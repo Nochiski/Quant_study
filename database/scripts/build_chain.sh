@@ -123,8 +123,9 @@ health_step() {
 }
 equity_step() { scripts/equity_rebuild_all.sh "${BASIS}_${D}" --basis "$BASIS"; }   # 로그 logs/equity/rebuild_<basis>_<D>/
 catalog_step() { $PY -m equity catalog; }
-# EGC 소비자 계약 — 커널 어댑터(`_engine/backtest_engine`)가 이 판을 읽을 수 있는지 본다(DEFECT-C05).
-# `_engine` 은 deploy.sh 가 저장소 backend/src/backtest_engine/ 에서 민다.
+# EGC 소비자 계약 — 제품 백테스트가 쓰는 워크벤치 어댑터(`_engine/strategy_workbench`)가 이 판을
+# 읽을 수 있는지 본다(DEFECT-C05·#372). `_engine` 은 deploy.sh 가 저장소 backend/src/strategy_workbench/
+# 에서 민다. 사건은 카탈로그 뷰를 함께 읽어 catalog 단계 뒤에 돈다.
 contract_step() { $PY -m equity contract --engine-src "$QL_HOME/_engine"; }
 deliver_step() {
   # Kael-alpha·워치독이 읽는 인계 파일. latest_* 는 덮어쓰고 history/ 는 영구 보관한다(B.3 ①층).

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Protocol
 
 from strategy_workbench.domain.factor.facade.expression import FieldMetadata
@@ -18,4 +19,13 @@ from strategy_workbench.domain.factor.facade.expression import FieldMetadata
 class FieldCatalogPort(Protocol):
     def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
         """어댑터가 제공하는 필드 계약 전부. 실행 경로의 필드 계약 조회와 같은 값을 답한다."""
+        ...
+
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """어댑터가 선언했지만 주지 않는 필드 id → 그 사유 문장(#316).
+
+        부팅 검사가 원천을 뺀 필드(`catalog_*` 사유와 조치 `CATALOG_REBUILD`)와 원장에 없는 필드다.
+        없는 필드의 compile 진단이 "필드 id 를 확인하세요" 대신 이 사유를 싣는다. 사유 문장은 질의
+        거절 사유와 같고, 응답으로 나가므로 서버 경로 없이 어댑터가 완성한다(#163).
+        """
         ...

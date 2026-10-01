@@ -33,7 +33,12 @@ from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
     _open,
     _parquet_table,
 )
+from strategy_workbench.adapters.outbound.equity_duckdb._source import (
+    CATALOG_REBUILD,
+    LEDGER_SYNC,
+)
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
+    FIELD_NOT_IN_LEDGER,
     FIELD_SPECS,
     SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
@@ -555,15 +560,11 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     assert result.status is DataLoadStatus.INVALID_QUERY and result.observations == ()
     assert result.detail is not None
     assert "unavailable" in result.detail and "classification.sector" in result.detail
-    assert "현재값 라벨" in result.detail  # 사유를 그대로 붙인다
     assert "price.adj_close" in result.detail  # supported 목록
-    # 격자 3테이블이 서도 남는 미지원은 사유가 셋으로 갈린다 — 컬럼 부재 · 원천 부재 · 안 굽기
-    ownership = _raw(adapter, fields=("flow.foreign_ownership",))
-    assert ownership.detail is not None and "S08-2" in ownership.detail
-    net_buy = _raw(adapter, fields=("credit.net_buy",))
-    assert net_buy.detail is not None and "39컬럼에 순매수 축이 없다" in net_buy.detail
-    ratio = _raw(adapter, fields=("short.short_balance_ratio",))
-    assert ratio.detail is not None and "셀 하나로 굽지 않는다" in ratio.detail
+    # 사유는 한 문장이고 필드별 메모(원장 작업 기록)는 싣지 않는다 — compile 진단도 같은 표를
+    # 읽는다(#316 리뷰 P3-1)
+    assert FIELD_NOT_IN_LEDGER in result.detail
+    assert UNSUPPORTED_FIELDS["classification.sector"] not in result.detail
 
 
 def test_queries_outside_calendar_coverage_are_no_data(
@@ -1017,6 +1018,22 @@ def test_load_universe_is_policy_free_and_names_securities(adapter: EquityDuckdb
     assert other.status is DataLoadStatus.INVALID_QUERY
 
 
+def test_universe_securities_reads_names_through_the_observation_market(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """기준일 요약(lang2 P4-03)의 이름은 관측 질의와 같은 시장·유니버스로 찾는다.
+
+    시장·유니버스 → venue 대응은 어댑터 몫이라 호출자가 venue 를 적지 않는다.
+    """
+    refs = {
+        ref.security_id: ref
+        for ref in adapter.universe_securities("KRX", "krx.common-stock", START)
+    }
+    assert refs["005930:1"].name == "삼성전자" and refs["005930:1"].venue == "XKRX"
+    assert adapter.universe_securities("NYSE", "krx.common-stock", START) == ()
+    assert adapter.universe_securities("KRX", "krx.unknown", START) == ()
+
+
 # ── FactorMetadataPort · FactorObservationPort ────────────────────────────────
 
 
@@ -1337,12 +1354,19 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
         assert "price.close" in served and "consensus.target_price" in served, code
         assert not served & macro_fields, code
         assert _raw(adapter, fields=("price.close",)).ok
+        # compile 진단이 싣는 필드별 사유(#316). 조치 문장의 owner 는 `CATALOG_REBUILD` 하나다
+        unavailable = adapter.unavailable_factor_fields()
+        assert all(
+            code in unavailable[field_id] and CATALOG_REBUILD in unavailable[field_id]
+            for field_id in macro_fields
+        ), code
         for field_id in ("credit.margin_balance", "price.adj_close"):
             denied = _raw(adapter, fields=(field_id,))
             assert denied.status is DataLoadStatus.INVALID_QUERY
             assert denied.detail is not None and code in denied.detail, (code, field_id)
-            # 조치가 사유에 실린다 — 원천은 부팅 때 정해지므로 재시작까지 적는다
-            assert "ledger_sync catalog" in denied.detail and "다시 띄워" in denied.detail
+            # 조치가 사유에 실린다 — 원천은 부팅 때 정해지므로 재시작까지 적는다. compile 진단과
+            # 같은 문장이다
+            assert unavailable[field_id] in denied.detail
             # 사유는 질의 거절로 사용자에게 간다(#163)
             assert str(root.resolve()) not in denied.detail
         assert any(  # 부팅 로그에도 남는다
@@ -1354,7 +1378,7 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
         # 조치는 사유 문장이 말한다
         with pytest.raises(BacktestDataNotReadyError, match=code) as stopped:
             adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
-        assert "ledger_sync catalog" in str(stopped.value) and "다시 띄워" in str(stopped.value)
+        assert CATALOG_REBUILD in str(stopped.value)  # compile 진단과 같은 조치 owner(#316)
         assert str(root.resolve()) not in str(stopped.value)
     # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
     assert adapter.snapshot().snapshot_id.startswith(
@@ -1739,7 +1763,11 @@ def degraded_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "no panel cells",
             lambda a: a.load_panel(ResearchPanelQuery(START, END, ("036220:1",), ("price.close",))),
         ),
-        ("equity tables not built", lambda a: _raw(a, fields=("flow.foreign_net_buy",))),
+        # 조치가 사유에 실린다 — 백테스트를 멈춘 사유와 같은 owner(#316 리뷰 P3-1)
+        (
+            f"{LEDGER_SYNC} (table_missing)",
+            lambda a: _raw(a, fields=("flow.foreign_net_buy",)),
+        ),
         ("catalog_missing", lambda a: _raw(a, fields=("financial.book_equity",))),
     ],
     ids=["no-sessions", "no-members", "no-panel-cells", "table-not-built", "meta-missing"],

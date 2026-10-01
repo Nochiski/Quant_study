@@ -66,7 +66,9 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다
 - `GET /api/v1/backtests/{run_id}/events`: SSE progress stream. 진행률은 `tape` 2~80%(원시 로딩·팩터
-  평가·TargetTape 컴파일), `data` 82%, `engine` 84~92%, `artifact` 93% 구간이다. `tape` 안에서는 선택
+  평가·TargetTape 컴파일), `data` 82%, `engine` 84~92%, `artifact` 93% 구간이다. 단계(`stage`) 어휘는
+  `domain/backtest` 의 `RunStage` 하나다 — 실행기는 engine 구간 안의 비율과 설명만 보고하고 단계는
+  `engine` 그대로다(#362 DR-B-03). `tape` 안에서는 선택
   능력 `ProgressReportingRawObservationPort`(duckdb 구현)의 로딩 진행, 계약 검증·팩터 입력 변환·
   포트폴리오 관측 변환 루프, 팩터 평가기(노드 종류별 가중치, 시계열은 관측 단위), TargetTape 컴파일
   진행이 1% 이상 오를 때마다 이벤트가 된다. 구간 폭은 실데이터 4년 구간 실측 시간 비율을 따른다
@@ -148,7 +150,8 @@ bootstrap ─> application + adapters
 `equity`(`uv sync --extra equity`, duckdb). 답하는 field_id의 정본은 선언표
 `adapters/outbound/equity_duckdb/_specs.py`(`FIELD_SPECS`)이고 지금 30개다(price 7·financial 8·consensus 6·
 flow 3·short 2·credit 1·event 3). 새 필드는 이 표에 한 행을 더한다. 표에 없는 field_id는 `list_fields()`
-밖이고 질의하면 `INVALID_QUERY`이며, 사유는 `UNSUPPORTED_FIELDS`가 적는다. 필드별 공개 랙의 정본은 원장
+밖이고 질의하면 `INVALID_QUERY`이며, 사유는 `FIELD_NOT_IN_LEDGER` 한 문장이다(필드별 메모는
+`UNSUPPORTED_FIELDS`, #316). 필드별 공개 랙의 정본은 원장
 `dataset_profile`의 `recommended_lag_sessions`이고 adapter가 부팅할 때 읽는다. 표가 없거나 행이 빠진
 필드는 `_specs.py`의 폴백 랙(`SourceSpec.lag_sessions`·`FieldSpec.lag_sessions`)으로 읽는데, 이 값은
 원장 선언의 사본이고 `tests/contract/test_equity_fallback_lag.py`가 원장 선언과 대조한다. 폴백을 쓰면

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar
@@ -17,7 +18,10 @@ from strategy_workbench.application.experiment_run.facade.ports import (
     WindowPick,
 )
 from strategy_workbench.domain.experiment.facade.design import ExperimentNotFoundError
-from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
+from strategy_workbench.domain.experiment.facade.trial import (
+    DEFAULT_EXPERIMENT_CONTROLS,
+    ExperimentControls,
+)
 
 from ._errors import ResearchStorageError
 from ._schema import migrate_schema
@@ -219,8 +223,11 @@ class SQLiteExperimentRepository:
 
 
 def _record(row: sqlite3.Row) -> ExperimentRecord:
+    # 조작 행이 없는 실험(판본 4 이전 파일 포함)은 처음 값으로 읽는다.
     controls = (
-        {} if row["paused"] is None else {"paused": row["paused"], "priority": row["priority"]}
+        asdict(DEFAULT_EXPERIMENT_CONTROLS)
+        if row["paused"] is None
+        else {"paused": row["paused"], "priority": row["priority"]}
     )
     return _decode(
         _RECORD,

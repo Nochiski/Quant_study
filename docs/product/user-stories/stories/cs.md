@@ -62,6 +62,10 @@
   중간 결과 추적·백테스트에서야 멈췄다. lang2 P2-07부터 compile 이 연결된 데이터의 필드 계약을 읽어
   저장 전에 `strategy.expression.field_missing`으로 막는다. e2e가 그 돌연변이(분모 `price.market_capx`)를
   먼저 넣어 "검증 오류"를 확인한 뒤 올바른 문서로 이어 간다.
+- 비고: 실데이터에서 어댑터가 뺀 필드(카탈로그가 없거나 낡음, 원장 표 없음)는 문제 목록이 "찾을 수
+  없다" 대신 원장 사유와 조치(카탈로그 재생성·원장 받기)를 말하고, 원장에 없는 필드는 원장이 싣지
+  않는다고 말한다(#316). 문장은 필드 계약 포트의 `unavailable_factor_fields` 가 넘긴 사유를 domain
+  `unavailable_field_message` 가 감싼 것이다. mock 은 빼는 필드가 없어 e2e 의 오타 문장은 그대로다.
 - 비고: 백테스트·추적 전에 실행 설정 패널에서 기간과 유니버스를 정한다(US-DM-05).
 - 비고: 모멘텀처럼 과거 세션 값을 읽는 연산에 원주가 `price.close`를 넣으면 문제 목록에 경고
   (`strategy.field.unadjusted_price`)가 뜨고 수정주가 `price.adj_close`를 쓰라고 말한다. 절대 가격

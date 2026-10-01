@@ -91,7 +91,7 @@ $env:STRATEGY_WORKBENCH_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"
 uv run server      # 저장소 루트에서. backend 에서 직접 띄우려면 cd backend && uv run server
 ```
 
-커널 어댑터(`backtest_engine.adapters.equity_duckdb`)도 같은 루트를 받는다. 실데이터 브라우저
+실데이터 브라우저
 E2E 는 `frontend`에서 `$env:E2E_REAL_EQUITY_ROOT = <루트>; npm run test:e2e`(변수가 있으면 실데이터
 project 만, 없으면 mock 릴리스 게이트만 돈다 — `frontend/e2e/README.md`). 서버 `_catalog_meta.json`·
 `_contract_meta.json` 원문은 `<루트>/_sync/remote/` 에만 두고, 루트의 `_catalog_meta.json` 은 로컬

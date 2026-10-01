@@ -12,6 +12,9 @@ from strategy_workbench.application.portfolio_design.ports.outgoing.raw_observat
     RawObservationQuery,
     RawObservationSet,
 )
+from strategy_workbench.application.portfolio_design.ports.outgoing.security_directory import (
+    SecurityDirectoryPort,
+)
 
 __all__ = [
     "CancellableRawObservationPort",
@@ -24,4 +27,5 @@ __all__ = [
     "RawObservationPort",
     "RawObservationQuery",
     "RawObservationSet",
+    "SecurityDirectoryPort",
 ]

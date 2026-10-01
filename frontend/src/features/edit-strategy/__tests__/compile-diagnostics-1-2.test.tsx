@@ -88,6 +88,7 @@ const DIAGNOSTICS: SourceDiagnostic[] = [
     code: "strategy.field.missing",
     kind: "semantic",
     severity: "error",
+    anchor: "value",
     pointer: "/eligibility/rules/0/field_id",
     message: OUTSIDE_GRAPH,
     range: {
@@ -100,6 +101,7 @@ const DIAGNOSTICS: SourceDiagnostic[] = [
     code: "strategy.expression.field_missing",
     kind: "semantic",
     severity: "error",
+    anchor: "value",
     pointer: "/factors/0/graph/nodes/0",
     message: INSIDE_GRAPH,
     range: {
@@ -112,6 +114,7 @@ const DIAGNOSTICS: SourceDiagnostic[] = [
     code: "strategy.operator.unsupported",
     kind: "capability",
     severity: "error",
+    anchor: "value",
     pointer: "/factors/1/graph/nodes/1",
     message: UNSUPPORTED,
     range: {

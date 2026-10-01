@@ -72,7 +72,7 @@ import json
 import logging
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -129,6 +129,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 
 from ._source import (
     CATALOG_REBUILD,
+    LEDGER_SYNC,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -143,6 +144,7 @@ from ._specs import (
     CORP_TICKER_TABLE,
     FACTOR_TABLE,
     FIELD_BY_ID,
+    FIELD_NOT_IN_LEDGER,
     FIELD_SPECS,
     POLICY_TABLE,
     PRICE_TABLE,
@@ -192,8 +194,9 @@ REFERENCE_KIND = "reference"
 # NULL). 옛 판 루트(e1.5.0 등)에는 컬럼 자체가 없고 그때는 전 행이 확정이다.
 BASIS_COLUMN = "basis"
 CONFIRMED_BASIS = "krx"
-# adj_factor.event_type → 커널 CorporateActionType 값 (S07 `EVENT_TYPE_MAP` 과 같은 판단: ok 행은
-# 전부 시총 불변이라 주식수 증가는 split, 감소는 reverse_split 로 보내 수량이 조정되게 한다)
+# adj_factor.event_type → 커널 CorporateActionType 값. ok 행은 전부 시총 불변이라 주식수 증가는
+# split, 감소는 reverse_split 로 보내 수량이 조정되게 한다. 원장 소비자 계약 EG-C ④
+# (`database/src/equity/contract.py`)가 서버 빌드마다 이 어댑터의 사건을 `adj_factor` 와 대조한다.
 EVENT_TYPE_MAP: dict[str, str] = {
     "split": "split",
     "bonus": "split",
@@ -201,9 +204,9 @@ EVENT_TYPE_MAP: dict[str, str] = {
     "capred": "reverse_split",
 }
 # S06-2 의 KRX 기준가 원천이 만든 사건 — `corp_event` 에 없어 유형을 모른다(기준가 변화 + 같은 날
-# 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → split, < 1 → reverse_split.
-# 엔진 어댑터(`backtest_engine/adapters/equity_duckdb.py::RATIO_DIRECTED_EVENT_TYPES`)와 **같은
-# 어휘를 써야 한다** — 한쪽만 알면 같은 데이터로 한쪽에서만 run 이 죽는다(서버 factor_ok 55행).
+# 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → split, < 1 → reverse_split
+# (서버 factor_ok 55행). 어휘 밖 ok 행은 run 을 멈추므로 원장이 새 유형을 내면 EG-C ④ 가 먼저
+# 잡는다.
 # `unknown_price_only`(기준가만 변화)는 항상 factor_ok=false 라 여기 오지 않고, ok 로 실려 오면
 # 어휘 밖이 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
 RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
@@ -727,7 +730,10 @@ class EquityDuckdbAdapter:
         tables = [name for name in spec.requires if name not in macros]
         absent = [table for table in tables if table not in self._builds]
         if absent:
-            return f"equity tables not built — missing={absent}"
+            return (
+                f"원장 표가 없어 이 원천의 필드를 뺀다 — {LEDGER_SYNC} (table_missing) — "
+                f"missing={absent}"
+            )
         if not macros:
             return None
         if not self._catalog.usable:
@@ -1025,6 +1031,19 @@ class EquityDuckdbAdapter:
             )
         return UniverseHistoryResult(points, DataLoadStatus.OK, self._snapshot_id)
 
+    def universe_securities(
+        self, market: str, universe_id: str, as_of: date
+    ) -> tuple[SecurityRef, ...]:
+        """관측 질의와 같은 시장·유니버스로 그날 종목의 이름·티커를 준다(lang2 P4-03 기준일 요약).
+
+        이름은 `load_universe` 가 종목 마스터에서 붙인 것이다. 모르는 시장·유니버스·날짜면 빈
+        튜플이다.
+        """
+        if market != MARKET or universe_id not in self._policies:
+            return ()
+        result = self.load_universe(UniverseHistoryQuery(venue=VENUE, start=as_of, end=as_of))
+        return next((point.members for point in result.points if point.session == as_of), ())
+
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         unknown = self._unknown_fields(query.field_ids)
         if unknown:
@@ -1121,6 +1140,19 @@ class EquityDuckdbAdapter:
         들어와야 PIT 그룹 필드를 낼 수 있다.
         """
         return self.resolve_factor_fields(tuple(self._fields)).fields
+
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """선언했지만 주지 않는 필드 → 사유(#316). compile 진단과 질의 거절이 같은 표를 읽는다.
+
+        부팅 검사가 원천을 뺀 필드는 그 원천의 사유(조치 `CATALOG_REBUILD`·`LEDGER_SYNC`)이고,
+        원장에 없는 필드(`UNSUPPORTED_FIELDS`)는 `FIELD_NOT_IN_LEDGER` 한 문장이다.
+        """
+        reasons = {
+            spec.field_id: reason
+            for spec in FIELD_SPECS
+            if (reason := self._source_reason[spec.source]) is not None
+        }
+        return reasons | dict.fromkeys(UNSUPPORTED_FIELDS, FIELD_NOT_IN_LEDGER)
 
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
@@ -1324,8 +1356,7 @@ class EquityDuckdbAdapter:
         if FACTOR_TABLE not in self._builds:
             raise BacktestDataNotReadyError(
                 f"원장 표 {FACTOR_TABLE} 이 없어 백테스트를 멈춘다 — 기업행위 사건 없이 돌리면 "
-                "분할·병합 구간의 손익이 조용히 틀린다. 원장을 받은 뒤(`ledger_sync`) 서버를 "
-                "다시 띄워야 한다 (table_missing)"
+                f"분할·병합 구간의 손익이 조용히 틀린다. {LEDGER_SYNC} (table_missing)"
             )
         if self._event_feed_reason is not None:
             raise BacktestDataNotReadyError(
@@ -1405,8 +1436,7 @@ class EquityDuckdbAdapter:
         for ticker, raw_date, open_, high, low, close, volume, value, kind, basis in price_rows:
             session = _as_date(raw_date, "price_daily.date")
             if basis is not None and str(basis) != CONFIRMED_BASIS:
-                # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다(엔진 어댑터
-                # `backtest_engine/adapters/equity_duckdb.py` 와 같은 판단). 구간 루프 **밖**에서
+                # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다. 구간 루프 **밖**에서
                 # 세는 이유: `security_span` 은 KRX 축(stg_listing_daily)이라 저녁 판에서도 D 에
                 # 멈춰 T 행이 아래 구간 필터에 조용히 걸린다 — 안에서 세면 건수가 0 이 된다.
                 n_provisional += 1
@@ -1608,13 +1638,8 @@ class EquityDuckdbAdapter:
         unknown = sorted(set(field_ids) - set(self._fields))
         if not unknown:
             return None
-        notes = []
-        for field_id in unknown:
-            if field_id in UNSUPPORTED_FIELDS:
-                notes.append(f"{field_id}: {UNSUPPORTED_FIELDS[field_id]}")
-            elif field_id in FIELD_BY_ID:
-                reason = self._source_reason[FIELD_BY_ID[field_id].source]
-                notes.append(f"{field_id}: {reason}")
+        reasons = self.unavailable_factor_fields()
+        notes = [f"{field_id}: {reasons[field_id]}" for field_id in unknown if field_id in reasons]
         detail = (
             f"unavailable field_id — unknown_fields={unknown} "
             f"supported={sorted(self._fields)} (mock 대체 없음)."

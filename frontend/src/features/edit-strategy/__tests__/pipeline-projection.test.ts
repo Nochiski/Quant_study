@@ -375,10 +375,15 @@ describe("카드 문장 틀", () => {
 
   it("틀을 글자와 같은 카드 필드의 자리로 나눈다", () => {
     expect(sentencePieces("{field_id} 값이 {value.percent} 이상")).toEqual([
-      { key: "field_id" },
+      { key: "field_id", slider: false },
       { text: " 값이 " },
-      { key: "value" },
+      { key: "value", slider: false },
       { text: " 이상" },
+    ]);
+    // `.slider` 는 카드 자리에 끄는 막대를 두라는 지시다(WORKFLOW P4-03 결정 2).
+    expect(sentencePieces("가중치 {weight.slider}")).toEqual([
+      { text: "가중치 " },
+      { key: "weight", slider: true },
     ]);
   });
 

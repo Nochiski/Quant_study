@@ -28,7 +28,11 @@ export const NO_FOCUS = { focusEditor: false } as const;
  * `fieldOperation`, `invalid`면 그 사유(`form.invalid.<사유>`)를 안내하고 적용하지 않는다.
  */
 export type CommitInvalidReason =
-  "duplicateNodeId" | "emptyNodeId" | "missingNode";
+  | "duplicateNodeId"
+  | "emptyNodeId"
+  | "missingNode"
+  | "duplicateIdentity"
+  | "emptyIdentity";
 export type CommitPlanner = (
   field: FormField,
   value: Scalar,
@@ -88,14 +92,10 @@ export const useFieldCommit = ({
 };
 
 /**
- * 목록 항목 삭제와 거부 안내. 다른 곳이 참조하면 지우지 않고 참조 위치를 담은 안내 문장을 돌려준다(Form
- * 항목과 파이프라인 카드가 같은 문장). 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다 — 문서가
- * 바뀌면(재색인 포함) 렌더 중 파생으로 사라진다. React key 가 pointer(인덱스)라 인스턴스가 다른 항목에
- * 재사용될 수 있다(리뷰 P2-2).
- *
- * 안내는 pointer 그대로다. 목록 항목을 붙잡는 참조는 문서 전역이라(`/portfolio/signal_factor_id` 같은
- * 자리) 이름보다 위치가 더 정확하고, pointer를 표시 이름으로 옮기는 규칙은 아직 owner가 없는 새
- * 사실이다. 의도적 제외이며 PLAN P1-04 Non-goals에 적었다.
+ * 목록 항목 삭제와 거부 판정. 다른 곳이 참조하면 지우지 않고 그 참조 목록을 돌려준다 — 문장은 화면이 만든다
+ * (WORKFLOW P4-03 결정 3: Form 은 pointer 그대로, 캔버스는 스키마 사실로 자리 이름). 거부는 그 판정을 낸
+ * 문서(tree)에만 붙는다 — 문서가 바뀌면(재색인 포함) 렌더 중 파생으로 사라진다. React key 가 pointer(인덱스)라
+ * 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
  */
 export const useItemRemoval = (
   item: FormListItem,
@@ -109,12 +109,7 @@ export const useItemRemoval = (
     references: DocumentReference[];
   } | null>(null);
   const blocked =
-    blockers !== null && blockers.tree === tree
-      ? t("form.list.blocked").replace(
-          "{pointers}",
-          blockers.references.map((reference) => reference.pointer).join(", "),
-        )
-      : null;
+    blockers !== null && blockers.tree === tree ? blockers.references : null;
   const remove = (): void => {
     const references = removalBlockers(tree, item);
     if (references.length > 0) {

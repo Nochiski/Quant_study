@@ -27,6 +27,7 @@ from strategy_workbench.domain.backtest._models import (
     RunFailureCode,
     RunManifest,
     RunProgressEvent,
+    RunStage,
     RunStatus,
     WarningSeverity,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "StrategySource",
     "StrategySourceKind",
     "RunProgressEvent",
+    "RunStage",
     "RunStatus",
     "WarningSeverity",
     "backtest_run_fingerprint",

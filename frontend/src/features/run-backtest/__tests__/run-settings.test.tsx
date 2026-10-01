@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -148,11 +149,13 @@ const ENVIRONMENT: RunEnvironment = {
 const VALID: RunEnvironmentValidation = {
   valid: true,
   environment: ENVIRONMENT,
+  accepted: ENVIRONMENT,
   errors: {},
 };
 const INCOMPLETE: RunEnvironmentValidation = {
   valid: false,
   environment: null,
+  accepted: {},
   errors: { start: "required" },
 };
 
@@ -471,6 +474,24 @@ describe("run environment panel", () => {
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
+  });
+
+  // #357 C-P3-16: 실행 계획 설명은 결측 정책 칸만 따로 싣는다. 기간·유니버스가 비었다고 기본 정책의
+  // 계획을 보이면 고른 정책과 다른 `plan_hash` 가 된다.
+  it("hands out the missing policy while the period and universe are still empty", async () => {
+    const { result } = renderHook(() => useBacktestRunSettings("strategy-1"), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={new QueryClient()}>
+          {children}
+        </QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(result.current.missing).toBe("drop"));
+
+    act(() => result.current.setEnvironmentValue("missing", "zero"));
+
+    expect(result.current.missing).toBe("zero");
+    expect(result.current.environment).toBeNull();
   });
 
   it("opens the panel at the first empty field from the summary band", async () => {
@@ -1248,6 +1269,55 @@ describe("backtest run actions", () => {
       expect(onReplayed).toHaveBeenCalledWith("run-replayed"),
     );
     expect(replayedRequest).toEqual(acceptedRequest);
+  });
+
+  it("says an experiment keeps a shared run instead of offering cancel again", async () => {
+    // #382: 내 몫은 빠졌지만 실험이 같은 실행을 써서 계속 돌면 응답의 `kept_by_owners` 로 알린다.
+    server.use(
+      http.post(`${API}/api/v1/backtests/:runId/cancel`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "running",
+          progress: 0.4,
+          stage: "engine",
+          message: "Running engine",
+          created_at: "2026-09-30T00:00:00Z",
+          updated_at: "2026-09-30T00:00:01Z",
+          kept_by_owners: true,
+        }),
+      ),
+    );
+    const view = renderWithQuery(
+      <BacktestRunActions
+        runId="run-shared"
+        status="running"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "실행 취소" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "실험이 이 실행을 함께 쓰고 있어 계속 돕니다. 멈추려면 실험 화면에서 실험을 취소하세요.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "실행 취소" }),
+    ).not.toBeInTheDocument();
+
+    // #407 리뷰 P2-1: 같은 화면이 다시 실행한 새 run 으로 넘어가면 앞 run 의 안내를 쓰지 않는다.
+    view.rerender(
+      <BacktestRunActions
+        runId="run-next"
+        status="running"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "실행 취소" }),
+    ).toBeInTheDocument();
   });
 
   it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {

@@ -1961,6 +1961,22 @@ workspace/dongmin/src/equity/
 | 엔진 의존 | §8-5 미결 | 같은 모노레포 `backend/src` 를 `contract.load_adapter(engine_src)` 가 `sys.path` 에 얹는다(equity → backend 의 유일한 import 경계). 기본 `<repo>/backend/src` 또는 `$QL_ENGINE_SRC`, 서버는 `--engine-src`. 엔진은 **numpy·pyarrow** 를 요구한다(`backtest_engine.types.market` 이 numpy import) — equity 테스트 명령에 `--with numpy` 추가. 없으면 skip 이 아니라 FileNotFoundError(A13) | §9 A13 |
 | 상수 미등재 | — | `asof_sample_tickers`·`contract_probe_dates`·`respan_count`·`delist_sample_*` 미등재는 해당 항 `skip(no_baseline)`, 테이블 미커밋은 `skip(not_built)`, `_pinned/` 입력 없음은 `skip(no_cross_source)`; skip 은 실패가 아니다 | §0-2 어휘 |
 
+**EG-C 대상 교체 — 커널 어댑터 → 워크벤치 facade (2026-09-30, #372 · 도메인 리뷰 A DR-A-04)**
+
+S07 의 커널 3포트 어댑터는 제품 경로가 쓰지 않았고, 제품 백테스트가 bar·사건을 받는 워크벤치 `load_backtest_dataset` 은 게이트 밖이었다. 계약 대상을 워크벤치 facade 로 옮기고 커널 어댑터와 그 테스트(`test_adapters_equity.py`·`test_bar_source_contract.py::BUILDERS['equity_duckdb']`)를 걷었다. `EVENT_TYPE_MAP`·`RATIO_DIRECTED_EVENT_TYPES`·`resolve_table` 은 워크벤치 한 벌만 남는다.
+
+| 항목 | S07 판 | 지금 | 근거 |
+|---|---|---|---|
+| 대상 | `backtest_engine/adapters/equity_duckdb.py`(3포트, pyarrow) | `EquityDuckdbAdapter.load_backtest_dataset`·`load_universe`(facade `strategy_workbench.adapters.outbound.equity_duckdb.facade.provider`). 백테스트 질의는 첫 세션 ~ backfill_end(④만 사건일부터) | DR-A-04 |
+| ① `EGC-01` | Bar = stage 원주가 · `dropped_rows` = 거래량 0·NULL + GAP-14 류(CLAMP) | (종목 id, 세션, O/H/L/C/V) = stage 원주가 전건. 거래량 0 행은 bar 가 없고, 거래됐지만 OHLC 가 NULL·0 이하이거나 서로 맞지 않는 행은 `invalid_bars` 에 같은 세션(제품 규칙이라 정책 선택이 없다) | 절단본 bar 40,720 · 기준가 346 |
+| ② `EGC-02` | `members(d)` 를 전 기간 한 번에 | `load_universe(d, d)` 를 탐침 날짜마다 — 전 기간 한 번은 날마다 전 종목이 실린다 | 절단본 7일 |
+| ③ `EGC-03` | 전 종목 Membership = 구간 | 재상장 종목만 전 구간 질의 → Membership = 구간 ∧ bar 가 제 구간 안 ∧ 공백 유지, 재상장 구간 첫날·끝날 구성원에 그 구간 id, `coverage_gap` 구간 id 가 backfill_end 구성원에 있음, `load_universe(backfill_end, +1일)` → NO_DATA(`query outside coverage`). 전 종목 Membership 대조는 원장 전체 bar 를 읽어 두지 않는다 | 실원장 0.8s |
+| ④ `EGC-04` | 사건 = factor_ok 전건(구간 밖 제외) | + 구간에 사건 세션이나 그 뒤 유효 거래가 없는 행도 모집단에서 뺀다(어댑터가 `equity.corporate_action_without_bar_dropped` 로 뺀다, `n_factor_without_bar_after`). factor_ok 행이 있는 종목만 첫 사건일 순 100종목 배치로 배치 첫 사건일부터 부르고, 원장 미접힘 층 이동(#369)은 `n_unfolded` 로만 센다. 세션은 `apply_date` 만 읽는다 | 실원장 1,997건 · 45.9s |
+| ⑤ `EGC-05` | OK ∧ dropped = Σ > 0 | ① 과 같은 전건 대조 ∧ 기준가 행 ≥ 1 | — |
+| ⑩ `EGC-10` | BarQuery 반환 symbol = 요청 | 예외 없음 ∧ bar 를 낸 종목 id = 요청 | 실원장 20/1,176 |
+| snapshot_id | — | 어댑터가 카탈로그 meta 의 `snapshot_id`(`equity.catalog.snapshot_id` 가 씀)를 자기 사본 규칙으로 다시 세어 대조하므로 두 사본이 갈리면 ①③④⑤⑩ 이 FAIL(`catalog_stale`) | `test_equity_s07_contract.py::test_FX_N_카탈로그_snapshot_id_가_다르면_bar_사건_항이_FAIL` |
+| 엔진 의존 | numpy·pyarrow | facade 는 제3자 패키지 없이 import 되고 어댑터는 duckdb 만 쓴다(S07 테스트는 numpy 없이 돈다). 서버 사본은 `deploy.sh` 가 `_engine/strategy_workbench/` 로 민다 | §9 A13 |
+
 **S06 3차 정정 — 행 대 행 매칭 · EG8-P03 집합 통계 · P02 임계 (2026-09-05, 서버 2차 빌드 EG8 실패 → `sql/adj_factor.sql`·`rules_s06.py`)**
 
 서버 2차(apply_date 판, 3,226행·ok 1,360 · nominal 2,129 · price_matched 157 · combined 2 · unmatched 938): EG8 `n_return_jump_over` 4(max 0.86) · `n_volume_jump_over` 71(max 1,724). 원인: (1) |조정수익률| > 0.30 6건이 전부 "직전 거래 종가" 로 재면 맞고 "직전 행 종가" 로 재면 튀는 패턴 — KRX 는 정지 중 **참고가(reference) 행의 close 에 새 기준가를 먼저 싣는다**(071970 capred 행 대 행 원수익률 0.102 → 조정 −0.86 · 044180 · 004200 · 123420 combined · 001360 split pf 1.0). (2) 얇은 종목의 재개일 거래 급증은 정상이라 하루 점프 건별 임계(10)는 71건을 잡지만 전부 정상.
@@ -2320,7 +2336,7 @@ workspace/dongmin/src/equity/
 | `cum_price × cum_share = 1` 허용오차 | (신규) | 한 계수당 `adj_factor.factor_product_tol_base`(0.01, S06-2 기준가 원천의 KRX 산식 잔여)를 **접힌 수만큼 복리로 편** `(1+tol)^n − 1`. 접힌 계수가 0 이면 정확히 1 을 요구한다. 상수를 복제하지 않고 `adj_factor` 네임스페이스에서 읽는다 | `baseline_seed_s23.json` |
 | 매크로 정합 | "게이트 또는 테스트로 증명" | **매 빌드 EG3 안에서** — `views.install_temp_macros` 로 두 fwd 매크로를 빌드 세션에 올려 as-of 표본(`asof_sample_dates` 5 × `asof_sample_tickers` 20)에서 행 집합·값을 대조한다(상대오차 1e-12). 서버 실측 **319,310행 비교, 차이 0, 최대 상대편차 0.0**(비트 동일) | `rules_s23._macro_mismatch` |
 | 얇은 매크로로 합치기 | 권고 | **채택하지 않았다** — `lag_override` 가 PIT 계약의 일부이고(회귀 테스트가 "아직 공개 전인 계수를 접지 않는다" 를 단언한다) 표에는 랙 축이 없어, 매크로를 표 읽기로 바꾸면 `lag_override` 가 조용한 no-op 이 된다. 두 산출을 남기고 게이트로 묶는 쪽을 택했다 | DESIGN §5 |
-| 커널 연결 | (미기재) | **금지**. 커널은 원주가 bar + `CorporateActionEvent` 로 수량을 조정하므로 조정가를 주면 이중 계산이다. `backtest_engine/adapters/equity_duckdb.py` 가 `price_adj_daily` 를 읽지 않는다는 것을 테스트가 회귀로 지킨다 | DESIGN §7 |
+| 커널 연결 | (미기재) | **금지**. 커널은 원주가 bar + `CorporateActionEvent` 로 수량을 조정하므로 조정가를 주면 이중 계산이다. `backtest_engine/adapters/equity_duckdb.py` 가 `price_adj_daily` 를 읽지 않는다는 것을 테스트가 회귀로 지킨다 *(2026-09-30 #372 로 그 어댑터를 걷었다 — 지금은 워크벤치 `load_backtest_dataset` 의 bar 를 stage 원주가와 대조하는 EG-C ①과 S07 facade 직접 호출 테스트가 지킨다)* | DESIGN §7 |
 | 부정 픽스처 | (신규) | 절단본에는 "재상장 + 폐지 전 구간의 ok 계수" 조합이 없어(`n_rows_span_free_diff` = 0, 서버도 0) 구간 누출을 못 잡는다 → **합성 equity 트리**(2구간 재상장 1종)에서 돈다: ① 조정가를 나눗셈으로 뒤집기 → `n_recompute_mismatch`·`n_macro_mismatch` ② 구간 부여를 상수로 바꿔 누출 → `n_cross_span_factor`·`n_span_first_not_unit` ③ `n_unadjusted_events` 를 0 으로 지우기 → `n_unadjusted_mismatch` | `test_equity_s23_price_adj.py` |
 | `dataset_profile` 소유 이동 | `price.adj_close` 를 `adj_factor` 가 뷰 필드(`view_name`)로 선언 | **`price_adj_daily` 가 표 컬럼으로 선언**한다(FX-6-006 `table_name` = `price_adj_daily` · `available_date_basis` = `derived`). 두 표가 같은 field_id 를 선언하면 grain 이 깨지므로 이동이지 추가가 아니다. `rules_s19.SOURCE_TABLES` 25 → **26**, 프로파일 행수 72 불변 | `rules_s19.owned_fields` |
 | EG3 기록형 사건 축 | (신설) | 미조정 사건의 사유별 내역은 **`event_id` 축**으로 센다. (ticker, apply_date) 로 묶으면 같은 날 두 사건이 하나로 접혀 `n_unadjusted_events` 가 세는 축과 갈린다(서버 4,014 → 3,970 으로 44건 유실). `adj_factor.event_id`·`factor_source` 를 EG3 전용 입력 컬럼으로 선언한다(산출식은 읽지 않는다) | `rules_s23` `input_columns` |
@@ -2398,7 +2414,7 @@ EG20(원주가 불변)은 **`basis='krx'` 행만** 대조한다 — 저녁 행�
 - EG3 ⑧(캘린더 세션)은 **`basis='krx'` 행에만** 건다 — 캘린더 상한이 `max(stg_price_daily.date)` 라 저녁 T 는 캘린더 밖이 정상이다. 안 그러면 매일 18:15 저녁 체인이 S23 에서 `n_off_calendar` 로 끊긴다(절단본 전량 체인 실측). 기록형 `n_evening_rows`·`n_evening_off_calendar`.
 - 폐기형 ⑩ `n_basis_ne_price_daily`: 두 표식이 `price_daily` 와 (ticker, date) 전건 동일.
 - 전방 조정이라 T 행에도 **과거 사건의 누적 share_factor** 가 곱해진다(005930 ×50). "T 행 조정가 = 원주가" 는 후방 축 `v_adj_price` 에서만 참이다(R2-06).
-- 백테스트 어댑터(`backtest_engine/adapters/equity_duckdb.py`)는 `basis`(선택 컬럼)를 읽어 `'krx'` 가 아닌 행을 방출하지 않는다 — 잠정 행은 OHLC 가 NULL 이라 STRICT 정책에서 run 전체가 FORMAT_ERROR 로 죽었다(R2-05).
+- 백테스트 어댑터(`backtest_engine/adapters/equity_duckdb.py`)는 `basis`(선택 컬럼)를 읽어 `'krx'` 가 아닌 행을 방출하지 않는다 — 잠정 행은 OHLC 가 NULL 이라 STRICT 정책에서 run 전체가 FORMAT_ERROR 로 죽었다(R2-05). *(2026-09-30 #372 로 그 어댑터를 걷었다 — 같은 판단을 워크벤치 `load_backtest_dataset` 이 하고 EG-C 가 그 어댑터를 부른다)*
 
 ### 10-4. 판(basis)이 지나가는 자리
 

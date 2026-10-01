@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -33,6 +33,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
+    SecurityRef,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
@@ -132,6 +133,10 @@ class MockEquityDataAdapter:
         field_ids = tuple(profile.field_id for profile in self._profiles)
         return self.resolve_factor_fields(field_ids).fields
 
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """mock 은 선언한 필드를 모두 준다 — 뺀 필드가 없다(#316)."""
+        return {}
+
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult:
         sessions = tuple(
             session for session in self._sessions if query.start <= session <= query.end
@@ -155,6 +160,16 @@ class MockEquityDataAdapter:
             snapshot_id=self._snapshot.snapshot_id,
             detail=None if points else f"no mock universe sessions — query={query}",
         )
+
+    def universe_securities(
+        self, market: str, universe_id: str, as_of: date
+    ) -> tuple[SecurityRef, ...]:
+        """관측 질의와 같은 시장·유니버스로 종목의 이름·티커를 준다(lang2 P4-03 기준일 요약).
+
+        mock 의 이름은 날짜로 바뀌지 않고, 관측은 fixture 달력 밖도 합성하므로 날짜로 거르지 않는다.
+        """
+        venue = _MOCK_UNIVERSES.get((market, universe_id))
+        return tuple(item.security for item in self._memberships if item.security.venue == venue)
 
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         profile_by_id = {profile.field_id: profile for profile in self._profiles}

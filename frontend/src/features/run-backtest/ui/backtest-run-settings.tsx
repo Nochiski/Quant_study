@@ -10,6 +10,7 @@ import {
   type RunEnvironmentFieldError,
 } from "../model/run-environment";
 import {
+  EXECUTION_CORE_LABELS,
   OOS_START_FIELD,
   type BacktestRunSettingsError,
 } from "../model/run-settings";
@@ -274,16 +275,14 @@ export const BacktestRunSettings = ({
             <select
               value={fields.core}
               onChange={(event) =>
-                setField(
-                  "core",
-                  event.target.value === "python" ? "python" : "rust",
-                )
+                setField("core", event.target.value as typeof fields.core)
               }
             >
-              <option value="rust">{t("backtest.settings.core.rust")}</option>
-              <option value="python">
-                {t("backtest.settings.core.python")}
-              </option>
+              {Object.entries(EXECUTION_CORE_LABELS).map(([core, key]) => (
+                <option key={core} value={core}>
+                  {t(key)}
+                </option>
+              ))}
             </select>
           </label>
           <label>

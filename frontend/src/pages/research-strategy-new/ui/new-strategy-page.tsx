@@ -118,11 +118,12 @@ export const NewStrategyPage = () => {
   // 실행 설정은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2, P3-02). 새 전략은 전략 id 가 없어 한
   // 칸(`new`)에 두고, 저장 뒤 revision 화면은 마지막 사용값으로 이어받는다.
   const runSettings = useBacktestRunSettings(NEW_STRATEGY_RUN_SETTINGS_KEY);
-  // 실행 계획 sandbox 도 실행과 같은 결측 정책을 싣는다(Phase 2 감사 #3).
+  // 실행 계획 sandbox 도 실행과 같은 결측 정책을 싣는다(Phase 2 감사 #3). 기간·유니버스가 비어도
+  // 결측 정책 칸 값은 따로 싣는다(#357 C-P3-16).
   const executionPlans = useExecutionPlans(
     document,
     assist.inspectorSource,
-    runSettings.environment?.missing ?? null,
+    runSettings.missing,
   );
   const backtest = useRunBacktest(
     document,
@@ -402,9 +403,7 @@ export const NewStrategyPage = () => {
           json: <StrategyProjectionPanel projection={projection} />,
           form: (
             <StrategyFormPanel
-              projection={form.projection}
-              stale={form.stale}
-              tree={form.tree}
+              form={form}
               schema={assist.schema}
               transactions={transactions}
               catalogs={catalogs}
@@ -432,14 +431,19 @@ export const NewStrategyPage = () => {
                 diagnostics={currentDiagnostics(document)}
                 selectedPointer={search.path}
                 revealSignal={problems.revealSignal}
-                editing={{
-                  tree: form.tree,
-                  transactions,
-                  catalogs,
-                  operators: assist.operators,
-                  onOpenForm: openForm,
-                  documentKey: document.documentEpoch,
-                }}
+                // 첫 parse 전 tree 는 비어 있어 편집기가 "팩터가 없습니다"를 그린다. 캔버스처럼 기다린다(#413).
+                editing={
+                  form.firstParsePending
+                    ? undefined
+                    : {
+                        tree: form.tree,
+                        transactions,
+                        catalogs,
+                        operators: assist.operators,
+                        onOpenForm: openForm,
+                        documentKey: document.documentEpoch,
+                      }
+                }
                 onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
                 onOpenSource={(pointer) => {
                   outline.requestSourceReveal(pointer);

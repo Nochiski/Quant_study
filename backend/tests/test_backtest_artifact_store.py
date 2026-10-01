@@ -179,10 +179,11 @@ def test_local_artifact_store_commits_atomically_and_preserves_null_vs_zero(tmp_
     commit = store.commit(_result())
 
     result_path = tmp_path / "run-safe-001" / "result.json"
-    manifest_path = tmp_path / "run-safe-001" / "manifest.json"
     payload = result_path.read_bytes()
     decoded = json.loads(payload)
-    assert manifest_path.exists()
+    # 매니페스트는 `result.json` 안에만 있다 — 해시로 검증되지 않는 두 번째 사본을 쓰지 않는다
+    # (#362 DR-B-05)
+    assert [path.name for path in result_path.parent.iterdir()] == ["result.json"]
     assert commit.sha256 == hashlib.sha256(payload).hexdigest()
     assert decoded["metrics"][0]["value"] == 0.0
     assert decoded["metrics"][1]["value"] is None

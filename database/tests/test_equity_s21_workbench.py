@@ -249,17 +249,13 @@ def test_krx_liquid_은_정책표대로_같은날_상위_비율만_남긴다(ada
 
 def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -> None:
     from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
-    r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("classification.sector",))
-    assert r.status is DataLoadStatus.INVALID_QUERY and "unavailable" in str(r.detail)
-    assert "현재값 라벨" in str(r.detail)
-    # 격자 3테이블이 다 서도 남는 미지원 — 컬럼 부재(S08-2)와 원천 축 부재(S10 판정)를 구분한다
-    ownership = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31),
-                     fields=("flow.foreign_ownership",))
-    assert ownership.status is DataLoadStatus.INVALID_QUERY
-    assert "S08-2" in str(ownership.detail)
-    net_buy = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("credit.net_buy",))
-    assert net_buy.status is DataLoadStatus.INVALID_QUERY
-    assert "순매수 축이 없다" in str(net_buy.detail)
+    reasons = adapter.unavailable_factor_fields()  # compile 진단과 같은 사유 표(#316)
+    # 격자 3테이블이 다 서도 남는 미지원 — 사유는 한 문장이고, 컬럼 부재(S08-2)·원천 축 부재(S10
+    # 판정) 같은 구분은 어댑터 `_specs.UNSUPPORTED_FIELDS` 의 메모에만 남는다(#316 리뷰 P3-1)
+    for field_id in ("classification.sector", "flow.foreign_ownership", "credit.net_buy"):
+        r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=(field_id,))
+        assert r.status is DataLoadStatus.INVALID_QUERY and "unavailable" in str(r.detail)
+        assert reasons[field_id] in str(r.detail) and "S08-2" not in str(r.detail)
 
 
 # ── S21 본판: 필드별 1셀 손검산 ───────────────────────────────────────────────

@@ -58,10 +58,13 @@ pub(crate) type RoutedOrder = (
 pub(crate) type RoutedUpdate = (String, String, String);
 pub(crate) type RoutedGroup = (String, String, Vec<String>);
 pub(crate) type RouteError = (String, String);
+/// 목표 금액 Δ → 수량 변환 기록 `(key, target_notional, rounded_notional)` (Python `TargetRounding`).
+pub(crate) type RoutedRounding = (String, f64, f64);
 type RoutedDecision = (
     Vec<RoutedOrder>,
     Vec<RoutedUpdate>,
     Vec<RoutedGroup>,
+    Vec<RoutedRounding>,
     Option<RouteError>,
 );
 
@@ -113,6 +116,7 @@ struct RouteContext<'a> {
     routed_sells: HashMap<String, i64>,
     updates: Vec<RoutedUpdate>,
     groups: Vec<RoutedGroup>,
+    roundings: Vec<RoutedRounding>,
 }
 
 impl RouteContext<'_> {
@@ -248,7 +252,29 @@ impl RouteContext<'_> {
         })
     }
 
-    fn target_delta(&self, target: &TargetWire, equity: f64) -> Result<(i64, bool), RouteError> {
+    /// 목표 금액 Δ 를 1주 단위 수량으로 내리고 그 기록을 남긴다(Python `_notional_to_delta`).
+    fn round_to_shares(
+        &mut self,
+        target: &TargetWire,
+        delta_notional: f64,
+    ) -> Result<i64, RouteError> {
+        let close = self.close(target)?;
+        let shares = (delta_notional.abs() / close).floor() as i64;
+        let delta = if delta_notional >= 0.0 {
+            shares
+        } else {
+            -shares
+        };
+        self.roundings
+            .push((target.1.clone(), delta_notional, delta as f64 * close));
+        Ok(delta)
+    }
+
+    fn target_delta(
+        &mut self,
+        target: &TargetWire,
+        equity: f64,
+    ) -> Result<(i64, bool), RouteError> {
         let held = self.held(&target.1);
         match target.0.as_str() {
             "weight" => {
@@ -269,12 +295,7 @@ impl RouteContext<'_> {
                 }
                 let target_notional = weight * equity;
                 let delta_notional = target_notional - self.market_value(&target.1);
-                let shares = (delta_notional.abs() / self.close(target)?).floor() as i64;
-                let delta = if delta_notional >= 0.0 {
-                    shares
-                } else {
-                    -shares
-                };
+                let delta = self.round_to_shares(target, delta_notional)?;
                 let flips =
                     held != 0 && target_notional != 0.0 && (held > 0) != (target_notional > 0.0);
                 Ok((delta, !flips))
@@ -310,15 +331,7 @@ impl RouteContext<'_> {
                     ));
                 }
                 let delta_notional = target_notional - self.market_value(&target.1);
-                let shares = (delta_notional.abs() / self.close(target)?).floor() as i64;
-                Ok((
-                    if delta_notional >= 0.0 {
-                        shares
-                    } else {
-                        -shares
-                    },
-                    false,
-                ))
+                Ok((self.round_to_shares(target, delta_notional)?, false))
             }
             "quantity" => {
                 let quantity = self.integer(target)?;
@@ -683,6 +696,7 @@ pub(crate) fn route_basic_decision(
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             Some((
                 "schema_version".to_string(),
                 format!(
@@ -695,6 +709,7 @@ pub(crate) fn route_basic_decision(
     for action in &decision.3 {
         if !config.action_declared(&action.0) {
             return Ok((
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
@@ -711,7 +726,7 @@ pub(crate) fn route_basic_decision(
         }
     }
     if decision.3.iter().all(|action| action.0 == "no_action") {
-        return Ok((Vec::new(), Vec::new(), Vec::new(), None));
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new(), None));
     }
     // 라우팅은 포지션 key를 읽기만 한다 — 원장에서 빌려 결정마다 나던 String 복제를 없앤다.
     let (_, positions, equity, _) = portfolio.snapshot_refs()?;
@@ -733,6 +748,7 @@ pub(crate) fn route_basic_decision(
         routed_sells: HashMap::new(),
         updates: Vec::new(),
         groups: Vec::new(),
+        roundings: Vec::new(),
     };
     let mut routed = Vec::new();
     for (action_index, action) in decision.3.iter().enumerate() {
@@ -947,8 +963,20 @@ pub(crate) fn route_basic_decision(
             )),
         };
         if let Err(error) = result {
-            return Ok((Vec::new(), context.updates, context.groups, Some(error)));
+            return Ok((
+                Vec::new(),
+                context.updates,
+                context.groups,
+                Vec::new(),
+                Some(error),
+            ));
         }
     }
-    Ok((routed, context.updates, context.groups, None))
+    Ok((
+        routed,
+        context.updates,
+        context.groups,
+        context.roundings,
+        None,
+    ))
 }

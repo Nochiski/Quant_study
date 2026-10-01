@@ -198,6 +198,7 @@ class TestGoldenRun:
             "order",
             "order_update",
             "fill",
+            "rounding",
             "snapshot",
         }
 

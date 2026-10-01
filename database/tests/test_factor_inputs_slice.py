@@ -45,7 +45,7 @@ from equity import (
 )
 from equity.baseline import Baseline, load
 from factor_inputs import build, queries
-from factor_inputs.build import GOLDEN_PATH
+from factor_inputs.build import GOLDEN_PATH, OPTIONAL_STAGE_SOURCES
 from model.contracts import UniverseRule
 from stage import manifest
 from test_equity_s08_flow import _repaired_stage_root
@@ -178,11 +178,14 @@ _COMPARE = ("revenue", "op", "ni", "eps", "bps", "per", "pbr", "roe", "roa", "de
 
 def _fin_views(con: duckdb.DuckDBPyConnection, chain: tuple[Path, Path]) -> None:
     eq, st = chain
-    for t in ("fin_std", "security", "dividend_event", "trading_calendar"):
+    for t in ("fin_std", "security", "dividend_event", "trading_calendar", "corp"):
         pb = inputs.resolve(eq, t)
         lit = ", ".join(f"'{g}'" for g in pb.globs)
         con.execute(f'CREATE VIEW "{t}" AS SELECT * FROM read_parquet([{lit}], '
                     "hive_partitioning=false)")
+    # 절단본에는 WISE 분기(10-01 T-Q4)가 없다 — build 와 같은 빈 대역(선택 원천)을 쓴다
+    con.execute('CREATE VIEW "stg_fin_wise_q" AS SELECT * FROM '
+                + OPTIONAL_STAGE_SOURCES["stg_fin_wise_q"])
     for t in ("stg_fin_wise", "stg_consensus_annual"):
         pb = inputs.resolve(st, t)
         lit = ", ".join(f"'{g}'" for g in pb.globs)

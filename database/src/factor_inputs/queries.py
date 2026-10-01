@@ -483,6 +483,21 @@ _FIN_SLOTS = "\n    UNION ALL\n    ".join(
     f"period_label_{i} AS label, val_{i} AS val FROM cur" for i in range(1, 7))
 
 
+# WISE 분기 손익(stg_fin_wise_q pkey Q:IS, 플랜 2026-09-30 T-Q4) — 6칸을 행으로. 기간·추정·기준은 stage 파생 열.
+_FIN_Q_SLOTS = "\n    UNION ALL\n    ".join(
+    "SELECT ticker, fetched_date, acc_nm, "
+    f"period_{i} AS period, is_est_{i} AS is_est, basis_{i} AS basis, val_{i} AS val FROM wqcur"
+    for i in range(1, 7))
+# 분기 매출 계정(최상위 행, 10-01 실측) — 일반 '매출액(수익)' · 보험 '영업수익'(총액) → gross,
+# 은행·증권·금융지주 '순영업이익'(순액) → net. 영업이익은 발표기준 우선(네이버·DART 와 같은 정의, DQ-12).
+WISE_Q_REVENUE_GROSS: tuple[str, ...] = ("매출액(수익)", "영업수익")
+WISE_Q_REVENUE_NET = "순영업이익"
+# 지주사 — 별도 재무는 사실상 자회사 배당이라 연결이 없는 분기를 별도로 대체하지 않는다(10-01 사용자).
+# DART 업종 KSIC 64992(지주회사) ∪ (649* ∧ 이름 '홀딩스'·'지주' 또는 효성·HDC). 서버 실측 98곳.
+HOLDING_KSIC = "64992"
+HOLDING_NAMES_649: tuple[str, ...] = ("효성", "HDC")
+
+
 def _fin_pick(ep: str, accode: str, top_only: bool = False, acc_nm: str | None = None) -> str:
     """compat `mappings._fin_pick` 과 같은 규칙(R1·DQ-6): 계정명이 주어지면 계정명 + 최상위로,
     아니면 accode 로 고른다. 금융업 템플릿의 accode 차이를 계정명이 흡수한다."""
@@ -562,6 +577,42 @@ wise AS (
     WHERE NOT is_est
     GROUP BY ticker, yyyy, mm
 ),
+wqsnap AS (
+    -- 종목별 D 이전 최신 WISE 분기 손익 스냅샷(신선·유예 종목만 — 연간 wsnap 과 같은 규약)
+    SELECT q.ticker, max(q.fetched_date) AS fetched_date
+    FROM stg_fin_wise_q q
+    WHERE q.pkey = 'Q:IS' AND q.fetched_date <= DATE '{p.d}'
+      AND q.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
+      AND q.{_IN_UNIVERSE}
+    GROUP BY q.ticker
+),
+wqcur AS (
+    SELECT q.* FROM stg_fin_wise_q q
+    JOIN wqsnap l ON l.ticker = q.ticker AND l.fetched_date = q.fetched_date
+    WHERE q.pkey = 'Q:IS' AND q.p_accode IS NULL           -- 최상위 계정만(DQ-6)
+),
+wqslots AS (
+    {_FIN_Q_SLOTS}
+),
+wq AS (
+    SELECT ticker,
+           substr(period, 1, 4) || '/' || substr(period, 5, 2)  AS period,
+           coalesce({" ".join(f"max(val) FILTER (WHERE acc_nm = '{n}')," for n in WISE_Q_REVENUE_GROSS)}
+                    max(val) FILTER (WHERE acc_nm = '{WISE_Q_REVENUE_NET}'))  AS q_revenue,
+           CASE WHEN max(val) FILTER (WHERE acc_nm IN ({", ".join(f"'{n}'" for n in WISE_Q_REVENUE_GROSS)}))
+                     IS NOT NULL THEN 'gross'
+                WHEN max(val) FILTER (WHERE acc_nm = '{WISE_Q_REVENUE_NET}') IS NOT NULL THEN 'net'
+           END                                                   AS q_revenue_basis,
+           coalesce(max(val) FILTER (WHERE acc_nm = '영업이익(발표기준)'),
+                    max(val) FILTER (WHERE acc_nm = '영업이익'))  AS q_op,
+           max(val) FILTER (WHERE acc_nm = '당기순이익')         AS q_ni,
+           max(basis)                                            AS q_basis,
+           max(fetched_date)                                     AS q_fetched,
+           row_number() OVER (PARTITION BY ticker ORDER BY period DESC) AS k
+    FROM wqslots
+    WHERE period IS NOT NULL AND is_est IS NOT TRUE
+    GROUP BY ticker, period
+),
 fin AS (
     SELECT f.*,
            row_number() OVER (
@@ -575,6 +626,12 @@ fin AS (
 dsec AS (
     SELECT ticker, corp_code FROM security
     WHERE corp_code IS NOT NULL AND {_IN_UNIVERSE}
+),
+hold AS (
+    SELECT DISTINCT s.ticker FROM dsec s JOIN corp c ON c.corp_code = s.corp_code
+    WHERE c.induty_code = '{HOLDING_KSIC}'
+       OR (c.induty_code LIKE '649%' AND (c.corp_name LIKE '%홀딩스%' OR c.corp_name LIKE '%지주%'
+           OR c.corp_name IN ({", ".join(f"'{n}'" for n in HOLDING_NAMES_649)})))
 ),
 div AS (
     SELECT s.ticker,
@@ -675,6 +732,7 @@ SELECT ticker, period, 'annual' AS period_type,
        CAST(round(d_total_asset / {eok}) AS BIGINT)                     AS total_assets,
        coalesce(w_fs_basis, 'DART:' || d_fs_div)                        AS fs_basis,
        d_capex_basis                                                    AS capex_basis,
+       CAST(NULL AS VARCHAR)                                            AS revenue_basis,
        greatest(w_fetched, d_available, dv_available)                   AS available_date
 FROM annual
 WHERE k <= {FIN_ANNUAL_PERIODS}
@@ -693,9 +751,35 @@ SELECT ticker, period, 'quarter' AS period_type,
        CAST(round(total_asset / {eok}) AS BIGINT)                       AS total_assets,
        'DART:' || fs_div                                                AS fs_basis,
        capex_basis,
+       CAST(NULL AS VARCHAR)                                            AS revenue_basis,
        available_date
 FROM qtr
-WHERE k <= {FIN_QUARTERS}"""
+WHERE k <= {FIN_QUARTERS} AND ticker NOT IN (SELECT ticker FROM wqsnap)
+
+UNION ALL
+
+SELECT w.ticker, w.period, 'quarter' AS period_type,
+       CASE WHEN h.ticker IS NULL OR w.q_basis LIKE '%연결%'
+            THEN CAST(round(w.q_revenue) AS BIGINT) END                 AS revenue,
+       CASE WHEN h.ticker IS NULL OR w.q_basis LIKE '%연결%'
+            THEN CAST(round(w.q_op) AS BIGINT) END                      AS op,
+       CASE WHEN h.ticker IS NULL OR w.q_basis LIKE '%연결%'
+            THEN CAST(round(w.q_ni) AS BIGINT) END                      AS ni,
+       NULL AS eps, NULL AS bps, NULL AS per, NULL AS pbr, NULL AS roe, NULL AS roa,
+       NULL AS debt_ratio,
+       NULL AS fcf, NULL AS capex, NULL AS op_margin, NULL AS ni_margin,
+       NULL AS dividend_yield, NULL AS dps, NULL AS shares, NULL AS ev_ebitda, NULL AS yoy,
+       NULL AS gross_profit, NULL AS total_assets,
+       -- 지주사의 연결 아닌 분기는 값을 비우고 표식을 남긴다(엔진 flag 지주사_별도제외)
+       'WISE:' || coalesce(w.q_basis, '?')
+           || CASE WHEN h.ticker IS NOT NULL AND coalesce(w.q_basis, '') NOT LIKE '%연결%'
+                   THEN '|지주사제외' ELSE '' END                       AS fs_basis,
+       CAST(NULL AS VARCHAR)                                            AS capex_basis,
+       w.q_revenue_basis                                                AS revenue_basis,
+       w.q_fetched                                                      AS available_date
+FROM wq w
+LEFT JOIN hold h ON h.ticker = w.ticker
+WHERE w.k <= {FIN_QUARTERS}"""
     return create("fi_fin_summary", inner)
 
 
@@ -713,8 +797,8 @@ TABLE_SOURCES: Mapping[str, tuple[str, ...]] = {
     "fi_consensus": ("stg_consensus_matrix", "stg_consensus_annual", "coverage_daily",
                      "trading_calendar"),
     "fi_consensus_annual": ("stg_consensus_annual",),
-    "fi_fin_summary": ("stg_fin_wise", "fin_std", "dividend_event", "security",
-                       "stg_consensus_annual", "trading_calendar"),
+    "fi_fin_summary": ("stg_fin_wise", "stg_fin_wise_q", "fin_std", "dividend_event", "security",
+                       "corp", "stg_consensus_annual", "trading_calendar"),
 }
 
 

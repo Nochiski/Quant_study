@@ -329,6 +329,47 @@ def test_value_and_quality_formulas() -> None:
         assert ind["W", key]["raw"] is None and _why(ind["W", key]) == "분모≤0", key
 
 
+
+def test_opm_ttm_flags_mixed_basis_and_holding_exclusion() -> None:
+    """10-01 T-Q5: 4분기에 연결·별도가 섞이면 값은 쓰고 `기준혼합`, 지주사의 별도 분기를 비워 연속 4분기가
+    없으면 `지주사_별도제외`. 기준이 하나면 표식 없음(WISE·DART 표기 모두)."""
+    b = Board()
+    q = ("2026/06", "2026/03", "2025/12", "2025/09")
+    b.stock("M", [10_000.0] * 30)
+    for per, basis in zip(q, ("WISE:IFRS연결", "WISE:IFRS연결", "WISE:IFRS별도", "WISE:IFRS별도"),
+                          strict=True):
+        b.fin("M", per, "quarter", op=10.0, revenue=100.0, fs_basis=basis)
+    b.stock("S", [10_000.0] * 30)
+    for per in q:
+        b.fin("S", per, "quarter", op=10.0, revenue=100.0, fs_basis="DART:CFS")
+    b.stock("H", [10_000.0] * 30)
+    b.fin("H", "2026/06", "quarter", op=None, revenue=None, fs_basis="WISE:IFRS별도|지주사제외")
+    for per in q[1:]:
+        b.fin("H", per, "quarter", op=10.0, revenue=100.0, fs_basis="WISE:IFRS연결")
+    _, ind = _run(b)
+    # 표식 칸은 다른 표식(업종소수→전체·버킷결측 등)과 ';' 로 이어진다
+    assert ind["M", "OPM_TTM"]["raw"] == 0.1 and "기준혼합" in ind["M", "OPM_TTM"]["flag"]
+    assert ind["S", "OPM_TTM"]["raw"] == 0.1 and "기준혼합" not in (ind["S", "OPM_TTM"]["flag"] or "")
+    assert ind["H", "OPM_TTM"]["raw"] is None and _why(ind["H", "OPM_TTM"]) == "지주사_별도제외"
+
+
+def test_opm_percentile_ranks_net_revenue_financials_as_their_own_peer_group() -> None:
+    """10-01: 은행·증권·금융지주(순영업이익 = net)와 보험·일반(총액 = gross)을 같은 대분류에서 한 줄로
+    세우면 총액 쪽이 구조적으로 꼴찌다 — 영업이익률 백분위만 매출 계정 종류별로 따로 매긴다."""
+    b = Board()
+    q = ("2026/06", "2026/03", "2025/12", "2025/09")
+    for i in range(6):
+        for kind, base in (("net", 0.50), ("gross", 0.05)):
+            t = f"{kind[0].upper()}{i}"
+            b.stock(t, [10_000.0] * 30, sector="G40")
+            for per in q:
+                b.fin(t, per, "quarter", op=(base + 0.02 * i) * 100.0, revenue=100.0,
+                      fs_basis="WISE:IFRS연결", revenue_basis=kind)
+    _, ind = _run(b)
+    assert ind["G5", "OPM_TTM"]["pct"] == ind["N5", "OPM_TTM"]["pct"] == 100.0   # 각 그룹 1위
+    assert ind["G0", "OPM_TTM"]["pct"] == ind["N0", "OPM_TTM"]["pct"]             # 각 그룹 꼴찌
+    assert "업종소수" not in (ind["G5", "OPM_TTM"]["flag"] or "")                 # 그룹마다 6 ≥ 5
+
 def test_foreign_60_and_credit_change_formulas() -> None:
     b = Board()
     b.stock("F", [100.0] * 70)

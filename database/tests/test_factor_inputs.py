@@ -419,16 +419,43 @@ def _dividend() -> list[dict]:
     ]
 
 
+def _corp(holding: frozenset[str] = frozenset()) -> list[dict]:
+    """equity corp — 지주사 판정 재료(10-01 T-Q4: KSIC 64992). `holding` 종목만 지주회사 업종."""
+    return [{"corp_code": corp(t), "corp_name": f"법인{t}", "fiscal_month": 12,
+             "fiscal_month_basis": "company", "induty_code": "64992" if t in holding else "26",
+             "induty_class": None} for t in (*LAYER, ETF, DELISTED)]
+
+
+# WISE 분기 손익(stg_fin_wise_q Q:IS) 기간 6칸 — 시프트업 실측 모양(별도 3분기 → 연결 2분기 + 추정 1칸)
+WQ_LABELS = (("202506", False, "IFRS별도"), ("202509", False, "IFRS별도"), ("202512", False, "IFRS별도"),
+             ("202603", False, "IFRS연결"), ("202606", False, "IFRS연결"), ("202609", True, "IFRS연결"))
+
+
+def _wq_rows(t: str, fetched: dt.date, accounts: dict[str, list[float]],
+             labels: tuple[tuple[str, bool, str], ...] = WQ_LABELS) -> list[dict]:
+    rows = []
+    for seq, (nm, vals) in enumerate(accounts.items()):
+        r: dict[str, object] = {"ticker": t, "fetched_date": fetched, "pkey": "Q:IS", "seq": seq,
+                                "accode": f"{200000 + seq}", "acc_nm": nm, "p_accode": None}
+        for i, ((per, est, basis), v) in enumerate(zip(labels, vals, strict=True), start=1):
+            r.update({f"period_{i}": per, f"is_est_{i}": est, f"basis_{i}": basis, f"val_{i}": v})
+        rows.append(r)
+    return rows
+
+
 def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
-               drop_fetch_after: dt.date | None = None) -> tuple[Path, Path]:
-    """(equity_root, stage_root). `drop_fetch_after` 를 주면 그날 뒤 WISE 수집이 없다(수집 정지)."""
+               drop_fetch_after: dt.date | None = None,
+               wise_q: list[dict] | None = None,
+               holding: frozenset[str] = frozenset()) -> tuple[Path, Path]:
+    """(equity_root, stage_root). `drop_fetch_after` 를 주면 그날 뒤 WISE 수집이 없다(수집 정지).
+    `wise_q` 를 주면 stg_fin_wise_q 판을 만든다(없으면 선택 원천 'absent' → 분기는 DART)."""
     eq, st = base / "eq", base / "st"
     equity = {"trading_calendar": _calendar(), "universe_daily": _universe(),
               "security": _security(), "price_daily": _prices(), "price_adj_daily": _adj(),
               "adj_factor": _adj_factor(), "flow_daily": _flows(), "credit_daily": _credit(),
               "sector_snapshot": _sector(), "coverage_daily": _coverage_daily(),
               "fin_std": _fin_std(), "dividend_event": _dividend(), "audit_opinion": _audit(),
-              "disclosure_version": _disclosure()}
+              "disclosure_version": _disclosure(), "corp": _corp(holding)}
     for table, rows in equity.items():
         _make_stage_tree(eq, table, rows, build_id=eq_build)
     stage = {"stg_consensus_annual": _consensus_annual(), "stg_consensus_matrix": _matrix(),
@@ -437,6 +464,8 @@ def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
         if drop_fetch_after is not None:
             rows = [r for r in rows if r["fetched_date"] <= drop_fetch_after]
         _make_stage_tree(st, table, rows, build_id=ST_BUILD)
+    if wise_q is not None:
+        _make_stage_tree(st, "stg_fin_wise_q", wise_q, build_id=ST_BUILD)
     return eq / "stage", st / "stage"
 
 
@@ -685,6 +714,43 @@ def test_fin_summary_last_five_quarters_from_dart(built) -> None:
     assert rows[0][5:7] == (round(500 * 0.29 * 1e4), 25.0)
     assert all(r[7] is None and r[8] is None and r[9] is None and r[10] is None for r in rows)
     assert rows[0][11] == "DART:CFS" and rows[0][12] == dt.date(2026, 8, 14)
+
+
+def test_fin_summary_quarters_switch_to_wise_with_basis_holding_and_revenue_kind(
+        tmp_path: Path) -> None:
+    """10-01 T-Q4: WISE 분기가 있는 종목은 분기 행을 WISE 에서(연결/별도 이름표 보존), 지주사의 연결 아닌
+    분기는 값을 비우고 표식, 금융 순영업이익은 revenue_basis 'net'."""
+    f = FETCH[-1]
+    wq = (_wq_rows(A, f, {"매출액(수익)": [1124, 755, 644, 473, 557, 522.6],
+                          "영업이익": [600, 400, 300, 200, 250, 260.0],
+                          "영업이익(발표기준)": [682, 495, 374, 215, 281, 262.6],
+                          "당기순이익": [513, 546, 482, 378, 417, 298.0]})
+          + _wq_rows(B, f, {"매출액(수익)": [100, 110, 120, 130, 140, 150.0],
+                            "영업이익(발표기준)": [10, 11, 12, 13, 14, 15.0],
+                            "당기순이익": [5, 6, 7, 8, 9, 10.0]})
+          + _wq_rows(C, f, {"순영업이익": [200, 210, 220, 230, 240, 250.0],
+                            "영업이익": [120, 130, 140, 150, 160, 170.0],
+                            "당기순이익": [90, 95, 100, 105, 110, 115.0]}))
+    eq, st = make_roots(tmp_path / "src", wise_q=wq, holding=frozenset({B}))
+    out = tmp_path / "factor_inputs"
+    build(D_S, "morning", out, st, eq, min_eligible=5, golden_path=None)
+    sql = ("SELECT period, revenue, op, ni, fs_basis, revenue_basis FROM t WHERE ticker = '{}' "
+           "AND period_type = 'quarter' ORDER BY period DESC")
+    a = q(out, "fi_fin_summary", sql.format(A))
+    assert [r[0] for r in a] == ["2026/06", "2026/03", "2025/12", "2025/09", "2025/06"]
+    assert [r[1:4] for r in a[:3]] == [(557, 281, 417), (473, 215, 378), (644, 374, 482)]  # 발표기준
+    assert [r[4] for r in a] == ["WISE:IFRS연결", "WISE:IFRS연결", "WISE:IFRS별도",
+                                 "WISE:IFRS별도", "WISE:IFRS별도"]
+    assert {r[5] for r in a} == {"gross"}
+    b = {r[0]: r for r in q(out, "fi_fin_summary", sql.format(B))}
+    assert b["2025/12"][1:4] == (None, None, None)                  # 지주사 · 별도 → 비움
+    assert b["2025/12"][4] == "WISE:IFRS별도|지주사제외"
+    assert b["2026/06"][1:5] == (140, 14, 9, "WISE:IFRS연결")
+    c = q(out, "fi_fin_summary", sql.format(C))
+    assert {r[5] for r in c} == {"net"} and c[0][1:3] == (240, 160)
+    # A 는 DART 분기(fin_std)도 있지만 WISE 분기가 있으면 섞지 않는다. WISE 분기가 없을 때 DART 로 가는
+    # 경로는 test_fin_summary_last_five_quarters_from_dart(선택 원천 absent)가 본다.
+    assert not any(str(r[4]).startswith("DART:") for r in a)
 
 
 # ── 가격 · 수정주가 · 수급 · 신용 ─────────────────────────────────────────────

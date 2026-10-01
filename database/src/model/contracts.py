@@ -168,11 +168,13 @@ FI_FIN_SUMMARY = TableContract(
      _c("gross_profit", "DOUBLE", "억원"), _c("total_assets", "DOUBLE", "억원"),
      _c("fs_basis", "VARCHAR", note="연결 | 별도 | GAAP개별(DQ-5·DQ-10)"),
      _c("capex_basis", "VARCHAR", note="fin_std capex_basis 그대로(DQ-8)"),
+     _c("revenue_basis", "VARCHAR",
+        note="분기 행 매출 계정 종류 gross | net(은행·증권·금융지주 순영업이익) — v4 영업이익률 비교 그룹(10-01)"),
      _c("available_date", "DATE",
         note="공시·수집으로 알 수 있게 된 날. PIT(≤ D)는 굽는 단계가 적용하고 엔진은 읽지 않는다")),
     window="확정치만(추정치는 fi_consensus). 연간 2기(v3 LIMIT 2) + 분기 5기(v4 TTM)",
-    source=("stg_fin_wise(손익·지표) + equity fin_std(자산·현금흐름) — "
-            "compat T1.5 SQL 을 이 층으로 옮긴다"),
+    source=("stg_fin_wise(연간 손익·지표) + stg_fin_wise_q(분기 손익, 10-01 T-Q4 — WISE 가 없는 종목만 "
+            "equity fin_std 분기) + equity fin_std(연간 자산·현금흐름) — compat T1.5 SQL 을 이 층으로 옮긴다"),
     readers=ALL_ENGINES)
 
 FI_CREDIT = TableContract(

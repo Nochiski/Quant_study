@@ -52,8 +52,18 @@ DUCKDB_MEMORY_LIMIT = "8GB"
 EQUITY_SOURCES = ("trading_calendar", "universe_daily", "security", "price_daily",
                   "price_adj_daily", "adj_factor", "flow_daily", "credit_daily",
                   "sector_snapshot", "coverage_daily", "fin_std", "dividend_event",
-                  "audit_opinion", "disclosure_version")
-STAGE_SOURCES = ("stg_consensus_annual", "stg_consensus_matrix", "stg_fin_wise")
+                  "audit_opinion", "disclosure_version", "corp")
+STAGE_SOURCES = ("stg_consensus_annual", "stg_consensus_matrix", "stg_fin_wise", "stg_fin_wise_q")
+# 있으면 쓰는 stage 원천 — 판이 없으면 같은 열의 빈 표로 대신한다(판 id 'absent'). stg_fin_wise_q(WISE 분기,
+# 10-01 T-Q4)는 수집 첫날 이전 날짜에 스냅샷이 없으므로 그 날짜의 분기는 DART(fin_std)로 돌아간다.
+_EMPTY_FIN_WISE_Q = (
+    "(SELECT CAST(NULL AS VARCHAR) AS ticker, CAST(NULL AS DATE) AS fetched_date, "
+    "CAST(NULL AS VARCHAR) AS pkey, CAST(NULL AS VARCHAR) AS p_accode, CAST(NULL AS VARCHAR) AS acc_nm, "
+    + ", ".join(f"CAST(NULL AS VARCHAR) AS period_{i}, CAST(NULL AS BOOLEAN) AS is_est_{i}, "
+                f"CAST(NULL AS VARCHAR) AS basis_{i}, CAST(NULL AS DECIMAL(38, 6)) AS val_{i}"
+                for i in range(1, 7))
+    + " WHERE false)")
+OPTIONAL_STAGE_SOURCES: dict[str, str] = {"stg_fin_wise_q": _EMPTY_FIN_WISE_Q}
 _CHAIN_TABLES = ("price_daily", "price_adj_daily", "adj_factor")
 
 
@@ -113,6 +123,9 @@ def _resolve(root: Path, tables: tuple[str, ...],
         try:
             pb = inputs.resolve(root, t)
         except FileNotFoundError as e:
+            if stage and t in OPTIONAL_STAGE_SOURCES:
+                ids[t], exprs[t] = "absent", OPTIONAL_STAGE_SOURCES[t]
+                continue
             raise FactorInputsError(f"원천 판이 없다: {root}/{t} ({e})") from e
         ids[t] = pb.build_id
         exprs[t] = _expr(pb.globs, stage)

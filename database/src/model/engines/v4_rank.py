@@ -69,6 +69,8 @@ SECTOR_SMALL = "업종소수→전체"       # 대분류 표본 < min_sector_siz
 SECTOR_NONE = "업종없음→전체"        # 대분류 코드가 없다 → 유니버스 백분위
 ELIG_UNKNOWN = "적격미확인"          # D-13 적격성 표식이 NULL — 적격으로 두되 표시(뒤에 (표식))
 BUCKET_MISSING = "버킷결측"          # 결측 비중 ≥ bucket_missing_share 로 버킷을 비웠다(뒤에 (NN%))
+BASIS_MIX = "기준혼합"               # TTM 4분기에 연결·별도가 섞였다 — 값은 쓰고 표시(10-01 결정 D-Q1)
+HOLDING_EXCLUDED = "지주사_별도제외"  # 지주사의 연결 아닌 분기를 비워 연속 4분기가 없다(10-01)
 
 REASON_INSUFFICIENT = "insufficient_data"
 REASON_ADV20 = "adv20"                      # 20세션 평균 거래대금 < min_adv20
@@ -324,6 +326,7 @@ def _opm_ttm(fins: Sequence[Row], d: date) -> Val:
     qs = sorted((r for r in fins if r["period_type"] == "quarter"),
                 key=lambda r: str(r["period"]), reverse=True)
     floor = d - timedelta(days=TTM_MAX_AGE_DAYS)
+    held = False
     for k in range(len(qs) - TTM_QUARTERS + 1):
         run = qs[k:k + TTM_QUARTERS]
         idx = [_month_index(str(r["period"])) for r in run]
@@ -332,12 +335,40 @@ def _opm_ttm(fins: Sequence[Row], d: date) -> Val:
         ops = [_num(r["op"]) for r in run]
         revs = [_num(r["revenue"]) for r in run]
         if any(v is None for v in ops) or any(v is None for v in revs):
+            held = held or any(_HOLDING_MARK in str(r["fs_basis"] or "") for r in run)
             continue
         if _month_end(str(run[0]["period"])) < floor:
             return _miss(NO_SOURCE)
-        return _ratio(sum(v for v in ops if v is not None),
-                      sum(v for v in revs if v is not None))
-    return _miss(NO_SOURCE)
+        v = _ratio(sum(v for v in ops if v is not None),
+                   sum(v for v in revs if v is not None))
+        kinds = {k for k in (_basis_kind(r) for r in run) if k is not None}
+        return Val(v.raw, BASIS_MIX) if v.raw is not None and len(kinds) > 1 else v
+    return _miss(HOLDING_EXCLUDED if held else NO_SOURCE)
+
+
+_HOLDING_MARK = "지주사제외"         # factor_inputs 가 지주사의 연결 아닌 분기 fs_basis 에 붙이는 표식
+
+
+def _basis_kind(r: Row) -> str | None:
+    """분기 행의 재무제표 기준 → 연결 | 별도. 'WISE:IFRS연결' · 'DART:CFS' · 'WISE:IFRS별도|지주사제외'."""
+    b = str(r["fs_basis"] or "")
+    if not b:
+        return None
+    return "연결" if ("연결" in b or b.endswith("CFS")) else "별도"
+
+
+def _opm_peers(inputs: FactorInputs, codes: set[str]) -> dict[str, str]:
+    """영업이익률 비교 그룹(10-01 결정): 최근 분기 매출이 순액(`revenue_basis` 'net' — 은행·증권·금융지주
+    순영업이익)인 종목. 총액(보험 영업수익·일반 매출)과 같은 대분류에서 한 줄로 세우면 총액 쪽이 구조적으로
+    꼴찌라, 영업이익률 백분위만 이 종목들을 대분류 안 별도 그룹으로 매긴다."""
+    latest: dict[str, tuple[str, str]] = {}
+    for r in inputs.rows("fi_fin_summary"):
+        t = str(r["ticker"])
+        rb = r.get("revenue_basis")
+        if t in codes and r["period_type"] == "quarter" and rb:
+            if t not in latest or str(r["period"]) > latest[t][0]:
+                latest[t] = (str(r["period"]), str(rb))
+    return {t: b for t, (_, b) in latest.items() if b == "net"}
 
 
 # ── 수급 · 신용 ──────────────────────────────────────────────────────────────
@@ -696,9 +727,14 @@ class V4RankEngine:
         scored = [i for i in spec.indicators if i.role == "score"]
         pcts: dict[str, dict[str, float]] = {}
         notes: dict[str, dict[str, str]] = {}
+        peers = _opm_peers(inputs, set(codes))
         for ind in scored:
+            sec = sector_of
+            if ind.key == "OPM_TTM" and peers:
+                sec = {t: (s if s is None or t not in peers else f"{s}|{peers[t]}")
+                       for t, s in sector_of.items()}
             pcts[ind.key], notes[ind.key] = _percentiles(
-                ind, raws[ind.key], sector_of,
+                ind, raws[ind.key], sec,
                 spec.sector_neutral is not None and ind.bucket in rules.neutral_buckets,
                 rules.min_sector_size)
 

@@ -43,6 +43,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     InlineDraft,
     RunFailureCode,
     RunProgressEvent,
+    RunStage,
     RunStatus,
     SavedRevisionReference,
     StrategyProvenance,
@@ -921,13 +922,14 @@ class BacktestRunService:
             )
             result = self._executor.execute(
                 BacktestExecutionRequest(run_id, spec, tape, dataset, provenance),
-                # 실행기는 자기 작업 안의 비율(0~1)을 보고한다. run 막대의 engine 구간으로 옮긴다.
-                progress=lambda value, stage, message: self._update(
+                # 실행기는 자기 작업 안의 비율(0~1)과 설명만 보고한다. run 막대의 engine 구간으로
+                # 옮기고 단계는 `engine` 하나로 둔다 — 단계 어휘는 `RunStage` 가 소유한다(DR-B-03).
+                progress=lambda value, message: self._update(
                     record,
                     RunStatus.RUNNING,
                     _ENGINE_PROGRESS_START
                     + min(max(value, 0.0), 1.0) * (_ENGINE_PROGRESS_END - _ENGINE_PROGRESS_START),
-                    stage,
+                    "engine",
                     message,
                 ),
                 cancelled=record.cancellation.is_set,
@@ -1032,7 +1034,7 @@ class BacktestRunService:
         record: _RunRecord,
         status: RunStatus,
         progress: float,
-        stage: str,
+        stage: RunStage,
         message: str,
     ) -> None:
         with self._lock:
@@ -1045,7 +1047,7 @@ class BacktestRunService:
         record: _RunRecord,
         status: RunStatus,
         progress: float,
-        stage: str,
+        stage: RunStage,
         message: str,
         *,
         durable: bool = False,

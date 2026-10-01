@@ -10,7 +10,7 @@
         "KRX"
       ],
       "default": "KRX",
-      "x-description-key": "strategy.field.run_environment.market"
+      "x-description-key": "run_environment.field.market"
     },
     "frequency": {
       "type": "string",
@@ -18,23 +18,23 @@
         "daily"
       ],
       "default": "daily",
-      "x-description-key": "strategy.field.run_environment.frequency"
+      "x-description-key": "run_environment.field.frequency"
     },
     "start": {
       "type": "string",
       "format": "date",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-      "x-description-key": "strategy.field.run_environment.start"
+      "x-description-key": "run_environment.field.start"
     },
     "end": {
       "type": "string",
       "format": "date",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-      "x-description-key": "strategy.field.run_environment.end"
+      "x-description-key": "run_environment.field.end"
     },
     "universe_id": {
       "type": "string",
-      "x-description-key": "strategy.field.run_environment.universe_id",
+      "x-description-key": "run_environment.field.universe_id",
       "x-catalog": "universe"
     },
     "timing": {
@@ -43,12 +43,12 @@
         "next_open"
       ],
       "default": "next_open",
-      "x-description-key": "strategy.field.run_environment.timing"
+      "x-description-key": "run_environment.field.timing"
     },
     "participation_rate": {
       "type": "number",
       "default": 0.1,
-      "x-description-key": "run_environment.contract.participation_rate",
+      "x-description-key": "run_environment.field.participation_rate",
       "x-unit": "ratio",
       "x-applied-stage": "execution",
       "exclusiveMinimum": 0.0,
@@ -65,12 +65,12 @@
         "adv20"
       ],
       "default": "adv20",
-      "x-description-key": "strategy.field.run_environment.participation_basis"
+      "x-description-key": "run_environment.field.participation_basis"
     },
     "fee_bps": {
       "type": "number",
       "default": 15.0,
-      "x-description-key": "run_environment.contract.fee_bps",
+      "x-description-key": "run_environment.field.fee_bps",
       "x-unit": "bps",
       "x-applied-stage": "execution",
       "minimum": 0.0,
@@ -82,7 +82,7 @@
     "slippage_bps": {
       "type": "number",
       "default": 10.0,
-      "x-description-key": "run_environment.contract.slippage_bps",
+      "x-description-key": "run_environment.field.slippage_bps",
       "x-unit": "bps",
       "x-applied-stage": "execution",
       "minimum": 0.0,
@@ -98,7 +98,7 @@
             "not_null": false
           }
         ],
-        "description_key": "run_environment.contract.slippage_bps",
+        "description_key": "run_environment.field.slippage_bps",
         "owned_by_error": null
       }
     },
@@ -109,12 +109,12 @@
         "sqrt"
       ],
       "default": "fixed_bps",
-      "x-description-key": "strategy.field.run_environment.impact_model"
+      "x-description-key": "run_environment.field.impact_model"
     },
     "impact_coefficient": {
       "type": "number",
       "default": 1.0,
-      "x-description-key": "run_environment.contract.impact_coefficient",
+      "x-description-key": "run_environment.field.impact_coefficient",
       "x-unit": "ratio",
       "x-applied-stage": "execution",
       "minimum": 0.0,
@@ -130,7 +130,7 @@
             "not_null": false
           }
         ],
-        "description_key": "run_environment.contract.impact_coefficient",
+        "description_key": "run_environment.field.impact_coefficient",
         "owned_by_error": null
       }
     },
@@ -142,7 +142,7 @@
         "none"
       ],
       "default": "krx_statutory",
-      "x-description-key": "strategy.field.run_environment.sell_tax"
+      "x-description-key": "run_environment.field.sell_tax"
     },
     "sell_tax_bps": {
       "anyOf": [
@@ -154,7 +154,7 @@
         }
       ],
       "default": null,
-      "x-description-key": "run_environment.contract.sell_tax_bps",
+      "x-description-key": "run_environment.field.sell_tax_bps",
       "x-unit": "bps",
       "x-applied-stage": "execution",
       "minimum": 0.0,
@@ -170,7 +170,7 @@
             "not_null": false
           }
         ],
-        "description_key": "run_environment.contract.sell_tax_bps",
+        "description_key": "run_environment.field.sell_tax_bps",
         "owned_by_error": null
       }
     },
@@ -183,7 +183,7 @@
         "cross_sectional_median"
       ],
       "default": "drop",
-      "x-description-key": "strategy.field.run_environment.missing"
+      "x-description-key": "run_environment.field.missing"
     }
   },
   "required": [

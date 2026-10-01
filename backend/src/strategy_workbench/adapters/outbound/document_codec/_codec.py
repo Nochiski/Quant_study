@@ -54,6 +54,7 @@ from ruamel.yaml.tokens import (
 
 from strategy_workbench.application.strategy_authoring.facade.ports import (
     CodecLimits,
+    DiagnosticAnchor,
     DiagnosticKind,
     DiagnosticSeverity,
     ParsedDocument,
@@ -170,6 +171,7 @@ class RuamelDocumentCodec:
                         pointer=rejected.pointer,
                         message=str(rejected),
                         severity=DiagnosticSeverity.ERROR,
+                        anchor=DiagnosticAnchor.VALUE,
                         range=rejected.range,
                     ),
                 ),

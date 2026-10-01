@@ -126,6 +126,20 @@ class InvalidPortfolioRequestError(ValueError):
         self.validation = validation
 
 
+def _non_finite_rejection(
+    path: str, error: Exception, node_id: str | None = None
+) -> InvalidPortfolioRequestError:
+    # 계산 예외의 원문(영문)은 문장 뒤 기계 디테일로만 싣는다(error-messages.md, #357 C-P3-17).
+    issue = semantic_issue(
+        "strategy.expression.calculation_non_finite",
+        path,
+        "계산 중에 NaN·무한대가 나와 결과를 만들 수 없습니다. 값이 넘칠 만큼 큰 곱셈·나눗셈이 "
+        f"없는지 확인하세요 — {error}",
+        node_id=node_id,
+    )
+    return InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=(issue,)))
+
+
 class RawObservationUnavailableError(RuntimeError):
     """The observation source could not serve the query (unknown universe/field, no data)."""
 
@@ -419,14 +433,8 @@ class PortfolioDesignService:
                     for index, node in enumerate(factor.graph.nodes)
                     if node.node_id == error.node_id
                 )
-                issue = semantic_issue(
-                    "strategy.expression.calculation_non_finite",
-                    f"factors.{factor_index}.graph.nodes.{node_index}",
-                    str(error),
-                    node_id=error.node_id,
-                )
-                raise InvalidPortfolioRequestError(
-                    StrategyValidation(valid=False, issues=(issue,))
+                raise _non_finite_rejection(
+                    f"factors.{factor_index}.graph.nodes.{node_index}", error, error.node_id
                 ) from error
             evaluations.append(
                 FactorEvaluationRecord(
@@ -483,14 +491,7 @@ class PortfolioDesignService:
                 tape = compiled.tape
                 construction_trace = compiled.trace
         except NonFinitePortfolioCalculationError as error:
-            issue = semantic_issue(
-                "strategy.expression.calculation_non_finite",
-                "portfolio",
-                str(error),
-            )
-            raise InvalidPortfolioRequestError(
-                StrategyValidation(valid=False, issues=(issue,))
-            ) from error
+            raise _non_finite_rejection("portfolio", error) from error
         preview = PortfolioPreview(
             tape=tape,
             engine=engine,

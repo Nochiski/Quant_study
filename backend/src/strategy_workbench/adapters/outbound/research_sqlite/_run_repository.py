@@ -321,6 +321,7 @@ def _state(row: sqlite3.Row) -> BacktestRunState:
             run_id=run_id,
             status=RunStatus(row["status"]),
             progress=row["progress"],
+            # 거르지 않는다 — 상태가 바뀔 때만 저장해 `RunStage` 어휘 안이다(그 정의의 주석)
             stage=row["stage"],
             message=row["message"],
             created_at=datetime.fromisoformat(row["created_at"]),

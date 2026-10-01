@@ -1229,4 +1229,6 @@ def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count
     assert min(tape_progress) == pytest.approx(0.02)
     assert max(tape_progress) <= 0.8
     assert len(tape) <= 100, len(tape)
-    assert {event["stage"] for event in events} >= {"queued", "tape", "data", "engine", "completed"}
+    # 완료 run 의 단계는 이 여섯이다 — 실행기 구간은 `engine` 하나다(#362 DR-B-03)
+    stages = {event["stage"] for event in events}
+    assert stages == {"queued", "tape", "data", "engine", "artifact", "completed"}

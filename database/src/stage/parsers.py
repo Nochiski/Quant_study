@@ -335,20 +335,20 @@ FIN_WISE_COLUMNS: tuple[str, ...] = (
 _FIN_LABEL_N = 8          # YYMM 라벨 8 = 기간 6 + '전년대비(YoY)' 2 (실측 1,592/1,614)
 
 
-def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
-    """cF3002(재무제표 244계정)·cF4002(재무비율 36) pkey='Y': DATA 배열 원소 1개 = 출력 1행(wide).
+# 같은 cF3002 의 추가 요청(backfill_wise.FIN_REQUESTS, 플랜 2026-09-30 T-Q2) — stg_fin_wise_q 가 읽는다.
+FIN_WISE_Q_PKEYS: tuple[str, ...] = ("Q:IS", "Y:BS", "Y:CF")
+FIN_WISE_Q_COLUMNS: tuple[str, ...] = FIN_WISE_COLUMNS[:3] + ("pkey",) + FIN_WISE_COLUMNS[3:]
+_FIN_Q_LABEL_N = (8, 10)   # 연간 재무상태·현금흐름 8(기간 6 + YoY 2) · 분기 손익 10(기간 6 + QoQ·YoY 4)
 
-    기간 라벨(YYMM[0..5])은 행마다 period_label_1~6 으로 병기해 DATA1~6 과 짝을 보존한다. DATAQ* 는
-    라벨이 blob 에 없어(QOQ/YOY 코멘트가 상대 위치만 말한다) 슬롯명 그대로 val_q* 컬럼에 둔다.
-    키는 (cmp_cd, fetched_date, ep, seq=배열 위치) — cF4002 는 같은 ACCODE 가 여러 P_ACCODE 아래
-    반복된다(실측 1,614/1,614 blob). 같은 cF3002 의 다른 요청(pkey Q:IS·Y:BS·Y:CF — 분기 손익·연간
-    재무상태·현금흐름, 플랜 2026-09-30 T-Q2)은 키가 겹치므로 건너뛰고 세기만 한다(`_parse_periodic` 규약).
-    """
+
+def _parse_fin(blobs: Iterable[RawBlob], pkeys: tuple[str, ...], columns: tuple[str, ...],
+               label_ns: tuple[int, ...]) -> ParseResult:
+    """cF3002·cF4002 JSON 공통 — DATA 배열 원소 1개 = 출력 1행(wide). `pkeys` 밖 요청은 건너뛰고 센다."""
     n_blobs: Counter[str] = Counter()
     n_empty = n_failed = n_label_other = n_skipped = 0
     out: list[dict[str, str | None]] = []
     for b in blobs:
-        if b.pkey != "Y":
+        if b.pkey not in pkeys:
             n_skipped += 1
             continue
         n_blobs[b.ep] += 1
@@ -364,16 +364,18 @@ def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
             continue
         labels_obj = top.get("YYMM")
         labels = [_s(x) for x in labels_obj] if isinstance(labels_obj, list) else []
-        if len(labels) != _FIN_LABEL_N:
+        if len(labels) not in label_ns:
             n_label_other += 1
         fs_basis, freq = _s(top.get("FIN")), _s(top.get("FRQ"))
         for i, r in enumerate(rows):
             if not isinstance(r, dict):
                 n_failed += 1
                 continue
-            row: dict[str, str | None] = dict.fromkeys(FIN_WISE_COLUMNS)
+            row: dict[str, str | None] = dict.fromkeys(columns)
             row.update(cmp_cd=b.cmp_cd, fetched_date=b.fetched_date, ep=b.ep, seq=str(i),
                        fs_basis=fs_basis, freq=freq, fetched_at=b.fetched_at)
+            if "pkey" in row:
+                row["pkey"] = b.pkey
             for src, dst in _FIN_ATTRS.items():
                 row[dst] = _s(r.get(src))
             for k, slot in enumerate(_FIN_SLOTS, 1):
@@ -385,11 +387,29 @@ def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
                 row[dst] = _s(r.get(src))
             out.append(row)
     out.sort(key=lambda r: (str(r["cmp_cd"]), str(r["fetched_date"]), str(r["ep"]),
-                            int(str(r["seq"]))))
-    return ParseResult(rows=out, columns=FIN_WISE_COLUMNS, metrics={
+                            str(r.get("pkey") or ""), int(str(r["seq"]))))
+    return ParseResult(rows=out, columns=columns, metrics={
         "n_blobs": dict(n_blobs), "n_empty": n_empty, "n_rows_emitted": len(out),
         "n_parse_failed": n_failed, "n_value_mismatch": 0, "n_label_shape_other": n_label_other,
         "n_skipped_pkey": n_skipped})
+
+
+def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
+    """cF3002(재무제표 244계정)·cF4002(재무비율 36) pkey='Y': DATA 배열 원소 1개 = 출력 1행(wide).
+
+    기간 라벨(YYMM[0..5])은 행마다 period_label_1~6 으로 병기해 DATA1~6 과 짝을 보존한다. DATAQ* 는
+    라벨이 blob 에 없어(QOQ/YOY 코멘트가 상대 위치만 말한다) 슬롯명 그대로 val_q* 컬럼에 둔다.
+    키는 (cmp_cd, fetched_date, ep, seq=배열 위치) — cF4002 는 같은 ACCODE 가 여러 P_ACCODE 아래
+    반복된다(실측 1,614/1,614 blob). 같은 cF3002 의 다른 요청(pkey Q:IS·Y:BS·Y:CF — 분기 손익·연간
+    재무상태·현금흐름, 플랜 2026-09-30 T-Q2)은 키가 겹치므로 건너뛰고 세기만 한다(`_parse_periodic` 규약).
+    """
+    return _parse_fin(blobs, ("Y",), FIN_WISE_COLUMNS, (_FIN_LABEL_N,))
+
+
+def parse_fin_wise_q(blobs: Iterable[RawBlob]) -> ParseResult:
+    """cF3002 pkey Q:IS(분기 손익)·Y:BS(연간 재무상태)·Y:CF(연간 현금흐름) — 열은 stg_fin_wise 와 같고 키에
+    pkey 가 더해진다. 분기 응답은 기간 칸마다 연결/별도 이름표가 따로 붙는다('2025/12<br />(IFRS별도)')."""
+    return _parse_fin(blobs, FIN_WISE_Q_PKEYS, FIN_WISE_Q_COLUMNS, _FIN_Q_LABEL_N)
 
 
 ANALYST_COLUMNS: tuple[str, ...] = (
@@ -582,5 +602,6 @@ PARSERS.update({
     "parse_consensus_quarterly": parse_consensus_quarterly,
     "parse_consensus_matrix": parse_consensus_matrix,
     "parse_fin_wise": parse_fin_wise,
+    "parse_fin_wise_q": parse_fin_wise_q,
     "parse_analyst_summary": parse_analyst_summary,
 })

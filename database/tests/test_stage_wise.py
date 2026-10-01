@@ -232,7 +232,7 @@ def test_rules_wise_declares_all_thirteen_tables_per_design_section_4() -> None:
     names = {t.name for t in rules_wise.TABLES}
     assert names == {"stg_consensus_monthly", "stg_consensus_annual", "stg_consensus_quarterly",
                      "stg_consensus_matrix", "stg_analyst_summary", "stg_analyst_broker",
-                     "stg_fin_wise",
+                     "stg_fin_wise", "stg_fin_wise_q",                   # _q: 10-01 T-Q3
                      "stg_v3_revision_daily", "stg_v3_analyst_opinions", "stg_v3_consensus_annual",
                      "stg_v3_revision_compare", "stg_wise_coverage", "stg_calls_wise"}
     assert names <= set(rules.RULES)
@@ -310,6 +310,42 @@ def test_build_fin_wise_rounds_float_artifacts_into_decimal_38_6(tmp_path: Path)
     assert str(got[0][5]) == "1714994.700000" and got[0][6] == "2026/12(E)(IFRS연결)"   # 태그 제거
     assert got[3][:4] == ("cF4002", 1, "312000", "382100")
 
+
+# ── stg_fin_wise_q (cF3002 pkey Q:IS·Y:BS·Y:CF, 플랜 2026-09-30 T-Q3) ──────────────────────────
+# 분기 손익 응답의 이름표(10-01 실측): 기간 6 + QoQ/YoY 4. 기간마다 연결/별도가 따로 붙는다.
+YYMM_Q = ["2025/06<br />(IFRS별도)", "2025/09<br />(IFRS별도)", "2025/12<br />(IFRS별도)",
+          "2026/03<br />(IFRS연결)", "2026/06<br />(IFRS연결)", "2026/09(E)<br />(IFRS연결)",
+          "전분기대비<br />(QoQ)", "전년동기대비<br />(YoY)", "전분기대비<br />(QoQ)", "전년동기대비<br />(YoY)"]
+
+
+def test_fin_wise_q_parser_reads_only_the_three_new_requests() -> None:
+    body = _z({"YYMM": YYMM_Q, "DATA": [_fin_row("200000", "매출액(수익)")], "FIN": "IFRS연결",
+               "FRQ": "분기"})
+    res = parsers.parse_fin_wise_q([_blob("462870", "cF3002", "Y", _fin_blob([_fin_row("1", "x")])),
+                                    _blob("462870", "cF3002", "Q:IS", body),
+                                    _blob("462870", "cF3002", "Y:BS", _fin_blob([_fin_row("2", "자산총계")])),
+                                    _blob("462870", "cF3002", "Y:CF", _fin_blob([]))])
+    assert res.metrics["n_skipped_pkey"] == 1 and res.metrics["n_empty"] == 1
+    assert res.metrics["n_rows_emitted"] == 2 and res.metrics["n_label_shape_other"] == 0
+    q = next(r for r in res.rows if r["pkey"] == "Q:IS")
+    assert q["freq"] == "분기" and q["period_label_3"] == "2025/12<br />(IFRS별도)"
+
+
+def test_build_fin_wise_q_derives_period_estimate_and_basis(tmp_path: Path) -> None:
+    q = _z({"YYMM": YYMM_Q, "DATA": [_fin_row("200000", "매출액(수익)")], "FIN": "IFRS연결",
+            "FRQ": "분기"})
+    rows = [_row("462870", "cF3002", "Q:IS", q),
+            _row("462870", "cF3002", "Y:BS", _fin_blob([_fin_row("211000", "자산총계")])),
+            _row("462870", "cF3002", "Y", _fin_blob([_fin_row("200000", "매출액(수익)")]))]
+    r = _build("stg_fin_wise_q", _snap(tmp_path, rows), tmp_path)
+    assert r.n_rows == 2                                # pkey 'Y' 는 stg_fin_wise 몫
+    con = _read(tmp_path, r)
+    got = con.execute("SELECT pkey, period_3, is_est_3, basis_3, period_4, basis_4, period_6, is_est_6 "
+                      "FROM t WHERE pkey = 'Q:IS'").fetchone()
+    assert got == ("Q:IS", "202512", False, "IFRS별도", "202603", "IFRS연결", "202609", True)
+    bs = con.execute("SELECT period_5, is_est_5, basis_5, period_6, is_est_6 FROM t "
+                     "WHERE pkey = 'Y:BS'").fetchone()
+    assert bs == ("202512", False, "IFRS연결", "202612", True)
 
 def test_build_analyst_summary_from_html(tmp_path: Path) -> None:
     rows = [_row("005930", "c1010001", "", _html(SAMSUNG_CELLS)),
@@ -469,7 +505,7 @@ def test_rules_analyst_broker_declares_key_and_two_digit_year_dates() -> None:
     assert r.column("opinion_date").kind == model.KIND_DATE_YY_SLASH
     assert r.blob_source is not None and r.blob_source.parser == "parse_analyst_broker"
     assert {e.name for e in r.extras} == {"opinion_class", "prev_opinion_class"}
-    assert len(rules_wise.TABLES) == 13
+    assert len(rules_wise.TABLES) == 14          # 13 + stg_fin_wise_q(10-01 T-Q3)
 
 
 def test_build_analyst_broker_parses_dates_and_classifies_opinions(tmp_path: Path) -> None:

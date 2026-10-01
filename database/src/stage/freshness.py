@@ -61,6 +61,7 @@ ALLOW_DAYS: dict[str, int] = {
     # WICS 주 1회(토요일, dt=금요일) — 다음 금요일 저녁 D 기준 7일 + 연휴 여유(플랜 wics-weekly T2)
     "stg_wics_components": 14,
     "stg_fin_wise": 10,
+    "stg_fin_wise_q": 10,                 # 10-01 T-Q3 — stg_fin_wise 와 같은 WISE 저녁 수집 축
     # 문서층
     "stg_doc_meta": 10, "stg_doc_section": 10, "stg_doc_correction": 10,
     "stg_doc_parse_log": 10,

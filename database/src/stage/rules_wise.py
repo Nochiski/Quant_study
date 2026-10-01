@@ -173,6 +173,33 @@ STG_FIN_WISE = _blob_table(
     "parse_fin_wise", ("cF3002", "cF4002"),
 )
 
+# ── stg_fin_wise_q (cF3002 pkey Q:IS 분기 손익 · Y:BS 연간 재무상태 · Y:CF 연간 현금흐름) ─────────────
+# 플랜 2026-09-30 T-Q3. 열은 stg_fin_wise 와 같고 키에 pkey 가 더해진다(같은 날 같은 cF3002 여러 요청).
+# 실시간 모델의 분기·현금흐름 원천(DART 대체 — 원화 환산·분기 4번째 칸 포함, 플랜 §1). 기간 이름표에서
+# 기간(YYYYMM)·추정 여부·연결/별도를 칸마다 파생해 둔다 — 분기 응답은 칸마다 기준이 따로 붙는다
+# ('2025/12<br />(IFRS별도)' · '2026/09(E)<br />(IFRS연결)', 10-01 실측). 소비층이 이름표를 다시 파싱하지 않게.
+def _label_extras() -> tuple[ExtraColumn, ...]:
+    out: list[ExtraColumn] = []
+    for i in range(1, 7):
+        lab = f's."period_label_{i}"'
+        out += [
+            ExtraColumn(f"period_{i}", f"nullif(replace(regexp_extract({lab}, '^(\\d{{4}}/\\d{{2}})', 1), '/', ''), '')"),
+            ExtraColumn(f"is_est_{i}", f"CASE WHEN {lab} IS NULL THEN NULL ELSE {lab} LIKE '%(E)%' END"),
+            ExtraColumn(f"basis_{i}", f"nullif(regexp_extract({lab}, '\\(((IFRS|GAAP|K-IFRS)[^)]*)\\)', 1), '')"),
+        ]
+    return tuple(out)
+
+
+STG_FIN_WISE_Q = _blob_table(
+    "stg_fin_wise_q",
+    STG_FIN_WISE.columns[:3]
+    + (ColumnRule("pkey", "pkey", KIND_TEXT, key=True),)        # Q:IS | Y:BS | Y:CF
+    + STG_FIN_WISE.columns[3:],
+    ("ticker", "fetched_date", "pkey", "seq"),
+    "parse_fin_wise_q", ("cF3002",),
+    extras=_label_extras(),
+)
+
 # ── stg_analyst_summary (c1010001 HTML cTB15 — 추정기관수) ────────────────────────────────────────
 STG_ANALYST_SUMMARY = _blob_table(
     "stg_analyst_summary",
@@ -368,7 +395,7 @@ STG_CALLS_WISE = TableRule(
 
 TABLES: tuple[TableRule, ...] = (
     STG_CONSENSUS_MONTHLY, STG_CONSENSUS_ANNUAL, STG_CONSENSUS_QUARTERLY, STG_CONSENSUS_MATRIX,
-    STG_ANALYST_SUMMARY, STG_ANALYST_BROKER, STG_FIN_WISE, STG_V3_REVISION_DAILY,
+    STG_ANALYST_SUMMARY, STG_ANALYST_BROKER, STG_FIN_WISE, STG_FIN_WISE_Q, STG_V3_REVISION_DAILY,
     STG_V3_ANALYST_OPINIONS,
     STG_V3_CONSENSUS_ANNUAL, STG_V3_REVISION_COMPARE, STG_WISE_COVERAGE, STG_CALLS_WISE,
 )

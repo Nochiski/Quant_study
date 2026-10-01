@@ -140,12 +140,12 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | 항목 | 값 |
 |---|---|
 | PR | `P4-03` — 세 PR 스택(리드 결정 8): P4-03a backend(빈 그래프 코드·trace `summary` 계약·OpenAPI·SDK) → P4-03b 팩터 카드·추가 → P4-03c 미리보기 패널 |
-| Intent | P4-03a: 빈 그래프를 "첫 단계를 추가하세요"로 알리는 진단 코드와, 기준일 미리보기가 다시 계산 없이 그릴 수 있는 trace `summary`(유니버스·규칙 탈락·순위 탈락·결측 제외·그중 masked 수, 그 기준일 targets)를 backend 가 준다 |
+| Intent | P4-03a: 빈 그래프를 "첫 단계를 추가하세요"로 알리는 진단 코드와, 기준일 미리보기가 다시 계산 없이 그릴 수 있는 trace `summary`(유니버스·규칙 탈락·순위 탈락·적격·결측 수, 그 기준일 targets)를 backend 가 준다 |
 | Acceptance | WORKFLOW P4-03(리드 결정 2026-09-30 포함) 중 backend 몫 |
 | Non-goals | 팩터 카드·`renameFactor`·빈 팩터 추가 UI(P4-03b), 미리보기 패널 UI(P4-03c), 탭 개편·Form 은퇴(P4-04) |
 | Branch/worktree | `feat/lang2-p4-03a-backend` / `wt-run-concurrency`(재사용) |
 | Base SHA | main `2b27fa06`(PR 열기 전 `29296bda` 에서 옮김) + #416(#413) 의 PLAN 커밋 cherry-pick(P4-02 MERGED 기록, 같은 내용) |
-| Steps | ① PLAN·WORKFLOW 착수(리드 결정) → ② `factor.graph.empty` → ③ trace `summary` 계약(요약만 요청 허용, 사유별 수·masked·targets) → ④ OpenAPI·생성 SDK 재생성 → ⑤ 전체 게이트(backend `pytest`·`ruff`·`pyright`, `database/tests`, frontend `typecheck`·`test`, `api:generate` diff) |
+| Steps | ① PLAN·WORKFLOW 착수(리드 결정) → ② `factor.graph.empty` → ③ trace `summary` 계약(요약만 요청 허용, 사유별 수·targets) → ④ OpenAPI·생성 SDK 재생성 → ⑤ 전체 게이트(backend `pytest`·`ruff`·`pyright`, `database/tests`, frontend `typecheck`·`test`, `api:generate` diff) |
 | Full gate | CI 전체 job green |
 
 ### P1-05
@@ -2086,3 +2086,7 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 1. PR row의 상태·Review 열과 `현재 작업 Packet`을 고친다.
 2. `변경 기록`에 한 줄 남긴다.
 3. `pwsh docs/planning/strategy-language-2-0/tools/update-plan-progress.ps1`을 실행한다(`-Check`는 검증만).
+
+## 클라우드 P4-03c 구현 기록 (2026-09-30)
+
+P4-03b는 draft #426으로 보존했다. P4-03c는 기존 trace owner를 공유하는 캔버스 아래 명시적 미리보기로 구현했다. 날짜 공백은 서버의 마지막 프레임, 종목 목록 공백은 전체 요약 요청이다. 선택·점수·이름·수는 backend 응답을 그대로 표시한다. 관련 frontend 69개와 backend trace 통합 75개 테스트를 통과했다. P4-04와 Phase 4 브라우저 출구 조건은 아직 완료되지 않았다. 환경 제약과 재실행 명령은 [CLOUD_UI_HANDOFF.md](CLOUD_UI_HANDOFF.md)에 기록했다.

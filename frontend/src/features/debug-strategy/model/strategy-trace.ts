@@ -42,13 +42,11 @@ export type StrategyDebuggerContext = {
 
 /** `environment` 는 실행 설정 패널의 기간·유니버스가 아직 정해지지 않았다는 뜻이다. */
 export type StrategyDebuggerUnavailableReason =
-  | "document"
-  | "preparing"
-  | "no-factors"
-  | "execution-plan"
-  | "environment";
+  "document" | "preparing" | "no-factors" | "execution-plan" | "environment";
 
 export type StrategyTraceSelection = {
+  /** 요약은 첫 팩터의 지문으로 검증하며 종목별 추적을 요청하지 않는다. */
+  summaryOnly?: boolean;
   asOf: string;
   security: string;
   factorId: string;
@@ -65,12 +63,7 @@ export type PreparedStrategyTrace =
        * (이슈 #260: 실행 설정만 비었는데 "실행 가능한 문서가 없다"가 함께 떴다).
        */
       reason:
-        | "unavailable"
-        | "date"
-        | "security"
-        | "factor"
-        | "node"
-        | "holdings";
+        "unavailable" | "date" | "security" | "factor" | "node" | "holdings";
     }
   | {
       kind: "ready";
@@ -156,20 +149,32 @@ export const prepareStrategyTrace = (
   if (context === null) return { kind: "blocked", reason: "unavailable" };
   if (selection.asOf !== "" && !validIsoDate(selection.asOf))
     return { kind: "blocked", reason: "date" };
-  const securityIds = parseSecurityIds(selection.security);
-  if (securityIds.length === 0 || securityIds.length > 100)
+  const securityIds = selection.summaryOnly
+    ? []
+    : parseSecurityIds(selection.security);
+  if (
+    (!selection.summaryOnly && securityIds.length === 0) ||
+    securityIds.length > 100
+  )
     return { kind: "blocked", reason: "security" };
-  const factor = context.factors.find(
-    (candidate) => candidate.factorId === selection.factorId,
-  );
+  const factor = selection.summaryOnly
+    ? context.factors[0]
+    : context.factors.find(
+        (candidate) => candidate.factorId === selection.factorId,
+      );
   if (factor === undefined) return { kind: "blocked", reason: "factor" };
-  if (!factor.nodes.some((node) => node.nodeId === selection.nodeId))
+  if (
+    !selection.summaryOnly &&
+    !factor.nodes.some((node) => node.nodeId === selection.nodeId)
+  )
     return { kind: "blocked", reason: "node" };
   const startingHoldings = parseStartingHoldings(selection.startingHoldings);
   if (startingHoldings.kind === "invalid")
     return { kind: "blocked", reason: "holdings" };
 
-  const nodeIds = factor.nodes.map((node) => node.nodeId);
+  const nodeIds = selection.summaryOnly
+    ? []
+    : factor.nodes.map((node) => node.nodeId);
   const commonRequest: Omit<
     StrategyTraceRequest,
     "node_ids" | "include_raw" | "offset" | "limit"
@@ -184,6 +189,14 @@ export const prepareStrategyTrace = (
       : {}),
   };
   const linkedRequests: StrategyTraceRequest[] = [];
+  if (selection.summaryOnly)
+    linkedRequests.push({
+      ...commonRequest,
+      node_ids: [],
+      include_raw: false,
+      offset: 0,
+      limit: 1,
+    });
   for (
     let index = 0;
     index < nodeIds.length;
@@ -206,13 +219,15 @@ export const prepareStrategyTrace = (
   }
   const request = linkedRequests[0];
   if (request === undefined) return { kind: "blocked", reason: "node" };
-  const selectedRequest: StrategyTraceRequest = {
-    ...commonRequest,
-    node_ids: [selection.nodeId],
-    include_raw: false,
-    offset: 0,
-    limit: securityIds.length,
-  };
+  const selectedRequest: StrategyTraceRequest = selection.summaryOnly
+    ? request
+    : {
+        ...commonRequest,
+        node_ids: [selection.nodeId],
+        include_raw: false,
+        offset: 0,
+        limit: securityIds.length,
+      };
   const sourceOwner =
     request.strategy_source.kind === "saved_revision"
       ? [
@@ -398,6 +413,9 @@ export const responseMatchesStrategyTrace = (
     response.plan_hash === prepared.expected.planHash &&
     response.factor_id === request.factor_id &&
     responseDateMatches(prepared, request, response) &&
+    (response.summary == null ||
+      (response.summary.signal_as_of === response.as_of &&
+        response.summary.execution_on === response.target?.execution_on)) &&
     sameSourceProvenance(request, response) &&
     response.trace.offset === (request.offset ?? 0) &&
     response.trace.limit === (request.limit ?? 200) &&
@@ -411,7 +429,8 @@ export const responseMatchesStrategyTrace = (
     ) &&
     response.raw.every(
       (row) =>
-        row.as_of === response.as_of && requestedSecurities.has(row.security_id),
+        row.as_of === response.as_of &&
+        requestedSecurities.has(row.security_id),
     ) &&
     (response.target === null ||
       (response.target.signal_as_of === response.as_of &&

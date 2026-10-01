@@ -54,6 +54,12 @@ const recipeOf = (
   if (nodes.length === 0) return { kind: "chain", links: [] };
   const advanced: Recipe = { kind: "advanced", nodeCount: nodes.length };
   const ids = nodes.map((node) => (isRecord(node) ? node.node_id : undefined));
+  // 이름이 없거나 겹친 문서는 편집 대상의 정체성이 모호하므로 backend 진단을 기다린다.
+  if (
+    ids.some((id) => typeof id !== "string" || id === "") ||
+    new Set(ids).size !== ids.length
+  )
+    return advanced;
   // 노드마다 입력 칸 순서대로 가리키는 노드의 index(없는 id 는 -1). 모르는 kind 면 고급이다.
   const inputs: number[][] = [];
   for (const node of nodes) {

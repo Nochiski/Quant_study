@@ -378,6 +378,7 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.branch_unit",
         "strategy.expression.cycle",
         "strategy.expression.duplicate_node",
+        "strategy.expression.empty",
         "strategy.expression.field_missing",
         "strategy.expression.group_field_missing",
         "strategy.expression.group_field_type",

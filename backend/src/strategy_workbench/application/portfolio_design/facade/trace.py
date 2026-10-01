@@ -6,6 +6,7 @@ from strategy_workbench.application.portfolio_design._trace_models import (
     StrategyTraceRequest,
     StrategyTraceResponse,
     StrategyTraceRow,
+    StrategyTraceSummary,
 )
 from strategy_workbench.application.portfolio_design._trace_service import (
     InvalidStrategyTraceRequestError,
@@ -32,4 +33,5 @@ __all__ = [
     "StrategyTraceRow",
     "StrategyTraceService",
     "StrategyTraceSourceNotFoundError",
+    "StrategyTraceSummary",
 ]

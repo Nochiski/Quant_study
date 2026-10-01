@@ -1018,6 +1018,22 @@ def test_load_universe_is_policy_free_and_names_securities(adapter: EquityDuckdb
     assert other.status is DataLoadStatus.INVALID_QUERY
 
 
+def test_universe_securities_reads_names_through_the_observation_market(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """기준일 요약(lang2 P4-03)의 이름은 관측 질의와 같은 시장·유니버스로 찾는다.
+
+    시장·유니버스 → venue 대응은 어댑터 몫이라 호출자가 venue 를 적지 않는다.
+    """
+    refs = {
+        ref.security_id: ref
+        for ref in adapter.universe_securities("KRX", "krx.common-stock", START)
+    }
+    assert refs["005930:1"].name == "삼성전자" and refs["005930:1"].venue == "XKRX"
+    assert adapter.universe_securities("NYSE", "krx.common-stock", START) == ()
+    assert adapter.universe_securities("KRX", "krx.unknown", START) == ()
+
+
 # ── FactorMetadataPort · FactorObservationPort ────────────────────────────────
 
 

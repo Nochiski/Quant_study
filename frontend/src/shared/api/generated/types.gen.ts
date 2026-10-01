@@ -3430,6 +3430,38 @@ export type PortfolioDataUnavailableDetail = {
 };
 
 /**
+ * PortfolioFrameSummary
+ *
+ * trace 한 프레임 전체의 선정 깔때기 수(기준일 미리보기, lang2 P4-03).
+ *
+ * 유니버스 멤버만 센다. 한 종목이 사유를 여럿 가질 수 있어(규칙 탈락이면서 팩터 값 없음) 사유별
+ * 수를 더해도 `universe` 가 되지 않으므로, 순위에 든 수(`eligible`)를 따로 싣는다. 소비자는 수를
+ * 다시 세지 않는다.
+ */
+export type PortfolioFrameSummary = {
+  /**
+   * Eligibility Failed
+   */
+  eligibility_failed: number;
+  /**
+   * Eligibility Rank Cut
+   */
+  eligibility_rank_cut: number;
+  /**
+   * Eligible
+   */
+  eligible: number;
+  /**
+   * Missing
+   */
+  missing: number;
+  /**
+   * Universe
+   */
+  universe: number;
+};
+
+/**
  * PortfolioPreview
  *
  * The tape a run will consume, plus the caveats the observation source reported.
@@ -5694,6 +5726,8 @@ export type StrategyTraceRequest = {
   offset?: number;
   /**
    * Security Ids
+   *
+   * Securities to trace. An empty list skips per-security rows and returns only the as-of summary.
    */
   security_ids: Array<string>;
   /**
@@ -5751,6 +5785,7 @@ export type StrategyTraceResponse = {
    * Spec Hash
    */
   spec_hash: string;
+  summary?: StrategyTraceSummary | null;
   target: StrategyTargetTrace | null;
   trace: StrategyTracePage;
   /**
@@ -5788,6 +5823,37 @@ export type StrategyTraceRow = {
    * Value
    */
   value: number | boolean | null;
+};
+
+/**
+ * StrategyTraceSummary
+ *
+ * 기준일 미리보기가 그리는 수와 그날의 선정(lang2 P4-03). 수는 컴파일러가 센 그대로다.
+ */
+export type StrategyTraceSummary = {
+  counts: PortfolioFrameSummary;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Targets
+   */
+  targets: Array<StrategyTraceSummaryTarget>;
+};
+
+/**
+ * StrategyTraceSummaryTarget
+ *
+ * 선정 종목 한 줄. 이름·티커는 실행 설정의 유니버스에서 찾고, 모르면 `security` 가 None.
+ */
+export type StrategyTraceSummaryTarget = {
+  position: TargetPosition;
+  security: SecurityRef | null;
 };
 
 /**

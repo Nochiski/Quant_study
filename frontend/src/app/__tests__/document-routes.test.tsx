@@ -234,6 +234,8 @@ const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
 ) as Record<string, unknown>;
 
 const server = setupServer(
+  http.get(`${API}/api/v1/experiments`, () => HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })),
+  http.get(`${API}/api/v1/strategy-documents/operators`, () => HttpResponse.json(JSON.parse(readBackendFixture("strategy_documents/operator-catalog.json")))),
   http.get(`${API}/api/v1/run-environments/schema`, () =>
     HttpResponse.json({ schema_hash: "run-env", schema: RUN_ENVIRONMENT_SCHEMA }),
   ),
@@ -583,8 +585,10 @@ afterAll(() => server.close());
 const mountWithClient = (
   initial: string,
   prime: (client: QueryClient) => void = () => undefined,
+  sourceView = true,
 ) => {
-  const history = createMemoryHistory({ initialEntries: [initial] });
+  const entry = !sourceView || initial.includes("view=") ? initial : `${initial}${initial.includes("?") ? "&" : "?"}view=yaml`;
+  const history = createMemoryHistory({ initialEntries: [entry] });
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: 0 } },
   });
@@ -600,6 +604,11 @@ const mountWithClient = (
 };
 
 const mount = (initial: string) => mountWithClient(initial).history;
+
+const openComparison = async () => {
+  const button = await screen.findByRole("button", { name: "리비전 변경 비교" });
+  if (button.getAttribute("aria-expanded") !== "true") await userEvent.setup().click(button);
+};
 
 /** Waits for the lazy CodeMirror editor and returns its view for programmatic edits. */
 const editor = async () => {
@@ -681,11 +690,11 @@ const serveRuntimeGraphDocument = (): void => {
 };
 
 describe("professional keyboard workflow (P6-03)", () => {
-  it("finds a JSON Pointer from a read-only view, returns to YAML and reveals its source", async () => {
+  it("그래프에서 문서 경로를 찾아 YAML 원문을 비동기로 드러낸다", async () => {
     const user = userEvent.setup();
-    const history = mount("/research/strategies/s1/revisions/2?view=json");
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
     expect(
-      await screen.findByLabelText("StrategySpec JSON"),
+      await screen.findByRole("tab", { name: "그래프" }),
     ).toBeInTheDocument();
 
     await user.keyboard("{Control>}k{/Control}");
@@ -697,7 +706,7 @@ describe("professional keyboard workflow (P6-03)", () => {
 
     await waitFor(() => {
       expect(history.location.search).toContain("path=%2Ftitle");
-      expect(history.location.search).not.toContain("view=json");
+      expect(history.location.search).not.toContain("view=graph");
     });
     const view = await editor();
     // reveal은 route 전환 뒤 비동기로 선택을 옮긴다 — 부하 중에는 한 틱 늦는다(P5-03: 전체 실행 flake).
@@ -831,8 +840,8 @@ describe("professional keyboard workflow (P6-03)", () => {
   it("searches a runtime-schema semantic node identity and reveals its pointer", async () => {
     serveRuntimeGraphDocument();
     const user = userEvent.setup();
-    const history = mount("/research/strategies/s1/revisions/2?view=json");
-    expect(await screen.findByLabelText("StrategySpec JSON")).toBeVisible();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+    expect(await screen.findByRole("tab", { name: "그래프" })).toBeVisible();
     const outlineFilter = screen.getByRole("searchbox", {
       name: t("ide.outline.filter"),
     });
@@ -841,15 +850,16 @@ describe("professional keyboard workflow (P6-03)", () => {
       await screen.findByRole("treeitem", { name: /mom_252/ }),
     ).toBeVisible();
     await user.clear(outlineFilter);
+    await waitFor(() => expect(compiledSources).toContain(GRAPH_SOURCE));
 
     await user.keyboard("{Control>}k{/Control}");
     await user.type(
       screen.getByRole("combobox", { name: "명령과 문서 경로 검색" }),
       "node:mom_252",
     );
-    const semanticResult = await screen.findByRole("option");
+    const semanticResult = await within(screen.getByRole("dialog")).findByRole("option");
     expect(semanticResult).toHaveTextContent("/factors/0/graph/nodes/1");
-    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(within(screen.getByRole("dialog")).getAllByRole("option")).toHaveLength(1);
     await user.keyboard("{Enter}");
 
     await waitFor(() =>
@@ -973,7 +983,7 @@ describe("document routes (P2-04)", () => {
       ),
     );
     const user = userEvent.setup();
-    mount("/research/strategies/s1/revisions/2?view=json");
+    mount("/research/strategies/s1/revisions/2?view=graph");
 
     await user.click(
       await screen.findByRole("button", {
@@ -1097,11 +1107,12 @@ describe("document routes (P2-04)", () => {
   it("loads the exact stored source of a revision into the editor as the draft base", async () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2?view=diff");
+    await openComparison();
     expect(
       await screen.findByRole("heading", { name: "퀄리티 모멘텀" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
-      "aria-selected",
+    expect(screen.getByRole("button", { name: "리비전 변경 비교" })).toHaveAttribute(
+      "aria-expanded",
       "true",
     );
     expect(screen.getByLabelText("StrategySpec Diff")).toBeVisible();
@@ -1406,8 +1417,8 @@ describe("document routes (P2-04)", () => {
     const view = await editor();
     replaceText(view, `${STORED}description: dirty\n`);
 
-    await user.click(screen.getByRole("tab", { name: "JSON" }));
-    await waitFor(() => expect(history.location.search).toContain("view=json"));
+    await user.click(screen.getByRole("tab", { name: "그래프" }));
+    await waitFor(() => expect(history.location.search).toContain("view=graph"));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
     await user.click(leaveLink());
@@ -1598,9 +1609,9 @@ describe("Strategy Outline route integration (P4-01)", () => {
 
   it("switches a read-only projection to source and reveals the selected path atomically", async () => {
     const user = userEvent.setup();
-    const history = mount("/research/strategies/s1/revisions/2?view=json");
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
     expect(
-      await screen.findByLabelText("StrategySpec JSON"),
+      await screen.findByRole("tab", { name: "그래프" }),
     ).toBeInTheDocument();
     const tree = await screen.findByRole("tree", {
       name: "StrategySpec 문서 구조",
@@ -1608,7 +1619,7 @@ describe("Strategy Outline route integration (P4-01)", () => {
     await user.click(within(tree).getByRole("treeitem", { name: "title" }));
     await waitFor(() => {
       expect(history.location.search).toContain("path=%2Ftitle");
-      expect(history.location.search).not.toContain("view=json");
+      expect(history.location.search).not.toContain("view=graph");
     });
     const view = await editor();
     await waitFor(() =>
@@ -1635,41 +1646,22 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       ),
     );
   });
-  const formPanel = () => screen.findByLabelText("Form 편집");
-  // 섹션은 runtime schema query가 끝난 뒤 나타난다.
-  // 섹션 legend는 `▾ <이름> <키>`다(P1-03). 앞이 낱말 문자가 아닌 자리에서 키를 찾는다 —
-  // 공백 자체는 `strategy-form-panel.test.tsx`의 "라벨 어휘" 테스트가 고정한다.
-  const formSection = async (name: string) =>
-    within(
-      await within(await formPanel()).findByRole("group", {
-        name: new RegExp(`(^|[^\\w])${name}`),
-      }),
-    );
+  const formPanel = () => screen.findByLabelText("전략 파이프라인");
+  const formSection = async () => {
+    const panel = await formPanel();
+    // 패널 껍데기는 첫 parse 전에 보인다. 실제 편집 컨트롤이 준비될 때까지 기다린다.
+    await within(panel).findByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" });
+    return within(panel);
+  };
 
   it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
-    "shows the backend JSON projection and a schema-driven Form on %s",
-    async (route) => {
-      const user = userEvent.setup();
-      mount(route);
-      await editor();
-
-      await user.click(screen.getByRole("tab", { name: "JSON" }));
-      const json = await screen.findByLabelText("StrategySpec JSON");
-      await waitFor(() => expect(json).toBeVisible());
-      expect(json.textContent).toContain('"schema_version":"1.2"');
-      expect(json.textContent).not.toContain("identity");
-      expect(within(json).getByText("현재 문서")).toBeInTheDocument();
-
-      await user.click(screen.getByRole("tab", { name: "Form" }));
-      const form = await formPanel();
-      await waitFor(() => expect(form).toBeVisible());
-      // 값은 parse tree에서, 없는 필드는 runtime schema 기본값 placeholder로 온다.
-      const portfolio = await formSection("portfolio");
-      expect(portfolio.getByRole("combobox", { name: /\bside/ })).toHaveValue(
-        "long_only",
-      );
-      expect(within(form).queryByText("strategy_id")).not.toBeInTheDocument();
-      expect(within(form).queryByText("revision")).not.toBeInTheDocument();
+    "그래프 기본 표현과 두 탭만 제공한다: %s", async (route) => {
+      mountWithClient(route, undefined, false);
+      const graph = await screen.findByRole("tab", { name: "그래프" });
+      expect(graph).toHaveAttribute("aria-selected", "true");
+      expect(screen.queryByRole("tab", { name: "JSON" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "Form" })).not.toBeInTheDocument();
+      expect(await formPanel()).not.toHaveTextContent(/_id|_node|kind:/);
     },
   );
 
@@ -1688,9 +1680,9 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     const selection = view.state.selection.main.anchor;
     await waitFor(() => expect(saveButton()).toBeEnabled());
 
-    await user.click(screen.getByRole("tab", { name: "Form" }));
+    await user.click(screen.getByRole("tab", { name: "그래프" }));
     await waitFor(() =>
-      expect(screen.getByLabelText("Form 편집")).toBeVisible(),
+      expect(screen.getByLabelText("전략 파이프라인")).toBeVisible(),
     );
     const hiddenContent = globalThis.document.querySelector(".cm-content");
     expect(hiddenContent).not.toBeNull();
@@ -1726,9 +1718,9 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     expect(view.state.doc.toString()).toBe(commented);
     const before = compiledSources.length;
 
-    await user.click(screen.getByRole("tab", { name: "Form" }));
-    const risk = await formSection("risk");
-    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
+    await user.click(screen.getByRole("tab", { name: "그래프" }));
+    const risk = await formSection();
+    const weight = risk.getByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" });
     expect(weight).toHaveValue(0.05);
     await user.clear(weight);
     await user.type(weight, "0.1{Enter}");
@@ -1739,7 +1731,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     );
     await waitFor(() => expect(view.state.doc.toString()).toBe(expected));
     expect(within(await formPanel()).getByRole("status")).toHaveTextContent(
-      "max_name_weight 반영됨",
+      "종목별 최대 목표 비중 한도 반영됨",
     );
     // 편집기 change → reducer → compile 왕복이 같은 텍스트로 일어난다.
     await waitFor(() => {
@@ -1749,9 +1741,9 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     await waitFor(() => expect(saveButton()).toBeEnabled());
 
     // 미작성 필드의 첫 값은 섹션에 insert-key, 문서 다른 부분은 그대로.
-    const portfolio = await formSection("portfolio");
+    const portfolio = await formSection();
     await user.selectOptions(
-      portfolio.getByRole("combobox", { name: /\bside/ }),
+      portfolio.getByRole("combobox", { name: "매매 방향" }),
       "long_short",
     );
     await waitFor(() =>
@@ -1767,68 +1759,31 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     expect(view.state.doc.toString()).toBe(commented);
   });
 
-  it("keeps a stored JSON document as the editable source while the Form is locked", async () => {
+  it("저장된 JSON 바이트를 YAML 원문에서 보존하고 YAML 편집을 허용한다", async () => {
     const jsonSource = '{"schema_version":"1.2","title":"JSON source"}';
-    server.use(
-      http.get(
-        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
-        () =>
-          HttpResponse.json({
-            ...document("s1", 2, jsonSource, "JSON source"),
-            format: "json",
-          }),
-      ),
-    );
-    const user = userEvent.setup();
-    mount("/research/strategies/s1/revisions/2");
+    server.use(http.get(`${API}/api/v1/strategies/:strategyId/revisions/:revision/document`, () =>
+      HttpResponse.json({ ...document("s1", 2, jsonSource, "JSON source"), format: "json" })));
+    mount("/research/strategies/s1/revisions/2?view=json");
     const view = await editor();
     expect(view.state.doc.toString()).toBe(jsonSource);
-    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-
-    await user.click(screen.getByRole("tab", { name: "Form" }));
-    const form = await formPanel();
-    expect(form).toBeVisible();
-    expect(
-      within(form).getByText("JSON 문서는 Form으로 편집하지 않습니다"),
-    ).toBeInTheDocument();
-    expect(
-      within(form).getByText("YAML 문서로 저장한 뒤 편집하세요", {
-        exact: false,
-      }),
-    ).toBeInTheDocument();
-    const root = await formSection("전략 문서");
-    expect(root.getByRole("textbox", { name: /\btitle/ })).toBeDisabled();
-    expect(view.state.doc.toString()).toBe(jsonSource);
-
-    await user.click(screen.getByRole("tab", { name: "JSON" }));
-    expect(view.state.doc.toString()).toBe(jsonSource);
+    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute("aria-selected", "true");
+    replaceText(view, 'schema_version: "1.2"\ntitle: YAML 수정\n');
+    await waitFor(() => expect(compiledSources).toContain('schema_version: "1.2"\ntitle: YAML 수정\n'));
   });
 
-  it("labels the Form stale on a syntax error, locks it, and never enables execution", async () => {
-    const user = userEvent.setup();
-    mount("/research/strategies/s1/revisions/2");
+  it("구문 오류 뒤 캔버스는 마지막 파싱 값을 잠그고 실행을 막는다", async () => {
+    mount("/research/strategies/s1/revisions/2?view=yaml");
     const view = await editor();
-    replaceText(view, 'schema_version: "1.2"\ntitle: last-valid\n');
+    replaceText(view, 'schema_version: "1.2"\ntitle: valid\nrisk: {max_name_weight: 0.17}\n');
     await waitFor(() => expect(saveButton()).toBeEnabled());
-
     replaceText(view, 'schema_version: "1.2"\ntitle: [broken\n');
-    await user.click(screen.getByRole("tab", { name: "Form" }));
-    const form = await formPanel();
-    // stale은 같은 버전의 parse가 실패한 뒤에만 참이다(P4-04 후속) — 디바운스가 끝날 때까지 기다린다.
-    expect(await within(form).findByText("STALE")).toBeInTheDocument();
-    expect(
-      within(form).getByText("구문 오류 · source를 먼저 고치세요"),
-    ).toBeInTheDocument();
-    const root = await formSection("전략 문서");
-    const title = root.getByRole("textbox", { name: /\btitle/ });
-    expect(title).toHaveValue("last-valid");
-    expect(title).toBeDisabled();
+    await userEvent.setup().click(screen.getByRole("tab", { name: "그래프" }));
+    const panel = await formPanel();
+    expect(await within(panel).findByText("STALE")).toBeInTheDocument();
+    const weight = within(panel).getByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" });
+    expect(weight).toHaveValue(0.17);
+    expect(weight).toBeDisabled();
     expect(saveButton()).toBeDisabled();
-    for (const run of screen.getAllByRole("button", { name: /백테스트 실행/ }))
-      expect(run).toBeDisabled();
   });
 
   // 그래프 1수준 캔버스(lang2 P4-02, 리드 결정 4): 카드 문장 안의 컨트롤은 Form 행과 한 경로다.
@@ -1896,20 +1851,20 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
         }),
       );
 
-      const form = await screen.findByLabelText("Form 편집");
-      await within(form).findByText("문서를 읽는 중입니다.");
-      // 첫 parse 전: 적힌 칸을 기본값으로 그리지 않는다 — 편집 컨트롤 자체가 없다(숨은 Graph 탭 캔버스도).
-      expect(within(form).queryByRole("spinbutton")).toBeNull();
-      const canvas = screen.getByRole("region", {
-        name: "전략 파이프라인",
-        hidden: true,
-      });
-      expect(within(canvas).queryByRole("spinbutton", { hidden: true })).toBeNull();
-      expect(canvas).toHaveTextContent("문서를 읽는 중입니다.");
-      // 같은 탭의 고급 그래프 편집기도 빈 tree 로 "팩터가 없습니다"를 그리지 않고 기다린다(#416 리뷰 P2-2).
       const graphEditor = () =>
         screen.queryByRole("region", { name: "그래프 편집", hidden: true });
-      expect(graphEditor()).toBeNull();
+      // 로딩 문구와 컨트롤 부재를 같은 DOM 시점에서 관찰한다. await 사이에 실제
+      // 디바운스가 끝나면 서로 다른 parse 상태를 비교하게 된다.
+      await waitFor(() => {
+        const pipeline = screen.getByRole("region", { name: "전략 파이프라인" });
+        expect(pipeline).toHaveTextContent("문서를 읽는 중입니다.");
+        expect(
+          within(pipeline).queryAllByRole("spinbutton", { hidden: true }),
+        ).toHaveLength(0);
+        expect(graphEditor()).toBeNull();
+      });
+      const form = screen.getByRole("region", { name: "전략 파이프라인" });
+      const canvas = form;
 
       // parse 뒤: 적힌 값(0.05)이 두 화면에 보인다.
       await waitFor(() =>
@@ -1918,7 +1873,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
         ).toHaveAttribute("data-settled", "true"),
       );
       expect(
-        within(form).getByRole("spinbutton", { name: /\bmax_name_weight/ }),
+        within(form).getByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" }),
       ).toHaveValue(0.05);
       expect(
         within(canvas).getByRole("spinbutton", { name: WEIGHT, hidden: true }),
@@ -1933,7 +1888,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       replaceText(hidden, EDITED);
       expect(within(form).queryByText("문서를 읽는 중입니다.")).toBeNull();
       expect(
-        within(form).getByRole("spinbutton", { name: /\bmax_name_weight/ }),
+        within(form).getByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" }),
       ).toHaveValue(0.05);
     });
 
@@ -1942,7 +1897,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       const view = await openCommented();
       const before = compiledSources.length;
 
-      await user.click(screen.getByRole("tab", { name: "Graph" }));
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
       const weight = (await canvasCard(WEIGHT)).getByRole("spinbutton", {
         name: WEIGHT,
       });
@@ -1958,13 +1913,13 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       await compiled(view, EDITED, before);
     });
 
-    it("카드와 Form 행은 같은 편집을 같은 SourceOperation 으로 낸다(두 번째 경로 없음)", async () => {
+    it("카드 편집을 되돌린 뒤 같은 값을 다시 입력해도 한 번 확정된다", async () => {
       // 적힌 값 바꾸기(replace)와 없는 섹션에 키 넣기(insert-key)를 카드로 한 결과가 Form 행으로 한 결과와
       // 바이트 단위로 같고, 편집마다 실행 취소 한 번이다.
       const user = userEvent.setup();
       const view = await openCommented();
 
-      await user.click(screen.getByRole("tab", { name: "Graph" }));
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
       const weight = (await canvasCard(WEIGHT)).getByRole("spinbutton", {
         name: WEIGHT,
       });
@@ -1990,18 +1945,18 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       expect(view.state.doc.toString()).toBe(COMMENTED);
       await compiled(view, COMMENTED, before);
 
-      await user.click(screen.getByRole("tab", { name: "Form" }));
-      const risk = await formSection("risk");
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
+      const risk = await formSection();
       const formWeight = risk.getByRole("spinbutton", {
-        name: /\bmax_name_weight/,
+        name: "종목별 최대 목표 비중 한도",
       });
       before = compiledSources.length;
       await user.clear(formWeight);
       await user.type(formWeight, "0.1{Enter}");
       await compiled(view, EDITED, before);
       await user.selectOptions(
-        (await formSection("portfolio")).getByRole("combobox", {
-          name: /\bside/,
+        (await formSection()).getByRole("combobox", {
+          name: "매매 방향",
         }),
         "long_short",
       );
@@ -2236,7 +2191,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
         ),
       ).toContain("node_id: mom_252"),
     );
-    await user.click(screen.getByRole("tab", { name: "Graph" }));
+    await user.click(screen.getByRole("tab", { name: "그래프" }));
     await screen.findByLabelText("FactorGraph DAG");
     const node = await screen.findByRole("button", {
       name: "그래프 노드 선택: mom_252",
@@ -2609,7 +2564,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
   }, 15_000);
 
   it.each(["resolve", "reject", "abort"] as const)(
-    "keeps a newer Diff URL generation after a deferred trace %s",
+    "keeps a newer Graph URL generation after a deferred trace %s",
     async (outcome) => {
       const specHash = "7".repeat(64);
       server.use(
@@ -2652,11 +2607,12 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       await user.click(screen.getByRole("button", { name: "추적 실행" }));
       await waitFor(() => expect(request).toBeDefined());
 
-      await user.click(screen.getByRole("tab", { name: "Diff" }));
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
+      await openComparison();
       await screen.findByLabelText("StrategySpec Diff");
       await waitFor(() =>
         expect(new URLSearchParams(history.location.search).get("view")).toBe(
-          "diff",
+          "graph",
         ),
       );
 
@@ -2673,13 +2629,13 @@ describe("FactorGraph read-only projection (P4-07)", () => {
 
       await waitFor(() => {
         const params = new URLSearchParams(history.location.search);
-        expect(params.get("view")).toBe("diff");
+        expect(params.get("view")).toBe("graph");
         expect(params.get("path")).toBe(nodePath);
         expect(params.get("asOf")).toBe("2026-08-31");
         expect(params.get("security")).toBe("sec-r");
       });
-      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
-        "aria-selected",
+      expect(screen.getByRole("button", { name: "리비전 변경 비교" })).toHaveAttribute(
+        "aria-expanded",
         "true",
       );
       expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
@@ -2723,7 +2679,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     replaceText(view, `${STORED}# research note\n`);
     await waitFor(() => expect(saveButton()).toBeEnabled());
 
-    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    await openComparison();
     const panel = await screen.findByLabelText("StrategySpec Diff");
     expect(within(panel).getByText("+1 / −0 변경 항목")).toBeInTheDocument();
     expect(within(panel).getByText("# research note")).toBeInTheDocument();
@@ -2735,7 +2691,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     const invalidView = await editor();
     replaceText(invalidView, 'schema_version: "1.2"\ntitle: "broken\n');
     await waitFor(() => expect(saveButton()).toBeDisabled());
-    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    await openComparison();
     const invalidPanel = await screen.findByLabelText("StrategySpec Diff");
     expect(
       await within(invalidPanel).findByText(
@@ -2784,6 +2740,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     );
 
     mount("/research/strategies/s1/revisions/2?view=diff");
+    await openComparison();
     const panel = await screen.findByLabelText("StrategySpec Diff");
     const base = await within(panel).findByRole("combobox", {
       name: "기준 revision",
@@ -2879,7 +2836,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
       "/research/strategies/s1/revisions/2",
     );
 
-    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    await openComparison();
     const panel = await screen.findByLabelText("StrategySpec Diff");
     expect(await within(panel).findByText("/description")).toBeInTheDocument();
     expect(within(panel).getByText('"saved"')).toBeInTheDocument();
@@ -2927,7 +2884,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     const view = await editor();
     replaceText(view, `${STORED}# first edit\n`);
     await waitFor(() => expect(saveButton()).toBeEnabled());
-    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    await openComparison();
     const panel = await screen.findByLabelText("StrategySpec Diff");
     expect(
       await within(panel).findByText("저장본 canonical 기준을 검증 중입니다."),
@@ -2946,7 +2903,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     const currentView = await editor();
     replaceText(currentView, `${STORED}# second edit\n`);
     await waitFor(() => expect(saveButton()).toBeEnabled());
-    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    await openComparison();
     const retriedPanel = await screen.findByLabelText("StrategySpec Diff");
     expect(
       await within(retriedPanel).findByText(
@@ -3020,6 +2977,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     );
 
     mount("/research/strategies/s1/revisions/51?view=diff");
+    await openComparison();
     const panel = await screen.findByLabelText("StrategySpec Diff");
     const base = await within(panel).findByRole("combobox", {
       name: "기준 revision",
@@ -3341,7 +3299,7 @@ describe("backtest from the editor (P3-05)", () => {
     await user.click(run);
     await waitFor(() => expect(started).toHaveLength(1));
 
-    history.push("/research/strategies/s1/revisions/1");
+    history.push("/research/strategies/s1/revisions/1?view=yaml");
     await waitFor(() =>
       expect(history.location.pathname).toBe(
         "/research/strategies/s1/revisions/1",
@@ -3406,9 +3364,9 @@ describe("revision conflict (P3-07)", () => {
     const view = await editor();
     replaceText(view, `${STORED}description: 충돌\n`);
     await waitFor(() => expect(saveButton()).toBeEnabled());
-    await user.click(screen.getByRole("tab", { name: "Diff" }));
-    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
-      "aria-selected",
+    await openComparison();
+    expect(screen.getByRole("button", { name: "리비전 변경 비교" })).toHaveAttribute(
+      "aria-expanded",
       "true",
     );
     await user.click(saveButton());
@@ -3420,8 +3378,8 @@ describe("revision conflict (P3-07)", () => {
     expect(
       within(banner).getByRole("button", { name: "현재 문서 복사" }),
     ).toBeVisible();
-    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
-      "aria-selected",
+    expect(screen.getByRole("button", { name: "리비전 변경 비교" })).toHaveAttribute(
+      "aria-expanded",
       "true",
     );
   });
@@ -3494,6 +3452,7 @@ describe("revision conflict (P3-07)", () => {
         "/research/strategies/s1/revisions/3",
       ),
     );
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
     const serverView = await editor();
     expect(serverView.state.doc.toString()).toBe(serverSource);
     expect(
@@ -3527,7 +3486,7 @@ describe("revision conflict (P3-07)", () => {
     await waitFor(() => expect(saveButton()).toBeEnabled());
     await user.click(saveButton());
 
-    history.push("/research/strategies/s1/revisions/2");
+    history.push("/research/strategies/s1/revisions/2?view=yaml");
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "나가기",
@@ -3639,10 +3598,10 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
     const history = mount("/research/strategies/s1/revisions/2");
     const view = await editor();
     replaceText(view, `${STORED}description: 편집 중\n`);
-    await user.click(screen.getByRole("tab", { name: "JSON" }));
-    await waitFor(() => expect(history.location.search).toContain("view=json"));
+    await user.click(screen.getByRole("tab", { name: "그래프" }));
+    await waitFor(() => expect(history.location.search).toContain("view=graph"));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -3732,7 +3691,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     await waitFor(() => expect(status).toHaveTextContent("검증 오류"));
     const problems = await screen.findByRole("region", { name: "문제" });
     expect(problems).toHaveTextContent("오류 1 · 경고 0");
-    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -3786,7 +3745,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     expect(
       screen.getByRole("group", { name: /선택한 노드/ }),
     ).not.toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
-    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -3826,8 +3785,8 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     });
     await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
     expect(card).toHaveTextContent("종목 한도는 0보다 크고 1 이하여야 합니다.");
-    expect(lastVisibleScroll()).toBe(card);
-    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+    await waitFor(() => expect(lastVisibleScroll()).toBe(card.querySelector('.pipeline__field[aria-current="true"]')));
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -3941,6 +3900,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     );
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=diff");
+    await openComparison();
 
     await user.click(await problemRow(/title is not a known field/));
 
@@ -3975,18 +3935,18 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=form");
 
-    await screen.findByLabelText("Form 편집");
+    await screen.findByLabelText("전략 파이프라인");
     await user.click(await problemRow(/weight must be positive/));
 
     await waitFor(() =>
-      expect(history.location.search).toContain("view=form"),
+      expect(history.location.search).toContain("view=graph"),
     );
-    const card = screen.getByRole("region", { name: "factors · momentum" });
+    const card = within(screen.getByRole("region", { name: "전략 파이프라인" })).getByRole("group", { name: "모멘텀" });
     await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
     // 카드 안에서 문제가 가리킨 필드 행까지 표시되고, 스크롤은 그 행으로 간다(P1-04).
-    const row = card.querySelector('.strategy-form__field[aria-current="true"]');
+    const row = card.querySelector('.pipeline__field[aria-current="true"]');
     expect(row).not.toBeNull();
-    expect(row).toHaveTextContent("weight must be positive");
+    expect(card).toHaveTextContent("weight must be positive");
     await waitFor(() => expect(lastVisibleScroll()).toBe(row));
 
     // 같은 행을 다시 눌렀을 때도 끌어온다 — URL은 그대로라 reveal 신호가 대신 올라간다(2차 리뷰 R2-2).

@@ -13,7 +13,7 @@ import {
 import { isRunKind, type RunKind } from "../../entities/backtest";
 import { strategyDocumentQuery } from "../../entities/strategy";
 import {
-  STRATEGY_VIEWS,
+  migrateStrategyView,
   isNewDraftId,
   type StrategyView,
 } from "../../features/edit-strategy";
@@ -36,12 +36,9 @@ export type RouterContext = {
   operationsEnabled: boolean;
 };
 
-const isView = (value: unknown): value is StrategyView =>
-  typeof value === "string" &&
-  (STRATEGY_VIEWS as readonly string[]).includes(value);
-
 type StrategyDocumentSearch = {
   view?: StrategyView;
+  compare?: boolean;
   path?: string;
   asOf?: string;
   security?: string;
@@ -59,7 +56,11 @@ const strategyDocumentSearch = (
 ): StrategyDocumentSearch => {
   const path = typeof search.path === "string" ? search.path : undefined;
   return {
-    view: isView(search.view) ? search.view : undefined,
+    view: migrateStrategyView(search.view),
+    compare:
+      search.compare === true || search.compare === "true" || search.view === "diff"
+        ? true
+        : undefined,
     path:
       path !== undefined && path !== "" && isJsonPointer(path)
         ? path

@@ -2090,3 +2090,7 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 ## 클라우드 P4-03c 구현 기록 (2026-09-30)
 
 P4-03b는 draft #426으로 보존했다. P4-03c는 기존 trace owner를 공유하는 캔버스 아래 명시적 미리보기로 구현했다. 날짜 공백은 서버의 마지막 프레임, 종목 목록 공백은 전체 요약 요청이다. 선택·점수·이름·수는 backend 응답을 그대로 표시한다. 관련 frontend 69개와 backend trace 통합 75개 테스트를 통과했다. P4-04와 Phase 4 브라우저 출구 조건은 아직 완료되지 않았다. 환경 제약과 재실행 명령은 [CLOUD_UI_HANDOFF.md](CLOUD_UI_HANDOFF.md)에 기록했다.
+
+## 클라우드 P4-04 구현 기록 (2026-09-30)
+
+Graph/YAML 두 표현, 기본 Graph, 옛 view 마이그레이션, revision 별도 비교(compare 검색 상태), 저장된 JSON 바이트의 YAML 1.2 편집, 지연 편집기 준비 후 문제 위치 이동을 구현한다. 공유 컨트롤의 undo 뒤 같은 값 재입력 누락도 회귀 테스트로 수정한다. 최소 viewport는 360px로 선언하고 360/640px 클릭 및 빈 문서→팩터→세 노드→명시적 미리보기→백테스트 browser 검사를 추가한다. 자동 E2E·시각 검증은 차단 상태라 Phase 4 exit를 완료로 바꾸지 않는다.

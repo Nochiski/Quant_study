@@ -19,7 +19,7 @@ import { factorGraphPointer, factorIndexAtPointer } from "./use-execution-plans"
 export type DiagnosticDestination =
   /** 지금 탭이 그 pointer의 카드·노드를 그린다 — 탭을 지키고 선택만 옮긴다. */
   | "current-view"
-  /** 지금 탭이 그리지 못한다 — 원문 탭(YAML·JSON)에서 그 줄로 간다. */
+  /** 지금 탭이 그리지 못한다 — 원문 탭(YAML)에서 그 줄로 간다. */
   | "source";
 
 /**
@@ -124,7 +124,6 @@ export const resolveDiagnosticDestination = ({
   // 문서 전체를 가리키는 진단(구문 오류 등)은 어느 카드에도 속하지 않는다.
   if (pointer === "") return "source";
   if (view === sourceView) return "source";
-  if (view === "form") return formCoversPointer(form, pointer) ? "current-view" : "source";
   // runtime schema가 아직 없으면 그래프 편집 표면 자체가 렌더되지 않아 그릴 카드가 없다
   // (P1-01 리뷰 P2-2 변형). 있으면 위 파이프라인 캔버스와 아래 고급 편집기가 함께 그린다(P4-02).
   if (view === "graph") {
@@ -135,6 +134,6 @@ export const resolveDiagnosticDestination = ({
         pipelineCoversPointer(projectPipeline(schema, form, tree), pointer));
     return drawn ? "current-view" : "source";
   }
-  // JSON 투영·Diff는 읽기 전용이라 선택을 받지 않는다.
+  // 그려지는 카드가 없으면 원문에서 선택한다.
   return "source";
 };

@@ -37,7 +37,7 @@ test(
       mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-06 한글 화면"),
     );
     await expectPhase(page, "검증 통과");
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
 
     // 실행 계획 노드 카드: 입력 칸·설정 칸 이름과 출력 표시가 한글이다. 칸은 스키마에서 읽고 영어 칸 키를

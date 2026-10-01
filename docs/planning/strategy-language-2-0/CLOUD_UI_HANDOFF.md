@@ -43,3 +43,67 @@ PW_BACKEND_PORT=18000 PW_PREVIEW_PORT=15173 npm run test:e2e
 해당 포트를 쓰는 수동 서버를 먼저 종료한다. 저장소 runner가 임시 DB·서버·기계 잠금을 소유하므로
 `playwright test`를 직접 실행하지 않는다. Windows Chromium의 1440×900 / 1920×1080,
 light/dark 기준선과 좁은 폭 동작을 확인한다. Linux 수동 시각 확인으로 Windows 기준선을 갱신하지 않는다.
+
+## 구현 검토 경계
+
+- 편집: runtime schema/catalog → 기존 navigator/form projection → 파이프라인/공유 컨트롤 →
+  source-operation planner → CodeMirror 트랜잭션 한 번 → parse/compile → 진단 경로를 유지한다.
+  Form/JSON 탭과 feature public 진입점을 제거했고, 공유 컨트롤의 내부 검증용 Form wrapper는 모듈에 남아 있다.
+- 미리보기: 현재 compile/plan/실행 설정 → 기존 trace 요청 owner/cache → backend summary 및
+  securities 디렉터리 → 생성 SDK → 표시만 수행한다. frontend의 선정·합산·이름 추론은 없다.
+- 라우트: 표현은 graph/yaml, 비교 펼침은 compare 검색 상태가 소유한다. 저장된 JSON은 재직렬화 없이
+  같은 바이트를 YAML 1.2로 읽는다. 문제 이동 보류는 documentEpoch/sourceVersion에 묶어 다른 문서에 적용하지 않는다.
+- 재입력: 카드 편집 → undo → 같은 값 재입력에서 이전 제출 기록이 새 입력을 막던 회귀를 검출하고
+  새 입력 시 기록을 초기화한다. Enter 후 blur의 동일 이벤트 중복 방지는 유지한다.
+
+## 연결 코드 SoT·책임 분리 검토 결과
+
+P4-04 draft 전 변경 파일뿐 아니라 schema navigator·form projection·source-operation planner,
+문서 reducer·parse/compile, trace request/cache와 backend summary, 라우트 문서 identity 경로를 함께 읽었다.
+표현 유니온은 `strategy-views.ts`에서 가져오며 widget에서 복제하지 않는다. 공유 컨트롤은 기존 planner를
+거쳐 CodeMirror 트랜잭션 하나를 만들고, 문서 원문 이외의 편집 모델이나 새 직렬화 경로를 만들지 않는다.
+선정·점수·이름·진단·hash 의미는 backend, 응답은 query cache, 펼침·표현은 route/UI가 소유한다.
+API DTO/OpenAPI 변경이 없어 SDK 재생성은 필요하지 않았다. 검토한 경로에서 새 SoT 중복이나
+역방향 레이어 의존은 발견하지 않았다. 이 결과는 실제 렌더·키보드·브라우저 경합 검증을 대신하지 않는다.
+
+## 남은 검증
+
+P4-04의 실제 빈 문서 → 팩터 → 기존 편집기 세 노드 → 명시적 미리보기 → 백테스트 흐름과
+파이프라인 식별자 노출, 360/640px 탭 클릭은 pinned browser에서 실행해야 한다.
+기존 Windows 스크린샷은 이전 탭 구성이라 새 렌더를 검토한 뒤 해당 환경에서만 갱신해야 한다.
+P5/P6와 보고된 다른 웹 이슈 전체를 해결했다는 의미가 아니다.
+
+## 현재 클라우드 검증 기록
+
+P4-04 frontend 전체 Vitest는 93개 파일 / 1,216개 테스트 통과(2026-09-30 UTC)했다.
+첫 parse 회귀 테스트는 로딩 문구 관찰 후 별도 await 틈에서 parse가 완료되는 경쟁을 제거하고,
+로딩 문구·컨트롤 부재·고급 편집기 부재를 같은 DOM 시점에서 단언한다. 제품의 150ms 설정은 바꾸지 않았다.
+frontend 타입·ESLint·production build·E2E 타입 검사가 통과했고 editor chunk는 gzip 132.07KiB로
+200KiB 예산 안이다. 루트 story harness는 40개 story / 35개 tagged E2E를 확인했고
+conflict-marker·diff 검사는 통과했다. story 목록 검사는 브라우저 실행이 아니다.
+P4-03c의 관련 frontend 69개 및 backend trace 통합 75개도 이 환경에서 통과했다.
+이후 P4-04에는 backend/API 변경이 없어 backend 전체 suite를 다시 실행하지 않았다.
+
+## 공식 Windows CI 후속 확인
+
+저장된 클라우드 VM의 브라우저 설치 제한과 별개로, 기존 GitHub Actions의 pinned Chromium 설치와
+공식 runner 실행은 가능했다. PR427 `ff425356`의 run 36768630040은 전체 성공했고 browser 54개가 통과했다.
+추적 기준일 선택자는 이후 추적 폼 안의 정확 일치로 한 번 더 범위를 좁혔다.
+PR428의 최초 실패는 옛 URL 기대값·Form 문구·빈 제목·미저장 문서 이탈 확인 누락과 시각 기준선이었다.
+서버의 필수 제목 및 이탈 보호 계약은 유지하고 테스트가 실제 사용자 단계를 거치도록 수정했다.
+
+run 36770326341의 artifact 11124291288에서 1440/1920 light/dark actual 및 diff를 직접 검토했다.
+1440은 두 탭 구성, 1920은 추가로 undo/redo/status의 별도 줄 배치가 의도된 변화이며 겹침은 없었다.
+각 actual은 같은 실행의 재시도 이미지와 바이트가 같았다. 네 workbench 기준선만 공식 Windows 출력으로
+갱신했고 debugger 기준선·픽셀 허용 오차는 바꾸지 않았다. 전체 trace artifact가 32MiB 전달 한도를
+넘으므로 동일 GitHub CI에 시각 검토용 소형 artifact를 추가했다. 별도 공개 배포나 네트워크 정책 변경은 없다.
+
+별도 관찰된 Graph 빈 스크롤 영역은 제목 입력만으로 해결됐다고 판단하지 않는다. 제목이 빈 상태에서
+output 선택 후 컨트롤의 viewport 교차를 검사하고, 실패 시 조상 DOM의 scrollTop·크기 정보를 보관한다.
+이 재현 검사와 수정 후 전체 CI가 끝나기 전에는 Phase4 출구 조건을 완료로 표시하지 않는다.
+
+Graph 빈 영역은 run 36772056605에서 viewport 교차율 0으로 재현됐다(browser 56개 통과, 해당 1개 실패).
+artifact 11124273518의 graph-layout 기록은 panel scrollTop=1978, window scrollTop=0,
+output y=3030.71875를 보여 줬다. 같은 문서의 pointer URL 변경이 router 기본 스크롤 초기화를 실행했다.
+새 문서/revision의 selectPointer에서만 resetScroll=false로 지정해 기존 reveal 경로가 스크롤을 소유하게 한다.
+선정·문서 원문·backend 의미에는 손대지 않는다. 새 CI로 viewport와 실제 캡처를 다시 검증한다.

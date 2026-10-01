@@ -432,21 +432,21 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByRole("heading", { name: "퀄리티 모멘텀 v2" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     expect(screen.getByLabelText("StrategySpec Diff")).toBeVisible();
     expect(screen.getAllByRole("tabpanel").length).toBeGreaterThan(0);
-    expect(history.location.search).toContain("view=diff");
+    expect(history.location.search).toContain("compare=true");
     expect(history.location.search).toContain("path=%2Frisk");
   });
 
   it("drops an invalid view from the URL instead of failing", async () => {
     const history = mount("/research/strategies/s1/revisions/1?view=bogus");
     await screen.findByRole("heading", { name: "퀄리티 모멘텀 v1" });
-    await waitFor(() => expect(history.location.search).not.toContain("view"));
-    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
+    await waitFor(() => expect(history.location.search).toContain("view=graph"));
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -495,16 +495,16 @@ describe("App Shell routes", () => {
     const history = mount("/");
     await screen.findByRole("heading", { name: "새 전략" });
     expect(history.location.pathname).toBe("/research/strategies/new");
-    expect(screen.getByRole("tab", { name: "JSON" })).toBeEnabled();
-    expect(screen.getByRole("tab", { name: "Form" })).toBeEnabled();
-    expect(screen.getByRole("tab", { name: "Graph" })).toBeEnabled();
+    expect(screen.queryByRole("tab", { name: "JSON" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Form" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "그래프" })).toBeEnabled();
   });
 
   it("moves legacy bookmarks to a clean YAML draft route", async () => {
     const history = mount("/?step=portfolio&run=bt-42");
     await screen.findByRole("heading", { name: "새 전략" });
     expect(history.location.pathname).toBe("/research/strategies/new");
-    expect(history.location.search).toMatch(/^\?draft=draft-[a-f0-9]{32}$/u);
+    expect(new URLSearchParams(history.location.search).get("draft")).toMatch(/^draft-[a-f0-9]{32}$/u);
     expect(history.location.search).not.toContain("step=");
     expect(history.location.search).not.toContain("run=");
     cleanup();
@@ -512,9 +512,7 @@ describe("App Shell routes", () => {
     const legacyHistory = mount("/legacy/builder?step=risk&run=bt-99");
     await screen.findByRole("heading", { name: "새 전략" });
     expect(legacyHistory.location.pathname).toBe("/research/strategies/new");
-    expect(legacyHistory.location.search).toMatch(
-      /^\?draft=draft-[a-f0-9]{32}$/u,
-    );
+    expect(new URLSearchParams(legacyHistory.location.search).get("draft")).toMatch(/^draft-[a-f0-9]{32}$/u);
     expect(legacyHistory.location.search).not.toContain("step=");
     expect(legacyHistory.location.search).not.toContain("run=");
     expect(screen.queryByText("Quick Builder")).not.toBeInTheDocument();
@@ -597,7 +595,7 @@ describe("App Shell routes", () => {
     ).toHaveLength(2);
     expect(
       within(revisions).getAllByRole("link", { name: "Diff" })[0],
-    ).toHaveAttribute("href", expect.stringContaining("view=diff"));
+    ).toHaveAttribute("href", expect.stringContaining("compare=true"));
   });
 
   it("marks frozen schema 1.0 strategies and revisions in the history lists", async () => {

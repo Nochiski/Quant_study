@@ -15,16 +15,12 @@ import {
   ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
-  StrategyFormPanel,
-  StrategyProjectionPanel,
-  StrategyDiffPanel,
   StrategyOutline,
   UpgradeBanner,
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
   createNewDraftId,
-  projectStrategySpec,
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
@@ -137,11 +133,8 @@ export const NewStrategyPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
-  const projection = projectStrategySpec(document);
   const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
-  const requested: StrategyView = search.view ?? document.format;
-  const implemented = availableViews.includes(requested);
-  const view: StrategyView = implemented ? requested : document.format;
+  const view: StrategyView = search.view === "yaml" ? "yaml" : "graph";
   // The page/router owns URL generations. The debugger treats this as an opaque publication
   // lease, so an older async trace cannot replay a callback that captured an older search object.
   const debuggerPublicationOwner = JSON.stringify([ROUTE, search]);
@@ -155,9 +148,11 @@ export const NewStrategyPage = () => {
         search: {
           ...search,
           path,
-          view: origin === "outline" ? undefined : search.view,
+          view: origin === "outline" ? "yaml" : search.view,
         },
         replace: true,
+        // 문서 안 선택은 reveal 경로가 스크롤을 소유한다. URL 갱신이 페이지를 맨 위로 돌리면 안 된다.
+        resetScroll: false,
       });
     },
     [navigate, search],
@@ -165,7 +160,7 @@ export const NewStrategyPage = () => {
   const outline = useOutlineNavigation({
     state: document,
     schema: assist.schema,
-    revealSelectedPointer: view === document.format,
+    revealSelectedPointer: view === "yaml",
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
@@ -175,7 +170,7 @@ export const NewStrategyPage = () => {
   const snippets = useSnippetInsertion(
     document,
     assist.snippetSource,
-    view === document.format,
+    view === "yaml",
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
@@ -193,17 +188,6 @@ export const NewStrategyPage = () => {
     },
     [navigate, search],
   );
-  const openForm = useCallback(
-    (pointer: string): void => {
-      void navigate({
-        to: ROUTE,
-
-        search: { ...search, path: pointer, view: "form" },
-        replace: true,
-      });
-    },
-    [navigate, search],
-  );
   const openSourceAt = useCallback(
     (pointer: string | undefined): void => {
       if (pointer !== undefined) outline.requestSourceReveal(pointer);
@@ -216,7 +200,7 @@ export const NewStrategyPage = () => {
   const problems = useDiagnosticNavigation({
     state: document,
     view,
-    sourceView: document.format,
+    sourceView: "yaml",
     form: form.projection,
     tree: form.tree,
     schema: assist.schema,
@@ -353,14 +337,14 @@ export const NewStrategyPage = () => {
         onSelectSymbol={selectSymbol}
         saveTone={saveStatusTone(document, status)}
         view={view}
-        sourceView={document.format}
+        sourceView="yaml"
         availableViews={availableViews}
         onViewChange={(next) =>
           void navigate({
             to: ROUTE,
             search: {
               ...search,
-              view: next === document.format ? undefined : next,
+              view: next,
             },
             replace: true,
           })
@@ -401,19 +385,6 @@ export const NewStrategyPage = () => {
           />
         }
         projections={{
-          json: <StrategyProjectionPanel projection={projection} />,
-          form: (
-            <StrategyFormPanel
-              form={form}
-              schema={assist.schema}
-              transactions={transactions}
-              catalogs={catalogs}
-              catalogSnippets={snippets.snippets}
-              onOpenGraph={openGraph}
-              selectedPointer={search.path}
-              revealSignal={problems.revealSignal}
-            />
-          ),
           graph: (
             <>
               {/* 그래프 1수준(파이프라인) 캔버스 위, 고급 수준(노드 편집·실행 계획) 아래(P4-02). */}
@@ -442,7 +413,7 @@ export const NewStrategyPage = () => {
                         transactions,
                         catalogs,
                         operators: assist.operators,
-                        onOpenForm: openForm,
+                        onOpenSource: openSourceAt,
                         documentKey: document.documentEpoch,
                       }
                 }
@@ -454,7 +425,6 @@ export const NewStrategyPage = () => {
               />
             </>
           ),
-          diff: <StrategyDiffPanel state={document} active={view === "diff"} />,
         }}
         outline={
           <StrategyOutline
@@ -511,11 +481,6 @@ export const NewStrategyPage = () => {
         }
         editor={
           <>
-            {implemented ? null : (
-              <p className="page-state" role="status">
-                {t("page.revision.viewPending")} ({requested.toUpperCase()})
-              </p>
-            )}
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}

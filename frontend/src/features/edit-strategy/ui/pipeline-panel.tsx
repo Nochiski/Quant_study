@@ -603,6 +603,7 @@ const InlineField = ({
   return (
     <span
       className="pipeline__field"
+      aria-current={coversPointer(field.pointer, context.selectedPointer) ? "true" : undefined}
       data-written={field.written}
       data-applicable={
         field.applicable === null ? "unknown" : String(field.applicable)

@@ -1,4 +1,6 @@
 const ko = {
+  "ide.view.graph": "그래프",
+  "ide.revision.diff": "리비전 변경 비교",
   "strategy.preview.title": "선정 미리보기",
   "strategy.preview.stale": "이전 요청 · 새로고침 필요",
   "strategy.preview.date": "기준일 (선택)",
@@ -1245,7 +1247,7 @@ const ko = {
   "graph.pipeline.execution.description":
     "시장·기간·유니버스·수수료는 전략 문서 밖의 실행 설정입니다. 화면 위 실행 설정에서 고릅니다.",
   "graph.pipeline.notHere": "이 캔버스에 없는 것",
-  "graph.pipeline.notHere.document": "{names}: YAML·Form 탭에서 고칩니다.",
+  "graph.pipeline.notHere.document": "{names}: YAML 탭에서 고칩니다.",
   "graph.pipeline.notHere.formula": "팩터 계산식: 아래 고급 편집기에서 고칩니다.",
   "run_environment.field.participation_rate.description":
     "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
@@ -2113,6 +2115,8 @@ export type MessageKey = keyof typeof ko;
 export const messages = {
   ko,
   en: {
+    "ide.view.graph": "Graph",
+    "ide.revision.diff": "Revision changes",
     "strategy.preview.title": "Selection preview",
     "strategy.preview.stale": "Outdated request · refresh needed",
     "strategy.preview.date": "As-of date (optional)",
@@ -3375,7 +3379,7 @@ export const messages = {
       "Market, period, universe and costs are run settings outside the strategy document. Choose them in the run settings above.",
     "graph.pipeline.notHere": "Not on this canvas",
     "graph.pipeline.notHere.document":
-      "{names}: edit them in the YAML or Form tab.",
+      "{names}: edit them in the YAML tab.",
     "graph.pipeline.notHere.formula":
       "Factor formulas: edit them in the advanced editor below.",
     "run_environment.field.participation_rate.description":

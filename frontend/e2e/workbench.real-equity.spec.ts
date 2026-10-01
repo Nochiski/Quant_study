@@ -82,7 +82,7 @@ test.describe("real equity data", () => {
     const { strategyId } = strategyIdentity(page);
 
     // Graph 편집: field 노드를 추가해 실데이터 필드(price.open)를 고르고, mom_252 의 입력을 그 노드로 재배선한다.
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const graphEditor = page.getByRole("region", { name: "그래프 편집" });
     await expect(graphEditor).toBeVisible();
     await expect(graphEditor.getByText("편집 가능")).toBeVisible();

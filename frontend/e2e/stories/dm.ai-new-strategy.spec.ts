@@ -50,8 +50,8 @@ const expectEditorReachable = async (
   where: string,
   controls: readonly (readonly [string, Locator])[] = [
     ...toolbarControls(page),
-    ["Graph 탭", page.getByRole("tab", { name: "Graph" })],
-    ["Diff 탭", page.getByRole("tab", { name: "Diff" })],
+    ["Graph 탭", page.getByRole("tab", { name: "그래프" })],
+    ["YAML 탭", page.getByRole("tab", { name: "YAML" })],
     ["문서 상태", page.getByRole("status", { name: "문서 상태" })],
     ["중간 결과 접기", page.getByRole("button", { name: "중간 결과 접기" })],
   ],

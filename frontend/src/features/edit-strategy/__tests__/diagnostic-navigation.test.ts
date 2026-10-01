@@ -85,16 +85,6 @@ describe("resolveDiagnosticDestination", () => {
     expect(destination("graph", "/nope")).toBe("source");
   });
 
-  it("keeps the Form tab only when that card is on screen", () => {
-    expect(destination("form", "/risk/max_name_weight")).toBe("current-view");
-    expect(destination("form", "/nope")).toBe("source");
-  });
-
-  it("sends the read-only projection tabs back to the source tab", () => {
-    expect(destination("json", "/risk/max_name_weight")).toBe("source");
-    expect(destination("diff", "/risk/max_name_weight")).toBe("source");
-  });
-
   it("sends the Graph tab to the source before the runtime schema arrives", () => {
     // 은퇴한 조건(`form !== null`)과 구분한다: 투영이 있어도 schema가 안 왔다고 말하면
     // 그래프 편집 표면이 렌더되지 않으므로 원문 탭으로 보낸다.
@@ -112,6 +102,6 @@ describe("resolveDiagnosticDestination", () => {
 
   it("sends a whole-document diagnostic back to the source tab", () => {
     expect(destination("graph", "")).toBe("source");
-    expect(destination("form", "")).toBe("source");
+    expect(destination("yaml", "")).toBe("source");
   });
 });

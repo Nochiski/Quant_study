@@ -9,7 +9,11 @@ import {
   useState,
 } from "react";
 
-import type { StrategyOutlineSymbol } from "../../../features/edit-strategy";
+import {
+  PROJECTION_VIEWS,
+  type StrategyOutlineSymbol,
+  type StrategyView,
+} from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import {
   useMediaQuery,
@@ -34,7 +38,7 @@ import {
 } from "../model/use-panel-layout";
 import "./strategy-ide.css";
 
-export type SourceView = "yaml" | "json" | "form" | "graph" | "diff";
+export type SourceView = StrategyView;
 
 export type StrategyIdeProps = {
   title: string;
@@ -73,7 +77,7 @@ export type StrategyIdeProps = {
   /** The source editor slot (P3). */
   editor: ReactNode;
   /** Source tab whose editor must stay mounted while read-only projections are selected. */
-  sourceView?: "yaml" | "json";
+  sourceView?: "yaml";
   /** Stable read-only tab content keyed by representation. */
   projections?: Partial<Record<SourceView, ReactNode>>;
   /** Document-level recovery or warning UI that must remain visible across every view. */
@@ -99,8 +103,11 @@ export type StrategyIdeProps = {
    * 보인다(WORKFLOW P1-01).
    */
   documentStatus?: ReactNode;
-  /** 문제 목록. 탭 패널 밖(편집 패널 아래)이라 다섯 탭 모두에서 보인다(WORKFLOW P1-01). */
+  /** 문제 목록. 탭 패널 밖(편집 패널 아래)이라 두 표현에서 함께 보인다(WORKFLOW P1-01). */
   problems?: ReactNode;
+  revisionDiff?: (active: boolean) => ReactNode;
+  comparisonOpen?: boolean;
+  onComparisonOpenChange?: (open: boolean) => void;
   view?: SourceView;
   onViewChange?: (view: SourceView) => void;
   /** Views the caller can render; the rest are shown disabled. */
@@ -168,12 +175,12 @@ const EDITOR_MIN_WIDTH = 480;
  * 팔레트)가 이 값 하나로 옮긴다.
  */
 const ASSISTANT_FOCUS: FocusOptions = { preventScroll: true };
-const VIEWS: readonly SourceView[] = ["yaml", "json", "form", "graph", "diff"];
+const VIEWS = PROJECTION_VIEWS;
 
 /**
  * Strategy IDE frame laid out like the concept: top bar (breadcrumb, save status, run), title
  * with meta line, left Outline + Snippets, centre editor with format/validate actions and the
- * YAML/JSON/Form/Graph/Diff tabs, right Contract Inspector, bottom Intermediate Results. All
+ * 그래프/YAML 표현, revision 비교, 오른쪽 계약 패널, 아래 중간 결과를 조합한다. All
  * panels resize and collapse; collapsed panels stay in the DOM (`hidden`) so every toggle's
  * `aria-controls` resolves. Below 1280px the inspector and debugger become non-modal drawers,
  * closed by default, toggled from the top bar and dismissed with Escape. There is deliberately
@@ -207,9 +214,12 @@ export const StrategyIde = ({
   documentHistory,
   documentStatus,
   problems,
-  view = "yaml",
+  revisionDiff,
+  comparisonOpen = false,
+  onComparisonOpenChange,
+  view = "graph",
   onViewChange,
-  availableViews = ["yaml"],
+  availableViews = VIEWS,
   inspector,
   debugger: debuggerPanel,
   assistant,
@@ -267,7 +277,11 @@ export const StrategyIde = ({
    * 빼앗지 않으면서 편집기 폭을 지키는 규칙이다.
    */
   const overlayRight =
-    !narrow && squeezed && hasAssistant && layout.inspectorOpen && layout.assistantOpen
+    !narrow &&
+    squeezed &&
+    hasAssistant &&
+    layout.inspectorOpen &&
+    layout.assistantOpen
       ? (layout.lastOpenedRight ?? "assistantOpen")
       : null;
   const inspectorFloating = narrow || overlayRight === "inspectorOpen";
@@ -287,7 +301,9 @@ export const StrategyIde = ({
     railDrawer === undefined ? "ide__drawer" : "ide__drawer ide__drawer--rail";
   // 기본이 접힘인데 내용을 미리 마운트하면 화면을 열 때마다 사이드바의 질의가 나간다. 한 번 펼친
   // 뒤에는 접어도 유지한다 — 진행 중 턴의 스트림이 접기로 끊기면 안 된다(B-04 리뷰 P3).
-  const [assistantMounted, setAssistantMounted] = useState(layout.assistantOpen);
+  const [assistantMounted, setAssistantMounted] = useState(
+    layout.assistantOpen,
+  );
   /**
    * 오른쪽 패널 토글. 좁은 화면에서는 계약·AI 서랍이 같은 자리(본문 오른쪽 끝)에 뜨므로
    * 한 번에 하나만 연다 — 겹치면 뒤에 깔린 패널이 보이지 않은 채 탭 순서와 접근성 트리에 남는다
@@ -319,9 +335,7 @@ export const StrategyIde = ({
   );
   const closeAssistant = useCallback((): void => {
     close(["assistantOpen"]);
-    queueMicrotask(() =>
-      document.getElementById(assistantToggleId)?.focus(),
-    );
+    queueMicrotask(() => document.getElementById(assistantToggleId)?.focus());
   }, [assistantToggleId, close]);
   const theme = useThemePreference();
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -546,7 +560,7 @@ export const StrategyIde = ({
             ASSISTANT_FOCUS,
           ),
         );
-      } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
+      } else if (event.altKey && !modifier && /^[1-2]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
         if (
           event.repeat ||
@@ -923,10 +937,7 @@ export const StrategyIde = ({
                 idBase={ids.views}
                 items={VIEWS.map((id) => ({
                   id,
-                  label:
-                    id === "yaml" || id === "json"
-                      ? id.toUpperCase()
-                      : capitalize(id),
+                  label: id === "yaml" ? "YAML" : t("ide.view.graph"),
                   disabled: !availableViews.includes(id),
                 }))}
                 value={view}
@@ -957,9 +968,18 @@ export const StrategyIde = ({
                     : projections?.[id]}
               </div>
             ))}
-            {problems ? (
-              <div className="ide__problems">{problems}</div>
+            {revisionDiff ? (
+              <section className="ide__revision-diff">
+                <Button
+                  aria-expanded={comparisonOpen}
+                  onClick={() => onComparisonOpenChange?.(!comparisonOpen)}
+                >
+                  {t("ide.revision.diff")}
+                </Button>
+                <div hidden={!comparisonOpen}>{revisionDiff(comparisonOpen)}</div>
+              </section>
             ) : null}
+            {problems ? <div className="ide__problems">{problems}</div> : null}
           </section>
           {!narrow && layout.debuggerOpen ? (
             <SplitHandle
@@ -1046,8 +1066,6 @@ export const StrategyIde = ({
   );
 };
 
-const capitalize = (value: string) =>
-  value.charAt(0).toUpperCase() + value.slice(1);
 
 const RESULT_TABS = [
   { id: "preview", label: t("ide.debugger.tab.preview") },

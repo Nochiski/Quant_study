@@ -402,7 +402,16 @@ export type BacktestCancelResult = {
   /**
    * Stage
    */
-  stage: string;
+  stage:
+    | "queued"
+    | "tape"
+    | "data"
+    | "engine"
+    | "artifact"
+    | "cancellation"
+    | "completed"
+    | "cancelled"
+    | "failed";
   status: RunStatus;
   /**
    * Updated At
@@ -691,7 +700,16 @@ export type BacktestRunState = {
   /**
    * Stage
    */
-  stage: string;
+  stage:
+    | "queued"
+    | "tape"
+    | "data"
+    | "engine"
+    | "artifact"
+    | "cancellation"
+    | "completed"
+    | "cancelled"
+    | "failed";
   status: RunStatus;
   /**
    * Updated At
@@ -1417,6 +1435,16 @@ export type DatasetRevision = {
 };
 
 /**
+ * DiagnosticAnchor
+ *
+ * 진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.
+ *
+ * 편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는
+ * backend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).
+ */
+export type DiagnosticAnchor = "value" | "key";
+
+/**
  * DiagnosticKind
  */
 export type DiagnosticKind =
@@ -1661,6 +1689,10 @@ export type ExecutionTiming = "next_open";
  * Experiment
  */
 export type Experiment = {
+  /**
+   * Finished
+   */
+  finished: boolean;
   record: ExperimentRecord;
   /**
    * Selections
@@ -1714,16 +1746,19 @@ export type ExperimentAdmissionErrorResponse = {
  *
  * 실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
  * 끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.
+ *
+ * 칸에 기본값을 두지 않는다 — 응답 스키마에서 늘 있는 칸이라 화면이 기본값을 복제하지 않는다(#402
+ * 리뷰 P3-1). 만든 실험의 처음 값은 `DEFAULT_EXPERIMENT_CONTROLS` 하나다.
  */
 export type ExperimentControls = {
   /**
    * Paused
    */
-  paused?: boolean;
+  paused: boolean;
   /**
    * Priority
    */
-  priority?: number;
+  priority: number;
 };
 
 /**
@@ -1782,6 +1817,7 @@ export type ExperimentErrorDetail = {
   code:
     | "experiment.base.invalid"
     | "experiment.base.unsaved"
+    | "experiment.cancel.completed"
     | "experiment.capacity.base_not_run"
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
@@ -1825,9 +1861,14 @@ export type ExperimentPage = {
    */
   items: Array<Experiment>;
   /**
+   * Max Priority
+   */
+  max_priority: number;
+  /**
    * Next After
    */
   next_after: string | null;
+  slots: RunSlotUsage;
 };
 
 /**
@@ -1873,7 +1914,7 @@ export type ExperimentRecord = {
    * Cancelled At
    */
   cancelled_at?: string | null;
-  controls?: ExperimentControls;
+  controls: ExperimentControls;
   /**
    * Created At
    */
@@ -1896,6 +1937,8 @@ export type ExperimentRequest = {
   run: BacktestRunSpec;
   /**
    * Search
+   *
+   * parameter_id → 탐색 값 목록. 값이 null 이면 문서 정의가 허용하는 격자 값 전체를 편다. 키가 없는 파라미터는 탐색하지 않고 기반 실행의 값을 쓴다.
    */
   search: {
     [key: string]: Array<number | number | string | boolean> | null;
@@ -2022,6 +2065,14 @@ export type ExperimentTrialState = {
    * Bankrupt
    */
   bankrupt?: boolean;
+  /**
+   * Retryable
+   */
+  retryable: boolean;
+  /**
+   * Selectable
+   */
+  selectable: boolean;
   status: TrialStatus;
   trial: ExperimentTrial;
 };
@@ -3379,6 +3430,38 @@ export type PortfolioDataUnavailableDetail = {
 };
 
 /**
+ * PortfolioFrameSummary
+ *
+ * trace 한 프레임 전체의 선정 깔때기 수(기준일 미리보기, lang2 P4-03).
+ *
+ * 유니버스 멤버만 센다. 한 종목이 사유를 여럿 가질 수 있어(규칙 탈락이면서 팩터 값 없음) 사유별
+ * 수를 더해도 `universe` 가 되지 않으므로, 순위에 든 수(`eligible`)를 따로 싣는다. 소비자는 수를
+ * 다시 세지 않는다.
+ */
+export type PortfolioFrameSummary = {
+  /**
+   * Eligibility Failed
+   */
+  eligibility_failed: number;
+  /**
+   * Eligibility Rank Cut
+   */
+  eligibility_rank_cut: number;
+  /**
+   * Eligible
+   */
+  eligible: number;
+  /**
+   * Missing
+   */
+  missing: number;
+  /**
+   * Universe
+   */
+  universe: number;
+};
+
+/**
  * PortfolioPreview
  *
  * The tape a run will consume, plus the caveats the observation source reported.
@@ -4528,6 +4611,22 @@ export type RunManifest = {
 };
 
 /**
+ * RunSlotUsage
+ *
+ * 동시 실행 슬롯 사용량(spec D6). 실험 목록 화면이 trial 수로 추정하지 않게 싣는다.
+ */
+export type RunSlotUsage = {
+  /**
+   * Running
+   */
+  running: number;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
  * RunStatus
  */
 export type RunStatus =
@@ -4832,8 +4931,11 @@ export type SignalStep = {
  *
  * `range` is None only when the source has no node to point at (empty document).
  * `node_id` names the FactorGraph node a semantic issue is about, when known.
+ * `anchor` 도 `severity` 처럼 기본값 없이 늘 보낸다 — `range` 가 키 자체를 가리키는지 값을
+ * 가리키는지다(`DiagnosticAnchor`). 새 생성 지점이 빠뜨리면 타입이 잡는다(#418 리뷰 P3-3).
  */
 export type SourceDiagnostic = {
+  anchor: DiagnosticAnchor;
   /**
    * Code
    */
@@ -5624,6 +5726,8 @@ export type StrategyTraceRequest = {
   offset?: number;
   /**
    * Security Ids
+   *
+   * Securities to trace. An empty list skips per-security rows and returns only the as-of summary.
    */
   security_ids: Array<string>;
   /**
@@ -5681,6 +5785,7 @@ export type StrategyTraceResponse = {
    * Spec Hash
    */
   spec_hash: string;
+  summary?: StrategyTraceSummary | null;
   target: StrategyTargetTrace | null;
   trace: StrategyTracePage;
   /**
@@ -5718,6 +5823,37 @@ export type StrategyTraceRow = {
    * Value
    */
   value: number | boolean | null;
+};
+
+/**
+ * StrategyTraceSummary
+ *
+ * 기준일 미리보기가 그리는 수와 그날의 선정(lang2 P4-03). 수는 컴파일러가 센 그대로다.
+ */
+export type StrategyTraceSummary = {
+  counts: PortfolioFrameSummary;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Targets
+   */
+  targets: Array<StrategyTraceSummaryTarget>;
+};
+
+/**
+ * StrategyTraceSummaryTarget
+ *
+ * 선정 종목 한 줄. 이름·티커는 실행 설정의 유니버스에서 찾고, 모르면 `security` 가 None.
+ */
+export type StrategyTraceSummaryTarget = {
+  position: TargetPosition;
+  security: SecurityRef | null;
 };
 
 /**
@@ -7633,6 +7769,42 @@ export type GetBacktestResultResponses = {
 export type GetBacktestResultResponse =
   GetBacktestResultResponses[keyof GetBacktestResultResponses];
 
+export type GetBacktestSummaryData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/summary";
+};
+
+export type GetBacktestSummaryErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestSummaryError =
+  GetBacktestSummaryErrors[keyof GetBacktestSummaryErrors];
+
+export type GetBacktestSummaryResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunSummary;
+};
+
+export type GetBacktestSummaryResponse =
+  GetBacktestSummaryResponses[keyof GetBacktestSummaryResponses];
+
 export type GetEquityCatalogData = {
   body?: never;
   path?: never;
@@ -7999,6 +8171,10 @@ export type CancelExperimentErrors = {
    * The experiment or trial is missing
    */
   404: ExperimentErrorResponse;
+  /**
+   * The experiment has completed
+   */
+  409: ExperimentErrorResponse;
   /**
    * Validation Error
    */

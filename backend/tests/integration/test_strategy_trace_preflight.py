@@ -219,6 +219,7 @@ def test_starting_holding_must_exist_on_the_actual_first_signal_frame() -> None:
             factor_registry_version="factor-registry-v1",
         ),
         InMemoryStrategyRepository(),
+        MockEquityDataAdapter.demo(),
     )
     accepted = present.trace(replace(_request(spec), starting_holdings=(holding,)))
     assert accepted.spec_hash
@@ -232,6 +233,7 @@ def test_starting_holding_must_exist_on_the_actual_first_signal_frame() -> None:
             factor_registry_version="factor-registry-v1",
         ),
         InMemoryStrategyRepository(),
+        MockEquityDataAdapter.demo(),
     )
     with pytest.raises(
         InvalidStrategyTraceRequestError,
@@ -252,6 +254,7 @@ def test_starting_holding_requires_at_least_one_target_tape_frame() -> None:
             factor_registry_version="factor-registry-v1",
         ),
         InMemoryStrategyRepository(),
+        MockEquityDataAdapter.demo(),
     )
 
     with pytest.raises(
@@ -274,7 +277,9 @@ def test_engine_capability_failure_precedes_metadata_and_raw_calculation() -> No
         factor_metadata=source,
         factor_registry_version="factor-registry-v1",
     )
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
 
     with pytest.raises(IncompatiblePortfolioRequestError):
         service.trace(_request(_spec()))
@@ -290,7 +295,9 @@ def test_trace_rejects_a_legacy_raw_adapter_before_metadata_or_raw_calculation()
         factor_registry_version="factor-registry-v1",
     )
 
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
 
     with pytest.raises(StrategyTraceCapabilityError) as excinfo:
         service.trace(_request(_spec()))
@@ -308,7 +315,9 @@ def test_unknown_node_and_pre_cancelled_request_never_load_raw_rows() -> None:
         factor_metadata=source,
         factor_registry_version="factor-registry-v1",
     )
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
     spec = _spec()
 
     with pytest.raises(InvalidStrategyTraceRequestError, match="unknown or unreachable"):
@@ -329,7 +338,9 @@ def test_non_finite_inline_spec_fails_validation_before_raw_loading(value: float
         factor_metadata=source,
         factor_registry_version="factor-registry-v1",
     )
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
     spec = _spec()
     # 비용의 owner 가 실행 설정이므로 비유한 값도 실행 설정이 싣는다(1.2).
     with pytest.raises(ValueError):
@@ -357,7 +368,9 @@ def test_all_non_finite_strategy_leaves_fail_before_metadata_and_raw(
         factor_metadata=source,
         factor_registry_version="factor-registry-v1",
     )
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
     spec = _spec()
     factor = spec.factors[0]
     if location == "factor_weight":
@@ -411,7 +424,9 @@ def test_cancellation_after_raw_load_stops_before_factor_evaluation() -> None:
         factor_metadata=source,
         factor_registry_version="factor-registry-v1",
     )
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
 
     with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
         service.trace(_request(_spec()), cancelled=stop.is_set)
@@ -427,7 +442,9 @@ def test_raw_port_checkpoint_interrupts_loading() -> None:
         factor_metadata=source,
         factor_registry_version="factor-registry-v1",
     )
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
 
     with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
         service.trace(_request(_spec()), cancelled=stop.is_set)
@@ -467,6 +484,7 @@ def test_raw_numeric_validation_cancellation_stops_before_factor_evaluation(
             factor_registry_version="factor-registry-v1",
         ),
         InMemoryStrategyRepository(),
+        MockEquityDataAdapter.demo(),
     )
 
     with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
@@ -618,6 +636,7 @@ def test_factor_output_cancellation_stops_before_target_and_projection(
             factor_registry_version="factor-registry-v1",
         ),
         InMemoryStrategyRepository(),
+        MockEquityDataAdapter.demo(),
     )
 
     with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
@@ -634,7 +653,9 @@ def test_factor_evaluator_checkpoint_stops_before_target_tape(monkeypatch) -> No
         factor_metadata=source,
         factor_registry_version="factor-registry-v1",
     )
-    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    service = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
     entered_evaluator = Event()
     from strategy_workbench.domain.factor import _trace as factor_trace_module
 

@@ -48,9 +48,10 @@ COMMON=(--exclude '__pycache__/' --exclude '.ruff_cache/' --exclude '.venv/'
 SRC_KEEP=(--exclude '.kw_token.json' --exclude '.kis_token.json'
           --exclude 'sync_v3_wise.py' --exclude 'rebuild_share.py')
 
-# equity contract(EGC) 가 대조하는 엔진 사본. 서버 `_engine/backtest_engine` 은 2026-09-05 판에서
-# 멈춰 있었고 갱신 경로가 어디에도 없었다(DEFECT-C05) — 배포가 같이 민다.
-ENGINE_SRC="$WORKTREE/backend/src/backtest_engine"
+# equity contract(EGC) 가 부르는 워크벤치 사본(#372 — 전에는 커널 `_engine/backtest_engine` 을
+# 불렀다). 사본은 2026-09-05 판에서 멈춰 있었고 갱신 경로가 어디에도 없었다(DEFECT-C05) — 배포가
+# 같이 민다. 계약이 읽는 facade 는 제3자 패키지 없이 import 되고 어댑터는 duckdb 만 쓴다.
+ENGINE_SRC="$WORKTREE/backend/src/strategy_workbench"
 [ -d "$ENGINE_SRC" ] || { echo "거부: $ENGINE_SRC 가 없다 — 엔진 사본을 밀 수 없다." >&2; exit 2; }
 # 비었거나 sparse-checkout 인 소스를 --delete 로 밀면 서버 _engine 이 전멸하고 contract 는 기록형이라 묻힌다(리뷰 REC-9)
 [ -f "$ENGINE_SRC/__init__.py" ] || { echo "거부: $ENGINE_SRC/__init__.py 가 없다 — 빈 소스로 서버 _engine 을 지울 수 없다." >&2; exit 2; }
@@ -104,7 +105,7 @@ plan_of() {   # 항목별 dry-run 계획을 $PLAN 에 모으고 변경 파일 �
 }
 N_SRC=$(plan_of "src/" "${COMMON[@]}" "${SRC_KEEP[@]}" --delete "$REPO/src/" "$REMOTE:$ROOT/src/")
 N_SCRIPTS=$(plan_of "scripts/" "${COMMON[@]}" --delete "$REPO/scripts/" "$REMOTE:$ROOT/scripts/")
-N_ENGINE=$(plan_of "_engine/backtest_engine/" "${COMMON[@]}" --delete "$ENGINE_SRC/" "$REMOTE:$ROOT/_engine/backtest_engine/")
+N_ENGINE=$(plan_of "_engine/strategy_workbench/" "${COMMON[@]}" --delete "$ENGINE_SRC/" "$REMOTE:$ROOT/_engine/strategy_workbench/")
 N_SHARE=$(plan_of "src/rebuild_share.py" "$WORKTREE/backend/ops/rebuild_share.py" "$REMOTE:$ROOT/src/rebuild_share.py")
 echo "════ 내용이 바뀔 파일 $((N_SRC + N_SCRIPTS + N_ENGINE + N_SHARE))개 (src $N_SRC · scripts $N_SCRIPTS · _engine $N_ENGINE · rebuild_share $N_SHARE) — $BRANCH $REV tests=$TESTS ════"
 cat "$PLAN"
@@ -118,9 +119,10 @@ rsync -avz $DRY --delete "${COMMON[@]}" \
       "$REPO/scripts/" "$REMOTE:$ROOT/scripts/"
 
 # equity contract 대조 대상. 서버 경로는 `equity contract --engine-src ~/quant-ledger/_engine` 이 읽는다.
-echo "== _engine/backtest_engine/  (backend/src/backtest_engine/ → $REMOTE:~/$ROOT/_engine/backtest_engine/)"
+# 옛 `_engine/backtest_engine/` 은 이제 아무도 읽지 않는다 — 이 배포는 그 디렉터리를 건드리지 않는다.
+echo "== _engine/strategy_workbench/  (backend/src/strategy_workbench/ → $REMOTE:~/$ROOT/_engine/strategy_workbench/)"
 rsync -avz $DRY --delete "${COMMON[@]}" \
-      "$ENGINE_SRC/" "$REMOTE:$ROOT/_engine/backtest_engine/"
+      "$ENGINE_SRC/" "$REMOTE:$ROOT/_engine/strategy_workbench/"
 
 # 워크벤치 공유 산출물 재생성기. 저장소 정본은 backend/ops/ 이고 서버는 src/ 에 두고 쓴다.
 echo "== backend/ops/rebuild_share.py → src/rebuild_share.py"

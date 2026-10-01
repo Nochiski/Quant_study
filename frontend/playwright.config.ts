@@ -13,6 +13,7 @@ import {
   runtimeAssistantSecretsPath,
   runtimeDatabasePath,
   runtimeResearchDatabasePath,
+  TRIAL_HOLD_SECONDS,
 } from "./e2e/runtime";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
@@ -144,6 +145,8 @@ export default defineConfig({
         STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH: runtimeAssistantSecrets,
         // 대본 공급자. 실 SDK·키·네트워크 없이 어시스턴트 시나리오가 돈다(WORKFLOW B-05).
         STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER: "1",
+        // 실험 trial run 을 붙잡는 훅. 실험 스토리 e2e 가 대기·일시정지·취소를 본다(검증 랩 V5-01).
+        STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS: String(TRIAL_HOLD_SECONDS),
       },
       url: `${backend}/api/v1/health`,
       reuseExistingServer: false,

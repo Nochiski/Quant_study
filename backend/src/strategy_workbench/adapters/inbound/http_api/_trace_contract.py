@@ -114,9 +114,13 @@ def apply_trace_openapi_contract(schema: dict[str, Any]) -> None:
     properties = _mapping(request, "properties")
 
     _mapping(properties, "security_ids").update(
-        minItems=1,
+        minItems=0,
         maxItems=StrategyTraceRequest.MAX_SECURITY_IDS,
         uniqueItems=True,
+        description=(
+            "Securities to trace. An empty list skips per-security rows and returns only the "
+            "as-of summary."
+        ),
     )
     _mapping(properties, "node_ids").update(
         maxItems=StrategyTraceRequest.MAX_NODE_IDS,

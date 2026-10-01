@@ -123,11 +123,15 @@ const server = setupServer(
       run_id: params.runId,
       status: runStatus,
       progress: runStatus === "completed" ? 1 : 0.5,
-      stage: runStatus === "completed" ? "done" : "engine",
+      stage: runStatus === "completed" ? "completed" : "engine",
       message: runStatus === "completed" ? "Run completed" : "Running",
       created_at: "2026-09-27T00:00:00Z",
       updated_at: "2026-09-27T00:00:01Z",
     }),
+  ),
+  // 결과 화면은 실행 종류를 서버 판정으로 읽는다(단일 실행에만 실험 만들기 링크).
+  http.get(`${API}/api/v1/backtests/:runId/summary`, () =>
+    HttpResponse.json({ kind: "single" }),
   ),
   http.get(`${API}/api/v1/backtests/:runId/request`, () =>
     HttpResponse.json({ core: "rust", metric_windows: [] }),

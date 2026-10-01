@@ -196,7 +196,7 @@ cd ~/quant-ledger
 .venv/bin/python -m equity --root data/equity --stage-root data/stage \
   --baseline data/equity/baseline.json catalog
 
-# 소비자 계약 EGC-01·02·03·04·05·10 — 커널 어댑터(pyarrow)로 duckdb 를 교차 검증
+# 소비자 계약 EGC-01·02·03·04·05·10 — 제품이 쓰는 워크벤치 어댑터를 duckdb 독립 읽기와 교차 검증(#372)
 .venv/bin/python -m equity --root data/equity --stage-root data/stage \
   --baseline data/equity/baseline.json contract --engine-src $HOME/quant-ledger/_engine
 ```
@@ -205,8 +205,9 @@ cd ~/quant-ledger
   `data/equity/_failed/catalog_<snapshot>.json` 을 읽어라.
 - `_asof/<view>/<snapshot_id>/` 는 EG5c 의 표본이다. 표본을 새 기준으로 갈아야 할 때만
   `catalog --rebase-asof` 를 쓰고, 그 사실을 DESIGN §10 에 기록하라(승인 축).
-- `contract` 의 `--engine-src` 는 서버에 rsync 해 둔 엔진 소스(`~/quant-ledger/_engine`)다.
-  서버 venv 에 `numpy`·`pyarrow` 가 있어야 한다.
+- `contract` 의 `--engine-src` 는 서버에 rsync 해 둔 backend 소스(`~/quant-ledger/_engine`, `deploy.sh` 가 `strategy_workbench/` 를 민다)다.
+  facade 는 제3자 패키지 없이 import 되고 어댑터는 duckdb 만 쓴다(#372 전 커널 어댑터는
+  `numpy`·`pyarrow` 를 요구했다). 사건이 카탈로그 뷰를 함께 읽어 `catalog` 뒤에 돌린다.
 
 ### 3-5. 로컬 테스트
 
@@ -217,7 +218,7 @@ ruff check --line-length 100 --select E,F,I,UP,B database/src/equity
 
 # 워크벤치 어댑터(ruamel.yaml 등 backend 의존성이 필요해 --project backend 로 돈다)
 cd backend && uv run --extra parquet --extra equity pytest \
-  tests/contract tests/test_adapters_equity_duckdb.py tests/test_adapters_equity.py -q
+  tests/contract tests/test_adapters_equity_duckdb.py -q
 ```
 
 `pytest ... | tail` 은 실패를 가린다 — **FAILED 도 grep 하라**.
@@ -695,8 +696,9 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 
 **읽지 않는 곳 — 엔진 커널**. 커널(`backtest_engine`)은 **원주가 bar + `CorporateActionEvent`** 로
 포지션 수량을 스스로 조정한다. 조정가를 bar 로 주면 같은 사건이 두 번 반영된다(가격은 이미
-조정됐는데 수량까지 다시 조정된다). `backtest_engine/adapters/equity_duckdb.py` 가 이 표를 읽지
-않는다는 것을 `test_equity_s23_price_adj.py::test_커널_어댑터는_조정가_표를_읽지_않는다` 가 지킨다.
+조정됐는데 수량까지 다시 조정된다). 워크벤치 `load_backtest_dataset` 은 원주가 bar 만 커널에 넘기고,
+EG-C ①(bar = stage 원주가)과 `test_equity_s07_contract.py::test_contract_meta_와_워크벤치_facade_직접_호출`
+이 지킨다(#372 전에는 커널 어댑터 파일의 문자열 검사였다).
 
 **`n_unadjusted_events` 를 반드시 보라** — 같은 구간에서 `factor_ok=false` 이고
 `apply_date ≤ d` 인 사건 수다. **0 이 아니면 그 구간의 조정 시계열은 불완전하다**: 기업행위가
@@ -720,7 +722,7 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 > `load_backtest_dataset` 이 창 안에서 사건 세션이나 그 뒤에 거래된 bar 가 없는 기업 행동을 빼고
 > `equity.corporate_action_without_bar_dropped` 경고로 남긴다(`7f9c7e15`, 포지션은 마지막 체결가에
 > 동결된다). 커널 어댑터 `backtest_engine.adapters.equity_duckdb` 에는 같은 거르기가 없어, 커널을 그
-> 어댑터로 직접 돌리는 경로는 확인하지 않았다. 아래는 당시 서술이다.
+> 어댑터로 직접 돌리는 경로는 확인하지 않았다(2026-09-30 #372 로 그 어댑터를 걷어 이제 그 경로가 없다). 아래는 당시 서술이다.
 
 정지된 뒤 데이터 끝까지 재개하지 않은 종목에 감자·병합이 걸리면 커널이
 `CorporateActionWithoutBar` 를 던지고 **run 전체가 중단된다**(부분 결과도 없다).

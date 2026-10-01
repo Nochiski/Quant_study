@@ -520,6 +520,20 @@ def create_app(
             ) from error
 
     @app.get(
+        "/api/v1/backtests/{run_id}/summary",
+        operation_id="getBacktestSummary",
+        responses=_backtest_run_not_found_responses(),
+    )
+    def get_backtest_summary(run_id: str) -> BacktestRunSummary:
+        """이력 한 행. 결과 화면이 실행 종류(단일·실험 trial·워크포워드 검증)를 서버 판정으로
+        읽는다."""
+
+        try:
+            return backtest_runs.summary(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+
+    @app.get(
         "/api/v1/backtests/{run_id}/request",
         operation_id="getBacktestRequest",
         responses=_backtest_run_not_found_responses(),

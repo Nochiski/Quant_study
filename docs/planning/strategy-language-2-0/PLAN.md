@@ -1,17 +1,17 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: IN_REVIEW
+project_status: IN_PROGRESS
 current_phase: P4
-current_pr: P4-02
-active_prs: [P4-02]
+current_pr: P4-03
+active_prs: [P4-03]
 parallel_window: []
-last_updated: 2026-09-30T14:17:09+09:00
+last_updated: 2026-09-30T17:30:15+09:00
 planned_prs: 30
-merged_prs: 21
+merged_prs: 22
 integrated_prs: 0
-approved_prs: 21
-progress_percent: 70
+approved_prs: 22
+progress_percent: 73
 ---
 
 # schema 1.2 · 그래프 표현 실시간 진행 계획
@@ -24,13 +24,13 @@ progress_percent: 70
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P4` |
-| Current/next PR | `P4-02` |
-| Active PR | `P4-02` |
-| Progress | `21 / 30 done (70%), main 21, integration 0` |
-| Approved | `21 / 30` |
-| Aggregated at | `2026-09-30 14:17 KST` |
+| Current/next PR | `P4-03` |
+| Active PR | `P4-03` |
+| Progress | `22 / 30 done (73%), main 22, integration 0` |
+| Approved | `22 / 30` |
+| Aggregated at | `2026-09-30 17:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -126,28 +126,26 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
 | P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 10 | 0 | `MERGED` |
 | P3 | Frontend 1.2 adaptation | 3 | 3 | 0 | `MERGED` |
-| P4 | Graph level 1: pipeline | 4 | 1 | 0 | `IN_REVIEW` |
+| P4 | Graph level 1: pipeline | 4 | 2 | 0 | `IN_PROGRESS` |
 | P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
-| **Total** |  | **30** | **21** | **0** | **70%** |
+| **Total** |  | **30** | **22** | **0** | **73%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
-현재 PR 은 `P4-02`(`IN_REVIEW` — P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) MERGED(`bc8b0dd1`), P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) r1 APPROVE 반영·main 병합·머지 대기, 리드 결정 2026-09-30 — WORKFLOW P4-02 결정 블록)이다. 아래 P1-05 이하 절은
-지난 PR 의 패킷 기록이고, P3-03 패킷은 P3 스택 절 끝에, P4-01a·P4-01b 패킷은 P4 스택 절에 있다.
+현재 PR 은 `P4-03`(`IN_PROGRESS` — P4-03a backend [#424](https://github.com/Nochiski/Quant_study/pull/424) 리뷰 대기, 리드 결정 2026-09-30 — WORKFLOW P4-03 결정 블록)이다. 아래 P1-05 이하
+절은 지난 PR 의 패킷 기록이고, P3-03 패킷은 P3 스택 절 끝에, P4-01a·P4-01b·P4-02 패킷은 P4 스택 절에 있다.
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-02` — 두 PR(리드 결정 6): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(a + route 테스트 R1·R2) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(b, #392 위 스택) |
-| Intent | 그래프 1수준(파이프라인) 캔버스: 요약 띠·4단계 카드·문장 안 컨트롤로 전략을 읽고 고친다. 카드 모델은 P4-01 투영, 컨트롤·연산은 Form 필드 행과 한 경로다 |
-| Acceptance | WORKFLOW P4-02(리드 결정 2026-09-30 포함) |
-| Non-goals | 팩터 카드·빈 팩터 추가·기준일 미리보기(P4-03), 탭 개편·Form·JSON 은퇴·빈 화면 e2e·식별자 0개 e2e 단언(P4-04), 레시피(P5), 실행 설정 띠 이동(띠는 이미 모든 탭 위, `features/run-backtest` 무변경), 비율 칸 % 입출력 전환(리드 결정 3) |
-| Branch/worktree | `feat/lang2-p4-02-stage-cards` / `wt-run-concurrency`(재사용) |
-| Base SHA | main `09aaf755`(#367 머지) |
-| Steps | ① PLAN·WORKFLOW 착수(리드 결정) → a: ② `projectPipeline` 입력을 `FormProjection` 으로(refactor) → ③ Form 필드 행에서 확정 훅(`useFieldCommit`)·되돌리기 버튼(`FieldActions`)·컨트롤(`FieldControl`)을 뗀다(refactor, 동작 불변. 목록 추가·삭제 상태는 쓰는 곳이 생기는 b 에서 — #392 리뷰 P3-3) → ④ 틀 분해 함수 → ⑤ 캔버스 골격·필드 카드·요약 띠·Graph 탭 배선·i18n(단계 소제목·카드 틀) → a 끝에서 비테스트 src 크기 확인(600줄·10파일을 넘으면 a 만 먼저 PR) → b: ⑥ 규칙 목록·항목 문장 → ⑦ 5 실행 안내 카드 → ⑧ 문제 행 이동(Graph 탭 카드) → ⑨ US-DM-07 비고 → ⑩ route 테스트 R1(카드 문장 컨트롤 → YAML 그 줄만·compile) · R2(Form 행과 같은 SourceOperation) → ⑪ 전체 게이트 한 번. 개발 중에는 변경 범위 vitest 만(리드 지시, 자원). **진행**: ①~⑤ 완료, a 끝 크기 13파일 +1136/−213 → P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) 로 먼저 열었다. ⑩ R1·R2 는 a 의 동작을 고정하므로 a 에 넣었고 ⑪ 은 a tip 에서 한 번 돌았다(검증 기록). P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) 는 ⑥ 규칙 추가·삭제 · ⑦ 5 실행 안내 · ⑧ 문제 행 이동 · ⑨ US-DM-07 비고와 b tip 전체 게이트(검증 기록) — 모두 완료 |
-| Head SHA | P4-02a `3ebbae7c`(`24b0b13f` refactor 입력 · `29ae9b89` refactor 컨트롤 추출 · `fea12044` 캔버스 · `e1eed337` route R1·R2 · `3ebbae7c` e2e 기준선 · `64ecd05c` 시각 점검 수정 — 열 수·선택지 이름·팩터 카드 진단). r1 반영: `f53362d1` P2-1 long_short 틀 삭제 · `d34d922b` P3-1 단언 셋 · `d42e32c9` P3-2 reveal 분기 되돌림 · `20153652` P3-3 코드 총량 정리. P4-02b `ce7c9cea`(`7d7a0717` 문제 행 이동 · `b2a63a96` 규칙 추가·삭제·5 실행 안내 · `ce7c9cea` US-DM-07 비고, r1 반영된 #392 위로 rebase — 옛 `ce639ec3`·`f4e987e3`·`c3517998`) |
-| Diff stat | P4-02a main `09aaf755` 대비 20파일 +1561/−248(PLAN·WORKFLOW·기준선 1장 포함, `3ebbae7c` 기준). 비테스트 src 13파일 +1136/−213 |
+| PR | `P4-03` — 세 PR 스택(리드 결정 8): P4-03a backend(빈 그래프 코드·trace `summary` 계약·OpenAPI·SDK) → P4-03b 팩터 카드·추가 → P4-03c 미리보기 패널 |
+| Intent | P4-03a: 빈 그래프를 "첫 단계를 추가하세요"로 알리는 진단 코드와, 기준일 미리보기가 다시 계산 없이 그릴 수 있는 trace `summary`(유니버스·규칙 탈락·순위 탈락·결측 제외·그중 masked 수, 그 기준일 targets)를 backend 가 준다 |
+| Acceptance | WORKFLOW P4-03(리드 결정 2026-09-30 포함) 중 backend 몫 |
+| Non-goals | 팩터 카드·`renameFactor`·빈 팩터 추가 UI(P4-03b), 미리보기 패널 UI(P4-03c), 탭 개편·Form 은퇴(P4-04) |
+| Branch/worktree | `feat/lang2-p4-03a-backend` / `wt-run-concurrency`(재사용) |
+| Base SHA | main `2b27fa06`(PR 열기 전 `29296bda` 에서 옮김) + #416(#413) 의 PLAN 커밋 cherry-pick(P4-02 MERGED 기록, 같은 내용) |
+| Steps | ① PLAN·WORKFLOW 착수(리드 결정) → ② `factor.graph.empty` → ③ trace `summary` 계약(요약만 요청 허용, 사유별 수·masked·targets) → ④ OpenAPI·생성 SDK 재생성 → ⑤ 전체 게이트(backend `pytest`·`ruff`·`pyright`, `database/tests`, frontend `typecheck`·`test`, `api:generate` diff) |
 | Full gate | CI 전체 job green |
 
 ### P1-05
@@ -905,9 +903,10 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    실행 결과 차이는 무시할 만하고 채우기는 사용자가 확인하는 값이라 그대로 둔다(#251 DEFECT-242-05).
    run 상세의 실행 기록도 같은 필드 모델(`entities/backtest` `runEnvironmentFields`)로 칸 이름·단위·enum
    값 이름을 보인다
-   (DEFECT-242-04). e2e 의 `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 기본값을 손으로 적어 둔다. enum 은 select,
-   숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe` 는 카탈로그 목록이 없어
-   텍스트 입력이다(Form 의 universe 카탈로그 컨트롤과 같은 규칙).
+   (DEFECT-242-04). e2e 의 `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이고, 기대값은 backend 스키마 fixture 의
+   기본값과 칸 적용 조건에서 만든다(`frontend/e2e/workbench-helpers.ts` 의 `requestedEnvironment`, #357
+   C-P3-12). enum 은 select, 숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe`
+   는 카탈로그 목록이 없어 텍스트 입력이다.
 3. **패널은 스키마가 말하는 규칙을 먼저 막고, 스키마 밖 규칙은 서버의 코드화된 거절로 고친다.** 패널이 같은
    스키마의 범위·필수·enum 과 칸 적용 조건(`x-applicable-when` — 지금 모드에서 읽히지 않는 칸은 끄고 요청에
    싣지 않으며 읽히는 칸은 비울 수 없다, #352)을 빠른 피드백으로 먼저 막아, 필드 옆 오류는 패널이 스스로
@@ -918,13 +917,17 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    시작일을 옮기는 교정 버튼을 보인다(V5-05). 날짜 칸의 1900-01-01 ~ 9999-12-31 은 backend 규칙이 아니라
    브라우저 날짜 입력의 연도를 4자리로 묶는 화면 범위다(#264). 그 밖의 요청 본문 검증 실패는
    `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화돼 툴바가 패널 칸 이름으로 말한다(#260,
-   추적·미리보기도 같은 코드 #351).
+   추적·미리보기도 같은 코드 #351). 같은 패널의 실행 옵션(`BacktestRunSpec`)도 backend 규칙(초기 자본 > 0,
+   연환산 거래일은 양의 정수, OOS 시작일은 실행 기간 안)을 빠른 피드백으로 옮겨 적는다(`run-settings.ts`).
+   최종 판정은 backend 다(#387 리뷰 P3-5).
    처음 결정(명시 `environment` 의 422 를 필드 단위 구조로 바꾸지 않는다 — 패널 검증이 같은 SoT 를 읽는
    동안에는 도달 경로가 없다)은 매도 거래세 칸 사이 규칙(V2-01)과 연구 하한(V1-01)이 스키마 밖에 생기며
    전제가 깨져 #260·#352 로 위와 같이 바뀌었다.
 4. **매니페스트 평면 비용 필드는 유지한다(NB-4(a)).** `RunManifest.fee_bps`·`slippage_bps`·
-   `participation_rate` 는 `environment` 와 같은 값이지만, 이미 저장된 run 과 결과 설명 도구가 읽는
-   필드라 지우면 OpenAPI·저장소 호환이 함께 움직인다. 화면(run 상세)은 `environment` 만 읽는다.
+   `participation_rate` 는 `environment` 와 같은 값이지만, 이미 저장된 run 의 결과와 OpenAPI 가 싣는
+   필드라 지우면 저장소 호환(옛 결과 읽기)과 생성 SDK 가 함께 움직인다. 결과 설명 도구
+   (`_result_context.py`)와 화면(run 상세)은 `environment` 만 읽는다(#357 C-P3-12, 평면 필드 정리는
+   #356 C-P3-7).
 5. **업그레이드 응답의 `environment` 는 사용자가 누를 때 패널에 채운다.** 배너가 "실행 설정에 채우기"를
    보이고, 누르면 패널 값이 바뀐다. `environment` 가 `null` 이면 버튼 대신 warning 을 보이고 패널을 건드리지
    않는다. 배너 문구는 버전 중립으로 바꾸고 은퇴 버전 문자열을 frontend 에 두지 않는다(#15 6키 포함).
@@ -995,6 +998,19 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
 
 ---
 
+| 항목 | 값 |
+|---|---|
+| PR | `P4-02`(MERGED — P4-02a main 머지 `bc8b0dd1`, P4-02b main 머지 `29296bda`) — 두 PR(리드 결정 6): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(a + route 테스트 R1·R2) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(b, #392 위 스택) |
+| Intent | 그래프 1수준(파이프라인) 캔버스: 요약 띠·4단계 카드·문장 안 컨트롤로 전략을 읽고 고친다. 카드 모델은 P4-01 투영, 컨트롤·연산은 Form 필드 행과 한 경로다 |
+| Acceptance | WORKFLOW P4-02(리드 결정 2026-09-30 포함) |
+| Non-goals | 팩터 카드·빈 팩터 추가·기준일 미리보기(P4-03), 탭 개편·Form·JSON 은퇴·빈 화면 e2e·식별자 0개 e2e 단언(P4-04), 레시피(P5), 실행 설정 띠 이동(띠는 이미 모든 탭 위, `features/run-backtest` 무변경), 비율 칸 % 입출력 전환(리드 결정 3) |
+| Branch/worktree | `feat/lang2-p4-02-stage-cards` / `wt-run-concurrency`(재사용) |
+| Base SHA | main `09aaf755`(#367 머지) |
+| Steps | ① PLAN·WORKFLOW 착수(리드 결정) → a: ② `projectPipeline` 입력을 `FormProjection` 으로(refactor) → ③ Form 필드 행에서 확정 훅(`useFieldCommit`)·되돌리기 버튼(`FieldActions`)·컨트롤(`FieldControl`)을 뗀다(refactor, 동작 불변. 목록 추가·삭제 상태는 쓰는 곳이 생기는 b 에서 — #392 리뷰 P3-3) → ④ 틀 분해 함수 → ⑤ 캔버스 골격·필드 카드·요약 띠·Graph 탭 배선·i18n(단계 소제목·카드 틀) → a 끝에서 비테스트 src 크기 확인(600줄·10파일을 넘으면 a 만 먼저 PR) → b: ⑥ 규칙 목록·항목 문장 → ⑦ 5 실행 안내 카드 → ⑧ 문제 행 이동(Graph 탭 카드) → ⑨ US-DM-07 비고 → ⑩ route 테스트 R1(카드 문장 컨트롤 → YAML 그 줄만·compile) · R2(Form 행과 같은 SourceOperation) → ⑪ 전체 게이트 한 번. 개발 중에는 변경 범위 vitest 만(리드 지시, 자원). **진행**: ①~⑤ 완료, a 끝 크기 13파일 +1136/−213 → P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) 로 먼저 열었다. ⑩ R1·R2 는 a 의 동작을 고정하므로 a 에 넣었고 ⑪ 은 a tip 에서 한 번 돌았다(검증 기록). P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) 는 ⑥ 규칙 추가·삭제 · ⑦ 5 실행 안내 · ⑧ 문제 행 이동 · ⑨ US-DM-07 비고와 b tip 전체 게이트(검증 기록) — 모두 완료 |
+| Head SHA | P4-02a `3ebbae7c`(`24b0b13f` refactor 입력 · `29ae9b89` refactor 컨트롤 추출 · `fea12044` 캔버스 · `e1eed337` route R1·R2 · `3ebbae7c` e2e 기준선 · `64ecd05c` 시각 점검 수정 — 열 수·선택지 이름·팩터 카드 진단). r1 반영: `f53362d1` P2-1 long_short 틀 삭제 · `d34d922b` P3-1 단언 셋 · `d42e32c9` P3-2 reveal 분기 되돌림 · `20153652` P3-3 코드 총량 정리. P4-02b `ce7c9cea`(`7d7a0717` 문제 행 이동 · `b2a63a96` 규칙 추가·삭제·5 실행 안내 · `ce7c9cea` US-DM-07 비고, r1 반영된 #392 위로 rebase — 옛 `ce639ec3`·`f4e987e3`·`c3517998`) |
+| Diff stat | P4-02a main `09aaf755` 대비 20파일 +1561/−248(PLAN·WORKFLOW·기준선 1장 포함, `3ebbae7c` 기준). 비테스트 src 13파일 +1136/−213 |
+| Full gate | CI 전체 job green |
+
 ## P0 — 기획 패키지와 계약 문서
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
@@ -1064,8 +1080,8 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P4-01` | `pipeline-projection.ts` (4단계 모델, `x-stage`, 팩터 요약 문장) | P3-03 | `MERGED` | 두 PR(리드 결정 2026-09-30): P4-01a [#347](https://github.com/Nochiski/Quant_study/pull/347)(`3b16345f` refactor·`50830b7e` `x-stage`·`398a14e2` 인프라 기준선) · `review_pr347` r1 APPROVE(`8af5f1b7`, P3 4 → P4-01b) · main 머지 `92bf38ee`(#347, 2026-09-30) → P4-01b [#367](https://github.com/Nochiski/Quant_study/pull/367)(`feat/lang2-p4-01b-pipeline-projection`, [#359](https://github.com/Nochiski/Quant_study/pull/359) 위 스택 → #359 머지 `7e7b2da9` 뒤 base main) · `review_pr367` r1 APPROVE(P2 2·P3 4 반영, 리드 결정 둘) · main 머지 `09aaf755`([#367](https://github.com/Nochiski/Quant_study/pull/367), 2026-09-30) |
-| [ ] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `IN_REVIEW` | 두 PR(리드 결정 6 — a 끝 비테스트 src 13파일 +1136/−213): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(`feat/lang2-p4-02-stage-cards`, main `09aaf755` 위) · `review_pr392` r1 APPROVE(P2 1·P3 4, 리드 지시로 머지 전 반영, 코드 tip `20153652`, main 병합 `b9e4b915`·CI R2 타이밍 수정 `e2f9e47a`) · main 머지 `bc8b0dd1`(#392, 2026-09-30) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(`feat/lang2-p4-02b-stage-cards`, `review_pr395` r1 APPROVE(P3 5, 옛 `ca3c18fa` 기준 — 테스트·문서 반영), main `bc8b0dd1` 병합 `eebd4905`, 머지 대기) |
-| [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `WAITING` | — |
+| [x] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `MERGED` | 두 PR(리드 결정 6 — a 끝 비테스트 src 13파일 +1136/−213): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(`feat/lang2-p4-02-stage-cards`, main `09aaf755` 위) · `review_pr392` r1 APPROVE(P2 1·P3 4, 리드 지시로 머지 전 반영, 코드 tip `20153652`, main 병합 `b9e4b915`·CI R2 타이밍 수정 `e2f9e47a`) · main 머지 `bc8b0dd1`(#392, 2026-09-30) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(`feat/lang2-p4-02b-stage-cards`, `review_pr395` r1 APPROVE(P3 5, 옛 `ca3c18fa` 기준 — 테스트·문서 반영), main `bc8b0dd1` 병합 `eebd4905`) · main 머지 `29296bda`([#395](https://github.com/Nochiski/Quant_study/pull/395), 2026-09-30) |
+| [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `IN_PROGRESS` | 세 PR 스택(리드 결정 8): P4-03a [#424](https://github.com/Nochiski/Quant_study/pull/424)(`feat/lang2-p4-03a-backend`, main `2b27fa06` 위, 리드 결정 5 수정 반영 — masked 제외·이름 포함) 리뷰 대기 → P4-03b → P4-03c |
 | [ ] | `P4-04` | 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `WAITING` | — |
 
 Phase exit:
@@ -1194,6 +1210,10 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P4-03a 리드 결정 5 수정 반영**([#424](https://github.com/Nochiski/Quant_study/pull/424)). (1) **masked 분리 집계는 뺀다** — 비용 대비 효용이 낮아서다(평가기 → 포트폴리오 → 컴파일러로 가림 표시를 나르는 제품 코드 약 100줄, WORKFLOW P4-03 acceptance 밖). 종목별 가림은 디버거가 추적 상태 `masked`(#350)로 이미 보인다. 필요하면 후속으로 한다. `FactorValue.masked`·컴파일러 세 자리의 기록·`PortfolioFrameSummary.masked`·팩터 미리보기 응답의 부수 필드를 모두 걷었다. `_warming_up` 은 원래 `_trace.py` 한 곳에만 있었고 옮긴 이유가 걷은 `masked_output` 뿐이라 제자리로 되돌렸다(중복이 생기지 않는다). summary 수는 유니버스·규칙 탈락·순위 탈락·결측 제외·순위에 든 수(`eligible`)다. (2) **선정 종목 이름을 싣는다** — `summary.targets` 한 줄이 `position`(`TargetPosition`)과 `security`(`SecurityRef` — 이름·티커, 모르면 null)다. portfolio_design 이 이미 의존하는 포트(관측·팩터 메타데이터·엔진)에는 `SecurityRef` 를 주는 메서드가 없고, `load_universe` 는 venue 를 받아 시장 → venue 대응을 application 에 두 번째로 적어야 했다. 그래서 작은 포트 `SecurityDirectoryPort.universe_securities(market, universe_id, as_of)` 를 두었다. 입력이 관측 질의와 같아 venue 대응은 관측 포트를 구현한 어댑터(duckdb `MARKET`·`VENUE`, mock `_MOCK_UNIVERSES`)가 그대로 갖는다. duckdb 는 `load_universe` 가 붙인 이름을 재사용한다. (3) 구현자 해석 셋(결측 제외 두 사유, 기준일을 비우면 마지막 신호 프레임, 요약만일 때도 `factor_id` 필수)은 리드가 수용했다.
+- 2026-09-30 — **P4-03a PR [#424](https://github.com/Nochiski/Quant_study/pull/424)**(backend, 리뷰 대기). (1) 빈 그래프 진단 `factor.graph.empty`("첫 단계를 추가하세요.", path `nodes`, output_missing 대신, alias `strategy.expression.empty`). (2) 평가 값 `FactorValue.masked`(`_NodeEvaluator.masked_output` — 가린 칸에서 이력 부족 칸을 뺀 것이라 출력 노드 추적 상태 `masked` 와 같은 칸, `_warming_up` 한 정의). (3) 컴파일러가 trace 하는 프레임의 요약 `PortfolioFrameSummary`(universe·eligible·eligibility_failed·eligibility_rank_cut·missing·masked, 유니버스 멤버만, tape 해시 밖)를 센다. 결측 제외 = `MISSING_ELIGIBILITY`·`MISSING_FACTOR`(`MISSING_RISK` 는 선정 뒤 비중 단계라 뺐다). 원장 몫은 결측을 판정한 세 자리(1-pass 규칙 필드·팩터 값·2-pass 횡단면 필드)가 입력 `masked` 로 기록한다. (4) trace 응답 `summary`(`StrategyTraceSummary`: 수 + 그 기준일 targets 순위 순, 기준일이 신호일일 때만)와 `security_ids` 0개(요약만) 허용, OpenAPI·SDK 재생성. 기준일을 비우면 실행 설정 구간의 마지막 신호 프레임이다(종료일 자체는 신호일이 아닐 수 있어 P4-03c 는 기준일을 비워 보낸다). `factor_id` 는 필수로 둔다(응답 `plan_hash` 가 팩터 기준). 리드 결정 5 의 수 가운데 이름(`SecurityRef.name`)은 trace 서비스에 이름 원천이 없어 리드에게 물었다. SoT 규칙에 기준일 요약 행을 더했다.
+- 2026-09-30 — **P4-03 착수·설계 결정(리드)**. 구현자 설계 메모의 여덟 선택지에 리드가 답했다(WORKFLOW P4-03 결정 블록). (1) 카드 이름은 `label` 을 편집하고 `factor_id` 는 씨앗(`factor_<n>`, 캔버스에 안 보임)이다. rename 은 Form·YAML 경로의 `renameFactor` planner 로 하고, Form `factor_id` 행이 참조를 끊던 잠복 결함도 고친다 — WORKFLOW P4-03 의 "이름(`factor_id` 편집 = 참조 갱신 rename)" 문장을 이 결정으로 바꿨다. (2) 슬라이더 하한은 스키마 최솟값, 상한 3·단계 0.1 은 표시 전용, 숫자 칸 병기, 확정은 blur·pointerup 한 번. (3) 삭제 거부는 훅이 참조 목록만 돌려주고 화면이 이름을 만든다. (4) 빈 그래프는 backend `factor.graph.empty`("첫 단계를 추가하세요."). (5) 미리보기는 trace 응답 `summary` 블록(`security_ids` 없이도), N = 그 기준일 targets, 기준일 기본값 = 실행 설정 종료일, 수·masked 는 backend 가 센다. (6) 캔버스 아래 패널, 버튼 갱신·stale 배지, 자동 갱신 없음. (7) 카드 위 진단은 수 배지. (8) P4-03a backend → P4-03b 카드·추가 → P4-03c 미리보기, 스택 PR. P4-03a 는 main `29296bda` 에서 `feat/lang2-p4-03a-backend` 로 시작한다. #416(#413 첫 parse 전 로딩) 리뷰와 병행하므로 P4-02 MERGED 기록은 #416 의 PLAN 커밋을 cherry-pick 해 같은 내용으로 둔다. P4-03 상태 `IN_PROGRESS`.
+- 2026-09-30 — **P4-02 MERGED**. P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) 가 main 에 머지돼(`29296bda`) P4-02 행을 `MERGED` 로 바꿨다(P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) `bc8b0dd1`). 두 PR 로 그래프 1수준 캔버스(요약 띠·4단계 카드·문장 안 컨트롤·규칙 추가·삭제·"5 실행" 안내·문제 행 이동)가 들어왔다. #392 CI 에서 찾은 첫 parse 전 기본값 표시·편집 손실은 #413 으로 고친다(이 기록을 싣는 PR). 다음은 P4-03a 다 — 리드 결정 여덟 (카드는 `label` 편집·`factor_id` 씨앗, 슬라이더 하한은 스키마, 삭제 거부는 화면이 이름으로, `factor.graph.empty`, trace `summary` 블록, 캔버스 아래 버튼 갱신 패널, 카드 진단 수 배지, a·b·c 스택)은 P4-03a 착수 커밋에서 WORKFLOW 와 함께 적는다.
 - 2026-09-30 — **P4-02a MERGED, P4-02b main 병합**. [#392](https://github.com/Nochiski/Quant_study/pull/392) 가 main 에 머지됐다(`bc8b0dd1`, P4-02a — 캔버스·카드 문장 틀·route R1·R2). 로컬 브랜치 `feat/lang2-p4-02-stage-cards` 는 지웠다. [#395](https://github.com/Nochiski/Quant_study/pull/395) 에 origin/main 을 merge 했다(`eebd4905`, force push 없음, 충돌은 PLAN 한 곳 — 양쪽 기록을 모두 살렸다). R1·R2 의 정착 대기(`data-settled`)는 main 에서 들어왔고, #395 가 더한 route 테스트 둘(문제 행 → 캔버스 카드·목록)은 편집하지 않아 같은 대기가 필요 없다. P4-02 상태 `IN_REVIEW` 유지 — #395 머지로 P4-02 가 끝난다.
 - 2026-09-30 — **P4-02a main 병합과 CI R2 타이밍 수정**([#392](https://github.com/Nochiski/Quant_study/pull/392)). 리드 머지 순서(#387 → #389 → #392)대로 main `227a655a` 를 merge 했다(`b9e4b915`, force push 없음, 충돌은 정본 대장 한 곳 — 검증 랩 두 행은 main, "그래프 표현 투영" 행은 `.card` 문장). 그 뒤 CI 두 run 에서 route R2 가 "마지막 compile 이 편집 전 원문"으로 실패했다. 원인은 테스트 타이밍이다: 빠른 러너에서 문서를 연 지 약 60ms 만에(첫 parse 150ms 전) 카드에 입력해, 빈 parse 로 그려진 캔버스가 적힌 칸을 미작성으로 보였고 확정이 insert-key 가 되어 parse 대기 중 구조 연산 보류(`pending`, 설계대로)로 버려졌다. `PARSE_DELAY_MS` 4000 으로 같은 실패를 재현했다. 테스트가 문서 상태 배지 `data-settled`(e2e `waitForSettledDocument` 와 같은 신호)를 기다린 뒤 편집하고, "마지막 compile" 대신 원문 일치 + 정착 + 그 원문의 compile 요청을 보게 고쳤다(`e2f9e47a`, 단언은 그대로). 관찰(후속 후보): 문서를 연 직후 첫 parse 전 약 150ms 동안 Form·캔버스가 스키마 기본값으로 그려진다 — 그 사이 편집은 보류 안내와 함께 버려진다. Form 부터 있던 동작이다.
 - 2026-09-30 — **P4-02b 리뷰 r1 반영**([#395](https://github.com/Nochiski/Quant_study/pull/395), `review_pr395` r1 APPROVE, 리드 지시). 코드는 그대로 두고 테스트·문서만 더했다. (1) P3-1: 빈 문서의 첫 문제(`/factors` "팩터를 하나 이상 추가하세요")를 Graph 탭에서 누르면 캔버스 알파 팩터 목록 group 이 `aria-current` 와 마지막 스크롤을 받는 route 테스트. (2) P3-2: `unstagedNames` 가 정확히 [전략 이름·전략 설명·탐색 파라미터]이고, 스키마 사본에서 `parameters` 에 단계를 주면 빠진다 — 손 목록·`const` 필터 제거를 구별한다. (3) P3-3: 캔버스 규칙 추가 버튼이 settling 이면 잠기고 사유를 설명으로 단다(P4-04 가 Form 목록을 걷어도 남는다). (4) P3-4: 캔버스 규칙은 참조되지 않아 삭제 거부가 일어나지 않는다(PR 본문 정정). 팩터 카드가 같은 거부를 쓸 때 이름으로 말하라는 한 줄을 WORKFLOW P4-03 acceptance 에 적었다. (5) P3-5: R2-1 주석을 제 테스트("scrolls to the editor row…") 앞으로 옮겼다. US-DM-07 비고 보강은 하지 않는다(리드).

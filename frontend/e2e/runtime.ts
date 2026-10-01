@@ -1,5 +1,12 @@
 import { isAbsolute, join } from "node:path";
 
+/**
+ * backend 가 실험 trial run 을 엔진 앞에서 붙잡아 두는 초(`STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS`).
+ * mock 실행은 1초 안에 끝나 실험의 대기·일시정지·취소를 화면에서 볼 수 없다. 사용자 단일 실행은 붙잡지
+ * 않으므로 실험을 만들지 않는 spec 에는 영향이 없다. 설정(webServer env)과 spec 의 대기 시간이 이 값을 읽는다.
+ */
+export const TRIAL_HOLD_SECONDS = 15;
+
 /** `npm run test:e2e`(run-playwright.mjs)가 만든 격리 런타임 디렉터리를 가리키는 환경 변수. */
 export const RUNTIME_DIRECTORY_ENV = "STRATEGY_WORKBENCH_E2E_RUNTIME_DIR";
 

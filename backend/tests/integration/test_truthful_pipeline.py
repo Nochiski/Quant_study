@@ -474,7 +474,9 @@ def test_unused_by_factor_non_finite_raw_field_fails_preview_trace_and_the_backt
     with pytest.raises(RawObservationContractError, match="raw numeric field value must be finite"):
         portfolio.preview(PortfolioPreviewRequest(spec, environment=_environment()))
 
-    trace = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    trace = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
     with pytest.raises(RawObservationContractError, match="raw numeric field value must be finite"):
         trace.trace(
             StrategyTraceRequest(
@@ -1129,7 +1131,9 @@ def test_unknown_sectors_keep_the_full_book_and_warn_in_preview_trace_and_run(
     assert f"{len(preview.tape.frames)}/{len(preview.tape.frames)}" in message
 
     # 디버거(preview 진단 화면)가 읽는 trace 응답의 경고에도 같은 문장이 실린다.
-    trace = StrategyTraceService(portfolio, InMemoryStrategyRepository()).trace(
+    trace = StrategyTraceService(
+        portfolio, InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    ).trace(
         StrategyTraceRequest(
             strategy_source=InlineDraft(spec, "inline_draft", "unknown-sector-probe"),
             environment=_environment(),

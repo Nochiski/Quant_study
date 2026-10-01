@@ -1,4 +1,5 @@
 from strategy_workbench.domain.experiment._trial import (
+    DEFAULT_EXPERIMENT_CONTROLS,
     MAX_EXPERIMENT_PRIORITY,
     ExperimentControls,
     ExperimentStatus,
@@ -9,6 +10,7 @@ from strategy_workbench.domain.experiment._trial import (
 )
 
 __all__ = [
+    "DEFAULT_EXPERIMENT_CONTROLS",
     "MAX_EXPERIMENT_PRIORITY",
     "ExperimentControls",
     "ExperimentStatus",

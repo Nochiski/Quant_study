@@ -373,8 +373,9 @@ def measure_once(
         clock.add("compute_analytics", time.perf_counter() - started)
         return analytics
 
-    def progress(value: float, stage: str, message: str) -> None:
-        clock.mark(f"progress:{stage}")
+    def progress(value: float, message: str) -> None:
+        # 실행기는 단계 이름을 싣지 않는다(DR-B-03). 마지막 보고가 산출물 동결 직전이다
+        clock.mark("progress:last")
 
     with ExitStack() as stack:
         stack.enter_context(patch.object(adapter_module, "BacktestEngine", engine_factory))
@@ -395,7 +396,7 @@ def measure_once(
     stage_seconds["analysis_points"] = clock.elapsed(
         "artifacts_returned", "compute_analytics_entered"
     )
-    stage_seconds["manifest"] = clock.elapsed("progress:artifacts", "execute_returned")
+    stage_seconds["manifest"] = clock.elapsed("progress:last", "execute_returned")
     stage_seconds["other"] = max(
         0.0, total_seconds - sum(stage_seconds[stage] for stage in STAGES if stage != "other")
     )

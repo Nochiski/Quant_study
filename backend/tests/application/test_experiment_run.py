@@ -30,6 +30,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 )
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
+    RunSlotUsage,
     TrialResultUnreadableError,
     TrialRunRejectedError,
 )
@@ -74,6 +75,7 @@ from strategy_workbench.domain.experiment.facade.design import (
 )
 from strategy_workbench.domain.experiment.facade.statistics import CapacityGap, CapacityLimit
 from strategy_workbench.domain.experiment.facade.trial import (
+    DEFAULT_EXPERIMENT_CONTROLS,
     ExperimentControls,
     ExperimentStatus,
     TrialStatus,
@@ -200,7 +202,7 @@ class _FakeRuns:
                 run_id=run_id,
                 status=self.run_statuses[run_id],
                 progress=0.0,
-                stage="",
+                stage="queued",
                 message="",
                 created_at=_AT,
                 updated_at=_AT,
@@ -208,6 +210,9 @@ class _FakeRuns:
             )
             for run_id in run_ids
         }
+
+    def slot_usage(self) -> RunSlotUsage:
+        return RunSlotUsage(total=3, running=2)
 
     def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
         self.schedules.append((owner, paused, priority))
@@ -326,6 +331,13 @@ def test_a_failed_trial_is_kept_and_a_retry_is_a_new_attempt() -> None:
     experiment_id = service.create(_request()).record.experiment_id
     runs.run_statuses["run-1"] = RunStatus.FAILED
 
+    # 재시도·선택 가능 여부는 trial 상태에 실려 화면이 규칙을 다시 세지 않는다(V5-01).
+    assert [(state.retryable, state.selectable) for state in service.trials(experiment_id)] == [
+        (False, False),
+        (True, False),
+        (False, False),
+        (False, False),
+    ]
     retried = service.retry(experiment_id, 1)
 
     assert [(attempt.attempt, attempt.run_id) for attempt in retried.attempts] == [
@@ -374,6 +386,32 @@ def test_cancel_stops_submission_and_cancels_submitted_runs() -> None:
     assert runs.started == []
     assert cancelled.status is ExperimentStatus.CANCELLED
     assert [state.status for state in service.trials(experiment_id)] == [TrialStatus.CANCELLED] * 4
+    # 취소한 실험의 trial 은 다시 실행할 수 없다.
+    assert not any(state.retryable for state in service.trials(experiment_id))
+
+
+def test_cancelling_a_completed_experiment_is_refused_and_leaves_it_completed() -> None:
+    """#402 리뷰 P3-3: 목록이 아직 도는 것으로 보인 틈에 누른 취소가 결과가 다 나온 실험을 취소로
+    바꾸지 않고 `experiment.cancel.completed` 로 거절한다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(runs, {f"run-{index}": _result(0.1 * (index + 1)) for index in range(4)})
+    assert service.advance(experiment_id) is True
+    runs.complete_all()
+    assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
+
+    with pytest.raises(ExperimentStateError) as raised:
+        service.cancel(experiment_id)
+    after = service.get(experiment_id)
+
+    assert raised.value.code == "experiment.cancel.completed"
+    assert (after.status, after.finished, after.record.cancelled_at, runs.cancelled) == (
+        ExperimentStatus.COMPLETED,
+        True,
+        None,
+        [],
+    )
 
 
 def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
@@ -400,6 +438,7 @@ def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
     with pytest.raises(ExperimentStateError) as raised:
         service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
     _finish(runs, {f"run-{index}": _result() for index in range(4)})
+    assert service.trials(experiment_id)[2].selectable
     selection = service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
 
     assert raised.value.code == "experiment.selection.not_completed"
@@ -481,11 +520,16 @@ def test_a_candidate_is_chosen_only_after_the_experiment_has_finished() -> None:
     service = _service(runs)
     experiment_id = service.create(_request()).record.experiment_id
     _finish(runs, {"run-2": _result()})
+    # 화면이 읽는 `selectable` 도 같은 판정이다 — 완료한 trial 이라도 실험이 끝나기 전에는 거짓이다.
+    unfinished_selectable = service.trials(experiment_id)[2].selectable
 
     with pytest.raises(ExperimentStateError) as raised:
         service.select(experiment_id, 2, "학습 샤프가 가장 높다")
     service.cancel(experiment_id)
+    assert service.trials(experiment_id)[2].selectable
     selection = service.select(experiment_id, 2, "학습 샤프가 가장 높다")
+
+    assert not unfinished_selectable
 
     assert raised.value.code == "experiment.selection.not_finished"
     assert "unfinished_trials=3" in str(raised.value)
@@ -546,6 +590,8 @@ def test_experiments_are_listed_newest_first_a_page_at_a_time() -> None:
     assert (first.next_after, second.next_after) == (created[1], None)
     assert [item.record.experiment_id for item in second.items] == created[:1]
     assert service.list(after="missing", limit=2).items == ()
+    # 대기열 화면의 슬롯 사용량과 우선순위 상한은 목록 응답이 싣는다(V5-01).
+    assert (first.slots, first.max_priority) == (RunSlotUsage(total=3, running=2), 5)
 
 
 def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
@@ -760,9 +806,9 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
     before = reopened.get(experiment_id)
     after = reopened.control(experiment_id, paused=True)
 
-    assert before.record.controls == ExperimentControls()
+    assert before.record.controls == DEFAULT_EXPERIMENT_CONTROLS
     assert [len(state.attempts) for state in reopened.trials(experiment_id)] == [1, 1, 1, 1]
-    assert after.record.controls == ExperimentControls(paused=True)
+    assert after.record.controls == ExperimentControls(paused=True, priority=1)
 
 
 # 워크포워드(V3-05). 칸 두 개(scale -1 → (0,), 1 → (1,)) × 롤링 창 두 개라 trial 0·1 이 칸 (0,) 의

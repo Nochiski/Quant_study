@@ -57,10 +57,14 @@ class ExperimentStatus(StrEnum):
 @dataclass(frozen=True)
 class ExperimentControls:
     """실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
-    끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다."""
+    끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.
 
-    paused: bool = False
-    priority: int = 1
+    칸에 기본값을 두지 않는다 — 응답 스키마에서 늘 있는 칸이라 화면이 기본값을 복제하지 않는다(#402
+    리뷰 P3-1). 만든 실험의 처음 값은 `DEFAULT_EXPERIMENT_CONTROLS` 하나다.
+    """
+
+    paused: bool
+    priority: int
 
     def __post_init__(self) -> None:
         priority: object = self.priority
@@ -73,6 +77,10 @@ class ExperimentControls:
                 "experiment priority must be an integer from 1 to the maximum — "
                 f"priority={priority!r} maximum={MAX_EXPERIMENT_PRIORITY}"
             )
+
+
+# 만든 실험의 대기열 조작 처음 값(진행·우선순위 1). 조작 행이 없는 실험도 이 값으로 읽는다.
+DEFAULT_EXPERIMENT_CONTROLS = ExperimentControls(paused=False, priority=1)
 
 
 def trial_status(

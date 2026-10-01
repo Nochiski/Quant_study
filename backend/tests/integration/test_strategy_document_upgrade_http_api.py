@@ -141,6 +141,8 @@ def test_a_current_document_with_1_0_syntax_is_a_fix_in_place_error_not_an_upgra
     assert compiled.status_code == 200, compiled.text
     legacy = [d for d in compiled.json()["diagnostics"] if d["code"] == "structure.legacy_shape"]
     assert legacy and all("업그레이드" not in d["message"] for d in legacy)
+    # 1.0 문법 힌트도 고칠 곳이 키다. 편집기는 이 표식으로 키를 짚는다(#418 리뷰 P3-1).
+    assert all(d["anchor"] == "key" for d in legacy)
 
     upgraded = client.post(
         "/api/v1/strategy-documents/upgrade", json={"source": source, "format": "yaml"}

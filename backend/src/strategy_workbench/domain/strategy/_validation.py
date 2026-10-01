@@ -24,6 +24,7 @@ from strategy_workbench.domain.factor.facade.validation import (
     FactorGraphValidation,
     FactorValidationSeverity,
     node_dependencies,
+    unavailable_field_message,
     validate_factor_graph,
 )
 
@@ -385,7 +386,7 @@ def _equity_field_references(value: object, path: str = "") -> Iterator[tuple[st
 
 
 def _field_reference_issues(
-    spec: StrategySpec, fields: tuple[FieldMetadata, ...]
+    spec: StrategySpec, fields: tuple[FieldMetadata, ...], unavailable: Mapping[str, str]
 ) -> list[ValidationIssue]:
     """그래프 밖 필드 참조를 연결된 어댑터의 계약에서 찾는다(P2-07 리뷰 P1, spec D5).
 
@@ -399,13 +400,14 @@ def _field_reference_issues(
     for path, field_id in _equity_field_references(spec):
         metadata = by_id.get(field_id)
         if metadata is None:
+            reason = unavailable.get(field_id)
+            message = (
+                f"연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: field_id={field_id!r}"
+                if reason is None
+                else unavailable_field_message(field_id, reason)
+            )
             issues.append(
-                semantic_issue(
-                    "strategy.field.missing",
-                    path,
-                    "연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: "
-                    f"field_id={field_id!r} path={path!r}",
-                )
+                semantic_issue("strategy.field.missing", path, f"{message} path={path!r}")
             )
         elif metadata.value_type is not NodeValueType.NUMERIC_SERIES:
             issues.append(
@@ -520,6 +522,7 @@ def validate_strategy(
     *,
     written_pointers: Collection[str] | None = None,
     fields: Collection[FieldMetadata] | None = None,
+    unavailable_fields: Mapping[str, str] | None = None,
 ) -> StrategyValidation:
     """Semantic validation of a typed spec.
 
@@ -534,7 +537,9 @@ def validate_strategy(
     `fields` 는 연결된 equity 어댑터가 제공하는 필드 계약 전부다(P2-07, spec D5). 주어지면 그래프
     검증이 계약을 요구해 없는 `field_id` 가 `strategy.expression.field_missing` 으로 저장 전에
     나고, 단위·그룹 타입도 실제 계약으로 추론한다. 어댑터가 없는 컨텍스트(CLI·테스트)는 None 을
-    넘기고 지금과 같이 계약 없이 검증한다.
+    넘기고 지금과 같이 계약 없이 검증한다. `unavailable_fields` 는 어댑터가 선언했지만 주지 않는
+    필드 → 사유다 — 없는 필드가 그 안에 있으면 진단이 "필드 id 를 확인하세요" 대신 그 사유(카탈로그
+    재생성 같은 조치)를 싣는다(#316).
     """
     field_contracts = None if fields is None else tuple(fields)
     fields_by_id = {field.field_id: field for field in field_contracts or ()}
@@ -568,8 +573,8 @@ def validate_strategy(
         semantic_issue(
             "strategy.number.non_finite",
             path,
-            "StrategySpec numeric values must be finite before execution or hashing: "
-            f"path={path!r} value={value!r}",
+            "숫자 값은 NaN·무한대가 아닌 유한한 수여야 합니다. 이 값으로는 실행하거나 "
+            f"해시를 만들 수 없습니다 — path={path!r} value={value!r}",
         )
         for path, value in _numeric_leaves(spec)
         if path not in bounded_paths and not math.isfinite(value)
@@ -596,7 +601,7 @@ def validate_strategy(
         )
     issues.extend(_eligibility_rule_issues(spec))
     if field_contracts is not None:
-        issues.extend(_field_reference_issues(spec, field_contracts))
+        issues.extend(_field_reference_issues(spec, field_contracts, unavailable_fields or {}))
     # Scalar bounds are owned by the constraint catalog (P1-04); the schema API reads the same rows.
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         value = resolve_scalar(spec, constraint.pointer)
@@ -726,6 +731,7 @@ def validate_strategy(
             parameter_ids=tuple(parameter_ids),
             fields=field_contracts or (),
             require_field_metadata=field_contracts is not None,
+            unavailable_fields=unavailable_fields,
         )
         unsupported = (
             []

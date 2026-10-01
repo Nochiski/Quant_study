@@ -59,6 +59,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 )
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
+    RunSlotUsage,
     TrialResultUnreadableError,
     TrialRunRejectedError,
 )
@@ -185,7 +186,7 @@ def build_container(
     run_repository = SQLiteBacktestRunRepository(research_db_path)
     if run_repository.database_path is not None:
         restrict_to_current_user(run_repository.database_path)
-    strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
+    strategy_traces = StrategyTraceService(portfolio_design, strategy_repository, equity_data)
     executor = BacktestEngineExecutorAdapter(metric_registry)
     hold = _TrialHold(executor, trial_hold_seconds) if trial_hold_seconds > 0 else None
     if hold is not None:
@@ -315,6 +316,10 @@ class _RunServiceTrialRuns:
 
     def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:
         return self._runs.states(run_ids)
+
+    def slot_usage(self) -> RunSlotUsage:
+        total, running = self._runs.slot_usage()
+        return RunSlotUsage(total=total, running=running)
 
     def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
         self._runs.schedule(owner, paused=paused, weight=priority)

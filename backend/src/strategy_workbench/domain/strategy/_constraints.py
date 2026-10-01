@@ -36,14 +36,16 @@ class ScalarConstraint:
     """Bounds and contract metadata for one numeric authoring field.
 
     `pointer` is the JSON Pointer inside the authoring document (identity-free canonical shape).
-    `code` is the validation issue code the validator emits when the bound is violated.
+    `code` is the validation issue code the validator emits when the bound is violated. 전략
+    문서 행만 갖는다 — 실행 설정 행(`RUN_ENVIRONMENT_CONSTRAINTS`)은 `RunEnvironment` 가 칸
+    이름을 실은 예외로 거절하고 진단 코드를 내지 않는다(#357 C-P3-8).
     """
 
     pointer: str
-    code: str
     stage: AppliedStage
     unit: ContractUnit
     message: str
+    code: str = ""
     minimum: float | None = None
     maximum: float | None = None
     exclusive_minimum: bool = False
@@ -376,6 +378,7 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.branch_unit",
         "strategy.expression.cycle",
         "strategy.expression.duplicate_node",
+        "strategy.expression.empty",
         "strategy.expression.field_missing",
         "strategy.expression.group_field_missing",
         "strategy.expression.group_field_type",

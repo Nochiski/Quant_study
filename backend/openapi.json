@@ -525,6 +525,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -982,6 +993,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -2246,6 +2268,15 @@
         "title": "DatasetRevision",
         "type": "object"
       },
+      "DiagnosticAnchor": {
+        "description": "진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.\n\n편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는\nbackend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).",
+        "enum": [
+          "value",
+          "key"
+        ],
+        "title": "DiagnosticAnchor",
+        "type": "string"
+      },
       "DiagnosticKind": {
         "enum": [
           "syntax",
@@ -2602,6 +2633,10 @@
       },
       "Experiment": {
         "properties": {
+          "finished": {
+            "title": "Finished",
+            "type": "boolean"
+          },
           "record": {
             "$ref": "#/components/schemas/ExperimentRecord"
           },
@@ -2630,7 +2665,8 @@
           "record",
           "status",
           "trial_counts",
-          "selections"
+          "selections",
+          "finished"
         ],
         "title": "Experiment",
         "type": "object"
@@ -2691,19 +2727,21 @@
         "type": "object"
       },
       "ExperimentControls": {
-        "description": "실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은\n끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.",
+        "description": "실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은\n끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.\n\n칸에 기본값을 두지 않는다 — 응답 스키마에서 늘 있는 칸이라 화면이 기본값을 복제하지 않는다(#402\n리뷰 P3-1). 만든 실험의 처음 값은 `DEFAULT_EXPERIMENT_CONTROLS` 하나다.",
         "properties": {
           "paused": {
-            "default": false,
             "title": "Paused",
             "type": "boolean"
           },
           "priority": {
-            "default": 1,
             "title": "Priority",
             "type": "integer"
           }
         },
+        "required": [
+          "paused",
+          "priority"
+        ],
         "title": "ExperimentControls",
         "type": "object"
       },
@@ -2803,6 +2841,7 @@
             "enum": [
               "experiment.base.invalid",
               "experiment.base.unsaved",
+              "experiment.cancel.completed",
               "experiment.capacity.base_not_run",
               "experiment.capacity.invalid_amounts",
               "experiment.kind.mismatch",
@@ -2862,6 +2901,10 @@
             "title": "Items",
             "type": "array"
           },
+          "max_priority": {
+            "title": "Max Priority",
+            "type": "integer"
+          },
           "next_after": {
             "anyOf": [
               {
@@ -2872,11 +2915,16 @@
               }
             ],
             "title": "Next After"
+          },
+          "slots": {
+            "$ref": "#/components/schemas/RunSlotUsage"
           }
         },
         "required": [
           "items",
-          "next_after"
+          "next_after",
+          "slots",
+          "max_priority"
         ],
         "title": "ExperimentPage",
         "type": "object"
@@ -2940,11 +2988,7 @@
             "title": "Cancelled At"
           },
           "controls": {
-            "$ref": "#/components/schemas/ExperimentControls",
-            "default": {
-              "paused": false,
-              "priority": 1
-            }
+            "$ref": "#/components/schemas/ExperimentControls"
           },
           "created_at": {
             "format": "date-time",
@@ -2977,7 +3021,8 @@
           "created_at",
           "run",
           "split",
-          "design"
+          "design",
+          "controls"
         ],
         "title": "ExperimentRecord",
         "type": "object"
@@ -3015,6 +3060,7 @@
                 }
               ]
             },
+            "description": "parameter_id → 탐색 값 목록. 값이 null 이면 문서 정의가 허용하는 격자 값 전체를 편다. 키가 없는 파라미터는 탐색하지 않고 기반 실행의 값을 쓴다.",
             "title": "Search",
             "type": "object"
           },
@@ -3241,6 +3287,14 @@
             "title": "Bankrupt",
             "type": "boolean"
           },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/components/schemas/TrialStatus"
           },
@@ -3252,7 +3306,9 @@
           "trial",
           "status",
           "attempts",
-          "awaiting_recovery"
+          "awaiting_recovery",
+          "retryable",
+          "selectable"
         ],
         "title": "ExperimentTrialState",
         "type": "object"
@@ -5455,6 +5511,40 @@
         "title": "PortfolioDataUnavailableDetail",
         "type": "object"
       },
+      "PortfolioFrameSummary": {
+        "description": "trace 한 프레임 전체의 선정 깔때기 수(기준일 미리보기, lang2 P4-03).\n\n유니버스 멤버만 센다. 한 종목이 사유를 여럿 가질 수 있어(규칙 탈락이면서 팩터 값 없음) 사유별\n수를 더해도 `universe` 가 되지 않으므로, 순위에 든 수(`eligible`)를 따로 싣는다. 소비자는 수를\n다시 세지 않는다.",
+        "properties": {
+          "eligibility_failed": {
+            "title": "Eligibility Failed",
+            "type": "integer"
+          },
+          "eligibility_rank_cut": {
+            "title": "Eligibility Rank Cut",
+            "type": "integer"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "universe": {
+            "title": "Universe",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "universe",
+          "eligible",
+          "eligibility_failed",
+          "eligibility_rank_cut",
+          "missing"
+        ],
+        "title": "PortfolioFrameSummary",
+        "type": "object"
+      },
       "PortfolioPreview": {
         "description": "The tape a run will consume, plus the caveats the observation source reported.\n\n`warnings` are the raw observation adapter's own messages, passed through verbatim. They ride\ninto `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run\nthat used the same data.",
         "properties": {
@@ -7247,6 +7337,25 @@
         "title": "RunManifest",
         "type": "object"
       },
+      "RunSlotUsage": {
+        "description": "동시 실행 슬롯 사용량(spec D6). 실험 목록 화면이 trial 수로 추정하지 않게 싣는다.",
+        "properties": {
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "running"
+        ],
+        "title": "RunSlotUsage",
+        "type": "object"
+      },
       "RunStatus": {
         "enum": [
           "queued",
@@ -7688,8 +7797,11 @@
         "type": "object"
       },
       "SourceDiagnostic": {
-        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.",
+        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.\n`anchor` 도 `severity` 처럼 기본값 없이 늘 보낸다 — `range` 가 키 자체를 가리키는지 값을\n가리키는지다(`DiagnosticAnchor`). 새 생성 지점이 빠뜨리면 타입이 잡는다(#418 리뷰 P3-3).",
         "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/DiagnosticAnchor"
+          },
           "code": {
             "title": "Code",
             "type": "string"
@@ -7735,7 +7847,8 @@
           "kind",
           "pointer",
           "message",
-          "severity"
+          "severity",
+          "anchor"
         ],
         "title": "SourceDiagnostic",
         "type": "object"
@@ -8939,12 +9052,13 @@
             "type": "integer"
           },
           "security_ids": {
+            "description": "Securities to trace. An empty list skips per-security rows and returns only the as-of summary.",
             "items": {
               "minLength": 1,
               "type": "string"
             },
             "maxItems": 100,
-            "minItems": 1,
+            "minItems": 0,
             "title": "Security Ids",
             "type": "array",
             "uniqueItems": true
@@ -9032,6 +9146,16 @@
           "spec_hash": {
             "title": "Spec Hash",
             "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyTraceSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "target": {
             "anyOf": [
@@ -9125,6 +9249,63 @@
           "inputs"
         ],
         "title": "StrategyTraceRow",
+        "type": "object"
+      },
+      "StrategyTraceSummary": {
+        "description": "기준일 미리보기가 그리는 수와 그날의 선정(lang2 P4-03). 수는 컴파일러가 센 그대로다.",
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/PortfolioFrameSummary"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTraceSummaryTarget"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_as_of",
+          "execution_on",
+          "counts",
+          "targets"
+        ],
+        "title": "StrategyTraceSummary",
+        "type": "object"
+      },
+      "StrategyTraceSummaryTarget": {
+        "description": "선정 종목 한 줄. 이름·티커는 실행 설정의 유니버스에서 찾고, 모르면 `security` 가 None.",
+        "properties": {
+          "position": {
+            "$ref": "#/components/schemas/TargetPosition"
+          },
+          "security": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "position",
+          "security"
+        ],
+        "title": "StrategyTraceSummaryTarget",
         "type": "object"
       },
       "StrategyValidation": {
@@ -12092,6 +12273,56 @@
         "summary": "Get Backtest Result"
       }
     },
+    "/api/v1/backtests/{run_id}/summary": {
+      "get": {
+        "description": "이력 한 행. 결과 화면이 실행 종류(단일·실험 trial·워크포워드 검증)를 서버 판정으로\n읽는다.",
+        "operationId": "getBacktestSummary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Summary"
+      }
+    },
     "/api/v1/equity/catalog": {
       "get": {
         "operationId": "getEquityCatalog",
@@ -12722,6 +12953,16 @@
               }
             },
             "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment has completed"
           },
           "422": {
             "content": {

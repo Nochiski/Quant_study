@@ -34,11 +34,21 @@ export type RunEnvironmentFieldError =
   | "dateRange"
   | "order";
 
+/**
+ * `accepted` 는 칸마다 자기 규칙을 통과한 값이다(칸 사이 규칙인 기간 순서는 보지 않는다). 전체가 무효여도
+ * 실행 계획 설명이 결측 정책 칸 값만 따로 싣는다(#357 C-P3-16).
+ */
 export type RunEnvironmentValidation =
-  | { valid: true; environment: RunEnvironment; errors: Record<string, never> }
+  | {
+      valid: true;
+      environment: RunEnvironment;
+      accepted: Partial<RunEnvironment>;
+      errors: Record<string, never>;
+    }
   | {
       valid: false;
       environment: null;
+      accepted: Partial<RunEnvironment>;
       errors: Readonly<Record<string, RunEnvironmentFieldError>>;
     };
 
@@ -205,19 +215,20 @@ export const validateRunEnvironment = (
     }
     environment[field.name] = text;
   }
-  const typed = environment as unknown as Partial<RunEnvironment>;
+  const accepted = environment as unknown as Partial<RunEnvironment>;
   if (
-    typeof typed.start === "string" &&
-    typeof typed.end === "string" &&
+    typeof accepted.start === "string" &&
+    typeof accepted.end === "string" &&
     errors.end === undefined &&
-    typed.start > typed.end
+    accepted.start > accepted.end
   )
     errors.end = "order";
   if (Object.keys(errors).length > 0)
-    return { valid: false, environment: null, errors };
+    return { valid: false, environment: null, accepted, errors };
   return {
     valid: true,
     environment: environment as unknown as RunEnvironment,
+    accepted,
     errors: {},
   };
 };

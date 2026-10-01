@@ -263,7 +263,7 @@
   막는다. 브라우저 e2e 는 이 표시를 단언하지 않고 frontend `factor-graph-panel.test.tsx` 가 본다.
 - 비고: 위 두 실패(#360·#361)는 브라우저 e2e 가 실제 backend(mock 데이터)로 만든다. mock 도 모르는
   벤치마크를 지어내지 않으므로 벤치마크를 비우면 mock 결과도 벤치마크 지표가 사용 불가다(#361). 새 코드의
-  번역은 frontend `backtest-error-contract.test.ts`(코드 전수)가, 실패 코드는 backend
+  번역은 `BacktestRunFailure`가 키를 `MessageKey`로 만들어 frontend typecheck가, 실패 코드는 backend
   `tests/integration/test_backtest_http_api.py`가 확인한다.
 
 ### US-DM-07 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다

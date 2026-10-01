@@ -231,8 +231,9 @@ crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화�
   되돌아간 사고가 있었다(DEFECT-D05).
 - 두 모드 모두 첫 줄에 "내용이 바뀔 파일 n개" 를 체크섬 기준으로 출력한다(워크트리 체크아웃은 mtime 이
   전부 달라 크기·시각 비교로는 못 센다).
-- `_engine/backtest_engine/` 은 `equity contract` 가 대조하는 커널 사본이다. 갱신 경로가 없어 2026-09-05
-  판에서 멈춰 있었다(DEFECT-C05) — 이제 배포가 같이 민다.
+- `_engine/strategy_workbench/` 는 `equity contract` 가 부르는 워크벤치 사본이다(#372 — 전에는 커널
+  사본 `_engine/backtest_engine/` 이었고 그 디렉터리는 이제 아무도 읽지 않는다). 갱신 경로가 없어
+  2026-09-05 판에서 멈춰 있던 것(DEFECT-C05)을 이제 배포가 같이 민다.
 - 서버에만 있어야 하는 것(제외): 토큰 캐시 2종, `sync_v3_wise.py`, `rebuild_share.py`(정본은 `backend/ops/`).
 
 ### 공유 소비자 완료 신호 — `data/{stage,equity}/_READY.json`

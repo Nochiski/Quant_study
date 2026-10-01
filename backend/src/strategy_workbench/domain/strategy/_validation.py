@@ -573,8 +573,8 @@ def validate_strategy(
         semantic_issue(
             "strategy.number.non_finite",
             path,
-            "StrategySpec numeric values must be finite before execution or hashing: "
-            f"path={path!r} value={value!r}",
+            "숫자 값은 NaN·무한대가 아닌 유한한 수여야 합니다. 이 값으로는 실행하거나 "
+            f"해시를 만들 수 없습니다 — path={path!r} value={value!r}",
         )
         for path, value in _numeric_leaves(spec)
         if path not in bounded_paths and not math.isfinite(value)

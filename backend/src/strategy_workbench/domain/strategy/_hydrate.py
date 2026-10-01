@@ -33,7 +33,12 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 from ._canonical import canonical_payload_json, canonical_strategy_payload
 from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
 from ._promotion import demote_boolean_factor_outputs, promote_boolean_factor_outputs
-from ._upgrade import FROZEN_SCHEMA_VERSIONS, legacy_shape_hints, upgrade_refusal
+from ._upgrade import (
+    FROZEN_SCHEMA_VERSIONS,
+    UpgradeUnsupportedNodeError,
+    legacy_shape_hints,
+    upgrade_refusal,
+)
 
 # 새 문서로 받는 버전 집합. 현재 버전 상수의 owner는 `_models.py`다(모델 기본값과 같은 값).
 SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (CURRENT_SCHEMA_VERSION,)
@@ -210,6 +215,9 @@ def _version_issues(
                 f"줍니다 — got={schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS}",
             )
         ]
+    if isinstance(refusal, UpgradeUnsupportedNodeError):
+        # 은퇴 노드는 지우거나 옮겨 적은 뒤에야 업그레이드된다. 문장은 업그레이더의 거절 문장이다.
+        return [StructuralIssue(NOT_UPGRADEABLE_CODE, "/schema_version", str(refusal))]
     if refusal.older_shapes:
         return [
             StructuralIssue(

@@ -431,7 +431,7 @@ def test_out_of_sample_curve_chains_returns_from_each_window_first_snapshot() ->
 
 def _test_run(status: RunStatus, error_code: RunFailureCode | None = None) -> BacktestRunState:
     at = datetime(2026, 9, 30, tzinfo=UTC)
-    return BacktestRunState("run", status, 0.0, "", "", at, at, error_code=error_code)
+    return BacktestRunState("run", status, 0.0, "queued", "", at, at, error_code=error_code)
 
 
 @pytest.mark.parametrize(

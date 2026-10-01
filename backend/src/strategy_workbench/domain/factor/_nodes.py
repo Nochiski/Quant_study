@@ -86,6 +86,10 @@ class MissingPolicy(StrEnum):
     CROSS_SECTIONAL_MEDIAN = "cross_sectional_median"
 
 
+# 빈 팩터 값을 채우는 정책. 채우는 자리는 평가기 `_filled` 하나다(#312)
+FILLING_MISSING_POLICIES = frozenset({MissingPolicy.ZERO, MissingPolicy.CROSS_SECTIONAL_MEDIAN})
+
+
 class NodeValueType(StrEnum):
     NUMERIC_SERIES = "numeric_series"
     BOOLEAN_SERIES = "boolean_series"

@@ -71,6 +71,7 @@ from backtest_engine.types.events import (
     OrderEvent,
     OrderStatus,
     StrategyEvent,
+    TargetRounding,
 )
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
@@ -213,6 +214,7 @@ def fill(side: Side, quantity: int, price: float, fee: float = 0.0, seq: int = 1
         price=price,
         fee=fee,
         slippage_per_share=0.0,
+        cap_volume=1_000,
     )
 
 
@@ -540,6 +542,37 @@ def test_engine_records_identical_across_cores(name: str, rust_core: str) -> Non
     )
 
 
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_fills_record_the_cap_volume_the_liquidity_cap_used(core: str) -> None:
+    """V4-04 2/2: 체결은 캡을 곱한 기준 거래량을 싣는다 — 세션 거래량 1,000주가 아니라 참여 기준
+    3,000주다."""
+    _engine, result = ENGINE_SCENARIOS["liquidity_volume"](core)
+
+    assert [fill.cap_volume for fill in result.fills] == [3_000] * 3
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_target_roundings_record_each_notional_to_share_conversion(core: str) -> None:
+    """V4-04 2/2: 라우터가 목표 금액 Δ 를 1주 단위로 내릴 때마다 ROUNDING 을 남긴다 — 두 코어가 같은
+    값이다. 8/3 청산 쪽 목표 Δ −2,400 은 1주 단위로 −2,310 까지만 판다(반올림 오차 90)."""
+    engine, _result = ENGINE_SCENARIOS["delisted_replace"](core)
+
+    assert [
+        (
+            record.ts.date(),
+            record.payload.instrument.symbol,
+            record.payload.target_notional,
+            record.payload.rounded_notional,
+        )
+        for record in engine.event_store.records
+        if isinstance(record.payload, TargetRounding)
+    ] == [
+        (day(1).date(), "005930", 40_000.0, 40_000.0),
+        (day(1).date(), "000660", 40_000.0, 40_000.0),
+        (day(3).date(), "005930", -2_400.0, -2_310.0),
+    ]
+
+
 @RUST_ONLY
 def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
     """DEFECT-601/602: 포지션 2개 이상에서 합산 결합 순서와 삽입 순서가 Python과 같아야 한다."""
@@ -564,6 +597,7 @@ def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
                     price=price,
                     fee=0.0,
                     slippage_per_share=0.0,
+                    cap_volume=1_000,
                 )
             )
         portfolio.mark(
@@ -604,6 +638,7 @@ def test_instruments_differing_only_in_currency_are_distinct_positions() -> None
                     price=100.0,
                     fee=0.0,
                     slippage_per_share=0.0,
+                    cap_volume=1_000,
                 )
             )
         s = portfolio.snapshot(day(1))

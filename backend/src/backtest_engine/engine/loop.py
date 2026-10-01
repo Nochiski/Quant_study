@@ -831,6 +831,7 @@ class BacktestEngine:
                         price=price,
                         fee=fee,
                         slippage_per_share=slip,
+                        cap_volume=snapshot.bar(entry.order.instrument).cap_volume,
                     )
                     queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                     if run.wants(EventKind.FILL):
@@ -1116,6 +1117,8 @@ class BacktestEngine:
         if run.router is None:
             raise RuntimeError("python session loop requires the Python DecisionRouter")
         routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
+        for rounding in routing.roundings:
+            run.store.append(rounding.ts, RecordKind.ROUNDING, rounding)
         for update in routing.updates:
             self._record_update(run, update, market)
         for group in routing.groups:

@@ -156,6 +156,7 @@ def test_order_and_fill_round_trip() -> None:
         price=71000.0,
         fee=100.0,
         slippage_per_share=0.0,
+        cap_volume=1_000,
     )
     assert order_event_from_dict(order_event_to_dict(order)) == order
     assert fill_event_from_dict(fill_event_to_dict(fill)) == fill

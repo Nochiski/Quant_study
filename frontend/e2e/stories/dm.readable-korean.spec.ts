@@ -54,12 +54,12 @@ test(
     await expect(momentumCard).not.toContainText("OUTPUT");
     await expect(momentumCard).not.toContainText("window");
 
-    // 노드 종류: 카드에 한글 이름이 먼저 보이고, 영어 kind는 보조 코드 표기로만 남는다.
+    // 노드에는 한글 연산 이름을 표시하고 영어 kind는 인스펙터의 접힌 식별자 영역에 둔다.
     const momentumNode = editor.getByRole("button", {
-      name: "노드 편집: mom_252",
+      name: /^노드 편집: 2\./,
     });
-    await expect(momentumNode).toContainText("기간 집계");
-    await expect(momentumNode.getByRole("code")).toHaveText("time_series");
+    await expect(momentumNode).toContainText("기간 수익률");
+    await expect(momentumNode).not.toContainText("time_series");
 
     // 연산자: 팔레트가 한글 이름과 한 줄 설명·계산식을 보인다.
     const palette = editor.getByRole("group", { name: "연산자 팔레트" });
@@ -71,11 +71,11 @@ test(
     });
     await expect(movingAverage).toContainText("이동평균이 이것입니다");
 
-    // 필드: 노드를 고르면 설정 칸이 한글 라벨(보조로 키)과 한 줄 설명을 보인다.
+    // 필드: 노드를 고르면 설정 칸이 한글 라벨과 한 줄 설명을 보인다.
     await momentumNode.click();
     const selected = editor.getByRole("group", { name: /선택한 노드/u });
     await expect(
-      selected.getByRole("spinbutton", { name: "집계 기간 window" }),
+      selected.getByRole("spinbutton", { name: "집계 기간", exact: true }),
     ).toHaveValue("252");
     await expect(selected).toContainText("집계에 쓸 세션 수입니다");
     // 노드 종류의 한 줄 설명은 계약 패널이 한글로 보인다.
@@ -88,10 +88,10 @@ test(
     );
 
     // 삭제 거부: 참조하는 노드를 JSON Pointer가 아니라 노드 이름으로 말한다.
-    await editor.getByRole("button", { name: "close · 삭제" }).click();
+    await editor.getByRole("button", { name: /^1\..* · 삭제$/ }).click();
     const refusal = editor.getByRole("alert");
     await expect(refusal).toHaveText(
-      "close을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: mom_252",
+      /1\..*을\(를\) 다른 곳이 참조하고 있어 삭제하지 않았습니다: 2\. 기간 수익률/,
     );
     await expect(refusal).not.toContainText("/factors/");
     // 거부된 삭제는 문서를 건드리지 않는다.

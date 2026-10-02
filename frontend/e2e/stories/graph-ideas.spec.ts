@@ -79,12 +79,17 @@ const factor = async (
   direction: "high" | "low" = "high",
 ) => {
   const canvas = pipeline(page);
+  const labels = canvas.getByRole("textbox", { name: "표시 이름", exact: true });
+  const previousCount = await labels.count();
   await canvas
     .getByRole("button", { name: "알파 팩터 · 항목 추가", exact: true })
     .click();
+  // 새 항목이 parse 투영에 나타난 뒤 편집한다. 기존 마지막 팩터를 먼저 채우면 안 된다.
+  await expect(labels).toHaveCount(previousCount + 1);
+  await waitForSettledDocument(page);
   await commit(
     page,
-    canvas.getByRole("textbox", { name: "표시 이름", exact: true }).last(),
+    labels.nth(previousCount),
     label,
   );
   const card = canvas.getByRole("group", { name: label, exact: true });
@@ -130,10 +135,14 @@ const period = async (
   window: number,
   lag?: number,
 ) => {
+  const cards = recipe(page).getByRole("article");
+  const previousCount = await cards.count();
   await recipe(page)
     .getByRole("button", { name: `${name} 노드 추가`, exact: true })
     .click();
-  const card = recipe(page).getByRole("article").last();
+  await expect(cards).toHaveCount(previousCount + 1);
+  await waitForSettledDocument(page);
+  const card = cards.nth(previousCount);
   await commit(
     page,
     card.getByRole("spinbutton", { name: /집계 기간/ }),

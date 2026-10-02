@@ -27,6 +27,7 @@ import {
   cardTemplate,
   itemName,
   pipelineNames,
+  pipelineDocumentProperties,
   placeName,
   projectPipeline,
   sentencePieces,
@@ -128,19 +129,7 @@ export const PipelinePanel = ({
           revealSignal,
           onOpenGraph,
         };
-  // 단계 없는 루트 스칼라는 문서 속성이다. 단계 마커를 추가하거나 다른 설정의 owner를 바꾸지 않는다.
-  const documentProperties = pipeline?.unstaged.find(
-    (section) => section.kind === "object" && section.pointer === "",
-  );
-  const documentSection =
-    documentProperties?.kind === "object"
-      ? {
-          ...documentProperties,
-          fields: documentProperties.fields.filter(
-            (field) => field.control.kind !== "const",
-          ),
-        }
-      : null;
+  const documentSection = pipeline === null ? null : pipelineDocumentProperties(pipeline);
   return (
     <section
       ref={container}
@@ -203,7 +192,7 @@ export const PipelinePanel = ({
               outside={unstagedNames({
                 ...pipeline,
                 unstaged: pipeline.unstaged.filter(
-                  (section) => section !== documentProperties,
+                  (section) => section.pointer !== documentSection?.pointer,
                 ),
               })}
             />

@@ -48,6 +48,14 @@ export type PipelineProjection = {
   unstaged: FormSection[];
 };
 
+/** 문서 속성으로 실제 렌더하는 루트 필드. 화면·진단 이동이 같은 집합을 읽는다(P5-03). */
+export const pipelineDocumentProperties = (pipeline: PipelineProjection): ObjectSection | null => {
+  const root = pipeline.unstaged.find((section) => section.kind === "object" && section.pointer === "");
+  return root?.kind === "object"
+    ? { ...root, fields: root.fields.filter((field) => field.control.kind !== "const") }
+    : null;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

@@ -1105,7 +1105,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P5-01` | `recipe-projection.ts`(체인 판정)·`recipe-transactions.ts`(추가·삭제·이동·파라미터·재배선), property test | P4-04 | `WAITING` | — |
 | [ ] | `P5-02` | 팔레트(연산자 카탈로그), 단계 카드 UI, 설명, 인라인 진단, 식별자 접힘 영역 | P5-01 | `WAITING` | — |
-| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `IN_PROGRESS` | 클라우드 P5-03: PR431·432 최종 검증 완료(draft), 그래프 전용 문서속성·식별자·아이디어 5개 E2E 구현/검증 중 |
+| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `IN_PROGRESS` | draft #431·432·433 최종 전체 CI·동일 SHA 화면 검증 완료, 미병합 |
 
 Phase exit:
 
@@ -1118,7 +1118,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `IN_PROGRESS` | draft #434 f7f12203, CI36959554980 전체 성공·동일 SHA 1440/640/360 확인 |
 | [ ] | `P6-02` | 노드 캔버스: 드래그 배선, 좌표 local state, 자동 정렬, 키보드 | P6-01 | `IN_PROGRESS` | 원문 캔버스·ELK worker·배선/키보드/undo 구현, 최종 CI 검증 예정 |
-| [ ] | `P6-03` | 노드 위 진단, 옛 목록형 편집기 제거, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `WAITING` | — |
+| [ ] | `P6-03` | 노드 위 진단, 옛 목록형 편집기 제거, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `IN_REVIEW` | 현재 캔버스에 backend 메타데이터·진단 투영, 옛 DAG 제거·문서·최종 검증 |
 
 Phase exit:
 
@@ -2255,3 +2255,44 @@ PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 
 - 독립 검토의 지연 배치 reveal Important1·팩터 좌표 신원 Minor1을 수정하고 재검토에서 해소 확인했다.
   최종 전체 CI·실제 브라우저 수치·캡처는 draft PR 본문에 기록한다. 아직 P6 완료로 보지 않는다.
 - SQLite BEGIN IMMEDIATE 저장 잠금의 근본 원인은 여전히 미확인이다. 저장 회귀·기존 테스트 기준을 유지한다.
+
+
+#### P6-03 캔버스 마감 Packet (2026-10-02)
+
+- base: draft #435의 ccfffaa8. `/workspace/Quant_study-p603` 별도 checkout에서 수행해 #435 검증/수정 WIP를 보존한다.
+  #435 첫 CI36962171567은 browser59통과/3실패/3미실행이었다. 한글 라벨 회귀를 갱신하고 형제 패널
+  reveal의 인스펙터 focus 침범과 새 catalogs wrapper의 배선 취소를 수정했다. ce8cd923의 CI36963306805는 browser63통과/진단 스냅샷1실패/1미실행이었다. 실제 인스펙터 캡처를
+  직접 검토해 기준 이미지를 갱신했다. 최종 SHA CI 결과는 PR 본문에서 별도로 확인한다.
+- RED: canvas-metadata import 부재 → GREEN: 고유 ID+pointer 결합, stale/중복 거부, 원문 boolean
+  계약과 합성 점수 표식 분리, backend 계획이 있을 때만 미실행 표시. 원문 없는 조회는 같은 투영의
+  읽기 전용 표를 쓰며 가짜 tree/transactions를 만들지 않는다.
+- 옛 GraphNode/DAG strip·노드 목록 CSS를 제거하고 source 버튼·backend 계약·진단은 현재 편집 노드에
+  붙였다. 기존 read-only 계약/승격/소스 pointer 회귀는 새 표면에서 유지했다. 팩터 선택과 개수는 현재
+  authoredFactors를 읽는다. 노드 메타데이터는 재계산 중 숨기고 계획 요약만 문서 신원 안 보존한다.
+- US-CS-07의 배선/키보드/undo·미실행·진단 반복 reveal을 스토리 게이트에 연결한다. 최종 브라우저
+  성공·폭별 캡처·실측 수치는 해당 draft PR 본문에 남긴다. 현재는 구현 검증 단계이며 병합 완료가 아니다.
+- 제거/대체 경계·기존 계약 회귀·SoT·M8·매뉴얼이 함께 움직여 권장 600줄/10파일을 넘는다.
+  dependency/스파이크는 #434, 캔버스 입력/worker는 #435로 이미 분리했고 이 PR은 최종 표시 owner 이동이다.
+- 로컬 검증: typecheck/e2e typecheck/lint/build 통과, 전체 frontend 100파일·1,278테스트 통과.
+  독립 review_tie 코드/Phase 6 SoT 재검토 APPROVE, Critical/Important/Minor 0(관련 37테스트 독립 통과).
+  단독 route 실행에서는 새 문서 metadata 대기 1회 실패했고 전체 실행에서는 통과해 공식 브라우저에서도 확인한다.
+- 절차: executing-plans task4/5, 독립 코드/SoT·책임분리 검토와 동일 리뷰어 재검토. 사용 가능한 Codex
+  reviewer를 실제 이름으로 기록하고 Opus 검토라고 주장하지 않는다.
+
+##### Initiative 완료 정의 6항의 증거와 최종 게이트
+
+1. 그래프만으로 빈 문서→아이디어5개→실제백테스트·정본 hash: #433 b009e394, CI36957762428 browser64.
+   `graph-ideas.spec.ts`와 `e2e_ideas_app.py`는 별도 100종목 앱에서 실제 거래와 manifest 신원을 확인한다.
+2. 기본 파이프라인/레시피 DOM의 식별자 비노출: 같은 #433의 아이디어5개·식별자 접기 E2E.
+3. 검증 통과→preview/backtest 계약: `test_strategy_compile_gate.py`, `test_compile_gate_property.py`,
+   fixture 전수 회귀가 같은 backend 전체 CI에 포함된다. 최종 P6 SHA에서도 전체 재검증한다.
+4. 1.1→1.2 hydrate/none 보존: `test_upgrade_preserves_1_1_meaning.py`, 업그레이드 source 계약과 browser
+   frozen 1.1/1.0 업그레이드→저장→백테스트 회귀. #433·#434 전체 CI에서 성공했다.
+5. 같은 전략·다른 실행 설정의 동일 spec_hash: `dm.run-environment.spec.ts`가 전략 hash와 별도 실행
+   기록을 대조하며 #433·#434 browser 게이트에서 성공했다.
+6. Phase별 기존 감사 기록은 PLAN 리뷰 대장에 유지한다. P5 후속과 P6-01/02 독립 리뷰는 차단0이며
+   P6-03 최종 코드/SoT·책임분리 및 같은 최종 SHA 전체 CI·실제 화면 확인을 끝낸 뒤 PR 본문에 결과를 적는다.
+
+남은 절차 제한: PowerShell 자동 집계 도구는 이 클라우드에서 미실행이다(생성 합계 수동 수정 안 함).
+실제 스크린리더 음성 출력은 미검증이다. 과거 SQLite BEGIN IMMEDIATE 저장 잠금의 근본 원인도
+미확인이다. draft PR 병합·배포·force-push·권한 변경은 수행하지 않는다.

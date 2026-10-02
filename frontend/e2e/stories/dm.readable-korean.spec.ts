@@ -40,17 +40,12 @@ test(
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
 
-    // 실행 계획 노드 카드: 입력 칸·설정 칸 이름과 출력 표시가 한글이다. 칸은 스키마에서 읽고 영어 칸 키를
-    // 보이지 않는다(#354).
-    const momentumCard = page
-      .getByRole("list", { name: "백엔드 계획 순서의 팩터 노드와 입력 연결" })
-      .getByRole("listitem")
-      .filter({
-        has: page.getByRole("button", { name: "그래프 노드 선택: mom_252" }),
-      });
+    // 같은 편집 노드에 backend 출력 표식과 스키마 입력 포트가 붙는다.
+    const momentumCard = editor.locator(".node-canvas__node").filter({
+      has: page.getByRole("button", { name: /^노드 편집: 2\./ }),
+    });
     await expect(momentumCard).toContainText("그래프 출력");
     await expect(momentumCard).toContainText("입력 노드");
-    await expect(momentumCard).toContainText("집계 기간");
     await expect(momentumCard).not.toContainText("OUTPUT");
     await expect(momentumCard).not.toContainText("window");
 

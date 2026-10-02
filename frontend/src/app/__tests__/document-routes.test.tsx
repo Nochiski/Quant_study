@@ -2127,21 +2127,28 @@ describe("FactorGraph read-only projection (P4-07)", () => {
   it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
     "renders the same backend-owned DAG on %s",
     async (route) => {
-      server.use(...graphHandlers());
+      server.use(
+        ...graphHandlers(),
+        revisionDocumentHandler(GRAPH_SOURCE),
+        http.get(`${API}/api/v1/strategies/template`, () => HttpResponse.json(graphSpec("", 0))),
+      );
       const user = userEvent.setup();
       mount(`${route}?view=graph`);
-      await screen.findByLabelText("FactorGraph DAG");
+      if (route.endsWith("/new")) {
+        await user.click(await screen.findByRole("tab", { name: "YAML" }));
+        replaceText(await editor(), GRAPH_SOURCE);
+        await user.click(screen.getByRole("tab", { name: "그래프" }));
+      }
+      await screen.findByRole("region", { name: "노드 캔버스" });
       await waitFor(() => expect(explainedGraphs).toHaveLength(1));
       const node = await screen.findByRole("button", {
-        name: "그래프 노드 선택: mom_252",
+        name: /^노드 편집: 2\./,
       });
-      const graph = screen.getByLabelText("FactorGraph DAG");
-      expect(within(graph).getByText("time_series.momentum")).toBeVisible();
-      expect(
-        within(graph).getAllByText("numeric_series").length,
-      ).toBeGreaterThan(0);
+      const graph = screen.getByRole("region", { name: "노드 캔버스" });
+      expect(within(graph).getByRole("button", { name: /^노드 편집: 2\./ })).toHaveTextContent("기간 수익률");
+      await waitFor(() => expect(within(graph).getAllByText("종목별 수치").length).toBeGreaterThan(0));
       expect(within(graph).getAllByText("ratio").length).toBeGreaterThan(0);
-      expect(within(graph).getAllByText("252 세션").length).toBeGreaterThan(0);
+      expect(within(graph).getAllByText("H 252 세션").length).toBeGreaterThan(0);
       await user.click(node);
     },
     15_000,
@@ -2193,9 +2200,9 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       ).toContain("node_id: mom_252"),
     );
     await user.click(screen.getByRole("tab", { name: "그래프" }));
-    await screen.findByLabelText("FactorGraph DAG");
+    await screen.findByRole("region", { name: "노드 캔버스" });
     const node = await screen.findByRole("button", {
-      name: "그래프 노드 선택: mom_252",
+      name: /^노드 편집: 2\./,
     });
     await user.click(node);
     await waitFor(() => {
@@ -3848,7 +3855,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
 
   // plan이 ready면 읽기 전용 DAG 노드와 그 아래 편집기 행에 같은 pointer로 `aria-current`가
   // 둘 붙는다. 중첩된 두 reveal 훅이 같은 요소로 수렴해야 한다(2차 리뷰 R2-1).
-  it("scrolls to the editor row, not the plan node, when both mark the same pointer", async () => {
+  it("reveals the editable canvas node again after removing the old DAG strip", async () => {
     server.use(
       graphCompileWith([
         {
@@ -3866,20 +3873,20 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2?view=graph");
 
-    await screen.findByLabelText("FactorGraph DAG");
+    await screen.findByRole("region", { name: "노드 캔버스" });
     await screen.findByRole("region", { name: "그래프 편집" });
     await user.click(await problemRow(/window가 깁니다/));
 
-    const planNode = screen
-      .getByRole("button", { name: "그래프 노드 선택: mom_252" })
-      .closest("li");
     const editorRow = screen
       .getByRole("button", { name: /^노드 편집: 2\./ })
       .closest(".node-canvas__node");
     await waitFor(() =>
       expect(editorRow).toHaveAttribute("aria-current", "true"),
     );
-    expect(planNode).toHaveAttribute("aria-current", "true");
+    expect(globalThis.document.querySelector(".factor-graph__canvas")).toBeNull();
+    const before = scrollIntoView.mock.calls.length;
+    await user.click(await problemRow(/window가 깁니다/));
+    await waitFor(() => expect(scrollIntoView.mock.calls.length).toBeGreaterThan(before));
     expect(lastVisibleScroll()).toBe(editorRow);
     // 경고도 같은 자리에 본문으로 붙는다(alert이 아니라 본문이다 — 리뷰 P3).
     expect(editorRow).toHaveTextContent("문제 1개");

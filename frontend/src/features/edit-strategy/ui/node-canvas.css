@@ -116,3 +116,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.node-canvas__metadata {
+  display: grid;
+  gap: 2px;
+  font-size: var(--text-size-small);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.node-canvas__metadata .factor-graph__contract {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

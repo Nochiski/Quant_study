@@ -1247,7 +1247,7 @@ test.describe("professional YAML workflow", () => {
     await expect(
       page
         .getByRole("tabpanel", { name: "그래프" })
-        .getByRole("button", { name: "그래프 노드 선택: field" }),
+        .getByRole("button", { name: /^노드 편집: 3\./ }),
     ).toBeVisible();
 
     // Graph → Form 왕복.

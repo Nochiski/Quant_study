@@ -61,6 +61,14 @@ const start = async (page: Page, title: string) => {
     pipeline(page).getByRole("textbox", { name: "전략 이름", exact: true }),
     title,
   );
+  await commit(
+    page,
+    pipeline(page).getByRole("spinbutton", {
+      name: "종목별 최대 목표 비중 상한",
+      exact: true,
+    }),
+    "0.05",
+  );
   return () => latestHash;
 };
 

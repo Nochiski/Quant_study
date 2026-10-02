@@ -51,6 +51,12 @@ const context = (): StrategyDebuggerContext => ({
 });
 
 const response = (): StrategyTraceResponse => ({
+  factor_preview: {
+    valid_count: 0,
+    missing_count: 0,
+    missing: "drop",
+    top: [],
+  },
   spec_hash: "spec-hash",
   snapshot_id: "snapshot-v1",
   registry_version: "registry-v1",
@@ -499,4 +505,32 @@ describe("strategy trace request contract", () => {
       },
     ]);
   });
+});
+
+it("summary requests keep the selected factor in request and cache identity", () => {
+  const current = context();
+  current.factors.push({
+    ...current.factors[0]!,
+    factorId: "other",
+    expectedPlanHash: "other-plan",
+  });
+  const selection = {
+    summaryOnly: true,
+    asOf: "",
+    security: "",
+    nodeId: "",
+    factorId: "other",
+  };
+  const selected = prepareStrategyTrace(current, selection);
+  expect(selected.kind).toBe("ready");
+  if (selected.kind !== "ready") return;
+  expect(selected.request.factor_id).toBe("other");
+  const first = prepareStrategyTrace(current, {
+    ...selection,
+    factorId: "momentum",
+  });
+  expect(first.kind === "ready" && first.ownerKey).not.toBe(selected.ownerKey);
+  expect(
+    prepareStrategyTrace(current, { ...selection, factorId: "removed" }),
+  ).toEqual({ kind: "blocked", reason: "factor" });
 });

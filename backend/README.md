@@ -116,7 +116,7 @@ use case를 제공한다. outgoing port는 기본 `equity_mock`이, 실데이터
 - `GET /api/v1/factors/catalog`: 50개 versioned 정의 검색·카테고리·구현 상태 필터
 - `POST /api/v1/factors/validate`: cycle/type/unit/min-history/reference/missing-policy 검증
 - `POST /api/v1/factors/explain`: topological PIT plan과 재현성 hash 설명
-- `POST /api/v1/factors/preview`: IC, Rank IC, quantile spread, coverage, turnover, decay
+- 팩터 결과는 `POST /api/v1/strategies/debug/trace`의 `factor_preview`로 조회한다. 기준일 유니버스의 평가값 유효수·결측수·실행 결측 정책·팩터 방향 기준 상위 5개를 제공한다. `/factors/preview`는 폐기했다.
 
 사람이 검토하는 전체 ID/Equity field mapping은 [FACTORS.md](./FACTORS.md)에 있다. 실행 의미의
 SoT는 항상 registry 코드이며 문서 정합성은 테스트로 고정한다.

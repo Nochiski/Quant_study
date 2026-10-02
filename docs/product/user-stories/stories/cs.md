@@ -85,6 +85,7 @@
   - `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests
   - `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다
   - `frontend/e2e/stories/cs.masked-trace.spec.ts` :: US-CS-03 원장이 가린 신용잔고 칸을 건넌 노드 값과 그 원시 셀을 원장이 가림으로 본다
+  - `frontend/e2e/workbench.workflow.spec.ts` :: 레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다
 
 수용 기준
 
@@ -106,6 +107,10 @@
   연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 …"처럼 백테스트 시작과 같은 문장이
   보이고 서버 원문은 접힌 "서버 사유"에 있다. "잠시 뒤 다시 추적하세요" 같은 일시 장애 문장은 보이지 않는다
   (이슈 #351).
+
+- Given 그래프와 실행 설정, When 팩터·기준일을 골라 미리보기를 새로고침하면, Then 해당 날짜 유니버스의
+  팩터 유효수·결측수·결측 처리·방향 기준 상위 5개가 선정 종목 표와 구분된다. 팩터를 바꾸면 기존 결과는 숨는다.
+- 추가 e2e(P5-03, CI 검증 대기): `frontend/e2e/workbench.workflow.spec.ts` :: 레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다
 
 ### US-CS-04 AI에게 팩터 자료 조사와 파라미터 조정안을 맡긴다
 
@@ -328,3 +333,6 @@ non-goal로 두고 1.2에서 두 노드를 없앴다(P2-06). 사용자 팩터를
   진행되고, 확인 단계에 검증 카드의 미달 항목이 함께 보인다.
 - When 연 뒤, Then 봉인 구간이 "열람됨"으로 표시되고 다시 열 수 없다.
 - Given 개봉 뒤 같은 계열을 다시 실행하면, Then 그 실행은 홀드아웃이 아니라 일반 검증으로 표시된다.
+
+P5-03 진행 메모: 그래프 팩터 미리보기는 strategy trace의 팩터별 평가값을 표시한다.
+아이디어 5개 그래프 제작·fixture hash·백테스트 E2E 출구는 아직 미완료이므로 US-CS-05·06 상태는 유지한다.

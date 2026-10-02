@@ -1,7 +1,7 @@
-"""연구 구간 잠금의 팩터·equity 미리보기 경로(검증 랩 spec D1, V1-02).
+"""연구 구간 잠금의 equity 미리보기 경로(검증 랩 spec D1, V1-02).
 
 판정 자체(경계일)는 `domain/backtest/_research_window.py` 하나가 소유하고 실행·미리보기·추적과 같은
-함수를 부른다. 여기서는 세 HTTP 경로가 그 판정을 부르는지와 각 경로 기존 422 모양에 코드·문장을
+함수를 부른다. 여기서는 두 HTTP 경로가 그 판정을 부르는지와 각 경로 기존 422 모양에 코드·문장을
 싣는지만 본다. 구성 종목 이력(`/equity/universe/preview`)은 측정이 아니라 잠금을 받지 않는다.
 """
 
@@ -17,25 +17,6 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 
 _END = "2024-01-04"
 _QUERY = {"end": _END, "security_ids": ["sec-005930-1"], "field_ids": ["price.close"]}
-# 창 연산(window 3)을 둬 워밍업 세션이 있는 그래프로 잰다: 허용 케이스가 연구 하한 직전 관측을
-# 워밍업으로 읽어도 막히지 않는지(spec D1 "워밍업 읽기는 측정 아님")를 함께 고정한다.
-_GRAPH = {
-    "nodes": [
-        {"node_id": "close", "field_id": "price.close", "kind": "field"},
-        {
-            "node_id": "mom",
-            "operator": "momentum",
-            "input_node_id": "close",
-            "window": 3,
-            "kind": "time_series",
-        },
-    ],
-    "output_node_id": "mom",
-}
-
-
-def _factor(start: str) -> tuple[str, dict[str, Any]]:
-    return "/api/v1/factors/preview", {"graph": _GRAPH, "as_of_start": start, "as_of_end": _END}
 
 
 def _panel(start: str) -> tuple[str, dict[str, Any]]:
@@ -46,13 +27,6 @@ def _equity(start: str) -> tuple[str, dict[str, Any]]:
     return "/api/v1/equity/preview", {**_QUERY, "start": start}
 
 
-def _factor_issue(detail: Any) -> tuple[str, str, str]:
-    """팩터 미리보기는 기존 `factor.graph.invalid` 진단 안에 issue 로 싣는다."""
-    assert detail["code"] == "factor.graph.invalid"
-    issue = detail["validation"]["issues"][-1]
-    return issue["code"], issue["path"], issue["message"]
-
-
 def _validation_item(detail: Any) -> tuple[str, str, str]:
     """equity 미리보기는 기존 본문 검증 실패 목록(`HTTPValidationError`)에 항목 하나로 싣는다."""
     (item,) = detail
@@ -60,7 +34,6 @@ def _validation_item(detail: Any) -> tuple[str, str, str]:
 
 
 _ROUTES: list[tuple[Callable[[str], tuple[str, dict[str, Any]]], Callable[[Any], Any], str]] = [
-    (_factor, _factor_issue, "as_of_start"),
     (_panel, _validation_item, "body.query.start"),
     (_equity, _validation_item, "body.start"),
 ]

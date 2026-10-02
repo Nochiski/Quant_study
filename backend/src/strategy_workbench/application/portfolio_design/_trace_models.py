@@ -8,6 +8,7 @@ from typing import ClassVar, TypeAlias
 
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.equity.facade.research_data import CellKind, SecurityRef
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 from strategy_workbench.domain.factor.facade.trace import TraceValueStatus
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateDecision,
@@ -150,6 +151,21 @@ class StrategyTraceSummary:
 
 
 @dataclass(frozen=True)
+class StrategyFactorPreviewRow:
+    security_id: str
+    value: float
+    security: SecurityRef | None
+
+
+@dataclass(frozen=True)
+class StrategyFactorPreview:
+    valid_count: int
+    missing_count: int
+    missing: MissingPolicy
+    top: tuple[StrategyFactorPreviewRow, ...]
+
+
+@dataclass(frozen=True)
 class StrategyTraceResponse:
     spec_hash: str
     snapshot_id: str
@@ -162,6 +178,7 @@ class StrategyTraceResponse:
     raw: tuple[RawStrategyTraceRow, ...]
     raw_truncated: bool
     target: StrategyTargetTrace | None
+    factor_preview: StrategyFactorPreview
     # `target` 처럼 기준일이 리밸런스 신호일일 때만 있다.
     summary: StrategyTraceSummary | None = None
     warnings: tuple[str, ...] = ()

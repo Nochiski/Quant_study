@@ -533,6 +533,8 @@ Python/Rust 결과가 같다.
 
 ### M8 — 전문가용 표현력과 작업 흐름
 
+- [x] LANG2 파이프라인·팩터 레시피·고급 노드 캔버스의 같은 원문 편집, ELK 배치·배선·undo·진단 이동 구현(P5/P6 draft 스택; 최종 CI·화면 근거는 해당 PR). 실제 스크린리더 음성 출력 감사와 아래 전문가 기능 전체 완료를 뜻하지 않는다.
+
 - [ ] long/short leg별 서로 다른 factor graph와 universe 지원.
 - [ ] regime switch와 conditional portfolio branch 지원.
 - [ ] event-driven eligibility/signal node 지원.

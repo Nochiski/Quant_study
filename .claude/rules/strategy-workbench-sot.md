@@ -165,3 +165,13 @@ runtime schema의 factor 참조·적용 조건 투영을 사용한다. frontend�
 `CanvasLayout`의 ELK worker·수동 좌표는 UI 전용이며 YAML·서버 cache에 직렬화하지 않는다.
 문서/sourceVersion/팩터 신원이 바뀌면 진행 중 배선·배치를 폐기한다. ELK 성공 뒤 선택 reveal을 다시
 수행하되 수동 이동에서는 스크롤하지 않는다. backend 실행 계획·진단·타입·history의 소유권은 유지한다.
+
+
+### P6-03 캔버스 메타데이터
+
+`factor-graph-projection`이 backend 순서·타입·단위·history·issues·planned 여부를 투영하고,
+`canvas-metadata`는 현재 원문 노드의 고유 ID와 pointer가 모두 맞을 때만 결합한다. 재계산 중에는
+같은 문서의 계획 요약만 보존하고 노드 메타데이터는 숨긴다. 편집 팩터 수·선택은 현재 원문을 따른다.
+미실행은 backend 실행 계획이 있는 경우의 planned=false이며, 계획 없음·stale을 미연결로 추론하지 않는다.
+합성 boolean-score는 원문 출력에 붙이는 읽기 전용 표식이다. 원래 boolean 타입을 덮어쓰지 않으며
+support 노드는 backend 출처 표식에 따라 숨긴다. 원문 없는 조회는 같은 투영의 읽기 전용 표를 쓴다.

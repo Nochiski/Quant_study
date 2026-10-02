@@ -467,7 +467,7 @@ describe("FactorGraphPanel", () => {
     const badges = screen.getAllByText("factor.graph.cycle");
     expect(badges).toHaveLength(2);
     for (const badge of badges) {
-      const row = badge.closest("li");
+      const row = badge.closest("tr");
       expect(
         within(row as HTMLElement).getByText(/cycle=close → positive → close/),
       ).toBeInTheDocument();
@@ -486,7 +486,9 @@ describe("FactorGraphPanel", () => {
       settling: false,
     };
     const editing = {
-      tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
+      tree: {
+        factors: [{ factor_id: "conditional-value", direction: "high", graph }],
+      },
       transactions,
       catalogs: { equityFields: null },
     };
@@ -502,9 +504,11 @@ describe("FactorGraphPanel", () => {
     );
     const { rerender } = render(view(readyState()));
     expect(screen.queryByText("재계산 중")).toBeNull();
+    expect(document.querySelectorAll(".node-canvas__metadata").length).toBe(5);
     // 편집 확정 뒤 실제 경로: 이전 compile의 spec이 남아 blocked(stale) → blocked(pending) → loading → ready.
     // 그동안 직전 투영이 남는다(reducer 실측: stale 판정이 pending보다 먼저다 — 4차 리뷰).
     rerender(view({ status: "blocked", reason: "stale" }));
+    expect(document.querySelectorAll(".node-canvas__metadata").length).toBe(0);
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
     rerender(view({ status: "blocked", reason: "pending" }));
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
@@ -517,7 +521,8 @@ describe("FactorGraphPanel", () => {
     // 다른 문서로 가면(문서 키 변경) 직전 투영을 쓰지 않는다.
     rerender(view({ status: "loading" }, 2));
     expect(screen.queryByText("재계산 중")).toBeNull();
-    expect(document.querySelector('[data-node-id="signal"]')).toBeNull();
+    expect(document.querySelector(".node-canvas__metadata")).toBeNull();
+    expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
   });
 
   it("renders conditional branches, group details, provenance and exact selection actions", async () => {
@@ -654,10 +659,10 @@ describe("FactorGraphPanel", () => {
       />,
     );
 
-    const unplanned = screen.getByRole("region", {
-      name: "실행 계획에 포함되지 않은 정의",
-    });
-    const orphan = within(unplanned).getByRole("listitem");
+    const orphan = document.querySelector(
+      '[data-node-id="orphan"]',
+    ) as HTMLElement;
+    expect(orphan.tagName).toBe("TR");
     expect(orphan).toHaveAttribute("data-node-id", "orphan");
     expect(within(orphan).getByText("미실행")).toBeInTheDocument();
     expect(within(orphan).getByText("price.open")).toBeInTheDocument();

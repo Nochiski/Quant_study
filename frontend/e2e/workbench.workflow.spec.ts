@@ -1247,11 +1247,11 @@ test.describe("professional YAML workflow", () => {
     await expect(
       page
         .getByRole("tabpanel", { name: "그래프" })
-        .getByRole("button", { name: "그래프 노드 선택: field" }),
+        .getByRole("button", { name: /^노드 편집: 3\./ }),
     ).toBeVisible();
 
-    // Graph → Form 왕복.
-    await editor.getByRole("button", { name: /소스에서 열기/ }).click();
+    // 팩터 Graph → YAML 왕복: 노드별 소스 버튼과 구분한다.
+    await editor.getByRole("button", { name: "momentum · 소스에서 열기", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "편집기" })).toBeVisible();
   });
 

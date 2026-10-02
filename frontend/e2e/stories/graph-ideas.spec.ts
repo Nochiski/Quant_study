@@ -64,7 +64,7 @@ const start = async (page: Page, title: string) => {
   await commit(
     page,
     pipeline(page).getByRole("spinbutton", {
-      name: "종목별 최대 목표 비중 상한",
+      name: "종목별 최대 목표 비중 한도",
       exact: true,
     }),
     "0.05",
@@ -404,7 +404,7 @@ test(
     await commit(
       page,
       canvas.getByRole("spinbutton", {
-        name: "종목별 최대 목표 비중 상한",
+        name: "종목별 최대 목표 비중 한도",
         exact: true,
       }),
       "0.1",

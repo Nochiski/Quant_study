@@ -1807,10 +1807,10 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **위험성**: 같은 결함이 경로에 따라 두 네임스페이스로 나가 frontend가 코드 → 마커 매핑을 두 벌
   가져야 하고, 사용자에게 내부 코드 문자열이 보인다. 지금은 frontend가 이 endpoint를 쓰지 않아
   노출은 없다.
-- **담당**: `P5-03`(팩터 결과 미리보기), 조건부. WORKFLOW·spec 어디에도 이 endpoint의 소비자가
-  정해져 있지 않다(P4-03 기준일 미리보기는 기존 trace API). 미리보기가 `/factors/preview`를 쓰면
-  P5-03이 422 코드를 `strategy.expression.*`로 정리하고, 쓰지 않으면 P5-03이 이 항목의 담당을 다시
-  정한다(WORKFLOW P5-03 acceptance에 예약).
+- **담당·처리**: `P5-03` 팩터 결과 미리보기. 사용자 확정에 따라 `/factors/preview`를
+  은퇴하고 strategy trace 경로로 통합했다. 폐기 endpoint는 404이고 `/factors/validate`는
+  유지한다. 그래프 진단과 실행 설정 검증은 기존 전략 trace 관문이 소유한다.
+  회귀는 `test_factor_http_api.py`의 은퇴 확인 및 `test_strategy_trace_http_api.py`가 맡는다.
 
 ### BACKLOG-005: 폭 640px 이하에서 IDE 뷰 탭이 사라진다 (감사 N5)
 
@@ -2171,3 +2171,15 @@ Rust 실행 코어(`CoreUnavailable: rust_persistent`)를 요청했다. pyright�
 
 PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 못했다. 위 기존 자동 집계는
 과거 시점 값으로 보존했으며 현재 Packet과 이 절에 실제 진행을 기록한다.
+
+#### P5-03 미리보기 리뷰 수정 및 추가 검증 (2026-10-02)
+
+- 읽기 전용 코드 리뷰의 Important 1건(선택 팩터 삭제 후 요청 차단)을 수정했다.
+  표시·요청이 같은 유효 선택을 읽으며, 명시적 미지 팩터의 trace 차단은 유지한다.
+  실패 재현 후 debugger 테스트 36개 통과. HIGH/LOW·6개 구성원 상위5 절단·동일값 ID 순서·
+  비구성원 극단값 배제를 추가 검증했다(2개 통과). 현행 SoT와 BACKLOG-004도 은퇴 결정으로 정리했다.
+- backend 관련 경로 최종 집중 검사: 175 passed. DB 전체는 같은 파일시스템의 임시 경로로
+  재실행해 1270 passed / 121 failed / 20 errors. DuckDB의 읽기 전용 홈 경로 쓰기 실패 등
+  클라우드 환경 제한이 남았으며 테스트 기준이나 보안 설정은 바꾸지 않았다.
+- 이 기록은 P5-03 전체 완료가 아니다. 보조 팩터 동점 규칙의 결측 결정, 아이디어 5개 E2E,
+  최종 SHA 공식 CI·화면 검증, 후속 P6는 별도 완료 증거가 필요하다.

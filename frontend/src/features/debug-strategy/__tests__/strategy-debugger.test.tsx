@@ -1481,6 +1481,26 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     await screen.findByText("팩터 상위 종목");
     expect(requests[1]?.factor_id).toBe("other");
   });
+  it("선택한 팩터가 삭제되면 남은 팩터로 표시와 요청을 함께 복구한다", async () => {
+    const current = context();
+    current.factors.push({ ...current.factors[0]!, factorId: "other", label: "다른 팩터" });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        requests.push(body);
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    const view = renderDebugger(<StrategyPreview context={current} unavailableReason={null} />);
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByRole("combobox", { name: "팩터" }), "other");
+    view.rerender(<StrategyPreview context={context()} unavailableReason={null} />);
+    expect(screen.getByRole("combobox", { name: "팩터" })).toHaveValue("momentum");
+    expect(screen.getByRole("button", { name: "미리보기 새로고침" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByText("팩터 상위 종목");
+    expect(requests[0]?.factor_id).toBe("momentum");
+  });
   it("미리보기 취소 뒤 늦은 응답이 결과 표를 다시 채우지 않는다", async () => {
     let finish: (() => void) | undefined;
     const waiting = new Promise<void>((resolve) => {

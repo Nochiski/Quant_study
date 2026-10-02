@@ -20,12 +20,15 @@ export const StrategyPreview = ({
   const titleId = useId();
   const [asOf, setAsOf] = useState("");
   const [factorId, setFactorId] = useState("");
+  const selectedFactorId = context?.factors.some((factor) => factor.factorId === factorId)
+    ? factorId
+    : (context?.factors[0]?.factorId ?? "");
   const [requestedOwner, setRequestedOwner] = useState<string | null>(null);
   const { prepared, state, run, cancel } = useStrategyTrace(context, {
     summaryOnly: true,
     asOf,
     security: "",
-    factorId,
+    factorId: selectedFactorId,
     nodeId: "",
   });
   const owner = prepared.kind === "ready" ? prepared.ownerKey : null;
@@ -45,7 +48,7 @@ export const StrategyPreview = ({
         <label>
           {t("strategy.preview.factor")}
           <select
-            value={factorId || context?.factors[0]?.factorId || ""}
+            value={selectedFactorId}
             onChange={(event) => setFactorId(event.target.value)}
           >
             {context?.factors.map((factor) => (

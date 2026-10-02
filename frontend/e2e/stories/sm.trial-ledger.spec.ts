@@ -135,11 +135,22 @@ test(
     expect(blocked.response?.status).toBe(422);
 
     await page.goto("/research/strategies");
-    await page
-      .getByRole("button", {
-        name: `Revision 펼치기: ${title} 제목만 (${first.strategy_id})`,
-      })
-      .click();
+    const revisionToggle = page.getByRole("button", {
+      name: `Revision 펼치기: ${title} 제목만 (${first.strategy_id})`,
+      exact: true,
+    });
+    const pager = page.getByRole("navigation", { name: "전략 목록 페이지", exact: true });
+    await expect(page.getByRole("table", { name: "저장 전략 목록" })).toBeVisible();
+    // 전체 suite의 저장 전략은 20개를 넘는다. ID 정렬의 첫 페이지라는 가정을 하지 않는다.
+    while ((await revisionToggle.count()) === 0) {
+      const previousPage = await pager.innerText();
+      const next = pager.getByRole("button", { name: "다음", exact: true });
+      await expect(next).toBeEnabled(); // 마지막 페이지에도 없으면 저장/목록 회귀로 실패한다.
+      await next.click();
+      await expect(pager).not.toHaveText(previousPage);
+      await expect(page.getByRole("table", { name: "저장 전략 목록" })).toBeVisible();
+    }
+    await revisionToggle.click();
     await page.getByRole("tab", { name: "시도 원장 2" }).click();
     const ledger = page.getByRole("tabpanel");
     await expect(ledger).toContainText("계열 시도 수 2회");

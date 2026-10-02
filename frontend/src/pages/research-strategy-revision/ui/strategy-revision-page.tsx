@@ -463,6 +463,8 @@ export const StrategyRevisionPage = () => {
                         operators: assist.operators,
                         onOpenSource: openSourceAt,
                         documentKey: document.documentEpoch,
+                        sourceVersion: document.sourceVersion,
+                        active: view === "graph" && !search.recipe,
                       }
                 }
                 onSelectPointer={(pointer) => selectPointer(pointer, "graph")}

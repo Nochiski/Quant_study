@@ -179,13 +179,13 @@ describe("FactorGraphEditor (P5-02)", () => {
     renderEditor(WITH_SPARE, transactions, "/factors/0/graph/nodes/1");
     const selected = within(editor().getByRole("group", { name: /선택한 노드/ }));
     // `mom_252`(time_series)의 속성: window(number), input_node_id(reference → 같은 그래프의 다른 노드).
-    const input = selected.getByRole("combobox", { name: /\binput_node_id/ });
+    const input = selected.getByRole("combobox", { name: "입력 노드" });
     const options = within(input)
       .getAllByRole("option")
       .map((option) => option.textContent);
-    expect(options).toContain("close");
-    expect(options).toContain("px");
-    expect(options).not.toContain("mom_252");
+    expect(options).toContain("1. 데이터 필드");
+    expect(options).toContain("3. 데이터 필드");
+    expect(options).not.toContain("2. 기간 수익률");
     await user.selectOptions(input, "px");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       {
@@ -193,25 +193,25 @@ describe("FactorGraphEditor (P5-02)", () => {
         pointer: "/factors/0/graph/nodes/1/input_node_id",
         value: "px",
       },
-      "input_node_id",
+      "입력 노드",
       "graph",
       { focusEditor: false },
     );
-    const window = selected.getByRole("spinbutton", { name: /\bwindow/ });
+    const window = selected.getByRole("spinbutton", { name: "집계 기간" });
     await user.clear(window);
     await user.type(window, "126{Enter}");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/factors/0/graph/nodes/1/window", value: 126 },
-      "window",
+      "집계 기간",
       "graph",
       { focusEditor: false },
     );
     // 그래프 설정: output_node_id(reference). missing_policy 는 1.2 에서 실행 설정으로 갔다.
     const settings = within(editor().getByRole("group", { name: "그래프 설정" }));
-    await user.selectOptions(settings.getByRole("combobox", { name: /\boutput_node_id/ }), "px");
+    await user.selectOptions(settings.getByRole("combobox", { name: "출력 노드" }), "px");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/factors/0/graph/output_node_id", value: "px" },
-      "output_node_id",
+      "출력 노드",
       "graph",
       { focusEditor: false },
     );
@@ -222,6 +222,8 @@ describe("FactorGraphEditor (P5-02)", () => {
     const transactions = stub();
     renderEditor(WITH_SPARE, transactions, "/factors/0/graph/nodes/0");
     const selected = within(editor().getByRole("group", { name: /선택한 노드/ }));
+    expect(selected.queryByRole("textbox", { name: /\bnode_id/ })).toBeNull();
+    await user.click(selected.getByRole("button", { name: "식별자(YAML)" }));
     const nodeId = selected.getByRole("textbox", { name: /\bnode_id/ });
     await user.clear(nodeId);
     await user.type(nodeId, "px_close{Enter}");
@@ -255,16 +257,16 @@ describe("FactorGraphEditor (P5-02)", () => {
     const user = userEvent.setup();
     const transactions = stub();
     const onSelectPointer = renderEditor(WITH_SPARE, transactions, "/factors/0/graph/nodes/2");
-    await user.click(editor().getByRole("button", { name: "close · 삭제" }));
+    await user.click(editor().getByRole("button", { name: "1. 데이터 필드 · 삭제" }));
     expect(transactions.apply).not.toHaveBeenCalled();
     // 거부 사유는 JSON Pointer가 아니라 노드 표시 이름이다(P1-04).
     expect(editor().getByRole("alert")).toHaveTextContent(
-      "close을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: mom_252",
+      "1. 데이터 필드을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: 2. 기간 수익률",
     );
-    await user.click(editor().getByRole("button", { name: "px · 삭제" }));
+    await user.click(editor().getByRole("button", { name: "3. 데이터 필드 · 삭제" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "remove", pointer: "/factors/0/graph/nodes/2" },
-      "px",
+      "3. 데이터 필드",
       "graph",
       { focusEditor: false },
     );
@@ -277,24 +279,24 @@ describe("FactorGraphEditor (P5-02)", () => {
     const transactions = stub();
     renderEditor(WITH_DUPLICATE, transactions, "/factors/0/graph");
     // 참조된 노드(close ← mom_252)는 거부하고 참조 pointer를 알려 준다.
-    await user.click(editor().getByRole("button", { name: "close · 삭제" }));
+    await user.click(editor().getByRole("button", { name: "1. 데이터 필드 · 삭제" }));
     expect(transactions.apply).not.toHaveBeenCalled();
     expect(editor().getByRole("alert")).toHaveTextContent(
-      "close을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: mom_252",
+      "1. 데이터 필드을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: 2. 기간 수익률",
     );
     // 중복 표시 이름(spare ×2)은 문서 순번으로 구분되고, 누른 행의 pointer가 지워진다(id로 첫 노드를 찾지 않는다).
-    await user.click(editor().getByRole("button", { name: "spare (4) · 삭제" }));
+    await user.click(editor().getByRole("button", { name: "4. 데이터 필드 · 삭제" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "remove", pointer: "/factors/0/graph/nodes/3" },
-      "spare (4)",
+      "4. 데이터 필드",
       "graph",
       { focusEditor: false },
     );
     // node_id가 없는 노드는 첫 문자열 값(field_id)로 표시되고 역시 pointer로 지운다.
-    await user.click(editor().getByRole("button", { name: "price.high · 삭제" }));
+    await user.click(editor().getByRole("button", { name: "5. 데이터 필드 · 삭제" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "remove", pointer: "/factors/0/graph/nodes/4" },
-      "price.high",
+      "5. 데이터 필드",
       "graph",
       { focusEditor: false },
     );
@@ -352,7 +354,7 @@ describe("FactorGraphEditor (P5-02)", () => {
         .getByText("노드를 추가할 수 없습니다: 구문 오류 · source를 먼저 고치세요")
         .id,
     );
-    expect(editor().getByRole("status")).toHaveTextContent("px 반영됨");
+    expect(editor().getByRole("status", { name: "" })).toHaveTextContent("px 반영됨");
     expect(editor().queryByText("title 반영됨")).toBeNull();
   });
 });
@@ -485,7 +487,7 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
     nodeId: "mom_252",
   };
 
-  it("노드 카드 한 곳에만 본문이 붙고 DOM id가 겹치지 않는다", () => {
+  it("노드 badge와 인스펙터 진단 본문이 연결되고 DOM id가 겹치지 않는다", () => {
     render(
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
@@ -503,14 +505,10 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
       />,
     );
 
-    const row = editor()
-      .getByRole("button", { name: "노드 편집: mom_252" })
-      .closest("li");
-    expect(row).toHaveTextContent(NODE_DIAGNOSTIC.message);
-    // 선택한 노드 패널은 같은 문장을 다시 그리지 않는다 — 정보가 늘지 않는 사본이다(2차 리뷰 P3).
-    expect(
-      editor().getByRole("group", { name: /선택한 노드/ }),
-    ).not.toHaveTextContent(NODE_DIAGNOSTIC.message);
+    const row = editor().getByRole("button", { name: "노드 편집: 2. 기간 수익률" }).closest(".node-canvas__node");
+    expect(within(row as HTMLElement).getByRole("button", { name: "문제 1개" })).toBeInTheDocument();
+    // 캔버스 badge는 이동 경로, 선택한 인스펙터가 진단 본문을 한 번 소유한다.
+    expect(editor().getByRole("group", { name: /선택한 노드/ })).toHaveTextContent(NODE_DIAGNOSTIC.message);
     // 문장은 편집기 안에서 한 번만 나온다.
     expect(editor().getAllByText(NODE_DIAGNOSTIC.message)).toHaveLength(1);
     // 본문이지 assertive 알림이 아니다(리뷰 P3).

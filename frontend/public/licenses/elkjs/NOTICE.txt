@@ -1,0 +1,4 @@
+elkjs 0.12.0
+Source: https://github.com/kieler/elkjs/tree/v0.12.0
+Distributed worker: elk-worker.min.js (unmodified upstream build).
+See LICENSE.md for upstream license terms.

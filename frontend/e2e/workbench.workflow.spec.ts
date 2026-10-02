@@ -1171,10 +1171,10 @@ test.describe("professional YAML workflow", () => {
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
     await redoButton.click();
     // 되돌리기는 선택까지 되살리지 않는다(선택 pointer는 URL, 문서 이력 밖) — 노드를 다시 고른다.
-    await editor.getByRole("button", { name: "노드 편집: field" }).click();
+    await editor.getByRole("button", { name: /^노드 편집: 3\./ }).click();
 
     const selected = editor.getByRole("group", { name: /선택한 노드/ });
-    const fieldId = selected.getByRole("combobox", { name: /\bfield_id/ });
+    const fieldId = selected.getByRole("combobox", { name: "데이터 필드", exact: true });
     const fieldOptions = fieldId.locator("option:not([disabled])");
     await expect.poll(async () => fieldOptions.count()).toBeGreaterThan(1);
     const chosenField = await fieldOptions.nth(1).getAttribute("value");
@@ -1184,13 +1184,13 @@ test.describe("professional YAML workflow", () => {
     ).toContainText("field_id 반영됨");
 
     // 재연결: mom_252의 입력을 새 노드로.
-    await editor.getByRole("button", { name: "노드 편집: mom_252" }).click();
+    await editor.getByRole("button", { name: /^노드 편집: 2\./ }).click();
     // 계산식은 엔진의 창(`x[t-lag-window+1 … t-lag]`)과 같아야 한다(P1-03 1차 리뷰 P2). 표기법이라
     // 문구 다듬기에 흔들리지 않으므로 이 한 줄만 고정한다 — 사전이 브라우저에서 렌더된다는
     // 사실은 이것으로 증명된다. 산문 문장은 `screen-vocabulary.test.ts`가 소유한다.
     await expect(selected).toContainText("x[t-lag] / x[t-lag-window+1] - 1");
     await selected
-      .getByRole("combobox", { name: /\binput_node_id/ })
+      .getByRole("combobox", { name: "입력 노드", exact: true })
       .selectOption("field");
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
@@ -1299,13 +1299,8 @@ test.describe("professional YAML workflow", () => {
   test("keeps a node card readable when that node carries a diagnostic (P1-04)", async ({
     page,
   }) => {
-    // 노드 카드 진단 본문의 **레이아웃 계약** 둘을 고정한다.
-    //  1. 본문이 이름·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다(2차 리뷰 차단).
-    //  2. 본문이 남의 카드보다 자기 카드에 더 가깝다(3차 리뷰 차단). 진단 문장에 node_id가 없어
-    //     근접성이 곧 소유권이다.
-    // 계약은 아래 boundingBox 단언이 잠근다. 기준선 한 장은 보조 증거라 폭·테마 한 벌로 충분하고,
-    // 그래서 시각 프로젝트(4종)가 아니라 workflow 프로젝트에 둔다. 결함 자체는 테마와 무관하고
-    // 폭이 좁을수록 심한데 1440은 구성된 둘 중 좁은 쪽이다.
+    // P6: 노드 badge가 해당 인스펙터로 이동하고, 진단 본문은 그 인스펙터 폭을 사용한다.
+    // 옛 목록 카드의 근접성 계약은 명시적 선택·소유권과 본문 폭 계약으로 옮긴다.
     await openEditor(page, "/research/strategies/new");
     // 오류를 **마지막이 아닌** 노드에 준다: 뒤에 노드가 없으면 근접성이 뒤집혀도 드러나지 않는다.
     // golden의 마지막 노드(`mom_252`)를 깨고 그 뒤에 노드를 하나 더 둔다.
@@ -1324,43 +1319,32 @@ test.describe("professional YAML workflow", () => {
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const editorRegion = page.getByRole("region", { name: "그래프 편집" });
     await expect(editorRegion).toBeVisible();
-    // 원인 문장이 그 노드 카드 안에 본문으로 있다.
-    const nodes = editorRegion.locator(".factor-graph__editor-nodes");
-    await expect(nodes).toContainText("window는 1 이상이고 lag는 0 이상이어야 합니다");
-
-    // 본문은 버튼들과 같은 줄이 아니라 카드 아래 줄 전체 폭을 쓴다. 레이아웃 계약이라 픽셀로
-    // 고정한다 — jsdom에는 레이아웃이 없어 단위 테스트로는 잡히지 않는다.
-    const body = nodes.locator(".strategy-form__diagnostics").first();
-    const removeButton = nodes
-      .getByRole("button", { name: "mom_252 · 삭제" })
-      .first();
-    const bodyBox = await body.boundingBox();
-    const buttonBox = await removeButton.boundingBox();
+    const canvas = editorRegion.getByRole("region", { name: "노드 캔버스" });
+    const ownNode = canvas
+      .locator(".node-canvas__node")
+      .filter({ has: page.getByRole("button", { name: /^노드 편집: 2\./ }) });
+    await ownNode.getByRole("button", { name: /문제 \d+개/ }).click();
+    const inspector = editorRegion.getByRole("group", {
+      name: /선택한 노드.*기간 수익률/,
+    });
+    await expect(inspector).toContainText(
+      "window는 1 이상이고 lag는 0 이상이어야 합니다",
+    );
+    const body = inspector.locator(".strategy-form__diagnostics").first();
+    const bodyBox = await body.boundingBox(),
+      inspectorBox = await inspector.boundingBox();
     expect(bodyBox).not.toBeNull();
-    expect(buttonBox).not.toBeNull();
-    if (bodyBox === null || buttonBox === null) return;
-    // 같은 줄이 아니다: 본문 위쪽이 버튼 아래쪽보다 아래에 있다.
-    expect(bodyBox.y).toBeGreaterThanOrEqual(buttonBox.y + buttonBox.height);
-    // 카드 폭을 거의 다 쓴다(버튼 옆 좁은 칸에 끼지 않았다).
-    const listBox = await nodes.boundingBox();
-    expect(listBox).not.toBeNull();
-    if (listBox === null) return;
-    expect(bodyBox.width).toBeGreaterThan(listBox.width * 0.8);
-
-    // 근접성이 소유권이다: 본문은 자기 행보다 **아래 노드 행**에서 더 멀어야 한다.
-    const nextRow = nodes.getByRole("button", { name: "노드 편집: trailing" });
-    const nextBox = await nextRow.boundingBox();
-    expect(nextBox).not.toBeNull();
-    if (nextBox === null) return;
-    const toOwnRow = bodyBox.y - (buttonBox.y + buttonBox.height);
-    const toNextRow = nextBox.y - (bodyBox.y + bodyBox.height);
-    expect(toOwnRow).toBeLessThanOrEqual(toNextRow);
-
+    expect(inspectorBox).not.toBeNull();
+    if (bodyBox === null || inspectorBox === null)
+      throw new Error("diagnostic inspector missing");
+    expect(bodyBox.width).toBeGreaterThan(inspectorBox.width * 0.8);
+    expect(bodyBox.y).toBeGreaterThan(inspectorBox.y);
+    await expect(ownNode).not.toContainText(
+      "window는 1 이상이고 lag는 0 이상이어야 합니다",
+    );
     await page.mouse.move(0, 0);
-    // 문장 자체는 backend 소유라 픽셀로 고정하지 않는다(`mask`). 이 기준선이 지키는 것은 카드
-    // 레이아웃이고, 문구가 다듬어져도 기준선을 다시 찍을 일이 없다.
-    await expect(nodes).toHaveScreenshot("graph-node-diagnostic.png", {
-      mask: [nodes.locator(".strategy-form__diagnostics")],
+    await expect(inspector).toHaveScreenshot("graph-node-diagnostic.png", {
+      mask: [inspector.locator(".strategy-form__diagnostics")],
     });
   });
 
@@ -1542,7 +1526,7 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   const graph = page.getByRole("region", { name: "그래프 편집" });
   await graph.getByRole("button", { name: "데이터 필드 노드 추가", exact: true }).click();
   await graph.getByRole("group", { name: /선택한 노드/ })
-    .getByRole("combobox", { name: /\bfield_id/ }).selectOption("price.close");
+    .getByRole("combobox", { name: "데이터 필드", exact: true }).selectOption("price.close");
   for (const operation of ["양끝 자르기", "순위"]) {
     await graph.getByRole("button", { name: `${operation} 노드 추가`, exact: true }).click();
   }

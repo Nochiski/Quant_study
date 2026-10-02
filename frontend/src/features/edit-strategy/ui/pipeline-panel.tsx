@@ -17,7 +17,12 @@ import {
   type FormListSection,
 } from "../model/form-projection";
 import { coversPointer } from "../model/diagnostic-navigation";
-import { itemSection, listAddition } from "../model/form-transactions";
+import {
+  draftOf,
+  itemSection,
+  listAddition,
+  renameIdentity,
+} from "../model/form-transactions";
 import {
   cardTemplate,
   itemName,
@@ -36,16 +41,21 @@ import { recipeSummary } from "../model/recipe-projection";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   NO_FOCUS,
+  type CommitPlanner,
   useFieldCommit,
   useItemRemoval,
 } from "../model/use-field-editing";
 import type { FormProjectionState } from "../model/use-form-projection";
-import { useRevealSelection } from "../model/use-reveal-selection";
+import {
+  useRevealSelection,
+  useRevealedOpen,
+} from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import {
   DiagnosticNotes,
   FieldActions,
   FieldControl,
+  FormFieldsEditor,
   SeverityBadge,
   type FormCatalogs,
   type SliderRange,
@@ -65,6 +75,7 @@ type CardContext = {
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   selectedPointer: string | undefined;
+  revealSignal: number | undefined;
   onOpenGraph: ((pointer: string) => void) | undefined;
 };
 
@@ -114,8 +125,22 @@ export const PipelinePanel = ({
           transactions,
           catalogs,
           selectedPointer,
+          revealSignal,
           onOpenGraph,
         };
+  // 단계 없는 루트 스칼라는 문서 속성이다. 단계 마커를 추가하거나 다른 설정의 owner를 바꾸지 않는다.
+  const documentProperties = pipeline?.unstaged.find(
+    (section) => section.kind === "object" && section.pointer === "",
+  );
+  const documentSection =
+    documentProperties?.kind === "object"
+      ? {
+          ...documentProperties,
+          fields: documentProperties.fields.filter(
+            (field) => field.control.kind !== "const",
+          ),
+        }
+      : null;
   return (
     <section
       ref={container}
@@ -140,6 +165,20 @@ export const PipelinePanel = ({
           <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
         ) : null}
       </header>
+      {documentSection === null || context === null ? null : (
+        <fieldset className="pipeline__properties" disabled={disabled !== null}>
+          <legend>{t("graph.pipeline.documentProperties")}</legend>
+          <FormFieldsEditor
+            section={documentSection}
+            transactions={transactions}
+            catalogs={catalogs}
+            owner={PIPELINE_OWNER}
+            selectedPointer={selectedPointer}
+            names={context.names}
+            showIdentifiers={false}
+          />
+        </fieldset>
+      )}
       <TransactionFeedbackNote
         feedback={transactions.feedbackFor(PIPELINE_OWNER)}
         owner={PIPELINE_OWNER}
@@ -161,7 +200,12 @@ export const PipelinePanel = ({
             ))}
             <ExecutionGuide
               number={pipeline.stages.length + 1}
-              outside={unstagedNames(pipeline)}
+              outside={unstagedNames({
+                ...pipeline,
+                unstaged: pipeline.unstaged.filter(
+                  (section) => section !== documentProperties,
+                ),
+              })}
             />
           </ol>
         </fieldset>
@@ -334,7 +378,7 @@ const StageList = ({
 
 /**
  * 목록 항목 카드: 항목 필드로 문장을 채우고 삭제를 둔다(Form 항목과 같은 `useItemRemoval`). identity(`factor_id`)는
- * YAML 식별자라 카드에 두지 않는다 — 이름은 `label` 이 맡고 rename 은 Form·YAML 몫이다(WORKFLOW P4-03 결정 1).
+ * 기본 카드 이름은 `label` 이 맡고 identity 편집은 접힌 영역에서 기존 참조 rename을 쓴다.
  * 팩터의 계산 그래프는 레시피 줄(`RecipeLine`)로 보인다. 삭제 거부는 참조 자리를 이름으로 말한다(결정 3).
  */
 const ListItemCard = ({
@@ -360,6 +404,16 @@ const ListItemCard = ({
     (field) => field.control.kind === "graph-link",
   );
   const identity = item.fields.find((field) => field.key === item.identityKey);
+  const [identifiers, setIdentifiers] = useRevealedOpen(
+    identity !== undefined && context.selectedPointer === identity.pointer
+      ? `${identity.pointer}:${context.revealSignal ?? 0}`
+      : null,
+    false,
+  );
+  const planIdentity: CommitPlanner = (field, value) =>
+    field.key === item.identityKey
+      ? renameIdentity(context.tree, list, item, draftOf(value))
+      : null;
   const shown = item.fields.filter(
     (field) => field !== graph && field !== identity,
   );
@@ -370,11 +424,39 @@ const ListItemCard = ({
       template={cardTemplate(item.fields, list.descriptionKey)}
       context={context}
       // 칸이 없는 identity 의 진단은 카드 본문으로 남긴다.
-      notes={[...item.diagnostics, ...(identity?.diagnostics ?? [])]}
+      notes={[
+        ...item.diagnostics,
+        ...(identifiers ? [] : (identity?.diagnostics ?? [])),
+      ]}
       owner={item.pointer}
     >
       {graph === undefined ? null : (
         <RecipeLine item={item} graph={graph} label={label} context={context} />
+      )}
+      {identity === undefined ? null : (
+        <div className="pipeline__identity">
+          <Button
+            size="small"
+            tone="ghost"
+            aria-expanded={identifiers}
+            onClick={() => setIdentifiers(!identifiers)}
+          >
+            {t("graph.pipeline.identifiers")}
+          </Button>
+          {identifiers ? (
+            <FormFieldsEditor
+              section={{ ...section, fields: [identity] }}
+              transactions={context.transactions}
+              catalogs={context.catalogs}
+              owner={PIPELINE_OWNER}
+              planCommit={planIdentity}
+              selectedPointer={context.selectedPointer}
+              names={context.names}
+              showIdentifiers={false}
+              sectionDiagnostics={false}
+            />
+          ) : null}
+        </div>
       )}
       <div className="pipeline__actions">
         <Button
@@ -603,7 +685,11 @@ const InlineField = ({
   return (
     <span
       className="pipeline__field"
-      aria-current={coversPointer(field.pointer, context.selectedPointer) ? "true" : undefined}
+      aria-current={
+        coversPointer(field.pointer, context.selectedPointer)
+          ? "true"
+          : undefined
+      }
       data-written={field.written}
       data-applicable={
         field.applicable === null ? "unknown" : String(field.applicable)

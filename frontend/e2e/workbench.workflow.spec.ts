@@ -1181,7 +1181,7 @@ test.describe("professional YAML workflow", () => {
     await fieldId.selectOption({ index: 1 });
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
-    ).toContainText("field_id 반영됨");
+    ).toContainText("데이터 필드 반영됨");
 
     // 재연결: mom_252의 입력을 새 노드로.
     await editor.getByRole("button", { name: /^노드 편집: 2\./ }).click();
@@ -1194,7 +1194,7 @@ test.describe("professional YAML workflow", () => {
       .selectOption("field");
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
-    ).toContainText("input_node_id 반영됨");
+    ).toContainText("입력 노드 반영됨");
 
     // 문서 상태 배지는 탭 밖에 있어 Graph 탭에 머문 채 compile 결과를 본다(WORKFLOW P1-01).
     await expectPhase(page, "검증 통과");

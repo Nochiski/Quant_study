@@ -93,9 +93,11 @@ export const FactorGraphEditor = ({
   const [inspectRequest, setInspectRequest] = useState(0);
   useEffect(() => {
     if (inspectRequest === 0) return;
-    container.current
-      ?.querySelector<HTMLElement>("[data-canvas-inspector]")
-      ?.focus();
+    const inspector = container.current?.querySelector<HTMLElement>(
+      "[data-canvas-inspector]",
+    );
+    inspector?.focus({ preventScroll: true });
+    inspector?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [inspectRequest, container]);
   const factors = authoredFactors(tree);
   const activeFactorId =
@@ -164,7 +166,7 @@ export const FactorGraphEditor = ({
             ?.label ?? null,
         reference: () => null,
       }),
-    [tree, schema, factorIndex, catalogs],
+    [tree, schema, factorIndex, catalogs.equityFields],
   );
   const names = {
     catalog: (_catalog: string, value: string) =>

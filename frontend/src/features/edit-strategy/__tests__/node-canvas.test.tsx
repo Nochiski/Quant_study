@@ -166,13 +166,28 @@ describe("node canvas keyboard and identity", () => {
         </fieldset>
       );
     };
+    const Sibling = ({ inspect }: { inspect: boolean }) => {
+      const root = useRevealSelection<HTMLDivElement>(
+        inspect ? graph.nodes[1].pointer : undefined,
+      );
+      return (
+        <div ref={root}>
+          <span aria-current={inspect ? "true" : undefined}>
+            Pipeline sibling
+          </span>
+        </div>
+      );
+    };
     const Surface = ({ inspect }: { inspect: boolean }) => {
       const selected = inspect ? graph.nodes[1].pointer : undefined;
       const root = useRevealSelection<HTMLDivElement>(selected);
       return (
-        <div ref={root} className="factor-graph__editor">
-          <NodeCanvas {...setup()} selectedPointer={selected ?? null} />
-          <Inspector inspect={inspect} />
+        <div role="tabpanel">
+          <div ref={root} className="factor-graph__editor">
+            <NodeCanvas {...setup()} selectedPointer={selected ?? null} />
+            <Inspector inspect={inspect} />
+          </div>
+          <Sibling inspect={inspect} />
         </div>
       );
     };
@@ -180,6 +195,9 @@ describe("node canvas keyboard and identity", () => {
       const view = render(<Surface inspect={false} />);
       await waitFor(() => expect(layout).toHaveBeenCalledOnce());
       view.rerender(<Surface inspect />);
+      expect(scroll.mock.instances).not.toContain(
+        screen.getByText("Pipeline sibling"),
+      );
       expect(screen.getByRole("group", { name: "Inspector" })).toHaveFocus();
       scroll.mockClear();
       await act(async () =>

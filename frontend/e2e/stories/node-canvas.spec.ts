@@ -26,7 +26,7 @@ test("노드 캔버스 배선·키보드·취소·배치·YAML undo가 같은 �
   test.setTimeout(180_000);
   const workers: string[] = [];
   page.on("worker", (worker) => workers.push(worker.url()));
-  await openEditor(page, "/research/strategies/new");
+  await openEditor(page, "/research/strategies/new?view=yaml");
   await replaceSource(page, GOLDEN);
   await waitForSettledDocument(page);
   expect(workers).toEqual([]);

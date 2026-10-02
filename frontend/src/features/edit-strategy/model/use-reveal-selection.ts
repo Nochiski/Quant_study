@@ -36,7 +36,12 @@ export const useRevealSelection = <El extends HTMLElement>(
     const inspector = document.activeElement?.closest(
       "[data-canvas-inspector]",
     );
-    if (inspector && container.current?.contains(inspector)) return;
+    const tab = container.current?.closest('[role="tabpanel"]');
+    if (
+      inspector &&
+      (container.current?.contains(inspector) || tab?.contains(inspector))
+    )
+      return;
     const found = container.current?.querySelectorAll('[aria-current="true"]');
     found?.[found.length - 1]?.scrollIntoView?.({ block: "nearest" });
   }, [selectedPointer, signal]);

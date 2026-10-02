@@ -518,3 +518,39 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
     expect(ids.length).toBe(new Set(ids).size);
   });
 });
+
+
+it("preserves a pending wire when unrelated parent state recreates the catalogs wrapper", async () => {
+  const tree = treeOf(WITH_SPARE),
+    transactions = stub(),
+    user = userEvent.setup();
+  const view = () => (
+    <FactorGraphPanel
+      state={{ status: "blocked", reason: "invalid" }}
+      schema={SCHEMA}
+      diagnostics={[]}
+      onSelectPointer={vi.fn()}
+      onOpenSource={vi.fn()}
+      editing={{
+        tree,
+        transactions,
+        catalogs: { equityFields: null },
+        active: true,
+      }}
+    />
+  );
+  const rendered = render(view());
+  await user.click(screen.getByRole("button", { name: /^3\..* · 출력$/ }));
+  rendered.rerender(view());
+  expect(screen.getByRole("button", { name: "연결 취소" })).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: /^2\..* · 입력 노드 ·/ }),
+  );
+  expect(transactions.apply).toHaveBeenCalledOnce();
+  expect(transactions.apply).toHaveBeenCalledWith(
+    expect.objectContaining({ value: "px" }),
+    expect.any(String),
+    "graph",
+    expect.anything(),
+  );
+});

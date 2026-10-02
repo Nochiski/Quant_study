@@ -9,6 +9,8 @@ export const TRIAL_HOLD_SECONDS = 15;
 
 /** `npm run test:e2e`(run-playwright.mjs)가 만든 격리 런타임 디렉터리를 가리키는 환경 변수. */
 export const RUNTIME_DIRECTORY_ENV = "STRATEGY_WORKBENCH_E2E_RUNTIME_DIR";
+/** 100종목 예제 앱만 쓰는 경로. 기존 3종목 회귀 앱과 DB·데이터를 분리한다. */
+export const IDEAS_API_PREFIX = "/ideas";
 
 const runtimeDirectory = (): string => {
   const directory = process.env[RUNTIME_DIRECTORY_ENV];

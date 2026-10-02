@@ -6,17 +6,48 @@ import {
   type Request,
 } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { compileStrategyDocument } from "../../src/shared/api/generated";
-import { waitForSettledDocument } from "../editor-helpers";
 import {
-  apiClient,
+  compileStrategyDocument,
+  getBacktestResult,
+  getStrategyDocumentContract,
+} from "../../src/shared/api/generated";
+import { createClient } from "../../src/shared/api/generated/client";
+import { waitForSettledDocument } from "../editor-helpers";
+import { IDEAS_API_PREFIX } from "../runtime";
+import {
+  BACKEND,
   backtest,
   fillRunEnvironment,
   requireData,
 } from "../workbench-helpers";
 
 // 여러 레시피 편집·compile과 실제 백테스트를 포함하므로 기존 장기 워크벤치 흐름과 같은 예산을 쓴다.
-test.beforeEach(() => { test.setTimeout(180_000); });
+test.beforeEach(async ({ page }) => {
+  test.setTimeout(180_000);
+  // 실제 HTTP 앱에 경로만 돌린다. 응답·원문 주입 없이 100종목 데이터와 독립 저장소를 사용한다.
+  await page.route(
+    (url) =>
+      url.origin === new URL(BACKEND).origin &&
+      url.pathname.startsWith("/api/v1/"),
+    async (route) => {
+      const url = new URL(route.request().url());
+      url.pathname = IDEAS_API_PREFIX + url.pathname;
+      await route.continue({ url: url.toString() });
+    },
+  );
+});
+
+const ideasClient = createClient({ baseUrl: BACKEND + IDEAS_API_PREFIX });
+const ideaEnvironment = {
+  start: "2021-01-01",
+  end: "2021-12-31",
+  universe_id: "krx.common-stock",
+};
+const isCompile = (url: string) =>
+  ["", IDEAS_API_PREFIX].some(
+    (prefix) =>
+      new URL(url).pathname === `${prefix}/api/v1/strategy-documents/compile`,
+  );
 
 const pipeline = (page: Page) =>
   page.getByRole("region", { name: "전략 파이프라인" });
@@ -35,20 +66,12 @@ const start = async (page: Page, title: string) => {
   let latestHash: string | null = null;
   let latestRequest: Request | null = null;
   page.on("request", (request) => {
-    if (
-      new URL(request.url()).pathname !== "/api/v1/strategy-documents/compile"
-    )
-      return;
+    if (!isCompile(request.url())) return;
     latestRequest = request;
     latestHash = null;
   });
   page.on("response", async (response) => {
-    if (
-      new URL(response.url()).pathname !==
-        "/api/v1/strategy-documents/compile" ||
-      !response.ok()
-    )
-      return;
+    if (!isCompile(response.url()) || !response.ok()) return;
     const result = (await response.json()) as { spec_hash: string | null };
     if (response.request() === latestRequest) latestHash = result.spec_hash;
   });
@@ -79,7 +102,10 @@ const factor = async (
   direction: "high" | "low" = "high",
 ) => {
   const canvas = pipeline(page);
-  const labels = canvas.getByRole("textbox", { name: "표시 이름", exact: true });
+  const labels = canvas.getByRole("textbox", {
+    name: "표시 이름",
+    exact: true,
+  });
   const previousCount = await labels.count();
   await canvas
     .getByRole("button", { name: "알파 팩터 · 항목 추가", exact: true })
@@ -87,11 +113,7 @@ const factor = async (
   // 새 항목이 parse 투영에 나타난 뒤 편집한다. 기존 마지막 팩터를 먼저 채우면 안 된다.
   await expect(labels).toHaveCount(previousCount + 1);
   await waitForSettledDocument(page);
-  await commit(
-    page,
-    labels.nth(previousCount),
-    label,
-  );
+  await commit(page, labels.nth(previousCount), label);
   const card = canvas.getByRole("group", { name: label, exact: true });
   if (id !== null) {
     await card
@@ -240,7 +262,7 @@ const finish = async (
   const expected = requireData(
     (
       await compileStrategyDocument({
-        client: apiClient,
+        client: ideasClient,
         body: { source, format: "yaml" },
       })
     ).data,
@@ -253,7 +275,7 @@ const finish = async (
   await expect(
     page.getByRole("tab", { name: "그래프", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
-  await fillRunEnvironment(page);
+  await fillRunEnvironment(page, {}, ideaEnvironment);
   await backtest(page).click();
   await page
     .getByRole("alertdialog", { name: "저장하지 않은 변경이 있습니다" })
@@ -264,6 +286,23 @@ const finish = async (
     "completed",
     { timeout: 120_000 },
   );
+  const runId = new URL(page.url()).pathname.split("/").at(-1)!;
+  const result = requireData(
+    (await getBacktestResult({ client: ideasClient, path: { run_id: runId } }))
+      .data,
+    "아이디어 실행 결과",
+  );
+  const contract = requireData(
+    (await getStrategyDocumentContract({ client: ideasClient })).data,
+    "아이디어 데이터 계약",
+  );
+  expect(result.manifest.strategy_hash).toBe(expected.spec_hash);
+  expect(result.manifest.strategy_provenance.spec_hash).toBe(
+    expected.spec_hash,
+  );
+  expect(result.manifest.data_snapshot_id).toBe(contract.contract.dataset_snapshot_id);
+  expect(result.manifest.environment).toMatchObject(ideaEnvironment);
+  expect(result.artifacts.trades.length).toBeGreaterThan(0);
 };
 
 test(
@@ -410,6 +449,7 @@ test(
     await canvas
       .getByRole("button", { name: "동점 해소 팩터 · 기본값으로", exact: true })
       .click();
+    await waitForSettledDocument(page);
     await commit(
       page,
       canvas.getByRole("spinbutton", {

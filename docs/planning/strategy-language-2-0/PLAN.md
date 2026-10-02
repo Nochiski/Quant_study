@@ -1116,7 +1116,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `WAITING` | — |
+| [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `IN_PROGRESS` | PR433 b009e394 위 별도 브랜치, ELK0.12.0·HTML/SVG ADR와 스파이크 검증 중 |
 | [ ] | `P6-02` | 노드 캔버스: 드래그 배선, 좌표 local state, 자동 정렬, 키보드 | P6-01 | `WAITING` | — |
 | [ ] | `P6-03` | 노드 위 진단, 옛 목록형 편집기 제거, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `WAITING` | — |
 
@@ -2223,3 +2223,19 @@ PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 
   별도 조립한다. 기존 회귀 앱/DB/데이터는 그대로이며 예제 앱은 snapshot·DB·산출물을 분리한다.
   UI와 정본 compile은 같은 예제 앱을 사용하고 실제 거래·manifest hash/provenance/snapshot까지
   검사한다. 최종 SHA 전체 CI·캡처는 PR433에 기록하며 이 중간 실행을 완료로 계산하지 않는다.
+
+#### P6-01 ADR·스파이크 Packet (2026-10-02)
+
+- 선행 PR433 `b009e394a406087e04ae3e86970e6bc769b876df`: CI36957762428 5개 job 성공,
+  backend3485/1skip·Equity1411·frontend1254·browser64·Rust38. 같은 SHA의 1440/640/360 캡처를
+  직접 확인했다. draft·미병합 상태로 보존하고 `feat/lang2-p6-01-elk-spike`를 그 위에 쌓는다.
+- 범위: ELK0.12.0 정확 버전/lockfile, HTML+SVG/ELK ADR, 재현 가능한 Node 배치·Vite 분할 크기
+  스파이크. 제품 canvas·배선은 P6-02, 진단/옛 목록 제거/마감은 P6-03이다.
+- 책임: ELK는 좌표만, 원문 편집은 기존 source transaction·CodeMirror undo, 포트는 runtime schema,
+  검증/계획은 backend. 실제 worker·신원/stale·키보드·진단 reveal·undo를 뒤 PR에서 실측한다.
+- 절차: executing-plans task1 → 범위 self-check → diff freeze → 독립 리뷰/같은 리뷰어 재검토 →
+  draft PR/최종 SHA 전체 CI. Opus가 제공되지 않아 실제 사용한 reviewer만 기록한다. 병합은 금지다.
+- 이전 task-done 오류는 파일 mode0600의 실행 비트 부재였다. `bash <공식 task-done> ...`로 정상
+  실행·Task4 완료 기록을 확인했다. 참조 sdd-workspace도 정상 실행됐고 권한 변경/보안 우회는 없다.
+- PowerShell 집계 도구 미실행·과거 자동 집계 보존 원칙은 유지한다. SQLite 저장 잠금 근본 원인은
+  미확인이며 이번 의존성/스파이크 작업으로 해결했다고 주장하지 않는다.

@@ -190,3 +190,54 @@ def test_semantic_hash_normalizes_auxiliary_reference_with_factor_rename():
         portfolio=replace(spec.portfolio, tie_breaker_factor_id="renamed"),
     )
     assert strategy_semantic_hash(spec) == strategy_semantic_hash(renamed)
+
+
+def test_short_rank_weights_follow_auxiliary_order_after_long_selection():
+    from strategy_workbench.domain.strategy.facade.specification import (
+        PortfolioSide,
+        WeightingMethod,
+    )
+
+    spec = _spec()
+    spec = replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio,
+            side=PortfolioSide.LONG_SHORT,
+            selection_count=2,
+            short_selection_count=2,
+            weighting=WeightingMethod.RANK,
+        ),
+        risk=replace(spec.risk, net_exposure=0, gross_exposure=1),
+    )
+    values = {"alpha": dict(a=1, b=1, c=1, d=1), "aux": dict(a=40, b=30, c=20, d=10)}
+    weights = {
+        target.security_id: target.weight for target in _frame(spec, _observations(values)).targets
+    }
+    assert weights == pytest.approx({"a": 1 / 3, "b": 1 / 6, "c": -1 / 3, "d": -1 / 6})
+
+
+def test_short_buffer_uses_the_same_available_candidates_as_selection():
+    from strategy_workbench.domain.strategy.facade.specification import PortfolioSide
+
+    spec = _spec()
+    spec = replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio,
+            side=PortfolioSide.LONG_SHORT,
+            selection_count=2,
+            short_selection_count=2,
+            turnover_buffer_count=1,
+        ),
+        risk=replace(spec.risk, net_exposure=0, gross_exposure=1),
+    )
+    observations = _observations(
+        {"alpha": dict(a=1, b=1, c=1, d=1, e=1), "aux": dict(a=50, b=40, c=30, d=20, e=10)}
+    )
+    observations = tuple(
+        replace(row, previous_weight=-0.2) if row.security_id == "e" else row
+        for row in observations
+    )
+    weights = {target.security_id: target.weight for target in _frame(spec, observations).targets}
+    assert weights["e"] < 0

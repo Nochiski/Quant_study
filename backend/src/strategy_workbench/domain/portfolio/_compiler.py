@@ -473,6 +473,22 @@ def _rank_candidates(
     return sorted(eligible, key=key)
 
 
+def _short_ranking(
+    spec: StrategySpec,
+    decisions: Iterable[CandidateDecision],
+    observations: Mapping[str, PortfolioObservation],
+    long_ids: set[str],
+    *,
+    checkpoint: Callable[[], None],
+) -> list[CandidateDecision]:
+    ranked = _rank_candidates(spec, decisions, observations, short=True, checkpoint=checkpoint)
+    # 보조 방향은 양측에 같아 롱 후보가 숏 순위 앞에도 올 수 있다. 선정·버퍼·비중은
+    # 같은 숏 모집단을 읽는다. 미설정 문서의 기존 순위·점수차 비중 계산은 그대로 둔다.
+    if spec.portfolio.tie_breaker_factor_id is None:
+        return ranked
+    return [item for item in _checkpointed(ranked, checkpoint) if item.security_id not in long_ids]
+
+
 def _compile_frame(
     spec: StrategySpec,
     signal_as_of: date,
@@ -510,9 +526,6 @@ def _compile_frame(
     ranked = _rank_candidates(
         spec, decisions, observations_by_id, short=False, checkpoint=checkpoint
     )
-    short_ranked = _rank_candidates(
-        spec, decisions, observations_by_id, short=True, checkpoint=checkpoint
-    )
     rank_by_id = {
         item.security_id: index
         for index, item in _checkpointed(enumerate(ranked, start=1), checkpoint)
@@ -523,6 +536,9 @@ def _compile_frame(
     ]
     long_count, short_count = _selection_counts(spec, len(ranked))
     long_ids = {item.security_id for item in ranked[:long_count]}
+    short_ranked = _short_ranking(
+        spec, decisions, observations_by_id, long_ids, checkpoint=checkpoint
+    )
     short_ids = (
         {
             item.security_id
@@ -1086,7 +1102,9 @@ def _apply_turnover_buffer(
                 retained.add(candidate.security_id)
             long_ids.add(candidate.security_id)
             short_ids.discard(candidate.security_id)
-        from_bottom = short_positions[candidate.security_id]
+        from_bottom = short_positions.get(
+            candidate.security_id, len(short_ranked) + buffer_count + 1
+        )
         if (
             previous < 0
             and spec.portfolio.side is PortfolioSide.LONG_SHORT
@@ -1125,7 +1143,7 @@ def _target_weights(
     )
     short_scores = _weight_scores(
         spec,
-        _rank_candidates(spec, ranked, observations, short=True, checkpoint=checkpoint),
+        _short_ranking(spec, ranked, observations, long_ids, checkpoint=checkpoint),
         observations,
         short_ids,
         reasons,

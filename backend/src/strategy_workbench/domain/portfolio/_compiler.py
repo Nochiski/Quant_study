@@ -435,6 +435,44 @@ class _FrameCompilation:
     unknown_sector_ids: tuple[str, ...] = ()
 
 
+def _rank_candidates(
+    spec: StrategySpec,
+    decisions: Iterable[CandidateDecision],
+    observations: Mapping[str, PortfolioObservation],
+    *,
+    short: bool,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[CandidateDecision]:
+    # 각 측의 기존 최종 ID 순서는 보존한다(롱 오름차순·숏 내림차순).
+    eligible = sorted(
+        (item for item in _checkpointed(decisions, checkpoint) if item.eligible),
+        key=lambda item: item.security_id,
+        reverse=short,
+    )
+    factor_id = spec.portfolio.tie_breaker_factor_id
+    direction = spec.portfolio.tie_breaker_direction
+
+    def key(item: CandidateDecision) -> tuple[float, bool, float]:
+        primary = (1 if short else -1) * (item.composite_score or 0.0)
+        if factor_id is None:
+            return primary, False, 0.0
+        observation = observations[item.security_id]
+        value = next(
+            (factor for factor in observation.factor_values if factor.factor_id == factor_id), None
+        )
+        # 결측 정책은 평가기에서 이미 적용했다. 공개 전 값은 순위에 누출하지 않는다.
+        if value is None or value.value is None or value.available_date > observation.as_of:
+            return primary, True, 0.0
+        if not math.isfinite(value.value):
+            raise ValueError(
+                f"동점 해소 팩터 값은 유한해야 합니다: factor_id={factor_id!r} "
+                f"security_id={item.security_id!r} value={value.value!r}"
+            )
+        return primary, False, (-1 if direction is FactorDirection.HIGH else 1) * value.value
+
+    return sorted(eligible, key=key)
+
+
 def _compile_frame(
     spec: StrategySpec,
     signal_as_of: date,
@@ -466,9 +504,14 @@ def _compile_frame(
     decisions = _apply_cross_sectional_eligibility(
         spec, observations, scored, checkpoint=checkpoint
     )
-    ranked = sorted(
-        (decision for decision in _checkpointed(decisions, checkpoint) if decision.eligible),
-        key=lambda item: (-(item.composite_score or 0.0), item.security_id),
+    observations_by_id = {
+        item.security_id: item for item in _checkpointed(observations, checkpoint)
+    }
+    ranked = _rank_candidates(
+        spec, decisions, observations_by_id, short=False, checkpoint=checkpoint
+    )
+    short_ranked = _rank_candidates(
+        spec, decisions, observations_by_id, short=True, checkpoint=checkpoint
     )
     rank_by_id = {
         item.security_id: index
@@ -481,13 +524,15 @@ def _compile_frame(
     long_count, short_count = _selection_counts(spec, len(ranked))
     long_ids = {item.security_id for item in ranked[:long_count]}
     short_ids = (
-        {item.security_id for item in ranked[-short_count:] if item.security_id not in long_ids}
+        {
+            item.security_id
+            for item in [
+                candidate for candidate in short_ranked if candidate.security_id not in long_ids
+            ][:short_count]
+        }
         if spec.portfolio.side is PortfolioSide.LONG_SHORT
         else set()
     )
-    observations_by_id = {
-        item.security_id: item for item in _checkpointed(observations, checkpoint)
-    }
     buffer_retained = _apply_turnover_buffer(
         spec,
         ranked,
@@ -496,6 +541,7 @@ def _compile_frame(
         short_ids=short_ids,
         long_count=long_count,
         short_count=short_count,
+        short_ranked=short_ranked,
         checkpoint=checkpoint,
     )
     weight_result = _target_weights(
@@ -1025,12 +1071,14 @@ def _apply_turnover_buffer(
     short_ids: set[str],
     long_count: int,
     short_count: int,
+    short_ranked: list[CandidateDecision],
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> set[str]:
     retained: set[str] = set()
     buffer_count = spec.portfolio.turnover_buffer_count
     if buffer_count == 0:
         return retained
+    short_positions = {item.security_id: index for index, item in enumerate(short_ranked, start=1)}
     for index, candidate in _checkpointed(enumerate(ranked), checkpoint):
         previous = previous_weights.get(candidate.security_id, 0.0)
         if previous > 0 and index < long_count + buffer_count:
@@ -1038,7 +1086,7 @@ def _apply_turnover_buffer(
                 retained.add(candidate.security_id)
             long_ids.add(candidate.security_id)
             short_ids.discard(candidate.security_id)
-        from_bottom = len(ranked) - index
+        from_bottom = short_positions[candidate.security_id]
         if (
             previous < 0
             and spec.portfolio.side is PortfolioSide.LONG_SHORT
@@ -1077,7 +1125,7 @@ def _target_weights(
     )
     short_scores = _weight_scores(
         spec,
-        list(reversed(ranked)),
+        _rank_candidates(spec, ranked, observations, short=True, checkpoint=checkpoint),
         observations,
         short_ids,
         reasons,

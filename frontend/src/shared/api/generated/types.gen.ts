@@ -3417,6 +3417,11 @@ export type PortfolioStep = {
    */
   short_selection_count?: number;
   side?: PortfolioSide;
+  tie_breaker_direction?: FactorDirection;
+  /**
+   * Tie Breaker Factor Id
+   */
+  tie_breaker_factor_id?: string | null;
   /**
    * Turnover Buffer Count
    */

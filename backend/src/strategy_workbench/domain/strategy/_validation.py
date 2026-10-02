@@ -250,7 +250,7 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         f"risk_factor_id={excluded!r}",
         severity=ValidationSeverity.WARNING,
     )
-    if not composite_factors(spec):
+    if not composite_factors(spec) and spec.portfolio.tie_breaker_factor_id is None:
         # 막지 않으면 모든 후보의 합성 점수가 `None` 이 되어 정렬이 `security_id` 사전순으로
         # 떨어진다 — 예외도 진단도 없이 엉뚱한 종목이 선정되는 silent wrong result 다.
         yield semantic_issue(
@@ -258,6 +258,36 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
             "factors",
             "리스크 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
             f"추가하세요: risk_factor_id={excluded!r} factors={factor_ids!r}",
+        )
+
+
+def _tie_breaker_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
+    factor_id = spec.portfolio.tie_breaker_factor_id
+    if factor_id is None:
+        return
+    factor_ids = [factor.factor_id for factor in spec.factors]
+    if factor_id not in factor_ids:
+        yield semantic_issue(
+            "strategy.portfolio.tie_breaker_factor_missing",
+            "portfolio.tie_breaker_factor_id",
+            "동점 해소 팩터가 이 문서의 팩터 목록에 없습니다: "
+            f"factor_id={factor_id!r} factors={factor_ids!r}",
+        )
+        return
+    yield semantic_issue(
+        "strategy.portfolio.tie_breaker_factor_excluded",
+        "portfolio.tie_breaker_factor_id",
+        "동점 해소 팩터는 주 점수가 같은 종목의 순위에만 쓰이고 "
+        "합성 점수에서는 빠집니다(가중치 무시): "
+        f"factor_id={factor_id!r}",
+        severity=ValidationSeverity.WARNING,
+    )
+    if not composite_factors(spec):
+        yield semantic_issue(
+            "strategy.signal.no_alpha_factor",
+            "factors",
+            "보조·역가중 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
+            f"추가하세요: tie_breaker_factor_id={factor_id!r} factors={factor_ids!r}",
         )
 
 
@@ -642,6 +672,7 @@ def validate_strategy(
             )
         )
     issues.extend(_risk_source_issues(spec))
+    issues.extend(_tie_breaker_issues(spec))
     if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_ONLY:
         issues.append(
             semantic_issue(

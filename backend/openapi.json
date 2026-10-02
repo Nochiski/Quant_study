@@ -5458,6 +5458,21 @@
             "$ref": "#/components/schemas/PortfolioSide",
             "default": "long_only"
           },
+          "tie_breaker_direction": {
+            "$ref": "#/components/schemas/FactorDirection",
+            "default": "high"
+          },
+          "tie_breaker_factor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tie Breaker Factor Id"
+          },
           "turnover_buffer_count": {
             "default": 0,
             "title": "Turnover Buffer Count",
@@ -8647,6 +8662,7 @@
               "selection_percentile": 0.1,
               "short_selection_count": 20,
               "side": "long_only",
+              "tie_breaker_direction": "high",
               "turnover_buffer_count": 0,
               "weighting": "equal"
             }

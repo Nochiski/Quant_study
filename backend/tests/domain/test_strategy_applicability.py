@@ -36,6 +36,11 @@ DRAFT = StrategyIdentity("draft", 0)
 # 행마다 (기본값과 다른 명시값, 읽히지 않게 만드는 문맥, 읽히게 만드는 문맥).
 # 기본 fixture: long_only, top_n, monthly, equal, liquidity/regime 없음.
 CASES: dict[str, tuple[Any, dict[str, Any], dict[str, Any]]] = {
+    "/portfolio/tie_breaker_direction": (
+        "low",
+        {},
+        {"/portfolio/tie_breaker_factor_id": "momentum"},
+    ),
     "/portfolio/selection_count": (50, {"/portfolio/selection_method": "percentile"}, {}),
     "/portfolio/short_selection_count": (5, {}, {"/portfolio/side": "long_short"}),
     "/portfolio/selection_percentile": (0.2, {}, {"/portfolio/selection_method": "percentile"}),

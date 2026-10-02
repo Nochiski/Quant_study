@@ -60,6 +60,15 @@ def explain_strategy(spec: StrategySpec) -> StrategyExplanation:
                 f"{spec.portfolio.rebalance}",
                 (
                     f"선택 방식: {spec.portfolio.selection_method}",
+                    *(
+                        (
+                            f"동점 해소: {spec.portfolio.tie_breaker_factor_id} · "
+                            f"{spec.portfolio.tie_breaker_direction.value} "
+                            "(주 점수가 같을 때만, 결측은 뒤, 최종 동점은 기존 종목 ID 순서)",
+                        )
+                        if spec.portfolio.tie_breaker_factor_id is not None
+                        else ()
+                    ),
                     f"가중 방식: {spec.portfolio.weighting}",
                     f"최소 거래 비중: {spec.portfolio.minimum_trade_weight:.2%}",
                 ),

@@ -82,6 +82,12 @@ const savedContext = (): StrategyDebuggerContext => ({
 });
 
 const traceResponse = (): StrategyTraceResponse => ({
+  factor_preview: {
+    valid_count: 0,
+    missing_count: 0,
+    missing: "drop",
+    top: [],
+  },
   spec_hash: "spec-hash",
   snapshot_id: "snapshot-v1",
   registry_version: "registry-v1",
@@ -246,6 +252,12 @@ const pagedTraceResponse = (
   const explicitHoldings = request.starting_holdings != null;
   const source = request.strategy_source;
   return {
+    factor_preview: {
+      valid_count: 0,
+      missing_count: 0,
+      missing: "drop",
+      top: [],
+    },
     spec_hash: "spec-hash",
     snapshot_id: "snapshot-v1",
     registry_version: "registry-v1",
@@ -1293,6 +1305,23 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     request: StrategyTraceRequest,
   ): StrategyTraceResponse => ({
     ...pagedTraceResponse(request),
+    factor_preview: {
+      valid_count: 81,
+      missing_count: 12,
+      missing: "drop",
+      top: [
+        {
+          security_id: "unselected",
+          value: 987.5,
+          security: {
+            security_id: "unselected",
+            name: "팩터 상위 종목",
+            ticker: "654321",
+            venue: "XKRX",
+          },
+        },
+      ],
+    },
     summary: {
       signal_as_of: "2026-08-31",
       execution_on: "2026-09-01",
@@ -1350,8 +1379,13 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     expect(screen.getByText("2026-08-31")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "7" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "0.123456" })).toBeInTheDocument();
-    for (const count of [93, 41, 17, 23, 12])
+    for (const count of [93, 41, 17, 23])
       expect(screen.getByText(String(count))).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", { name: "팩터 상위 5개 (방향 기준)" }),
+    ).toHaveTextContent("팩터 상위 종목");
+    expect(screen.getByRole("cell", { name: "987.5" })).toBeInTheDocument();
+    expect(screen.getByText("81")).toBeInTheDocument();
     view.rerender(
       <StrategyPreview context={context(4)} unavailableReason={null} />,
     );
@@ -1415,5 +1449,85 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
       "문서 또는 실행 설정과 맞지 않는 응답",
     );
     expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
+  });
+  it("팩터를 바꾸면 이전 결과를 숨기고 새 팩터의 명시적 요청만 표시한다", async () => {
+    const current = context();
+    current.factors.push({
+      ...current.factors[0]!,
+      factorId: "other",
+      label: "다른 팩터",
+    });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        requests.push(body);
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    renderDebugger(
+      <StrategyPreview context={current} unavailableReason={null} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByText("팩터 상위 종목");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "팩터" }),
+      "other",
+    );
+    expect(screen.queryByText("팩터 상위 종목")).not.toBeInTheDocument();
+    expect(screen.getByText("이전 요청 · 새로고침 필요")).toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByText("팩터 상위 종목");
+    expect(requests[1]?.factor_id).toBe("other");
+  });
+  it("선택한 팩터가 삭제되면 남은 팩터로 표시와 요청을 함께 복구한다", async () => {
+    const current = context();
+    current.factors.push({ ...current.factors[0]!, factorId: "other", label: "다른 팩터" });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        requests.push(body);
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    const view = renderDebugger(<StrategyPreview context={current} unavailableReason={null} />);
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByRole("combobox", { name: "팩터" }), "other");
+    view.rerender(<StrategyPreview context={context()} unavailableReason={null} />);
+    expect(screen.getByRole("combobox", { name: "팩터" })).toHaveValue("momentum");
+    expect(screen.getByRole("button", { name: "미리보기 새로고침" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByText("팩터 상위 종목");
+    expect(requests[0]?.factor_id).toBe("momentum");
+  });
+  it("미리보기 취소 뒤 늦은 응답이 결과 표를 다시 채우지 않는다", async () => {
+    let finish: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        await waiting;
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await user.click(
+      await screen.findByRole("button", { name: "미리보기 취소" }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "추적 요청을 취소했습니다.",
+    );
+    await act(async () => {
+      finish?.();
+      await waiting;
+    });
+    expect(screen.queryByText("팩터 상위 종목")).not.toBeInTheDocument();
   });
 });

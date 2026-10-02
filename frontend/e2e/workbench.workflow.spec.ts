@@ -1593,7 +1593,7 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText("completed", { timeout: 120_000 });
 });
 
-test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다", async ({ page }) => {
+test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다", { tag: ["@story", "@US-CS-03"] }, async ({ page }) => {
   await openEditor(page, "/research/strategies/new");
   await replaceSource(page, 'schema_version: "1.2"\ntitle: "레시피 편집 검증"\n');
   await page.getByRole("tab", { name: "그래프", exact: true }).click();
@@ -1638,6 +1638,15 @@ test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화�
   await page.goBack();
   await expect(recipe).toBeVisible();
   await expect(recipe.getByRole("article")).toHaveCount(2);
+  await fillRunEnvironment(page);
+  const factorPreview = page.getByRole("region", { name: "선정 미리보기" });
+  await factorPreview.getByRole("button", { name: "미리보기 새로고침" }).click();
+  await expect(factorPreview.getByRole("table", { name: "팩터 상위 5개 (방향 기준)" })).toBeVisible();
+  for (const width of [1440, 640, 360]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await factorPreview.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath(`recipe-preview-${width}.png`) });
+  }
   for (const width of [1440, 640, 360]) {
     await page.setViewportSize({ width, height: 900 });
     await recipe.getByRole("button", { name: "1. 데이터 필드", exact: true }).click();

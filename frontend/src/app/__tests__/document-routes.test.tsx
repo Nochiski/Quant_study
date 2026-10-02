@@ -2086,6 +2086,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
   const completedTrace = (
     request: StrategyTraceRequest,
   ): StrategyTraceResponse => ({
+  factor_preview: { valid_count: 0, missing_count: 0, missing: "drop", top: [] },
     spec_hash: "7".repeat(64),
     snapshot_id: "snap",
     registry_version: "v1",

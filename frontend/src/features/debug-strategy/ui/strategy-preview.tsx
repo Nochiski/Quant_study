@@ -19,12 +19,16 @@ export const StrategyPreview = ({
 }) => {
   const titleId = useId();
   const [asOf, setAsOf] = useState("");
+  const [factorId, setFactorId] = useState("");
+  const selectedFactorId = context?.factors.some((factor) => factor.factorId === factorId)
+    ? factorId
+    : (context?.factors[0]?.factorId ?? "");
   const [requestedOwner, setRequestedOwner] = useState<string | null>(null);
-  const { prepared, state, run } = useStrategyTrace(context, {
+  const { prepared, state, run, cancel } = useStrategyTrace(context, {
     summaryOnly: true,
     asOf,
     security: "",
-    factorId: "",
+    factorId: selectedFactorId,
     nodeId: "",
   });
   const owner = prepared.kind === "ready" ? prepared.ownerKey : null;
@@ -41,6 +45,19 @@ export const StrategyPreview = ({
         {stale ? (
           <Badge tone="warn">{t("strategy.preview.stale")}</Badge>
         ) : null}
+        <label>
+          {t("strategy.preview.factor")}
+          <select
+            value={selectedFactorId}
+            onChange={(event) => setFactorId(event.target.value)}
+          >
+            {context?.factors.map((factor) => (
+              <option key={factor.factorId} value={factor.factorId}>
+                {factor.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           {t("strategy.preview.date")}
           <input
@@ -60,6 +77,9 @@ export const StrategyPreview = ({
         >
           {t("strategy.preview.refresh")}
         </Button>
+        {state.kind === "loading" ? (
+          <Button onClick={cancel}>{t("strategy.preview.cancel")}</Button>
+        ) : null}
       </header>
       <p>{t("strategy.preview.description")}</p>
       {unavailableReason !== null ? (
@@ -70,6 +90,12 @@ export const StrategyPreview = ({
       ) : null}
       {state.kind === "loading" ? (
         <p role="status">{t("strategy.preview.loading")}</p>
+      ) : null}
+      {state.kind === "cancelled" ? (
+        <p role="status">{t("debugger.state.cancelled")}</p>
+      ) : null}
+      {state.kind === "blocked" && state.reason === "factor" ? (
+        <p>{t("debugger.blocked.factor")}</p>
       ) : null}
       {state.kind === "error" ? (
         <FailureNotice message={state.message} reason={state.reason} />
@@ -82,6 +108,45 @@ export const StrategyPreview = ({
           <p>
             {t("strategy.preview.resolvedDate")}: <time>{response.as_of}</time>
           </p>
+          <dl className="strategy-preview__counts">
+            <div>
+              <dt>{t("strategy.preview.factorValid")}</dt>
+              <dd>{response.factor_preview.valid_count}</dd>
+            </div>
+            <div>
+              <dt>{t("strategy.preview.factorMissing")}</dt>
+              <dd>{response.factor_preview.missing_count}</dd>
+            </div>
+            <div>
+              <dt>{t("strategy.preview.missingPolicy")}</dt>
+              <dd>
+                {t(
+                  `run_environment.field.missing.value.${response.factor_preview.missing}`,
+                )}
+              </dd>
+            </div>
+          </dl>
+          <div className="strategy-preview__table">
+            <table>
+              <caption>{t("strategy.preview.factorTop")}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">{t("strategy.preview.name")}</th>
+                  <th scope="col">{t("strategy.preview.factorValue")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {response.factor_preview.top.map((row) => (
+                  <tr key={row.security_id}>
+                    <td>
+                      {row.security?.name ?? t("strategy.preview.unknownName")}
+                    </td>
+                    <td>{row.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {summary == null ? (
             <p>{t("strategy.preview.noFrame")}</p>
           ) : (

@@ -134,6 +134,16 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 
 ## 현재 작업 Packet
 
+현재 작업은 P5-03이며 main `e8400fba0d7f64bacdbcd320e4ca1cfdf7931edd`에서
+`feat/lang2-p5-03-factor-preview`로 분리했다(2026-10-02). 기존 PR422~430 병합 상태는 사용자 인계 기준이다.
+단계: trace 평가결과 투영/이전 API 폐기 → 전략 보조 팩터 동점 해소 → 아이디어 5개 E2E/매뉴얼 → 전체 검증/독립 리뷰/draft PR.
+확정: 보조 팩터와 방향은 전략 설정, 주 점수 동점에만 사용, alpha 합성 제외, 특정 지표 고정 금지.
+확인 대기: 실행 결측 처리 후 남은 보조값 결측의 우선순위. 기존 최종 동점 순서는 security_id다.
+검증: 최초 main CI 저장 2건의 SQLite BEGIN IMMEDIATE 잠금은 재실행 성공만 확인됐으며 근본 해결은 미확인이다.
+이 작업은 저장 구현·테스트 기준을 변경하지 않는다. P5 전체 출구와 P6는 아직 완료하지 않았다.
+
+### 이전 P4-03 Packet (보존)
+
 현재 PR 은 `P4-03`(`IN_PROGRESS` — P4-03a backend [#424](https://github.com/Nochiski/Quant_study/pull/424) 리뷰 대기, 리드 결정 2026-09-30 — WORKFLOW P4-03 결정 블록)이다. 아래 P1-05 이하
 절은 지난 PR 의 패킷 기록이고, P3-03 패킷은 P3 스택 절 끝에, P4-01a·P4-01b·P4-02 패킷은 P4 스택 절에 있다.
 
@@ -1095,7 +1105,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P5-01` | `recipe-projection.ts`(체인 판정)·`recipe-transactions.ts`(추가·삭제·이동·파라미터·재배선), property test | P4-04 | `WAITING` | — |
 | [ ] | `P5-02` | 팔레트(연산자 카탈로그), 단계 카드 UI, 설명, 인라인 진단, 식별자 접힘 영역 | P5-01 | `WAITING` | — |
-| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `WAITING` | — |
+| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `IN_PROGRESS` | 클라우드 P5-03: trace 미리보기·기존 preview 폐기 구현 중. 보조 결측 정책 확인 대기 |
 
 Phase exit:
 
@@ -1797,10 +1807,10 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **위험성**: 같은 결함이 경로에 따라 두 네임스페이스로 나가 frontend가 코드 → 마커 매핑을 두 벌
   가져야 하고, 사용자에게 내부 코드 문자열이 보인다. 지금은 frontend가 이 endpoint를 쓰지 않아
   노출은 없다.
-- **담당**: `P5-03`(팩터 결과 미리보기), 조건부. WORKFLOW·spec 어디에도 이 endpoint의 소비자가
-  정해져 있지 않다(P4-03 기준일 미리보기는 기존 trace API). 미리보기가 `/factors/preview`를 쓰면
-  P5-03이 422 코드를 `strategy.expression.*`로 정리하고, 쓰지 않으면 P5-03이 이 항목의 담당을 다시
-  정한다(WORKFLOW P5-03 acceptance에 예약).
+- **담당·처리**: `P5-03` 팩터 결과 미리보기. 사용자 확정에 따라 `/factors/preview`를
+  은퇴하고 strategy trace 경로로 통합했다. 폐기 endpoint는 404이고 `/factors/validate`는
+  유지한다. 그래프 진단과 실행 설정 검증은 기존 전략 trace 관문이 소유한다.
+  회귀는 `test_factor_http_api.py`의 은퇴 확인 및 `test_strategy_trace_http_api.py`가 맡는다.
 
 ### BACKLOG-005: 폭 640px 이하에서 IDE 뷰 탭이 사라진다 (감사 N5)
 
@@ -2143,3 +2153,33 @@ P5-03 결정 확인: #374는 open이고 댓글/확정 ADR은 없다. 기존 fact
 미정이다(후자는 selection_count 초과 정책도 필요). 현재 UI에서 어느 쪽도 임의 구현하지 않는다.
 
 - P5-02 공식 CI 캡처 후속: 360px에서 기존 좌측 구조 패널이 레시피 폭을 약 30px로 압축하는 문제를 확인했다. 767px 이하 IDE는 구조·편집기를 세로 배치하고 상단 액션을 줄바꿈한다. 화면 안에 들어오는지만 보던 검사를 카드 가독 폭과 문서 가로 넘침 검사로 강화했다.
+
+## 클라우드 P5-03 미리보기 구현 검증 (2026-10-02)
+
+첫 검토 범위는 기존 factors/preview 폐기와 strategy trace의 팩터별 결과 투영이다.
+보조 팩터 동점 해소·아이디어 5개 E2E는 후속이며 P5-03 전체 완료로 집계하지 않는다.
+`factor_evaluations`의 값과 PIT 유니버스로 수·상위 5개를 만들고 `summary.targets`는 사용하지 않는다.
+기존 요청 신원·provenance·query cache·취소 경로를 유지한다. validate/explain·equity API는 유지한다.
+
+로컬 frontend 전체 96파일/1248개·build, 이후 취소 회귀를 포함한 debugger 35개·typecheck 통과.
+backend 전체는 3072 passed / 9 failed / 376 skipped다. 실패 9개는 모두 설치되지 않은
+Rust 실행 코어(`CoreUnavailable: rust_persistent`)를 요청했다. pyright는 backend 디렉터리에서
+0 errors / 4 Rust source warnings, ruff(src/tests/examples/scripts/tools)는 통과했다.
+원장 검사의 첫 실행은 fixture와 pytest tmp의 파일시스템이 달라 EXDEV가 발생했다
+(202 failed / 760 passed / 449 errors). 코드를 바꾸지 않고 같은 파일시스템의 basetemp로 재검사한다.
+최종 SHA 공식 CI와 실제 캡처 검토는 draft PR에 별도로 기록한다. main의 SQLite 잠금 근본 해결은 미확인이다.
+
+PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 못했다. 위 기존 자동 집계는
+과거 시점 값으로 보존했으며 현재 Packet과 이 절에 실제 진행을 기록한다.
+
+#### P5-03 미리보기 리뷰 수정 및 추가 검증 (2026-10-02)
+
+- 읽기 전용 코드 리뷰의 Important 1건(선택 팩터 삭제 후 요청 차단)을 수정했다.
+  표시·요청이 같은 유효 선택을 읽으며, 명시적 미지 팩터의 trace 차단은 유지한다.
+  실패 재현 후 debugger 테스트 36개 통과. HIGH/LOW·6개 구성원 상위5 절단·동일값 ID 순서·
+  비구성원 극단값 배제를 추가 검증했다(2개 통과). 현행 SoT와 BACKLOG-004도 은퇴 결정으로 정리했다.
+- backend 관련 경로 최종 집중 검사: 175 passed. DB 전체는 같은 파일시스템의 임시 경로로
+  재실행해 1270 passed / 121 failed / 20 errors. DuckDB의 읽기 전용 홈 경로 쓰기 실패 등
+  클라우드 환경 제한이 남았으며 테스트 기준이나 보안 설정은 바꾸지 않았다.
+- 이 기록은 P5-03 전체 완료가 아니다. 보조 팩터 동점 규칙의 결측 결정, 아이디어 5개 E2E,
+  최종 SHA 공식 CI·화면 검증, 후속 P6는 별도 완료 증거가 필요하다.

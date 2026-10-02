@@ -71,6 +71,7 @@ const sameCalculation = (
   sameWireValue(anchor.provenance, candidate.provenance) &&
   sameWireValue(anchor.target, candidate.target) &&
   sameWireValue(anchor.summary, candidate.summary) &&
+  sameWireValue(anchor.factor_preview, candidate.factor_preview) &&
   sameWireValue(anchor.warnings ?? [], candidate.warnings ?? []);
 
 const rowIdentity = (row: TraceRow): string =>

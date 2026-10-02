@@ -156,9 +156,6 @@ import type {
   PreviewExperimentData,
   PreviewExperimentErrors,
   PreviewExperimentResponses,
-  PreviewFactorGraphData,
-  PreviewFactorGraphErrors,
-  PreviewFactorGraphResponses,
   PreviewPortfolioData,
   PreviewPortfolioErrors,
   PreviewPortfolioResponses,
@@ -908,25 +905,6 @@ export const explainFactorGraph = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/factors/explain",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-
-/**
- * Preview Factor Graph
- */
-export const previewFactorGraph = <ThrowOnError extends boolean = false>(
-  options: Options<PreviewFactorGraphData, ThrowOnError>,
-) =>
-  (options.client ?? client).post<
-    PreviewFactorGraphResponses,
-    PreviewFactorGraphErrors,
-    ThrowOnError
-  >({
-    url: "/api/v1/factors/preview",
     ...options,
     headers: {
       "Content-Type": "application/json",

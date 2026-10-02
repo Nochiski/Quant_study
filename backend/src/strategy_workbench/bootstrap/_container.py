@@ -242,7 +242,6 @@ def build_container(
         factor_research=FactorResearchService(
             factor_registry,
             metadata_source=equity_data,
-            observation_source=equity_data,
         ),
         portfolio_design=portfolio_design,
         strategy_traces=strategy_traces,

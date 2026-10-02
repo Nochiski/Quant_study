@@ -1105,7 +1105,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P5-01` | `recipe-projection.ts`(체인 판정)·`recipe-transactions.ts`(추가·삭제·이동·파라미터·재배선), property test | P4-04 | `WAITING` | — |
 | [ ] | `P5-02` | 팔레트(연산자 카탈로그), 단계 카드 UI, 설명, 인라인 진단, 식별자 접힘 영역 | P5-01 | `WAITING` | — |
-| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `IN_PROGRESS` | 클라우드 P5-03: PR431 미리보기 검증 완료(draft), 보조 순위 후속 구현 중. 아이디어 5개 E2E 미완료 |
+| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `IN_PROGRESS` | 클라우드 P5-03: PR431·432 최종 검증 완료(draft), 그래프 전용 문서속성·식별자·아이디어 5개 E2E 구현/검증 중 |
 
 Phase exit:
 
@@ -2200,3 +2200,26 @@ PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 
   선언으로 두며 공통 엔진에 지표를 고정하지 않는다.
 - P6: 사용자 선택 ELK를 ADR에 반영하고 라이선스·번들·실측·키보드·진단 reveal·undo를 검증한
   뒤에만 완료 처리한다. ELK 승인으로 다른 도구·권한 변경을 허용하지 않는다.
+
+
+#### P5-03 그래프 전용 예제 Packet (2026-10-02)
+
+- base: PR432 `6b0ee49b0e176aa95bb0c30d617ac1999deead76`, 브랜치 `feat/lang2-p5-03-graph-ideas`.
+  PR432 CI36950916337 전체 5개 job 성공: backend3477/1skip, database1411, frontend1250,
+  browser59, Rust38. 동일 SHA 공식 캡처 1440/640/360과 독립 재검토 blocking0 확인.
+- 문서 머리는 단계 없는 root schema projection의 기존 필드 컨트롤이다. identity는 접힌 영역에서
+  기존 renameIdentity로 바꾸고, 진단 재선택은 기존 reveal owner를 공유한다. 별도 계산/직렬화 없음.
+- 정상 보조/역가중 제외 안내만 backend의 팩터 label로 표시한다. 진단 code/pointer를 유지하며
+  frontend가 문장을 재조립하지 않는다.
+- 아이디어3은 선언형 60일 모멘텀을 보조로 두되 공통 엔진에 지표를 고정하지 않는다. 주 이진
+  팩터의 4개 노드와 별도 보조 레시피를 유지한다. spec_hash를 semantic_hash로 완화하지 않는다.
+- 5개 graph-only E2E·참조 rename/undo·문서 튜토리얼을 추가한다. 최종 전체CI/화면/독립검토는
+  후속 draft PR에 기록한다. P5 출구·P6 완료 표시는 아직 하지 않는다.
+- US-CS05/06 전체 수용 기준(3종 정규화 기여도·100후보 순위 탈락 등)은 예제 생성만으로 증명하지
+  않으며 스토리 상태를 과장하지 않는다. SQLite 저장 잠금 근본 원인은 여전히 미확인이다.
+- 공식 CI36955113523: backend·frontend·no-extras·story 성공, browser62통과/2실패.
+  역가중의 참조 reset 뒤 비중 입력은 settling 대기를 보완했다. 상위20%는 기존 3종목 mock과
+  확정된 floor 규칙에서 0종목이므로 전략·규칙을 바꾸지 않고 예제용 100종목 앱을 테스트에서
+  별도 조립한다. 기존 회귀 앱/DB/데이터는 그대로이며 예제 앱은 snapshot·DB·산출물을 분리한다.
+  UI와 정본 compile은 같은 예제 앱을 사용하고 실제 거래·manifest hash/provenance/snapshot까지
+  검사한다. 최종 SHA 전체 CI·캡처는 PR433에 기록하며 이 중간 실행을 완료로 계산하지 않는다.

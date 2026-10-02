@@ -2,7 +2,8 @@
 # adj_close → mean(20) → 잎 adj_close_2 → gt(left=adj_close_2, right=mean). 체인 머리(adj_close)를
 # 다시 읽지 않는다. 종가와 이평 모두 수정주가로 재야 분할·병합 날 가짜 돌파가 없다(이슈 #214).
 # node_id 는 빌더 규칙(연산자·필드 이름, 겹치면 `_2`)이다. 비교 출력(참/거짓)은 compile 이 0/1 점수로
-# 승격한다(P2-07).
+# 승격한다(P2-07). 같은 주 점수 안에서만 아래 60일 모멘텀을 비교한다.
+# 보조 지표는 이 예제의 선언이며 엔진이 지표를 고정하지 않는다.
 schema_version: "1.2"
 title: "20일 이평 돌파"
 factors:
@@ -28,7 +29,23 @@ factors:
           left_node_id: adj_close_2
           right_node_id: mean
       output_node_id: gt
+  - factor_id: momentum_60
+    label: "동점 비교 모멘텀"
+    direction: high
+    graph:
+      nodes:
+        - kind: field
+          node_id: adj_close
+          field_id: price.adj_close
+        - kind: time_series
+          node_id: momentum
+          operator: momentum
+          input_node_id: adj_close
+          window: 60
+      output_node_id: momentum
 portfolio:
   selection_count: 20
+  tie_breaker_factor_id: momentum_60
+  tie_breaker_direction: high
 risk:
   max_name_weight: 0.05

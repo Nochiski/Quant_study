@@ -1,4 +1,10 @@
-import { useEffect, useRef } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 
 /**
  * 선택한 pointer의 카드·노드를 화면 안으로 끌어온다(WORKFLOW P1-01 리뷰 P2-2). 문제 목록이 탭과
@@ -30,4 +36,18 @@ export const useRevealSelection = <El extends HTMLElement>(
     found?.[found.length - 1]?.scrollIntoView?.({ block: "nearest" });
   }, [selectedPointer, signal]);
   return container;
+};
+
+/** 접힌 영역은 새 진단 이동 요청에서 렌더 중에 연다. 같은 pointer의 재선택도 signal로 구별한다. */
+export const useRevealedOpen = (
+  request: string | null,
+  initiallyOpen = true,
+): [boolean, Dispatch<SetStateAction<boolean>>] => {
+  const [open, setOpen] = useState(initiallyOpen || request !== null);
+  const [served, setServed] = useState(request);
+  if (request !== served) {
+    setServed(request);
+    if (request !== null && !open) setOpen(true);
+  }
+  return [open, setOpen];
 };

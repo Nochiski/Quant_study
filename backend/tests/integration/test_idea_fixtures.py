@@ -59,7 +59,7 @@ IDEAS = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_document
 _EXPECTED_DIAGNOSTICS: dict[str, frozenset[str]] = {
     "momentum_12_1.yaml": frozenset(),
     "low_pbr_high_roe.yaml": frozenset(),
-    "ma20_breakout.yaml": frozenset(),
+    "ma20_breakout.yaml": frozenset({"strategy.portfolio.tie_breaker_factor_excluded"}),
     "top_trading_value.yaml": frozenset(),
     # 변동성 팩터는 합성 점수에서 빠지고 역가중에만 쓰인다는 정보 경고(spec D3 S6).
     "inverse_volatility.yaml": frozenset({"strategy.risk.risk_factor_excluded"}),
@@ -268,7 +268,7 @@ def test_ma20_breakout_is_four_nodes_with_two_leaves_and_a_promoted_output(
 
     adj_close → mean → 잎 adj_close_2 → gt(adj_close_2, mean).
     """
-    (nodes,) = _document_nodes(authoring, "ma20_breakout.yaml").values()
+    nodes = _document_nodes(authoring, "ma20_breakout.yaml")["ma20_breakout"]
 
     assert [(node.node_id, node.kind, node.inputs) for node in nodes] == [
         ("adj_close", "field", ()),
@@ -277,7 +277,7 @@ def test_ma20_breakout_is_four_nodes_with_two_leaves_and_a_promoted_output(
         ("gt", "comparison", ("adj_close_2", "mean")),
     ]
     # 비교 출력(boolean)은 P2-07 승격으로 0/1 숫자 점수가 되어 compile 을 통과한다.
-    (factor,) = _spec(authoring, "ma20_breakout.yaml").factors
+    [factor] = list(composite_factors(_spec(authoring, "ma20_breakout.yaml")))
     assert factor.graph.output_node_id.startswith("__promote_")
 
 
@@ -325,3 +325,14 @@ def test_inverse_volatility_weights_by_a_second_factor_outside_the_composite(
         factor.factor_id for factor in spec.factors if factor.factor_id != risk_factor
     ]
     assert len(composite_factors(spec)) == 1
+
+
+def test_breakout_declares_auxiliary_momentum_without_changing_boolean_alpha(
+    authoring: StrategyAuthoringService,
+) -> None:
+    spec = _spec(authoring, "ma20_breakout.yaml")
+    assert spec.portfolio.tie_breaker_factor_id == "momentum_60"
+    assert spec.portfolio.tie_breaker_direction.value == "high"
+    assert [factor.factor_id for factor in composite_factors(spec)] == ["ma20_breakout"]
+    [auxiliary] = [factor for factor in spec.factors if factor.factor_id == "momentum_60"]
+    assert auxiliary.graph.output_node_id == "momentum"

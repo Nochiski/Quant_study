@@ -6,6 +6,7 @@ import type {
 import { authoredFactors } from "./graph-transactions";
 import {
   projectPipeline,
+  pipelineDocumentProperties,
   type PipelineProjection,
 } from "./pipeline-projection";
 import type { JsonSchema } from "./schema-navigator";
@@ -77,13 +78,14 @@ export const graphCoversPointer = (tree: unknown, pointer: string): boolean => {
 };
 
 /**
- * Graph 탭 맨 위 파이프라인 캔버스(P4-02)가 그 pointer의 카드·목록 항목을 그리는가. 단계가 없는
- * 섹션(`unstaged` — 전략 이름·설명·파라미터)은 캔버스 밖이라 들어오지 않는다.
+ * Graph 탭의 문서 속성과 파이프라인 카드·목록 항목이 그 pointer를 그리는가.
+ * 문서 속성의 필드 집합은 렌더링과 공유한다. 미표시 파라미터·버전 상수는 원문에서 고친다.
  */
 export const pipelineCoversPointer = (
   pipeline: PipelineProjection,
   pointer: string,
 ): boolean =>
+  (pipelineDocumentProperties(pipeline)?.fields.some((field) => coversPointer(field.pointer, pointer)) ?? false) ||
   pipeline.stages.some((stage) =>
     [
       ...stage.cards.flatMap((card) =>

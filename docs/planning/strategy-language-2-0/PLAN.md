@@ -2275,7 +2275,8 @@ PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 
   dependency/스파이크는 #434, 캔버스 입력/worker는 #435로 이미 분리했고 이 PR은 최종 표시 owner 이동이다.
 - 로컬 검증: typecheck/e2e typecheck/lint/build 통과, 전체 frontend 100파일·1,278테스트 통과.
   독립 review_tie 코드/Phase 6 SoT 재검토 APPROVE, Critical/Important/Minor 0(관련 37테스트 독립 통과).
-  단독 route 실행에서는 새 문서 metadata 대기 1회 실패했고 전체 실행에서는 통과해 공식 브라우저에서도 확인한다.
+  단독 route 실패는 ready 전환으로 분리된 이전 DOM을 계속 조회한 테스트 문제였다. 현재 canvas를
+  waitFor 안에서 재조회해 타입/ratio/history 단언을 그대로 유지했다.
 - 절차: executing-plans task4/5, 독립 코드/SoT·책임분리 검토와 동일 리뷰어 재검토. 사용 가능한 Codex
   reviewer를 실제 이름으로 기록하고 Opus 검토라고 주장하지 않는다.
 

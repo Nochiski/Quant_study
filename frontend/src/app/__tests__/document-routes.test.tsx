@@ -2141,12 +2141,13 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       }
       await screen.findByRole("region", { name: "노드 캔버스" });
       await waitFor(() => expect(explainedGraphs).toHaveLength(1));
-      const node = await screen.findByRole("button", {
-        name: /^노드 편집: 2\./,
-      });
+      // 계획 ready 전환은 캔버스를 다시 마운트할 수 있으므로 현재 DOM을 매번 조회한다.
+      await waitFor(() =>
+        expect(within(screen.getByRole("region", { name: "노드 캔버스" })).getAllByText("종목별 수치").length).toBeGreaterThan(0),
+      );
       const graph = screen.getByRole("region", { name: "노드 캔버스" });
-      expect(within(graph).getByRole("button", { name: /^노드 편집: 2\./ })).toHaveTextContent("기간 수익률");
-      await waitFor(() => expect(within(graph).getAllByText("종목별 수치").length).toBeGreaterThan(0));
+      const node = within(graph).getByRole("button", { name: /^노드 편집: 2\./ });
+      expect(node).toHaveTextContent("기간 수익률");
       expect(within(graph).getAllByText("ratio").length).toBeGreaterThan(0);
       expect(within(graph).getAllByText("H 252 세션").length).toBeGreaterThan(0);
       await user.click(node);

@@ -147,10 +147,18 @@ const period = async (
     );
 };
 
-const binary = async (page: Page, name: string, fieldId: string) => {
+const binary = async (
+  page: Page,
+  name: string,
+  fieldId: string,
+  previousInput = "left_node_id",
+) => {
   await recipe(page)
     .getByRole("button", { name: `${name} 노드 추가`, exact: true })
     .click();
+  await recipe(page)
+    .getByRole("combobox", { name: "앞 단계가 들어갈 입력", exact: true })
+    .selectOption(previousInput);
   await recipe(page)
     .getByRole("combobox", { name: "데이터 필드 1", exact: true })
     .selectOption(fieldId);
@@ -305,7 +313,7 @@ test(
     await factor(page, "ma20_breakout", "20일 이평 돌파");
     await field(page, "price.adj_close");
     await period(page, "기간 평균", 20);
-    await binary(page, "초과", "price.adj_close");
+    await binary(page, "초과", "price.adj_close", "right_node_id");
     await closeRecipe(page);
     await momentum(page, "momentum_60", "동점 비교 모멘텀", 60);
     await pipeline(page)

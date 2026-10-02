@@ -1,0 +1,65 @@
+# scope_v1.0 — 메인 모델. 원본 v3 5팩터 z-score(`v3_zscore.toml`)를 그대로 쓰고 밸류의 EV/EBITDA 만 뺐다
+# (2026-10-02 사용자 결정). 사람이 부르는 이름은 `scope_v1.0`, 레지스트리 id 는 `scope@1.0`.
+#
+# EV/EBITDA 를 뺀 이유: 원본 v3 는 설정에 ev_ebitda .25 가 있지만 데이터가 3/1,321 종목뿐이라 실제로는
+# PER·PBR·배당만으로 밸류를 계산했다. 이식판은 WISE cF4002 로 538/587 종목에 값이 있어 원본과 순위가
+# 갈렸다(10-01 추정치 보유 585 대조: 밸류 순위상관 0.987 → 시뮬레이션 0.997). 엔진은 있는 하위 지표끼리
+# 비례 재정규화하므로, 키를 빼면 원본에서 EV/EBITDA 가 비었을 때와 같은 계산이 된다.
+#
+# 나머지는 `v3_zscore.toml` 과 글자 그대로 같다(테스트가 대조한다). `v3_zscore@1.0` 은 원본 코드 동등성
+# 검증(골든·G-M3) 기준으로 남는다. 키 순서가 합산 순서다.
+
+model_id = "scope"
+version = "1.0"
+engine = "v3_zscore"
+
+[buckets]
+momentum = 0.30
+revision = 0.30
+flow = 0.20
+quality = 0.10
+valuation = 0.10
+
+[universe]
+require_estimates = true
+sec_types = ["common", "spac"]
+markets = ["KOSPI", "KOSDAQ"]
+min_market_cap = 1000.0
+
+[params.momentum.sub_weights]
+r1m = 0.35
+r3m = 0.25
+r6m = 0.20
+r9m = 0.12
+r12m = 0.08
+
+[params.revision.metrics]
+operating_profit = 0.4
+net_income = 0.6
+
+[params.revision.periods]
+"1w" = 0.25
+"1m" = 0.45
+"3m" = 0.30
+
+[params.flow.sub_weights]
+inst_5d = 0.25
+inst_20d = 0.15
+for_5d = 0.25
+for_20d = 0.15
+pe_5d = 0.10
+pe_20d = 0.10
+
+[params.quality.sub_weights]
+gpa = 0.20
+roa = 0.15
+fcf_assets = 0.15
+debt_ratio = 0.15
+gpa_change = 0.15
+std_20d = 0.20
+
+# ev_ebitda(.25) 삭제 — 남은 셋은 원본 가중 그대로, 엔진이 .75 로 나눠 PER .40·PBR .40·배당 .20 이 된다
+[params.valuation.sub_weights]
+per = 0.30
+pbr = 0.30
+dividend_yield = 0.15

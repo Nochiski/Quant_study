@@ -41,7 +41,7 @@ D = "2026-09-28"
 D_S = "20260928"
 FI_BID = "m_20260929T000500_000000Z"
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "model_golden" / "2026-09-28"
-ALL_SPECS = ("v2_percentrank@1.0", "v3_zscore@1.0", "v4_rank@0.1", "v4_rank@0.2")
+ALL_SPECS = ("scope@1.0", "v2_percentrank@1.0", "v3_zscore@1.0", "v4_rank@0.1", "v4_rank@0.2")
 V3, V2, V4 = "v3_zscore@1.0", "v2_percentrank@1.0", "v4_rank@0.1"
 N_BOARD = 40
 # 보드 트리는 40종목이라 서버 하한(D 가격 2,000 · v4 순위 100)을 그대로 두면 MG4·MG1 이 FAIL 한다

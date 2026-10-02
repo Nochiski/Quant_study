@@ -45,7 +45,7 @@ from .view import DayView, load_day, rank_of, ticker_of
 Row = dict[str, object]
 Dictionary = list[tuple[str, str, str, str]]
 
-MODEL_LABELS = {"v4_rank@0.1": "v4 기본", "v4_rank@0.2": "v4 동일가중",
+MODEL_LABELS = {"scope@1.0": "scope_v1.0", "v4_rank@0.1": "v4 기본", "v4_rank@0.2": "v4 동일가중",
                 "v3_zscore": "v3 원본", "v2_percentrank": "v2 원본"}
 FOOTNOTES = (
     "① 유니버스 컷: 주 모델 모집단 = 추정치 보유 보통주(신선·유예) — D-13 적격성(관리·정지·"

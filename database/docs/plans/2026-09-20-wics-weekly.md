@@ -1,4 +1,6 @@
 # WICS 주간 섹터 원장 → stage → equity 플랜 (2026-09-20)
+> **10-05 감사**: **진행 중.** T0~T4 는 완료됐고, G-W5 2회째(10-03) 결과는 기록되지 않았다. 코드는 feat/v3-merge 에만 있다(main 미병합). 시각·임계는 미확정(U19). ([감사](../research/2026-10-05-plan-audit.md) · 결정 [`DECISIONS.md`](../DECISIONS.md))
+
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

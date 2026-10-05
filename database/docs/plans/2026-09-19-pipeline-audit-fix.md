@@ -1,4 +1,6 @@
 # 일일 증분 파이프라인 감사 결함 수정 플랜 (2026-09-19)
+> **10-05 감사**: **낡음 — PR #164 병합으로 종결.** G-C-2·§4 체크박스는 갱신되지 않았다. ★ 가 아닌 임계(C6·EG21·키움 결손 게이트 등)는 확정 기록이 없다(U12·U15·U16). ([감사](../research/2026-10-05-plan-audit.md) · 결정 [`DECISIONS.md`](../DECISIONS.md))
+
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

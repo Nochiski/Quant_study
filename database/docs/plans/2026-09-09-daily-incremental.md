@@ -1,4 +1,6 @@
 # 일일 증분 파이프라인 구축 플랜 — 원장 → stage → equity
+> **10-05 감사**: **낡음.** 시간표와 P4~P6 은 09-11 v2 로, 운영 구조는 [로드맵](2026-10-05-roadmap.md) 으로 대체됐다. 유효 범위는 P0~P3 결과와 R1~R10 근거뿐이다. 하한 수치(U9)·R5 제외 조건(U13)은 미확정 기본값이다. ([감사](../research/2026-10-05-plan-audit.md) · 결정 [`DECISIONS.md`](../DECISIONS.md))
+
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

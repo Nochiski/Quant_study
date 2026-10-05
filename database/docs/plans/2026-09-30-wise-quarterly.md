@@ -1,4 +1,6 @@
 # WISE 분기 재무 수집 · 실시간 모델 입력 전환 플랜 (2026-09-30, 승인 — 결정 D-Q1~Q4 권고안)
+> **10-05 감사**: **낡음(기록 공백).** T-Q1~Q5 는 구현됐다(d01e5dab·5c2d272a·6004abb5). GQ2~5 통과는 v3-merge v2:41 에만 기록돼 있다. D-Q2 판정·fi1.1.0·DART 분기 FG 는 미이행. Y:BS·Y:CF 수집은 소비자가 없다(U11·Q-9). ([감사](../research/2026-10-05-plan-audit.md) · 결정 [`DECISIONS.md`](../DECISIONS.md))
+
 
 > 근거: [`docs/research/2026-09-30-quarter-source-test.md`](../research/2026-09-30-quarter-source-test.md) — 키움은 분기 재무 TR 없음,
 > 네이버 = WISE(162/163 칸 일치), KIS 는 누적·0=결측. 사용자 방향(09-30): "실시간 모델은 WISE 분기". 모 플랜

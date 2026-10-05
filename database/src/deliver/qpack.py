@@ -37,7 +37,6 @@ SEP_WIDTH = 5.0
 MIN_WIDTH = 4.4             # Q.Pack 실측 보이는 열 최소(Sector 4.43)
 NUM_MAX_WIDTH = 12.0        # 숫자 열 상한 — 넘는 값은 없다(시총 억원 9자리도 9 안팎)
 TXT_MAX_WIDTH = 9.0         # 너비를 지정하지 않은 문자 열 상한(지정하면 그 값이 상한)
-HEADER_LINES = 3            # 7행 33.75 = 11.25 × 3줄
 FIRST_DATA_ROW = 8
 
 C_STRIP = "BDD7EE"      # 1행 — accent1 60% 밝게
@@ -154,12 +153,11 @@ def _shown(v: object, fmt: str | None) -> str:
 
 def fit_width(col: Col, rows: Sequence[Mapping[str, object]]) -> float:
     """열 너비 = 값·헤더가 들어가는 최소 폭(Q.Pack 처럼 촘촘히). 숫자는 '####' 가 안 나게 넉넉히 재고,
-    헤더는 7행 3줄 안에서 가장 긴 줄이 남는 줄로 접힌다고 본다. 상한 = 지정 너비 또는 종류별 기본."""
+    헤더는 낱말(공백·줄바꿈으로 나뉨)이 한 줄에 온전히 들어가게 잰다 — 7행 3줄 안에서 낱말 사이로만
+    접혀 '유니버/스' 처럼 가운데서 끊기지 않는다(10-05 렌더 확인). 상한 = 지정 너비 또는 종류별 기본."""
     numeric = col.kind not in ("id", "txt")
     wide, narrow, pad = (1.6, 0.85, 1.0) if numeric else (1.55, 0.8, 0.7)
-    lines = sorted((_text_width(x, 1.55, 0.8) for x in col.label.split("\n")), reverse=True)
-    spare = max(0, HEADER_LINES - len(lines))
-    need_hdr = max(lines[0] / (1 + spare), lines[1] if len(lines) > 1 else 0.0) + 0.7
+    need_hdr = max((_text_width(w, 1.55, 0.8) for w in col.label.split()), default=0.0) + 0.7
     need_val = max((_text_width(_shown(r.get(col.key), col.fmt), wide, narrow) for r in rows),
                    default=0.0) + pad
     cap = col.width or (NUM_MAX_WIDTH if numeric else TXT_MAX_WIDTH)

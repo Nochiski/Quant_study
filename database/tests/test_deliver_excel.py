@@ -792,6 +792,10 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
     # scope(v3 엔진) 점수 행엔 업종 열이 없다 — fi_universe 업종으로 채워 업종 시트가 3 대분류로 선다
     sector_rows = [wb["업종"].cell(r, 1).value for r in range(8, wb["업종"].max_row + 1)]
     assert len(sector_rows) >= 3, sector_rows
+    # 신선도도 점수 행이 아니라 fi_universe 에서 — 빈칸이면 커버리지 열이 통째로 빈다
+    ws = wb["점수"]
+    cov = [ws.cell(r, header(ws)["커버리지"]).value for r in range(8, ws.max_row + 1)]
+    assert cov and all(cov), cov[:5]
     with pytest.raises(DeliverError, match="업종 열"):
         load_day(tmp_path / "model", None, find_run(tmp_path / "model", "2026-09-28", "morning"),
                  with_fi=False)

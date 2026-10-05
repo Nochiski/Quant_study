@@ -265,7 +265,8 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         out: Row = {**id_values(view, t, fi), "rank": r, "composite": _num(row.get("composite")),
                     "prev_rank": pr, "d_rank": None if r is None or pr is None else pr - r,
                     "excl": exclude_label(row.get("exclude_reason")),
-                    "cov": coverage_label(row.get("coverage_state"),
+                    # v3·v2 점수 행엔 신선도 열이 없다 → 그 판 fi_universe 값(v4 는 같은 값을 행에 싣는다)
+                    "cov": coverage_label(row.get("coverage_state", u.get("coverage_state")),
                                           u.get("coverage_age_days")),
                     "note": analyst_note(u.get("n_analysts"))}
         scored = t in view.ind

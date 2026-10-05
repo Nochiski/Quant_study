@@ -267,7 +267,7 @@ def sheet_cards(wb: Workbook, base: DayView, week: Week, fi: FiData) -> Dictiona
                       f"재무 {'-' if a is None else iso(a.get('available_date'))}",
                       f"추정 {'-' if cur is None else iso(cur.get('obs_date'))}",
                       f"수급 {fi.flow_last.get(t) or '-'}", "", "",
-                      "커버리지 " + coverage_label(row.get("coverage_state"),
+                      "커버리지 " + coverage_label(row.get("coverage_state", u.get("coverage_state")),
                                                 u.get("coverage_age_days"))))
         for line in lines:
             for k, v in enumerate(line, start=1):

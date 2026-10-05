@@ -796,6 +796,12 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
     ws = wb["점수"]
     cov = [ws.cell(r, header(ws)["커버리지"]).value for r in range(8, ws.max_row + 1)]
     assert cov and all(cov), cov[:5]
+    # 종합 점수 열 이름은 엔진마다 다르다(v3 composite_score · v2 total_score) — 비면 안 된다
+    comp = [ws.cell(r, header(ws)["종합 점수"]).value for r in range(8, ws.max_row + 1)]
+    assert all(isinstance(c, float) for c in comp), comp[:5]
+    sec = wb["업종"]
+    med = [sec.cell(r, header(sec)["종합 점수 중앙값"]).value for r in range(8, sec.max_row + 1)]
+    assert any(isinstance(m, float) for m in med), med
     with pytest.raises(DeliverError, match="업종 열"):
         load_day(tmp_path / "model", None, find_run(tmp_path / "model", "2026-09-28", "morning"),
                  with_fi=False)

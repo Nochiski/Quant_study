@@ -41,7 +41,7 @@ from .reader import (
     read_scores,
     ymd,
 )
-from .view import DayView, load_day, rank_of, ticker_of
+from .view import DayView, composite_of, load_day, rank_of, ticker_of
 
 Row = dict[str, object]
 Dictionary = list[tuple[str, str, str, str]]
@@ -262,7 +262,7 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         u = view.uni.get(t, {})
         r = rank_of(row)
         pr = prev_rank.get(t)
-        out: Row = {**id_values(view, t, fi), "rank": r, "composite": _num(row.get("composite")),
+        out: Row = {**id_values(view, t, fi), "rank": r, "composite": composite_of(row),
                     "prev_rank": pr, "d_rank": None if r is None or pr is None else pr - r,
                     "excl": exclude_label(row.get("exclude_reason")),
                     # v3·v2 점수 행엔 신선도 열이 없다 → 그 판 fi_universe 값(v4 는 같은 값을 행에 싣는다)
@@ -573,7 +573,7 @@ def sheet_sectors(wb: Workbook, view: DayView) -> Dictionary:
                              / min(100, n_ranked) * 100 if n_ranked else None),
                     "n_cand": sum(1 for t in members if t in cands),
                     "comp_med": _median([c for t in ranked
-                                         if (c := _num(view.by_ticker[t].get("composite")))
+                                         if (c := composite_of(view.by_ticker[t]))
                                          is not None]),
                     "top": ", ".join(f"{view.name(t) or t}({view.rank(t)})" for t in ranked[:3])}
         for b in view.buckets:

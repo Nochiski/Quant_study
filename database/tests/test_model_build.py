@@ -198,7 +198,7 @@ def test_run_manifest_and_latest_pointer(built) -> None:
     assert run["layer"] == "model" and run["status"] == "ok"
     assert (run["build_id"], run["date"], run["basis"], run["fi_build_id"]) == (
         res.build_id, D, "morning", FI_BID)
-    assert run["primary_spec"] == "v4_rank@0.1"
+    assert run["primary_spec"] == "scope@1.0"          # 기본 주 모델(10-05 v4_rank@0.1 → scope@1.0)
     assert tuple(run["specs"]) == ALL_SPECS
     for spec_id, s in run["specs"].items():
         assert set(s) == {"n_scores", "n_ranked", "n_excluded", "gates"}
@@ -287,7 +287,7 @@ def test_mg0_mixed_types_fail(board_tree, tmp_path, monkeypatch) -> None:
         s[0]["rank"] = "1"
         s[1]["composite"] = True
     patch_engine(monkeypatch, "v4_rank", edit_scores(bad))
-    res = build(D_S, "morning", tmp_path / "model", board_tree, specs=[V4], **SMALL)
+    res = build(D_S, "morning", tmp_path / "model", board_tree, specs=[V4], primary=V4, **SMALL)
     g = gate(res, V4, "MG0")
     assert g["status"] == "fail"
     assert g["metrics"]["type_violations"] == {"scores.rank": 1, "scores.composite": 1}
@@ -314,7 +314,7 @@ def test_mg1_v3_universe_applies_min_market_cap(tmp_path) -> None:
 
 
 def test_mg1_v4_needs_one_hundred_ranked(board_tree, tmp_path) -> None:
-    res = build(D_S, "morning", tmp_path / "model", board_tree, specs=[V4],
+    res = build(D_S, "morning", tmp_path / "model", board_tree, specs=[V4], primary=V4,
                 min_prices_on_d=SMALL["min_prices_on_d"])
     g = gate(res, V4, "MG1")
     assert g["status"] == "fail" and g["metrics"]["min_ranked"] == mgates.MIN_RANKED == 100
@@ -355,8 +355,8 @@ def test_mg3_sanity_failures(board_tree, tmp_path, monkeypatch, engine, spec_id,
 # ── MG5 전판 대비 ────────────────────────────────────────────────────────────
 def test_mg5_records_against_previous_build_and_warns(board_tree, tmp_path, monkeypatch) -> None:
     root = tmp_path / "model"
-    first = build(D_S, "morning", root, board_tree, specs=[V2, V4], **SMALL)
-    second = build(D_S, "morning", root, board_tree, specs=[V2, V4], **SMALL)
+    first = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    second = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
     for spec_id in (V2, V4):
         g = gate(second, spec_id, "MG5")
         assert g["status"] == "pass"
@@ -372,7 +372,7 @@ def test_mg5_records_against_previous_build_and_warns(board_tree, tmp_path, monk
         for k, r in enumerate(s, start=1):
             r["rank"] = k
     patch_engine(monkeypatch, "v2_percentrank", edit_scores(reverse))
-    third = build(D_S, "morning", root, board_tree, specs=[V2, V4], **SMALL)
+    third = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
     g = gate(third, V2, "MG5")
     assert third.ok and g["status"] == "warn"
     assert g["metrics"]["spearman"] < mgates.SPEARMAN_WARN and g["metrics"]["warn"] is True
@@ -431,7 +431,8 @@ def test_explicit_fi_build_id(board_tree, tmp_path) -> None:
 def test_cli_return_codes(board_tree, golden_tree, tmp_path, capsys) -> None:
     common = ["build", "--date", D_S, "--basis", "morning", "--fi-root"]
     ok = cli_main([*common, str(board_tree), "--root", str(tmp_path / "a"),
-                   "--specs", f"{V2},{V4}", "--min-prices-on-d", "10", "--min-ranked", "10"])
+                   "--specs", f"{V2},{V4}", "--primary", V4,
+                   "--min-prices-on-d", "10", "--min-ranked", "10"])
     assert ok == 0
     assert json.loads((tmp_path / "a" / "latest_morning.json").read_text())["primary_spec"] == V4
     fail = cli_main([*common, str(golden_tree), "--root", str(tmp_path / "b"),
@@ -439,7 +440,7 @@ def test_cli_return_codes(board_tree, golden_tree, tmp_path, capsys) -> None:
     assert fail == 1
     assert "MG4" in capsys.readouterr().err
     bad = cli_main([*common, str(board_tree), "--root", str(tmp_path / "c"),
-                    "--specs", V3])                     # primary 기본 v4_rank@0.1 이 선택 밖
+                    "--specs", V3])                     # primary 기본 scope@1.0 이 선택 밖
     assert bad == 2
 
 

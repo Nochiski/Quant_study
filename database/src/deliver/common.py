@@ -87,6 +87,18 @@ def coverage_label(state: object, age: object) -> str:
     return {"lapsed": "소멸", "none": "없음"}.get(str(state), "" if state is None else str(state))
 
 
+def analyst_note(n: object) -> str | None:
+    """비고 — 추정기관수(WISE 최근 3개월 투자의견을 낸 증권사 수) 0 · 1~3 · 모름을 표시, 4 이상은 빈칸.
+
+    0 은 원천이 밝힌 '최근 3개월 의견 없음'(stage v2.5.0), NULL 은 모름(수집 실패 등) — 둘을 섞지 않는다.
+    """
+    if n is None:
+        return "애널리스트 수 미상"
+    if not isinstance(n, int | float) or n > 3:
+        return None
+    return "최근 3개월 의견 없음" if n == 0 else "애널리스트 3명 이하"
+
+
 def market_label(m: object) -> str:
     return {"KOSPI": "KS", "KOSDAQ": "KQ"}.get(str(m), "" if m is None else str(m))
 

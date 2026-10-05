@@ -42,10 +42,11 @@ from model import gates, registry
 from model.contracts import FI_TABLES, FactorInputs, ModelSpec
 from model.engines import ENGINES
 
-RULES_VERSION = "mb1.0.0"
+RULES_VERSION = "mb1.1.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
 LAYER = "model"
 BASES = ("evening", "morning")
-PRIMARY_DEFAULT = "v4_rank@0.1"      # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
+PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
+                                     # (2026-10-05 v4_rank@0.1 → scope@1.0, 사용자 결정 10-01)
 SCORES_FILE = "scores.parquet"
 INDICATORS_FILE = "indicators.parquet"
 

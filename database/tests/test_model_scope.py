@@ -1,20 +1,27 @@
 """scope_v1.0(`scope@1.0`) — 원본 v3(`v3_zscore@1.0`)에서 밸류의 EV/EBITDA 만 뺀 메인 모델.
 
-(a) 레지스트리: 엔진·버킷·유니버스·하위 가중이 v3_zscore@1.0 과 글자 그대로 같고, 밸류 하위 가중만
-    ev_ebitda 가 빠진다(나머지 키 순서 유지 — 합산 순서).
+(a) 레지스트리: 엔진·버킷·하위 가중이 v3_zscore@1.0 과 글자 그대로 같고, 밸류 하위 가중만
+    ev_ebitda 가 빠진다(나머지 키 순서 유지 — 합산 순서). 유니버스는 3개월 의견 기준
+    (min_analysts = 1) 하나만 다르다(2026-10-05 사용자 결정).
 (b) 골든 09-28 입력: 밸류·종합 밖의 팩터 점수는 v3_zscore@1.0 과 비트 단위로 같다.
 (c) EV/EBITDA 값을 아무리 바꿔도 scope 점수는 그대로다(원값 표시 열 val_ev_ebitda 만 따라간다).
+(d) 추정기관수(최근 3개월 투자의견을 낸 증권사 수) 0 은 유니버스 밖, 모름(NULL)·1 이상은 안.
+(e) MG1 이 같은 규칙으로 유니버스를 센다(안 그러면 빠진 종목이 '점수 누락'으로 잡혀 판이 막힌다).
+(f) 인계(엑셀)의 기본 주 모델은 scope@1.0 이다.
 """
 from __future__ import annotations
 
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from model import registry
+from model import gates, registry
+from model.build import PRIMARY_DEFAULT
 from model.contracts import V3_SCORE_COLUMNS, FactorInputs
 from model.engines import ENGINES
+from stage.gates import GateStatus
 
 _TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
 if _TOOLS not in sys.path:
@@ -43,7 +50,8 @@ def test_scope_spec_is_v3_without_ev_ebitda() -> None:
     assert scope.validate() == [] and scope in registry.all_specs()
     assert (scope.model_id, scope.version, scope.engine) == ("scope", "1.0", "v3_zscore")
     assert list(scope.buckets.items()) == list(v3.buckets.items())
-    assert scope.universe == v3.universe
+    assert replace(scope.universe, min_analysts=None) == v3.universe
+    assert scope.universe.min_analysts == 1 and v3.universe.min_analysts is None
     assert ENGINE.output_columns(scope) == V3_SCORE_COLUMNS
     for f in ("momentum", "revision", "flow", "quality"):
         assert scope.params[f] == v3.params[f], f
@@ -79,3 +87,39 @@ def test_ev_ebitda_values_do_not_move_scope_scores(golden_fi) -> None:
     v3 = registry.get(V3)
     assert [r["valuation_score"] for r in ENGINE.run(v3, golden_fi).scores] != \
         [r["valuation_score"] for r in ENGINE.run(v3, bent_fi).scores]
+
+
+# ── (d)·(e) 3개월 의견 기준 ─────────────────────────────────────────────────────
+def _with_analysts(fi: FactorInputs, counts: dict[str, int | None]) -> FactorInputs:
+    uni = [dict(r, n_analysts=counts[str(r["ticker"])]) if str(r["ticker"]) in counts else r
+           for r in fi.tables["fi_universe"]]
+    return FactorInputs(fi.date, fi.basis, fi.build_id, {**fi.tables, "fi_universe": uni})
+
+
+def test_scope_drops_stocks_without_opinions_in_three_months(golden_fi) -> None:
+    codes = sorted(_by_code(ENGINE.run(registry.get(V3), golden_fi).scores))
+    zero, unknown, one = codes[:3]
+    fi = _with_analysts(golden_fi, {zero: 0, unknown: None, one: 1})
+    scope = _by_code(ENGINE.run(registry.get(SCOPE), fi).scores)
+    v3 = _by_code(ENGINE.run(registry.get(V3), fi).scores)
+    assert zero not in scope and {unknown, one} <= scope.keys()
+    assert set(scope) == set(v3) - {zero}          # v3_zscore@1.0 은 이 규칙이 없다
+    ranks = sorted(r["rank"] for r in scope.values() if r["rank"] is not None)
+    assert ranks == list(range(1, len(ranks) + 1))
+
+
+def test_mg1_counts_scope_universe_with_the_same_rule(golden_fi) -> None:
+    codes = sorted(_by_code(ENGINE.run(registry.get(V3), golden_fi).scores))
+    fi = _with_analysts(golden_fi, dict.fromkeys(codes[:100], 0))
+    spec = registry.get(SCOPE)
+    res = ENGINE.run(spec, fi)
+    ctx = gates.GateContext(spec=spec, date=str(fi.date)[:10], inputs=fi, result=res,
+                            rerun=res, n_prices_on_d=len(codes))
+    g = gates.mg1_coverage(ctx)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_eligible"] == g.metrics["n_covered"] == len(res.scores) == len(codes) - 100
+
+
+# ── (f) 주 모델 ────────────────────────────────────────────────────────────────
+def test_scope_is_the_default_primary_model() -> None:
+    assert PRIMARY_DEFAULT == SCOPE

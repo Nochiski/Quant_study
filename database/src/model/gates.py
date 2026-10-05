@@ -9,7 +9,8 @@
                  않는다). FAIL 이면 MG1·MG2·MG3·MG5 는 `skip(upstream_failed)`
                  (MG4 는 입력 판정이라 돈다).
   MG1 커버리지 — v3·v2: 그 spec 자신의 유니버스 규칙으로 센 종목 중 점수가 나온 비율 ≥ 0.95
-                 (v3 = eligible ∧ D 가격 행 ∧ 시총 ≥ min_market_cap, v2 = eligible ∧ 시총 > 0).
+                 (v3 = eligible ∧ D 가격 행 ∧ 시총 ≥ min_market_cap ∧ 추정기관수 ≥ min_analysts
+                 (NULL 은 통과), v2 = eligible ∧ 시총 > 0).
                  그 밖(v4 계열): 순위가 매겨진 종목 ≥ `min_ranked`(기본 100).
   MG2 결정성   — 같은 FactorInputs 두 번 실행의 점수·지표 직렬화 sha256 이 같다.
   MG3 온전성   — NaN·inf 없음 · 종목 중복 없음 · 순위 = 순위 있는 행의 1…n · v3·v2 는 전 행 순위 ·
@@ -225,12 +226,16 @@ def _spec_universe(ctx: GateContext) -> set[str] | None:
         on_d = {str(r["ticker"]) for r in ctx.inputs.rows("fi_prices")
                 if str(r["date"])[:10] == ctx.date}
         min_cap = ctx.spec.universe.min_market_cap or 0
+        min_an = ctx.spec.universe.min_analysts
         out = set()
         for r in uni:
             cap = _num(r["market_cap"])
             if str(r["ticker"]) not in on_d:
                 continue
             if min_cap > 0 and (cap is None or cap < min_cap):
+                continue
+            n_an = _num(r.get("n_analysts"))
+            if min_an is not None and n_an is not None and n_an < min_an:
                 continue
             out.add(str(r["ticker"]))
         return out

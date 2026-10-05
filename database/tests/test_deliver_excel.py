@@ -19,7 +19,8 @@ from deliver import __main__ as cli
 from deliver.common import cap_candidates, change_pct, quantile, winsorize, yoy
 from deliver.excel_daily import build_daily
 from deliver.excel_weekly import build_weekly, prev_week, week_days
-from deliver.reader import DeliverError
+from deliver.reader import DeliverError, find_run
+from deliver.view import load_day
 from model import registry
 from model.contracts import FI_TABLES, score_columns
 from openpyxl import load_workbook
@@ -34,6 +35,8 @@ SPECS = ("v2_percentrank@1.0", "v3_zscore@1.0", "v4_rank@0.1", "v4_rank@0.2")
 N = 45
 SECTOR_NAMES = {"G45": "IT", "G10": "에너지", "G20": "산업재", "G30": "필수소비재", "G40": "금융"}
 FORMULA_NAME = '=HYPERLINK("http://x")'
+# fi_universe 추정기관수(최근 3개월 투자의견 증권사 수) — 비고 열 대조용. 나머지 종목은 5명.
+ANALYSTS = {1: 0, 2: 2, 3: 3, 4: None}
 TOKEN, CHAT = "123456:SECRET-TOKEN-abc", "-100987654321"
 PA = {"VARCHAR": pa.string(), "DATE": pa.date32(), "BIGINT": pa.int64(),
       "INTEGER": pa.int32(), "DOUBLE": pa.float64(), "BOOLEAN": pa.bool_()}
@@ -224,7 +227,7 @@ def write_fi_day(fi_root: Path, day: str) -> str:
                     "sector_l2": sector(i) + "10",
                     "sector_l2_name": SECTOR_NAMES[sector(i)] + " 중분류",
                     "has_estimates": i != N, "coverage_state": "grace" if i == 5 else "fresh",
-                    "coverage_age_days": 2 if i == 5 else 0, "n_analysts": 5, "adv20": 50.0,
+                    "coverage_age_days": 2 if i == 5 else 0, "n_analysts": ANALYSTS.get(i, 5), "adv20": 50.0,
                     "is_admin": i == 40, "is_halted": False, "audit_adverse": False,
                     "filing_late": False, "eligible": i != N, "exclude_reason": None})
         for dd, px, ok in ((W38[1], 100.0, True),
@@ -393,6 +396,17 @@ def test_daily_scores_sheet_contents(daily) -> None:
     # 다른 모델 순위 — v3 는 역순 유니버스
     v3 = col_of(ws, "v3 원본 v3_zscore@1.0")
     assert ws.cell(r0, v3).value == 40
+
+
+def test_daily_scores_sheet_note_flags_thin_coverage(daily) -> None:
+    _, wb = daily
+    ws = wb["점수"]
+    h = header(ws)
+    assert h["비고"] == h["커버리지"] + 1
+    rows = rows_by_code(ws)
+    note = {i: ws.cell(rows[tick(i)], h["비고"]).value for i in range(5)}
+    assert note == {0: None, 1: "최근 3개월 의견 없음", 2: "애널리스트 3명 이하",
+                    3: "애널리스트 3명 이하", 4: "애널리스트 수 미상"}
 
 
 def test_daily_raw_sheet_flags_and_definitions(daily) -> None:
@@ -768,16 +782,23 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
     d = build_daily("2026-09-28", "morning", model_root=tmp_path / "model", fi_root=fi_root,
                     out_root=tmp_path / "out")
     wb = load_workbook(d.path)
-    n_scores = res.specs[PRIMARY]["n_scores"]
-    assert d.n_rows == n_scores and d.n_ranked == res.specs[PRIMARY]["n_ranked"]
+    primary = res.primary_spec                 # 기본 주 모델(scope@1.0)
+    n_scores = res.specs[primary]["n_scores"]
+    assert d.n_rows == n_scores and d.n_ranked == res.specs[primary]["n_ranked"]
     assert wb["점수"].max_row == 7 + n_scores
     pairs = {wb["메타"].cell(r, 1).value: wb["메타"].cell(r, 2).value
              for r in range(8, wb["메타"].max_row + 1)}
-    assert pairs["model 판 id"] == res.build_id and "MG1 pass" in pairs[f"판 게이트 {PRIMARY}"]
+    assert pairs["model 판 id"] == res.build_id and "MG1 pass" in pairs[f"판 게이트 {primary}"]
+    # scope(v3 엔진) 점수 행엔 업종 열이 없다 — fi_universe 업종으로 채워 업종 시트가 3 대분류로 선다
+    sector_rows = [wb["업종"].cell(r, 1).value for r in range(8, wb["업종"].max_row + 1)]
+    assert len(sector_rows) >= 3, sector_rows
+    with pytest.raises(DeliverError, match="업종 열"):
+        load_day(tmp_path / "model", None, find_run(tmp_path / "model", "2026-09-28", "morning"),
+                 with_fi=False)
     w = build_weekly("2026-W40", model_root=tmp_path / "model", fi_root=fi_root,
                      out_root=tmp_path / "out")
     assert w.base_date == "2026-09-28" and w.n_days == 1
-    assert w.n_candidates == min(30, 3 * 9, res.specs[PRIMARY]["n_ranked"])   # 3 업종 × 상한 9
+    assert w.n_candidates == min(30, 3 * 9, res.specs[primary]["n_ranked"])   # 3 업종 × 상한 9
     for book in (wb, load_workbook(w.path)):
         for ws in book.worksheets:
             for row in ws.iter_rows():

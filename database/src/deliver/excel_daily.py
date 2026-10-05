@@ -18,6 +18,7 @@ from openpyxl import Workbook
 from .common import (
     PREV_NEGATIVE_FLAGS,
     REVISION_KEYS,
+    analyst_note,
     bucket_label,
     change_pct,
     coverage_label,
@@ -232,6 +233,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
                 "버킷 게이트(고점근접+반전 하위 30%)")),
             Col("cov", "커버리지", "txt", None, 8.0, definition=(
                 "추정치 신선도(T2.11): 신선 · 유예 D+n(마지막 신선일부터 거래일 n) · 소멸")),
+            Col("note", "비고", "txt", None, 16.0, definition=(
+                "추정기관수(WISE 최근 3개월 투자의견을 낸 증권사 수): 0 = 최근 3개월 의견 없음 · "
+                "1~3 = 애널리스트 3명 이하 · 모름 = 애널리스트 수 미상 · 4 이상은 빈칸")),
         ), core=True),
     ]
     for b in view.buckets:
@@ -262,7 +266,8 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
                     "prev_rank": pr, "d_rank": None if r is None or pr is None else pr - r,
                     "excl": exclude_label(row.get("exclude_reason")),
                     "cov": coverage_label(row.get("coverage_state"),
-                                          u.get("coverage_age_days"))}
+                                          u.get("coverage_age_days")),
+                    "note": analyst_note(u.get("n_analysts"))}
         scored = t in view.ind
         miss = []
         for b in view.buckets:
@@ -333,7 +338,8 @@ def sheet_raw(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
         Col("obs", "추정\n관측일", "txt", None, 10.0,
             definition="당해 결산기 컨센서스(cur) 관측일 = 추정 base_date"),
         Col("n_an", "애널리스트\n수", "num", "#,##0", color=False,
-            definition="추정기관 수(fi_universe, 리비전은 3곳 이상일 때만)"),
+            definition=("추정기관 수(fi_universe) = WISE 최근 3개월 투자의견을 낸 증권사 수. "
+                        "0 = 의견 없음, 빈칸 = 모름")),
         Col("flow_d", "수급\n최신일", "txt", None, 10.0, definition="fi_flows 에 있는 최신 수급일"),
     )))
     rows: list[Row] = []

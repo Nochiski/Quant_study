@@ -1,6 +1,6 @@
 """판 하나(하루)를 엑셀이 쓰는 모양으로 모은다 — 주 모델 점수 · 버킷 백분위 · 후보 · 입력 원자료.
 
-주 모델 = run 의 `primary_spec`(v4_rank@0.1). 버킷 백분위는 엔진 버킷 점수(0~100)를 한 번 더
+주 모델 = run 의 `primary_spec`(기본 scope@1.0). 버킷 백분위는 엔진 버킷 점수(0~100)를 한 번 더
 순위 매긴 **표시값**이다: 유니버스 백분위 = 그 버킷 점수가 있는 전 종목 안, 업종 백분위 = WICS
 대분류 안(표본 < min_sector_size 면 유니버스로 되돌린다 — 엔진 규칙과 같다).
 """
@@ -113,6 +113,15 @@ def load_day(model_root: Path, fi_root: Path | None, run: ModelRun, *,
         raise DeliverError(f"주 모델 {spec_id} 가 판 {run.build_id} specs 에 없다")
     spec = spec_of(spec_id, None if config_dir is None else str(config_dir))
     raw = read_scores(model_root, run, spec_id)
+    uni_rows = None if fi_root is None else read_fi(fi_root, "fi_universe", run.fi_build_id)
+    if raw and "sector_l1" not in raw[0]:
+        # v3·v2 엔진 점수 행에는 업종 열이 없다(원본 score_history 48·21열 그대로). 그대로 두면 업종 상한
+        # 후보가 한 묶음(9개)으로 잘리고 업종 백분위·업종 시트가 무너진다 → 그 판 fi_universe 업종으로 채운다.
+        if uni_rows is None:
+            raise DeliverError(f"{spec_id} 점수에 업종 열이 없어 fi_root 가 필요하다(판 {run.build_id})")
+        sect = {str(u["ticker"]): u for u in uni_rows}
+        raw = [{**r, "sector_l1": sect.get(ticker_of(r), {}).get("sector_l1"),
+                "sector_l2": sect.get(ticker_of(r), {}).get("sector_l2")} for r in raw]
     ranked = sorted((r for r in raw if rank_of(r) is not None), key=lambda r: rank_of(r) or 0)
     rest = sorted((r for r in raw if rank_of(r) is None), key=ticker_of)
     rows = ranked + rest
@@ -137,9 +146,9 @@ def load_day(model_root: Path, fi_root: Path | None, run: ModelRun, *,
     view = DayView(run, spec_id, spec, buckets, rows, by_ticker, upct, spct,
                    [ticker_of(dict(r)) for r in cands], output)
     if with_fi:
-        if fi_root is None:
+        if uni_rows is None:
             raise DeliverError("fi_root 가 필요하다")
-        view.uni = {str(r["ticker"]): r for r in read_fi(fi_root, "fi_universe", run.fi_build_id)}
+        view.uni = {str(r["ticker"]): r for r in uni_rows}
         for r in read_indicators(model_root, run, spec_id):
             view.ind.setdefault(str(r["ticker"]), {})[str(r["key"])] = r
     if others:

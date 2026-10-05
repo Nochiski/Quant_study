@@ -99,8 +99,9 @@ class Week:
 
 
 def load_week(model_root: Path, week: str, spec_id: str | None, *,
-              config_dir: Path | None = None) -> Week:
-    """판이 있는 날만 점수 표를 읽는다. spec_id 가 None 이면 마지막 판의 primary_spec."""
+              config_dir: Path | None = None, fi_root: Path | None = None) -> Week:
+    """판이 있는 날만 점수 표를 읽는다. spec_id 가 None 이면 마지막 판의 primary_spec.
+    fi_root 는 업종 열이 없는 엔진(v3·v2)의 업종 상한 후보에 쓴다(`view.load_day`)."""
     days = week_days(week)
     runs = {d: r for d in days if (r := find_run(model_root, d, BASIS)) is not None}
     if spec_id is None and runs:
@@ -109,7 +110,7 @@ def load_week(model_root: Path, week: str, spec_id: str | None, *,
     for d, run in runs.items():
         if spec_id not in run.specs:
             continue                      # 그날 판에 주 모델이 없으면 ✕ 로 둔다
-        views[d] = load_day(model_root, None, run, config_dir=config_dir, with_fi=False,
+        views[d] = load_day(model_root, fi_root, run, config_dir=config_dir, with_fi=False,
                             others=False, spec_id=spec_id)
     return Week(week, days, views)
 
@@ -520,14 +521,15 @@ def _meta_pairs(base: DayView, week: Week, last: Week | None,
 
 def build_weekly(week: str, *, model_root: Path, fi_root: Path, out_root: Path,
                  config_dir: Path | None = None) -> WeeklyResult:
-    now = load_week(model_root, week, None, config_dir=config_dir)
+    now = load_week(model_root, week, None, config_dir=config_dir, fi_root=fi_root)
     if now.base is None:
         runs_dir = Path(model_root) / "_runs"
         raise DeliverError(f"{week} 에 {BASIS} model 판이 하나도 없다: {runs_dir}")
     spec_id = now.base.spec_id
     base = load_day(model_root, fi_root, now.base.run, config_dir=config_dir, spec_id=spec_id)
     now.views[base.date] = base
-    last = load_week(model_root, prev_week(week), spec_id, config_dir=config_dir)
+    last = load_week(model_root, prev_week(week), spec_id, config_dir=config_dir,
+                     fi_root=fi_root)
     last_or_none = last if last.base is not None else None
     fi = load_fi(fi_root, base)
 

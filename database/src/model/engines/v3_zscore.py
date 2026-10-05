@@ -68,11 +68,14 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> tuple[list[str],
     """v3 `engine.py:66-78` + `_load_market_caps`(245-255).
 
     D 에 가격 행이 있고 `fi_universe.eligible` 인 종목 중 시총 ≥ `universe.min_market_cap`.
+    `universe.min_analysts` 가 있으면 추정기관수(n_analysts)가 그보다 작은 종목도 뺀다 —
+    NULL(모름)은 빼지 않는다(원본 v3 에는 없는 scope 규칙, 2026-10-05).
     시총 맵은 > 0 인 값만 담는다(수급 분모). 반환 종목은 정렬 순서.
     """
     on_d = {r["ticker"] for r in _rows(inputs, "fi_prices") if _iso(r["date"]) == d}
     uni = {r["ticker"]: r for r in _rows(inputs, "fi_universe")}
     min_cap = spec.universe.min_market_cap or 0
+    min_an = spec.universe.min_analysts
     codes: list[str] = []
     caps: dict[str, float] = {}
     for t in sorted(on_d):
@@ -83,6 +86,9 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> tuple[list[str],
         if cap is not None and cap > 0:
             caps[t] = cap
         if min_cap > 0 and caps.get(t, 0) < min_cap:
+            continue
+        n_an = u.get("n_analysts")
+        if min_an is not None and n_an is not None and n_an < min_an:
             continue
         codes.append(t)
     return codes, caps
@@ -381,10 +387,11 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> None:
     if tuple(spec.buckets) != FACTORS:
         raise ValueError(f"{spec.spec_id}: buckets 는 {FACTORS} 순서여야 한다 — "
                          f"{tuple(spec.buckets)}")
-    # 시총 하한 밖의 유니버스 조건은 fi_universe.eligible(기본 규칙 판정)을 그대로 믿는다.
-    # 기본과 다른 규칙이면 이 엔진은 재판정하지 않으므로 거절한다(조용히 무시하지 않는다).
-    if replace(spec.universe, min_market_cap=None) != UniverseRule():
-        raise ValueError(f"{spec.spec_id}: v3_zscore 는 기본 유니버스 규칙(+min_market_cap)만 지원")
+    # 시총 하한·추정기관수 하한 밖의 유니버스 조건은 fi_universe.eligible(기본 규칙 판정)을 그대로
+    # 믿는다. 기본과 다른 규칙이면 이 엔진은 재판정하지 않으므로 거절한다(조용히 무시하지 않는다).
+    if replace(spec.universe, min_market_cap=None, min_analysts=None) != UniverseRule():
+        raise ValueError(f"{spec.spec_id}: v3_zscore 는 기본 유니버스 규칙"
+                         "(+min_market_cap·min_analysts)만 지원")
     errs = inputs.check(V3ZScoreEngine.name)
     if errs:
         raise ValueError(f"factor_inputs {inputs.build_id} 계약 불일치: {errs}")

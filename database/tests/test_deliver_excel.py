@@ -563,6 +563,11 @@ def test_daily_qpack_styles(daily) -> None:
             if (d := ws.column_dimensions[ws.cell(7, c).column_letter]).width > 14 and not d.hidden]
     assert set(wide) <= {"제외 사유", "비고"}, wide
     assert wb["점수 원자료"].row_dimensions[5].height == 11.25        # 정의 행도 한 줄
+    # 행 높이는 행마다 박는다 — 시트 기본값만 두면 기본 글꼴(Calibri 11)로 다시 잡혀 Q.Pack 보다
+    # 1.4배 높게 그려진다(10-05 렌더: 한 쪽 29행 vs Q.Pack 37행)
+    assert all(ws.row_dimensions[r].height == 11.25 for r in range(1, ws.max_row + 1) if r != 7)
+    for s in wb.worksheets:
+        assert all(s.row_dimensions[r].height for r in range(1, s.max_row + 1)), s.title
     rules = [(str(rng.sqref), rule) for rng in ws.conditional_formatting for rule in rng.rules]
     scales = [(ref, r.colorScale) for ref, r in rules if isinstance(r.colorScale, ColorScale)]
     colored = {ref.split(":")[0].rstrip("0123456789") for ref, _ in scales}
@@ -619,6 +624,12 @@ def test_weekly_sheets_and_candidates_with_sector_cap(weekly) -> None:
     assert ws.cell(8, h["금요일 순위 (원본·상한 전)"]).value == 1
     assert ws.cell(8 + 9, h["금요일 순위 (원본·상한 전)"]).value == 16   # 상한으로 10~15위 건너뜀
     assert res.n_new == 2 and res.n_out == 2
+
+
+def test_weekly_rows_have_explicit_heights(weekly) -> None:
+    _, wb = weekly
+    for s in wb.worksheets:
+        assert all(s.row_dimensions[r].height for r in range(1, s.max_row + 1)), s.title
 
 
 def test_weekly_presence_marks_and_holiday(weekly) -> None:

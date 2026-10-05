@@ -177,6 +177,17 @@ def _layout(groups: Sequence[Group]) -> list[tuple[int, Group | None, Col | None
     return out
 
 
+def tighten_rows(ws: Worksheet) -> None:
+    """높이를 정하지 않은 행에 11.25 를 박는다(이미 정한 7행 33.75 등은 그대로).
+
+    시트 기본 높이(sheetFormatPr)만 두면 엑셀·LibreOffice 가 통합 문서 기본 글꼴(Calibri 11)로 행을
+    다시 잡아 Q.Pack 보다 1.4배 높게 그린다 — 10-05 렌더: 한 쪽 29행 vs Q.Pack 37행, 행마다 박으면 37행.
+    """
+    for r in range(1, ws.max_row + 1):
+        if ws.row_dimensions[r].height is None:
+            ws.row_dimensions[r].height = ROW_HEIGHT
+
+
 def title_block(ws: Worksheet, title: Title, ncol: int, sort_col: int | None) -> None:
     ws.sheet_view.showGridLines = False
     ws.sheet_format.defaultRowHeight = ROW_HEIGHT
@@ -279,6 +290,7 @@ def write_table(wb: Workbook, title: Title, groups: Sequence[Group],
     n_freeze = sum(len(g.cols) for g in groups[:n_freeze_groups]) + max(0, n_freeze_groups - 1)
     ws.freeze_panes = ws.cell(FIRST_DATA_ROW, n_freeze + 1)
     ws.auto_filter.ref = f"A7:{get_column_letter(ncol)}{max(7, last)}"
+    tighten_rows(ws)
     return [(title.sheet, g.name, col.label.replace("\n", " "), col.definition)
             for _c, g, col in layout if g is not None and col is not None]
 
@@ -288,7 +300,8 @@ def write_meta(wb: Workbook, title: Title, pairs: Sequence[tuple[str, object]],
     """메타 시트 — 키·값 표(8행~) 뒤에 열 사전(시트 · 그룹·열 · 정의)."""
     ws = wb.create_sheet(title.sheet)
     title_block(ws, title, 3, None)
-    for letter, width in (("A", 18.0), ("B", 34.0), ("C", 110.0)):
+    def_width = 110.0
+    for letter, width in (("A", 18.0), ("B", 34.0), ("C", def_width)):
         ws.column_dimensions[letter].width = width
 
     def header(r: int, labels: Sequence[str]) -> None:
@@ -321,8 +334,12 @@ def write_meta(wb: Workbook, title: Title, pairs: Sequence[tuple[str, object]],
         cell = put(ws, r, 3, definition)
         cell.font = font()
         cell.alignment = Alignment(vertical="top", wrap_text=True)
+        # 정의가 접히는 줄 수만큼만 높인다(자동 높이는 기본 글꼴 기준이라 헐겁다 — tighten_rows)
+        lines = math.ceil(_text_width(str(definition or ""), 1.55, 0.8) / (def_width - 1))
+        ws.row_dimensions[r].height = ROW_HEIGHT * max(1, lines)
         r += 1
     ws.freeze_panes = ws.cell(FIRST_DATA_ROW, 1)
+    tighten_rows(ws)
 
 
 __all__ = [

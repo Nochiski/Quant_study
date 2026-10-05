@@ -283,6 +283,7 @@ def sheet_cards(wb: Workbook, base: DayView, week: Week, fi: FiData) -> Dictiona
     if r > 8:
         ws.conditional_formatting.add(f"D8:E{r}", qpack.scale_high_red())
     ws.freeze_panes = ws.cell(6, 1)
+    qpack.tighten_rows(ws)
     return [("팩터 카드", "카드", h, d) for h, d in (
         ("항목", "축 이름 · 점수 지표 라벨 · 최근 5일 순위 · 기준일"),
         ("값", "축 = 엔진 버킷 점수(0~100) · 지표 = 원값(% 표시, 리비전 이전값<0 은 표식만)"),

@@ -21,6 +21,13 @@ def test_price_strips_direction_sign() -> None:
     assert P.price(None) is None and P.price("") is None
 
 
+def test_split_code_reads_exchange_suffix() -> None:
+    assert P.split_code("005930") == ("005930", "KRX")
+    assert P.split_code("005930_NX") == ("005930", "NXT")
+    assert P.split_code("005930_AL") == ("005930", "SOR")
+    assert P.split_code("ka10095_NX") == ("ka10095", "NXT")
+
+
 def test_norm_code_and_batches() -> None:
     assert P.norm_code("A005930") == "005930" and P.norm_code("005930_NX") == "005930"
     assert P.norm_code("0010V0") == "0010V0"
@@ -71,6 +78,10 @@ def _make(tmp: Path) -> tuple[Path, Path, Path]:
                         (stamp, "minute", "ka10095", tk, T,
                          json.dumps({"stk_cd": tk, "cur_prc": prc, "close_pric": "-100"
                                      if tk == "005930" else "-50", "base_pric": "99"})))
+    for ts in ("16:01", "16:10"):                                  # NXT — 애프터마켓 가격
+        con.execute("INSERT INTO obs VALUES (?,?,?,?,?,1,?,NULL)",
+                    (f"2026-10-06T{ts}:09", "minute", "ka10060", "005930_NX", T,
+                     json.dumps([_row("+104", FLOWS_A)])))
     for tk, prc in (("005930", "-100"), ("000660", "-50"), ("035720", "-7")):
         con.execute("INSERT INTO obs VALUES (?,?,?,?,?,1,?,NULL)",
                     ("2026-10-06T16:00:30", "sweep@1600", "ka10060", tk, T,
@@ -110,14 +121,17 @@ def _make(tmp: Path) -> tuple[Path, Path, Path]:
 def test_grade_reads_price_window_flow_settle_sweep_and_bars(tmp_path: Path) -> None:
     db, krx, kw = _make(tmp_path)
     rep = P.grade(T, db=db, krx_db=krx, kw_db=kw)
-    cur = rep["minute_price"]["ka10060.cur_prc"]
+    cur = rep["minute_price"]["KRX.ka10060.cur_prc"]
     assert cur["first_all_match"] == "15:31"                 # 15:25 장중 → 15:31 공식 종가
     assert cur["first_mismatch_after_1600"] == "16:10"       # 애프터마켓 체결로 달라짐
-    assert rep["minute_price"]["ka10095.close_pric"]["first_mismatch_after_1600"] is None
-    flows = rep["minute_flows"]
+    assert rep["minute_price"]["KRX.ka10095.close_pric"]["first_mismatch_after_1600"] is None
+    nxt = rep["minute_price"]["NXT.ka10060.cur_prc"]                   # 거래소별로 따로 센다
+    assert nxt["n_tickers"] == 1 and nxt["first_all_match"] is None
+    assert set(rep["minute_flows"]) == {"KRX", "NXT"}
+    flows = rep["minute_flows"]["KRX"]
     assert flows["settle_by_ticker"]["005930"] == "15:45" and flows["settle_max"] == "15:45"
     assert flows["n_with_ledger"] == 1 and flows["same_as_ledger"] == 0   # 원장엔 애프터마켓분
-    sweep = rep["sweeps"]["sweep@1600/ka10060"]
+    sweep = rep["sweeps"]["sweep@1600/ka10060/KRX"]
     assert (sweep["seconds"], sweep["n_t_rows"], sweep["close_match"], sweep["n_rate"]) == (
         150, 3, 3, 1)
     assert rep["sweeps"]["last_sweep == ledger(21:05)"] == {"n": 1, "flows_equal": 0}

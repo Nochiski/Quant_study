@@ -45,6 +45,9 @@ TICKERS = ("005930", "000660", "035720", "021240", "086520", "008290",
 FLOW_KEYS = ("ind_invsr", "frgnr_invsr", "orgn", "fnnc_invt", "insrnc", "invtrt", "etc_fnnc",
              "bank", "penfnd_etc", "samo_fund", "natn", "etc_corp", "natfor")
 BATCH = 100              # ka10095 한 콜 종목 수(시험값 — 응답 행 수로 실제 한도를 본다)
+# 키움 REST 거래소 구분 = 종목코드 접미사(공식 가이드): KRX 그대로 · NXT '_NX' · 통합(SOR) '_AL'.
+# 분 단위 조회와 묶음 조회는 셋 다(10-06 사용자 요청), 후보 전량 ka10060 은 운영 원천인 KRX 만.
+EXCHANGES = (("KRX", ""), ("NXT", "_NX"), ("SOR", "_AL"))
 REGULAR_LAST = "153059"  # 정규장 마지막 체결(종가 단일가) 봉 시각 상한
 EMPTY = ""
 
@@ -96,6 +99,14 @@ def norm_code(code: object) -> str:
     """응답 종목코드 → 6자리(앞의 'A'·뒤의 '_NX'·'_AL' 제거)."""
     s = str(code).strip().split("_")[0]
     return s[1:] if len(s) == 7 and s[0] == "A" else s
+
+
+def split_code(key: str) -> tuple[str, str]:
+    """저장 키 '005930_NX' → ('005930', 'NXT'). 접미사가 없으면 KRX."""
+    for name, sfx in EXCHANGES:
+        if sfx and key.endswith(sfx):
+            return key[: -len(sfx)], name
+    return key, "KRX"
 
 
 def latest_date(api_id: str, rows: Sequence[Mapping[str, Any]]) -> str:
@@ -167,8 +178,9 @@ def _stamp(t: dt.datetime) -> str:
 
 
 def collect(con: sqlite3.Connection, client: CountingClient, run: str, api_id: str,
-            tickers: Sequence[str], target: str) -> dict[str, int | str]:
-    """종목(또는 묶음 코드열)마다 1콜 — 운영 수집기와 같은 간격(1/4.4초)으로 쏜다."""
+            tickers: Sequence[str], target: str, suffix: str = "") -> dict[str, int | str]:
+    """종목(또는 묶음 코드열)마다 1콜 — 운영 수집기와 같은 간격(1/4.4초)으로 쏜다.
+    `suffix` = 거래소 접미사. 묶음 응답의 종목코드에 다시 붙여 저장 키를 거래소별로 가른다."""
     spec, gap = SPECS[api_id], 1.0 / KW.RATE_PER_SEC
     started, rate0 = now_kst(), client.rate
     n_ok = n_err = 0
@@ -181,7 +193,7 @@ def collect(con: sqlite3.Connection, client: CountingClient, run: str, api_id: s
             rows = pick_rows(api_id, out.rows, target)
             if api_id == "ka10095":
                 con.executemany("INSERT INTO obs VALUES (?,?,?,?,?,1,?,NULL)",
-                                [(ts, run, api_id, norm_code(r.get("stk_cd", tk)), target,
+                                [(ts, run, api_id, norm_code(r.get("stk_cd", tk)) + suffix, target,
                                   json.dumps(r, ensure_ascii=False)) for r in rows])
             else:
                 note = None if rows else f"T 행 없음 — 최신 {latest_date(api_id, out.rows)}"
@@ -197,10 +209,11 @@ def collect(con: sqlite3.Connection, client: CountingClient, run: str, api_id: s
         time.sleep(max(0.0, gap - (time.time() - t0)))
     con.commit()
     stats: dict[str, int | str] = {
-        "run": run, "api": api_id, "started": _stamp(started), "ended": _stamp(now_kst()),
+        "run": run, "api": api_id + suffix, "started": _stamp(started), "ended": _stamp(now_kst()),
         "n_req": len(tickers), "n_ok": n_ok, "n_err": n_err, "n_rate": client.rate - rate0}
     con.execute("INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (run, api_id, target, stats["started"], stats["ended"], len(tickers), n_ok, n_err,
+                (run, api_id + suffix, target, stats["started"], stats["ended"], len(tickers), n_ok,
+                 n_err,
                  stats["n_rate"], ""))
     con.commit()
     return stats
@@ -233,9 +246,11 @@ def _client() -> CountingClient:
 def cmd_minute(target: str) -> None:
     con, client = connect(), _client()
     try:
-        for api_id in ("ka10060", "ka10086"):
-            collect(con, client, "minute", api_id, TICKERS, target)
-        collect(con, client, "minute", "ka10095", ["|".join(TICKERS)], target)
+        for _name, sfx in EXCHANGES:
+            codes = [t + sfx for t in TICKERS]
+            for api_id in ("ka10060", "ka10086"):
+                collect(con, client, "minute", api_id, codes, target, sfx)
+            collect(con, client, "minute", "ka10095", ["|".join(codes)], target, sfx)
     finally:
         con.close()
 
@@ -245,8 +260,10 @@ def cmd_sweep(target: str) -> None:
     con, client = connect(), _client()
     try:
         tickers = candidates()
-        for stats in (collect(con, client, run, "ka10060", tickers, target),
-                      collect(con, client, run, "ka10095", batches(tickers), target)):
+        print(json.dumps(collect(con, client, run, "ka10060", tickers, target), ensure_ascii=False))
+        for _name, sfx in EXCHANGES:
+            stats = collect(con, client, run, "ka10095", batches([t + sfx for t in tickers]),
+                            target, sfx)
             print(json.dumps(stats, ensure_ascii=False))
     finally:
         con.close()
@@ -317,20 +334,23 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
     con = _ro(db)
     try:
         rep: dict[str, Any] = {"target": target, "n_official": len(official)}
-        # ① 분 단위 10종목 — 가격(ka10060 현재가 · ka10086 종가 · ka10095 현재가/종가) vs 공식 종가
+        # ① 분 단위 10종목 × 거래소(KRX·NXT·SOR) — 가격(ka10060 현재가 · ka10086 종가 ·
+        #    ka10095 현재가/종가)을 KRX 공식 종가와, 수급은 각자의 마지막 값과 견준다
         minute: dict[str, dict[str, list[tuple[str, Any]]]] = {}
         for api_id, field in (("ka10060", "cur_prc"), ("ka10086", "close_pric")):
-            for ts, tk, rows in _obs(con, target, "minute", api_id):
+            for ts, key, rows in _obs(con, target, "minute", api_id):
+                tk, ex = split_code(key)
                 r = _first(rows)
-                minute.setdefault(f"{api_id}.{field}", {}).setdefault(tk, []).append(
+                minute.setdefault(f"{ex}.{api_id}.{field}", {}).setdefault(tk, []).append(
                     (ts[11:16], None if r is None else price(r.get(field))))
                 if api_id == "ka10060" and r is not None:
-                    minute.setdefault("ka10060.flows", {}).setdefault(tk, []).append(
+                    minute.setdefault(f"{ex}.ka10060.flows", {}).setdefault(tk, []).append(
                         (ts[11:16], tuple(str(r.get(k)) for k in FLOW_KEYS)))
         for field in ("cur_prc", "close_pric"):
-            for ts, tk, r in _obs(con, target, "minute", "ka10095"):
+            for ts, key, r in _obs(con, target, "minute", "ka10095"):
                 if isinstance(r, dict):
-                    minute.setdefault(f"ka10095.{field}", {}).setdefault(tk, []).append(
+                    tk, ex = split_code(key)
+                    minute.setdefault(f"{ex}.ka10095.{field}", {}).setdefault(tk, []).append(
                         (ts[11:16], price(r.get(field))))
         price_rep: dict[str, Any] = {}
         for key, per in minute.items():
@@ -348,14 +368,20 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
                               "first_mismatch_after_1600": first_diff,
                               "match_by_minute": match}
         rep["minute_price"] = price_rep
-        flows = minute.get("ka10060.flows", {})
-        settle = {tk: settle_time(s) for tk, s in flows.items()}
-        rep["minute_flows"] = {
-            "settle_by_ticker": settle,
-            "settle_max": max((v for v in settle.values() if v), default=None),
-            "same_as_ledger": sum(1 for tk, s in flows.items() if s and tk in ledger
-                                  and s[-1][1] == tuple(ledger[tk].get(k, "") for k in FLOW_KEYS)),
-            "n_with_ledger": sum(1 for tk in flows if tk in ledger)}
+        rep["minute_flows"] = {}
+        for ex, _sfx in EXCHANGES:
+            flows = minute.get(f"{ex}.ka10060.flows", {})
+            if not flows:
+                continue
+            settle = {tk: settle_time(s) for tk, s in flows.items()}
+            rep["minute_flows"][ex] = {
+                "settle_by_ticker": settle,
+                "settle_max": max((v for v in settle.values() if v), default=None),
+                # 원장 키움 T 행은 KRX 코드로 받은 것 — 다른 거래소는 참고로만 견준다
+                "same_as_ledger": sum(
+                    1 for tk, s in flows.items() if s and tk in ledger
+                    and s[-1][1] == tuple(ledger[tk].get(k, "") for k in FLOW_KEYS)),
+                "n_with_ledger": sum(1 for tk in flows if tk in ledger)}
         # ② 후보 전량
         sweeps: dict[str, Any] = {}
         for run, api_id, started, ended, n_req, n_ok, n_err, n_rate in con.execute(
@@ -364,8 +390,10 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
             secs = (dt.datetime.fromisoformat(ended) - dt.datetime.fromisoformat(started)).seconds
             entry: dict[str, Any] = {"started": started[11:19], "seconds": secs, "n_req": n_req,
                                      "n_ok": n_ok, "n_err": n_err, "n_rate": n_rate}
-            obs = _obs(con, target, run, api_id)
-            if api_id == "ka10060":
+            base, ex = split_code(api_id)
+            obs = [(ts, tk, r) for ts, key, r in _obs(con, target, run, base)
+                   for tk, kex in (split_code(key),) if kex == ex]
+            if base == "ka10060":
                 firsts = {tk: _first(rows) for _, tk, rows in obs}
                 got = {tk: r for tk, r in firsts.items() if r is not None}
                 entry["n_t_rows"] = len(got)
@@ -382,8 +410,8 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
                     entry[f"{field}_match_close"] = sum(
                         1 for tk, r in rows.items()
                         if official.get(tk, (None,))[0] == price(r.get(field)))
-            sweeps[f"{run}/{api_id}"] = entry
-        flow_runs = [k for k in sweeps if k.endswith("/ka10060")]
+            sweeps[f"{run}/{base}/{ex}"] = entry
+        flow_runs = [k for k in sweeps if k.endswith("/ka10060/KRX")]
         for a, b in zip(flow_runs, flow_runs[1:], strict=False):
             fa, fb = sweeps[a]["flows"], sweeps[b]["flows"]
             common = set(fa) & set(fb)
@@ -423,12 +451,13 @@ def report_md(rep: Mapping[str, Any]) -> str:
              "|---|---|---|"]
     for key, v in rep["minute_price"].items():
         lines.append(f"| {key} | {v['first_all_match']} | {v['first_mismatch_after_1600']} |")
-    mf = rep["minute_flows"]
-    lines += ["", "## 분 단위 10종목 — 수급", "",
-              f"- 정규장 확정(이후 끝까지 같은 값) 가장 늦은 종목 시각: **{mf['settle_max']}**",
-              f"- 종목별: {mf['settle_by_ticker']}",
-              f"- 마지막 분 값 = 원장 21:05 값: {mf['same_as_ledger']}/{mf['n_with_ledger']}",
-              "", "## 후보 전량", "", "```json",
+    lines += ["", "## 분 단위 10종목 — 수급(거래소별)", ""]
+    for ex, mf in rep["minute_flows"].items():
+        lines += [f"- {ex}: 정규장 확정(이후 끝까지 같은 값) 가장 늦은 종목 시각 "
+                  f"**{mf['settle_max']}** · 마지막 분 값 = 원장 21:05(KRX) 값 "
+                  f"{mf['same_as_ledger']}/{mf['n_with_ledger']}",
+                  f"  - 종목별: {mf['settle_by_ticker']}"]
+    lines += ["", "## 후보 전량", "", "```json",
               json.dumps(rep["sweeps"], ensure_ascii=False, indent=1), "```", "",
               "## 1분봉 15:30 봉(대안)", "", "```json",
               json.dumps(rep["bars"], ensure_ascii=False, indent=1), "```", ""]

@@ -281,7 +281,7 @@ def sheet_cards(wb: Workbook, base: DayView, week: Week, fi: FiData) -> Dictiona
             r += 1
         r += 1
     if r > 8:
-        ws.conditional_formatting.add(f"D8:E{r}", qpack.scale_high_red())
+        ws.conditional_formatting.add(f"D8:E{r}", qpack.scale_high_good())
     ws.freeze_panes = ws.cell(6, 1)
     qpack.tighten_rows(ws)
     return [("팩터 카드", "카드", h, d) for h, d in (

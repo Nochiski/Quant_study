@@ -52,7 +52,8 @@ FOOTNOTES = (
     "① 유니버스 컷: 주 모델 모집단은 메타 시트 '유니버스 규칙' 줄을 따른다. 탈락 종목은 점수 없이 "
     "제외 사유만 적는다.",
     "② 창: 가격 지표는 수정종가 세션 수, 재무는 D 이전 공시(PIT), 추정치는 당해 결산기 컨센서스.",
-    "③ 색: 3색 백분위 10/50/90 — 초록(낮음)·노랑·빨강(높음). 순위 열은 반전(1위 = 빨강). "
+    "③ 색: 3색 백분위 10/50/90 — 빨강(낮음)·노랑·초록(높음), 초록 = 좋음. "
+    "순위 열은 반전(1위 = 초록). "
     "레벨 값은 무색. 형광 노랑 = 신규 진입.",
     "④ 정렬 키: 점수·원자료·지표·실적·모델 비교 = 주 모델 순위 오름차순, 제외 종목은 뒤에 코드순.",
 )
@@ -227,7 +228,7 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
             Col("prev_rank", "전일\n순위", "num", "#,##0", color=False,
                 definition="직전 성공 판(같은 basis)의 주 모델 순위"),
             Col("d_rank", "Δ순위", "chg", "#,##0", definition=(
-                "전일 순위 − 오늘 순위(양수 = 상승). 색 = 높음 빨강")),
+                "전일 순위 − 오늘 순위(양수 = 상승). 색 = 높음 초록")),
             Col("excl", "제외 사유", "txt", None, 16.0, definition=(
                 "엔진 exclude_reason — D-13 적격성(관리·정지·감사·지연·거래대금) · 데이터 부족 · "
                 "버킷 게이트(고점근접+반전 하위 30%)")),
@@ -284,7 +285,7 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
             out[f"r:{s}"] = view.other_ranks[s].get(t)
         out["max_diff"] = max(ranks) - min(ranks) if len(ranks) >= 2 else None
         rows.append(out)
-    note = ("축 = 버킷 점수의 백분위(높을수록 좋다, 빨강 = 상위). 제외 종목은 점수만 남고 순위가 "
+    note = ("축 = 버킷 점수의 백분위(높을수록 좋다, 초록 = 상위). 제외 종목은 점수만 남고 순위가 "
             "없다. 결측은 '결측(사유)'.")
     return write_table(wb, title_for(view, "점수", note), groups, rows, sort_key="rank")
 

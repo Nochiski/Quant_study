@@ -590,7 +590,7 @@ def test_daily_qpack_styles(daily) -> None:
     cs = next(c for ref, c in scales if ref.startswith(letter))
     assert [v.type for v in cs.cfvo] == ["percentile"] * 3
     assert [v.val for v in cs.cfvo] == [10, 50, 90]
-    assert [c.rgb[-6:] for c in cs.color] == ["63BE7B", "FFEB84", "F8696B"]
+    assert [c.rgb[-6:] for c in cs.color] == ["F8696B", "FFEB84", "63BE7B"]   # 높음 = 초록(N-15)
 
 
 def test_daily_rank_scale_is_reversed_on_model_sheet(daily) -> None:
@@ -599,7 +599,7 @@ def test_daily_rank_scale_is_reversed_on_model_sheet(daily) -> None:
     c = ws.cell(7, col_of(ws, "v4 기본")).column_letter
     cs = next(r.colorScale for rng in ws.conditional_formatting for r in rng.rules
               if str(rng.sqref).startswith(c))
-    assert [x.rgb[-6:] for x in cs.color] == ["F8696B", "FFEB84", "63BE7B"]
+    assert [x.rgb[-6:] for x in cs.color] == ["63BE7B", "FFEB84", "F8696B"]   # 1위 = 초록(N-15)
 
 
 def test_daily_missing_or_failed_run_is_an_error(world: dict[str, Path], tmp_path: Path) -> None:

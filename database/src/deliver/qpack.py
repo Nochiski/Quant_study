@@ -9,8 +9,9 @@
   열 너비 — 값·헤더에 맞춘 최소 폭(Q.Pack 실측: 보이는 숫자 열 4.4~6.4, 종목명 13~15). 10-05 전엔
         숫자 열을 13 으로 고정해 Q.Pack 의 두 배 넘게 넓었다(사용자 지적).
   그룹 사이 빈 구분 열(너비 5 · 숨김 · 아웃라인 1) · 식별 열 끝에서 틀고정 · 7행 자동필터
-  색 스케일 3색 백분위 10/50/90: 초록 63BE7B → 노랑 FFEB84 → 빨강 F8696B(높음 = 빨강).
-  순위 열은 반전(1위 = 빨강). 레벨 값은 무색.
+  색 스케일 3색 백분위 10/50/90: 빨강 F8696B → 노랑 FFEB84 → 초록 63BE7B(높음 = 초록 = 좋음,
+  2026-10-06 사용자 결정 N-15 — Q.Pack 의 '높음 = 빨강'과 반대). 순위 열은 반전(1위 = 초록).
+  레벨 값은 무색.
 
 **값만 쓴다.** '=' 로 시작하는 문자열도 수식이 되지 않게 문자열 형으로 고정한다.
 """
@@ -80,18 +81,18 @@ def fill(color: str) -> PatternFill:
     return PatternFill("solid", fgColor=color)
 
 
-def scale_high_red() -> Rule:
-    """백분위·변화율 열 — 높음 = 빨강."""
-    return ColorScaleRule(start_type="percentile", start_value=10, start_color=GREEN,
-                          mid_type="percentile", mid_value=50, mid_color=YELLOW,
-                          end_type="percentile", end_value=90, end_color=RED)
-
-
-def scale_rank() -> Rule:
-    """순위 열 — 1위(작은 값) = 빨강."""
+def scale_high_good() -> Rule:
+    """백분위·변화율 열 — 높음 = 초록(좋음), 낮음 = 빨강(나쁨)."""
     return ColorScaleRule(start_type="percentile", start_value=10, start_color=RED,
                           mid_type="percentile", mid_value=50, mid_color=YELLOW,
                           end_type="percentile", end_value=90, end_color=GREEN)
+
+
+def scale_rank() -> Rule:
+    """순위 열 — 1위(작은 값) = 초록(좋음)."""
+    return ColorScaleRule(start_type="percentile", start_value=10, start_color=GREEN,
+                          mid_type="percentile", mid_value=50, mid_color=YELLOW,
+                          end_type="percentile", end_value=90, end_color=RED)
 
 
 def clean(v: object) -> object:
@@ -302,7 +303,7 @@ def write_table(wb: Workbook, title: Title, groups: Sequence[Group],
             if col is None or not col.colored:
                 continue
             letter = get_column_letter(c)
-            rule = scale_rank() if col.kind == "rank" else scale_high_red()
+            rule = scale_rank() if col.kind == "rank" else scale_high_good()
             ws.conditional_formatting.add(f"{letter}{FIRST_DATA_ROW}:{letter}{last}", rule)
     n_freeze = sum(len(g.cols) for g in groups[:n_freeze_groups]) + max(0, n_freeze_groups - 1)
     ws.freeze_panes = ws.cell(FIRST_DATA_ROW, n_freeze + 1)
@@ -362,5 +363,5 @@ def write_meta(wb: Workbook, title: Title, pairs: Sequence[tuple[str, object]],
 __all__ = [
     "C_BAND", "C_GOLD", "C_HDR", "C_KEY", "C_NEW", "C_STRIP", "C_STYLE", "FIRST_DATA_ROW",
     "FONT_NAME", "GREEN", "RED", "YELLOW", "Col", "Group", "Title", "clean", "fill", "font",
-    "put", "scale_high_red", "scale_rank", "title_block", "write_meta", "write_table",
+    "put", "scale_high_good", "scale_rank", "title_block", "write_meta", "write_table",
 ]

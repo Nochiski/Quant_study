@@ -5,19 +5,19 @@ DECISIONS Q-1·N-13(모델 데이터는 정규장이 끝나고 최대한 빨리)
 보고서를 쓴다.
 임시 크론(KST, 2026-10-06~10-08 거래일 — `--until` 뒤엔 아무것도 안 한다):
 
-  15:20~16:30 5분마다 minute 고정 10종목 — ka10060 T 행(현재가·누적거래량·투자자별 순매수) ·
-                            ka10086 T 행(종가) · ka10095 10종목 한 콜(현재가·종가·기준가·체결시간)
-  15:45·16:00·16:20 sweep   후보 전량(최신 fi_universe eligible) ka10060 T 행 + ka10095 묶음 —
-                            소요 시간·실패·유량 초과를 운영 수집기와 같은 속도(4.4콜/초)로 잰다
-  16:40·20:30       bars    ka10080 1분봉 — 15:30 봉 종가(16:00 을 놓쳤을 때의 대안).
-                            16:40 은 후보 전량(`--all`). 10-06 새벽 시험에서 밤에도
-                            10종목 중 9종목이 공식 종가와 같았다
+  15:20~16:30 5분마다 minute 고정 3종목 × 거래소 3 — ka10060 T 행(현재가·누적거래량·
+                            투자자별 순매수) · ka10086 T 행(종가) · ka10095 한 콜(현재가·종가·
+                            기준가·체결시간)
+  15:45·16:00·16:20 sweep   후보 100종목(고정 3 + 최신 fi_universe eligible 에서 고르게 97) —
+                            ka10060 T 행(KRX) + ka10095 묶음(거래소 3). 소요 시간·실패·유량
+                            초과를 운영 수집기와 같은 속도(4.4콜/초)로 잰다
   다음 거래일 09:20 grade    KRX 공식 종가(T)·원장 키움 T 행(21:05 수집)과 대조 →
                             `data/evidence/postclose_<T>.md`·`.json`
 
 판독: ① 가격이 공식 종가와 같아지는 시각과 애프터마켓 체결로 달라지는 시각
 ② 수급이 정규장 확정값이 되는
-시각 ③ 후보 전량 수집 시간 ④ 16:00 뒤에도 공식 종가를 주는 필드(ka10095 close_pric·ka10086·1분봉).
+시각 ③ 후보 수집 시간(100종목 → 630종목 환산) ④ 거래소(KRX·NXT·통합)별 값 차이.
+(1분봉 15:30 봉 시험은 10-06 사용자 결정으로 뺐다.)
 요청 본문·재시도 규칙은 운영 수집기(`daily/kw_daily.py`)의 것을 그대로 쓴다 —
 잰 값이 운영과 같아야 한다.
 """
@@ -41,16 +41,16 @@ BASE = Path(os.environ.get("QL_HOME", Path(__file__).resolve().parents[1]))
 DB = BASE / "data" / "evidence" / "postclose.db"
 KST = dt.timezone(dt.timedelta(hours=9))
 UNTIL_DEFAULT = "20261008"
-# 대형·중형·소형, 코스피·코스닥을 섞었다(09-14 애프터마켓 프로브 6종목 + 10-02 모델 상위 4종목)
-TICKERS = ("005930", "000660", "035720", "021240", "086520", "008290",
-           "001820", "092870", "403870", "000500")
+# 고정 3종목(10-06 사용자 '3종목으로 줄여'): 삼성전자(코스피 대형·NXT 있음) · 에코프로(코스닥·
+# NXT 있음) · 삼화콘덴서(코스피 중형·NXT 없음, 10-02 모델 1위)
+TICKERS = ("005930", "086520", "001820")
+SWEEP_N = 100           # 후보 조회 종목 수(10-06 사용자 '100종목만해')
 FLOW_KEYS = ("ind_invsr", "frgnr_invsr", "orgn", "fnnc_invt", "insrnc", "invtrt", "etc_fnnc",
              "bank", "penfnd_etc", "samo_fund", "natn", "etc_corp", "natfor")
 BATCH = 100              # ka10095 한 콜 종목 수(시험값 — 응답 행 수로 실제 한도를 본다)
 # 키움 REST 거래소 구분 = 종목코드 접미사(공식 가이드): KRX 그대로 · NXT '_NX' · 통합(SOR) '_AL'.
 # 분 단위 조회와 묶음 조회는 셋 다(10-06 사용자 요청), 후보 전량 ka10060 은 운영 원천인 KRX 만.
 EXCHANGES = (("KRX", ""), ("NXT", "_NX"), ("SOR", "_AL"))
-REGULAR_LAST = "153059"  # 정규장 마지막 체결(종가 단일가) 봉 시각 상한
 EMPTY = ""
 
 
@@ -66,9 +66,6 @@ SPECS: dict[str, KW.TrSpec] = {
                      lambda tk, s, e: {"stk_cd": tk, "qry_dt": e, "indc_tp": "0"}),
     "ka10095": _spec("ka10095", "/api/dostk/stkinfo", "atn_stk_infr",
                      lambda tk, s, e: {"stk_cd": tk}),
-    "ka10080": _spec("ka10080", "/api/dostk/chart", "stk_min_pole_chart_qry",
-                     lambda tk, s, e: {"stk_cd": tk, "tic_scope": "1", "upd_stkpc_tp": "0",
-                                       "base_dt": e}),
 }
 
 
@@ -113,25 +110,17 @@ def split_code(key: str) -> tuple[str, str]:
 
 def latest_date(api_id: str, rows: Sequence[Mapping[str, Any]]) -> str:
     """T 행이 없을 때 진단용 — 응답의 가장 최근 날짜(또는 시각) 표기."""
-    key = {"ka10060": "dt", "ka10086": "date", "ka10080": "cntr_tm"}.get(api_id)
+    key = {"ka10060": "dt", "ka10086": "date"}.get(api_id)
     vals = [str(r.get(key)) for r in rows if key and r.get(key)]
     return max(vals) if vals else "(빈 응답)"
 
 
 def pick_rows(api_id: str, rows: Sequence[Mapping[str, Any]], target: str) -> list[dict[str, Any]]:
-    """저장할 행만 — 일별 TR 은 T 행, 1분봉은 T 의 15:20~15:35 봉과 마지막 봉, 묶음 TR 은 전부."""
+    """저장할 행만 — 일별 TR 은 T 행, 묶음 TR 은 전부."""
     if api_id == "ka10060":
         return [dict(r) for r in rows if str(r.get("dt")) == target]
     if api_id == "ka10086":
         return [dict(r) for r in rows if str(r.get("date")) == target]
-    if api_id == "ka10080":
-        bars = [dict(r) for r in rows if str(r.get("cntr_tm", "")).startswith(target)]
-        keep = [b for b in bars if "152000" <= str(b["cntr_tm"])[8:14] <= "153500"]
-        if bars:
-            last = max(bars, key=lambda b: str(b["cntr_tm"]))
-            if last not in keep:
-                keep.append(last)
-        return keep
     return [dict(r) for r in rows]
 
 
@@ -146,15 +135,6 @@ def settle_time(series: Sequence[tuple[str, object]]) -> str | None:
             break
         first = ts
     return first
-
-
-def regular_close_bar(bars: Sequence[Mapping[str, Any]]) -> tuple[str, int | None] | None:
-    """1분봉 중 정규장 마지막 봉(시각 ≤ 15:30:59)의 (시각, 종가)."""
-    regular = [b for b in bars if str(b.get("cntr_tm", ""))[8:14] <= REGULAR_LAST]
-    if not regular:
-        return None
-    b = max(regular, key=lambda x: str(x["cntr_tm"]))
-    return str(b["cntr_tm"])[8:14], price(b.get("cur_prc"))
 
 
 # ── 저장 ─────────────────────────────────────────────────────────────────────
@@ -221,15 +201,29 @@ def collect(con: sqlite3.Connection, client: CountingClient, run: str, api_id: s
     return stats
 
 
+def spread(tickers: Sequence[str], n: int) -> list[str]:
+    """정렬된 목록에서 고르게 n 개(같은 간격) — 매번 같은 종목이 뽑힌다."""
+    if n >= len(tickers):
+        return list(tickers)
+    step = len(tickers) / n
+    return [tickers[int(i * step)] for i in range(n)]
+
+
+def sample(cands: Sequence[str], n: int = SWEEP_N) -> list[str]:
+    """고정 종목 + 나머지 후보에서 고르게 — 합계 n 종목."""
+    rest = sorted(set(cands) - set(TICKERS))
+    return sorted({*TICKERS, *spread(rest, n - len(TICKERS))})
+
+
 def candidates(base: Path = BASE) -> list[str]:
-    """최신 factor_inputs 판의 eligible 종목 + 고정 10종목(장 마감 직후 모델이 받을 범위)."""
+    """최신 factor_inputs 판의 eligible 종목(장 마감 직후 모델이 받을 범위)."""
     import duckdb
     root = base / "data" / "factor_inputs"
     bid = json.loads((root / "latest_morning.json").read_text(encoding="utf-8"))["build_id"]
     part = root / "fi_universe" / f"v={bid}"
     got = duckdb.sql(f"SELECT ticker FROM read_parquet('{part.as_posix()}/*.parquet', "
                      "hive_partitioning=false) WHERE eligible ORDER BY ticker").fetchall()
-    return sorted({str(t) for (t,) in got} | set(TICKERS))
+    return sorted({str(t) for (t,) in got})
 
 
 def batches(tickers: Sequence[str], size: int = BATCH) -> list[str]:
@@ -261,22 +255,12 @@ def cmd_sweep(target: str) -> None:
     run = f"sweep@{now_kst().strftime('%H%M')}"
     con, client = connect(), _client()
     try:
-        tickers = candidates()
+        tickers = sample(candidates())
         print(json.dumps(collect(con, client, run, "ka10060", tickers, target), ensure_ascii=False))
         for _name, sfx in EXCHANGES:
             stats = collect(con, client, run, "ka10095", batches([t + sfx for t in tickers]),
                             target, sfx)
             print(json.dumps(stats, ensure_ascii=False))
-    finally:
-        con.close()
-
-
-def cmd_bars(target: str, every: bool = False) -> None:
-    run = f"bars@{now_kst().strftime('%H%M')}"
-    con, client = connect(), _client()
-    try:
-        tickers = candidates() if every else list(TICKERS)
-        print(json.dumps(collect(con, client, run, "ka10080", tickers, target), ensure_ascii=False))
     finally:
         con.close()
 
@@ -337,7 +321,7 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
     con = _ro(db)
     try:
         rep: dict[str, Any] = {"target": target, "n_official": len(official)}
-        # ① 분 단위 10종목 × 거래소(KRX·NXT·SOR) — 가격(ka10060 현재가 · ka10086 종가 ·
+        # ① 5분 간격 고정 종목 × 거래소(KRX·NXT·SOR) — 가격(ka10060 현재가 · ka10086 종가 ·
         #    ka10095 현재가/종가)을 KRX 공식 종가와, 수급은 각자의 마지막 값과 견준다
         minute: dict[str, dict[str, list[tuple[str, Any]]]] = {}
         for api_id, field in (("ka10060", "cur_prc"), ("ka10086", "close_pric")):
@@ -430,17 +414,6 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
         for k in flow_runs:
             sweeps[k].pop("flows", None)
         rep["sweeps"] = sweeps
-        # ③ 1분봉 15:30 봉
-        bars: dict[str, Any] = {}
-        for (run,) in con.execute("SELECT DISTINCT run FROM obs WHERE target_dt = ? AND run LIKE "
-                                  "'bars@%' ORDER BY run", (target,)):
-            got = {tk: regular_close_bar(rows or []) for _, tk, rows in _obs(con, target, run,
-                                                                             "ka10080")}
-            bars[run] = {"n": len(got),
-                         "close_match": sum(1 for tk, b in got.items()
-                                            if b and official.get(tk, (None,))[0] == b[1]),
-                         "bar_times": sorted({b[0] for b in got.values() if b})}
-        rep["bars"] = bars
         return rep
     finally:
         con.close()
@@ -450,20 +423,18 @@ def report_md(rep: Mapping[str, Any]) -> str:
     lines = [f"# 장 마감 직후 프로브 채점 — {rep['target']}", "",
              f"KRX 공식 종가 {rep['n_official']}종목과 대조. "
              "원장·모델에 쓰지 않은 시험 기록이다.", "",
-             "## 분 단위 10종목 — 가격", "", "| 필드 | 첫 전 종목 일치 | 16:00 뒤 첫 불일치 |",
+             "## 5분 간격 고정 종목 — 가격", "", "| 필드 | 첫 전 종목 일치 | 16:00 뒤 첫 불일치 |",
              "|---|---|---|"]
     for key, v in rep["minute_price"].items():
         lines.append(f"| {key} | {v['first_all_match']} | {v['first_mismatch_after_1600']} |")
-    lines += ["", "## 분 단위 10종목 — 수급(거래소별)", ""]
+    lines += ["", "## 5분 간격 고정 종목 — 수급(거래소별)", ""]
     for ex, mf in rep["minute_flows"].items():
         lines += [f"- {ex}: 정규장 확정(이후 끝까지 같은 값) 가장 늦은 종목 시각 "
                   f"**{mf['settle_max']}** · 마지막 분 값 = 원장 21:05(KRX) 값 "
                   f"{mf['same_as_ledger']}/{mf['n_with_ledger']}",
                   f"  - 종목별: {mf['settle_by_ticker']}"]
-    lines += ["", "## 후보 전량", "", "```json",
-              json.dumps(rep["sweeps"], ensure_ascii=False, indent=1), "```", "",
-              "## 1분봉 15:30 봉(대안)", "", "```json",
-              json.dumps(rep["bars"], ensure_ascii=False, indent=1), "```", ""]
+    lines += ["", "## 후보 100종목", "", "```json",
+              json.dumps(rep["sweeps"], ensure_ascii=False, indent=1), "```", ""]
     return "\n".join(lines)
 
 
@@ -479,10 +450,8 @@ def cmd_grade(target: str) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="probe_postclose")
-    p.add_argument("cmd", choices=("minute", "sweep", "bars", "grade"))
+    p.add_argument("cmd", choices=("minute", "sweep", "grade"))
     p.add_argument("--until", default=UNTIL_DEFAULT, help="이 날짜(YYYYMMDD) 뒤엔 아무것도 안 한다")
-    p.add_argument("--all", action="store_true",
-                   help="bars 를 후보 전량에 쏜다(기본은 고정 10종목)")
     p.add_argument("--date", default=None,
                    help="대상 T(YYYYMMDD) — 기본: 오늘, grade 는 직전 거래일")
     a = p.parse_args(argv)
@@ -499,10 +468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{a.cmd} 건너뜀 — {today} 거래일 아님 또는 until {a.until} 지남")
         return 0
     target = a.date or today.strftime("%Y%m%d")
-    if a.cmd == "bars":
-        cmd_bars(target, a.all)
-    else:
-        {"minute": cmd_minute, "sweep": cmd_sweep}[a.cmd](target)
+    {"minute": cmd_minute, "sweep": cmd_sweep}[a.cmd](target)
     return 0
 
 

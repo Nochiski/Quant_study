@@ -1,4 +1,4 @@
-"""장 마감 직후 프로브(`src/probe_postclose.py`) — 행 고르기·확정 시각·채점(합성 DB 왕복).
+"""장 마감 직후 프로브(`src/probe_postclose.py`) — 행 고르기·표본·확정 시각·채점(합성 DB 왕복).
 
 키움을 부르지 않는다. 채점은 합성 postclose.db · krx.db · kiwoom.db 로 판독 셋
 (가격 일치 시각, 수급 확정 시각,
@@ -37,19 +37,7 @@ def test_norm_code_and_batches() -> None:
 def test_pick_rows_keeps_only_target_rows() -> None:
     assert P.pick_rows("ka10060", [{"dt": T}, {"dt": "20261002"}], T) == [{"dt": T}]
     assert P.pick_rows("ka10086", [{"date": "20261002"}], T) == []
-    bars = [{"cntr_tm": f"{T}{hms}"} for hms in ("161000", "153000", "152900", "151000")]
-    kept = P.pick_rows("ka10080", bars, T)
-    # 15:20~15:35 봉 + 마지막 봉
-    assert [b["cntr_tm"][8:] for b in kept] == ["153000", "152900", "161000"]
     assert P.latest_date("ka10060", [{"dt": "20261002"}, {"dt": "20261001"}]) == "20261002"
-
-
-def test_regular_close_bar_ignores_after_market_bars() -> None:
-    bars = [{"cntr_tm": f"{T}152900", "cur_prc": "-99"},
-            {"cntr_tm": f"{T}153000", "cur_prc": "-100"},
-            {"cntr_tm": f"{T}161000", "cur_prc": "+105"}]
-    assert P.regular_close_bar(bars) == ("153000", 100)
-    assert P.regular_close_bar([{"cntr_tm": f"{T}161000", "cur_prc": "1"}]) is None
 
 
 def test_settle_time_is_first_time_value_stays_final() -> None:
@@ -89,10 +77,6 @@ def _make(tmp: Path) -> tuple[Path, Path, Path]:
     con.execute("INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?)",
                 ("sweep@1600", "ka10060", T, "2026-10-06T16:00:00", "2026-10-06T16:02:30", 3, 3, 0,
                  1, ""))
-    bars = [{"cntr_tm": f"{T}153000", "cur_prc": "-100"},
-            {"cntr_tm": f"{T}161500", "cur_prc": "+104"}]
-    con.execute("INSERT INTO obs VALUES (?,?,?,?,?,1,?,NULL)",
-                ("2026-10-06T16:40:01", "bars@1640", "ka10080", "005930", T, json.dumps(bars)))
     con.commit()
     con.close()
     krx = tmp / "krx.db"
@@ -118,7 +102,7 @@ def _make(tmp: Path) -> tuple[Path, Path, Path]:
     return db, krx, kw
 
 
-def test_grade_reads_price_window_flow_settle_sweep_and_bars(tmp_path: Path) -> None:
+def test_grade_reads_price_window_flow_settle_and_sweep(tmp_path: Path) -> None:
     db, krx, kw = _make(tmp_path)
     rep = P.grade(T, db=db, krx_db=krx, kw_db=kw)
     cur = rep["minute_price"]["KRX.ka10060.cur_prc"]
@@ -135,7 +119,6 @@ def test_grade_reads_price_window_flow_settle_sweep_and_bars(tmp_path: Path) -> 
     assert (sweep["seconds"], sweep["n_t_rows"], sweep["close_match"], sweep["n_rate"]) == (
         150, 3, 3, 1)
     assert rep["sweeps"]["last_sweep == ledger(21:05)"] == {"n": 1, "flows_equal": 0}
-    assert rep["bars"]["bars@1640"] == {"n": 1, "close_match": 1, "bar_times": ["153000"]}
     md = P.report_md(rep)
     assert "15:45" in md and "16:10" in md
 
@@ -154,14 +137,10 @@ def test_main_skips_outside_window_without_calling_kiwoom(monkeypatch, capsys) -
     assert "건너뜀" in capsys.readouterr().out
 
 
-def test_bars_all_uses_candidates(monkeypatch) -> None:
-    """`bars --all` 은 후보 전량, 기본은 고정 10종목 — 1분봉 15:30 봉 대안을 전 종목으로 잰다."""
-    seen: list[list[str]] = []
-    monkeypatch.setattr(P, "connect", lambda: type("C", (), {"close": lambda self: None})())
-    monkeypatch.setattr(P, "_client", lambda: None)
-    monkeypatch.setattr(P, "candidates", lambda: ["000001", "000002"])
-    monkeypatch.setattr(P, "collect", lambda con, cl, run, api, tickers, target, sfx="":
-                        seen.append(list(tickers)) or {})
-    P.cmd_bars(T, every=True)
-    P.cmd_bars(T)
-    assert seen == [["000001", "000002"], list(P.TICKERS)]
+def test_sample_is_fixed_three_plus_evenly_spread_rest() -> None:
+    """후보 100종목 = 고정 3 + 나머지에서 같은 간격 97(매번 같은 종목)."""
+    cands = [f"{i:06d}" for i in range(1, 627)] + list(P.TICKERS)
+    got = P.sample(cands)
+    assert len(got) == P.SWEEP_N == 100 and set(P.TICKERS) <= set(got)
+    assert got == P.sample(list(reversed(cands)))                  # 입력 순서와 무관
+    assert P.spread(["a", "b", "c", "d"], 2) == ["a", "c"] and P.spread(["a"], 5) == ["a"]

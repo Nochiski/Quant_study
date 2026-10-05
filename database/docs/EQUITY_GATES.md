@@ -545,7 +545,7 @@ WHERE c.src = 'v3'
 SELECT count(*) AS n FROM duckdb_columns()
 WHERE table_name IN (SELECT "table" FROM _reg_table)
   AND (column_name LIKE 'is\_latest%' ESCAPE '\' OR column_name LIKE '%\_current' ESCAPE '\');
--- 예외: corp.corp_name·security.name_current 처럼 "현재값 라벨"로 선언한 컬럼은
+-- 예외: corp.corp_name·security.name_current·name_abbrv_current 처럼 "현재값 라벨"로 선언한 컬럼은
 --       _reg_column.current_label = true 로 등재하고 술어에서 뺀다
 
 -- EG6-P05 : DOC_DESIGN §8.1 E-G6a

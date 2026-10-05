@@ -96,6 +96,17 @@ def test_최신_행_기준_이름과_상장일(built: build.BuildResult) -> None
                     ("101970", "우양에이치씨", date(2025, 3, 28))]
 
 
+def test_약명은_KRX_ISU_ABBRV이고_ETF는_자기_이름(built: build.BuildResult) -> None:
+    """엑셀·v3 호환에 쓰는 이름은 약명(시장에서 부르는 이름)이다 — 정식명은 그대로 둔다(10-05)."""
+    assert built.out_dir is not None
+    rows = _query(built.out_dir, "SELECT ticker, name_current, name_abbrv_current FROM t "
+                                 "WHERE ticker IN ('000660', '003545', '005930', '069500') ORDER BY 1")
+    assert rows == [("000660", "에스케이하이닉스보통주", "SK하이닉스"),
+                    ("003545", "대신증권1우선주", "대신증권우"),
+                    ("005930", "삼성전자보통주", "삼성전자"),
+                    ("069500", "KODEX 200", "KODEX 200")]
+
+
 # ── 폐지 두 축 ────────────────────────────────────────────────────────────────
 def test_폐지일은_KRX_다음거래일이고_KIS와_대조된다(built: build.BuildResult) -> None:
     assert built.out_dir is not None
@@ -159,7 +170,8 @@ _LISTING_VOCAB: list[dict[str, object]] = [
 def _vocab_stage(tmp_path: Path, make_stage_tree) -> Path:
     make_stage_tree(tmp_path, "stg_listing_daily", [
         {"ticker": r["t"], "date": BACKFILL_END, "isin": "KR7" + str(r["t"]) + "000",
-         "name": r["n"], "list_date": date(2015, 1, 5), "secugrp": r["g"], "sect_tp": r["s"],
+         "name": r["n"], "name_abbrv": r["n"], "list_date": date(2015, 1, 5), "secugrp": r["g"],
+         "sect_tp": r["s"],
          "stkcert_tp": r["k"]} for r in _LISTING_VOCAB])
     make_stage_tree(tmp_path, "stg_etf_price_daily",
                     [{"ticker": "E00001", "date": BACKFILL_END, "name": "가나ETF"}])
@@ -226,7 +238,8 @@ _BROKEN_SEC_TYPE_SQL = """
 WITH t AS (SELECT DISTINCT ticker FROM stg_listing_daily
            UNION SELECT DISTINCT ticker FROM stg_etf_price_daily)
 SELECT ticker, NULL::VARCHAR AS corp_code, NULL::VARCHAR AS isin,
-       NULL::VARCHAR AS name_current, 'warrant' AS sec_type, NULL::DATE AS list_date,
+       NULL::VARCHAR AS name_current, NULL::VARCHAR AS name_abbrv_current,
+       'warrant' AS sec_type, NULL::DATE AS list_date,
        'unknown' AS list_date_basis, NULL::DATE AS delist_date_krx,
        NULL::DATE AS delist_date_kis, false AS delist_conflict, NULL::DATE AS delist_date,
        'unknown' AS delist_date_basis, NULL::VARCHAR AS reject_reason

@@ -157,10 +157,12 @@ def _universe_rows(fillers: list[str]) -> list[dict]:
     return rows
 
 
-def _sec_row(ticker: str, name: str, list_date: dt.date, delist: dt.date | None = None) -> dict:
-    """`security` 실물 13열."""
+def _sec_row(ticker: str, name: str, list_date: dt.date, delist: dt.date | None = None,
+             formal: str | None = None) -> dict:
+    """`security` 실물 14열. name = 약명(시장 호칭), formal = 정식 종목명(기본 name + '보통주')."""
     return {"ticker": ticker, "corp_code": f"{ticker}00", "isin": "KR" + ticker * 2,
-            "name_current": name, "sec_type": "common", "list_date": list_date,
+            "name_current": formal or f"{name}보통주", "name_abbrv_current": name,
+            "sec_type": "common", "list_date": list_date,
             "list_date_basis": "measured", "delist_date_krx": delist,
             "delist_date_kis": None, "delist_conflict": False, "delist_date": delist,
             "delist_date_basis": "derived" if delist else "unknown"}
@@ -168,7 +170,7 @@ def _sec_row(ticker: str, name: str, list_date: dt.date, delist: dt.date | None 
 
 def _security_rows(fillers: list[str]) -> list[dict]:
     rows = [_sec_row("005930", "삼성전자", dt.date(1975, 6, 11)),
-            _sec_row("000660", "SK하이닉스", dt.date(1996, 12, 26)),
+            _sec_row("000660", "SK하이닉스", dt.date(1996, 12, 26), formal="에스케이하이닉스보통주"),
             _sec_row(SPAC, "스팩1호", dt.date(2024, 3, 1)),
             _sec_row("900000", "폐지종목", dt.date(2010, 1, 4), dt.date(2026, 5, 1))]
     rows += [_sec_row(t, f"제외{t}", dt.date(2020, 1, 2)) for t, _, _ in EXCLUDED]

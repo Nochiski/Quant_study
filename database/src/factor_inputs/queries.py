@@ -242,7 +242,9 @@ fil AS (
     FROM filing f ASOF LEFT JOIN _calx c ON c.date >= f.legal_deadline
 ),
 base AS (
-    SELECT u.ticker, u.market, u.sec_type, s.name_current AS name, s.list_date,
+    SELECT u.ticker, u.market, u.sec_type,
+           coalesce(s.name_abbrv_current, s.name_current) AS name,  -- 약명(시장 호칭) 우선
+           s.list_date,
            u.halt_state, u.admin_state, u.adv20_krw,
            px.close, px.shares_out,
            CAST(round(CAST(px.shares_out AS DECIMAL(38, 0)) * CAST(px.close AS DECIMAL(38, 0))

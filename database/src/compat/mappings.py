@@ -118,7 +118,7 @@ sect AS (
 )
 SELECT
     u.ticker                                              AS stock_code,
-    v.name_current                                        AS stock_name,
+    coalesce(v.name_abbrv_current, v.name_current)        AS stock_name,   -- v3 도 약명
     u.market                                              AS market,
     sect.wics_l1_nm                                       AS sector,
     CAST(round(cap.mktcap_krw / {KRW_PER_EOK}.0) AS BIGINT)

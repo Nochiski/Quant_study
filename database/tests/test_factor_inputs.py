@@ -141,6 +141,7 @@ def _disclosure() -> list[dict]:
 
 def _security() -> list[dict]:
     return [{"ticker": t, "corp_code": corp(A) if t == G else corp(t), "name_current": f"종목{t}",
+             "name_abbrv_current": None if t == B else f"약{t}",
              "sec_type": SPEC[t][0], "list_date": dt.date(2015, 1, 2)} for t in SPEC]
 
 
@@ -577,8 +578,10 @@ def test_universe_attributes_market_cap_and_sector(built) -> None:
                                 f"mktcap_basis, sector_l1, sector_l1_name, n_analysts, date "
                                 f"FROM t WHERE ticker = '{A}'")[0]
     close_d = CLOSE[A] + 100 * (len(PRICE_DAYS) - 1)
-    assert row == ("종목100010", "KOSPI", "common", dt.date(2015, 1, 2), SHARES[A],
+    assert row == ("약100010", "KOSPI", "common", dt.date(2015, 1, 2), SHARES[A],
                    float(round(SHARES[A] * close_d / 1e8)), "krx", "G15", "소재", 10, D)
+    # 이름은 약명(시장 호칭) — 약명이 없는 B 는 정식명으로 돌아간다
+    assert q(out, "fi_universe", f"SELECT name FROM t WHERE ticker = '{B}'") == [(f"종목{B}",)]
     # 유예 종목 B 의 추정기관 수는 마지막 신선일(09-23) 값 7 — 소멸 뒤 값 3 이 아니다
     assert q(out, "fi_universe", f"SELECT n_analysts FROM t WHERE ticker = '{B}'") == [(7,)]
     assert q(out, "fi_universe", f"SELECT n_analysts FROM t WHERE ticker = '{F}'") == [(2,)]

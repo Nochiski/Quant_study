@@ -30,7 +30,7 @@ axis_max AS (
            (SELECT max(date) FROM stg_etf_price_daily) AS etf_max
 ),
 lst AS (
-    SELECT ticker, isin, name, list_date, secugrp, stkcert_tp
+    SELECT ticker, isin, name, name_abbrv, list_date, secugrp, stkcert_tp
     FROM stg_listing_daily
     QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY date DESC) = 1
 ),
@@ -63,6 +63,9 @@ resolved AS (
         cm.corp_code                                         AS corp_code,
         l.isin                                               AS isin,
         coalesce(l.name, e.name)                             AS name_current,
+        -- 약명(KRX ISU_ABBRV — '삼화콘덴서공업보통주' 의 '삼화콘덴서'). 엑셀·v3 호환 이름(10-05).
+        -- ETF 는 가격표 이름이 이미 약칭이라 그대로 쓴다.
+        coalesce(l.name_abbrv, e.name)                       AS name_abbrv_current,
         CASE
             WHEN e.ticker IS NOT NULL THEN 'etf'
             WHEN s.ticker IS NOT NULL THEN 'spac'
@@ -94,6 +97,7 @@ SELECT
     corp_code,
     isin,
     name_current,
+    name_abbrv_current,
     sec_type,
     list_date,
     CASE WHEN list_date IS NULL THEN 'unknown' ELSE 'measured' END        AS list_date_basis,

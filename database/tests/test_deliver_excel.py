@@ -17,7 +17,7 @@ import pyarrow.parquet as pq
 import pytest
 from deliver import __main__ as cli
 from deliver.common import cap_candidates, change_pct, quantile, winsorize, yoy
-from deliver.excel_daily import build_daily
+from deliver.excel_daily import build_daily, model_label
 from deliver.excel_weekly import build_weekly, prev_week, week_days
 from deliver.reader import DeliverError, find_run
 from deliver.view import load_day
@@ -394,7 +394,7 @@ def test_daily_scores_sheet_contents(daily) -> None:
     tail = [ws.cell(r, 1).value for r in range(8 + 41, 8 + N)]
     assert tail == sorted(tail) == [tick(i) for i in (40, 41, 42, 43)]
     # 다른 모델 순위 — v3 는 역순 유니버스
-    v3 = col_of(ws, "v3 원본 v3_zscore@1.0")
+    v3 = col_of(ws, "v3 원본")                       # 헤더는 모델 이름만(spec id 는 정의·메타)
     assert ws.cell(r0, v3).value == 40
 
 
@@ -494,9 +494,9 @@ def test_daily_sector_and_model_sheets(daily) -> None:
     m = wb["모델 비교"]
     hm = header(m)
     for sid in SPECS:
-        assert any(sid in k for k in hm), sid
-    assert m.cell(8, col_of(m, "v4 기본 v4_rank@0.1")).value == 1
-    assert m.cell(8, col_of(m, "v4 동일가중 v4_rank@0.2")).value == 3
+        assert model_label(sid) in hm, sid     # 헤더는 모델 이름(spec id 는 정의·메타)
+    assert m.cell(8, col_of(m, "v4 기본")).value == 1
+    assert m.cell(8, col_of(m, "v4 동일가중")).value == 3
 
 
 def test_daily_meta_sheet(daily) -> None:
@@ -553,7 +553,16 @@ def test_daily_qpack_styles(daily) -> None:
     assert ws.cell(8, h["시총(억)"]).number_format == "#,##0"
     sep = ws.column_dimensions[ws.cell(7, h["주가"] + 1).column_letter]
     assert sep.hidden and sep.outlineLevel == 1 and sep.width == 5
-    assert ws.column_dimensions[ws.cell(7, h["종합 점수"]).column_letter].width == 13
+    # Q.Pack 실측(보이는 숫자 열 4.4~6.4) — 고정 13 이 아니라 값·헤더에 맞춘 최소 폭
+    comp_w = ws.column_dimensions[ws.cell(7, h["종합 점수"]).column_letter].width
+    assert 4.4 <= comp_w <= 6.5, comp_w
+    shown = [ws.column_dimensions[ws.cell(7, c).column_letter] for c in range(1, ws.max_column + 1)]
+    # 문자 열 상한 16(제외 사유·비고 — '애널리스트 3명 이하'가 15.5) · 그 밖은 14 이하
+    assert max(d.width for d in shown if not d.hidden) <= 16, [d.width for d in shown]
+    wide = [ws.cell(7, c).value for c in range(1, ws.max_column + 1)
+            if (d := ws.column_dimensions[ws.cell(7, c).column_letter]).width > 14 and not d.hidden]
+    assert set(wide) <= {"제외 사유", "비고"}, wide
+    assert wb["점수 원자료"].row_dimensions[5].height == 11.25        # 정의 행도 한 줄
     rules = [(str(rng.sqref), rule) for rng in ws.conditional_formatting for rule in rng.rules]
     scales = [(ref, r.colorScale) for ref, r in rules if isinstance(r.colorScale, ColorScale)]
     colored = {ref.split(":")[0].rstrip("0123456789") for ref, _ in scales}
@@ -569,7 +578,7 @@ def test_daily_qpack_styles(daily) -> None:
 def test_daily_rank_scale_is_reversed_on_model_sheet(daily) -> None:
     _, wb = daily
     ws = wb["모델 비교"]
-    c = ws.cell(7, col_of(ws, "v4 기본 v4_rank@0.1")).column_letter
+    c = ws.cell(7, col_of(ws, "v4 기본")).column_letter
     cs = next(r.colorScale for rng in ws.conditional_formatting for r in rng.rules
               if str(rng.sqref).startswith(c))
     assert [x.rgb[-6:] for x in cs.color] == ["F8696B", "FFEB84", "63BE7B"]

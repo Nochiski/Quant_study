@@ -250,7 +250,7 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         "버킷 점수가 빈 축(점수 대상 종목만). 사유는 축 칸의 '결측(사유)'")),)))
     if others:
         groups.append(Group("다른 모델 순위", (
-            *(Col(f"r:{s}", f"{model_label(s)}\n{s}", "num", "#,##0", color=False,
+            *(Col(f"r:{s}", model_label(s), "num", "#,##0", color=False,
                   definition=f"{s} 순위(같은 판)") for s in others),
             Col("max_diff", "최대 차이", "num", "#,##0",
                 definition="주 모델 포함 모델 순위의 최댓값 − 최솟값(순위 둘 이상일 때)"),
@@ -615,7 +615,7 @@ def sheet_models(wb: Workbook, view: DayView) -> Dictionary:
     top_n = view.output.top_n
     groups = [
         Group("종목", id_cols()),
-        Group("순위", tuple(Col(f"r:{s}", f"{model_label(s)}\n{s}", "rank", "#,##0",
+        Group("순위", tuple(Col(f"r:{s}", model_label(s), "rank", "#,##0",
                               key_col=s == view.spec_id, definition=f"{s} 순위(1 = 최고)")
                           for s in specs), core=True),
         Group(f"상위 {top_n}", tuple(Col(f"t:{s}", model_label(s), "txt", None, 8.0,

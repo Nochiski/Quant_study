@@ -6,6 +6,8 @@
   6~7행 2단 헤더 — 6행 그룹(파랑, 종합·순위 그룹은 금색 FFC000), 7행 열 이름(회색 7F7F7F),
         핵심 열은 보라 7030A0, 얇은 테두리로 열마다 상자, 7행 높이 33.75·줄바꿈
   8행~  데이터(채움 없음 · 위 정렬 · 맑은 고딕 8 · 기본 높이 11.25)
+  열 너비 — 값·헤더에 맞춘 최소 폭(Q.Pack 실측: 보이는 숫자 열 4.4~6.4, 종목명 13~15). 10-05 전엔
+        숫자 열을 13 으로 고정해 Q.Pack 의 두 배 넘게 넓었다(사용자 지적).
   그룹 사이 빈 구분 열(너비 5 · 숨김 · 아웃라인 1) · 식별 열 끝에서 틀고정 · 7행 자동필터
   색 스케일 3색 백분위 10/50/90: 초록 63BE7B → 노랑 FFEB84 → 빨강 F8696B(높음 = 빨강).
   순위 열은 반전(1위 = 빨강). 레벨 값은 무색.
@@ -15,6 +17,7 @@
 from __future__ import annotations
 
 import math
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -29,9 +32,12 @@ FONT_NAME = "맑은 고딕"
 FONT_SIZE = 8
 ROW_HEIGHT = 11.25
 HEADER_HEIGHT = 33.75
-DEFS_HEIGHT = 56.25
-NUM_WIDTH = 13.0
+DEFS_HEIGHT = ROW_HEIGHT    # 정의 행도 한 줄(Q.Pack 5행 각주와 같은 높이) — 전문은 메타 시트
 SEP_WIDTH = 5.0
+MIN_WIDTH = 4.4             # Q.Pack 실측 보이는 열 최소(Sector 4.43)
+NUM_MAX_WIDTH = 12.0        # 숫자 열 상한 — 넘는 값은 없다(시총 억원 9자리도 9 안팎)
+TXT_MAX_WIDTH = 9.0         # 너비를 지정하지 않은 문자 열 상한(지정하면 그 값이 상한)
+HEADER_LINES = 3            # 7행 33.75 = 11.25 × 3줄
 FIRST_DATA_ROW = 8
 
 C_STRIP = "BDD7EE"      # 1행 — accent1 60% 밝게
@@ -126,6 +132,40 @@ class Title:
     note: str = ""
 
 
+def _text_width(s: str, wide: float, narrow: float) -> float:
+    """맑은 고딕 8 표시 폭(엑셀 열 너비 단위) 근사 — 한글 등 전각은 wide, 그 밖은 narrow."""
+    return sum(wide if unicodedata.east_asian_width(ch) in ("W", "F") else narrow for ch in s)
+
+
+def _shown(v: object, fmt: str | None) -> str:
+    """셀에 보이는 문자열 근사 — 숫자는 서식(#,##0.0 등)대로, 그 밖은 str."""
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        return "" if v is None else str(v)
+    if isinstance(v, float) and not math.isfinite(v):
+        return ""
+    if not fmt or fmt == "General":
+        return str(v)
+    pct = fmt.endswith("%")
+    dec = len(fmt.split(".")[1].rstrip("%")) if "." in fmt else 0
+    x = v * 100 if pct else v
+    s = f"{x:,.{dec}f}" if "," in fmt else f"{x:.{dec}f}"
+    return s + ("%" if pct else "")
+
+
+def fit_width(col: Col, rows: Sequence[Mapping[str, object]]) -> float:
+    """열 너비 = 값·헤더가 들어가는 최소 폭(Q.Pack 처럼 촘촘히). 숫자는 '####' 가 안 나게 넉넉히 재고,
+    헤더는 7행 3줄 안에서 가장 긴 줄이 남는 줄로 접힌다고 본다. 상한 = 지정 너비 또는 종류별 기본."""
+    numeric = col.kind not in ("id", "txt")
+    wide, narrow, pad = (1.6, 0.85, 1.0) if numeric else (1.55, 0.8, 0.7)
+    lines = sorted((_text_width(x, 1.55, 0.8) for x in col.label.split("\n")), reverse=True)
+    spare = max(0, HEADER_LINES - len(lines))
+    need_hdr = max(lines[0] / (1 + spare), lines[1] if len(lines) > 1 else 0.0) + 0.7
+    need_val = max((_text_width(_shown(r.get(col.key), col.fmt), wide, narrow) for r in rows),
+                   default=0.0) + pad
+    cap = col.width or (NUM_MAX_WIDTH if numeric else TXT_MAX_WIDTH)
+    return round(min(cap, max(MIN_WIDTH, need_hdr, need_val)), 2)
+
+
 def _layout(groups: Sequence[Group]) -> list[tuple[int, Group | None, Col | None]]:
     out: list[tuple[int, Group | None, Col | None]] = []
     c = 1
@@ -187,8 +227,7 @@ def write_table(wb: Workbook, title: Title, groups: Sequence[Group],
         if g.name not in seen:
             seen.add(g.name)
             first_in_group.add(c)
-        ws.column_dimensions[letter].width = col.width or (
-            NUM_WIDTH if col.kind not in ("id", "txt") else 9.0)
+        ws.column_dimensions[letter].width = fit_width(col, rows)
         is_id = col.kind == "id" or id(g) in ident
         if style == "sector":
             g_fill, l_fill = C_STYLE, C_STYLE

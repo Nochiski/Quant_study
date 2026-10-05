@@ -5,11 +5,13 @@ DECISIONS Q-1·N-13(모델 데이터는 정규장이 끝나고 최대한 빨리)
 보고서를 쓴다.
 임시 크론(KST, 2026-10-06~10-08 거래일 — `--until` 뒤엔 아무것도 안 한다):
 
-  15:20~16:30 매분  minute  고정 10종목 — ka10060 T 행(현재가·누적거래량·투자자별 순매수) ·
+  15:20~16:30 5분마다 minute 고정 10종목 — ka10060 T 행(현재가·누적거래량·투자자별 순매수) ·
                             ka10086 T 행(종가) · ka10095 10종목 한 콜(현재가·종가·기준가·체결시간)
   15:45·16:00·16:20 sweep   후보 전량(최신 fi_universe eligible) ka10060 T 행 + ka10095 묶음 —
                             소요 시간·실패·유량 초과를 운영 수집기와 같은 속도(4.4콜/초)로 잰다
-  16:40·20:30       bars    고정 10종목 ka10080 1분봉 — 15:30 봉 종가(16:00 을 놓쳤을 때의 대안)
+  16:40·20:30       bars    ka10080 1분봉 — 15:30 봉 종가(16:00 을 놓쳤을 때의 대안).
+                            16:40 은 후보 전량(`--all`). 10-06 새벽 시험에서 밤에도
+                            10종목 중 9종목이 공식 종가와 같았다
   다음 거래일 09:20 grade    KRX 공식 종가(T)·원장 키움 T 행(21:05 수집)과 대조 →
                             `data/evidence/postclose_<T>.md`·`.json`
 
@@ -269,11 +271,12 @@ def cmd_sweep(target: str) -> None:
         con.close()
 
 
-def cmd_bars(target: str) -> None:
+def cmd_bars(target: str, every: bool = False) -> None:
     run = f"bars@{now_kst().strftime('%H%M')}"
     con, client = connect(), _client()
     try:
-        print(json.dumps(collect(con, client, run, "ka10080", TICKERS, target), ensure_ascii=False))
+        tickers = candidates() if every else list(TICKERS)
+        print(json.dumps(collect(con, client, run, "ka10080", tickers, target), ensure_ascii=False))
     finally:
         con.close()
 
@@ -478,6 +481,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="probe_postclose")
     p.add_argument("cmd", choices=("minute", "sweep", "bars", "grade"))
     p.add_argument("--until", default=UNTIL_DEFAULT, help="이 날짜(YYYYMMDD) 뒤엔 아무것도 안 한다")
+    p.add_argument("--all", action="store_true",
+                   help="bars 를 후보 전량에 쏜다(기본은 고정 10종목)")
     p.add_argument("--date", default=None,
                    help="대상 T(YYYYMMDD) — 기본: 오늘, grade 는 직전 거래일")
     a = p.parse_args(argv)
@@ -494,7 +499,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{a.cmd} 건너뜀 — {today} 거래일 아님 또는 until {a.until} 지남")
         return 0
     target = a.date or today.strftime("%Y%m%d")
-    {"minute": cmd_minute, "sweep": cmd_sweep, "bars": cmd_bars}[a.cmd](target)
+    if a.cmd == "bars":
+        cmd_bars(target, a.all)
+    else:
+        {"minute": cmd_minute, "sweep": cmd_sweep}[a.cmd](target)
     return 0
 
 

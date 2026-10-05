@@ -152,3 +152,16 @@ def test_main_skips_outside_window_without_calling_kiwoom(monkeypatch, capsys) -
     monkeypatch.setattr(P, "_client", lambda: (_ for _ in ()).throw(AssertionError("no call")))
     assert P.main(["minute"]) == 0
     assert "건너뜀" in capsys.readouterr().out
+
+
+def test_bars_all_uses_candidates(monkeypatch) -> None:
+    """`bars --all` 은 후보 전량, 기본은 고정 10종목 — 1분봉 15:30 봉 대안을 전 종목으로 잰다."""
+    seen: list[list[str]] = []
+    monkeypatch.setattr(P, "connect", lambda: type("C", (), {"close": lambda self: None})())
+    monkeypatch.setattr(P, "_client", lambda: None)
+    monkeypatch.setattr(P, "candidates", lambda: ["000001", "000002"])
+    monkeypatch.setattr(P, "collect", lambda con, cl, run, api, tickers, target, sfx="":
+                        seen.append(list(tickers)) or {})
+    P.cmd_bars(T, every=True)
+    P.cmd_bars(T)
+    assert seen == [["000001", "000002"], list(P.TICKERS)]

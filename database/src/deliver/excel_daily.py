@@ -30,7 +30,7 @@ from .common import (
     winsorize,
     yoy,
 )
-from .qpack import Col, Group, Title, write_meta, write_table
+from .qpack import Col, Group, Title, new_workbook, write_meta, write_table
 from .reader import (
     DeliverError,
     fi_run_meta,
@@ -777,7 +777,7 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
         except DeliverError:
             prev_rank = {}
 
-    wb = Workbook()
+    wb = new_workbook()
     wb.remove(wb.worksheets[0])
     dictionary: Dictionary = []
     dictionary += sheet_scores(wb, view, fi, prev_rank)

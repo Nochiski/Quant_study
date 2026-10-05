@@ -534,7 +534,7 @@ def build_weekly(week: str, *, model_root: Path, fi_root: Path, out_root: Path,
     last_or_none = last if last.base is not None else None
     fi = load_fi(fi_root, base)
 
-    wb = Workbook()
+    wb = qpack.new_workbook()
     wb.remove(wb.worksheets[0])
     dictionary: Dictionary = []
     dictionary += sheet_candidates(wb, base, now, last_or_none)

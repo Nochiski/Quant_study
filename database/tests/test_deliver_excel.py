@@ -296,6 +296,19 @@ def weekly(world: dict[str, Path]):
     return res, load_workbook(res.path)
 
 
+def test_normal_style_font_is_arial_10_like_qpack(daily, weekly) -> None:
+    """엑셀은 행 번호를 표준 스타일 글꼴로 그린다 — openpyxl 기본 Calibri 11 이면
+    11.25pt 행에서 잘린다. 큐팩 원본처럼 글꼴 0번과 표준 스타일이 Arial 10 이어야
+    한다(10-06 사용자 지적)."""
+    for _, book in (daily, weekly):
+        normal = book._named_styles["Normal"].font
+        assert (normal.name, normal.sz) == ("Arial", 10.0)
+        assert (book._fonts[0].name, book._fonts[0].sz) == ("Arial", 10.0)
+        first = book["점수" if "점수" in book.sheetnames else book.sheetnames[0]]
+        # 데이터 칸은 그대로 맑은 고딕 8
+        assert {c.font.name for c in first[8] if c.value is not None} == {"맑은 고딕"}
+
+
 def header(ws) -> dict[str, int]:
     """7행 열 이름 → 열 번호(줄바꿈은 공백으로)."""
     return {str(c.value).replace("\n", " "): c.column for c in ws[7] if c.value is not None}

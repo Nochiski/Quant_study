@@ -19,12 +19,14 @@ from __future__ import annotations
 import math
 import unicodedata
 from collections.abc import Mapping, Sequence
+from copy import copy
 from dataclasses import dataclass
 from typing import Any
 
 from openpyxl.formatting.rule import ColorScaleRule, Rule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.indexed_list import IndexedList
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -38,6 +40,11 @@ MIN_WIDTH = 4.4             # Q.Pack 실측 보이는 열 최소(Sector 4.43)
 NUM_MAX_WIDTH = 12.0        # 숫자 열 상한 — 넘는 값은 없다(시총 억원 9자리도 9 안팎)
 TXT_MAX_WIDTH = 9.0         # 너비를 지정하지 않은 문자 열 상한(지정하면 그 값이 상한)
 FIRST_DATA_ROW = 8
+# 표준(Normal) 스타일 글꼴 — 큐팩 원본 styles.xml 과 같은 Arial 10
+# (글꼴 0번·'표준' 스타일). 엑셀은 행 번호·열 머리를 이 글꼴로 그린다.
+# openpyxl 기본 Calibri 11 은 줄 높이(약 18px)가 11.25pt 행(15px)보다 커서
+# 행 번호가 잘린다(10-06 사용자 지적).
+NORMAL_FONT = Font(name="Arial", sz=10, family=2)
 
 C_STRIP = "BDD7EE"      # 1행 — accent1 60% 밝게
 C_BAND = "4F81BD"       # 2~4행 제목 띠 · 6행 그룹 헤더 — accent1
@@ -53,6 +60,16 @@ GREEN, YELLOW, RED = "63BE7B", "FFEB84", "F8696B"
 KINDS = ("id", "txt", "num", "pct", "chg", "rank")
 _THIN = Side(style="thin", color="808080")
 _MEDIUM = Side(style="medium", color="1F3864")
+
+
+def new_workbook() -> Workbook:
+    """표준 글꼴을 `NORMAL_FONT` 로 둔 새 통합문서."""
+    wb = Workbook()
+    # openpyxl 에는 기본 글꼴을 바꾸는 공개 API 가 없다. 셀 스타일이 하나도
+    # 없는 지금 글꼴 0번을 갈아 끼우고 표준 스타일을 다시 계산하게 한다.
+    wb._fonts = IndexedList([copy(NORMAL_FONT)])
+    wb._named_styles["Normal"].font = copy(NORMAL_FONT)
+    return wb
 
 
 def font(**kw: object) -> Font:

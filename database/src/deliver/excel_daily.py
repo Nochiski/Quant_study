@@ -58,9 +58,9 @@ FOOTNOTES = (
     "순위 열은 반전(1위 = 초록). "
     "레벨 값은 무색. 형광 노랑 = 신규 진입.",
     "④ 정렬 키: 점수·원자료·지표·실적·모델 비교 = 주 모델 순위 오름차순, 제외 종목은 뒤에 코드순.",
-    "⑤ 흐름: 셀 안 꺾은선(엑셀 스파크라인) = 1W·1M 동안 판마다의 순위 백분위, "
+    "⑤ 흐름: 셀 안 꺾은선(엑셀 스파크라인) = 1M 동안 판마다의 순위 백분위, "
     "위로 갈수록 순위 상승. 선 색 = 그 기간 Δ순위(초록 상승 · 빨강 하락 · 회색 같음·모름). "
-    "1일 Δ순위는 노이즈라 싣지 않는다.",
+    "1일·1W Δ순위는 싣지 않는다.",
 )
 
 
@@ -232,14 +232,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
                 "있는 버킷 점수의 가중평균(0~100, 엔진 값). 제외 종목도 점수는 남는다")),
             Col("prev_rank", "전일\n순위", "num", "#,##0", color=False,
                 definition="직전 성공 판(같은 basis)의 주 모델 순위"),
-            Col("d1w", "Δ순위\n1W", "chg", "#,##0", definition=(
-                "1W 비교 판(D−7일 이하 마지막 판) 순위 − 오늘 순위(양수 = 상승). "
-                "색 = 높음 초록")),
             Col("d1m", "Δ순위\n1M", "chg", "#,##0", definition=(
                 "1M 비교 판(D−1개월 이하 마지막 판) 순위 − 오늘 순위(양수 = 상승). "
                 "색 = 높음 초록")),
-            Col("t1w", "1W\n흐름", "spark", None, 6.0, definition=(
-                "1W 동안 판마다의 순위 백분위 꺾은선(위 = 상승). 선 색 = Δ순위 1W 부호")),
             Col("t1m", "1M\n흐름", "spark", None, 11.0, definition=(
                 "1M 동안 판마다의 순위 백분위 꺾은선(위 = 상승). 선 색 = Δ순위 1M 부호")),
             Col("excl", "제외 사유", "txt", None, 16.0, definition=(
@@ -277,8 +272,7 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         r = rank_of(row)
         pr = prev_rank.get(t)
         out: Row = {**id_values(view, t, fi), "rank": r, "composite": composite_of(row),
-                    "prev_rank": pr, "d1w": trend.delta("1W", t, r),
-                    "d1m": trend.delta("1M", t, r),
+                    "prev_rank": pr, "d1m": trend.delta("1M", t, r),
                     "excl": exclude_label(row.get("exclude_reason")),
                     # v3·v2 점수 행엔 신선도 열이 없다 → 그 판 fi_universe 값(v4 는 같은 값을 행에 싣는다)
                     "cov": coverage_label(row.get("coverage_state", u.get("coverage_state")),

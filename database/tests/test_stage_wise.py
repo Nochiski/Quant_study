@@ -61,7 +61,8 @@ def _fin_blob(rows: list[dict], yymm: list[str] = YYMM8) -> bytes:
     return _z({"YYMM": yymm, "DATA": rows, "FIN": "IFRS연결", "FRQ": "연간"})
 
 
-def _html(cells: list[str] | str, base: str = "2026.09.01") -> bytes:
+def _html(cells: list[str] | str, base: str = "2026.09.01",
+          broker: str = "<tr><td>LS</td><td>26/08/31</td></tr>") -> bytes:
     if isinstance(cells, str):
         body = f'<tr><td width="353" colspan="5" class="center noline-bottom">{cells}</td></tr>'
     else:
@@ -75,8 +76,15 @@ def _html(cells: list[str] | str, base: str = "2026.09.01") -> bytes:
         '<tr><td rowspan="2"><span id="pointerVal">4.05</span></td><th scope="col">투자의견</th>'
         '<th scope="col">목표주가<span class="span-sub">(원)</span></th><th>EPS</th><th>PER</th>'
         f'<th>추정기관수</th></tr>{body}</table>'
-        '<table id="cTB24"><tr><td>LS</td><td>26/08/31</td></tr></table></body></html>')
+        f'<table id="cTB24">{broker}</table></body></html>')
     return zlib.compress(html.encode("utf-8"))
+
+
+# 실물(340450 지씨지놈, 10-01): 요약 표는 EPS·PER 만 있고 투자의견·목표가·추정기관수가 빈칸이며,
+# 제공처별 표(cTB24)는 머리 행 + 단일 셀 문구 한 행이다.
+NO_OPINION_TB24 = ('<thead><tr><th scope="col">제공처</th><th scope="col">최종일자</th></tr></thead>'
+                   '<tbody><tr><td colspan="7" class="center">최근 3개월 이내에 제시된 의견이 '
+                   '없습니다.</td></tr></tbody>')
 
 
 ALERT = b"<script>alert('x');location.replace('../company/c1010001.aspx');</script>"  # 142B 실물
@@ -220,11 +228,28 @@ def test_analyst_summary_parser_handles_three_html_shapes_and_alert_body() -> No
             s["analyst_count"], s["no_opinion_note"]) == (
         "2026.09.01", "4.05", "487,045", "48,339", "5.40", "22", None)
     n = by["000250"]
-    assert n["opinion_score"] is None and n["analyst_count"] is None
+    # WISE 추정기관수 = 최근 3개월 안에 투자의견을 낸 증권사 수 → '의견 없음' 문구는 0 이다
+    assert n["opinion_score"] is None and n["analyst_count"] == "0"
     assert n["no_opinion_note"] == "최근3개월 이내에 제시된 의견이 없습니다"
-    e = by["000020"]
+    e = by["000020"]       # 기관수 빈칸인데 제공처 표에 증권사가 있다 → 모름(빈칸 그대로)
     assert (e["opinion_score"], e["target_price_krw"], e["eps_krw"], e["analyst_count"]) == (
         "", "", "999", "")
+
+
+def test_analyst_summary_reads_zero_from_broker_table_note() -> None:
+    blobs = [_blob("340450", "c1010001", "",
+                   _html(["<b>&nbsp;</b>", "", "266", "34.80", ""], broker=NO_OPINION_TB24)),
+             # 3개월이 아닌 창이면 우리 규칙(3개월 의견 기준)의 0 이 아니다 → 모름
+             _blob("000040", "c1010001", "", _html("최근6개월 이내에 제시된 의견이 없습니다"))]
+    res = parsers.parse_analyst_summary(blobs)
+    g = by_ticker(res)["340450"]
+    assert (g["opinion_score"], g["target_price_krw"], g["eps_krw"], g["per"]) == (
+        "", "", "266", "34.80")
+    assert g["analyst_count"] == "0"
+    assert g["no_opinion_note"] == "최근 3개월 이내에 제시된 의견이 없습니다."
+    s = by_ticker(res)["000040"]
+    assert s["analyst_count"] is None
+    assert s["no_opinion_note"] == "최근6개월 이내에 제시된 의견이 없습니다"
 
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────────────────────
@@ -350,9 +375,11 @@ def test_build_fin_wise_q_derives_period_estimate_and_basis(tmp_path: Path) -> N
 def test_build_analyst_summary_from_html(tmp_path: Path) -> None:
     rows = [_row("005930", "c1010001", "", _html(SAMSUNG_CELLS)),
             _row("000250", "c1010001", "", _html("최근3개월 이내에 제시된 의견이 없습니다")),
+            _row("340450", "c1010001", "",
+                 _html(["<b>&nbsp;</b>", "", "266", "34.80", ""], broker=NO_OPINION_TB24)),
             _row("082640", "c1010001", "", ALERT)]
     r = _build("stg_analyst_summary", _snap(tmp_path, rows), tmp_path)
-    assert r.n_rows == 2
+    assert r.n_rows == 3
     con = _read(tmp_path, r)
     s = con.execute("SELECT base_date, opinion_score, target_price_krw, eps_krw, per,"
                     " analyst_count FROM t WHERE ticker='005930'").fetchone()
@@ -360,7 +387,10 @@ def test_build_analyst_summary_from_html(tmp_path: Path) -> None:
         "2026-09-01", "4.05", 487045, 48339, "5.40", 22)
     n = con.execute("SELECT analyst_count, miss_kind.analyst_count, no_opinion_note FROM t "
                     "WHERE ticker='000250'").fetchone()
-    assert n == (None, "ledger_null", "최근3개월 이내에 제시된 의견이 없습니다")
+    assert n == (0, None, "최근3개월 이내에 제시된 의견이 없습니다")
+    g = con.execute("SELECT analyst_count, miss_kind.analyst_count, no_opinion_note FROM t "
+                    "WHERE ticker='340450'").fetchone()
+    assert g == (0, None, "최근 3개월 이내에 제시된 의견이 없습니다.")
     assert next(g for g in r.gates if g.name == "G8").metrics["n_no_data"] == 1
 
 

@@ -425,6 +425,10 @@ _WS_RE = re.compile(r"\s+")
 
 
 _NA_TOKENS = frozenset({"N/A", "n/a", "NA"})   # WISE 표기 결측 — PER 'N/A' 98 blob 실측
+# WISE 추정기관수 = 최근 3개월 안에 투자의견을 낸 증권사 수(제공처별 표 cTB24 의 행 수와 같다 —
+# 10-05 실측 005930: 21행 = 21). 이 문구는 그 수가 0 이라는 원천의 명시다. 다른 창(N개월)이면
+# 우리 규칙(3개월 의견 기준)의 0 이 아니므로 맞추지 않는다.
+_NO_OPINION_3M_RE = re.compile(r"최근\s*3\s*개월\s*이내에\s*제시된\s*의견이\s*없습니다")
 
 
 def _cell_text(fragment: str) -> str:
@@ -433,12 +437,31 @@ def _cell_text(fragment: str) -> str:
     return "" if t in _NA_TOKENS else t
 
 
+def _broker_no_opinion_note(text: str) -> str | None:
+    """제공처별 표(cTB24) 본문이 '최근 3개월 … 없습니다' 단일 셀 한 행뿐이면 그 문구, 아니면 None."""
+    m = _TB24_RE.search(text)
+    if m is None:
+        return None
+    body = _TBODY_RE.search(m.group(0))
+    rows = [[_cell_text(td) for td in _TD_RE.findall(tr)]
+            for tr in _TR_RE.findall(body.group(1) if body else m.group(0))]
+    rows = [r for r in rows if r]                     # 머리 행(th 뿐)은 빈 목록
+    if len(rows) == 1 and len(rows[0]) == 1 and _NO_OPINION_3M_RE.search(rows[0][0]):
+        return rows[0][0]
+    return None
+
+
 def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
     """c1010001 HTML: `id="cTB15"` 표 마지막 행 → (투자의견·목표주가·EPS·PER·추정기관수) 1행/blob.
 
     실측 모양 3종(1,612 blob): 5셀 숫자 · 5셀 중 빈칸(&nbsp;/'') · 단일 셀 '최근N개월 이내에 제시된
     의견이 없습니다'(346) → 값 NULL + no_opinion_note. `<script>alert(…)` 리다이렉트 본문(1)은
     데이터 없음(n_no_data, 실패 아님). 기준일은 '[기준:YYYY.MM.DD]'.
+
+    추정기관수 0(2026-10-05): '최근 3개월 … 의견이 없습니다' 가 보이면 추정기관수 = 0 이다 — 요약 표
+    단일 셀 문구이거나, 요약 표의 기관수 칸이 비고 제공처별 표(cTB24)가 그 문구 한 행뿐일 때
+    (10-01 scope 유니버스의 빈 값 77건 전부가 이 둘, 70건이 뒤쪽). 그 밖의 빈칸은 모름(NULL)으로 둔다
+    — 0 과 모름을 섞으면 수집 실패가 '의견 없음'으로 둔갑한다.
     """
     n_blobs = n_no_data = n_failed = n_no_opinion = n_dup = n_na = 0
     coords: dict[tuple[str, str], dict[str, str | None]] = {}
@@ -465,11 +488,16 @@ def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
         if len(cells) == 1:
             n_no_opinion += 1
             row["no_opinion_note"] = cells[0]
+            if _NO_OPINION_3M_RE.search(cells[0]):
+                row["analyst_count"] = "0"
         elif len(cells) == 5:
             n_na += sum(1 for td in _TD_RE.findall(trs[-1])
                         if _TAG_RE.sub("", td).strip() in _NA_TOKENS)
             row.update(opinion_score=cells[0], target_price_krw=cells[1], eps_krw=cells[2],
                        per=cells[3], analyst_count=cells[4])
+            note = _broker_no_opinion_note(text) if cells[4] == "" else None
+            if note is not None:
+                row.update(analyst_count="0", no_opinion_note=note)
         else:
             n_failed += 1
             continue

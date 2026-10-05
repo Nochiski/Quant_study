@@ -374,7 +374,9 @@ def test_daily_sheets_and_row_counts(daily) -> None:
     assert res.path.name == "model_scores_20260925_morning.xlsx"
     assert res.path.parent.name == "daily"
     assert wb.sheetnames == [
-        "점수", "점수 원자료", "지표(표시용)", "실적", "업종", "모델 비교", "메타"]
+        "점수", "점수 원자료", "지표(표시용)", "실적", "업종", "모델 비교", "메타", "순위 흐름"]
+    assert wb["순위 흐름"].sheet_state == "hidden"                 # 그래프 원자료(숨김)
+    assert res.sheets == wb.sheetnames[:-1]                         # 보이는 시트만 알린다
     for name in ("점수", "점수 원자료", "지표(표시용)", "실적", "모델 비교"):
         assert wb[name].max_row == 7 + N, name              # 주 모델 모집단 45행
     assert wb["업종"].max_row == 7 + 10                       # 대분류 5 + 중분류 5
@@ -388,13 +390,18 @@ def test_daily_scores_sheet_contents(daily) -> None:
     h = header(ws)
     for label in ("코드", "이름", "시장", "대분류", "중분류", "시총(억)", "거래대금 20일(억)",
                   "주가",
-                  "순위", "종합 점수", "전일 순위", "Δ순위", "제외 사유", "커버리지",
+                  "순위", "종합 점수", "전일 순위", "Δ순위 1W", "Δ순위 1M", "1W 흐름", "1M 흐름",
+                  "제외 사유", "커버리지",
                   "저위험 유니버스", "저위험 업종", "리비전 유니버스", "결측 축", "최대 차이"):
         assert label in h, label
     rows = rows_by_code(ws)
     assert ws.cell(8, 1).value == tick(0) and ws.cell(8, h["순위"]).value == 1
     r0 = rows[tick(0)]
-    assert ws.cell(r0, h["전일 순위"]).value == 2 and ws.cell(r0, h["Δ순위"]).value == 1
+    assert ws.cell(r0, h["전일 순위"]).value == 2 and "Δ순위" not in h        # 1일 Δ 없음(N-16)
+    # 1W 비교 판 = 09-18(지난주 34·39 가 맨 앞 → tick0 3위) → 오늘 1위 = +2. 1M 비교 판은 없다
+    assert ws.cell(r0, h["Δ순위 1W"]).value == 2 and ws.cell(r0, h["Δ순위 1M"]).value is None
+    assert ws.cell(rows[tick(34)], h["Δ순위 1W"]).value == 1 - 35
+    assert ws.cell(r0, h["1W 흐름"]).value is None                  # 그래프 칸은 값이 없다
     assert ws.cell(rows[tick(40)], h["제외 사유"]).value == "관리종목(admin)"
     assert ws.cell(rows[tick(42)], h["제외 사유"]).value == "고점근접+반전 게이트(pull_gate)"
     assert ws.cell(rows[tick(40)], h["순위"]).value is None
@@ -520,10 +527,12 @@ def test_daily_meta_sheet(daily) -> None:
     assert pairs["model 판 id"] == "m_20260925T000000Z"
     assert pairs["factor_inputs 판 id"] == "m_20260925T010000Z"
     assert pairs["전일 비교 판"].startswith(THU)
+    assert pairs["1W 비교 판"] == "2026-09-18" and pairs["1M 비교 판"].startswith("없음")
+    assert pairs["순위 흐름 판"] == "2026-09-17 ~ 2026-09-25 · 6개"   # 09-23 휴장
     assert "MG0 pass" in pairs["판 게이트 v4_rank@0.1"]
     assert "저위험 25.0%" in pairs["가중치"]
     assert "20세션 거래대금 ≥ 10억" in pairs["유니버스 규칙"]
-    assert all(f"각주 {k}" in pairs for k in (1, 2, 3, 4))
+    assert all(f"각주 {k}" in pairs for k in (1, 2, 3, 4, 5))
     sheets_in_dict = {ws.cell(r, 1).value for r in range(8, ws.max_row + 1)}
     assert {"점수", "점수 원자료", "지표(표시용)", "실적", "업종", "모델 비교"} <= sheets_in_dict
 
@@ -585,12 +594,51 @@ def test_daily_qpack_styles(daily) -> None:
     scales = [(ref, r.colorScale) for ref, r in rules if isinstance(r.colorScale, ColorScale)]
     colored = {ref.split(":")[0].rstrip("0123456789") for ref, _ in scales}
     letter = ws.cell(7, h["저위험 유니버스"]).column_letter
-    assert letter in colored and ws.cell(7, h["Δ순위"]).column_letter in colored
+    assert letter in colored and ws.cell(7, h["Δ순위 1W"]).column_letter in colored
+    assert ws.cell(7, h["Δ순위 1M"]).column_letter in colored
+    assert ws.cell(7, h["1W 흐름"]).column_letter not in colored        # 그래프 칸은 색 없음
     assert ws.cell(7, h["순위"]).column_letter not in colored            # 점수 시트 순위 무색
     cs = next(c for ref, c in scales if ref.startswith(letter))
     assert [v.type for v in cs.cfvo] == ["percentile"] * 3
     assert [v.val for v in cs.cfvo] == [10, 50, 90]
     assert [c.rgb[-6:] for c in cs.color] == ["F8696B", "FFEB84", "63BE7B"]   # 높음 = 초록(N-15)
+
+
+def test_daily_rank_trend_sheet_and_sparklines(daily) -> None:
+    """숨김 '순위 흐름' 시트 = 판마다의 순위 백분위(행은 점수 시트와 같은 순서), 점수 시트에는
+    1W·1M 흐름 칸마다 엑셀 스파크라인이 붙는다. 선 색 = 그 창의 Δ순위 부호(N-16)."""
+    res, wb = daily
+    tr, sc = wb["순위 흐름"], wb["점수"]
+    assert [tr.cell(7, c).value for c in range(1, tr.max_column + 1)] == [
+        "코드", "09-17", "09-18", "09-21", "09-22", "09-24", "09-25"]
+    assert [tr.cell(r, 1).value for r in range(8, tr.max_row + 1)] == [
+        sc.cell(r, 1).value for r in range(8, sc.max_row + 1)]
+    r0 = rows_by_code(tr)[tick(0)]
+    assert tr.cell(r0, 2).value == pytest.approx(100 * (41 - 3) / 40)      # 09-17 3위 / 41
+    assert tr.cell(r0, 7).value == 100.0                                    # 09-25 1위
+    assert tr.cell(rows_by_code(tr)[tick(40)], 7).value is None             # 제외 종목
+    with zipfile.ZipFile(res.path) as z:
+        xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    h = header(sc)
+    c1w, c1m = (sc.cell(7, h[k]).column_letter for k in ("1W 흐름", "1M 흐름"))
+    assert xml.count("<x14:sparkline>") == 2 * N
+    assert f"<xm:f>'순위 흐름'!C{r0}:G{r0}</xm:f><xm:sqref>{c1w}{r0}</xm:sqref>" in xml
+    assert f"<xm:f>'순위 흐름'!B{r0}:G{r0}</xm:f><xm:sqref>{c1m}{r0}</xm:sqref>" in xml
+    groups = xml.split("<x14:sparklineGroup ")[1:]
+    def color_of(cell: str) -> str:
+        g = next(g for g in groups if f"<xm:sqref>{cell}</xm:sqref>" in g)
+        return g.split('colorSeries rgb="FF')[1][:6]
+    assert color_of(f"{c1w}{r0}") == "1E8C45"                                     # +2 상승
+    assert color_of(f"{c1w}{rows_by_code(sc)[tick(34)]}") == "D0312D"            # 하락
+    assert color_of(f"{c1m}{r0}") == "8C8C8C"                                     # 1M 모름
+
+
+def test_month_back_and_windows() -> None:
+    from deliver.trend import month_back, window_start
+    assert month_back(date(2026, 3, 31)) == date(2026, 2, 28)
+    assert month_back(date(2026, 1, 15)) == date(2025, 12, 15)
+    assert window_start(date(2026, 10, 2), "1W") == date(2026, 9, 25)
+    assert window_start(date(2026, 10, 2), "1M") == date(2026, 9, 2)
 
 
 def test_daily_rank_scale_is_reversed_on_model_sheet(daily) -> None:

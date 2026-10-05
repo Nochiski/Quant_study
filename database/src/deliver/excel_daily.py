@@ -30,7 +30,7 @@ from .common import (
     winsorize,
     yoy,
 )
-from .qpack import Col, Group, Title, new_workbook, write_meta, write_table
+from .qpack import Col, Group, Title, add_sparklines, new_workbook, write_meta, write_table
 from .reader import (
     DeliverError,
     fi_run_meta,
@@ -41,6 +41,8 @@ from .reader import (
     read_scores,
     ymd,
 )
+from .trend import WINDOWS, Trend, load_trend, spark_groups
+from .trend import write_sheet as write_trend_sheet
 from .view import DayView, composite_of, load_day, rank_of, ticker_of
 
 Row = dict[str, object]
@@ -56,6 +58,9 @@ FOOTNOTES = (
     "순위 열은 반전(1위 = 초록). "
     "레벨 값은 무색. 형광 노랑 = 신규 진입.",
     "④ 정렬 키: 점수·원자료·지표·실적·모델 비교 = 주 모델 순위 오름차순, 제외 종목은 뒤에 코드순.",
+    "⑤ 흐름: 셀 안 꺾은선(엑셀 스파크라인) = 1W·1M 동안 판마다의 순위 백분위, "
+    "위로 갈수록 순위 상승. 선 색 = 그 기간 Δ순위(초록 상승 · 빨강 하락 · 회색 같음·모름). "
+    "1일 Δ순위는 노이즈라 싣지 않는다.",
 )
 
 
@@ -216,7 +221,7 @@ def bucket_missing_reason(view: DayView, t: str, b: str) -> str:
 
 # ── 시트: 점수 ───────────────────────────────────────────────────────────────
 def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
-                 prev_rank: Mapping[str, int | None]) -> Dictionary:
+                 prev_rank: Mapping[str, int | None], trend: Trend) -> Dictionary:
     others = sorted(view.other_ranks)
     groups = [
         Group("종목", id_cols(full=True)),
@@ -227,8 +232,16 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
                 "있는 버킷 점수의 가중평균(0~100, 엔진 값). 제외 종목도 점수는 남는다")),
             Col("prev_rank", "전일\n순위", "num", "#,##0", color=False,
                 definition="직전 성공 판(같은 basis)의 주 모델 순위"),
-            Col("d_rank", "Δ순위", "chg", "#,##0", definition=(
-                "전일 순위 − 오늘 순위(양수 = 상승). 색 = 높음 초록")),
+            Col("d1w", "Δ순위\n1W", "chg", "#,##0", definition=(
+                "1W 비교 판(D−7일 이하 마지막 판) 순위 − 오늘 순위(양수 = 상승). "
+                "색 = 높음 초록")),
+            Col("d1m", "Δ순위\n1M", "chg", "#,##0", definition=(
+                "1M 비교 판(D−1개월 이하 마지막 판) 순위 − 오늘 순위(양수 = 상승). "
+                "색 = 높음 초록")),
+            Col("t1w", "1W\n흐름", "spark", None, 6.0, definition=(
+                "1W 동안 판마다의 순위 백분위 꺾은선(위 = 상승). 선 색 = Δ순위 1W 부호")),
+            Col("t1m", "1M\n흐름", "spark", None, 11.0, definition=(
+                "1M 동안 판마다의 순위 백분위 꺾은선(위 = 상승). 선 색 = Δ순위 1M 부호")),
             Col("excl", "제외 사유", "txt", None, 16.0, definition=(
                 "엔진 exclude_reason — D-13 적격성(관리·정지·감사·지연·거래대금) · 데이터 부족 · "
                 "버킷 게이트(고점근접+반전 하위 30%)")),
@@ -264,7 +277,8 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         r = rank_of(row)
         pr = prev_rank.get(t)
         out: Row = {**id_values(view, t, fi), "rank": r, "composite": composite_of(row),
-                    "prev_rank": pr, "d_rank": None if r is None or pr is None else pr - r,
+                    "prev_rank": pr, "d1w": trend.delta("1W", t, r),
+                    "d1m": trend.delta("1M", t, r),
                     "excl": exclude_label(row.get("exclude_reason")),
                     # v3·v2 점수 행엔 신선도 열이 없다 → 그 판 fi_universe 값(v4 는 같은 값을 행에 싣는다)
                     "cov": coverage_label(row.get("coverage_state", u.get("coverage_state")),
@@ -778,10 +792,12 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
         except DeliverError:
             prev_rank = {}
 
+    trend = load_trend(model_root, run, view.spec_id, basis)
+
     wb = new_workbook()
     wb.remove(wb.worksheets[0])
     dictionary: Dictionary = []
-    dictionary += sheet_scores(wb, view, fi, prev_rank)
+    dictionary += sheet_scores(wb, view, fi, prev_rank, trend)
     dictionary += sheet_raw(wb, view, fi)
     dictionary += sheet_display(wb, view, fi)
     dictionary += sheet_earnings(wb, view, fi)
@@ -789,12 +805,26 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     dictionary += sheet_models(wb, view)
     pairs = meta_pairs(view, fi_run_meta(fi_root, run.date, basis, run.fi_build_id), fi)
     pairs.insert(6, ("전일 비교 판", "없음" if prev is None else f"{prev.date} {prev.build_id}"))
+    pairs[7:7] = [(f"{w} 비교 판", trend.base[w] or "없음(그 전 판이 없다)") for w in WINDOWS]
+    pairs.insert(9, ("순위 흐름 판", f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"
+                                  if trend.dates else "없음"))
     write_meta(wb, title_for(view, "메타"), pairs, dictionary)
+    tickers = [ticker_of(r) for r in view.rows]
+    write_trend_sheet(wb, tickers, trend)
     path = daily_path(out_root, run.date, basis)
     save_atomic(wb, path)
+    score_ws = wb["점수"]
+    heads = {str(score_ws.cell(7, c).value): score_ws.cell(7, c).column_letter
+             for c in range(1, score_ws.max_column + 1)}
+    cols = {w: heads[f"{w}\n흐름"] for w in WINDOWS if f"{w}\n흐름" in heads}
+    deltas = {w: {ticker_of(r): trend.delta(w, ticker_of(r), rank_of(r)) for r in view.rows}
+              for w in WINDOWS}
+    add_sparklines(path, "점수", spark_groups(tickers, trend, date.fromisoformat(run.date),
+                                              cols, deltas))
     top = [(rank_of(r) or 0, ticker_of(r), view.name(ticker_of(r))) for r in view.ranked[:5]]
     return DailyResult(path, run.date, basis, view.spec_id, top, len(view.rows),
-                       len(view.ranked), wb.sheetnames)
+                       len(view.ranked),
+                       [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"])
 
 
 __all__ = ["DailyResult", "FiData", "build_daily", "daily_path", "id_cols", "id_values",

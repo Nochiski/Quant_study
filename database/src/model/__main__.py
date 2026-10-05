@@ -3,7 +3,7 @@
     python -m model build --date 20260928 --basis morning \\
         [--fi-build latest|<factor_inputs build_id>] [--specs all|<spec_id,…>] \\
         [--primary v4_rank@0.1] [--root data/model] [--fi-root data/factor_inputs] \\
-        [--min-prices-on-d 2000] [--min-ranked 100] [--keep 3]
+        [--min-prices-on-d 2000] [--min-ranked 100] [--keep 60]
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같은 규약.
@@ -15,10 +15,8 @@ import os
 import sys
 from pathlib import Path
 
-from stage.manifest import KEEP_DEFAULT
-
 from model import gates
-from model.build import BASES, PRIMARY_DEFAULT, ModelBuildError, build
+from model.build import BASES, KEEP_DEFAULT, PRIMARY_DEFAULT, ModelBuildError, build
 
 
 def _parser() -> argparse.ArgumentParser:

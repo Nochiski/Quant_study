@@ -117,6 +117,19 @@ def previous_run(model_root: Path, d: str | date, basis: str) -> ModelRun | None
     return None
 
 
+def runs_between(model_root: Path, start: str | date, end: str | date,
+                 basis: str) -> list[ModelRun]:
+    """start ≤ 날짜 ≤ end 의 성공 판(같은 basis), 날짜 오름차순. 순위 흐름용."""
+    runs_dir = Path(model_root) / "_runs"
+    if not runs_dir.is_dir():
+        return []
+    lo, hi = ymd(start), ymd(end)
+    days = sorted(p.name[:8] for p in runs_dir.glob(f"*_{basis}.json")
+                  if p.name[:8].isdigit() and lo <= p.name[:8] <= hi)
+    return [run for run in (find_run(model_root, day, basis) for day in days)
+            if run is not None]
+
+
 def _query(sql: str) -> list[dict[str, object]]:
     con = duckdb.connect()
     try:

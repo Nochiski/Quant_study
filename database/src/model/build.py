@@ -49,6 +49,10 @@ LAYER = "model"
 BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
                                      # (2026-10-05 v4_rank@0.1 → scope@1.0, 사용자 결정 10-01)
+# spec 별 MANIFEST 에 남길 판 수. 엑셀의 Δ순위 1W·1M·순위 흐름이 한 달 전 판까지 열어야
+# 한다 — 3 이면 같은 날 재빌드 세 번에 전날 판이 지워졌다(10-05 Δ순위 빈칸).
+# 60 ≈ 거래일 석 달(판 하나 약 140KB).
+KEEP_DEFAULT = 60
 SCORES_FILE = "scores.parquet"
 INDICATORS_FILE = "indicators.parquet"
 
@@ -224,7 +228,7 @@ def _previous(root: Path, spec: ModelSpec) -> gates.Previous | None:
 def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str = "latest",
           specs: str | Sequence[str] = "all", primary: str = PRIMARY_DEFAULT,
           min_prices_on_d: int = gates.MIN_PRICES_ON_D, min_ranked: int = gates.MIN_RANKED,
-          keep: int = manifest.KEEP_DEFAULT, build_id: str | None = None) -> BuildResult:
+          keep: int = KEEP_DEFAULT, build_id: str | None = None) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 모델 판. 게이트 FAIL 은 결과 status 로, 입력·인자 오류는
     `ModelBuildError` 로 낸다."""
     t0 = time.time()

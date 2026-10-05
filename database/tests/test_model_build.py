@@ -419,6 +419,12 @@ def test_mg5_records_against_previous_build_and_warns(board_tree, tmp_path, monk
     assert latest["specs"][V2]["gates"]["MG5"]["status"] == "warn"
 
 
+def test_keep_default_holds_three_months_of_runs() -> None:
+    """엑셀 Δ순위 1W·1M·순위 흐름이 한 달 전 판까지 연다 — 3 이면 같은 날 재빌드에
+    전날 판이 지워졌다."""
+    assert mbuild.KEEP_DEFAULT == 60
+
+
 def test_keep_prunes_old_versions(board_tree, tmp_path) -> None:
     root = tmp_path / "model"
     a = build(D_S, "morning", root, board_tree, specs=[V2], primary=V2, keep=1, **SMALL)

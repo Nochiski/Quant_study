@@ -18,11 +18,16 @@
 from __future__ import annotations
 
 import math
+import os
 import unicodedata
+import zipfile
 from collections.abc import Mapping, Sequence
 from copy import copy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
+from xml.sax.saxutils import escape
 
 from openpyxl.formatting.rule import ColorScaleRule, Rule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -58,7 +63,9 @@ C_NEW = "FFFF00"        # 형광 — '신규 진입' 한 종류만(D)
 C_WHITE = "FFFFFF"
 GREEN, YELLOW, RED = "63BE7B", "FFEB84", "F8696B"
 
-KINDS = ("id", "txt", "num", "pct", "chg", "rank")
+# spark = 셀 안 꺾은선(엑셀 스파크라인) 자리 — 값 없이 지정 너비 그대로.
+# 그림은 저장 뒤 add_sparklines 가 넣는다.
+KINDS = ("id", "txt", "num", "pct", "chg", "rank", "spark")
 _THIN = Side(style="thin", color="808080")
 _MEDIUM = Side(style="medium", color="1F3864")
 
@@ -173,6 +180,8 @@ def fit_width(col: Col, rows: Sequence[Mapping[str, object]]) -> float:
     """열 너비 = 값·헤더가 들어가는 최소 폭(Q.Pack 처럼 촘촘히). 숫자는 '####' 가 안 나게 넉넉히 재고,
     헤더는 낱말(공백·줄바꿈으로 나뉨)이 한 줄에 온전히 들어가게 잰다 — 7행 3줄 안에서 낱말 사이로만
     접혀 '유니버/스' 처럼 가운데서 끊기지 않는다(10-05 렌더 확인). 상한 = 지정 너비 또는 종류별 기본."""
+    if col.kind == "spark":
+        return col.width or MIN_WIDTH
     numeric = col.kind not in ("id", "txt")
     wide, narrow, pad = (1.6, 0.85, 1.0) if numeric else (1.55, 0.8, 0.7)
     need_hdr = max((_text_width(w, 1.55, 0.8) for w in col.label.split()), default=0.0) + 0.7
@@ -360,8 +369,80 @@ def write_meta(wb: Workbook, title: Title, pairs: Sequence[tuple[str, object]],
     tighten_rows(ws)
 
 
+# ── 셀 안 꺾은선(엑셀 스파크라인) ───────────────────────────────────────────
+# openpyxl 은 스파크라인을 읽지도 쓰지도 못한다. 저장한 xlsx 의 시트 XML 끝 extLst 에 x14
+# sparklineGroups 를 넣는다(엑셀 2010+ 확장. LibreOffice 도 읽는다 — 10-06 왕복 확인).
+_NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_NS_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+_SPARK_URI = "{05C60535-1F16-4fd2-B633-F4F36F0B64E0}"
+
+
+@dataclass(frozen=True)
+class SparkGroup:
+    """같은 선 색의 스파크라인 묶음. cells = (원자료 범위, 그릴 셀) — 예 ("'시트'!B8:W8", "M8")."""
+
+    color: str
+    cells: tuple[tuple[str, str], ...]
+
+
+def sparkline_xml(groups: Sequence[SparkGroup]) -> str:
+    body = []
+    for g in groups:
+        c = f'rgb="FF{g.color}"'
+        colors = "".join(f"<x14:{k} {c}/>" for k in (
+            "colorSeries", "colorNegative", "colorAxis", "colorMarkers", "colorFirst",
+            "colorLast", "colorHigh", "colorLow"))
+        lines = "".join(f"<x14:sparkline><xm:f>{escape(ref)}</xm:f><xm:sqref>{escape(cell)}"
+                        "</xm:sqref></x14:sparkline>" for ref, cell in g.cells)
+        body.append('<x14:sparklineGroup displayEmptyCellsAs="gap" lineWeight="1">'
+                    f"{colors}<x14:sparklines>{lines}</x14:sparklines></x14:sparklineGroup>")
+    return (f'<ext uri="{_SPARK_URI}" '
+            'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'
+            '<x14:sparklineGroups xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">'
+            + "".join(body) + "</x14:sparklineGroups></ext>")
+
+
+def _sheet_part(z: zipfile.ZipFile, title: str) -> str:
+    wb = ElementTree.fromstring(z.read("xl/workbook.xml"))
+    rid = next((s.get(f"{{{_NS_REL}}}id") for s in wb.iter(f"{{{_NS_MAIN}}}sheet")
+                if s.get("name") == title), None)
+    rels = ElementTree.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+    target = next((r.get("Target") for r in rels.iter(f"{{{_NS_PKG}}}Relationship")
+                   if rid is not None and r.get("Id") == rid), None)
+    if target is None:
+        raise ValueError(f"시트 {title!r} 를 xlsx 에서 찾지 못했다")
+    return target.lstrip("/") if target.startswith("/") else f"xl/{target}"
+
+
+def add_sparklines(path: Path, sheet: str, groups: Sequence[SparkGroup]) -> int:
+    """저장된 xlsx 의 `sheet` 에 스파크라인을 넣고 그린 셀 수를 돌려준다(파일은 원자적 교체)."""
+    groups = [g for g in groups if g.cells]
+    if not groups:
+        return 0
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.spark.tmp")
+    with zipfile.ZipFile(path) as zin:
+        part = _sheet_part(zin, sheet)
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == part:
+                    xml = data.decode("utf-8")
+                    ext = sparkline_xml(groups)
+                    if "</extLst>" in xml:
+                        xml = xml.replace("</extLst>", ext + "</extLst>", 1)
+                    else:
+                        xml = xml.replace("</worksheet>", f"<extLst>{ext}</extLst></worksheet>", 1)
+                    data = xml.encode("utf-8")
+                zout.writestr(item, data)
+    os.replace(tmp, path)
+    return sum(len(g.cells) for g in groups)
+
+
 __all__ = [
     "C_BAND", "C_GOLD", "C_HDR", "C_KEY", "C_NEW", "C_STRIP", "C_STYLE", "FIRST_DATA_ROW",
     "FONT_NAME", "GREEN", "RED", "YELLOW", "Col", "Group", "Title", "clean", "fill", "font",
-    "put", "scale_high_good", "scale_rank", "title_block", "write_meta", "write_table",
+    "SparkGroup", "add_sparklines", "new_workbook", "put", "scale_high_good", "scale_rank",
+    "sparkline_xml", "title_block", "write_meta", "write_table",
 ]

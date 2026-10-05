@@ -20,7 +20,7 @@
 python -m model build --date 20260928 --basis morning \
     [--fi-build latest|<factor_inputs build_id>] [--specs all|<spec_id,…>] \
     [--primary scope@1.0] [--root data/model] [--fi-root data/factor_inputs] \
-    [--min-prices-on-d 2000] [--min-ranked 100] [--keep 3]
+    [--min-prices-on-d 2000] [--min-ranked 100] [--keep 60]
 ```
 
 | rc | 뜻 |
@@ -54,7 +54,7 @@ cd /home/kael/quant-ledger && QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/k
 
 ```
 data/model/
-  <spec_id>/MANIFEST.json                     # stage.manifest — current_build · keep=3 · builds[]
+  <spec_id>/MANIFEST.json                     # stage.manifest — current_build · keep=60 · builds[]
   <spec_id>/v=<build_id>/scores.parquet       # 점수 표(열 = score_columns(spec))
   <spec_id>/v=<build_id>/indicators.parquet   # 지표 긴 표(열 = INDICATOR_COLUMNS, v3·v2 는 0행)
   _runs/<YYYYMMDD>_<basis>.json               # 판 manifest — 성공·실패 모두. 같은 날 재실행은 덮는다
@@ -66,7 +66,8 @@ data/model/
 - `<spec_id>` 는 `model_id@version` 그대로다(예: `v4_rank@0.1`).
 - 판 id 하나(`m_<UTC>` — `stage.model.make_build_id(basis)`)를 선택한 spec 이 공유한다. spec 마다
   MANIFEST 포인터를 따로 바꾸므로 전환 순간에는 섞여 보일 수 있다 — **소비자는 `latest_<basis>.json` 의
-  `build_id` 로 `<spec_id>/v=<build_id>/` 를 연다**(keep=3 이라 다음 두 빌드 동안 남는다).
+  `build_id` 로 `<spec_id>/v=<build_id>/` 를 연다**(keep=60 — 거래일 석 달. 10-06 전엔 3 이라 같은 날
+  재빌드 세 번에 전날 판이 지워졌다).
 - 쓰기는 원자적이다: 게이트를 전부 통과한 뒤에만 `_tmp/<build_id>/<spec_id>/` 에 쓰고
   `<spec_id>/v=<build_id>/` 로 옮긴 다음 `stage.manifest.commit` → `_runs` → `latest` 순. FAIL 이면
   parquet 을 쓰지 않는다. **판 전체가 실패하는 것은 주 모델(`primary_spec`)이 FAIL 일 때뿐이다.** 비교
@@ -179,8 +180,8 @@ data/model/
 4. 경고는 `specs.<spec>.gates.MG5.status == "warn"`(순위가 전판과 크게 달라짐)이다. latest 에는 FAIL
    판이 오지 않는다 — 그날 FAIL 이면 latest 의 `date` 가 D 보다 앞선다(인계가 날짜를 확인할 것).
    `excluded_specs` 에 있는 비교 모델은 그날 판에 없다 — 엑셀은 그 모델 열을 빼고 메타에 사유를 적는다.
-5. 전일 순위는 전 거래일의 `_runs/<YYYYMMDD>_morning.json` 의 `build_id` 로 같은 경로를 연다(keep=3 이라
-   같은 날 재실행이 여러 번이면 GC 됐을 수 있다 — 없으면 비운다).
+5. 전일 순위·Δ순위 1W·1M·순위 흐름은 그날들의 `_runs/<YYYYMMDD>_morning.json` 의 `build_id` 로 같은
+   경로를 연다(keep=60. 판 파일이 없으면 그날은 비우거나 흐름에서 뺀다 — `deliver/trend.py`).
 
 ## 8. 테스트
 

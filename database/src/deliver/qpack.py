@@ -376,6 +376,8 @@ _NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _NS_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
 _SPARK_URI = "{05C60535-1F16-4fd2-B633-F4F36F0B64E0}"
+# 선 두께(pt) — 엑셀이 고를 수 있는 가장 얇은 값. 1pt 는 11.25pt 행에서 굵어 보였다(10-06 지적).
+SPARK_LINE_WEIGHT = 0.25
 
 
 @dataclass(frozen=True)
@@ -395,7 +397,8 @@ def sparkline_xml(groups: Sequence[SparkGroup]) -> str:
             "colorLast", "colorHigh", "colorLow"))
         lines = "".join(f"<x14:sparkline><xm:f>{escape(ref)}</xm:f><xm:sqref>{escape(cell)}"
                         "</xm:sqref></x14:sparkline>" for ref, cell in g.cells)
-        body.append('<x14:sparklineGroup displayEmptyCellsAs="gap" lineWeight="1">'
+        body.append('<x14:sparklineGroup displayEmptyCellsAs="gap" '
+                    f'lineWeight="{SPARK_LINE_WEIGHT}">'
                     f"{colors}<x14:sparklines>{lines}</x14:sparklines></x14:sparklineGroup>")
     return (f'<ext uri="{_SPARK_URI}" '
             'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'

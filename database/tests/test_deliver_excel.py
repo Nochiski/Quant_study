@@ -622,6 +622,7 @@ def test_daily_rank_trend_sheet_and_sparklines(daily) -> None:
     h = header(sc)
     c1w, c1m = (sc.cell(7, h[k]).column_letter for k in ("1W 흐름", "1M 흐름"))
     assert xml.count("<x14:sparkline>") == 2 * N
+    assert 'lineWeight="0.25"' in xml and 'lineWeight="1"' not in xml    # 가장 얇은 선
     assert f"<xm:f>'순위 흐름'!C{r0}:G{r0}</xm:f><xm:sqref>{c1w}{r0}</xm:sqref>" in xml
     assert f"<xm:f>'순위 흐름'!B{r0}:G{r0}</xm:f><xm:sqref>{c1m}{r0}</xm:sqref>" in xml
     groups = xml.split("<x14:sparklineGroup ")[1:]

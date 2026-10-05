@@ -19,6 +19,9 @@
   100090 I      etf               — 층에 싣지 않는다
   100099 J      common, delisted  — 층에 싣지 않는다
   100120~160    common KOSPI      전 수집일(보통 종목 5 — eligible 을 10 으로 채운다)
+
+기대 상태는 유예 G=5 기준이다 — `built` 픽스처가 유예 경로를 시험하려고 `grace_days=5` 를 명시한다.
+기본값은 0(N-14)이라 기본 빌드에서는 B·C 도 lapsed 다(`test_default_grace_is_zero…`).
 """
 from __future__ import annotations
 
@@ -31,7 +34,7 @@ import pytest
 from conftest import _make_stage_tree
 from factor_inputs import FactorInputsError, build
 from factor_inputs.__main__ import main as cli_main
-from model.contracts import FI_TABLES
+from model.contracts import FI_TABLES, UniverseRule
 from stage import manifest
 
 D = dt.date(2026, 9, 28)
@@ -478,7 +481,8 @@ def roots(tmp_path_factory) -> tuple[Path, Path]:
 @pytest.fixture(scope="module")
 def built(roots, tmp_path_factory):
     out = tmp_path_factory.mktemp("fi_out") / "factor_inputs"
-    res = build(D_S, "morning", out, roots[1], roots[0], min_eligible=5, golden_path=None)
+    res = build(D_S, "morning", out, roots[1], roots[0], grace_days=5, min_eligible=5,
+                golden_path=None)
     return out, res
 
 
@@ -570,6 +574,21 @@ def test_grace_days_parameter_moves_the_boundary(roots, tmp_path: Path) -> None:
     got = dict(q(out, "fi_universe", "SELECT ticker, coverage_state FROM t"))
     assert got[C] == "lapsed" and got[B] == "grace"
     assert res.coverage["n_lapsed_dropped"] == 2
+
+
+def test_default_grace_is_zero_so_absent_estimates_lapse(roots, tmp_path: Path) -> None:
+    """기본 유예 0(N-14) — 최신 수집일(D*)에 추정치가 없으면 나이와 상관없이 lapsed 로 빠진다."""
+    assert UniverseRule().coverage_grace_days == 0
+    out = tmp_path / "fi"
+    res = build(D_S, "morning", out, roots[1], roots[0], min_eligible=1, golden_path=None)
+    assert res.ok
+    got = {r[0]: r[1:] for r in q(out, "fi_universe",
+           "SELECT ticker, coverage_state, coverage_age_days, eligible, exclude_reason FROM t")}
+    assert got[B] == ("lapsed", 1, False, "estimates_lapsed")
+    assert got[C] == ("lapsed", 5, False, "estimates_lapsed")
+    assert got[A][0] == "fresh" and got[E][0] == "fresh"
+    assert res.coverage["n_lapsed_dropped"] == 3
+    assert "grace" not in res.coverage["counts"]
 
 
 def test_universe_attributes_market_cap_and_sector(built) -> None:
@@ -736,7 +755,7 @@ def test_fin_summary_quarters_switch_to_wise_with_basis_holding_and_revenue_kind
                             "당기순이익": [90, 95, 100, 105, 110, 115.0]}))
     eq, st = make_roots(tmp_path / "src", wise_q=wq, holding=frozenset({B}))
     out = tmp_path / "factor_inputs"
-    build(D_S, "morning", out, st, eq, min_eligible=5, golden_path=None)
+    build(D_S, "morning", out, st, eq, grace_days=5, min_eligible=5, golden_path=None)
     sql = ("SELECT period, revenue, op, ni, fs_basis, revenue_basis FROM t WHERE ticker = '{}' "
            "AND period_type = 'quarter' ORDER BY period DESC")
     a = q(out, "fi_fin_summary", sql.format(A))
@@ -849,14 +868,31 @@ def test_gate_failure_commits_nothing(roots, tmp_path: Path) -> None:
     assert not (out / "_tmp" / bad.build_id).exists()
 
 
-def test_collection_stop_beyond_grace_fails_fresh_gate(tmp_path: Path) -> None:
+def test_collection_stop_beyond_lag_max_fails_fresh_gate(tmp_path: Path) -> None:
     """WISE 수집이 09-16 에 멈췄다 — D* 가 D 보다 6 거래일 뒤처지면 전 종목이 '신선' 으로 보이는
     조용한 낡음이 된다. FG-fresh 가 막는다."""
     eq, st = make_roots(tmp_path, drop_fetch_after=dt.date(2026, 9, 16))
     res = build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=1, golden_path=None)
     fresh = next(g for g in res.gates if g.name == "FG-fresh")
-    assert fresh.status.value == "fail" and fresh.metrics["collection_lag_over_grace"] == 1
+    assert fresh.status.value == "fail" and fresh.metrics["collection_lag_over_max"] == 1
     assert fresh.metrics["collection_lag_sessions"] == 6
+
+
+@pytest.mark.parametrize(("stop", "lag", "passed"), [
+    (dt.date(2026, 9, 23), 1, True),     # 09-24·25 휴장 → 09-28 하루 밀림
+    (dt.date(2026, 9, 22), 2, False),    # 09-23·09-28 두 거래일 밀림
+])
+def test_collection_lag_tolerates_exactly_one_session(tmp_path: Path, stop: dt.date, lag: int,
+                                                     passed: bool) -> None:
+    """WISE 수집 중단 허용치 = 1거래일(N-12) — 유예 값과 따로 판정한다."""
+    eq, st = make_roots(tmp_path, drop_fetch_after=stop)
+    res = build(D_S, "morning", tmp_path / "fi", st, eq, grace_days=5, min_eligible=1,
+                golden_path=None)
+    fresh = next(g for g in res.gates if g.name == "FG-fresh")
+    assert fresh.metrics["collection_lag_sessions"] == lag
+    assert fresh.metrics["collection_lag_max"] == 1
+    assert fresh.metrics["collection_lag_over_max"] == int(not passed)
+    assert (fresh.status.value == "pass") is passed, fresh.detail
 
 
 def test_cli_return_codes(roots, tmp_path: Path, capsys) -> None:

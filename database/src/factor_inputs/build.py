@@ -37,7 +37,9 @@ from stage.model import basis_of_build_id, build_id_time, make_build_id
 
 from . import gates, queries
 
-RULES_VERSION = "fi1.0.0"
+# 1.1.0(2026-10-05): WISE 분기 원천(T-Q4) · 종목명 KRX 약명(N-8) · 추정치 유예 기본 0(N-14) ·
+# WISE 수집 지연 허용 1거래일(N-12, 유예와 분리)
+RULES_VERSION = "fi1.1.0"
 LAYER = "factor_inputs"
 BASES_IMPLEMENTED = ("morning",)
 BASES_KNOWN = ("evening", "morning")

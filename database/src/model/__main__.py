@@ -57,10 +57,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"model 실패(예상 밖): {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     print(result.summary())
+    for sid, rs in result.gates.items():
+        for g in gates.failed(rs):
+            print(f"  {sid} {g.name} FAIL: {g.detail}", file=sys.stderr)
+    if result.excluded:
+        print(f"  비교 모델 제외(주 모델 판은 올림): {', '.join(result.excluded)}", file=sys.stderr)
     if not result.ok:
-        for sid, rs in result.gates.items():
-            for g in gates.failed(rs):
-                print(f"  {sid} {g.name} FAIL: {g.detail}", file=sys.stderr)
         print(f"  보고서 {result.failed_report}", file=sys.stderr)
         return 1
     return 0

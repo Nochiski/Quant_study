@@ -228,7 +228,10 @@ class UniverseRule:
     sec_types: tuple[str, ...] = ("common", "spac")  # D-11(v3 미러). v4 는 ("common",)
     markets: tuple[str, ...] = ("KOSPI", "KOSDAQ")
     min_market_cap: float | None = None              # 억원
-    coverage_grace_days: int = 5                     # D-14 후보(유예, 거래일)
+    # 추정치 유예(거래일). 0 = 최신 WISE 스냅샷에 없으면 바로 제외(2026-10-05 사용자 결정
+    # N-14 — 이탈은 WISE 의 추정치 3개월 만료라 유예하면 만료된 추정치로 채점한다).
+    # v4 TOML 은 5 를 명시한다.
+    coverage_grace_days: int = 0
     min_adv20: float | None = None                   # 억원. D-13 적격성(v4 = 10)
     # 추정기관수(fi_universe.n_analysts — 최근 3개월 투자의견을 낸 증권사 수) 하한. 0 은 원천이
     # 밝힌 0 이라 제외하고, NULL(모름)은 제외하지 않는다 — 수집 실패로 종목이 조용히 빠지지 않게.

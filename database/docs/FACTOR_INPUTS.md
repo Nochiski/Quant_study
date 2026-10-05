@@ -136,7 +136,9 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | `lapsed` | 나이 > G | false → 유니버스 제외, `n_lapsed_dropped` | 없음(추정·WISE 재무 NULL) |
 | `none` | 신선일이 한 번도 없다 | false | 없음 |
 
-- G = `--grace-days`(기본 `UniverseRule().coverage_grace_days` = 5 거래일). 복귀(fresh 재진입)는
+- G = `--grace-days`(기본 `UniverseRule().coverage_grace_days` = **0** — 2026-10-05 사용자 결정 N-14.
+  WISE 는 증권사 추정치를 약 3개월(91~92일)만 쓰므로 이탈은 만료이고, 유예하면 만료 추정치로 채점한다.
+  근거 `DECISIONS.md` U1 원인). 복귀(fresh 재진입)는
   마지막 신선일이 D\* 로 바뀌는 것이라 나이가 저절로 0 이 된다.
 - `n_lapsed_dropped` = 다른 조건은 다 통과했는데 lapsed 라 빠진 종목 수(판 manifest 최상위와
   `coverage`).
@@ -152,7 +154,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | FG2 T 행 출처 | 아침판: 전 행 KRX | `price_source`·`mktcap_basis` ≠ 'krx' |
 | FG3 시총 | market_cap = round(shares × close(D) / 1e8) (상대 1e-6) | 규칙 위반 · 주식수·종가가 있는데 NULL · basis ≠ krx. KRX `mktcap_krw` 반올림값과 다른 수는 기록형(`n_krx_mktcap_diff`) |
 | FG4 골든 | `src/factor_inputs/fixtures/golden.json`(3종목 005930·000660·161890, 22항목, stage 원장에서 손으로 옮긴 값) | 창·유니버스 안 항목이 값이 다르거나 행이 없다. 셀 수 있는 항목이 0 이면 `skip(no_fixtures)` — 창이 지나가면 골든을 갱신한다(수급·신용 항목은 2026-08 날짜라 11월 중순에 창 밖) |
-| FG-fresh | 상태 수·eligible 상태 수·`n_lapsed_dropped`·D\*·수집 지연 기록 | 어휘 밖 · has_estimates ≠ 상태 · fresh 나이 ≠ 0 · grace 나이 > G · lapsed 나이 ≤ G · lapsed/none 인데 eligible · **D\* 가 D 보다 G 거래일 넘게 뒤처짐**(수집 정지 — 전 종목이 '신선' 으로 보이는 조용한 낡음). D 이전 수집 기록이 없으면 `skip(no_collection)` |
+| FG-fresh | 상태 수·eligible 상태 수·`n_lapsed_dropped`·D\*·수집 지연 기록 | 어휘 밖 · has_estimates ≠ 상태 · fresh 나이 ≠ 0 · grace 나이 > G · lapsed 나이 ≤ G · lapsed/none 인데 eligible · **D\* 가 D 보다 1거래일 넘게 뒤처짐**(`COLLECTION_LAG_MAX`, N-12 — 유예 G 와 따로 둔다. 수집 정지 — 전 종목이 '신선' 으로 보이는 조용한 낡음). D 이전 수집 기록이 없으면 `skip(no_collection)` |
 
 아침판 가드(게이트 전, rc 2): equity 판 접두어가 `e_` 이면 거절 · `price_daily`·`price_adj_daily`·
 `adj_factor` 판의 빌드 시각 차 > 3시간이면 거절(compat R5·R9 와 같은 값).

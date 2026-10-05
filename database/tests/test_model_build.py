@@ -194,8 +194,8 @@ def test_run_manifest_and_latest_pointer(built) -> None:
     latest = json.loads((root / "latest_morning.json").read_text())
     assert run == latest
     assert set(run) == {"layer", "status", "build_id", "date", "basis", "fi_build_id",
-                        "generated_at", "specs", "primary_spec", "elapsed_s"}
-    assert run["layer"] == "model" and run["status"] == "ok"
+                        "generated_at", "specs", "excluded_specs", "primary_spec", "elapsed_s"}
+    assert run["layer"] == "model" and run["status"] == "ok" and run["excluded_specs"] == {}
     assert (run["build_id"], run["date"], run["basis"], run["fi_build_id"]) == (
         res.build_id, D, "morning", FI_BID)
     assert run["primary_spec"] == "scope@1.0"          # 기본 주 모델(10-05 v4_rank@0.1 → scope@1.0)
@@ -259,6 +259,44 @@ def test_gate_failure_keeps_previous_latest(board_tree, tmp_path) -> None:
         assert not (root / spec_id / f"v={bad.build_id}").exists()
         assert manifest.load(root / spec_id / "MANIFEST.json").current_build == first.build_id
     assert not (root / "_tmp").exists() or not any((root / "_tmp").iterdir())
+
+
+def test_comparison_model_failure_is_isolated(board_tree, tmp_path, monkeypatch, capsys) -> None:
+    """비교 모델(V2)만 FAIL 이면 그 spec 만 빼고 주 모델 판은 올린다(N-11 격리)."""
+    patch_engine(monkeypatch, "v2_percentrank", edit_scores(lambda s: s[0].update(rank=None)))
+    root = tmp_path / "model"
+    res = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert res.ok and res.excluded == (V2,)
+    assert gate(res, V2, "MG3")["status"] == "fail"
+    assert f"EXCLUDED={V2}" in res.summary()
+    latest = json.loads((root / "latest_morning.json").read_text())
+    assert latest["status"] == "ok" and latest["build_id"] == res.build_id
+    assert set(latest["specs"]) == {V4} and set(latest["excluded_specs"]) == {V2}
+    assert latest["excluded_specs"][V2]["gates"]["MG3"]["status"] == "fail"
+    assert (root / V4 / f"v={res.build_id}" / "scores.parquet").exists()
+    assert not (root / V2 / f"v={res.build_id}").exists()
+    assert manifest.load(root / V2 / "MANIFEST.json").current_build is None
+    assert not (root / "_failed").exists()
+    rc = cli_main(["build", "--date", D_S, "--basis", "morning", "--fi-root", str(board_tree),
+                   "--root", str(tmp_path / "cli"), "--specs", f"{V2},{V4}", "--primary", V4,
+                   "--min-prices-on-d", "10", "--min-ranked", "10"])
+    err = capsys.readouterr().err
+    assert rc == 0 and f"{V2} MG3 FAIL" in err and "비교 모델 제외" in err
+
+
+def test_primary_failure_publishes_nothing_even_if_others_pass(board_tree, tmp_path,
+                                                              monkeypatch) -> None:
+    """주 모델(V4)이 FAIL 이면 통과한 비교 모델(V2)도 올리지 않는다."""
+    patch_engine(monkeypatch, "v4_rank", edit_scores(
+        lambda s: next(r for r in s if r["rank"] == 1).update(composite=100.5)))
+    root = tmp_path / "model"
+    res = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert not res.ok and res.status == "gate_failed" and res.excluded == ()
+    assert not (root / "latest_morning.json").exists()
+    assert not (root / V2 / f"v={res.build_id}").exists()
+    run = json.loads((root / "_runs" / f"{D_S}_morning.json").read_text())
+    assert run["status"] == "gate_failed" and set(run["specs"]) == {V2, V4}
+    assert run["excluded_specs"] == {}
 
 
 def test_mg4_fails_below_two_thousand_prices_on_d(golden_tree, tmp_path) -> None:

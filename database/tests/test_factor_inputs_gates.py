@@ -185,9 +185,11 @@ def test_fg_fresh_fails_on_each_breach(con, breaker: str, key: str) -> None:
 
 
 def test_fg_fresh_collection_lag(con) -> None:
-    assert gates.fg_fresh(_ctx(con, collection_lag_sessions=5)).status is GateStatus.PASS
-    r = gates.fg_fresh(_ctx(con, collection_lag_sessions=6))
-    assert r.status is GateStatus.FAIL and r.metrics["collection_lag_over_grace"] == 1
+    """수집 중단 허용치는 1거래일(N-12) — 유예 G 와 무관하다."""
+    assert gates.fg_fresh(_ctx(con, collection_lag_sessions=1)).status is GateStatus.PASS
+    r = gates.fg_fresh(_ctx(con, collection_lag_sessions=2))
+    assert r.status is GateStatus.FAIL and r.metrics["collection_lag_over_max"] == 1
+    assert r.metrics["collection_lag_max"] == gates.COLLECTION_LAG_MAX == 1
 
 
 def test_fg_fresh_without_collection_is_skip(con) -> None:

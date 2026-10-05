@@ -9,7 +9,8 @@
              + 판 manifest `_runs/<D>_<basis>.json` + `latest_<basis>.json`
   → 실패: 아무 것도 쓰지 않고 `_failed/<build_id>.json` + `_runs/<D>_<basis>.json`
             (status gate_failed). MANIFEST·latest 는 건드리지 않는다(마지막 성공 판 유지).
-            한 spec 이라도 FAIL 이면 전부 안 올린다.
+            판 전체가 실패하는 것은 **주 모델(primary)** 이 FAIL 일 때뿐이다. 비교 모델만 FAIL 이면
+            그 spec 만 빼고(`excluded_specs`) 나머지를 올린다(2026-10-05 사용자 결정 N-11 '격리').
 
 판 id 하나(`m_<UTC>`)를 선택한 spec 이 공유한다. spec 마다 포인터를 따로 바꾸므로 전환 순간에는
 spec 끼리 판이 섞여 보일 수 있다 — 소비자(deliver)는 `latest_<basis>.json` 의 `build_id` 로 읽는다.
@@ -42,7 +43,8 @@ from model import gates, registry
 from model.contracts import FI_TABLES, FactorInputs, ModelSpec
 from model.engines import ENGINES
 
-RULES_VERSION = "mb1.1.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
+RULES_VERSION = "mb1.2.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
+                            # 1.2.0(2026-10-05): 비교 모델 실패 격리(N-11)
 LAYER = "model"
 BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
@@ -68,6 +70,7 @@ class BuildResult:
     run_manifest: Path
     failed_report: Path | None
     elapsed_s: float
+    excluded: tuple[str, ...] = ()               # 게이트 FAIL 로 이번 판에서 뺀 비교 모델
 
     @property
     def ok(self) -> bool:
@@ -81,7 +84,8 @@ class BuildResult:
         return (f"model {self.status} date={self.date} basis={self.basis} build={self.build_id} "
                 f"fi={self.fi_build_id} primary={self.primary_spec} | " + " | ".join(parts)
                 + (f" | WARN={','.join(warns)}" if warns else "")
-                + (f" | FAIL={','.join(fails)}" if fails else ""))
+                + (f" | FAIL={','.join(fails)}" if fails else "")
+                + (f" | EXCLUDED={','.join(self.excluded)}" if self.excluded else ""))
 
 
 # ── parquet 쓰기 ─────────────────────────────────────────────────────────────
@@ -253,19 +257,24 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
     summary: dict[str, dict[str, Any]] = {
         s.spec_id: {**gates.counts(s, results[s.spec_id]),
                     "gates": gates.as_dicts(gate_results[s.spec_id])} for s in selected}
-    failed = any(gates.failed(rs) for rs in gate_results.values())
+    failed_ids = {sid for sid, rs in gate_results.items() if gates.failed(rs)}
+    failed = primary in failed_ids
+    excluded = () if failed else tuple(s for s in ids if s in failed_ids)
+    published = [s for s in selected if s.spec_id not in failed_ids]
     status = "gate_failed" if failed else "ok"
     elapsed = round(time.time() - t0, 1)
     payload: dict[str, object] = {
         "layer": LAYER, "status": status, "build_id": bid, "date": d_iso, "basis": basis,
         "fi_build_id": fi_bid,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "specs": summary, "primary_spec": primary, "elapsed_s": elapsed}
+        "specs": summary if failed else {s.spec_id: summary[s.spec_id] for s in published},
+        "excluded_specs": {sid: summary[sid] for sid in excluded},
+        "primary_spec": primary, "elapsed_s": elapsed}
     run_manifest = root / "_runs" / f"{d.strftime('%Y%m%d')}_{basis}.json"
 
     def result(report: Path | None) -> BuildResult:
         return BuildResult(status, bid, d_iso, basis, fi_bid, primary, summary, gate_results,
-                           run_manifest, report, elapsed)
+                           run_manifest, report, elapsed, excluded=excluded)
 
     if failed:
         report = root / "_failed" / f"{bid}.json"
@@ -280,7 +289,7 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
     try:
         con = duckdb.connect()
         try:
-            for spec in selected:
+            for spec in published:
                 out = tmp_root / spec.spec_id
                 res = results[spec.spec_id]
                 write_parquet(res.scores, gates.score_dtypes(spec), out / SCORES_FILE)
@@ -294,7 +303,7 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
         raise
 
     built_at = datetime.now(UTC).isoformat(timespec="seconds")
-    for spec in selected:
+    for spec in published:
         sid = spec.spec_id
         spec_root = root / sid
         spec_root.mkdir(parents=True, exist_ok=True)

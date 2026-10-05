@@ -809,6 +809,8 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
     pairs = {wb["메타"].cell(r, 1).value: wb["메타"].cell(r, 2).value
              for r in range(8, wb["메타"].max_row + 1)}
     assert pairs["model 판 id"] == res.build_id and "MG1 pass" in pairs[f"판 게이트 {primary}"]
+    rule = pairs["유니버스 규칙"]
+    assert "추정기관수 ≥ 1" in rule and "추정치 유예 없음" in rule
     # scope(v3 엔진) 점수 행엔 업종 열이 없다 — fi_universe 업종으로 채워 업종 시트가 3 대분류로 선다
     sector_rows = [wb["업종"].cell(r, 1).value for r in range(8, wb["업종"].max_row + 1)]
     assert len(sector_rows) >= 3, sector_rows
@@ -833,6 +835,27 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
         for ws in book.worksheets:
             for row in ws.iter_rows():
                 assert all(c.data_type != "f" for c in row)
+
+
+def test_failed_comparison_model_is_left_out_of_the_excel(tmp_path: Path, monkeypatch) -> None:
+    """비교 모델이 게이트에서 떨어지면 그 모델 열만 빠지고 메타에 사유가 남는다(N-11 격리)."""
+    from model import build as mbuild
+    from test_model_build import board_fi, edit_scores, patch_engine, write_fi_tree
+
+    v2 = "v2_percentrank@1.0"
+    fi_root = write_fi_tree(tmp_path / "fi", board_fi())
+    patch_engine(monkeypatch, "v2_percentrank", edit_scores(lambda s: s[0].update(rank=None)))
+    res = mbuild.build("20260928", "morning", tmp_path / "model", fi_root,
+                       min_prices_on_d=10, min_ranked=10)
+    assert res.ok and res.excluded == (v2,)
+    d = build_daily("2026-09-28", "morning", model_root=tmp_path / "model", fi_root=fi_root,
+                    out_root=tmp_path / "out")
+    wb = load_workbook(d.path)
+    pairs = {wb["메타"].cell(r, 1).value: wb["메타"].cell(r, 2).value
+             for r in range(8, wb["메타"].max_row + 1)}
+    assert "MG3 fail" in pairs[f"제외된 비교 모델 {v2}"]
+    assert f"판 게이트 {v2}" not in pairs and v2 not in pairs["비교 모델"]
+    assert model_label(v2) not in header(wb["모델 비교"])
 
 
 def test_display_names_strip_common_suffix_and_wics_prefix() -> None:

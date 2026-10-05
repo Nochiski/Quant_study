@@ -15,7 +15,8 @@
   FG4 골든     — `fixtures/golden.json` 의 손계산 값과 정확히 같다. 창 밖·유니버스 밖 항목은 세지
                  않고, 셀 수 있는 항목이 0 이면 `skip(no_fixtures)`.
   FG-fresh     — 신선도 상태 수를 기록하고, lapsed·none 은 eligible 이 아니며(require_estimates),
-                 grace 나이 ≤ G, 마지막 수집일 D* 가 D 보다 G 거래일 넘게 뒤처지지 않는다.
+                 grace 나이 ≤ G, 마지막 수집일 D* 가 D 보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지
+                 않는다(수집 중단 허용치는 유예 G 와 따로 둔다).
 """
 from __future__ import annotations
 
@@ -35,6 +36,10 @@ MKTCAP_REL_TOL = 1e-6
 # eligible 중 WISE 연간 재무(per·eps 중 하나라도)가 있는 종목 비율 하한. 09-23 실측 결측 6/621
 # (≈1%, 전부 DQ-7 lapsed) — 이 선 아래면 수집·파싱 쪽이 통째로 빠진 것이다.
 FIN_COVERAGE_MIN = 0.9
+# WISE 수집 중단 허용치(거래일). D* 가 D 보다 이만큼 넘게 뒤처지면 FAIL — 2거래일 이상 멈추면 판을
+# 올리지 않는다(2026-10-05 사용자 결정 N-12 '1거래일'). 추정치 유예(coverage_grace_days)와 값을
+# 공유하지 않는다 — 유예는 종목의 추정치가 사라진 경우, 이것은 수집 자체가 멈춘 경우다.
+COLLECTION_LAG_MAX = 1
 DATE_KEYED = ("fi_prices", "fi_adj_prices", "fi_flows", "fi_credit")
 
 
@@ -281,7 +286,8 @@ def fg_fresh(ctx: GateContext) -> GateResult:
         "counts": counts, "counts_eligible": counts_eligible,
         "n_lapsed_dropped": n_lapsed_dropped, "grace_days": g,
         "last_collection_date": ctx.dstar,
-        "collection_lag_sessions": ctx.collection_lag_sessions}
+        "collection_lag_sessions": ctx.collection_lag_sessions,
+        "collection_lag_max": COLLECTION_LAG_MAX}
     viol = {
         "state_outside_vocab": _count(
             ctx.con, f"SELECT count(*) FROM {uni} WHERE coverage_state NOT IN "
@@ -312,7 +318,7 @@ def fg_fresh(ctx: GateContext) -> GateResult:
         return GateResult("FG-fresh", GateStatus.SKIP,
                           "no_collection — D 이전 추정치 수집 기록이 없다", {**viol, **metrics})
     lag = ctx.collection_lag_sessions or 0
-    viol["collection_lag_over_grace"] = int(lag > g)
+    viol["collection_lag_over_max"] = int(lag > COLLECTION_LAG_MAX)
     return _result("FG-fresh", viol, metrics,
                    f"신선도 기록 · lapsed {n_lapsed_dropped}종목 제외 · D* {ctx.dstar}")
 

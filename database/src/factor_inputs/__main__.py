@@ -29,7 +29,7 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
     b.add_argument("--equity-root", type=Path, default=base / "data" / "equity")
     b.add_argument("--grace-days", type=int, default=None,
-                   help="추정치 소멸 유예(거래일, 기본 UniverseRule().coverage_grace_days = 5)")
+                   help="추정치 소멸 유예(거래일, 기본 UniverseRule().coverage_grace_days = 0)")
     b.add_argument("--min-eligible", type=int, default=MIN_ELIGIBLE_DEFAULT,
                    help="FG1 eligible 종목 수 하한")
     b.add_argument("--keep", type=int, default=3, help="표별 MANIFEST 에 남길 판 수")

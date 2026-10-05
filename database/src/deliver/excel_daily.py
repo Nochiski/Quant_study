@@ -49,8 +49,8 @@ Dictionary = list[tuple[str, str, str, str]]
 MODEL_LABELS = {"scope@1.0": "scope_v1.0", "v4_rank@0.1": "v4 기본", "v4_rank@0.2": "v4 동일가중",
                 "v3_zscore": "v3 원본", "v2_percentrank": "v2 원본"}
 FOOTNOTES = (
-    "① 유니버스 컷: 주 모델 모집단 = 추정치 보유 보통주(신선·유예) — D-13 적격성(관리·정지·"
-    "비적정 감사·지연 공시·20세션 거래대금) 탈락은 점수 없이 제외 사유만.",
+    "① 유니버스 컷: 주 모델 모집단은 메타 시트 '유니버스 규칙' 줄을 따른다. 탈락 종목은 점수 없이 "
+    "제외 사유만 적는다.",
     "② 창: 가격 지표는 수정종가 세션 수, 재무는 D 이전 공시(PIT), 추정치는 당해 결산기 컨센서스.",
     "③ 색: 3색 백분위 10/50/90 — 초록(낮음)·노랑·빨강(높음). 순위 열은 반전(1위 = 빨강). "
     "레벨 값은 무색. 형광 노랑 = 신규 진입.",
@@ -667,9 +667,12 @@ def universe_text(view: DayView) -> str:
     if view.spec is None:
         return "레지스트리에 없는 spec — 규칙 미상"
     u = view.spec.universe
+    g = u.coverage_grace_days
     parts = ["추정치 보유" if u.require_estimates else "추정치 무관",
              "/".join(u.sec_types), "/".join(u.markets),
-             f"추정치 유예 {u.coverage_grace_days} 거래일"]
+             f"추정치 유예 {g} 거래일" if g else "추정치 유예 없음"]
+    if u.min_analysts is not None:
+        parts.append(f"추정기관수 ≥ {u.min_analysts}")
     if u.min_market_cap is not None:
         parts.append(f"시총 ≥ {u.min_market_cap:,.0f}억")
     if u.min_adv20 is not None:
@@ -726,6 +729,12 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
         pairs.append((f"판 게이트 {sid}",
                       f"점수 {s.get('n_scores')} · 순위 {s.get('n_ranked')} · "
                       f"제외 {s.get('n_excluded')} · {gates_text(s.get('gates'))}"))
+    excluded = run.meta.get("excluded_specs")
+    if isinstance(excluded, Mapping):
+        for sid, s in sorted(excluded.items()):
+            gates_of = s.get("gates") if isinstance(s, Mapping) else None
+            pairs.append((f"제외된 비교 모델 {sid}",
+                          f"게이트 실패로 이번 판에서 뺐다 · {gates_text(gates_of)}"))
     pairs += [(f"각주 {i}", text) for i, text in enumerate(FOOTNOTES, start=1)]
     return pairs
 

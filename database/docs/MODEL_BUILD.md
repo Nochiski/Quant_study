@@ -69,7 +69,9 @@ data/model/
   `build_id` 로 `<spec_id>/v=<build_id>/` 를 연다**(keep=3 이라 다음 두 빌드 동안 남는다).
 - 쓰기는 원자적이다: 게이트를 전부 통과한 뒤에만 `_tmp/<build_id>/<spec_id>/` 에 쓰고
   `<spec_id>/v=<build_id>/` 로 옮긴 다음 `stage.manifest.commit` → `_runs` → `latest` 순. FAIL 이면
-  parquet 을 쓰지 않는다. **한 spec 이라도 FAIL 이면 전 spec 을 올리지 않는다.**
+  parquet 을 쓰지 않는다. **판 전체가 실패하는 것은 주 모델(`primary_spec`)이 FAIL 일 때뿐이다.** 비교
+  모델만 FAIL 이면 그 spec 만 빼고(`excluded_specs`, MANIFEST·`v=<build_id>` 없음) 나머지를 올린다
+  (2026-10-05 사용자 결정 N-11 '격리', mb1.2.0).
 - MANIFEST `BuildRecord`: `n_rows` = 점수 행 수, `content_hash` = 점수 파일 해시(equity 와 같은 식),
   `partitions[0]` = `{path: "v=<build_id>", n_rows, content_hash, n_indicators, indicators_content_hash}`,
   `inputs` = `{"factor_inputs": <fi build_id>}`, `gates` = MG0~MG5(`name`·`status`·`detail`·`metrics`),
@@ -103,7 +105,8 @@ data/model/
 | `date` · `basis` | 판 기준일 D(ISO) · `morning` |
 | `fi_build_id` | 읽은 factor_inputs 판 id |
 | `generated_at` | UTC(`…Z`) |
-| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순 |
+| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부 |
+| `excluded_specs` | 게이트 FAIL 로 이번 판에서 뺀 비교 모델 — `specs` 와 같은 모양. 없으면 `{}`(gate_failed 판도 `{}`) |
 | `primary_spec` | 인계 대표 모델(`--primary`) |
 | `elapsed_s` | 적재·엔진·게이트 소요(초) |
 
@@ -147,7 +150,7 @@ data/model/
 }
 ```
 
-## 6. 게이트 (spec 마다, FAIL 이 하나라도 있으면 판을 안 올린다)
+## 6. 게이트 (spec 마다. 주 모델 FAIL 이면 판을 안 올리고, 비교 모델 FAIL 이면 그 spec 만 뺀다)
 
 엔진을 같은 FactorInputs 로 **두 번** 돌린 결과(메모리)에서 판정한다. MG0 이 FAIL 이면 MG1·MG2·MG3·MG5 는
 `skip(upstream_failed)`, MG4 는 입력 판정이라 그대로 돈다.
@@ -175,6 +178,7 @@ data/model/
 3. 이름·시장·업종 이름·시총·거래대금은 `fi_build_id` 의 `fi_universe` 에서 조인한다.
 4. 경고는 `specs.<spec>.gates.MG5.status == "warn"`(순위가 전판과 크게 달라짐)이다. latest 에는 FAIL
    판이 오지 않는다 — 그날 FAIL 이면 latest 의 `date` 가 D 보다 앞선다(인계가 날짜를 확인할 것).
+   `excluded_specs` 에 있는 비교 모델은 그날 판에 없다 — 엑셀은 그 모델 열을 빼고 메타에 사유를 적는다.
 5. 전일 순위는 전 거래일의 `_runs/<YYYYMMDD>_morning.json` 의 `build_id` 로 같은 경로를 연다(keep=3 이라
    같은 날 재실행이 여러 번이면 GC 됐을 수 있다 — 없으면 비운다).
 
@@ -184,5 +188,6 @@ data/model/
 열·dtype·엔진 직접 실행과 비트 일치·MANIFEST·판 manifest·latest), 골든 트리(`tests/tools/compat_to_fi`
 → v3 579·v2 619 행 = 이식 엔진 = v3 원본 순위), 실제 factor_inputs 판(`test_factor_inputs.make_roots`)
 → v2, 게이트마다 엔진을 감싸 한 가지씩 망가뜨린 FAIL 경로(MG0 열·타입 · MG1 v3 비율·시총 하한·v4 100 ·
-MG2 비결정 · MG3 6가지 · MG4 골든 618 < 2,000) · FAIL 이면 latest·MANIFEST 유지 · MG5 기록·warn ·
+MG2 비결정 · MG3 6가지 · MG4 골든 618 < 2,000) · FAIL 이면 latest·MANIFEST 유지 · 비교 모델 FAIL 격리 ·
+주 모델 FAIL 이면 전부 미공개 · MG5 기록·warn ·
 keep GC · spec 선택·primary · 입력 판 거절 · CLI rc.

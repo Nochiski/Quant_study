@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
 #   순서: 캘린더 동기화 → D(직전 거래일) 판정 → 키움 마스터(daily_wise.sh, 매일) →
+#         [월요일 KST] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01 10-06) →
 #         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 신규 corp 회사정보 공백 메우기 → 수집 요약 알림
 #   소스별 단계는 서로 막지 않는다 — 한 단계가 rc≠0 이어도 다음 소스는 받고, 실패한 단계를 모두 모아 crit
 #   (플랜 2026-09-30 T-K3: 신용잔고 판정 실패가 DART 를 막던 결함). `dart company gap` 만 `dart` 성공에 묶는다.
@@ -60,6 +61,13 @@ if [ -z "$D" ]; then
 fi
 # ① 소멸성 축(키움 마스터)은 매일 — daily_wise.sh 는 raw 락을 물려받는다(WISE 는 18:05 로 이동)
 if [ -z "$DRY" ]; then step "daily_wise" bash scripts/daily_wise.sh || true; fi
+# 월요일(KST)만 DART 번호표(dart_corp_map)·corps.txt 갱신(A-01, 10-06 · DART 1콜) — 신규 상장을 DART 재무·공시에 잇는다.
+#   키움 마스터 뒤라 그날 신규 상장까지 들고, 건너뜀 검사 앞이라 D(금)를 이미 받은 평소 월요일에도 돈다(그날 신규
+#   corp 의 회사 정보 공백 메우기는 D 를 받는 다음 실행 몫). 크론이 UTC(일 21:00)라 요일은 KST 로 본다.
+#   dry-run 이 없는 원장 쓰기라 dry-run 에선 건너뛴다. QL_WEEKDAY(1=월…7=일)는 테스트 전용 요일 주입 — 운영에선 비워 둔다.
+if [ -z "$DRY" ] && [ "${QL_WEEKDAY:-$(TZ=Asia/Seoul date +%u)}" = 1 ]; then
+  step "dart universe(월)" $PY src/dart_universe.py || true
+fi
 # D 가 이미 수집·판정 완료면 여기서 끝(주말·연휴에 같은 D 를 반복하지 않는다)
 if [ -z "$DRY" ] && $PY -c 'import sys; from daily import runlog
 rows=[r for r in runlog.recent("data/raw/daily_run.db", source="ledger_chain", limit=10) if r.date==sys.argv[1] and r.status=="ok"]

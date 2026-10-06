@@ -4,6 +4,7 @@ blob 구조는 2026-09-02 서버 ws_raw 실측(§10). 픽스처는 실물 인코
 """
 import json
 import sqlite3
+import weakref
 import zlib
 from collections.abc import Iterable
 from pathlib import Path
@@ -610,7 +611,7 @@ def _fin_ws_rows(broken: bool) -> list[tuple]:
     return rows
 
 
-def _snap_fin(tmp_path: Path, broken: bool) -> snapshot.Snapshot:
+def _snap_fin(tmp_path: Path, broken: bool, snap_root: Path | None = None) -> snapshot.Snapshot:
     d = tmp_path / "raw"
     d.mkdir(exist_ok=True)
     p = d / "wisereport.db"
@@ -620,7 +621,8 @@ def _snap_fin(tmp_path: Path, broken: bool) -> snapshot.Snapshot:
                     _fin_ws_rows(broken))
     con.commit()
     con.close()
-    return snapshot.make_snapshot({"wise": p}, tmp_path / "snapshots", snapshot_id="s")
+    return snapshot.make_snapshot({"wise": p}, snap_root or tmp_path / "snapshots",
+                                  snapshot_id="s")
 
 
 def _load_fin(tmp_path: Path, snap: snapshot.Snapshot, name: str, tag: str, **kw: int
@@ -643,17 +645,24 @@ def _load_fin(tmp_path: Path, snap: snapshot.Snapshot, name: str, tag: str, **kw
 def test_fin_blob_source_split_by_company_equals_one_shot(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     """회사 1곳씩 나눠 푼 결과가 한 번에 푼 결과와 JSONL 바이트·metrics 까지 같다. 나눠 풀면
-    파서를 회사 오름차순으로 여러 번 부른다 — 한 번에 한 묶음의 행만 메모리에 산다."""
+    파서를 회사 오름차순으로 여러 번 부르고, 앞 묶음의 파싱 결과는 다음 묶음을 풀기 전에 이미
+    놓여 있다 — 한 번에 한 묶음의 행만 메모리에 산다."""
     snap = _snap_fin(tmp_path, broken=True)
     bs = rules.RULES[name].blob_source
     assert bs is not None
     real = parsers.PARSERS[bs.parser]
     calls: list[list[str]] = []
+    prev: list[weakref.ref[parsers.ParseResult]] = []
 
     def spy(blobs: Iterable[parsers.RawBlob]) -> parsers.ParseResult:
         got = list(blobs)
+        if got and prev:                    # 앞 묶음 결과가 아직 살아 있으면 두 묶음이 겹친다
+            assert prev[-1]() is None, f"previous batch still alive: {calls[-1]}"
         calls.append(sorted({b.cmp_cd for b in got}))
-        return real(got)
+        res = real(got)
+        if got:                             # 빈 호출(열·0 metrics)은 누적의 바탕이라 산다
+            prev.append(weakref.ref(res))
+        return res
 
     monkeypatch.setitem(parsers.PARSERS, bs.parser, spy)
     with monkeypatch.context() as m:        # 한 번에 푸는 기존 경로(다른 파서와 같은 길)
@@ -661,23 +670,27 @@ def test_fin_blob_source_split_by_company_equals_one_shot(
         one = _load_fin(tmp_path, snap, name, "one")
     assert [c for c in calls if c] == [sorted(FIN_CMPS)]
     calls.clear()
+    prev.clear()
     per1 = _load_fin(tmp_path, snap, name, "per1", chunk_companies=1)
     assert [c for c in calls if c] == [[c] for c in sorted(FIN_CMPS)]   # 오름차순 1곳씩
     calls.clear()
+    prev.clear()
     big = _load_fin(tmp_path, snap, name, "big", chunk_companies=10**9)
     assert [c for c in calls if c] == [sorted(FIN_CMPS)]
     assert one[0] == per1[0] == big[0]          # JSONL 바이트 = src_all 적재 입력
     assert one[1:] == per1[1:] == big[1:]       # 열 · metrics · src_all 행 수
     pm = one[2]
+    skipped = pm["n_skipped_pkey"]
     assert pm["n_rows_emitted"] == one[3] > 0
-    assert pm["n_parse_failed"] == 1 and pm["n_skipped_pkey"] > 0   # 건너뛴 pkey 도 센다
+    assert pm["n_parse_failed"] == 1
+    assert isinstance(skipped, int) and skipped > 0     # 건너뛴 pkey 도 센다
 
 
 def test_build_fin_wise_content_hash_unchanged_when_split_by_company(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """서버 G3(운영 MANIFEST content_hash 대조)의 로컬판 — 한 번에 푼 빌드 · 기본 묶음 ·
-    1곳씩 묶음의 content_hash · 행 수 · G8 metrics 가 같다. content_hash 는 행 순서와
-    무관한 bit_xor 라, 행 순서는 위 JSONL 바이트 비교가 지킨다."""
+    3곳 묶음(4곳이라 끝 묶음이 1곳)의 content_hash · 행 수 · G8 metrics 가 같다. content_hash 는
+    행 순서와 무관한 bit_xor 라, 행 순서는 위 JSONL 바이트 비교가 지킨다."""
     snap = _snap_fin(tmp_path, broken=False)
     real = build._load_blob_source
     for name in ("stg_fin_wise", "stg_fin_wise_q"):
@@ -688,9 +701,50 @@ def test_build_fin_wise_content_hash_unchanged_when_split_by_company(
         dflt = build.build_table(rule, snap, tmp_path / "dflt")
         with monkeypatch.context() as m:
             m.setattr(build, "_load_blob_source",
-                      lambda con, r, d: real(con, r, d, chunk_companies=1))
-            per1 = build.build_table(rule, snap, tmp_path / "per1")
+                      lambda con, r, d: real(con, r, d, chunk_companies=3))
+            per3 = build.build_table(rule, snap, tmp_path / "per3")
         got = [(r.ok, r.content_hash, r.n_rows,
-                next(g.metrics for g in r.gates if g.name == "G8")) for r in (one, dflt, per1)]
+                next(g.metrics for g in r.gates if g.name == "G8")) for r in (one, dflt, per3)]
         assert got[0][0] and got[0][2] > 0, name
         assert got[0] == got[1] == got[2], name
+
+
+def test_fin_blob_source_opens_relative_snapshot_path_with_uri_characters(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """스냅샷 경로가 cwd 기준 상대 경로(운영: QL_HOME 의 `data/snapshots/…`)이고 `#`·`?`·`%` 를
+    품어도 ATTACH 한 그 파일을 읽기 전용으로 연다. 날 경로를 URI 에 넣으면 `#`·`?` 에서 잘리고
+    mode=ro 가 떨어져, 잘린 이름의 빈 DB 를 rwc 로 만들고 'no such table' 로 죽는다."""
+    monkeypatch.chdir(tmp_path)
+    snap = _snap_fin(tmp_path, broken=False, snap_root=Path("snap #1?x=%41"))
+    assert not snap.files["wise"].path.is_absolute()
+    with monkeypatch.context() as m:
+        m.setattr(build, "CHUNKED_PARSERS", frozenset())
+        one = _load_fin(tmp_path, snap, "stg_fin_wise", "one")
+    per = _load_fin(tmp_path, snap, "stg_fin_wise", "per")
+    assert per[3] > 0 and per == one
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["one", "per", "raw", "snap #1?x=%41"]
+
+
+@pytest.mark.parametrize("extra, err, words", [
+    ({"n_new": 1}, RuntimeError, ("key='n_new'", "parser=parse_fin_wise", "cmp_cd=000020..000020")),
+    ({"n_empty": "x"}, TypeError, ("key='n_empty'", "acc=0", "new='x'", "parser=parse_fin_wise")),
+])
+def test_fin_blob_metrics_merge_errors_carry_context(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict[str, object],
+        err: type[Exception], words: tuple[str, ...]) -> None:
+    """parser([]) 에 없는 metrics 키나 더할 수 없는 값이면 파서·키·누적값·새 값·묶음 회사를
+    싣고 멈춘다 — 조용히 덮어쓰거나 맥락 없는 KeyError 로 죽지 않는다."""
+    snap = _snap_fin(tmp_path, broken=False)
+    real = parsers.PARSERS["parse_fin_wise"]
+
+    def bad(blobs: Iterable[parsers.RawBlob]) -> parsers.ParseResult:
+        got = list(blobs)
+        res = real(got)
+        if got:
+            res.metrics.update(extra)
+        return res
+
+    monkeypatch.setitem(parsers.PARSERS, "parse_fin_wise", bad)
+    with pytest.raises(err) as ei:
+        _load_fin(tmp_path, snap, "stg_fin_wise", "bad", chunk_companies=1)
+    assert all(w in str(ei.value) for w in words), str(ei.value)

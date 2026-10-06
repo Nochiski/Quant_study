@@ -420,14 +420,17 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
 
 # B-01(플랜 2026-10-06 Task 3) — 회사 단위로 나눠 푸는 파서. 한 번에 풀면 파서가 전 행
 # dict 를 쥐어 빌드 메모리가 수집일마다 는다(10-03 서버 stg_fin_wise 557만 행 · 최대 RSS
-# 13.4GiB, RAM 15.4GiB). `parsers._parse_fin` 은 (cmp_cd, fetched_date, ep, pkey, seq) 로
-# 전역 정렬하므로, 회사 오름차순 묶음을 차례로 풀어 이어 쓰면 JSONL 행 순서(→ src_all ·
-# parquet · content_hash)가 한 번에 푼 것과 같다.
+# 12.8GiB(13,375,880KiB), RAM 15.4GiB). `parsers._parse_fin` 은 (cmp_cd, fetched_date, ep,
+# pkey, seq) 로 전역 정렬하므로, 회사 오름차순 묶음을 차례로 풀어 이어 쓰면 JSONL 이 한 번에
+# 푼 것과 바이트까지 같다. 산출물 동일에는 필요 이상의 충분조건이다 — parquet 는 자연키
+# ORDER BY 로 쓰고 content_hash 는 행 순서와 무관한 bit_xor 다.
 CHUNKED_PARSERS: frozenset[str] = frozenset({"parse_fin_wise", "parse_fin_wise_q"})
-# 묶음 크기 근거(10-06 측정): 파서 출력 1행 ≈ 2.2KB, 회사 1곳 ≈ 수집일마다 257행(557만 행
-# ÷ 867곳 ÷ 25일) → 지금 ≈ 14MB/곳. 20곳이면 ≈ 0.3GB, 수집일이 60일 늘어도 ≈ 1GB 다.
-# 묶음마다 색인 조회 한 번이라 묶음을 줄여도 전체 시간은 그대로다(1·20·100곳 실측 같음).
-FIN_CHUNK_COMPANIES = 20
+# 묶음 크기 근거(10-06 측정): 파서 출력 1행 ≈ 2.2KB. 회사 1곳의 행은 수집일마다 stg_fin_wise
+# ≈ 257행(557만 행 ÷ 867곳 ÷ 25일) · stg_fin_wise_q ≈ 740행(128만 행 ÷ 867곳 ÷ 2일)이다.
+# 묶음 메모리는 전체 회사 수와 무관하고 수집일에 비례한다 — 1곳 기준 수집일마다 fin_wise
+# ≈ 0.57MB · _q ≈ 1.6MB(20곳 묶음이면 _q 가 수집일마다 ≈ 32MB 씩, 250일이면 ≈ 8GB). 묶음마다
+# 색인 조회 한 번이라 1·20·100곳 소요가 같아(로컬 실측) 가장 작은 1곳으로 둔다.
+FIN_CHUNK_COMPANIES = 1
 
 
 def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule, tmp_dir: Path,
@@ -495,7 +498,9 @@ def _write_jsonl_by_company(con: duckdb.DuckDBPyConnection, bs: BlobSource,
     table = _q(bs.table)
     eps = list(bs.eps)
     ep_in = ", ".join("?" * len(eps))
-    lite = sqlite3.connect(f"file:{found[0]}?mode=ro", uri=True)
+    # 날 경로를 URI 에 넣으면 `#`·`?` 에서 잘리고 mode=ro 가 떨어져 rwc 로 열린다 — as_uri() 가
+    # `#`·`?`·`%` 를 퍼센트 인코딩한다. 상대 경로는 ATTACH 와 같이 cwd 기준이다(운영 QL_HOME).
+    lite = sqlite3.connect(Path(found[0]).absolute().as_uri() + "?mode=ro", uri=True)
     try:
         cmps = sorted(str(r[0]) for r in lite.execute(
             f"SELECT DISTINCT cmp_cd FROM {table} WHERE ep IN ({ep_in})", eps))
@@ -513,6 +518,11 @@ def _write_jsonl_by_company(con: duckdb.DuckDBPyConnection, bs: BlobSource,
                     f.write(json.dumps({c: r[c] for c in cols}, ensure_ascii=False))
                     f.write("\n")
                 for k, v in res.metrics.items():
+                    if k not in metrics:
+                        raise RuntimeError(
+                            f"parse metric missing from parser([]) — key={k!r} value={v!r} "
+                            f"parser={bs.parser} known={sorted(metrics)} "
+                            f"cmp_cd={part[0]}..{part[-1]}")
                     acc = metrics[k]
                     if isinstance(v, dict) and isinstance(acc, dict):
                         for kk, n in v.items():
@@ -520,7 +530,9 @@ def _write_jsonl_by_company(con: duckdb.DuckDBPyConnection, bs: BlobSource,
                     elif isinstance(v, int) and isinstance(acc, int):
                         metrics[k] = acc + v
                     else:
-                        raise TypeError(f"cannot sum parse metric {k}={v!r} parser={bs.parser}")
+                        raise TypeError(
+                            f"cannot sum parse metric — key={k!r} acc={acc!r} new={v!r} "
+                            f"parser={bs.parser} cmp_cd={part[0]}..{part[-1]}")
                 del res          # 다음 묶음 전에 놓는다 — 두 묶음의 행이 겹쳐 살지 않게
     finally:
         lite.close()

@@ -46,7 +46,7 @@ def _root(tmp_path: Path) -> Path:
     stubs = {
         ".venv/bin/python": _PY,
         "scripts/sync_calendar.sh": "#!/usr/bin/env bash\nexit 0\n",
-        "scripts/daily_wise.sh": "#!/usr/bin/env bash\nexit 0\n",
+        "scripts/daily_wise.sh": "#!/usr/bin/env bash\necho daily_wise >> calls.txt\n",
         "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2" >> notify.txt\n',
         "scripts/dart_company_gap.sh": "#!/usr/bin/env bash\necho gap >> calls.txt\n",
     }
@@ -75,7 +75,7 @@ def _run(tmp_path: Path, *args: str, weekday: int = 3,
 def test_all_steps_ok(tmp_path: Path) -> None:
     rc, calls, notify, runlog = _run(tmp_path)
     assert rc == 0
-    assert calls == ["daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert notify.startswith("info|") and runlog.startswith("ok|")
 
 
@@ -83,7 +83,7 @@ def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:
     """09-25~28·09-30 재현 — 신용잔고 판정 실패(rc 2) 뒤에도 DART·회사정보 공백 메우기가 돈다."""
     rc, calls, notify, runlog = _run(tmp_path, daily_kis_daily=2)
     assert rc == 2
-    assert calls == ["daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert notify.startswith("crit|daily_ledger 실패: kis credit(rc=2)")
     assert runlog == "failed|kis credit(rc=2)\n"
 
@@ -91,14 +91,14 @@ def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:
 def test_dart_failure_skips_only_company_gap(tmp_path: Path) -> None:
     rc, calls, notify, _ = _run(tmp_path, daily_dart_daily=2)
     assert rc == 2
-    assert calls == ["daily.kw_daily", "daily.kis_daily", "daily.dart_daily"]
+    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily"]
     assert "dart(rc=2)" in notify
 
 
 def test_every_failed_step_is_reported(tmp_path: Path) -> None:
     rc, calls, notify, runlog = _run(tmp_path, daily_kw_daily=1, daily_kis_daily=2)
     assert rc == 2
-    assert calls == ["daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert "kiwoom fetch(rc=1), kis credit(rc=2)" in notify
     assert runlog == "failed|kiwoom fetch(rc=1), kis credit(rc=2)\n"
 
@@ -110,7 +110,7 @@ def test_monday_refreshes_dart_universe_before_company_gap(tmp_path: Path) -> No
     """
     rc, calls, notify, runlog = _run(tmp_path, weekday=1)
     assert rc == 0
-    assert calls == ["src/dart_universe.py",
+    assert calls == ["daily_wise", "src/dart_universe.py",
                      "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert notify.startswith("info|") and runlog.startswith("ok|")
 
@@ -119,7 +119,7 @@ def test_monday_refreshes_dart_universe_before_company_gap(tmp_path: Path) -> No
 def test_dart_universe_not_called_on_other_days(tmp_path: Path, weekday: int) -> None:
     rc, calls, _, _ = _run(tmp_path, weekday=weekday)
     assert rc == 0
-    assert calls == ["daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
 
 
 def test_dry_run_skips_dart_universe_on_monday(tmp_path: Path) -> None:
@@ -133,7 +133,7 @@ def test_monday_refresh_runs_even_when_d_already_collected(tmp_path: Path) -> No
     """평소 월요일 06:00 은 D(금요일)를 토요일에 이미 받아 건너뛰는 날이다 — 그날도 돈다."""
     rc, calls, notify, runlog = _run(tmp_path, weekday=1, recent=0)
     assert rc == 0
-    assert calls == ["src/dart_universe.py"]
+    assert calls == ["daily_wise", "src/dart_universe.py"]
     assert notify.startswith("info|daily_ledger 건너뜀") and runlog == ""
 
 
@@ -141,7 +141,44 @@ def test_dart_universe_failure_is_reported_but_chain_continues(tmp_path: Path) -
     """daily_wise 와 같은 처리 — 뒤 단계는 돌고, FAILED 에 남아 crit·런로그 failed 가 된다."""
     rc, calls, notify, runlog = _run(tmp_path, weekday=1, dart_universe=1)
     assert rc == 2
-    assert calls == ["src/dart_universe.py",
+    assert calls == ["daily_wise", "src/dart_universe.py",
                      "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert notify.startswith("crit|daily_ledger 실패: dart universe(월)(rc=1)")
     assert runlog == "failed|dart universe(월)(rc=1)\n"
+
+
+_DATE = """#!/usr/bin/env bash
+# 요일(+%u) 질의만 가로챈다 — TZ=Asia/Seoul 로 물으면 월(1), 그 밖(UTC·-u)은 일(7). 나머지는 진짜 date.
+if [ "${!#}" = "+%u" ]; then
+  if [ "${TZ:-}" = "Asia/Seoul" ] && [ "$#" -eq 1 ]; then echo 1; else echo 7; fi
+  exit 0
+fi
+PATH="${PATH#*:}" exec date "$@"
+"""
+
+
+def test_weekday_is_judged_in_kst(tmp_path: Path) -> None:
+    """크론은 UTC 일 21:00 = KST 월 06:00 — 요일을 KST 로 봐야 돈다(QL_WEEKDAY 주입 없이)."""
+    root = _root(tmp_path)
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    (fake / "date").write_text(_DATE, encoding="utf-8")
+    (fake / "date").chmod(0o755)
+    env = dict(os.environ, QL_LEDGER_ROOT=str(root), QL_RAW_LOCK_HELD="1", TZ="UTC",
+               PATH=f"{fake}:{os.environ['PATH']}")
+    for k in ("QL_WEEKDAY", "QL_SKIP_KW"):
+        env.pop(k, None)
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"), "--date", "20260929"],
+                       env=env, capture_output=True, text=True, timeout=60, check=False)
+    assert p.returncode == 0, p.stderr
+    calls = (root / "calls.txt").read_text(encoding="utf-8").split()
+    assert calls[:2] == ["daily_wise", "src/dart_universe.py"]
+
+
+def test_skip_day_monday_failure_is_crit_without_runlog(tmp_path: Path) -> None:
+    """가장 흔한 실패 모양 — 평소 월요일(건너뜀 날)에 dart_universe 만 실패하면 crit, 런로그는 없다."""
+    rc, calls, notify, runlog = _run(tmp_path, weekday=1, recent=0, dart_universe=1)
+    assert rc == 2
+    assert calls == ["daily_wise", "src/dart_universe.py"]
+    assert notify.startswith("crit|daily_ledger 실패: dart universe(월)(rc=1)")
+    assert runlog == ""

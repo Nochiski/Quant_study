@@ -5,7 +5,7 @@
   date·basis 가 요청과 같아야 한다) → FactorInputs 한 벌(아래) → spec 마다 엔진 2회(MG2)
   → 게이트 MG0~MG5
   → 통과: spec 마다 `_tmp/<build_id>/<spec_id>/{scores,indicators}.parquet` 를
-             `<spec_id>/v=<build_id>/` 로 옮기고 `stage.manifest.commit`(keep=3)
+             `<spec_id>/v=<build_id>/` 로 옮기고 `stage.manifest.commit`(keep=60)
              + 판 manifest `_runs/<D>_<basis>.json` + `latest_<basis>.json`
   → 실패: 아무 것도 쓰지 않고 `_failed/<build_id>.json` + `_runs/<D>_<basis>.json`
             (status gate_failed). MANIFEST·latest 는 건드리지 않는다(마지막 성공 판 유지).

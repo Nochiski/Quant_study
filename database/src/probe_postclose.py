@@ -404,6 +404,10 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
                 entry["n_rows"] = len(rows)
                 entry["batch_size"] = BATCH
                 for field in ("cur_prc", "close_pric", "base_pric"):
+                    # 값이 있는 행 수 — n_rows 는 NXT 미상장 빈 행까지 센 원시값이라
+                    # 일치 수의 비율은 이쪽으로 나눈다
+                    entry[f"{field}_n_value"] = sum(
+                        1 for r in rows.values() if price(r.get(field)) is not None)
                     entry[f"{field}_match_close"] = sum(
                         1 for tk, r in rows.items()
                         if (o := official.get(tk, (None,))[0]) is not None

@@ -215,7 +215,9 @@ def test_grade_minute_keeps_ticker_whose_t_row_appears_later(tmp_path: Path) -> 
 
 
 def test_grade_sweep_does_not_count_none_equals_none_as_close_match(tmp_path: Path) -> None:
-    """L-05: 공식 종가가 없는 종목·stk_cd 빈 묶음 행은 값이 None 이어도 일치로 세지 않는다."""
+    """L-05: 공식 종가가 없는 종목·stk_cd 빈 묶음 행은 값이 None 이어도 일치로 세지 않는다.
+
+    L-01 의 sweep 판(값 있는 행 수 n_value)도 함께 고정한다."""
     db = tmp_path / "postclose.db"
     con = P.connect(db)
     run = "sweep@1601"
@@ -225,9 +227,11 @@ def test_grade_sweep_does_not_count_none_equals_none_as_close_match(tmp_path: Pa
     con.execute("INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (run, "ka10060", T, "2026-10-06T16:01:00", "2026-10-06T16:02:00", 3, 3, 0, 0, ""))
     # ka10095 묶음 — 거래소마다 정상 1행 + 공식 종가가 없는 종목의 빈 값 행 + stk_cd 빈 행
+    # + 현재가만 있는 행(필드마다 값 유무가 달라야 n_value 가 필드별로 세는지 가려진다)
     bundle = ({"stk_cd": "005930", "cur_prc": "-100", "close_pric": "-100", "base_pric": "99"},
               {"stk_cd": "888888", "cur_prc": "", "close_pric": "", "base_pric": ""},
-              {"stk_cd": "", "cur_prc": "", "close_pric": "", "base_pric": ""})
+              {"stk_cd": "", "cur_prc": "", "close_pric": "", "base_pric": ""},
+              {"stk_cd": "000660", "cur_prc": "-51", "close_pric": "", "base_pric": ""})
     for _name, sfx in P.EXCHANGES:
         for r in bundle:
             _put(con, "16:01:40", run, "ka10095", P.norm_code(r["stk_cd"]) + sfx, r)
@@ -242,13 +246,18 @@ def test_grade_sweep_does_not_count_none_equals_none_as_close_match(tmp_path: Pa
     got: dict[str, tuple[int, ...]] = {
         "ka10060/KRX": (sweeps[f"{run}/ka10060/KRX"]["n_t_rows"],
                         sweeps[f"{run}/ka10060/KRX"]["close_match"])}
+    n_value: dict[str, tuple[int, ...]] = {}
     for name, _sfx in P.EXCHANGES:
         e = sweeps[f"{run}/ka10095/{name}"]
         got[f"ka10095/{name}"] = (e["n_rows"], e["cur_prc_match_close"],
                                   e["close_pric_match_close"], e["base_pric_match_close"])
+        n_value[name] = (e["cur_prc_n_value"], e["close_pric_n_value"], e["base_pric_n_value"])
     # 빈 행 둘도 n_rows 에는 들어 있다 — 일치로만 세지 않는다
-    assert got == {"ka10060/KRX": (3, 1), "ka10095/KRX": (3, 1, 1, 0),
-                   "ka10095/NXT": (3, 1, 1, 0), "ka10095/SOR": (3, 1, 1, 0)}
+    assert got == {"ka10060/KRX": (3, 1), "ka10095/KRX": (4, 1, 1, 0),
+                   "ka10095/NXT": (4, 1, 1, 0), "ka10095/SOR": (4, 1, 1, 0)}
+    # n_rows 는 빈 값 행까지 센 원시값이고, n_value 는 필드마다 값이 있는 행만 센다.
+    # 그래서 일치 수 ÷ n_value 가 '그 필드에 값이 있는 행 중'의 비율이다(L-01 의 sweep 판)
+    assert n_value == {"KRX": (2, 1, 1), "NXT": (2, 1, 1), "SOR": (2, 1, 1)}
 
 
 @pytest.mark.parametrize(("closes", "matches"), [
@@ -289,10 +298,12 @@ def test_collect_does_not_hold_write_lock_between_calls(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, api_id: str, status: P.KW.CallStatus
 ) -> None:
     """L-02: collect 가 반복 전체를 트랜잭션 하나로 잡으면, 같은 DB 에 쓰는 다른 프로세스
-    (minute·sweep)가 최대 60초 막힌다. 콜 사이에는 쓰기 잠금을 쥐지 않아야 한다."""
+    (minute·sweep)가 최대 60초 막힌다. 콜 사이에는 쓰기 잠금을 쥐지 않아야 하고, 앞 콜의
+    기록은 커밋되어 있어야 한다(rollback 으로 잠금만 푸는 변이를 잡는다)."""
     db = tmp_path / "postclose.db"
     con = P.connect(db)
     other: list[str] = []          # 두 번째 콜부터 시도한 다른 연결의 쓰기 결과
+    visible: list[int] = []        # 같은 시점에 다른 연결에서 보이는 collect 의 기록 행 수
     calls = 0
 
     def fake_call_tr(client: object, spec: object, ticker: str, end_dt: str) -> P.KW.CallOutcome:
@@ -301,6 +312,8 @@ def test_collect_does_not_hold_write_lock_between_calls(
         if calls > 1:
             side = sqlite3.connect(db, timeout=0.2)
             try:
+                visible.append(
+                    side.execute("SELECT COUNT(*) FROM obs WHERE run = 'minute'").fetchone()[0])
                 side.execute("INSERT INTO obs VALUES (?,?,?,?,?,1,NULL,NULL)",
                              ("2026-10-06T15:20:00", "other", "ka10060", "000000", T))
                 side.commit()
@@ -319,3 +332,4 @@ def test_collect_does_not_hold_write_lock_between_calls(
     con.close()
     assert stats["n_req"] == 3
     assert other == ["ok", "ok"]
+    assert visible == [1, 2]       # 콜마다 한 행씩 — 앞 콜의 기록이 이미 커밋되어 보인다

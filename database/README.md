@@ -154,7 +154,7 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 빌드 락을 잡고 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
 | ~~매시~~ | — | ~~키움 확정 시각 프로브~~ (09-16 제거 — 09-14 촘촘 프로브로 20:15 정착 확인, `data/evidence/after_market_20260914.db`) | 제거 |
 
-crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화되면 이대로 넣는다 — 예전 표는 잠정 빌드를
+crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 적었다 — 크론은 /bin/sh 로 돌고 HOME 이 있어 그대로 넣어도 된다(서버의 실제 줄은 펼친 경로라 글자 대조는 다르게 나온다, F-13 10-06). WICS 3줄은 10-06 에 빠진 것을 채웠다. 서버가 초기화되면 이대로 넣는다 — 예전 표는 잠정 빌드를
 18:15 로 적어 두어 그대로 복구하면 매 평일 crit 이 났다). 수집 체인 3개의 `>> logs/cron_*.log` 는
 알림 전송 실패를 사후에 확인하기 위한 것이다(DEFECT-D04, `logs/notify_failed.log` 와 짝):
 
@@ -168,6 +168,9 @@ crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화�
 0 15 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
 30 18 * * 5 cd ~/quant-ledger && /bin/bash scripts/backup_raw.sh >> logs/backup_raw.log 2>&1
 30 19 * * 6 cd ~/quant-ledger && /bin/bash scripts/gc.sh --apply >> logs/gc.log 2>&1
+0 18 * * 5 cd ~/quant-ledger && /bin/bash scripts/wics_weekly.sh >> logs/cron_wics_weekly.log 2>&1
+0 1 * * 6 cd ~/quant-ledger && /bin/bash scripts/wics_weekly.sh --retry >> logs/cron_wics_weekly.log 2>&1
+30 2 * * 6 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh wics_weekly >> logs/watchdog.log 2>&1
 ```
 
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`

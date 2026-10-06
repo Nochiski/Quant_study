@@ -127,7 +127,7 @@
 - 상황: PR #99 "public 레포에서 서버 계정명·홈 경로 제거"(5f97f8ce)·#165(서버 주소 기본값 제거)는 main 에만 있다. feat/v3-merge 는 09-20 d0372a4d 에서 갈라졌다(`git merge-base`). HD:144 는 이것을 '병합 때 보안 역행 위험(39파일)'으로 적었다(기존).
 - 인풋: `git grep -I '<서버 홈 경로>'` — origin/main 0줄, HEAD 72줄(39파일), **origin/feat/v3-merge(원격 끝 3af78837 — 10-02 커밋까지 푸시됨) 72줄**. `git grep -E '192\.168\.'` — main·브랜치 모두 1파일.
 - 에러 위치: `database/README.md`(9줄 — 크론 복구 원문 포함)·`scripts/*.sh`(watchdog 6 등)·`src/daily/ledger_health.py`(1) · `docs/DOC_DESIGN.md:221`(로컬 LLM 호스트의 사설 IP — #99 범위 밖).
-- 위험성(보안 — 정보 노출): 새 사실은 '병합 때 위험'이 아니라 이미 원격 브랜치에 계정명·홈 경로가 올라가 있다는 것(저장소 공개 여부는 #99 제목 근거, GitHub 설정은 미확인). sshd 는 비밀번호 차단(`00-hardening.conf`)·quantshare chroot+읽기전용 sftp 라 직접 위험은 낮다. HEAD 는 원격보다 22커밋 앞서 있어 다음 push 때도 같은 문자열이 나간다.
+- 위험성(보안 — 정보 노출): 새 사실은 '병합 때 위험'이 아니라 이미 원격 브랜치에 계정명·홈 경로가 올라가 있다는 것(저장소 공개 여부는 #99 제목 근거, GitHub 설정은 미확인). sshd 는 비밀번호 차단(`00-hardening.conf`)·공유 계정 chroot+읽기전용 sftp 라 직접 위험은 낮다. HEAD 는 원격보다 22커밋 앞서 있어 다음 push 때도 같은 문자열이 나간다.
 - 근거: `git merge-base --is-ancestor 5f97f8ce HEAD` → 아님, `git grep -I '<서버 홈 경로>' origin/feat/v3-merge -- database | wc -l` → 72, `git rev-list --count origin/feat/v3-merge..HEAD` → 22. (주: 이 확인을 위해 `git fetch -q origin` 을 1회 실행 — 원격 추적 ref 만 갱신, 작업 트리 무변경.)
 
 ### F-14 v4 비교 모델의 '유예 5거래일'(TOML·DECISIONS N-14)은 fi1.1.0 뒤 실제로 작동하지 않는다 — 기록과 실행이 다르다 [하]
@@ -165,7 +165,7 @@
 4. 결정 값 일치: N-12 `COLLECTION_LAG_MAX = 1`, N-14 유예 0, N-6 `min_analysts = 1`, U7 시총 1,000억, U5 30·9, U6 300·0.9, D-12 기본 채널 AIPLAYGROUND, N-3 notify 기본 로그만(10-03 백업 알림 'logged only').
 5. 비밀 파일 권한: `src/.kis_token.json`·`.kw_token.json` 600, `~/kael-system-v3/.env`·백업 4개 600, `data/calendar/*` 600. `~/quant-ledger/.env` 는 없음(키는 v3 .env 에서 읽는 설계 — README:126·`api.py:14-16`).
 6. 저장소 database/ 에 비밀값 없음 — 키 패턴 5건은 테스트 더미(값 길이·문자 판정), 공인 IP 0건(사설 IP 1건은 F-13).
-7. sshd: 비밀번호·root 로그인 차단(`00-hardening.conf`), quantshare = chroot + 읽기전용 internal-sftp, 바인드는 raw·stage·equity 3개.
+7. sshd: 비밀번호·root 로그인 차단(`00-hardening.conf`), 공유 계정 = chroot + 읽기전용 internal-sftp, 바인드는 raw·stage·equity 3개.
 8. 디스크: `/` 466G 중 200G 여유(56%). data ≈ 162G(equity 55·snapshots 54·raw 46·stage 4.4·compat 2.6), 백업 19G(+v3 14G). 하한 50·60G 와 거리 충분. kern.log·syslog 에 OOM 없음.
 9. 백업 10-03 03:30~03:37 KST 7 DB 성공·integrity ok·이전 세트 삭제 — 결정 9 대로. v3 백업(03:00, 14초)과 시각 안 겹침.
 10. v3 와 같은 DB 파일 쓰기 없음 — v3 트리에서 읽는 것은 `.kis_holidays.json`(06:00·18:05 복사, v3 쓰기 20:05·매월 1일 09:00·12-30 05:00 과 분리)과 `.env` 뿐. compat 은 `data/compat/quant.db` 사본에만 쓰고, model.compare 는 `mode=ro`·수동.

@@ -971,7 +971,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **위험성**: **자원 + 데이터 손실(소비자 측)**. ① `_pinned/` 31 GB 는 stage parquet 하드링크 사본이라
   `rsync -a equity/` 를 그대로 도는 소비자에게 필요량의 10배 넘는 전송을 시킨다 ② `_failed/*.json` 은
   실패 빌드의 게이트 metric 전문(종목 코드·표본 키)을 내보낸다 ③ `_contract_meta.json`·
-  `_catalog_meta.json`·`equity.duckdb` 매크로가 `~/...` 절대경로를 싣는다(토큰·키는 없음 — 확인)
+  `_catalog_meta.json`·`equity.duckdb` 매크로가 홈 디렉터리 절대경로(`/home/<운영 계정>/...`)를 싣는다(토큰·키는 없음 — 확인)
   ④ `baseline.json.bak_*` 8개·`baseline_seed_s*.json` 11개 같은 잔재가 "어느 것이 정본인가" 를 묻게 만든다
   ⑤ 읽는 중 `v=` 가 지워지면 duckdb `read_parquet` 이 중간에 깨진다.
 - **왜 미뤘나**: 마운트 재구성은 `sudo` 가 필요하고(현 세션 권한 밖), 소비자에게 무엇을 보일지 = 공유
@@ -1137,4 +1137,20 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **인풋**: DART 가 corpCode.xml ZIP 대신 오류 본문(키 한도 초과·점검·인증 오류 등)을 돌려준 날.
 - **에러 위치**: `src/dart_universe.py:73` `zipfile.ZipFile(io.BytesIO(api.dart("corpCode.xml")))` — 응답 본문 앞부분과 DART status·message 를 로그에 남기지 않는다.
 - **위험성**: 그 주 갱신이 빠져 다음 월요일까지 번호표가 낡고(신규 상장 DART 연결 1~2주 지연), 원인이 로그에 없어 진단이 늦다.
+
+## 2026-10-06 감사 수정 F-13(서버 경로 정리) 품질 검토에서 분리한 항목
+
+### B-44: 크론 스크립트 다수가 `cd` 실패를 검사하지 않는다
+
+- **상황**: `daily_build.sh:9`·`daily_evening.sh:14`·`daily_wise.sh:11`·`daily_dart.sh:8`·`watchdog.sh:12`·`run_stage.sh:5`·`daily_ledger.sh:17`·`sync_calendar.sh:10`·`dart_company_gap.sh:8`·`backup_raw.sh:16` 은 `set -e` 가 없고 `cd "$HOME/quant-ledger"` 뒤 실패 가드가 없다(F-13 전에는 리터럴 경로).
+- **인풋**: 크론 환경의 HOME 이 다른 값이거나 디렉터리가 없는 날.
+- **에러 위치**: 위 각 줄 — cd 가 실패해도 크론의 cwd 에서 계속 돈다. daily_build·daily_evening 은 `scripts/notify.sh` 를 상대경로로 불러 notify.log 에도 남지 않고 `cron_*.log` 에만 흔적이 남는다.
+- **위험성**: 체인이 엉뚱한 디렉터리에서 돌다 조용히 실패한다(운영 중단 · 무음). 같은 머리말을 가진 워치독도 함께 침묵할 수 있다. 고칠 때는 `|| { echo …; exit 4; }` 로 통일한다(build_chain 계열은 이미 있음).
+
+### B-45: `.gitignore` 의 `*.bak` 가 `deploy.sh` 깨끗한 트리 검사를 비켜 간다
+
+- **상황**: F-13 이 `.gitignore` 에 `*.bak` 를 더했다(#99 와 같음). `deploy.sh:64` 는 `git status --porcelain` 으로 '깨끗한 트리'를 판정한다.
+- **인풋**: `database/src`·`database/scripts` 아래에 `.bak` 파일이 생긴 채 배포.
+- **에러 위치**: `deploy.sh` 의 rsync `COMMON` 제외 목록에 `*.bak` 가 없다 — git 은 무시하지만 rsync 는 서버로 민다.
+- **위험성**: 백업 사본이 서버 src 에 섞여 들어간다(낮음, 10-06 기준 .bak 0개). 필요하면 `COMMON` 에 `--exclude '*.bak'` 를 더한다.
 

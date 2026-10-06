@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import json
 import os
 from pathlib import Path
@@ -543,7 +544,8 @@ def test_default_keep_keeps_the_first_of_four_same_day_builds(roots, tmp_path: P
     out = tmp_path / "fi"
     runs = [build(D_S, "morning", out, roots[1], roots[0], min_eligible=5, golden_path=None)
             for _ in range(4)]
-    assert all(r.ok for r in runs)
+    assert all(r.ok for r in runs), [(r.build_id, g.name, g.detail) for r in runs
+                                     for g in r.gates if g.status.value == "fail"]
     for t in FI_TABLES:
         assert len(manifest.load(out / t / "MANIFEST.json").builds) == 4, t
         assert (out / t / f"v={runs[0].build_id}").is_dir(), t
@@ -965,6 +967,15 @@ def test_cli_keep_default_is_the_build_default() -> None:
     from factor_inputs.build import KEEP_DEFAULT
     args = _parser().parse_args(["build", "--date", D_S, "--basis", "morning"])
     assert args.keep == KEEP_DEFAULT == 60
+    assert inspect.signature(build).parameters["keep"].default == KEEP_DEFAULT
+
+
+def test_fi_keep_default_is_at_least_the_model_keep() -> None:
+    """E-01: 두 층의 keep 관계는 테스트에서만 고정한다 — 운영 코드에서 model 을 import 하면
+    순환 import 다(model.build 가 factor_inputs.build 를 import 한다)."""
+    from factor_inputs.build import KEEP_DEFAULT
+    from model.build import KEEP_DEFAULT as MODEL_KEEP
+    assert KEEP_DEFAULT >= MODEL_KEEP   # fi 판이 모델 판보다 먼저 지워지지 않게(E-01)
 
 
 def test_flow_and_unit_constants_match_compat() -> None:

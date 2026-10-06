@@ -4,14 +4,14 @@
   원천 판 해석(MANIFEST `current_build` — 맨 glob 금지) → 판 가드(아침판에 저녁 equity 판 금지 ·
   가격·수정주가·계수 판이 같은 체인) → TEMP VIEW → `queries` 순서대로 임시 표
   → `_tmp/<build_id>/<표>/part0.parquet` → 게이트(FG0~FG4 · FG-fresh)
-  → 통과: 8표 모두 `v=<build_id>` 로 옮기고 표마다 `stage.manifest.commit`(keep=60)
+  → 통과: 8표 모두 `v=<build_id>` 로 옮기고 표마다 `stage.manifest.commit`(keep=KEEP_DEFAULT=60)
              + 판 manifest `_runs/<D>_<basis>.json` + `latest_<basis>.json`
   → 실패: 임시 폐기 + `_failed/<build_id>.json` + `_runs/<D>_<basis>.json`(status gate_failed).
             MANIFEST·latest 는 건드리지 않는다(마지막 성공 판 유지).
             같은 날 성공 기록이 있으면 `_runs` 는 덮지 않는다(실패는 `_failed/` 에만, D-09).
 
 판 id 하나(`m_<UTC>`)를 8표가 공유한다. 표마다 포인터를 따로 바꾸므로 전환 순간에는 표끼리 판이
-섞여 보일 수 있다 — 소비자는 `latest_<basis>.json` 의 `build_id` 로 읽는다(표마다 keep=60 이라
+섞여 보일 수 있다 — 소비자는 `latest_<basis>.json` 의 `build_id` 로 읽는다(표마다 keep=KEEP_DEFAULT=60 이라
 그 판은 다음 59번의 빌드 동안 남는다).
 
 입력은 `_pinned/` 하드링크로 고정하지 않는다: 산출 자체가 창을 자른 사본이라 재현에 원천 판을
@@ -47,6 +47,7 @@ BASES_KNOWN = ("evening", "morning")
 # eligible 하한 — 09-23 실측 580 · 09-28 619 의 절반. 빈 유니버스를 성공으로 쓰지 않는다
 MIN_ELIGIBLE_DEFAULT = 300
 # 모델 판과 같은 수 — 모델 판이 가리키는 fi 판이 지워지지 않게(E-01·N-17)
+# fi 판 1개 ≈ 25MB(60판 ≈ 1.5GB), 모델과 1:1 로 지을 때만 맞물린다
 KEEP_DEFAULT = 60
 GOLDEN_PATH = Path(__file__).resolve().parent / "fixtures" / "golden.json"
 # 가격·수정주가·계수 판이 같은 체인인지 보는 빌드 시각 차 한도(시간) — compat R9 와 같은 값.

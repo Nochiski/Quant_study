@@ -226,7 +226,7 @@ FY2025 `capex_basis`: standard 2,320 · ppe_parts 203 · none_in_cf 104 · ppe_i
 
 **T-F 코드 완료(09-28, 커밋 아래) — 서버 절차(09-29 아침, GB3 뒤)**
 ```bash
-cd /home/kael/quant-ledger; SNAP=<09-29 아침 확정 빌드의 snapshot-id>
+cd ~/quant-ledger; SNAP=<09-29 아침 확정 빌드의 snapshot-id>
 # 1) 재파싱 대상 = 캐시에서 정정 표지가 있는 접수 전부(≈17,600) — 미파싱 2,392 만 골라도 되지만 parser p1.5 일관성을 위해 전부
 .venv/bin/python -c "import json,pathlib,sys; r=pathlib.Path('data/stage/_tmp/doc/%s/stg_doc_correction'%sys.argv[1]); print('\n'.join(sorted({json.loads(l)['rcept_no'] for f in r.glob('year=*.jsonl') for l in f.open(encoding='utf-8') if l.strip()})))" $SNAP > /tmp/corr_$SNAP.txt
 # 2) 표적 재파싱(≈30분): PYTHONPATH=src .venv/bin/python -m stage.doc_prepass --snapshot-id $SNAP --repair /tmp/corr_$SNAP.txt --workers 3

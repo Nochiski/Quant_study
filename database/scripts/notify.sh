@@ -21,7 +21,7 @@ if [ "${QL_NOTIFY_TELEGRAM:-0}" != "1" ]; then
   echo "notify: logged only ($LEVEL: $TITLE)"
   exit 0
 fi
-ENV_FILE="${QL_ENV:-/home/kael/kael-system-v3/.env}"
+ENV_FILE="${QL_ENV:-$HOME/kael-system-v3/.env}"
 if [ ! -f "$ENV_FILE" ]; then
   echo "notify: env file not found: $ENV_FILE" >&2
   exit 2

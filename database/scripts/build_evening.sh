@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 21:20 KST 잠정 빌드 트리거 — 플랜 v2 §4 Task B.1. 저녁 원장이 끝나면 stage·equity 잠정판을 짓는다.
 #   사용: scripts/build_evening.sh [--date YYYYMMDD] [--dry-run]
-#   크론(서버 TZ=UTC. 등록은 오케스트레이터): 20 12 * * 1-5 cd /home/kael/quant-ledger && scripts/build_evening.sh
+#   크론(서버 TZ=UTC. 등록은 오케스트레이터): 20 12 * * 1-5 cd $HOME/quant-ledger && scripts/build_evening.sh
 #   (09-13 까지 18:15 → 결정 11: 키움 저녁 수집이 21:05 로 옮겨져 인계 파일이 ≈21:20 에 나온다)
 #   순서: 오늘(KST) 거래일 판정 → 저녁 원장 완료 대기 → scripts/build_chain.sh evening
 #   대기 규칙: data/deliver/ledger_evening.json 이 date==오늘 && kiwoom_rc==0 && wise_rc==0 이 될
@@ -10,8 +10,8 @@
 #     세 갈래가 다 끝난 뒤에 쓰이므로, 파일이 보이는 시점엔 dart.db 쓰기도 끝나 있다(스냅샷 안전).
 #   휴장·대기 실패도 반드시 알린다 (결정 V2-7). 알림 없는 경로는 --dry-run 뿐이다.
 set -uo pipefail
-cd /home/kael/quant-ledger || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 빌드하지 않는다" >&2; exit 4; }
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd $HOME/quant-ledger || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 빌드하지 않는다" >&2; exit 4; }
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 DATE_ARG=""; DRY=""
 while [ $# -gt 0 ]; do

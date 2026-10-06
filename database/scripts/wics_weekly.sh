@@ -8,8 +8,8 @@
 #   토 11:30 `watchdog.sh wics_weekly` 가 원장에 금요일 스냅샷 38코드가 있는지 다시 본다(크론 자체가 안 돈 경우).
 #   사용: wics_weekly.sh [--date YYYYMMDD] [--retry] [--dry-run]
 set -uo pipefail
-cd /home/kael/quant-ledger || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 4; }
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 4; }
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 LOCK=/tmp/quant_ledger_raw.lock
 DATE_ARG=""; DRY=""; RETRY=""

@@ -6,8 +6,8 @@
 #   rc: 0 pass(info) · 1 fail(warn — 차이 원인 분류를 사람이 본다) · 그 외 오류(crit)
 #   사용: model_compare.sh --date YYYY-MM-DD|YYYYMMDD --left V3_QUANT_DB --right OUR_DB [--table score_history|score_history_v2|both]
 set -uo pipefail
-cd /home/kael/quant-ledger || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 2; }
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 2; }
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 DATE_ARG=""; LEFT=""; RIGHT=""; TABLE="both"
 while [ $# -gt 0 ]; do

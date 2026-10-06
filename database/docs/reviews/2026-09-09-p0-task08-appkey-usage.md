@@ -229,7 +229,7 @@ ssh kael-server 'python3' <<'PY'
 import re, datetime, collections
 pat = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})")
 agg = collections.defaultdict(collections.Counter)
-for path in ("/home/kael/logs/kael-v3/briefing.log", "/home/kael/logs/kael-v3/pipeline.log"):
+for path in ("~/logs/kael-v3/briefing.log", "~/logs/kael-v3/pipeline.log"):
     for line in open(path, errors="ignore"):
         m = pat.match(line)
         if not m or ("api.kiwoom.com" not in line and "openapi.koreainvestment.com" not in line):

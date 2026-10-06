@@ -89,7 +89,7 @@
 - 순서는 그대로 — KIS 가 07:00(v3 토큰 재발급) 전에 끝나야 한다(09-29 실측: KIS 06:13→06:41, DART 06:41→07:15).
 - `FAILED` 는 실패 단계를 **모두** 모은다("kis credit(rc=2), dart(rc=2)"). 하나라도 있으면 지금처럼 crit 알림 · 런로그 `failed` · exit 2
   (→ 같은 D 는 다음 날 다시 돈다. T-K1 뒤로는 재실행이 거짓 실패하지 않는다).
-- 테스트 가능하게 루트만 환경변수로 뺀다: `ROOT="${QL_LEDGER_ROOT:-/home/kael/quant-ledger}"`(운영 기본값 불변).
+- 테스트 가능하게 루트만 환경변수로 뺀다: `ROOT="${QL_LEDGER_ROOT:-$HOME/quant-ledger}"`(운영 기본값 불변).
 - **신규 테스트** `tests/test_daily_ledger_sh.py`: 임시 루트에 대역 `.venv/bin/python`·`scripts/*.sh` 를 두고
   ① KIS rc=2 → DART·company gap 이 실행되고 exit 2, crit 제목에 `kis credit(rc=2)` ② 전부 rc=0 → exit 0·info 알림
   ③ DART rc=2 → company gap 미실행, KIS 는 실행 ④ 실패 두 개 → `FAILED` 에 둘 다.

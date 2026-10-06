@@ -148,7 +148,7 @@
 - 상황: 모델 엑셀 발송은 `src/deliver`(status ok 판만, 기본 채널 AIPLAYGROUND — `deliver/reader.py:87`, `telegram.py:23`)로 한다. 게이트 대장 '발송 장부' ①은 "모든 엑셀 발송은 래퍼 하나를 거친다"를 요구한다(채택 전).
 - 인풋: 서버 `~/quant-ledger/logs/tg_send_doc.py`(8줄, 09-26 06:59 UTC, 644) + 같은 폴더 `sample_model_scores_20260923_morning.xlsx`.
 - 에러 위치: `logs/tg_send_doc.py:4`(`~/kael-system-v3/.env` 직접 파싱)·`:7`(curl `-F chat_id=CHAT_ID_AIPLAYGROUND -F document=@<인자>` — 판 상태·중복 검사 없음). 저장소에 없음(src 대조 결과 서버 전용은 rebuild_share.py·sync_v3_wise.py 둘뿐), deploy.sh 범위 밖이라 배포로 지워지지도 않는다. (토큰·채팅 ID 하드코딩은 없음 — 패턴 grep 0건.)
-- 위험성(운영 — 무장부 발송): 이 경로로 보낸 엑셀은 FAIL 판·중복 여부를 보지 않고 나가며 기록도 남지 않는다. 토큰이 curl 인자(URL)로 넘어가 같은 호스트의 프로세스 목록에 잠시 보인다(로컬 사용자는 kael·quantshare(chroot sftp) 둘뿐이라 실위험 낮음).
+- 위험성(운영 — 무장부 발송): 이 경로로 보낸 엑셀은 FAIL 판·중복 여부를 보지 않고 나가며 기록도 남지 않는다. 토큰이 curl 인자(URL)로 넘어가 같은 호스트의 프로세스 목록에 잠시 보인다(로컬 사용자는 운영 계정·공유 계정(chroot sftp) 둘뿐이라 실위험 낮음).
 - 근거: `ls -la ~/quant-ledger/logs/tg_send_doc.py`, `grep -nE "\.env|CHAT_ID" tg_send_doc.py`(값 마스킹), 토큰 패턴 count 0.
 
 ## 참고 — 결함은 아니지만 종합에 쓸 사실

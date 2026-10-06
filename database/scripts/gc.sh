@@ -8,7 +8,7 @@
 #   스냅샷(data/snapshots) GC 는 여기 없다 — stage 빌드에 내장한다(플랜 Task 4.2). 한 곳에서만.
 #   빌드 락을 잡는다 — 같은 자원을 만지는 run_stage_all.sh·build_chain.sh·run_equity.sh 와 같은 락이다.
 set -euo pipefail
-cd "${QL_HOME:-/home/kael/quant-ledger}"
+cd "${QL_HOME:-$HOME/quant-ledger}"
 export PYTHONPATH="$PWD/src"
 PY=.venv/bin/python
 APPLY=0

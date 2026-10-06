@@ -7,7 +7,7 @@
 #   · 로그 gzip 규칙은 여기 한 곳뿐이다(`gc.sh` 의 자체 7일 gzip 줄은 2026-09-11 에 제거).
 #   사용: rotate_logs.sh [--dry-run|--apply]
 set -euo pipefail
-cd "${QL_HOME:-/home/kael/quant-ledger}"
+cd "${QL_HOME:-$HOME/quant-ledger}"
 GZIP_DAYS=14
 PURGE_DAYS=90
 APPLY=0

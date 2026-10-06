@@ -385,7 +385,7 @@ QL_ROOT=~/quant-ledger ~/quant-ledger/.venv/bin/python ~/quant-ledger/src/backfi
 
 ```bash
 # (a) systemd user 유닛 + linger 활성화  ← 권장
-ssh kael-server 'sudo loginctl enable-linger kael'   # 비밀번호 필요
+ssh kael-server 'sudo loginctl enable-linger "$USER"'   # 비밀번호 필요
 # (b) tmux/screen 세션
 ssh kael-server 'tmux new -d -s ql "QL_ROOT=~/quant-ledger ~/quant-ledger/.venv/bin/python ~/quant-ledger/src/backfill_kw.py --tr ka10008 ..."'
 ```

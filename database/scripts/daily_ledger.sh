@@ -13,7 +13,7 @@
 #         daily_evening.sh 가 당일 저녁에 원장 직행으로 받고(결정 V2-1·V2-3), 외국인 보유(ka10008)는
 #         T-1 행이 07시 전후에 정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다.
 set -uo pipefail
-ROOT="${QL_LEDGER_ROOT:-/home/kael/quant-ledger}"   # 테스트가 임시 루트를 쓰게 할 때만 바꾼다
+ROOT="${QL_LEDGER_ROOT:-$HOME/quant-ledger}"   # 테스트가 임시 루트를 쓰게 할 때만 바꾼다
 cd "$ROOT"
 export QL_HOME="$ROOT" PYTHONPATH="$ROOT/src"
 PY=.venv/bin/python

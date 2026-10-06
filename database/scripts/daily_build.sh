@@ -6,8 +6,8 @@
 #   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
 #         QL_FORCE=1 이면 "이미 확정판 있음" 가드를 무시하고 다시 돈다(--date 명시도 같은 효과)
 set -uo pipefail
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd "$HOME/quant-ledger"
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 LOCK=/tmp/quant_ledger_raw.lock
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then

@@ -46,7 +46,7 @@ python -m model build --date 20260928 --basis morning \
 서버(수동, 09-28 판):
 
 ```bash
-cd /home/kael/quant-ledger && QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src \
+cd ~/quant-ledger && QL_HOME=~/quant-ledger PYTHONPATH=~/quant-ledger/src \
     .venv/bin/python -m model build --date 20260928 --basis morning
 ```
 

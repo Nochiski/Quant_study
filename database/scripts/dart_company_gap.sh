@@ -5,8 +5,8 @@
 #   사용: dart_company_gap.sh [--dry-run]     (06:00 daily_ledger.sh 의 DART 단계 뒤에서 부른다)
 #   비용: 공백 corp 당 DART 1콜. 평소 0~수 건.
 set -uo pipefail
-cd "${QL_HOME:-/home/kael/quant-ledger}"
-export QL_HOME="${QL_HOME:-/home/kael/quant-ledger}" PYTHONPATH="${PYTHONPATH:-/home/kael/quant-ledger/src}"
+cd "${QL_HOME:-$HOME/quant-ledger}"
+export QL_HOME="${QL_HOME:-$HOME/quant-ledger}" PYTHONPATH="${PYTHONPATH:-$HOME/quant-ledger/src}"
 PY=.venv/bin/python
 DRY=""; [ "${1:-}" = "--dry-run" ] && DRY=1
 MISSING=$(sqlite3 "file:data/raw/dart.db?mode=ro" \

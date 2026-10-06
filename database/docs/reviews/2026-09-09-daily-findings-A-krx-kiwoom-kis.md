@@ -126,7 +126,7 @@ master_daily.py:28-29  snap = (utcnow + 9h).strftime("%Y%m%d")
               :43-45   cont-yn=='Y' 면 경고만 찍고 첫 페이지만 적재
 scripts/daily_wise.sh:11  .venv/bin/python src/master_daily.py
                      :16  .venv/bin/python src/backfill_wise.py --mode full
-크론(실측): 0 21 * * *  /bin/bash /home/kael/quant-ledger/scripts/daily_wise.sh   (UTC 21:00 = KST 06:00, 매일)
+크론(실측): 0 21 * * *  /bin/bash ~/quant-ledger/scripts/daily_wise.sh   (UTC 21:00 = KST 06:00, 매일)
 ```
 - quant-ledger 크론은 **이 한 줄뿐**이다(서버 `crontab -l` 실측; 나머지는 전부 kael-system-v3·unitelegram·n8n).
 - 실측 로그 `logs/daily_wise_0909.log`: `06:00:01 → 06:04:47 KST`, 코스피 2,486행 · 코스닥 1,822행, WISE 15,617요청 / 4.7분 / 54.8req/s.

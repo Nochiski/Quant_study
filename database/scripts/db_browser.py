@@ -142,7 +142,7 @@ def build_views(con: duckdb.DuckDBPyConnection, root: Path, snapshot: str | None
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="서버 DB 조회 화면(DuckDB UI, 읽기 전용)")
     ap.add_argument("--root", type=Path,
-                    default=Path(os.environ.get("QL_HOME", "/home/kael/quant-ledger")))
+                    default=Path(os.environ.get("QL_HOME", os.path.expanduser("~/quant-ledger"))))
     ap.add_argument("--port", type=int, default=4213)
     ap.add_argument("--memory", default="3GB")
     ap.add_argument("--threads", type=int, default=2)

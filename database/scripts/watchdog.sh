@@ -3,7 +3,7 @@
 #   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly>
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 12 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh evening_ledger   # 21:50 KST (결정 11: 키움 저녁 수집 21:05)
-#     0 15 * * 1-5  cd ~/quant-ledger && scripts/watchdog.sh evening_build    # 00:00 KST (F-11 10-06: 빌드가 거래일마다 약 2분씩 길어져 23:30 → 00:00, 10-02 종료 23:02. D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
+#     55 14 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh evening_build    # 23:55 KST (F-11 10-06·10-07: 빌드가 거래일마다 약 2분씩 길어져 23:30 → 23:55, 10-02 종료 23:02. 자정을 넘기면 안 된다 — TODAY 가 다음 날이 되어 정상 판을 '오늘 것이 아니다'로 찍고, 금요일 판은 토요일 휴장 판정으로 건너뛴다(10-07 00:00 실측). D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
 #     30 2 * * 6    cd ~/quant-ledger && scripts/watchdog.sh wics_weekly      # 토 11:30 KST — 금요일 dt WICS 스냅샷 38코드(행>0)
 #     30 1 * * *    cd ~/quant-ledger && scripts/watchdog.sh morning_build    # 10:30 KST 매일 (F-11 10-06: 10:00 → 10:30, 10-03 종료 09:49 로 여유 11분. D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
@@ -15,8 +15,8 @@ PY=.venv/bin/python
 CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build>}"
 case "$CHECK" in
   evening_ledger) TITLE_OK="watchdog evening_ledger 정상"; TITLE_BAD="watchdog: 21:50 까지 저녁 원장 보고 없음/실패" ;;
-  evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:30 까지 잠정판 보고 없음/실패" ;;
-  morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 10:00 까지 확정 빌드 보고 없음/실패" ;;
+  evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:55 까지 잠정판 보고 없음/실패" ;;
+  morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 10:30 까지 확정 빌드 보고 없음/실패" ;;
   wics_weekly)    TITLE_OK="watchdog wics_weekly 정상";    TITLE_BAD="watchdog: 토 11:30 까지 WICS 주간 스냅샷 없음/불완전" ;;
   *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build, wics_weekly)" >&2; exit 2 ;;
 esac

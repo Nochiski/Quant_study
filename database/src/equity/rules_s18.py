@@ -221,7 +221,8 @@ eg6_first_observation.gate_name = "EG6"                # type: ignore[attr-defin
 def _same(c: str) -> str:
     """겹친 키(w = wise, x = v3)에서 열 `c` 가 같은 값인지 가리는 SQL 식.
 
-    `analyst_count` 만 wise 0 · v3 NULL 을 같은 값으로 본다(둘 다 '3개월 이내 의견 없음').
+    `analyst_count` 만 wise 0 · v3 NULL 을 같은 값으로 본다 — WISE 는 '3개월 이내 의견 없음'을
+    0 으로 싣고 v3 미러는 그 경우를 NULL 로 적는다(v3 NULL 에는 미커버 행도 섞여 있다).
     wise NULL · v3 0 이나 wise 0 · v3 양수는 동치가 아니라 어긋남으로 센다.
     """
     eq = f"w.{_q(c)} IS NOT DISTINCT FROM x.{_q(c)}"

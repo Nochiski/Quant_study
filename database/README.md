@@ -142,11 +142,11 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → 대차(ka20068) → KIS 신용 → DART 재스윕 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
 | 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:30) → `daily_report.py` | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") |
-| 10:00 | `0 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) | 가동 |
+| 10:30 | `30 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) → 10:30(F-11, 10-06: 빌드가 거래일마다 약 2분씩 길어져 10-03 종료 09:49) | 가동 |
 | 18:05 | `5 9 * * 1-5` | `QL_KW_EVENING_HHMM=2105 daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피) | 가동 |
 | 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, 실측 종료 22:38~22:41), 한도 21:45 | 가동 (09-17) |
 | 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
-| 23:30 | `30 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) | 가동 |
+| 00:00 | `0 15 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) → 00:00(F-11, 10-06: 10-02 종료 23:02) | 가동 |
 | 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
 | 토 03:00 | `0 18 * * 5` | `wics_weekly.sh` — WICS 섹터 구성 주간 스냅샷(dt=금요일, L2 28 + L1 10 = 38콜, 멱등) → `data/raw/wiseindex.db`. 전부 빈 응답이면 rc 4 + warn | 가동 (09-20 10:15 등록) |
 | 토 10:00 | `0 1 * * 6` | `wics_weekly.sh --retry` — 빈 코드만 다시 콜(행>0 판본은 skip). 그래도 비면 crit | 가동 (09-20) |
@@ -163,9 +163,9 @@ crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화�
 10 23 * * * /bin/bash /home/kael/quant-ledger/scripts/daily_build.sh >> /home/kael/quant-ledger/logs/cron_daily_build.log 2>&1
 5 9 * * 1-5 QL_KW_EVENING_HHMM=2105 /bin/bash /home/kael/quant-ledger/scripts/daily_evening.sh >> /home/kael/quant-ledger/logs/cron_daily_evening.log 2>&1
 50 12 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh evening_ledger >> logs/watchdog.log 2>&1
-0 1 * * * cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh morning_build >> logs/watchdog.log 2>&1
+30 1 * * * cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh morning_build >> logs/watchdog.log 2>&1
 20 12 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/build_evening.sh >> logs/build_evening.log 2>&1
-30 14 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
+0 15 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
 30 18 * * 5 cd /home/kael/quant-ledger && /bin/bash scripts/backup_raw.sh >> logs/backup_raw.log 2>&1
 30 19 * * 6 cd /home/kael/quant-ledger && /bin/bash scripts/gc.sh --apply >> logs/gc.log 2>&1
 ```

@@ -3,9 +3,9 @@
 #   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly>
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 12 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_ledger   # 21:50 KST (결정 11: 키움 저녁 수집 21:05)
-#     30 14 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 23:30 KST (D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
+#     0 15 * * 1-5  cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 00:00 KST (F-11 10-06: 빌드가 거래일마다 약 2분씩 길어져 23:30 → 00:00, 10-02 종료 23:02. D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
 #     30 2 * * 6    cd /home/kael/quant-ledger && scripts/watchdog.sh wics_weekly      # 토 11:30 KST — 금요일 dt WICS 스냅샷 38코드(행>0)
-#     0 1 * * *     cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 10:00 KST 매일 (D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
+#     30 1 * * *    cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 10:30 KST 매일 (F-11 10-06: 10:00 → 10:30, 10-03 종료 09:49 로 여유 11분. D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail

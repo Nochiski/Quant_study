@@ -5,7 +5,7 @@
         [--primary v4_rank@0.1] [--root data/model] [--fi-root data/factor_inputs] \\
         [--min-prices-on-d 2000] [--min-ranked 100] [--keep 60]
 
-rc 0 판 커밋(비교 모델이 FAIL·예외로 빠져도 0, `excluded_specs`) · 1 게이트 FAIL(판 안 올림,
+rc 0 판 커밋(비교 모델이 FAIL·예외로 빠져도 0, `excluded_specs`) · 1 주 모델 게이트 FAIL(판 안 올림,
 `_failed/<build_id>.json`) · 2 입력·인자 오류·주 모델·입력 단계 예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같은 규약.
 """

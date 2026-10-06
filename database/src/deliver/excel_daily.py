@@ -30,7 +30,18 @@ from .common import (
     winsorize,
     yoy,
 )
-from .qpack import Col, Group, Title, add_sparklines, new_workbook, write_meta, write_table
+from .qpack import (
+    C_HDR,
+    FIRST_DATA_ROW,
+    Col,
+    Group,
+    Title,
+    add_sparklines,
+    font,
+    new_workbook,
+    write_meta,
+    write_table,
+)
 from .reader import (
     DeliverError,
     fi_run_meta,
@@ -117,6 +128,16 @@ class FiData:
         periods = [str(r["target_period"]) for r in self.cons.get(t, ())
                    if r.get("target_period") is not None and str(r["target_period"]) >= asof]
         return min(periods, default=None)
+
+    def fy_month(self, t: str) -> str:
+        """결산월 'MM' — 컨센서스 결산기(가장 늦은 것)의 월, 컨센서스가 없으면 확정 연간 행의 월,
+        둘 다 없으면 '12'. 실적 시트 연간 칸 = 결산기가 끝나는 연도(사용자 결정 10-06)."""
+        p = max((str(r["target_period"]) for r in self.cons.get(t, ())
+                 if r.get("target_period") is not None), default=None)
+        if p is None:
+            a = self.annual(t, ("revenue", "op", "ni"))
+            p = None if a is None else str(a["period"])
+        return "12" if p is None else p[5:7]
 
 
 def _group(rows: Sequence[Row]) -> dict[str, list[Row]]:
@@ -242,9 +263,12 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
                 "버킷 게이트(고점근접+반전 하위 30%)")),
             Col("cov", "커버리지", "txt", None, 8.0, definition=(
                 "추정치 신선도(T2.11): 신선 · 유예 D+n(마지막 신선일부터 거래일 n) · 소멸")),
-            Col("note", "비고", "txt", None, 16.0, definition=(
+            # 너비 상한 26 — 가장 긴 조합 '최근 3개월 의견 없음 · 11월 결산'이 qpack fit 25.75
+            Col("note", "비고", "txt", None, 26.0, definition=(
                 "추정기관수(WISE 최근 3개월 투자의견을 낸 증권사 수): 0 = 최근 3개월 의견 없음 · "
-                "1~3 = 애널리스트 3명 이하 · 모름 = 애널리스트 수 미상 · 4 이상은 빈칸")),
+                "1~3 = 애널리스트 3명 이하 · 모름 = 애널리스트 수 미상 · 4 이상은 빈칸. "
+                "결산월이 12월이 아니면 'N월 결산'을 ' · ' 로 덧붙인다(실적 시트 연간 칸 = "
+                "결산기가 끝나는 연도)")),
         ), core=True),
     ]
     for b in view.buckets:
@@ -271,13 +295,15 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         u = view.uni.get(t, {})
         r = rank_of(row)
         pr = prev_rank.get(t)
+        mm = fi.fy_month(t)
+        notes = (analyst_note(u.get("n_analysts")), None if mm == "12" else f"{int(mm)}월 결산")
         out: Row = {**id_values(view, t, fi), "rank": r, "composite": composite_of(row),
                     "prev_rank": pr, "d1m": trend.delta("1M", t, r),
                     "excl": exclude_label(row.get("exclude_reason")),
                     # v3·v2 점수 행엔 신선도 열이 없다 → 그 판 fi_universe 값(v4 는 같은 값을 행에 싣는다)
                     "cov": coverage_label(row.get("coverage_state", u.get("coverage_state")),
                                           u.get("coverage_age_days")),
-                    "note": analyst_note(u.get("n_analysts"))}
+                    "note": " · ".join(n for n in notes if n) or None}
         scored = t in view.ind
         miss = []
         for b in view.buckets:
@@ -453,71 +479,85 @@ def _either(fi: FiData, t: str, period: str, key: str) -> float | None:
 
 
 def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
-    groups = [Group("종목", id_cols()),
-              Group("결산기", (
-                  Col("fy_1", "FY-1\n(확정)", "txt", None, 8.0,
-                      definition="최근 연간 확정 결산기(매출·영업이익·순이익 중 하나라도 값)"),
-                  Col("fy0", "FY0 · FY1\n(추정)", "txt", None, 14.0,
-                      definition="FY-1 + 12개월 · + 24개월 결산기(컨센서스 cur)")))]
+    # 연간 머리글 = 판 날짜의 연도 Y 로 Y−1 · YE · (Y+1)E — 해가 바뀌면 저절로 넘어간다(N-19).
+    # 칸 = 결산기가 끝나는 연도(9월 결산이면 2026E = 2026/09 결산기, 증권사 FY 표기 관례)
+    year = int(view.date[:4])
+    years = (("a", year - 1, f"{year - 1}"), ("e0", year, f"{year}E"),
+             ("e1", year + 1, f"{year + 1}E"))
+    groups = [Group("종목", id_cols())]
     for key, label in METRICS:
         cols: list[Col] = []
-        for slot, what in (("a", "FY-1"), ("e0", "FY0 E"), ("e1", "FY1 E")):
-            base = {"a": "확정", "e0": "당해 추정(컨센서스 cur)", "e1": "차기 추정(컨센서스 cur)"}
+        for slot, yr, head in years:
+            what = (f"{yr}년에 끝나는 결산기(12월 결산 = {yr}/12, 9월 결산이면 {yr}/09) "
+                    "확정치(사업보고서). 공시 전이면 같은 결산기 추정치(컨센서스 cur)를 회색 'E' "
+                    "서식으로, 둘 다 없으면 빈칸" if slot == "a"
+                    else f"{yr}년에 끝나는 결산기 추정치(컨센서스 cur)")
             cols += [
-                Col(f"{key}_{slot}", f"{what}", "num", "#,##0",
-                    definition=f"{label} {base[slot]}, 억원"),
-                Col(f"{key}_{slot}_y", f"{what}\ny-y(%)", "chg", "#,##0.0", definition=(
-                    f"{label} 전년 대비(%) — 직전 결산기(확정 우선, 없으면 추정)와 비교")),
-                Col(f"{key}_{slot}_f", f"{what}\n표식", "txt", None, 6.0, definition=(
-                    "흑전(−→+) · 적전(+→−) · 적지(−→−): 증가율 대신 표식만(E)")),
+                Col(f"{key}_{slot}", head, "num", "#,##0", definition=f"{label}(억원) {what}"),
+                Col(f"{key}_{slot}_y", f"{head}\ny-y(%)", "chg", "#,##0.0", definition=(
+                    f"{label} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 추정)와 "
+                    "비교. 부호가 바뀌면 숫자 대신 흑자전환(−→+) · 적자전환(+→−) · 적자지속(−→−)")),
             ]
         groups.append(Group(f"{label}(억원)", tuple(cols)))
-    qcols = [Col("q0p", "최근\n분기", "txt", None, 8.0, definition="영업이익이 있는 최근 분기")]
-    for k in range(N_QUARTERS - 1, -1, -1):
-        qcols.append(Col(f"q{k}", "Q0(최근)" if k == 0 else f"Q-{k}", "num", "#,##0",
-                         definition=f"분기 영업이익(3개월 값), 억원 — 최근 분기 − {3 * k}개월"))
-    qcols += [Col("q_y", "Q0\ny-y(%)", "chg", "#,##0.0",
-                  definition="최근 분기 영업이익 전년 동기 대비"),
-              Col("q_f", "Q0\n표식", "txt", None, 6.0, definition="흑전·적전·적지(E)"),
-              Col("q_avail", "Q0\n공시일", "txt", None, 10.0,
-                  definition="최근 분기 행의 available_date(공시로 알게 된 날)")]
+    # 분기 창 = 판 전 종목 중 영업이익이 있는 가장 최근 달력 분기를 끝으로 5칸(오래된 → 최근).
+    # 머리글 'YY.nQ' — 'YYYY/MM' 의 03→1Q · 06→2Q · 09→3Q · 12→4Q. 기말이 분기말이 아닌 결산월
+    # (예 11월 결산의 2026/08)은 창 끝을 정하지 않고 칸에도 들어가지 않는다(최근 분기 y-y 는 그대로)
+    q_last = max((p for row in view.rows for p, q in fi.quarters(ticker_of(row)).items()
+                  if q.get("op") is not None and p[5:7] in ("03", "06", "09", "12")),
+                 default=None)
+    q_periods = ([] if q_last is None
+                 else [period_add(q_last, -3 * k) for k in range(N_QUARTERS - 1, -1, -1)])
+    qcols = [Col(f"q:{p}", f"{p[2:4]}.{int(p[5:7]) // 3}Q", "num", "#,##0",
+                 definition=f"{p} 분기 영업이익(3개월 값), 억원 — 그 분기 행이 없으면 빈칸")
+             for p in q_periods]
+    qcols.append(Col("q_y", "최근 분기\ny-y(%)", "chg", "#,##0.0", definition=(
+        "종목마다 영업이익이 있는 최근 분기의 전년 동기 대비(%). 부호가 바뀌면 숫자 대신 "
+        "흑자전환·적자전환·적자지속")))
     groups.append(Group("분기 영업이익(억원)", tuple(qcols)))
 
     rows: list[Row] = []
-    for row in view.rows:
+    est: list[tuple[int, str]] = []         # Y−1 칸에 추정치를 넣은 (행 순번, 지표)
+    for i, row in enumerate(view.rows):
         t = ticker_of(row)
         out: Row = id_values(view, t)
-        a = fi.annual(t, ("revenue", "op", "ni"))
-        if a is not None:
-            fy_1 = str(a["period"])
-        else:
-            fy0p = fi.fy0(t, view.date)
-            fy_1 = None if fy0p is None else period_add(fy0p, -12)
-        if fy_1 is not None:
-            p0, p1 = period_add(fy_1, 12), period_add(fy_1, 24)
-            out.update(fy_1=fy_1, fy0=f"{p0} · {p1}")
-            for key, _ in METRICS:
-                slots = (("a", fy_1, _actual(fi, t, fy_1, key)),
-                         ("e0", p0, _estimate(fi, t, p0, key)),
-                         ("e1", p1, _estimate(fi, t, p1, key)))
-                for slot, p, v in slots:
-                    y, f = yoy(v, _either(fi, t, period_add(p, -12), key))
-                    out[f"{key}_{slot}"], out[f"{key}_{slot}_y"], out[f"{key}_{slot}_f"] = v, y, f
+        mm = fi.fy_month(t)                 # 결산월 — 비12월이면 점수 시트 비고에 'N월 결산'
+        for key, _ in METRICS:
+            for slot, yr, _head in years:
+                p = f"{yr}/{mm}"
+                v = _either(fi, t, p, key) if slot == "a" else _estimate(fi, t, p, key)
+                if slot == "a" and v is not None and _actual(fi, t, p, key) is None:
+                    est.append((i, key))
+                y, f = yoy(v, _either(fi, t, f"{yr - 1}/{mm}", key))
+                out[f"{key}_{slot}"], out[f"{key}_{slot}_y"] = v, f or y   # 부호 전환이면 글자
         qs = fi.quarters(t)
+        for p in q_periods:
+            q = qs.get(p)
+            out[f"q:{p}"] = None if q is None else _num(q.get("op"))
         with_op = [p for p, q in qs.items() if q.get("op") is not None]
         if with_op:
             q0 = max(with_op)
-            out["q0p"] = q0
-            for k in range(N_QUARTERS):
-                q = qs.get(period_add(q0, -3 * k))
-                out[f"q{k}"] = None if q is None else _num(q.get("op"))
-            out["q_y"], out["q_f"] = yoy(_num(out.get("q0")),
-                                         _num(out.get(f"q{N_QUARTERS - 1}")))
-            out["q_avail"] = iso(qs[q0].get("available_date"))
+            prev = qs.get(period_add(q0, -12))
+            y, f = yoy(_num(qs[q0].get("op")), None if prev is None else _num(prev.get("op")))
+            out["q_y"] = f or y
         rows.append(out)
-    note = ("연간 FY-1 확정 · FY0·FY1 추정(컨센서스) · 분기 영업이익(최근 5기). 부호 전환은 증가율 "
-            "대신 표식. 어닝시즌(예정일·잠정치·서프라이즈)은 원천이 없어 비운다.")
-    return write_table(wb, title_for(view, "실적", note), groups, rows)
+    note = ("연간: Y−1 = 확정치(사업보고서) — 공시 전이면 Y−1 추정치를 회색 'E' 로 · "
+            f"YE·(Y+1)E = 컨센서스 추정. 머리글 연도는 판 날짜 기준(Y = {year})이라 해가 바뀌면 "
+            f"자동으로 넘어간다. 연간 칸 = 결산기가 끝나는 연도(9월 결산이면 {year}E = {year}/09 "
+            "결산기, 비12월 결산은 점수 시트 비고에 'N월 결산'). "
+            "분기 = 판 전 종목의 최근 달력 분기(기말 03·06·09·12월)까지 5분기 "
+            "영업이익 — 기말이 다른 결산월의 분기는 칸이 비고 최근 분기 y-y 만 있다. 부호가 바뀌면 "
+            "y-y 칸에 숫자 대신 흑자전환·적자전환·적자지속. "
+            "어닝시즌(예정일·잠정치·서프라이즈)은 원천이 없어 비운다.")
+    dictionary = write_table(wb, title_for(view, "실적", note), groups, rows)
+    # qpack 은 서식을 열 단위로 건다 — Y−1 칸 중 추정치를 넣은 칸만 'E' 서식·회색 글자로 고친다
+    ws = wb["실적"]
+    y1_cols = dict(zip((k for k, _ in METRICS),
+                       (c for c in range(1, ws.max_column + 1)
+                        if ws.cell(7, c).value == f"{year - 1}"), strict=True))
+    for i, key in est:
+        cell = ws.cell(FIRST_DATA_ROW + i, y1_cols[key])
+        cell.number_format, cell.font = '#,##0"E"', font(color=C_HDR)
+    return dictionary
 
 
 # ── 시트: 업종 ───────────────────────────────────────────────────────────────

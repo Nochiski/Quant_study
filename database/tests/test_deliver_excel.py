@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import statistics
 import zipfile
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from deliver import __main__ as cli
 from deliver.common import cap_candidates, change_pct, quantile, winsorize, yoy
 from deliver.excel_daily import build_daily, model_label
 from deliver.excel_weekly import build_weekly, prev_week, week_days
+from deliver.qpack import Col, fit_width
 from deliver.reader import DeliverError, find_run
 from deliver.view import load_day
 from model import registry
@@ -215,7 +217,9 @@ def write_model_day(model_root: Path, day: str, fi_bid: str, *, status: str = "o
     return bid
 
 
-def write_fi_day(fi_root: Path, day: str) -> str:
+def write_fi_day(fi_root: Path, day: str,
+                 edit: Callable[[str, list[dict[str, object]]], None] | None = None) -> str:
+    """합성 fi 판 하나. `edit(표 이름, 행 목록)` 으로 쓰기 직전에 표마다 행을 고칠 수 있다."""
     bid = f"m_{day.replace('-', '')}T010000Z"
     uni, prices, adj, flows, fins, cons = [], [], [], [], [], []
     for i in range(N + 1):
@@ -269,6 +273,8 @@ def write_fi_day(fi_root: Path, day: str) -> str:
     for table, rows in (("fi_universe", uni), ("fi_prices", prices), ("fi_adj_prices", adj),
                         ("fi_flows", flows), ("fi_fin_summary", fins), ("fi_consensus", cons),
                         ("fi_credit", []), ("fi_consensus_annual", [])):
+        if edit is not None:
+            edit(table, rows)
         write_fi(fi_root, table, bid, rows)
     return bid
 
@@ -325,10 +331,12 @@ def col_of(ws, label: str, occurrence: int = 0) -> int:
 
 # ── 순수 함수 ──────────────────────────────────────────────────────────────────
 def test_yoy_sign_flags_replace_growth() -> None:
-    assert yoy(20.0, -10.0) == (None, "흑전")
-    assert yoy(-5.0, 30.0) == (None, "적전")
-    assert yoy(-20.0, -10.0) == (None, "적지")
-    assert yoy(110.0, 100.0) == (pytest.approx(10.0), None)
+    assert yoy(20.0, -10.0) == (None, "흑자전환")
+    assert yoy(-5.0, 30.0) == (None, "적자전환")
+    assert yoy(-20.0, -10.0) == (None, "적자지속")
+    assert yoy(5.0, 0.0) == (None, "흑자전환")              # 이전값 0 도 부호 전환
+    assert yoy(-5.0, 0.0) == (None, "적자전환")
+    assert yoy(110.0, 100.0) == (pytest.approx(10.0), None)  # 흑자지속은 숫자
     assert yoy(None, 1.0) == (None, None)
 
 
@@ -472,29 +480,177 @@ def test_daily_display_sheet_is_winsorized(daily) -> None:
     assert "VOL60 백분위" not in h and "60일 변동성(%)" not in h
 
 
-def test_daily_earnings_sign_flags(daily) -> None:
+def test_daily_earnings_real_years_quarters_and_sign_words(daily) -> None:
+    """N-19: 실적 시트 머리글은 실제 연도·분기다. 합성 판(09-25)은 10-02 판과 같은 구조다
+    (Y = 2026, 확정 2025/12, 컨센서스 2026·2027, 최근 분기 2026/06).
+    결산기·표식·최근 분기·Q0 공시일 열은 없고, 부호 전환은 y-y 칸 안의 글자다."""
     _, wb = daily
     ws = wb["실적"]
+    labels = [str(c.value).replace("\n", " ") for c in ws[7] if c.value is not None]
+    years = ["2025", "2025 y-y(%)", "2026E", "2026E y-y(%)", "2027E", "2027E y-y(%)"]
+    assert labels == ["코드", "이름", "대분류", *years * 3,
+                      "25.2Q", "25.3Q", "25.4Q", "26.1Q", "26.2Q", "최근 분기 y-y(%)"]
+    groups = [str(c.value) for c in ws[6] if c.value is not None]
+    assert groups == ["종목", "매출(억원)", "영업이익(억원)", "순이익(억원)", "분기 영업이익(억원)"]
+    gone = ("표식", "공시일", "결산기", "FY-1", "FY0")
+    assert not [s for s in labels + groups if any(w in s for w in gone)]
     rows = rows_by_code(ws)
-    fy_1 = col_of(ws, "FY-1", 1)          # 0 = 매출, 1 = 영업이익, 2 = 순이익
-    op_y, op_f = fy_1 + 1, fy_1 + 2
-    assert ws.cell(rows[tick(1)], op_y).value is None
-    assert ws.cell(rows[tick(1)], op_f).value == "흑전"
-    assert ws.cell(rows[tick(3)], op_f).value == "적지"
-    ni_f = col_of(ws, "FY-1", 2) + 2
-    assert ws.cell(rows[tick(2)], ni_f).value == "적전"
-    rev = col_of(ws, "FY-1", 0)
     r10 = rows[tick(10)]
+    rev = col_of(ws, "2025", 0)                       # 0 = 매출, 1 = 영업이익, 2 = 순이익
     assert ws.cell(r10, rev).value == 1200.0
+    assert ws.cell(r10, rev).number_format == "#,##0"                   # 확정치 — 'E' 아님
     assert ws.cell(r10, rev + 1).value == pytest.approx((1200 / 1100 - 1) * 100)
-    e0 = col_of(ws, "FY0 E", 0)
+    e0 = col_of(ws, "2026E", 0)
     assert ws.cell(r10, e0).value == 1300.0                              # 2026/12 컨센서스
     assert ws.cell(r10, e0 + 1).value == pytest.approx((1300 / 1200 - 1) * 100)
+    op_y = col_of(ws, "2025 y-y(%)", 1)
+    assert ws.cell(rows[tick(1)], op_y).value == "흑자전환"               # −10 → 20
+    assert ws.cell(rows[tick(3)], op_y).value == "적자지속"               # −10 → −20
+    assert ws.cell(rows[tick(2)], col_of(ws, "2025 y-y(%)", 2)).value == "적자전환"  # 순이익
     h = header(ws)
-    assert ws.cell(r10, h["FY-1 (확정)"]).value == "2025/12"
-    assert ws.cell(r10, h["최근 분기"]).value == "2026/06"
-    assert ws.cell(rows[tick(1)], h["Q0 표식"]).value == "흑전"
-    assert ws.cell(r10, h["Q0 y-y(%)"]).value == pytest.approx((14 / 10 - 1) * 100)
+    assert [ws.cell(r10, h[q]).value for q in ("25.2Q", "25.3Q", "25.4Q", "26.1Q", "26.2Q")] == [
+        10, 11, 12, 13, 14]
+    assert ws.cell(r10, h["최근 분기 y-y(%)"]).value == pytest.approx((14 / 10 - 1) * 100)
+    assert ws.cell(rows[tick(1)], h["최근 분기 y-y(%)"]).value == "흑자전환"   # −5 → 8
+
+
+def _roll_to_2027(table: str, rows: list[dict[str, object]]) -> None:
+    """2027-01-04 판 합성 — 2026 사업보고서는 0번 종목만 나왔고 나머지는 공시 전이다.
+    컨센서스는 2026·2027·2028 결산기다(11번 종목은 2026 추정치도 없다).
+    2026/09 분기는 0번 종목만 있다(분기 5기 창이라 0번의 2025/06 은 빠진다)."""
+    if table == "fi_fin_summary":
+        rows[:] = [r for r in rows if not (r["ticker"] == tick(0) and r["period"] == "2025/06")]
+        rows += [{"ticker": tick(0), "period": "2026/12", "period_type": "annual",
+                  "revenue": 1450.0, "op": 150.0, "ni": 75.0, "available_date": "2027-01-03"},
+                 {"ticker": tick(0), "period": "2026/09", "period_type": "quarter",
+                  "revenue": 250.0, "op": 20.0, "available_date": "2026-11-14"}]
+    elif table == "fi_consensus":
+        rows[:] = [r for r in rows
+                   if not (r["ticker"] == tick(11) and r["target_period"] == "2026/12")]
+        rows += [{**r, "target_period": "2028/12", "revenue": float(r["revenue"]) + 200}
+                 for r in rows if r["target_period"] == "2027/12"]
+
+
+def test_daily_earnings_headers_roll_over_with_the_board_year(tmp_path: Path) -> None:
+    """N-19: 연간 머리글은 판 날짜의 연도 Y 로 `Y−1 · YE · (Y+1)E` 다 — 2027-01-04 판은
+    `2026 · 2027E · 2028E`. 2026 확정치가 없으면 2026 추정치를 숫자 서식 `#,##0"E"`·회색 글자로
+    그 칸만 표시한다(값은 숫자). 분기 창도 판 전체의 최근 분기(2026/09)를 따라 넘어간다."""
+    day = "2027-01-04"
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, day, write_fi_day(fi_root, day, edit=_roll_to_2027))
+    res = build_daily(day, "morning", model_root=model_root, fi_root=fi_root, out_root=tmp_path)
+    ws = load_workbook(res.path)["실적"]
+    labels = [str(c.value).replace("\n", " ") for c in ws[7] if c.value is not None]
+    assert labels[3:9] == ["2026", "2026 y-y(%)", "2027E", "2027E y-y(%)", "2028E",
+                           "2028E y-y(%)"]
+    assert labels[-6:] == ["25.3Q", "25.4Q", "26.1Q", "26.2Q", "26.3Q", "최근 분기 y-y(%)"]
+    assert "2025" not in labels
+    rows = rows_by_code(ws)
+    rev = col_of(ws, "2026", 0)
+    est = ws.cell(rows[tick(10)], rev)                  # 2026 확정치 없음 → 2026 추정치
+    assert est.value == 1300 and '"E"' in est.number_format
+    assert est.font.color.rgb.endswith("7F7F7F")        # 회색 글자
+    assert ws.cell(rows[tick(10)], rev + 1).value == pytest.approx((1300 / 1200 - 1) * 100)
+    act = ws.cell(rows[tick(0)], rev)                   # 2026 확정치 있음 → 그 칸은 그대로
+    assert act.value == 1450 and act.number_format == "#,##0"
+    assert act.font.color is None or not act.font.color.rgb.endswith("7F7F7F")
+    assert ws.cell(rows[tick(11)], rev).value is None   # 확정·추정 둘 다 없으면 빈칸
+    assert ws.cell(rows[tick(10)], col_of(ws, "2028E", 0)).value == 1500
+    h = header(ws)
+    assert ws.cell(rows[tick(0)], h["26.3Q"]).value == 20
+    assert ws.cell(rows[tick(10)], h["26.3Q"]).value is None          # 그 분기 행이 없다
+    # 최근 분기 y-y 는 종목마다 자기 최근 분기 — 0번 2026/09 vs 2025/09, 10번 2026/06 vs 2025/06
+    q_y = h["최근 분기 y-y(%)"]
+    assert ws.cell(rows[tick(0)], q_y).value == pytest.approx((20 / 11 - 1) * 100)
+    assert ws.cell(rows[tick(10)], q_y).value == pytest.approx((14 / 10 - 1) * 100)
+
+
+def _off_calendar_quarters(table: str, rows: list[dict[str, object]]) -> None:
+    """5번 종목을 11월 결산사처럼 — 분기 기말이 2025/08·11·2026/02·05·08(DART period_end 그대로)이고
+    마지막 2026/08 은 12월 결산 종목들의 최근 분기(2026/06)보다 늦다."""
+    if table == "fi_fin_summary":
+        rows[:] = [r for r in rows
+                   if not (r["ticker"] == tick(5) and r["period_type"] == "quarter")]
+        rows += [{"ticker": tick(5), "period": per, "period_type": "quarter", "revenue": 250.0,
+                  "op": 30.0 + k, "available_date": "2026-10-15"}
+                 for k, per in enumerate(("2025/08", "2025/11", "2026/02", "2026/05", "2026/08"))]
+
+
+def test_daily_earnings_quarter_window_ignores_off_calendar_quarters(tmp_path: Path) -> None:
+    """분기 창 끝은 달력 분기(기말 03·06·09·12월)만 본다. 11월 결산 종목의 더 늦은 2026/08 분기가
+    창을 끌고 가면 머리글이 '26.0Q' 로 깨지고 12월 결산 종목 칸이 전부 빈다(검토 재현).
+    그 종목 분기는 달력 칸에 넣지 않고, 최근 분기 y-y 는 자기 최근 분기(2026/08 vs 2025/08)다."""
+    day = "2026-10-20"
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, day, write_fi_day(fi_root, day, edit=_off_calendar_quarters))
+    res = build_daily(day, "morning", model_root=model_root, fi_root=fi_root, out_root=tmp_path)
+    ws = load_workbook(res.path)["실적"]
+    quarters = ["25.2Q", "25.3Q", "25.4Q", "26.1Q", "26.2Q"]
+    labels = [str(c.value).replace("\n", " ") for c in ws[7] if c.value is not None]
+    assert labels[-6:] == [*quarters, "최근 분기 y-y(%)"]
+    h, rows = header(ws), rows_by_code(ws)
+    assert [ws.cell(rows[tick(10)], h[q]).value for q in quarters] == [10, 11, 12, 13, 14]
+    assert [ws.cell(rows[tick(5)], h[q]).value for q in quarters] == [None] * 5
+    assert ws.cell(rows[tick(5)], h["최근 분기 y-y(%)"]).value == pytest.approx((34 / 30 - 1) * 100)
+
+
+def _september_fy(table: str, rows: list[dict[str, object]]) -> None:
+    """2번 종목을 9월 결산사처럼 — 컨센서스 결산기 2026/09·2027/09·2028/09, 연간 확정 행 없음
+    (fi 연간 행은 12월 결산만 싣는다, U22)."""
+    if table == "fi_fin_summary":
+        rows[:] = [r for r in rows
+                   if not (r["ticker"] == tick(2) and r["period_type"] == "annual")]
+    elif table == "fi_consensus":
+        base = next(r for r in rows if r["ticker"] == tick(2) and r["horizon"] == "cur")
+        rows[:] = [r for r in rows if r["ticker"] != tick(2)]
+        rows += [{**base, "target_period": p, "revenue": rev, "op": rev / 10, "ni": rev / 20}
+                 for p, rev in (("2026/09", 900.0), ("2027/09", 990.0), ("2028/09", 1100.0))]
+
+
+def test_daily_earnings_non_december_fy_uses_the_year_the_fy_ends(tmp_path: Path) -> None:
+    """비12월 결산(사용자 결정 10-06): 연간 칸 = 결산기가 끝나는 연도(증권사 FY 표기 관례) —
+    9월 결산이면 2026E 칸 = 2026/09 결산기, y-y 는 한 해 앞 같은 결산월과 비교한다. 점수 시트
+    비고엔 'N월 결산'을 기존 비고와 ' · ' 로 잇는다. 12월 결산 종목은 그대로다."""
+    day = "2026-10-02"
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, day, write_fi_day(fi_root, day, edit=_september_fy))
+    wb = load_workbook(build_daily(day, "morning", model_root=model_root, fi_root=fi_root,
+                                   out_root=tmp_path).path)
+    ws = wb["실적"]
+    rows = rows_by_code(ws)
+    r2, r10 = rows[tick(2)], rows[tick(10)]
+    rev = {y: col_of(ws, y, 0) for y in ("2025", "2026E", "2027E")}
+    assert ws.cell(r2, rev["2025"]).value is None                    # 2025/09 확정·추정 없음
+    assert ws.cell(r2, rev["2026E"]).value == 900                    # 2026/09 결산기 추정
+    assert ws.cell(r2, rev["2027E"]).value == 990                    # 2027/09 결산기 추정
+    assert ws.cell(r2, rev["2027E"] + 1).value == pytest.approx((990 / 900 - 1) * 100)
+    assert [ws.cell(r10, rev[y]).value for y in ("2025", "2026E", "2027E")] == [1200, 1300, 1300]
+    sc = wb["점수"]
+    note, srows = header(sc)["비고"], rows_by_code(sc)
+    assert sc.cell(srows[tick(2)], note).value == "애널리스트 3명 이하 · 9월 결산"
+    assert sc.cell(srows[tick(10)], note).value is None              # 12월 결산은 붙이지 않는다
+    assert sc.cell(srows[tick(1)], note).value == "최근 3개월 의견 없음"
+
+
+def _november_fy_no_opinion(table: str, rows: list[dict[str, object]]) -> None:
+    """1번 종목(추정기관수 0 → '최근 3개월 의견 없음')을 11월 결산사로 — 비고가 가장 긴 조합이다."""
+    if table == "fi_consensus":
+        rows[:] = [{**r, "target_period": str(r["target_period"])[:5] + "11"}
+                   if r["ticker"] == tick(1) else r for r in rows]
+
+
+def test_daily_scores_note_column_fits_the_longest_note(tmp_path: Path) -> None:
+    """비고 열은 가장 긴 조합('최근 3개월 의견 없음 · 11월 결산', qpack fit 25.75)도 잘리지 않는
+    너비다 — 상한 16 이면 잘려 보인다(사용자는 잘린 표시에 민감하다)."""
+    day = "2026-10-02"
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, day, write_fi_day(fi_root, day, edit=_november_fy_no_opinion))
+    ws = load_workbook(build_daily(day, "morning", model_root=model_root, fi_root=fi_root,
+                                   out_root=tmp_path).path)["점수"]
+    col, longest = header(ws)["비고"], "최근 3개월 의견 없음 · 11월 결산"
+    assert ws.cell(rows_by_code(ws)[tick(1)], col).value == longest
+    need = fit_width(Col("note", "비고", "txt", None, 99.0), [{"note": longest}])
+    assert ws.column_dimensions[ws.cell(7, col).column_letter].width >= need
 
 
 def test_daily_sector_and_model_sheets(daily) -> None:
@@ -578,8 +734,9 @@ def test_daily_qpack_styles(daily) -> None:
     comp_w = ws.column_dimensions[ws.cell(7, h["종합 점수"]).column_letter].width
     assert 4.4 <= comp_w <= 6.5, comp_w
     shown = [ws.column_dimensions[ws.cell(7, c).column_letter] for c in range(1, ws.max_column + 1)]
-    # 문자 열 상한 16(제외 사유·비고 — '애널리스트 3명 이하'가 15.5) · 그 밖은 14 이하
-    assert max(d.width for d in shown if not d.hidden) <= 16, [d.width for d in shown]
+    # 문자 열 상한 — 제외 사유 16 · 비고 26(가장 긴 조합 '최근 3개월 의견 없음 · 11월 결산'이
+    # 25.75) · 그 밖은 14 이하
+    assert max(d.width for d in shown if not d.hidden) <= 26, [d.width for d in shown]
     wide = [ws.cell(7, c).value for c in range(1, ws.max_column + 1)
             if (d := ws.column_dimensions[ws.cell(7, c).column_letter]).width > 14 and not d.hidden]
     assert set(wide) <= {"제외 사유", "비고"}, wide

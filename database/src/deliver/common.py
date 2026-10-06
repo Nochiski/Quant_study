@@ -118,26 +118,28 @@ def split_flags(flag: object) -> list[str]:
 
 
 def yoy(cur: float | None, prev: float | None) -> tuple[float | None, str | None]:
-    """실적 y-y(%) — 흑전(−→+) · 적전(+→−) · 적지(−→−)는 증가율 대신 표식만(E). 흑지는 빈칸.
+    """실적 y-y(%) → (증가율, 부호 전환 글자). 부호가 바뀌면 증가율 대신 글자만 준다(E):
+    흑자전환(−→+) · 적자전환(+→−) · 적자지속(−→−). 흑자지속은 증가율(숫자)이다.
 
-    이전값 0 은 부호 전환으로 본다(0→+ 흑전 · 0→− 적전). 값이 없으면 (None, None).
+    이전값 0 은 부호 전환으로 본다(0→+ 흑자전환 · 0→− 적자전환). 값이 없으면 (None, None).
+    실적 시트는 글자가 있으면 글자를, 없으면 증가율을 y-y 칸 하나에 넣는다(표식 열 없음, N-19).
     """
     if cur is None or prev is None:
         return None, None
     if prev > 0:
         if cur < 0:
-            return None, "적전"
+            return None, "적자전환"
         return (cur / prev - 1.0) * 100.0, None
     if prev < 0:
         if cur > 0:
-            return None, "흑전"
+            return None, "흑자전환"
         if cur < 0:
-            return None, "적지"
+            return None, "적자지속"
         return None, None
     if cur > 0:
-        return None, "흑전"
+        return None, "흑자전환"
     if cur < 0:
-        return None, "적전"
+        return None, "적자전환"
     return None, None
 
 

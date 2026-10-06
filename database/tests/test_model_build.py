@@ -329,21 +329,43 @@ def test_failed_rerun_keeps_the_same_day_ok_run(board_tree, tmp_path, monkeypatc
     assert again.ok and json.loads(run_path.read_text())["build_id"] == again.build_id
 
 
-@pytest.mark.parametrize("before", [None, '{"status": "gate_failed"}', '{"status": "ok", ',
-                                    '["ok"]'], ids=["absent", "failed", "broken", "not_object"])
+@pytest.mark.parametrize("before", [None, b'{"status": "gate_failed"}', b'{"status": "ok", ',
+                                    b'["ok"]', b"\xff\xfe"],
+                         ids=["absent", "failed", "broken", "not_object", "not_utf8"])
 def test_failed_build_writes_the_run_record_unless_the_day_is_ok(board_tree, tmp_path,
                                                                  before) -> None:
-    """D-09 판정의 나머지 갈래 — 같은 날 기록이 없거나 · status ≠ ok 거나 · 읽을 수 없으면
-    (깨진 JSON · 객체가 아님) FAIL 도 `_runs` 를 쓴다."""
+    """D-09 판정의 나머지 갈래 — 같은 날 기록이 없거나 · status ≠ ok 거나 · 내용이 깨졌으면
+    (JSON · UTF-8 · 객체가 아님) FAIL 도 `_runs` 를 쓴다."""
     root = tmp_path / "model"
     run_path = root / "_runs" / f"{D_S}_morning.json"
     if before is not None:
         run_path.parent.mkdir(parents=True)
-        run_path.write_text(before)
+        run_path.write_bytes(before)
     bad = build(D_S, "morning", root, board_tree, specs=[V2], primary=V2,
                 min_prices_on_d=10**6, min_ranked=SMALL["min_ranked"])
     run = json.loads(run_path.read_text())
     assert not bad.ok and run["status"] == "gate_failed" and run["build_id"] == bad.build_id
+    assert not bad.run_manifest_kept
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root 는 권한 0 파일도 읽는다")
+def test_unreadable_same_day_run_is_kept_and_raises(board_tree, tmp_path) -> None:
+    """D-09: 같은 날 기록이 있는데 못 읽으면(권한 등) 덮지 않고 오류로 낸다 — 성공 기록이
+    조용히 gate_failed 로 바뀌지 않는다. 실패 보고서는 그 전에 쓴다."""
+    root = tmp_path / "model"
+    assert build(D_S, "morning", root, board_tree, specs=[V2], primary=V2, **SMALL).ok
+    run_path = root / "_runs" / f"{D_S}_morning.json"
+    before = run_path.read_bytes()
+    run_path.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            build(D_S, "morning", root, board_tree, specs=[V2], primary=V2,
+                  min_prices_on_d=10**6, min_ranked=SMALL["min_ranked"])
+    finally:
+        run_path.chmod(0o644)
+    assert run_path.read_bytes() == before
+    assert [json.loads(p.read_text())["status"] for p in (root / "_failed").glob("*.json")] == [
+        "gate_failed"]
 
 
 def test_mg4_fails_below_two_thousand_prices_on_d(golden_tree, tmp_path) -> None:

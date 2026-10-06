@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from pathlib import Path
 
 import duckdb
@@ -870,20 +871,42 @@ def test_gate_failure_commits_nothing(roots, tmp_path: Path) -> None:
     assert not (out / "_tmp" / bad.build_id).exists()
 
 
-@pytest.mark.parametrize("before", [None, '{"status": "gate_failed"}', '{"status": "ok", ',
-                                    '["ok"]'], ids=["absent", "failed", "broken", "not_object"])
+@pytest.mark.parametrize("before", [None, b'{"status": "gate_failed"}', b'{"status": "ok", ',
+                                    b'["ok"]', b"\xff\xfe"],
+                         ids=["absent", "failed", "broken", "not_object", "not_utf8"])
 def test_failed_build_writes_the_run_record_unless_the_day_is_ok(roots, tmp_path: Path,
-                                                                 before: str | None) -> None:
-    """D-09 판정의 나머지 갈래 — 같은 날 기록이 없거나 · status ≠ ok 거나 · 읽을 수 없으면
-    (깨진 JSON · 객체가 아님) FAIL 도 `_runs` 를 쓴다."""
+                                                                 before: bytes | None) -> None:
+    """D-09 판정의 나머지 갈래 — 같은 날 기록이 없거나 · status ≠ ok 거나 · 내용이 깨졌으면
+    (JSON · UTF-8 · 객체가 아님) FAIL 도 `_runs` 를 쓴다."""
     out = tmp_path / "fi"
     run_path = out / "_runs" / f"{D_S}_morning.json"
     if before is not None:
         run_path.parent.mkdir(parents=True)
-        run_path.write_text(before, encoding="utf-8")
+        run_path.write_bytes(before)
     bad = build(D_S, "morning", out, roots[1], roots[0], min_eligible=999, golden_path=None)
     run = json.loads(run_path.read_text(encoding="utf-8"))
     assert not bad.ok and run["status"] == "gate_failed" and run["build_id"] == bad.build_id
+    assert not bad.run_manifest_kept
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root 는 권한 0 파일도 읽는다")
+def test_unreadable_same_day_run_is_kept_and_raises(roots, tmp_path: Path) -> None:
+    """D-09: 같은 날 기록이 있는데 못 읽으면(권한 등) 덮지 않고 오류로 낸다 — 성공 기록이
+    조용히 gate_failed 로 바뀌지 않는다. 실패 보고서는 그 전에 쓰고 임시 판도 지운다."""
+    out = tmp_path / "fi"
+    assert build(D_S, "morning", out, roots[1], roots[0], min_eligible=5, golden_path=None).ok
+    run_path = out / "_runs" / f"{D_S}_morning.json"
+    before = run_path.read_bytes()
+    run_path.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            build(D_S, "morning", out, roots[1], roots[0], min_eligible=999, golden_path=None)
+    finally:
+        run_path.chmod(0o644)
+    assert run_path.read_bytes() == before
+    assert [json.loads(p.read_text(encoding="utf-8"))["status"]
+            for p in (out / "_failed").glob("*.json")] == ["gate_failed"]
+    assert not (out / "_tmp").exists() or not any((out / "_tmp").iterdir())
 
 
 def test_collection_stop_beyond_lag_max_fails_fresh_gate(tmp_path: Path) -> None:

@@ -72,7 +72,7 @@ class BuildResult:
     primary_spec: str
     specs: dict[str, dict[str, Any]]             # spec_id → n_scores·n_ranked·n_excluded·gates
     gates: dict[str, list[GateResult]]
-    run_manifest: Path
+    run_manifest: Path                           # kept 면 그날 성공 판 기록(이 빌드: failed_report)
     failed_report: Path | None
     elapsed_s: float
     excluded: tuple[str, ...] = ()               # 게이트 FAIL 로 이번 판에서 뺀 비교 모델
@@ -287,10 +287,11 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
         report = root / "_failed" / f"{bid}.json"
         _write_json(report, payload)
         # D-09: 같은 날 성공 기록(status ok)은 FAIL 재실행이 덮지 않는다(덮으면 인계 find_run 이
-        # 그날 판을 잃는다). 기록이 없거나 ok 가 아니거나 읽을 수 없으면(깨진 JSON 등) 덮는다.
+        # 그날 판을 잃는다). 기록이 없거나 ok 가 아니거나 내용이 깨졌으면(JSON·UTF-8) 덮는다.
+        # 있는데 못 읽으면(권한 등) 덮지 않고 오류로 낸다 — 실패 보고서는 이미 썼다.
         try:
             prev = json.loads(run_manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (FileNotFoundError, ValueError):
             prev = None
         kept = isinstance(prev, dict) and prev.get("status") == "ok"
         if not kept:

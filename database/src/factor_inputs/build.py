@@ -90,7 +90,7 @@ class BuildResult:
     basis: str
     tables: dict[str, dict[str, object]]     # 표 → n_rows · content_hash · inputs
     gates: list[GateResult]
-    run_manifest: Path
+    run_manifest: Path                       # kept 면 그날 성공 판 기록(이 빌드: failed_report)
     failed_report: Path | None
     elapsed_s: float
     coverage: dict[str, object] = field(default_factory=dict)
@@ -311,16 +311,17 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     if failed:
         report = root / "_failed" / f"{bid}.json"
         _write_json(report, payload)
+        shutil.rmtree(tmp_root, ignore_errors=True)
         # D-09: 같은 날 성공 기록(status ok)은 FAIL 재실행이 덮지 않는다(덮으면 엑셀 메타 시트의
-        # fi 판 기록이 빈다). 기록이 없거나 ok 가 아니거나 읽을 수 없으면(깨진 JSON 등) 덮는다.
+        # fi 판 기록이 빈다). 기록이 없거나 ok 가 아니거나 내용이 깨졌으면(JSON·UTF-8) 덮는다.
+        # 있는데 못 읽으면(권한 등) 덮지 않고 오류로 낸다 — 보고서는 이미 썼고 임시 판도 지웠다.
         try:
             prev = json.loads(run_manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (FileNotFoundError, ValueError):
             prev = None
         kept = isinstance(prev, dict) and prev.get("status") == "ok"
         if not kept:
             _write_json(run_manifest, payload)
-        shutil.rmtree(tmp_root, ignore_errors=True)
         return BuildResult(status, bid, d_iso, basis, tables, results, run_manifest, report,
                            elapsed, coverage, run_manifest_kept=kept)
 

@@ -12,7 +12,7 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 | stage | 66테이블 커밋(09-05), 원장 정지 날짜까지 |
 | equity | 29표(`coverage_daily` S24 추가)·규칙 **e1.15.0**(코드 반영 09-11, 서버 첫 빌드 대기 — 아래는 e1.14.0 서버 상태)·규칙 e1.14.0(09-09 전량 재빌드로 단일화)·팩터 준비도 54/54. catalog `2c38be1d58fb03be`·contract pass, baseline 락 바이트 동일(09-09 정렬) |
 | 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1·P2 완료(키움 갭은 09-09 저녁 즉시 실행), P3 크론 가동(09-09), 관찰 1/5 통과(09-10)** — 06:00 수집·08:10 빌드 체인, 키움 단계 포함(사용자 결정: 공유 앱키로 콜). **첫 적재분 검수**(09-10): high 5·mid 9 → `docs/reviews/2026-09-10-intake-audit-summary.md`. 수집기 핫픽스 3건(WISE 커버 판정·키움 유예·DART 분기 창) 배포 `52d0f48`, 사용자 결정 3건 반영(결정 6: 키움 머지 신규 행만·KIS 최초 관측판(P5)·G3 개정). **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
-| 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도는 21:05 원장 직행 ∥ DART ∥ WISE 스냅샷) · 21:20 `build_evening.sh`(잠정 빌드) · 06:00 `daily_ledger.sh`(키움 마스터, 대차, KIS, DART 재스윕) · 08:10 `daily_build.sh`(KRX → 외국인 보유 → 머지 → 건전성 → **확정 빌드 포함**, 09-17 `--no-build` 제거) · 워치독 21:50/00:00/10:30(F-11, 10-06) · 토 03:30 백업 · 일 04:30 gc. 전체는 아래 "운영 (P6) → 크론 전체표" |
+| 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도는 21:05 원장 직행 ∥ DART ∥ WISE 스냅샷) · 21:20 `build_evening.sh`(잠정 빌드) · 06:00 `daily_ledger.sh`(키움 마스터, 월요일 DART 번호표, 대차, KIS, DART 재스윕) · 08:10 `daily_build.sh`(KRX → 외국인 보유 → 머지 → 건전성 → **확정 빌드 포함**, 09-17 `--no-build` 제거) · 워치독 21:50/00:00/10:30(F-11, 10-06) · 토 03:30 백업 · 일 04:30 gc. 전체는 아래 "운영 (P6) → 크론 전체표" |
 
 ## 층 구조
 
@@ -139,7 +139,7 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | KST | crontab (UTC) | 스크립트 | 상태 |
 |---|---|---|---|
 | 토 03:30 | `30 18 * * 5` | `backup_raw.sh` — 원장 6 DB 온라인 백업, 금요일 장마감분. 성공 시 최신 1세트만 보관(결정 9, 09-14) | 가동 |
-| 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → 대차(ka20068) → KIS 신용 → DART 재스윕 | 가동 |
+| 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → (월요일 KST) DART 번호표 갱신 `dart_universe.py`(A-01, 10-06 — 'D 이미 수집' 건너뜀 검사보다 앞) → 대차(ka20068) → KIS 신용 → DART 재스윕 → 회사 정보 공백 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
 | 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:30) → `daily_report.py` | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") |
 | 10:30 | `30 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) → 10:30(F-11, 10-06: 빌드가 거래일마다 약 2분씩 길어져 10-03 종료 09:49) | 가동 |
@@ -172,7 +172,7 @@ crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화�
 
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`
 (잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
-`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy).
+`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다).
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 

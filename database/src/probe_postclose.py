@@ -188,6 +188,9 @@ def collect(con: sqlite3.Connection, client: CountingClient, run: str, api_id: s
                         (ts, run, api_id, tk, target, f"{out.status.value} {out.detail}"[:300]))
             if out.status is KW.CallStatus.TOKEN:
                 break
+        # 콜마다 커밋한다 — 반복 전체를 트랜잭션 하나로 잡으면 같은 DB 에 쓰는 다른 프로세스
+        # (minute·sweep)가 그동안 쓰기 잠금에 막힌다(L-02). TOKEN 중단은 아래 반복 끝 커밋이 맡는다
+        con.commit()
         time.sleep(max(0.0, gap - (time.time() - t0)))
     con.commit()
     stats: dict[str, int | str] = {
@@ -343,9 +346,14 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
         for key, per in minute.items():
             if key.endswith("flows"):
                 continue
+            # 이 거래소·TR 에서 값이 한 번도 없던 종목(T 행 없음·빈 값, 예: NXT 미상장)은
+            # 분모에서 뺀다(L-01)
+            per = {tk: s for tk, s in per.items() if any(v is not None for _, v in s)}
             times = sorted({t for s in per.values() for t, _ in s})
+            # 공식 종가가 없으면 일치로 세지 않는다 — None == None 은 일치가 아니다(L-05)
             match = {t: sum(1 for tk, s in per.items() for tt, v in s
-                            if tt == t and official.get(tk, (None,))[0] == v) for t in times}
+                            if tt == t and (o := official.get(tk, (None,))[0]) is not None
+                            and o == v) for t in times}
             n = len(per)
             all_ok = [t for t in times if match[t] == n]
             after_close = [t for t in times if t >= "15:31"]
@@ -384,9 +392,11 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
                 firsts = {tk: _first(rows) for _, tk, rows in obs}
                 got = {tk: r for tk, r in firsts.items() if r is not None}
                 entry["n_t_rows"] = len(got)
+                # 공식 종가가 없으면 일치로 세지 않는다 — None == None 은 일치가 아니다(L-05)
                 entry["close_match"] = sum(
                     1 for tk, r in got.items()
-                    if official.get(tk, (None,))[0] == price(r.get("cur_prc")))
+                    if (o := official.get(tk, (None,))[0]) is not None
+                    and o == price(r.get("cur_prc")))
                 entry["flows"] = {tk: tuple(str(r.get(k)) for k in FLOW_KEYS)
                                   for tk, r in got.items()}
             else:
@@ -396,7 +406,8 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
                 for field in ("cur_prc", "close_pric", "base_pric"):
                     entry[f"{field}_match_close"] = sum(
                         1 for tk, r in rows.items()
-                        if official.get(tk, (None,))[0] == price(r.get(field)))
+                        if (o := official.get(tk, (None,))[0]) is not None
+                        and o == price(r.get(field)))
             sweeps[f"{run}/{base}/{ex}"] = entry
         flow_runs = [k for k in sweeps if k.endswith("/ka10060/KRX")]
         for a, b in zip(flow_runs, flow_runs[1:], strict=False):

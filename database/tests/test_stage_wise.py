@@ -5,6 +5,7 @@ blob 구조는 2026-09-02 서버 ws_raw 실측(§10). 픽스처는 실물 인코
 import json
 import sqlite3
 import zlib
+from collections.abc import Iterable
 from pathlib import Path
 
 import duckdb
@@ -572,3 +573,124 @@ def test_fin_wise_separate_basis_rows_keep_values_and_fs_basis():
     r = res.rows[0]
     assert r["fs_basis"] == "IFRS별도" and r["period_label_5"] == "2025/12<br />(IFRS별도)"
     assert r["val_5"] == "150.6" and r["accode"] == "203170"   # 파서는 값을 문자열로 보존(캐스팅은 stage 규칙)
+
+
+# ── B-01: stg_fin_wise·_q 를 회사 단위로 나눠 푼다(플랜 2026-10-06 Task 3) ─────────────────────
+# 운영 원장 DDL(backfill_wise.DDL)과 같은 키 — 이 키의 색인이 회사 묶음 조회를 받친다.
+WS_RAW_PK_DDL = ("CREATE TABLE ws_raw (cmp_cd TEXT NOT NULL, ep TEXT NOT NULL,"
+                 " pkey TEXT NOT NULL, fetched_date TEXT NOT NULL, body BLOB NOT NULL,"
+                 " sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, fetched_at TEXT NOT NULL,"
+                 " PRIMARY KEY (cmp_cd, ep, pkey, fetched_date))")
+FIN_CMPS = ["462870", "005930", "0010V0", "000020"]   # 정렬 밖 순서로 적재(rowid ≠ 회사 순)
+
+
+def _fin_body(k: int, tag: str, n: int) -> bytes:
+    return _fin_blob([_fin_row(f"2{k}{i:04d}", f"계정{tag}{i}", data5=1000.5 + 100 * k + i)
+                      for i in range(n)])
+
+
+def _fin_ws_rows(broken: bool) -> list[tuple]:
+    """회사 4 × 수집일 2 × (cF3002 Y·Q:IS·Y:BS·Y:CF·X:ZZ · cF4002 Y) + ep 밖 cF5001.
+
+    X:ZZ 는 두 파서가 다 건너뛰는 pkey 다. 첫 회사의 Y 는 12행이라 seq 10·11 이 정수 정렬을
+    탄다.
+    """
+    rows = []
+    for fd in ("2026-10-02", "2026-09-30"):
+        for k, cmp in enumerate(FIN_CMPS):
+            rows.append(_row(cmp, "cF3002", "Y", _fin_body(k, "Y", 12 if k == 0 else 3), fd))
+            rows.append(_row(cmp, "cF4002", "Y", _fin_body(k, "R", 2), fd))
+            rows += [_row(cmp, "cF3002", pk, _fin_body(k, pk, 2), fd)
+                     for pk in ("Q:IS", "Y:BS", "Y:CF", "X:ZZ")]
+            rows.append(_row(cmp, "cF5001", "202612", b"not-read", fd))
+    rows.append(_row("005930", "cF3002", "Y:CF", _fin_blob([]), "2026-10-01"))     # 빈 DATA
+    if broken:                          # 파서 실패 계상도 묶음 사이에서 더해져야 한다
+        rows += [_row("0010V0", "cF4002", "Y", b"\x78\x9cbroken", "2026-10-01"),
+                 _row("0010V0", "cF3002", "Q:IS", b"\x78\x9cbroken", "2026-10-01")]
+    return rows
+
+
+def _snap_fin(tmp_path: Path, broken: bool) -> snapshot.Snapshot:
+    d = tmp_path / "raw"
+    d.mkdir(exist_ok=True)
+    p = d / "wisereport.db"
+    con = sqlite3.connect(p)
+    con.execute(WS_RAW_PK_DDL)
+    con.executemany(f"INSERT INTO ws_raw VALUES ({','.join('?' * len(WS_COLS))})",
+                    _fin_ws_rows(broken))
+    con.commit()
+    con.close()
+    return snapshot.make_snapshot({"wise": p}, tmp_path / "snapshots", snapshot_id="s")
+
+
+def _load_fin(tmp_path: Path, snap: snapshot.Snapshot, name: str, tag: str, **kw: int
+              ) -> tuple[bytes, list[str], dict[str, object], int]:
+    """`_load_blob_source` 한 번 → (src_all.jsonl 바이트, 열, metrics, src_all 행 수)."""
+    rule = rules.RULES[name]
+    d = tmp_path / tag
+    d.mkdir()
+    con = duckdb.connect()
+    con.execute("LOAD sqlite")
+    build._attach(con, rule, snap, {})
+    cols, metrics = build._load_blob_source(con, rule, d, **kw)
+    row = con.execute("SELECT count(*) FROM src_all").fetchone()
+    con.close()
+    assert row is not None
+    return (d / "src_all.jsonl").read_bytes(), cols, metrics, int(row[0])
+
+
+@pytest.mark.parametrize("name", ["stg_fin_wise", "stg_fin_wise_q"])
+def test_fin_blob_source_split_by_company_equals_one_shot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """회사 1곳씩 나눠 푼 결과가 한 번에 푼 결과와 JSONL 바이트·metrics 까지 같다. 나눠 풀면
+    파서를 회사 오름차순으로 여러 번 부른다 — 한 번에 한 묶음의 행만 메모리에 산다."""
+    snap = _snap_fin(tmp_path, broken=True)
+    bs = rules.RULES[name].blob_source
+    assert bs is not None
+    real = parsers.PARSERS[bs.parser]
+    calls: list[list[str]] = []
+
+    def spy(blobs: Iterable[parsers.RawBlob]) -> parsers.ParseResult:
+        got = list(blobs)
+        calls.append(sorted({b.cmp_cd for b in got}))
+        return real(got)
+
+    monkeypatch.setitem(parsers.PARSERS, bs.parser, spy)
+    with monkeypatch.context() as m:        # 한 번에 푸는 기존 경로(다른 파서와 같은 길)
+        m.setattr(build, "CHUNKED_PARSERS", frozenset())
+        one = _load_fin(tmp_path, snap, name, "one")
+    assert [c for c in calls if c] == [sorted(FIN_CMPS)]
+    calls.clear()
+    per1 = _load_fin(tmp_path, snap, name, "per1", chunk_companies=1)
+    assert [c for c in calls if c] == [[c] for c in sorted(FIN_CMPS)]   # 오름차순 1곳씩
+    calls.clear()
+    big = _load_fin(tmp_path, snap, name, "big", chunk_companies=10**9)
+    assert [c for c in calls if c] == [sorted(FIN_CMPS)]
+    assert one[0] == per1[0] == big[0]          # JSONL 바이트 = src_all 적재 입력
+    assert one[1:] == per1[1:] == big[1:]       # 열 · metrics · src_all 행 수
+    pm = one[2]
+    assert pm["n_rows_emitted"] == one[3] > 0
+    assert pm["n_parse_failed"] == 1 and pm["n_skipped_pkey"] > 0   # 건너뛴 pkey 도 센다
+
+
+def test_build_fin_wise_content_hash_unchanged_when_split_by_company(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """서버 G3(운영 MANIFEST content_hash 대조)의 로컬판 — 한 번에 푼 빌드 · 기본 묶음 ·
+    1곳씩 묶음의 content_hash · 행 수 · G8 metrics 가 같다. content_hash 는 행 순서와
+    무관한 bit_xor 라, 행 순서는 위 JSONL 바이트 비교가 지킨다."""
+    snap = _snap_fin(tmp_path, broken=False)
+    real = build._load_blob_source
+    for name in ("stg_fin_wise", "stg_fin_wise_q"):
+        rule = rules.RULES[name]
+        with monkeypatch.context() as m:
+            m.setattr(build, "CHUNKED_PARSERS", frozenset())
+            one = build.build_table(rule, snap, tmp_path / "one")
+        dflt = build.build_table(rule, snap, tmp_path / "dflt")
+        with monkeypatch.context() as m:
+            m.setattr(build, "_load_blob_source",
+                      lambda con, r, d: real(con, r, d, chunk_companies=1))
+            per1 = build.build_table(rule, snap, tmp_path / "per1")
+        got = [(r.ok, r.content_hash, r.n_rows,
+                next(g.metrics for g in r.gates if g.name == "G8")) for r in (one, dflt, per1)]
+        assert got[0][0] and got[0][2] > 0, name
+        assert got[0] == got[1] == got[2], name

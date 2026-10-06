@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sqlite3
 import time
 import unicodedata
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -27,6 +29,7 @@ from .model import (
     KIND_NUMERIC,
     KIND_TEXT,
     RULES_VERSION,
+    BlobSource,
     ColumnRule,
     TableRule,
 )
@@ -415,37 +418,113 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
     return "CAST(NULL AS DATE) AS available_date, CAST(NULL AS VARCHAR) AS available_basis", ""
 
 
-def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule, tmp_dir: Path
+# B-01(플랜 2026-10-06 Task 3) — 회사 단위로 나눠 푸는 파서. 한 번에 풀면 파서가 전 행
+# dict 를 쥐어 빌드 메모리가 수집일마다 는다(10-03 서버 stg_fin_wise 557만 행 · 최대 RSS
+# 13.4GiB, RAM 15.4GiB). `parsers._parse_fin` 은 (cmp_cd, fetched_date, ep, pkey, seq) 로
+# 전역 정렬하므로, 회사 오름차순 묶음을 차례로 풀어 이어 쓰면 JSONL 행 순서(→ src_all ·
+# parquet · content_hash)가 한 번에 푼 것과 같다.
+CHUNKED_PARSERS: frozenset[str] = frozenset({"parse_fin_wise", "parse_fin_wise_q"})
+# 묶음 크기 근거(10-06 측정): 파서 출력 1행 ≈ 2.2KB, 회사 1곳 ≈ 수집일마다 257행(557만 행
+# ÷ 867곳 ÷ 25일) → 지금 ≈ 14MB/곳. 20곳이면 ≈ 0.3GB, 수집일이 60일 늘어도 ≈ 1GB 다.
+# 묶음마다 색인 조회 한 번이라 묶음을 줄여도 전체 시간은 그대로다(1·20·100곳 실측 같음).
+FIN_CHUNK_COMPANIES = 20
+
+
+def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule, tmp_dir: Path,
+                      chunk_companies: int = FIN_CHUNK_COMPANIES
                       ) -> tuple[list[str], dict[str, object]]:
     """blob 원장을 파이썬 파서로 언네스트해 `src_all` 임시 테이블(전 컬럼 VARCHAR)로 올린다.
 
     적재는 JSON Lines 파일 → `read_json` 한 번. duckdb executemany 는 행마다 statement 를 돌려
     34만 행에 수십 분이 걸렸다(S3 서버 실측). JSON null 이 그대로 NULL 이라 ''/NULL 구분도 보존된다.
+    `CHUNKED_PARSERS`(ws_raw 모양)는 회사 `chunk_companies` 곳씩 나눠 푼다(B-01).
     """
     bs = rule.blob_source
     if bs is None:
         raise ValueError(f"_load_blob_source called without blob_source: {rule.name}")
     parser = parsers.PARSERS[bs.parser]
-    src_ref = f"{_q(bs.db)}.{_q(bs.table)}"
-    if bs.select_sql is not None:                                   # ws_raw 모양이 아닌 blob 원장(wics_raw)
-        sql = bs.select_sql.replace("{src}", src_ref)
-    else:
-        eps = ", ".join(f"'{e}'" for e in bs.eps)
-        sql = f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at FROM {src_ref} WHERE ep IN ({eps})"
-    rows = con.execute(sql).fetchall()
-    blobs = [parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
-                             bytes(r[4]) if r[4] is not None else b"", str(r[5])) for r in rows]
-    res = parser(blobs)
-    cols = list(res.columns)
     jsonl = tmp_dir / "src_all.jsonl"
-    with open(jsonl, "w", encoding="utf-8") as f:
-        for r in res.rows:
-            f.write(json.dumps({c: r[c] for c in cols}, ensure_ascii=False))
-            f.write("\n")
+    if bs.parser in CHUNKED_PARSERS and bs.select_sql is None:
+        cols, metrics = _write_jsonl_by_company(con, bs, parser, jsonl, chunk_companies)
+    else:
+        src_ref = f"{_q(bs.db)}.{_q(bs.table)}"
+        if bs.select_sql is not None:                               # ws_raw 모양이 아닌 blob 원장(wics_raw)
+            sql = bs.select_sql.replace("{src}", src_ref)
+        else:
+            eps = ", ".join(f"'{e}'" for e in bs.eps)
+            sql = f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at FROM {src_ref} WHERE ep IN ({eps})"
+        rows = con.execute(sql).fetchall()
+        blobs = [parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
+                                 bytes(r[4]) if r[4] is not None else b"", str(r[5])) for r in rows]
+        res = parser(blobs)
+        cols, metrics = list(res.columns), res.metrics
+        with open(jsonl, "w", encoding="utf-8") as f:
+            for r in res.rows:
+                f.write(json.dumps({c: r[c] for c in cols}, ensure_ascii=False))
+                f.write("\n")
     schema = ", ".join(f"{_q(c)}: 'VARCHAR'" for c in cols)
     con.execute(f"CREATE OR REPLACE TEMP TABLE src_all AS SELECT *, '{bs.table}' AS _src "
                 f"FROM read_json('{jsonl}', format='newline_delimited', columns={{{schema}}})")
-    return cols, res.metrics
+    return cols, metrics
+
+
+def _write_jsonl_by_company(con: duckdb.DuckDBPyConnection, bs: BlobSource,
+                            parser: Callable[[Iterable[parsers.RawBlob]], parsers.ParseResult],
+                            jsonl: Path, chunk_companies: int
+                            ) -> tuple[list[str], dict[str, object]]:
+    """B-01 — ws_raw 를 회사 `chunk_companies` 곳씩 읽어 파싱하고 그 행을 JSONL 에 바로 쓴 뒤
+    버린다.
+
+    - 회사 목록은 파이썬 `sorted` 로 정렬한다 — 파서의 str 정렬과 같아야 이어 쓴 행이 전역
+      정렬과 같다.
+    - 블롭은 ATTACH 된 sqlite 파일을 sqlite3 읽기 전용으로 직접 읽는다. duckdb sqlite 스캐너는
+      WHERE 를 sqlite 로 넘기지 않아(1.5.5 실측 — sqlite 가 받는 질의는 `WHERE ROWID BETWEEN`
+      뿐) 묶음마다 표 전체(다른 ep 본문까지)를 훑는다. 직접 읽으면 키 색인을 탄다.
+    - pkey 는 SQL 에서 거르지 않는다 — 파서가 건너뛰며 세는 n_skipped_pkey 가 같아야 한다.
+    - metrics 는 정수는 더하고 dict(ep 별 n_blobs)는 키별로 더한다. 블롭이 없으면 parser([])
+      의 열·0 이다.
+    """
+    if chunk_companies < 1:
+        raise ValueError(f"chunk_companies must be >= 1: got {chunk_companies} parser={bs.parser}")
+    found = con.execute("SELECT path FROM duckdb_databases() WHERE database_name = ?",
+                        [bs.db]).fetchone()
+    if found is None or found[0] is None:
+        raise FileNotFoundError(f"blob ledger is not attached: db={bs.db} table={bs.table}")
+    empty = parser([])
+    cols, metrics = list(empty.columns), empty.metrics
+    table = _q(bs.table)
+    eps = list(bs.eps)
+    ep_in = ", ".join("?" * len(eps))
+    lite = sqlite3.connect(f"file:{found[0]}?mode=ro", uri=True)
+    try:
+        cmps = sorted(str(r[0]) for r in lite.execute(
+            f"SELECT DISTINCT cmp_cd FROM {table} WHERE ep IN ({ep_in})", eps))
+        with open(jsonl, "w", encoding="utf-8") as f:
+            for i in range(0, len(cmps), chunk_companies):
+                part = cmps[i:i + chunk_companies]
+                cur = lite.execute(
+                    f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at FROM {table} "
+                    f"WHERE cmp_cd IN ({', '.join('?' * len(part))}) AND ep IN ({ep_in})",
+                    part + eps)
+                res = parser([parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
+                                              bytes(r[4]) if r[4] is not None else b"", str(r[5]))
+                              for r in cur])
+                for r in res.rows:
+                    f.write(json.dumps({c: r[c] for c in cols}, ensure_ascii=False))
+                    f.write("\n")
+                for k, v in res.metrics.items():
+                    acc = metrics[k]
+                    if isinstance(v, dict) and isinstance(acc, dict):
+                        for kk, n in v.items():
+                            acc[kk] = acc.get(kk, 0) + n
+                    elif isinstance(v, int) and isinstance(acc, int):
+                        metrics[k] = acc + v
+                    else:
+                        raise TypeError(f"cannot sum parse metric {k}={v!r} parser={bs.parser}")
+                del res          # 다음 묶음 전에 놓는다 — 두 묶음의 행이 겹쳐 살지 않게
+    finally:
+        lite.close()
+    return cols, metrics
 
 
 def _load_file_source(con: duckdb.DuckDBPyConnection, rule: TableRule, snap: Snapshot,

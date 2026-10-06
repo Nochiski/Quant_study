@@ -12,6 +12,7 @@
             같은 날 성공 기록이 있으면 `_runs` 는 덮지 않는다(실패는 `_failed/` 에만, D-09).
             판 전체가 실패하는 것은 **주 모델(primary)** 이 FAIL 일 때뿐이다. 비교 모델만 FAIL 이면
             그 spec 만 빼고(`excluded_specs`) 나머지를 올린다(2026-10-05 사용자 결정 N-11 '격리').
+            비교 모델의 엔진 예외도 그 spec 만 뺀다(주 모델 예외는 전체 실패, D-01).
 
 판 id 하나(`m_<UTC>`)를 선택한 spec 이 공유한다. spec 마다 포인터를 따로 바꾸므로 전환 순간에는
 spec 끼리 판이 섞여 보일 수 있다 — 소비자(deliver)는 `latest_<basis>.json` 의 `build_id` 로 읽는다.
@@ -44,8 +45,10 @@ from model import gates, registry
 from model.contracts import FI_TABLES, FactorInputs, ModelSpec
 from model.engines import ENGINES
 
-RULES_VERSION = "mb1.2.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
+RULES_VERSION = "mb1.3.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
                             # 1.2.0(2026-10-05): 비교 모델 실패 격리(N-11)
+                            # 1.3.0(2026-10-06): 비교 모델 엔진 예외도 그 spec 만 뺌(D-01) · FAIL 재실행이
+                            #   같은 날 ok `_runs` 기록을 덮지 않음(D-09)
 LAYER = "model"
 BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
@@ -54,6 +57,8 @@ PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — �
 # 한다 — 3 이면 같은 날 재빌드 세 번에 전날 판이 지워졌다(10-05 Δ순위 빈칸).
 # 60 ≈ 거래일 석 달(판 하나 약 140KB).
 KEEP_DEFAULT = 60
+# 엔진 예외로 뺀 비교 모델 사유('<예외 클래스>: <메시지>')의 글자 수 상한 — 넘으면 앞에서 자른다(D-01)
+ERROR_MAX = 500
 SCORES_FILE = "scores.parquet"
 INDICATORS_FILE = "indicators.parquet"
 
@@ -71,11 +76,12 @@ class BuildResult:
     fi_build_id: str
     primary_spec: str
     specs: dict[str, dict[str, Any]]             # spec_id → n_scores·n_ranked·n_excluded·gates
-    gates: dict[str, list[GateResult]]
+                                                 # (엔진 예외로 뺀 비교 모델은 error 하나, D-01)
+    gates: dict[str, list[GateResult]]           # 엔진 예외로 뺀 비교 모델은 없다
     run_manifest: Path                           # kept 면 그날 성공 판 기록(이 빌드: failed_report)
     failed_report: Path | None
     elapsed_s: float
-    excluded: tuple[str, ...] = ()               # 게이트 FAIL 로 이번 판에서 뺀 비교 모델
+    excluded: tuple[str, ...] = ()               # 게이트 FAIL·엔진 예외로 이번 판에서 뺀 비교 모델
     run_manifest_kept: bool = False              # FAIL 이지만 같은 날 성공 기록을 덮지 않았다(D-09)
 
     @property
@@ -83,7 +89,9 @@ class BuildResult:
         return self.status == "ok"
 
     def summary(self) -> str:
-        parts = [f"{sid} n={s['n_scores']} ranked={s['n_ranked']}" for sid, s in self.specs.items()]
+        parts = [f"{sid} error" if "error" in s
+                 else f"{sid} n={s['n_scores']} ranked={s['n_ranked']}"
+                 for sid, s in self.specs.items()]
         warns = [f"{sid}:{g.name}" for sid, rs in self.gates.items() for g in rs
                  if gates.status_of(g) == gates.WARN]
         fails = [f"{sid}:{g.name}" for sid, rs in self.gates.items() for g in gates.failed(rs)]
@@ -251,19 +259,30 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
 
     results = {}
     gate_results: dict[str, list[GateResult]] = {}
+    errors: dict[str, str] = {}                  # 엔진 예외로 뺀 비교 모델 → 사유
     for spec in selected:
         engine = ENGINES[spec.engine]
-        first = engine.run(spec, inputs)
-        ctx = gates.GateContext(
-            spec=spec, date=d_iso, inputs=inputs, result=first, rerun=engine.run(spec, inputs),
-            n_prices_on_d=n_on_d, min_prices_on_d=min_prices_on_d, min_ranked=min_ranked,
-            previous=_previous(root, spec))
+        try:
+            first = engine.run(spec, inputs)
+            ctx = gates.GateContext(
+                spec=spec, date=d_iso, inputs=inputs, result=first, rerun=engine.run(spec, inputs),
+                n_prices_on_d=n_on_d, min_prices_on_d=min_prices_on_d, min_ranked=min_ranked,
+                previous=_previous(root, spec))
+            gate_results[spec.spec_id] = gates.run_all(ctx)
+        except Exception as e:
+            # D-01: 비교 모델의 실행·재실행·게이트 평가 예외는 그 spec 만 뺀다(N-11).
+            # 주 모델 예외는 잡지 않는다 — 판 전체 실패(CLI rc 2).
+            if spec.spec_id == primary:
+                raise
+            errors[spec.spec_id] = f"{type(e).__name__}: {e}"[:ERROR_MAX]
+            continue
         results[spec.spec_id] = first
-        gate_results[spec.spec_id] = gates.run_all(ctx)
     summary: dict[str, dict[str, Any]] = {
-        s.spec_id: {**gates.counts(s, results[s.spec_id]),
-                    "gates": gates.as_dicts(gate_results[s.spec_id])} for s in selected}
-    failed_ids = {sid for sid, rs in gate_results.items() if gates.failed(rs)}
+        s.spec_id: ({"error": errors[s.spec_id]} if s.spec_id in errors else
+                    {**gates.counts(s, results[s.spec_id]),
+                     "gates": gates.as_dicts(gate_results[s.spec_id])}) for s in selected}
+    # 엔진 예외로 뺀 비교 모델도 게이트 FAIL 과 같이 판에서 뺀다(주 모델은 위에서 이미 raise)
+    failed_ids = {sid for sid, rs in gate_results.items() if gates.failed(rs)} | set(errors)
     failed = primary in failed_ids
     excluded = () if failed else tuple(s for s in ids if s in failed_ids)
     published = [s for s in selected if s.spec_id not in failed_ids]

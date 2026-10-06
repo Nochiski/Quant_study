@@ -1090,6 +1090,26 @@ def test_failed_comparison_model_is_left_out_of_the_excel(tmp_path: Path, monkey
     assert model_label(v2) not in header(wb["모델 비교"])
 
 
+def test_engine_error_comparison_model_reason_in_the_meta_sheet(tmp_path: Path) -> None:
+    """D-01: 엔진 예외로 뺀 비교 모델(`excluded_specs` 항목에 `error`)은 메타에 '엔진 오류로 …'
+    와 사유를 적는다. 게이트로 뺀 것은 '게이트 실패로 …' 문구 그대로다."""
+    v2, v3 = "v2_percentrank@1.0", "v3_zscore@1.0"
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, FRI, write_fi_day(fi_root, FRI))
+    path = model_root / "_runs" / "20260925_morning.json"
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    gate_failed = meta["specs"].pop(v3)
+    gate_failed["gates"] = {"MG3": {"status": "fail"}}
+    meta["specs"].pop(v2)
+    meta["excluded_specs"] = {v2: {"error": "ZeroDivisionError: x"}, v3: gate_failed}
+    path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    res = build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root, out_root=tmp_path)
+    ws = load_workbook(res.path)["메타"]
+    pairs = {ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(8, ws.max_row + 1)}
+    assert pairs[f"제외된 비교 모델 {v2}"] == "엔진 오류로 이번 판에서 뺐다 · ZeroDivisionError: x"
+    assert pairs[f"제외된 비교 모델 {v3}"] == "게이트 실패로 이번 판에서 뺐다 · MG3 fail"
+
+
 def test_display_names_strip_common_suffix_and_wics_prefix() -> None:
     from deliver.reader import display_names
     rows = display_names([

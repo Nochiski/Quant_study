@@ -136,6 +136,11 @@ def edit_scores(fn: Callable[[list[dict[str, object]]], None]):
     return apply
 
 
+def boom(_: EngineResult) -> EngineResult:
+    """엔진 예외 흉내(D-01) — 지표 계산의 0 나누기."""
+    raise ZeroDivisionError("지표 분모 0")
+
+
 # ── 판 규약 · 산출 ────────────────────────────────────────────────────────────
 def test_build_writes_every_spec_under_one_build_id(built) -> None:
     root, res = built
@@ -297,6 +302,95 @@ def test_primary_failure_publishes_nothing_even_if_others_pass(board_tree, tmp_p
     run = json.loads((root / "_runs" / f"{D_S}_morning.json").read_text())
     assert run["status"] == "gate_failed" and set(run["specs"]) == {V2, V4}
     assert run["excluded_specs"] == {}
+
+
+def test_comparison_model_engine_error_is_isolated(board_tree, tmp_path, monkeypatch,
+                                                   capsys) -> None:
+    """D-01: 비교 모델(V2) 엔진이 예외를 내도 그 spec 만 빼고 주 모델 판은 올린다(N-11 완성).
+    사유는 `excluded_specs[V2].error` 에 '<예외 클래스>: <메시지>' 로 남는다."""
+    patch_engine(monkeypatch, "v2_percentrank", boom)
+    root = tmp_path / "model"
+    res = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert res.ok and res.excluded == (V2,)
+    assert res.specs[V2] == {"error": "ZeroDivisionError: 지표 분모 0"} and V2 not in res.gates
+    assert f"EXCLUDED={V2}" in res.summary()
+    latest = json.loads((root / "latest_morning.json").read_text())
+    assert latest["status"] == "ok" and latest["build_id"] == res.build_id
+    assert set(latest["specs"]) == {V4} and set(latest["excluded_specs"]) == {V2}
+    assert latest["excluded_specs"][V2]["error"].startswith("ZeroDivisionError: ")
+    assert (root / V4 / f"v={res.build_id}" / "scores.parquet").exists()
+    assert not (root / V2 / f"v={res.build_id}").exists()
+    assert manifest.load(root / V2 / "MANIFEST.json").current_build is None
+    assert not (root / "_failed").exists()
+    rc = cli_main(["build", "--date", D_S, "--basis", "morning", "--fi-root", str(board_tree),
+                   "--root", str(tmp_path / "cli"), "--specs", f"{V2},{V4}", "--primary", V4,
+                   "--min-prices-on-d", "10", "--min-ranked", "10"])
+    err = capsys.readouterr().err
+    assert rc == 0 and f"{V2} 엔진 오류: ZeroDivisionError" in err and "비교 모델 제외" in err
+
+
+def test_comparison_model_rerun_error_is_isolated(board_tree, tmp_path, monkeypatch) -> None:
+    """D-01: 결정성 게이트(MG2)용 재실행 — 두 번째 run 에서만 예외가 나도 같은 격리.
+    사유가 길면 `ERROR_MAX` 자에서 자른다."""
+    calls = {"n": 0}
+    long_msg = "지표 분모 0 " + "x" * 1000
+
+    def second_run_fails(r: EngineResult) -> EngineResult:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise ZeroDivisionError(long_msg)
+        return r
+    patch_engine(monkeypatch, "v2_percentrank", second_run_fails)
+    root = tmp_path / "model"
+    res = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert calls["n"] == 2
+    assert res.ok and res.excluded == (V2,) and V2 not in res.gates
+    latest = json.loads((root / "latest_morning.json").read_text())
+    assert latest["build_id"] == res.build_id and set(latest["specs"]) == {V4}
+    error = f"ZeroDivisionError: {long_msg}"[:mbuild.ERROR_MAX]
+    assert mbuild.ERROR_MAX == 500 and latest["excluded_specs"] == {V2: {"error": error}}
+    assert (root / V4 / f"v={res.build_id}" / "scores.parquet").exists()
+    assert not (root / V2 / f"v={res.build_id}").exists()
+
+
+def test_primary_engine_error_still_fails_the_build(board_tree, tmp_path, monkeypatch,
+                                                    capsys) -> None:
+    """D-01 회귀 가드: 주 모델(V4) 엔진 예외는 격리하지 않는다 — 예외가 그대로 나가고(CLI rc 2)
+    판·`_runs`·latest 를 하나도 쓰지 않는다."""
+    patch_engine(monkeypatch, "v4_rank", boom)
+    root = tmp_path / "model"
+    with pytest.raises(ZeroDivisionError, match="지표 분모 0"):
+        build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert not (root / "latest_morning.json").exists()
+    assert not (root / "_runs").exists() and not (root / "_failed").exists()
+    assert not list(root.glob("*/v=*"))
+    rc = cli_main(["build", "--date", D_S, "--basis", "morning", "--fi-root", str(board_tree),
+                   "--root", str(tmp_path / "cli"), "--specs", f"{V2},{V4}", "--primary", V4,
+                   "--min-prices-on-d", "10", "--min-ranked", "10"])
+    assert rc == 2 and "ZeroDivisionError: 지표 분모 0" in capsys.readouterr().err
+
+
+def test_primary_gate_failure_records_the_comparison_engine_error(board_tree, tmp_path,
+                                                                  monkeypatch, capsys) -> None:
+    """D-01: 주 모델이 게이트 FAIL 이면 지금처럼 판 전체 실패 — 예외 낸 비교 모델은 실패 보고서
+    `specs` 에 `{error}` 로 남고 `excluded_specs` 는 `{}` 그대로다."""
+    patch_engine(monkeypatch, "v2_percentrank", boom)
+    patch_engine(monkeypatch, "v4_rank", edit_scores(
+        lambda s: next(r for r in s if r["rank"] == 1).update(composite=100.5)))
+    root = tmp_path / "model"
+    res = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert not res.ok and res.status == "gate_failed" and res.excluded == ()
+    assert f"FAIL={V4}:MG3" in res.summary()
+    report = json.loads((root / "_failed" / f"{res.build_id}.json").read_text())
+    assert report["specs"][V2] == {"error": "ZeroDivisionError: 지표 분모 0"}
+    assert report["specs"][V4]["gates"]["MG3"]["status"] == "fail"
+    assert report["excluded_specs"] == {}
+    assert not (root / "latest_morning.json").exists()
+    rc = cli_main(["build", "--date", D_S, "--basis", "morning", "--fi-root", str(board_tree),
+                   "--root", str(tmp_path / "cli"), "--specs", f"{V2},{V4}", "--primary", V4,
+                   "--min-prices-on-d", "10", "--min-ranked", "10"])
+    err = capsys.readouterr().err
+    assert rc == 1 and f"{V2} 엔진 오류: ZeroDivisionError" in err and "비교 모델 제외" not in err
 
 
 def test_failed_rerun_keeps_the_same_day_ok_run(board_tree, tmp_path, monkeypatch,

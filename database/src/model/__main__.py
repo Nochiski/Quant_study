@@ -58,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     for sid, rs in result.gates.items():
         for g in gates.failed(rs):
             print(f"  {sid} {g.name} FAIL: {g.detail}", file=sys.stderr)
+    for sid, s in result.specs.items():
+        if "error" in s:                         # 엔진 예외로 뺀 비교 모델(D-01)
+            print(f"  {sid} 엔진 오류: {s['error']}", file=sys.stderr)
     if result.excluded:
         print(f"  비교 모델 제외(주 모델 판은 올림): {', '.join(result.excluded)}", file=sys.stderr)
     if not result.ok:

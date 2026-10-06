@@ -72,7 +72,8 @@ data/model/
   `<spec_id>/v=<build_id>/` 로 옮긴 다음 `stage.manifest.commit` → `_runs` → `latest` 순. FAIL 이면
   parquet 을 쓰지 않는다. **판 전체가 실패하는 것은 주 모델(`primary_spec`)이 FAIL 일 때뿐이다.** 비교
   모델만 FAIL 이면 그 spec 만 빼고(`excluded_specs`, MANIFEST·`v=<build_id>` 없음) 나머지를 올린다
-  (2026-10-05 사용자 결정 N-11 '격리', mb1.2.0).
+  (2026-10-05 사용자 결정 N-11 '격리', mb1.2.0). 비교 모델의 엔진 예외도 그 spec 만 뺀다(주 모델 예외는
+  전체 실패, D-01, mb1.3.0).
 - MANIFEST `BuildRecord`: `n_rows` = 점수 행 수, `content_hash` = 점수 파일 해시(equity 와 같은 식),
   `partitions[0]` = `{path: "v=<build_id>", n_rows, content_hash, n_indicators, indicators_content_hash}`,
   `inputs` = `{"factor_inputs": <fi build_id>}`, `gates` = MG0~MG5(`name`·`status`·`detail`·`metrics`),
@@ -106,8 +107,8 @@ data/model/
 | `date` · `basis` | 판 기준일 D(ISO) · `morning` |
 | `fi_build_id` | 읽은 factor_inputs 판 id |
 | `generated_at` | UTC(`…Z`) |
-| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부 |
-| `excluded_specs` | 게이트 FAIL 로 이번 판에서 뺀 비교 모델 — `specs` 와 같은 모양. 없으면 `{}`(gate_failed 판도 `{}`) |
+| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(엔진 예외 낸 비교 모델은 `{error}` 하나) |
+| `excluded_specs` | 게이트 FAIL·엔진 예외로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 엔진 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`(500자에서 자름, D-01). 없으면 `{}`(gate_failed 판도 `{}`) |
 | `primary_spec` | 인계 대표 모델(`--primary`) |
 | `elapsed_s` | 적재·엔진·게이트 소요(초) |
 

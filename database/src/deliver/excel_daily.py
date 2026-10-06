@@ -131,7 +131,9 @@ class FiData:
 
     def fy_month(self, t: str) -> str:
         """결산월 'MM' — 컨센서스 결산기(가장 늦은 것)의 월, 컨센서스가 없으면 확정 연간 행의 월,
-        둘 다 없으면 '12'. 실적 시트 연간 칸 = 결산기가 끝나는 연도(사용자 결정 10-06)."""
+        둘 다 없으면 '12'. 실적 시트 연간 칸 = 결산기가 끝나는 연도(사용자 결정 10-06).
+        U22 전까지 fi 연간 행은 12월 결산만이라 두 번째 대안은 늘 '12' — 컨센서스 없는
+        비12월 결산사는 12월로 떨어진다(물결 4)."""
         p = max((str(r["target_period"]) for r in self.cons.get(t, ())
                  if r.get("target_period") is not None), default=None)
         if p is None:
@@ -489,7 +491,7 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
         cols: list[Col] = []
         for slot, yr, head in years:
             what = (f"{yr}년에 끝나는 결산기(12월 결산 = {yr}/12, 9월 결산이면 {yr}/09) "
-                    "확정치(사업보고서). 공시 전이면 같은 결산기 추정치(컨센서스 cur)를 회색 'E' "
+                    "확정치(사업보고서). 확정치가 없으면 같은 결산기 추정치(컨센서스 cur)를 회색 'E' "
                     "서식으로, 둘 다 없으면 빈칸" if slot == "a"
                     else f"{yr}년에 끝나는 결산기 추정치(컨센서스 cur)")
             cols += [
@@ -540,7 +542,7 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
             y, f = yoy(_num(qs[q0].get("op")), None if prev is None else _num(prev.get("op")))
             out["q_y"] = f or y
         rows.append(out)
-    note = ("연간: Y−1 = 확정치(사업보고서) — 공시 전이면 Y−1 추정치를 회색 'E' 로 · "
+    note = ("연간: Y−1 = 확정치(사업보고서) — 확정치가 없으면 Y−1 추정치를 회색 'E' 로 · "
             f"YE·(Y+1)E = 컨센서스 추정. 머리글 연도는 판 날짜 기준(Y = {year})이라 해가 바뀌면 "
             f"자동으로 넘어간다. 연간 칸 = 결산기가 끝나는 연도(9월 결산이면 {year}E = {year}/09 "
             "결산기, 비12월 결산은 점수 시트 비고에 'N월 결산'). "

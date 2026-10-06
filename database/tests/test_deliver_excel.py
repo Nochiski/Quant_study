@@ -555,6 +555,9 @@ def test_daily_earnings_headers_roll_over_with_the_board_year(tmp_path: Path) ->
     assert act.value == 1450 and act.number_format == "#,##0"
     assert act.font.color is None or not act.font.color.rgb.endswith("7F7F7F")
     assert ws.cell(rows[tick(11)], rev).value is None   # 확정·추정 둘 다 없으면 빈칸
+    # 열 전체 대조 — 'E' 칸은 0번(확정)·11번(빈칸)을 뺀 전 종목, 서식이 한 행 밀리면 깨진다
+    e_rows = {code for code, r in rows.items() if '"E"' in ws.cell(r, rev).number_format}
+    assert e_rows == set(rows) - {tick(0), tick(11)}
     assert ws.cell(rows[tick(10)], col_of(ws, "2028E", 0)).value == 1500
     h = header(ws)
     assert ws.cell(rows[tick(0)], h["26.3Q"]).value == 20

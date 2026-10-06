@@ -43,7 +43,7 @@ data/factor_inputs/
   fi_<표>/MANIFEST.json            # stage.manifest — current_build · keep=3 · BuildRecord.inputs
   fi_<표>/v=<build_id>/part0.parquet
   fi_<표>/v=<build_id>/_meta.json  # 표·판·행수·content_hash·inputs·창·게이트
-  _runs/<YYYYMMDD>_<basis>.json    # 판 manifest(V2-8) — 성공·실패 모두. 같은 날 재실행은 덮는다
+  _runs/<YYYYMMDD>_<basis>.json    # 판 manifest(V2-8) — 성공·실패 모두. 같은 날 재실행은 덮는다. 단 FAIL 재실행은 같은 날 성공 기록을 덮지 않는다(실패는 _failed/ 에만)
   latest_<basis>.json              # 마지막 성공 판(= 그 판의 _runs 내용)
   _failed/<build_id>.json          # 게이트 FAIL 보고서
   _tmp/<build_id>/                 # 빌드 중 임시(끝나면 지운다)

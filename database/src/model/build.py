@@ -9,6 +9,7 @@
              + 판 manifest `_runs/<D>_<basis>.json` + `latest_<basis>.json`
   → 실패: 아무 것도 쓰지 않고 `_failed/<build_id>.json` + `_runs/<D>_<basis>.json`
             (status gate_failed). MANIFEST·latest 는 건드리지 않는다(마지막 성공 판 유지).
+            같은 날 성공 기록이 있으면 `_runs` 는 덮지 않는다(실패는 `_failed/` 에만, D-09).
             판 전체가 실패하는 것은 **주 모델(primary)** 이 FAIL 일 때뿐이다. 비교 모델만 FAIL 이면
             그 spec 만 빼고(`excluded_specs`) 나머지를 올린다(2026-10-05 사용자 결정 N-11 '격리').
 
@@ -75,6 +76,7 @@ class BuildResult:
     failed_report: Path | None
     elapsed_s: float
     excluded: tuple[str, ...] = ()               # 게이트 FAIL 로 이번 판에서 뺀 비교 모델
+    run_manifest_kept: bool = False              # FAIL 이지만 같은 날 성공 기록을 덮지 않았다(D-09)
 
     @property
     def ok(self) -> bool:
@@ -276,15 +278,24 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
         "primary_spec": primary, "elapsed_s": elapsed}
     run_manifest = root / "_runs" / f"{d.strftime('%Y%m%d')}_{basis}.json"
 
-    def result(report: Path | None) -> BuildResult:
+    def result(report: Path | None, *, kept: bool = False) -> BuildResult:
         return BuildResult(status, bid, d_iso, basis, fi_bid, primary, summary, gate_results,
-                           run_manifest, report, elapsed, excluded=excluded)
+                           run_manifest, report, elapsed, excluded=excluded,
+                           run_manifest_kept=kept)
 
     if failed:
         report = root / "_failed" / f"{bid}.json"
         _write_json(report, payload)
-        _write_json(run_manifest, payload)
-        return result(report)
+        # D-09: 같은 날 성공 기록(status ok)은 FAIL 재실행이 덮지 않는다(덮으면 인계 find_run 이
+        # 그날 판을 잃는다). 기록이 없거나 ok 가 아니거나 읽을 수 없으면(깨진 JSON 등) 덮는다.
+        try:
+            prev = json.loads(run_manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            prev = None
+        kept = isinstance(prev, dict) and prev.get("status") == "ok"
+        if not kept:
+            _write_json(run_manifest, payload)
+        return result(report, kept=kept)
 
     tmp_root = root / "_tmp" / bid
     if tmp_root.exists():

@@ -8,6 +8,7 @@
              + 판 manifest `_runs/<D>_<basis>.json` + `latest_<basis>.json`
   → 실패: 임시 폐기 + `_failed/<build_id>.json` + `_runs/<D>_<basis>.json`(status gate_failed).
             MANIFEST·latest 는 건드리지 않는다(마지막 성공 판 유지).
+            같은 날 성공 기록이 있으면 `_runs` 는 덮지 않는다(실패는 `_failed/` 에만, D-09).
 
 판 id 하나(`m_<UTC>`)를 8표가 공유한다. 표마다 포인터를 따로 바꾸므로 전환 순간에는 표끼리 판이
 섞여 보일 수 있다 — 소비자는 `latest_<basis>.json` 의 `build_id` 로 읽는다(표마다 keep=3 이라
@@ -93,6 +94,7 @@ class BuildResult:
     failed_report: Path | None
     elapsed_s: float
     coverage: dict[str, object] = field(default_factory=dict)
+    run_manifest_kept: bool = False          # FAIL 이지만 같은 날 성공 기록을 덮지 않았다(D-09)
 
     @property
     def ok(self) -> bool:
@@ -309,10 +311,18 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     if failed:
         report = root / "_failed" / f"{bid}.json"
         _write_json(report, payload)
-        _write_json(run_manifest, payload)
+        # D-09: 같은 날 성공 기록(status ok)은 FAIL 재실행이 덮지 않는다(덮으면 엑셀 메타 시트의
+        # fi 판 기록이 빈다). 기록이 없거나 ok 가 아니거나 읽을 수 없으면(깨진 JSON 등) 덮는다.
+        try:
+            prev = json.loads(run_manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            prev = None
+        kept = isinstance(prev, dict) and prev.get("status") == "ok"
+        if not kept:
+            _write_json(run_manifest, payload)
         shutil.rmtree(tmp_root, ignore_errors=True)
         return BuildResult(status, bid, d_iso, basis, tables, results, run_manifest, report,
-                           elapsed, coverage)
+                           elapsed, coverage, run_manifest_kept=kept)
 
     gate_dicts = [g.as_dict() for g in results]
     built_at = datetime.now(UTC).isoformat(timespec="seconds")

@@ -861,11 +861,29 @@ def test_gate_failure_commits_nothing(roots, tmp_path: Path) -> None:
         assert manifest.load(out / t / "MANIFEST.json").current_build == ok.build_id
         assert not (out / t / f"v={bad.build_id}").exists()
     assert bad.failed_report is not None and bad.failed_report.exists()
+    # D-09: 같은 날 성공 기록은 FAIL 재실행이 덮지 않는다(실패는 `_failed/` 에만)
     run = json.loads((out / "_runs" / f"{D_S}_morning.json").read_text(encoding="utf-8"))
-    assert run["status"] == "gate_failed" and run["build_id"] == bad.build_id
+    assert run["status"] == "ok" and run["build_id"] == ok.build_id
+    assert bad.run_manifest_kept
     latest = json.loads((out / "latest_morning.json").read_text(encoding="utf-8"))
     assert latest["build_id"] == ok.build_id
     assert not (out / "_tmp" / bad.build_id).exists()
+
+
+@pytest.mark.parametrize("before", [None, '{"status": "gate_failed"}', '{"status": "ok", ',
+                                    '["ok"]'], ids=["absent", "failed", "broken", "not_object"])
+def test_failed_build_writes_the_run_record_unless_the_day_is_ok(roots, tmp_path: Path,
+                                                                 before: str | None) -> None:
+    """D-09 판정의 나머지 갈래 — 같은 날 기록이 없거나 · status ≠ ok 거나 · 읽을 수 없으면
+    (깨진 JSON · 객체가 아님) FAIL 도 `_runs` 를 쓴다."""
+    out = tmp_path / "fi"
+    run_path = out / "_runs" / f"{D_S}_morning.json"
+    if before is not None:
+        run_path.parent.mkdir(parents=True)
+        run_path.write_text(before, encoding="utf-8")
+    bad = build(D_S, "morning", out, roots[1], roots[0], min_eligible=999, golden_path=None)
+    run = json.loads(run_path.read_text(encoding="utf-8"))
+    assert not bad.ok and run["status"] == "gate_failed" and run["build_id"] == bad.build_id
 
 
 def test_collection_stop_beyond_lag_max_fails_fresh_gate(tmp_path: Path) -> None:
@@ -901,6 +919,7 @@ def test_cli_return_codes(roots, tmp_path: Path, capsys) -> None:
     assert cli_main(base + ["--basis", "morning", "--min-eligible", "5"]) == 0
     assert "factor_inputs ok" in capsys.readouterr().out
     assert cli_main(base + ["--basis", "morning", "--min-eligible", "999"]) == 1
+    assert "같은 날 성공 기록" in capsys.readouterr().err        # D-09: _runs 는 첫 판 그대로
     assert cli_main(base + ["--basis", "evening"]) == 2
 
 

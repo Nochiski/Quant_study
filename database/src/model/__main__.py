@@ -62,6 +62,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  비교 모델 제외(주 모델 판은 올림): {', '.join(result.excluded)}", file=sys.stderr)
     if not result.ok:
         print(f"  보고서 {result.failed_report}", file=sys.stderr)
+        if result.run_manifest_kept:
+            print(f"  같은 날 성공 기록 {result.run_manifest} 은 그대로 둔다(실패는 보고서에만)",
+                  file=sys.stderr)
         return 1
     return 0
 

@@ -254,7 +254,7 @@ def test_gate_failure_keeps_previous_latest(board_tree, tmp_path) -> None:
     assert report["status"] == "gate_failed" and report["build_id"] == bad.build_id
     assert report["specs"][V3]["gates"]["MG4"]["status"] == "fail"
     run = json.loads((root / "_runs" / f"{D_S}_morning.json").read_text())
-    assert run["status"] == "gate_failed"
+    assert run["status"] == "ok" and run["build_id"] == first.build_id    # 같은 날 성공 기록(D-09)
     for spec_id in ALL_SPECS:
         assert not (root / spec_id / f"v={bad.build_id}").exists()
         assert manifest.load(root / spec_id / "MANIFEST.json").current_build == first.build_id
@@ -297,6 +297,53 @@ def test_primary_failure_publishes_nothing_even_if_others_pass(board_tree, tmp_p
     run = json.loads((root / "_runs" / f"{D_S}_morning.json").read_text())
     assert run["status"] == "gate_failed" and set(run["specs"]) == {V2, V4}
     assert run["excluded_specs"] == {}
+
+
+def test_failed_rerun_keeps_the_same_day_ok_run(board_tree, tmp_path, monkeypatch,
+                                                capsys) -> None:
+    """D-09: 같은 날 성공 판 뒤의 FAIL 재실행은 `_runs` 를 덮지 않는다(실패는 `_failed/` 에만).
+    인계 `find_run` 이 그날 성공 판을 계속 찾는다. 성공 재실행은 지금처럼 덮는다."""
+    from deliver.reader import find_run
+
+    root = tmp_path / "model"
+    run_path = root / "_runs" / f"{D_S}_morning.json"
+    first = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert first.ok
+    with monkeypatch.context() as m:                     # 주 모델(V4) MG3 FAIL
+        patch_engine(m, "v4_rank", edit_scores(
+            lambda s: next(r for r in s if r["rank"] == 1).update(composite=100.5)))
+        bad = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+        rc = cli_main(["build", "--date", D_S, "--basis", "morning", "--fi-root",
+                       str(board_tree), "--root", str(root), "--specs", f"{V2},{V4}",
+                       "--primary", V4, "--min-prices-on-d", "10", "--min-ranked", "10"])
+    assert not bad.ok and bad.status == "gate_failed"
+    report = json.loads((root / "_failed" / f"{bad.build_id}.json").read_text())
+    assert report["status"] == "gate_failed" and report["build_id"] == bad.build_id
+    run = json.loads(run_path.read_text())
+    assert run["status"] == "ok" and run["build_id"] == first.build_id
+    got = find_run(root, D, "morning")
+    assert got is not None and got.build_id == first.build_id
+    assert bad.run_manifest_kept
+    assert rc == 1 and "같은 날 성공 기록" in capsys.readouterr().err
+    again = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert again.ok and json.loads(run_path.read_text())["build_id"] == again.build_id
+
+
+@pytest.mark.parametrize("before", [None, '{"status": "gate_failed"}', '{"status": "ok", ',
+                                    '["ok"]'], ids=["absent", "failed", "broken", "not_object"])
+def test_failed_build_writes_the_run_record_unless_the_day_is_ok(board_tree, tmp_path,
+                                                                 before) -> None:
+    """D-09 판정의 나머지 갈래 — 같은 날 기록이 없거나 · status ≠ ok 거나 · 읽을 수 없으면
+    (깨진 JSON · 객체가 아님) FAIL 도 `_runs` 를 쓴다."""
+    root = tmp_path / "model"
+    run_path = root / "_runs" / f"{D_S}_morning.json"
+    if before is not None:
+        run_path.parent.mkdir(parents=True)
+        run_path.write_text(before)
+    bad = build(D_S, "morning", root, board_tree, specs=[V2], primary=V2,
+                min_prices_on_d=10**6, min_ranked=SMALL["min_ranked"])
+    run = json.loads(run_path.read_text())
+    assert not bad.ok and run["status"] == "gate_failed" and run["build_id"] == bad.build_id
 
 
 def test_mg4_fails_below_two_thousand_prices_on_d(golden_tree, tmp_path) -> None:

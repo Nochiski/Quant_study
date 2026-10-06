@@ -57,7 +57,7 @@ data/model/
   <spec_id>/MANIFEST.json                     # stage.manifest — current_build · keep=60 · builds[]
   <spec_id>/v=<build_id>/scores.parquet       # 점수 표(열 = score_columns(spec))
   <spec_id>/v=<build_id>/indicators.parquet   # 지표 긴 표(열 = INDICATOR_COLUMNS, v3·v2 는 0행)
-  _runs/<YYYYMMDD>_<basis>.json               # 판 manifest — 성공·실패 모두. 같은 날 재실행은 덮는다
+  _runs/<YYYYMMDD>_<basis>.json               # 판 manifest — 성공·실패 모두. 같은 날 재실행은 덮는다. 단 FAIL 재실행은 같은 날 성공 기록을 덮지 않는다(실패는 _failed/ 에만)
   latest_<basis>.json                         # 마지막 성공 판(= 그 판의 _runs 내용)
   _failed/<build_id>.json                     # 게이트 FAIL 보고서(판 manifest 와 같은 모양)
   _tmp/<build_id>/                            # 쓰는 중 임시(끝나면 지운다)

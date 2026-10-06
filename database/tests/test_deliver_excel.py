@@ -1090,8 +1090,31 @@ def test_failed_comparison_model_is_left_out_of_the_excel(tmp_path: Path, monkey
     assert model_label(v2) not in header(wb["모델 비교"])
 
 
+def test_erroring_comparison_model_is_left_out_of_the_excel(tmp_path: Path, monkeypatch) -> None:
+    """D-01 왕복(build ↔ 엑셀 계약): 비교 모델 엔진이 예외를 내면 `model.build` 가 그 모델을 빼고,
+    일일 엑셀은 그 모델 열을 빼고 메타에 '실행 오류로 …' 와 사유를 적는다."""
+    from model import build as mbuild
+    from test_model_build import board_fi, boom, patch_engine, write_fi_tree
+
+    v2 = "v2_percentrank@1.0"
+    fi_root = write_fi_tree(tmp_path / "fi", board_fi())
+    patch_engine(monkeypatch, "v2_percentrank", boom)
+    res = mbuild.build("20260928", "morning", tmp_path / "model", fi_root,
+                       min_prices_on_d=10, min_ranked=10)
+    assert res.ok and res.excluded == (v2,)
+    d = build_daily("2026-09-28", "morning", model_root=tmp_path / "model", fi_root=fi_root,
+                    out_root=tmp_path / "out")
+    wb = load_workbook(d.path)
+    pairs = {wb["메타"].cell(r, 1).value: wb["메타"].cell(r, 2).value
+             for r in range(8, wb["메타"].max_row + 1)}
+    assert pairs[f"제외된 비교 모델 {v2}"] == (
+        "실행 오류로 이번 판에서 뺐다 · ZeroDivisionError: 지표 분모 0")
+    assert f"판 게이트 {v2}" not in pairs and v2 not in pairs["비교 모델"]
+    assert model_label(v2) not in header(wb["모델 비교"])
+
+
 def test_engine_error_comparison_model_reason_in_the_meta_sheet(tmp_path: Path) -> None:
-    """D-01: 엔진 예외로 뺀 비교 모델(`excluded_specs` 항목에 `error`)은 메타에 '엔진 오류로 …'
+    """D-01: 실행 예외로 뺀 비교 모델(`excluded_specs` 항목에 `error`)은 메타에 '실행 오류로 …'
     와 사유를 적는다. 게이트로 뺀 것은 '게이트 실패로 …' 문구 그대로다."""
     v2, v3 = "v2_percentrank@1.0", "v3_zscore@1.0"
     model_root, fi_root = tmp_path / "model", tmp_path / "fi"
@@ -1106,7 +1129,7 @@ def test_engine_error_comparison_model_reason_in_the_meta_sheet(tmp_path: Path) 
     res = build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root, out_root=tmp_path)
     ws = load_workbook(res.path)["메타"]
     pairs = {ws.cell(r, 1).value: ws.cell(r, 2).value for r in range(8, ws.max_row + 1)}
-    assert pairs[f"제외된 비교 모델 {v2}"] == "엔진 오류로 이번 판에서 뺐다 · ZeroDivisionError: x"
+    assert pairs[f"제외된 비교 모델 {v2}"] == "실행 오류로 이번 판에서 뺐다 · ZeroDivisionError: x"
     assert pairs[f"제외된 비교 모델 {v3}"] == "게이트 실패로 이번 판에서 뺐다 · MG3 fail"
 
 

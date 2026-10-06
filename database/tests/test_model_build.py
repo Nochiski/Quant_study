@@ -11,6 +11,7 @@ factor_inputs 판(합성 트리)을 읽어 레지스트리 spec 을 돌리고 �
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import sys
@@ -305,15 +306,20 @@ def test_primary_failure_publishes_nothing_even_if_others_pass(board_tree, tmp_p
 
 
 def test_comparison_model_engine_error_is_isolated(board_tree, tmp_path, monkeypatch,
-                                                   capsys) -> None:
+                                                   capsys, caplog) -> None:
     """D-01: 비교 모델(V2) 엔진이 예외를 내도 그 spec 만 빼고 주 모델 판은 올린다(N-11 완성).
-    사유는 `excluded_specs[V2].error` 에 '<예외 클래스>: <메시지>' 로 남는다."""
+    사유는 `excluded_specs[V2].error` 에 '<예외 클래스>: <메시지>' 로 남고, traceback 은 로컬
+    로그(경고 + exc_info)에 남는다."""
     patch_engine(monkeypatch, "v2_percentrank", boom)
+    caplog.set_level(logging.WARNING, logger="model.build")
     root = tmp_path / "model"
     res = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
     assert res.ok and res.excluded == (V2,)
     assert res.specs[V2] == {"error": "ZeroDivisionError: 지표 분모 0"} and V2 not in res.gates
     assert f"EXCLUDED={V2}" in res.summary()
+    rec = next(r for r in caplog.records if r.name == "model.build")
+    assert rec.levelno == logging.WARNING and V2 in rec.getMessage()
+    assert rec.exc_info is not None and rec.exc_info[0] is ZeroDivisionError
     latest = json.loads((root / "latest_morning.json").read_text())
     assert latest["status"] == "ok" and latest["build_id"] == res.build_id
     assert set(latest["specs"]) == {V4} and set(latest["excluded_specs"]) == {V2}
@@ -326,7 +332,7 @@ def test_comparison_model_engine_error_is_isolated(board_tree, tmp_path, monkeyp
                    "--root", str(tmp_path / "cli"), "--specs", f"{V2},{V4}", "--primary", V4,
                    "--min-prices-on-d", "10", "--min-ranked", "10"])
     err = capsys.readouterr().err
-    assert rc == 0 and f"{V2} 엔진 오류: ZeroDivisionError" in err and "비교 모델 제외" in err
+    assert rc == 0 and f"{V2} 실행 오류: ZeroDivisionError" in err and "비교 모델 제외" in err
 
 
 def test_comparison_model_rerun_error_is_isolated(board_tree, tmp_path, monkeypatch) -> None:
@@ -348,7 +354,7 @@ def test_comparison_model_rerun_error_is_isolated(board_tree, tmp_path, monkeypa
     latest = json.loads((root / "latest_morning.json").read_text())
     assert latest["build_id"] == res.build_id and set(latest["specs"]) == {V4}
     error = f"ZeroDivisionError: {long_msg}"[:mbuild.ERROR_MAX]
-    assert mbuild.ERROR_MAX == 500 and latest["excluded_specs"] == {V2: {"error": error}}
+    assert latest["excluded_specs"] == {V2: {"error": error}}
     assert (root / V4 / f"v={res.build_id}" / "scores.parquet").exists()
     assert not (root / V2 / f"v={res.build_id}").exists()
 
@@ -390,7 +396,23 @@ def test_primary_gate_failure_records_the_comparison_engine_error(board_tree, tm
                    "--root", str(tmp_path / "cli"), "--specs", f"{V2},{V4}", "--primary", V4,
                    "--min-prices-on-d", "10", "--min-ranked", "10"])
     err = capsys.readouterr().err
-    assert rc == 1 and f"{V2} 엔진 오류: ZeroDivisionError" in err and "비교 모델 제외" not in err
+    assert rc == 1 and f"{V2} 실행 오류: ZeroDivisionError" in err and "비교 모델 제외" not in err
+
+
+def test_comparison_model_error_reason_is_one_line_relative_to_the_model_root(board_tree,
+                                                                               tmp_path) -> None:
+    """D-01 리뷰 I-1: 밖으로 나가는 사유(판 manifest → 엑셀 메타)에는 절대 경로·여러 줄이 없다
+    (error-messages.md:56). 비교 모델의 직전 판 파일이 깨지면 duckdb 메시지(둘째 줄부터 경로가
+    잘린 SQL 문맥)의 첫 줄만, model 루트 기준 상대 경로로 남는다."""
+    root = tmp_path / "model"
+    first = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert first.ok
+    (root / V2 / f"v={first.build_id}" / "scores.parquet").write_bytes(b"not a parquet")
+    res = build(D_S, "morning", root, board_tree, specs=[V2, V4], primary=V4, **SMALL)
+    assert res.ok and res.excluded == (V2,)
+    err = json.loads((root / "latest_morning.json").read_text())["excluded_specs"][V2]["error"]
+    assert str(tmp_path) not in err and "\n" not in err
+    assert f"{V2}/v={first.build_id}/scores.parquet" in err
 
 
 def test_failed_rerun_keeps_the_same_day_ok_run(board_tree, tmp_path, monkeypatch,

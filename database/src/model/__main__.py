@@ -5,7 +5,8 @@
         [--primary v4_rank@0.1] [--root data/model] [--fi-root data/factor_inputs] \\
         [--min-prices-on-d 2000] [--min-ranked 100] [--keep 60]
 
-rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
+rc 0 판 커밋(비교 모델이 FAIL·예외로 빠져도 0, `excluded_specs`) · 1 게이트 FAIL(판 안 올림,
+`_failed/<build_id>.json`) · 2 입력·인자 오류·주 모델·입력 단계 예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같은 규약.
 """
 from __future__ import annotations
@@ -59,8 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         for g in gates.failed(rs):
             print(f"  {sid} {g.name} FAIL: {g.detail}", file=sys.stderr)
     for sid, s in result.specs.items():
-        if "error" in s:                         # 엔진 예외로 뺀 비교 모델(D-01)
-            print(f"  {sid} 엔진 오류: {s['error']}", file=sys.stderr)
+        if "error" in s:                         # 실행 예외로 뺀 비교 모델(D-01)
+            print(f"  {sid} 실행 오류: {s['error']}", file=sys.stderr)
     if result.excluded:
         print(f"  비교 모델 제외(주 모델 판은 올림): {', '.join(result.excluded)}", file=sys.stderr)
     if not result.ok:

@@ -27,6 +27,7 @@ dtype 을 지정해 읽고 COPY. 부동소수는 repr 왕복이라 비트 단위
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import time
 from collections.abc import Mapping, Sequence
@@ -45,10 +46,12 @@ from model import gates, registry
 from model.contracts import FI_TABLES, FactorInputs, ModelSpec
 from model.engines import ENGINES
 
+log = logging.getLogger(__name__)
+
 RULES_VERSION = "mb1.3.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
                             # 1.2.0(2026-10-05): 비교 모델 실패 격리(N-11)
-                            # 1.3.0(2026-10-06): 비교 모델 엔진 예외도 그 spec 만 뺌(D-01) · FAIL 재실행이
-                            #   같은 날 ok `_runs` 기록을 덮지 않음(D-09)
+                            # 1.3.0(2026-10-06): 비교 모델 엔진 예외도 그 spec 만 뺌(D-01)
+                            #   · FAIL 재실행이 같은 날 ok `_runs` 기록을 덮지 않음(D-09)
 LAYER = "model"
 BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
@@ -57,7 +60,8 @@ PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — �
 # 한다 — 3 이면 같은 날 재빌드 세 번에 전날 판이 지워졌다(10-05 Δ순위 빈칸).
 # 60 ≈ 거래일 석 달(판 하나 약 140KB).
 KEEP_DEFAULT = 60
-# 엔진 예외로 뺀 비교 모델 사유('<예외 클래스>: <메시지>')의 글자 수 상한 — 넘으면 앞에서 자른다(D-01)
+# 엔진 예외로 뺀 비교 모델 사유('<예외 클래스>: <메시지>')의 글자 수 상한 — 앞 500자만 남기고
+# 뒤를 버린다(D-01)
 ERROR_MAX = 500
 SCORES_FILE = "scores.parquet"
 INDICATORS_FILE = "indicators.parquet"
@@ -240,7 +244,8 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
           min_prices_on_d: int = gates.MIN_PRICES_ON_D, min_ranked: int = gates.MIN_RANKED,
           keep: int = KEEP_DEFAULT, build_id: str | None = None) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 모델 판. 게이트 FAIL 은 결과 status 로, 입력·인자 오류는
-    `ModelBuildError` 로 낸다."""
+    `ModelBuildError` 로 낸다. 비교 모델 예외는 `specs[sid]={error}`·`excluded`, 주 모델 예외는
+    그대로 전파."""
     t0 = time.time()
     d = _parse_date(date_s)
     d_iso = d.isoformat()
@@ -270,11 +275,17 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
                 previous=_previous(root, spec))
             gate_results[spec.spec_id] = gates.run_all(ctx)
         except Exception as e:
-            # D-01: 비교 모델의 실행·재실행·게이트 평가 예외는 그 spec 만 뺀다(N-11).
+            # D-01: 비교 모델의 실행·재실행·직전 판 읽기·게이트 평가 예외는 그 spec 만 뺀다(N-11).
             # 주 모델 예외는 잡지 않는다 — 판 전체 실패(CLI rc 2).
             if spec.spec_id == primary:
                 raise
-            errors[spec.spec_id] = f"{type(e).__name__}: {e}"[:ERROR_MAX]
+            # traceback 은 로컬 로그에만 남긴다(절대 경로·stack 허용, error-messages.md)
+            log.warning("비교 모델 %s 를 이번 판에서 뺀다(D-01) — date=%s basis=%s build=%s",
+                        spec.spec_id, d_iso, basis, bid, exc_info=True)
+            # 밖으로 나가는 사유 — 첫 줄만(duckdb 는 둘째 줄부터 경로가 잘린 SQL 문맥), model 루트
+            # 기준 상대 경로(error-messages.md:56), 그다음 자른다
+            head = (str(e).splitlines() or [""])[0].replace(f"{root.as_posix()}/", "")
+            errors[spec.spec_id] = f"{type(e).__name__}: {head}"[:ERROR_MAX]
             continue
         results[spec.spec_id] = first
     summary: dict[str, dict[str, Any]] = {

@@ -25,9 +25,9 @@ python -m model build --date 20260928 --basis morning \
 
 | rc | 뜻 |
 |---|---|
-| 0 | 판 커밋 · `latest_<basis>.json` 갱신(MG5 warn 이 있어도 0) |
-| 1 | 게이트 FAIL — 아무 spec 도 올리지 않는다(`_failed/<build_id>.json`, MANIFEST·latest 는 직전 성공 판 유지) |
-| 2 | 입력·인자 오류(factor_inputs 판 없음 · 판의 date·basis 가 요청과 다름 · 모르는 spec · `--primary` 가 선택 밖 · 날짜 형식) 또는 예외 |
+| 0 | 판 커밋 · `latest_<basis>.json` 갱신(MG5 warn 이 있어도 0 · 비교 모델이 FAIL·예외로 빠져도 0 — `excluded_specs`) |
+| 1 | 주 모델 게이트 FAIL — 아무 spec 도 올리지 않는다(`_failed/<build_id>.json`, MANIFEST·latest 는 직전 성공 판 유지) |
+| 2 | 입력·인자 오류(factor_inputs 판 없음 · 판의 date·basis 가 요청과 다름 · 모르는 spec · `--primary` 가 선택 밖 · 날짜 형식) 또는 주 모델·입력 단계 예외 |
 
 - 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
 - `--date` 는 factor_inputs 판의 기준일 D 다. `--fi-build latest`(기본)는
@@ -73,11 +73,12 @@ data/model/
   parquet 을 쓰지 않는다. **판 전체가 실패하는 것은 주 모델(`primary_spec`)이 FAIL 일 때뿐이다.** 비교
   모델만 FAIL 이면 그 spec 만 빼고(`excluded_specs`, MANIFEST·`v=<build_id>` 없음) 나머지를 올린다
   (2026-10-05 사용자 결정 N-11 '격리', mb1.2.0). 비교 모델의 엔진 예외도 그 spec 만 뺀다(주 모델 예외는
-  전체 실패, D-01, mb1.3.0).
+  전체 실패, D-01, mb1.3.0). 비교 모델의 직전 판 파일이 깨지면 그 모델은 판마다 계속 빠진다 — 손으로
+  복구해야 다시 올라온다(D-01 리뷰 M-4, 기록만).
 - MANIFEST `BuildRecord`: `n_rows` = 점수 행 수, `content_hash` = 점수 파일 해시(equity 와 같은 식),
   `partitions[0]` = `{path: "v=<build_id>", n_rows, content_hash, n_indicators, indicators_content_hash}`,
   `inputs` = `{"factor_inputs": <fi build_id>}`, `gates` = MG0~MG5(`name`·`status`·`detail`·`metrics`),
-  `rules_version` = `mb1.0.0`.
+  `rules_version` = `build.py` 의 `RULES_VERSION`.
 - parquet 은 `hive_partitioning=false` 로 읽는다(경로의 `v=` 가 열로 붙지 않게).
 
 ## 4. 산출 파일
@@ -107,8 +108,8 @@ data/model/
 | `date` · `basis` | 판 기준일 D(ISO) · `morning` |
 | `fi_build_id` | 읽은 factor_inputs 판 id |
 | `generated_at` | UTC(`…Z`) |
-| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(엔진 예외 낸 비교 모델은 `{error}` 하나) |
-| `excluded_specs` | 게이트 FAIL·엔진 예외로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 엔진 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`(500자에서 자름, D-01). 없으면 `{}`(gate_failed 판도 `{}`) |
+| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(실행 예외 — 엔진 실행·재실행·직전 판 읽기·게이트 평가 — 를 낸 비교 모델은 `{error}` 하나) |
+| `excluded_specs` | 게이트 FAIL·실행 예외(엔진 실행·재실행·직전 판 읽기·게이트 평가)로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`. 사유는 첫 줄만, model 루트 기준 상대 경로로 바꾼 뒤 500자에서 자른다(D-01, traceback 은 로컬 로그 경고에만). 없으면 `{}`(gate_failed 판도 `{}`) |
 | `primary_spec` | 인계 대표 모델(`--primary`) |
 | `elapsed_s` | 적재·엔진·게이트 소요(초) |
 
@@ -191,5 +192,7 @@ data/model/
 → v3 579·v2 619 행 = 이식 엔진 = v3 원본 순위), 실제 factor_inputs 판(`test_factor_inputs.make_roots`)
 → v2, 게이트마다 엔진을 감싸 한 가지씩 망가뜨린 FAIL 경로(MG0 열·타입 · MG1 v3 비율·시총 하한·v4 100 ·
 MG2 비결정 · MG3 6가지 · MG4 골든 618 < 2,000) · FAIL 이면 latest·MANIFEST 유지 · 비교 모델 FAIL 격리 ·
-주 모델 FAIL 이면 전부 미공개 · MG5 기록·warn ·
-keep GC · spec 선택·primary · 입력 판 거절 · CLI rc.
+주 모델 FAIL 이면 전부 미공개 · 비교 모델 실행 예외 격리(첫 실행·재실행·직전 판 파일 깨짐 — 사유는
+첫 줄·model 루트 상대 경로·500자, 경고 로그에 traceback)·주 모델 예외 전파·주 모델 FAIL 이면 실패
+보고서 `specs` 에 `{error}`(D-01) · FAIL 재실행이 같은 날 ok `_runs` 보존(그 밖의 기록은 덮고, 못
+읽으면 오류 — D-09) · MG5 기록·warn · keep GC · spec 선택·primary · 입력 판 거절 · CLI rc.

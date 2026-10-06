@@ -783,9 +783,9 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
     excluded = run.meta.get("excluded_specs")
     if isinstance(excluded, Mapping):
         for sid, s in sorted(excluded.items()):
-            if isinstance(s, Mapping) and "error" in s:      # 엔진 예외로 뺀 비교 모델(D-01)
+            if isinstance(s, Mapping) and "error" in s:      # 실행 예외로 뺀 비교 모델(D-01)
                 pairs.append((f"제외된 비교 모델 {sid}",
-                              f"엔진 오류로 이번 판에서 뺐다 · {s['error']}"))
+                              f"실행 오류로 이번 판에서 뺐다 · {s['error']}"))
                 continue
             gates_of = s.get("gates") if isinstance(s, Mapping) else None
             pairs.append((f"제외된 비교 모델 {sid}",

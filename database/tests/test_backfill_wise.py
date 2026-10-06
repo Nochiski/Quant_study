@@ -124,6 +124,7 @@ def test_universe_follows_kiwoom_rule_and_keeps_new_listing_without_size_class(
         ("20261005", "0238P0", "", "ETF"),            # ETF → 제외
     ])
     monkeypatch.setattr(bw, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(bw, "KRX", str(tmp_path / "absent.db"))   # 폴백하면 실물 대신 실패한다
     with closing(sqlite3.connect(":memory:")) as con_w:     # WISE 원장 자리 — 선정에 안 쓴다
         got = bw.universe(con_w)
     with closing(sqlite3.connect(kw)) as con_kw:
@@ -133,15 +134,23 @@ def test_universe_follows_kiwoom_rule_and_keeps_new_listing_without_size_class(
     assert "· 유니버스 = 키움 마스터 20261005 (2종목)" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("case", ["no_snapshot", "no_file"])
+@pytest.mark.parametrize("case", ["no_snapshot", "no_match", "no_file", "no_table"])
 def test_universe_falls_back_to_krx_without_kiwoom_snapshot(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str], case: str) -> None:
-    """키움 마스터에 스냅샷이 없거나(`kiwoom_common` 의 ValueError) 파일을 못 열면
-    (sqlite3.Error) 종전대로 KRX 종목기본 최신일의 보통주로 폴백한다. 실패 안내 줄은
-    열기·조회 실패일 때만 찍힌다(종전과 같다)."""
+    """키움 마스터에 스냅샷이 없거나(`kiwoom_common` 의 ValueError), 고른 종목이 0 이거나,
+    파일·테이블을 못 읽으면(sqlite3.Error) 종전대로 KRX 종목기본 최신일의 보통주로 폴백한다.
+    실패 안내 줄은 sqlite 오류(열기·조회 실패)일 때만 찍힌다(종전과 같다)."""
     if case == "no_snapshot":
         _kiwoom_master(tmp_path, [])
+    elif case == "no_match":            # 스냅샷은 있으나 우선주·ETF 뿐 → 고른 종목 0
+        _kiwoom_master(tmp_path, [("20261005", "005935", "", "거래소"),
+                                  ("20261005", "0238P0", "", "ETF")])
+    elif case == "no_table":            # 파일은 있으나 마스터 테이블이 없다
+        (tmp_path / "data" / "raw").mkdir(parents=True)
+        with closing(sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")) as con:
+            con.execute("CREATE TABLE other (x TEXT)")
+            con.commit()
     krx = tmp_path / "krx.db"
     with closing(sqlite3.connect(krx)) as con:
         for t, rows in (("krx_stk_isu_base_info", [("20260820", "005930", "보통주"),
@@ -157,4 +166,4 @@ def test_universe_falls_back_to_krx_without_kiwoom_snapshot(
         assert bw.universe(con_w) == ["005930", "247540"]
     out = capsys.readouterr().out
     assert "유니버스 = 키움 마스터" not in out
-    assert ("키움 마스터 조회 실패" in out) == (case == "no_file")
+    assert ("키움 마스터 조회 실패" in out) == (case in ("no_file", "no_table"))

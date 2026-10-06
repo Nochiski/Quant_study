@@ -29,6 +29,7 @@ import time
 import urllib.parse
 import zlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
 import requests
@@ -246,12 +247,11 @@ def universe(con_w: sqlite3.Connection) -> list[str]:
     마스터를 못 읽거나, 스냅샷이 없거나, 고른 종목이 0 이면 종전대로 KRX 폴백."""
     kw = os.path.join(BASE_DIR, "data", "raw", "kiwoom.db")
     try:
-        con = sqlite3.connect(f"file:{kw}?mode=ro", uri=True)
-        try:
-            snap = kiwoom_common(con)
-        except ValueError:      # 스냅샷 없음 — 종전의 "행이 비면 KRX 폴백"과 같게 조용히 넘어간다
-            snap = None
-        con.close()
+        with closing(sqlite3.connect(f"file:{kw}?mode=ro", uri=True)) as con:
+            try:
+                snap = kiwoom_common(con)
+            except ValueError:  # 스냅샷 없음 — 종전의 "행이 비면 KRX 폴백"과 같게 조용히 넘어간다
+                snap = None
         if snap is not None and snap.tickers:
             print(f"  · 유니버스 = 키움 마스터 {snap.snap_date} ({len(snap.tickers):,}종목)",
                   flush=True)

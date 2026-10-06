@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.23.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.24.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -208,6 +208,7 @@ RULES_VERSION = "e1.23.0"                # BuildRecord.rules_version 에 실린�
 #          · `n_available_orig_filing`(기록형).
 # e1.23.0: `security.name_abbrv_current`(KRX 약명) 추가(10-05 사용자 지적 — 엑셀이 정식명 '삼화콘덴서공업'을
 #          보였다). 정식명 `name_current` 는 그대로고, fi_universe 이름·compat stock_name 이 약명을 쓴다.
+# e1.24.0: opinion_daily EG8 추정기관수 비교가 wise 0 ≡ v3 NULL(10-06 G-42). 게이트 변경, 산출 불변.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

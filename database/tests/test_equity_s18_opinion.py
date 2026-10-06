@@ -560,6 +560,66 @@ def test_두_원천_값이_어긋나면_EG8이_폐기한다(tmp_path: Path, make
     assert eg8.metrics["threshold"] == 1.0
 
 
+def test_wise_0과_v3_NULL인_추정기관수는_EG8이_같은_값으로_본다(tmp_path: Path,
+                                                      make_stage_tree) -> None:
+    """G-42 — stage 2.5.0 부터 WISE '3개월 의견 없음'은 0 이고 동결 v3 미러는 같은 경우가 NULL 이다.
+
+    같은 사실을 어긋남으로 세면 서버 겹침 796키 중 290키가 불일치로 잡혀(일치율 0.636) 매 빌드가
+    폐기된다. 나머지 4열은 같게 두고 임계 1.0 으로 `analyst_count` 한 열만 시험한다.
+    """
+    synthetic = {
+        "stg_analyst_summary": [{**_summary_row("005930", _D(2026, 9, 1), _D(2026, 8, 31)),
+                                 "analyst_count": 0}],
+        "stg_v3_analyst_opinions": [{**_v3_row("005930", _D(2026, 9, 1), _D(2026, 9, 2)),
+                                     "analyst_count": None}],
+        "stg_wise_coverage": _COVERAGE}
+    stage_root = _hybrid_stage(tmp_path, make_stage_tree, synthetic)
+    eq = tmp_path / "equity"
+    _build_chain(eq, stage_root)
+    seeded = Baseline({**SEED.data, "opinion_daily": {"src_overlap_agree_min": 1.0}})
+    # 산출은 두 원천의 값을 그대로 싣는다(0 과 NULL) — 같은 값으로 보는 쪽은 게이트다
+    fixtures = [{"id": "g42-wise", "key": {"ticker": "005930", "obs_date": "2026-09-01",
+                                           "src": "wise"},
+                 "column": "analyst_count", "expect": "0", "source": "hand",
+                 "note": "WISE '3개월 의견 없음' = 0"},
+                {"id": "g42-v3", "key": {"ticker": "005930", "obs_date": "2026-09-01",
+                                         "src": "v3"},
+                 "column": "analyst_count", "expect": None, "source": "hand",
+                 "note": "동결 v3 미러는 같은 경우를 NULL 로 가진다"}]
+    r = build.build_table(rules_s18.OPINION_DAILY, stage_root, eq, seeded,
+                          build_id="b_opinion_daily_eg8_zero_null",
+                          fixtures_path=_fixture_file(tmp_path, fixtures))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    eg8 = _gate(r, "EG8")
+    assert eg8.status is GateStatus.PASS
+    assert eg8.metrics["n_overlap_keys"] == 1 and eg8.metrics["n_agree_all_columns"] == 1
+    assert eg8.metrics["n_agree_by_column"]["analyst_count"] == 1
+
+
+def test_wise_0과_v3_5인_추정기관수는_EG8이_여전히_폐기한다(tmp_path: Path,
+                                                    make_stage_tree) -> None:
+    """G-42 반대 사례 — 0 ≡ NULL 동치는 v3 가 비어 있을 때만이다. v3 가 5명이라 하면 어긋남이다."""
+    synthetic = {
+        "stg_analyst_summary": [{**_summary_row("005930", _D(2026, 9, 1), _D(2026, 8, 31)),
+                                 "analyst_count": 0}],
+        "stg_v3_analyst_opinions": [{**_v3_row("005930", _D(2026, 9, 1), _D(2026, 9, 2)),
+                                     "analyst_count": 5}],
+        "stg_wise_coverage": _COVERAGE}
+    stage_root = _hybrid_stage(tmp_path, make_stage_tree, synthetic)
+    eq = tmp_path / "equity"
+    _build_chain(eq, stage_root)
+    seeded = Baseline({**SEED.data, "opinion_daily": {"src_overlap_agree_min": 1.0}})
+    r = build.build_table(rules_s18.OPINION_DAILY, stage_root, eq, seeded,
+                          build_id="b_opinion_daily_eg8_zero_five",
+                          fixtures_path=_fixture_file(tmp_path, []))
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg8 = _gate(r, "EG8")
+    assert eg8.status is GateStatus.FAIL
+    assert eg8.metrics["n_overlap_keys"] == 1 and eg8.metrics["n_agree_all_columns"] == 0
+    assert eg8.metrics["n_agree_by_column"]["analyst_count"] == 0
+    assert eg8.metrics["n_agree_by_column"]["opinion_score"] == 1
+
+
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
 def test_선언이_DESIGN_4_6과_같다() -> None:

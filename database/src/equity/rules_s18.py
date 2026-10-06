@@ -58,6 +58,9 @@ BROKER_REJECT_REASONS: tuple[str, ...] = ("nonpositive_target_price", "opinion_d
 
 # EG8 이 겹친 키에서 대조하는 (opinion_daily 컬럼, stage v3 컬럼) 쌍이 아니라 산출 컬럼 이름 —
 # 두 원천을 이미 같은 이름으로 접었으므로 산출 위에서 자기끼리 대조한다.
+# `analyst_count` 만 wise 0 ≡ v3 NULL 을 같은 값으로 본다(`_same`). stage 2.5.0(10-05)부터
+# WISE '3개월 의견 없음'을 0 으로 싣는데 동결된 v3 미러는 같은 경우를 NULL 로 가진다
+# (10-06 전수 조사 G-42).
 _OVERLAP_COLUMNS: tuple[str, ...] = ("opinion_score", "target_price_krw", "eps_krw", "per",
                                      "analyst_count")
 
@@ -215,6 +218,18 @@ def eg6_first_observation(ctx: EquityGateContext) -> GateResult:
 eg6_first_observation.gate_name = "EG6"                # type: ignore[attr-defined]
 
 
+def _same(c: str) -> str:
+    """겹친 키(w = wise, x = v3)에서 열 `c` 가 같은 값인지 가리는 SQL 식.
+
+    `analyst_count` 만 wise 0 · v3 NULL 을 같은 값으로 본다(둘 다 '3개월 이내 의견 없음').
+    wise NULL · v3 0 이나 wise 0 · v3 양수는 동치가 아니라 어긋남으로 센다.
+    """
+    eq = f"w.{_q(c)} IS NOT DISTINCT FROM x.{_q(c)}"
+    if c == "analyst_count":
+        return f"({eq} OR (w.{_q(c)} = 0 AND x.{_q(c)} IS NULL))"
+    return eq
+
+
 def eg8_src_overlap(ctx: EquityGateContext) -> GateResult:
     """EG8 — v3 ⋈ wise 겹친 키의 값 일치율 ≥ baseline (WORKFLOW §3-2 5단계 통과 조건).
 
@@ -223,9 +238,8 @@ def eg8_src_overlap(ctx: EquityGateContext) -> GateResult:
     측정치는 어느 쪽이든 metrics 에 남는다.
     """
     v = _q(ctx.out_view)
-    pairs = " AND ".join(f"w.{_q(c)} IS NOT DISTINCT FROM x.{_q(c)}" for c in _OVERLAP_COLUMNS)
-    per_col = ", ".join(f"count(*) FILTER (WHERE w.{_q(c)} IS NOT DISTINCT FROM x.{_q(c)})"
-                        for c in _OVERLAP_COLUMNS)
+    pairs = " AND ".join(_same(c) for c in _OVERLAP_COLUMNS)
+    per_col = ", ".join(f"count(*) FILTER (WHERE {_same(c)})" for c in _OVERLAP_COLUMNS)
     row = _ints(ctx, f"""
         WITH w AS (SELECT * FROM {v} WHERE src = 'wise'),
              x AS (SELECT * FROM {v} WHERE src = 'v3')

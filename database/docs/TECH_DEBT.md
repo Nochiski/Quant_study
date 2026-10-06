@@ -1119,3 +1119,22 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
   바뀜 37.5%(중앙 10%). 바뀐 쪽은 정정값을 원본 날짜에 쓰면 look-ahead 라 원본 수치를 원본 날짜에 두는 판본 분리(4C,
   `stg_fin_asreported`)만 정답. 원본 문서 ZIP 은 `data/raw/documents/{yyyy}/{rcept_no}.zip` 에 전부 캐시돼 있다.
 - **보류 이유**: 실시간 모델은 WISE 분기로 전환 예정(`docs/plans/2026-09-30-wise-quarterly.md`) — 이 편향은 백테스트 품질 문제다.
+
+## 2026-10-06 감사 수정 A-01(월요일 DART 번호표 자동 갱신) 품질 검토에서 분리한 항목
+
+### B-42: `dart_universe.py` 가 종목코드 키 `INSERT OR REPLACE` 라 티커 재사용 때 옛 회사 매핑을 덮는다
+
+- **상황**: `dart_corp_map(stock_code PRIMARY KEY, corp_code, corp_name)` 은 stage `stg_corp_map`(`src/stage/rules_dart.py:547-552`)을 거쳐
+  equity `corp`·`corp_ticker`·`security` 로 간다. 10-06 A-01 로 매주 월요일 06:00 에 자동 갱신된다(그 전엔 손으로 돌릴 때만).
+- **인풋**: 상장폐지된 회사의 종목코드를 다른 회사가 다시 쓰는 경우(실례 036220 — `stage-health-dashboard` 09-05 기록) 다음 월요일 갱신.
+- **에러 위치**: `src/dart_universe.py:94-99` — 키가 stock_code 하나라 새 corp_code 가 옛 corp_code 를 덮고, 원장 표에는 최신 매핑만 남는다.
+- **위험성**: stage·equity 가 옛 매핑을 이력으로 보존하지 않으면, 옛 회사의 DART 재무·공시가 새 회사 종목에 잘못 이어지거나(silent corrupt)
+  폐지 종목 이력이 끊긴다(백테스트 생존 편향). stage 의 최초 관측 접기가 옛 행을 판본으로 남기는지는 확인하지 않았다 — 고치기 전에 먼저 본다.
+
+### B-43: `dart_universe.py` 가 DART 오류 응답을 `BadZipFile` 로만 남긴다
+
+- **상황**: 매주 월요일 06:00 무인 실행(A-01). 실패하면 `daily_ledger.sh` 의 FAILED 에 남고 crit 는 `logs/notify.log` 에만 기록된다.
+- **인풋**: DART 가 corpCode.xml ZIP 대신 오류 본문(키 한도 초과·점검·인증 오류 등)을 돌려준 날.
+- **에러 위치**: `src/dart_universe.py:73` `zipfile.ZipFile(io.BytesIO(api.dart("corpCode.xml")))` — 응답 본문 앞부분과 DART status·message 를 로그에 남기지 않는다.
+- **위험성**: 그 주 갱신이 빠져 다음 월요일까지 번호표가 낡고(신규 상장 DART 연결 1~2주 지연), 원인이 로그에 없어 진단이 늦다.
+

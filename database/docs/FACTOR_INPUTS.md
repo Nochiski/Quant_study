@@ -21,7 +21,7 @@
 ```bash
 python -m factor_inputs build --date 20260929 --basis morning \
     [--root data/factor_inputs] [--stage-root data/stage] [--equity-root data/equity] \
-    [--grace-days 5] [--min-eligible 300] [--keep 3]
+    [--grace-days 5] [--min-eligible 300] [--keep 60]
 ```
 
 | rc | 뜻 |
@@ -40,7 +40,7 @@ python -m factor_inputs build --date 20260929 --basis morning \
 
 ```
 data/factor_inputs/
-  fi_<표>/MANIFEST.json            # stage.manifest — current_build · keep=3 · BuildRecord.inputs
+  fi_<표>/MANIFEST.json            # stage.manifest — current_build · keep=60 · BuildRecord.inputs
   fi_<표>/v=<build_id>/part0.parquet
   fi_<표>/v=<build_id>/_meta.json  # 표·판·행수·content_hash·inputs·창·게이트
   _runs/<YYYYMMDD>_<basis>.json    # 판 manifest(V2-8) — 성공·실패 모두. 같은 날 재실행은 덮는다. 단 FAIL 재실행은 같은 날 성공 기록을 덮지 않는다(실패는 _failed/ 에만)
@@ -50,8 +50,8 @@ data/factor_inputs/
 ```
 
 - 판 id 하나(`m_<UTC>`)를 8표가 공유한다. 표마다 포인터를 따로 바꾸므로 전환 순간에는 섞여 보일 수
-  있다 — **소비자는 `latest_<basis>.json` 의 `build_id` 로 8표를 연다**(keep=3 이라 다음 두 빌드 동안
-  남는다).
+  있다 — **소비자는 `latest_<basis>.json` 의 `build_id` 로 8표를 연다**(keep=60 이라 다음 59번의
+  빌드 동안 남는다).
 - **parquet 은 `hive_partitioning=false` 로 읽는다.** 경로의 `v=<build_id>` 가 열(`v`)로 붙으면
   계약 밖 열이 된다(equity 산출과 같은 규약).
 - 원천 판은 MANIFEST `current_build` 로 해석한다(맨 glob 금지). equity `_pinned/` 처럼 하드링크로

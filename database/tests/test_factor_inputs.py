@@ -536,6 +536,19 @@ def test_schema_equals_contract_and_gates_pass(built) -> None:
                       "FG4": "skip", "FG-fresh": "pass"}
 
 
+def test_default_keep_keeps_the_first_of_four_same_day_builds(roots, tmp_path: Path) -> None:
+    """E-01: 기본 keep(인자 생략)은 모델 판과 같은 60(N-17)이라 같은 날 네 번 지어도 첫 판이 8표
+    모두 남는다. 3 이던 때는 네 번째 빌드가 첫 판을 지워, 그 판을 `fi_build_id` 로 가리키는 모델
+    판의 엑셀 인계(주간·옛 날짜 일일)가 `DeliverError` 로 실패했다."""
+    out = tmp_path / "fi"
+    runs = [build(D_S, "morning", out, roots[1], roots[0], min_eligible=5, golden_path=None)
+            for _ in range(4)]
+    assert all(r.ok for r in runs)
+    for t in FI_TABLES:
+        assert len(manifest.load(out / t / "MANIFEST.json").builds) == 4, t
+        assert (out / t / f"v={runs[0].build_id}").is_dir(), t
+
+
 # ── T2.11 신선도 · 유니버스 ────────────────────────────────────────────────────
 def test_coverage_states_ages_and_has_estimates(built) -> None:
     out, _ = built
@@ -944,6 +957,14 @@ def test_cli_return_codes(roots, tmp_path: Path, capsys) -> None:
     assert cli_main(base + ["--basis", "morning", "--min-eligible", "999"]) == 1
     assert "같은 날 성공 기록" in capsys.readouterr().err        # D-09: _runs 는 첫 판 그대로
     assert cli_main(base + ["--basis", "evening"]) == 2
+
+
+def test_cli_keep_default_is_the_build_default() -> None:
+    """E-01: fi 를 짓는 운영 스크립트가 없어(수동 실행) CLI `--keep` 기본값이 곧 운영 보관 수다."""
+    from factor_inputs.__main__ import _parser
+    from factor_inputs.build import KEEP_DEFAULT
+    args = _parser().parse_args(["build", "--date", D_S, "--basis", "morning"])
+    assert args.keep == KEEP_DEFAULT == 60
 
 
 def test_flow_and_unit_constants_match_compat() -> None:

@@ -2,7 +2,7 @@
 
     python -m factor_inputs build --date 20260929 --basis morning \\
         [--root data/factor_inputs] [--stage-root data/stage] [--equity-root data/equity] \\
-        [--grace-days 5] [--min-eligible 300] [--keep 3]
+        [--grace-days 5] [--min-eligible 300] [--keep 60]
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — equity CLI 와 같은 규약.
@@ -14,7 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-from .build import MIN_ELIGIBLE_DEFAULT, FactorInputsError, build
+from .build import KEEP_DEFAULT, MIN_ELIGIBLE_DEFAULT, FactorInputsError, build
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -32,7 +32,7 @@ def _parser() -> argparse.ArgumentParser:
                    help="추정치 소멸 유예(거래일, 기본 UniverseRule().coverage_grace_days = 0)")
     b.add_argument("--min-eligible", type=int, default=MIN_ELIGIBLE_DEFAULT,
                    help="FG1 eligible 종목 수 하한")
-    b.add_argument("--keep", type=int, default=3, help="표별 MANIFEST 에 남길 판 수")
+    b.add_argument("--keep", type=int, default=KEEP_DEFAULT, help="표별 MANIFEST 에 남길 판 수")
     return p
 
 

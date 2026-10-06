@@ -32,6 +32,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import requests
+from daily.universe import kiwoom_common
 
 BASE_DIR = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB   = os.path.join(BASE_DIR, "data", "raw", "wisereport.db")
@@ -237,19 +238,24 @@ def universe(con_w: sqlite3.Connection) -> list[str]:
 
     키움 마스터는 master_daily.py 가 매일 적재한다 — KRX 원장(--to 하드코딩으로
     08-20 동결)보다 최신이라 신규상장이 다음 날 자동 편입된다 (2026-09-01 결정).
-    보통주 판정은 upSizeName(대/중/소형주) 채움 여부다 — 거래소 규모구분은 보통주에만
-    붙는다(실측: 코스피 827 ≈ KRX 보통주 832 · ETF/ETN/우선주/스팩/외국주는 빈값)."""
+    종목 선정은 키움 수집과 같은 규칙 하나(`daily.universe.kiwoom_common`)로 한다(A-07, 10-06):
+    규모구분(upSizeName)이 있거나, 없어도 거래소·코스닥에서 코드 6번째 자리가 '0' 인 종목.
+    규모구분은 상장 몇 주 뒤에야 붙어서 옛 규칙(`upSizeName<>''` 만)은 신규 상장 보통주
+    (예 0039P0 매드업, 07-01 상장)의 컨센서스를 몇 달씩 한 번도 받지 않았다.
+    규모구분이 없는 해외 DR·스팩도 같은 규칙으로 들어온다(N-21 승인).
+    마스터를 못 읽거나, 스냅샷이 없거나, 고른 종목이 0 이면 종전대로 KRX 폴백."""
     kw = os.path.join(BASE_DIR, "data", "raw", "kiwoom.db")
     try:
         con = sqlite3.connect(f"file:{kw}?mode=ro", uri=True)
-        d = con.execute("SELECT MAX(snap_date) FROM ka10099_stock_master").fetchone()[0]
-        rows = con.execute(
-            "SELECT code FROM ka10099_stock_master WHERE snap_date=? AND upSizeName<>''",
-            (d,)).fetchall()
+        try:
+            snap = kiwoom_common(con)
+        except ValueError:      # 스냅샷 없음 — 종전의 "행이 비면 KRX 폴백"과 같게 조용히 넘어간다
+            snap = None
         con.close()
-        if rows:
-            print(f"  · 유니버스 = 키움 마스터 {d} ({len(rows):,}종목)", flush=True)
-            return sorted(r[0] for r in rows)
+        if snap is not None and snap.tickers:
+            print(f"  · 유니버스 = 키움 마스터 {snap.snap_date} ({len(snap.tickers):,}종목)",
+                  flush=True)
+            return sorted(snap.tickers)
     except sqlite3.Error as e:
         print(f"  ! 키움 마스터 조회 실패({e!r}) — KRX 스냅샷으로 폴백", flush=True)
     con = sqlite3.connect(f"file:{KRX}?mode=ro", uri=True)

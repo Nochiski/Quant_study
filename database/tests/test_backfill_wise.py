@@ -5,9 +5,13 @@
 먼저 비므로 오탐이 늘어난다. false-none 은 그날 스냅샷의 영구 손실이다.
 """
 import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 import backfill_wise as bw
 import pytest
+from daily.universe import kiwoom_common
 
 YMMS = ["202612", "202712", "202812"]
 
@@ -86,3 +90,71 @@ def test_daily_mode_is_gone():
         bw._parse_args(["--mode", "daily"])
     assert bw._parse_args(["--mode", "full"]).mode == "full"
     assert bw._parse_args([]).mode == "full"
+
+
+# ── universe() — WISE 수집 유니버스는 키움 수집과 같은 규칙이다(A-07, 10-06) ──────
+
+def _kiwoom_master(base: Path, rows: list[tuple[str, str, str, str]]) -> Path:
+    """`<base>/data/raw/kiwoom.db` 에 키움 마스터를 만든다.
+
+    rows: (snap_date, code, upSizeName, marketName). 열은 `kiwoom_common`·`universe()` 가
+    읽는 넷만 둔다(실물은 응답 필드 전부 TEXT)."""
+    raw = base / "data" / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(raw / "kiwoom.db")) as con:
+        con.execute("CREATE TABLE ka10099_stock_master "
+                    "(snap_date TEXT, code TEXT, upSizeName TEXT, marketName TEXT)")
+        con.executemany("INSERT INTO ka10099_stock_master VALUES (?,?,?,?)", rows)
+        con.commit()
+    return raw / "kiwoom.db"
+
+
+def test_universe_follows_kiwoom_rule_and_keeps_new_listing_without_size_class(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """A-07: 규모구분(upSizeName)은 상장 몇 주 뒤에야 붙는다. 옛 규칙(`upSizeName<>''` 만)은
+    0039P0 매드업(07-01 상장, 코스닥, 시총 1,497억 — 원본 v3 에는 2026E 컨센서스가 있다)을
+    한 번도 받지 않아 '추정치 보유' 유니버스에서 조용히 뺐다. 종목 선정은 키움 수집과 같은
+    `kiwoom_common` 하나여야 한다."""
+    kw = _kiwoom_master(tmp_path, [
+        ("20261002", "000660", "대형주", "거래소"),   # 직전 스냅샷에만 있다 → 최신만 본다
+        ("20261005", "005930", "대형주", "거래소"),   # 규모구분 있는 보통주
+        ("20261005", "0039P0", "", "코스닥"),         # 신규 상장 보통주, 규모구분 없음 → 포함
+        ("20261005", "005935", "", "거래소"),         # 우선주(6번째 자리 '5') → 제외
+        ("20261005", "0238P0", "", "ETF"),            # ETF → 제외
+    ])
+    monkeypatch.setattr(bw, "BASE_DIR", str(tmp_path))
+    with closing(sqlite3.connect(":memory:")) as con_w:     # WISE 원장 자리 — 선정에 안 쓴다
+        got = bw.universe(con_w)
+    with closing(sqlite3.connect(kw)) as con_kw:
+        want = kiwoom_common(con_kw).tickers
+    assert "0039P0" in got and "005935" not in got
+    assert got == sorted(want) == ["0039P0", "005930"]
+    assert "· 유니버스 = 키움 마스터 20261005 (2종목)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("case", ["no_snapshot", "no_file"])
+def test_universe_falls_back_to_krx_without_kiwoom_snapshot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str], case: str) -> None:
+    """키움 마스터에 스냅샷이 없거나(`kiwoom_common` 의 ValueError) 파일을 못 열면
+    (sqlite3.Error) 종전대로 KRX 종목기본 최신일의 보통주로 폴백한다. 실패 안내 줄은
+    열기·조회 실패일 때만 찍힌다(종전과 같다)."""
+    if case == "no_snapshot":
+        _kiwoom_master(tmp_path, [])
+    krx = tmp_path / "krx.db"
+    with closing(sqlite3.connect(krx)) as con:
+        for t, rows in (("krx_stk_isu_base_info", [("20260820", "005930", "보통주"),
+                                                   ("20260820", "005935", "구형우선주")]),
+                        ("krx_ksq_isu_base_info", [("20260820", "247540", "보통주")])):
+            con.execute(f"CREATE TABLE {t} "
+                        "(bas_dd_req TEXT, ISU_SRT_CD TEXT, KIND_STKCERT_TP_NM TEXT)")
+            con.executemany(f"INSERT INTO {t} VALUES (?,?,?)", rows)
+        con.commit()
+    monkeypatch.setattr(bw, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(bw, "KRX", str(krx))
+    with closing(sqlite3.connect(":memory:")) as con_w:
+        assert bw.universe(con_w) == ["005930", "247540"]
+    out = capsys.readouterr().out
+    assert "유니버스 = 키움 마스터" not in out
+    assert ("키움 마스터 조회 실패" in out) == (case == "no_file")

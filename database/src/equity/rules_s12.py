@@ -297,15 +297,23 @@ _OWN_DOC = ("EXISTS (SELECT 1 FROM stg_doc_meta m0 WHERE m0.rcept_no = o.rcept_n
             + DOC_QUALIFIED_PRED.format(a="m0") + ")")
 # 기간 문서의 증인 접수(rcept_no → w_rcept) — 산출 행의 판 자신, 그리고 그 판에 자격 있는 자기
 # 문서가 **없을 때만** `.sql` 이 기간을 빌려 오는 같은 정정 사슬(disclosure_version 링크)의 판
-# (`chain_doc`, G-21 후속). 두 기간 검사에 `_OWN_DOC_FIRST` 를 함께 걸어 '자기 문서 우선'을 검증한다
-# — 사슬 전체를 늘 증인으로 받으면 `.sql` 이 사슬 문서를 앞세우는 회귀(자기 문서 12-31 인데 산출
-# 11-30)가 통과한다(품질 검토 재현). 사슬은 disclosure_version 이 정정 체인을 평평하게 접는다는
-# 전제(정정의 orig_rcept_no 는 언제나 원본)에 기대고, 그 전제는 S11 EG3 의
-# `n_link_orig_invalid`·`n_is_correction_prefix_mismatch` 가 지킨다.
+# (`chain_doc`, G-21 후속). 사슬은 disclosure_version 이 정정 체인을 평평하게 접는다는 전제(정정의
+# orig_rcept_no 는 언제나 원본)에 기대고, 그 전제는 S11 EG3 의 `n_link_orig_invalid`·
+# `n_is_correction_prefix_mismatch` 가 지킨다.
 _DOC_WITNESS = ("(SELECT rcept_no, rcept_no AS w_rcept FROM \"{v}\" UNION "
                 "SELECT s.rcept_no, x.rcept_no FROM disclosure_version s JOIN disclosure_version x "
                 "ON coalesce(x.orig_rcept_no, x.rcept_no) = coalesce(s.orig_rcept_no, s.rcept_no))")
-_OWN_DOC_FIRST = f"AND (c.w_rcept = o.rcept_no OR NOT {_OWN_DOC}) "
+# 증인 문서(rcept_no → 기간) — 자격 있는 main 문서만, 그리고 '자기 문서 우선': 판에 자격 있는 자기
+# 문서가 있으면 자기 문서만 증인이다. 사슬 전체를 늘 증인으로 받으면 `.sql` 이 사슬 문서를 앞세우는
+# 회귀(자기 문서 12-31 인데 산출 11-30)가 통과한다(품질 검토 재현).
+# **상관 없는 파생 표로 먼저 만든다** — 두 검사의 NOT EXISTS 에는 rcept_no 를 포함한 등호만 남긴다.
+# 증인 조건을 상관 NOT EXISTS 안에 두면 DuckDB 1.5.5 가 stg_doc_meta 와 바깥 행을 기간 열로만 조인해
+# 서버 규모에서 중간 결과가 수억 행이 된다(합성 벤치 1.0배 메모리 부족 → 이 형태 0.06초·0.33GB).
+_WITNESS_DOCS = ("(SELECT c.rcept_no, m.period_to, m.period_from, m.doc_acode FROM {wit} c "
+                 "JOIN stg_doc_meta m ON m.rcept_no = c.w_rcept WHERE "
+                 + DOC_QUALIFIED_PRED.format(a="m")
+                 + " AND (c.w_rcept = c.rcept_no OR NOT EXISTS (SELECT 1 FROM stg_doc_meta m0 "
+                 "WHERE m0.rcept_no = c.rcept_no AND " + DOC_QUALIFIED_PRED.format(a="m0") + ")))")
 
 
 def _vocab_sql(values: tuple[str, ...]) -> str:
@@ -377,12 +385,12 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
     기간 판정 재계산은 `.sql` 의 tie-break 를 베끼지 않는다 — "증인 접수의 main 문서 중 **어느 한
     행**이 이 `period_end`(그리고 그 행의 개월 수가 이 `report_code`)를 준다"는 존재 명제로 본다.
     증인 접수는 그 판 자신이고, 판에 자격 있는 자기 문서가 없을 때만 같은 정정 사슬의 판이다
-    (`_DOC_WITNESS`·`_OWN_DOC_FIRST`, e1.25.0). 사슬로 보충한 규모는 기록형
+    (`_DOC_WITNESS`·`_WITNESS_DOCS`, e1.25.0). 사슬로 보충한 규모는 기록형
     `n_period_end_chain_doc`.
     `stg_doc_meta` 가 rcept_no 당 main 을 둘 이상 갖는지는 `n_doc_meta_multi_main` 이 기록한다.
     """
     v = ctx.out_view
-    wit = _DOC_WITNESS.format(v=v)
+    wd = _WITNESS_DOCS.format(wit=_DOC_WITNESS.format(v=v))
     q1 = int(str(ctx.baseline.require(ctx.rule.name, "quarter_months")))
     inferred = _inferred_recent(ctx)
     checks = {
@@ -409,19 +417,17 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         # 없을 때만 같은 사슬)
         "n_period_end_not_document": _n(
             ctx, f'SELECT count(*) FROM "{v}" o WHERE o.period_end_basis = \'document\' '
-                 f"AND NOT EXISTS (SELECT 1 FROM {wit} c JOIN stg_doc_meta m "
-                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no " + _OWN_DOC_FIRST
-                 + "AND m.member_role = 'main' AND m.period_to = o.period_end "
-                 "AND m.period_from IS NOT DISTINCT FROM o.period_start)"),
+                 f"AND NOT EXISTS (SELECT 1 FROM {wd} w WHERE w.rcept_no = o.rcept_no "
+                 "AND w.period_to = o.period_end "
+                 "AND w.period_from IS NOT DISTINCT FROM o.period_start)"),
         # 1Q/3Q 판정 — doc_acode 11013 은 개월 수로만 갈린다
         "n_report_code_month_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o WHERE o.period_end_basis = \'document\' '
-                 f"AND NOT EXISTS (SELECT 1 FROM {wit} c JOIN stg_doc_meta m "
-                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no " + _OWN_DOC_FIRST
-                 + "AND m.member_role = 'main' AND m.period_to = o.period_end "
-                 "AND m.period_from = o.period_start AND o.report_code = "
-                 "(CASE WHEN m.doc_acode <> '11013' THEN m.doc_acode "
-                 f"WHEN date_diff('month', m.period_from, m.period_to) + 1 <= {q1} "
+                 f"AND NOT EXISTS (SELECT 1 FROM {wd} w WHERE w.rcept_no = o.rcept_no "
+                 "AND w.period_to = o.period_end "
+                 "AND w.period_from = o.period_start AND o.report_code = "
+                 "(CASE WHEN w.doc_acode <> '11013' THEN w.doc_acode "
+                 f"WHEN date_diff('month', w.period_from, w.period_to) + 1 <= {q1} "
                  "THEN '11013' ELSE '11014' END))"),
         "n_period_end_after_rcept": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                             "WHERE period_end > rcept_dt"),

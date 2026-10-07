@@ -221,7 +221,10 @@ RULES_VERSION = "e1.25.0"                # BuildRecord.rules_version 에 실린�
 #             look-ahead).
 #          ③ G-21(N-25 Q2) `fin_std` 그룹 판본을 첫 접수 → **최신 접수**(max rcept_no)로,
 #             값 줄도 그 접수 것만. 일일 수집이 덧붙인 정정 값이 반영되고 ord 가 바뀐
-#             계정의 모호 NULL 이 사라진다.
+#             계정의 모호 NULL 이 사라진다. 그 판에 문서가 없으면 같은 정정 사슬
+#             (disclosure_version 링크)의 최신 문서로 기간을 잇는다(`chain_doc` — 없으면 문서
+#             없는 정정이 추정 창 밖일 때 그룹이 통째로 period_unresolved). EG3 기간 증인도 같은
+#             사슬을 본다.
 #          게이트: EG3_fin_std 의 `n_available_ne_rcept_dt`·`n_orig_filing_unwitnessed` 가
 #          stage 공개일 축으로, EG8 그룹 조인 키가 max(rcept_no) 로.
 

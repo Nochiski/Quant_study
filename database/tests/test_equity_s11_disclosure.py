@@ -254,9 +254,10 @@ def _disclosure(rcept_no: str, rcept_dt: date | None, corp: str, report_nm: str,
 
 
 def _correction(rcept_no: str, filed: date | None, status: str = "parsed",
-                page: bool = True, items: str = "") -> dict[str, object]:
+                page: bool = True, items: str = "",
+                reason: str = "단순 기재오류") -> dict[str, object]:
     return {"rcept_no": rcept_no, "page_found": page, "filed_date": filed,
-            "filed_date_status": status, "reason_raw": "단순 기재오류", "items": items}
+            "filed_date_status": status, "reason_raw": reason, "items": items}
 
 
 def _hand_tree(make_stage_tree, tmp_path: Path, disclosures: list[dict[str, object]],
@@ -304,6 +305,27 @@ def _build_hand(make_stage_tree, tmp_path: Path, disclosures: list[dict[str, obj
         DV, stage_root, tmp_path / "equity", base, build_id="b_hand",
         fixtures_path=_hand_fixture(tmp_path, "20200101000001", "available_basis", "derived"),
         gate_thresholds={"EG7": 1.0})
+
+
+@pytest.mark.parametrize("reason, expect", [
+    ("재무제표 수정에 따른 기재정정", True),     # 공백 낀 사유 — 공백을 떼고 대조한다(C-11)
+    ("단순 기재오류", False),                    # 대조군 — 비재무 항목·사유
+])
+def test_재무_정정_판정은_공백을_뗀_사유도_본다(make_stage_tree, tmp_path: Path,
+                                          reason: str, expect: bool) -> None:
+    disclosures = [
+        _disclosure("20200101000001", date(2020, 3, 30), "00000001",
+                    "사업보고서 (2019.12)", False),
+        _disclosure("20200101000003", date(2020, 5, 20), "00000001",
+                    "[기재정정]사업보고서 (2019.12)", True),
+    ]
+    items = json.dumps([{"항목": "VIII. 임원 및 직원 등에 관한 사항"}], ensure_ascii=False)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures,
+                    [_correction("20200101000003", date(2020, 3, 30), items=items,
+                                 reason=reason)])
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    assert rows["20200101000003"]["corr_has_fin_item"] is expect
 
 
 def test_부정_후보_2건이면_multi_unresolved(make_stage_tree, tmp_path: Path) -> None:

@@ -4,7 +4,8 @@
 절단본 실측(`stg_fin` 41,740행 · 법인 9개):
   모집단 = (corp_code, bsns_year, reprt_code, fs_div) 중 표준계정 행이 있는 그룹 **226**
   → 산출 **220** · 격리 **6**(전부 `non_krw` = 중국원양자원 00722500, HKD 848행).
-  `period_end_basis` document 220 · inferred 1(격리된 00722500 2016 반기, 문서 없음).
+  `period_end_basis` 산출 220 전부 document. 격리된 00722500 2016 반기는 판(정정)에 문서가 없어
+  e1.24.0 까지 inferred 였고 e1.25.0 부터 같은 정정 사슬의 원본 문서로 document 다(같은 말일).
   `report_code` 11011 57 · 11012 56 · 11013 56 · 11014 51 — `doc_acode` 는 1·3분기를 둘 다
   11013 으로 적으므로 개월 수(3 vs 9)가 11014 51 건을 갈라낸다.
   접수 지연 p50 45일 · p99 216일 · **max 445일**(`api_restated` 축의 증거).
@@ -129,11 +130,13 @@ def test_비KRW_그룹은_격리된다(built: build.BuildResult) -> None:
     assert len(rej) == N_REJECT
     assert {r["reject_reason"] for r in rej} == {"non_krw"}
     assert {r["corp_code"] for r in rej} == {"00722500"}
-    # 문서 없는 그룹의 후보 규칙(inferred)이 실제로 돌았다는 증거 — 반기 말일을 스스로 찾았다
-    inferred = [r for r in rej if r["period_end_basis"] == "inferred"]
-    assert len(inferred) == 1
-    assert (inferred[0]["bsns_year"], inferred[0]["report_code"],
-            inferred[0]["period_end"]) == ("2016", "11012", date(2016, 6, 30))
+    # 2016 반기 그룹의 판(정정 20160830000761)은 문서가 없다. e1.25.0 부터는 같은 정정 사슬의
+    # 원본 20160829000543 문서(2016-01-01~06-30)로 기간을 잇는다(`chain_doc`) — 예전 후보
+    # 규칙(inferred)과 같은 말일이다. 후보 규칙 자체는 손 트리 시험
+    # (`test_결산월이_있으면_…`)이 본다.
+    half = [r for r in rej if (r["bsns_year"], r["report_code"]) == ("2016", "11012")]
+    assert len(half) == 1
+    assert (half[0]["period_end_basis"], half[0]["period_end"]) == ("document", date(2016, 6, 30))
 
 
 def test_보고서_종류_분포와_1Q_3Q_판정(built: build.BuildResult,
@@ -693,12 +696,17 @@ def test_재제출본은_접수번호_날짜부터_보인다(make_stage_tree, tm
 _G21_ORIG = ("20260319001177", date(2026, 3, 19))      # 원본 — 백필이 08-26 에 관측
 _G21_CORR = ("20260928000253", date(2026, 9, 28))      # [기재정정] — 일일 수집이 09-28 에 덧붙였다
 _G21_SEEN = (date(2026, 8, 26), date(2026, 9, 28))
+_FY2025 = (date(2025, 12, 31), "11011")                  # 사업보고서 문서의 (period_to, doc_acode)
+_NO_DOC = (None, None)                                   # 그 접수의 기간 문서가 없다(ZIP 014 등)
 
 
 def _g21_row(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
-             corrections: list[dict[str, object]] | None = None) -> dict[str, object]:
-    reports = [(rc, "01472930", "2025", "11011", dt, date(2025, 12, 31), "11011")
-               for rc, dt in (_G21_ORIG, _G21_CORR)]
+             corrections: list[dict[str, object]] | None = None,
+             docs: tuple[tuple[date | None, str | None], ...] = (_FY2025, _FY2025)
+             ) -> dict[str, object]:
+    """`docs` = (원본, 정정) 각 접수의 문서 (period_to, doc_acode)."""
+    reports = [(rc, "01472930", "2025", "11011", dt, pt, ac)
+               for (rc, dt), (pt, ac) in zip((_G21_ORIG, _G21_CORR), docs, strict=True)]
     r = _hand_build(make_stage_tree, tmp_path, [("01472930", "12")], reports, fin,
                     (_G21_CORR[0], "rcept_no", _G21_CORR[0]),
                     report_names={_G21_CORR[0]: "[기재정정]사업보고서 (2025.12)"},
@@ -749,6 +757,51 @@ def test_재무_무관_정정이_쌓이면_값은_정정본이고_공개일은_�
     assert row["rcept_no"] == _G21_CORR[0]
     assert row["rcept_dt"] == _G21_CORR[1]
     assert row["available_date"] == _G21_ORIG[1]
+
+
+def test_최신_판본에_문서가_없으면_같은_정정_사슬의_문서로_기간을_잇는다(make_stage_tree,
+                                                                    tmp_path: Path) -> None:
+    """G-21 후속(명세 검토) — 정정 ZIP 이 없어(014) 최신 판본에 기간 문서가 없고 정정 접수일이 기간
+    말일에서 271일이라 추정 창(0~period_end_lag_max_days 200일) 밖이다. 사슬 보충이 없으면
+    `period_unresolved` 로 그룹이 통째로 격리된다(원본 고정 때는 보이던 재무가 사라진다)."""
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
+                   docs=(_FY2025, _NO_DOC))
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert _num(row["revenue"]) == Decimal("90")                 # 값은 정정본
+    assert (row["period_end"], row["period_start"]) == (date(2025, 12, 31), date(2025, 1, 1))
+    assert (row["period_end_basis"], row["report_code"]) == ("document", "11011")
+    assert row["available_date"] == _G21_CORR[1]                # 첫 장 정보 없음 → 정정일
+
+
+def test_정정_문서가_있으면_그_문서의_기간을_쓴다(make_stage_tree, tmp_path: Path) -> None:
+    """사슬 보충은 최신 판본에 문서가 **없을 때만**이다 — 원본 문서가 달라도 정정 문서가 이긴다."""
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
+                   docs=((date(2025, 6, 30), "11012"), _FY2025))
+    assert (row["period_end"], row["report_code"]) == (date(2025, 12, 31), "11011")
+
+
+def test_부정_사슬이_아닌_다른_보고서의_문서는_빌리지_않는다(make_stage_tree,
+                                                         tmp_path: Path) -> None:
+    """한화리츠 01669226 — 반기 결산 리츠라 한 (bsns_year, 11012) 그룹에 서로 다른 반기보고서
+    (2026.01 · 2026.07)가 묶인다. 최신 접수에 문서가 없어도 남의 기간(2026-01-31)을 빌리면 틀린
+    기간이 되므로 종전대로 추정한다(결산월 12 → 2026-06-30, inferred)."""
+    old, new = ("20260320000101", date(2026, 3, 20)), ("20260914000202", date(2026, 9, 14))
+    reports = [(old[0], "01669226", "2026", "11012", old[1], date(2026, 1, 31), "11012"),
+               (new[0], "01669226", "2026", "11012", new[1], None, None)]
+    fin = [_fin_row("01669226", "2026", "11012", rc, sj="IS", account_id="ifrs-full_Revenue",
+                    account_nm="매출액", amount=amt)
+           for rc, amt in ((old[0], 10.0), (new[0], 20.0))]
+    r = _hand_build(make_stage_tree, tmp_path, [("01669226", "12")], reports, fin,
+                    (new[0], "rcept_no", new[0]),
+                    report_names={old[0]: "반기보고서 (2026.01)", new[0]: "반기보고서 (2026.07)"},
+                    fin_std_inferred_recent_ratio_max=None)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    out = _rows(r.out_dir)                                       # type: ignore[arg-type]
+    assert len(out) == 1
+    assert (out[0]["rcept_no"], out[0]["period_end_basis"]) == (new[0], "inferred")
+    assert out[0]["period_end"] == date(2026, 6, 30)
 
 
 def test_부정_접수지연_상한_밖은_격리된다(make_stage_tree, tmp_path: Path) -> None:

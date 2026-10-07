@@ -22,6 +22,7 @@ R_OTHER = "20160108000502"
 R_NO_MAP = "20200101000001"    # disclosure 에 없는 접수번호 → 참조표 미스
 R_FUTURE = "29230101000001"    # 연도 범위 밖 (G7 격리)
 R_BACKDATED = "20250828000446"  # 박셀바이오 재제출본 — 원천 rcept_dt 가 접수번호보다 과거(J-41)
+R_BAD_PREFIX = "20251399000001"  # 앞 8자리가 날짜가 아니다(13월) — 참조표 값 그대로
 
 
 def _disc(rcept_no: str, rcept_dt: str, collected: str = "2026-08-30T10:00:00",
@@ -201,8 +202,10 @@ def test_fin_available_date_is_never_earlier_than_the_receipt_number_date(tmp_pa
     참조표 자체(원문 rcept_dt)와 참조표 미스(NULL·unknown)는 그대로다."""
     d = tmp_path / "raw_j41"
     d.mkdir()
-    _write_dart(d / "dart.db", DISC_ROWS + [_disc(R_BACKDATED, "20240319")],
-                FIN_ROWS + [_fin(R_BACKDATED, corp="01335851", year="2023", amt="5")])
+    _write_dart(d / "dart.db",
+                DISC_ROWS + [_disc(R_BACKDATED, "20240319"), _disc(R_BAD_PREFIX, "20240319")],
+                FIN_ROWS + [_fin(R_BACKDATED, corp="01335851", year="2023", amt="5"),
+                            _fin(R_BAD_PREFIX, corp="00000099", year="2023", amt="6")])
     s = snapshot.make_snapshot({"dart": d / "dart.db"}, tmp_path / "snapshots", snapshot_id="sj")
     m = _build("stg_rcept_dt_map", s, tmp_path)
     r = _build("stg_fin", s, tmp_path)
@@ -217,6 +220,9 @@ def test_fin_available_date_is_never_earlier_than_the_receipt_number_date(tmp_pa
     miss = con.execute(f"SELECT available_date, available_basis FROM t WHERE rcept_no='{R_NO_MAP}'"
                        ).fetchone()
     assert miss == (None, "unknown")                          # 미스는 접두로 채우지 않는다(§6)
+    bad = con.execute("SELECT available_date, available_basis FROM t "
+                      f"WHERE rcept_no='{R_BAD_PREFIX}'").fetchone()
+    assert bad is not None and (str(bad[0]), bad[1]) == ("2024-03-19", "derived")
     ref = _read(tmp_path, m).execute(f"SELECT rcept_dt FROM t WHERE rcept_no='{R_BACKDATED}'"
                                      ).fetchone()
     assert ref is not None and str(ref[0]) == "2024-03-19"   # 참조표는 원문 사실 그대로

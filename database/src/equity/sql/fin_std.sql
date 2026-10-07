@@ -21,7 +21,8 @@
 -- 취득 줄이 아예 없는 현금흐름표는 `capex_zero` 가 0 으로 읽는다(F-A3, basis `none_in_cf`).
 -- 그 분모 밖(표가 없음 · 표는 있는데 못 잡음)은 basis 가 사유를 말한다(T-H, 아래).
 --
--- 기간: `period_end` = `stg_doc_meta.period_to`(main), `report_code` = `doc_acode`.
+-- 기간: `period_end` = `stg_doc_meta.period_to`(main), `report_code` = `doc_acode`. 그 판에 문서가
+-- 없으면 같은 정정 사슬(disclosure_version 링크)의 최신 문서를 쓴다(`chain_doc`, G-21 후속).
 -- `doc_acode` 는 1분기·3분기를 둘 다 11013 으로 적으므로 `period_from → period_to` 개월 수로
 -- 가른다(≤ `quarter_months` → 11013 · 그 밖 → 11014).
 -- 문서가 없으면 후보 규칙: `corp.fiscal_month` 말일(bsns_year · bsns_year+1)에서 보고서 종류만큼
@@ -282,6 +283,24 @@ doc AS (
     QUALIFY row_number() OVER (PARTITION BY rcept_no
                                ORDER BY period_to, period_from, doc_acode) = 1
 ),
+chain_doc AS (
+    -- 그룹의 판(최신 접수)에 기간 문서가 없으면(정정 ZIP 미제공 014 등) **같은 정정 사슬**의 다른 판
+    -- 문서로 기간을 잇는다 — 정정과 원본은 같은 보고서라 기간이 같다. 없으면 G-21 이 고른 정정의 접수일이
+    -- 추정 창(0~period_end_lag_max_days) 밖일 때 그룹이 통째로 `period_unresolved` 가 된다.
+    -- 사슬은 disclosure_version 링크(정정 → 원본, 링크가 성립한 것만)로만 묶는다. 그룹(API 요청 축)의
+    -- 아무 접수나 쓰지 않는다 — 한 그룹에 서로 다른 보고서가 묶일 수 있다(한화리츠 01669226 반기
+    -- 2026.01·2026.07). 사슬에 문서가 여럿이면 최신 판(가장 큰 rcept_no)의 문서다.
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div,
+           m.period_from, m.period_to, m.doc_acode
+    FROM grp g
+    JOIN disclosure_version s ON s.rcept_no = g.rcept_no
+    JOIN disclosure_version x
+      ON coalesce(x.orig_rcept_no, x.rcept_no) = coalesce(s.orig_rcept_no, s.rcept_no)
+    JOIN doc m ON m.rcept_no = x.rcept_no
+    WHERE NOT EXISTS (SELECT 1 FROM doc o WHERE o.rcept_no = g.rcept_no)
+    QUALIFY row_number() OVER (PARTITION BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div
+                               ORDER BY x.rcept_no DESC) = 1
+),
 head AS (
     -- `rcept_dt` 는 이 판의 원천 접수일(기간 판정·접수 지연 격리는 이 축), `avail_dt` 는 공개일 축이다 —
     -- 원본 공시일을 승계한 정정본(`redate`)은 `available_date < rcept_dt`, 원천 rcept_dt 가 접수번호보다
@@ -289,12 +308,19 @@ head AS (
     SELECT g.*,
            d.rcept_dt,
            coalesce(rd.orig_avail_dt, d.available_date)          AS avail_dt,
-           m.period_from, m.period_to, m.doc_acode,
+           -- 기간 문서: 그 판 자신 → 없으면 같은 정정 사슬의 문서(`chain_doc`). `doc` 은 세 열이 다
+           -- 차거나 다 비므로 열마다 coalesce 해도 한 문서의 값이 섞이지 않는다.
+           coalesce(m.period_from, cd.period_from)               AS period_from,
+           coalesce(m.period_to, cd.period_to)                   AS period_to,
+           coalesce(m.doc_acode, cd.doc_acode)                   AS doc_acode,
            c.fiscal_month
     FROM grp g
     LEFT JOIN dt d ON d.rcept_no = g.rcept_no
     LEFT JOIN redate rd ON rd.rcept_no = g.rcept_no
     LEFT JOIN doc m ON m.rcept_no = g.rcept_no
+    LEFT JOIN chain_doc cd
+      ON cd.corp_code = g.corp_code AND cd.bsns_year = g.bsns_year
+     AND cd.reprt_code = g.reprt_code AND cd.fs_div = g.fs_div
     LEFT JOIN corp c ON c.corp_code = g.corp_code
 ),
 pe_cand AS (

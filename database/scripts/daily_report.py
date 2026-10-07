@@ -6,7 +6,9 @@
 (표를 만들지 않으려고 `daily.runlog` 의 열기 경로 대신 직접 연다. 행 모양만 `runlog.Run` 을 재사용).
 
 등급(`docs/COLLECT_PLAN.md` §4-4 · 플랜 v2 §2-1):
-  crit — 수집 실패(런 `failed` · 저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패)
+  crit — 수집 실패(런 `failed` · 저녁 원장 rc≠0 — dart 와 DART 하나로만 실패한 저녁 체인은
+         그 D 마지막 dart 런이 ok 면 '회복', `_recovery`)
+         · 게이트 폐기(stage·빌드 health 실패)
          · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB
   warn — 건전성 warn 항목 실패, 아직 `running` 인 런
   info — 그 밖의 일일 요약
@@ -23,6 +25,7 @@ import datetime as dt
 import glob
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -39,6 +42,17 @@ BASES = ("evening", "morning")  # 잠정판 · 확정판
 LOCK_GLOB = "/tmp/quant_ledger_*.lock"
 NOTIFY_FAILED_LOG = "logs/notify_failed.log"   # notify.sh 가 전송 실패 때만 한 줄 append (DEFECT-D04)
 NOTIFY_WINDOW_H = 24
+# 같은 D 의 런마다 그 D 전체를 다시 판정하는 source — 마지막 런이 ok 면 앞 런 실패는 '회복'이다
+# (dart: 18:05 저녁 실패 → 06:00 재시도가 설계된 경로, 배포 묶음 3 A-05). 키움 fetch 처럼 런마다
+# TR 이 다른 source 는 뒤 런 ok 가 앞 런의 결손을 메웠다는 뜻이 아니라 넣지 않는다.
+LAST_RUN_SOURCES = frozenset({"dart"})
+# 뒤 런이 ok 여도 회복으로 덮지 않는 상태 — v3 프로덕션 키 사용은 수집 실패가 아니라 사고다(P1)
+NEVER_RECOVERED = frozenset({"kael_key_used"})
+# 저녁 체인 런 detail 의 갈래별 rc — `kiwoom_rc=0 dart_rc=2 wise_rc=0 …`. 이 리포트가
+# `scripts/daily_evening.sh` :148-154 가 적는 detail 형식을 파싱한다(그 형식을 바꾸면 여기도 본다).
+# 갈래 키를 나열하지 않고 `*_rc` 를 모두 읽는다 — 갈래가 늘어도 그 실패를 놓치지 않는다(P1)
+_EVENING_RC_RE = re.compile(r"\b([a-z][a-z0-9_]*_rc)=(-?\d+)\b")
+_EVENING_BRANCHES = frozenset({"kiwoom_rc", "dart_rc", "wise_rc"})
 
 
 class ReportStatus(str, Enum):
@@ -237,17 +251,50 @@ def _basis_section(label: str, reports: dict[str, dict[str, object] | None],
     return f"■ {label} " + " · ".join(parts), crit
 
 
-def _evening_section(rep: dict[str, object] | None) -> tuple[str, list[str]]:
+def _evening_section(rep: dict[str, object] | None, *,
+                     dart_recovered: bool = False) -> tuple[str, list[str]]:
+    """`dart_recovered` = `_recovery(runs, "dart")` 가 있음 — 저녁 dart_rc≠0 을 '뒤 런에서 회복'으로
+    본다."""
     if rep is None:
         return "■ 저녁 원장 없음", []
-    bad = [f"{k}={rep.get(k)}" for k in ("kiwoom_rc", "dart_rc", "wise_rc") if rep.get(k) not in (0, None)]
+    dart_healed = rep.get("dart_rc") not in (0, None) and dart_recovered
+    bad = [f"{k}={rep.get(k)}" for k in ("kiwoom_rc", "dart_rc", "wise_rc")
+           if rep.get(k) not in (0, None) and not (k == "dart_rc" and dart_healed)]
     line = ("■ 저녁 원장 "
             f"키움 rc={rep.get('kiwoom_rc')}({str(rep.get('kiwoom_done_at') or '?')[11:19]}) "
-            f"DART rc={rep.get('dart_rc')} "
+            f"DART rc={rep.get('dart_rc')}{'(뒤 런에서 회복)' if dart_healed else ''} "
             f"WISE rc={rep.get('wise_rc')}({str(rep.get('wise_done_at') or '?')[11:19]}) "
             f"종료 {_hhmm_kst(rep.get('finished_at'))}")
     crit = [f"저녁 원장 수집 실패 {' '.join(bad)}"] if bad else []
     return line, crit
+
+
+def _evening_dart_only(detail: str | None) -> bool:
+    """저녁 체인 실패 런의 원인이 DART 갈래 하나뿐인가 — 세 갈래 rc 가 다 있고, dart_rc≠0 이고,
+    그 밖의 모든 `*_rc`(모르는 갈래 포함)가 0. 하나라도 못 읽으면 False(P1)."""
+    rc = {k: int(v) for k, v in _EVENING_RC_RE.findall(detail or "")}
+    return (_EVENING_BRANCHES <= rc.keys() and rc["dart_rc"] != 0
+            and all(v == 0 for k, v in rc.items() if k != "dart_rc"))
+
+
+def _recovery(runs: list[Run] | None, source: str) -> str | None:
+    """그 D 의 `source` 실패가 회복됐으면 그 사유, 아니면 None. 런 절과 저녁 절이 같이 쓰는
+    판정 하나다.
+
+    · 마지막 런 규칙 source(dart): 마지막 런이 ok 이고 `NEVER_RECOVERED` 상태의 런이 없다.
+    · evening_chain: DART 갈래 실패도 자기 실패로 남긴다(`daily_evening.sh`) — 실패 런이 전부
+      DART 하나로만 실패했고 dart 가 회복됐으면 회복이다. 키움·WISE 실패거나 원인을 모르면 아니다.
+    """
+    mine = [r for r in runs or [] if r.source == source]          # run_id 오름차순
+    if source == "evening_chain":
+        bad = [r for r in mine if r.status not in ("ok", "running")]
+        if bad and all(_evening_dart_only(r.detail) for r in bad) and _recovery(runs, "dart"):
+            return "DART 뒤 런 회복"
+        return None
+    status = [r.status for r in mine]
+    if source in LAST_RUN_SOURCES and status[-1:] == ["ok"] and not NEVER_RECOVERED & set(status):
+        return "앞 런 실패 → 마지막 런 ok"
+    return None
 
 
 def _runs_section(runs: list[Run] | None) -> tuple[str, list[str], list[str]]:
@@ -256,10 +303,13 @@ def _runs_section(runs: list[Run] | None) -> tuple[str, list[str], list[str]]:
     if not runs:
         return "■ 런 기록 0건", [], []
     parts = [f"{r.source} {r.status}({_hhmm_kst(r.started)}→{_hhmm_kst(r.ended)})" for r in runs]
-    failed = sorted({r.source for r in runs if r.status not in ("ok", "running")})
+    bad = {r.source for r in runs if r.status not in ("ok", "running")}
+    healed = {s: why for s in sorted(bad) if (why := _recovery(runs, s))}
+    failed = sorted(bad - healed.keys())
     running = sorted({r.source for r in runs if r.status == "running"})
     crit = [f"수집 실패 런 {', '.join(failed)}"] if failed else []
     warns = [f"미완 런 {', '.join(running)}"] if running else []
+    parts += [f"회복 {s}({why})" for s, why in healed.items()]
     return "■ 런 " + " · ".join(parts), crit, warns
 
 
@@ -314,7 +364,7 @@ def build_report(home: str, date: str, *, now_kst: dt.datetime | None = None,
         line, c = _basis_section(label, reports, key)
         lines.append(line)
         crit += c
-    line, c = _evening_section(evening)
+    line, c = _evening_section(evening, dart_recovered=_recovery(runs, "dart") is not None)
     lines.append(line)
     crit += c
     line, c, w = _runs_section(runs)

@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _SCRIPTS = str(Path(__file__).resolve().parents[1] / "scripts")
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
@@ -70,12 +72,13 @@ def _ledger_evening(home: Path, *, kiwoom_rc: int = 0, dart_rc: int = 0, wise_rc
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _runs(home: Path, rows: tuple[tuple[str, str], ...] = (("ledger_chain", "ok"), ("evening_chain", "ok"))) -> None:
+def _runs(home: Path, rows: tuple[tuple[str, ...], ...] = (("ledger_chain", "ok"), ("evening_chain", "ok"))) -> None:
+    """런 기록. 행은 (source, status[, detail])."""
     db = str(home / "data" / "raw" / "daily_run.db")
-    for source, status in rows:
+    for source, status, *detail in rows:
         rid = runlog.start(db, date=D, source=source)
         if status != "running":
-            runlog.finish(db, rid, status=status, detail=None)
+            runlog.finish(db, rid, status=status, detail=detail[0] if detail else None)
 
 
 def _full(tmp_path: Path) -> Path:
@@ -132,6 +135,119 @@ def test_런_failed_는_수집_실패로_crit(tmp_path: Path) -> None:
     r = _build(home)
     assert r.status is dr.ReportStatus.CRIT
     assert "ledger_chain" in r.text
+
+
+# `daily_evening.sh` 가 실패한 저녁 체인 런에 남기는 detail 모양(:148-154) — 갈래별 rc 와 실패 갈래
+_EVENING_DART_ONLY = ("kiwoom_rc=0 dart_rc=2 wise_rc=0 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
+                      "wise_done_at=2026-09-10T18:09:41+09:00 failed= DART(rc=2)")
+_EVENING_KIWOOM_TOO = ("kiwoom_rc=1 dart_rc=2 wise_rc=0 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
+                       "wise_done_at=2026-09-10T18:09:41+09:00 failed= 키움(rc=1) DART(rc=2)")
+_EVENING_WISE_TOO = ("kiwoom_rc=0 dart_rc=2 wise_rc=1 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
+                     "wise_done_at=2026-09-10T18:09:41+09:00 failed= DART(rc=2) WISE(rc=1)")
+_EVENING_KIWOOM_ONLY = ("kiwoom_rc=1 dart_rc=0 wise_rc=0 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
+                        "wise_done_at=2026-09-10T18:09:41+09:00 failed= 키움(rc=1)")
+
+
+def _recovery_day(tmp_path: Path, *, dart: tuple[str, ...], dart_rc: int = 2,
+                  kiwoom_rc: int = 0, wise_rc: int = 0, evening: tuple[str, ...] = ()) -> Path:
+    """저녁 dart 런(18:05) 뒤 아침 dart 런(06:00)이 같은 D 를 다시 판정한 날.
+    `dart` = 런 순서대로의 상태. `evening` = 실패한 저녁 체인 런들의 detail(순서대로)."""
+    home = _home(tmp_path)
+    _ledger(home)
+    for basis in ("evening", "morning"):
+        _stage(home, basis)
+        _latest(home, basis)
+    _ledger_evening(home, dart_rc=dart_rc, kiwoom_rc=kiwoom_rc, wise_rc=wise_rc)
+    chain = tuple(("evening_chain", "failed", e) for e in evening)
+    _runs(home, rows=(("dart", dart[0]), *chain, ("ledger_chain", "ok"),
+                      *(("dart", s) for s in dart[1:])))
+    return home
+
+
+def test_저녁_dart_실패를_아침_dart_런이_회복하면_crit_이_아니다(tmp_path: Path) -> None:
+    """M-3 — 저녁 dart 가 유닛 하나를 못 받아 gate_failed, 06:00 런이 그 유닛을 받아 ok
+    (A-05 의 설계된 재시도 경로). 옛 판정은 실패 런이 하나라도 있으면 crit, 저녁 dart_rc≠0 도
+    crit 이었다."""
+    r = _build(_recovery_day(tmp_path, dart=("gate_failed", "ok")))
+    assert r.status is not dr.ReportStatus.CRIT, r.text
+    assert "회복 dart" in r.text
+    assert "DART rc=2(뒤 런에서 회복)" in r.text
+
+
+def test_저녁_체인이_DART_하나로만_실패했고_dart_가_회복되면_crit_이_아니다(tmp_path: Path) -> None:
+    """M-3 운영 모양 — 저녁 DART 갈래가 실패하면 `daily_evening.sh` 는 evening_chain 런도 failed 로
+    남긴다. 원인이 DART 하나뿐이고 dart 가 아침에 회복됐으면 저녁 체인 실패도 회복이다."""
+    r = _build(_recovery_day(tmp_path, dart=("gate_failed", "ok"), evening=(_EVENING_DART_ONLY,)))
+    assert r.status is not dr.ReportStatus.CRIT, r.text
+    assert "회복 dart(" in r.text and "회복 evening_chain(DART 뒤 런 회복)" in r.text
+
+
+@pytest.mark.parametrize(("detail", "kiwoom_rc", "wise_rc"), [
+    (_EVENING_KIWOOM_TOO, 1, 0),
+    (_EVENING_WISE_TOO, 0, 1),
+    ("dart_rc=2", 0, 0),                          # rc 일부만 — 키움·WISE 를 확인할 수 없다
+    # 모르는 갈래(krx_rc)가 실패 — 갈래가 늘어도 거짓 회복이 열리지 않는다(P1)
+    ("kiwoom_rc=0 dart_rc=2 wise_rc=0 krx_rc=1 failed= DART(rc=2) KRX(rc=1)", 0, 0),
+    ("", 0, 0),
+    ("형식 미상", 0, 0),
+], ids=["kiwoom", "wise", "dart_rc_only", "unknown_branch", "empty", "unknown"])
+def test_저녁_체인_실패_원인이_DART_만이_아니거나_모르면_dart_가_회복돼도_crit(
+        tmp_path: Path, detail: str, kiwoom_rc: int, wise_rc: int) -> None:
+    """키움·WISE 갈래도 실패했거나, detail 로 원인을 가릴 수 없으면 지금처럼 crit(P1)."""
+    home = _recovery_day(tmp_path, dart=("gate_failed", "ok"), evening=(detail,),
+                         kiwoom_rc=kiwoom_rc, wise_rc=wise_rc)
+    r = _build(home)
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 evening_chain" in r.text
+    assert "회복 evening_chain" not in r.text
+
+
+def test_저녁_체인_실패_런이_둘이면_전부_DART_만이어야_회복이다(tmp_path: Path) -> None:
+    """키움만 실패한 저녁 체인 → 재실행에서 DART 만 실패 — 앞 런의 키움 실패가 남아 crit."""
+    r = _build(_recovery_day(tmp_path, dart=("gate_failed", "ok"), kiwoom_rc=0,
+                             evening=(_EVENING_KIWOOM_ONLY, _EVENING_DART_ONLY)))
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 evening_chain" in r.text
+    assert "회복 evening_chain" not in r.text
+
+
+def test_dart_마지막_런도_실패면_crit(tmp_path: Path) -> None:
+    """저녁 dart_rc≠0 + 아침 dart 도 실패 — dart·저녁 체인·저녁 원장 모두 crit 그대로."""
+    r = _build(_recovery_day(tmp_path, dart=("gate_failed", "gate_failed"),
+                             evening=(_EVENING_DART_ONLY,)))
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 dart, evening_chain" in r.text
+    assert "저녁 원장 수집 실패 dart_rc=2" in r.text
+    assert "회복" not in r.text
+
+
+def test_dart_ok_뒤_런이_실패하면_마지막_런_기준으로_crit(tmp_path: Path) -> None:
+    """마지막 런 = run_id 가 가장 큰 런 — 앞 런 ok 가 뒤 런 실패를 덮지 않는다."""
+    r = _build(_recovery_day(tmp_path, dart=("ok", "gate_failed"), dart_rc=0))
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 dart" in r.text
+    assert "회복" not in r.text
+
+
+def test_dart_kael_키_런은_뒤_런이_ok_여도_회복으로_덮지_않는다(tmp_path: Path) -> None:
+    """v3 프로덕션 키 사용은 수집 실패가 아니라 사고다 — 사이에 다른 실패 런이 끼고 마지막 런이
+    ok 여도 지우지 않는다(P1). 저녁 절도 같은 판정이라 '아침에 회복' 으로 적지 않는다."""
+    r = _build(_recovery_day(tmp_path, dart=("kael_key_used", "gate_failed", "ok"),
+                             evening=(_EVENING_DART_ONLY,)))
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 dart, evening_chain" in r.text
+    assert "저녁 원장 수집 실패 dart_rc=2" in r.text
+    assert "회복" not in r.text
+
+
+def test_키움_fetch_는_뒤_런이_ok_여도_앞_런_실패가_crit(tmp_path: Path) -> None:
+    """키움 fetch 는 런마다 TR 이 다르다(저녁 ka10060·ka10014 · 08:10 ka10008) — 뒤 런 ok 가 앞 런의
+    결손을 메웠다는 뜻이 아니라 마지막 런 규칙을 걸지 않는다."""
+    home = _full(tmp_path)
+    _runs(home, rows=(("kiwoom_fetch", "coverage_failed"), ("kiwoom_fetch", "ok")))
+    r = _build(home)
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 kiwoom_fetch" in r.text
 
 
 def test_런이_아직_running_이면_warn(tmp_path: Path) -> None:

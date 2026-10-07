@@ -25,6 +25,13 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+# 아직 오지 않은 D(--date 오타)는 원장 락·KRX 단계에 들어가기 전에 거부한다 — build_chain.sh 의 같은 거부까지
+# 가면 그 앞 KRX 재시도(10분 간격 최대 6회) 동안 원장 락을 쥘 수 있다. 문구·rc 는 build_chain.sh 와 같다(N-24 3.14).
+TODAY_KST=$(TZ=Asia/Seoul date +%Y%m%d)
+if [ -n "$DATE_ARG" ] && [[ "$DATE_ARG" > "$TODAY_KST" ]]; then
+  echo "D=$DATE_ARG 가 오늘(KST $TODAY_KST)보다 뒤다 — 아직 오지 않은 날의 판은 짓지 않는다(--date 오타?)" >&2
+  exit 2
+fi
 LOCK="${QL_RAW_LOCK_FILE:-/tmp/quant_ledger_raw.lock}"   # 테스트가 운영 락을 잡지 않게 할 때만 바꾼다
 LOCK_WAITED=""     # 원장 락을 기다렸으면 "N초 (시작 ~ 끝)" — 체인 로그에도 남긴다
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then

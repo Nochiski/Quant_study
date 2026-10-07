@@ -1,15 +1,18 @@
 """scripts/daily_build.sh — 원장 락이 잡혀 있으면 풀릴 때까지 기다렸다 이어서 돈다.
 
-배포 묶음 3 T16(N-23 ①·P9). HOME 을 임시 폴더로 바꿔 `~/quant-ledger` 에 대역
-`.venv/bin/python`·`scripts/notify.sh` 를 두고 진짜 스크립트를 `--dry-run` 으로 돌린다
-(test_daily_ledger_sh 와 같은 방식). 락 구간은 인자 해석보다 앞이라 dry-run 과 운영 경로가
-같고, dry-run 은 원장 단계(대역 python)만 돌아 KRX·원장·빌드를 건드리지 않는다.
+배포 묶음 3 T16(N-23 ①·P9) · M-6(미래 `--date` 는 락 전에 거부). HOME 을 임시 폴더로 바꿔
+`~/quant-ledger` 에 대역 `.venv/bin/python`·`scripts/notify.sh` 를 두고 진짜 스크립트를
+`--dry-run` 으로 돌린다(test_daily_ledger_sh 와 같은 방식). 스크립트는 인자를 먼저 읽고(미래 D
+거부도 여기서) 원장 락을 잡는다 — 락 구간은 dry-run 과 운영 경로가 같고(dry-run 은 대기·실패
+알림을 남기지 않는 것만 다르다), dry-run 은 원장 단계(대역 python)만 돌아 KRX·원장·빌드를
+건드리지 않는다.
 락 파일은 `QL_RAW_LOCK_FILE` 로 임시 경로를 준다 — 운영 락 `/tmp/quant_ledger_raw.lock` 을
 잡지 않는다. 맥에는 flock 이 없어 PATH 대역 flock 으로 '대기형으로 불렸는가'를 보고,
 진짜 flock 이 있으면(서버·CI 우분투) 다른 프로세스가 쥔 락이 풀린 뒤 이어서 도는지 실물로 본다.
 """
 from __future__ import annotations
 
+import datetime as dt
 import os
 import shutil
 import subprocess
@@ -162,6 +165,36 @@ def test_failed_wait_never_runs_without_lock(tmp_path: Path, dry: bool) -> None:
     assert r.calls == []
     sent = ["|".join(ln.split("|")[:2]) for ln in r.notify.splitlines()]
     assert sent == ([] if dry else ["info|daily_build 원장 락 대기", "warn|daily_build 락 실패"])
+
+
+def _kst_day(offset: int) -> str:
+    """오늘(KST) + offset 일, YYYYMMDD — 스크립트의 `TZ=Asia/Seoul date +%Y%m%d` 와 같은 축."""
+    return (dt.datetime.now(dt.UTC) + dt.timedelta(hours=9, days=offset)).strftime("%Y%m%d")
+
+
+def test_future_date_is_rejected_before_the_raw_lock(tmp_path: Path) -> None:
+    """M-6 — `--date` 가 오늘(KST)보다 뒤면 원장 락을 잡기 전에 rc 2(`build_chain.sh` 와 같은
+    문구·rc).
+
+    옛 코드는 락을 잡은 뒤 KRX 단계(10분 간격 최대 6회 재시도)에 들어가고, 미래 D 는
+    `build_chain.sh` 에 가서야 거부했다. 이제 락 파일을 열지도 않고, 원장 단계·알림도 없다.
+    """
+    _root(tmp_path)
+    future = _kst_day(2)                     # +1 은 KST 자정 경계에서 '오늘'이 될 수 있다
+    r = _run(tmp_path, flock_stub=True, args=("--date", future, "--dry-run"))
+    assert r.rc == 2, r.out
+    assert (r.flock, r.calls, r.notify) == ([], [], "")
+    assert not (tmp_path / "raw.lock").exists()
+    assert f"D={future} 가 오늘(KST " in r.out and "(--date 오타?)" in r.out
+
+
+def test_today_date_passes_the_future_guard(tmp_path: Path) -> None:
+    """오늘(KST) D 는 거부하지 않는다 — `build_chain.sh` 와 같은 경계(오늘보다 뒤만 거부)."""
+    _root(tmp_path)
+    r = _run(tmp_path, flock_stub=True, n_rc=0, args=("--date", _kst_day(0), "--dry-run"))
+    assert r.rc == 0, r.out
+    assert r.flock == ["-n 9"]
+    assert r.calls == STEPS
 
 
 @pytest.mark.skipif(shutil.which("flock") is None,

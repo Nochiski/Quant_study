@@ -92,6 +92,9 @@ def test_endpoint_names_match_backfill_dart_stages(tmp_path, monkeypatch) -> Non
     assert dd.DS005_ENDPOINTS == tuple(bf.STAGES[4]) + tuple(bf.STAGES[5])
     assert len(dd.DS005_ENDPOINTS) == 15
     assert {bf.SPEC[n]["axis"] for n in dd.DS005_ENDPOINTS} == {"corp_range"}
+    # 재무 재확인은 이 표 이름으로 저장된 재무 행을 읽는다(`fin_rcept_max`). 이름이 바뀌면
+    # 받은 재무가 매 런 '행 없음' 으로 보여 전부 다시 불린다
+    assert bf.SPEC["fin"]["tbl"] == "dart_fin_raw"
 
 
 # ── 픽스처 ──────────────────────────────────────────────────────────────────────
@@ -299,6 +302,25 @@ def test_plan_late_sample_is_capped(tmp_path) -> None:
     p = dd.plan(con, D, since_ts=since)
     assert p.n_late == dd.LATE_SAMPLE_MAX + 5
     assert len(p.late_rcept_nos) == dd.LATE_SAMPLE_MAX
+    con.close()
+
+
+def test_plan_trigger_takes_max_first_seen_and_max_rcept_no(tmp_path) -> None:
+    """같은 유닛을 만든 공시가 여럿이면 최초 관측·접수번호 둘 다 최댓값이다.
+
+    저녁 스윕이 처음 본 늦은 공시(b, 09:10)와 D일 정정본(a, 12:00)이 같은 반기 재무 유닛을 만든다.
+    plan 은 (a) 다음 (b) 순서로 돌므로 '마지막 값' 이나 최솟값으로 모으면 기준이 어긋난다.
+    """
+    rows = [("20260908000002", D, C1, "005930", "[기재정정]반기보고서 (2026.06)",
+             "2026-09-08T12:00:00"),
+            ("20260905000001", "20260905", C1, "005930", "반기보고서 (2026.06)",
+             "2026-09-08T09:10:00")]
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    p = dd.plan(con, D, since_ts="2026-09-08T09:05:00")
+    assert p.n_late == 1
+    t = p.triggers[dd.Unit("fin", C1, "2026", "11012")]
+    assert (t.first_seen, t.rcept_no) == ("2026-09-08T12:00:00", "20260908000002")
     con.close()
 
 
@@ -549,8 +571,8 @@ def test_filings_gate_counts_listed_filings_once_not_resweep_rows(tmp_path) -> N
 
 
 def test_received_rules_axis_status_fs_div_and_latest_trigger(tmp_path) -> None:
-    """N-24 3.1~3.3 경계(3.2 는 10-07 수정) — no_data 는 모든 축에서 받음 · 연도 축은 다시
-    부를 대상 · ok_empty · fs_div 무시 · 최초 관측(계기 여럿은 최댓값)."""
+    """N-24 3.1~3.3 경계(3.2 는 10-07 수정) — no_data 는 모든 축에서 받음(다시 부르는 013 은
+    재무뿐) · ok_empty · fs_div 무시 · 최초 관측(계기 여럿은 최댓값)."""
     rows = [("20260908000001", D, C1, "005930", "반기보고서 (2026.06)"),
             ("20260908000002", D, C2, "005930", "주식등의대량보유상황보고서(약식)"),
             # 같은 정기 유닛을 두 공시가 만든다 — 정정본을 나중(15:00)에 처음 봤다
@@ -562,7 +584,7 @@ def test_received_rules_axis_status_fs_div_and_latest_trigger(tmp_path) -> None:
     fin1, div1, sh1, cap1 = _periodic(C1)[:4]
     con.execute("INSERT INTO ingest_log VALUES ('fin',?,'2026','11012','OFS','ok',9,NULL,?)",
                 (C1, _LOGGED))                                   # fs_div 는 키가 아니다
-    _log(con, [div1], status="no_data")                           # 연도 축 013 — 받음·다시 부름
+    _log(con, [div1], status="no_data")                           # 부속 연도 축 013 — 받음
     _log(con, [sh1], status="ok_empty")                           # 정상이라며 0행
     _log(con, [cap1], ts="2026-09-01T00:00:00")                   # 최초 관측 전의 ok
     _log(con, _per_corp(("elestock",), C2), status="no_data")     # 회사 축 무자료 — 받음
@@ -572,11 +594,64 @@ def test_received_rules_axis_status_fs_div_and_latest_trigger(tmp_path) -> None:
 
     rec = dd.received(con, dd.plan(con, D))
     assert {fin1, div1, *_per_corp(dd.HOLDER_ENDPOINTS, C2)} <= rec.ok
-    assert rec.nodata == {div1}                                   # 회사 축 013 은 다시 안 부른다
+    assert rec.nodata == frozenset()                              # 부속·회사 축 013 은 안 부른다
     assert rec.missing[sh1] == "status=ok_empty"
     assert rec.missing[cap1].startswith("ts 2026-09-01T00:00:00 < 최초 관측")
     assert rec.missing[_periodic(C3)[0]] == "ts 2026-09-08T13:00:00 < 최초 관측 2026-09-08T15:00:00"
     assert rec.missing[_periodic(C1)[4]] == "ingest_log 없음"
+    con.close()
+
+
+@pytest.mark.parametrize(("endpoint", "rows", "want"), [
+    # 최종 행 = ts 가 가장 늦은 행, fs_div 는 키가 아니다 — 옛 CFS error 뒤 새 OFS ok 는 받음
+    ("fin", [("CFS", "error", "2026-09-08T12:30:00"), ("OFS", "ok", _LOGGED)], "ok"),
+    ("fin", [("CFS", "ok", "2026-09-08T12:30:00"), ("OFS", "error", _LOGGED)], "status=error"),
+    # 같은 시각이면 받지 않은 쪽(P1)
+    ("fin", [("CFS", "ok", _LOGGED), ("OFS", "error", _LOGGED)], "status=error"),
+    # ts == 최초 관측(12:00)은 받음, 1초 전은 받지 않음
+    ("dividend", [("", "ok", "2026-09-08T12:00:00")], "ok"),
+    ("dividend", [("", "ok", "2026-09-08T11:59:59")],
+     "ts 2026-09-08T11:59:59 < 최초 관측 2026-09-08T12:00:00"),
+    # 013 은 모든 축에서 받음 — 다시 부르는 것은 재무뿐(N-23 ② 와 같은 범위)
+    ("fin", [("OFS", "no_data", _LOGGED)], "ok·다시 부름"),
+    ("dividend", [("", "no_data", _LOGGED)], "ok"),
+    ("elestock", [("", "no_data", _LOGGED)], "ok"),
+    ("dividend", [("", "ok_empty", _LOGGED)], "status=ok_empty"),
+    ("dividend", [], "ingest_log 없음"),
+])
+def test_received_final_row_rules(tmp_path, endpoint, rows, want) -> None:
+    """`received()` 표 — 최종 행 규칙 · 같은 시각 · 최초 관측 경계 · 축별 013 · ok_empty ·
+    행 없음."""
+    home = _make_home(tmp_path, rows=[
+        ("20260908000001", D, C1, "005930", "반기보고서 (2026.06)"),
+        ("20260908000002", D, C1, "005930", "주식등의대량보유상황보고서(약식)")])
+    con = _con(home)
+    u = (dd.Unit(endpoint, C1, "2026", "11012") if endpoint in dd.PERIODIC_ENDPOINTS
+         else dd.Unit(endpoint, C1, "", ""))
+    con.executemany("INSERT INTO ingest_log VALUES (?,?,?,?,?,?,1,NULL,?)",
+                    [(u.endpoint, u.corp_code, u.bsns_year, u.reprt_code, fs, st, ts)
+                     for fs, st, ts in rows])
+    con.commit()
+    rec = dd.received(con, dd.plan(con, D))
+    got = (("ok·다시 부름" if u in rec.nodata else "ok") if u in rec.ok else rec.missing[u])
+    assert got == want
+    con.close()
+
+
+def test_periodic_gate_fails_on_unresolved_label_even_when_units_are_received(tmp_path) -> None:
+    """라벨을 못 읽은 정기보고서는 유닛을 만들지 못해 '받았다' 를 물을 수 없다 — 받은 유닛이
+    다 있어도 FAIL."""
+    rows = [*_busy_day_rows(500)[:-1],                            # 정기 C2(반기)만, 주요 제외
+            ("20260908000009", D, C3, "005930", "분기보고서 (2025.06)")]   # 결산월 모름 → 미해석
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    _log(con, _periodic(C2))
+    _doc_ok(con, "20260908000001")
+    _doc_ok(con, "20260908000009")
+    con.commit()
+    g = _gates(con, dd.plan(con, D))
+    assert _failed(g) == {"periodic_followed"}
+    assert g["periodic_followed"].metrics == {"n_units": 7, "n_received": 7, "n_unresolved": 1}
     con.close()
 
 
@@ -704,6 +779,19 @@ def _fin_rows(con, *rows):
                     [(f"{c}:{y}:{r}:{rno}", rno, c, y, r, _LOGGED) for c, y, r, rno in rows])
 
 
+def test_fin_rcept_max_with_two_periods_and_foreign_corp(tmp_path) -> None:
+    """(연도, 보고서) 쌍이 둘 이상이고 plan 밖 회사 행이 섞여도 키별 최댓값만 낸다."""
+    home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타")])
+    con = _con(home)
+    _fin_rows(con, (C1, "2026", "11012", "20260814000001"),
+              (C1, "2026", "11012", "20260908000001"),
+              (C2, "2025", "11011", "20260310000001"),
+              ("99999999", "2026", "11012", "20260909000009"))           # plan 밖 회사
+    got = dd.fin_rcept_max(con, {(C1, "2026", "11012"), (C2, "2025", "11011")})
+    assert got == {(C1, "2026", "11012"): "20260908000001", (C2, "2025", "11011"): "20260310000001"}
+    con.close()
+
+
 def _fake_backfill(monkeypatch, home, *, fin_rcept_no=None, status="ok"):
     """`backfill_dart.py` 를 흉내 내는 가짜(콜 0) — 부른 유닛마다 `ingest_log` 결과(기본 ok)를
     남긴다.
@@ -814,14 +902,15 @@ def test_second_run_rechecks_fin_when_the_stored_filing_is_older(tmp_path, monke
 def test_year_axis_no_data_passes_the_gate_and_is_recalled_once(tmp_path, monkeypatch) -> None:
     """09-22형 — 재무가 연도 축 013(no_data). 013 은 DART 의 확정 답이라 완료 판정은 통과하고
     (N-24 3.2 10-07 수정), 늦은 반영에 대비해 두 번째 런이 그 재무 유닛만 1회 다시 부른다 —
-    재무 재확인(3.10)과 같은 성격이라 재호출만 정하고 판정엔 넣지 않는다.
+    재무 재확인(3.10)과 같은 성격이라 재호출만 정하고 판정엔 넣지 않는다. 부속 6종의 013(여기선
+    배당)은 받음으로만 두고 다시 부르지 않는다(N-23 ② '재무만' 과 같은 범위).
     """
     rows = [*_busy_day_rows(500)[:-2],
             ("20260908000001", D, C1, "005930", "반기보고서 (2026.06)")]
     home = _make_home(tmp_path, rows=rows)
     con = _con(home)
-    _log(con, _periodic(C1)[1:])
-    _log(con, _periodic(C1)[:1], status="no_data")               # 저녁 재무 응답이 013
+    _log(con, _periodic(C1)[2:])
+    _log(con, _periodic(C1)[:2], status="no_data")               # 저녁 재무·배당 응답이 013
     _doc_ok(con, "20260908000001")
     con.commit()
     assert _failed(_gates(con, dd.plan(con, D))) == set()       # 완료 판정 통과
@@ -835,17 +924,52 @@ def test_year_axis_no_data_passes_the_gate_and_is_recalled_once(tmp_path, monkey
     assert "연도축 자료없음 재확인 1" in dd.report(r)
 
 
+@pytest.mark.parametrize("evening", ["fin_lag", "nodata"])
+def test_recheck_call_error_flips_received_to_gate_failed(tmp_path, monkeypatch, evening) -> None:
+    """저녁에 '받음'(옛 판 ok 또는 재무 013)이던 재무 유닛을 아침 재확인으로 다시 부르다 실패하면
+    GATE_FAILED — unlock 이 저녁 행을 먼저 지우므로 받음이 받지 않음으로 바뀐다. P1 쪽으로 둔다."""
+    nm = "[기재정정]반기보고서 (2026.06)" if evening == "fin_lag" else "반기보고서 (2026.06)"
+    home = _make_home(tmp_path, rows=[*_busy_day_rows(500)[:-2],
+                                      ("20260908000001", D, C1, "005930", nm)])
+    con = _con(home)
+    _log(con, _periodic(C1)[1:])
+    if evening == "fin_lag":
+        _log(con, _periodic(C1)[:1])
+        _fin_rows(con, (C1, "2026", "11012", "20260814000001"))  # 정정 전 판
+    else:
+        _log(con, _periodic(C1)[:1], status="no_data")
+    _doc_ok(con, "20260908000001")
+    con.commit()
+    assert _failed(_gates(con, dd.plan(con, D))) == set()       # 저녁 상태 = 판정 통과
+    con.close()
+    seen = _fake_backfill(monkeypatch, home, status="error")     # 아침 재확인 호출이 실패
+
+    r = dd.run(D, home=home, skip_sweep=True)
+    assert [(c[c.index("--only") + 1], corps) for c, corps in seen] == [("fin", [C1])]
+    assert r.status is dd.RunStatus.GATE_FAILED and "status=error" in r.detail
+
+
 _EVENING = "2026-09-08T09:05:00"            # 그 D 의 첫 dart 런(18:05 KST 저녁) 시작, UTC
 
 
-def _prior_dart_run(home, started_utc):
-    """그 D 의 앞선 dart 런 1행 — runlog 실물로 남기고 시작 시각만 고정한다(runlog 는 '…Z' UTC)."""
+def _prior_dart_run(home, started):
+    """그 D 의 앞선 dart 런 1행 — runlog 실물로 남기고 시작 시각 원문만 고정한다('…Z' UTC)."""
     db = f"{home}/data/raw/daily_run.db"
     rid = runlog.start(db, date=D, source="dart")
     con = sqlite3.connect(db)
-    con.execute("UPDATE run SET started=? WHERE run_id=?", (f"{started_utc}Z", rid))
+    con.execute("UPDATE run SET started=? WHERE run_id=?", (started, rid))
     con.commit()
     con.close()
+
+
+def test_run_stops_on_a_runlog_start_time_in_an_unknown_format(tmp_path, monkeypatch) -> None:
+    """앞선 런의 시작 시각을 읽지 못하면 (b) 창을 조용히 잃지 않고 멈춘다(ValueError)."""
+    home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타")])
+    _prior_dart_run(home, "2026-09-08 18:05:00+09:00")
+    seen = _fake_exec(monkeypatch)
+    with pytest.raises(ValueError):
+        dd.run(D, home=home, skip_sweep=True)
+    assert seen == []
 
 
 @pytest.mark.parametrize(("evening_status", "skip_sweep"),
@@ -863,7 +987,7 @@ def test_second_run_follows_late_filings_first_seen_by_the_first_run(tmp_path, m
     late = ("20260824000001", "20260824", C2, "005930", "주식등의대량보유상황보고서(약식)",
             "2026-09-08T09:10:00")                              # 저녁 스윕(18:10 KST)이 처음 봤다
     home = _make_home(tmp_path, rows=[*_busy_day_rows(500)[:-2], late])
-    _prior_dart_run(home, _EVENING)
+    _prior_dart_run(home, f"{_EVENING}Z")
     con = _con(home)
     _log(con, _per_corp(dd.HOLDER_ENDPOINTS, C2), status=evening_status, ts="2026-09-08T09:30:00")
     con.commit()
@@ -872,6 +996,12 @@ def test_second_run_follows_late_filings_first_seen_by_the_first_run(tmp_path, m
 
     r = dd.run(D, home=home, sweep_from="2026Q3", skip_sweep=skip_sweep)
     assert (r.plan.n_late, r.plan.holder_corps) == (1, (C2,))
+    # (b) 창 시작과 출처를 출력·런 로그에 남긴다(검토 M-5)
+    assert (r.late_since, r.late_source) == (_EVENING, "첫 런 시작")
+    detail = sqlite3.connect(f"{home}/data/raw/daily_run.db").execute(
+        "SELECT detail FROM run ORDER BY run_id DESC LIMIT 1").fetchone()[0]
+    assert f"late 창 {_EVENING} (첫 런 시작)" in dd.report(r)
+    assert f"late 창 {_EVENING} (첫 런 시작)" in detail
     if evening_status == "ok":
         assert seen == [] and r.status is dd.RunStatus.OK, r.detail
     else:
@@ -908,6 +1038,7 @@ def test_run_follows_filings_that_first_appeared_in_this_sweep(tmp_path, monkeyp
 
     r = dd.run(D, home=home, sweep_from="2026Q3")
     assert r.plan.n_late == 1 and r.plan.holder_corps == (C2,)
+    assert r.late_source == "이번 런 시작"                       # 앞선 런이 없는 첫 런
     backfills = [c for c in seen if c[1].endswith("backfill_dart.py")]
     assert len(backfills) == 1                                   # 지분공시 1그룹
     only = backfills[0][backfills[0].index("--only") + 1]
@@ -945,6 +1076,7 @@ def test_run_skip_sweep_does_not_follow_late_filings(tmp_path, monkeypatch) -> N
 
     r = dd.run(D, home=home, skip_sweep=True)
     assert r.plan.n_late == 0 and r.plan.units == ()
+    assert (r.late_since, r.late_source) == (None, "없음")
     assert not [c for c in seen if c[1].endswith("backfill_dart.py")]
 
 

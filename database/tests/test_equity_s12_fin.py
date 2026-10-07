@@ -286,12 +286,13 @@ def test_계정_대응표는_fin_map_에서_유도된다() -> None:
 
 
 def test_기간_문서_자격은_sql_doc_CTE_와_같다() -> None:
-    """EG3 기간 증인(`_OWN_DOC`)과 `.sql` `doc` CTE 가 같은 자격을 써야 '자기 문서 우선'이
-    맞물린다."""
+    """EG3 기간 증인(`DOC_QUALIFIED_PRED`)과 `.sql` `doc` CTE 가 같은 자격을 써야 '자기 문서
+    우선'이 맞물린다. 조건 집합 등식 — 어느 쪽에 조건이 더해지거나 빠져도 걸린다."""
     sql = rules_s12.SQL_PATH.read_text(encoding="utf-8")
     doc = sql.split("\ndoc AS (", 1)[1].split("),", 1)[0]
-    for clause in rules_s12.DOC_QUALIFIED_PRED.format(a="m").split(" AND "):
-        assert clause.removeprefix("m.") in doc, clause
+    where = " ".join(doc.split("WHERE", 1)[1].split("QUALIFY", 1)[0].split())
+    pred = rules_s12.DOC_QUALIFIED_PRED.format(a="m").replace("m.", "")
+    assert set(where.split(" AND ")) == set(pred.split(" AND "))
 
 
 def test_sql_의_acct_블록은_생성기_문자열과_같다() -> None:
@@ -712,11 +713,11 @@ _FY2025 = (date(2025, 12, 31), "11011")                  # 사업보고서 문�
 _NO_DOC = (None, None)
 
 
-def _g21_row(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
-             corrections: list[dict[str, object]] | None = None,
-             docs: tuple[tuple[date | None, str | None], ...] = (_FY2025, _FY2025)
-             ) -> dict[str, object]:
-    """`docs` = (원본, 정정) 각 접수의 문서 (period_to, doc_acode)."""
+def _g21_build(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
+               corrections: list[dict[str, object]] | None = None,
+               docs: tuple[tuple[date | None, str | None], ...] = (_FY2025, _FY2025)
+               ) -> tuple[build.BuildResult, dict[str, object]]:
+    """`docs` = (원본, 정정) 각 접수의 문서 (period_to, doc_acode). (빌드 결과, 산출 1행)."""
     reports = [(rc, "01472930", "2025", "11011", dt, pt, ac)
                for (rc, dt), (pt, ac) in zip((_G21_ORIG, _G21_CORR), docs, strict=True)]
     r = _hand_build(make_stage_tree, tmp_path, [("01472930", "12")], reports, fin,
@@ -726,7 +727,14 @@ def _g21_row(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     out = _rows(r.out_dir)                             # type: ignore[arg-type]
     assert len(out) == 1
-    return out[0]
+    return r, out[0]
+
+
+def _g21_row(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
+             corrections: list[dict[str, object]] | None = None,
+             docs: tuple[tuple[date | None, str | None], ...] = (_FY2025, _FY2025)
+             ) -> dict[str, object]:
+    return _g21_build(make_stage_tree, tmp_path, fin, corrections, docs)[1]
 
 
 def _g21_fin(sj: str, account_id: str, account_nm: str, amounts: tuple[float, float],
@@ -776,9 +784,10 @@ def test_최신_판본에_문서가_없으면_같은_정정_사슬의_문서로_
     """G-21 후속(명세 검토) — 정정 ZIP 이 없어(014) 최신 판본에 기간 문서가 없고 정정 접수일이 기간
     말일에서 271일이라 추정 창(0~period_end_lag_max_days 200일) 밖이다. 사슬 보충이 없으면
     `period_unresolved` 로 그룹이 통째로 격리된다(원본 고정 때는 보이던 재무가 사라진다)."""
-    row = _g21_row(make_stage_tree, tmp_path,
-                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
-                   docs=(_FY2025, _NO_DOC))
+    r, row = _g21_build(make_stage_tree, tmp_path,
+                        _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
+                        docs=(_FY2025, _NO_DOC))
+    assert _gate(r, "EG3_fin_std").metrics["n_period_end_chain_doc"] == 1   # 보충 규모(기록형)
     assert row["rcept_no"] == _G21_CORR[0]
     assert _num(row["revenue"]) == Decimal("90")                 # 값은 정정본
     assert (row["period_end"], row["period_start"]) == (date(2025, 12, 31), date(2025, 1, 1))

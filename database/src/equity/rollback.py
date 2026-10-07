@@ -8,16 +8,22 @@
 약 3.5일 유지됐다(그 사이 catalog 도 안 돌아 `equity.duckdb` 매크로는 옛 `v=` 를 가리켰다).
 
 되돌리기의 범위는 **포인터뿐**이다.
-  · `MANIFEST.current_build` 를 직전 판으로 옮긴다 — `builds[]` 목록과 `v=` 디렉터리는 그대로
-    둔다. keep=10(≈5거래일) 이라 이전 판은 반드시 살아 있고, 지우면 그 판으로 다시 못 돌아간다.
-  · 이번 판을 커밋하지 못한 표(= rc≠0)는 **건드리지 않는다**. 그 표의 current 는 이미 어제 판이라
-    한 칸 더 되돌리면 멀쩡한 판을 잃는다.
+  · `MANIFEST.current_build` 를 패스 시작 때 고른 판(`before.json`, 없으면 직전 판)으로 옮긴다 —
+    `builds[]` 목록과 `v=` 디렉터리는 그대로 둔다. keep=10(≈5거래일) 이라 이전 판은 반드시 살아
+    있고, 지우면 그 판으로 다시 못 돌아간다.
+  · 저녁·수동 패스: 이번 판을 커밋하지 못한 표(= rc≠0·미도달)는 **건드리지 않는다**. 그 표의
+    current 는 이미 시작 판이라 한 칸 더 되돌리면 멀쩡한 판을 잃는다.
+  · 아침 패스(C-01 · N-25 Q4): 목표는 마지막으로 **완료된** 아침 확정판(`latest_morning.json`)이고,
+    before 의 **모든 표**(커밋 못 한 표·미도달 표 포함)를 그 판으로 옮긴다 — rc 0 표만 옮기면
+    앞 표는 확정판, 뒤 표는 시작 때의 저녁 잠정판으로 섞인다(DEFECT-C03 재발). 포인터만 옮기므로
+    판을 잃지 않는다.
 
 `stage.manifest` 는 갈래 2 소유라 여기서는 읽기·원자쓰기 유틸(`load`·`_write_atomic`)만 쓴다.
 """
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -26,6 +32,9 @@ from stage import model as stage_model
 
 MANIFEST_NAME = "MANIFEST.json"
 BASIS_MORNING = "morning"                 # 아침 확정판 — stage.model.BASIS_PREFIX 의 키(`m_`)
+# 마지막으로 완료된 아침 판의 인계 포인터 — build_chain.sh deliver_step 이 stage·equity health 가
+# 둘 다 ok 인 아침 판에서만 쓴다(`equity_builds` = {표: build_id}). QL_HOME 기준 상대 경로.
+LATEST_MORNING_REL = Path("data/deliver/latest_morning.json")
 LOG_ROOT_DEFAULT = Path("logs/equity")
 SUMMARY_NAME = "summary.tsv"
 
@@ -70,16 +79,19 @@ def _rc_by_table(summary: Path) -> list[tuple[str, int]]:
 
 
 def rollback_pass(equity_root: Path, pass_name: str, *,
-                  log_root: Path | None = None, before: Path | None = None) -> dict[str, str]:
-    """`logs/equity/rebuild_<PASS>/summary.tsv` 의 **rc 0 표만** 되돌린다.
+                  log_root: Path | None = None, before: Path | None = None,
+                  basis: str = stage_model.BASIS_MANUAL) -> dict[str, str]:
+    """실패한 패스의 포인터를 되돌린다. 반환값은 `{표: 되돌아간 build_id}`.
 
     `before`(패스 시작 시점에 `pass_start_targets` 가 고른 `{표: build_id}` JSON)가 있으면
     **그 판**으로, 없으면 직전 판으로.
-    아침 확정 빌드가 중간에 실패하면 "직전 판" 은 대개 전날 저녁 잠정판(`e_`)이라 MANIFEST 를 직접
-    읽는 공유 소비자가 확정 자리에서 잠정판을 보게 된다(리뷰 REC-13) — 아침 패스의 before 는 직전
-    확정판(`m_`, C-01)이다.
-    시작 시점 판이 이미 GC 됐으면 직전 판으로 폴백한다.
-    반환값은 `{표: 되돌아간 build_id}`.
+      · 저녁·수동 패스: `logs/equity/rebuild_<PASS>/summary.tsv` 의 **rc 0 표만**.
+      · 아침 패스(`basis='morning'`, C-01): rc 0 표 + before 의 **모든 표** — 목표는 마지막으로
+        완료된 아침 확정판이라 커밋 못 한 표·미도달 표도 그 판으로 옮겨야 전 표가 한 판이 된다.
+        아침 확정 빌드가 중간에 실패하면 "직전 판" 은 대개 전날 저녁 잠정판(`e_`)이라 MANIFEST 를
+        직접 읽는 공유 소비자가 확정 자리에서 잠정판을 보게 된다(리뷰 REC-13).
+    목표 판이 그새 GC 됐으면 이번 패스가 커밋한 표는 직전 판으로 폴백하고, 커밋 안 한 표는
+    그대로 둔다.
     """
     targets: dict[str, str] = {}
     if before is not None:
@@ -90,33 +102,48 @@ def rollback_pass(equity_root: Path, pass_name: str, *,
     if not summary.exists():
         raise FileNotFoundError(f"rebuild summary not found: {summary} "
                                 f"(pass={pass_name} — 되돌릴 표 목록을 알 수 없다)")
+    committed = [t for t, rc in _rc_by_table(summary) if rc == 0]
+    # 저녁·수동은 커밋한 표만(커밋 안 한 표를 되돌리면 시작 판을 잃는다), 아침은 before 의 모든 표도
+    tables = (list(dict.fromkeys([*committed, *targets])) if basis == BASIS_MORNING
+              else committed)
     out: dict[str, str] = {}
-    for table, rc in _rc_by_table(summary):
-        if rc != 0:
-            continue                          # 커밋 자체가 없다 — 되돌리면 어제 판을 잃는다
+    for table in tables:
+        target = targets.get(table)
+        if target is None and table not in committed:
+            continue
         try:
-            prev = rollback_table(equity_root / table, to_build_id=targets.get(table))
-        except ValueError:
-            prev = rollback_table(equity_root / table)     # 시작 시점 판이 GC 됨 — 직전 판으로
+            prev = rollback_table(equity_root / table, to_build_id=target)
+        except ValueError:                    # 목표 판이 GC 됨
+            prev = rollback_table(equity_root / table) if table in committed else None
         if prev is not None:
             out[table] = prev
     return out
 
 
-def pass_start_targets(equity_root: Path, tables: Iterable[str],
-                       basis: str) -> dict[str, str]:
+def pass_start_targets(equity_root: Path, tables: Iterable[str], basis: str,
+                       latest_morning: Path | None = None) -> dict[str, str]:
     """패스 시작 시점에 표마다 실패하면 돌아갈 판 `{표: build_id}` — `equity_rebuild_all.sh` 가
     `before.json` 으로 남기고 `rollback_pass(before=…)` 가 읽는다. MANIFEST 가 없거나 판이 없는 표는
     싣지 않는다(→ `rollback_pass` 의 직전 판 폴백).
 
     `basis` 는 이번 패스의 빌드 판(`--basis` 값, 생략이면 manual).
       · 저녁(evening)·수동(manual): 시작 시점의 `current_build`.
-      · 아침(morning, C-01 · N-25 Q4): `builds[]` 에서 시작 `current_build` **이하**의 마지막 `m_`
-        (직전 확정판). 시작 current 는 대개 전날 저녁 잠정판(`e_`)이라 그리로 돌아가면 확정 자리에
-        잠정판이 남는다. '이하' 인 이유: 같은 날 실패한 첫 시도가 커밋한 `m_` 는 builds[] 끝에
-        남아 있지만 롤백으로 current 뒤에 놓인다 — 재시도도 첫 시도와 같은 판을 고른다.
-        확정판이 한 번도 없으면 시작 current(옛 동작).
+      · 아침(morning, C-01 · N-25 Q4 '직전 확정판' = 마지막으로 **완료된** 아침 판, 전 표 일관):
+        `latest_morning`(기본 `$QL_HOME/data/deliver/latest_morning.json`)의 `equity_builds[표]`.
+        실패한 아침 패스가 남긴 `m_` 는 이 파일에 안 오르므로 다음 날에도 고르지 않는다. 파일이
+        없거나 못 읽거나, 표가 거기 없거나, 그 판이 그 표 `builds[]` 에 없으면(GC) 그 표는 시작
+        `current_build`(옛 동작).
     """
+    latest: dict[str, str] = {}
+    if basis == BASIS_MORNING:
+        if latest_morning is None:
+            latest_morning = Path(os.environ.get("QL_HOME", ".")) / LATEST_MORNING_REL
+        try:
+            raw = json.loads(latest_morning.read_text(encoding="utf-8")).get("equity_builds")
+        except (OSError, ValueError, AttributeError):
+            raw = None
+        if isinstance(raw, dict):
+            latest = {str(k): str(v) for k, v in raw.items() if v}
     out: dict[str, str] = {}
     for table in tables:
         path = equity_root / table / MANIFEST_NAME
@@ -125,14 +152,9 @@ def pass_start_targets(equity_root: Path, tables: Iterable[str],
         m = manifest.load(path)
         if not m.current_build:
             continue
-        target = m.current_build
-        ids = [b.build_id for b in m.builds]
-        if basis == BASIS_MORNING and target in ids:
-            confirmed = [b for b in ids[:ids.index(target) + 1]
-                         if stage_model.basis_of_build_id(b) == BASIS_MORNING]
-            if confirmed:
-                target = confirmed[-1]
-        out[table] = target
+        confirmed = latest.get(table)
+        ids = {b.build_id for b in m.builds}
+        out[table] = confirmed if confirmed in ids else m.current_build
     return out
 
 

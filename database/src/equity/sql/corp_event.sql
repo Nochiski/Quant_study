@@ -207,6 +207,8 @@ dart AS (
 -- 확인 = adj_factor S06-2 (a) 의 짝 규칙(같은 상수를 adj_factor 네임스페이스에서 복제 없이 읽는다):
 --   r = D 의 기준가 / 직전 행 종가, |r − 1| > base_price_tol_rel 이고
 --   |r × ratio − 1| ≤ max(price_match_tol_rel × m, price_match_tol_abs), m = |min(ratio, 1/ratio) − 1|.
+--   후보 집합도 bp 와 같다 — ETF(security.sec_type = 'etf')·구간 첫날(security_span.first_date = D,
+--   재상장 첫 행의 '직전 행' 은 옛 구간 종가)은 확인에 쓰지 않는다.
 fut_bonus_tk AS (
     SELECT DISTINCT l.ticker
     FROM dart d
@@ -219,9 +221,12 @@ end_base AS (
     FROM (SELECT p.ticker, p.date, p.base_price_krw,
                  lag(p.close) OVER (PARTITION BY p.ticker ORDER BY p.date) AS prev_close
           FROM price_daily p
-          WHERE p.ticker IN (SELECT ticker FROM fut_bonus_tk)) x
+          WHERE p.ticker IN (SELECT ticker FROM fut_bonus_tk)
+            AND p.ticker NOT IN (SELECT ticker FROM security WHERE sec_type = 'etf')) x
     WHERE x.date = (SELECT cal_max FROM cal_bounds)
       AND x.prev_close > 0 AND x.base_price_krw IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM security_span sp
+                      WHERE sp.ticker = x.ticker AND sp.first_date = x.date)
 ),
 dart_leg AS (
     -- announce 폴백: rcept_no 14자리 = 접수일 YYYYMMDD + 일련번호 6자리 → '%Y%m%d%f'(%f = 6자리)

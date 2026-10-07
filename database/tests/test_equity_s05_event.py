@@ -125,12 +125,14 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   tsstk: list[dict[str, object]] | None = None,
                   cvbd: list[dict[str, object]] | None = None,
                   prices: list[dict[str, object]] | None = None,
+                  etf_tickers: frozenset[str] = frozenset(),
                   const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
     """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
 
     `listing` 은 (ticker, date, list_shrs[, par_value_krw]) 를 주면 되고 corp_ticker·security_span
     은 거기서 유도한다 — corp_code = 'C' + ticker, 첫 상장일 = 그 티커의 첫 행. `prices` 는 equity
     `price_daily` 의 (ticker, date, close, base_price_krw) — 없으면 빈 뷰(C-04 기준가 확인 축).
+    `security.sec_type` 은 `etf_tickers` 면 'etf', 아니면 'stock'(C-04 기준가 후보에서 ETF 제외).
     """
     con = duckdb.connect()
     try:
@@ -144,6 +146,9 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   _STG_TYPES[name])
         _view(con, "price_daily", prices or [], _PRICE_TYPES)
         tickers = sorted({str(r["ticker"]) for r in listing})
+        _view(con, "security",
+              [{"ticker": t, "sec_type": "etf" if t in etf_tickers else "stock"} for t in tickers],
+              {"ticker": "VARCHAR", "sec_type": "VARCHAR"})
         _view(con, "corp_ticker",
               [{"ticker": t, "isin8": f"KR7{t}", "corp_code": "C" + t, "is_common": True}
                for t in tickers],
@@ -723,6 +728,7 @@ def _krx_harness(tol: float) -> duckdb.DuckDBPyConnection:
         con.execute(f"CREATE TABLE {name}({cols})")
     con.execute("CREATE TABLE price_daily(ticker VARCHAR, date DATE, close DECIMAL(9,0), "
                 "base_price_krw DECIMAL(10,0))")            # C-04 축 — KRX 분류엔 안 쓴다
+    con.execute("CREATE TABLE security(ticker VARCHAR, sec_type VARCHAR)")
     con.execute(f"CREATE TABLE _const AS SELECT 2555 AS effective_before_announce_max_days, "
                 f"{tol!r} AS krx_share_change_tol, 25 AS bonus_ratio_window_sessions, "
                 "0.002 AS base_price_tol_rel, 0.15 AS price_match_tol_rel, "
@@ -1030,3 +1036,29 @@ def test_C04_기준일이_캘린더_안이면_옛_규칙_그대로_직전_거래
     cal = sessions(40)
     rows = _bonus_rows(_bonus_case(cal[35], 1.0, None))
     assert [r["effective_date"] for r in rows] == [cal[34]]
+
+
+@pytest.mark.parametrize("case", ["etf", "span_first_date"])
+def test_C04_기준가_확인_후보는_adj_factor_기준가_후보와_같이_ETF와_구간_첫날을_뺀다(
+        case: str) -> None:
+    """D 에 비율과 맞는 기준가 점프가 있어도 그 행이 adj_factor 기준가 후보(bp) 밖이면 확인이
+    아니다:
+    ETF(분배락·설정환매) · 구간 첫날(재상장 첫 행의 '직전 행' 은 옛 구간 종가). 두 확인 식의 후보
+    집합이 같아야 corp_event 가 D 로 확정한 사건을 adj_factor 가 같은 날 기준가로 교체한다."""
+    cal = sessions(40)
+    nxt = date.fromordinal(cal[-1].toordinal() + 3)            # D 다음 거래일
+    close = 10_000.0
+    prices: list[dict[str, object]] = []
+    for i, d in enumerate(cal):
+        base = round(close * 0.5) if i == len(cal) - 1 else close
+        close = base
+        prices.append({"ticker": "A00001", "date": d, "close": close, "base_price_krw": base})
+    # 구간 첫날 축: 상장 행이 D 에서 시작하면 security_span.first_date = D(가격 행은 그 앞에도 있다)
+    listing = flat_listing("A00001", cal, 1_000_000)
+    if case == "span_first_date":
+        listing = listing[-1:]
+    fric = [{"rcept_no": "20200220000001", "corp_code": "CA00001", "nstk_asstd": nxt,
+             "nstk_ascnt_ps_ostk_ratio": 1.0, "available_date": cal[30]}]
+    out = run_event_sql(cal, listing, fric=fric, prices=prices,
+                        etf_tickers=frozenset({"A00001"}) if case == "etf" else frozenset())
+    assert _bonus_rows(out) == []

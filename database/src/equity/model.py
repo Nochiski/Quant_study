@@ -214,8 +214,11 @@ RULES_VERSION = "e1.25.0"                # BuildRecord.rules_version 에 실린�
 #          available_date = min(announce, apply_date)(정정 공시가 늦거나 신규 행이면 다음 세션으로
 #          접혀 그 세션 가짜 급락·다음 날 급반등, 002070 2026-07-31) + EG3 재계산.
 #          C-04(N-25 Q3) `corp_event` — 기준일이 캘린더 끝 D 뒤인 무상증자는 D 의 KRX 기준가가
-#          비율을 확인할 때만 효력일 D, 아니면 대기(out_of_calendar); 입력 `price_daily`·상수
-#          `adj_factor.{base_price_tol_rel, price_match_tol_rel, price_match_tol_abs}` 추가.
+#          비율을 확인할 때만 효력일 D, 아니면 대기(out_of_calendar); 입력 `price_daily`·`security`
+#          (ETF 제외 — 기준가 후보 정합)·상수 `adj_factor.{base_price_tol_rel, price_match_tol_rel,
+#          price_match_tol_abs}` 추가.
+#          C-01(N-25 Q4) 아침 패스 실패 롤백 = latest_morning.json 의 확정판, before 의 모든 표
+#          (산출 불변).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

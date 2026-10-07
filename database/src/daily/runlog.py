@@ -5,6 +5,7 @@ import datetime as dt
 import os
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 _DDL = """CREATE TABLE IF NOT EXISTS run (
   run_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +92,8 @@ def first_started_utc(db: str | os.PathLike[str], *, source: str, date: str) -> 
     """
     if not os.path.exists(db):
         return None
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    # 절대 경로의 file: URI 로 연다 — 경로에 # · ? 가 있어도 mode=ro 가 잘리지 않는다
+    con = sqlite3.connect(Path(db).absolute().as_uri() + "?mode=ro", uri=True)
     try:
         has_run = con.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='run'").fetchone()

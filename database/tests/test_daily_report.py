@@ -188,9 +188,10 @@ def test_저녁_체인이_DART_하나로만_실패했고_dart_가_회복되면_c
     ("dart_rc=2", 0, 0),                          # rc 일부만 — 키움·WISE 를 확인할 수 없다
     # 모르는 갈래(krx_rc)가 실패 — 갈래가 늘어도 거짓 회복이 열리지 않는다(P1)
     ("kiwoom_rc=0 dart_rc=2 wise_rc=0 krx_rc=1 failed= DART(rc=2) KRX(rc=1)", 0, 0),
+    ("kiwoom_rc=0 dart_rc=0 wise_rc=0", 0, 0),   # 세 rc 가 다 0 인데 failed — 원인 미상은 회복 아님
     ("", 0, 0),
     ("형식 미상", 0, 0),
-], ids=["kiwoom", "wise", "dart_rc_only", "unknown_branch", "empty", "unknown"])
+], ids=["kiwoom", "wise", "dart_rc_only", "unknown_branch", "all_zero", "empty", "unknown"])
 def test_저녁_체인_실패_원인이_DART_만이_아니거나_모르면_dart_가_회복돼도_crit(
         tmp_path: Path, detail: str, kiwoom_rc: int, wise_rc: int) -> None:
     """키움·WISE 갈래도 실패했거나, detail 로 원인을 가릴 수 없으면 지금처럼 crit(P1)."""

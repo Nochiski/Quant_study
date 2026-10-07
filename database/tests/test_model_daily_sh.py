@@ -156,6 +156,9 @@ def test_model_daily_failure_stops_later_steps_and_records_crit(tmp_path: Path, 
     assert len(crit) == 1 and f"모델 단계 실패: {failing}(rc={rc})" in crit[0]
     assert f"D={D}" in crit[0]
     assert f"모델 단계 실패: {failing}(rc={rc})" in r.out
+    # deliver 실패는 '발송 0' 이라 단정하지 않는다 — rc 3 은 발송 뒤 장부 기록 실패일 수 있다(B-58)
+    note = ("발송 여부는 deliver 출력과 장부" if failing == "deliver" else "엑셀 발송 0")
+    assert note in crit[0] and note in r.out
 
 
 def test_model_daily_resend_is_passed_to_deliver(tmp_path: Path) -> None:
@@ -165,11 +168,13 @@ def test_model_daily_resend_is_passed_to_deliver(tmp_path: Path) -> None:
     assert r.calls[-1] == f"deliver model-daily --date {D} --basis morning --send --resend"
 
 
-@pytest.mark.parametrize("args", [(), ("--date", "2026-10-06")])
+@pytest.mark.parametrize("args", [(), ("--date",), ("--date", "2026-10-06")])
 def test_model_daily_needs_a_yyyymmdd_date(tmp_path: Path, args: tuple[str, ...]) -> None:
-    """D 가 없거나 형식이 틀리면 아무 단계도 돌지 않고 rc 2(인자 오류)."""
+    """D 가 없거나(`--date` 값 없음 포함 — 옛 코드는 set -u 로 rc 1) 형식이 틀리면 아무 단계도
+    돌지 않고 rc 2(인자 오류)와 같은 안내문."""
     r = _run(tmp_path, "model_daily.sh", *args)
     assert r.rc == 2, r.out
+    assert "--date YYYYMMDD 가 필요하다" in r.out
     assert r.calls == [] and r.notify == []
 
 

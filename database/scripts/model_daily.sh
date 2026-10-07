@@ -12,7 +12,7 @@
 #         (rc 0). 같은 날 다시 보내려면 --resend(캡션에 '정정 n'·판 id·생성 시각).
 #   빌드 락: 세 단계 전체를 stage·equity 와 같은 빌드 락 안에서 돈다 — 아래 락 절 주석.
 #   rc: 0 완료 · 실패하면 그 단계의 rc(deliver: 1 발송 실패 · 2 입력 오류 · 3 생성 실패) · 2 인자 오류
-#       · 3 빌드 락 대기 실패
+#       · 3 빌드 락 대기 실패 · 4 홈(~/quant-ledger) 이동 실패
 set -uo pipefail
 cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 돌지 않는다" >&2; exit 4; }
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
@@ -20,7 +20,8 @@ PY=.venv/bin/python
 D=""; RESEND=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --date) D="$2"; shift 2 ;;
+    # 값 없는 --date 는 D 를 비운 채 넘긴다 — 아래 형식 검사가 rc 2 로 거부한다(shift 2 실패 무한 반복 방지)
+    --date) if [ $# -ge 2 ]; then D="$2"; shift 2; else shift; fi ;;
     --resend) RESEND="--resend"; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -71,9 +72,15 @@ step "factor_inputs" $PY -m factor_inputs build --date "$D" --basis morning \
   && step "deliver" $PY -m deliver model-daily --date "$D" --basis morning --send $RESEND
 RC=$?
 if [ "$RC" -ne 0 ]; then
-  echo "모델 단계 실패: $FAILED — 그 뒤 단계는 돌지 않았다(엑셀 발송 0) D=$D"
+  if [[ "$FAILED" == deliver* ]]; then
+    # deliver 실패는 '발송 0' 이라 단정할 수 없다 — rc 3 은 발송 성공 뒤 장부 쓰기 실패일 수 있다(B-58)
+    SENT="발송 여부는 deliver 출력과 장부(data/deliver/sent_model_daily.jsonl)로 확인 — rc 3 은 발송 뒤 장부 기록 실패일 수 있다"
+  else
+    SENT="그 뒤 단계는 돌지 않았다(엑셀 발송 0)"
+  fi
+  echo "모델 단계 실패: $FAILED — $SENT D=$D"
   scripts/notify.sh crit "모델 단계 실패: $FAILED" \
-    "D=$D basis=morning | 그 뒤 단계는 돌지 않았다(엑셀 발송 0). 원인을 고친 뒤 scripts/model_daily.sh --date $D"
+    "D=$D basis=morning | $SENT. 원인을 고친 뒤 scripts/model_daily.sh --date $D"
   exit "$RC"
 fi
 echo "모델 단계 완료 D=$D"

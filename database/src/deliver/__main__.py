@@ -46,16 +46,23 @@ def _sent(ledger: Path, day: str, basis: str) -> list[dict[str, object]]:
     """장부에서 그 D(YYYY-MM-DD)·basis 의 발송 기록(보낸 순서). 장부가 없으면 빈 목록."""
     if not ledger.is_file():
         return []
+    # 보냈는지 알 수 없으면 보내지 않는다(P1) — 중복 발송보다 미발송 경보 쪽. 읽기 실패는 rc 2
+    unknown = f"D={day} basis={basis} 를 보냈는지 알 수 없어 보내지 않는다"
+    try:
+        text = ledger.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise DeliverError(f"발송 장부 {ledger} 를 UTF-8 로 읽지 못했다 — {unknown}: {e}") from e
     out: list[dict[str, object]] = []
-    for i, line in enumerate(ledger.read_text(encoding="utf-8").splitlines(), start=1):
+    for i, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
         try:
             entry = json.loads(line)
         except ValueError as e:
-            # 보냈는지 알 수 없으면 보내지 않는다(P1) — 중복 발송보다 미발송 경보 쪽
-            raise DeliverError(f"발송 장부 {ledger}:{i} 를 읽지 못했다 — D={day} basis={basis} 를 "
-                               f"보냈는지 알 수 없어 보내지 않는다: {e}") from e
+            raise DeliverError(f"발송 장부 {ledger}:{i} 를 읽지 못했다 — {unknown}: {e}") from e
+        if not isinstance(entry, dict):
+            raise DeliverError(f"발송 장부 {ledger}:{i} 가 JSON 객체가 아니다"
+                               f"({type(entry).__name__}) — {unknown}")
         if entry.get("date") == day and entry.get("basis") == basis:
             out.append(entry)
     return out

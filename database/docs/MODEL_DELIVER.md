@@ -47,7 +47,9 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
   `--out-root` 를 따르므로 임시 루트 리허설은 운영 장부를 건드리지 않는다.
 - `scripts/model_daily.sh` 는 빌드 락(`/tmp/quant_ledger_build.lock`, stage·equity 공용) 안에서 돈다(동시 실행
   직렬화 — 같은 D 이중 발송·모델 단계 중 equity 재빌드를 막는다). `python -m deliver … --send` 를 직접 부르면
-  락이 없으니 손 발송은 `model_daily.sh` 로 한다.
+  락이 없으니 손 발송은 `model_daily.sh` 로 한다. 손 실행은 08:10 체인~확정판 종료(보통 10:00 전),
+  21:20~잠정판 종료(보통 23:10 전)를 피한다 — 그동안 빌드 락을 쥐면 그 시각의 build_chain 이 `flock -n` 으로
+  건너뛰어 판이 생기지 않는다.
 
 - 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
 - 산출 경로: 매일 `data/deliver/daily/model_scores_<YYYYMMDD>_<basis>.xlsx`, 주간

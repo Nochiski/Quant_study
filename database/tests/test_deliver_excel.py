@@ -1105,6 +1105,20 @@ def test_cli_unreadable_ledger_sends_nothing(world: dict[str, Path], tmp_path: P
     assert calls == [] and f"{LEDGER}:1" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("raw", [b'\xff\xfe{"date": "2026-09-25"}\n', b"[1, 2]\n"],
+                         ids=["not_utf8", "not_object"])
+def test_cli_malformed_ledger_is_an_input_error(world: dict[str, Path], tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch,
+                                                capsys: pytest.CaptureFixture[str],
+                                                raw: bytes) -> None:
+    """장부가 UTF-8 이 아니거나 줄이 JSON 객체가 아니어도 보냈는지 알 수 없다 — 옛 코드는
+    UnicodeDecodeError·AttributeError 가 rc 3(생성 실패)으로 샜다. rc 2, 발송 0."""
+    calls = _fake_send(monkeypatch)
+    (tmp_path / LEDGER).write_bytes(raw)
+    assert cli.main(_send_args(world, tmp_path)) == 2
+    assert calls == [] and "보냈는지 알 수 없어 보내지 않는다" in capsys.readouterr().err
+
+
 def test_cli_unexpected_error_is_rc_3(world: dict[str, Path], tmp_path: Path,
                                       monkeypatch: pytest.MonkeyPatch,
                                       capsys: pytest.CaptureFixture[str]) -> None:

@@ -39,6 +39,12 @@ STG_RCEPT_DT_MAP = TableRule(
     payload_columns=("rcept_no", "rcept_dt"),   # 페이지 경계 중복(618 그룹)은 이 투영에서 접힌다
     key_unique=True,                     # 실측: rcept_no 당 distinct rcept_dt > 1 = 0
 )
+# 참조표 룩업 공개일 — DART 내용 표가 전부 이것 하나를 쓴다(stg_fin·보조 6표·DS005 15표·문서층).
+# 참조표 값은 원천 rcept_dt 그대로지만 공개일은 접수번호 날짜보다 이르지 않다(J-41, N-26 4.2 —
+# stg_disclosure 의 E08 과 같은 규칙. 박셀바이오 재제출본 8접수가 최대 654일 앞당겨 보였다).
+RCEPT_LOOKUP = AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rcept_no",
+                             lookup_key="rcept_no", lookup_value="rcept_dt",
+                             fallback_column="rcept_no")
 
 # ── stg_fin (dart_fin_raw 28컬럼) — 골격 키 예외: ticker·date 없음, 키는 요청축 8컬럼 ─────────
 
@@ -89,8 +95,7 @@ STG_FIN = TableRule(
     fanout=1,
     payload_exclude=("row_hash", "dup_seq", "collected_at"),
     lag_known=False,                     # 공개일은 참조표(derived)
-    available=AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rcept_no",
-                            lookup_key="rcept_no", lookup_value="rcept_dt"),
+    available=RCEPT_LOOKUP,
     key_unique=False,                    # append_only: 재수집 판본은 G6 축 (§7). S2 실측 위반 0
     extras=(
         ExtraColumn("bsns_year_mismatch", 's."req_bsns_year" <> s."bsns_year"'),
@@ -139,8 +144,6 @@ _RESP_META = (
     ColumnRule("corp_name", "corp_name_current", KIND_TEXT, normalize_text=True),
     ColumnRule("stlm_dt", "stlm_dt", KIND_DATE_ISO),
 )
-_RCEPT_LOOKUP = AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rcept_no",
-                              lookup_key="rcept_no", lookup_value="rcept_dt")
 
 
 def _row_kind(src: str) -> ExtraColumn:
@@ -182,7 +185,7 @@ STG_DIVIDEND = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=_RCEPT_LOOKUP,
+    available=RCEPT_LOOKUP,
     key_unique=False,        # 유일성 미실측 — (se, stock_knd) 로 갈리는지 서버 대조 필요
 )
 
@@ -220,7 +223,7 @@ STG_SHARES = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=_RCEPT_LOOKUP,
+    available=RCEPT_LOOKUP,
     key_unique=False,        # 유일성 미실측
     extras=(_row_kind("se"),),
 )
@@ -260,7 +263,7 @@ STG_CAPITAL = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=_RCEPT_LOOKUP,
+    available=RCEPT_LOOKUP,
     key_unique=False,        # 같은 날 같은 형태의 증자가 2건이면 충돌 — 미실측
 )
 
@@ -296,7 +299,7 @@ STG_TESSTK = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=_RCEPT_LOOKUP,
+    available=RCEPT_LOOKUP,
     key_unique=False,        # 유일성 미실측
     extras=(_row_kind("acqs_mth1"),),
 )
@@ -334,7 +337,7 @@ STG_HYSLR = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=_RCEPT_LOOKUP,
+    available=RCEPT_LOOKUP,
     key_unique=False,        # 동명이인·같은 이름의 법인 주주가 갈리는지 미실측
     extras=(_row_kind("nm"),),
 )
@@ -371,7 +374,7 @@ STG_AUDIT = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=_RCEPT_LOOKUP,
+    available=RCEPT_LOOKUP,
     key_unique=False,        # bsns_year_label 이 '-' 인 4,805행이 한 요청축에 몰리면 충돌
     extras=(
         ExtraColumn("adt_opinion_class",

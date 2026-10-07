@@ -10,16 +10,14 @@ from .model import (
     KIND_DATE_YMD8,
     KIND_NUMERIC,
     KIND_TEXT,
-    AvailableRule,
     ColumnRule,
     FileSource,
     SourceRef,
     TableRule,
 )
+from .rules_dart import RCEPT_LOOKUP
 
 _DOC = SourceRef("dart", "doc_store", "doc_zip")
-_RCEPT_LOOKUP = AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rcept_no",
-                              lookup_key="rcept_no", lookup_value="rcept_dt")
 _CNT = (12, 0)
 _MS = (10, 1)
 
@@ -51,7 +49,7 @@ def _table(name: str, columns: tuple[ColumnRule, ...],
         name=name, sources=(_DOC,), columns=columns, natural_key=natural_key,
         partition_class="receipt_axis", partition_expr="substr(rcept_no, 1, 4)",
         partition_src="rcept_no", observed_src="fetched_at", write_mode="append_only", fanout=1,
-        payload_exclude=("fetched_at",), lag_known=False, available=_RCEPT_LOOKUP,
+        payload_exclude=("fetched_at",), lag_known=False, available=RCEPT_LOOKUP,
         payload_columns=tuple(c.src for c in columns), key_unique=True,
         file_source=FileSource(name, src_cols),
     )

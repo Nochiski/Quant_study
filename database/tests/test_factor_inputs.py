@@ -132,16 +132,21 @@ def _audit() -> list[dict]:
 def _disclosure() -> list[dict]:
     y = dt.date
 
-    def row(t: str, rcept: dt.date, deadline: dt.date, *, corr: bool = False) -> dict:
-        return {"rcept_no": rcept.strftime("%Y%m%d") + t, "corp_code": corp(t), "rcept_dt": rcept,
+    def row(t: str, rcept: dt.date, deadline: dt.date, *, corr: bool = False,
+            avail: dt.date | None = None) -> dict:
+        # `avail` = equity 공개일. 재제출본(J-41 · N-26 4.10)은 원천 rcept_dt 보다 늦다
+        a = avail or rcept
+        return {"rcept_no": a.strftime("%Y%m%d") + t, "corp_code": corp(t), "rcept_dt": rcept,
                 "kind": "half", "is_correction": corr, "legal_deadline": deadline,
-                "delay_days": (rcept - deadline).days, "available_date": rcept}
+                "delay_days": (rcept - deadline).days, "available_date": a}
     return [row(A, y(2026, 8, 14), y(2026, 8, 14)),                 # 기한 당일
             row(B, y(2026, 8, 18), y(2026, 8, 15)),                 # 기한 토 → 월 휴장 → 화 제출
             row(E, y(2026, 8, 20), y(2026, 8, 14)),                 # 지연
             row(E, y(2026, 9, 1), y(2026, 8, 14), corr=True),       # 정정은 원본이 아니다
             row(H, y(2026, 5, 20), y(2026, 5, 15)),                 # 옛 지연 …
-            row(H, y(2026, 8, 13), y(2026, 8, 14))]                 # … 최근 건은 기한 안
+            row(H, y(2026, 8, 13), y(2026, 8, 14)),                 # … 최근 건은 기한 안
+            # D 뒤에야 공개되는 재제출본(원천 rcept_dt 08-15 는 지연) — filing_late 는 보지 않는다
+            row(H, y(2026, 8, 15), y(2026, 8, 14), avail=D + dt.timedelta(days=1))]
 
 
 def _security() -> list[dict]:

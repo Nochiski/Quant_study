@@ -12,7 +12,8 @@ fin_map 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정
 
 **기간 정본**: `period_end` = `stg_doc_meta.period_to`(main 멤버), `report_code` = `doc_acode`.
 `doc_acode` 는 1분기와 3분기를 **둘 다 11013** 으로 적으므로 `period_from → period_to` 개월 수로
-가른다(3개월 → 11013 · 9개월 → 11014). 문서가 없으면 후보 규칙(`corp.fiscal_month` 말일을
+가른다(3개월 → 11013 · 9개월 → 11014). 그 판에 문서가 없으면 같은 정정 사슬(`disclosure_version`
+링크)의 최신 문서로 잇고(e1.25.0), 사슬에도 없으면 후보 규칙(`corp.fiscal_month` 말일을
 보고서 종류만큼 당긴 두 후보 × `bsns_year`·`bsns_year+1`, 접수일까지 0~`period_end_lag_max_days`
 일)으로 채우고 `period_end_basis='inferred'`; 후보가 0 개거나 2 개면 `period_unresolved` 격리.
 
@@ -27,8 +28,15 @@ fin_map 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정
 `restated_unknown=true` 다. 원본·정정 판본은 4C(S14, 문서층 P2 `stg_fin_asreported`) 몫이다.
 API 는 정정이 있으면 정정본의 `rcept_no` 를 돌려주므로 `available_date` = 그 접수일이고
 `rcept_dt − period_end` 가 1년을 넘는 행이 실제로 있다(절단본 최대 445일). 단 원본부터 그 판까지의
-정정이 모두 재무표를 건드리지 않았으면 수치가 원본과 같으므로 공개일은 원본 접수일이다
+정정이 모두 재무를 건드리지 않았으면 수치가 원본과 같으므로 공개일은 원본 접수일이다
 (09-30 — 그 행은 `available_date < rcept_dt`. 서버 실측 2016~ 늦게 찍힌 4,657행 중 재무표 무관 정정 2,581).
+재무 정정 판정은 `disclosure_version.corr_has_fin_item` 한 곳이다 — 항목 이름 키워드 외에
+정정 사유가 재작성·재감사 류이거나 항목 표가 빈 정정도 재무 정정(TRUE·NULL)이다(C-11, N-25 Q1).
+일일 수집은 같은 (corp, bsns_year, reprt_code, fs_div) 에 원본 뒤에 정정을 덧붙이므로 그룹의
+판본은 **최신 접수(max `rcept_no`)** 하나다(G-21, N-25 Q2 — 백필 구간과 같은 '최신 판본 값 +
+그 판의 공개일'). 공개일의 날짜 원천은 stage 공개일 `stg_disclosure.available_date`(원천 rcept_dt
+와 접수번호 날짜 중 늦은 쪽 — J-41 재제출본은 `available_date > rcept_dt`)이고 `rcept_dt` 는
+원천 그대로 기간 판정 축이다.
 
 **매출 기준 두 축**: `revenue_basis` 는 그 행의 매출이 어느 규칙에서 나왔는지를,
 `revenue_basis_prev` 는 **직전 회계연도 같은 보고서**(`bsns_year` − 1 · 같은 `report_code`·
@@ -275,6 +283,31 @@ def _f(ctx: EquityGateContext, sql: str) -> float | None:
     return float(str(row[0]))
 
 
+# 산출 행(`o`) 접수번호의 stage 공개일. 재수집 판본이 쌓여도(append_only) 상한·하한으로 읽는다.
+_RCEPT_STAGE_AVAIL_MAX = ("(SELECT max(d.available_date) FROM stg_disclosure d "
+                          "WHERE d.rcept_no = o.rcept_no)")
+_RCEPT_STAGE_AVAIL_MIN = ("(SELECT min(d.available_date) FROM stg_disclosure d "
+                          "WHERE d.rcept_no = o.rcept_no)")
+# 기간 정본으로 쓰는 main 문서의 자격 — `.sql` `doc` CTE 의 WHERE 와 같다(tests 가 대조).
+DOC_QUALIFIED_PRED = ("{a}.member_role = 'main' AND {a}.period_to IS NOT NULL "
+                      "AND {a}.period_from IS NOT NULL "
+                      "AND {a}.doc_acode IN ('11011', '11012', '11013')")
+# 산출 행의 판(o.rcept_no)에 자격 있는 자기 문서가 있는가.
+_OWN_DOC = ("EXISTS (SELECT 1 FROM stg_doc_meta m0 WHERE m0.rcept_no = o.rcept_no AND "
+            + DOC_QUALIFIED_PRED.format(a="m0") + ")")
+# 기간 문서의 증인 접수(rcept_no → w_rcept) — 산출 행의 판 자신, 그리고 그 판에 자격 있는 자기
+# 문서가 **없을 때만** `.sql` 이 기간을 빌려 오는 같은 정정 사슬(disclosure_version 링크)의 판
+# (`chain_doc`, G-21 후속). 두 기간 검사에 `_OWN_DOC_FIRST` 를 함께 걸어 '자기 문서 우선'을 검증한다
+# — 사슬 전체를 늘 증인으로 받으면 `.sql` 이 사슬 문서를 앞세우는 회귀(자기 문서 12-31 인데 산출
+# 11-30)가 통과한다(품질 검토 재현). 사슬은 disclosure_version 이 정정 체인을 평평하게 접는다는
+# 전제(정정의 orig_rcept_no 는 언제나 원본)에 기대고, 그 전제는 S11 EG3 의
+# `n_link_orig_invalid`·`n_is_correction_prefix_mismatch` 가 지킨다.
+_DOC_WITNESS = ("(SELECT rcept_no, rcept_no AS w_rcept FROM \"{v}\" UNION "
+                "SELECT s.rcept_no, x.rcept_no FROM disclosure_version s JOIN disclosure_version x "
+                "ON coalesce(x.orig_rcept_no, x.rcept_no) = coalesce(s.orig_rcept_no, s.rcept_no))")
+_OWN_DOC_FIRST = f"AND (c.w_rcept = o.rcept_no OR NOT {_OWN_DOC}) "
+
+
 def _vocab_sql(values: tuple[str, ...]) -> str:
     return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
 
@@ -341,11 +374,15 @@ def _inferred_recent(ctx: EquityGateContext) -> dict[str, object]:
 def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
     """EG3-P01 보강 — 어휘 폐쇄 · 기간 판정 재계산 · 파생 부분합 금지 · 계정 커버율(기록형).
 
-    기간 판정 재계산은 `.sql` 의 tie-break 를 베끼지 않는다 — "그 접수의 main 문서 중 **어느 한
+    기간 판정 재계산은 `.sql` 의 tie-break 를 베끼지 않는다 — "증인 접수의 main 문서 중 **어느 한
     행**이 이 `period_end`(그리고 그 행의 개월 수가 이 `report_code`)를 준다"는 존재 명제로 본다.
+    증인 접수는 그 판 자신이고, 판에 자격 있는 자기 문서가 없을 때만 같은 정정 사슬의 판이다
+    (`_DOC_WITNESS`·`_OWN_DOC_FIRST`, e1.25.0). 사슬로 보충한 규모는 기록형
+    `n_period_end_chain_doc`.
     `stg_doc_meta` 가 rcept_no 당 main 을 둘 이상 갖는지는 `n_doc_meta_multi_main` 이 기록한다.
     """
     v = ctx.out_view
+    wit = _DOC_WITNESS.format(v=v)
     q1 = int(str(ctx.baseline.require(ctx.rule.name, "quarter_months")))
     inferred = _inferred_recent(ctx)
     checks = {
@@ -368,37 +405,46 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         "n_currency_not_krw": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE currency <> \'KRW\''),
         "n_restated_unknown_false": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                             "WHERE restated_unknown IS DISTINCT FROM TRUE"),
-        # `period_end` = stg_doc_meta.period_to 정본 (document 근거 행)
+        # `period_end` = stg_doc_meta.period_to 정본 (document 근거 행 — 판 자신, 자기 문서가
+        # 없을 때만 같은 사슬)
         "n_period_end_not_document": _n(
             ctx, f'SELECT count(*) FROM "{v}" o WHERE o.period_end_basis = \'document\' '
-                 "AND NOT EXISTS (SELECT 1 FROM stg_doc_meta m WHERE m.rcept_no = o.rcept_no "
-                 "AND m.member_role = 'main' AND m.period_to = o.period_end "
+                 f"AND NOT EXISTS (SELECT 1 FROM {wit} c JOIN stg_doc_meta m "
+                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no " + _OWN_DOC_FIRST
+                 + "AND m.member_role = 'main' AND m.period_to = o.period_end "
                  "AND m.period_from IS NOT DISTINCT FROM o.period_start)"),
         # 1Q/3Q 판정 — doc_acode 11013 은 개월 수로만 갈린다
         "n_report_code_month_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o WHERE o.period_end_basis = \'document\' '
-                 "AND NOT EXISTS (SELECT 1 FROM stg_doc_meta m WHERE m.rcept_no = o.rcept_no "
-                 "AND m.member_role = 'main' AND m.period_to = o.period_end "
+                 f"AND NOT EXISTS (SELECT 1 FROM {wit} c JOIN stg_doc_meta m "
+                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no " + _OWN_DOC_FIRST
+                 + "AND m.member_role = 'main' AND m.period_to = o.period_end "
                  "AND m.period_from = o.period_start AND o.report_code = "
                  "(CASE WHEN m.doc_acode <> '11013' THEN m.doc_acode "
                  f"WHEN date_diff('month', m.period_from, m.period_to) + 1 <= {q1} "
                  "THEN '11013' ELSE '11014' END))"),
         "n_period_end_after_rcept": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                             "WHERE period_end > rcept_dt"),
-        # 공개일 = 판 접수일. 예외는 원본 공시일을 승계한 정정본(09-30) 하나이고 그 행은 공개일이
-        # 접수일보다 이르다 — 늦거나 NULL 이 갈리면 규칙이 어긋난 것이다.
-        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" '
-                                           "WHERE (available_date IS NULL) <> (rcept_dt IS NULL) "
-                                           "OR available_date > rcept_dt"),
-        # 승계 행(available_date < rcept_dt)은 `.sql` 의 `redate` 를 베끼지 않고 disclosure_version 에서
-        # 다시 증언받는다: 이 판이 정정이고, 연결된 원본 접수일이 공개일과 같고, 첫 장 원본 제출일이
-        # 확인됐고, 원본부터 이 판까지 재무표를 건드린 정정이 없다.
+        # 공개일 = 판 접수번호의 stage 공개일(`stg_disclosure.available_date` — 원천 rcept_dt 와
+        # 접수번호 날짜 중 늦은 쪽, E08·J-41). 예외는 원본 공시일을 승계한 정정본(09-30) 하나이고
+        # 그 행은 공개일이 더 이르다 — 늦거나 NULL 이 갈리면 규칙이 어긋난 것이다.
+        # 이름은 옛 정의(rcept_dt 와 비교)를 그대로 둔다(게이트 출력 계약). 비교 축은 e1.25.0 부터
+        # stage 공개일이다 — J-41 재제출본은 `available_date > rcept_dt` 가 정상이다.
+        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" o '
+                                           "WHERE (o.available_date IS NULL) <> "
+                                           "(o.rcept_dt IS NULL) "
+                                           f"OR o.available_date > {_RCEPT_STAGE_AVAIL_MAX}"),
+        # 접수번호의 stage 공개일보다 이른 행(= 승계 행)은 `.sql` 의 `redate` 를 베끼지 않고
+        # disclosure_version 에서 다시 증언받는다: 이 판이 정정이고, 연결된 원본의 stage 공개일이
+        # 공개일과 같고, 첫 장 원본 제출일이 확인됐고, 원본부터 이 판까지 재무 정정이 없다. 원천
+        # rcept_dt 로 되돌아간 재제출본(J-41 회귀)도 증언이 없어 여기서 걸린다.
         "n_orig_filing_unwitnessed": _n(
-            ctx, f'SELECT count(*) FROM "{v}" o WHERE o.available_date < o.rcept_dt '
+            ctx, f'SELECT count(*) FROM "{v}" o '
+                 f"WHERE o.available_date < {_RCEPT_STAGE_AVAIL_MIN} "
                  "AND NOT EXISTS (SELECT 1 FROM disclosure_version c "
-                 "JOIN disclosure_version g ON g.rcept_no = c.orig_rcept_no "
+                 "JOIN stg_disclosure g ON g.rcept_no = c.orig_rcept_no "
                  "WHERE c.rcept_no = o.rcept_no AND c.is_correction "
-                 "AND g.rcept_dt = o.available_date "
+                 "AND g.available_date = o.available_date "
                  "AND c.date_check IN ('exact', 'off_1d') "
                  "AND NOT EXISTS (SELECT 1 FROM disclosure_version x "
                  "WHERE x.orig_rcept_no = c.orig_rcept_no AND x.is_correction "
@@ -445,8 +491,16 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         # 결산월을 바꾼 법인의 과거 사업보고서는 정상적으로 어긋난다(DESIGN §11 "결산월 변경은
         # 문서 period_to 로 해소"). 폐기형으로 두면 그 법인 하나가 서버 빌드를 죽인다.
         # **기록형**. 원본 공시일을 승계한 정정본 수(09-30) — 정정일 편향을 얼마나 되돌렸나.
+        # 축은 원천 `rcept_dt` 그대로다(계산 불변). e1.25.0 의 J-41 행(`available_date >
+        # rcept_dt`)은 세지 않고, 승계 행도 정정의 원천 rcept_dt 가 원본 공개일보다 이른 드문
+        # 재제출본이면 빠진다 — 판정 축(stage 공개일)의 승계 검사는 `n_orig_filing_unwitnessed` 다.
         "n_available_orig_filing": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                            "WHERE available_date < rcept_dt"),
+        # **기록형**. 기간을 같은 정정 사슬의 문서로 보충한 행(자기 접수에 자격 있는 문서가 없는
+        # document 행, G-21 후속) — 보충 규모가 빌드마다 보이게.
+        "n_period_end_chain_doc": _n(ctx, f'SELECT count(*) FROM "{v}" o '
+                                          "WHERE o.period_end_basis = 'document' "
+                                          f"AND NOT {_OWN_DOC}"),
         "n_fiscal_month_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o JOIN corp c USING (corp_code) '
                  "WHERE o.report_code = '11011' AND c.fiscal_month IS NOT NULL "
@@ -579,10 +633,10 @@ def _coverage_source_sql(ctx: EquityGateContext) -> str:
         " AND t.fs_div = o.fs_div AND t.rcept_no = o.rcept_no"
         for view, adopted in ((ctx.out_view, "TRUE"), (ctx.reject_view, "FALSE"))
         if view is not None]
-    # `tg` 의 키는 `.sql` 의 `grp`(그룹당 min(rcept_no))과 같은 자리다 — 산출에는 `reprt_code`
-    # 가 없고(1Q·3Q 는 `doc_acode` 로 다시 갈린다) `rcept_no` 가 그 그룹의 이름표다.
+    # `tg` 의 키는 `.sql` 의 `grp`(그룹당 최신 접수 max(rcept_no), G-21)과 같은 자리다 — 산출에는
+    # `reprt_code` 가 없고(1Q·3Q 는 `doc_acode` 로 다시 갈린다) `rcept_no` 가 그 그룹의 이름표다.
     return ("WITH tg AS (\n"
-            "    SELECT corp_code, bsns_year, fs_div, min(rcept_no) AS rcept_no,\n"
+            "    SELECT corp_code, bsns_year, fs_div, max(rcept_no) AS rcept_no,\n"
             f"           {flags}\n"
             "    FROM stg_fin\n"
             "    GROUP BY corp_code, bsns_year, reprt_code, fs_div\n"
@@ -942,7 +996,8 @@ FIN_STD = register(EquityTable(
     inputs=("stg_fin", "stg_doc_meta", "stg_disclosure", "disclosure_version", "corp"),
     partition_class="receipt_axis",
     partition_key_expr="CAST(substr(rcept_no, 1, 4) AS INTEGER)",
-    available_rule=("column:rcept_dt — DART 접수일(derived). 재무표를 안 건드린 정정본은 원본 접수일"
+    available_rule=("stg_disclosure.available_date — 판 접수번호의 stage 공개일(derived, 원천"
+                    " rcept_dt 와 접수번호 날짜 중 늦은 쪽). 재무를 안 건드린 정정본은 원본 공개일"
                     "(available_date < rcept_dt 로 드러난다). 파생 컬럼은 구성 행 max 를 동반"),
     # GATES §3-⑫ — 표준계정 행이 하나라도 있는 (corp, bsns_year, reprt_code, fs_div) 그룹 수
     eg1_lhs_sql='SELECT count(*) FROM "out_pq"',
@@ -957,7 +1012,8 @@ FIN_STD = register(EquityTable(
                     "account_detail", "ord", "account_nm", "account_nm_norm", "thstrm_amount",
                     "account_std", "is_krw", "currency", "rcept_no", "observed_date"),
         "stg_doc_meta": ("rcept_no", "member_role", "doc_acode", "period_from", "period_to"),
-        "stg_disclosure": ("rcept_no", "rcept_dt", "observed_date"),
+        # `available_date` = stage 보정 공개일(J-41) — 공개일 축. `rcept_dt` 는 기간 판정 축.
+        "stg_disclosure": ("rcept_no", "rcept_dt", "available_date", "observed_date"),
         # 링크 판본을 같이 고정한다(EG6_fin_std 무매칭 비대칭이 읽는다). `stg_rcept_dt_map` 은
         # 실재하지 않아 접수일 원천은 `stg_disclosure.rcept_dt` 다(GATES §9).
         # 정정본의 원본 공시일 승계(09-30)는 정정 여부·원본 링크·재무표 정정 여부·첫 장 날짜 확인을 읽는다.
@@ -981,7 +1037,8 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s12.json"
 
 __all__ = ["ACCOUNTS", "BASELINE_SEED", "CAPEX_BASIS_NULL_REASONS", "CAPEX_BASIS_VOCAB",
            "CF_ACCOUNTS", "CF_PRIOR_REPORT",
-           "CF_Q_COLUMNS", "CONCEPT_PREFIX_PATTERN", "COVERAGE_METRICS", "GATE_NAME_EG8",
+           "CF_Q_COLUMNS", "CONCEPT_PREFIX_PATTERN", "COVERAGE_METRICS", "DOC_QUALIFIED_PRED",
+           "GATE_NAME_EG8",
            "TEMPLATE_STANDARD", "TEMPLATE_TAGS", "TEMPLATE_VOCAB",
            "TIER_CAPEX_COMBINED", "TIER_CAPEX_PARTS", "TIER_CONCEPT", "TIER_CONCEPT_ALT",
            "TIER_NM",

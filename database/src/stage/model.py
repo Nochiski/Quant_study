@@ -8,7 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-RULES_VERSION = "2.5.0"
+# 2.6.0: 참조표 룩업 공개일도 접수번호 날짜보다 이르지 않다(J-41, N-26 4.2)
+RULES_VERSION = "2.6.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
@@ -163,7 +164,10 @@ class AvailableRule:
     lookup_key: str | None = None   # kind=lookup: 참조 테이블 키 컬럼
     lookup_value: str | None = None  # kind=lookup: 참조 테이블 날짜 컬럼
     basis: str = "default"          # kind=column: default(내용일 대용) | measured(수집일 등 실재)
-    fallback_column: str | None = None   # kind=column: column 이 NULL 이면 이 컬럼 + basis default
+    # kind=column: column 이 NULL 이면 이 컬럼 + basis default.
+    # kind=greatest_ymd8·lookup: 앞 8자리가 YYYYMMDD 인 텍스트 컬럼(접수번호). 날짜가 그보다 이르면
+    # 그 날짜로 민다(E08·J-41 — `build._not_before_ymd8_sql` 한 곳). lookup 미스는 NULL 그대로.
+    fallback_column: str | None = None
 
 
 AVAILABLE_NONE = AvailableRule("none")

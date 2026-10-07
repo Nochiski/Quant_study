@@ -21,6 +21,8 @@ R_SAMSUNG = "20250311001085"   # 삼성전자 FY2024 사업보고서
 R_OTHER = "20160108000502"
 R_NO_MAP = "20200101000001"    # disclosure 에 없는 접수번호 → 참조표 미스
 R_FUTURE = "29230101000001"    # 연도 범위 밖 (G7 격리)
+R_BACKDATED = "20250828000446"  # 박셀바이오 재제출본 — 원천 rcept_dt 가 접수번호보다 과거(J-41)
+R_BAD_PREFIX = "20251399000001"  # 앞 8자리가 날짜가 아니다(13월) — 참조표 값 그대로
 
 
 def _disc(rcept_no: str, rcept_dt: str, collected: str = "2026-08-30T10:00:00",
@@ -118,6 +120,16 @@ def test_rules_rcept_dt_map_is_a_whole_reference_table() -> None:
     assert rule.key_unique is True
 
 
+def test_every_receipt_lookup_floors_at_the_receipt_number_date() -> None:
+    """J-41 — 참조표 룩업을 쓰는 표는 전부 같은 보정(접수번호 앞 8자리보다 이르면 그 날짜)을
+    선언한다. 새 DART 표가 룩업을 베껴 오면서 보정을 빠뜨리면 여기서 걸린다."""
+    lookups = {n: r.available for n, r in rules.RULES.items() if r.available.kind == "lookup"}
+    assert {"stg_fin", "stg_dividend", "stg_audit", "stg_event_cr", "stg_doc_meta"} <= set(lookups)
+    for name, avail in lookups.items():
+        assert avail.table == "stg_rcept_dt_map" and avail.local_key == "rcept_no", name
+        assert avail.fallback_column == "rcept_no", name
+
+
 # ── S1b: stg_rcept_dt_map ──────────────────────────────────────────────────────
 def test_map_folds_page_duplicates_into_one_row_per_rcept_no(
     snap: snapshot.Snapshot, tmp_path: Path
@@ -181,6 +193,39 @@ def test_fin_derives_available_date_from_map_and_marks_misses_unknown(
                        ).fetchone()
     assert miss == (None, "unknown")
     assert _gate(r, "G0").metrics["rcept_map_miss"] == 1
+
+
+def test_fin_available_date_is_never_earlier_than_the_receipt_number_date(tmp_path: Path) -> None:
+    """J-41(N-26 4.2). 박셀바이오 재제출본 — 목록 API 가 2025-08-28 접수번호에 원래 제출일
+    rcept_dt(2024-03-19)를 붙여 준다. 그 판본은 접수번호 날짜부터 DART 에 있었으므로 참조표 값을
+    그대로 쓰면 527일 look-ahead 다. stg_disclosure(E08)와 같은 규칙으로 늦은 쪽을 쓴다.
+    참조표 자체(원문 rcept_dt)와 참조표 미스(NULL·unknown)는 그대로다."""
+    d = tmp_path / "raw_j41"
+    d.mkdir()
+    _write_dart(d / "dart.db",
+                DISC_ROWS + [_disc(R_BACKDATED, "20240319"), _disc(R_BAD_PREFIX, "20240319")],
+                FIN_ROWS + [_fin(R_BACKDATED, corp="01335851", year="2023", amt="5"),
+                            _fin(R_BAD_PREFIX, corp="00000099", year="2023", amt="6")])
+    s = snapshot.make_snapshot({"dart": d / "dart.db"}, tmp_path / "snapshots", snapshot_id="sj")
+    m = _build("stg_rcept_dt_map", s, tmp_path)
+    r = _build("stg_fin", s, tmp_path)
+    assert r.ok, [g for g in r.gates if g.status is gates.GateStatus.FAIL]
+    con = _read(tmp_path, r)
+    back = con.execute("SELECT available_date, available_basis FROM t "
+                       f"WHERE rcept_no='{R_BACKDATED}'").fetchone()
+    assert back is not None and (str(back[0]), back[1]) == ("2025-08-28", "derived")
+    hit = con.execute(f"SELECT available_date FROM t WHERE rcept_no='{R_SAMSUNG}'"
+                      " AND account_id='ifrs-full_Revenue'").fetchone()
+    assert hit is not None and str(hit[0]) == "2025-03-11"     # 접두와 같은 날 — 그대로
+    miss = con.execute(f"SELECT available_date, available_basis FROM t WHERE rcept_no='{R_NO_MAP}'"
+                       ).fetchone()
+    assert miss == (None, "unknown")                          # 미스는 접두로 채우지 않는다(§6)
+    bad = con.execute("SELECT available_date, available_basis FROM t "
+                      f"WHERE rcept_no='{R_BAD_PREFIX}'").fetchone()
+    assert bad is not None and (str(bad[0]), bad[1]) == ("2024-03-19", "derived")
+    ref = _read(tmp_path, m).execute(f"SELECT rcept_dt FROM t WHERE rcept_no='{R_BACKDATED}'"
+                                     ).fetchone()
+    assert ref is not None and str(ref[0]) == "2024-03-19"   # 참조표는 원문 사실 그대로
 
 
 def test_fin_casts_amounts_to_decimal_38_4_and_records_missing_kinds(

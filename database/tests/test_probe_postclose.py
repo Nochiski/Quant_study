@@ -469,7 +469,8 @@ def test_report_names_fixed_tickers_without_official_close(tmp_path: Path) -> No
     rep = _grade(tmp_path, {"005930": "100", "001820": "300"})     # 코스피 표만 적재됐다
     md = P.report_md(rep)
     assert ("공식 종가 없는 고정 종목: 086520 — 이 종목이 든 필드는 첫 전 종목 일치·전환 구간을 "
-            "낼 수 없다(KRX 적재 확인 뒤 `grade --date 20261006` 재실행)") in md
+            "낼 수 없고 이탈 구간 앞끝도 '관측 전'이 된다(이탈 짝 목록이 늘 수 있다 — KRX 적재 "
+            "확인 뒤 `grade --date 20261006` 재실행)") in md
     assert (rep["gradable"], rep["no_official_close"]) == (True, ["086520"])
     assert rep["minute_price"]["KRX.ka10060.cur_prc"]["switch_window"] is None
 

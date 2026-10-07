@@ -1223,3 +1223,10 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 ### B-55: 정리 — DART 스윕이 호출마다 전체 행 수를 두 번 센다
 
 - `src/backfill_dart.py` `store()` 가 콜마다 COUNT(*) 2회(`dart_disclosure` 351만 행 0.9~5.3초, `dart_fin_raw` 1,541만 행 0.25~7.1초 — cold/warm). 평일 06:00 DART 시간의 대부분(27~33분)이 스윕이다. 원인 단정 아님 — 고칠 때 먼저 잰다(동결 코드라 사람 결정).
+
+### B-56: 원장 락 경로와 대기 규칙이 여러 곳에 흩어져 있다
+
+- **상황**: 원장 락 파일 경로가 `scripts/daily_ledger.sh`·`daily_evening.sh`·`daily_wise.sh`·`wics_weekly.sh`·README 절차서에 하드코딩돼 있고, `daily_build.sh` 만 `QL_RAW_LOCK_FILE`(테스트 전용)로 덮어쓸 수 있다. 대기 규칙도 넷이다 — `daily_build.sh` 한도 없음(P9) · 나머지 체인 `-n`(B-52) · README 수동 실행 `-w 600`(사람이 정한 마감).
+- **인풋**: 대화형 셸에 `QL_RAW_LOCK_FILE` 이 남은 채 `daily_build.sh` 를 손으로 돌림 · 락 경로를 한 곳만 바꿈.
+- **에러 위치**: 위 스크립트들의 `LOCK=` 줄.
+- **위험성**: 그 실행만 다른 락을 잡아 원장 쓰기 배타가 깨질 수 있다(동시 쓰기). 경로 변경이 한 곳에서 빠지면 같은 결과. 고칠 때는 락 경로·대기 규칙을 공용 셸 조각 하나로 모은다(배포 묶음 3 구조 검토 M-7).

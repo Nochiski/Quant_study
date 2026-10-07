@@ -6,8 +6,10 @@
 #   순서: 오늘(KST) 거래일 판정 → 저녁 원장 완료 대기 → scripts/build_chain.sh evening
 #   대기 규칙: data/deliver/ledger_evening.json 이 date==오늘 && kiwoom_rc==0 && wise_rc==0 이 될
 #     때까지 60초 간격으로 본다. 한도는 21:45 KST(QL_EVENING_BUILD_DEADLINE 로 조정 — 키움이 21:05 부터 받는다). DART 는
-#     조건이 아니다 — 저녁 스코어링 경로 밖이라 실패해도 빌드는 간다. 다만 저 인계 파일 자체가
-#     세 갈래가 다 끝난 뒤에 쓰이므로, 파일이 보이는 시점엔 dart.db 쓰기도 끝나 있다(스냅샷 안전).
+#     조건이 아니다 — 저녁 스코어링 경로 밖이라 실패해도 빌드는 간다. 인계 파일은 키움·WISE 가 끝나면
+#     dart_rc=null 로 먼저 쓰이고(daily_evening.sh) DART 가 끝나면 다시 쓰인다 — 그래서 dart.db 는 아직 쓰는
+#     중일 수 있고, 스냅샷은 VACUUM INTO 트랜잭션 일관 사본이다(build_chain.sh snapshot_step). 그날 DART 분은
+#     아침 확정판에 들어온다(마감일엔 잠정판에 DART 일부만 — 배포 묶음 3 구조 검토).
 #   휴장·대기 실패도 반드시 알린다 (결정 V2-7). 알림 없는 경로는 --dry-run 뿐이다.
 set -uo pipefail
 cd $HOME/quant-ledger || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 빌드하지 않는다" >&2; exit 4; }

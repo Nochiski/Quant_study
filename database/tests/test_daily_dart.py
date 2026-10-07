@@ -592,9 +592,12 @@ def test_received_rules_axis_status_fs_div_and_latest_trigger(tmp_path) -> None:
     _log(con, _periodic(C3)[:1], ts="2026-09-08T13:00:00")        # 원본 뒤·정정본 전
     con.commit()
 
-    rec = dd.received(con, dd.plan(con, D))
+    p = dd.plan(con, D)
+    rec = dd.received(con, p)
     assert {fin1, div1, *_per_corp(dd.HOLDER_ENDPOINTS, C2)} <= rec.ok
-    assert rec.nodata == frozenset()                              # 부속·회사 축 013 은 안 부른다
+    # `received()` 는 사실만 낸다(받음 중 no_data — 축 무관), 재무만 거르는 것은 `recall_targets()`
+    assert rec.nodata == {div1, *_per_corp(("elestock",), C2)}
+    assert dd.recall_targets(con, p).fin_nodata == frozenset()   # 부속·회사 축 013 은 안 부른다
     assert rec.missing[sh1] == "status=ok_empty"
     assert rec.missing[cap1].startswith("ts 2026-09-01T00:00:00 < 최초 관측")
     assert rec.missing[_periodic(C3)[0]] == "ts 2026-09-08T13:00:00 < 최초 관측 2026-09-08T15:00:00"
@@ -632,9 +635,33 @@ def test_received_final_row_rules(tmp_path, endpoint, rows, want) -> None:
                     [(u.endpoint, u.corp_code, u.bsns_year, u.reprt_code, fs, st, ts)
                      for fs, st, ts in rows])
     con.commit()
-    rec = dd.received(con, dd.plan(con, D))
-    got = (("ok·다시 부름" if u in rec.nodata else "ok") if u in rec.ok else rec.missing[u])
+    p = dd.plan(con, D)
+    rec, again = dd.received(con, p), dd.recall_targets(con, p).fin_nodata
+    got = (("ok·다시 부름" if u in again else "ok") if u in rec.ok else rec.missing[u])
     assert got == want
+    assert (u in rec.nodata) is (want.startswith("ok") and rows[-1][1] == "no_data")
+    con.close()
+
+
+def test_recall_targets_units_by_reason(tmp_path) -> None:
+    """다시 부를 유닛 = 받지 않음 + 재무 자료없음(013) 재확인 + 재무 반영 지연 재확인. 부속·회사 축
+    013 은 받음으로만 두고 부르지 않는다(N-24 3.2 · N-23 ②). 재무만 거르는 곳을 `recall_targets()`
+    로 옮긴 리팩터(M-4)의 동작 고정 — 옮기기 전후로 같아야 한다."""
+    rows = [("20260908000001", D, C1, "005930", "반기보고서 (2026.06)"),
+            ("20260908000002", D, C2, "005930", "주식등의대량보유상황보고서(약식)"),
+            ("20260908000003", D, C3, "005930", "[기재정정]반기보고서 (2026.06)")]
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    fin1, div1, sh1 = _periodic(C1)[:3]
+    _log(con, _periodic(C1)[3:])
+    _log(con, [fin1, div1], status="no_data")                     # 재무·부속 연도 축 013
+    _log(con, [sh1], status="error")                              # 받지 않음
+    _log(con, _per_corp(("elestock",), C2), status="no_data")     # 회사 축 013
+    _log(con, _per_corp(("majorstock",), C2))
+    _log(con, _periodic(C3))
+    _fin_rows(con, (C3, "2026", "11012", "20260814000001"))     # 정정 전 판 — 반영 지연
+    con.commit()
+    assert dd.recall_targets(con, dd.plan(con, D)).units == sorted([sh1, fin1, _periodic(C3)[0]])
     con.close()
 
 
@@ -964,13 +991,17 @@ def _prior_dart_run(home, started):
 
 
 def test_run_stops_on_a_runlog_start_time_in_an_unknown_format(tmp_path, monkeypatch) -> None:
-    """앞선 런의 시작 시각을 읽지 못하면 (b) 창을 조용히 잃지 않고 멈춘다(ValueError)."""
+    """앞선 런의 시작 시각을 읽지 못하면 (b) 창을 조용히 잃지 않고 멈춘다(ValueError) — 메시지에
+    runlog db·source·D·원문 값(M-5)."""
     home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타")])
     _prior_dart_run(home, "2026-09-08 18:05:00+09:00")
     seen = _fake_exec(monkeypatch)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as ei:
         dd.run(D, home=home, skip_sweep=True)
     assert seen == []
+    for token in (f"{home}/data/raw/daily_run.db", "source=dart", f"date={D}",
+                  "'2026-09-08 18:05:00+09:00'"):
+        assert token in str(ei.value)
 
 
 @pytest.mark.parametrize(("evening_status", "skip_sweep"),

@@ -17,7 +17,8 @@
 "당일 `list.json` 공시에 해당 유형이 있는 corp 만 그날 재호출 — 이벤트 없으면 0콜".
 백필의 종결 판정은 `ok` 를 축 무관하게 **영구 종결**로 보므로(`backfill_dart.py:674-681`),
 재호출하려면 그 유닛의 `ingest_log` 행을 먼저 지워야 한다(`unlock`). `store()` 가 멱등이라
-재호출 자체는 안전하고, 백필 코드는 한 줄도 고치지 않는다(플랜 §4 "백필 코드는 동결").
+재호출 자체는 안전하고, 백필 코드는 T15 예외 재시도 1건(N-23 ③) 말고는 고치지 않는다(플랜 §4
+"백필 코드는 동결").
 같은 D 를 다시 돌 때(18:05 저녁 → 06:00 아침) 지우고 부르는 것은 **받지 않은 유닛**과 재무 반영
 지연 재확인, 재무 자료없음(013) 재확인뿐이다(`recall_targets()`, 배포 묶음 3 A-04) — 저녁
 실패분은 받지 않은 유닛이라 아침에 그대로 다시 불린다.
@@ -478,11 +479,12 @@ def plan(con: sqlite3.Connection, date_yyyymmdd: str, *,
 # ── 2-1. 수신 판정 · 다시 부를 유닛 (배포 묶음 3 T12·T13) ────────────────────────────
 @dataclass(frozen=True)
 class Received:
-    """`received()` 결과 — 판정용 '받음'과 `ingest_log` 에서 나오는 재호출 사유를 한 번에 낸다."""
+    """`received()` 결과 — `ingest_log` 에서 읽은 사실만 낸다. 다시 부를 범위는
+    `recall_targets()` 가 정한다."""
 
     ok: frozenset[Unit]              # 받음 — 완료 판정은 이것만 본다
-    missing: dict[Unit, str]         # 받지 않음 → 사유. 다시 부른다
-    nodata: frozenset[Unit]          # 받음 가운데 재무(fin) no_data — 판정은 통과, 다시 부를 대상
+    missing: dict[Unit, str]         # 받지 않음 → 사유
+    nodata: frozenset[Unit]          # 받음 가운데 최종 행이 no_data 인 유닛 — 엔드포인트 무관
 
 
 def received(con: sqlite3.Connection, daily_plan: DailyPlan) -> Received:
@@ -494,10 +496,8 @@ def received(con: sqlite3.Connection, daily_plan: DailyPlan) -> Received:
          빈 응답이라 받지 않은 것이다(P1).
       ② `ts` ≥ 계기 공시 최초 관측(`Trigger.first_seen`) — 어제 이미 ok 였던 유닛이 오늘 공시
          (정정본·새 DS005 사건)를 반영하지 않은 채 통과하지 못하게 한다(DEFECT-B01 의 우려).
-    재무(`fin`)의 `no_data` 는 받았지만 늦은 반영에 대비해 다시 부를 대상(`nodata`)으로도 낸다 —
-    재무 재확인(3.10)과 같은 성격이라 재호출만 정하고 판정엔 넣지 않는다. 부속 6종의 연도 축 013 은
-    받음으로만 둔다: N-23 ② '재무만 아침에 재확인' 과 같은 범위이고, 서버 실측 부속 013 비율(사업
-    보고서 13%대)로는 마감일 아침 재호출이 1천 건 넘게 늘 수 있다.
+    받음 가운데 최종 행이 `no_data` 인 유닛은 엔드포인트와 무관하게 `nodata` 로도 낸다 — 사실만
+    낸다. 그중 무엇을 다시 부를지(재무만, N-24 3.2)는 `recall_targets()` 가 정한다.
     최종 행 = `ts` 가 가장 늦은 행. `fin` 은 CFS·OFS 두 행이 남을 수 있어 같은 시각이면 받지 않은
     쪽을 고른다(P1). 행이 없는 유닛(키 소진·키 오류 경로 `backfill_dart.py:723-737`)은 받지 않은
     것이다.
@@ -523,7 +523,7 @@ def received(con: sqlite3.Connection, daily_plan: DailyPlan) -> Received:
             missing[u] = f"ts {last} < 최초 관측 {first_seen}"
         else:
             ok.add(u)
-            if u.endpoint == "fin" and "no_data" in latest:
+            if "no_data" in latest:
                 nodata.add(u)
     return Received(frozenset(ok), missing, frozenset(nodata))
 
@@ -576,18 +576,22 @@ def _fin_max_rowid(con: sqlite3.Connection) -> int:
 class Recall:
     """`recall_targets()` 의 결과 — 다시 부를 유닛과 사유. 세 사유는 서로 겹치지 않는다."""
 
-    received: Received               # 받지 않음(`missing`) · 재무 자료없음 재확인(`nodata`)
+    received: Received               # 받지 않음(`missing`)은 그대로 다시 부른다
     fin_lag: frozenset[Unit]         # 재무 재확인 — 저장된 재무 판이 계기 공시보다 옛것
+    fin_nodata: frozenset[Unit]      # 재무 자료없음 재확인 — 받음 중 no_data 인 재무(N-24 3.2)
 
     @property
     def units(self) -> list[Unit]:
-        return sorted({*self.received.missing, *self.received.nodata, *self.fin_lag})
+        return sorted({*self.received.missing, *self.fin_nodata, *self.fin_lag})
 
 
 def recall_targets(con: sqlite3.Connection, daily_plan: DailyPlan) -> Recall:
     """다시 부를 유닛 = 받지 않음 + 재무 반영 지연 재확인 + 재무 자료없음 재확인. 읽기만 한다.
 
-    T13 · N-23 ② · N-24 3.2(10-07 수정)·3.10. 받지 않음과 재무 자료없음은 `received()` 가 낸다.
+    T13 · N-23 ② · N-24 3.2(10-07 수정)·3.10. 재호출 범위는 여기 한 곳에서 정한다 — 받지 않음은
+    `received()` 의 `missing` 그대로, 자료없음(013)은 `received()` 의 `nodata` 가운데 재무만 다시
+    부른다. 부속 6종의 연도 축 013 은 받음으로만 둔다: N-23 ② '재무만 아침에 재확인' 과 같은 범위
+    이고, 서버 실측 부속 013 비율(사업보고서 13%대)로는 마감일 아침 재호출이 1천 건 넘게 늘 수 있다.
     재무 재확인 = 응답이 있었던(ok) `fin` 유닛 중 저장된 재무 행의 rcept_no 최댓값이 계기 공시
     rcept_no 보다 작은 것. DART 재무 API 는 최신 판만 주므로(`backfill_dart.py:72-74`) 저녁 응답이
     계기 공시를 아직 반영하지 못했으면 다음 런에 다시 부른다. no_data 인 재무 유닛은 이미 자료없음
@@ -596,10 +600,12 @@ def recall_targets(con: sqlite3.Connection, daily_plan: DailyPlan) -> Recall:
     받지 않음으로 바뀌어 완료 판정이 실패한다 — P1 쪽이라 그대로 둔다.
     """
     rec = received(con, daily_plan)
+    fin_nodata = frozenset(u for u in rec.nodata if u.endpoint == "fin")
     fins = [u for u in rec.ok - rec.nodata if u.endpoint == "fin"]
     stored = fin_rcept_max(con, {_fin_key(u) for u in fins})
     return Recall(rec, frozenset(u for u in fins
-                                 if stored.get(_fin_key(u), "") < daily_plan.triggers[u].rcept_no))
+                                 if stored.get(_fin_key(u), "") < daily_plan.triggers[u].rcept_no),
+                  fin_nodata)
 
 
 def fin_still_lagging(con: sqlite3.Connection, daily_plan: DailyPlan,
@@ -821,27 +827,6 @@ def _write_corps(tmpdir: str, tag: str, corps: Sequence[str]) -> str:
 _REQUIRED_TABLES = ("dart_disclosure", "ingest_log", "dart_call_log", "doc_store")
 
 
-def _first_run_started(runlog_db: str, date_yyyymmdd: str) -> str | None:
-    """그 D 의 가장 이른 dart 런 시작 시각(`daily_run.db`), 없으면 None.
-
-    runlog 는 '%Y-%m-%dT%H:%M:%SZ'(UTC) 로 적고 `collected_at`·since_ts 는 Z 없는 UTC 다 — 같은
-    축이라 형식만 맞춘다. 다른 형식이면 조용히 넘기지 않고 ValueError 로 멈춘다.
-    """
-    if not os.path.exists(runlog_db):
-        return None
-    rl = sqlite3.connect(runlog_db)
-    try:
-        if not _has_table(rl, "run"):
-            return None
-        row = rl.execute("SELECT MIN(started) FROM run WHERE source='dart' AND date=?",
-                         (date_yyyymmdd,)).fetchone()
-    finally:
-        rl.close()
-    if row is None or row[0] is None:
-        return None
-    return dt.datetime.strptime(str(row[0]), "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%dT%H:%M:%S")
-
-
 def _late_window(prior_ts: str | None, started_ts: str,
                  sweep_started_ts: str | None) -> tuple[str | None, str]:
     """(b) 창 시작과 출처 = 그 D 의 첫 dart 런 시작(앞선 런이 없으면 이번 런 시작)과 이번 스윕
@@ -906,9 +891,9 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
                                    DailyPlan(date_yyyymmdd, 0, 0, (), {}), pre,
                                    detail=f"{reason}: {pre.describe()}")
 
-        # 이번 런을 기록하기 전에 읽어야 앞선 런만 보인다
-        prior_ts = _first_run_started(os.path.join(home, "data", "raw", "daily_run.db"),
-                                      date_yyyymmdd)
+        # 이번 런을 기록하기 전에 읽어야 앞선 런만 보인다. 형식은 runlog 가 맞춰 준다(Z 없는 UTC)
+        prior_ts = runlog.first_started_utc(os.path.join(home, "data", "raw", "daily_run.db"),
+                                            source="dart", date=date_yyyymmdd)
         run_id: int | None = None
         if not dry_run:
             run_id = runlog.start(os.path.join(home, "data", "raw", "daily_run.db"),
@@ -969,7 +954,7 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
                                      n_calls, detail, n_calls_est=calls_est(targets),
                                      n_missing=len(recall.received.missing),
                                      n_fin_recheck=len(recall.fin_lag),
-                                     n_nodata_recheck=len(recall.received.nodata),
+                                     n_nodata_recheck=len(recall.fin_nodata),
                                      fin_lagged=lagged, late_since=late_since,
                                      late_source=late_source)
         except BaseException as e:

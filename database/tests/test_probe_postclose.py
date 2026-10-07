@@ -376,7 +376,7 @@ def test_grade_minute_dropped_ticker_is_missing_not_mismatch(tmp_path: Path, abo
     - error: call_tr ERROR(유량 재시도 소진) — ok=0 행이라 채점이 거른다
     - token: TOKEN 으로 collect 가 멈춘다 — ok=0 행 뒤 001820 은 관측 행조차 없다(부분 기록)
     '첫 전 종목 일치'는 모든 종목이 관측된 칸만 될 수 있어 15:40 이고 '16:00 뒤 첫 불일치'는
-    없다. 지금 코드는 그 칸의 일치 수가 종목 수보다 작다는 것만 보고 16:00 을 불일치로 찍는다."""
+    없다. 수정 전 코드는 그 칸의 일치 수가 종목 수보다 작다는 것만 보고 16:00 을 불일치로 찍는다."""
     con = P.connect(tmp_path / "postclose.db")
     for slot in SLOTS:
         for i, (tk, close) in enumerate(CLOSES.items()):
@@ -437,7 +437,7 @@ def test_report_marks_switch_windows_that_overlap_within_one_run(tmp_path: Path)
 
 def test_grade_minute_without_official_closes_is_ungradable(tmp_path: Path) -> None:
     """M-5: 09:20 채점 때 krx.db 에 T 행이 아직 없으면 공식 종가표가 빈다(n_official 0). 그때 가격
-    칸은 일치도 불일치도 아니다 — 지금 코드는 16시대 첫 칸을 '16:00 뒤 첫 불일치'로 찍는다
+    칸은 일치도 불일치도 아니다 — 수정 전 코드는 16시대 첫 칸을 '16:00 뒤 첫 불일치'로 찍는다
     (일치 0 < 종목 3). 보고서는 '공식 종가 없음 — 채점 불가'로 적고 표에 종목 수를 싣는다(M-4)."""
     con = P.connect(tmp_path / "postclose.db")
     for slot in SLOTS:
@@ -452,6 +452,44 @@ def test_grade_minute_without_official_closes_is_ungradable(tmp_path: Path) -> N
     md = P.report_md(rep)
     assert "공식 종가 없음 — 채점 불가" in md
     assert "| KRX.ka10060.cur_prc | 3 | 채점 불가 | 채점 불가 | 채점 불가 | 채점 불가 |" in md
+    assert (rep["gradable"], rep["no_official_close"]) == (False, sorted(CLOSES))  # 판정은 grade
+
+
+def test_report_names_fixed_tickers_without_official_close(tmp_path: Path) -> None:
+    """I-1: 공식 종가표가 일부만 찬 날 — KRX 적재는 표(시장)마다 커밋되므로 코스닥 표만 실패할 수
+    있다. 그러면 코스닥 고정 종목(086520)은 모든 칸에서 관측 없음이 되어 그 종목이 든 필드의 첫 전
+    종목 일치·전환 구간이 None 인데, 수정 전 보고서는 그 까닭을 적지 않는다. grade 가 채점 가능
+    여부(gradable)와 공식 종가 없는 고정 종목을 싣고, md 머리에 한 줄로 적는다."""
+    con = P.connect(tmp_path / "postclose.db")
+    for slot in ("15:25", "15:30", "15:35"):
+        for i, (tk, close) in enumerate(CLOSES.items()):
+            _price(con, f"{slot}:{i + 1:02d}", "ka10060", tk, close if slot >= "15:30" else "1")
+    con.commit()
+    con.close()
+    rep = _grade(tmp_path, {"005930": "100", "001820": "300"})     # 코스피 표만 적재됐다
+    md = P.report_md(rep)
+    assert ("공식 종가 없는 고정 종목: 086520 — 이 종목이 든 필드는 첫 전 종목 일치·전환 구간을 "
+            "낼 수 없다(KRX 적재 확인 뒤 `grade --date 20261006` 재실행)") in md
+    assert (rep["gradable"], rep["no_official_close"]) == (True, ["086520"])
+    assert rep["minute_price"]["KRX.ka10060.cur_prc"]["switch_window"] is None
+
+
+def test_grade_minute_cell_with_any_mismatch_is_a_mismatch() -> None:
+    """한 칸에 관측이 여럿이면(같은 회차 재실행 등) 하나라도 불일치면 그 칸은 불일치다 — 일치 뒤
+    불일치가 오고 다시 일치해도 마지막 관측이 이기지 않는다."""
+    got = P.grade_minute_prices({"a": [("16:00:01", 1), ("16:00:30", 2), ("16:00:50", 1)]},
+                                {"a": 1})
+    assert (got["match_by_minute"], got["mismatch_by_minute"]) == ({"16:00": 0}, {"16:00": 1})
+
+
+def test_undetermined_pairs_treat_windows_as_closed() -> None:
+    """구간은 닫힌 구간이다 — 한 필드의 뒤끝과 다른 필드의 앞끝이 같은 초(hi_a == lo_b)면 그 초
+    안의 순서를 모르므로 겹침(선후 판정 불가)이다."""
+    prices = {"A": {"first_all_match": "15:30",
+                    "switch_window": {"last_mismatch": "15:25:01", "all_matched_at": "15:30:05"}},
+              "B": {"first_all_match": "15:35",
+                    "switch_window": {"last_mismatch": "15:30:05", "all_matched_at": "15:35:05"}}}
+    assert P.undetermined_pairs(prices, P.SWITCH) == [("A", "B")]
 
 
 def test_report_marks_leave_windows_that_overlap_within_one_run(tmp_path: Path) -> None:

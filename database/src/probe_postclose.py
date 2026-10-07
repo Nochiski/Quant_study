@@ -422,13 +422,15 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
     기존 키 first_all_match · first_mismatch_after_1600 · minutes · match_by_minute ·
     minute_flows.*.settle_by_ticker · settle_max 의 'HH:MM' 과 개수는 이 회차 기준이다(L-03 수정
     전 보고서는 관측 분 기준). 초 단위는 switch_window · leave_window 에, 칸이 다른데 구간이 겹치는
-    짝은 minute_undetermined 에 싣는다(L-04)."""
+    짝은 minute_undetermined 에 싣는다(L-04). gradable(공식 종가표가 비지 않음, M-5)과
+    no_official_close(공식 종가 없는 고정 종목, I-1)는 md 머리의 판정 근거다."""
     official = krx_official(target, krx_db)
     closes = {tk: close for tk, (close, _vol) in official.items()}
     ledger = ledger_flows(target, kw_db)
     con = _ro(db)
     try:
-        rep: dict[str, Any] = {"target": target, "n_official": len(official)}
+        rep: dict[str, Any] = {"target": target, "n_official": len(official),
+                               "gradable": len(official) > 0}
         # ① 5분 간격 고정 종목 × 거래소(KRX·NXT·SOR) — 가격(ka10060 현재가 · ka10086 종가 ·
         #    ka10095 현재가/종가)을 KRX 공식 종가와, 수급은 각자의 마지막 값과 견준다.
         #    가격은 초 단위 관측 시각을 그대로 넘기고(전환 구간, L-04) 수급은 칸(실행 회차)으로
@@ -455,6 +457,12 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
         rep["minute_undetermined"] = {
             name: [[a, b] for a, b in undetermined_pairs(rep["minute_price"], window)]
             for name, window in (("switch", SWITCH), ("leave", LEAVE))}
+        # 공식 종가 없는 고정 종목 — 값이 한 번이라도 있어 채점 분모에 드는(L-01) 종목만 본다.
+        # KRX 적재는 표(시장)마다 커밋돼 한 표만 비는 날이 있다 — 그 종목이 든 필드는 첫 전 종목
+        # 일치·전환 구간을 낼 수 없다(I-1)
+        priced = {tk for key, per in minute.items() if not key.endswith("flows")
+                  for tk, s in per.items() if any(v is not None for _, v in s)}
+        rep["no_official_close"] = sorted(tk for tk in priced if closes.get(tk) is None)
         rep["minute_flows"] = {}
         for ex, _sfx in EXCHANGES:
             flows = minute.get(f"{ex}.ka10060.flows", {})
@@ -532,21 +540,29 @@ def _window(v: Mapping[str, Any], window: tuple[str, str, str, str]) -> str:
 
 def report_md(rep: Mapping[str, Any]) -> str:
     prices = rep["minute_price"]
-    gradable = rep["n_official"] > 0      # 공식 종가표가 비면 가격 칸은 가리지 않는다(M-5)
+    gradable = rep["gradable"]            # 공식 종가표가 비면 가격 칸은 가리지 않는다(M-5)
     lines = [f"# 장 마감 직후 프로브 채점 — {rep['target']}", "",
              (f"KRX 공식 종가 {rep['n_official']}종목과 대조. " if gradable
               else f"KRX 공식 종가 0종목 — **{UNGRADABLE}**. ")
-             + "원장·모델에 쓰지 않은 시험 기록이다.", "",
-             "## 5분 간격 고정 종목 — 가격", "",
-             "칸은 실행 회차(관측 시각을 5분 격자로 내림)다. 칸마다 종목을 일치·불일치·"
-             "관측 없음(견줄 값이 없음 — 수집 실패·중단, 값 없음, 그 종목 공식 종가 없음)으로 "
-             "나누고 관측 없음은 불일치로 세지 않는다. 첫 전 종목 일치 = 모든 종목이 관측되고 "
-             "모두 일치한 첫 칸. 구간은 초 단위다 — 전환 구간 = 마지막 불일치 관측 ~ 첫 전 종목 "
-             "일치 칸에서 전 종목 일치를 확인한 시각(그 칸의 마지막 일치 관측), 이탈 구간 = 16:00 "
-             "뒤 첫 불일치 칸 앞의 마지막 일치 관측(종목마다 본 것 중 가장 이른 시각) ~ 그 칸의 "
-             "첫 불일치 관측.", "",
-             "| 필드 | 종목 수 | 첫 전 종목 일치 | 16:00 뒤 첫 불일치 | 전환 구간 | 이탈 구간 |",
-             "|---|---|---|---|---|---|"]
+             + "원장·모델에 쓰지 않은 시험 기록이다.", ""]
+    if rep["no_official_close"]:
+        lines += [f"공식 종가 없는 고정 종목: {' · '.join(rep['no_official_close'])} — 이 종목이 "
+                  "든 필드는 첫 전 종목 일치·전환 구간을 낼 수 없다(KRX 적재 확인 뒤 "
+                  f"`grade --date {rep['target']}` 재실행)", ""]
+    lines += ["## 5분 간격 고정 종목 — 가격", "",
+              "칸은 실행 회차(관측 시각을 5분 격자로 내림)다. 칸마다 종목을 일치·불일치·"
+              "관측 없음(견줄 값이 없음 — 수집 실패·중단, 값 없음, 그 종목 공식 종가 없음)으로 "
+              "나누고 관측 없음은 불일치로 세지 않는다. 첫 전 종목 일치 = 모든 종목이 관측되고 "
+              "모두 일치한 첫 칸. 구간은 초 단위다 — 전환 구간 = 첫 전 종목 일치 칸 앞의 마지막 "
+              "불일치 관측 ~ 그 칸에서 전 종목 일치를 확인한 시각(그 칸의 마지막 일치 관측), "
+              "이탈 구간 = 16:00 뒤 첫 불일치 칸 앞의 마지막 일치 관측(종목마다 본 것 중 가장 "
+              "이른 시각 — '관측 전'이면 일치를 한 번도 못 본 종목이 있다) ~ 그 칸의 첫 불일치 "
+              "관측.", "",
+              "같은 거래소·TR 의 두 필드는 한 응답에서 나와 끝점만 맞닿아도 '선후 판정 불가'로 "
+              "표시될 수 있다(보수적 — 시각이 초 단위라 같은 초의 다른 호출과 구별하지 "
+              "않는다).", "",
+              "| 필드 | 종목 수 | 첫 전 종목 일치 | 16:00 뒤 첫 불일치 | 전환 구간 | 이탈 구간 |",
+              "|---|---|---|---|---|---|"]
     for key, v in prices.items():
         cells = ((v["first_all_match"], v["first_mismatch_after_1600"], _window(v, SWITCH),
                   _window(v, LEAVE)) if gradable else ("채점 불가",) * 4)

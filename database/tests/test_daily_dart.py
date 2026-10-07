@@ -689,6 +689,7 @@ def test_run_stops_before_any_call_when_our_budget_is_blown(tmp_path, monkeypatc
     monkeypatch.setattr(dd, "OUR_QUOTA_LIMIT", 4)
     r = dd.run(D, home=home)
     assert r.status is dd.RunStatus.BUDGET_EXCEEDED and r.exit_code == 2 and seen == []
+    assert "late 창" not in dd.report(r)                     # 창을 정하기 전에 끝난 런
 
 
 def test_run_stops_when_kael_production_key_was_used(tmp_path, monkeypatch) -> None:
@@ -899,7 +900,7 @@ def test_second_run_rechecks_fin_when_the_stored_filing_is_older(tmp_path, monke
     assert ("재무 반영 지연 1건" in detail) is (n_lag == 1)
 
 
-def test_year_axis_no_data_passes_the_gate_and_is_recalled_once(tmp_path, monkeypatch) -> None:
+def test_fin_no_data_passes_the_gate_and_is_recalled_once(tmp_path, monkeypatch) -> None:
     """09-22형 — 재무가 연도 축 013(no_data). 013 은 DART 의 확정 답이라 완료 판정은 통과하고
     (N-24 3.2 10-07 수정), 늦은 반영에 대비해 두 번째 런이 그 재무 유닛만 1회 다시 부른다 —
     재무 재확인(3.10)과 같은 성격이라 재호출만 정하고 판정엔 넣지 않는다. 부속 6종의 013(여기선
@@ -921,7 +922,7 @@ def test_year_axis_no_data_passes_the_gate_and_is_recalled_once(tmp_path, monkey
     assert [(c[c.index("--only") + 1], corps) for c, corps in seen] == [("fin", [C1])]
     assert (r.n_missing, r.n_fin_recheck, r.n_nodata_recheck) == (0, 0, 1)
     assert r.status is dd.RunStatus.OK, r.detail
-    assert "연도축 자료없음 재확인 1" in dd.report(r)
+    assert "재무 자료없음 재확인 1" in dd.report(r)
 
 
 @pytest.mark.parametrize("evening", ["fin_lag", "nodata"])

@@ -884,7 +884,7 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
         dry_run: bool = False, limit: int = 5, trading_day: bool = True) -> DartDailyResult:
     """D일 증분 1회. 순서 = 스윕 → 계획 → 다시 부를 유닛 → 종결 해제 → 상세 재호출 → 문서 → 판정.
 
-    다시 부를 유닛은 받지 않은 유닛 + 재무 반영 지연 재확인 + 연도 축 자료없음 재확인뿐이다
+    다시 부를 유닛은 받지 않은 유닛 + 재무 반영 지연 재확인 + 재무 자료없음 재확인뿐이다
     (`recall_targets()`) — 같은 D 의 두 번째 런(06:00)이 저녁에 받은 유닛을 전량 다시 부르지 않는다
     (배포 묶음 3 A-04).
 
@@ -1017,13 +1017,15 @@ def report(result: DartDailyResult) -> str:
     lines = [f"── DART 일일 증분 {result.date} · {result.status.value} (rc {result.exit_code})",
              (f"  공시 {p.n_filings:,}건(상장사 행 {p.n_rows:,}) · late={p.n_late:,} · "
               f"분류 {p.kind_counts}"),
-             f"  {_late_text(result.late_since, result.late_source)}",
+             # 창을 정하기 전에 끝난 런(예산 초과 조기 반환)은 이 줄을 남기지 않는다
+             *([f"  {_late_text(result.late_since, result.late_source)}"]
+               if result.late_source else []),
              (f"  유닛 {len(p.units):,} · 콜 추정 {result.n_calls_est:,} · "
               f"해제 {result.n_unlocked:,} · 실제 콜 {result.n_calls:,}"),
              (f"  다시 부른 유닛 "
               f"{result.n_missing + result.n_fin_recheck + result.n_nodata_recheck:,} "
               f"(받지 않음 {result.n_missing:,} · 재무 재확인 {result.n_fin_recheck:,} · "
-              f"연도축 자료없음 재확인 {result.n_nodata_recheck:,})"),
+              f"재무 자료없음 재확인 {result.n_nodata_recheck:,})"),
              f"  예산 {result.budget.describe()}"]
     if result.fin_lagged:
         # 재확인 뒤에도 계기 공시보다 옛 판 — 판정은 통과시키고 기록만 한다(N-24 3.10)

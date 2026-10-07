@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import itertools
 import json
 import os
 import sqlite3
@@ -52,6 +53,16 @@ BATCH = 100              # ka10095 한 콜 종목 수(시험값 — 응답 행 �
 # 분 단위 조회와 묶음 조회는 셋 다(10-06 사용자 요청), 후보 전량 ka10060 은 운영 원천인 KRX 만.
 EXCHANGES = (("KRX", ""), ("NXT", "_NX"), ("SOR", "_AL"))
 EMPTY = ""
+# minute 은 크론이 5분마다 :00 에 띄운다 — 관측 시각을 이 간격으로 내리면 그 실행 회차(칸)다
+SLOT_MINUTES = 5
+# 칸 안 종목 상태 — 일치 · 불일치 · 관측 없음(그 칸에 견줄 값이 없다)
+MATCH, MISMATCH, MISSING = "match", "mismatch", "missing"
+UNGRADABLE = "공식 종가 없음 — 채점 불가"
+UNDETERMINED = "같은 회차 안 호출 순서 차이 — 선후 판정 불가"
+# 가격 구간 두 가지 — (구간 키, 기준 칸 키, 앞끝, 뒤끝). 전환 = 공식 종가가 반영되는 때,
+# 이탈 = 16:00 뒤 애프터마켓 체결로 공식 종가에서 벗어나는 때(L-04)
+SWITCH = ("switch_window", "first_all_match", "last_mismatch", "all_matched_at")
+LEAVE = ("leave_window", "first_mismatch_after_1600", "last_match", "first_mismatch")
 
 
 def _spec(api_id: str, url: str, rows_key: str,
@@ -135,6 +146,92 @@ def settle_time(series: Sequence[tuple[str, object]]) -> str | None:
             break
         first = ts
     return first
+
+
+def slot_of(hms: str) -> str:
+    """관측 시각 'HH:MM:SS' → 칸 'HH:MM' — 5분 격자로 내린 실행 회차(크론이 :00 에 띄운다).
+    응답이 늦어 회차가 분 경계를 넘어도(15:45:59 → 15:46:01) 같은 칸에 남는다(L-03)."""
+    minute = int(hms[3:5])
+    return f"{hms[:3]}{minute - minute % SLOT_MINUTES:02d}"
+
+
+def close_state(v: int | None, close: int | None) -> str:
+    """값을 KRX 공식 종가와 견준 상태. 둘 다 있어야 일치·불일치를 가리고, 하나라도 없으면 견줄
+    값이 없어 MISSING 이다 — 공식 종가가 없는 종목의 빈 값(None == None)은 일치가 아니다(L-05)."""
+    if v is None or close is None:
+        return MISSING
+    return MATCH if v == close else MISMATCH
+
+
+def grade_minute_prices(per: Mapping[str, Sequence[tuple[str, int | None]]],
+                        closes: Mapping[str, int | None]) -> dict[str, Any]:
+    """5분 간격 가격 한 필드(거래소·TR·필드) 채점 — `per` 는 종목 → [(관측 시각 HH:MM:SS, 값)]
+    오름차순.
+
+    칸(실행 회차, `slot_of`)마다 종목 상태를 일치·불일치·관측 없음으로 나눈다(L-03). 관측 없음은
+    그 칸에 견줄 값이 없다는 뜻이고(수집 실패·중단으로 행이 없음, T 행·값 없음, 공식 종가 없음)
+    불일치로 세지 않는다. 한 칸에 관측이 여럿이면 하나라도 불일치면 불일치다.
+    - minutes · {match,mismatch,missing}_by_minute: 칸 수 · 칸별 상태별 종목 수(키 이름의
+      minute 은 minute 회차다)
+    - first_all_match: 모든 종목이 관측되고 모두 일치한 첫 칸
+    - first_mismatch_after_1600: 16:00 이후 실제 불일치가 처음 나온 칸
+    - switch_window: 전환 구간(초, L-04) — 첫 전 종목 일치 칸 앞의 마지막 불일치 관측(last_mismatch)
+      ~ 그 칸에서 전 종목 일치를 확인한 시각(all_matched_at, 그 칸의 마지막 일치 관측). 공식 종가
+      반영은 이 사이에 있다. 앞에 불일치가 없으면(첫 관측부터 일치) last_mismatch 는 None
+    - leave_window: 이탈 구간(초, L-04) — 16:00 뒤 첫 불일치 칸 앞(16:00 이전 포함)의 마지막 일치
+      관측 ~ 그 칸의 첫 불일치 관측. 애프터마켓 체결로 처음 벗어난 때는 이 사이에 있다. 어느
+      종목이 먼저 벗어났는지 모르므로 앞끝은 종목마다 본 마지막 일치 중 가장 이른 시각이고,
+      일치를 한 번도 못 본 종목이 있으면 last_match 는 None
+    """
+    # 이 필드(거래소·TR·필드)에서 값이 한 번도 없던 종목(T 행 없음·빈 값, 예: NXT 미상장)은
+    # 분모에서 뺀다(L-01)
+    graded = {tk: [(hms, close_state(v, closes.get(tk))) for hms, v in s]
+              for tk, s in per.items() if any(v is not None for _, v in s)}
+    cells: dict[str, dict[str, str]] = {}            # 칸 → 종목 → 상태(없는 종목은 관측 없음)
+    for tk, obs in graded.items():
+        for hms, st in obs:
+            cell = cells.setdefault(slot_of(hms), {})
+            if st != MISSING and cell.get(tk) != MISMATCH:    # 불일치 > 일치 > 관측 없음
+                cell[tk] = st
+    counts = {slot: {st: sum(1 for tk in graded if cells[slot].get(tk, MISSING) == st)
+                     for st in (MATCH, MISMATCH, MISSING)} for slot in sorted(cells)}
+    n = len(graded)
+    first_all = next((slot for slot, c in counts.items() if c[MATCH] == n), None)
+    first_diff = next((slot for slot, c in counts.items() if slot >= "16:00" and c[MISMATCH]),
+                      None)
+    flat = [(slot_of(hms), hms, st) for obs in graded.values() for hms, st in obs]
+    switch = leave = None
+    if first_all is not None:
+        switch = {"last_mismatch": max((hms for slot, hms, st in flat
+                                        if st == MISMATCH and slot < first_all), default=None),
+                  "all_matched_at": max(hms for slot, hms, st in flat
+                                        if st == MATCH and slot == first_all)}
+    if first_diff is not None:
+        # 종목마다 그 칸 앞에서 마지막으로 일치를 본 시각 — 못 봤으면 ''(앞끝을 모른다)
+        last = [max((hms for hms, st in obs if st == MATCH and slot_of(hms) < first_diff),
+                    default="") for obs in graded.values()]
+        leave = {"last_match": min(last) or None,
+                 "first_mismatch": min(hms for slot, hms, st in flat
+                                       if st == MISMATCH and slot == first_diff)}
+    return {"n_tickers": n, "minutes": len(counts), "first_all_match": first_all,
+            "first_mismatch_after_1600": first_diff,
+            "match_by_minute": {slot: c[MATCH] for slot, c in counts.items()},
+            "mismatch_by_minute": {slot: c[MISMATCH] for slot, c in counts.items()},
+            "missing_by_minute": {slot: c[MISSING] for slot, c in counts.items()},
+            "switch_window": switch, "leave_window": leave}
+
+
+def undetermined_pairs(prices: Mapping[str, Mapping[str, Any]],
+                       window: tuple[str, str, str, str]) -> list[tuple[str, str]]:
+    """기준 칸은 다른데 구간(`SWITCH` 전환 · `LEAVE` 이탈)이 겹치는 필드 쌍 — 표의 칸 차이가 선후를
+    뜻하지 않는다(L-04). 시각이 초 단위로 잘려 있어 닫힌 구간으로 견준다(같은 초끼리는 순서를
+    모른다). 기준 칸이 같은 필드끼리는 구간이 늘 겹친다(앞끝은 그 칸 앞, 뒤끝은 그 칸 안)."""
+    win, slot, lo, hi = window
+    # 필드 → (기준 칸, 앞끝, 뒤끝). 앞끝이 없으면 관측 전부터 — '' 는 어느 시각보다 앞선다
+    spans = {key: (v[slot], v[win][lo] or "", v[win][hi]) for key, v in prices.items() if v[win]}
+    return [(a, b) for (a, (slot_a, lo_a, hi_a)), (b, (slot_b, lo_b, hi_b))
+            in itertools.combinations(spans.items(), 2)
+            if slot_a != slot_b and lo_a <= hi_b and lo_b <= hi_a]
 
 
 # ── 저장 ─────────────────────────────────────────────────────────────────────
@@ -319,50 +416,45 @@ def _first(rows: Any) -> dict[str, Any] | None:
 
 
 def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str, Any]:
+    """T 의 관측을 KRX 공식 종가·원장 수급과 대조한 보고서 — `cmd_grade` 가 json·md 로 쓴다.
+
+    minute 의 시각 축은 관측 분이 아니라 실행 회차(칸, `slot_of` — 5분 격자 'HH:MM')다(L-03).
+    기존 키 first_all_match · first_mismatch_after_1600 · minutes · match_by_minute ·
+    minute_flows.*.settle_by_ticker · settle_max 의 'HH:MM' 과 개수는 이 회차 기준이다(L-03 수정
+    전 보고서는 관측 분 기준). 초 단위는 switch_window · leave_window 에, 칸이 다른데 구간이 겹치는
+    짝은 minute_undetermined 에 싣는다(L-04)."""
     official = krx_official(target, krx_db)
+    closes = {tk: close for tk, (close, _vol) in official.items()}
     ledger = ledger_flows(target, kw_db)
     con = _ro(db)
     try:
         rep: dict[str, Any] = {"target": target, "n_official": len(official)}
         # ① 5분 간격 고정 종목 × 거래소(KRX·NXT·SOR) — 가격(ka10060 현재가 · ka10086 종가 ·
-        #    ka10095 현재가/종가)을 KRX 공식 종가와, 수급은 각자의 마지막 값과 견준다
+        #    ka10095 현재가/종가)을 KRX 공식 종가와, 수급은 각자의 마지막 값과 견준다.
+        #    가격은 초 단위 관측 시각을 그대로 넘기고(전환 구간, L-04) 수급은 칸(실행 회차)으로
+        #    묶는다(L-03)
         minute: dict[str, dict[str, list[tuple[str, Any]]]] = {}
         for api_id, field in (("ka10060", "cur_prc"), ("ka10086", "close_pric")):
             for ts, key, rows in _obs(con, target, "minute", api_id):
                 tk, ex = split_code(key)
                 r = _first(rows)
                 minute.setdefault(f"{ex}.{api_id}.{field}", {}).setdefault(tk, []).append(
-                    (ts[11:16], None if r is None else price(r.get(field))))
+                    (ts[11:19], None if r is None else price(r.get(field))))
                 if api_id == "ka10060" and r is not None:
                     minute.setdefault(f"{ex}.ka10060.flows", {}).setdefault(tk, []).append(
-                        (ts[11:16], tuple(str(r.get(k)) for k in FLOW_KEYS)))
+                        (slot_of(ts[11:19]), tuple(str(r.get(k)) for k in FLOW_KEYS)))
         for field in ("cur_prc", "close_pric"):
             for ts, key, r in _obs(con, target, "minute", "ka10095"):
                 if isinstance(r, dict):
                     tk, ex = split_code(key)
                     minute.setdefault(f"{ex}.ka10095.{field}", {}).setdefault(tk, []).append(
-                        (ts[11:16], price(r.get(field))))
-        price_rep: dict[str, Any] = {}
-        for key, per in minute.items():
-            if key.endswith("flows"):
-                continue
-            # 이 거래소·TR 에서 값이 한 번도 없던 종목(T 행 없음·빈 값, 예: NXT 미상장)은
-            # 분모에서 뺀다(L-01)
-            per = {tk: s for tk, s in per.items() if any(v is not None for _, v in s)}
-            times = sorted({t for s in per.values() for t, _ in s})
-            # 공식 종가가 없으면 일치로 세지 않는다 — None == None 은 일치가 아니다(L-05)
-            match = {t: sum(1 for tk, s in per.items() for tt, v in s
-                            if tt == t and (o := official.get(tk, (None,))[0]) is not None
-                            and o == v) for t in times}
-            n = len(per)
-            all_ok = [t for t in times if match[t] == n]
-            after_close = [t for t in times if t >= "15:31"]
-            first_diff = next((t for t in after_close if t >= "16:00" and match[t] < n), None)
-            price_rep[key] = {"n_tickers": n, "minutes": len(times),
-                              "first_all_match": all_ok[0] if all_ok else None,
-                              "first_mismatch_after_1600": first_diff,
-                              "match_by_minute": match}
-        rep["minute_price"] = price_rep
+                        (ts[11:19], price(r.get(field))))
+        rep["minute_price"] = {key: grade_minute_prices(per, closes)
+                               for key, per in minute.items() if not key.endswith("flows")}
+        # md 목록과 같은 판정 — 기준 칸이 다른데 구간이 겹쳐 선후를 가릴 수 없는 필드 짝(L-04)
+        rep["minute_undetermined"] = {
+            name: [[a, b] for a, b in undetermined_pairs(rep["minute_price"], window)]
+            for name, window in (("switch", SWITCH), ("leave", LEAVE))}
         rep["minute_flows"] = {}
         for ex, _sfx in EXCHANGES:
             flows = minute.get(f"{ex}.ka10060.flows", {})
@@ -392,11 +484,9 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
                 firsts = {tk: _first(rows) for _, tk, rows in obs}
                 got = {tk: r for tk, r in firsts.items() if r is not None}
                 entry["n_t_rows"] = len(got)
-                # 공식 종가가 없으면 일치로 세지 않는다 — None == None 은 일치가 아니다(L-05)
                 entry["close_match"] = sum(
                     1 for tk, r in got.items()
-                    if (o := official.get(tk, (None,))[0]) is not None
-                    and o == price(r.get("cur_prc")))
+                    if close_state(price(r.get("cur_prc")), closes.get(tk)) == MATCH)
                 entry["flows"] = {tk: tuple(str(r.get(k)) for k in FLOW_KEYS)
                                   for tk, r in got.items()}
             else:
@@ -410,8 +500,7 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
                         1 for r in rows.values() if price(r.get(field)) is not None)
                     entry[f"{field}_match_close"] = sum(
                         1 for tk, r in rows.items()
-                        if (o := official.get(tk, (None,))[0]) is not None
-                        and o == price(r.get(field)))
+                        if close_state(price(r.get(field)), closes.get(tk)) == MATCH)
             sweeps[f"{run}/{base}/{ex}"] = entry
         flow_runs = [k for k in sweeps if k.endswith("/ka10060/KRX")]
         for a, b in zip(flow_runs, flow_runs[1:], strict=False):
@@ -434,18 +523,49 @@ def grade(target: str, *, db: Path = DB, krx_db: Path, kw_db: Path) -> dict[str,
         con.close()
 
 
+def _window(v: Mapping[str, Any], window: tuple[str, str, str, str]) -> str:
+    """구간(`SWITCH` · `LEAVE`) 표기 — 앞끝이 없으면 '관측 전'부터."""
+    win, _slot, lo, hi = window
+    w = v[win]
+    return "None" if w is None else f"{w[lo] or '관측 전'} ~ {w[hi]}"
+
+
 def report_md(rep: Mapping[str, Any]) -> str:
+    prices = rep["minute_price"]
+    gradable = rep["n_official"] > 0      # 공식 종가표가 비면 가격 칸은 가리지 않는다(M-5)
     lines = [f"# 장 마감 직후 프로브 채점 — {rep['target']}", "",
-             f"KRX 공식 종가 {rep['n_official']}종목과 대조. "
-             "원장·모델에 쓰지 않은 시험 기록이다.", "",
-             "## 5분 간격 고정 종목 — 가격", "", "| 필드 | 첫 전 종목 일치 | 16:00 뒤 첫 불일치 |",
-             "|---|---|---|"]
-    for key, v in rep["minute_price"].items():
-        lines.append(f"| {key} | {v['first_all_match']} | {v['first_mismatch_after_1600']} |")
+             (f"KRX 공식 종가 {rep['n_official']}종목과 대조. " if gradable
+              else f"KRX 공식 종가 0종목 — **{UNGRADABLE}**. ")
+             + "원장·모델에 쓰지 않은 시험 기록이다.", "",
+             "## 5분 간격 고정 종목 — 가격", "",
+             "칸은 실행 회차(관측 시각을 5분 격자로 내림)다. 칸마다 종목을 일치·불일치·"
+             "관측 없음(견줄 값이 없음 — 수집 실패·중단, 값 없음, 그 종목 공식 종가 없음)으로 "
+             "나누고 관측 없음은 불일치로 세지 않는다. 첫 전 종목 일치 = 모든 종목이 관측되고 "
+             "모두 일치한 첫 칸. 구간은 초 단위다 — 전환 구간 = 마지막 불일치 관측 ~ 첫 전 종목 "
+             "일치 칸에서 전 종목 일치를 확인한 시각(그 칸의 마지막 일치 관측), 이탈 구간 = 16:00 "
+             "뒤 첫 불일치 칸 앞의 마지막 일치 관측(종목마다 본 것 중 가장 이른 시각) ~ 그 칸의 "
+             "첫 불일치 관측.", "",
+             "| 필드 | 종목 수 | 첫 전 종목 일치 | 16:00 뒤 첫 불일치 | 전환 구간 | 이탈 구간 |",
+             "|---|---|---|---|---|---|"]
+    for key, v in prices.items():
+        cells = ((v["first_all_match"], v["first_mismatch_after_1600"], _window(v, SWITCH),
+                  _window(v, LEAVE)) if gradable else ("채점 불가",) * 4)
+        lines.append(f"| {key} | {v['n_tickers']} | {' | '.join(map(str, cells))} |")
+    if gradable:
+        for name, window, title, col in (
+                ("switch", SWITCH, "전환 구간이 겹치는 짝 — 공식 종가 반영", "첫 전 종목 일치"),
+                ("leave", LEAVE, "이탈 구간이 겹치는 짝 — 16:00 뒤 애프터마켓",
+                 "16:00 뒤 첫 불일치")):
+            lines += ["", f"### {title}", "",
+                      f"{col} 칸이 같은 필드끼리는 늘 겹친다. 칸이 다른데 겹치는 짝"
+                      "(표의 칸 차이가 선후가 아니다):"]
+            lines += [f"- {a}({prices[a][window[1]]}, {_window(prices[a], window)}) ↔ "
+                      f"{b}({prices[b][window[1]]}, {_window(prices[b], window)}) — "
+                      f"{UNDETERMINED}" for a, b in rep["minute_undetermined"][name]] or ["- 없음"]
     lines += ["", "## 5분 간격 고정 종목 — 수급(거래소별)", ""]
     for ex, mf in rep["minute_flows"].items():
-        lines += [f"- {ex}: 정규장 확정(이후 끝까지 같은 값) 가장 늦은 종목 시각 "
-                  f"**{mf['settle_max']}** · 마지막 분 값 = 원장 21:05(KRX) 값 "
+        lines += [f"- {ex}: 정규장 확정(이후 끝까지 같은 값)이 가장 늦은 종목의 회차 "
+                  f"**{mf['settle_max']}** · 마지막 회차 값 = 원장 21:05(KRX) 값 "
                   f"{mf['same_as_ledger']}/{mf['n_with_ledger']}",
                   f"  - 종목별: {mf['settle_by_ticker']}"]
     lines += ["", "## 후보 100종목", "", "```json",

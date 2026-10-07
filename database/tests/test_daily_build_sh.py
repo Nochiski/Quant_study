@@ -75,8 +75,12 @@ def _run(home: Path, *, flock_stub: bool, n_rc: int = 1, wait_rc: int = 0,
          held: bool = False, args: tuple[str, ...] = ("--date", "20261006", "--dry-run")) -> Run:
     root = home / "quant-ledger"
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"),
-               QL_RAW_LOCK_FILE=str(home / "raw.lock"))
-    for k in ("QL_RAW_LOCK_HELD", "QL_BUILD_LOCK_HELD", "QL_SKIP_KW", "QL_FORCE"):
+               QL_RAW_LOCK_FILE=str(home / "raw.lock"),
+               # daily_build 는 확정 빌드 앞에서 QL_BUILD_LOCK_HELD 를 비운다(빌드 락은
+               # build_chain·model_daily 가 직접 잡는다). 이 파일의 경로(dry-run·가드 건너뜀)는
+               # 거기까지 가지 않고, 가더라도 락 파일은 임시 경로다
+               QL_BUILD_LOCK_HELD="1", QL_BUILD_LOCK_FILE=str(home / "build.lock"))
+    for k in ("QL_RAW_LOCK_HELD", "QL_SKIP_KW", "QL_FORCE"):
         env.pop(k, None)
     if held:
         env["QL_RAW_LOCK_HELD"] = "1"

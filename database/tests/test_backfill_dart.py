@@ -80,6 +80,16 @@ def test_network_exception_gives_up_after_retry_max(monkeypatch: pytest.MonkeyPa
     assert log == ["exc/resp_NoneType"] * (bf.RETRY_MAX + 1)
 
 
+def test_server_error_statuses_are_retried_until_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    """800·900(DART 서버 일시 오류)은 지금처럼 재시도한다 — 고친 술어의 다른 반쪽(v == "retry")."""
+    replies: list[object] = [{"status": "800"}, {"status": "900"}, _OK]
+    (rows, verdict, status), n_sent, log, waits = _call(monkeypatch, replies)
+    assert n_sent == 3
+    assert (verdict, status, len(rows)) == ("ok", "000", 1)
+    assert log == ["800", "900", "000"]
+    assert waits == [bf.PACE, bf.RETRY_BASE, bf.PACE, bf.RETRY_BASE * 2, bf.PACE]
+
+
 @pytest.mark.parametrize("reply", [{"status": "013"}, {"status": "100"}, {"status": 0}])
 def test_other_statuses_are_not_retried(monkeypatch: pytest.MonkeyPatch, reply: dict) -> None:
     """예외가 아닌 응답은 지금처럼 한 번에 끝난다(무자료·요청 오류·문자열이 아닌 status)."""

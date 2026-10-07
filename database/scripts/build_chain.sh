@@ -30,6 +30,13 @@ while [ $# -gt 0 ]; do
 done
 D="${D:-$(TZ=Asia/Seoul date +%Y%m%d)}"
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
+# 아직 오지 않은 D(오타)로 판이 서면 'D 가 앞설 때만 갱신'(N-24 3.8) 때문에 최신판 포인터·완료 신호가 그 날짜에
+# 묶인다. 인자 오류라 rc 2(알 수 없는 basis·인자와 같다). 저녁 잠정판은 D = 오늘, 아침 확정판은 D = 전 거래일이다.
+TODAY_KST=$(TZ=Asia/Seoul date +%Y%m%d)
+if [[ "$D" > "$TODAY_KST" ]]; then
+  echo "D=$D 가 오늘(KST $TODAY_KST)보다 뒤다 — 아직 오지 않은 날의 판은 짓지 않는다(--date 오타?)" >&2
+  exit 2
+fi
 
 if [ -n "$DRY" ]; then
   # 계획만 출력한다 — 락·스냅샷·빌드·알림 전부 없음 (결정 V2-7 의 유일한 예외)
@@ -171,8 +178,8 @@ except (OSError, ValueError, KeyError, TypeError):
     cur = ""
 # 다음 D 를 지은 뒤 놓친 옛 D 를 손으로 다시 지어도 최신판 포인터가 뒤로 가지 않게 한다(N-24 3.8).
 # 포인터가 없거나 그 D 를 읽을 수 없으면 지금처럼 쓴다. D 는 YYYYMMDD 라 문자열 순서가 날짜 순서다.
-not_older = not cur.isdigit() or date >= cur
-if h_stage == "ok" and h_equity == "ok" and not_older:
+older = cur.isdigit() and date < cur      # ready_step 과 같은 판정(같은 모양)
+if h_stage == "ok" and h_equity == "ok" and not older:
     # latest_* 는 소비자(Kael-alpha)가 읽는 포인터 — 실패 판으로 덮으면 health 를 안 읽는 소비자에게
     # 어제 판이 오늘 판처럼 보인다. 실패는 history 에만 남기고 latest_* 는 마지막 성공 판을 유지한다.
     latest.write_text(text, encoding="utf-8")
@@ -219,7 +226,8 @@ for root in (Path("data/stage"), Path("data/equity")):
     except (OSError, ValueError, KeyError, TypeError):
         cur = ""
     # basis 공용 파일이라 D 만 본다. 파일이 없거나 D 를 읽을 수 없으면(date 없는 옛 형식 포함) 지금처럼 쓴다.
-    if cur.isdigit() and date < cur:
+    older = cur.isdigit() and date < cur      # deliver_step 과 같은 판정(같은 모양)
+    if older:
         print(f"  완료 신호 유지 {ready} (더 새 D={cur} — 옛 D={date} 재빌드는 완료 신호를 되돌리지 않는다)")
         continue
     payload = {"date": date, "basis": basis, "generated_at_utc": stamp,

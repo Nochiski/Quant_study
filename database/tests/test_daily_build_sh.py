@@ -22,7 +22,16 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "daily_build.sh"
 STEPS = ["daily.kw_daily", "daily.kw_daily", "daily.ledger_health"]   # dry-run 원장 단계
 
+# 대역 python — `-m` 모듈은 calls.txt 에 적는다. 크론 경로(인자 없음)의 `-c` 는 D 계산에 20261006,
+# '이미 확정판 있음' 가드에 rc 0(있음 → 건너뜀)으로 답해 KRX 단계 없이 끝나게 한다.
 _PY = """#!/usr/bin/env bash
+if [ "$1" = "-c" ]; then
+  case "$2" in
+    *_morning.json*) exit 0 ;;
+    *prev_trading_day*) echo 20261006 ;;
+  esac
+  exit 0
+fi
 if [ "$1" = "-m" ]; then echo "$2" >> "$QL_HOME/calls.txt"; fi
 exit 0
 """
@@ -40,7 +49,7 @@ class Run(NamedTuple):
     out: str            # stdout + stderr — 대기 시작·끝이 실시간으로 나온다(크론에선 cron 로그)
     flock: list[str]    # 대역 flock 호출 인자
     calls: list[str]    # 대역 python 이 받은 모듈(+ 실물 테스트의 holder 표식)
-    notify: str
+    notify: str         # 대역 notify — 줄마다 "등급|제목|본문"
     log: str            # 체인 로그 logs/daily_build_<KST 오늘>.log
 
 
@@ -51,7 +60,7 @@ def _root(home: Path) -> Path:
     (home / "tmp").mkdir(exist_ok=True)
     shutil.copy(SCRIPT, root / "scripts" / "daily_build.sh")
     stubs = {".venv/bin/python": _PY,
-             "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2" >> notify.txt\n'}
+             "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n'}
     for rel, body in stubs.items():
         p = root / rel
         p.write_text(body, encoding="utf-8")
@@ -60,7 +69,7 @@ def _root(home: Path) -> Path:
 
 
 def _run(home: Path, *, flock_stub: bool, n_rc: int = 1, wait_rc: int = 0,
-         held: bool = False) -> Run:
+         held: bool = False, args: tuple[str, ...] = ("--date", "20261006", "--dry-run")) -> Run:
     root = home / "quant-ledger"
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"),
                QL_RAW_LOCK_FILE=str(home / "raw.lock"))
@@ -75,8 +84,7 @@ def _run(home: Path, *, flock_stub: bool, n_rc: int = 1, wait_rc: int = 0,
         (fake / "flock").chmod(0o755)
         env.update(PATH=f"{fake}:{env['PATH']}", FLOCK_LOG=str(home / "flock.txt"),
                    FLOCK_N_RC=str(n_rc), FLOCK_WAIT_RC=str(wait_rc))
-    p = subprocess.run(["bash", str(root / "scripts" / "daily_build.sh"),
-                        "--date", "20261006", "--dry-run"],
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_build.sh"), *args],
                        env=env, capture_output=True, text=True, timeout=60, check=False)
 
     def read(path: Path) -> str:
@@ -100,8 +108,25 @@ def test_waits_for_held_raw_lock_then_continues(tmp_path: Path) -> None:
     assert r.calls == STEPS
     assert "원장 락 대기 시작" in r.out and "원장 락 대기 끝" in r.out
     assert "원장 락 대기" in r.log
-    assert "락 실패" not in r.notify
+    assert r.notify == ""                     # dry-run 은 다른 알림처럼 대기 알림도 남기지 않는다
     assert (tmp_path / "raw.lock").exists()   # QL_RAW_LOCK_FILE 경로를 썼다
+
+
+def test_wait_is_recorded_in_notify_log(tmp_path: Path) -> None:
+    """I-1 — 대기 시작이 notify 기록에 1건 남는다(기록만, 외부 발송 아님).
+
+    10:30 워치독 crit 를 '미실행'이 아니라 '앞 원장 작업 대기'로 읽게 하고, 손으로 `--date` 를
+    또 돌려 대기열에 붙은 실행이 체인을 한 번 더 도는 일을 막는다. 크론 경로(인자 없음)로 돈다.
+    """
+    _root(tmp_path)
+    r = _run(tmp_path, flock_stub=True, args=())
+    assert r.rc == 0, r.out
+    assert r.flock == ["-n 9", "9"]
+    waits = [ln for ln in r.notify.splitlines() if ln.startswith("info|daily_build 원장 락 대기|")]
+    assert len(waits) == 1, r.notify
+    assert "손으로 --date" in waits[0]
+    # 대기 뒤 이어서 돌았다 — 대역 가드가 '이미 확정판 있음'이라 그다음은 건너뜀
+    assert "건너뜀(D=20261006 확정판 완료)" in r.notify
 
 
 def test_free_raw_lock_runs_without_waiting(tmp_path: Path) -> None:

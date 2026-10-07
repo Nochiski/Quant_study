@@ -5,10 +5,26 @@
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
 #   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
 #         QL_FORCE=1 이면 "이미 확정판 있음" 가드를 무시하고 다시 돈다(--date 명시도 같은 효과)
+#   원장 락: 다른 원장 작업(06:00 수집 체인 등)이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다 — 시간 한도 없음
+#         (N-23 ①, P9). 대기 시작은 실시간 출력과 notify 기록(dry-run 제외)에, 대기 시간은 체인 로그에 남고,
+#         늦어짐은 10:30 워치독이 알린다. 원장 락 래퍼(`flock <원장 락> daily_build.sh …`) 안에서 부르지
+#         않는다 — 자기 자신을 기다려 멈춘다. 부모가 이미 쥐었으면 QL_RAW_LOCK_HELD=1 로 물려준다.
+#         QL_RAW_LOCK_FILE 은 테스트 전용(락 파일 경로 덮어쓰기)이다.
 set -uo pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
+# 인자는 락보다 먼저 읽는다 — 락 대기 알림이 dry-run 인지 알아야 한다
+DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --date) DATE_ARG="$2"; shift 2 ;;
+    --dry-run) DRY="--dry-run"; shift ;;
+    --limit) LIMIT="--limit $2"; shift 2 ;;
+    --no-build) NOBUILD=1; shift ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
 LOCK="${QL_RAW_LOCK_FILE:-/tmp/quant_ledger_raw.lock}"   # 테스트가 운영 락을 잡지 않게 할 때만 바꾼다
 LOCK_WAITED=""     # 원장 락을 기다렸으면 "N초 (시작 ~ 끝)" — 체인 로그에도 남긴다
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
@@ -19,6 +35,10 @@ if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
     # 시간 한도·재시도 시각은 두지 않는다 — 늦어짐·멈춤 경보는 10:30 워치독 몫이다(감시이지 제어가 아니다).
     W0=$(date +%s); W0_KST=$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')
     echo "[$W0_KST] daily_build 원장 락 대기 시작 — 다른 원장 작업이 $LOCK 을 쥐고 있다(끝나면 이어서 돈다)"
+    # 기록만(notify.sh → logs/notify.log). 10:30 워치독 crit 를 '미실행'이 아니라 '대기'로 읽게 하고,
+    # 손으로 --date 를 또 돌려 대기열에 붙이는 일(그러면 체인을 한 번 더 돈다)을 막는다.
+    [ -z "$DRY" ] && scripts/notify.sh info "daily_build 원장 락 대기" \
+      "시작 $W0_KST — 다른 원장 작업(06:00 수집 등)이 $LOCK 을 쥐고 있다. 끝나면 이어서 돈다. 손으로 --date 를 돌리기 전에 확인"
     if ! flock 9; then
       # 대기형 flock 이 실패하면 락을 못 잡은 것이다 — 락 없이 원장을 쓰지 않는다
       scripts/notify.sh warn "daily_build 락 실패" "$LOCK 을 기다리다 flock 이 실패했다 — 이번 실행 건너뜀"
@@ -30,16 +50,6 @@ if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
   fi
   export QL_RAW_LOCK_HELD=1
 fi
-DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --date) DATE_ARG="$2"; shift 2 ;;
-    --dry-run) DRY="--dry-run"; shift ;;
-    --limit) LIMIT="--limit $2"; shift 2 ;;
-    --no-build) NOBUILD=1; shift ;;
-    *) echo "unknown arg: $1" >&2; exit 2 ;;
-  esac
-done
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_build_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)

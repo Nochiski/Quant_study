@@ -8,6 +8,7 @@ HOME 을 임시 폴더로 바꿔 `~/quant-ledger` 에 대역 `.venv/bin/python`�
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import shutil
@@ -18,9 +19,11 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "build_chain.sh"
+KST = dt.timezone(dt.timedelta(hours=9))
 
 # 대역 python — `$PY - 인자 <<'PY'` heredoc 중 스냅샷은 가짜 id 를 쓰고 GC 는 건너뛴다.
-# 나머지 heredoc(인계·완료 신호)은 진짜 python(REAL_PY)으로, `-m` 모듈은 rc 0 으로 끝낸다.
+# 나머지 heredoc(인계·완료 신호)은 진짜 python(REAL_PY)으로, `-m` 모듈은 rc 0 으로 끝낸다
+# (stage.health 만 RC_STAGE_HEALTH 로 rc 를 바꿀 수 있다).
 _PY = """#!/usr/bin/env bash
 if [ "$1" = "-" ]; then
   code=$(cat)
@@ -31,6 +34,7 @@ if [ "$1" = "-" ]; then
   shift
   exec "$REAL_PY" - "$@" <<<"$code"
 fi
+if [ "$1" = "-m" ] && [ "$2" = "stage.health" ]; then exit "${RC_STAGE_HEALTH:-0}"; fi
 exit 0
 """
 
@@ -44,7 +48,7 @@ def _root(home: Path) -> Path:
         ".venv/bin/python": _PY,
         "scripts/run_stage_all.sh": ("#!/usr/bin/env bash\nmkdir -p logs/stage_all && "
                                      "echo stage > logs/stage_all/summary.tsv\n"),
-        "scripts/equity_rebuild_all.sh": "#!/usr/bin/env bash\nexit 0\n",
+        "scripts/equity_rebuild_all.sh": '#!/usr/bin/env bash\nexit "${RC_EQUITY:-0}"\n',
         "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2" >> notify.txt\n',
     }
     for rel, body in stubs.items():
@@ -54,14 +58,20 @@ def _root(home: Path) -> Path:
     return root
 
 
-def _build(home: Path, d: str, snap: str) -> None:
-    """확정판(morning) D 를 짓는다. 스냅샷 id 로 어느 실행의 판인지 가린다."""
+def _chain(home: Path, d: str, snap: str, basis: str = "morning",
+           **rcs: str) -> subprocess.CompletedProcess[str]:
+    """build_chain 한 번. 스냅샷 id 로 어느 실행의 판인지 가린다. rcs 는 대역 rc(RC_*)."""
     (home / "tmp").mkdir(exist_ok=True)
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"), QL_BUILD_LOCK_HELD="1",
-               REAL_PY=sys.executable, FAKE_SNAP=snap)
-    p = subprocess.run(["bash", str(home / "quant-ledger" / "scripts" / "build_chain.sh"),
-                        "morning", "--date", d],
-                       env=env, capture_output=True, text=True, timeout=60, check=False)
+               REAL_PY=sys.executable, FAKE_SNAP=snap, **rcs)
+    return subprocess.run(["bash", str(home / "quant-ledger" / "scripts" / "build_chain.sh"),
+                           basis, "--date", d],
+                          env=env, capture_output=True, text=True, timeout=60, check=False)
+
+
+def _build(home: Path, d: str, snap: str, basis: str = "morning") -> None:
+    """판 D 를 짓고 성공(rc 0)을 확인한다."""
+    p = _chain(home, d, snap, basis)
     assert p.returncode == 0, p.stdout + p.stderr
 
 
@@ -162,3 +172,48 @@ def test_unreadable_ready_signal_is_rewritten(tmp_path: Path, broken: str) -> No
     _build(tmp_path, "20261006", snap="snap_x")
     for r in _ready(root):
         assert (r["date"], r["basis"]) == ("20261006", "morning")
+
+
+# ── 판정 밖 경로: 미래 D 거부 · 실패 판 ─────────────────────────────────────────
+
+def test_future_d_is_refused(tmp_path: Path) -> None:
+    """M-4 — 아직 오지 않은 D(오타)로는 판을 짓지 않는다(rc 2, 인자 오류).
+
+    지으면 'D 가 앞설 때만 갱신' 규칙 때문에 최신판 포인터·완료 신호가 그 날짜에 묶인다.
+    """
+    root = _root(tmp_path)
+    tomorrow = (dt.datetime.now(KST) + dt.timedelta(days=1)).strftime("%Y%m%d")
+    p = _chain(tmp_path, tomorrow, snap="snap_future")
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert f"D={tomorrow}" in p.stderr and "오늘" in p.stderr
+    assert not (root / "data" / "deliver").exists()
+    assert not (root / "data" / "stage" / "_READY.json").exists()
+
+
+def test_today_d_builds(tmp_path: Path) -> None:
+    """저녁 잠정판은 D = 오늘(KST)이다 — 미래 D 거부에 걸리지 않는다."""
+    root = _root(tmp_path)
+    today = dt.datetime.now(KST).strftime("%Y%m%d")
+    _build(tmp_path, today, snap="snap_today", basis="evening")
+    assert _read(root / "data" / "deliver" / "latest_evening.json")["date"] == today
+    assert [r["date"] for r in _ready(root)] == [today, today]
+
+
+@pytest.mark.parametrize("fail", [{"RC_STAGE_HEALTH": "2"}, {"RC_EQUITY": "1"}])
+def test_failed_build_keeps_latest_and_ready(tmp_path: Path, fail: dict[str, str]) -> None:
+    """M-7 — 실패 판(stage 건전성·equity)은 D 가 앞서도 latest·완료 신호를 건드리지 않는다.
+
+    기존 동작의 회귀 테스트다. 실패 판은 history 에만 남고 rc 2(crit)다.
+    """
+    root = _root(tmp_path)
+    _set_current(root, "b_ok")
+    _build(tmp_path, "20261006", snap="snap_ok")
+    _set_current(root, "b_fail")
+    p = _chain(tmp_path, "20261007", snap="snap_fail", **fail)
+    assert p.returncode == 2, p.stdout + p.stderr
+    latest = _read(root / "data" / "deliver" / "latest_morning.json")
+    assert (latest["date"], latest["stage_snapshot_id"]) == ("20261006", "snap_ok")
+    for r in _ready(root):
+        assert (r["date"], r["builds"]) == ("20261006", {"t1": "b_ok"})
+    failed = _read(root / "data" / "deliver" / "history" / "20261007_morning.json")
+    assert failed["health"] != {"stage": "ok", "equity": "ok"}

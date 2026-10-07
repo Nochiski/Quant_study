@@ -177,6 +177,25 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 (잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
 `QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다).
 
+### WISE 같은 날 재실행 — `src/backfill_wise.py` (A-03, 10-07)
+
+18:05 저녁 체인의 WISE 갈래가 끊겼거나(체인 crit), 호출 일부가 실패해 다음 날 08:10 `wise.*` 건전성이 FAIL 할 날이면 그날 안에 수집기만 다시 돌린다. 건전성은 그날 런을 모두 합쳐 본다. 실패한 호출을 같은 날 뒤 런이 ok 로 다시 받았으면 회복으로 친다(`backfill_wise.last_call_status`).
+
+1. **같은 KST 날 24:00 전에만** 돌린다. 수집기의 스냅샷 날짜는 시작 시각 기준이라, 자정 뒤 재실행은 D+1 스냅샷이 된다.
+2. **수집기를 직접, 원장 락 아래에서** 돌린다. 수집기가 rc 0 으로 끝난 날은 저녁 체인 status 가 ok 라서, `daily_evening.sh` 를 다시 돌려도 "이미 완료"로 아무것도 하지 않는다(`scripts/daily_evening.sh:119-123`).
+   ```bash
+   cd ~/quant-ledger && export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
+   flock -w 600 /tmp/quant_ledger_raw.lock .venv/bin/python src/backfill_wise.py --mode full
+   ```
+   재실행은 아직 안 받은 종목과 오늘 실패가 남은 종목만 부른다. 대상이 0 이어도 런 로그를 1줄 남긴다.
+3. **`--limit` 을 쓰지 않는다.** `--limit` 은 시험용이라 런 로그를 남기지 않는다. 그날 런 로그 1행 = '`--limit` 없는 런이 끝까지 돌았다'가 완료의 증거다. `daily_evening.sh --dry-run` 도 원장에 3종목을 실제로 쓴다(런 로그는 없음).
+4. 21:20~22:45 잠정 빌드 중에는 돌리지 않는다.
+5. 미리 보기: `.venv/bin/python -m daily.ledger_health --date D --out "$(mktemp -d)"`. 운영 리포트(`logs/health/`)는 건드리지 않는다.
+6. 재실행 뒤에도 `wise.run` 값의 `unrecovered` 가 0 이 아니면, 다음 날 08:10 체인이 원장 게이트에서 멈춘다(TECH_DEBT B-46 — 수집 도중 커버 판정이 뒤집힌 종목). 그때는 사유를 결정 장부에 남기고, WISE 만 빼고 판정한 뒤 확정 빌드를 손으로 돌린다(B-25 의 09-14·15 처리와 같은 방식):
+   ```bash
+   .venv/bin/python -m daily.ledger_health --date D --skip wise && bash scripts/build_morning.sh --date D
+   ```
+
 ### 원장 백업 — `scripts/backup_raw.sh`
 
 - 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run}.db` (`QL_BACKUP_ROOT` 로 변경). 한 세트 19 GB(09-19 실측. `data/raw` 전체는 46 GB 지만 `documents/` 27 GB 는 백업 대상이 아니다).

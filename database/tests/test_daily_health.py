@@ -4,6 +4,7 @@ import sqlite3
 import zlib
 from pathlib import Path
 
+import pytest
 from daily import ledger_health as lh
 from wics_snapshot import L1, L2
 
@@ -310,6 +311,44 @@ def test_wise_without_either_snapshot_fails(tmp_path):
     c = _by(rep)
     assert c["wise.run"].status is lh.Status.FAIL and not rep.ok
     assert c["wise.snapshot_day"].status is lh.Status.SKIP and c["wise.snapshot_day"].value is None
+
+
+# ── A-03: 같은 날 런 여럿(중단 뒤 재실행·실패 재수집)은 합쳐 본다 ──────────────────────────
+_NONE_KEYS = [("c1050001_data", "")] + [("cF5001", y) for y in ("202612", "202712", "202812")]
+
+
+def _calls(ts, tk, status):
+    """무커버 종목 1회 수집(4콜). 두 번째 키(cF5001 202612)만 status, 나머지는 ok."""
+    return [(ts, tk, ep, pk, status if (ep, pk) == _NONE_KEYS[1] else "ok")
+            for ep, pk in _NONE_KEYS]
+
+
+@pytest.mark.parametrize(("first", "second", "want"), [
+    ("http500", "ok", lh.Status.PASS),       # 뒤 런이 같은 키를 ok 로 다시 받았다 → 회복
+    ("ok", "http500", lh.Status.FAIL),       # 재수집에서 새로 실패 — 마지막 호출이 실패면 미회복
+    ("http500", "http500", lh.Status.FAIL),
+])
+def test_wise_failure_recovers_only_when_the_keys_last_call_is_ok(tmp_path, first, second, want):
+    """1차 런: 무커버 000001·000002(4콜씩), 000001 의 한 키가 first. 같은 날 재실행이 000001 만 다시
+    받아 그 키가 second. 그날 런을 합쳐 보고, 실패는 같은 (종목, ep, pkey) 의 마지막 호출이 ok 면
+    회복이다. 항등식 실제값은 고유 키 수(8) — 종전엔 마지막 런 n_req(4)를 그날 원장(8)과
+    비교해 FAIL 했다."""
+    r1, r2 = "2026-09-08T09:05:00", "2026-09-08T09:40:00"
+    calls = _calls(r1, "000001", first) + _calls(r1, "000002", "ok") + _calls(r2, "000001", second)
+    con = sqlite3.connect(tmp_path / "wise.db")
+    con.execute("CREATE TABLE ws_run_log (run_at TEXT, mode TEXT, n_stocks INTEGER, n_req INTEGER, "
+                "n_ok INTEGER, n_bad INTEGER, bad_summary TEXT)")
+    con.executemany("INSERT INTO ws_run_log VALUES (?,'full',?,?,?,0,'{}')",
+                    [(r1, 2, 8, 7 + (first == "ok")), (r2, 1, 4, 3 + (second == "ok"))])
+    con.execute("CREATE TABLE ws_call_log (ts TEXT NOT NULL, cmp_cd TEXT, ep TEXT, pkey TEXT, "
+                "status TEXT NOT NULL, bytes INTEGER, ms INTEGER)")
+    con.executemany("INSERT INTO ws_call_log VALUES (?,?,?,?,?,1,1)", calls)
+    con.commit()
+    con.close()
+    c = _by(lh.run(D, _paths(tmp_path, wise=str(tmp_path / "wise.db"))))
+    assert c["wise.run"].status is want, c["wise.run"]
+    assert c["wise.req_identity"].status is lh.Status.PASS, c["wise.req_identity"]
+    assert c["wise.req_identity"].value["actual"] == 8
 
 
 # ── 검수 R3-02·R3-03: 기업행위 후보 게이트가 시장별 결측·NULL 을 "0건" 으로 위장하지 않는다 ──

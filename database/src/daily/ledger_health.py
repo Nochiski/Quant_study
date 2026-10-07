@@ -18,7 +18,11 @@ import sys
 from dataclasses import asdict, dataclass
 from enum import Enum
 
-from backfill_wise import REQ_NONE, req_covered_on  # 종목당 일일 요청 수의 정본(커버는 런 날짜로 고른다)
+from backfill_wise import (  # 종목당 일일 요청 수·실패 회복 규칙의 정본(커버는 런 날짜로 고른다)
+    REQ_NONE,
+    last_call_status,
+    req_covered_on,
+)
 from daily import calendar as _cal
 
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -388,27 +392,33 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
 
     요청 항등식(covered·none)의 입력은 `ws_call_log`(append-only)다 — `ws_coverage` 는 종목당 1행
     덮어쓰기라 이력이 없다(DQ-9, 2026-09-26 실측). 어느 표에서 셌는지는 검사 값의 `source` 에 남는다.
+
+    그날 런은 모두 합쳐 본다(A-03). 마지막 런 1행만 보면 중단 뒤 재실행 런의 n_req 가 남은
+    종목분뿐이라 항등식이 반드시 깨지고, 앞 런의 실패는 재실행으로 회복돼도 남았다. 런 로그 합이
+    그날 호출을 1:1 로 담으면(런이 하나뿐인 평소 날) 판정은 종전과 같다. 아니면 호출 원장으로
+    본다 — 실패는 키마다 마지막 호출(`last_call_status`), 항등식 실제값은 고유 (종목, ep, pkey) 수.
     """
     out: list[Check] = []
     if not _has_table(con, "ws_run_log"):
         return out
-    sql = ("SELECT run_at, mode, n_stocks, n_req, n_ok, n_bad FROM ws_run_log "
-           "WHERE date(run_at, '+9 hours') = ? ORDER BY run_at DESC LIMIT 1")
-    day, run = d_iso, con.execute(sql, (d_iso,)).fetchone()
-    if run is None:
-        day, run = next_iso, con.execute(sql, (next_iso,)).fetchone()
-    out.append(Check("wise.snapshot_day", Level.WARN, Status.SKIP if run is None else Status.PASS,
-                     None if run is None else ("target_day" if day == d_iso else "next_morning"),
+    sql = ("SELECT mode, n_stocks, n_req, n_ok, n_bad FROM ws_run_log "
+           "WHERE date(run_at, '+9 hours') = ?")
+    day, runs = d_iso, con.execute(sql, (d_iso,)).fetchall()
+    if not runs:
+        day, runs = next_iso, con.execute(sql, (next_iso,)).fetchall()
+    out.append(Check("wise.snapshot_day", Level.WARN, Status.PASS if runs else Status.SKIP,
+                     ("target_day" if day == d_iso else "next_morning") if runs else None,
                      f"D({d_iso}) 저녁 스냅샷 — 없으면 D+1({next_iso}) 아침 스냅샷으로 폴백(전환기)"))
-    if run is None:
+    if not runs:
         out.append(Check("wise.run", Level.REQUIRED, Status.FAIL, None,
                          f"{d_iso}(또는 폴백 {next_iso}) 실행 1건 (full, n_bad 0)"))
         return out
-    _, mode, n_stocks, n_req, n_ok, n_bad = run
-    out.append(Check("wise.run", Level.REQUIRED, Status.PASS if (mode == "full" and n_bad == 0 and n_ok == n_req) else Status.FAIL,
-                     {"mode": mode, "n_stocks": n_stocks, "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad}, "mode=full, n_bad=0, n_ok=n_req"))
+    modes = sorted({str(r[0]) for r in runs})
+    n_stocks, n_req, n_ok, n_bad = (sum(int(r[i] or 0) for r in runs) for i in range(1, 5))
     cov = none = -1
     src = basis = None
+    last: dict[tuple[str, str, str], str] | None = None
+    n_calls = 0
     if _has_table(con, "ws_call_log"):
         # 항등식 입력은 append-only 호출 원장이다. `ws_coverage` 는 cmp_cd PK + INSERT OR REPLACE 라
         # (backfill_wise.py:66-69·355) 나중 런이 checked_at 을 전건 덮어써 **판정 이력이 남지 않는다** —
@@ -419,19 +429,39 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
         n_stocks_day = _count(con, "SELECT COUNT(DISTINCT cmp_cd) FROM ws_call_log WHERE date(ts, '+9 hours')=?", (day,))
         none = n_stocks_day - cov
         src, basis = "call_log", "ws_call_log 호출 원장(cF3002 종목=covered)"
+        last = last_call_status(con, day)
+        n_calls = _count(con, "SELECT COUNT(*) FROM ws_call_log WHERE date(ts, '+9 hours')=?",
+                         (day,))
     elif _has_table(con, "ws_coverage"):
         # 전환기 폴백 — 호출 원장이 없던 옛 원장 사본. 그 런이 갱신한(checked_at = 스냅샷 날짜 KST) 행만 센다
         # (09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
         cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (day,))
         none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (day,))
         src, basis = "coverage", "ws_coverage.checked_at(호출 원장 없음 — 전환기 폴백)"
+    # 런 로그 합이 그날 호출의 1:1 장부인가 — 같은 키를 두 번 부르지 않았고(재수집 없음) 끝난 런들의
+    # 종목 수가 그날 종목 수와 같다(끊긴 런의 종목 없음). 그러면 종전대로 런 로그 합으로 판정한다.
+    n_keys = 0 if last is None else len(last)
+    by_calls = last is not None and not (n_stocks == cov + none and n_keys == n_calls)
+    unrecovered = None if last is None else sum(v != "ok" for v in last.values())
+    run_ok = unrecovered == 0 if by_calls else (n_bad == 0 and n_ok == n_req)
+    out.append(Check("wise.run", Level.REQUIRED,
+                     Status.PASS if (modes == ["full"] and run_ok) else Status.FAIL,
+                     {"mode": ",".join(modes), "runs": len(runs), "n_stocks": n_stocks,
+                      "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad, "unrecovered": unrecovered,
+                      "basis": "call_log" if by_calls else "run_log"},
+                     "그날 런 전부 mode=full · 런 로그 합 n_bad=0, n_ok=n_req (재실행·끊긴 런이 "
+                     "있으면 호출 원장에서 키마다 마지막 호출 ok — 미회복 0)"))
     req_cov = req_covered_on(day)          # 재무 추가 3콜(10-01~) 전 런은 15
     if src is not None:
         expected = cov * req_cov + none * REQ_NONE
-        out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
-                         {"expected": expected, "actual": n_req, "covered": cov, "none": none, "source": src},
+        actual = n_keys if by_calls else n_req
+        out.append(Check("wise.req_identity", Level.REQUIRED,
+                         Status.PASS if expected == actual else Status.FAIL,
+                         {"expected": expected, "actual": actual, "covered": cov, "none": none,
+                          "source": src},
                          f"{day} {basis} 기준 covered×{req_cov} + none×{REQ_NONE} == n_req "
-                         "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후)"))
+                         "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후) · n_req 는 런 "
+                         "로그 합, 재실행·끊긴 런이 있으면 그날 고유 (종목, ep, pkey) 수"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
                          None if rate is None else round(rate, 3), ">= 0.25 (실측 0.315; 미만이면 페이지 개편 의심)"))

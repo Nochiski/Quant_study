@@ -6,11 +6,13 @@
 """
 import json
 import sqlite3
+import sys
 from contextlib import closing
 from pathlib import Path
 
 import backfill_wise as bw
 import pytest
+from daily import ledger_health as lh
 from daily.universe import kiwoom_common
 
 YMMS = ["202612", "202712", "202812"]
@@ -167,3 +169,122 @@ def test_universe_falls_back_to_krx_without_kiwoom_snapshot(
     out = capsys.readouterr().out
     assert "유니버스 = 키움 마스터" not in out
     assert ("키움 마스터 조회 실패" in out) == (case in ("no_file", "no_table"))
+
+
+# ── 같은 날 재실행(A-03) — 수집기 main() 을 가짜 fetch 로 돌리고 그날 wise.* 건전성을 본다 ──
+# 감사 재현(2026-10-06 audit sim_wise.py)을 수집기 경로 그대로 옮겼다. 종목 수·커버 비율은
+# wise.raw 하한(2,400종목)·wise.cov_rate(>= 0.25)를 실물처럼 넘기는 값이다. 10-01 뒤라 커버 18콜.
+DAY, NEXT_DAY = "2026-10-06", "2026-10-07"
+TICKERS = [f"{i:06d}" for i in range(2400)]
+COVERED = frozenset(TICKERS[::3])                  # 800종목(33%) — 나머지 1,600 은 무커버
+N_CALLS = len(COVERED) * 18 + (len(TICKERS) - len(COVERED)) * 4
+WISE_CHECKS = {"wise.snapshot_day", "wise.run", "wise.req_identity", "wise.cov_rate", "wise.raw"}
+_PAGE = ("<html>추정기관수" + "x" * 5000 + "</html>").encode()   # c1010001 검증 통과 본문
+
+
+def _fake_fetch(fail):
+    """네트워크 대역. `fail(cmp_cd, ep, pkey)` 가 (verdict, body) 를 주면 그 응답, None 이면
+    정상 응답."""
+    def fetch(cmp_cd, ep, pk, url):
+        got = fail(cmp_cd, ep, pk) if fail else None
+        if got is not None:
+            return cmp_cd, got[0], got[1], len(got[1]), 1
+        if ep == "c1010001":
+            body = _PAGE
+        elif ep == "cF5001":
+            c1 = {"select_item": [1 if cmp_cd in COVERED else None], "target_price": [None]}
+            body = json.dumps({"chart1": json.dumps(c1),
+                               "chart2": json.dumps({"select_item": [None]})}).encode()
+        else:       # 목록·cF5002·대체 축·재무. 목록이 비면 기본 3개년(202612·202712·202812)
+            body = b'{"JsonData": []}'
+        return cmp_cd, "ok", body, len(body), 1
+    return fetch
+
+
+def _collect(monkeypatch, db, ts, fail=None):
+    """`backfill_wise.main()` 한 번 = 런 1회. 기록 시각은 전부 ts(UTC) — 런 안의 순서는 rowid."""
+    monkeypatch.setattr(bw, "DB", str(db))
+    monkeypatch.setattr(bw, "universe", lambda con: list(TICKERS))
+    monkeypatch.setattr(bw, "encparam", lambda refresh=False: "tok")
+    monkeypatch.setattr(bw, "fetch", _fake_fetch(fail))
+    monkeypatch.setattr(bw, "kst_today", lambda: DAY)
+    monkeypatch.setattr(bw, "now_utc", lambda: ts)
+    monkeypatch.setattr(sys, "argv", ["backfill_wise.py", "--mode", "full"])
+    bw.main()
+
+
+def _health(db):
+    """그날(DAY) `ledger_health.check_wise` 결과 {검사 이름: Check}."""
+    with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as con:
+        return {c.name: c for c in lh.check_wise(con, DAY, NEXT_DAY)}
+
+
+def _not_pass(checks):
+    return {n: (c.status.value, c.value) for n, c in checks.items()
+            if c.status is not lh.Status.PASS}
+
+
+def _runs(db):
+    with closing(sqlite3.connect(db)) as con:
+        return con.execute("SELECT n_stocks, n_req, n_ok, n_bad FROM ws_run_log "
+                           "ORDER BY run_at, rowid").fetchall()
+
+
+def test_rerun_after_an_interrupted_run_passes_that_days_health(tmp_path, monkeypatch):
+    """A-03 (a): 1차 런이 중간에 끊기면(encparam 실패·OOM·kill) 런 로그가 없다. 같은 날 재실행은
+    남은 종목만 받고, 그날 wise.* 는 전부 PASS 여야 한다. 종전에는 마지막 런 n_req(남은 종목분)를
+    그날 호출 원장 전체와 비교해 `wise.req_identity` 가 반드시 FAIL 했다(감사 재현 40 vs 18)."""
+    db = tmp_path / "wisereport.db"
+
+    def crash(cmp_cd, ep, pk):
+        if cmp_cd == TICKERS[1000]:
+            raise RuntimeError("런 중단 재현")
+
+    with pytest.raises(RuntimeError, match="런 중단 재현"):
+        _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=crash)
+    assert _runs(db) == []                                   # 끊긴 런은 런 로그를 못 남긴다
+    _collect(monkeypatch, db, "2026-10-06T09:40:00")
+    assert [r[0] for r in _runs(db)] == [1400]               # 앞 런이 커밋한 1,000종목은 안 부른다
+    with closing(sqlite3.connect(db)) as con:
+        assert con.execute("SELECT COUNT(*) FROM ws_call_log").fetchone()[0] == N_CALLS
+    checks = _health(db)
+    assert set(checks) == WISE_CHECKS and _not_pass(checks) == {}
+
+
+def test_rerun_refetches_only_failed_stocks_and_passes_that_days_health(tmp_path, monkeypatch):
+    """A-03 (b): 런은 끝났지만 콜 일부가 실패(http 5xx·예외·본문 검증 실패)하면 그날 wise.run 은
+    FAIL 이다(종전과 같다). 같은 날 재실행은 실패가 남은 종목만 다시 받고, 회복되면 그날 wise.* 가
+    전부 PASS 다. 다 회복된 뒤 재실행은 대상 0 이어도 런 로그를 한 줄(n_req 0) 남긴다. 종전에는
+    cF5001 을 받은 종목을 통째로 건너뛰어 '대상 0' 으로 끝났고 런 로그도 없어 실패가 그대로
+    남았다."""
+    db = tmp_path / "wisereport.db"
+    cov, none = sorted(COVERED), sorted(set(TICKERS) - COVERED)
+    fails = {(cov[0], "cF5002", "202712"): ("http503", b""),
+             (cov[1], "c1010001", ""): ("ok", "접속장애".encode()),         # 200 인데 bad/errpage
+             (none[0], "cF5001", "202612"): ("exc/ConnectionError", b"")}   # 판정 불능 → 18콜
+    _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=lambda *k: fails.get(k))
+    assert _health(db)["wise.run"].status is lh.Status.FAIL                # 런 하나·일부 실패
+    _collect(monkeypatch, db, "2026-10-06T09:40:00")
+    _collect(monkeypatch, db, "2026-10-06T10:10:00")                       # 다 회복된 뒤 — 대상 0
+    runs = _runs(db)
+    assert [r[0] for r in runs] == [2400, 3, 0]
+    assert runs[0][1:] == (N_CALLS + 14, N_CALLS + 11, 1)                  # none[0] 은 18콜
+    assert runs[1][1:] == (18 + 18 + 4, 40, 0) and runs[2][1:] == (0, 0, 0)
+    checks = _health(db)
+    assert set(checks) == WISE_CHECKS and _not_pass(checks) == {}
+
+
+@pytest.mark.parametrize("failing", [False, True], ids=["all_ok", "one_failed"])
+def test_single_run_health_is_unchanged(tmp_path, monkeypatch, failing):
+    """A-03 회귀 가드: 그날 런이 하나면 판정은 종전과 같다. 전부 성공이면 wise.* 전부 PASS,
+    콜 하나가 실패하고 재실행이 없으면 wise.run·wise.raw FAIL(항등식은 호출 수가 맞아 PASS)."""
+    db = tmp_path / "wisereport.db"
+    bad = (min(COVERED), "cF4002", "Y")
+
+    def fail(*k):
+        return ("http500", b"") if failing and k == bad else None
+
+    _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=fail)
+    checks = _health(db)
+    assert set(checks) == WISE_CHECKS
+    assert set(_not_pass(checks)) == ({"wise.run", "wise.raw"} if failing else set())

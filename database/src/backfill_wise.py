@@ -146,6 +146,21 @@ def req_covered_on(day_iso: str) -> int:
     return REQ_COVERED if day_iso >= FIN_EXT_SINCE else REQ_COVERED_BEFORE_FIN_EXT
 
 
+def last_call_status(con: sqlite3.Connection, day_iso: str) -> dict[tuple[str, str, str], str]:
+    """그 KST 날(YYYY-MM-DD)에 부른 (종목, ep, pkey) 마다 마지막 호출의 status (A-03).
+
+    ok 가 아닌 호출(http·exc·검증 실패 bad/*·notjson)은 같은 날 뒤 런에서 같은 키를 ok 로
+    다시 받으면 회복이다 — 마지막 호출이 ok 가 아닌 키만 미회복으로 남는다. 입력은 append-only
+    호출 원장이라 런 로그 없이 끊긴 런의 호출도 들어온다. 재실행 대상(`main`)과
+    ledger_health `wise.run` 이 이 규칙 하나를 같이 쓴다."""
+    last: dict[tuple[str, str, str], str] = {}
+    for cmp_cd, ep, pkey, status in con.execute(
+            "SELECT cmp_cd, ep, pkey, status FROM ws_call_log WHERE date(ts, '+9 hours') = ? "
+            "ORDER BY ts, rowid", (day_iso,)):
+        last[(cmp_cd, ep, pkey)] = status
+    return last
+
+
 def dt_today() -> str:
     return (datetime.now(UTC) + timedelta(hours=9)).strftime("%Y%m%d")
 
@@ -293,9 +308,20 @@ def main() -> None:
     today = kst_today()
     done = {r[0] for r in con.execute(
         "SELECT DISTINCT cmp_cd FROM ws_raw WHERE fetched_date=? AND ep='cF5001'", (today,))}
+    # 오늘 실패가 남은 키(마지막 호출이 ok 아님)가 있는 종목은 다시 부른다(A-03).
+    # 성공만 한 종목은 종전대로 건너뛴다
+    retry = {k[0] for k, v in last_call_status(con, today).items() if v != "ok"}
+    done -= retry
     tks = [t for t in tks if t not in done]
-    print(f"  · 대상 {len(tks):,} 종목 (오늘 기수집 {len(done):,} 제외) · 스냅샷 {today}", flush=True)
+    print(f"  · 대상 {len(tks):,} 종목 (오늘 기수집 {len(done):,} 제외"
+          f" · 실패 재수집 {len(retry):,}) · 스냅샷 {today}", flush=True)
     if not tks:
+        # 대상 0 이어도 런 로그를 한 줄(n_req 0) 남긴다 — 건전성은 그날 런을 합쳐 보므로, 끝까지 돈
+        # 런이 있었다는 기록이 있어야 런 로그 없이 끊긴 앞 런 뒤의 하루도 판정된다(A-03)
+        con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
+                    (now_utc(), a.mode, 0, 0, 0, 0, json.dumps({})))
+        con.commit()
+        con.close()
         return
 
     t0 = time.time()

@@ -19,7 +19,7 @@
 
 ```bash
 # 매일 — 그날 판(_runs/<YYYYMMDD>_<basis>.json)으로
-python -m deliver model-daily  --date 20260929 --basis morning [--send] [--dry-run]
+python -m deliver model-daily  --date 20260929 --basis morning [--send [--resend]] [--dry-run]
 # 주간 — 그 ISO 주 월~금 아침 확정판으로
 python -m deliver model-weekly --week 2026-W40                [--send] [--dry-run]
 
@@ -31,14 +31,23 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
 | 인자 | 동작 |
 |---|---|
 | (없음) | 엑셀만 만든다. 캡션을 표준출력에 찍는다 |
-| `--send` | 엑셀을 만들고 텔레그램 `sendDocument` 로 보낸다 |
+| `--send` | 엑셀을 만들고 텔레그램 `sendDocument` 로 보낸다. 매일 엑셀은 같은 D·basis 를 이미 보냈으면(발송 장부) 엑셀도 만들지 않고 건너뛴다(rc 0) |
+| `--send --resend` | (매일만) 이미 보낸 D·basis 를 정정으로 다시 보낸다 — 캡션 끝에 `정정 n · 판 <model 판 id> · 생성 <model 생성 시각>` (N-25 Q9) |
 | `--dry-run` | 엑셀을 만들고, 네트워크 없이 env 파일의 `BOT_TOKEN`·채팅 키 **존재만** 확인한다(`--send` 와 함께 줘도 보내지 않는다) |
 
 | rc | 뜻 |
 |---|---|
-| 0 | 성공 |
+| 0 | 성공(매일 엑셀을 이미 보내 장부로 건너뜀 포함) |
 | 1 | 발송 실패(텔레그램 `ok=false`·예외) · dry-run 에서 비밀 키 없음 |
-| 2 | 입력·인자 오류 — 그날 판 없음 · 실패 판(status ≠ ok) · 점수/fi 파일 없음 · 날짜·주 형식 |
+| 2 | 입력·인자 오류 — 그날 판 없음 · 실패 판(status ≠ ok) · 점수/fi 파일 없음 · 날짜·주 형식 · 발송 장부 줄 손상(보냈는지 몰라 보내지 않음) · `--send` 없는 `--resend` |
+| 3 | 그 밖 예외 — 엑셀 생성 실패 등(E-13). 트레이스백과 인자를 stderr 에 남긴다. 1(발송 실패)과 섞지 않는다 — 재시도 래퍼가 rc 1 을 '다시 보내기'로 다뤄도 이전 실행의 엑셀을 보내지 않게 |
+
+- 발송 장부(매일만, N-25 Q9 · 로드맵 K0-1): `<out-root>/sent_model_daily.jsonl`(기본 `data/deliver/`), 실제 발송이
+  **성공한 뒤에만** 한 줄 — `date`·`basis`·`build_id`(model 판)·`sha256`(보낸 엑셀)·`sent_utc`·`correction`(0 = 첫 발송).
+  `--out-root` 를 따르므로 임시 루트 리허설은 운영 장부를 건드리지 않는다.
+- `scripts/model_daily.sh` 는 빌드 락(`/tmp/quant_ledger_build.lock`, stage·equity 공용) 안에서 돈다(동시 실행
+  직렬화 — 같은 D 이중 발송·모델 단계 중 equity 재빌드를 막는다). `python -m deliver … --send` 를 직접 부르면
+  락이 없으니 손 발송은 `model_daily.sh` 로 한다.
 
 - 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
 - 산출 경로: 매일 `data/deliver/daily/model_scores_<YYYYMMDD>_<basis>.xlsx`, 주간
@@ -178,4 +187,6 @@ QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-weekly --week 2026
 ```
 
 D-12: 매일 v4 점수는 파일 저장이 기본이고 발송은 스위치(`--send`)다. 주간은 토요일 아침 금요일
-확정판 기준. 체인 연결(`build_chain.sh` · 크론)은 이 문서 범위 밖(T3.1).
+확정판 기준. 매일 엑셀은 08:10 `daily_build.sh` 가 확정판(rc 0·1) 뒤 `scripts/model_daily.sh --date D` 로
+fi → 모델 → `--send` 를 잇는다(N-25 Q0, 임시 — N-13 전까지). 손으로 다시 돌릴 때도 같은 명령이고, 정정
+발송은 `--resend` 를 붙인다. 주간 발송은 체인에 없다.

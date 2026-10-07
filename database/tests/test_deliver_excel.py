@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import statistics
 import zipfile
 from collections.abc import Callable
@@ -1004,6 +1006,119 @@ def test_cli_send_uses_transport_and_errors(world: dict[str, Path], tmp_path: Pa
     rc = cli.main(["model-daily", "--date", "20260925", "--basis", "morning", "--dry-run",
                    "--env-file", str(tmp_path / "none.env"), *_roots(world, tmp_path)])
     assert rc == 1                                                       # 비밀 키 없음
+
+
+# ── 발송 장부·재발송 가드(N-25 Q9) · 생성 실패 rc 3(E-13) ──────────────────────────
+LEDGER = "sent_model_daily.jsonl"
+FRI_BUILD, FRI_GENERATED = "m_20260925T000000Z", "2026-09-25T00:00:00Z"
+
+
+def _fake_send(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[dict[str, str]]:
+    """가짜 전송(실제 텔레그램 없음) — 보낸 폼 필드(caption 포함)를 모은다."""
+    import deliver.telegram as tg
+    calls: list[dict[str, str]] = []
+
+    def fake(url: str, fields, name: str, data: bytes):
+        calls.append(dict(fields))
+        return {"ok": True} if ok else {"ok": False, "description": "Bad Request: 가짜 실패"}
+    monkeypatch.setattr(tg, "urllib_transport", fake)
+    return calls
+
+
+def _ledger(out: Path) -> list[dict[str, object]]:
+    p = out / LEDGER
+    if not p.exists():
+        return []
+    return [json.loads(ln) for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+def _send_args(world: dict[str, Path], tmp_path: Path) -> list[str]:
+    return ["model-daily", "--date", "20260925", "--basis", "morning", "--send",
+            "--env-file", str(_env(tmp_path)), *_roots(world, tmp_path)]
+
+
+def test_cli_send_records_ledger_and_skips_the_same_day(world: dict[str, Path], tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch,
+                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    """Q9 · K0-1 — 보낸 D·basis 는 발송 장부에 한 줄 남고, 같은 D·basis 의 두 번째 자동 발송은
+    건너뛴다(rc 0, 로그만). 옛 코드는 장부가 없어 같은 D 를 다시 돌리면 다시 보냈다
+    (E-08 — 10-02 5회)."""
+    calls = _fake_send(monkeypatch)
+    args = _send_args(world, tmp_path)
+    assert cli.main(args) == 0
+    xlsx = tmp_path / "daily" / "model_scores_20260925_morning.xlsx"
+    sent = _ledger(tmp_path)
+    assert len(calls) == 1 and len(sent) == 1
+    e = sent[0]
+    assert {k: e[k] for k in ("date", "basis", "build_id", "correction")} == {
+        "date": FRI, "basis": "morning", "build_id": FRI_BUILD, "correction": 0}
+    assert e["sha256"] == hashlib.sha256(xlsx.read_bytes()).hexdigest()
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", str(e["sent_utc"]))
+    assert "정정" not in calls[0]["caption"]                 # 첫 발송 캡션은 종전 그대로
+    mtime = xlsx.stat().st_mtime_ns
+    capsys.readouterr()
+    assert cli.main(args) == 0                               # 같은 D·basis 두 번째 실행
+    out = capsys.readouterr().out
+    assert len(calls) == 1 and len(_ledger(tmp_path)) == 1   # 발송 0회 · 장부 그대로
+    assert "건너뜀" in out and "--resend" in out
+    # 보낸 파일을 다시 만들지 않는다 — 디스크 파일이 장부 sha256 과 같게 남는다
+    assert xlsx.stat().st_mtime_ns == mtime
+
+
+def test_cli_resend_marks_correction_in_caption(world: dict[str, Path], tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q9 — 같은 날 다시 보내려면 `--resend` 를 명시하고, 그때 캡션에 '정정 n'·판 id·생성
+    시각을 단다."""
+    calls = _fake_send(monkeypatch)
+    args = _send_args(world, tmp_path)
+    assert cli.main(args) == 0
+    assert cli.main([*args, "--resend"]) == 0
+    assert len(calls) == 2
+    cap = calls[1]["caption"]
+    assert "정정 1" in cap and FRI_BUILD in cap and FRI_GENERATED in cap
+    assert [e["correction"] for e in _ledger(tmp_path)] == [0, 1]
+    with pytest.raises(SystemExit) as ex:                    # --send 없는 --resend 는 인자 오류
+        cli.main(["model-daily", "--date", "20260925", "--basis", "morning", "--resend",
+                  *_roots(world, tmp_path)])
+    assert ex.value.code == 2 and len(calls) == 2
+
+
+def test_cli_failed_send_writes_no_ledger(world: dict[str, Path], tmp_path: Path,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """장부는 발송이 성공한 뒤에만 쓴다 — 보내지 못한 날(rc 1)은 다음 자동 실행이 다시 보낸다."""
+    _fake_send(monkeypatch, ok=False)
+    args = _send_args(world, tmp_path)
+    assert cli.main(args) == 1
+    assert _ledger(tmp_path) == []
+    calls = _fake_send(monkeypatch)
+    assert cli.main(args) == 0
+    assert len(calls) == 1 and len(_ledger(tmp_path)) == 1
+
+
+def test_cli_unreadable_ledger_sends_nothing(world: dict[str, Path], tmp_path: Path,
+                                             monkeypatch: pytest.MonkeyPatch,
+                                             capsys: pytest.CaptureFixture[str]) -> None:
+    """장부 줄을 읽지 못하면 보냈는지 알 수 없다 — 보내지 않고 rc 2(입력 오류, P1)."""
+    calls = _fake_send(monkeypatch)
+    (tmp_path / LEDGER).write_text('{"date": "2026-09-25", 깨진 줄\n', encoding="utf-8")
+    assert cli.main(_send_args(world, tmp_path)) == 2
+    assert calls == [] and f"{LEDGER}:1" in capsys.readouterr().err
+
+
+def test_cli_unexpected_error_is_rc_3(world: dict[str, Path], tmp_path: Path,
+                                      monkeypatch: pytest.MonkeyPatch,
+                                      capsys: pytest.CaptureFixture[str]) -> None:
+    """E-13 — DeliverError 밖의 예외(엑셀 생성 실패)는 rc 3 이다. 옛 코드는 예외가 그대로 올라가
+    파이썬 기본 rc 1(문서상 '발송 실패')과 섞였다. 아무것도 보내지 않고 장부도 쓰지 않는다."""
+    calls = _fake_send(monkeypatch)
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise ValueError("시트 '점수' 를 찾지 못했다(가짜)")
+    monkeypatch.setattr(cli, "build_daily", boom)
+    rc = cli.main(_send_args(world, tmp_path))
+    err = capsys.readouterr().err
+    assert rc == 3 and calls == [] and _ledger(tmp_path) == []
+    assert "ValueError" in err and "가짜" in err and "--date 20260925" in err
 
 
 # ── 실제 model 판 빌드 → 전달층 ────────────────────────────────────────────────

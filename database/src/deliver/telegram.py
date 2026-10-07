@@ -137,11 +137,18 @@ def _names(top: Sequence[tuple[int, str, str]]) -> str:
 
 
 def caption_daily(date: str, basis: str, spec_id: str, top: Sequence[tuple[int, str, str]],
-                  n_ranked: int, n_rows: int) -> str:
-    """[모델 점수] 날짜 basis · spec / 상위 5 / 순위·제외·모집단."""
+                  n_ranked: int, n_rows: int, *, correction: int = 0, build_id: str = "",
+                  generated_at: str = "") -> str:
+    """[모델 점수] 날짜 basis · spec / 상위 5 / 순위·제외·모집단.
+
+    정정 발송(`correction` ≥ 1 — 같은 D·basis 를 `--resend` 로 다시 보냄)이면 끝에
+    '정정 n · 판 <model 판 id> · 생성 <model 생성 시각>' 줄을 단다(N-25 Q9). 첫 발송은 그대로다.
+    """
     text = (f"[모델 점수] {date} {basis} · {spec_id}\n"
             f"상위5: {_names(top)}\n"
             f"순위 {n_ranked} · 제외 {n_rows - n_ranked} · 모집단 {n_rows}")
+    if correction >= 1:
+        text += f"\n정정 {correction} · 판 {build_id} · 생성 {generated_at}"
     return text[:CAPTION_MAX]
 
 

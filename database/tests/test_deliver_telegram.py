@@ -144,6 +144,19 @@ def test_captions_fixed_format() -> None:
     assert tg.caption_daily("d", "b", "s", [], 0, 0).splitlines()[1] == "상위5: -"
 
 
+def test_caption_daily_correction_line() -> None:
+    """Q9 — 정정 발송(n ≥ 1)만 끝에 '정정 n · 판 id · 생성 시각' 줄을 단다.
+    첫 발송(n = 0)은 그대로."""
+    top = [(1, "005930", "삼성전자")]
+    base = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603)
+    first = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603,
+                             correction=0, build_id="m_x", generated_at="2026-09-25T00:43:12Z")
+    assert first == base
+    c = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603,
+                         correction=2, build_id="m_x", generated_at="2026-09-25T00:43:12Z")
+    assert c.splitlines() == [*base.splitlines(), "정정 2 · 판 m_x · 생성 2026-09-25T00:43:12Z"]
+
+
 def test_multipart_body_shape() -> None:
     body, ctype = tg._multipart({"chat_id": "1", "caption": "한글"}, "a.xlsx", b"DATA")
     boundary = ctype.split("boundary=")[1]

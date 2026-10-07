@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → 확정 빌드 → 요약.
+# 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → 확정 빌드
+# → 모델 단계(fi → 모델 → 일간 엑셀 발송, scripts/model_daily.sh — N-25 Q0) → 요약.
 # 플랜 P1 Task 1.8 / 결정 R1. 확정 빌드(stage·equity basis=morning)는 scripts/build_morning.sh 가 한다
 # (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
@@ -160,6 +161,15 @@ if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
   elif [ "$BRC" -ne 0 ]; then
     FAILED="build_morning(rc=$BRC)"
   fi
+  # 일간 모델 단계(N-25 Q0, 임시 — N-13 가동 전까지): 확정판을 쓸 수 있으면(rc 0, 또는 GC 같은 후처리만
+  # 실패한 rc 1) 이어서 fi → 모델 → 일간 엑셀 발송(P9). soft step — 실패해도 확정판 rc·요약 등급은
+  # 그대로다. 실패 단계 이름·rc 는 model_daily.sh 가 crit(notify.log 기록만)로 남기고, 아래 요약 본문에
+  # 결과 줄이 붙는다. 이미 보낸 D 는 deliver 가 발송 장부로 건너뛴다(같은 D 재빌드에도 중복 발송 없음).
+  if [ "$BRC" -eq 0 ] || [ "$BRC" -eq 1 ]; then
+    echo "──── 모델 단계 시작 $(kst) ────"
+    bash scripts/model_daily.sh --date "$D"; MRC=$?
+    echo "──── 모델 단계 종료 rc=$MRC $(kst) ────"
+  fi
 fi
 # 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).
 [ -z "$DRY" ] && [ -x scripts/daily_report.py ] && { $PY scripts/daily_report.py --date "$D" || true; }
@@ -167,7 +177,10 @@ echo "════ 종료 rc=$RC $(kst) ════"
 fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
-SUMMARY=$(grep -E "원장 락 대기|^원장 건전성|──── .* 종료|아직 미완료|KRX 401" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
+# 확정판 부분은 종전 그대로 고르고 '모델 단계 시작' 앞에서 자른다 — 모델 단계 안쪽 줄(──── factor_inputs
+# 종료 …)이 tail 창을 밀어내지 않게. 모델 단계는 결과 줄(완료/실패 단계·rc)과 종료 rc 만 덧붙인다.
+SUMMARY=$({ sed '/^──── 모델 단계 시작/,$d' "$RUN" | grep -E "원장 락 대기|^원장 건전성|──── .* 종료|아직 미완료|KRX 401" | tail -8
+           grep -E "^모델 단계 (완료|실패)|^──── 모델 단계 종료" "$RUN" | tail -2; } | tr '\n' ' ' | cut -c1-900)
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 확정판이 이미 있어 재수집·재빌드하지 않았다 — 다시 돌리려면 QL_FORCE=1 또는 --date $D | 로그 $LOG"
   rm -f "$RUN"; exit 0

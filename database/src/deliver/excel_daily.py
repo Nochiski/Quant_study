@@ -805,6 +805,8 @@ class DailyResult:
     n_rows: int
     n_ranked: int
     sheets: list[str]
+    build_id: str                       # model 판 id — 발송 장부·정정 캡션용(N-25 Q9)
+    generated_at: str                   # model 판 생성 시각(판 JSON generated_at)
 
 
 def daily_path(out_root: Path, d: str, basis: str) -> Path:
@@ -864,7 +866,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     top = [(rank_of(r) or 0, ticker_of(r), view.name(ticker_of(r))) for r in view.ranked[:5]]
     return DailyResult(path, run.date, basis, view.spec_id, top, len(view.rows),
                        len(view.ranked),
-                       [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"])
+                       [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"],
+                       build_id=run.build_id, generated_at=run.generated_at)
 
 
 __all__ = ["DailyResult", "FiData", "build_daily", "daily_path", "id_cols", "id_values",

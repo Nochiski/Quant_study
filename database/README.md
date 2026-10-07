@@ -175,7 +175,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`
 (잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
-`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다).
+`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다) · `QL_RAW_LOCK_FILE`(테스트 전용 — `daily_build.sh` 원장 락 파일 경로, 운영 크론에는 넣지 않는다).
 
 ### WISE 같은 날 재실행 — `src/backfill_wise.py` (A-03, 10-07)
 
@@ -195,6 +195,24 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
    ```bash
    .venv/bin/python -m daily.ledger_health --date D --skip wise && bash scripts/build_morning.sh --date D
    ```
+
+### DART 완료 판정 실패 · 놓친 확정판 (배포 묶음 3, 10-07)
+
+DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지분 2종)이 '받았는지'(수집 기록 ok·자료 없음, 계기 공시를 처음 본 뒤) 본다. 같은 D 의 두 번째 런(06:00·주말 재실행)은 못 받은 유닛만 다시 부른다(`plans/2026-10-07-batch3-dart-deadline.md`).
+
+1. **완료 판정 실패**(체인 crit · 일일 리포트) — 다음 거래일 18:05 저녁 런 **전에** 못 받은 유닛만 다시 부른다. 원장 락은 체인과 같이 쓴다(락이 잡혀 있으면 풀릴 때까지 기다린다):
+   ```bash
+   cd ~/quant-ledger && export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
+   flock /tmp/quant_ledger_raw.lock .venv/bin/python -m daily.dart_daily --date D --skip-sweep
+   ```
+   다음 거래일 저녁 런 뒤에 돌리면 다른 D 의 늦은 공시가 섞여 판정에 들어온다(TECH_DEBT B-54).
+2. **10:30 워치독이 확정판 없음으로 crit** — 손으로 돌리기 전에 08:10 체인이 기다리는 중인지 먼저 본다. 08:10 체인은 06:00 수집이 끝나지 않았으면 끝날 때까지 기다렸다가 이어서 돈다(P9, 시간 한도 없음):
+   ```bash
+   grep "원장 락 대기" ~/quant-ledger/logs/notify.log | tail -1; pgrep -af daily_build.sh
+   ```
+   기다리는 중이면 그대로 둔다. 아니면 `bash scripts/daily_build.sh --date D` 로 다시 짓는다 — 원장 락 래퍼(`flock …`) 안에서 부르지 않는다(자기 락을 기다리며 멈춘다. 부모가 락을 쥐었으면 `QL_RAW_LOCK_HELD=1`).
+3. **더 새 D 판이 이미 있으면 옛 D 를 다시 짓지 않는다.** 지어도 `latest_<basis>.json`·`_READY.json` 은 더 새 D 를 유지하고 그 판은 `history/` 에만 남지만, stage·equity MANIFEST 의 현재 판은 옛 D 판으로 바뀐다(TECH_DEBT B-50). 옛 D 판이 꼭 필요하면 사용자와 정한다.
+4. 아직 오지 않은 D(오늘 KST 보다 뒤)는 `build_chain.sh` 가 rc 2 로 거부한다(`--date` 오타).
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 

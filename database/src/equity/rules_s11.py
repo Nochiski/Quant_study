@@ -267,10 +267,10 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
                  "ON o.rcept_no = c.orig_rcept_no WHERE c.orig_rcept_no IS NOT NULL AND "
                  "(o.rcept_no IS NULL OR o.is_correction OR o.group_key IS DISTINCT FROM "
                  "c.group_key OR o.rcept_no >= c.rcept_no)"),
-        # 원본 측 집계 재계산
+        # 원본 측 집계 재계산 — 최초 정정일은 공개일 축(e1.25.0 N-26 4.10)
         "n_corrections_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o LEFT JOIN (SELECT orig_rcept_no, count(*) AS n, '
-                 f'min(rcept_dt) AS d FROM "{v}" WHERE orig_rcept_no IS NOT NULL '
+                 f'min(available_date) AS d FROM "{v}" WHERE orig_rcept_no IS NOT NULL '
                  "GROUP BY 1) b ON b.orig_rcept_no = o.rcept_no "
                  "WHERE o.n_corrections IS DISTINCT FROM coalesce(b.n, 0) "
                  "OR o.first_correction_dt IS DISTINCT FROM b.d"),
@@ -292,8 +292,13 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
         "n_is_correction_prefix_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE is_correction <> '
                  f"(corr_prefix IN ({_vocab_sql(CORRECTION_PREFIXES)}))"),
-        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" '
-                                           "WHERE available_date IS DISTINCT FROM rcept_dt"),
+        # 공개일 = 그 접수의 stage 공개일(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽). 이름은 옛
+        # 정의(rcept_dt 와 비교)를 그대로 둔다(게이트 출력 계약) — 비교 축은 e1.25.0 부터 stage
+        # 공개일이다(N-26 4.10, 재제출본은 `available_date > rcept_dt` 가 정상).
+        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" o WHERE NOT EXISTS ('
+                                           "SELECT 1 FROM stg_disclosure d "
+                                           "WHERE d.rcept_no = o.rcept_no "
+                                           "AND d.available_date = o.available_date)"),
         # 최근 창 정정 파싱률 — 표본 CORR_RECENT_MIN_N 이상이고 비율이 CORR_RECENT_FAIL_RATIO
         # 미만일 때만 폐기한다(서식 드리프트). 그 밖에는 0 이고 비율은 metrics 로 남는다.
         "n_corr_recent_parse_drift": 1 if recent_drift else 0,
@@ -462,14 +467,16 @@ DISCLOSURE_VERSION = register(EquityTable(
     # DESIGN §2 receipt_axis 정의 그대로 — 이 테이블은 rcept_no 가 grain 이라 접수연도가 항상 있다
     # (S05 `corp_event` 는 KRX 파생행에 rcept_no 가 없어 year(announce_date) 로 대신했다).
     partition_key_expr="CAST(substr(rcept_no, 1, 4) AS INTEGER)",
-    available_rule="column:rcept_dt — DART 접수일(derived)",
+    available_rule=("column:available_date — stg_disclosure 공개일(derived, 원천 rcept_dt 와"
+                    " 접수번호 날짜 중 늦은 쪽)"),
     eg1_lhs_sql=EG1_LHS_SQL,
     eg1_rhs_sql=EG1_RHS_SQL,
     sql_path=SQL_PATH,
     input_columns={
         # `observed_date` 는 재수집 판본을 접는 축이다(first_write_wins) — 산출 컬럼이 아니다.
-        "stg_disclosure": ("rcept_no", "rcept_dt", "corp_code", "report_nm", "is_correction",
-                           "rm_corrected_later", "observed_date"),
+        # `available_date` = stage 보정 공개일(N-26 4.10) — 공개일·최초 정정일 축.
+        "stg_disclosure": ("rcept_no", "rcept_dt", "available_date", "corp_code", "report_nm",
+                           "is_correction", "rm_corrected_later", "observed_date"),
         "stg_doc_correction": ("rcept_no", "page_found", "filed_date", "filed_date_status",
                                "reason_raw", "items"),
         "stg_doc_index": ("rcept_no", "zip_ok", "observed_date"),

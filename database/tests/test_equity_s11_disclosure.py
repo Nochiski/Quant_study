@@ -248,9 +248,14 @@ OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 
 def _disclosure(rcept_no: str, rcept_dt: date | None, corp: str, report_nm: str,
                 is_correction: bool, rm: bool = False,
                 observed: date = OBSERVED) -> dict[str, object]:
+    # `available_date` 는 가짜 stage 공개일 — stage E08 규칙(원천 rcept_dt 와 접수번호 앞 8자리 중
+    # 늦은 쪽)을 흉내 낸다. 정상 접수는 rcept_dt 와 같다.
+    pfx = date(int(rcept_no[:4]), int(rcept_no[4:6]), int(rcept_no[6:8]))
     return {"rcept_no": rcept_no, "rcept_dt": rcept_dt, "corp_code": corp,
             "report_nm": report_nm, "is_correction": is_correction,
-            "rm_corrected_later": rm, "observed_date": observed}
+            "rm_corrected_later": rm,
+            "available_date": None if rcept_dt is None else max(rcept_dt, pfx),
+            "observed_date": observed}
 
 
 def _correction(rcept_no: str, filed: date | None, status: str = "parsed",
@@ -326,6 +331,31 @@ def test_재무_정정_판정은_공백을_뗀_사유도_본다(make_stage_tree,
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
     assert rows["20200101000003"]["corr_has_fin_item"] is expect
+
+
+def test_재제출본의_공개일과_최초_정정일은_접수번호_날짜다(make_stage_tree,
+                                                    tmp_path: Path) -> None:
+    """N-26 4.10(J-41 의 disclosure_version 몫) — 박셀바이오 재제출본은 원천 rcept_dt 가 원래
+    제출일이다. 공개일·원본 측 `first_correction_dt` 는 stage 공개일(접수번호 날짜)로, `rcept_dt`
+    열과 `delay_days`(원천 rcept_dt − 기한)는 원천 그대로 둔다. fi `filing_late` 가 이 공개일로
+    거른다."""
+    orig, corr = "20250828000446", "20250828000453"
+    disclosures = [
+        _disclosure("20200101000001", date(2020, 1, 1), "00000001",
+                    "사업보고서 (2019.12)", False),                  # 보통 행 — 불변
+        _disclosure(orig, date(2024, 3, 19), "01335851", "사업보고서 (2023.12)", False),
+        _disclosure(corr, date(2024, 8, 14), "01335851", "[기재정정]사업보고서 (2023.12)", True),
+    ]
+    r = _build_hand(make_stage_tree, tmp_path, disclosures,
+                    [_correction(corr, date(2024, 3, 19))])
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    o, c, n = rows[orig], rows[corr], rows["20200101000001"]
+    assert (o["rcept_dt"], o["available_date"]) == (date(2024, 3, 19), date(2025, 8, 28))
+    assert o["first_correction_dt"] == date(2025, 8, 28)     # 정정의 원천 rcept_dt 는 2024-08-14
+    assert o["delay_days"] == -11                            # 2024-03-19 − (2023-12-31 + 90일)
+    assert c["available_date"] == date(2025, 8, 28)
+    assert (n["rcept_dt"], n["available_date"]) == (date(2020, 1, 1), date(2020, 1, 1))
 
 
 def test_부정_후보_2건이면_multi_unresolved(make_stage_tree, tmp_path: Path) -> None:

@@ -290,6 +290,9 @@ chain_doc AS (
     -- 사슬은 disclosure_version 링크(정정 → 원본, 링크가 성립한 것만)로만 묶는다. 그룹(API 요청 축)의
     -- 아무 접수나 쓰지 않는다 — 한 그룹에 서로 다른 보고서가 묶일 수 있다(한화리츠 01669226 반기
     -- 2026.01·2026.07). 사슬에 문서가 여럿이면 최신 판(가장 큰 rcept_no)의 문서다.
+    -- 전제: disclosure_version 이 정정 체인을 평평하게 접는다(정정의 orig_rcept_no 는 언제나 원본) —
+    -- S11 EG3 `n_link_orig_invalid`·`n_is_correction_prefix_mismatch` 가 지킨다.
+    -- 사슬 문서가 판보다 늦은 접수일 수 있으나 기간은 보고서의 고정 속성이라 값이 새지 않는다.
     SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div,
            m.period_from, m.period_to, m.doc_acode
     FROM grp g
@@ -298,6 +301,7 @@ chain_doc AS (
       ON coalesce(x.orig_rcept_no, x.rcept_no) = coalesce(s.orig_rcept_no, s.rcept_no)
     JOIN doc m ON m.rcept_no = x.rcept_no
     WHERE NOT EXISTS (SELECT 1 FROM doc o WHERE o.rcept_no = g.rcept_no)
+    -- 유효한 사슬 안에서는 기간이 같아 어느 판을 골라도 결과가 같다 — 정렬은 결정성을 위한 것이다.
     QUALIFY row_number() OVER (PARTITION BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div
                                ORDER BY x.rcept_no DESC) = 1
 ),

@@ -381,9 +381,10 @@ def _recorded_metrics(con: duckdb.DuckDBPyConnection, rule: TableRule, view: str
             "n_rcept_dt_after_no_prefix": int(str(row[1]))}
 
 
-def _ymd8_prefix_sql(column: str) -> str:
+def _ymd8_prefix_sql(column: str, alias: str | None = None) -> str:
     """텍스트 컬럼 앞 8자리를 DATE 로. 읽히지 않으면 NULL (E08 — 접수번호 접두 = 접수일)."""
-    return f"TRY_CAST(try_strptime(substr({_q(column)}, 1, 8), '%Y%m%d') AS DATE)"
+    ref = _q(column) if alias is None else f"{alias}.{_q(column)}"
+    return f"TRY_CAST(try_strptime(substr({ref}, 1, 8), '%Y%m%d') AS DATE)"
 
 
 def _not_before_ymd8_sql(date_expr: str, text_column: str) -> str:
@@ -393,8 +394,10 @@ def _not_before_ymd8_sql(date_expr: str, text_column: str) -> str:
     쓰면 look-ahead 다(E08 · J-41 박셀바이오 재제출본 최대 −654일). 미래 오타는 보수적이라 둔다.
     접두가 안 읽히면 날짜 그대로, 날짜가 NULL 이면 NULL 그대로다 — `greatest` 는 NULL 을 건너뛰어
     참조표 미스를 접두 날짜로 채워 버리므로 쓰지 않는다(§6 — rcept_no[:8] 폴백 폐기).
+    텍스트 열은 원천 행 별칭 `a`(stage_ok 의 `FROM stage_all a`)로 한정한다 — 룩업 조인 `lk` 와
+    이름이 겹쳐도 모호해지지 않게.
     """
-    pfx = _ymd8_prefix_sql(text_column)
+    pfx = _ymd8_prefix_sql(text_column, alias="a")
     return f"CASE WHEN {pfx} > {date_expr} THEN {pfx} ELSE {date_expr} END"
 
 
@@ -415,7 +418,8 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
         # 접두가 날짜로 안 읽히면 날짜 컬럼을 그대로 쓴다.
         if a.column is None or a.fallback_column is None:
             raise ValueError(f"greatest_ymd8 needs column and fallback_column: table={rule.name}")
-        return ((f"{_not_before_ymd8_sql(_q(a.column), a.fallback_column)} AS available_date, "
+        return ((f"{_not_before_ymd8_sql(f'a.{_q(a.column)}', a.fallback_column)} "
+                 "AS available_date, "
                  f"'{a.basis}' AS available_basis"), "")
     if a.kind == "lookup":
         if not (a.table and a.local_key and a.lookup_key and a.lookup_value):

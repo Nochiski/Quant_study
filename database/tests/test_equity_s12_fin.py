@@ -25,9 +25,9 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from equity import build, rules_s01, rules_s11, rules_s12
+from equity import build, inputs, rules_s01, rules_s11, rules_s12
 from equity.baseline import Baseline, load
-from equity.gates import GateStatus
+from equity.gates import EquityGateContext, GateStatus
 from fin_map import FIN_MAP
 from stage import manifest as stage_manifest
 
@@ -283,6 +283,15 @@ def test_계정_대응표는_fin_map_에서_유도된다() -> None:
     assert "gross_profit" in FIN_MAP        # 추가 계정이 아니라 FIELD_MAP 판정만 바뀐다
     metrics = {r[0] for r in rules_s12.acct_rows()}
     assert metrics == set(rules_s12.ACCOUNTS)
+
+
+def test_기간_문서_자격은_sql_doc_CTE_와_같다() -> None:
+    """EG3 기간 증인(`_OWN_DOC`)과 `.sql` `doc` CTE 가 같은 자격을 써야 '자기 문서 우선'이
+    맞물린다."""
+    sql = rules_s12.SQL_PATH.read_text(encoding="utf-8")
+    doc = sql.split("\ndoc AS (", 1)[1].split("),", 1)[0]
+    for clause in rules_s12.DOC_QUALIFIED_PRED.format(a="m").split(" AND "):
+        assert clause.removeprefix("m.") in doc, clause
 
 
 def test_sql_의_acct_블록은_생성기_문자열과_같다() -> None:
@@ -697,7 +706,10 @@ _G21_ORIG = ("20260319001177", date(2026, 3, 19))      # 원본 — 백필이 08
 _G21_CORR = ("20260928000253", date(2026, 9, 28))      # [기재정정] — 일일 수집이 09-28 에 덧붙였다
 _G21_SEEN = (date(2026, 8, 26), date(2026, 9, 28))
 _FY2025 = (date(2025, 12, 31), "11011")                  # 사업보고서 문서의 (period_to, doc_acode)
-_NO_DOC = (None, None)                                   # 그 접수의 기간 문서가 없다(ZIP 014 등)
+# 그 접수의 기간 문서가 없다 — 손 트리는 stg_doc_meta 행을 period_to·doc_acode NULL 로 깔고
+# (stg_doc_index.zip_ok 는 TRUE) fin_std `doc` CTE 의 자격(기간 NULL 아님)에서 빠지게 만든다.
+# 실물의 ZIP 014(문서 자체 없음)와 fin_std 쪽 결과가 같다.
+_NO_DOC = (None, None)
 
 
 def _g21_row(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
@@ -780,6 +792,42 @@ def test_정정_문서가_있으면_그_문서의_기간을_쓴다(make_stage_tr
                    _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
                    docs=((date(2025, 6, 30), "11012"), _FY2025))
     assert (row["period_end"], row["report_code"]) == (date(2025, 12, 31), "11011")
+
+
+def test_부정_자기_문서가_있는데_사슬_문서_기간을_실으면_EG3_가_잡는다(make_stage_tree,
+                                                                  tmp_path: Path) -> None:
+    """품질 검토 — 판(정정)에 자기 문서(2025-12-31)가 있는데 산출이 사슬 원본 문서(2025-11-30)의
+    기간을 실은 회귀를 심는다. 증인을 '판 자신 ∪ 사슬 전체'로 받으면 원본 문서가 증언해 통과한다
+    — 자기 문서가 있으면 자기 문서만 증인이어야 한다."""
+    reports = [(rc, "01472930", "2025", "11011", dt, pt, "11011")
+               for (rc, dt), pt in zip((_G21_ORIG, _G21_CORR),
+                                       (date(2025, 11, 30), date(2025, 12, 31)), strict=True)]
+    r = _hand_build(make_stage_tree, tmp_path, [("01472930", "12")], reports,
+                    _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)),
+                    (_G21_CORR[0], "rcept_no", _G21_CORR[0]),
+                    report_names={_G21_CORR[0]: "[기재정정]사업보고서 (2025.12)"})
+    assert r.ok and r.out_dir is not None, [(g.name, g.status.value, g.detail) for g in r.gates]
+    root = tmp_path / "equity"
+    m = stage_manifest.load(root / FIN_STD.name / "MANIFEST.json")
+    rec = next(b for b in m.builds if b.build_id == m.current_build)
+    pinned = {t: inputs.load_pinned(root, t, b) for t, b in rec.inputs.items()}
+    con = duckdb.connect()
+    try:
+        inputs.create_views(con, pinned,
+                            {t: list(FIN_STD.declared_columns(t)) for t in FIN_STD.inputs})
+        glob = r.out_dir / "year=*" / "*.parquet"
+        con.execute("CREATE VIEW planted AS SELECT * EXCLUDE (v) REPLACE "
+                    "(DATE '2025-11-30' AS period_end) "
+                    f"FROM read_parquet('{glob}', hive_partitioning=true)")
+        ctx = EquityGateContext(con=con, rule=FIN_STD, out_view="planted", reject_view=None,
+                                pinned=pinned, n_out=1, n_reject=0, reject_by_reason={},
+                                inputs=dict(rec.inputs), partition_hashes={}, baseline=_seed())
+        g = rules_s12.eg3_fin_std(ctx)
+    finally:
+        con.close()
+    assert g.status is GateStatus.FAIL
+    assert (g.metrics["n_period_end_not_document"],
+            g.metrics["n_report_code_month_mismatch"]) == (1, 1)
 
 
 def test_부정_사슬이_아닌_다른_보고서의_문서는_빌리지_않는다(make_stage_tree,

@@ -223,10 +223,16 @@ RULES_VERSION = "e1.25.0"                # BuildRecord.rules_version 에 실린�
 #             값 줄도 그 접수 것만. 일일 수집이 덧붙인 정정 값이 반영되고 ord 가 바뀐
 #             계정의 모호 NULL 이 사라진다. 그 판에 문서가 없으면 같은 정정 사슬
 #             (disclosure_version 링크)의 최신 문서로 기간을 잇는다(`chain_doc` — 없으면 문서
-#             없는 정정이 추정 창 밖일 때 그룹이 통째로 period_unresolved). EG3 기간 증인도 같은
-#             사슬을 본다.
-#          게이트: EG3_fin_std 의 `n_available_ne_rcept_dt`·`n_orig_filing_unwitnessed` 가
-#          stage 공개일 축으로, EG8 그룹 조인 키가 max(rcept_no) 로.
+#             없는 정정이 추정 창 밖일 때 그룹이 통째로 period_unresolved). EG3 기간 증인은 판
+#             자신이고 자기 문서가 없을 때만 같은 사슬(자기 문서 우선 검증), 보충 규모는 기록형
+#             `n_period_end_chain_doc`.
+#          ④ N-26 4.10 `disclosure_version.available_date`·`first_correction_dt` 도 stage 공개일
+#             축으로(J-41 — 재제출본 17행이 최대 654일 앞당겨 보였고 fi filing_late 가 이 축을
+#             쓴다).
+#             `rcept_dt`·`delay_days`·`date_check` 는 원천 rcept_dt 그대로.
+#          게이트: EG3_fin_std 의 `n_available_ne_rcept_dt`·`n_orig_filing_unwitnessed` 와
+#          EG3_disclosure_version 의 `n_available_ne_rcept_dt`·`n_corrections_mismatch` 가 stage
+#          공개일 축으로(이름은 그대로), EG8 그룹 조인 키가 max(rcept_no) 로.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

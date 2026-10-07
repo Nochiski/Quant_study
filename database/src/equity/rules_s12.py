@@ -288,12 +288,24 @@ _RCEPT_STAGE_AVAIL_MAX = ("(SELECT max(d.available_date) FROM stg_disclosure d "
                           "WHERE d.rcept_no = o.rcept_no)")
 _RCEPT_STAGE_AVAIL_MIN = ("(SELECT min(d.available_date) FROM stg_disclosure d "
                           "WHERE d.rcept_no = o.rcept_no)")
-# 기간 문서의 증인 접수(rcept_no → w_rcept) — 산출 행의 판 자신, 그리고 그 판에 문서가 없을 때
-# `.sql` 이 기간을 빌려 오는 같은 정정 사슬(disclosure_version 링크)의 판(`chain_doc`, G-21 후속).
-# 존재 명제로만 본다 — 어느 판의 문서를 골랐는지는 베끼지 않는다.
+# 기간 정본으로 쓰는 main 문서의 자격 — `.sql` `doc` CTE 의 WHERE 와 같다(tests 가 대조).
+DOC_QUALIFIED_PRED = ("{a}.member_role = 'main' AND {a}.period_to IS NOT NULL "
+                      "AND {a}.period_from IS NOT NULL "
+                      "AND {a}.doc_acode IN ('11011', '11012', '11013')")
+# 산출 행의 판(o.rcept_no)에 자격 있는 자기 문서가 있는가.
+_OWN_DOC = ("EXISTS (SELECT 1 FROM stg_doc_meta m0 WHERE m0.rcept_no = o.rcept_no AND "
+            + DOC_QUALIFIED_PRED.format(a="m0") + ")")
+# 기간 문서의 증인 접수(rcept_no → w_rcept) — 산출 행의 판 자신, 그리고 그 판에 자격 있는 자기
+# 문서가 **없을 때만** `.sql` 이 기간을 빌려 오는 같은 정정 사슬(disclosure_version 링크)의 판
+# (`chain_doc`, G-21 후속). 두 기간 검사에 `_OWN_DOC_FIRST` 를 함께 걸어 '자기 문서 우선'을 검증한다
+# — 사슬 전체를 늘 증인으로 받으면 `.sql` 이 사슬 문서를 앞세우는 회귀(자기 문서 12-31 인데 산출
+# 11-30)가 통과한다(품질 검토 재현). 사슬은 disclosure_version 이 정정 체인을 평평하게 접는다는
+# 전제(정정의 orig_rcept_no 는 언제나 원본)에 기대고, 그 전제는 S11 EG3 의
+# `n_link_orig_invalid`·`n_is_correction_prefix_mismatch` 가 지킨다.
 _DOC_WITNESS = ("(SELECT rcept_no, rcept_no AS w_rcept FROM \"{v}\" UNION "
                 "SELECT s.rcept_no, x.rcept_no FROM disclosure_version s JOIN disclosure_version x "
                 "ON coalesce(x.orig_rcept_no, x.rcept_no) = coalesce(s.orig_rcept_no, s.rcept_no))")
+_OWN_DOC_FIRST = f"AND (c.w_rcept = o.rcept_no OR NOT {_OWN_DOC}) "
 
 
 def _vocab_sql(values: tuple[str, ...]) -> str:
@@ -362,8 +374,11 @@ def _inferred_recent(ctx: EquityGateContext) -> dict[str, object]:
 def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
     """EG3-P01 보강 — 어휘 폐쇄 · 기간 판정 재계산 · 파생 부분합 금지 · 계정 커버율(기록형).
 
-    기간 판정 재계산은 `.sql` 의 tie-break 를 베끼지 않는다 — "그 접수의 main 문서 중 **어느 한
+    기간 판정 재계산은 `.sql` 의 tie-break 를 베끼지 않는다 — "증인 접수의 main 문서 중 **어느 한
     행**이 이 `period_end`(그리고 그 행의 개월 수가 이 `report_code`)를 준다"는 존재 명제로 본다.
+    증인 접수는 그 판 자신이고, 판에 자격 있는 자기 문서가 없을 때만 같은 정정 사슬의 판이다
+    (`_DOC_WITNESS`·`_OWN_DOC_FIRST`, e1.25.0). 사슬로 보충한 규모는 기록형
+    `n_period_end_chain_doc`.
     `stg_doc_meta` 가 rcept_no 당 main 을 둘 이상 갖는지는 `n_doc_meta_multi_main` 이 기록한다.
     """
     v = ctx.out_view
@@ -390,19 +405,20 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         "n_currency_not_krw": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE currency <> \'KRW\''),
         "n_restated_unknown_false": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                             "WHERE restated_unknown IS DISTINCT FROM TRUE"),
-        # `period_end` = stg_doc_meta.period_to 정본 (document 근거 행 — 판 자신 또는 같은 사슬)
+        # `period_end` = stg_doc_meta.period_to 정본 (document 근거 행 — 판 자신, 자기 문서가
+        # 없을 때만 같은 사슬)
         "n_period_end_not_document": _n(
             ctx, f'SELECT count(*) FROM "{v}" o WHERE o.period_end_basis = \'document\' '
                  f"AND NOT EXISTS (SELECT 1 FROM {wit} c JOIN stg_doc_meta m "
-                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no "
-                 "AND m.member_role = 'main' AND m.period_to = o.period_end "
+                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no " + _OWN_DOC_FIRST
+                 + "AND m.member_role = 'main' AND m.period_to = o.period_end "
                  "AND m.period_from IS NOT DISTINCT FROM o.period_start)"),
         # 1Q/3Q 판정 — doc_acode 11013 은 개월 수로만 갈린다
         "n_report_code_month_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o WHERE o.period_end_basis = \'document\' '
                  f"AND NOT EXISTS (SELECT 1 FROM {wit} c JOIN stg_doc_meta m "
-                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no "
-                 "AND m.member_role = 'main' AND m.period_to = o.period_end "
+                 "ON m.rcept_no = c.w_rcept WHERE c.rcept_no = o.rcept_no " + _OWN_DOC_FIRST
+                 + "AND m.member_role = 'main' AND m.period_to = o.period_end "
                  "AND m.period_from = o.period_start AND o.report_code = "
                  "(CASE WHEN m.doc_acode <> '11013' THEN m.doc_acode "
                  f"WHEN date_diff('month', m.period_from, m.period_to) + 1 <= {q1} "
@@ -480,6 +496,11 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         # 재제출본이면 빠진다 — 판정 축(stage 공개일)의 승계 검사는 `n_orig_filing_unwitnessed` 다.
         "n_available_orig_filing": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                            "WHERE available_date < rcept_dt"),
+        # **기록형**. 기간을 같은 정정 사슬의 문서로 보충한 행(자기 접수에 자격 있는 문서가 없는
+        # document 행, G-21 후속) — 보충 규모가 빌드마다 보이게.
+        "n_period_end_chain_doc": _n(ctx, f'SELECT count(*) FROM "{v}" o '
+                                          "WHERE o.period_end_basis = 'document' "
+                                          f"AND NOT {_OWN_DOC}"),
         "n_fiscal_month_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o JOIN corp c USING (corp_code) '
                  "WHERE o.report_code = '11011' AND c.fiscal_month IS NOT NULL "
@@ -1016,7 +1037,8 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s12.json"
 
 __all__ = ["ACCOUNTS", "BASELINE_SEED", "CAPEX_BASIS_NULL_REASONS", "CAPEX_BASIS_VOCAB",
            "CF_ACCOUNTS", "CF_PRIOR_REPORT",
-           "CF_Q_COLUMNS", "CONCEPT_PREFIX_PATTERN", "COVERAGE_METRICS", "GATE_NAME_EG8",
+           "CF_Q_COLUMNS", "CONCEPT_PREFIX_PATTERN", "COVERAGE_METRICS", "DOC_QUALIFIED_PRED",
+           "GATE_NAME_EG8",
            "TEMPLATE_STANDARD", "TEMPLATE_TAGS", "TEMPLATE_VOCAB",
            "TIER_CAPEX_COMBINED", "TIER_CAPEX_PARTS", "TIER_CONCEPT", "TIER_CONCEPT_ALT",
            "TIER_NM",

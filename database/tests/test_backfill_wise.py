@@ -173,11 +173,11 @@ def test_universe_falls_back_to_krx_without_kiwoom_snapshot(
 
 # ── 같은 날 재실행(A-03) — 수집기 main() 을 가짜 fetch 로 돌리고 그날 wise.* 건전성을 본다 ──
 # 감사 재현(2026-10-06 audit sim_wise.py)을 수집기 경로 그대로 옮겼다. 종목 수·커버 비율은
-# wise.raw 하한(2,400종목)·wise.cov_rate(>= 0.25)를 실물처럼 넘기는 값이다. 10-01 뒤라 커버 18콜.
+# wise.raw 하한(2,400종목)·wise.cov_rate(>= 0.25)를 실물처럼 넘기는 값이다. 그날은 10-01 뒤다.
 DAY, NEXT_DAY = "2026-10-06", "2026-10-07"
 TICKERS = [f"{i:06d}" for i in range(2400)]
 COVERED = frozenset(TICKERS[::3])                  # 800종목(33%) — 나머지 1,600 은 무커버
-N_CALLS = len(COVERED) * 18 + (len(TICKERS) - len(COVERED)) * 4
+N_CALLS = len(COVERED) * bw.REQ_COVERED + (len(TICKERS) - len(COVERED)) * bw.REQ_NONE
 WISE_CHECKS = {"wise.snapshot_day", "wise.run", "wise.req_identity", "wise.cov_rate", "wise.raw"}
 _PAGE = ("<html>추정기관수" + "x" * 5000 + "</html>").encode()   # c1010001 검증 통과 본문
 
@@ -201,16 +201,27 @@ def _fake_fetch(fail):
     return fetch
 
 
-def _collect(monkeypatch, db, ts, fail=None):
-    """`backfill_wise.main()` 한 번 = 런 1회. 기록 시각은 전부 ts(UTC) — 런 안의 순서는 rowid."""
+def _collect(monkeypatch, db, ts, fail=None, limit=0, tickers=None):
+    """`backfill_wise.main()` 한 번 = 런 1회. 기록 시각은 전부 ts(UTC) — 런 안의 순서는 rowid.
+    limit 은 `--limit`(저녁 체인 dry-run 은 3), tickers 는 유니버스(기본 TICKERS)."""
+    universe = list(TICKERS if tickers is None else tickers)
     monkeypatch.setattr(bw, "DB", str(db))
-    monkeypatch.setattr(bw, "universe", lambda con: list(TICKERS))
+    monkeypatch.setattr(bw, "universe", lambda con: list(universe))
     monkeypatch.setattr(bw, "encparam", lambda refresh=False: "tok")
     monkeypatch.setattr(bw, "fetch", _fake_fetch(fail))
     monkeypatch.setattr(bw, "kst_today", lambda: DAY)
     monkeypatch.setattr(bw, "now_utc", lambda: ts)
-    monkeypatch.setattr(sys, "argv", ["backfill_wise.py", "--mode", "full"])
+    monkeypatch.setattr(sys, "argv", ["backfill_wise.py", "--mode", "full"]
+                        + (["--limit", str(limit)] if limit else []))
     bw.main()
+
+
+def _crash_at(i):
+    """i 번째 종목에서 런을 죽인다(encparam 실패·OOM·kill 재현) — 그 앞 종목만 커밋된다."""
+    def fail(cmp_cd, ep, pk):
+        if cmp_cd == TICKERS[i]:
+            raise RuntimeError("런 중단 재현")
+    return fail
 
 
 def _health(db):
@@ -235,16 +246,11 @@ def test_rerun_after_an_interrupted_run_passes_that_days_health(tmp_path, monkey
     남은 종목만 받고, 그날 wise.* 는 전부 PASS 여야 한다. 종전에는 마지막 런 n_req(남은 종목분)를
     그날 호출 원장 전체와 비교해 `wise.req_identity` 가 반드시 FAIL 했다(감사 재현 40 vs 18)."""
     db = tmp_path / "wisereport.db"
-
-    def crash(cmp_cd, ep, pk):
-        if cmp_cd == TICKERS[1000]:
-            raise RuntimeError("런 중단 재현")
-
     with pytest.raises(RuntimeError, match="런 중단 재현"):
-        _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=crash)
+        _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=_crash_at(1000))
     assert _runs(db) == []                                   # 끊긴 런은 런 로그를 못 남긴다
     _collect(monkeypatch, db, "2026-10-06T09:40:00")
-    assert [r[0] for r in _runs(db)] == [1400]               # 앞 런이 커밋한 1,000종목은 안 부른다
+    assert [r[0] for r in _runs(db)] == [len(TICKERS) - 1000]   # 앞 런이 커밋한 종목은 안 부른다
     with closing(sqlite3.connect(db)) as con:
         assert con.execute("SELECT COUNT(*) FROM ws_call_log").fetchone()[0] == N_CALLS
     checks = _health(db)
@@ -261,15 +267,17 @@ def test_rerun_refetches_only_failed_stocks_and_passes_that_days_health(tmp_path
     cov, none = sorted(COVERED), sorted(set(TICKERS) - COVERED)
     fails = {(cov[0], "cF5002", "202712"): ("http503", b""),
              (cov[1], "c1010001", ""): ("ok", "접속장애".encode()),         # 200 인데 bad/errpage
-             (none[0], "cF5001", "202612"): ("exc/ConnectionError", b"")}   # 판정 불능 → 18콜
+             (none[0], "cF5001", "202612"): ("exc/ConnectionError", b"")}   # 판정 불능 → 커버 세트
     _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=lambda *k: fails.get(k))
     assert _health(db)["wise.run"].status is lh.Status.FAIL                # 런 하나·일부 실패
     _collect(monkeypatch, db, "2026-10-06T09:40:00")
     _collect(monkeypatch, db, "2026-10-06T10:10:00")                       # 다 회복된 뒤 — 대상 0
     runs = _runs(db)
-    assert [r[0] for r in runs] == [2400, 3, 0]
-    assert runs[0][1:] == (N_CALLS + 14, N_CALLS + 11, 1)                  # none[0] 은 18콜
-    assert runs[1][1:] == (18 + 18 + 4, 40, 0) and runs[2][1:] == (0, 0, 0)
+    assert [r[0] for r in runs] == [len(TICKERS), len(fails), 0]
+    flip = bw.REQ_COVERED - bw.REQ_NONE             # none[0] 은 그 런에서 커버 세트를 받았다
+    assert runs[0][1:] == (N_CALLS + flip, N_CALLS + flip - len(fails), 1)
+    rerun = 2 * bw.REQ_COVERED + bw.REQ_NONE        # cov[0]·cov[1] 커버 + none[0] 무커버
+    assert runs[1][1:] == (rerun, rerun, 0) and runs[2][1:] == (0, 0, 0)
     checks = _health(db)
     assert set(checks) == WISE_CHECKS and _not_pass(checks) == {}
 
@@ -288,3 +296,49 @@ def test_single_run_health_is_unchanged(tmp_path, monkeypatch, failing):
     checks = _health(db)
     assert set(checks) == WISE_CHECKS
     assert set(_not_pass(checks)) == ({"wise.run", "wise.raw"} if failing else set())
+    assert checks["wise.run"].value["basis"] == "run_log"            # 판정식도 종전 그대로
+
+
+def test_limited_run_after_an_interrupted_run_is_not_completion_evidence(tmp_path, monkeypatch):
+    """(검토 C-1) 끊긴 런 뒤 dry-run(--limit 3)만 돌았으면 그날 wise.run 은 FAIL 이어야 한다.
+    --limit 은 done 을 거르기 전에 유니버스 앞 3종목에 걸려 '대상 0' 으로 끝나므로 그날 완료의
+    증거가 아니다 — 그 런의 런 로그(n_stocks 0)를 완료로 읽으면 빠진 종목을 두고 PASS 한다."""
+    db = tmp_path / "wisereport.db"
+    with pytest.raises(RuntimeError, match="런 중단 재현"):
+        _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=_crash_at(1000))
+    _collect(monkeypatch, db, "2026-10-06T12:00:00", limit=3)
+    assert _runs(db) == []                                   # --limit 런은 런 로그를 남기지 않는다
+    assert _health(db)["wise.run"].status is lh.Status.FAIL
+
+
+def test_dry_run_before_a_run_that_breaks_late_is_not_completion_evidence(tmp_path, monkeypatch):
+    """(검토 C-1) 18:05 전 dry-run(--limit 3) 뒤 정규 런이 끊기면 그날 wise.run 은 FAIL 이어야
+    한다 — dry-run 의 런 로그를 완료로 읽으면 끊긴 정규 런의 하루가 PASS 한다."""
+    db = tmp_path / "wisereport.db"
+    _collect(monkeypatch, db, "2026-10-06T05:00:00", limit=3)
+    with pytest.raises(RuntimeError, match="런 중단 재현"):
+        _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=_crash_at(1000))
+    assert _runs(db) == []
+    assert _health(db)["wise.run"].status is lh.Status.FAIL
+
+
+def test_dry_run_before_the_evening_run_passes_that_days_health(tmp_path, monkeypatch):
+    """(검토 M-4) 18:05 전 dry-run(--limit 3) → 정규 런 완주 → 그날 wise.* 전부 PASS. dry-run 은
+    런 로그를 남기지 않아 런 로그가 그날 호출을 1:1 로 담지 않으므로 호출 원장 기준(basis
+    call_log)이다. 원래 코드는 마지막 런 n_req(남은 종목분)를 그날 원장 전체와 비교해 거짓 FAIL."""
+    db = tmp_path / "wisereport.db"
+    _collect(monkeypatch, db, "2026-10-06T05:00:00", limit=3)
+    _collect(monkeypatch, db, "2026-10-06T09:05:00")
+    assert [r[0] for r in _runs(db)] == [len(TICKERS) - 3]
+    checks = _health(db)
+    assert set(checks) == WISE_CHECKS and _not_pass(checks) == {}
+    assert checks["wise.run"].value["basis"] == "call_log"
+
+
+def test_empty_universe_day_is_not_a_completed_run(tmp_path, monkeypatch):
+    """(검토 M-3) 유니버스가 0 이면 대상 0 런 로그(n_req 0)만 남고 호출은 없다. 그날 wise.run 이
+    0 == 0 으로 PASS 하면 안 된다 — 원래 코드는 런 로그가 없어 FAIL 이었다."""
+    db = tmp_path / "wisereport.db"
+    _collect(monkeypatch, db, "2026-10-06T09:05:00", tickers=[])
+    assert _runs(db) == [(0, 0, 0, 0)]
+    assert _health(db)["wise.run"].status is lh.Status.FAIL

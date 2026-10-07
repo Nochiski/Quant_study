@@ -291,7 +291,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--mode", default="full", choices=("full",),
                     help="full=전 종목 (무커버도 매일 재프로브). daily(무커버 영구 스킵)는 제거 — "
                          "건전성 검사 wise.run 이 mode=full 을 요구한다 (DQ-9)")
-    ap.add_argument("--limit", type=int, default=0, help="종목 수 상한 (시험용)")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="종목 수 상한. 시험용 — 런 로그를 남기지 않는다"
+                         "(건전성 판정의 완료 증거가 아니다)")
     return ap.parse_args(argv)
 
 
@@ -314,13 +316,15 @@ def main() -> None:
     done -= retry
     tks = [t for t in tks if t not in done]
     print(f"  · 대상 {len(tks):,} 종목 (오늘 기수집 {len(done):,} 제외"
-          f" · 실패 재수집 {len(retry):,}) · 스냅샷 {today}", flush=True)
+          f" · 실패 재수집 {len(retry.intersection(tks)):,}) · 스냅샷 {today}", flush=True)
     if not tks:
         # 대상 0 이어도 런 로그를 한 줄(n_req 0) 남긴다 — 건전성은 그날 런을 합쳐 보므로, 끝까지 돈
-        # 런이 있었다는 기록이 있어야 런 로그 없이 끊긴 앞 런 뒤의 하루도 판정된다(A-03)
-        con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
-                    (now_utc(), a.mode, 0, 0, 0, 0, json.dumps({})))
-        con.commit()
+        # 런이 있었다는 기록이 있어야 런 로그 없이 끊긴 앞 런 뒤의 하루도 판정된다(A-03).
+        # 불변식: 런 로그 1행 = --limit 없는 런 완주 = 그때 유니버스 전부가 done 이거나 이번에 받음
+        if not a.limit:
+            con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
+                        (now_utc(), a.mode, 0, 0, 0, 0, json.dumps({})))
+            con.commit()
         con.close()
         return
 
@@ -421,9 +425,10 @@ def main() -> None:
     n_bad = sum(badkinds.values())
     print(f"\n  ④ 종료 — 종목 {n_cov+n_none:,} (커버 {n_cov:,} · 무커버 {n_none:,}) "
           f"· 요청 {n_req:,} · {el/60:.1f}분 · {n_req/max(el,1):.1f}req/s", flush=True)
-    con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
-                (now_utc(), a.mode, n_cov + n_none, n_req, n_ok, n_bad,
-                 json.dumps(badkinds, ensure_ascii=False)))
+    if not a.limit:          # 위 불변식 — --limit 런(시험용)은 런 로그를 남기지 않는다
+        con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
+                    (now_utc(), a.mode, n_cov + n_none, n_req, n_ok, n_bad,
+                     json.dumps(badkinds, ensure_ascii=False)))
     if n_bad:
         print(f"  ⚠⚠ 본문 검증 실패 {n_bad}건 — {badkinds}", flush=True)
         if badkinds.get("struct_changed") or badkinds.get("marker_missing"):

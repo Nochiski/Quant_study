@@ -443,14 +443,16 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
     n_keys = 0 if last is None else len(last)
     by_calls = last is not None and not (n_stocks == cov + none and n_keys == n_calls)
     unrecovered = None if last is None else sum(v != "ok" for v in last.values())
-    run_ok = unrecovered == 0 if by_calls else (n_bad == 0 and n_ok == n_req)
+    # 호출이 하나도 없는 날(유니버스 0 → 대상 0 런 로그만)은 완료가 아니다(종전엔 런 로그 없어 FAIL)
+    called = n_req > 0 or n_keys > 0
+    run_ok = called and (unrecovered == 0 if by_calls else (n_bad == 0 and n_ok == n_req))
     out.append(Check("wise.run", Level.REQUIRED,
                      Status.PASS if (modes == ["full"] and run_ok) else Status.FAIL,
                      {"mode": ",".join(modes), "runs": len(runs), "n_stocks": n_stocks,
                       "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad, "unrecovered": unrecovered,
                       "basis": "call_log" if by_calls else "run_log"},
-                     "그날 런 전부 mode=full · 런 로그 합 n_bad=0, n_ok=n_req (재실행·끊긴 런이 "
-                     "있으면 호출 원장에서 키마다 마지막 호출 ok — 미회복 0)"))
+                     "그날 런 전부 mode=full · 호출 1건 이상 · 런 로그 합 n_bad=0, n_ok=n_req "
+                     "(재실행·끊긴 런이 있으면 호출 원장에서 키마다 마지막 호출 ok — 미회복 0)"))
     req_cov = req_covered_on(day)          # 재무 추가 3콜(10-01~) 전 런은 15
     if src is not None:
         expected = cov * req_cov + none * REQ_NONE

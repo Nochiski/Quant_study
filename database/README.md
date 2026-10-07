@@ -218,7 +218,7 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
    cd ~/quant-ledger && export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
    flock -w 600 /tmp/quant_ledger_raw.lock .venv/bin/python -m daily.dart_daily --date D --skip-sweep
    ```
-   06:00 체인 crit 직후(08:10 전)에 돌리면 08:10 체인이 그 끝을 기다렸다가 회복된 DART 로 확정판을 짓는다. 08:10 뒤에 고쳤다면 그 D 확정판에는 빠져 있다 — 다시 지을지는 3번. DART 가 실패하면 06:00 체인의 `dart company gap` 도 건너뛰므로 회복 뒤 `bash scripts/dart_company_gap.sh` 를 돌린다. '재무 반영 지연 N건'은 판정을 막지 않는다 — 다음 런이 다시 확인한다. 다음 거래일 저녁 런 뒤에 돌리면 다른 D 의 늦은 공시가 섞여 판정에 들어온다(TECH_DEBT B-54).
+   06:00 체인 crit 직후(08:10 전)에 돌리면 08:10 체인이 그 끝을 기다렸다가 회복된 DART 로 확정판을 짓는다. 그날 일일 리포트에서 dart 는 '회복'으로 보이지만 `ledger_chain` 실패는 crit 으로 남는다(`dart company gap` 을 실제로 건너뛰었으므로 — 아래처럼 따로 돌린다). 08:10 뒤에 고쳤다면 그 D 확정판에는 빠져 있다 — 다시 지을지는 3번. DART 가 실패하면 06:00 체인의 `dart company gap` 도 건너뛰므로 회복 뒤 `bash scripts/dart_company_gap.sh` 를 돌린다. '재무 반영 지연 N건'은 판정을 막지 않는다 — 다음 런이 다시 확인한다. 다음 거래일 저녁 런 뒤에 돌리면 다른 D 의 늦은 공시가 섞여 판정에 들어온다(TECH_DEBT B-54).
 2. **10:30 워치독이 확정판 없음으로 crit** — 08:10 체인이 기다리는 중인지, 기다리는 상대가 살아 있는지 먼저 본다:
    ```bash
    grep "원장 락 대기" ~/quant-ledger/logs/notify.log | tail -1; pgrep -af "daily_build.sh|daily_ledger.sh"
@@ -260,7 +260,7 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 
 | 등급 | 조건 | 행동 |
 |---|---|---|
-| crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB | `notify.sh crit` (쿨다운 없음) |
+| crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB. 단 같은 D 의 dart 는 **마지막 런**으로 판정한다 — 앞 런 실패가 뒤 런 ok 로 회복됐으면 '회복'으로 표시하고 crit 이 아니다(kael 키 런이 있으면 회복 아님). DART 하나로만 실패한 `evening_chain`(그 런 detail 의 다른 `*_rc` 가 모두 0)과 저녁 원장 dart_rc 도 같다(N-24 3.15) | `notify.sh crit` (쿨다운 없음) |
 | warn | 건전성 warn 항목 실패, 아직 `running` 인 런 | `notify.sh warn` |
 | info | 그 밖의 일일 요약 | `notify.sh info` |
 

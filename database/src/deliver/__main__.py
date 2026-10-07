@@ -17,7 +17,8 @@
 시각' 이 붙는다. 장부 줄을 읽지 못하면 보냈는지 모르므로 보내지 않는다(rc 2).
 
 rc: 0 성공(이미 보내 건너뜀 포함) · 1 발송 실패(dry-run 은 비밀 키 없음) · 2 입력·인자 오류(판 없음·
-    발송 장부 손상 등) · 3 그 밖 예외(엑셀 생성 실패 등 — E-13, 1 '발송 실패'와 섞지 않는다)
+    발송 장부 손상·읽기 실패 등) · 3 그 밖 예상 밖 예외(엑셀 생성 실패 등 — E-13, 1 '발송 실패'와
+    섞지 않는다. 발송 뒤 장부 기록 실패면 메시지에 '발송은 됐다')
 """
 from __future__ import annotations
 
@@ -50,8 +51,9 @@ def _sent(ledger: Path, day: str, basis: str) -> list[dict[str, object]]:
     unknown = f"D={day} basis={basis} 를 보냈는지 알 수 없어 보내지 않는다"
     try:
         text = ledger.read_text(encoding="utf-8")
-    except UnicodeDecodeError as e:
-        raise DeliverError(f"발송 장부 {ledger} 를 UTF-8 로 읽지 못했다 — {unknown}: {e}") from e
+    except (OSError, UnicodeDecodeError) as e:
+        raise DeliverError(f"발송 장부 {ledger} 를 UTF-8 텍스트로 읽지 못했다 — {unknown}: "
+                           f"{type(e).__name__}: {e}") from e
     out: list[dict[str, object]] = []
     for i, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
@@ -116,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--resend 는 --send 와 함께 준다(다시 보내는 옵션이다)")
     roots = dict(model_root=args.model_root, fi_root=args.fi_root, out_root=args.out_root,
                  config_dir=args.config_dir)
+    sent = False                        # 발송이 성공했는가 — 그 뒤 예외(장부 append 실패)를 가른다
     try:
         if args.cmd == "model-daily":
             try:
@@ -140,13 +143,18 @@ def main(argv: list[str] | None = None) -> int:
                 r.date, r.basis, r.spec_id, r.top, r.n_ranked, r.n_rows,
                 correction=len(prior), build_id=r.build_id, generated_at=r.generated_at))
             if rc == 0 and sending:
+                sent = True
                 entry = {"date": r.date, "basis": r.basis, "build_id": r.build_id,
                          "sha256": sha256,
                          "sent_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                          "correction": len(prior)}
                 ledger.parent.mkdir(parents=True, exist_ok=True)
+                # 손 편집으로 끝 줄바꿈이 빠졌으면 먼저 보충한다 — 줄이 붙으면 다음 실행부터
+                # 장부 손상 rc 2 로 멈춘다
+                old = ledger.read_bytes() if ledger.is_file() else b""
+                lead = "\n" if old and not old.endswith(b"\n") else ""
                 with ledger.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    f.write(lead + json.dumps(entry, ensure_ascii=False) + "\n")
                 print(f"발송 장부 {ledger} — {json.dumps(entry, ensure_ascii=False)}")
             return rc
         parse_week(args.week)
@@ -159,11 +167,14 @@ def main(argv: list[str] | None = None) -> int:
     except DeliverError as e:
         print(f"오류: {e}", file=sys.stderr)
         return 2
-    except Exception as e:  # noqa: BLE001  # reason: E-13 — 생성 실패를 rc 1(발송 실패)과 가르려고 어떤 예외든 rc 3
+    except Exception as e:  # noqa: BLE001  # reason: E-13 — 예상 밖 예외를 rc 1(발송 실패)과 가른다
         target = (f"--date {args.date} --basis {args.basis}" if args.cmd == "model-daily"
                   else f"--week {args.week}")
+        # 발송 뒤 예외(장부 append 실패, B-58)면 장부에 없어 다음 자동 실행이 다시 보낼 수 있다
+        after = (" · 발송은 됐다 — 장부 기록 실패(장부에 없어 다음 실행이 다시 보낼 수 있다)"
+                 if sent else "")
         traceback.print_exc()
-        print(f"생성 실패(예상 밖) rc 3 — {args.cmd} {target}: {type(e).__name__}: {e}",
+        print(f"예상 밖 예외 rc 3 — {args.cmd} {target}{after}: {type(e).__name__}: {e}",
               file=sys.stderr)
         return 3
 

@@ -11,8 +11,8 @@
 #   중복 발송: deliver 가 발송 장부(data/deliver/sent_model_daily.jsonl)를 보고 이미 보낸 D 는 건너뛴다
 #         (rc 0). 같은 날 다시 보내려면 --resend(캡션에 '정정 n'·판 id·생성 시각).
 #   빌드 락: 세 단계 전체를 stage·equity 와 같은 빌드 락 안에서 돈다 — 아래 락 절 주석.
-#   rc: 0 완료 · 실패하면 그 단계의 rc(deliver: 1 발송 실패 · 2 입력 오류 · 3 생성 실패) · 2 인자 오류
-#       · 3 빌드 락 대기 실패 · 4 홈(~/quant-ledger) 이동 실패
+#   rc: 0 완료 · 실패하면 그 단계의 rc(deliver: 1 발송 실패 · 2 입력 오류 · 3 예상 밖 예외) · 2 인자 오류
+#       · 3 빌드 락 열기·대기 실패 · 4 홈(~/quant-ledger) 이동 실패
 set -uo pipefail
 cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 돌지 않는다" >&2; exit 4; }
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
@@ -39,7 +39,14 @@ kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 # 없다(교착 없음). 부모가 이미 쥐었으면 QL_BUILD_LOCK_HELD=1 로 물려준다.
 LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"   # QL_BUILD_LOCK_FILE 은 테스트 전용(운영 락을 잡지 않게)
 if [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
-  exec 9>"$LOCK"
+  # 락 파일을 못 열면 멈춘다 — bash 는 exec 리다이렉트 실패에 멈추지 않아, 그대로 가면 daily_build 에서
+  # 물려받은 fd 9(원장 락)가 빌드 락 행세를 한다
+  exec 9>"$LOCK" || {
+    echo "모델 단계 실패: 빌드 락 열기(rc=3) — $LOCK 을 열 수 없다, 아무 단계도 돌지 않았다(엑셀 발송 0) D=$D"
+    scripts/notify.sh crit "모델 단계 실패: 빌드 락 열기(rc=3)" \
+      "D=$D basis=morning | $LOCK 을 열 수 없다 — 아무 단계도 돌지 않았다(엑셀 발송 0)"
+    exit 3
+  }
   if ! flock -n 9; then
     W0=$(date +%s); W0_KST=$(kst)
     echo "[$W0_KST] model_daily 빌드 락 대기 시작 — 다른 빌드가 $LOCK 을 쥐고 있다(끝나면 이어서 돈다) D=$D"

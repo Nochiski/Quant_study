@@ -103,13 +103,15 @@ def _root(home: Path, *, stub_flock: bool = True) -> Path:
 
 
 def _run(home: Path, script: str, *args: str, held: bool = True, stub_flock: bool = True,
-         **rcs: int) -> Run:
-    """held=True 면 빌드 락을 물려받은 것으로(QL_BUILD_LOCK_HELD=1) model_daily 가 락을 건너뛴다."""
+         build_lock: Path | None = None, **rcs: int) -> Run:
+    """held=True 면 빌드 락을 물려받은 것으로(QL_BUILD_LOCK_HELD=1) model_daily 가 락을 건너뛴다.
+    build_lock 은 빌드 락 파일 경로(기본 home/build.lock)."""
     root = _root(home, stub_flock=stub_flock)
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"),
                PATH=f"{home / 'fakebin'}:{os.environ['PATH']}",
                QL_RAW_LOCK_HELD="1", QL_RAW_LOCK_FILE=str(home / "raw.lock"),
-               QL_BUILD_LOCK_FILE=str(home / "build.lock"), FLOCK_LOG=str(home / "flock.txt"))
+               QL_BUILD_LOCK_FILE=str(build_lock or home / "build.lock"),
+               FLOCK_LOG=str(home / "flock.txt"))
     for k in ("QL_BUILD_LOCK_HELD", "QL_SKIP_KW", "QL_FORCE"):
         env.pop(k, None)
     if held:
@@ -206,16 +208,33 @@ def test_model_daily_failed_lock_wait_runs_nothing(tmp_path: Path) -> None:
     assert len(crit) == 1 and "모델 단계 실패: 빌드 락 대기(rc=3)" in crit[0]
 
 
+def test_model_daily_unopenable_lock_file_runs_nothing(tmp_path: Path) -> None:
+    """빌드 락 파일을 열 수 없으면(`exec 9>` 실패) 멈춘다 — bash 는 이 실패에 멈추지 않아, 그대로
+    가면 물려받은 fd 9(daily_build 의 원장 락)가 빌드 락 행세를 했다. rc 3, 단계 0, crit 1건."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, held=False,
+             build_lock=tmp_path / "no_such_dir" / "build.lock")
+    assert r.rc == 3, r.out
+    assert r.calls == [] and r.flock == []
+    crit = _crit(r)
+    assert len(crit) == 1 and "모델 단계 실패: 빌드 락 열기(rc=3)" in crit[0]
+
+
 @pytest.mark.skipif(shutil.which("flock") is None,
                     reason="flock(util-linux) 없음(맥) — 서버·CI 우분투에서 돈다")
 def test_model_daily_real_build_lock_released_then_runs(tmp_path: Path) -> None:
-    """진짜 flock — 다른 프로세스가 빌드 락을 2초 쥐었다 풀면, 대기 줄·info 1건을 남기고
-    그 뒤에 돈다."""
+    """진짜 flock — 다른 프로세스가 빌드 락을 쥔 동안 model_daily 가 대기 줄·info 1건을 남기고,
+    holder 가 그 info 를 본 뒤 풀면 그 뒤에 돈다(고정 sleep 이 아니라 대기 기록을 보고 푼다 —
+    부하 큰 CI 에서 대기 전에 풀려 버리는 간헐 실패 방지, 상한 30초)."""
     root = _root(tmp_path, stub_flock=False)
     held = tmp_path / "held"
-    # holder 는 락을 잡은 뒤 표식을 남기고, 풀기 직전에 calls.txt 에 released 를 적는다
-    holder = subprocess.Popen(["flock", str(tmp_path / "build.lock"), "-c",
-                               f"touch '{held}'; sleep 2; echo released >> '{root / 'calls.txt'}'"])
+    notify = root / "notify.txt"
+    # holder 는 락을 잡은 뒤 표식을 남기고, notify 에 '빌드 락 대기' 가 생기면(최대 30초)
+    # calls.txt 에 released 를 적고 푼다. flock -c 는 /bin/sh(우분투 dash)로 돌므로 POSIX
+    # 문법만 쓴다.
+    wait_then_release = (f"touch '{held}'; i=0; while [ $i -lt 300 ]; do "
+                         f"grep -q '빌드 락 대기' '{notify}' 2>/dev/null && break; "
+                         f"sleep 0.1; i=$((i+1)); done; echo released >> '{root / 'calls.txt'}'")
+    holder = subprocess.Popen(["flock", str(tmp_path / "build.lock"), "-c", wait_then_release])
     try:
         deadline = time.monotonic() + 10
         while not held.exists():
@@ -248,6 +267,8 @@ def test_daily_build_runs_model_step_after_the_morning_build(tmp_path: Path) -> 
     assert _crit(r) == []
     done = [n for n in r.notify if n.startswith("info|daily_build 완료|")]
     assert len(done) == 1 and f"모델 단계 완료 D={D}" in done[0]
+    # 모델 결과 줄이 요약 맨 앞이다 — 확정판 줄이 길어도 cut -c1-900 에 잘리지 않게
+    assert done[0].split("|", 2)[2].startswith(f"모델 단계 완료 D={D}")
 
 
 def test_daily_build_soft_build_failure_still_runs_model_step(tmp_path: Path) -> None:
@@ -266,6 +287,8 @@ def test_daily_build_failed_morning_build_sends_nothing(tmp_path: Path) -> None:
     assert r.mods == [*LEDGER_STEPS, "build_morning"]
     assert [n.split("|")[:2] for n in r.notify] == [
         ["crit", "daily_build 실패: build_morning(rc=2)"]]
+    # 모델 단계 없는 날의 요약은 종전 그대로(확정판 줄로 시작)
+    assert r.notify[0].split("|", 2)[2].startswith("──── krx 종료")
 
 
 def test_daily_build_model_failure_is_soft_and_recorded(tmp_path: Path) -> None:

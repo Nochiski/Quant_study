@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import statistics
 import zipfile
@@ -1117,6 +1118,50 @@ def test_cli_malformed_ledger_is_an_input_error(world: dict[str, Path], tmp_path
     (tmp_path / LEDGER).write_bytes(raw)
     assert cli.main(_send_args(world, tmp_path)) == 2
     assert calls == [] and "보냈는지 알 수 없어 보내지 않는다" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root 는 권한 없는 파일도 읽는다")
+def test_cli_unreadable_ledger_permission_is_an_input_error(
+        world: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """장부를 권한 때문에 못 읽어도(OSError) 보냈는지 알 수 없다 — rc 3(예상 밖)이 아니라
+    rc 2, 발송 0."""
+    calls = _fake_send(monkeypatch)
+    ledger = tmp_path / LEDGER
+    ledger.write_text("", encoding="utf-8")
+    ledger.chmod(0o000)
+    try:
+        assert cli.main(_send_args(world, tmp_path)) == 2
+    finally:
+        ledger.chmod(0o644)
+    assert calls == [] and "보냈는지 알 수 없어 보내지 않는다" in capsys.readouterr().err
+
+
+def test_cli_ledger_append_failure_after_send_says_it_was_sent(
+        world: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """B-58 — 발송이 성공한 뒤 장부 append 가 실패하면 rc 3 이고, 메시지가 '발송은 됐다'를 밝힌다
+    (장부에 없으니 다음 자동 실행이 다시 보낼 수 있다 — 사람이 장부를 채워야 한다)."""
+    calls = _fake_send(monkeypatch)
+    (tmp_path / LEDGER).mkdir()           # 장부 자리에 폴더 — 읽기는 '없음', 발송 뒤 append 는 실패
+    rc = cli.main(_send_args(world, tmp_path))
+    err = capsys.readouterr().err
+    assert rc == 3 and len(calls) == 1
+    assert "발송은 됐다 — 장부 기록 실패" in err and "IsADirectoryError" in err
+
+
+def test_cli_ledger_append_restores_a_missing_newline(world: dict[str, Path], tmp_path: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """손 편집으로 장부 끝 줄바꿈이 빠졌어도 append 가 줄을 붙이지 않는다 — 붙으면 다음 실행부터
+    매일 장부 손상 rc 2 로 멈춘다."""
+    calls = _fake_send(monkeypatch)
+    other = {"date": "2026-09-24", "basis": "morning", "build_id": "m_x", "sha256": "0" * 64,
+             "sent_utc": "2026-09-24T01:00:00Z", "correction": 0}
+    (tmp_path / LEDGER).write_text(json.dumps(other), encoding="utf-8")    # 끝 줄바꿈 없음
+    args = _send_args(world, tmp_path)
+    assert cli.main(args) == 0
+    assert [e["date"] for e in _ledger(tmp_path)] == ["2026-09-24", FRI]
+    assert cli.main(args) == 0 and len(calls) == 1     # 다음 실행도 장부를 읽고 건너뛴다
 
 
 def test_cli_unexpected_error_is_rc_3(world: dict[str, Path], tmp_path: Path,

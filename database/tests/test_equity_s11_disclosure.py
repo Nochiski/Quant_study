@@ -210,6 +210,8 @@ def test_모집단_어휘가_sql_리터럴과_같다() -> None:
         assert f"'{c}'" in body, c
     for k in rules_s11.FIN_ITEM_KEYWORDS:
         assert f"LIKE '%{k}%'" in body, k
+    for k in rules_s11.FIN_REASON_KEYWORDS:              # C-11 — 사유는 공백 뗀 판으로 대조
+        assert f"reason_compact LIKE '%{k}%'" in body, k
 
 
 def test_EG1_우변은_sql_의_모집단_CTE_를_재사용한다() -> None:

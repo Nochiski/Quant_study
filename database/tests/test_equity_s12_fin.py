@@ -374,6 +374,12 @@ def test_픽스처는_전부_positive_이고_키가_유일하다(built: build.Bu
 OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 선택 축)
 
 
+def _stage_available(rcept: str, rcept_dt: date) -> date:
+    """가짜 stage `stg_disclosure.available_date` — stage E08 규칙(원천 rcept_dt 와 접수번호 앞
+    8자리 중 늦은 쪽)을 그대로 흉내 낸다. 정상 접수는 rcept_dt 와 같다."""
+    return max(rcept_dt, date(int(rcept[:4]), int(rcept[4:6]), int(rcept[6:8])))
+
+
 def _fin_row(corp: str, year: str, reprt: str, rcept: str, *, sj: str, account_id: str,
              account_nm: str, amount: float | None, is_krw: bool = True, currency: str = "KRW",
              ord_: int = 1, observed: date = OBSERVED,
@@ -423,7 +429,8 @@ def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | No
               for r, c, y, _rc, dt, _pt, _ac in reports] + list(extra_disclosures or [])
     disclosures = [{"rcept_no": r, "rcept_dt": dt, "corp_code": c, "report_nm": nm,
                     "is_correction": nm.startswith(("[기재정정]", "[첨부정정]")),
-                    "rm_corrected_later": False, "observed_date": OBSERVED}
+                    "rm_corrected_later": False, "available_date": _stage_available(r, dt),
+                    "observed_date": OBSERVED}
                    for r, c, nm, dt in listed]
     if duplicate_disclosure:
         disclosures.append({**disclosures[0], "observed_date": date(2026, 9, 3)})
@@ -586,12 +593,16 @@ def test_부정_같은_grain_으로_접히면_둘_다_격리된다(make_stage_tr
 _ORIG = ("20210330000001", date(2021, 3, 30))
 _NONFIN = "VIII. 임원 및 직원 등에 관한 사항 1. 임원 및 직원의 현황"
 _FIN_SECTION = "III. 재무에 관한 사항 8. 기타 재무에 관한 사항"
+_EMPTY_ITEMS = "[]"          # 정정 첫 장에서 항목 표를 하나도 못 뽑았다(stage 원문 그대로)
 
 
 def _correction_row(make_stage_tree, tmp_path: Path,
-                    chain: list[tuple[str, date, str | None, date]]) -> dict[str, object]:
-    """chain = [(정정 접수번호, 접수일, 정정 항목(None = 첫 장 미해석), 첫 장의 원본 제출일)] — 마지막이
-    API 가 돌려준 판(재무 행의 접수번호)이다. 원본은 `_ORIG`."""
+                    chain: list[tuple[str, date, str | None, date]],
+                    reason: str = "기재정정") -> dict[str, object]:
+    """chain = [(정정 접수번호, 접수일, 정정 항목, 첫 장의 원본 제출일)] — 정정 항목 None 은 첫 장
+    미해석, `_EMPTY_ITEMS` 는 빈 항목 표다. 마지막이 API 가 돌려준 판(재무 행의 접수번호)이다.
+    원본은 `_ORIG`.
+    `reason` 은 정정 첫 장의 정정 사유(`reason_raw`)다."""
     corps = [("00000001", "12")]
     last, last_dt = chain[-1][0], chain[-1][1]
     reports = [(last, "00000001", "2020", "11011", last_dt, date(2020, 12, 31), "11011")]
@@ -601,8 +612,9 @@ def _correction_row(make_stage_tree, tmp_path: Path,
     extra = [(_ORIG[0], "00000001", "사업보고서 (2020.12)", _ORIG[1])] + [
         (r, "00000001", corr_nm, dt) for r, dt, _it, _fd in chain[:-1]]
     corrections = [{"rcept_no": r, "page_found": True, "filed_date": fd,
-                    "filed_date_status": "parsed", "reason_raw": "기재정정",
-                    "items": None if it is None else json.dumps([{"항목": it}], ensure_ascii=False)}
+                    "filed_date_status": "parsed", "reason_raw": reason,
+                    "items": it if it in (None, _EMPTY_ITEMS)
+                    else json.dumps([{"항목": it}], ensure_ascii=False)}
                    for r, _dt, it, fd in chain]
     r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin, (last, "rcept_no", last),
                     report_names={r: corr_nm for r, *_ in chain}, extra_disclosures=extra,
@@ -639,16 +651,104 @@ def test_중간_정정이_재무표를_고쳤으면_정정일을_지킨다(make_
     assert row["available_basis"] == "derived"
 
 
-@pytest.mark.parametrize("items, filed", [
-    (None, _ORIG[1]),                        # 정정 첫 장 미해석 → 판단 불가
-    (_NONFIN, date(2021, 2, 1)),             # 첫 장의 원본 제출일이 연결된 원본과 어긋난다
+@pytest.mark.parametrize("items, filed, reason", [
+    (None, _ORIG[1], "기재정정"),             # 정정 첫 장 미해석 → 판단 불가
+    (_NONFIN, date(2021, 2, 1), "기재정정"),  # 첫 장의 원본 제출일이 연결된 원본과 어긋난다
+    # C-11(N-25 Q1) — 항목 표가 비었다(서술형·표만 있는 첫 장) → 판단 불가. 예전엔 FALSE 로 읽혀
+    # 재작성 값에 원본 공시일이 붙었다(20181129000580 개발비 판단오류 재작성 등)
+    (_EMPTY_ITEMS, _ORIG[1], "기재정정"),
+    # C-11 — 항목은 비재무(배당 지표)인데 사유가 재무제표 재작성이다(00287812 FY2015, 2018-09-07)
+    (_NONFIN, _ORIG[1], "2015~2017 연결재무제표 재작성 및 감사보고서 재발행"),
 ])
 def test_판단할_수_없으면_정정일을_지킨다(make_stage_tree, tmp_path: Path,
-                                     items: str | None, filed: date) -> None:
+                                     items: str | None, filed: date, reason: str) -> None:
     row = _correction_row(make_stage_tree, tmp_path,
-                          [("20210615000002", date(2021, 6, 15), items, filed)])
+                          [("20210615000002", date(2021, 6, 15), items, filed)], reason=reason)
     assert row["available_date"] == date(2021, 6, 15)
     assert row["available_basis"] == "derived"
+
+
+def test_재제출본은_접수번호_날짜부터_보인다(make_stage_tree, tmp_path: Path) -> None:
+    """J-41(N-26 4.2) — 박셀바이오 재제출본. 목록 API 가 2025-08-28 접수번호에 원래 제출일
+    rcept_dt(2024-03-19)를 붙인다. 공개일은 stage 가 보정한 `stg_disclosure.available_date`
+    (접수번호 날짜)다 — 원천 rcept_dt 를 쓰면 527일 look-ahead. 판의 `rcept_dt` 는 원천 그대로
+    기간 판정·접수 지연 격리 축으로 남는다."""
+    rcept = "20250828000446"
+    corps = [("01335851", "12")]
+    reports = [(rcept, "01335851", "2023", "11011", date(2024, 3, 19), date(2023, 12, 31),
+                "11011")]
+    fin = [_fin_row("01335851", "2023", "11011", rcept, sj="IS",
+                    account_id="ifrs-full_Revenue", account_nm="매출액", amount=100.0)]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin, (rcept, "rcept_no", rcept))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    out = _rows(r.out_dir)                             # type: ignore[arg-type]
+    assert len(out) == 1
+    assert out[0]["rcept_dt"] == date(2024, 3, 19)
+    assert out[0]["available_date"] == date(2025, 8, 28)
+
+
+# ── 일일 재수집으로 원본·정정이 쌓인 재무 그룹 (G-21, N-25 Q2 — B-41 결정 A 와 같은 정책) ──────
+# 백필 구간은 API 가 정정본만 줘서 '정정 값 + 정정일'인데, 일일 수집은 같은 그룹에 원본 뒤에 정정을
+# 덧붙인다. 그룹의 **최신 판본(max rcept_no)** 값과 그 판의 공개일을 싣는다(오브젠 01472930 FY2025).
+_G21_ORIG = ("20260319001177", date(2026, 3, 19))      # 원본 — 백필이 08-26 에 관측
+_G21_CORR = ("20260928000253", date(2026, 9, 28))      # [기재정정] — 일일 수집이 09-28 에 덧붙였다
+_G21_SEEN = (date(2026, 8, 26), date(2026, 9, 28))
+
+
+def _g21_row(make_stage_tree, tmp_path: Path, fin: list[dict[str, object]],
+             corrections: list[dict[str, object]] | None = None) -> dict[str, object]:
+    reports = [(rc, "01472930", "2025", "11011", dt, date(2025, 12, 31), "11011")
+               for rc, dt in (_G21_ORIG, _G21_CORR)]
+    r = _hand_build(make_stage_tree, tmp_path, [("01472930", "12")], reports, fin,
+                    (_G21_CORR[0], "rcept_no", _G21_CORR[0]),
+                    report_names={_G21_CORR[0]: "[기재정정]사업보고서 (2025.12)"},
+                    corrections=corrections)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    out = _rows(r.out_dir)                             # type: ignore[arg-type]
+    assert len(out) == 1
+    return out[0]
+
+
+def _g21_fin(sj: str, account_id: str, account_nm: str, amounts: tuple[float, float],
+             ords: tuple[int, int] = (1, 1)) -> list[dict[str, object]]:
+    return [_fin_row("01472930", "2025", "11011", rc, sj=sj, account_id=account_id,
+                     account_nm=account_nm, amount=amt, ord_=o, observed=seen)
+            for (rc, _dt), amt, o, seen in zip((_G21_ORIG, _G21_CORR), amounts, ords, _G21_SEEN,
+                                               strict=True)]
+
+
+def test_원본과_정정이_쌓이면_최신_판본_값과_정정일을_싣는다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 90.0)))
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert _num(row["revenue"]) == Decimal("90")
+    assert row["rcept_dt"] == _G21_CORR[1]
+    assert row["available_date"] == _G21_CORR[1]       # 정정 첫 장 정보가 없다 → 정정일
+
+
+def test_정정이_줄_순서를_바꿔도_값이_모호해지지_않는다(make_stage_tree, tmp_path: Path) -> None:
+    """이오플로우 01274310 FY2024 — 정정이 `ifrs-full_Equity` 의 ord 를 24 → 26 으로 옮겼다.
+    자연키에 ord 가 들어 있어 두 판의 줄이 다 살아남으면 `pick` 이 갈려 total_equity 가 NULL 이
+    된다."""
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("BS", "ifrs-full_Equity", "자본총계", (576.0, 457.0), ords=(24, 26)))
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert row["total_equity"] is not None and _num(row["total_equity"]) == Decimal("457")
+
+
+def test_재무_무관_정정이_쌓이면_값은_정정본이고_공개일은_원본이다(make_stage_tree,
+                                                                tmp_path: Path) -> None:
+    """G-21 과 원본 공시일 승계(e1.22.0 · C-11)가 같은 판을 본다 — 최신 판본이 재무 무관 정정이고
+    첫 장 원본 제출일이 확인되면 공개일은 원본 접수일이다(백필 구간과 같은 정책)."""
+    corrections = [{"rcept_no": _G21_CORR[0], "page_found": True, "filed_date": _G21_ORIG[1],
+                    "filed_date_status": "parsed", "reason_raw": "기재정정",
+                    "items": json.dumps([{"항목": _NONFIN}], ensure_ascii=False)}]
+    row = _g21_row(make_stage_tree, tmp_path,
+                   _g21_fin("IS", "ifrs-full_Revenue", "매출액", (100.0, 100.0)), corrections)
+    assert row["rcept_no"] == _G21_CORR[0]
+    assert row["rcept_dt"] == _G21_CORR[1]
+    assert row["available_date"] == _G21_ORIG[1]
 
 
 def test_부정_접수지연_상한_밖은_격리된다(make_stage_tree, tmp_path: Path) -> None:

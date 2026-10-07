@@ -1,7 +1,8 @@
 -- fin_std (S12) — 재무 PIT 표준화. DESIGN v1.2 §4-4 · GATES v1.0 §3-⑫ · EG7-P04.
 -- grain (corp_code, period_end, report_code, fs_div, vintage_kind) · receipt_axis.
 -- 모집단 = `stg_fin` 의 (corp_code, bsns_year, reprt_code, fs_div) 중 표준계정 행이 하나라도
--- 있는 그룹(= EG1 우변). 그룹당 `rcept_no` 는 하나다(API 는 요청한 보고서 하나를 돌려준다).
+-- 있는 그룹(= EG1 우변). 그룹의 판본은 **최신 접수(max `rcept_no`) 하나**다 — API 는 요청한 보고서의
+-- 최신 정정본 하나를 돌려주지만, 일일 수집은 같은 그룹에 원본 뒤에 정정을 덧붙인다(G-21, `grp`).
 --
 -- 계정 대응표 `_acct` 는 `src/fin_map.py` 가 정본이고 `rules_s12.py:acct_values_sql()` 이 만든
 -- 문자열을 그대로 옮겼다(tests 가 대조). 탐색 순서는 tier(a_concept → b_concept_alt → c_nm →
@@ -53,9 +54,11 @@
 -- 잡았다. 매출도 같은 꼴로 `no_is_statement`(IS·CIS 행 없음) 와 `unmapped` 로 갈린다 — 한 낱말
 -- (`unavailable`)로 묶여 있던 동안 DQ-6·DQ-8 같은 대응 실패가 게이트 숫자에 안 보였다.
 --
--- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`) — 단 재무표를 안 건드린 정정본은 원본
--- 접수일(`redate` CTE — 그 행만 `available_date < rcept_dt`, basis 는 둘 다 derived). `stg_rcept_dt_map` 은 stage 에
--- 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 · `restated_unknown = true`(4A).
+-- PIT: `available_date` = 판 접수번호의 stage 공개일(`stg_disclosure.available_date`, derived — 원천
+-- `rcept_dt` 와 접수번호 날짜 중 늦은 쪽. 재제출본은 원천 rcept_dt 가 접수번호보다 이르다, J-41) — 단
+-- 재무를 안 건드린 정정본은 원본 공개일(`redate` CTE — 그 행만 `available_date < rcept_dt`, basis 는 둘 다
+-- derived). `stg_rcept_dt_map` 은 stage 에 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 ·
+-- `restated_unknown = true`(4A).
 -- 격리 4종: non_krw · period_unresolved · rcept_lag_out_of_range · duplicate_vintage.
 WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS (
     VALUES
@@ -123,8 +126,12 @@ _rcode(reprt_code) AS (
 ),
 grp AS (
     -- 모집단. `WHERE account_std` 는 GATES §3-⑫ 우변과 같은 술어다.
+    -- 판본 = 그룹의 **최신 접수**(G-21, N-25 Q2). 일일 수집이 원본 뒤에 정정을 덧붙인 그룹을 첫 접수에
+    -- 고정하면 정정 값이 영영 안 들어오고, 줄 순서(ord)를 바꾼 계정은 두 판의 줄이 다 살아 `pick` 이
+    -- 모호 NULL 이 된다(이오플로우 01274310 total_equity). 백필 구간(API = 최신 정정본 하나)과 같은
+    -- 정책이다 — 정정 값 + 그 판의 공개일(B-41 결정 A). 원본 구간의 원본 값은 4C 몫이다.
     SELECT corp_code, bsns_year, reprt_code, fs_div,
-           min(rcept_no)                                        AS rcept_no,
+           max(rcept_no)                                        AS rcept_no,
            min(currency)                                        AS currency,
            bool_and(is_krw)                                     AS is_krw_group
     FROM stg_fin
@@ -149,15 +156,19 @@ fin AS (
     SEMI JOIN grp g
       ON g.corp_code = f.corp_code AND g.bsns_year = f.bsns_year
      AND g.reprt_code = f.reprt_code AND g.fs_div = f.fs_div
-    -- 자연키 8열(rules_dart.STG_FIN natural_key)당 1행. first_write_wins(`observed_date` 최소).
+     AND g.rcept_no = f.rcept_no                -- 그룹의 최신 판본 줄만(G-21) — 판끼리 섞지 않는다
+    -- 자연키 8열(rules_dart.STG_FIN natural_key)당 1행 — 같은 접수의 재수집 판본을 접는다.
+    -- first_write_wins(`observed_date` 최소).
     QUALIFY row_number() OVER (
         PARTITION BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
                      f.account_id, f.account_detail, f.ord
         ORDER BY f.observed_date NULLS LAST, f.thstrm_amount NULLS LAST) = 1
 ),
 dt AS (
-    -- 접수일 원천. 접수번호당 1행으로 접어야 `head` 조인이 grp 행을 늘리지 않는다.
-    SELECT rcept_no, rcept_dt
+    -- 접수일·공개일 원천. 접수번호당 1행으로 접어야 `head` 조인이 grp 행을 늘리지 않는다.
+    -- `available_date` 는 stage 가 보정한 공개일이다(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽 —
+    -- E08·J-41, 보정 규칙은 stage 한 곳). `rcept_dt` 는 원천 그대로 기간 판정·접수 지연 격리 축이다.
+    SELECT rcept_no, rcept_dt, available_date
     FROM stg_disclosure
     QUALIFY row_number() OVER (PARTITION BY rcept_no
                                ORDER BY observed_date NULLS LAST, rcept_dt NULLS LAST) = 1
@@ -165,16 +176,20 @@ dt AS (
 redate AS (
     -- 정정본의 원본 공시일 승계(09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③).
     -- DART API 는 정정이 있으면 정정본만 돌려주므로 이 판의 값은 정정본이다. 원본부터 이 판까지의
-    -- **모든 정정**이 재무표를 건드리지 않았으면(`corr_has_fin_item = false` — 첫 장 미해석 NULL 은
-    -- 건드린 것으로 본다) 재무 수치는 원본과 같으므로 공개일은 원본 접수일이다. 정정 첫 장의 원본
+    -- **모든 정정**이 재무를 건드리지 않았으면(`corr_has_fin_item = false` — 첫 장 미해석·빈 항목 표
+    -- NULL 은 건드린 것으로 본다) 재무 수치는 원본과 같으므로 공개일은 원본 접수일이다. 정정 첫 장의 원본
     -- 제출일이 연결된 원본 접수일과 1일 안(`date_check` exact·off_1d)일 때만 — 연결이 흔들리면
     -- 정정 접수일을 지킨다. `disclosure_version` 은 rcept_no grain(유일)이다.
-    SELECT c.rcept_no, o.rcept_dt                                AS orig_rcept_dt
+    -- 재무 정정 판정은 disclosure_version 한 곳이다 — 사유가 재작성·재감사 류이거나 항목 표가 빈 정정은
+    -- TRUE·NULL 이라 승계하지 않는다(C-11, N-25 Q1). 날짜는 두 판 모두 stage 공개일(`dt`)로 잇는다 —
+    -- 원본이 재제출본이면 원천 rcept_dt 가 접수번호보다 이르다(J-41).
+    SELECT c.rcept_no, od.available_date                         AS orig_avail_dt
     FROM disclosure_version c
-    JOIN disclosure_version o ON o.rcept_no = c.orig_rcept_no
+    JOIN dt od ON od.rcept_no = c.orig_rcept_no
+    JOIN dt cd ON cd.rcept_no = c.rcept_no
     WHERE c.is_correction
       AND c.date_check IN ('exact', 'off_1d')
-      AND o.rcept_dt < c.rcept_dt
+      AND od.available_date < cd.available_date
       AND NOT EXISTS (
           SELECT 1 FROM disclosure_version x
           WHERE x.orig_rcept_no = c.orig_rcept_no AND x.is_correction
@@ -268,11 +283,12 @@ doc AS (
                                ORDER BY period_to, period_from, doc_acode) = 1
 ),
 head AS (
-    -- `rcept_dt` 는 이 판의 접수일(기간 판정·접수 지연 격리는 이 축), `avail_dt` 는 공개일 축이다 —
-    -- 원본 공시일을 승계한 정정본만 둘이 갈린다(`redate`) — 그 행은 `available_date < rcept_dt` 로 드러난다.
+    -- `rcept_dt` 는 이 판의 원천 접수일(기간 판정·접수 지연 격리는 이 축), `avail_dt` 는 공개일 축이다 —
+    -- 원본 공시일을 승계한 정정본(`redate`)은 `available_date < rcept_dt`, 원천 rcept_dt 가 접수번호보다
+    -- 이른 재제출본(J-41)은 `available_date > rcept_dt` 로 드러난다.
     SELECT g.*,
            d.rcept_dt,
-           coalesce(rd.orig_rcept_dt, d.rcept_dt)                AS avail_dt,
+           coalesce(rd.orig_avail_dt, d.available_date)          AS avail_dt,
            m.period_from, m.period_to, m.doc_acode,
            c.fiscal_month
     FROM grp g

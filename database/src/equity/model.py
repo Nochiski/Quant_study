@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.24.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.25.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -209,6 +209,21 @@ RULES_VERSION = "e1.24.0"                # BuildRecord.rules_version 에 실린�
 # e1.23.0: `security.name_abbrv_current`(KRX 약명) 추가(10-05 사용자 지적 — 엑셀이 정식명 '삼화콘덴서공업'을
 #          보였다). 정식명 `name_current` 는 그대로고, fi_universe 이름·compat stock_name 이 약명을 쓴다.
 # e1.24.0: opinion_daily EG8 추정기관수 비교가 wise 0 ≡ v3 NULL(10-06 G-42). 게이트 변경, 산출 불변.
+# e1.25.0: 배포 묶음 4 갈래 4-1 의 fin_std·disclosure_version 몫
+#          (플랜 `2026-10-07-batch4-inputs-excel.md`).
+#          ① J-41(N-26 4.2) `fin_std` 공개일 원천을 `stg_disclosure.available_date`로 —
+#             stage 보정 공개일(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽). 박셀바이오
+#             재제출본이 최대 654일 앞당겨 보였다. 그 행은 `available_date > rcept_dt`
+#             (rcept_dt 는 원천 그대로 기간 판정 축). stage 2.6.0 동반.
+#          ② C-11(N-25 Q1) `disclosure_version.corr_has_fin_item` — 정정 사유가 재작성·
+#             재감사·재발행·소급·재무제표수정이면 TRUE, 항목 표가 빈('[]') 정정은 NULL.
+#             원본 공시일 승계가 그 정정에서 멈춘다(재작성 값에 원본 공시일이 붙던
+#             look-ahead).
+#          ③ G-21(N-25 Q2) `fin_std` 그룹 판본을 첫 접수 → **최신 접수**(max rcept_no)로,
+#             값 줄도 그 접수 것만. 일일 수집이 덧붙인 정정 값이 반영되고 ord 가 바뀐
+#             계정의 모호 NULL 이 사라진다.
+#          게이트: EG3_fin_std 의 `n_available_ne_rcept_dt`·`n_orig_filing_unwitnessed` 가
+#          stage 공개일 축으로, EG8 그룹 조인 키가 max(rcept_no) 로.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

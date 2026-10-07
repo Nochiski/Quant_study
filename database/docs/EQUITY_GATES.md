@@ -2566,7 +2566,7 @@ DQ-8(capex 311사 NULL)도 **모든 게이트를 통과했다**. EG7 격리 비�
 
 | 항목 | 내용 |
 |---|---|
-| 그룹 축 | `fs_div` × **템플릿** × `report_code`. 템플릿은 `.sql` 의 `req` CTE 와 **같은 술어**를 게이트가 `stg_fin` 위에서 되풀이 계산한다(게이트는 `.sql` 을 베끼지 않는다 — EG3 기간 판정과 같은 규약): `RevenueFromInterest` 태그 → `banking`, 아니면 `InvestmentIncome` → `insurance`, 그 밖 `standard`. 요구 태그 정본은 `fin_map.REVENUE_FALLBACK` 의 `require` 이고, 산출에는 `reprt_code` 가 없으므로(1Q·3Q 는 `doc_acode` 로 다시 갈린다) 그룹 조인 키는 `(corp_code, bsns_year, fs_div, rcept_no)` — `.sql` `grp` 의 `min(rcept_no)` 와 같은 자리다 |
+| 그룹 축 | `fs_div` × **템플릿** × `report_code`. 템플릿은 `.sql` 의 `req` CTE 와 **같은 술어**를 게이트가 `stg_fin` 위에서 되풀이 계산한다(게이트는 `.sql` 을 베끼지 않는다 — EG3 기간 판정과 같은 규약): `RevenueFromInterest` 태그 → `banking`, 아니면 `InvestmentIncome` → `insurance`, 그 밖 `standard`. 요구 태그 정본은 `fin_map.REVENUE_FALLBACK` 의 `require` 이고, 산출에는 `reprt_code` 가 없으므로(1Q·3Q 는 `doc_acode` 로 다시 갈린다) 그룹 조인 키는 `(corp_code, bsns_year, fs_div, rcept_no)` — `.sql` `grp` 의 `max(rcept_no)`(그룹의 최신 접수, e1.25.0 G-21 — 그 전은 `min`)와 같은 자리다 |
 | 분모(예상 대상) | 그 그룹의 **채택 행 + 격리 행**. 격리를 넣는 이유는 값이 나와야 했던 대상이 격리로 사라지는 것도 커버리지 손실이기 때문이다(DQ-5·DEFECT-F01 이 그 유형). 기간 미해소로 격리돼 `report_code` 가 없는 행은 그룹 키에서 `unknown` 자리에 모인다 |
 | 분자 | **채택 행 중 값이 있는 것**. 계정은 `revenue`·`op_profit`·`net_income`·`total_asset`·`cf_operating_ytd`·`capex_ytd` 여섯(`rules_s12.COVERAGE_METRICS`) |
 | 기록형 | `coverage_by_group`(예상 대상 **20 이상**인 그룹만 — MANIFEST 가 커지지 않게) · `coverage_total`(전 그룹 합계) · `n_groups` · `n_groups_recorded`. `BuildRecord.gates` 에 실리고 **다음 빌드가 그것을 읽는다** |

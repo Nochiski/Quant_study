@@ -61,7 +61,7 @@ PERIODIC_PREFIXES: tuple[str, ...] = ("사업보고서", "반기보고서", "분
 EXCLUDED_TOKENS: tuple[str, ...] = ("연장신고", "유동화전문회사", "회계법인", "해외증권거래소")
 # 정정본 접두. `[첨부추가]` 는 원본 라벨이라 여기 없다(원본 후보 자격을 유지한다).
 CORRECTION_PREFIXES: tuple[str, ...] = ("기재정정", "첨부정정")
-# `corr_has_fin_item`(기록형) 의 키워드. `.sql` 의 LIKE 리터럴이 이것을 그대로 옮긴다.
+# `corr_has_fin_item` 의 항목 이름 키워드. `.sql` 의 LIKE 리터럴이 이것을 그대로 옮긴다.
 # ★ 서버 재측정: DESIGN §4-4 의 참조값 2,238/17,600 은 항목 목록이 명시되지 않은 채 인용된
 #   수치라 이 키워드 집합으로 재현되지 않을 수 있다(절단본 39/84).
 # "재무에 관한" 은 09-30 추가 — fin_std 가 이 플래그로 정정본의 원본 공시일 승계를 판정하게 되어
@@ -69,6 +69,14 @@ CORRECTION_PREFIXES: tuple[str, ...] = ("기재정정", "첨부정정")
 #   건드린 정정은 보수적으로 재무 정정으로 본다. 서버 실측: 기존 키워드로 false 인 정정 2,581 중 166.
 FIN_ITEM_KEYWORDS: tuple[str, ...] = ("재무제표", "재무상태표", "손익계산서", "현금흐름표",
                                       "자본변동표", "요약재무", "재무에 관한")
+# 정정 사유(`reason_raw`)가 재무 수치 재작성을 밝히는 낱말(C-11, N-25 Q1 — 10-07). 항목
+# 이름이 비재무여도 재무를 바꾼 정정이다(00287812 FY2015 2018-09-07 정정: 항목은 '배당에 관한
+# 사항'뿐, 사유는 '연결재무제표 재작성·감사보고서 재발행'). `.sql` 은 사유의 공백을 전부 떼고
+# LIKE 로 대조하므로 낱말도 공백 없이 적는다. 이 낱말이 있거나 항목 표가 빈('[]') 정정은
+# `corr_has_fin_item` 이 TRUE·NULL 이라 fin_std 가 원본 공시일을 잇지 않는다(10-06 감사 추정:
+# 승계 3,757행 중 사유 21 · 빈 항목 표 56, 겹침 빼고 71행이 정정일로 돌아간다 — 숫자는 배포 전
+# 서버 재연이 확정한다).
+FIN_REASON_KEYWORDS: tuple[str, ...] = ("재작성", "재감사", "재발행", "소급", "재무제표수정")
 
 # ── 최근 창 정정 파싱률 (서식 드리프트 감지, 2026-09-28) ──────────────────────
 # DART 정정신고 첫 장 서식이 2025년에 바뀌어 `stg_doc_correction` 의 `filed_date` 파싱이 조용히
@@ -312,6 +320,7 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
         "max_prior_corr_count": _n(ctx, f'SELECT coalesce(max(prior_corr_count), 0) FROM "{v}"'),
         "reject_by_reason": dict(ctx.reject_by_reason),
         "fin_item_keywords": list(FIN_ITEM_KEYWORDS),
+        "fin_reason_keywords": list(FIN_REASON_KEYWORDS),
         "corr_recent_asof": str(_asof(ctx, v)),
         "corr_recent_window_days": CORR_RECENT_WINDOW_DAYS,
         "n_corr_recent_page": recent_page,
@@ -485,6 +494,7 @@ __all__ = ["BASELINE_SEED", "CANDIDATE_STATUS_VOCAB", "CORRECTION_PREFIXES",
            "CORR_RECENT_FAIL_RATIO", "CORR_RECENT_MIN_N", "CORR_RECENT_WARN_RATIO",
            "CORR_RECENT_WINDOW_DAYS", "DATE_CHECK_VOCAB", "POPULATION_DUP_SQL",
            "DATE_CHECK_UNMEASURED", "DISCLOSURE_VERSION", "EXCLUDED_TOKENS",
-           "FIN_ITEM_KEYWORDS", "GROUP_KEY_BASIS_VOCAB", "KIND_VOCAB", "LADDER", "LADDER_OUT",
+           "FIN_ITEM_KEYWORDS", "FIN_REASON_KEYWORDS", "GROUP_KEY_BASIS_VOCAB", "KIND_VOCAB",
+           "LADDER", "LADDER_OUT",
            "LINKED_STATUS", "LINK_BASIS_VOCAB", "PERIODIC_PREFIXES", "REJECT_REASONS", "TABLES",
            "corr_recent_sql", "population_sql"]

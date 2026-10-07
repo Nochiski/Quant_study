@@ -140,6 +140,8 @@ linked AS (
            k.filed_date,
            k.filed_date_status,
            k.reason_raw,
+           -- 사유 낱말 대조용 — 공백을 전부 뗀다('재무제표 수정' = '재무제표수정', C-11)
+           regexp_replace(coalesce(k.reason_raw, ''), '\s+', '', 'g')     AS reason_compact,
            k.items,
            i.zip_ok,
            dm.rcept_no IS NOT NULL                                      AS has_doc_meta,
@@ -216,8 +218,16 @@ SELECT
     CASE WHEN v.is_correction THEN v.page_found END                   AS corr_page_found,
     CASE WHEN v.is_correction THEN v.filed_date END                   AS filed_date,
     CASE WHEN v.is_correction THEN nullif(trim(v.reason_raw), '') END AS reason_raw,
-    -- 정정 항목에 재무표가 걸렸는가(기록형). 키워드는 rules_s11.FIN_ITEM_KEYWORDS 가 정본.
-    CASE WHEN NOT v.is_correction OR v.items IS NULL THEN NULL
+    -- 재무 정정인가 — fin_std 의 원본 공시일 승계가 읽는다(FALSE 만 승계, TRUE·NULL 은 정정일).
+    -- 키워드 정본은 rules_s11 의 FIN_REASON_KEYWORDS(정정 사유, 공백을 떼고 대조)·FIN_ITEM_KEYWORDS
+    -- (항목 이름). C-11(N-25 Q1): 사유가 재작성·재감사 류면 항목 이름과 무관하게 TRUE(00287812
+    -- FY2015 — 항목은 배당 지표인데 사유가 연결재무제표 재작성), 항목 표가 비었으면('[]') 판단할 수
+    -- 없으므로 미해석과 같은 NULL. 예전엔 빈 목록이 FALSE 로 읽혀 재작성 값에 원본 공시일이 붙었다.
+    CASE WHEN NOT v.is_correction THEN NULL
+         WHEN v.reason_compact LIKE '%재작성%' OR v.reason_compact LIKE '%재감사%'
+              OR v.reason_compact LIKE '%재발행%' OR v.reason_compact LIKE '%소급%'
+              OR v.reason_compact LIKE '%재무제표수정%'                THEN TRUE
+         WHEN v.items IS NULL OR v.items = '[]' THEN NULL
          ELSE (v.items LIKE '%재무제표%' OR v.items LIKE '%재무상태표%'
                OR v.items LIKE '%손익계산서%' OR v.items LIKE '%현금흐름표%'
                OR v.items LIKE '%자본변동표%' OR v.items LIKE '%요약재무%'

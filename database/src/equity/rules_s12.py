@@ -27,8 +27,15 @@ fin_map 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정
 `restated_unknown=true` 다. 원본·정정 판본은 4C(S14, 문서층 P2 `stg_fin_asreported`) 몫이다.
 API 는 정정이 있으면 정정본의 `rcept_no` 를 돌려주므로 `available_date` = 그 접수일이고
 `rcept_dt − period_end` 가 1년을 넘는 행이 실제로 있다(절단본 최대 445일). 단 원본부터 그 판까지의
-정정이 모두 재무표를 건드리지 않았으면 수치가 원본과 같으므로 공개일은 원본 접수일이다
+정정이 모두 재무를 건드리지 않았으면 수치가 원본과 같으므로 공개일은 원본 접수일이다
 (09-30 — 그 행은 `available_date < rcept_dt`. 서버 실측 2016~ 늦게 찍힌 4,657행 중 재무표 무관 정정 2,581).
+재무 정정 판정은 `disclosure_version.corr_has_fin_item` 한 곳이다 — 항목 이름 키워드 외에
+정정 사유가 재작성·재감사 류이거나 항목 표가 빈 정정도 재무 정정(TRUE·NULL)이다(C-11, N-25 Q1).
+일일 수집은 같은 (corp, bsns_year, reprt_code, fs_div) 에 원본 뒤에 정정을 덧붙이므로 그룹의
+판본은 **최신 접수(max `rcept_no`)** 하나다(G-21, N-25 Q2 — 백필 구간과 같은 '최신 판본 값 +
+그 판의 공개일'). 공개일의 날짜 원천은 stage 공개일 `stg_disclosure.available_date`(원천 rcept_dt
+와 접수번호 날짜 중 늦은 쪽 — J-41 재제출본은 `available_date > rcept_dt`)이고 `rcept_dt` 는
+원천 그대로 기간 판정 축이다.
 
 **매출 기준 두 축**: `revenue_basis` 는 그 행의 매출이 어느 규칙에서 나왔는지를,
 `revenue_basis_prev` 는 **직전 회계연도 같은 보고서**(`bsns_year` − 1 · 같은 `report_code`·
@@ -275,6 +282,13 @@ def _f(ctx: EquityGateContext, sql: str) -> float | None:
     return float(str(row[0]))
 
 
+# 산출 행(`o`) 접수번호의 stage 공개일. 재수집 판본이 쌓여도(append_only) 상한·하한으로 읽는다.
+_RCEPT_STAGE_AVAIL_MAX = ("(SELECT max(d.available_date) FROM stg_disclosure d "
+                          "WHERE d.rcept_no = o.rcept_no)")
+_RCEPT_STAGE_AVAIL_MIN = ("(SELECT min(d.available_date) FROM stg_disclosure d "
+                          "WHERE d.rcept_no = o.rcept_no)")
+
+
 def _vocab_sql(values: tuple[str, ...]) -> str:
     return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
 
@@ -385,20 +399,24 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
                  "THEN '11013' ELSE '11014' END))"),
         "n_period_end_after_rcept": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                             "WHERE period_end > rcept_dt"),
-        # 공개일 = 판 접수일. 예외는 원본 공시일을 승계한 정정본(09-30) 하나이고 그 행은 공개일이
-        # 접수일보다 이르다 — 늦거나 NULL 이 갈리면 규칙이 어긋난 것이다.
-        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" '
-                                           "WHERE (available_date IS NULL) <> (rcept_dt IS NULL) "
-                                           "OR available_date > rcept_dt"),
-        # 승계 행(available_date < rcept_dt)은 `.sql` 의 `redate` 를 베끼지 않고 disclosure_version 에서
-        # 다시 증언받는다: 이 판이 정정이고, 연결된 원본 접수일이 공개일과 같고, 첫 장 원본 제출일이
-        # 확인됐고, 원본부터 이 판까지 재무표를 건드린 정정이 없다.
+        # 공개일 = 판 접수번호의 stage 공개일(`stg_disclosure.available_date` — 원천 rcept_dt 와
+        # 접수번호 날짜 중 늦은 쪽, E08·J-41). 예외는 원본 공시일을 승계한 정정본(09-30) 하나이고
+        # 그 행은 공개일이 더 이르다 — 늦거나 NULL 이 갈리면 규칙이 어긋난 것이다.
+        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" o '
+                                           "WHERE (o.available_date IS NULL) <> "
+                                           "(o.rcept_dt IS NULL) "
+                                           f"OR o.available_date > {_RCEPT_STAGE_AVAIL_MAX}"),
+        # 접수번호의 stage 공개일보다 이른 행(= 승계 행)은 `.sql` 의 `redate` 를 베끼지 않고
+        # disclosure_version 에서 다시 증언받는다: 이 판이 정정이고, 연결된 원본의 stage 공개일이
+        # 공개일과 같고, 첫 장 원본 제출일이 확인됐고, 원본부터 이 판까지 재무 정정이 없다. 원천
+        # rcept_dt 로 되돌아간 재제출본(J-41 회귀)도 증언이 없어 여기서 걸린다.
         "n_orig_filing_unwitnessed": _n(
-            ctx, f'SELECT count(*) FROM "{v}" o WHERE o.available_date < o.rcept_dt '
+            ctx, f'SELECT count(*) FROM "{v}" o '
+                 f"WHERE o.available_date < {_RCEPT_STAGE_AVAIL_MIN} "
                  "AND NOT EXISTS (SELECT 1 FROM disclosure_version c "
-                 "JOIN disclosure_version g ON g.rcept_no = c.orig_rcept_no "
+                 "JOIN stg_disclosure g ON g.rcept_no = c.orig_rcept_no "
                  "WHERE c.rcept_no = o.rcept_no AND c.is_correction "
-                 "AND g.rcept_dt = o.available_date "
+                 "AND g.available_date = o.available_date "
                  "AND c.date_check IN ('exact', 'off_1d') "
                  "AND NOT EXISTS (SELECT 1 FROM disclosure_version x "
                  "WHERE x.orig_rcept_no = c.orig_rcept_no AND x.is_correction "
@@ -579,10 +597,10 @@ def _coverage_source_sql(ctx: EquityGateContext) -> str:
         " AND t.fs_div = o.fs_div AND t.rcept_no = o.rcept_no"
         for view, adopted in ((ctx.out_view, "TRUE"), (ctx.reject_view, "FALSE"))
         if view is not None]
-    # `tg` 의 키는 `.sql` 의 `grp`(그룹당 min(rcept_no))과 같은 자리다 — 산출에는 `reprt_code`
-    # 가 없고(1Q·3Q 는 `doc_acode` 로 다시 갈린다) `rcept_no` 가 그 그룹의 이름표다.
+    # `tg` 의 키는 `.sql` 의 `grp`(그룹당 최신 접수 max(rcept_no), G-21)과 같은 자리다 — 산출에는
+    # `reprt_code` 가 없고(1Q·3Q 는 `doc_acode` 로 다시 갈린다) `rcept_no` 가 그 그룹의 이름표다.
     return ("WITH tg AS (\n"
-            "    SELECT corp_code, bsns_year, fs_div, min(rcept_no) AS rcept_no,\n"
+            "    SELECT corp_code, bsns_year, fs_div, max(rcept_no) AS rcept_no,\n"
             f"           {flags}\n"
             "    FROM stg_fin\n"
             "    GROUP BY corp_code, bsns_year, reprt_code, fs_div\n"
@@ -942,7 +960,8 @@ FIN_STD = register(EquityTable(
     inputs=("stg_fin", "stg_doc_meta", "stg_disclosure", "disclosure_version", "corp"),
     partition_class="receipt_axis",
     partition_key_expr="CAST(substr(rcept_no, 1, 4) AS INTEGER)",
-    available_rule=("column:rcept_dt — DART 접수일(derived). 재무표를 안 건드린 정정본은 원본 접수일"
+    available_rule=("stg_disclosure.available_date — 판 접수번호의 stage 공개일(derived, 원천"
+                    " rcept_dt 와 접수번호 날짜 중 늦은 쪽). 재무를 안 건드린 정정본은 원본 공개일"
                     "(available_date < rcept_dt 로 드러난다). 파생 컬럼은 구성 행 max 를 동반"),
     # GATES §3-⑫ — 표준계정 행이 하나라도 있는 (corp, bsns_year, reprt_code, fs_div) 그룹 수
     eg1_lhs_sql='SELECT count(*) FROM "out_pq"',
@@ -957,7 +976,8 @@ FIN_STD = register(EquityTable(
                     "account_detail", "ord", "account_nm", "account_nm_norm", "thstrm_amount",
                     "account_std", "is_krw", "currency", "rcept_no", "observed_date"),
         "stg_doc_meta": ("rcept_no", "member_role", "doc_acode", "period_from", "period_to"),
-        "stg_disclosure": ("rcept_no", "rcept_dt", "observed_date"),
+        # `available_date` = stage 보정 공개일(J-41) — 공개일 축. `rcept_dt` 는 기간 판정 축.
+        "stg_disclosure": ("rcept_no", "rcept_dt", "available_date", "observed_date"),
         # 링크 판본을 같이 고정한다(EG6_fin_std 무매칭 비대칭이 읽는다). `stg_rcept_dt_map` 은
         # 실재하지 않아 접수일 원천은 `stg_disclosure.rcept_dt` 다(GATES §9).
         # 정정본의 원본 공시일 승계(09-30)는 정정 여부·원본 링크·재무표 정정 여부·첫 장 날짜 확인을 읽는다.

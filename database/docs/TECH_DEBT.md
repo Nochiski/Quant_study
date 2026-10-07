@@ -1258,3 +1258,14 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **인풋**: 유무상증자 — 유상 권리락이 D(기준가 r 0.954)이고 무상 비율이 1.1. `|0.954 × 1.1 − 1| = 0.049 ≤ 0.05`.
 - **에러 위치**: `src/equity/sql/corp_event.sql` C-04 확인 갈래 — (a) 와 달리 ±창 안 후보끼리 경쟁하지 않고 D 후보 하나만 본다.
 - **위험성**: 그 판 하나에서 무상증자 효력일이 D 로 잘못 확정된다(수정주가가 하루 어긋남). 다음 판이 캘린더를 넓히면 전량 재빌드로 다시 판정되므로 일시적이다. 고칠 때는 tol_abs 하한 대신 비율 크기에 비례한 허용치만 쓰거나, 같은 날 다른 사건(유상 권리락)이 있으면 대기로 둔다(배포 묶음 4-1a 명세 검토 C).
+
+### B-61: J-41(접수번호 날짜 하한) 후속 — 남은 원천 접수일 사용·기록 지표·뜻이 바뀐 주석
+
+- **상황**: 배포 묶음 4-1b 가 stage 접수 룩업 26표·stg_disclosure·fin_std·disclosure_version(N-26 4.10)의 공개일을 '원문과 접수번호 앞 8자리 날짜 중 늦은 쪽'으로 맞췄다.
+- **인풋**: 재제출본처럼 원천 rcept_dt 가 접수번호 날짜보다 이른 공시(박셀바이오 rcept_dt 2024-03-19 · rcept_no 20250828000446).
+- **에러 위치**:
+  - `src/equity/sql/universe_daily.sql` `sig_raw`(정지 신호)가 `stg_disclosure.rcept_dt` 원천값을 쓴다 — 게이트 장부 RG-C1-07 범위.
+  - `disclosure_version.delay_days`·fi `filing_late` 는 원천 rcept_dt 로 기한을 대조한다 — 원천 rcept_dt 가 원 제출일인지 확인 전이라 그대로 둔 열린 질문(N-26 4.10).
+  - stage 룩업 표에는 J-41 이 민 행 수 기록형 지표가 없다(stg_disclosure 의 G3 `n_rcept_dt_before_no_prefix` 만 있음 — `stage/build.py` `_recorded_metrics` 를 룩업에도 넓히면 매 빌드 보인다).
+  - 뜻이 바뀐 주석: `src/equity/rules_s16.py:6·455·497·548`, `rules_s15.py:5`, `sql/corp_event.sql:46`('announce_date = DART rcept_dt' — 이제 보정된 stage 값).
+- **위험성**: 정지 신호 창이 재제출본에서 앞당겨질 수 있다(미측정). 지연 판정은 재제출본에서 '기한 안'으로 볼 수 있다(원 제출일 확인 전이라 결함 여부 미정). 지표·주석은 운영 위험 없음 — 노출이 매 빌드 안 보이고 읽는 사람이 옛 뜻으로 오해할 수 있다(배포 묶음 4-1b 품질 검토 사소 5·8).

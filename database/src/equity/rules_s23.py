@@ -422,7 +422,8 @@ FIELDS: tuple[FieldProfile, ...] = (
         unit="KRW", value_type="price", frequency="session", recommended_lag_sessions=0,
         recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
         disclosure_basis="원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date "
-                         "다음 세션)) 중 나중 — 산출 available_date 는 항상 date 다",
+                         "다음 세션), KRX 기준가가 확정한 ok 계수는 min(공시 접수일, apply_date)"
+                         " — C-07) 중 나중 — 산출 available_date 는 항상 date 다",
         evidence="price_adj_daily.adj_close = close × Π(share_factor : factor_ok ∧ 같은 "
                  "security_span 구간 ∧ greatest(apply_date, available_date) ≤ date). 첫 관측 "
                  "수준 고정이라 창·as_of 에 무관하다(결정 6, 09-05). 카탈로그 매크로 "

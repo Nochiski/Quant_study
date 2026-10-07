@@ -9,7 +9,9 @@
 --   adj_close(d) = close(d) × Π(share_factor : factor_ok ∧ 구간 안 ∧ fold_date ≤ d)
 --   adj_volume_shr(d) = volume_shr(d) × Π(price_factor : 같은 집합)
 --   fold_date = greatest(apply_date, available_date)  ← 적용 세션이 와도 아직 공개 전인 계수
---     (회고 기재 원천은 available = apply 다음 세션)는 **공개 세션부터** 접는다. 이 규약 때문에
+--     (회고 기재 원천은 available = apply 다음 세션)는 **공개 세션부터** 접는다. KRX 기준가가
+--     확정한 ok 계수(사건 교체·unknown_krx)는 available ≤ apply(C-07, adj_factor.sql)라 그 세션에
+--     접힌다. 이 규약 때문에
 --     행의 available_date 가 항상 date 로 떨어지고(아래), 값이 (ticker, date) 의 순수 함수가 된다.
 -- OHLC 는 close 와 같은 계수를 쓴다(같은 날 같은 척도). 거래량만 반대 축(price_factor)이다 —
 -- 분할 뒤 거래량을 분할 전 주식수 척도로 내린다. 나눗셈으로 쓰면 50:1 분할에서 2,500배 어긋난다.

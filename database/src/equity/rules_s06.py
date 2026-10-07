@@ -33,7 +33,9 @@ shares_out: 기준가 원천)·`trading_calendar`·`security`(sec_type·corp_cod
                    nominal 은 명목 세션 · 복합 성분은 같은 apply_date · 개별 ok 2건이 같은 날 0) ·
                    `available_date = min(announce, apply_date 다음 세션)` 독립 재계산(EG2-P02
                    대체 — announce 축은 회고 기재 원천에서 available < announce 가 정상이라 못
-                   쓴다) · corp_event 정합. 기록형: 사유·apply_basis 별 건수, 오프셋 분포.
+                   쓴다; KRX 기준가가 확정한 ok 행 — 사건 교체·unknown_krx — 은 min(announce,
+                   apply_date) — C-07)
+                   · corp_event 정합. 기록형: 사유·apply_basis 별 건수, 오프셋 분포.
   EG8            — P02 수정수익률(행 대 행) 점프를 **apply_date** 에서 건별로, P03 은 이벤트 집합의
                    조정 거래량 20세션 중앙값 비의 중앙값 ∈ [1/band, band](방향 오류 탐지, 3차)
                    (`views` 의 같은 템플릿을 TEMP MACRO 로 올려 계산). 상수 미등재면
@@ -258,7 +260,10 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
           count(*) FILTER (WHERE factor_ok AND apply_basis <> '{krx}'
                              AND share_factor IS DISTINCT FROM ratio),
           count(*) FILTER (WHERE available_date IS DISTINCT FROM
-                                 coalesce(least(e_ann, next_session), apply_date)),
+                                 CASE WHEN factor_ok AND apply_basis = '{krx}'
+                                      THEN least(e_ann, apply_date)
+                                      ELSE coalesce(least(e_ann, next_session), apply_date)
+                                 END),
           count(*) FILTER (WHERE available_date < e_ann),
           count(*) FILTER (WHERE n_apply IS NULL),
           count(*) FILTER (WHERE apply_basis = 'nominal' AND n_apply IS DISTINCT FROM n_nom),
@@ -662,8 +667,9 @@ ADJ_FACTOR = register(EquityTable(
     partition_class="date_axis",
     partition_key_expr="year(effective_date)",
     available_rule=("derived: min(corp_event.announce_date, apply_date 다음 세션) · 기준가 신규 "
-                    "행은 apply_date 다음 세션 — EG2-P02 축 없음(회고 기재 원천은 available < "
-                    "announce 가 정상), EG3_adj_factor 가 독립 재계산"),
+                    "행은 apply_date 다음 세션 · 기준가가 확정한 ok 행(사건 교체·unknown_krx)은 "
+                    "min(announce_date, apply_date)(C-07) — EG2-P02 축 없음(회고 기재 원천은 "
+                    "available < announce 가 정상), EG3_adj_factor 가 독립 재계산"),
     # GATES §3-⑩ (S06-2): 좌변 행수 = corp_event 의 계수 대상 이벤트 수 + 기준가 신규 행 수(격리
     # 없음). 신규 행 수 = price_daily 기준가 후보(비ETF·구간 첫날 아님) − (a) 로 사건에 붙은 날짜 −
     # (c) 재발견(주식수 불변 ∧ 직전 행 reference). 후보·재발견은 입력에서 독립 재계산하고 (a) 소비

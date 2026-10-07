@@ -62,6 +62,8 @@
 -- available_date = min(announce_date, apply_date 다음 세션) · basis derived — 공시가 없어도 KRX 가격·주식수
 --   변화가 그 다음 세션에 관측된다. 회고 기재 원천(자본변동, announce 가 수년 뒤)은 available < announce
 --   가 정상이라 EG2-P02 announce 축을 못 쓴다(content_date_column 없음) — EG3_adj_factor 가 독립 재계산.
+--   예외(C-07, e1.25.0): KRX 기준가가 확정한 ok 계수(아래 S06-2 (a) 사건 교체 · (b) unknown_krx 정상)는
+--   min(announce_date, apply_date) — (b) 는 announce = apply 라 그날.
 --
 -- ── S06-2 KRX 기준가 원천 `krx_base_price` (v3, 09-05) — 위 사건 매칭은 기준가 사건이 없을 때의 폴백 ──
 --   price_daily.base_price_krw(= close − change_krw) 가 그날 KRX 기준가라, 사건이 실제로 가격에 적용된 세션과
@@ -86,7 +88,10 @@
 --   (c) 사건과 안 맞고 S 없음 · 직전 행이 reference(전일 무거래) → 정지 재개 가격 재발견, 행 없음(EG3 기록형).
 --   (d) 그 외(주식수 불변 · 전일 거래) → 신규 행 event_type 'unknown_price_only' · ok=false · 계수 1
 --       (유상증자 권리락·주식배당락 등 MVP 밖 — 시총 불변이 아니라 계수를 만들지 않는다).
---   (b)(d) 의 available_date = 다음 세션 · (a) 는 min(announce, 다음 세션) 그대로. 상수는 전부 _const.
+--   available_date: ok 행((a) 교체 · (b) 곱 검사 통과)은 min(announce, apply_date)(C-07 — 기준가 r 과
+--   주식수 비 S 가 그 세션의 KRX 일별 행에서 온다; (b) 는 announce = apply 라 그날) · 정상 아닌 행은
+--   옛 식 그대로 — (b) krx_base_inconsistent·(d) 는 다음 세션, (a) 의 not-ok 행은 min(announce, 다음 세션).
+--   상수는 전부 _const.
 -- 숫자 리터럴은 0·1·2 만 쓴다(test_sql파일에_상수_하드코딩_없음) — 창 폭·허용치는 _const 로만 들어온다.
 WITH RECURSIVE
 cal AS (
@@ -422,7 +427,15 @@ SELECT
     -- 소비자가 이 열로 거르거나 정산 정책을 고른다.
     (lt.last_trade_date IS NULL OR o.apply_date > lt.last_trade_date)                 AS no_bar_after_apply,
     -- 캘린더 마지막 세션의 기준가 사건은 다음 세션이 없다(서버 09-05 EG2 NULL 1) → 적용일(당일)로.
-    coalesce(CASE WHEN o.is_new THEN nx.date ELSE least(o.announce_date, nx.date) END,
+    -- C-07(N-26 4.1, e1.25.0): KRX 기준가가 apply 세션에 확정한 ok 계수(사건 교체 · unknown_krx
+    -- 정상)는 그 세션에 알 수 있다 → min(announce, apply_date)(신규 행은 announce = apply). 정정
+    -- 공시 접수일이 announce 라 apply 보다 늦거나 신규 행이면 옛 식이 다음 세션이 되어 전방 조정이
+    -- 하루 늦게 접혔다(002070 2026-07-31 수정수익률 −35.0% → 08-03 +159.6%). 정상 아닌 행·가격
+    -- 매칭 계수는 옛 식 그대로.
+    coalesce(CASE WHEN o.apply_basis = 'krx_base_price' AND o.factor_source = 'mktcap_neutral'
+                       THEN least(o.announce_date, o.apply_date)
+                  WHEN o.is_new THEN nx.date
+                  ELSE least(o.announce_date, nx.date) END,
              o.apply_date)                                                            AS available_date,
     'derived'                                                                        AS available_basis,
     NULL::VARCHAR                                                                    AS reject_reason

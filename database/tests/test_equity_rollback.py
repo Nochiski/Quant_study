@@ -118,3 +118,169 @@ def test_before_맵이_있으면_시작_시점_판으로_되돌린다(tmp_path: 
     out = rollback.rollback_pass(eq, "p1", log_root=tmp_path / "logs" / "equity", before=before)
     assert out == {"price_daily": "m_1", "flow_daily": "e_2"}     # 시작 판 GC 됨 → 직전 판 폴백
     assert manifest.load(eq / "price_daily" / "MANIFEST.json").current_build == "m_1"
+
+
+TABLES3 = ["price_daily", "corp_event", "adj_factor"]
+
+
+def _latest_morning(path: Path, builds: dict[str, str]) -> Path:
+    """build_chain deliver_step 이 아침 판 성공 때만 쓰는 인계 포인터와 같은 모양."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"date": "20261006", "basis": "morning", "equity_builds": builds}),
+                    encoding="utf-8")
+    return path
+
+
+def _commit(t: Path, build_id: str) -> None:
+    (t / f"v={build_id}").mkdir()
+    manifest.commit(t, _record(build_id), keep=10)
+
+
+def _currents(eq: Path, tables: list[str]) -> dict[str, str | None]:
+    return {t: manifest.load(eq / t / "MANIFEST.json").current_build for t in tables}
+
+
+def _failed_morning_pass(tmp_path: Path, eq: Path, latest: Path, name: str,
+                         commit: str) -> dict[str, str]:
+    """아침 패스: before 기록 → 첫 표만 `commit` 커밋 → 둘째 표 실패(셋째 미도달) → CLI 롤백."""
+    from equity.__main__ import main
+
+    before = tmp_path / f"before_{name}.json"
+    before.write_text(json.dumps(rollback.pass_start_targets(eq, TABLES3, "morning",
+                                                             latest_morning=latest)),
+                      encoding="utf-8")
+    _commit(eq / TABLES3[0], commit)
+    _summary(tmp_path / "logs" / "equity" / f"rebuild_{name}" / "summary.tsv",
+             [(TABLES3[0], 0), (TABLES3[1], 1)])
+    rc = main(["--root", str(eq), "rollback", "--pass", name, "--before", str(before),
+               "--log-root", str(tmp_path / "logs" / "equity"), "--basis", "morning"])
+    assert rc == 0
+    return json.loads(before.read_text(encoding="utf-8"))
+
+
+def test_아침_패스의_되돌릴_판은_latest_morning_의_equity_builds다(tmp_path: Path) -> None:
+    """C-01(N-25 Q4): '직전 확정판' = 마지막으로 **완료된** 아침 판(build_chain 이 stage·equity 가
+    다 ok 일 때만 쓰는 latest_morning.json)."""
+    eq = tmp_path / "equity"
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"])
+    latest = _latest_morning(tmp_path / "deliver" / "latest_morning.json",
+                             dict.fromkeys(TABLES3, "m_1"))
+    got = rollback.pass_start_targets(eq, [*TABLES3, "없는표"], "morning", latest_morning=latest)
+    assert got == dict.fromkeys(TABLES3, "m_1")             # MANIFEST 없는 표는 싣지 않는다
+
+
+@pytest.mark.parametrize("case", ["gc", "absent"])
+def test_한_표라도_latest_morning_판을_못_얻으면_전_표가_시작_current다(
+        tmp_path: Path, case: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """전부 아니면 전무 — 표별로 폴백하면 m_(latest)·e_(시작 current) 가 다시 섞인다. 폴백하면
+    stderr 에 어느 표가 왜 그랬는지 한 줄."""
+    eq = tmp_path / "equity"
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"] if not (case == "gc" and t == "adj_factor") else ["e_2"])
+    builds = dict.fromkeys(TABLES3, "m_1")
+    if case == "absent":
+        del builds["adj_factor"]
+    latest = _latest_morning(tmp_path / "latest_morning.json", builds)
+    got = rollback.pass_start_targets(eq, TABLES3, "morning", latest_morning=latest)
+    assert got == dict.fromkeys(TABLES3, "e_2")
+    err = capsys.readouterr().err
+    assert "adj_factor" in err and ("GC" in err if case == "gc" else "없" in err)
+
+
+def test_latest_morning_이_없거나_못_읽으면_시작_current다(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    eq = tmp_path / "equity"
+    _table(eq, "price_daily", ["m_1", "e_2"])
+    missing = tmp_path / "없음" / "latest_morning.json"
+    assert rollback.pass_start_targets(eq, ["price_daily"], "morning",
+                                       latest_morning=missing) == {"price_daily": "e_2"}
+    assert str(missing) in capsys.readouterr().err
+    broken = tmp_path / "latest_morning.json"
+    broken.write_text("{깨진", encoding="utf-8")
+    assert rollback.pass_start_targets(eq, ["price_daily"], "morning",
+                                       latest_morning=broken) == {"price_daily": "e_2"}
+    assert str(broken) in capsys.readouterr().err
+
+
+def test_아침_패스는_latest_morning_경로가_필수다(tmp_path: Path) -> None:
+    """경로는 스크립트 한 곳(`equity_rebuild_all.sh`)에만 둔다 — 함수 안 기본값이 없다."""
+    eq = tmp_path / "equity"
+    _table(eq, "price_daily", ["m_1", "e_2"])
+    with pytest.raises(ValueError, match="latest_morning"):
+        rollback.pass_start_targets(eq, ["price_daily"], "morning")
+    assert rollback.pass_start_targets(eq, ["price_daily"], "evening") == {"price_daily": "e_2"}
+
+
+def test_저녁_패스와_수동_패스의_되돌릴_판은_시작_current_그대로다(tmp_path: Path) -> None:
+    eq = tmp_path / "equity"
+    _table(eq, "price_daily", ["m_1", "e_2"])
+    latest = _latest_morning(tmp_path / "latest_morning.json", {"price_daily": "m_1"})
+    for basis in ("evening", "manual"):
+        assert rollback.pass_start_targets(eq, ["price_daily"], basis,
+                                           latest_morning=latest) == {"price_daily": "e_2"}
+
+
+def test_아침_패스가_둘째_표에서_실패하면_전_표가_latest_morning_판으로_간다(
+        tmp_path: Path) -> None:
+    """검토자 재현(09-11 형): 3표 [m_1, e_2], 첫 표 m_3 커밋 → 둘째 표 실패 → 셋째 미도달.
+    rc 0 표만 옮기면 앞 = m_1 · 뒤 = e_2 로 섞인다(DEFECT-C03 재발 + 확정 자리에 잠정판).
+    아침 롤백은 before 의 **모든 표**를 목표 판으로 — 포인터만이라 판을 잃지 않는다."""
+    eq = tmp_path / "equity"
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"])
+    latest = _latest_morning(tmp_path / "latest_morning.json", dict.fromkeys(TABLES3, "m_1"))
+    _failed_morning_pass(tmp_path, eq, latest, "m_d1", "m_3")
+    assert _currents(eq, TABLES3) == dict.fromkeys(TABLES3, "m_1")
+    assert {d.name for d in (eq / "price_daily").iterdir() if d.is_dir()} == {
+        "v=m_1", "v=e_2", "v=m_3"}                             # 실패 판도 지우지 않는다
+
+
+def test_실패한_아침_패스가_남긴_m은_다음_날에도_목표가_아니다(tmp_path: Path) -> None:
+    """다음 날 저녁 e_4 커밋 뒤 아침이 또 실패해도 목표는 latest_morning(m_1) — 실패 패스가 남긴
+    m_3 을 고르면 m_3/m_1 이 다시 섞인다."""
+    eq = tmp_path / "equity"
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"])
+    latest = _latest_morning(tmp_path / "latest_morning.json", dict.fromkeys(TABLES3, "m_1"))
+    _failed_morning_pass(tmp_path, eq, latest, "m_d1", "m_3")
+    for t in TABLES3:
+        _commit(eq / t, "e_4")                                 # 다음 날 저녁 잠정판
+    before = _failed_morning_pass(tmp_path, eq, latest, "m_d2", "m_5")
+    assert before == dict.fromkeys(TABLES3, "m_1")
+    assert _currents(eq, TABLES3) == dict.fromkeys(TABLES3, "m_1")
+
+
+def test_아침_롤백은_커밋_안_한_표의_목표가_사라졌으면_건드리지_않는다(tmp_path: Path) -> None:
+    """패스 도중 GC 로 목표 판이 사라진 경우: 커밋한 표는 직전 판 폴백(옛 동작), 커밋 안 한 표는
+    그대로 — 한 칸 되돌리면 멀쩡한 판을 잃는다."""
+    eq = tmp_path / "equity"
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"])
+    before = tmp_path / "before.json"
+    before.write_text(json.dumps(dict.fromkeys(TABLES3, "gc_gone")), encoding="utf-8")
+    _commit(eq / TABLES3[0], "m_3")
+    _summary(tmp_path / "logs" / "equity" / "rebuild_p" / "summary.tsv",
+             [(TABLES3[0], 0), (TABLES3[1], 1)])
+    out = rollback.rollback_pass(eq, "p", log_root=tmp_path / "logs" / "equity", before=before,
+                                 basis="morning")
+    assert out == {TABLES3[0]: "e_2"}
+    assert _currents(eq, TABLES3) == dict.fromkeys(TABLES3, "e_2")
+
+
+def test_저녁_패스_실패_롤백은_지금처럼_rc0_표만이다(tmp_path: Path) -> None:
+    """회귀 가드: 저녁·수동 패스는 before 에 다른 판이 적혀 있어도 rc 0 표만 옮긴다."""
+    eq = tmp_path / "equity"
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"])
+    before = tmp_path / "before.json"
+    before.write_text(json.dumps({TABLES3[0]: "e_2", TABLES3[1]: "m_1", TABLES3[2]: "m_1"}),
+                      encoding="utf-8")
+    _commit(eq / TABLES3[0], "e_3")
+    _summary(tmp_path / "logs" / "equity" / "rebuild_p" / "summary.tsv",
+             [(TABLES3[0], 0), (TABLES3[1], 1)])
+    for basis in ("evening", "manual"):
+        out = rollback.rollback_pass(eq, "p", log_root=tmp_path / "logs" / "equity",
+                                     before=before, basis=basis)
+        assert _currents(eq, TABLES3) == dict.fromkeys(TABLES3, "e_2")
+        assert out == ({TABLES3[0]: "e_2"} if basis == "evening" else {})

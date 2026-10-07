@@ -977,6 +977,30 @@ def test_합성_기준가_신규_unknown_krx_정상_행은_적용일에_공개�
         assert g.metrics["n_available_mismatch"] == 0
 
 
+@pytest.mark.parametrize(("r", "expect"), [(0.52, True), (0.56, False)])
+def test_C04_기준가_확인과_adj_factor_짝_규칙은_같은_경계를_낸다(r: float, expect: bool) -> None:
+    """ratio 2.0(pf 0.5, m 0.5) → tol = max(0.15 × 0.5, 0.05) = 0.075. D 기준가 r 0.52(잔여 0.04)는
+    corp_event 가 D 로 확인하고 adj_factor (a) 도 같은 날 기준가로 교체한다. r 0.56(잔여 0.12)은
+    둘 다 아니다. 한쪽 식(예: corp_event 의 m = |min(ratio, 1/ratio) − 1|)만 바뀌면 여기서
+    갈린다."""
+    from test_equity_s05_event import run_event_sql
+
+    cal = sessions(40)
+    d_end = cal[-1]
+    px = flat_prices("A00020", cal, 10000, jumps={39: r}, base={39: r})
+    listing = [{"ticker": "A00020", "date": d, "list_shrs": 1_000_000} for d in cal]
+    fric = [{"rcept_no": "20200301000020", "corp_code": "CA00020",
+             "nstk_asstd": d_end + dt.timedelta(days=3), "nstk_ascnt_ps_ostk_ratio": 1.0,
+             "available_date": cal[30]}]
+    ce = [e for e in run_event_sql(cal, listing, fric=fric, prices=px).values()
+          if e["event_type"] == "bonus"]
+    confirms = [e["effective_date"] for e in ce] == [d_end]
+    ev = [{"ticker": "A00020", "event_type": "bonus", "effective_date": d_end, "ratio": 2.0,
+           "source": "event_fric", "rcept_no": "20200301000020", "announce_date": cal[30]}]
+    pairs = run_adj_sql(ev, px, cal)[f"A00020:bonus:{d_end}"]["apply_basis"] == "krx_base_price"
+    assert (confirms, pairs) == (expect, expect)
+
+
 def test_C04_미래_기준일_소액_무상증자는_캘린더_끝에_ok_계수를_만들지_않는다() -> None:
     """C-04(N-25 Q3): 1주당 0.03주(ratio 1.03, m 0.029 ≤ tol_abs) 무상증자의 기준일이 캘린더 끝 D
     뒤 10일. 옛 corp_event 는 효력일 D 를 냈고 adj_factor 의 소액 경로(jump_mag ≤ tol_abs, 가격

@@ -160,30 +160,56 @@ def _failed_morning_pass(tmp_path: Path, eq: Path, latest: Path, name: str,
 
 def test_아침_패스의_되돌릴_판은_latest_morning_의_equity_builds다(tmp_path: Path) -> None:
     """C-01(N-25 Q4): '직전 확정판' = 마지막으로 **완료된** 아침 판(build_chain 이 stage·equity 가
-    다 ok 일 때만 쓰는 latest_morning.json). 그 판이 builds[] 에 없거나(GC) 표가 없으면 시작
-    current(옛 동작)."""
+    다 ok 일 때만 쓰는 latest_morning.json)."""
     eq = tmp_path / "equity"
-    _table(eq, "price_daily", ["m_1", "e_2"])
-    _table(eq, "corp_event", ["m_1", "e_2"])
-    _table(eq, "adj_factor", ["e_2"])                          # 확정판 m_1 이 GC 됨
-    _table(eq, "fin_std", ["m_1", "e_2"])                      # latest 에 없는 표
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"])
     latest = _latest_morning(tmp_path / "deliver" / "latest_morning.json",
-                             {"price_daily": "m_1", "corp_event": "m_1", "adj_factor": "m_1"})
-    got = rollback.pass_start_targets(eq, [*TABLES3, "fin_std"], "morning", latest_morning=latest)
-    assert got == {"price_daily": "m_1", "corp_event": "m_1", "adj_factor": "e_2",
-                   "fin_std": "e_2"}
+                             dict.fromkeys(TABLES3, "m_1"))
+    got = rollback.pass_start_targets(eq, [*TABLES3, "없는표"], "morning", latest_morning=latest)
+    assert got == dict.fromkeys(TABLES3, "m_1")             # MANIFEST 없는 표는 싣지 않는다
 
 
-def test_latest_morning_이_없거나_못_읽으면_시작_current다(tmp_path: Path) -> None:
+@pytest.mark.parametrize("case", ["gc", "absent"])
+def test_한_표라도_latest_morning_판을_못_얻으면_전_표가_시작_current다(
+        tmp_path: Path, case: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """전부 아니면 전무 — 표별로 폴백하면 m_(latest)·e_(시작 current) 가 다시 섞인다. 폴백하면
+    stderr 에 어느 표가 왜 그랬는지 한 줄."""
+    eq = tmp_path / "equity"
+    for t in TABLES3:
+        _table(eq, t, ["m_1", "e_2"] if not (case == "gc" and t == "adj_factor") else ["e_2"])
+    builds = dict.fromkeys(TABLES3, "m_1")
+    if case == "absent":
+        del builds["adj_factor"]
+    latest = _latest_morning(tmp_path / "latest_morning.json", builds)
+    got = rollback.pass_start_targets(eq, TABLES3, "morning", latest_morning=latest)
+    assert got == dict.fromkeys(TABLES3, "e_2")
+    err = capsys.readouterr().err
+    assert "adj_factor" in err and ("GC" in err if case == "gc" else "없" in err)
+
+
+def test_latest_morning_이_없거나_못_읽으면_시작_current다(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     eq = tmp_path / "equity"
     _table(eq, "price_daily", ["m_1", "e_2"])
     missing = tmp_path / "없음" / "latest_morning.json"
     assert rollback.pass_start_targets(eq, ["price_daily"], "morning",
                                        latest_morning=missing) == {"price_daily": "e_2"}
+    assert str(missing) in capsys.readouterr().err
     broken = tmp_path / "latest_morning.json"
     broken.write_text("{깨진", encoding="utf-8")
     assert rollback.pass_start_targets(eq, ["price_daily"], "morning",
                                        latest_morning=broken) == {"price_daily": "e_2"}
+    assert str(broken) in capsys.readouterr().err
+
+
+def test_아침_패스는_latest_morning_경로가_필수다(tmp_path: Path) -> None:
+    """경로는 스크립트 한 곳(`equity_rebuild_all.sh`)에만 둔다 — 함수 안 기본값이 없다."""
+    eq = tmp_path / "equity"
+    _table(eq, "price_daily", ["m_1", "e_2"])
+    with pytest.raises(ValueError, match="latest_morning"):
+        rollback.pass_start_targets(eq, ["price_daily"], "morning")
+    assert rollback.pass_start_targets(eq, ["price_daily"], "evening") == {"price_daily": "e_2"}
 
 
 def test_저녁_패스와_수동_패스의_되돌릴_판은_시작_current_그대로다(tmp_path: Path) -> None:

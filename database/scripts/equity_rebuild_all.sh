@@ -58,6 +58,12 @@ d = rollback.pass_start_targets(pathlib.Path("data/equity"), sys.argv[3:], sys.a
                                 latest_morning=pathlib.Path("data/deliver/latest_morning.json"))
 pathlib.Path(sys.argv[1]).write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
 PY
+RC_BEFORE=$?
+if [ "$RC_BEFORE" -ne 0 ]; then
+  # 되돌릴 기준이 없는 패스는 시작하지 않는다(P1) — 중간에 실패하면 혼합 판을 되돌릴 수 없다.
+  echo "!!! before.json 을 못 만들었다(rc=$RC_BEFORE) — 아무 표도 짓지 않고 멈춘다" | tee -a "$OUT/STATUS"
+  exit "$RC_BEFORE"
+fi
 
 T_ALL0=$(date +%s)
 ANY_FAIL=""
@@ -84,10 +90,19 @@ for t in $ORDER; do
     # 09-11 사례에서 3.5일 유지). 포인터만 before 의 판으로 되돌린다(`v=` 는 keep=10 이라 남아 있고
     # 지우지 않는다). 아침 패스는 커밋 못 한 표·미도달 표까지 before 의 확정판으로 맞춘다(C-01 —
     # rc 0 표만 옮기면 확정판과 저녁 잠정판이 섞인다). 되돌리기 자체가 실패해도 원래 실패 코드로 나간다.
+    # 되돌린 뒤엔 catalog 를 한 번 돌려 equity.duckdb 매크로·_catalog_meta 를 되돌린 포인터에 맞춘다
+    # (체인은 equity 실패 시 catalog_step 을 건너뛴다 — 안 하면 다음 성공 패스까지 매크로는 실패 전 판).
+    # best-effort: catalog 가 실패해도 패스 rc 는 빌드 실패 그대로다. _READY.json 은 건드리지 않는다
+    # (앞으로만 움직이는 마지막 성공 판 신호, N-24 3.8 — 포인터와 달라질 수 있고 포인터가 정본).
     echo "!!! FAILED $t (rc=$RC) — 중단, 이번 판 커밋분을 되돌린다"
     # shellcheck disable=SC2086  # reason: BASIS_ARGS 는 비었거나 "--basis <값>" 두 낱말이다
-    .venv/bin/python -m equity --root data/equity rollback --pass "$PASS" --before "$BEFORE" \
-      $BASIS_ARGS >> "$OUT/rollback.log" 2>&1 || echo "!!! rollback 실패 — $OUT/rollback.log 확인"
+    if .venv/bin/python -m equity --root data/equity rollback --pass "$PASS" --before "$BEFORE" \
+         $BASIS_ARGS >> "$OUT/rollback.log" 2>&1; then
+      .venv/bin/python -m equity catalog >> "$OUT/rollback.log" 2>&1 \
+        || echo "!!! 롤백 뒤 catalog 실패 — $OUT/rollback.log 확인, 손으로 'python -m equity catalog'"
+    else
+      echo "!!! rollback 실패 — $OUT/rollback.log 확인"
+    fi
     exit "$RC"
   fi
 done

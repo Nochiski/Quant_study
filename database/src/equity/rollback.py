@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import json
-import os
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -32,9 +32,6 @@ from stage import model as stage_model
 
 MANIFEST_NAME = "MANIFEST.json"
 BASIS_MORNING = "morning"                 # 아침 확정판 — stage.model.BASIS_PREFIX 의 키(`m_`)
-# 마지막으로 완료된 아침 판의 인계 포인터 — build_chain.sh deliver_step 이 stage·equity health 가
-# 둘 다 ok 인 아침 판에서만 쓴다(`equity_builds` = {표: build_id}). QL_HOME 기준 상대 경로.
-LATEST_MORNING_REL = Path("data/deliver/latest_morning.json")
 LOG_ROOT_DEFAULT = Path("logs/equity")
 SUMMARY_NAME = "summary.tsv"
 
@@ -109,8 +106,6 @@ def rollback_pass(equity_root: Path, pass_name: str, *,
     out: dict[str, str] = {}
     for table in tables:
         target = targets.get(table)
-        if target is None and table not in committed:
-            continue
         try:
             prev = rollback_table(equity_root / table, to_build_id=target)
         except ValueError:                    # 목표 판이 GC 됨
@@ -129,22 +124,21 @@ def pass_start_targets(equity_root: Path, tables: Iterable[str], basis: str,
     `basis` 는 이번 패스의 빌드 판(`--basis` 값, 생략이면 manual).
       · 저녁(evening)·수동(manual): 시작 시점의 `current_build`.
       · 아침(morning, C-01 · N-25 Q4 '직전 확정판' = 마지막으로 **완료된** 아침 판, 전 표 일관):
-        `latest_morning`(기본 `$QL_HOME/data/deliver/latest_morning.json`)의 `equity_builds[표]`.
-        실패한 아침 패스가 남긴 `m_` 는 이 파일에 안 오르므로 다음 날에도 고르지 않는다. 파일이
-        없거나 못 읽거나, 표가 거기 없거나, 그 판이 그 표 `builds[]` 에 없으면(GC) 그 표는 시작
-        `current_build`(옛 동작).
+        `latest_morning`(build_chain deliver_step 이 stage·equity 가 다 ok 인 아침 판에서만 쓰는
+        인계 포인터, **필수** — 경로는 `equity_rebuild_all.sh` 한 곳에 둔다)의 `equity_builds[표]`.
+        실패한 아침 패스가 남긴 `m_` 는 이 파일에 안 오르므로 다음 날에도 고르지 않는다.
+        **전부 아니면 전무**: MANIFEST 가 있는 표 중 하나라도 그 판을 못 얻으면(파일 없음·
+        못 읽음·표 없음·그 판이 builds[] 에 없음 = GC) 전 표를 시작 `current_build`(옛 동작)로
+        두고 stderr 에 이유 한 줄 — 표별로 폴백하면 확정판과 잠정판이 다시 섞인다.
+
+    Raises:
+        ValueError: 아침 패스인데 `latest_morning` 을 주지 않았다.
     """
-    latest: dict[str, str] = {}
-    if basis == BASIS_MORNING:
-        if latest_morning is None:
-            latest_morning = Path(os.environ.get("QL_HOME", ".")) / LATEST_MORNING_REL
-        try:
-            raw = json.loads(latest_morning.read_text(encoding="utf-8")).get("equity_builds")
-        except (OSError, ValueError, AttributeError):
-            raw = None
-        if isinstance(raw, dict):
-            latest = {str(k): str(v) for k, v in raw.items() if v}
-    out: dict[str, str] = {}
+    if basis == BASIS_MORNING and latest_morning is None:
+        raise ValueError(f"pass_start_targets: basis=morning needs latest_morning path "
+                         f"(equity_root={equity_root})")
+    current: dict[str, str] = {}
+    ids: dict[str, set[str]] = {}
     for table in tables:
         path = equity_root / table / MANIFEST_NAME
         if not path.exists():
@@ -152,10 +146,29 @@ def pass_start_targets(equity_root: Path, tables: Iterable[str], basis: str,
         m = manifest.load(path)
         if not m.current_build:
             continue
-        confirmed = latest.get(table)
-        ids = {b.build_id for b in m.builds}
-        out[table] = confirmed if confirmed in ids else m.current_build
-    return out
+        current[table] = m.current_build
+        ids[table] = {b.build_id for b in m.builds}
+    if basis != BASIS_MORNING or latest_morning is None:
+        return current
+    try:
+        raw = json.loads(latest_morning.read_text(encoding="utf-8")).get("equity_builds")
+    except (OSError, ValueError, AttributeError) as e:
+        raw, why = None, f"{type(e).__name__}: {e}"
+    else:
+        why = "equity_builds 가 객체가 아니다"
+    if not isinstance(raw, dict):
+        print(f"!!! 아침 롤백 목표: {latest_morning} 를 못 읽어 전 표 시작 current 로 ({why})",
+              file=sys.stderr)
+        return current
+    latest = {str(k): str(v) for k, v in raw.items() if v}
+    missing = sorted(t for t in current if t not in latest)
+    gone = sorted(t for t in current if t in latest and latest[t] not in ids[t])
+    if missing or gone:
+        print(f"!!! 아침 롤백 목표: {latest_morning} 판을 못 얻는 표가 있어 "
+              f"전 표 시작 current 로 — "
+              f"latest 에 없음 {missing} · GC(builds 에 없음) {gone}", file=sys.stderr)
+        return current
+    return {t: latest[t] for t in current}
 
 
 __all__ = ["pass_start_targets", "rollback_pass", "rollback_table"]

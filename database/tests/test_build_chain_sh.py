@@ -182,10 +182,11 @@ def test_future_d_is_refused(tmp_path: Path) -> None:
     지으면 'D 가 앞설 때만 갱신' 규칙 때문에 최신판 포인터·완료 신호가 그 날짜에 묶인다.
     """
     root = _root(tmp_path)
-    tomorrow = (dt.datetime.now(KST) + dt.timedelta(days=1)).strftime("%Y%m%d")
-    p = _chain(tmp_path, tomorrow, snap="snap_future")
+    # +2일 — 테스트와 스크립트가 '오늘'을 따로 재므로 +1일이면 KST 자정 직전에 깜빡일 수 있다
+    future = (dt.datetime.now(KST) + dt.timedelta(days=2)).strftime("%Y%m%d")
+    p = _chain(tmp_path, future, snap="snap_future")
     assert p.returncode == 2, p.stdout + p.stderr
-    assert f"D={tomorrow}" in p.stderr and "오늘" in p.stderr
+    assert f"D={future}" in p.stderr and "오늘" in p.stderr
     assert not (root / "data" / "deliver").exists()
     assert not (root / "data" / "stage" / "_READY.json").exists()
 

@@ -148,14 +148,20 @@ def test_inherited_raw_lock_skips_flock(tmp_path: Path) -> None:
     assert r.calls == STEPS
 
 
-def test_failed_wait_never_runs_without_lock(tmp_path: Path) -> None:
-    """대기형 flock 자체가 실패하면(락을 못 잡음) 락 없이 돌지 않는다 — 지금처럼 warn + exit 3."""
+@pytest.mark.parametrize("dry", [False, True])
+def test_failed_wait_never_runs_without_lock(tmp_path: Path, dry: bool) -> None:
+    """대기형 flock 자체가 실패하면(락을 못 잡음) 락 없이 돌지 않는다 — exit 3.
+
+    알림은 다른 알림과 같은 규칙이다 — dry-run 이 아니면 대기 info 뒤 warn, dry-run 이면 없음.
+    """
     _root(tmp_path)
-    r = _run(tmp_path, flock_stub=True, wait_rc=1)
+    args = ("--date", "20261006", "--dry-run") if dry else ()
+    r = _run(tmp_path, flock_stub=True, wait_rc=1, args=args)
     assert r.rc == 3, r.out
     assert r.flock == ["-n 9", "9"]
     assert r.calls == []
-    assert r.notify.startswith("warn|daily_build 락 실패")
+    sent = ["|".join(ln.split("|")[:2]) for ln in r.notify.splitlines()]
+    assert sent == ([] if dry else ["info|daily_build 원장 락 대기", "warn|daily_build 락 실패"])
 
 
 @pytest.mark.skipif(shutil.which("flock") is None,

@@ -41,7 +41,7 @@ if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
       "시작 $W0_KST — 다른 원장 작업(06:00 수집 등)이 $LOCK 을 쥐고 있다. 끝나면 이어서 돈다. 손으로 --date 를 돌리기 전에 확인"
     if ! flock 9; then
       # 대기형 flock 이 실패하면 락을 못 잡은 것이다 — 락 없이 원장을 쓰지 않는다
-      scripts/notify.sh warn "daily_build 락 실패" "$LOCK 을 기다리다 flock 이 실패했다 — 이번 실행 건너뜀"
+      [ -z "$DRY" ] && scripts/notify.sh warn "daily_build 락 실패" "$LOCK 을 기다리다 flock 이 실패했다 — 이번 실행 건너뜀"
       exit 3
     fi
     W1_KST=$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')
@@ -160,7 +160,7 @@ echo "════ 종료 rc=$RC $(kst) ════"
 fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
-SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미완료|KRX 401" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "원장 락 대기|^원장 건전성|──── .* 종료|아직 미완료|KRX 401" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 확정판이 이미 있어 재수집·재빌드하지 않았다 — 다시 돌리려면 QL_FORCE=1 또는 --date $D | 로그 $LOG"
   rm -f "$RUN"; exit 0

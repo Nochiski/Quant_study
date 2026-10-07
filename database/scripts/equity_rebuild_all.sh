@@ -40,22 +40,20 @@ ORDER=$(grep -vE '^\s*(#|$)' "$QL_HOME/scripts/equity_order.txt" | tr '\n' ' ')
 # 정본은 scripts/equity_order.txt 하나다 — 빌드와 재판정이 같은 29표를 돈다(DEFECT-C09).
 [ -n "${ORDER// /}" ] || { echo "!!! scripts/equity_order.txt 가 비었거나 없다" >&2; exit 2; }
 
-# 패스 시작 시점의 포인터를 남긴다 — 실패 롤백은 "직전 판" 이 아니라 이 판으로 돌아간다. 아침 실패의
-# 직전 판은 대개 전날 저녁 잠정판이라 확정 자리에서 잠정판이 보인다(리뷰 REC-13).
+# 패스 시작 시점에 실패하면 돌아갈 판을 남긴다 — 실패 롤백은 "직전 판" 이 아니라 이 판으로 돌아간다.
+# 아침 실패의 직전 판은 대개 전날 저녁 잠정판이라 확정 자리에서 잠정판이 보인다(리뷰 REC-13).
+# 판 고르기는 equity/rollback.py `pass_start_targets` 한 곳에서 한다(테스트 대상).
 BEFORE="$OUT/before.json"
 # shellcheck disable=SC2086  # reason: ORDER 는 표 이름 목록이라 단어 분리가 의도다
-.venv/bin/python - "$BEFORE" $ORDER <<'PY'
+.venv/bin/python - "$BEFORE" "${BASIS:-manual}" $ORDER <<'PY'
 import json
 import pathlib
 import sys
 
-out = pathlib.Path(sys.argv[1])
-d = {}
-for t in sys.argv[2:]:
-    p = pathlib.Path("data/equity") / t / "MANIFEST.json"
-    if p.exists():
-        d[t] = json.loads(p.read_text(encoding="utf-8")).get("current_build")
-out.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+from equity import rollback
+
+d = rollback.pass_start_targets(pathlib.Path("data/equity"), sys.argv[3:], sys.argv[2])
+pathlib.Path(sys.argv[1]).write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
 PY
 
 T_ALL0=$(date +%s)

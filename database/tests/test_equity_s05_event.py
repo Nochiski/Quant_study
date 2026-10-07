@@ -53,7 +53,10 @@ N_BY_TYPE = {"bonus": 1, "capred": 5, "cb_issue": 1, "split": 2, "treasury_buy":
 
 _EVENT_SQL = CORP_EVENT.sql_path.read_text(encoding="utf-8").strip().rstrip(";")
 _EVENT_CONST = {"effective_before_announce_max_days": 2555, "krx_share_change_tol": 0.001,
-                "bonus_ratio_window_sessions": 25}
+                "bonus_ratio_window_sessions": 25,
+                # C-04 — 미래 기준일 무상증자의 KRX 기준가 확인(adj_factor 네임스페이스, seed 값)
+                "base_price_tol_rel": 0.002, "price_match_tol_rel": 0.15,
+                "price_match_tol_abs": 0.05}
 
 
 def _lit(v: object) -> str:
@@ -110,6 +113,8 @@ _STG_TYPES: dict[str, dict[str, str]] = {
     "stg_listing_daily": {"ticker": "VARCHAR", "date": "DATE", "par_value_krw": "DOUBLE",
                           "list_shrs": "DOUBLE", "available_basis": "VARCHAR"},
 }
+_PRICE_TYPES = {"ticker": "VARCHAR", "date": "DATE", "close": "DECIMAL(9,0)",
+                "base_price_krw": "DECIMAL(10,0)"}
 
 
 def run_event_sql(cal: list[date], listing: list[dict[str, object]],
@@ -119,11 +124,13 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   cr: list[dict[str, object]] | None = None,
                   tsstk: list[dict[str, object]] | None = None,
                   cvbd: list[dict[str, object]] | None = None,
+                  prices: list[dict[str, object]] | None = None,
                   const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
     """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
 
     `listing` 은 (ticker, date, list_shrs[, par_value_krw]) 를 주면 되고 corp_ticker·security_span
-    은 거기서 유도한다 — corp_code = 'C' + ticker, 첫 상장일 = 그 티커의 첫 행.
+    은 거기서 유도한다 — corp_code = 'C' + ticker, 첫 상장일 = 그 티커의 첫 행. `prices` 는 equity
+    `price_daily` 의 (ticker, date, close, base_price_krw) — 없으면 빈 뷰(C-04 기준가 확인 축).
     """
     con = duckdb.connect()
     try:
@@ -135,6 +142,7 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                             ("stg_event_tsstk_aq", tsstk), ("stg_event_cvbd_is", cvbd)):
             _view(con, name, [{"available_basis": "measured", **r} for r in (rows_ or [])],
                   _STG_TYPES[name])
+        _view(con, "price_daily", prices or [], _PRICE_TYPES)
         tickers = sorted({str(r["ticker"]) for r in listing})
         _view(con, "corp_ticker",
               [{"ticker": t, "isin8": f"KR7{t}", "corp_code": "C" + t, "is_common": True}
@@ -182,10 +190,12 @@ def flat_listing(ticker: str, cal: list[date], shrs: float,
 
 
 def _seed() -> Baseline:
-    """S01·S02·S05 seed 병합 — 오케스트레이터가 baseline.json 에 병합하는 것과 같은 모양."""
+    """S01·S02·S04·S05·S06 seed 병합 — 오케스트레이터가 baseline.json 에 병합하는 것과 같은 모양.
+    S06 은 C-04(e1.25.0) — corp_event 가 adj_factor 의 기준가 짝 상수 3개를 읽는다."""
     merged: dict[str, object] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s04.BASELINE_SEED, rules_s05.BASELINE_SEED):
+              rules_s04.BASELINE_SEED, rules_s05.BASELINE_SEED,
+              Path(rules_s05.__file__).parent / "baseline_seed_s06.json"):
         merged.update({k: v for k, v in load(p).data.items()
                        if not k.startswith("_") and k != "measured_at"})
     return Baseline(merged)
@@ -197,7 +207,8 @@ def _with(bl: Baseline, **corp_event: object) -> Baseline:
 
 def _build_chain(stage_root: Path, equity_root: Path, baseline: Baseline,
                  rule: EquityTable = CORP_EVENT, **kw: object) -> build.BuildResult:
-    for t in (rules_s02.TRADING_CALENDAR, rules_s01.CORP_TICKER, rules_s02.SECURITY_SPAN):
+    for t in (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s01.CORP_TICKER,
+              rules_s02.SECURITY_SPAN, rules_s04.PRICE_DAILY):
         r = build.build_table(t, stage_root, equity_root, baseline, build_id=f"b_{t.name}")
         assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     return build.build_table(rule, stage_root, equity_root, baseline, build_id="b_s05_event",
@@ -710,8 +721,12 @@ def _krx_harness(tol: float) -> duckdb.DuckDBPyConnection:
                     "(?, DATE '2013-05-24', ?, ?, 'default')", [t, par0, shr0, t, par1, shr1])
     for name, cols in _DART_EMPTY.items():
         con.execute(f"CREATE TABLE {name}({cols})")
+    con.execute("CREATE TABLE price_daily(ticker VARCHAR, date DATE, close DECIMAL(9,0), "
+                "base_price_krw DECIMAL(10,0))")            # C-04 축 — KRX 분류엔 안 쓴다
     con.execute(f"CREATE TABLE _const AS SELECT 2555 AS effective_before_announce_max_days, "
-                f"{tol!r} AS krx_share_change_tol, 25 AS bonus_ratio_window_sessions")
+                f"{tol!r} AS krx_share_change_tol, 25 AS bonus_ratio_window_sessions, "
+                "0.002 AS base_price_tol_rel, 0.15 AS price_match_tol_rel, "
+                "0.05 AS price_match_tol_abs")
     return con
 
 
@@ -957,3 +972,61 @@ def test_사건일이_없으면_격리된다() -> None:
     out = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000), cvbd=cvbd)
     rows = [r for r in out.values() if r["event_type"] == "cb_issue"]
     assert rows and all(r["reject_reason"] == "effective_unresolved" for r in rows)
+
+
+# ── C-04(N-25 Q3): 신주배정기준일이 그 판 캘린더 밖(미래)인 무상증자 ─────────────
+# 권리락일 = 기준일 직전 거래일인데, 기준일이 캘린더 끝 D 뒤면 옛 식(캘린더에서 기준일 미만 최대)이
+# 항상 D 를 냈다 — 기준일이 D+10 이어도 효력일 D(현판 6건: 052400·303360·023150·290650·456160·
+# 009140). 고친 규칙: D 의 KRX 기준가가 비율을 확인할 때만 D, 아니면 대기(pool out_of_calendar).
+
+def _bonus_case(basis: date, ratio_ps: float, jump_at_end: float | None
+                ) -> dict[str, dict[str, object]]:
+    """평일 40 세션 캘린더 끝 D 에서 1주당 ratio_ps 주 무상증자(결정공시, 공시 세션 30). 가격은
+    평탄하고 jump_at_end 를 주면 D 의 기준가·종가 = 직전 종가 × jump_at_end."""
+    cal = sessions(40)
+    prices: list[dict[str, object]] = []
+    close = 10_000.0
+    for i, d in enumerate(cal):
+        base = close
+        if jump_at_end is not None and i == len(cal) - 1:
+            base = round(close * jump_at_end)
+        close = base
+        prices.append({"ticker": "A00001", "date": d, "close": close, "base_price_krw": base})
+    fric = [{"rcept_no": "20200220000001", "corp_code": "CA00001", "nstk_asstd": basis,
+             "nstk_ascnt_ps_ostk_ratio": ratio_ps, "available_date": cal[30]}]
+    return run_event_sql(cal, flat_listing("A00001", cal, 1_000_000), fric=fric, prices=prices)
+
+
+def _bonus_rows(out: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+    return [r for r in out.values() if r["event_type"] == "bonus"]
+
+
+def test_C04_기준일이_캘린더_끝_D_뒤_10일이면_효력일은_D가_아니라_대기다() -> None:
+    d_end = sessions(40)[-1]
+    out = _bonus_case(date.fromordinal(d_end.toordinal() + 10), 1.0, None)
+    assert _bonus_rows(out) == [], [r["event_id"] for r in _bonus_rows(out)]
+
+
+def test_C04_회귀_가드_기준일이_D_다음_거래일이고_D_기준가가_비율을_확인하면_효력일은_D() -> None:
+    """권리락 당일 빌드 — 캘린더는 D(권리락일)에서 끝나고 기준일은 그 다음 거래일이라 캘린더
+    밖이다. '캘린더 밖이면 NULL' 로 단순 수정하면 여기서 사건이 빠져 D 의 원주가 급락이 조정되지
+    않는다(scope 모멘텀 끝점이 깎인다)."""
+    d_end = sessions(40)[-1]                                  # 2020-02-28(금)
+    nxt = date.fromordinal(d_end.toordinal() + 3)             # 월요일 = D 다음 거래일
+    rows = _bonus_rows(_bonus_case(nxt, 1.0, 0.5))
+    assert [(r["effective_date"], r["ratio"]) for r in rows] == [(d_end, 2.0)]
+    assert rows[0]["reject_reason"] is None
+
+
+def test_C04_기준일이_D_다음_거래일이어도_D_기준가가_확인하지_않으면_대기다() -> None:
+    d_end = sessions(40)[-1]
+    nxt = date.fromordinal(d_end.toordinal() + 3)
+    assert _bonus_rows(_bonus_case(nxt, 1.0, None)) == []
+    # 기준가가 움직였어도 비율과 안 맞으면(×0.8 vs 1/2) 확인이 아니다
+    assert _bonus_rows(_bonus_case(nxt, 1.0, 0.8)) == []
+
+
+def test_C04_기준일이_캘린더_안이면_옛_규칙_그대로_직전_거래일이다() -> None:
+    cal = sessions(40)
+    rows = _bonus_rows(_bonus_case(cal[35], 1.0, None))
+    assert [r["effective_date"] for r in rows] == [cal[34]]

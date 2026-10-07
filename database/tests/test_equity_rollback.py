@@ -118,3 +118,56 @@ def test_before_맵이_있으면_시작_시점_판으로_되돌린다(tmp_path: 
     out = rollback.rollback_pass(eq, "p1", log_root=tmp_path / "logs" / "equity", before=before)
     assert out == {"price_daily": "m_1", "flow_daily": "e_2"}     # 시작 판 GC 됨 → 직전 판 폴백
     assert manifest.load(eq / "price_daily" / "MANIFEST.json").current_build == "m_1"
+
+
+def _set_current(t: Path, build_id: str) -> None:
+    rollback.rollback_table(t, to_build_id=build_id)
+
+
+def test_아침_패스의_되돌릴_판은_시작_current가_아니라_직전_확정판_m이다(tmp_path: Path) -> None:
+    """C-01(N-25 Q4): 아침 확정 패스 시작 current 는 대개 전날 저녁 잠정판(e_)이다. 실패 롤백이
+    그리로 가면 확정 자리에 잠정판이 남는다 — 같은 판(morning)의 마지막 m_ 로 간다."""
+    eq = tmp_path / "equity"
+    _table(eq, "price_daily", ["m_1", "e_2"])                  # 시작 current = e_2
+    assert rollback.pass_start_targets(eq, ["price_daily"], "morning") == {"price_daily": "m_1"}
+
+
+def test_저녁_패스와_수동_패스의_되돌릴_판은_시작_current_그대로다(tmp_path: Path) -> None:
+    eq = tmp_path / "equity"
+    _table(eq, "price_daily", ["m_1", "e_2"])
+    assert rollback.pass_start_targets(eq, ["price_daily"], "evening") == {"price_daily": "e_2"}
+    assert rollback.pass_start_targets(eq, ["price_daily"], "manual") == {"price_daily": "e_2"}
+
+
+def test_같은_날_아침_재시도도_첫_시도와_같은_m으로_간다(tmp_path: Path) -> None:
+    """첫 시도가 커밋한 m_3 은 실패 판이다 — builds[] 의 마지막 m_ 가 아니라 **current 이하**의
+    마지막 m_ 를 고른다. 첫 시도 롤백 뒤 current 가 m_1(새 규칙)이든 e_2(옛 규칙)이든 m_1."""
+    eq = tmp_path / "equity"
+    t = _table(eq, "price_daily", ["m_1", "e_2", "m_3"])
+    _set_current(t, "m_1")
+    assert rollback.pass_start_targets(eq, ["price_daily"], "morning") == {"price_daily": "m_1"}
+    _set_current(t, "e_2")
+    assert rollback.pass_start_targets(eq, ["price_daily"], "morning") == {"price_daily": "m_1"}
+
+
+def test_확정판이_한_번도_없거나_MANIFEST가_없으면(tmp_path: Path) -> None:
+    """확정판이 없으면 시작 current(옛 동작), MANIFEST 가 없으면 싣지 않는다(→ 직전 판 폴백)."""
+    eq = tmp_path / "equity"
+    _table(eq, "price_daily", ["e_1", "e_2"])
+    assert rollback.pass_start_targets(eq, ["price_daily", "없는표"], "morning") == {
+        "price_daily": "e_2"}
+
+
+def test_아침_패스_실패는_before_맵으로_직전_확정판에_돌아간다(tmp_path: Path) -> None:
+    """끝에서 끝까지: 시작 맵 → 패스가 m_3 커밋 → 실패 → rollback_pass(before) → m_1."""
+    eq = tmp_path / "equity"
+    t = _table(eq, "price_daily", ["m_1", "e_2"])
+    before = tmp_path / "before.json"
+    before.write_text(json.dumps(rollback.pass_start_targets(eq, ["price_daily"], "morning")),
+                      encoding="utf-8")
+    (t / "v=m_3").mkdir()
+    manifest.commit(t, _record("m_3"), keep=10)
+    _summary(tmp_path / "logs" / "equity" / "rebuild_p1" / "summary.tsv", [("price_daily", 0)])
+    out = rollback.rollback_pass(eq, "p1", log_root=tmp_path / "logs" / "equity", before=before)
+    assert out == {"price_daily": "m_1"}
+    assert manifest.load(t / "MANIFEST.json").current_build == "m_1"

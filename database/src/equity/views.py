@@ -16,7 +16,8 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
   S06 2차)이지 명목 효력일이 아니다.
   cutoff = as_of 에서 `lag` 세션 전 거래일(trading_calendar 역산). lag 기본값은 컬럼군 세션 랙인데
   `dataset_profile`(S19)이 아직 없으므로 **가격 계열 0 세션** 을 본문 상수(FACTOR_LAG_SESSIONS)로
-  둔다 — 근거: 계수의 available_date 는 min(공시 접수일, 효력일 다음 거래일) 이라 이미 '그날 알 수
+  둔다 — 근거: 계수의 available_date 는 min(공시 접수일, 효력일 다음 거래일)(KRX 기준가가 확정한
+  ok 계수 — 사건 교체·unknown_krx — 는 min(공시 접수일, 적용일), C-07) 이라 이미 '그날 알 수
   있었던 날' 이고(stage 가격류 lag_known=true, 공표 시각 미제공 → S04 와 같은 규약), 랙을 더 두면
   분할 당일
   조정가가 하루 늦게 붙어 EG8 점프가 생긴다. 소비자는 `lag_override` 로 세션 단위로 늘릴 수 있다.

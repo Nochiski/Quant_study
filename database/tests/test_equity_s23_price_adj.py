@@ -239,6 +239,74 @@ def test_무상증자_권리락은_KRX_기준가_축_계수를_쓴다(built) -> 
         con.close()
 
 
+def _synth_adj_close(ticker: str, events: list[dict[str, object]],
+                     prices: list[dict[str, object]],
+                     cal: list[dt.date]) -> tuple[dict[dt.date, float], int]:
+    """합성 입력 위에서 adj_factor.sql → price_adj_daily.sql 을 잇는다(프레임·게이트 없이 산출식만).
+    반환 = (그 티커의 date → adj_close, available_date ≠ date 행 수)."""
+    from test_equity_s06_adj import _body as adj_body
+    from test_equity_s06_adj import _setup
+
+    con = duckdb.connect()
+    try:
+        _setup(con, events, prices, cal, None, None)
+        con.execute(f"CREATE TEMP TABLE adj_factor AS {adj_body()}")
+        # price_adj_daily 가 읽는 가격 축(OHLC·거래량·표식)을 같은 합성 행으로 다시 올린다
+        con.execute("CREATE TEMP TABLE px_full AS SELECT ticker, date, close AS open, "
+                    "close AS high, close AS low, close, "
+                    "CAST(1000 AS DECIMAL(13,0)) AS volume_shr, "
+                    "'krx' AS basis, FALSE AS corp_action_pending FROM price_daily")
+        con.execute("DROP VIEW price_daily")
+        con.execute("CREATE TEMP VIEW price_daily AS SELECT * FROM px_full")
+        adj = dict(con.execute(f"SELECT date, adj_close FROM ({_body()}) "
+                               f"WHERE ticker = '{ticker}' ORDER BY date").fetchall())
+        n_avail_ne = _one(con, f"SELECT count(*) FROM ({_body()}) "
+                               "WHERE available_date IS DISTINCT FROM date")[0]
+    finally:
+        con.close()
+    return adj, int(str(n_avail_ne))
+
+
+def test_정정_공시가_늦어도_기준가로_확정된_무상증자는_권리락일에_접힌다() -> None:
+    """C-07(N-26 4.1) — 002070 2026-07-31 형. 정정 공시 announce(세션 33) > apply(권리락일 30) 인
+    1주당 1주 무상증자를 KRX 기준가가 권리락일에 확인했다(기준가 = 직전 종가 × 0.5). 옛
+    available(apply 다음 세션)이 fold_date 를 하루 미뤄 권리락일 수정수익률이 원주가 하락
+    그대로(−50%), 다음 날 반대로 튀었다(+100%). 고친 뒤 두 날 모두 |r| < price_match_tol_abs."""
+    from test_equity_s06_adj import flat_prices, sessions
+
+    tol = SEED.get("adj_factor", "price_match_tol_abs")
+    assert tol is not None
+    cal = sessions(60)
+    ev = [{"ticker": "A00016", "event_type": "bonus", "effective_date": cal[30], "ratio": 2.0,
+           "source": "event_fric", "rcept_no": "20191202000016", "announce_date": cal[33]}]
+    adj, n_avail_ne = _synth_adj_close(
+        "A00016", ev, flat_prices("A00016", cal, 10000, jumps={30: 0.5}, base={30: 0.5}), cal)
+    r_ex = adj[cal[30]] / adj[cal[29]] - 1           # 권리락일
+    r_next = adj[cal[31]] / adj[cal[30]] - 1
+    assert abs(r_ex) < float(str(tol)), r_ex         # 옛 규칙 −0.5
+    assert abs(r_next) < float(str(tol)), r_next     # 옛 규칙 +1.0
+    assert n_avail_ne == 0                           # 표의 PIT 항등(available = date) 유지
+
+
+def test_기준가_신규_unknown_krx_정상_계수도_적용일에_접힌다() -> None:
+    """C-07 후속(N-26 4.1): 사건 없이 기준가 ×0.1 · 같은 날 주식수 ×10(곱 1 — DART 공백기 분할 형)
+    인 unknown_krx 정상 행. r 과 S 가 모두 그날 KRX 일별 행에서 오므로 그날 접는다 — 옛
+    available(다음 세션)이면 적용일 −90%, 다음 날 +900% 가짜 급락·급반등."""
+    from test_equity_s06_adj import flat_prices, sessions
+
+    tol = SEED.get("adj_factor", "price_match_tol_abs")
+    assert tol is not None
+    cal = sessions(60)
+    px = flat_prices("A00018", cal, 10000, jumps={30: 0.1}, base={30: 0.1},
+                     share_jumps={30: 10.0})
+    adj, n_avail_ne = _synth_adj_close("A00018", [], px, cal)
+    r_ex = adj[cal[30]] / adj[cal[29]] - 1
+    r_next = adj[cal[31]] / adj[cal[30]] - 1
+    assert abs(r_ex) < float(str(tol)), r_ex         # 옛 규칙 −0.9
+    assert abs(r_next) < float(str(tol)), r_next     # 옛 규칙 +9.0
+    assert n_avail_ne == 0
+
+
 def test_재상장_구간의_첫_행은_누적이_1이고_이전_구간_사건을_물지_않는다(built) -> None:
     eq, _ = built
     con = _con(eq)

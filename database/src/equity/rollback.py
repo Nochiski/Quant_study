@@ -18,11 +18,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 from stage import manifest
+from stage import model as stage_model
 
 MANIFEST_NAME = "MANIFEST.json"
+BASIS_MORNING = "morning"                 # 아침 확정판 — stage.model.BASIS_PREFIX 의 키(`m_`)
 LOG_ROOT_DEFAULT = Path("logs/equity")
 SUMMARY_NAME = "summary.tsv"
 
@@ -70,10 +73,11 @@ def rollback_pass(equity_root: Path, pass_name: str, *,
                   log_root: Path | None = None, before: Path | None = None) -> dict[str, str]:
     """`logs/equity/rebuild_<PASS>/summary.tsv` 의 **rc 0 표만** 되돌린다.
 
-    `before`(패스 시작 시점의 `{표: current_build}` JSON)가 있으면 **그 판**으로,
-    없으면 직전 판으로.
+    `before`(패스 시작 시점에 `pass_start_targets` 가 고른 `{표: build_id}` JSON)가 있으면
+    **그 판**으로, 없으면 직전 판으로.
     아침 확정 빌드가 중간에 실패하면 "직전 판" 은 대개 전날 저녁 잠정판(`e_`)이라 MANIFEST 를 직접
-    읽는 공유 소비자가 확정 자리에서 잠정판을 보게 된다(리뷰 REC-13) — 시작 시점 판이 정답이다.
+    읽는 공유 소비자가 확정 자리에서 잠정판을 보게 된다(리뷰 REC-13) — 아침 패스의 before 는 직전
+    확정판(`m_`, C-01)이다.
     시작 시점 판이 이미 GC 됐으면 직전 판으로 폴백한다.
     반환값은 `{표: 되돌아간 build_id}`.
     """
@@ -99,4 +103,37 @@ def rollback_pass(equity_root: Path, pass_name: str, *,
     return out
 
 
-__all__ = ["rollback_pass", "rollback_table"]
+def pass_start_targets(equity_root: Path, tables: Iterable[str],
+                       basis: str) -> dict[str, str]:
+    """패스 시작 시점에 표마다 실패하면 돌아갈 판 `{표: build_id}` — `equity_rebuild_all.sh` 가
+    `before.json` 으로 남기고 `rollback_pass(before=…)` 가 읽는다. MANIFEST 가 없거나 판이 없는 표는
+    싣지 않는다(→ `rollback_pass` 의 직전 판 폴백).
+
+    `basis` 는 이번 패스의 빌드 판(`--basis` 값, 생략이면 manual).
+      · 저녁(evening)·수동(manual): 시작 시점의 `current_build`.
+      · 아침(morning, C-01 · N-25 Q4): `builds[]` 에서 시작 `current_build` **이하**의 마지막 `m_`
+        (직전 확정판). 시작 current 는 대개 전날 저녁 잠정판(`e_`)이라 그리로 돌아가면 확정 자리에
+        잠정판이 남는다. '이하' 인 이유: 같은 날 실패한 첫 시도가 커밋한 `m_` 는 builds[] 끝에
+        남아 있지만 롤백으로 current 뒤에 놓인다 — 재시도도 첫 시도와 같은 판을 고른다.
+        확정판이 한 번도 없으면 시작 current(옛 동작).
+    """
+    out: dict[str, str] = {}
+    for table in tables:
+        path = equity_root / table / MANIFEST_NAME
+        if not path.exists():
+            continue
+        m = manifest.load(path)
+        if not m.current_build:
+            continue
+        target = m.current_build
+        ids = [b.build_id for b in m.builds]
+        if basis == BASIS_MORNING and target in ids:
+            confirmed = [b for b in ids[:ids.index(target) + 1]
+                         if stage_model.basis_of_build_id(b) == BASIS_MORNING]
+            if confirmed:
+                target = confirmed[-1]
+        out[table] = target
+    return out
+
+
+__all__ = ["pass_start_targets", "rollback_pass", "rollback_table"]

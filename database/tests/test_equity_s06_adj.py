@@ -242,7 +242,8 @@ def test_교차_원천_근접_중복은_가격_매칭보다_먼저_낮은_쪽을
 def test_available_date는_min_공시_apply_date_다음_세션_이다(built: build.BuildResult,
                                                    factors: dict[str, dict[str, object]]) -> None:
     """캘린더 원자료로 독립 재계산. EG2-P02 announce 축을 못 쓰는 대신 EG3_adj_factor 가 이 식을
-    본다."""
+    본다. C-07(e1.25.0): KRX 기준가가 확정한 사건 교체 ok 행은 min(공시, apply_date) — 절단본 3건은
+    공시 ≤ apply 라 값은 옛 식과 같다(공시가 늦은 경우는 합성 테스트)."""
     con = duckdb.connect()
     try:
         cal = sorted(r[0] for r in con.execute(
@@ -257,6 +258,9 @@ def test_available_date는_min_공시_apply_date_다음_세션_이다(built: bui
         nxt = cal[cal.index(f["apply_date"]) + 1]
         if eid in PRICE_ONLY_IDS:                                 # S06-2 신규 행: 다음 세션
             assert f["available_date"] == nxt and f["announce_date"] == f["apply_date"]
+        elif f["apply_basis"] == "krx_base_price" and f["factor_ok"]:   # C-07
+            assert f["available_date"] == min(f["announce_date"],        # type: ignore[type-var]
+                                              f["apply_date"])
         else:
             assert f["available_date"] == min(f["announce_date"], nxt)   # type: ignore[type-var]
         assert f["available_basis"] == "derived"
@@ -900,6 +904,107 @@ def test_합성_기준가_비율과_사건_비율이_어긋나면_krx_base_incon
     assert c[f"A00011:split:{cal[30]}"]["factor_ok"] is True
 
 
+def test_합성_정정_공시가_적용일보다_늦어도_기준가로_확정된_계수는_적용일에_공개된다(
+        tmp_path: Path) -> None:
+    """C-07(N-26 4.1): 002070 2026-07-31 무상증자는 announce 가 정정 공시 접수일이라 apply_date
+    보다 늦고, 옛 규칙 available = min(announce, apply 다음 세션) 이 다음 세션이 되어 전방 조정이
+    하루 늦게 접혔다(07-31 수정수익률 −35.0% → 08-03 +159.6%). KRX 기준가가 apply 세션에 비율을
+    확인한 계수(사건 교체 krx_base_price, ok)는 그 세션에 알 수 있다 → available = min(announce,
+    apply_date). 공시가 앞선 사건은 그대로 공시일이고, 가격 매칭(nominal) 계수는 옛 규칙 그대로."""
+    from equity.gates import EquityGateContext
+
+    cal = sessions(80)
+    ev = [{"ticker": "A00016", "event_type": "bonus", "effective_date": cal[30], "ratio": 2.0,
+           "source": "event_fric", "rcept_no": "20191202000016", "announce_date": cal[33]}]
+    px = flat_prices("A00016", cal, 10000, jumps={30: 0.5}, base={30: 0.5})
+    f = run_adj_sql(ev, px, cal)[f"A00016:bonus:{cal[30]}"]
+    assert f["apply_basis"] == "krx_base_price" and f["factor_ok"] is True
+    assert f["apply_date"] == cal[30] and f["announce_date"] == cal[33]
+    assert f["available_date"] == cal[30]                    # 옛 규칙이면 다음 세션 cal[31]
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_available_mismatch"] == 0
+    # 공시가 apply 보다 앞서면 공시일 그대로(다른 행 불변)
+    early = run_adj_sql([{**ev[0], "announce_date": cal[10]}], px, cal)
+    assert early[f"A00016:bonus:{cal[30]}"]["available_date"] == cal[10]
+    # 기준가 사건이 없어 가격 매칭(nominal)으로 선 계수는 옛 규칙 — 다음 세션
+    nom = run_adj_sql(ev, flat_prices("A00016", cal, 10000, jumps={30: 0.5}), cal)
+    assert nom[f"A00016:bonus:{cal[30]}"]["apply_basis"] == "nominal"
+    assert nom[f"A00016:bonus:{cal[30]}"]["available_date"] == cal[31]
+    # EG3 독립 재계산도 새 규칙이다 — 산출을 옛 규칙(다음 세션)으로 되돌리면 잡는다
+    con = duckdb.connect()
+    try:
+        _setup(con, ev, px, cal, None, None)
+        con.execute(f"CREATE OR REPLACE TEMP TABLE out_pq AS {_body()}")
+        con.execute(f"UPDATE out_pq SET available_date = DATE '{cal[31]}'")
+        bl = Baseline({"corp_event": {"near_dup_window_days": 5, "krx_share_change_tol": 0.001},
+                       "adj_factor": {c: _CONST[c] for c in (*rules_s06.PRICE_MATCH_CONSTS,
+                                                             *rules_s06.BASE_PRICE_CONSTS)}})
+        ctx = EquityGateContext(con=con, rule=ADJ, out_view="out_pq", reject_view=None,
+                                pinned={}, n_out=1, n_reject=0, reject_by_reason={}, inputs={},
+                                partition_hashes={}, baseline=bl)
+        bad = rules_s06.eg3_adj_factor(ctx)
+    finally:
+        con.close()
+    assert bad.status is GateStatus.FAIL and bad.metrics["n_available_mismatch"] == 1
+
+
+def test_합성_기준가_신규_unknown_krx_정상_행은_적용일에_공개되고_나머지_신규_행은_다음_세션(
+        tmp_path: Path) -> None:
+    """C-07 후속(N-26 4.1): unknown_krx 정상 행(곱 검사 통과)은 기준가 r 과 주식수 비 S 가 모두
+    그날 KRX 일별 행에서 오므로 available = apply_date(= announce = 그날). 정상 아닌 신규 행
+    (unknown_krx krx_base_inconsistent · unknown_price_only)은 옛 식 그대로 다음 세션."""
+    cal = sessions(80)
+    ok = run_adj_sql([], flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
+                                     share_jumps={40: 10.0}), cal)[f"A00019:krx_base:{cal[40]}"]
+    assert ok["event_type"] == "unknown_krx" and ok["factor_ok"] is True
+    assert ok["available_date"] == cal[40] == ok["apply_date"]       # 옛 규칙이면 cal[41]
+    # 회귀 가드: 곱 검사 실패(r 0.1 × S 3 = 0.3) → krx_base_inconsistent, 다음 세션
+    bad = run_adj_sql([], flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
+                                      share_jumps={40: 3.0}), cal)[f"A00019:krx_base:{cal[40]}"]
+    assert bad["event_type"] == "unknown_krx" and bad["factor_source"] == "krx_base_inconsistent"
+    assert bad["available_date"] == cal[41]
+    # 회귀 가드: 주식수 불변 → unknown_price_only, 다음 세션
+    po = run_adj_sql([], flat_prices("A00019", cal, 10000, jumps={40: 0.9}, base={40: 0.9}),
+                     cal)[f"A00019:krx_base:{cal[40]}"]
+    assert po["event_type"] == "unknown_price_only" and po["available_date"] == cal[41]
+    for px in (flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
+                           share_jumps={40: 10.0}),
+               flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
+                           share_jumps={40: 3.0})):
+        g = run_eg3([], px, cal)
+        assert g.status is GateStatus.PASS, g.detail
+        assert g.metrics["n_available_mismatch"] == 0
+
+
+def test_C04_미래_기준일_소액_무상증자는_캘린더_끝에_ok_계수를_만들지_않는다() -> None:
+    """C-04(N-25 Q3): 1주당 0.03주(ratio 1.03, m 0.029 ≤ tol_abs) 무상증자의 기준일이 캘린더 끝 D
+    뒤 10일. 옛 corp_event 는 효력일 D 를 냈고 adj_factor 의 소액 경로(jump_mag ≤ tol_abs, 가격
+    확인 없음)가 D 에 ok 계수를 붙였다 — 가짜 조정. 고친 뒤 D 기준가가 1/1.03 을 확인할 때만
+    효력일 D(→ 기준가 교체 ok), 아니면 corp_event 에서 대기라 adj_factor 행이 없다."""
+    from test_equity_s05_event import run_event_sql
+
+    cal = sessions(60)
+    d_end = cal[-1]
+    listing = [{"ticker": "A00017", "date": d, "list_shrs": 1_000_000} for d in cal]
+    fric = [{"rcept_no": "20200301000017", "corp_code": "CA00017",
+             "nstk_asstd": d_end + dt.timedelta(days=10), "nstk_ascnt_ps_ostk_ratio": 0.03,
+             "available_date": cal[50]}]
+
+    def chain(px: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+        ev = [e for e in run_event_sql(cal, listing, fric=fric, prices=px).values()
+              if e["event_type"] == "bonus"]
+        return run_adj_sql(ev, px, cal)
+
+    flat = chain(flat_prices("A00017", cal, 10000, jumps={}))
+    assert [e for e, x in flat.items() if x["factor_ok"] and x["apply_date"] == d_end] == []
+    # D 의 기준가가 1/1.03 을 확인하면 효력일 D — 기준가 교체 ok 계수
+    ok = chain(flat_prices("A00017", cal, 10000, jumps={59: 1 / 1.03}, base={59: 1 / 1.03}))
+    x = ok[f"A00017:bonus:{d_end}"]
+    assert x["factor_ok"] is True and x["apply_basis"] == "krx_base_price"
+    assert x["apply_date"] == d_end
+
+
 def test_합성_기준가만_바뀌고_주식수_불변_전일_거래면_unknown_price_only(tmp_path: Path) -> None:
     """(ii) 사건 없음. 세션 40 기준가 ×0.9(권리락 류) — 신규 행 ok=false · 계수 1 · effective =
     announce = apply = 그날 · available 다음 세션 · corp_code 는 security."""
@@ -923,7 +1028,7 @@ def test_합성_기준가만_바뀌고_주식수_불변_전일_거래면_unknown
     b = run_adj_sql([], px_b, cal)[f"A00012:krx_base:{cal[40]}"]
     assert b["event_type"] == "unknown_krx" and b["factor_ok"] is True
     assert (b["price_factor"], b["share_factor"]) == (0.1, 10.0)
-    assert b["available_date"] == cal[41]
+    assert b["available_date"] == cal[40]          # C-07 후속: 정상 unknown_krx 는 그날
     # ETF 는 후보 밖 — 분배락 + 설정·환매 좌수 변화가 곱을 우연히 통과해도 행이 없다
     px_etf = flat_prices("ETF001", cal, 10000, jumps={40: 0.998}, base={40: 0.998},
                          share_jumps={40: 1.002})

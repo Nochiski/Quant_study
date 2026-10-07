@@ -398,8 +398,9 @@ def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
         time.sleep(PACE)
 
         # v 는 verdict("error"), st 가 "exc" 다. v 로 "exc" 를 검사하면 예외 경로가
-        # 첫 시도에서 빠져나가 재시도가 0 회가 된다.
-        if (v != "retry" and st != "exc") or attempt == RETRY_MAX:
+        # 첫 시도에서 빠져나가 재시도가 0 회가 된다. st 도 j=None 이면 위 형태 신호가 붙어
+        # "exc/resp_NoneType" 이 되므로 같다(==)가 아니라 접두어로 본다(배포 묶음 3 T15, N-23 ③).
+        if (v != "retry" and not str(st).startswith("exc")) or attempt == RETRY_MAX:
             if v == "unknown":
                 print(f"    ? 모르는 status={st} — endpoint={s['ep']} corp={corp} "
                       f"year={year or '-'} reprt={reprt}. VERDICT 에 추가할 것")

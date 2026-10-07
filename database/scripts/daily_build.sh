@@ -9,12 +9,24 @@ set -uo pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
-LOCK=/tmp/quant_ledger_raw.lock
+LOCK="${QL_RAW_LOCK_FILE:-/tmp/quant_ledger_raw.lock}"   # 테스트가 운영 락을 잡지 않게 할 때만 바꾼다
+LOCK_WAITED=""     # 원장 락을 기다렸으면 "N초 (시작 ~ 끝)" — 체인 로그에도 남긴다
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
   exec 9>"$LOCK"
   if ! flock -n 9; then
-    scripts/notify.sh warn "daily_build 락 실패" "다른 원장 작업이 $LOCK 을 쥐고 있다 — 이번 실행 건너뜀"
-    exit 3
+    # 앞 원장 작업(06:00 수집 체인)이 아직 돌면 건너뛰지 않고 끝나기를 기다렸다 이어서 돈다(N-23 ①, P9).
+    # 공시 마감일엔 06:00 체인이 10시를 넘기는데, 예전처럼 exit 3 으로 물러나면 그 D 확정판이 영구히 빠졌다.
+    # 시간 한도·재시도 시각은 두지 않는다 — 늦어짐·멈춤 경보는 10:30 워치독 몫이다(감시이지 제어가 아니다).
+    W0=$(date +%s); W0_KST=$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')
+    echo "[$W0_KST] daily_build 원장 락 대기 시작 — 다른 원장 작업이 $LOCK 을 쥐고 있다(끝나면 이어서 돈다)"
+    if ! flock 9; then
+      # 대기형 flock 이 실패하면 락을 못 잡은 것이다 — 락 없이 원장을 쓰지 않는다
+      scripts/notify.sh warn "daily_build 락 실패" "$LOCK 을 기다리다 flock 이 실패했다 — 이번 실행 건너뜀"
+      exit 3
+    fi
+    W1_KST=$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')
+    LOCK_WAITED="$(( $(date +%s) - W0 ))초 ($W0_KST ~ $W1_KST)"
+    echo "[$W1_KST] daily_build 원장 락 대기 끝 — $LOCK_WAITED"
   fi
   export QL_RAW_LOCK_HELD=1
 fi
@@ -71,6 +83,7 @@ d=sys.argv[1]; print(c.load().prev_trading_day(dt.date(int(d[:4]),int(d[4:6]),in
 }
 {
 echo "════ [$(kst)] daily_build 시작 dry=${DRY:-no} no_build=${NOBUILD:-0} ════"
+if [ -n "$LOCK_WAITED" ]; then echo "  원장 락 대기 $LOCK_WAITED — 앞 원장 작업이 끝난 뒤 이어서 돈다"; fi
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"

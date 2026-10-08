@@ -34,15 +34,15 @@ while [ $# -gt 0 ]; do
 done
 deliver_json() {
   # 18:15 잠정 빌드·워치독이 읽는 인계 파일. dart_rc 가 빈 문자열이면 아직 도는 중(null) — 빌드 조건이 아니다.
-  # 임시 파일에 쓰고 원자 교체한다(읽는 쪽이 부분 JSON 을 보지 않게).
+  # 임시 파일에 쓰고 원자 교체한다(읽는 쪽이 부분 JSON 을 보지 않게). wise_n_bad = Σ(n_req − n_ok) — 런 로그 n_bad(검증 실패만)와 다르다.
   $PY -c 'import datetime as dt, json, os, sys
-d, rc_kw, rc_dart, rc_wise, kw_at, wise_at = sys.argv[1:7]
+d, rc_kw, rc_dart, rc_wise, kw_at, wise_at, n_bad, bad = sys.argv[1:9]
 os.makedirs("data/deliver", exist_ok=True)
-payload = {"date": d,
-           "finished_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+payload = {"date": d, "finished_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "kiwoom_rc": int(rc_kw), "dart_rc": (int(rc_dart) if rc_dart != "" else None),
            "wise_rc": int(rc_wise), "dart_done": rc_dart != "",
-           "kiwoom_done_at": kw_at or None, "wise_done_at": wise_at or None}
+           "kiwoom_done_at": kw_at or None, "wise_done_at": wise_at or None,
+           "wise_n_bad": int(n_bad) if n_bad else None, "wise_bad_summary": json.loads(bad) if bad else None}
 tmp = "data/deliver/ledger_evening.json.tmp"
 with open(tmp, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=False, indent=1)
@@ -54,7 +54,7 @@ LOG="logs/daily_evening_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
 D=""; FAILED=""; SKIPPED=""
 RC_KW=0; RC_DART=0; RC_WISE=0
-KW_LOG=""; DART_LOG=""; WISE_LOG=""; KW_DONE=""; WISE_DONE=""
+KW_LOG=""; DART_LOG=""; WISE_LOG=""; KW_DONE=""; WISE_DONE=""; WISE_N_BAD=""; WISE_BAD_SUMMARY=""; WISE_FROM=""
 # 세 갈래는 서로 다른 원장(kiwoom.db · dart.db · wise.db)만 건드리므로 병렬이 안전하다.
 # 각자 자기 로그에 쓰고 rc 는 `wait <pid>` 로 따로 받는다 — 하나가 죽어도 나머지는 끝까지 간다.
 branch_kiwoom() {
@@ -127,6 +127,7 @@ else
   WISE_LOG="logs/evening_wise_${D}.log"
   RID=""
   [ -z "$DRY" ] && RID=$($PY -c 'import sys; from daily import runlog; print(runlog.start("data/raw/daily_run.db", date=sys.argv[1], source="evening_chain"))' "$D")
+  WISE_FROM=$(date -u +%Y-%m-%dT%H:%M:%S)   # 이번 저녁 WISE 런의 하한 — ws_run_log.run_at 과 같은 UTC 형식
   branch_kiwoom > "$KW_LOG"   2>&1 & PID_KW=$!
   branch_dart   > "$DART_LOG" 2>&1 & PID_DART=$!
   branch_wise   > "$WISE_LOG" 2>&1 & PID_WISE=$!
@@ -138,7 +139,36 @@ else
   KW_DONE=$(grep -m1 '^DONE_AT=' "$KW_LOG" | cut -d= -f2-)
   WISE_DONE=$(grep -m1 '^DONE_AT=' "$WISE_LOG" | cut -d= -f2-)
   echo "  종료 시각 — 키움 ${KW_DONE:-미기록} · WISE ${WISE_DONE:-미기록} (18:15 잠정 빌드 트리거 근거) $(kst)"
-  [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "" "$RC_WISE" "$KW_DONE" "$WISE_DONE"
+  # WISE 부분 실패(N-27 ③·N-30 ③) — 수집기는 일부 콜이 실패해도 rc 0 이라 FAILED 에 들지 않고, ⚠⚠ 줄은
+  # 아래 info 요약에 섞일 뿐이다. 근거는 갈래 로그의 ⚠⚠ 줄이 아니라 이번 저녁 런의 런 로그(ws_run_log,
+  # run_at ≥ 갈래 시작)다 — ⚠⚠ 줄은 출력 문구라 바뀌면 조용히 0 이 되고 본문 검증 실패(n_bad)만 담는다.
+  # 런 로그의 n_req − n_ok 는 전송 실패(http·exc·notjson)까지 담아 08:10 wise.run 의 런 로그 판정
+  # (n_bad 0 ∧ n_ok = n_req)과 같은 양이다(P1). 같은 날 앞 런은 세지 않는다 — 회복 여부는 08:10 건전성 몫.
+  # 런 로그를 못 읽거나 0행이면(수집기 비정상 종료·--limit·읽기/파싱 실패) 모름 = 빈 값 → 인계 파일 null.
+  # rc≠0 이면 이미 crit 이고, rc 0 이면 '확인 불가' warn 이다 — --limit 없는 rc 0 런은 대상 0 이어도 런 로그를
+  # 반드시 1행 쓰므로(backfill_wise.py:321-330·:428-431) 0행은 실제 이상이다(P1).
+  WISE_FAIL=$($PY -c 'import json, sqlite3, sys
+since = sys.argv[1]
+try:
+    con = sqlite3.connect("file:data/raw/wisereport.db?mode=ro", uri=True)
+    rows = con.execute("SELECT n_req, n_ok, n_bad, bad_summary FROM ws_run_log WHERE run_at >= ?",
+                       (since,)).fetchall()
+    n_fail, kinds = 0, {}
+    for n_req, n_ok, n_bad, summary in rows:
+        for k, v in json.loads(summary or "{}").items():
+            kinds[k] = kinds.get(k, 0) + int(v)
+        other = int(n_req or 0) - int(n_ok or 0) - int(n_bad or 0)
+        if other:
+            kinds["전송 실패(http·exc·notjson)"] = kinds.get("전송 실패(http·exc·notjson)", 0) + other
+        n_fail += int(n_req or 0) - int(n_ok or 0)
+except Exception as e:  # noqa: BLE001  # reason: 읽기·파싱 어떤 실패든 "모름"(빈 값) — 확인 불가 warn 이 받는다
+    sys.exit(f"  ! WISE 런 로그를 읽지 못했다 — run_at>={since} ({type(e).__name__}: {e})")
+if not rows:
+    sys.exit(f"  ! WISE 런 로그 없음 — run_at>={since} (수집기 비정상 종료·--limit)")
+print(n_fail, json.dumps(kinds, ensure_ascii=False))' "$WISE_FROM")
+  WISE_N_BAD="${WISE_FAIL%% *}"; WISE_BAD_SUMMARY="${WISE_FAIL#* }"
+  echo "  WISE 이번 저녁 런 실패 콜 ${WISE_N_BAD:-모름} ${WISE_BAD_SUMMARY} $(kst)"
+  [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "" "$RC_WISE" "$KW_DONE" "$WISE_DONE" "$WISE_N_BAD" "$WISE_BAD_SUMMARY"
   wait "$PID_DART"; RC_DART=$?
   echo "  DART 종료 rc=$RC_DART $(kst)"
   for f in "$KW_LOG" "$DART_LOG" "$WISE_LOG"; do
@@ -153,7 +183,7 @@ else
       "$RID" "$([ -z "$FAILED" ] && echo ok || echo failed)" \
       "kiwoom_rc=$RC_KW dart_rc=$RC_DART wise_rc=$RC_WISE kiwoom_done_at=${KW_DONE:-none} wise_done_at=${WISE_DONE:-none}${FAILED:+ failed=$FAILED}"
   fi
-  [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "$RC_DART" "$RC_WISE" "$KW_DONE" "$WISE_DONE"
+  [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "$RC_DART" "$RC_WISE" "$KW_DONE" "$WISE_DONE" "$WISE_N_BAD" "$WISE_BAD_SUMMARY"
 fi
 echo "════ 종료 키움=$RC_KW DART=$RC_DART WISE=$RC_WISE $(kst) ════"
 } > "$RUN" 2>&1
@@ -166,6 +196,15 @@ SUMMARY=$(printf 'D=%s | 키움 %s| DART %s| WISE %s| 종료 키움 %s · WISE %
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_evening $SKIPPED — 건너뜀" "D=$D | 로그 $LOG"
   rm -f "$RUN"; exit 0
+fi
+# WISE 부분 실패 warn(N-27 ③·N-30 ③) — 체인 rc·FAILED·info 와 별개로 1건. 08:10 건전성에서야 드러나면 같은 날
+# 재실행(자정 전)을 놓친다. 다른 갈래 실패(crit)와 겹쳐도 낸다 — WISE 재실행은 따로 해야 한다.
+# 수집기 rc 0 인데 실패 수를 모르면(런 로그 0행·못 읽음) 그것도 warn 1건(P1). rc≠0 은 아래 crit 이 맡는다.
+if [ "${WISE_N_BAD:-0}" -gt 0 ] && [ -z "$DRY" ]; then
+  scripts/notify.sh warn "WISE 수집 일부 실패 ${WISE_N_BAD}콜" \
+    "D=$D | 종류 $WISE_BAD_SUMMARY | 같은 날 재실행: README 'WISE 같은 날 재실행'(자정 전) | 로그 $WISE_LOG"
+elif [ -z "$WISE_N_BAD" ] && [ "$RC_WISE" -eq 0 ] && [ -z "$DRY" ]; then
+  scripts/notify.sh warn "WISE 실패 콜 수 확인 불가" "D=$D | 수집기 rc 0, 런 로그(run_at>=$WISE_FROM) 못 읽음 | 로그 $LOG"
 fi
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_evening 실패:$FAILED" "$SUMMARY | 로그 $LOG $KW_LOG $DART_LOG $WISE_LOG"

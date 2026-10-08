@@ -79,6 +79,8 @@
 
 ## G-28 — 4-1 배포 뒤 (Q5)
 - `factor_inputs/queries.py:653-668`·`:685` — fi 연간 행에 기간(개월) 열(fin_std `period_start`), `model/engines/v3_zscore.py:306-338` 은 scope(TOML 파라미터)에서만 12개월 미만 행을 퀄리티 손익 지표(gpa·roa·fcf_assets·gpa_change)에서 뺀다 — v3_zscore@1.0(원본 대조용)은 그대로, 이름 scope_v1.0 유지. 비고 '첫 사업연도 N개월'. fi 판본 상향. G1: 짧은 전기 → gpa_change 없음 · fi 기간 열.
+- 구현(10-08, 갈래 4-2b — G-28 + 4-2 의 금융 매출 줄): fi1.2.0. `fi_fin_summary` 에 `period_months`(INTEGER, 연간만, DART 연간 행·`period_start` 가 없으면 NULL) · 연간 매출 계정 = 분기와 같은 `WISE_Q_REVENUE_*` + 연간 `revenue_basis`. scope TOML `[params.quality] min_period_months = 12`(없으면 끔 — v3_zscore@1.0). 레지스트리에 spec 해시가 없어 파라미터 추가로 바뀌는 기록 값은 없다(같은 `scope@1.0` 이 점수만 달라진다). 엑셀 비고는 후속(4-2a 병합 뒤) — 결산월 변경·리츠 단기 결산도 12개월 미만이라 문구는 '회계기간 N개월'(10-08 검토), 문턱은 spec `quality.min_period_months` 를 읽는다(12 하드코딩 금지). 개월 = 달력 달 수(1월 중 설립이면 12). 모델 판본 mb1.4.0.
+  - 영향 재연(가짜 — 서버 10-02 fi 판 사본 + 로컬 equity fin_std 같은 판으로 `period_months` 를 붙여 옛/새 엔진 비교): 12개월 미만 행 4종목(489790 전기 4개월 · 499790 전기 1개월 · 475150 전기 10개월 · 0126Z0 최신 2개월), 순위 변동 138종목(최대 66계단, 499790), 상위 30 집합·순서 불변, v3_zscore@1.0 동일. 금융(WICS G40) scope 28종목은 10-02 판 2025 연간 매출이 전부 빈칸 — 28종목 모두 WISE 분기에 금융 계정이 있다(gross 10 · net 18). 연간 채움 수 자체는 로컬에 WISE cF3002 원천이 없어 미검증(서버 확인 몫).
 
 ## 범위 밖 · 알려진 한계
 - C-05(가짜 '미해결' 사건 집계)는 v4 묶음(§8-17 먼저, N-26 4.3). 068270 06-04 무상증자 미조정(krx_base_inconsistent, 그날 수정수익률 −6.07%)·295310 매출총이익 증가율 83.8(전기 음수 분모)은 기록만.

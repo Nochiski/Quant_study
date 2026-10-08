@@ -366,12 +366,21 @@ def _fin_wise() -> list[dict]:
 
 
 TRIL = 1_000_000_000_000.0     # 1조 원
+# 보고서 종류 → 누계 개월(fin_std period_start~period_end — 1분기 3 · 반기 6 · 3분기 9 · 사업 12)
+REPORT_MONTHS = {"11013": 3, "11012": 6, "11014": 9, "11011": 12}
+
+
+def _period_start(period_end: dt.date, report: str) -> dt.date:
+    """누계 기간 첫날 — 기말 달에서 개월 수만큼 거슬러 올라간 달의 1일."""
+    k = period_end.year * 12 + period_end.month - REPORT_MONTHS[report]
+    return dt.date(k // 12, k % 12 + 1, 1)
 
 
 def _fin_std_row(t: str, period_end: dt.date, report: str, avail: dt.date, *,
                  fs_div: str = "CFS", scale: float = 1.0, **over: object) -> dict:
     row: dict = {
         "corp_code": corp(t), "period_end": period_end, "report_code": report, "fs_div": fs_div,
+        "period_start": _period_start(period_end, report),
         "vintage_kind": "api_restated", "rcept_no": avail.strftime("%Y%m%d") + "000001",
         "available_date": avail, "capex_basis": "standard",
         "total_asset": 500 * TRIL * scale, "total_liab": 100 * TRIL * scale,
@@ -391,7 +400,9 @@ def _fin_std_row(t: str, period_end: dt.date, report: str, avail: dt.date, *,
 def _fin_std() -> list[dict]:
     y = dt.date
     return [
-        _fin_std_row(A, y(2024, 12, 31), "11011", y(2025, 3, 10), scale=0.9),
+        # A 2024: 1월 중(01-20) 시작 — 달력 달 수라 12개월(G-28 경계)
+        _fin_std_row(A, y(2024, 12, 31), "11011", y(2025, 3, 10), scale=0.9,
+                     period_start=y(2024, 1, 20)),
         _fin_std_row(A, y(2025, 12, 31), "11011", y(2026, 3, 11)),
         _fin_std_row(A, y(2025, 12, 31), "11011", y(2026, 3, 12), fs_div="OFS", scale=0.2),
         _fin_std_row(A, y(2025, 12, 31), "11011", y(2026, 10, 1), scale=2.0),     # D 뒤 정정
@@ -401,7 +412,9 @@ def _fin_std() -> list[dict]:
         _fin_std_row(A, y(2026, 3, 31), "11013", y(2026, 5, 15), scale=0.28),
         _fin_std_row(A, y(2026, 6, 30), "11012", y(2026, 8, 14), scale=0.29),
         _fin_std_row(A, y(2026, 9, 30), "11014", y(2026, 11, 14), scale=0.3),      # D 뒤
-        _fin_std_row(F, y(2025, 12, 31), "11011", y(2026, 3, 20), capex_basis="ppe_parts"),
+        # F: 2025-06-15 설립 — 회계기간 6월~12월 = 달력 달 7개(G-28, 월 중간 시작)
+        _fin_std_row(F, y(2025, 12, 31), "11011", y(2026, 3, 20), capex_basis="ppe_parts",
+                     period_start=y(2025, 6, 15)),
         _fin_std_row(C, y(2025, 3, 31), "11011", y(2025, 6, 20)),                  # 3월 결산
     ]
 
@@ -457,9 +470,11 @@ def _wq_rows(t: str, fetched: dt.date, accounts: dict[str, list[float]],
 def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
                drop_fetch_after: dt.date | None = None,
                wise_q: list[dict] | None = None,
-               holding: frozenset[str] = frozenset()) -> tuple[Path, Path]:
+               holding: frozenset[str] = frozenset(),
+               fin_wise: list[dict] | None = None) -> tuple[Path, Path]:
     """(equity_root, stage_root). `drop_fetch_after` 를 주면 그날 뒤 WISE 수집이 없다(수집 정지).
-    `wise_q` 를 주면 stg_fin_wise_q 판을 만든다(없으면 선택 원천 'absent' → 분기는 DART)."""
+    `wise_q` 를 주면 stg_fin_wise_q 판을 만든다(없으면 선택 원천 'absent' → 분기는 DART).
+    `fin_wise` 를 주면 stg_fin_wise 를 그 행으로 바꾼다(기본 `_fin_wise()`)."""
     eq, st = base / "eq", base / "st"
     equity = {"trading_calendar": _calendar(), "universe_daily": _universe(),
               "security": _security(), "price_daily": _prices(), "price_adj_daily": _adj(),
@@ -470,7 +485,7 @@ def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
     for table, rows in equity.items():
         _make_stage_tree(eq, table, rows, build_id=eq_build)
     stage = {"stg_consensus_annual": _consensus_annual(), "stg_consensus_matrix": _matrix(),
-             "stg_fin_wise": _fin_wise()}
+             "stg_fin_wise": _fin_wise() if fin_wise is None else fin_wise}
     for table, rows in stage.items():
         if drop_fetch_after is not None:
             rows = [r for r in rows if r["fetched_date"] <= drop_fetch_after]
@@ -744,6 +759,62 @@ def test_fin_summary_non_december_fye_follows_compat_rule(built) -> None:
                                     "AND period_type = 'annual'") == [(0,)]
 
 
+def test_fin_summary_annual_period_months_from_dart_period(built) -> None:
+    """G-28(N-25 Q5): 연간 행 기간(개월) = DART fin_std period_start~period_end 의 달력 달 수
+    (양끝 달 포함). F 는 2025-06-15 시작 → 7(월 중간 시작도 그 달을 센다), A 2024 는 01-20
+    시작 → 12(1월 중 설립이면 12). DART 연간 행이 없는(WISE 만) 기·분기 행은 NULL(모름)."""
+    out, _ = built
+    sql = ("SELECT ticker, period, period_months FROM t WHERE period_type = 'annual' "
+           f"AND ticker IN ('{A}', '{E}', '{F}') ORDER BY ticker, period DESC")
+    assert q(out, "fi_fin_summary", sql) == [
+        (A, "2025/12", 12), (A, "2024/12", 12), (E, "2025/12", None), (E, "2024/12", None),
+        (F, "2025/12", 7)]
+    assert q(out, "fi_fin_summary", "SELECT count(*) FROM t WHERE period_type = 'quarter' "
+                                    "AND period_months IS NOT NULL") == [(0,)]
+
+
+def test_fin_summary_annual_revenue_reads_financial_accounts(tmp_path: Path) -> None:
+    """금융업 WISE cF3002 는 최상위 매출 계정이 '매출액(수익)' 이 아니다 — 보험 '영업수익'(총액) ·
+    은행·증권 '순영업이익'(순액). 연간 매출도 분기(`WISE_Q_REVENUE_*`)와 같은 계정으로 고른다
+    (10-07 scope 금융 28종목 2025 매출 빈칸). 둘 이상 있으면 총액 계정이 순서대로('매출액(수익)' →
+    '영업수익') 이기고 순액은 마지막이다."""
+    x1, x2 = EXTRA[0], EXTRA[1]
+    renamed = {B: "영업수익", E: "순영업이익", x1: "영업수익"}
+    # 같은 종목에 더 싣는 매출 계정 — 값은 기본 + 오프셋(어느 계정이 골렸는지 값으로 가른다)
+    added = {H: (("순영업이익", 50_000.0),), x1: (("순영업이익", 50_000.0),),
+             x2: (("영업수익", 30_000.0),)}
+    rows = []
+    for r in _fin_wise():
+        if r["acc_nm"] != "매출액(수익)":
+            rows.append(r)
+            continue
+        t = r["ticker"]
+        rows.append(dict(r, acc_nm=renamed[t]) if t in renamed else r)
+        for k, (nm, off) in enumerate(added.get(t, ()), start=1):
+            rows.append(dict(r, acc_nm=nm, accode=f"29{k:04d}", seq=90 + k,
+                             **{f"val_{i}": r[f"val_{i}"] + off for i in range(1, 7)}))
+    eq, st = make_roots(tmp_path / "src", fin_wise=rows)
+    out = tmp_path / "factor_inputs"
+    build(D_S, "morning", out, st, eq, grace_days=5, min_eligible=5, golden_path=None)
+    got = {(r[0], r[1]): r[2:] for r in q(
+        out, "fi_fin_summary", "SELECT ticker, period, revenue, revenue_basis FROM t "
+                               "WHERE period_type = 'annual'")}
+
+    def base(t: str, slot: int = 5) -> float:
+        return 10_000.4 * IDX[t] + slot
+
+    # 2025/12 = WISE 5번 칸(기본값 10,000.4 × IDX + 5 — 모두 마지막 판이라 보정값 없음)
+    assert got[(A, "2025/12")] == (float(round(base(A))), "gross")
+    assert got[(B, "2025/12")] == (float(round(base(B))), "gross")
+    assert got[(E, "2025/12")] == (float(round(base(E))), "net")
+    assert got[(E, "2024/12")] == (float(round(base(E, 4))), "net")
+    # 우선순위: 매출액 + 순영업이익 → 매출액 · 영업수익 + 순영업이익 → 영업수익 ·
+    # 매출액 + 영업수익 → 매출액
+    assert got[(H, "2025/12")] == (float(round(base(H))), "gross")
+    assert got[(x1, "2025/12")] == (float(round(base(x1))), "gross")
+    assert got[(x2, "2025/12")] == (float(round(base(x2))), "gross")
+
+
 def test_fin_summary_last_five_quarters_from_dart(built) -> None:
     out, _ = built
     rows = q(out, "fi_fin_summary", "SELECT period, revenue, op, ni, gross_profit, total_assets, "
@@ -773,7 +844,13 @@ def test_fin_summary_quarters_switch_to_wise_with_basis_holding_and_revenue_kind
                             "당기순이익": [5, 6, 7, 8, 9, 10.0]})
           + _wq_rows(C, f, {"순영업이익": [200, 210, 220, 230, 240, 250.0],
                             "영업이익": [120, 130, 140, 150, 160, 170.0],
-                            "당기순이익": [90, 95, 100, 105, 110, 115.0]}))
+                            "당기순이익": [90, 95, 100, 105, 110, 115.0]})
+          # E: 매출 계정 셋이 다 있으면 총액 순서대로 '매출액(수익)' 이 이긴다(순액은 마지막)
+          + _wq_rows(E, f, {"순영업이익": [900, 910, 920, 930, 940, 950.0],
+                            "영업수익": [700, 710, 720, 730, 740, 750.0],
+                            "매출액(수익)": [300, 310, 320, 330, 340, 350.0],
+                            "영업이익": [30, 31, 32, 33, 34, 35.0],
+                            "당기순이익": [20, 21, 22, 23, 24, 25.0]}))
     eq, st = make_roots(tmp_path / "src", wise_q=wq, holding=frozenset({B}))
     out = tmp_path / "factor_inputs"
     build(D_S, "morning", out, st, eq, grace_days=5, min_eligible=5, golden_path=None)
@@ -791,6 +868,8 @@ def test_fin_summary_quarters_switch_to_wise_with_basis_holding_and_revenue_kind
     assert b["2026/06"][1:5] == (140, 14, 9, "WISE:IFRS연결")
     c = q(out, "fi_fin_summary", sql.format(C))
     assert {r[5] for r in c} == {"net"} and c[0][1:3] == (240, 160)
+    e = q(out, "fi_fin_summary", sql.format(E))
+    assert {r[5] for r in e} == {"gross"} and [r[1] for r in e] == [340, 330, 320, 310, 300]
     # A 는 DART 분기(fin_std)도 있지만 WISE 분기가 있으면 섞지 않는다. WISE 분기가 없을 때 DART 로 가는
     # 경로는 test_fin_summary_last_five_quarters_from_dart(선택 원천 absent)가 본다.
     assert not any(str(r[4]).startswith("DART:") for r in a)

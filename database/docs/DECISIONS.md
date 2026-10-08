@@ -96,7 +96,7 @@
 | R7 | 휴장일은 v3 캐시 사본을 쓰고, 검증 실패 시 영업일로 가정 | 09-09 | `daily/calendar.py:97-99`. RM C3 와 충돌 → §3-C |
 | R9 | 스냅샷 keep 3 · `_failed` 30일 · baseline 자동 갱신 금지 | 09-09 (DP:585·635) | `snapshot.py:19`, `gc.sh:82-84`. gc 캐시 보존 변경은 U20 |
 | 결정 6-1 | 키움은 새로 들어온 행만 원장에 적재 | 09-10 원문 "새로들어온 데이터들만 원장에 적재" (DP:603) | `merge_tr` |
-| 결정 7 | ka10008 은 08:10 체인, 07:10 하한 | 09-10 (DP:613) | `daily_build.sh:104` |
+| 결정 7 | ka10008 은 08:10 체인, 07:10 하한 | 09-10 (DP:613) | `daily_build.sh:118` |
 | V2-1 | 저녁 키움은 원장에 바로 적재, KRX 대조 없음 | 09-10 (DP:623) | `daily_evening.sh:69`. 결손 게이트는 U12 |
 | V2-2 | 잠정 가격 = 키움 종가, 급변(> 30%) 종목은 저녁 제외 | 09-10 (DP:623). 30% 수치는 결정 표에만 있음 | `price_daily.sql:116`. N-5 와 충돌 → §3-C |
 | V2-3·V2-6 | WISE 18:05 수집, T−1 기준 | 09-10 (DP:623) | `daily_evening.sh:83-95` |
@@ -150,7 +150,7 @@
 | U14 | 문서층 D2 0.5% · D3 1% · D0·D10 무관용(1건이면 4표를 건너뜀) | `stage/doc_prepass.py:177-185·209·274·406·476`(baseline 밖 하드코딩) |
 | U15 | stage C6 허용 지연 — 문서 두 곳(AUD:21·115)과 코드가 셋 다 다름 | `stage/freshness.py:43-68` |
 | U16 | equity 상수: EG14(최신 5세션 ≥ 0.98) · EG21(0.8 등) · fin_std 추정 기말 비율 0.2 | `equity/baseline_locked.json:1277-1367` |
-| U17 | KRX 재시도 10분 × 6(09:10 까지) · DART 상한(우리 키 40,000 · 문서 3,000) | `scripts/daily_build.sh:44-70`, `dart_daily.py:100·105` |
+| U17 | KRX 재시도 10분 × 6(09:10 까지) · DART 상한(우리 키 40,000 · 문서 3,000) | `scripts/daily_build.sh:57-84`, `dart_daily.py:100·105` |
 | U18 | 워치독 23:30 · 10:00 (결정 11 의 23:00 을 승인 없이 바꿈) | `scripts/watchdog.sh:5-8` |
 | U19 | WICS 시각(토 03:00 · 10:00 재시도 · 11:30 워치독)과 임계(coverage ≥ 0.85 WARN · integrity REQUIRED) | README:151-153, `ledger_health.py:455-491` |
 | U20 | 보관: `_pinned` 30일 + 월말 영구 · equity keep 10 · gc 캐시 보존(R9 의 '빌드 후 삭제'를 감사 Task 4.3 이 바꿈) | `build_chain.sh:234-251`, `gc.sh:37-78` |

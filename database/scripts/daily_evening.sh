@@ -14,15 +14,6 @@ set -uo pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
-LOCK=/tmp/quant_ledger_raw.lock
-if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
-  exec 9>"$LOCK"
-  if ! flock -n 9; then
-    scripts/notify.sh warn "daily_evening 락 실패" "다른 원장 작업이 $LOCK 을 쥐고 있다 — 이번 실행 건너뜀"
-    exit 3
-  fi
-  export QL_RAW_LOCK_HELD=1
-fi
 DATE_ARG=""; DRY=""; LIMIT=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -32,6 +23,15 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+# 원장 락 — 다른 원장 작업(늦어진 08:10 확정 체인·손 작업 등)이 쥐고 있으면 건너뛰지 않고 끝날 때까지
+#   기다렸다 이어서 돈다(P9, 시간 한도 없음 — 배포 묶음 5-3, B-52). 예전 `flock -n` 은 그날 저녁 슬롯
+#   전체(키움 소멸성 수급·WISE·DART 첫 런)를 잃었다. 대기 시작은 실시간 출력과 notify info(dry-run 제외)에
+#   남는다. 같은 스크립트의 대기자는 하나 — 이미 기다리는 실행이 있으면 info 후 rc 3, 대기형 flock 이
+#   실패하면 warn 후 rc 3(락 없이 원장을 쓰지 않는다). 인자를 먼저 읽는 것은 대기 알림이 dry-run 인지
+#   알아야 해서다. 규칙(QL_RAW_LOCK_HELD · QL_RAW_LOCK_FILE 테스트 전용)은 scripts/raw_lock.sh 한 곳.
+#   대기 중 KST 날짜가 바뀌면(자정을 넘는 점유) crit 후 rc 3 으로 멈춘다 — D(오늘)를 대기 뒤에 정해서다(B-51).
+. scripts/raw_lock.sh
+raw_lock_acquire daily_evening "$DRY" || exit $?
 deliver_json() {
   # 18:15 잠정 빌드·워치독이 읽는 인계 파일. dart_rc 가 빈 문자열이면 아직 도는 중(null) — 빌드 조건이 아니다.
   # 임시 파일에 쓰고 원자 교체한다(읽는 쪽이 부분 JSON 을 보지 않게). wise_n_bad = Σ(n_req − n_ok) — 런 로그 n_bad(검증 실패만)와 다르다.
@@ -94,7 +94,7 @@ branch_wise() {
   return "$rc"
 }
 {
-echo "════ [$(kst)] daily_evening 시작 dry=${DRY:-no} ════"
+echo "════ [$(kst)] daily_evening 시작 dry=${DRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
 scripts/sync_calendar.sh || echo "  ! 캘린더 동기화 실패 — 이전 복사본으로 진행"
 D="${DATE_ARG:-$(TZ=Asia/Seoul date +%Y%m%d)}"
 echo "  대상 거래일 D=$D (기본은 오늘 KST — 저녁 슬롯은 당일 데이터를 받는다)"

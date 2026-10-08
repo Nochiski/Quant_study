@@ -139,7 +139,7 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | KST | crontab (UTC) | 스크립트 | 상태 |
 |---|---|---|---|
 | 토 03:30 | `30 18 * * 5` | `backup_raw.sh` — 원장 6 DB 온라인 백업, 금요일 장마감분. 성공 시 최신 1세트만 보관(결정 9, 09-14) | 가동 |
-| 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → (월요일 KST) DART 번호표 갱신 `dart_universe.py`(A-01, 10-06 — 'D 이미 수집' 건너뜀 검사보다 앞) → 대차(ka20068) → KIS 신용 → DART 재스윕 → 회사 정보 공백 | 가동 |
+| 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → (월요일 KST, 또는 마지막 성공이 7일을 넘었거나 기록이 없으면) DART 번호표 갱신 `dart_universe.py`(A-01 — 'D 이미 수집' 건너뜀 검사보다 앞. 성공은 런 로그 `source=dart_universe`, 실패는 warn 한 줄이고 체인 rc 는 그대로 — 배포 묶음 5-2) → 대차(ka20068) → KIS 신용 → DART 재스윕 → 회사 정보 공백 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
 | 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:51) → `model_daily.sh`(확정판 rc 0·1 일 때만 fi → 모델 → 일간 엑셀 발송, 발송 장부로 D 당 1건 — N-25 Q0 임시, 실패는 notify.log crit 만·체인 rc 불변) → `daily_report.py`. 06:00 체인이 아직 원장 락을 쥐고 있으면 끝날 때까지 기다렸다가 이어서 돈다(P9, 시간 한도 없음 — 대기 시작은 notify.log 에 info). 06:00 체인이 일찍 끝나도 08:10 전엔 시작하지 않는다 — KRX 확정 데이터(전날 애프터마켓까지 반영) 공개·T-1 정정(07시 전후)을 기다리는 시각이다 | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") |
 | 10:30 | `30 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) → 10:30(F-11, 10-06: 빌드가 거래일마다 약 2분씩 길어져 10-03 종료 09:49). 08:10 체인이 원장 락을 기다리는 날엔 이 crit 은 예상된 것이다 — 아래 'DART 완료 판정 실패 · 놓친 확정판' 2번 | 가동 |
@@ -175,7 +175,20 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`
 (잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
-`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다) · `QL_RAW_LOCK_FILE`(테스트 전용 — `daily_build.sh` 원장 락 파일 경로, 운영 크론에는 넣지 않는다).
+`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다) · `QL_RAW_LOCK_FILE`(테스트 전용 — 원장 락 파일 경로, `scripts/raw_lock.sh` 를 쓰는 다섯 스크립트 공통, 운영 크론·대화형 셸에 남기지 않는다) · `QL_RAW_LOCK_WAKE_DATE`(테스트 전용 — 원장 락을 잡은 직후의 KST 날짜 YYYY-MM-DD 를 덮어쓴다, 운영에선 비운다).
+
+### 원장 락 — `scripts/raw_lock.sh` (배포 묶음 5-3 · TECH_DEBT B-52 해결)
+
+원장(`data/raw/*.db`)을 쓰는 체인 스크립트 다섯 — `daily_ledger.sh`(06:00) · `daily_build.sh`(08:10) · `daily_evening.sh`(18:05) · `daily_wise.sh`(06:00 체인 안, 손 실행) · `wics_weekly.sh`(토 03:00·10:00) — 은 원장 락 `/tmp/quant_ledger_raw.lock` 을 이 공용 조각 하나로 잡는다.
+
+- 비었으면 바로 잡는다. 다른 원장 작업이 쥐고 있으면 **건너뛰지 않고 끝날 때까지 기다렸다 이어서 돈다** — 시간 한도 없음(P9). 늦어짐은 워치독이 알린다. 예전엔 08:10 만 기다리고 나머지는 `flock -n` 실패 시 그 회차를 건너뛰었다(rc 3).
+- 대기 시작은 실시간 출력(크론 `logs/cron_*.log`)과 `logs/notify.log` 의 info '<이름> 원장 락 대기' 한 줄, 대기 시간은 체인 로그에 남는다. dry-run 은 알림을 남기지 않는다.
+- **스크립트마다 대기자는 하나**: 같은 스크립트가 이미 기다리는 중이면 두 번째 실행은 기다리지 않고 info '<이름> 이미 대기 중인 실행 있음 — 이번 실행 건너뜀' 후 rc 3. 대기자 표시는 `/tmp/quant_ledger_raw.lock.<이름>.wait`(빈 파일, 지우지 않는다). `<이름>` 은 `daily_wise.sh` 만 `daily_master`(그 스크립트의 다른 알림과 같은 이름)이고 나머지는 파일 이름이다.
+- 대기형 flock 이 실패하면 warn '<이름> 락 실패' 후 rc 3 — 락 없이 원장을 쓰지 않는다. 부모가 이미 쥐었으면 `QL_RAW_LOCK_HELD=1` 로 물려받아 락을 열지 않는다(06:00 체인 → `daily_wise.sh`).
+- 지금 누가 기다리는지: `grep -E "원장 락 대기|이미 대기 중" ~/quant-ledger/logs/notify.log | tail; pgrep -af "daily_(ledger|build|evening|wise)\.sh|wics_weekly\.sh"`.
+- 기다리는 동안 KST 날짜가 바뀌면(자정을 넘는 점유) 락을 잡아도 본 작업을 하지 않는다 — crit '<이름> 원장 락 대기 중 날짜가 바뀜(시작 … → 지금 …) — 이번 실행 중단' 후 락을 놓고 rc 3(dry-run 은 알림 없이 같은 rc). 수집 대상일(D·오늘)을 대기 뒤에 정하므로 그날 값을 그대로 받을 수 없다(TECH_DEBT B-51). 다시 돌릴지는 사람이 정한다 — 원래 날의 슬롯을 `--date` 로 다시 돌리는 것이 맞는지(저녁 WISE·키움은 그날 안에만 받을 수 있다) 먼저 본다.
+- 서로 다른 스크립트가 함께 기다리다 풀리면 누가 먼저 잡을지는 정해져 있지 않다(TECH_DEBT B-62 — 08:10 이 06:00 보다 먼저 잡으면 그날 확정판이 원장 게이트에서 멈춘다).
+- 손으로 돌리는 수집기는 이 조각을 쓰지 않고 `flock -w <초>` 로 대기 상한을 둔다(아래 절차서 — 사람이 정한 마감이 있어서).
 
 ### WISE 같은 날 재실행 — `src/backfill_wise.py` (A-03, 10-07)
 
@@ -202,7 +215,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지분 2종)이 '받았는지'(수집 기록이 ok·자료 없음이고, 계기 공시를 처음 본 뒤) 보고, 공시 목록 건수(filings)·문서·미해석 공시도 본다. 같은 D 의 두 번째 이후 런(06:00·주말 재실행·아래 수동 실행)은 못 받은 유닛과 재무 재확인(저장 재무 행이 계기 공시보다 옛것이거나 재무 자료 없음)만 다시 부른다(`plans/2026-10-07-batch3-dart-deadline.md`).
 
-손으로 돌리는 작업은 **18:05 저녁 체인 전에 끝나야 한다** — 원장 락을 쥔 채 18:05 를 넘기면 `daily_evening.sh`(`flock -n`)가 그날 저녁 슬롯 전체(키움 소멸성 수급·WISE·DART 첫 런)를 건너뛴다. 그래서 체인끼리의 연결(P9, 한도 없음)과 달리 수동 실행은 `flock -w <초>` 로 대기 상한을 두고, 끝낼 수 없으면 그날 저녁 체인이 끝난 뒤(≈22:45 이후)부터 자정 사이에 한다. 저녁 슬롯이 건너뛰어졌으면 자정 전에 `bash scripts/daily_evening.sh` 를 다시 돌린다.
+손으로 돌리는 작업은 **18:05 저녁 체인 전에 끝나야 한다** — 원장 락을 쥔 채 18:05 를 넘기면 `daily_evening.sh` 가 그 끝을 기다리느라 그날 저녁 슬롯 전체(키움 소멸성 수급·WISE·DART 첫 런)가 늦어지고, 자정을 넘기면 crit 후 그 회차를 멈춘다(위 '원장 락' — 배포 묶음 5-3 전에는 아예 건너뛰었다). 그래서 체인끼리의 연결(P9, 한도 없음)과 달리 수동 실행은 `flock -w <초>` 로 대기 상한을 두고, 끝낼 수 없으면 그날 저녁 체인이 끝난 뒤(≈22:45 이후)부터 자정 사이에 한다. 저녁 슬롯이 건너뛰어졌으면(대기 실패 · 체인 crit) 자정 전에 `bash scripts/daily_evening.sh` 를 다시 돌린다.
 
 1. **DART 런이 실패했다**(체인 crit · 일일 리포트) — 먼저 그 D(`YYYYMMDD`)의 **마지막** dart 런 결과와 실패 줄을 본다(앞 런 실패가 뒤 런에서 회복됐으면 할 일 없음):
    ```bash

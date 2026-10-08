@@ -9,6 +9,8 @@
 락 파일은 `QL_RAW_LOCK_FILE` 로 임시 경로를 준다 — 운영 락 `/tmp/quant_ledger_raw.lock` 을
 잡지 않는다. 맥에는 flock 이 없어 PATH 대역 flock 으로 '대기형으로 불렸는가'를 보고,
 진짜 flock 이 있으면(서버·CI 우분투) 다른 프로세스가 쥔 락이 풀린 뒤 이어서 도는지 실물로 본다.
+락 규칙은 `scripts/raw_lock.sh`(다섯 원장 스크립트 공용, 배포 묶음 5-3)라 함께 복사한다.
+대기자 1 등 공용 규칙은 `test_raw_lock_sh.py` 가 다섯 스크립트에 걸쳐 본다.
 """
 from __future__ import annotations
 
@@ -38,13 +40,19 @@ fi
 if [ "$1" = "-m" ]; then echo "$2" >> "$QL_HOME/calls.txt"; fi
 exit 0
 """
-# 대역 flock — 인자를 적고, 비대기(-n)는 FLOCK_N_RC(1 = 다른 작업이 쥐고 있음),
-# 대기형은 FLOCK_WAIT_RC(0 = 풀려서 잡았음)로 끝난다.
+# 대역 flock — 인자를 적고, 원장 락 비대기(-n 9)는 FLOCK_N_RC(1 = 다른 작업이 쥐고 있음),
+# 대기형(9)은 FLOCK_WAIT_RC(0 = 풀려서 잡았음)로 끝난다. 대기자 락(fd 8, 배포 묶음 5-3)은
+# 늘 비어 있다.
 _FLOCK = """#!/usr/bin/env bash
 echo "$*" >> "$FLOCK_LOG"
-if [ "$1" = "-n" ]; then exit "$FLOCK_N_RC"; fi
-exit "$FLOCK_WAIT_RC"
+case "$*" in
+  "-n 9") exit "$FLOCK_N_RC" ;;
+  "9") exit "$FLOCK_WAIT_RC" ;;
+esac
+exit 0
 """
+# 쥐여 있음 → 대기자 자리 확보 → 대기형으로 잡음 → 대기자 자리 반납
+WAITED = ["-n 9", "-n 8", "9", "-u 8"]
 
 
 class Run(NamedTuple):
@@ -62,6 +70,7 @@ def _root(home: Path) -> Path:
         (root / sub).mkdir(parents=True, exist_ok=True)
     (home / "tmp").mkdir(exist_ok=True)
     shutil.copy(SCRIPT, root / "scripts" / "daily_build.sh")
+    shutil.copy(SCRIPT.parent / "raw_lock.sh", root / "scripts" / "raw_lock.sh")
     stubs = {".venv/bin/python": _PY,
              "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n'}
     for rel, body in stubs.items():
@@ -111,7 +120,7 @@ def test_waits_for_held_raw_lock_then_continues(tmp_path: Path) -> None:
     _root(tmp_path)
     r = _run(tmp_path, flock_stub=True)
     assert r.rc == 0, r.out
-    assert r.flock == ["-n 9", "9"]          # 비대기로 확인 → 시간 한도 없는 대기형으로 잡는다
+    assert r.flock == WAITED                 # 비대기로 확인 → 시간 한도 없는 대기형으로 잡는다
     assert r.calls == STEPS
     assert "원장 락 대기 시작" in r.out and "원장 락 대기 끝" in r.out
     assert "원장 락 대기" in r.log
@@ -128,7 +137,7 @@ def test_wait_is_recorded_in_notify_log(tmp_path: Path) -> None:
     _root(tmp_path)
     r = _run(tmp_path, flock_stub=True, args=())
     assert r.rc == 0, r.out
-    assert r.flock == ["-n 9", "9"]
+    assert r.flock == WAITED
     waits = [ln for ln in r.notify.splitlines() if ln.startswith("info|daily_build 원장 락 대기|")]
     assert len(waits) == 1, r.notify
     assert "손으로 --date" in waits[0]
@@ -165,7 +174,7 @@ def test_failed_wait_never_runs_without_lock(tmp_path: Path, dry: bool) -> None:
     args = ("--date", "20261006", "--dry-run") if dry else ()
     r = _run(tmp_path, flock_stub=True, wait_rc=1, args=args)
     assert r.rc == 3, r.out
-    assert r.flock == ["-n 9", "9"]
+    assert r.flock == ["-n 9", "-n 8", "9"]
     assert r.calls == []
     sent = ["|".join(ln.split("|")[:2]) for ln in r.notify.splitlines()]
     assert sent == ([] if dry else ["info|daily_build 원장 락 대기", "warn|daily_build 락 실패"])

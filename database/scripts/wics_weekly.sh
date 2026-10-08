@@ -3,15 +3,17 @@
 #   순서: raw 락 → dt = 직전 거래일(금요일, daily.calendar) → wics_snapshot(38콜, 멱등) → 알림
 #   크론(서버 TZ=UTC): 0 18 * * 5 … scripts/wics_weekly.sh            # 03:00 KST
 #                     0 1  * * 6 … scripts/wics_weekly.sh --retry    # 10:00 KST — 03:00 이 전부 빈 응답(rc 4)이었을 때만 콜
-#   rc: 0 완료(info) · 3 락 실패(warn) · 4 빈 응답 있음(03:00 은 warn + 10:00 재시도, --retry 에서도 남으면 crit)
+#   rc: 0 완료(info) · 3 락 대기 실패(warn)·이미 대기 중인 실행 있음(info) · 4 빈 응답 있음(03:00 은 warn + 10:00 재시도, --retry 에서도 남으면 crit)
 #       · 5 L1 검산 불일치(crit) · 1/2 실패·연속 실패(crit). 어느 경로도 알림 없이 끝나지 않는다(결정 V2-7).
 #   토 11:30 `watchdog.sh wics_weekly` 가 원장에 금요일 스냅샷 38코드가 있는지 다시 본다(크론 자체가 안 돈 경우).
+#   원장 락: 다른 원장 작업(늦어진 토요일 08:10 확정 체인 등)이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다(P9,
+#         배포 묶음 5-3 — 예전엔 rc 3 건너뜀이라 10:00 재시도가 확정 체인과 겹치면 빈 코드를 다시 받지 못했다, B-52 ②). 03:00 과 10:00 은 같은
+#         스크립트라 대기자는 하나다. 규칙(QL_RAW_LOCK_HELD · QL_RAW_LOCK_FILE 테스트 전용)은 scripts/raw_lock.sh 한 곳.
 #   사용: wics_weekly.sh [--date YYYYMMDD] [--retry] [--dry-run]
 set -uo pipefail
 cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 4; }
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
-LOCK=/tmp/quant_ledger_raw.lock
 DATE_ARG=""; DRY=""; RETRY=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -22,17 +24,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
-exec 9>"$LOCK"
-if ! flock -n 9; then
-  [ -z "$DRY" ] && scripts/notify.sh warn "wics_weekly 락 실패" "다른 원장 작업이 $LOCK 을 쥐고 있다 — 이번 실행 건너뜀"
-  exit 3
-fi
+. scripts/raw_lock.sh
+raw_lock_acquire wics_weekly "$DRY" || exit $?
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 LOG="logs/wics_weekly_${D:-unknown}.log"
 RCF=$(mktemp)          # 파이프(`| tee`) 안의 RC 는 서브셸에 갇힌다 — 파일로 꺼낸다(09-20 자체 검수: 항상 0 으로 읽히던 결함)
 {
-echo "════ [$(kst)] wics_weekly 시작 dt=$D dry=${DRY:-no} retry=${RETRY:-no} ════"
+echo "════ [$(kst)] wics_weekly 시작 dt=$D dry=${DRY:-no} retry=${RETRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
 if [ -z "$D" ]; then
   echo "  ✗ 대상 거래일 산출 실패(캘린더 오류) — 중단"; RC=2
 else

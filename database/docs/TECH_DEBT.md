@@ -944,16 +944,19 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 
 ### B-26 — 저녁 체인이 원장 락을 3시간 15분 붙잡는다 (감사 A08)
 
-- **상황**: 평일 18:05 `daily_evening.sh` 가 최외곽에서 `/tmp/quant_ledger_raw.lock` 을 `flock -n` 으로
-  잡는다. 키움 갈래는 결정 11(애프터마켓 20:00 마감·kael-v3 20:05 앱키 공유 회피)에 따라 21:05 까지
+- **상황**: 평일 18:05 `daily_evening.sh` 가 최외곽에서 `/tmp/quant_ledger_raw.lock` 을 잡는다(배포 묶음 5-3
+  전까지 `flock -n`, 지금은 못 잡으면 기다린다). 키움 갈래는 결정 11(애프터마켓 20:00 마감·kael-v3 20:05 앱키 공유 회피)에 따라 21:05 까지
   `sleep 60` 루프로 기다린다. DART(≈40분)·WISE(≈6분)는 18:05 에 이미 끝나 있다.
 - **인풋**: 평일 18:05 자동 실행 1회. 같은 창(18:05~21:20)에 원장 락이 필요한 다른 작업이 들어오는 경우.
-- **에러 위치**: `scripts/daily_evening.sh:18-25`(락 획득) + `:64-67`(21:05 대기 루프) + `:118-130`
+- **에러 위치**: `scripts/daily_evening.sh:33-34`(락 획득 — `scripts/raw_lock.sh`) + `:64-67`(21:05 대기 루프) + `:118-130`
   (세 갈래 `wait`). 락 해제는 스크립트 종료 시점(≈21:20)이라 실제 원장 접근이 없는 2시간 50분도 점유한다.
 - **위험성**: **운영 정지(회피 가능)**. 락을 못 잡은 쪽은 `notify.sh warn` 후 `exit 3` 으로 **그 회차를
   통째로 건너뛴다**(재시도 없음). 현재 크론 배치(06:00·08:10·토 03:30·일 04:30)는 이 창과 겹치지 않아
   사고는 없었지만, 수동 복구 작업이나 앞으로 추가될 슬롯이 조용히 스킵된다. 부수적으로
   `daily_report.py` 의 "락 raw=점유" 표시가 저녁 내내 켜져 있어 진짜 점유와 구분되지 않는다.
+- **배포 묶음 5-3 뒤**: 원장 락을 쓰는 체인 스크립트 다섯(`scripts/raw_lock.sh`)은 건너뛰지 않고 이 점유가
+  끝나기를 기다린다(B-52) — 체인 쪽 위험은 '그 회차 건너뜀'에서 '≈21:20 까지 대기 지연'으로 바뀐다. 손 작업
+  (`flock -w <초>`)은 여전히 상한에서 물러난다. 점유 시간 자체(이 항목)는 그대로다.
 - **왜 미뤘나**: 갈래를 나눠 락을 따로 잡는 설계(키움 갈래만 21:05 직전에 획득)가 필요하고, 그러면
   DART·WISE 갈래와의 경합 규약을 새로 정해야 한다. 감사 판의 수술 범위 밖.
 - **위치**: `scripts/daily_evening.sh`
@@ -1133,16 +1136,16 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 
 ### B-43: `dart_universe.py` 가 DART 오류 응답을 `BadZipFile` 로만 남긴다
 
-- **상황**: 매주 월요일 06:00 무인 실행(A-01). 실패하면 `daily_ledger.sh` 의 FAILED 에 남고 crit 는 `logs/notify.log` 에만 기록된다.
+- **상황**: 매주 월요일 06:00 무인 실행(A-01) — 배포 묶음 5-2 부터는 마지막 성공이 7일을 넘으면 다른 요일 06:00 에도 다시 돈다. 실패하면 warn 한 줄이 `logs/notify.log` 에만 기록된다(5-2 전엔 FAILED·crit).
 - **인풋**: DART 가 corpCode.xml ZIP 대신 오류 본문(키 한도 초과·점검·인증 오류 등)을 돌려준 날.
 - **에러 위치**: `src/dart_universe.py:73` `zipfile.ZipFile(io.BytesIO(api.dart("corpCode.xml")))` — 응답 본문 앞부분과 DART status·message 를 로그에 남기지 않는다.
-- **위험성**: 그 주 갱신이 빠져 다음 월요일까지 번호표가 낡고(신규 상장 DART 연결 1~2주 지연), 원인이 로그에 없어 진단이 늦다.
+- **위험성**: 재시도가 성공할 때까지 번호표가 낡고(신규 상장 DART 연결 지연 — 5-2 전엔 다음 월요일까지 1~2주), 원인이 로그에 없어 진단이 늦다.
 
 ## 2026-10-06 감사 수정 F-13(서버 경로 정리) 품질 검토에서 분리한 항목
 
 ### B-44: 크론 스크립트 다수가 `cd` 실패를 검사하지 않는다
 
-- **상황**: `daily_build.sh:9`·`daily_evening.sh:14`·`daily_wise.sh:11`·`daily_dart.sh:8`·`watchdog.sh:12`·`run_stage.sh:5`·`daily_ledger.sh:17`·`sync_calendar.sh:10`·`dart_company_gap.sh:8`·`backup_raw.sh:16` 은 `set -e` 가 없고 `cd "$HOME/quant-ledger"` 뒤 실패 가드가 없다(F-13 전에는 리터럴 경로).
+- **상황**: `daily_build.sh:16`·`daily_evening.sh:14`·`daily_wise.sh:13`·`daily_dart.sh:8`·`watchdog.sh:12`·`run_stage.sh:5`·`daily_ledger.sh:19`·`sync_calendar.sh:10`·`dart_company_gap.sh:8`·`backup_raw.sh:16` 은 `set -e` 가 없고 `cd "$HOME/quant-ledger"` 뒤 실패 가드가 없다(F-13 전에는 리터럴 경로).
 - **인풋**: 크론 환경의 HOME 이 다른 값이거나 디렉터리가 없는 날.
 - **에러 위치**: 위 각 줄 — cd 가 실패해도 크론의 cwd 에서 계속 돈다. daily_build·daily_evening 은 `scripts/notify.sh` 를 상대경로로 불러 notify.log 에도 남지 않고 `cron_*.log` 에만 흔적이 남는다.
 - **위험성**: 체인이 엉뚱한 디렉터리에서 돌다 조용히 실패한다(운영 중단 · 무음). 같은 머리말을 가진 워치독도 함께 침묵할 수 있다. 고칠 때는 `|| { echo …; exit 4; }` 로 통일한다(build_chain 계열은 이미 있음).
@@ -1192,19 +1195,22 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **에러 위치**: `src/stage/manifest.py` `commit()` — 표마다 `current_build = record.build_id` 를 날짜와 무관하게 옮긴다(equity 도 같은 방식).
 - **위험성**: MANIFEST 를 직접 읽는 소비자(fi·model 빌드, `build_chain.sh` 의 `_READY` 작성부)는 다음 정규 빌드까지 옛 D 라벨의 판을 본다(데이터는 그 시점 원장 전량이라 더 오래되진 않지만 D 라벨·포인터가 어긋난다). 지금 대응은 README 운영 절 'DART 완료 판정 실패 · 놓친 확정판' 3번(더 새 D 판이 있으면 다시 짓지 않는다). 고칠 때는 '이력 전용 빌드'(포인터를 옮기지 않는 판) 경로를 둔다.
 
-### B-51: `daily_build.sh` 의 D 는 원장 락 대기가 끝난 뒤 계산된다
+### B-51: `daily_build.sh` 의 D 는 원장 락 대기가 끝난 뒤 계산된다 — **해결(배포 묶음 5-3, 대기 중 날짜가 바뀌면 멈춤)**
 
 - **상황**: 배포 묶음 3(T16)으로 08:10 체인이 원장 락을 한도 없이 기다린다(P9).
 - **인풋**: 원장 락 보유자가 KST 자정을 넘겨서야 끝나는 날(08:10 기준 16시간 이상 대기 — 사실상 장애).
 - **에러 위치**: `scripts/daily_build.sh` — 락 획득 뒤 D(직전 거래일)와 로그 파일 이름을 계산한다.
 - **위험성**: 원래 D 대신 다음 D 를 짓고 원래 D 는 예전처럼 빠진다(10:30 워치독 crit 이 이미 난 뒤라 조용하진 않다). 고칠 때는 D 를 대기 전에 고정한다(F-11 날짜 판정 규칙).
+- **배포 묶음 5-3 뒤 같은 모양이 셋 더**: `daily_ledger.sh`·`wics_weekly.sh`(D = 직전 거래일)·`daily_evening.sh`(D = 오늘 KST)도 이제 원장 락을 한도 없이 기다리고 D 는 대기 뒤에 정한다(`scripts/raw_lock.sh` 를 부른 다음 줄들). 가장 나쁜 것은 저녁이다 — 18:05 에 시작해 보유자가 KST 자정을 넘겨 끝나면 D 가 다음 날이 되고, 키움 갈래의 21:05 대기(`daily_evening.sh:64-67`)는 시각만 비교해 그날 21:05 까지 원장 락을 쥔 채 잔다(그동안 06:00·08:10 체인은 기다린다). WISE 갈래는 자정 직후 바로 돌아 그날 스냅샷을 장중 갱신 전 값으로 채우고, 그날 18:05 인스턴스는 대기자로 기다렸다 '이미 완료'로 끝나며 같은 날 재실행도 받은 종목을 건너뛰어 덮지 못한다(silent — 리비전 팩터 1일 랙). 18:05 이후 6시간 넘는 점유가 전제라 사실상 장애 상황이고 워치독(21:50 저녁 원장·10:30 확정판)이 원래 날의 crit 을 낸다. 대기 뒤 KST 날짜가 바뀌었으면 crit 후 멈출지(5-3 전의 '건너뜀'과 같은 결과 + 경보)는 '체인이 멈추는 조건'이라 사람 결정(P3).
+- **해결(배포 묶음 5-3 후속, 10-08 오케스트레이터 결정 — P1 멈춤)**: `scripts/raw_lock.sh` 한 곳에서 다섯 스크립트 공통으로, 실제로 기다린 경우 대기 시작 직전과 락을 잡은 직후의 KST 날짜가 다르면 crit '<이름> 원장 락 대기 중 날짜가 바뀜(시작 YYYY-MM-DD → 지금 YYYY-MM-DD) — 이번 실행 중단'(본문: 수집 대상일 기준이 바뀌어 그날 값을 그대로 받을 수 없다, 다시 돌릴지는 사람 판단)을 남기고 원장 락을 놓고 rc 3 이다(dry-run 은 알림 없이 같은 rc). 위 D 이동·저녁 21:05 수면·WISE 장중 전 스냅샷은 생기지 않고, 원래 날의 회차는 예전처럼 빠지되 crit 으로 드러난다. 같은 날 안에 끝난 대기는 그대로 이어서 돈다. 날짜 주입은 테스트 전용 `QL_RAW_LOCK_WAKE_DATE`. 시험: `tests/test_raw_lock_sh.py::test_date_change_during_wait_stops`·`test_same_day_wait_continues`.
 
-### B-52: 원장 락 대기는 `daily_build.sh` 한 곳뿐이다 — 다른 사용자는 여전히 `flock -n`
+### B-52: 원장 락 대기는 `daily_build.sh` 한 곳뿐이다 — 다른 사용자는 여전히 `flock -n` — **해결(배포 묶음 5-3, 원장 락 범위)**
 
 - **상황**: 배포 묶음 3(T16)은 08:10 확정 체인에만 P9(앞 작업 끝 감지)를 적용했다. `daily_ledger.sh`(06:00)·`daily_evening.sh`(18:05)·`wics_weekly.sh`(토 03:00·10:00)·빌드 락(`build_chain.sh`)은 잡혀 있으면 건너뛴다(exit 3).
 - **인풋**: ① 06:00 체인이 아주 늦게(약 16:25 뒤) 끝나 확정 빌드가 18:05 를 넘김 ② 토요일 06:00 체인이 늦어 금요일 판 빌드가 10:00 WICS 재시도와 겹침 ③ 락 보유자가 하루 넘게 멈춰 08:10 대기 인스턴스가 날마다 쌓임 ④ (배포 묶음 4-0 뒤) 08:10 체인의 모델 단계(`model_daily.sh`)가 빌드 락을 기다리는 동안 daily_build 는 원장 락을 계속 쥔다 — 손 equity 재빌드가 18:05 까지 이어지면 저녁 수집이 건너뛴다(체인 안에서는 build_chain 이 빌드 락을 푼 직후라 정상이면 대기가 없다). ⑤ 반대로 손으로 돌린 `model_daily.sh` 가 빌드 락을 쥔 동안 08:10 체인의 확정 빌드나 21:20 잠정 빌드가 시작하면 `build_chain.sh` 가 `flock -n` 으로 물러나 그날 판이 생기지 않는다(워치독 crit 로 사후 감지) — MODEL_DELIVER.md 에 손 실행을 피할 시간대를 적어 둔다(배포 묶음 4-0 명세 검토 중요-1). ⑥ 모델 단계는 원장 락이 필요 없는데 daily_build 의 원장 락 안에서 돌아 점유가 그만큼 길어진다 — 확정판이 09:49 근처에 끝나는 토요일엔 10:00 `wics_weekly --retry`(`flock -n`)와 겹칠 확률이 오른다(② 악화, 운영 전 확인에서 모델 단계 소요와 함께 잰다).
 - **에러 위치**: 각 스크립트의 `flock -n` 분기 · `scripts/daily_build.sh` 대기형 flock(대기자 수 제한 없음 — 풀리면 무작위 순서로 전부 같은 D 로 돈다).
 - **위험성**: ① 그날 저녁 원장 소실(WISE 는 자정 전 손 재실행만 가능) ② WICS 주간 스냅샷 누락 → 다음 주 확정 빌드 정지(감사 A-02 보충) ③ 같은 D 체인 N회·crit N건. 확률은 낮다. 대기 사실은 notify.log 의 '원장 락 대기' 줄로 보인다. 다른 사용자도 기다릴지·대기자를 하나로 제한할지는 사람 결정(P3).
+- **해결(배포 묶음 5-3 — N-27 ⑥, 구현 10-08 · 배포 대기)**: 원장 락을 쓰는 다섯 스크립트(`daily_ledger.sh`·`daily_build.sh`·`daily_evening.sh`·`daily_wise.sh`·`wics_weekly.sh`)가 공용 조각 `scripts/raw_lock.sh` 로 같은 규칙을 따른다 — 못 잡으면 실시간 출력 + notify info '<이름> 원장 락 대기'(dry-run 제외) 뒤 한도 없이 기다리고, 같은 스크립트의 대기자는 하나(대기자 락 `<원장 락>.<이름>.wait`, 두 번째 인스턴스는 info '<이름> 이미 대기 중인 실행 있음 — 이번 실행 건너뜀' 후 rc 3). ①②④⑥(원장 락 경합)과 ③(대기자 누적)은 이것으로 닫힌다. 남는 것: ⑤ 빌드 락(`build_chain.sh` 의 `flock -n`)은 원장 락이 아니라 범위 밖 · 서로 다른 스크립트가 함께 기다리다 풀리면 잡는 순서는 정해져 있지 않다(B-62) · 대기 중 날짜가 바뀌면 멈춘다(B-51). 시험: `tests/test_raw_lock_sh.py`(실물 flock 시험은 서버·CI 우분투에서).
 
 ### B-53: DART 네트워크 예외가 연속될 때 끊는 장치가 없다
 
@@ -1230,6 +1236,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **인풋**: 대화형 셸에 `QL_RAW_LOCK_FILE` 이 남은 채 `daily_build.sh` 를 손으로 돌림 · 락 경로를 한 곳만 바꿈. 빌드 락도 같다 — `model_daily.sh` 만 `QL_BUILD_LOCK_FILE`(테스트 전용)을 받고 `build_chain.sh` 등은 하드코딩(배포 묶음 4-0).
 - **에러 위치**: 위 스크립트들의 `LOCK=` 줄.
 - **위험성**: 그 실행만 다른 락을 잡아 원장 쓰기 배타가 깨질 수 있다(동시 쓰기). 경로 변경이 한 곳에서 빠지면 같은 결과. 고칠 때는 락 경로·대기 규칙을 공용 셸 조각 하나로 모은다(배포 묶음 3 구조 검토 M-7).
+- **진행(배포 묶음 5-3)**: 원장 락은 공용 조각 `scripts/raw_lock.sh` 하나로 모았다 — 경로(`QL_RAW_LOCK_FILE` 테스트 전용, 기본 `/tmp/quant_ledger_raw.lock`)·대기(한도 없음)·대기자 1·`QL_RAW_LOCK_HELD` 규칙을 다섯 스크립트가 source 해서 쓴다(`LOCK=` 줄은 그 파일 하나). 그 대신 '대화형 셸에 `QL_RAW_LOCK_FILE` 이 남은 채 손으로 돌림' 인풋은 이제 다섯 스크립트 모두에 해당한다. 남은 것: README 수동 실행의 하드코딩 경로·`-w 600`(사람이 정한 마감 — 의도된 차이) · 빌드 락 경로(`build_chain.sh` 등 하드코딩).
 
 ### B-57: 워치독이 일간 모델 단계·발송 장부를 보지 않는다
 
@@ -1269,3 +1276,18 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
   - stage 룩업 표에는 J-41 이 민 행 수 기록형 지표가 없다(stg_disclosure 의 G3 `n_rcept_dt_before_no_prefix` 만 있음 — `stage/build.py` `_recorded_metrics` 를 룩업에도 넓히면 매 빌드 보인다).
   - 뜻이 바뀐 주석: `src/equity/rules_s16.py:6·455·497·548`, `rules_s15.py:5`, `sql/corp_event.sql:46`('announce_date = DART rcept_dt' — 이제 보정된 stage 값).
 - **위험성**: 정지 신호 창이 재제출본에서 앞당겨질 수 있다(미측정). 지연 판정은 재제출본에서 '기한 안'으로 볼 수 있다(원 제출일 확인 전이라 결함 여부 미정). 지표·주석은 운영 위험 없음 — 노출이 매 빌드 안 보이고 읽는 사람이 옛 뜻으로 오해할 수 있다(배포 묶음 4-1b 품질 검토 사소 5·8).
+
+## 2026-10-08 배포 묶음 5-3(원장 락 대기) 후속에서 분리한 항목
+
+### B-62: 함께 기다리던 원장 작업이 풀리는 순서가 정해져 있지 않다 — 08:10 이 06:00 보다 먼저 잡을 수 있다
+
+- **상황**: 배포 묶음 5-3 으로 원장 락을 쓰는 다섯 스크립트가 모두 한도 없이 기다린다(스크립트마다 대기자 1). flock(2) 은 대기자 순서를 보장하지 않아 락이 풀리면 먼저 깨어난 쪽이 잡는다. 08:10 `daily_build.sh` 는 06:00 `daily_ledger.sh` 의 산출을 전제로 한다.
+- **인풋**: 손 작업(`flock -w` 로 돌린 수집기·`daily_build.sh --date` 재빌드 등)이 06:00 전부터 08:10 뒤까지 원장 락을 쥔다 → 06:00·08:10 이 함께 기다리다 풀리는 순간 08:10 이 먼저 잡는다.
+- **에러 위치**: `scripts/raw_lock.sh` 의 `flock 9`(순서 없음) → `scripts/daily_build.sh:118-130`(원장 단계 — ka10008 fetch → merge → ledger_health). 06:00 산출이 없을 때 지금 막는 것과 막지 않는 것(코드 확인 10-08):
+  - 키움 대차 ka20068 — **막는다, 지금 유일한 차단**. ka20068 incoming 은 06:00 `kw_daily --fetch --tr ka20068` 만 세운다. 08:10 `--merge`(`src/daily/kw_daily.py:754-786`)는 게이트 TR ka10008 incoming(08:10 자기 fetch)만 있으면 OK 로 머지하므로 ka20068 의 D 행이 없다 → `ledger_health` `kiwoom.ka20068.rows`(dt=D, rows/requested ≥ 0.98, REQUIRED — `src/daily/ledger_health.py:260-268`) FAIL → rc 2(`:627`) → `daily_build.sh` 의 ledger_health 단계 실패 → 확정 빌드·모델 단계(엑셀 발송) 미실행, crit 'daily_build 실패: ledger_health(rc=2)'.
+  - KIS 신용 — 막지 않는다. 오늘 06:00 이 안 돌면 max(deal_date) 가 한 세션 뒤(D−3)라 `kis.credit.fresh` 는 WARN(`ledger_health.py:327-329`).
+  - DART — 막지 않는다. 08:10 원장 게이트는 dart 런 로그(A-05 완료 판정)를 보지 않고 `dart.disclosure.rows`(rcept_dt=D ≥ 400)·`dart.docs` 만 본다(`:360-375`) — 18:05 저녁 런이 이미 채워 통과한다. 06:00 두 번째 런(늦은 공시·재무 재확인)만 빠진다.
+  - 캘린더 — 막지 않는다. `daily_build.sh` 는 `sync_calendar.sh` 를 부르지 않고 직전 복사본으로 D 를 정한다(하루 늦은 복사본이라도 보통 같은 D).
+  - 키움 마스터 — 무관. `kiwoom.master` 는 snap_date=D(전날 06:00 스냅샷, `ledger_health.py:304-307`)를 본다.
+  - `QL_SKIP_KW=1`(운영 크론엔 없음)이면 키움 판정이 통째로 빠져 아무것도 막지 않는다 — KIS 한 세션 뒤·DART 아침 재확인 없는 확정판이 조용히 지어진다.
+- **위험성**: 운영 정지·비결정(풀리는 순서가 실행마다 다르다). 그 D 확정판과 일간 엑셀이 그날 빠지고(10:30 워치독 crit), 손 재빌드(README 'DART 완료 판정 실패 · 놓친 확정판' 2번 — 06:00 이 끝난 뒤, 16:30 전)가 필요하다. 원장 손상은 없다 — 게이트가 막고, 대차 D 행은 다음 날 06:00 fetch 가 과거 100행을 함께 받아(`kw_daily.py` 머리말 '1회 실행 = 유니버스 × 4콜', `insert_rows` 가 응답 전 행 적재) 다음 08:10 머지에 들어간다. `QL_SKIP_KW` 가 켜진 날만 silent 부분판이다. 지금은 고치지 않는다(10-08 오케스트레이터 판정). 고칠 때의 후보는 08:10 이 락을 잡은 뒤 그날 `ledger_chain` 런 로그(06:00 완료)를 확인하거나, 06:00 대기자가 있으면 양보하는 것 — 체인이 멈추는 조건이라 사람 결정(P3).

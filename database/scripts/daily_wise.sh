@@ -7,23 +7,18 @@
 # 2026-09-09 (플랜 P0 Task 0.1·0.2): 원장 락(flock) + 종료코드 검사 + 텔레그램 알림.
 #   락 규약 — 최외곽 스크립트만 잡고, 부모가 QL_RAW_LOCK_HELD=1 을 넘기면 자식은 획득을 생략한다
 #   (같은 락 파일을 자식이 다시 열면 별개 open file description 이라 부모와 충돌한다).
+#   혼자 돌 때(손 실행) 락이 잡혀 있으면 끝날 때까지 기다렸다 이어서 돈다(P9, 배포 묶음 5-3 — 예전엔 rc 3 건너뜀).
+#   대기자는 하나, 규칙은 scripts/raw_lock.sh 한 곳. 알림 이름은 이 스크립트의 다른 알림처럼 daily_master 다.
 set -o pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger"
-LOCK=/tmp/quant_ledger_raw.lock
-if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
-  exec 9>"$LOCK"
-  if ! flock -n 9; then
-    scripts/notify.sh warn "daily_master 락 실패" "다른 원장 작업이 $LOCK 을 쥐고 있다 — 이번 실행 건너뜀"
-    exit 3
-  fi
-  export QL_RAW_LOCK_HELD=1
-fi
+. scripts/raw_lock.sh
+raw_lock_acquire daily_master "" || exit $?
 LOG="logs/daily_wise_$(TZ=Asia/Seoul date +%m%d).log"
 RUN=$(mktemp)
 RC_M=0
 {
-echo "════ [$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')] 키움 마스터 데일리 ════"
+echo "════ [$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')] 키움 마스터 데일리${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
 .venv/bin/python src/master_daily.py 2>&1 | grep -v Deprecation
 RC_M=${PIPESTATUS[0]}
 echo "════ 종료 $(TZ=Asia/Seoul date '+%H:%M:%S KST') rc master=$RC_M ════"

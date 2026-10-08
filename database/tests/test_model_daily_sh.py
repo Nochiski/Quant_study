@@ -88,7 +88,7 @@ def _root(home: Path, *, stub_flock: bool = True) -> Path:
         (root / sub).mkdir(parents=True, exist_ok=True)
     (home / "tmp").mkdir(exist_ok=True)
     (home / "fakebin").mkdir(exist_ok=True)
-    for name in ("daily_build.sh", "model_daily.sh"):
+    for name in ("daily_build.sh", "model_daily.sh", "raw_lock.sh"):
         shutil.copy(SCRIPTS / name, root / "scripts" / name)
     stubs = {root / ".venv/bin/python": _PY,
              root / "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',

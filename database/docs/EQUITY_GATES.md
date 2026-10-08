@@ -1046,6 +1046,8 @@ SELECT (SELECT count(*) FROM adj_factor)
         - eg1_tail('adj_factor')) AS delta;
 ```
 
+⑤(e1.26.0) 는 **행을 만들지 않는다** — 열 2개(`price_only_factor`·`price_resolution`)와 계수 행의 공개일만 바뀌므로 위 등식은 그대로다. 값 축은 `EG3_adj_factor` ⑤ 술어(`rules_s06._price_only`)가 폐기형으로 본다: 어휘 닫힘 · `'factor' ⇔ factor_ok` · 계수 행은 `factor_ok=false` ∧ `apply_basis='krx_base_price'` ∧ 사유 ∈ {krx_base_inconsistent, unknown_price_only} ∧ 주식 계열 · 계수 = 기준가 후보 r(`FACTOR_PRODUCT_TOL`) · 게이트가 다시 만든 단위당 계수 행 정확히 1 · 단위 밖·ok 접힘일 계수 행 0 · 계수 행 아닌데 계수 ≠ 1 0 · `price_only_dup` 은 계수 행과 같은 (ticker, apply_date) · 공개일 재계산에 계수 행 분기. 기록형: 표식별·사유×종류별 수, r 분포, 계수를 실을 행이 없는 기준가 날짜 수, `unresolved` 사유별, 근처 판정 수. EG8 은 계수 행 적용일 수정수익률을 기록형으로 잰다(폐기형 승격은 D6-5 — `PRICE_ONLY_JUMP_GATE`).
+
 ### ⑪ `flow_daily` · `short_daily` · `credit_daily`
 ```sql
 -- (a) 격자 행수
@@ -1217,7 +1219,7 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 count(price_adj_daily) = count(price_daily)
 ```
 
-**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 값 7축(`adj_open`·`adj_high`·`adj_low`·`adj_close`·`adj_volume_shr`·`cum_price_factor`·`cum_share_factor`)을 비교하고, `n_factors_applied`·`n_unadjusted_events`·`available_date` 도 따로 재계산한다. `n_factors_applied` 은 **완전 일치**(`n_factor_count_mismatch`)와 **방향 있는 초과**(`n_cross_span_factor`) 둘로 센다 — 계수 값이 1 인 사건이 새거나 빠지면 값 축은 안 움직이고 이 수만 어긋난다.
+**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 값 8축(`adj_open`·`adj_high`·`adj_low`·`adj_close` — ⑤ 누적으로 나눈 값 · `adj_volume_shr`·`cum_price_factor`·`cum_share_factor`·`cum_price_only_factor`, e1.26.0)을 비교하고, ⑤ 접힌 수·가격 축 미해결 수(`n_price_only_applied`·`n_price_unresolved_events`)도 재계산 대조하고, `n_factors_applied`·`n_unadjusted_events`·`available_date` 도 따로 재계산한다. `n_factors_applied` 은 **완전 일치**(`n_factor_count_mismatch`)와 **방향 있는 초과**(`n_cross_span_factor`) 둘로 센다 — 계수 값이 1 인 사건이 새거나 빠지면 값 축은 안 움직이고 이 수만 어긋난다.
 
 ---
 

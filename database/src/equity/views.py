@@ -115,6 +115,12 @@ MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
 # **표 `price_adj_daily`(S23)가 같은 규칙의 저장본**이고, 그 표의 EG3_price_adj_daily 가 매 빌드
 # 기본 랙에서 두 산출의 동일성을 증명한다. 표를 읽는 얇은 매크로로 합치지 않은 이유는
 # `lag_override` 다 — 기본값 밖 랙에서는 계수 컷오프를 다시 계산해야 하는데 표에는 랙 축이 없다.
+# ⑤ 가격 전용 계수(e1.26.0, N-32 ②): `adj_factor.price_resolution='price_only'` 행의
+# `price_only_factor`(그날 기준가 ÷ 직전 행 종가)를 **별도 사슬**(po_*)로 같은 fold·구간 규칙에
+# 누적하고 조정 OHLC 를 그 누적으로 나눈다. ok 계수 사슬(vis·fac·pre)에 섞지 않는 이유: 섞으면
+# 창 곱의 결합 순서가 바뀌어 기존 누적계수가 끝자리에서 흔들릴 수 있고(거래량 축 불변 계약),
+# 표(price_adj_daily)도 같은 두 사슬 구조라 비트 동일성이 선다. 출력 열은 늘리지 않는다 —
+# `cum_price_only_factor` 는 CTE 안에서만 쓴다(`_asof/` 표본·EG5c 의 열 집합 불변).
 _FWD_CTE = """
 WITH cut AS (
     SELECT k.date AS cutoff
@@ -150,6 +156,33 @@ pre AS (
     WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 ),
+po_vis AS (
+    SELECT ticker, greatest(apply_date, available_date) AS fold_date,
+           price_only_factor, available_date
+    FROM {adj_factor}
+    WHERE price_resolution = 'price_only' AND apply_date <= as_of
+      AND available_date <= (SELECT cutoff FROM cut)
+),
+po_spn AS (
+    SELECT f.ticker, coalesce(s.span_seq, -1) AS span_seq, f.fold_date,
+           f.price_only_factor, f.available_date
+    FROM po_vis f
+    ASOF LEFT JOIN {security_span} s ON s.ticker = f.ticker AND f.fold_date > s.first_date
+),
+po_fac AS (
+    SELECT ticker, span_seq, fold_date, product(price_only_factor) AS pof,
+           max(available_date) AS available_date
+    FROM po_spn
+    GROUP BY ticker, span_seq, fold_date
+),
+po_pre AS (
+    SELECT ticker, span_seq, fold_date,
+           product(pof) OVER pw AS cum_price_only_factor,
+           max(available_date) OVER pw AS available_date
+    FROM po_fac
+    WINDOW pw AS (PARTITION BY ticker, span_seq ORDER BY fold_date
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
 px AS (
     SELECT p.*, coalesce(s.span_seq, 0) AS span_seq
     FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
@@ -160,10 +193,14 @@ fwd AS (
            p.basis, p.corp_action_pending,
            coalesce(c.cum_price_factor, 1) AS cum_price_factor,
            coalesce(c.cum_share_factor, 1) AS cum_share_factor,
-           greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
+           coalesce(q.cum_price_only_factor, 1) AS cum_price_only_factor,
+           greatest(p.date, coalesce(c.available_date, p.date),
+                    coalesce(q.available_date, p.date)) AS available_date
     FROM px p
     ASOF LEFT JOIN pre c
       ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
+    ASOF LEFT JOIN po_pre q
+      ON q.ticker = p.ticker AND q.span_seq = p.span_seq AND p.date >= q.fold_date
 )
 """
 
@@ -209,16 +246,38 @@ FROM (SELECT ticker, date FROM {price_daily} WHERE date <= as_of) p
 ASOF LEFT JOIN suf s ON s.ticker = p.ticker AND p.date < s.apply_date
 """,
     # 원주가 × 누적 가격계수 (FIELD_MAP price.adj_close). 원주가 컬럼은 그대로 함께 낸다(결정 6).
+    # ⑤(e1.26.0): 조정 OHLC 에 가격 전용 계수 r 의 후방 누적(d < apply_date ≤ as_of ∧ available ≤
+    # cutoff — `v_cum_adj` 와 같은 축)을 더 곱한다. 누적계수 열은 `v_cum_adj` 그대로 — 출력 열 불변.
     "v_adj_price": """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, {lag_factor})
+),
+po AS (
+    SELECT ticker, apply_date, product(price_only_factor) AS pof
+    FROM {adj_factor}
+    WHERE price_resolution = 'price_only' AND apply_date <= as_of
+      AND available_date <= (SELECT cutoff FROM cut)
+    GROUP BY ticker, apply_date
+),
+po_suf AS (
+    SELECT ticker, apply_date,
+           product(pof) OVER (PARTITION BY ticker ORDER BY apply_date
+                              ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS cum_po
+    FROM po
+)
 SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
        p.basis, p.corp_action_pending,
        c.cum_price_factor, c.cum_share_factor,
-       p.open  * c.cum_price_factor AS adj_open,
-       p.high  * c.cum_price_factor AS adj_high,
-       p.low   * c.cum_price_factor AS adj_low,
-       p.close * c.cum_price_factor AS adj_close
+       p.open  * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_open,
+       p.high  * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_high,
+       p.low   * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_low,
+       p.close * c.cum_price_factor * coalesce(s.cum_po, 1) AS adj_close
 FROM {price_daily} p
 JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND c.date = p.date
+ASOF LEFT JOIN po_suf s ON s.ticker = p.ticker AND p.date < s.apply_date
 """,
     # 원거래량 × 누적 주식수계수 — 곱셈이다(FX-2-010 · FX-N-006). 나눗셈이면 분할 전 거래량이
     # 1/2500 이 된다.
@@ -230,14 +289,15 @@ JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND
 """,
     # 전방 조정가 = 원주가 × 그날까지 접힌 누적 주식수계수 (FIELD_MAP price.adj_close, S21 후속).
     # 곱셈이다 — 나눗셈이면 분할 뒤 가격이 1/2500 로 떨어진다(FX-N-006 류, test_equity_s06_views).
+    # ⑤(e1.26.0): ÷ 누적 가격 전용 계수 — 표 price_adj_daily 와 같은 식·같은 계산 순서.
     "v_adj_price_fwd": _FWD_CTE + """
 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
        basis, corp_action_pending,
        cum_price_factor, cum_share_factor, available_date,
-       open  * cum_share_factor AS adj_open,
-       high  * cum_share_factor AS adj_high,
-       low   * cum_share_factor AS adj_low,
-       close * cum_share_factor AS adj_close
+       open  * cum_share_factor / cum_price_only_factor AS adj_open,
+       high  * cum_share_factor / cum_price_only_factor AS adj_high,
+       low   * cum_share_factor / cum_price_only_factor AS adj_low,
+       close * cum_share_factor / cum_price_only_factor AS adj_close
 FROM fwd
 """,
     # 전방 조정 거래량 = 원거래량 × 누적 가격계수(= ÷ 누적 주식수계수) — 분할 뒤 거래량을 분할 전

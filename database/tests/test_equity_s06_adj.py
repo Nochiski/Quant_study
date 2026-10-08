@@ -256,8 +256,9 @@ def test_available_date는_min_공시_apply_date_다음_세션_이다(built: bui
         nominal = next(d for d in cal if d >= f["effective_date"])   # type: ignore[operator]
         assert f["apply_date"] == nominal                         # 절단본은 전부 명목 세션
         nxt = cal[cal.index(f["apply_date"]) + 1]
-        if eid in PRICE_ONLY_IDS:                                 # S06-2 신규 행: 다음 세션
-            assert f["available_date"] == nxt and f["announce_date"] == f["apply_date"]
+        if eid in PRICE_ONLY_IDS:            # ⑤ 계수 행(e1.26.0): min(공시, 적용일) = 적용일
+            assert f["available_date"] == f["apply_date"] == f["announce_date"]
+            assert f["available_date"] != nxt                     # 옛 식(다음 세션)이 아니다
         elif f["apply_basis"] == "krx_base_price" and f["factor_ok"]:   # C-07
             assert f["available_date"] == min(f["announce_date"],        # type: ignore[type-var]
                                               f["apply_date"])
@@ -460,10 +461,12 @@ def _view(con: duckdb.DuckDBPyConnection, name: str, rows_: list[dict[str, objec
 def _setup(con: duckdb.DuckDBPyConnection, events: list[dict[str, object]],
            prices: list[dict[str, object]], cal: list[date],
            cr: list[dict[str, object]] | None, const: dict[str, object] | None,
-           spans: list[tuple[str, int, date]] | None = None) -> None:
+           spans: list[tuple[str, int, date]] | None = None,
+           sec_types: dict[str, str] | None = None) -> None:
     """합성 입력 뷰(corp_event·price_daily·trading_calendar·stg_event_cr·security·security_span)
     + `_const`. `spans` 를 주면 그 (ticker, span_seq, first_date) 가 security_span(S06-2 구간 첫날
-    제외 축), 없으면 티커별 첫 가격 행 하나. 티커가 'ETF' 로 시작하면 sec_type etf."""
+    제외 축), 없으면 티커별 첫 가격 행 하나. 티커가 'ETF' 로 시작하면 sec_type etf, `sec_types`
+    로 티커별 종류를 덮어쓴다(⑤ D6-1 종류 축)."""
     ev_types = {"event_id": "VARCHAR", "ticker": "VARCHAR", "corp_code": "VARCHAR",
                 "event_type": "VARCHAR", "announce_date": "DATE", "effective_date": "DATE",
                 "effective_basis": "VARCHAR", "ratio": "DOUBLE", "rcept_no": "VARCHAR",
@@ -482,7 +485,9 @@ def _setup(con: duckdb.DuckDBPyConnection, events: list[dict[str, object]],
            "shares_out": "DECIMAL(13,0)"})
     _view(con, "trading_calendar", [{"date": d} for d in cal], {"date": "DATE"})
     tickers = sorted({str(p["ticker"]) for p in prices} | {str(e["ticker"]) for e in evs})
-    _view(con, "security", [{"ticker": t, "sec_type": "etf" if t.startswith("ETF") else "common",
+    _view(con, "security", [{"ticker": t,
+                             "sec_type": (sec_types or {}).get(
+                                 t, "etf" if t.startswith("ETF") else "common"),
                              "corp_code": "C" + t} for t in tickers],
           {"ticker": "VARCHAR", "sec_type": "VARCHAR", "corp_code": "VARCHAR"})
     span_rows: list[dict[str, object]] = (
@@ -505,11 +510,12 @@ def _setup(con: duckdb.DuckDBPyConnection, events: list[dict[str, object]],
 def run_adj_sql(events: list[dict[str, object]], prices: list[dict[str, object]],
                 cal: list[date], cr: list[dict[str, object]] | None = None,
                 const: dict[str, object] | None = None,
-                spans: list[tuple[str, int, date]] | None = None) -> dict[str, dict[str, object]]:
+                spans: list[tuple[str, int, date]] | None = None,
+                sec_types: dict[str, str] | None = None) -> dict[str, dict[str, object]]:
     """`sql/adj_factor.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만)."""
     con = duckdb.connect()
     try:
-        _setup(con, events, prices, cal, cr, const, spans)
+        _setup(con, events, prices, cal, cr, const, spans, sec_types)
         rel = con.execute(_body())
         cols = [d[0] for d in rel.description]
         return {str(r[cols.index("event_id")]): dict(zip(cols, r, strict=True))
@@ -520,14 +526,18 @@ def run_adj_sql(events: list[dict[str, object]], prices: list[dict[str, object]]
 
 def run_eg3(events: list[dict[str, object]], prices: list[dict[str, object]],
             cal: list[date], const: dict[str, object] | None = None,
-            spans: list[tuple[str, int, date]] | None = None):
-    """같은 합성 입력 위에서 산출을 `out_pq` 로 올리고 `EG3_adj_factor` 만 돌린다."""
+            spans: list[tuple[str, int, date]] | None = None,
+            sec_types: dict[str, str] | None = None, tamper: str | None = None):
+    """같은 합성 입력 위에서 산출을 `out_pq` 로 올리고 `EG3_adj_factor` 만 돌린다. `tamper` 는
+    산출을 올린 뒤 실행할 변조 SQL(부정 픽스처)."""
     from equity.gates import EquityGateContext
 
     con = duckdb.connect()
     try:
-        _setup(con, events, prices, cal, None, const, spans)
+        _setup(con, events, prices, cal, None, const, spans, sec_types)
         con.execute(f"CREATE OR REPLACE TEMP TABLE out_pq AS {_body()}")
+        if tamper is not None:
+            con.execute(tamper)
         n_out = con.execute("SELECT count(*) FROM out_pq").fetchone()[0]   # type: ignore[index]
         k = {**_CONST, **(const or {})}
         bl = Baseline({"corp_event": {"near_dup_window_days": k["near_dup_window_days"],
@@ -826,7 +836,8 @@ def test_절단본_기준가_후보_분류_a3_b0_c2_d2(built: build.BuildResult,
         assert (f["price_factor"], f["share_factor"]) == (1.0, 1.0)
         assert f["effective_date"] == f["announce_date"] == f["apply_date"]
     f = factors["247540:krx_base:2022-05-09"]
-    assert f["apply_date"] == date(2022, 5, 9) and f["available_date"] == date(2022, 5, 10)
+    # ⑤ 계수 행이라 공개일이 적용일(e1.26.0, 옛 식은 다음 세션 05-10)
+    assert f["apply_date"] == date(2022, 5, 9) and f["available_date"] == date(2022, 5, 9)
     assert f["corp_code"] == factors["247540:bonus:2022-06-27"]["corp_code"]   # security 에서
     assert "036220:krx_base:2024-03-13" not in factors        # 재상장 첫 행
     assert not any(e.startswith("069500:") for e in factors)   # ETF
@@ -953,21 +964,29 @@ def test_합성_기준가_신규_unknown_krx_정상_행은_적용일에_공개�
         tmp_path: Path) -> None:
     """C-07 후속(N-26 4.1): unknown_krx 정상 행(곱 검사 통과)은 기준가 r 과 주식수 비 S 가 모두
     그날 KRX 일별 행에서 오므로 available = apply_date(= announce = 그날). 정상 아닌 신규 행
-    (unknown_krx krx_base_inconsistent · unknown_price_only)은 옛 식 그대로 다음 세션."""
+    (unknown_krx krx_base_inconsistent · unknown_price_only)은 ⑤ 계수 행(e1.26.0)이면 같은 이유로
+    그날, 계수 행이 아니면(D6-1 제외 종류 등) 옛 식 그대로 다음 세션."""
     cal = sessions(80)
     ok = run_adj_sql([], flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
                                      share_jumps={40: 10.0}), cal)[f"A00019:krx_base:{cal[40]}"]
     assert ok["event_type"] == "unknown_krx" and ok["factor_ok"] is True
     assert ok["available_date"] == cal[40] == ok["apply_date"]       # 옛 규칙이면 cal[41]
-    # 회귀 가드: 곱 검사 실패(r 0.1 × S 3 = 0.3) → krx_base_inconsistent, 다음 세션
-    bad = run_adj_sql([], flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
-                                      share_jumps={40: 3.0}), cal)[f"A00019:krx_base:{cal[40]}"]
+    # 곱 검사 실패(r 0.1 × S 3 = 0.3) → krx_base_inconsistent — ⑤ 계수 행이라 그날
+    bad_px = flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
+                         share_jumps={40: 3.0})
+    bad = run_adj_sql([], bad_px, cal)[f"A00019:krx_base:{cal[40]}"]
     assert bad["event_type"] == "unknown_krx" and bad["factor_source"] == "krx_base_inconsistent"
-    assert bad["available_date"] == cal[41]
-    # 회귀 가드: 주식수 불변 → unknown_price_only, 다음 세션
-    po = run_adj_sql([], flat_prices("A00019", cal, 10000, jumps={40: 0.9}, base={40: 0.9}),
-                     cal)[f"A00019:krx_base:{cal[40]}"]
-    assert po["event_type"] == "unknown_price_only" and po["available_date"] == cal[41]
+    assert bad["price_resolution"] == "price_only" and bad["available_date"] == cal[40]
+    # 회귀 가드: 계수 행이 아니면(펀드 — D6-1) 옛 식 다음 세션
+    fund = {"A00019": "fund"}
+    bad_f = run_adj_sql([], bad_px, cal, sec_types=fund)[f"A00019:krx_base:{cal[40]}"]
+    assert bad_f["price_resolution"] == "unresolved" and bad_f["available_date"] == cal[41]
+    # 주식수 불변 → unknown_price_only — 계수 행이면 그날, 아니면 다음 세션
+    po_px = flat_prices("A00019", cal, 10000, jumps={40: 0.9}, base={40: 0.9})
+    po = run_adj_sql([], po_px, cal)[f"A00019:krx_base:{cal[40]}"]
+    assert po["event_type"] == "unknown_price_only" and po["available_date"] == cal[40]
+    po_f = run_adj_sql([], po_px, cal, sec_types=fund)[f"A00019:krx_base:{cal[40]}"]
+    assert po_f["available_date"] == cal[41]
     for px in (flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
                            share_jumps={40: 10.0}),
                flat_prices("A00019", cal, 10000, jumps={40: 0.1}, base={40: 0.1},
@@ -1031,7 +1050,8 @@ def test_C04_미래_기준일_소액_무상증자는_캘린더_끝에_ok_계수�
 
 def test_합성_기준가만_바뀌고_주식수_불변_전일_거래면_unknown_price_only(tmp_path: Path) -> None:
     """(ii) 사건 없음. 세션 40 기준가 ×0.9(권리락 류) — 신규 행 ok=false · 계수 1 · effective =
-    announce = apply = 그날 · available 다음 세션 · corp_code 는 security."""
+    announce = apply = 그날 · corp_code 는 security. ⑤(e1.26.0): 이 행이 계수 행(r 0.9)이라
+    available 도 그날(옛 식은 다음 세션)."""
     cal = sessions(80)
     px = flat_prices("A00012", cal, 10000, jumps={40: 0.9}, base={40: 0.9})
     f = run_adj_sql([], px, cal)
@@ -1041,7 +1061,8 @@ def test_합성_기준가만_바뀌고_주식수_불변_전일_거래면_unknown
     assert d["factor_source"] == "unknown_price_only" and d["apply_basis"] == "krx_base_price"
     assert (d["price_factor"], d["share_factor"]) == (1.0, 1.0)
     assert d["effective_date"] == d["announce_date"] == d["apply_date"] == cal[40]
-    assert d["available_date"] == cal[41] and d["corp_code"] == "CA00012"
+    assert d["available_date"] == cal[40] and d["corp_code"] == "CA00012"
+    assert d["price_resolution"] == "price_only" and d["price_only_factor"] == 0.9
     g = run_eg3([], px, cal)
     assert g.status is GateStatus.PASS, g.detail
     assert g.metrics["n_unknown_price_only"] == 1
@@ -1172,6 +1193,356 @@ def test_정지_뒤_재개하지_않는_종목의_사건은_no_bar_after_apply(t
     px_ok = flat_prices("A00014", cal, 10000, halt=(50, 60), **merge)
     ok = run_adj_sql([], px_ok, cal)[f"A00014:krx_base:{cal[55]}"]
     assert ok["factor_ok"] is True and ok["no_bar_after_apply"] is False
+
+
+# ── ⑤ 가격 전용 계수(N-32 ②·N-33, e1.26.0) ───────────────────────────────────
+# 미해결(factor_ok=false) 사건 중 그날 KRX 기준가 근거가 있는 (종목, 날짜) 단위마다 한 행에만
+# `price_only_factor` = 그날 기준가 ÷ 직전 행 종가를 싣는다. 보유 수량 경로(factor_ok·price_factor·
+# share_factor·factor_source)는 그대로다. 표식 `price_resolution` 이 가격 축 해소를 말한다.
+
+# 옛 산출(e1.25.0, eae8b217)의 절단본 10행 — 옛 열 15개 전부. ⑤ 는 계수 행 2개의 available_date
+# 만 바꾸고 나머지는 한 칸도 바꾸지 않는다(회귀 가드).
+OLD_ADJ_COLUMNS = ("ticker", "effective_date", "event_id", "corp_code", "event_type",
+                   "announce_date", "apply_date", "apply_basis", "price_factor", "share_factor",
+                   "factor_source", "factor_ok", "no_bar_after_apply", "available_date",
+                   "available_basis")
+OLD_SLICE_ROWS: dict[str, tuple[object, ...]] = {
+    "005930:split:2018-05-04": (
+        "005930", date(2018, 5, 4), "005930:split:2018-05-04", "00126380", "split",
+        date(2018, 5, 4), date(2018, 5, 4), "krx_base_price", 0.02, 50.0, "mktcap_neutral", True,
+        False, date(2018, 5, 4), "derived"),
+    "005935:split:2018-05-04": (
+        "005935", date(2018, 5, 4), "005935:split:2018-05-04", "00126380", "split",
+        date(2018, 5, 4), date(2018, 5, 4), "krx_base_price", 0.02, 50.0, "mktcap_neutral", True,
+        False, date(2018, 5, 4), "derived"),
+    "101970:capred:2015-11-26": (
+        "101970", date(2015, 11, 26), "101970:capred:2015-11-26", "00450931", "capred",
+        date(2016, 6, 8), date(2015, 11, 26), "unmatched", 1.0, 1.0, "no_price_match", False,
+        False, date(2015, 11, 27), "derived"),
+    "101970:capred:2015-11-28": (
+        "101970", date(2015, 11, 28), "101970:capred:2015-11-28", "00450931", "capred",
+        date(2016, 6, 8), date(2015, 11, 30), "unmatched", 1.0, 1.0, "no_price_match", False,
+        False, date(2015, 12, 1), "derived"),
+    "101970:capred:2018-02-23": (
+        "101970", date(2018, 2, 23), "101970:capred:2018-02-23", "00450931", "capred",
+        date(2019, 3, 13), date(2018, 2, 23), "nominal", 1.0, 1.0, "ratio_null", False, False,
+        date(2018, 2, 26), "derived"),
+    "101970:capred:2018-10-12": (
+        "101970", date(2018, 10, 12), "101970:capred:2018-10-12", "00450931", "capred",
+        date(2018, 7, 24), date(2018, 10, 12), "unmatched", 1.0, 1.0, "no_price_match", False,
+        False, date(2018, 7, 24), "derived"),
+    "101970:capred:2018-10-13": (
+        "101970", date(2018, 10, 13), "101970:capred:2018-10-13", "00450931", "capred",
+        date(2019, 3, 13), date(2018, 10, 15), "nominal", 1.0, 1.0, "near_dup_suppressed", False,
+        False, date(2018, 10, 16), "derived"),
+    "247540:bonus:2022-06-27": (
+        "247540", date(2022, 6, 27), "247540:bonus:2022-06-27", "01160363", "bonus",
+        date(2022, 6, 14), date(2022, 6, 27), "krx_base_price", 0.2507036590269401,
+        3.988773055332799, "mktcap_neutral", True, False, date(2022, 6, 14), "derived"),
+    "247540:krx_base:2022-05-09": (
+        "247540", date(2022, 5, 9), "247540:krx_base:2022-05-09", "01160363",
+        "unknown_price_only", date(2022, 5, 9), date(2022, 5, 9), "krx_base_price", 1.0, 1.0,
+        "unknown_price_only", False, False, date(2022, 5, 10), "derived"),
+    "900050:krx_base:2011-02-16": (
+        "900050", date(2011, 2, 16), "900050:krx_base:2011-02-16", "00722500",
+        "unknown_price_only", date(2011, 2, 16), date(2011, 2, 16), "krx_base_price", 1.0, 1.0,
+        "unknown_price_only", False, False, date(2011, 2, 17), "derived"),
+}
+# 절단본 ⑤ 손계산: 247540 2022-05-09 기준가 491,300(= 481,000 − (−10,300)) / 직전 종가 498,500 ·
+# 900050 2011-02-16 기준가 10,150 / 직전 종가 10,250 (둘 다 unknown_price_only, 보통주·외국기업)
+PO_247540 = 491300 / 498500
+PO_900050 = 10150 / 10250
+
+
+def test_절단본_계수_행은_247540_900050이고_옛_열은_공개일_밖에_그대로다(
+        built: build.BuildResult, factors: dict[str, dict[str, object]]) -> None:
+    """회귀 가드: ok 3행·미해결 5행은 옛 열 15개 전부 그대로(⑤ 표식 'factor'·'unresolved', 계수 1),
+    계수 행 2개는 공개일만 다음 세션 → 적용일."""
+    assert set(factors) == set(OLD_SLICE_ROWS)
+    for eid, old in OLD_SLICE_ROWS.items():
+        got = tuple(factors[eid][c] for c in OLD_ADJ_COLUMNS)
+        if eid in PRICE_ONLY_IDS:
+            i = OLD_ADJ_COLUMNS.index("available_date")
+            assert got[:i] + got[i + 1:] == old[:i] + old[i + 1:], eid
+            assert got[i] == factors[eid]["apply_date"] != old[i]
+        else:
+            assert got == old, eid
+    assert {e: (f["price_resolution"], f["price_only_factor"]) for e, f in factors.items()} == {
+        **{e: ("factor", 1.0) for e in OK_IDS},
+        **{e: ("unresolved", 1.0) for e in (NO_MATCH_IDS | RATIO_NULL_IDS | NEAR_DUP_IDS)},
+        "247540:krx_base:2022-05-09": ("price_only", PO_247540),
+        "900050:krx_base:2011-02-16": ("price_only", PO_900050)}
+    x = _gate(built, "EG3_adj_factor").metrics
+    assert x["n_by_price_resolution"] == {"factor": 3, "price_only": 2, "unresolved": 5}
+    assert x["n_price_only_by_source_sec_type"] == {"unknown_price_only:common": 1,
+                                                    "unknown_price_only:foreign": 1}
+    assert x["n_unit_without_carrier_row"] == 0
+    # 101970 근접 중복의 형제(10-12)는 no_price_match 라 C-05 원안 밖 — unresolved 로 남는다
+    assert x["n_unresolved_by_factor_source"] == {"near_dup_suppressed": 1,
+                                                  "no_price_match": 3, "ratio_null": 1}
+
+
+def test_절단본_EG8은_계수_행_적용일_수정수익률을_기록한다(built: build.BuildResult) -> None:
+    """D6-5: 계수 행의 적용일 수정수익률 = 종가 ÷ 그날 기준가 − 1 — 기록형(폐기형 승격은 6-5 서버
+    재연 뒤). 900050 2011-02-16 원수익률 +5.4% → 10,800/10,150 − 1 = +6.4%, 247540 05-09
+    −3.51% → 481,000/491,300 − 1 = −2.10%."""
+    m = _gate(built, "EG8").metrics
+    assert m["n_price_only_events"] == 2 and m["n_price_only_with_price"] == 2
+    assert m["max_abs_price_only_adj_return"] == pytest.approx(10800 / 10150 - 1)
+    assert m["n_price_only_abs_adj_return_over_030"] == 0
+    assert m["n_price_only_return_jump_over"] == 0
+    assert m["price_only_jump_gate"] is False and rules_s06.PRICE_ONLY_JUMP_GATE is False
+    ev = {e["event_id"]: e for e in m["events"]}                # type: ignore[union-attr]
+    assert ev["247540:krx_base:2022-05-09"]["adj_return"] == pytest.approx(481000 / 491300 - 1)
+    assert ev["247540:krx_base:2022-05-09"]["raw_return"] == pytest.approx(481000 / 498500 - 1)
+
+
+def test_계수_행_종류_화이트리스트는_SQL과_rules_s06_상수가_같다() -> None:
+    """D6-1: 주식 계열만(common·preferred·spac·foreign·dr). SQL 의 문자열 목록과 게이트 상수를
+    묶는다 — 한쪽만 바뀌면 게이트가 다른 단위를 다시 만든다."""
+    text = ADJ.sql_path.read_text(encoding="utf-8")
+    m = re.search(r"po_kind AS \(.*?sec_type IN \(([^)]*)\)", text, re.S)
+    assert m is not None
+    assert tuple(re.findall(r"'([a-z_]+)'", m.group(1))) == rules_s06.PRICE_ONLY_SEC_TYPES
+    assert rules_s06.PRICE_ONLY_SEC_TYPES == ("common", "preferred", "spac", "foreign", "dr")
+    assert set(rules_s06.PRICE_RESOLUTION_VOCAB) == {
+        "factor", "price_only", "price_only_dup", "price_only_near", "factor_near", "unresolved"}
+
+
+def _carrier(out: dict[str, dict[str, object]]) -> list[str]:
+    return [e for e, f in out.items() if f["price_resolution"] == "price_only"]
+
+
+def test_G1_207940형_사건_없는_기준가_unknown_krx_정상아님은_계수_행이고_적용일에_공개된다(
+        ) -> None:
+    """207940 2025-11-24 · 000880 2026-08-25 형(인적분할 류): 사건 없이 기준가 ×1.465, 같은 날
+    주식수 ×1.2 → unknown_krx 곱 검사 실패(krx_base_inconsistent, ok=false). 보유 수량 축은
+    그대로(계수 1·factor_ok false)이고 가격 축 계수 행 r = 1.465, 공개일 = 적용일."""
+    cal = sessions(80)
+    px = flat_prices("A00021", cal, 100000, jumps={30: 1.465 * 0.996}, base={30: 1.465},
+                     share_jumps={30: 1.2})
+    f = run_adj_sql([], px, cal)[f"A00021:krx_base:{cal[30]}"]
+    assert f["event_type"] == "unknown_krx" and f["factor_source"] == "krx_base_inconsistent"
+    assert f["factor_ok"] is False and (f["price_factor"], f["share_factor"]) == (1.0, 1.0)
+    assert f["price_resolution"] == "price_only" and f["price_only_factor"] == 1.465
+    assert f["available_date"] == cal[30]                     # 옛 식이면 다음 세션 cal[31]
+    g = run_eg3([], px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_by_price_resolution"] == {"price_only": 1}
+    assert g.metrics["n_available_mismatch"] == 0
+
+
+def test_G1_084010형_같은_날_bonus_반증과_unknown_price_only는_KRX_행_하나에만_싣는다() -> None:
+    """084010 2026-01-05 형: 무상증자(ratio 2, 종가 ×0.5 로 명목 매칭)의 적용일 기준가 r 0.6667 이
+    비율 0.5 와 안 맞아 사건은 krx_base_inconsistent(apply_basis nominal), 기준가 후보는 신규
+    unknown_price_only. ⑤ 단위 (종목, 날짜) 하나 → 계수 행은 KRX 행 1개, bonus 는
+    price_only_dup(계수 1)."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00022", "event_type": "bonus", "effective_date": cal[30], "ratio": 2.0,
+           "source": "event_fric", "rcept_no": "20191202000022", "announce_date": cal[20]}]
+    px = flat_prices("A00022", cal, 10000, jumps={30: 0.5}, base={30: 0.6667})
+    f = run_adj_sql(ev, px, cal)
+    bonus, krx = f[f"A00022:bonus:{cal[30]}"], f[f"A00022:krx_base:{cal[30]}"]
+    assert bonus["factor_source"] == "krx_base_inconsistent" and bonus["apply_basis"] == "nominal"
+    assert krx["event_type"] == "unknown_price_only"
+    assert _carrier(f) == [f"A00022:krx_base:{cal[30]}"]
+    assert krx["price_only_factor"] == 0.6667 and krx["available_date"] == cal[30]
+    assert bonus["price_resolution"] == "price_only_dup" and bonus["price_only_factor"] == 1.0
+    assert bonus["available_date"] == cal[20]                 # 계수 행 아닌 행은 옛 식 그대로
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_by_price_resolution"] == {"price_only": 1, "price_only_dup": 1}
+
+
+def test_G1_111610형_성분_감자_2행은_계수_행_하나이고_값은_그날_기준가_비율이다() -> None:
+    """111610 2015-08-17 형: 감자 + 액면병합 성분(곱 4)이 기준가 ×4 로 교체됐는데 같은 날 주식수
+    비 0.9 라 곱 3.6 ≠ 1 → 두 행 다 krx_base_inconsistent(krx_base_price). 계수 행은 최소
+    event_id(capred) 1행, 값은 멤버 계수가 아니라 그날 r = 4.0."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00023", "event_type": "capred", "effective_date": cal[20], "ratio": 0.5,
+           "source": "event_cr", "rcept_no": "20191202000023", "announce_date": cal[5]},
+          {"ticker": "A00023", "event_type": "reverse_split", "effective_date": cal[22],
+           "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[22]}]
+    px = flat_prices("A00023", cal, 1000, jumps={26: 4.0}, halt=(19, 25), base={26: 4.0},
+                     share_jumps={26: 0.9})
+    f = run_adj_sql(ev, px, cal)
+    a, b = f[f"A00023:capred:{cal[20]}"], f[f"A00023:reverse_split:{cal[22]}"]
+    for x in (a, b):
+        assert x["factor_source"] == "krx_base_inconsistent" and x["apply_date"] == cal[26]
+        assert x["apply_basis"] == "krx_base_price" and x["factor_ok"] is False
+    assert _carrier(f) == [f"A00023:capred:{cal[20]}"]
+    assert a["price_only_factor"] == 4.0 and b["price_only_factor"] == 1.0
+    assert b["price_resolution"] == "price_only_dup"
+    assert a["available_date"] == cal[5]                      # min(공시, 적용일) — 공시가 앞선다
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+def test_G1_작은_권리락_r_0_9923도_계수_행이다() -> None:
+    """기준가 −0.77%(207940 2026-10-02 형, 0단계 대조: 키움도 같은 비율로 조정). tol 0.2% 밖이면
+    크기와 무관하게 싣는다."""
+    cal = sessions(80)
+    px = flat_prices("A00024", cal, 10000, jumps={40: 0.9923 * 1.01}, base={40: 0.9923})
+    f = run_adj_sql([], px, cal)[f"A00024:krx_base:{cal[40]}"]
+    assert f["event_type"] == "unknown_price_only" and f["factor_ok"] is False
+    assert f["price_resolution"] == "price_only" and f["price_only_factor"] == 0.9923
+    assert f["available_date"] == cal[40]
+    g = run_eg3([], px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_price_only_r_dev_le_005"] == 1
+
+
+@pytest.mark.parametrize("sec_type", ["fund", "reit", "ship_fund"])
+def test_D6_1_펀드_리츠_선박펀드는_계수_행이_아니라_unresolved(sec_type: str) -> None:
+    """D6-1: 분배·배당락 추정의 반복 하락 — 접으면 adj_close 가 분배 재투자 축이 된다."""
+    cal = sessions(80)
+    px = flat_prices("A00025", cal, 10000, jumps={40: 0.97}, base={40: 0.97})
+    st = {"A00025": sec_type}
+    f = run_adj_sql([], px, cal, sec_types=st)[f"A00025:krx_base:{cal[40]}"]
+    assert f["price_resolution"] == "unresolved" and f["price_only_factor"] == 1.0
+    assert f["available_date"] == cal[41]                     # 옛 식 그대로
+    g = run_eg3([], px, cal, sec_types=st)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_by_price_resolution"] == {"unresolved": 1}
+
+
+def _ok_fold_overlap() -> tuple[list[date], list[dict[str, object]], list[dict[str, object]]]:
+    """ok 계수(명목 매칭 무상증자, 정정 공시가 늦어 접힘일 = 다음 세션 31)의 접힘일에 기준가
+    후보(r 0.95, 비율 안 맞음)가 겹친다 → unknown_price_only 신규 행."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00026", "event_type": "bonus", "effective_date": cal[30], "ratio": 2.0,
+           "source": "event_fric", "rcept_no": "20191202000026", "announce_date": cal[35]}]
+    px = flat_prices("A00026", cal, 10000, jumps={30: 0.5, 31: 0.95}, base={31: 0.95})
+    return cal, ev, px
+
+
+def test_회귀_ok_접힘일과_겹친_unknown_price_only는_unresolved_계수_1() -> None:
+    cal, ev, px = _ok_fold_overlap()
+    f = run_adj_sql(ev, px, cal)
+    ok, po = f[f"A00026:bonus:{cal[30]}"], f[f"A00026:krx_base:{cal[31]}"]
+    assert ok["factor_ok"] is True and ok["apply_basis"] == "nominal"
+    assert ok["available_date"] == cal[31] and ok["price_resolution"] == "factor"
+    assert po["event_type"] == "unknown_price_only"
+    assert po["price_resolution"] == "unresolved" and po["price_only_factor"] == 1.0
+    assert po["available_date"] == cal[32]                    # 옛 식 그대로
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+def test_회귀_기준가_근거_없는_no_price_match는_unresolved() -> None:
+    cal = sessions(80)
+    ev = [{"ticker": "A00027", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000027", "announce_date": cal[5]}]
+    f = run_adj_sql(ev, flat_prices("A00027", cal, 1000, jumps={}), cal)
+    x = f[f"A00027:capred:{cal[20]}"]
+    assert x["factor_source"] == "no_price_match"
+    assert (x["price_resolution"], x["price_only_factor"]) == ("unresolved", 1.0)
+
+
+def test_D6_2_날짜가_다른_DART_행은_창_안_계수_단위가_있고_c_후보가_없을_때만_price_only_near(
+        ) -> None:
+    """DART 감자(명목 20, 가격 매칭 실패 → no_price_match). 같은 종목 세션 50(창 [15, 60] 안)에
+    ⑤ 단위(unknown_price_only r 0.8) → price_only_near. 같은 창에 (c) 재발견 후보(정지 뒤 기준가
+    리셋, 행 없음)가 있으면 숨은 점프일 수 있어 unresolved. 단위가 창 밖(61)이어도 unresolved."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00028", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000028", "announce_date": cal[5]}]
+    eid = f"A00028:capred:{cal[20]}"
+    near = run_adj_sql(ev, flat_prices("A00028", cal, 1000, jumps={50: 0.8}, base={50: 0.8}),
+                       cal)
+    assert near[eid]["factor_source"] == "no_price_match"
+    assert near[eid]["price_resolution"] == "price_only_near"
+    assert near[eid]["price_only_factor"] == 1.0
+    assert _carrier(near) == [f"A00028:krx_base:{cal[50]}"]
+    g = run_eg3(ev, flat_prices("A00028", cal, 1000, jumps={50: 0.8}, base={50: 0.8}), cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_near_by_factor_source"] == {"price_only_near:no_price_match": 1}
+    guarded = run_adj_sql(ev, flat_prices("A00028", cal, 1000, jumps={50: 0.8, 45: 0.7},
+                                          base={50: 0.8, 45: 0.7}, halt=(43, 44)), cal)
+    assert guarded[f"A00028:krx_base:{cal[50]}"]["price_resolution"] == "price_only"
+    assert f"A00028:krx_base:{cal[45]}" not in guarded            # (c) — 행이 없다
+    assert guarded[eid]["price_resolution"] == "unresolved"
+    far = run_adj_sql(ev, flat_prices("A00028", cal, 1000, jumps={61: 0.8}, base={61: 0.8}), cal)
+    assert far[eid]["price_resolution"] == "unresolved"
+
+
+def test_D6_3_ok_형제가_있는_억제_중복본은_factor_near_형제가_미해결이면_unresolved() -> None:
+    """C-05 원안(감사 C-05: 정상 처리된 사건의 중복본 near_dup_suppressed·same_day_suppressed).
+    ① 결정공시 감자(20)와 자본변동 감자(21, ratio NULL)는 근접 중복 — 결정공시가 기준가로 ok 면
+    자본변동 행은 factor_near. 형제가 no_price_match 면 그대로 unresolved(절단본 101970 도 같다).
+    ② 같은 날 개별 매칭 2건 중 눌린 쪽(same_day_suppressed)도 이긴 쪽이 ok 면 factor_near."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00029", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000029", "announce_date": cal[5]},
+          {"ticker": "A00029", "event_type": "capred", "effective_date": cal[21], "ratio": None,
+           "source": "capital", "rcept_no": "20200302000029", "announce_date": cal[60]}]
+    win, lose = f"A00029:capred:{cal[20]}", f"A00029:capred:{cal[21]}"
+    px = flat_prices("A00029", cal, 1000, jumps={25: 10.0}, halt=(19, 24), base={25: 10.0},
+                     share_jumps={25: 0.1})
+    f = run_adj_sql(ev, px, cal)
+    assert f[win]["factor_ok"] is True and f[lose]["factor_source"] == "near_dup_suppressed"
+    assert (f[lose]["price_resolution"], f[lose]["price_only_factor"]) == ("factor_near", 1.0)
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_near_by_factor_source"] == {"factor_near:near_dup_suppressed": 1}
+    flat = run_adj_sql(ev, flat_prices("A00029", cal, 1000, jumps={}), cal)
+    assert flat[win]["factor_source"] == "no_price_match"
+    assert flat[lose]["price_resolution"] == "unresolved"
+    # ② 같은 날 억제 — 감자(0.5) + 액면병합(0.5) 이 둘 다 세션 26 ×2 에 개별 매칭
+    ev2 = [{"ticker": "A00030", "event_type": "capred", "effective_date": cal[20], "ratio": 0.5,
+            "source": "event_cr", "rcept_no": "20191202000030", "announce_date": cal[5]},
+           {"ticker": "A00030", "event_type": "reverse_split", "effective_date": cal[22],
+            "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
+            "announce_date": cal[22]}]
+    h = run_adj_sql(ev2, flat_prices("A00030", cal, 1000, jumps={26: 2.0}, halt=(19, 25)), cal)
+    sup = h[f"A00030:reverse_split:{cal[22]}"]
+    assert sup["factor_source"] == "same_day_suppressed"
+    assert sup["price_resolution"] == "factor_near"
+    assert h[f"A00030:capred:{cal[20]}"]["price_resolution"] == "factor"
+
+
+# ── ⑤ 부정 픽스처 — EG3_adj_factor 가 FAIL 해야 한다 ─────────────────────────
+
+def _g1_084010() -> tuple[list[date], list[dict[str, object]], list[dict[str, object]]]:
+    cal = sessions(80)
+    ev = [{"ticker": "A00022", "event_type": "bonus", "effective_date": cal[30], "ratio": 2.0,
+           "source": "event_fric", "rcept_no": "20191202000022", "announce_date": cal[20]}]
+    return cal, ev, flat_prices("A00022", cal, 10000, jumps={30: 0.5}, base={30: 0.6667})
+
+
+def test_부정_계수를_1_r로_뒤집으면_EG3가_잡는다() -> None:
+    cal, ev, px = _g1_084010()
+    g = run_eg3(ev, px, cal, tamper="UPDATE out_pq SET price_only_factor = 1 / price_only_factor "
+                                    "WHERE price_resolution = 'price_only'")
+    assert g.status is GateStatus.FAIL and g.metrics["n_price_only_factor_mismatch"] == 1
+
+
+def test_부정_한_단위에_계수_행이_2개면_EG3가_잡는다() -> None:
+    cal, ev, px = _g1_084010()
+    g = run_eg3(ev, px, cal, tamper="UPDATE out_pq SET price_resolution = 'price_only', "
+                                    "price_only_factor = 0.6667 "
+                                    "WHERE price_resolution = 'price_only_dup'")
+    assert g.status is GateStatus.FAIL and g.metrics["n_price_only_unit_carrier_ne_one"] == 1
+
+
+def test_부정_ok_접힘일에_계수_행을_두면_EG3가_잡는다() -> None:
+    cal, ev, px = _ok_fold_overlap()
+    g = run_eg3(ev, px, cal, tamper="UPDATE out_pq SET price_resolution = 'price_only', "
+                                    "price_only_factor = 0.95 "
+                                    "WHERE event_type = 'unknown_price_only'")
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["n_price_only_on_ok_fold"] == 1
+    assert g.metrics["n_price_only_outside_unit"] == 1
+
+
+def test_부정_계수_행을_factor_ok_true로_두면_EG3가_잡는다() -> None:
+    cal, ev, px = _g1_084010()
+    g = run_eg3(ev, px, cal, tamper="UPDATE out_pq SET factor_ok = TRUE "
+                                    "WHERE price_resolution = 'price_only'")
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["n_price_resolution_factor_mismatch"] == 1
+    assert g.metrics["n_price_only_carrier_bad"] == 1
 
 
 def test_sql파일에_상수_하드코딩_없음() -> None:

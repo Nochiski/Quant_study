@@ -30,6 +30,9 @@ MKTCAP_005930_0503 = 2650000 * 128386494 + 2125000 * 18072580     # 378,628,441,
 # S06-2: 247540 권리락일 계수는 KRX 기준가 124,700 / 직전 종가 497,400 (1/4 = 124,350 이 아니다)
 PF_247540 = 124700 / 497400
 SF_247540 = 497400 / 124700
+# ⑤(e1.26.0): 247540 2022-05-09 · 900050 2011-02-16 unknown_price_only 의 가격 전용 계수 r
+PO_247540 = 491300 / 498500
+PO_900050 = 10150 / 10250
 
 
 @pytest.fixture(scope="module")
@@ -177,12 +180,27 @@ def test_무상증자_권리락_전일_조정가는_4분의_1이다(ro: duckdb.D
 
 
 def test_v_adj_price는_v_cum_adj와_같은_계수를_쓴다(ro: duckdb.DuckDBPyConnection) -> None:
+    """누적계수 열은 `v_cum_adj` 그대로(⑤ 는 열을 늘리지 않는다). 조정가는 ⑤ 계수 행의 적용일
+    **이전** 행에만 r 이 더 곱해진다(후방 조정 — as_of 기준 1)."""
     n = ro.execute("""
         SELECT count(*) FROM v_adj_price(DATE '2026-08-20') p
         JOIN v_cum_adj(DATE '2026-08-20') c USING (ticker, date)
-        WHERE p.cum_price_factor <> c.cum_price_factor
-           OR p.adj_close <> p.close * c.cum_price_factor""").fetchone()
+        WHERE p.cum_price_factor <> c.cum_price_factor""").fetchone()
     assert n == (0,)
+    diff = ro.execute("""
+        SELECT p.ticker, count(*), max(p.date),
+               min(p.adj_close / (p.close * c.cum_price_factor)),
+               max(p.adj_close / (p.close * c.cum_price_factor))
+        FROM v_adj_price(DATE '2026-08-20') p
+        JOIN v_cum_adj(DATE '2026-08-20') c USING (ticker, date)
+        WHERE p.adj_close <> p.close * c.cum_price_factor GROUP BY 1 ORDER BY 1""").fetchall()
+    # 달라진 행 = 그 종목의 ⑤ 적용일 전날까지 전 행, 배수는 정확히 r 하나
+    assert [(t, hi) for t, _, hi, _, _ in diff] == [("247540", date(2022, 5, 6)),
+                                                    ("900050", date(2011, 2, 15))]
+    for (t, n, hi, lo_r, hi_r), r in zip(diff, (PO_247540, PO_900050), strict=True):
+        assert ro.execute("SELECT count(*) FROM v_adj_price(DATE '2026-08-20') "
+                          f"WHERE ticker = '{t}' AND date <= DATE '{hi}'").fetchone() == (n,)
+        assert lo_r == pytest.approx(r) and hi_r == pytest.approx(r)
 
 
 # ── 전방 조정 (S21 후속, 사용자 결정 09-05) ───────────────────────────────────
@@ -243,14 +261,15 @@ def test_전방조정_lag_override는_아직_공개_전_계수를_접지_않는�
     assert ro.execute(q.format(as_of="2018-05-04", lag=0)).fetchone() == (50.0, 2595000.0)
     assert ro.execute(q.format(as_of="2018-05-04", lag=1)).fetchone() == (1.0, 51900.0)
     assert ro.execute(q.format(as_of="2018-05-08", lag=1)).fetchone() == (50.0, 2595000.0)
-    # 무상증자 계수 available = 공시일 06-14 < 권리락일 06-27: 랙 1 이어도 권리락일에 접힌다
+    # 무상증자 계수 available = 공시일 06-14 < 권리락일 06-27: 랙 1 이어도 권리락일에 접힌다.
+    # 05-09 ⑤ 계수(÷ r, e1.26.0)는 그 전에 이미 공개·접혀 있다
     assert ro.execute("SELECT cum_share_factor, adj_close "
                       "FROM v_adj_price_fwd(DATE '2022-06-27', lag_override := 1) "
                       "WHERE ticker = '247540' AND date = DATE '2022-06-27'").fetchone() == (
-        pytest.approx(SF_247540), pytest.approx(135900 * SF_247540))
+        pytest.approx(SF_247540), pytest.approx(135900 * SF_247540 / PO_247540))
     assert ro.execute("SELECT cum_share_factor, adj_close FROM v_adj_price_fwd(DATE '2022-06-30') "
                       "WHERE ticker = '247540' AND date = DATE '2022-06-24'").fetchone() == (
-        1.0, 497400.0)
+        1.0, pytest.approx(497400 / PO_247540))
 
 
 def test_전방조정_거래량은_원거래량_나누기_50이다(ro: duckdb.DuckDBPyConnection) -> None:
@@ -279,11 +298,37 @@ def test_전방조정과_as_of_조정은_종목별_상수배다(ro: duckdb.DuckD
     assert rows and all(n == 1 for _, n, _ in rows)
     ratio = {t: r for t, _, r in rows}
     assert ratio["005930"] == ratio["005935"] == pytest.approx(50.0)
-    assert ratio["247540"] == pytest.approx(SF_247540) and ratio["000660"] == pytest.approx(1.0)
+    # ⑤ 도 두 축에 같이 들어가 상수배가 유지된다 — 배수 = Π share ÷ Π ⑤
+    assert ratio["247540"] == pytest.approx(SF_247540 / PO_247540)
+    assert ratio["900050"] == pytest.approx(1 / PO_900050)
+    assert ratio["000660"] == pytest.approx(1.0)
+
+
+def test_가격_전용_계수_행에서_두_조정가_뷰의_수익률이_기준가_대비로_이어진다(
+        ro: duckdb.DuckDBPyConnection) -> None:
+    """⑤ 247540 2022-05-09: 원수익률 −3.51% → 두 뷰 모두 481,000/491,300 − 1 = −2.10%.
+    전방은 그날부터 ÷ r, 후방은 그 전날까지 × r. 공개일 = 적용일(05-09) 이라 랙 1 이면 그날
+    as_of 에서는 아직 접히지 않는다(PIT)."""
+    want = 481000 / 491300 - 1
+    for view in ("v_adj_price_fwd", "v_adj_price"):
+        got = dict(ro.execute(f"""
+            SELECT date, adj_close FROM {view}(DATE '2026-08-20')
+            WHERE ticker = '247540' AND date IN (DATE '2022-05-06', DATE '2022-05-09')
+            """).fetchall())
+        assert got[date(2022, 5, 9)] / got[date(2022, 5, 6)] - 1 == pytest.approx(want), view
+    fwd = dict(ro.execute("SELECT date, adj_close FROM v_adj_price_fwd(DATE '2026-08-20') "
+                          "WHERE ticker = '247540' AND date IN (DATE '2022-05-06', "
+                          "DATE '2022-05-09')").fetchall())
+    assert fwd[date(2022, 5, 6)] == 498500.0 and fwd[date(2022, 5, 9)] == 481000 / PO_247540
+    q = ("SELECT adj_close FROM v_adj_price_fwd(DATE '2022-05-09', lag_override := {lag}) "
+         "WHERE ticker = '247540' AND date = DATE '2022-05-09'")
+    assert ro.execute(q.format(lag=0)).fetchone() == (481000 / PO_247540,)
+    assert ro.execute(q.format(lag=1)).fetchone() == (481000.0,)
 
 
 _FWD_DIVIDED = views.TEMPLATES["v_adj_price_fwd"].replace(
-    "close * cum_share_factor AS adj_close", "close / cum_share_factor AS adj_close")
+    "close * cum_share_factor / cum_price_only_factor AS adj_close",
+    "close / cum_share_factor / cum_price_only_factor AS adj_close")
 
 
 def test_전방조정을_나눗셈으로_뒤집으면_분할일_조정수익률이_점프한다(

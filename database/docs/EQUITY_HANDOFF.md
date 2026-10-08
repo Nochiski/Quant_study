@@ -697,6 +697,18 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 (서버 실측: 행의 27.4% · 1,440 종목이 걸린다 — 대부분 `unknown_price_only`(유상증자 권리락·
 주식배당락 등 MVP 밖 사건)라 "조정이 틀렸다" 가 아니라 "이 축은 MVP 가 안 덮는다" 는 뜻이다).
 
+**⑤ 가격 전용 계수(e1.26.0)** — 미해결 사건 중 그날 KRX 기준가 근거가 있는 (종목, 날짜)는
+`adj_factor.price_only_factor`(그날 기준가 ÷ 직전 행 종가)를 **가격 축에만** 접는다: 조정 OHLC =
+원주가 × `cum_share_factor` ÷ `cum_price_only_factor`. 그 날의 조정 수익률은 종가 ÷ 기준가 − 1 이
+된다(키움 수정주가와 같은 방식). 거래량·`cum_price_factor`·`cum_share_factor`·`n_factors_applied`·
+`n_unadjusted_events` 는 그대로이고, 백테스트 보유 수량 경로(`factor_ok` 행만)도 그대로다 —
+⑤ 는 인적분할·권리락의 수량을 고치지 않는다(H-04 는 남음). **조정가를 쓰는 소비자의 거름 축은
+`n_price_unresolved_events`**(같은 구간 `price_resolution='unresolved'` 사건 수)다 —
+`n_unadjusted_events` 는 뜻을 바꾸지 않아(보유 수량 축 미해결) ⑤ 로 해소된 사건도 계속 센다.
+`adj_factor.price_resolution` 어휘: `factor`(ok) · `price_only`(계수 행) · `price_only_dup`(같은 단위
+다른 행) · `factor_near`(C-05 원안: 억제 중복본 중 형제가 ok) · `price_only_near`(근처 ⑤ 단위, (c)
+후보 없음) · `unresolved`.
+
 **`cum_price_factor` × `cum_share_factor` = 1** 이고(시총 불변), 구간 첫 행에서는 둘 다 정확히
 1 이다. 재상장 종목(036220·101970)은 구간마다 누적이 초기화된다 — 폐지 전 구간의 계수는 새 구간에
 넘어오지 않는다.

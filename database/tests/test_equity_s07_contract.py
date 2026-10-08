@@ -140,6 +140,28 @@ def test_EGC04_actions_는_factor_ok_3건_ratio_share_factor(result: contract.Co
     assert m["by_type"] == {"split->split": 2, "bonus->split": 1}
 
 
+def test_EGC04_가격_전용_계수_행이_있어도_어댑터_사건_집합은_그대로(
+        built: Path, result: contract.ContractResult) -> None:
+    """⑤(e1.26.0): 247540 2022-05-09 계수 행(price_only_factor ≠ 1)이 있는 판에서도 어댑터는
+    factor_ok 행만 내보낸다 — not-ok 방출 0, 사건 집합·유형은 ⑤ 전과 같다."""
+    con = duckdb.connect()
+    try:
+        m = manifest.load(built / "adj_factor" / "MANIFEST.json")
+        rows = con.execute(
+            "SELECT event_id, factor_ok, price_resolution, price_only_factor FROM read_parquet("
+            f"'{built / 'adj_factor' / f'v={m.current_build}' / 'year=*' / '*.parquet'}') "
+            "WHERE price_resolution = 'price_only' ORDER BY event_id").fetchall()
+    finally:
+        con.close()
+    assert [(e, ok, res) for e, ok, res, _ in rows] == [
+        ("247540:krx_base:2022-05-09", False, "price_only"),
+        ("900050:krx_base:2011-02-16", False, "price_only")]
+    assert all(f != 1.0 for *_, f in rows)
+    m4 = _metrics(result, "EGC-04")
+    assert m4["n_not_ok_emitted"] == 0 and m4["n_actions"] == 3
+    assert m4["by_type"] == {"split->split": 2, "bonus->split": 1}
+
+
 def test_EGC05_정지_섞인_다종목_BarQuery_OK_dropped_양수(result: contract.ContractResult) -> None:
     m = _metrics(result, "EGC-05")
     assert m["status"] == "ok" and m["dropped_rows"] == m["expected_dropped"] > 0

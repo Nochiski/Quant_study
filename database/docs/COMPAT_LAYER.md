@@ -121,7 +121,7 @@ watchlist`/`holding-review` 일 09:00 · `brief morning`/`lunch`/`close` 07:10·
 `flow_daily.sql`, `src/stage/rules_kiwoom.py`, `scripts/daily_evening.sh:69`, 결정 11.
 
 저녁 21:05 키움 수집은 **`ka10060`·`ka10014` 두 TR 뿐**이다(`scripts/daily_evening.sh:69`).
-`ka10008`(외국인 보유)은 다음 날 07:10 이고(`scripts/daily_build.sh:104`, 결정 7),
+`ka10008`(외국인 보유)은 다음 날 07:10 이고(`scripts/daily_build.sh:118`, 결정 7),
 `ka20068`(대차)은 06:00 이다.
 
 | v3 열 | 우리 저녁 T 원천 | 판정 |
@@ -283,7 +283,7 @@ WHERE s.stock_code = ?
 
 | v3 열 | 우리 원천 | 판정 |
 |---|---|---|
-| `foreign_ownership_pct` (%) | `flow_daily.foreign_wght_pct` ← 키움 ka10008 `wght_pct`(`src/equity/sql/flow_daily.sql` `foreign_own` CTE, `src/stage/rules_kiwoom.py:141`) | **채울 수 있다**. 단 ka10008 은 저녁이 아니라 **07:10** 수집이라(`scripts/daily_build.sh:104`) 아침 확정 compat 에서만 T 값이 선다. drilldown 은 날짜 축이 없는 스냅샷이라 문제 없다 |
+| `foreign_ownership_pct` (%) | `flow_daily.foreign_wght_pct` ← 키움 ka10008 `wght_pct`(`src/equity/sql/flow_daily.sql` `foreign_own` CTE, `src/stage/rules_kiwoom.py:141`) | **채울 수 있다**. 단 ka10008 은 저녁이 아니라 **07:10** 수집이라(`scripts/daily_build.sh:118`) 아침 확정 compat 에서만 T 값이 선다. drilldown 은 날짜 축이 없는 스냅샷이라 문제 없다 |
 | `high_52w` · `low_52w` (원) | `price_daily.close` 에서 최근 252 세션 max/min 으로 **계산 가능**. 기성 표는 없다 | **파생하면 채울 수 있다**. 단 v3 값은 네이버 원본(미조정 원)이고 우리 계산은 `close`(미조정 원)이라 축은 같다. `adj_close` 를 쓰면 값이 달라진다 — `close` 로 맞춘다 |
 | `beta` | **없다.** equity 30표에 베타 표·열이 없다. `price_adj_daily` × `index_daily` 회귀로 만들 수 있으나 그건 새 파생(윈도·지수·수익률 정의를 결정해야 한다) | **못 채운다**(새 파생 결정 필요) |
 | `market_cap` (억원) | `price_daily.mktcap_krw / 1e8` | 채울 수 있으나 **소비자 없음** — 채우지 않는다 |

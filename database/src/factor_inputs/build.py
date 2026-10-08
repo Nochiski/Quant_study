@@ -40,7 +40,9 @@ from . import gates, queries
 
 # 1.1.0(2026-10-05): WISE 분기 원천(T-Q4) · 종목명 KRX 약명(N-8) · 추정치 유예 기본 0(N-14) ·
 # WISE 수집 지연 허용 1거래일(N-12, 유예와 분리)
-RULES_VERSION = "fi1.1.0"
+# 1.2.0(2026-10-08, 배포 묶음 4-2b): 금융업 연간 매출(영업수익·순영업이익) + 연간 revenue_basis ·
+# fi_fin_summary.period_months 열(G-28 짧은 첫 사업연도, N-25 Q5)
+RULES_VERSION = "fi1.2.0"
 LAYER = "factor_inputs"
 BASES_IMPLEMENTED = ("morning",)
 BASES_KNOWN = ("evening", "morning")

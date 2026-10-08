@@ -230,13 +230,24 @@ def fin_pair(chain) -> tuple[dict, dict]:
     return ours, compat
 
 
+# 의도한 차이: 금융업 연간 매출(영업수익·순영업이익)은 이 층만 싣는다 — compat(v3 미러)은
+# '매출액(수익)' 계정만 보고, v3 엔진은 매출을 읽지 않는다(배포 묶음 4-2b). 절단본에서는
+# 대신증권 2기가 해당한다.
+_FIN_REVENUE_ONLY_OURS = {("003540", "2025/12"), ("003540", "2024/12")}
+
+
 def test_fin_summary_annual_equals_compat_on_slice(fin_pair) -> None:
     ours, compat = fin_pair
     assert set(ours) == set(compat)
     assert {t for t, _ in ours} >= {"005930", "000660", "003540", "161890", "247540"}
+    only_ours = {k for k, c in compat.items()
+                 if c["revenue"] is None and ours[k]["revenue"] is not None}
+    assert only_ours == _FIN_REVENUE_ONLY_OURS
     for key, c in compat.items():
         o = ours[key]
         for col in _COMPARE:
+            if col == "revenue" and key in only_ours:
+                continue
             cv, ov = c[col], o[col]
             assert (cv is None and ov is None) or (
                 cv is not None and ov is not None and float(cv) == float(ov)), (key, col, cv, ov)
@@ -258,7 +269,16 @@ def test_fin_summary_slice_golden_005930(fin_pair) -> None:
     assert r["dps"] == 1_668.0                           # stg_dividend 보통주 주당 현금배당금
     assert r["capex_basis"] == "standard"
     assert r["available_date"] == dt.date(2026, 9, 2)    # WISE 판(09-02) > DART 접수(03-10)
+    assert r["period_months"] == 12                      # fin_std 2025-01-01 ~ 2025-12-31(G-28)
     assert ours[("000660", "2025/12")]["dps"] == 3_000.0
+
+
+def test_fin_summary_slice_financial_revenue_003540(fin_pair) -> None:
+    """대신증권 2025/12 — WISE cF3002 최상위에 '매출액(수익)' 이 없고 '순영업이익' 8,846.07509 억원
+    (stg_fin_wise 09-02 판 202520 행)이 매출 자리다. 연간 매출 = 그 값, 종류 net."""
+    ours, _ = fin_pair
+    r = ours[("003540", "2025/12")]
+    assert (r["revenue"], r["revenue_basis"]) == (8_846.0, "net")
 
 
 # ── compat consensus_annual 동등(v2 원천, D = 2026-09-03) ────────────────────

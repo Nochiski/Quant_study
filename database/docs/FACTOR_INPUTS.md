@@ -97,6 +97,16 @@ compat 은 한 기에 E 하나(E 우선)만 남기지만 이 표는 E·A 를 둘
   법인 1,261 중 155 곳이 `'-'` 행에만 dps 를 싣는다. 빼면 그 155 곳이 NULL → 엔진의 '무배당 0' 으로
   조용히 떨어지므로 보통주 값이 없을 때만 `'-'` 를 쓴다.
 - `available_date` = 행을 이룬 원천의 max(WISE fetched_date, DART·배당 available_date).
+- 연간 매출은 분기와 같은 계정(최상위 '매출액(수익)' → 보험 '영업수익' → 은행·증권·금융지주
+  '순영업이익')으로 고르고 `revenue_basis`(gross | net)를 적는다(fi1.2.0, 배포 묶음 4-2b). compat 은
+  '매출액(수익)' 만 봐서 금융업 연간 매출이 비었다(10-02 판 scope 금융 28종목 전부). v3 엔진은 매출을
+  읽지 않으므로 G-M3 동등성과 무관하다.
+- `period_months`(연간 행만) = DART `fin_std` `period_start`~`period_end` 의 **달력 달 수**(양끝 달
+  포함 — 1월 중 설립이면 12, 06-15 시작이면 7. fin_std 의 1분기·3분기 판정과 같은 식). 12 미만 =
+  짧은 첫 사업연도·결산월 변경·리츠 단기 결산 등 — scope 가 퀄리티 손익 지표에서 뺀다(G-28,
+  N-25 Q5, fi1.2.0). 엑셀 비고는 후속(4-2a 병합 뒤) — 문구는 '회계기간 N개월'(결산월 변경도 걸려
+  '첫 사업연도' 는 틀릴 수 있다), 문턱은 12 를 박지 말고 spec `quality.min_period_months` 를 읽는다.
+- 연간 `revenue_basis` 는 WISE 가 없는 연간 행(DART 만)에서 NULL 이다.
 - 분기 행: eps·bps·per·pbr·ev_ebitda·dividend_yield·dps·shares·roe·roa·fcf·capex 는 NULL(아래 §7).
 
 `fi_adj_prices.adj_ok`(오케스트레이터 09-29): 창 안 미해결 사건(`adj_factor.factor_ok = false`,
@@ -169,6 +179,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | `fi_fin_summary.op_margin·ni_margin·yoy` | compat 과 같이 NULL — 계산은 엔진 몫 |
 | `fi_fin_summary` 분기 행 eps…capex | WISE 분기 슬롯(`val_q*`)은 기간 라벨이 없다 · 분기 ROA 연율화 정의 전 · 분기 capex·FCF 는 `fin_std._q` 가 부호가 섞인 누계의 차라(절단본 003540: 1Q −7.2억 → 반기 +13.7억) 싣지 않는다 |
 | `fi_fin_summary` 비12월 결산 연간 | 싣지 않는다(§4) — 전 시장 12종목, 09-23 유니버스 0 |
+| `fi_fin_summary.period_months` | 연간 행만 — DART 연간 행이 없거나(WISE 만) `fin_std.period_start`(문서 메타)가 없으면 NULL(모름 — scope 는 빼지 않는다). 분기 행 NULL |
 | `fi_universe.filing_late` | 미제출 보고서는 판정 밖(가장 최근 제출분만) |
 | `fi_universe.is_admin` | equity `admin_state` 그대로 — 판정 재료가 없으면 NULL |
 
@@ -178,5 +189,6 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
   컨센서스·재무·창·수급·신용·실패 경로·CLI).
 - `tests/test_factor_inputs_gates.py` — 게이트마다 한 가지씩 망가뜨려 FAIL 을 확인.
 - `tests/test_factor_inputs_slice.py` — 커밋된 stage 절단본 위 equity 16표 체인 → 판 빌드(FG4 골든
-  통과) · `fi_fin_summary` 연간 = compat `financial_summary` SQL(겹치는 열 전부) · `fi_consensus_annual`
+  통과) · `fi_fin_summary` 연간 = compat `financial_summary` SQL(겹치는 열 전부 — 금융업 연간 매출
+  003540 2기만 의도한 차이) · `fi_consensus_annual`
   = compat `consensus_annual` SQL(같은 종류 행) · 005930 DART 값 손계산.

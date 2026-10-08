@@ -19,6 +19,12 @@ v3 `backend/scoring/engine.py`·`factors/{momentum,revision,flow,quality,valuati
   - 퀄리티는 연간 확정 재무 행이 하나도 없으면 가격만으로 되는 std_20d 도 만들지 않는다
     (`quality.py:78-79`). 하위 지표가 두 종목 미만이면 그 지표 z 는 0.0(`quality.py:44-47`).
   - `adj_ok`(DQ-1 미해결 구간)은 읽지 않는다 — v3 에 그 개념이 없다.
+
+spec 파라미터로만 켜는 원본 밖 규칙(v3_zscore@1.0 은 끈 채로 원본과 같다):
+  - `quality.min_period_months`(scope, G-28 · N-25 Q5): 연간 행 기간
+    (`fi_fin_summary.period_months`)이 이보다 짧으면(짧은 첫 사업연도) 그 행을 퀄리티 손익
+    지표(gpa·roa·fcf_assets·gpa_change)에 쓰지 않는다. 기간을 모르면(NULL) 쓴다.
+    부채비율·변동성은 그대로.
 """
 from __future__ import annotations
 
@@ -52,6 +58,8 @@ REVISION_PERIODS = ("1w", "1m", "3m")                # revision.py:11-15(_PERIOD
 QUALITY_REVERSE = frozenset({"debt_ratio", "std_20d"})           # quality.py:21
 VALUATION_REVERSE = frozenset({"per", "pbr", "ev_ebitda"})       # valuation.py:17
 STD_MIN_PRICES, STD_WINDOW, STD_MIN_RETURNS = 10, 21, 5          # quality.py:118-130
+# params.quality 에 올 수 있는 키 — 오타가 규칙을 조용히 끄지 않게 이 밖은 거절한다
+QUALITY_PARAM_KEYS = frozenset({"sub_weights", "min_period_months"})
 
 
 def _rows(inputs: FactorInputs, name: str) -> Sequence[Row]:
@@ -69,7 +77,8 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> tuple[list[str],
 
     D 에 가격 행이 있고 `fi_universe.eligible` 인 종목 중 시총 ≥ `universe.min_market_cap`.
     `universe.min_analysts` 가 있으면 추정기관수(n_analysts)가 그보다 작은 종목도 뺀다 —
-    NULL(모름)은 빼지 않는다(원본 v3 에는 없는 scope 규칙, 2026-10-05).
+    NULL(모름)은 빼지 않는다(원본 v3 에는 없는 규칙, 2026-10-05 scope 에 넣었다가 10-08 뺐다 —
+    지금 이 값을 쓰는 등록 spec 은 없다. 지원은 남긴다: v3_zscore@1.0 동등성과 무관).
     시총 맵은 > 0 인 값만 담는다(수급 분모). 반환 종목은 정렬 순서.
     """
     on_d = {r["ticker"] for r in _rows(inputs, "fi_prices") if _iso(r["date"]) == d}
@@ -303,10 +312,20 @@ def _return_std(prices: Sequence[float]) -> float | None:
     return statistics.stdev(returns)
 
 
+def _full_year(row: Row, min_period_months: int | None) -> bool:
+    """손익 지표에 쓸 연간 행인가 — 규칙이 꺼졌거나(None) 기간을 모르면(NULL) 쓴다(G-28)."""
+    if min_period_months is None:
+        return True
+    months = row["period_months"]
+    return months is None or months >= min_period_months
+
+
 def _quality_raw(annual: Mapping[str, Sequence[Row]], codes: Sequence[str],
-                 histories: Mapping[str, Sequence[float]]) -> dict[str, dict[str, float]]:
+                 histories: Mapping[str, Sequence[float]],
+                 min_period_months: int | None = None) -> dict[str, dict[str, float]]:
     """v3 `quality.py:66-115` — 최신 연간 2기에서 gpa·roa·fcf_assets·debt_ratio·gpa_change,
-    가격 이력에서 std_20d."""
+    가격 이력에서 std_20d. `min_period_months` 를 주면 그보다 짧은 기는 손익 지표에서 뺀다
+    (최신 기 → gpa·roa·fcf_assets·gpa_change, 전기 → gpa_change, G-28)."""
     raw: dict[str, dict[str, float]] = {}
     for code in codes:
         rows = annual.get(code, [])[:2]
@@ -315,16 +334,17 @@ def _quality_raw(annual: Mapping[str, Sequence[Row]], codes: Sequence[str],
         m: dict[str, float] = {}
         latest = rows[0]
         gp, ta = latest["gross_profit"], latest["total_assets"]
-        if gp is not None and ta is not None and ta > 0:
-            m["gpa"] = gp / ta
-        if latest["roa"] is not None:
-            m["roa"] = latest["roa"]
-        fcf = latest["fcf"]
-        if fcf is not None and ta is not None and ta > 0:
-            m["fcf_assets"] = fcf / ta
+        if _full_year(latest, min_period_months):
+            if gp is not None and ta is not None and ta > 0:
+                m["gpa"] = gp / ta
+            if latest["roa"] is not None:
+                m["roa"] = latest["roa"]
+            fcf = latest["fcf"]
+            if fcf is not None and ta is not None and ta > 0:
+                m["fcf_assets"] = fcf / ta
         if latest["debt_ratio"] is not None:
             m["debt_ratio"] = latest["debt_ratio"]
-        if len(rows) >= 2 and "gpa" in m:
+        if len(rows) >= 2 and "gpa" in m and _full_year(rows[1], min_period_months):
             prev_gp, prev_ta = rows[1]["gross_profit"], rows[1]["total_assets"]
             if prev_gp is not None and prev_ta is not None and prev_ta > 0:
                 prev_gpa = prev_gp / prev_ta
@@ -392,6 +412,16 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> None:
     if replace(spec.universe, min_market_cap=None, min_analysts=None) != UniverseRule():
         raise ValueError(f"{spec.spec_id}: v3_zscore 는 기본 유니버스 규칙"
                          "(+min_market_cap·min_analysts)만 지원")
+    quality = spec.params.get("quality")
+    if isinstance(quality, Mapping):
+        extra = sorted(set(quality) - QUALITY_PARAM_KEYS)
+        if extra:
+            raise ValueError(f"{spec.spec_id}: params.quality 모르는 키 {extra} — "
+                             f"허용 {sorted(QUALITY_PARAM_KEYS)}")
+        mpm = quality.get("min_period_months")
+        if mpm is not None and (isinstance(mpm, bool) or not isinstance(mpm, int) or mpm < 1):
+            raise ValueError(f"{spec.spec_id}: params.quality.min_period_months={mpm!r} — "
+                             "1 이상 정수여야 한다(G-28)")
     errs = inputs.check(V3ZScoreEngine.name)
     if errs:
         raise ValueError(f"factor_inputs {inputs.build_id} 계약 불일치: {errs}")
@@ -417,7 +447,8 @@ class V3ZScoreEngine:
         rev, rev_raw = _revision(inputs, codes, d, p["revision"]["metrics"],
                                  p["revision"]["periods"])
         flow, flow_raw = _flow(inputs, codes, caps, d, p["flow"]["sub_weights"])
-        qual_raw = _quality_raw(annual, codes, histories)
+        qual_raw = _quality_raw(annual, codes, histories,
+                                p["quality"].get("min_period_months"))
         qual = _score_subs(qual_raw, p["quality"]["sub_weights"], QUALITY_REVERSE)
         val_raw = _valuation_raw(annual, codes)
         val = _score_subs(val_raw, p["valuation"]["sub_weights"], VALUATION_REVERSE)

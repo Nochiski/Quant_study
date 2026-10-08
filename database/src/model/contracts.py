@@ -109,7 +109,8 @@ FI_UNIVERSE = TableContract(
      _c("coverage_state", "VARCHAR", note="fresh | grace | lapsed | none (T2.11)"),
      _c("coverage_age_days", "INTEGER", "일", note="마지막 신선 수집일부터 거래일 수"),
      _c("n_analysts", "INTEGER", note="추정기관 수 = WISE 최근 3개월 투자의견을 낸 증권사 수"
-        "(0 = 의견 없음, NULL = 모름). v4 리비전 ≥3 판정·scope 유니버스(min_analysts)"),
+        "(0 = 의견 없음, NULL = 모름). v4 리비전 ≥3 판정·엑셀 비고(scope 유니버스 조건은 "
+        "10-08 해제)"),
      _c("adv20", "DOUBLE", "억원", "최근 20세션 평균 거래대금(D-13 적격성 ≥ 10억)"),
      _c("is_admin", "BOOLEAN", note="관리종목 지정 중(D 기준)"),
      _c("is_halted", "BOOLEAN", note="매매정지 중(D 기준)"),
@@ -170,7 +171,16 @@ FI_FIN_SUMMARY = TableContract(
      _c("fs_basis", "VARCHAR", note="연결 | 별도 | GAAP개별(DQ-5·DQ-10)"),
      _c("capex_basis", "VARCHAR", note="fin_std capex_basis 그대로(DQ-8)"),
      _c("revenue_basis", "VARCHAR",
-        note="분기 행 매출 계정 종류 gross | net(은행·증권·금융지주 순영업이익) — v4 영업이익률 비교 그룹(10-01)"),
+        note="WISE 매출 계정 종류 gross(매출액·보험 영업수익) | net(은행·증권·"
+             "금융지주 순영업이익) — 분기 행은 v4 영업이익률 비교 그룹(10-01), "
+             "연간 행은 표시(배포 묶음 4-2b). DART 분기 행·WISE 가 없는 연간 행 NULL"),
+     _c("period_months", "INTEGER",
+        note="연간 행 회계기간 = DART fin_std period_start~period_end 의 달력 달 수"
+             "(양끝 달 포함 — 1월 중 설립이면 12). 12 미만 = 짧은 첫 사업연도·결산월 "
+             "변경 등 — scope 퀄리티 손익 지표 제외(G-28). 엑셀 비고는 후속(4-2a 병합 "
+             "뒤) — 문구 '회계기간 N개월', 문턱은 12 를 박지 말고 spec 파라미터 "
+             "quality.min_period_months 를 읽는다. 모름(DART 연간 행·period_start "
+             "없음)·분기 행 NULL"),
      _c("available_date", "DATE",
         note="공시·수집으로 알 수 있게 된 날. PIT(≤ D)는 굽는 단계가 적용하고 엔진은 읽지 않는다")),
     window="확정치만(추정치는 fi_consensus). 연간 2기(v3 LIMIT 2) + 분기 5기(v4 TTM)",
@@ -235,7 +245,7 @@ class UniverseRule:
     min_adv20: float | None = None                   # 억원. D-13 적격성(v4 = 10)
     # 추정기관수(fi_universe.n_analysts — 최근 3개월 투자의견을 낸 증권사 수) 하한. 0 은 원천이
     # 밝힌 0 이라 제외하고, NULL(모름)은 제외하지 않는다 — 수집 실패로 종목이 조용히 빠지지 않게.
-    # scope = 1(2026-10-05 사용자 결정 '3개월 의견 없으면 유니버스 제외').
+    # scope 에 1 을 걸었다가(2026-10-05) 10-08 사용자 결정으로 뺐다 — 지금 쓰는 등록 spec 없음.
     min_analysts: int | None = None
     exclude: tuple[str, ...] = ()                    # ELIGIBILITY_FLAGS 부분집합(v3 미러 = 없음)
 

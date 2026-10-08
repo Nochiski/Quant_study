@@ -1226,7 +1226,8 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
              for r in range(8, wb["메타"].max_row + 1)}
     assert pairs["model 판 id"] == res.build_id and "MG1 pass" in pairs[f"판 게이트 {primary}"]
     rule = pairs["유니버스 규칙"]
-    assert "추정기관수 ≥ 1" in rule and "추정치 유예 없음" in rule
+    # N-30 ①(10-08): scope 는 의견 0 종목도 남긴다 — 메타 유니버스 규칙 줄에서 추정기관수 조건이 빠진다
+    assert "추정기관수" not in rule and "추정치 유예 없음" in rule
     # scope(v3 엔진) 점수 행엔 업종 열이 없다 — fi_universe 업종으로 채워 업종 시트가 3 대분류로 선다
     sector_rows = [wb["업종"].cell(r, 1).value for r in range(8, wb["업종"].max_row + 1)]
     assert len(sector_rows) >= 3, sector_rows

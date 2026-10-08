@@ -95,6 +95,12 @@ class DayView:
         row = self.by_ticker.get(t)
         return None if row is None else _num(row.get(f"{b}_score"))
 
+    def scored(self, t: str) -> bool:
+        """엔진이 점수를 매긴 종목(결측 버킷 표기·결측 축·메타 결측 수의 대상) — 지표 행이
+        있거나(v4) 점수 행에 종합 점수가 있다(scope·v3·v2 는 지표 긴 표가 0행이라 점수 행으로
+        가린다, E-02). v4 의 D-13 적격성 탈락 행은 둘 다 없어 대상이 아니다."""
+        return t in self.ind or composite_of(self.by_ticker.get(t)) is not None
+
 
 def _buckets(spec: ModelSpec | None, rows: list[dict[str, object]]) -> tuple[str, ...]:
     if spec is not None:

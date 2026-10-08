@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -22,6 +23,28 @@ import duckdb
 
 class DeliverError(RuntimeError):
     """산출물을 만들 수 없는 입력 상태(판 없음 · 실패 판 · 파일 없음 · 잘못된 인자)."""
+
+
+UNKNOWN_REV = "알 수 없음"
+
+
+def ql_home() -> Path:
+    """`QL_HOME`(없으면 저장소 `database/`) — CLI 기본 루트와 배포 기록 위치의 기준."""
+    return Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
+
+
+def deployed_rev(home: Path) -> str:
+    """배포 rev — `<home>/DEPLOYED.json`(scripts/deploy.sh 가 `--apply` 때 쓴다)의 rev · 배포 시각.
+    파일이 없거나 읽지 못하면 '알 수 없음'(로컬 작업 트리 실행 등 — 엑셀 생성은 막지 않는다)."""
+    try:
+        meta = json.loads((Path(home) / "DEPLOYED.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return UNKNOWN_REV
+    rev = meta.get("rev") if isinstance(meta, dict) else None
+    if not isinstance(rev, str) or not rev:
+        return UNKNOWN_REV
+    at = meta.get("at_utc")
+    return f"{rev} · 배포 {at}" if isinstance(at, str) and at else rev
 
 
 def iso(v: object) -> str | None:

@@ -675,9 +675,11 @@ def test_daily_sector_and_model_sheets(daily) -> None:
     m = wb["모델 비교"]
     hm = header(m)
     for sid in SPECS:
-        assert model_label(sid) in hm, sid     # 헤더는 모델 이름(spec id 는 정의·메타)
+        if sid == "v4_rank@0.2":               # v4 비교 열은 뺀다(N-27) — 주 모델 v4 기본은 남는다
+            assert model_label(sid) not in hm
+        else:
+            assert model_label(sid) in hm, sid     # 헤더는 모델 이름(spec id 는 정의·메타)
     assert m.cell(8, col_of(m, "v4 기본")).value == 1
-    assert m.cell(8, col_of(m, "v4 동일가중")).value == 3
 
 
 def test_daily_meta_sheet(daily) -> None:
@@ -766,8 +768,8 @@ def test_daily_qpack_styles(daily) -> None:
 
 
 def test_daily_rank_trend_sheet_and_sparklines(daily) -> None:
-    """숨김 '순위 흐름' 시트 = 판마다의 순위 백분위(행은 점수 시트와 같은 순서), 점수 시트에는
-    1M 흐름 칸마다 엑셀 스파크라인이 붙는다. 선 색 = Δ순위 1M 부호(N-16)."""
+    """숨김 '순위 흐름' 시트 = 판마다의 −순위(원순위, 위 = 상승 — E-06)(행은 점수 시트와 같은 순서),
+    점수 시트에는 1M 흐름 칸마다 엑셀 스파크라인이 붙는다. 선 색 = Δ순위 1M 부호(N-16)."""
     res, wb = daily
     tr, sc = wb["순위 흐름"], wb["점수"]
     assert [tr.cell(7, c).value for c in range(1, tr.max_column + 1)] == [
@@ -775,8 +777,8 @@ def test_daily_rank_trend_sheet_and_sparklines(daily) -> None:
     assert [tr.cell(r, 1).value for r in range(8, tr.max_row + 1)] == [
         sc.cell(r, 1).value for r in range(8, sc.max_row + 1)]
     r0 = rows_by_code(tr)[tick(0)]
-    assert tr.cell(r0, 2).value == pytest.approx(100 * (41 - 3) / 40)      # 09-17 3위 / 41
-    assert tr.cell(r0, 7).value == 100.0                                    # 09-25 1위
+    assert tr.cell(r0, 2).value == -3                                       # 09-17 3위
+    assert tr.cell(r0, 7).value == -1                                       # 09-25 1위
     assert tr.cell(rows_by_code(tr)[tick(40)], 7).value is None             # 제외 종목
     with zipfile.ZipFile(res.path) as z:
         xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
@@ -797,7 +799,7 @@ def test_spark_groups_color_lines_by_delta_sign() -> None:
     원자료 범위는 비교 판 열부터 D 까지."""
     from deliver.trend import Trend, spark_groups
     tr = Trend(dates=("2026-09-02", "2026-09-15", "2026-10-02"),
-               pct={"A": (10.0, 50.0, 90.0), "B": (90.0, 50.0, 10.0), "C": (None, 50.0, 50.0)},
+               line={"A": (-50, -20, -5), "B": (-5, -20, -45), "C": (None, -20, -20)},
                base={"1M": "2026-09-02"}, base_rank={"1M": {"A": 50, "B": 5}})
     deltas = {"1M": {"A": 45, "B": -40, "C": None}}
     groups = spark_groups(["A", "B", "C"], tr, date(2026, 10, 2), {"1M": "M"}, deltas)
@@ -1319,3 +1321,342 @@ def test_display_names_strip_common_suffix_and_wics_prefix() -> None:
     assert rows[0]["sector_l2_name"] == "식품,음료,담배"
     assert rows[1]["sector_l1_name"] == "경기관련소비재"
     assert rows[1]["sector_l2_name"] is None and rows[2]["sector_l2_name"] == "자본재"
+
+
+# ── 배포 묶음 4-2a — 일간 엑셀 표시 바로잡기(E-09·E-02·E-08·E-06·E-10·Q10·N-27) ─────────────
+def _meta_pairs(wb) -> list[tuple[object, object]]:
+    """메타 시트 키·값 표(8행부터 첫 빈 행 전까지 — 그 뒤는 열 사전)."""
+    ws, out = wb["메타"], []
+    for r in range(8, ws.max_row + 1):
+        if ws.cell(r, 1).value is None:
+            break
+        out.append((ws.cell(r, 1).value, ws.cell(r, 2).value))
+    return out
+
+
+def test_meta_lines_are_placed_by_key_name(daily) -> None:
+    """E-09 — 비교 판 줄은 'model 생성 시각' 뒤에 이름으로 끼운다. 옛 코드는 insert(6)·[7:7]·
+    insert(9) 고정 숫자라 1W 를 뺀 뒤 '순위 흐름 판'이 factor_inputs·equity 판 id 사이에 끼었다."""
+    _, wb = daily
+    keys = [k for k, _ in _meta_pairs(wb)]
+    at = keys.index("model 생성 시각")
+    assert keys[at + 1:at + 4] == ["전일 비교 판", "1M 비교 판", "순위 흐름 판"]
+    assert keys[keys.index("factor_inputs 판 id") + 1] == "equity 판 id"
+
+
+def test_exclude_reason_column_fits_every_v4_label(daily) -> None:
+    """N-26 4.5 — '제외 사유' 열 상한 26. 상한 16 이면 v4 라벨 8개 중 6개가 잘려 보인다
+    (가장 긴 '고점근접+반전 게이트(pull_gate)' qpack fit 25.05)."""
+    from deliver.common import EXCLUDE_LABELS, exclude_label
+    _, wb = daily
+    ws = wb["점수"]
+    col = header(ws)["제외 사유"]
+    labels = [exclude_label(c) for c in (*EXCLUDE_LABELS, "pull_gate")]
+    probe = Col("excl", "제외 사유", "txt", None, 99.0)
+    need = max(fit_width(probe, [{"excl": s}]) for s in labels)
+    assert ws.column_dimensions[ws.cell(7, col).column_letter].width >= need
+
+
+def test_meta_records_excel_time_and_deployed_rev(world: dict[str, Path], tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """E-08 — 같은 model 판으로 코드만 바뀐 정정판을 파일로 구별하게 메타에 엑셀 생성 시각과 배포
+    rev(`<QL_HOME>/DEPLOYED.json`, deploy.sh 가 쓴다)를 싣는다. 못 읽으면 '알 수 없음'."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("QL_HOME", str(home))
+    (home / "DEPLOYED.json").write_text(json.dumps(
+        {"rev": "abc1234", "branch": "main", "at_utc": "2026-10-08T05:00:00Z"}), encoding="utf-8")
+    res = build_daily(FRI, "morning", model_root=world["model"], fi_root=world["fi"],
+                      out_root=tmp_path / "a")
+    pairs = dict(_meta_pairs(load_workbook(res.path)))
+    assert str(pairs["코드 rev"]).startswith("abc1234")
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", str(pairs["엑셀 생성 시각"]))
+    for broken in (None, "{깨진"):
+        p = home / "DEPLOYED.json"
+        if broken is None:
+            p.unlink()
+        else:
+            p.write_text(broken, encoding="utf-8")
+        res = build_daily(FRI, "morning", model_root=world["model"], fi_root=world["fi"],
+                          out_root=tmp_path / "b")
+        assert dict(_meta_pairs(load_workbook(res.path)))["코드 rev"] == "알 수 없음"
+
+
+def _write_rank_run(model_root: Path, day: str, spec: str, ranks: dict[str, int]) -> None:
+    """순위만 있는 최소 model 판(순위 흐름 재료)."""
+    bid = f"m_{day.replace('-', '')}T000000Z"
+    _write(model_root / spec / f"v={bid}" / "scores.parquet",
+           pa.schema([("ticker", pa.string()), ("rank", pa.int64())]),
+           [{"ticker": t, "rank": r} for t, r in ranks.items()])
+    runs = model_root / "_runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    meta = {"layer": "model", "status": "ok", "build_id": bid, "date": day, "basis": "morning",
+            "fi_build_id": "x", "generated_at": f"{day}T00:00:00Z", "specs": {spec: {}},
+            "primary_spec": spec}
+    (runs / f"{day.replace('-', '')}_morning.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_trend_line_direction_matches_its_color_when_universe_grows(tmp_path: Path) -> None:
+    """E-06 G1 — 유니버스가 100 → 110 으로 커지고 X 의 순위가 50 → 51(1칸 하락)이면 선 색은
+    빨강(Δ −1)이다. 옛 코드는 선을 백분위(50.5 → 54.1, 위로)로 그려 선은 오르는데 색은 빨강이었다.
+    선 = 원순위(위 = 상승)라 선의 처음 → 끝 방향과 색이 늘 같다."""
+    from deliver.reader import load_run
+    from deliver.trend import LINE_DOWN, load_trend, spark_groups
+    from deliver.trend import write_sheet as write_trend
+    from openpyxl import Workbook
+    spec, d0, d1 = "v4_rank@0.1", "2026-09-01", "2026-10-01"
+    others0 = {f"T{k:03d}": k + (1 if k >= 50 else 0) for k in range(1, 100)}
+    others1 = {f"T{k:03d}": k + (1 if k >= 51 else 0) for k in range(1, 110)}
+    _write_rank_run(tmp_path, d0, spec, {"X": 50, **others0})
+    _write_rank_run(tmp_path, d1, spec, {"X": 51, **others1})
+    run = load_run(tmp_path, d1, "morning")
+    trend = load_trend(tmp_path, run, spec, "morning")
+    assert trend.dates == (d0, d1) and trend.base["1M"] == d0
+    delta = trend.delta("1M", "X", 51)
+    assert delta == -1
+    wb = Workbook()
+    write_trend(wb, ["X"], trend)
+    ws = wb["순위 흐름"]
+    first, last = ws.cell(8, 2).value, ws.cell(8, 3).value
+    assert isinstance(first, int | float) and isinstance(last, int | float)
+    groups = spark_groups(["X"], trend, date.fromisoformat(d1), {"1M": "M"}, {"1M": {"X": delta}})
+    assert [g.color for g in groups] == [LINE_DOWN]          # 선 색 = 하락
+    assert last < first                                       # 선도 내려간다(색과 같은 방향)
+
+
+def test_rank_delta_cell_color_is_centered_on_zero(daily) -> None:
+    """E-06(Q8) — Δ순위 1M 칸 색의 가운데는 0 이다(음수 빨강 · 양수 초록, 끝점 ±M 대칭).
+    옛 코드는 3색 백분위 10/50/90 이라 가운데가 중앙값(10-02 판 −21.5) — 소폭 하락이 연두로
+    보였다."""
+    _, wb = daily
+    ws = wb["점수"]
+    letter = ws.cell(7, header(ws)["Δ순위 1M"]).column_letter
+    cs = next(r.colorScale for rng in ws.conditional_formatting for r in rng.rules
+              if str(rng.sqref).startswith(letter))
+    assert [v.type for v in cs.cfvo] == ["num", "num", "num"]
+    lo, mid, hi = (float(v.val) for v in cs.cfvo)
+    assert mid == 0 and lo == -hi and hi > 0
+    assert [c.rgb[-6:] for c in cs.color] == ["F8696B", "FFEB84", "63BE7B"]
+
+
+def test_scale_zero_mid_endpoints_are_symmetric_90th_magnitude() -> None:
+    from deliver.qpack import scale_zero_mid
+    vals: list[object] = [-192.0, -21.5, -1.0, 0.0, 5.0, 174.9, None, "x"]
+
+    def points(values: list[object]) -> tuple[float, ...]:
+        cs = scale_zero_mid(values).colorScale
+        assert cs is not None and [v.type for v in cs.cfvo] == ["num"] * 3
+        return tuple(float(v.val) for v in cs.cfvo)
+    lo, mid, hi = points(vals)
+    mags = sorted(abs(float(v)) for v in vals if isinstance(v, float))
+    assert mid == 0 and hi == pytest.approx(quantile(mags, 0.9)) and lo == -hi
+    assert points([None, 0]) == (-1.0, 0.0, 1.0)            # 값이 없거나 전부 0 이면 ±1
+
+
+def test_daily_earnings_estimated_prior_year_yoy_is_grey_too(tmp_path: Path) -> None:
+    """Q10 — Y−1 칸을 추정치로 채우면(회색 'E', N-19) 그 옆 y-y 칸도 회색 글자다.
+    확정치 칸 옆 y-y 는 그대로."""
+    day = "2027-01-04"
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, day, write_fi_day(fi_root, day, edit=_roll_to_2027))
+    res = build_daily(day, "morning", model_root=model_root, fi_root=fi_root, out_root=tmp_path)
+    ws = load_workbook(res.path)["실적"]
+    rows = rows_by_code(ws)
+    for occurrence in (0, 1, 2):                       # 매출 · 영업이익 · 순이익
+        c = col_of(ws, "2026", occurrence)
+        est_y = ws.cell(rows[tick(10)], c + 1)          # 2026 = 추정치 → y-y 회색
+        assert est_y.value is not None and est_y.font.color.rgb.endswith("7F7F7F")
+        act_y = ws.cell(rows[tick(0)], c + 1)           # 2026 = 확정치 → y-y 그대로
+        assert act_y.font.color is None or not act_y.font.color.rgb.endswith("7F7F7F")
+    grey = {code for code, r in rows.items()
+            if (f := ws.cell(r, col_of(ws, "2026") + 1).font).color is not None
+            and f.color.rgb.endswith("7F7F7F")}
+    est = {code for code, r in rows.items()
+           if '"E"' in ws.cell(r, col_of(ws, "2026")).number_format}
+    assert grey == est                                   # y-y 회색 = 'E' 칸 행 그대로
+
+
+def test_display_sheet_defines_roe_roa_debt_from_dart(daily) -> None:
+    """지표 시트 ROE·ROA·부채비율은 fi 가 DART 사업보고서로 계산한다(factor_inputs queries 연간
+    `d_net_income ÷ d_total_equity` 등). 옛 정의 문구는 'WISE'."""
+    _, wb = daily
+    ws = wb["지표(표시용)"]
+    h = header(ws)
+    for label in ("ROE(%)", "ROA(%)", "부채비율(%)"):
+        text = str(ws.cell(5, h[label]).value)
+        assert "DART" in text and "WISE" not in text, (label, text)
+
+
+# ── scope 실물 모양 판(실제 model.build — 주 모델 scope@1.0) ─────────────────────
+# 연간 확정 PER·PBR·배당수익률이 없는 종목 → scope 밸류 버킷 결측(279570 모양)
+NO_VAL = "100007"
+
+
+def _write_fi_tree(b, fi_root: Path, fi_bid: str, day: str) -> None:
+    """test_model_v4_rank.Board → factor_inputs 고정 경로(8표 + latest)."""
+    from model import build as mbuild
+    fi = b.fi()
+    for name, t in FI_TABLES.items():
+        out = fi_root / name / f"v={fi_bid}" / "part0.parquet"
+        mbuild.write_parquet(list(fi.tables.get(name, ())),
+                             {c.name: c.dtype for c in t.columns}, out)
+        (out.parent / "_meta.json").write_text(json.dumps(
+            {"table": name, "build_id": fi_bid, "basis": "morning", "date": day}))
+    (fi_root / "latest_morning.json").write_text(json.dumps(
+        {"layer": "factor_inputs", "status": "ok", "build_id": fi_bid, "date": day,
+         "basis": "morning"}))
+
+
+@pytest.fixture(scope="module")
+def scope_board(tmp_path_factory: pytest.TempPathFactory):
+    """실제 `model.build` 판(40종목, 다섯 spec) — 주 모델 scope@1.0 은 원값을 점수 표 열로 싣고
+    지표 긴 표는 0행이다(서버 10-02 판과 같은 모양). NO_VAL 만 밸류 재료가 없다."""
+    from model import build as mbuild
+    from test_model_v4_rank import Board, _full
+    root = tmp_path_factory.mktemp("scope")
+    b = Board()
+    for i in range(40):
+        _full(b, f"{100000 + i:06d}", i, sector=("G10", "G20", "G30")[i % 3])
+    for r in b.tables["fi_prices"]:
+        r["close"] = round(float(r["close"]))                  # type: ignore[arg-type]
+    for r in b.tables["fi_fin_summary"]:
+        if r["period_type"] == "annual" and r["ticker"] != NO_VAL:
+            k = int(str(r["ticker"])) % 11
+            r.update(per=6.0 + k, pbr=0.6 + 0.1 * k, dividend_yield=0.5 + 0.2 * k, roa=2.0 + k,
+                     debt_ratio=60.0 + 5 * k, gross_profit=100.0 + 3 * k)
+    fi_root = root / "fi"
+    _write_fi_tree(b, fi_root, "m_20260929T000500_000000Z", "2026-09-28")
+    res = mbuild.build("20260928", "morning", root / "model", fi_root,
+                       min_prices_on_d=10, min_ranked=10)
+    assert res.ok and res.primary_spec == "scope@1.0", res.specs
+    d = build_daily("2026-09-28", "morning", model_root=root / "model", fi_root=fi_root,
+                    out_root=root / "out")
+    scores = {str(r["stock_code"]): r for r in duckdb_rows(
+        root / "model" / "scope@1.0" / f"v={res.build_id}" / "scores.parquet")}
+    return res, load_workbook(d.path), scores
+
+
+def duckdb_rows(path: Path) -> list[dict[str, object]]:
+    import duckdb
+    con = duckdb.connect()
+    try:
+        cur = con.execute(f"SELECT * FROM read_parquet('{path}')")
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+    finally:
+        con.close()
+
+
+def test_scope_bucket_missing_is_marked_and_counted(scope_board) -> None:
+    """E-02(N-26 4.5) — scope 는 지표 긴 표가 0행이라 옛 코드는 `t in view.ind` 로 '점수 대상'을
+    가려 결측 버킷을 빈칸으로 두고 결측 축·메타 결측 수를 0 으로 냈다. 점수 행이 있으면 점수 대상:
+    빈 버킷 = '결측(원천없음)', 결측 축 = 밸류, 메타 '축별 결측 수' 밸류 1."""
+    _, wb, scores = scope_board
+    assert scores[NO_VAL]["valuation_score"] is None
+    assert all(r["valuation_score"] is not None for t, r in scores.items() if t != NO_VAL)
+    ws = wb["점수"]
+    h, rows = header(ws), rows_by_code(ws)
+    r = rows[NO_VAL]
+    assert ws.cell(r, h["밸류 유니버스"]).value == "결측(원천없음)"
+    assert ws.cell(r, h["밸류 업종"]).value == "결측(원천없음)"
+    assert ws.cell(r, h["결측 축"]).value == "밸류"
+    assert {ws.cell(rows[t], h["결측 축"]).value for t in scores if t != NO_VAL} <= {None, ""}
+    meta = dict(_meta_pairs(wb))
+    assert "밸류 1" in str(meta["축별 결측 수"]) and "모멘텀 0" in str(meta["축별 결측 수"])
+
+
+# scope 점수 표 원값 27열 + 표식 6열(contracts.V3_SCORE_COLUMNS) — 엑셀 머리글(줄바꿈은 공백)
+SCOPE_RAW_HEADERS = {
+    "r1m": "1M 수익률 (비율)", "r3m": "3M 수익률 (비율)", "r6m": "6M 수익률 (비율)",
+    "r9m": "9M 수익률 (비율)", "r12m": "12M 수익률 (비율)",
+    "op_change_1w": "영업이익 추정 1W (비율)", "op_1w_flag": "영업이익 1W 표식",
+    "ni_change_1w": "순이익 추정 1W (비율)", "ni_1w_flag": "순이익 1W 표식",
+    "op_change_1m": "영업이익 추정 1M (비율)", "op_1m_flag": "영업이익 1M 표식",
+    "ni_change_1m": "순이익 추정 1M (비율)", "ni_1m_flag": "순이익 1M 표식",
+    "op_change_3m": "영업이익 추정 3M (비율)", "op_3m_flag": "영업이익 3M 표식",
+    "ni_change_3m": "순이익 추정 3M (비율)", "ni_3m_flag": "순이익 3M 표식",
+    "flow_inst_5d": "기관 5일 (순매수/시총)", "flow_inst_20d": "기관 20일 (순매수/시총)",
+    "flow_for_5d": "외국인 5일 (순매수/시총)", "flow_for_20d": "외국인 20일 (순매수/시총)",
+    "flow_pe_5d": "사모 5일 (순매수/시총)", "flow_pe_20d": "사모 20일 (순매수/시총)",
+    "qual_gpa": "GP/A (비율)", "qual_roa": "ROA (%)", "qual_fcf_assets": "FCF/자산 (비율)",
+    "qual_debt_ratio": "부채비율 (%)", "qual_gpa_change": "GP/A 변화 (비율)",
+    "qual_std_20d": "20일 변동성 (비율)",
+    "val_per": "PER (배)", "val_pbr": "PBR (배)", "val_ev_ebitda": "EV/EBITDA (배)",
+    "val_dividend_yield": "배당수익률 (%)",
+}
+
+
+def test_scope_raw_sheet_carries_the_score_table_raw_columns(scope_board) -> None:
+    """E-10(Q7) G1 — scope 엑셀 '점수 원자료'에 점수 표 원값 27열 + 표식 6열을 엔진 값 그대로
+    싣는다. 옛 코드는 지표 긴 표(v4 전용)만 읽어 scope 원자료 시트가 코드·이름·기준 열뿐이었다
+    (10-02 발송본)."""
+    from model.contracts import V3_SCORE_COLUMNS
+    _, wb, scores = scope_board
+    assert set(SCOPE_RAW_HEADERS) <= set(V3_SCORE_COLUMNS) and len(SCOPE_RAW_HEADERS) == 33
+    ws = wb["점수 원자료"]
+    h, rows = header(ws), rows_by_code(ws)
+    assert set(SCOPE_RAW_HEADERS.values()) <= set(h), set(SCOPE_RAW_HEADERS.values()) - set(h)
+    groups = [str(c.value) for c in ws[6] if c.value is not None]
+    assert groups[:6] == ["종목", "모멘텀", "리비전", "수급", "퀄리티", "밸류"]
+    t = "100005"
+    for key, label in SCOPE_RAW_HEADERS.items():
+        got, want = ws.cell(rows[t], h[label]).value, scores[t][key]
+        if isinstance(want, float):
+            assert got == pytest.approx(want), key                   # 배율 없이 엔진 값 그대로
+        else:
+            assert got == want, key                                  # 표식 글자 · 값 없음 = 빈칸
+        assert str(ws.cell(5, h[label]).value).startswith(f"{key}:"), key   # 정의 = 열 이름부터
+    assert isinstance(ws.cell(rows[t], h["1M 수익률 (비율)"]).value, float)
+    defs = {key: str(ws.cell(5, h[label]).value) for key, label in SCOPE_RAW_HEADERS.items()}
+    assert "비율" in defs["r1m"] and "%" in defs["val_dividend_yield"]
+    assert "순매수" in defs["flow_for_5d"] and "시총" in defs["flow_for_5d"]
+    unit = dict(_meta_pairs(wb))["점수 원자료 단위"]
+    assert "r1m" in str(unit) and "val_dividend_yield" in str(unit) and "flow_" in str(unit)
+
+
+def test_scope_sector_sheet_fills_per_revision_and_return(scope_board) -> None:
+    """E-10(Q7) — 업종 시트 '업종 지표' 3열을 scope 점수 표 원값으로 채운다: PER 중앙값(val_per) ·
+    리비전 상향 비율(op_change_1m > 0, 값 있는 종목 중) · 1M 수익률(r1m 시총가중 × 100).
+    옛 코드는 v4 지표 긴 표만 봐서 scope 판에선 세 열이 전부 빈칸이었다."""
+    res, wb, scores = scope_board
+    ws = wb["업종"]
+    h = header(ws)
+    first = {ws.cell(r, h["코드"]).value: r for r in range(8, ws.max_row + 1)
+             if ws.cell(r, h["구분"]).value == "대분류"}
+    caps = {f"{100000 + i:06d}": 1000.0 + 37.0 * i for i in range(40)}
+    for code, r in first.items():
+        members = [t for t in scores if ("G10", "G20", "G30")[(int(t) - 100000) % 3] == code]
+        per = [scores[t]["val_per"] for t in members if scores[t]["val_per"] is not None]
+        rv = [scores[t]["op_change_1m"] for t in members if scores[t]["op_change_1m"] is not None]
+        r1 = {t: scores[t]["r1m"] for t in members if scores[t]["r1m"] is not None}
+        w = sum(caps[t] for t in r1)
+        assert ws.cell(r, h["PER 중앙값 (배)"]).value == pytest.approx(statistics.median(per))
+        assert ws.cell(r, h["리비전 상향 비율(%)"]).value == pytest.approx(
+            sum(1 for v in rv if v > 0) / len(rv) * 100)
+        assert ws.cell(r, h["1M 수익률 (%)"]).value == pytest.approx(
+            sum(v * caps[t] for t, v in r1.items()) / w * 100)
+
+
+def test_v4_comparison_columns_are_left_out_until_fixed(scope_board) -> None:
+    """N-27 §8-17 — v4 비교 열(v4_rank@*)은 결함 수정 전까지 점수 시트 '다른 모델 순위'와
+    '모델 비교' 시트에서 뺀다. v3 원본·v2 원본 비교와 '최대 차이'(남은 모델끼리)는 남고, 메타에
+    한 줄 남긴다.
+    v4 판 계산·저장은 그대로다(판 게이트 줄도 그대로)."""
+    res, wb, _ = scope_board
+    assert {"v4_rank@0.1", "v4_rank@0.2"} <= set(res.specs)
+    sc, mc = wb["점수"], wb["모델 비교"]
+    for ws in (sc, mc):
+        h = header(ws)
+        assert "v3 원본" in h and "v2 원본" in h, ws.title
+        assert "v4 기본" not in h and "v4 동일가중" not in h, ws.title
+    h, rows = header(sc), rows_by_code(sc)
+    for t, r in rows.items():
+        got = [sc.cell(r, h[k]).value for k in ("순위", "v3 원본", "v2 원본")]
+        ranks = [x for x in got if x is not None]
+        want = max(ranks) - min(ranks) if len(ranks) >= 2 else None
+        assert sc.cell(r, h["최대 차이"]).value == want, t
+    meta = dict(_meta_pairs(wb))
+    left_out = str(meta["비교에서 뺀 모델"])
+    assert "N-27" in left_out and "v4_rank@0.1" in left_out and "v4_rank@0.2" in left_out
+    assert "v4_rank" not in str(meta["비교 모델"])
+    assert "판 게이트 v4_rank@0.1" in meta                                   # 판은 그대로

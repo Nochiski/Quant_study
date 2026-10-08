@@ -26,7 +26,6 @@ import argparse
 import hashlib
 import json
 import logging
-import os
 import sys
 import traceback
 from datetime import UTC, datetime
@@ -34,7 +33,7 @@ from pathlib import Path
 
 from .excel_daily import build_daily
 from .excel_weekly import build_weekly, parse_week
-from .reader import DeliverError
+from .reader import DeliverError, ql_home
 from .telegram import DEFAULT_CHAT_KEY, caption_daily, caption_weekly, send_document
 
 # 발송 장부 — out-root(기본 data/deliver) 바로 아래. out-root 를 따르므로 임시 루트 리허설
@@ -71,7 +70,7 @@ def _sent(ledger: Path, day: str, basis: str) -> list[dict[str, object]]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
+    base = ql_home()
     p = argparse.ArgumentParser(prog="python -m deliver")
     sub = p.add_subparsers(dest="cmd", required=True)
 

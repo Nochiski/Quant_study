@@ -30,13 +30,19 @@ import inspect
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import duckdb
 import pytest
 from conftest import _make_stage_tree
+from deliver.excel_weekly import _returns
+from deliver.view import DayView
 from factor_inputs import FactorInputsError, build
 from factor_inputs.__main__ import main as cli_main
+from model.build import load_inputs
 from model.contracts import FI_TABLES, UniverseRule
+from model.engines import v4_rank
 from stage import manifest
 
 D = dt.date(2026, 9, 28)
@@ -181,32 +187,47 @@ def _prices() -> list[dict]:
 
 
 ADJ_FACTOR = {A: 2.0}
+# ⑤ 가격 전용 계수(equity e1.26.0) — P 는 09-22 계수 행(price_only, r = 1.25)만 있는 종목이다.
+# 그날부터 cum_price_only_factor = 1.25 → 수정가 = 원가 × cum_share_factor ÷ 1.25.
+# Q 는 가격 축에서 해소된 표식 행(factor_near · price_only_near)만 있는 종목이다(계수 1).
+P, Q = EXTRA[0], EXTRA[1]
+P_DAY, P_R = dt.date(2026, 9, 22), 1.25
+
+
+def _price_only(t: str, d: dt.date) -> float:
+    return P_R if t == P and d >= P_DAY else 1.0
 
 
 def _adj() -> list[dict]:
     return [{"ticker": r["ticker"], "date": r["date"],
-             "adj_close": float(r["close"]) * ADJ_FACTOR.get(r["ticker"], 1.0),
+             "adj_close": float(r["close"]) * ADJ_FACTOR.get(r["ticker"], 1.0)
+             / _price_only(r["ticker"], r["date"]),
              "cum_share_factor": ADJ_FACTOR.get(r["ticker"], 1.0),
+             "cum_price_only_factor": _price_only(r["ticker"], r["date"]),
              "n_unadjusted_events": 0, "basis": "krx"} for r in _prices()]
 
 
 def _adj_factor() -> list[dict]:
     # B: 창 안 미해결 사건(09-22) → 09-22 부터 adj_ok False. A: 창 밖 옛 사건(2020) → 영향 없음.
     # E: 창 안 사건 두 날(09-21 에 둘 · 09-23) → True · False · False · True · True 로 뒤집힌다.
-    def bad(t: str, d: dt.date, eid: str) -> dict:
+    # P·Q: not-ok 행이지만 가격 축에서 해소됐다(price_resolution ≠ 'unresolved') → 뒤집지 않는다.
+    def bad(t: str, d: dt.date, eid: str, res: str = "unresolved") -> dict:
         return {"ticker": t, "effective_date": d, "event_id": eid, "apply_date": d,
-                "factor_ok": False, "available_date": d}
+                "factor_ok": False, "available_date": d, "price_resolution": res}
     return [bad(E, dt.date(2026, 9, 21), "e1"), bad(E, dt.date(2026, 9, 21), "e2"),
             bad(E, dt.date(2026, 9, 23), "e3"),
             {"ticker": B, "effective_date": dt.date(2026, 9, 22), "event_id": "b1",
              "apply_date": dt.date(2026, 9, 22), "factor_ok": False,
-             "available_date": dt.date(2026, 9, 22)},
+             "available_date": dt.date(2026, 9, 22), "price_resolution": "unresolved"},
             {"ticker": A, "effective_date": dt.date(2020, 5, 4), "event_id": "a0",
              "apply_date": dt.date(2020, 5, 4), "factor_ok": False,
-             "available_date": dt.date(2020, 5, 4)},
+             "available_date": dt.date(2020, 5, 4), "price_resolution": "unresolved"},
             {"ticker": A, "effective_date": dt.date(2021, 5, 4), "event_id": "a1",
              "apply_date": dt.date(2021, 5, 4), "factor_ok": True,
-             "available_date": dt.date(2021, 5, 4)}]
+             "available_date": dt.date(2021, 5, 4), "price_resolution": "factor"},
+            bad(P, P_DAY, "p1", "price_only"), bad(P, P_DAY, "p2", "price_only_dup"),
+            bad(Q, dt.date(2026, 9, 21), "q1", "factor_near"),
+            bad(Q, dt.date(2026, 9, 23), "q2", "price_only_near")]
 
 
 _FLOW_COLS = ("ind_invsr_krw", "frgnr_invsr_krw", "orgn_krw", "fnnc_invt_krw", "insrnc_krw",
@@ -903,6 +924,49 @@ def test_adj_ok_is_a_step_at_each_in_window_unresolved_event(built) -> None:
     assert a[0] is True and a[1] == 2.0            # 창 밖 옛 사건은 표시하지 않는다
 
 
+def test_price_resolved_rows_keep_adj_ok_and_fold_into_adj_factor(built) -> None:
+    """⑤(equity e1.26.0) — 가격 축에서 해소된 not-ok 행(price_only · _dup · _near · factor_near)은
+    `adj_ok` 를 뒤집지 않고, `adj_factor` = cum_share ÷ cum_price_only 라 '원가 × 계수 = 수정가' 가
+    ⑤ 종목에서도 선다(fi1.3.0). 옛 fi(`NOT factor_ok` · `cum_share_factor`)는 P 를 09-22 부터
+    False · 계수 1 로 냈다."""
+    out, _ = built
+    for t in (P, Q):
+        assert q(out, "fi_adj_prices", "SELECT bool_and(adj_ok), count(*) FROM t "
+                                       f"WHERE ticker = '{t}'") == [(True, len(PRICE_DAYS))], t
+    p = dict(q(out, "fi_adj_prices", f"SELECT date, adj_factor FROM t WHERE ticker = '{P}'"))
+    assert p[dt.date(2026, 9, 21)] == 1.0 and p[P_DAY] == p[D] == 1.0 / P_R
+    con = duckdb.connect()
+    try:
+        for t in ("fi_prices", "fi_adj_prices"):
+            cur = manifest.load(out / t / "MANIFEST.json").current_build
+            con.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet("
+                        f"'{out / t / f'v={cur}' / 'part0.parquet'}', hive_partitioning=false)")
+        got = con.execute(
+            "SELECT count(*), count(*) FILTER (WHERE abs(a.adj_factor * p.close - a.adj_close) "
+            "> 1e-12 * a.adj_close), (SELECT count(*) FROM fi_adj_prices) "
+            "FROM fi_adj_prices a JOIN fi_prices p USING (ticker, date)").fetchone()
+    finally:
+        con.close()
+    assert got is not None and got[0] == got[2] > 0 and got[1] == 0     # A 분할 · P ⑤ 포함 전 행
+
+
+def test_price_resolved_stock_gets_v4_and_weekly_returns(built) -> None:
+    """실제 fi 판을 v4 `_ret`·주간 엑셀 `_returns` 에 그대로 넣는다(배포 묶음 6-3 G1). ⑤ 만 있는
+    P 는 09-22 를 넘는 창에서도 값이 나오고(옛 fi: '수정주가미해결'), 가격 축 미해결 B 는 그대로
+    결측이다."""
+    out, res = built
+    lag = len(PRICE_DAYS) - 1                         # 09-18 → 09-28 — 09-22 를 넘는다
+    want = (CLOSE[P] + 100 * lag) / P_R / CLOSE[P] - 1.0
+    fi, _ = load_inputs(out, res.build_id, D.isoformat(), "morning")
+    s = v4_rank._series(fi, {P, B}, D.isoformat())
+    assert v4_rank._ret(s[P], lag).raw == pytest.approx(want, rel=1e-12)
+    assert v4_rank._ret(s[B], lag) == v4_rank.Val(None, v4_rank.ADJ_UNRESOLVED)
+    base = cast(DayView, SimpleNamespace(run=SimpleNamespace(fi_build_id=res.build_id)))
+    week = _returns(out, base, PRICE_DAYS[0].isoformat(), D.isoformat())
+    assert week[P] == pytest.approx(want * 100.0, rel=1e-12)
+    assert week[B] == "결측(수정주가미해결)"
+
+
 def test_flows_sixty_sessions_units_and_source_pick(built) -> None:
     out, _ = built
     a = q(out, "fi_flows", f"SELECT date, individual, foreign_investor FROM t WHERE ticker = '{A}' "
@@ -948,6 +1012,24 @@ def test_evening_equity_build_refused_for_morning(tmp_path: Path) -> None:
     eq, st = make_roots(tmp_path, eq_build="e_20260928T121000_000000Z")
     with pytest.raises(FactorInputsError, match="접두어"):
         build(D_S, "morning", tmp_path / "fi", st, eq)
+
+
+@pytest.mark.parametrize(("table", "column"), [("price_adj_daily", "cum_price_only_factor"),
+                                                ("adj_factor", "price_resolution")])
+def test_old_equity_build_without_price_only_columns_refuses(tmp_path: Path, table: str,
+                                                            column: str) -> None:
+    """fi1.3.0 은 equity e1.26.0 판의 ⑤ 열을 읽는다 — 그 열이 없는 옛 판이면 판을 만들지 않고
+    멈춘다(판 섞임이 조용히 지나가지 않게, P1)."""
+    eq, st = make_roots(tmp_path)
+    rows = {"price_adj_daily": _adj, "adj_factor": _adj_factor}[table]()
+    _make_stage_tree(tmp_path / "eq", table, [{k: v for k, v in r.items() if k != column}
+                                              for r in rows],
+                     build_id="m_20260929T000600_000000Z")
+    with pytest.raises(FactorInputsError, match=rf"table={table} .*{column}"):
+        build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=5, golden_path=None)
+    assert not (tmp_path / "fi" / "fi_adj_prices" / "MANIFEST.json").exists()
+    tmp = tmp_path / "fi" / "_tmp"
+    assert not tmp.exists() or not any(tmp.iterdir())
 
 
 def test_gate_failure_commits_nothing(roots, tmp_path: Path) -> None:

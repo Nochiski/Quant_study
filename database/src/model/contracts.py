@@ -79,9 +79,12 @@ FI_ADJ_PRICES = TableContract(
     "fi_adj_prices", ("ticker", "date"),
     (_c("ticker", "VARCHAR"), _c("date", "DATE"),
      _c("adj_close", "DOUBLE", "원", "수정종가 — 모멘텀·변동성·52주 고점은 이것만"),
-     _c("adj_factor", "DOUBLE", note="누적 수정계수(원가 × 계수 = 수정가)"),
+     _c("adj_factor", "DOUBLE",
+        note="누적 수정계수(원가 × 계수 = 수정가) = cum_share_factor ÷ cum_price_only_factor "
+             "(⑤ 가격 전용 계수 포함, fi1.3.0)"),
      _c("adj_ok", "BOOLEAN",
-        note="False = 미해결 기업행위 사건 구간(DQ-1). v3@1.0 은 무시(원본 동등성), "
+        note="False = 가격 축 미해결 기업행위 사건 구간(DQ-1, adj_factor.price_resolution = "
+             "'unresolved' — fi1.3.0). v3@1.0 은 무시(원본 동등성), "
              "v4 계열은 해당 창을 결측 처리")),
     window="fi_prices 와 같다",
     source="equity price_adj_daily · adj_factor",

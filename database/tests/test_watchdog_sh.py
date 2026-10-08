@@ -103,7 +103,9 @@ def _run(home: Path) -> Run:
     None,                                               # 장부 파일 없음(첫 자동 발송 전)
     _line("2026-10-06"),                                # 전날 D 만 있음
     _line(D_ISO, basis="evening"),                      # 같은 D 라도 잠정판(evening) 발송은 아니다
-], ids=["no_ledger", "other_day", "evening_only"])
+    "",                                                 # 빈 파일
+    "\n\n",                                             # 빈 줄만
+], ids=["no_ledger", "other_day", "evening_only", "empty_file", "blank_lines"])
 def test_missing_send_record_is_crit(tmp_path: Path, ledger: str | None) -> None:
     """G1 — 확정판은 정상인데 장부에 그 D(basis=morning) 줄이 없으면 crit 1건.
 
@@ -118,6 +120,9 @@ def test_missing_send_record_is_crit(tmp_path: Path, ledger: str | None) -> None
     assert (level, title) == ("crit", TITLE_NOT_SENT)
     assert f"확정판 D={D} 엑셀 발송 기록 없음" in body
     assert f"scripts/model_daily.sh --date {D} 로 손 발송(사용자 승인 뒤)" in body
+    # 발송 뒤 장부 기록만 실패했을 수 있다 — 손 발송 전에 notify.log 를 보라는 안내(B-58)
+    assert "이미 보냈을 수 있다(B-58)" in body
+    assert ("파일 없음" in body) == (ledger is None)
 
 
 @pytest.mark.parametrize("correction", [0, 1])

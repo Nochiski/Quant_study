@@ -165,7 +165,8 @@ if check == "morning_build":
     # 08:10 체인이 확정판 뒤 model_daily.sh(fi → 모델 → 발송)를 잇고, deliver 는 발송이
     # 성공한 뒤에만 한 줄을 남긴다(N-25 Q9). 경로는 deliver LEDGER_NAME · 기본 out-root
     # (data/deliver), 줄의 date 는 YYYY-MM-DD 다. 장부를 못 읽으면 보냈는지 모르므로
-    # crit(P1) — deliver 가 장부를 읽는 규칙(_sent)과 같다.
+    # crit(P1). deliver(_sent)보다 엄격하다 — 장부 경로가 디렉터리면 deliver 는 is_file()
+    # 거짓이라 빈 장부로 보지만, 워치독은 열기 실패(IsADirectoryError)로 판정 불가 crit 이다.
     spath = "data/deliver/sent_model_daily.jsonl"
     unknown = f"확정판 D={d_prev} 엑셀 발송 여부 판정 불가 — 발송 장부"
     tail = f" · {lsum}{warn_txt}"
@@ -191,7 +192,9 @@ if check == "morning_build":
     if not sent:
         where = spath if os.path.exists(spath) else f"{spath} 파일 없음"
         out("", f"확정판 D={d_prev} 엑셀 발송 기록 없음 — scripts/model_daily.sh --date "
-                f"{d_prev} 로 손 발송(사용자 승인 뒤) · 장부 {where}{tail}", 3)
+                f"{d_prev} 로 손 발송(사용자 승인 뒤) · notify.log 에 같은 D 의 deliver(rc=3) "
+                f"실패가 있으면 이미 보냈을 수 있다(B-58) — 손 발송 전에 확인"
+                f" · 장부 {where}{tail}", 3)
     corr = rc_txt(sent[-1].get("correction"))
     out(when.split(" ")[-1],
         f"D={d_prev} 원장 건전성 OK ({when} KST) · 발송 기록 있음(정정 {corr}){tail}", 0)

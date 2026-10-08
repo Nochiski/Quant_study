@@ -79,6 +79,7 @@
 - 첫 운영 확인: 10-08 18:05 저녁 체인(WISE 실패 없으면 warn 0 이 정상), 10-09 08:10 자동 발송(D=10-08 — e1.25.0 확정판 + fi1.2.0 + scope 594 내외 + 4-2a/4-2d 표시), MG5 warn 가능(모집단 +81).
 - 첫 운영(10-08 저녁, 실제): WISE 22,084콜 전부 ok — ws_run_log n_bad 0, `ledger_evening.json` wise_n_bad 0·wise_bad_summary {}·wise_rc 0, notify.log 에 WISE warn 0 줄(정상). 저녁 체인 21:20 완료.
 - **첫 e1.25.0 잠정판(10-08 21:21~22:56) 실패 — stage 건전성 rc 2, equity 미실행.** 원인: WISE `stg_consensus_monthly` G8 value_mismatch=6 — 474650 의 2026/09/30 칸 6개(EPS·매출 × 3개년)가 cF5001 은 빈 값, cF5002 엔 값(원천 불일치, 이번 배포와 무관). G8 은 원장 전체를 다시 파싱해 다음 빌드도 같은 이유로 실패한다 → 10-09 00:xx 핫픽스(한쪽 빈 값 = n_one_side_null 기록, 진짜 충돌만 FAIL, 산출 불변 — 서버 blob 10-07·10-08 옛·새 파서 방출 행 동일). 4-1 실전 확인(adj_factor·disclosure_version·fin_std)은 10-09 08:10 확정판으로 넘어감(미검증). stage 소요 5,725s(10-07 5,077s · 10-06 3,755s).
+- **G8 핫픽스 배포(10-09 03:11 KST, rev 1425a9ba, 브랜치 hotfix/g8-one-side-null = a8261680 + 이 수정만, 사용자 '오늘 밤 핫픽스' — 낮 창 규칙 예외, 체인 유휴 확인)**: deploy.sh 테스트 통과, 내용이 바뀐 파일 2개(stage/parsers.py·model.py 주석) md5 일치, 서버 원장 전체 메모리 재파싱 — 방출 4,805,148 · mismatch 0 · one_side_null 6(10-08 474650) · parse_failed 0(32초, RSS 3.7GB). stage 판본 2.6.0 유지(산출 불변). 되돌릴 rev a8261680. 검토 후속 B-63. feat/v3-merge 에 병합(cf6efcde) — 묶음 5 배포가 되돌리지 않음.
 
 ## 갈래 4-2 — 엑셀 표시 (4-0 머지 뒤 — 같은 deliver 파일)
 - E-09 `excel_daily.py:847-850` 메타 줄을 키 이름 기준으로 · E-02 `excel_daily.py:309`·`:315-317`·`:744-745` 점수 행이 있으면 scored → '결측(원천없음)'·결측 축·메타 수(N-26 4.5) · 제외 사유 열 폭 26(`excel_daily.py:263`, `qpack.py:179-191`) · E-08 메타에 엑셀 생성 시각·rev(`excel_daily.py:746-758`).

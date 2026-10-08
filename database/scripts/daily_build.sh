@@ -10,7 +10,8 @@
 #         (N-23 ①, P9). 대기 시작은 실시간 출력과 notify 기록(dry-run 제외)에, 대기 시간은 체인 로그에 남고,
 #         늦어짐은 10:30 워치독이 알린다. 원장 락 래퍼(`flock <원장 락> daily_build.sh …`) 안에서 부르지
 #         않는다 — 자기 자신을 기다려 멈춘다. 부모가 이미 쥐었으면 QL_RAW_LOCK_HELD=1 로 물려준다.
-#         QL_RAW_LOCK_FILE 은 테스트 전용(락 파일 경로 덮어쓰기)이다.
+#         대기자는 하나(이미 기다리는 중이면 두 번째 실행은 info 후 rc 3), 대기 중 KST 날짜가 바뀌면 crit 후 rc 3(--date 고정 실행도 — 다시 돌리면 된다, 배포 묶음 5-3).
+#         규칙은 scripts/raw_lock.sh 한 곳이다(다른 원장 스크립트와 공용). QL_RAW_LOCK_FILE 은 테스트 전용(락 파일 경로 덮어쓰기)이다.
 set -uo pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
@@ -33,31 +34,13 @@ if [ -n "$DATE_ARG" ] && [[ "$DATE_ARG" > "$TODAY_KST" ]]; then
   echo "D=$DATE_ARG 가 오늘(KST $TODAY_KST)보다 뒤다 — 아직 오지 않은 날의 판은 짓지 않는다(--date 오타?)" >&2
   exit 2
 fi
-LOCK="${QL_RAW_LOCK_FILE:-/tmp/quant_ledger_raw.lock}"   # 테스트가 운영 락을 잡지 않게 할 때만 바꾼다
-LOCK_WAITED=""     # 원장 락을 기다렸으면 "N초 (시작 ~ 끝)" — 체인 로그에도 남긴다
-if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
-  exec 9>"$LOCK"
-  if ! flock -n 9; then
-    # 앞 원장 작업(06:00 수집 체인)이 아직 돌면 건너뛰지 않고 끝나기를 기다렸다 이어서 돈다(N-23 ①, P9).
-    # 공시 마감일엔 06:00 체인이 10시를 넘기는데, 예전처럼 exit 3 으로 물러나면 그 D 확정판이 영구히 빠졌다.
-    # 시간 한도·재시도 시각은 두지 않는다 — 늦어짐·멈춤 경보는 10:30 워치독 몫이다(감시이지 제어가 아니다).
-    W0=$(date +%s); W0_KST=$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')
-    echo "[$W0_KST] daily_build 원장 락 대기 시작 — 다른 원장 작업이 $LOCK 을 쥐고 있다(끝나면 이어서 돈다)"
-    # 기록만(notify.sh → logs/notify.log). 10:30 워치독 crit 를 '미실행'이 아니라 '대기'로 읽게 하고,
-    # 손으로 --date 를 또 돌려 대기열에 붙이는 일(그러면 체인을 한 번 더 돈다)을 막는다.
-    [ -z "$DRY" ] && scripts/notify.sh info "daily_build 원장 락 대기" \
-      "시작 $W0_KST — 다른 원장 작업(06:00 수집 등)이 $LOCK 을 쥐고 있다. 끝나면 이어서 돈다. 손으로 --date 를 돌리기 전에 확인"
-    if ! flock 9; then
-      # 대기형 flock 이 실패하면 락을 못 잡은 것이다 — 락 없이 원장을 쓰지 않는다
-      [ -z "$DRY" ] && scripts/notify.sh warn "daily_build 락 실패" "$LOCK 을 기다리다 flock 이 실패했다 — 이번 실행 건너뜀"
-      exit 3
-    fi
-    W1_KST=$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')
-    LOCK_WAITED="$(( $(date +%s) - W0 ))초 ($W0_KST ~ $W1_KST)"
-    echo "[$W1_KST] daily_build 원장 락 대기 끝 — $LOCK_WAITED"
-  fi
-  export QL_RAW_LOCK_HELD=1
-fi
+# 앞 원장 작업(06:00 수집 체인)이 아직 돌면 건너뛰지 않고 끝나기를 기다렸다 이어서 돈다(N-23 ①, P9).
+# 공시 마감일엔 06:00 체인이 10시를 넘기는데, 예전처럼 exit 3 으로 물러나면 그 D 확정판이 영구히 빠졌다.
+# 대기 info 는 기록만(notify.sh → logs/notify.log) — 10:30 워치독 crit 를 '미실행'이 아니라 '대기'로 읽게 하고,
+# 손으로 --date 를 또 돌려 체인을 한 번 더 도는 일을 막는다. LOCK_WAITED("N초 (시작 ~ 끝)")는 체인 로그에도 남긴다.
+. scripts/raw_lock.sh
+raw_lock_acquire daily_build "$DRY" \
+  "다른 원장 작업(06:00 수집 등)이 $LOCK 을 쥐고 있다. 끝나면 이어서 돈다. 손으로 --date 를 돌리기 전에 확인" || exit $?
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_build_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)

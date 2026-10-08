@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
 #   순서: 캘린더 동기화 → D(직전 거래일) 판정 → 키움 마스터(daily_wise.sh, 매일) →
-#         [월요일 KST] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01 10-06) →
+#         [월요일 KST · 마지막 성공 7일 초과] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01) →
 #         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 신규 corp 회사정보 공백 메우기 → 수집 요약 알림
 #   소스별 단계는 서로 막지 않는다 — 한 단계가 rc≠0 이어도 다음 소스는 받고, 실패한 단계를 모두 모아 crit
 #   (플랜 2026-09-30 T-K3: 신용잔고 판정 실패가 DART 를 막던 결함). `dart company gap` 만 `dart` 성공에 묶는다.
@@ -12,20 +12,14 @@
 #         키움은 대차(ka20068) 하나만 여기서 받는다 — 투자자·공매도(ka10060·ka10014)는 18:05
 #         daily_evening.sh 가 당일 저녁에 원장 직행으로 받고(결정 V2-1·V2-3), 외국인 보유(ka10008)는
 #         T-1 행이 07시 전후에 정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다.
+#   원장 락: 다른 원장 작업이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다(P9, 배포 묶음 5-3) — 규칙은
+#         scripts/raw_lock.sh 한 곳(대기자 1 · QL_RAW_LOCK_HELD · QL_RAW_LOCK_FILE 테스트 전용).
 set -uo pipefail
 ROOT="${QL_LEDGER_ROOT:-$HOME/quant-ledger}"   # 테스트가 임시 루트를 쓰게 할 때만 바꾼다
 cd "$ROOT"
 export QL_HOME="$ROOT" PYTHONPATH="$ROOT/src"
 PY=.venv/bin/python
-LOCK=/tmp/quant_ledger_raw.lock
-if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
-  exec 9>"$LOCK"
-  if ! flock -n 9; then
-    scripts/notify.sh warn "daily_ledger 락 실패" "다른 원장 작업이 $LOCK 을 쥐고 있다 — 이번 실행 건너뜀"
-    exit 3
-  fi
-  export QL_RAW_LOCK_HELD=1
-fi
+# 인자는 락보다 먼저 읽는다 — 락 대기 알림이 dry-run 인지 알아야 한다(daily_build.sh 와 같은 순서)
 DATE_ARG=""; DRY=""; LIMIT=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,6 +29,8 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+. scripts/raw_lock.sh
+raw_lock_acquire daily_ledger "$DRY" || exit $?
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_ledger_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
@@ -49,7 +45,7 @@ step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 덧
   return 0
 }
 {
-echo "════ [$(kst)] daily_ledger 시작 dry=${DRY:-no} ════"
+echo "════ [$(kst)] daily_ledger 시작 dry=${DRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
 scripts/sync_calendar.sh || echo "  ! 캘린더 동기화 실패 — 이전 복사본으로 진행"
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
@@ -61,12 +57,42 @@ if [ -z "$D" ]; then
 fi
 # ① 소멸성 축(키움 마스터)은 매일 — daily_wise.sh 는 raw 락을 물려받는다(WISE 는 18:05 로 이동)
 if [ -z "$DRY" ]; then step "daily_wise" bash scripts/daily_wise.sh || true; fi
-# 월요일(KST)만 DART 번호표(dart_corp_map)·corps.txt 갱신(A-01, 10-06 · DART 1콜) — 신규 상장을 DART 재무·공시에 잇는다.
+# DART 번호표(dart_corp_map)·corps.txt 갱신(A-01 · DART 1콜) — 신규 상장을 DART 재무·공시에 잇는다.
+#   월요일(KST)엔 늘, 그 밖의 날엔 마지막 성공(런 로그 source=dart_universe, date = KST 달력일)이 7일을 넘었거나
+#   기록이 없을 때 돈다(N-27 ⑤, 배포 묶음 5-2 — 월요일만이면 실패한 주는 2주 공백). 런 로그를 못 읽으면 돈다(P1).
+#   성공해야 ok 를 남기고, 실패는 warn 한 줄 — 체인 rc·FAILED·ledger_chain 런 로그엔 넣지 않는다(체인은 계속,
+#   성공 기록이 없으니 7일을 넘는 동안 다음 06:00 이 다시 부른다).
 #   키움 마스터 뒤라 그날 신규 상장까지 들고, 건너뜀 검사 앞이라 D(금)를 이미 받은 평소 월요일에도 돈다(그날 신규
 #   corp 의 회사 정보 공백 메우기는 D 를 받는 다음 실행 몫). 크론이 UTC(일 21:00)라 요일은 KST 로 본다.
 #   dry-run 이 없는 원장 쓰기라 dry-run 에선 건너뛴다. QL_WEEKDAY(1=월…7=일)는 테스트 전용 요일 주입 — 운영에선 비워 둔다.
-if [ -z "$DRY" ] && [ "${QL_WEEKDAY:-$(TZ=Asia/Seoul date +%u)}" = 1 ]; then
-  step "dart universe(월)" $PY src/dart_universe.py || true
+if [ -z "$DRY" ]; then
+  if [ "${QL_WEEKDAY:-$(TZ=Asia/Seoul date +%u)}" = 1 ]; then
+    UNIV_WHY="월요일"
+  elif UNIV_WHY=$($PY -c 'import datetime as dt, sys; from daily import runlog
+ok = [r.date for r in runlog.recent("data/raw/daily_run.db", source="dart_universe", limit=20) if r.status == "ok"]
+if not ok:
+    print("마지막 성공 기록 없음"); sys.exit(1)
+age = (dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date() - dt.datetime.strptime(ok[0], "%Y%m%d").date()).days
+print(f"마지막 성공 {ok[0]}({age}일 전)"); sys.exit(0 if age <= 7 else 1)'); then
+    echo "  DART 번호표 갱신 안 함 — $UNIV_WHY, 7일 이내"
+    UNIV_WHY=""
+  else
+    UNIV_WHY="${UNIV_WHY:-런 로그를 못 읽음}"
+  fi
+  if [ -n "$UNIV_WHY" ]; then
+    echo "──── dart universe 시작 ($UNIV_WHY) $(kst) ────"
+    $PY src/dart_universe.py; URC=$?
+    echo "──── dart universe 종료 rc=$URC $(kst) ────"
+    if [ "$URC" -eq 0 ]; then
+      $PY -c 'import datetime as dt; from daily import runlog
+d = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%Y%m%d")
+runlog.finish("data/raw/daily_run.db", runlog.start("data/raw/daily_run.db", date=d, source="dart_universe"), status="ok")' \
+        || echo "  ! dart_universe 성공 기록 실패 — 다음 06:00 이 다시 부른다(DART 1콜)"
+    else
+      scripts/notify.sh warn "daily_ledger dart universe 실패(rc=$URC)" \
+        "DART 번호표(dart_corp_map)·corps.txt 갱신 실패($UNIV_WHY) — 체인은 계속. 마지막 성공이 7일을 넘는 동안 06:00 체인이 날마다 다시 부른다 | 로그 $LOG"
+    fi
+  fi
 fi
 # D 가 이미 수집·판정 완료면 여기서 끝(주말·연휴에 같은 D 를 반복하지 않는다)
 if [ -z "$DRY" ] && $PY -c 'import sys; from daily import runlog

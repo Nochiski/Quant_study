@@ -6,6 +6,7 @@
 #     55 14 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh evening_build    # 23:55 KST (F-11 10-06·10-07: 빌드가 거래일마다 약 2분씩 길어져 23:30 → 23:55, 10-02 종료 23:02. 자정을 넘기면 안 된다 — TODAY 가 다음 날이 되어 정상 판을 '오늘 것이 아니다'로 찍고, 금요일 판은 토요일 휴장 판정으로 건너뛴다(10-07 00:00 실측). D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
 #     30 2 * * 6    cd ~/quant-ledger && scripts/watchdog.sh wics_weekly      # 토 11:30 KST — 금요일 dt WICS 스냅샷 38코드(행>0)
 #     30 1 * * *    cd ~/quant-ledger && scripts/watchdog.sh morning_build    # 10:30 KST 매일 (F-11 10-06: 10:00 → 10:30, 10-03 종료 09:49 로 여유 11분. D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
+#     morning_build 은 확정판이 정상이면 그 D 의 엑셀 발송 장부 줄(data/deliver/sent_model_daily.jsonl, basis=morning)까지 본다(B-57)
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail
@@ -33,6 +34,8 @@ if [ "$CHECK" != "morning_build" ] && [ "$CHECK" != "wics_weekly" ] && [ "$TRADI
   exit 0
 fi
 # 판정은 파이썬이 한다(jq 없음). 1줄 = 알림 제목에 붙일 시각, 2줄~ = 본문. rc 0 = 정상, 1 = 이상.
+# morning_build 의 발송 장부 검사(B-57)만 rc 3 = 발송 기록 없음, 4 = 발송 여부 판정 불가 — 아래에서
+# crit 제목을 확정 빌드 실패와 가른다.
 OUT=$($PY - "$CHECK" "$TODAY" <<'PY'
 import datetime as dt
 import json
@@ -158,7 +161,43 @@ if check == "morning_build":
     lbad = [k for k in ("stage", "equity") if lhealth.get(k) != "ok"]
     if lbad:
         out("", f"확정판 건전성 실패 {', '.join(lbad)} — {lsum}{warn_txt}", 1)
-    out(when.split(" ")[-1], f"D={d_prev} 원장 건전성 OK ({when} KST) · {lsum}{warn_txt}", 0)
+    # B-57(배포 묶음 5-1): 확정판이 정상이면 그 D 의 일간 엑셀 발송 장부 줄까지 본다.
+    # 08:10 체인이 확정판 뒤 model_daily.sh(fi → 모델 → 발송)를 잇고, deliver 는 발송이
+    # 성공한 뒤에만 한 줄을 남긴다(N-25 Q9). 경로는 deliver LEDGER_NAME · 기본 out-root
+    # (data/deliver), 줄의 date 는 YYYY-MM-DD 다. 장부를 못 읽으면 보냈는지 모르므로
+    # crit(P1). deliver(_sent)보다 엄격하다 — 장부 경로가 디렉터리면 deliver 는 is_file()
+    # 거짓이라 빈 장부로 보지만, 워치독은 열기 실패(IsADirectoryError)로 판정 불가 crit 이다.
+    spath = "data/deliver/sent_model_daily.jsonl"
+    unknown = f"확정판 D={d_prev} 엑셀 발송 여부 판정 불가 — 발송 장부"
+    tail = f" · {lsum}{warn_txt}"
+    try:
+        with open(spath, encoding="utf-8") as f:
+            slines = f.read().splitlines()
+    except FileNotFoundError:
+        slines = []
+    except (OSError, ValueError) as e:
+        out("", f"{unknown} {spath} 를 읽을 수 없다 ({type(e).__name__}: {e}){tail}", 4)
+    sent = []
+    for i, line in enumerate(slines, start=1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+            if not isinstance(entry, dict):
+                raise ValueError(f"JSON 객체가 아니다({type(entry).__name__})")
+        except ValueError as e:
+            out("", f"{unknown} {spath}:{i} 를 읽을 수 없다 ({e}){tail}", 4)
+        if entry.get("date") == d_prev_d.isoformat() and entry.get("basis") == "morning":
+            sent.append(entry)
+    if not sent:
+        where = spath if os.path.exists(spath) else f"{spath} 파일 없음"
+        out("", f"확정판 D={d_prev} 엑셀 발송 기록 없음 — scripts/model_daily.sh --date "
+                f"{d_prev} 로 손 발송(사용자 승인 뒤) · notify.log 에 같은 D 의 deliver(rc=3) "
+                f"실패가 있으면 이미 보냈을 수 있다(B-58) — 손 발송 전에 확인"
+                f" · 장부 {where}{tail}", 3)
+    corr = rc_txt(sent[-1].get("correction"))
+    out(when.split(" ")[-1],
+        f"D={d_prev} 원장 건전성 OK ({when} KST) · 발송 기록 있음(정정 {corr}){tail}", 0)
 
 if check == "wics_weekly":
     # 플랜 wics-weekly: 토 03:00 잡(10:00 재시도)이 금요일 dt 스냅샷을 38코드 전부(행>0) 남겼는가.
@@ -206,5 +245,9 @@ if [ "$RC" -eq 0 ]; then
   scripts/notify.sh info "$TITLE_OK ${STAMP:-$(TZ=Asia/Seoul date +%H:%M)}" "$BODY"
   exit 0
 fi
+case "$RC" in   # 발송 장부 검사(B-57) — 확정 빌드는 정상이므로 제목을 따로 단다
+  3) TITLE_BAD="watchdog: 10:30 까지 확정판 엑셀 발송 기록 없음" ;;
+  4) TITLE_BAD="watchdog: 확정판 엑셀 발송 여부 판정 불가" ;;
+esac
 scripts/notify.sh crit "$TITLE_BAD" "$BODY"
 exit 2

@@ -121,6 +121,7 @@ def _run(home: Path, wise_fail: str, *, dry: bool = False, kw_rc: int = 0) -> Ru
         (root / sub).mkdir(parents=True, exist_ok=True)
     (home / "tmp").mkdir(exist_ok=True)
     shutil.copy(SCRIPT, root / "scripts" / "daily_evening.sh")
+    shutil.copy(SCRIPT.parent / "raw_lock.sh", root / "scripts" / "raw_lock.sh")
     stubs = {".venv/bin/python": _PY,
              "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
              "scripts/sync_calendar.sh": "#!/usr/bin/env bash\nexit 0\n"}

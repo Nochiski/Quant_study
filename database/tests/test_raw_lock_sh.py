@@ -215,11 +215,12 @@ def test_date_change_during_wait_stops(tmp_path: Path, spec: Spec) -> None:
     crit 1건 뒤 원장 락을 놓고 rc 3. 옛 코드는 날짜를 다시 보지 않고 대기 뒤에 D(·오늘)를 새
     날짜로 계산해 그대로 돌았다(B-51 — 저녁은 WISE 스냅샷을 장중 갱신 전 값으로 채운다).
     """
+    today = _kst_today()                         # 실행 전에 잰다(자정 경계)
     r = _run(tmp_path, spec, n=1, wake="2099-01-01")
     assert r.rc == 3, r.out
     assert r.flock == [*WAITED, "-u 9"]          # 잡은 원장 락을 바로 놓는다
     assert r.calls == []                         # 본 작업(캘린더 동기화·수집·빌드) 미실행
-    title = (f"{spec.name} 원장 락 대기 중 날짜가 바뀜(시작 {_kst_today()} → 지금 2099-01-01)"
+    title = (f"{spec.name} 원장 락 대기 중 날짜가 바뀜(시작 {today} → 지금 2099-01-01)"
              " — 이번 실행 중단")
     assert [n.split("|")[:2] for n in r.notify] == [
         ["info", f"{spec.name} 원장 락 대기"], ["crit", title]]
@@ -341,4 +342,45 @@ def test_real_second_instance_skips_while_first_waits(tmp_path: Path, spec: Spec
     assert len([n for n in notify if n.startswith(
         f"info|{spec.name} 이미 대기 중인 실행 있음 — 이번 실행 건너뜀|")]) == 1, notify
     assert len([n for n in notify if n.startswith(f"info|{spec.name} 원장 락 대기|")]) == 1, notify
+    assert len([n for n in notify if n.startswith(spec.done)]) == 1, notify
+
+
+@real_flock
+def test_real_killed_waiter_frees_its_seat(tmp_path: Path) -> None:
+    """진짜 flock — 기다리던 스크립트의 bash 만 죽어도(크론 kill·OOM) 대기자 자리가 빈다.
+
+    다음 실행이 새 대기자가 되고, 락이 풀리면 그 실행이 이어서 돈다. 옛 코드는 대기형 `flock 9`
+    자식이 대기자 락 fd 8 을 물려받아, bash 가 죽으면 고아 flock 이 자리를 계속 쥐었다 — 다음
+    실행은 전부 '이미 대기 중' rc 3 이고, 락이 풀리면 고아만 잡고 끝나 아무 작업도 돌지 않았다
+    (배포 묶음 5-3 리뷰 중-1). 규칙이 공용 조각 한 곳이라 스크립트 하나로 본다.
+    """
+    spec = BUILD
+    root = _root(tmp_path)
+    env = _env(tmp_path, flock_stub=False)
+    cmd = ["bash", str(root / "scripts" / spec.script)]
+    holder = _hold(tmp_path, 6)
+    first = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True)
+    second: subprocess.Popen[str] | None = None
+    try:
+        assert first.stdout is not None
+        head = ""
+        while "원장 락 대기 시작" not in head:
+            line = first.stdout.readline()
+            assert line, f"첫 인스턴스가 대기에 들어가지 않았다: {head}"
+            head += line
+        first.kill()                                   # bash 만 — 대기형 flock 자식은 고아로 남는다
+        first.wait(timeout=10)
+        second = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True)
+        out, _ = second.communicate(timeout=60)
+    finally:
+        holder.wait(timeout=30)
+        for p in (first, second):
+            if p is not None and p.poll() is None:
+                p.kill()
+    _, _, notify = _read(tmp_path)
+    assert "이미 대기 중인 실행 있음" not in out, out    # 죽은 실행이 자리를 쥐고 있지 않다
+    assert second.returncode == 0, out
+    assert f"{spec.name} 원장 락 대기 시작" in out and f"{spec.name} 원장 락 대기 끝" in out
     assert len([n for n in notify if n.startswith(spec.done)]) == 1, notify

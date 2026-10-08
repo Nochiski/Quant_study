@@ -3,7 +3,7 @@
 #   순서: raw 락 → dt = 직전 거래일(금요일, daily.calendar) → wics_snapshot(38콜, 멱등) → 알림
 #   크론(서버 TZ=UTC): 0 18 * * 5 … scripts/wics_weekly.sh            # 03:00 KST
 #                     0 1  * * 6 … scripts/wics_weekly.sh --retry    # 10:00 KST — 03:00 이 전부 빈 응답(rc 4)이었을 때만 콜
-#   rc: 0 완료(info) · 3 락 대기 실패(warn)·이미 대기 중인 실행 있음(info) · 4 빈 응답 있음(03:00 은 warn + 10:00 재시도, --retry 에서도 남으면 crit)
+#   rc: 0 완료(info) · 3 락 대기 실패(warn)·이미 대기 중인 실행 있음(info)·대기 중 날짜 바뀜(crit) · 4 빈 응답 있음(03:00 은 warn + 10:00 재시도, --retry 에서도 남으면 crit)
 #       · 5 L1 검산 불일치(crit) · 1/2 실패·연속 실패(crit). 어느 경로도 알림 없이 끝나지 않는다(결정 V2-7).
 #   토 11:30 `watchdog.sh wics_weekly` 가 원장에 금요일 스냅샷 38코드가 있는지 다시 본다(크론 자체가 안 돈 경우).
 #   원장 락: 다른 원장 작업(늦어진 토요일 08:10 확정 체인 등)이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다(P9,

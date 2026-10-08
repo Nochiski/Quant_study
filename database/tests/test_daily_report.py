@@ -140,7 +140,7 @@ def test_런_failed_는_수집_실패로_crit(tmp_path: Path) -> None:
     assert "ledger_chain" in r.text
 
 
-# `daily_evening.sh` 가 실패한 저녁 체인 런에 남기는 detail 모양(:176-182) — 갈래별 rc 와 실패 갈래
+# `daily_evening.sh` 가 실패한 저녁 체인 런에 남기는 detail 모양(:178-184) — 갈래별 rc 와 실패 갈래
 _EVENING_DART_ONLY = ("kiwoom_rc=0 dart_rc=2 wise_rc=0 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
                       "wise_done_at=2026-09-10T18:09:41+09:00 failed= DART(rc=2)")
 _EVENING_KIWOOM_TOO = ("kiwoom_rc=1 dart_rc=2 wise_rc=0 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
@@ -272,7 +272,8 @@ def test_저녁_원장_rc_0이_아니면_crit(tmp_path: Path) -> None:
 
 def test_저녁_WISE_부분_실패는_warn_줄로_싣고_crit_은_아니다(tmp_path: Path) -> None:
     """N-27 ③ · N-30 ③ — 수집기 rc 0 인 채 일부 콜이 실패한 저녁. 실패 콜 수·종류를 경고에 싣되
-    이 줄만으로 crit 로 올리지 않는다(회복 여부는 같은 리포트의 원장 `wise.*` 판정이 말한다)."""
+    이 줄만으로 crit 로 올리지 않는다. 이 픽스처의 원장 건전성엔 `wise.run` 이 없다 — 회복 여부를
+    모르면 경고로 남긴다(P1)."""
     home = _full(tmp_path)
     kinds = {"invalid_stock": 1, "전송 실패(http·exc·notjson)": 1}
     _ledger_evening(home, extra={"wise_n_bad": 2, "wise_bad_summary": kinds})
@@ -282,17 +283,61 @@ def test_저녁_WISE_부분_실패는_warn_줄로_싣고_crit_은_아니다(tmp_
     assert "■ 경고: " in r.text
 
 
-@pytest.mark.parametrize("extra", [None, {"wise_n_bad": 0, "wise_bad_summary": {}},
-                                   {"wise_n_bad": None, "wise_bad_summary": None}],
-                         ids=["old_json_no_keys", "zero", "unknown"])
-def test_저녁_WISE_실패가_없거나_모르면_아무것도_안_붙는다(
+@pytest.mark.parametrize("extra", [None, {"wise_n_bad": 0, "wise_bad_summary": {}}],
+                         ids=["old_json_no_keys", "zero"])
+def test_저녁_WISE_실패가_없으면_아무것도_안_붙는다(
         tmp_path: Path, extra: dict[str, object] | None) -> None:
-    """회귀 가드 — 키가 없는 옛 인계 파일·실패 0·모름(null)은 종전 리포트 그대로(info)."""
+    """회귀 가드 — 키가 없는 옛 인계 파일·실패 0 은 종전 리포트 그대로(info)."""
     home = _full(tmp_path)
     _ledger_evening(home, extra=extra)
     r = _build(home)
     assert r.status is dr.ReportStatus.INFO, r.text
     assert "WISE 저녁 실패" not in r.text
+
+
+def test_저녁_WISE_실패_수를_모르면_warn(tmp_path: Path) -> None:
+    """I-1 — 키가 있는데 null 이고 wise_rc 0 = 수집기는 끝났는데 런 로그를 못 읽었다. 실패 수를
+    모르는 것도 경고다(P1)."""
+    home = _full(tmp_path)
+    _ledger_evening(home, extra={"wise_n_bad": None, "wise_bad_summary": None})
+    r = _build(home)
+    assert r.status is dr.ReportStatus.WARN, r.text
+    assert "WISE 저녁 실패 수 확인 불가" in r.text
+
+
+def test_저녁_WISE_rc_실패면_확인_불가_줄은_없다(tmp_path: Path) -> None:
+    """wise_rc≠0 이면 이미 crit(저녁 원장 수집 실패) — 실패 수 모름은 따로 싣지 않는다."""
+    home = _full(tmp_path)
+    _ledger_evening(home, wise_rc=2, extra={"wise_n_bad": None, "wise_bad_summary": None})
+    r = _build(home)
+    assert r.status is dr.ReportStatus.CRIT
+    assert "wise_rc=2" in r.text
+    assert "확인 불가" not in r.text
+
+
+def test_저녁_WISE_실패를_같은_날_재실행이_회복했으면_등급을_안_올린다(tmp_path: Path) -> None:
+    """같은 리포트의 원장 `wise.run` 이 PASS = 같은 날 재실행이 실패 콜을 다시 받았다(DART
+    `_recovery` 와 같은 방식). 저녁 절에 '회복'으로만 적고 경고로 올리지 않는다."""
+    home = _full(tmp_path)
+    _ledger(home, checks=[_check("krx.rows", "required", "pass"),
+                          _check("wise.run", "required", "pass")])
+    _ledger_evening(home, extra={"wise_n_bad": 2, "wise_bad_summary": {"invalid_stock": 2}})
+    r = _build(home)
+    assert r.status is dr.ReportStatus.INFO, r.text
+    assert "WISE 저녁 실패 2콜(invalid_stock 2) — 같은 날 재실행으로 회복(wise.run pass)" in r.text
+    assert "■ 경고" not in r.text
+
+
+def test_저녁_WISE_실패가_회복되지_않았으면_경고로_남긴다(tmp_path: Path) -> None:
+    """`wise.run` FAIL — 원장 쪽에서 이미 crit 이고, 저녁 실패 줄은 지금처럼 경고에 남는다."""
+    home = _full(tmp_path)
+    _ledger(home, checks=[_check("krx.rows", "required", "pass"),
+                          _check("wise.run", "required", "fail")])
+    _ledger_evening(home, extra={"wise_n_bad": 2, "wise_bad_summary": {"invalid_stock": 2}})
+    r = _build(home)
+    assert r.status is dr.ReportStatus.CRIT
+    assert "■ 경고: WISE 저녁 실패 2콜(invalid_stock 2)" in r.text
+    assert "회복(wise.run" not in r.text
 
 
 def test_빌드_health_실패는_게이트_폐기로_crit(tmp_path: Path) -> None:

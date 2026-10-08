@@ -11,7 +11,8 @@
          · 게이트 폐기(stage·빌드 health 실패)
          · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB
   warn — 건전성 warn 항목 실패, 아직 `running` 인 런, 저녁 WISE 부분 실패(인계 파일
-         `wise_n_bad` > 0 — 수집기 rc 0 인 채 일부 콜 실패, N-27 ③)
+         `wise_n_bad` > 0 — 수집기 rc 0 인 채 일부 콜 실패, N-27 ③. 같은 리포트의 원장 `wise.run`
+         이 pass 면 '회복'으로만 적는다) · 그 실패 수 확인 불가(키가 있는데 null, wise_rc 0)
   info — 그 밖의 일일 요약
 
 입력 파일이 없으면 "없음" 으로만 적고 등급을 올리지 않는다 — 보고 누락 판정은 워치독(`scripts/watchdog.sh`)
@@ -50,7 +51,7 @@ LAST_RUN_SOURCES = frozenset({"dart"})
 # 뒤 런이 ok 여도 회복으로 덮지 않는 상태 — v3 프로덕션 키 사용은 수집 실패가 아니라 사고다(P1)
 NEVER_RECOVERED = frozenset({"kael_key_used"})
 # 저녁 체인 런 detail 의 갈래별 rc — `kiwoom_rc=0 dart_rc=2 wise_rc=0 …`. 이 리포트가
-# `scripts/daily_evening.sh` :176-182 가 적는 detail 형식을 파싱한다(그 형식을 바꾸면 여기도 본다).
+# `scripts/daily_evening.sh` :178-184 가 적는 detail 형식을 파싱한다(그 형식을 바꾸면 여기도 본다).
 # 갈래 키를 나열하지 않고 `*_rc` 를 모두 읽는다 — 갈래가 늘어도 그 실패를 놓치지 않는다(P1)
 _EVENING_RC_RE = re.compile(r"\b([a-z][a-z0-9_]*_rc)=(-?\d+)\b")
 _EVENING_BRANCHES = frozenset({"kiwoom_rc", "dart_rc", "wise_rc"})
@@ -252,14 +253,24 @@ def _basis_section(label: str, reports: dict[str, dict[str, object] | None],
     return f"■ {label} " + " · ".join(parts), crit
 
 
-def _evening_section(rep: dict[str, object] | None, *,
-                     dart_recovered: bool = False) -> tuple[str, list[str], list[str]]:
+def _wise_run_passed(ledger: dict[str, object] | None) -> bool:
+    """같은 리포트의 원장 건전성 `wise.run` 이 pass 인가. 리포트가 없거나 검사가 없거나 fail 이면
+    False — 회복을 확인하지 못한 것으로 본다(P1)."""
+    if ledger is None:
+        return False
+    return any(c.get("name") == "wise.run" and c.get("status") == "pass" for c in _checks(ledger))
+
+
+def _evening_section(rep: dict[str, object] | None, *, dart_recovered: bool = False,
+                     wise_recovered: bool = False) -> tuple[str, list[str], list[str]]:
     """`dart_recovered` = `_recovery(runs, "dart")` 가 있음 — 저녁 dart_rc≠0 을 '뒤 런에서 회복'으로
     본다.
 
-    WISE 부분 실패(`wise_n_bad` > 0, N-27 ③ · N-30 ③)는 경고로만 싣는다 — 수집기 rc 는 0 이고, 같은
-    날 재실행으로 회복됐는지는 같은 리포트의 원장 `wise.*` 판정이 말한다. 키가 없는 옛 인계 파일·
-    0·null(모름)은 아무것도 붙이지 않는다."""
+    WISE 부분 실패(`wise_n_bad` > 0, N-27 ③ · N-30 ③)는 crit 으로 올리지 않는다 — 수집기 rc 는
+    0 이다. `wise_recovered`(= 같은 리포트의 원장 `wise.run` pass, 같은 날 재실행이 실패 콜을 다시
+    받음)면 저녁 줄에 '회복'으로만 적고, 아니면 경고로 싣는다(DART 회복과 같은 방식). 키가 있는데
+    null(모름)이고 wise_rc 0 이면 '확인 불가' 경고(P1). 키가 없는 옛 인계 파일·0 은 아무것도
+    붙이지 않는다."""
     if rep is None:
         return "■ 저녁 원장 없음", [], []
     dart_healed = rep.get("dart_rc") not in (0, None) and dart_recovered
@@ -277,7 +288,13 @@ def _evening_section(rep: dict[str, object] | None, *,
         kinds = rep.get("wise_bad_summary")
         kind_text = (", ".join(f"{k} {v}" for k, v in kinds.items())
                      if isinstance(kinds, dict) and kinds else "종류 미상")
-        warns.append(f"WISE 저녁 실패 {n_bad}콜({kind_text}) — 회복 여부는 원장 wise.run")
+        wise_fail = f"WISE 저녁 실패 {n_bad}콜({kind_text})"
+        if wise_recovered:
+            line += f" · {wise_fail} — 같은 날 재실행으로 회복(wise.run pass)"
+        else:
+            warns.append(f"{wise_fail} — 회복 여부는 원장 wise.run")
+    elif "wise_n_bad" in rep and n_bad is None and rep.get("wise_rc") == 0:
+        warns.append("WISE 저녁 실패 수 확인 불가(수집기 rc 0, 런 로그 못 읽음)")
     return line, crit, warns
 
 
@@ -376,7 +393,8 @@ def build_report(home: str, date: str, *, now_kst: dt.datetime | None = None,
         line, c = _basis_section(label, reports, key)
         lines.append(line)
         crit += c
-    line, c, w = _evening_section(evening, dart_recovered=_recovery(runs, "dart") is not None)
+    line, c, w = _evening_section(evening, dart_recovered=_recovery(runs, "dart") is not None,
+                                  wise_recovered=_wise_run_passed(ledger))
     lines.append(line)
     crit += c
     warns += w

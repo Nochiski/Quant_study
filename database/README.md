@@ -181,7 +181,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 18:05 저녁 체인의 WISE 갈래가 끊겼거나(체인 crit), 호출 일부가 실패해 다음 날 08:10 `wise.*` 건전성이 FAIL 할 날이면 그날 안에 수집기만 다시 돌린다. 건전성은 그날 런을 모두 합쳐 본다. 실패한 호출을 같은 날 뒤 런이 ok 로 다시 받았으면 회복으로 친다(`backfill_wise.last_call_status`).
 
-저녁 warn "WISE 수집 일부 실패 N콜"(`logs/notify.log`)을 보면 이 절차다 — 수집기는 일부 콜이 실패해도 rc 0 이라 체인 crit 이 없다. 저녁 체인이 이번 런의 런 로그(`ws_run_log` n_req − n_ok: 본문 검증 실패 + 전송 실패)를 세어 1콜이라도 있으면 warn 1건을 남기고, 인계 파일 `ledger_evening.json` 의 `wise_n_bad`·`wise_bad_summary` 와 다음 날 일일 리포트 경고에도 싣는다(N-27 ③ · N-30 ③).
+저녁 warn "WISE 수집 일부 실패 N콜"(`logs/notify.log`)을 보면 이 절차다 — 수집기는 일부 콜이 실패해도 rc 0 이라 체인 crit 이 없다. 저녁 체인이 이번 런의 런 로그(`ws_run_log` n_req − n_ok: 본문 검증 실패 + 전송 실패)를 세어 1콜이라도 있으면 warn 1건을 남기고, 인계 파일 `ledger_evening.json` 의 `wise_n_bad`·`wise_bad_summary` 와 다음 날 일일 리포트 경고에도 싣는다(N-27 ③ · N-30 ③). 실패 수를 못 읽으면(수집기 rc 0 인데 런 로그 0행) "WISE 실패 콜 수 확인 불가" warn 이다. warn 은 저녁 체인이 끝날 때(키움 21:05 대기 뒤, 약 21:15) 나간다 — 21:20~22:45 잠정 빌드 중엔 재실행 금지(아래 4번)라 실제 재실행 창은 잠정 빌드 뒤 ~ 자정 전이다. 다음 날 리포트는 원장 `wise.run` 이 pass 면(같은 날 재실행으로 회복) 경고로 올리지 않고 '회복'으로만 적는다.
 
 1. **같은 KST 날 24:00 전에만** 돌린다. 수집기의 스냅샷 날짜는 시작 시각 기준이라, 자정 뒤 재실행은 D+1 스냅샷이 된다.
 2. **수집기를 직접, 원장 락 아래에서** 돌린다. 수집기가 rc 0 으로 끝난 날은 저녁 체인 status 가 ok 라서, `daily_evening.sh` 를 다시 돌려도 "이미 완료"로 아무것도 하지 않는다(`scripts/daily_evening.sh:119-123`).
@@ -263,7 +263,7 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 | 등급 | 조건 | 행동 |
 |---|---|---|
 | crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB. 단 같은 D 의 dart 는 **마지막 런**으로 판정한다 — 앞 런 실패가 뒤 런 ok 로 회복됐으면 '회복'으로 표시하고 crit 이 아니다(kael 키 런이 있으면 회복 아님). DART 하나로만 실패한 `evening_chain`(그 런 detail 의 다른 `*_rc` 가 모두 0)과 저녁 원장 dart_rc 도 같다(N-24 3.15) | `notify.sh crit` (쿨다운 없음) |
-| warn | 건전성 warn 항목 실패, 아직 `running` 인 런, 저녁 WISE 부분 실패(`ledger_evening.json` 의 `wise_n_bad` > 0 — 회복 여부는 같은 리포트의 원장 `wise.run`) | `notify.sh warn` |
+| warn | 건전성 warn 항목 실패, 아직 `running` 인 런, 저녁 WISE 부분 실패(`ledger_evening.json` 의 `wise_n_bad` > 0 — 같은 리포트의 원장 `wise.run` 이 pass 면 '회복'으로만 적고 올리지 않는다) · 그 실패 수 확인 불가(`wise_n_bad` null · `wise_rc` 0) | `notify.sh warn` |
 | info | 그 밖의 일일 요약 | `notify.sh info` |
 
 입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —

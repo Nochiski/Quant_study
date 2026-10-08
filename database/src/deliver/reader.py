@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -22,6 +23,34 @@ import duckdb
 
 class DeliverError(RuntimeError):
     """산출물을 만들 수 없는 입력 상태(판 없음 · 실패 판 · 파일 없음 · 잘못된 인자)."""
+
+
+UNKNOWN_REV = "알 수 없음"
+# 코드 루트 = `src/` 의 부모(저장소 database/ · 서버 ~/quant-ledger)
+# — deploy.sh 가 DEPLOYED.json 을 쓰는 곳
+CODE_ROOT = Path(__file__).resolve().parents[2]
+
+
+def ql_home() -> Path:
+    """`QL_HOME`(없으면 저장소 `database/`) — CLI 기본 루트와 배포 기록 위치의 기준."""
+    return Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
+
+
+def deployed_rev(root: Path | None = None) -> str:
+    """배포 rev — 코드 루트(`CODE_ROOT`)의 `DEPLOYED.json`(scripts/deploy.sh 가 `--apply` 때 쓴다)의
+    rev · 배포 시각. 데이터 루트(QL_HOME)가 아니라 이 코드가 놓인 곳을 본다 — 둘이 다르면
+    다른 배포의 rev 를 적게 된다. 파일이 없거나 읽지 못하면 '알 수 없음'(로컬 작업 트리 등 —
+    엑셀 생성은 막지 않는다)."""
+    path = (CODE_ROOT if root is None else Path(root)) / "DEPLOYED.json"
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return UNKNOWN_REV
+    rev = meta.get("rev") if isinstance(meta, dict) else None
+    if not isinstance(rev, str) or not rev:
+        return UNKNOWN_REV
+    at = meta.get("at_utc")
+    return f"{rev} · 배포 {at}" if isinstance(at, str) and at else rev
 
 
 def iso(v: object) -> str | None:

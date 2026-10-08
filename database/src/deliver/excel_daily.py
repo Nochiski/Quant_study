@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from model.engines.v3_zscore import V3ZScoreEngine
 from openpyxl import Workbook
 
 from .common import (
@@ -71,6 +70,7 @@ FOOTNOTES = (
     "② 창: 가격 지표는 수정종가 세션 수, 재무는 D 이전 공시(PIT), 추정치는 당해 결산기 컨센서스.",
     "③ 색: 3색 백분위 10/50/90 — 빨강(낮음)·노랑·초록(높음), 초록 = 좋음. "
     "순위 열은 반전(1위 = 초록). Δ순위 1M 은 가운데 = 0(하락 빨강 · 상승 초록). "
+    "z 엔진(scope·v3) 주 모델의 축 z 칸은 고정 3색 −3·0·+3. "
     "레벨 값은 무색. 형광 노랑 = 신규 진입.",
     "④ 정렬 키: 점수·원자료·지표·실적·모델 비교 = 주 모델 순위 오름차순, 제외 종목은 뒤에 코드순.",
     "⑤ 흐름: 셀 안 꺾은선(엑셀 스파크라인) = 1M 동안 판마다의 순위(원순위), "
@@ -78,6 +78,8 @@ FOOTNOTES = (
     "선의 처음 → 끝 방향과 같다. 1일·1W Δ순위는 싣지 않는다.",
 )
 
+
+Z_SPAN = 3.0       # z 칸 색 끝점 ±3 — 엔진 z 상한(z_score_winsorized ±3σ)과 같다
 
 # 비교 열에서 빼는 모델(model_id) — v4 는 결함 수정 전까지 뺀다(N-27 §8-17). 판 계산·저장은 그대로
 HIDDEN_COMPARE_MODELS = frozenset({"v4_rank"})
@@ -327,9 +329,7 @@ def score_raw_columns(view: DayView) -> tuple[RawCol, ...]:
     """주 모델 엔진이 v3_zscore(scope·v3 원본)면 점수 표 원값 열(V3_RAW), 아니면 빈 튜플.
     점수 표에 없는 열은 그 칸만 빈다(`row.get`) — 열 하나가 빠졌다고 33열·업종 3열·단위 줄을 통째로
     잃지 않는다(검토 사소 1). 빠진 열은 sheet_raw 가 로그 한 줄로 남긴다."""
-    if view.spec is not None and view.spec.engine == V3ZScoreEngine.name:
-        return V3_RAW
-    return ()
+    return V3_RAW if view.z_engine else ()
 
 
 # 퀄리티 손익 지표(엔진 원값 열) — 다 비고 변동성만 남으면 비고에 적는다
@@ -415,12 +415,23 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
     ]
     for b in view.buckets:
         name = bucket_label(b)
-        groups.append(Group(bucket_weight_label(view, b), (
-            Col(f"{b}_u", f"{name}\n유니버스", "pct", "#,##0.0", definition=(
-                f"{name} 버킷 점수(엔진)의 유니버스 백분위 0~100 — 높을수록 좋다")),
-            Col(f"{b}_s", f"{name}\n업종", "pct", "#,##0.0", definition=(
-                f"{name} 버킷 점수의 WICS 대분류 안 백분위(표본 < 5 면 유니버스)")),
-        )))
+        if view.z_engine:         # z 엔진 — 버킷 점수가 z 라 z 그대로(10-08 '둘 다 z')
+            cols = (
+                Col(f"{b}_u", f"{name}\n유니버스 z", "num", "#,##0.00", color=True, span=Z_SPAN,
+                    definition=(f"{name} 버킷 점수(엔진 z — 종합 점수에 들어간 값 그대로, "
+                                "±3 상한). 0 = 유니버스 평균, 높을수록 좋다")),
+                Col(f"{b}_s", f"{name}\n업종 z", "num", "#,##0.00", color=True, span=Z_SPAN,
+                    definition=(f"{name} 버킷 z 를 WICS 대분류 안에서 다시 z(대분류 평균·표본 "
+                                "표준편차, ±3σ 로 자른 뒤 표준화 — 엔진 z 와 같은 식, ±3 안). "
+                                "값 있는 종목 < 5 이거나 표준편차 0 이면 유니버스 z. 순위·점수에 "
+                                "쓰지 않는 참고값")))
+        else:
+            cols = (
+                Col(f"{b}_u", f"{name}\n유니버스", "pct", "#,##0.0", definition=(
+                    f"{name} 버킷 점수(엔진)의 유니버스 백분위 0~100 — 높을수록 좋다")),
+                Col(f"{b}_s", f"{name}\n업종", "pct", "#,##0.0", definition=(
+                    f"{name} 버킷 점수의 WICS 대분류 안 백분위(표본 < 5 면 유니버스)")))
+        groups.append(Group(bucket_weight_label(view, b), cols))
     groups.append(Group("결측", (Col("miss", "결측 축", "txt", None, 14.0, definition=(
         "버킷 점수가 빈 축(점수 대상 종목만). 사유는 축 칸의 '결측(사유)'")),)))
     if others:
@@ -452,8 +463,12 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         miss = []
         for b in view.buckets:
             if view.bucket_score(t, b) is not None:
-                out[f"{b}_u"] = view.upct[b].get(t)
-                out[f"{b}_s"] = view.spct[b].get(t)
+                if view.z_engine:
+                    out[f"{b}_u"] = view.bucket_score(t, b)
+                    out[f"{b}_s"] = view.zsec[b].get(t)
+                else:
+                    out[f"{b}_u"] = view.upct[b].get(t)
+                    out[f"{b}_s"] = view.spct[b].get(t)
             elif scored:
                 out[f"{b}_u"] = out[f"{b}_s"] = missing(bucket_missing_reason(view, t, b))
                 miss.append(bucket_label(b))
@@ -465,6 +480,10 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
         rows.append(out)
     note = ("축 = 버킷 점수의 백분위(높을수록 좋다, 초록 = 상위). 제외 종목은 점수만 남고 순위가 "
             "없다. 결측은 '결측(사유)'.")
+    if view.z_engine:
+        note = ("축 = 엔진 버킷 z(유니버스 z = 종합 점수에 들어간 값 그대로 · 업종 z = 대분류 "
+                "안에서 다시 매긴 참고값), 높을수록 좋다 — 색 −3 빨강 · 0 노랑 · +3 초록. "
+                "결측은 '결측(사유)'.")
     return write_table(wb, title_for(view, "점수", note), groups, rows, sort_key="rank")
 
 
@@ -806,7 +825,10 @@ def sheet_sectors(wb: Workbook, view: DayView) -> Dictionary:
                 definition=f"업종 상한({view.output.max_per_sector}) 적용 후보 {top_n} 중 수"))),
         Group("종합", (Col("comp_med", "종합 점수\n중앙값", "num", "#,##0.00",
                            definition="순위 종목 종합 점수 중앙값"),), core=True),
-        Group("축별 평균 백분위", tuple(
+        Group("축별 평균 z", tuple(
+            Col(f"{b}_u", bucket_label(b), "num", "#,##0.00", color=True, span=Z_SPAN,
+                definition=f"{bucket_label(b)} 유니버스 z(엔진 버킷 점수)의 업종 평균")
+            for b in view.buckets)) if view.z_engine else Group("축별 평균 백분위", tuple(
             Col(f"{b}_u", bucket_label(b), "pct", "#,##0.0",
                 definition=f"{bucket_label(b)} 유니버스 백분위의 업종 평균")
             for b in view.buckets)),
@@ -838,7 +860,10 @@ def sheet_sectors(wb: Workbook, view: DayView) -> Dictionary:
                                          is not None]),
                     "top": ", ".join(f"{view.name(t) or t}({view.rank(t)})" for t in ranked[:3])}
         for b in view.buckets:
-            vals = [view.upct[b][t] for t in members if t in view.upct[b]]
+            if view.z_engine:
+                vals = [z for t in members if (z := view.bucket_score(t, b)) is not None]
+            else:
+                vals = [view.upct[b][t] for t in members if t in view.upct[b]]
             out[f"{b}_u"] = statistics.fmean(vals) if vals else None
 
         def raws(key: str) -> dict[str, float]:
@@ -871,8 +896,8 @@ def sheet_sectors(wb: Workbook, view: DayView) -> Dictionary:
             if code is not None:
                 by.setdefault(str(code), []).append(ticker_of(r))
         rows += [aggregate(level, code, by[code]) for code in sorted(by)]
-    note = ("주 모델 모집단의 WICS 대분류·중분류 집계. 축 평균은 유니버스 백분위 평균, 1M 수익률은 "
-            "시총가중.")
+    note = ("주 모델 모집단의 WICS 대분류·중분류 집계. 축 평균은 유니버스 "
+            + ("z(엔진 버킷 점수)" if view.z_engine else "백분위") + " 평균, 1M 수익률은 시총가중.")
     return write_table(wb, title_for(view, "업종", note), groups, rows, style="sector")
 
 

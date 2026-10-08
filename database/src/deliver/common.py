@@ -5,9 +5,11 @@
 """
 from __future__ import annotations
 
+import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from model.engines._common import z_score_winsorized
 from model.engines.v4_rank import pct_rank_avg
 
 from .stats import quantile
@@ -192,6 +194,26 @@ def group_pct(values: Mapping[str, float], group_of: Mapping[str, str | None],
     return out
 
 
+def group_z(values: Mapping[str, float], group_of: Mapping[str, str | None],
+            min_size: int) -> dict[str, float]:
+    """그룹(업종) 안에서 다시 매긴 z — 엔진 `z_score_winsorized`(그룹 평균·표본 표준편차, ±3σ 로
+    자른 뒤 표준화 → ±3 안). 값 있는 종목 < min_size 이거나 표준편차 0 이거나 그룹이 없으면 원래
+    값(유니버스 z)을 그대로 둔다(group_pct 의 표본 문턱과 같다). 표시용 참고값 — 순위·점수에
+    안 쓴다."""
+    out = dict(values)
+    groups: dict[str, dict[str, float]] = {}
+    for t, v in values.items():
+        g = group_of.get(t)
+        if g is not None:
+            groups.setdefault(g, {})[t] = v
+    for members in groups.values():
+        vals = list(members.values())
+        if len(vals) < min_size or statistics.stdev(vals) == 0:
+            continue
+        out.update(zip(members, z_score_winsorized(vals), strict=True))
+    return out
+
+
 def cap_candidates(ranked: Sequence[Mapping[str, object]], top_n: int, max_per: int,
                    sector_of: Callable[[Mapping[str, object]], object],
                    ) -> list[Mapping[str, object]]:
@@ -213,6 +235,6 @@ def cap_candidates(ranked: Sequence[Mapping[str, object]], top_n: int, max_per: 
 __all__ = [
     "BUCKET_LABELS", "EXCLUDE_LABELS", "IND_META", "PREV_NEGATIVE_FLAGS", "REVISION_KEYS",
     "SIGN_FLAGS", "IndMeta", "bucket_label", "cap_candidates", "change_pct", "coverage_label",
-    "exclude_label", "group_pct", "ind_meta", "market_label", "missing", "pct_rank_avg",
+    "exclude_label", "group_pct", "group_z", "ind_meta", "market_label", "missing", "pct_rank_avg",
     "quantile", "split_flags", "winsorize", "yoy",
 ]

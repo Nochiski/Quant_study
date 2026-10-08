@@ -1507,6 +1507,7 @@ NO_VAL = "100007"
 # 연간 행은 있는데(WISE 매출·PER) 손익·자산 재료가 다 빈 종목 → 퀄리티 = 변동성만(241560 모양)
 VOL_ONLY = "100011"
 SCOPE_FI_BID = "m_20260929T000500_000000Z"
+LONE = "100040"            # 대분류 G50 의 유일한 종목
 
 
 def _write_fi_tree(b, fi_root: Path, fi_bid: str, day: str) -> None:
@@ -1534,6 +1535,7 @@ def scope_board(tmp_path_factory: pytest.TempPathFactory):
     b = Board()
     for i in range(40):
         _full(b, f"{100000 + i:06d}", i, sector=("G10", "G20", "G30")[i % 3])
+    _full(b, LONE, 40, sector="G50")        # 혼자인 대분류 — 업종 z 는 유니버스 z 로 되돌린다
     for r in b.tables["fi_prices"]:
         r["close"] = round(float(r["close"]))                  # type: ignore[arg-type]
     for r in b.tables["fi_fin_summary"]:
@@ -1576,8 +1578,8 @@ def test_scope_bucket_missing_is_marked_and_counted(scope_board) -> None:
     ws = wb["점수"]
     h, rows = header(ws), rows_by_code(ws)
     r = rows[NO_VAL]
-    assert ws.cell(r, h["밸류 유니버스"]).value == "결측(원천없음)"
-    assert ws.cell(r, h["밸류 업종"]).value == "결측(원천없음)"
+    assert ws.cell(r, h["밸류 유니버스 z"]).value == "결측(원천없음)"     # scope 축 = z(10-08)
+    assert ws.cell(r, h["밸류 업종 z"]).value == "결측(원천없음)"
     assert ws.cell(r, h["결측 축"]).value == "밸류"
     assert {ws.cell(rows[t], h["결측 축"]).value for t in scores if t != NO_VAL} <= {None, ""}
     meta = dict(_meta_pairs(wb))
@@ -1642,11 +1644,11 @@ def test_scope_sector_sheet_fills_per_revision_and_return(scope_board) -> None:
     h = header(ws)
     first = {ws.cell(r, h["코드"]).value: r for r in range(8, ws.max_row + 1)
              if ws.cell(r, h["구분"]).value == "대분류"}
-    caps = {str(r["ticker"]): r["market_cap"] for r in duckdb_rows(
-        root / "fi" / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
-        if isinstance(r["market_cap"], float)}
+    uni = duckdb_rows(root / "fi" / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+    caps = {str(r["ticker"]): r["market_cap"] for r in uni if isinstance(r["market_cap"], float)}
+    l1 = {str(r["ticker"]): r["sector_l1"] for r in uni}
     for code, r in first.items():
-        members = [t for t in scores if ("G10", "G20", "G30")[(int(t) - 100000) % 3] == code]
+        members = [t for t in scores if l1[t] == code]
         per = [scores[t]["val_per"] for t in members if scores[t]["val_per"] is not None]
         rv = [scores[t]["op_change_1m"] for t in members if scores[t]["op_change_1m"] is not None]
         r1 = {t: scores[t]["r1m"] for t in members if scores[t]["r1m"] is not None}
@@ -1790,3 +1792,96 @@ def test_insert_after_appends_when_the_key_is_missing(caplog: pytest.LogCaptureF
         insert_after(pairs, "없는 줄", [("엑셀 생성 시각", "x")])
     assert pairs == [("기준일", "2026-10-02"), ("엑셀 생성 시각", "x")]
     assert any("없는 줄" in rec.getMessage() for rec in caplog.records)
+
+
+# ── 점수 시트 축 = z(사용자 결정 10-08 '둘 다 z') ────────────────────────────────────
+SCOPE_BUCKETS = (("momentum", "모멘텀"), ("revision", "리비전"), ("flow", "수급"),
+                 ("quality", "퀄리티"), ("valuation", "밸류"))
+
+
+def _sector_z(values: list[float], v: float) -> float:
+    """손 계산 — 대분류 평균·표본 표준편차, ±3σ 로 자른 뒤 표준화(엔진 z 와 같은 식)."""
+    mean, sd = statistics.mean(values), statistics.stdev(values)
+    return (max(mean - 3 * sd, min(mean + 3 * sd, v)) - mean) / sd
+
+
+def test_scope_score_sheet_axes_are_engine_z(scope_board) -> None:
+    """z 엔진(scope·v3_zscore) 주 모델이면 점수 시트 5팩터 칸이 z 다. 유니버스 z = 엔진 버킷 점수
+    (종합 점수에 들어간 값) 그대로 — 다시 순위 매기지 않는다. 업종 z = 같은 z 를 WICS 대분류 안에서
+    다시 z(표본 < 5 · 표준편차 0 이면 유니버스 z). 옛 코드는 버킷 z 를 0~100 백분위로 바꿔
+    실었다."""
+    _, wb, scores, root = scope_board
+    ws = wb["점수"]
+    h, rows = header(ws), rows_by_code(ws)
+    uni = duckdb_rows(root / "fi" / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+    l1 = {str(r["ticker"]): r["sector_l1"] for r in uni}
+    for b, name in SCOPE_BUCKETS:
+        u, s = h[f"{name} 유니버스 z"], h[f"{name} 업종 z"]
+        assert f"{name} 유니버스" not in h
+        for t, row in scores.items():
+            got_u, got_s = ws.cell(rows[t], u).value, ws.cell(rows[t], s).value
+            if row[f"{b}_score"] is None:
+                assert got_u == got_s == "결측(원천없음)", (b, t)       # 결측 규칙 그대로
+                continue
+            assert got_u == pytest.approx(row[f"{b}_score"]), (b, t)
+            assert -3.0 <= got_s <= 3.0, (b, t)
+        # 손 계산 대조 — 100005(G30) 와 혼자인 G50 종목
+        t = "100005"
+        peers = [r[f"{b}_score"] for x, r in scores.items()
+                 if l1[x] == l1[t] and r[f"{b}_score"] is not None]
+        assert len(peers) >= 5
+        assert ws.cell(rows[t], s).value == pytest.approx(_sector_z(peers, scores[t][f"{b}_score"]))
+        assert ws.cell(rows[LONE], s).value == pytest.approx(scores[LONE][f"{b}_score"])
+        assert ws.cell(rows[t], u).number_format == "#,##0.00"
+    # 색 — z 칸은 고정 3색 −3·0·+3(초록 = 높음)
+    for label in ("모멘텀 유니버스 z", "밸류 업종 z"):
+        letter = ws.cell(7, h[label]).column_letter
+        cs = next(r.colorScale for rng in ws.conditional_formatting for r in rng.rules
+                  if str(rng.sqref).startswith(letter))
+        assert [(v.type, float(v.val)) for v in cs.cfvo] == [("num", -3.0), ("num", 0.0),
+                                                            ("num", 3.0)]
+        assert [c.rgb[-6:] for c in cs.color] == ["F8696B", "FFEB84", "63BE7B"]
+    assert "z" in str(ws.cell(5, 1).value)                               # 시트 각주
+
+
+def test_scope_sector_sheet_axis_means_are_z(scope_board) -> None:
+    """업종 시트 축별 평균도 z 엔진이면 유니버스 z(엔진 버킷 점수)의 업종 평균 — 머리글
+    '축별 평균 z'."""
+    _, wb, scores, root = scope_board
+    ws = wb["업종"]
+    assert "축별 평균 z" in [str(c.value) for c in ws[6] if c.value is not None]
+    h = header(ws)
+    uni = duckdb_rows(root / "fi" / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+    l1 = {str(r["ticker"]): r["sector_l1"] for r in uni}
+    first = {ws.cell(r, h["코드"]).value: r for r in range(8, ws.max_row + 1)
+             if ws.cell(r, h["구분"]).value == "대분류"}
+    for b, name in SCOPE_BUCKETS:
+        for code, r in first.items():
+            vals = [x[f"{b}_score"] for t, x in scores.items()
+                    if l1[t] == code and x[f"{b}_score"] is not None]
+            assert ws.cell(r, h[name]).value == pytest.approx(statistics.fmean(vals)), (b, code)
+
+
+def test_v4_score_sheet_axes_stay_percentiles(daily) -> None:
+    """회귀 가드 — 백분위 엔진(v4_rank) 주 모델은 지금처럼 0~100 백분위·백분위 색 10/50/90."""
+    _, wb = daily
+    ws = wb["점수"]
+    h = header(ws)
+    assert "저위험 유니버스" in h and "저위험 업종" in h
+    assert not [k for k in h if k.endswith(" z")]
+    vals = [ws.cell(r, h["저위험 유니버스"]).value for r in range(8, ws.max_row + 1)]
+    assert all(0 <= v <= 100 for v in vals if isinstance(v, float))
+    sec = wb["업종"]
+    assert "축별 평균 백분위" in [str(c.value) for c in sec[6] if c.value is not None]
+
+
+def test_group_z_falls_back_to_universe_value() -> None:
+    from deliver.common import group_z
+    vals = {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0, "f": 0.7, "g": 0.7, "h": 9.0}
+    grp = {"a": "X", "b": "X", "c": "X", "d": "X", "e": "X", "f": "Y", "g": "Y", "h": None}
+    out = group_z(vals, grp, 5)
+    assert out["c"] == pytest.approx(0.0) and out["e"] == pytest.approx(_sector_z(
+        [1.0, 2.0, 3.0, 4.0, 5.0], 5.0))
+    assert out["f"] == 0.7 and out["g"] == 0.7 and out["h"] == 9.0   # 표본 < 5 · 업종 없음
+    same = group_z({k: 1.5 for k in "abcde"}, dict.fromkeys("abcde", "X"), 5)
+    assert all(v == 1.5 for v in same.values())                        # 표준편차 0

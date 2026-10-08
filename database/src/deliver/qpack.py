@@ -97,6 +97,13 @@ def scale_high_good() -> Rule:
                           end_type="percentile", end_value=90, end_color=GREEN)
 
 
+def scale_fixed_zero(span: float) -> Rule:
+    """가운데 = 0(노랑), 끝점 ±span 고정 — 음수 빨강 · 양수 초록(높음 = 좋음, N-15)."""
+    return ColorScaleRule(start_type="num", start_value=-span, start_color=RED,
+                          mid_type="num", mid_value=0, mid_color=YELLOW,
+                          end_type="num", end_value=span, end_color=GREEN)
+
+
 def scale_zero_mid(values: Sequence[object]) -> Rule:
     """Δ순위 열 — 가운데 = 0(노랑), 음수 빨강 · 양수 초록. 끝점 = |값|의 90 백분위(선형 보간)를
     ±M 으로 대칭에 둔다 — 백분위 50 가운데는 유니버스가 바뀌는 날 중앙값이 0 에서 벗어나 소폭 하락이
@@ -104,10 +111,7 @@ def scale_zero_mid(values: Sequence[object]) -> Rule:
     mags = sorted(abs(float(v)) for v in values
                   if isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v))
     m = quantile(mags, 0.9) if mags else 0.0
-    m = m if m > 0 else 1.0
-    return ColorScaleRule(start_type="num", start_value=-m, start_color=RED,
-                          mid_type="num", mid_value=0, mid_color=YELLOW,
-                          end_type="num", end_value=m, end_color=GREEN)
+    return scale_fixed_zero(m if m > 0 else 1.0)
 
 
 def scale_rank() -> Rule:
@@ -151,6 +155,7 @@ class Col:
     item: bool = False          # 업종 시트 항목명(보라 글씨)
     color: bool | None = None   # None = kind 기본(pct·chg·rank 만 색)
     zero_mid: bool = False      # 색 가운데 = 0(Δ순위 — 부호와 색이 같은 쪽, E-06)
+    span: float | None = None   # 색 가운데 0 · 끝점 ±span 고정(z 칸 — −3·0·+3)
 
     @property
     def colored(self) -> bool:
@@ -328,7 +333,9 @@ def write_table(wb: Workbook, title: Title, groups: Sequence[Group],
             if col is None or not col.colored:
                 continue
             letter = get_column_letter(c)
-            if col.zero_mid:
+            if col.span is not None:
+                rule = scale_fixed_zero(col.span)
+            elif col.zero_mid:
                 rule = scale_zero_mid([r.get(col.key) for r in rows])
             else:
                 rule = scale_rank() if col.kind == "rank" else scale_high_good()
@@ -466,5 +473,6 @@ __all__ = [
     "C_BAND", "C_GOLD", "C_HDR", "C_KEY", "C_NEW", "C_STRIP", "C_STYLE", "FIRST_DATA_ROW",
     "FONT_NAME", "GREEN", "RED", "YELLOW", "Col", "Group", "Title", "clean", "fill", "font",
     "SparkGroup", "add_sparklines", "new_workbook", "put", "scale_high_good", "scale_rank",
-    "scale_zero_mid", "sparkline_xml", "title_block", "write_meta", "write_table",
+    "scale_fixed_zero", "scale_zero_mid", "sparkline_xml", "title_block", "write_meta",
+    "write_table",
 ]

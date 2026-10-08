@@ -1,8 +1,10 @@
 """판 하나(하루)를 엑셀이 쓰는 모양으로 모은다 — 주 모델 점수 · 버킷 백분위 · 후보 · 입력 원자료.
 
-주 모델 = run 의 `primary_spec`(기본 scope@1.0). 버킷 백분위는 엔진 버킷 점수(0~100)를 한 번 더
+주 모델 = run 의 `primary_spec`(기본 scope@1.0). 버킷 백분위는 엔진 버킷 점수를 한 번 더
 순위 매긴 **표시값**이다: 유니버스 백분위 = 그 버킷 점수가 있는 전 종목 안, 업종 백분위 = WICS
-대분류 안(표본 < min_sector_size 면 유니버스로 되돌린다 — 엔진 규칙과 같다).
+대분류 안(표본 < min_sector_size 면 유니버스로 되돌린다 — 엔진 규칙과 같다). 일간 점수 시트는 z 엔진
+(scope·v3) 이면 백분위 대신 버킷 z 그대로와 대분류 안 다시 매긴 z(`zsec`)를 싣는다(10-08 '둘 다 z').
+주간 엑셀은 아직 백분위.
 """
 from __future__ import annotations
 
@@ -12,8 +14,9 @@ from pathlib import Path
 
 from model import registry
 from model.contracts import ModelSpec, OutputRule
+from model.engines.v3_zscore import V3ZScoreEngine
 
-from .common import cap_candidates, group_pct, pct_rank_avg
+from .common import cap_candidates, group_pct, group_z, pct_rank_avg
 from .reader import DeliverError, ModelRun, read_fi, read_indicators, read_scores
 
 COMPOSITE_COLS = ("composite", "composite_score", "total_score")
@@ -75,10 +78,19 @@ class DayView:
     uni: dict[str, dict[str, object]] = field(default_factory=dict)
     ind: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
     other_ranks: dict[str, dict[str, int | None]] = field(default_factory=dict)
+    # 버킷 → 종목 → 업종 z(z 엔진만)
+    zsec: dict[str, dict[str, float]] = field(default_factory=dict)
 
     @property
     def date(self) -> str:
         return self.run.date
+
+    @property
+    def z_engine(self) -> bool:
+        """주 모델 엔진이 z 엔진(v3_zscore — scope·v3 원본)인가. 버킷 점수가 z 라 점수 시트 축을
+        z 로 싣고, 원값이 점수 표 열에 있다. 백분위 엔진(v4_rank)은 버킷 점수 자체가 0~100 백분위다.
+        엑셀의 엔진 판정은 이 한 곳."""
+        return self.spec is not None and self.spec.engine == V3ZScoreEngine.name
 
     @property
     def ranked(self) -> list[dict[str, object]]:
@@ -142,8 +154,10 @@ def load_day(model_root: Path, fi_root: Path | None, run: ModelRun, *,
           for t, r in by_ticker.items()}
     upct: dict[str, dict[str, float]] = {}
     spct: dict[str, dict[str, float]] = {}
+    bucket_vals: dict[str, dict[str, float]] = {}
     for b in buckets:
         vals = {t: v for t, r in by_ticker.items() if (v := _num(r.get(f"{b}_score"))) is not None}
+        bucket_vals[b] = vals
         upct[b] = pct_rank_avg(vals)
         spct[b] = group_pct(vals, l1, min_size)
 
@@ -151,6 +165,8 @@ def load_day(model_root: Path, fi_root: Path | None, run: ModelRun, *,
     cands = cap_candidates(ranked, output.top_n, output.max_per_sector, lambda r: r.get(level))
     view = DayView(run, spec_id, spec, buckets, rows, by_ticker, upct, spct,
                    [ticker_of(dict(r)) for r in cands], output)
+    if view.z_engine:                     # 업종 z — 점수 시트·업종 시트 참고값(순위·점수에 안 쓴다)
+        view.zsec = {b: group_z(vals, l1, min_size) for b, vals in bucket_vals.items()}
     if with_fi:
         if uni_rows is None:
             raise DeliverError("fi_root 가 필요하다")

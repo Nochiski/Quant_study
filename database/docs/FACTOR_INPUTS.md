@@ -69,7 +69,7 @@ D = 판 기준일. 표 전부 `fi_universe` 종목으로 자른다.
 |---|---|---|---|
 | `fi_universe` | `universe_daily`(D 행: 상장·정지 · KOSPI/KOSDAQ · ETF 제외 · `adv20_krw`·`admin_state`·`halt_state`) · `security`(이름·상장일) · `price_daily`(D 의 KRX 종가·상장주식수) · `sector_snapshot`(D 이하 최신 WICS) · `coverage_daily.analyst_count` · `audit_opinion` · `disclosure_version` · 신선도(`stg_consensus_annual`, §5) | D 한 날 | 시총 = **round(주식수 × 종가 / 1e8) 정수 억원**(compat `stocks.market_cap` 과 같은 반올림) · adv20 억원 |
 | `fi_prices` | `price_daily`(basis `krx`) | D 포함 550 달력일 | 가격 원 · 거래량 주 · **거래대금 원**(compat 의 백만원이 아니다) |
-| `fi_adj_prices` | `price_adj_daily.adj_close`·`cum_share_factor` · `adj_factor`(미해결 사건) | 550 달력일 | `adj_ok` = 미해결 사건 **계단 표식**(아래) |
+| `fi_adj_prices` | `price_adj_daily.adj_close`·`cum_share_factor`·`cum_price_only_factor` · `adj_factor.price_resolution`(가격 축 미해결 사건) | 550 달력일 | `adj_factor` = cum_share ÷ cum_price_only(원가 × 계수 = 수정가, fi1.3.0) · `adj_ok` = 가격 축 미해결 사건 **계단 표식**(아래) |
 | `fi_flows` | `flow_daily` 12주체(키움 우선, 전 주체 NULL 칸은 행 없음) | D 까지 60 세션 | **round(원 / 1e6) 정수 백만원** |
 | `fi_credit` | `credit_daily.whol_loan_rmnd_stcn_shr`·`whol_loan_rmnd_rate_pct` | D 까지 60 세션, `available_date ≤ D` | 주 · % · `available_date` = 그날 + 3 세션(KIS 실입수, equity FieldProfile) |
 | `fi_consensus` | `stg_consensus_matrix`(c1050001 T4) — **한시 예외**(§7) | 신선·유예 종목의 마지막 신선일 판 × 결산기 3 × horizon cur/1w/1m/3m | 억원·원·배·% 원값(eps·bps 는 정수 — compat 과 같다). 판에 있는 (종목, 결산기)마다 네 horizon 행을 값이 NULL 이어도 만든다 |
@@ -109,12 +109,17 @@ compat 은 한 기에 E 하나(E 우선)만 남기지만 이 표는 E·A 를 둘
 - 연간 `revenue_basis` 는 WISE 가 없는 연간 행(DART 만)에서 NULL 이다.
 - 분기 행: eps·bps·per·pbr·ev_ebitda·dividend_yield·dps·shares·roe·roa·fcf·capex 는 NULL(아래 §7).
 
-`fi_adj_prices.adj_ok`(오케스트레이터 09-29): 창 안 미해결 사건(`adj_factor.factor_ok = false`,
-적용일 ∈ (창 시작, D], available ≤ D)의 **적용일마다 값이 뒤집힌다** — 창 첫 구간 True, 첫 사건
-적용일부터 False, 둘째 사건부터 다시 True …(같은 날 사건 여럿은 한 번). **사건 쪽(적용일 이후)을
+`fi_adj_prices.adj_ok`(오케스트레이터 09-29): 창 안 가격 축 미해결 사건
+(`adj_factor.price_resolution = 'unresolved'`, 적용일 ∈ (창 시작, D], available ≤ D)의 **적용일마다
+값이 뒤집힌다** — 창 첫 구간 True, 첫 사건 적용일부터 False, 둘째 사건부터 다시 True …(같은 날
+사건 여럿은 한 번). **사건 쪽(적용일 이후)을
 뒤집는다** — 사건이 하나면 '사건 전 True · 사건부터 False'. 창 안에서 값이 바뀌면 그 창이 사건을
 넘는다(v4 엔진 `crosses_event`), 한결같으면 척도가 이어진다. 창 밖 옛 사건은 세지 않는다. 09-28 로컬
-판 실측: 2,763 종목 중 224 종목이 창 안에 전환을 가진다.
+판 실측: 2,763 종목 중 224 종목이 창 안에 전환을 가진다(fi1.2.0 기준 — `factor_ok = false` 전부를
+셌다).
+fi1.3.0(배포 묶음 6-3, N-33): not-ok 행 중 가격 축에서 해소된 것(⑤ 계수 행 `price_only`·같은 단위
+`price_only_dup`·근처 단위 `price_only_near`·C-05 형제 `factor_near`)은 수정종가가 이어지므로 세지
+않는다. equity e1.26.0 이전 판(새 열 없음)을 읽으면 판을 만들지 않고 멈춘다.
 
 D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**, v4 가 `UniverseRule.exclude`·
 `min_adv20` 으로 건다):

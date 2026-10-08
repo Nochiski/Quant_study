@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from equity.rules_s06 import PRICE_UNRESOLVED
 from model.contracts import FI_TABLES, TableContract, UniverseRule
 
 # ── 창·상수 ──────────────────────────────────────────────────────────────────
@@ -308,23 +309,37 @@ WHERE basis = 'krx' AND date >= DATE '{p.price_from}' AND date <= DATE '{p.d}'
     return create("fi_prices", inner)
 
 
-def adj_prices_sql(p: Params) -> str:
-    """전방 조정 종가 + 누적계수 + 미해결 사건 **계단 표식**(DQ-1, 오케스트레이터 09-29).
+# fi_adj_prices 가 읽는 equity e1.26.0(⑤ 가격 전용 계수) 열 — 옛 판에 없으면 빌드가 멈춘다
+# (`build._check_columns`, 판 섞임을 조용히 넘기지 않는다).
+ADJ_REQUIRED_COLUMNS: Mapping[str, tuple[str, ...]] = {
+    "adj_factor": ("price_resolution",), "price_adj_daily": ("cum_price_only_factor",)}
 
-    `adj_ok` 는 창 안 미해결 사건(`adj_factor.factor_ok = false`, 적용일 ∈ (창 시작, D],
-    available ≤ D)의 **적용일마다 뒤집힌다** — 창 첫 구간 = True, 첫 사건 적용일부터 False, 둘째
-    사건부터 다시 True …(같은 날 사건 여럿은 한 번). 그래서 창 안에서 값이 바뀌면 그 창이 사건을
-    넘는다(엔진 `v4_rank._Series.crosses_event`), 값이 한결같으면 척도가 이어진다. 사건이 하나면
-    '사건 전 True · 사건부터 False' 다. 창 밖 옛 사건은 창 안 비율을 깨지 않으므로 세지 않는다
-    (`price_adj_daily.n_unadjusted_events` 는 구간 누적이라 2011년 사건 하나로 영구 표시가 된다).
+
+def adj_prices_sql(p: Params) -> str:
+    """전방 조정 종가 + 누적계수 + 가격 축 미해결 사건 **계단 표식**(DQ-1, 오케스트레이터 09-29).
+
+    `adj_factor` = `cum_share_factor ÷ cum_price_only_factor` — `price_adj_daily.adj_close` 와
+    같은 식이라 '원가 × 계수 = 수정가' 가 ⑤ 가격 전용 계수(equity e1.26.0)가 접힌 종목에서도
+    선다(fi1.3.0).
+
+    `adj_ok` 는 창 안 가격 축 미해결 사건(`adj_factor.price_resolution = 'unresolved'`,
+    적용일 ∈ (창 시작, D], available ≤ D)의 **적용일마다 뒤집힌다** — 창 첫 구간 = True, 첫 사건
+    적용일부터 False, 둘째 사건부터 다시 True …(같은 날 사건 여럿은 한 번). 그래서 창 안에서 값이
+    바뀌면 그 창이 사건을 넘는다(엔진 `v4_rank._Series.crosses_event`), 값이 한결같으면 척도가
+    이어진다. 사건이 하나면 '사건 전 True · 사건부터 False' 다. 창 밖 옛 사건은 창 안 비율을 깨지
+    않으므로 세지 않는다(`price_adj_daily.n_unadjusted_events` 는 구간 누적이라 2011년 사건
+    하나로 영구 표시가 된다). not-ok 행 중 가격 축에서 해소된 것(⑤ 계수 행·같은 단위 중복·근처
+    단위·C-05 형제 ok)은 수정종가가 이미 이어지므로 세지 않는다 — 판정은 equity 열 하나만
+    읽는다(fi1.3.0, 배포 묶음 6-3).
     """
     inner = f"""WITH bad AS (
     SELECT DISTINCT ticker, apply_date FROM adj_factor
-    WHERE NOT factor_ok
+    WHERE price_resolution = '{PRICE_UNRESOLVED}'
       AND apply_date > DATE '{p.price_from}' AND apply_date <= DATE '{p.d}'
       AND available_date <= DATE '{p.d}'
 )
-SELECT a.ticker, a.date, a.adj_close, a.cum_share_factor AS adj_factor,
+SELECT a.ticker, a.date, a.adj_close,
+       a.cum_share_factor / a.cum_price_only_factor AS adj_factor,
        (SELECT count(*) FROM bad b
         WHERE b.ticker = a.ticker AND b.apply_date <= a.date) % 2 = 0 AS adj_ok
 FROM price_adj_daily a

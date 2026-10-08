@@ -42,7 +42,10 @@ from . import gates, queries
 # WISE 수집 지연 허용 1거래일(N-12, 유예와 분리)
 # 1.2.0(2026-10-08, 배포 묶음 4-2b): 금융업 연간 매출(영업수익·순영업이익) + 연간 revenue_basis ·
 # fi_fin_summary.period_months 열(G-28 짧은 첫 사업연도, N-25 Q5)
-RULES_VERSION = "fi1.2.0"
+# 1.3.0(2026-10-08, 배포 묶음 6-3 · N-33): fi_adj_prices.adj_ok 를 가격 축 미해결
+# (`adj_factor.price_resolution = 'unresolved'`)로 좁히고 adj_factor 열 = cum_share ÷ cum_price_only
+# (⑤ 가격 전용 계수). equity e1.26.0 판의 새 열을 읽는다 — 옛 판이면 멈춘다(`_check_columns`)
+RULES_VERSION = "fi1.3.0"
 LAYER = "factor_inputs"
 BASES_IMPLEMENTED = ("morning",)
 BASES_KNOWN = ("evening", "morning")
@@ -164,6 +167,20 @@ def _check_chain(equity_builds: dict[str, str]) -> None:
                                                     for t in _CHAIN_TABLES))
 
 
+def _check_columns(con: duckdb.DuckDBPyConnection, equity_builds: dict[str, str]) -> None:
+    """fi 가 읽는 equity 새 열이 판에 있는지 — 옛 판(e1.26.0 이전)을 읽으면 SQL 바인딩 오류 대신
+    판·열을 짚어 멈춘다(판 섞임을 조용히 넘기지 않는다, P1)."""
+    for table, want in sorted(queries.ADJ_REQUIRED_COLUMNS.items()):
+        rel = con.execute(f'SELECT * FROM "{table}" LIMIT 0')
+        have = {d[0] for d in rel.description}
+        missing = [c for c in want if c not in have]
+        if missing:
+            raise FactorInputsError(
+                f"equity 판에 fi {RULES_VERSION} 가 읽는 열이 없다(e1.26.0 ⑤ 이전 판): "
+                f"table={table} build_id={equity_builds[table]} 없는 열={missing} "
+                f"— equity 를 e1.26.0 이상으로 다시 지은 뒤 돌린다")
+
+
 # ── 쓰기 ─────────────────────────────────────────────────────────────────────
 def _content_hash(con: duckdb.DuckDBPyConnection, path: Path) -> str:
     """equity `build._content_hash` 와 같은 식(행 struct 문자열 해시의 xor)."""
@@ -234,6 +251,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         con.execute("SET enable_progress_bar = false")
         for name, expr in {**eq_exprs, **st_exprs}.items():
             con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+        _check_columns(con, equity_builds)
         con.execute(queries.calendar_sql())
         if not _one(con, f"SELECT count(*) FROM _calx WHERE date = DATE '{d_iso}'"):
             raise FactorInputsError(

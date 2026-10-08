@@ -77,7 +77,8 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> tuple[list[str],
 
     D 에 가격 행이 있고 `fi_universe.eligible` 인 종목 중 시총 ≥ `universe.min_market_cap`.
     `universe.min_analysts` 가 있으면 추정기관수(n_analysts)가 그보다 작은 종목도 뺀다 —
-    NULL(모름)은 빼지 않는다(원본 v3 에는 없는 scope 규칙, 2026-10-05).
+    NULL(모름)은 빼지 않는다(원본 v3 에는 없는 규칙, 2026-10-05 scope 에 넣었다가 10-08 뺐다 —
+    지금 이 값을 쓰는 등록 spec 은 없다. 지원은 남긴다: v3_zscore@1.0 동등성과 무관).
     시총 맵은 > 0 인 값만 담는다(수급 분모). 반환 종목은 정렬 순서.
     """
     on_d = {r["ticker"] for r in _rows(inputs, "fi_prices") if _iso(r["date"]) == d}

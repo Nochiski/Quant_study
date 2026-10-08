@@ -109,7 +109,8 @@ FI_UNIVERSE = TableContract(
      _c("coverage_state", "VARCHAR", note="fresh | grace | lapsed | none (T2.11)"),
      _c("coverage_age_days", "INTEGER", "일", note="마지막 신선 수집일부터 거래일 수"),
      _c("n_analysts", "INTEGER", note="추정기관 수 = WISE 최근 3개월 투자의견을 낸 증권사 수"
-        "(0 = 의견 없음, NULL = 모름). v4 리비전 ≥3 판정·scope 유니버스(min_analysts)"),
+        "(0 = 의견 없음, NULL = 모름). v4 리비전 ≥3 판정·엑셀 비고(scope 유니버스 조건은 "
+        "10-08 해제)"),
      _c("adv20", "DOUBLE", "억원", "최근 20세션 평균 거래대금(D-13 적격성 ≥ 10억)"),
      _c("is_admin", "BOOLEAN", note="관리종목 지정 중(D 기준)"),
      _c("is_halted", "BOOLEAN", note="매매정지 중(D 기준)"),
@@ -244,7 +245,7 @@ class UniverseRule:
     min_adv20: float | None = None                   # 억원. D-13 적격성(v4 = 10)
     # 추정기관수(fi_universe.n_analysts — 최근 3개월 투자의견을 낸 증권사 수) 하한. 0 은 원천이
     # 밝힌 0 이라 제외하고, NULL(모름)은 제외하지 않는다 — 수집 실패로 종목이 조용히 빠지지 않게.
-    # scope = 1(2026-10-05 사용자 결정 '3개월 의견 없으면 유니버스 제외').
+    # scope 에 1 을 걸었다가(2026-10-05) 10-08 사용자 결정으로 뺐다 — 지금 쓰는 등록 spec 없음.
     min_analysts: int | None = None
     exclude: tuple[str, ...] = ()                    # ELIGIBILITY_FLAGS 부분집합(v3 미러 = 없음)
 

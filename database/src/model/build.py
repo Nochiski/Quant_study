@@ -53,7 +53,8 @@ RULES_VERSION = "mb1.4.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에
                             # 1.3.0(2026-10-06): 비교 모델 엔진 예외도 그 spec 만 뺌(D-01)
                             #   · FAIL 재실행이 같은 날 ok `_runs` 기록을 덮지 않음(D-09)
                             # 1.4.0(2026-10-08): scope 퀄리티 — 짧은 회계기간 행 제외
-                            #   (G-28, fi1.2.0 period_months)
+                            #   (G-28, fi1.2.0 period_months) · scope 유니버스 의견 0 제외
+                            #   해제(min_analysts 삭제, 4-2c — 엑셀 비고로만)
 LAYER = "model"
 BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델

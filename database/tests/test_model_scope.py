@@ -1,12 +1,14 @@
 """scope_v1.0(`scope@1.0`) — 원본 v3(`v3_zscore@1.0`)에서 밸류의 EV/EBITDA 만 뺀 메인 모델.
 
-(a) 레지스트리: 엔진·버킷·하위 가중이 v3_zscore@1.0 과 글자 그대로 같고, 밸류 하위 가중만
-    ev_ebitda 가 빠진다(나머지 키 순서 유지 — 합산 순서). 유니버스는 3개월 의견 기준
-    (min_analysts = 1) 하나만 다르다(2026-10-05 사용자 결정).
+(a) 레지스트리: 엔진·버킷·유니버스·하위 가중이 v3_zscore@1.0 과 글자 그대로 같고, 밸류 하위
+    가중만 ev_ebitda 가 빠진다(나머지 키 순서 유지 — 합산 순서). 3개월 의견 기준(min_analysts = 1)은
+    10-05 에 넣었다가 10-08 사용자 결정으로 뺐다 — 의견 0 은 엑셀 비고로만 표시한다.
 (b) 골든 09-28 입력: 밸류·종합 밖의 팩터 점수는 v3_zscore@1.0 과 비트 단위로 같다.
 (c) EV/EBITDA 값을 아무리 바꿔도 scope 점수는 그대로다(원값 표시 열 val_ev_ebitda 만 따라간다).
-(d) 추정기관수(최근 3개월 투자의견을 낸 증권사 수) 0 은 유니버스 밖, 모름(NULL)·1 이상은 안.
-(e) MG1 이 같은 규칙으로 유니버스를 센다(안 그러면 빠진 종목이 '점수 누락'으로 잡혀 판이 막힌다).
+(d) 추정기관수(최근 3개월 투자의견을 낸 증권사 수) 0 도 scope 유니버스 안(10-08). 엔진의
+    min_analysts 지원은 남아 있어, spec 이 그 값을 주면 0 은 빠지고 모름(NULL)·1 이상은 남는다.
+(e) MG1 이 spec 과 같은 규칙으로 유니버스를 센다(안 그러면 빠진 종목이 '점수 누락'으로 잡혀 판이
+    막힌다).
 (f) 인계(엑셀)의 기본 주 모델은 scope@1.0 이다.
 (g) 짧은 첫 사업연도(G-28, N-25 Q5): scope 만 12개월 미만 연간 행을 퀄리티 손익 지표(gpa·roa·
     fcf_assets·gpa_change)에서 뺀다. v3_zscore@1.0 은 그대로(회귀 가드).
@@ -22,7 +24,7 @@ from pathlib import Path
 import pytest
 from model import gates, registry
 from model.build import PRIMARY_DEFAULT
-from model.contracts import FI_TABLES, V3_SCORE_COLUMNS, FactorInputs
+from model.contracts import FI_TABLES, V3_SCORE_COLUMNS, FactorInputs, ModelSpec
 from model.engines import ENGINES
 from stage.gates import GateStatus
 
@@ -53,8 +55,7 @@ def test_scope_spec_is_v3_without_ev_ebitda() -> None:
     assert scope.validate() == [] and scope in registry.all_specs()
     assert (scope.model_id, scope.version, scope.engine) == ("scope", "1.0", "v3_zscore")
     assert list(scope.buckets.items()) == list(v3.buckets.items())
-    assert replace(scope.universe, min_analysts=None) == v3.universe
-    assert scope.universe.min_analysts == 1 and v3.universe.min_analysts is None
+    assert scope.universe == v3.universe and scope.universe.min_analysts is None   # 10-08 해제
     assert ENGINE.output_columns(scope) == V3_SCORE_COLUMNS
     for f in ("momentum", "revision", "flow"):
         assert scope.params[f] == v3.params[f], f
@@ -108,22 +109,40 @@ def _with_analysts(fi: FactorInputs, counts: dict[str, int | None]) -> FactorInp
     return FactorInputs(fi.date, fi.basis, fi.build_id, {**fi.tables, "fi_universe": uni})
 
 
-def test_scope_drops_stocks_without_opinions_in_three_months(golden_fi) -> None:
+def _with_min_analysts(n: int) -> ModelSpec:
+    """scope 에 추정기관수 하한을 다시 건 spec — 엔진·MG1 의 min_analysts 지원을 시험한다(10-08 뒤
+    이 값을 쓰는 등록 spec 은 없다)."""
+    scope = registry.get(SCOPE)
+    return replace(scope, universe=replace(scope.universe, min_analysts=n))
+
+
+def test_scope_keeps_stocks_without_opinions_in_three_months(golden_fi) -> None:
+    """10-08 사용자 결정: 의견 0 종목도 점수 대상(엑셀 비고 '최근 3개월 의견 없음'으로만 표시)."""
     codes = sorted(_by_code(ENGINE.run(registry.get(V3), golden_fi).scores))
     zero, unknown, one = codes[:3]
     fi = _with_analysts(golden_fi, {zero: 0, unknown: None, one: 1})
     scope = _by_code(ENGINE.run(registry.get(SCOPE), fi).scores)
     v3 = _by_code(ENGINE.run(registry.get(V3), fi).scores)
-    assert zero not in scope and {unknown, one} <= scope.keys()
-    assert set(scope) == set(v3) - {zero}          # v3_zscore@1.0 은 이 규칙이 없다
-    ranks = sorted(r["rank"] for r in scope.values() if r["rank"] is not None)
+    assert {zero, unknown, one} <= scope.keys() and set(scope) == set(v3)
+    assert scope[zero]["rank"] is not None and scope[zero]["composite_score"] is not None
+
+
+def test_min_analysts_rule_still_works_when_a_spec_sets_it(golden_fi) -> None:
+    codes = sorted(_by_code(ENGINE.run(registry.get(V3), golden_fi).scores))
+    zero, unknown, one = codes[:3]
+    fi = _with_analysts(golden_fi, {zero: 0, unknown: None, one: 1})
+    got = _by_code(ENGINE.run(_with_min_analysts(1), fi).scores)
+    v3 = _by_code(ENGINE.run(registry.get(V3), fi).scores)
+    assert zero not in got and {unknown, one} <= got.keys()
+    assert set(got) == set(v3) - {zero}
+    ranks = sorted(r["rank"] for r in got.values() if r["rank"] is not None)
     assert ranks == list(range(1, len(ranks) + 1))
 
 
-def test_mg1_counts_scope_universe_with_the_same_rule(golden_fi) -> None:
+def test_mg1_counts_the_universe_with_the_spec_rule(golden_fi) -> None:
     codes = sorted(_by_code(ENGINE.run(registry.get(V3), golden_fi).scores))
     fi = _with_analysts(golden_fi, dict.fromkeys(codes[:100], 0))
-    spec = registry.get(SCOPE)
+    spec = _with_min_analysts(1)
     res = ENGINE.run(spec, fi)
     ctx = gates.GateContext(spec=spec, date=str(fi.date)[:10], inputs=fi, result=res,
                             rerun=res, n_prices_on_d=len(codes))

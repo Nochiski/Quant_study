@@ -198,8 +198,8 @@ def group_z(values: Mapping[str, float], group_of: Mapping[str, str | None],
             min_size: int) -> dict[str, float]:
     """그룹(업종) 안에서 다시 매긴 z — 엔진 `z_score_winsorized`(그룹 평균·표본 표준편차, ±3σ 로
     자른 뒤 표준화 → ±3 안). 값 있는 종목 < min_size 이거나 표준편차 0 이거나 그룹이 없으면 원래
-    값(유니버스 z)을 그대로 둔다(group_pct 의 표본 문턱과 같다). 표시용 참고값 — 순위·점수에
-    안 쓴다."""
+    값(유니버스 z)을 그대로 둔다(group_pct 의 표본 문턱과 같다). 표본 표준편차는 2종목부터라
+    min_size ≤ 1 인 spec 이어도 2종목 미만은 되돌린다. 표시용 참고값 — 순위·점수에 안 쓴다."""
     out = dict(values)
     groups: dict[str, dict[str, float]] = {}
     for t, v in values.items():
@@ -208,7 +208,7 @@ def group_z(values: Mapping[str, float], group_of: Mapping[str, str | None],
             groups.setdefault(g, {})[t] = v
     for members in groups.values():
         vals = list(members.values())
-        if len(vals) < min_size or statistics.stdev(vals) == 0:
+        if len(vals) < max(min_size, 2) or statistics.stdev(vals) == 0:
             continue
         out.update(zip(members, z_score_winsorized(vals), strict=True))
     return out

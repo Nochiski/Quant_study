@@ -673,14 +673,21 @@ def annual_years(year: int) -> tuple[tuple[str, int, str], ...]:
 
 
 def revenue_basis_mixed(fi: FiData, t: str, year: int) -> list[str]:
-    """매출 y-y 를 비교하지 않는 연간 칸(slot) — 두 결산기 중 한쪽만 확정 순액
+    """매출 y-y 를 비운 연간 칸(slot) — 견줄 두 값이 다 있는데 한쪽만 확정 순액
     (`FiData.revenue_net`)이면 총액(추정치는 늘 총액)과 견주게 되어 y-y 가 가짜로 부푼다
     (4-2b 명세 검토 #1: 증권·카드 6종목 2025 순액 대 2026E 총액 +180~+1,100%).
-    비교값은 확정 우선이라 확정 행의 기준으로 가른다."""
+    비교값은 확정 우선이라 확정 행의 기준으로 가른다. 한쪽 값이 없어 y-y 가 원래 비는 칸은 넣지
+    않는다 — 점수 시트 비고는 실제로 비운 칸이 있을 때만 붙는다."""
     mm = fi.fy_month(t)
-    return [slot for slot, yr, _ in annual_years(year)
-            if (slot == "a" and fi.revenue_net(t, f"{yr}/{mm}"))
-            != fi.revenue_net(t, f"{yr - 1}/{mm}")]
+    out: list[str] = []
+    for slot, yr, _ in annual_years(year):
+        p, p0 = f"{yr}/{mm}", f"{yr - 1}/{mm}"
+        cur = (_either if slot == "a" else _estimate)(fi, t, p, "revenue")
+        if cur is None or _either(fi, t, p0, "revenue") is None:
+            continue
+        if (slot == "a" and fi.revenue_net(t, p)) != fi.revenue_net(t, p0):
+            out.append(slot)
+    return out
 
 
 def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:

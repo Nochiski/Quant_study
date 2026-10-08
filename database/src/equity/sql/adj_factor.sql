@@ -110,13 +110,22 @@
 --     factor          factor_ok
 --     price_only      계수 행
 --     price_only_dup  같은 단위의 다른 not-ok 행(같은 날 DART 명목 행·성분 다른 멤버 등) — 계수 1
---     factor_near     (D6-3, C-05 원안) 억제 중복본(near_dup_suppressed·same_day_suppressed) 중
---                     그 행을 누른 형제가 최종 ok 인 것 — 정상 처리된 사건의 중복본
+--     factor_near     (D6-3, C-05 원안 '정상 사건의 중복본' — ok 계수 근처·같은 날 억제 중복)
+--                     (가) 억제 중복본(near_dup_suppressed·same_day_suppressed) 중 그 행을 누른 형제가
+--                          최종 ok 인 것 — 억제 중복본은 이 갈래로만 판정한다(형제가 미해결이면 근처에
+--                          다른 ok 계수가 있어도 아래 (나)(다)로 가지 않는다)
+--                     (나) 그날 기준가 후보가 없는 not-ok 행 중 [n − lookback, n + window] 세션 안에 ok
+--                          계수의 적용일이 있고 같은 창에 (c) 재발견 후보가 없는 것(D6-2 와 같은 모양)
+--                     (다) 그날 ok 계수가 접히는 not-ok 행(⑤ 단위 ③ 으로 빠지는 날)
+--                     (나)(다) 에서 빼는 것: ② 사유 행(krx_base_inconsistent·unknown_price_only) — 그 행
+--                     자체가 KRX 기준가 근거라 단위 밖이면 그 불연속은 아직 안 고쳐졌다(반증 행 포함) ·
+--                     capred_paid — 유상감자는 시총 불변 사건이 아니라 '정상 사건의 중복본' 근거가 약하다
 --     price_only_near (D6-2) 그날 기준가 후보가 없는 not-ok 행 중 [n − lookback, n + window] 세션 안에
 --                     ⑤ 단위가 있고 같은 창에 (c) 재발견 후보(행 없는 기준가 리셋)가 없는 것 — 그 날짜엔
 --                     가격 불연속이 없고 실제 불연속(⑤ 단위)은 고쳐졌다. 창은 사건 매칭 창과 같다
 --     unresolved      나머지(기준가 근거 없는 DART 행·D6-1 제외 종류·ok 접힘일과 겹친 단위 등)
---   판정 순서는 위 순서(단위 소속 > 형제 ok > 근처 단위).
+--   판정 순서는 위 순서(계수 행 > price_only_dup > factor_near > price_only_near > unresolved) —
+--   두 근처가 겹치면 factor_near 로 가고 EG3 가 겹친 수를 기록형으로 센다.
 -- 숫자 리터럴은 0·1·2 만 쓴다(test_sql파일에_상수_하드코딩_없음) — 창 폭·허용치는 _const 로만 들어온다.
 WITH RECURSIVE
 cal AS (
@@ -500,12 +509,19 @@ sibling AS (
     SELECT event_id, sibling_id FROM same_day WHERE rn > 1
 ),
 near_ok AS (
-    -- D6-3 factor_near: 형제가 최종 ok 인 억제 중복본
+    -- D6-3 factor_near (가): 형제가 최종 ok 인 억제 중복본
     SELECT s.event_id
     FROM sibling s
     JOIN out_rows o ON o.event_id = s.sibling_id
     WHERE o.factor_source = 'mktcap_neutral'
     GROUP BY s.event_id
+),
+fold_day AS (
+    -- D6-3 factor_near (다): 그날 ok 계수가 접히는 not-ok 행
+    SELECT o.event_id
+    FROM out_rows o
+    JOIN ok_fold f ON f.ticker = o.ticker AND f.d = o.apply_date
+    WHERE o.factor_source <> 'mktcap_neutral'
 ),
 po_free AS (
     -- 단위 밖 not-ok 행 중 그날 기준가 후보가 없는 행(날짜가 다른 DART 행)
@@ -534,6 +550,19 @@ near_po AS (
     LEFT JOIN near_c g ON g.event_id = x.event_id
     WHERE g.event_id IS NULL
     GROUP BY x.event_id
+),
+ok_apply AS (
+    SELECT ticker, n_apply AS n FROM out_rows WHERE factor_source = 'mktcap_neutral'
+),
+near_fac AS (
+    -- D6-3 factor_near (나): 창 [n − lookback, n + window] 안 ok 계수 적용일 ∧ 같은 창 (c) 없음
+    SELECT x.event_id
+    FROM po_free x CROSS JOIN k
+    JOIN ok_apply a ON a.ticker = x.ticker AND a.n BETWEEN x.n_apply - k.win_before
+                                                   AND x.n_apply + k.win_after
+    LEFT JOIN near_c g ON g.event_id = x.event_id
+    WHERE g.event_id IS NULL
+    GROUP BY x.event_id
 )
 SELECT
     o.ticker,
@@ -554,6 +583,10 @@ SELECT
          WHEN p.is_carrier                        THEN 'price_only'
          WHEN p.event_id IS NOT NULL              THEN 'price_only_dup'
          WHEN fn.event_id IS NOT NULL             THEN 'factor_near'
+         WHEN o.factor_source NOT IN ('near_dup_suppressed', 'same_day_suppressed',
+                                      'krx_base_inconsistent', 'unknown_price_only',
+                                      'capred_paid')
+              AND (fa.event_id IS NOT NULL OR fd.event_id IS NOT NULL) THEN 'factor_near'
          WHEN pn.event_id IS NOT NULL             THEN 'price_only_near'
          ELSE 'unresolved' END                                                       AS price_resolution,
     -- DEFECT-10: 적용일 이후 그 종목의 실거래 세션이 하나도 없으면 참. 커널은 사건 시점 이후
@@ -571,4 +604,6 @@ SELECT
 FROM out_rows o
 LEFT JOIN po_rows p  ON p.event_id = o.event_id
 LEFT JOIN near_ok fn ON fn.event_id = o.event_id
+LEFT JOIN near_fac fa ON fa.event_id = o.event_id
+LEFT JOIN fold_day fd ON fd.event_id = o.event_id
 LEFT JOIN near_po pn ON pn.event_id = o.event_id

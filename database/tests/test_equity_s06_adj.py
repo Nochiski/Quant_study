@@ -1502,6 +1502,109 @@ def test_D6_3_ok_형제가_있는_억제_중복본은_factor_near_형제가_미�
     assert h[f"A00030:capred:{cal[20]}"]["price_resolution"] == "factor"
 
 
+def _capred_ok_at_25(extra: list[dict[str, object]], **px_kw: object
+                     ) -> tuple[list[date], list[dict[str, object]], list[dict[str, object]]]:
+    """결정공시 감자(명목 20, ratio 0.1)가 정지 뒤 재개일 25 기준가 ×10 · 주식수 ×0.1 로 ok(기준가
+    교체). `extra` 사건과 가격 변형(px_kw: halt·jumps·base 덮어쓰기)을 더한다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00031", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000031", "announce_date": cal[5]},
+          *extra]
+    jumps = {25: 10.0, **dict(px_kw.pop("jumps", {}))}           # type: ignore[call-overload]
+    base = {25: 10.0, **dict(px_kw.pop("base", {}))}             # type: ignore[call-overload]
+    halt = px_kw.pop("halt", (19, 24))
+    px = flat_prices("A00031", cal, 1000, jumps=jumps, base=base, halt=halt,  # type: ignore[arg-type]
+                     share_jumps={25: 0.1})
+    return cal, ev, px
+
+
+def test_G1_D6_3나_ok_계수_적용일이_창_안인_DART_명목_행은_factor_near() -> None:
+    """D6-3 (나): 자본변동 감자(ratio NULL, 명목 30 — 결정공시와 14일 떨어져 근접 중복이 아니다)는
+    정상 처리된 같은 감자의 회고 기재 행이다. 그날 기준가 후보가 없고 창 [25, 70] 안에 ok 계수의
+    적용일(25)이 있으며 (c) 후보가 없다 → factor_near(f5e14b8e 는 unresolved)."""
+    cal = sessions(80)
+    retro = {"ticker": "A00031", "event_type": "capred", "effective_date": cal[30], "ratio": None,
+             "source": "capital", "rcept_no": "20200302000031", "announce_date": cal[70]}
+    cal, ev, px = _capred_ok_at_25([retro])
+    f = run_adj_sql(ev, px, cal)
+    ok, r = f[f"A00031:capred:{cal[20]}"], f[f"A00031:capred:{cal[30]}"]
+    assert ok["factor_ok"] is True and ok["apply_date"] == cal[25]
+    assert r["factor_source"] == "ratio_null" and r["apply_date"] == cal[30]
+    assert (r["price_resolution"], r["price_only_factor"]) == ("factor_near", 1.0)
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_factor_near_by_branch"] == {"near_ok_apply": 1}
+
+
+def test_회귀_D6_3나_같은_창에_c_후보가_있으면_unresolved() -> None:
+    """같은 자본변동 행이라도 창 안에 정지 뒤 기준가 리셋((c), 행 없음)이 있으면 숨은 점프일 수
+    있다 → unresolved."""
+    cal = sessions(80)
+    retro = {"ticker": "A00031", "event_type": "capred", "effective_date": cal[30], "ratio": None,
+             "source": "capital", "rcept_no": "20200302000031", "announce_date": cal[70]}
+    cal, ev, px = _capred_ok_at_25([retro], halt=(19, 24), jumps={42: 0.7}, base={42: 0.7})
+    px = [{**p, "price_kind": "reference"} if p["date"] in (cal[40], cal[41]) else p for p in px]
+    f = run_adj_sql(ev, px, cal)
+    assert f"A00031:krx_base:{cal[42]}" not in f                # (c) — 행이 없다
+    assert f[f"A00031:capred:{cal[30]}"]["price_resolution"] == "unresolved"
+
+
+def test_회귀_D6_3_형제가_미해결인_근접_중복본은_ok_계수가_가까이_있어도_unresolved() -> None:
+    """근접 중복본은 형제(누른 쪽)로만 판정한다 — 형제가 no_price_match 면 근처의 다른 ok 계수
+    (분할, 세션 30)로 factor_near 가 되지 않는다(코디네이터 지시: 형제 미해결 near_dup 4행 유지)."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00032", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000032", "announce_date": cal[5]},
+          {"ticker": "A00032", "event_type": "capred", "effective_date": cal[21], "ratio": None,
+           "source": "capital", "rcept_no": "20200302000032", "announce_date": cal[60]},
+          {"ticker": "A00032", "event_type": "split", "effective_date": cal[30], "ratio": 2.0,
+           "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[30]}]
+    px = flat_prices("A00032", cal, 10000, jumps={30: 0.5}, base={30: 0.5}, share_jumps={30: 2.0})
+    f = run_adj_sql(ev, px, cal)
+    assert f[f"A00032:split:{cal[30]}"]["factor_ok"] is True
+    assert f[f"A00032:capred:{cal[20]}"]["factor_source"] == "no_price_match"
+    sup = f[f"A00032:capred:{cal[21]}"]
+    assert sup["factor_source"] == "near_dup_suppressed"
+    assert sup["price_resolution"] == "unresolved"
+    # 형제(결정공시 감자)는 미해결이지만 사건 행 자체는 (나) 로 ok 분할 근처 → factor_near
+    assert f[f"A00032:capred:{cal[20]}"]["price_resolution"] == "factor_near"
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+def test_회귀_D6_3_ok_계수_근처의_유상감자는_unresolved() -> None:
+    """유상감자(capred_paid)는 시총 불변 사건이 아니라 '정상 사건의 중복본'으로 볼 근거가 약하다 —
+    창 [22, 67] 안에 ok 계수 적용일(25)이 있어도 (나)(다) 로 factor_near 가 되지 않는다(P1)."""
+    cal = sessions(80)
+    paid = {"ticker": "A00031", "event_type": "capred", "effective_date": cal[27], "ratio": 0.9,
+            "source": "event_cr", "rcept_no": "20200302000033", "announce_date": cal[22]}
+    cr = [{"rcept_no": "20200302000033", "corp_code": "C0000001", "cr_mth": "주식소각",
+           "cr_rs": "주주환원 목적 유상감자"}]
+    cal, ev, px = _capred_ok_at_25([paid])
+    f = run_adj_sql(ev, px, cal, cr=cr)
+    assert f[f"A00031:capred:{cal[20]}"]["factor_ok"] is True
+    x = f[f"A00031:capred:{cal[27]}"]
+    assert x["factor_source"] == "capred_paid" and x["apply_date"] == cal[27]   # 창 [22, 67] ∋ 25
+    assert (x["price_resolution"], x["price_only_factor"]) == ("unresolved", 1.0)
+
+
+def test_D6_3다_ok_계수가_접히는_날의_DART_행은_factor_near() -> None:
+    """D6-3 (다): 자본변동 감자(ratio NULL)의 명목일 = ok 계수(결정공시 감자, 기준가 교체)의 적용일
+    25 — 그날 기준가 후보는 ok 계수가 이미 썼다(⑤ 단위 ③ 으로 빠지는 날)."""
+    cal = sessions(80)
+    retro = {"ticker": "A00031", "event_type": "capred", "effective_date": cal[25], "ratio": None,
+             "source": "capital", "rcept_no": "20200302000031", "announce_date": cal[70]}
+    cal, ev, px = _capred_ok_at_25([retro])
+    f = run_adj_sql(ev, px, cal)
+    r = f[f"A00031:capred:{cal[25]}"]
+    assert r["factor_source"] == "ratio_null" and r["apply_date"] == cal[25]
+    assert r["price_resolution"] == "factor_near"
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_factor_near_by_branch"] == {"ok_fold_day": 1}
+
+
 # ── ⑤ 부정 픽스처 — EG3_adj_factor 가 FAIL 해야 한다 ─────────────────────────
 
 def _g1_084010() -> tuple[list[date], list[dict[str, object]], list[dict[str, object]]]:

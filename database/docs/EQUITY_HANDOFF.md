@@ -706,7 +706,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 `n_price_unresolved_events`**(같은 구간 `price_resolution='unresolved'` 사건 수)다 —
 `n_unadjusted_events` 는 뜻을 바꾸지 않아(보유 수량 축 미해결) ⑤ 로 해소된 사건도 계속 센다.
 `adj_factor.price_resolution` 어휘: `factor`(ok) · `price_only`(계수 행) · `price_only_dup`(같은 단위
-다른 행) · `factor_near`(C-05 원안: 억제 중복본 중 형제가 ok) · `price_only_near`(근처 ⑤ 단위, (c)
+다른 행) · `factor_near`(C-05 원안 '정상 사건의 중복본': 형제가 ok 인 억제 중복본 · 창 안에 ok
+계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행) · `price_only_near`(근처 ⑤ 단위, (c)
 후보 없음) · `unresolved`.
 
 **`cum_price_factor` × `cum_share_factor` = 1** 이고(시총 불변), 구간 첫 행에서는 둘 다 정확히

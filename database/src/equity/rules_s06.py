@@ -133,7 +133,8 @@ JUMP_SAMPLE_ROWS = 20
 # ⑤ 가격 전용 계수(e1.26.0, N-32 ②·N-33) — 정의는 `sql/adj_factor.sql` 머리말 ⑤ 블록.
 # `price_resolution` 폐쇄 어휘. 'factor' ⇔ factor_ok, 'price_only' = 계수 행(그날 기준가 ÷ 직전 행
 # 종가를 `price_only_factor` 에 싣는 유일한 행). 나머지 셋은 계수 1 의 not-ok 행이 가격 축에서
-# 해소됐다는 표식(같은 단위 · C-05 원안 형제 ok · 근처 단위), 'unresolved' 만 가격 축 미해결이다.
+# 해소됐다는 표식(같은 단위 · C-05 원안 정상 사건의 중복본(형제 ok·창 안 ok 적용일·ok 접힘일) ·
+# 근처 단위), 'unresolved' 만 가격 축 미해결이다.
 PRICE_RESOLUTION_VOCAB: tuple[str, ...] = ("factor", "price_only", "price_only_dup",
                                            "factor_near", "price_only_near", "unresolved")
 PRICE_ONLY_RESOLUTION = "price_only"
@@ -619,11 +620,54 @@ def _price_only(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, objec
         SELECT price_resolution, factor_source, count(*) FROM {v}
         WHERE price_resolution IN ('price_only_near', 'factor_near')
         GROUP BY 1, 2 ORDER BY 1, 2""").fetchall()}
+    # D6-3 factor_near 갈래(가 형제 ok · 다 ok 접힘일 · 나 창 안 ok 적용일) — 기록형
+    branch = {str(r[0]): int(str(r[1])) for r in ctx.con.execute(f"""
+        WITH okf AS (SELECT ticker, apply_date AS d FROM {v} WHERE factor_ok
+                     UNION
+                     SELECT ticker, greatest(apply_date, available_date) FROM {v} WHERE factor_ok)
+        SELECT CASE WHEN a.factor_source IN ('near_dup_suppressed', 'same_day_suppressed')
+                    THEN 'sibling_ok'
+                    WHEN f.ticker IS NOT NULL THEN 'ok_fold_day'
+                    ELSE 'near_ok_apply' END, count(*)
+        FROM {v} a LEFT JOIN okf f ON f.ticker = a.ticker AND f.d = a.apply_date
+        WHERE a.price_resolution = 'factor_near' GROUP BY 1 ORDER BY 1""").fetchall()}
+    # 두 근처(ok 적용일·⑤ 단위)가 겹친 행 — 판정 순서상 factor_near 로 갔다. 게이트가 D6-2 조건
+    # (그날 기준가 후보 없음 ∧ 창 안 계수 행 ∧ 같은 창 (c) 재발견 후보 없음)을 다시 세워 센다.
+    lookback = _const_or_none(ctx, ctx.rule.name, "price_match_lookback_sessions")
+    window = _const_or_none(ctx, ctx.rule.name, "price_match_window_sessions")
+    n_overlap: int | None = None
+    if lookback is not None and window is not None:
+        lb, wn = int(lookback), int(window)
+        n_overlap = _n(ctx, f"""
+            WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n
+                         FROM trading_calendar),
+                 {_BASE_PRICE_CANDIDATES_CTE},
+                 scope AS (SELECT b.* FROM bpc b WHERE {_BP_IN_SCOPE}),
+                 consumed AS (SELECT DISTINCT ticker, apply_date AS d FROM {v}
+                              WHERE apply_basis = '{krx}'
+                                AND event_type IN ({_vocab_sql(FACTOR_BEARING_EVENTS)})),
+                 cfree AS (
+              SELECT s.ticker, c.n FROM scope s JOIN cal c ON c.date = s.date
+              LEFT JOIN consumed u ON u.ticker = s.ticker AND u.d = s.date
+              WHERE s.share_ratio IS NULL AND s.prev_kind = 'reference' AND u.ticker IS NULL),
+                 car AS (SELECT a.ticker, c.n FROM {v} a JOIN cal c ON c.date = a.apply_date
+                         WHERE a.price_resolution = '{po}'),
+                 fnr AS (
+              SELECT a.event_id, a.ticker, c.n FROM {v} a JOIN cal c ON c.date = a.apply_date
+              LEFT JOIN scope s ON s.ticker = a.ticker AND s.date = a.apply_date
+              WHERE a.price_resolution = 'factor_near' AND s.ticker IS NULL)
+            SELECT count(*) FROM fnr x
+            WHERE EXISTS (SELECT 1 FROM car p WHERE p.ticker = x.ticker
+                          AND p.n BETWEEN x.n - {lb} AND x.n + {wn})
+              AND NOT EXISTS (SELECT 1 FROM cfree q WHERE q.ticker = x.ticker
+                              AND q.n BETWEEN x.n - {lb} AND x.n + {wn})""")
     metrics: dict[str, object] = {
         "n_by_price_resolution": _counts(ctx, "price_resolution"),
         "n_price_only_by_source_sec_type": by_source_kind,
         "n_unresolved_by_factor_source": unresolved_by_source,
         "n_near_by_factor_source": near_by_source,
+        "n_factor_near_by_branch": branch,
+        "n_near_overlap_to_factor_near": n_overlap,
         "n_unit_without_carrier_row": int(str(n_unit_no_row)),   # 기록형 — 기대 0
         "n_price_only_r_dev_le_005": int(str(n_r_small)),
         "n_price_only_r_dev_over_030": int(str(n_r_large)),

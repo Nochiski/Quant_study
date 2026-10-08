@@ -252,7 +252,8 @@ RULES_VERSION = "e1.26.0"                # BuildRecord.rules_version 에 실린�
 #          available_date = min(announce, apply_date)(C-07 확장). factor_ok·price_factor·
 #          share_factor·factor_source·apply_date·행 수는 그대로 — 두 백테스트 어댑터·EGC-04 의
 #          사건 집합 불변. D6-1 주식 계열만(fund·ship_fund·reit 제외) · D6-2 price_only_near
-#          ((c) 가드) · D6-3 factor_near = C-05 원안(억제 중복본 중 형제가 ok) ·
+#          ((c) 가드) · D6-3 factor_near = C-05 원안(형제 ok 억제 중복본 · 창 안 ok 적용일 ·
+#          ok 접힘일의 not-ok 행, ② 사유 행·capred_paid 제외) ·
 #          EG3_adj_factor ⑤ 폐기형 + EG8 계수 행 수정수익률 기록형(D6-5 승격 대기).
 #          `price_adj_daily` 열 3개 신설(`cum_price_only_factor`·`n_price_only_applied`·
 #          `n_price_unresolved_events`, D6-4 — `n_unadjusted_events` 뜻 유지) · 조정 OHLC =

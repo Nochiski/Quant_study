@@ -42,7 +42,7 @@
  {"case": "FX-2-009-basis",
   "key": {"event_id": "005930:split:2018-05-04"}, "column": "available_basis",
   "expect": "derived", "expect_source": "hand", "fixture_class": "positive",
-  "source": "hand — min(공시, apply_date 다음 세션) 파생", "note": ""},
+  "source": "hand — 파생: KRX 기준가가 확정한 ok 계수라 min(공시, apply_date)(C-07, e1.25.0) — 이 행은 공시 = apply 라 옛 식 min(공시, 다음 세션)과 값이 같다", "note": ""},
 
  {"case": "FX-2-001-preferred-share-factor",
   "key": {"event_id": "005935:split:2018-05-04"}, "column": "share_factor", "expect": "50.0",

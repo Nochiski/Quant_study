@@ -61,7 +61,7 @@ PERIODIC_PREFIXES: tuple[str, ...] = ("사업보고서", "반기보고서", "분
 EXCLUDED_TOKENS: tuple[str, ...] = ("연장신고", "유동화전문회사", "회계법인", "해외증권거래소")
 # 정정본 접두. `[첨부추가]` 는 원본 라벨이라 여기 없다(원본 후보 자격을 유지한다).
 CORRECTION_PREFIXES: tuple[str, ...] = ("기재정정", "첨부정정")
-# `corr_has_fin_item`(기록형) 의 키워드. `.sql` 의 LIKE 리터럴이 이것을 그대로 옮긴다.
+# `corr_has_fin_item` 의 항목 이름 키워드. `.sql` 의 LIKE 리터럴이 이것을 그대로 옮긴다.
 # ★ 서버 재측정: DESIGN §4-4 의 참조값 2,238/17,600 은 항목 목록이 명시되지 않은 채 인용된
 #   수치라 이 키워드 집합으로 재현되지 않을 수 있다(절단본 39/84).
 # "재무에 관한" 은 09-30 추가 — fin_std 가 이 플래그로 정정본의 원본 공시일 승계를 판정하게 되어
@@ -69,6 +69,14 @@ CORRECTION_PREFIXES: tuple[str, ...] = ("기재정정", "첨부정정")
 #   건드린 정정은 보수적으로 재무 정정으로 본다. 서버 실측: 기존 키워드로 false 인 정정 2,581 중 166.
 FIN_ITEM_KEYWORDS: tuple[str, ...] = ("재무제표", "재무상태표", "손익계산서", "현금흐름표",
                                       "자본변동표", "요약재무", "재무에 관한")
+# 정정 사유(`reason_raw`)가 재무 수치 재작성을 밝히는 낱말(C-11, N-25 Q1 — 10-07). 항목
+# 이름이 비재무여도 재무를 바꾼 정정이다(00287812 FY2015 2018-09-07 정정: 항목은 '배당에 관한
+# 사항'뿐, 사유는 '연결재무제표 재작성·감사보고서 재발행'). `.sql` 은 사유의 공백을 전부 떼고
+# LIKE 로 대조하므로 낱말도 공백 없이 적는다. 이 낱말이 있거나 항목 표가 빈('[]') 정정은
+# `corr_has_fin_item` 이 TRUE·NULL 이라 fin_std 가 원본 공시일을 잇지 않는다(10-06 감사 추정:
+# 승계 3,757행 중 사유 21 · 빈 항목 표 56, 겹침 빼고 71행이 정정일로 돌아간다 — 숫자는 배포 전
+# 서버 재연이 확정한다).
+FIN_REASON_KEYWORDS: tuple[str, ...] = ("재작성", "재감사", "재발행", "소급", "재무제표수정")
 
 # ── 최근 창 정정 파싱률 (서식 드리프트 감지, 2026-09-28) ──────────────────────
 # DART 정정신고 첫 장 서식이 2025년에 바뀌어 `stg_doc_correction` 의 `filed_date` 파싱이 조용히
@@ -259,10 +267,10 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
                  "ON o.rcept_no = c.orig_rcept_no WHERE c.orig_rcept_no IS NOT NULL AND "
                  "(o.rcept_no IS NULL OR o.is_correction OR o.group_key IS DISTINCT FROM "
                  "c.group_key OR o.rcept_no >= c.rcept_no)"),
-        # 원본 측 집계 재계산
+        # 원본 측 집계 재계산 — 최초 정정일은 공개일 축(e1.25.0 N-26 4.10)
         "n_corrections_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o LEFT JOIN (SELECT orig_rcept_no, count(*) AS n, '
-                 f'min(rcept_dt) AS d FROM "{v}" WHERE orig_rcept_no IS NOT NULL '
+                 f'min(available_date) AS d FROM "{v}" WHERE orig_rcept_no IS NOT NULL '
                  "GROUP BY 1) b ON b.orig_rcept_no = o.rcept_no "
                  "WHERE o.n_corrections IS DISTINCT FROM coalesce(b.n, 0) "
                  "OR o.first_correction_dt IS DISTINCT FROM b.d"),
@@ -284,8 +292,13 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
         "n_is_correction_prefix_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE is_correction <> '
                  f"(corr_prefix IN ({_vocab_sql(CORRECTION_PREFIXES)}))"),
-        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" '
-                                           "WHERE available_date IS DISTINCT FROM rcept_dt"),
+        # 공개일 = 그 접수의 stage 공개일(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽). 이름은 옛
+        # 정의(rcept_dt 와 비교)를 그대로 둔다(게이트 출력 계약) — 비교 축은 e1.25.0 부터 stage
+        # 공개일이다(N-26 4.10, 재제출본은 `available_date > rcept_dt` 가 정상).
+        "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" o WHERE NOT EXISTS ('
+                                           "SELECT 1 FROM stg_disclosure d "
+                                           "WHERE d.rcept_no = o.rcept_no "
+                                           "AND d.available_date = o.available_date)"),
         # 최근 창 정정 파싱률 — 표본 CORR_RECENT_MIN_N 이상이고 비율이 CORR_RECENT_FAIL_RATIO
         # 미만일 때만 폐기한다(서식 드리프트). 그 밖에는 0 이고 비율은 metrics 로 남는다.
         "n_corr_recent_parse_drift": 1 if recent_drift else 0,
@@ -312,6 +325,7 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
         "max_prior_corr_count": _n(ctx, f'SELECT coalesce(max(prior_corr_count), 0) FROM "{v}"'),
         "reject_by_reason": dict(ctx.reject_by_reason),
         "fin_item_keywords": list(FIN_ITEM_KEYWORDS),
+        "fin_reason_keywords": list(FIN_REASON_KEYWORDS),
         "corr_recent_asof": str(_asof(ctx, v)),
         "corr_recent_window_days": CORR_RECENT_WINDOW_DAYS,
         "n_corr_recent_page": recent_page,
@@ -453,14 +467,16 @@ DISCLOSURE_VERSION = register(EquityTable(
     # DESIGN §2 receipt_axis 정의 그대로 — 이 테이블은 rcept_no 가 grain 이라 접수연도가 항상 있다
     # (S05 `corp_event` 는 KRX 파생행에 rcept_no 가 없어 year(announce_date) 로 대신했다).
     partition_key_expr="CAST(substr(rcept_no, 1, 4) AS INTEGER)",
-    available_rule="column:rcept_dt — DART 접수일(derived)",
+    available_rule=("column:available_date — stg_disclosure 공개일(derived, 원천 rcept_dt 와"
+                    " 접수번호 날짜 중 늦은 쪽)"),
     eg1_lhs_sql=EG1_LHS_SQL,
     eg1_rhs_sql=EG1_RHS_SQL,
     sql_path=SQL_PATH,
     input_columns={
         # `observed_date` 는 재수집 판본을 접는 축이다(first_write_wins) — 산출 컬럼이 아니다.
-        "stg_disclosure": ("rcept_no", "rcept_dt", "corp_code", "report_nm", "is_correction",
-                           "rm_corrected_later", "observed_date"),
+        # `available_date` = stage 보정 공개일(N-26 4.10) — 공개일·최초 정정일 축.
+        "stg_disclosure": ("rcept_no", "rcept_dt", "available_date", "corp_code", "report_nm",
+                           "is_correction", "rm_corrected_later", "observed_date"),
         "stg_doc_correction": ("rcept_no", "page_found", "filed_date", "filed_date_status",
                                "reason_raw", "items"),
         "stg_doc_index": ("rcept_no", "zip_ok", "observed_date"),
@@ -485,6 +501,7 @@ __all__ = ["BASELINE_SEED", "CANDIDATE_STATUS_VOCAB", "CORRECTION_PREFIXES",
            "CORR_RECENT_FAIL_RATIO", "CORR_RECENT_MIN_N", "CORR_RECENT_WARN_RATIO",
            "CORR_RECENT_WINDOW_DAYS", "DATE_CHECK_VOCAB", "POPULATION_DUP_SQL",
            "DATE_CHECK_UNMEASURED", "DISCLOSURE_VERSION", "EXCLUDED_TOKENS",
-           "FIN_ITEM_KEYWORDS", "GROUP_KEY_BASIS_VOCAB", "KIND_VOCAB", "LADDER", "LADDER_OUT",
+           "FIN_ITEM_KEYWORDS", "FIN_REASON_KEYWORDS", "GROUP_KEY_BASIS_VOCAB", "KIND_VOCAB",
+           "LADDER", "LADDER_OUT",
            "LINKED_STATUS", "LINK_BASIS_VOCAB", "PERIODIC_PREFIXES", "REJECT_REASONS", "TABLES",
            "corr_recent_sql", "population_sql"]

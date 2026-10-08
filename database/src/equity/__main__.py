@@ -12,6 +12,7 @@
                         돌려 duckdb 독립 읽기와 대조 → `_contract_meta.json`. 엔진 소스는
                         `--engine-src`(기본 `<repo>/backend/src` 또는 `$QL_ENGINE_SRC`)
   rollback              `--pass <PASS>` 의 `summary.tsv` 에서 rc 0 인 표만 직전 판으로 되돌린다
+                        (`--basis morning` 이면 `--before` 의 모든 표를 직전 확정판으로 — C-01)
                         (포인터만 — `v=` 는 남는다). 전량 빌드가 중간에 실패해 표마다 다른 날의
                         판이 섞인 상태를 푼다(DEFECT-C03)
 
@@ -166,7 +167,7 @@ def _cmd_contract(a: argparse.Namespace) -> int:
 
 def _cmd_rollback(a: argparse.Namespace) -> int:
     done = rollback.rollback_pass(a.root, getattr(a, "pass"), log_root=a.log_root,
-                                  before=a.before)
+                                  before=a.before, basis=a.basis)
     if not done:
         print(f"ok rollback root={a.root} pass={getattr(a, 'pass')} — 되돌린 표 없음")
         return 0
@@ -230,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
     p_rb.add_argument("--before", type=Path, default=None,
                       help="패스 시작 시점의 {표: current_build} JSON — "
                            "있으면 직전 판이 아니라 그 판으로")
+    p_rb.add_argument("--basis", choices=sorted(BUILD_BASES), default=BUILD_BASIS_DEFAULT,
+                      help="되돌리는 패스의 빌드 판 — morning 이면 before 의 모든 표")
     p_rb.set_defaults(fn=_cmd_rollback)
 
     a = ap.parse_args(argv)

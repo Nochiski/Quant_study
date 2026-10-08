@@ -17,7 +17,8 @@ _COLLECTED = "2026-09-01T02:10:00"      # 원장 시각은 UTC 무표기 → +9h
 R_OLD = "20160108000502"                # DESIGN §9 의 tsstk_dp 연도 오타 행 접수번호
 R_NEW = "20250311001085"
 R_UNMAPPED = "20200101000001"           # 참조표에 없는 접수번호 → available_basis unknown
-_MAP = {R_OLD: "20160108", R_NEW: "20250311"}
+R_BACKDATED = "20250828000446"          # 재제출본 — 원천 rcept_dt 가 접수번호 날짜보다 과거(J-41)
+_MAP = {R_OLD: "20160108", R_NEW: "20250311", R_BACKDATED: "20240319"}
 
 # 선언 컬럼 수 회귀 고정 (survey v2 컬럼 − 수집 메타 4)
 _LEDGER_COLUMNS = {
@@ -227,6 +228,21 @@ def test_rcept_map_miss_leaves_available_date_null_and_basis_unknown(tmp_path: P
                        f"WHERE rcept_no = '{R_UNMAPPED}'").fetchone()
     assert miss == (None, "unknown")
     assert _gate(r, "G0").metrics["rcept_map_miss"] == 1
+
+
+def test_backdated_rcept_dt_is_floored_at_the_receipt_number_date(tmp_path: Path) -> None:
+    """J-41(N-26 4.2) — 참조표 룩업도 stg_disclosure(E08)와 같은 규칙: 접수번호 날짜보다 이르면
+    접수번호 날짜. 그 판본은 접수번호 날짜부터 DART 에 있었다."""
+    rule = rules.RULES["stg_event_ctrcvs_bgrq"]
+    rows = [_row(rule, R_OLD), _row(rule, R_BACKDATED), _row(rule, R_UNMAPPED)]
+    r = _build(rule, _snap(tmp_path, "j41", rule, rows), tmp_path)
+    assert r.ok, _failed(r)
+    got = _read(tmp_path, r).execute("SELECT rcept_no, available_date, available_basis FROM t "
+                                     "ORDER BY rcept_no").fetchall()
+    assert [(g[0], None if g[1] is None else str(g[1]), g[2]) for g in got] == [
+        (R_OLD, "2016-01-08", "derived"),
+        (R_UNMAPPED, None, "unknown"),
+        (R_BACKDATED, "2025-08-28", "derived")]
 
 
 def test_identical_payload_recollection_folds_and_keeps_the_first_observed_date(

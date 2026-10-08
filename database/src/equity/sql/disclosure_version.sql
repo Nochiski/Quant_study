@@ -34,11 +34,16 @@
 -- 198,189 vs count(DISTINCT rcept_no) 198,163, delta −26). `stg_doc_index` 도 같은 규약이라
 -- 조인 전에 접는다(`idx`); `stg_doc_correction` 은 `key_unique=True` 라 접을 필요가 없다.
 --
--- PIT: `available_date = rcept_dt`(derived). 격리는 `rcept_dt` 결측 하나뿐이다(그 행은
--- available_date 를 가질 수 없다).
+-- PIT: `available_date` = stage 공개일 `stg_disclosure.available_date`(derived — 원천 rcept_dt 와
+-- 접수번호 날짜 중 늦은 쪽, e1.25.0 N-26 4.10 · J-41). 재제출본(박셀바이오)은 원천 rcept_dt 가 원래
+-- 제출일이라 그대로 쓰면 최대 654일 앞당겨 보였다. 원본 측 `first_correction_dt` 도 같은 축이다.
+-- `rcept_dt` 열·`delay_days`(원천 rcept_dt − 법정기한)·`date_check`(첫 장 원본 제출일 대조)는 원천
+-- 그대로 둔다 — 지연을 어느 날짜로 판정할지는 열린 질문이다. 격리는 `rcept_dt` 결측 하나뿐이다
+-- (그 행은 available_date 를 가질 수 없다).
 WITH base AS (
     SELECT d.rcept_no,
            d.rcept_dt,
+           d.available_date,
            d.corp_code,
            d.report_nm,
            d.is_correction,
@@ -55,7 +60,8 @@ WITH base AS (
                  d.rm_corrected_later NULLS LAST) = 1
 ),
 periodic AS (
-    SELECT b.rcept_no, b.rcept_dt, b.corp_code, b.is_correction, b.rm_corrected_later,
+    SELECT b.rcept_no, b.rcept_dt, b.available_date, b.corp_code, b.is_correction,
+           b.rm_corrected_later,
            b.corr_prefix,
            CASE WHEN b.nm_clean LIKE '사업보고서%' THEN 'annual'
                 WHEN b.nm_clean LIKE '반기보고서%' THEN 'half'
@@ -140,6 +146,8 @@ linked AS (
            k.filed_date,
            k.filed_date_status,
            k.reason_raw,
+           -- 사유 낱말 대조용 — 공백을 전부 뗀다('재무제표 수정' = '재무제표수정', C-11)
+           regexp_replace(coalesce(k.reason_raw, ''), '\s+', '', 'g')     AS reason_compact,
            k.items,
            i.zip_ok,
            dm.rcept_no IS NOT NULL                                      AS has_doc_meta,
@@ -171,9 +179,9 @@ linked AS (
     LEFT JOIN picked a ON a.rcept_no = l.rcept_no
 ),
 back AS (
-    -- 원본 측 팩트 — 이 접수를 가리키는 정정들의 최초 접수일·건수
+    -- 원본 측 팩트 — 이 접수를 가리키는 정정들의 최초 공개일(stage 공개일 축, N-26 4.10)·건수
     SELECT x.orig_rcept_no                                              AS rcept_no,
-           min(x.rcept_dt)                                              AS first_correction_dt,
+           min(x.available_date)                                        AS first_correction_dt,
            count(*)                                                     AS n_corrections
     FROM linked x
     WHERE x.orig_rcept_no IS NOT NULL
@@ -216,8 +224,16 @@ SELECT
     CASE WHEN v.is_correction THEN v.page_found END                   AS corr_page_found,
     CASE WHEN v.is_correction THEN v.filed_date END                   AS filed_date,
     CASE WHEN v.is_correction THEN nullif(trim(v.reason_raw), '') END AS reason_raw,
-    -- 정정 항목에 재무표가 걸렸는가(기록형). 키워드는 rules_s11.FIN_ITEM_KEYWORDS 가 정본.
-    CASE WHEN NOT v.is_correction OR v.items IS NULL THEN NULL
+    -- 재무 정정인가 — fin_std 의 원본 공시일 승계가 읽는다(FALSE 만 승계, TRUE·NULL 은 정정일).
+    -- 키워드 정본은 rules_s11 의 FIN_REASON_KEYWORDS(정정 사유, 공백을 떼고 대조)·FIN_ITEM_KEYWORDS
+    -- (항목 이름). C-11(N-25 Q1): 사유가 재작성·재감사 류면 항목 이름과 무관하게 TRUE(00287812
+    -- FY2015 — 항목은 배당 지표인데 사유가 연결재무제표 재작성), 항목 표가 비었으면('[]') 판단할 수
+    -- 없으므로 미해석과 같은 NULL. 예전엔 빈 목록이 FALSE 로 읽혀 재작성 값에 원본 공시일이 붙었다.
+    CASE WHEN NOT v.is_correction THEN NULL
+         WHEN v.reason_compact LIKE '%재작성%' OR v.reason_compact LIKE '%재감사%'
+              OR v.reason_compact LIKE '%재발행%' OR v.reason_compact LIKE '%소급%'
+              OR v.reason_compact LIKE '%재무제표수정%'                THEN TRUE
+         WHEN v.items IS NULL OR v.items = '[]' THEN NULL
          ELSE (v.items LIKE '%재무제표%' OR v.items LIKE '%재무상태표%'
                OR v.items LIKE '%손익계산서%' OR v.items LIKE '%현금흐름표%'
                OR v.items LIKE '%자본변동표%' OR v.items LIKE '%요약재무%'
@@ -239,7 +255,7 @@ SELECT
                                     + CAST(k.deadline_days_interim AS INTEGER), v.rcept_dt) END
          AS BIGINT)                                                   AS delay_days,
     CASE WHEN v.orig_rcept_no IS NOT NULL THEN 'parsed' ELSE 'n/a' END AS link_basis,
-    v.rcept_dt                                                        AS available_date,
+    v.available_date                                                  AS available_date,
     'derived'                                                         AS available_basis,
     CASE WHEN v.rcept_dt IS NULL THEN 'rcept_dt_missing' END          AS reject_reason
 FROM linked v

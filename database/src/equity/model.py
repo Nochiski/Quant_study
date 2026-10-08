@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.24.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.25.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -209,6 +209,40 @@ RULES_VERSION = "e1.24.0"                # BuildRecord.rules_version 에 실린�
 # e1.23.0: `security.name_abbrv_current`(KRX 약명) 추가(10-05 사용자 지적 — 엑셀이 정식명 '삼화콘덴서공업'을
 #          보였다). 정식명 `name_current` 는 그대로고, fi_universe 이름·compat stock_name 이 약명을 쓴다.
 # e1.24.0: opinion_daily EG8 추정기관수 비교가 wise 0 ≡ v3 NULL(10-06 G-42). 게이트 변경, 산출 불변.
+# e1.25.0: 배포 묶음 4 갈래 4-1(플랜 `docs/plans/2026-10-07-batch4-inputs-excel.md`).
+#          [기업행위 — 4-1a]
+#          C-07(N-26 4.1) `adj_factor` — KRX 기준가가 확정한 ok 계수(사건 교체·unknown_krx)의
+#          available_date = min(announce, apply_date)(정정 공시가 늦거나 신규 행이면 다음 세션으로
+#          접혀 그 세션 가짜 급락·다음 날 급반등, 002070 2026-07-31) + EG3 재계산.
+#          C-04(N-25 Q3) `corp_event` — 기준일이 캘린더 끝 D 뒤인 무상증자는 D 의 KRX 기준가가
+#          비율을 확인할 때만 효력일 D, 아니면 대기(out_of_calendar); 입력 `price_daily`·`security`
+#          (ETF 제외 — 기준가 후보 정합)·상수 `adj_factor.{base_price_tol_rel, price_match_tol_rel,
+#          price_match_tol_abs}` 추가.
+#          C-01(N-25 Q4) 아침 패스 실패 롤백 = latest_morning.json 의 확정판, before 의 모든 표
+#          (산출 불변).
+#          [공시일·정정 — 4-1b, stage 2.6.0 동반]
+#          ① J-41(N-26 4.2) `fin_std` 공개일 원천을 `stg_disclosure.available_date`로 —
+#             stage 보정 공개일(원천 rcept_dt 와 접수번호 날짜 중 늦은 쪽). 박셀바이오
+#             재제출본이 최대 654일 앞당겨 보였다. 그 행은 `available_date > rcept_dt`
+#             (rcept_dt 는 원천 그대로 기간 판정 축). stage 2.6.0 동반.
+#          ② C-11(N-25 Q1) `disclosure_version.corr_has_fin_item` — 정정 사유가 재작성·
+#             재감사·재발행·소급·재무제표수정이면 TRUE, 항목 표가 빈('[]') 정정은 NULL.
+#             원본 공시일 승계가 그 정정에서 멈춘다(재작성 값에 원본 공시일이 붙던
+#             look-ahead).
+#          ③ G-21(N-25 Q2) `fin_std` 그룹 판본을 첫 접수 → **최신 접수**(max rcept_no)로,
+#             값 줄도 그 접수 것만. 일일 수집이 덧붙인 정정 값이 반영되고 ord 가 바뀐
+#             계정의 모호 NULL 이 사라진다. 그 판에 문서가 없으면 같은 정정 사슬
+#             (disclosure_version 링크)의 최신 문서로 기간을 잇는다(`chain_doc` — 없으면 문서
+#             없는 정정이 추정 창 밖일 때 그룹이 통째로 period_unresolved). EG3 기간 증인은 판
+#             자신이고 자기 문서가 없을 때만 같은 사슬(자기 문서 우선 검증), 보충 규모는 기록형
+#             `n_period_end_chain_doc`.
+#          ④ N-26 4.10 `disclosure_version.available_date`·`first_correction_dt` 도 stage 공개일
+#             축으로(J-41 — 재제출본 17행이 최대 654일 앞당겨 보였고 fi filing_late 가 이 축을
+#             쓴다).
+#             `rcept_dt`·`delay_days`·`date_check` 는 원천 rcept_dt 그대로.
+#          게이트: EG3_fin_std 의 `n_available_ne_rcept_dt`·`n_orig_filing_unwitnessed` 와
+#          EG3_disclosure_version 의 `n_available_ne_rcept_dt`·`n_corrections_mismatch` 가 stage
+#          공개일 축으로(이름은 그대로), EG8 그룹 조인 키가 max(rcept_no) 로.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

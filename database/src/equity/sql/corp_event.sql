@@ -20,7 +20,8 @@
 -- **범위 밖(scope_out)은 격리가 아니라 모집단 밖이다** — 조정할 가격이 없는 사건(서버 1차 빌드
 -- 실측: 사업보고서가 창립 이래 자본 변동을 회고 기재해 1963년 사건까지 실린다). 행을 내지 않고
 -- EG3_corp_event 가 건수만 기록한다:
---   out_of_calendar  효력일이 trading_calendar [min, max] 밖(DART 결정공시·자본변동 공통)
+--   out_of_calendar  효력일이 trading_calendar [min, max] 밖(DART 결정공시·자본변동 공통). 기준일이
+--                    캘린더 끝 뒤인 무상증자 중 KRX 기준가가 확인하지 않은 것(C-04 대기)도 여기다
 --   unlisted_class   상장 티커가 없는 주식 종류(RCPS·전환우선주 등 UNLISTED_KINDS, 또는 우선주
 --                    계열인데 법인에 상장 우선주가 없음, 결정공시의 기타주식도 같은 규칙)
 --   class_unknown    종류 어휘 밖('-' 포함) — 어느 티커의 사건인지 정할 수 없다
@@ -34,7 +35,8 @@
 -- effective_date = **가격 축 효력일** (계수는 date >= effective_date 인 가격·거래량에 곱한다):
 --   bonus  : 권리락일 = 신주배정기준일 직전 거래일(trading_calendar) — 절단본 실측 247540 2022-06-27
 --            (기준일 06-28, 종가 497,400 → 135,900). DART 자본변동의 isu_dcrs_de 도 배정기준일이라
---            두 원천이 같은 effective_date 로 접힌다.
+--            두 원천이 같은 effective_date 로 접힌다. 기준일이 캘린더 끝 D 뒤(미래)면 D 의 KRX
+--            기준가가 비율을 확인할 때만 D, 아니면 대기(out_of_calendar) — 아래 C-04 절.
 --   capred : 감자기준일(cr_std / isu_dcrs_de). 기준일은 매매거래정지 구간 안이라 그 뒤 첫 거래일
 --            (변경상장일)부터 계수가 적용된다.
 --   split·reverse_split : KRX 액면가가 바뀐 날 = 변경상장일(정지 해제 첫 거래일). 005930 2018-05-04.
@@ -195,6 +197,37 @@ dart AS (
     UNION ALL SELECT * FROM tsstk_aq
     UNION ALL SELECT * FROM cvbd_is
 ),
+-- ── C-04 (N-25 Q3, e1.25.0): 기준일이 그 판 캘린더 밖(미래)인 무상증자 ─────────────────────
+-- 권리락일 = 기준일 직전 거래일인데 기준일이 캘린더 끝 D 뒤면 그 거래일은 D 이후 어딘가다. 옛 식
+-- (캘린더에서 기준일 미만 최대)은 기준일이 D+10 이어도 D 를 냈고, adj_factor 가 그 가짜 효력일에
+-- 소액 경로(가격 확인 없음)로 ok 계수를 붙이거나 no_price_match 로 D 를 미해결 표시했다.
+-- 그래서 **D 의 KRX 기준가가 비율을 확인할 때만** 효력일 D, 아니면 NULL → pool out_of_calendar
+-- (대기 — 다음 판이 캘린더를 넓히면 다시 판정한다). '캘린더 밖이면 NULL' 로만 고치면 권리락 당일
+-- 빌드(기준일 = D 다음 거래일, D 에 기준가 점프)에서 사건이 빠진다.
+-- 확인 = adj_factor S06-2 (a) 의 짝 규칙(같은 상수를 adj_factor 네임스페이스에서 복제 없이 읽는다):
+--   r = D 의 기준가 / 직전 행 종가, |r − 1| > base_price_tol_rel 이고
+--   |r × ratio − 1| ≤ max(price_match_tol_rel × m, price_match_tol_abs), m = |min(ratio, 1/ratio) − 1|.
+--   후보 집합도 bp 와 같다 — ETF(security.sec_type = 'etf')·구간 첫날(security_span.first_date = D,
+--   재상장 첫 행의 '직전 행' 은 옛 구간 종가)은 확인에 쓰지 않는다.
+fut_bonus_tk AS (
+    SELECT DISTINCT l.ticker
+    FROM dart d
+    JOIN legs l ON l.corp_code = d.corp_code AND l.cls = d.cls
+    WHERE d.event_type = 'bonus' AND d.basis_date > (SELECT cal_max FROM cal_bounds)
+),
+end_base AS (
+    -- 그 티커들의 D 행 r (직전 **행** 종가 대비 — adj_factor bp 와 같은 축, 참고가 행 포함)
+    SELECT x.ticker, x.base_price_krw / x.prev_close AS r
+    FROM (SELECT p.ticker, p.date, p.base_price_krw,
+                 lag(p.close) OVER (PARTITION BY p.ticker ORDER BY p.date) AS prev_close
+          FROM price_daily p
+          WHERE p.ticker IN (SELECT ticker FROM fut_bonus_tk)
+            AND p.ticker NOT IN (SELECT ticker FROM security WHERE sec_type = 'etf')) x
+    WHERE x.date = (SELECT cal_max FROM cal_bounds)
+      AND x.prev_close > 0 AND x.base_price_krw IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM security_span sp
+                      WHERE sp.ticker = x.ticker AND sp.first_date = x.date)
+),
 dart_leg AS (
     -- announce 폴백: rcept_no 14자리 = 접수일 YYYYMMDD + 일련번호 6자리 → '%Y%m%d%f'(%f = 6자리)
     -- 로 한 번에 파싱해 날짜만 취한다(참조표 미스 → stage available_date NULL·basis unknown).
@@ -206,12 +239,22 @@ dart_leg AS (
                     CAST(try_strptime(d.rcept_no, '%Y%m%d%f') AS DATE))    AS announce_date,
            CASE WHEN d.available_date IS NOT NULL THEN d.available_basis
                 ELSE 'derived' END                                          AS available_basis,
-           CASE WHEN d.event_type = 'bonus'
-                THEN (SELECT max(c.date) FROM cal c WHERE c.date < d.basis_date)
-                ELSE d.basis_date END                                       AS effective_date,
+           CASE WHEN d.event_type <> 'bonus' THEN d.basis_date
+                WHEN d.basis_date <= b.cal_max
+                     THEN (SELECT max(c.date) FROM cal c WHERE c.date < d.basis_date)
+                WHEN d.basis_date > b.cal_max
+                     AND abs(eb.r - 1) > k.base_price_tol_rel
+                     AND abs(eb.r * d.ratio - 1)
+                         <= greatest(k.price_match_tol_rel * abs(least(d.ratio, 1 / d.ratio) - 1),
+                                     k.price_match_tol_abs)
+                     THEN b.cal_max
+           END                                                              AS effective_date,
            'disclosure_body'                                                AS effective_basis
     FROM dart d
+    CROSS JOIN cal_bounds b
+    CROSS JOIN _const k
     LEFT JOIN legs l ON l.corp_code = d.corp_code AND l.cls = d.cls
+    LEFT JOIN end_base eb ON eb.ticker = l.ticker
 ),
 -- ── KRX 액면가 변경 (직전 거래일 대비) ───────────────────────────────────────
 listing AS (

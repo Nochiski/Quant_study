@@ -19,6 +19,12 @@ v3 `backend/scoring/engine.py`·`factors/{momentum,revision,flow,quality,valuati
   - 퀄리티는 연간 확정 재무 행이 하나도 없으면 가격만으로 되는 std_20d 도 만들지 않는다
     (`quality.py:78-79`). 하위 지표가 두 종목 미만이면 그 지표 z 는 0.0(`quality.py:44-47`).
   - `adj_ok`(DQ-1 미해결 구간)은 읽지 않는다 — v3 에 그 개념이 없다.
+
+spec 파라미터로만 켜는 원본 밖 규칙(v3_zscore@1.0 은 끈 채로 원본과 같다):
+  - `quality.min_period_months`(scope, G-28 · N-25 Q5): 연간 행 기간
+    (`fi_fin_summary.period_months`)이 이보다 짧으면(짧은 첫 사업연도) 그 행을 퀄리티 손익
+    지표(gpa·roa·fcf_assets·gpa_change)에 쓰지 않는다. 기간을 모르면(NULL) 쓴다.
+    부채비율·변동성은 그대로.
 """
 from __future__ import annotations
 
@@ -303,10 +309,20 @@ def _return_std(prices: Sequence[float]) -> float | None:
     return statistics.stdev(returns)
 
 
+def _full_year(row: Row, min_period_months: int | None) -> bool:
+    """손익 지표에 쓸 연간 행인가 — 규칙이 꺼졌거나(None) 기간을 모르면(NULL) 쓴다(G-28)."""
+    if min_period_months is None:
+        return True
+    months = row["period_months"]
+    return months is None or months >= min_period_months
+
+
 def _quality_raw(annual: Mapping[str, Sequence[Row]], codes: Sequence[str],
-                 histories: Mapping[str, Sequence[float]]) -> dict[str, dict[str, float]]:
+                 histories: Mapping[str, Sequence[float]],
+                 min_period_months: int | None = None) -> dict[str, dict[str, float]]:
     """v3 `quality.py:66-115` — 최신 연간 2기에서 gpa·roa·fcf_assets·debt_ratio·gpa_change,
-    가격 이력에서 std_20d."""
+    가격 이력에서 std_20d. `min_period_months` 를 주면 그보다 짧은 기는 손익 지표에서 뺀다
+    (최신 기 → gpa·roa·fcf_assets·gpa_change, 전기 → gpa_change, G-28)."""
     raw: dict[str, dict[str, float]] = {}
     for code in codes:
         rows = annual.get(code, [])[:2]
@@ -315,16 +331,17 @@ def _quality_raw(annual: Mapping[str, Sequence[Row]], codes: Sequence[str],
         m: dict[str, float] = {}
         latest = rows[0]
         gp, ta = latest["gross_profit"], latest["total_assets"]
-        if gp is not None and ta is not None and ta > 0:
-            m["gpa"] = gp / ta
-        if latest["roa"] is not None:
-            m["roa"] = latest["roa"]
-        fcf = latest["fcf"]
-        if fcf is not None and ta is not None and ta > 0:
-            m["fcf_assets"] = fcf / ta
+        if _full_year(latest, min_period_months):
+            if gp is not None and ta is not None and ta > 0:
+                m["gpa"] = gp / ta
+            if latest["roa"] is not None:
+                m["roa"] = latest["roa"]
+            fcf = latest["fcf"]
+            if fcf is not None and ta is not None and ta > 0:
+                m["fcf_assets"] = fcf / ta
         if latest["debt_ratio"] is not None:
             m["debt_ratio"] = latest["debt_ratio"]
-        if len(rows) >= 2 and "gpa" in m:
+        if len(rows) >= 2 and "gpa" in m and _full_year(rows[1], min_period_months):
             prev_gp, prev_ta = rows[1]["gross_profit"], rows[1]["total_assets"]
             if prev_gp is not None and prev_ta is not None and prev_ta > 0:
                 prev_gpa = prev_gp / prev_ta
@@ -417,7 +434,8 @@ class V3ZScoreEngine:
         rev, rev_raw = _revision(inputs, codes, d, p["revision"]["metrics"],
                                  p["revision"]["periods"])
         flow, flow_raw = _flow(inputs, codes, caps, d, p["flow"]["sub_weights"])
-        qual_raw = _quality_raw(annual, codes, histories)
+        qual_raw = _quality_raw(annual, codes, histories,
+                                p["quality"].get("min_period_months"))
         qual = _score_subs(qual_raw, p["quality"]["sub_weights"], QUALITY_REVERSE)
         val_raw = _valuation_raw(annual, codes)
         val = _score_subs(val_raw, p["valuation"]["sub_weights"], VALUATION_REVERSE)

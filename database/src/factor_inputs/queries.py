@@ -490,8 +490,9 @@ _FIN_Q_SLOTS = "\n    UNION ALL\n    ".join(
     "SELECT ticker, fetched_date, acc_nm, "
     f"period_{i} AS period, is_est_{i} AS is_est, basis_{i} AS basis, val_{i} AS val FROM wqcur"
     for i in range(1, 7))
-# 분기 매출 계정(최상위 행, 10-01 실측) — 일반 '매출액(수익)' · 보험 '영업수익'(총액) → gross,
+# 매출 계정(최상위 행, 10-01 실측) — 일반 '매출액(수익)' · 보험 '영업수익'(총액) → gross,
 # 은행·증권·금융지주 '순영업이익'(순액) → net. 영업이익은 발표기준 우선(네이버·DART 와 같은 정의, DQ-12).
+# 연간(cF3002)도 같은 계정·순서로 고른다(배포 묶음 4-2b — 이름의 Q 는 처음 쓴 곳이 분기라서다).
 WISE_Q_REVENUE_GROSS: tuple[str, ...] = ("매출액(수익)", "영업수익")
 WISE_Q_REVENUE_NET = "순영업이익"
 # 지주사 — 별도 재무는 사실상 자회사 배당이라 연결이 없는 분기를 별도로 대체하지 않는다(10-01 사용자).
@@ -533,9 +534,17 @@ def fin_summary_sql(p: Params) -> str:
         'YYYY/MM') — v4 DY0 재료(계약 09-29 추가). 모르면 NULL(무배당 = 0 은 엔진이 정한다).
         분기 행 NULL.
       · `available_date` = 행을 이룬 원천들의 max(WISE fetched_date, DART·배당 available_date).
+      · 연간 매출은 분기와 같은 계정(`WISE_Q_REVENUE_*`)으로 고르고 `revenue_basis` 를 적는다 —
+        compat 은 '매출액(수익)' 만 봐서 금융업 연간 매출이 비었다(배포 묶음 4-2b, v3 는 매출을
+        읽지 않으므로 G-M3 동등성과 무관).
+      · `period_months`(연간만) = DART fin_std period_start~period_end 개월 수(양끝 달 포함 —
+        fin_std 의 1분기·3분기 판정과 같은 식). 짧은 첫 사업연도 표식(G-28, N-25 Q5).
     op_margin·ni_margin·yoy 는 compat 과 같이 NULL(계산은 엔진 몫).
     """
     eok = f"{KRW_PER_EOK}.0"
+    # 연간 매출 — 총액 계정을 순서대로, 없으면 순액(분기 wq 와 같은 우선순위)
+    w_gross = ", ".join(_fin_pick("cF3002", "", True, n) for n in WISE_Q_REVENUE_GROSS)
+    w_net = _fin_pick("cF3002", "", True, WISE_Q_REVENUE_NET)
     inner = f"""WITH wsnap AS (
     SELECT w.ticker, max(w.fetched_date) AS fetched_date
     FROM stg_fin_wise w
@@ -562,7 +571,9 @@ parsed AS (
 wise AS (
     SELECT ticker,
            yyyy || '/' || mm                                      AS period,
-           {_fin_pick('cF3002', '200000', True, '매출액(수익)')}  AS w_revenue,
+           coalesce({w_gross}, {w_net})                          AS w_revenue,
+           CASE WHEN coalesce({w_gross}) IS NOT NULL THEN 'gross'
+                WHEN {w_net} IS NOT NULL THEN 'net' END          AS w_revenue_basis,
            {_fin_pick('cF3002', '201370', True, '영업이익')}      AS w_op,
            {_fin_pick('cF3002', '203170', True, '당기순이익')}    AS w_ni,
            {_fin_pick('cF4002', '312000', True)}                  AS w_eps,
@@ -662,7 +673,8 @@ dart AS (
            f.gross_profit     AS d_gross_profit,
            f.capex_basis      AS d_capex_basis,
            f.fs_div           AS d_fs_div,
-           f.available_date   AS d_available
+           f.available_date   AS d_available,
+           date_diff('month', f.period_start, f.period_end) + 1 AS d_period_months
     FROM fin f JOIN dsec s ON s.corp_code = f.corp_code
     WHERE f.rn = 1 AND f.report_code = '{ANNUAL_REPORT}'
 ),
@@ -671,9 +683,10 @@ act AS (
            coalesce(w.period, d.period) AS period,
            w.w_revenue, w.w_op, w.w_ni, w.w_eps, w.w_bps, w.w_per, w.w_pbr,
            w.w_ev_ebitda, w.w_dividend_yield, w.w_shares, w.w_gross_profit, w.w_fs_basis,
-           w.w_fetched,
+           w.w_fetched, w.w_revenue_basis,
            d.d_total_asset, d.d_total_liab, d.d_total_equity, d.d_net_income,
-           d.d_cf_op, d.d_capex, d.d_gross_profit, d.d_capex_basis, d.d_fs_div, d.d_available
+           d.d_cf_op, d.d_capex, d.d_gross_profit, d.d_capex_basis, d.d_fs_div, d.d_available,
+           d.d_period_months
     FROM wise w
     FULL OUTER JOIN dart d ON d.ticker = w.ticker AND d.period = w.period
 ),
@@ -734,7 +747,8 @@ SELECT ticker, period, 'annual' AS period_type,
        CAST(round(d_total_asset / {eok}) AS BIGINT)                     AS total_assets,
        coalesce(w_fs_basis, 'DART:' || d_fs_div)                        AS fs_basis,
        d_capex_basis                                                    AS capex_basis,
-       CAST(NULL AS VARCHAR)                                            AS revenue_basis,
+       w_revenue_basis                                                  AS revenue_basis,
+       CAST(d_period_months AS INTEGER)                                 AS period_months,
        greatest(w_fetched, d_available, dv_available)                   AS available_date
 FROM annual
 WHERE k <= {FIN_ANNUAL_PERIODS}
@@ -754,6 +768,7 @@ SELECT ticker, period, 'quarter' AS period_type,
        'DART:' || fs_div                                                AS fs_basis,
        capex_basis,
        CAST(NULL AS VARCHAR)                                            AS revenue_basis,
+       CAST(NULL AS INTEGER)                                            AS period_months,
        available_date
 FROM qtr
 WHERE k <= {FIN_QUARTERS} AND ticker NOT IN (SELECT ticker FROM wqsnap)
@@ -778,6 +793,7 @@ SELECT w.ticker, w.period, 'quarter' AS period_type,
                    THEN '|지주사제외' ELSE '' END                       AS fs_basis,
        CAST(NULL AS VARCHAR)                                            AS capex_basis,
        w.q_revenue_basis                                                AS revenue_basis,
+       CAST(NULL AS INTEGER)                                            AS period_months,
        w.q_fetched                                                      AS available_date
 FROM wq w
 LEFT JOIN hold h ON h.ticker = w.ticker
@@ -837,6 +853,9 @@ GAPS: tuple[dict[str, str], ...] = (
     {"table": "fi_fin_summary", "column": "annual(비12월 결산)",
      "reason": "compat DQ-11 미러 — 결산월 12 만 annual. 비12월 결산 연간 확정치(전 시장 12종목, "
                "09-23 유니버스 0)는 싣지 않는다(quarter 로 두면 3개월 분기 행과 섞인다)"},
+    {"table": "fi_fin_summary", "column": "period_months",
+     "reason": "연간 행만 — DART 연간 행이 없거나(WISE 만) fin_std period_start(문서 메타)가 "
+               "없으면 NULL(모름 — scope 는 빼지 않는다, G-28). 분기 행 NULL"},
     {"table": "fi_fin_summary", "column": "op_margin,ni_margin,yoy",
      "reason": "compat 과 같이 NULL — 계산은 엔진 몫(원천 WISE·DART 에 직접 열이 없다)"},
     {"table": "fi_fin_summary", "column": "quarter:eps,bps,per,pbr,ev_ebitda,dividend_yield,"

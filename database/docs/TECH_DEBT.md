@@ -1292,3 +1292,18 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
   - 키움 마스터 — 무관. `kiwoom.master` 는 snap_date=D(전날 06:00 스냅샷, `ledger_health.py:304-307`)를 본다.
   - `QL_SKIP_KW=1`(운영 크론엔 없음)이면 키움 판정이 통째로 빠져 아무것도 막지 않는다 — KIS 한 세션 뒤·DART 아침 재확인 없는 확정판이 조용히 지어진다.
 - **위험성**: 운영 정지·비결정(풀리는 순서가 실행마다 다르다). 그 D 확정판과 일간 엑셀이 그날 빠지고(10:30 워치독 crit), 손 재빌드(README 'DART 완료 판정 실패 · 놓친 확정판' 2번 — 06:00 이 끝난 뒤, 16:30 전)가 필요하다. 원장 손상은 없다 — 게이트가 막고, 대차 D 행은 다음 날 06:00 fetch 가 과거 100행을 함께 받아(`kw_daily.py` 머리말 '1회 실행 = 유니버스 × 4콜', `insert_rows` 가 응답 전 행 적재) 다음 08:10 머지에 들어간다. `QL_SKIP_KW` 가 켜진 날만 silent 부분판이다. 지금은 고치지 않는다(10-08 오케스트레이터 판정). 고칠 때의 후보는 08:10 이 락을 잡은 뒤 그날 `ledger_chain` 런 로그(06:00 완료)를 확인하거나, 06:00 대기자가 있으면 양보하는 것 — 체인이 멈추는 조건이라 사람 결정(P3).
+
+### B-63: 컨센서스 월간 G8 핫픽스(10-09) 후속 — 같은 blob 안 라벨 중복의 한쪽 결측, 한쪽 결측 상한 없음, 순서 커버리지
+
+10-09 핫픽스 1425a9ba 가 5001·5002 사이 '한쪽만 빈 값'을 `n_one_side_null`(기록만)로 갈랐다. 검토에서 남은 것 셋(모두 하, 배포는 막지 않음).
+
+- **상황**: WISE `ws_raw` cF5001·cF5002 blob 을 `stage/parsers.py` `parse_consensus_monthly` 가 좌표별로 합친다. G8(`stage/gates.py` `g8_parse_equation`)은 `n_value_mismatch > 0` 이면 그 표의 새 판을 폐기한다.
+- **인풋**:
+  1. 같은 blob 안에서 라벨이 반복되는데(5002 응답은 마지막 라벨 반복이 정상 모양) 반복 칸 중 한쪽만 빈 값.
+  2. WISE 가 cF5001 을 대량으로 비워 보냄(칸 수십 %).
+  3. 한 5001 blob 안에 같은 metric 차트가 둘(예: 둘 다 알 수 없는 항목명)이고 한쪽만 빈 값, blob 순서 [5002, 5001].
+- **에러 위치**:
+  1. `stage/parsers.py` `seen` 경로(같은 blob 라벨 중복) — None 대 값을 여전히 `n_value_mismatch` 로 센다.
+  2. `stage/gates.py` G8 — `n_one_side_null` 에 상한·알림이 없다(equity 쪽 `rules_s17.py` `n_mean_null` 도 기록만).
+  3. `stage/parsers.py` 5001 분기의 `cross(val, row["consensus"])` — 5002 가 먼저 오면 직전 5001 차트 값과 비교해 `n_one_side_null` 이 순서에 따라 0 또는 2(방출 행·G8 판정은 순서와 무관).
+- **위험성**: 1 은 이번과 같은 모양의 운영 정지(시끄러운 실패, 오염 없음) — 현재 원장엔 0건. 2 는 조용한 결측 확대(consensus None 대량 방출, 알림 없음). 3 은 기록 지표 비결정(판정 영향 없음). 진짜 충돌 회귀 테스트가 5001 먼저인 순서만 본다(`tests/test_stage_consensus.py` — parametrize 로 막을 수 있다). 고칠 때: 1 은 같은 규칙(한쪽 결측 = 기록) 적용 여부 결정, 2 는 비율 임계 또는 세션 시작 보고 항목, 3 은 테스트 순서 parametrize.

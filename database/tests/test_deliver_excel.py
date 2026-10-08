@@ -1478,13 +1478,13 @@ def test_daily_earnings_estimated_prior_year_yoy_is_grey_too(tmp_path: Path) -> 
     ws = load_workbook(res.path)["실적"]
     rows = rows_by_code(ws)
     for occurrence in (0, 1, 2):                       # 매출 · 영업이익 · 순이익
-        c = col_of(ws, "2026", occurrence)
-        est_y = ws.cell(rows[tick(10)], c + 1)          # 2026 = 추정치 → y-y 회색
+        yy = col_of(ws, "2026 y-y(%)", occurrence)       # y-y 칸은 머리글로 찾는다(위치 가정 없음)
+        est_y = ws.cell(rows[tick(10)], yy)             # 2026 = 추정치 → y-y 회색
         assert est_y.value is not None and est_y.font.color.rgb.endswith("7F7F7F")
-        act_y = ws.cell(rows[tick(0)], c + 1)           # 2026 = 확정치 → y-y 그대로
+        act_y = ws.cell(rows[tick(0)], yy)              # 2026 = 확정치 → y-y 그대로
         assert act_y.font.color is None or not act_y.font.color.rgb.endswith("7F7F7F")
     grey = {code for code, r in rows.items()
-            if (f := ws.cell(r, col_of(ws, "2026") + 1).font).color is not None
+            if (f := ws.cell(r, col_of(ws, "2026 y-y(%)")).font).color is not None
             and f.color.rgb.endswith("7F7F7F")}
     est = {code for code, r in rows.items()
            if '"E"' in ws.cell(r, col_of(ws, "2026")).number_format}
@@ -1878,11 +1878,70 @@ def test_v4_score_sheet_axes_stay_percentiles(daily) -> None:
 
 def test_group_z_falls_back_to_universe_value() -> None:
     from deliver.common import group_z
-    vals = {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0, "f": 0.7, "g": 0.7, "h": 9.0}
+    # Y 는 표준편차가 0 이 아닌 2종목 — 표본 문턱(< 5)만으로 되돌아가는지 따로 본다
+    vals = {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0, "f": 0.7, "g": 1.4, "h": 9.0}
     grp = {"a": "X", "b": "X", "c": "X", "d": "X", "e": "X", "f": "Y", "g": "Y", "h": None}
     out = group_z(vals, grp, 5)
     assert out["c"] == pytest.approx(0.0) and out["e"] == pytest.approx(_sector_z(
         [1.0, 2.0, 3.0, 4.0, 5.0], 5.0))
-    assert out["f"] == 0.7 and out["g"] == 0.7 and out["h"] == 9.0   # 표본 < 5 · 업종 없음
+    assert out["f"] == 0.7 and out["g"] == 1.4 and out["h"] == 9.0   # 표본 < 5 · 업종 없음
     same = group_z({k: 1.5 for k in "abcde"}, dict.fromkeys("abcde", "X"), 5)
     assert all(v == 1.5 for v in same.values())                        # 표준편차 0
+
+
+# ── 4-2a 수정분 검토 후속(10-08) ─────────────────────────────────────────────────
+def test_group_z_min_size_one_does_not_crash_on_a_single_member_sector() -> None:
+    """min_sector_size ≤ 1 인 spec 이면 종목 하나인 대분류에서 표본 표준편차를 구할 수 없다 —
+    옛 코드는 `statistics.stdev` StatisticsError 로 엑셀 생성 rc 3. 2 미만은 늘 유니버스 z."""
+    from deliver.common import group_z
+    vals = {"a": 1.0, "b": 2.0, "c": 3.0}
+    out = group_z(vals, {"a": "X", "b": "Y", "c": "Y"}, 1)
+    assert out["a"] == 1.0                                              # 혼자인 X 는 그대로
+    assert out["b"] == pytest.approx(_sector_z([2.0, 3.0], 2.0))       # 2종목 Y 는 다시 z
+
+
+def test_quality_vol_only_needs_a_volatility_value() -> None:
+    """G-27 표기 음성 — 퀄리티 손익 지표가 다 비어도 qual_std_20d 까지 비면(퀄리티 자체가 없음)
+    '퀄리티 = 변동성만' 비고를 붙이지 않는다. 손익 지표가 하나라도 있거나 z 엔진이 아니어도
+    붙지 않는다."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from deliver.excel_daily import QUALITY_PL_KEYS, quality_vol_only
+    from deliver.view import DayView
+    empty = dict.fromkeys(QUALITY_PL_KEYS)
+    rows = {"vol": {**empty, "qual_std_20d": 0.02}, "none": {**empty, "qual_std_20d": None},
+            "pl": {**empty, "qual_roa": 3.0, "qual_std_20d": 0.02}}
+
+    def view(z: bool) -> DayView:
+        return cast(DayView, SimpleNamespace(z_engine=z, by_ticker=rows))
+    assert quality_vol_only(view(True), "vol")
+    assert not quality_vol_only(view(True), "none")
+    assert not quality_vol_only(view(True), "pl")
+    assert not quality_vol_only(view(False), "vol")
+
+
+def _net_revenue_no_estimate(table: str, rows: list[dict[str, object]]) -> None:
+    """12번 = 순액 두 해(2024·2025) + 2026 결산기 cur 컨센서스 없음 → 견줄 YE 추정치가 없다."""
+    _net_revenue(table, rows)
+    if table == "fi_consensus":
+        rows[:] = [r for r in rows if not (r["ticker"] == tick(12) and r["horizon"] == "cur"
+                                           and r["target_period"] == "2026/12")]
+
+
+def test_net_revenue_note_only_when_a_yoy_cell_was_blanked(tmp_path: Path) -> None:
+    """순액 매출 비고는 실제로 비운 y-y 칸이 있을 때만 붙인다. 견줄 추정치(YE 컨센서스)가 없어
+    y-y 칸이 원래 비는 종목에 '총액 추정치와 y-y 비교 안 함'을 달면 없는 비교를 말한다(옛 코드)."""
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, FRI, write_fi_day(fi_root, FRI, edit=_net_revenue_no_estimate))
+    wb = load_workbook(build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root,
+                                   out_root=tmp_path).path)
+    ws = wb["실적"]
+    r12 = rows_by_code(ws)[tick(12)]
+    assert ws.cell(r12, col_of(ws, "2026E", 0)).value is None             # 견줄 추정치 없음
+    assert ws.cell(r12, col_of(ws, "2026E y-y(%)", 0)).value is None       # 원래 빈 칸
+    assert isinstance(ws.cell(r12, col_of(ws, "2025 y-y(%)", 0)).value, int | float)  # 순액끼리
+    sc = wb["점수"]
+    srows = rows_by_code(sc)
+    assert sc.cell(srows[tick(12)], header(sc)["비고"]).value is None
+    assert sc.cell(srows[tick(13)], header(sc)["비고"]).value == NET_NOTE  # 실제로 비운 칸 있음

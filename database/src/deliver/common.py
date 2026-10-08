@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 from model.engines.v4_rank import pct_rank_avg
 
+from .stats import quantile
+
 # ── 라벨 ─────────────────────────────────────────────────────────────────────
 BUCKET_LABELS: dict[str, str] = {
     "low_risk": "저위험", "value": "밸류", "quality": "퀄리티", "pull": "고점근접+반전",
@@ -161,14 +163,6 @@ def change_pct(cur: float | None, prev: float | None) -> tuple[float | None, str
 
 
 # ── 통계 ─────────────────────────────────────────────────────────────────────
-def quantile(sorted_vals: Sequence[float], q: float) -> float:
-    """선형 보간 분위수(numpy 기본과 같다). 빈 목록은 호출부가 거른다."""
-    pos = (len(sorted_vals) - 1) * q
-    lo = int(pos)
-    hi = min(lo + 1, len(sorted_vals) - 1)
-    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (pos - lo)
-
-
 def winsorize(values: Sequence[object], lo: float = 0.01, hi: float = 0.99) -> list[object]:
     """숫자만 [1%, 99%] 분위수로 자른다(표시 전용 — 순위·점수에는 쓰지 않는다).
     문자·None 은 그대로."""

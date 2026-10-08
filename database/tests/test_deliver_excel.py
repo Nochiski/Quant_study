@@ -282,6 +282,14 @@ def write_fi_day(fi_root: Path, day: str,
     return bid
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _pin_ql_home(tmp_path_factory: pytest.TempPathFactory):
+    """QL_HOME 을 빈 임시 폴더로 고정 — 개발 머신·서버의 실제 QL_HOME 이 테스트에 새지 않게."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("QL_HOME", str(tmp_path_factory.mktemp("ql_home")))
+        yield
+
+
 @pytest.fixture(scope="module")
 def world(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     root = tmp_path_factory.mktemp("deliver")
@@ -1360,19 +1368,25 @@ def test_exclude_reason_column_fits_every_v4_label(daily) -> None:
 def test_meta_records_excel_time_and_deployed_rev(world: dict[str, Path], tmp_path: Path,
                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     """E-08 — 같은 model 판으로 코드만 바뀐 정정판을 파일로 구별하게 메타에 엑셀 생성 시각과 배포
-    rev(`<QL_HOME>/DEPLOYED.json`, deploy.sh 가 쓴다)를 싣는다. 못 읽으면 '알 수 없음'."""
-    home = tmp_path / "home"
+    rev 를 싣는다. rev 는 **코드 루트**(`src/` 의 부모 — 서버 ~/quant-ledger)의 DEPLOYED.json
+    (deploy.sh 가 쓴다)에서 읽는다 — QL_HOME 은 데이터 루트라 다른 곳을 가리킬 수 있다(검토 사소 2).
+    못 읽으면 '알 수 없음'."""
+    import deliver.reader as reader
+    code, home = tmp_path / "code", tmp_path / "home"
+    code.mkdir()
     home.mkdir()
+    monkeypatch.setattr(reader, "CODE_ROOT", code)
     monkeypatch.setenv("QL_HOME", str(home))
-    (home / "DEPLOYED.json").write_text(json.dumps(
+    (code / "DEPLOYED.json").write_text(json.dumps(
         {"rev": "abc1234", "branch": "main", "at_utc": "2026-10-08T05:00:00Z"}), encoding="utf-8")
+    (home / "DEPLOYED.json").write_text(json.dumps({"rev": "zzz9999"}), encoding="utf-8")
     res = build_daily(FRI, "morning", model_root=world["model"], fi_root=world["fi"],
                       out_root=tmp_path / "a")
     pairs = dict(_meta_pairs(load_workbook(res.path)))
-    assert str(pairs["코드 rev"]).startswith("abc1234")
+    assert pairs["코드 rev"] == "abc1234 · 배포 2026-10-08T05:00:00Z"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", str(pairs["엑셀 생성 시각"]))
     for broken in (None, "{깨진"):
-        p = home / "DEPLOYED.json"
+        p = code / "DEPLOYED.json"
         if broken is None:
             p.unlink()
         else:
@@ -1490,6 +1504,9 @@ def test_display_sheet_defines_roe_roa_debt_from_dart(daily) -> None:
 # ── scope 실물 모양 판(실제 model.build — 주 모델 scope@1.0) ─────────────────────
 # 연간 확정 PER·PBR·배당수익률이 없는 종목 → scope 밸류 버킷 결측(279570 모양)
 NO_VAL = "100007"
+# 연간 행은 있는데(WISE 매출·PER) 손익·자산 재료가 다 빈 종목 → 퀄리티 = 변동성만(241560 모양)
+VOL_ONLY = "100011"
+SCOPE_FI_BID = "m_20260929T000500_000000Z"
 
 
 def _write_fi_tree(b, fi_root: Path, fi_bid: str, day: str) -> None:
@@ -1524,8 +1541,10 @@ def scope_board(tmp_path_factory: pytest.TempPathFactory):
             k = int(str(r["ticker"])) % 11
             r.update(per=6.0 + k, pbr=0.6 + 0.1 * k, dividend_yield=0.5 + 0.2 * k, roa=2.0 + k,
                      debt_ratio=60.0 + 5 * k, gross_profit=100.0 + 3 * k)
+        if r["period_type"] == "annual" and r["ticker"] == VOL_ONLY:
+            r.update(roa=None, debt_ratio=None, gross_profit=None, fcf=None, total_assets=None)
     fi_root = root / "fi"
-    _write_fi_tree(b, fi_root, "m_20260929T000500_000000Z", "2026-09-28")
+    _write_fi_tree(b, fi_root, SCOPE_FI_BID, "2026-09-28")
     res = mbuild.build("20260928", "morning", root / "model", fi_root,
                        min_prices_on_d=10, min_ranked=10)
     assert res.ok and res.primary_spec == "scope@1.0", res.specs
@@ -1533,7 +1552,7 @@ def scope_board(tmp_path_factory: pytest.TempPathFactory):
                     out_root=root / "out")
     scores = {str(r["stock_code"]): r for r in duckdb_rows(
         root / "model" / "scope@1.0" / f"v={res.build_id}" / "scores.parquet")}
-    return res, load_workbook(d.path), scores
+    return res, load_workbook(d.path), scores, root
 
 
 def duckdb_rows(path: Path) -> list[dict[str, object]]:
@@ -1551,7 +1570,7 @@ def test_scope_bucket_missing_is_marked_and_counted(scope_board) -> None:
     """E-02(N-26 4.5) — scope 는 지표 긴 표가 0행이라 옛 코드는 `t in view.ind` 로 '점수 대상'을
     가려 결측 버킷을 빈칸으로 두고 결측 축·메타 결측 수를 0 으로 냈다. 점수 행이 있으면 점수 대상:
     빈 버킷 = '결측(원천없음)', 결측 축 = 밸류, 메타 '축별 결측 수' 밸류 1."""
-    _, wb, scores = scope_board
+    _, wb, scores, _ = scope_board
     assert scores[NO_VAL]["valuation_score"] is None
     assert all(r["valuation_score"] is not None for t, r in scores.items() if t != NO_VAL)
     ws = wb["점수"]
@@ -1591,7 +1610,7 @@ def test_scope_raw_sheet_carries_the_score_table_raw_columns(scope_board) -> Non
     싣는다. 옛 코드는 지표 긴 표(v4 전용)만 읽어 scope 원자료 시트가 코드·이름·기준 열뿐이었다
     (10-02 발송본)."""
     from model.contracts import V3_SCORE_COLUMNS
-    _, wb, scores = scope_board
+    _, wb, scores, _ = scope_board
     assert set(SCOPE_RAW_HEADERS) <= set(V3_SCORE_COLUMNS) and len(SCOPE_RAW_HEADERS) == 33
     ws = wb["점수 원자료"]
     h, rows = header(ws), rows_by_code(ws)
@@ -1618,12 +1637,14 @@ def test_scope_sector_sheet_fills_per_revision_and_return(scope_board) -> None:
     """E-10(Q7) — 업종 시트 '업종 지표' 3열을 scope 점수 표 원값으로 채운다: PER 중앙값(val_per) ·
     리비전 상향 비율(op_change_1m > 0, 값 있는 종목 중) · 1M 수익률(r1m 시총가중 × 100).
     옛 코드는 v4 지표 긴 표만 봐서 scope 판에선 세 열이 전부 빈칸이었다."""
-    res, wb, scores = scope_board
+    res, wb, scores, root = scope_board
     ws = wb["업종"]
     h = header(ws)
     first = {ws.cell(r, h["코드"]).value: r for r in range(8, ws.max_row + 1)
              if ws.cell(r, h["구분"]).value == "대분류"}
-    caps = {f"{100000 + i:06d}": 1000.0 + 37.0 * i for i in range(40)}
+    caps = {str(r["ticker"]): r["market_cap"] for r in duckdb_rows(
+        root / "fi" / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+        if isinstance(r["market_cap"], float)}
     for code, r in first.items():
         members = [t for t in scores if ("G10", "G20", "G30")[(int(t) - 100000) % 3] == code]
         per = [scores[t]["val_per"] for t in members if scores[t]["val_per"] is not None]
@@ -1642,7 +1663,7 @@ def test_v4_comparison_columns_are_left_out_until_fixed(scope_board) -> None:
     '모델 비교' 시트에서 뺀다. v3 원본·v2 원본 비교와 '최대 차이'(남은 모델끼리)는 남고, 메타에
     한 줄 남긴다.
     v4 판 계산·저장은 그대로다(판 게이트 줄도 그대로)."""
-    res, wb, _ = scope_board
+    res, wb, _, _ = scope_board
     assert {"v4_rank@0.1", "v4_rank@0.2"} <= set(res.specs)
     sc, mc = wb["점수"], wb["모델 비교"]
     for ws in (sc, mc):
@@ -1660,3 +1681,112 @@ def test_v4_comparison_columns_are_left_out_until_fixed(scope_board) -> None:
     assert "N-27" in left_out and "v4_rank@0.1" in left_out and "v4_rank@0.2" in left_out
     assert "v4_rank" not in str(meta["비교 모델"])
     assert "판 게이트 v4_rank@0.1" in meta                                   # 판은 그대로
+
+
+# ── 4-2a 검토 후속(G-27 표기 · 순액 매출 y-y · 원값 열 부분 결측 · insert_after) ─────────────
+VOL_ONLY_NOTE = "퀄리티 = 변동성만(손익 지표 없음)"
+NET_NOTE = "매출 = 순영업이익(순액) — 총액 추정치와 y-y 비교 안 함"
+
+
+def test_scope_volatility_only_quality_is_noted(scope_board) -> None:
+    """G-27(컨트롤러 결정) — scope 점수 행의 퀄리티 손익 지표(qual_gpa·roa·fcf_assets·debt_ratio·
+    gpa_change)가 다 비고 변동성(qual_std_20d)만 있으면 비고에 '퀄리티 = 변동성만(손익 지표 없음)'.
+    원인(외화 재무 등)은 적지 않는다 — 다른 이유로 비는 종목도 있다(477850·0011T0)."""
+    _, wb, scores, _ = scope_board
+    row = scores[VOL_ONLY]
+    assert row["qual_std_20d"] is not None and row["quality_score"] is not None
+    assert all(row[k] is None for k in ("qual_gpa", "qual_roa", "qual_fcf_assets",
+                                        "qual_debt_ratio", "qual_gpa_change"))
+    ws = wb["점수"]
+    h, rows = header(ws), rows_by_code(ws)
+    notes = {t: ws.cell(r, h["비고"]).value for t, r in rows.items()}
+    assert VOL_ONLY_NOTE in str(notes[VOL_ONLY]) and "외화" not in str(notes[VOL_ONLY])
+    assert [t for t, n in notes.items() if VOL_ONLY_NOTE in str(n)] == [VOL_ONLY]
+    need = fit_width(Col("note", "비고", "txt", None, 99.0), [{"note": notes[VOL_ONLY]}])
+    assert ws.column_dimensions[ws.cell(7, h["비고"]).column_letter].width >= need   # 잘리지 않게
+
+
+def _net_revenue(table: str, rows: list[dict[str, object]]) -> None:
+    """12번 종목 = 증권사처럼 연간 확정 매출이 순액(순영업이익, fi1.2.0 `revenue_basis` 'net')
+    두 해, 13번 = 2025 만 순액(2024 총액). 컨센서스 매출은 총액 그대로."""
+    if table == "fi_fin_summary":
+        for r in rows:
+            net = r["ticker"] == tick(12) or (r["ticker"] == tick(13) and r["period"] == "2025/12")
+            if r["period_type"] == "annual" and net:
+                r["revenue_basis"] = "net"
+
+
+def test_net_revenue_yoy_against_gross_estimate_is_left_blank(tmp_path: Path) -> None:
+    """4-2b 명세 검토 #1 — 확정 매출이 순액(순영업이익)인데 추정치는 총액이라 2025 순액 대 2026E
+    총액 y-y 가 가짜 급증(현장 증권·카드 6종목 +180~+1,100%)으로 찍혔다. 한쪽만 순액인 매출 y-y
+    칸은 비우고 점수 시트 비고에 적는다. 둘 다 순액(12번 2025 대 2024)·영업이익·총액 종목은
+    그대로."""
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    write_model_day(model_root, FRI, write_fi_day(fi_root, FRI, edit=_net_revenue))
+    wb = load_workbook(build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root,
+                                   out_root=tmp_path).path)
+    ws = wb["실적"]
+    rows = rows_by_code(ws)
+    y25, y26, y27 = (col_of(ws, f"{y} y-y(%)", 0) for y in ("2025", "2026E", "2027E"))
+    r12, r13, r10 = rows[tick(12)], rows[tick(13)], rows[tick(10)]
+    assert ws.cell(r12, y26).value is None                        # 2026E 총액 vs 2025 순액
+    num = (int, float)                                            # 엑셀 왕복에서 0.0 은 0
+    assert isinstance(ws.cell(r12, y25).value, num)               # 2025 순액 vs 2024 순액
+    assert isinstance(ws.cell(r12, y27).value, num)               # 추정 vs 추정
+    assert ws.cell(r13, y25).value is None and ws.cell(r13, y26).value is None
+    assert isinstance(ws.cell(r12, col_of(ws, "2026E y-y(%)", 1)).value, num)     # 영업이익 그대로
+    assert ws.cell(r10, y26).value == pytest.approx((1300 / 1200 - 1) * 100)       # 총액 종목
+    sc = wb["점수"]
+    note, srows = header(sc)["비고"], rows_by_code(sc)
+    assert sc.cell(srows[tick(12)], note).value == NET_NOTE
+    assert sc.cell(srows[tick(13)], note).value == NET_NOTE
+    assert sc.cell(srows[tick(10)], note).value is None
+
+
+def test_scope_raw_columns_survive_a_missing_engine_column(scope_board, tmp_path: Path,
+                                                          caplog: pytest.LogCaptureFixture) -> None:
+    """검토 사소 1 — 원값 열은 '전부 아니면 전무'가 아니다. 엔진(v3_zscore)으로 판정하고, 점수 표에
+    없는 열만 빈칸으로 두며 빠진 열 이름을 로그 한 줄로 남긴다. 옛 코드는 열 하나만 빠져도 원자료
+    33열·업종 3열·메타 단위 줄이 통째로 사라졌다."""
+    import shutil
+
+    import duckdb
+    res, _, scores, root = scope_board
+    model = tmp_path / "model"
+    shutil.copytree(root / "model", model)
+    path = model / "scope@1.0" / f"v={res.build_id}" / "scores.parquet"
+    tmp = path.with_name("cut.parquet")
+    con = duckdb.connect()
+    con.execute(f"COPY (SELECT * EXCLUDE (val_ev_ebitda) FROM read_parquet('{path}')) "
+                f"TO '{tmp}' (FORMAT parquet)")
+    con.close()
+    tmp.replace(path)
+    with caplog.at_level("WARNING"):
+        d = build_daily("2026-09-28", "morning", model_root=model, fi_root=root / "fi",
+                        out_root=tmp_path / "out")
+    wb = load_workbook(d.path)
+    ws = wb["점수 원자료"]
+    h, rows = header(ws), rows_by_code(ws)
+    assert set(SCOPE_RAW_HEADERS.values()) <= set(h)
+    assert all(ws.cell(r, h["EV/EBITDA (배)"]).value is None for r in rows.values())
+    t = "100005"
+    for key, label in SCOPE_RAW_HEADERS.items():
+        if key != "val_ev_ebitda" and isinstance(scores[t][key], float):
+            assert ws.cell(rows[t], h[label]).value == pytest.approx(scores[t][key]), key
+    sec = wb["업종"]
+    hs = header(sec)
+    for label in ("PER 중앙값 (배)", "리비전 상향 비율(%)", "1M 수익률 (%)"):
+        assert isinstance(sec.cell(8, hs[label]).value, int | float), label
+    assert "점수 원자료 단위" in dict(_meta_pairs(wb))
+    assert any("val_ev_ebitda" in rec.getMessage() for rec in caplog.records)
+
+
+def test_insert_after_appends_when_the_key_is_missing(caplog: pytest.LogCaptureFixture) -> None:
+    """검토 사소 6 — 끼울 자리(키)가 없어도 그날 엑셀·발송을 막지 않는다: 끝에 덧붙이고
+    경고 한 줄."""
+    from deliver.excel_daily import insert_after
+    pairs: list[tuple[str, object]] = [("기준일", "2026-10-02")]
+    with caplog.at_level("WARNING"):
+        insert_after(pairs, "없는 줄", [("엑셀 생성 시각", "x")])
+    assert pairs == [("기준일", "2026-10-02"), ("엑셀 생성 시각", "x")]
+    assert any("없는 줄" in rec.getMessage() for rec in caplog.records)

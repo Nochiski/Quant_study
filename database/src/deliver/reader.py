@@ -26,6 +26,9 @@ class DeliverError(RuntimeError):
 
 
 UNKNOWN_REV = "알 수 없음"
+# 코드 루트 = `src/` 의 부모(저장소 database/ · 서버 ~/quant-ledger)
+# — deploy.sh 가 DEPLOYED.json 을 쓰는 곳
+CODE_ROOT = Path(__file__).resolve().parents[2]
 
 
 def ql_home() -> Path:
@@ -33,11 +36,14 @@ def ql_home() -> Path:
     return Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
 
 
-def deployed_rev(home: Path) -> str:
-    """배포 rev — `<home>/DEPLOYED.json`(scripts/deploy.sh 가 `--apply` 때 쓴다)의 rev · 배포 시각.
-    파일이 없거나 읽지 못하면 '알 수 없음'(로컬 작업 트리 실행 등 — 엑셀 생성은 막지 않는다)."""
+def deployed_rev(root: Path | None = None) -> str:
+    """배포 rev — 코드 루트(`CODE_ROOT`)의 `DEPLOYED.json`(scripts/deploy.sh 가 `--apply` 때 쓴다)의
+    rev · 배포 시각. 데이터 루트(QL_HOME)가 아니라 이 코드가 놓인 곳을 본다 — 둘이 다르면
+    다른 배포의 rev 를 적게 된다. 파일이 없거나 읽지 못하면 '알 수 없음'(로컬 작업 트리 등 —
+    엑셀 생성은 막지 않는다)."""
+    path = (CODE_ROOT if root is None else Path(root)) / "DEPLOYED.json"
     try:
-        meta = json.loads((Path(home) / "DEPLOYED.json").read_text(encoding="utf-8"))
+        meta = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return UNKNOWN_REV
     rev = meta.get("rev") if isinstance(meta, dict) else None

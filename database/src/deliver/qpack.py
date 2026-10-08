@@ -36,7 +36,7 @@ from openpyxl.utils.indexed_list import IndexedList
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .common import quantile
+from .stats import quantile
 
 FONT_NAME = "맑은 고딕"
 FONT_SIZE = 8

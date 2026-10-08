@@ -10,7 +10,7 @@
 #         (N-23 ①, P9). 대기 시작은 실시간 출력과 notify 기록(dry-run 제외)에, 대기 시간은 체인 로그에 남고,
 #         늦어짐은 10:30 워치독이 알린다. 원장 락 래퍼(`flock <원장 락> daily_build.sh …`) 안에서 부르지
 #         않는다 — 자기 자신을 기다려 멈춘다. 부모가 이미 쥐었으면 QL_RAW_LOCK_HELD=1 로 물려준다.
-#         대기자는 하나 — 이 스크립트가 이미 기다리는 중이면 두 번째 실행은 info 후 rc 3(배포 묶음 5-3).
+#         대기자는 하나(이미 기다리는 중이면 두 번째 실행은 info 후 rc 3), 대기 중 KST 날짜가 바뀌면 crit 후 rc 3(--date 고정 실행도 — 다시 돌리면 된다, 배포 묶음 5-3).
 #         규칙은 scripts/raw_lock.sh 한 곳이다(다른 원장 스크립트와 공용). QL_RAW_LOCK_FILE 은 테스트 전용(락 파일 경로 덮어쓰기)이다.
 set -uo pipefail
 cd "$HOME/quant-ledger"

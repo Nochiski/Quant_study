@@ -31,7 +31,7 @@
 - G1: 마지막 성공 8일 전 · 화요일 → 지금 안 돎 → 바꾼 뒤 돎. 회귀 가드: 마지막 성공 3일 전 · 화요일 → 안 돎, 월요일 → 돎.
 
 ### 5-3 B-52
-- 대상: `daily_ledger.sh` · `daily_evening.sh` · `daily_wise.sh` · `wics_weekly.sh`(+ `daily_build.sh` 의 대기자 1 제한). 원장 락을 못 잡으면 대기(P9) — 대기 시작 notify info 한 줄(묶음 3 의 daily_build 와 같은 모양). 대기자 1: 같은 스크립트의 두 번째 인스턴스는 '대기 중인 실행 있음' info 기록 후 rc 3.
+- 대상: `daily_ledger.sh` · `daily_evening.sh` · `daily_wise.sh` · `wics_weekly.sh`(+ `daily_build.sh` 의 대기자 1 제한·대기 중 날짜 바뀜 중단). 원장 락을 못 잡으면 대기(P9) — 대기 시작 notify info 한 줄(묶음 3 의 daily_build 와 같은 모양). 대기자 1: 같은 스크립트의 두 번째 인스턴스는 '대기 중인 실행 있음' info 기록 후 rc 3.
 - 문서가 인용하는 `daily_evening.sh` 줄 번호(:64·:69·:83-95, README :119-123)가 바뀌면 함께 고친다.
 - G1: 임시 락을 쥔 채 실행 → 지금 rc 3 건너뜀 → 바꾼 뒤 대기 후 실행. 두 번째 인스턴스 → rc 3 + info. 맥엔 flock 이 없으니 실물 시험은 서버 임시 폴더에서(배포 뒤, 운영 기록 무흔적).
 

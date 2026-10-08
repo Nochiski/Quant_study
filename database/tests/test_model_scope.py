@@ -62,7 +62,7 @@ def test_scope_spec_is_v3_without_ev_ebitda() -> None:
     s_q, v_q = scope.params["quality"], v3.params["quality"]
     assert isinstance(s_q, dict) and isinstance(v_q, dict)
     assert list(s_q["sub_weights"].items()) == list(v_q["sub_weights"].items())
-    assert set(s_q) - set(v_q) == {"min_period_months"}
+    assert set(s_q) ^ set(v_q) == {"min_period_months"}
     v3_val = dict(v3.params["valuation"]["sub_weights"])       # type: ignore[index]
     v3_val.pop("ev_ebitda")
     assert list(scope.params["valuation"]["sub_weights"].items()) == list(v3_val.items())  # type: ignore[index]
@@ -70,6 +70,10 @@ def test_scope_spec_is_v3_without_ev_ebitda() -> None:
 
 # ── (b) 골든 입력에서 v3_zscore@1.0 과의 차이 ────────────────────────────────────
 def test_scope_differs_from_v3_only_in_valuation_and_composite(golden_fi) -> None:
+    # 전제: 골든(compat 어댑터) 입력의 period_months 는 모두 NULL(compat 에 원천이 없다)이라
+    # scope 의 짧은 회계기간 규칙(G-28)이 작동하지 않는다 — 그래서 퀄리티 점수가 v3_zscore@1.0 과
+    # 같다.
+    assert all(r["period_months"] is None for r in golden_fi.tables["fi_fin_summary"])
     scope = _by_code(ENGINE.run(registry.get(SCOPE), golden_fi).scores)
     v3 = _by_code(ENGINE.run(registry.get(V3), golden_fi).scores)
     assert scope.keys() == v3.keys()
@@ -192,6 +196,19 @@ def test_v3_zscore_keeps_short_year_rows_regression_guard() -> None:
     assert v3["SHORT"]["qual_fcf_assets"] == 0.13
     assert v3["SHORT"]["qual_gpa_change"] == (0.33 - 0.23) / 0.23
     assert v3["PREV"]["qual_gpa_change"] == (0.32 - 0.22) / 0.22
+
+
+@pytest.mark.parametrize("bad", [{"min_period_month": 12},      # 오타 — 조용히 꺼지면 안 된다
+                                 {"min_period_months": True},   # bool 은 정수로 치지 않는다
+                                 {"min_period_months": 0}])
+def test_quality_params_are_validated(bad: dict[str, object]) -> None:
+    spec = registry.get(SCOPE)
+    s_q = spec.params["quality"]
+    assert isinstance(s_q, dict)
+    quality = {"sub_weights": s_q["sub_weights"], **bad}
+    bent = replace(spec, params={**spec.params, "quality": quality})
+    with pytest.raises(ValueError, match="params.quality"):
+        ENGINE.run(bent, _short_year_fi())
 
 
 # ── (f) 주 모델 ────────────────────────────────────────────────────────────────

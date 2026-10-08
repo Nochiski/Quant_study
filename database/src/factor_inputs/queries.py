@@ -537,8 +537,9 @@ def fin_summary_sql(p: Params) -> str:
       · 연간 매출은 분기와 같은 계정(`WISE_Q_REVENUE_*`)으로 고르고 `revenue_basis` 를 적는다 —
         compat 은 '매출액(수익)' 만 봐서 금융업 연간 매출이 비었다(배포 묶음 4-2b, v3 는 매출을
         읽지 않으므로 G-M3 동등성과 무관).
-      · `period_months`(연간만) = DART fin_std period_start~period_end 개월 수(양끝 달 포함 —
-        fin_std 의 1분기·3분기 판정과 같은 식). 짧은 첫 사업연도 표식(G-28, N-25 Q5).
+      · `period_months`(연간만) = DART fin_std period_start~period_end 의 달력 달 수(양끝 달
+        포함 — 1월 중 설립이면 12. fin_std 의 1분기·3분기 판정과 같은 식). 짧은 회계기간 표식
+        (G-28, N-25 Q5).
     op_margin·ni_margin·yoy 는 compat 과 같이 NULL(계산은 엔진 몫).
     """
     eok = f"{KRW_PER_EOK}.0"

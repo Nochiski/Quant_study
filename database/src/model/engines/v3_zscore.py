@@ -58,6 +58,8 @@ REVISION_PERIODS = ("1w", "1m", "3m")                # revision.py:11-15(_PERIOD
 QUALITY_REVERSE = frozenset({"debt_ratio", "std_20d"})           # quality.py:21
 VALUATION_REVERSE = frozenset({"per", "pbr", "ev_ebitda"})       # valuation.py:17
 STD_MIN_PRICES, STD_WINDOW, STD_MIN_RETURNS = 10, 21, 5          # quality.py:118-130
+# params.quality 에 올 수 있는 키 — 오타가 규칙을 조용히 끄지 않게 이 밖은 거절한다
+QUALITY_PARAM_KEYS = frozenset({"sub_weights", "min_period_months"})
 
 
 def _rows(inputs: FactorInputs, name: str) -> Sequence[Row]:
@@ -409,6 +411,16 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> None:
     if replace(spec.universe, min_market_cap=None, min_analysts=None) != UniverseRule():
         raise ValueError(f"{spec.spec_id}: v3_zscore 는 기본 유니버스 규칙"
                          "(+min_market_cap·min_analysts)만 지원")
+    quality = spec.params.get("quality")
+    if isinstance(quality, Mapping):
+        extra = sorted(set(quality) - QUALITY_PARAM_KEYS)
+        if extra:
+            raise ValueError(f"{spec.spec_id}: params.quality 모르는 키 {extra} — "
+                             f"허용 {sorted(QUALITY_PARAM_KEYS)}")
+        mpm = quality.get("min_period_months")
+        if mpm is not None and (isinstance(mpm, bool) or not isinstance(mpm, int) or mpm < 1):
+            raise ValueError(f"{spec.spec_id}: params.quality.min_period_months={mpm!r} — "
+                             "1 이상 정수여야 한다(G-28)")
     errs = inputs.check(V3ZScoreEngine.name)
     if errs:
         raise ValueError(f"factor_inputs {inputs.build_id} 계약 불일치: {errs}")

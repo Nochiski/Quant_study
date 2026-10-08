@@ -101,9 +101,12 @@ compat 은 한 기에 E 하나(E 우선)만 남기지만 이 표는 E·A 를 둘
   '순영업이익')으로 고르고 `revenue_basis`(gross | net)를 적는다(fi1.2.0, 배포 묶음 4-2b). compat 은
   '매출액(수익)' 만 봐서 금융업 연간 매출이 비었다(10-02 판 scope 금융 28종목 전부). v3 엔진은 매출을
   읽지 않으므로 G-M3 동등성과 무관하다.
-- `period_months`(연간 행만) = DART `fin_std` `period_start`~`period_end` 개월 수(양끝 달 포함 —
-  fin_std 의 1분기·3분기 판정과 같은 식). 12 미만 = 짧은 첫 사업연도 등 — scope 가 퀄리티 손익
-  지표에서 빼고(G-28, N-25 Q5) 엑셀 비고 '첫 사업연도 N개월' 재료가 된다(fi1.2.0).
+- `period_months`(연간 행만) = DART `fin_std` `period_start`~`period_end` 의 **달력 달 수**(양끝 달
+  포함 — 1월 중 설립이면 12, 06-15 시작이면 7. fin_std 의 1분기·3분기 판정과 같은 식). 12 미만 =
+  짧은 첫 사업연도·결산월 변경·리츠 단기 결산 등 — scope 가 퀄리티 손익 지표에서 뺀다(G-28,
+  N-25 Q5, fi1.2.0). 엑셀 비고는 후속(4-2a 병합 뒤) — 문구는 '회계기간 N개월'(결산월 변경도 걸려
+  '첫 사업연도' 는 틀릴 수 있다), 문턱은 12 를 박지 말고 spec `quality.min_period_months` 를 읽는다.
+- 연간 `revenue_basis` 는 WISE 가 없는 연간 행(DART 만)에서 NULL 이다.
 - 분기 행: eps·bps·per·pbr·ev_ebitda·dividend_yield·dps·shares·roe·roa·fcf·capex 는 NULL(아래 §7).
 
 `fi_adj_prices.adj_ok`(오케스트레이터 09-29): 창 안 미해결 사건(`adj_factor.factor_ok = false`,

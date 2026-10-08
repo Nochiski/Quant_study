@@ -527,15 +527,16 @@ def run_adj_sql(events: list[dict[str, object]], prices: list[dict[str, object]]
 def run_eg3(events: list[dict[str, object]], prices: list[dict[str, object]],
             cal: list[date], const: dict[str, object] | None = None,
             spans: list[tuple[str, int, date]] | None = None,
-            sec_types: dict[str, str] | None = None, tamper: str | None = None):
+            sec_types: dict[str, str] | None = None, tamper: str | None = None,
+            sql: str | None = None):
     """같은 합성 입력 위에서 산출을 `out_pq` 로 올리고 `EG3_adj_factor` 만 돌린다. `tamper` 는
-    산출을 올린 뒤 실행할 변조 SQL(부정 픽스처)."""
+    산출을 올린 뒤 실행할 변조 SQL, `sql` 은 산출 SQL 변형(둘 다 부정 픽스처)."""
     from equity.gates import EquityGateContext
 
     con = duckdb.connect()
     try:
         _setup(con, events, prices, cal, None, const, spans, sec_types)
-        con.execute(f"CREATE OR REPLACE TEMP TABLE out_pq AS {_body()}")
+        con.execute(f"CREATE OR REPLACE TEMP TABLE out_pq AS {sql or _body()}")
         if tamper is not None:
             con.execute(tamper)
         n_out = con.execute("SELECT count(*) FROM out_pq").fetchone()[0]   # type: ignore[index]
@@ -1307,6 +1308,11 @@ def test_계수_행_종류_화이트리스트는_SQL과_rules_s06_상수가_같�
     assert rules_s06.PRICE_ONLY_SEC_TYPES == ("common", "preferred", "spac", "foreign", "dr")
     assert set(rules_s06.PRICE_RESOLUTION_VOCAB) == {
         "factor", "price_only", "price_only_dup", "price_only_near", "factor_near", "unresolved"}
+    # D6-3 (나)(다) 제외 사유 — 최종 CASE 의 목록과 게이트 상수(근처 표식 폐기형이 쓴다)
+    m2 = re.search(r"WHEN o\.factor_source NOT IN \(([^)]*)\)", text, re.S)
+    assert m2 is not None
+    assert tuple(re.findall(r"'([a-z_]+)'", m2.group(1))) == (
+        *rules_s06.SUPPRESSED_SOURCES, *rules_s06.FACTOR_NEAR_EXCLUDED_SOURCES)
 
 
 def _carrier(out: dict[str, dict[str, object]]) -> list[str]:
@@ -1646,6 +1652,70 @@ def test_부정_계수_행을_factor_ok_true로_두면_EG3가_잡는다() -> Non
     assert g.status is GateStatus.FAIL
     assert g.metrics["n_price_resolution_factor_mismatch"] == 1
     assert g.metrics["n_price_only_carrier_bad"] == 1
+
+
+# ── 근처 표식의 비보수 방향 폐기형(리뷰 중-1) — 산출 SQL 변형이 EG3 에 걸려야 한다 ───────────
+
+def _no_c_guard() -> str:
+    """(c) 가드를 지운 변형 — 재발견 후보 집합을 비운다."""
+    old = "SELECT ticker, n FROM bp_new WHERE event_type IS NULL"
+    assert _body().count(old) == 1
+    return _body().replace(old, "SELECT ticker, n FROM bp_new WHERE FALSE")
+
+
+def _flipped_window() -> str:
+    """창 부호를 뒤집은 변형 — [n − lookback, n + window] 를 [n − window, n + lookback] 로."""
+    body = _body()
+    a, b = "x.n_apply - k.win_before", "x.n_apply + k.win_after"
+    assert body.count(a) == body.count(b) == 3
+    return (body.replace(a, "x.n_apply - k.@A@").replace(b, "x.n_apply + k.@B@")
+            .replace("k.@A@", "k.win_after").replace("k.@B@", "k.win_before"))
+
+
+def test_부정_c_가드를_지운_변형은_근처_표식을_EG3가_잡는다() -> None:
+    """창 안 (c) 재발견 후보가 있는데 근처로 표시하면(숨은 점프를 해소로 셈) 폐기."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00028", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000028", "announce_date": cal[5]}]
+    px = flat_prices("A00028", cal, 1000, jumps={50: 0.8, 45: 0.7}, base={50: 0.8, 45: 0.7},
+                     halt=(43, 44))
+    assert run_eg3(ev, px, cal).status is GateStatus.PASS        # 정본은 unresolved
+    g = run_eg3(ev, px, cal, sql=_no_c_guard())
+    assert g.status is GateStatus.FAIL and g.metrics["n_price_only_near_bad"] == 1
+    # (나) factor_near 도 같다 — ok 계수(25) 근처 자본변동 행, 창 안 (c)(42)
+    retro = {"ticker": "A00031", "event_type": "capred", "effective_date": cal[30], "ratio": None,
+             "source": "capital", "rcept_no": "20200302000031", "announce_date": cal[70]}
+    cal, ev2, px2 = _capred_ok_at_25([retro], halt=(19, 24), jumps={42: 0.7}, base={42: 0.7})
+    px2 = [{**p, "price_kind": "reference"} if p["date"] in (cal[40], cal[41]) else p
+           for p in px2]
+    assert run_eg3(ev2, px2, cal).status is GateStatus.PASS
+    h = run_eg3(ev2, px2, cal, sql=_no_c_guard())
+    assert h.status is GateStatus.FAIL and h.metrics["n_factor_near_bad"] == 1
+
+
+def test_부정_창_부호를_뒤집은_변형은_근처_표식을_EG3가_잡는다() -> None:
+    """창 [n − 5, n + 40] 를 [n − 40, n + 5] 로 뒤집으면 사건 전 계수 행·ok 적용일을 근처로 센다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00034", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000034", "announce_date": cal[5]}]
+    px = flat_prices("A00034", cal, 1000, jumps={10: 0.8}, base={10: 0.8})   # ⑤ 단위 세션 10
+    assert run_adj_sql(ev, px, cal)[f"A00034:capred:{cal[20]}"]["price_resolution"] == (
+        "unresolved")
+    assert run_eg3(ev, px, cal).status is GateStatus.PASS
+    g = run_eg3(ev, px, cal, sql=_flipped_window())
+    assert g.status is GateStatus.FAIL and g.metrics["n_price_only_near_bad"] == 1
+    # (나): ok 분할 적용일 10 이 사건(20) 앞 — 뒤집힌 창에서만 근처
+    ev2 = [{**ev[0], "ticker": "A00035", "rcept_no": "20191202000035"},
+           {"ticker": "A00035", "event_type": "split", "effective_date": cal[10], "ratio": 2.0,
+            "source": "krx_listing", "effective_basis": "krx_shares_change",
+            "announce_date": cal[10]}]
+    px2 = flat_prices("A00035", cal, 1000, jumps={10: 0.5}, base={10: 0.5},
+                      share_jumps={10: 2.0})
+    f2 = run_adj_sql(ev2, px2, cal)
+    assert f2[f"A00035:split:{cal[10]}"]["factor_ok"] is True
+    assert f2[f"A00035:capred:{cal[20]}"]["price_resolution"] == "unresolved"
+    h = run_eg3(ev2, px2, cal, sql=_flipped_window())
+    assert h.status is GateStatus.FAIL and h.metrics["n_factor_near_bad"] == 1
 
 
 def test_sql파일에_상수_하드코딩_없음() -> None:

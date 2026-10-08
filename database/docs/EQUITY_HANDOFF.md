@@ -689,13 +689,14 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 조정됐는데 수량까지 다시 조정된다). `backtest_engine/adapters/equity_duckdb.py` 가 이 표를 읽지
 않는다는 것을 `test_equity_s23_price_adj.py::test_커널_어댑터는_조정가_표를_읽지_않는다` 가 지킨다.
 
-**`n_unadjusted_events` 를 반드시 보라** — 같은 구간에서 `factor_ok=false` 이고
-`apply_date ≤ d` 인 사건 수다. **0 이 아니면 그 구간의 조정 시계열은 불완전하다**: 기업행위가
-실재하는데 계수를 못 냈다는 뜻이고(사유는 `adj_factor.factor_source` — `no_price_match` ·
-`ratio_null` · `capred_paid` · `unknown_price_only` 등), 그 뒤 구간의 수익률에는 조정되지 않은
-점프가 남아 있다. equity 는 값을 만들어 채우지 않는다. 소비자는 이 열로 종목·구간을 거른다
-(서버 실측: 행의 27.4% · 1,440 종목이 걸린다 — 대부분 `unknown_price_only`(유상증자 권리락·
-주식배당락 등 MVP 밖 사건)라 "조정이 틀렸다" 가 아니라 "이 축은 MVP 가 안 덮는다" 는 뜻이다).
+**`n_unadjusted_events` 는 보유 수량 축이다** — 같은 구간에서 `factor_ok=false` 이고
+`apply_date ≤ d` 인 사건 수다. **0 이 아니면 그 구간의 계수(보유 수량) 축이 불완전하다**: 기업행위가
+실재하는데 시총 불변 계수를 못 냈다는 뜻이다(사유는 `adj_factor.factor_source` — `no_price_match` ·
+`ratio_null` · `capred_paid` · `unknown_price_only` 등). equity 는 값을 만들어 채우지 않는다.
+e1.26.0 부터 이 열은 **조정가(가격 축)의 거름 축이 아니다** — ⑤ 로 가격 축에서 해소된 사건도 계속
+센다. 조정가 소비자는 아래 ⑤ 문단의 `n_price_unresolved_events` 로 거른다(⑤ 전 서버 실측: 이 열에
+행의 27.4% · 1,440 종목이 걸렸다 — 대부분 `unknown_price_only`(유상증자 권리락·주식배당락 등 MVP 밖
+사건)이고, 그 가격 점프는 이제 ⑤ 계수 행이 고친다).
 
 **⑤ 가격 전용 계수(e1.26.0)** — 미해결 사건 중 그날 KRX 기준가 근거가 있는 (종목, 날짜)는
 `adj_factor.price_only_factor`(그날 기준가 ÷ 직전 행 종가)를 **가격 축에만** 접는다: 조정 OHLC =
@@ -707,8 +708,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 `n_unadjusted_events` 는 뜻을 바꾸지 않아(보유 수량 축 미해결) ⑤ 로 해소된 사건도 계속 센다.
 `adj_factor.price_resolution` 어휘: `factor`(ok) · `price_only`(계수 행) · `price_only_dup`(같은 단위
 다른 행) · `factor_near`(C-05 원안 '정상 사건의 중복본': 형제가 ok 인 억제 중복본 · 창 안에 ok
-계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행) · `price_only_near`(근처 ⑤ 단위, (c)
-후보 없음) · `unresolved`.
+계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행 — 뒤 둘은 ② 사유 행·유상감자 제외) ·
+`price_only_near`(근처 ⑤ 단위, (c) 후보 없음) · `unresolved`.
 
 **`cum_price_factor` × `cum_share_factor` = 1** 이고(시총 불변), 구간 첫 행에서는 둘 다 정확히
 1 이다. 재상장 종목(036220·101970)은 구간마다 누적이 초기화된다 — 폐지 전 구간의 계수는 새 구간에

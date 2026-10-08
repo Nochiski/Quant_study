@@ -17,7 +17,8 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
   cutoff = as_of 에서 `lag` 세션 전 거래일(trading_calendar 역산). lag 기본값은 컬럼군 세션 랙인데
   `dataset_profile`(S19)이 아직 없으므로 **가격 계열 0 세션** 을 본문 상수(FACTOR_LAG_SESSIONS)로
   둔다 — 근거: 계수의 available_date 는 min(공시 접수일, 효력일 다음 거래일)(KRX 기준가가 확정한
-  ok 계수 — 사건 교체·unknown_krx — 는 min(공시 접수일, 적용일), C-07) 이라 이미 '그날 알 수
+  ok 계수 — 사건 교체·unknown_krx — 와 ⑤ 가격 전용 계수 행(e1.26.0)은 min(공시 접수일, 적용일),
+  C-07) 이라 이미 '그날 알 수
   있었던 날' 이고(stage 가격류 lag_known=true, 공표 시각 미제공 → S04 와 같은 규약), 랙을 더 두면
   분할 당일
   조정가가 하루 늦게 붙어 EG8 점프가 생긴다. 소비자는 `lag_override` 로 세션 단위로 늘릴 수 있다.
@@ -29,7 +30,9 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
   `v_adj_price_fwd(as_of, lag_override := NULL)` —
   adj_close_fwd(d) = close(d) × Π(share_factor : factor_ok ∧ **같은 security_span 구간** ∧
                                                  apply_date ≤ d ∧ available_date ≤ d
-                                                 ∧ available_date ≤ cutoff),
+                                                 ∧ available_date ≤ cutoff)
+                    ÷ Π(price_only_factor : price_resolution='price_only' ∧ 같은 구간 ∧ 같은
+                                            fold·cutoff 규칙)   ← ⑤(e1.26.0, 별도 사슬),
   즉 종목의 **첫 관측 수준을 고정**하고 사건마다 이후 가격을 누적 배수로 올린다(시총 불변 사건은
   share_factor = 1/price_factor 라 위 `v_adj_price` 의 역수 축과 같은 값). 삼성전자 2018-05-03 =
   2,650,000(원주가 그대로) · 05-04 = 51,900 × 50 = 2,595,000. 접는 세션 fold_date =

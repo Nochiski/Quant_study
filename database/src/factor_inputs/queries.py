@@ -328,9 +328,11 @@ def adj_prices_sql(p: Params) -> str:
     바뀌면 그 창이 사건을 넘는다(엔진 `v4_rank._Series.crosses_event`), 값이 한결같으면 척도가
     이어진다. 사건이 하나면 '사건 전 True · 사건부터 False' 다. 창 밖 옛 사건은 창 안 비율을 깨지
     않으므로 세지 않는다(`price_adj_daily.n_unadjusted_events` 는 구간 누적이라 2011년 사건
-    하나로 영구 표시가 된다). not-ok 행 중 가격 축에서 해소된 것(⑤ 계수 행·같은 단위 중복·근처
-    단위·C-05 형제 ok)은 수정종가가 이미 이어지므로 세지 않는다 — 판정은 equity 열 하나만
-    읽는다(fi1.3.0, 배포 묶음 6-3).
+    하나로 영구 표시가 된다). not-ok 행 중 가격 축에서 해소된 것(⑤ 계수 행 `price_only` · 같은
+    단위 다른 행 `price_only_dup` · `factor_near`(C-05 원안 '정상 사건의 중복본': 형제가 ok 인 억제
+    중복본 · 창 안에 ok 계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행 — 뒤 둘은
+    ② 사유 행·유상감자 제외) · `price_only_near`(근처 ⑤ 단위, (c) 후보 없음))은 수정종가가 이미
+    이어지므로 세지 않는다 — 판정은 equity 열 하나만 읽는다(fi1.3.0, 배포 묶음 6-3).
     """
     inner = f"""WITH bad AS (
     SELECT DISTINCT ticker, apply_date FROM adj_factor

@@ -145,6 +145,10 @@ PRICE_ONLY_SOURCES: tuple[str, ...] = ("krx_base_inconsistent", "unknown_price_o
 # ④ D6-1 대상 종류 = 주식 계열. fund·ship_fund·reit 는 분배·배당락 반복 하락(추정)이라 접으면
 # adj_close 가 분배 재투자 축이 된다. SQL `po_kind` 의 문자열 목록과 같아야 한다(테스트가 묶는다).
 PRICE_ONLY_SEC_TYPES: tuple[str, ...] = ("common", "preferred", "spac", "foreign", "dr")
+# D6-3 factor_near 갈래 판정 축 — 억제 중복본은 (가) 형제 ok 로만, (나)(다) 에서 빼는 사유(그 행
+# 자체가 기준가 근거인 ② 사유 · 시총 불변이 아닌 유상감자). `sql/adj_factor.sql` 최종 CASE 와 같다.
+SUPPRESSED_SOURCES: tuple[str, ...] = ("near_dup_suppressed", "same_day_suppressed")
+FACTOR_NEAR_EXCLUDED_SOURCES: tuple[str, ...] = (*PRICE_ONLY_SOURCES, "capred_paid")
 # 기록형 r 분포 보고 구간 |r − 1| (플랜 실측 ≤ 5% 838 · > 30% 610) — 판정축 아님.
 PRICE_ONLY_R_SMALL, PRICE_ONLY_R_LARGE = 0.05, 0.30
 # D6-5: EG8-P02(|수정수익률| ≤ adj_return_jump_max) 를 계수 행에도 폐기형으로 걸지는 6-5 서버 재연
@@ -527,7 +531,11 @@ def _price_only(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, objec
     폐기 술어: 어휘 닫힘 · 'factor' ⇔ factor_ok · price_only_factor NULL 0 · 계수 행 아닌데
     계수 ≠ 1 0 · 계수 행은 factor_ok=false ∧ apply_basis krx_base_price ∧ 사유 ② ∧ 허용 종류 ·
     계수 = 그날 기준가 ÷ 직전 행 종가(FACTOR_PRODUCT_TOL) · 단위당 계수 행 정확히 1 · 단위 밖
-    계수 행 0 · ok 접힘일 계수 행 0 · price_only_dup 은 계수 행과 같은 (ticker, apply_date).
+    계수 행 0 · ok 접힘일 계수 행 0 · price_only_dup 은 계수 행과 같은 (ticker, apply_date) ·
+    근처 표식의 **비보수 방향**(해소로 잘못 센 행, 리뷰 중-1): price_only_near 는 그날 기준가 후보
+    없음 ∧ 창 [n − lookback, n + window] 안 계수 행 ∃ ∧ 같은 창 (c) 재발견 후보 없음, 억제 중복본이
+    아닌 factor_near 는 제외 사유가 아니고 (나 그날 기준가 후보 없음 ∧ 창 안 ok 적용일 ∃ ∧ 창 안
+    (c) 없음) ∨ (다 그날 ok 접힘). 창·(c) 는 게이트가 기준가 후보에서 다시 세운다.
     available_date 의 계수 행 분기는 eg3 본문 재계산식에 있다.
     """
     v = _q(ctx.out_view)
@@ -631,14 +639,16 @@ def _price_only(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, objec
                     ELSE 'near_ok_apply' END, count(*)
         FROM {v} a LEFT JOIN okf f ON f.ticker = a.ticker AND f.d = a.apply_date
         WHERE a.price_resolution = 'factor_near' GROUP BY 1 ORDER BY 1""").fetchall()}
-    # 두 근처(ok 적용일·⑤ 단위)가 겹친 행 — 판정 순서상 factor_near 로 갔다. 게이트가 D6-2 조건
-    # (그날 기준가 후보 없음 ∧ 창 안 계수 행 ∧ 같은 창 (c) 재발견 후보 없음)을 다시 세워 센다.
+    # 근처 표식 재판정 — 게이트가 기준가 후보에서 창·(c) 재발견 후보·계수 행·ok 적용일을 다시
+    # 세운다. ① 비보수 방향 폐기형(price_only_near·factor_near 를 해소로 잘못 센 행) ② 두 근처(ok
+    # 적용일·⑤ 단위)가 겹친 행 — 판정 순서상 factor_near 로 갔다(기록형).
     lookback = _const_or_none(ctx, ctx.rule.name, "price_match_lookback_sessions")
     window = _const_or_none(ctx, ctx.rule.name, "price_match_window_sessions")
-    n_overlap: int | None = None
+    n_overlap: object | None = None
     if lookback is not None and window is not None:
         lb, wn = int(lookback), int(window)
-        n_overlap = _n(ctx, f"""
+        sup, excl = _vocab_sql(SUPPRESSED_SOURCES), _vocab_sql(FACTOR_NEAR_EXCLUDED_SOURCES)
+        n_overlap, n_pon_bad, n_fn_bad = _row(ctx, f"""
             WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n
                          FROM trading_calendar),
                  {_BASE_PRICE_CANDIDATES_CTE},
@@ -652,23 +662,49 @@ def _price_only(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, objec
               WHERE s.share_ratio IS NULL AND s.prev_kind = 'reference' AND u.ticker IS NULL),
                  car AS (SELECT a.ticker, c.n FROM {v} a JOIN cal c ON c.date = a.apply_date
                          WHERE a.price_resolution = '{po}'),
-                 fnr AS (
-              SELECT a.event_id, a.ticker, c.n FROM {v} a JOIN cal c ON c.date = a.apply_date
+                 okapp AS (SELECT a.ticker, c.n FROM {v} a JOIN cal c ON c.date = a.apply_date
+                           WHERE a.factor_ok),
+                 okf AS (SELECT ticker, apply_date AS d FROM {v} WHERE factor_ok
+                         UNION
+                         SELECT ticker, greatest(apply_date, available_date) FROM {v}
+                         WHERE factor_ok),
+                 nr AS (
+              SELECT a.event_id, a.ticker, a.price_resolution, a.factor_source, c.n,
+                     s.ticker IS NOT NULL AS own_bp, f.ticker IS NOT NULL AS on_fold
+              FROM {v} a JOIN cal c ON c.date = a.apply_date
               LEFT JOIN scope s ON s.ticker = a.ticker AND s.date = a.apply_date
-              WHERE a.price_resolution = 'factor_near' AND s.ticker IS NULL)
-            SELECT count(*) FROM fnr x
-            WHERE EXISTS (SELECT 1 FROM car p WHERE p.ticker = x.ticker
-                          AND p.n BETWEEN x.n - {lb} AND x.n + {wn})
-              AND NOT EXISTS (SELECT 1 FROM cfree q WHERE q.ticker = x.ticker
-                              AND q.n BETWEEN x.n - {lb} AND x.n + {wn})""")
+              LEFT JOIN okf f ON f.ticker = a.ticker AND f.d = a.apply_date
+              WHERE a.price_resolution IN ('price_only_near', 'factor_near')),
+                 fl AS (
+              SELECT x.*,
+                     EXISTS (SELECT 1 FROM car p WHERE p.ticker = x.ticker
+                             AND p.n BETWEEN x.n - {lb} AND x.n + {wn}) AS has_car,
+                     EXISTS (SELECT 1 FROM okapp o WHERE o.ticker = x.ticker
+                             AND o.n BETWEEN x.n - {lb} AND x.n + {wn}) AS has_ok,
+                     EXISTS (SELECT 1 FROM cfree q WHERE q.ticker = x.ticker
+                             AND q.n BETWEEN x.n - {lb} AND x.n + {wn}) AS has_c
+              FROM nr x)
+            SELECT
+              count(*) FILTER (WHERE price_resolution = 'factor_near' AND NOT own_bp
+                               AND has_car AND NOT has_c),
+              count(*) FILTER (WHERE price_resolution = 'price_only_near'
+                               AND (own_bp OR NOT has_car OR has_c)),
+              count(*) FILTER (WHERE price_resolution = 'factor_near'
+                               AND factor_source NOT IN ({sup})
+                               AND (factor_source IN ({excl})
+                                    OR NOT ((NOT own_bp AND has_ok AND NOT has_c) OR on_fold)))
+            FROM fl""")
+        checks["n_price_only_near_bad"] = int(str(n_pon_bad))
+        checks["n_factor_near_bad"] = int(str(n_fn_bad))
     metrics: dict[str, object] = {
         "n_by_price_resolution": _counts(ctx, "price_resolution"),
         "n_price_only_by_source_sec_type": by_source_kind,
         "n_unresolved_by_factor_source": unresolved_by_source,
         "n_near_by_factor_source": near_by_source,
         "n_factor_near_by_branch": branch,
-        "n_near_overlap_to_factor_near": n_overlap,
-        "n_unit_without_carrier_row": int(str(n_unit_no_row)),   # 기록형 — 기대 0
+        "n_near_overlap_to_factor_near": None if n_overlap is None else int(str(n_overlap)),
+        # 기록형 — (c) 재발견과 DART 행이 같은 날이면 1 이상일 수 있다(086830 2016-05-19 ratio_null)
+        "n_unit_without_carrier_row": int(str(n_unit_no_row)),
         "n_price_only_r_dev_le_005": int(str(n_r_small)),
         "n_price_only_r_dev_over_030": int(str(n_r_large)),
         "price_only_factor_quantiles": {"min": _f(r_min), "p10": _f(r_q10), "p50": _f(r_med),
@@ -931,4 +967,5 @@ __all__ = ["ADJ_FACTOR", "APPLY_BASIS_VOCAB", "BASELINE_SEED", "BASE_PRICE_CONST
            "KRX_BASE_EVENT_TYPES", "OK_APPLY_BASIS", "OK_FACTOR_SOURCE", "PRICE_MATCH_CONSTS",
            "PRICE_ONLY_JUMP_GATE", "PRICE_ONLY_RESOLUTION", "PRICE_ONLY_SEC_TYPES",
            "PRICE_ONLY_SOURCES", "PRICE_RESOLUTION_VOCAB", "PRICE_UNRESOLVED",
-           "RETURN_REPORT_LIMIT", "TABLES", "VOLUME_MEDIAN_WINDOW", "VOLUME_RATIO_REPORT_BAND"]
+           "FACTOR_NEAR_EXCLUDED_SOURCES", "SUPPRESSED_SOURCES", "RETURN_REPORT_LIMIT",
+           "TABLES", "VOLUME_MEDIAN_WINDOW", "VOLUME_RATIO_REPORT_BAND"]

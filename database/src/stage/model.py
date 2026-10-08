@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 # 2.6.0: 참조표 룩업 공개일도 접수번호 날짜보다 이르지 않다(J-41, N-26 4.2)
+# (10-09 핫픽스, 판본 그대로) 컨센서스 월간 G8: 5001·5002 한쪽만 빈 값은 불일치가 아니라 n_one_side_null 로 기록만 — 산출 행 불변
 RULES_VERSION = "2.6.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 

@@ -94,11 +94,24 @@ def _build(table_root: Path, table: str, rec: manifest.BuildRecord) -> PinnedBui
                        _load_meta(paths))
 
 
-def resolve(root: Path, table: str) -> PinnedBuild:
-    """`<root>/<table>/MANIFEST.json` 의 current_build 를 푼다(root = stage 또는 equity)."""
+def resolve(root: Path, table: str, build_id: str | None = None) -> PinnedBuild:
+    """`<root>/<table>/MANIFEST.json` 의 current_build 를 푼다(root = stage 또는 equity).
+
+    `build_id` 를 주면 current 가 아니라 `builds[]` 에서 그 판을 고른다 — 인계 이력이 가리킨 판으로
+    고정하는 경로(compat·factor_inputs `--builds-from`). 없으면(keep 밖으로 GC 됨 등)
+    `FileNotFoundError` — 최신 판으로 대신하지 않는다.
+    """
     table_root = root / table
     path = table_root / "MANIFEST.json"
-    return _build(table_root, table, _record(manifest.load(path), table, path))
+    m = manifest.load(path)
+    if build_id is None:
+        return _build(table_root, table, _record(m, table, path))
+    rec = next((b for b in m.builds if b.build_id == build_id), None)
+    if rec is None:
+        raise FileNotFoundError(
+            f"build not in MANIFEST builds[] (GC'd or never built): table={table} "
+            f"build_id={build_id} manifest={path} builds={[b.build_id for b in m.builds]}")
+    return _build(table_root, table, rec)
 
 
 def load_pinned(equity_root: Path, table: str, build_id: str) -> PinnedBuild:

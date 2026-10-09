@@ -2,7 +2,8 @@
 
     python -m factor_inputs build --date 20260929 --basis morning \\
         [--root data/factor_inputs] [--stage-root data/stage] [--equity-root data/equity] \\
-        [--grace-days 5] [--min-eligible 300] [--keep 60]
+        [--grace-days 5] [--min-eligible 300] [--keep 60] \\
+        [--builds-from data/deliver/history/20260928_morning.json]
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — equity CLI 와 같은 규약.
@@ -33,6 +34,9 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--min-eligible", type=int, default=MIN_ELIGIBLE_DEFAULT,
                    help="FG1 eligible 종목 수 하한")
     b.add_argument("--keep", type=int, default=KEEP_DEFAULT, help="표별 MANIFEST 에 남길 판 수")
+    b.add_argument("--builds-from", default=None, type=Path,
+                   help="인계 이력 JSON(data/deliver/history/<D>_<basis>.json) 의 판으로 고정 "
+                        "— 이력 없음·health 실패·판 소멸이면 rc 2(최신 판으로 대신하지 않는다)")
     return p
 
 
@@ -41,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = build(args.date, args.basis, args.root, args.stage_root, args.equity_root,
                        grace_days=args.grace_days, min_eligible=args.min_eligible,
-                       keep=args.keep)
+                       keep=args.keep, builds_from=args.builds_from)
     except FactorInputsError as e:
         print(f"factor_inputs 실패: {e}", file=sys.stderr)
         return 2

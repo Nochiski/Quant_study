@@ -88,9 +88,10 @@ def _price_rows(*, bad_open: bool = False) -> list[dict]:
     return rows
 
 
-def _adj_rows(skip_last: bool = False) -> list[dict]:
+def _adj_rows(skip_last: bool = False, price_rows: list[dict] | None = None) -> list[dict]:
     """`price_adj_daily` 실물 15열. `skip_last` 면 마지막 krx 행의 조정가가 없다(R9)."""
-    src = [r for r in _price_rows() if r["basis"] == "krx"]
+    src = [r for r in (price_rows if price_rows is not None else _price_rows())
+           if r["basis"] == "krx"]
     if skip_last:
         src = src[:-1]
     out: list[dict] = []
@@ -105,18 +106,21 @@ def _adj_rows(skip_last: bool = False) -> list[dict]:
     return out
 
 
+def _flow_row(ticker: str, d: dt.date, offset: int = 0) -> dict:
+    """`flow_daily` 실물 23열 — 측정 셀 하나. 주체마다 +1,000,000원씩 어긋난다."""
+    row: dict = {"date": d, "ticker": ticker, "src": "kiwoom"}
+    for k, col in enumerate(_FLOW_SRC):
+        row[col] = FRGN_KRW + (offset + k) * 1_000_000
+    row.update(foreign_wght_pct=50.0, foreign_limit_exh_pct=50.0,
+               foreign_poss_shr=1_000, pension_net_buy_kiwoom_krw=1_000_000,
+               fill_kind="measured", available_date=d, available_basis="default")
+    return row
+
+
 def _flow_rows() -> list[dict]:
     """`flow_daily` 실물 23열."""
-    rows: list[dict] = []
-    for i, ticker in enumerate(REAL):
-        for j, d in enumerate(SESSIONS):
-            row: dict = {"date": d, "ticker": ticker, "src": "kiwoom"}
-            for k, col in enumerate(_FLOW_SRC):
-                row[col] = FRGN_KRW + (i + j + k) * 1_000_000
-            row.update(foreign_wght_pct=50.0, foreign_limit_exh_pct=50.0,
-                       foreign_poss_shr=1_000, pension_net_buy_kiwoom_krw=1_000_000,
-                       fill_kind="measured", available_date=d, available_basis="default")
-            rows.append(row)
+    rows = [_flow_row(ticker, d, i + j)
+            for i, ticker in enumerate(REAL) for j, d in enumerate(SESSIONS)]
     # 미측정 셀 — 전 주체 NULL. v3 는 수집한 행만 가지므로 내보내지 않는다.
     empty: dict = {"date": D22, "ticker": "000270", "src": None}
     empty.update(dict.fromkeys(_FLOW_SRC))
@@ -178,13 +182,27 @@ def _security_rows(fillers: list[str]) -> list[dict]:
     return rows
 
 
-def _sector_rows() -> list[dict]:
-    """`sector_snapshot` 실물 11열."""
-    return [{"ticker": t, "snapshot_date": dt.date(2026, 9, 19), "wics_l1_cd": "G45",
-             "wics_l1_nm": "IT", "wics_l2_cd": "G4530", "wics_l2_nm": "반도체",
-             "float_shares_shr": 1_000, "float_mktcap_krw": 1_000_000.0,
-             "wgt_in_l2_pct": 10.0, "available_date": dt.date(2026, 9, 19),
-             "available_basis": "convention"} for t in REAL]
+def _master_row(ticker: str, d: dt.date, up_name: str) -> dict:
+    """stage `stg_master_daily`(키움 ka10099 일별 마스터) 규칙 열 + 불리언 파생 3열."""
+    return {"date": d, "ticker": ticker, "mrkt_tp": "0", "name": f"이름{ticker}",
+            "list_shrs": 1_000_000, "audit_info": "정상", "reg_date": dt.date(2000, 1, 4),
+            "last_price": 70_000, "state": "증거금20%", "market_code": "0",
+            "market_name": "거래소", "up_name": up_name, "up_size_name": "대형주",
+            "company_class_name": "", "order_warning": "0", "nxt_enable": "Y", "kind": "A",
+            "is_admin_issue": False, "is_trade_halt": False, "is_liquidation": False}
+
+
+# QL-B(T-19) — v3 `stocks.sector` 는 키움 ka10099 `upName`(KRX 업종명) 그대로다(v3
+# `clients/kiwoom/client.py` get_stock_list → `daily_pipeline._fetch_kiwoom_stocks`, 공란은
+# `strip() or None`). 값은 v3 실물 어휘('전기/전자'·'기계/장비').
+def _master_rows() -> list[dict]:
+    return [
+        _master_row("005930", D22, "전기/전자"),
+        _master_row("005930", dt.date(2026, 9, 24), "화학"),       # D 뒤 스냅샷 — 보이면 안 된다
+        _master_row("000660", dt.date(2026, 9, 1), "기계/장비"),   # 옛 스냅샷 — 최신이 이긴다
+        _master_row("000660", D23, "전기/전자"),
+        _master_row(SPAC, D23, ""),                                # 업종 공란 → v3 는 NULL
+    ]
 
 
 def _matrix_rows() -> list[dict]:
@@ -303,7 +321,8 @@ def _fin_std_rows() -> list[dict]:
 def _make_roots(base: Path, *, fillers: list[str] | None = None,
                 price_rows: list[dict] | None = None, adj_rows: list[dict] | None = None,
                 eq_build: str = EQ_BUILD, adj_build: str | None = None,
-                fin_wise_rows: list[dict] | None = None) -> tuple[Path, Path]:
+                fin_wise_rows: list[dict] | None = None,
+                flow_rows: list[dict] | None = None) -> tuple[Path, Path]:
     eq, st = base / "eq", base / "st"
     f = _filler_tickers(N_FILLER) if fillers is None else fillers
     equity = {
@@ -312,8 +331,7 @@ def _make_roots(base: Path, *, fillers: list[str] | None = None,
                             adj_build or eq_build),
         "universe_daily": (_universe_rows(f), eq_build),
         "security": (_security_rows(f), eq_build),
-        "sector_snapshot": (_sector_rows(), eq_build),
-        "flow_daily": (_flow_rows(), eq_build),
+        "flow_daily": (flow_rows if flow_rows is not None else _flow_rows(), eq_build),
         "fin_std": (_fin_std_rows(), eq_build),
     }
     for table, (rows, build) in equity.items():
@@ -323,6 +341,8 @@ def _make_roots(base: Path, *, fillers: list[str] | None = None,
                         ("stg_fin_wise", _fin_wise_rows() if fin_wise_rows is None
                          else fin_wise_rows)):
         _make_stage_tree(st, table, rows, build_id=ST_BUILD)
+    _make_stage_tree(st, "stg_master_daily", _master_rows(), partition_class="date_axis",
+                     build_id=ST_BUILD)
     return eq / "stage", st / "stage"
 
 
@@ -376,9 +396,24 @@ def test_stocks_snapshot_and_market_cap_in_eok(roots, tmp_path: Path) -> None:
                         "listed_date, is_active, delisted_date FROM stocks "
                         "WHERE stock_code IN ('005930','000660') ORDER BY stock_code")
     assert got == [
-        ("000660", "SK하이닉스", "KOSPI", "IT", 98_765, "1996-12-26", 1, None),
-        ("005930", "삼성전자", "KOSPI", "IT", 123_457, "1975-06-11", 1, None),
+        ("000660", "SK하이닉스", "KOSPI", "전기/전자", 98_765, "1996-12-26", 1, None),
+        ("005930", "삼성전자", "KOSPI", "전기/전자", 123_457, "1975-06-11", 1, None),
     ]
+
+
+def test_stocks_sector_is_krx_industry_from_kiwoom_master(roots, tmp_path: Path) -> None:
+    """QL-B(T-19) — `sector` 는 v3 와 같은 원천(키움 ka10099 `upName` = KRX 업종명)이다.
+
+    as-of D 이하 최신 마스터 스냅샷 하나를 쓴다 — D 뒤 스냅샷은 안 보이고(005930 '화학'),
+    옛 스냅샷은 최신에 진다(000660 '기계/장비'). 공란·마스터 행 없음은 NULL(v3 `strip() or None`).
+    """
+    target = tmp_path / "quant.db"
+    _run(roots, target, tables=["stocks"])
+    got = dict(_rows(target, "SELECT stock_code, sector FROM stocks "
+                             f"WHERE stock_code IN ('005930', '000660', '{SPAC}')"))
+    assert got == {"005930": "전기/전자", "000660": "전기/전자", SPAC: None}
+    # 마스터 행이 없는 filler 2,100 종목은 NULL — WICS 등 다른 분류로 메우지 않는다.
+    assert _rows(target, "SELECT count(*) FROM stocks WHERE sector IS NOT NULL") == [(2,)]
 
 
 def test_stocks_mirrors_v3_universe_common_and_spac_only(roots, tmp_path: Path) -> None:
@@ -419,6 +454,24 @@ def test_model_universe_all_keeps_market_cap(roots, tmp_path: Path) -> None:
     assert _rows(target, "SELECT model_universe FROM _compat_meta") == [("all",)]
 
 
+# ── QL-B(T-19) — 제자리 반영의 시총은 전 종목(all) 고정 ──────────────────────────
+# v3 quant.db 제자리 반영 뒤에는 v3 스코어링이 꺼지고(T-16) 시총은 뉴스 preview 상위 100 ·
+# naver_ir 상위 600 · 엑셀 · unitelegram 이 읽는다. `estimates` 로 NULL 을 넣으면 그 소비자들이
+# 대부분의 종목을 잃으므로 그림자(별도 파일) 전용으로만 남긴다.
+def test_in_place_refuses_estimates_before_writing(roots, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    with pytest.raises(CompatError, match="그림자 전용"):
+        _run(roots, target, tables=["stocks"], in_place=True, model_universe="estimates")
+    assert not target.exists()                              # 대상 파일을 열기 전에 멈춘다
+
+
+def test_in_place_keeps_market_cap_for_all_stocks(roots, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["stocks"], in_place=True)
+    assert (res.model_universe, res.n_universe_with_estimates) == ("all", None)
+    assert _rows(target, "SELECT count(*) FROM stocks WHERE market_cap IS NOT NULL") == [(2,)]
+
+
 def test_investor_flows_in_million_krw(roots, tmp_path: Path) -> None:
     target = tmp_path / "quant.db"
     res = _run(roots, target, tables=["investor_detail_flows"])
@@ -428,6 +481,54 @@ def test_investor_flows_in_million_krw(roots, tmp_path: Path) -> None:
                         "WHERE stock_code='005930' AND trade_date='2026-09-21'")
     # ind = -3,456,000,000원 → -3,456 백만원. 주체마다 +1,000,000원(=+1 백만원)씩 어긋난다.
     assert got == [(-3456, -3455, -3454, -3445)]
+
+
+# ── QL-A — 가격·수급도 v3 `stocks` 집합(D-11)만 ──────────────────────────────
+# v3 는 `stocks` 에 든 종목만 가격·수급을 모은다. 09-28 그림자에서 compat `daily_prices` 3,817행 중
+# `stocks` 에 있는 것은 2,490행이었다 — ETF·우선주 등이 섞여 위키 동일가중 수익률·가설 입력이 바뀐다.
+# 여기서는 09-23 하루에 스팩 1 + 제외 7종(우선주·ETF·리츠·외국주·DR·펀드·KONEX) 행을 더 얹는다.
+@pytest.fixture(scope="module")
+def excluded_roots(tmp_path_factory) -> tuple[Path, Path]:
+    extra = [SPAC] + [t for t, _, _ in EXCLUDED]
+    prices = _price_rows() + [_price_row(t, D23, 10_000, value=VALUE_KRW, mktcap=MKTCAP_KRW)
+                              for t in extra]
+    flows = _flow_rows() + [_flow_row(t, D23) for t in extra]
+    return _make_roots(tmp_path_factory.mktemp("excluded"), price_rows=prices,
+                       adj_rows=_adj_rows(price_rows=prices), flow_rows=flows)
+
+
+def test_daily_prices_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    res = _run(excluded_roots, target, tables=["daily_prices"])
+    assert {r[0] for r in _rows(target, "SELECT DISTINCT stock_code FROM daily_prices")} == \
+        {*REAL, SPAC}
+    assert res.tables["daily_prices"].n_rows == 7           # 보통주 2 × 3세션 + 스팩 1
+
+
+# QL-A2 — 거래정지일 참고가 행(`price_kind='reference'`)도 v3 처럼 싣는다. KRX 는 그날 O/H/L 을 '0' 으로
+# 주고 stage 가 NULL 로 두므로(결측은 결측) v3 NOT NULL 에 걸려 조용히 빠지고 있었다(10-01~08 재생에서
+# v3 에만 있는 102~104행). v3 는 그날을 open=high=low=close=참고가 · volume 0 · amount 0 으로 싣는다
+# (로컬 v3 사본 2026-07~08 정지 행 전부 같은 모양, 예: 000300 4200·4200·4200·4200·0·0).
+def test_daily_prices_keeps_halted_reference_row_like_v3(tmp_path: Path) -> None:
+    halted_ticker = _filler_tickers(1)[0]                   # D23 universe 행이 있는 보통주
+    halted = _price_row(halted_ticker, D23, 4_200, ohl=False, value=0)
+    halted.update(volume_shr=0, price_kind="reference")
+    prices = _price_rows() + [halted]
+    roots2 = _make_roots(tmp_path / "h", price_rows=prices, adj_rows=_adj_rows(price_rows=prices))
+    target = tmp_path / "quant.db"
+    res = _run(roots2, target, tables=["daily_prices"])
+    assert (res.tables["daily_prices"].n_rows, res.tables["daily_prices"].n_skipped) == (7, 0)
+    assert _rows(target, "SELECT open, high, low, close, volume, amount FROM daily_prices "
+                         f"WHERE stock_code='{halted_ticker}'") == [(4200, 4200, 4200, 4200, 0, 0)]
+
+
+def test_investor_flows_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    res = _run(excluded_roots, target, tables=["investor_detail_flows"])
+    assert {r[0] for r in _rows(target,
+                                "SELECT DISTINCT stock_code FROM investor_detail_flows")} == \
+        {*REAL, SPAC}
+    assert res.tables["investor_detail_flows"].n_rows == 7
 
 
 def test_consensus_revision_daily_and_compare(roots, tmp_path: Path) -> None:
@@ -767,9 +868,10 @@ def test_builds_from_pins_an_older_build(tmp_path: Path) -> None:
     hist.write_text(json.dumps({
         "equity_builds": {t: EQ_BUILD_OLD for t in
                           ("price_daily", "price_adj_daily", "universe_daily", "security",
-                           "sector_snapshot", "flow_daily")},
+                           "flow_daily")},
         "stage_builds": {t: ST_BUILD for t in
-                         ("stg_consensus_matrix", "stg_consensus_annual", "stg_fin_wise")},
+                         ("stg_consensus_matrix", "stg_consensus_annual", "stg_fin_wise",
+                          "stg_master_daily")},
     }), encoding="utf-8")
 
     target = tmp_path / "quant.db"
@@ -786,25 +888,26 @@ def test_builds_from_pins_an_older_build(tmp_path: Path) -> None:
 
 
 def test_builds_from_missing_key_falls_back_to_current(roots, tmp_path: Path) -> None:
-    """09-18 실측 — 그날 인계 JSON 에는 `sector_snapshot` 키가 아예 없었다(표가 없던 날)."""
+    """인계 JSON 에 표 키가 아예 없는 날(09-18 실측: 그날은 `sector_snapshot` 이 없었다 — 표가
+    없던 날). 지금 `stocks` 가 읽는 표 중에서는 stage `stg_master_daily` 로 같은 경로를 본다."""
     hist = tmp_path / "20260918_morning.json"
     hist.write_text(json.dumps({
         "equity_builds": {t: EQ_BUILD for t in
                           ("price_daily", "price_adj_daily", "universe_daily", "security",
-                           "flow_daily")},              # sector_snapshot 없음
+                           "flow_daily")},
         "stage_builds": {t: ST_BUILD for t in
                          ("stg_consensus_matrix", "stg_consensus_annual", "stg_fin_wise")},
-    }), encoding="utf-8")
-    with pytest.raises(CompatError, match="sector_snapshot"):
+    }), encoding="utf-8")                               # stg_master_daily 없음
+    with pytest.raises(CompatError, match="stg_master_daily"):
         _run(roots, tmp_path / "e.db", tables=["stocks"], builds_from=hist)
 
     target = tmp_path / "quant.db"
     res = _run(roots, target, tables=["stocks"], builds_from=hist,
                builds_from_missing="current")
-    assert res.builds_fallback == ("sector_snapshot",)
-    assert res.equity_builds["sector_snapshot"] == EQ_BUILD      # current_build
+    assert res.builds_fallback == ("stg_master_daily",)
+    assert res.stage_builds["stg_master_daily"] == ST_BUILD      # current_build
     assert json.loads(_rows(target, "SELECT builds_fallback FROM _compat_meta")[0][0]) == \
-        ["sector_snapshot"]
+        ["stg_master_daily"]
 
 
 def test_builds_from_gc_removed_build_falls_back_to_current(roots, tmp_path: Path) -> None:
@@ -851,6 +954,15 @@ def test_cli_exports_and_prints_summary(roots, tmp_path: Path, capsys) -> None:
     out = capsys.readouterr().out
     assert "daily_prices=6" in out and f"stocks={N_STOCKS}" in out
     assert "universe(estimates)=1" in out
+
+
+def test_cli_in_place_refuses_estimates(roots, tmp_path: Path, capsys) -> None:
+    rc = cli_main(["export", "--date", AS_OF, "--basis", "morning",
+                   "--equity-root", str(roots[0]), "--stage-root", str(roots[1]),
+                   "--target", str(tmp_path / "quant.db"), "--tables", "stocks", "--full",
+                   "--in-place", "--model-universe", "estimates"])
+    assert rc == 2
+    assert "그림자 전용" in capsys.readouterr().err
 
 
 def test_cli_returns_2_on_error(roots, tmp_path: Path) -> None:

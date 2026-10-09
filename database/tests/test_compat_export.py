@@ -302,7 +302,8 @@ def _fin_std_rows() -> list[dict]:
 
 def _make_roots(base: Path, *, fillers: list[str] | None = None,
                 price_rows: list[dict] | None = None, adj_rows: list[dict] | None = None,
-                eq_build: str = EQ_BUILD, adj_build: str | None = None) -> tuple[Path, Path]:
+                eq_build: str = EQ_BUILD, adj_build: str | None = None,
+                fin_wise_rows: list[dict] | None = None) -> tuple[Path, Path]:
     eq, st = base / "eq", base / "st"
     f = _filler_tickers(N_FILLER) if fillers is None else fillers
     equity = {
@@ -319,7 +320,8 @@ def _make_roots(base: Path, *, fillers: list[str] | None = None,
         _make_stage_tree(eq, table, rows, build_id=build)
     for table, rows in (("stg_consensus_matrix", _matrix_rows()),
                         ("stg_consensus_annual", _annual_rows()),
-                        ("stg_fin_wise", _fin_wise_rows())):
+                        ("stg_fin_wise", _fin_wise_rows() if fin_wise_rows is None
+                         else fin_wise_rows)):
         _make_stage_tree(st, table, rows, build_id=ST_BUILD)
     return eq / "stage", st / "stage"
 
@@ -511,6 +513,31 @@ def test_financial_summary_wise_gross_profit_wins(roots, tmp_path: Path) -> None
     _run(roots, target, tables=["financial_summary"])
     assert _rows(target, "SELECT gross_profit FROM financial_summary "
                          "WHERE stock_code='005930' AND period='2025/12'") == [(1_000_000,)]
+
+
+def test_financial_summary_takes_each_ep_from_its_own_latest_version(tmp_path: Path) -> None:
+    """G1(배포 묶음 7-2): stage 가 같은 원문을 접으면 cF3002(손익) 판은 09-22 뿐이고 cF4002(지표)만
+    09-23 에 새 판일 수 있다. 09-23 행은 손익 = 09-22 판(값 +1,000), 지표 = 09-23 판이어야 한다.
+    옛 쿼리(종목별 max 한 날짜)는 09-23 을 골라 revenue·op·ni·회계기준이 조용히 비었다."""
+    base = _fin_wise_rows()
+    rows = ([dict(r, fetched_date=D22, **{f"val_{i}": r[f"val_{i}"] + 1_000 for i in range(1, 7)})
+             for r in base if r["ep"] == "cF3002"]
+            + [dict(r, fetched_date=D22, **{f"val_{i}": r[f"val_{i}"] * 2 for i in range(1, 7)})
+               for r in base if r["ep"] == "cF4002"]
+            + [r for r in base if r["ep"] == "cF4002"])
+    roots = _make_roots(tmp_path / "src", fin_wise_rows=rows)
+    sql = ("SELECT period, revenue, op, ni, gross_profit, eps, per, accounting_standard "
+           "FROM financial_summary WHERE period_type='annual' AND data_type IS NULL "
+           "ORDER BY period DESC LIMIT 1")
+    target = tmp_path / "quant.db"
+    _run(roots, target, tables=["financial_summary"])
+    assert _rows(target, sql) == [("2025/12", 3_337_059, 517_339, 400_075, 1_001_000, 6564,
+                                   18.27, "IFRS연결")]
+    # 09-22 기준이면 두 ep 다 09-22 판 — 지표도 09-22 값(×2)
+    old = tmp_path / "quant_0922.db"
+    _run(roots, old, tables=["financial_summary"], consensus_asof="20260922")
+    assert _rows(old, sql) == [("2025/12", 3_337_059, 517_339, 400_075, 1_001_000, 13_127,
+                                36.54, "IFRS연결")]
 
 
 # ── R1 — accode 충돌(금융업)은 계정명으로 가른다. 실물 절단본으로 본다 ───────

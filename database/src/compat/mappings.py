@@ -289,6 +289,9 @@ WHERE rn = 1
 #   4일 그림자 실측에서 quality 상관이 0.48 뿐이었던 원인이 ②의 부재였다(나머지 팩터는
 #   momentum 0.997 · flow 0.996 · revision 0.985 · valuation 0.977). WISE cF3002 는
 #   손익계산서 전용이라 재무상태표·현금흐름표 계정이 없다.
+#   ①의 판은 **(종목, ep) 단위** `fetched_date <= {consensus_asof}` 최신이다(배포 묶음 7 D7-4,
+#   fi `fin_summary_sql` 과 같은 규칙). stage 2.7.0 이 같은 원문의 연속 판을 접어 cF3002·cF4002
+#   판 날짜가 다를 수 있다 — 종목 한 날짜로 고르면 cF4002 만 새 판인 날 손익 열이 조용히 빈다.
 #
 # 정의(단위는 v3 `financial_summary` 기준 — 금액 억원 · 비율 %):
 #   total_assets = total_asset / 1e8                              (원 → 억원)
@@ -364,14 +367,14 @@ _W_TAIL = """       CAST(NULL AS DOUBLE)                                   AS op
 # 고치지 않는다. 결산월을 옳게 보는 판정은 **모델 층이 `freq` 로** 한다(그림자 컷오버 뒤).
 _FINANCIAL_SUMMARY_SQL = f"""
 WITH latest AS (
-    SELECT ticker, max(fetched_date) AS fetched_date
+    SELECT ticker, ep, max(fetched_date) AS fetched_date
     FROM {{stg_fin_wise}}
     WHERE fetched_date <= DATE '{{consensus_asof}}'
-    GROUP BY ticker
+    GROUP BY ticker, ep
 ),
 cur AS (
     SELECT w.* FROM {{stg_fin_wise}} w
-    JOIN latest l ON l.ticker = w.ticker AND l.fetched_date = w.fetched_date
+    JOIN latest l ON l.ticker = w.ticker AND l.ep = w.ep AND l.fetched_date = w.fetched_date
 ),
 slots AS (
     {_FIN_SLOTS}

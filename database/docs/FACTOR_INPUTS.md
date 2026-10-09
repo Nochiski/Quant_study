@@ -74,7 +74,7 @@ D = 판 기준일. 표 전부 `fi_universe` 종목으로 자른다.
 | `fi_credit` | `credit_daily.whol_loan_rmnd_stcn_shr`·`whol_loan_rmnd_rate_pct` | D 까지 60 세션, `available_date ≤ D` | 주 · % · `available_date` = 그날 + 3 세션(KIS 실입수, equity FieldProfile) |
 | `fi_consensus` | `stg_consensus_matrix`(c1050001 T4) — **한시 예외**(§7) | 신선·유예 종목의 마지막 신선일 판 × 결산기 3 × horizon cur/1w/1m/3m | 억원·원·배·% 원값(eps·bps 는 정수 — compat 과 같다). 판에 있는 (종목, 결산기)마다 네 horizon 행을 값이 NULL 이어도 만든다 |
 | `fi_consensus_annual` (v2 전용) | `stg_consensus_annual`(WISE c1050001 T2Y — v2 원천) | 종목별 fetched_date ≤ D **최신 한 판**, 전년·당해·차년 12월기(Y−1/12 · Y/12 · Y+1/12), 추정 E·확정 A 둘 다 | 억원·원·배 원값(eps 정수 — compat `consensus_annual` 과 같다). 원천 행이 있으면 값이 전부 NULL 이어도 싣는다(v2 에게는 행 존재가 뜻이 있다) |
-| `fi_fin_summary` | 연간: `stg_fin_wise`(WISE cF3002·cF4002, 계정명+최상위 선택 DQ-6) + `fin_std`(사업보고서, 연결 우선, PIT) + `dividend_event`(보통주 dps) · 분기: `fin_std`(1Q·반기·3Q 3개월 값, 4Q = 사업보고서 − 1~3Q) | 연간 최신 2기 · 분기 최신 5기 | 금액 **정수 억원**(compat 식 그대로) · 비율 % · dps 원 |
+| `fi_fin_summary` | 연간: `stg_fin_wise`(WISE cF3002·cF4002, 계정명+최상위 선택 DQ-6 — **(종목, ep) 단위** fetched_date ≤ D 최신 판, fi1.4.0) + `fin_std`(사업보고서, 연결 우선, PIT) + `dividend_event`(보통주 dps) · 분기: `fin_std`(1Q·반기·3Q 3개월 값, 4Q = 사업보고서 − 1~3Q) | 연간 최신 2기 · 분기 최신 5기 | 금액 **정수 억원**(compat 식 그대로) · 비율 % · dps 원 |
 
 `fi_consensus` 와 `fi_consensus_annual` 을 나눈 이유(계약 09-29 W1-d): 같은 기·같은 항목이어도
 v3 원천(매트릭스 T4 · cF3002)과 v2 원천(c1050001 T2Y)의 값이 다르다(09-28 골든: 당해 추정 op 318 ·
@@ -96,7 +96,15 @@ compat 은 한 기에 E 하나(E 우선)만 남기지만 이 표는 E·A 를 둘
   정한다). **연구 R-2 질의와 다른 점**: R-2 는 `'-'` 행을 빼고 쟀다 — 09-28 로컬 판 실측 FY2025 배당
   법인 1,261 중 155 곳이 `'-'` 행에만 dps 를 싣는다. 빼면 그 155 곳이 NULL → 엔진의 '무배당 0' 으로
   조용히 떨어지므로 보통주 값이 없을 때만 `'-'` 를 쓴다.
-- `available_date` = 행을 이룬 원천의 max(WISE fetched_date, DART·배당 available_date).
+- WISE 연간 판 = **(종목, ep) 단위** fetched_date ≤ D 최신(fi1.4.0, 배포 묶음 7 D7-4). stage 2.7.0 이
+  같은 (종목, ep, pkey) 의 직전 판과 같은 원문을 접어 cF3002(손익)·cF4002(지표) 판 날짜가 종목 안에서
+  다를 수 있다 — 종목 한 날짜로 고르면 cF4002 만 새 판인 날 손익 열(매출·영업이익·순이익·매출총이익·
+  fs_basis)이 조용히 빈다(fi1.2.0 까지의 쿼리). 한쪽 ep 가 그날 수집되지 않았으면 그 ep 의 직전 판을
+  잇는다(결손 자체는 WISE 부분 실패 알림 — N-30 ③ — 이 따로 알린다). compat `financial_summary` 도 같은 규칙.
+- `available_date` = 행을 이룬 원천의 max(WISE fetched_date, DART·배당 available_date). 연간 행의
+  WISE 날짜는 두 ep 판 중 늦은 날, 분기 WISE 행은 Q:IS 판 날짜다. stage 2.7.0 부터 WISE fetched_date 는
+  '그 원문을 처음 본 날'(그 전엔 '마지막으로 확인한 날')이라 원문이 그대로인 종목은 D 보다 이르다 —
+  '알게 된 날' 뜻은 그대로이고 ≤ D 다(FG1). 엔진은 읽지 않는다.
 - 연간 매출은 분기와 같은 계정(최상위 '매출액(수익)' → 보험 '영업수익' → 은행·증권·금융지주
   '순영업이익')으로 고르고 `revenue_basis`(gross | net)를 적는다(fi1.2.0, 배포 묶음 4-2b). compat 은
   '매출액(수익)' 만 봐서 금융업 연간 매출이 비었다(10-02 판 scope 금융 28종목 전부). v3 엔진은 매출을
@@ -160,7 +168,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | 게이트 | 판정 | FAIL 조건 |
 |---|---|---|
 | FG0 스키마 | 8표 열 이름·순서·타입 = 계약 | 하나라도 다르면(뒤 게이트는 `skip(upstream_failed)`) |
-| FG1 행수 | 유니버스 × 창 | 종목 ⊄ fi_universe · fi_universe 종목 중복·date ≠ D · eligible 인데 D 가격 없음 · eligible 인데 cur 컨센서스 없음 · eligible < `--min-eligible`(기본 300) · 날짜가 창 밖 · 수급·신용 60 세션 초과 · 신용·재무 `available_date > D` · 연간 > 2기 · 분기 > 5기 · horizon 어휘 밖 · `fi_consensus_annual` 기가 Y−1~Y+1/12 밖·data_type ∉ {E, A}·fetched_date > D · eligible 중 WISE 연간 재무(per 또는 eps) 비율 < 0.9 |
+| FG1 행수 | 유니버스 × 창 | 종목 ⊄ fi_universe · fi_universe 종목 중복·date ≠ D · eligible 인데 D 가격 없음 · eligible 인데 cur 컨센서스 없음 · eligible < `--min-eligible`(기본 300) · 날짜가 창 밖 · 수급·신용 60 세션 초과 · 신용·재무 `available_date > D` · 연간 > 2기 · 분기 > 5기 · horizon 어휘 밖 · `fi_consensus_annual` 기가 Y−1~Y+1/12 밖·data_type ∉ {E, A}·fetched_date > D · eligible 중 WISE 연간 재무(per 또는 eps) 비율 < 0.9. 기록형: eligible 중 WISE 연간 손익(op 또는 ni — cF3002) 비율 `eligible_wise_is_ratio`(fi1.4.0, D7-8 — 서버 재연 6개 D 에서 ≥ 0.95 면 `FIN_IS_COVERAGE_ENFORCED` 로 같은 하한 0.9 의 FAIL 조건으로 올린다) |
 | FG2 T 행 출처 | 아침판: 전 행 KRX | `price_source`·`mktcap_basis` ≠ 'krx' |
 | FG3 시총 | market_cap = round(shares × close(D) / 1e8) (상대 1e-6) | 규칙 위반 · 주식수·종가가 있는데 NULL · basis ≠ krx. KRX `mktcap_krw` 반올림값과 다른 수는 기록형(`n_krx_mktcap_diff`) |
 | FG4 골든 | `src/factor_inputs/fixtures/golden.json`(3종목 005930·000660·161890, 22항목, stage 원장에서 손으로 옮긴 값) | 창·유니버스 안 항목이 값이 다르거나 행이 없다. 셀 수 있는 항목이 0 이면 `skip(no_fixtures)` — 창이 지나가면 골든을 갱신한다(수급·신용 항목은 2026-08 날짜라 11월 중순에 창 밖) |

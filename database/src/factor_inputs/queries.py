@@ -533,7 +533,15 @@ def fin_summary_sql(p: Params) -> str:
         보통주/보통주식, 값이 없으면 법인 축 '-' · available_date ≤ D, 결산기 = stlm_dt 의
         'YYYY/MM') — v4 DY0 재료(계약 09-29 추가). 모르면 NULL(무배당 = 0 은 엔진이 정한다).
         분기 행 NULL.
-      · `available_date` = 행을 이룬 원천들의 max(WISE fetched_date, DART·배당 available_date).
+      · WISE 연간 판은 **(종목, ep) 단위**로 fetched_date ≤ D 최신 판을 고른다(배포 묶음 7, D7-4).
+        stage 가 같은 (종목, ep, pkey) 의 직전 판과 같은 원문을 접으므로(stage 2.7.0) cF3002(손익)·
+        cF4002(지표) 판 날짜가 종목 안에서 다를 수 있다 — 종목 한 날짜로 고르면 cF4002 만 새 판인
+        날 cF3002 열(매출·영업이익·순이익·매출총이익·fs_basis)이 조용히 빈다. 한쪽 ep 가 그날
+        수집되지 않았으면 그 ep 의 직전 판을 잇는다(접지 않은 원천에서는 그날만 옛 쿼리와 다르다).
+      · `available_date` = 행을 이룬 원천들의 max(WISE 두 ep 판의 fetched_date, DART·배당
+        available_date). WISE fetched_date 는 stage 2.7.0 부터 '그 원문을 처음 본 날'이다(그 전엔
+        '마지막으로 확인한 날') — cF4002 가 거의 매일 바뀌어 대개 D 지만, 두 ep 모두 원문이 그대로면
+        D 보다 이르다. 어느 쪽이든 ≤ D(FG1 available_after_d) 이고 엔진은 읽지 않는다.
       · 연간 매출은 분기와 같은 계정(`WISE_Q_REVENUE_*`)으로 고르고 `revenue_basis` 를 적는다 —
         compat 은 '매출액(수익)' 만 봐서 금융업 연간 매출이 비었다(배포 묶음 4-2b, v3 는 매출을
         읽지 않으므로 G-M3 동등성과 무관).
@@ -547,16 +555,17 @@ def fin_summary_sql(p: Params) -> str:
     w_gross = ", ".join(_fin_pick("cF3002", "", True, n) for n in WISE_Q_REVENUE_GROSS)
     w_net = _fin_pick("cF3002", "", True, WISE_Q_REVENUE_NET)
     inner = f"""WITH wsnap AS (
-    SELECT w.ticker, max(w.fetched_date) AS fetched_date
+    -- (종목, ep) 단위 D 이전 최신 판(배포 묶음 7 D7-4) — 두 ep 의 판 날짜가 다를 수 있다
+    SELECT w.ticker, w.ep, max(w.fetched_date) AS fetched_date
     FROM stg_fin_wise w
     WHERE w.fetched_date <= DATE '{p.d}'
       AND w.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
       AND w.{_IN_UNIVERSE}
-    GROUP BY w.ticker
+    GROUP BY w.ticker, w.ep
 ),
 cur AS (
     SELECT w.* FROM stg_fin_wise w
-    JOIN wsnap l ON l.ticker = w.ticker AND l.fetched_date = w.fetched_date
+    JOIN wsnap l ON l.ticker = w.ticker AND l.ep = w.ep AND l.fetched_date = w.fetched_date
 ),
 slots AS (
     {_FIN_SLOTS}

@@ -114,7 +114,7 @@
 | QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ☐ |
 | QL-M·N | compat 만료 정리 · compare 기준 scope | S | ☐ |
 | QL-P | T-23 v3 `market_*` 를 KRX 지수 원장으로 | M | ✕ 보류(T-27) — 구현 브랜치 `pr/QL-P` 3b9a5e04 는 v3 폴더 이관 때 쓴다(열 대응표: 지수 3종 대응·VKOSPI·폭·시장 수급·프로그램 없음·업종 부분) |
-| QL-Q | T-24 v3·uni 휴장 파일을 quant-ledger 달력에서 | S | ☐ |
+| QL-Q | T-24 v3·uni 휴장 파일을 quant-ledger 달력에서 | S | ✅ 머지(5478538d). 연결 PR 전제 — ① 매일(주말·휴장 포함) KST 00:00 뒤·v3 20:05 전 1회 이상(06:00 체인 휴장일에도 도는 자리) ② 쓰기 전 서버 v3 `data/.kis_holidays.json` 링크 여부·소유자 확인과 백업 ③ 연결 당일 `sync_calendar.sh` v3 대조를 끄거나 일치 일수를 세지 않음(자기 사본 비교) ④ `COMPAT_LAYER.md:79` uni 휴장 원천을 `daily.calendar_export` 로 |
 | V3-A~E | v3 쪽(`daily_post` 체인, `daily_all` 퀀트 단계 제거, 첫 반영, uni 날짜 조건) — 백업 뒤 컷오버 날(N-42 Q4 일괄 승인) | S×4 | ☐ |
 
 ### P5 전체 재생 검증 · phase 셀프 리뷰

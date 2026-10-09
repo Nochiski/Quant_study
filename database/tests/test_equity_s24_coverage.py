@@ -31,7 +31,7 @@ WISE_TABLES = ("stg_consensus_monthly", "stg_analyst_summary", "stg_wise_coverag
 COVERAGE = rules_s24.COVERAGE_DAILY
 # 격리 사유가 없는 표라 EG7 은 비율 0 으로 통과하고 baseline 상수도 필요 없다.
 SEED = Baseline({})
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_coverage_daily", "EG4", "EG5a"]
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_coverage_daily", "EG4", "EG5a"]
 
 N_TICKER = 7
 N_DATE = 2

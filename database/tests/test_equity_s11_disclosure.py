@@ -90,10 +90,10 @@ def rows(built: build.BuildResult) -> dict[str, dict[str, object]]:
 def test_절단본_빌드가_전_게이트를_통과한다(built: build.BuildResult) -> None:
     assert built.ok, [(g.name, g.status.value, g.detail) for g in built.gates]
     assert [g.name for g in built.gates] == [
-        "EG0", "EG7", "EG1", "EG2", "EG3", "EG3_disclosure_version",
+        "EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_disclosure_version",
         "EG6_disclosure_version", "EG8_disclosure_version", "EG4", "EG5a"]
     assert {g.name: g.status.value for g in built.gates if g.name != "EG5a"} == {
-        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG3": "pass",
+        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG13": "pass", "EG3": "pass",
         "EG3_disclosure_version": "pass", "EG6_disclosure_version": "pass",
         "EG8_disclosure_version": "pass", "EG4": "pass"}
     assert (built.n_rows, built.n_reject) == (N_OUT, N_REJECT)

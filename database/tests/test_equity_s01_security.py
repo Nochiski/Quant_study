@@ -51,7 +51,7 @@ def built(tmp_path: Path) -> build.BuildResult:
 def test_절단본_왕복이_ok이고_게이트는_pass나_skip뿐(built: build.BuildResult) -> None:
     assert built.ok, _fail_names(built)
     assert {g.name: g.status.value for g in built.gates} == {
-        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "skip", "EG3": "pass",
+        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "skip", "EG13": "skip", "EG3": "pass",
         "EG3_security": "pass", "EG4": "pass", "EG5a": "skip"}
     # 손계산: listing 14티커 + etf 1티커, 교집합 없음
     assert built.n_rows == 15 and built.n_reject == 0

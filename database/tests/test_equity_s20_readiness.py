@@ -42,7 +42,7 @@ REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 N_READY = 54
 N_BLOCKED = 0
 BLOCKED_REASON_COUNTS: dict[str, int] = {}
-READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
+READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG10", "EG4", "EG5a"]
 
 
 @pytest.fixture(scope="module")

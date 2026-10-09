@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import functools
 import json
 import re
 from datetime import date
@@ -111,10 +112,11 @@ def rows(built: build.BuildResult) -> dict[str, dict[str, object]]:
 
 def test_절단본_빌드가_전_게이트를_통과한다(built: build.BuildResult) -> None:
     assert built.ok, [(g.name, g.status.value, g.detail) for g in built.gates]
-    assert [g.name for g in built.gates] == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_fin_std",
-                                             "EG8_fin_std", "EG6_fin_std", "EG4", "EG5a"]
+    assert [g.name for g in built.gates] == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3",
+                                             "EG3_fin_std", "EG8_fin_std", "EG6_fin_std", "EG4",
+                                             "EG5a"]
     assert {g.name: g.status.value for g in built.gates if g.name != "EG5a"} == {
-        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG3": "pass",
+        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "pass", "EG13": "pass", "EG3": "pass",
         "EG3_fin_std": "pass", "EG8_fin_std": "pass", "EG6_fin_std": "skip", "EG4": "pass"}
     assert (built.n_rows, built.n_reject) == (N_OUT, N_REJECT)
 
@@ -385,6 +387,9 @@ def test_픽스처는_전부_positive_이고_키가_유일하다(built: build.Bu
 # ── 손 트리 부정 픽스처 ───────────────────────────────────────────────────────
 
 OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 선택 축)
+# 손 트리 stage 판의 원장 스냅샷 — 시나리오의 가장 늦은 관측(G-21 정정 09-28) 뒤.
+# EG13 이 이 id 의 KST 날짜를 공개일 상한으로 읽는다.
+HAND_SNAPSHOT = "snap_20260930T000000Z"
 
 
 def _stage_available(rcept: str, rcept_dt: date) -> date:
@@ -434,6 +439,7 @@ def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | No
     `corrections` 는 `stg_doc_correction` 행(기본 = 첫 접수 한 행).
     `period_from` 은 접수번호별 문서 기간 시작일이다 — 없으면 period_to 해의 1월 1일(12월 결산)."""
     names = report_names or {}
+    make_stage_tree = functools.partial(make_stage_tree, snapshot_id=HAND_SNAPSHOT)   # EG13 기준일
     tree = make_stage_tree(tmp_path, "stg_corp_map",
                            [{"corp_code": c, "ticker": f"{i:06d}", "corp_name_current": c}
                             for i, (c, _) in enumerate(corps)])

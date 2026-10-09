@@ -43,7 +43,7 @@ from equity.model import BASIS_VOCAB, FILL_EVIDENCE, FILL_KINDS, EquityTable
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SHORT = rules_s09.SHORT_DAILY
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_short_daily", "EG3_short_daily",
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG1_short_daily", "EG3_short_daily",
               "EG21", "EG4", "EG5a"]
 # S09 격자는 universe_daily(S03) 위에 선다 — S03C 가 adj_factor 를 읽으므로 계수 체인까지 앞세운다
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,

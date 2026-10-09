@@ -36,7 +36,7 @@ N_REFERENCE = 346                   # volume_shr = 0 인 주식 행 (ETF 0)
 N_005930_PRE_SPLIT = 2060           # 005930 의 2018-05-04 이전 행수 (부정 픽스처 손계산)
 N_NO_PAR = 1916                     # 900050 무액면 전 행
 LAST_KRX_SESSION = date(2026, 8, 20)   # 절단본 KRX 상한 = 캘린더 max (EG17 유도값)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_price_daily", "EG20", "EG14",
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_price_daily", "EG20", "EG14",
               "EG4", "EG5a"]
 
 

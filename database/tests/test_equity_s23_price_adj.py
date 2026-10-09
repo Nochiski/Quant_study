@@ -49,7 +49,7 @@ ADJ_DAILY = rules_s23.PRICE_ADJ_DAILY
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
             rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT,
             rules_s06.ADJ_FACTOR)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_price_adj_daily", "EG4", "EG5a"]
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_price_adj_daily", "EG4", "EG5a"]
 
 N_ROWS = 41_066                     # = 절단본 price_daily 행수 (EG1 항등)
 N_ROWS_ADJUSTED = 5_083
@@ -522,8 +522,12 @@ SYNTH_PRICE_DATES = [dt.date(2020, 1, 2), dt.date(2020, 1, 3), dt.date(2020, 1, 
 
 
 def _write_equity_table(root: Path, table: str, rows_sql: str, *,
-                        partition_expr: str | None = None) -> None:
-    """equity 산출 규약(`v=<build>/…` + MANIFEST)대로 손 테이블 하나를 굽는다."""
+                        partition_expr: str | None = None,
+                        lineage: dict[str, str] | None = None) -> None:
+    """equity 산출 규약(`v=<build>/…` + MANIFEST)대로 손 테이블 하나를 굽는다.
+
+    `lineage` 는 그 손 판의 `inputs`(고정된 stage 판) — EG13 은 equity 내부 입력의 계보를 따라가
+    stage 스냅샷 날짜를 기준일로 세우므로 계보가 없으면 판을 막는다."""
     build_id = f"b_synth_{table}"
     table_root = root / table
     vdir = table_root / f"v={build_id}"
@@ -554,18 +558,20 @@ def _write_equity_table(root: Path, table: str, rows_sql: str, *,
     manifest.commit(table_root, manifest.BuildRecord(
         build_id=build_id, snapshot_id="synth", rules_version="synth",
         built_at_utc="2026-09-06T00:00:00+00:00", n_rows=sum(r["n_rows"] for r in records),
-        content_hash="synth", partitions=records, gates=[], inputs={}))
+        content_hash="synth", partitions=records, gates=[], inputs=dict(lineage or {})))
 
 
 def _synth_root(root: Path) -> Path:
     """구간 2개짜리 재상장 종목 하나로 이뤄진 equity 입력 트리."""
+    # 손 판들은 절단본 stg_price_daily 판(스냅샷 2026-09-03 KST)에 선 것으로 둔다 — EG13 기준일 출처
+    lineage = {"stg_price_daily": inputs.pin(STAGE_SLICE, root, "stg_price_daily").build_id}
     cal = ", ".join(f"(DATE '{d}')" for d in SYNTH_SESSIONS)
     _write_equity_table(root, "trading_calendar",
-                        f"SELECT * FROM (VALUES {cal}) AS t(date)")
+                        f"SELECT * FROM (VALUES {cal}) AS t(date)", lineage=lineage)
     spans = ", ".join(f"('{t}', {q}, DATE '{a}', DATE '{b}')" for t, q, a, b in SYNTH_SPANS)
     _write_equity_table(root, "security_span",
                         f"SELECT * FROM (VALUES {spans}) AS t(ticker, span_seq, first_date, "
-                        "last_date)")
+                        "last_date)", lineage=lineage)
     px = ", ".join(
         f"('036220', DATE '{d}', CAST({100 + i} AS DECIMAL(9,0)), "
         f"CAST({110 + i} AS DECIMAL(9,0)), CAST({90 + i} AS DECIMAL(9,0)), "
@@ -577,7 +583,7 @@ def _synth_root(root: Path) -> Path:
     _write_equity_table(root, "price_daily",
                         f"SELECT * FROM (VALUES {px}) AS t(ticker, date, open, high, low, close, "
                         "volume_shr, price_kind, basis, corp_action_pending)",
-                        partition_expr="year(date)")
+                        partition_expr="year(date)", lineage=lineage)
     fac = ("('036220:split:2020-01-03', '036220', DATE '2020-01-03', DATE '2020-01-03', "
            "0.1, 10.0, TRUE, 'mktcap_neutral', 1.0, 'factor'), "
            "('036220:capred:2020-01-06', '036220', DATE '2020-01-06', DATE '2020-01-06', "
@@ -590,7 +596,7 @@ def _synth_root(root: Path) -> Path:
                         f"SELECT * FROM (VALUES {fac}) AS t(event_id, ticker, apply_date, "
                         "available_date, price_factor, share_factor, factor_ok, factor_source, "
                         "price_only_factor, price_resolution)",
-                        partition_expr="year(apply_date)")
+                        partition_expr="year(apply_date)", lineage=lineage)
     return root
 
 

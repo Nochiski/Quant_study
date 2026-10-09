@@ -25,6 +25,13 @@ def bucket_label(b: str) -> str:
     return BUCKET_LABELS.get(b, b)
 
 
+# 판 성격 문구 — 텔레그램 캡션·엑셀 메타 공용. 장 마감 직후 판은 basis 이름 evening 을 재사용한다
+# (컷오버 트랙 T-1). 시각 근거 N-35(가격 15:35 회차부터 공식 종가 일치 · 정규장 수급 15:40 확정),
+# 컨센서스는 WISE DT = T−1(N-13 근거). 문구가 없는 basis(아침판 morning)는 기존 그대로 둔다.
+BASIS_NOTES: dict[str, str] = {
+    "evening": "장 마감 직후 판(가격 15:35·수급 15:40 정규장 기준) · 컨센서스 기준일 = 직전 거래일"}
+
+
 @dataclass(frozen=True)
 class IndMeta:
     """지표 표시 규칙 — 라벨 · 배율(비율 → %) · 숫자 서식 · 변화 열 여부(색 스케일 대상)."""

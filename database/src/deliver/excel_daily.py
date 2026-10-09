@@ -17,6 +17,7 @@ from pathlib import Path
 from openpyxl import Workbook
 
 from .common import (
+    BASIS_NOTES,
     PREV_NEGATIVE_FLAGS,
     REVISION_KEYS,
     analyst_note,
@@ -994,8 +995,10 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
             counts[k] = counts.get(k, 0) + 1
     scored = [t for t in view.by_ticker if view.scored(t)]
     miss = {b: sum(1 for t in scored if view.bucket_score(t, b) is None) for b in view.buckets}
-    pairs: list[tuple[str, object]] = [
-        ("기준일", view.date), ("basis", run.basis),
+    pairs: list[tuple[str, object]] = [("기준일", view.date), ("basis", run.basis)]
+    if run.basis in BASIS_NOTES:                 # 장 마감 직후 판(evening)만 — 아침판은 줄 없음(PR-6)
+        pairs.append(("판 성격", BASIS_NOTES[run.basis]))
+    pairs += [
         ("주 모델", f"{view.spec_id}({model_label(view.spec_id)})"),
         ("비교 모델", ", ".join(f"{s}({model_label(s)})" for s in compared_specs(view))),
     ]

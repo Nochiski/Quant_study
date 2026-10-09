@@ -144,6 +144,20 @@ def test_captions_fixed_format() -> None:
     assert tg.caption_daily("d", "b", "s", [], 0, 0).splitlines()[1] == "상위5: -"
 
 
+def test_caption_daily_evening_says_postclose_basis() -> None:
+    """PR-6 — 장 마감 직후 판(basis evening)은 둘째 줄에 판 성격(가격·수급 시각, 컨센서스 기준일)을
+    단다. 아침판 캡션은 그대로(위 고정 형식 테스트)."""
+    top = [(1, "005930", "삼성전자")]
+    morning = tg.caption_daily("2026-10-14", "morning", "scope@1.0", top, 593, 600)
+    c = tg.caption_daily("2026-10-14", "evening", "scope@1.0", top, 593, 600)
+    lines = c.splitlines()
+    assert lines[0] == "[모델 점수] 2026-10-14 evening · scope@1.0"
+    assert lines[1] == ("장 마감 직후 판(가격 15:35·수급 15:40 정규장 기준) · "
+                        "컨센서스 기준일 = 직전 거래일")
+    assert lines[2:] == morning.splitlines()[1:]
+    assert "장 마감" not in morning and "컨센서스" not in morning
+
+
 def test_caption_daily_correction_line() -> None:
     """Q9 — 정정 발송(n ≥ 1)만 끝에 '정정 n · 판 id · 생성 시각' 줄을 단다.
     첫 발송(n = 0)은 그대로."""

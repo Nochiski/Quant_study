@@ -14,6 +14,15 @@ D, DP = "20260908", "20260907"          # 대상일(화), 직전 거래일(월)
 RC = lh.req_covered_on("2026-09-08")  # 그 날 런의 커버 종목당 요청 수(재무 추가 전 = 15)
 
 
+# 필수 표의 기준 원천(모델이 쓰는 원천, K1-7b). 표와 실제 REQUIRED 검사가 어긋나지 않는지 아래 테스트가 대조한다.
+_MODEL_SOURCES = ("krx", "kiwoom", "wise", "dart")
+
+
+def _only(*keep):
+    """keep 밖의 모델 원천은 `--skip` 으로 뺀다 — 필수 검사 누락 = 실패(K1-7c) 뒤 일부 원천만 보는 테스트용."""
+    return frozenset(_MODEL_SOURCES) - set(keep)
+
+
 def _cal(tmp_path, holidays=()):
     p = tmp_path / "kis_holidays_2026.json"
     p.write_text(json.dumps({"year": 2026, "holidays": list(holidays)}), encoding="utf-8")
@@ -103,7 +112,7 @@ def _by(report):
 
 
 def test_krx_all_ok_passes(tmp_path):
-    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path)))
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path)), skip=_only("krx"))
     c = _by(rep)
     assert c["krx.ingest_log"].status is lh.Status.PASS and c["krx.rows"].status is lh.Status.PASS
     assert c["krx.holiday_misfire"].status is lh.Status.PASS and rep.ok
@@ -120,7 +129,7 @@ def test_krx_corp_action_candidates_flags_parval_and_shares_changes(tmp_path):
         ("ksq", 7, ("500", "500"), ("28757309", "29301512")),          # 주식수 +1.89%
         ("ksq", 9, ("500", "500"), ("1000000", "1000400")),            # +0.04% — 문턱 아래
     ))
-    rep = lh.run(D, _paths(tmp_path, krx=krx))
+    rep = lh.run(D, _paths(tmp_path, krx=krx), skip=_only("krx"))
     c = _by(rep)["krx.corp_action_candidates"]
     # 기록형이다 — 한국 시장에서 전환·증자·소각은 매일 몇 건씩 나므로 "0건 기대" 는 매일 FAIL 이고
     # 사람은 곧 무시한다(DEFECT-A09). 대조는 equity 의 adj_factor·corp_event 가 매일 한다.
@@ -192,7 +201,7 @@ def test_krx_holiday_rows_on_a_calendar_holiday_pass(tmp_path):
     krx = _krx(tmp_path)
     _krx_rows_on(krx, "20260903", status="holiday")          # 휴장일의 빈 응답은 정상
     _krx_rows_on(krx, "20260904")                            # 달력상 거래일의 ok 행도 정상
-    rep = lh.run(D, _paths(tmp_path, krx=krx, holidays=("20260903",)))
+    rep = lh.run(D, _paths(tmp_path, krx=krx, holidays=("20260903",)), skip=_only("krx"))
     assert _by(rep)["krx.holiday_traded"].status is lh.Status.PASS and rep.ok
 
 
@@ -255,15 +264,16 @@ def test_kiwoom_cross_close_mismatch_is_recorded_only(tmp_path):
 
 
 def test_report_json_roundtrip(tmp_path):
-    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path)))
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path)), skip=_only("krx"))
     path = lh.write_report(rep, str(tmp_path / "health"))
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["ok"] is True and data["checks"][0]["level"] == "required" and "OK" in data["summary"]
+    first = next(c for c in data["checks"] if c["name"] == "krx.ingest_log")
+    assert data["ok"] is True and first["level"] == "required" and "OK" in data["summary"]
 
 
 def test_skip_source_excludes_its_checks(tmp_path):
     rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, stale=2540)),
-                 skip=frozenset({"kiwoom"}))
+                 skip=_only("krx"))
     names = {c.name for c in rep.checks}
     assert "kiwoom.skipped" in names and not any(n.startswith("kiwoom.ka") for n in names)
     assert rep.ok                                                     # 오염 99% 픽스처인데 kiwoom 을 제외했으니 통과
@@ -469,13 +479,13 @@ def test_KRX_지수가_줄면_행수_검사는_실패한다(tmp_path) -> None:
 
 # ── KIS 신용잔고 신선도 (DEFECT-A06·E01) ────────────────────────────────────
 def test_kis_credit_fresh_passes_at_d_minus_2(tmp_path):
-    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260904")))   # D-2 세션 = 정상
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260904")), skip=_only())   # D-2 세션 = 정상
     c = _by(rep)["kis.credit.fresh"]
     assert c.level is lh.Level.REQUIRED and c.status is lh.Status.PASS and rep.ok
 
 
 def test_kis_credit_fresh_warns_one_session_behind(tmp_path):
-    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260903")))   # D-3 — 하루 밀렸다
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260903")), skip=_only())   # D-3 — 하루 밀렸다
     c = _by(rep)["kis.credit.fresh"]
     assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
     assert rep.ok                                                        # 경고는 체인을 세우지 않는다
@@ -511,7 +521,7 @@ def test_kis_credit_rows_ignore_requested_tickers_that_never_have_credit(tmp_pat
 
 
 def test_kis_credit_rows_warn_when_three_percent_of_expected_is_missing(tmp_path):
-    rep = lh.run(D, _paths(tmp_path, kis=_kis_hist(tmp_path, 2425)))
+    rep = lh.run(D, _paths(tmp_path, kis=_kis_hist(tmp_path, 2425)), skip=_only())
     c = _by(rep)["kis.credit.rows"]
     assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
     assert "판정일 행 부족" in c.detail and rep.ok
@@ -568,7 +578,8 @@ def test_wics_stale_or_thin_snapshot_only_warns(tmp_path):
     """주간 축을 일일 건전성이 FAIL 로 보면 안 된다 — 나이·커버리지는 WARN 등급."""
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir(); b.mkdir()
-    rep = lh.run(D, _paths(tmp_path, krx=_krx(a), wiseindex=_wics(a, dt_="20260821", n=200)))   # 18일 · 200/2,762
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(a), wiseindex=_wics(a, dt_="20260821", n=200)),
+                 skip=_only("krx"))                                                    # 18일 · 200/2,762
     c = _by(rep)
     assert c["wics.fresh"].status is lh.Status.FAIL and c["wics.fresh"].level is lh.Level.WARN
     assert c["wics.coverage"].status is lh.Status.FAIL and c["wics.coverage"].level is lh.Level.WARN
@@ -585,8 +596,6 @@ def test_wise_request_budget_follows_the_run_date():
 
 
 # ── K1-7b: 필수 검사 SKIP = 실패(N-42 Q4) ──────────────────────────────────────────
-# 필수 표의 기준 원천(모델이 쓰는 원천). 표와 실제 REQUIRED 검사가 어긋나지 않는지 아래 테스트가 대조한다.
-_MODEL_SOURCES = ("krx", "kiwoom", "wise", "dart")
 
 
 def _dart(tmp_path, n=410):
@@ -602,7 +611,7 @@ def _dart(tmp_path, n=410):
 
 def _skip_rows(tmp_path):
     """요청 유니버스 크기 미상(상태 파일 n_requested 0) — 키움 행수 3검사가 비율을 못 낸다."""
-    p = _paths(tmp_path, kiwoom=_kw(tmp_path))
+    p = _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path))
     (tmp_path / "universe_kw.json").write_text(json.dumps({"asof": D, "grace": {}, "n_requested": 0}),
                                                encoding="utf-8")
     return p
@@ -614,7 +623,7 @@ def _skip_stale(tmp_path):
     con = sqlite3.connect(kw)
     con.execute("DELETE FROM ka10008_foreign_holdings WHERE dt=?", (DP,))
     con.commit(); con.close()
-    return _paths(tmp_path, kiwoom=kw)
+    return _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=kw)
 
 
 def _skip_cross(tmp_path):
@@ -635,7 +644,7 @@ def _skip_cross(tmp_path):
 def test_required_skip_without_skip_record_fails(tmp_path, make, names):
     """필수 검사가 판정을 못 하면(SKIP) 실패다 — 종전엔 ok 가 FAIL 만 봐서 SKIP 이 통과로 집계됐다
     (DECISIONS §6-6 · RM K1-7). 리포트 JSON 의 status 도 fail 이어야 일일 리포트·워치독이 crit 로 센다."""
-    rep = lh.run(D, make(tmp_path))
+    rep = lh.run(D, make(tmp_path), skip=_only("krx", "kiwoom"))
     c = _by(rep)
     for n in names:
         assert c[n].level is lh.Level.REQUIRED and c[n].status is lh.Status.FAIL, c[n]
@@ -649,7 +658,7 @@ def test_required_skip_without_skip_record_fails(tmp_path, make, names):
 
 def test_required_skip_with_skip_record_passes_and_is_recorded(tmp_path):
     """운영자가 `--skip kiwoom` 으로 뺐으면 통과 — 그 기록(`kiwoom.skipped`)이 리포트에 남는다."""
-    rep = lh.run(D, _skip_rows(tmp_path), skip=frozenset({"kiwoom"}))
+    rep = lh.run(D, _skip_rows(tmp_path), skip=_only("krx"))
     assert rep.ok
     data = json.loads(Path(lh.write_report(rep, str(tmp_path / "health"))).read_text(encoding="utf-8"))
     assert data["ok"] is True
@@ -666,7 +675,7 @@ def test_non_required_skip_still_passes(tmp_path):
     con.execute("CREATE TABLE other (a TEXT)")
     con.commit(); con.close()
     rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, base_prev=False), kis=_kis(tmp_path, "20260904"),
-                           wiseindex=str(wics)))
+                           wiseindex=str(wics)), skip=_only("krx"))
     c = _by(rep)
     assert c["krx.corp_action_candidates"].status is lh.Status.SKIP
     assert c["wics.raw"].level is lh.Level.REQUIRED and c["wics.raw"].status is lh.Status.SKIP
@@ -684,3 +693,63 @@ def test_required_table_is_exactly_the_required_checks_of_model_sources(tmp_path
                if c.level is lh.Level.REQUIRED and c.name.split(".", 1)[0] in _MODEL_SOURCES}
     assert set(lh.REQUIRED_NO_SKIP) == emitted
     assert all(isinstance(v, str) and v.strip() for v in lh.REQUIRED_NO_SKIP.values())
+
+
+# ── K1-7c: 필수 검사가 아예 실행되지 않으면 실패 ─────────────────────────────────────────
+def _full(tmp_path, **kw):
+    """모델 원천 4개가 모두 정상인 경로. `kw` 로 원천 경로를 바꿔 끼운다(없는 파일 = 그 원장 부재)."""
+    base = {"krx": lambda: _krx(tmp_path, stk=2563), "kiwoom": lambda: _kw(tmp_path),
+            "wise": lambda: _wise(tmp_path), "dart": lambda: _dart(tmp_path)}
+    return _paths(tmp_path, **{k: kw.get(k) or make() for k, make in base.items()},
+                  **{k: v for k, v in kw.items() if k not in base})
+
+
+def _not_run(rep):
+    return {c.name for c in rep.checks if c.status is lh.Status.FAIL and "실행되지 않음" in c.detail}
+
+
+def test_missing_kiwoom_ledger_fails(tmp_path):
+    """`kiwoom.db` 가 없으면 키움 검사가 하나도 안 돈다 — 종전엔 검사 0개로 ok=True 였다(K1-7b 보고 결함 2)."""
+    rep = lh.run(D, _full(tmp_path, kiwoom=str(tmp_path / "absent_kiwoom.db")))
+    kiwoom = {n for n in lh.REQUIRED_NO_SKIP if n.startswith("kiwoom.")}
+    assert _not_run(rep) == kiwoom
+    c = _by(rep)["kiwoom.ka10060.rows"]
+    assert c.level is lh.Level.REQUIRED and "원장 파일 없음(absent_kiwoom.db)" in c.detail
+    assert "--skip kiwoom" in c.expected and "K1-7c" in c.expected
+    assert not rep.ok
+    data = json.loads(Path(lh.write_report(rep, str(tmp_path / "health"))).read_text(encoding="utf-8"))
+    assert {x["name"] for x in data["checks"] if x["level"] == "required" and x["status"] == "fail"} == kiwoom
+
+
+def test_missing_wise_run_log_table_fails(tmp_path):
+    """WISE 원장은 있는데 런 로그 표가 없으면 `check_wise` 가 빈 목록을 돌려준다 — 세 필수 검사가 FAIL 이다."""
+    wise = _wise(tmp_path)
+    con = sqlite3.connect(wise)
+    con.execute("DROP TABLE ws_run_log")
+    con.commit(); con.close()
+    rep = lh.run(D, _full(tmp_path, wise=wise))
+    assert _not_run(rep) == {"wise.run", "wise.req_identity", "wise.raw"}
+    assert "원장 표 없음" in _by(rep)["wise.run"].detail
+    assert not rep.ok
+
+
+def test_skipped_source_is_not_reported_missing(tmp_path):
+    """`--skip kiwoom` 이면 원장이 없어도 통과 — `kiwoom.skipped` 기록만 남는다."""
+    rep = lh.run(D, _full(tmp_path, kiwoom=str(tmp_path / "absent_kiwoom.db")), skip=frozenset({"kiwoom"}))
+    assert rep.ok and not _not_run(rep)
+    assert _by(rep)["kiwoom.skipped"].status is lh.Status.SKIP
+
+
+def test_calendar_holiday_keeps_the_old_flow(tmp_path):
+    """달력상 휴장일 실행엔 누락 판정을 하지 않는다 — 그날은 키움·WISE·DART 행이 없는 것이 정상이다."""
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, statuses="holiday"), holidays=(D,)))
+    assert not _not_run(rep) and rep.ok
+
+
+def test_krx_all_holiday_on_a_trading_day_is_left_to_the_halt(tmp_path):
+    """거래일에 KRX 가 전부 휴장 응답 — `krx.holiday_misfire` HALT 가 세운다. 이 응답이면 시세가 없어
+    `krx.rows` 가 안 나오는데, 누락 FAIL 로 겹쳐 싣지 않는다."""
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, statuses="holiday")), skip=_only("krx"))
+    c = _by(rep)
+    assert c["krx.holiday_misfire"].status is lh.Status.FAIL and "krx.rows" not in c
+    assert not rep.failed_required and rep.halts and not rep.ok

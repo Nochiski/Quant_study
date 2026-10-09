@@ -1,7 +1,8 @@
 """원장 5개의 "D 일자 수집 완료" 판정. 플랜 P1 Task 1.7.
 
 기대치는 전부 2026-09-09 서버 실측(reviews/2026-09-09-daily-findings-A §6·B §7)이다. 판정 3등급:
-  required — 실패면 rc 2(뒤 단계로 안 넘어간다). 필수 표(`REQUIRED_NO_SKIP`)의 검사는 SKIP 도 실패(K1-7b)
+  required — 실패면 rc 2(뒤 단계로 안 넘어간다). 필수 표(`REQUIRED_NO_SKIP`)의 검사는 SKIP 도 실패(K1-7b),
+             거래일에 리포트에서 빠져도 실패(K1-7c)
   warn     — 로그·알림만
   halt     — 중단 신호(DEFECT-A-01 휴장 오확정 · DEFECT-A-03 KIS 중복 증식 · v3 키 사용): rc 2 + crit
 종목 단위 테이블은 절대 하한이 아니라 **요청 유니버스 대비 비율**로 본다(리뷰 B2). 결과는 JSON 으로
@@ -81,9 +82,10 @@ class HealthReport:
 
 
 # ── 필수 검사 표(K1-7b · N-42 Q4 '필수 검사 SKIP = 실패') ───────────────────────────────────
-# 이 표의 검사가 판정을 못 하면(SKIP) 실패로 센다. `run` 이 status 를 FAIL 로 바꿔 싣는다 — 리포트 JSON 을
-# 읽는 일일 리포트·워치독도 같은 판정을 보게 한다. 운영 결정으로 뺄 때는 `--skip <소스>` 를 쓴다(그 소스는
-# 판정하지 않고 `<소스>.skipped` 기록만 남는다).
+# 이 표의 검사가 판정을 못 하면(SKIP) 실패로 센다. 달력상 거래일에 리포트에서 아예 빠져도(원장 파일·표 부재로
+# 검사가 안 돎) 실패다(K1-7c). `run` 이 FAIL 행으로 싣는다 — 리포트 JSON 을 읽는 일일 리포트·워치독도 같은
+# 판정을 보게 한다. 운영 결정으로 뺄 때는 `--skip <소스>` 를 쓴다(그 소스는 판정하지 않고 `<소스>.skipped`
+# 기록만 남는다).
 # 기준: 모델이 쓰는 원천(KRX·키움·WISE·DART)의 완결성 검사 = 그 네 원천의 REQUIRED 검사 전부
 # (tests/test_daily_health.py 가 이 표와 실제 REQUIRED 검사 이름이 같은지 대조한다). 값 = 근거 한 줄.
 # 기준 밖이라 SKIP 이 종전대로 통과인 것: KIS `kis.credit.fresh` · WICS `wics.*` · WARN·HALT 등급 전부.
@@ -114,6 +116,24 @@ def _skip_is_fail(c: Check) -> Check:
             f"센다(K1-7b · N-42 Q4). 근거: {why}")
     return replace(c, status=Status.FAIL, expected=f"{c.expected} · 필수 검사 SKIP 불가(K1-7b)",
                    detail=f"{note} | {c.detail}" if c.detail else note)
+
+
+def _not_run(checks: list[Check], skip: frozenset[str], no_file: dict[str, str]) -> list[Check]:
+    """필수 표 항목 중 리포트에 없는 것을 FAIL 행으로 만든다(K1-7c) — 원장 파일·표가 없어 검사가 아예 안 돈
+    날을 통과로 세지 않는다. `--skip` 한 소스는 뺀다. 거래일에 KRX 가 휴장 응답을 준 날은 시세가 없어
+    `krx.rows` 가 안 나오는데, 그날은 `krx.holiday_misfire` HALT 가 이미 세우므로 겹쳐 싣지 않는다."""
+    have = {c.name for c in checks}
+    misfire = any(c.name == "krx.holiday_misfire" and c.status is Status.FAIL for c in checks)
+    out: list[Check] = []
+    for name, why in REQUIRED_NO_SKIP.items():
+        src = name.split(".", 1)[0]
+        if name in have or src in skip or (misfire and name == "krx.rows"):
+            continue
+        reason = f"원장 파일 없음({no_file[src]})" if src in no_file else "원장 표 없음 또는 선행 조건 미충족"
+        out.append(Check(name, Level.REQUIRED, Status.FAIL, None,
+                         f"필수 검사가 리포트에 있어야 한다(K1-7c) — 운영 결정으로 뺄 때만 --skip {src}",
+                         f"실행되지 않음 — {reason}. 근거: {why}"))
+    return out
 
 
 @dataclass
@@ -612,7 +632,8 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
         skip: frozenset[str] = frozenset()) -> HealthReport:
     """skip 에 든 소스(krx·kiwoom·kis·dart·wise·wics)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom).
 
-    skip 밖 소스에서 필수 표(`REQUIRED_NO_SKIP`)의 검사가 SKIP 이면 FAIL 로 싣는다(K1-7b)."""
+    skip 밖 소스에서 필수 표(`REQUIRED_NO_SKIP`)의 검사가 SKIP 이면 FAIL 로 싣는다(K1-7b). 달력상 거래일이면
+    리포트에 없는 필수 검사도 FAIL 행으로 더한다(K1-7c) — 휴장일 실행은 종전대로 둔다."""
     cal = _cal.load(paths.calendar)
     dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     d_prev = cal.prev_trading_day(dd).strftime("%Y%m%d")
@@ -659,7 +680,13 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
         for c in (krx, kw, kis, dart, wise, wics):
             if c is not None:
                 c.close()
-    return HealthReport(d, tuple(_skip_is_fail(c) for c in checks), n_req)
+    checks = [_skip_is_fail(c) for c in checks]
+    if cal.is_trading_day(dd):
+        no_file = {src: os.path.basename(p) for src, p, con in (
+            ("krx", paths.krx, krx), ("kiwoom", paths.kiwoom, kw), ("dart", paths.dart, dart),
+            ("wise", paths.wise, wise)) if con is None}
+        checks += _not_run(checks, skip, no_file)
+    return HealthReport(d, tuple(checks), n_req)
 
 
 def write_report(report: HealthReport, out_dir: str) -> str:

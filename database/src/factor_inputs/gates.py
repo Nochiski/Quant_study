@@ -9,6 +9,8 @@
   FG1 행수     — 유니버스 × 창: 모든 표의 종목 ⊆ fi_universe · eligible 은 D 가격·cur 컨센서스가
                  있다 · eligible 수 ≥ 하한 · 날짜가 창 안 · 연간 ≤ 2기 · 분기 ≤ 5기 ·
                  eligible 중 WISE 연간 재무가 있는 비율 ≥ 하한(원천 누락이 조용히 지나가지 않게).
+                 WISE 연간 손익(op·ni, cF3002) 비율은 기록형(배포 묶음 7 D7-8 — 폐기형 승격은
+                 `FIN_IS_COVERAGE_ENFORCED`).
   FG2 T 행 출처 — 아침판: fi_prices.price_source · fi_universe.mktcap_basis 가 전부 'krx'.
   FG3 시총     — market_cap = round(shares × close(D) / 1e8) 정수 억원(상대 1e-6 — compat
                  `stocks.market_cap` 과 같은 반올림, 오케스트레이터 09-29). KRX 시총 대조는 기록형.
@@ -36,6 +38,11 @@ MKTCAP_REL_TOL = 1e-6
 # eligible 중 WISE 연간 재무(per·eps 중 하나라도)가 있는 종목 비율 하한. 09-23 실측 결측 6/621
 # (≈1%, 전부 DQ-7 lapsed) — 이 선 아래면 수집·파싱 쪽이 통째로 빠진 것이다.
 FIN_COVERAGE_MIN = 0.9
+# eligible 중 WISE 연간 손익(op 또는 ni — cF3002)이 있는 종목 비율. per·eps 비율은 cF4002 만 봐서
+# cF3002 열만 비는 결함(배포 묶음 7 — 종목 한 날짜로 두 ep 를 고르던 쿼리)을 못 잡는다. 하한은
+# FIN_COVERAGE_MIN 을 함께 쓴다. 지금은 기록형 — 10-11 서버 재연 6개 D 에서 비율 ≥ 0.95 를 확인한
+# 뒤 True(폐기형)로 올린다(D7-8).
+FIN_IS_COVERAGE_ENFORCED = False
 # WISE 수집 중단 허용치(거래일). D* 가 D 보다 이만큼 넘게 뒤처지면 FAIL — 2거래일 이상 멈추면 판을
 # 올리지 않는다(2026-10-05 사용자 결정 N-12 '1거래일'). 추정치 유예(coverage_grace_days)와 값을
 # 공유하지 않는다 — 유예는 종목의 추정치가 사라진 경우, 이것은 수집 자체가 멈춘 경우다.
@@ -158,11 +165,22 @@ def fg1_rows(ctx: GateContext) -> GateResult:
     if ctx.rule.require_estimates and n_eligible:
         viol["eligible_wise_fin_ratio_below_min"] = int(
             fin_ratio is not None and fin_ratio < FIN_COVERAGE_MIN)
+    n_is = _count(
+        con, f"SELECT count(*) FROM {uni} u WHERE u.eligible AND EXISTS ("
+             f"SELECT 1 FROM {fin} f WHERE f.ticker = u.ticker AND f.period_type = 'annual' "
+             "AND (f.op IS NOT NULL OR f.ni IS NOT NULL))")
+    is_ratio = (n_is / n_eligible) if n_eligible else None
+    if FIN_IS_COVERAGE_ENFORCED and ctx.rule.require_estimates and n_eligible:
+        viol["eligible_wise_is_ratio_below_min"] = int(
+            is_ratio is not None and is_ratio < FIN_COVERAGE_MIN)
     metrics: dict[str, object] = {"n_rows": n_rows, "n_eligible": n_eligible,
                                   "min_eligible": ctx.min_eligible,
                                   "n_eligible_with_wise_fin": n_fin,
                                   "eligible_wise_fin_ratio": fin_ratio,
-                                  "fin_coverage_min": FIN_COVERAGE_MIN}
+                                  "fin_coverage_min": FIN_COVERAGE_MIN,
+                                  "n_eligible_with_wise_is": n_is,
+                                  "eligible_wise_is_ratio": is_ratio,
+                                  "fin_is_coverage_enforced": FIN_IS_COVERAGE_ENFORCED}
     return _result("FG1", viol, metrics, "유니버스 × 창 정합")
 
 

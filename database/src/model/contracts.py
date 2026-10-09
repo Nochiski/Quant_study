@@ -182,7 +182,10 @@ FI_FIN_SUMMARY = TableContract(
              "quality.min_period_months 를 읽는다. 모름(DART 연간 행·period_start "
              "없음)·분기 행 NULL"),
      _c("available_date", "DATE",
-        note="공시·수집으로 알 수 있게 된 날. PIT(≤ D)는 굽는 단계가 적용하고 엔진은 읽지 않는다")),
+        note="공시·수집으로 알 수 있게 된 날. PIT(≤ D)는 굽는 단계가 적용하고 엔진은 읽지 않는다. "
+             "WISE 쪽은 행을 이룬 판의 fetched_date — stage 2.7.0(fi1.4.0)부터 그 원문을 "
+             "처음 본 날(연간 행은 cF3002·cF4002 판 중 늦은 날, 분기 행은 Q:IS 판)이라 원문이 "
+             "그대로인 종목은 D 보다 이르다")),
     window="확정치만(추정치는 fi_consensus). 연간 2기(v3 LIMIT 2) + 분기 5기(v4 TTM)",
     source=("stg_fin_wise(연간 손익·지표) + stg_fin_wise_q(분기 손익, 10-01 T-Q4 — WISE 가 없는 종목만 "
             "equity fin_std 분기) + equity fin_std(연간 자산·현금흐름) — compat T1.5 SQL 을 이 층으로 옮긴다"),

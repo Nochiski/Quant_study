@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
@@ -311,3 +312,75 @@ def test_consensus_annual_equals_compat_on_slice(chain) -> None:
         assert tuple(None if v is None else float(v) for v in cv) == ours[key], key
     extra = set(ours) - set(compat)
     assert all(k[2] == "A" and (k[0], k[1], "E") in compat for k in extra), extra
+
+
+# ── 회귀 가드(배포 묶음 7-2): 접지 않은 절단본에서 WISE 소비 출력이 fi1.2.0 과 같다 ──
+# stage 가 WISE 재무 두 표의 같은 원문을 접어도(7-1) fi 가 (종목, ep) 단위 최신 판을 읽도록 바꾼다.
+# 접지 않은 절단본은 매 수집일 두 ep 가 다 있어 옛 쿼리(종목 한 날짜)와 새 쿼리의 답이 같아야 한다.
+# 골든은 바꾸기 전 코드(fi1.2.0, faa41f7d)로 뽑아 고정했다 — 전 열·전 행 그대로 대조한다.
+# `_cov`·fi_consensus·fi_consensus_annual 은 이번에 고치지 않는 쿼리라 함께 묶어 그대로임을 본다.
+SLICE_WISE_GOLDEN = Path(__file__).resolve().parent / "fixtures" / "fi_slice_wise_golden.json"
+SLICE_WISE_DATES = (dt.date(2026, 9, 1), dt.date(2026, 9, 2), dt.date(2026, 9, 3))
+
+
+def _plain(v: object) -> object:
+    """JSON 골든과 같은 모양 — 날짜는 ISO 문자열, DECIMAL 은 문자열."""
+    if isinstance(v, dt.date):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return str(v)
+    return v
+
+
+def _slice_wise_outputs(chain: tuple[Path, Path], d: dt.date) -> dict[str, dict[str, list]]:
+    """D 의 `_cov`·fi_fin_summary·fi_consensus·fi_consensus_annual 전 행
+    (유니버스 = security 전부)."""
+    con = duckdb.connect()
+    try:
+        _fin_views(con, chain)
+        pb = inputs.resolve(chain[1], "stg_consensus_matrix")
+        lit = ", ".join(f"'{g}'" for g in pb.globs)
+        con.execute('CREATE VIEW "stg_consensus_matrix" AS SELECT * FROM read_parquet('
+                    f"[{lit}], hive_partitioning=true, union_by_name=true)")
+        p = queries.Params(d=d.isoformat(), fy=f"{d.year}12",
+                           price_from=(d - dt.timedelta(days=550)).isoformat(),
+                           flow_from=d.isoformat(),
+                           grace_days=UniverseRule().coverage_grace_days, credit_lag=3)
+        con.execute(queries.calendar_sql())
+        for sql in queries.coverage_sqls(p):
+            con.execute(sql)
+        # fi_consensus 가 n_analysts 를 universe 에서 붙인다 — 절단본 D 에는 universe_daily 행이
+        # 없어 security 전부를 유니버스로 둔다(fin_pair 와 같은 틀)
+        con.execute("CREATE TEMP TABLE _fi_universe AS "
+                    "SELECT ticker, CAST(NULL AS INTEGER) AS n_analysts FROM security")
+        for sql in (queries.fin_summary_sql(p), queries.consensus_sql(p),
+                    queries.consensus_annual_sql(p)):
+            con.execute(sql)
+        out: dict[str, dict[str, list]] = {}
+        for name, sql in (("_cov", "SELECT * FROM _cov ORDER BY ticker"),
+                          ("fi_fin_summary", "SELECT * FROM _fi_fin_summary"),
+                          ("fi_consensus", "SELECT * FROM _fi_consensus"),
+                          ("fi_consensus_annual", "SELECT * FROM _fi_consensus_annual")):
+            cur = con.execute(sql)
+            out[name] = {"columns": [c[0] for c in cur.description or []],
+                         "rows": [[_plain(v) for v in r] for r in cur.fetchall()]}
+        return out
+    finally:
+        con.close()
+
+
+@pytest.mark.parametrize("d", SLICE_WISE_DATES, ids=lambda d: d.isoformat())
+def test_unfolded_slice_wise_outputs_equal_fi120_golden(chain, d: dt.date) -> None:
+    golden = json.loads(SLICE_WISE_GOLDEN.read_text(encoding="utf-8"))[d.isoformat()]
+    got = _slice_wise_outputs(chain, d)
+    assert set(got) == set(golden)
+    for name, want in golden.items():
+        assert got[name]["columns"] == want["columns"], name
+        assert len(got[name]["rows"]) == len(want["rows"]), name
+        for g, w in zip(got[name]["rows"], want["rows"], strict=True):
+            assert g == w, (name, dict(zip(want["columns"], zip(g, w, strict=True), strict=True)))
+    # 골든이 비어 있으면 가드가 아니다 — WISE 연간 행·컨센서스 행이 실제로 들어 있어야 한다
+    fin = golden["fi_fin_summary"]
+    i_type, i_op = fin["columns"].index("period_type"), fin["columns"].index("op")
+    assert sum(r[i_type] == "annual" and r[i_op] is not None for r in fin["rows"]) >= 10
+    assert all(golden[t]["rows"] for t in ("_cov", "fi_consensus", "fi_consensus_annual"))

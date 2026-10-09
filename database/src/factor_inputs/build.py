@@ -42,7 +42,11 @@ from . import gates, queries
 # WISE 수집 지연 허용 1거래일(N-12, 유예와 분리)
 # 1.2.0(2026-10-08, 배포 묶음 4-2b): 금융업 연간 매출(영업수익·순영업이익) + 연간 revenue_basis ·
 # fi_fin_summary.period_months 열(G-28 짧은 첫 사업연도, N-25 Q5)
-RULES_VERSION = "fi1.2.0"
+# 1.4.0(2026-10-13 예정, 배포 묶음 7 — 묶음 6 의 fi1.3.0 다음. 이 갈래는 fi1.2.0 위라
+# 1.3.0 줄은 통합 때 넣는다): fi_fin_summary WISE 연간 판을 (종목, ep) 단위 최신 ≤ D 로
+# (stage 2.7.0 연속 판 접기 — D7-4), available_date 의 WISE 날짜가 '처음 본 날'로,
+# FG1 손익(op·ni) 비율 기록(D7-8)
+RULES_VERSION = "fi1.4.0"
 LAYER = "factor_inputs"
 BASES_IMPLEMENTED = ("morning",)
 BASES_KNOWN = ("evening", "morning")

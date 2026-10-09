@@ -875,6 +875,107 @@ def test_fin_summary_quarters_switch_to_wise_with_basis_holding_and_revenue_kind
     assert not any(str(r[4]).startswith("DART:") for r in a)
 
 
+# ── 배포 묶음 7-2: stage 가 같은 원문을 접은 stg_fin_wise 를 (종목, ep) 단위로 읽는다 ─────────
+def _fin_version(t: str, f: dt.date, ep: str, off: float) -> list[dict]:
+    """stg_fin_wise 한 판(종목 · 수집일 · ep) — 값 = 기본 × IDX + 칸 번호 + off."""
+    rows = []
+    for seq, (e, accode, p_accode, nm, base) in enumerate(_FIN_ITEMS):
+        if e != ep:
+            continue
+        row: dict = {"ticker": t, "fetched_date": f, "ep": e, "seq": seq, "accode": accode,
+                     "p_accode": p_accode, "acc_nm": nm, "fs_basis": "IFRS연결", "freq": "연간"}
+        row.update({f"period_label_{i}": lab for i, lab in enumerate(_labels(t), start=1)})
+        row.update({f"val_{i}": base * IDX[t] + i + off for i in range(1, 7)})
+        rows.append(row)
+    return rows
+
+
+def _fin_summary_at(roots: tuple[Path, Path], d: dt.date, sql: str) -> list[tuple]:
+    """판 빌드 없이 D 의 fi_fin_summary 쿼리만 돌리고 `_fi_fin_summary` 위에서 `sql` 을
+    읽는다 — D 마다 다른 게이트(유니버스·가격)를 빼고 재무 스냅샷 선택만 본다.
+    유니버스 = security 전부, 유예 G = 5."""
+    from factor_inputs import queries
+    from factor_inputs.build import EQUITY_SOURCES, STAGE_SOURCES, _resolve
+    con = duckdb.connect()
+    try:
+        for root, tables, stage in ((roots[0], EQUITY_SOURCES, False),
+                                    (roots[1], STAGE_SOURCES, True)):
+            for name, expr in _resolve(root, tables, stage)[1].items():
+                con.execute(f'CREATE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+        p = queries.Params(d=d.isoformat(), fy=f"{d.year}12", price_from=d.isoformat(),
+                           flow_from=d.isoformat(), grace_days=5, credit_lag=3)
+        con.execute(queries.calendar_sql())
+        for cov_sql in queries.coverage_sqls(p):
+            con.execute(cov_sql)
+        con.execute("CREATE TEMP TABLE _fi_universe AS SELECT ticker FROM security")
+        con.execute(queries.fin_summary_sql(p))
+        return con.execute(sql).fetchall()
+    finally:
+        con.close()
+
+
+def test_fin_summary_takes_each_ep_from_its_own_latest_version(tmp_path: Path) -> None:
+    """G1(7-2): 접힌 stage 에서 A 의 cF3002(손익) 판은 09-23 뿐이고 cF4002(지표)만 D 에 새 판이다.
+    D 의 연간 행은 손익 = 09-23 판(값 +7), 지표 = D 판이어야 한다. 옛 쿼리(종목별 max 한 날짜)는
+    D 를 골라 cF3002 행이 없어 매출·영업이익·순이익·매출총이익·fs_basis 가 **조용히** 비었다."""
+    rows = [r for r in _fin_wise()
+            if not (r["ticker"] == A and r["ep"] == "cF3002" and r["fetched_date"] == D)]
+    eq, st = make_roots(tmp_path / "src", fin_wise=rows)
+    out = tmp_path / "factor_inputs"
+    res = build(D_S, "morning", out, st, eq, grace_days=5, min_eligible=5, golden_path=None)
+    assert res.ok, [(g.name, g.detail) for g in res.gates if g.status.value == "fail"]
+    got = q(out, "fi_fin_summary", "SELECT period, revenue, op, ni, gross_profit, fs_basis, "
+                                   "revenue_basis, eps, per, available_date FROM t "
+                                   f"WHERE ticker = '{A}' AND period_type = 'annual' "
+                                   "ORDER BY period DESC")
+    i = IDX[A]
+
+    def old(base: float, slot: int) -> float:   # 09-23 판 값(fin_val +7), SQL 반올림(.5 올림)
+        return float(int(base * i + slot + 7 + 0.5))
+    assert got == [
+        ("2025/12", old(10_000.4, 5), old(1_000.5, 5), old(800.2, 5), old(3_000.6, 5),
+         "IFRS연결", "gross", float(round(1_234.4 * i + 5)), 12.5 * i + 5, D),
+        ("2024/12", old(10_000.4, 4), old(1_000.5, 4), old(800.2, 4), old(3_000.6, 4),
+         "IFRS연결", "gross", float(round(1_234.4 * i + 4)), 12.5 * i + 4, D)]
+    fg1 = next(g for g in res.gates if g.name == "FG1")
+    assert fg1.metrics["n_eligible_with_wise_is"] == fg1.metrics["n_eligible_with_wise_fin"]
+
+
+def test_fin_summary_reads_folded_versions_per_ep_on_each_d(tmp_path: Path) -> None:
+    """접힌 stage 를 각 D 에서 읽는다 — A 의 cF3002 는 09-14 A판 · 09-16 B판 · 09-18 A판
+    (되돌아온 판은 stage 가 남긴다), 그 사이 날은 행이 없다. cF4002 는 매일 새 판. 손익은
+    A·A·B·B·A, 지표는 그날 판, available_date = D. X 는 두 ep 다 09-14 판 하나(그 뒤 접힘) —
+    값은 그대로이고 available_date 는 '처음 본 날' 09-14(≤ D)."""
+    d = FETCH[:5]
+    x = EXTRA[0]
+    assert [f.day for f in d] == [14, 15, 16, 17, 18]
+    rows = (_fin_version(A, d[0], "cF3002", 0) + _fin_version(A, d[2], "cF3002", 100)
+            + _fin_version(A, d[4], "cF3002", 0)
+            + [r for f in d for r in _fin_version(A, f, "cF4002", f.day)]
+            + _fin_version(x, d[0], "cF3002", 0) + _fin_version(x, d[0], "cF4002", 0))
+    roots = make_roots(tmp_path / "src", fin_wise=rows)
+    sql = ("SELECT ticker, revenue, ni, eps, available_date FROM _fi_fin_summary WHERE "
+           "period = '2025/12' AND period_type = 'annual' AND ticker IN "
+           f"('{A}', '{x}') ORDER BY ticker")
+    ia, ix = IDX[A], IDX[x]
+    for day, is_off in zip(d, (0, 0, 100, 100, 0), strict=True):
+        got = _fin_summary_at(roots, day, sql)
+        assert got == [
+            (A, float(round(10_000.4 * ia + 5 + is_off)), float(round(800.2 * ia + 5 + is_off)),
+             float(round(1_234.4 * ia + 5 + day.day)), day),
+            (x, float(round(10_000.4 * ix + 5)), float(round(800.2 * ix + 5)),
+             float(round(1_234.4 * ix + 5)), d[0])], day
+
+
+def test_fg1_wise_income_statement_ratio_on_the_full_tree(built) -> None:
+    """FG1 손익 비율(7-2 D7-8, 기록형) — 기본 합성 트리에서 손익(op·ni)이 있는 eligible 은
+    per·eps 가 있는 eligible 과 같은 9곳(eligible 10 중 C 는 3월 결산이라 연간 행이 없다)."""
+    _, res = built
+    m = next(g for g in res.gates if g.name == "FG1").metrics
+    assert (m["n_eligible_with_wise_fin"], m["n_eligible_with_wise_is"]) == (9, 9)
+    assert m["eligible_wise_is_ratio"] == 0.9 and m["fin_coverage_min"] == 0.9
+
+
 # ── 가격 · 수정주가 · 수급 · 신용 ─────────────────────────────────────────────
 def test_prices_window_units_and_universe(built) -> None:
     out, _ = built

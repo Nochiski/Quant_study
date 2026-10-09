@@ -108,6 +108,25 @@ def test_fg1_fails_on_each_breach(con, breaker: str, key: str) -> None:
     assert r.status is GateStatus.FAIL and r.metrics[key], (key, r.detail)
 
 
+def test_fg1_wise_income_statement_ratio_is_record_only(con, monkeypatch) -> None:
+    """배포 묶음 7 D7-8: eligible 중 연간 손익(op 또는 ni — WISE cF3002) 비율.
+    per·eps(cF4002)만 있고 손익이 비면 per·eps 비율은 통과한다 — 그 결함 부류를 이 비율이
+    잡는다. 지금은 기록형이고 `FIN_IS_COVERAGE_ENFORCED` 를 켜면 같은 하한
+    (FIN_COVERAGE_MIN)으로 FAIL."""
+    r = gates.fg1_rows(_ctx(con))
+    assert r.status is GateStatus.PASS and not gates.FIN_IS_COVERAGE_ENFORCED
+    assert (r.metrics["n_eligible_with_wise_fin"], r.metrics["n_eligible_with_wise_is"]) == (1, 0)
+    assert r.metrics["eligible_wise_is_ratio"] == 0.0
+    assert r.metrics["fin_is_coverage_enforced"] is False
+    assert "eligible_wise_is_ratio_below_min" not in r.metrics
+    monkeypatch.setattr(gates, "FIN_IS_COVERAGE_ENFORCED", True)
+    r = gates.fg1_rows(_ctx(con))
+    assert r.status is GateStatus.FAIL and r.detail == "eligible_wise_is_ratio_below_min=1"
+    con.execute("UPDATE g_fi_fin_summary SET ni = 1.0")           # 손익 한 열이면 충분하다
+    r = gates.fg1_rows(_ctx(con))
+    assert r.status is GateStatus.PASS and r.metrics["eligible_wise_is_ratio"] == 1.0
+
+
 def test_fg1_min_eligible(con) -> None:
     r = gates.fg1_rows(_ctx(con, min_eligible=2))
     assert r.status is GateStatus.FAIL and r.metrics["eligible_below_min"] == 1

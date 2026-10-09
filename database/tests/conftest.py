@@ -77,15 +77,22 @@ def _json_write(path: Path, obj: object) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+# 가짜 stage 판의 원장 스냅샷 — 실물과 같은 `snap_YYYYMMDDTHHMMSSZ`(UTC) 형식이어야 equity EG13 이
+# 기준일(KST 날짜)을 읽는다. 아래 `built_at_utc` 와 같은 시각이다.
+STAGE_SNAPSHOT_ID_DEFAULT = "snap_20260905T000000Z"
+
+
 def _make_stage_tree(tmp_path: Path, table: str, rows: list[dict[str, object]],
                      partition_class: str = "whole", build_id: str = "b_stage_0001",
-                     gate_status: str = "pass", lag_known: bool = True) -> StageTree:
+                     gate_status: str = "pass", lag_known: bool = True,
+                     snapshot_id: str = STAGE_SNAPSHOT_ID_DEFAULT) -> StageTree:
     """tmp_path 아래에 stage 규약 그대로의 테이블 1개를 만든다.
 
     `<tmp_path>/stage/<table>/v=<build_id>/` + 파티션 `_meta.json` + `MANIFEST.json`
     (stage `manifest.commit` 을 그대로 써서 실물과 같은 포인터 규약을 갖는다).
     partition_class: whole = `part0.parquet` 하나, date_axis = `year(date)`,
     receipt_axis = `substr(rcept_no,1,4)` 하이브 디렉토리.
+    snapshot_id: 그 판이 선 원장 스냅샷 — equity EG13 이 공개일 상한(KST 날짜)으로 읽는다.
     """
     import duckdb  # sys.path 조작 뒤에 import 해야 한다
     from stage import manifest
@@ -136,7 +143,7 @@ def _make_stage_tree(tmp_path: Path, table: str, rows: list[dict[str, object]],
         records.append({"path": f"v={build_id}" + (f"/{label}" if label else ""),
                         "n_rows": n_rows})
     manifest.commit(table_root, manifest.BuildRecord(
-        build_id=build_id, snapshot_id="snap_test", rules_version="v_test",
+        build_id=build_id, snapshot_id=snapshot_id, rules_version="v_test",
         built_at_utc="2026-09-05T00:00:00+00:00", n_rows=len(rows),
         content_hash=content_hash, partitions=records, gates=[]))
     return StageTree(stage_root, table, build_id, table_root,

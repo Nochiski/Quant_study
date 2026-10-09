@@ -212,6 +212,128 @@ def test_eg2_팩트인데_PIT컬럼이_없으면_fail(con: duckdb.DuckDBPyConnec
     assert r.metrics["missing_columns"] == ["available_date", "available_basis"]
 
 
+# ── EG13 미래 공개일 (K1-3a · T-12: 기준일 = 입력 stage 스냅샷의 KST 날짜) ─────────────
+# `_OK_SQL` 의 공개일은 2020-01-03·2020-01-06 이다. 스냅샷 id 는 UTC 라 KST 날짜로 바꿔 견준다.
+SNAP_0106_KST = "snap_20200106T000000Z"          # 2020-01-06 09:00 KST
+
+
+def _snap_pinned(tmp_path: Path, make_stage_tree, snapshot_id: str = SNAP_0106_KST,
+                 table: str = "stg_sample") -> dict[str, inputs.PinnedBuild]:
+    """stage 판 1개를 `snapshot_id` 로 지어 `_pinned/` 에 고정한다 — EG13 의 기준일 출처."""
+    tree = make_stage_tree(tmp_path, table, ROWS, snapshot_id=snapshot_id)
+    return {table: inputs.pin(tree.stage_root, tmp_path / "equity", table)}
+
+
+def _eg13(con: duckdb.DuckDBPyConnection, rule: EquityTable,
+          pinned: dict[str, inputs.PinnedBuild]) -> GateResult:
+    return gates.eg13_available_future(_ctx(
+        con, rule, pinned=pinned, inputs={t: pb.build_id for t, pb in pinned.items()}))
+
+
+def test_eg13_공개일이_스냅샷_KST_날짜_이하면_pass(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                          make_stage_tree) -> None:
+    r = _eg13(con, _rule(), _snap_pinned(tmp_path, make_stage_tree))
+    assert r.status is GateStatus.PASS, r.detail
+    assert r.metrics["snapshot_kst_date"] == "2020-01-06"
+    assert r.metrics["n_available_after_snapshot"] == 0
+    assert r.metrics["input_snapshot_ids"] == [SNAP_0106_KST]
+
+
+def test_eg13_음성대조_미래_공개일_한_행이면_fail(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                         make_stage_tree) -> None:
+    """정상 픽스처에 스냅샷 다음 날 공개일 행 하나를 심는다 — 그 판의 원장에 있을 수 없는 행."""
+    _out(con, f"{_OK_SQL} UNION ALL SELECT 3, 'c', DATE '2020-01-07', 'measured'")
+    r = _eg13(con, _rule(), _snap_pinned(tmp_path, make_stage_tree))
+    assert r.status is GateStatus.FAIL
+    assert r.metrics["n_available_after_snapshot"] == 1
+    assert r.metrics["max_available_date"] == "2020-01-07"
+    assert "n_available_after_snapshot=1" in r.detail and "2020-01-06" in r.detail
+
+
+def test_eg13_기준일은_UTC가_아니라_KST_날짜다(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                       make_stage_tree) -> None:
+    """아침 체인 스냅샷(06:00 KST)은 UTC 로 전날이다 — UTC 날짜로 자르면 그날 행이 미래로 잡힌다."""
+    _out(con, f"{_OK_SQL} UNION ALL SELECT 3, 'c', DATE '2020-01-07', 'measured'")
+    pinned = _snap_pinned(tmp_path, make_stage_tree, "snap_20200106T210000Z")
+    r = _eg13(con, _rule(), pinned)                  # 2020-01-07 06:00 KST
+    assert r.status is GateStatus.PASS, r.detail
+    assert r.metrics["snapshot_kst_date"] == "2020-01-07"
+
+
+def test_eg13_입력_스냅샷이_여럿이면_가장_늦은_날짜가_기준(
+        con: duckdb.DuckDBPyConnection, tmp_path: Path, make_stage_tree) -> None:
+    """한 표가 오늘 실패해 어제 판에 머문 stage 입력과 오늘 판을 함께 읽을 수 있다. 판이 알 수 있는
+    상한은 가장 늦은 스냅샷이다 — 가장 이른 것을 쓰면 오늘 판 행을 미래로 잘못 버린다."""
+    _out(con, f"{_OK_SQL} UNION ALL SELECT 3, 'c', DATE '2020-01-07', 'measured'")
+    pinned = {**_snap_pinned(tmp_path, make_stage_tree, SNAP_0106_KST, "stg_a"),
+              **_snap_pinned(tmp_path, make_stage_tree, "snap_20200107T000000Z", "stg_b")}
+    r = _eg13(con, _rule(inputs=("stg_a", "stg_b")), pinned)
+    assert r.status is GateStatus.PASS, r.detail
+    assert r.metrics["snapshot_kst_date"] == "2020-01-07"
+    assert r.metrics["input_snapshot_ids"] == [SNAP_0106_KST, "snap_20200107T000000Z"]
+
+
+def test_eg13_equity_내부_입력은_그_판의_stage_스냅샷까지_따라간다(
+        con: duckdb.DuckDBPyConnection, tmp_path: Path, make_stage_tree) -> None:
+    """S23 `price_adj_daily` 처럼 stage 입력을 직접 갖지 않는 표도 기준일이 있어야 한다."""
+    from equity import build, rules_sample
+
+    snap = "snap_20210104T000000Z"                   # ROWS 최대 공개일 2021-01-04 와 같은 날
+    tree = make_stage_tree(tmp_path, "stg_sample", ROWS, snapshot_id=snap)
+    eq = tmp_path / "equity"
+    (eq / "fixtures").mkdir(parents=True)
+    (eq / "fixtures" / "sample_table.json").write_text(
+        '[{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]',
+        encoding="utf-8")
+    up = build.build_table(rules_sample.SAMPLE_TABLE, tree.stage_root, eq, Baseline(),
+                           build_id="b_up_1")
+    assert up.ok, [(g.name, g.status.value, g.detail) for g in up.gates]
+    pinned = {"sample_table": inputs.pin(tree.stage_root, eq, "sample_table")}
+    _out(con, f"{_OK_SQL} UNION ALL SELECT 3, 'c', DATE '2021-01-05', 'measured'")
+    r = _eg13(con, _rule(inputs=("sample_table",)), pinned)
+    assert r.status is GateStatus.FAIL and r.metrics["n_available_after_snapshot"] == 1
+    assert r.metrics["input_snapshot_ids"] == [snap]
+    assert r.metrics["snapshot_kst_date"] == "2021-01-04"
+
+
+def test_eg13_스냅샷_id를_해석할_수_없으면_fail(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                         make_stage_tree) -> None:
+    """기준일이 모호하면 통과로 두지 않는다(P1) — skip 은 통과로 집계된다(K1-7)."""
+    r = _eg13(con, _rule(), _snap_pinned(tmp_path, make_stage_tree, "snap_test"))
+    assert r.status is GateStatus.FAIL
+    assert r.metrics["unparsed_snapshot_ids"] == {"stg_sample@b_stage_0001": "snap_test"}
+
+
+def test_eg13_입력이_없으면_기준일이_없어_fail(con: duckdb.DuckDBPyConnection) -> None:
+    r = gates.eg13_available_future(_ctx(con, _rule()))
+    assert r.status is GateStatus.FAIL and r.metrics["input_snapshot_ids"] == []
+
+
+def test_eg13_upstream_고정이_사라졌으면_fail(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                       make_stage_tree) -> None:
+    """equity 내부 입력의 stage 고정본을 GC 가 지웠으면 기준일을 못 구한다 — 예외 대신 FAIL."""
+    pb = inputs.PinnedBuild("sample_table", "b_up_1", tmp_path / "equity" / "_pinned" /
+                            "sample_table" / "v=b_up_1", (), {},
+                            inputs={"stg_sample": "b_gone"})
+    r = _eg13(con, _rule(inputs=("sample_table",)), {"sample_table": pb})
+    assert r.status is GateStatus.FAIL and "stg_sample" in r.detail
+
+
+def test_eg13_공개일_NULL_행은_EG2_규약을_따라_세지_않는다(
+        con: duckdb.DuckDBPyConnection, tmp_path: Path, make_stage_tree) -> None:
+    """NULL 은 EG2-P01 이 판정한다(basis='unknown' 일 때만 허용).
+    EG13 은 미래값만 세고 NULL 수는 남긴다."""
+    _out(con, f"{_OK_SQL} UNION ALL SELECT 3, 'c', NULL::DATE, 'unknown'")
+    r = _eg13(con, _rule(available_basis=()), _snap_pinned(tmp_path, make_stage_tree))
+    assert r.status is GateStatus.PASS, r.detail
+    assert r.metrics["n_available_null"] == 1
+
+
+def test_eg13_차원테이블은_skip(con: duckdb.DuckDBPyConnection) -> None:
+    r = gates.eg13_available_future(_ctx(con, _rule(available_rule=AVAILABLE_NONE)))
+    assert r.status is GateStatus.SKIP and r.detail == "dimension_table"
+
+
 # ── EG3 ──────────────────────────────────────────────────────────────────────
 def test_eg3_유일키는_pass(con: duckdb.DuckDBPyConnection) -> None:
     assert gates.eg3_keys(_ctx(con, _rule())).status is GateStatus.PASS
@@ -337,7 +459,7 @@ def test_eg7_임계는_baseline이_코드기본값을_덮는다(con: duckdb.Duck
 def test_run_all_실행순서는_GATES_7_1(con: duckdb.DuckDBPyConnection) -> None:
     fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
     names = [g.name for g in gates.run_all(_ctx(con, _rule(), fixtures=fx))]
-    assert names == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG4", "EG5a"]
+    assert names == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG4", "EG5a"]
 
 
 def test_앞_게이트_실패시_뒤는_skip_upstream_failed(con: duckdb.DuckDBPyConnection) -> None:
@@ -356,17 +478,21 @@ def test_extra_gates_훅이_EG3_뒤에_붙는다(con: duckdb.DuckDBPyConnection)
     fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
     names = [g.name for g in gates.run_all(
         _ctx(con, _rule(extra_gates=(eg6_version,)), fixtures=fx))]
-    assert names == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG6", "EG4", "EG5a"]
+    assert names == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG6", "EG4", "EG5a"]
 
 
-def test_없는_상수는_skip_no_baseline이고_metrics를_남긴다(con: duckdb.DuckDBPyConnection) -> None:
+def test_없는_상수는_skip_no_baseline이고_metrics를_남긴다(con: duckdb.DuckDBPyConnection,
+                                                   tmp_path: Path, make_stage_tree) -> None:
     def eg9_coverage(ctx: EquityGateContext) -> GateResult:
         gates.require_const(ctx, "coverage_min", {"measured_coverage": 0.97})
         return GateResult("EG9", GateStatus.PASS, "커버율", {})
 
     eg9_coverage.gate_name = "EG9"  # pyright: ignore[reportFunctionMemberAccess]  # reason: 훅 규약
     fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
-    results = gates.run_all(_ctx(con, _rule(extra_gates=(eg9_coverage,)), fixtures=fx))
+    pinned = _snap_pinned(tmp_path, make_stage_tree)       # EG13 기준일 — 없으면 EG13 이 막는다
+    results = gates.run_all(_ctx(con, _rule(inputs=("stg_sample",), extra_gates=(eg9_coverage,)),
+                                 fixtures=fx, pinned=pinned,
+                                 inputs={t: pb.build_id for t, pb in pinned.items()}))
     eg9 = next(g for g in results if g.name == "EG9")
     assert eg9.status is GateStatus.SKIP and eg9.detail == "no_baseline"
     assert eg9.metrics == {"missing_metric": "t.coverage_min", "measured_coverage": 0.97}

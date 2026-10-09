@@ -41,7 +41,9 @@ def _rows(dt: str, extra_l1_only: bool = False) -> list[tuple]:
 def _stage(tmp_path: Path, *, extra_l1_only: bool = False) -> Path:
     raw = tmp_path / "raw"; raw.mkdir()
     _write_wics(raw / "wiseindex.db", _rows(D1) + _rows(D2, extra_l1_only))
-    snap = snapshot.make_snapshot({"wiseindex": raw / "wiseindex.db"}, tmp_path / "snapshots", snapshot_id="s")
+    # 스냅샷 id 는 실물 형식(UTC) — 수집(AT, 09-20 03:00 KST) 뒤 아침 체인. EG13 이 KST 날짜를 기준일로 읽는다
+    snap = snapshot.make_snapshot({"wiseindex": raw / "wiseindex.db"}, tmp_path / "snapshots",
+                                  snapshot_id="snap_20260919T210000Z")
     stage_root = tmp_path / "stage"
     r = stage_build.build_table(stage_rules.RULES["stg_wics_components"], snap, stage_root, fixtures_path=_fixtures(tmp_path))
     assert r.ok, [g for g in r.gates if g.status.value == "fail"]

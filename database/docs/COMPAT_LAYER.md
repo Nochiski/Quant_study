@@ -329,3 +329,11 @@ WHERE s.stock_code = ?
 7. **`stocks.market` CHECK 제약** — v3 DDL 이 `CHECK(market IN ('KOSPI','KOSDAQ'))`
    (`backend/db/schema.py:7`)다. 우리 유니버스에 KONEX·ETF 등 다른 시장 값이 있으면 그 행은
    삽입이 거부된다. 우리 `security.market` 의 어휘 분포를 T1.2 에서 확인해야 한다.
+
+---
+
+## 7. v3 대비 의도된 차이(재생 대조 범주)
+
+v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 고치지 않는 것이다. 여기 없는 차이는 결함 후보로 본다.
+
+- **신규 스팩 — compat 에만 있다(v3 누락 교정)**: v3 `stocks` 에는 옛 숫자코드 스팩 117개뿐이고, 그 뒤 상장한 스팩(2024-02-01~2026-09-22 상장, 숫자·영숫자 코드 모두)이 없다. compat 은 `sec_type='spac'` 이면 싣는다(10-01·06·07·08 재생에서 71종목, 10-10 판정).

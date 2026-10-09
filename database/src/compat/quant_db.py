@@ -78,6 +78,10 @@ BASES = ("evening", "morning")
 #   all       : `stocks.market_cap` 을 있는 그대로 싣는다(지금까지의 동작)
 #   estimates : 당해 12월기 WISE 추정치(op·ni)가 없는 종목의 `market_cap` 을 NULL 로 둔다
 #               → v3 엔진의 `market_cap >= min_market_cap` 필터가 그 종목을 빼고 돈다
+# **estimates 는 그림자(별도 파일) 전용이다**(T-19, QL-B). 제자리 반영(`in_place`) 뒤에는 v3 스코어링이
+#   꺼지고(T-16) `market_cap` 소비자는 뉴스 preview 상위 100 · naver_ir 상위 600 · 엑셀 ·
+#   unitelegram 이다 — NULL 을 넣으면 그들이 대부분의 종목을 잃는다. 그래서 제자리는 all 고정이고
+#   estimates 를 함께 주면 쓰기 전에 멈춘다.
 MODEL_UNIVERSES = ("all", "estimates")
 # `--builds-from` 이 가리킨 판을 못 찾았을 때의 처리(서버 4일 재실행 실측).
 #   error   : 멈춘다(기본). 그 판으로 재현해야 하는 비교에서는 이쪽이 맞다.
@@ -89,6 +93,7 @@ MODEL_UNIVERSES = ("all", "estimates")
 # ⚠ **equity 표 폴백은 다르다** — 격자·조정계수 표는 판마다 값이 바뀔 수 있어 과거 날짜 재현이
 #   깨진다. `sector_snapshot` 처럼 표시용이고 자체 `snapshot_date` as-of 를 갖는 표만 안전하다
 #   (09-18 실측: 그날 인계 JSON 에 `sector_snapshot` 키 자체가 없었다 — 표가 아직 없던 날).
+#   QL-B(T-19) 뒤 `stocks.sector` 원천은 stage `stg_master_daily`(append-only)라 위 stage 규칙을 따른다.
 #   가격·수급 표가 폴백 목록에 뜨면 그 날짜 비교 결과는 믿지 말고 원인을 먼저 본다.
 BUILDS_MISSING = ("error", "current")
 MARKET_VOCAB = ("KOSPI", "KOSDAQ")      # v3 `stocks.market` CHECK 제약과 같은 어휘
@@ -592,7 +597,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
            tables: list[str] | None = None, full: bool = False,
            window_days: int | None = None, consensus_asof: str | None = None,
            builds_from: Path | None = None, builds_from_missing: str = "error",
-           model_universe: str = "all") -> ExportResult:
+           model_universe: str = "all", in_place: bool = False) -> ExportResult:
     """equity/stage 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
 
     date·consensus_asof 는 YYYYMMDD. `full=False`(기본)면 최근 `INCREMENTAL_DAYS` 달력일만,
@@ -602,7 +607,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     그 판을 못 찾았을 때 `builds_from_missing='current'` 면 `current_build` 로 폴백하고
     폴백한 표를 `_compat_meta.builds_fallback` 에 남긴다(기본 'error' 는 멈춘다).
     `model_universe='estimates'` 면 당해 12월기 WISE 추정치가 없는 종목의 `stocks.market_cap`
-    을 NULL 로 두어 v3 엔진 유니버스에서 뺀다(사용자 결정 09-24).
+    을 NULL 로 두어 v3 엔진 유니버스에서 뺀다(사용자 결정 09-24). 그림자 전용 —
+    `in_place=True`(v3 quant.db 제자리 반영)이면 `all` 만 허용한다(T-19).
     """
     as_of = _parse_date(date, "--date")
     if basis not in BASES:
@@ -614,6 +620,10 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     if model_universe not in MODEL_UNIVERSES:
         raise CompatError(
             f"--model-universe 는 {MODEL_UNIVERSES} 중 하나여야 한다: {model_universe!r}")
+    if in_place and model_universe != "all":
+        raise CompatError(
+            f"--model-universe {model_universe} 는 그림자 전용이다 — 제자리 반영(--in-place)의 "
+            "stocks.market_cap 은 전 종목(all) 고정(T-19)")
     asof_cons = _parse_date(consensus_asof, "--consensus-asof") if consensus_asof else as_of
     if window_days is not None and not full:
         raise CompatError("--window-days 는 --full 과 함께만 쓴다 — 증분 창은 "

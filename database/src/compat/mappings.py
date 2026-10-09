@@ -44,6 +44,15 @@ class TableMapping:
     cross_sources: tuple[tuple[str, str], ...] = ()
 
 
+# ── v3 `stocks` 집합(D-11) — `stocks`·`daily_prices`·`investor_detail_flows` 가 같이 쓰는 한 곳 ──
+# v3 `stocks` 는 KOSPI·KOSDAQ 의 보통주·스팩이다(아래 `stocks` 주석의 09-23 실측). v3 는 이 목록의
+# 종목만 가격·수급을 모으므로 두 표도 같은 집합이어야 한다(QL-A — 09-28 그림자에서 compat
+# `daily_prices` 3,817행 중 `stocks` 에 있는 것은 2,490행뿐이었다. ETF·우선주 등이 위키 동일가중
+# 수익률과 가설 입력에 섞였다). 판정은 같은 날 `universe_daily` 행(별칭 `u`)의 종목 유형·시장이다.
+# 시장 어휘는 v3 `stocks.market` CHECK 제약과 같다.
+V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'KOSDAQ')"
+
+
 # ── daily_prices ────────────────────────────────────────────────────────────────────────────
 # equity `price_daily`(OHLCV·거래대금) + `price_adj_daily.adj_close`(전방 조정).
 # v3 `adj_close` 는 소급 조정이지만 모멘텀은 **비율**만 쓰므로 전방 조정과 결과가 같다
@@ -57,21 +66,29 @@ class TableMapping:
 #   `_compat_meta.n_evening_rows_skipped` 에 남는다.
 #   → D-8 결정 뒤 evening 행 처리 추가(`docs/COMPAT_LAYER.md` §4).
 #   M1 의 G-M2 비교는 확정판(morning, 전 행 krx)만 쓰므로 영향이 없다.
+# 거래정지일 참고가 행(`price_kind='reference'`, 거래량 0): KRX 가 O/H/L 을 '0' 으로 주고 stage 가
+#   NULL 로 둔다. v3 는 그날을 open=high=low=close=참고가 · volume 0 · amount 0 으로 싣는다(로컬 v3
+#   사본 2026-07~08 정지 행 전부 같은 모양). v3 NOT NULL 에 걸려 조용히 빠지던 행(QL-A2 — 10-01~08
+#   재생에서 하루 102~104행)이라 **그 행의 비어 있는 O/H/L 만** 종가로 채운다. v3 외부 계약 때문의
+#   채움이고 equity·모델 입력으로는 돌아가지 않는다(원칙 ④ 는 equity 층 규칙).
+_REF_FILL = "CASE WHEN p.price_kind = 'reference' THEN p.close END"
 _DAILY_PRICES_SQL = f"""
 SELECT
     p.ticker                                       AS stock_code,
     CAST(p.date AS VARCHAR)                        AS trade_date,
-    CAST(p.open AS BIGINT)                         AS open,
-    CAST(p.high AS BIGINT)                         AS high,
-    CAST(p.low AS BIGINT)                          AS low,
+    CAST(coalesce(p.open, {_REF_FILL}) AS BIGINT)  AS open,
+    CAST(coalesce(p.high, {_REF_FILL}) AS BIGINT)  AS high,
+    CAST(coalesce(p.low, {_REF_FILL}) AS BIGINT)   AS low,
     CAST(p.close AS BIGINT)                        AS close,
     CAST(p.volume_shr AS BIGINT)                   AS volume,
     CAST(round(p.value_krw / {KRW_PER_MN}.0) AS BIGINT)  AS amount,
     CAST(a.adj_close AS DOUBLE)                    AS adj_close
 FROM {{price_daily}} p
+JOIN {{universe_daily}} u ON u.ticker = p.ticker AND u.date = p.date
 LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
 WHERE p.basis = 'krx'
   AND p.date >= DATE '{{from_date}}' AND p.date <= DATE '{{date}}'
+  AND {V3_STOCK_FILTER}
 """
 
 # 같은 창에서 `basis='evening'` 이라 제외한 행 수 — `_compat_meta.n_evening_rows_skipped`.
@@ -90,9 +107,11 @@ WHERE p.basis = 'evening'
 #   09-23 그림자 실측 — v3 active 2,533 = common 2,413 + spac 117. 우리가 더 넣었던 236 은
 #   preferred 114 · reit 23 · foreign 12 · dr 10 · fund 3 이고 v3 수집기(키움 ka10099 + KIS MST)가
 #   애초에 담지 않는 종류다. 유니버스를 v3 와 같게 맞춰야 G-M2 ①의 티커 집합 차이가 선다.
-# `sector` 는 WICS L1 명(`sector_snapshot`)을 넣는다 — v3 는 KRX 업종명이라 **값이 다르다**.
-#   T1.4 소비자 감사에서 브리핑·리서치센터가 sector 를 표시용으로만 쓰는지 확인한 뒤
-#   WICS 유지 / KRX 업종으로 교체를 확정한다(플랜 §5 T1.2 2).
+# `sector` 는 v3 와 같은 KRX 업종명이다(QL-B · T-19 — U24 의 WICS L1 을 대체). v3 는 키움 ka10099
+#   `upName` 을 그대로 넣는다(v3 `clients/kiwoom/client.py` get_stock_list →
+#   `pipeline/daily_pipeline.py` _fetch_kiwoom_stocks, 공란은 `strip() or None`). 같은 원천이 stage
+#   `stg_master_daily.up_name`(06:00 마스터 스냅샷, 2026-09-01~ 누적)이고 equity 에는 이 열이 없어
+#   stage 를 직독한다. as-of D 이하 최신 스냅샷 한 행 — 공란이면 NULL(v3 와 같다), 행이 없으면 NULL.
 # `updated_at` 은 v3 가 `datetime('now')` 로 채우던 자리 — 우리는 export 시각을 넣어
 # 신선도를 남긴다.
 _STOCKS_SQL = f"""
@@ -111,16 +130,16 @@ cap AS (
       AND p.date >= DATE '{{snap_from}}' AND p.date <= DATE '{{date}}'
 ),
 sect AS (
-    SELECT s.ticker, s.wics_l1_nm,
-           row_number() OVER (PARTITION BY s.ticker ORDER BY s.snapshot_date DESC) AS rn
-    FROM {{sector_snapshot}} s
-    WHERE s.snapshot_date <= DATE '{{date}}'
+    SELECT m.ticker, nullif(m.up_name, '') AS up_name,
+           row_number() OVER (PARTITION BY m.ticker ORDER BY m.date DESC) AS rn
+    FROM {{stg_master_daily}} m
+    WHERE m.date <= DATE '{{date}}'
 )
 SELECT
     u.ticker                                              AS stock_code,
     coalesce(v.name_abbrv_current, v.name_current)        AS stock_name,   -- v3 도 약명
     u.market                                              AS market,
-    sect.wics_l1_nm                                       AS sector,
+    sect.up_name                                          AS sector,
     CAST(round(cap.mktcap_krw / {KRW_PER_EOK}.0) AS BIGINT)
                                                           AS market_cap,
     CAST(v.list_date AS VARCHAR)                          AS listed_date,
@@ -133,8 +152,7 @@ JOIN {{security}} v ON v.ticker = u.ticker
 LEFT JOIN cap  ON cap.ticker = u.ticker AND cap.rn = 1
 LEFT JOIN sect ON sect.ticker = u.ticker AND sect.rn = 1
 WHERE u.rn = 1
-  AND u.sec_type IN ('common', 'spac')          -- D-11
-  AND u.market IN ('KOSPI', 'KOSDAQ')           -- v3 CHECK 제약과 같은 어휘
+  AND {V3_STOCK_FILTER}
 """
 
 # ── investor_detail_flows ───────────────────────────────────────────────────────────────────
@@ -156,8 +174,10 @@ WITH picked AS (
                PARTITION BY f.ticker, f.date
                ORDER BY CASE WHEN f.src = 'kiwoom' THEN 0 ELSE 1 END, f.src) AS rn
     FROM {{flow_daily}} f
+    JOIN {{universe_daily}} u ON u.ticker = f.ticker AND u.date = f.date
     WHERE f.date >= DATE '{{from_date}}' AND f.date <= DATE '{{date}}'
       AND coalesce({_FLOW_ANY}) IS NOT NULL
+      AND {V3_STOCK_FILTER}
 )
 SELECT f.ticker                   AS stock_code,
        CAST(f.date AS VARCHAR)    AS trade_date,
@@ -511,7 +531,7 @@ MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
         v3_table="daily_prices",
         source_kind=EQUITY,
-        sources=("price_daily", "price_adj_daily"),
+        sources=("price_daily", "price_adj_daily", "universe_daily"),
         columns=("stock_code", "trade_date", "open", "high", "low", "close", "volume",
                  "amount", "adj_close"),
         pk=("stock_code", "trade_date"),
@@ -524,19 +544,20 @@ MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
         v3_table="stocks",
         source_kind=EQUITY,
-        sources=("universe_daily", "security", "price_daily", "sector_snapshot"),
+        sources=("universe_daily", "security", "price_daily"),
         columns=("stock_code", "stock_name", "market", "sector", "market_cap", "listed_date",
                  "is_active", "delisted_date", "updated_at"),
         pk=("stock_code",),
         sql=_STOCKS_SQL,
         retire_when="브리핑·리서치센터·뉴스 preview/naver_ir·api health·unitelegram kael_db 가 "
                     "equity security/universe_daily 직독으로 옮겨진 뒤",
-        note="sector 는 WICS L1 명 — v3 는 KRX 업종명이라 값이 다르다(T1.4 확인 대상)",
+        note="sector 는 v3 와 같은 KRX 업종명(키움 ka10099 upName) — stage stg_master_daily 직독(T-19)",
+        cross_sources=((STAGE, "stg_master_daily"),),
     ),
     TableMapping(
         v3_table="investor_detail_flows",
         source_kind=EQUITY,
-        sources=("flow_daily",),
+        sources=("flow_daily", "universe_daily"),
         columns=("stock_code", "trade_date") + tuple(c for c, _ in _FLOW_COLS),
         pk=("stock_code", "trade_date"),
         sql=_INVESTOR_FLOWS_SQL,

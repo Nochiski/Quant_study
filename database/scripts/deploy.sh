@@ -17,7 +17,7 @@
 #   ③ database/tests 전량 통과(`--skip-tests` 로 생략 가능 — 생략 사실이 서버에 기록된다)
 #   ④ 배포 결과를 서버 ~/quant-ledger/DEPLOYED.json 에 남긴다(rev·branch·at_utc·by·tests[·rollback_from])
 #   ⑤ 서버 빌드 락(/tmp/quant_ledger_build.lock — build_chain·model_daily·gc 등이 쓰는 것)을 비차단으로 잡고
-#      rsync 와 DEPLOYED.json 쓰기를 마칠 때까지 쥔다. 못 잡으면 체인 실행 중이라 거부한다 — 기다리거나
+#      rsync 와 DEPLOYED.json 쓰기를 마칠 때까지 쥔다. 못 잡으면 다른 빌드·배포가 실행 중이라 거부한다 — 기다리거나
 #      다시 시도하지 않는다(P9). 체인이 빌드하는 도중에 코드가 바뀌면 한 판 안에 옛 코드·새 코드가 섞인다.
 #   ⑦ 서버 DEPLOYED.json 의 rev 가 HEAD 의 조상이어야 한다(K1-1e). main 을 역병합한 브랜치는 ② 를 늘
 #      통과하므로, 다른 브랜치에서 먼저 민 핫픽스를 모르고 덮는 일은 ② 로 못 막는다. 의도한 되돌림은
@@ -115,14 +115,15 @@ fi
 # ⑤·⑦ 은 두 모드 모두 판정한다. --apply 면 실패 시 거부(rc 2 — 락은 cleanup 이 놓는다), dry-run 이면
 # 결과만 출력하고 계속한다. 테스트(③) 뒤에 두는 이유: 락을 쥔 채 몇 분짜리 테스트를 돌리면 그동안 시작하는
 # 체인이 락 실패로 그 회차를 건너뛴다.
-verdict_fail() {
+verdict_fail() {   # 첫 인자는 판정, 나머지는 안내 줄
+  local msg="$1"; shift
   if [ "$APPLY" -eq 1 ]; then
-    printf '거부: %s\n' "$1" >&2
-    [ $# -lt 2 ] || printf '      %s\n' "$2" >&2
+    printf '거부: %s\n' "$msg" >&2
+    [ $# -eq 0 ] || printf '      %s\n' "$@" >&2
     exit 2
   fi
-  printf '== (dry-run) --apply 라면 거부: %s\n' "$1"
-  [ $# -lt 2 ] || printf '      %s\n' "$2"
+  printf '== (dry-run) --apply 라면 거부: %s\n' "$msg"
+  [ $# -eq 0 ] || printf '      %s\n' "$@"
 }
 
 # ⑤ 빌드 락 — 원격에서 비차단으로 잡고 LOCKED 를 찍은 뒤 stdin 이 닫힐 때까지 쥔다. 못 잡으면 BUSY.
@@ -149,8 +150,8 @@ case "$LOCK_STATE" in
       echo "== 빌드 락: $REMOTE:$BUILD_LOCK 비어 있음"
     fi ;;
   BUSY)
-    verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK)을 다른 작업이 쥐고 있다 — 체인 실행 중이다." \
-                 "기다리지 않는다(P9). 체인이 끝난 뒤 다시 실행한다." ;;
+    verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK)을 다른 작업이 쥐고 있다 — 다른 빌드·배포가 실행 중이다." \
+                 "기다리지 않는다(P9). 그 빌드·배포가 끝난 뒤 다시 실행한다." ;;
   *)
     verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK)을 확인하지 못했다(ssh 실패 또는 락 파일 열기 실패, 응답='$LOCK_STATE') — 체인과 겹치는지 판정할 수 없다." ;;
 esac
@@ -158,13 +159,14 @@ esac
 # ⑦ 서버 rev — 서버 DEPLOYED.json 의 rev 가 HEAD 의 조상이 아니면 그 판에만 있는 커밋(핫픽스)이 되돌아간다
 SERVER_REV=""; ROLLBACK_FROM=""
 if ! SERVER_META="$(ssh "$REMOTE" "cat $ROOT/DEPLOYED.json")"; then
-  verdict_fail "서버 ~/$ROOT/DEPLOYED.json 을 읽지 못했다 — 서버 판이 HEAD=$BRANCH ($REV) 에 들어 있는지 판정할 수 없다."
+  verdict_fail "서버 ~/$ROOT/DEPLOYED.json 을 읽지 못했다 — 서버 판이 HEAD=$BRANCH ($REV) 에 들어 있는지 판정할 수 없다." \
+               "서버 ~/$ROOT/DEPLOYED.json 을 마지막 배포 rev 로 되살린 뒤 다시 실행한다."
 else
   SERVER_REV="$(printf '%s\n' "$SERVER_META" \
     | sed -n 's/.*"rev"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
   if [ -z "$SERVER_REV" ]; then
     verdict_fail "서버 ~/$ROOT/DEPLOYED.json 에서 rev(16진 7~40자)를 읽지 못했다 — 서버 판이 HEAD=$BRANCH ($REV) 에 들어 있는지 판정할 수 없다." \
-                 "내용: $SERVER_META"
+                 "서버 ~/$ROOT/DEPLOYED.json 을 마지막 배포 rev 로 되살린 뒤 다시 실행한다." "내용: $SERVER_META"
   elif git -C "$REPO" merge-base --is-ancestor "$SERVER_REV" HEAD 2>/dev/null; then
     echo "== 서버 rev 확인: 서버 $SERVER_REV 가 HEAD=$BRANCH ($REV) 의 조상이다 — 되돌리는 커밋 없음"
   elif [ "$ALLOW_ROLLBACK" = "$SERVER_REV" ]; then

@@ -77,6 +77,9 @@ for a in "$@"; do
 done
 state="$("$FAKE_PY" "$FAKE_BIN/_probe.py" "$QL_BUILD_LOCK_FILE")"
 printf '%s\\t%s\\t%s\\n' "$mode" "$state" "$*" >> "$FAKE_LOG/rsync.log"
+if [ "$mode" = push ] && [ -n "${FAKE_RSYNC_FAIL:-}" ]; then
+  case "$*" in *"$FAKE_RSYNC_FAIL"*) exit 23 ;; esac
+fi
 """
 _FLOCK = '#!/usr/bin/env bash\nexec "$FAKE_PY" "$FAKE_BIN/_flock.py" "$@"\n'
 
@@ -134,14 +137,16 @@ def _scenario(tmp_path: Path) -> Scenario:
         (fakebin / name).write_text(body, encoding="utf-8")
         (fakebin / name).chmod(0o755)
     lock = tmp_path / "build.lock"
-    # HOME 을 비운 폴더로 — 개발자 ~/.gitconfig(서명·훅)가 테스트 커밋에 끼어들지 않게
+    # HOME 을 비운 폴더로, 전역·시스템 git 설정은 끈다 — 개발자 ~/.gitconfig(서명·훅)가 테스트
+    # 커밋에 끼어들지 않게
     env = dict(os.environ, HOME=str(home), PATH=f"{fakebin}:{os.environ['PATH']}",
-               GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+               GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null",
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
                QL_REMOTE="fake-host", QL_REMOTE_ROOT=ROOT, QL_BUILD_LOCK_FILE=str(lock),
                FAKE_PY=sys.executable, FAKE_BIN=str(fakebin), FAKE_LOG=str(log),
                FAKE_REMOTE_HOME=str(remote))
-    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "FAKE_RSYNC_FAIL"):
         env.pop(k, None)
 
     origin, repo = tmp_path / "origin.git", tmp_path / "repo"
@@ -274,6 +279,7 @@ def test_apply_refuses_when_server_rev_unreadable(tmp_path: Path) -> None:
     r = _deploy(sc, "--apply", "--skip-tests")
     assert r.rc == 2, r.out + r.err
     assert "DEPLOYED.json 을 읽지 못했다" in r.err
+    assert "DEPLOYED.json 을 마지막 배포 rev 로 되살린 뒤 다시 실행한다" in r.err   # 복구 안내
     assert r.pushes == [] and r.writes == [] and r.deployed is None
 
 
@@ -286,9 +292,37 @@ def test_apply_refuses_when_build_lock_held(tmp_path: Path) -> None:
     with _held(sc.lock):
         r = _deploy(sc, "--apply", "--skip-tests")
     assert r.rc == 2, r.out + r.err
-    assert "체인 실행 중" in r.err and str(sc.lock) in r.err
+    assert "다른 빌드·배포가 실행 중" in r.err and str(sc.lock) in r.err
     assert r.pushes == [] and r.writes == []
     assert r.deployed is not None and r.deployed["rev"] == sc.base
+
+
+def test_apply_refuses_when_lock_state_unknown(tmp_path: Path) -> None:
+    """원격 응답이 LOCKED·BUSY 어느 쪽도 아니면(여기선 락 파일을 열 수 없어 빈 응답) 겹침을
+    판정할 수 없다 → 거부. rsync 실전송 0 · DEPLOYED.json 그대로."""
+    sc = _scenario(tmp_path)
+    _server_rev(sc, sc.base)
+    bad = tmp_path / "no-such-dir" / "build.lock"
+    r = _deploy(sc._replace(env={**sc.env, "QL_BUILD_LOCK_FILE": str(bad)}),
+                "--apply", "--skip-tests")
+    assert r.rc == 2, r.out + r.err
+    assert "서버 빌드 락" in r.err and "확인하지 못했다" in r.err and str(bad) in r.err
+    assert r.pushes == [] and r.writes == []
+    assert r.deployed is not None and r.deployed["rev"] == sc.base
+
+
+def test_apply_rsync_failure_midway_releases_lock_and_keeps_deployed(tmp_path: Path) -> None:
+    """두 번째 실전송(scripts/)에서 rsync 가 실패하면 그 rc 로 멈추고 DEPLOYED.json 은 쓰지 않으며
+    (서버 rev 그대로) 락은 풀린다 — 다음 체인이 막히지 않는다."""
+    sc = _scenario(tmp_path)
+    _server_rev(sc, sc.base)
+    r = _deploy(sc._replace(env={**sc.env, "FAKE_RSYNC_FAIL": "database/scripts/"}),
+                "--apply", "--skip-tests")
+    assert r.rc == 23, r.out + r.err
+    assert len(r.pushes) == 2 and all(s == "held" for _m, s, _a in r.pushes)
+    assert r.writes == []
+    assert r.deployed is not None and r.deployed["rev"] == sc.base
+    assert _lock_free(sc.lock)
 
 
 # ── dry-run ─────────────────────────────────────────────────────────────────
@@ -301,7 +335,7 @@ def test_dry_run_reports_both_checks_and_writes_nothing(tmp_path: Path) -> None:
         r = _deploy(sc)
     assert r.rc == 0, r.out + r.err
     assert "(dry-run) --apply 라면 거부" in r.out
-    assert "체인 실행 중" in r.out
+    assert "다른 빌드·배포가 실행 중" in r.out
     assert f"서버 rev {sc.hotfix} 가 HEAD=feat ({sc.head}) 에 들어 있지 않다" in r.out
     assert r.rsync and r.pushes == []
     assert r.writes == []

@@ -48,13 +48,15 @@ from model.engines import ENGINES
 
 log = logging.getLogger(__name__)
 
-RULES_VERSION = "mb1.4.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
+RULES_VERSION = "mb1.5.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
                             # 1.2.0(2026-10-05): 비교 모델 실패 격리(N-11)
                             # 1.3.0(2026-10-06): 비교 모델 엔진 예외도 그 spec 만 뺌(D-01)
                             #   · FAIL 재실행이 같은 날 ok `_runs` 기록을 덮지 않음(D-09)
                             # 1.4.0(2026-10-08): scope 퀄리티 — 짧은 회계기간 행 제외
                             #   (G-28, fi1.2.0 period_months) · scope 유니버스 의견 0 제외
                             #   해제(min_analysts 삭제, 4-2c — 엑셀 비고로만)
+                            # 1.5.0(2026-10-10): MG5 전판 = 같은 basis 의 직전 판(컷오버 PR-6)
+                            #   — 점수·지표 불변, 게이트 기록(MG5 prev_build_id)만 달라진다
 LAYER = "model"
 BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
@@ -219,12 +221,14 @@ def load_inputs(fi_root: Path, fi_build_id: str, d_iso: str,
     return FactorInputs(d_iso, basis, fi_build_id, tables), n_on_d
 
 
-def _previous(root: Path, spec: ModelSpec) -> gates.Previous | None:
-    """같은 spec 의 직전 성공 판(MANIFEST current_build). 파일이 지워졌으면 None."""
+def _previous(root: Path, spec: ModelSpec, basis: str) -> gates.Previous | None:
+    """같은 spec·같은 basis 의 직전 성공 판 — MANIFEST 기록(커밋 순) 중 basis 가 같은 마지막 판.
+    아침판과 장 마감 판(evening)을 섞어 견주지 않는다(PR-6). 없거나 파일이 지워졌으면 None."""
     m = manifest.load(root / spec.spec_id / "MANIFEST.json")
-    if m.current_build is None:
+    prev_id = next((b.build_id for b in reversed(m.builds) if b.basis == basis), None)
+    if prev_id is None:
         return None
-    path = root / spec.spec_id / f"v={m.current_build}" / SCORES_FILE
+    path = root / spec.spec_id / f"v={prev_id}" / SCORES_FILE
     if not path.exists():
         return None
     tcol, comp = gates.ticker_col(spec), gates.composite_col(spec)
@@ -235,7 +239,7 @@ def _previous(root: Path, spec: ModelSpec) -> gates.Previous | None:
     finally:
         con.close()
     return gates.Previous(
-        build_id=m.current_build,
+        build_id=prev_id,
         score_date=None if not got else str(got[0][3]),
         composite={str(t): float(c) for t, c, _, _ in got if c is not None},
         rank={str(t): int(k) for t, _, k, _ in got if k is not None})
@@ -275,7 +279,7 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
             ctx = gates.GateContext(
                 spec=spec, date=d_iso, inputs=inputs, result=first, rerun=engine.run(spec, inputs),
                 n_prices_on_d=n_on_d, min_prices_on_d=min_prices_on_d, min_ranked=min_ranked,
-                previous=_previous(root, spec))
+                previous=_previous(root, spec, basis))
             gate_results[spec.spec_id] = gates.run_all(ctx)
         except Exception as e:
             # D-01: 비교 모델의 실행·재실행·직전 판 읽기·게이트 평가 예외는 그 spec 만 뺀다(N-11).

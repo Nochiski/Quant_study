@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
 
 import duckdb
 import pytest
-from conftest import _make_stage_tree
+from conftest import _make_stage_tree, allow_skips
 from equity import (
     build as eq_build,
 )
@@ -50,6 +51,19 @@ from factor_inputs.build import GOLDEN_PATH, OPTIONAL_STAGE_SOURCES
 from model.contracts import UniverseRule
 from stage import manifest
 from test_equity_s08_flow import _repaired_stage_root
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG6_fin_std", "no_coverage",
+             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다"),
+            ("factor_inputs", "FG-fresh", "no_collection",
+             "절단본 D=2026-08-20 은 WISE 추정치 수집(09-01) 이전이다(모듈 docstring)")):
+        yield
+
 
 CHAIN = (rules_s02.TRADING_CALENDAR, rules_s01.CORP, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
          rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT, rules_s06.ADJ_FACTOR,

@@ -61,9 +61,25 @@ def _by_name(results: list[GateResult]) -> dict[str, GateResult]:
 
 
 def test_baseline_passes_every_gate(con) -> None:
-    got = {g.name: g.status for g in gates.run_all(_ctx(con))}
+    got = {g.name: g.status for g in gates.run_all(_ctx(con, golden=[_fx()]))}
     assert got == {"FG0": GateStatus.PASS, "FG1": GateStatus.PASS, "FG2": GateStatus.PASS,
-                   "FG3": GateStatus.PASS, "FG4": GateStatus.SKIP, "FG-fresh": GateStatus.PASS}
+                   "FG3": GateStatus.PASS, "FG4": GateStatus.PASS, "FG-fresh": GateStatus.PASS}
+
+
+def test_fg4_skip_is_outside_the_skip_table_so_the_board_fails(con) -> None:
+    """K1-7a 음성 대조 — 골든이 없거나 창 밖이라 FG4 가 SKIP 이면 층 판정은 FAIL 이다."""
+    for golden in ([], [_fx(key={"ticker": "000001", "date": "2025-01-02"})]):
+        fg4 = _by_name(gates.run_all(_ctx(con, golden=golden)))["FG4"]
+        assert fg4.status is GateStatus.FAIL, golden
+        assert fg4.metrics["skip_reason"] == "no_fixtures" and "skip_not_allowed" in fg4.detail
+
+
+def test_fg_fresh_skip_without_collection_fails_the_board(con) -> None:
+    """K1-7a — 수집 기록이 없어(D* 없음) 신선도를 못 재면 층 판정은 FAIL 이다."""
+    res = _by_name(gates.run_all(_ctx(con, golden=[_fx()], dstar=None,
+                                      collection_lag_sessions=None)))
+    assert res["FG-fresh"].status is GateStatus.FAIL
+    assert res["FG-fresh"].metrics["skip_reason"] == "no_collection"
 
 
 def test_fg0_dtype_drift_fails_and_skips_the_rest(con) -> None:

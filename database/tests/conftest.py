@@ -3,6 +3,8 @@ import datetime as dt
 import json
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -147,3 +149,22 @@ def _make_stage_tree(tmp_path: Path, table: str, rows: list[dict[str, object]],
 def make_stage_tree():
     """가짜 stage 트리 생성기 — equity 테스트는 전부 이 픽스처만 쓴다."""
     return _make_stage_tree
+
+
+# ── K1-7a 게이트 SKIP 허용표 ──────────────────────────────────────────────────
+@contextmanager
+def allow_skips(*entries: tuple[str, ...]) -> Iterator[None]:
+    """테스트 전용 — 절단본·합성 판이 표본이 작아 못 재는 게이트의 SKIP 을 허용표에 잠시 더한다.
+
+    운영 허용표(`src/stage/skip_allow.py`)는 바꾸지 않는다. 항목은 `(층, 게이트, 사유, 왜[, 표…])`
+    이고 '왜' 는 그 픽스처가 그 게이트를 못 재는 이유 한 줄이다. 표를 적으면 그 표에만 허용한다.
+    모듈 스코프 픽스처 안에서도 쓰도록 함수 스코프 `monkeypatch` 대신 `MonkeyPatch.context()` 로
+    되돌린다.
+    """
+    from stage import skip_allow  # sys.path 조작 뒤에 import 해야 한다
+
+    extra = tuple(skip_allow.Allow(layer, gate, reason, why, tuple(tables))
+                  for layer, gate, reason, why, *tables in entries)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(skip_allow, "ALLOW", skip_allow.ALLOW + extra)
+        yield

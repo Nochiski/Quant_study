@@ -43,6 +43,8 @@
 
 **skip 은 통과가 아니다.** 7단계 최종 게이트(§7-4)가 "전 테이블 `gates[]` 에 `status='fail'` 0 **이면서** `status='skip'` 중 `no_baseline` 잔존 0" 을 요구한다.
 
+K1-7a(2026-10-10)부터 `gates.run_all` 이 판마다 이것을 강제한다 — (게이트, 사유, 표) 가 허용표(`src/stage/skip_allow.py`)에 없는 skip 은 FAIL 로 세고 판을 폐기한다. `no_baseline` 은 허용표에 없으므로 새 게이트·새 표는 상수와 함께 배포한다(측정치는 `_failed/<build_id>.json` 의 그 게이트 metrics 에 남는다). 아래 각 항의 "첫 빌드 `skip(no_baseline)`" 은 이 규칙 전의 기술이다.
+
 ### 0-3. 상수 참조 — `data/equity/baseline.json`
 
 파일 형식은 stage 와 동일(`baseline.py:measure` 반환 구조): 최상위 `{table: {metric: value}}` + `_measured[]` 에 `{table, metric, db, sql, value, measured_at, growing}`. equity 는 `db` 대신 **`inputs`(고정 stage build)** 를 provenance 로 싣는다.

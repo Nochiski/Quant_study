@@ -18,7 +18,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from conftest import _make_stage_tree
+from conftest import _make_stage_tree, allow_skips
 from equity import build, rules_s02, rules_s04
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
@@ -398,8 +398,10 @@ def _fake_build(tmp_path: Path, make_stage_tree, price_rows: list[dict[str, obje
     make_stage_tree(tmp_path, "stg_flow_daily_kiwoom",
                     [{"ticker": "005930", "date": D1, "close_krw": 1000, "volume_shr": 1}],
                     "date_axis")
-    cal = build.build_table(rules_s02.TRADING_CALENDAR, tree.stage_root, eq, Baseline({}),
-                            build_id="b_cal", fixtures_path=cal_fx)
+    with allow_skips(("equity", "EG17", "no_baseline",
+                      "가짜 3일 달력 — 달력 하한 상수(calendar_start)를 싣지 않는다")):
+        cal = build.build_table(rules_s02.TRADING_CALENDAR, tree.stage_root, eq, Baseline({}),
+                                build_id="b_cal", fixtures_path=cal_fx)
     assert cal.ok, [(g.name, g.status.value, g.detail) for g in cal.gates]
     price_fx = tmp_path / "price_fx.json"
     price_fx.write_text(json.dumps([{"key": fixture_key, "column": "close", "expect": fixture_close,
@@ -407,9 +409,11 @@ def _fake_build(tmp_path: Path, make_stage_tree, price_rows: list[dict[str, obje
     # EG14 의 두 상수는 일부러 안 싣는다 — 가짜 4행짜리 입력에 최신 세션 행수 하한을 들이대면
     # 표본 크기 때문에 폐기되고, 이 픽스처가 보려는 축(격리·NULL 처리)이 가려진다.
     bl = baseline or Baseline({"price_daily": {"evening_jump_abs_max": 0.3}})
-    return build.build_table(rules_s04.PRICE_DAILY, tree.stage_root, eq, bl,
-                             build_id="b_price", fixtures_path=price_fx,
-                             gate_thresholds={"EG7": 1.0})
+    with allow_skips(("equity", "EG14", "no_baseline",
+                      "가짜 4행 입력 — 최신 세션 행수 상수를 일부러 싣지 않는다(위 주석)")):
+        return build.build_table(rules_s04.PRICE_DAILY, tree.stage_root, eq, bl,
+                                 build_id="b_price", fixtures_path=price_fx,
+                                 gate_thresholds={"EG7": 1.0})
 
 
 def test_close가_0_open이_음수_캘린더_밖_행은_격리되고_등식은_유지된다(
@@ -728,14 +732,15 @@ def test_종가가_빈_최신_세션은_EG14가_폐기한다(tmp_path: Path, mak
         D3.isoformat()]
 
 
-def test_EG14_상수가_없으면_skip_no_baseline(tmp_path: Path) -> None:
-    """첫 빌드 규약(GATES §0-2) — 상수 미등재는 폐기가 아니라 skip. 통과로 세지 않는다."""
+def test_EG14_상수가_없으면_no_baseline_SKIP_이고_허용표_밖이라_폐기(tmp_path: Path) -> None:
+    """상수 미등재는 통과로 세지 않는다(GATES §0-2) — K1-7a 부터 판을 폐기하고 측정치는 남긴다."""
     eq = tmp_path / "equity"
     _build_calendar(eq)
     bl = Baseline({**SEED.data, "price_daily": {"evening_jump_abs_max": 0.3}})
     r = build.build_table(rules_s04.PRICE_DAILY, STAGE_SLICE, eq, bl, build_id="b_no_eg14")
+    assert r.status is build.BuildStatus.GATE_FAILED
     g = _gate(r, "EG14")
-    assert g.status is GateStatus.SKIP and g.detail == "no_baseline"
+    assert g.status is GateStatus.FAIL and g.metrics["skip_reason"] == "no_baseline"
     assert g.metrics["missing_metric"] == "price_daily.recent_session_window"
 
 

@@ -21,13 +21,29 @@ F03 이 `field_unavailable` → `partial_support`(GAP-03) 로 옮겨 갔다.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import build, gates, rules_s19, rules_s20
 from equity.model import EquityTable
 from test_equity_s19_profile import SEED, STAGE_SLICE, build_chain
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG8", "no_baseline",
+             "시드에 opinion_daily 겹침 일치율 하한이 없다(운영 값은 baseline_locked 0.99)",
+             "opinion_daily"),
+            ("equity", "EG6_fin_std", "no_coverage",
+             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다")):
+        yield
+
 
 DOCS = Path(__file__).parents[1] / "docs"
 REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"

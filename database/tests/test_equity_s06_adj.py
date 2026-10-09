@@ -354,15 +354,16 @@ def test_D6_5_계수_행_적용일_수정수익률이_상한을_넘으면_EG8이
     assert off.metrics["n_price_only_return_jump_over"] == 1     # 기록은 남는다
 
 
-def test_점프_상수가_없으면_EG8은_skip이되_metric은_계산한다(tmp_path: Path) -> None:
+def test_점프_상수가_없으면_EG8은_폐기되지만_metric은_계산한다(tmp_path: Path) -> None:
+    """상수 미등재 SKIP(no_baseline)은 허용표 밖이라 판을 폐기한다(K1-7a) — 측정치는 남긴다."""
     bl = seed()
     keep = {k: v for k, v in bl.table("adj_factor").items()
             if k in rules_s06.PRICE_MATCH_CONSTS
             or k in rules_s06.BASE_PRICE_CONSTS}            # 매칭·기준가 상수는 산출식이 요구한다
     r = build_chain(STAGE_SLICE, tmp_path / "equity", Baseline({**bl.data, "adj_factor": keep}))
-    assert r.ok
+    assert not r.ok
     eg8 = _gate(r, "EG8")
-    assert eg8.status is GateStatus.SKIP and eg8.detail == "no_baseline"
+    assert eg8.status is GateStatus.FAIL and eg8.metrics["skip_reason"] == "no_baseline"
     assert eg8.metrics["missing_metric"] == "adj_factor.adj_return_jump_max"
     # as-of 는 상수가 아니라 유도값이라 상수를 다 빼도 계속 잡힌다(e1.15.0)
     assert eg8.metrics["asof_used"] == "2026-08-20"

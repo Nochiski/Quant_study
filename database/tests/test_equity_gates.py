@@ -359,7 +359,10 @@ def test_extra_gates_훅이_EG3_뒤에_붙는다(con: duckdb.DuckDBPyConnection)
     assert names == ["EG0", "EG7", "EG1", "EG2", "EG3", "EG6", "EG4", "EG5a"]
 
 
-def test_없는_상수는_skip_no_baseline이고_metrics를_남긴다(con: duckdb.DuckDBPyConnection) -> None:
+def test_없는_상수는_skip_no_baseline_이지만_허용표_밖이라_FAIL이고_metrics를_남긴다(
+        con: duckdb.DuckDBPyConnection) -> None:
+    """K1-7a: 게이트는 SKIP(no_baseline) 을 내지만 층 판정은 FAIL 이다.
+    뒤 게이트는 upstream_failed."""
     def eg9_coverage(ctx: EquityGateContext) -> GateResult:
         gates.require_const(ctx, "coverage_min", {"measured_coverage": 0.97})
         return GateResult("EG9", GateStatus.PASS, "커버율", {})
@@ -368,8 +371,41 @@ def test_없는_상수는_skip_no_baseline이고_metrics를_남긴다(con: duckd
     fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
     results = gates.run_all(_ctx(con, _rule(extra_gates=(eg9_coverage,)), fixtures=fx))
     eg9 = next(g for g in results if g.name == "EG9")
-    assert eg9.status is GateStatus.SKIP and eg9.detail == "no_baseline"
-    assert eg9.metrics == {"missing_metric": "t.coverage_min", "measured_coverage": 0.97}
+    assert eg9.status is GateStatus.FAIL and "no_baseline" in eg9.detail
+    assert eg9.metrics == {"missing_metric": "t.coverage_min", "measured_coverage": 0.97,
+                           "skip_reason": "no_baseline", "skip_not_allowed": True}
+    after = results[[g.name for g in results].index("EG9") + 1:]
+    assert [(g.name, g.status, g.detail) for g in after] == [
+        ("EG4", GateStatus.SKIP, "upstream_failed"), ("EG5a", GateStatus.SKIP, "upstream_failed")]
+
+
+def test_허용표_안_SKIP_만_있으면_판정은_통과(con: duckdb.DuckDBPyConnection) -> None:
+    """선언표 EG1 · 차원 표 EG2 · 첫 빌드 EG5a — 셋 다 SKIP 이고 FAIL 은 0 이다(K1-7a 시드)."""
+    fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
+    rule = _rule(declaration_table=True, available_rule=AVAILABLE_NONE)
+    got = {g.name: (g.status, g.detail) for g in gates.run_all(_ctx(con, rule, fixtures=fx))}
+    assert got["EG1"] == (GateStatus.SKIP, "declaration_table")
+    assert got["EG2"] == (GateStatus.SKIP, "dimension_table")
+    assert got["EG5a"] == (GateStatus.SKIP, "no_previous_build")
+    assert not [n for n, (s, _) in got.items() if s is GateStatus.FAIL]
+
+
+def test_표_한정_허용은_그_표에서만_SKIP이다(con: duckdb.DuckDBPyConnection) -> None:
+    """음성 대조 — EG21 no_coverage 는 opinion_daily 에만 허용이다. 같은 SKIP 이 다른 표면 FAIL."""
+    fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
+    base = Baseline({name: {"recent_grid_window": 3, "recent_grid_baseline_window": 20,
+                            "recent_grid_row_ratio_min": 0.8, "recent_grid_lag_sessions": 0}
+                     for name in ("opinion_daily", "price_daily")})
+
+    def eg21(name: str) -> GateResult:
+        rule = _rule(name=name, content_date_column="available_date",
+                     extra_gates=(gates.eg21_recent_grid,))
+        return next(g for g in gates.run_all(_ctx(con, rule, fixtures=fx, baseline=base))
+                    if g.name == "EG21")
+
+    assert eg21("opinion_daily").status is GateStatus.SKIP
+    bad = eg21("price_daily")
+    assert bad.status is GateStatus.FAIL and bad.metrics["skip_reason"] == "no_coverage"
 
 
 def test_skip_사유는_폐쇄_어휘다() -> None:

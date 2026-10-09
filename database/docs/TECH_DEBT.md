@@ -1430,3 +1430,11 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **에러 위치**: `src/backfill_kis.py:24-25`(`from backfill_dart import store, SPEC as DART_SPEC` — import 시점 바인딩)·`:358-361` `_spec_shim`(옛 `DART_SPEC` 에 `__kis_<name>` 등록) → 새 `backfill_dart.store` 가 자기 SPEC 에서 못 찾아 `KeyError: '__kis_credit'`.
 - **위험성**: 운영 경로(프로세스마다 한 번 import)에는 영향이 없고, 테스트 실행 순서에 따라 거짓 실패가 난다. 지금은 `tests/test_calendar_refresh.py` 픽스처가 두 모듈을 import 전 상태로 되돌려 피한다(휴장 달력 플랜 2026-10-10). 뿌리는 `_spec_shim` 이 모듈 전역 SPEC 을 고치는 구조 — 백필 코드 동결(P5)이라 고치려면 결정이 필요하다.
 
+## 2026-10-10 주말 작업(N-40)에서 남긴 항목
+
+### B-78: `test_not_before_blocks_with_rc3` 가 실제 시계에 기대어 23:59 KST 에 돌면 실패한다
+
+- **상황**: `kw_daily._too_early` 는 `dt.datetime.now(KST)` 의 `HH:MM` 을 문자열로 비교한다(`now < not_before`). 테스트는 시계를 고정하지 않는다.
+- **인풋**: `tests/test_daily_kw.py::test_not_before_blocks_with_rc3` 가 `--not-before 23:59` 로 rc 3 을 기대한다. 실행 순간이 23:59 KST 면 `now == not_before` 라 막히지 않고 rc 0.
+- **에러 위치**: `tests/test_daily_kw.py:313`(시계 고정 없음), `src/daily/kw_daily.py:825-835`.
+- **위험성**: 운영 결함은 아니다(가드 자체는 맞다). 10-09 23:59 KST 무렵 CI(`wip/cal-direct` run 37947870744)에서 이 한 건만 실패했다 — 같은 테스트가 다른 시각엔 통과한다. 23:59 에 `deploy.sh` 테스트 단계가 돌면 배포가 헛되이 거부된다. 고칠 방향: 테스트에서 `kw_daily` 의 현재 시각을 monkeypatch 로 고정한다.

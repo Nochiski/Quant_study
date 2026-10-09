@@ -1238,13 +1238,13 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **위험성**: 그 실행만 다른 락을 잡아 원장 쓰기 배타가 깨질 수 있다(동시 쓰기). 경로 변경이 한 곳에서 빠지면 같은 결과. 고칠 때는 락 경로·대기 규칙을 공용 셸 조각 하나로 모은다(배포 묶음 3 구조 검토 M-7).
 - **진행(배포 묶음 5-3)**: 원장 락은 공용 조각 `scripts/raw_lock.sh` 하나로 모았다 — 경로(`QL_RAW_LOCK_FILE` 테스트 전용, 기본 `/tmp/quant_ledger_raw.lock`)·대기(한도 없음)·대기자 1·`QL_RAW_LOCK_HELD` 규칙을 다섯 스크립트가 source 해서 쓴다(`LOCK=` 줄은 그 파일 하나). 그 대신 '대화형 셸에 `QL_RAW_LOCK_FILE` 이 남은 채 손으로 돌림' 인풋은 이제 다섯 스크립트 모두에 해당한다. 남은 것: README 수동 실행의 하드코딩 경로·`-w 600`(사람이 정한 마감 — 의도된 차이) · 빌드 락 경로(`build_chain.sh` 등 하드코딩).
 
-### B-57: 워치독이 일간 모델 단계·발송 장부를 보지 않는다 — 구현 완료·배포 대기(배포 묶음 5-1)
+### B-57: 워치독이 일간 모델 단계·발송 장부를 보지 않는다 — 해결(배포 묶음 5-1, 10-09 rev d12085bd)
 
 - **상황**: 배포 묶음 4-0 으로 08:10 체인이 확정판 뒤에 `scripts/model_daily.sh`(fi → 모델 → 엑셀 발송)를 잇는다. 실패하면 notify.log 에 crit 한 줄을 남기고 끝난다(운영 로그 텔레그램 금지).
 - **인풋**: 거래일 D 에 fi·모델·엑셀 생성 중 한 단계가 실패하거나, 확정판이 rc ≥ 2 로 끝나 모델 단계가 아예 돌지 않음.
 - **에러 위치**: `scripts/watchdog.sh morning_build`(10:30) — 확정 빌드 보고만 판정하고 `data/deliver/sent_model_daily.jsonl` 의 D 줄은 보지 않는다(헤더 주석 '스코어 워치독은 페이즈 C 에서 case 에 추가' — 아직 없음).
 - **위험성**: 로드맵 K0-1 '거래일마다 정확히 1건'이 깨져도 사람은 엑셀이 오지 않은 것으로만 안다(notify.log 를 열어 봐야 원인이 보인다). 데이터 손상은 없다. 고칠 때는 아침 워치독이 '오늘 확정판 D 의 장부 줄 유무'를 같이 본다. 자동 재시도도 없다 — 같은 D 를 가드로 건너뛰는 날(주말·연휴)엔 모델 단계도 돌지 않아, 토요일 발송이 실패해도 일요일 08:10 이 복구하지 않는다(재시도 트리거는 사람 결정, P3).
-- **구현 완료·배포 대기(배포 묶음 5-1, N-31 ①)**: `scripts/watchdog.sh morning_build` 이 확정판이 정상이면 이어서 그 확정판 D 의 장부 줄(`date`=D(YYYY-MM-DD) · `basis`=morning)을 본다. 없으면 crit '확정판 D=… 엑셀 발송 기록 없음 — `scripts/model_daily.sh --date D` 로 손 발송(사용자 승인 뒤)', 장부를 못 읽거나 줄이 JSON 객체가 아니면 crit(P1), 확정 빌드가 비정상이면 그 crit 하나만(발송 검사 생략). crit 제목은 확정 빌드 실패와 가른다(`watchdog: 10:30 까지 확정판 엑셀 발송 기록 없음` · `watchdog: 확정판 엑셀 발송 여부 판정 불가`). 정상 info 에 '발송 기록 있음(정정 n)'. 자동 재시도는 여전히 없다(P3). 테스트 `tests/test_watchdog_sh.py`.
+- **해결(배포 묶음 5-1, N-31 ①, 10-09 배포)**: `scripts/watchdog.sh morning_build` 이 확정판이 정상이면 이어서 그 확정판 D 의 장부 줄(`date`=D(YYYY-MM-DD) · `basis`=morning)을 본다. 없으면 crit '확정판 D=… 엑셀 발송 기록 없음 — `scripts/model_daily.sh --date D` 로 손 발송(사용자 승인 뒤)', 장부를 못 읽거나 줄이 JSON 객체가 아니면 crit(P1), 확정 빌드가 비정상이면 그 crit 하나만(발송 검사 생략). crit 제목은 확정 빌드 실패와 가른다(`watchdog: 10:30 까지 확정판 엑셀 발송 기록 없음` · `watchdog: 확정판 엑셀 발송 여부 판정 불가`). 정상 info 에 '발송 기록 있음(정정 n)'. 자동 재시도는 여전히 없다(P3). 테스트 `tests/test_watchdog_sh.py`.
 
 ### B-58: 발송은 됐는데 장부 쓰기가 실패하면 다음 실행이 한 번 더 보낸다
 

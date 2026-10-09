@@ -113,3 +113,38 @@ def test_legacy_unsuffixed_file_is_not_read(tmp_path):
     c = cal.load(tmp_path / "kis_holidays.json")
     assert c.is_trading_day(dt.date(2026, 10, 20)) is True
     assert c.is_trading_day(dt.date(2026, 12, 25)) is False
+
+
+# ── 세션 예외 표(정규장 시각이 바뀌는 거래일 — 컷오버 PR-1 M2) ──────────────────────────
+def _write_exceptions(path, days):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"days": days}, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_session_exceptions_union_repo_default_and_ops_table(tmp_path):
+    default = _write_exceptions(tmp_path / "repo" / "session_exceptions.json",
+                                {"20261119": "수능(기본)"})
+    ops = tmp_path / "data" / "calendar"
+    # 운영 표가 없으면 기본 표만
+    assert cal.load_session_exceptions(ops, default=default) == {"20261119": "수능(기본)"}
+    # 운영 표가 있으면 합집합, 같은 날짜는 운영 표 사유 — 기본 표의 날이 가려지지 않는다
+    _write_exceptions(ops / cal.SESSION_EXCEPTIONS_FILE,
+                      {"20261119": "수능(KRX 공지 확인)", "20261231": "폐장일 시각 변경"})
+    assert cal.load_session_exceptions(ops, default=default) == {
+        "20261119": "수능(KRX 공지 확인)", "20261231": "폐장일 시각 변경"}
+
+
+@pytest.mark.parametrize("days", [{"2026-11-19": "형식"}, {"20261131": "없는 날"},
+                                  {"20261119": ""}, ["20261119"]])
+def test_session_exceptions_malformed_table_stops(tmp_path, days):
+    # 조용히 빈 표로 넘어가면 시각이 바뀐 날 장중 값을 첫 관측으로 굳힌다 — 멈춘다(P1)
+    default = tmp_path / "session_exceptions.json"
+    default.write_text(json.dumps({"days": days}), encoding="utf-8")
+    with pytest.raises(cal.CalendarUnavailable, match="session_exceptions"):
+        cal.load_session_exceptions(tmp_path / "ops", default=default)
+
+
+def test_session_exceptions_missing_repo_default_stops(tmp_path):
+    with pytest.raises(cal.CalendarUnavailable, match="session_exceptions"):
+        cal.load_session_exceptions(tmp_path, default=tmp_path / "nope.json")

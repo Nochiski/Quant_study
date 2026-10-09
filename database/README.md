@@ -198,6 +198,8 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 - 기다리는 동안 KST 날짜가 바뀌면(자정을 넘는 점유) 락을 잡아도 본 작업을 하지 않는다 — crit '<이름> 원장 락 대기 중 날짜가 바뀜(시작 … → 지금 …) — 이번 실행 중단' 후 락을 놓고 rc 3(dry-run 은 알림 없이 같은 rc). 수집 대상일(D·오늘)을 대기 뒤에 정하므로 그날 값을 그대로 받을 수 없다(TECH_DEBT B-51). 다시 돌릴지는 사람이 정한다 — 원래 날의 슬롯을 `--date` 로 다시 돌리는 것이 맞는지(저녁 WISE·키움은 그날 안에만 받을 수 있다) 먼저 본다.
 - 서로 다른 스크립트가 함께 기다리다 풀리면 누가 먼저 잡을지는 정해져 있지 않다(TECH_DEBT B-62 — 08:10 이 06:00 보다 먼저 잡으면 그날 확정판이 원장 게이트에서 멈춘다).
 - 손으로 돌리는 수집기는 이 조각을 쓰지 않고 `flock -w <초>` 로 대기 상한을 둔다(아래 절차서 — 사람이 정한 마감이 있어서).
+- 예외: 장 마감 수집기 `python -m daily.postclose`(15:41, 컷오버 PR-1)는 별도 원장 `data/raw/postclose.db` 에만 쓰고 원장 락을 잡지도 기다리지도 않는다 — 자체 락 `/tmp/quant_ledger_postclose.lock` 을 비대기로 잡고 쥐고 있으면 rc 3(16:00 창, 컷오버 정본 T-4).
+  세션 시각이 바뀌는 날(수능일 등)은 rc 3 으로 건너뛴다 — 표는 저장소 기본 `config/calendar/session_exceptions.json`(배포로 나감) ∪ 운영 `data/calendar/session_exceptions.json`(급할 때 더하고 같은 항목을 PR 로 기본 표에도), 읽기는 `daily.calendar.load_session_exceptions` 한 곳.
 
 ### WISE 같은 날 재실행 — `src/backfill_wise.py` (A-03, 10-07)
 
@@ -264,7 +266,7 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 
-- 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run}.db` (`QL_BACKUP_ROOT` 로 변경). 한 세트 19 GB(09-19 실측. `data/raw` 전체는 46 GB 지만 `documents/` 27 GB 는 백업 대상이 아니다).
+- 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run,postclose}.db` (`QL_BACKUP_ROOT` 로 변경). 한 세트 19 GB(09-19 실측. `data/raw` 전체는 46 GB 지만 `documents/` 27 GB 는 백업 대상이 아니다).
 - 방식: `sqlite3 .backup` **온라인 백업만**(DB 당 `timeout 25m`, 외부 쓰기가 계속되면 재시작만 반복하므로). 원장이 18 GB 라 `cp`·`rsync`·하드링크는 금지고, 원장 락도 잡지
   않는다(18 GB 를 뜨는 동안 수집 체인이 막힌다). 03:30 은 어느 체인과도 겹치지 않는다.
 - 판정: DB 별로 격리해 하나가 실패해도 나머지를 끝까지 뜨고, 실패 목록을 모아 crit 한 번. 사본마다

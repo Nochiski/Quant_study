@@ -1,0 +1,6 @@
+{
+ "note": "정규장 시각이 바뀌는 거래일(YYYYMMDD → 사유). 이 날은 장 마감 직후 수집(daily.postclose, 15:41~16:00)을 하지 않고 rc 3 으로 건너뛴다 — 그 종목들은 21:05 저녁 값을 쓴다. 저장소 기본 표이고 배포(config/)로 코드와 함께 나간다. 급할 때는 운영 data/calendar/session_exceptions.json 에 같은 형식으로 더하고(두 표는 합쳐 읽는다) 같은 항목을 PR 로 여기에도 넣는다. 읽기는 daily.calendar.load_session_exceptions 한 곳.",
+ "days": {
+  "20261119": "2027학년도 대학수학능력시험(수능) — 개장·폐장 1시간 늦춤 예상(폐장 16:30), KRX 공지로 확인 필요"
+ }
+}

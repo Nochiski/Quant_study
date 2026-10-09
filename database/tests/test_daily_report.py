@@ -254,6 +254,27 @@ def test_키움_fetch_는_뒤_런이_ok_여도_앞_런_실패가_crit(tmp_path: 
     assert "수집 실패 런 kiwoom_fetch" in r.text
 
 
+@pytest.mark.parametrize("status", ["cutoff", "late", "session_exception"])
+def test_장_마감_수집의_정상_종료_상태는_crit_이_아니라_warn(tmp_path: Path, status: str) -> None:
+    """수집기가 정상 종료로 정한 상태(`runlog.WARN_STATUSES`) — 16:00 컷오프·늦은 시작·세션 예외일.
+    남은 종목은 QL-D 가 21:05 저녁 값으로 메운다. 실패 상태(error)는 그대로 crit."""
+    home = _full(tmp_path)
+    _runs(home, rows=(("ledger_chain", "ok"), ("evening_chain", "ok"),
+                      ("kiwoom_postclose", status)))
+    r = _build(home)
+    assert r.status is dr.ReportStatus.WARN
+    assert f"kiwoom_postclose {status}" in r.text and "수집 실패 런" not in r.text
+
+
+def test_장_마감_수집_error_는_crit(tmp_path: Path) -> None:
+    home = _full(tmp_path)
+    _runs(home, rows=(("ledger_chain", "ok"), ("evening_chain", "ok"),
+                      ("kiwoom_postclose", "error")))
+    r = _build(home)
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 kiwoom_postclose" in r.text
+
+
 def test_런이_아직_running_이면_warn(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _ledger(home)

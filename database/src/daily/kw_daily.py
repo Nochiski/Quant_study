@@ -111,6 +111,21 @@ TRS: dict[str, TrSpec] = {
         body=lambda tk, s, e: {"stk_cd": tk}),
 }
 
+# ka10060 투자자별 순매수 13주체(응답 열 이름, 키움 원장 열 순서) — 장 마감 수집(`daily.postclose`)과
+# 프로브(`probe_postclose`)가 같이 쓴다
+FLOW_KEYS = ("ind_invsr", "frgnr_invsr", "orgn", "fnnc_invt", "insrnc", "invtrt", "etc_fnnc",
+             "bank", "penfnd_etc", "samo_fund", "natn", "etc_corp", "natfor")
+
+
+def pick_rows(api_id: str, rows: Sequence[Mapping[str, object]],
+              target: str) -> list[dict[str, object]]:
+    """저장할 행만 — 일별 TR 은 target 날짜 행(ka10060 `dt` · ka10086 `date`), 묶음 TR 은 전부."""
+    if api_id == "ka10060":
+        return [dict(r) for r in rows if str(r.get("dt")) == target]
+    if api_id == "ka10086":
+        return [dict(r) for r in rows if str(r.get("date")) == target]
+    return [dict(r) for r in rows]
+
 GATE_TR = "ka10008"          # 오염·크로스소스 게이트의 판정 대상
 
 # 키움 오류코드표 분류(backfill_kw.py:108-112)

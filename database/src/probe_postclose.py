@@ -37,6 +37,7 @@ from typing import Any
 
 from daily import calendar as trading_calendar
 from daily import kw_daily as KW
+from daily.kw_daily import FLOW_KEYS, pick_rows
 
 BASE = Path(os.environ.get("QL_HOME", Path(__file__).resolve().parents[1]))
 DB = BASE / "data" / "evidence" / "postclose.db"
@@ -46,8 +47,6 @@ UNTIL_DEFAULT = "20261008"
 # NXT 있음) · 삼화콘덴서(코스피 중형·NXT 없음, 10-02 모델 1위)
 TICKERS = ("005930", "086520", "001820")
 SWEEP_N = 100           # 후보 조회 종목 수(10-06 사용자 '100종목만해')
-FLOW_KEYS = ("ind_invsr", "frgnr_invsr", "orgn", "fnnc_invt", "insrnc", "invtrt", "etc_fnnc",
-             "bank", "penfnd_etc", "samo_fund", "natn", "etc_corp", "natfor")
 BATCH = 100              # ka10095 한 콜 종목 수(시험값 — 응답 행 수로 실제 한도를 본다)
 # 키움 REST 거래소 구분 = 종목코드 접미사(공식 가이드): KRX 그대로 · NXT '_NX' · 통합(SOR) '_AL'.
 # 분 단위 조회와 묶음 조회는 셋 다(10-06 사용자 요청), 후보 전량 ka10060 은 운영 원천인 KRX 만.
@@ -124,15 +123,6 @@ def latest_date(api_id: str, rows: Sequence[Mapping[str, Any]]) -> str:
     key = {"ka10060": "dt", "ka10086": "date"}.get(api_id)
     vals = [str(r.get(key)) for r in rows if key and r.get(key)]
     return max(vals) if vals else "(빈 응답)"
-
-
-def pick_rows(api_id: str, rows: Sequence[Mapping[str, Any]], target: str) -> list[dict[str, Any]]:
-    """저장할 행만 — 일별 TR 은 T 행, 묶음 TR 은 전부."""
-    if api_id == "ka10060":
-        return [dict(r) for r in rows if str(r.get("dt")) == target]
-    if api_id == "ka10086":
-        return [dict(r) for r in rows if str(r.get("date")) == target]
-    return [dict(r) for r in rows]
 
 
 def settle_time(series: Sequence[tuple[str, object]]) -> str | None:

@@ -199,6 +199,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 - 서로 다른 스크립트가 함께 기다리다 풀리면 누가 먼저 잡을지는 정해져 있지 않다(TECH_DEBT B-62 — 08:10 이 06:00 보다 먼저 잡으면 그날 확정판이 원장 게이트에서 멈춘다).
 - 손으로 돌리는 수집기는 이 조각을 쓰지 않고 `flock -w <초>` 로 대기 상한을 둔다(아래 절차서 — 사람이 정한 마감이 있어서).
 - 예외: 장 마감 수집기 `python -m daily.postclose`(15:41, 컷오버 PR-1)는 별도 원장 `data/raw/postclose.db` 에만 쓰고 원장 락을 잡지도 기다리지도 않는다 — 자체 락 `/tmp/quant_ledger_postclose.lock` 을 비대기로 잡고 쥐고 있으면 rc 3(16:00 창, 컷오버 정본 T-4).
+  세션 시각이 바뀌는 날(수능일 등)은 rc 3 으로 건너뛴다 — 표는 저장소 기본 `config/calendar/session_exceptions.json`(배포로 나감) ∪ 운영 `data/calendar/session_exceptions.json`(급할 때 더하고 같은 항목을 PR 로 기본 표에도), 읽기는 `daily.calendar.load_session_exceptions` 한 곳.
 
 ### WISE 같은 날 재실행 — `src/backfill_wise.py` (A-03, 10-07)
 

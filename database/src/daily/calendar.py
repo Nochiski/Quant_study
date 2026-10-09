@@ -25,6 +25,12 @@ DEFAULT_PATH = os.path.join(os.environ.get("QL_HOME", os.path.expanduser("~/quan
 # 판정 연도 파일 이름 — 읽기(`load`)와 쓰기(`calendar_refresh`)가 함께 쓰는 정본
 YEAR_FILE = "kis_holidays_{year}.json"
 _YEAR_FILE_RE = re.compile(r"^kis_holidays_(\d{4})\.json$")
+# 세션 예외 표(정규장 시각이 바뀌는 거래일 — 수능일 등). 운영 표는 판정 연도 파일과 같은 디렉터리
+# (`data/calendar/`)에 두고, 저장소 기본 표는 배포로 코드와 함께 나가는 `config/calendar/` 에 둔다
+SESSION_EXCEPTIONS_FILE = "session_exceptions.json"
+DEFAULT_SESSION_EXCEPTIONS = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "calendar", SESSION_EXCEPTIONS_FILE)
 
 
 class CalendarUnavailable(RuntimeError):
@@ -121,3 +127,40 @@ def load(path: str | os.PathLike[str] = DEFAULT_PATH) -> Calendar:
             f"holiday calendar unusable: dir={os.path.abspath(directory)} {type(e).__name__}: {e} — 영업일 "
             f"가정으로 넘어가지 않는다(K1-9 ⑦, N-31 ②)") from e
     return Calendar(frozenset().union(*by_year.values()), "kis_cache", years=frozenset(by_year))
+
+
+def _read_session_table(path: str) -> dict[str, str]:
+    """세션 예외 표 하나 — `{"days": {YYYYMMDD: 사유}}`. 형식 오류는 `CalendarUnavailable`(경로를 싣는다)."""
+    full = os.path.abspath(path)
+    try:
+        with open(full, encoding="utf-8") as f:
+            days = json.load(f)["days"]
+        if not isinstance(days, dict):
+            raise TypeError(f"days must be an object: got {type(days).__name__}")
+        out: dict[str, str] = {}
+        for k, v in days.items():
+            dt.datetime.strptime(str(k), "%Y%m%d")            # 없는 날(20261131)도 여기서 걸린다
+            if len(str(k)) != 8 or not isinstance(v, str) or not v.strip():
+                raise ValueError(f"entry must be YYYYMMDD → non-empty reason: {k!r}: {v!r}")
+            out[str(k)] = v
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise CalendarUnavailable(f"session_exceptions table unusable: path={full} "
+                                  f"{type(e).__name__}: {e}") from e
+    return out
+
+
+def load_session_exceptions(directory: str | os.PathLike[str],
+                            default: str | os.PathLike[str] = DEFAULT_SESSION_EXCEPTIONS
+                            ) -> dict[str, str]:
+    """정규장 시각이 바뀌는 거래일 `{YYYYMMDD: 사유}` — 장 마감 직후 수집(15:41~16:00)을 하지 않는 날.
+
+    저장소 기본 표(`default`, 배포로 코드와 함께 나간다)와 운영 표(`<directory>/session_exceptions.json`,
+    있을 때만)를 합친다. 같은 날짜면 운영 표의 사유. 합치는 이유: 운영 표가 기본 표를 통째로 가리면
+    나중에 기본 표에 더한 날(이듬해 수능일)을 놓친다. 기본 표가 없거나 어느 표든 형식이 틀리면
+    `CalendarUnavailable` — 빈 표로 넘어가면 시각이 바뀐 날 장중 값을 첫 관측으로 굳힌다(P1).
+    """
+    out = _read_session_table(os.fspath(default))
+    ops = os.path.join(os.fspath(directory), SESSION_EXCEPTIONS_FILE)
+    if os.path.exists(ops):
+        out.update(_read_session_table(ops))
+    return out

@@ -356,7 +356,7 @@ def _now_utc() -> str:
 
 
 def _atomic_write_json(path: Path, payload: object, mode: int = 0o600) -> None:
-    """같은 디렉터리 임시 파일 → 0600 → os.replace(원자 교체). 중간에 죽어도 절단된 JSON 이 남지 않는다.
+    """같은 디렉터리 임시 파일 → mode(기본 0600) → os.replace(원자 교체). 중간에 죽어도 절단된 JSON 이 남지 않는다.
 
     `mode` 는 남의 파일 내용만 바꿀 때 원래 권한을 지키려고 받는다
     (`calendar_export` — v3 휴장 파일).

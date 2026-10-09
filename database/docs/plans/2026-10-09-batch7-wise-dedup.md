@@ -16,9 +16,9 @@
 
 | ID | 무엇 | 계획 | 구현 | 검토 | 배포 | 실전 확인 | 다음 관측 |
 |---|---|---|---|---|---|---|---|
-| 7-1 | stage 연속 판 접기(blob 단계, 두 표): 접기 함수 한 곳, G8 보존 등식, 남긴 blob sha 재검증, 기록형 지표 | 완료 | 대기 | 대기 | 대기 | 대기 | 10-13 21:20 첫 2.7.0 저녁판 |
-| 7-2 | 소비자 최신성 정합: fi wsnap·compat latest 를 (종목, ep) 단위로, FG1 손익 비율, available_date 뜻 문서(fi1.4.0) | 완료 | 대기 | 대기 | 대기 | 대기 | 10-14 08:10 fi·엑셀 |
-| 7-3 | 아침 재사용(두 표): 지문·판본·rev 판정, 하드링크 재커밋, 실패 시 일반 빌드, 끄기 파일 | 완료 | 대기 | 대기 | 대기 | 대기 | 10-14 08:10 |
+| 7-1 | stage 연속 판 접기(blob 단계, 두 표): 접기 함수 한 곳, G8 보존 등식, 남긴 blob sha 재검증, 기록형 지표 | 완료 | 완료(7a0629f9 — 서버 원장 읽기 전용 대조 행 1,380,846·932,706 플랜과 정확히 일치, sha 불일치 0) | 통과(상 0·중 1 반영 중) | 대기 | 대기 | 10-13 21:20 첫 2.7.0 저녁판 |
+| 7-2 | 소비자 최신성 정합: fi wsnap·compat latest 를 (종목, ep) 단위로, FG1 손익 비율, available_date 뜻 문서(fi1.4.0) | 완료 | 완료(2eb09226 — G1 옛 NULL→새 값, 접지 않은 절단본 골든 동일) | 통과 | 대기 | 대기 | 10-14 08:10 fi·엑셀 |
+| 7-3 | 아침 재사용(두 표): 지문·판본·rev 판정, 하드링크 재커밋, 실패 시 일반 빌드, 끄기 파일 | 완료 | 완료(7a0629f9, 거절 조건 14종 테스트) | 통과(하 반영 중) | 대기 | 대기 | 10-14 08:10 |
 | 7-4 | 판본(stage 2.7.0·fi1.4.0), C3 1회 처리, 문서, TECH_DEBT | 완료 | 대기 | 대기 | — | — | — |
 | 7-5 | 서버 재연(읽기 전용 + 임시 폴더): 소요·행 수, 각 날짜 최신 판 동일성, fi 동일성, 재사용 연습, sha 전수 대조 | 완료 | 대기 | — | — | — | 10-11 |
 | 7-6 | 배포, 수동 b_ 패스, 첫 저녁·아침 관측 | 완료 | — | — | 대기 | 대기 | 10-13 낮 창 |
@@ -26,6 +26,11 @@
 
 ## 브랜치
 - `wip/b7-stage`(7-1·7-3)·`wip/b7-fi`(7-2) 모두 feat/v3-merge 위 — 10-11 재연은 서버 equity e1.25.0 위에서 돌아야 하고, wip/b6-int 의 fi1.3.0 은 `_check_columns` 때문에 e1.26.0 판이 없으면 멈춘다. `wip/b7-int` 는 10-12 묶음 6 이 feat 에 들어간 뒤 다시 통합.
+
+## 진행 기록(10-09 오후)
+- 통합 `wip/b7-int` e8d08b26 = 7-1·7-3(7a0629f9) + 7-2(2eb09226), 전체 2,136 passed · 12 skipped. 브랜치는 둘 다 feat/v3-merge(faa41f7d) 위 — 묶음 6 이 feat 에 들어간 뒤(10-12) 재통합, fi 판본 줄에 1.3.0 이력 넣기.
+- 묶음 전체 검토: 상 0 · 중 1(G8 원장 count 독립성을 지키는 부정 테스트 부재 — 추가 중) · 하 8(sha 재계산 압축 판정 규칙을 파서와 맞춤, 저녁 CLI 게이트 임계 override 기록·비교, 재사용 결과 객체를 커밋 앞에서, code_rev 를 코드 루트 DEPLOYED.json 에서(deliver E-08 과 같게), 'C4 독립 확인' 문구 정정, freshness 근거 정정, 지문 스트리밍 해시 — 반영 중). PIT·접기 정확성·재사용 안전성·소비자 전수(두 표를 읽는 곳은 fi·compat 뿐) 통과.
+- **7-5 재연 때 챙길 것(검토)**: ④ fi 동일성 예외 목록을 '미수집 날 + 빈 응답(ok·빈 DATA) 날'로 정의해 건수 보고 — 빈 응답 날에도 직전 손익 값이 이어지는 동작(검토 하-2)은 D7-4 의 '결손'보다 넓다, 건수를 보고 사용자 판단으로 D7-4 보강 여부 결정. ⑤ 임시 루트 코드 사본에 DEPLOYED.json 을 둬야 재사용 연습이 거절되지 않는다.
 
 ## 사실 근거
 
@@ -82,7 +87,7 @@
 | 외부 공유 소비자(stage 디렉터리 바인드) | 사용 방식 모름 | 날짜별 행 존재·fetched_date 뜻이 바뀜 | STAGE_HANDOFF 기록, 알림은 D7-9 |
 
 ### 7-3 아침 재사용
-- **판정**(`stage/reuse.py`, 전부 참일 때만): ① `TableRule.morning_reuse=True`(두 표), basis morning, 끄기 파일 `data/stage/REUSE_OFF` 없음 ② MANIFEST 현재 판이 basis evening 이고 그 자신이 재사용 판이 아님 ③ 현재 판 rules_version = 코드 RULES_VERSION ④ 현재 판 code_rev = `$QL_HOME/DEPLOYED.json` rev(둘 중 하나라도 없으면 재사용 안 함) ⑤ 아침 스냅샷에서 다시 계산한 원장 지문 = 저녁 판 기록(지문 = sha256(머리줄 RULES_VERSION·파서·eps + (cmp_cd, ep, pkey, fetched_date, sha256, fetched_at) 정렬 전부), 본문 없이 sqlite 에서 — 10-09 실측 57,415 blob 7.4초) ⑥ baseline.json 그 표 항목 해시·골든 픽스처 해시·KST 연도(G7 범위가 빌드 연도에 묶임) 같음 ⑦ 하드링크한 parquet 의 content_hash 재계산 = 기록. src_bytes·src_mtime 은 기록만(D7-6).
+- **판정**(`stage/reuse.py`, 전부 참일 때만): ① `TableRule.morning_reuse=True`(두 표), basis morning, 끄기 파일 `data/stage/REUSE_OFF` 없음 ② MANIFEST 현재 판이 basis evening 이고 그 자신이 재사용 판이 아님 ③ 현재 판 rules_version = 코드 RULES_VERSION ④ 현재 판 code_rev = **코드 루트** `DEPLOYED.json` rev(deliver E-08 과 같은 곳 — 10-09 검토 하-5, 둘 중 하나라도 없으면 재사용 안 함) ⑤ 아침 스냅샷에서 다시 계산한 원장 지문 = 저녁 판 기록(지문 = sha256(머리줄 RULES_VERSION·파서·eps + (cmp_cd, ep, pkey, fetched_date, sha256, fetched_at) 정렬 전부), 본문 없이 sqlite 에서 — 10-09 실측 57,415 blob 7.4초) ⑥ baseline.json 그 표 항목 해시·골든 픽스처 해시·빌드 연도(UTC — G7 범위가 `datetime.now(UTC).year` 라 그와 맞춤, 10-09 구현)·CLI 게이트 임계 override(저녁·아침 같아야 함, 10-09 검토 하-3) 같음 ⑦ 하드링크한 parquet 의 content_hash 재계산 = 기록. src_bytes·src_mtime 은 기록만(D7-6).
 - **재커밋**: 새 `m_` id, `_tmp/<id>/<표>` 에 저녁 판 parquet·`_reject` 하드링크 뒤 `v=<m_>` 로, `_meta.json` 은 새 파일(하드링크된 저녁 파일을 제자리에서 쓰면 저녁 판이 바뀜). 레코드 snapshot_id = 아침 스냅샷, gates 는 저녁 판에서 복사, 새 선택 필드 `reused_from`·`input_fingerprint`·`code_rev`(BuildRecord 기본 None, equity 쪽 통지). 출력 줄에 `reused_from=e_…`, 끝은 `<초>s` 유지.
 - **건전성**: m_ 판이라 C1 그대로 통과(예외 규칙 없음), C4 는 계수·해시 동결로 통과(재사용 정합의 독립 확인), C3·C6 같은 값.
 - **실패**: 판정 아님·예외면 사유 한 줄(`reuse_declined reason=…`), 반쯤 만든 판 지우고 일반 `build_table`(P1).

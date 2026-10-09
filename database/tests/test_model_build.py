@@ -207,11 +207,16 @@ def test_run_manifest_and_latest_pointer(built) -> None:
     assert run["primary_spec"] == "scope@1.0"          # 기본 주 모델(10-05 v4_rank@0.1 → scope@1.0)
     assert tuple(run["specs"]) == ALL_SPECS
     for spec_id, s in run["specs"].items():
-        assert set(s) == {"n_scores", "n_ranked", "n_excluded", "gates"}
+        # scope 만 엔진 메타(T-9 · H1-4 창 안 제한폭 초과 미해결 칸 수)를 싣는다
+        meta = {"adj_jump_masked"} if spec_id == "scope@1.0" else set()
+        assert set(s) == {"n_scores", "n_ranked", "n_excluded", "gates"} | meta
         assert tuple(s["gates"]) == mgates.GATE_ORDER
         assert {g["status"] for g in s["gates"].values()} <= {"pass", "skip"}, spec_id
         assert s["gates"]["MG5"]["status"] == "skip"          # 첫 판 — 전판이 없다
         assert s["gates"]["MG4"]["metrics"]["n_prices_on_d"] == N_BOARD
+    # 보드 트리에는 점프 표식이 없다(adj_jump_ok NULL = True) — 0 도 기록한다
+    assert run["specs"]["scope@1.0"]["adj_jump_masked"] == {
+        "n_tickers": 0, "r1m": 0, "r3m": 0, "r6m": 0, "r9m": 0, "r12m": 0, "std_20d": 0}
 
 
 # ── 골든 · 실제 factor_inputs 판 ─────────────────────────────────────────────

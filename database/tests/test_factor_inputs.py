@@ -1068,6 +1068,122 @@ def test_price_resolved_stock_gets_v4_and_weekly_returns(built) -> None:
     assert week[B] == "결측(수정주가미해결)"
 
 
+# ── 제한폭 초과 미해결 점프 표식 adj_jump_ok(T-9 · H1-4, fi1.5.0) ─────────────────
+def test_within_limit_unresolved_events_leave_adj_jump_ok_true(built) -> None:
+    """기본 합성 트리의 미해결 사건(B 09-22 · E 09-21·09-23)은 하루 등락이 1% 안이다 — adj_ok 는
+    뒤집혀도 adj_jump_ok 는 전 행 True(scope 모멘텀·20일 변동성을 건드리지 않는다)."""
+    out, _ = built
+    for t in (B, E):
+        assert q(out, "fi_adj_prices", "SELECT bool_and(adj_jump_ok), bool_and(adj_ok) FROM t "
+                                       f"WHERE ticker = '{t}'") == [(True, False)], t
+    assert q(out, "fi_adj_prices", "SELECT count(*) FROM t WHERE adj_jump_ok IS NULL "
+                                   "OR NOT adj_jump_ok") == [(0,)]
+
+
+JUMP_D, JUMP_D2 = dt.date(2015, 7, 31), dt.date(2015, 8, 4)
+# 종목 → (사건 적용일, 점프 날, 배율, price_resolution). 점프 날 종가 = 전날 종가 × 배율(정수 원),
+# 그 밖의 날은 전날 + 10원(0.1% 안팎). 세션 = 2015-05-04 ~ 08-14 평일(휴장 없음).
+JUMP_CASES: dict[str, tuple[dt.date, dt.date, float, str]] = {
+    "B1": (dt.date(2015, 6, 12), dt.date(2015, 6, 12), 1.2, "unresolved"),   # 15% 시절 +20%
+    "B2": (dt.date(2015, 6, 15), dt.date(2015, 6, 15), 1.2, "unresolved"),   # 30% 첫날 +20%
+    "XB": (dt.date(2015, 6, 17), dt.date(2015, 6, 12), 1.2, "unresolved"),   # 적용일은 30% 시절,
+                                                                             # 점프(−3 세션)는 15% 시절
+    "LU": (dt.date(2015, 7, 1), dt.date(2015, 7, 1), 1.3, "unresolved"),     # 상한가 +30% 그대로
+    "NB6": (dt.date(2015, 7, 1), dt.date(2015, 7, 9), 1.4, "unresolved"),    # 적용일 +6 세션
+    "NB7": (dt.date(2015, 7, 1), dt.date(2015, 7, 10), 1.4, "unresolved"),   # 적용일 +7 세션
+    "PRE6": (dt.date(2015, 7, 1), dt.date(2015, 6, 23), 0.6, "unresolved"),  # 적용일 −6 세션
+    "LATE": (dt.date(2015, 7, 30), dt.date(2015, 8, 3), 0.5, "unresolved"),  # 점프가 D 뒤
+    "RES": (dt.date(2015, 7, 1), dt.date(2015, 7, 1), 0.5, "price_only"),    # 가격 축 해소
+}
+
+
+def _adj_steps_at(d: dt.date) -> dict[str, list[tuple[dt.date, bool, bool]]]:
+    """작은 equity 표(달력·price_adj_daily·adj_factor) 위에서 fi_adj_prices SQL 만 돌린다 →
+    종목 → [(날짜, adj_ok, adj_jump_ok)] 날짜순."""
+    from factor_inputs import queries
+    sessions, day = [], dt.date(2015, 5, 4)
+    while day <= dt.date(2015, 8, 14):
+        if day.weekday() < 5:
+            sessions.append(day)
+        day += dt.timedelta(days=1)
+    con = duckdb.connect()
+    try:
+        con.execute("CREATE TABLE trading_calendar (date DATE)")
+        con.executemany("INSERT INTO trading_calendar VALUES (?)", [(s,) for s in sessions])
+        con.execute("CREATE TABLE price_adj_daily (ticker VARCHAR, date DATE, adj_close DOUBLE, "
+                    "cum_share_factor DOUBLE, cum_price_only_factor DOUBLE, basis VARCHAR)")
+        con.execute("CREATE TABLE adj_factor (ticker VARCHAR, apply_date DATE, "
+                    "available_date DATE, price_resolution VARCHAR)")
+        for t, (apply, jump, ratio, res) in JUMP_CASES.items():
+            px, rows = 10_000, []
+            for i, s in enumerate(sessions):
+                px = round(px * ratio) if s == jump else px + (10 if i else 0)
+                rows.append((t, s, float(px), 1.0, 1.0, "krx"))
+            con.executemany("INSERT INTO price_adj_daily VALUES (?, ?, ?, ?, ?, ?)", rows)
+            con.execute("INSERT INTO adj_factor VALUES (?, ?, ?, ?)", [t, apply, apply, res])
+        con.execute("CREATE TABLE _fi_universe AS SELECT DISTINCT ticker FROM price_adj_daily")
+        p = queries.Params(d=d.isoformat(), fy=f"{d.year}12",
+                           price_from=(d - dt.timedelta(days=queries.PRICE_WINDOW_DAYS)).isoformat(),
+                           flow_from=d.isoformat(), grace_days=0, credit_lag=0)
+        con.execute(queries.calendar_sql())
+        con.execute(queries.adj_prices_sql(p))
+        got: dict[str, list[tuple[dt.date, bool, bool]]] = {}
+        for t, day_, ok, jump_ok in con.execute(
+                "SELECT ticker, date, adj_ok, adj_jump_ok FROM _fi_adj_prices "
+                "ORDER BY ticker, date").fetchall():
+            got.setdefault(t, []).append((day_, ok, jump_ok))
+        return got
+    finally:
+        con.close()
+
+
+@pytest.fixture(scope="module")
+def jump_steps() -> dict[dt.date, dict[str, list[tuple[dt.date, bool, bool]]]]:
+    return {d: _adj_steps_at(d) for d in (JUMP_D, JUMP_D2)}
+
+
+def _first_false(rows: list[tuple[dt.date, bool, bool]], col: int) -> dt.date | None:
+    """col 1 = adj_ok · 2 = adj_jump_ok 가 처음 False 인 날(없으면 None)."""
+    return next((r[0] for r in rows if not r[col]), None)
+
+
+def test_adj_jump_ok_steps_only_at_unresolved_events_with_a_limit_breaking_neighbour(
+        jump_steps) -> None:
+    """adj_jump_ok 는 adj_ok 와 같은 계단 표식이되, 적용일 ±6 세션 안 행의 |수정수익률|이 그날
+    가격제한폭을 넘는 미해결 사건만 센다 — 뒤집는 날은 점프 날이 아니라 적용일이다. 상한가 그대로
+    (+30%, 부동소수 0.30000000000000004)는 넘지 않은 것이다. 가격 축에서 해소된 사건은 점프가
+    있어도 세지 않는다. adj_ok 는 그대로(미해결이면 점프 크기와 무관하게 뒤집힌다)."""
+    got = jump_steps[JUMP_D]
+    assert {t: _first_false(v, 2) for t, v in got.items()} == {
+        "B1": dt.date(2015, 6, 12), "B2": None, "XB": dt.date(2015, 6, 17), "LU": None,
+        "NB6": dt.date(2015, 7, 1), "NB7": None, "PRE6": dt.date(2015, 7, 1), "LATE": None,
+        "RES": None}
+    assert {t: _first_false(v, 1) for t, v in got.items()} == {
+        t: (None if res != "unresolved" else apply)
+        for t, (apply, _, _, res) in JUMP_CASES.items()}
+    # 사건이 하나라 적용일부터 끝까지 False — 계단 하나
+    nb6 = [r[2] for r in got["NB6"]]
+    k = nb6.index(False)
+    assert all(nb6[:k]) and not any(nb6[k:])
+
+
+def test_adj_jump_price_limit_switches_on_2015_06_15(jump_steps) -> None:
+    """가격제한폭은 수익률 날짜 기준 — 2015-06-12(금) +20% 는 15% 를 넘어 점프, 2015-06-15(월)
+    +20% 는 30% 안이라 점프가 아니다. 적용일이 06-17(30% 시절)이어도 인접 점프가 06-12 면 15% 로
+    잰다(XB — 적용일 기준으로 고르면 놓친다)."""
+    got = jump_steps[JUMP_D]
+    assert _first_false(got["B1"], 2) == dt.date(2015, 6, 12)
+    assert _first_false(got["B2"], 2) is None and _first_false(got["B2"], 1) == dt.date(2015, 6, 15)
+    assert _first_false(got["XB"], 2) == dt.date(2015, 6, 17)
+
+
+def test_adj_jump_does_not_look_past_d(jump_steps) -> None:
+    """적용일 07-30(D−1) 사건의 점프가 08-03(D+1)이면 D 판은 모른다(price_adj_daily 에 D 뒤 행이
+    있어도) — 08-04 판에서야 적용일 07-30 부터 False 다."""
+    assert _first_false(jump_steps[JUMP_D]["LATE"], 2) is None
+    assert _first_false(jump_steps[JUMP_D2]["LATE"], 2) == dt.date(2015, 7, 30)
+
+
 def test_flows_sixty_sessions_units_and_source_pick(built) -> None:
     out, _ = built
     a = q(out, "fi_flows", f"SELECT date, individual, foreign_investor FROM t WHERE ticker = '{A}' "

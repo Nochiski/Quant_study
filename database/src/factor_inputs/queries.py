@@ -314,6 +314,18 @@ WHERE basis = 'krx' AND date >= DATE '{p.price_from}' AND date <= DATE '{p.d}'
 ADJ_REQUIRED_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "adj_factor": ("price_resolution",), "price_adj_daily": ("cum_price_only_factor",)}
 
+# KRX 일반 세션 가격제한폭(T-9 · H1-4) — 날짜별 제한폭은 여기에만 둔다. 수익률이 난 날(행 날짜)
+# 기준으로 2015-06-15 부터 ±30%, 그 전 ±15%.
+PRICE_LIMIT_CHANGE_DATE = "2015-06-15"
+PRICE_LIMIT_BEFORE, PRICE_LIMIT_AFTER = 0.15, 0.30
+# 부동소수 나눗셈 잡음 여유 — 상한가 하루(13,000 / 10,000 − 1 = 0.30000000000000004)를 제한폭을
+# 넘은 것으로 세지 않는다
+PRICE_LIMIT_EPS = 1e-9
+# 미해결 사건의 '인접' = 적용일 앞뒤 이 세션 수 안의 행(그 행의 직전 행 대비 수익률). K1-6/H1-1 분해
+# (10-09)가 적용일 ±6 의 인접 수익률로 점프 흔적 7 · 제한폭 안 334 를 갈랐다 — 미해결 사건의 적용일은
+# 명목 세션이라(no_price_match 등) 실제 점프가 며칠 어긋날 수 있다.
+ADJ_JUMP_NEIGHBOR_SESSIONS = 6
+
 
 def adj_prices_sql(p: Params) -> str:
     """전방 조정 종가 + 누적계수 + 가격 축 미해결 사건 **계단 표식**(DQ-1, 오케스트레이터 09-29).
@@ -333,17 +345,47 @@ def adj_prices_sql(p: Params) -> str:
     중복본 · 창 안에 ok 계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행 — 뒤 둘은
     ② 사유 행·유상감자 제외) · `price_only_near`(근처 ⑤ 단위, (c) 후보 없음))은 수정종가가 이미
     이어지므로 세지 않는다 — 판정은 equity 열 하나만 읽는다(fi1.3.0, 배포 묶음 6-3).
+
+    `adj_jump_ok`(T-9 · H1-4, fi1.5.0)는 같은 계단을 위 사건 중 **인접 수익률이 가격제한폭을 넘는
+    것**만으로 센다 — 적용일(첫 거래일 ≥ 적용일)의 앞뒤 `ADJ_JUMP_NEIGHBOR_SESSIONS` 세션 안 행 중
+    |수정종가 ÷ 그 종목 직전 행 수정종가 − 1| > 그 행 날짜의 제한폭(+`PRICE_LIMIT_EPS`)인 행이 하나라도
+    있는 사건. 뒤집는 날은 점프 날이 아니라 적용일이다(adj_ok 와 같은 축 — 창 판정이 하나다). 수익률은
+    D 이하 행만 본다(D 뒤 행을 읽으면 D 판이 미래를 안다). 제한폭 안 미해결 사건은 수정종가가 끊겼다고
+    볼 근거가 없어 세지 않는다(K1-6/H1-1 분해 — 주식 계열 미해결 중 점프 흔적 7, 제한폭 안 334).
     """
     inner = f"""WITH bad AS (
     SELECT DISTINCT ticker, apply_date FROM adj_factor
     WHERE price_resolution = '{PRICE_UNRESOLVED}'
       AND apply_date > DATE '{p.price_from}' AND apply_date <= DATE '{p.d}'
       AND available_date <= DATE '{p.d}'
+),
+ret AS (
+    SELECT r.ticker, c.idx, abs(r.adj_close / nullif(r.prev_close, 0) - 1) AS abs_ret,
+           CASE WHEN r.date < DATE '{PRICE_LIMIT_CHANGE_DATE}' THEN {PRICE_LIMIT_BEFORE}
+                ELSE {PRICE_LIMIT_AFTER} END AS price_limit
+    FROM (SELECT ticker, date, adj_close,
+                 lag(adj_close) OVER (PARTITION BY ticker ORDER BY date) AS prev_close
+          FROM price_adj_daily
+          WHERE basis = 'krx' AND date <= DATE '{p.d}'
+            AND ticker IN (SELECT ticker FROM bad) AND {_IN_UNIVERSE}) r
+    JOIN _calx c ON c.date = r.date
+),
+jump AS (
+    SELECT DISTINCT b.ticker, b.apply_date
+    FROM (SELECT ticker, apply_date,
+                 (SELECT min(idx) FROM _calx WHERE date >= apply_date) AS apply_idx
+          FROM bad) b
+    JOIN ret r ON r.ticker = b.ticker
+              AND r.idx BETWEEN b.apply_idx - {ADJ_JUMP_NEIGHBOR_SESSIONS}
+                            AND b.apply_idx + {ADJ_JUMP_NEIGHBOR_SESSIONS}
+    WHERE r.abs_ret > r.price_limit + {PRICE_LIMIT_EPS}
 )
 SELECT a.ticker, a.date, a.adj_close,
        a.cum_share_factor / a.cum_price_only_factor AS adj_factor,
        (SELECT count(*) FROM bad b
-        WHERE b.ticker = a.ticker AND b.apply_date <= a.date) % 2 = 0 AS adj_ok
+        WHERE b.ticker = a.ticker AND b.apply_date <= a.date) % 2 = 0 AS adj_ok,
+       (SELECT count(*) FROM jump j
+        WHERE j.ticker = a.ticker AND j.apply_date <= a.date) % 2 = 0 AS adj_jump_ok
 FROM price_adj_daily a
 WHERE a.basis = 'krx' AND a.date >= DATE '{p.price_from}' AND a.date <= DATE '{p.d}'
   AND a.{_IN_UNIVERSE}"""
@@ -836,7 +878,7 @@ TABLE_SOURCES: Mapping[str, tuple[str, ...]] = {
                     "coverage_daily", "audit_opinion", "disclosure_version",
                     "stg_consensus_annual", "trading_calendar"),
     "fi_prices": ("price_daily",),
-    "fi_adj_prices": ("price_adj_daily", "adj_factor"),
+    "fi_adj_prices": ("price_adj_daily", "adj_factor", "trading_calendar"),
     "fi_flows": ("flow_daily", "trading_calendar"),
     "fi_credit": ("credit_daily", "trading_calendar"),
     "fi_consensus": ("stg_consensus_matrix", "stg_consensus_annual", "coverage_daily",

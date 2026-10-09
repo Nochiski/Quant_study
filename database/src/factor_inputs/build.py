@@ -59,7 +59,9 @@ from . import gates, queries
 # 1.4.0(2026-10-13 예정, 배포 묶음 7 · N-37): fi_fin_summary WISE 연간 판을 (종목, ep) 단위 최신 ≤ D 로
 # (stage 2.7.0 연속 판 접기 — D7-4), available_date 의 WISE 날짜가 '처음 본 날'로,
 # FG1 손익(op·ni) 비율 기록(D7-8)
-RULES_VERSION = "fi1.4.0"
+# 1.5.0(2026-10-10, 컷오버 H1-4 · T-9): fi_adj_prices.adj_jump_ok 열 — 인접 수익률이 그날 가격제한폭을
+# 넘는 가격 축 미해결 사건만 세는 계단 표식(scope 모멘텀·20일 변동성 결측 판정의 재료)
+RULES_VERSION = "fi1.5.0"
 LAYER = "factor_inputs"
 BASES_IMPLEMENTED = ("morning",)
 BASES_KNOWN = ("evening", "morning")

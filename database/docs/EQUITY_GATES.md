@@ -1674,7 +1674,7 @@ WHERE p.close IS DISTINCT FROM coalesce(s.close_krw, e.close_krw)
 | EG10 | **팩터 준비도** | 폐기형+기록형 | 6 | `factor_readiness.ready_min`(미등재) | (신규) 재료 무성 소실 · 목적 판정 부재 |
 | EG11 | 뷰 결과 결정성 | 폐기형 | 7 | `<view>.determinism_asof` | 재현성 |
 | EG12 | 단위 접미사 전수 | 폐기형 | 전 | — | (신규) 단위 오적용 |
-| EG13 | `available_date` 미래값 | 폐기형 | 전 | — (기존 상수 재사용) | look-ahead(거울상: 조용한 결측) |
+| EG13 | `available_date` 미래값 | 폐기형 | 전 | 입력 스냅샷 KST 날짜 | look-ahead(거울상: 조용한 결측) |
 | EG14 | 파티션 경계 누락 | 폐기형 | 전 | `<table>.expected_partitions` | 레짐 편향 |
 | EG15 | 폐지 직전 가격 존재 | 기록형→폐기형 | 1·2 | `security.pre_delist_price_days`·`_min` | 생존편향 |
 | EG16 | 가짜 재상장 | 폐기형 | 1 | `security_span.respan_verified_n` | 생존편향 |

@@ -1,39 +1,48 @@
-"""거래일 판정 — v3 KIS 휴장 캐시 복사본(`data/calendar/kis_holidays*.json`) + 주말.
+"""거래일 판정 — 판정 연도 파일(`data/calendar/kis_holidays_<YYYY>.json`) + 주말.
 
-캐시가 없거나 검증에 실패하면 **영업일 가정**(주말만 제외)으로 간다 — `COLLECT_PLAN.md §4-1` 0단계:
-"둘 다 실패면 영업일 가정하고 진행". KRX 빈 응답을 휴장 확정 근거로 쓰는 순환(DEFECT-A-01)을 끊는다.
-어느 쪽으로 판정했는지는 `Calendar.source` 에 남는다(조용한 폴백 금지 — python.md 원칙 3).
+연도 파일은 KIS 휴장 조회 직접 갱신(`daily.calendar_refresh`)이 쓴다(결정 Q-2 = N-31 ②). v3 사본은
+병행 대조용으로 `data/calendar/v3/` 에만 쌓이고(`sync_calendar.sh`) 판정에는 섞이지 않는다.
+
+달력을 못 읽으면 `CalendarUnavailable` 로 멈춘다 — 예전의 '영업일 가정'(주말만 제외) 폴백(R7)은
+평일 휴장을 거래일로 판정해 체인을 돌렸다(K1-9 ⑦). 옛 경로 `kis_holidays.json`(v3 사본 호환용)은
+읽지 않는다 — 합집합으로 섞으면 직접 갱신이 지운 휴장일(지정 취소)이 되살아난다.
 
 원천(v3)은 **단일 연도** 파일이라 12월에 이듬해 판으로 교체되면 그해 성탄절·연말이 목록에서 사라졌다
-(DEFECT-A07). 그래서 `sync_calendar.sh` 가 연도별 파일로 쌓고 `load()` 는 디렉터리의 `kis_holidays*.json`
-을 전부 합친다. 캐시가 덮지 않는 연도를 물으면 주말만 거르는 폴백으로 눙치지 않고 `KeyError` 를 낸다 —
-신정·설 연휴를 통째로 거래일로 판정하느니 체인을 세우는 쪽이 낫다.
+(DEFECT-A07). 그래서 연도별 파일을 합쳐 읽는다. 연도 파일이 덮지 않는 연도를 물으면 주말만 거르는
+폴백으로 눙치지 않고 `KeyError` 를 낸다 — 신정·설 연휴를 통째로 거래일로 판정하느니 체인을 세우는 쪽이 낫다.
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Literal
 
 DEFAULT_PATH = os.path.join(os.environ.get("QL_HOME", os.path.expanduser("~/quant-ledger")),
                             "data", "calendar", "kis_holidays.json")
+# 판정 연도 파일 이름 — 읽기(`load`)와 쓰기(`calendar_refresh`)가 함께 쓰는 정본
+YEAR_FILE = "kis_holidays_{year}.json"
+_YEAR_FILE_RE = re.compile(r"^kis_holidays_(\d{4})\.json$")
+
+
+class CalendarUnavailable(RuntimeError):
+    """판정 달력을 읽지 못했다 — 호출부는 영업일을 가정하지 말고 멈춘다(K1-9 ⑦)."""
 
 
 @dataclass(frozen=True)
 class Calendar:
     holidays: frozenset[str]                       # 'YYYYMMDD'
-    source: Literal["kis_cache", "weekend_only"]
-    detail: str = ""                               # 폴백 사유(있을 때)
-    years: frozenset[str] = frozenset()            # 캐시가 덮는 연도. 비어 있으면 연도 검사를 하지 않는다
+    source: Literal["kis_cache"]
+    years: frozenset[str] = frozenset()            # 연도 파일이 덮는 연도. 비어 있으면 연도 검사를 하지 않는다
 
     def _require_year(self, d: dt.date) -> None:
         year = str(d.year)
         if self.years and year not in self.years:
             raise KeyError(
                 f"holiday cache does not cover {year}: have={sorted(self.years)} date={d.isoformat()} "
-                f"— sync_calendar.sh 가 그 해 파일을 아직 받지 못했다. 주말만 거르는 폴백으로 "
+                f"— calendar_refresh 가 그 해 판을 아직 게시하지 못했다(이듬해 판 기한 12-15). 주말만 거르는 폴백으로 "
                 f"넘어가지 않는다(DEFECT-A07: 신정·설 연휴가 거래일로 판정된다)")
 
     def is_trading_day(self, d: dt.date) -> bool:
@@ -66,34 +75,49 @@ class Calendar:
         return cur
 
 
-def load(path: str | os.PathLike[str] = DEFAULT_PATH) -> Calendar:
-    """캐시를 읽어 Calendar 를 만든다. 실패하면 weekend_only 폴백(사유는 detail).
+def read_year_files(directory: str | os.PathLike[str]) -> dict[str, frozenset[str]]:
+    """디렉터리의 `kis_holidays_<YYYY>.json` 을 연도별 휴장 집합으로 읽는다(형식만 검사).
 
-    `path` 는 파일이어도 디렉터리여도 된다 — 어느 쪽이든 **그 디렉터리의 `kis_holidays*.json` 전부**를
-    합쳐 읽는다(연 경계, DEFECT-A07). 옛 호출부(`load(".../kis_holidays.json")`)는 그대로 동작한다.
+    건수·주말 검증은 쓰는 쪽(`calendar_refresh`·`sync_calendar.sh`)이 쓰기 전에 한다. 여기서는 파일 이름의
+    연도 = 내용의 `year` 이고 모든 항목이 그 연도의 YYYYMMDD 인지만 본다. 연도 파일이 하나도 없거나
+    한 파일이라도 읽기·형식 오류면 `CalendarUnavailable` — 메시지에 문제의 연도 파일 전체 경로를 싣는다.
+    """
+    d = os.fspath(directory)
+    names = sorted(n for n in os.listdir(d) if _YEAR_FILE_RE.match(n))
+    if not names:
+        raise CalendarUnavailable(f"no {YEAR_FILE.format(year='<YYYY>')} under {d} — 판정 달력 없음")
+    out: dict[str, frozenset[str]] = {}
+    for name in names:
+        full = os.path.abspath(os.path.join(d, name))
+        try:
+            with open(full, encoding="utf-8") as f:
+                data = json.load(f)
+            year = str(data["year"])
+            m = _YEAR_FILE_RE.match(name)
+            if m is None or m.group(1) != year:
+                raise ValueError(f"year in file name != content: name={name} content_year={year}")
+            one = frozenset(str(x) for x in data["holidays"])
+            if any(len(x) != 8 or x[:4] != year for x in one):
+                raise ValueError(f"holiday file has entries outside year {year}: n={len(one)}")
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            # 어느 연도 파일이 깨졌는지 운영자가 바로 알게 전체 경로를 싣는다(error-messages.md)
+            raise CalendarUnavailable(f"holiday year file unusable: path={full} {type(e).__name__}: {e}") from e
+        out[year] = one
+    return out
+
+
+def load(path: str | os.PathLike[str] = DEFAULT_PATH) -> Calendar:
+    """판정 연도 파일을 합쳐 Calendar 를 만든다. 못 읽으면 `CalendarUnavailable`(영업일 가정 없음).
+
+    `path` 는 파일이어도 디렉터리여도 된다 — 어느 쪽이든 **그 디렉터리의 `kis_holidays_<YYYY>.json`**
+    전부를 합쳐 읽는다(연 경계, DEFECT-A07). 옛 호출부(`load(".../kis_holidays.json")`)는 디렉터리만 쓴다.
     """
     p = os.fspath(path)
     directory = p if os.path.isdir(p) else (os.path.dirname(p) or ".")
     try:
-        names = sorted(n for n in os.listdir(directory)
-                       if n.startswith("kis_holidays") and n.endswith(".json"))
-        if not names:
-            raise FileNotFoundError(f"no kis_holidays*.json under {directory}")
-        hol: set[str] = set()
-        years: set[str] = set()
-        for name in names:
-            full = os.path.join(directory, name)
-            with open(full, encoding="utf-8") as f:
-                data = json.load(f)
-            one = {str(x) for x in data["holidays"]}
-            year = str(data["year"])
-            # 건수(≥100)·주말 수 검증은 sync_calendar.sh 가 복사 시점에 한다. 여기서는 형식만 본다.
-            if any(len(x) != 8 or x[:4] != year for x in one):
-                raise ValueError(f"holiday cache has entries outside year {year}: "
-                                 f"n={len(one)} path={full}")
-            hol |= one
-            years.add(year)
-        return Calendar(frozenset(hol), "kis_cache", years=frozenset(years))
-    except (OSError, KeyError, ValueError, TypeError) as e:
-        return Calendar(frozenset(), "weekend_only",
-                        detail=f"holiday cache unusable, assuming business days: path={path} {type(e).__name__}: {e}")
+        by_year = read_year_files(directory)
+    except (CalendarUnavailable, OSError, KeyError, ValueError, TypeError) as e:
+        raise CalendarUnavailable(
+            f"holiday calendar unusable: dir={os.path.abspath(directory)} {type(e).__name__}: {e} — 영업일 "
+            f"가정으로 넘어가지 않는다(K1-9 ⑦, N-31 ②)") from e
+    return Calendar(frozenset().union(*by_year.values()), "kis_cache", years=frozenset(by_year))

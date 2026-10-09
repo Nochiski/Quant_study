@@ -945,8 +945,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     base = _base()
     cal = trading_calendar.load(os.path.join(base, "data", "calendar", "kis_holidays.json"))
-    if cal.source != "kis_cache":
-        print(f"[kw_daily] 휴장 캐시 사용 불가 — 영업일 가정: {cal.detail}", file=sys.stderr)
     date = a.date or cal.prev_trading_day(dt.datetime.now(KST).date()).strftime("%Y%m%d")
     prev_date = cal.prev_trading_day(_parse_date(date)).strftime("%Y%m%d")
     db_path = a.db or os.path.join(base, "data", "raw", "kiwoom.db")

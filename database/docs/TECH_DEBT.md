@@ -1422,3 +1422,11 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **인풋**: '이 종목 재무를 최근 언제 확인했나'를 stage 에서 읽으려는 소비자(지금은 없음 — 플랜 '설계 7-2' 표).
 - **에러 위치**: `src/stage/fold.py`(접힌 판은 행이 없다). 기록형 `n_keys_stale{ep:pkey}`(G8 지표 — 마지막 원장 blob 날짜 < 그 ep·pkey 최신 수집일인 단위 수)가 일부만 대신한다.
 - **위험성**: 소비자가 `max(fetched_date)` 를 최신성으로 읽으면 수집 정지로 오판하거나(반대로) 정지를 못 본다. 필요해지면 원장 직독 지표로 만든다 — 지금 수집 신선도는 `stg_consensus_annual`(접지 않음)·원장 `wise.run`·fi FG-fresh 가 본다.
+
+### B-77: `backfill_kis._spec_shim` 이 import 시점의 `backfill_dart.SPEC` 을 쥔다 — 모듈을 다시 import 하면 KeyError
+
+- **상황**: 테스트가 `backfill_dart` 만 `sys.modules` 에서 지우고 다시 import 한다(`tests/test_daily_dart.py:84-86`). 그 전에 `backfill_kis` 가 import 돼 있으면 그대로 남는다.
+- **인풋**: 같은 세션에서 앞 테스트가 `backfill_kis` 를 import(예: `daily.calendar_refresh.fetch_page` 의 지연 import) → `test_daily_dart` → `test_daily_kis::_seed_by_backfill`(`from backfill_dart import store` 는 새 모듈, `_spec_shim` 은 옛 모듈).
+- **에러 위치**: `src/backfill_kis.py:24-25`(`from backfill_dart import store, SPEC as DART_SPEC` — import 시점 바인딩)·`:358-361` `_spec_shim`(옛 `DART_SPEC` 에 `__kis_<name>` 등록) → 새 `backfill_dart.store` 가 자기 SPEC 에서 못 찾아 `KeyError: '__kis_credit'`.
+- **위험성**: 운영 경로(프로세스마다 한 번 import)에는 영향이 없고, 테스트 실행 순서에 따라 거짓 실패가 난다. 지금은 `tests/test_calendar_refresh.py` 픽스처가 두 모듈을 import 전 상태로 되돌려 피한다(휴장 달력 플랜 2026-10-10). 뿌리는 `_spec_shim` 이 모듈 전역 SPEC 을 고치는 구조 — 백필 코드 동결(P5)이라 고치려면 결정이 필요하다.
+

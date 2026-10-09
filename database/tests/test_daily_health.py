@@ -1,5 +1,7 @@
 """daily.ledger_health — 원장별 완료 판정(실측 기대치)과 등급별 rc. 플랜 P1 Task 1.7."""
+import ast
 import json
+import re
 import sqlite3
 import zlib
 from pathlib import Path
@@ -13,7 +15,7 @@ RC = lh.req_covered_on("2026-09-08")  # 그 날 런의 커버 종목당 요청 �
 
 
 def _cal(tmp_path, holidays=()):
-    p = tmp_path / "kis_holidays.json"
+    p = tmp_path / "kis_holidays_2026.json"
     p.write_text(json.dumps({"year": 2026, "holidays": list(holidays)}), encoding="utf-8")
     return str(p)
 
@@ -90,7 +92,8 @@ def _paths(tmp_path, **kw):
     p = lh.Paths(krx=kw.get("krx", str(tmp_path / "none1.db")), kiwoom=kw.get("kiwoom", str(tmp_path / "none2.db")),
                  kis=kw.get("kis", str(tmp_path / "none3.db")), dart=str(tmp_path / "none4.db"), wise=kw.get("wise", str(tmp_path / "none5.db")),
                  wiseindex=kw.get("wiseindex", ""),
-                 calendar=_cal(tmp_path), universe_state=str(tmp_path / "universe_kw.json"))
+                 calendar=_cal(tmp_path, kw.get("holidays", ())),
+                 universe_state=str(tmp_path / "universe_kw.json"))
     (tmp_path / "universe_kw.json").write_text(json.dumps({"asof": D, "grace": {}, "n_requested": 2563}), encoding="utf-8")
     return p
 
@@ -155,6 +158,75 @@ def test_holiday_on_trading_day_is_halt(tmp_path):
     c = _by(rep)
     assert c["krx.holiday_misfire"].level is lh.Level.HALT and c["krx.holiday_misfire"].status is lh.Status.FAIL
     assert rep.halts and not rep.ok
+
+
+# ── 반대 방향: 달력상 휴장일에 KRX 시세 (K1-9 ②) ─────────────────────────────────────
+_KRX_EPS = ("sto/stk_bydd_trd", "sto/ksq_bydd_trd", "sto/stk_isu_base_info", "sto/ksq_isu_base_info",
+            "idx/kospi_dd_trd", "idx/kosdaq_dd_trd", "etp/etf_bydd_trd")
+
+
+def _krx_rows_on(krx_db: str, bas_dd: str, status: str = "ok", n_rows: int = 942,
+                 eps: tuple[str, ...] = _KRX_EPS) -> None:
+    """D 밖의 날짜 하나에 KRX 엔드포인트 ingest_log 행을 더한다(08:10 재수집 창 안의 날)."""
+    con = sqlite3.connect(krx_db)
+    con.executemany("INSERT INTO ingest_log VALUES (?,?,?,?,NULL,'t')",
+                    [(e, bas_dd, n_rows if status == "ok" else 0, status) for e in eps])
+    con.commit(); con.close()
+
+
+def test_krx_rows_on_a_calendar_holiday_halt(tmp_path):
+    """달력이 휴장이라 한 평일(09-03)에 KRX 가 시세를 줬다 = 달력이 틀렸다 → 중단.
+
+    옛 게이트는 한 방향(KRX '휴장' ↔ 달력 거래일, krx.holiday_misfire)뿐이라 이 날을 보지 못했다.
+    """
+    krx = _krx(tmp_path)
+    _krx_rows_on(krx, "20260903")
+    rep = lh.run(D, _paths(tmp_path, krx=krx, holidays=("20260903",)))
+    c = _by(rep)["krx.holiday_traded"]
+    assert c.level is lh.Level.HALT and c.status is lh.Status.FAIL
+    assert c.value == ["20260903"] and "20260903" in c.detail
+    assert not rep.ok
+
+
+def test_krx_holiday_rows_on_a_calendar_holiday_pass(tmp_path):
+    krx = _krx(tmp_path)
+    _krx_rows_on(krx, "20260903", status="holiday")          # 휴장일의 빈 응답은 정상
+    _krx_rows_on(krx, "20260904")                            # 달력상 거래일의 ok 행도 정상
+    rep = lh.run(D, _paths(tmp_path, krx=krx, holidays=("20260903",)))
+    assert _by(rep)["krx.holiday_traded"].status is lh.Status.PASS and rep.ok
+
+
+def test_base_info_rows_on_a_holiday_are_not_price(tmp_path):
+    """명세는 '휴장일에 KRX **시세**' — 종목기본정보 행만 있는 휴장일은 HALT 가 아니다(하-4)."""
+    krx = _krx(tmp_path)
+    _krx_rows_on(krx, "20260903", eps=("sto/stk_isu_base_info", "sto/ksq_isu_base_info"))
+    rep = lh.run(D, _paths(tmp_path, krx=krx, holidays=("20260903",)))
+    assert _by(rep)["krx.holiday_traded"].status is lh.Status.PASS
+
+
+def test_price_endpoints_are_backfill_krx_endpoints():
+    """시세 엔드포인트 목록이 정본(`backfill_krx.EPS`)에서 어긋나지 않는지 — import 없이 소스를 읽는다."""
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "src" / "backfill_krx.py").read_text(encoding="utf-8"))
+    eps = next(ast.literal_eval(n.value) for n in tree.body
+               if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "EPS" for t in n.targets))
+    paths = {e[0] for e in eps}
+    assert set(lh.KRX_PRICE_ENDPOINTS) <= paths
+    assert paths - set(lh.KRX_PRICE_ENDPOINTS) == {"sto/stk_isu_base_info", "sto/ksq_isu_base_info"}
+
+
+def test_recheck_sessions_match_daily_build_krx_step():
+    """② 의 창 폭 = 08:10 krx_step 재수집 폭(`prev_trading_day(..., n=10)`) — 한쪽만 바뀌면 창이 어긋난다."""
+    sh = (Path(__file__).resolve().parents[1] / "scripts" / "daily_build.sh").read_text(encoding="utf-8")
+    step = sh[sh.index("krx_step() {"):sh.index("for attempt in")]
+    assert re.findall(r"prev_trading_day\(.*, n=(\d+)\)", step) == [str(lh.KRX_RECHECK_SESSIONS)]
+
+
+def test_krx_rows_on_a_holiday_outside_the_recheck_window_are_not_judged(tmp_path):
+    # 판정 창 = 08:10 KRX 재수집 창(직전 10거래일 ~ D). 그 밖의 옛 기록은 이 게이트가 보지 않는다.
+    krx = _krx(tmp_path)
+    _krx_rows_on(krx, "20260803")
+    rep = lh.run(D, _paths(tmp_path, krx=krx, holidays=("20260803",)))
+    assert _by(rep)["krx.holiday_traded"].status is lh.Status.PASS
 
 
 def test_kiwoom_relative_gates_and_cross_source(tmp_path):

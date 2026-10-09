@@ -536,8 +536,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     kw_db = a.kw_db or os.path.join(base, "data", "raw", "kiwoom.db")
     run_db = os.path.join(base, "data", "raw", "daily_run.db")
     cal = trading_calendar.load(os.path.join(base, "data", "calendar", "kis_holidays.json"))
-    if cal.source != "kis_cache":
-        print(f"  ! 캘린더 폴백 — {cal.detail}")
 
     today = dt.datetime.now(KST).date()
     d = _parse_date(a.date) if a.date else cal.prev_trading_day(today)

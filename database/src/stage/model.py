@@ -10,7 +10,9 @@ from datetime import UTC, datetime
 
 # 2.6.0: 참조표 룩업 공개일도 접수번호 날짜보다 이르지 않다(J-41, N-26 4.2)
 # (10-09 핫픽스, 판본 그대로) 컨센서스 월간 G8: 5001·5002 한쪽만 빈 값은 불일치가 아니라 n_one_side_null 로 기록만 — 산출 행 불변
-RULES_VERSION = "2.6.0"
+# 2.7.0: stg_fin_wise·_q 연속 판 접기 — 같은 (종목, ep, pkey) 의 바로 앞 원장 blob 과 sha256 이 같으면
+#        파싱 전에 버린다(§1 예외 (f), 묶음 7 N-37). 두 표 fetched_date 뜻이 '그 원문을 처음 본 날'로 바뀐다
+RULES_VERSION = "2.7.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
@@ -138,6 +140,9 @@ class BlobSource:
     # ws_raw 모양이 아닌 blob 원장(`wics_raw` 등)은 RawBlob 6컬럼 별칭을 내는 SELECT 를 직접 준다.
     # `{src}` 가 `"db"."table"` 로 치환된다. None 이면 ws_raw 계약(위 required_columns + ep IN eps).
     select_sql: str | None = None
+    # §1 예외 (f) 연속 판 접기(`fold.py`) — 같은 (cmp_cd, ep, pkey) 의 바로 앞 blob 과 원장 sha256 이
+    # 같으면 파싱하지 않는다. 원장 sha256 열이 필요하다(required_columns 에 선언). stg_fin_wise·_q 만
+    fold_consecutive: bool = False
 
 
 @dataclass(frozen=True)
@@ -198,6 +203,9 @@ class TableRule:
     file_source: FileSource | None = None
     coverage_from: str | None = None    # §3 temporality ⓑ — 누적 스냅샷 관측 시작일 (ka10099 09-01)
     versioned: bool = True              # False = 판본 없는 로그(콜·유닛) → G6 skip(unversioned)
+    # 아침 확정판 재사용(`reuse.py`, 묶음 7-3) — 원장 지문·규칙 판본·코드 rev 가 저녁 판과 같으면
+    # 다시 짓지 않고 저녁 판 파일을 하드링크한 새 m_ 판으로 커밋한다. stg_fin_wise·_q 만
+    morning_reuse: bool = False
 
     def column(self, name: str) -> ColumnRule:
         for c in self.columns:

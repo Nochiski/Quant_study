@@ -2,6 +2,7 @@
 
 blob 구조는 2026-09-02 서버 ws_raw 실측(§10). 픽스처는 실물 인코딩(zlib+JSON, HTML)을 재현한다.
 """
+import hashlib
 import json
 import sqlite3
 import weakref
@@ -94,7 +95,13 @@ SAMSUNG_CELLS = ["<b>4.05</b>", "487,045", "48,339", "5.40", "22"]
 
 
 def _row(cmp: str, ep: str, pkey: str, body: bytes, fd: str = "2026-09-02", at: str = AT) -> tuple:
-    return (cmp, ep, pkey, fd, body, f"sha-{cmp}-{ep}-{pkey}-{fd}", len(body), at)
+    """ws_raw 한 행. sha256 은 원장 규약대로 압축 전 원문의 해시다(`backfill_wise.py:412` — 접기 표 G8 이
+    대조한다). 압축이 깨진 본문은 원문이 없어 본문 바이트 해시로 둔다(파서가 parse_failed 로 센다)."""
+    try:
+        raw = zlib.decompress(body)
+    except zlib.error:
+        raw = body
+    return (cmp, ep, pkey, fd, body, hashlib.sha256(raw).hexdigest(), len(body), at)
 
 
 def _blob(cmp: str, ep: str, pkey: str, body: bytes, fd: str = "2026-09-02") -> parsers.RawBlob:
@@ -594,7 +601,8 @@ def _fin_ws_rows(broken: bool) -> list[tuple]:
     """회사 4 × 수집일 2 × (cF3002 Y·Q:IS·Y:BS·Y:CF·X:ZZ · cF4002 Y) + ep 밖 cF5001.
 
     X:ZZ 는 두 파서가 다 건너뛰는 pkey 다. 첫 회사의 Y 는 12행이라 seq 10·11 이 정수 정렬을
-    탄다.
+    탄다. 두 수집일의 원문이 같아 10-02 판은 연속 판 접기(2.7.0)로 접힌다 — 사이에 다른 원문(10-01 빈
+    DATA·깨진 본문)이 낀 단위만 A→B→A 로 셋 다 남는다(`FIN_FOLDED`).
     """
     rows = []
     for fd in ("2026-10-02", "2026-09-30"):
@@ -609,6 +617,12 @@ def _fin_ws_rows(broken: bool) -> list[tuple]:
         rows += [_row("0010V0", "cF4002", "Y", b"\x78\x9cbroken", "2026-10-01"),
                  _row("0010V0", "cF3002", "Q:IS", b"\x78\x9cbroken", "2026-10-01")]
     return rows
+
+
+# 위 픽스처(broken=True)에서 접히는 blob — 'ep:pkey' → 수. 005930 Y:CF 와 0010V0 cF4002 Y·Q:IS 는 10-01 에
+# 다른 원문이 끼어 10-02 판이 남는다.
+FIN_FOLDED = {"cF3002:Q:IS": 3, "cF3002:X:ZZ": 4, "cF3002:Y": 4, "cF3002:Y:BS": 4, "cF3002:Y:CF": 3,
+              "cF4002:Y": 3}
 
 
 def _snap_fin(tmp_path: Path, broken: bool, snap_root: Path | None = None) -> snapshot.Snapshot:
@@ -677,13 +691,24 @@ def test_fin_blob_source_split_by_company_equals_one_shot(
     prev.clear()
     big = _load_fin(tmp_path, snap, name, "big", chunk_companies=10**9)
     assert [c for c in calls if c] == [sorted(FIN_CMPS)]
-    assert one[0] == per1[0] == big[0]          # JSONL 바이트 = src_all 적재 입력
-    assert one[1:] == per1[1:] == big[1:]       # 열 · metrics · src_all 행 수
+    calls.clear()
+    prev.clear()
+    per3 = _load_fin(tmp_path, snap, name, "per3", chunk_companies=3)   # 끝 묶음이 1곳
+    assert [c for c in calls if c] == [sorted(FIN_CMPS)[:3], sorted(FIN_CMPS)[3:]]
+    assert one[0] == per1[0] == big[0] == per3[0]       # JSONL 바이트 = src_all 적재 입력
+    assert one[1:] == per1[1:] == big[1:] == per3[1:]   # 열 · metrics · src_all 행 수
     pm = one[2]
     skipped = pm["n_skipped_pkey"]
     assert pm["n_rows_emitted"] == one[3] > 0
     assert pm["n_parse_failed"] == 1
     assert isinstance(skipped, int) and skipped > 0     # 건너뛴 pkey 도 센다
+    # 연속 판 접기(2.7.0): 두 수집일의 같은 원문은 접히고, 원장 blob 은 남김·건너뜀·접음으로 빠짐없이 갈린다
+    want = {k: v for k, v in FIN_FOLDED.items() if k.split(":")[0] in bs.eps}
+    assert pm["n_folded"] == want
+    n_blobs = pm["n_blobs"]
+    assert isinstance(n_blobs, dict)
+    assert pm["n_ledger_blobs"] == sum(n_blobs.values()) + skipped + sum(want.values())
+    assert pm["n_sha_mismatch"] == 0
 
 
 def test_build_fin_wise_content_hash_unchanged_when_split_by_company(

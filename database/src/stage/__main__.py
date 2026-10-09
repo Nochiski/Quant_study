@@ -3,6 +3,10 @@
 스냅샷이 없으면 rules 가 필요로 하는 DB 만 VACUUM INTO 로 새로 뜬다.
 `--basis evening|morning` 은 빌드 id 접두어(`e_`/`m_`)와 MANIFEST 의 `basis` 를 정한다 —
 하루 2판(저녁 잠정·아침 확정) 규약, 플랜 v2 Task B.1.
+
+아침(m_) 빌드에서 `morning_reuse` 표(stg_fin_wise·_q)는 먼저 저녁 판 재사용을 시도한다(`reuse.py`, 묶음 7-3).
+재사용이면 결과 줄에 `reused_from=<e_ id>` 가 붙고(끝은 그대로 `<초>s` — `run_stage_all.sh` 해석 불변),
+아니면 `reuse_declined reason=…` 한 줄 뒤 일반 빌드다. 끄기: `<stage-root>/REUSE_OFF` 파일.
 """
 from __future__ import annotations
 
@@ -11,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import build, model, rules, snapshot
+from . import build, model, reuse, rules, snapshot
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,12 +48,26 @@ def main(argv: list[str] | None = None) -> int:
     thr = {k: v for k, v in (("G2", a.g2), ("G7", a.g7)) if v is not None}
     fx = Path(__file__).parent / "fixtures" / f"{a.table}.json"   # 골든 픽스처는 코드와 함께 산다
     bid = a.build_id or model.make_build_id(a.basis)   # --build-id 를 주면 그 접두어가 basis 다
-    r = build.build_table(rule, snap, a.stage_root, build_id=bid, gate_thresholds=thr,
-                          fixtures_path=fx if fx.exists() else None,
-                          memory_limit=a.memory_limit, threads=a.threads)
+    code_rev = reuse.deployed_rev(base)                 # 배포 rev — 기록·아침 재사용 판정 ④
+    r: build.BuildResult | None = None
+    if rule.morning_reuse and model.basis_of_build_id(bid) == "morning":
+        try:
+            if thr:     # CLI 임계는 저녁 판 게이트에 없던 입력이다 — baseline 임계(판정 ⑥)와 같은 축
+                raise reuse.Declined(f"gate_threshold_override {thr}")
+            r = reuse.try_reuse(rule, snap, a.stage_root, bid, code_rev=code_rev,
+                                fixtures_path=fx if fx.exists() else None)
+        except reuse.Declined as e:
+            print(f"reuse_declined reason={e.reason}", flush=True)
+        except Exception as e:  # noqa: BLE001  # reason: 재사용 실패는 사유만 남기고 일반 빌드로 간다(P1)
+            print(f"reuse_declined reason=error {type(e).__name__}: {e}", flush=True)
+    if r is None:
+        r = build.build_table(rule, snap, a.stage_root, build_id=bid, gate_thresholds=thr,
+                              fixtures_path=fx if fx.exists() else None,
+                              memory_limit=a.memory_limit, threads=a.threads, code_rev=code_rev)
+    reused = f" reused_from={r.reused_from}" if r.reused_from else ""
     print(f"{r.status.value} table={r.table} build={r.build_id} "
           f"basis={model.basis_of_build_id(r.build_id)} rows={r.n_rows:,} src={r.n_src:,} "
-          f"dedup={r.n_dedup:,} reject={r.n_reject:,} hash={r.content_hash} {r.elapsed_s}s")
+          f"dedup={r.n_dedup:,} reject={r.n_reject:,} hash={r.content_hash}{reused} {r.elapsed_s}s")
     for g in r.gates:
         print(f"  {g.name} {g.status.value:5s} {g.detail}  {g.metrics}")
     if r.failed_report:

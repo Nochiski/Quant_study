@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -19,10 +20,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import duckdb
 
-from . import doc_prepass, gates, manifest, parsers
+from . import doc_prepass, fold, gates, manifest, parsers
 from .model import (
     DATE_FORMATS,
     KIND_BOOL,
@@ -59,6 +61,7 @@ class BuildResult:
     elapsed_s: float
     out_dir: Path | None            # OK 일 때 v=<build_id>
     failed_report: Path | None      # GATE_FAILED 일 때 _failed/<build_id>.json
+    reused_from: str | None = None  # 아침 재사용 판(reuse.py)이면 하드링크한 저녁 판 build_id
 
     @property
     def ok(self) -> bool:
@@ -465,33 +468,91 @@ def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule, tmp_dir: 
         raise ValueError(f"_load_blob_source called without blob_source: {rule.name}")
     parser = parsers.PARSERS[bs.parser]
     jsonl = tmp_dir / "src_all.jsonl"
+    tally = fold.Tally() if bs.fold_consecutive else None      # §1 예외 (f) — 두 길 모두 같은 함수
     if bs.parser in CHUNKED_PARSERS and bs.select_sql is None:
-        cols, metrics = _write_jsonl_by_company(con, bs, parser, jsonl, chunk_companies)
+        cols, metrics = _write_jsonl_by_company(con, bs, parser, jsonl, chunk_companies, tally)
     else:
         src_ref = f"{_q(bs.db)}.{_q(bs.table)}"
         if bs.select_sql is not None:                               # ws_raw 모양이 아닌 blob 원장(wics_raw)
             sql = bs.select_sql.replace("{src}", src_ref)
         else:
             eps = ", ".join(f"'{e}'" for e in bs.eps)
-            sql = f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at FROM {src_ref} WHERE ep IN ({eps})"
-        rows = con.execute(sql).fetchall()
-        blobs = [parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
-                                 bytes(r[4]) if r[4] is not None else b"", str(r[5])) for r in rows]
-        res = parser(blobs)
+            sql = f"SELECT {_blob_columns(bs)} FROM {src_ref} WHERE ep IN ({eps})"
+        blobs = [_raw_blob(r) for r in con.execute(sql).fetchall()]
+        res = parser(blobs if tally is None else tally.fold(blobs))
         cols, metrics = list(res.columns), res.metrics
         with open(jsonl, "w", encoding="utf-8") as f:
             for r in res.rows:
                 f.write(json.dumps({c: r[c] for c in cols}, ensure_ascii=False))
                 f.write("\n")
+    if tally is not None or rule.morning_reuse:
+        metrics.update(_ledger_metrics(con, rule, tally))
     schema = ", ".join(f"{_q(c)}: 'VARCHAR'" for c in cols)
     con.execute(f"CREATE OR REPLACE TEMP TABLE src_all AS SELECT *, '{bs.table}' AS _src "
                 f"FROM read_json('{jsonl}', format='newline_delimited', columns={{{schema}}})")
     return cols, metrics
 
 
+def _blob_columns(bs: BlobSource) -> str:
+    """ws_raw 계약 SELECT 열. 접기 표는 원장 sha256 을 7번째로 더 읽는다."""
+    return ("cmp_cd, ep, pkey, fetched_date, body, fetched_at"
+            + (", sha256" if bs.fold_consecutive else ""))
+
+
+def _raw_blob(r: tuple[Any, ...]) -> parsers.RawBlob:
+    """`_blob_columns`(또는 select_sql 6열) 한 행 → RawBlob."""
+    return parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
+                           bytes(r[4]) if r[4] is not None else b"", str(r[5]),
+                           str(r[6]) if len(r) > 6 else "")
+
+
+def _attached_path(con: duckdb.DuckDBPyConnection, db: str, table: str) -> Path:
+    found = con.execute("SELECT path FROM duckdb_databases() WHERE database_name = ?",
+                        [db]).fetchone()
+    if found is None or found[0] is None:
+        raise FileNotFoundError(f"blob ledger is not attached: db={db} table={table}")
+    return Path(found[0])
+
+
+def _sqlite_ro(path: Path) -> sqlite3.Connection:
+    """원장(스냅샷) sqlite 를 읽기 전용으로 연다.
+
+    날 경로를 URI 에 넣으면 `#`·`?` 에서 잘리고 mode=ro 가 떨어져 rwc 로 열린다 — as_uri() 가
+    `#`·`?`·`%` 를 퍼센트 인코딩한다. 상대 경로는 ATTACH 와 같이 cwd 기준이다(운영 QL_HOME).
+    """
+    return sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
+
+
+def _ledger_metrics(con: duckdb.DuckDBPyConnection, rule: TableRule,
+                    tally: fold.Tally | None) -> dict[str, object]:
+    """파서 지표 뒤에 싣는 원장 쪽 지표 — G8 이 판정한다(§9).
+
+    `n_ledger_blobs` 는 접기 함수가 아니라 sqlite 에서 따로 센 `ep IN eps` 원장 행 수다 — 같은 함수로 세면
+    G8 등식 `n_ledger_blobs = Σn_blobs + n_skipped_pkey + Σn_folded` 가 항진명제가 된다.
+    `input_fingerprint` 는 아침 재사용(7-3) 판정 ⑤ 의 저녁 쪽 기록이다.
+    """
+    bs = rule.blob_source
+    if bs is None:
+        raise ValueError(f"_ledger_metrics called without blob_source: {rule.name}")
+    lite = _sqlite_ro(_attached_path(con, bs.db, bs.table))
+    try:
+        out: dict[str, object] = {}
+        if tally is not None:
+            eps = list(bs.eps)
+            row = lite.execute(f"SELECT count(*) FROM {_q(bs.table)} "
+                               f"WHERE ep IN ({', '.join('?' * len(eps))})", eps).fetchone()
+            out["n_ledger_blobs"] = int(row[0]) if row else 0
+            out.update(tally.metrics())
+        if rule.morning_reuse:
+            out["input_fingerprint"] = fold.input_fingerprint(lite, bs)
+        return out
+    finally:
+        lite.close()
+
+
 def _write_jsonl_by_company(con: duckdb.DuckDBPyConnection, bs: BlobSource,
                             parser: Callable[[Iterable[parsers.RawBlob]], parsers.ParseResult],
-                            jsonl: Path, chunk_companies: int
+                            jsonl: Path, chunk_companies: int, tally: fold.Tally | None = None
                             ) -> tuple[list[str], dict[str, object]]:
     """B-01 — ws_raw 를 회사 `chunk_companies` 곳씩 읽어 파싱하고 그 행을 JSONL 에 바로 쓴 뒤
     버린다.
@@ -504,21 +565,17 @@ def _write_jsonl_by_company(con: duckdb.DuckDBPyConnection, bs: BlobSource,
     - pkey 는 SQL 에서 거르지 않는다 — 파서가 건너뛰며 세는 n_skipped_pkey 가 같아야 한다.
     - metrics 는 정수는 더하고 dict(ep 별 n_blobs)는 키별로 더한다. 블롭이 없으면 parser([])
       의 열·0 이다.
+    - `tally` 가 있으면(접기 표) 묶음마다 파서 전에 연속 판을 접는다 — 단위가 회사 안이라 묶음 크기 무관.
     """
     if chunk_companies < 1:
         raise ValueError(f"chunk_companies must be >= 1: got {chunk_companies} parser={bs.parser}")
-    found = con.execute("SELECT path FROM duckdb_databases() WHERE database_name = ?",
-                        [bs.db]).fetchone()
-    if found is None or found[0] is None:
-        raise FileNotFoundError(f"blob ledger is not attached: db={bs.db} table={bs.table}")
+    path = _attached_path(con, bs.db, bs.table)
     empty = parser([])
     cols, metrics = list(empty.columns), empty.metrics
     table = _q(bs.table)
     eps = list(bs.eps)
     ep_in = ", ".join("?" * len(eps))
-    # 날 경로를 URI 에 넣으면 `#`·`?` 에서 잘리고 mode=ro 가 떨어져 rwc 로 열린다 — as_uri() 가
-    # `#`·`?`·`%` 를 퍼센트 인코딩한다. 상대 경로는 ATTACH 와 같이 cwd 기준이다(운영 QL_HOME).
-    lite = sqlite3.connect(Path(found[0]).absolute().as_uri() + "?mode=ro", uri=True)
+    lite = _sqlite_ro(path)
     try:
         cmps = sorted(str(r[0]) for r in lite.execute(
             f"SELECT DISTINCT cmp_cd FROM {table} WHERE ep IN ({ep_in})", eps))
@@ -526,12 +583,11 @@ def _write_jsonl_by_company(con: duckdb.DuckDBPyConnection, bs: BlobSource,
             for i in range(0, len(cmps), chunk_companies):
                 part = cmps[i:i + chunk_companies]
                 cur = lite.execute(
-                    f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at FROM {table} "
+                    f"SELECT {_blob_columns(bs)} FROM {table} "
                     f"WHERE cmp_cd IN ({', '.join('?' * len(part))}) AND ep IN ({ep_in})",
                     part + eps)
-                res = parser([parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
-                                              bytes(r[4]) if r[4] is not None else b"", str(r[5]))
-                              for r in cur])
+                blobs = [_raw_blob(r) for r in cur]
+                res = parser(blobs if tally is None else tally.fold(blobs))
                 for r in res.rows:
                     f.write(json.dumps({c: r[c] for c in cols}, ensure_ascii=False))
                     f.write("\n")
@@ -593,11 +649,40 @@ def _load_file_source(con: duckdb.DuckDBPyConnection, rule: TableRule, snap: Sna
                               "input_hash": summary.get("input_hash")}     # D5 — _meta.json
 
 
+def _baseline_entry(rule: TableRule, stage_root: Path, baseline_path: Path | None) -> object:
+    """baseline.json 의 그 표 항목(§9) — 없으면 None."""
+    bpath = baseline_path or (stage_root / "baseline.json")
+    return (json.loads(bpath.read_text(encoding="utf-8")).get(rule.name)
+            if bpath.exists() else None)
+
+
+def _fixtures_file(rule: TableRule, stage_root: Path, fixtures_path: Path | None) -> Path:
+    return fixtures_path or (stage_root / "fixtures" / f"{rule.name}.json")
+
+
+def build_inputs(rule: TableRule, stage_root: Path, fixtures_path: Path | None,
+                 baseline_path: Path | None, year: int) -> dict[str, object]:
+    """원장·코드 밖에서 산출을 정하는 빌드 입력 — baseline.json 의 그 표 항목·골든 픽스처·연도(G7 범위가
+    빌드 시각의 UTC 연도에 묶인다). `_meta.json` 에 싣고, 아침 재사용 판정 ⑥(reuse.py)이 같은 함수로
+    다시 계산해 비교한다."""
+    fpath = _fixtures_file(rule, stage_root, fixtures_path)
+    entry = json.dumps(_baseline_entry(rule, stage_root, baseline_path), sort_keys=True,
+                       ensure_ascii=False, default=str)
+    return {"baseline_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
+            "fixtures_sha256": (hashlib.sha256(fpath.read_bytes()).hexdigest()
+                                if fpath.exists() else None),
+            "year_utc": year}
+
+
 def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str | None = None,
                 extra_ledgers: dict[str, Path] | None = None, fixtures_path: Path | None = None,
                 baseline_path: Path | None = None, gate_thresholds: dict[str, float] | None = None,
-                memory_limit: str = "6GB", threads: int = 3) -> BuildResult:
-    """테이블 1개를 스냅샷에서 빌드한다. 결과는 status 로, 예외는 버그·환경 오류에만."""
+                memory_limit: str = "6GB", threads: int = 3,
+                code_rev: str | None = None) -> BuildResult:
+    """테이블 1개를 스냅샷에서 빌드한다. 결과는 status 로, 예외는 버그·환경 오류에만.
+
+    `code_rev` 는 배포 rev(`$QL_HOME/DEPLOYED.json`) — MANIFEST 에 기록만 한다(아침 재사용 판정 ④ 입력).
+    """
     t0 = time.time()
     bid = build_id or datetime.now(UTC).strftime("b_%Y%m%dT%H%M%S_%fZ")
     table_root = stage_root / rule.name
@@ -609,9 +694,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
     spill = stage_root / "_tmp" / "spill"
     spill.mkdir(parents=True, exist_ok=True)
     # 게이트 임계: 기본 ← baseline.json 의 테이블별 thresholds (§9) ← CLI override
-    bpath = baseline_path or (stage_root / "baseline.json")
-    baseline = (json.loads(bpath.read_text(encoding="utf-8")).get(rule.name)
-                if bpath.exists() else None)
+    baseline = _baseline_entry(rule, stage_root, baseline_path)
     base_thr = baseline.get("thresholds", {}) if isinstance(baseline, dict) else {}
     thresholds = {**gates.DEFAULT_THRESHOLDS, **base_thr, **(gate_thresholds or {})}
     now_year = datetime.now(UTC).year
@@ -691,7 +774,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         max_observed_date = _max_date(con, "stage_pq", "observed_date")
         recorded = _recorded_metrics(con, rule, "stage_pq")
 
-        fpath = fixtures_path or (stage_root / "fixtures" / f"{rule.name}.json")
+        fpath = _fixtures_file(rule, stage_root, fixtures_path)
         fixtures = json.loads(fpath.read_text(encoding="utf-8")) if fpath.exists() else None
         cross_alias = None
         if rule.cross_check and rule.cross_check.db in attached:
@@ -724,6 +807,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         else:
             part_dirs = [("", n_stage, tmp_table)]
         src_files = [snap.files[s.db] for s in rule.sources if s.db in snap.files]
+        inputs = build_inputs(rule, stage_root, fixtures_path, baseline_path, now_year)
         g7 = next(g for g in results if g.name == "G7")
         partitions: list[dict[str, object]] = []
         for label, n, pdir in part_dirs:
@@ -740,6 +824,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
                 "observed_date_exempt": rule.observed_src is None, "rcept_map_miss": lookup_miss,
                 "lag_known": rule.lag_known, "content_hash": content_hash,
                 "doc_input_hash": (parse_metrics or {}).get("input_hash"),   # D5 (문서층만)
+                "build_inputs": inputs,                                       # 묶음 7-3 ⑥
                 "gates": gate_dicts}
             _write_json(pdir / "_meta.json", meta)
             partitions.append({"path": f"v={bid}" + (f"/{label}" if label else ""), "n_rows": n})
@@ -752,10 +837,13 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         shutil.rmtree(final_dir)
     shutil.move(str(tmp_table), str(final_dir))
     shutil.rmtree(tmp_root, ignore_errors=True)
+    fingerprint = (parse_metrics or {}).get("input_fingerprint")
     manifest.commit(table_root, manifest.BuildRecord(
         build_id=bid, snapshot_id=snap.snapshot_id, rules_version=RULES_VERSION,
         built_at_utc=datetime.now(UTC).isoformat(timespec="seconds"), n_rows=n_stage,
         content_hash=content_hash, partitions=partitions, gates=gate_dicts,
-        max_available_date=max_available_date, max_observed_date=max_observed_date))
+        max_available_date=max_available_date, max_observed_date=max_observed_date,
+        input_fingerprint=fingerprint if isinstance(fingerprint, str) else None,
+        code_rev=code_rev))
     return BuildResult(BuildStatus.OK, rule.name, bid, snap.snapshot_id, n_stage, n_src, n_dedup,
                        n_reject, content_hash, results, round(time.time() - t0, 1), final_dir, None)

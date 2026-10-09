@@ -82,7 +82,7 @@
 | WISE | `stg_consensus_matrix` | 214,650 | 214,650 | 0 | T4 계정 9 × lookback 5(current·1w·1m·3m·1y 실측 대조) |
 | WISE | `stg_analyst_summary` | 1,612 | 1,612 | 0 | cTB15 요약행 · 무의견 346 · `N/A` blank |
 | WISE | `stg_analyst_broker` | 9,717 | 9,717 | 0 | cTB24 증권사별 목표가·의견(09-01~03) · `opinion_class` buy/hold/sell/other · 리비전 팩터 재료 |
-| WISE | `stg_fin_wise` | 445,294 | 445,294 | 0 | 키 (…,ep,seq) wide · `period_label_1~6` 병기 · `val_q*` 슬롯 라벨 없음 · Decimal(38,6) |
+| WISE | `stg_fin_wise` | 445,294 | 445,294 | 0 | 키 (…,ep,seq) wide · `period_label_1~6` 병기 · `val_q*` 슬롯 라벨 없음 · Decimal(38,6) · **2.7.0(묶음 7)부터 연속 판 접기 — 행 수는 이 표(09-03 당시)와 다르다, §4 WISE 참조** |
 | WISE | `stg_v3_revision_daily` | 63,175 | 63,175 | 0 | 동결 사본 · available=collected_date, NULL 은 base_date/default + `coverage_degraded` |
 | WISE | `stg_v3_analyst_opinions` | 254,925 | 254,925 | 0 | 동결 사본 · snapshot_date measured |
 | WISE | `stg_v3_consensus_annual` | 18,086 | 18,086 | 0 | sync_date 09-01·09-02 두 판본 |
@@ -100,6 +100,7 @@
 - **공시 정정 신호(equity 첫 파생 테이블 후보)**: "이 공시에 나중에 정정이 붙었나" 는 stage 에 없다 — 원장에 원본↔정정 링크가 없고(ZIP 본문에만), 여러 행을 묶는 일이라 §1 금지. stage 가 주는 재료는 `stg_disclosure.is_correction`(그 접수가 정정인가)·`report_nm` 원문·`rcept_dt`·`stg_doc_index.zip_ok`. equity 는 (corp_code, 보고서 종류, `report_nm` 끝 기간 라벨) 로 묶어 `has_correction`·`correction_rcept_no`·`corrected_at` 을 만들고 기준일 D 에는 `rcept_dt ≤ D` 판본만 본다. 실측 09-03: 정기보고서 그룹 181,106 중 정정 있음 20,759(11.5%), 정정 접수는 원본 후 7일 이내 32% · 90일 이후 30% · 1년 이후 10% → 이 규칙 없이는 look-ahead. **09-05 정정**: ZIP 첫 장에는 원본 접수번호가 없다(C340 0/339). 링크는 equity 가 원장 후보 규칙(같은 corp·종류·기간, 접두 ∉ {[기재정정],[첨부정정]})으로 만들고 `stg_doc_correction.filed_date` 는 검증 딱지 — `DOC_DESIGN.md` §8.1.
 - 집계행·라벨: DART 보조원장 `row_kind='aggregate'` 제외 후 합산. `stg_fin` 은 wide 6금액·`account_std=false` 행은 표준계정 조인 금지·기간 라벨은 텍스트.
 - WISE: `stg_consensus_*` 는 fetched_date 판본 축 — 리비전 팩터는 `(ticker, obs)` 의 `min(fetched_date)` 행이 PIT. `stg_fin_wise` 의 `val_q*` 슬롯 라벨·`lookback` 해석은 equity. 단위는 데이터 값(`unit`, `acc_nm`).
+- **WISE 재무 2표 `fetched_date` 뜻(2.7.0, 묶음 7 — 2026-10-13 배포 예정)**: `stg_fin_wise`·`stg_fin_wise_q` 는 같은 (종목, ep, pkey) 의 바로 앞 원장 판과 원문(sha256)이 같은 판을 싣지 않는다(STAGE_DESIGN §1 예외 f). 그래서 `fetched_date` 는 '마지막 확인일'이 아니라 **'그 원문을 처음 본 날'**이고, 원문이 안 바뀐 날에는 그 단위의 행이 없다(A→B→A 로 되돌아온 판은 남는다). 날짜 D 의 값은 **(종목, ep[, pkey]) 마다 `fetched_date ≤ D` 의 최신 판**으로 읽어야 한다 — 종목별 `max(fetched_date)` 한 날짜로 두 ep 를 함께 고르면 한쪽 ep 만 새 판인 날 다른 ep 가 빈다(fi wsnap·compat latest 는 묶음 7-2 에서 고침). 수집 신선도는 이 열로 보지 않는다(접지 않는 `stg_consensus_annual` 과 원장 건전성이 본다). 원장에는 모든 판이 그대로 있다. 외부 공유 소비자 알림은 D7-9(사용자).
 - 단위 미측정 컬럼(접미사 없음): 키움 `shrts_avg_pric`·`last_price`·ka20068 `dbrt_trde_*`·`rmnd`·ka10008 `frgnr_limit*`, KIS `frgn_reg/nreg_ntby_pbmn`·credit `*_amt` 6, DART `df_amt`, WISE T2Y/T2Q 값(억원·원은 카탈로그 지식).
 
 ## 5. 알려진 한계 (§0·§8)

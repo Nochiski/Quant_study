@@ -227,8 +227,16 @@ def g7_range(ctx: GateContext) -> GateResult:
                        "n_out_of_range_cells": n_cells, "ratio": ratio, "limit": lim})
 
 
+def _total(v: object) -> int:
+    """계상 값(정수 또는 키별 dict)의 합."""
+    if isinstance(v, dict):
+        return sum(int(str(n)) for n in v.values())
+    return int(str(v or 0))
+
+
 def g8_parse_equation(ctx: GateContext) -> GateResult:
-    """blob 테이블: 파서 계상 등식 — 실패 0 · 5001≡5002 · 방출 행수 = 원장 행수(n_src)."""
+    """blob 테이블: 파서 계상 등식 — 실패 0 · 5001≡5002 · 방출 행수 = 원장 행수(n_src).
+    연속 판 접기 표는 원장 blob 보존 등식과 sha 불일치 0 을 더 본다."""
     pm = ctx.parse_metrics
     if pm is None:
         return GateResult("G8", GateStatus.SKIP, "not_blob", {})
@@ -240,6 +248,17 @@ def g8_parse_equation(ctx: GateContext) -> GateResult:
         reasons.append(f"value_mismatch={pm['n_value_mismatch']}")
     if emitted != ctx.n_src:
         reasons.append(f"emitted {emitted} != n_src {ctx.n_src}")
+    if "n_ledger_blobs" in pm:
+        # §1 예외 (f) 연속 판 접기 표 — 원장 행 수(sqlite 별도 count)가 남긴·건너뛴·접은 blob 의 합과 같고,
+        # 남긴 blob 의 원장 sha256 이 압축 해제 원문과 모두 같아야 한다(build._ledger_metrics·fold.py)
+        ledger = int(str(pm["n_ledger_blobs"]))
+        kept, skipped = _total(pm.get("n_blobs")), int(str(pm.get("n_skipped_pkey", 0)))
+        folded = _total(pm.get("n_folded"))
+        if ledger != kept + skipped + folded:
+            reasons.append(f"n_ledger_blobs {ledger} != n_blobs {kept} + n_skipped_pkey {skipped} "
+                           f"+ n_folded {folded}")
+        if int(str(pm.get("n_sha_mismatch", 0))) > 0:
+            reasons.append(f"sha_mismatch={pm['n_sha_mismatch']}")
     ok = not reasons
     return GateResult("G8", GateStatus.PASS if ok else GateStatus.FAIL,
                       "파싱 등식 성립" if ok else "; ".join(reasons), dict(pm))

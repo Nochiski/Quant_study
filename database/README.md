@@ -212,6 +212,16 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
    .venv/bin/python -m daily.ledger_health --date D --skip wise && bash scripts/build_morning.sh --date D
    ```
 
+### WISE 재무 2표 — 연속 판 접기 · 아침 재사용 (배포 묶음 7, stage 2.7.0)
+
+`stg_fin_wise`·`stg_fin_wise_q` 는 같은 (종목, ep, pkey) 의 바로 앞 원장 판과 원문(sha256)이 같은 판을 싣지 않는다(`src/stage/fold.py`, STAGE_DESIGN §1 예외 f). 원장은 그대로다. 두 표의 `fetched_date` 는 '그 원문을 처음 본 날'이다 — 날짜 D 의 값은 (종목, ep[, pkey]) 마다 `fetched_date ≤ D` 최신 판으로 읽는다(STAGE_HANDOFF §4).
+
+**아침 재사용**(`src/stage/reuse.py`): 08:10 확정 빌드에서 두 표는 먼저 저녁 판(e_) 재사용을 시도한다. 원장 내용 지문(키·sha256·fetched_at)·규칙 판본·코드 rev(`$QL_HOME/DEPLOYED.json` — 저녁 판에도 같은 rev 가 기록돼 있어야 한다)·`data/stage/baseline.json` 그 표 항목·골든 픽스처·연도가 저녁 판과 모두 같으면, 다시 짓지 않고 저녁 판 parquet 를 하드링크한 새 `m_` 판으로 커밋한다.
+- 로그(`logs/stage_all/<표>.log`) 결과 줄 끝에 `reused_from=e_… <초>s` 가 붙는다. `summary.tsv` 해석은 그대로다.
+- 하나라도 다르거나 도중에 실패하면 `reuse_declined reason=…` 한 줄을 남기고 일반 빌드로 간다 — 손댈 일은 없다. 저녁 판 뒤 WISE 를 같은 날 다시 돌렸으면(위 절) 지문이 달라 일반 빌드가 된다(정상).
+- **끄기**: `touch ~/quant-ledger/data/stage/REUSE_OFF` → 다음 아침부터 일반 빌드(코드·크론 변경 없음). 되살리기는 파일 삭제. 접기 자체를 되돌리는 절차는 플랜 `docs/plans/2026-10-09-batch7-wise-dedup.md` '7-4'.
+- 재사용 판은 m_ 판이라 건전성 C1 이 그대로 통과하고, C4 는 계수·해시 동결로 재사용 정합을 따로 확인한다.
+
 ### DART 완료 판정 실패 · 놓친 확정판 (배포 묶음 3, 10-07)
 
 DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지분 2종)이 '받았는지'(수집 기록이 ok·자료 없음이고, 계기 공시를 처음 본 뒤) 보고, 공시 목록 건수(filings)·문서·미해석 공시도 본다. 같은 D 의 두 번째 이후 런(06:00·주말 재실행·아래 수동 실행)은 못 받은 유닛과 재무 재확인(저장 재무 행이 계기 공시보다 옛것이거나 재무 자료 없음)만 다시 부른다(`plans/2026-10-07-batch3-dart-deadline.md`).

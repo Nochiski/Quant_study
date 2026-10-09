@@ -63,14 +63,21 @@ _FETCHED_MEASURED = AvailableRule("column", column="fetched_date", basis="measur
 
 def _blob_table(name: str, columns: tuple[ColumnRule, ...], natural_key: tuple[str, ...],
                 parser: str, eps: tuple[str, ...],
-                extras: tuple[ExtraColumn, ...] = ()) -> TableRule:
-    """ws_raw blob 언네스트 테이블의 공통 골격 (§1 예외 c). 파티션·시각·가용은 monthly 와 동일."""
+                extras: tuple[ExtraColumn, ...] = (), fold: bool = False) -> TableRule:
+    """ws_raw blob 언네스트 테이블의 공통 골격 (§1 예외 c). 파티션·시각·가용은 monthly 와 동일.
+
+    `fold` = 연속 판 접기(§1 예외 f)와 아침 재사용(묶음 7-3)을 함께 켠다 — 원장 sha256 열을 G0 계약에 더한다.
+    """
+    bs = BlobSource("wise", "ws_raw", eps, parser)
+    if fold:
+        bs = BlobSource("wise", "ws_raw", eps, parser,
+                        required_columns=bs.required_columns + ("sha256",), fold_consecutive=True)
     return TableRule(
         name=name, sources=(_WS,), columns=columns, natural_key=natural_key,
         partition_class="date_axis", partition_expr="substr(fetched_date, 1, 4)",
         partition_src="fetched_date", observed_src="fetched_at", write_mode="append_only",
         fanout=1, payload_exclude=("fetched_at",), lag_known=True, available=_FETCHED_MEASURED,
-        key_unique=True, extras=extras, blob_source=BlobSource("wise", "ws_raw", eps, parser),
+        key_unique=True, extras=extras, blob_source=bs, morning_reuse=fold,
     )
 
 
@@ -171,6 +178,7 @@ STG_FIN_WISE = _blob_table(
     ),
     ("ticker", "fetched_date", "ep", "seq"),
     "parse_fin_wise", ("cF3002", "cF4002"),
+    fold=True,              # 2.7.0 — fetched_date = 그 원문을 처음 본 날(A→B→A 는 남김)
 )
 
 # ── stg_fin_wise_q (cF3002 pkey Q:IS 분기 손익 · Y:BS 연간 재무상태 · Y:CF 연간 현금흐름) ─────────────
@@ -198,6 +206,7 @@ STG_FIN_WISE_Q = _blob_table(
     ("ticker", "fetched_date", "pkey", "seq"),
     "parse_fin_wise_q", ("cF3002",),
     extras=_label_extras(),
+    fold=True,              # 2.7.0 — stg_fin_wise 와 같다
 )
 
 # ── stg_analyst_summary (c1010001 HTML cTB15 — 추정기관수) ────────────────────────────────────────

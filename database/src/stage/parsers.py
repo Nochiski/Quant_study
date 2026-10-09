@@ -24,6 +24,7 @@ class RawBlob:
     fetched_date: str    # 'YYYY-MM-DD' (수집일 KST)
     body: bytes
     fetched_at: str      # UTC 무표기 시각 → observed_date 원천
+    sha256: str = ""     # 원장 sha256 열(압축 전 원문) — 연속 판 접기 표만 읽는다(fold.py)
 
 
 @dataclass

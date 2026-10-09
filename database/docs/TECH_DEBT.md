@@ -1307,3 +1307,59 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
   2. `stage/gates.py` G8 — `n_one_side_null` 에 상한·알림이 없다(equity 쪽 `rules_s17.py` `n_mean_null` 도 기록만).
   3. `stage/parsers.py` 5001 분기의 `cross(val, row["consensus"])` — 5002 가 먼저 오면 직전 5001 차트 값과 비교해 `n_one_side_null` 이 순서에 따라 0 또는 2(방출 행·G8 판정은 순서와 무관).
 - **위험성**: 1 은 이번과 같은 모양의 운영 정지(시끄러운 실패, 오염 없음) — 현재 원장엔 0건. 2 는 조용한 결측 확대(consensus None 대량 방출, 알림 없음). 3 은 기록 지표 비결정(판정 영향 없음). 진짜 충돌 회귀 테스트가 5001 먼저인 순서만 본다(`tests/test_stage_consensus.py` — parametrize 로 막을 수 있다). 고칠 때: 1 은 같은 규칙(한쪽 결측 = 기록) 적용 여부 결정, 2 는 비율 임계 또는 세션 시작 보고 항목, 3 은 테스트 순서 parametrize.
+
+### B-69: 원장 `ws_raw` 가 같은 원문(sha256)을 수집일마다 다시 적재한다 — stage 접기(묶음 7)는 산출만 줄인다
+
+- **상황**: 배포 묶음 7(stage 2.7.0)이 `stg_fin_wise`·`_q` 에서 연속 판을 접지만 원장은 그대로 매일 전체 원문을 쌓는다(결정 장부 §3-C D-Q4 'WISE 원문 매일 전체 저장' ↔ RM:74).
+- **인풋**: 매 저녁 `backfill_wise.py --mode full` — cF3002·cF4002 원문의 81~94% 가 전날과 같은 sha256(10-09 서버 실측, 플랜 2026-10-09 '사실 근거').
+- **에러 위치**: `src/backfill_wise.py:405-412`(ok 응답마다 `INSERT OR REPLACE`, PK 에 fetched_date) · 같은 sha 재적재를 막으면 `src/daily/ledger_health.py:470-471`(REQ_COVERED 항등식)이 깨진다.
+- **위험성**: 데이터 손상은 없다(원장 증가·디스크·백업 시간). 막으려면 원장 건전성 항등식·D-Q4·RM:74 재결정이 함께 걸린다 — 사람 결정.
+
+### B-70: fstrim 매일화(N-36 ②) — 묶음 7 효과를 본 뒤 정한다
+
+- **상황**: N-36 ② '나중에'. 묶음 7 로 stage 두 표의 쓰기가 76M·34M 블록(10-09 아침 `/usr/bin/time`)에서 크게 준다(추정).
+- **인풋**: 10-13 배포 뒤 첫 저녁·아침의 쓰기 블록 실측(플랜 7-6 관측).
+- **에러 위치**: 서버 크론(fstrim 주기) — 코드 밖.
+- **위험성**: 성능·디스크 수명 축. 정확성 영향 없음.
+
+### B-71: stage 열·JSONL 성능 — blob 표는 `raw__` 열 중복·1행 약 2.2KB JSONL·창 함수 spill
+
+- **상황**: 접기 뒤에도 blob 표 빌드는 파서 출력 → JSONL → duckdb `read_json` → 창 함수(`build._stage_sql` rn·rn_day) 경로다.
+- **인풋**: `stg_fin_wise` 류 wide 표(열 50+), 10-09 서버 RSS 6.8GB(한도 6GB 초과 spill — 접기 전 실측).
+- **에러 위치**: `src/stage/build.py` `_load_blob_source`(JSONL 경유)·`_stage_sql`(`raw__` 원장 열 전부 복제).
+- **위험성**: 성능(아침 체인 종료 시각). 정확성 영향 없음.
+
+### B-72: cF4002 원문이 거의 매일 바뀐다 — 접은 뒤 `stg_fin_wise` 증가의 절반 이상
+
+- **상황**: 같은 sha 비율 cF4002:Y 1.8~4.2%(10-01~10-08 서버 실측) — 가격 의존 비율(PER·PBR 등)이 담겨 있다는 추정.
+- **인풋**: 매일 수집되는 cF4002 pkey='Y' 36행/blob.
+- **에러 위치**: `src/stage/fold.py`(blob 단위 비교라 한 칸만 바뀌어도 판 전체가 남는다).
+- **위험성**: 성능·저장 축. 고칠 방법(행 단위 접기 또는 가격 의존 비율 분리)은 blob 의 한 시점 일관성 상실·소비자 쿼리 확대가 걸려 묶음 7 에서 기각(플랜 '설계 7-1').
+
+### B-73: 두 표가 접기 전 크기(948만 행)로 돌아오는 시점 재측정 — 12월 초
+
+- **상황**: 접은 뒤 두 표 합 하루 약 8.7~17만 행 증가(추정) → 약 40~80거래일 뒤 지금 크기(추정, 실적 시즌엔 더 짧다).
+- **인풋**: 12월 초 서버 `summary.tsv` 두 표 행 수·소요.
+- **에러 위치**: 해당 없음(측정 항목).
+- **위험성**: 성능 회귀가 조용히 돌아온다 — 재측정으로만 보인다.
+
+### B-74: 아침 재사용 일반화 — 지금은 `stg_fin_wise`·`_q` 두 표만
+
+- **상황**: D7-7 로 범위를 두 표로 묶었다. 구조는 `TableRule.morning_reuse` 선언으로 일반이지만, 원장 지문(`fold.input_fingerprint`)이 ws_raw 모양 blob 원천에만 정의돼 있다.
+- **인풋**: 나머지 WISE blob 6표(절감 약 3분, 추정) 등.
+- **에러 위치**: `src/stage/build.py` `_ledger_metrics`(지문은 `morning_reuse` 표만 계산) · `src/stage/reuse.py` 판정 ⑤.
+- **위험성**: 성능 축. 넓힐 때는 표마다 지문 정의(원장 모양)와 회귀 가드를 새로 세워야 한다.
+
+### B-75: 접을 수 없는 WISE 표의 증가를 감시하는 장치가 없다
+
+- **상황**: `stg_consensus_monthly` 하루 +20.7만 행·108초, `stg_consensus_matrix` +10.9만 행·54초(10-09 서버). fetched_date 를 수집일로 쓰는 소비자(fi `_cov`·matrix 같은 날짜 조인·equity coverage_daily)가 있어 접을 수 없다(D7-2).
+- **인풋**: 매일 저녁·아침 빌드.
+- **에러 위치**: `src/stage/health.py` C5 는 체인 전체 소요만 기록형으로 본다 — 표별 증가 추세는 아무도 안 본다.
+- **위험성**: 성능 회귀가 조용히 쌓여 체인 종료가 늦어진다(워치독이 시각으로만 잡는다).
+
+### B-76: '마지막 확인일'이 stage 에서 사라졌다 — 두 표의 `fetched_date` 는 '그 원문을 처음 본 날'
+
+- **상황**: 2.7.0 부터 `stg_fin_wise`·`_q` 는 원문이 안 바뀐 날의 행이 없다. 그 종목·ep 가 오늘도 수집됐는지는 stage 로 알 수 없다.
+- **인풋**: '이 종목 재무를 최근 언제 확인했나'를 stage 에서 읽으려는 소비자(지금은 없음 — 플랜 '설계 7-2' 표).
+- **에러 위치**: `src/stage/fold.py`(접힌 판은 행이 없다). 기록형 `n_keys_stale{ep:pkey}`(G8 지표 — 마지막 원장 blob 날짜 < 그 ep·pkey 최신 수집일인 단위 수)가 일부만 대신한다.
+- **위험성**: 소비자가 `max(fetched_date)` 를 최신성으로 읽으면 수집 정지로 오판하거나(반대로) 정지를 못 본다. 필요해지면 원장 직독 지표로 만든다 — 지금 수집 신선도는 `stg_consensus_annual`(접지 않음)·원장 `wise.run`·fi FG-fresh 가 본다.

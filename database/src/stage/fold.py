@@ -9,7 +9,8 @@
 - 비교 상대는 바로 앞 blob 하나다 — A→B→A 의 셋째 A 는 남는다(DART `backfill_dart.py:481-484` 는 버리지만
   따르지 않는다. cF4002 는 하루 최대 19건이 되돌아온다, 10-09 서버 실측).
 - 수집 공백은 무시한다 — A(d1)·없음(d2)·A(d3) 이면 d1 만 남는다(D7-1).
-- 정렬은 파이썬에서 한다(SQL ORDER BY 에 기대지 않는다). 단위가 회사 안에 있어 묶음 크기와 무관하다.
+- 접기 판정의 정렬은 파이썬에서 한다(SQL ORDER BY 에 기대지 않는다). 단위가 회사 안에 있어 묶음 크기와
+  무관하다. 지문(`input_fingerprint`)만 원장 PK 순서 ORDER BY 로 스트리밍한다.
 - 같은 원문 판정은 원장 sha256 열(압축 전 원문 해시, `backfill_wise.py:412`)이다. 남긴 blob 은 압축을 풀어
   sha256 을 다시 계산해 대조한다(`n_sha_mismatch` — G8 폐기형, 열 뜻 오류를 첫 빌드에서 잡는다, D7-3).
 """
@@ -59,12 +60,15 @@ def fold_consecutive(blobs: Iterable[RawBlob]) -> Folded:
 
 
 def sha_mismatch(b: RawBlob) -> bool:
-    """원장 sha256 이 압축을 푼 원문의 sha256 과 다른가. 압축 해제 실패는 False — 파서가 parse_failed 로
-    센다(sha 불일치로 세지 않는다)."""
-    try:
-        raw = zlib.decompress(b.body)
-    except zlib.error:
-        return False
+    """원장 sha256 이 원문의 sha256 과 다른가. 원문은 파서와 같은 규칙으로 얻는다 — 본문이 zlib 머리(`78 9C`)로
+    시작할 때만 압축을 풀고 아니면 본문 그대로(`parsers._decode_json`). 압축 해제 실패만 False — 파서가
+    parse_failed 로 센다(sha 불일치로 세지 않는다)."""
+    raw = bytes(b.body)
+    if raw[:2] == b"\x78\x9c":
+        try:
+            raw = zlib.decompress(raw)
+        except zlib.error:
+            return False
     return hashlib.sha256(raw).hexdigest() != b.sha256
 
 
@@ -111,15 +115,15 @@ class Tally:
 def input_fingerprint(lite: sqlite3.Connection, bs: BlobSource) -> str:
     """원장 내용 지문 — 아침 재사용(7-3) 판정 ⑤ 의 원장 축. 본문 없이 키·sha256·fetched_at 만 읽는다.
 
-    sha256(머리줄 'RULES_VERSION·파서·eps' + (cmp_cd, ep, pkey, fetched_date, sha256, fetched_at) 를 파이썬에서
-    정렬한 전부). 같은 날 같은 키를 다른 원문으로 덮거나(sha256) 원문이 같아도 다시 받으면(fetched_at — 행의
-    observed_date 원천) 지문이 바뀐다. 저녁 빌드가 G8 지표로 싣고, 아침에 같은 함수로 다시 계산해 비교한다.
+    sha256(머리줄 'RULES_VERSION·파서·eps' + (cmp_cd, ep, pkey, fetched_date, sha256, fetched_at) 전부를 원장
+    PK 순서로). 행은 `ORDER BY` PK 로 받아 한 행씩 해시에 넣는다 — 전 행을 메모리에 모으지 않고, PK 가 유일해
+    순서가 결정적이다. 같은 날 같은 키를 다른 원문으로 덮거나(sha256) 원문이 같아도 다시 받으면(fetched_at —
+    행의 observed_date 원천) 지문이 바뀐다. 저녁 빌드가 G8 지표로 싣고, 아침에 같은 함수로 다시 계산해 비교한다.
     """
     eps = list(bs.eps)
-    rows = sorted(tuple(str(v) for v in r) for r in lite.execute(
-        f'SELECT cmp_cd, ep, pkey, fetched_date, sha256, fetched_at FROM "{bs.table}" '
-        f"WHERE ep IN ({', '.join('?' * len(eps))})", eps))
     h = hashlib.sha256(f"{RULES_VERSION}\t{bs.parser}\t{','.join(bs.eps)}\n".encode())
-    for r in rows:
-        h.update(("\t".join(r) + "\n").encode())
+    for r in lite.execute(
+            f'SELECT cmp_cd, ep, pkey, fetched_date, sha256, fetched_at FROM "{bs.table}" '
+            f"WHERE ep IN ({', '.join('?' * len(eps))}) ORDER BY cmp_cd, ep, pkey, fetched_date", eps):
+        h.update(("\t".join(str(v) for v in r) + "\n").encode())
     return h.hexdigest()

@@ -48,14 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     thr = {k: v for k, v in (("G2", a.g2), ("G7", a.g7)) if v is not None}
     fx = Path(__file__).parent / "fixtures" / f"{a.table}.json"   # 골든 픽스처는 코드와 함께 산다
     bid = a.build_id or model.make_build_id(a.basis)   # --build-id 를 주면 그 접두어가 basis 다
-    code_rev = reuse.deployed_rev(base)                 # 배포 rev — 기록·아침 재사용 판정 ④
+    code_rev = reuse.deployed_rev()                     # 코드 루트 배포 rev — 기록·아침 재사용 판정 ④
     r: build.BuildResult | None = None
     if rule.morning_reuse and model.basis_of_build_id(bid) == "morning":
         try:
-            if thr:     # CLI 임계는 저녁 판 게이트에 없던 입력이다 — baseline 임계(판정 ⑥)와 같은 축
-                raise reuse.Declined(f"gate_threshold_override {thr}")
             r = reuse.try_reuse(rule, snap, a.stage_root, bid, code_rev=code_rev,
-                                fixtures_path=fx if fx.exists() else None)
+                                fixtures_path=fx if fx.exists() else None, gate_thresholds=thr)
         except reuse.Declined as e:
             print(f"reuse_declined reason={e.reason}", flush=True)
         except Exception as e:  # noqa: BLE001  # reason: 재사용 실패는 사유만 남기고 일반 빌드로 간다(P1)

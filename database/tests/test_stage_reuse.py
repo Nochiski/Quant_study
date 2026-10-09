@@ -16,7 +16,7 @@ from pathlib import Path
 import duckdb
 import pytest
 from stage import __main__ as stage_main
-from stage import build, fold, health, manifest, rules, snapshot
+from stage import build, fold, health, manifest, reuse, rules, snapshot
 from test_stage_fold import _body, _r, _sha, snap_of
 
 REV = "abc1234"
@@ -28,7 +28,8 @@ ROWS = [_r("005930", "cF3002", "Y", _body(3), "2026-10-01"),
 
 
 def _deployed(home: Path, rev: str | None) -> None:
-    p = home / "DEPLOYED.json"
+    """코드 루트(`reuse.CODE_ROOT` — fixture 가 `<home>/code` 로 바꾼다)의 DEPLOYED.json."""
+    p = home / "code" / "DEPLOYED.json"
     if rev is None:
         p.unlink(missing_ok=True)
         return
@@ -62,8 +63,10 @@ def _evening_dir(home: Path) -> Path:
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """QL_HOME — 저녁 스냅샷 s_e, DEPLOYED rev. 아침 스냅샷은 테스트가 뜬다(`_morning_snap`)."""
+    """QL_HOME — 저녁 스냅샷 s_e, 코드 루트 `<home>/code` 의 DEPLOYED rev. 아침 스냅샷은 테스트가 뜬다."""
     monkeypatch.setenv("QL_HOME", str(tmp_path))
+    (tmp_path / "code").mkdir()
+    monkeypatch.setattr(reuse, "CODE_ROOT", tmp_path / "code")
     snap_of(tmp_path, ROWS, sid="s_e")
     _deployed(tmp_path, REV)
     return tmp_path
@@ -251,15 +254,38 @@ def test_재사용_중_예외면_사유를_남기고_일반_빌드(home: Path, s
     assert cur.reused_from is None and not (home / "stage" / "_tmp" / cur.build_id).exists()
 
 
-def test_CLI_게이트_임계_override_가_있으면_재사용하지_않는다(home: Path, spy: list[str],
-                                                           capsys: pytest.CaptureFixture[str]
-                                                           ) -> None:
+@pytest.mark.parametrize("evening, morning, reused", [
+    ((), ("--g7", "0.5"), False),                   # 아침에만 override
+    (("--g7", "0.5"), (), False),                   # 저녁에만 override
+    (("--g7", "0.5"), ("--g7", "0.4"), False),      # 값이 다름
+    (("--g7", "0.5"), ("--g7", "0.5"), True),       # 같은 override — 같은 입력
+])
+def test_CLI_게이트_임계_override_는_판정_6_에서_저녁과_비교한다(
+        home: Path, spy: list[str], capsys: pytest.CaptureFixture[str],
+        evening: tuple[str, ...], morning: tuple[str, ...], reused: bool) -> None:
     _morning_snap(home)
-    assert _run(home, "s_e", "evening") == 0
+    assert _run(home, "s_e", "evening", TABLE, *evening) == 0
     spy.clear()
     capsys.readouterr()
-    assert _run(home, "s_m", "morning", TABLE, "--g7", "0.5") == 0
-    assert spy == [TABLE] and "reuse_declined reason=gate_threshold_override" in capsys.readouterr().out
+    assert _run(home, "s_m", "morning", TABLE, *morning) == 0
+    out = capsys.readouterr().out
+    if reused:
+        assert spy == [] and _current(home).reused_from is not None, out
+    else:
+        assert spy == [TABLE] and "reuse_declined reason=build_inputs" in out, out
+        assert "gate_thresholds" in out
+
+
+def test_code_rev_는_QL_HOME_이_아니라_코드_루트_DEPLOYED_에서_읽는다(home: Path, spy: list[str]) -> None:
+    """deliver E-08 과 같은 규약 — QL_HOME(데이터 루트)의 DEPLOYED.json 은 다른 배포일 수 있다."""
+    (home / "DEPLOYED.json").write_text(json.dumps({"rev": "zzz9999"}), encoding="utf-8")
+    _morning_snap(home)
+    assert _run(home, "s_e", "evening") == 0
+    assert _current(home).code_rev == REV
+    spy.clear()
+    assert _run(home, "s_m", "morning") == 0
+    assert spy == [] and _current(home).code_rev == REV
+    assert reuse.CODE_ROOT != home and reuse.deployed_rev(home) == "zzz9999"
 
 
 def _hash_of(d: Path, work: Path) -> str:
@@ -304,7 +330,8 @@ def test_재사용_판은_건전성_C1_C3_C4_C6_을_통과한다(home: Path) -> 
     status = {c.name: c for c in r.checks}
     for name in ("C1", "C2", "C3", "C4", "C6"):
         assert status[name].status is health.Status.PASS, (name, status[name].detail)
-    assert status["C4"].metrics["n_frozen"] == 1          # 계수·해시 동결 대조를 실제로 했다
+    # C4 는 계수·해시를 저녁 판에서 옮겨 적어 구조상 통과한다 — 독립 확인은 판정 ⑦(해시 재계산)이다
+    assert status["C4"].metrics["n_frozen"] == 1
 
 
 def _stage_all_parse(log: Path) -> dict[str, str]:

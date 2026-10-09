@@ -216,11 +216,11 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 `stg_fin_wise`·`stg_fin_wise_q` 는 같은 (종목, ep, pkey) 의 바로 앞 원장 판과 원문(sha256)이 같은 판을 싣지 않는다(`src/stage/fold.py`, STAGE_DESIGN §1 예외 f). 원장은 그대로다. 두 표의 `fetched_date` 는 '그 원문을 처음 본 날'이다 — 날짜 D 의 값은 (종목, ep[, pkey]) 마다 `fetched_date ≤ D` 최신 판으로 읽는다(STAGE_HANDOFF §4).
 
-**아침 재사용**(`src/stage/reuse.py`): 08:10 확정 빌드에서 두 표는 먼저 저녁 판(e_) 재사용을 시도한다. 원장 내용 지문(키·sha256·fetched_at)·규칙 판본·코드 rev(`$QL_HOME/DEPLOYED.json` — 저녁 판에도 같은 rev 가 기록돼 있어야 한다)·`data/stage/baseline.json` 그 표 항목·골든 픽스처·연도가 저녁 판과 모두 같으면, 다시 짓지 않고 저녁 판 parquet 를 하드링크한 새 `m_` 판으로 커밋한다.
+**아침 재사용**(`src/stage/reuse.py`): 08:10 확정 빌드에서 두 표는 먼저 저녁 판(e_) 재사용을 시도한다. 원장 내용 지문(키·sha256·fetched_at)·규칙 판본·코드 rev(코드 루트 `~/quant-ledger/DEPLOYED.json` — 저녁 판에도 같은 rev 가 기록돼 있어야 한다)·`data/stage/baseline.json` 그 표 항목·골든 픽스처·연도·CLI 게이트 임계 override(`STAGE_EXTRA='--g2 …'`)가 저녁 판과 모두 같으면, 다시 짓지 않고 저녁 판 parquet 를 하드링크한 새 `m_` 판으로 커밋한다.
 - 로그(`logs/stage_all/<표>.log`) 결과 줄 끝에 `reused_from=e_… <초>s` 가 붙는다. `summary.tsv` 해석은 그대로다.
 - 하나라도 다르거나 도중에 실패하면 `reuse_declined reason=…` 한 줄을 남기고 일반 빌드로 간다 — 손댈 일은 없다. 저녁 판 뒤 WISE 를 같은 날 다시 돌렸으면(위 절) 지문이 달라 일반 빌드가 된다(정상).
 - **끄기**: `touch ~/quant-ledger/data/stage/REUSE_OFF` → 다음 아침부터 일반 빌드(코드·크론 변경 없음). 되살리기는 파일 삭제. 접기 자체를 되돌리는 절차는 플랜 `docs/plans/2026-10-09-batch7-wise-dedup.md` '7-4'.
-- 재사용 판은 m_ 판이라 건전성 C1 이 그대로 통과하고, C4 는 계수·해시 동결로 재사용 정합을 따로 확인한다.
+- 재사용 정합의 독립 확인은 하드링크한 parquet 의 content_hash 재계산(판정 ⑦)이다. 재사용 판은 m_ 판이라 건전성 C1 이 그대로 통과하고, C4 는 계수·해시를 저녁 판에서 옮겨 적으므로 구조상 통과한다(따로 확인하는 것이 아니다).
 
 ### DART 완료 판정 실패 · 놓친 확정판 (배포 묶음 3, 10-07)
 

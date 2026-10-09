@@ -60,9 +60,10 @@ ALLOW_DAYS: dict[str, int] = {
     "stg_consensus_matrix": 10, "stg_analyst_summary": 10, "stg_analyst_broker": 10,
     # WICS 주 1회(토요일, dt=금요일) — 다음 금요일 저녁 D 기준 7일 + 연휴 여유(플랜 wics-weekly T2)
     "stg_wics_components": 14,
-    # 2.7.0(묶음 7) 연속 판 접기 뒤 두 표의 max_available_date 는 '최근 원문이 바뀐 날'이다(cF4002 가
-    # 하루 96~98% 바뀌어 사실상 그날). 10일 동안 전 종목 원문이 그대로일 때만 FAIL — 수집 정지와 같은
-    # 신호로 읽는다. 수집 정지 자체는 컨센서스 6표 C6·원장 `wise.run`·fi FG-fresh 가 계속 본다
+    # 2.7.0(묶음 7) 연속 판 접기 뒤 두 표의 max_available_date 는 '최근 원문이 바뀐 날'이다 — stg_fin_wise 는
+    # cF4002 가 하루 96~98% 바뀌어 사실상 그날, stg_fin_wise_q 는 Q:IS·Y:BS·Y:CF 가 하루 7~18% 바뀐다(10-01~10-08
+    # 서버 실측). 10일 동안 전 종목 원문이 그대로일 때만 FAIL — 수집 정지와 같은 신호로 읽는다. 수집 정지
+    # 자체는 컨센서스 6표 C6·원장 `wise.run`·fi FG-fresh 가 계속 본다
     "stg_fin_wise": 10,
     "stg_fin_wise_q": 10,                 # 10-01 T-Q3 — stg_fin_wise 와 같은 WISE 저녁 수집 축
     # 문서층

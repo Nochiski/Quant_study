@@ -39,7 +39,7 @@ class BuildRecord:
     max_observed_date: str | None = None
     # 묶음 7-3 아침 재사용(stage/reuse.py) — 선택 필드, 기본 None(equity·옛 판은 비워 둔다).
     # reused_from = 하드링크로 다시 커밋한 저녁 판 build_id · input_fingerprint = 원장 내용 지문(재사용 표만)
-    # · code_rev = 빌드한 코드의 배포 rev(`$QL_HOME/DEPLOYED.json`, 없으면 None)
+    # · code_rev = 빌드한 코드의 배포 rev(코드 루트 `DEPLOYED.json` — `reuse.deployed_rev`, 없으면 None)
     reused_from: str | None = None
     input_fingerprint: str | None = None
     code_rev: str | None = None

@@ -661,17 +661,19 @@ def _fixtures_file(rule: TableRule, stage_root: Path, fixtures_path: Path | None
 
 
 def build_inputs(rule: TableRule, stage_root: Path, fixtures_path: Path | None,
-                 baseline_path: Path | None, year: int) -> dict[str, object]:
+                 baseline_path: Path | None, year: int,
+                 gate_thresholds: dict[str, float] | None = None) -> dict[str, object]:
     """원장·코드 밖에서 산출을 정하는 빌드 입력 — baseline.json 의 그 표 항목·골든 픽스처·연도(G7 범위가
-    빌드 시각의 UTC 연도에 묶인다). `_meta.json` 에 싣고, 아침 재사용 판정 ⑥(reuse.py)이 같은 함수로
-    다시 계산해 비교한다."""
+    빌드 시각의 UTC 연도에 묶인다)·CLI 게이트 임계 override(`--g2/--g7`, STAGE_EXTRA). `_meta.json` 에 싣고,
+    아침 재사용 판정 ⑥(reuse.py)이 같은 함수로 다시 계산해 비교한다."""
     fpath = _fixtures_file(rule, stage_root, fixtures_path)
     entry = json.dumps(_baseline_entry(rule, stage_root, baseline_path), sort_keys=True,
                        ensure_ascii=False, default=str)
     return {"baseline_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
             "fixtures_sha256": (hashlib.sha256(fpath.read_bytes()).hexdigest()
                                 if fpath.exists() else None),
-            "year_utc": year}
+            "year_utc": year,
+            "gate_thresholds": dict(sorted((gate_thresholds or {}).items()))}
 
 
 def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str | None = None,
@@ -681,7 +683,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
                 code_rev: str | None = None) -> BuildResult:
     """테이블 1개를 스냅샷에서 빌드한다. 결과는 status 로, 예외는 버그·환경 오류에만.
 
-    `code_rev` 는 배포 rev(`$QL_HOME/DEPLOYED.json`) — MANIFEST 에 기록만 한다(아침 재사용 판정 ④ 입력).
+    `code_rev` 는 배포 rev(코드 루트 `DEPLOYED.json`, `reuse.deployed_rev`) — MANIFEST 에 기록만 한다(판정 ④ 입력).
     """
     t0 = time.time()
     bid = build_id or datetime.now(UTC).strftime("b_%Y%m%dT%H%M%S_%fZ")
@@ -807,7 +809,8 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         else:
             part_dirs = [("", n_stage, tmp_table)]
         src_files = [snap.files[s.db] for s in rule.sources if s.db in snap.files]
-        inputs = build_inputs(rule, stage_root, fixtures_path, baseline_path, now_year)
+        inputs = build_inputs(rule, stage_root, fixtures_path, baseline_path, now_year,
+                              gate_thresholds)
         g7 = next(g for g in results if g.name == "G7")
         partitions: list[dict[str, object]] = []
         for label, n, pdir in part_dirs:

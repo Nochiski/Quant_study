@@ -314,3 +314,64 @@ def test_부정_깨진_본문은_parse_failed_로_FAIL_하고_sha_불일치로_�
     m = g8(r).metrics
     assert not r.ok and m["n_parse_failed"] == 1 and m["n_sha_mismatch"] == 0
     assert "parse_failed=1" in g8(r).detail and "sha_mismatch" not in g8(r).detail
+
+
+def test_부정_파싱_경로에서_blob_을_잃으면_원장_별도_count_가_G8_로_잡는다(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`n_ledger_blobs` 는 접기·파싱 계상이 아니라 sqlite 에서 따로 센다. 접기 함수에 들어가기 전에 blob 1개를
+    소리 없이 버려도(계상 어디에도 안 남김) 등식이 깨져야 한다 — `_ledger_metrics` 를 계상 역산
+    (Σn_blobs + n_skipped_pkey + Σn_folded)으로 바꾸면 이 테스트가 FAIL 한다."""
+    real = fold.Tally.fold
+    dropped: list[parsers.RawBlob] = []
+
+    def lossy(self: fold.Tally, blobs: object) -> list[parsers.RawBlob]:
+        got = list(blobs)  # type: ignore[call-overload]
+        if got and not dropped:
+            dropped.append(got.pop())                   # 한 번만, 세지 않고 버린다
+        return real(self, got)
+
+    monkeypatch.setattr(fold.Tally, "fold", lossy)
+    a, b = _body(2, "A"), _body(2, "B")
+    r = build_of(tmp_path, "stg_fin_wise", snap_of(tmp_path, [
+        _r("005930", "cF3002", "Y", a, "2026-10-01"), _r("005930", "cF3002", "Y", a, "2026-10-02"),
+        _r("005930", "cF4002", "Y", b, "2026-10-01"), _r("000020", "cF3002", "Q:IS", b, "2026-10-01")]))
+    assert len(dropped) == 1 and not r.ok
+    assert g8(r).status is gates.GateStatus.FAIL and g8(r).metrics["n_ledger_blobs"] == 4
+    assert "n_ledger_blobs 4 != " in g8(r).detail, g8(r).detail
+
+
+def test_sha_재계산은_파서와_같은_규칙으로_원문을_얻는다(tmp_path: Path) -> None:
+    """zlib 머리(`78 9C`)가 없는 본문은 파서가 그대로 JSON 으로 읽는다(`parsers._decode_json`). sha 대조도
+    본문 그대로를 원문으로 본다 — 옛 규칙(무조건 압축 해제)은 해제 실패로 세지 않아 틀린 sha 를 놓쳤다."""
+    raw = zlib.decompress(_body(2))                     # 압축하지 않은 원문 JSON
+    ok = build_of(tmp_path, "stg_fin_wise", snap_of(tmp_path, [
+        _r("005930", "cF3002", "Y", raw, "2026-10-01", sha=hashlib.sha256(raw).hexdigest())],
+        sid="ok"), root="s_ok")
+    assert ok.ok and ok.n_rows == 2 and g8(ok).metrics["n_sha_mismatch"] == 0
+    bad = build_of(tmp_path, "stg_fin_wise", snap_of(tmp_path, [
+        _r("005930", "cF3002", "Y", raw, "2026-10-01", sha="0" * 64)], sid="bad"), root="s_bad")
+    assert not bad.ok and g8(bad).metrics["n_sha_mismatch"] == 1
+    assert fold.sha_mismatch(parsers.RawBlob("x", "cF3002", "Y", "d", b"\x78\x9cbroken", "t", "0")) is False
+
+
+def test_지문은_원장_PK_순서라_적재_순서와_무관하고_sha256_fetched_at_에_반응한다(tmp_path: Path) -> None:
+    rows = [_r(c, ep, pk, _body(1, c + pk), d) for c in ("005930", "000020") for ep, pk in
+            (("cF3002", "Y"), ("cF3002", "Q:IS"), ("cF4002", "Y")) for d in ("2026-10-01", "2026-10-02")]
+    bs = rules.RULES["stg_fin_wise"].blob_source
+    assert bs is not None
+
+    def fp(rs: list[tuple], name: str) -> str:
+        p = tmp_path / name / "wisereport.db"
+        write_ws(p, rs)
+        lite = build._sqlite_ro(p)
+        try:
+            return fold.input_fingerprint(lite, bs)
+        finally:
+            lite.close()
+
+    base = fp(rows, "a")
+    shuffled = rows[:]
+    random.Random(7).shuffle(shuffled)
+    assert fp(shuffled, "b") == fp(rows[::-1], "c") == base       # rowid 순서가 달라도 같다
+    assert fp([(*rows[0][:5], "f" * 64, *rows[0][6:]), *rows[1:]], "d") != base          # sha256
+    assert fp([(*rows[0][:7], "2026-10-01T09:00:00"), *rows[1:]], "e") != base           # fetched_at

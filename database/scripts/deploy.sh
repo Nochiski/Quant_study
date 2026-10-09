@@ -6,6 +6,7 @@
 #   database/scripts/deploy.sh --apply                           # 실제 배포
 #   database/scripts/deploy.sh --apply --allow-branch <브랜치>    # main 미머지 브랜치를 알고 민다
 #   database/scripts/deploy.sh --apply --skip-tests              # 테스트 생략(사유는 DEPLOYED.json 에 남는다)
+#   database/scripts/deploy.sh --apply --allow-rollback <서버 rev> # 서버 판이 HEAD 에 없는 것을 알고 되돌린다
 #
 # --delete 를 쓰는 이유: 서버에만 남은 작업 사본(equity_s23/ 같은 것)이 다음 사람에게
 # "둘 중 어느 쪽이 정본인가" 를 다시 묻게 만든다. 저장소에 없으면 서버에도 없어야 한다.
@@ -14,7 +15,14 @@
 #   ① 작업 트리가 깨끗해야 한다 — 어느 커밋을 밀었는지 서버에 적을 수 없으면 드리프트를 추적할 수 없다
 #   ② HEAD 가 origin/main 을 포함해야 한다. 미머지 브랜치는 `--allow-branch <그 브랜치 이름>` 으로만 허용
 #   ③ database/tests 전량 통과(`--skip-tests` 로 생략 가능 — 생략 사실이 서버에 기록된다)
-#   ④ 배포 결과를 서버 ~/quant-ledger/DEPLOYED.json 에 남긴다(rev·branch·at_utc·by·tests)
+#   ④ 배포 결과를 서버 ~/quant-ledger/DEPLOYED.json 에 남긴다(rev·branch·at_utc·by·tests[·rollback_from])
+#   ⑤ 서버 빌드 락(/tmp/quant_ledger_build.lock — build_chain·model_daily·gc 등이 쓰는 것)을 비차단으로 잡고
+#      rsync 와 DEPLOYED.json 쓰기를 마칠 때까지 쥔다. 못 잡으면 체인 실행 중이라 거부한다 — 기다리거나
+#      다시 시도하지 않는다(P9). 체인이 빌드하는 도중에 코드가 바뀌면 한 판 안에 옛 코드·새 코드가 섞인다.
+#   ⑦ 서버 DEPLOYED.json 의 rev 가 HEAD 의 조상이어야 한다(K1-1e). main 을 역병합한 브랜치는 ② 를 늘
+#      통과하므로, 다른 브랜치에서 먼저 민 핫픽스를 모르고 덮는 일은 ② 로 못 막는다. 의도한 되돌림은
+#      `--allow-rollback <서버 rev>` 로만 허용하고 DEPLOYED.json 에 rollback_from 으로 남긴다.
+#   dry-run 은 ⑤·⑦ 을 똑같이 판정해 결과만 출력한다(락은 잡았다가 바로 놓는다).
 # 서버에는 pytest·ruff 가 없다(맨 pip venv) — 검사는 이 저장소 쪽에서만 돈다.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"     # …/database
@@ -25,13 +33,15 @@ ROOT="${QL_REMOTE_ROOT:-quant-ledger}"                       # 원격 홈 기준
 APPLY=0
 SKIP_TESTS=0
 ALLOW_BRANCH=""
+ALLOW_ROLLBACK=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1; shift ;;
     --dry-run) APPLY=0; shift ;;
     --skip-tests) SKIP_TESTS=1; shift ;;
     --allow-branch) ALLOW_BRANCH="${2:?--allow-branch 뒤에 브랜치 이름이 필요하다}"; shift 2 ;;
-    *) echo "usage: deploy.sh [--apply|--dry-run] [--allow-branch <name>] [--skip-tests]" >&2; exit 2 ;;
+    --allow-rollback) ALLOW_ROLLBACK="${2:?--allow-rollback 뒤에 서버 DEPLOYED.json 의 rev 가 필요하다}"; shift 2 ;;
+    *) echo "usage: deploy.sh [--apply|--dry-run] [--allow-branch <name>] [--allow-rollback <server rev>] [--skip-tests]" >&2; exit 2 ;;
   esac
 done
 DRY="--dry-run"
@@ -59,6 +69,17 @@ ENGINE_SRC="$WORKTREE/backend/src/strategy_workbench"
 BRANCH="$(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
 REV="$(git -C "$REPO" rev-parse HEAD)"
 TESTS="ok"
+
+PLAN=""; LOCK_PID=""; LOCK_DIR=""
+cleanup() {   # 끝날 때(정상·거부·중단 모두) 계획 파일을 지우고 쥐고 있던 서버 빌드 락을 놓는다
+  [ -z "$PLAN" ] || rm -f "$PLAN"
+  if [ -n "$LOCK_PID" ]; then
+    exec 8>&- 7<&-      # FIFO 의 쓰는 쪽을 닫으면 원격 cat 이 끝나고 락이 풀린다
+    wait "$LOCK_PID" || true
+  fi
+  [ -z "$LOCK_DIR" ] || rm -rf "$LOCK_DIR"
+}
+trap cleanup EXIT
 
 if [ "$APPLY" -eq 1 ]; then
   # ① 더러운 트리 — 밀린 코드가 어느 커밋인지 서버에 적을 수 없다
@@ -91,11 +112,78 @@ if [ "$APPLY" -eq 1 ]; then
   fi
 fi
 
+# ⑤·⑦ 은 두 모드 모두 판정한다. --apply 면 실패 시 거부(rc 2 — 락은 cleanup 이 놓는다), dry-run 이면
+# 결과만 출력하고 계속한다. 테스트(③) 뒤에 두는 이유: 락을 쥔 채 몇 분짜리 테스트를 돌리면 그동안 시작하는
+# 체인이 락 실패로 그 회차를 건너뛴다.
+verdict_fail() {
+  if [ "$APPLY" -eq 1 ]; then
+    printf '거부: %s\n' "$1" >&2
+    [ $# -lt 2 ] || printf '      %s\n' "$2" >&2
+    exit 2
+  fi
+  printf '== (dry-run) --apply 라면 거부: %s\n' "$1"
+  [ $# -lt 2 ] || printf '      %s\n' "$2"
+}
+
+# ⑤ 빌드 락 — 원격에서 비차단으로 잡고 LOCKED 를 찍은 뒤 stdin 이 닫힐 때까지 쥔다. 못 잡으면 BUSY.
+BUILD_LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"   # QL_BUILD_LOCK_FILE 은 테스트 전용(model_daily.sh 와 같다)
+LOCK_CMD="exec 9>$BUILD_LOCK || exit 4; if flock -n 9; then echo LOCKED; cat >/dev/null; else echo BUSY; fi"
+LOCK_STATE=""
+if [ "$APPLY" -eq 1 ]; then
+  # ssh 하나가 락을 쥔 채 FIFO 로 받은 stdin 을 기다린다. 이 스크립트가 어떻게 끝나든 FIFO 의 쓰는 쪽
+  # (fd 8)이 닫히면 원격 cat 이 끝나 락이 풀린다 — 배포가 중간에 죽어도 서버에 락이 남지 않는다.
+  LOCK_DIR="$(mktemp -d)"
+  mkfifo "$LOCK_DIR/in" "$LOCK_DIR/out"
+  ssh "$REMOTE" "$LOCK_CMD" <"$LOCK_DIR/in" >"$LOCK_DIR/out" &
+  LOCK_PID=$!
+  exec 8>"$LOCK_DIR/in" 7<"$LOCK_DIR/out"
+  read -r LOCK_STATE <&7 || true
+else
+  LOCK_STATE="$(ssh "$REMOTE" "$LOCK_CMD" </dev/null || true)"   # stdin 이 비어 잡자마자 놓는다
+fi
+case "$LOCK_STATE" in
+  LOCKED)
+    if [ "$APPLY" -eq 1 ]; then
+      echo "== 빌드 락: $REMOTE:$BUILD_LOCK 비어 있음 — rsync·DEPLOYED.json 기록을 마칠 때까지 쥔다"
+    else
+      echo "== 빌드 락: $REMOTE:$BUILD_LOCK 비어 있음"
+    fi ;;
+  BUSY)
+    verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK)을 다른 작업이 쥐고 있다 — 체인 실행 중이다." \
+                 "기다리지 않는다(P9). 체인이 끝난 뒤 다시 실행한다." ;;
+  *)
+    verdict_fail "서버 빌드 락($REMOTE:$BUILD_LOCK)을 확인하지 못했다(ssh 실패 또는 락 파일 열기 실패, 응답='$LOCK_STATE') — 체인과 겹치는지 판정할 수 없다." ;;
+esac
+
+# ⑦ 서버 rev — 서버 DEPLOYED.json 의 rev 가 HEAD 의 조상이 아니면 그 판에만 있는 커밋(핫픽스)이 되돌아간다
+SERVER_REV=""; ROLLBACK_FROM=""
+if ! SERVER_META="$(ssh "$REMOTE" "cat $ROOT/DEPLOYED.json")"; then
+  verdict_fail "서버 ~/$ROOT/DEPLOYED.json 을 읽지 못했다 — 서버 판이 HEAD=$BRANCH ($REV) 에 들어 있는지 판정할 수 없다."
+else
+  SERVER_REV="$(printf '%s\n' "$SERVER_META" \
+    | sed -n 's/.*"rev"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p')"
+  if [ -z "$SERVER_REV" ]; then
+    verdict_fail "서버 ~/$ROOT/DEPLOYED.json 에서 rev(16진 7~40자)를 읽지 못했다 — 서버 판이 HEAD=$BRANCH ($REV) 에 들어 있는지 판정할 수 없다." \
+                 "내용: $SERVER_META"
+  elif git -C "$REPO" merge-base --is-ancestor "$SERVER_REV" HEAD 2>/dev/null; then
+    echo "== 서버 rev 확인: 서버 $SERVER_REV 가 HEAD=$BRANCH ($REV) 의 조상이다 — 되돌리는 커밋 없음"
+  elif [ "$ALLOW_ROLLBACK" = "$SERVER_REV" ]; then
+    ROLLBACK_FROM="$SERVER_REV"
+    echo "== 되돌림 허용: 서버 $SERVER_REV 가 HEAD=$BRANCH ($REV) 에 없지만 --allow-rollback 으로 덮는다 — DEPLOYED.json 에 rollback_from 으로 남긴다"
+  else
+    WHY=""
+    git -C "$REPO" cat-file -e "$SERVER_REV^{commit}" 2>/dev/null \
+      || WHY=" (이 저장소에 그 커밋이 없다 — 다른 브랜치·다른 작업 사본에서 민 판일 수 있다)"
+    [ -z "$ALLOW_ROLLBACK" ] || WHY="$WHY (--allow-rollback $ALLOW_ROLLBACK 은 서버 rev 와 다르다)"
+    verdict_fail "서버 rev $SERVER_REV 가 HEAD=$BRANCH ($REV) 에 들어 있지 않다$WHY — 그대로 밀면 서버에만 있는 커밋(핫픽스)이 --delete 로 되돌아간다." \
+                 "먼저 그 rev 를 이 브랜치에 병합한다. 의도한 되돌림이라면: deploy.sh --apply --allow-rollback $SERVER_REV"
+  fi
+fi
+
 # ⑥ 무엇이 바뀌는지 먼저 센다. rsync 를 한 번 더 부르는 값으로, apply 모드에서도 계획을 남긴다.
 # `-c`(체크섬)로 재는 이유: 워크트리 체크아웃은 mtime 이 전부 다르다 — 크기·시각 비교로 세면
 # "바뀐다" 가 214개로 나와 진짜 되돌아가는 파일이 묻힌다.
 PLAN="$(mktemp)"
-trap 'rm -f "$PLAN"' EXIT
 plan_of() {   # 항목별 dry-run 계획을 $PLAN 에 모으고 변경 파일 수를 반환한다
   local label="$1"; shift
   local out; out="$(rsync -ainc "$@" 2>/dev/null || true)"
@@ -135,11 +223,14 @@ echo "== backend/ops/rebuild_share.py → src/rebuild_share.py"
 rsync -avz $DRY "$WORKTREE/backend/ops/rebuild_share.py" "$REMOTE:$ROOT/src/rebuild_share.py"
 
 if [ "$APPLY" -eq 1 ]; then
-  # ④ 서버에 무엇을 언제 누가 밀었는지 남긴다 — 드리프트 조사의 출발점(D05).
-  printf '{"rev":"%s","branch":"%s","at_utc":"%s","by":"%s","tests":"%s"}\n' \
+  # ④ 서버에 무엇을 언제 누가 밀었는지 남긴다 — 드리프트 조사의 출발점(D05). 알고 되돌렸으면(⑦) 덮인 rev 도.
+  ROLLBACK_JSON=""
+  [ -z "$ROLLBACK_FROM" ] || ROLLBACK_JSON=",\"rollback_from\":\"$ROLLBACK_FROM\""
+  printf '{"rev":"%s","branch":"%s","at_utc":"%s","by":"%s","tests":"%s"%s}\n' \
     "$REV" "$BRANCH" "$(date -u +%FT%TZ)" "${USER:-unknown}@$(hostname -s 2>/dev/null || echo unknown)" "$TESTS" \
+    "$ROLLBACK_JSON" \
     | ssh "$REMOTE" "cat > $ROOT/DEPLOYED.json"
-  echo "== DEPLOYED.json 기록: rev=$REV branch=$BRANCH tests=$TESTS"
+  echo "== DEPLOYED.json 기록: rev=$REV branch=$BRANCH tests=$TESTS${ROLLBACK_FROM:+ rollback_from=$ROLLBACK_FROM}"
 else
   echo
   echo "(dry-run 이었다. 실제로 밀려면 --apply)"

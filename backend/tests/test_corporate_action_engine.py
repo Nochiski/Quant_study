@@ -15,6 +15,7 @@ import pytest
 
 from backtest_engine import BacktestEngine, BacktestResult, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.core import core_available
 from backtest_engine.errors import CorporateActionWithoutBar
 from backtest_engine.types.actions import (
     ActionKind,
@@ -122,11 +123,46 @@ def run(
     actions: tuple[CorporateActionEvent, ...],
     script: tuple[StrategyAction | None, ...] = (buy(7),),
     events: frozenset[EventKind] = frozenset({EventKind.MARKET}),
+    core: str = "python",
 ) -> tuple[BacktestEngine, Strategy, BacktestResult]:
-    engine = BacktestEngine(RunConfig(run_id="split", initial_cash=10_000.0, fee_bps=0.0))
+    engine = BacktestEngine(
+        RunConfig(run_id="split", initial_cash=10_000.0, fee_bps=0.0), core=core
+    )
     strategy = Strategy(script, events)
     result = engine.run(strategy, DataFeed(bars), corporate_actions=actions)
     return engine, strategy, result
+
+
+RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
+
+
+@RUST_ONLY
+def test_corporate_action_notifications_are_identical_across_cores() -> None:
+    """GAP-1: 같은 세션에 사건이 둘이어도 알림 index ↔ side table 정합이 두 코어에서 같다.
+
+    Rust는 `load_corporate_actions`의 enumerate 위치를 NOTIFY payload로 넘기고 Python이
+    `bind_corporate_actions`로 받은 튜플에서 그 위치를 꺼낸다 — 순서가 어긋나면 전략이 다른
+    사건을 받는다.
+    """
+    # 확인된 분할(포지션 조정)과 미확인 주식수 변경(기록·알림만)을 같은 정산 세션에 둔다.
+    actions = (split("5"), split("50", CorporateActionType.SHARE_COUNT_CHANGE))
+    declared = frozenset({EventKind.MARKET, EventKind.CORPORATE_ACTION})
+    outcomes: list[tuple[object, ...]] = []
+    for core in ("python", "rust"):
+        engine, strategy, result = run(
+            bars_with_split(20.0, 21.0), actions, events=declared, core=core
+        )
+        received = [e for e in strategy.received if isinstance(e, CorporateActionEvent)]
+        outcomes.append(
+            (
+                result,
+                engine.event_store.trace_bytes(),
+                engine.event_store.decision_tape_bytes(),
+                tuple((e.instrument, e.action_type, e.ratio, e.ts) for e in received),
+            )
+        )
+    assert outcomes[0] == outcomes[1]
+    assert outcomes[1][3] == tuple((a.instrument, a.action_type, a.ratio, a.ts) for a in actions)
 
 
 class TestConfirmedSplit:

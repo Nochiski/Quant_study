@@ -7,20 +7,28 @@
 - 상태 `implemented`: M3 mock Equity adapter에서 즉시 preview 가능
 - 상태 `catalog_only`: ID와 데이터 요구사항은 예약됐지만 기본 실행 graph는 후속 구현 대상
 - 모든 입력은 `available_date <= as_of`인 PIT 관측값만 사용
+- 가격 변화(수익률·모멘텀·이평·변동성·낙폭·고점 거리·베타)는 수정주가 `price.adj_close`(전방
+  조정, 그날까지 적용·공개된 분할·증자·병합 계수만 곱해 과거 값이 바뀌지 않는다)를 읽는다. 대부분의
+  분할·증자를 반영하지만 원장 조정 공백이 남을 수 있다 — 확인 안 된 사건(`factor_ok=false`)은 조정되지
+  않고, 계수가 적용일보다 늦게 공개되면 적용일 하루에 스파이크가 남아 창 기반 계산이 창 길이만큼 읽는다
+  (#220). 원주가
+  `price.close`는 같은 날 두 값을 견주는 비율(장중 수익률·목표주가 괴리·배당수익률)과 거래대금에만
+  쓴다. 야간 수익률은 수정 시가 필드가 없어 `adj_close[t]/adj_close[t-1] × open[t]/close[t]`로 만든다
+  (이슈 #214)
 - `factor_id`, registry version, graph hash, data snapshot, parameters, as-of range가 재현성 키를 구성
 
 | # | Factor ID | Category | Preference | Required Equity fields | Min history | Status |
 |---:|---|---|---|---|---:|---|
-| 1 | `price.momentum_12_1` | price | high | `price.close` | 252 | implemented |
-| 2 | `price.momentum_6_1` | price | high | `price.close` | 126 | catalog_only |
-| 3 | `price.reversal_1m` | price | low | `price.close` | 21 | catalog_only |
-| 4 | `price.volatility_60d` | price | low | `price.close` | 60 | catalog_only |
-| 5 | `price.beta_252d` | price | low | `price.close`, `benchmark.close` | 252 | catalog_only |
-| 6 | `price.max_drawdown_252d` | price | low | `price.close` | 252 | catalog_only |
-| 7 | `price.distance_52w_high` | price | high | `price.close` | 252 | catalog_only |
-| 8 | `price.overnight_return_20d` | price | high | `price.open`, `price.close` | 21 | catalog_only |
+| 1 | `price.momentum_12_1` | price | high | `price.adj_close` | 252 | implemented |
+| 2 | `price.momentum_6_1` | price | high | `price.adj_close` | 126 | catalog_only |
+| 3 | `price.reversal_1m` | price | low | `price.adj_close` | 21 | catalog_only |
+| 4 | `price.volatility_60d` | price | low | `price.adj_close` | 60 | catalog_only |
+| 5 | `price.beta_252d` | price | low | `price.adj_close`, `benchmark.close` | 252 | catalog_only |
+| 6 | `price.max_drawdown_252d` | price | low | `price.adj_close` | 252 | catalog_only |
+| 7 | `price.distance_52w_high` | price | high | `price.adj_close` | 252 | catalog_only |
+| 8 | `price.overnight_return_20d` | price | high | `price.open`, `price.close`, `price.adj_close` | 21 | catalog_only |
 | 9 | `price.intraday_return_20d` | price | high | `price.open`, `price.close` | 21 | catalog_only |
-| 10 | `price.liquidity_amihud_20d` | price | low | `price.close`, `price.volume` | 21 | catalog_only |
+| 10 | `price.liquidity_amihud_20d` | price | low | `price.adj_close`, `price.close`, `price.volume` | 21 | catalog_only |
 | 11 | `financial.book_to_market` | financial | high | `financial.book_equity`, `price.market_cap` | 1 | implemented |
 | 12 | `financial.earnings_yield` | financial | high | `financial.net_income`, `price.market_cap` | 1 | catalog_only |
 | 13 | `financial.sales_to_price` | financial | high | `financial.revenue`, `price.market_cap` | 1 | catalog_only |
@@ -51,7 +59,7 @@
 | 38 | `short.borrow_utilization` | short | low | `short.borrowed_quantity`, `price.shares_outstanding` | 1 | catalog_only |
 | 39 | `short.short_covering` | short | high | `short.short_balance_ratio`, `price.close` | 20 | catalog_only |
 | 40 | `credit.margin_balance_change_20d` | credit | low | `credit.margin_balance` | 20 | implemented |
-| 41 | `credit.margin_balance_ratio` | credit | low | `credit.margin_balance`, `price.market_cap` | 1 | catalog_only |
+| 41 | `credit.margin_balance_ratio` | credit | low | `credit.margin_balance`, `price.shares_outstanding` | 1 | catalog_only |
 | 42 | `credit.credit_net_buy_20d` | credit | low | `credit.net_buy` | 20 | catalog_only |
 | 43 | `credit.collateral_ratio` | credit | high | `credit.collateral_value`, `credit.loan_value` | 1 | catalog_only |
 | 44 | `credit.forced_liquidation_pressure` | credit | low | `credit.forced_liquidation`, `price.trading_value` | 20 | catalog_only |
@@ -65,8 +73,8 @@
 ## M3 executable subset
 
 각 카테고리에서 하나씩, 총 7개 기본 graph를 제공합니다. 모든 graph는 같은 expression node 계약과
-validator/compiler/evaluator를 통과하며 UI(YAML source editor와 read-only projection)가 별도
-계산식을 소유하지 않습니다.
+validator/compiler/evaluator를 통과하며 UI(YAML source editor, 그리고 같은 source 위의 Form·Graph
+트랜잭션 편집기와 JSON/Diff read-only projection)가 별도 계산식을 소유하지 않습니다.
 
 | Category | Executable default | Core operation |
 |---|---|---|
@@ -75,5 +83,5 @@ validator/compiler/evaluator를 통과하며 UI(YAML source editor와 read-only 
 | consensus | `consensus.forward_eps_growth` | rolling forward EPS growth |
 | flow | `flow.foreign_net_buy_20d` | 20-session foreign net-buy mean |
 | short | `short.short_balance_ratio` | short balance ratio |
-| credit | `credit.margin_balance_change_20d` | 20-session margin balance delta |
+| credit | `credit.margin_balance_change_20d` | 20-session margin balance rate of change |
 | event | `event.earnings_surprise` | PIT earnings surprise |

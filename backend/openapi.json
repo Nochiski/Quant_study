@@ -1,6 +1,459 @@
 {
   "components": {
     "schemas": {
+      "ApplicableCondition": {
+        "properties": {
+          "equals": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equals"
+          },
+          "not_null": {
+            "title": "Not Null",
+            "type": "boolean"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pointer",
+          "equals",
+          "not_null"
+        ],
+        "title": "ApplicableCondition",
+        "type": "object"
+      },
+      "ApplicableWhen": {
+        "description": "Same row as `FIELD_APPLICABILITY`, in the shape both the schema and the contract publish.\n\n`all_of` must all hold for the field to be read. `owned_by_error` names the blocking rule that\nreports a violation instead of the `strategy.field.inapplicable` warning.",
+        "properties": {
+          "all_of": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicableCondition"
+            },
+            "title": "All Of",
+            "type": "array"
+          },
+          "description_key": {
+            "title": "Description Key",
+            "type": "string"
+          },
+          "owned_by_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owned By Error"
+          }
+        },
+        "required": [
+          "all_of",
+          "description_key",
+          "owned_by_error"
+        ],
+        "title": "ApplicableWhen",
+        "type": "object"
+      },
+      "Assistant409Response": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "assistant.no_running_turn": "#/components/schemas/AssistantNoRunningTurnDetail",
+                "assistant.turn_in_progress": "#/components/schemas/AssistantTurnInProgressDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssistantTurnInProgressDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantNoRunningTurnDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "Assistant409Response",
+        "type": "object"
+      },
+      "AssistantBaseUrlRejectedDetail": {
+        "properties": {
+          "code": {
+            "const": "assistant.base_url_rejected",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantBaseUrlRejectedDetail",
+        "type": "object"
+      },
+      "AssistantDocumentRefInvalidDetail": {
+        "description": "`document_ref`가 \"저장된 전략과 초안 중 정확히 하나\" 규칙을 어겼다.\n\nspec D6이 적어 둔 네 코드 밖이지만, 세션 목록 조회는 사이드바가 열릴 때마다 타는 경로라\n비거나 둘 다 채워진 참조가 실전에서 들어온다. 규칙을 판정하는 곳은 application의\n`DocumentRef`이고 여기서는 그 거절을 옮기기만 한다.",
+        "properties": {
+          "code": {
+            "const": "assistant.document_ref_invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantDocumentRefInvalidDetail",
+        "type": "object"
+      },
+      "AssistantEventEnvelopeView": {
+        "description": "SSE 프레임 하나의 payload. `sequence`는 `id:` 줄과 같은 값이다.",
+        "properties": {
+          "event": {
+            "discriminator": {
+              "mapping": {
+                "done": "#/components/schemas/DoneView",
+                "failure": "#/components/schemas/FailureView",
+                "proposal": "#/components/schemas/ProposalView",
+                "search_activity": "#/components/schemas/SearchActivityView",
+                "search_budget_exhausted": "#/components/schemas/SearchBudgetExhaustedView",
+                "text_delta": "#/components/schemas/TextDeltaView",
+                "thinking_summary": "#/components/schemas/ThinkingSummaryView",
+                "tool_call": "#/components/schemas/ToolCallView",
+                "tool_result": "#/components/schemas/ToolResultSummaryView",
+                "usage": "#/components/schemas/UsageView"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextDeltaView"
+              },
+              {
+                "$ref": "#/components/schemas/ThinkingSummaryView"
+              },
+              {
+                "$ref": "#/components/schemas/ToolCallView"
+              },
+              {
+                "$ref": "#/components/schemas/ToolResultSummaryView"
+              },
+              {
+                "$ref": "#/components/schemas/SearchActivityView"
+              },
+              {
+                "$ref": "#/components/schemas/SearchBudgetExhaustedView"
+              },
+              {
+                "$ref": "#/components/schemas/ProposalView"
+              },
+              {
+                "$ref": "#/components/schemas/UsageView"
+              },
+              {
+                "$ref": "#/components/schemas/DoneView"
+              },
+              {
+                "$ref": "#/components/schemas/FailureView"
+              }
+            ],
+            "title": "Event"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "turn_id",
+          "event"
+        ],
+        "title": "AssistantEventEnvelopeView",
+        "type": "object"
+      },
+      "AssistantNoActiveProviderDetail": {
+        "properties": {
+          "code": {
+            "const": "assistant.no_active_provider",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantNoActiveProviderDetail",
+        "type": "object"
+      },
+      "AssistantNoRunningTurnDetail": {
+        "properties": {
+          "code": {
+            "const": "assistant.no_running_turn",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantNoRunningTurnDetail",
+        "type": "object"
+      },
+      "AssistantNotFoundDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "assistant.session.not_found",
+              "assistant.turn.not_found",
+              "assistant.provider.not_found"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantNotFoundDetail",
+        "type": "object"
+      },
+      "AssistantNotFoundResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/AssistantNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "AssistantNotFoundResponse",
+        "type": "object"
+      },
+      "AssistantProbeFailedDetail": {
+        "description": "연결 테스트 실패. `message`는 `failure` 열거값이 정하는 고정 문구뿐이다.\n\nSDK 예외 문자열을 넣지 않는 것이 핵심이다. 공급자 인증 오류 본문은 키 조각을 그대로 담는\n일이 흔하고, 이 응답은 설정 화면에 그대로 뿌려진다(spec D2).",
+        "properties": {
+          "code": {
+            "const": "assistant.probe_failed",
+            "title": "Code",
+            "type": "string"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/ProbeFailure"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "failure"
+        ],
+        "title": "AssistantProbeFailedDetail",
+        "type": "object"
+      },
+      "AssistantProviderNotInstalledDetail": {
+        "properties": {
+          "code": {
+            "const": "assistant.provider_not_installed",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantProviderNotInstalledDetail",
+        "type": "object"
+      },
+      "AssistantResultUnavailableDetail": {
+        "description": "결과 세션이 가리키는 실행의 결과가 없다(결과 설명 spec R3·R7).\n\n모르는 실행이거나 끝나지 않았거나 실패했다. 실행 레지스트리가 프로세스 안에만 있어 backend를\n다시 시작한 뒤의 옛 결과 세션도 여기로 온다.",
+        "properties": {
+          "code": {
+            "const": "assistant.result_unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantResultUnavailableDetail",
+        "type": "object"
+      },
+      "AssistantSecretMissingDetail": {
+        "description": "프로파일은 있는데 키 파일에 그 키가 없다.\n\nspec D6이 적어 둔 네 코드 밖이지만, 이 상태는 사용자가 키 파일을 지우거나 다른 기기에서\nDB만 복사해 오면 실제로 생긴다. 500으로 떨어뜨리면 화면이 \"알 수 없는 오류\"만 보여 주고,\n다른 코드로 뭉개면 \"키를 다시 넣으세요\"라는 조치를 안내할 수 없다.",
+        "properties": {
+          "code": {
+            "const": "assistant.provider_secret_missing",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantSecretMissingDetail",
+        "type": "object"
+      },
+      "AssistantTurnContextMismatchDetail": {
+        "description": "턴 요청의 `context`가 세션 모드와 맞지 않는다(결과 설명 spec R5).\n\n전략 세션은 편집기 상태를 턴마다 받아야 하고, 결과 세션은 받지 않는다.",
+        "properties": {
+          "code": {
+            "const": "assistant.turn_context_mismatch",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantTurnContextMismatchDetail",
+        "type": "object"
+      },
+      "AssistantTurnInProgressDetail": {
+        "description": "세션에 이미 도는 턴이 있다.\n\n`turn_id`는 **조회 시점에 이미 종료 상태일 수 있다.** 러너는 종료 상태를 저장한 뒤에\n세션 슬롯을 풀기 때문에, 그 짧은 창에 도착한 시작 요청이 방금 끝난 턴의 id를 받는다.\n오차 방향을 \"아직 바쁘다\" 쪽으로 고정한 결과이므로, 이 409는 영구 거절이 아니라 잠깐\n뒤 다시 시도하면 되는 충돌이다.",
+        "properties": {
+          "code": {
+            "const": "assistant.turn_in_progress",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "turn_id": {
+            "description": "충돌한 턴. 조회 시점에 이미 종료 상태일 수 있으므로 짧게 재시도한다.",
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "turn_id"
+        ],
+        "title": "AssistantTurnInProgressDetail",
+        "type": "object"
+      },
+      "AssistantUnprocessableResponse": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "assistant.base_url_rejected": "#/components/schemas/AssistantBaseUrlRejectedDetail",
+                "assistant.document_ref_invalid": "#/components/schemas/AssistantDocumentRefInvalidDetail",
+                "assistant.no_active_provider": "#/components/schemas/AssistantNoActiveProviderDetail",
+                "assistant.probe_failed": "#/components/schemas/AssistantProbeFailedDetail",
+                "assistant.provider_not_installed": "#/components/schemas/AssistantProviderNotInstalledDetail",
+                "assistant.provider_secret_missing": "#/components/schemas/AssistantSecretMissingDetail",
+                "assistant.result_unavailable": "#/components/schemas/AssistantResultUnavailableDetail",
+                "assistant.turn_context_mismatch": "#/components/schemas/AssistantTurnContextMismatchDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssistantProviderNotInstalledDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantNoActiveProviderDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantProbeFailedDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantBaseUrlRejectedDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantSecretMissingDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantDocumentRefInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantResultUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantTurnContextMismatchDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "AssistantUnprocessableResponse",
+        "type": "object"
+      },
       "BacktestResultNotReadyDetail": {
         "properties": {
           "code": {
@@ -141,6 +594,16 @@
             "$ref": "#/components/schemas/ExecutionCore",
             "default": "rust"
           },
+          "environment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunEnvironment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "initial_cash": {
             "default": 100000000.0,
             "title": "Initial Cash",
@@ -221,6 +684,24 @@
               }
             ],
             "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.internal"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
           },
           "message": {
             "title": "Message",
@@ -359,6 +840,25 @@
         "title": "BacktestStrategyNotFoundResponse",
         "type": "object"
       },
+      "BacktestStrategyRequiresUpgradeDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.strategy.requires_upgrade",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestStrategyRequiresUpgradeDetail",
+        "type": "object"
+      },
       "BacktestStrategyStaleDetail": {
         "properties": {
           "code": {
@@ -396,8 +896,7 @@
             "discriminator": {
               "mapping": {
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
-                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
-                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
+                "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
               "propertyName": "code"
@@ -407,13 +906,10 @@
                 "$ref": "#/components/schemas/BacktestRunInvalidDetail"
               },
               {
+                "$ref": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail"
+              },
+              {
                 "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
-              },
-              {
-                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
-              },
-              {
-                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"
@@ -575,6 +1071,50 @@
           "coverage_gap"
         ],
         "title": "CellKind",
+        "type": "string"
+      },
+      "ChatMessageView": {
+        "description": "대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다(C-03).\n\n화면은 이 값으로 질문을 턴에 붙인다. `null`은 이 필드가 생기기 전에 저장돼 어느 턴 뒤에도 오지\n않는 메시지뿐이며, 화면은 그런 메시지를 어느 턴에도 달지 않는다.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ChatRole"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Id"
+          }
+        },
+        "required": [
+          "role",
+          "text",
+          "created_at",
+          "turn_id"
+        ],
+        "title": "ChatMessageView",
+        "type": "object"
+      },
+      "ChatRole": {
+        "enum": [
+          "user",
+          "assistant"
+        ],
+        "title": "ChatRole",
         "type": "string"
       },
       "ChoiceParameter": {
@@ -826,6 +1366,71 @@
         "title": "ConstantNode",
         "type": "object"
       },
+      "CreateProviderProfileRequest": {
+        "description": "프로파일 생성 요청. `secret`은 이 방향으로만 흐른다.",
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "secret": {
+            "description": "공급자 API 키. 요청 전용이며 어떤 응답에도 실리지 않는다.",
+            "minLength": 1,
+            "title": "Secret",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "secret"
+        ],
+        "title": "CreateProviderProfileRequest",
+        "type": "object"
+      },
+      "CreateSessionRequest": {
+        "properties": {
+          "document_ref": {
+            "$ref": "#/components/schemas/DocumentRefView"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_ref"
+        ],
+        "title": "CreateSessionRequest",
+        "type": "object"
+      },
       "CrossSectionalNode": {
         "properties": {
           "input_node_id": {
@@ -868,7 +1473,8 @@
         "enum": [
           "rank",
           "zscore",
-          "winsorize"
+          "winsorize",
+          "demean"
         ],
         "title": "CrossSectionalOperator",
         "type": "string"
@@ -944,7 +1550,8 @@
             "default": "daily"
           },
           "market": {
-            "$ref": "#/components/schemas/Market"
+            "$ref": "#/components/schemas/Market",
+            "default": "KRX"
           },
           "start": {
             "format": "date",
@@ -957,7 +1564,6 @@
           }
         },
         "required": [
-          "market",
           "start",
           "end",
           "universe_id"
@@ -1129,6 +1735,76 @@
         ],
         "title": "DiffKind",
         "type": "string"
+      },
+      "DocumentRefView": {
+        "description": "세션이 붙은 대상. 저장된 전략·초안·백테스트 실행 중 정확히 하나다(application이 검증한다).\n\n`run_id`에 붙은 세션은 결과 설명 전용이다(결과 설명 spec R3·R5).",
+        "properties": {
+          "draft_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          }
+        },
+        "title": "DocumentRefView",
+        "type": "object"
+      },
+      "DoneView": {
+        "properties": {
+          "stop_reason": {
+            "title": "Stop Reason",
+            "type": "string"
+          },
+          "type": {
+            "const": "done",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "stop_reason"
+        ],
+        "title": "DoneView",
+        "type": "object"
       },
       "DrawdownPoint": {
         "properties": {
@@ -1345,10 +2021,6 @@
             "default": 15.0,
             "title": "Fee Bps",
             "type": "number"
-          },
-          "order_style": {
-            "$ref": "#/components/schemas/OrderStyle",
-            "default": "market"
           },
           "participation_rate": {
             "default": 0.1,
@@ -1673,9 +2345,6 @@
             "title": "Minimum History Sessions",
             "type": "integer"
           },
-          "missing_policy": {
-            "$ref": "#/components/schemas/MissingPolicy"
-          },
           "output_unit": {
             "title": "Output Unit",
             "type": "string"
@@ -1708,7 +2377,6 @@
           "output_unit",
           "required_field_ids",
           "minimum_history_sessions",
-          "missing_policy",
           "availability",
           "default_graph"
         ],
@@ -1910,7 +2578,8 @@
         "properties": {
           "missing_policy": {
             "$ref": "#/components/schemas/MissingPolicy",
-            "default": "drop"
+            "default": "drop",
+            "deprecated": true
           },
           "nodes": {
             "items": {
@@ -1980,6 +2649,16 @@
           },
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
+          },
+          "missing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MissingPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "parameter_ids": {
             "default": [],
@@ -2166,6 +2845,16 @@
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
           },
+          "missing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MissingPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "parameters": {
             "default": [],
             "items": {
@@ -2208,6 +2897,7 @@
             "type": "string"
           },
           "weight": {
+            "default": 1.0,
             "title": "Weight",
             "type": "number"
           }
@@ -2216,26 +2906,9 @@
           "factor_id",
           "label",
           "direction",
-          "weight",
           "graph"
         ],
         "title": "FactorSignal",
-        "type": "object"
-      },
-      "FactorStep": {
-        "properties": {
-          "factors": {
-            "items": {
-              "$ref": "#/components/schemas/FactorSignal"
-            },
-            "title": "Factors",
-            "type": "array"
-          }
-        },
-        "required": [
-          "factors"
-        ],
-        "title": "FactorStep",
         "type": "object"
       },
       "FactorValidationIssue": {
@@ -2316,6 +2989,48 @@
         "title": "FactorValue",
         "type": "object"
       },
+      "FailureCode": {
+        "description": "턴이 정상 종료하지 못한 사유.\n\n`Failure.message`는 이 코드별 고정 문장에 진단 컨텍스트만 붙인다. SDK 예외 문자열·응답 본문을\n그대로 넣지 않는다(spec D2: 비밀 스크럽). 예외는 코드로만 매핑한다.",
+        "enum": [
+          "auth",
+          "rate_limit",
+          "network",
+          "refusal",
+          "provider",
+          "internal",
+          "tool_rounds_exceeded",
+          "timeout",
+          "cancelled",
+          "proposal_invalid",
+          "output_truncated",
+          "token_budget_exceeded"
+        ],
+        "title": "FailureCode",
+        "type": "string"
+      },
+      "FailureView": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/FailureCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "const": "failure",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "code",
+          "message"
+        ],
+        "title": "FailureView",
+        "type": "object"
+      },
       "FieldCatalogFacets": {
         "properties": {
           "dataset_ids": {
@@ -2349,8 +3064,18 @@
         "type": "object"
       },
       "FieldContract": {
-        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
+        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
         "properties": {
+          "applicable_when": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApplicableWhen"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "applied_stage": {
             "anyOf": [
               {
@@ -2397,6 +3122,22 @@
           },
           "default": {
             "title": "Default"
+          },
+          "default_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default From"
+          },
+          "deprecated": {
+            "default": false,
+            "title": "Deprecated",
+            "type": "boolean"
           },
           "description_key": {
             "anyOf": [
@@ -3061,11 +3802,102 @@
         "title": "NodeValueType",
         "type": "string"
       },
-      "OrderStyle": {
+      "OperatorAvailability": {
+        "description": "정의 시점의 가용성. 실제 판정(어댑터 capability)은 P2-04이 추가한다.",
         "enum": [
-          "market"
+          "available",
+          "unsupported"
         ],
-        "title": "OrderStyle",
+        "title": "OperatorAvailability",
+        "type": "string"
+      },
+      "OperatorDefinition": {
+        "description": "`(kind, operator)` 조합 하나에 대한 화면용 정의.",
+        "properties": {
+          "arity": {
+            "title": "Arity",
+            "type": "integer"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/OperatorAvailability"
+          },
+          "description_key": {
+            "title": "Description Key",
+            "type": "string"
+          },
+          "example": {
+            "title": "Example",
+            "type": "string"
+          },
+          "formula_key": {
+            "title": "Formula Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "operator": {
+            "title": "Operator",
+            "type": "string"
+          },
+          "output_type_rule": {
+            "$ref": "#/components/schemas/OutputTypeRule"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/OperatorParameter"
+            },
+            "title": "Params",
+            "type": "array"
+          },
+          "unit_rule": {
+            "$ref": "#/components/schemas/UnitRule"
+          }
+        },
+        "required": [
+          "kind",
+          "operator",
+          "arity",
+          "params",
+          "output_type_rule",
+          "unit_rule",
+          "availability",
+          "description_key",
+          "formula_key",
+          "example"
+        ],
+        "title": "OperatorDefinition",
+        "type": "object"
+      },
+      "OperatorParameter": {
+        "description": "연산자가 읽는 노드 property 하나. 필수 여부는 노드 dataclass의 기본값이 정한다.",
+        "properties": {
+          "property_name": {
+            "title": "Property Name",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "property_name",
+          "required"
+        ],
+        "title": "OperatorParameter",
+        "type": "object"
+      },
+      "OutputTypeRule": {
+        "description": "`_validation.py`가 이 연산자의 출력 `NodeValueType`을 정하는 방식.",
+        "enum": [
+          "same_as_input",
+          "numeric_series",
+          "numeric_if_any_series",
+          "boolean_series"
+        ],
+        "title": "OutputTypeRule",
         "type": "string"
       },
       "Page_BacktestRunSummary_": {
@@ -3426,6 +4258,16 @@
       },
       "PortfolioPreviewRequest": {
         "properties": {
+          "environment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunEnvironment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "spec": {
             "$ref": "#/components/schemas/StrategySpec"
           }
@@ -3604,6 +4446,265 @@
           "detail"
         ],
         "title": "PortfolioUnprocessableResponse",
+        "type": "object"
+      },
+      "ProbeFailure": {
+        "description": "연결 테스트가 실패한 사유.\n\n화면이 \"키를 확인하세요\"와 \"잠시 후 다시\"를 구분하려면 필요하다.",
+        "enum": [
+          "auth",
+          "model_not_found",
+          "network",
+          "rate_limit",
+          "unknown"
+        ],
+        "title": "ProbeFailure",
+        "type": "string"
+      },
+      "ProbeResultView": {
+        "description": "연결 테스트 결과. `message`는 `failure`에서 유도된 고정 문구다(spec D2).",
+        "properties": {
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProbeFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "message",
+          "latency_ms",
+          "failure"
+        ],
+        "title": "ProbeResultView",
+        "type": "object"
+      },
+      "ProposalCompileView": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalDiagnosticView"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Hash"
+          }
+        },
+        "required": [
+          "ok",
+          "spec_hash",
+          "diagnostics"
+        ],
+        "title": "ProposalCompileView",
+        "type": "object"
+      },
+      "ProposalDiagnosticView": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pointer",
+          "message",
+          "severity"
+        ],
+        "title": "ProposalDiagnosticView",
+        "type": "object"
+      },
+      "ProposalView": {
+        "properties": {
+          "proposal": {
+            "$ref": "#/components/schemas/StrategyProposalView"
+          },
+          "type": {
+            "const": "proposal",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "proposal"
+        ],
+        "title": "ProposalView",
+        "type": "object"
+      },
+      "ProviderKind": {
+        "description": "지원 공급자. 값은 저장·전송 계약이므로 화면 이름(Claude/Codex)과 분리한다.",
+        "enum": [
+          "anthropic",
+          "openai"
+        ],
+        "title": "ProviderKind",
+        "type": "string"
+      },
+      "ProviderKindView": {
+        "description": "설정 화면이 \"설치 필요\"를 그리는 데 필요한 사실.",
+        "properties": {
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          }
+        },
+        "required": [
+          "kind",
+          "installed",
+          "default_model"
+        ],
+        "title": "ProviderKindView",
+        "type": "object"
+      },
+      "ProviderProfileView": {
+        "description": "저장된 프로파일 하나. 키 자리에는 꼬리 4자리뿐이고, 짧은 키는 그마저 `null`이다.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "secret_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret Tail"
+          }
+        },
+        "required": [
+          "profile_id",
+          "kind",
+          "label",
+          "model",
+          "base_url",
+          "created_at",
+          "active",
+          "secret_tail"
+        ],
+        "title": "ProviderProfileView",
+        "type": "object"
+      },
+      "ProvidersView": {
+        "properties": {
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderKindView"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderProfileView"
+            },
+            "title": "Profiles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kinds",
+          "profiles"
+        ],
+        "title": "ProvidersView",
         "type": "object"
       },
       "RawArtifactBundle": {
@@ -4524,6 +5625,10 @@
           "origin": {
             "$ref": "#/components/schemas/RevisionOrigin"
           },
+          "requires_upgrade": {
+            "title": "Requires Upgrade",
+            "type": "boolean"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -4565,7 +5670,8 @@
           "origin",
           "created_at",
           "source_format",
-          "source_hash"
+          "source_hash",
+          "requires_upgrade"
         ],
         "title": "RevisionSummary",
         "type": "object"
@@ -4638,6 +5744,83 @@
         "title": "RollingMetricPoint",
         "type": "object"
       },
+      "RunEnvironment": {
+        "description": "한 번의 실행이 놓인 환경 — 시장·빈도·기간·유니버스·체결·비용·결측 정책(spec D6).\n\n전략 문서가 아니라 실행이 소유하는 사실이다. 같은 전략을 다른 기간·유니버스·수수료로\n돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도\n전략 revision 이 늘지 않는다.\n\nenum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,\n`domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`\n이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가\n순환한다.",
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "fee_bps": {
+            "default": 15.0,
+            "title": "Fee Bps",
+            "type": "number"
+          },
+          "frequency": {
+            "$ref": "#/components/schemas/DataFrequency",
+            "default": "daily"
+          },
+          "market": {
+            "$ref": "#/components/schemas/Market",
+            "default": "KRX"
+          },
+          "missing": {
+            "$ref": "#/components/schemas/MissingPolicy",
+            "default": "drop"
+          },
+          "participation_rate": {
+            "default": 0.1,
+            "title": "Participation Rate",
+            "type": "number"
+          },
+          "slippage_bps": {
+            "default": 10.0,
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/ExecutionTiming",
+            "default": "next_open"
+          },
+          "universe_id": {
+            "title": "Universe Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "universe_id"
+        ],
+        "title": "RunEnvironment",
+        "type": "object"
+      },
+      "RunEnvironmentSchema": {
+        "description": "실행 설정(`RunEnvironment`)의 런타임 JSON Schema; `schema_hash` 가 ETag 다.\n\n전략 authoring 문서 스키마(`StrategyDocumentSchema`)와 별개 산출물이다 — 문서에는\n`schema_version` 이 있고 실행 설정에는 없다. 프론트 실행 설정 패널이 기본값·enum 을 손으로\n적지 않게 하는 경로다(spec D6).",
+        "properties": {
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "schema_hash": {
+            "title": "Schema Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_hash",
+          "schema"
+        ],
+        "title": "RunEnvironmentSchema",
+        "type": "object"
+      },
       "RunManifest": {
         "description": "What a finished run was made of.\n\n`strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run\nexecuted one strategy.",
         "properties": {
@@ -4664,6 +5847,13 @@
           },
           "engine_version": {
             "title": "Engine Version",
+            "type": "string"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/RunEnvironment"
+          },
+          "environment_hash": {
+            "title": "Environment Hash",
             "type": "string"
           },
           "fee_bps": {
@@ -4739,6 +5929,8 @@
           "fee_bps",
           "slippage_bps",
           "participation_rate",
+          "environment",
+          "environment_hash",
           "strategy_provenance"
         ],
         "title": "RunManifest",
@@ -4890,6 +6082,10 @@
       },
       "SavedStrategy": {
         "properties": {
+          "requires_upgrade": {
+            "title": "Requires Upgrade",
+            "type": "boolean"
+          },
           "spec": {
             "$ref": "#/components/schemas/StrategySpec"
           },
@@ -4900,7 +6096,8 @@
         },
         "required": [
           "spec",
-          "spec_hash"
+          "spec_hash",
+          "requires_upgrade"
         ],
         "title": "SavedStrategy",
         "type": "object"
@@ -4927,6 +6124,48 @@
           "kind"
         ],
         "title": "SavedSubgraphNode",
+        "type": "object"
+      },
+      "SearchActivityView": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceView"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "type": {
+            "const": "search_activity",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "query",
+          "sources"
+        ],
+        "title": "SearchActivityView",
+        "type": "object"
+      },
+      "SearchBudgetExhaustedView": {
+        "description": "검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.\n\n본문 필드가 없다. 화면 문구는 frontend가 로케일별로 소유하고, 모델에게 보낸 지시문은 wire에\n싣지 않는다(C-03).",
+        "properties": {
+          "type": {
+            "const": "search_budget_exhausted",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "SearchBudgetExhaustedView",
         "type": "object"
       },
       "SecurityRef": {
@@ -4965,25 +6204,113 @@
         "title": "SelectionMethod",
         "type": "string"
       },
-      "SignalMethod": {
-        "enum": [
-          "weighted_sum",
-          "rank_threshold"
+      "SessionHistoryView": {
+        "description": "사이드바가 새로 열릴 때 한 번에 복구하는 이력.\n\n이벤트를 함께 싣는 이유는 spec D7의 복구 규칙 때문이다. 스트림을 열기도 전에 끝난 턴은\n`GET /sessions/{id}/events`가 409로 거절하므로, 그 턴의 이벤트를 볼 통로가 여기뿐이다.\n\n`usage`는 그 `events`를 접은 값이다. 같은 이력에서 파생되므로 둘이 어긋날 수 없다.",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AssistantEventEnvelopeView"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageView"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionView"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnView"
+            },
+            "title": "Turns",
+            "type": "array"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/SessionUsageView"
+          }
+        },
+        "required": [
+          "session",
+          "messages",
+          "turns",
+          "events",
+          "usage"
         ],
-        "title": "SignalMethod",
-        "type": "string"
+        "title": "SessionHistoryView",
+        "type": "object"
+      },
+      "SessionUsageView": {
+        "description": "세션 누적과 턴별 내역. 이벤트 이력에서 파생되며 저장되지 않는다.",
+        "properties": {
+          "provider_calls": {
+            "title": "Provider Calls",
+            "type": "integer"
+          },
+          "search_uses": {
+            "title": "Search Uses",
+            "type": "integer"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenTotalsView"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnUsageView"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tokens",
+          "search_uses",
+          "provider_calls",
+          "turns"
+        ],
+        "title": "SessionUsageView",
+        "type": "object"
+      },
+      "SessionView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_ref": {
+            "$ref": "#/components/schemas/DocumentRefView"
+          },
+          "provider_profile_id": {
+            "title": "Provider Profile Id",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "document_ref",
+          "provider_profile_id",
+          "created_at",
+          "title"
+        ],
+        "title": "SessionView",
+        "type": "object"
       },
       "SignalStep": {
         "properties": {
-          "entry_percentile": {
-            "default": 0.1,
-            "title": "Entry Percentile",
-            "type": "number"
-          },
-          "method": {
-            "$ref": "#/components/schemas/SignalMethod",
-            "default": "weighted_sum"
-          },
           "regime_field_id": {
             "anyOf": [
               {
@@ -5122,6 +6449,49 @@
         "title": "SourceRange",
         "type": "object"
       },
+      "SourceView": {
+        "properties": {
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "SourceView",
+        "type": "object"
+      },
+      "StartTurnRequest": {
+        "description": "턴 시작 요청. `context`는 전략 세션에만 싣는다.\n\n결과 세션은 서버가 실행 결과를 읽어 요약하므로 문서 컨텍스트가 없다. 모드와 맞지 않으면 422\n`assistant.turn_context_mismatch`다(결과 설명 spec R5·R7).",
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnContextPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "StartTurnRequest",
+        "type": "object"
+      },
       "StrategyDocument": {
         "description": "A stored revision as an editor sees it: exact source plus what it compiles to.\n\n`generated` is True when the revision predates document authoring (legacy JSON API) and the\nsource shown is a canonical JSON projection of the stored spec, not text an author wrote.",
         "properties": {
@@ -5139,6 +6509,10 @@
           },
           "origin": {
             "$ref": "#/components/schemas/RevisionOrigin"
+          },
+          "requires_upgrade": {
+            "title": "Requires Upgrade",
+            "type": "boolean"
           },
           "revision": {
             "title": "Revision",
@@ -5179,7 +6553,8 @@
           "schema_version",
           "origin",
           "created_at",
-          "generated"
+          "generated",
+          "requires_upgrade"
         ],
         "title": "StrategyDocument",
         "type": "object"
@@ -5249,6 +6624,101 @@
         "title": "StrategyDocumentContractResponse",
         "type": "object"
       },
+      "StrategyDocumentInvalidDetail": {
+        "description": "`_invalid_document_compiled`가 내보내는 모양: compile·save·revise·upgrade가 공유한다.",
+        "properties": {
+          "code": {
+            "const": "strategy_document.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDiagnostic"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "source_hash",
+          "schema_version",
+          "diagnostics"
+        ],
+        "title": "StrategyDocumentInvalidDetail",
+        "type": "object"
+      },
+      "StrategyDocumentInvalidResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDocumentInvalidDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDocumentInvalidResponse",
+        "type": "object"
+      },
+      "StrategyDocumentNotUpgradeableDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy_document.not_upgradeable",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          }
+        },
+        "required": [
+          "code",
+          "schema_version",
+          "message"
+        ],
+        "title": "StrategyDocumentNotUpgradeableDetail",
+        "type": "object"
+      },
+      "StrategyDocumentNotUpgradeableResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDocumentNotUpgradeableDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDocumentNotUpgradeableResponse",
+        "type": "object"
+      },
       "StrategyDocumentSchema": {
         "description": "Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.",
         "properties": {
@@ -5272,6 +6742,42 @@
           "schema"
         ],
         "title": "StrategyDocumentSchema",
+        "type": "object"
+      },
+      "StrategyDocumentUpgradeDriftDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy_document.upgrade_drift",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pointer",
+          "message"
+        ],
+        "title": "StrategyDocumentUpgradeDriftDetail",
+        "type": "object"
+      },
+      "StrategyDocumentUpgradeDriftResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDocumentUpgradeDriftDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDocumentUpgradeDriftResponse",
         "type": "object"
       },
       "StrategyDraft": {
@@ -5503,7 +7009,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "default": "1.0",
+            "default": "1.1",
             "title": "Schema Version",
             "type": "string"
           },
@@ -5517,6 +7023,74 @@
           "revision"
         ],
         "title": "StrategyIdentity",
+        "type": "object"
+      },
+      "StrategyOperatorCatalog": {
+        "description": "그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.\n\n문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,\n연산자 목록·arity·가용성을 손으로 적지 않는다.",
+        "properties": {
+          "catalog_hash": {
+            "title": "Catalog Hash",
+            "type": "string"
+          },
+          "operators": {
+            "items": {
+              "$ref": "#/components/schemas/OperatorDefinition"
+            },
+            "title": "Operators",
+            "type": "array"
+          }
+        },
+        "required": [
+          "catalog_hash",
+          "operators"
+        ],
+        "title": "StrategyOperatorCatalog",
+        "type": "object"
+      },
+      "StrategyProposalView": {
+        "properties": {
+          "compile": {
+            "$ref": "#/components/schemas/ProposalCompileView"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "source_format": {
+            "const": "yaml",
+            "title": "Source Format",
+            "type": "string"
+          },
+          "source_text": {
+            "title": "Source Text",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceView"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "summary",
+          "rationale",
+          "sources",
+          "source_text",
+          "source_format",
+          "compile"
+        ],
+        "title": "StrategyProposalView",
         "type": "object"
       },
       "StrategyProvenance": {
@@ -5631,17 +7205,31 @@
             "$ref": "#/components/schemas/DataStep"
           },
           "description": {
+            "default": "",
             "title": "Description",
             "type": "string"
           },
           "eligibility": {
-            "$ref": "#/components/schemas/EligibilityStep"
+            "$ref": "#/components/schemas/EligibilityStep",
+            "default": {
+              "rules": []
+            }
           },
           "execution": {
-            "$ref": "#/components/schemas/ExecutionStep"
+            "$ref": "#/components/schemas/ExecutionStep",
+            "default": {
+              "fee_bps": 15.0,
+              "participation_rate": 0.1,
+              "slippage_bps": 10.0,
+              "timing": "next_open"
+            }
           },
           "factors": {
-            "$ref": "#/components/schemas/FactorStep"
+            "items": {
+              "$ref": "#/components/schemas/FactorSignal"
+            },
+            "title": "Factors",
+            "type": "array"
           },
           "identity": {
             "$ref": "#/components/schemas/StrategyIdentity"
@@ -5665,13 +7253,33 @@
             "type": "array"
           },
           "portfolio": {
-            "$ref": "#/components/schemas/PortfolioStep"
+            "$ref": "#/components/schemas/PortfolioStep",
+            "default": {
+              "minimum_trade_weight": 0.0,
+              "rebalance": "monthly",
+              "rebalance_every_n_sessions": 21,
+              "selection_count": 20,
+              "selection_method": "top_n",
+              "selection_percentile": 0.1,
+              "short_selection_count": 20,
+              "side": "long_only",
+              "turnover_buffer_count": 0,
+              "weighting": "equal"
+            }
           },
           "risk": {
-            "$ref": "#/components/schemas/RiskStep"
+            "$ref": "#/components/schemas/RiskStep",
+            "default": {
+              "gross_exposure": 1.0,
+              "max_name_weight": 0.1,
+              "max_sector_weight": 0.3,
+              "net_exposure": 1.0,
+              "sector_neutral": false
+            }
           },
           "signal": {
-            "$ref": "#/components/schemas/SignalStep"
+            "$ref": "#/components/schemas/SignalStep",
+            "default": {}
           },
           "title": {
             "title": "Title",
@@ -5681,14 +7289,8 @@
         "required": [
           "identity",
           "title",
-          "description",
           "data",
-          "eligibility",
-          "factors",
-          "signal",
-          "portfolio",
-          "risk",
-          "execution"
+          "factors"
         ],
         "title": "StrategySpec",
         "type": "object"
@@ -5698,6 +7300,10 @@
           "latest_revision": {
             "title": "Latest Revision",
             "type": "integer"
+          },
+          "requires_upgrade": {
+            "title": "Requires Upgrade",
+            "type": "boolean"
           },
           "spec_hash": {
             "title": "Spec Hash",
@@ -5722,7 +7328,8 @@
           "title",
           "latest_revision",
           "spec_hash",
-          "updated_at"
+          "updated_at",
+          "requires_upgrade"
         ],
         "title": "StrategySummary",
         "type": "object"
@@ -5848,6 +7455,16 @@
               }
             ],
             "title": "As Of"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunEnvironment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "factor_id": {
             "minLength": 1,
@@ -6199,6 +7816,44 @@
         "title": "TargetTape",
         "type": "object"
       },
+      "TextDeltaView": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "text_delta",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "TextDeltaView",
+        "type": "object"
+      },
+      "ThinkingSummaryView": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "thinking_summary",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "ThinkingSummaryView",
+        "type": "object"
+      },
       "TimeSeriesNode": {
         "properties": {
           "input_node_id": {
@@ -6248,6 +7903,104 @@
         ],
         "title": "TimeSeriesOperator",
         "type": "string"
+      },
+      "TokenTotalsView": {
+        "description": "토큰 종류별 합. 종류가 늘면 여기에 필드를 더한다(application `TokenTotals`와 같은 이름).\n\n입력은 분리형이다. `input_tokens`는 캐시 읽기·쓰기를 **뺀** 성분이고 캐시 성분은 각자 자기\n칸을 가지며, 세 칸은 겹치지 않는다. 화면이 한 숫자만 필요하면 `total_input_tokens`를 읽는다 —\n성분을 화면에서 다시 더하면 합산 규칙의 owner가 둘이 된다.",
+        "properties": {
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "total_input_tokens": {
+            "title": "Total Input Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "total_input_tokens"
+        ],
+        "title": "TokenTotalsView",
+        "type": "object"
+      },
+      "ToolCallView": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "const": "tool_call",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "arguments"
+        ],
+        "title": "ToolCallView",
+        "type": "object"
+      },
+      "ToolResultSummaryView": {
+        "properties": {
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "type": {
+            "const": "tool_result",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "ok",
+          "summary"
+        ],
+        "title": "ToolResultSummaryView",
+        "type": "object"
       },
       "TraceCancelledDetail": {
         "properties": {
@@ -6372,6 +8125,25 @@
         "title": "TraceStrategyNotFoundResponse",
         "type": "object"
       },
+      "TraceStrategyRequiresUpgradeDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.strategy.requires_upgrade",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceStrategyRequiresUpgradeDetail",
+        "type": "object"
+      },
       "TraceStrategyStaleDetail": {
         "properties": {
           "code": {
@@ -6413,13 +8185,17 @@
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
                 "trace.capability.unsupported": "#/components/schemas/TraceCapabilityUnsupportedDetail",
                 "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
-                "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail"
+                "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail",
+                "trace.strategy.requires_upgrade": "#/components/schemas/TraceStrategyRequiresUpgradeDetail"
               },
               "propertyName": "code"
             },
             "oneOf": [
               {
                 "$ref": "#/components/schemas/TraceRequestInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TraceStrategyRequiresUpgradeDetail"
               },
               {
                 "$ref": "#/components/schemas/TraceEngineIncompatibleDetail"
@@ -6457,6 +8233,164 @@
         ],
         "title": "TraceValueStatus",
         "type": "string"
+      },
+      "TurnAcceptedView": {
+        "description": "202 응답. `accepted_sequence`를 그대로 `after_sequence`로 써서 스트림을 연다.",
+        "properties": {
+          "accepted_sequence": {
+            "title": "Accepted Sequence",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TurnStatus"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id",
+          "session_id",
+          "status",
+          "accepted_sequence",
+          "started_at"
+        ],
+        "title": "TurnAcceptedView",
+        "type": "object"
+      },
+      "TurnContextPayload": {
+        "description": "한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7).",
+        "properties": {
+          "diagnostics": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "source_format": {
+            "default": "yaml",
+            "title": "Source Format",
+            "type": "string"
+          },
+          "source_text": {
+            "title": "Source Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_text"
+        ],
+        "title": "TurnContextPayload",
+        "type": "object"
+      },
+      "TurnStatus": {
+        "description": "진행 중 턴의 영속 상태. 종료 상태 세 개는 다시 바뀌지 않는다.",
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TurnStatus",
+        "type": "string"
+      },
+      "TurnUsageView": {
+        "description": "턴 하나가 쓴 양. `provider_calls`는 adapter가 공급자를 실제로 부른 횟수다.",
+        "properties": {
+          "provider_calls": {
+            "title": "Provider Calls",
+            "type": "integer"
+          },
+          "search_uses": {
+            "title": "Search Uses",
+            "type": "integer"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenTotalsView"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id",
+          "tokens",
+          "search_uses",
+          "provider_calls"
+        ],
+        "title": "TurnUsageView",
+        "type": "object"
+      },
+      "TurnView": {
+        "properties": {
+          "accepted_sequence": {
+            "title": "Accepted Sequence",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TurnStatus"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id",
+          "session_id",
+          "status",
+          "accepted_sequence",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "TurnView",
+        "type": "object"
       },
       "UnaryNode": {
         "properties": {
@@ -6500,13 +8434,19 @@
       "UnaryOperator": {
         "enum": [
           "negate",
-          "lag",
-          "rank",
-          "zscore",
-          "winsorize",
-          "neutralize"
+          "lag"
         ],
         "title": "UnaryOperator",
+        "type": "string"
+      },
+      "UnitRule": {
+        "description": "`_validation.py`가 이 연산자의 출력 단위를 정하는 방식.",
+        "enum": [
+          "same_as_input",
+          "combined",
+          "boolean"
+        ],
+        "title": "UnitRule",
         "type": "string"
       },
       "UniverseCoverageSummary": {
@@ -6674,6 +8614,68 @@
         "title": "UniversePreview",
         "type": "object"
       },
+      "UpgradedDocument": {
+        "description": "A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3).",
+        "properties": {
+          "compiled": {
+            "$ref": "#/components/schemas/CompiledDocument"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "source",
+          "source_hash",
+          "compiled"
+        ],
+        "title": "UpgradedDocument",
+        "type": "object"
+      },
+      "UsageView": {
+        "description": "공급자 호출 한 번의 사용량. 세 입력 칸은 겹치지 않는다(도메인 `Usage` 불변식).\n\n총입력은 싣지 않는다. 이벤트는 이력에 그대로 쌓이므로, 성분과 합을 함께 저장하면 둘이\n어긋난 이력이 남는다. 합이 필요한 화면은 세션 사용량의 `total_input_tokens`를 읽는다.",
+        "properties": {
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "type": {
+            "const": "usage",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "input_tokens",
+          "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens"
+        ],
+        "title": "UsageView",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -6800,6 +8802,683 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/assistant/providers": {
+      "get": {
+        "description": "가용 공급자 종류와 등록된 프로파일. 키 자리에는 꼬리 4자리만 있다.",
+        "operationId": "listAssistantProviders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Assistant Providers",
+        "tags": [
+          "assistant"
+        ]
+      },
+      "post": {
+        "description": "연결 테스트를 통과한 프로파일만 저장된다(spec D6).",
+        "operationId": "createAssistantProvider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderProfileView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssistantUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Createassistantprovider"
+                }
+              }
+            },
+            "description": "A coded assistant rejection or a malformed request envelope"
+          }
+        },
+        "summary": "Create Assistant Provider",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/providers/{profile_id}": {
+      "delete": {
+        "description": "프로파일과 그 키를 함께 지운다. 활성이었으면 application이 승계를 정한다.",
+        "operationId": "deleteAssistantProvider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantNotFoundResponse"
+                }
+              }
+            },
+            "description": "The session, turn or provider profile does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Assistant Provider",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/providers/{profile_id}/activate": {
+      "post": {
+        "operationId": "activateAssistantProvider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderProfileView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantNotFoundResponse"
+                }
+              }
+            },
+            "description": "The session, turn or provider profile does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Assistant Provider",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/providers/{profile_id}/test": {
+      "post": {
+        "description": "저장된 키로 연결을 다시 확인한다. 실패는 예외가 아니라 결과 값으로 돌려준다.",
+        "operationId": "testAssistantProvider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeResultView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantNotFoundResponse"
+                }
+              }
+            },
+            "description": "The session, turn or provider profile does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssistantUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Testassistantprovider"
+                }
+              }
+            },
+            "description": "A coded assistant rejection or a malformed request envelope"
+          }
+        },
+        "summary": "Test Assistant Provider",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions": {
+      "get": {
+        "description": "문서 하나(또는 백테스트 실행 하나)의 세션 목록.\n\n`document_ref`를 한 덩어리 문자열로 받지 않고 필드 셋으로 받는 이유는, 그래야 생성\nSDK가 타입을 그대로 만들고 서버도 다시 parse하지 않기 때문이다.",
+        "operationId": "listAssistantSessions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "strategy_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          },
+          {
+            "in": "query",
+            "name": "draft_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Draft Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionView"
+                  },
+                  "title": "Response Listassistantsessions",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssistantUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Listassistantsessions"
+                }
+              }
+            },
+            "description": "A coded assistant rejection or a malformed request envelope"
+          }
+        },
+        "summary": "List Assistant Sessions",
+        "tags": [
+          "assistant"
+        ]
+      },
+      "post": {
+        "operationId": "createAssistantSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssistantUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Createassistantsession"
+                }
+              }
+            },
+            "description": "A coded assistant rejection or a malformed request envelope"
+          }
+        },
+        "summary": "Create Assistant Session",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{session_id}": {
+      "get": {
+        "description": "메시지·턴·이벤트 이력 전부. 사이드바가 새로 열릴 때 한 번에 복구한다.\n\n**턴을 이벤트보다 먼저 읽는다.** 네 조회는 한 트랜잭션이 아니라서 그 사이 러너가\n마지막 이벤트를 저장하고 턴을 끝낼 수 있다. 이벤트를 먼저 읽으면 \"턴은 FAILED인데\n그 실패 이벤트는 목록에 없는\" 조합이 나가고, 화면은 이유 없이 멈춘 턴을 그린다 —\nspec D7의 복구 규칙이 이 응답 하나만 보기 때문에 그 이유는 영영 나오지 않는다.\n\n순서를 뒤집으면 창의 방향이 \"턴은 아직 RUNNING인데 이벤트는 더 와 있다\"가 된다.\n프론트 리듀서는 sequence 기준 멱등이라 여분 이벤트를 그대로 흡수하고, 다음 폴링이\n상태를 따라잡는다. 러너의 `_finish`가 택한 \"바쁘다 쪽으로만 틀린다\"와 같은 방향이다.\n\n`chat.messages`를 마지막에 읽는 것도 같은 이유로 안전하다. 부분 assistant 메시지\n저장은 `_close`에서 `_finish`보다 먼저 일어난다.",
+        "operationId": "getAssistantSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionHistoryView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantNotFoundResponse"
+                }
+              }
+            },
+            "description": "The session, turn or provider profile does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Assistant Session",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{session_id}/events": {
+      "get": {
+        "description": "진행 중 턴의 이벤트를 SSE로 흘린다.\n\n재개 위치는 `Last-Event-ID` 헤더가 있으면 그것, 없으면 `after_sequence` 쿼리다(spec D6).\n헤더가 이기는 이유는 그 값이 **클라이언트가 실제로 반영한 마지막 번호**이기 때문이다.\n쿼리는 최초 연결 때 적은 값이라 재연결 시점에는 이미 낡아 있다.\n\n진행 중 턴이 없으면 열지 않고 409로 거절한다. 스트림을 열어 두면 클라이언트는 \"곧 뭔가\n오겠지\"로 읽고 기다리지만, 이력에 이미 결말이 적힌 턴이라 아무것도 오지 않는다.",
+        "operationId": "streamAssistantEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_sequence",
+            "required": false,
+            "schema": {
+              "default": -1,
+              "minimum": -1,
+              "title": "After Sequence",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": -1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantEventEnvelopeView"
+                }
+              }
+            },
+            "description": "Server-sent events. Each frame carries one AssistantEventEnvelopeView as its data, and the frame id repeats that envelope's sequence."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantNotFoundResponse"
+                }
+              }
+            },
+            "description": "The session, turn or provider profile does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Assistant409Response"
+                }
+              }
+            },
+            "description": "A turn is already running, or no turn is running to stream"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Assistant Events",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{session_id}/turns": {
+      "post": {
+        "description": "턴을 시작하고 즉시 202로 답한다. 이벤트는 SSE로 따로 읽는다.",
+        "operationId": "startAssistantTurn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnAcceptedView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantNotFoundResponse"
+                }
+              }
+            },
+            "description": "The session, turn or provider profile does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Assistant409Response"
+                }
+              }
+            },
+            "description": "A turn is already running, or no turn is running to stream"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssistantUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Startassistantturn"
+                }
+              }
+            },
+            "description": "A coded assistant rejection or a malformed request envelope"
+          }
+        },
+        "summary": "Start Assistant Turn",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{session_id}/turns/{turn_id}/cancel": {
+      "post": {
+        "description": "취소 신호를 세운다. 이미 끝난 턴이면 그 상태를 그대로 돌려준다.",
+        "operationId": "cancelAssistantTurn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "title": "Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantNotFoundResponse"
+                }
+              }
+            },
+            "description": "The session, turn or provider profile does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Assistant Turn",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
     "/api/v1/backtests": {
       "get": {
         "operationId": "listBacktests",
@@ -7741,6 +10420,56 @@
         "summary": "Portfolio Preview"
       }
     },
+    "/api/v1/run-environments/schema": {
+      "get": {
+        "description": "실행 설정의 런타임 JSON Schema. ETag = 스키마 해시(일치하면 304).",
+        "operationId": "getRunEnvironmentSchema",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunEnvironmentSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Environment Schema"
+      }
+    },
     "/api/v1/strategies": {
       "get": {
         "description": "Latest immutable revision of every strategy, ordered by strategy id.",
@@ -8318,11 +11047,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Createstrategydocument"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Source has error-severity diagnostics, or malformed envelope"
           }
         },
         "summary": "Create Strategy Document"
@@ -8417,6 +11154,56 @@
         "summary": "Strategy Document Contract"
       }
     },
+    "/api/v1/strategy-documents/operators": {
+      "get": {
+        "description": "그래프 노드 연산자 정의 전부.\n\n입력 개수, 읽는 파라미터, 출력 타입·단위 규칙, 가용성, i18n 키를 담는다.\n\n팔레트·노드 라벨이 보일 수 있는 연산자 목록의 유일한 출처다. 소비자는 목록을 다시 적지\n않는다. ETag는 카탈로그 해시이며 If-None-Match가 맞으면 304로 답한다.",
+        "operationId": "getStrategyOperatorCatalog",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyOperatorCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Strategy Operator Catalog"
+      }
+    },
     "/api/v1/strategy-documents/schema": {
       "get": {
         "description": "Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match).",
@@ -8465,6 +11252,59 @@
           }
         },
         "summary": "Strategy Document Schema"
+      }
+    },
+    "/api/v1/strategy-documents/upgrade": {
+      "post": {
+        "description": "Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.\n\nThe rewrite must parse to exactly what the domain dict transform yields; otherwise the\nservice refuses with `strategy_document.upgrade_drift` rather than returning text that\nwould silently mean something else (spec D3).",
+        "operationId": "upgradeStrategyDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpgradedDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentNotUpgradeableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentUpgradeDriftResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Upgradestrategydocument"
+                }
+              }
+            },
+            "description": "Syntax errors, a non-1.0 document, or upgrade rule drift"
+          }
+        },
+        "summary": "Upgrade Strategy Document"
       }
     },
     "/api/v1/strategy-documents/{strategy_id}/revisions": {
@@ -8517,11 +11357,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Revisestrategydocument"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Source has error-severity diagnostics, or malformed envelope"
           }
         },
         "summary": "Revise Strategy Document"

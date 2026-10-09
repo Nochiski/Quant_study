@@ -127,7 +127,7 @@ describe("ExecutionPlanPanel", () => {
     render(
       <ExecutionPlanPanel
         state={readyState()}
-        selectedPointer="/factors/factors/0/graph/nodes/1/operator"
+        selectedPointer="/factors/0/graph/nodes/1/operator"
         onSelectPointer={vi.fn()}
       />,
     );
@@ -166,22 +166,20 @@ describe("ExecutionPlanPanel", () => {
       screen.getByRole("button", { name: /momentum 소스 열기/ }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/1",
+      "/factors/0/graph/nodes/1",
     );
     await user.click(
       screen.getByRole("button", { name: /close.*numeric_series.*KRW/ }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/0",
+      "/factors/0/graph/nodes/0",
     );
 
     await user.selectOptions(
       screen.getByRole("combobox", { name: "팩터 그래프" }),
       "1",
     );
-    expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/1/graph",
-    );
+    expect(onSelectPointer).toHaveBeenLastCalledWith("/factors/1/graph");
     expect(screen.getByTitle("b".repeat(64))).toBeInTheDocument();
   });
 
@@ -189,7 +187,7 @@ describe("ExecutionPlanPanel", () => {
     render(
       <ExecutionPlanPanel
         state={readyState()}
-        selectedPointer="/factors/factors/1/graph/nodes/0/field_id"
+        selectedPointer="/factors/1/graph/nodes/0/field_id"
         onSelectPointer={vi.fn()}
       />,
     );
@@ -227,7 +225,7 @@ describe("ExecutionPlanPanel", () => {
     render(
       <ExecutionPlanPanel
         state={state}
-        selectedPointer="/factors/factors/0"
+        selectedPointer="/factors/0"
         onSelectPointer={vi.fn()}
       />,
     );

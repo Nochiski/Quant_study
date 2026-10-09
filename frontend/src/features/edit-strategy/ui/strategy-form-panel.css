@@ -1,0 +1,188 @@
+.strategy-form {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+  overflow: auto;
+}
+
+.strategy-form__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.strategy-form__header > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.strategy-form__header span,
+.strategy-form__state,
+.strategy-form__hint,
+.strategy-form__description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__feedback {
+  margin: 0;
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__feedback--error,
+.strategy-form__invalid {
+  margin: 0;
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__warning {
+  margin: 0;
+  color: var(--status-warn);
+  font-size: var(--text-size-small);
+}
+
+/* 진단 본문은 배지 옆이 아니라 그 카드·필드 아래에 인라인으로 쌓인다(P1-04). */
+.strategy-form__diagnostics {
+  display: grid;
+  gap: 2px;
+}
+
+.strategy-form__field[aria-current="true"] {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--accent);
+}
+
+.strategy-form__section {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.strategy-form__section legend {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+/* passive 행(링크·const)의 라벨 span도 같은 규칙(P4-02 리뷰 010). */
+.strategy-form__field label,
+.strategy-form__field .strategy-form__label {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__unit {
+  color: var(--text-muted);
+}
+
+/* 라벨은 이름이 주다. 스키마 키는 보조 표기로 작고 흐리게 내려간다(P1-03). */
+.strategy-form__name {
+  font-weight: 600;
+}
+
+.strategy-form__key {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.strategy-form__control input,
+.strategy-form__control select {
+  min-width: 12rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.strategy-form__control input[type="checkbox"] {
+  min-width: auto;
+}
+
+/* 미작성 필드: 기본값이 회색 placeholder로 보인다(spec D6). */
+.strategy-form__field[data-written="false"] .strategy-form__control input,
+.strategy-form__field[data-written="false"] .strategy-form__control select {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.strategy-form__field[data-applicable="false"] label {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.strategy-form__section:disabled .strategy-form__control input,
+.strategy-form__section:disabled .strategy-form__control select {
+  opacity: 0.6;
+}
+
+.strategy-form__const {
+  padding: var(--space-1) var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+}
+
+.strategy-form__item {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border);
+}
+
+/* URL path가 가리키는 항목(Graph "Form에서 열기" 도착 지점, P5-03). */
+.strategy-form__item[aria-current="true"] {
+  border-left-color: var(--accent);
+}
+
+.strategy-form__item-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.strategy-form__badges {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.strategy-form__toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.strategy-form__toggle:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}

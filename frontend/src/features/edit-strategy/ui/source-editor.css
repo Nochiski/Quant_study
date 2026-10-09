@@ -1,0 +1,8 @@
+/* 편집기는 탭 패널의 남은 높이를 채운다 — 문제 목록이 패널 밖으로 올라가면서 생긴 빈 구멍을
+   없앤다(P1-01 리뷰 P2-1). */
+.source-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}

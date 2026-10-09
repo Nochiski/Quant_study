@@ -82,20 +82,129 @@ class ScalarConstraint:
         return True
 
 
-STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
-    ScalarConstraint(
-        pointer="/signal/entry_percentile",
-        code="strategy.signal.percentile",
-        stage=AppliedStage.SIGNAL,
-        unit=ContractUnit.RATIO,
-        display_unit="%",
-        minimum=0.0,
-        exclusive_minimum=True,
-        maximum=1.0,
-        example=0.1,
-        description_key="strategy.contract.signal.entry_percentile",
-        message="선택 비율은 0보다 크고 1 이하여야 합니다.",
+@dataclass(frozen=True)
+class ApplicabilityCondition:
+    """When a field is read by the pipeline: another field `equals` a value, or is `not_null`.
+
+    The condition is data so the runtime schema can publish it (`x-applicable-when`) and the
+    validator can evaluate it from the same row; neither restates the rule.
+    """
+
+    pointer: str
+    equals: str | None = None
+    not_null: bool = False
+
+    def __post_init__(self) -> None:
+        if (self.equals is None) == (not self.not_null):
+            raise ValueError(
+                "applicability condition must be exactly one of equals/not_null — "
+                f"pointer={self.pointer!r} equals={self.equals!r} not_null={self.not_null}"
+            )
+        if self.equals is not None and not isinstance(self.equals, str):
+            # 프론트는 `x-applicable-when.equals`를 JSON 값 그대로 비교한다. 문자열(enum 값)만
+            # 허용해야 Python 쪽 `str(value)` 비교와 어긋나지 않는다.
+            raise TypeError(
+                "applicability `equals` must be the enum's string value — "
+                f"pointer={self.pointer!r} equals={self.equals!r}"
+            )
+
+    @property
+    def path(self) -> str:
+        return self.pointer.strip("/").replace("/", ".")
+
+    def describe(self) -> str:
+        return f"{self.path} = {self.equals}" if self.equals is not None else f"{self.path} 설정"
+
+    def holds_for(self, spec: StrategySpec) -> bool:
+        value = resolve_scalar(spec, self.pointer)
+        if self.not_null:
+            return value is not None
+        return value is not None and str(getattr(value, "value", value)) == self.equals
+
+
+@dataclass(frozen=True)
+class FieldApplicability:
+    """A flat field that the pipeline reads only in one mode (spec D4).
+
+    Writing it in another mode is not an error — the flat 1.1 shape keeps defaults for every
+    field — but the value has no effect, so compile reports a warning when the document sets it
+    explicitly.
+    """
+
+    pointer: str
+    # 모두 성립해야 읽힌다(AND). 예: short_selection_count는 long_short이면서 top_n일 때만.
+    conditions: tuple[ApplicabilityCondition, ...]
+    description_key: str
+    # 이미 blocking error 규칙이 같은 관계를 소유하는 행: 스키마에는 조건을 노출하되 validator는
+    # 그 error 하나만 낸다(같은 사실을 warning으로 두 번 보고하지 않는다).
+    owned_by_error: str | None = None
+
+    @property
+    def path(self) -> str:
+        return self.pointer.strip("/").replace("/", ".")
+
+    def __post_init__(self) -> None:
+        if not self.conditions:
+            raise ValueError(f"field applicability needs a condition — pointer={self.pointer!r}")
+
+    def applies_to(self, spec: StrategySpec) -> bool:
+        return all(condition.holds_for(spec) for condition in self.conditions)
+
+
+FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
+    # `_compiler.py::_selection_counts`: top_n이면 selection_count(+long_short이면
+    # short_selection_count),
+    # percentile이면 selection_percentile로 양쪽 count를 계산한다.
+    FieldApplicability(
+        "/portfolio/selection_count",
+        (ApplicabilityCondition("/portfolio/selection_method", equals="top_n"),),
+        "strategy.contract.applicable.selection_count",
     ),
+    FieldApplicability(
+        "/portfolio/short_selection_count",
+        (
+            ApplicabilityCondition("/portfolio/side", equals="long_short"),
+            ApplicabilityCondition("/portfolio/selection_method", equals="top_n"),
+        ),
+        "strategy.contract.applicable.short_selection_count",
+    ),
+    FieldApplicability(
+        "/portfolio/selection_percentile",
+        (ApplicabilityCondition("/portfolio/selection_method", equals="percentile"),),
+        "strategy.contract.applicable.selection_percentile",
+    ),
+    FieldApplicability(
+        "/portfolio/rebalance_every_n_sessions",
+        (ApplicabilityCondition("/portfolio/rebalance", equals="every_n_sessions"),),
+        "strategy.contract.applicable.rebalance_every_n_sessions",
+    ),
+    FieldApplicability(
+        "/portfolio/minimum_liquidity",
+        (ApplicabilityCondition("/portfolio/liquidity_field_id", not_null=True),),
+        "strategy.contract.applicable.minimum_liquidity",
+        owned_by_error="strategy.portfolio.liquidity_field",
+    ),
+    FieldApplicability(
+        "/risk/sector_neutral",
+        (ApplicabilityCondition("/portfolio/side", equals="long_short"),),
+        "strategy.contract.applicable.sector_neutral",
+        owned_by_error="strategy.risk.sector_neutral_side",
+    ),
+    FieldApplicability(
+        "/risk/risk_field_id",
+        (ApplicabilityCondition("/portfolio/weighting", equals="risk"),),
+        "strategy.contract.applicable.risk_field_id",
+    ),
+    FieldApplicability(
+        "/signal/regime_minimum",
+        (ApplicabilityCondition("/signal/regime_field_id", not_null=True),),
+        "strategy.contract.applicable.regime_minimum",
+        owned_by_error="strategy.signal.regime_field",
+    ),
+)
+
+
+STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
     ScalarConstraint(
         pointer="/portfolio/selection_count",
         code="strategy.portfolio.selection_count",
@@ -249,6 +358,8 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
 # Validation codes that are cross-field, graph or parameter rules: owned by the validator only.
 SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
     {
+        "strategy.schema_version.unsupported",
+        "strategy.field.inapplicable",
         "strategy.title.empty",
         "strategy.data.date_order",
         "strategy.data.universe_empty",
@@ -276,17 +387,57 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
 # "owned by the validator only" — the registry, not a call site, is what owns them.
 EXPRESSION_CODES: frozenset[str] = frozenset(
     {
+        # `domain.factor`의 `FACTOR_GRAPH_CODES`를 그대로 옮긴 것. 두 집합이 어긋나면 그래프
+        # 진단이 전략 문서에 도착하지 못하므로 테스트가 대응을 고정한다(P1-05).
+        "strategy.expression.branch_type",
+        "strategy.expression.branch_unit",
+        "strategy.expression.cycle",
         "strategy.expression.duplicate_node",
-        "strategy.expression.output_missing",
+        "strategy.expression.field_missing",
+        "strategy.expression.group_field_missing",
+        "strategy.expression.group_field_type",
         "strategy.expression.input_missing",
-        "strategy.expression.parameter_missing",
+        "strategy.expression.input_type",
+        "strategy.expression.insufficient_history",
         "strategy.expression.lag_periods",
+        "strategy.expression.operand_type",
+        "strategy.expression.output_missing",
+        "strategy.expression.parameter_missing",
+        "strategy.expression.predicate_type",
+        "strategy.expression.saved_factor_missing",
+        "strategy.expression.saved_subgraph_missing",
+        "strategy.expression.time_series_window",
+        "strategy.expression.unit_mismatch",
+        "strategy.expression.winsor_bounds",
+        # 전략·포트폴리오 쪽에서만 나는 표현식 진단.
         "strategy.expression.parameter_type",
         "strategy.expression.reference_unsupported",
         "strategy.expression.output_type",
         "strategy.expression.calculation_non_finite",
     }
 )
+
+_FACTOR_GRAPH_PREFIX = "factor.graph."
+_EXPRESSION_PREFIX = "strategy.expression."
+
+
+def expression_code(factor_code: str) -> str:
+    """`domain.factor` 그래프 진단 코드를 전략 문서 네임스페이스로 옮긴다(P1-05).
+
+    전략 문서를 읽는 소비자에게 `factor.*`는 없는 네임스페이스다 — 코드 → 마커 매핑도 422 번역도
+    `strategy.*`만 안다. 전환을 손으로 적은 표 대신 접두사 치환 하나로 두어, 그래프 코드가 늘어도
+    alias가 빠지지 않게 한다. 결과가 `EXPRESSION_CODES`에 없으면 `semantic_issue`가 거절한다.
+    """
+    if not factor_code.startswith(_FACTOR_GRAPH_PREFIX):
+        raise ValueError(
+            "only factor graph codes can be aliased into the strategy namespace — "
+            f"code={factor_code!r} expected_prefix={_FACTOR_GRAPH_PREFIX!r}"
+        )
+    return _EXPRESSION_PREFIX + factor_code[len(_FACTOR_GRAPH_PREFIX) :]
+
+
+def field_applicability_index() -> Mapping[str, FieldApplicability]:
+    return {row.pointer: row for row in FIELD_APPLICABILITY}
 
 
 def scalar_constraint_index() -> Mapping[str, ScalarConstraint]:

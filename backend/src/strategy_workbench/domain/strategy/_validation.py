@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -14,10 +14,14 @@ from strategy_workbench.domain.factor.facade.validation import (
 
 from ._constraints import (
     EXPRESSION_CODES,
+    FIELD_APPLICABILITY,
     SEMANTIC_ONLY_CODES,
     STRATEGY_SCALAR_CONSTRAINTS,
+    expression_code,
+    field_default,
     resolve_scalar,
 )
+from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
 from ._models import (
     ChoiceParameter,
     FloatParameter,
@@ -55,6 +59,10 @@ class StrategyValidation:
     issues: tuple[ValidationIssue, ...]
 
 
+# 전략 문서 진단에 그대로 실릴 수 없는 네임스페이스(`semantic_issue` 게이트).
+_FACTOR_CODE_PREFIX = "factor."
+
+
 def _owned_codes() -> frozenset[str]:
     """The registry of `strategy.*` codes, read live so a monkeypatched catalog still applies."""
     return (
@@ -76,10 +84,17 @@ def semantic_issue(
 
     This is the only sanctioned way to mint a `strategy.*` issue, in the domain and in the
     application alike: constructing `ValidationIssue` directly would let a code exist that no
-    registry row describes, which the schema API and the UI could not explain. Codes outside the
-    `strategy.` namespace pass through unchecked — they belong to another registry (today
-    `domain.factor` graph codes, forwarded verbatim when the validator has no alias for them).
+    registry row describes, which the schema API and the UI could not explain.
+
+    `factor.*` 코드는 전략 문서 진단으로 그대로 나갈 수 없다(P1-05). 전에는 alias가 없는 그래프
+    코드가 검사 없이 통과해, frontend가 모르는 네임스페이스의 코드가 문제 목록에 섞였다. 지금은
+    호출자가 `expression_code()`로 먼저 옮겨야 하고, 옮긴 코드는 `EXPRESSION_CODES`가 검사한다.
     """
+    if code.startswith(_FACTOR_CODE_PREFIX):
+        raise ValueError(
+            "factor graph codes never reach a strategy document — alias them with "
+            f"expression_code() first: code={code!r} path={path!r}"
+        )
     if code.startswith("strategy.") and code not in _owned_codes():
         raise ValueError(
             "validation code has no owner — add it to SEMANTIC_ONLY_CODES, EXPRESSION_CODES or "
@@ -125,8 +140,37 @@ def _numeric_leaves(value: object, path: str = "") -> Iterator[tuple[str, float]
             yield from _numeric_leaves(item, child_path)
 
 
-def validate_strategy(spec: StrategySpec) -> StrategyValidation:
+def validate_strategy(
+    spec: StrategySpec, *, written_pointers: Collection[str] | None = None
+) -> StrategyValidation:
+    """Semantic validation of a typed spec.
+
+    `written_pointers` names the JSON Pointers the authoring document set explicitly. The typed
+    spec cannot tell a written value from a default, so the applicability warning (spec D4) is
+    only emitted for pointers in this set; callers without a document pass nothing. A written
+    value equal to the model default is silent too: canonical documents (JSON projection, legacy
+    generated source, format conversion) spell out every default and must not warn.
+    """
     issues: list[ValidationIssue] = []
+    written = frozenset(written_pointers or ())
+    for applicability in FIELD_APPLICABILITY:
+        if applicability.owned_by_error is not None:
+            continue  # 아래의 기존 error 규칙이 같은 관계를 보고한다
+        if applicability.pointer not in written or applicability.applies_to(spec):
+            continue
+        if resolve_scalar(spec, applicability.pointer) == field_default(applicability.pointer):
+            continue
+        expectation = " 그리고 ".join(
+            condition.describe() for condition in applicability.conditions
+        )
+        issues.append(
+            semantic_issue(
+                "strategy.field.inapplicable",
+                applicability.path,
+                f"이 필드는 현재 모드에서 읽히지 않습니다: {expectation}일 때만 적용됩니다.",
+                severity=ValidationSeverity.WARNING,
+            )
+        )
     bounded_paths = {constraint.path for constraint in STRATEGY_SCALAR_CONSTRAINTS}
     issues.extend(
         semantic_issue(
@@ -138,6 +182,18 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
         for path, value in _numeric_leaves(spec)
         if path not in bounded_paths and not math.isfinite(value)
     )
+    if spec.identity.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        # 문서 경로는 envelope가 현재 버전을 넣으므로 여기 오지 않는다. JSON spec API가 identity를
+        # 직접 받을 때 은퇴한 버전을 저장·실행하려는 요청을 저장소 무결성 오류(500)가 아니라
+        # 검증 오류로 막는다.
+        issues.append(
+            semantic_issue(
+                "strategy.schema_version.unsupported",
+                "identity.schema_version",
+                "지원하지 않는 schema_version입니다: "
+                f"got={spec.identity.schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS}",
+            )
+        )
     if not spec.title.strip():
         issues.append(semantic_issue("strategy.title.empty", "title", "전략 이름을 입력하세요."))
     if spec.data.start > spec.data.end:
@@ -152,7 +208,7 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                 "strategy.data.universe_empty", "data.universe_id", "유니버스를 선택하세요."
             )
         )
-    if not spec.factors.factors:
+    if not spec.factors:
         issues.append(
             semantic_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요.")
         )
@@ -258,26 +314,19 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                     )
                 )
 
-    factor_ids = [factor.factor_id for factor in spec.factors.factors]
+    factor_ids = [factor.factor_id for factor in spec.factors]
     if len(factor_ids) != len(set(factor_ids)):
         issues.append(
             semantic_issue("strategy.factor.duplicate", "factors", "팩터 ID는 중복될 수 없습니다.")
         )
-    code_aliases = {
-        "factor.graph.duplicate_node": "strategy.expression.duplicate_node",
-        "factor.graph.output_missing": "strategy.expression.output_missing",
-        "factor.graph.input_missing": "strategy.expression.input_missing",
-        "factor.graph.parameter_missing": "strategy.expression.parameter_missing",
-        "factor.graph.lag_periods": "strategy.expression.lag_periods",
-    }
     numeric_parameter_ids = {
         parameter.parameter_id
         for parameter in spec.parameters
         if not isinstance(parameter, ChoiceParameter)
         or all(_is_number(choice) for choice in (parameter.default, *parameter.choices))
     }
-    for factor_index, factor in enumerate(spec.factors.factors):
-        base = f"factors.factors.{factor_index}"
+    for factor_index, factor in enumerate(spec.factors):
+        base = f"factors.{factor_index}"
         for node_index, node in enumerate(factor.graph.nodes):
             if (
                 isinstance(node, ParameterNode)
@@ -299,7 +348,7 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
         )
         issues.extend(
             semantic_issue(
-                code_aliases.get(factor_issue.code, factor_issue.code),
+                expression_code(factor_issue.code),
                 f"{base}.graph.{factor_issue.path}",
                 factor_issue.message,
                 severity=(

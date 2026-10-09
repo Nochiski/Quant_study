@@ -6,15 +6,15 @@ ctx는 어디서나 접근하는 전역 변수가 아니라 엔진이 매 호출
 
 from __future__ import annotations
 
+import abc
 import functools
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from backtest_engine.engine.compact import CompactOrder
 from backtest_engine.errors import (
     InsufficientHistoryError,
     UndeclaredDataAccess,
@@ -26,6 +26,9 @@ from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot, PriceField, PriceWindow
 from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import HistoryRequest
+
+if TYPE_CHECKING:
+    from backtest_engine.engine.store import PersistentEventStore
 
 
 class HistoryStore:
@@ -127,19 +130,27 @@ class PersistentHistoryStore(HistoryStore):
         return PriceWindow(timestamps=timestamps, instruments=request.instruments, values=matrix)
 
 
-@dataclass(frozen=True, eq=False)  # HistoryStore 필드 → eq 비교 무의미
-class EngineStrategyContext:
-    """선언한 데이터만 현재 시점까지 잘라서 돌려주는 엔진 소유 Context 구현체.
+class _DeclaredContextMethods(abc.ABC):
+    """두 Context 구현이 공유하는 읽기 전용 조회 메서드.
 
-    전략별 차이는 Context 클래스가 아니라 declared 데이터와 schedule 값이다.
+    미선언 history 요청과 universe 미제공의 거절 메시지는 이 클래스가 단일 정본이다.
+    전에는 엔진 경로와 Rust 경로가 메시지 문자열까지 복사해 한쪽만 고치면 같은 전략이
+    코어에 따라 다른 진단을 받았다.
+
+    서브클래스는 아래 속성을 dataclass 필드나 property로 제공하고 `_open_orders_view()`를
+    구현한다. `snapshot`은 한쪽이 필드, 다른 쪽이 `cached_property`라 여기서는 값을 두지
+    않고 계약만 선언한다.
     """
 
     now: datetime
     snapshot: PortfolioSnapshot
     history_store: HistoryStore
-    declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
-    open_orders_snapshot: tuple[OpenOrderSnapshot, ...] = ()
-    universe_source: UniverseResult | None = None  # None = 제공 안 됨; 조회 시점에 계산
+    declared: frozenset[HistoryRequest]
+    universe_source: UniverseResult | None
+
+    @abc.abstractmethod
+    def _open_orders_view(self) -> tuple[OpenOrderSnapshot, ...]:
+        """이 컨텍스트 시점에 대기 중인 주문 전체. 필터링은 `open_orders()`가 한다."""
 
     def history(self, request: HistoryRequest) -> PriceWindow:
         if request not in self.declared:
@@ -172,30 +183,53 @@ class EngineStrategyContext:
         return self.universe_source.members(self.now.date())
 
     def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
+        orders = self._open_orders_view()
         if instrument is None:
-            return self.open_orders_snapshot
-        return tuple(o for o in self.open_orders_snapshot if o.instrument == instrument)
+            return orders
+        return tuple(order for order in orders if order.instrument == instrument)
+
+
+@dataclass(frozen=True, eq=False)  # HistoryStore 필드 → eq 비교 무의미
+class EngineStrategyContext(_DeclaredContextMethods):
+    """선언한 데이터만 현재 시점까지 잘라서 돌려주는 엔진 소유 Context 구현체.
+
+    전략별 차이는 Context 클래스가 아니라 declared 데이터와 schedule 값이다.
+    """
+
+    now: datetime
+    snapshot: PortfolioSnapshot
+    history_store: HistoryStore
+    declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
+    open_orders_snapshot: tuple[OpenOrderSnapshot, ...] = ()
+    universe_source: UniverseResult | None = None  # None = 제공 안 됨; 조회 시점에 계산
+
+    def _open_orders_view(self) -> tuple[OpenOrderSnapshot, ...]:
+        return self.open_orders_snapshot
 
 
 @dataclass(frozen=True, eq=False)
-class RustStrategyContext(EngineStrategyContext):
-    """Rust callback token에 묶인 전략 조회 뷰.
+class RustStrategyContext(_DeclaredContextMethods):
+    """Rust callback frame에 묶인 전략 조회 뷰.
 
-    snapshot/open orders는 callback 생성 시점 값으로 고정되고 history는 `now`를 end로 사용해
-    context를 보관했다가 나중에 읽어도 미래 상태가 섞이지 않는다.
+    포트폴리오·대기 주문은 Rust가 콜백 시점에 고정한 wire이며 전략이 실제로 읽을 때만 공개
+    객체로 만든다. history는 `now`를 end로 사용하므로 context를 보관했다가 나중에 읽어도
+    미래 상태가 섞이지 않는다.
     """
 
-    callback_token: int = 0
-    compact_open_orders: tuple[tuple[CompactOrder, int], ...] = ()
+    now: datetime
+    frame: Any  # reason: pyo3 CallbackFrame — 확장 모듈 stub 부재, getter는 store가 해석
+    store: PersistentEventStore
+    history_store: HistoryStore
+    declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
+    universe_source: UniverseResult | None = None
 
     @functools.cached_property
-    def _lazy_open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
-        return tuple(
-            OpenOrderSnapshot(order=order.materialize(), remaining=Decimal(remaining))
-            for order, remaining in self.compact_open_orders
-        )
+    def snapshot(self) -> PortfolioSnapshot:
+        return self.store.snapshot_from_wire(self.now, self.frame.snapshot)
 
-    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
-        if instrument is None:
-            return self._lazy_open_orders
-        return tuple(order for order in self._lazy_open_orders if order.instrument == instrument)
+    @functools.cached_property
+    def _open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
+        return self.store.open_orders_from_wire(self.now, self.frame.open_orders)
+
+    def _open_orders_view(self) -> tuple[OpenOrderSnapshot, ...]:
+        return self._open_orders

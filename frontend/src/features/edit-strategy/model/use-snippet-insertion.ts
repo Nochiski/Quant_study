@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
@@ -9,15 +9,36 @@ import {
   type SnippetCatalogSource,
   type SnippetEditFailure,
 } from "./canonical-snippets";
+import {
+  useSourceTransactions,
+  type SourceTransactions,
+} from "./use-source-transactions";
+
+export type SnippetFailure =
+  SnippetEditFailure | "editor-unavailable" | "editor-inactive" | "composing";
+
+const SNIPPET_OWNER = "snippet";
+const IDLE: SnippetFeedback = { status: "idle" };
+
+const SNIPPET_FAILURES: ReadonlySet<string> = new Set<SnippetFailure>([
+  "yaml-only",
+  "selection",
+  "cursor-context",
+  "duplicate",
+  "parse",
+  "editor-unavailable",
+  "editor-inactive",
+  "composing",
+]);
+
+/** `planSnippetEdit`가 PlanFailure를 스니펫 코드로 번역하므로 다른 코드는 오지 않지만, 좁히기는 가드로 한다. */
+const isSnippetFailure = (reason: string): reason is SnippetFailure =>
+  SNIPPET_FAILURES.has(reason);
 
 export type SnippetFeedback =
   | { status: "idle" }
   | { status: "inserted"; label: string }
-  | {
-      status: "error";
-      label: string;
-      reason: SnippetEditFailure | "editor-unavailable" | "composing";
-    };
+  | { status: "error"; label: string; reason: SnippetFailure };
 
 export type SnippetInsertion = {
   snippets: readonly CanonicalSnippet[];
@@ -27,106 +48,79 @@ export type SnippetInsertion = {
   insert: (snippet: CanonicalSnippet) => void;
 };
 
-type ScopedFeedback = {
-  scope: object;
-  value: SnippetFeedback;
-};
-
-const IDLE_FEEDBACK: SnippetFeedback = { status: "idle" };
-
-/** Coordinates the editor command handle with pure schema projection and insertion planning. */
+/**
+ * 스니펫 카탈로그(순수 schema projection)와 source 트랜잭션 훅을 잇는다. 삽입은 `planSnippetEdit`가
+ * 커서 문맥을 `insert-key`/`insert-item` 연산으로 번역한 계획을 `useSourceTransactions.run`으로
+ * 적용한다(P3-02). 카탈로그 상태가 ready → unavailable → ready로 바뀌면 이전 구간의 feedback이
+ * 되살아나지 않도록 상태를 scope에 넣는다.
+ */
 export const useSnippetInsertion = (
   state: DocumentState,
   source: SnippetCatalogSource,
   editorActive = true,
+  shared?: SourceTransactions,
 ): SnippetInsertion => {
-  const editor = useRef<CodeEditorHandle | null>(null);
-  const [scopedFeedback, setScopedFeedback] = useState<ScopedFeedback | null>(
-    null,
-  );
-  // A fresh token for every capability transition prevents ready -> unavailable -> ready from
-  // reviving feedback that belonged to the first ready interval.
-  const feedbackScope = useMemo(
-    () => ({ documentEpoch: state.documentEpoch, status: source.status }),
-    [source.status, state.documentEpoch],
-  );
+  // page가 만든 인스턴스를 공유하면(P4-04) 그것을 쓰고, 아니면 자기 것을 만든다.
+  const own = useSourceTransactions(state, editorActive);
+  const transactions = shared ?? own;
   const snippets = useMemo(
     () => buildCanonicalSnippetCatalog(source),
     [source],
   );
-  const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
-    editor.current = next;
-  }, []);
-  const setFeedback = useCallback(
-    (value: SnippetFeedback): void => {
-      setScopedFeedback({
-        scope: feedbackScope,
-        value,
-      });
-    },
-    [feedbackScope],
-  );
+  const { run } = transactions;
+  // 카탈로그 상태가 ready → unavailable → ready로 바뀌면 이전 구간의 feedback을 되살리지 않는다:
+  // 상태가 한 번이라도 바뀌면 렌더 중 파생 상태 조정으로 슬롯을 비운다.
+  const [statusAtInsert, setStatusAtInsert] = useState<
+    SnippetCatalogSource["status"] | null
+  >(null);
+  if (statusAtInsert !== null && statusAtInsert !== source.status)
+    setStatusAtInsert(null);
   const insert = useCallback(
     (snippet: CanonicalSnippet): void => {
-      if (state.format !== "yaml" || !editorActive) {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: "yaml-only",
-        });
+      setStatusAtInsert(source.status);
+      // page 인스턴스를 공유해도 스니펫은 source view가 활성일 때만 커서에 넣는다(hidden 편집기의 커서는
+      // 사용자가 보지 못한다). 공유 인스턴스의 editorActive는 "handle이 살아 있는가"라 따로 막는다.
+      if (shared !== undefined && !editorActive) {
+        run(
+          () => ({ status: "error", reason: "editor-inactive" }),
+          snippet.label,
+          SNIPPET_OWNER,
+        );
         return;
       }
-      const current = editor.current;
-      if (current === null) {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: "editor-unavailable",
-        });
-        return;
-      }
-      if (state.composing) {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: "composing",
-        });
-        return;
-      }
-      const result = planSnippetEdit(
-        current.getText(),
-        state.format,
-        current.getSelection(),
-        snippet,
+      run(
+        ({ text, selection }) =>
+          planSnippetEdit(text, "yaml", selection, snippet),
+        snippet.label,
+        SNIPPET_OWNER,
       );
-      if (result.status === "error") {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: result.reason,
-        });
-        current.focus();
-        return;
-      }
-      const { edit } = result;
-      current.replaceRange(edit.from, edit.to, edit.insert, edit.selection);
-      current.scrollTo(edit.selection.from);
-      current.focus();
-      setFeedback({ status: "inserted", label: snippet.label });
     },
-    [editorActive, setFeedback, state.composing, state.format],
+    [editorActive, run, shared, source.status],
   );
 
-  const feedback =
-    scopedFeedback?.scope === feedbackScope
-      ? scopedFeedback.value
-      : IDLE_FEEDBACK;
+  // 자기 owner 슬롯만 읽는다(Phase 4 감사 R2). memo 의존성은 슬롯 값이다(리뷰 P2-7: `transactions`는 매 렌더 새 객체).
+  const snippetFeedback = transactions.feedbackFor(SNIPPET_OWNER);
+  const feedback = useMemo((): SnippetFeedback => {
+    const current = snippetFeedback;
+    if (current.status === "idle" || current.owner !== SNIPPET_OWNER)
+      return IDLE;
+    if (statusAtInsert === null) return IDLE;
+    if (current.status === "applied")
+      return { status: "inserted", label: current.label };
+    return {
+      status: "error",
+      label: current.label,
+      reason: isSnippetFailure(current.reason)
+        ? current.reason
+        : "cursor-context",
+    };
+  }, [statusAtInsert, snippetFeedback]);
 
   return {
     snippets,
     sourceStatus: source.status,
     feedback,
-    onEditorReady,
+    onEditorReady: transactions.onEditorReady,
     insert,
   };
 };

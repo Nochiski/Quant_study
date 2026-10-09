@@ -13,6 +13,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
+from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
+from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
@@ -26,6 +29,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     RunStatus,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
+    StrategyRevisionRequiresUpgradeError,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -68,14 +72,19 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
     StrategyTraceResponse,
     StrategyTraceService,
     StrategyTraceSourceNotFoundError,
+    StrategyTraceSourceRequiresUpgradeError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
+    DocumentNotUpgradeableError,
+    DocumentUpgradeDriftError,
+    DocumentUpgradeSyntaxError,
     InvalidStrategyDocumentError,
     InvalidStrategyDraftError,
     ReviseDocumentRequest,
     RevisionDiff,
+    RunEnvironmentSchema,
     SaveDocumentRequest,
     SaveStrategyDraftRequest,
     StrategyAuthoringService,
@@ -85,6 +94,8 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyDocumentService,
     StrategyDraft,
     StrategyDraftService,
+    StrategyOperatorCatalog,
+    UpgradedDocument,
 )
 from strategy_workbench.application.strategy_authoring.facade.ports import (
     StrategyDraftConflictError,
@@ -111,6 +122,7 @@ from strategy_workbench.domain.strategy.facade.explanation import StrategyExplan
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
+from ._assistant_routes import register_assistant_routes
 from ._backtest_contract import (
     Backtest422Response,
     BacktestResultNotReadyResponse,
@@ -123,6 +135,12 @@ from ._execution_error_contract import (
     PortfolioRawObservationInvalidDetail,
 )
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
+from ._strategy_document_contract import (
+    StrategyDocumentNotUpgradeableDetail,
+    StrategyDocumentSave422Response,
+    StrategyDocumentUpgrade422Response,
+    StrategyDocumentUpgradeDriftDetail,
+)
 from ._strategy_draft_contract import (
     StrategyDraft422Response,
     StrategyDraftConflictDetail,
@@ -138,6 +156,7 @@ from ._trace_contract import (
     TraceRequestInvalidDetail,
     TraceStrategyNotFoundDetail,
     TraceStrategyNotFoundResponse,
+    TraceStrategyRequiresUpgradeDetail,
     TraceStrategyStaleDetail,
     TraceStrategyStaleResponse,
     apply_trace_openapi_contract,
@@ -236,8 +255,21 @@ def create_app(
     portfolio_design: PortfolioDesignService,
     strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
-    allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
+    assistant_profiles: ProviderProfileService | None = None,
+    assistant_chat: AssistantChatService | None = None,
+    assistant_turns: AssistantTurnRunner | None = None,
+    allowed_origins: tuple[str, ...],
 ) -> FastAPI:
+    """Compose the HTTP surface; the assistant routes appear only when their services arrive.
+
+    어시스턴트 서비스 셋은 항상 같이 만들어진다 — 하나를 세우는 컨테이너는 셋을 다 세운다.
+    `/api/v1/assistant`를 건드리지 않는 기존 테스트는 셋 다 넘기지 않고, 그러면 라우트가
+    "있는데 실패"가 아니라 아예 없는 상태가 된다.
+
+    `allowed_origins`는 기본값을 두지 않는다. 기본 origin의 owner는 조립 지점
+    (`bootstrap/_http.py`의 `DEFAULT_ALLOWED_ORIGINS`)이고, 여기에 같은 리터럴을 또 두면 개발 서버
+    포트를 옮길 때 한쪽만 바뀐다(Phase B 감사 NB-7).
+    """
     app = FastAPI(
         title="Quant Strategy Workbench API",
         version="0.1.0",
@@ -319,12 +351,15 @@ def create_app(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "backtest.strategy.stale", "message": str(error)},
             ) from error
+        except StrategyRevisionRequiresUpgradeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "backtest.strategy.requires_upgrade", "message": str(error)},
+            ) from error
 
-        except (
-            InvalidPortfolioRequestError,
-            RawObservationUnavailableError,
-            RawObservationContractError,
-        ) as error:
+        except InvalidPortfolioRequestError as error:
+            # 시작 요청은 데이터를 읽지 않는 사전 검사만 한다(이슈 #158). 관측 데이터 부재·계약
+            # 위반은 run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
             raise _portfolio_http_error(error) from error
 
     @app.get(
@@ -502,6 +537,15 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=asdict(detail),
+            ) from error
+        except StrategyTraceSourceRequiresUpgradeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(
+                    TraceStrategyRequiresUpgradeDetail(
+                        "trace.strategy.requires_upgrade", str(error)
+                    )
+                ),
             ) from error
         except IncompatiblePortfolioRequestError as error:
             detail = TraceEngineIncompatibleDetail("trace.engine.incompatible", error.compatibility)
@@ -728,9 +772,57 @@ def create_app(
         return strategy_authoring.compile(request)
 
     @app.post(
+        "/api/v1/strategy-documents/upgrade",
+        operation_id="upgradeStrategyDocument",
+        responses={
+            422: {
+                "model": StrategyDocumentUpgrade422Response,
+                "description": "Syntax errors, a non-1.0 document, or upgrade rule drift",
+            },
+        },
+    )
+    def upgrade_strategy_document(request: CompileRequest) -> UpgradedDocument:
+        """Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.
+
+        The rewrite must parse to exactly what the domain dict transform yields; otherwise the
+        service refuses with `strategy_document.upgrade_drift` rather than returning text that
+        would silently mean something else (spec D3).
+        """
+        try:
+            return strategy_authoring.upgrade(request)
+        except DocumentUpgradeSyntaxError as error:
+            raise _invalid_document_compiled(error.compiled) from error
+        except DocumentNotUpgradeableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(
+                    StrategyDocumentNotUpgradeableDetail(
+                        "strategy_document.not_upgradeable",
+                        None if error.schema_version is None else str(error.schema_version),
+                        str(error),
+                    )
+                ),
+            ) from error
+        except DocumentUpgradeDriftError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(
+                    StrategyDocumentUpgradeDriftDetail(
+                        "strategy_document.upgrade_drift", error.pointer, str(error)
+                    )
+                ),
+            ) from error
+
+    @app.post(
         "/api/v1/strategy-documents",
         operation_id="createStrategyDocument",
         status_code=status.HTTP_201_CREATED,
+        responses={
+            422: {
+                "model": StrategyDocumentSave422Response,
+                "description": "Source has error-severity diagnostics, or malformed envelope",
+            },
+        },
     )
     def create_strategy_document(request: SaveDocumentRequest) -> StrategyDocument:
         """Store a cleanly compiled exact source as revision 1 of a new strategy."""
@@ -747,7 +839,11 @@ def create_app(
             409: {
                 "model": StrategyRevisionConflictResponse,
                 "description": "The expected revision is stale",
-            }
+            },
+            422: {
+                "model": StrategyDocumentSave422Response,
+                "description": "Source has error-severity diagnostics, or malformed envelope",
+            },
         },
     )
     def revise_strategy_document(
@@ -828,6 +924,46 @@ def create_app(
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
         response.headers["ETag"] = etag
         return schema
+
+    @app.get(
+        "/api/v1/run-environments/schema",
+        operation_id="getRunEnvironmentSchema",
+        response_model=RunEnvironmentSchema,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
+    )
+    def run_environment_schema(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> RunEnvironmentSchema | Response:
+        """실행 설정의 런타임 JSON Schema. ETag = 스키마 해시(일치하면 304)."""
+        schema = strategy_authoring.run_environment_schema()
+        etag = _etag(schema.schema_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return schema
+
+    @app.get(
+        "/api/v1/strategy-documents/operators",
+        operation_id="getStrategyOperatorCatalog",
+        response_model=StrategyOperatorCatalog,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
+    )
+    def strategy_operator_catalog(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> StrategyOperatorCatalog | Response:
+        """그래프 노드 연산자 정의 전부.
+
+        입력 개수, 읽는 파라미터, 출력 타입·단위 규칙, 가용성, i18n 키를 담는다.
+
+        팔레트·노드 라벨이 보일 수 있는 연산자 목록의 유일한 출처다. 소비자는 목록을 다시 적지
+        않는다. ETag는 카탈로그 해시이며 If-None-Match가 맞으면 304로 답한다.
+        """
+        catalog = strategy_authoring.operators()
+        etag = _etag(catalog.catalog_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return catalog
 
     @app.get(
         "/api/v1/strategy-documents/contract",
@@ -953,6 +1089,15 @@ def create_app(
         except StrategyRevisionConflictError as error:
             raise _revision_conflict(error) from error
 
+    if (
+        assistant_profiles is not None
+        and assistant_chat is not None
+        and assistant_turns is not None
+    ):
+        register_assistant_routes(
+            app, profiles=assistant_profiles, chat=assistant_chat, turns=assistant_turns
+        )
+
     # FastAPI sees plain dataclasses, while this inbound adapter owns wire-only constraints and
     # discriminator metadata. Mutate the cached schema once after every route is registered.
     apply_trace_openapi_contract(app.openapi())
@@ -987,7 +1132,10 @@ def _strategy_not_found(error: StrategyNotFoundError) -> HTTPException:
 
 
 def _invalid_document(error: InvalidStrategyDocumentError) -> HTTPException:
-    compiled = error.compiled
+    return _invalid_document_compiled(error.compiled)
+
+
+def _invalid_document_compiled(compiled: CompiledDocument) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail={

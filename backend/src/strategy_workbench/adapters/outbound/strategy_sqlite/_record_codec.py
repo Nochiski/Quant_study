@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -13,11 +14,16 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyRevisionRecord,
 )
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
     SourceFormat,
     hydrate_strategy_document,
+    is_frozen_schema_version,
+    upgrade_document_1_0,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
+    StrategySpec,
+    canonical_json_spec_hash,
     canonical_strategy_json,
 )
 
@@ -32,6 +38,11 @@ def encode_record(
 ) -> tuple[object, ...]:
     """Map a validated envelope to columns without defining a second StrategySpec DTO."""
     try:
+        if record.requires_upgrade:
+            raise ValueError(
+                "a frozen retired-schema revision is read-only history and cannot be written — "
+                f"schema_version={record.spec.identity.schema_version}"
+            )
         _verify_source_spec(record, source_spec_hash)
         source = record.source
         return (
@@ -49,7 +60,7 @@ def encode_record(
         )
     except (TypeError, ValueError) as error:
         raise StrategyRepositoryStorageError(
-            "strategy revision cannot be persisted because its source and spec disagree -- "
+            "strategy revision cannot be persisted -- "
             f"strategy_id={record.strategy_id} revision={record.revision}: {error}"
         ) from error
 
@@ -70,16 +81,29 @@ def decode_record(
             raise ValueError("spec_json must contain a JSON object with string keys")
         if payload.get("schema_version") != schema_version:
             raise ValueError("schema_version column does not match the canonical strategy payload")
-        hydration = hydrate_strategy_document(
-            _as_document(payload),
-            identity=StrategyIdentity(strategy_id, revision, schema_version),
-        )
-        if not hydration.ok or hydration.spec is None:
-            detail = ", ".join(f"{issue.code}@{issue.pointer}" for issue in hydration.issues[:5])
-            raise ValueError(f"canonical strategy payload cannot hydrate — {detail}")
-        spec = hydration.spec
-        if canonical_strategy_json(spec) != spec_json:
-            raise ValueError("spec_json is not canonical for its hydrated StrategySpec")
+        spec_hash = required_text(row, "spec_hash")
+        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 동결 row 중에서도
+        # `upgrade_document_1_0`이 받아 주는 것은 버전이 은퇴 버전이거나 본문이 옛 판 모양인
+        # 문서다(`is_upgradeable_document`). 둘 다 아니면 NotALegacyDocumentError(ValueError)로
+        # fail-closed한다.
+        frozen = is_frozen_schema_version(schema_version)
+        if frozen:
+            spec = _decode_frozen_spec(
+                payload, spec_json, spec_hash, strategy_id, revision, schema_version
+            )
+        else:
+            hydration = hydrate_strategy_document(
+                _as_document(payload),
+                identity=StrategyIdentity(strategy_id, revision, schema_version),
+            )
+            if not hydration.ok or hydration.spec is None:
+                detail = ", ".join(
+                    f"{issue.code}@{issue.pointer}" for issue in hydration.issues[:5]
+                )
+                raise ValueError(f"canonical strategy payload cannot hydrate — {detail}")
+            spec = hydration.spec
+            if canonical_strategy_json(spec) != spec_json:
+                raise ValueError("spec_json is not canonical for its hydrated StrategySpec")
 
         origin = RevisionOrigin(required_text(row, "origin"))
         source_format_text = optional_text(row, "source_format")
@@ -99,7 +123,7 @@ def decode_record(
             raise ValueError("created_at is not canonical timezone-aware UTC text")
         record = StrategyRevisionRecord(
             spec=spec,
-            spec_hash=required_text(row, "spec_hash"),
+            spec_hash=spec_hash,
             source=source,
             provenance=RevisionProvenance(
                 origin=origin,
@@ -107,7 +131,8 @@ def decode_record(
                 change_note=optional_text(row, "change_note"),
             ),
         )
-        _verify_source_spec(record, source_spec_hash)
+        if not frozen:
+            _verify_source_spec(record, source_spec_hash)
         return record
     except (json.JSONDecodeError, TypeError, ValueError) as error:
         raise StrategyRepositoryStorageError(
@@ -117,6 +142,42 @@ def decode_record(
 
 def _as_document(payload: dict[str, Any]) -> Mapping[str, object]:
     return payload
+
+
+def _decode_frozen_spec(
+    payload: dict[str, Any],
+    spec_json: str,
+    spec_hash: str,
+    strategy_id: str,
+    revision: int,
+    schema_version: str,
+) -> StrategySpec:
+    """Read a retired-schema row without a model for that schema (spec D2).
+
+    The 1.0 model no longer exists, so "the source compiles to the stored spec" cannot be
+    re-proven. The row is immutable and was proven when written; what is verified here is that
+    the stored bytes are what the hash column claims and that the domain upgrade transform still
+    understands them. The spec keeps the row's retired `schema_version` as its frozen marker.
+    """
+    computed = canonical_json_spec_hash(spec_json)
+    if computed != spec_hash:
+        raise ValueError(
+            "frozen spec_json bytes do not match the stored spec_hash -- "
+            f"strategy_id={strategy_id} revision={revision} computed={computed} stored={spec_hash}"
+        )
+    upgraded = upgrade_document_1_0(payload)
+    hydration = hydrate_strategy_document(
+        upgraded, identity=StrategyIdentity(strategy_id, revision, CURRENT_SCHEMA_VERSION)
+    )
+    if not hydration.ok or hydration.spec is None:
+        detail = ", ".join(f"{issue.code}@{issue.pointer}" for issue in hydration.issues[:5])
+        raise ValueError(
+            "frozen strategy payload cannot be upgraded -- "
+            f"strategy_id={strategy_id} revision={revision} issues={detail}"
+        )
+    spec = hydration.spec
+    # 동결 표식은 row가 저장된 그 버전이다(1.0만이 아니라 은퇴한 모든 버전).
+    return replace(spec, identity=replace(spec.identity, schema_version=schema_version))
 
 
 def _verify_source_spec(

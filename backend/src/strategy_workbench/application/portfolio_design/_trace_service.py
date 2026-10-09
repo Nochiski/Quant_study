@@ -24,13 +24,16 @@ from strategy_workbench.domain.strategy.facade.provenance import (
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategySpec,
 )
+from strategy_workbench.domain.strategy.facade.validation import validate_strategy
 
 from ._models import PortfolioPipelineOptions, PortfolioPreviewRequest
 from ._service import (
+    InvalidPortfolioRequestError,
     InvalidPortfolioTraceSelectionError,
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     TraceObservationCapabilityError,
+    _resolve_environment_or_reject,
 )
 from ._trace_models import (
     RawStrategyTraceRow,
@@ -56,6 +59,10 @@ class StrategyTraceSourceNotFoundError(LookupError):
 
 class StaleStrategyTraceSourceError(RuntimeError):
     """The saved revision's server hash differs from the caller's expected hash."""
+
+
+class StrategyTraceSourceRequiresUpgradeError(RuntimeError):
+    """The saved revision is frozen under a retired schema version; trace it after upgrading."""
 
 
 class StrategyTraceCancelledError(RuntimeError):
@@ -89,12 +96,22 @@ class StrategyTraceService:
     ) -> StrategyTraceResponse:
         spec, provenance = self._resolve(request)
         _raise_if_cancelled(cancelled)
-        if request.as_of is not None and not spec.data.start <= request.as_of <= spec.data.end:
+        # `as_of` 범위 판정은 실행 설정을 필요로 하고, 문서에서 만드는 브리지는 유효한 문서를
+        # 전제한다. 그래서 파이프라인이 하는 것과 같은 검증을 여기서 먼저 한 번 돌린다 —
+        # 없으면 잘못된 문서가 코드화된 진단 대신 브리지의 raw ValueError 로 터진다.
+        validation = validate_strategy(spec)
+        if not validation.valid:
+            raise InvalidPortfolioRequestError(validation)
+        # 실행 설정 해소 실패는 preview·run 과 같은 구조화 진단으로 나간다(2차 리뷰 P3).
+        # trace 만 메시지 문자열로 납작하게 만들면 프론트가 코드로 분기하려고 본문을 파싱해야
+        # 한다.
+        environment = _resolve_environment_or_reject(spec, request.environment)
+        if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
-                "trace as_of is outside the strategy data range — "
-                f"as_of={request.as_of} range={spec.data.start}..{spec.data.end}"
+                "trace as_of is outside the run range — "
+                f"as_of={request.as_of} range={environment.start}..{environment.end}"
             )
-        factors = {factor.factor_id: factor for factor in spec.factors.factors}
+        factors = {factor.factor_id: factor for factor in spec.factors}
         if request.factor_id not in factors:
             raise InvalidStrategyTraceRequestError(
                 "trace factor_id is not present in the strategy — "
@@ -110,7 +127,7 @@ class StrategyTraceService:
         )
         try:
             pipeline = self._portfolio_design.run_pipeline(
-                PortfolioPreviewRequest(spec),
+                PortfolioPreviewRequest(spec, environment=environment),
                 options=PortfolioPipelineOptions(
                     trace_factor_id=request.factor_id,
                     trace_selection=selection,
@@ -229,6 +246,13 @@ class StrategyTraceService:
                     "saved strategy revision not found for trace — "
                     f"strategy_id={source.strategy_id} revision={source.revision}"
                 ) from error
+            if record.requires_upgrade:
+                raise StrategyTraceSourceRequiresUpgradeError(
+                    "saved strategy revision is frozen under a retired schema version and must "
+                    "be upgraded and saved again before it can be traced — "
+                    f"strategy_id={source.strategy_id} revision={source.revision} "
+                    f"schema_version={record.spec.identity.schema_version}"
+                )
             if record.spec_hash != source.expected_spec_hash:
                 raise StaleStrategyTraceSourceError(
                     "saved strategy revision hash mismatch for trace — "

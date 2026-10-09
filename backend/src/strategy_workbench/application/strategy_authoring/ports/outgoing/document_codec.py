@@ -198,3 +198,9 @@ class ParsedDocument:
 
 class DocumentCodecPort(Protocol):
     def parse(self, source: str, *, format: SourceFormat) -> ParsedDocument: ...
+
+    def upgrade_source(self, source: str, *, format: SourceFormat) -> str:
+        """Rewrite a schema 1.0 source as 1.1 text, keeping comments and order where the format
+        allows (spec D3 source path). Precondition: `parse` accepted the source and its tree is a
+        1.0 document; the caller re-parses the result and compares it with the domain dict path."""
+        ...

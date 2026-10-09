@@ -1,39 +1,90 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:strategy-workbench:strategy-document:1.0",
+  "$id": "urn:strategy-workbench:strategy-document:1.1",
   "title": "StrategyDocument",
+  "x-description-key": "strategy.document",
   "type": "object",
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "1.0"
+      "const": "1.1",
+      "x-description-key": "strategy.section.schema_version"
     },
     "title": {
-      "type": "string"
+      "type": "string",
+      "x-description-key": "strategy.section.title"
     },
     "description": {
-      "type": "string"
+      "type": "string",
+      "default": "",
+      "x-description-key": "strategy.section.description"
     },
     "data": {
-      "$ref": "#/$defs/DataStep"
+      "$ref": "#/$defs/DataStep",
+      "x-description-key": "strategy.section.data"
     },
     "eligibility": {
-      "$ref": "#/$defs/EligibilityStep"
+      "$ref": "#/$defs/EligibilityStep",
+      "default": {
+        "rules": []
+      },
+      "x-description-key": "strategy.section.eligibility"
     },
     "factors": {
-      "$ref": "#/$defs/FactorStep"
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FactorSignal"
+      },
+      "x-description-key": "strategy.section.factors"
     },
     "signal": {
-      "$ref": "#/$defs/SignalStep"
+      "$ref": "#/$defs/SignalStep",
+      "default": {
+        "score_threshold": null,
+        "regime_field_id": null,
+        "regime_minimum": null
+      },
+      "x-description-key": "strategy.section.signal"
     },
     "portfolio": {
-      "$ref": "#/$defs/PortfolioStep"
+      "$ref": "#/$defs/PortfolioStep",
+      "default": {
+        "side": "long_only",
+        "selection_count": 20,
+        "weighting": "equal",
+        "rebalance": "monthly",
+        "selection_method": "top_n",
+        "short_selection_count": 20,
+        "selection_percentile": 0.1,
+        "rebalance_every_n_sessions": 21,
+        "turnover_buffer_count": 0,
+        "minimum_trade_weight": 0.0,
+        "liquidity_field_id": null,
+        "minimum_liquidity": null
+      },
+      "x-description-key": "strategy.section.portfolio"
     },
     "risk": {
-      "$ref": "#/$defs/RiskStep"
+      "$ref": "#/$defs/RiskStep",
+      "default": {
+        "gross_exposure": 1.0,
+        "net_exposure": 1.0,
+        "max_name_weight": 0.1,
+        "max_sector_weight": 0.3,
+        "sector_neutral": false,
+        "risk_field_id": null
+      },
+      "x-description-key": "strategy.section.risk"
     },
     "execution": {
-      "$ref": "#/$defs/ExecutionStep"
+      "$ref": "#/$defs/ExecutionStep",
+      "default": {
+        "timing": "next_open",
+        "participation_rate": 0.1,
+        "fee_bps": 15.0,
+        "slippage_bps": 10.0
+      },
+      "x-description-key": "strategy.section.execution"
     },
     "parameters": {
       "type": "array",
@@ -54,45 +105,45 @@
         }
       },
       "default": [],
+      "x-description-key": "strategy.section.parameters",
       "x-defines": "parameter"
     }
   },
   "required": [
     "schema_version",
     "title",
-    "description",
     "data",
-    "eligibility",
-    "factors",
-    "signal",
-    "portfolio",
-    "risk",
-    "execution"
+    "factors"
   ],
   "additionalProperties": false,
   "$defs": {
     "DataStep": {
       "type": "object",
-      "title": "DataStep",
+      "x-description-key": "strategy.type.data_step",
       "properties": {
         "market": {
           "type": "string",
           "enum": [
             "KRX"
-          ]
+          ],
+          "default": "KRX",
+          "x-description-key": "strategy.field.data_step.market"
         },
         "start": {
           "type": "string",
           "format": "date",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "x-description-key": "strategy.field.data_step.start"
         },
         "end": {
           "type": "string",
           "format": "date",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "x-description-key": "strategy.field.data_step.end"
         },
         "universe_id": {
           "type": "string",
+          "x-description-key": "strategy.field.data_step.universe_id",
           "x-catalog": "universe"
         },
         "frequency": {
@@ -100,11 +151,11 @@
           "enum": [
             "daily"
           ],
-          "default": "daily"
+          "default": "daily",
+          "x-description-key": "strategy.field.data_step.frequency"
         }
       },
       "required": [
-        "market",
         "start",
         "end",
         "universe_id"
@@ -113,10 +164,11 @@
     },
     "EligibilityRule": {
       "type": "object",
-      "title": "EligibilityRule",
+      "x-description-key": "strategy.type.eligibility_rule",
       "properties": {
         "field_id": {
           "type": "string",
+          "x-description-key": "strategy.field.eligibility_rule.field_id",
           "x-catalog": "equity-field"
         },
         "operator": {
@@ -127,10 +179,12 @@
             "lt",
             "lte",
             "eq"
-          ]
+          ],
+          "x-description-key": "strategy.field.eligibility_rule.operator"
         },
         "value": {
-          "type": "number"
+          "type": "number",
+          "x-description-key": "strategy.field.eligibility_rule.value"
         }
       },
       "required": [
@@ -142,14 +196,15 @@
     },
     "EligibilityStep": {
       "type": "object",
-      "title": "EligibilityStep",
+      "x-description-key": "strategy.type.eligibility_step",
       "properties": {
         "rules": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/EligibilityRule"
           },
-          "default": []
+          "default": [],
+          "x-description-key": "strategy.field.eligibility_step.rules"
         }
       },
       "required": [],
@@ -157,97 +212,110 @@
     },
     "FieldNode": {
       "type": "object",
-      "title": "FieldNode",
+      "x-description-key": "strategy.node.field",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "field",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "field_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.field_id",
           "x-catalog": "equity-field"
-        },
-        "kind": {
-          "type": "string",
-          "const": "field"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "field_id",
-        "kind"
+        "field_id"
       ],
       "additionalProperties": false
     },
     "ConstantNode": {
       "type": "object",
-      "title": "ConstantNode",
+      "x-description-key": "strategy.node.constant",
       "properties": {
-        "node_id": {
-          "type": "string"
-        },
-        "value": {
-          "type": "number"
-        },
         "kind": {
           "type": "string",
-          "const": "constant"
+          "const": "constant",
+          "x-description-key": "strategy.field.node.kind"
+        },
+        "node_id": {
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
+        },
+        "value": {
+          "type": "number",
+          "x-description-key": "strategy.field.node.value"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "value",
-        "kind"
+        "value"
       ],
       "additionalProperties": false
     },
     "ParameterNode": {
       "type": "object",
-      "title": "ParameterNode",
+      "x-description-key": "strategy.node.parameter",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "parameter",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "parameter_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.parameter_id",
           "x-reference": "parameter"
-        },
-        "kind": {
-          "type": "string",
-          "const": "parameter"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "parameter_id",
-        "kind"
+        "parameter_id"
       ],
       "additionalProperties": false
     },
     "UnaryNode": {
       "type": "object",
-      "title": "UnaryNode",
+      "x-description-key": "strategy.node.unary",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "unary",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "operator": {
           "type": "string",
           "enum": [
             "negate",
-            "lag",
-            "rank",
-            "zscore",
-            "winsorize",
-            "neutralize"
-          ]
+            "lag"
+          ],
+          "x-description-key": "strategy.field.node.operator",
+          "x-operator": {
+            "negate": "strategy.operator.unary.negate",
+            "lag": "strategy.operator.unary.lag"
+          }
         },
         "input_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.input_node_id",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "unary"
         },
         "periods": {
           "anyOf": [
@@ -258,23 +326,31 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "minimum": 1,
+          "x-description-key": "strategy.field.node.periods"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
-        "input_node_id",
-        "kind"
+        "input_node_id"
       ],
       "additionalProperties": false
     },
     "BinaryNode": {
       "type": "object",
-      "title": "BinaryNode",
+      "x-description-key": "strategy.node.binary",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "binary",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "operator": {
           "type": "string",
@@ -283,36 +359,47 @@
             "subtract",
             "multiply",
             "divide"
-          ]
+          ],
+          "x-description-key": "strategy.field.node.operator",
+          "x-operator": {
+            "add": "strategy.operator.binary.add",
+            "subtract": "strategy.operator.binary.subtract",
+            "multiply": "strategy.operator.binary.multiply",
+            "divide": "strategy.operator.binary.divide"
+          }
         },
         "left_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.left_node_id",
           "x-reference": "node"
         },
         "right_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.right_node_id",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "binary"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "left_node_id",
-        "right_node_id",
-        "kind"
+        "right_node_id"
       ],
       "additionalProperties": false
     },
     "TimeSeriesNode": {
       "type": "object",
-      "title": "TimeSeriesNode",
+      "x-description-key": "strategy.node.time_series",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "time_series",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "operator": {
           "type": "string",
@@ -323,115 +410,153 @@
             "delta",
             "min",
             "max"
-          ]
+          ],
+          "x-description-key": "strategy.field.node.operator",
+          "x-operator": {
+            "mean": "strategy.operator.time_series.mean",
+            "std": "strategy.operator.time_series.std",
+            "momentum": "strategy.operator.time_series.momentum",
+            "delta": "strategy.operator.time_series.delta",
+            "min": "strategy.operator.time_series.min",
+            "max": "strategy.operator.time_series.max"
+          }
         },
         "input_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.input_node_id",
           "x-reference": "node"
         },
         "window": {
-          "type": "integer"
-        },
-        "kind": {
-          "type": "string",
-          "const": "time_series"
+          "type": "integer",
+          "minimum": 1,
+          "x-description-key": "strategy.field.node.window"
         },
         "lag": {
           "type": "integer",
-          "default": 0
+          "default": 0,
+          "minimum": 0,
+          "x-description-key": "strategy.field.node.lag"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "input_node_id",
-        "window",
-        "kind"
+        "window"
       ],
       "additionalProperties": false
     },
     "CrossSectionalNode": {
       "type": "object",
-      "title": "CrossSectionalNode",
+      "x-description-key": "strategy.node.cross_sectional",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "cross_sectional",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "operator": {
           "type": "string",
           "enum": [
             "rank",
             "zscore",
-            "winsorize"
-          ]
+            "winsorize",
+            "demean"
+          ],
+          "x-description-key": "strategy.field.node.operator",
+          "x-operator": {
+            "rank": "strategy.operator.cross_sectional.rank",
+            "zscore": "strategy.operator.cross_sectional.zscore",
+            "winsorize": "strategy.operator.cross_sectional.winsorize",
+            "demean": "strategy.operator.cross_sectional.demean"
+          }
         },
         "input_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.input_node_id",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "cross_sectional"
         },
         "lower_quantile": {
           "type": "number",
-          "default": 0.01
+          "default": 0.01,
+          "x-description-key": "strategy.field.node.lower_quantile"
         },
         "upper_quantile": {
           "type": "number",
-          "default": 0.99
+          "default": 0.99,
+          "x-description-key": "strategy.field.node.upper_quantile"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
-        "input_node_id",
-        "kind"
+        "input_node_id"
       ],
       "additionalProperties": false
     },
     "GroupNode": {
       "type": "object",
-      "title": "GroupNode",
+      "x-description-key": "strategy.node.group",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "group",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "operator": {
           "type": "string",
           "enum": [
             "neutralize",
             "rank"
-          ]
+          ],
+          "x-description-key": "strategy.field.node.operator",
+          "x-operator": {
+            "neutralize": "strategy.operator.group.neutralize",
+            "rank": "strategy.operator.group.rank"
+          }
         },
         "input_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.input_node_id",
           "x-reference": "node"
         },
         "group_field_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.group_field_id",
           "x-catalog": "equity-field"
-        },
-        "kind": {
-          "type": "string",
-          "const": "group"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "input_node_id",
-        "group_field_id",
-        "kind"
+        "group_field_id"
       ],
       "additionalProperties": false
     },
     "ComparisonNode": {
       "type": "object",
-      "title": "ComparisonNode",
+      "x-description-key": "strategy.node.comparison",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "comparison",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "operator": {
           "type": "string",
@@ -441,112 +566,129 @@
             "lt",
             "lte",
             "eq"
-          ]
+          ],
+          "x-description-key": "strategy.field.node.operator",
+          "x-operator": {
+            "gt": "strategy.operator.comparison.gt",
+            "gte": "strategy.operator.comparison.gte",
+            "lt": "strategy.operator.comparison.lt",
+            "lte": "strategy.operator.comparison.lte",
+            "eq": "strategy.operator.comparison.eq"
+          }
         },
         "left_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.left_node_id",
           "x-reference": "node"
         },
         "right_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.right_node_id",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "comparison"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "left_node_id",
-        "right_node_id",
-        "kind"
+        "right_node_id"
       ],
       "additionalProperties": false
     },
     "ConditionalNode": {
       "type": "object",
-      "title": "ConditionalNode",
+      "x-description-key": "strategy.node.conditional",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "conditional",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "predicate_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.predicate_node_id",
           "x-reference": "node"
         },
         "true_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.true_node_id",
           "x-reference": "node"
         },
         "false_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.false_node_id",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "conditional"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "predicate_node_id",
         "true_node_id",
-        "false_node_id",
-        "kind"
+        "false_node_id"
       ],
       "additionalProperties": false
     },
     "SavedFactorNode": {
       "type": "object",
-      "title": "SavedFactorNode",
+      "x-description-key": "strategy.node.saved_factor",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "saved_factor",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "factor_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.factor_id",
           "x-catalog": "factor"
-        },
-        "kind": {
-          "type": "string",
-          "const": "saved_factor"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "factor_id",
-        "kind"
+        "factor_id"
       ],
       "additionalProperties": false
     },
     "SavedSubgraphNode": {
       "type": "object",
-      "title": "SavedSubgraphNode",
+      "x-description-key": "strategy.node.saved_subgraph",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "saved_subgraph",
+          "x-description-key": "strategy.field.node.kind"
+        },
         "node_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.node.node_id"
         },
         "subgraph_id": {
           "type": "string",
+          "x-description-key": "strategy.field.node.subgraph_id",
           "x-catalog": "subgraph"
-        },
-        "kind": {
-          "type": "string",
-          "const": "saved_subgraph"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "subgraph_id",
-        "kind"
+        "subgraph_id"
       ],
       "additionalProperties": false
     },
     "FactorGraph": {
       "type": "object",
-      "title": "FactorGraph",
+      "x-description-key": "strategy.type.factor_graph",
       "properties": {
         "nodes": {
           "type": "array",
@@ -593,10 +735,12 @@
               "propertyName": "kind"
             }
           },
+          "x-description-key": "strategy.field.factor_graph.nodes",
           "x-defines": "node"
         },
         "output_node_id": {
           "type": "string",
+          "x-description-key": "strategy.field.factor_graph.output_node_id",
           "x-reference": "node"
         },
         "missing_policy": {
@@ -607,7 +751,9 @@
             "zero",
             "cross_sectional_median"
           ],
-          "default": "drop"
+          "default": "drop",
+          "x-description-key": "strategy.field.factor_graph.missing_policy",
+          "x-deprecated": true
         }
       },
       "required": [
@@ -618,16 +764,19 @@
     },
     "FactorSignal": {
       "type": "object",
-      "title": "FactorSignal",
+      "x-description-key": "strategy.type.factor_signal",
       "properties": {
         "factor_id": {
           "type": "string",
+          "x-description-key": "strategy.field.factor_signal.factor_id",
           "x-authoring-source": "factor_id",
           "x-authoring-identity": true
         },
         "label": {
           "type": "string",
-          "x-authoring-source": "label"
+          "x-description-key": "strategy.field.factor_signal.label",
+          "x-authoring-source": "label",
+          "x-default-from": "factor_id"
         },
         "direction": {
           "type": "string",
@@ -635,67 +784,32 @@
             "high",
             "low"
           ],
+          "x-description-key": "strategy.field.factor_signal.direction",
           "x-authoring-source": "preference"
         },
         "weight": {
           "type": "number",
+          "default": 1.0,
+          "x-description-key": "strategy.field.factor_signal.weight",
           "x-authoring-default": 1.0
         },
         "graph": {
           "$ref": "#/$defs/FactorGraph",
+          "x-description-key": "strategy.field.factor_signal.graph",
           "x-authoring-source": "default_graph"
         }
       },
       "required": [
         "factor_id",
-        "label",
         "direction",
-        "weight",
         "graph"
-      ],
-      "additionalProperties": false
-    },
-    "FactorStep": {
-      "type": "object",
-      "title": "FactorStep",
-      "properties": {
-        "factors": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/FactorSignal"
-          }
-        }
-      },
-      "required": [
-        "factors"
       ],
       "additionalProperties": false
     },
     "SignalStep": {
       "type": "object",
-      "title": "SignalStep",
+      "x-description-key": "strategy.type.signal_step",
       "properties": {
-        "method": {
-          "type": "string",
-          "enum": [
-            "weighted_sum",
-            "rank_threshold"
-          ],
-          "default": "weighted_sum"
-        },
-        "entry_percentile": {
-          "type": "number",
-          "default": 0.1,
-          "x-unit": "ratio",
-          "x-applied-stage": "signal",
-          "exclusiveMinimum": 0.0,
-          "maximum": 1.0,
-          "x-display-unit": "%",
-          "examples": [
-            0.1
-          ],
-          "x-description-key": "strategy.contract.signal.entry_percentile"
-        },
         "score_threshold": {
           "anyOf": [
             {
@@ -705,7 +819,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "x-description-key": "strategy.field.signal_step.score_threshold"
         },
         "regime_field_id": {
           "anyOf": [
@@ -717,6 +832,7 @@
             }
           ],
           "default": null,
+          "x-description-key": "strategy.field.signal_step.regime_field_id",
           "x-catalog": "equity-field"
         },
         "regime_minimum": {
@@ -728,7 +844,19 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "x-description-key": "strategy.field.signal_step.regime_minimum",
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/signal/regime_field_id",
+                "equals": null,
+                "not_null": true
+              }
+            ],
+            "description_key": "strategy.contract.applicable.regime_minimum",
+            "owned_by_error": "strategy.signal.regime_field"
+          }
         }
       },
       "required": [],
@@ -736,7 +864,7 @@
     },
     "PortfolioStep": {
       "type": "object",
-      "title": "PortfolioStep",
+      "x-description-key": "strategy.type.portfolio_step",
       "properties": {
         "side": {
           "type": "string",
@@ -744,18 +872,30 @@
             "long_only",
             "long_short"
           ],
-          "default": "long_only"
+          "default": "long_only",
+          "x-description-key": "strategy.field.portfolio_step.side"
         },
         "selection_count": {
           "type": "integer",
           "default": 20,
+          "x-description-key": "strategy.contract.portfolio.selection_count",
           "x-unit": "count",
           "x-applied-stage": "portfolio",
           "minimum": 1,
           "examples": [
             20
           ],
-          "x-description-key": "strategy.contract.portfolio.selection_count"
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/selection_method",
+                "equals": "top_n",
+                "not_null": false
+              }
+            ],
+            "description_key": "strategy.contract.applicable.selection_count",
+            "owned_by_error": null
+          }
         },
         "weighting": {
           "type": "string",
@@ -765,7 +905,8 @@
             "rank",
             "risk"
           ],
-          "default": "equal"
+          "default": "equal",
+          "x-description-key": "strategy.field.portfolio_step.weighting"
         },
         "rebalance": {
           "type": "string",
@@ -775,7 +916,8 @@
             "monthly",
             "quarterly"
           ],
-          "default": "monthly"
+          "default": "monthly",
+          "x-description-key": "strategy.field.portfolio_step.rebalance"
         },
         "selection_method": {
           "type": "string",
@@ -783,22 +925,40 @@
             "top_n",
             "percentile"
           ],
-          "default": "top_n"
+          "default": "top_n",
+          "x-description-key": "strategy.field.portfolio_step.selection_method"
         },
         "short_selection_count": {
           "type": "integer",
           "default": 20,
+          "x-description-key": "strategy.contract.portfolio.short_selection_count",
           "x-unit": "count",
           "x-applied-stage": "portfolio",
           "minimum": 1,
           "examples": [
             20
           ],
-          "x-description-key": "strategy.contract.portfolio.short_selection_count"
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/side",
+                "equals": "long_short",
+                "not_null": false
+              },
+              {
+                "pointer": "/portfolio/selection_method",
+                "equals": "top_n",
+                "not_null": false
+              }
+            ],
+            "description_key": "strategy.contract.applicable.short_selection_count",
+            "owned_by_error": null
+          }
         },
         "selection_percentile": {
           "type": "number",
           "default": 0.1,
+          "x-description-key": "strategy.contract.portfolio.selection_percentile",
           "x-unit": "ratio",
           "x-applied-stage": "portfolio",
           "exclusiveMinimum": 0.0,
@@ -807,33 +967,55 @@
           "examples": [
             0.1
           ],
-          "x-description-key": "strategy.contract.portfolio.selection_percentile"
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/selection_method",
+                "equals": "percentile",
+                "not_null": false
+              }
+            ],
+            "description_key": "strategy.contract.applicable.selection_percentile",
+            "owned_by_error": null
+          }
         },
         "rebalance_every_n_sessions": {
           "type": "integer",
           "default": 21,
+          "x-description-key": "strategy.contract.portfolio.rebalance_every_n_sessions",
           "x-unit": "sessions",
           "x-applied-stage": "portfolio",
           "minimum": 1,
           "examples": [
             21
           ],
-          "x-description-key": "strategy.contract.portfolio.rebalance_every_n_sessions"
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/rebalance",
+                "equals": "every_n_sessions",
+                "not_null": false
+              }
+            ],
+            "description_key": "strategy.contract.applicable.rebalance_every_n_sessions",
+            "owned_by_error": null
+          }
         },
         "turnover_buffer_count": {
           "type": "integer",
           "default": 0,
+          "x-description-key": "strategy.contract.portfolio.turnover_buffer_count",
           "x-unit": "count",
           "x-applied-stage": "portfolio",
           "minimum": 0,
           "examples": [
             0
-          ],
-          "x-description-key": "strategy.contract.portfolio.turnover_buffer_count"
+          ]
         },
         "minimum_trade_weight": {
           "type": "number",
           "default": 0.0,
+          "x-description-key": "strategy.contract.portfolio.minimum_trade_weight",
           "x-unit": "ratio",
           "x-applied-stage": "portfolio",
           "minimum": 0.0,
@@ -841,8 +1023,7 @@
           "x-display-unit": "%",
           "examples": [
             0.0
-          ],
-          "x-description-key": "strategy.contract.portfolio.minimum_trade_weight"
+          ]
         },
         "liquidity_field_id": {
           "anyOf": [
@@ -854,6 +1035,7 @@
             }
           ],
           "default": null,
+          "x-description-key": "strategy.field.portfolio_step.liquidity_field_id",
           "x-catalog": "equity-field"
         },
         "minimum_liquidity": {
@@ -866,10 +1048,21 @@
             }
           ],
           "default": null,
+          "x-description-key": "strategy.contract.portfolio.minimum_liquidity",
           "x-unit": "field",
           "x-applied-stage": "eligibility",
           "minimum": 0.0,
-          "x-description-key": "strategy.contract.portfolio.minimum_liquidity"
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/liquidity_field_id",
+                "equals": null,
+                "not_null": true
+              }
+            ],
+            "description_key": "strategy.contract.applicable.minimum_liquidity",
+            "owned_by_error": "strategy.portfolio.liquidity_field"
+          }
         }
       },
       "required": [],
@@ -877,27 +1070,29 @@
     },
     "RiskStep": {
       "type": "object",
-      "title": "RiskStep",
+      "x-description-key": "strategy.type.risk_step",
       "properties": {
         "gross_exposure": {
           "type": "number",
           "default": 1.0,
+          "x-description-key": "strategy.contract.risk.gross_exposure",
           "x-unit": "ratio",
           "x-applied-stage": "risk",
           "exclusiveMinimum": 0.0,
           "x-display-unit": "%",
           "examples": [
             1.0
-          ],
-          "x-description-key": "strategy.contract.risk.gross_exposure"
+          ]
         },
         "net_exposure": {
           "type": "number",
-          "default": 1.0
+          "default": 1.0,
+          "x-description-key": "strategy.field.risk_step.net_exposure"
         },
         "max_name_weight": {
           "type": "number",
           "default": 0.1,
+          "x-description-key": "strategy.contract.risk.max_name_weight",
           "x-unit": "ratio",
           "x-applied-stage": "risk",
           "exclusiveMinimum": 0.0,
@@ -905,12 +1100,12 @@
           "x-display-unit": "%",
           "examples": [
             0.05
-          ],
-          "x-description-key": "strategy.contract.risk.max_name_weight"
+          ]
         },
         "max_sector_weight": {
           "type": "number",
           "default": 0.3,
+          "x-description-key": "strategy.contract.risk.max_sector_weight",
           "x-unit": "ratio",
           "x-applied-stage": "risk",
           "exclusiveMinimum": 0.0,
@@ -918,12 +1113,23 @@
           "x-display-unit": "%",
           "examples": [
             0.25
-          ],
-          "x-description-key": "strategy.contract.risk.max_sector_weight"
+          ]
         },
         "sector_neutral": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "x-description-key": "strategy.field.risk_step.sector_neutral",
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/side",
+                "equals": "long_short",
+                "not_null": false
+              }
+            ],
+            "description_key": "strategy.contract.applicable.sector_neutral",
+            "owned_by_error": "strategy.risk.sector_neutral_side"
+          }
         },
         "risk_field_id": {
           "anyOf": [
@@ -935,6 +1141,18 @@
             }
           ],
           "default": null,
+          "x-description-key": "strategy.field.risk_step.risk_field_id",
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/weighting",
+                "equals": "risk",
+                "not_null": false
+              }
+            ],
+            "description_key": "strategy.contract.applicable.risk_field_id",
+            "owned_by_error": null
+          },
           "x-catalog": "equity-field"
         }
       },
@@ -943,25 +1161,20 @@
     },
     "ExecutionStep": {
       "type": "object",
-      "title": "ExecutionStep",
+      "x-description-key": "strategy.type.execution_step",
       "properties": {
         "timing": {
           "type": "string",
           "enum": [
             "next_open"
           ],
-          "default": "next_open"
-        },
-        "order_style": {
-          "type": "string",
-          "enum": [
-            "market"
-          ],
-          "default": "market"
+          "default": "next_open",
+          "x-description-key": "strategy.field.execution_step.timing"
         },
         "participation_rate": {
           "type": "number",
           "default": 0.1,
+          "x-description-key": "strategy.contract.execution.participation_rate",
           "x-unit": "ratio",
           "x-applied-stage": "execution",
           "exclusiveMinimum": 0.0,
@@ -969,32 +1182,31 @@
           "x-display-unit": "%",
           "examples": [
             0.1
-          ],
-          "x-description-key": "strategy.contract.execution.participation_rate"
+          ]
         },
         "fee_bps": {
           "type": "number",
           "default": 15.0,
+          "x-description-key": "strategy.contract.execution.fee_bps",
           "x-unit": "bps",
           "x-applied-stage": "execution",
           "minimum": 0.0,
           "x-display-unit": "bp",
           "examples": [
             15.0
-          ],
-          "x-description-key": "strategy.contract.execution.fee_bps"
+          ]
         },
         "slippage_bps": {
           "type": "number",
           "default": 10.0,
+          "x-description-key": "strategy.contract.execution.slippage_bps",
           "x-unit": "bps",
           "x-applied-stage": "execution",
           "minimum": 0.0,
           "x-display-unit": "bp",
           "examples": [
             10.0
-          ],
-          "x-description-key": "strategy.contract.execution.slippage_bps"
+          ]
         }
       },
       "required": [],
@@ -1002,23 +1214,28 @@
     },
     "FloatParameter": {
       "type": "object",
-      "title": "FloatParameter",
+      "x-description-key": "strategy.parameter.float",
       "properties": {
-        "parameter_id": {
-          "type": "string"
-        },
-        "default": {
-          "type": "number"
-        },
-        "minimum": {
-          "type": "number"
-        },
-        "maximum": {
-          "type": "number"
-        },
         "kind": {
           "type": "string",
-          "const": "float"
+          "const": "float",
+          "x-description-key": "strategy.field.parameter.kind"
+        },
+        "parameter_id": {
+          "type": "string",
+          "x-description-key": "strategy.field.parameter.parameter_id"
+        },
+        "default": {
+          "type": "number",
+          "x-description-key": "strategy.field.parameter.default"
+        },
+        "minimum": {
+          "type": "number",
+          "x-description-key": "strategy.field.parameter.minimum"
+        },
+        "maximum": {
+          "type": "number",
+          "x-description-key": "strategy.field.parameter.maximum"
         },
         "step": {
           "anyOf": [
@@ -1029,65 +1246,79 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "x-description-key": "strategy.field.parameter.step"
         }
       },
       "required": [
+        "kind",
         "parameter_id",
         "default",
         "minimum",
-        "maximum",
-        "kind"
+        "maximum"
       ],
       "additionalProperties": false
     },
     "IntegerParameter": {
       "type": "object",
-      "title": "IntegerParameter",
+      "x-description-key": "strategy.parameter.integer",
       "properties": {
-        "parameter_id": {
-          "type": "string"
-        },
-        "default": {
-          "type": "integer"
-        },
-        "minimum": {
-          "type": "integer"
-        },
-        "maximum": {
-          "type": "integer"
-        },
         "kind": {
           "type": "string",
-          "const": "integer"
+          "const": "integer",
+          "x-description-key": "strategy.field.parameter.kind"
+        },
+        "parameter_id": {
+          "type": "string",
+          "x-description-key": "strategy.field.parameter.parameter_id"
+        },
+        "default": {
+          "type": "integer",
+          "x-description-key": "strategy.field.parameter.default"
+        },
+        "minimum": {
+          "type": "integer",
+          "x-description-key": "strategy.field.parameter.minimum"
+        },
+        "maximum": {
+          "type": "integer",
+          "x-description-key": "strategy.field.parameter.maximum"
         },
         "step": {
           "type": "integer",
-          "default": 1
+          "default": 1,
+          "x-description-key": "strategy.field.parameter.step"
         }
       },
       "required": [
+        "kind",
         "parameter_id",
         "default",
         "minimum",
-        "maximum",
-        "kind"
+        "maximum"
       ],
       "additionalProperties": false
     },
     "ChoiceParameter": {
       "type": "object",
-      "title": "ChoiceParameter",
+      "x-description-key": "strategy.parameter.choice",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "choice",
+          "x-description-key": "strategy.field.parameter.kind"
+        },
         "parameter_id": {
-          "type": "string"
+          "type": "string",
+          "x-description-key": "strategy.field.parameter.parameter_id"
         },
         "default": {
           "type": [
             "boolean",
             "number",
             "string"
-          ]
+          ],
+          "x-description-key": "strategy.field.parameter.default"
         },
         "choices": {
           "type": "array",
@@ -1097,18 +1328,15 @@
               "number",
               "string"
             ]
-          }
-        },
-        "kind": {
-          "type": "string",
-          "const": "choice"
+          },
+          "x-description-key": "strategy.field.parameter.choices"
         }
       },
       "required": [
+        "kind",
         "parameter_id",
         "default",
-        "choices",
-        "kind"
+        "choices"
       ],
       "additionalProperties": false
     }

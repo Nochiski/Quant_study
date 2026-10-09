@@ -1,20 +1,23 @@
 use crate::buying_power::BuyingPower;
 use crate::callback::CallbackFrame;
-use crate::compact_store::{AppendWire, CompactRecordStore, RecordWire};
+use crate::driver::{CorporateActionEntry, Queued, RunSettings};
 use crate::event_queue::NativeEventQueue;
 use crate::feed::PersistentFeed;
 use crate::persistent_router::{
-    self, CloseWire, DecisionWire, RouteError, RoutedGroup, RoutedOrder, RoutedUpdate, RouterConfig,
+    DecisionWire, ExecutionWire, RouteError, RoutedOrder, RouterConfig, TargetWire,
 };
-use crate::portfolio::{Portfolio, SnapshotTuple};
+use crate::portfolio::Portfolio;
 use crate::quote::parse_decimal_ratio;
+use crate::records::{RecordIndexWire, RecordStore};
 use crate::session::{self, BarTuple, EntryTuple, Op};
+use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-enum Lifecycle {
+pub(crate) enum Lifecycle {
     Ready,
     Running,
     AwaitingDecision(u64),
@@ -23,16 +26,8 @@ enum Lifecycle {
 }
 
 type GroupTuple = (String, String, Vec<String>);
-type OrderState = (String, i64, bool);
 type CostTuple = (String, Option<String>, f64);
 type CorporateActionTuple = (i64, i64, f64, f64, f64);
-type RouteResponse = (
-    String,
-    Vec<RoutedOrder>,
-    Vec<RoutedUpdate>,
-    Vec<RoutedGroup>,
-    Option<RouteError>,
-);
 
 fn scaled_corporate_action_quantity(quantity: i64, ratio: &str) -> PyResult<(i64, f64)> {
     const QUANTUM: i128 = 1_000_000_000;
@@ -74,47 +69,27 @@ fn scaled_corporate_action_quantity(quantity: i64, ratio: &str) -> PyResult<(i64
 pub(crate) struct StoredOrder {
     pub(crate) order_id: String,
     pub(crate) key: String,
-    symbol: String,
+    pub(crate) symbol: String,
     pub(crate) side: String,
-    order_type: String,
+    pub(crate) order_type: String,
     limit_price: Option<f64>,
     stop_price: Option<f64>,
-    limit_text: Option<String>,
-    stop_text: Option<String>,
-    tif: String,
+    pub(crate) limit_text: Option<String>,
+    pub(crate) stop_text: Option<String>,
+    pub(crate) tif: String,
+    /// 최초 주문 수량 (ORDER 레코드용). `remaining`은 체결·정정으로 줄어든다.
+    pub(crate) quantity: i64,
     pub(crate) remaining: i64,
     triggered: bool,
-    group_id: Option<String>,
+    pub(crate) group_id: Option<String>,
     participation: Option<String>,
+    /// 결정 추적 메타. 드라이버가 결정을 주문으로 풀 때 채운다.
+    pub(crate) decision_id: String,
+    pub(crate) action_index: usize,
+    pub(crate) leg_index: Option<usize>,
 }
 
 impl StoredOrder {
-    fn from_tuple(value: EntryTuple) -> PyResult<Self> {
-        if value.7 <= 0 {
-            return Err(PyValueError::new_err(format!(
-                "order remaining must be > 0 — order_id={} remaining={}",
-                value.0, value.7
-            )));
-        }
-        let (limit_price, stop_price, limit_text, stop_text) = value.5;
-        Ok(Self {
-            order_id: value.0,
-            key: value.1,
-            symbol: value.2,
-            side: value.3,
-            order_type: value.4,
-            limit_price,
-            stop_price,
-            limit_text,
-            stop_text,
-            tif: value.6,
-            remaining: value.7,
-            triggered: value.8,
-            group_id: value.9,
-            participation: value.10,
-        })
-    }
-
     fn as_tuple(&self) -> EntryTuple {
         (
             self.order_id.clone(),
@@ -136,10 +111,11 @@ impl StoredOrder {
         )
     }
 
-    fn from_routed(
+    pub(crate) fn from_routed(
         value: &RoutedOrder,
         decision: &DecisionWire,
         fallback_symbol: Option<&str>,
+        decision_id: &str,
     ) -> PyResult<Self> {
         let action = decision.3.get(value.9).ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -202,19 +178,23 @@ impl StoredOrder {
             limit_text: value.5.clone(),
             stop_text: value.6.clone(),
             tif: value.7.clone(),
+            quantity: value.2,
             remaining: value.2,
             triggered: false,
             group_id: value.8.clone(),
             participation: participation.map(|value| value.to_string()),
+            decision_id: decision_id.to_string(),
+            action_index: value.9,
+            leg_index: value.10,
         })
     }
 }
 
 #[derive(Clone, Debug)]
-struct StoredGroup {
-    group_id: String,
-    policy: String,
-    order_ids: Vec<String>,
+pub(crate) struct StoredGroup {
+    pub(crate) group_id: String,
+    pub(crate) policy: String,
+    pub(crate) order_ids: Vec<String>,
 }
 
 impl StoredGroup {
@@ -227,30 +207,43 @@ impl StoredGroup {
     }
 }
 
-/// 세션 사이에 포트폴리오·대기 주문·그룹·식별자 시퀀스를 유지하는 첫 persistent runtime.
+/// 세션 루프 전체를 소유하는 persistent runtime.
 ///
-/// 전략·Router·EventQueue는 M1 동안 Python에 남고, mutable 주문 상태의 단일 진실 원천만
-/// 이 객체로 옮긴다. `process_market`에는 Bar만 전달하며 open entries/groups는 내부 상태를 쓴다.
+/// feed·큐·레코드·주문·그룹·포트폴리오·ID 시퀀스·자본변동 일정이 여기 있고, Python은 전략
+/// 콜백(`drive()` → `submit_decision()`)과 결과 조회(`finish()` 배치)에서만 왕복한다.
+/// 세션 진행 로직은 `driver.rs`에 있다.
 #[pyclass]
 pub(crate) struct PersistentEngine {
-    portfolio: Portfolio,
-    orders: Vec<StoredOrder>,
-    groups: Vec<StoredGroup>,
-    pending_orders: Vec<StoredOrder>,
-    pending_groups: Vec<StoredGroup>,
-    event_queue: NativeEventQueue,
-    lifecycle: Lifecycle,
-    callback_seq: u64,
-    failure_message: Option<String>,
-    record_store: CompactRecordStore,
-    decision_seq: u64,
-    order_seq: u64,
-    fill_seq: u64,
-    group_seq: u64,
-    leverage: f64,
-    allow_short: bool,
-    router_config: RouterConfig,
-    feed: Option<PersistentFeed>,
+    pub(crate) portfolio: Portfolio,
+    pub(crate) orders: Vec<StoredOrder>,
+    pub(crate) groups: Vec<StoredGroup>,
+    pub(crate) pending_orders: Vec<StoredOrder>,
+    pub(crate) pending_groups: Vec<StoredGroup>,
+    pub(crate) event_queue: NativeEventQueue,
+    /// 큐 payload arena. 힙 엔트리는 이 Vec의 index(token)만 들고 다닌다.
+    pub(crate) queued: Vec<Option<Queued>>,
+    /// `pop`이 payload를 가져가 비운 arena 자리. `push`가 여기서 먼저 꺼내 쓴다.
+    pub(crate) free_slots: Vec<usize>,
+    pub(crate) lifecycle: Lifecycle,
+    pub(crate) callback_seq: u64,
+    pub(crate) awaiting_session: usize,
+    pub(crate) started: bool,
+    pub(crate) failure_message: Option<String>,
+    pub(crate) records: RecordStore,
+    pub(crate) decision_seq: u64,
+    pub(crate) order_seq: u64,
+    pub(crate) fill_seq: u64,
+    pub(crate) group_seq: u64,
+    pub(crate) leverage: f64,
+    pub(crate) allow_short: bool,
+    pub(crate) router_config: RouterConfig,
+    pub(crate) feed: Option<PersistentFeed>,
+    pub(crate) run: Option<Arc<RunSettings>>,
+    pub(crate) corporate_actions: Vec<CorporateActionEntry>,
+    pub(crate) ca_by_session: HashMap<usize, Vec<usize>>,
+    pub(crate) debug_panic_on_market: bool,
+    /// 선언형 tape. 있으면 `drive()`가 콜백을 Python에 넘기지 않고 Rust에서 결정한다.
+    pub(crate) tape: Option<NativeTape>,
 }
 
 impl PersistentEngine {
@@ -286,7 +279,7 @@ impl PersistentEngine {
         Ok(new_remaining)
     }
 
-    fn next_id(sequence: &mut u64, prefix: char) -> String {
+    pub(crate) fn next_id(sequence: &mut u64, prefix: char) -> String {
         *sequence += 1;
         format!("{prefix}-{:06}", *sequence)
     }
@@ -334,13 +327,17 @@ impl PersistentEngine {
         Ok(())
     }
 
-    fn process_market_values(
-        &mut self,
+    /// MARKET 처리 계획만 세운다 — 상태를 바꾸지 않으므로 `&self`다.
+    ///
+    /// 적용(`apply_market_ops`)과 나눠 둔 이유는 빌림이다. `bars`가 피드를 빌린 채
+    /// 들어오므로, 계획 단계까지 `&mut self`를 잡으면 같은 `self`의 피드 빌림과 겹친다.
+    fn plan_market_ops(
+        &self,
         ts: &str,
-        bars: HashMap<String, BarTuple>,
+        bars: &HashMap<&str, BarTuple>,
         fee_rate: f64,
         default_participation: Option<&str>,
-        slippage: (String, f64, f64),
+        slippage: &(String, f64, f64),
     ) -> PyResult<Vec<Op>> {
         let (_, positions, equity, _) = self.portfolio.snapshot()?;
         let power_positions = positions
@@ -355,7 +352,7 @@ impl PersistentEngine {
             .filter(|group| self.group_is_open(group))
             .map(StoredGroup::as_tuple)
             .collect();
-        let mut ops = session::process_market_impl(
+        session::process_market_impl(
             ts,
             entries,
             groups,
@@ -364,12 +361,10 @@ impl PersistentEngine {
             fee_rate,
             default_participation,
             slippage,
-        )?;
-        self.apply_market_ops(&mut ops)?;
-        Ok(ops)
+        )
     }
 
-    fn activate_pending_internal(&mut self) -> PyResult<()> {
+    pub(crate) fn activate_pending_internal(&mut self) -> PyResult<()> {
         if let Some(order) = self.pending_orders.iter().find(|pending| {
             self.orders
                 .iter()
@@ -394,423 +389,8 @@ impl PersistentEngine {
         self.groups.append(&mut self.pending_groups);
         Ok(())
     }
-}
 
-#[pymethods]
-impl PersistentEngine {
-    #[new]
-    #[pyo3(signature = (initial_cash, allow_short=false, allow_margin=false, leverage=1.0))]
-    fn new(
-        initial_cash: f64,
-        allow_short: bool,
-        allow_margin: bool,
-        leverage: f64,
-    ) -> PyResult<Self> {
-        if leverage <= 0.0 {
-            return Err(PyValueError::new_err(format!(
-                "leverage must be > 0 — leverage={leverage}"
-            )));
-        }
-        Ok(Self {
-            portfolio: Portfolio::new(initial_cash, allow_short, allow_margin),
-            orders: Vec::new(),
-            groups: Vec::new(),
-            pending_orders: Vec::new(),
-            pending_groups: Vec::new(),
-            event_queue: NativeEventQueue::default(),
-            lifecycle: Lifecycle::Ready,
-            callback_seq: 0,
-            failure_message: None,
-            record_store: CompactRecordStore::default(),
-            decision_seq: 0,
-            order_seq: 0,
-            fill_seq: 0,
-            group_seq: 0,
-            leverage,
-            allow_short,
-            router_config: RouterConfig::default(),
-            feed: None,
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn load_feed(
-        &mut self,
-        keys: Vec<String>,
-        symbols: Vec<String>,
-        sessions: Vec<String>,
-        offsets: Vec<usize>,
-        instrument_ids: Vec<u32>,
-        opens: Vec<f64>,
-        highs: Vec<f64>,
-        lows: Vec<f64>,
-        closes: Vec<f64>,
-        volumes: Vec<i64>,
-    ) -> PyResult<()> {
-        self.feed = Some(PersistentFeed::new(
-            keys,
-            symbols,
-            sessions,
-            offsets,
-            instrument_ids,
-            opens,
-            highs,
-            lows,
-            closes,
-            volumes,
-        )?);
-        Ok(())
-    }
-
-    fn configure_router(&mut self, actions: Vec<String>, features: Vec<String>) {
-        self.router_config.configure(actions, features);
-    }
-
-    #[pyo3(signature = (decision, bars=None))]
-    fn route_basic_decision(
-        &mut self,
-        decision: DecisionWire,
-        bars: Option<HashMap<String, CloseWire>>,
-    ) -> PyResult<RouteResponse> {
-        let decision_id = Self::next_id(&mut self.decision_seq, 'D');
-        let bars = match bars {
-            Some(bars) => bars,
-            None => self
-                .feed
-                .as_ref()
-                .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-                .current_closes()?,
-        };
-        // 심볼 폴백은 그날 바뿐 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
-        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
-        let mut fallback_symbols: HashMap<String, String> = self
-            .feed
-            .as_ref()
-            .map(PersistentFeed::registry_symbols)
-            .unwrap_or_default();
-        for (key, (symbol, _)) in bars.iter() {
-            fallback_symbols.insert(key.clone(), symbol.clone());
-        }
-        let decision_for_orders = decision.clone();
-        let (orders, updates, groups, error) = persistent_router::route_basic_decision(
-            &self.portfolio,
-            &mut self.orders,
-            &self.router_config,
-            &mut self.order_seq,
-            &mut self.group_seq,
-            self.allow_short,
-            &decision_id,
-            decision,
-            bars,
-        )?;
-        if error.is_none() {
-            let staged_orders = orders
-                .iter()
-                .map(|order| {
-                    StoredOrder::from_routed(
-                        order,
-                        &decision_for_orders,
-                        fallback_symbols.get(&order.1).map(String::as_str),
-                    )
-                })
-                .collect::<PyResult<Vec<_>>>()?;
-            let staged_groups: Vec<StoredGroup> = groups
-                .iter()
-                .map(|group| StoredGroup {
-                    group_id: group.0.clone(),
-                    policy: group.1.clone(),
-                    order_ids: group.2.clone(),
-                })
-                .collect();
-            self.pending_orders.extend(staged_orders);
-            self.pending_groups.extend(staged_groups);
-        }
-        Ok((decision_id, orders, updates, groups, error))
-    }
-
-    fn run_until_callback(
-        &mut self,
-        event_kind: &str,
-        session_index: usize,
-    ) -> PyResult<CallbackFrame> {
-        match self.lifecycle {
-            Lifecycle::AwaitingDecision(token) => {
-                return Err(PyValueError::new_err(format!(
-                    "callback already awaiting a decision — token={token}"
-                )))
-            }
-            Lifecycle::Failed => {
-                return Err(PyValueError::new_err(format!(
-                    "persistent runtime is failed — detail={:?}",
-                    self.failure_message
-                )))
-            }
-            Lifecycle::Finished => {
-                return Err(PyValueError::new_err(
-                    "persistent runtime is already finished",
-                ))
-            }
-            Lifecycle::Ready | Lifecycle::Running => {}
-        }
-        if !matches!(
-            event_kind,
-            "market" | "fill" | "order_update" | "corporate_action"
-        ) {
-            return Err(PyValueError::new_err(format!(
-                "unsupported callback event kind — kind={event_kind:?}"
-            )));
-        }
-        let ts = self
-            .feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-            .session_at(session_index)?
-            .to_string();
-        self.callback_seq = self.callback_seq.checked_add(1).ok_or_else(|| {
-            PyValueError::new_err("persistent callback token sequence exhausted u64")
-        })?;
-        let token = self.callback_seq;
-        self.lifecycle = Lifecycle::AwaitingDecision(token);
-        Ok(CallbackFrame {
-            token,
-            event_kind: event_kind.to_string(),
-            session_index,
-            ts,
-        })
-    }
-
-    fn submit_decision(&mut self, token: u64, decision: DecisionWire) -> PyResult<RouteResponse> {
-        match self.lifecycle {
-            Lifecycle::AwaitingDecision(expected) if token == expected => {}
-            Lifecycle::AwaitingDecision(expected) => {
-                return Err(PyValueError::new_err(format!(
-                    "stale callback token — expected={expected} got={token}"
-                )))
-            }
-            Lifecycle::Failed => {
-                return Err(PyValueError::new_err(format!(
-                    "persistent runtime is failed — detail={:?}",
-                    self.failure_message
-                )))
-            }
-            Lifecycle::Finished => {
-                return Err(PyValueError::new_err(
-                    "persistent runtime is already finished",
-                ))
-            }
-            Lifecycle::Ready | Lifecycle::Running => {
-                return Err(PyValueError::new_err(format!(
-                    "no callback is awaiting a decision — token={token}"
-                )))
-            }
-        }
-        match self.route_basic_decision(decision, None) {
-            Ok(response) => {
-                if response.4.is_some() {
-                    self.lifecycle = Lifecycle::Failed;
-                    self.failure_message = response.4.as_ref().map(|error| error.1.clone());
-                } else {
-                    self.lifecycle = Lifecycle::Running;
-                }
-                Ok(response)
-            }
-            Err(error) => {
-                self.lifecycle = Lifecycle::Failed;
-                self.failure_message = Some(error.to_string());
-                Err(error)
-            }
-        }
-    }
-
-    fn fail_callback(&mut self, token: u64, detail: String) -> PyResult<()> {
-        match self.lifecycle {
-            Lifecycle::AwaitingDecision(expected) if token == expected => {
-                self.lifecycle = Lifecycle::Failed;
-                self.failure_message = Some(detail);
-                Ok(())
-            }
-            Lifecycle::AwaitingDecision(expected) => Err(PyValueError::new_err(format!(
-                "stale callback token while failing — expected={expected} got={token}"
-            ))),
-            _ => Err(PyValueError::new_err(format!(
-                "cannot fail callback from lifecycle state {} — token={token}",
-                self.lifecycle_state()
-            ))),
-        }
-    }
-
-    fn finish_callbacks(&mut self) -> PyResult<()> {
-        match self.lifecycle {
-            Lifecycle::AwaitingDecision(token) => Err(PyValueError::new_err(format!(
-                "cannot finish while callback awaits a decision — token={token}"
-            ))),
-            Lifecycle::Failed => Err(PyValueError::new_err(format!(
-                "cannot finish failed persistent runtime — detail={:?}",
-                self.failure_message
-            ))),
-            Lifecycle::Finished => Err(PyValueError::new_err(
-                "persistent runtime finish called more than once",
-            )),
-            Lifecycle::Ready | Lifecycle::Running => {
-                self.lifecycle = Lifecycle::Finished;
-                Ok(())
-            }
-        }
-    }
-
-    fn lifecycle_state(&self) -> &'static str {
-        match self.lifecycle {
-            Lifecycle::Ready => "ready",
-            Lifecycle::Running => "running",
-            Lifecycle::AwaitingDecision(_) => "awaiting_decision",
-            Lifecycle::Failed => "failed",
-            Lifecycle::Finished => "finished",
-        }
-    }
-
-    #[getter]
-    fn failure_detail(&self) -> Option<String> {
-        self.failure_message.clone()
-    }
-
-    fn poison(&mut self, detail: String) {
-        self.lifecycle = Lifecycle::Failed;
-        self.failure_message = Some(detail);
-    }
-
-    #[doc(hidden)]
-    fn _debug_force_panic(&self) {
-        panic!("forced persistent runtime panic for boundary verification");
-    }
-
-    fn activate_pending(&mut self) -> PyResult<()> {
-        self.activate_pending_internal()
-    }
-
-    fn queue_push(&mut self, timestamp_micros: i64, priority: u8, token: u64) -> PyResult<()> {
-        self.event_queue.push(timestamp_micros, priority, token)
-    }
-
-    fn queue_pop(&mut self) -> PyResult<u64> {
-        self.event_queue.pop()
-    }
-
-    fn queue_len(&self) -> usize {
-        self.event_queue.len()
-    }
-
-    fn record_append(
-        &mut self,
-        timestamp_micros: i64,
-        kind: u8,
-        payload_token: u64,
-    ) -> PyResult<()> {
-        self.record_store
-            .append(timestamp_micros, kind, payload_token)
-    }
-
-    fn record_batch(&self) -> Vec<RecordWire> {
-        self.record_store.batch()
-    }
-
-    fn record_extend(&mut self, records: Vec<AppendWire>) -> PyResult<()> {
-        self.record_store.extend(records)
-    }
-
-    fn finish(&mut self) -> PyResult<Vec<RecordWire>> {
-        self.finish_callbacks()?;
-        self.record_store.finish()
-    }
-
-    fn next_decision_id(&mut self) -> String {
-        Self::next_id(&mut self.decision_seq, 'D')
-    }
-
-    fn next_order_id(&mut self) -> String {
-        Self::next_id(&mut self.order_seq, 'O')
-    }
-
-    fn next_fill_id(&mut self) -> String {
-        Self::next_id(&mut self.fill_seq, 'F')
-    }
-
-    fn next_group_id(&mut self) -> String {
-        Self::next_id(&mut self.group_seq, 'G')
-    }
-
-    fn place_order(&mut self, order: EntryTuple) -> PyResult<()> {
-        let order = StoredOrder::from_tuple(order)?;
-        if self.order_index(&order.order_id).is_some() {
-            return Err(PyValueError::new_err(format!(
-                "duplicate order id — order_id={}",
-                order.order_id
-            )));
-        }
-        self.orders.push(order);
-        Ok(())
-    }
-
-    fn register_group(
-        &mut self,
-        group_id: String,
-        policy: String,
-        order_ids: Vec<String>,
-    ) -> PyResult<()> {
-        if self.groups.iter().any(|group| group.group_id == group_id) {
-            return Err(PyValueError::new_err(format!(
-                "duplicate basket group id — group_id={group_id}"
-            )));
-        }
-        self.groups.push(StoredGroup {
-            group_id,
-            policy,
-            order_ids,
-        });
-        Ok(())
-    }
-
-    fn open_order_states(&self) -> Vec<OrderState> {
-        self.orders
-            .iter()
-            .map(|order| (order.order_id.clone(), order.remaining, order.triggered))
-            .collect()
-    }
-
-    fn open_group_states(&self) -> Vec<GroupTuple> {
-        self.groups
-            .iter()
-            .filter(|group| self.group_is_open(group))
-            .map(StoredGroup::as_tuple)
-            .collect()
-    }
-
-    fn drop_group(&mut self, group_id: &str) {
-        if let Some(index) = self
-            .groups
-            .iter()
-            .position(|group| group.group_id == group_id)
-        {
-            self.groups.remove(index);
-        }
-    }
-
-    fn remove_order(&mut self, order_id: &str) -> PyResult<OrderState> {
-        let index = self.require_order_index(order_id)?;
-        let order = self.remove_order_at(index);
-        Ok((order.order_id, order.remaining, order.triggered))
-    }
-
-    fn settle_order(&mut self, order_id: &str, filled: i64) -> PyResult<i64> {
-        self.settle_internal(order_id, filled)
-    }
-
-    fn mark_triggered(&mut self, order_id: &str) -> PyResult<()> {
-        let index = self.require_order_index(order_id)?;
-        self.orders[index].triggered = true;
-        Ok(())
-    }
-
-    fn cancel_for_key(&mut self, key: &str) -> Vec<String> {
+    pub(crate) fn cancel_for_key(&mut self, key: &str) -> Vec<String> {
         let mut cancelled = Vec::new();
         self.orders.retain(|order| {
             if order.key == key {
@@ -823,62 +403,37 @@ impl PersistentEngine {
         cancelled
     }
 
-    fn drain_orders(&mut self) -> Vec<OrderState> {
-        self.orders.append(&mut self.pending_orders);
-        self.orders
-            .drain(..)
-            .map(|order| (order.order_id, order.remaining, order.triggered))
-            .collect()
-    }
-
-    #[pyo3(signature = (ts, bars, fee_rate, default_participation, slippage))]
-    fn process_market(
-        &mut self,
-        ts: &str,
-        bars: HashMap<String, BarTuple>,
-        fee_rate: f64,
-        default_participation: Option<&str>,
-        slippage: (String, f64, f64),
-    ) -> PyResult<Vec<Op>> {
-        self.process_market_values(ts, bars, fee_rate, default_participation, slippage)
-    }
-
-    #[pyo3(signature = (session_index, fee_rate, default_participation, slippage))]
-    fn process_market_index(
+    pub(crate) fn process_market_index(
         &mut self,
         session_index: usize,
         fee_rate: f64,
         default_participation: Option<&str>,
-        slippage: (String, f64, f64),
+        slippage: &(String, f64, f64),
     ) -> PyResult<Vec<Op>> {
-        let (ts, bars) = {
+        self.feed
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .set_current(session_index)?;
+        // 계획 단계는 피드를 빌린 ts·bars를 그대로 읽는다 — 둘 다 `&self`라 겹치지 않는다.
+        let mut ops = {
             let feed = self
                 .feed
-                .as_mut()
+                .as_ref()
                 .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
-            feed.set_current(session_index)?;
-            feed.session_market(session_index)
+            let (ts, bars) = feed.session_market(session_index);
+            self.plan_market_ops(ts, &bars, fee_rate, default_participation, slippage)?
         };
-        self.process_market_values(&ts, bars, fee_rate, default_participation, slippage)
+        self.apply_market_ops(&mut ops)?;
+        Ok(ops)
     }
 
-    fn mark_current_session(&mut self) -> PyResult<()> {
-        let marks = self
-            .feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-            .current_marks()?;
-        self.portfolio.mark(marks);
-        Ok(())
-    }
-
-    fn close_current_session(
+    pub(crate) fn close_current_session(
         &mut self,
         schedule: &str,
         short_borrow_bps_annual: f64,
         margin_interest_bps_annual: f64,
         annualization_days: u32,
-    ) -> PyResult<(bool, Vec<CostTuple>, SnapshotTuple)> {
+    ) -> PyResult<(bool, Vec<CostTuple>)> {
         if short_borrow_bps_annual < 0.0 || margin_interest_bps_annual < 0.0 {
             return Err(PyValueError::new_err(format!(
                 "annual cost rates must be >= 0 — short_borrow_bps_annual={short_borrow_bps_annual} margin_interest_bps_annual={margin_interest_bps_annual}"
@@ -895,8 +450,11 @@ impl PersistentEngine {
             .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
         let should_dispatch = feed.schedule_matches(schedule)?;
         let marks = feed.current_marks()?;
-        self.portfolio.mark(marks);
-        let (cash, positions, _, _) = self.portfolio.snapshot()?;
+        self.portfolio.mark_refs(&marks);
+        // 비용 계산은 key를 읽기만 하므로 원장에서 빌린다 — 실제 String이 필요한 것은
+        // 레코드로 나가는 공매도 차입 비용뿐이라, 세션마다 포지션 수만큼 나던 복제가
+        // 공매도 포지션 수만큼으로 줄어든다.
+        let (cash, positions, _, _) = self.portfolio.snapshot_refs()?;
         let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
         let mut costs = Vec::new();
         if borrow_daily > 0.0 {
@@ -904,11 +462,16 @@ impl PersistentEngine {
                 if position.1 < 0 {
                     let amount = position.4.abs() * borrow_daily;
                     if amount > 0.0 {
-                        costs.push(("short_borrow".to_string(), Some(position.0.clone()), amount));
+                        costs.push((
+                            "short_borrow".to_string(),
+                            Some(position.0.to_string()),
+                            amount,
+                        ));
                     }
                 }
             }
         }
+        drop(positions);
         let interest_daily = margin_interest_bps_annual / 10_000.0 / f64::from(annualization_days);
         if interest_daily > 0.0 && cash < 0.0 {
             let amount = -cash * interest_daily;
@@ -919,71 +482,12 @@ impl PersistentEngine {
         for cost in &costs {
             self.portfolio.charge(cost.2)?;
         }
-        Ok((should_dispatch, costs, self.portfolio.snapshot()?))
+        // 마감 스냅샷은 호출부가 필요할 때 직접 만든다 — 여기서 만들어 돌려주면 key를
+        // 소유해야 하고, 드라이버는 그 key를 instrument id로 바꾼 뒤 바로 버린다.
+        Ok((should_dispatch, costs))
     }
 
-    fn current_session_count(&self) -> PyResult<usize> {
-        Ok(self
-            .feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-            .current_session_count())
-    }
-
-    fn settlement_session_index(&self, key: &str, event_ts: &str) -> PyResult<Option<usize>> {
-        Ok(self
-            .feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-            .settlement_session_index(key, event_ts))
-    }
-
-    fn history_window(
-        &self,
-        keys: Vec<String>,
-        field: &str,
-        lookback: usize,
-        end: &str,
-    ) -> PyResult<(Vec<String>, Vec<f64>)> {
-        self.feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-            .history_window(&keys, field, lookback, end)
-    }
-
-    fn apply_fill(
-        &mut self,
-        key: &str,
-        side: &str,
-        quantity: i64,
-        price: f64,
-        fee: f64,
-    ) -> PyResult<()> {
-        self.portfolio.apply(key, side, quantity, price, fee)
-    }
-
-    fn charge(&mut self, amount: f64) -> PyResult<()> {
-        self.portfolio.charge(amount)
-    }
-
-    fn apply_corporate_action(
-        &mut self,
-        key: &str,
-        new_quantity: i64,
-        new_average_price: f64,
-        cash_paid: f64,
-        settlement_price: f64,
-    ) -> PyResult<()> {
-        self.portfolio.apply_corporate_action(
-            key,
-            new_quantity,
-            new_average_price,
-            cash_paid,
-            settlement_price,
-        )
-    }
-
-    fn apply_corporate_action_ratio(
+    pub(crate) fn apply_corporate_action_ratio(
         &mut self,
         key: &str,
         ratio: &str,
@@ -1022,26 +526,312 @@ impl PersistentEngine {
             cash_paid,
         )))
     }
+}
 
-    fn mark(&mut self, closes: Vec<(String, f64)>) {
-        self.portfolio.mark(closes);
+#[pymethods]
+impl PersistentEngine {
+    #[new]
+    #[pyo3(signature = (initial_cash, allow_short=false, allow_margin=false, leverage=1.0))]
+    pub(crate) fn new(
+        initial_cash: f64,
+        allow_short: bool,
+        allow_margin: bool,
+        leverage: f64,
+    ) -> PyResult<Self> {
+        if leverage <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "leverage must be > 0 — leverage={leverage}"
+            )));
+        }
+        Ok(Self {
+            portfolio: Portfolio::new(initial_cash, allow_short, allow_margin),
+            orders: Vec::new(),
+            groups: Vec::new(),
+            pending_orders: Vec::new(),
+            pending_groups: Vec::new(),
+            event_queue: NativeEventQueue::default(),
+            queued: Vec::new(),
+            free_slots: Vec::new(),
+            lifecycle: Lifecycle::Ready,
+            callback_seq: 0,
+            awaiting_session: 0,
+            started: false,
+            failure_message: None,
+            records: RecordStore::default(),
+            decision_seq: 0,
+            order_seq: 0,
+            fill_seq: 0,
+            group_seq: 0,
+            leverage,
+            allow_short,
+            router_config: RouterConfig::default(),
+            feed: None,
+            run: None,
+            corporate_actions: Vec::new(),
+            ca_by_session: HashMap::new(),
+            debug_panic_on_market: false,
+            tape: None,
+        })
+    }
+
+    /// 선언형 tape 적재: `(session_index, weight targets, scope, execution, reason)` 목록과 idle 사유.
+    #[allow(clippy::type_complexity)]
+    fn load_target_tape(
+        &mut self,
+        frames: Vec<(usize, Vec<TargetWire>, String, ExecutionWire, String)>,
+        idle_reason: String,
+    ) -> PyResult<()> {
+        self.load_target_tape_internal(frames, idle_reason)
+    }
+
+    /// RunConfig와 requirements에서 온 실행 설정. `drive()` 전에 한 번 호출한다.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (fee_rate, default_participation, slippage, schedule, short_borrow_bps_annual, margin_interest_bps_annual, annualization_days, warmup_sessions, notify_fill, notify_order_update, notify_corporate_action))]
+    fn configure_run(
+        &mut self,
+        fee_rate: f64,
+        default_participation: Option<String>,
+        slippage: (String, f64, f64),
+        schedule: String,
+        short_borrow_bps_annual: f64,
+        margin_interest_bps_annual: f64,
+        annualization_days: u32,
+        warmup_sessions: usize,
+        notify_fill: bool,
+        notify_order_update: bool,
+        notify_corporate_action: bool,
+    ) -> PyResult<()> {
+        if !matches!(schedule.as_str(), "every_session" | "month_end") {
+            return Err(PyValueError::new_err(format!(
+                "unsupported persistent schedule — schedule={schedule:?}"
+            )));
+        }
+        self.run = Some(Arc::new(RunSettings {
+            fee_rate,
+            default_participation,
+            slippage,
+            schedule,
+            short_borrow_bps_annual,
+            margin_interest_bps_annual,
+            annualization_days,
+            warmup_sessions,
+            notify_fill,
+            notify_order_update,
+            notify_corporate_action,
+        }));
+        Ok(())
+    }
+
+    /// 정산 세션이 확정된 자본변동 목록. 입력 순서가 같은 세션 안의 적용 순서다.
+    #[allow(clippy::type_complexity)]
+    fn load_corporate_actions(
+        &mut self,
+        actions: Vec<(usize, String, String, String, String, String, bool)>,
+    ) -> PyResult<()> {
+        let sessions = self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .session_len();
+        self.corporate_actions.clear();
+        self.ca_by_session.clear();
+        for (index, (session_index, key, symbol, action_type, ratio, event_ts, confirmed)) in
+            actions.into_iter().enumerate()
+        {
+            if session_index >= sessions {
+                return Err(PyValueError::new_err(format!(
+                    "corporate action session index out of range — index={session_index} sessions={sessions}"
+                )));
+            }
+            self.corporate_actions.push(CorporateActionEntry {
+                key,
+                symbol,
+                action_type,
+                ratio,
+                event_ts,
+                confirmed,
+            });
+            self.ca_by_session
+                .entry(session_index)
+                .or_default()
+                .push(index);
+        }
+        Ok(())
+    }
+
+    /// 다음 전략 콜백까지 세션을 진행한다. 콜백이 더 없으면 `None`.
+    fn drive(&mut self) -> PyResult<Option<CallbackFrame>> {
+        self.drive_internal()
+    }
+
+    /// 전략 결정을 라우팅하고 `(decision_id, route_error)`를 돌려준다.
+    fn submit_decision(
+        &mut self,
+        token: u64,
+        decision: DecisionWire,
+    ) -> PyResult<(String, Option<RouteError>)> {
+        self.submit_internal(token, decision, None)
+    }
+
+    /// 잔여 주문 취소 기록 후 레코드 인덱스 `(seq, session_index, kind)`를 돌려준다.
+    /// 큐 arena는 더 쓰지 않으므로 여기서 해제한다.
+    fn finish(&mut self) -> PyResult<Vec<RecordIndexWire>> {
+        self.finish_internal()?;
+        self.queued = Vec::new();
+        self.free_slots = Vec::new();
+        // tape 프레임은 결정 생성에만 쓰였다 — 재구성 정보는 DECISION 레코드에 있다.
+        self.tape = None;
+        self.event_queue = NativeEventQueue::default();
+        Ok(self.records.index())
+    }
+
+    /// 종료 여부와 무관한 현재 레코드 인덱스 (전략 예외 시 partial trace 조회용).
+    fn record_batch(&self) -> PyResult<Vec<RecordIndexWire>> {
+        self.records.index_for_trace()
+    }
+
+    /// kind 하나의 `(seq, session_index, payload)`를 seq 순서로 한 번에 돌려준다.
+    /// 종료 전 partial trace에서도 동작한다 — 그 시점까지 쌓인 레코드만 답한다.
+    fn record_payloads(&self, py: Python<'_>, kind: u8) -> PyResult<Vec<(u64, usize, PyObject)>> {
+        self.records.payloads_of(py, kind)
+    }
+
+    /// kind 하나의 payload를 `limit`개까지 넘기면서 그 자리를 해제한다. 빈 목록이면 끝이다.
+    ///
+    /// 호출 순서 계약: Python은 `finish()` 직후 `equity_series`/`traded_notional`로 metrics를
+    /// 먼저 계산하고, 그 뒤 결과 조회에서만 kind를 넘겨받는다. 넘긴 payload를
+    /// `record_payloads`·`equity_series`·`traded_notional`로 다시 읽으면
+    /// 오류다. 모든 레코드를 넘기면 인덱스까지 돌려주므로 `record_batch`도 오류가 된다
+    /// (인덱스는 `finish()`가 이미 Python에 넘겼다).
+    fn drain_payloads(
+        &mut self,
+        py: Python<'_>,
+        kind: u8,
+        limit: usize,
+    ) -> PyResult<Vec<(u64, usize, PyObject)>> {
+        self.records.drain(py, kind, limit)
+    }
+
+    /// 결과 집계용 columnar 테이블
+    /// `(snapshot_rows, position_rows, order_rows, fill_rows, cost_rows, fill_totals)`.
+    ///
+    /// 레코드를 한 번 순회해 primitive 행만 만든다 — 행 원소의 의미는 Python
+    /// `backtest_engine/types/result_tables.py`가 정본이다. 비파괴 조회라 payload를 해제하지
+    /// 않으므로 이후 `drain_payloads`로 같은 레코드를 공개 Event 객체로 다시 읽을 수 있다.
+    fn result_tables(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.records.result_tables(py)
+    }
+
+    fn equity_series(&self) -> PyResult<Vec<f64>> {
+        self.records.equity_series()
+    }
+
+    fn traded_notional(&self) -> PyResult<f64> {
+        self.records.traded_notional()
+    }
+
+    #[doc(hidden)]
+    fn _debug_force_panic_on_market(&mut self) {
+        self.debug_panic_on_market = true;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn load_feed(
+        &mut self,
+        keys: Vec<String>,
+        symbols: Vec<String>,
+        sessions: Vec<String>,
+        offsets: Vec<usize>,
+        instrument_ids: Vec<u32>,
+        opens: Vec<f64>,
+        highs: Vec<f64>,
+        lows: Vec<f64>,
+        closes: Vec<f64>,
+        volumes: Vec<i64>,
+    ) -> PyResult<()> {
+        self.feed = Some(PersistentFeed::new(
+            keys,
+            symbols,
+            sessions,
+            offsets,
+            instrument_ids,
+            opens,
+            highs,
+            lows,
+            closes,
+            volumes,
+        )?);
+        Ok(())
+    }
+
+    pub(crate) fn configure_router(&mut self, actions: Vec<String>, features: Vec<String>) {
+        self.router_config.configure(actions, features);
+    }
+
+    fn fail_callback(&mut self, token: u64, detail: String) -> PyResult<()> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(expected) if token == expected => {
+                self.lifecycle = Lifecycle::Failed;
+                self.failure_message = Some(detail);
+                Ok(())
+            }
+            Lifecycle::AwaitingDecision(expected) => Err(PyValueError::new_err(format!(
+                "stale callback token while failing — expected={expected} got={token}"
+            ))),
+            _ => Err(PyValueError::new_err(format!(
+                "cannot fail callback from lifecycle state {} — token={token}",
+                self.lifecycle_state()
+            ))),
+        }
+    }
+
+    pub(crate) fn lifecycle_state(&self) -> &'static str {
+        match self.lifecycle {
+            Lifecycle::Ready => "ready",
+            Lifecycle::Running => "running",
+            Lifecycle::AwaitingDecision(_) => "awaiting_decision",
+            Lifecycle::Failed => "failed",
+            Lifecycle::Finished => "finished",
+        }
     }
 
     #[getter]
-    fn cash(&self) -> f64 {
-        self.portfolio.cash()
+    fn failure_detail(&self) -> Option<String> {
+        self.failure_message.clone()
     }
 
-    fn held_qty(&self, key: &str) -> i64 {
-        self.portfolio.held_qty(key)
+    fn poison(&mut self, detail: String) {
+        self.lifecycle = Lifecycle::Failed;
+        self.failure_message = Some(detail);
     }
 
-    fn average_price(&self, key: &str) -> Option<f64> {
-        self.portfolio.average_price(key)
+    fn current_session_count(&self) -> PyResult<usize> {
+        Ok(self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .current_session_count())
     }
 
-    fn portfolio_snapshot(&self) -> PyResult<SnapshotTuple> {
-        self.portfolio.snapshot()
+    fn settlement_session_index(&self, key: &str, event_ts: &str) -> PyResult<Option<usize>> {
+        Ok(self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .settlement_session_index(key, event_ts))
+    }
+
+    fn history_window(
+        &self,
+        keys: Vec<String>,
+        field: &str,
+        lookback: usize,
+        end: &str,
+    ) -> PyResult<(Vec<String>, Vec<f64>)> {
+        self.feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .history_window(&keys, field, lookback, end)
     }
 }
 
@@ -1054,20 +844,27 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use super::*;
 
-    fn market_order(order_id: &str) -> EntryTuple {
-        (
-            order_id.to_string(),
-            "X:ONE:equity:KRW".to_string(),
-            "ONE".to_string(),
-            "buy".to_string(),
-            "market".to_string(),
-            (None, None, None, None),
-            "day".to_string(),
-            10,
-            false,
-            None,
-            None,
-        )
+    fn market_order(order_id: &str) -> StoredOrder {
+        StoredOrder {
+            order_id: order_id.to_string(),
+            key: "X:ONE:equity:KRW".to_string(),
+            symbol: "ONE".to_string(),
+            side: "buy".to_string(),
+            order_type: "market".to_string(),
+            limit_price: None,
+            stop_price: None,
+            limit_text: None,
+            stop_text: None,
+            tif: "day".to_string(),
+            quantity: 10,
+            remaining: 10,
+            triggered: false,
+            group_id: None,
+            participation: None,
+            decision_id: String::new(),
+            action_index: 0,
+            leg_index: None,
+        }
     }
 
     #[test]
@@ -1084,31 +881,23 @@ mod tests {
     }
 
     #[test]
-    fn identifiers_are_deterministic() {
-        let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
-        assert_eq!(runtime.next_decision_id(), "D-000001");
-        assert_eq!(runtime.next_order_id(), "O-000001");
-        assert_eq!(runtime.next_fill_id(), "F-000001");
-        assert_eq!(runtime.next_group_id(), "G-000001");
-    }
-
-    #[test]
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
-        runtime.place_order(market_order("O-000001")).unwrap();
-        let bars = HashMap::from([("X:ONE:equity:KRW".to_string(), (100.0, 110.0, 90.0, 1_000))]);
+        runtime.orders.push(market_order("O-000001"));
+        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000))]);
 
-        let ops = runtime
-            .process_market(
+        let mut ops = runtime
+            .plan_market_ops(
                 "2026-01-02 00:00:00",
-                bars,
+                &bars,
                 0.0,
                 None,
-                ("none".into(), 0.0, 0.0),
+                &("none".into(), 0.0, 0.0),
             )
             .unwrap();
+        runtime.apply_market_ops(&mut ops).unwrap();
 
-        assert!(runtime.open_order_states().is_empty());
+        assert!(runtime.orders.is_empty());
         assert_eq!(ops[0].0, "fill");
         assert_eq!(ops[0].6, "F-000001");
         assert_eq!(runtime.portfolio.held_qty("X:ONE:equity:KRW"), 10);

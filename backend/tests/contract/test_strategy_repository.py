@@ -50,7 +50,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
+GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
 T0 = datetime(2026, 9, 4, 9, 0, tzinfo=UTC)
 
 RepositoryFactory = Callable[[], StrategyRepositoryPort]
@@ -225,7 +225,7 @@ def test_sqlite_rejects_a_mismatched_document_envelope_before_writing(tmp_path: 
         source=RevisionSource(SourceFormat.YAML, changed, source_hash_of(changed)),
     )
 
-    with pytest.raises(StrategyRepositoryStorageError, match="source and spec disagree"):
+    with pytest.raises(StrategyRepositoryStorageError, match="cannot be persisted"):
         repository.add(mismatched)
     assert repository.list_strategies(PageRequest()).total == 0
 

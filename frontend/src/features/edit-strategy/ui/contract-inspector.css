@@ -77,6 +77,19 @@
   background: var(--surface-subtle);
 }
 
+/* 조건 성립 여부: 글리프(✓ ✕ ?)가 텍스트 표식이고 색은 보조다. */
+.contract-inspector__condition[data-holds="true"] {
+  color: var(--status-ok);
+}
+
+.contract-inspector__condition[data-holds="false"] {
+  color: var(--status-error);
+}
+
+.contract-inspector__condition[data-holds="unknown"] {
+  color: var(--text-muted);
+}
+
 .contract-inspector__notice {
   margin: 0;
   padding: var(--space-2) var(--space-3);

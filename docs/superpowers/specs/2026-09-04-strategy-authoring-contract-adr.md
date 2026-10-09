@@ -7,6 +7,18 @@
 > 2026-09-06 P6-06 개정: 제품 소유자의 명시적 결정으로 D9의 M6 선행 조건을 폐기하고
 > YAML-first 전환을 완료한다. M6 Parameter Search는 YAML route에 결합되는 후속 milestone이다.
 >
+> 2026-09-18 GUI 편집 개정: D5를 개정한다 — Form과 Graph는 read-only projection이 아니라 runtime
+> schema × parse tree projection 위의 **source 트랜잭션** 편집기다(JSON pointer 범위의 `replaceRange`
+> 한 번, 주석·순서 보존, undo 한 번). 설계는
+> [schema 1.1 · GUI 편집 spec](./2026-09-17-strategy-schema-1-1-and-gui-editing-design.md) D5~D7,
+> 진행은 [strategy-gui-editing PLAN](../../planning/strategy-gui-editing/PLAN.md).
+>
+> 2026-09-20 schema 1.2·그래프 표현 개정: D8의 대상 사용자와 완료 정의를 개정한다 — 대상 사용자는
+> 비전공자를 포함하고, 완료 정의는 로드맵 원문 "코드를 몰라도 대부분의 cross-sectional 전략을 만들
+> 수 있다"로 되돌린다. 설계는
+> [schema 1.2·그래프 표현 spec](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md) D1~D2,
+> 진행은 [strategy-language-2-0 PLAN](../../planning/strategy-language-2-0/PLAN.md).
+>
 > Initiative: [YAML Strategy Workbench](../../planning/strategy-workbench-yaml-ui/README.md) —
 > 범위는 [WORKFLOW.md](../../planning/strategy-workbench-yaml-ui/WORKFLOW.md), PR 진행은
 > [PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)
@@ -100,7 +112,12 @@ AND semantic blocking error == 0
   inline draft로 실행하고 run manifest에 source/spec provenance를 남긴다 (P1-09, P3-05).
 - 미래 live deployment는 saved revision reference만 허용한다. inline draft는 backtest 전용이다.
 
-### D5. Form과 Graph는 v1에서 read-only projection이다
+### D5. Form과 Graph는 v1에서 read-only projection이다 (2026-09-18 개정: source 트랜잭션 편집기)
+
+> 개정: Form(P4)·Graph(P5)는 이제 편집 가능하다. 편집은 projection을 reserialize하지 않고 runtime
+> schema × parse tree projection 위에서 `SourceOperation`(replace-scalar·insert-key·insert-item·remove)을
+> `planSourceOperation`이 source 텍스트의 최소 범위 하나로 계획해 편집기에 `replaceRange` 한 번으로 적용한다.
+> 그래서 아래 "YAML 주석과 순서를 잃는다"는 우려는 해소됐고 source SoT는 하나다. 아래 원문은 기록용이다.
 
 - JSON, Form, Graph, Diff view는 현재 valid `StrategySpec`을 읽는 projection이며 새 편집
   모델이 아니다. invalid source에서는 last valid 값을 `stale` badge와 함께 보여준다.
@@ -122,6 +139,11 @@ AND semantic blocking error == 0
 - compile은 알려진 credential 패턴을 capability diagnostic으로 거부한다 (P1-03 이후).
 
 ### D8. 제품 방향: YAML-first, no-code는 범위 조정
+
+2026-09-20 개정: 아래 대상 사용자와 완료 정의는
+[schema 1.2·그래프 표현 spec](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md) D1이
+개정했다. 대상 사용자는 비전공자를 포함하고 완료 정의는 로드맵 원문으로 돌아갔다. 아래 문단은
+2026-09-04 시점 결정의 기록으로 남긴다.
 
 - 전략 정의의 primary authoring은 YAML/JSON이다. 대상 사용자는 전문 트레이더다.
 - 로드맵의 완료 정의 "코드를 몰라도 대부분의 cross-sectional 전략을 만들 수 있다"는 다음으로
@@ -211,7 +233,7 @@ typing을 피하도록 날짜·버전을 quoted string으로 적으며, P0-03이
 기능:
 
 - 표현식 문자열 DSL, 단위 literal, YAML anchor/alias/merge key/custom tag
-- Form/Graph에서 source로의 편집
+- ~~Form/Graph에서 source로의 편집~~ (2026-09-18 개정으로 제공)
 - 자동 merge, 다중 사용자 실시간 편집
 - live trading, deployment, order routing (WORKFLOW 15절 경계만 유지)
 

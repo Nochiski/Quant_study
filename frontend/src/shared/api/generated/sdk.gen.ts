@@ -3,18 +3,33 @@
 import type { Client, Options as Options2, TDataShape } from "./client";
 import { client } from "./client.gen";
 import type {
+  ActivateAssistantProviderData,
+  ActivateAssistantProviderErrors,
+  ActivateAssistantProviderResponses,
+  CancelAssistantTurnData,
+  CancelAssistantTurnErrors,
+  CancelAssistantTurnResponses,
   CancelBacktestData,
   CancelBacktestErrors,
   CancelBacktestResponses,
   CompileStrategyDocumentData,
   CompileStrategyDocumentErrors,
   CompileStrategyDocumentResponses,
+  CreateAssistantProviderData,
+  CreateAssistantProviderErrors,
+  CreateAssistantProviderResponses,
+  CreateAssistantSessionData,
+  CreateAssistantSessionErrors,
+  CreateAssistantSessionResponses,
   CreateStrategyData,
   CreateStrategyDocumentData,
   CreateStrategyDocumentErrors,
   CreateStrategyDocumentResponses,
   CreateStrategyErrors,
   CreateStrategyResponses,
+  DeleteAssistantProviderData,
+  DeleteAssistantProviderErrors,
+  DeleteAssistantProviderResponses,
   DeleteStrategyDraftData,
   DeleteStrategyDraftErrors,
   DeleteStrategyDraftResponses,
@@ -27,6 +42,9 @@ import type {
   ExplainStrategyData,
   ExplainStrategyErrors,
   ExplainStrategyResponses,
+  GetAssistantSessionData,
+  GetAssistantSessionErrors,
+  GetAssistantSessionResponses,
   GetBacktestRequestData,
   GetBacktestRequestErrors,
   GetBacktestRequestResponses,
@@ -44,6 +62,9 @@ import type {
   GetFactorCatalogResponses,
   GetHealthData,
   GetHealthResponses,
+  GetRunEnvironmentSchemaData,
+  GetRunEnvironmentSchemaErrors,
+  GetRunEnvironmentSchemaResponses,
   GetStrategyData,
   GetStrategyDocumentContractData,
   GetStrategyDocumentContractErrors,
@@ -58,9 +79,17 @@ import type {
   GetStrategyDraftErrors,
   GetStrategyDraftResponses,
   GetStrategyErrors,
+  GetStrategyOperatorCatalogData,
+  GetStrategyOperatorCatalogErrors,
+  GetStrategyOperatorCatalogResponses,
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  ListAssistantProvidersData,
+  ListAssistantProvidersResponses,
+  ListAssistantSessionsData,
+  ListAssistantSessionsErrors,
+  ListAssistantSessionsResponses,
   ListBacktestsData,
   ListBacktestsErrors,
   ListBacktestsResponses,
@@ -94,15 +123,28 @@ import type {
   SaveStrategyDraftData,
   SaveStrategyDraftErrors,
   SaveStrategyDraftResponses,
+  StartAssistantTurnData,
+  StartAssistantTurnErrors,
+  StartAssistantTurnResponses,
   StartBacktestData,
   StartBacktestErrors,
   StartBacktestResponses,
+  StreamAssistantEventsData,
+  StreamAssistantEventsErrors,
+  StreamAssistantEventsResponse,
+  StreamAssistantEventsResponses,
   StreamBacktestEventsData,
   StreamBacktestEventsErrors,
   StreamBacktestEventsResponses,
+  TestAssistantProviderData,
+  TestAssistantProviderErrors,
+  TestAssistantProviderResponses,
   TraceStrategyData,
   TraceStrategyErrors,
   TraceStrategyResponses,
+  UpgradeStrategyDocumentData,
+  UpgradeStrategyDocumentErrors,
+  UpgradeStrategyDocumentResponses,
   ValidateFactorGraphData,
   ValidateFactorGraphErrors,
   ValidateFactorGraphResponses,
@@ -128,6 +170,206 @@ export type Options<
    */
   meta?: Record<string, unknown>;
 };
+
+/**
+ * List Assistant Providers
+ *
+ * 가용 공급자 종류와 등록된 프로파일. 키 자리에는 꼬리 4자리만 있다.
+ */
+export const listAssistantProviders = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAssistantProvidersData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListAssistantProvidersResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/assistant/providers", ...options });
+
+/**
+ * Create Assistant Provider
+ *
+ * 연결 테스트를 통과한 프로파일만 저장된다(spec D6).
+ */
+export const createAssistantProvider = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAssistantProviderData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateAssistantProviderResponses,
+    CreateAssistantProviderErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/assistant/providers",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Delete Assistant Provider
+ *
+ * 프로파일과 그 키를 함께 지운다. 활성이었으면 application이 승계를 정한다.
+ */
+export const deleteAssistantProvider = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteAssistantProviderData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteAssistantProviderResponses,
+    DeleteAssistantProviderErrors,
+    ThrowOnError
+  >({ url: "/api/v1/assistant/providers/{profile_id}", ...options });
+
+/**
+ * Activate Assistant Provider
+ */
+export const activateAssistantProvider = <ThrowOnError extends boolean = false>(
+  options: Options<ActivateAssistantProviderData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    ActivateAssistantProviderResponses,
+    ActivateAssistantProviderErrors,
+    ThrowOnError
+  >({ url: "/api/v1/assistant/providers/{profile_id}/activate", ...options });
+
+/**
+ * Test Assistant Provider
+ *
+ * 저장된 키로 연결을 다시 확인한다. 실패는 예외가 아니라 결과 값으로 돌려준다.
+ */
+export const testAssistantProvider = <ThrowOnError extends boolean = false>(
+  options: Options<TestAssistantProviderData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    TestAssistantProviderResponses,
+    TestAssistantProviderErrors,
+    ThrowOnError
+  >({ url: "/api/v1/assistant/providers/{profile_id}/test", ...options });
+
+/**
+ * List Assistant Sessions
+ *
+ * 문서 하나(또는 백테스트 실행 하나)의 세션 목록.
+ *
+ * `document_ref`를 한 덩어리 문자열로 받지 않고 필드 셋으로 받는 이유는, 그래야 생성
+ * SDK가 타입을 그대로 만들고 서버도 다시 parse하지 않기 때문이다.
+ */
+export const listAssistantSessions = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAssistantSessionsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListAssistantSessionsResponses,
+    ListAssistantSessionsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/assistant/sessions", ...options });
+
+/**
+ * Create Assistant Session
+ */
+export const createAssistantSession = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAssistantSessionData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateAssistantSessionResponses,
+    CreateAssistantSessionErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/assistant/sessions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get Assistant Session
+ *
+ * 메시지·턴·이벤트 이력 전부. 사이드바가 새로 열릴 때 한 번에 복구한다.
+ *
+ * **턴을 이벤트보다 먼저 읽는다.** 네 조회는 한 트랜잭션이 아니라서 그 사이 러너가
+ * 마지막 이벤트를 저장하고 턴을 끝낼 수 있다. 이벤트를 먼저 읽으면 "턴은 FAILED인데
+ * 그 실패 이벤트는 목록에 없는" 조합이 나가고, 화면은 이유 없이 멈춘 턴을 그린다 —
+ * spec D7의 복구 규칙이 이 응답 하나만 보기 때문에 그 이유는 영영 나오지 않는다.
+ *
+ * 순서를 뒤집으면 창의 방향이 "턴은 아직 RUNNING인데 이벤트는 더 와 있다"가 된다.
+ * 프론트 리듀서는 sequence 기준 멱등이라 여분 이벤트를 그대로 흡수하고, 다음 폴링이
+ * 상태를 따라잡는다. 러너의 `_finish`가 택한 "바쁘다 쪽으로만 틀린다"와 같은 방향이다.
+ *
+ * `chat.messages`를 마지막에 읽는 것도 같은 이유로 안전하다. 부분 assistant 메시지
+ * 저장은 `_close`에서 `_finish`보다 먼저 일어난다.
+ */
+export const getAssistantSession = <ThrowOnError extends boolean = false>(
+  options: Options<GetAssistantSessionData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetAssistantSessionResponses,
+    GetAssistantSessionErrors,
+    ThrowOnError
+  >({ url: "/api/v1/assistant/sessions/{session_id}", ...options });
+
+/**
+ * Stream Assistant Events
+ *
+ * 진행 중 턴의 이벤트를 SSE로 흘린다.
+ *
+ * 재개 위치는 `Last-Event-ID` 헤더가 있으면 그것, 없으면 `after_sequence` 쿼리다(spec D6).
+ * 헤더가 이기는 이유는 그 값이 **클라이언트가 실제로 반영한 마지막 번호**이기 때문이다.
+ * 쿼리는 최초 연결 때 적은 값이라 재연결 시점에는 이미 낡아 있다.
+ *
+ * 진행 중 턴이 없으면 열지 않고 409로 거절한다. 스트림을 열어 두면 클라이언트는 "곧 뭔가
+ * 오겠지"로 읽고 기다리지만, 이력에 이미 결말이 적힌 턴이라 아무것도 오지 않는다.
+ */
+export const streamAssistantEvents = <ThrowOnError extends boolean = false>(
+  options: Options<
+    StreamAssistantEventsData,
+    ThrowOnError,
+    StreamAssistantEventsResponse
+  >,
+) =>
+  (options.client ?? client).sse.get<
+    StreamAssistantEventsResponses,
+    StreamAssistantEventsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/assistant/sessions/{session_id}/events", ...options });
+
+/**
+ * Start Assistant Turn
+ *
+ * 턴을 시작하고 즉시 202로 답한다. 이벤트는 SSE로 따로 읽는다.
+ */
+export const startAssistantTurn = <ThrowOnError extends boolean = false>(
+  options: Options<StartAssistantTurnData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    StartAssistantTurnResponses,
+    StartAssistantTurnErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/assistant/sessions/{session_id}/turns",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Cancel Assistant Turn
+ *
+ * 취소 신호를 세운다. 이미 끝난 턴이면 그 상태를 그대로 돌려준다.
+ */
+export const cancelAssistantTurn = <ThrowOnError extends boolean = false>(
+  options: Options<CancelAssistantTurnData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CancelAssistantTurnResponses,
+    CancelAssistantTurnErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/assistant/sessions/{session_id}/turns/{turn_id}/cancel",
+    ...options,
+  });
 
 /**
  * List Backtests
@@ -391,6 +633,20 @@ export const previewPortfolio = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Run Environment Schema
+ *
+ * 실행 설정의 런타임 JSON Schema. ETag = 스키마 해시(일치하면 304).
+ */
+export const getRunEnvironmentSchema = <ThrowOnError extends boolean = false>(
+  options?: Options<GetRunEnvironmentSchemaData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetRunEnvironmentSchemaResponses,
+    GetRunEnvironmentSchemaErrors,
+    ThrowOnError
+  >({ url: "/api/v1/run-environments/schema", ...options });
+
+/**
  * List Strategies
  *
  * Latest immutable revision of every strategy, ordered by strategy id.
@@ -634,6 +890,27 @@ export const getStrategyDocumentContract = <
   >({ url: "/api/v1/strategy-documents/contract", ...options });
 
 /**
+ * Strategy Operator Catalog
+ *
+ * 그래프 노드 연산자 정의 전부.
+ *
+ * 입력 개수, 읽는 파라미터, 출력 타입·단위 규칙, 가용성, i18n 키를 담는다.
+ *
+ * 팔레트·노드 라벨이 보일 수 있는 연산자 목록의 유일한 출처다. 소비자는 목록을 다시 적지
+ * 않는다. ETag는 카탈로그 해시이며 If-None-Match가 맞으면 304로 답한다.
+ */
+export const getStrategyOperatorCatalog = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<GetStrategyOperatorCatalogData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetStrategyOperatorCatalogResponses,
+    GetStrategyOperatorCatalogErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategy-documents/operators", ...options });
+
+/**
  * Strategy Document Schema
  *
  * Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match).
@@ -646,6 +923,31 @@ export const getStrategyDocumentSchema = <ThrowOnError extends boolean = false>(
     GetStrategyDocumentSchemaErrors,
     ThrowOnError
   >({ url: "/api/v1/strategy-documents/schema", ...options });
+
+/**
+ * Upgrade Strategy Document
+ *
+ * Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.
+ *
+ * The rewrite must parse to exactly what the domain dict transform yields; otherwise the
+ * service refuses with `strategy_document.upgrade_drift` rather than returning text that
+ * would silently mean something else (spec D3).
+ */
+export const upgradeStrategyDocument = <ThrowOnError extends boolean = false>(
+  options: Options<UpgradeStrategyDocumentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    UpgradeStrategyDocumentResponses,
+    UpgradeStrategyDocumentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategy-documents/upgrade",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * Revise Strategy Document

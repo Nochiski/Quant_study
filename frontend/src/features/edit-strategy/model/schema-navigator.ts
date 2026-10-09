@@ -5,12 +5,50 @@
  * sibling `kind` value in the document, so a `kind` change re-selects the allowed fields.
  */
 
+import type { ApplicableWhen } from "../../../shared/api";
 import {
   decodePointerSegment,
   pointerSegments,
 } from "../../../shared/lib/yaml12";
+import { isApplicableWhen } from "./field-applicability";
 
 export type JsonSchema = Record<string, unknown>;
+
+export type Bound = { value: number; inclusive: boolean };
+
+/**
+ * 스키마 노드 하나가 말하는 사실(WORKFLOW P4-01). Contract Inspector와 Form projection이 같은
+ * 함수로 읽어 컨트롤·범위·단위·카탈로그 해석 규칙을 두 벌 두지 않는다. 값은 전부 backend runtime
+ * schema에서 온다: 여기에 필드 이름·enum·기본값을 적지 않는다.
+ */
+export type SchemaFacts = {
+  type: string;
+  enumValues: readonly string[];
+  hasConst: boolean;
+  constValue: unknown;
+  hasDefault: boolean;
+  defaultValue: unknown;
+  /** `x-default-from`: 생략하면 backend가 이 형제 필드의 값으로 채운다(`label` ← `factor_id`). */
+  defaultFrom: string | null;
+  minimum: Bound | null;
+  maximum: Bound | null;
+  format: string | null;
+  unit: string | null;
+  displayUnit: string | null;
+  descriptionKey: string | null;
+  /**
+   * `x-operator`: 노드 `operator` property가 발행하는 `enum 값 → 설명 키 stem`. 소비자가 값에서
+   * 키를 조립하지 않도록 backend가 매핑을 통째로 내려준다(P1-03, spec D8).
+   */
+  operatorKeys: Readonly<Record<string, string>> | null;
+  appliedStage: string | null;
+  catalog: string | null;
+  reference: string | null;
+  applicableWhen: ApplicableWhen | null;
+  /** `examples`의 첫 non-null 값. backend는 없는 예시를 null로 직렬화한다. */
+  example: unknown;
+  hasExample: boolean;
+};
 
 export type ResolvedSchema = {
   node: JsonSchema;
@@ -413,6 +451,218 @@ export const definingArrayFor = (
     }
   }
   return null;
+};
+
+const stringAt = (node: JsonSchema, key: string): string | null =>
+  typeof node[key] === "string" ? (node[key] as string) : null;
+
+/** 문자열만 담은 mapping 확장 값(`x-operator`). 경계에서 모양을 확인하고 아니면 null. */
+const stringRecordAt = (
+  node: JsonSchema,
+  key: string,
+): Readonly<Record<string, string>> | null => {
+  const value = node[key];
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.every(([, item]) => typeof item === "string")
+    ? (Object.fromEntries(entries) as Record<string, string>)
+    : null;
+};
+
+/** 한 스키마 노드의 사실. `$ref`·nullable은 이미 풀린 노드(`schemaAt(...).node`)를 받는다. */
+export const schemaFacts = (node: JsonSchema): SchemaFacts => {
+  const own = (key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(node, key);
+  const type = Array.isArray(node.type)
+    ? node.type.map(String).join(" | ")
+    : typeof node.type === "string"
+      ? node.type
+      : "object";
+  const minimum: Bound | null =
+    typeof node.minimum === "number"
+      ? { value: node.minimum, inclusive: true }
+      : typeof node.exclusiveMinimum === "number"
+        ? { value: node.exclusiveMinimum, inclusive: false }
+        : null;
+  const maximum: Bound | null =
+    typeof node.maximum === "number"
+      ? { value: node.maximum, inclusive: true }
+      : typeof node.exclusiveMaximum === "number"
+        ? { value: node.exclusiveMaximum, inclusive: false }
+        : null;
+  const example = Array.isArray(node.examples)
+    ? node.examples.find(
+        (candidate) => candidate !== null && candidate !== undefined,
+      )
+    : undefined;
+  return {
+    type,
+    enumValues: Array.isArray(node.enum) ? node.enum.map(String) : [],
+    hasConst: own("const"),
+    constValue: node.const,
+    hasDefault: own("default"),
+    defaultValue: node.default,
+    defaultFrom: stringAt(node, "x-default-from"),
+    minimum,
+    maximum,
+    format: stringAt(node, "format"),
+    unit: stringAt(node, "x-unit"),
+    displayUnit: stringAt(node, "x-display-unit"),
+    descriptionKey: stringAt(node, "x-description-key"),
+    operatorKeys: stringRecordAt(node, "x-operator"),
+    appliedStage: stringAt(node, "x-applied-stage"),
+    catalog: stringAt(node, "x-catalog"),
+    reference: stringAt(node, "x-reference"),
+    applicableWhen: isApplicableWhen(node["x-applicable-when"])
+      ? node["x-applicable-when"]
+      : null,
+    example,
+    hasExample: example !== undefined,
+  };
+};
+
+/**
+ * `x-reference: <namespace>` 필드가 고를 수 있는 id 목록: 가장 가까운 `x-defines: <namespace>` 배열의
+ * 항목에서 `<namespace>_id`를 읽되 `pointer`가 속한 항목 자신은 뺀다(완성·Form select가 같은 목록).
+ */
+export const referenceCandidates = (
+  root: JsonSchema,
+  pointer: string,
+  namespace: string,
+  tree: unknown,
+): string[] => {
+  const defining = definingArrayFor(root, pointer, namespace, tree);
+  if (defining === null) return [];
+  const selfPrefix = `${defining.pointer}/`;
+  const self = pointer.startsWith(selfPrefix)
+    ? pointer.slice(selfPrefix.length).split("/")[0]
+    : null;
+  return defining.items
+    .map((item, index) =>
+      isObject(item) && String(index) !== self
+        ? item[`${namespace}_id`]
+        : undefined,
+    )
+    .filter((id): id is string => typeof id === "string");
+};
+
+const scalarFallback = (node: JsonSchema): unknown => {
+  if (Object.hasOwn(node, "const")) return node.const;
+  if (Array.isArray(node.enum) && node.enum.length > 0) return node.enum[0];
+  if (node.type === "boolean") return false;
+  if (node.type === "integer" || node.type === "number") {
+    if (typeof node.minimum === "number") return node.minimum;
+    if (typeof node.exclusiveMinimum === "number")
+      return node.type === "integer"
+        ? Math.floor(node.exclusiveMinimum) + 1
+        : node.exclusiveMinimum + Number.EPSILON;
+    return 0;
+  }
+  return "";
+};
+
+export class UnsupportedSchemaShape extends Error {}
+
+/** nullable(`anyOf`) 포장을 벗긴 뒤의 선언 타입이 `integer`인가. */
+const isIntegerTyped = (root: JsonSchema, node: JsonSchema): boolean => {
+  if (node.type === "integer") return true;
+  if (!Array.isArray(node.anyOf)) return false;
+  const member = node.anyOf.filter(isObject).find((item) => item.type !== "null");
+  const resolved = member === undefined ? null : resolveRef(root, member);
+  return resolved?.type === "integer";
+};
+
+/**
+ * `default: null`인 정수 파라미터의 씨앗. 발행된 하한이 있으면 그 값, 없으면 null이다(P1-04 리뷰
+ * 차단 1).
+ *
+ * `default: null`은 "이 값을 비워 둔다"가 아니라 "선택 파라미터"라는 표시다. 그런데 고른 연산자가
+ * 그 파라미터를 요구하면(`unary.lag`의 `periods`) null인 채로 만들어진 노드는 만들자마자
+ * `factor.graph.lag_periods`로 거부된다 — `window`에서 고친 것과 같은 결함이다.
+ *
+ * 정수 타입만 본다. `number`이면서 null이 "제한 없음"을 뜻하는 선택 값(`portfolio.minimum_liquidity`,
+ * 하한 `0`)은 하한으로 채우면 뜻이 바뀐다 — 그런 필드는 null 그대로 둔다.
+ *
+ * `materializeSchemaValue`가 아니라 **호출자**가 쓴다(2차 리뷰 P3). 씨앗이 필요한지는 "고른
+ * 연산자가 이 파라미터를 요구하는가"이고, 그 사실의 owner는 스키마가 아니라 연산자 카탈로그다 —
+ * property 단위로 판단하면 `periods`를 읽지도 않는 `부호 뒤집기`에도 `periods: 1`이 붙는다.
+ * 규칙의 짝은 `backend/tests/fixtures/strategy_documents/parameter-seeds.json` golden이 묶는다.
+ */
+export const nullDefaultSeed = (root: JsonSchema, node: JsonSchema): unknown => {
+  const bound = node.minimum;
+  return typeof bound === "number" &&
+    Number.isInteger(bound) &&
+    isIntegerTyped(root, node)
+    ? bound
+    : null;
+};
+
+type MaterializeState = {
+  ancestors: Set<JsonSchema>;
+  budget: { remaining: number };
+};
+
+/**
+ * 한 runtime schema 노드의 최소 유효 값(필수 키·기본값만). 스니펫(P2)과 목록 항목 추가(P4-03)가 같은
+ * 함수를 쓴다. 재귀·과대 스키마·해소 불가 `$ref`는 `UnsupportedSchemaShape`로 fail-closed.
+ */
+export const materializeSchemaValue = (
+  root: JsonSchema,
+  schemaNode: JsonSchema,
+  state: MaterializeState = {
+    ancestors: new Set(),
+    budget: { remaining: 256 },
+  },
+): unknown => {
+  const node = resolveRef(root, schemaNode);
+  if (node === null)
+    throw new UnsupportedSchemaShape("unresolvable schema reference");
+  state.budget.remaining -= 1;
+  if (state.budget.remaining < 0 || state.ancestors.has(node))
+    throw new UnsupportedSchemaShape("recursive or oversized schema");
+  state.ancestors.add(node);
+  try {
+    if (Object.hasOwn(node, "default")) return node.default;
+    if (Object.hasOwn(node, "const")) return node.const;
+    if (Array.isArray(node.anyOf)) {
+      const member = node.anyOf
+        .filter(isObject)
+        .find((item) => item.type !== "null");
+      return member ? materializeSchemaValue(root, member, state) : null;
+    }
+    if (Array.isArray(node.oneOf)) {
+      const member = node.oneOf.find(isObject);
+      return member ? materializeSchemaValue(root, member, state) : {};
+    }
+    if (node.type === "array") return [];
+    if (node.type !== "object" && !isObject(node.properties))
+      return scalarFallback(node);
+
+    const properties = isObject(node.properties) ? node.properties : {};
+    const required = new Set(
+      Array.isArray(node.required)
+        ? node.required.filter((key): key is string => typeof key === "string")
+        : [],
+    );
+    const value: Record<string, unknown> = {};
+    for (const [key, candidate] of Object.entries(properties)) {
+      if (!isObject(candidate)) continue;
+      const property = resolveRef(root, candidate);
+      if (property === null)
+        throw new UnsupportedSchemaShape("unresolvable property reference");
+      if (
+        !required.has(key) &&
+        !Object.hasOwn(candidate, "default") &&
+        !Object.hasOwn(property, "default")
+      )
+        continue;
+      value[key] = materializeSchemaValue(root, candidate, state);
+    }
+    return value;
+  } finally {
+    state.ancestors.delete(node);
+  }
 };
 
 /** Short type label for completion details: `string`, `number ≥0 ≤1`, `enum(a|b)`, `object`. */

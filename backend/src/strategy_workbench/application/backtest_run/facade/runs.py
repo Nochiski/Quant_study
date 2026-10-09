@@ -6,6 +6,7 @@ from strategy_workbench.application.backtest_run._service import (
     InvalidBacktestRunError,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
+    StrategyRevisionRequiresUpgradeError,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
@@ -36,6 +37,7 @@ __all__ = [
     "RunStatus",
     "SavedRevisionReference",
     "StaleStrategyReferenceError",
+    "StrategyRevisionRequiresUpgradeError",
     "StrategyProvenance",
     "StrategyReferenceNotFoundError",
     "StrategySource",

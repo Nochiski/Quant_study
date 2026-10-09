@@ -7,10 +7,17 @@ from typing import Literal, TypeAlias
 
 from strategy_workbench.domain.factor.facade.expression import FactorGraph
 
+# 새 문서로 받는 유일한 authoring schema 버전. 모델 기본값·hydrate·스키마·어댑터가 전부 이 상수를
+# 읽는다(Phase 1 감사 DEFECT-P1X-001: 리터럴을 두 곳에 적지 않는다). 1.0 문서·저장 row는
+# `_upgrade.py`의 변환을 거쳐서만 들어온다(spec D2·D3).
+CURRENT_SCHEMA_VERSION = "1.1"
+
 # Editor metadata for identifier fields (see domain.factor._nodes for the node-side markers).
 CATALOG_UNIVERSE = {"catalog": "universe"}
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
 DEFINES_PARAMETER = {"defines": "parameter"}
+# 생략 시 hydrate가 같은 mapping의 다른 필드 값을 넣는 파생 기본값 (schema 1.1, spec D1 S3).
+DEFAULT_FROM_FACTOR_ID = {"default-from": "factor_id"}
 
 
 def _factor_authoring(source: str, *, identity: bool = False) -> dict[str, object]:
@@ -42,11 +49,6 @@ class FactorDirection(StrEnum):
     LOW = "low"
 
 
-class SignalMethod(StrEnum):
-    WEIGHTED_SUM = "weighted_sum"
-    RANK_THRESHOLD = "rank_threshold"
-
-
 class PortfolioSide(StrEnum):
     LONG_ONLY = "long_only"
     LONG_SHORT = "long_short"
@@ -75,20 +77,16 @@ class ExecutionTiming(StrEnum):
     NEXT_OPEN = "next_open"
 
 
-class OrderStyle(StrEnum):
-    MARKET = "market"
-
-
 @dataclass(frozen=True)
 class StrategyIdentity:
     strategy_id: str
     revision: int
-    schema_version: str = "1.0"
+    schema_version: str = CURRENT_SCHEMA_VERSION
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DataStep:
-    market: Market
+    market: Market = Market.KRX
     start: date
     end: date
     universe_id: str = field(metadata=CATALOG_UNIVERSE)
@@ -107,24 +105,18 @@ class EligibilityStep:
     rules: tuple[EligibilityRule, ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class FactorSignal:
     factor_id: str = field(metadata=_factor_authoring("factor_id", identity=True))
-    label: str = field(metadata=_factor_authoring("label"))
+    # dataclass default가 아니라 파생 기본값: 문서에서 생략하면 hydrate가 factor_id를 넣는다.
+    label: str = field(metadata={**_factor_authoring("label"), **DEFAULT_FROM_FACTOR_ID})
     direction: FactorDirection = field(metadata=_factor_authoring("preference"))
-    weight: float = field(metadata={"authoring-default": 1.0})
+    weight: float = field(default=1.0, metadata={"authoring-default": 1.0})
     graph: FactorGraph = field(metadata=_factor_authoring("default_graph"))
 
 
 @dataclass(frozen=True)
-class FactorStep:
-    factors: tuple[FactorSignal, ...]
-
-
-@dataclass(frozen=True)
 class SignalStep:
-    method: SignalMethod = SignalMethod.WEIGHTED_SUM
-    entry_percentile: float = 0.1
     score_threshold: float | None = None
     regime_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
     regime_minimum: float | None = None
@@ -159,7 +151,6 @@ class RiskStep:
 @dataclass(frozen=True)
 class ExecutionStep:
     timing: ExecutionTiming = ExecutionTiming.NEXT_OPEN
-    order_style: OrderStyle = OrderStyle.MARKET
     participation_rate: float = 0.1
     fee_bps: float = 15.0
     slippage_bps: float = 10.0
@@ -199,16 +190,16 @@ class ChoiceParameter:
 ParameterDefinition: TypeAlias = FloatParameter | IntegerParameter | ChoiceParameter
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class StrategySpec:
     identity: StrategyIdentity
     title: str
-    description: str
+    description: str = ""
     data: DataStep
-    eligibility: EligibilityStep
-    factors: FactorStep
-    signal: SignalStep
-    portfolio: PortfolioStep
-    risk: RiskStep
-    execution: ExecutionStep
+    eligibility: EligibilityStep = EligibilityStep()
+    factors: tuple[FactorSignal, ...]
+    signal: SignalStep = SignalStep()
+    portfolio: PortfolioStep = PortfolioStep()
+    risk: RiskStep = RiskStep()
+    execution: ExecutionStep = ExecutionStep()
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)

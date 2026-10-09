@@ -7,7 +7,6 @@ same tape regardless of core.
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -19,25 +18,20 @@ from strategy_workbench.adapters.inbound.http_api._backtest_contract import (
     BacktestStrategyStaleResponse,
 )
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from tests.backtest_run_wait import wait_for_terminal_state
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
 
 def _wait(client: TestClient, run_id: str) -> dict[str, Any]:
-    state: dict[str, Any] = {}
-    for _ in range(400):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            return state
-        time.sleep(0.025)
-    return state
+    return wait_for_terminal_state(client, run_id)
 
 
 def _saved_template(client: TestClient) -> dict[str, Any]:
     """Save the JSON template as a document revision so the run can reference it."""
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
-    template["schema_version"] = "1.0"
+    template["schema_version"] = "1.1"
     source = json.dumps(template, ensure_ascii=False, indent=2, default=str)
     created = client.post("/api/v1/strategy-documents", json={"source": source, "format": "json"})
     assert created.status_code == 201, created.text
@@ -74,7 +68,8 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     run_id = accepted.json()["run"]["run_id"]
     accepted_request = client.get(f"/api/v1/backtests/{run_id}/request")
     assert accepted_request.status_code == 200
-    assert accepted_request.json() == {**requested, "strategy": None}
+    # 실행 설정을 주지 않은 요청은 접수 본문에도 None 으로 남는다 — 브리지 결과는 매니페스트에만.
+    assert accepted_request.json() == {**requested, "strategy": None, "environment": None}
 
     replayed = client.post("/api/v1/backtests", json=accepted_request.json())
     assert replayed.status_code == 202, replayed.text
@@ -85,7 +80,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     assert manifest["strategy_provenance"] == {
         "kind": "saved_revision",
         "spec_hash": document["spec_hash"],
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "strategy_id": document["strategy_id"],
         "revision": 1,
         "source_hash": document["source_hash"],

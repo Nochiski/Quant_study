@@ -6,9 +6,12 @@ Rust 확장(`backtest_core`)이 설치돼 있지 않으면 rust 파라미터는 
 
 from __future__ import annotations
 
+import importlib
 import random
+import sys
 from collections.abc import Callable
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -25,6 +28,7 @@ from backtest_engine.engine.core import (
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.slippage import FixedBpsSlippage
 from backtest_engine.errors import (
+    CapabilityNotImplemented,
     CoreUnavailable,
     NegativeCashError,
     NegativePositionError,
@@ -80,6 +84,7 @@ from backtest_engine.types.requirements import (
     EventKind,
     EverySession,
     HistoryRequest,
+    MonthEndSession,
     StrategyRequirements,
 )
 from backtest_engine.types.strategy import Strategy, StrategyContext
@@ -96,19 +101,28 @@ from tests.test_engine_golden import (
 
 INSTRUMENT = make_instrument()
 RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
+# rust_legacy(= backtest_core.Portfolio 단독 어댑터)를 직접 쓰는 테스트용.
+# deprecation 경고는 의도된 것이라 무시한다.
+LEGACY_DEPRECATION = pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning")
 RUST_ENGINE_CORES = [
     pytest.param("rust", marks=RUST_ONLY, id="rust"),
     pytest.param("rust_persistent", marks=RUST_ONLY, id="rust_persistent"),
     pytest.param(
         "rust_legacy",
-        marks=[
-            RUST_ONLY,
-            pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning"),
-        ],
+        marks=[RUST_ONLY, LEGACY_DEPRECATION],
         id="rust_legacy",
     ),
 ]
 CORES = ["python", *RUST_ENGINE_CORES]
+# make_portfolio가 단독 원장을 돌려주는 코어. persistent 코어는 PersistentEngine이 원장을 소유한다.
+STANDALONE_PORTFOLIO_CORES = [
+    "python",
+    pytest.param(
+        "rust_legacy",
+        marks=[RUST_ONLY, LEGACY_DEPRECATION],
+        id="rust_legacy",
+    ),
+]
 
 
 @pytest.fixture(params=CORES)
@@ -137,6 +151,49 @@ def test_floor_delta_shares_identical() -> None:
         assert int(floor_delta_shares(notional, price)) == backtest_core.floor_delta_shares(
             notional, price
         )
+
+
+@RUST_ONLY
+def test_record_kind_codes_match_python_store() -> None:
+    """레코드 kind 코드의 정본은 Python `RecordKind`가 멤버마다 박아 둔 리터럴이다.
+    Rust 상수가 어긋나면 payload가 엉뚱한 kind로 materialize돼 결과가 조용히 틀어진다."""
+    import backtest_core
+
+    from backtest_engine.engine.store import RecordKind
+
+    assert backtest_core.RECORD_KIND_CODES == {kind.value: kind.code for kind in RecordKind}
+
+
+@RUST_ONLY
+def test_event_priorities_match_python_queue() -> None:
+    """같은 세션 안의 처리 순서를 정하는 우선순위 값의 정본은 Python `EventPriority`다.
+    Rust 상수가 어긋나면 이벤트 드레인 순서가 python core와 달라진다."""
+    import backtest_core
+
+    from backtest_engine.engine.queue import EventPriority
+
+    assert backtest_core.EVENT_PRIORITIES == {
+        priority.name.lower(): int(priority) for priority in EventPriority
+    }
+
+
+@RUST_ONLY
+def test_row_index_bytes_match_bench_fallback() -> None:
+    """행 조회표 표현 선택(Dense / Sparse)에 쓰는 바이트 상수의 정본은 Rust `feed.rs`다.
+    벤치는 확장이 없는 환경을 위해 같은 리터럴을 폴백으로 들고 있으므로 둘이 어긋나면
+    `workload.row_index_expected`가 실제로 고른 표현과 다른 값을 기록한다."""
+    import backtest_core
+
+    # `scripts/`는 패키지가 아니라 실행 스크립트 디렉터리라 sys.path에 없다. 벤치 스크립트가
+    # 서로를 import할 때와 같은 방식으로 이 테스트에서만 잠깐 올린다.
+    scripts = str(Path(__file__).resolve().parents[1] / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        bench = importlib.import_module("bench_universe")
+    finally:
+        sys.path.remove(scripts)
+
+    assert backtest_core.ROW_INDEX_BYTES == dict(bench.ROW_INDEX_BYTES_FALLBACK)
 
 
 # --- Portfolio -------------------------------------------------------------------
@@ -220,15 +277,18 @@ def scenario(portfolio: PortfolioLedger) -> list[tuple[object, ...]]:
     return trace
 
 
-@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
-def test_portfolio_scenario_identical_across_cores(rust_core: str) -> None:
+@RUST_ONLY
+@LEGACY_DEPRECATION
+def test_portfolio_scenario_identical_across_cores() -> None:
+    """포트폴리오 단독 회계의 parity oracle. 엔진 코어 parity는 trace 비교 테스트가 덮는다."""
     python = scenario(make_portfolio("python", 100_000.0, allow_short=True, allow_margin=False))
-    rust = scenario(make_portfolio(rust_core, 100_000.0, allow_short=True, allow_margin=False))
+    rust = scenario(make_portfolio("rust_legacy", 100_000.0, allow_short=True, allow_margin=False))
     assert python == rust
 
 
-def test_portfolio_errors_map_to_domain_exceptions(core: str) -> None:
-    portfolio = make_portfolio(core, 500.0)
+@pytest.mark.parametrize("core_name", STANDALONE_PORTFOLIO_CORES)
+def test_portfolio_errors_map_to_domain_exceptions(core_name: str) -> None:
+    portfolio = make_portfolio(core_name, 500.0)
     with pytest.raises(NegativeCashError, match="cash"):
         portfolio.apply(fill(Side.BUY, 10, 100.0))
     with pytest.raises(NegativePositionError, match="sell"):
@@ -238,6 +298,14 @@ def test_portfolio_errors_map_to_domain_exceptions(core: str) -> None:
 def test_unavailable_core_is_an_error_not_a_fallback() -> None:
     with pytest.raises(CoreUnavailable, match="nope"):
         make_portfolio("nope", 1.0)
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("core_name", ["rust", "rust_persistent"])
+def test_persistent_core_has_no_standalone_portfolio(core_name: str) -> None:
+    """persistent 코어는 PersistentEngine이 원장을 소유한다 — 단독 어댑터를 주면 안 된다."""
+    with pytest.raises(CoreUnavailable, match="owns its portfolio inside PersistentEngine"):
+        make_portfolio(core_name, 1_000.0)
 
 
 # --- Engine result diff ---------------------------------------------------------
@@ -341,6 +409,16 @@ ENGINE_SCENARIOS = {
         ),
         DataFeed(test_short_selling.BARS),
     ),
+    # 롱 보유에서 한 번의 체결로 숏으로 넘어간다(평단 리셋). 포트폴리오 단독 시나리오만
+    # 덮던 방향 전환을 엔진 레벨 trace로도 고정한다.
+    "flip": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="f", initial_cash=10_000.0, fee_bps=0.0, short_borrow_bps_annual=252.0),
+        test_short_selling.ShortStrategy(
+            (test_short_selling.target(5), test_short_selling.target(-8))
+        ),
+        DataFeed(test_short_selling.BARS),
+    ),
     "margin": lambda core: _engine_scenario(
         core,
         test_margin.config(),
@@ -418,7 +496,7 @@ def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
         return (s.cash, s.equity, s.gross_exposure, tuple(p.instrument.symbol for p in s.positions))
 
     python = scenario(make_portfolio("python", 3_305_944.3718483075, allow_short=True))
-    rust = scenario(make_portfolio("rust", 3_305_944.3718483075, allow_short=True))
+    rust = scenario(make_portfolio("rust_legacy", 3_305_944.3718483075, allow_short=True))
     assert python == rust
 
 
@@ -430,7 +508,7 @@ def test_instruments_differing_only_in_currency_are_distinct_positions() -> None
     krw = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="KRW")
     usd = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="USD")
     results = []
-    for core_name in ("python", "rust"):
+    for core_name in ("python", "rust_legacy"):
         portfolio = make_portfolio(core_name, 1_000_000.0)
         for seq, instrument in enumerate((krw, usd), start=1):
             portfolio.apply(
@@ -821,10 +899,14 @@ def test_all_actions_randomized_trace_matches_persistent_rust(seed: int) -> None
 
 
 @RUST_ONLY
-def test_promoted_rust_sends_one_decision_batch_per_callback(
+def test_promoted_rust_makes_no_per_session_ffi(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """세션 루프는 Rust가 돌린다 — Python↔Rust 왕복은 전략 콜백과 적재·종료에서만 일어난다."""
+    from collections import Counter
+
     from backtest_engine.engine import loop as loop_module
+    from backtest_engine.engine.store import RecordKind
 
     real_factory = loop_module.make_persistent_runtime
     proxies: list[Any] = []
@@ -832,48 +914,18 @@ def test_promoted_rust_sends_one_decision_batch_per_callback(
     class CountingRuntime:
         def __init__(self, inner: Any) -> None:
             self.inner = inner
-            self.route_calls = 0
-            self.load_feed_calls = 0
-            self.indexed_market_calls = 0
-            self.legacy_market_calls = 0
-            self.activate_pending_calls = 0
-            self.place_order_calls = 0
-            self.register_group_calls = 0
-
-        def load_feed(self, *args: object) -> object:
-            self.load_feed_calls += 1
-            return self.inner.load_feed(*args)
-
-        def route_basic_decision(self, *args: object) -> object:
-            self.route_calls += 1
-            return self.inner.route_basic_decision(*args)
-
-        def submit_decision(self, *args: object) -> object:
-            self.route_calls += 1
-            return self.inner.submit_decision(*args)
-
-        def process_market_index(self, *args: object) -> object:
-            self.indexed_market_calls += 1
-            return self.inner.process_market_index(*args)
-
-        def process_market(self, *args: object) -> object:
-            self.legacy_market_calls += 1
-            return self.inner.process_market(*args)
-
-        def activate_pending(self, *args: object) -> object:
-            self.activate_pending_calls += 1
-            return self.inner.activate_pending(*args)
-
-        def place_order(self, *args: object) -> object:
-            self.place_order_calls += 1
-            return self.inner.place_order(*args)
-
-        def register_group(self, *args: object) -> object:
-            self.register_group_calls += 1
-            return self.inner.register_group(*args)
+            self.calls: Counter[str] = Counter()
 
         def __getattr__(self, name: str) -> Any:
-            return getattr(self.inner, name)
+            attribute = getattr(self.inner, name)
+            if not callable(attribute):
+                return attribute
+
+            def counted(*args: object, **kwargs: object) -> object:
+                self.calls[name] += 1
+                return attribute(*args, **kwargs)
+
+            return counted
 
     def counting_factory(*args: Any, **kwargs: Any) -> CountingRuntime:
         proxy = CountingRuntime(real_factory(*args, **kwargs))
@@ -882,19 +934,110 @@ def test_promoted_rust_sends_one_decision_batch_per_callback(
 
     monkeypatch.setattr(loop_module, "make_persistent_runtime", counting_factory)
     engine = BacktestEngine(RunConfig(run_id="ffi-count", initial_cash=100_000.0), core="rust")
-    engine.run(
+    result = engine.run(
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
         DataFeed(GOLDEN_BARS),
     )
     assert len(proxies) == 1
-    assert proxies[0].route_calls == len(engine.event_store.decision_tape)
-    assert proxies[0].load_feed_calls == 1
-    assert proxies[0].indexed_market_calls == len(GOLDEN_BARS)
-    assert proxies[0].legacy_market_calls == 0
-    assert proxies[0].activate_pending_calls == 2
-    assert proxies[0].place_order_calls == 0
-    assert proxies[0].register_group_calls == 0
+    calls = proxies[0].calls
+    callbacks = len(engine.event_store.decision_tape)
+    assert callbacks == len(GOLDEN_BARS)
+    assert calls["submit_decision"] == callbacks
+    assert calls["drive"] == callbacks + 1
+    assert calls["load_feed"] == 1
+    assert calls["configure_router"] == 1
+    assert calls["configure_run"] == 1
+    assert calls["load_corporate_actions"] == 1
+    assert calls["finish"] == 1
+    # Rust가 세션 루프를 소유하므로 공개 메서드는 적재·콜백·종료·조회뿐이다. 블랙리스트가
+    # 아니라 전체 집합을 고정한다 — 사라진 메서드의 재노출과 새 메서드 추가를 함께 잡는다.
+    assert {name for name in dir(proxies[0].inner) if not name.startswith("_")} == {
+        "configure_router",
+        "configure_run",
+        "current_session_count",
+        "drain_payloads",
+        "drive",
+        "equity_series",
+        "fail_callback",
+        "failure_detail",
+        "finish",
+        "history_window",
+        "lifecycle_state",
+        "load_corporate_actions",
+        "load_feed",
+        "load_target_tape",
+        "poison",
+        "record_batch",
+        "record_payloads",
+        "result_tables",
+        "settlement_session_index",
+        "submit_decision",
+        "traded_notional",
+    }
+    # 결과·지표 조회는 종료 배치와 Rust 누산값만 쓴다.
+    assert len(result.fills) == 2
+    assert calls["record_batch"] == 0
+    assert calls["equity_series"] == 1
+    assert calls["traded_notional"] == 1
+    # fills 조회는 FILL kind 하나만 청크로 넘겨받는다 (레코드 2건 < 청크).
+    # 해제하지 않는 `record_payloads`는 종료 전 partial trace 전용이라 여기서는 안 쓰인다.
+    assert calls["drain_payloads"] == 1
+    assert calls["record_payloads"] == 0
+    # orders 조회는 결정 복원을 위해 DECISION을 먼저 읽는다 — 주문 수와 무관하게 kind당 한 번.
+    assert len(result.orders) == 2
+    assert calls["drain_payloads"] == 3
+    # 넘긴 kind를 다시 읽으면 어느 조회가 어느 레코드에서 막혔는지 알린다.
+    with pytest.raises(RuntimeError, match=r"already released — operation=record_payloads seq="):
+        proxies[0].inner.record_payloads(RecordKind.FILL.code)
+    with pytest.raises(RuntimeError, match=r"already released — operation=traded_notional seq="):
+        proxies[0].inner.traded_notional()
     assert proxies[0].inner.lifecycle_state() == "finished"
+
+
+@RUST_ONLY
+def test_failed_materialization_poisons_the_kind_instead_of_shortening_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEFECT-601: 변환이 청크 중간에 실패하면 이미 해제된 레코드가 조용히 사라진다.
+
+    `drain_payloads`는 넘긴 청크를 그 자리에서 해제하므로, 변환기가 중간에 예외를 던지면
+    Rust 커서는 전진했는데 Python은 그 kind를 캐시하지 못한다. 재조회가 남은 레코드만
+    다시 읽으면 예외 없이 짧은 결과가 나온다.
+    """
+    from backtest_engine.engine.store import PersistentEventStore
+
+    engine = BacktestEngine(RunConfig(run_id="drain-fail", initial_cash=100_000.0), core="rust")
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    )
+    store = engine.event_store
+    assert isinstance(store, PersistentEventStore)
+
+    real_snapshot_from_wire = PersistentEventStore.snapshot_from_wire
+    conversions = 0
+
+    def failing(self: PersistentEventStore, ts: Any, wire: Any) -> Any:
+        nonlocal conversions
+        conversions += 1
+        if conversions == 2:
+            raise ValueError("forced materialization failure")
+        return real_snapshot_from_wire(self, ts, wire)
+
+    monkeypatch.setattr(PersistentEventStore, "snapshot_from_wire", failing)
+    with pytest.raises(ValueError, match="forced materialization failure"):
+        _ = result.snapshots
+
+    # 변환기를 되돌려도 해제된 레코드는 돌아오지 않는다 — 재조회는 짧은 튜플이 아니라 오류다.
+    monkeypatch.setattr(PersistentEventStore, "snapshot_from_wire", real_snapshot_from_wire)
+    with pytest.raises(RuntimeError, match=r"partially released — kind=snapshot handed_over=4"):
+        _ = result.snapshots
+    with pytest.raises(RuntimeError, match=r"kind=snapshot handed_over=4"):
+        store.snapshots()
+    # 같은 이유로 전체 trace 조립도 막힌다.
+    with pytest.raises(RuntimeError, match=r"kind=snapshot handed_over=4"):
+        _ = store.records
+    # 다른 kind는 멀쩡하다 — poison은 해제된 kind 하나에만 걸린다.
+    assert len(result.fills) == 2
 
 
 @RUST_ONLY
@@ -911,8 +1054,10 @@ def test_rust_panic_becomes_engine_error_and_poisons_runtime(
         def __init__(self, inner: Any) -> None:
             self.inner = inner
 
-        def process_market_index(self, *_args: object) -> object:
-            return self.inner._debug_force_panic()
+        def drive(self) -> object:
+            # 첫 세션 MARKET 레코드를 남긴 직후 Rust 내부에서 panic이 나게 한다.
+            self.inner._debug_force_panic_on_market()
+            return self.inner.drive()
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self.inner, name)
@@ -954,36 +1099,6 @@ def test_empty_feed_fails_identically_after_clean_finish(core_name: str) -> None
 
 
 @RUST_ONLY
-def test_persistent_event_queue_matches_timestamp_priority_and_fifo_order() -> None:
-    from backtest_engine.engine.queue import (
-        EventPriority,
-        MarketArrived,
-        PersistentEventQueue,
-        SessionClose,
-    )
-
-    runtime = make_persistent_runtime(
-        100_000.0, allow_short=False, allow_margin=False, leverage=1.0
-    )
-    queue = PersistentEventQueue(runtime)
-    late = MarketArrived(make_snapshot(day(2), make_bar(day(2), INSTRUMENT, 100.0, 100.0)))
-    close = SessionClose(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 100.0, 100.0)))
-    first = MarketArrived(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 100.0, 100.0)))
-    second = MarketArrived(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 101.0, 101.0)))
-    queue.push(day(2), EventPriority.MARKET, late)
-    queue.push(day(1), EventPriority.SESSION_CLOSE, close)
-    queue.push(day(1), EventPriority.MARKET, first)
-    queue.push(day(1), EventPriority.MARKET, second)
-    assert len(queue) == 4
-    assert [queue.pop(), queue.pop(), queue.pop(), queue.pop()] == [
-        first,
-        second,
-        close,
-        late,
-    ]
-
-
-@RUST_ONLY
 def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
     from backtest_engine.engine.wire import decision_to_wire
 
@@ -1003,17 +1118,28 @@ def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
         [100.0],
         [1_000],
     )
-    runtime.process_market_index(0, 0.0, None, ("none", 0.0, 0.0))
-    frame = runtime.run_until_callback("market", 0)
+    runtime.configure_run(
+        0.0, None, ("none", 0.0, 0.0), "every_session", 0.0, 0.0, 252, 0, False, False, False
+    )
+    frame = runtime.drive()
     assert frame.token == 1
     assert frame.event_kind == "market"
     assert frame.session_index == 0
+    assert frame.event is None
+    assert frame.snapshot == (100_000.0, [], 100_000.0, 0.0)
+    assert frame.open_orders == []
+    with pytest.raises(ValueError, match="callback already awaiting"):
+        runtime.drive()
     decision = decision_to_wire(StrategyDecision.no_action(day(1), "token"))
     with pytest.raises(ValueError, match="stale callback token"):
         runtime.submit_decision(frame.token + 1, decision)
-    runtime.submit_decision(frame.token, decision)
+    decision_id, error = runtime.submit_decision(frame.token, decision)
+    assert (decision_id, error) == ("D-000001", None)
     with pytest.raises(ValueError, match="no callback is awaiting"):
         runtime.submit_decision(frame.token, decision)
+    assert runtime.drive() is None
+    kinds = [kind for _seq, _session, kind in runtime.finish()]
+    assert kinds == [0, 5, 1]  # MARKET, SNAPSHOT, DECISION
 
 
 @RUST_ONLY
@@ -1067,33 +1193,32 @@ def test_persistent_strategy_exception_poison_runtime_and_preserves_partial_trac
 def test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from backtest_engine.engine.compact import CompactFill, CompactOrder
     from backtest_engine.engine.store import PersistentEventStore, RecordKind
 
     finished = False
     materialized = {"order": 0, "fill": 0}
     real_finish = PersistentEventStore.finish
-    real_order_materialize = CompactOrder.materialize
-    real_fill_materialize = CompactFill.materialize
+    real_order_materialize = PersistentEventStore.order_from_wire
+    real_fill_materialize = PersistentEventStore.fill_from_wire
 
     def tracked_finish(store: PersistentEventStore) -> None:
         nonlocal finished
         real_finish(store)
         finished = True
 
-    def tracked_order(order: CompactOrder) -> OrderEvent:
+    def tracked_order(store: PersistentEventStore, ts: Any, wire: Any) -> OrderEvent:
         assert finished, "public OrderEvent was allocated before finish()"
         materialized["order"] += 1
-        return real_order_materialize(order)
+        return real_order_materialize(store, ts, wire)
 
-    def tracked_fill(fill: CompactFill) -> FillEvent:
+    def tracked_fill(store: PersistentEventStore, ts: Any, wire: Any) -> FillEvent:
         assert finished, "public FillEvent was allocated before finish()"
         materialized["fill"] += 1
-        return real_fill_materialize(fill)
+        return real_fill_materialize(store, ts, wire)
 
     monkeypatch.setattr(PersistentEventStore, "finish", tracked_finish)
-    monkeypatch.setattr(CompactOrder, "materialize", tracked_order)
-    monkeypatch.setattr(CompactFill, "materialize", tracked_fill)
+    monkeypatch.setattr(PersistentEventStore, "order_from_wire", tracked_order)
+    monkeypatch.setattr(PersistentEventStore, "fill_from_wire", tracked_fill)
 
     engine = BacktestEngine(
         RunConfig(run_id="lazy-result", initial_cash=100_000.0, fee_bps=10.0),
@@ -1196,6 +1321,35 @@ def test_persistent_router_error_type_order_and_trace_match_python() -> None:
                 )
             )
         assert failures[0] == failures[1]
+
+
+class _MonthEndStrategy:
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=MonthEndSession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({ActionKind.NO_ACTION}),
+            features=frozenset(),
+        )
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        del event
+        return StrategyDecision.no_action(ctx.now)
+
+
+def test_month_end_schedule_is_rejected_before_any_core_runs(core: str) -> None:
+    """GAP-2: MonthEndSession은 capability 게이트가 코어보다 먼저 거절한다.
+
+    Rust 드라이버는 `configure_run("month_end")`와 `feed.schedule_matches`로 월말 일정을 이미
+    구현했고 그 동작은 `driver.rs`의 month_end 단위 테스트가 고정한다. Python reference
+    calendar가 없어 두 코어를 나란히 돌리는 parity 시나리오는 아직 만들 수 없다 — 이 테스트가
+    깨지는 날(capability 승격) parity 시나리오를 함께 추가한다.
+    """
+    bars = tuple(make_bar(day(n), INSTRUMENT, 100.0, 100.0) for n in (1, 2, 3))
+    engine = BacktestEngine(RunConfig(run_id="month-end", initial_cash=10_000.0), core=core)
+    with pytest.raises(CapabilityNotImplemented, match="schedule=MonthEndSession"):
+        engine.run(_MonthEndStrategy(), DataFeed(bars))
 
 
 @RUST_ONLY
@@ -1537,3 +1691,137 @@ def test_execution_policy_validates_participation() -> None:
         ExecutionPolicy(
             ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.DAY, max_participation=1.5
         )
+
+
+def _all_scenarios() -> dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]]]:
+    """이 파일이 코어 동등성을 거는 시나리오 전부. 키 충돌이 조용히 시나리오를 먹지 않게
+    `ENGINE_SCENARIOS`만 접두사를 붙인다 (숏 차입·마진 이자가 COST 행을 만드는 유일한 묶음)."""
+    scenarios: dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]]] = {
+        f"engine:{name}": scenario for name, scenario in ENGINE_SCENARIOS.items()
+    }
+    scenarios.update(_session_scenarios())
+    scenarios.update(_EXTRA_SCENARIOS)
+    scenarios.update(_OPUS_SCENARIOS)
+    expected = (
+        len(ENGINE_SCENARIOS)
+        + len(_session_scenarios())
+        + len(_EXTRA_SCENARIOS)
+        + len(_OPUS_SCENARIOS)
+    )
+    if len(scenarios) != expected:
+        raise AssertionError(
+            f"scenario name collision — merged={len(scenarios)} expected={expected}"
+        )
+    return scenarios
+
+
+def _result_tables(engine: BacktestEngine) -> tuple[object, ...]:
+    """`ResultTables`는 eq=False(세션×종목 규모 비교를 실수로 유발하지 않게)라 필드를 편다."""
+    tables = engine.event_store.result_tables()
+    return (
+        tables.sessions,
+        tables.instruments,
+        tables.snapshots,
+        tables.positions,
+        tables.orders,
+        tables.fills,
+        tables.costs,
+        (
+            tables.fill_totals.traded_notional,
+            tables.fill_totals.total_fees,
+            tables.fill_totals.total_slippage_cost,
+        ),
+    )
+
+
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
+@pytest.mark.parametrize("name", sorted(_all_scenarios()))
+def test_result_tables_identical_across_cores(name: str, rust_core: str) -> None:
+    """결과 테이블은 두 코어가 값까지 같아야 한다 (float 포함 — 결합 순서가 계약이다)."""
+    scenario = _all_scenarios()[name]
+    python_engine, _ = scenario("python")
+    rust_engine, _ = scenario(rust_core)
+    assert _result_tables(python_engine) == _result_tables(rust_engine)
+
+
+@RUST_ONLY
+def test_result_tables_are_a_non_destructive_query() -> None:
+    """테이블 조회는 Rust payload를 해제하지 않는다 — 공개 객체 경로가 그대로 남는다."""
+    engine = BacktestEngine(RunConfig(run_id="tables-live", initial_cash=100_000.0), core="rust")
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    )
+    tables = engine.event_store.result_tables()
+
+    assert [row[0] for row in tables.fills] == [fill.fill_id for fill in result.fills]
+    assert [row[2] for row in tables.snapshots] == [
+        snapshot.equity for snapshot in result.snapshots
+    ]
+    assert [row[0] for row in tables.orders] == [order.order_id for order in result.orders]
+    # 캐시된 테이블은 다시 만들지 않는다.
+    assert engine.event_store.result_tables() is tables
+
+
+@RUST_ONLY
+def test_result_tables_refuse_kinds_that_were_already_materialized() -> None:
+    """공개 객체로 먼저 넘겨 해제한 kind는 테이블에서 조용히 빠지는 대신 오류가 된다."""
+    engine = BacktestEngine(RunConfig(run_id="tables-drained", initial_cash=100_000.0), core="rust")
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    )
+    assert len(result.fills) == 2
+
+    with pytest.raises(RuntimeError, match=r"already released — operation=result_tables seq="):
+        engine.event_store.result_tables()
+
+
+_PARTIAL_A = make_instrument("005930")
+_PARTIAL_B = make_instrument("000660")
+# B는 3번째 세션에 처음 등장한다 — 2번째 세션에서 멈춘 trace의 `instruments`에 B가 들어오면
+# persistent store가 feed 등록부를 그대로 답했다는 뜻이다.
+_PARTIAL_BARS: tuple[Bar, ...] = (
+    make_bar(day(1), _PARTIAL_A, 100.0, 100.0),
+    make_bar(day(2), _PARTIAL_A, 110.0, 120.0),
+    make_bar(day(3), _PARTIAL_A, 130.0, 125.0),
+    make_bar(day(3), _PARTIAL_B, 50.0, 50.0),
+    make_bar(day(4), _PARTIAL_A, 90.0, 80.0),
+    make_bar(day(4), _PARTIAL_B, 55.0, 55.0),
+)
+
+
+class _ExplodingOnSecondSession(ScriptedStrategy):
+    """첫 세션에만 목표를 내고 두 번째 세션 콜백에서 터진다."""
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        if ctx.now != day(1):
+            raise RuntimeError("strategy exploded")
+        return super().on_event(ctx, event)
+
+
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
+def test_result_tables_match_across_cores_on_a_partial_trace(rust_core: str) -> None:
+    """DEFECT-701: 중단된 실행에서도 두 코어 테이블이 같아야 한다.
+
+    persistent store는 feed 전체를 `bind_feed`로 들고 있어 자르지 않으면 MARKET 레코드에서
+    조회표를 만드는 python 코어보다 긴 `sessions`와, 아직 bar가 오지 않은 종목까지 담은
+    `instruments`를 답한다.
+    """
+
+    def run(core_name: str) -> BacktestEngine:
+        engine = BacktestEngine(
+            RunConfig(run_id="partial-tables", initial_cash=100_000.0, fee_bps=10.0),
+            core=core_name,
+        )
+        strategy = _ExplodingOnSecondSession(script=(target_70pct(),))
+        with pytest.raises(RuntimeError, match="strategy exploded"):
+            engine.run(strategy, DataFeed(_PARTIAL_BARS))
+        return engine
+
+    python_engine = run("python")
+    rust_engine = run(rust_core)
+
+    tables = python_engine.event_store.result_tables()
+    # feed는 4세션·2종목인데 2번째 세션에서 멈췄다.
+    assert tables.sessions == (day(1), day(2))
+    assert tables.instruments == (_PARTIAL_A,)
+    assert _result_tables(python_engine) == _result_tables(rust_engine)

@@ -359,12 +359,12 @@ def test_target_tape_hash_is_immutable_and_snapshot_sensitive() -> None:
 
 def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_score() -> None:
     spec = _spec()
-    original = spec.factors.factors[0]
+    original = spec.factors[0]
     second = replace(original, factor_id="second", weight=3.0)
     first = replace(original, weight=1.0)
     spec = replace(
         spec,
-        factors=replace(spec.factors, factors=(first, second)),
+        factors=(first, second),
         portfolio=replace(
             spec.portfolio, selection_count=2, weighting=WeightingMethod.FACTOR_SCORE
         ),
@@ -519,8 +519,8 @@ def test_target_tape_hash_preserves_the_pre_cancellation_byte_contract() -> None
 
 def test_portfolio_arithmetic_overflow_never_materializes_a_target_tape() -> None:
     spec = _spec()
-    factor = replace(spec.factors.factors[0], weight=1e308)
-    spec = replace(spec, factors=replace(spec.factors, factors=(factor,)))
+    factor = replace(spec.factors[0], weight=1e308)
+    spec = replace(spec, factors=(factor,))
     day = date(2026, 1, 2)
 
     with pytest.raises(NonFinitePortfolioCalculationError, match="composite_score"):

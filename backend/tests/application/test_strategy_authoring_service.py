@@ -25,13 +25,13 @@ from strategy_workbench.domain.strategy.facade.validation import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
+GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
 
 
 def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyPatch) -> None:
     warning = ValidationIssue(
         code="strategy.expression.lag_periods",
-        path="factors.factors.0.graph.nodes.1",
+        path="factors.0.graph.nodes.1",
         message="warm-up",
         kind=ValidationKind.SEMANTIC,
         severity=ValidationSeverity.WARNING,
@@ -40,7 +40,7 @@ def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(
         _service,
         "validate_strategy",
-        lambda spec: StrategyValidation(valid=True, issues=(warning,)),
+        lambda spec, **_: StrategyValidation(valid=True, issues=(warning,)),
     )
     service = StrategyAuthoringService(
         RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id=lambda: "s"
@@ -57,7 +57,7 @@ def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyP
     assert diagnostic.severity is DiagnosticSeverity.WARNING
     assert diagnostic.kind is DiagnosticKind.SEMANTIC
     assert diagnostic.node_id == "mom_252"
-    assert diagnostic.pointer == "/factors/factors/0/graph/nodes/1"
+    assert diagnostic.pointer == "/factors/0/graph/nodes/1"
     assert diagnostic.range is not None
 
 

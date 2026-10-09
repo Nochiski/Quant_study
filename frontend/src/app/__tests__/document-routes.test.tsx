@@ -19,11 +19,16 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
   vi,
 } from "vitest";
+
+// 케이스 timeout(15초)은 `vite.config.ts`, 비동기 대기 예산(10초)은 `shared/config/test-setup.ts`가 정한다 — 이 파일은
+// 둘 다 덮어쓰지 않는다. 부하 flake의 원인은 54파일 병렬의 워커 경합(단독 65초, 케이스당 1초)이다(Phase 5 backlog 15·19).
+
 
 import { backtestHistoryQuery } from "../../entities/backtest";
 import { strategiesQuery } from "../../entities/strategy";
@@ -32,6 +37,10 @@ import {
   type StrategyTraceRequest,
   type StrategyTraceResponse,
 } from "../../shared/api";
+import type {
+  AssistantEventEnvelopeView,
+  TurnContextPayload,
+} from "../../entities/assistant";
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
 import { t } from "../../shared/config";
 import { App } from "../app";
@@ -39,7 +48,7 @@ import { App } from "../app";
 const API = "http://localhost:8000";
 
 const spec = (strategyId: string, revision: number, title: string) => ({
-  identity: { strategy_id: strategyId, revision, schema_version: "1.0" },
+  identity: { strategy_id: strategyId, revision, schema_version: "1.1" },
   title,
   description: "",
   data: {
@@ -50,8 +59,12 @@ const spec = (strategyId: string, revision: number, title: string) => ({
     frequency: "daily",
   },
   eligibility: { rules: [] },
-  factors: { factors: [] },
-  signal: { method: "weighted_sum", entry_percentile: 0.1 },
+  factors: [],
+  signal: {
+    score_threshold: null,
+    regime_field_id: null,
+    regime_minimum: null,
+  },
   portfolio: {
     side: "long_only",
     selection_count: 20,
@@ -66,7 +79,6 @@ const spec = (strategyId: string, revision: number, title: string) => ({
   },
   execution: {
     timing: "next_open",
-    order_style: "market",
     fee_bps: 15,
     slippage_bps: 10,
   },
@@ -81,7 +93,7 @@ const document = (
 ) => ({
   strategy_id: strategyId,
   revision,
-  schema_version: "1.0",
+  schema_version: "1.1",
   format: "yaml",
   source,
   source_hash: "b".repeat(64),
@@ -89,59 +101,57 @@ const document = (
   spec_hash: `${revision}`.repeat(64).slice(0, 64),
   origin: "document",
   generated: false,
+  requires_upgrade: false,
   created_at: "2026-09-04T09:30:00+00:00",
 });
 
-const STORED = 'schema_version: "1.0"\ntitle: 퀄리티 모멘텀\n';
-const GRAPH_SOURCE = `schema_version: "1.0"
+const STORED = 'schema_version: "1.1"\ntitle: 퀄리티 모멘텀\n';
+const GRAPH_SOURCE = `schema_version: "1.1"
 title: 그래프 전략
 factors:
-  factors:
-    - factor_id: momentum
-      label: 모멘텀
-      weight: 1.0
-      direction: high
-      graph:
-        nodes:
-          - node_id: close
-            kind: field
-            field_id: price.close
-          - node_id: mom_252
-            kind: time_series
-            operator: momentum
-            input_node_id: close
-            window: 252
-            lag: 0
-        output_node_id: mom_252
-        missing_policy: drop
+  - factor_id: momentum
+    label: 모멘텀
+    weight: 1.0
+    direction: high
+    graph:
+      nodes:
+        - node_id: close
+          kind: field
+          field_id: price.close
+        - node_id: mom_252
+          kind: time_series
+          operator: momentum
+          input_node_id: close
+          window: 252
+          lag: 0
+      output_node_id: mom_252
+      missing_policy: drop
 `;
 const graphSpec = (strategyId: string, revision: number) => ({
   ...spec(strategyId, revision, "그래프 전략"),
-  factors: {
-    factors: [
-      {
-        factor_id: "momentum",
-        label: "모멘텀",
-        weight: 1,
-        direction: "high",
-        graph: {
-          nodes: [
-            { node_id: "close", kind: "field", field_id: "price.close" },
-            {
-              node_id: "mom_252",
-              kind: "time_series",
-              operator: "momentum",
-              input_node_id: "close",
-              window: 252,
-              lag: 0,
-            },
-          ],
-          output_node_id: "mom_252",
-          missing_policy: "drop",
-        },
+  factors: [
+    {
+      factor_id: "momentum",
+      label: "모멘텀",
+      weight: 1,
+      direction: "high",
+      graph: {
+        nodes: [
+          { node_id: "close", kind: "field", field_id: "price.close" },
+          {
+            node_id: "mom_252",
+            kind: "time_series",
+            operator: "momentum",
+            input_node_id: "close",
+            window: 252,
+            lag: 0,
+          },
+        ],
+        output_node_id: "mom_252",
+        missing_policy: "drop",
       },
-    ],
-  },
+    },
+  ],
 });
 const SIGNAL_SCHEMA_RESPONSE = {
   schema: {
@@ -150,14 +160,14 @@ const SIGNAL_SCHEMA_RESPONSE = {
       signal: {
         type: "object",
         properties: {
-          method: { type: "string", default: "weighted_sum" },
+          regime_minimum: { type: "number", default: 0.5 },
         },
       },
     },
     additionalProperties: false,
   },
   schema_hash: "h".repeat(64),
-  schema_version: "1.0",
+  schema_version: "1.1",
 };
 const RUNTIME_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/runtime-schema.json"),
@@ -195,6 +205,22 @@ const acceptedRun = (runId = "run-7") => ({
     updated_at: "2026-09-04T00:00:00Z",
   },
 });
+
+type AssistantSessionRow = {
+  session_id: string;
+  title: string;
+  provider_profile_id: string;
+  document_ref: unknown;
+  created_at: string;
+};
+
+let assistantSessions: AssistantSessionRow[] = [];
+const assistantTurns: { text: string; context: TurnContextPayload }[] = [];
+const cancelledTurns: string[] = [];
+let assistantStream: {
+  push: (envelope: AssistantEventEnvelopeView) => void;
+  close: () => void;
+} | null = null;
 
 const server = setupServer(
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
@@ -258,7 +284,7 @@ const server = setupServer(
     return HttpResponse.json({
       format: "yaml",
       source_hash: "b".repeat(64),
-      schema_version: "1.0",
+      schema_version: "1.1",
       spec: compiledSpec,
       canonical_json: JSON.stringify({
         ...canonicalSpec,
@@ -291,7 +317,7 @@ const server = setupServer(
     HttpResponse.json({
       schema: { type: "object", properties: {}, additionalProperties: false },
       schema_hash: "h".repeat(64),
-      schema_version: "1.0",
+      schema_version: "1.1",
     }),
   ),
   http.get(`${API}/api/v1/strategy-documents/contract`, () =>
@@ -302,7 +328,7 @@ const server = setupServer(
         factor_registry_version: "v1",
         fields: [],
         schema_hash: "h".repeat(64),
-        schema_version: "1.0",
+        schema_version: "1.1",
       },
       equity_catalog_url: "/api/v1/equity/catalog",
       factor_catalog_url: "/api/v1/factors/catalog",
@@ -392,6 +418,117 @@ const server = setupServer(
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec("", 0, "새 팩터 전략")),
   ),
+  // AI 어시스턴트 사이드바는 전략 화면 우측 슬롯에 늘 붙어 있다(B-04). 공급자 목록은 첫 렌더에
+  // 조회되고, 나머지는 사용자가 질문을 보낼 때만 불린다.
+  http.get(`${API}/api/v1/assistant/providers`, () =>
+    HttpResponse.json({
+      kinds: [
+        { kind: "anthropic", installed: true, default_model: "claude-sonnet-5" },
+        { kind: "openai", installed: false, default_model: null },
+      ],
+      profiles: [
+        {
+          profile_id: "p-1",
+          kind: "anthropic",
+          label: "작업용 Claude",
+          model: "claude-sonnet-5",
+          base_url: null,
+          secret_tail: "9876",
+          active: true,
+          created_at: "2026-09-20T00:00:00Z",
+        },
+      ],
+    }),
+  ),
+  http.get(`${API}/api/v1/assistant/sessions`, () =>
+    HttpResponse.json(assistantSessions),
+  ),
+  http.post(`${API}/api/v1/assistant/sessions`, async ({ request }) => {
+    const body = (await request.json()) as { document_ref: unknown };
+    const created = {
+      session_id: "s-1",
+      title: "새 대화",
+      provider_profile_id: "p-1",
+      document_ref: body.document_ref,
+      created_at: "2026-09-20T00:00:00Z",
+    };
+    assistantSessions = [created];
+    return HttpResponse.json(created, { status: 201 });
+  }),
+  http.get(`${API}/api/v1/assistant/sessions/:sessionId`, ({ params }) => {
+    const found = assistantSessions.find(
+      (item) => item.session_id === String(params.sessionId),
+    );
+    return found === undefined
+      ? HttpResponse.json(
+          { detail: { code: "assistant.session.not_found", message: "" } },
+          { status: 404 },
+        )
+      : HttpResponse.json({
+          session: found,
+          messages: [],
+          turns: [],
+          events: [],
+        });
+  }),
+  http.post(
+    `${API}/api/v1/assistant/sessions/:sessionId/turns`,
+    async ({ params, request }) => {
+      assistantTurns.push(
+        (await request.json()) as { text: string; context: TurnContextPayload },
+      );
+      return HttpResponse.json(
+        {
+          turn_id: "t-1",
+          session_id: String(params.sessionId),
+          status: "running",
+          accepted_sequence: -1,
+          started_at: "2026-09-20T00:01:00Z",
+        },
+        { status: 202 },
+      );
+    },
+  ),
+  http.post(
+    `${API}/api/v1/assistant/sessions/:sessionId/turns/:turnId/cancel`,
+    ({ params }) => {
+      cancelledTurns.push(String(params.turnId));
+      return HttpResponse.json({
+        turn_id: String(params.turnId),
+        session_id: String(params.sessionId),
+        status: "cancelled",
+        accepted_sequence: -1,
+        started_at: "2026-09-20T00:01:00Z",
+        finished_at: "2026-09-20T00:02:00Z",
+      });
+    },
+  ),
+  http.get(`${API}/api/v1/assistant/sessions/:sessionId/events`, () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+      start: (value) => {
+        controller = value;
+      },
+    });
+    assistantStream = {
+      push: (envelope) =>
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              `id: ${envelope.sequence}`,
+              "event: assistant",
+              `data: ${JSON.stringify(envelope)}`,
+              "",
+              "",
+            ].join("\n"),
+          ),
+        ),
+      close: () => controller.close(),
+    };
+    return new HttpResponse(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -405,6 +542,10 @@ afterEach(() => {
   compiledSources.length = 0;
   explainedGraphs.length = 0;
   tracedStrategies.length = 0;
+  assistantSessions = [];
+  assistantTurns.length = 0;
+  cancelledTurns.length = 0;
+  assistantStream = null;
 });
 afterAll(() => server.close());
 
@@ -459,13 +600,13 @@ const WORKFLOW_ROUTES = [
   {
     name: "new strategy",
     route: "/research/strategies/new",
-    initialSource: 'schema_version: "1.0"\ntitle: ""\n',
+    initialSource: 'schema_version: "1.1"\ntitle: ""\n',
     editedSource:
-      'schema_version: "1.0"\ntitle: ""\ndescription: keyboard save\n',
+      'schema_version: "1.1"\ntitle: ""\ndescription: keyboard save\n',
     savedPath: "/research/strategies/s9/revisions/1",
     savedRequest: {
       format: "yaml",
-      source: 'schema_version: "1.0"\ntitle: ""\ndescription: keyboard save\n',
+      source: 'schema_version: "1.1"\ntitle: ""\ndescription: keyboard save\n',
     },
     backtestSource: "inline_draft",
   },
@@ -490,7 +631,7 @@ const serveRuntimeGraphDocument = (): void => {
       HttpResponse.json({
         schema: RUNTIME_SCHEMA,
         schema_hash: "h".repeat(64),
-        schema_version: "1.0",
+        schema_version: "1.1",
       }),
     ),
     http.get(
@@ -524,12 +665,15 @@ describe("professional keyboard workflow (P6-03)", () => {
       expect(history.location.search).not.toContain("view=json");
     });
     const view = await editor();
-    expect(
-      view.state.sliceDoc(
-        view.state.selection.main.from,
-        view.state.selection.main.to,
-      ),
-    ).toBe("퀄리티 모멘텀");
+    // reveal은 route 전환 뒤 비동기로 선택을 옮긴다 — 부하 중에는 한 틱 늦는다(P5-03: 전체 실행 flake).
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("퀄리티 모멘텀"),
+    );
     expect(view.hasFocus).toBe(true);
   });
 
@@ -558,6 +702,9 @@ describe("professional keyboard workflow (P6-03)", () => {
       const history = mount(route);
       const view = await editor();
       replaceText(view, editedSource);
+      // 세 게이트 케이스가 같은 순서: 편집한 원문의 compile이 도착한 뒤 게이트를 본다(#150 재검토 P2-8 —
+      // warm 실행에서도 이 케이스가 실패했다).
+      await waitFor(() => expect(compiledSources).toContain(editedSource));
       await waitFor(() => expect(saveButton()).toBeEnabled());
 
       fireEvent.keyDown(window, { key: "s", ctrlKey: true });
@@ -569,9 +716,11 @@ describe("professional keyboard workflow (P6-03)", () => {
 
   it.each(WORKFLOW_ROUTES)(
     "routes Ctrl+Shift+Enter through the same Backtest gate on $name",
-    async ({ route, backtestSource }) => {
+    async ({ route, initialSource, backtestSource }) => {
       const history = mount(route);
       await editor();
+      // Validate 케이스와 같은 순서: compile 결과가 도착한 뒤 게이트를 본다(cold 실행 1회 flake, #150 리뷰 P1-2).
+      await waitFor(() => expect(compiledSources).toContain(initialSource));
       const run = within(
         globalThis.document.querySelector(".ide__editor-actions")!,
       ).getByRole("button", { name: "백테스트" });
@@ -664,15 +813,13 @@ describe("professional keyboard workflow (P6-03)", () => {
       "node:mom_252",
     );
     const semanticResult = await screen.findByRole("option");
-    expect(semanticResult).toHaveTextContent(
-      "/factors/factors/0/graph/nodes/1",
-    );
+    expect(semanticResult).toHaveTextContent("/factors/0/graph/nodes/1");
     expect(screen.getAllByRole("option")).toHaveLength(1);
     await user.keyboard("{Enter}");
 
     await waitFor(() =>
       expect(history.location.search).toContain(
-        "path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
+        "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
       ),
     );
     const view = await editor();
@@ -725,7 +872,7 @@ describe("professional keyboard workflow (P6-03)", () => {
 
 describe("document routes (P2-04)", () => {
   it.each([
-    ["/research/strategies/new", 'schema_version: "1.0"\ntitle: ""\n'],
+    ["/research/strategies/new", 'schema_version: "1.1"\ntitle: ""\n'],
     ["/research/strategies/s1/revisions/2", STORED],
   ])("wires a runtime-schema snippet through %s", async (route, prefix) => {
     server.use(
@@ -745,7 +892,7 @@ describe("document routes (P2-04)", () => {
     );
 
     expect(view.state.doc.toString()).toBe(
-      `${prefix}signal:\n  method: weighted_sum`,
+      `${prefix}signal:\n  regime_minimum: 0.5`,
     );
     expect(
       screen.getByText(/YAML 문법 검사를 통과했습니다/),
@@ -768,7 +915,7 @@ describe("document routes (P2-04)", () => {
       "같은 항목이 이미 존재합니다",
     );
     expect(view.state.doc.toString()).toBe(
-      `${prefix}signal:\n  method: weighted_sum\n`,
+      `${prefix}signal:\n  regime_minimum: 0.5\n`,
     );
 
     act(() =>
@@ -784,7 +931,7 @@ describe("document routes (P2-04)", () => {
     expect(view.state.doc.toString()).toBe(prefix);
   });
 
-  it("reports YAML-only from a JSON projection instead of an editor lifecycle error", async () => {
+  it("reports an inactive editor from a JSON projection instead of a readiness error", async () => {
     server.use(
       http.get(`${API}/api/v1/strategy-documents/schema`, () =>
         HttpResponse.json(SIGNAL_SCHEMA_RESPONSE),
@@ -799,8 +946,9 @@ describe("document routes (P2-04)", () => {
       }),
     );
 
+    // projection view에서는 편집기 handle이 비활성이라 "비활성" 사유(Phase 3 감사 R1). 준비 안 됨 오류가 아니다.
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "YAML 편집 화면에서만 사용할 수 있습니다",
+      "소스 편집기가 비활성인 화면에서는 삽입하지 않습니다",
     );
     expect(
       screen.queryByText(/아직 준비되지 않았습니다/),
@@ -838,7 +986,7 @@ describe("document routes (P2-04)", () => {
         HttpResponse.json({
           schema: RUNTIME_SCHEMA,
           schema_hash: "h".repeat(64),
-          schema_version: "1.0",
+          schema_version: "1.1",
         }),
       ),
       http.get(`${API}/api/v1/factors/catalog`, () =>
@@ -940,7 +1088,7 @@ describe("document routes (P2-04)", () => {
           source: recovered,
           format: "yaml",
           source_hash: "d".repeat(64),
-          schema_version: "1.0",
+          schema_version: "1.1",
           updated_at: "2026-09-05T01:02:03Z",
           strategy_id: "s1",
           base_revision: 2,
@@ -972,7 +1120,7 @@ describe("document routes (P2-04)", () => {
           source: `${STORED}description: wrong identity\n`,
           format: "yaml",
           source_hash: "d".repeat(64),
-          schema_version: "1.0",
+          schema_version: "1.1",
           updated_at: "2026-09-05T01:02:03Z",
           strategy_id: "s1",
           base_revision: 2,
@@ -1020,7 +1168,7 @@ describe("document routes (P2-04)", () => {
                 source: "title: another draft\n",
                 format: "yaml",
                 source_hash: "e".repeat(64),
-                schema_version: "1.0",
+                schema_version: "1.1",
                 updated_at: "2026-09-05T01:02:04Z",
                 strategy_id: "s1",
                 base_revision: 2,
@@ -1085,7 +1233,7 @@ describe("document routes (P2-04)", () => {
 
     const history = mount("/research/strategies/new");
     const view = await editor();
-    const source = 'schema_version: "1.0"\ntitle: first edit\n';
+    const source = 'schema_version: "1.1"\ntitle: first edit\n';
     replaceText(view, source);
 
     await waitFor(() => expect(writes).toHaveLength(1), { timeout: 3_000 });
@@ -1101,7 +1249,7 @@ describe("document routes (P2-04)", () => {
     const history = mount("/research/strategies/new");
     const view = await editor();
     expect(screen.getAllByText("초안").length).toBeGreaterThan(0);
-    replaceText(view, 'schema_version: "1.0"\ntitle: 새 전략 A\n');
+    replaceText(view, 'schema_version: "1.1"\ntitle: 새 전략 A\n');
     expect(screen.getByText("저장되지 않은 변경")).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
@@ -1113,7 +1261,7 @@ describe("document routes (P2-04)", () => {
       ),
     );
     expect(posted).toEqual([
-      { format: "yaml", source: 'schema_version: "1.0"\ntitle: 새 전략 A\n' },
+      { format: "yaml", source: 'schema_version: "1.1"\ntitle: 새 전략 A\n' },
     ]);
     // The revision page opens from the cache the save filled: no extra document fetch, no prompt.
     expect(
@@ -1155,7 +1303,7 @@ describe("document routes (P2-04)", () => {
     );
     const history = mount("/research/strategies/new");
     const view = await editor();
-    const first = 'schema_version: "1.0"\ntitle: A\n';
+    const first = 'schema_version: "1.1"\ntitle: A\n';
     const second = `${first}description: typed while saving\n`;
     replaceText(view, first);
     await waitFor(() => expect(saveButton()).toBeEnabled());
@@ -1298,6 +1446,7 @@ describe("document routes (P2-04)", () => {
           strategy_id: "s1",
           title: "Old title",
           latest_revision: 2,
+          requires_upgrade: false,
           spec_hash: "2".repeat(64),
           updated_at: "2026-09-04T00:00:00Z",
         },
@@ -1438,9 +1587,32 @@ describe("Strategy Outline route integration (P4-01)", () => {
   });
 });
 
-describe("StrategySpec JSON and Form projections (P4-06)", () => {
+describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () => {
+  // 기본 핸들러의 스키마는 비어 있다(properties 없음). Form 섹션은 실제 runtime schema에서 온다.
+  beforeEach(() => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json({
+          schema: RUNTIME_SCHEMA,
+          schema_hash: "h".repeat(64),
+          schema_version: "1.1",
+        }),
+      ),
+    );
+  });
+  const formPanel = () => screen.findByLabelText("Form 편집");
+  // 섹션은 runtime schema query가 끝난 뒤 나타난다.
+  // 섹션 legend는 `▾ <이름> <키>`다(P1-03). 앞이 낱말 문자가 아닌 자리에서 키를 찾는다 —
+  // 공백 자체는 `strategy-form-panel.test.tsx`의 "라벨 어휘" 테스트가 고정한다.
+  const formSection = async (name: string) =>
+    within(
+      await within(await formPanel()).findByRole("group", {
+        name: new RegExp(`(^|[^\\w])${name}`),
+      }),
+    );
+
   it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
-    "shows the same backend-owned projections on %s",
+    "shows the backend JSON projection and a schema-driven Form on %s",
     async (route) => {
       const user = userEvent.setup();
       mount(route);
@@ -1450,18 +1622,20 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
       const json = await screen.findByLabelText("StrategySpec JSON");
       await waitFor(() => expect(json).toBeVisible());
       expect(json.textContent).toContain('"market":"KRX"');
-      expect(json.textContent).toContain('"schema_version":"1.0"');
+      expect(json.textContent).toContain('"schema_version":"1.1"');
       expect(json.textContent).not.toContain("identity");
       expect(within(json).getByText("현재 문서")).toBeInTheDocument();
 
       await user.click(screen.getByRole("tab", { name: "Form" }));
-      const form = await screen.findByLabelText("StrategySpec 요약 Form");
+      const form = await formPanel();
       await waitFor(() => expect(form).toBeVisible());
-      expect(within(form).getByText('"KRX"')).toBeInTheDocument();
-      expect(within(form).getByText("15")).toBeInTheDocument();
+      // 값은 parse tree에서, 없는 필드는 runtime schema 기본값 placeholder로 온다.
+      const data = await formSection("data");
+      expect(data.getByRole("combobox", { name: /\bmarket/ })).toHaveValue(
+        "KRX",
+      );
       expect(within(form).queryByText("strategy_id")).not.toBeInTheDocument();
       expect(within(form).queryByText("revision")).not.toBeInTheDocument();
-      expect(within(form).queryByRole("textbox")).not.toBeInTheDocument();
     },
   );
 
@@ -1482,7 +1656,7 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
 
     await user.click(screen.getByRole("tab", { name: "Form" }));
     await waitFor(() =>
-      expect(screen.getByLabelText("StrategySpec 요약 Form")).toBeVisible(),
+      expect(screen.getByLabelText("Form 편집")).toBeVisible(),
     );
     const hiddenContent = globalThis.document.querySelector(".cm-content");
     expect(hiddenContent).not.toBeNull();
@@ -1503,8 +1677,64 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
     expect(view.state.doc.toString()).toBe(STORED);
   });
 
-  it("keeps a stored JSON document as the editable source while Form stays read-only", async () => {
-    const jsonSource = '{"schema_version":"1.0","title":"JSON source"}';
+  it("edits through the Form into the hidden editor, keeps comments, compiles, and undoes in one step", async () => {
+    const commented =
+      '# 문서 머리말\nschema_version: "1.1"\ntitle: 퀄리티 모멘텀 # 제목 메모\nrisk:\n  # 집중도 상한\n  max_name_weight: 0.05\n';
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () => HttpResponse.json(document("s1", 2, commented)),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe(commented);
+    const before = compiledSources.length;
+
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    const risk = await formSection("risk");
+    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
+    expect(weight).toHaveValue(0.05);
+    await user.clear(weight);
+    await user.type(weight, "0.1{Enter}");
+
+    const expected = commented.replace(
+      "max_name_weight: 0.05",
+      "max_name_weight: 0.1",
+    );
+    await waitFor(() => expect(view.state.doc.toString()).toBe(expected));
+    expect(within(await formPanel()).getByRole("status")).toHaveTextContent(
+      "max_name_weight 반영됨",
+    );
+    // 편집기 change → reducer → compile 왕복이 같은 텍스트로 일어난다.
+    await waitFor(() => {
+      expect(compiledSources.length).toBeGreaterThan(before);
+      expect(compiledSources[compiledSources.length - 1]).toBe(expected);
+    });
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+
+    // 미작성 필드의 첫 값은 섹션에 insert-key, 문서 다른 부분은 그대로.
+    const data = await formSection("data");
+    await user.selectOptions(
+      data.getByRole("combobox", { name: /\bfrequency/ }),
+      "daily",
+    );
+    await waitFor(() =>
+      expect(view.state.doc.toString()).toBe(
+        `${expected}data:\n  frequency: daily\n`,
+      ),
+    );
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(expected);
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(commented);
+  });
+
+  it("keeps a stored JSON document as the editable source while the Form is locked", async () => {
+    const jsonSource = '{"schema_version":"1.1","title":"JSON source"}';
     server.use(
       http.get(
         `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
@@ -1525,141 +1755,168 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "Form" }));
-    const form = await screen.findByLabelText("StrategySpec 요약 Form");
+    const form = await formPanel();
     expect(form).toBeVisible();
-    expect(within(form).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      within(form).getByText("JSON 문서는 Form으로 편집하지 않습니다"),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText("YAML 문서로 저장한 뒤 편집하세요", {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    const root = await formSection("전략 문서");
+    expect(root.getByRole("textbox", { name: /\btitle/ })).toBeDisabled();
     expect(view.state.doc.toString()).toBe(jsonSource);
 
     await user.click(screen.getByRole("tab", { name: "JSON" }));
     expect(view.state.doc.toString()).toBe(jsonSource);
   });
 
-  it("labels the same-document last valid projection stale and never enables execution", async () => {
+  it("labels the Form stale on a syntax error, locks it, and never enables execution", async () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2");
     const view = await editor();
-    replaceText(view, 'schema_version: "1.0"\ntitle: last-valid\n');
+    replaceText(view, 'schema_version: "1.1"\ntitle: last-valid\n');
     await waitFor(() => expect(saveButton()).toBeEnabled());
 
-    replaceText(view, 'schema_version: "1.0"\ntitle: [broken\n');
+    replaceText(view, 'schema_version: "1.1"\ntitle: [broken\n');
     await user.click(screen.getByRole("tab", { name: "Form" }));
-    const form = await screen.findByLabelText("StrategySpec 요약 Form");
-    expect(within(form).getByText("STALE")).toBeInTheDocument();
-    expect(within(form).getByText('"last-valid"')).toBeInTheDocument();
-    expect(within(form).getByRole("status")).toHaveTextContent(
-      "저장·실행에는 사용되지 않습니다",
-    );
+    const form = await formPanel();
+    // stale은 같은 버전의 parse가 실패한 뒤에만 참이다(P4-04 후속) — 디바운스가 끝날 때까지 기다린다.
+    expect(await within(form).findByText("STALE")).toBeInTheDocument();
+    expect(
+      within(form).getByText("구문 오류 · source를 먼저 고치세요"),
+    ).toBeInTheDocument();
+    const root = await formSection("전략 문서");
+    const title = root.getByRole("textbox", { name: /\btitle/ });
+    expect(title).toHaveValue("last-valid");
+    expect(title).toBeDisabled();
     expect(saveButton()).toBeDisabled();
     for (const run of screen.getAllByRole("button", { name: /백테스트 실행/ }))
       expect(run).toBeDisabled();
   });
 });
 
-describe("FactorGraph read-only projection (P4-07)", () => {
-  const graphHandlers = () => [
-    http.post(`${API}/api/v1/strategy-documents/compile`, () => {
-      const compiledSpec = graphSpec("draft", 0);
-      const { identity, ...canonicalSpec } = compiledSpec;
-      return HttpResponse.json({
-        format: "yaml",
-        source_hash: "b".repeat(64),
-        schema_version: "1.0",
-        spec: compiledSpec,
-        canonical_json: JSON.stringify({
-          ...canonicalSpec,
-          schema_version: identity.schema_version,
-        }),
-        spec_hash: "7".repeat(64),
-        diagnostics: [],
-      });
-    }),
-    http.get(`${API}/api/v1/strategy-documents/schema`, () =>
-      HttpResponse.json({
-        schema: RUNTIME_SCHEMA,
-        schema_hash: "h".repeat(64),
-        schema_version: "1.0",
+/** 같은 그래프 문서를 compile하되 진단만 바꿔 답한다. */
+const graphCompileWith = (diagnostics: readonly unknown[]) =>
+  http.post(`${API}/api/v1/strategy-documents/compile`, () => {
+    const compiledSpec = graphSpec("draft", 0);
+    const { identity, ...canonicalSpec } = compiledSpec;
+    return HttpResponse.json({
+      format: "yaml",
+      source_hash: "b".repeat(64),
+      schema_version: "1.1",
+      spec: compiledSpec,
+      canonical_json: JSON.stringify({
+        ...canonicalSpec,
+        schema_version: identity.schema_version,
       }),
-    ),
-    http.get(`${API}/api/v1/equity/catalog`, () =>
-      HttpResponse.json({
-        snapshot: {
-          snapshot_id: "snap",
-          schema_version: "1.0",
-          built_at: "2026-09-05T00:00:00Z",
-          source: "route-test",
-          point_in_time: true,
-          dataset_revisions: [],
-        },
-        total: 0,
-        page: 1,
-        page_size: 100,
-        page_count: 0,
-        fields: [],
-        facets: { dataset_ids: [], units: [], frequencies: [] },
-      }),
-    ),
-    http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
-      explainedGraphs.push(await request.json());
-      return HttpResponse.json({
-        registry_version: "v1",
-        data_snapshot_id: "snap",
-        narrative: [],
-        validation: {
-          valid: true,
-          issues: [],
-          node_contracts: [
-            {
-              node_id: "close",
-              value_type: "numeric_series",
-              unit: "KRW",
-              minimum_history_sessions: 1,
-            },
-            {
-              node_id: "mom_252",
-              value_type: "numeric_series",
-              unit: "ratio",
-              minimum_history_sessions: 252,
-            },
-          ],
-          minimum_history_sessions: 252,
-          required_field_ids: ["price.close"],
-        },
-        plan: {
-          graph_hash: "g".repeat(64),
-          plan_hash: "p".repeat(64),
-          registry_version: "v1",
-          output_node_id: "mom_252",
-          steps: [
-            {
-              sequence: 1,
-              node_id: "close",
-              operation: "field",
-              input_node_ids: [],
-              output_type: "numeric_series",
-              output_unit: "KRW",
-              minimum_history_sessions: 1,
-            },
-            {
-              sequence: 2,
-              node_id: "mom_252",
-              operation: "time_series.momentum",
-              input_node_ids: ["close"],
-              output_type: "numeric_series",
-              output_unit: "ratio",
-              minimum_history_sessions: 252,
-            },
-          ],
-          required_field_ids: ["price.close"],
-          referenced_factor_ids: [],
-          referenced_subgraph_ids: [],
-          minimum_history_sessions: 252,
-          missing_policy: "drop",
-          as_of_policy: "available_date_lte_as_of",
-        },
-      });
-    }),
-  ];
+      spec_hash: "7".repeat(64),
+      diagnostics,
+    });
+  });
 
+const graphHandlers = () => [
+  graphCompileWith([]),
+  http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+    HttpResponse.json({
+      schema: RUNTIME_SCHEMA,
+      schema_hash: "h".repeat(64),
+      schema_version: "1.1",
+    }),
+  ),
+  http.get(`${API}/api/v1/equity/catalog`, () =>
+    HttpResponse.json({
+      snapshot: {
+        snapshot_id: "snap",
+        schema_version: "1.1",
+        built_at: "2026-09-05T00:00:00Z",
+        source: "route-test",
+        point_in_time: true,
+        dataset_revisions: [],
+      },
+      total: 0,
+      page: 1,
+      page_size: 100,
+      page_count: 0,
+      fields: [],
+      facets: { dataset_ids: [], units: [], frequencies: [] },
+    }),
+  ),
+  http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
+    explainedGraphs.push(await request.json());
+    return HttpResponse.json({
+      registry_version: "v1",
+      data_snapshot_id: "snap",
+      narrative: [],
+      validation: {
+        valid: true,
+        issues: [],
+        node_contracts: [
+          {
+            node_id: "close",
+            value_type: "numeric_series",
+            unit: "KRW",
+            minimum_history_sessions: 1,
+          },
+          {
+            node_id: "mom_252",
+            value_type: "numeric_series",
+            unit: "ratio",
+            minimum_history_sessions: 252,
+          },
+        ],
+        minimum_history_sessions: 252,
+        required_field_ids: ["price.close"],
+      },
+      plan: {
+        graph_hash: "g".repeat(64),
+        plan_hash: "p".repeat(64),
+        registry_version: "v1",
+        output_node_id: "mom_252",
+        steps: [
+          {
+            sequence: 1,
+            node_id: "close",
+            operation: "field",
+            input_node_ids: [],
+            output_type: "numeric_series",
+            output_unit: "KRW",
+            minimum_history_sessions: 1,
+          },
+          {
+            sequence: 2,
+            node_id: "mom_252",
+            operation: "time_series.momentum",
+            input_node_ids: ["close"],
+            output_type: "numeric_series",
+            output_unit: "ratio",
+            minimum_history_sessions: 252,
+          },
+        ],
+        required_field_ids: ["price.close"],
+        referenced_factor_ids: [],
+        referenced_subgraph_ids: [],
+        minimum_history_sessions: 252,
+        missing_policy: "drop",
+        as_of_policy: "available_date_lte_as_of",
+      },
+    });
+  }),
+];
+
+const revisionDocumentHandler = (source: string, strategyId = "s1") =>
+  http.get(
+    `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+    () =>
+      HttpResponse.json({
+        ...document(strategyId, 2, source, "그래프 전략"),
+        spec: graphSpec(strategyId, 2),
+      }),
+  );
+
+describe("FactorGraph read-only projection (P4-07)", () => {
   const completedTrace = (
     request: StrategyTraceRequest,
   ): StrategyTraceResponse => ({
@@ -1671,7 +1928,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     as_of: request.as_of ?? "2026-08-31",
     provenance: {
       kind: "saved_revision",
-      schema_version: "1.0",
+      schema_version: "1.1",
       spec_hash: "7".repeat(64),
       source_hash: "b".repeat(64),
       strategy_id: "s1",
@@ -1726,17 +1983,10 @@ describe("FactorGraph read-only projection (P4-07)", () => {
   it("keeps graph selection in the URL, then opens the exact YAML node", async () => {
     server.use(
       ...graphHandlers(),
-      http.get(
-        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
-        () =>
-          HttpResponse.json({
-            ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
-            spec: graphSpec("s1", 2),
-          }),
-      ),
+      revisionDocumentHandler(GRAPH_SOURCE),
     );
     const user = userEvent.setup();
-    const nodePath = "%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
+    const nodePath = "%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
     const history = mount(
       `/research/strategies/s1/revisions/2?path=${nodePath}`,
     );
@@ -1758,7 +2008,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     await waitFor(() => {
       expect(history.location.search).toContain("view=graph");
       expect(history.location.search).toContain(
-        "path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
+        "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
       );
     });
 
@@ -1802,7 +2052,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           as_of: resolvedAsOf,
           provenance: {
             kind: "inline_draft",
-            schema_version: "1.0",
+            schema_version: "1.1",
             spec_hash: "7".repeat(64),
             source_hash: "b".repeat(64),
             strategy_id: null,
@@ -1941,7 +2191,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           as_of: body.as_of,
           provenance: {
             kind: "saved_revision",
-            schema_version: "1.0",
+            schema_version: "1.1",
             spec_hash: specHash,
             source_hash: "b".repeat(64),
             strategy_id: "s1",
@@ -2021,7 +2271,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
         });
       }),
     );
-    const nodePath = "%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
+    const nodePath = "%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
     const initial = `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${nodePath}`;
     const history = mount(initial);
     const user = userEvent.setup();
@@ -2052,7 +2302,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
 
     act(() => {
       history.push(
-        `/research/strategies/s1/revisions/2?asOf=2026-08-30&security=sec-next&path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F0`,
+        `/research/strategies/s1/revisions/2?asOf=2026-08-30&security=sec-next&path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F0`,
       );
     });
     await waitFor(() => {
@@ -2116,7 +2366,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           });
         },
       );
-      const nodePath = "/factors/factors/0/graph/nodes/1";
+      const nodePath = "/factors/0/graph/nodes/1";
       const history = mount(
         `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${encodeURIComponent(nodePath)}`,
       );
@@ -2179,7 +2429,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
           return HttpResponse.json({
             format: "yaml",
             source_hash: "b".repeat(64),
-            schema_version: "1.0",
+            schema_version: "1.1",
             spec: compiledSpec,
             canonical_json: JSON.stringify({
               ...canonicalSpec,
@@ -2208,7 +2458,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
 
     await user.click(screen.getByRole("tab", { name: "YAML" }));
     const invalidView = await editor();
-    replaceText(invalidView, 'schema_version: "1.0"\ntitle: "broken\n');
+    replaceText(invalidView, 'schema_version: "1.1"\ntitle: "broken\n');
     await waitFor(() => expect(saveButton()).toBeDisabled());
     await user.click(screen.getByRole("tab", { name: "Diff" }));
     const invalidPanel = await screen.findByLabelText("StrategySpec Diff");
@@ -2225,7 +2475,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
   it("compares exact stored sources and backend semantic revision diff", async () => {
     const revisionSource = (revision: number) =>
       revision === 1
-        ? 'schema_version: "1.0"\ntitle: 이전 전략\n'
+        ? 'schema_version: "1.1"\ntitle: 이전 전략\n'
         : revision === 3
           ? `${STORED}description: 서버 최신\n`
           : STORED;
@@ -2314,7 +2564,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
           return HttpResponse.json({
             format: "yaml",
             source_hash: "b".repeat(64),
-            schema_version: "1.0",
+            schema_version: "1.1",
             spec: compiledSpec,
             canonical_json: JSON.stringify(semantic),
             spec_hash: specHash,
@@ -2387,9 +2637,9 @@ describe("StrategySpec Diff projection (P4-08)", () => {
           return HttpResponse.json({
             format: "yaml",
             source_hash: "b".repeat(64),
-            schema_version: "1.0",
+            schema_version: "1.1",
             spec: compiledSpec,
-            canonical_json: '{"schema_version":"1.0","title":"same"}',
+            canonical_json: '{"schema_version":"1.1","title":"same"}',
             spec_hash: "2".repeat(64),
             diagnostics: [],
           });
@@ -2471,7 +2721,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
             document(
               String(params.strategyId),
               revision,
-              `schema_version: "1.0"\ntitle: revision ${revision}\n`,
+              `schema_version: "1.1"\ntitle: revision ${revision}\n`,
               `revision ${revision}`,
             ),
           );
@@ -2600,7 +2850,7 @@ describe("backtest from the editor (P3-05)", () => {
       {
         core: "rust",
         initial_cash: 100_000_000,
-        benchmark_security_id: "005930",
+        benchmark_security_id: null,
         annualization_days: 252,
         metric_windows: [],
         strategy_source: {
@@ -2629,7 +2879,7 @@ describe("backtest from the editor (P3-05)", () => {
     expect(started[0]).toEqual({
       core: "rust",
       initial_cash: 100_000_000,
-      benchmark_security_id: "005930",
+      benchmark_security_id: null,
       annualization_days: 252,
       metric_windows: [],
       strategy_source: {
@@ -2696,6 +2946,48 @@ describe("backtest from the editor (P3-05)", () => {
       "/research/strategies/s1/revisions/1",
     );
     expect(screen.queryByText(/run-stale.*접수됨/)).not.toBeInTheDocument();
+  });
+
+  it("explains a saved 1.0 revision the backend refuses to run and disables the run control", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.strategy.requires_upgrade",
+              message: "strategy s1 revision 2 is a frozen schema 1.0 row",
+            },
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({
+      strategy_source: {
+        kind: "saved_revision",
+        strategy_id: "s1",
+        revision: 2,
+      },
+    });
+    const banner = await screen.findByRole("region", {
+      name: "schema 1.0 문서",
+    });
+    expect(banner).toHaveTextContent(
+      "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다",
+    );
+    expect(run).toBeDisabled();
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
   });
 });
 
@@ -2956,5 +3248,421 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
     expect(history.location.pathname).toBe(
       "/research/strategies/s1/revisions/2",
     );
+  });
+});
+
+describe("problems and the document status badge follow no tab (P1-01)", () => {
+  const problemRow = (message: string | RegExp) =>
+    screen.findByRole("button", { name: message });
+
+  /** 키 범위를 쓰는 유일한 진단 종류 — outline의 값 범위 reveal과 구별된다. */
+  const UNKNOWN_TITLE_KEY = {
+    code: "structure.unknown_key",
+    kind: "structural",
+    severity: "error",
+    pointer: "/title",
+    message: "title is not a known field",
+  };
+
+  // jsdom에는 `scrollIntoView`가 없다. 선택된 카드를 화면으로 끌어오는지 보려고 심는다.
+  const scrollIntoView = vi.fn();
+  let previousScrollIntoView: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    previousScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    scrollIntoView.mockClear();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+  });
+  afterEach(() => {
+    if (previousScrollIntoView)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollIntoView",
+        previousScrollIntoView,
+      );
+    else
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown })
+        .scrollIntoView;
+  });
+
+  it("shows the badge and the problem list while the Graph tab is selected", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          // backend는 그래프 노드 진단을 노드 **객체** pointer로 낸다(`_validation.py`의
+          // `nodes.{index}` → `<factor>.graph.nodes.N`). 필드 pointer로 mocking하면 화면이
+          // 실제로 못 하는 일을 통과시킨다(리뷰 차단 2).
+          code: "factor.graph.time_series_window",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window는 1 이상이고 lag는 0 이상이어야 합니다: window=0 lag=0",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    mount("/research/strategies/s1/revisions/2?view=graph");
+
+    const status = await screen.findByRole("status", { name: "문서 상태" });
+    await waitFor(() => expect(status).toHaveTextContent("검증 오류"));
+    const problems = await screen.findByRole("region", { name: "문제" });
+    expect(problems).toHaveTextContent("오류 1 · 경고 0");
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }, 15_000);
+
+  it("keeps the Graph tab and selects the pointer the graph editor draws", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          // backend는 그래프 노드 진단을 노드 **객체** pointer로 낸다(`_validation.py`의
+          // `nodes.{index}` → `<factor>.graph.nodes.N`). 필드 pointer로 mocking하면 화면이
+          // 실제로 못 하는 일을 통과시킨다(리뷰 차단 2).
+          code: "factor.graph.time_series_window",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window는 1 이상이고 lag는 0 이상이어야 합니다: window=0 lag=0",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    // compile이 error를 내면 실행 plan이 막혀 DAG는 없고 문서 tree로 그리는 편집 표면만 남는다.
+    await screen.findByRole("region", { name: "그래프 편집" });
+    await user.click(await problemRow(/window는 1 이상이고 lag는 0 이상이어야 합니다/));
+
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain(
+        "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
+      );
+    });
+    // URL은 wire일 뿐이다 — 그래프 노드가 실제로 선택 표시를 받고 화면으로 끌려오는지도 본다.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
+      ).toHaveAttribute("aria-current", "true"),
+    );
+    // 노드 pointer 진단이므로 가장 구체적인 선택은 노드 행이고 스크롤도 거기로 간다.
+    const editorRow = screen
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .closest("li");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    // 원인 문장이 그 노드 카드 안에 본문으로 붙는다(리뷰 차단 2). 선택한 노드 패널은 같은
+    // 문장을 다시 그리지 않는다(2차 리뷰 P3).
+    expect(editorRow).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    expect(
+      screen.getByRole("group", { name: /선택한 노드/ }),
+    ).not.toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }, 15_000);
+
+  // plan이 ready면 읽기 전용 DAG 노드와 그 아래 편집기 행에 같은 pointer로 `aria-current`가
+  // 둘 붙는다. 중첩된 두 reveal 훅이 같은 요소로 수렴해야 한다(2차 리뷰 R2-1).
+  it("scrolls to the editor row, not the plan node, when both mark the same pointer", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "factor.graph.time_series_window",
+          kind: "semantic",
+          severity: "warning",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window가 깁니다",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2?view=graph");
+
+    await screen.findByLabelText("FactorGraph DAG");
+    await screen.findByRole("region", { name: "그래프 편집" });
+    await user.click(await problemRow(/window가 깁니다/));
+
+    const planNode = screen
+      .getByRole("button", { name: "그래프 노드 선택: mom_252" })
+      .closest("li");
+    const editorRow = screen
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .closest("li");
+    await waitFor(() =>
+      expect(editorRow).toHaveAttribute("aria-current", "true"),
+    );
+    expect(planNode).toHaveAttribute("aria-current", "true");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    // 경고도 같은 자리에 본문으로 붙는다(alert이 아니라 본문이다 — 리뷰 P3).
+    expect(editorRow).toHaveTextContent("window가 깁니다");
+  }, 15_000);
+
+  it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {
+    server.use(
+      graphCompileWith([UNKNOWN_TITLE_KEY]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    await user.click(await problemRow(/title is not a known field/));
+
+    await waitFor(() =>
+      expect(history.location.search).not.toContain("view=graph"),
+    );
+    // `structure.unknown_key`는 키 범위(`keyRanges`), outline reveal은 값 범위(`valueRanges`)라
+    // 둘이 다르다. 정확히 비교해야 진단 reveal이 마지막에 썼음을 고정한다(리뷰 P3-1).
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("title"),
+    );
+  }, 15_000);
+
+  it("falls back to the source tab from the read-only Diff projection too", async () => {
+    server.use(
+      graphCompileWith([UNKNOWN_TITLE_KEY]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=diff");
+
+    await user.click(await problemRow(/title is not a known field/));
+
+    await waitFor(() =>
+      expect(history.location.search).not.toContain("view=diff"),
+    );
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("title"),
+    );
+  }, 15_000);
+
+  it("reveals the Form card the problem points at without leaving the Form tab", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.factor.weight",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/weight",
+          message: "weight must be positive",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=form");
+
+    await screen.findByLabelText("Form 편집");
+    await user.click(await problemRow(/weight must be positive/));
+
+    await waitFor(() =>
+      expect(history.location.search).toContain("view=form"),
+    );
+    const card = screen.getByRole("region", { name: "factors · momentum" });
+    await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
+    // 카드 안에서 문제가 가리킨 필드 행까지 표시되고, 스크롤은 그 행으로 간다(P1-04).
+    const row = card.querySelector('.strategy-form__field[aria-current="true"]');
+    expect(row).not.toBeNull();
+    expect(row).toHaveTextContent("weight must be positive");
+    await waitFor(() => expect(scrollIntoView.mock.contexts.at(-1)).toBe(row));
+
+    // 같은 행을 다시 눌렀을 때도 끌어온다 — URL은 그대로라 reveal 신호가 대신 올라간다(2차 리뷰 R2-2).
+    const before = scrollIntoView.mock.calls.length;
+    await user.click(await problemRow(/weight must be positive/));
+    await waitFor(() =>
+      expect(scrollIntoView.mock.calls.length).toBeGreaterThan(before),
+    );
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(row);
+  }, 15_000);
+});
+
+describe("AI 어시스턴트 제안 적용 (B-04)", () => {
+  /** 사이드바를 열고 질문 하나를 보낸 뒤 그 턴의 SSE 연결을 돌려준다. */
+  const askAssistant = async (user: ReturnType<typeof userEvent.setup>) => {
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "지금 시장에 맞는 전략을 제안해 줘");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(assistantTurns).toHaveLength(1));
+    await waitFor(() => expect(assistantStream).not.toBeNull());
+    return assistantStream!;
+  };
+
+  const proposal = (source: string) => ({
+    title: "저변동 모멘텀",
+    summary: "변동성이 낮은 모멘텀 상위 종목을 매수합니다.",
+    rationale: "최근 국내 시장은 저변동 구간입니다.",
+    sources: [],
+    source_format: "yaml" as const,
+    source_text: source,
+    compile: { ok: true, spec_hash: "hash-1", diagnostics: [] },
+  });
+
+  it("사이드바 제안을 편집기에 적용하고 실행 취소 한 번으로 되돌린다", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    const before = view.state.doc.toString();
+    const stream = await askAssistant(user);
+
+    // 턴에는 지금 편집기 텍스트가 실린다(서버가 문서를 따로 들지 않는다).
+    expect(assistantTurns[0].context.source_text).toBe(before);
+    expect(assistantTurns[0].context.source_format).toBe("yaml");
+
+    const proposed = 'schema_version: "1.1"\ntitle: "저변동 모멘텀"\n';
+    act(() =>
+      stream.push({
+        sequence: 1,
+        turn_id: "t-1",
+        event: { type: "proposal", proposal: proposal(proposed) },
+      }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "문서에 적용" }),
+    );
+    expect(view.state.doc.toString()).toBe(proposed);
+    expect(
+      screen.getByText("제안을 문서에 적용했습니다."),
+    ).toBeInTheDocument();
+
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(before);
+  });
+
+  it("세션 생성 왕복 뒤에 시작되는 턴도 최신 편집기 텍스트를 싣는다", async () => {
+    let release: (() => void) | null = null;
+    const created = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/assistant/sessions`, async ({ request }) => {
+        const body = (await request.json()) as { document_ref: unknown };
+        // 세션이 만들어지는 동안 사용자가 계속 타자를 친다.
+        await created;
+        const row = {
+          session_id: "s-1",
+          title: "새 대화",
+          provider_profile_id: "p-1",
+          document_ref: body.document_ref,
+          created_at: "2026-09-20T00:00:00Z",
+        };
+        assistantSessions = [row];
+        return HttpResponse.json(row, { status: 201 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "전략을 제안해 줘");
+    await user.keyboard("{Enter}");
+
+    const typedAfterSend =
+      'schema_version: "1.1"\ntitle: "보낸 뒤에 친 제목"\n';
+    replaceText(view, typedAfterSend);
+    act(() => release?.());
+
+    await waitFor(() => expect(assistantTurns).toHaveLength(1));
+    expect(assistantTurns[0].context.source_text).toBe(typedAfterSend);
+  });
+
+  it("턴이 도는 중 사이드바를 닫으면 취소를 확인하고, 계속 두면 닫히지 않는다", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    await editor();
+    await askAssistant(user);
+
+    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    const confirm = await screen.findByRole("alertdialog", {
+      name: "사이드바 닫기",
+    });
+    expect(cancelledTurns).toHaveLength(0);
+
+    await user.click(
+      within(confirm).getByRole("button", { name: "계속 두기" }),
+    );
+    expect(
+      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
+    ).toBeInTheDocument();
+    expect(cancelledTurns).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    await user.click(
+      await screen.findByRole("button", { name: "취소하고 닫기" }),
+    );
+    await waitFor(() => expect(cancelledTurns).toHaveLength(1));
+    expect(
+      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("기다리는 동안 문서를 고쳤으면 확인을 거쳐 덮어쓴다", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    const stream = await askAssistant(user);
+
+    const typed = 'schema_version: "1.1"\ntitle: "직접 쓴 제목"\n';
+    replaceText(view, typed);
+    const proposed = 'schema_version: "1.1"\ntitle: "저변동 모멘텀"\n';
+    act(() =>
+      stream.push({
+        sequence: 1,
+        turn_id: "t-1",
+        event: { type: "proposal", proposal: proposal(proposed) },
+      }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "문서에 적용" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "문서가 바뀌었습니다",
+    });
+    expect(view.state.doc.toString()).toBe(typed);
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "그래도 덮어쓰기" }),
+    );
+    expect(view.state.doc.toString()).toBe(proposed);
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(typed);
   });
 });

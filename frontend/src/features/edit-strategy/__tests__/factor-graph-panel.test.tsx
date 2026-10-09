@@ -6,7 +6,10 @@ import type {
   FactorExplanation,
   FactorGraphRequest,
 } from "../../../shared/api";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { projectFactorGraphs } from "../model/factor-graph-projection";
+import type { JsonSchema } from "../model/schema-navigator";
+import type { SourceTransactions } from "../model/use-source-transactions";
 import type {
   ExecutionPlansState,
   PlannedFactor,
@@ -193,7 +196,7 @@ describe("FactorGraph projection", () => {
     ]);
     expect(factor.nodes[0]).toMatchObject({
       planned: true,
-      pointer: "/factors/factors/0/graph/nodes/1",
+      pointer: "/factors/0/graph/nodes/1",
       outputType: "numeric_series",
       outputUnit: "KRW",
       minimumHistorySessions: 1,
@@ -226,7 +229,7 @@ describe("FactorGraph projection", () => {
       nodeId: "orphan",
       planned: false,
       sequence: null,
-      pointer: "/factors/factors/0/graph/nodes/5",
+      pointer: "/factors/0/graph/nodes/5",
       outputType: "numeric_series",
       outputUnit: "KRW",
       minimumHistorySessions: 1,
@@ -269,7 +272,127 @@ describe("FactorGraph projection", () => {
   });
 });
 
+/** 순환·중복 진단이 노드를 집어 오는 상태(P1-05). 계획은 없고 검증 진단만 있다. */
+const cyclicReadyState = (): ExecutionPlansState => {
+  const graphExplanation = explanation();
+  graphExplanation.plan = null;
+  graphExplanation.validation.valid = false;
+  graphExplanation.validation.issues = [
+    {
+      code: "factor.graph.cycle",
+      message:
+        "이 노드가 순환 참조에 묶여 있어 값을 계산할 수 없습니다. 고리 중 한 곳의 입력을 끊어 주세요 — cycle=close → positive → close",
+      node_id: "close",
+      path: "nodes.1",
+      severity: "error",
+    },
+    {
+      code: "factor.graph.cycle",
+      message:
+        "이 노드가 순환 참조에 묶여 있어 값을 계산할 수 없습니다. 고리 중 한 곳의 입력을 끊어 주세요 — cycle=close → positive → close",
+      node_id: "positive",
+      path: "nodes.3",
+      severity: "error",
+    },
+  ];
+  return {
+    status: "ready",
+    expectedRegistryVersion: "factor-registry-v7",
+    expectedDataSnapshotId: "krx-pit-2026-09-01",
+    factors: [plannedFactor(graph, graphExplanation)],
+  };
+};
+
 describe("FactorGraphPanel", () => {
+  it("puts a cycle diagnostic on every node card in the loop, not in the graph-level list", () => {
+    // P1-05: `node_id`가 없던 시절에는 "순환 참조가 있습니다" 한 줄이 그래프 머리에만 떠서,
+    // 어느 노드를 고쳐야 하는지 사용자가 목록을 눈으로 훑어야 했다.
+    const projection = projectFactorGraphs(cyclicReadyState());
+    if (projection.status !== "ready") throw new Error("fixture must be ready");
+
+    const byNodeId = new Map(
+      projection.factors[0].nodes.map((node) => [node.nodeId, node]),
+    );
+    expect(byNodeId.get("close")?.issues.map((issue) => issue.code)).toEqual([
+      "factor.graph.cycle",
+    ]);
+    expect(byNodeId.get("positive")?.issues.map((issue) => issue.code)).toEqual(
+      ["factor.graph.cycle"],
+    );
+    expect(byNodeId.get("zero")?.issues).toEqual([]);
+    expect(
+      projection.factors[0].issues.filter((issue) => issue.node_id === null),
+    ).toEqual([]);
+
+    render(
+      <FactorGraphPanel
+        state={cyclicReadyState()}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+      />,
+    );
+
+    // 고리에 묶인 노드 카드 둘에만 배지가 붙고, 문장이 고리 경로를 말한다.
+    const badges = screen.getAllByText("factor.graph.cycle");
+    expect(badges).toHaveLength(2);
+    for (const badge of badges) {
+      const row = badge.closest("li");
+      expect(
+        within(row as HTMLElement).getByText(/cycle=close → positive → close/),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("keeps the last plan projection with a recomputing badge while the plan reloads (OBS-132-05)", () => {
+    const schema = JSON.parse(
+      readBackendFixture("strategy_documents/runtime-schema.json"),
+    ) as JsonSchema;
+    const transactions: SourceTransactions = {
+      apply: vi.fn(() => true),
+      run: vi.fn(() => true),
+      feedback: { status: "idle" },
+      feedbackFor: () => ({ status: "idle" }),
+      onEditorReady: vi.fn(),
+      enabled: true,
+      disabled: null,
+      settling: false,
+    };
+    const editing = {
+      tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
+      schema,
+      transactions,
+      catalogs: { equityFields: null, factors: null },
+    };
+    const view = (state: ExecutionPlansState, documentKey = 1) => (
+      <FactorGraphPanel
+        state={state}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+        editing={{ ...editing, documentKey }}
+      />
+    );
+    const { rerender } = render(view(readyState()));
+    expect(screen.queryByText("재계산 중")).toBeNull();
+    // 편집 확정 뒤 실제 경로: 이전 compile의 spec이 남아 blocked(stale) → blocked(pending) → loading → ready.
+    // 그동안 직전 투영이 남는다(reducer 실측: stale 판정이 pending보다 먼저다 — 4차 리뷰).
+    rerender(view({ status: "blocked", reason: "stale" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
+    rerender(view({ status: "blocked", reason: "pending" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
+    rerender(view({ status: "loading" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
+    expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "데이터 필드 노드 추가" }),
+    ).toBeInTheDocument();
+    // 다른 문서로 가면(문서 키 변경) 직전 투영을 쓰지 않는다.
+    rerender(view({ status: "loading" }, 2));
+    expect(screen.queryByText("재계산 중")).toBeNull();
+    expect(document.querySelector('[data-node-id="signal"]')).toBeNull();
+  });
+
   it("renders conditional branches, saved references, provenance and exact selection actions", async () => {
     const user = userEvent.setup();
     const onSelectPointer = vi.fn();
@@ -278,7 +401,7 @@ describe("FactorGraphPanel", () => {
       <FactorGraphPanel
         state={readyState()}
         diagnostics={[]}
-        selectedPointer="/factors/factors/0/graph/nodes/0/true_node_id"
+        selectedPointer="/factors/0/graph/nodes/0/true_node_id"
         onSelectPointer={onSelectPointer}
         onOpenSource={onOpenSource}
       />,
@@ -286,9 +409,8 @@ describe("FactorGraphPanel", () => {
 
     expect(screen.getByText("factor-registry-v7")).toBeInTheDocument();
     expect(screen.getByText("krx-pit-2026-09-01")).toBeInTheDocument();
-    expect(screen.getByTitle("g".repeat(64))).toHaveTextContent(
-      `${"g".repeat(12)}…`,
-    );
+    // fingerprint는 `title`에 숨지 않고 본문으로 전부 보인다(P1-04).
+    expect(screen.getByText("g".repeat(64))).toBeInTheDocument();
     const signal = document.querySelector('[data-node-id="signal"]');
     expect(signal).toHaveAttribute("aria-current", "true");
     expect(
@@ -308,7 +430,7 @@ describe("FactorGraphPanel", () => {
       screen.getByRole("button", { name: "그래프 노드 선택: signal" }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/0",
+      "/factors/0/graph/nodes/0",
     );
     await user.click(
       screen.getByRole("button", {
@@ -316,12 +438,10 @@ describe("FactorGraphPanel", () => {
       }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/2",
+      "/factors/0/graph/nodes/2",
     );
     await user.click(within(signal as HTMLElement).getByText("소스에서 열기"));
-    expect(onOpenSource).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/0",
-    );
+    expect(onOpenSource).toHaveBeenLastCalledWith("/factors/0/graph/nodes/0");
   });
 
   it("hides stale graph data and exposes current backend graph diagnostics", async () => {
@@ -335,7 +455,7 @@ describe("FactorGraphPanel", () => {
             code: "factor.graph.missing_input",
             kind: "semantic",
             severity: "error",
-            pointer: "/factors/factors/0/graph/nodes/2/input_node_id",
+            pointer: "/factors/0/graph/nodes/2/input_node_id",
             nodeId: "momentum",
             message: "input node does not exist",
             range: null,
@@ -353,7 +473,7 @@ describe("FactorGraphPanel", () => {
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "소스에서 열기" }));
     expect(onOpenSource).toHaveBeenCalledWith(
-      "/factors/factors/0/graph/nodes/2/input_node_id",
+      "/factors/0/graph/nodes/2/input_node_id",
     );
   });
 
@@ -384,11 +504,9 @@ describe("FactorGraphPanel", () => {
       }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/5",
+      "/factors/0/graph/nodes/5",
     );
     await user.click(within(orphan).getByText("소스에서 열기"));
-    expect(onOpenSource).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/5",
-    );
+    expect(onOpenSource).toHaveBeenLastCalledWith("/factors/0/graph/nodes/5");
   });
 });

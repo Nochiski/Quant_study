@@ -19,7 +19,7 @@ change; the observation adapter owns their as_of vintage (D-006).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sized
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import TypeVar
@@ -27,6 +27,11 @@ from typing import TypeVar
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataPort,
     FactorMetadataSnapshot,
+)
+from strategy_workbench.domain.backtest.facade.environment import (
+    LegacyMissingPolicyConflictError,
+    RunEnvironment,
+    resolve_environment,
 )
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
@@ -36,7 +41,7 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     NonFiniteFactorCalculationError,
     evaluate_factor_graph,
 )
-from strategy_workbench.domain.factor.facade.expression import NodeValueType
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy, NodeValueType
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
     InvalidFactorGraphError,
@@ -64,6 +69,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     compile_target_tape,
     compile_target_tape_with_trace,
 )
+from strategy_workbench.domain.strategy.facade.constraints import expression_code
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
@@ -82,6 +88,7 @@ from ._models import (
 from .ports.outgoing.engine_portfolio import EnginePortfolioPort
 from .ports.outgoing.raw_observations import (
     CancellableRawObservationPort,
+    ProgressReportingRawObservationPort,
     RawObservation,
     RawObservationContractViolation,
     RawObservationPort,
@@ -91,6 +98,24 @@ from .ports.outgoing.raw_observations import (
 
 _T = TypeVar("_T")
 _CHECKPOINT_BATCH = 256
+
+PipelineProgress = Callable[[float, str], None]
+"""파이프라인 안의 완료 비율(0~1, 단조 증가)과 사람이 읽는 현재 작업 설명을 받는 콜백."""
+
+# 파이프라인 진행 구간 경계. 실데이터(4년, 팩터 1개) 실측 시간 비율을 따른다(이슈 #162).
+# 화면은 정수 % 만 바뀌므로 구간 폭이 실제 시간에 비례해야 긴 구간에서도 막대가 고르게 오른다.
+# 실측 비율: 원시 로딩 약 17%, 재검증 약 2.5%, 팩터 입력 변환 약 8%, 팩터 평가 약 59%,
+# 포트폴리오 관측 약 10%, TargetTape 컴파일 약 3.5%.
+_PROGRESS_RAW_LOADED = 0.171
+_PROGRESS_VALIDATED = 0.196
+_PROGRESS_FACTOR_INPUTS = 0.197
+_PROGRESS_FACTORS_START = 0.279
+_PROGRESS_FACTORS_END = 0.87
+_PROGRESS_COMPILE = 0.966
+
+
+def _no_progress(fraction: float, message: str) -> None:
+    return None
 
 
 class InvalidPortfolioRequestError(ValueError):
@@ -171,6 +196,20 @@ class FactorEvaluationRecord:
     trace: FactorTrace | None = None
 
 
+@dataclass(frozen=True, eq=False)
+class _PreparedPipeline:
+    """관측 데이터를 읽기 전에 확정되는 파이프라인 입력(엔진 판정·필드 메타데이터·실행 플랜).
+
+    `plans` 가 dict 라 frozen 이 만드는 `__hash__` 가 깨지므로 `eq=False`(비교·해시 용도 없음).
+    """
+
+    engine: EngineCompatibility
+    metadata: FactorMetadataSnapshot
+    plans: dict[str, FactorExecutionPlan]
+    # 문서 검증 뒤에 해소한 실행 설정. 호출자가 브리지를 다시 부르지 않게 같이 돌려준다.
+    environment: RunEnvironment
+
+
 @dataclass(frozen=True)
 class PortfolioPipelineResult:
     data_snapshot_id: str
@@ -198,23 +237,290 @@ class PortfolioDesignService:
     def preview(self, request: PortfolioPreviewRequest) -> PortfolioPreview:
         return self.run_pipeline(request).preview
 
+    def preflight(self, request: PortfolioPreviewRequest) -> EngineCompatibility:
+        """관측 데이터를 읽지 않고 끝나는 검사만 돌려 엔진 호환성을 답한다.
+
+        `run_pipeline` 의 앞부분(스펙 검증·엔진 판정·팩터 메타데이터·실행 플랜·출력 타입/저장 참조
+        거부)과 같은 `_prepare` 를 타므로, 여기서 예외 없이 끝난 스펙이 그 앞부분에서 예외로
+        거부되는 일은 없다. 엔진 호환성만은 예외가 아니라 반환값으로 답하므로 호출자가
+        `.compatible` 을 검사해야 한다. 원시 관측 로딩과 TargetTape 컴파일은 하지 않으므로 응답
+        시간이 데이터 구간·유니버스 크기에 비례하지 않는다 — 백테스트 시작 요청이 즉시 202 를
+        돌려주기 위한 사전 검사다(이슈 #158). 데이터에 의존하는 실패(관측 부재·계약 위반·스냅샷
+        불일치·비유한 계산)는 여기서 잡히지 않는다.
+
+        **`request.environment` 를 읽는다**(P2-02). `_prepare` 가 문서 검증 뒤에 실행 설정을
+        해소하고 그 `missing` 으로 플랜을 컴파일하기 때문이다. 호출자는 해소 전 값을 그대로
+        넘겨야 검증이 브리지보다 먼저 돈다. 그래서 이 메서드는 엔진 호환성 말고도 문서·실행
+        설정 문제로 예외를 던진다 — `InvalidPortfolioRequestError`(팩터별 결측 정책 충돌
+        `run_environment.missing_policy_conflict` 포함)와 `RunEnvironment` 생성자 검증이다.
+        `run_pipeline` 과 같은 `spec.environment` 를 넘기는 한 두 경로의 해소 결과는 같다.
+        """
+
+        # 엔진 호환성만은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게
+        # 명시한다. 문서·실행 설정 오류는 위 docstring 대로 예외다.
+        options = PortfolioPipelineOptions(require_engine_compatible=False)
+        return self._prepare(request.spec, options, request.environment).engine
+
     def run_pipeline(
         self,
         request: PortfolioPreviewRequest,
         *,
         options: PortfolioPipelineOptions | None = None,
         cancelled: Callable[[], bool] = lambda: False,
+        progress: PipelineProgress = _no_progress,
     ) -> PortfolioPipelineResult:
+        """스펙을 검증하고 원시 관측에서 TargetTape 까지 만든다.
+
+        `progress` 는 원시 로딩 시작(0)부터 컴파일 완료(1)까지 단조 증가하는 비율을 받는다.
+        팩터 평가 구간은 팩터마다 같은 몫으로 나누고 그 안에서는 평가기의 노드·종목 단위 진행을
+        따른다. 보고 빈도는 조절하지 않는다 — 이벤트로 남길지는 호출자가 정한다.
+        """
         pipeline_options = options or PortfolioPipelineOptions()
 
         def checkpoint() -> None:
             _raise_if_cancelled(cancelled)
 
         spec = request.spec
+        # 브리지는 `_prepare` 안에서 `validate_strategy` 뒤에 돈다 — 잘못된 문서는 코드화된
+        # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다. 플랜이 결측 정책을
+        # 인자로 받으므로(P2-02) 해소한 실행 설정을 `_prepare` 가 돌려준다.
+        prepared = self._prepare(spec, pipeline_options, request.environment, checkpoint=checkpoint)
+        environment = prepared.environment
+        engine = prepared.engine
+        metadata = prepared.metadata
+        plans = prepared.plans
+        raw_query = RawObservationQuery(
+            market=environment.market.value,
+            universe_id=environment.universe_id,
+            start=environment.start,
+            end=environment.end,
+            field_ids=_required_field_ids(spec, plans),
+            # Plans count as_of itself; the port counts sessions strictly before start.
+            history_sessions_before_start=max(
+                (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
+            ),
+        )
+        progress(0.0, "Loading raw observations")
+        try:
+            if isinstance(self._observation_source, ProgressReportingRawObservationPort):
+                raw = self._observation_source.load_raw_observations_reporting(
+                    raw_query,
+                    checkpoint=checkpoint,
+                    progress=lambda fraction: progress(
+                        fraction * _PROGRESS_RAW_LOADED, "Loading raw observations"
+                    ),
+                )
+            elif isinstance(self._observation_source, CancellableRawObservationPort):
+                raw = self._observation_source.load_raw_observations_cancellable(
+                    raw_query, checkpoint=checkpoint
+                )
+            else:
+                raw = self._observation_source.load_raw_observations(raw_query)
+            progress(_PROGRESS_RAW_LOADED, "Validating raw observations")
+            # Normal construction already validates the immutable value. Recheck at the consumer
+            # boundary so a foreign/stale adapter cannot bypass the current port contract.
+            raw.validate_contract(
+                checkpoint=checkpoint,
+                progress=lambda fraction: progress(
+                    _between(_PROGRESS_RAW_LOADED, _PROGRESS_VALIDATED, fraction),
+                    "Validating raw observations",
+                ),
+            )
+        except RawObservationContractViolation as error:
+            raise RawObservationContractError(str(error)) from error
+        checkpoint()
+        if not raw.ok:
+            raise RawObservationUnavailableError(raw.status, raw.detail)
+        if raw.data_snapshot_id != metadata.data_snapshot_id:
+            raise PortfolioSnapshotMismatchError(
+                expected=metadata.data_snapshot_id,
+                actual=raw.data_snapshot_id,
+            )
+        _reject_sessions_outside_run_range(raw, environment, checkpoint=checkpoint)
+        schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
+        pipeline_options = _resolve_default_trace_date(pipeline_options, schedule)
+        _validate_loaded_trace_scope(
+            pipeline_options,
+            raw,
+            first_signal_as_of=schedule.first_signal_as_of,
+            checkpoint=checkpoint,
+        )
+        checkpoint()
+        progress(_PROGRESS_FACTOR_INPUTS, "Preparing factor inputs")
+        factor_observations = tuple(
+            _to_factor_observation(item, checkpoint=checkpoint)
+            for item in _reported(
+                raw.observations,
+                checkpoint,
+                lambda fraction: progress(
+                    _between(_PROGRESS_FACTOR_INPUTS, _PROGRESS_FACTORS_START, fraction),
+                    "Preparing factor inputs",
+                ),
+            )
+        )
+        parameters = tuple(
+            ResolvedFactorParameter(parameter.parameter_id, parameter.default)
+            for parameter in spec.parameters
+        )
+        evaluations: list[FactorEvaluationRecord] = []
+        factor_count = max(len(spec.factors), 1)
+        for factor_index, factor in enumerate(spec.factors):
+            checkpoint()
+            factor_message = (
+                f"Evaluating factor {factor.factor_id} ({factor_index + 1}/{len(spec.factors)})"
+            )
+            progress(
+                _between(
+                    _PROGRESS_FACTORS_START, _PROGRESS_FACTORS_END, factor_index / factor_count
+                ),
+                factor_message,
+            )
+
+            def report_factor(
+                fraction: float, index: int = factor_index, message: str = factor_message
+            ) -> None:
+                # 팩터 경계를 (index + fraction) / count 한 식으로 계산해 다음 팩터 시작값과 같은
+                # float 가 되게 한다. 누적 덧셈은 팩터 3·6개에서 1ulp 역행했다(리뷰 P3-2).
+                progress(
+                    _between(
+                        _PROGRESS_FACTORS_START,
+                        _PROGRESS_FACTORS_END,
+                        (index + fraction) / factor_count,
+                    ),
+                    message,
+                )
+
+            trace = None
+            try:
+                if factor.factor_id == pipeline_options.trace_factor_id:
+                    evaluation, trace = evaluate_factor_graph_with_trace(
+                        factor.graph,
+                        observations=factor_observations,
+                        missing=environment.missing,
+                        parameters=parameters,
+                        selection=pipeline_options.trace_selection,
+                        checkpoint=checkpoint,
+                        progress=report_factor,
+                    )
+                else:
+                    evaluation = evaluate_factor_graph(
+                        factor.graph,
+                        observations=factor_observations,
+                        missing=environment.missing,
+                        parameters=parameters,
+                        checkpoint=checkpoint,
+                        progress=report_factor,
+                    )
+            except NonFiniteFactorCalculationError as error:
+                node_index = next(
+                    index
+                    for index, node in enumerate(factor.graph.nodes)
+                    if node.node_id == error.node_id
+                )
+                issue = semantic_issue(
+                    "strategy.expression.calculation_non_finite",
+                    f"factors.{factor_index}.graph.nodes.{node_index}",
+                    str(error),
+                    node_id=error.node_id,
+                )
+                raise InvalidPortfolioRequestError(
+                    StrategyValidation(valid=False, issues=(issue,))
+                ) from error
+            evaluations.append(
+                FactorEvaluationRecord(
+                    factor_id=factor.factor_id,
+                    plan=plans[factor.factor_id],
+                    values=evaluation.values,
+                    trace=trace,
+                )
+            )
+        evaluation_records = tuple(evaluations)
+        checkpoint()
+        progress(_PROGRESS_FACTORS_END, "Building portfolio observations")
+        observations = _to_portfolio_observations(
+            raw,
+            evaluation_records,
+            pipeline_options.starting_holdings,
+            checkpoint=checkpoint,
+            progress=lambda fraction: progress(
+                _between(_PROGRESS_FACTORS_END, _PROGRESS_COMPILE, fraction),
+                "Building portfolio observations",
+            ),
+        )
+        checkpoint()
+        progress(_PROGRESS_COMPILE, "Compiling target tape")
+
+        def report_compile(fraction: float) -> None:
+            progress(_between(_PROGRESS_COMPILE, 1.0, fraction), "Compiling target tape")
+
+        try:
+            if pipeline_options.construction_trace_selection is None:
+                tape = compile_target_tape(
+                    spec,
+                    data_snapshot_id=raw.data_snapshot_id,
+                    sessions=raw.sessions,
+                    observations=observations,
+                    schedule=schedule,
+                    checkpoint=checkpoint,
+                    progress=report_compile,
+                )
+                construction_trace = None
+            else:
+                compiled = compile_target_tape_with_trace(
+                    spec,
+                    data_snapshot_id=raw.data_snapshot_id,
+                    sessions=raw.sessions,
+                    observations=observations,
+                    schedule=schedule,
+                    trace_selection=pipeline_options.construction_trace_selection,
+                    checkpoint=checkpoint,
+                    progress=report_compile,
+                )
+                tape = compiled.tape
+                construction_trace = compiled.trace
+        except NonFinitePortfolioCalculationError as error:
+            issue = semantic_issue(
+                "strategy.expression.calculation_non_finite",
+                "portfolio",
+                str(error),
+            )
+            raise InvalidPortfolioRequestError(
+                StrategyValidation(valid=False, issues=(issue,))
+            ) from error
+        preview = PortfolioPreview(
+            tape=tape,
+            engine=engine,
+            warnings=raw.warnings,
+        )
+        progress(1.0, "Target tape compiled")
+        return PortfolioPipelineResult(
+            data_snapshot_id=raw.data_snapshot_id,
+            factor_evaluations=evaluation_records,
+            raw_observations=raw.observations,
+            observations=observations,
+            construction_trace=construction_trace,
+            preview=preview,
+        )
+
+    def _prepare(
+        self,
+        spec: StrategySpec,
+        pipeline_options: PortfolioPipelineOptions,
+        environment: RunEnvironment | None,
+        *,
+        checkpoint: Callable[[], None] = lambda: None,
+    ) -> _PreparedPipeline:
+        """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다.
+
+        실행 설정 해소도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
+        플랜 컴파일은 `environment.missing` 을 인자로 받아야 한다(P2-02).
+        """
+
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
         checkpoint()
+        resolved = _resolve_environment_or_reject(spec, environment)
 
         engine = self._engine_portfolio.assess(spec)
         if pipeline_options.require_engine_compatible and not engine.compatible:
@@ -233,176 +539,37 @@ class PortfolioDesignService:
                 sorted(
                     {
                         field_id
-                        for factor in spec.factors.factors
+                        for factor in spec.factors
                         for field_id in factor_required_field_ids(factor.graph)
                     }
                 )
             )
         )
-        plans = self._plans(spec, metadata)
+        plans = self._plans(spec, metadata, resolved.missing)
         _reject_non_numeric_factor_outputs(spec, plans)
         _reject_saved_references(spec, plans)
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
-        raw_query = RawObservationQuery(
-            market=spec.data.market.value,
-            universe_id=spec.data.universe_id,
-            start=spec.data.start,
-            end=spec.data.end,
-            field_ids=_required_field_ids(spec, plans),
-            # Plans count as_of itself; the port counts sessions strictly before start.
-            history_sessions_before_start=max(
-                (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
-            ),
-        )
-        try:
-            if isinstance(self._observation_source, CancellableRawObservationPort):
-                raw = self._observation_source.load_raw_observations_cancellable(
-                    raw_query, checkpoint=checkpoint
-                )
-            else:
-                raw = self._observation_source.load_raw_observations(raw_query)
-            # Normal construction already validates the immutable value. Recheck at the consumer
-            # boundary so a foreign/stale adapter cannot bypass the current port contract.
-            raw.validate_contract(checkpoint=checkpoint)
-        except RawObservationContractViolation as error:
-            raise RawObservationContractError(str(error)) from error
-        checkpoint()
-        if not raw.ok:
-            raise RawObservationUnavailableError(raw.status, raw.detail)
-        if raw.data_snapshot_id != metadata.data_snapshot_id:
-            raise PortfolioSnapshotMismatchError(
-                expected=metadata.data_snapshot_id,
-                actual=raw.data_snapshot_id,
-            )
-        _reject_sessions_outside_strategy_range(raw, spec, checkpoint=checkpoint)
-        schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
-        pipeline_options = _resolve_default_trace_date(pipeline_options, schedule)
-        _validate_loaded_trace_scope(
-            pipeline_options,
-            raw,
-            first_signal_as_of=schedule.first_signal_as_of,
-            checkpoint=checkpoint,
-        )
-        checkpoint()
-        factor_observations = tuple(
-            _to_factor_observation(item, checkpoint=checkpoint)
-            for item in _checkpointed(raw.observations, checkpoint)
-        )
-        parameters = tuple(
-            ResolvedFactorParameter(parameter.parameter_id, parameter.default)
-            for parameter in spec.parameters
-        )
-        evaluations: list[FactorEvaluationRecord] = []
-        for factor_index, factor in enumerate(spec.factors.factors):
-            checkpoint()
-            trace = None
-            try:
-                if factor.factor_id == pipeline_options.trace_factor_id:
-                    evaluation, trace = evaluate_factor_graph_with_trace(
-                        factor.graph,
-                        observations=factor_observations,
-                        parameters=parameters,
-                        selection=pipeline_options.trace_selection,
-                        checkpoint=checkpoint,
-                    )
-                else:
-                    evaluation = evaluate_factor_graph(
-                        factor.graph,
-                        observations=factor_observations,
-                        parameters=parameters,
-                        checkpoint=checkpoint,
-                    )
-            except NonFiniteFactorCalculationError as error:
-                node_index = next(
-                    index
-                    for index, node in enumerate(factor.graph.nodes)
-                    if node.node_id == error.node_id
-                )
-                issue = semantic_issue(
-                    "strategy.expression.calculation_non_finite",
-                    f"factors.factors.{factor_index}.graph.nodes.{node_index}",
-                    str(error),
-                    node_id=error.node_id,
-                )
-                raise InvalidPortfolioRequestError(
-                    StrategyValidation(valid=False, issues=(issue,))
-                ) from error
-            evaluations.append(
-                FactorEvaluationRecord(
-                    factor_id=factor.factor_id,
-                    plan=plans[factor.factor_id],
-                    values=evaluation.values,
-                    trace=trace,
-                )
-            )
-        evaluation_records = tuple(evaluations)
-        checkpoint()
-        observations = _to_portfolio_observations(
-            raw,
-            evaluation_records,
-            pipeline_options.starting_holdings,
-            checkpoint=checkpoint,
-        )
-        checkpoint()
-        try:
-            if pipeline_options.construction_trace_selection is None:
-                tape = compile_target_tape(
-                    spec,
-                    data_snapshot_id=raw.data_snapshot_id,
-                    sessions=raw.sessions,
-                    observations=observations,
-                    schedule=schedule,
-                    checkpoint=checkpoint,
-                )
-                construction_trace = None
-            else:
-                compiled = compile_target_tape_with_trace(
-                    spec,
-                    data_snapshot_id=raw.data_snapshot_id,
-                    sessions=raw.sessions,
-                    observations=observations,
-                    schedule=schedule,
-                    trace_selection=pipeline_options.construction_trace_selection,
-                    checkpoint=checkpoint,
-                )
-                tape = compiled.tape
-                construction_trace = compiled.trace
-        except NonFinitePortfolioCalculationError as error:
-            issue = semantic_issue(
-                "strategy.expression.calculation_non_finite",
-                "portfolio",
-                str(error),
-            )
-            raise InvalidPortfolioRequestError(
-                StrategyValidation(valid=False, issues=(issue,))
-            ) from error
-        preview = PortfolioPreview(
-            tape=tape,
-            engine=engine,
-            warnings=raw.warnings,
-        )
-        return PortfolioPipelineResult(
-            data_snapshot_id=raw.data_snapshot_id,
-            factor_evaluations=evaluation_records,
-            raw_observations=raw.observations,
-            observations=observations,
-            construction_trace=construction_trace,
-            preview=preview,
+        return _PreparedPipeline(
+            engine=engine, metadata=metadata, plans=plans, environment=resolved
         )
 
     def _plans(
-        self, spec: StrategySpec, metadata: FactorMetadataSnapshot
+        self,
+        spec: StrategySpec,
+        metadata: FactorMetadataSnapshot,
+        missing: MissingPolicy,
     ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
-        factor_ids = tuple(factor.factor_id for factor in spec.factors.factors)
+        factor_ids = tuple(factor.factor_id for factor in spec.factors)
         plans: dict[str, FactorExecutionPlan] = {}
         issues = []
-        for factor_index, factor in enumerate(spec.factors.factors):
+        for factor_index, factor in enumerate(spec.factors):
             try:
                 plans[factor.factor_id] = compile_factor_plan(
                     factor.graph,
                     registry_version=self._factor_registry_version,
+                    missing=missing,
                     fields=metadata.fields,
                     parameter_ids=parameter_ids,
                     factor_ids=factor_ids,
@@ -411,8 +578,8 @@ class PortfolioDesignService:
             except InvalidFactorGraphError as error:
                 issues.extend(
                     semantic_issue(
-                        factor_issue.code,
-                        f"factors.factors.{factor_index}.graph.{factor_issue.path}",
+                        expression_code(factor_issue.code),
+                        f"factors.{factor_index}.graph.{factor_issue.path}",
                         factor_issue.message,
                         severity=(
                             ValidationSeverity.ERROR
@@ -428,6 +595,23 @@ class PortfolioDesignService:
                 StrategyValidation(valid=False, issues=tuple(issues))
             )
         return plans
+
+
+def _resolve_environment_or_reject(
+    spec: StrategySpec, environment: RunEnvironment | None
+) -> RunEnvironment:
+    """실행 설정을 확정하고, 1.1 문서에서 못 만드는 경우는 요청 거부로 바꾼다.
+
+    브리지 실패는 서버 오류가 아니라 문서/요청 문제라 `portfolio.strategy.invalid` 진단으로
+    나간다. `run_environment.*` 코드는 `strategy.*` 레지스트리 밖이라 그대로 전달된다.
+    """
+    try:
+        return resolve_environment(spec, environment)
+    except LegacyMissingPolicyConflictError as error:
+        issue = semantic_issue(error.code, "factors", str(error))
+        raise InvalidPortfolioRequestError(
+            StrategyValidation(valid=False, issues=(issue,))
+        ) from error
 
 
 def _required_field_ids(
@@ -598,18 +782,40 @@ def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterat
         yield item
 
 
+def _reported(
+    items: Iterable[_T], checkpoint: Callable[[], None], progress: Callable[[float], None]
+) -> Iterator[_T]:
+    """`_checkpointed` 와 같은 배치마다 완료 비율(0~1)도 보고한다. 끝나면 1.0 을 보고한다.
+
+    길이를 모르는 입력(지연 생성 값)은 중간 비율 없이 체크포인트만 걸고 끝에서 1.0 을 보고한다.
+    """
+    total = len(items) if isinstance(items, Sized) else None
+    for index, item in enumerate(items):
+        if index % _CHECKPOINT_BATCH == 0:
+            checkpoint()
+            if total:
+                progress(index / total)
+        yield item
+    progress(1.0)
+
+
+def _between(start: float, end: float, fraction: float) -> float:
+    """구간 [start, end] 안의 위치. 부동소수 오차로 end 를 넘지 않게 자른다."""
+    return min(start + (end - start) * fraction, end)
+
+
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
     # TODO(PLAN P5-03): evaluate referenced factors/subgraphs in topological order instead.
     issues = tuple(
         # The domain owns the code registry; minting an issue here goes through the same gate.
         semantic_issue(
             "strategy.expression.reference_unsupported",
-            f"factors.factors.{index}.graph",
+            f"factors.{index}.graph",
             "저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
             f"factor_ids={plan.referenced_factor_ids} "
             f"subgraph_ids={plan.referenced_subgraph_ids}",
         )
-        for index, factor in enumerate(spec.factors.factors)
+        for index, factor in enumerate(spec.factors)
         for plan in (plans[factor.factor_id],)
         if plan.referenced_factor_ids or plan.referenced_subgraph_ids
     )
@@ -630,12 +836,12 @@ def _reject_non_numeric_factor_outputs(
     issues = tuple(
         semantic_issue(
             "strategy.expression.output_type",
-            f"factors.factors.{factor_index}.graph.output_node_id",
+            f"factors.{factor_index}.graph.output_node_id",
             "FactorSignal output must be numeric_series for portfolio/backtest execution: "
             f"actual={output.output_type!r}",
             node_id=plan.output_node_id,
         )
-        for factor_index, factor in enumerate(spec.factors.factors)
+        for factor_index, factor in enumerate(spec.factors)
         for plan in (plans[factor.factor_id],)
         for output in (next(step for step in plan.steps if step.node_id == plan.output_node_id),)
         if output.output_type != NodeValueType.NUMERIC_SERIES.value
@@ -644,31 +850,31 @@ def _reject_non_numeric_factor_outputs(
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
 
 
-def _reject_sessions_outside_strategy_range(
+def _reject_sessions_outside_run_range(
     raw: RawObservationSet,
-    spec: StrategySpec,
+    environment: RunEnvironment,
     *,
     checkpoint: Callable[[], None],
 ) -> None:
-    """Sessions must stay inside `spec.data.start..end` (fail-closed, D-004).
+    """Sessions must stay inside `environment.start..end` (fail-closed, D-004).
 
     A wider answer is fail-open: `compile_target_tape` would emit frames whose execution date has
-    no bar in the backtest dataset, which `application/backtest_run` queries for the strategy
-    range alone.
+    no bar in the backtest dataset, which `application/backtest_run` queries for the run range
+    alone.
     """
     outside = tuple(
         session
         for session in _checkpointed(raw.sessions, checkpoint)
-        if not spec.data.start <= session <= spec.data.end
+        if not environment.start <= session <= environment.end
     )
     if not outside:
         return
     raise RawObservationContractError(
-        "raw observation sessions fall outside the requested strategy range — "
-        f"expected={spec.data.start}..{spec.data.end} "
+        "raw observation sessions fall outside the requested run range — "
+        f"expected={environment.start}..{environment.end} "
         f"actual={raw.sessions[0]}..{raw.sessions[-1]} "
         f"outside={outside[:5]} outside_count={len(outside)} "
-        f"universe_id={spec.data.universe_id!r} snapshot={raw.data_snapshot_id!r}"
+        f"universe_id={environment.universe_id!r} snapshot={raw.data_snapshot_id!r}"
     )
 
 
@@ -701,11 +907,18 @@ def _to_portfolio_observations(
     starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None,
     *,
     checkpoint: Callable[[], None] = lambda: None,
+    progress: Callable[[float], None] = lambda fraction: None,
 ) -> tuple[PortfolioObservation, ...]:
+    """`progress` 는 팩터 값 색인(0~0.3)과 관측 조립(0.3~1.0) 진행을 받는다."""
     in_range = set(_checkpointed(raw.sessions, checkpoint))
     values_by_key: dict[tuple[str, date, str], float | None] = {}
-    for record in _checkpointed(evaluations, checkpoint):
-        for value in _checkpointed(record.values, checkpoint):
+    record_count = max(len(evaluations), 1)
+    for record_index, record in enumerate(_checkpointed(evaluations, checkpoint)):
+
+        def report_record(fraction: float, index: int = record_index) -> None:
+            progress(0.3 * (index + fraction) / record_count)
+
+        for value in _reported(record.values, checkpoint, report_record):
             values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
     opening_weights = (
         None
@@ -741,7 +954,9 @@ def _to_portfolio_observations(
                 else opening_weights.get(item.security_id, 0.0)
             ),
         )
-        for item in _checkpointed(raw.observations, checkpoint)
+        for item in _reported(
+            raw.observations, checkpoint, lambda fraction: progress(0.3 + 0.7 * fraction)
+        )
         if item.as_of in in_range
     )
 

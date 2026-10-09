@@ -25,6 +25,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategySummary,
 )
 from strategy_workbench.domain.strategy.facade.diff import DiffEntry, diff_strategy_specs
+from strategy_workbench.domain.strategy.facade.document import CURRENT_SCHEMA_VERSION
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
@@ -67,6 +68,9 @@ class StrategyDocument:
     origin: RevisionOrigin
     created_at: datetime
     generated: bool
+    # 은퇴한 schema 버전으로 저장된 동결 revision (spec D2). 편집기는 업그레이드 후 새 revision
+    # 으로만 실행할 수 있다고 안내하고, saved-reference 실행은 422로 거부된다.
+    requires_upgrade: bool
 
 
 @dataclass(frozen=True)
@@ -172,7 +176,13 @@ def _view(record: StrategyRevisionRecord) -> StrategyDocument:
             False,
         )
     else:
-        source = canonical_strategy_json(record.spec, indent=2) + "\n"
+        # legacy JSON revision의 generated source는 항상 현재 schema 모양이다. 동결 1.0 row라도 잃을
+        # 주석이 없으므로 identity의 동결 표시만 현재 버전으로 바꿔 1.1 문서를 내보낸다 (spec D2).
+        current = replace(
+            record.spec,
+            identity=replace(record.spec.identity, schema_version=CURRENT_SCHEMA_VERSION),
+        )
+        source = canonical_strategy_json(current, indent=2) + "\n"
         format, source_hash, generated = SourceFormat.JSON, source_hash_of(source), True
     return StrategyDocument(
         strategy_id=record.strategy_id,
@@ -186,4 +196,5 @@ def _view(record: StrategyRevisionRecord) -> StrategyDocument:
         origin=record.provenance.origin,
         created_at=record.provenance.created_at,
         generated=generated,
+        requires_upgrade=record.requires_upgrade,
     )

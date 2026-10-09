@@ -5,11 +5,12 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  compileStrategyDocument,
   createStrategy,
   explainFactorGraph,
   getBacktestResult,
@@ -21,51 +22,33 @@ import {
   type BacktestStartResponse,
   type StrategyTraceRequest,
 } from "../src/shared/api/generated";
-import { createClient } from "../src/shared/api/generated/client";
+import { runtimeDatabasePath } from "./runtime";
+import {
+  apiClient,
+  backtest,
+  currentSource,
+  editor,
+  expectPhase,
+  GOLDEN,
+  mustReplace,
+  openEditor,
+  replaceSource,
+  requireData,
+  save,
+  saveAndWaitForRevision,
+  strategyIdentity,
+  validate,
+} from "./workbench-helpers";
 
-const BACKEND = "http://localhost:8000";
-const apiClient = createClient({ baseUrl: BACKEND });
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
-const GOLDEN = readFileSync(
-  resolve(
-    ownDirectory,
-    "../../backend/tests/fixtures/strategy_documents/quality_momentum.yaml",
-  ),
-  "utf8",
-).replace(/\r\n?/gu, "\n");
 
-const editor = (page: Page) =>
-  page.getByRole("textbox", { name: "편집기", exact: true });
-const save = (page: Page) =>
-  page.getByRole("button", { name: "리비전 저장", exact: true });
-const validate = (page: Page) =>
-  page.getByRole("button", { name: "검증", exact: true });
-const backtest = (page: Page) =>
-  page.getByRole("button", { name: "백테스트", exact: true });
-
-const openEditor = async (page: Page, url: string) => {
-  const response = await page.goto(url);
-  expect(response?.ok()).toBe(true);
-  await expect(editor(page)).toBeVisible();
-};
-
-const replaceSource = async (page: Page, source: string) => {
-  await editor(page).fill(source);
-};
-
-const expectPhase = async (page: Page, phase: string) => {
-  await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
-    phase,
-  );
-};
-
-const requireData = <Value>(
-  data: Value | undefined,
-  operation: string,
-): Value => {
-  if (data === undefined) throw new Error(`${operation} returned no data`);
-  return data;
-};
+/** golden 그래프 끝에 붙이는 노드. 오류 노드 뒤에 비교 대상이 있어야 근접성을 잴 수 있다. */
+const TRAILING_NODE = [
+  "        - kind: field",
+  "          node_id: trailing",
+  "          field_id: price.close",
+  "",
+].join("\n");
 
 const rowFor = (region: Locator, securityId: string): Locator =>
   region.getByRole("row").filter({ hasText: securityId });
@@ -118,35 +101,34 @@ const expectBacktestResultPresentation = async (page: Page) => {
   await page.emulateMedia({ colorScheme: "light" });
 };
 
-const currentSource = async (page: Page) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://localhost:5173",
-  });
-  await editor(page).click();
-  await editor(page).press("Control+A");
-  await editor(page).press("Control+C");
-  return page.evaluate(() => navigator.clipboard.readText());
-};
-
-const strategyIdentity = (page: Page) => {
-  const match = new URL(page.url()).pathname.match(
-    /^\/research\/strategies\/([^/]+)\/revisions\/(\d+)$/u,
+/**
+ * schema 1.0 동결 row 두 개(1.0 YAML 원문 문서, source 없는 legacy JSON)를 backend 테스트 헬퍼로
+ * 격리 SQLite에 직접 심는다. 1.0 인코더는 더 이상 없으므로 API로는 만들 수 없다. revision은 불변이라
+ * serial 그룹 재시도가 같은 DB를 다시 쓰면 지울 수 없으므로 시도마다 고유한 전략 id를 심는다
+ * (`frozen-doc-<suffix>`). DB 경로와 suffix는 공백이 있어도 shell이 쪼개지 않도록 환경 변수로 넘긴다.
+ */
+const seedFrozenRevisionRows = (): { document: string; legacy: string } => {
+  const suffix = `-${Date.now().toString(36)}`;
+  const result = spawnSync(
+    "uv",
+    ["run", "python", "tests/frozen_revision_rows.py"],
+    {
+      cwd: resolve(ownDirectory, "../../backend"),
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      env: {
+        ...process.env,
+        STRATEGY_WORKBENCH_E2E_DB: runtimeDatabasePath(),
+        STRATEGY_WORKBENCH_E2E_SEED_SUFFIX: suffix,
+      },
+    },
   );
-  if (match === null)
-    throw new Error(`Not on a strategy revision: ${page.url()}`);
-  return { strategyId: match[1]!, revision: Number(match[2]) };
-};
-
-const saveAndWaitForRevision = async (page: Page, revision: number) => {
-  await expect(save(page)).toBeEnabled();
-  await save(page).click();
-  await expect(page).toHaveURL(
-    new RegExp(
-      `/research/strategies/[^/]+/revisions/${revision}(?:\\?.*)?$`,
-      "u",
-    ),
-  );
-  await expectPhase(page, "저장됨");
+  if (result.status !== 0) {
+    throw new Error(
+      `frozen revision seeding failed — status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`,
+    );
+  }
+  return { document: `frozen-doc${suffix}`, legacy: `frozen-legacy${suffix}` };
 };
 
 const openConflictingEditor = async (browser: Browser, revisionUrl: string) => {
@@ -188,7 +170,7 @@ test.describe("professional YAML workflow", () => {
     );
   });
 
-  test("creates, recovers, validates, versions, traces and backtests", async ({
+  test("creates, recovers, validates, versions, traces and backtests", { tag: ["@story", "@US-SM-01", "@US-SM-03", "@US-SM-05", "@US-CS-03"] }, async ({
     browser,
     page,
   }) => {
@@ -243,9 +225,15 @@ test.describe("professional YAML workflow", () => {
     await expectPhase(page, "구조 오류");
     await expect(save(page)).toBeDisabled();
     await expect(backtest(page)).toBeDisabled();
-    await expect(page.getByRole("region", { name: "문제" })).toContainText(
-      "/risk/max_name_wieght",
-    );
+    const problems = page.getByRole("region", { name: "문제" });
+    await expect(problems).toContainText("/risk/max_name_wieght");
+    // P1-05: 구조 오류는 한글 문장으로 오고, 오타에는 가까운 키를 제안한다. 문장은 계약 문자열인
+    // 키를 번역하지 않고 백틱으로 인용하며, 같은 제안이 기계가 읽는 자리에도 실린다.
+    await expect(problems).toContainText("모르는 키입니다");
+    await expect(problems).toContainText("혹시 `max_name_weight`인가요?");
+    await expect(problems).toContainText("got='max_name_wieght'");
+    await expect(problems).toContainText("suggestion='max_name_weight'");
+    await expect(problems).not.toContainText("unknown key");
 
     await replaceSource(page, sourceV1);
     await expectPhase(page, "검증 통과");
@@ -339,7 +327,7 @@ test.describe("professional YAML workflow", () => {
 
     const workflow = conflicting.page;
     const securityIds = ["sec-005930-1", "sec-000660-1", "sec-035420-1"];
-    const factor = savedV4.spec.factors.factors[0];
+    const factor = savedV4.spec.factors[0];
     if (factor === undefined) throw new Error("saved v4 has no factor");
     const traceRequest: StrategyTraceRequest = {
       strategy_source: {
@@ -388,7 +376,7 @@ test.describe("professional YAML workflow", () => {
       provenance: {
         kind: "saved_revision",
         spec_hash: savedV4.spec_hash,
-        schema_version: "1.0",
+        schema_version: "1.1",
         strategy_id: strategyId,
         revision: 4,
         source_hash: savedV4.source_hash,
@@ -606,9 +594,7 @@ test.describe("professional YAML workflow", () => {
             parameter_ids: (savedV4.spec.parameters ?? []).map(
               (parameter) => parameter.parameter_id,
             ),
-            factor_ids: savedV4.spec.factors.factors.map(
-              (item) => item.factor_id,
-            ),
+            factor_ids: savedV4.spec.factors.map((item) => item.factor_id),
             subgraph_ids: [],
           },
         })
@@ -849,7 +835,7 @@ test.describe("professional YAML workflow", () => {
     await conflicting.context.close();
   });
 
-  test("cancels a nonterminal run and replays the server-owned request byte-for-byte", async ({
+  test("cancels a nonterminal run and replays the server-owned request byte-for-byte", { tag: ["@story", "@US-SM-05"] }, async ({
     page,
   }) => {
     const acceptedRequest: BacktestRunSpec = {
@@ -949,7 +935,7 @@ test.describe("professional YAML workflow", () => {
     expect(replayed).toBe(true);
   });
 
-  test("migrates a source-less legacy revision without changing meaning", async ({
+  test("migrates a source-less legacy revision without changing meaning", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
     const template = requireData(
@@ -993,5 +979,441 @@ test.describe("professional YAML workflow", () => {
     expect(migrated.origin).toBe("document");
     expect(migrated.source).toBe(whitespaceOnly);
     expect(migrated.spec_hash).toBe(saved.spec_hash);
+  });
+
+  test("edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan", { tag: ["@story", "@US-SM-08"] }, async ({
+    page,
+  }) => {
+    // 같은 GOLDEN에서 출발하는 전략 둘: 하나는 Form으로, 하나는 YAML로 같은 값을 바꾼다.
+    const title = "P4-04 E2E Form";
+    const base = GOLDEN.replace("퀄리티 모멘텀", title);
+    const viaYaml = base.replace(
+      "max_name_weight: 0.05",
+      "max_name_weight: 0.1",
+    );
+
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, base);
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 1);
+    const { strategyId } = strategyIdentity(page);
+
+    await page.getByRole("tab", { name: "Form", exact: true }).click();
+    const form = page.getByRole("region", { name: "Form 편집" });
+    await expect(form).toBeVisible();
+    await expect(form.getByText("편집 가능")).toBeVisible();
+    const risk = form.getByRole("group", { name: /\brisk\b/ });
+    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
+    await expect(weight).toHaveValue("0.05");
+    await weight.fill("0.1");
+    await weight.press("Enter");
+    await expect(
+      form.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("max_name_weight 반영됨");
+
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    // Form 편집은 hidden 편집기에 범위 교체 한 번이므로 GOLDEN의 주석·순서가 그대로다.
+    const edited = await currentSource(page);
+    expect(edited).toBe(viaYaml);
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 2);
+    const formSaved = requireData(
+      (
+        await getStrategyDocument({
+          client: apiClient,
+          path: { strategy_id: strategyId, revision: 2 },
+        })
+      ).data,
+      "form-edited revision",
+    );
+
+    // 같은 값을 YAML로 직접 쓴 문서를 backend가 compile한 hash와 같다(Form 편집 = source 편집).
+    const yamlSaved = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: { source: viaYaml, format: "yaml" },
+        })
+      ).data,
+      "compile yaml-edited source",
+    );
+    expect(formSaved.spec_hash).toBe(yamlSaved.spec_hash);
+    expect(formSaved.source_hash).toBe(yamlSaved.source_hash);
+
+    // 카탈로그에서 팩터 추가 → source에 항목이 생기고 검증을 통과하며 Graph 화면에 새 팩터가 보인다.
+    await page.getByRole("tab", { name: "Form", exact: true }).click();
+    const factors = form.getByRole("group", { name: /\bfactors\b/ });
+    const catalog = factors.getByRole("combobox", {
+      name: "factors · 카탈로그에서 추가",
+    });
+    const options = catalog.locator("option:not([disabled])");
+    await expect.poll(async () => options.count()).toBeGreaterThan(1);
+    const addedId = await options.nth(1).getAttribute("value");
+    await catalog.selectOption({ index: 1 });
+    await expect(
+      form.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    const withFactor = await currentSource(page);
+    expect(withFactor).toContain(
+      `factor_id: ${addedId!.replace("factor:", "")}`,
+    );
+    expect(
+      withFactor.startsWith(viaYaml.slice(0, viaYaml.indexOf("factors:"))),
+    ).toBe(true);
+    await expectPhase(page, "검증 통과");
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    // Graph 화면(실행 plan 기반)의 팩터 선택에 새 팩터가 들어온다.
+    await expect(page.getByRole("tabpanel", { name: "Graph" })).toContainText(
+      addedId!.replace("factor:", ""),
+    );
+  });
+
+  test("adds a node in the Graph editor, rewires an input, refreshes the plan and saves", { tag: ["@story", "@US-SM-08", "@US-CS-01"] }, async ({
+    page,
+  }) => {
+    const title = "P5-03 E2E Graph";
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", title));
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 1);
+    const { strategyId } = strategyIdentity(page);
+
+    const baseSource = await currentSource(page);
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editor = page.getByRole("region", { name: "그래프 편집" });
+    await expect(editor).toBeVisible();
+    await expect(editor.getByText("편집 가능")).toBeVisible();
+
+    // 노드 추가: 연산자 팔레트에서 고르면 kind가 따라온다(WORKFLOW P1-04). 새 field 노드가 문서
+    // 끝에 들어가고 바로 선택된다.
+    await expect(
+      editor.getByRole("combobox", { name: "노드 종류" }),
+    ).toHaveCount(0);
+    await editor
+      .getByRole("button", { name: "데이터 필드 노드 추가", exact: true })
+      .click();
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("field 반영됨");
+
+    // 되돌리기는 툴바 버튼이라 Graph 탭에 머문 채로 동작한다 — 편집기는 이 탭에서 hidden이다(WORKFLOW P1-02).
+    const undoButton = page.getByRole("button", { name: "실행 취소" });
+    const redoButton = page.getByRole("button", { name: "다시 실행" });
+    await expect(undoButton).not.toHaveAttribute("aria-disabled", "true");
+    await undoButton.click();
+    expect(
+      await page
+        .getByRole("tab", { name: "Graph", exact: true })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    await expect(redoButton).not.toHaveAttribute("aria-disabled", "true");
+    // 트랜잭션 한 번 = 되돌리기 한 단계: YAML 원문이 노드 추가 전으로 정확히 돌아온다.
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    expect(await currentSource(page)).toBe(baseSource);
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await redoButton.click();
+    // 되돌리기는 선택까지 되살리지 않는다(선택 pointer는 URL, 문서 이력 밖) — 노드를 다시 고른다.
+    await editor.getByRole("button", { name: "노드 편집: field" }).click();
+
+    const selected = editor.getByRole("group", { name: /선택한 노드/ });
+    const fieldId = selected.getByRole("combobox", { name: /\bfield_id/ });
+    const fieldOptions = fieldId.locator("option:not([disabled])");
+    await expect.poll(async () => fieldOptions.count()).toBeGreaterThan(1);
+    const chosenField = await fieldOptions.nth(1).getAttribute("value");
+    await fieldId.selectOption({ index: 1 });
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("field_id 반영됨");
+
+    // 재연결: mom_252의 입력을 새 노드로.
+    await editor.getByRole("button", { name: "노드 편집: mom_252" }).click();
+    // 계산식은 엔진의 창(`x[t-lag-window+1 … t-lag]`)과 같아야 한다(P1-03 1차 리뷰 P2). 표기법이라
+    // 문구 다듬기에 흔들리지 않으므로 이 한 줄만 고정한다 — 사전이 브라우저에서 렌더된다는
+    // 사실은 이것으로 증명된다. 산문 문장은 `screen-vocabulary.test.ts`가 소유한다.
+    await expect(selected).toContainText("x[t-lag] / x[t-lag-window+1] - 1");
+    await selected
+      .getByRole("combobox", { name: /\binput_node_id/ })
+      .selectOption("field");
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("input_node_id 반영됨");
+
+    // 문서 상태 배지는 탭 밖에 있어 Graph 탭에 머문 채 compile 결과를 본다(WORKFLOW P1-01).
+    await expectPhase(page, "검증 통과");
+    expect(
+      await page
+        .getByRole("tab", { name: "Graph", exact: true })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+
+    // 편집은 source 트랜잭션이라 YAML에 그대로 있다. 원문 읽기는 편집기가 보이는 탭에서 한다.
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    const edited = await currentSource(page);
+    // 줄 단위 단언: `node_id: field`는 `input_node_id: field`의 부분문자열이라 앞 공백까지 본다.
+    expect(edited).toContain("\n          node_id: field\n");
+    expect(edited).toContain(`\n          field_id: ${chosenField}\n`);
+    expect(edited).toContain("\n          input_node_id: field\n");
+    expect(
+      edited.startsWith(
+        GOLDEN.slice(0, GOLDEN.indexOf("factors:")).replace(
+          "퀄리티 모멘텀",
+          title,
+        ),
+      ),
+    ).toBe(true);
+    await saveAndWaitForRevision(page, 2);
+    const saved = requireData(
+      (
+        await getStrategyDocument({
+          client: apiClient,
+          path: { strategy_id: strategyId, revision: 2 },
+        })
+      ).data,
+      "graph-edited revision",
+    );
+    // Graph 편집 = source 편집: 편집기 텍스트를 backend가 compile한 hash와 저장된 revision의 hash가 같다.
+    const compiled = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: { source: edited, format: "yaml" },
+        })
+      ).data,
+      "graph-edited compile",
+    );
+    expect(saved.spec_hash).toBe(compiled.spec_hash);
+    expect(saved.source_hash).toBe(compiled.source_hash);
+
+    // plan 투영(DAG 카드)에 새 노드가 들어온다.
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await expect(
+      page
+        .getByRole("tabpanel", { name: "Graph" })
+        .getByRole("button", { name: "그래프 노드 선택: field" }),
+    ).toBeVisible();
+
+    // Graph → Form 왕복.
+    await editor.getByRole("button", { name: /Form에서 열기/ }).click();
+    await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
+  });
+
+  test("picks the operator first in the palette and the document stays valid (P1-04)", async ({
+    page,
+  }) => {
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", "P1-04 E2E 팔레트"));
+    await expectPhase(page, "검증 통과");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editor = page.getByRole("region", { name: "그래프 편집" });
+    const palette = editor.getByRole("group", { name: "연산자 팔레트" });
+    await expect(palette).toBeVisible();
+    // kind 드롭다운은 없고, 카탈로그가 도착하면 연산자 이름과 계산식이 보인다(P1-03 카탈로그).
+    await expect(editor.getByRole("combobox", { name: "노드 종류" })).toHaveCount(0);
+    await expect(
+      palette.getByRole("button", { name: "기간 평균 노드 추가", exact: true }),
+    ).toBeVisible();
+
+    // `기간 평균`을 고른다: 필수 정수 파라미터(`window`)가 있어 하한이 없으면 `window: 0`인
+    // 노드가 만들어져 곧바로 검증 오류가 났다(P1-04). runtime schema가 하한을 발행하면서
+    // 추가만으로 유효한 노드가 된다.
+    await palette.getByRole("searchbox", { name: "연산자 검색" }).fill("기간 평균");
+    await palette
+      .getByRole("button", { name: "기간 평균 노드 추가", exact: true })
+      .click();
+    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("mean 반영됨");
+
+    // 연산자를 고르면 kind와 파라미터 기본값이 따라오고, 문서는 그대로 검증을 통과한다.
+    await expectPhase(page, "검증 통과");
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    const edited = await currentSource(page);
+    expect(edited).toContain("\n        - kind: time_series\n");
+    expect(edited).toContain("\n          node_id: mean\n");
+    expect(edited).toContain("\n          operator: mean\n");
+    expect(edited).toContain("\n          input_node_id: mom_252\n");
+    // 파라미터 기본값은 runtime schema가 발행한 하한에서 온다(`window >= 1`).
+    expect(edited).toContain("\n          window: 1\n");
+  });
+
+  test("keeps a node card readable when that node carries a diagnostic (P1-04)", async ({
+    page,
+  }) => {
+    // 노드 카드 진단 본문의 **레이아웃 계약** 둘을 고정한다.
+    //  1. 본문이 이름·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다(2차 리뷰 차단).
+    //  2. 본문이 남의 카드보다 자기 카드에 더 가깝다(3차 리뷰 차단). 진단 문장에 node_id가 없어
+    //     근접성이 곧 소유권이다.
+    // 계약은 아래 boundingBox 단언이 잠근다. 기준선 한 장은 보조 증거라 폭·테마 한 벌로 충분하고,
+    // 그래서 시각 프로젝트(4종)가 아니라 workflow 프로젝트에 둔다. 결함 자체는 테마와 무관하고
+    // 폭이 좁을수록 심한데 1440은 구성된 둘 중 좁은 쪽이다.
+    await openEditor(page, "/research/strategies/new");
+    // 오류를 **마지막이 아닌** 노드에 준다: 뒤에 노드가 없으면 근접성이 뒤집혀도 드러나지 않는다.
+    // golden의 마지막 노드(`mom_252`)를 깨고 그 뒤에 노드를 하나 더 둔다.
+    const withTrailingNode = mustReplace(
+      mustReplace(
+        mustReplace(GOLDEN, "퀄리티 모멘텀", "P1-04 노드 진단 레이아웃"),
+        "window: 252",
+        "window: 0",
+      ),
+      "      output_node_id: mom_252",
+      TRAILING_NODE + "      output_node_id: mom_252",
+    );
+    await replaceSource(page, withTrailingNode);
+    await expectPhase(page, "검증 오류");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editorRegion = page.getByRole("region", { name: "그래프 편집" });
+    await expect(editorRegion).toBeVisible();
+    // 원인 문장이 그 노드 카드 안에 본문으로 있다.
+    const nodes = editorRegion.locator(".factor-graph__editor-nodes");
+    await expect(nodes).toContainText("window는 1 이상이고 lag는 0 이상이어야 합니다");
+
+    // 본문은 버튼들과 같은 줄이 아니라 카드 아래 줄 전체 폭을 쓴다. 레이아웃 계약이라 픽셀로
+    // 고정한다 — jsdom에는 레이아웃이 없어 단위 테스트로는 잡히지 않는다.
+    const body = nodes.locator(".strategy-form__diagnostics").first();
+    const removeButton = nodes
+      .getByRole("button", { name: "mom_252 · 삭제" })
+      .first();
+    const bodyBox = await body.boundingBox();
+    const buttonBox = await removeButton.boundingBox();
+    expect(bodyBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    if (bodyBox === null || buttonBox === null) return;
+    // 같은 줄이 아니다: 본문 위쪽이 버튼 아래쪽보다 아래에 있다.
+    expect(bodyBox.y).toBeGreaterThanOrEqual(buttonBox.y + buttonBox.height);
+    // 카드 폭을 거의 다 쓴다(버튼 옆 좁은 칸에 끼지 않았다).
+    const listBox = await nodes.boundingBox();
+    expect(listBox).not.toBeNull();
+    if (listBox === null) return;
+    expect(bodyBox.width).toBeGreaterThan(listBox.width * 0.8);
+
+    // 근접성이 소유권이다: 본문은 자기 행보다 **아래 노드 행**에서 더 멀어야 한다.
+    const nextRow = nodes.getByRole("button", { name: "노드 편집: trailing" });
+    const nextBox = await nextRow.boundingBox();
+    expect(nextBox).not.toBeNull();
+    if (nextBox === null) return;
+    const toOwnRow = bodyBox.y - (buttonBox.y + buttonBox.height);
+    const toNextRow = nextBox.y - (bodyBox.y + bodyBox.height);
+    expect(toOwnRow).toBeLessThanOrEqual(toNextRow);
+
+    await page.mouse.move(0, 0);
+    // 문장 자체는 backend 소유라 픽셀로 고정하지 않는다(`mask`). 이 기준선이 지키는 것은 카드
+    // 레이아웃이고, 문구가 다듬어져도 기준선을 다시 찍을 일이 없다.
+    await expect(nodes).toHaveScreenshot("graph-node-diagnostic.png", {
+      mask: [nodes.locator(".strategy-form__diagnostics")],
+    });
+  });
+
+  test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
+    page,
+  }) => {
+    const frozen = seedFrozenRevisionRows();
+    const nextRevision = 2;
+    const banner = page.getByRole("region", { name: "schema 1.0 문서" });
+    const upgrade = banner.getByRole("button", { name: "1.1로 업그레이드" });
+
+    await openEditor(
+      page,
+      `/research/strategies/${frozen.document}/revisions/1`,
+    );
+    await expectPhase(page, "구조 오류");
+    await expect(banner).toContainText("이 문서는 schema 1.0입니다");
+    await expect(backtest(page)).toBeDisabled();
+    await expect(upgrade).toBeEnabled();
+
+    const upgraded = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          "/api/v1/strategy-documents/upgrade",
+    );
+    await upgrade.click();
+    expect((await upgraded).status()).toBe(200);
+    await expect(banner).toContainText("1.1로 다시 썼습니다");
+    const source = await currentSource(page);
+    expect(source).toContain('schema_version: "1.1"');
+    expect(source).not.toContain("  factors:\n");
+    await expectPhase(page, "검증 통과");
+
+    await saveAndWaitForRevision(page, nextRevision);
+    await expect(banner).toHaveCount(0);
+    const savedV2 = requireData(
+      (
+        await getStrategyDocument({
+          client: apiClient,
+          path: { strategy_id: frozen.document, revision: nextRevision },
+        })
+      ).data,
+      "get upgraded frozen-doc revision",
+    );
+    expect(savedV2.schema_version).toBe("1.1");
+    expect(savedV2.requires_upgrade).toBe(false);
+    // 업그레이드는 의미를 바꾸지 않는다: 1.1 golden fixture와 같은 spec hash.
+    const golden = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: { source: GOLDEN, format: "yaml" },
+        })
+      ).data,
+      "compile 1.1 golden fixture",
+    );
+    expect(savedV2.spec_hash).toBe(golden.spec_hash);
+
+    await expect(backtest(page)).toBeEnabled();
+    const submittedRun = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/backtests",
+    );
+    await backtest(page).click();
+    expect((await submittedRun).postDataJSON()).toMatchObject({
+      strategy_source: {
+        kind: "saved_revision",
+        strategy_id: frozen.document,
+        revision: nextRevision,
+        expected_spec_hash: savedV2.spec_hash,
+      },
+    });
+    await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
+    await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
+      "completed",
+      { timeout: 120_000 },
+    );
+
+    // legacy JSON 동결 row: generated source가 이미 1.1이므로 업그레이드 대신 새 revision 저장만 제안한다.
+    await openEditor(page, `/research/strategies/${frozen.legacy}/revisions/1`);
+    await expect(banner).toContainText("schema 1.0 동결 revision입니다");
+    await expect(upgrade).toHaveCount(0);
+    await expectPhase(page, "검증 통과");
+
+    await page.goto("/research/strategies");
+    await expect(
+      page.getByRole("heading", { name: "전략 이력" }),
+    ).toBeVisible();
+    const legacyRow = page
+      .getByRole("row")
+      .filter({ hasText: frozen.legacy })
+      .first();
+    await expect(legacyRow).toContainText("1.0 동결");
+    const docRow = page
+      .getByRole("row")
+      .filter({ hasText: frozen.document })
+      .first();
+    await expect(docRow).toContainText(`v${nextRevision}`);
+    await expect(docRow).not.toContainText("1.0 동결");
+    await docRow.getByRole("button", { name: /Revision 펼치기/u }).click();
+    const revisions = page.getByRole("region", {
+      name: new RegExp(`저장 revision 목록: .*${frozen.document}`, "u"),
+    });
+    await expect(
+      revisions.getByRole("row").filter({ hasText: "v1" }),
+    ).toContainText("1.0 동결");
+    await expect(
+      revisions.getByRole("row").filter({ hasText: `v${nextRevision}` }),
+    ).not.toContainText("1.0 동결");
   });
 });

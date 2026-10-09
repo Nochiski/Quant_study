@@ -14,6 +14,7 @@ import {
   getStrategyDocument,
   getStrategyDocumentContract,
   getStrategyDocumentSchema,
+  getStrategyOperatorCatalog,
   getBacktestStatus,
   listBacktests,
   listStrategies,
@@ -22,8 +23,10 @@ import {
   saveStrategyDraft,
   startBacktest,
   traceStrategy as postStrategyTrace,
+  upgradeStrategyDocument,
 } from "./generated/sdk.gen";
 import type {
+  ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
@@ -42,13 +45,14 @@ import type {
   FactorValidationIssue,
   FieldContract,
   GetEquityCatalogData,
-  InlineDraft,
   GetFactorCatalogData,
-  NodeContract,
+  InlineDraft,
   MetricDefinition,
   MetricValue,
-  PageRevisionSummary,
+  NodeContract,
+  OperatorDefinition,
   PageBacktestRunSummary,
+  PageRevisionSummary,
   PageStrategySummary,
   ResearchCatalog,
   ReviseDocumentRequest,
@@ -60,14 +64,17 @@ import type {
   SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
+  StrategyDocumentInvalidDetail,
   StrategyDocumentSchema,
   StrategyDraft,
   StrategyDraftConflictDetail,
+  StrategyOperatorCatalog,
   StrategyRevisionConflictDetail,
   StrategySpec,
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  UpgradedDocument,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -130,6 +137,22 @@ const errorField = (
 
 const errorCode = (error: unknown): string | undefined =>
   errorField(error, "code");
+
+/**
+ * 저장·revise·upgrade의 `strategy_document.invalid` detail에는 `message`가 없다 — 첫 error 진단(pointer + 문구)을
+ * detail 문구로 쓴다(Phase 5 감사 backlog 16: 저장 실패 사유가 화면에 비어 있었다).
+ */
+export const invalidDocumentSummary = (error: unknown): string | undefined => {
+  if (errorCode(error) !== "strategy_document.invalid") return undefined;
+  const detail = (error as { detail: Partial<StrategyDocumentInvalidDetail> }).detail;
+  const diagnostics = Array.isArray(detail.diagnostics) ? detail.diagnostics : [];
+  const first =
+    diagnostics.find((item) => item.severity === "error") ?? diagnostics[0];
+  if (first === undefined) return undefined;
+  const pointer = first.pointer === "" ? "/" : first.pointer;
+  const rest = diagnostics.length - 1;
+  return `${pointer}: ${first.message}${rest > 0 ? ` (+${rest})` : ""}`;
+};
 
 /** Runtime check at the HTTP boundary for the generated structured 409 detail. */
 const revisionConflictDetail = (
@@ -233,7 +256,7 @@ const requestError = (
     context,
     responseStatus,
     errorCode(response.error),
-    errorField(response.error, "message"),
+    errorField(response.error, "message") ?? invalidDocumentSummary(response.error),
     conflict?.latest_revision ?? null,
     draftConflict?.current ?? null,
   );
@@ -421,9 +444,24 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "compileStrategyDocument");
   },
 
+  /** 1.0 텍스트를 1.1로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
+  async upgradeStrategyDocument(
+    request: CompileRequest,
+    signal?: AbortSignal,
+  ): Promise<UpgradedDocument> {
+    const response = await upgradeStrategyDocument({ body: request, signal });
+    return unwrap(response, "upgradeStrategyDocument");
+  },
+
   async getStrategyDocumentSchema(): Promise<StrategyDocumentSchema> {
     const response = await getStrategyDocumentSchema();
     return unwrap(response, "getStrategyDocumentSchema");
+  },
+
+  /** 그래프 노드 연산자 정의 전부(P1-03, spec D8). 팔레트·라벨이 읽는 유일한 연산자 목록이다. */
+  async getStrategyOperatorCatalog(): Promise<StrategyOperatorCatalog> {
+    const response = await getStrategyOperatorCatalog();
+    return unwrap(response, "getStrategyOperatorCatalog");
   },
 
   async getStrategyDocumentContract(): Promise<StrategyDocumentContractResponse> {
@@ -478,6 +516,7 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
@@ -499,6 +538,7 @@ export type {
   NodeContract,
   MetricDefinition,
   MetricValue,
+  OperatorDefinition,
   PageRevisionSummary,
   PageBacktestRunSummary,
   PageStrategySummary,
@@ -514,8 +554,10 @@ export type {
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
   StrategyDraft,
+  StrategyOperatorCatalog,
   StrategySpec,
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  UpgradedDocument,
 };

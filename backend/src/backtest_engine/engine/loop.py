@@ -18,7 +18,7 @@ import importlib
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -30,7 +30,6 @@ from backtest_engine.capability import (
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
 from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote, participation_of
-from backtest_engine.engine.compact import CompactFill, CompactOrder, CompactOrderUpdate
 from backtest_engine.engine.context import (
     EngineStrategyContext,
     HistoryStore,
@@ -41,8 +40,6 @@ from backtest_engine.engine.core import (
     PERSISTENT_RUST_CORES,
     RUST_CORES,
     BuyingPowerTracker,
-    PersistentOrderManager,
-    PersistentPortfolio,
     PortfolioLedger,
     RustBuyingPower,
     instrument_key,
@@ -51,20 +48,18 @@ from backtest_engine.engine.core import (
     make_portfolio,
     make_pricing,
     make_quote_core,
+    route_error_exception,
     slippage_config,
 )
 from backtest_engine.engine.costs import session_costs
 from backtest_engine.engine.metrics import compute_metrics, compute_metrics_from_values
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.queue import (
-    CompactFillOccurred,
-    CompactOrderPlaced,
     EventPriority,
     EventQueue,
     FillOccurred,
     MarketArrived,
     OrderPlaced,
-    PersistentEventQueue,
     SessionClose,
     StrategyNotify,
 )
@@ -76,12 +71,20 @@ from backtest_engine.engine.store import (
     PersistentEventStore,
     RecordKind,
 )
-from backtest_engine.engine.wire import submit_basic_decision, supports_basic_decision
+from backtest_engine.engine.wire import (
+    decision_to_wire,
+    execution_wire,
+    route_error_from,
+    supports_basic_decision,
+    target_wire,
+)
 from backtest_engine.errors import (
     CoreUnavailable,
     CorporateActionsNotProvided,
     CorporateActionWithoutBar,
     EquityWipedOut,
+    NegativeCashError,
+    NegativePositionError,
     RustCorePanic,
     UndeclaredFeatureUsed,
 )
@@ -96,17 +99,29 @@ from backtest_engine.types.events import (
     OrderUpdateEvent,
     StrategyEvent,
 )
+from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
 from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import (
     EngineFeature,
     EventKind,
+    EverySession,
     HistoryRequest,
+    MonthEndSession,
     StrategyRequirements,
 )
 from backtest_engine.types.results import BacktestResult, RunConfig
 from backtest_engine.types.strategy import Strategy
+from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
+
+
+def _instrument_text(instrument: InstrumentId) -> str:
+    """오류 메시지용 InstrumentId 표기. 어느 필드가 부딪혔는지 보이도록 네 필드를 다 적는다."""
+    return (
+        f"(venue={instrument.venue!r}, symbol={instrument.symbol!r}, "
+        f"asset_class={instrument.asset_class.value!r}, currency={instrument.currency!r})"
+    )
 
 
 class _Run:
@@ -132,8 +147,9 @@ class _Run:
         allow_short = EngineFeature.SHORT_SELLING in requirements.features
         allow_margin = EngineFeature.MARGIN in requirements.features
         self.persistent_runtime: Any | None = None
-        self.persistent_session_indices: dict[datetime, int] = {}
         if core in PERSISTENT_RUST_CORES:
+            # Rust runtime이 포트폴리오·주문·큐·레코드·자본변동 일정을 모두 소유한다.
+            # Python 쪽 짝은 만들지 않는다 — 두 곳에서 같은 상태를 갱신하면 안 된다.
             persistent_runtime = make_persistent_runtime(
                 config.initial_cash,
                 allow_short=allow_short,
@@ -146,25 +162,25 @@ class _Run:
             )
             self.persistent_runtime = persistent_runtime
             self.history_store = PersistentHistoryStore(persistent_runtime)
-            self.portfolio = PersistentPortfolio(persistent_runtime)
-            self.order_manager = PersistentOrderManager(persistent_runtime)
+            self.portfolio: PortfolioLedger | None = None
+            self.order_manager: OrderManager | None = None
+            self.queue: EventQueue | None = None
+            self.corporate_actions: dict[datetime, list[CorporateActionEvent]] | None = None
         else:
-            self.portfolio: PortfolioLedger = make_portfolio(
+            self.portfolio = make_portfolio(
                 core,
                 config.initial_cash,
                 allow_short=allow_short,
                 allow_margin=allow_margin,
             )
             self.order_manager = OrderManager()
+            self.queue = EventQueue()
+            self.corporate_actions = defaultdict(list)
         self.core = core
         self.slippage_model = slippage if slippage is not None else NoSlippage()
         self.max_participation = max_participation
         # Rust 코어는 내장 슬리피지만 지원한다 — 첫 세션이 아니라 run 시작에 거절한다.
-        self.rust_slippage = (
-            slippage_config(self.slippage_model)
-            if core in RUST_CORES
-            else None
-        )
+        self.rust_slippage = slippage_config(self.slippage_model) if core in RUST_CORES else None
         self.broker = BrokerSim(
             config.fee_bps,
             slippage,
@@ -174,22 +190,14 @@ class _Run:
         )
         self.router = (
             None
-            if core in PERSISTENT_RUST_CORES
-            else DecisionRouter(
-                requirements.actions, self.order_manager, requirements.features
-            )
+            if self.order_manager is None
+            else DecisionRouter(requirements.actions, self.order_manager, requirements.features)
         )
-        self.store = (
+        self.store: EventStore = (
             PersistentEventStore(self.persistent_runtime)
             if self.persistent_runtime is not None
             else EventStore()
         )
-        self.queue = (
-            PersistentEventQueue(self.persistent_runtime)
-            if self.persistent_runtime is not None
-            else EventQueue()
-        )
-        self.corporate_actions: dict[datetime, list[CorporateActionEvent]] = defaultdict(list)
         self.universe: UniverseResult | None = None
 
     def wants(self, kind: EventKind) -> bool:
@@ -308,8 +316,6 @@ class BacktestEngine:
         universe: UniverseResult | None,
     ) -> BacktestResult:
         run.universe = universe
-        if run.persistent_runtime is not None:
-            self._load_persistent_feed(run, feed)
         if self._config.max_gross_leverage > 1.0 and not run.wants_feature(EngineFeature.MARGIN):
             raise UndeclaredFeatureUsed(
                 f"max_gross_leverage={self._config.max_gross_leverage} requires MARGIN feature "
@@ -324,126 +330,64 @@ class BacktestEngine:
                     f"(possibly an empty tuple) explicitly"
                 )
             corporate_actions = ()
+        if run.persistent_runtime is not None:
+            return self._execute_persistent(run, feed, tuple(corporate_actions))
+
+        queue = self._queue(run)
+        order_manager = self._orders(run)
+        pending_actions = self._pending_actions(run)
         # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
         # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
         for action in corporate_actions:
-            if run.persistent_runtime is None:
-                settle_ts = self._settlement_session(feed, action)
-            else:
-                session_index = run.persistent_runtime.settlement_session_index(
-                    instrument_key(action.instrument), str(action.ts)
-                )
-                if session_index is None:
-                    raise CorporateActionWithoutBar(
-                        f"no traded session for instrument at or after corporate action — "
-                        f"instrument={action.instrument.symbol} ts={action.ts} "
-                        f"action={action.action_type.value} ratio={action.ratio} "
-                        f"feed_sessions={len(feed)} "
-                        f"last_session={feed.sessions[-1] if len(feed) else None}"
-                    )
-                settle_ts = feed.sessions[session_index]
-            run.corporate_actions[settle_ts].append(action)
+            settle_ts = self._settlement_session(feed, action)
+            pending_actions[settle_ts].append(action)
 
         for snapshot in feed.snapshots():
-            run.queue.push(snapshot.ts, EventPriority.MARKET, MarketArrived(snapshot))
+            queue.push(snapshot.ts, EventPriority.MARKET, MarketArrived(snapshot))
 
-        while run.queue:
-            event = run.queue.pop()
+        while queue:
+            event = queue.pop()
             match event:
                 case MarketArrived(snapshot=snapshot):
                     self._on_market(run, snapshot)
                 case FillOccurred(fill=fill, snapshot=snapshot):
-                    if run.persistent_runtime is None:
-                        run.portfolio.apply(fill)
-                    run.store.append(fill.ts, RecordKind.FILL, fill)
-                case CompactFillOccurred(fill=fill, snapshot=_snapshot):
-                    if not isinstance(run.store, PersistentEventStore):
-                        raise RuntimeError("compact fill reached a non-persistent event store")
+                    self._ledger(run).apply(fill)
                     run.store.append(fill.ts, RecordKind.FILL, fill)
                 case StrategyNotify(event=strategy_event, snapshot=snapshot):
                     self._dispatch(run, strategy_event, snapshot)
                 case SessionClose(snapshot=snapshot):
                     self._on_session_close(run, snapshot)
                 case OrderPlaced(order=order):
-                    run.order_manager.place(order)
-                    run.store.append(order.ts, RecordKind.ORDER, order)
-                case CompactOrderPlaced(order=order):
-                    if not isinstance(run.order_manager, PersistentOrderManager) or not isinstance(
-                        run.store, PersistentEventStore
-                    ):
-                        raise RuntimeError("compact order reached a non-persistent runtime")
-                    run.order_manager.place_compact(order)
+                    order_manager.place(order)
                     run.store.append(order.ts, RecordKind.ORDER, order)
 
         # 남은 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다. 마지막 세션에 낸
         # DAY/IOC/FOK는 "당일 만료", GTC만 "run 종료"가 사유다.
-        if isinstance(run.order_manager, PersistentOrderManager):
-            if not isinstance(run.store, PersistentEventStore):
-                raise RuntimeError("persistent order manager requires its compact event store")
-            remaining_compact = run.order_manager.drain_compact()
-            if remaining_compact:
-                last_ts = feed.sessions[-1]  # 주문이 있다면 세션도 최소 하나 있다
-            for order, remaining, _triggered in remaining_compact:
-                tif = order.time_in_force
-                reason = (
-                    "run ended with GTC order still open — "
-                    if tif is TimeInForce.GTC
-                    else f"{tif.value} order expired at last session — "
-                )
-                run.store.append(
-                    last_ts,
-                    RecordKind.ORDER_UPDATE,
-                    CompactOrderUpdate(
-                        ts=last_ts,
-                        order_id=order.order_id,
-                        status=OrderStatus.CANCELLED,
-                        detail=(
-                            f"{reason}instrument={order.instrument.symbol} "
-                            f"remaining={remaining}"
-                        ),
+        remaining_entries = order_manager.drain()
+        if remaining_entries:
+            last_ts = feed.sessions[-1]
+        for entry in remaining_entries:
+            tif = entry.order.time_in_force
+            reason = (
+                "run ended with GTC order still open — "
+                if tif is TimeInForce.GTC
+                else f"{tif.value} order expired at last session — "
+            )
+            run.store.append(
+                last_ts,
+                RecordKind.ORDER_UPDATE,
+                OrderUpdateEvent(
+                    ts=last_ts,
+                    order_id=entry.order_id,
+                    status=OrderStatus.CANCELLED,
+                    detail=(
+                        f"{reason}instrument={entry.order.instrument.symbol} "
+                        f"remaining={entry.remaining}"
                     ),
-                )
-        else:
-            remaining_entries = run.order_manager.drain()
-            if remaining_entries:
-                last_ts = feed.sessions[-1]
-            for entry in remaining_entries:
-                tif = entry.order.time_in_force
-                reason = (
-                    "run ended with GTC order still open — "
-                    if tif is TimeInForce.GTC
-                    else f"{tif.value} order expired at last session — "
-                )
-                run.store.append(
-                    last_ts,
-                    RecordKind.ORDER_UPDATE,
-                    OrderUpdateEvent(
-                        ts=last_ts,
-                        order_id=entry.order_id,
-                        status=OrderStatus.CANCELLED,
-                        detail=(
-                            f"{reason}instrument={entry.order.instrument.symbol} "
-                            f"remaining={entry.remaining}"
-                        ),
-                    ),
-                )
-
-        if isinstance(run.store, PersistentEventStore):
-            run.store.finish()
-
-        snapshots = run.store.snapshots()
-        if isinstance(run.store, PersistentEventStore):
-            return BacktestResult.lazy(
-                run_id=self._config.run_id,
-                snapshots=snapshots,
-                orders=run.store.orders,
-                fills=run.store.fills,
-                metrics=compute_metrics_from_values(
-                    tuple(snapshot.equity for snapshot in snapshots),
-                    run.store.traded_notional(),
-                    self._config.annualization_days,
                 ),
             )
+
+        snapshots = run.store.snapshots()
         return BacktestResult(
             run_id=self._config.run_id,
             snapshots=snapshots,
@@ -452,98 +396,289 @@ class BacktestEngine:
             metrics=compute_metrics(snapshots, run.store.fills(), self._config.annualization_days),
         )
 
+    @staticmethod
+    def _ledger(run: _Run) -> PortfolioLedger:
+        if run.portfolio is None:
+            raise CoreUnavailable("python session loop requires a Python-side portfolio ledger")
+        return run.portfolio
+
+    @staticmethod
+    def _orders(run: _Run) -> OrderManager:
+        if run.order_manager is None:
+            raise CoreUnavailable("python session loop requires a Python-side order manager")
+        return run.order_manager
+
+    @staticmethod
+    def _queue(run: _Run) -> EventQueue:
+        if run.queue is None:
+            raise CoreUnavailable("python session loop requires a Python-side event queue")
+        return run.queue
+
+    @staticmethod
+    def _pending_actions(run: _Run) -> dict[datetime, list[CorporateActionEvent]]:
+        if run.corporate_actions is None:
+            raise CoreUnavailable(
+                "python session loop requires a Python-side corporate action calendar"
+            )
+        return run.corporate_actions
+
+    # --- persistent Rust 경로 ---------------------------------------------------
+
+    def _execute_persistent(
+        self,
+        run: _Run,
+        feed: DataFeed,
+        corporate_actions: tuple[CorporateActionEvent, ...],
+    ) -> BacktestResult:
+        """Rust runtime이 세션 루프를 돌리고 Python은 전략 콜백에서만 개입한다.
+
+        `drive()`는 다음 전략 콜백까지 MARKET/FILL/NOTIFY/SESSION_CLOSE/ORDER를 내부에서
+        처리하고 프레임을 돌려준다. 프레임이 없으면 큐가 비었다는 뜻이다.
+        """
+        runtime = run.persistent_runtime
+        store = run.store
+        if runtime is None or not isinstance(store, PersistentEventStore):
+            raise CoreUnavailable("persistent Rust path requires its runtime and event store")
+        # 확장 심볼은 드레인 전에 한 번만 해석한다 — except 절에서 해석하면 조회가 실패할 때
+        # 원래 예외가 CoreUnavailable에 가려진다.
+        route_error_type = route_error_exception()
+        instruments = self._load_persistent_feed(run, feed)
+        store.bind_feed(feed, instruments)
+        self._configure_persistent_run(run)
+
+        # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
+        # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
+        rows: list[tuple[int, str, str, str, str, str, bool]] = []
+        for action in corporate_actions:
+            session_index = runtime.settlement_session_index(
+                instrument_key(action.instrument), str(action.ts)
+            )
+            if session_index is None:
+                raise CorporateActionWithoutBar(
+                    f"no traded session for instrument at or after corporate action — "
+                    f"instrument={action.instrument.symbol} ts={action.ts} "
+                    f"action={action.action_type.value} ratio={action.ratio} "
+                    f"feed_sessions={len(feed)} "
+                    f"last_session={feed.sessions[-1] if len(feed) else None}"
+                )
+            rows.append(
+                (
+                    session_index,
+                    instrument_key(action.instrument),
+                    action.instrument.symbol,
+                    action.action_type.value,
+                    str(action.ratio),
+                    str(action.ts),
+                    action.action_type
+                    in (CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT),
+                )
+            )
+        store.bind_corporate_actions(corporate_actions)
+        runtime.load_corporate_actions(rows)
+        if isinstance(run.strategy, DeclarativeTapeStrategy):
+            # 결정 표를 Rust에 넘기면 drive()가 콜백 없이 완주한다 — 아래 루프는 프레임을
+            # 받지 않는다.
+            self._load_target_tape(run, feed, store)
+
+        while (frame := self._drive(runtime, route_error_type)) is not None:
+            event = store.frame_event(frame)
+            context = RustStrategyContext(
+                now=store.session_ts(frame.session_index),
+                frame=frame,
+                store=store,
+                history_store=run.history_store,
+                declared=run.declared,
+                universe_source=run.universe,
+            )
+            try:
+                decision = run.strategy.on_event(context, event)
+            except BaseException as error:
+                runtime.fail_callback(frame.token, f"{type(error).__name__}: {error}")
+                raise
+            if not supports_basic_decision(decision):
+                runtime.fail_callback(
+                    frame.token,
+                    f"unsupported strategy decision — type={type(decision).__name__}",
+                )
+                raise RuntimeError(
+                    "persistent Rust router does not support a returned strategy action"
+                )
+            store.stage_decision(decision)
+            decision_id, error_wire = runtime.submit_decision(
+                frame.token, decision_to_wire(decision)
+            )
+            store.record_callback(event, decision_id, decision)
+            store.register_decision(decision_id, decision)
+            if error_wire is not None:
+                raise route_error_from(error_wire)
+
+        store.finish()
+        return BacktestResult.lazy(
+            run_id=self._config.run_id,
+            snapshots=store.snapshots,
+            orders=store.orders,
+            fills=store.fills,
+            metrics=compute_metrics_from_values(
+                store.equity_values(),
+                store.traded_notional(),
+                self._config.annualization_days,
+            ),
+        )
+
+    @staticmethod
+    def _load_target_tape(run: _Run, feed: DataFeed, store: PersistentEventStore) -> None:
+        runtime = run.persistent_runtime
+        strategy = run.strategy
+        if runtime is None or not isinstance(strategy, DeclarativeTapeStrategy):
+            raise CoreUnavailable(
+                "declarative tape requires the persistent runtime and an explicit "
+                f"DeclarativeTapeStrategy subclass — strategy={type(strategy).__name__} "
+                f"runtime={'missing' if runtime is None else 'present'}"
+            )
+        # Python 경로는 `frames.get(event.ts.date())`이므로 같은 날짜의 세션(일중 다중 세션)이
+        # 여럿이면 모두 같은 프레임을 받는다. 날짜당 index 목록으로 매핑해 Rust에도 같게 배정한다.
+        sessions_by_date: dict[date, list[int]] = {}
+        for index, ts in enumerate(feed.sessions):
+            sessions_by_date.setdefault(ts.date(), []).append(index)
+        frames_by_session: dict[int, TapeFrame] = {}
+        rows = []
+        for frame_date, frame in strategy.tape_frames().items():
+            # 세션이 아닌 날짜의 프레임은 Python 경로에서도 dict 조회에 실패해 무시된다.
+            for session_index in sessions_by_date.get(frame_date, ()):
+                frames_by_session[session_index] = frame
+                rows.append(
+                    (
+                        session_index,
+                        [target_wire(target) for target in frame.action.targets],
+                        frame.action.scope.value,
+                        execution_wire(frame.action),
+                        frame.reason,
+                    )
+                )
+        store.bind_tape(frames_by_session)
+        runtime.load_target_tape(rows, strategy.idle_reason)
+
+    @staticmethod
+    def _drive(
+        runtime: Any,  # reason: pyo3 확장 모듈(backtest_core) stub 부재
+        route_error_type: type[BaseException],
+    ) -> Any | None:
+        """Rust 드라이버를 한 번 전진시키고, 도메인 오류를 엔진 예외로 바꾼다.
+
+        Args:
+            runtime: persistent Rust runtime.
+            route_error_type: 라우팅 오류 예외 타입. 호출 전에 해석해 넘긴다.
+        """
+        try:
+            return runtime.drive()
+        except route_error_type as error:
+            code, detail = error.args
+            raise route_error_from((code, detail)) from error
+        except ValueError as error:
+            message = str(error)
+            if message.startswith("equity_wiped_out: "):
+                raise EquityWipedOut(message.removeprefix("equity_wiped_out: ")) from error
+            if message.startswith("negative_position: "):
+                raise NegativePositionError(message.removeprefix("negative_position: ")) from error
+            if message.startswith("negative_cash: "):
+                raise NegativeCashError(message.removeprefix("negative_cash: ")) from error
+            raise
+
+    def _configure_persistent_run(self, run: _Run) -> None:
+        runtime = run.persistent_runtime
+        if runtime is None:
+            raise CoreUnavailable("persistent Rust path requires its runtime")
+        schedule = run.requirements.schedule
+        if isinstance(schedule, EverySession):
+            schedule_wire = "every_session"
+        elif isinstance(schedule, MonthEndSession):
+            schedule_wire = "month_end"
+        else:
+            raise TypeError(f"unsupported persistent schedule — got {type(schedule).__name__}")
+        runtime.configure_run(
+            run.broker.fee_rate,
+            None if run.max_participation is None else str(run.max_participation),
+            run.rust_slippage,
+            schedule_wire,
+            self._config.short_borrow_bps_annual,
+            self._config.margin_interest_bps_annual,
+            self._config.annualization_days,
+            run.warmup_sessions,
+            run.wants(EventKind.FILL),
+            run.wants(EventKind.ORDER_UPDATE),
+            run.wants(EventKind.CORPORATE_ACTION),
+        )
+
     # --- 세션 처리 -----------------------------------------------------------
 
     @staticmethod
-    def _load_persistent_feed(run: _Run, feed: DataFeed) -> None:
+    def _load_persistent_feed(run: _Run, feed: DataFeed) -> tuple[InstrumentId, ...]:
+        """전체 feed를 columnar batch로 한 번 전송한다.
+
+        instrument id 순서의 registry를 돌려준다 — 호출부가 EventStore에 같은 순서로 묶어
+        결과 테이블의 종목 조회표로 쓴다.
+        """
         runtime = run.persistent_runtime
-        portfolio = run.portfolio
-        if runtime is None or not isinstance(portfolio, PersistentPortfolio):
-            raise CoreUnavailable("persistent Rust feed requires its runtime and portfolio")
-        registry: dict[object, int] = {}
-        instruments = []
-        keys: list[str] = []
-        symbols: list[str] = []
-        sessions: list[str] = []
-        offsets = [0]
-        instrument_ids: list[int] = []
-        opens: list[float] = []
-        highs: list[float] = []
-        lows: list[float] = []
-        closes: list[float] = []
-        volumes: list[int] = []
-        for session_index, snapshot in enumerate(feed.snapshots()):
-            run.persistent_session_indices[snapshot.ts] = session_index
-            sessions.append(str(snapshot.ts))
-            for bar in snapshot.bars:
-                instrument_id = registry.get(bar.instrument)
-                if instrument_id is None:
-                    instrument_id = len(instruments)
-                    registry[bar.instrument] = instrument_id
-                    instruments.append(bar.instrument)
-                    keys.append(instrument_key(bar.instrument))
-                    symbols.append(bar.instrument.symbol)
-                instrument_ids.append(instrument_id)
-                opens.append(bar.open)
-                highs.append(bar.high)
-                lows.append(bar.low)
-                closes.append(bar.close)
-                volumes.append(bar.volume)
-            offsets.append(len(instrument_ids))
+        if runtime is None:
+            raise CoreUnavailable("persistent Rust feed requires its runtime")
+        # feed가 열을 그대로 준다 — bar 단위 Python 루프도, 열마다 도는 comprehension도 없다.
+        # 열로 적재한 feed(워크벤치 어댑터 경로)는 여기서 `Bar` 객체를 한 개도 만들지 않는다.
+        columns = feed.columns()
+        instruments = columns.instruments
+        keys = [instrument_key(instrument) for instrument in instruments]
+        # `instrument_key`는 필드를 ':'로 이어 붙이므로 필드 안에 ':'가 있으면 서로 다른
+        # InstrumentId가 같은 key를 낼 수 있다 (예: symbol="A:B"와 venue="KRX:A"). 그러면
+        # 원장·마크·심볼 표가 두 종목을 한 종목으로 합쳐 조용히 섞인다. Rust 적재도 같은
+        # 상황을 거부하지만(등록부 key 하나에 symbol 둘), 여기서 먼저 잡아야 어느 두 종목이
+        # 부딪혔는지 알려줄 수 있다 — 메시지 정본은 이쪽이다.
+        owner_by_key: dict[str, InstrumentId] = {}
+        for instrument, key in zip(instruments, keys, strict=True):
+            previous = owner_by_key.setdefault(key, instrument)
+            if previous is not instrument:
+                raise ValueError(
+                    f"instrument key collision — key={key!r} instruments=["
+                    f"{_instrument_text(previous)}, {_instrument_text(instrument)}] "
+                    f"registry={len(instruments)} (a ':' inside venue/symbol/currency "
+                    f"makes two instruments share one key)"
+                )
+        symbols = [instrument.symbol for instrument in instruments]
+        sessions = [str(ts) for ts in feed.sessions]
         runtime.load_feed(
             keys,
             symbols,
             sessions,
-            offsets,
-            instrument_ids,
-            opens,
-            highs,
-            lows,
-            closes,
-            volumes,
+            columns.offsets,
+            columns.instrument_ids,
+            columns.opens,
+            columns.highs,
+            columns.lows,
+            columns.closes,
+            columns.volumes,
         )
-        portfolio.register_instruments(tuple(instruments))
+        return instruments
 
     def _on_market(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.history_store.append(snapshot)
         run.store.append(snapshot.ts, RecordKind.MARKET, snapshot)
-        order_manager = run.order_manager
+        order_manager = self._orders(run)
+        queue = self._queue(run)
+        portfolio = self._ledger(run)
 
         def update(order_id: str, status: OrderStatus, detail: str | None) -> None:
-            if isinstance(run.store, PersistentEventStore):
-                self._record_compact_update(
-                    run,
-                    CompactOrderUpdate(
-                        ts=snapshot.ts, order_id=order_id, status=status, detail=detail
-                    ),
-                    snapshot,
-                )
-            else:
-                self._record_update(
-                    run,
-                    OrderUpdateEvent(
-                        ts=snapshot.ts, order_id=order_id, status=status, detail=detail
-                    ),
-                    snapshot,
-                )
+            self._record_update(
+                run,
+                OrderUpdateEvent(ts=snapshot.ts, order_id=order_id, status=status, detail=detail),
+                snapshot,
+            )
 
         # 자본변동은 이 세션의 어떤 체결보다 먼저 적용한다 — 분할 후 가격으로 체결되는
         # 주문이 분할 전 수량과 섞이면 안 된다.
-        if isinstance(order_manager, PersistentOrderManager):
-            # 이전 세션 ORDER priority에서 공개된 주문을 일괄 활성화한다. 자본변동 취소가
-            # 해당 주문까지 볼 수 있어야 하므로 corporate action 처리보다 앞선다.
-            order_manager.activate_pending()
-        for action in run.corporate_actions.get(snapshot.ts, ()):
+        for action in self._pending_actions(run).get(snapshot.ts, ()):
             self._apply_corporate_action(run, action, snapshot, update)
-
-        if run.persistent_runtime is not None:
-            self._on_market_persistent(run, snapshot, update)
-            run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
-            return
 
         if run.core == "rust_legacy":
             self._on_market_rust(run, snapshot, update)
-            run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+            queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
             return
 
         # 매도 먼저 처리해 매수가 쓸 수 있는 현금을 확정한다 (결정론적 규칙).
@@ -552,7 +687,7 @@ class BacktestEngine:
             key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
         )
         power = make_buying_power(
-            run.core, run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+            run.core, portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
         )
         # 바스켓 그룹은 leg를 함께 견적해 정책을 판정한 뒤 체결한다 (단일 주문보다 먼저).
         for group in order_manager.open_groups():
@@ -608,7 +743,7 @@ class BacktestEngine:
                 )
             update(order.order_id, OrderStatus.CANCELLED, reason)
 
-        run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+        queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
 
     def _on_market_rust(
         self,
@@ -618,9 +753,10 @@ class BacktestEngine:
     ) -> None:
         """세션 MARKET 처리를 Rust `process_market`에 맡기고 계획(ops)을 순서대로 적용한다."""
         core = importlib.import_module("backtest_core")
-        order_manager = run.order_manager
+        order_manager = self._orders(run)
+        queue = self._queue(run)
         power = make_buying_power(
-            run.core, run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+            run.core, self._ledger(run).snapshot(snapshot.ts), run.config.max_gross_leverage
         )
         if not isinstance(power, RustBuyingPower):  # 코어가 rust면 항상 Rust 누산기다
             raise CoreUnavailable("rust session core requires the rust buying-power tracker")
@@ -685,11 +821,9 @@ class BacktestEngine:
                         fee=fee,
                         slippage_per_share=slip,
                     )
-                    run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+                    queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                     if run.wants(EventKind.FILL):
-                        run.queue.push(
-                            fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot)
-                        )
+                        queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
                     order_manager.settle(order_id, fill.quantity)
                 case "update":
                     status_text, _, detail = payload.partition("|")
@@ -702,59 +836,6 @@ class BacktestEngine:
                     order_manager.drop_group(order_id)
                 case _:
                     raise RuntimeError(f"unknown op from rust core — kind={kind!r}")
-
-    def _on_market_persistent(
-        self,
-        run: _Run,
-        snapshot: MarketSnapshot,
-        update: Callable[[str, OrderStatus, str | None], None],
-    ) -> None:
-        """Rust runtime 내부의 persistent 주문·그룹 상태로 한 세션을 처리한다."""
-        runtime = run.persistent_runtime
-        order_manager = run.order_manager
-        if runtime is None or not isinstance(order_manager, PersistentOrderManager):
-            raise CoreUnavailable("persistent rust core requires its runtime and order manager")
-        default = None if run.max_participation is None else str(run.max_participation)
-        ops = runtime.process_market_index(
-            run.persistent_session_indices[snapshot.ts],
-            run.broker.fee_rate,
-            default,
-            run.rust_slippage,
-        )
-        for kind, order_id, quantity, price, slip, fee, payload in ops:
-            match kind:
-                case "fill":
-                    order = order_manager.order_compact(order_id)
-                    fill = CompactFill(
-                        fill_id=payload,
-                        order_id=order_id,
-                        ts=snapshot.ts,
-                        instrument=order.instrument,
-                        quantity=quantity,
-                        side=order.side,
-                        price=price,
-                        fee=fee,
-                        slippage_per_share=slip,
-                    )
-                    run.queue.push(
-                        fill.ts, EventPriority.FILL, CompactFillOccurred(fill, snapshot)
-                    )
-                    if run.wants(EventKind.FILL):
-                        run.queue.push(
-                            fill.ts,
-                            EventPriority.NOTIFY,
-                            StrategyNotify(fill.materialize(), snapshot),
-                        )
-                case "update":
-                    status_text, _, detail = payload.partition("|")
-                    update(order_id, OrderStatus(status_text), detail or None)
-                case "trigger" | "remove" | "drop_group":
-                    # mutable 상태는 process_market 안에서 이미 Rust runtime에 적용됐다.
-                    pass
-                case _:
-                    raise RuntimeError(
-                        f"unknown op from persistent rust core — kind={kind!r}"
-                    )
 
     @staticmethod
     def _settlement_session(feed: DataFeed, action: CorporateActionEvent) -> datetime:
@@ -780,26 +861,28 @@ class BacktestEngine:
     ) -> None:
         """견적을 실제 체결로 확정한다: Fill 큐 적재, 잔량 갱신, 상태 기록, 여력 소모."""
         order = entry.order
+        order_manager = self._orders(run)
+        queue = self._queue(run)
         fill = run.broker.fill(
             quote,
             entry,
             snapshot.bar(order.instrument),
-            run.order_manager.next_fill_id(),
+            order_manager.next_fill_id(),
             quantity,
         )
         power.consume(fill)
-        run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+        queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
         if run.wants(EventKind.FILL):
             # FILL 알림은 그 체결이 만든 ORDER_UPDATE 알림보다 먼저 큐에 실린다 (인과 순서).
             # NOTIFY(25) > FILL(20)이라 알림 시점엔 포트폴리오에 이미 반영돼 있다.
-            run.queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
-        left = run.order_manager.settle(order.order_id, fill.quantity)
+            queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
+        left = order_manager.settle(order.order_id, fill.quantity)
         if left == 0:
             update(order.order_id, OrderStatus.FILLED, None)
         else:
             # STOP/STOP_LIMIT이 발동해 일부만 체결됐으면 잔량은 발동 상태를 유지한다.
             if order.order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and not entry.triggered:
-                run.order_manager.mark_triggered(order.order_id)
+                order_manager.mark_triggered(order.order_id)
             update(order.order_id, OrderStatus.PARTIALLY_FILLED, quote.detail)
 
     def _process_group(
@@ -810,7 +893,7 @@ class BacktestEngine:
         power: BuyingPowerTracker,
         update: Callable[[str, OrderStatus, str | None], None],
     ) -> None:
-        order_manager = run.order_manager
+        order_manager = self._orders(run)
         entries = order_manager.group_entries(group.group_id)
         policy = group.policy
 
@@ -932,26 +1015,12 @@ class BacktestEngine:
             CorporateActionType.SPLIT,
             CorporateActionType.REVERSE_SPLIT,
         )
-        if isinstance(run.order_manager, PersistentOrderManager):
-            remaining_by_id = {
-                order.order_id: Decimal(remaining)
-                for order, remaining, _triggered in run.order_manager.compact_open_entries()
-            }
-        else:
-            remaining_by_id = {
-                entry.order_id: entry.remaining for entry in run.order_manager.open_entries()
-            }
+        order_manager = self._orders(run)
+        remaining_by_id = {
+            entry.order_id: entry.remaining for entry in order_manager.open_entries()
+        }
         # 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
-        if isinstance(run.order_manager, PersistentOrderManager):
-            stale_orders = (
-                run.order_manager.cancel_compact_for_instrument(action.instrument)
-                if confirmed
-                else ()
-            )
-        else:
-            stale_orders = (
-                run.order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
-            )
+        stale_orders = order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
         for stale in stale_orders:
             stale_remaining = remaining_by_id[stale.order_id]
             update(
@@ -962,27 +1031,25 @@ class BacktestEngine:
                 f"event_ts={action.ts} settled_at={snapshot.ts} remaining={stale_remaining}",
             )
         if confirmed:
-            applied = run.portfolio.apply_corporate_action(
+            applied = self._ledger(run).apply_corporate_action(
                 action, snapshot.bar(action.instrument).open, settled_at=snapshot.ts
             )
             if applied is not None:
                 run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION_APPLIED, applied)
         if run.wants(EventKind.CORPORATE_ACTION):
-            run.queue.push(snapshot.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot))
+            self._queue(run).push(
+                snapshot.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot)
+            )
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
-        if isinstance(run.portfolio, PersistentPortfolio):
-            should_dispatch, costs, marked = run.portfolio.close_session(
-                snapshot.ts, run.config, run.requirements.schedule
-            )
-        else:
-            run.portfolio.mark(snapshot)
-            # 세션 종료 평가 상태에서 차입·이자 비용을 발생시킨 뒤 자본 잠식을 검사한다.
-            costs = session_costs(run.portfolio.snapshot(snapshot.ts), run.config)
-            for cost in costs:
-                run.portfolio.charge(cost)
-            marked = run.portfolio.snapshot(snapshot.ts)
-            should_dispatch = calendar.matches(run.requirements.schedule, snapshot.ts)
+        portfolio = self._ledger(run)
+        portfolio.mark(snapshot)
+        # 세션 종료 평가 상태에서 차입·이자 비용을 발생시킨 뒤 자본 잠식을 검사한다.
+        costs = session_costs(portfolio.snapshot(snapshot.ts), run.config)
+        for cost in costs:
+            portfolio.charge(cost)
+        marked = portfolio.snapshot(snapshot.ts)
+        should_dispatch = calendar.matches(run.requirements.schedule, snapshot.ts)
         for cost in costs:
             run.store.append(cost.ts, RecordKind.COST, cost)
         if marked.equity < 0:
@@ -1011,120 +1078,34 @@ class BacktestEngine:
         if run.history_store.session_count < run.warmup_sessions:
             return
         ts = market.ts
+        order_manager = self._orders(run)
         if portfolio_snapshot is None:
-            portfolio_snapshot = run.portfolio.snapshot(ts)
-        if isinstance(run.order_manager, PersistentOrderManager):
-            open_orders_snapshot = ()
-            compact_open_orders = run.order_manager.compact_open_orders()
-        else:
-            open_orders_snapshot = run.order_manager.open_orders()
-            compact_open_orders = ()
-        callback_frame = None
-        if run.persistent_runtime is None:
-            context = EngineStrategyContext(
-                now=ts,
-                snapshot=portfolio_snapshot,
-                history_store=run.history_store,
-                declared=run.declared,
-                open_orders_snapshot=open_orders_snapshot,
-                universe_source=run.universe,
-            )
-        else:
-            callback_frame = run.persistent_runtime.run_until_callback(
-                self._callback_kind(event), run.persistent_session_indices[ts]
-            )
-            context = RustStrategyContext(
-                now=ts,
-                snapshot=portfolio_snapshot,
-                history_store=run.history_store,
-                declared=run.declared,
-                open_orders_snapshot=open_orders_snapshot,
-                universe_source=run.universe,
-                callback_token=callback_frame.token,
-                compact_open_orders=compact_open_orders,
-            )
-        try:
-            decision = run.strategy.on_event(context, event)
-        except BaseException as error:
-            if callback_frame is not None:
-                assert run.persistent_runtime is not None
-                run.persistent_runtime.fail_callback(
-                    callback_frame.token, f"{type(error).__name__}: {error}"
-                )
-            raise
-        persistent_route = None
-        if run.persistent_runtime is not None:
-            assert callback_frame is not None
-            if not supports_basic_decision(decision):
-                run.persistent_runtime.fail_callback(
-                    callback_frame.token,
-                    f"unsupported strategy decision — type={type(decision).__name__}",
-                )
-                raise RuntimeError(
-                    "persistent Rust router does not support a returned strategy action"
-                )
-            persistent_route = submit_basic_decision(
-                run.persistent_runtime,
-                callback_frame.token,
-                decision,
-                portfolio_snapshot,
-                market,
-            )
-            decision_id = persistent_route.decision_id
-        else:
-            decision_id = run.order_manager.next_decision_id()
+            portfolio_snapshot = self._ledger(run).snapshot(ts)
+        context = EngineStrategyContext(
+            now=ts,
+            snapshot=portfolio_snapshot,
+            history_store=run.history_store,
+            declared=run.declared,
+            open_orders_snapshot=order_manager.open_orders(),
+            universe_source=run.universe,
+        )
+        decision = run.strategy.on_event(context, event)
+        decision_id = order_manager.next_decision_id()
         run.store.record_callback(event, decision_id, decision)
         run.store.append(ts, RecordKind.DECISION, DecisionRecord(decision_id, decision))
 
-        if persistent_route is not None:
-            if persistent_route.error is not None:
-                raise persistent_route.error
-            routing = persistent_route.routing
-        else:
-            if run.router is None:
-                raise RuntimeError(
-                    "persistent Rust router does not support a returned strategy action"
-                )
-            routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
+        if run.router is None:
+            raise RuntimeError("python session loop requires the Python DecisionRouter")
+        routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
         for update in routing.updates:
-            if isinstance(update, CompactOrderUpdate):
-                self._record_compact_update(run, update, market)
-            else:
-                self._record_update(run, update, market)
+            self._record_update(run, update, market)
         for group in routing.groups:
-            run.order_manager.register_group(group)
+            order_manager.register_group(group)
+        queue = self._queue(run)
         for order in routing.orders:
-            if isinstance(order, CompactOrder):
-                run.queue.push(order.ts, EventPriority.ORDER, CompactOrderPlaced(order))
-            else:
-                run.queue.push(order.ts, EventPriority.ORDER, OrderPlaced(order))
-
-    @staticmethod
-    def _callback_kind(event: StrategyEvent) -> str:
-        if isinstance(event, MarketSnapshot):
-            return "market"
-        if isinstance(event, FillEvent):
-            return "fill"
-        if isinstance(event, OrderUpdateEvent):
-            return "order_update"
-        if isinstance(event, CorporateActionEvent):
-            return "corporate_action"
-        raise TypeError(f"unsupported strategy callback event — got {type(event).__name__}")
+            queue.push(order.ts, EventPriority.ORDER, OrderPlaced(order))
 
     def _record_update(self, run: _Run, update: OrderUpdateEvent, market: MarketSnapshot) -> None:
         run.store.append(update.ts, RecordKind.ORDER_UPDATE, update)
         if run.wants(EventKind.ORDER_UPDATE):
-            run.queue.push(update.ts, EventPriority.NOTIFY, StrategyNotify(update, market))
-
-    def _record_compact_update(
-        self, run: _Run, update: CompactOrderUpdate, market: MarketSnapshot
-    ) -> None:
-        if not isinstance(run.store, PersistentEventStore):
-            raise RuntimeError("compact update reached a non-persistent event store")
-        run.store.append(update.ts, RecordKind.ORDER_UPDATE, update)
-        if run.wants(EventKind.ORDER_UPDATE):
-            run.queue.push(
-                update.ts,
-                EventPriority.NOTIFY,
-                StrategyNotify(update.materialize(), market),
-            )
+            self._queue(run).push(update.ts, EventPriority.NOTIFY, StrategyNotify(update, market))

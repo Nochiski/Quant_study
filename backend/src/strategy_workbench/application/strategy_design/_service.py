@@ -15,7 +15,6 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorGraph,
     FactorSignal,
-    FactorStep,
     FieldNode,
     Market,
     PortfolioStep,
@@ -43,6 +42,9 @@ from .ports.outgoing.strategy_repository import (
 class SavedStrategy:
     spec: StrategySpec
     spec_hash: str
+    # 은퇴한 schema 버전으로 동결된 revision (spec D2). spec은 업그레이드 변환을 거친 1.1 모양이고
+    # spec_hash는 저장된 값이라 서로 재계산 관계가 아니다.
+    requires_upgrade: bool
 
 
 class InvalidStrategyError(ValueError):
@@ -78,25 +80,23 @@ class StrategyDesignService:
                 universe_id="krx.common-stock",
             ),
             eligibility=EligibilityStep(),
-            factors=FactorStep(
-                factors=(
-                    FactorSignal(
-                        factor_id="price.close",
-                        label="종가",
-                        direction=FactorDirection.HIGH,
-                        weight=1.0,
-                        graph=FactorGraph(
-                            nodes=(
-                                FieldNode(
-                                    node_id="close",
-                                    field_id="price.close",
-                                    kind="field",
-                                ),
+            factors=(
+                FactorSignal(
+                    factor_id="price.close",
+                    label="종가",
+                    direction=FactorDirection.HIGH,
+                    weight=1.0,
+                    graph=FactorGraph(
+                        nodes=(
+                            FieldNode(
+                                node_id="close",
+                                field_id="price.close",
+                                kind="field",
                             ),
-                            output_node_id="close",
                         ),
+                        output_node_id="close",
                     ),
-                )
+                ),
             ),
             signal=SignalStep(),
             portfolio=PortfolioStep(),
@@ -122,11 +122,15 @@ class StrategyDesignService:
         )
         record = self._legacy_record(saved)
         self._repository.add(record)
-        return SavedStrategy(record.spec, record.spec_hash)
+        return SavedStrategy(
+            spec=record.spec, spec_hash=record.spec_hash, requires_upgrade=record.requires_upgrade
+        )
 
     def get(self, strategy_id: str, revision: int | None = None) -> SavedStrategy:
         record = self._repository.get(strategy_id, revision)
-        return SavedStrategy(record.spec, record.spec_hash)
+        return SavedStrategy(
+            spec=record.spec, spec_hash=record.spec_hash, requires_upgrade=record.requires_upgrade
+        )
 
     def revise(
         self,
@@ -153,7 +157,9 @@ class StrategyDesignService:
         )
         record = self._legacy_record(saved)
         self._repository.append(record, expected_revision=expected_revision)
-        return SavedStrategy(record.spec, record.spec_hash)
+        return SavedStrategy(
+            spec=record.spec, spec_hash=record.spec_hash, requires_upgrade=record.requires_upgrade
+        )
 
     def _legacy_record(self, spec: StrategySpec) -> StrategyRevisionRecord:
         """JSON spec API revisions carry no source text (authoring ADR D9 migration)."""

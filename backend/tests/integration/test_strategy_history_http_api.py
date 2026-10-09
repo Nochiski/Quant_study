@@ -44,6 +44,7 @@ def test_strategy_list_is_deterministic_paginated_and_projects_latest_revision()
                 "latest_revision": 2,
                 "spec_hash": revised.json()["spec_hash"],
                 "updated_at": revision_history["items"][0]["created_at"],
+                "requires_upgrade": False,
             }
         ],
         "total": 2,

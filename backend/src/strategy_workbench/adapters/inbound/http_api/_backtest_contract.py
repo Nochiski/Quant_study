@@ -8,8 +8,6 @@ from typing import Annotated, Literal, TypeAlias
 from pydantic import Field
 
 from ._execution_error_contract import (
-    PortfolioDataUnavailableDetail,
-    PortfolioRawObservationInvalidDetail,
     PortfolioStrategyInvalidDetail,
     RequestValidationResponse,
 )
@@ -21,11 +19,19 @@ class BacktestRunInvalidDetail:
     message: str
 
 
+@dataclass(frozen=True)
+class BacktestStrategyRequiresUpgradeDetail:
+    code: Literal["backtest.strategy.requires_upgrade"]
+    message: str
+
+
+# 시작 요청의 사전 검사는 관측 데이터를 읽지 않으므로(이슈 #158) `portfolio.data.unavailable` ·
+# `portfolio.raw_observation.invalid` 는 이 경로에서 나오지 않는다. 그 실패는 run 상태 `failed` 의
+# `error` 로 전달된다.
 BacktestUnprocessableDetail: TypeAlias = Annotated[
     BacktestRunInvalidDetail
-    | PortfolioStrategyInvalidDetail
-    | PortfolioDataUnavailableDetail
-    | PortfolioRawObservationInvalidDetail,
+    | BacktestStrategyRequiresUpgradeDetail
+    | PortfolioStrategyInvalidDetail,
     Field(discriminator="code"),
 ]
 

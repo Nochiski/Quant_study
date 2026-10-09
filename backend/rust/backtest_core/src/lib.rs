@@ -10,7 +10,7 @@
 
 mod buying_power;
 mod callback;
-mod compact_store;
+mod driver;
 mod event_queue;
 mod execution;
 mod feed;
@@ -18,12 +18,26 @@ mod persistent;
 mod persistent_router;
 mod portfolio;
 mod quote;
+mod records;
 mod session;
+mod tape;
 
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
+
+pyo3::create_exception!(
+    backtest_core,
+    RouteErrorException,
+    pyo3::exceptions::PyValueError,
+    "결정 라우팅 오류. args=(code, message)이며 Python 어댑터가 엔진 예외로 바꾼다."
+);
 
 #[pymodule]
 fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add(
+        "RouteErrorException",
+        m.py().get_type::<RouteErrorException>(),
+    )?;
     callback::register(m)?;
     execution::register(m)?;
     persistent::register(m)?;
@@ -31,6 +45,31 @@ fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     quote::register(m)?;
     buying_power::register(m)?;
     session::register(m)?;
+    m.add(
+        "RECORD_KIND_CODES",
+        wire_constants(m.py(), &records::RECORD_KIND_NAMES)?,
+    )?;
+    m.add(
+        "EVENT_PRIORITIES",
+        wire_constants(m.py(), &driver::EVENT_PRIORITY_NAMES)?,
+    )?;
+    m.add(
+        "ROW_INDEX_BYTES",
+        wire_constants(m.py(), &feed::ROW_INDEX_BYTE_NAMES)?,
+    )?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
+}
+
+/// (name, value) 목록을 Python dict로 바꾼다. Rust 상수를 Python 정본과 대조하거나 Python이
+/// 같은 규칙을 재현할 수 있게 모듈 상수로 노출하는 용도다 — 실행 경로는 이 dict를 읽지 않는다.
+fn wire_constants<'py, T>(py: Python<'py>, names: &[(&str, T)]) -> PyResult<Bound<'py, PyDict>>
+where
+    T: Copy + IntoPyObject<'py>,
+{
+    let mapping = PyDict::new(py);
+    for (name, value) in names {
+        mapping.set_item(name, *value)?;
+    }
+    Ok(mapping)
 }

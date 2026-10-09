@@ -15,6 +15,7 @@ from ._nodes import (
     ConstantNode,
     CrossSectionalNode,
     CrossSectionalOperator,
+    ExpressionNode,
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
@@ -41,6 +42,10 @@ _CHECKPOINT_BATCH = 256
 
 
 def _noop_checkpoint() -> None:
+    return None
+
+
+def _noop_progress(fraction: float) -> None:
     return None
 
 
@@ -122,13 +127,35 @@ def evaluate_factor_graph(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> FactorEvaluation:
+    """그래프를 평가한다. `progress` 는 그래프 평가 안의 완료 비율(0~1, 단조 증가)을 받는다.
+
+    노드 계산이 `_NODES_PROGRESS_SHARE` 까지, 출력 값 조립이 나머지를 채운다. `missing` 은 실행
+    설정(`RunEnvironment.missing`)이 소유한다 — P2-02 이후 그래프의 deprecated `missing_policy` 는
+    읽지 않는다.
+    """
+
     computed = _compute_nodes(
-        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+        graph,
+        observations=observations,
+        missing=missing,
+        parameters=parameters,
+        checkpoint=checkpoint,
+        progress=lambda fraction: progress(fraction * _NODES_PROGRESS_SHARE),
     )
-    return _evaluation_from_computed(graph, observations, computed, checkpoint=checkpoint)
+    return _evaluation_from_computed(
+        graph,
+        observations,
+        computed,
+        checkpoint=checkpoint,
+        progress=lambda fraction: progress(
+            _NODES_PROGRESS_SHARE + (1.0 - _NODES_PROGRESS_SHARE) * fraction
+        ),
+    )
 
 
 def _evaluation_from_computed(
@@ -137,6 +164,7 @@ def _evaluation_from_computed(
     computed: dict[str, list[FactorComputedValue]],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> FactorEvaluation:
     """Build the public output from an already evaluated node cache.
 
@@ -144,107 +172,212 @@ def _evaluation_from_computed(
     of one `_compute_nodes` invocation, rather than two calculations that merely ought to agree.
     """
     raw_output = computed[graph.output_node_id]
-    output = tuple(
-        FactorValue(
-            as_of=observation.as_of,
-            security_id=observation.security_id,
-            value=float(value)
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-            else None,
+    total = max(len(observations), 1)
+    output: list[FactorValue] = []
+    for index, (observation, value) in enumerate(
+        _checkpointed(zip(observations, raw_output, strict=True), checkpoint)
+    ):
+        if index % _CHECKPOINT_BATCH == 0:
+            progress(index / total)
+        output.append(
+            FactorValue(
+                as_of=observation.as_of,
+                security_id=observation.security_id,
+                value=float(value)
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+                else None,
+            )
         )
-        for observation, value in _checkpointed(
-            zip(observations, raw_output, strict=True), checkpoint
-        )
-    )
-    return FactorEvaluation(output_node_id=graph.output_node_id, values=output)
+    progress(1.0)
+    return FactorEvaluation(output_node_id=graph.output_node_id, values=tuple(output))
 
 
 def _compute_nodes(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> dict[str, list[FactorComputedValue]]:
     """Evaluate every node reachable from the output once; the cache is the single value source.
 
     `evaluate_factor_graph` returns the output node; `_trace.trace_factor_graph` projects the whole
     cache. Both read the same lists so trace values equal evaluation values by construction.
-    """
-    nodes = {node.node_id: node for node in graph.nodes}
-    parameter_values = {parameter.parameter_id: parameter.value for parameter in parameters}
-    computed: dict[str, list[FactorComputedValue]] = {}
 
-    def evaluate(node_id: str) -> list[FactorComputedValue]:
-        checkpoint()
-        if node_id in computed:
-            return computed[node_id]
+    진행은 도달 가능한 노드마다 종류별 가중치(`_node_progress_weight`)로 몫을 나눠 노드 완료 때
+    올리고, 창 연산이라 가장 오래 걸리는 시계열 노드는 종목 하나를 끝낼 때마다 그 몫 안에서 올린다
+    (이슈 #162). 누적은 정수 가중치 합이라 끝값이 정확히 1.0 이다. 보고 빈도 조절은 호출자 몫이다.
+    """
+    evaluator = _NodeEvaluator(
+        graph,
+        observations=observations,
+        missing=missing,
+        parameters=parameters,
+        checkpoint=checkpoint,
+        progress=progress,
+    )
+    evaluator.evaluate(graph.output_node_id)
+    return evaluator.computed
+
+
+class _NodeEvaluator:
+    """노드 캐시를 채우는 재귀 평가기. `_compute_nodes` 한 번의 호출 동안만 산다.
+
+    예전에는 재귀를 클로저(`evaluate` 가 자기 이름을 부르는 내부 함수)로 했는데, 그 함수는 자기
+    cell 로 자신을 참조하는 순환(함수 → cell → 함수)을 남긴다. cell 들이 `observations` 를 쥐어
+    평가가 끝나도 관측 튜플 전체가 참조 카운트로 풀리지 않고 다음 전체 수집(2세대)을 기다렸다 —
+    4년 실데이터에서 약 830만 객체, run 종료 뒤 수 GB(이슈 #196). 메서드 재귀는 호출마다 바운드
+    메서드를 잠깐 만들 뿐 인스턴스가 자신을 붙잡지 않으므로, 호출이 끝나면 참조 카운트로 풀린다.
+    """
+
+    def __init__(
+        self,
+        graph: FactorGraph,
+        *,
+        observations: tuple[FactorObservation, ...],
+        missing: MissingPolicy,
+        parameters: tuple[ResolvedFactorParameter, ...],
+        checkpoint: Callable[[], None],
+        progress: Callable[[float], None],
+    ) -> None:
+        self._nodes = {node.node_id: node for node in graph.nodes}
+        self._parameter_values = {
+            parameter.parameter_id: parameter.value for parameter in parameters
+        }
+        self._observations = observations
+        self._missing = missing
+        self._checkpoint = checkpoint
+        self._progress = progress
+        self._computed: dict[str, list[FactorComputedValue]] = {}
+        self._total_weight = _reachable_progress_weight(graph.output_node_id, self._nodes)
+        self._completed_weight = 0
+
+    @property
+    def computed(self) -> dict[str, list[FactorComputedValue]]:
+        return self._computed
+
+    def _advance_within_node(self, node: ExpressionNode, fraction: float) -> None:
+        self._progress(
+            (self._completed_weight + fraction * _node_progress_weight(node)) / self._total_weight
+        )
+
+    def evaluate(self, node_id: str) -> list[FactorComputedValue]:
+        self._checkpoint()
+        if node_id in self._computed:
+            return self._computed[node_id]
         try:
-            node = nodes[node_id]
+            node = self._nodes[node_id]
         except KeyError as error:
             raise ValueError(
                 f"factor evaluation references unknown node — node_id={node_id!r}"
             ) from error
-        inputs = [evaluate(dependency) for dependency in node_dependencies(node)]
+        inputs = [self.evaluate(dependency) for dependency in node_dependencies(node)]
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
             values = _field_values(
-                observations, node.field_id, graph.missing_policy, checkpoint=checkpoint
+                self._observations, node.field_id, self._missing, checkpoint=self._checkpoint
             )
         elif isinstance(node, ConstantNode):
-            values = [node.value for _ in _checkpointed(observations, checkpoint)]
+            values = [node.value for _ in _checkpointed(self._observations, self._checkpoint)]
         elif isinstance(node, ParameterNode):
-            if node.parameter_id not in parameter_values:
+            if node.parameter_id not in self._parameter_values:
                 raise ValueError(
                     "factor evaluation parameter is unresolved — "
                     f"node_id={node.node_id!r} parameter_id={node.parameter_id!r}"
                 )
-            value = parameter_values[node.parameter_id]
+            value = self._parameter_values[node.parameter_id]
             if isinstance(value, (str, bool)):
                 raise ValueError(
                     "numeric factor parameter has incompatible value — "
                     f"parameter_id={node.parameter_id!r} value={value!r}"
                 )
-            values = [float(value) for _ in _checkpointed(observations, checkpoint)]
+            values = [float(value) for _ in _checkpointed(self._observations, self._checkpoint)]
         elif isinstance(node, BinaryNode):
             values = [
                 _binary(node.operator, left, right)
-                for left, right in _checkpointed(zip(*inputs, strict=True), checkpoint)
+                for left, right in _checkpointed(zip(*inputs, strict=True), self._checkpoint)
             ]
         elif isinstance(node, ComparisonNode):
             values = [
                 _compare(node.operator, left, right)
-                for left, right in _checkpointed(zip(*inputs, strict=True), checkpoint)
+                for left, right in _checkpointed(zip(*inputs, strict=True), self._checkpoint)
             ]
         elif isinstance(node, ConditionalNode):
             values = [
                 true_value if predicate is True else false_value if predicate is False else None
                 for predicate, true_value, false_value in _checkpointed(
-                    zip(*inputs, strict=True), checkpoint
+                    zip(*inputs, strict=True), self._checkpoint
                 )
             ]
         elif isinstance(node, UnaryNode):
-            values = _unary(node, inputs[0], observations, checkpoint=checkpoint)
+            values = _unary(node, inputs[0], self._observations, checkpoint=self._checkpoint)
         elif isinstance(node, TimeSeriesNode):
-            values = _time_series(node, inputs[0], observations, checkpoint=checkpoint)
+            values = _time_series(
+                node,
+                inputs[0],
+                self._observations,
+                checkpoint=self._checkpoint,
+                advance=lambda fraction: self._advance_within_node(node, fraction),
+            )
         elif isinstance(node, CrossSectionalNode):
-            values = _cross_sectional(node, inputs[0], observations, checkpoint=checkpoint)
+            values = _cross_sectional(
+                node, inputs[0], self._observations, checkpoint=self._checkpoint
+            )
         elif isinstance(node, GroupNode):
-            values = _group_transform(node, inputs[0], observations, checkpoint=checkpoint)
+            values = _group_transform(
+                node, inputs[0], self._observations, checkpoint=self._checkpoint
+            )
         elif isinstance(node, SavedFactorNode):
             values = _reference_values(
-                observations, f"factor:{node.factor_id}", checkpoint=checkpoint
+                self._observations, f"factor:{node.factor_id}", checkpoint=self._checkpoint
             )
         elif isinstance(node, SavedSubgraphNode):
             values = _reference_values(
-                observations, f"subgraph:{node.subgraph_id}", checkpoint=checkpoint
+                self._observations, f"subgraph:{node.subgraph_id}", checkpoint=self._checkpoint
             )
-        _require_finite_values(node.node_id, values, observations, checkpoint=checkpoint)
-        computed[node_id] = values
+        _require_finite_values(
+            node.node_id, values, self._observations, checkpoint=self._checkpoint
+        )
+        self._computed[node_id] = values
+        self._completed_weight += _node_progress_weight(node)
+        self._progress(self._completed_weight / self._total_weight)
         return values
 
-    evaluate(graph.output_node_id)
-    return computed
+
+# 노드 계산이 평가 진행에서 차지하는 몫. 나머지는 출력 값 조립이다(4년 구간 실측 약 4%).
+_NODES_PROGRESS_SHARE = 0.96
+
+# 노드 종류별 진행 가중치. 실데이터 실측(이슈 #162, 모멘텀 252)에서 시계열 노드가 필드 노드의
+# 약 30배 시간을 썼다(창 길이만큼 값을 복사한다). 횡단면·그룹 노드는 날짜별 정렬이라 그 사이다.
+_TIME_SERIES_PROGRESS_WEIGHT = 20
+_SECTION_PROGRESS_WEIGHT = 3
+
+
+def _node_progress_weight(node: ExpressionNode) -> int:
+    if isinstance(node, TimeSeriesNode):
+        return _TIME_SERIES_PROGRESS_WEIGHT
+    if isinstance(node, (CrossSectionalNode, GroupNode)):
+        return _SECTION_PROGRESS_WEIGHT
+    return 1
+
+
+def _reachable_progress_weight(output_node_id: str, nodes: dict[str, ExpressionNode]) -> int:
+    """출력에서 도달 가능한 노드의 진행 가중치 합(진행 분모).
+
+    모르는 참조는 평가가 예외로 거부하므로 세지 않는다.
+    """
+
+    seen: set[str] = set()
+    pending = [output_node_id]
+    while pending:
+        node_id = pending.pop()
+        if node_id in seen or node_id not in nodes:
+            continue
+        seen.add(node_id)
+        pending.extend(node_dependencies(nodes[node_id]))
+    return max(sum(_node_progress_weight(nodes[node_id]) for node_id in seen), 1)
 
 
 def _require_finite_values(
@@ -370,40 +503,9 @@ def _unary(
         ]
     if node.operator is UnaryOperator.LAG:
         return _lag(values, observations, node.periods or 0, checkpoint=checkpoint)
-    if node.operator is UnaryOperator.NEUTRALIZE:
-        return _cross_sectional_demean(values, observations, checkpoint=checkpoint)
-    synthetic = CrossSectionalNode(
-        node_id=node.node_id,
-        operator={
-            UnaryOperator.RANK: CrossSectionalOperator.RANK,
-            UnaryOperator.ZSCORE: CrossSectionalOperator.ZSCORE,
-            UnaryOperator.WINSORIZE: CrossSectionalOperator.WINSORIZE,
-        }[node.operator],
-        input_node_id=node.input_node_id,
-        kind="cross_sectional",
+    raise ValueError(  # pragma: no cover - enum은 두 멤버뿐, 새 멤버는 여기서 즉시 드러난다
+        f"unary operator has no evaluation — operator={node.operator!r} node_id={node.node_id!r}"
     )
-    return _cross_sectional(synthetic, values, observations, checkpoint=checkpoint)
-
-
-def _cross_sectional_demean(
-    values: list[FactorComputedValue],
-    observations: tuple[FactorObservation, ...],
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[FactorComputedValue]:
-    result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _checkpointed(
-        _cross_section_indices(observations, checkpoint=checkpoint).values(), checkpoint
-    ):
-        numeric = [
-            (index, number)
-            for index in _checkpointed(indices, checkpoint)
-            if (number := _as_number(values[index])) is not None
-        ]
-        center = mean(value for _, value in numeric) if numeric else 0.0
-        for index, value in _checkpointed(numeric, checkpoint):
-            result[index] = value - center
-    return result
 
 
 def _time_series(
@@ -412,9 +514,14 @@ def _time_series(
     observations: tuple[FactorObservation, ...],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    advance: Callable[[float], None] = _noop_progress,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
     by_security = _indices_by_security(observations, checkpoint=checkpoint)
+    # 종목마다 관측 수가 달라 종목 수로 세면 이력이 긴 종목 구간에서 느려진다.
+    # 처리한 관측 수로 센다.
+    observation_count = max(len(values), 1)
+    finished = 0
     for indices in _checkpointed(by_security.values(), checkpoint):
         for position, result_index in _checkpointed(enumerate(indices), checkpoint):
             end = position - node.lag + 1
@@ -436,6 +543,8 @@ def _time_series(
                 result[result_index] = min(window)
             else:
                 result[result_index] = max(window)
+        finished += len(indices)
+        advance(finished / observation_count)
     return result
 
 
@@ -456,7 +565,11 @@ def _cross_sectional(
         ]
         if not numeric:
             continue
-        if node.operator is CrossSectionalOperator.RANK:
+        if node.operator is CrossSectionalOperator.DEMEAN:
+            center = mean(value for _, value in numeric)
+            for index, value in _checkpointed(numeric, checkpoint):
+                result[index] = value - center
+        elif node.operator is CrossSectionalOperator.RANK:
             ranked = rank_items(numeric)
             denominator = max(len(ranked) - 1, 1)
             for index, rank in _checkpointed(ranked.items(), checkpoint):

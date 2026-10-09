@@ -3,6 +3,7 @@ import { useState } from "react";
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
 import {
+  factorGraphPointer,
   factorIndexAtPointer,
   nodePointerById,
   pointerSelectsNode,
@@ -92,7 +93,7 @@ export const ExecutionPlanPanel = ({
             onChange={(event) => {
               const next = Number(event.target.value);
               setChosenFactor(next);
-              onSelectPointer(`/factors/factors/${next}/graph`);
+              onSelectPointer(factorGraphPointer(next));
             }}
           >
             {state.factors.map((item, index) => (

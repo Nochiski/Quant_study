@@ -30,6 +30,13 @@
   box-shadow: var(--shadow-popover);
 }
 
+.backtest-settings__hint {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
 .backtest-settings fieldset {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -74,7 +81,14 @@
 }
 
 @media (max-width: 760px) {
-  .backtest-settings fieldset {
+  .backtest-settings__hint {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.backtest-settings fieldset {
     grid-template-columns: 1fr;
   }
 }

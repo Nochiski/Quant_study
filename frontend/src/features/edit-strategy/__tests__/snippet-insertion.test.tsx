@@ -22,7 +22,7 @@ const SIGNAL_SCHEMA: JsonSchema = {
   properties: {
     signal: {
       type: "object",
-      properties: { method: { type: "string", default: "weighted_sum" } },
+      properties: { regime_minimum: { type: "number", default: 0.5 } },
     },
   },
 };
@@ -33,14 +33,12 @@ const SIGNAL_SNIPPET: CanonicalSnippet = {
   label: "signal",
   kind: "section",
   sectionKey: "signal",
-  collectionKey: null,
   identity: null,
-  value: { method: "weighted_sum" },
+  value: { regime_minimum: 0.5 },
 };
 
 const editorHandle: CodeEditorHandle = {
   getText: () => "",
-  setText: vi.fn(),
   replaceRange: vi.fn(),
   getSelection: () => ({ from: 0, to: 0 }),
   setSelection: vi.fn(),
@@ -48,6 +46,10 @@ const editorHandle: CodeEditorHandle = {
   positionToOffset: vi.fn(() => 0),
   scrollTo: vi.fn(),
   focus: vi.fn(),
+  loadText: vi.fn(),
+  undo: vi.fn(() => false),
+  redo: vi.fn(() => false),
+  historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
   getHistoryState: vi.fn(() => null),
   restoreHistoryState: vi.fn(),
 };
@@ -74,7 +76,7 @@ describe("snippet insertion coordinator", () => {
     });
   });
 
-  it("reports YAML-only before consulting an unmounted projection editor", () => {
+  it("reports an inactive editor before consulting an unmounted projection editor", () => {
     const state = initialDocumentState("yaml", "");
     const { result } = renderHook(() =>
       useSnippetInsertion(
@@ -89,7 +91,7 @@ describe("snippet insertion coordinator", () => {
     expect(result.current.feedback).toEqual({
       status: "error",
       label: "signal",
-      reason: "yaml-only",
+      reason: "editor-inactive",
     });
   });
 

@@ -54,7 +54,7 @@ def test_identity_is_injected_from_the_envelope_not_the_document() -> None:
     spec = _hydrate_ok(_document())
 
     assert spec.identity == DRAFT
-    assert spec.identity.schema_version == "1.0"
+    assert spec.identity.schema_version == "1.1"
     saved = hydrate_strategy_document(_document(), identity=StrategyIdentity("s-1", 4))
     assert saved.spec is not None
     assert saved.spec.identity == StrategyIdentity("s-1", 4)
@@ -62,7 +62,7 @@ def test_identity_is_injected_from_the_envelope_not_the_document() -> None:
 
 def test_document_carrying_identity_is_rejected() -> None:
     document = _document()
-    document["identity"] = {"strategy_id": "x", "revision": 1, "schema_version": "1.0"}
+    document["identity"] = {"strategy_id": "x", "revision": 1, "schema_version": "1.1"}
 
     assert _issue_codes(document) == [("structure.unknown_key", "/identity")]
 
@@ -73,7 +73,7 @@ def test_unsupported_schema_version_fails_closed(version: object) -> None:
     document["schema_version"] = version
 
     assert _issue_codes(document) == [("structure.unsupported_schema_version", "/schema_version")]
-    assert "1.0" in SUPPORTED_SCHEMA_VERSIONS
+    assert "1.1" in SUPPORTED_SCHEMA_VERSIONS
 
 
 def test_missing_schema_version_fails_closed() -> None:
@@ -86,34 +86,34 @@ def test_missing_schema_version_fails_closed() -> None:
 def test_unknown_keys_at_every_depth_carry_pointers() -> None:
     document = _document()
     document["risk"]["max_name_wieght"] = 0.05
-    document["factors"]["factors"][0]["graph"]["nodes"][1]["bogus"] = 1
+    document["factors"][0]["graph"]["nodes"][1]["bogus"] = 1
     document["extra"] = True
 
     codes = _issue_codes(document)
     assert ("structure.unknown_key", "/risk/max_name_wieght") in codes
-    assert ("structure.unknown_key", "/factors/factors/0/graph/nodes/1/bogus") in codes
+    assert ("structure.unknown_key", "/factors/0/graph/nodes/1/bogus") in codes
     assert ("structure.unknown_key", "/extra") in codes
 
 
 def test_missing_required_fields_are_reported_not_defaulted() -> None:
     document = _document()
     del document["data"]["start"]
-    del document["factors"]["factors"][0]["graph"]["output_node_id"]
+    del document["factors"][0]["graph"]["output_node_id"]
 
     codes = _issue_codes(document)
     assert ("structure.missing_field", "/data/start") in codes
-    assert ("structure.missing_field", "/factors/factors/0/graph/output_node_id") in codes
+    assert ("structure.missing_field", "/factors/0/graph/output_node_id") in codes
 
 
 def test_kind_discriminator_is_required_and_validated() -> None:
     document = _document()
-    nodes = document["factors"]["factors"][0]["graph"]["nodes"]
+    nodes = document["factors"][0]["graph"]["nodes"]
     nodes[0]["kind"] = "fieldd"
     nodes.append({"node_id": "c", "value": 1.0})
 
     codes = _issue_codes(document)
-    assert ("structure.unknown_kind", "/factors/factors/0/graph/nodes/0/kind") in codes
-    assert ("structure.missing_field", "/factors/factors/0/graph/nodes/2/kind") in codes
+    assert ("structure.unknown_kind", "/factors/0/graph/nodes/0/kind") in codes
+    assert ("structure.missing_field", "/factors/0/graph/nodes/2/kind") in codes
 
 
 def test_scalar_literals_are_typed_and_bad_literals_fail() -> None:
@@ -135,13 +135,13 @@ def test_scalar_literals_are_typed_and_bad_literals_fail() -> None:
 def test_typed_fields_normalise_int_float_and_iso_dates() -> None:
     document = _document()
     document["execution"]["fee_bps"] = 15
-    document["factors"]["factors"][0]["weight"] = 1
+    document["factors"][0]["weight"] = 1
     document["portfolio"]["selection_count"] = 20.0
 
     spec = _hydrate_ok(document)
 
     assert spec.execution.fee_bps == 15.0 and isinstance(spec.execution.fee_bps, float)
-    assert isinstance(spec.factors.factors[0].weight, float)
+    assert isinstance(spec.factors[0].weight, float)
     assert spec.portfolio.selection_count == 20 and isinstance(spec.portfolio.selection_count, int)
     assert spec.data.start == date(2021, 1, 1)
 
@@ -174,15 +174,15 @@ def test_parameter_value_union_folds_integral_floats_but_keeps_bool_and_str() ->
 
 def test_negative_zero_inside_tuple_fields_hashes_like_zero() -> None:
     document = _document()
-    document["factors"]["factors"][0]["weight"] = -0.0
+    document["factors"][0]["weight"] = -0.0
     document["eligibility"]["rules"] = [{"field_id": "x", "operator": "gt", "value": -0.0}]
-    document["factors"]["factors"][0]["graph"]["nodes"].append(
+    document["factors"][0]["graph"]["nodes"].append(
         {"kind": "constant", "node_id": "zero", "value": -0.0}
     )
     positive = copy.deepcopy(document)
-    positive["factors"]["factors"][0]["weight"] = 0.0
+    positive["factors"][0]["weight"] = 0.0
     positive["eligibility"]["rules"][0]["value"] = 0.0
-    positive["factors"]["factors"][0]["graph"]["nodes"][2]["value"] = 0.0
+    positive["factors"][0]["graph"]["nodes"][2]["value"] = 0.0
 
     minus = _hydrate_ok(document)
 
@@ -280,8 +280,105 @@ def test_saved_strategy_hydrate_reads_identity_from_the_document() -> None:
 def test_sequence_index_pointers_and_non_sequence_values() -> None:
     document = _document()
     document["eligibility"]["rules"] = {"field_id": "x"}
-    document["factors"]["factors"][0]["graph"]["nodes"][1]["window"] = "252"
+    document["factors"][0]["graph"]["nodes"][1]["window"] = "252"
 
     codes = _issue_codes(document)
     assert ("structure.type_mismatch", "/eligibility/rules") in codes
-    assert ("structure.type_mismatch", "/factors/factors/0/graph/nodes/1/window") in codes
+    assert ("structure.type_mismatch", "/factors/0/graph/nodes/1/window") in codes
+
+
+def test_default_from_must_name_a_required_sibling_field() -> None:
+    """`default-from`은 모델 선언 계약이다. 원천이 없거나 선택 필드면 사용자 문서 오류가 아니라
+    TypeError로 즉시 드러나야 한다(원천이 문서에 없을 때 KeyError로 새는 것을 막는다)."""
+    from dataclasses import dataclass, field
+
+    from strategy_workbench.domain.strategy._hydrate import _hydrate
+
+    @dataclass(frozen=True, kw_only=True)
+    class OptionalSource:
+        name: str = "n"
+        label: str = field(metadata={"default-from": "name"})
+
+    @dataclass(frozen=True, kw_only=True)
+    class MissingSource:
+        label: str = field(metadata={"default-from": "nope"})
+
+    for bad in (OptionalSource, MissingSource):
+        with pytest.raises(TypeError, match="default-from must name a required field"):
+            _hydrate(bad, {}, "", [])
+
+    @dataclass(frozen=True, kw_only=True)
+    class Good:
+        name: str
+        label: str = field(metadata={"default-from": "name"})
+
+    issues: list[Any] = []
+    assert _hydrate(Good, {"name": "x"}, "", issues) == Good(name="x", label="x")
+    assert _hydrate(Good, {"name": "x", "label": "y"}, "", issues) == Good(name="x", label="y")
+    assert issues == []
+    missing: list[Any] = []
+    _hydrate(Good, {}, "", missing)
+    assert [(issue.code, issue.pointer) for issue in missing] == [
+        ("structure.missing_field", "/name")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    [
+        ("signal", "method", "weighted_sum"),
+        ("signal", "entry_percentile", 0.1),
+        ("execution", "order_style", "market"),
+    ],
+)
+def test_removed_1_0_fields_are_flagged_as_legacy_shape(
+    section: str, key: str, value: object
+) -> None:
+    """schema 1.1 S2: 읽지 않던 세 필드는 fail-closed이고, 1.0 문법임을 문장이 말한다(P1-05)."""
+    document = copy.deepcopy(_document())
+    document.setdefault(section, {})[key] = value
+
+    result = hydrate_strategy_document(document, identity=DRAFT)
+
+    assert not result.ok
+    assert [(issue.code, issue.pointer) for issue in result.issues] == [
+        ("structure.legacy_shape", f"/{section}/{key}")
+    ]
+    assert "1.0" in result.issues[0].message and f"got={key!r}" in result.issues[0].message
+
+
+def test_cross_sectional_demean_hydrates_from_a_document() -> None:
+    """schema 1.1 S4: GUI가 노출하는 `cross_sectional: demean`을 문서 입구가 받아 준다."""
+    document = copy.deepcopy(_document())
+    document["factors"][0]["graph"]["nodes"].append(
+        {
+            "kind": "cross_sectional",
+            "node_id": "dm",
+            "operator": "demean",
+            "input_node_id": "mom_252",
+        }
+    )
+    document["factors"][0]["graph"]["output_node_id"] = "dm"
+
+    spec = _hydrate_ok(document)
+
+    node = spec.factors[0].graph.nodes[-1]
+    assert node.kind == "cross_sectional" and str(node.operator) == "demean"
+
+
+@pytest.mark.parametrize("operator", ["rank", "zscore", "winsorize", "neutralize"])
+def test_unary_aliases_of_cross_sectional_operators_are_gone(operator: str) -> None:
+    """schema 1.1 S4: 횡단면 변환은 `cross_sectional`로만 쓴다. `unary`에는 negate·lag만 남는다."""
+    document = copy.deepcopy(_document())
+    document["factors"][0]["graph"]["nodes"].append(
+        {"kind": "unary", "node_id": "x", "operator": operator, "input_node_id": "close"}
+    )
+
+    result = hydrate_strategy_document(document, identity=DRAFT)
+
+    assert not result.ok
+    # 1.0에서만 쓰던 alias라 "고를 수 없는 값"이 아니라 "예전 문법"으로 안내한다(P1-05).
+    assert [(issue.code, issue.pointer) for issue in result.issues] == [
+        ("structure.legacy_shape", "/factors/0/graph/nodes/2/operator")
+    ]
+    assert f"got=unary/{operator}" in result.issues[0].message

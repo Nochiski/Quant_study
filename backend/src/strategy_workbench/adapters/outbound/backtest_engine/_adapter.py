@@ -1,33 +1,35 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.slippage import FixedBpsSlippage
+from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.ports.market_data import LoadStatus
 from backtest_engine.ports.universe import Membership, UniverseResult
-from backtest_engine.types.actions import PositionTarget, QuantityTarget
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
-    FillEvent,
     StrategyEvent,
 )
 from backtest_engine.types.instruments import AssetClass, InstrumentId
-from backtest_engine.types.market import Bar, MarketSnapshot
-from backtest_engine.types.orders import Side
 from backtest_engine.types.requirements import StrategyRequirements
+from backtest_engine.types.result_tables import ResultTables
 from backtest_engine.types.strategy import StrategyContext
+from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataset,
     BacktestExecutionRequest,
     CancellationCheck,
+    MarketBarRecord,
     ProgressCallback,
     RunCancelledError,
 )
@@ -40,9 +42,11 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     compute_analytics,
     unavailable_metric_values,
 )
+from strategy_workbench.domain.backtest.facade.environment import environment_hash
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestSeries,
+    DataWarning,
     RawArtifactBundle,
     RawCost,
     RawFill,
@@ -57,61 +61,109 @@ from strategy_workbench.domain.portfolio.facade.construction import TargetTape
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
 
+def _columnar_feed(rows: Sequence[MarketBarRecord]) -> DataFeed:
+    """dataset 행을 열로 펴 DataFeed를 만든다 — 중간에 `Bar` 객체를 만들지 않는다.
+
+    세션은 오름차순, 한 세션 안 종목은 dataset 입력 순서다. 같은 행 묶음을 `Bar`로 만들어
+    `DataFeed(bars)`에 넣었을 때와 같은 스냅샷 순서다. 가격·거래량 불변식과 세션 단조는
+    `DataFeed.from_columns`가 검사한다 — 어댑터는 모양만 바꾼다.
+
+    Args:
+        rows: dataset이 답한 시장 bar 행. 순서는 세션 기준으로만 쓰인다.
+
+    Returns:
+        열을 그대로 보관하는 DataFeed. persistent Rust 경로는 이 열을 바로 FFI로 넘긴다.
+    """
+    rows_by_session: dict[date, list[MarketBarRecord]] = {}
+    for row in rows:
+        rows_by_session.setdefault(row.session, []).append(row)
+
+    sessions: list[datetime] = []
+    instruments: list[InstrumentId] = []
+    instrument_index: dict[str, int] = {}
+    offsets = [0]
+    instrument_ids: list[int] = []
+    opens: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    volumes: list[int] = []
+    for session in sorted(rows_by_session):
+        sessions.append(datetime.combine(session, time(15, 30)))
+        for row in rows_by_session[session]:
+            index = instrument_index.get(row.security_id)
+            if index is None:
+                # `_instrument`는 종목당 한 번만 부른다 — 행마다 부르면 유니버스 크기가
+                # 아니라 행 수만큼 InstrumentId를 만든다.
+                index = len(instruments)
+                instrument_index[row.security_id] = index
+                instruments.append(_instrument(row.security_id))
+            instrument_ids.append(index)
+            opens.append(row.open)
+            highs.append(row.high)
+            lows.append(row.low)
+            closes.append(row.close)
+            volumes.append(row.volume)
+        offsets.append(len(instrument_ids))
+    return DataFeed.from_columns(
+        sessions=sessions,
+        instruments=instruments,
+        offsets=offsets,
+        instrument_ids=instrument_ids,
+        opens=opens,
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        volumes=volumes,
+    )
+
+
 def _instrument(security_id: str) -> InstrumentId:
     return InstrumentId("XKRX", security_id, AssetClass.EQUITY, "KRW")
 
 
-class TargetTapeStrategy:
+class TargetTapeStrategy(DeclarativeTapeStrategy):
+    """컴파일된 TargetTape를 엔진 전략으로 노출한다.
+
+    선언형 tape(`DeclarativeTapeStrategy`)를 상속하므로 persistent Rust 경로는
+    `tape_frames()`를 적재해 콜백 없이 실행하고, Python 경로는 `on_event()`가 같은
+    규칙(`evaluate_tape`)을 적용한다.
+    bar 없는 종목 처리(거래정지·기준가 세션은 equity 피드에 행이 없다)는 `evaluate_tape`가
+    단일 정본이다.
+    """
+
+    @property
+    def idle_reason(self) -> str:
+        return "target_tape_idle"
+
     def __init__(
         self,
         spec: StrategySpec,
         tape: TargetTape,
         portfolio_bridge: BacktestEnginePortfolioAdapter,
+        *,
+        max_participation: float,
     ) -> None:
         self._spec = spec
-        self._frames = {frame.signal_as_of: frame for frame in tape.frames}
         self._bridge = portfolio_bridge
+        self._frames: dict[date, TapeFrame] = {
+            frame.signal_as_of: TapeFrame(
+                action=portfolio_bridge.to_target_action(
+                    frame, max_participation=max_participation
+                ),
+                reason=f"target_tape:{frame.signal_as_of.isoformat()}",
+            )
+            for frame in tape.frames
+        }
 
     def requirements(self) -> StrategyRequirements:
         return self._bridge.requirements(self._spec)
 
+    def tape_frames(self) -> Mapping[date, TapeFrame]:
+        return self._frames
+
     def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
-        if not isinstance(event, MarketSnapshot):
-            return StrategyDecision.no_action(ctx.now, "target_tape_idle")
-        frame = self._frames.get(event.ts.date())
-        if frame is None:
-            return StrategyDecision.no_action(ctx.now, "target_tape_idle")
-        action = self._bridge.to_target_action(
-            frame,
-            max_participation=self._spec.execution.participation_rate,
-        )
-        targets, untradable = _tradable_targets(action.targets, event, ctx)
-        reason = f"target_tape:{frame.signal_as_of.isoformat()}"
-        if untradable:
-            reason += f" no_bar={untradable}"
-        return StrategyDecision.of(ctx.now, replace(action, targets=targets), reason)
-
-
-def _tradable_targets(
-    targets: tuple[PositionTarget, ...], snapshot: MarketSnapshot, ctx: StrategyContext
-) -> tuple[tuple[PositionTarget, ...], tuple[str, ...]]:
-    """The kernel sizes a weight target off this session's close, so a target whose instrument
-    has no bar today (trading halt, reference-price session — equity feeds omit those rows)
-    cannot be routed: it is held at its current quantity when held, and skipped when not. The
-    skipped budget stays in cash until the next frame; the symbols are reported in the decision
-    reason so the run manifest keeps the trace (KRX halts are routine, e.g. 005930 2018-04-30).
-    """
-    kept: list[PositionTarget] = []
-    untradable: list[str] = []
-    for target in targets:
-        if snapshot.has(target.instrument):
-            kept.append(target)
-            continue
-        untradable.append(target.instrument.symbol)
-        held = ctx.position_qty(target.instrument)
-        if held != 0:
-            kept.append(QuantityTarget(instrument=target.instrument, quantity=held))
-    return tuple(kept), tuple(untradable)
+        return evaluate_tape(self._frames, self.idle_reason, ctx, event)
 
 
 class BacktestEngineExecutorAdapter:
@@ -134,21 +186,20 @@ class BacktestEngineExecutorAdapter:
                 "execution request must carry a resolved strategy — "
                 f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
             )
+        # 비용·체결 파라미터는 실행 설정이 소유한다(P2-01). 요청자가 명시한 값이 엔진에 닿지
+        # 않으면 매니페스트에 적힌 수수료와 실제로 돌린 수수료가 달라진다.
+        environment = request.spec.environment
+        if environment is None:
+            raise ValueError(
+                "execution request must carry a resolved run environment — "
+                f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
+            )
         self._check_cancelled(cancelled)
         started_at = datetime.now(UTC)
+        # 진행 값은 이 실행기 작업 안의 완료 비율(0~1)이다(`ProgressCallback` 계약). 준비 0.35,
+        # 엔진 루프가 끝난 뒤 지표 계산 0.78, 산출물 고정 0.88 이다. run 진행 막대의 engine 구간
+        # 배치(84~92%)는 유스케이스가 정한다(이슈 #162).
         progress(0.35, "engine.prepare", "Preparing market feed and strategy")
-        bars = tuple(
-            Bar(
-                ts=datetime.combine(item.session, time(15, 30)),
-                instrument=_instrument(item.security_id),
-                open=item.open,
-                high=item.high,
-                low=item.low,
-                close=item.close,
-                volume=item.volume,
-            )
-            for item in request.dataset.bars
-        )
         universe = UniverseResult(
             memberships=tuple(
                 Membership(
@@ -174,48 +225,54 @@ class BacktestEngineExecutorAdapter:
             RunConfig(
                 run_id=request.run_id,
                 initial_cash=request.spec.initial_cash,
-                fee_bps=strategy.execution.fee_bps,
+                fee_bps=environment.fee_bps,
                 annualization_days=request.spec.annualization_days,
                 max_gross_leverage=max(1.0, strategy.risk.gross_exposure),
             ),
-            slippage=FixedBpsSlippage(strategy.execution.slippage_bps),
-            max_participation=strategy.execution.participation_rate,
+            slippage=FixedBpsSlippage(environment.slippage_bps),
+            max_participation=environment.participation_rate,
             core=request.spec.core.value,
         )
         result = engine.run(
-            TargetTapeStrategy(strategy, request.target_tape, self._portfolio_bridge),
-            DataFeed(bars),
+            TargetTapeStrategy(
+                strategy,
+                request.target_tape,
+                self._portfolio_bridge,
+                max_participation=environment.participation_rate,
+            ),
+            _columnar_feed(request.dataset.bars),
             corporate_actions=corporate_actions,
             universe=universe,
         )
         self._check_cancelled(cancelled)
         progress(0.78, "analytics", "Calculating professional metrics")
-        costs = engine.event_store.costs()
-        artifacts, outcomes = _artifacts(result, costs)
-        benchmark = _benchmark_values(request)
+        # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw
+        # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
+        tables = engine.event_store.result_tables()
+        artifacts, outcomes = _artifacts(tables)
+        benchmark, carried = _benchmark_series(
+            request.dataset,
+            request.spec.initial_cash,
+            tuple(item.session for item in artifacts.snapshots),
+        )
+        # net exposure 공식은 `_artifacts`가 단일 정본이다 — 여기서 다시 계산하지 않는다.
         points = tuple(
             AnalysisPoint(
-                session=snapshot.ts.date(),
-                equity=snapshot.equity,
-                gross_exposure=snapshot.gross_exposure,
-                net_exposure=(
-                    sum(position.market_value for position in snapshot.positions) / snapshot.equity
-                    if snapshot.equity != 0
-                    else 0.0
-                ),
-                benchmark_equity=benchmark.get(snapshot.ts.date()),
+                session=item.session,
+                equity=item.equity,
+                gross_exposure=item.gross_exposure,
+                net_exposure=item.net_exposure,
+                benchmark_equity=benchmark.get(item.session),
             )
-            for snapshot in result.snapshots
+            for item in artifacts.snapshots
         )
         full_input = AnalyticsInput(
             points=points,
-            traded_notional=sum(float(fill.quantity) * fill.price for fill in result.fills),
+            traded_notional=tables.fill_totals.traded_notional,
             trades=outcomes,
-            total_fees=sum(fill.fee for fill in result.fills),
-            total_slippage_cost=sum(
-                float(fill.quantity) * abs(fill.slippage_per_share) for fill in result.fills
-            ),
-            total_carry_cost=sum(item.amount for item in costs),
+            total_fees=tables.fill_totals.total_fees,
+            total_slippage_cost=tables.fill_totals.total_slippage_cost,
+            total_carry_cost=sum(amount for _session, _kind, _security, amount in tables.costs),
         )
         full = compute_analytics(
             full_input,
@@ -268,11 +325,16 @@ class BacktestEngineExecutorAdapter:
                 metric_registry_version=self._registry.version,
                 initial_cash=request.spec.initial_cash,
                 annualization_days=request.spec.annualization_days,
-                fee_bps=strategy.execution.fee_bps,
-                slippage_bps=strategy.execution.slippage_bps,
-                participation_rate=strategy.execution.participation_rate,
+                fee_bps=environment.fee_bps,
+                slippage_bps=environment.slippage_bps,
+                participation_rate=environment.participation_rate,
+                environment=environment,
+                environment_hash=environment_hash(environment),
                 strategy_provenance=request.strategy_provenance,
-                warnings=request.dataset.warnings,
+                warnings=(
+                    *request.dataset.warnings,
+                    *_benchmark_carry_warnings(request.dataset, carried),
+                ),
             ),
             metric_definitions=self._registry.definitions(),
             metrics=tuple(metrics),
@@ -291,82 +353,198 @@ class BacktestEngineExecutorAdapter:
             raise RunCancelledError("run cancelled")
 
 
-def _benchmark_values(request: BacktestExecutionRequest) -> dict[date, float]:
-    benchmark_id = request.dataset.benchmark_security_id
+# 엔진이 보유 수량에 적용하는 확인된 사건(`_apply_corporate_action`)과 같은 집합이다. 알림 전용
+# 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
+_PRICE_ADJUSTING_ACTIONS = frozenset(
+    {CorporateActionType.SPLIT.value, CorporateActionType.REVERSE_SPLIT.value}
+)
+
+
+def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[date, float]:
+    """벤치마크 종목을 첫 세션에 `initial_cash`어치 사서 들고 있는 곡선.
+
+    bar는 원주가라 분할·병합 날 끊긴다. 엔진이 전략 보유 수량에 적용하는 것과 같은 사건
+    (`dataset.corporate_actions`의 split·reverse_split, `ratio` = 주식 수 배율)을 사건 세션부터
+    누적해 곱하면 보유자가 실제로 가진 가치가 된다(이슈 #219). 사건 세션에 bar가 없으면 다음 bar부터
+    반영된다. 첫 bar 이전·당일 사건은 기준값에도 곱해져 곡선을 움직이지 않는다.
+    """
+    benchmark_id = dataset.benchmark_security_id
     if benchmark_id is None:
         return {}
-    bars = tuple(item for item in request.dataset.bars if item.security_id == benchmark_id)
+    bars = sorted(
+        (item for item in dataset.bars if item.security_id == benchmark_id),
+        key=lambda item: item.session,
+    )
     if not bars:
         return {}
-    first = bars[0].close
-    return {item.session: request.spec.initial_cash * item.close / first for item in bars}
+    actions = sorted(
+        (
+            (item.session, float(item.ratio))
+            for item in dataset.corporate_actions
+            if item.security_id == benchmark_id and item.action_type in _PRICE_ADJUSTING_ACTIONS
+        ),
+        key=lambda item: item[0],
+    )
+    values: dict[date, float] = {}
+    cumulative = 1.0
+    applied = 0
+    base: float | None = None
+    for bar in bars:
+        while applied < len(actions) and actions[applied][0] <= bar.session:
+            cumulative *= actions[applied][1]
+            applied += 1
+        adjusted = bar.close * cumulative
+        if base is None:
+            base = adjusted
+        values[bar.session] = initial_cash * adjusted / base
+    return values
 
 
-def _artifacts(result, costs) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
+def _benchmark_series(
+    dataset: BacktestDataset, initial_cash: float, sessions: Sequence[date]
+) -> tuple[dict[date, float], tuple[date, ...]]:
+    """run 세션마다의 벤치마크 값과, bar가 없어 직전 값을 이어 쓴 세션들.
+
+    벤치마크 종목이 거래정지·상장폐지로 bar가 없는 세션에는 직전 값(분할·병합 반영)을 이어 쓴다
+    (이슈 #226). 엔진이 정지 종목을 평가하는 규칙과 같다 — `Portfolio.mark`(Python·Rust core)는
+    bar가 있는 종목의 평가 가격만 갱신하므로 정지 종목은 직전 종가로 계속 평가된다. 정지 중 사건은
+    엔진이 다음 bar 세션에 정산하듯 `_benchmark_values`가 다음 bar부터 반영한다. 첫 bar 이전 세션은
+    이어 쓸 값이 없어(살 수 없었다) 비워 두고, 그 경우 벤치마크 지표는 전과 같이 사용 불가다.
+    """
+    by_bar = _benchmark_values(dataset, initial_cash)
+    if not by_bar:
+        return {}, ()
+    values: dict[date, float] = {}
+    carried: list[date] = []
+    last: float | None = None
+    for session in sorted(sessions):
+        value = by_bar.get(session)
+        if value is not None:
+            last = value
+        elif last is not None:
+            value = last
+            carried.append(session)
+        else:
+            continue
+        values[session] = value
+    return values, tuple(carried)
+
+
+def _benchmark_carry_warnings(
+    dataset: BacktestDataset, carried: tuple[date, ...]
+) -> tuple[DataWarning, ...]:
+    """이어 쓴 세션이 있으면 manifest 경고 한 줄. 화면은 code와 message를 그대로 보여 준다."""
+    if not carried:
+        return ()
+    shown = ", ".join(session.isoformat() for session in carried[:10])
+    more = f" (+{len(carried) - 10})" if len(carried) > 10 else ""
+    return (
+        DataWarning(
+            code="benchmark.suspended_sessions_carried",
+            message=(
+                "벤치마크 종목에 bar가 없는 세션(거래정지·상장폐지)은 직전 종가(분할·병합 반영)를 "
+                "이어 썼다 — 엔진이 정지 종목을 평가하는 규칙과 같다. "
+                f"benchmark={dataset.benchmark_security_id} carried_sessions={len(carried)} "
+                f"sessions={shown}{more}"
+            ),
+        ),
+    )
+
+
+def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
+    """엔진 결과 테이블을 워크벤치 raw artifact로 옮긴다.
+
+    세션 날짜와 종목 코드는 행마다 다시 만들지 않는다 — position 행이 세션 × 보유 종목 수라
+    행당 `.date()` 한 번이 그대로 유니버스 크기의 비용이 된다.
+    """
+    session_dates = tuple(ts.date() for ts in tables.sessions)
+    security_ids = tuple(instrument.symbol for instrument in tables.instruments)
     snapshots = tuple(
         RawSnapshot(
-            session=item.ts.date(),
-            cash=item.cash,
-            equity=item.equity,
-            gross_exposure=item.gross_exposure,
-            net_exposure=(
-                sum(position.market_value for position in item.positions) / item.equity
-                if item.equity != 0
-                else 0.0
-            ),
+            session=session_dates[session_index],
+            cash=cash,
+            equity=equity,
+            gross_exposure=gross_exposure,
+            net_exposure=positions_value / equity if equity != 0 else 0.0,
         )
-        for item in result.snapshots
+        for session_index, cash, equity, gross_exposure, positions_value in tables.snapshots
     )
     positions = tuple(
         RawPosition(
-            session=snapshot.ts.date(),
-            security_id=position.instrument.symbol,
-            quantity=str(position.quantity),
-            average_price=position.average_price,
-            market_price=position.market_price,
-            market_value=position.market_value,
-            unrealized_pnl=position.unrealized_pnl,
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            quantity=str(quantity),
+            average_price=average_price,
+            market_price=market_price,
+            market_value=market_value,
+            unrealized_pnl=unrealized_pnl,
         )
-        for snapshot in result.snapshots
-        for position in snapshot.positions
+        for (
+            session_index,
+            instrument_index,
+            quantity,
+            average_price,
+            market_price,
+            market_value,
+            unrealized_pnl,
+        ) in tables.positions
     )
     orders = tuple(
         RawOrder(
-            order_id=item.order_id,
-            decision_id=item.decision_id,
-            session=item.ts.date(),
-            security_id=item.instrument.symbol,
-            side=item.side.value,
-            quantity=str(item.quantity),
-            order_type=item.order_type.value,
-            time_in_force=item.time_in_force.value,
+            order_id=order_id,
+            decision_id=decision_id,
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            side=side,
+            quantity=str(quantity),
+            order_type=order_type,
+            time_in_force=time_in_force,
         )
-        for item in result.orders
+        for (
+            order_id,
+            decision_id,
+            session_index,
+            instrument_index,
+            side,
+            quantity,
+            order_type,
+            time_in_force,
+        ) in tables.orders
     )
     fills = tuple(
         RawFill(
-            fill_id=item.fill_id,
-            order_id=item.order_id,
-            session=item.ts.date(),
-            security_id=item.instrument.symbol,
-            side=item.side.value,
-            quantity=str(item.quantity),
-            price=item.price,
-            fee=item.fee,
-            slippage_per_share=item.slippage_per_share,
+            fill_id=fill_id,
+            order_id=order_id,
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            side=side,
+            quantity=str(quantity),
+            price=price,
+            fee=fee,
+            slippage_per_share=slippage_per_share,
         )
-        for item in result.fills
+        for (
+            fill_id,
+            order_id,
+            session_index,
+            instrument_index,
+            side,
+            quantity,
+            price,
+            fee,
+            slippage_per_share,
+        ) in tables.fills
     )
     raw_costs = tuple(
         RawCost(
-            session=item.ts.date(),
-            kind=item.kind.value,
-            security_id=item.instrument.symbol if item.instrument is not None else None,
-            amount=item.amount,
+            session=session_dates[session_index],
+            kind=kind,
+            security_id=None if instrument_index is None else security_ids[instrument_index],
+            amount=amount,
         )
-        for item in costs
+        for session_index, kind, instrument_index, amount in tables.costs
     )
-    trades = _closed_trades(result.fills)
+    trades = _closed_trades(tables, session_dates, security_ids)
     outcomes = tuple(
         TradeOutcome(
             security_id=item.security_id,
@@ -392,13 +570,31 @@ class _OpenTrade:
     opening_slippage: float
 
 
-def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
+def _closed_trades(
+    tables: ResultTables,
+    session_dates: tuple[date, ...],
+    security_ids: tuple[str, ...],
+) -> tuple[RawTrade, ...]:
+    sessions = tables.sessions
     states: dict[str, _OpenTrade] = {}
     trades: list[RawTrade] = []
-    for fill in sorted(fills, key=lambda item: (item.ts, item.fill_id)):
-        security_id = fill.instrument.symbol
-        delta = float(fill.quantity) * (1 if fill.side is Side.BUY else -1)
-        slip = float(fill.quantity) * abs(fill.slippage_per_share)
+    # `(세션 ts, fill_id)` 순서 — 세션 index는 feed 정렬 순서라 ts 정렬과 결과가 같다.
+    for row in sorted(tables.fills, key=lambda item: (sessions[item[2]], item[0])):
+        (
+            _fill_id,
+            _order_id,
+            session_index,
+            instrument_index,
+            side,
+            quantity,
+            price,
+            fee,
+            slippage_per_share,
+        ) = row
+        security_id = security_ids[instrument_index]
+        session = session_dates[session_index]
+        delta = float(quantity) * (1 if side == "buy" else -1)
+        slip = float(quantity) * abs(slippage_per_share)
         state = states.get(security_id)
         if state is None or state.quantity == 0 or state.quantity * delta > 0:
             current_quantity = abs(state.quantity) if state is not None else 0.0
@@ -408,11 +604,11 @@ def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
                 quantity=(1 if delta > 0 else -1) * total,
                 average_price=(
                     ((state.average_price * current_quantity) if state is not None else 0.0)
-                    + fill.price * added
+                    + price * added
                 )
                 / total,
-                opened_on=state.opened_on if state is not None else fill.ts.date(),
-                opening_fees=(state.opening_fees if state is not None else 0.0) + fill.fee,
+                opened_on=state.opened_on if state is not None else session,
+                opening_fees=(state.opening_fees if state is not None else 0.0) + fee,
                 opening_slippage=(state.opening_slippage if state is not None else 0.0) + slip,
             )
             continue
@@ -421,20 +617,23 @@ def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
         closed_quantity = min(open_quantity, fill_quantity)
         open_fraction = closed_quantity / open_quantity
         exit_fraction = closed_quantity / fill_quantity
-        fees = state.opening_fees * open_fraction + fill.fee * exit_fraction
+        fees = state.opening_fees * open_fraction + fee * exit_fraction
         slippage_cost = state.opening_slippage * open_fraction + slip * exit_fraction
         gross_pnl = (
-            (fill.price - state.average_price) * closed_quantity * (1 if state.quantity > 0 else -1)
+            (price - state.average_price) * closed_quantity * (1 if state.quantity > 0 else -1)
         )
         trades.append(
             RawTrade(
                 security_id=security_id,
                 opened_on=state.opened_on,
-                closed_on=fill.ts.date(),
+                closed_on=session,
                 side="long" if state.quantity > 0 else "short",
-                quantity=str(Decimal(str(closed_quantity)).normalize()),
+                # 지수 표기 금지(#135): `Decimal("700.0").normalize()`는 `7E+2`라 `str()`이
+                # "7E+2"를 냈다. `format(…, "f")`는 같은 값을 "700"으로 — fills·positions의
+                # 정수 문자열과 표현이 맞는다.
+                quantity=format(Decimal(str(closed_quantity)).normalize(), "f"),
                 entry_price=state.average_price,
-                exit_price=fill.price,
+                exit_price=price,
                 pnl=gross_pnl - fees,
                 fees=fees,
                 slippage_cost=slippage_cost,
@@ -453,9 +652,9 @@ def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
         elif remaining_fill > 0:
             states[security_id] = _OpenTrade(
                 quantity=(1 if delta > 0 else -1) * remaining_fill,
-                average_price=fill.price,
-                opened_on=fill.ts.date(),
-                opening_fees=fill.fee * (1 - exit_fraction),
+                average_price=price,
+                opened_on=session,
+                opening_fees=fee * (1 - exit_fraction),
                 opening_slippage=slip * (1 - exit_fraction),
             )
         else:

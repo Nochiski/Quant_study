@@ -116,6 +116,20 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
             </li>
           ))}
         </ul>
+        <ul className="app-shell__list app-shell__list--footer">
+          <li>
+            <Link
+              to="/settings"
+              className="app-shell__link"
+              activeProps={{ "aria-current": "page" }}
+            >
+              <span className="app-shell__icon" aria-hidden="true">
+                ⚙
+              </span>
+              <span className="app-shell__label">{t("nav.settings")}</span>
+            </Link>
+          </li>
+        </ul>
         <div className="app-shell__collapse">
           <Button
             size="small"

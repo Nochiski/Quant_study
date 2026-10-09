@@ -3,23 +3,22 @@ import { describe, expect, it } from "vitest";
 import { describeYamlCursor, templatePointer } from "../cursor";
 
 const DOC = [
-  'schema_version: "1.0"',
+  'schema_version: "1.1"',
   "title: 퀄리티 모멘텀",
   "risk:",
   "  gross_exposure: 1",
   "  max_name_weight: 0.05",
   "factors:",
-  "  factors:",
-  "    - factor_id: momentum",
-  "      graph:",
-  "        nodes:",
-  "          - node_id: px",
-  "            kind: field",
-  "          - node_id: mom",
-  "            kind: time_series",
-  "            input_node_id: px",
-  "    - factor_id: quality",
-  "      weight: 1",
+  "  - factor_id: momentum",
+  "    graph:",
+  "      nodes:",
+  "        - node_id: px",
+  "          kind: field",
+  "        - node_id: mom",
+  "          kind: time_series",
+  "          input_node_id: px",
+  "  - factor_id: quality",
+  "    weight: 1",
   "parameters:",
   "  - parameter_id: lookback",
   "",
@@ -76,21 +75,18 @@ describe("describeYamlCursor", () => {
 
   it("counts sequence items and the keys owned by `- key:` lines", () => {
     // typing a key inside the second graph node
-    const cursor = describeYamlCursor(DOC, at(14, 12) + "in".length);
+    const cursor = describeYamlCursor(DOC, at(13, 10) + "in".length);
     expect(cursor).toMatchObject({
       mode: "key",
-      pointer: "/factors/factors/0/graph/nodes/1",
+      pointer: "/factors/0/graph/nodes/1",
       prefix: "in",
     });
     expect(cursor?.siblings).toEqual(["node_id", "kind"]);
     // value of a key on the item line itself
-    const first = describeYamlCursor(
-      DOC,
-      at(15, "    - factor_id: qua".length),
-    );
+    const first = describeYamlCursor(DOC, at(14, "  - factor_id: qua".length));
     expect(first).toMatchObject({
       mode: "value",
-      pointer: "/factors/factors/1/factor_id",
+      pointer: "/factors/1/factor_id",
       prefix: "qua",
     });
   });
@@ -138,10 +134,10 @@ describe("describeYamlCursor", () => {
       prefix: "b",
     });
     const nested =
-      "factors:\n  factors:\n  - factor_id: m\n    graph:\n      nodes:\n      - node_id: a\n      - node_id: b\n        ki";
+      "factors:\n- factor_id: m\n  graph:\n    nodes:\n    - node_id: a\n    - node_id: b\n      ki";
     expect(describeYamlCursor(nested, nested.length)).toMatchObject({
       mode: "key",
-      pointer: "/factors/factors/0/graph/nodes/1",
+      pointer: "/factors/0/graph/nodes/1",
       prefix: "ki",
       siblings: ["node_id"],
     });
@@ -178,8 +174,8 @@ describe("describeYamlCursor", () => {
   it("escapes pointer segments and templates array indices", () => {
     const text = "a/b:\n  ";
     expect(describeYamlCursor(text, text.length)?.pointer).toBe("/a~1b");
-    expect(templatePointer("/factors/factors/12/graph/nodes/0/kind")).toBe(
-      "/factors/factors/*/graph/nodes/*/kind",
+    expect(templatePointer("/factors/12/graph/nodes/0/kind")).toBe(
+      "/factors/*/graph/nodes/*/kind",
     );
   });
 });

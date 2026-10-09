@@ -1,0 +1,8 @@
+/* 배지가 둘 이상일 때(STALE·한글 조합) 서로 맞닿지 않게 한다 — 바깥 슬롯의 gap은 이 div 하나에만
+   닿는다(P1-01 리뷰 P3-5). */
+.document-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

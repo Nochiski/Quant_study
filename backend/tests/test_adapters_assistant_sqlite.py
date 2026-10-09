@@ -1,0 +1,994 @@
+"""`assistant_sqlite` 저장 adapter 계약 테스트 (설계 spec D5, A-03).
+
+포트 계약의 기대 동작은 `tests/application/_assistant_fakes.py`의 인메모리 가짜가 이미 고정해
+두었다. 여기서는 같은 계약을 SQLite 구현이 지키는지, 그리고 파일 저장소에서만 드러나는 사실
+(재기동 후 보존, 부분 유니크 인덱스, 트랜잭션 안 sequence 부여, 이벤트 JSON 왕복)을 본다.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
+from threading import Barrier
+from typing import get_args
+
+import pytest
+
+from strategy_workbench.adapters.outbound.assistant_sqlite import _schema
+from strategy_workbench.adapters.outbound.assistant_sqlite._event_codec import (
+    decode_event,
+    encode_event,
+)
+from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository import (
+    AssistantDatabase,
+    AssistantStorageError,
+    SQLiteChatSessionRepository,
+    SQLiteProviderProfileRepository,
+)
+from strategy_workbench.application.assistant_chat.facade.chat import ChatSession, DocumentRef
+from strategy_workbench.application.assistant_chat.facade.ports import (
+    ChatSessionNotFoundError,
+    ProviderProfileNotFoundError,
+    TurnNotFoundError,
+)
+from strategy_workbench.domain.assistant.facade.models import (
+    ChatEvent,
+    ChatMessage,
+    ChatRole,
+    Done,
+    Failure,
+    FailureCode,
+    Proposal,
+    ProposalCompileResult,
+    ProposalDiagnostic,
+    ProviderKind,
+    ProviderProfile,
+    SearchActivity,
+    SearchBudgetExhausted,
+    Source,
+    StrategyProposal,
+    TextDelta,
+    ThinkingSummary,
+    ToolCall,
+    ToolResultSummary,
+    Turn,
+    TurnStatus,
+    Usage,
+)
+
+NOW = datetime(2026, 9, 20, 9, 30, tzinfo=UTC)
+
+
+@pytest.fixture
+def database() -> Iterator[AssistantDatabase]:
+    with AssistantDatabase() as opened:
+        yield opened
+
+
+def _profile(
+    profile_id: str = "profile-1",
+    *,
+    kind: ProviderKind = ProviderKind.ANTHROPIC,
+    active: bool = False,
+    base_url: str | None = None,
+) -> ProviderProfile:
+    return ProviderProfile(
+        profile_id=profile_id,
+        kind=kind,
+        label=f"라벨 {profile_id}",
+        model="claude-opus-5",
+        base_url=base_url,
+        created_at=NOW,
+        active=active,
+    )
+
+
+def _session(
+    session_id: str = "session-1",
+    *,
+    document_ref: DocumentRef | None = None,
+) -> ChatSession:
+    return ChatSession(
+        session_id=session_id,
+        document_ref=document_ref or DocumentRef(strategy_id=None, revision=None, draft_id="d-1"),
+        provider_profile_id="profile-1",
+        created_at=NOW,
+        title="모멘텀 전략 상담",
+    )
+
+
+def _turn(turn_id: str = "turn-1", *, session_id: str = "session-1", accepted: int = -1) -> Turn:
+    return Turn(
+        turn_id=turn_id,
+        session_id=session_id,
+        status=TurnStatus.RUNNING,
+        accepted_sequence=accepted,
+        started_at=NOW,
+        finished_at=None,
+    )
+
+
+def _stated(
+    status: TurnStatus,
+    *,
+    finished_at: datetime | None,
+    turn_id: str = "turn-1",
+    session_id: str = "session-1",
+) -> Turn:
+    """상태 갱신용 `Turn`. 보존 대상 두 필드는 저장 값과 다르게 둬 갱신이 건드리지 않음을 본다."""
+    return Turn(
+        turn_id=turn_id,
+        session_id=session_id,
+        status=status,
+        accepted_sequence=-1,
+        started_at=datetime(1999, 1, 1, tzinfo=UTC),
+        finished_at=finished_at,
+    )
+
+
+def _event_samples() -> dict[type, ChatEvent]:
+    """union 멤버 타입마다 왕복에 쓸 표본 하나.
+
+    키 집합이 `get_args(ChatEvent)`와 같은지는 아래 테스트가 단언한다. 멤버가 늘면 `_every_event`가
+    `KeyError`로 먼저 멈추고, 표본만 빠뜨리면 그 테스트가 어느 타입인지 이름으로 말한다.
+    """
+    proposal = StrategyProposal(
+        title="KRX 모멘텀",
+        summary="12개월 모멘텀 상위 20종목.",
+        rationale="근거 문장 — 출처 인용 포함.",
+        sources=(Source(title="논문", url="https://example.test/paper"),),
+        source_text="schema_version: '1.1'\n",
+        source_format="yaml",
+        compile=ProposalCompileResult(
+            ok=False,
+            spec_hash=None,
+            diagnostics=(
+                ProposalDiagnostic(
+                    code="strategy.factor.unknown",
+                    pointer="/factors/0/factor_id",
+                    message="알 수 없는 팩터 식별자",
+                    severity="error",
+                ),
+            ),
+        ),
+    )
+    samples: tuple[ChatEvent, ...] = (
+        TextDelta(text="안녕하세요"),
+        ThinkingSummary(text="요약된 사고"),
+        ToolCall(call_id="call-1", name="validate_strategy_yaml", arguments={"source": "a: 1"}),
+        ToolResultSummary(call_id="call-1", name="validate_strategy_yaml", ok=True, summary="통과"),
+        SearchActivity(query="KRX 모멘텀", sources=(Source(title="기사", url="https://a.test/1"),)),
+        SearchBudgetExhausted(),
+        Proposal(proposal=proposal),
+        # 캐시 두 칸도 0이 아니어야 왕복 검사가 뜻을 가진다. 기본값 그대로면 codec이
+        # 두 필드를 통째로 흘려도 같은 값으로 복원돼 테스트가 조용히 통과한다.
+        Usage(
+            input_tokens=1200,
+            output_tokens=340,
+            cache_read_tokens=8000,
+            cache_write_tokens=450,
+        ),
+        Done(stop_reason="end_turn"),
+        Failure(code=FailureCode.TOOL_ROUNDS_EXCEEDED, message="도구 호출이 너무 많습니다"),
+    )
+    return {type(event): event for event in samples}
+
+
+def _every_event() -> tuple[ChatEvent, ...]:
+    """`ChatEvent` union 전부를 union 선언 순서대로. 목록이 아니라 union이 내용을 정한다."""
+    samples = _event_samples()
+    return tuple(samples[member] for member in get_args(ChatEvent))
+
+
+# -- 프로파일 저장소 -------------------------------------------------------------------------
+
+
+def test_profiles_round_trip_in_registration_order(database: AssistantDatabase) -> None:
+    repository = SQLiteProviderProfileRepository(database)
+
+    repository.add(_profile("profile-b", base_url="https://gateway.test/v1"))
+    repository.add(_profile("profile-a", kind=ProviderKind.OPENAI))
+
+    assert [profile.profile_id for profile in repository.list()] == ["profile-b", "profile-a"]
+    stored = repository.get("profile-b")
+    assert stored == _profile("profile-b", base_url="https://gateway.test/v1")
+    assert repository.get("profile-a").kind is ProviderKind.OPENAI
+
+
+def test_missing_profile_is_a_port_error(database: AssistantDatabase) -> None:
+    repository = SQLiteProviderProfileRepository(database)
+
+    with pytest.raises(ProviderProfileNotFoundError):
+        repository.get("absent")
+    with pytest.raises(ProviderProfileNotFoundError):
+        repository.delete("absent")
+    with pytest.raises(ProviderProfileNotFoundError):
+        repository.set_active("absent")
+
+
+def test_set_active_leaves_exactly_one_active_profile(database: AssistantDatabase) -> None:
+    repository = SQLiteProviderProfileRepository(database)
+    repository.add(_profile("profile-a", active=True))
+    repository.add(_profile("profile-b"))
+
+    repository.set_active("profile-b")
+
+    assert [profile.active for profile in repository.list()] == [False, True]
+
+
+def test_a_second_active_profile_is_refused_by_the_partial_unique_index(
+    database: AssistantDatabase,
+) -> None:
+    """활성 프로파일이 둘이 되는 상태는 저장소가 표현조차 못 하게 막는다."""
+    repository = SQLiteProviderProfileRepository(database)
+    repository.add(_profile("profile-a", active=True))
+
+    with pytest.raises(AssistantStorageError):
+        repository.add(_profile("profile-b", active=True))
+
+    assert [profile.profile_id for profile in repository.list()] == ["profile-a"]
+
+
+def test_profiles_survive_reopening_the_database_file(tmp_path: Path) -> None:
+    path = tmp_path / "assistant.sqlite3"
+    with AssistantDatabase(path) as first:
+        SQLiteProviderProfileRepository(first).add(_profile("profile-a", active=True))
+
+    with AssistantDatabase(path) as second:
+        restored = SQLiteProviderProfileRepository(second).list()
+
+    assert [profile.profile_id for profile in restored] == ["profile-a"]
+    assert restored[0].active is True
+
+
+def test_a_foreign_sqlite_file_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "foreign.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE unrelated (id TEXT)")
+
+    with pytest.raises(AssistantStorageError):
+        AssistantDatabase(path)
+
+
+# -- 세션·메시지 ------------------------------------------------------------------------------
+
+
+def test_sessions_round_trip_and_list_by_document_reference(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    draft_ref = DocumentRef(strategy_id=None, revision=None, draft_id="d-1")
+    saved_ref = DocumentRef(strategy_id="s-1", revision=3, draft_id=None)
+    repository.create(_session("session-draft", document_ref=draft_ref))
+    repository.create(_session("session-saved", document_ref=saved_ref))
+
+    assert repository.get("session-draft") == _session("session-draft", document_ref=draft_ref)
+    assert [item.session_id for item in repository.list_for_document(draft_ref)] == [
+        "session-draft"
+    ]
+    assert [item.session_id for item in repository.list_for_document(saved_ref)] == [
+        "session-saved"
+    ]
+
+
+def test_run_sessions_round_trip_and_list_apart_from_documents(
+    database: AssistantDatabase,
+) -> None:
+    """결과 설명 세션은 실행 하나에 붙고, 문서 세션 목록에 섞이지 않는다(결과 설명 spec R3)."""
+    repository = SQLiteChatSessionRepository(database)
+    run_ref = DocumentRef(strategy_id=None, revision=None, draft_id=None, run_id="run-1")
+    other_run = DocumentRef(strategy_id=None, revision=None, draft_id=None, run_id="run-2")
+    draft_ref = DocumentRef(strategy_id=None, revision=None, draft_id="d-1")
+    repository.create(_session("session-run", document_ref=run_ref))
+    repository.create(_session("session-draft", document_ref=draft_ref))
+
+    assert repository.get("session-run") == _session("session-run", document_ref=run_ref)
+    assert [item.session_id for item in repository.list_for_document(run_ref)] == ["session-run"]
+    assert repository.list_for_document(other_run) == ()
+    assert [item.session_id for item in repository.list_for_document(draft_ref)] == [
+        "session-draft"
+    ]
+
+
+def test_messages_keep_conversation_order(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW, "turn-1"))
+    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW, "turn-1"))
+
+    stored = repository.messages("session-1")
+
+    assert [(message.role, message.text) for message in stored] == [
+        (ChatRole.USER, "질문"),
+        (ChatRole.ASSISTANT, "답변"),
+    ]
+
+
+def test_messages_keep_the_turn_they_belong_to(database: AssistantDatabase) -> None:
+    """메시지의 `turn_id`가 왕복한다(C-03). 턴 행보다 먼저 써도 받는다.
+
+    러너는 거절(세션 없음·활성 공급자 없음)을 호출 스레드에서 돌려주려고 사용자 메시지를 턴 행보다
+    먼저 쓴다. 그래서 이 칼럼에는 외래 키를 걸지 않는다 — 걸면 첫 질문부터 거부된다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW, "turn-9"))
+    repository.create_turn(_turn("turn-9"))
+    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW, "turn-9"))
+
+    assert [message.turn_id for message in repository.messages("session-1")] == [
+        "turn-9",
+        "turn-9",
+    ]
+
+
+def test_missing_session_is_a_port_error(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.get("absent")
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.append_message("absent", ChatMessage(ChatRole.USER, "질문", NOW, "turn-1"))
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.messages("absent")
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.last_sequence("absent")
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.events("absent")
+
+
+# -- 턴 ---------------------------------------------------------------------------------------
+
+
+def test_turns_round_trip_and_record_their_final_state(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn(accepted=4))
+
+    finished = Turn(
+        turn_id="turn-1",
+        session_id="session-1",
+        status=TurnStatus.COMPLETED,
+        accepted_sequence=4,
+        started_at=NOW,
+        finished_at=datetime(2026, 9, 20, 9, 35, tzinfo=UTC),
+    )
+    assert repository.update_turn(finished) == finished
+    assert repository.get_turn("turn-1") == finished
+
+
+def test_a_cancelled_turn_may_still_have_no_finish_time(database: AssistantDatabase) -> None:
+    """러너는 취소를 먼저 기록하고 종료 시각은 스레드가 끝날 때 채운다(`_turns.py`의 `cancel`)."""
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn())
+
+    cancelled = repository.update_turn(
+        Turn(
+            turn_id="turn-1",
+            session_id="session-1",
+            status=TurnStatus.CANCELLED,
+            accepted_sequence=-1,
+            started_at=NOW,
+            finished_at=None,
+        )
+    )
+
+    assert cancelled.status is TurnStatus.CANCELLED
+    assert cancelled.finished_at is None
+
+
+def test_missing_turn_is_a_port_error(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+
+    with pytest.raises(TurnNotFoundError):
+        repository.get_turn("absent")
+    with pytest.raises(TurnNotFoundError):
+        repository.update_turn(_turn("absent"))
+    with pytest.raises(TurnNotFoundError):
+        repository.append_events("absent", (Done(stop_reason="end_turn"),))
+
+
+def test_session_turns_come_back_in_start_order(database: AssistantDatabase) -> None:
+    """A-04의 이력 화면이 읽는 조회. `chat_turns`는 `WITHOUT ROWID`라 삽입 순서가 없다.
+
+    시작 시각이 같아도(같은 초에 두 턴을 열면 흔하다) 순서가 흔들리면 사이드바의 턴 목록이
+    새로고침마다 뒤바뀐다. 직전 sequence, 그다음 turn_id로 갈라 결정적으로 만든다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn("turn-b", accepted=1))
+    repository.create_turn(_turn("turn-a", accepted=0))
+
+    stored = repository.turns("session-1")
+
+    assert [item.turn_id for item in stored] == ["turn-a", "turn-b"]
+    assert [item.accepted_sequence for item in stored] == [0, 1]
+
+
+def test_session_turns_include_a_turn_that_never_produced_an_event(
+    database: AssistantDatabase,
+) -> None:
+    """이벤트에서 turn_id를 모아 역산하면 사라지는 턴이 있다. 그래서 별도 조회가 필요하다."""
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn())
+    repository.update_turn(_stated(TurnStatus.CANCELLED, finished_at=NOW))
+
+    stored = repository.turns("session-1")
+
+    assert [item.status for item in stored] == [TurnStatus.CANCELLED]
+    assert repository.events("session-1") == ()
+
+
+def test_turns_of_an_unknown_session_is_a_port_error(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.turns("absent")
+
+
+def test_a_turn_for_an_unknown_session_is_refused(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.create_turn(_turn(session_id="absent"))
+
+
+# -- 이벤트 -----------------------------------------------------------------------------------
+
+
+def test_append_events_numbers_the_session_monotonically(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn("turn-1"))
+    repository.create_turn(_turn("turn-2"))
+
+    first = repository.append_events("turn-1", (TextDelta(text="가"), TextDelta(text="나")))
+    second = repository.append_events("turn-2", (Done(stop_reason="end_turn"),))
+
+    assert first == (0, 1)
+    assert second == (2,)
+    assert repository.last_sequence("session-1") == 2
+
+
+def test_sequences_do_not_collide_across_sessions(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session("session-1"))
+    repository.create(_session("session-2"))
+    repository.create_turn(_turn("turn-1", session_id="session-1"))
+    repository.create_turn(_turn("turn-2", session_id="session-2"))
+
+    repository.append_events("turn-1", (TextDelta(text="가"),))
+
+    assert repository.append_events("turn-2", (TextDelta(text="나"),)) == (0,)
+    assert repository.last_sequence("session-2") == 0
+
+
+def test_last_sequence_is_minus_one_before_any_event(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+
+    assert repository.last_sequence("session-1") == -1
+
+
+def test_events_after_sequence_are_ordered(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn())
+    repository.append_events(
+        "turn-1", (TextDelta(text="가"), TextDelta(text="나"), Done(stop_reason="end_turn"))
+    )
+
+    resumed = repository.events("session-1", after_sequence=0)
+
+    assert [item.sequence for item in resumed] == [1, 2]
+    assert [item.turn_id for item in resumed] == ["turn-1", "turn-1"]
+    assert resumed[-1].event == Done(stop_reason="end_turn")
+
+
+def test_every_chat_event_round_trips_through_storage(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn())
+    events = _every_event()
+
+    repository.append_events("turn-1", events)
+
+    assert tuple(item.event for item in repository.events("session-1")) == events
+
+
+def test_an_unknown_event_tag_in_the_file_is_a_storage_error(tmp_path: Path) -> None:
+    """손상·다운그레이드된 행을 조용히 건너뛰면 이력에 구멍이 생긴다. 읽기에서 멈춘다."""
+    path = tmp_path / "assistant.sqlite3"
+    with AssistantDatabase(path) as database:
+        repository = SQLiteChatSessionRepository(database)
+        repository.create(_session())
+        repository.create_turn(_turn())
+        repository.append_events("turn-1", (TextDelta(text="가"),))
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("UPDATE chat_events SET event_type = 'telepathy'")
+
+    with AssistantDatabase(path) as reopened:
+        with pytest.raises(AssistantStorageError):
+            SQLiteChatSessionRepository(reopened).events("session-1")
+
+
+def test_concurrent_appends_on_one_file_produce_disjoint_sequences(tmp_path: Path) -> None:
+    """서로 다른 연결 두 개가 같은 세션에 동시에 붙여도 번호가 겹치거나 비지 않는다.
+
+    `BEGIN IMMEDIATE`와 `(session_id, sequence)` 기본키가 함께 집행한다. 겹치면 재개 클라이언트가
+    한 이벤트를 두 번 반영하고, 비면 영영 오지 않는 번호를 기다린다.
+    """
+    path = tmp_path / "assistant.sqlite3"
+    with AssistantDatabase(path) as setup:
+        repository = SQLiteChatSessionRepository(setup)
+        repository.create(_session())
+        repository.create_turn(_turn("turn-1"))
+        repository.create_turn(_turn("turn-2"))
+
+    barrier = Barrier(2)
+
+    def append(turn_id: str) -> tuple[int, ...]:
+        with AssistantDatabase(path) as database:
+            worker = SQLiteChatSessionRepository(database)
+            barrier.wait(timeout=10)
+            return worker.append_events(turn_id, (TextDelta(text=turn_id), Done(stop_reason="x")))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(append, "turn-1"), pool.submit(append, "turn-2")]
+        assigned = sorted(sequence for future in futures for sequence in future.result())
+
+    assert assigned == [0, 1, 2, 3]
+    with AssistantDatabase(path) as reopened:
+        stored = SQLiteChatSessionRepository(reopened).events("session-1")
+    assert [item.sequence for item in stored] == [0, 1, 2, 3]
+
+
+def test_a_document_reference_row_cannot_name_both_a_strategy_and_a_draft(tmp_path: Path) -> None:
+    """세션 행의 불변식은 `DocumentRef`와 같아야 한다.
+
+    DB가 둘 다 담은 행을 허용하면 읽을 때 `DocumentRef` 생성이 `ValueError`로 터져, 포트가
+    약속하지 않은 예외가 호출부로 샌다.
+    """
+    path = tmp_path / "assistant.sqlite3"
+    with AssistantDatabase(path) as database:
+        SQLiteChatSessionRepository(database).create(_session())
+
+    with sqlite3.connect(path) as connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO chat_sessions (
+                    session_id, ordinal, strategy_id, revision, draft_id,
+                    provider_profile_id, created_at, title
+                ) VALUES ('both', 1, 's-1', 3, 'd-1', 'profile-1', '2026-09-20T00:00:00+00:00', 't')
+                """
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO chat_sessions (
+                    session_id, ordinal, strategy_id, revision, draft_id,
+                    provider_profile_id, created_at, title
+                ) VALUES ('draft-rev', 2, NULL, 3, 'd-1', 'profile-1',
+                          '2026-09-20T00:00:00+00:00', 't')
+                """
+            )
+
+
+def test_a_run_session_row_names_nothing_else(tmp_path: Path) -> None:
+    """실행에 붙은 행도 `DocumentRef`와 같은 불변식을 DB가 집행한다."""
+    path = tmp_path / "assistant.sqlite3"
+    with AssistantDatabase(path):
+        pass
+
+    insert = """
+        INSERT INTO chat_sessions (
+            session_id, ordinal, strategy_id, revision, draft_id, run_id,
+            provider_profile_id, created_at, title
+        ) VALUES (?, ?, ?, ?, ?, ?, 'profile-1', '2026-09-20T00:00:00+00:00', 't')
+    """
+    with sqlite3.connect(path) as connection:
+        for row in (
+            ("run-and-strategy", 0, "s-1", None, None, "run-1"),
+            ("run-and-draft", 1, None, None, "d-1", "run-1"),
+            ("run-revision", 2, None, 3, None, "run-1"),
+            ("nothing", 3, None, None, None, None),
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(insert, row)
+
+
+def _write_v2_file(path: Path) -> None:
+    """v2 스키마(C-03)로 만든 파일에 세션·턴·메시지·이벤트를 하나씩 남긴다(v3 이전 사용자 파일)."""
+    with sqlite3.connect(path) as connection:
+        for _object_type, _name, statement in _schema.V2_SCHEMA_OBJECTS:
+            connection.execute(statement)
+        connection.execute(f"PRAGMA application_id = {_schema._APPLICATION_ID}")
+        connection.execute("PRAGMA user_version = 2")
+        connection.execute(
+            """
+            INSERT INTO chat_sessions (
+                session_id, ordinal, strategy_id, revision, draft_id,
+                provider_profile_id, created_at, title
+            ) VALUES ('session-old', 0, 's-1', 3, NULL, 'profile-1',
+                      '2026-09-20T09:30:00.000000+00:00', '옛 대화')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO chat_turns VALUES (
+                'turn-old', 'session-old', 'completed', -1,
+                '2026-09-20T09:30:00.000000+00:00', '2026-09-20T09:31:00.000000+00:00'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO chat_messages VALUES (
+                'session-old', 0, 'user', '모멘텀이 뭐야?',
+                '2026-09-20T09:30:00.000000+00:00', 'turn-old'
+            )
+            """
+        )
+        event_type, event_json = encode_event(TextDelta(text="모멘텀은"))
+        connection.execute(
+            "INSERT INTO chat_events VALUES ('session-old', 0, 'turn-old', ?, ?)",
+            (event_type, event_json),
+        )
+
+
+def test_a_v2_file_is_upgraded_to_v3_without_losing_history(tmp_path: Path) -> None:
+    """v2 사용자 파일은 이력을 그대로 둔 채 실행 세션을 받을 수 있게 된다(결과 설명 spec R3)."""
+    path = tmp_path / "assistant.sqlite3"
+    _write_v2_file(path)
+
+    with AssistantDatabase(path) as database:
+        repository = SQLiteChatSessionRepository(database)
+        old = repository.get("session-old")
+        assert old.document_ref == DocumentRef(strategy_id="s-1", revision=3, draft_id=None)
+        assert old.title == "옛 대화"
+        assert [
+            (message.text, message.turn_id) for message in repository.messages("session-old")
+        ] == [("모멘텀이 뭐야?", "turn-old")]
+        assert [turn.turn_id for turn in repository.turns("session-old")] == ["turn-old"]
+        assert [item.event for item in repository.events("session-old")] == [
+            TextDelta(text="모멘텀은")
+        ]
+        run_ref = DocumentRef(strategy_id=None, revision=None, draft_id=None, run_id="run-1")
+        repository.create(_session("session-run", document_ref=run_ref))
+        assert [item.session_id for item in repository.list_for_document(run_ref)] == [
+            "session-run"
+        ]
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        # 자식 표의 외래 키는 여전히 원래 이름을 가리킨다(`legacy_alter_table`, 모듈 docstring).
+        (messages_ddl,) = connection.execute(
+            "SELECT sql FROM sqlite_schema WHERE name = 'chat_messages'"
+        ).fetchone()
+        assert "REFERENCES chat_sessions(session_id)" in messages_ddl
+    # 다시 열 때는 이미 v3이라 올리기 없이 manifest 검사만 통과한다.
+    with AssistantDatabase(path) as reopened:
+        assert SQLiteChatSessionRepository(reopened).get("session-old").title == "옛 대화"
+
+
+def test_foreign_keys_stay_on_after_the_schema_is_prepared() -> None:
+    """마이그레이션은 외래 키를 끄고 돈다. in-memory DB는 그 연결을 계속 쓰므로 되돌려야 한다.
+
+    되돌리지 않으면 없는 세션의 턴·이벤트 행이 조용히 저장된다.
+    """
+    with AssistantDatabase() as database, database.transaction(write=False) as connection:
+        assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_a_hand_edited_v2_file_is_refused_before_it_is_rewritten(tmp_path: Path) -> None:
+    """v2 선언과 다른 파일을 v3으로 옮기면 누가 완화한 제약이 새 파일에 조용히 묻힌다."""
+    path = tmp_path / "assistant.sqlite3"
+    _write_v2_file(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE extra (id TEXT)")
+
+    with pytest.raises(AssistantStorageError, match="version 2"):
+        AssistantDatabase(path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+def _write_v1_file(path: Path) -> None:
+    """v1 스키마(A-03)로 만든 파일. 세션·턴·메시지·이벤트를 하나씩 남긴다(`turn_id` 칸이 없다)."""
+    with sqlite3.connect(path) as connection:
+        for _object_type, _name, statement in _schema.V1_SCHEMA_OBJECTS:
+            connection.execute(statement)
+        connection.execute(f"PRAGMA application_id = {_schema._APPLICATION_ID}")
+        connection.execute("PRAGMA user_version = 1")
+        connection.execute(
+            """
+            INSERT INTO chat_sessions (
+                session_id, ordinal, strategy_id, revision, draft_id,
+                provider_profile_id, created_at, title
+            ) VALUES ('session-v1', 0, NULL, NULL, 'draft-1', 'profile-1',
+                      '2026-09-20T09:00:00.000000+00:00', 'v1 대화')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO chat_turns VALUES (
+                'turn-v1', 'session-v1', 'completed', -1,
+                '2026-09-20T09:01:00.000000+00:00', '2026-09-20T09:02:00.000000+00:00'
+            )
+            """
+        )
+        for ordinal, role, text, created_at in (
+            (0, "user", "샤프 비율이 뭐야?", "2026-09-20T09:01:00.000000+00:00"),
+            (1, "assistant", "위험 한 단위당 수익입니다.", "2026-09-20T09:01:30.000000+00:00"),
+        ):
+            connection.execute(
+                "INSERT INTO chat_messages VALUES ('session-v1', ?, ?, ?, ?)",
+                (ordinal, role, text, created_at),
+            )
+        event_type, event_json = encode_event(TextDelta(text="위험 한 단위당"))
+        connection.execute(
+            "INSERT INTO chat_events VALUES ('session-v1', 0, 'turn-v1', ?, ?)",
+            (event_type, event_json),
+        )
+
+
+def _schema_sql(path: Path) -> dict[str, str]:
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name"
+        ).fetchall()
+    return {str(name): str(sql) for name, sql in rows}
+
+
+def _add_orphan_turn(path: Path) -> None:
+    """없는 세션을 가리키는 턴. 외래 키를 끈 연결로만 쓴다 — 올리기의 마지막 검사에 걸리게 한다."""
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute(
+            """
+            INSERT INTO chat_turns VALUES (
+                'turn-orphan', 'no-such-session', 'completed', -1,
+                '2026-09-20T10:00:00.000000+00:00', NULL
+            )
+            """
+        )
+
+
+def test_a_v1_file_climbs_to_v3_without_losing_history(tmp_path: Path) -> None:
+    """v1 파일은 v1 → v2(C-03) → v3(결과 설명) 순서로 한 번에 오른다."""
+    path = tmp_path / "assistant.sqlite3"
+    _write_v1_file(path)
+
+    with AssistantDatabase(path) as database:
+        repository = SQLiteChatSessionRepository(database)
+        old = repository.get("session-v1")
+        assert old.document_ref == DocumentRef(strategy_id=None, revision=None, draft_id="draft-1")
+        assert [
+            (message.role, message.text, message.turn_id)
+            for message in repository.messages("session-v1")
+        ] == [
+            (ChatRole.USER, "샤프 비율이 뭐야?", "turn-v1"),
+            (ChatRole.ASSISTANT, "위험 한 단위당 수익입니다.", "turn-v1"),
+        ]
+        assert [item.event for item in repository.events("session-v1")] == [
+            TextDelta(text="위험 한 단위당")
+        ]
+        run_ref = DocumentRef(strategy_id=None, revision=None, draft_id=None, run_id="run-1")
+        repository.create(_session("session-run", document_ref=run_ref))
+        assert [item.session_id for item in repository.list_for_document(run_ref)] == [
+            "session-run"
+        ]
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert "run_id" in _schema_sql(path)["chat_sessions"]
+    assert "turn_id" in _schema_sql(path)["chat_messages"]
+
+
+@pytest.mark.parametrize(("writer", "version"), [(_write_v1_file, 1), (_write_v2_file, 2)])
+def test_a_failed_upgrade_rolls_back_whole_and_the_retry_is_idempotent(
+    tmp_path: Path, writer: Callable[[Path], None], version: int
+) -> None:
+    """올리기는 한 트랜잭션이다. 마지막 검사에서 실패하면 파일은 원래 버전 그대로 남는다.
+
+    v1 파일은 v2 단계를 지난 뒤 v3 단계 끝(`foreign_key_check`)에서 실패하도록 고아 턴을 심는다.
+    중간 상태(v2 표 모양에 v1 번호)가 남으면 다음 열기가 manifest 검사에서 영영 거부된다. 원인을
+    치운 뒤 다시 열면 오르고, 한 번 더 열어도 아무것도 바뀌지 않는다.
+    """
+    path = tmp_path / "assistant.sqlite3"
+    writer(path)
+    _add_orphan_turn(path)
+    before = _schema_sql(path)
+
+    with pytest.raises(AssistantStorageError, match="parent is missing") as raised:
+        AssistantDatabase(path)
+    # 어느 표의 어느 행을 치워야 하는지와 복구 방법을 말해야 한다(D 스택 리뷰 P3-2). 표가 전부
+    # `WITHOUT ROWID`라 `foreign_key_check`의 rowid 칸만으로는 행을 가리킬 수 없다.
+    message = str(raised.value)
+    assert "table=chat_turns" in message
+    assert "session_id->chat_sessions.session_id" in message
+    assert "{'turn_id': 'turn-orphan', 'session_id': 'no-such-session'}" in message
+    assert "delete those child rows" in message
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == version
+    assert _schema_sql(path) == before
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM chat_turns WHERE turn_id = 'turn-orphan'")
+    with AssistantDatabase(path):
+        pass
+    upgraded = _schema_sql(path)
+    with AssistantDatabase(path) as reopened:
+        sessions = SQLiteChatSessionRepository(reopened)
+        session_id = "session-v1" if version == 1 else "session-old"
+        assert sessions.get(session_id).session_id == session_id
+    assert _schema_sql(path) == upgraded
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
+def test_every_chat_event_union_member_has_a_round_trip_sample() -> None:
+    """표본 목록이 union과 어긋나면 여기서 먼저 깨진다.
+
+    인코딩 쪽 누락은 `assert_never`가 타입 단계에서 잡지만, 디코딩은 태그 문자열 → 타입이라
+    타입 체커가 볼 수 없다. 그 구멍을 이 단언이 막는다.
+    """
+    covered = set(_event_samples())
+
+    assert covered == set(get_args(ChatEvent)), (
+        "ChatEvent union 멤버와 왕복 표본이 다르다 — "
+        f"표본 없음={sorted(member.__name__ for member in set(get_args(ChatEvent)) - covered)} "
+        f"union 밖={sorted(member.__name__ for member in covered - set(get_args(ChatEvent)))}"
+    )
+
+
+def test_every_union_member_decodes_from_its_own_stored_tag() -> None:
+    """태그는 멤버마다 달라야 한다. 두 멤버가 한 태그를 쓰면 되돌릴 때 한쪽이 다른 쪽이 된다."""
+    encoded = {type(event): encode_event(event) for event in _every_event()}
+
+    tags = [tag for tag, _payload in encoded.values()]
+    assert len(set(tags)) == len(tags), f"태그가 겹친다 — tags={sorted(tags)}"
+    for member, (tag, payload) in encoded.items():
+        decoded = decode_event(tag, payload)
+        assert type(decoded) is member
+        assert decoded == _event_samples()[member]
+
+
+def test_every_failure_code_round_trips() -> None:
+    """`FailureCode`가 늘어도 저장·복원이 따라온다. 모르는 코드는 조용히 넘기지 않고 멈춘다."""
+    for code in FailureCode:
+        tag, payload = encode_event(Failure(code=code, message="사유 문장"))
+
+        assert decode_event(tag, payload) == Failure(code=code, message="사유 문장")
+
+    with pytest.raises(AssistantStorageError):
+        decode_event("failure", '{"code":"telepathy","message":"x"}')
+
+
+def test_update_turn_does_not_move_the_resume_anchor_or_the_start_time(
+    database: AssistantDatabase,
+) -> None:
+    """`accepted_sequence`·`started_at`은 턴의 정체다. 갱신이 이 둘을 건드리면 재개가 깨진다.
+
+    `-1`로 덮이면 재접속 클라이언트가 세션을 처음부터 다시 받고, 더 큰 값으로 덮이면 그 사이
+    이벤트를 영영 못 본다. `started_at`이 덮이면 사이드바의 턴 순서가 뒤집힌다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn(accepted=7))
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+
+    returned = repository.update_turn(
+        Turn(
+            turn_id="turn-1",
+            session_id="session-1",
+            status=TurnStatus.COMPLETED,
+            accepted_sequence=-1,
+            started_at=datetime(1999, 1, 1, tzinfo=UTC),
+            finished_at=finished_at,
+        )
+    )
+
+    stored = repository.get_turn("turn-1")
+    assert stored.accepted_sequence == 7
+    assert stored.started_at == NOW
+    assert stored.status is TurnStatus.COMPLETED
+    assert stored.finished_at == finished_at
+    assert returned == stored, "돌려주는 값은 인자가 아니라 저장된 행이어야 한다"
+
+
+def test_the_strategy_revision_database_is_refused(tmp_path: Path) -> None:
+    """두 DB를 서로 열지 않게 하는 방어의 핵심 가지다.
+
+    `_APPLICATION_ID`가 나중에 전략 쪽 값과 겹치게 바뀌면 여기서 깨진다.
+    """
+    path = tmp_path / "strategy-revisions.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA application_id = 0x5357524B")  # "SWRK" — strategy_sqlite
+        connection.execute("PRAGMA user_version = 2")
+
+    with pytest.raises(AssistantStorageError, match="another application"):
+        AssistantDatabase(path)
+
+
+def test_a_non_utc_aware_timestamp_is_stored_as_utc(database: AssistantDatabase) -> None:
+    """offset이 0이 아닌 aware 값도 손실 없이 UTC로 옮겨진다. 거부하는 것은 naive뿐이다."""
+    seoul = timezone(timedelta(hours=9))
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.append_message(
+        "session-1",
+        ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 18, 30, tzinfo=seoul), "turn-1"),
+    )
+
+    assert repository.messages("session-1")[0].created_at == NOW
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        repository.append_message(
+            "session-1", ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 9, 30), "turn-1")
+        )
+
+
+def test_a_finished_turn_cannot_go_back_to_running(database: AssistantDatabase) -> None:
+    """종료 상태 셋은 다시 바뀌지 않는다(`TurnStatus` docstring).
+
+    되살아나면 "세션에 RUNNING 턴이 있으면 409"(spec D6) 판정이 뒤집혀 그 세션에서 새 턴을 영영
+    시작할 수 없다. 지금은 러너의 `decided`가 막아 주지만, A-04가 HTTP에서 턴 상태를 쓰거나
+    재기동 후 남은 RUNNING 턴을 쓸어 담는 스윕이 생기면 저장소가 막아 줄 것이 없다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn(accepted=3))
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+    repository.update_turn(_stated(TurnStatus.COMPLETED, finished_at=finished_at))
+
+    with pytest.raises(AssistantStorageError, match="cannot change status"):
+        repository.update_turn(_stated(TurnStatus.RUNNING, finished_at=None))
+    with pytest.raises(AssistantStorageError, match="cannot change status"):
+        repository.update_turn(_stated(TurnStatus.FAILED, finished_at=finished_at))
+
+    stored = repository.get_turn("turn-1")
+    assert stored.status is TurnStatus.COMPLETED
+    assert stored.finished_at == finished_at
+
+
+def test_a_running_turn_still_reaches_every_terminal_state(database: AssistantDatabase) -> None:
+    """한쪽 방향만 막는다. 크래시 복구는 남은 RUNNING 턴을 FAILED로 정리해야 한다."""
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+
+    terminal = (TurnStatus.COMPLETED, TurnStatus.FAILED, TurnStatus.CANCELLED)
+
+    for index, status in enumerate(terminal):
+        turn_id = f"turn-{index}"
+        repository.create_turn(_turn(turn_id))
+        target = _stated(status, finished_at=finished_at, turn_id=turn_id)
+
+        assert repository.update_turn(target).status is status
+
+
+def test_a_cancelled_turn_can_still_be_stamped_with_its_finish_time(
+    database: AssistantDatabase,
+) -> None:
+    """러너는 CANCELLED를 먼저 쓰고 스레드가 끝날 때 같은 상태에 `finished_at`만 채운다.
+
+    같은 종료 상태로의 갱신까지 막으면 `_turns.py`의 `cancel` → `_finish` 순서가 깨진다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn())
+    repository.update_turn(_stated(TurnStatus.CANCELLED, finished_at=None))
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+
+    stamped = repository.update_turn(_stated(TurnStatus.CANCELLED, finished_at=finished_at))
+
+    assert stamped.status is TurnStatus.CANCELLED
+    assert stamped.finished_at == finished_at

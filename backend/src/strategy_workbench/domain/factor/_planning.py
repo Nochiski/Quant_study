@@ -11,6 +11,7 @@ from ._nodes import (
     ExpressionNode,
     FactorGraph,
     FieldMetadata,
+    MissingPolicy,
     SavedFactorNode,
     SavedSubgraphNode,
 )
@@ -88,6 +89,7 @@ def compile_factor_plan(
     graph: FactorGraph,
     *,
     registry_version: str,
+    missing: MissingPolicy,
     fields: tuple[FieldMetadata, ...] = (),
     parameter_ids: tuple[str, ...] = (),
     factor_ids: tuple[str, ...] = (),
@@ -125,7 +127,9 @@ def compile_factor_plan(
         "registry_version": registry_version,
         "output_node_id": graph.output_node_id,
         "steps": [asdict(step) for step in steps],
-        "missing_policy": graph.missing_policy.value,
+        # 결측 정책은 실행 설정으로 옮겼지만 plan 의 일부로 남는다: 이 값이 `plan_hash` 에서
+        # 빠지면 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유한다(spec D6).
+        "missing_policy": missing.value,
         "as_of_policy": "available_date_lte_as_of",
     }
     plan_hash = hashlib.sha256(
@@ -147,7 +151,7 @@ def compile_factor_plan(
             )
         ),
         minimum_history_sessions=validation.minimum_history_sessions,
-        missing_policy=graph.missing_policy.value,
+        missing_policy=missing.value,
     )
 
 

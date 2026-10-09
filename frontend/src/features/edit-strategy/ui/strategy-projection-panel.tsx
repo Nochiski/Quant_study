@@ -5,19 +5,11 @@ import "./strategy-projection-panel.css";
 
 type StrategyProjectionPanelProps = {
   projection: StrategyProjection;
-  view: "json" | "form";
 };
 
-const valueText = (value: unknown): string => {
-  if (value === undefined) return "—";
-  const serialized = JSON.stringify(value);
-  return serialized === undefined ? String(value) : serialized;
-};
-
-/** Backend-owned canonical StrategySpec rendered without any edit or reserialization path. */
+/** backend canonical StrategySpec JSON(읽기 전용). Form view는 P4-04부터 `StrategyFormPanel`이 맡는다. */
 export const StrategyProjectionPanel = ({
   projection,
-  view,
 }: StrategyProjectionPanelProps) => {
   if (projection.status === "unavailable") {
     return (
@@ -27,28 +19,14 @@ export const StrategyProjectionPanel = ({
     );
   }
 
-  const sections = [
-    {
-      id: "metadata",
-      values: {
-        title: projection.spec.title,
-        description: projection.spec.description,
-      },
-    },
-    { id: "data", values: projection.spec.data },
-    { id: "portfolio", values: projection.spec.portfolio },
-    { id: "risk", values: projection.spec.risk },
-    { id: "execution", values: projection.spec.execution },
-  ] as const;
-
   return (
     <section
       className="strategy-projection"
-      aria-label={t(`projection.${view}.label`)}
+      aria-label={t("projection.json.label")}
     >
       <header className="strategy-projection__header">
         <div>
-          <strong>{t(`projection.${view}.label`)}</strong>
+          <strong>{t("projection.json.label")}</strong>
           <span>{t("projection.readOnly")}</span>
         </div>
         <Badge tone={projection.stale ? "warn" : "ok"}>
@@ -76,31 +54,9 @@ export const StrategyProjectionPanel = ({
           </dd>
         </div>
       </dl>
-      {view === "json" ? (
-        <pre className="strategy-projection__json">
-          <code>{projection.canonicalJson}</code>
-        </pre>
-      ) : (
-        <div className="strategy-projection__form">
-          {sections.map((section) => (
-            <section key={section.id}>
-              <h2>{t(`projection.section.${section.id}`)}</h2>
-              <dl>
-                {Object.entries(section.values).map(([field, value]) => (
-                  <div key={field}>
-                    <dt>
-                      <code>{field}</code>
-                    </dt>
-                    <dd>
-                      <code>{valueText(value)}</code>
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
-        </div>
-      )}
+      <pre className="strategy-projection__json">
+        <code>{projection.canonicalJson}</code>
+      </pre>
     </section>
   );
 };

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { t, tOptional } from "../../../shared/config";
+import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import {
   formatContractValue,
   projectContractInspector,
@@ -8,6 +8,10 @@ import {
   type ContractCatalogProjection,
   type ContractInspectorSource,
 } from "../model/contract-inspector";
+import {
+  describeApplicabilityConditions,
+  type FieldApplicability,
+} from "../model/field-applicability";
 import "./contract-inspector.css";
 
 type ContractInspectorProps = {
@@ -214,7 +218,6 @@ const CatalogDetails = ({
           [t("contract.availability"), factor.availability],
           [t("contract.outputUnit"), factor.output_unit],
           [t("contract.preference"), factor.preference],
-          [t("contract.missingPolicy"), factor.missing_policy],
           [
             t("contract.minimumHistory"),
             `${factor.minimum_history_sessions} ${t("contract.sessions")}`,
@@ -226,6 +229,85 @@ const CatalogDetails = ({
           [t("contract.tags"), factor.tags?.join(", ") || EMPTY],
         ]}
       />
+    </section>
+  );
+};
+
+/** 조건표 행의 판정(WORKFLOW P2-03): 조건 목록과 "지금 읽히는가"를 backend 문구 키로 보여준다. */
+const ApplicabilitySection = ({
+  applicability,
+}: {
+  applicability: FieldApplicability;
+}) => {
+  const conditions = describeApplicabilityConditions(applicability);
+  const description = tOptional(applicability.descriptionKey);
+  const verdict =
+    applicability.applicable === true
+      ? t("contract.applicable.holds")
+      : applicability.applicable === false
+        ? t("contract.applicable.inapplicable").replace(
+            "{conditions}",
+            conditions,
+          )
+        : t("contract.applicable.unknown");
+  return (
+    <section className="contract-inspector__section">
+      <h3>{t("contract.applicableWhen")}</h3>
+      <Rows
+        rows={[
+          [
+            t("contract.applicableWhen"),
+            <span
+              key="conditions"
+              className="contract-inspector__inline-values"
+            >
+              {applicability.conditions.map((condition) => (
+                <code
+                  key={condition.pointer}
+                  className="contract-inspector__condition"
+                  data-holds={
+                    condition.holds === null
+                      ? "unknown"
+                      : String(condition.holds)
+                  }
+                >
+                  {condition.holds === true
+                    ? "✓ "
+                    : condition.holds === false
+                      ? "✕ "
+                      : "? "}
+                  {condition.equals === null
+                    ? t("contract.applicable.condition.set").replace(
+                        "{path}",
+                        condition.path,
+                      )
+                    : `${condition.path} = ${condition.equals}`}
+                  {condition.fromDefault
+                    ? ` ${t("contract.applicable.fromDefault")}`
+                    : null}
+                </code>
+              ))}
+            </span>,
+          ],
+          ...(applicability.ownedByError
+            ? ([
+                [
+                  t("contract.applicable.ownedByError"),
+                  <code key="owner">{applicability.ownedByError}</code>,
+                ],
+              ] as [string, ReactNode][])
+            : []),
+        ]}
+      />
+      <p
+        className={`contract-inspector__notice${applicability.applicable === false ? " contract-inspector__notice--warn" : ""}`}
+        role="status"
+      >
+        {verdict}
+      </p>
+      {description ? (
+        <p className="contract-inspector__notice">{description}</p>
+      ) : null}
     </section>
   );
 };
@@ -291,9 +373,10 @@ export const ContractInspector = ({
     );
 
   const { field } = projection;
-  const description = field.descriptionKey
-    ? tOptional(field.descriptionKey)
-    : null;
+  // backend 키는 stem이다: 이름과 한 줄 설명을 따로 찾는다(P1-03). 번역이 없으면 키 문자열을
+  // 본문으로 찍지 않고 "설명 없음"을 보인다 — 키는 아래 보조 `<code>`에만 남는다.
+  const name = tName(field.descriptionKey);
+  const description = tDescription(field.descriptionKey);
   const rows: [string, ReactNode][] = [
     [
       t("ide.inspector.path"),
@@ -393,7 +476,9 @@ export const ContractInspector = ({
       ) : null}
       <section className="contract-inspector__section">
         <h3>
-          {field.shape === "root" ? t("contract.root") : field.templatePointer}
+          {name ?? (field.shape === "root" ? t("contract.root") : null) ?? (
+            <code>{field.templatePointer}</code>
+          )}
         </h3>
         <Rows rows={rows} />
         {field.unresolvedBranches !== null ? (
@@ -410,13 +495,17 @@ export const ContractInspector = ({
         {field.descriptionKey ? (
           <div className="contract-inspector__description">
             <strong>{t("contract.description")}</strong>
-            <p>{description ?? field.descriptionKey}</p>
+            <p>{description ?? t("contract.noDescription")}</p>
             <code title={t("contract.descriptionKey")}>
               {field.descriptionKey}
             </code>
           </div>
         ) : null}
       </section>
+
+      {field.applicability ? (
+        <ApplicabilitySection applicability={field.applicability} />
+      ) : null}
 
       {field.discriminator ? (
         <section className="contract-inspector__section">

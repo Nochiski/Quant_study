@@ -5,6 +5,7 @@ export {
   strategyContractQuery,
   strategyDiffQuery,
   strategyDocumentQuery,
+  strategyOperatorsQuery,
   strategyRevisionsKey,
   strategyRevisionsQuery,
   strategySchemaQuery,

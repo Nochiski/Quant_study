@@ -33,12 +33,16 @@ Preview / Backtest / Debug Trace
 
 Form과 Graph는 첫 버전에서 별도 전략 편집 모델을 만들지 않고 현재 StrategySpec을 읽는 projection으로 제공한다.
 
+> 2026-09-18 개정(`docs/planning/strategy-gui-editing`, ADR D5 개정): Form과 Graph는 이제 편집 가능하다.
+> 다만 새 편집 모델이 아니라 runtime schema × parse tree projection 위의 **source 트랜잭션**(JSON pointer
+> 범위의 `replaceRange` 한 번)이라 source SoT는 여전히 하나이고 주석·순서가 보존된다.
+
 ### 2.2 v1 authoring 문법
 
-v1은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON으로 확정한다. 시각적으로 간단해 보이기 위한 별도 문자열 DSL이나 단위 sugar를 도입하지 않는다.
+v1은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON으로 확정한다. 시각적으로 간단해 보이기 위한 별도 문자열 DSL이나 단위 sugar를 도입하지 않는다. 아래 예시는 schema 1.1(2026-09-18, `factors` 평탄화·`signal.method` 등 미사용 필드 제거)이며 backend 골든 fixture `backend/tests/fixtures/strategy_documents/quality_momentum.yaml`과 같다.
 
 ```yaml
-schema_version: "1.0"
+schema_version: "1.1"
 title: "퀄리티 모멘텀"
 description: ""
 data:
@@ -50,25 +54,22 @@ data:
 eligibility:
   rules: []
 factors:
-  factors:
-    - factor_id: momentum
-      label: "모멘텀"
-      direction: high
-      weight: 0.6
-      graph:
-        nodes:
-          - node_id: close
-            field_id: price.close
-            kind: field
-          - node_id: mom_252
-            operator: momentum
-            input_node_id: close
-            window: 252
-            kind: time_series
-        output_node_id: mom_252
-        missing_policy: drop
-signal:
-  method: weighted_sum
+  - factor_id: momentum
+    label: "모멘텀"
+    direction: high
+    weight: 0.6
+    graph:
+      nodes:
+        - kind: field
+          node_id: close
+          field_id: price.close
+        - kind: time_series
+          node_id: mom_252
+          operator: momentum
+          input_node_id: close
+          window: 252
+      output_node_id: mom_252
+      missing_policy: drop
 portfolio:
   selection_count: 20
   rebalance: monthly
@@ -93,7 +94,8 @@ parameters: []
 
 - 전략 정의의 primary authoring은 YAML/JSON이다.
 - parameter search와 실험 실행은 source를 다시 편집하지 않고 UI에서 수행할 수 있어야 한다.
-- Form/Graph v1은 projection이며 새로운 편집 SoT가 아니다.
+- Form/Graph v1은 projection이며 새로운 편집 SoT가 아니다(2026-09-18 개정: Form·Graph 편집은 source
+  트랜잭션으로 제공되며 여전히 새 편집 SoT가 아니다 — 2.1 개정 주석 참고).
 - Quick/Advanced UI는 P6-06 migration gate를 통과시켜 제거한다. `/legacy/builder`는 YAML 신규 문서로
   보내는 bookmark 호환 redirect만 유지한다.
 - P0-01과 P6-06 개정은 roadmap M6~M10의 순서와 완료 정의, `strategy-workbench-sot.md`,

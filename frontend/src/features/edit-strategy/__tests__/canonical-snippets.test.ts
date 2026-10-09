@@ -25,7 +25,6 @@ const FACTOR: FactorDefinition = {
   factor_id: "server.momentum",
   label: "Server momentum",
   minimum_history_sessions: 1,
-  missing_policy: "drop",
   output_unit: "score",
   preference: "high",
   required_field_ids: ["price.close"],
@@ -78,6 +77,17 @@ describe("canonical StrategySpec snippets", () => {
     });
   });
 
+  it("fails closed when two root arrays both carry authoring markers", () => {
+    // P2-01 리뷰 P2-004: 순서가 유일한 tie-break가 되지 않도록 모호하면 팩터 스니펫을 내지 않는다.
+    const ambiguous = structuredClone(SCHEMA);
+    const root = ambiguous.properties as Record<string, JsonSchema>;
+    root.alternates = root.factors;
+    expect(
+      catalog(ambiguous).some((snippet) => snippet.kind === "factor"),
+    ).toBe(false);
+    expect(catalog().some((snippet) => snippet.kind === "factor")).toBe(true);
+  });
+
   it("fails closed for catalog-only, missing graph and incomplete authoring metadata", () => {
     const unavailable = [
       { ...FACTOR, availability: "catalog_only" as const },
@@ -119,7 +129,7 @@ describe("canonical StrategySpec snippets", () => {
 
   it("replaces a partial root key and validates the complete next YAML document", () => {
     const snippet = findSnippet(catalog(), "section:signal");
-    const source = 'schema_version: "1.0"\nsig';
+    const source = 'schema_version: "1.1"\nsig';
     const result = planSnippetEdit(
       source,
       "yaml",
@@ -130,7 +140,7 @@ describe("canonical StrategySpec snippets", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.edit.nextSource).toBe(
-      'schema_version: "1.0"\nsignal:\n  method: weighted_sum\n  entry_percentile: 0.1\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
+      'schema_version: "1.1"\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
     );
     expect(result.edit).toMatchObject({
       from: source.length - 3,
@@ -140,8 +150,7 @@ describe("canonical StrategySpec snippets", () => {
 
   it("rejects a duplicate catalog factor without becoming a semantic validator", () => {
     const snippet = findSnippet(catalog(), "factor:server.momentum");
-    const source =
-      "factors:\n  factors:\n    - factor_id: server.momentum\n    ";
+    const source = "factors:\n  - factor_id: server.momentum\n  ";
     expect(
       planSnippetEdit(
         source,
@@ -153,9 +162,9 @@ describe("canonical StrategySpec snippets", () => {
   });
 
   it.each([
-    ['schema_version: "1.0"\r\nsig\r\nrisk: {}\r\n', "\r\nrisk: {}\r\n"],
-    ['schema_version: "1.0"\r\nsig', ""],
-    ['schema_version: "1.0"\r\nsig\r\n\r\nrisk: {}', "\r\n\r\nrisk: {}"],
+    ['schema_version: "1.1"\r\nsig\r\nrisk: {}\r\n', "\r\nrisk: {}\r\n"],
+    ['schema_version: "1.1"\r\nsig', ""],
+    ['schema_version: "1.1"\r\nsig\r\n\r\nrisk: {}', "\r\n\r\nrisk: {}"],
   ])("preserves CRLF at a partial-key boundary", (source, suffix) => {
     const snippet = findSnippet(catalog(), "section:signal");
     const cursor = source.indexOf("sig") + 3;
@@ -171,9 +180,70 @@ describe("canonical StrategySpec snippets", () => {
     expect(result.edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
   });
 
+  it.each([
+    [
+      "# 첫 키 설명\nsig\nrisk: {}\n",
+      "# 첫 키 설명\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+    ],
+    [
+      "risk:\n  a: 1\n# 주석\nsig\ndata: {}\n",
+      "risk:\n  a: 1\n# 주석\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\ndata: {}\n",
+    ],
+    [
+      "\nsig\nrisk: {}\n",
+      "\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+    ],
+    [
+      "# c\r\nsig\r\nrisk: {}\r\n",
+      "# c\r\nsignal:\r\n  score_threshold: null\r\n  regime_field_id: null\r\n  regime_minimum: null\r\nrisk: {}\r\n",
+    ],
+  ])(
+    "keeps the snippet on the cursor line below leading comments and blank lines (review P1-1)",
+    (source, expected) => {
+      const snippet = findSnippet(catalog(), "section:signal");
+      const cursor = source.indexOf("sig") + 3;
+      const result = planSnippetEdit(
+        source,
+        "yaml",
+        { from: cursor, to: cursor },
+        snippet,
+      );
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") return;
+      expect(result.edit.nextSource).toBe(expected);
+      // 교체 범위는 부분 키 `sig`부터 그 줄 끝까지다(머리말은 범위 밖).
+      expect(result.edit.from).toBe(cursor - 3);
+    },
+  );
+
+  it("inserts a factor item on the cursor line, below the comment that describes the next item", () => {
+    const snippet = findSnippet(catalog(), "factor:server.momentum");
+    const source =
+      "factors:\n  # 첫 팩터 설명\n  \n  - factor_id: other\n    label: o\n    direction: high\n    graph: {}\n";
+    const cursor = source.indexOf("  \n  - factor_id") + 2;
+    const result = planSnippetEdit(
+      source,
+      "yaml",
+      { from: cursor, to: cursor },
+      snippet,
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(
+      result.edit.nextSource.startsWith(
+        "factors:\n  # 첫 팩터 설명\n  - factor_id: server.momentum\n",
+      ),
+    ).toBe(true);
+    expect(
+      result.edit.nextSource.endsWith(
+        "\n  - factor_id: other\n    label: o\n    direction: high\n    graph: {}\n",
+      ),
+    ).toBe(true);
+  });
+
   it("inserts a catalog factor as an indented array item at the cursor", () => {
     const snippet = findSnippet(catalog(), "factor:server.momentum");
-    const source = 'schema_version: "1.0"\nfactors:\n  factors:\n    ';
+    const source = 'schema_version: "1.1"\nfactors:\n  ';
     const result = planSnippetEdit(
       source,
       "yaml",
@@ -185,10 +255,10 @@ describe("canonical StrategySpec snippets", () => {
     if (result.status !== "ok") return;
     expect(result.edit.insert).toContain("- factor_id: server.momentum");
     expect(result.edit.insert).toContain(
-      "      graph:\n        nodes:\n          - kind: field",
+      "    graph:\n      nodes:\n        - kind: field",
     );
     expect(result.edit.nextSource).toContain(
-      "  factors:\n    - factor_id: server.momentum",
+      "factors:\n  - factor_id: server.momentum",
     );
   });
 

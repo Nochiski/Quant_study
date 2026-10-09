@@ -5,6 +5,7 @@ import type {
 } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import { useId } from "react";
+import { metricPlainCopy } from "../model/metric-copy";
 import "./backtest-run-detail.css";
 
 type ChartSeries = {
@@ -179,10 +180,17 @@ export const BacktestRunDetail = ({
           const metric = fullMetrics.get(metricId);
           const definition = definitions.get(metricId);
           if (metric === undefined || definition === undefined) return null;
+          // 영어 이름은 registry `label` 그대로, 쉬운 이름·뜻은 i18n이 소유한다(결과 설명 spec R4).
+          const plain = metricPlainCopy(metricId);
           return (
             <div key={metricId}>
               <span>{definition.label}</span>
               <MetricCell definition={definition} metric={metric} />
+              {plain === null ? null : (
+                <p className="metric-highlights__plain">
+                  <dfn>{plain.name}</dfn> {plain.description}
+                </p>
+              )}
             </div>
           );
         })}

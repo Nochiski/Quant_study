@@ -108,8 +108,12 @@ a.app-shell__link:hover {
   font-size: var(--text-size-small);
 }
 
-.app-shell__collapse {
+/* 설정은 목록 맨 아래에 붙인다 — `margin-top: auto`가 접기 버튼 대신 여기서 남은 높이를 먹는다. */
+.app-shell__list--footer {
   margin-top: auto;
+}
+
+.app-shell__collapse {
   padding-top: var(--space-3);
   border-top: 1px solid var(--border);
   text-align: center;

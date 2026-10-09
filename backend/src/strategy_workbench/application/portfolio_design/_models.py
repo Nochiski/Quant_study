@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioTraceSelection,
@@ -37,6 +38,9 @@ class EngineCompatibility:
 @dataclass(frozen=True)
 class PortfolioPreviewRequest:
     spec: StrategySpec
+    # 없으면 1.1 문서에서 브리지로 만든다(P2-01). 주어지면 문서의 `data`·`execution` 보다
+    # 우선한다. 우선순위 판정은 `resolve_environment` 하나가 소유한다.
+    environment: RunEnvironment | None = None
 
 
 @dataclass(frozen=True)

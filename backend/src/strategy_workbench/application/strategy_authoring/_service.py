@@ -17,12 +17,27 @@ excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real stra
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
-from dataclasses import dataclass
+import json
+import logging
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass
 from functools import cached_property
 from typing import Any
 
-from strategy_workbench.domain.strategy.facade.document import hydrate_strategy_document
+from strategy_workbench.domain.backtest.facade.environment import (
+    run_environment_schema,
+    run_environment_schema_hash,
+)
+from strategy_workbench.domain.factor.facade.operators import (
+    OperatorDefinition,
+    operator_definitions,
+)
+from strategy_workbench.domain.strategy.facade.document import (
+    LEGACY_SHAPE_CODE,
+    hydrate_strategy_document,
+    is_upgradeable_document,
+    upgrade_document_1_0,
+)
 from strategy_workbench.domain.strategy.facade.schema import (
     FieldContract,
     strategy_document_schema,
@@ -51,6 +66,8 @@ from .ports.outgoing.document_codec import (
     SourceRange,
 )
 
+logger = logging.getLogger(__name__)
+
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 
 
@@ -58,6 +75,50 @@ DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 class CompileRequest:
     source: str
     format: SourceFormat
+
+
+@dataclass(frozen=True)
+class UpgradedDocument:
+    """A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3)."""
+
+    format: SourceFormat
+    source: str
+    source_hash: str
+    compiled: CompiledDocument
+
+
+class DocumentNotUpgradeableError(ValueError):
+    """The source parses but is not a schema 1.0 document, so no upgrade rule applies."""
+
+    def __init__(self, schema_version: object) -> None:
+        super().__init__(
+            "only schema 1.0 documents can be upgraded — "
+            f"schema_version={schema_version!r} expected='1.0'"
+        )
+        self.schema_version = schema_version
+
+
+class DocumentUpgradeSyntaxError(ValueError):
+    """The source does not parse; the compile outcome carries the syntax diagnostics."""
+
+    def __init__(self, compiled: CompiledDocument) -> None:
+        codes = [diagnostic.code for diagnostic in compiled.diagnostics[:3]]
+        super().__init__(
+            "source has syntax errors and cannot be upgraded — "
+            f"format={compiled.format.value} source_hash={compiled.source_hash} codes={codes}"
+        )
+        self.compiled = compiled
+
+
+class DocumentUpgradeDriftError(RuntimeError):
+    """The rewritten text does not parse to the dict-path upgrade: the two paths disagree."""
+
+    def __init__(self, pointer: str, detail: str) -> None:
+        super().__init__(
+            "upgraded source drifts from the domain upgrade transform — "
+            f"pointer={pointer!r} {detail}"
+        )
+        self.pointer = pointer
 
 
 @dataclass(frozen=True)
@@ -85,6 +146,19 @@ class StrategyDocumentSchema:
 
 
 @dataclass(frozen=True)
+class RunEnvironmentSchema:
+    """실행 설정(`RunEnvironment`)의 런타임 JSON Schema; `schema_hash` 가 ETag 다.
+
+    전략 authoring 문서 스키마(`StrategyDocumentSchema`)와 별개 산출물이다 — 문서에는
+    `schema_version` 이 있고 실행 설정에는 없다. 프론트 실행 설정 패널이 기본값·enum 을 손으로
+    적지 않게 하는 경로다(spec D6).
+    """
+
+    schema_hash: str
+    schema: dict[str, Any]  # reason: JSON Schema 는 DTO 가 아니라 열린 문서다
+
+
+@dataclass(frozen=True)
 class StrategyDocumentContract:
     """Per-field authoring contract plus the registry versions the schema was built against.
 
@@ -98,6 +172,29 @@ class StrategyDocumentContract:
     factor_registry_version: str
     dataset_snapshot_id: str
     fields: tuple[FieldContract, ...]
+
+
+@dataclass(frozen=True)
+class StrategyOperatorCatalog:
+    """그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
+
+    문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,
+    연산자 목록·arity·가용성을 손으로 적지 않는다.
+    """
+
+    catalog_hash: str
+    operators: tuple[OperatorDefinition, ...]
+
+
+def operator_catalog_hash(operators: tuple[OperatorDefinition, ...]) -> str:
+    """정의 전부의 canonical JSON sha256. 정의가 하나라도 바뀌면 ETag가 바뀐다."""
+    material = json.dumps(
+        [asdict(definition) for definition in operators],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def contract_hash(schema_hash: str, factor_registry_version: str, dataset_snapshot_id: str) -> str:
@@ -134,6 +231,26 @@ class StrategyAuthoringService:
         return self._schema
 
     @cached_property
+    def _run_environment_schema(self) -> RunEnvironmentSchema:
+        schema = run_environment_schema()
+        return RunEnvironmentSchema(schema_hash=run_environment_schema_hash(schema), schema=schema)
+
+    def run_environment_schema(self) -> RunEnvironmentSchema:
+        """실행 설정의 런타임 스키마(`domain/backtest` 소유 모델에서 유도, 순수·캐시)."""
+        return self._run_environment_schema
+
+    @cached_property
+    def _operators(self) -> StrategyOperatorCatalog:
+        operators = operator_definitions()
+        return StrategyOperatorCatalog(
+            catalog_hash=operator_catalog_hash(operators), operators=operators
+        )
+
+    def operators(self) -> StrategyOperatorCatalog:
+        """연산자 정의 카탈로그 (domain.factor 레지스트리 그대로, pure·cached)."""
+        return self._operators
+
+    @cached_property
     def _fields(self) -> tuple[FieldContract, ...]:
         return strategy_field_contracts()
 
@@ -151,8 +268,50 @@ class StrategyAuthoringService:
             fields=self._fields,
         )
 
-    def compile(self, request: CompileRequest) -> CompiledDocument:
+    def upgrade(self, request: CompileRequest) -> UpgradedDocument:
+        """Rewrite a 1.0 source as 1.1 with comments kept, fail-closed against rule drift."""
         parsed = self._codec.parse(request.source, format=request.format)
+        if not parsed.ok or parsed.tree is None:
+            raise DocumentUpgradeSyntaxError(_rejected(parsed, None, parsed.diagnostics))
+        if not is_upgradeable_document(parsed.tree):
+            raise DocumentNotUpgradeableError(parsed.tree.get("schema_version"))
+        expected = upgrade_document_1_0(parsed.tree)
+        try:
+            upgraded = self._codec.upgrade_source(request.source, format=request.format)
+        except Exception as error:  # noqa: BLE001  # reason: 아래 설명대로 어떤 어댑터 실패든 drift다
+            # 어댑터의 전제 위반(rt loader가 safe parse와 다르게 읽는 문서, ruamel이 특정 주석
+            # 배치에서 던지는 IndexError 등)은 untrusted input에 대한 500이 아니라 drift로 강등한다.
+            # safe parse는 이미 통과했으므로 두 경로가 같은 문서를 다르게 봤다는 뜻이고, 응답은
+            # 422 계약 안에 있다.
+            logger.warning(
+                "document upgrade rewrite failed in the codec adapter — treating as drift "
+                "(format=%s, error=%s: %s)",
+                request.format.value,
+                type(error).__name__,
+                error,
+            )
+            raise DocumentUpgradeDriftError(
+                "", f"rewrite failed: {type(error).__name__}: {error}"
+            ) from error
+        reparsed = self._codec.parse(upgraded, format=request.format)
+        if not reparsed.ok or reparsed.tree is None:
+            detail = ", ".join(f"{d.code}@{d.pointer}" for d in reparsed.diagnostics[:3])
+            raise DocumentUpgradeDriftError("", f"rewritten text does not parse: {detail}")
+        mismatch = _first_mismatch(expected, reparsed.tree, "")
+        if mismatch is not None:
+            raise DocumentUpgradeDriftError(*mismatch)
+        compiled = self._compile_parsed(reparsed)
+        return UpgradedDocument(
+            format=request.format,
+            source=upgraded,
+            source_hash=compiled.source_hash,
+            compiled=compiled,
+        )
+
+    def compile(self, request: CompileRequest) -> CompiledDocument:
+        return self._compile_parsed(self._codec.parse(request.source, format=request.format))
+
+    def _compile_parsed(self, parsed: ParsedDocument) -> CompiledDocument:
         if not parsed.ok or parsed.tree is None:
             return _rejected(parsed, None, parsed.diagnostics)
 
@@ -174,7 +333,8 @@ class StrategyAuthoringService:
             return _rejected(parsed, schema_version, diagnostics)
 
         spec = hydration.spec
-        validation = validate_strategy(spec)
+        # 문서에 명시된 pointer만 넘긴다: 적용 불가 경고는 작성된 값에만 해당한다 (spec D4).
+        validation = validate_strategy(spec, written_pointers=parsed.key_ranges.keys())
         diagnostics = tuple(
             SourceDiagnostic(
                 code=issue.code,
@@ -220,11 +380,40 @@ def _rejected(
     )
 
 
+# 값이 아니라 키 자체를 가리켜야 하는 구조 진단. 모르는 키도, 1.0 문법 힌트도 고칠 곳이 키다.
+_KEY_RANGE_CODES = frozenset({"structure.unknown_key", LEGACY_SHAPE_CODE})
+
+
 def _structural_range(parsed: ParsedDocument, code: str, pointer: str) -> SourceRange | None:
     # An unknown key exists in the source: point at the key itself, not its value.
-    if code == "structure.unknown_key" and pointer in parsed.key_ranges:
+    if code in _KEY_RANGE_CODES and pointer in parsed.key_ranges:
         return parsed.key_ranges[pointer]
     return parsed.locate(pointer)
+
+
+def _first_mismatch(expected: object, actual: object, pointer: str) -> tuple[str, str] | None:
+    """Deepest JSON Pointer where two parsed trees differ, or None when they are equal."""
+    if isinstance(expected, Mapping) and isinstance(actual, Mapping):
+        for key in sorted(set(expected) | set(actual)):
+            child = f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
+            if key not in expected or key not in actual:
+                side = "dict-path only" if key in expected else "rewritten text only"
+                return child, f"key present in {side}"
+            found = _first_mismatch(expected[key], actual[key], child)
+            if found is not None:
+                return found
+        return None
+    if isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
+        if len(expected) != len(actual):
+            return pointer, f"length dict-path={len(expected)} rewritten={len(actual)}"
+        for index, (left, right) in enumerate(zip(expected, actual, strict=True)):
+            found = _first_mismatch(left, right, f"{pointer}/{index}")
+            if found is not None:
+                return found
+        return None
+    if expected != actual or type(expected) is not type(actual):
+        return pointer, f"dict-path={expected!r} rewritten={actual!r}"
+    return None
 
 
 def _pointer_from_path(path: str) -> str:

@@ -27,10 +27,11 @@ impl NativeEventQueue {
         Ok(())
     }
 
-    pub(crate) fn pop(&mut self) -> PyResult<u64> {
+    /// 엔트리의 세션(ts)을 token과 함께 돌려준다 — 호출부가 세션을 다시 유도하지 않게 한다.
+    pub(crate) fn pop(&mut self) -> PyResult<(TimestampKey, u64)> {
         self.heap
             .pop()
-            .map(|Reverse((_, _, _, token))| token)
+            .map(|Reverse((ts, _, _, token))| (ts, token))
             .ok_or_else(|| PyIndexError::new_err("pop from empty persistent event queue"))
     }
 
@@ -51,10 +52,10 @@ mod tests {
         queue.push(1, 20, 3).unwrap();
         queue.push(1, 20, 4).unwrap();
         assert_eq!(queue.len(), 4);
-        assert_eq!(queue.pop().unwrap(), 3);
-        assert_eq!(queue.pop().unwrap(), 4);
-        assert_eq!(queue.pop().unwrap(), 2);
-        assert_eq!(queue.pop().unwrap(), 1);
+        assert_eq!(queue.pop().unwrap(), (1, 3));
+        assert_eq!(queue.pop().unwrap(), (1, 4));
+        assert_eq!(queue.pop().unwrap(), (1, 2));
+        assert_eq!(queue.pop().unwrap(), (2, 1));
         assert!(queue.pop().is_err());
     }
 }

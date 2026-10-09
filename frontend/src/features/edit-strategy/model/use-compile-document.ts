@@ -16,6 +16,12 @@ import {
 
 const COMPILE_DELAY_MS = 300;
 
+/** 값이 아니라 키 자체를 가리켜야 하는 구조 진단(backend `_structural_range`와 같은 목록). */
+const KEY_RANGE_CODES = new Set([
+  "structure.unknown_key",
+  "structure.legacy_shape",
+]);
+
 /** Exact frontend range for the pointer, else the backend's range, else the nearest ancestor. */
 const rangeFor = (
   diagnostic: SourceDiagnostic,
@@ -43,11 +49,11 @@ const rangeFor = (
   if (parse) {
     // Unknown-key diagnostics identify the misspelled field itself. Other diagnostics describe
     // the field's value, so prefer its value range while retaining a key-only fallback.
-    const exact =
-      diagnostic.code === "structure.unknown_key"
-        ? parse.keyRanges.get(diagnostic.pointer)
-        : (parse.valueRanges.get(diagnostic.pointer) ??
-          parse.keyRanges.get(diagnostic.pointer));
+    // 1.0 문법 힌트(P1-05)도 고칠 곳이 키라 같은 편에 선다 — backend `_structural_range`와 같은 규칙.
+    const exact = KEY_RANGE_CODES.has(diagnostic.code)
+      ? parse.keyRanges.get(diagnostic.pointer)
+      : (parse.valueRanges.get(diagnostic.pointer) ??
+        parse.keyRanges.get(diagnostic.pointer));
     if (exact) return exact;
   }
   if (diagnostic.range) return diagnostic.range;

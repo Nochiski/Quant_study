@@ -1,0 +1,64 @@
+/* run 실패 표시. 서버 사유는 접힌 disclosure 로 — `manifest-drawer`(entities/backtest) 와 같은 시각 신호. */
+.backtest-run-error {
+  overflow-wrap: anywhere;
+}
+
+.backtest-run-error__reason {
+  margin-top: var(--space-2);
+}
+
+.backtest-run-error__reason > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: var(--font-weight-strong);
+}
+
+/* 결과 화면 우측 AI 패널(결과 설명 spec R1). 결과를 읽으며 물을 수 있게 넓은 화면에서는 옆에 두고,
+   좁은 화면에서는 결과 아래로 내린다. */
+.backtest-run-layout {
+  display: grid;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.backtest-run-layout--assistant {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 26rem);
+}
+
+.backtest-run-layout__main {
+  min-width: 0;
+}
+
+.backtest-run-layout__assistant {
+  position: sticky;
+  top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: calc(100vh - var(--space-6) * 2);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+}
+
+.backtest-run-layout__assistant > h2 {
+  margin: 0;
+  padding: var(--space-3) var(--space-3) 0;
+  font-size: var(--text-size-body);
+}
+
+.backtest-run-layout__assistant > .assist {
+  flex: 1;
+}
+
+@media (max-width: 1279px) {
+  .backtest-run-layout--assistant {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .backtest-run-layout__assistant {
+    position: static;
+    max-height: none;
+  }
+}

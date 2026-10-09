@@ -82,6 +82,19 @@
   text-overflow: ellipsis;
 }
 
+/* 지표의 쉬운 이름·뜻(결과 설명 spec R4). 값보다 한 단계 약하게, 이름만 굵게. */
+.run-detail .metric-highlights__plain {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .metric-highlights__plain dfn {
+  color: var(--text);
+  font-style: normal;
+  font-weight: var(--font-weight-strong);
+}
+
 .run-detail .metric-highlights small,
 .run-detail .result-table td small {
   display: block;

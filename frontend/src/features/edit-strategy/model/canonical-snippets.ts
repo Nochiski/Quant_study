@@ -4,8 +4,6 @@
  * values are copied from backend-owned contracts. The five category names are UI placement from
  * WORKFLOW P4-05, not a second validation model.
  */
-import { stringify } from "yaml";
-
 import type { FactorDefinition } from "../../../shared/api";
 import {
   escapePointerSegment,
@@ -13,7 +11,18 @@ import {
   parseSource,
   type SourceFormat,
 } from "../../../shared/lib/yaml12";
-import { resolveRef, type JsonSchema } from "./schema-navigator";
+import {
+  materializeSchemaValue,
+  resolveRef,
+  UnsupportedSchemaShape,
+  type JsonSchema,
+} from "./schema-navigator";
+import {
+  detectEol,
+  planSourceOperation,
+  type PlannedEdit,
+  type SourceOperation,
+} from "./source-transactions";
 
 export const SNIPPET_CATEGORIES = [
   "data",
@@ -30,10 +39,9 @@ export type CanonicalSnippet = {
   category: SnippetCategory;
   /** Backend field name or factor label. */
   label: string;
-  /** Section snippets add a root key; factor snippets can also add an item to factors.factors. */
+  /** 섹션 스니펫은 루트 키를 추가하고, 팩터 스니펫은 루트 `factors` 시퀀스에 항목을 추가한다. */
   kind: "section" | "factor";
   sectionKey: string;
-  collectionKey: string | null;
   identity: { field: string; value: unknown } | null;
   value: unknown;
 };
@@ -44,13 +52,8 @@ export type SnippetCatalogSource = {
   status: "loading" | "ready" | "unavailable" | "incompatible";
 };
 
-export type SnippetEdit = {
-  from: number;
-  to: number;
-  insert: string;
-  selection: { from: number };
-  nextSource: string;
-};
+/** 커서 줄(반쯤 입력한 키)까지 포함한 단일 범위 편집. 텍스트 조립은 `planSourceOperation`이 했다. */
+export type SnippetEdit = PlannedEdit;
 
 export type SnippetEditFailure =
   "yaml-only" | "selection" | "cursor-context" | "duplicate" | "parse";
@@ -65,87 +68,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const owns = (value: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
 
-const scalarFallback = (node: JsonSchema): unknown => {
-  if (owns(node, "const")) return node.const;
-  if (Array.isArray(node.enum) && node.enum.length > 0) return node.enum[0];
-  if (node.type === "boolean") return false;
-  if (node.type === "integer" || node.type === "number") {
-    if (typeof node.minimum === "number") return node.minimum;
-    if (typeof node.exclusiveMinimum === "number")
-      return node.type === "integer"
-        ? Math.floor(node.exclusiveMinimum) + 1
-        : node.exclusiveMinimum + Number.EPSILON;
-    return 0;
-  }
-  return "";
-};
-
-class UnsupportedSnippetSchema extends Error {}
-
-type MaterializeState = {
-  ancestors: Set<JsonSchema>;
-  budget: { remaining: number };
-};
-
-/** Minimal parseable value whose keys/defaults are taken from one runtime schema node. */
-const materializeSchemaValue = (
-  root: JsonSchema,
-  schemaNode: JsonSchema,
-  state: MaterializeState = {
-    ancestors: new Set(),
-    budget: { remaining: 256 },
-  },
-): unknown => {
-  const node = resolveRef(root, schemaNode);
-  if (node === null)
-    throw new UnsupportedSnippetSchema("unresolvable schema reference");
-  state.budget.remaining -= 1;
-  if (state.budget.remaining < 0 || state.ancestors.has(node))
-    throw new UnsupportedSnippetSchema("recursive or oversized schema");
-  state.ancestors.add(node);
-  try {
-    if (owns(node, "default")) return node.default;
-    if (owns(node, "const")) return node.const;
-    if (Array.isArray(node.anyOf)) {
-      const member = node.anyOf
-        .filter(isRecord)
-        .find((item) => item.type !== "null");
-      return member ? materializeSchemaValue(root, member, state) : null;
-    }
-    if (Array.isArray(node.oneOf)) {
-      const member = node.oneOf.find(isRecord);
-      return member ? materializeSchemaValue(root, member, state) : {};
-    }
-    if (node.type === "array") return [];
-    if (node.type !== "object" && !isRecord(node.properties))
-      return scalarFallback(node);
-
-    const properties = isRecord(node.properties) ? node.properties : {};
-    const required = new Set(
-      Array.isArray(node.required)
-        ? node.required.filter((key): key is string => typeof key === "string")
-        : [],
-    );
-    const value: Record<string, unknown> = {};
-    for (const [key, candidate] of Object.entries(properties)) {
-      if (!isRecord(candidate)) continue;
-      const property = resolveRef(root, candidate);
-      if (property === null)
-        throw new UnsupportedSnippetSchema("unresolvable property reference");
-      if (
-        !required.has(key) &&
-        !owns(candidate, "default") &&
-        !owns(property, "default")
-      )
-        continue;
-      value[key] = materializeSchemaValue(root, candidate, state);
-    }
-    return value;
-  } finally {
-    state.ancestors.delete(node);
-  }
-};
-
 const rootProperty = (schema: JsonSchema, key: string): JsonSchema | null => {
   const properties = isRecord(schema.properties) ? schema.properties : null;
   const property = properties?.[key];
@@ -153,52 +75,50 @@ const rootProperty = (schema: JsonSchema, key: string): JsonSchema | null => {
 };
 
 type FactorAuthoringContract = {
+  /** 팩터 시퀀스의 루트 키(schema 1.1: `factors`는 최상위 배열). 이름은 스키마에서 읽는다. */
   sectionKey: string;
-  collectionKey: string;
   item: JsonSchema;
 };
 
+/**
+ * 항목 타입이 backend `x-authoring-*` 마커를 가진 루트 배열을 찾는다. 키 이름은 스키마에서 읽고
+ * 가정하지 않으므로 UI는 문서 레이아웃을 복제하지 않는다. 마커가 범용이라 두 개 이상이 매치되면
+ * 순서에 기대지 않고 `null`로 fail-closed한다(P2-01 리뷰 P2-004).
+ */
 const factorAuthoringContract = (
   schema: JsonSchema,
 ): FactorAuthoringContract | null => {
   const root = isRecord(schema.properties) ? schema.properties : {};
+  const matches: FactorAuthoringContract[] = [];
   for (const [sectionKey, candidate] of Object.entries(root)) {
     if (!isRecord(candidate)) continue;
-    const section = resolveRef(schema, candidate);
-    if (section === null) continue;
-    const properties = isRecord(section.properties) ? section.properties : {};
-    for (const [collectionKey, collectionCandidate] of Object.entries(
-      properties,
-    )) {
-      if (!isRecord(collectionCandidate)) continue;
-      const collection = resolveRef(schema, collectionCandidate);
-      if (collection === null) continue;
-      if (collection.type !== "array" || !isRecord(collection.items)) continue;
-      const item = resolveRef(schema, collection.items);
-      if (item === null) continue;
-      const itemProperties = isRecord(item.properties) ? item.properties : {};
-      const required = Array.isArray(item.required)
-        ? item.required.filter((key): key is string => typeof key === "string")
-        : [];
-      const mapped = required.every((key) => {
-        const property = itemProperties[key];
-        return (
-          isRecord(property) &&
-          (typeof property["x-authoring-source"] === "string" ||
-            owns(property, "x-authoring-default"))
-        );
-      });
-      if (
-        mapped &&
-        Object.values(itemProperties).some(
-          (property) =>
-            isRecord(property) && property["x-authoring-identity"] === true,
-        )
+    const collection = resolveRef(schema, candidate);
+    if (collection === null) continue;
+    if (collection.type !== "array" || !isRecord(collection.items)) continue;
+    const item = resolveRef(schema, collection.items);
+    if (item === null) continue;
+    const itemProperties = isRecord(item.properties) ? item.properties : {};
+    const required = Array.isArray(item.required)
+      ? item.required.filter((key): key is string => typeof key === "string")
+      : [];
+    const mapped = required.every((key) => {
+      const property = itemProperties[key];
+      return (
+        isRecord(property) &&
+        (typeof property["x-authoring-source"] === "string" ||
+          owns(property, "x-authoring-default"))
+      );
+    });
+    if (
+      mapped &&
+      Object.values(itemProperties).some(
+        (property) =>
+          isRecord(property) && property["x-authoring-identity"] === true,
       )
-        return { sectionKey, collectionKey, item };
-    }
+    )
+      matches.push({ sectionKey, item });
   }
-  return null;
+  return matches.length === 1 ? matches[0]! : null;
 };
 
 const factorValue = (
@@ -251,12 +171,11 @@ export const buildCanonicalSnippetCatalog = (
         label: category,
         kind: "section",
         sectionKey: category,
-        collectionKey: null,
         identity: null,
         value: materializeSchemaValue(schema, property),
       });
     } catch (error) {
-      if (!(error instanceof UnsupportedSnippetSchema)) throw error;
+      if (!(error instanceof UnsupportedSchemaShape)) throw error;
     }
   }
 
@@ -273,7 +192,6 @@ export const buildCanonicalSnippetCatalog = (
       label: factor.label,
       kind: "factor",
       sectionKey: contract.sectionKey,
-      collectionKey: contract.collectionKey,
       identity: preset.identity,
       value: preset.value,
     });
@@ -281,73 +199,12 @@ export const buildCanonicalSnippetCatalog = (
   return snippets;
 };
 
-const yamlFragment = (value: unknown): string =>
-  stringify(value, { lineWidth: 0 }).replace(/\n$/, "");
-
-const indentFragment = (
-  fragment: string,
-  indent: string,
-  eol: "\n" | "\r\n",
-): string => fragment.split("\n").join(`${eol}${indent}`);
-
-const fragmentFor = (
-  snippet: CanonicalSnippet,
-  pointer: string,
-  siblings: readonly string[],
-  prefix: string,
-):
-  | { status: "ok"; fragment: string }
-  | { status: "error"; reason: SnippetEditFailure } => {
-  if (snippet.kind === "section") {
-    if (pointer !== "" || !snippet.sectionKey.startsWith(prefix))
-      return { status: "error", reason: "cursor-context" };
-    if (siblings.includes(snippet.sectionKey))
-      return { status: "error", reason: "duplicate" };
-    return {
-      status: "ok",
-      fragment: yamlFragment({ [snippet.sectionKey]: snippet.value }),
-    };
-  }
-
-  if (snippet.collectionKey === null)
-    return { status: "error", reason: "cursor-context" };
-  const sectionPointer = `/${escapePointerSegment(snippet.sectionKey)}`;
-  const collectionPointer = `${sectionPointer}/${escapePointerSegment(snippet.collectionKey)}`;
-  if (prefix !== "" && !snippet.sectionKey.startsWith(prefix))
-    return { status: "error", reason: "cursor-context" };
-  if (pointer === collectionPointer && prefix === "")
-    return { status: "ok", fragment: yamlFragment([snippet.value]) };
-  if (pointer === sectionPointer && !siblings.includes(snippet.collectionKey)) {
-    return {
-      status: "ok",
-      fragment: yamlFragment({ [snippet.collectionKey]: [snippet.value] }),
-    };
-  }
-  if (pointer === "") {
-    if (siblings.includes("factors"))
-      return { status: "error", reason: "duplicate" };
-    return {
-      status: "ok",
-      fragment: yamlFragment({
-        [snippet.sectionKey]: { [snippet.collectionKey]: [snippet.value] },
-      }),
-    };
-  }
-  return { status: "error", reason: "cursor-context" };
-};
-
 const containsSnippetIdentity = (
   tree: Record<string, unknown>,
   snippet: CanonicalSnippet,
 ): boolean => {
-  if (
-    snippet.kind !== "factor" ||
-    snippet.collectionKey === null ||
-    snippet.identity === null
-  )
-    return false;
-  const section = tree[snippet.sectionKey];
-  const collection = isRecord(section) ? section[snippet.collectionKey] : null;
+  if (snippet.kind !== "factor" || snippet.identity === null) return false;
+  const collection = tree[snippet.sectionKey];
   return (
     Array.isArray(collection) &&
     collection.some(
@@ -360,8 +217,74 @@ const containsSnippetIdentity = (
 };
 
 /**
- * Plans one cursor-local insertion and preflights the complete next document with the shared
- * YAML 1.2 parser. The caller applies only the returned range edit, never a whole-source append.
+ * 커서 줄(반쯤 입력한 키나 빈 줄)을 통째로 뺀 원문과, 그 줄이 있던 자리(`anchor`). 마지막 줄이면 앞의
+ * EOL을 함께 빼고 anchor는 문서 끝이다. 스니펫은 이 자리에 들어간다(P3-02 리뷰 P1-1: 선행 주석·빈 줄 위로
+ * 올라가지 않는다).
+ */
+const withoutCursorLine = (
+  source: string,
+  lineStart: number,
+  lineEnd: number,
+): { text: string; anchor: number } => {
+  const eol = source.startsWith("\r\n", lineEnd)
+    ? 2
+    : source.startsWith("\n", lineEnd)
+      ? 1
+      : 0;
+  if (eol > 0)
+    return {
+      text: `${source.slice(0, lineStart)}${source.slice(lineEnd + eol)}`,
+      anchor: lineStart,
+    };
+  const previous = source.slice(0, lineStart).replace(/\r?\n$/, "");
+  return {
+    text: `${previous}${source.slice(lineEnd)}`,
+    anchor: previous.length,
+  };
+};
+
+/**
+ * 원문과 다음 원문의 차이를 커서 줄을 포함하는 단일 범위로 만든다. 공통 접두는 커서 줄의 키 시작
+ * (`from`)까지만, 공통 접미는 커서 줄 끝(`lineEnd`)부터만 인정하므로 반쯤 입력한 키가 교체 범위에
+ * 들어간다(편집기 history가 "sig → signal: …" 한 번으로 남는다).
+ */
+const singleRangeEdit = (
+  source: string,
+  next: string,
+  from: number,
+  lineEnd: number,
+): SnippetEdit => {
+  let prefix = 0;
+  while (
+    prefix < from &&
+    prefix < next.length &&
+    source[prefix] === next[prefix]
+  )
+    prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < source.length - lineEnd &&
+    suffix < next.length - prefix &&
+    source[source.length - 1 - suffix] === next[next.length - 1 - suffix]
+  )
+    suffix += 1;
+  const to = source.length - suffix;
+  const insert = next.slice(prefix, next.length - suffix);
+  const cursor = prefix + insert.length;
+  return {
+    from: prefix,
+    to,
+    insert,
+    nextSource: next,
+    selection: { from: cursor, to: cursor },
+  };
+};
+
+/**
+ * 커서 문맥을 `insert-key`/`insert-item` 연산으로 번역한다(P3-02). 텍스트 조립·들여쓰기·EOL·preflight는
+ * 모두 `planSourceOperation`의 몫이고, 이 함수는 (1) 커서 줄의 반쯤 입력한 키를 뺀 원문을 만들고
+ * (2) 커서 줄의 위치를 형제 순서(`before`/`index`)로 옮겨 적은 뒤 (3) 결과를 원문 대비 단일 범위
+ * 편집으로 되돌린다.
  */
 export const planSnippetEdit = (
   source: string,
@@ -380,8 +303,12 @@ export const planSnippetEdit = (
     selection.from !== selection.to
   )
     return { status: "error", reason: "selection" };
-  const current = parseSource(source, "yaml");
-  if (current.status === "ok" && containsSnippetIdentity(current.tree, snippet))
+  // 중복 판정은 커서 문맥보다 먼저, 원문 전체로 한다(커서가 어디든 같은 팩터는 한 번만).
+  const original = parseSource(source, "yaml");
+  if (
+    original.status === "ok" &&
+    containsSnippetIdentity(original.tree, snippet)
+  )
     return { status: "error", reason: "duplicate" };
   const cursor = selection.from;
   const context = describeYamlCursor(source, cursor);
@@ -398,31 +325,78 @@ export const planSnippetEdit = (
         : foundLineEnd;
   if (source.slice(cursor, lineEnd).trim() !== "")
     return { status: "error", reason: "cursor-context" };
-  const indent = source.slice(lineStart, context.from);
-  if (!/^ *$/.test(indent))
+  if (!/^ *$/.test(source.slice(lineStart, context.from)))
+    return { status: "error", reason: "cursor-context" };
+  if (!snippet.sectionKey.startsWith(context.prefix))
     return { status: "error", reason: "cursor-context" };
 
-  const planned = fragmentFor(
-    snippet,
-    context.pointer,
-    context.siblings,
-    context.prefix,
+  const { text: stripped, anchor } = withoutCursorLine(
+    source,
+    lineStart,
+    lineEnd,
   );
-  if (planned.status === "error") return planned;
-  const eol = source.includes("\r\n") ? "\r\n" : "\n";
-  const insert = indentFragment(planned.fragment, indent, eol);
-  const nextSource = `${source.slice(0, context.from)}${insert}${source.slice(lineEnd)}`;
-  if (parseSource(nextSource, "yaml").status !== "ok")
-    return { status: "error", reason: "parse" };
-  const selectionFrom = context.from + insert.length;
+  const parsed = parseSource(stripped, "yaml");
+  const tree = parsed.status === "ok" ? parsed.tree : {};
+  if (original.status !== "ok" && containsSnippetIdentity(tree, snippet))
+    return { status: "error", reason: "duplicate" };
+  // 커서 줄이 빠진 원문에서 커서 줄 뒤에 오던 형제는 offset이 lineStart 이상이다.
+  const after = (pointer: string): boolean => {
+    const range =
+      parsed.keyRanges.get(pointer) ?? parsed.valueRanges.get(pointer);
+    return range !== undefined && range.start.offset >= lineStart;
+  };
+  const sequencePointer = `/${escapePointerSegment(snippet.sectionKey)}`;
+  let op: SourceOperation;
+  if (context.pointer === "") {
+    const before = Object.keys(tree).find((key) =>
+      after(`/${escapePointerSegment(key)}`),
+    );
+    op = {
+      kind: "insert-key",
+      parentPointer: "",
+      key: snippet.sectionKey,
+      value: snippet.kind === "section" ? snippet.value : [snippet.value],
+      ...(before === undefined ? {} : { before }),
+    };
+  } else if (
+    snippet.kind === "factor" &&
+    context.pointer === sequencePointer &&
+    context.prefix === ""
+  ) {
+    const items = tree[snippet.sectionKey];
+    const count = Array.isArray(items) ? items.length : 0;
+    let index = 0;
+    while (index < count && !after(`${sequencePointer}/${index}`)) index += 1;
+    op = {
+      kind: "insert-item",
+      parentPointer: sequencePointer,
+      value: snippet.value,
+      index,
+    };
+  } else {
+    return { status: "error", reason: "cursor-context" };
+  }
+
+  const planned = planSourceOperation(stripped, "yaml", op, {
+    eol: detectEol(source),
+    anchor,
+  });
+  if (planned.status === "error") {
+    const reason: SnippetEditFailure =
+      planned.reason === "exists"
+        ? "duplicate"
+        : planned.reason === "parse"
+          ? "parse"
+          : "cursor-context";
+    return { status: "error", reason };
+  }
   return {
     status: "ok",
-    edit: {
-      from: context.from,
-      to: lineEnd,
-      insert,
-      selection: { from: selectionFrom },
-      nextSource,
-    },
+    edit: singleRangeEdit(
+      source,
+      planned.edit.nextSource,
+      context.from,
+      lineEnd,
+    ),
   };
 };

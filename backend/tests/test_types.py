@@ -103,3 +103,22 @@ class TestPriceWindow:
         window = self._window()
         with pytest.raises(KeyError, match="not in window"):
             window.column(make_instrument("XXXX"))
+
+
+def test_instrument_id_hash_is_cached_once_at_construction() -> None:
+    from dataclasses import fields
+
+    from backtest_engine.types.instruments import AssetClass, InstrumentId
+
+    instrument = InstrumentId("XKRX", "005930", AssetClass.EQUITY, "KRW")
+    # 캐시된 해시는 필드 튜플 해시와 같아야 dict/set 동작이 기존과 동일하다.
+    assert hash(instrument) == hash(("XKRX", "005930", AssetClass.EQUITY, "KRW"))
+    assert instrument == InstrumentId("XKRX", "005930", AssetClass.EQUITY, "KRW")
+    assert instrument != InstrumentId("XKRX", "005930", AssetClass.EQUITY, "USD")
+    # 캐시는 dataclass 필드가 아니어야 ==·repr·trace 직렬화에 나타나지 않는다.
+    assert "_hash" not in {field.name for field in fields(instrument)}
+    assert "_hash" in vars(instrument)
+    assert repr(instrument) == (
+        "InstrumentId(venue='XKRX', symbol='005930', "
+        "asset_class=<AssetClass.EQUITY: 'equity'>, currency='KRW')"
+    )

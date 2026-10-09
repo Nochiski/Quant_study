@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { t } from "../../../shared/config";
+import { t, tOptional } from "../../../shared/config";
 import { Badge, Button, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
 import type { DocumentState } from "../model/document-state";
@@ -137,7 +137,11 @@ export const DocumentToolbar = ({
         ) : null}
         {runStatus.kind === "failed" ? (
           <span className="doc-toolbar__error" role="alert">
-            {t("toolbar.run.failed")}: {runStatus.detail}
+            {t("toolbar.run.failed")}:{" "}
+            {(runStatus.code === null
+              ? null
+              : tOptional(`backtest.error.${runStatus.code}`)) ??
+              runStatus.detail}
           </span>
         ) : null}
       </div>

@@ -52,7 +52,7 @@ impl<'a> Session<'a> {
         let all_leg_ids: Vec<String> = legs.iter().map(|e| e.order_id.clone()).collect();
         let missing: Vec<String> = legs
             .iter()
-            .filter(|e| !self.bars.contains_key(&e.key))
+            .filter(|e| !self.bars.contains_key(e.key.as_str()))
             .map(|e| e.symbol.clone())
             .collect();
         if !missing.is_empty() && policy != "best_effort" {
@@ -79,7 +79,7 @@ impl<'a> Session<'a> {
             return Ok(());
         }
         // 견적 패스: 매도 먼저, 임시 소모 후 복원.
-        legs.retain(|e| self.bars.contains_key(&e.key));
+        legs.retain(|e| self.bars.contains_key(e.key.as_str()));
         legs.sort_by(|a, b| {
             (a.side != "sell", a.order_id.clone()).cmp(&(b.side != "sell", b.order_id.clone()))
         });

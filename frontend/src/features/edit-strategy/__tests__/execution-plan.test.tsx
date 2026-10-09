@@ -33,32 +33,30 @@ const API = "http://localhost:8000";
 const FIXTURE_SPEC = JSON.parse(
   readBackendFixture("strategy_documents/quality_momentum.legacy.json"),
 ) as StrategySpec;
-const MOMENTUM_FACTOR = FIXTURE_SPEC.factors.factors[0]!;
+const MOMENTUM_FACTOR = FIXTURE_SPEC.factors[0]!;
 const SPEC: StrategySpec = {
   ...FIXTURE_SPEC,
   title: "멀티 팩터",
-  factors: {
-    factors: [
-      MOMENTUM_FACTOR,
-      {
-        ...MOMENTUM_FACTOR,
-        factor_id: "quality",
-        label: "퀄리티",
-        weight: 0.4,
-        graph: {
-          nodes: [
-            {
-              node_id: "book",
-              field_id: "financial.book_equity",
-              kind: "field",
-            },
-          ],
-          output_node_id: "book",
-          missing_policy: "keep",
-        },
+  factors: [
+    MOMENTUM_FACTOR,
+    {
+      ...MOMENTUM_FACTOR,
+      factor_id: "quality",
+      label: "퀄리티",
+      weight: 0.4,
+      graph: {
+        nodes: [
+          {
+            node_id: "book",
+            field_id: "financial.book_equity",
+            kind: "field",
+          },
+        ],
+        output_node_id: "book",
+        missing_policy: "keep",
       },
-    ],
-  },
+    },
+  ],
 };
 
 const catalogField = (
@@ -135,7 +133,7 @@ const METADATA: ContractInspectorSource = {
   schema: {
     schema: { type: "object" },
     schema_hash: "schema-hash",
-    schema_version: "1.0",
+    schema_version: "1.1",
   },
   contract: {
     contract: {
@@ -144,7 +142,7 @@ const METADATA: ContractInspectorSource = {
       factor_registry_version: "registry-v1",
       fields: [],
       schema_hash: "schema-hash",
-      schema_version: "1.0",
+      schema_version: "1.1",
     },
     equity_catalog_url: "/api/v1/equity/catalog",
     factor_catalog_url: "/api/v1/factors/catalog",
@@ -168,14 +166,17 @@ const currentState = (): DocumentState => ({
     spec: SPEC,
     canonicalJson: JSON.stringify(SPEC),
     specHash: "s".repeat(64),
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     sourceHash: "x".repeat(64),
     diagnostics: [],
   },
   phase: "semantically-valid",
 });
 
-const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
+// backend 규칙(P2-02): 요청이 `missing` 을 생략하면 1.1 그래프의 값으로 떨어진다. mock 이
+// 그래프만 읽으면 요청에서 정책이 빠지는 회귀를 구조적으로 못 잡는다.
+const explanation = (body: FactorGraphRequest): FactorExplanation => {
+  const graph = body.graph;
   const contracts = graph.nodes.map((node, index) => ({
     node_id: node.node_id,
     value_type: "numeric_series" as const,
@@ -217,7 +218,7 @@ const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
       referenced_factor_ids: [],
       referenced_subgraph_ids: [],
       minimum_history_sessions: contracts.at(-1)?.minimum_history_sessions ?? 0,
-      missing_policy: graph.missing_policy ?? "drop",
+      missing_policy: body.missing ?? graph.missing_policy ?? "drop",
       as_of_policy: "available_date_lte_as_of",
     },
     narrative: [],
@@ -229,7 +230,7 @@ const server = setupServer(
   http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
     const body = (await request.json()) as FactorGraphRequest;
     requests.push(body);
-    return HttpResponse.json(explanation(body.graph));
+    return HttpResponse.json(explanation(body));
   }),
 );
 
@@ -343,7 +344,7 @@ describe("execution plan orchestration", () => {
       status: "incompatible",
       resource: "schema-contract",
       expected: "2.0",
-      actual: "1.0:1.0",
+      actual: "1.1:1.1",
     });
     const { result } = renderHook(
       () => useExecutionPlans(currentState(), nextRuntime),
@@ -360,7 +361,7 @@ describe("execution plan orchestration", () => {
     server.use(
       http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
         const body = (await request.json()) as FactorGraphRequest;
-        const payload = explanation(body.graph);
+        const payload = explanation(body);
         return HttpResponse.json({
           ...payload,
           registry_version: "registry-v2",
@@ -388,7 +389,7 @@ describe("execution plan orchestration", () => {
       http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
         const body = (await request.json()) as FactorGraphRequest;
         return HttpResponse.json({
-          ...explanation(body.graph),
+          ...explanation(body),
           data_snapshot_id: "dataset-v2",
         });
       }),
@@ -471,20 +472,18 @@ describe("execution plan orchestration", () => {
     expect(prepared.status).toBe("prepared");
     if (prepared.status !== "prepared") return;
 
-    expect(factorNodePointer(1, 0)).toBe("/factors/factors/1/graph/nodes/0");
+    expect(factorNodePointer(1, 0)).toBe("/factors/1/graph/nodes/0");
     expect(nodePointerById(prepared.requests[0], "mom_252")).toBe(
-      "/factors/factors/0/graph/nodes/1",
+      "/factors/0/graph/nodes/1",
     );
     expect(nodePointerById(prepared.requests[0], "missing")).toBeNull();
-    expect(
-      factorIndexAtPointer("/factors/factors/1/graph/nodes/0/field_id"),
-    ).toBe(1);
+    expect(factorIndexAtPointer("/factors/1/graph/nodes/0/field_id")).toBe(1);
     expect(factorIndexAtPointer("/risk/max_name_weight")).toBeNull();
-    expect(factorIndexAtPointer("/factors/factors/01/graph")).toBeNull();
+    expect(factorIndexAtPointer("/factors/01/graph")).toBeNull();
     expect(
       pointerSelectsNode(
-        "/factors/factors/1/graph/nodes/0/field_id",
-        "/factors/factors/1/graph/nodes/0",
+        "/factors/1/graph/nodes/0/field_id",
+        "/factors/1/graph/nodes/0",
       ),
     ).toBe(true);
   });

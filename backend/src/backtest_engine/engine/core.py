@@ -21,30 +21,23 @@ from backtest_engine.engine.broker import (
     QuoteCore,
     QuoteNumbers,
 )
-from backtest_engine.engine.compact import CompactOrder
-from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import FixedBpsSlippage, NoSlippage, VolumeShareSlippage
 from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
 from backtest_engine.ports.execution import SlippageModel
-from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import (
     CorporateActionApplied,
     CorporateActionEvent,
     CostAccrued,
-    CostKind,
     FillEvent,
-    OpenOrderSnapshot,
     OrderEvent,
 )
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot
 from backtest_engine.types.orders import Side
 from backtest_engine.types.portfolio import PortfolioSnapshot, Position
-from backtest_engine.types.requirements import EverySession, MonthEndSession, Schedule
-from backtest_engine.types.results import RunConfig
 
 CORES = ("python", "rust", "rust_legacy", "rust_persistent")
 RUST_CORES = frozenset({"rust", "rust_legacy", "rust_persistent"})
@@ -250,319 +243,14 @@ class RustPortfolio:
         )
 
 
-class PersistentPortfolio:
-    """`PersistentEngine`이 소유한 포트폴리오의 Python 도메인 어댑터."""
+@functools.cache
+def route_error_exception() -> type[BaseException]:
+    """Rust 드라이버가 라우팅 오류에 쓰는 예외 타입. `args`는 `(code, message)`다.
 
-    def __init__(self, runtime: Any) -> None:
-        self._inner = runtime
-        self._instruments: dict[str, InstrumentId] = {}
-        self._snapshot_cache: tuple[datetime, PortfolioSnapshot] | None = None
-        self._feed_loaded = False
-
-    def register_instruments(self, instruments: tuple[InstrumentId, ...]) -> None:
-        for instrument in instruments:
-            self._instruments.setdefault(instrument_key(instrument), instrument)
-        self._feed_loaded = True
-
-    def apply(self, fill: FillEvent) -> None:
-        if fill.quantity != fill.quantity.to_integral_value():
-            raise ValueError(
-                f"rust core supports integer share quantities only — fill_id={fill.fill_id} "
-                f"quantity={fill.quantity}"
-            )
-        key = instrument_key(fill.instrument)
-        try:
-            self._inner.apply_fill(
-                key, fill.side.value, int(fill.quantity), fill.price, fill.fee
-            )
-        except ValueError as error:
-            message = str(error)
-            if message.startswith("negative_position:"):
-                raise NegativePositionError(
-                    f"{message.removeprefix('negative_position: ')} fill_id={fill.fill_id}"
-                ) from error
-            if message.startswith("negative_cash:"):
-                raise NegativeCashError(
-                    f"{message.removeprefix('negative_cash: ')} fill_id={fill.fill_id}"
-                ) from error
-            raise
-        self._instruments.setdefault(key, fill.instrument)
-        self._snapshot_cache = None
-
-    def charge(self, cost: CostAccrued) -> None:
-        self._inner.charge(cost.amount)
-        self._snapshot_cache = None
-
-    def apply_corporate_action(
-        self,
-        action: CorporateActionEvent,
-        settlement_price: float,
-        settled_at: datetime | None = None,
-    ) -> CorporateActionApplied | None:
-        key = instrument_key(action.instrument)
-        old_quantity = Decimal(self._inner.held_qty(key))
-        if old_quantity == 0:
-            return None
-        if settlement_price <= 0:
-            raise ValueError(
-                f"corporate action settlement price must be > 0 — "
-                f"instrument={action.instrument.symbol} ts={action.ts} price={settlement_price}"
-            )
-        applied = self._inner.apply_corporate_action_ratio(
-            key, str(action.ratio), settlement_price
-        )
-        if applied is None:
-            return None
-        old_quantity_raw, new_quantity_raw, old_average, new_average, cash_paid = applied
-        old_quantity = Decimal(old_quantity_raw)
-        new_quantity = Decimal(new_quantity_raw)
-        self._snapshot_cache = None
-        return CorporateActionApplied(
-            ts=settled_at if settled_at is not None else action.ts,
-            instrument=action.instrument,
-            action=action,
-            old_quantity=old_quantity,
-            new_quantity=new_quantity,
-            old_average_price=old_average,
-            new_average_price=new_average,
-            cash_paid=cash_paid,
-        )
-
-    def mark(self, snapshot: MarketSnapshot) -> None:
-        if self._feed_loaded:
-            self._inner.mark_current_session()
-        else:
-            self._inner.mark([(instrument_key(bar.instrument), bar.close) for bar in snapshot.bars])
-            for bar in snapshot.bars:
-                self._instruments.setdefault(instrument_key(bar.instrument), bar.instrument)
-        self._snapshot_cache = None
-
-    @property
-    def cash(self) -> float:
-        return float(self._inner.cash)
-
-    def held_qty(self, instrument: InstrumentId) -> Decimal:
-        return Decimal(self._inner.held_qty(instrument_key(instrument)))
-
-    def snapshot(self, ts: datetime) -> PortfolioSnapshot:
-        if self._snapshot_cache is not None and self._snapshot_cache[0] == ts:
-            return self._snapshot_cache[1]
-        cash, rows, equity, gross_exposure = self._inner.portfolio_snapshot()
-        built = self._snapshot_from_wire(ts, cash, rows, equity, gross_exposure)
-        self._snapshot_cache = (ts, built)
-        return built
-
-    def close_session(
-        self, ts: datetime, config: RunConfig, schedule: Schedule
-    ) -> tuple[bool, tuple[CostAccrued, ...], PortfolioSnapshot]:
-        """종가 평가와 세션 비용 차감을 Rust에서 한 번에 수행한다."""
-        if isinstance(schedule, EverySession):
-            schedule_wire = "every_session"
-        elif isinstance(schedule, MonthEndSession):
-            schedule_wire = "month_end"
-        else:
-            raise TypeError(f"unsupported persistent schedule — got {type(schedule).__name__}")
-        should_dispatch, cost_rows, snapshot_wire = self._inner.close_current_session(
-            schedule_wire,
-            config.short_borrow_bps_annual,
-            config.margin_interest_bps_annual,
-            config.annualization_days,
-        )
-        costs = tuple(
-            CostAccrued(
-                ts=ts,
-                kind=CostKind(kind),
-                instrument=None if key is None else self._instruments[key],
-                amount=amount,
-            )
-            for kind, key, amount in cost_rows
-        )
-        cash, rows, equity, gross_exposure = snapshot_wire
-        built = self._snapshot_from_wire(ts, cash, rows, equity, gross_exposure)
-        self._snapshot_cache = (ts, built)
-        return should_dispatch, costs, built
-
-    def _snapshot_from_wire(
-        self,
-        ts: datetime,
-        cash: float,
-        rows: list[tuple[str, int, float, float, float, float]],
-        equity: float,
-        gross_exposure: float,
-    ) -> PortfolioSnapshot:
-        positions = tuple(
-            Position(
-                instrument=self._instruments[key],
-                quantity=Decimal(quantity),
-                average_price=average_price,
-                market_price=market_price,
-                market_value=market_value,
-                unrealized_pnl=unrealized_pnl,
-            )
-            for key, quantity, average_price, market_price, market_value, unrealized_pnl in rows
-        )
-        built = PortfolioSnapshot(
-            ts=ts,
-            cash=cash,
-            positions=positions,
-            equity=equity,
-            gross_exposure=gross_exposure,
-        )
-        return built
-
-
-class PersistentOrderManager(OrderManager):
-    """mutable 주문 상태는 Rust runtime만 소유하고 Python에는 immutable OrderEvent만 보관한다."""
-
-    def __init__(self, runtime: Any) -> None:
-        self._runtime = runtime
-        self._orders: dict[str, CompactOrder] = {}
-        self._has_pending = False
-
-    def _states(self) -> dict[str, tuple[int, bool]]:
-        return {
-            order_id: (remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.open_order_states()
-        }
-
-    def _entry(self, order_id: str, remaining: int, triggered: bool) -> OpenOrder:
-        return OpenOrder(
-            order=self._orders[order_id].materialize(),
-            remaining=Decimal(remaining),
-            triggered=triggered,
-        )
-
-    def next_decision_id(self) -> str:
-        return cast(str, self._runtime.next_decision_id())
-
-    def next_order_id(self) -> str:
-        return cast(str, self._runtime.next_order_id())
-
-    def next_fill_id(self) -> str:
-        return cast(str, self._runtime.next_fill_id())
-
-    def next_group_id(self) -> str:
-        return cast(str, self._runtime.next_group_id())
-
-    def register_group(self, group: BasketGroup) -> None:
-        # Rust Router가 그룹을 같은 route 호출 안에서 pending 상태로 저장한다.
-        del group
-        self._has_pending = True
-
-    def activate_pending(self) -> None:
-        """ORDER priority에서 노출된 주문을 다음 MARKET 직전에 Rust에서 일괄 활성화한다."""
-        if not self._has_pending:
-            return
-        self._runtime.activate_pending()
-        self._has_pending = False
-
-    def open_groups(self) -> tuple[BasketGroup, ...]:
-        return tuple(
-            BasketGroup(group_id, GroupPolicy(policy), tuple(order_ids))
-            for group_id, policy, order_ids in self._runtime.open_group_states()
-        )
-
-    def group_entries(self, group_id: str) -> tuple[OpenOrder, ...]:
-        states = self._states()
-        group = next(group for group in self.open_groups() if group.group_id == group_id)
-        return tuple(
-            self._entry(order_id, *states[order_id])
-            for order_id in group.order_ids
-            if order_id in states
-        )
-
-    def drop_group(self, group_id: str) -> None:
-        self._runtime.drop_group(group_id)
-
-    def place(self, order: OrderEvent) -> None:
-        if order.quantity != order.quantity.to_integral_value():
-            raise ValueError(
-                f"rust core supports integer share quantities only — "
-                f"order_id={order.order_id} quantity={order.quantity}"
-            )
-        # mutable 주문은 route 호출에서 이미 Rust pending 영역에 저장됐다. 여기서는 공개
-        # EventStore/context materialization에 필요한 immutable 객체만 기억한다.
-        self.place_compact(CompactOrder.from_event(order))
-
-    def place_compact(self, order: CompactOrder) -> None:
-        self._orders[order.order_id] = order
-        self._has_pending = True
-
-    def order_compact(self, order_id: str) -> CompactOrder:
-        return self._orders[order_id]
-
-    def compact_open_entries(self) -> tuple[tuple[CompactOrder, int, bool], ...]:
-        return tuple(
-            (self._orders[order_id], remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.open_order_states()
-        )
-
-    def compact_open_orders(self) -> tuple[tuple[CompactOrder, int], ...]:
-        return tuple(
-            (order, remaining)
-            for order, remaining, _triggered in self.compact_open_entries()
-        )
-
-    def open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
-        return tuple(
-            OpenOrderSnapshot(order=entry.order, remaining=entry.remaining)
-            for entry in self.open_entries()
-        )
-
-    def open_entries(self) -> tuple[OpenOrder, ...]:
-        return tuple(
-            self._entry(order_id, remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.open_order_states()
-        )
-
-    def get(self, order_id: str) -> OpenOrder | None:
-        state = self._states().get(order_id)
-        return None if state is None else self._entry(order_id, *state)
-
-    def order_event(self, order_id: str) -> OrderEvent:
-        return self._orders[order_id].materialize()
-
-    def settle(self, order_id: str, filled: Decimal) -> Decimal:
-        if filled != filled.to_integral_value():
-            raise ValueError(
-                f"rust core supports integer share quantities only — "
-                f"order_id={order_id} quantity={filled}"
-            )
-        return Decimal(self._runtime.settle_order(order_id, int(filled)))
-
-    def mark_triggered(self, order_id: str) -> None:
-        self._runtime.mark_triggered(order_id)
-
-    def remove(self, order_id: str) -> OpenOrder:
-        _, remaining, triggered = self._runtime.remove_order(order_id)
-        return self._entry(order_id, remaining, triggered)
-
-    def cancel_for_instrument(self, instrument: InstrumentId) -> tuple[OrderEvent, ...]:
-        return tuple(
-            order.materialize() for order in self.cancel_compact_for_instrument(instrument)
-        )
-
-    def cancel_compact_for_instrument(
-        self, instrument: InstrumentId
-    ) -> tuple[CompactOrder, ...]:
-        order_ids = self._runtime.cancel_for_key(instrument_key(instrument))
-        return tuple(self._orders[order_id] for order_id in order_ids)
-
-    def drain(self) -> tuple[OpenOrder, ...]:
-        return tuple(
-            OpenOrder(
-                order=order.materialize(),
-                remaining=Decimal(remaining),
-                triggered=triggered,
-            )
-            for order, remaining, triggered in self.drain_compact()
-        )
-
-    def drain_compact(self) -> tuple[tuple[CompactOrder, int, bool], ...]:
-        return tuple(
-            (self._orders[order_id], remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.drain_orders()
-        )
+    확장 심볼 조회를 한 곳에 모으고 세션마다 반복되는 import를 피하려고 메모한다.
+    """
+    _require_core("rust_persistent")
+    return cast(type[BaseException], importlib.import_module("backtest_core").RouteErrorException)
 
 
 def make_persistent_runtime(
@@ -759,11 +447,9 @@ def make_portfolio(
     if core == "rust_legacy":
         return RustPortfolio(initial_cash, allow_short=allow_short, allow_margin=allow_margin)
     if core in PERSISTENT_RUST_CORES:
-        runtime = make_persistent_runtime(
-            initial_cash,
-            allow_short=allow_short,
-            allow_margin=allow_margin,
-            leverage=1.0,
+        raise CoreUnavailable(
+            f"core={core!r} owns its portfolio inside PersistentEngine — "
+            "use BacktestEngine(core=...) for engine runs, or core='rust_legacy' for the "
+            "standalone backtest_core.Portfolio adapter"
         )
-        return PersistentPortfolio(runtime)
     return PythonPortfolio(initial_cash, allow_short=allow_short, allow_margin=allow_margin)

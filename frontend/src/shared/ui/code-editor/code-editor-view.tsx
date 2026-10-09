@@ -9,6 +9,10 @@ import {
   historyKeymap,
   indentWithTab,
   isolateHistory,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
 } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
@@ -173,6 +177,9 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       onEscape,
     };
     const languageCompartment = useRef(new Compartment());
+    // 문서를 갈아 끼울 때 이력을 비우려고 compartment에 둔다: 확장을 잠시 떼면 `historyField`가 사라지고
+    // 다시 붙이면 빈 이력으로 초기화된다(CM6에서 이력을 지우는 방법).
+    const historyCompartment = useRef(new Compartment());
     const readOnlyCompartment = useRef(new Compartment());
     const completionCompartment = useRef(new Compartment());
     const hoverCompartment = useRef(new Compartment());
@@ -208,7 +215,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
         bracketMatching(),
         highlightSelectionMatches(),
         syntaxHighlighting(semanticHighlightStyle, { fallback: true }),
-        history(),
+        historyCompartment.current.of(history()),
         lintGutter(),
         linter(null),
         languageCompartment.current.of(language === "json" ? json() : yaml()),
@@ -360,11 +367,17 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       ref,
       (): CodeEditorHandle => ({
         getText: () => view.current?.state.doc.toString() ?? "",
-        setText: (text) => {
+        loadText: (text) => {
           const current = view.current;
-          if (!current || current.state.doc.toString() === text) return;
+          if (!current) return;
+          // 교체 트랜잭션에서 이미 history 확장을 떼므로 이 변경은 기록되지 않고,
+          // 다시 붙이는 순간 이전 문서의 편집 단계까지 사라진다(깊이 0).
           current.dispatch({
             changes: { from: 0, to: current.state.doc.length, insert: text },
+            effects: historyCompartment.current.reconfigure([]),
+          });
+          current.dispatch({
+            effects: historyCompartment.current.reconfigure(history()),
           });
         },
         replaceRange: (from, to, text, selection) => {
@@ -425,6 +438,21 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           });
         },
         focus: () => view.current?.focus(),
+        // 툴바 버튼과 전역 단축키가 쓰는 경로(P1-02). 편집기가 포커스를 갖지 않아도(다른 탭이 보이는 동안
+        // 편집기는 hidden으로 살아 있다) 명령을 직접 실행한다 — 키맵은 포커스가 있어야만 도는 경로다.
+        undo: () => {
+          const current = view.current;
+          return current === null ? false : undo(current);
+        },
+        redo: () => {
+          const current = view.current;
+          return current === null ? false : redo(current);
+        },
+        historyDepth: () => {
+          const state = view.current?.state;
+          if (state === undefined) return { undo: 0, redo: 0 };
+          return { undo: undoDepth(state), redo: redoDepth(state) };
+        },
         getHistoryState: () =>
           view.current?.state.toJSON(HISTORY_FIELDS) ?? null,
         restoreHistoryState: (state) => {

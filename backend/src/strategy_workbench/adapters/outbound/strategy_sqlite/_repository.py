@@ -182,6 +182,7 @@ class SQLiteStrategyRepository:
                     latest_revision=record.revision,
                     spec_hash=record.spec_hash,
                     updated_at=record.provenance.created_at,
+                    requires_upgrade=record.requires_upgrade,
                 )
                 for record in records
             ),
@@ -216,6 +217,7 @@ class SQLiteStrategyRepository:
                     source_format=record.source.format if record.source else None,
                     source_hash=record.source.source_hash if record.source else None,
                     change_note=record.provenance.change_note,
+                    requires_upgrade=record.requires_upgrade,
                 )
                 for record in records
             ),

@@ -32,7 +32,10 @@ export type BacktestRunSettingsResult =
 export const DEFAULT_BACKTEST_RUN_SETTINGS: BacktestRunSettingsFields = {
   core: "rust",
   initialCashKrw: "100000000",
-  benchmarkSecurityId: "005930",
+  // 종목 ID 어휘는 연결된 equity 어댑터가 정한다(mock `sec-005930-1`, 실데이터 `005930:1`). frontend 가
+  // 특정 어휘를 기본값으로 굽으면 다른 어댑터에서 백테스트가 시작조차 못 하므로(이슈 #154) 비워 둔다 —
+  // 비우면 벤치마크 없이 실행한다.
+  benchmarkSecurityId: "",
   annualizationDays: "252",
   oosStart: "",
 };

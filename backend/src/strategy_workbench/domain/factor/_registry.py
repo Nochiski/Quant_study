@@ -10,7 +10,6 @@ from ._nodes import (
     CrossSectionalOperator,
     FactorGraph,
     FieldNode,
-    MissingPolicy,
     TimeSeriesNode,
     TimeSeriesOperator,
 )
@@ -46,7 +45,6 @@ class FactorDefinition:
     output_unit: str
     required_field_ids: tuple[str, ...]
     minimum_history_sessions: int
-    missing_policy: MissingPolicy
     availability: FactorAvailability
     default_graph: FactorGraph | None
     tags: tuple[str, ...] = ()
@@ -98,11 +96,18 @@ def _field_graph(field_id: str) -> FactorGraph:
     )
 
 
+# 가격 변화(수익률·모멘텀·이평·변동성·낙폭·고점 거리·베타)는 수정주가를 읽는다. 원주가
+# `price.close`는 분할·증자·병합 날 끊겨 가짜 급등락을 만든다(이슈 #214). 원주가는 같은 날 두 값을
+# 견주는 절대 가격 비율(목표주가 괴리·배당수익률·장중 수익률)과 거래대금에만 쓴다.
+_ADJUSTED_CLOSE = "price.adj_close"
+_RAW_CLOSE = "price.close"
+
+
 def _implemented_graphs() -> dict[str, FactorGraph]:
     return {
         "price.momentum_12_1": FactorGraph(
             nodes=(
-                FieldNode("close", "price.close", "field"),
+                FieldNode("close", _ADJUSTED_CLOSE, "field"),
                 TimeSeriesNode(
                     "momentum", TimeSeriesOperator.MOMENTUM, "close", 252, "time_series", 21
                 ),
@@ -142,7 +147,7 @@ def _implemented_graphs() -> dict[str, FactorGraph]:
         "credit.margin_balance_change_20d": FactorGraph(
             nodes=(
                 FieldNode("balance", "credit.margin_balance", "field"),
-                TimeSeriesNode("change", TimeSeriesOperator.DELTA, "balance", 20, "time_series"),
+                TimeSeriesNode("change", TimeSeriesOperator.MOMENTUM, "balance", 20, "time_series"),
             ),
             output_node_id="change",
         ),
@@ -157,7 +162,7 @@ _SEEDS = (
         FactorCategory.PRICE,
         FactorPreference.HIGH,
         "ratio",
-        ("price.close",),
+        (_ADJUSTED_CLOSE,),
         252,
     ),
     _CatalogSeed(
@@ -166,7 +171,7 @@ _SEEDS = (
         FactorCategory.PRICE,
         FactorPreference.HIGH,
         "ratio",
-        ("price.close",),
+        (_ADJUSTED_CLOSE,),
         126,
     ),
     _CatalogSeed(
@@ -175,7 +180,7 @@ _SEEDS = (
         FactorCategory.PRICE,
         FactorPreference.LOW,
         "ratio",
-        ("price.close",),
+        (_ADJUSTED_CLOSE,),
         21,
     ),
     _CatalogSeed(
@@ -184,7 +189,7 @@ _SEEDS = (
         FactorCategory.PRICE,
         FactorPreference.LOW,
         "ratio",
-        ("price.close",),
+        (_ADJUSTED_CLOSE,),
         60,
     ),
     _CatalogSeed(
@@ -193,7 +198,7 @@ _SEEDS = (
         FactorCategory.PRICE,
         FactorPreference.LOW,
         "ratio",
-        ("price.close", "benchmark.close"),
+        (_ADJUSTED_CLOSE, "benchmark.close"),
         252,
     ),
     _CatalogSeed(
@@ -202,7 +207,7 @@ _SEEDS = (
         FactorCategory.PRICE,
         FactorPreference.LOW,
         "ratio",
-        ("price.close",),
+        (_ADJUSTED_CLOSE,),
         252,
     ),
     _CatalogSeed(
@@ -211,34 +216,38 @@ _SEEDS = (
         FactorCategory.PRICE,
         FactorPreference.HIGH,
         "ratio",
-        ("price.close",),
+        (_ADJUSTED_CLOSE,),
         252,
     ),
+    # 야간 수익률 open[t] / close[t-1]은 날을 건넌다. 수정 시가 필드가 없으므로
+    # (adj_close[t] / adj_close[t-1]) × (open[t] / close[t])로 같은 값을 만든다.
     _CatalogSeed(
         "price.overnight_return_20d",
         "야간 수익률",
         FactorCategory.PRICE,
         FactorPreference.HIGH,
         "ratio",
-        ("price.open", "price.close"),
+        ("price.open", _RAW_CLOSE, _ADJUSTED_CLOSE),
         21,
     ),
+    # 장중 수익률 close[t] / open[t]는 같은 날 원주가끼리라 조정이 필요 없다.
     _CatalogSeed(
         "price.intraday_return_20d",
         "장중 수익률",
         FactorCategory.PRICE,
         FactorPreference.HIGH,
         "ratio",
-        ("price.open", "price.close"),
+        ("price.open", _RAW_CLOSE),
         21,
     ),
+    # |수익률|은 수정주가, 거래대금(close × volume)은 원주가라야 분할에 불변이다.
     _CatalogSeed(
         "price.liquidity_amihud_20d",
         "Amihud 비유동성",
         FactorCategory.PRICE,
         FactorPreference.LOW,
         "ratio",
-        ("price.close", "price.volume"),
+        (_ADJUSTED_CLOSE, _RAW_CLOSE, "price.volume"),
         21,
     ),
     _CatalogSeed(
@@ -355,7 +364,7 @@ _SEEDS = (
         FactorCategory.CONSENSUS,
         FactorPreference.HIGH,
         "ratio",
-        ("consensus.target_price", "price.close"),
+        ("consensus.target_price", _RAW_CLOSE),
         1,
     ),
     _CatalogSeed(
@@ -517,7 +526,7 @@ _SEEDS = (
         FactorCategory.CREDIT,
         FactorPreference.LOW,
         "ratio",
-        ("credit.margin_balance", "price.market_cap"),
+        ("credit.margin_balance", "price.shares_outstanding"),
         1,
     ),
     _CatalogSeed(
@@ -562,7 +571,7 @@ _SEEDS = (
         FactorCategory.EVENT,
         FactorPreference.HIGH,
         "ratio",
-        ("event.dividend_per_share", "price.close"),
+        ("event.dividend_per_share", _RAW_CLOSE),
         1,
     ),
     _CatalogSeed(
@@ -616,7 +625,6 @@ def build_default_factor_registry() -> FactorRegistry:
             output_unit=seed.unit,
             required_field_ids=seed.fields,
             minimum_history_sessions=seed.history,
-            missing_policy=MissingPolicy.DROP,
             availability=(
                 FactorAvailability.IMPLEMENTED
                 if seed.factor_id in implemented

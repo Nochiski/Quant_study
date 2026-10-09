@@ -25,7 +25,7 @@ import { App } from "../app";
 const API = "http://localhost:8000";
 
 const spec = (revision: number, title: string) => ({
-  identity: { strategy_id: "s1", revision, schema_version: "1.0" },
+  identity: { strategy_id: "s1", revision, schema_version: "1.1" },
   title,
   description: "",
   data: {
@@ -36,8 +36,12 @@ const spec = (revision: number, title: string) => ({
     frequency: "daily",
   },
   eligibility: { rules: [] },
-  factors: { factors: [] },
-  signal: { method: "weighted_sum", entry_percentile: 0.1 },
+  factors: [],
+  signal: {
+    score_threshold: null,
+    regime_field_id: null,
+    regime_minimum: null,
+  },
   portfolio: {
     side: "long_only",
     selection_count: 20,
@@ -52,7 +56,6 @@ const spec = (revision: number, title: string) => ({
   },
   execution: {
     timing: "next_open",
-    order_style: "market",
     fee_bps: 15,
     slippage_bps: 10,
   },
@@ -62,9 +65,9 @@ const spec = (revision: number, title: string) => ({
 const document = (revision: number, title: string) => ({
   strategy_id: "s1",
   revision,
-  schema_version: "1.0",
+  schema_version: "1.1",
   format: "yaml",
-  source: `schema_version: "1.0"
+  source: `schema_version: "1.1"
 title: ${title}
 `,
   source_hash: "b".repeat(64),
@@ -99,7 +102,7 @@ const backtestSummary = ({
   strategy_provenance: {
     kind: saved ? "saved_revision" : "inline_draft",
     spec_hash: saved ? "1".repeat(64) : "2".repeat(64),
-    schema_version: "1.0",
+    schema_version: "1.1",
     strategy_id: saved ? "s1" : null,
     revision: saved ? 2 : null,
     source_hash: saved ? "b".repeat(64) : "c".repeat(64),
@@ -143,6 +146,7 @@ const server = setupServer(
       {
         strategy_id: "s1",
         latest_revision: 2,
+        requires_upgrade: false,
         title: "Alpha strategy",
         spec_hash: "a".repeat(64),
         updated_at: "2026-09-05T00:00:00Z",
@@ -199,9 +203,9 @@ const server = setupServer(
     return HttpResponse.json({
       format: "yaml",
       source_hash: "b".repeat(64),
-      schema_version: "1.0",
+      schema_version: "1.1",
       spec: spec(1, "퀄리티 모멘텀 v1"),
-      canonical_json: '{"schema_version":"1.0","title":"퀄리티 모멘텀 v1"}',
+      canonical_json: '{"schema_version":"1.1","title":"퀄리티 모멘텀 v1"}',
       spec_hash: "a".repeat(64),
       diagnostics: [],
       echo: body.source,
@@ -211,7 +215,7 @@ const server = setupServer(
     HttpResponse.json({
       schema: { type: "object", properties: {}, additionalProperties: false },
       schema_hash: "h".repeat(64),
-      schema_version: "1.0",
+      schema_version: "1.1",
     }),
   ),
   http.get(`${API}/api/v1/strategy-documents/contract`, () =>
@@ -222,7 +226,7 @@ const server = setupServer(
         factor_registry_version: "v1",
         fields: [],
         schema_hash: "h".repeat(64),
-        schema_version: "1.0",
+        schema_version: "1.1",
       },
       equity_catalog_url: "/api/v1/equity/catalog",
       factor_catalog_url: "/api/v1/factors/catalog",
@@ -289,6 +293,19 @@ const server = setupServer(
   ),
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec(0, "새 팩터 전략")),
+  ),
+  http.get(`${API}/api/v1/assistant/providers`, () =>
+    HttpResponse.json({
+      kinds: [
+        {
+          kind: "anthropic",
+          installed: true,
+          default_model: "claude-sonnet-5",
+        },
+        { kind: "openai", installed: false, default_model: null },
+      ],
+      profiles: [],
+    }),
   ),
 );
 
@@ -518,6 +535,61 @@ describe("App Shell routes", () => {
     ).toHaveAttribute("href", expect.stringContaining("view=diff"));
   });
 
+  it("marks frozen schema 1.0 strategies and revisions in the history lists", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              strategy_id: "frozen-legacy",
+              latest_revision: 1,
+              requires_upgrade: true,
+              title: "Frozen strategy",
+              spec_hash: "f".repeat(64),
+              updated_at: "2026-09-04T00:00:00Z",
+            },
+          ],
+          total: 1,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+      http.get(`${API}/api/v1/strategies/:strategyId/revisions`, () =>
+        HttpResponse.json({
+          items: [1, 2].map((revision) => ({
+            strategy_id: "frozen-legacy",
+            revision,
+            requires_upgrade: revision === 1,
+            spec_hash: `${revision}`.repeat(64).slice(0, 64),
+            source_hash: null,
+            source_format: null,
+            origin: "legacy_json",
+            change_note: null,
+            created_at: `2026-09-0${revision}T00:00:00Z`,
+          })),
+          total: 2,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+    );
+    mount("/research/strategies");
+    const row = (await screen.findByText("Frozen strategy")).closest("tr")!;
+    expect(within(row).getByText("1.0 동결")).toBeInTheDocument();
+    await user.click(
+      within(row).getByRole("button", {
+        name: "Revision 펼치기: Frozen strategy (frozen-legacy)",
+      }),
+    );
+    const revisions = await screen.findByRole("region", {
+      name: "저장 revision 목록: Frozen strategy (frozen-legacy)",
+    });
+    const rows = within(revisions).getAllByRole("row").slice(1);
+    expect(within(rows[0]!).getByText("1.0 동결")).toBeInTheDocument();
+    expect(within(rows[1]!).queryByText("1.0 동결")).toBeNull();
+  });
+
   it("paginates strategy and revision pages with distinct disclosure ownership", async () => {
     const strategyOffsets: number[] = [];
     const revisionOffsets: number[] = [];
@@ -526,6 +598,7 @@ describe("App Shell routes", () => {
       return {
         strategy_id: `s${String(number).padStart(2, "0")}`,
         latest_revision: 21,
+        requires_upgrade: false,
         title:
           number <= 2
             ? "Duplicate title"
@@ -776,6 +849,110 @@ describe("App Shell routes", () => {
       "백테스트 이력을 불러올 수 없습니다",
     );
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+  });
+
+  it("shows the server-owned failure reason of a failed backtest run", async () => {
+    // 이슈 #154: 어댑터가 거절한 실행은 "failed" 배지만 보이고 원인이 화면에 없었다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "failed",
+          progress: 0.05,
+          stage: "data",
+          message: "Run failed",
+          error:
+            "ValueError: malformed security_id — expected <ticker>:<span_seq> got='005930'",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+    );
+    mount("/research/backtests/run-failed");
+    expect(
+      await screen.findByRole("alert", { name: "실행 오류" }),
+    ).toHaveTextContent("malformed security_id");
+    expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
+      "failed",
+    );
+  });
+
+  it("translates a coded tape-stage failure and keeps the server reason", async () => {
+    // 이슈 #158: 데이터 의존 실패는 시작 422 대신 run `failed` + `error_code` 로 온다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "failed",
+          progress: 0.02,
+          stage: "tape",
+          message: "Run failed",
+          error:
+            "RawObservationUnavailableError: raw observations unavailable — status=no_data detail=no members in universe — universe_id=krx.common-stok root=<path>",
+          error_code: "portfolio.data.unavailable",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+    );
+    mount("/research/backtests/run-failed-tape");
+    const alert = await screen.findByRole("alert", { name: "실행 오류" });
+    expect(alert).toHaveTextContent("유니버스 ID 와 데이터 기간을 확인하세요");
+    // 서버 원문은 본문이 아니라 접힌 진단 상세("서버 사유") 안에만 있다.
+    const detail = within(alert).getByRole("group");
+    expect(detail).toHaveTextContent("universe_id=krx.common-stok");
+    expect(alert.textContent?.indexOf("유니버스 ID")).toBeLessThan(
+      alert.textContent?.indexOf("universe_id=") ?? -1,
+    );
+    expect(screen.getByRole("status", { name: "실행 진행" })).toHaveTextContent(
+      "tape · 2%",
+    );
+  });
+
+  it("labels a failure that raced a cancellation as an error before cancellation", async () => {
+    // 이슈 #158: 실패와 취소가 겹친 run 은 `cancelled` 배지에 사유가 같이 온다 — "실행 오류" 로 부르지 않는다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "cancelled",
+          progress: 0.02,
+          stage: "cancelled",
+          message: "Run cancelled",
+          error:
+            "RawObservationUnavailableError: raw observations unavailable — status=no_data",
+          error_code: "portfolio.data.unavailable",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+    );
+    mount("/research/backtests/run-cancelled-with-error");
+    const alert = await screen.findByRole("alert", {
+      name: "취소 전 발생한 오류",
+    });
+    expect(alert).toHaveTextContent("유니버스 ID 와 데이터 기간을 확인하세요");
+    expect(screen.queryByRole("alert", { name: "실행 오류" })).toBeNull();
+    expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
+      "cancelled",
+    );
+  });
+
+  it("opens the settings route with the AI provider section from the shell", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/backtests");
+    await user.click(await screen.findByRole("link", { name: "설정" }));
+
+    await waitFor(() => expect(history.location.pathname).toBe("/settings"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "설정" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "AI 어시스턴트 공급자" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("연결된 공급자가 없습니다"),
+    ).toBeInTheDocument();
   });
 
   it("supports back and forward between routes", async () => {

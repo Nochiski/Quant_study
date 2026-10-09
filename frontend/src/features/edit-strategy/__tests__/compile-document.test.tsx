@@ -8,8 +8,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { SourceDiagnostic } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { toDocumentDiagnostics } from "../model/use-compile-document";
+import { useDiagnosticNavigation } from "../model/use-diagnostic-navigation";
 import { useStrategyDocument } from "../model/use-strategy-document";
 import { useCompileDocument } from "../model/use-compile-document";
+import { DiagnosticsPanel } from "../ui/diagnostics-panel";
 import { SourceEditor } from "../ui/source-editor";
 
 const API = "http://localhost:8000";
@@ -22,11 +24,11 @@ const compiled = (
 ) => ({
   format: "yaml",
   source_hash: "s".repeat(64),
-  schema_version: "1.0",
+  schema_version: "1.1",
   spec: diagnostics.some((d) => d.severity === "error") ? null : spec,
   canonical_json: diagnostics.some((d) => d.severity === "error")
     ? null
-    : '{"schema_version":"1.0","title":"ok"}',
+    : '{"schema_version":"1.1","title":"ok"}',
   spec_hash: diagnostics.some((d) => d.severity === "error")
     ? null
     : "h".repeat(64),
@@ -88,6 +90,7 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
+/** 페이지와 같은 조합: 문제 목록은 편집기 밖에 있고 항해는 훅이 소유한다(WORKFLOW P1-01). */
 const Harness = ({ initial }: { initial: string }) => {
   const [state, dispatch] = useStrategyDocument({
     kind: "new",
@@ -95,13 +98,32 @@ const Harness = ({ initial }: { initial: string }) => {
     source: initial,
   });
   useCompileDocument(state, dispatch);
+  const problems = useDiagnosticNavigation({
+    state,
+    view: "yaml",
+    sourceView: "yaml",
+    form: null,
+    tree: null,
+    schemaLoaded: false,
+    onSelectPointer: () => undefined,
+    onOpenSource: () => undefined,
+  });
   return (
     <>
       <output data-testid="phase">{state.phase}</output>
       <output data-testid="version">
         {state.sourceVersion}/{state.compiledVersion}
       </output>
-      <SourceEditor state={state} dispatch={dispatch} />
+      <SourceEditor
+        state={state}
+        dispatch={dispatch}
+        onEditorReady={problems.onEditorReady}
+      />
+      <DiagnosticsPanel
+        diagnostics={problems.diagnostics}
+        stale={problems.stale}
+        onSelect={problems.selectDiagnostic}
+      />
     </>
   );
 };
@@ -127,14 +149,14 @@ const type = (view: EditorView, text: string) =>
 
 describe("useCompileDocument", () => {
   it("compiles a parsed text once and records the semantic verdict for that version", async () => {
-    await mount('schema_version: "1.0"\ntitle: ok\n');
+    await mount('schema_version: "1.1"\ntitle: ok\n');
     await waitFor(() =>
       expect(screen.getByTestId("phase")).toHaveTextContent(
         "semantically-valid",
       ),
     );
     expect(requests.map((r) => r.source)).toEqual([
-      'schema_version: "1.0"\ntitle: ok\n',
+      'schema_version: "1.1"\ntitle: ok\n',
     ]);
     {
       const [source, compiled] = screen
@@ -145,7 +167,7 @@ describe("useCompileDocument", () => {
   });
 
   it("fails closed when the wire response is missing a canonical payload", async () => {
-    await mount('schema_version: "1.0"\ntitle: incomplete\n');
+    await mount('schema_version: "1.1"\ntitle: incomplete\n');
     await waitFor(() =>
       expect(screen.getByTestId("phase")).toHaveTextContent(
         "structure-invalid",
@@ -200,7 +222,7 @@ describe("useCompileDocument", () => {
 
   it("lists problems with their source position and moves the selection on click", async () => {
     const user = userEvent.setup();
-    const view = await mount('schema_version: "1.0"\ntitle: bad\n');
+    const view = await mount('schema_version: "1.1"\ntitle: bad\n');
     const problems = await screen.findByRole("region", { name: "문제" });
     expect(problems).toHaveTextContent("오류 1 · 경고 0");
     const item = screen.getByRole("button", {
@@ -236,7 +258,7 @@ describe("useCompileDocument", () => {
   });
 
   it("disables an error list that belongs to an older text", async () => {
-    const view = await mount('schema_version: "1.0"\ntitle: bad\n');
+    const view = await mount('schema_version: "1.1"\ntitle: bad\n');
     await screen.findByRole("button", { name: /title must not be empty/ });
 
     type(view, "a: 1\n");
@@ -266,7 +288,7 @@ describe("useCompileDocument", () => {
 
 describe("toDocumentDiagnostics", () => {
   it("locates markers through the frontend parse map and falls back to the backend range", () => {
-    const text = 'schema_version: "1.0"\nrisk:\n  max_name_weight: 2\n';
+    const text = 'schema_version: "1.1"\nrisk:\n  max_name_weight: 2\n';
     const parse = parseSource(text, "yaml");
     const [located, fallback] = toDocumentDiagnostics(
       [
@@ -327,7 +349,7 @@ describe("toDocumentDiagnostics", () => {
   });
 
   it("anchors a root diagnostic at the start instead of marking the whole document", () => {
-    const text = 'schema_version: "1.0"\ntitle: ok\n';
+    const text = 'schema_version: "1.1"\ntitle: ok\n';
     const parse = parseSource(text, "yaml");
     const [diagnostic] = toDocumentDiagnostics(
       [

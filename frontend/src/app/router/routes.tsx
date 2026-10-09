@@ -82,6 +82,10 @@ const BacktestsPage = lazyRouteComponent(
   () => import("../../pages/research-backtests"),
   "BacktestsPage",
 );
+const SettingsPage = lazyRouteComponent(
+  () => import("../../pages/settings"),
+  "SettingsPage",
+);
 
 const offsetOf = (value: unknown): number | undefined => {
   if (typeof value === "number") {
@@ -183,6 +187,12 @@ const strategyRevisionRoute = createRoute({
   component: StrategyRevisionPage,
 });
 
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SettingsPage,
+});
+
 const backtestsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/backtests",
@@ -239,6 +249,7 @@ const routeTree = rootRoute.addChildren([
   strategyRevisionRoute,
   backtestsRoute,
   backtestRunRoute,
+  settingsRoute,
   operationsRoute.addChildren([
     deploymentsRoute,
     realtimeRoute,

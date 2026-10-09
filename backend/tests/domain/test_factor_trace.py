@@ -20,6 +20,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     FieldNode,
     GroupNode,
     GroupOperator,
+    MissingPolicy,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
@@ -80,10 +81,10 @@ def test_trace_values_equal_evaluation_values_for_every_selected_row() -> None:
     graph, panel = _graph(), _panel()
     evaluation = {
         (v.as_of, v.security_id): v.value
-        for v in evaluate_factor_graph(graph, observations=panel).values
+        for v in evaluate_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP).values
     }
 
-    trace = trace_factor_graph(graph, observations=panel)
+    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
 
     output = _rows(trace, "final")
     assert set(output) == set(evaluation)
@@ -112,7 +113,10 @@ def test_joint_evaluation_and_trace_share_one_compute_cache(monkeypatch) -> None
 
     monkeypatch.setattr(trace_module, "_compute_nodes", counted)
     evaluation, trace = evaluate_factor_graph_with_trace(
-        _graph(), observations=_panel(), selection=TraceSelection(node_ids=("final",))
+        _graph(),
+        observations=_panel(),
+        missing=MissingPolicy.DROP,
+        selection=TraceSelection(node_ids=("final",)),
     )
 
     assert calls == 1
@@ -121,7 +125,7 @@ def test_joint_evaluation_and_trace_share_one_compute_cache(monkeypatch) -> None
 
 
 def test_rows_are_ordered_by_as_of_then_security_and_carry_inputs() -> None:
-    trace = trace_factor_graph(_graph(), observations=_panel())
+    trace = trace_factor_graph(_graph(), observations=_panel(), missing=MissingPolicy.DROP)
 
     (close,) = [node for node in trace.nodes if node.node_id == "close"]
     assert [(row.as_of, row.security_id) for row in close.values][:4] == [
@@ -136,7 +140,7 @@ def test_rows_are_ordered_by_as_of_then_security_and_carry_inputs() -> None:
 
 
 def test_none_values_are_explained_by_status() -> None:
-    trace = trace_factor_graph(_graph(), observations=_panel())
+    trace = trace_factor_graph(_graph(), observations=_panel(), missing=MissingPolicy.DROP)
 
     close = _rows(trace, "close")
     assert close[(DAYS[1], "b")].status is TraceValueStatus.MISSING_INPUT
@@ -173,7 +177,7 @@ def test_division_by_zero_is_distinguished_from_missing_input() -> None:
             DAYS[0], "a", (FactorFieldValue("price.close", 1.0), FactorFieldValue("zero", 0.0))
         ),
     )
-    trace = trace_factor_graph(graph, observations=panel)
+    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
 
     assert _rows(trace, "div")[(DAYS[0], "a")].status is TraceValueStatus.DIVIDE_BY_ZERO
 
@@ -198,7 +202,9 @@ def test_finite_operands_that_overflow_fail_at_the_node_boundary(
         observation = _observation(DAYS[0], "overflowing-security", 1e308)
 
     with pytest.raises(NonFiniteFactorCalculationError) as excinfo:
-        evaluate_factor_graph_with_trace(graph, observations=(observation,))
+        evaluate_factor_graph_with_trace(
+            graph, observations=(observation,), missing=MissingPolicy.DROP
+        )
 
     assert excinfo.value.node_id == "overflow"
     assert excinfo.value.as_of == DAYS[0]
@@ -211,6 +217,7 @@ def test_selection_bounds_nodes_securities_dates_and_rows() -> None:
     bounded = trace_factor_graph(
         graph,
         observations=panel,
+        missing=MissingPolicy.DROP,
         selection=TraceSelection(
             node_ids=("final", "close"), security_ids=("a",), as_of=(DAYS[3],)
         ),
@@ -219,28 +226,44 @@ def test_selection_bounds_nodes_securities_dates_and_rows() -> None:
     assert all(len(node.values) == 1 for node in bounded.nodes)
     assert bounded.row_count == 2 and not bounded.truncated
 
-    capped = trace_factor_graph(graph, observations=panel, selection=TraceSelection(max_rows=5))
+    capped = trace_factor_graph(
+        graph, observations=panel, missing=MissingPolicy.DROP, selection=TraceSelection(max_rows=5)
+    )
     assert capped.truncated and capped.row_count == 5
     assert [node.node_id for node in capped.nodes] == ["close"]
     assert len(capped.nodes[0].values) == 5
 
     with pytest.raises(ValueError, match="unknown or not reachable"):
-        trace_factor_graph(graph, observations=panel, selection=TraceSelection(node_ids=("nope",)))
+        trace_factor_graph(
+            graph,
+            observations=panel,
+            missing=MissingPolicy.DROP,
+            selection=TraceSelection(node_ids=("nope",)),
+        )
     with pytest.raises(ValueError, match="max_rows must be positive"):
-        trace_factor_graph(graph, observations=panel, selection=TraceSelection(max_rows=0))
+        trace_factor_graph(
+            graph,
+            observations=panel,
+            missing=MissingPolicy.DROP,
+            selection=TraceSelection(max_rows=0),
+        )
 
 
 def test_trace_is_deterministic_across_calls_and_input_order() -> None:
     graph, panel = _graph(), _panel()
-    first = trace_factor_graph(graph, observations=panel)
-    second = trace_factor_graph(graph, observations=tuple(reversed(panel)))
+    first = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    second = trace_factor_graph(
+        graph, observations=tuple(reversed(panel)), missing=MissingPolicy.DROP
+    )
 
     assert first == second
 
 
 def test_exact_cap_boundary_does_not_emit_an_empty_trailing_node() -> None:
     graph, panel = _graph(), _panel()
-    capped = trace_factor_graph(graph, observations=panel, selection=TraceSelection(max_rows=8))
+    capped = trace_factor_graph(
+        graph, observations=panel, missing=MissingPolicy.DROP, selection=TraceSelection(max_rows=8)
+    )
 
     assert [node.node_id for node in capped.nodes] == ["close"]
     assert capped.truncated and capped.row_count == 8
@@ -251,7 +274,7 @@ def test_duplicate_rows_fail_closed_before_evaluation() -> None:
     duplicated = panel + (_observation(DAYS[1], "a", 99.0),)
 
     with pytest.raises(ValueError, match=r"unique \(as_of, security_id\)"):
-        trace_factor_graph(graph, observations=duplicated)
+        trace_factor_graph(graph, observations=duplicated, missing=MissingPolicy.DROP)
 
 
 def test_unreachable_node_selection_is_an_error_not_an_empty_trace() -> None:
@@ -262,5 +285,8 @@ def test_unreachable_node_selection_is_an_error_not_an_empty_trace() -> None:
     )
     with pytest.raises(ValueError, match="not reachable"):
         trace_factor_graph(
-            orphaned, observations=_panel(), selection=TraceSelection(node_ids=("orphan",))
+            orphaned,
+            observations=_panel(),
+            missing=MissingPolicy.DROP,
+            selection=TraceSelection(node_ids=("orphan",)),
         )

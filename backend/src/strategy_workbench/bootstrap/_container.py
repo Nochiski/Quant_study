@@ -23,6 +23,9 @@ from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository impo
     SQLiteStrategyDraftRepository,
     SQLiteStrategyRepository,
 )
+from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
+from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
+from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.equity_workspace.facade.workspace import (
@@ -45,6 +48,12 @@ from strategy_workbench.application.strategy_design.facade.ports import Strategy
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 
+from ._assistant import (
+    DEFAULT_ASSISTANT_SETTINGS,
+    AssistantSettings,
+    build_assistant_services,
+)
+
 
 @dataclass(frozen=True)
 class BackendContainer:
@@ -59,9 +68,15 @@ class BackendContainer:
     portfolio_design: PortfolioDesignService
     strategy_traces: StrategyTraceService
     backtest_runs: BacktestRunService
+    assistant_profiles: ProviderProfileService
+    assistant_chat: AssistantChatService
+    assistant_turns: AssistantTurnRunner
 
 
 EQUITY_ADAPTERS = ("mock", "duckdb")
+# `artifact_root`를 주지 않은 컨테이너의 백테스트 산출물 위치. `build_container`가 호출 시점에 읽는
+# 모듈 상수라 테스트가 개발자 로컬 `.local/`을 쓰지 않게 tmp로 바꿀 수 있다(#211).
+DEFAULT_RUN_ARTIFACT_ROOT = Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
 
 
 def build_container(
@@ -70,6 +85,7 @@ def build_container(
     artifact_root: Path | None = None,
     equity_root: Path | None = None,
     strategy_repository_path: str | Path | None = None,
+    assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
 
@@ -77,6 +93,9 @@ def build_container(
     `equity` optional extra (duckdb) and fails loudly when the root or the extra is missing.
     `strategy_repository_path=None` selects isolated in-memory SQLite for tests; the HTTP
     runtime supplies a durable file path explicitly so both exercise the same adapter contract.
+    `assistant`는 어시스턴트 DB에 같은 규칙을 적용하고, 공급자 adapter 레지스트리를 같이
+    나른다. 레지스트리는 A-05·A-06이 자기 항목을 등록할 때까지 비어 있고, 팩토리는 시작할 때가
+    아니라 처음 필요할 때 불린다(미설치 SDK가 서버 시작을 막지 않는다).
     """
     equity_data: MockEquityDataAdapter | EquityDuckdbAdapter
     if equity_adapter == "mock":
@@ -112,10 +131,24 @@ def build_container(
         source_spec_hash=_source_spec_hash_resolver(strategy_authoring),
     )
     strategy_draft_repository = SQLiteStrategyDraftRepository(strategy_repository_path)
-    run_artifact_root = artifact_root or (
-        Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
-    )
+    run_artifact_root = artifact_root or DEFAULT_RUN_ARTIFACT_ROOT
     strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
+    backtest_runs = BacktestRunService(
+        portfolio_design,
+        strategy_repository,
+        equity_data,
+        BacktestEngineExecutorAdapter(metric_registry),
+        LocalArtifactStore(run_artifact_root),
+        new_id=lambda: str(uuid4()),
+    )
+    # 결과 설명 세션이 완료된 실행을 읽으므로 실행 레지스트리를 먼저 세운다(결과 설명 spec R2).
+    assistant_services = build_assistant_services(
+        settings=assistant,
+        equity_data=equity_data,
+        factor_registry=factor_registry,
+        strategy_authoring=strategy_authoring,
+        backtest_runs=backtest_runs,
+    )
     return BackendContainer(
         equity_data=equity_data,
         equity_workspace=EquityWorkspaceService(equity_data),
@@ -139,14 +172,10 @@ def build_container(
         ),
         portfolio_design=portfolio_design,
         strategy_traces=strategy_traces,
-        backtest_runs=BacktestRunService(
-            portfolio_design,
-            strategy_repository,
-            equity_data,
-            BacktestEngineExecutorAdapter(metric_registry),
-            LocalArtifactStore(run_artifact_root),
-            new_id=lambda: str(uuid4()),
-        ),
+        backtest_runs=backtest_runs,
+        assistant_profiles=assistant_services.profiles,
+        assistant_chat=assistant_services.chat,
+        assistant_turns=assistant_services.turns,
     )
 
 

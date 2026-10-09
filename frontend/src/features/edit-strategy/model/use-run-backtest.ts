@@ -4,10 +4,12 @@ import {
   useStartBacktest,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
+import { ApiRequestError } from "../../../shared/api";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
   gateBacktestSourceWithFactorPlans,
+  isBacktestSettling,
   type BacktestSourceDecision,
 } from "./backtest-source";
 import type { DocumentState } from "./document-state";
@@ -17,7 +19,8 @@ export type RunBacktestStatus =
   | { kind: "idle" }
   | { kind: "starting" }
   | { kind: "accepted"; runId: string }
-  | { kind: "failed"; detail: string };
+  /** `code`는 backend 422 detail의 코드(예: `backtest.strategy.requires_upgrade`), 없으면 null. */
+  | { kind: "failed"; detail: string; code: string | null };
 
 export type BacktestRunOptions = Omit<
   BacktestRunSpec,
@@ -129,6 +132,8 @@ export const useRunBacktest = (
           status: {
             kind: "failed",
             detail: error instanceof Error ? error.message : String(error),
+            code:
+              error instanceof ApiRequestError ? (error.code ?? null) : null,
           },
         });
       }
@@ -170,6 +175,8 @@ export const useRunBacktest = (
     run,
     decision,
     status,
+    /** 결정이 닫혀 있지만 팩터 계획 조회가 아직 끝나지 않았다(`isBacktestSettling`). */
+    settling: isBacktestSettling(decision, executionPlans),
     canRun:
       (status.kind === "accepted" || decision.kind !== "blocked") &&
       options !== null &&

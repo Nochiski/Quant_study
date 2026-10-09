@@ -44,7 +44,7 @@ def _draft(
         source=source,
         format=SourceFormat.YAML,
         source_hash=source_hash_of(source),
-        schema_version="1.0",
+        schema_version="1.1",
         updated_at=updated_at,
     )
 
@@ -170,7 +170,7 @@ def test_draft_service_rejects_a_naive_clock(tmp_path: Path) -> None:
     with pytest.raises(InvalidStrategyDraftError, match="timezone-aware"):
         service.save(
             "naive-clock",
-            SaveStrategyDraftRequest(0, "", SourceFormat.YAML, "1.0"),
+            SaveStrategyDraftRequest(0, "", SourceFormat.YAML, "1.1"),
         )
 
 
@@ -187,7 +187,7 @@ def test_draft_service_reuses_authoring_source_size_limit(tmp_path: Path) -> Non
     with pytest.raises(InvalidStrategyDraftError, match="max_bytes=4"):
         service.save(
             "oversized",
-            SaveStrategyDraftRequest(0, "한글", SourceFormat.YAML, "1.0"),
+            SaveStrategyDraftRequest(0, "한글", SourceFormat.YAML, "1.1"),
         )
 
 

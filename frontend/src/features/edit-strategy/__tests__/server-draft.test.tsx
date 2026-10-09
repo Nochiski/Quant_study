@@ -24,7 +24,7 @@ import { ServerDraftBanner } from "../ui/server-draft-banner";
 
 const DRAFT_ID = "draft-0123456789abcdef0123456789abcdef";
 const NEXT_DRAFT_ID = `revision:s1:2:${"c".repeat(64)}`;
-const BASE = 'schema_version: "1.0"\ntitle: base\n';
+const BASE = 'schema_version: "1.1"\ntitle: base\n';
 const SPEC_HASH = "a".repeat(64);
 
 const remoteDraft = (source: string, version = 1): StrategyDraft => ({
@@ -33,7 +33,7 @@ const remoteDraft = (source: string, version = 1): StrategyDraft => ({
   source,
   format: "yaml",
   source_hash: "b".repeat(64),
-  schema_version: "1.0",
+  schema_version: "1.1",
   updated_at: `2026-09-05T00:00:0${version}Z`,
   strategy_id: "s1",
   base_revision: 1,
@@ -60,7 +60,7 @@ const Harness = ({
     rotateDraftOnSave && state.baseRevision === 2 ? NEXT_DRAFT_ID : DRAFT_ID;
   const sync = useServerDraft(state, dispatch, {
     draftId,
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     delayMs: 5,
   });
   return (

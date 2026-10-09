@@ -44,14 +44,14 @@ const CONTRACT: FieldContract[] = [
     maximum: 1,
   },
   {
-    pointer: "/factors/factors/*/graph/nodes/*/field_id",
+    pointer: "/factors/*/graph/nodes/*/field_id",
     branch: "field",
     type: "string",
     required: true,
     catalog: "equity-field",
   },
   {
-    pointer: "/factors/factors/*/graph/nodes/*/factor_id",
+    pointer: "/factors/*/graph/nodes/*/factor_id",
     branch: "saved_factor",
     type: "string",
     required: true,
@@ -116,7 +116,6 @@ const FACTOR_CATALOG = {
       factor_id: "momentum_12m",
       label: "12M Momentum",
       minimum_history_sessions: 252,
-      missing_policy: "drop",
       output_unit: "score",
       preference: "high",
       required_field_ids: ["close"],
@@ -136,7 +135,7 @@ const source = (
   schema: {
     schema: SCHEMA,
     schema_hash: "schema-hash-v1",
-    schema_version: "1.0",
+    schema_version: "1.1",
   },
   contract: {
     contract: {
@@ -145,7 +144,7 @@ const source = (
       factor_registry_version: "factor-registry-v1",
       fields: CONTRACT,
       schema_hash: "schema-hash-v1",
-      schema_version: "1.0",
+      schema_version: "1.1",
     },
     equity_catalog_url: "/api/v1/equity/catalog",
     factor_catalog_url: "/api/v1/factors/catalog",
@@ -162,39 +161,35 @@ const source = (
 });
 
 const TREE = {
-  schema_version: "1.0",
+  schema_version: "1.1",
   title: "테스트 전략",
   risk: { max_name_weight: 0.05 },
-  factors: {
-    factors: [
-      {
-        factor_id: "alpha",
-        graph: {
-          nodes: [
-            { node_id: "px", kind: "field", field_id: "close" },
-            {
-              node_id: "saved",
-              kind: "saved_factor",
-              factor_id: "momentum_12m",
-            },
-          ],
-          output_node_id: "px",
-        },
+  factors: [
+    {
+      factor_id: "alpha",
+      graph: {
+        nodes: [
+          { node_id: "px", kind: "field", field_id: "close" },
+          {
+            node_id: "saved",
+            kind: "saved_factor",
+            factor_id: "momentum_12m",
+          },
+        ],
+        output_node_id: "px",
       },
-    ],
-  },
+    },
+  ],
 };
 
 const treeWithDraftNode = (node: Record<string, unknown>) => ({
   ...TREE,
-  factors: {
-    factors: [
-      {
-        ...TREE.factors.factors[0],
-        graph: { nodes: [node], output_node_id: "draft" },
-      },
-    ],
-  },
+  factors: [
+    {
+      ...TREE.factors[0],
+      graph: { nodes: [node], output_node_id: "draft" },
+    },
+  ],
 });
 
 describe("contract projection", () => {
@@ -251,7 +246,7 @@ describe("contract projection", () => {
       const pendingTree = treeWithDraftNode(pendingNode);
       const result = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/kind",
+        "/factors/0/graph/nodes/0/kind",
         pendingTree,
         false,
       );
@@ -268,7 +263,7 @@ describe("contract projection", () => {
 
       const nodeId = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/node_id",
+        "/factors/0/graph/nodes/0/node_id",
         pendingTree,
         false,
       );
@@ -319,7 +314,7 @@ describe("contract projection", () => {
       });
       const operator = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/operator",
+        "/factors/0/graph/nodes/0/operator",
         pendingTree,
         false,
       );
@@ -338,7 +333,7 @@ describe("contract projection", () => {
 
       const fieldId = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/field_id",
+        "/factors/0/graph/nodes/0/field_id",
         pendingTree,
         false,
       );
@@ -353,7 +348,7 @@ describe("contract projection", () => {
   it("joins a field only to the contract-pinned snapshot and exposes PIT metadata", () => {
     const result = projectContractInspector(
       source(),
-      "/factors/factors/0/graph/nodes/0/field_id",
+      "/factors/0/graph/nodes/0/field_id",
       TREE,
       false,
     );
@@ -382,7 +377,7 @@ describe("contract projection", () => {
   it("joins saved factor ids to the contract-pinned registry", () => {
     const result = projectContractInspector(
       source(),
-      "/factors/factors/0/graph/nodes/1/factor_id",
+      "/factors/0/graph/nodes/1/factor_id",
       TREE,
       false,
     );
@@ -417,7 +412,7 @@ describe("contract projection", () => {
     };
     const field = projectContractInspector(
       source({ equityCatalog: mismatchedCatalog }),
-      "/factors/factors/0/graph/nodes/0/field_id",
+      "/factors/0/graph/nodes/0/field_id",
       TREE,
       false,
     );
@@ -441,7 +436,7 @@ describe("contract projection", () => {
     const cases = [
       [undefined, "root"],
       ["/risk", "object"],
-      ["/factors/factors", "array"],
+      ["/factors", "array"],
     ] as const;
     for (const [pointer, shape] of cases) {
       const result = projectContractInspector(source(), pointer, TREE, false);
@@ -455,12 +450,107 @@ describe("contract projection", () => {
   });
 });
 
+describe("field applicability in the contract projection (P2-03)", () => {
+  const PORTFOLIO_ROW: FieldContract = {
+    pointer: "/portfolio/selection_percentile",
+    type: "number",
+    required: false,
+    example: null,
+    applicable_when: {
+      all_of: [
+        {
+          pointer: "/portfolio/selection_method",
+          equals: "percentile",
+          not_null: false,
+        },
+      ],
+      description_key: "strategy.contract.applicable.selection_percentile",
+      owned_by_error: null,
+    },
+  };
+
+  it("reads the typed contract row first and judges it on the current tree", () => {
+    const field = projectContractField(
+      SCHEMA,
+      [...CONTRACT, PORTFOLIO_ROW],
+      "/portfolio/selection_percentile",
+      { ...TREE, portfolio: { selection_method: "top_n" } },
+    );
+    expect(field?.applicability).toMatchObject({
+      applicable: false,
+      descriptionKey: "strategy.contract.applicable.selection_percentile",
+      ownedByError: null,
+    });
+    expect(field?.applicability?.conditions[0]).toMatchObject({
+      path: "portfolio.selection_method",
+      equals: "percentile",
+      holds: false,
+    });
+  });
+
+  it("falls back to the schema's x-applicable-when and judges unwritten conditions on published defaults", () => {
+    // CONTRACT에는 short_selection_count 행이 없다: runtime schema 마커에서 같은 모양을 읽고,
+    // 문서에 portfolio가 없으므로 schema `default`(side long_only)로 판정한다.
+    const byDefault = projectContractField(
+      SCHEMA,
+      CONTRACT,
+      "/portfolio/short_selection_count",
+      TREE,
+    );
+    expect(byDefault?.applicability?.applicable).toBe(false);
+    expect(
+      byDefault?.applicability?.conditions.map((c) => c.fromDefault),
+    ).toEqual([true, true]);
+    expect(byDefault?.applicability?.conditions.map((c) => c.path)).toEqual([
+      "portfolio.side",
+      "portfolio.selection_method",
+    ]);
+    const decided = projectContractField(
+      SCHEMA,
+      CONTRACT,
+      "/portfolio/short_selection_count",
+      { ...TREE, portfolio: { side: "long_only", selection_method: "top_n" } },
+    );
+    expect(decided?.applicability?.applicable).toBe(false);
+    expect(
+      projectContractField(SCHEMA, CONTRACT, "/risk/max_name_weight", TREE)
+        ?.applicability,
+    ).toBeNull();
+  });
+
+  it("renders the conditions, the verdict and the owning error code", () => {
+    render(
+      <ContractInspector
+        source={source()}
+        selectedPointer="/portfolio/minimum_liquidity"
+        tree={{ ...TREE, portfolio: { minimum_liquidity: 1000 } }}
+        stale={false}
+      />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "적용 조건" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("✕ portfolio.liquidity_field_id 설정 (기본값으로 판정)"),
+    ).toHaveAttribute("data-holds", "false");
+    expect(
+      screen.getByText("strategy.portfolio.liquidity_field"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "현재 문서에서는 읽히지 않습니다. portfolio.liquidity_field_id 설정일 때만 적용됩니다.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("최소 유동성 하한")).toBeInTheDocument();
+  });
+});
+
 describe("ContractInspector UI", () => {
   it("requires a kind before showing a branch-dependent field contract", () => {
     render(
       <ContractInspector
         source={source()}
-        selectedPointer="/factors/factors/0/graph/nodes/0/operator"
+        selectedPointer="/factors/0/graph/nodes/0/operator"
         tree={treeWithDraftNode({
           node_id: "draft",
           operator: "momentum",
@@ -510,7 +600,7 @@ describe("ContractInspector UI", () => {
     render(
       <ContractInspector
         source={source()}
-        selectedPointer="/factors/factors/0/graph/nodes/0/field_id"
+        selectedPointer="/factors/0/graph/nodes/0/field_id"
         tree={TREE}
         stale={false}
       />,

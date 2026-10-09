@@ -31,8 +31,10 @@ import {
   isSchemaContractCompatible,
   projectContractField,
 } from "./contract-inspector";
+import { describeApplicabilityConditions } from "./field-applicability";
 import {
-  definingArrayFor,
+  referenceCandidates,
+  schemaFacts,
   propertyOptions,
   schemaAt,
   typeLabel,
@@ -107,9 +109,6 @@ export const projectAssistMetadata = (
   };
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** The document tree for the text being completed: a fresh parse, else the last good one. */
 const treeFor = (text: string, state: DocumentState): unknown => {
   try {
@@ -145,28 +144,6 @@ const referenceLabel = (reference: string): string => {
   }
 };
 
-/** Ids supplied by the nearest schema-declared namespace array, excluding the current item. */
-const referenceIds = (
-  schema: JsonSchema,
-  reference: string,
-  pointer: string,
-  tree: unknown,
-): string[] => {
-  const defining = definingArrayFor(schema, pointer, reference, tree);
-  if (!defining) return [];
-  const selfPrefix = `${defining.pointer}/`;
-  const self = pointer.startsWith(selfPrefix)
-    ? pointer.slice(selfPrefix.length).split("/")[0]
-    : null;
-  return defining.items
-    .map((item, index) =>
-      isRecord(item) && String(index) !== self
-        ? item[`${reference}_id`]
-        : undefined,
-    )
-    .filter((id): id is string => typeof id === "string");
-};
-
 const identifierOptions = (
   schema: JsonSchema,
   resolved: ResolvedSchema,
@@ -174,7 +151,7 @@ const identifierOptions = (
   tree: unknown,
   catalogs: AssistCatalogs,
 ): EditorCompletionOption[] | null => {
-  const catalog = resolved.node["x-catalog"];
+  const catalog = schemaFacts(resolved.node).catalog;
   if (typeof catalog === "string") {
     if (catalog === "equity-field") {
       return catalogs.equityFields.map((field) => ({
@@ -194,9 +171,9 @@ const identifierOptions = (
     }
     return []; // universe / subgraph: no catalog endpoint yet, and never a guessed list
   }
-  const reference = resolved.node["x-reference"];
+  const reference = schemaFacts(resolved.node).reference;
   if (typeof reference === "string") {
-    return referenceIds(schema, reference, pointer, tree).map((id) => ({
+    return referenceCandidates(schema, pointer, reference, tree).map((id) => ({
       label: id,
       detail: referenceLabel(reference),
       type: "value",
@@ -320,6 +297,13 @@ export const describePointer = (
     lines.push(`${t("assist.source")}: ${catalogLabel(field.catalog)}`);
   if (field.reference)
     lines.push(`${t("assist.source")}: ${referenceLabel(field.reference)}`);
+  if (field.applicability) {
+    lines.push(
+      `${t("contract.applicableWhen")}: ${describeApplicabilityConditions(field.applicability)}`,
+    );
+    if (field.applicability.applicable === false)
+      lines.push(t("contract.applicable.badge"));
+  }
   return lines;
 };
 

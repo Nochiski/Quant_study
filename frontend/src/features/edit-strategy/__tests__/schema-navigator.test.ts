@@ -25,7 +25,8 @@ describe("schema navigator", () => {
     expect(options.map((o) => o.name)).toEqual(
       Object.keys(SCHEMA.properties as object),
     );
-    expect(options.find((o) => o.name === "risk")?.required).toBe(true);
+    expect(options.find((o) => o.name === "data")?.required).toBe(true);
+    expect(options.find((o) => o.name === "risk")?.required).toBe(false);
     expect(options.find((o) => o.name === "parameters")?.required).toBe(false);
   });
 
@@ -41,18 +42,19 @@ describe("schema navigator", () => {
   });
 
   it("selects the union branch from the document's kind and re-selects when it changes", () => {
-    const nodes = "/factors/factors/0/graph/nodes";
+    const nodes = "/factors/0/graph/nodes";
     const field = schemaAt(SCHEMA, `${nodes}/0`, DOCUMENT);
     expect(field?.branches).toBeNull();
+    // schema 1.1: `kind`가 첫 속성이다 (스키마 빌더 정렬).
     expect(propertyOptions(SCHEMA, field!).map((o) => o.name)).toEqual([
+      "kind",
       "node_id",
       "field_id",
-      "kind",
     ]);
     const changed = structuredClone(DOCUMENT) as {
-      factors: { factors: { graph: { nodes: { kind: string }[] } }[] };
+      factors: { graph: { nodes: { kind: string }[] } }[];
     };
-    changed.factors.factors[0].graph.nodes[0].kind = "time_series";
+    changed.factors[0].graph.nodes[0].kind = "time_series";
     const timeSeries = schemaAt(SCHEMA, `${nodes}/0`, changed);
     expect(propertyOptions(SCHEMA, timeSeries!).map((o) => o.name)).toContain(
       "input_node_id",
@@ -63,22 +65,14 @@ describe("schema navigator", () => {
   });
 
   it("offers every branch's properties, labelled, while the kind is still unknown", () => {
-    const unresolved = schemaAt(
-      SCHEMA,
-      "/factors/factors/0/graph/nodes/9",
-      DOCUMENT,
-    );
+    const unresolved = schemaAt(SCHEMA, "/factors/0/graph/nodes/9", DOCUMENT);
     expect(unresolved?.branches?.length).toBeGreaterThan(5);
     const options = propertyOptions(SCHEMA, unresolved!);
     expect(options.find((o) => o.name === "kind")?.branch).toBeNull();
     expect(options.find((o) => o.name === "field_id")?.branch).toBe("field");
     expect(options.find((o) => o.name === "node_id")?.branch).toBeNull();
     expect(valueOptions(unresolved!)).toContain("field");
-    const kind = schemaAt(
-      SCHEMA,
-      "/factors/factors/0/graph/nodes/0/kind",
-      DOCUMENT,
-    );
+    const kind = schemaAt(SCHEMA, "/factors/0/graph/nodes/0/kind", DOCUMENT);
     expect(valueOptions(kind!)).toEqual(["field"]);
   });
 
@@ -86,15 +80,15 @@ describe("schema navigator", () => {
     "marks branch-only and conflicting property schemas unresolved when kind is %s",
     (kind) => {
       const changed = structuredClone(DOCUMENT) as {
-        factors: { factors: { graph: { nodes: Record<string, unknown>[] } }[] };
+        factors: { graph: { nodes: Record<string, unknown>[] } }[];
       };
-      changed.factors.factors[0].graph.nodes[0] = {
+      changed.factors[0].graph.nodes[0] = {
         node_id: "draft",
         ...(kind === undefined ? {} : { kind }),
         operator: "momentum",
         field_id: "close",
       };
-      const base = "/factors/factors/0/graph/nodes/0";
+      const base = "/factors/0/graph/nodes/0";
       const nodeId = schemaAt(SCHEMA, `${base}/node_id`, changed);
       expect(nodeId?.propertyVariants).toBeNull();
       expect(nodeId?.propertyRequired).toBe(true);
@@ -169,7 +163,7 @@ describe("schema navigator", () => {
     );
     expect(valueOptions(operator!)).toEqual(["gt", "gte", "lt", "lte", "eq"]);
     const version = schemaAt(SCHEMA, "/schema_version", DOCUMENT);
-    expect(valueOptions(version!)).toEqual(["1.0"]);
+    expect(valueOptions(version!)).toEqual(["1.1"]);
     expect(typeLabel(operator!.node)).toBe("enum(gt|gte|lt|lte|eq)");
   });
 

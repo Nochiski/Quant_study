@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
+GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
 
 
 def _source(name: str) -> str:
@@ -36,11 +36,11 @@ def test_yaml_and_json_sources_compile_to_the_same_backend_hash() -> None:
     assert yaml_result["diagnostics"] == []
     assert yaml_result["spec_hash"] == GOLDEN_SPEC_HASH == json_result["spec_hash"]
     assert yaml_result["source_hash"] != json_result["source_hash"]
-    assert yaml_result["schema_version"] == "1.0"
+    assert yaml_result["schema_version"] == "1.1"
     assert yaml_result["spec"]["identity"] == {
         "strategy_id": "draft",
         "revision": 0,
-        "schema_version": "1.0",
+        "schema_version": "1.1",
     }
     assert yaml_result["canonical_json"] == json_result["canonical_json"]
     assert '"max_name_weight":0.05' in yaml_result["canonical_json"]
@@ -168,9 +168,7 @@ def test_factor_graph_issue_names_the_node_and_points_into_the_graph() -> None:
     result = _compile(client, source)
 
     assert result["spec"] is None
-    graph_issues = [
-        d for d in result["diagnostics"] if d["pointer"].startswith("/factors/factors/0/graph")
-    ]
+    graph_issues = [d for d in result["diagnostics"] if d["pointer"].startswith("/factors/0/graph")]
     assert graph_issues, result["diagnostics"]
     issue = next(d for d in graph_issues if d["code"] == "strategy.expression.input_missing")
     assert issue["node_id"] == "mom_252"
@@ -183,8 +181,8 @@ def test_semantic_range_for_a_parent_path_falls_back_to_the_parent_node() -> Non
     source = _source("quality_momentum.yaml")
     # Duplicate the factor block: the strategy-level duplicate check fires on `factors`.
     lines = source.splitlines(keepends=True)
-    start = lines.index("factors:\n") + 2
-    end = lines.index("signal:\n")
+    start = lines.index("factors:\n") + 1
+    end = lines.index("portfolio:\n")
     source = "".join(lines[:end] + lines[start:end] + lines[end:])
 
     result = _compile(client, source)
@@ -222,3 +220,29 @@ def test_malformed_envelope_is_the_only_422() -> None:
         ).status_code
         == 422
     )
+
+
+def test_inapplicable_field_written_explicitly_is_a_warning_with_its_key_range() -> None:
+    """spec D4 (P1-05): top_n 모드에서 명시한 selection_percentile은 실행을 막지 않는
+    warning이다."""
+    client = TestClient(build_http_app())
+    source = _source("quality_momentum.yaml").replace(
+        "  selection_count: 20", "  selection_count: 20\n  selection_percentile: 0.2"
+    )
+    assert "selection_percentile: 0.2" in source
+
+    result = _compile(client, source)
+
+    assert result["spec_hash"] is not None and result["spec"] is not None
+    warnings = [d for d in result["diagnostics"] if d["code"] == "strategy.field.inapplicable"]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning["severity"] == "warning" and warning["kind"] == "semantic"
+    assert warning["pointer"] == "/portfolio/selection_percentile"
+    assert warning["range"]["start"]["line"] == source.splitlines().index(
+        "  selection_percentile: 0.2"
+    )
+
+    # 같은 값이라도 생략된 필드에는 경고가 없다.
+    silent = _compile(client, _source("quality_momentum.yaml"))
+    assert not [d for d in silent["diagnostics"] if d["code"] == "strategy.field.inapplicable"]

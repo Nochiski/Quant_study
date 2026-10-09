@@ -53,28 +53,23 @@ const SCHEMA: JsonSchema = {
       },
     },
     factors: {
-      type: "object",
-      properties: {
-        factors: {
-          type: "array",
-          items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          factor_id: { type: "string" },
+          graph: {
             type: "object",
             properties: {
-              factor_id: { type: "string" },
-              graph: {
-                type: "object",
-                properties: {
-                  nodes: {
-                    type: "array",
-                    "x-defines": "node",
-                    items: {
-                      type: "object",
-                      properties: {
-                        node_id: { type: "string" },
-                        field_id: { type: "string" },
-                        kind: { type: "string" },
-                      },
-                    },
+              nodes: {
+                type: "array",
+                "x-defines": "node",
+                items: {
+                  type: "object",
+                  properties: {
+                    node_id: { type: "string" },
+                    field_id: { type: "string" },
+                    kind: { type: "string" },
                   },
                 },
               },
@@ -99,7 +94,7 @@ const SCHEMA: JsonSchema = {
 };
 
 const SOURCE = [
-  'schema_version: "1.0"',
+  'schema_version: "1.1"',
   "title: momentum",
   'description: ""',
   "data:",
@@ -108,13 +103,12 @@ const SOURCE = [
   "  rules:",
   "    - field_id: price.close",
   "factors:",
-  "  factors:",
-  "    - factor_id: momentum",
-  "      graph:",
-  "        nodes:",
-  "          - field_id: price.close",
-  "            node_id: close",
-  "            kind: field",
+  "  - factor_id: momentum",
+  "    graph:",
+  "      nodes:",
+  "        - field_id: price.close",
+  "          node_id: close",
+  "          kind: field",
   "signal: {}",
   "portfolio: {}",
   "risk:",
@@ -161,15 +155,15 @@ describe("Strategy Outline projection", () => {
       "execution",
       "parameters",
     ]);
-    const factor = findOutlineNode(nodes, "/factors/factors/0");
+    const factor = findOutlineNode(nodes, "/factors/0");
     expect(factor).toMatchObject({
       arrayIndex: 0,
       semanticIdentity: null,
     });
-    const node = findOutlineNode(nodes, "/factors/factors/0/graph/nodes/0");
+    const node = findOutlineNode(nodes, "/factors/0/graph/nodes/0");
     expect(node).toMatchObject({
-      id: "/factors/factors/0/graph/nodes/0",
-      pointer: "/factors/factors/0/graph/nodes/0",
+      id: "/factors/0/graph/nodes/0",
+      pointer: "/factors/0/graph/nodes/0",
       arrayIndex: 0,
       semanticIdentity: { namespace: "node", value: "close" },
     });
@@ -190,9 +184,7 @@ describe("Strategy Outline projection", () => {
       description: "/risk/max_name_weight",
     });
     expect(
-      symbols.find(
-        (item) => item.pointer === "/factors/factors/0/graph/nodes/0",
-      ),
+      symbols.find((item) => item.pointer === "/factors/0/graph/nodes/0"),
     ).toMatchObject({ keywords: ["node", "close", "node:close"] });
     expect(symbols.some((item) => item.pointer === "/deployment")).toBe(false);
   });
@@ -212,9 +204,7 @@ describe("Strategy Outline projection", () => {
     );
 
     expect(
-      symbols.find(
-        (item) => item.pointer === "/factors/factors/0/graph/nodes/1",
-      ),
+      symbols.find((item) => item.pointer === "/factors/0/graph/nodes/1"),
     ).toMatchObject({ keywords: ["node", "mom_252", "node:mom_252"] });
   });
 
@@ -269,7 +259,6 @@ describe("Strategy Outline projection", () => {
     );
     const editor: CodeEditorHandle = {
       getText: () => editorSource,
-      setText: vi.fn(),
       replaceRange: vi.fn(),
       getSelection: () => ({ from: 0, to: 0 }),
       setSelection: (from, to = from) =>
@@ -282,6 +271,10 @@ describe("Strategy Outline projection", () => {
       positionToOffset: () => 0,
       scrollTo: vi.fn(),
       focus: vi.fn(),
+      loadText: vi.fn(),
+      undo: () => false,
+      redo: () => false,
+      historyDepth: () => ({ undo: 0, redo: 0 }),
       getHistoryState: () => null,
       restoreHistoryState: vi.fn(),
     };
@@ -299,7 +292,7 @@ describe("Strategy Outline projection", () => {
     act(() => result.current.onSelectOutlineNode(basics!));
     expect(onSelectedPointer).toHaveBeenLastCalledWith(undefined, "outline");
 
-    editorSource = 'schema_version: "1.0"\ntitle: minimal\n';
+    editorSource = 'schema_version: "1.1"\ntitle: minimal\n';
     const loaded = documentReducer(parsedState(), {
       type: "load",
       format: "yaml",
@@ -342,7 +335,6 @@ describe("Strategy Outline projection", () => {
     );
     const editor: CodeEditorHandle = {
       getText: () => SOURCE,
-      setText: vi.fn(),
       replaceRange: vi.fn(),
       getSelection: () => ({ from: 0, to: 0 }),
       setSelection,
@@ -350,6 +342,10 @@ describe("Strategy Outline projection", () => {
       positionToOffset: () => 0,
       scrollTo,
       focus,
+      loadText: vi.fn(),
+      undo: () => false,
+      redo: () => false,
+      historyDepth: () => ({ undo: 0, redo: 0 }),
       getHistoryState: () => null,
       restoreHistoryState: vi.fn(),
     };
@@ -419,7 +415,6 @@ describe("Strategy Outline projection", () => {
       act(() =>
         result.current.onEditorReady({
           getText: () => state.source,
-          setText: vi.fn(),
           replaceRange: vi.fn(),
           getSelection: () => ({ from: 0, to: 0 }),
           setSelection,
@@ -427,6 +422,10 @@ describe("Strategy Outline projection", () => {
           positionToOffset: () => 0,
           scrollTo,
           focus,
+          loadText: vi.fn(),
+          undo: () => false,
+          redo: () => false,
+          historyDepth: () => ({ undo: 0, redo: 0 }),
           getHistoryState: () => null,
           restoreHistoryState: vi.fn(),
         }),
@@ -601,7 +600,7 @@ describe("Strategy Outline tree", () => {
     const view = render(
       <StrategyOutline
         snapshot={snapshot()}
-        selectedPointer="/factors/factors/0/graph/nodes/0"
+        selectedPointer="/factors/0/graph/nodes/0"
         onSelect={vi.fn()}
         onCollapse={vi.fn()}
       />,
@@ -611,7 +610,7 @@ describe("Strategy Outline tree", () => {
         name: "배열 인덱스 0, node_id close",
         selected: true,
       }),
-    ).toHaveAttribute("title", "/factors/factors/0/graph/nodes/0");
+    ).toHaveAttribute("title", "/factors/0/graph/nodes/0");
     screen
       .getByRole("treeitem", {
         name: "배열 인덱스 0, node_id close",

@@ -3,6 +3,7 @@ from strategy_workbench.application.portfolio_design.ports.outgoing.engine_portf
 )
 from strategy_workbench.application.portfolio_design.ports.outgoing.raw_observations import (
     CancellableRawObservationPort,
+    ProgressReportingRawObservationPort,
     RawFieldValue,
     RawFieldValueType,
     RawObservation,
@@ -15,6 +16,7 @@ from strategy_workbench.application.portfolio_design.ports.outgoing.raw_observat
 __all__ = [
     "CancellableRawObservationPort",
     "EnginePortfolioPort",
+    "ProgressReportingRawObservationPort",
     "RawFieldValue",
     "RawFieldValueType",
     "RawObservation",

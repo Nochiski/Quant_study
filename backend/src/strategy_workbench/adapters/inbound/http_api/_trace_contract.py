@@ -42,8 +42,15 @@ class TraceCapabilityUnsupportedDetail:
     message: str
 
 
+@dataclass(frozen=True)
+class TraceStrategyRequiresUpgradeDetail:
+    code: Literal["trace.strategy.requires_upgrade"]
+    message: str
+
+
 TraceUnprocessableDetail: TypeAlias = Annotated[
     TraceRequestInvalidDetail
+    | TraceStrategyRequiresUpgradeDetail
     | TraceEngineIncompatibleDetail
     | TraceCapabilityUnsupportedDetail
     | PortfolioStrategyInvalidDetail

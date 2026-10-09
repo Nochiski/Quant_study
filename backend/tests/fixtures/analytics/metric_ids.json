@@ -1,0 +1,23 @@
+[
+  "total_return",
+  "cagr",
+  "volatility",
+  "sharpe",
+  "sortino",
+  "max_drawdown",
+  "calmar",
+  "turnover",
+  "max_drawdown_duration_sessions",
+  "max_drawdown_recovery_sessions",
+  "benchmark_return",
+  "excess_return",
+  "trade_count",
+  "win_rate",
+  "profit_factor",
+  "average_gross_exposure",
+  "maximum_gross_exposure",
+  "average_net_exposure",
+  "total_fees",
+  "total_slippage_cost",
+  "total_carry_cost"
+]

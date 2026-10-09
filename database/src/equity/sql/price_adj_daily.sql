@@ -30,11 +30,23 @@
 -- 가격 원장의 커버가 어긋나는 자리. 건수는 EG3_price_adj_daily.n_rows_without_span 이 센다).
 --
 -- n_factors_applied  = 그 행에 접힌 ok 계수 수. 0 이면 cum_* 는 정확히 1 이다.
--- n_unadjusted_events = 같은 구간에서 factor_ok=false 이고 apply_date ≤ d 인 사건 수.
---   0 이 아닌 구간의 조정 시계열은 **불완전**하다 — 사건은 실재하는데 계수를 못 냈다는 뜻이고
---   (사유는 adj_factor.factor_source), 소비자가 종목을 거를 축이다. 값을 만들어 채우지 않는다.
+-- n_unadjusted_events = 같은 구간에서 factor_ok=false 이고 apply_date ≤ d 인 사건 수(뜻 유지 — D6-4).
+--   0 이 아닌 구간은 보유 수량 축(계수)이 **불완전**하다 — 사건은 실재하는데 계수를 못 냈다는
+--   뜻이고(사유는 adj_factor.factor_source), 소비자가 종목을 거를 축이다. 값을 만들어 채우지 않는다.
 --
--- PIT: available_date = greatest(date, 접힌 계수의 available_date 최댓값) — 구성 행의 max 이므로
+-- ⑤ 가격 전용 계수(e1.26.0, N-32 ②·N-33 — 정의는 adj_factor.sql 머리말 ⑤ 블록):
+--   adj_{open,high,low,close}(d) = 원주가 × cum_share_factor(d) ÷ cum_price_only_factor(d)
+--   cum_price_only_factor(d) = Π(price_only_factor : price_resolution='price_only' ∧ 같은 구간 ∧
+--     fold_date ≤ d) — fold_date·구간 부여는 ok 계수와 같은 규칙(계수 행의 available ≤ apply 라
+--     fold = apply). r = 그날 기준가 ÷ 직전 행 종가라 그날 수익률 = 종가 ÷ 기준가 − 1(키움 수정주가와
+--     같은 방식). **별도 사슬**로 누적한다 — ok 계수 사슬에 섞으면 창 곱의 결합 순서가 바뀌어
+--     기존 누적계수 끝자리가 흔들릴 수 있다. 그래서 adj_volume_shr·cum_price_factor·
+--     cum_share_factor·n_factors_applied·n_unadjusted_events 는 ⑤ 전과 비트까지 같다(EG3 ② 곱 1 유지).
+--   n_price_only_applied = 그 행에 접힌 ⑤ 계수 수.
+--   n_price_unresolved_events = 같은 구간에서 price_resolution='unresolved' 이고 apply_date ≤ d 인
+--     사건 수 — 가격 축에 남은 미해결(D6-4). 조정가를 쓰는 소비자의 거름 축이다.
+--
+-- PIT: available_date = greatest(date, 접힌 계수(ok·⑤)의 available_date 최댓값) — 구성 행의 max 이므로
 -- basis 는 'derived' 다(convention 이 아니라 계산 결과다, DESIGN §8-3 EG2-P05 규약). fold 규칙상
 -- 접힌 계수는 전부 available_date ≤ fold_date ≤ date 라 결과는 **항상 date** 이고, 그 항등을
 -- EG3_price_adj_daily 가 폐기형으로 다시 확인한다(선언이 아니라 산출로 증명한다).
@@ -82,26 +94,58 @@ cum AS (
     WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 ),
+pof AS (                                    -- ⑤ 가격 전용 계수 — ok 사슬과 같은 fold·구간 규칙
+    SELECT f.ticker, greatest(f.apply_date, f.available_date) AS fold_date,
+           f.price_only_factor, f.available_date
+    FROM adj_factor f
+    WHERE f.price_resolution = 'price_only'
+),
+pos AS (
+    SELECT q.ticker, coalesce(s.span_seq, 0) AS span_seq, q.fold_date,
+           q.price_only_factor, q.available_date
+    FROM pof q
+    ASOF LEFT JOIN security_span s
+      ON s.ticker = q.ticker AND q.fold_date > s.first_date
+),
+pofac AS (
+    SELECT ticker, span_seq, fold_date,
+           product(price_only_factor) AS pof, count(*) AS n_po, max(available_date) AS avail
+    FROM pos
+    GROUP BY ticker, span_seq, fold_date
+),
+pocum AS (
+    SELECT ticker, span_seq, fold_date,
+           product(pof) OVER pw AS cum_price_only_factor,
+           sum(n_po)    OVER pw AS n_price_only_applied,
+           max(avail)   OVER pw AS po_available_date
+    FROM pofac
+    WINDOW pw AS (PARTITION BY ticker, span_seq ORDER BY fold_date
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
 badf AS (
-    SELECT e.ticker, e.apply_date FROM adj_factor e WHERE NOT e.factor_ok
+    -- 미조정(factor_ok=false) 사건 — 그중 가격 축 미해결(price_resolution='unresolved')을 따로 센다
+    SELECT e.ticker, e.apply_date, (e.price_resolution = 'unresolved') AS price_unresolved
+    FROM adj_factor e WHERE NOT e.factor_ok
 ),
 bads AS (
-    SELECT b.ticker, coalesce(s.span_seq, 0) AS span_seq, b.apply_date
+    SELECT b.ticker, coalesce(s.span_seq, 0) AS span_seq, b.apply_date, b.price_unresolved
     FROM badf b
     ASOF LEFT JOIN security_span s
       ON s.ticker = b.ticker AND b.apply_date >= s.first_date
 ),
 bad AS (
-    SELECT ticker, span_seq, apply_date, count(*) AS n_bad
+    SELECT ticker, span_seq, apply_date, count(*) AS n_bad,
+           count(*) FILTER (WHERE price_unresolved) AS n_bad_price
     FROM bads
     GROUP BY ticker, span_seq, apply_date
 ),
 badcum AS (
     SELECT ticker, span_seq, apply_date,
-           sum(n_bad) OVER (PARTITION BY ticker, span_seq ORDER BY apply_date
-                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-             AS n_unadjusted_events
+           sum(n_bad) OVER bw       AS n_unadjusted_events,
+           sum(n_bad_price) OVER bw AS n_price_unresolved_events
     FROM bad
+    WINDOW bw AS (PARTITION BY ticker, span_seq ORDER BY apply_date
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
 ),
 joined AS (
     SELECT p.ticker, p.date, p.span_seq, p.open, p.high, p.low, p.close, p.volume_shr,
@@ -114,25 +158,39 @@ joined AS (
     ASOF LEFT JOIN cum c
       ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
 ),
-unadj AS (
-    SELECT j.*, coalesce(b.n_unadjusted_events, 0) AS n_unadjusted_events
+pojoined AS (
+    SELECT j.*,
+           coalesce(c.cum_price_only_factor, 1) AS cum_price_only_factor,
+           coalesce(c.n_price_only_applied, 0)  AS n_price_only_applied,
+           c.po_available_date
     FROM joined j
+    ASOF LEFT JOIN pocum c
+      ON c.ticker = j.ticker AND c.span_seq = j.span_seq AND j.date >= c.fold_date
+),
+unadj AS (
+    SELECT j.*, coalesce(b.n_unadjusted_events, 0) AS n_unadjusted_events,
+           coalesce(b.n_price_unresolved_events, 0) AS n_price_unresolved_events
+    FROM pojoined j
     ASOF LEFT JOIN badcum b
       ON b.ticker = j.ticker AND b.span_seq = j.span_seq AND j.date >= b.apply_date
 )
 SELECT
     u.ticker,
     u.date,
-    u.open       * u.cum_share_factor              AS adj_open,
-    u.high       * u.cum_share_factor              AS adj_high,
-    u.low        * u.cum_share_factor              AS adj_low,
-    u.close      * u.cum_share_factor              AS adj_close,
+    u.open       * u.cum_share_factor / u.cum_price_only_factor AS adj_open,
+    u.high       * u.cum_share_factor / u.cum_price_only_factor AS adj_high,
+    u.low        * u.cum_share_factor / u.cum_price_only_factor AS adj_low,
+    u.close      * u.cum_share_factor / u.cum_price_only_factor AS adj_close,
     u.volume_shr * u.cum_price_factor              AS adj_volume_shr,
     u.cum_price_factor,
     u.cum_share_factor,
+    u.cum_price_only_factor,
     CAST(u.n_factors_applied AS BIGINT)            AS n_factors_applied,
+    CAST(u.n_price_only_applied AS BIGINT)         AS n_price_only_applied,
     CAST(u.n_unadjusted_events AS BIGINT)          AS n_unadjusted_events,
-    greatest(u.date, coalesce(u.factor_available_date, u.date)) AS available_date,
+    CAST(u.n_price_unresolved_events AS BIGINT)    AS n_price_unresolved_events,
+    greatest(u.date, coalesce(u.factor_available_date, u.date),
+             coalesce(u.po_available_date, u.date)) AS available_date,
     'derived'                                      AS available_basis,
     u.basis                                        AS basis,
     u.corp_action_pending                          AS corp_action_pending,

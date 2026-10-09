@@ -60,6 +60,10 @@ SPLIT_EVE, SPLIT_DAY = dt.date(2018, 5, 3), dt.date(2018, 5, 4)
 BONUS_EVE, BONUS_DAY = dt.date(2022, 6, 24), dt.date(2022, 6, 27)
 RELIST_101970 = dt.date(2025, 3, 28)
 SF_247540 = 497_400 / 124_700       # KRX 기준가 축(S06-2) — 배정비율 4.0 이 아니다
+# ⑤ 가격 전용 계수(e1.26.0): 247540 2022-05-09 기준가 491,300 / 직전 종가 498,500 — 이 날부터
+# 조정가가 1/r 배(전방 조정), 그날 조정 수익률 = 481,000/491,300 − 1 (원수익률 −3.51%)
+PO_247540 = 491_300 / 498_500
+PO_DAY_247540 = dt.date(2022, 5, 9)
 
 
 def seed() -> Baseline:
@@ -132,11 +136,22 @@ def test_EG3_불변식이_전부_0이고_기록형_실측이_남는다(built) ->
     m = _gate(r, "EG3_price_adj_daily").metrics
     for key in ("n_cum_nonpositive", "n_cum_product_off", "n_cum_product_recalc_off",
                 "n_span_first_not_unit", "n_recompute_mismatch", "n_unadjusted_mismatch",
+                "n_price_unresolved_mismatch", "n_price_only_count_mismatch",
                 "n_available_recompute_mismatch", "n_factor_count_mismatch",
                 "n_cross_span_factor", "n_available_ne_date",
                 "n_available_basis_not_derived", "n_ticker_malformed", "n_off_calendar",
                 "n_macro_mismatch"):
         assert m[key] == 0, (key, m[key])
+    # ⑤ — 미해결 2건(247540·900050 unknown_price_only)이 둘 다 계수 행이라 가격 축 미해결은 0
+    assert m["n_rows_with_price_only"] == N_ROWS_UNADJUSTED_EVENT
+    assert m["n_tickers_with_price_only"] == N_TICKERS_UNADJUSTED_EVENT
+    assert m["n_rows_with_price_unresolved_events"] == 0
+    assert m["cum_price_only_factor_min"] == pytest.approx(PO_247540)
+    assert m["cum_price_only_factor_max"] == 1.0
+    by_res = {row["price_resolution"]: row for row in m["unadjusted_events_by_price_resolution"]}
+    assert set(by_res) == {"price_only", "unresolved"}
+    assert by_res["price_only"]["n_events_counted"] == 2
+    assert by_res["unresolved"]["n_events_counted"] == 0       # 101970 5건은 폐지 구간
     assert m["n_rows"] == N_ROWS
     assert m["n_rows_adjusted"] == N_ROWS_ADJUSTED
     assert m["n_rows_without_span"] == 0
@@ -227,14 +242,20 @@ def test_무상증자_권리락은_KRX_기준가_축_계수를_쓴다(built) -> 
     try:
         eve = _one(con, "SELECT adj_close, cum_share_factor FROM price_adj_daily "
                         f"WHERE ticker='247540' AND date=DATE '{BONUS_EVE}'")
-        assert eve == (497_400.0, 1.0)
-        day = _one(con, "SELECT adj_close, cum_share_factor, n_unadjusted_events "
+        # ⑤: 05-09 가격 전용 계수 498,500/491,300 이 앞서 접혀 있다(e1.26.0 골든 fx2_015 재정의)
+        assert eve[0] == pytest.approx(497_400 / PO_247540) and eve[1] == 1.0
+        day = _one(con, "SELECT adj_close, cum_share_factor, n_unadjusted_events, "
+                        "n_price_unresolved_events, cum_price_only_factor "
                         f"FROM price_adj_daily WHERE ticker='247540' AND date=DATE '{BONUS_DAY}'")
-        assert day[0] == pytest.approx(135_900 * SF_247540)
+        assert day[0] == pytest.approx(135_900 * SF_247540 / PO_247540)
         assert day[1] == pytest.approx(SF_247540)
-        assert day[2] == 1                        # 2022-05-09 unknown_price_only(ok=false)
+        assert day[2] == 1                        # 05-09 unknown_price_only(ok=false) — 뜻 유지
+        assert day[3] == 0                        # 그 사건은 ⑤ 로 가격 축에서 해소(D6-4)
+        assert day[4] == PO_247540
+        # 권리락일 조정 수익률은 ⑤ 와 무관하게 그대로(+8.98%) — 공통 배수가 약분된다
+        assert day[0] / eve[0] - 1 == pytest.approx(135_900 * SF_247540 / 497_400 - 1)
         # 배정비율 4.0 을 쓰면 543,600 — KRX 기준가 산식(자기주식 신주 미배정)과 어긋난다
-        assert day[0] != pytest.approx(135_900 * 4.0)
+        assert day[0] != pytest.approx(135_900 * 4.0 / PO_247540)
     finally:
         con.close()
 
@@ -305,6 +326,114 @@ def test_기준가_신규_unknown_krx_정상_계수도_적용일에_접힌다() 
     assert abs(r_ex) < float(str(tol)), r_ex         # 옛 규칙 −0.9
     assert abs(r_next) < float(str(tol)), r_next     # 옛 규칙 +9.0
     assert n_avail_ne == 0
+
+
+def test_G1_207940형_가격_전용_계수로_적용일_점프가_기준가_대비_수익률이_된다() -> None:
+    """207940 2025-11-24 형(⑤ G1): 사건 없이 기준가 ×1.465 · 주식수 ×1.2(곱 검사 실패 →
+    unknown_krx krx_base_inconsistent). 옛 판은 계수가 없어 적용일 수정수익률 = 원수익률 +45.9%
+    (서버 실측 +46.5%). 고친 뒤 적용일 수익률 = 종가 ÷ 기준가 − 1(−0.4%), 다음 세션은 영향 없음,
+    available ≠ date 행 0."""
+    from test_equity_s06_adj import flat_prices, sessions
+
+    tol = SEED.get("adj_factor", "price_match_tol_abs")
+    assert tol is not None
+    cal = sessions(60)
+    px = flat_prices("A00021", cal, 100000, jumps={30: 1.465 * 0.996}, base={30: 1.465},
+                     share_jumps={30: 1.2})
+    close30 = float(str(px[30]["close"]))
+    adj, n_avail_ne = _synth_adj_close("A00021", [], px, cal)
+    r_ex = adj[cal[30]] / adj[cal[29]] - 1
+    assert abs(r_ex) < float(str(tol)), r_ex                  # 옛 규칙 +0.459
+    assert r_ex == pytest.approx(close30 / 146500 - 1, abs=1e-12)
+    assert adj[cal[31]] / adj[cal[30]] - 1 == 0.0             # 다음 세션 영향 없음(평탄)
+    assert adj[cal[29]] == 100000.0                           # 전방 조정 — 사건 전은 원주가
+    assert n_avail_ne == 0
+
+
+def test_247540_05_09_계수_행에서_조정가가_이어진다(built) -> None:
+    """골든 연속성 칸(fx2_018): 05-06 원주가 498,500 → 05-09 481,000 ÷ r. 조정 수익률
+    481,000/491,300 − 1 = −2.10% (원수익률 −3.51%). 누적 ⑤ 는 그날부터 r, 접힌 수 1."""
+    eq, _ = built
+    con = _con(eq)
+    try:
+        prev = _one(con, "SELECT adj_close, cum_price_only_factor, n_price_only_applied "
+                         "FROM price_adj_daily WHERE ticker='247540' AND date=DATE '2022-05-06'")
+        day = _one(con, "SELECT adj_close, cum_price_only_factor, n_price_only_applied, "
+                        "n_unadjusted_events, n_price_unresolved_events FROM price_adj_daily "
+                        f"WHERE ticker='247540' AND date=DATE '{PO_DAY_247540}'")
+        assert prev == (498_500.0, 1.0, 0)
+        assert day[1:] == (PO_247540, 1, 1, 0)
+        assert day[0] / prev[0] - 1 == pytest.approx(481_000 / 491_300 - 1)
+        assert day[0] / prev[0] - 1 != pytest.approx(481_000 / 498_500 - 1)
+    finally:
+        con.close()
+
+
+# 옛 산출(e1.25.0, eae8b217)의 절단본 종목별 요약 — (행 수, 계수 접힌 행, Σ n_factors_applied,
+# Σ n_unadjusted_events, cum_share_factor 값 집합, cum_price_factor 값 집합). ⑤ 는 이 축들을 한
+# 칸도 바꾸지 않는다(회귀 가드, D6-4 n_unadjusted_events 뜻 유지 포함).
+OLD_TICKER_SUMMARY = {
+    "000030": (1037, 0, 0, 0, [1.0], [1.0]),
+    "0001A0": (135, 0, 0, 0, [1.0], [1.0]),
+    "000660": (4094, 0, 0, 0, [1.0], [1.0]),
+    "003540": (4094, 0, 0, 0, [1.0], [1.0]),
+    "003545": (4094, 0, 0, 0, [1.0], [1.0]),
+    "003547": (4094, 0, 0, 0, [1.0], [1.0]),
+    "005930": (4094, 2034, 2034, 0, [1.0, 50.0], [0.02, 1.0]),
+    "005935": (4094, 2034, 2034, 0, [1.0, 50.0], [0.02, 1.0]),
+    "036220": (2163, 0, 0, 0, [1.0], [1.0]),
+    "069500": (4094, 0, 0, 0, [1.0], [1.0]),
+    "101970": (989, 0, 0, 0, [1.0], [1.0]),
+    "161890": (3396, 0, 0, 0, [1.0], [1.0]),
+    "247540": (1834, 1015, 1015, 1048, [1.0, 3.988773055332799], [0.2507036590269401, 1.0]),
+    "900050": (1916, 0, 0, 1636, [1.0], [1.0]),
+    "900060": (938, 0, 0, 0, [1.0], [1.0]),
+}
+
+
+def test_회귀_거래량_축과_기존_누적계수_열은_옛_판과_같다(built) -> None:
+    eq, _ = built
+    con = _con(eq)
+    try:
+        got = {str(r[0]): tuple(r[1:]) for r in con.execute("""
+            SELECT ticker, count(*), count(*) FILTER (WHERE n_factors_applied > 0),
+                   sum(n_factors_applied), sum(n_unadjusted_events),
+                   list(DISTINCT cum_share_factor ORDER BY cum_share_factor),
+                   list(DISTINCT cum_price_factor ORDER BY cum_price_factor)
+            FROM price_adj_daily GROUP BY 1""").fetchall()}
+        assert got == OLD_TICKER_SUMMARY
+        # 거래량은 옛 식 그대로(원거래량 × 누적 price_factor), 조정가는 ÷ 누적 ⑤ 만 더해졌다 —
+        # ⑤ 가 안 접힌 행은 옛 식(원주가 × 누적 share_factor)과 비트까지 같다
+        assert _one(con, """
+            SELECT count(*) FILTER (WHERE a.adj_volume_shr IS DISTINCT FROM
+                                          p.volume_shr * a.cum_price_factor),
+                   count(*) FILTER (WHERE a.n_price_only_applied = 0
+                                    AND a.adj_close IS DISTINCT FROM p.close * a.cum_share_factor),
+                   count(*) FILTER (WHERE a.adj_close IS DISTINCT FROM
+                                          p.close * a.cum_share_factor / a.cum_price_only_factor),
+                   count(*) FILTER (WHERE a.n_price_only_applied > 0)
+            FROM price_adj_daily a JOIN price_daily p USING (ticker, date)""") == (
+            0, 0, 0, N_ROWS_UNADJUSTED_EVENT)
+    finally:
+        con.close()
+
+
+def test_매크로를_안_고치면_EG3_매크로_정합이_폐기한다(built, tmp_path: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """표에만 ⑤ 를 넣고 매크로 `v_adj_price_fwd` 를 옛 식으로 두면 ⑨ 가 잡는다 — 소비 경로 둘이
+    갈리지 않는다는 증명."""
+    from equity import views
+
+    eq, _ = built
+    old_tpl = views.TEMPLATES["v_adj_price_fwd"].replace(" / cum_price_only_factor", "")
+    assert old_tpl != views.TEMPLATES["v_adj_price_fwd"]
+    monkeypatch.setitem(views.TEMPLATES, "v_adj_price_fwd", old_tpl)
+    r = build.build_table(_variant(tmp_path, "neg_macro_unfixed", _body()), STAGE_SLICE, eq,
+                          SEED, build_id="b_neg_macro_unfixed")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g = _gate(r, "EG3_price_adj_daily")
+    assert g.status is GateStatus.FAIL and g.detail.startswith("n_macro_mismatch=")
+    assert g.metrics["n_macro_mismatch"] > 0 and g.metrics["n_recompute_mismatch"] == 0
 
 
 def test_재상장_구간의_첫_행은_누적이_1이고_이전_구간_사건을_물지_않는다(built) -> None:
@@ -380,8 +509,10 @@ def test_같은_입력을_두_번_지으면_content_hash가_같다(built, tmp_pa
 # 어긋나는지 보이려면 그 조합을 손으로 만들어야 한다.
 #   036220: 구간 1 [2020-01-02, 2020-01-06] · 구간 2 [2020-01-09, 2020-01-10]
 #   ok 계수 1건 (fold 2020-01-03, share 10 / price 0.1) — 구간 1 안
-#   not-ok 사건 1건 (apply 2020-01-06) — 구간 1 안
-# 기대: 구간 2 의 두 행은 cum = 1 · n_unadjusted_events = 0.
+#   not-ok 사건 1건 (apply 2020-01-06) — 구간 1 안, 같은 날 ⑤ 계수 행(r 0.5)의 price_only_dup
+#   ⑤ 계수 행 1건 (apply 2020-01-06, price_only_factor 0.5) — 구간 1 안 (e1.26.0)
+#   가격 축 미해결 1건 (apply 2020-01-10) — 구간 2 안 (e1.26.0)
+# 기대: 구간 2 의 두 행은 cum = 1(⑤ 누적 포함) · 구간 1 사건 수 0.
 
 SYNTH_SESSIONS = [dt.date(2020, 1, d) for d in (2, 3, 6, 7, 8, 9, 10)]
 SYNTH_SPANS = [("036220", 1, dt.date(2020, 1, 2), dt.date(2020, 1, 6)),
@@ -448,12 +579,17 @@ def _synth_root(root: Path) -> Path:
                         "volume_shr, price_kind, basis, corp_action_pending)",
                         partition_expr="year(date)")
     fac = ("('036220:split:2020-01-03', '036220', DATE '2020-01-03', DATE '2020-01-03', "
-           "0.1, 10.0, TRUE, 'mktcap_neutral'), "
+           "0.1, 10.0, TRUE, 'mktcap_neutral', 1.0, 'factor'), "
            "('036220:capred:2020-01-06', '036220', DATE '2020-01-06', DATE '2020-01-06', "
-           "1.0, 1.0, FALSE, 'no_price_match')")
+           "1.0, 1.0, FALSE, 'no_price_match', 1.0, 'price_only_dup'), "
+           "('036220:krx_base:2020-01-06', '036220', DATE '2020-01-06', DATE '2020-01-06', "
+           "1.0, 1.0, FALSE, 'krx_base_inconsistent', 0.5, 'price_only'), "
+           "('036220:capred:2020-01-10', '036220', DATE '2020-01-10', DATE '2020-01-10', "
+           "1.0, 1.0, FALSE, 'no_price_match', 1.0, 'unresolved')")
     _write_equity_table(root, "adj_factor",
                         f"SELECT * FROM (VALUES {fac}) AS t(event_id, ticker, apply_date, "
-                        "available_date, price_factor, share_factor, factor_ok, factor_source)",
+                        "available_date, price_factor, share_factor, factor_ok, factor_source, "
+                        "price_only_factor, price_resolution)",
                         partition_expr="year(apply_date)")
     return root
 
@@ -505,22 +641,27 @@ def test_합성_재상장_트리에서_구간2는_구간1_계수를_물지_않�
         con.execute("CREATE OR REPLACE VIEW pad AS SELECT * FROM read_parquet("
                     f"'{out / 'year=*' / '*.parquet'}', hive_partitioning=false)")
         rows = con.execute("SELECT date, cum_share_factor, n_factors_applied, "
-                           "n_unadjusted_events FROM pad ORDER BY date").fetchall()
+                           "n_unadjusted_events, cum_price_only_factor, n_price_only_applied, "
+                           "n_price_unresolved_events FROM pad ORDER BY date").fetchall()
         assert rows == [
-            (dt.date(2020, 1, 2), 1.0, 0, 0),      # 구간 1 앵커
-            (dt.date(2020, 1, 3), 10.0, 1, 0),     # 구간 1 계수 적용
-            (dt.date(2020, 1, 6), 10.0, 1, 1),     # 미조정 사건이 같은 구간에서 잡힌다
-            (dt.date(2020, 1, 9), 1.0, 0, 0),      # 구간 2 앵커 — 누적 초기화
-            (dt.date(2020, 1, 10), 1.0, 0, 0),
+            (dt.date(2020, 1, 2), 1.0, 0, 0, 1.0, 0, 0),      # 구간 1 앵커
+            (dt.date(2020, 1, 3), 10.0, 1, 0, 1.0, 0, 0),     # 구간 1 계수 적용
+            # 미조정 사건 2건(⑤ 계수 행 + 그 dup)이 같은 구간에서 잡히고 ⑤ 가 접힌다
+            (dt.date(2020, 1, 6), 10.0, 1, 2, 0.5, 1, 0),
+            (dt.date(2020, 1, 9), 1.0, 0, 0, 1.0, 0, 0),      # 구간 2 앵커 — ⑤ 누적도 초기화
+            (dt.date(2020, 1, 10), 1.0, 0, 1, 1.0, 0, 1),     # 가격 축 미해결(구간 2)
         ]
+        adj = dict(con.execute("SELECT date, adj_close FROM pad").fetchall())
+        assert adj[dt.date(2020, 1, 6)] == 102 * 10.0 / 0.5     # 원주가 × 누적 share ÷ 누적 ⑤
     finally:
         con.close()
 
 
 def test_부정_조정가를_나눗셈으로_뒤집으면_EG3가_폐기한다(synth, tmp_path: Path) -> None:
     eq, _ = synth
-    sql = _body().replace("u.close      * u.cum_share_factor              AS adj_close",
-                          "u.close      / u.cum_share_factor              AS adj_close")
+    sql = _body().replace(
+        "u.close      * u.cum_share_factor / u.cum_price_only_factor AS adj_close",
+        "u.close      / u.cum_share_factor / u.cum_price_only_factor AS adj_close")
     assert "u.close      / u.cum_share_factor" in sql
     r = build.build_table(_variant(tmp_path, "neg_divide", sql), STAGE_SLICE, eq, SEED,
                           build_id="b_neg_divide")
@@ -569,6 +710,36 @@ def test_부정_미조정_사건_수를_0으로_지우면_EG3가_폐기한다(sy
     assert g.metrics["n_unadjusted_mismatch"] > 0
 
 
+def test_부정_가격_전용_계수를_곱셈으로_뒤집으면_EG3가_폐기한다(synth, tmp_path: Path) -> None:
+    """⑤ 방향 오류: 기준가 비 r 은 '이후 가격 ÷ r' 이다. 곱하면 사건일 뒤 수준이 r² 배 틀어진다."""
+    eq, _ = synth
+    sql = _body().replace(
+        "u.close      * u.cum_share_factor / u.cum_price_only_factor AS adj_close",
+        "u.close      * u.cum_share_factor * u.cum_price_only_factor AS adj_close")
+    assert "* u.cum_price_only_factor AS adj_close" in sql
+    r = build.build_table(_variant(tmp_path, "neg_po_multiply", sql), STAGE_SLICE, eq, SEED,
+                          build_id="b_neg_po_multiply")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g = _gate(r, "EG3_price_adj_daily")
+    assert g.metrics["n_recompute_mismatch"] > 0 and g.metrics["n_macro_mismatch"] > 0
+
+
+def test_부정_가격_전용_누적을_구간_첫_행에서_안_끊으면_EG3가_폐기한다(synth,
+                                                                     tmp_path: Path) -> None:
+    """구간 1 의 ⑤ 계수(01-06, r 0.5)가 재상장 구간 2 로 넘어오면 구간 2 앵커가 1 이 아니다."""
+    eq, _ = synth
+    sql = _body().replace(
+        "ON c.ticker = j.ticker AND c.span_seq = j.span_seq AND j.date >= c.fold_date",
+        "ON c.ticker = j.ticker AND j.date >= c.fold_date")
+    assert sql != _body()
+    r = build.build_table(_variant(tmp_path, "neg_po_span_leak", sql), STAGE_SLICE, eq, SEED,
+                          build_id="b_neg_po_span_leak")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g = _gate(r, "EG3_price_adj_daily")
+    assert g.metrics["n_span_first_not_unit"] > 0
+    assert g.metrics["n_recompute_mismatch"] > 0 and g.metrics["n_price_only_count_mismatch"] > 0
+
+
 # ── 선언 축 ──────────────────────────────────────────────────────────────────
 
 def test_price_adj_close_필드는_이_표만_선언한다() -> None:
@@ -592,6 +763,19 @@ def test_커널_어댑터는_조정가_표를_읽지_않는다() -> None:
               / "equity_duckdb.py")
     assert kernel.exists(), kernel
     assert "price_adj_daily" not in kernel.read_text(encoding="utf-8")
+
+
+def test_두_백테스트_어댑터는_가격_전용_계수를_읽지_않는다() -> None:
+    """⑤ 는 가격 축만 고친다 — 보유 수량을 조정하는 두 어댑터(워크벤치·커널)가 `price_only_factor`
+    를 읽으면 같은 사건이 수량으로 한 번 더 반영된다(기각한 안 ①)."""
+    backend = Path(__file__).parents[2] / "backend" / "src"
+    adapters = (backend / "backtest_engine" / "adapters" / "equity_duckdb.py",
+                backend / "strategy_workbench" / "adapters" / "outbound" / "equity_duckdb"
+                / "_adapter.py")
+    for src in adapters:
+        assert src.exists(), src
+        text = src.read_text(encoding="utf-8")
+        assert "price_only_factor" not in text and "price_resolution" not in text, src
 
 
 # ── 검수 R2-01·R2-04: 저녁 잠정 T 행이 있는 price_daily 위에서 S23 이 서고 표식을 싣는다 ──

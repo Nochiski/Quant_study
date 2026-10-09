@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.25.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.26.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -243,6 +243,24 @@ RULES_VERSION = "e1.25.0"                # BuildRecord.rules_version 에 실린�
 #          게이트: EG3_fin_std 의 `n_available_ne_rcept_dt`·`n_orig_filing_unwitnessed` 와
 #          EG3_disclosure_version 의 `n_available_ne_rcept_dt`·`n_corrections_mismatch` 가 stage
 #          공개일 축으로(이름은 그대로), EG8 그룹 조인 키가 max(rcept_no) 로.
+# e1.26.0: 배포 묶음 6 갈래 6-1·6-2 — Q-5 고침 ⑤(N-32 ②·N-33, 플랜
+#          `docs/plans/2026-10-08-batch6-q5-price-only.md`). 미해결 사건의 KRX 기준가
+#          비율을 가격 축에만 접는다(키움 수정주가 방식, 0단계 대조 148/150).
+#          `adj_factor` 열 2개 신설: `price_only_factor`(⑤ 단위 (ticker, d) 마다 한 행에만
+#          그날 기준가 ÷ 직전 행 종가, 나머지 1) · `price_resolution`(factor · price_only ·
+#          price_only_dup · factor_near · price_only_near · unresolved). 계수 행의
+#          available_date = min(announce, apply_date)(C-07 확장). factor_ok·price_factor·
+#          share_factor·factor_source·apply_date·행 수는 그대로 — 두 백테스트 어댑터·EGC-04 의
+#          사건 집합 불변. D6-1 주식 계열만(fund·ship_fund·reit 제외) · D6-2 price_only_near
+#          ((c) 가드) · D6-3 factor_near = C-05 원안(형제 ok 억제 중복본 · 창 안 ok 적용일 ·
+#          ok 접힘일의 not-ok 행, ② 사유 행·capred_paid 제외) ·
+#          EG3_adj_factor ⑤ 폐기형 + EG8 계수 행 수정수익률 기록형(D6-5 승격 대기).
+#          `price_adj_daily` 열 3개 신설(`cum_price_only_factor`·`n_price_only_applied`·
+#          `n_price_unresolved_events`, D6-4 — `n_unadjusted_events` 뜻 유지) · 조정 OHLC =
+#          원주가 × 누적 share ÷ 누적 ⑤ · 거래량·기존 누적계수 열 불변. 매크로
+#          `v_adj_price_fwd`·`v_adj_price` 도 같은 ⑤ 누적(출력 열 불변) — `_asof/` 표본
+#          (v_adj_price·v_adj_price_fwd)이 ⑤ 종목에서 바뀌어 EG5c 는 `catalog --rebase-asof`
+#          승인이 필요하다(D6-6).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

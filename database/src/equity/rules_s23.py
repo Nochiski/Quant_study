@@ -8,7 +8,8 @@
 
 산출식은 `sql/price_adj_daily.sql` 머리말이 정본이다. 요약:
   adj_close(d)      = close(d)      × Π(share_factor : ok ∧ 같은 구간 ∧ fold_date ≤ d)
-  adj_volume_shr(d) = volume_shr(d) × Π(price_factor : 같은 집합)
+                                    ÷ Π(price_only_factor : ⑤ 계수 행 ∧ 같은 구간 ∧ fold_date ≤ d)
+  adj_volume_shr(d) = volume_shr(d) × Π(price_factor : ok 집합)   ← ⑤ 는 가격 축만(e1.26.0)
   fold_date = greatest(apply_date, available_date) · 누적은 (ticker, span_seq) 안에서만
 
 **`price_daily` 에 컬럼을 더하지 않는다** — `adj_factor` 가 `price_daily` 를 입력으로 쓰므로
@@ -94,7 +95,8 @@ def install_recalc(ctx: EquityGateContext) -> None:
 
       구간 앵커  span_first = max(security_span.first_date : first_date ≤ date)  (범위 조인 집계)
       ok 계수    span_first < fold_date ≤ date                                   (구간 안 = 앵커 뒤)
-      미조정     span_first ≤ apply_date ≤ date
+      ⑤ 계수     같은 범위(price_resolution='price_only' 행의 price_only_factor)
+      미조정     span_first ≤ apply_date ≤ date (그중 price_resolution='unresolved' 를 따로)
 
     산출의 "구간 부여 후 span_seq 로 조인" 과 이 "행의 앵커로 구간을 자르기" 는 같은 집합이다:
     구간이 서로 겹치지 않고 first_date 순서라, 계수의 구간 = 행의 구간 ⟺ 앵커 < fold ≤ date.
@@ -126,10 +128,28 @@ def install_recalc(ctx: EquityGateContext) -> None:
                  AND f.fold_date > a.span_first AND f.fold_date <= a.date
             GROUP BY a.ticker, a.date, a.span_first
         ),
-        unadj AS (
-            SELECT a.ticker, a.date, count(e.apply_date) AS n_unadjusted_events
+        pof AS (
+            SELECT ticker, greatest(apply_date, available_date) AS fold_date,
+                   price_only_factor, available_date
+            FROM adj_factor WHERE price_resolution = 'price_only'
+        ),
+        poagg AS (
+            SELECT a.ticker, a.date,
+                   coalesce(product(f.price_only_factor), 1) AS cum_price_only_factor,
+                   count(f.fold_date)                        AS n_price_only_applied,
+                   max(f.available_date)                     AS po_available_date
             FROM anchor a
-            LEFT JOIN (SELECT ticker, apply_date FROM adj_factor WHERE NOT factor_ok) e
+            LEFT JOIN pof f ON f.ticker = a.ticker
+                 AND f.fold_date > a.span_first AND f.fold_date <= a.date
+            GROUP BY a.ticker, a.date
+        ),
+        unadj AS (
+            SELECT a.ticker, a.date, count(e.apply_date) AS n_unadjusted_events,
+                   count(e.apply_date) FILTER (WHERE e.price_resolution = 'unresolved')
+                     AS n_price_unresolved_events
+            FROM anchor a
+            LEFT JOIN (SELECT ticker, apply_date, price_resolution FROM adj_factor
+                       WHERE NOT factor_ok) e
                  ON e.ticker = a.ticker
                  AND e.apply_date >= a.span_first AND e.apply_date <= a.date
             GROUP BY a.ticker, a.date
@@ -146,13 +166,18 @@ def install_recalc(ctx: EquityGateContext) -> None:
                g.cum_share_factor AS r_cum_share_factor,
                g.n_factors_applied AS r_n_factors_applied,
                g.product_of_products AS r_product_of_products,
-               greatest(o.date, coalesce(g.factor_available_date, o.date)) AS r_available_date,
+               greatest(o.date, coalesce(g.factor_available_date, o.date),
+                        coalesce(q.po_available_date, o.date)) AS r_available_date,
+               q.cum_price_only_factor AS r_cum_price_only_factor,
+               q.n_price_only_applied AS r_n_price_only_applied,
                u.n_unadjusted_events AS r_n_unadjusted_events,
+               u.n_price_unresolved_events AS r_n_price_unresolved_events,
                fr.cum_share_factor_span_free,
                p.open AS raw_open, p.high AS raw_high, p.low AS raw_low, p.close AS raw_close,
                p.volume_shr AS raw_volume_shr
         FROM {_q(ctx.out_view)} o
         JOIN agg g   ON g.ticker = o.ticker AND g.date = o.date
+        JOIN poagg q ON q.ticker = o.ticker AND q.date = o.date
         JOIN unadj u ON u.ticker = o.ticker AND u.date = o.date
         JOIN free fr ON fr.ticker = o.ticker AND fr.date = o.date
         JOIN price_daily p ON p.ticker = o.ticker AND p.date = o.date""")
@@ -234,14 +259,16 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
     """EG3_price_adj_daily (폐기형) — 전방 조정의 불변식 전부.
 
     폐기 술어
-      ① `cum_price_factor > 0 ∧ cum_share_factor > 0`  (0·음수·NULL 계수는 조정이 아니다)
+      ① `cum_price_factor`·`cum_share_factor`·`cum_price_only_factor` > 0 (0·음수·NULL 계수는
+         조정이 아니다)
       ② `cum_price × cum_share = 1`  — 확정 계수는 전부 시총 불변이다. 허용오차는 한 계수의
          `adj_factor.factor_product_tol_base` 를 접힌 수만큼 복리로 편 `(1+tol)^n − 1` 이고,
          **접힌 계수가 없으면 정확히 1** 이다. 항등이 `Π(pf·sf)` 와 같은지도 함께 본다
-      ③ 구간 첫 행의 누적 = 1 ∧ `n_factors_applied` = 0  (앵커 = 첫 관측)
-      ④ 독립 재계산(`install_recalc`)과 값 7축(조정 OHLC 4 · 조정 거래량 · 누적계수 2) 전건 일치
-         — 나눗셈으로 뒤집으면 여기서 걸린다
-      ⑤ `n_unadjusted_events`·`n_factors_applied` 독립 재계산 일치
+      ③ 구간 첫 행의 누적 = 1 ∧ `n_factors_applied` = 0 (⑤ 누적·접힌 수 포함, 앵커 = 첫 관측)
+      ④ 독립 재계산(`install_recalc`)과 값 8축(조정 OHLC 4 — ⑤ 포함 · 조정 거래량 · 누적계수 3)
+         전건 일치 — 나눗셈↔곱셈을 뒤집으면 여기서 걸린다
+      ⑤ `n_unadjusted_events`·`n_price_unresolved_events`·`n_factors_applied`·
+         `n_price_only_applied` 독립 재계산 일치
       ⑥ 구간 밖 계수 유입 0 — 접힌 수가 구간 안 계수 수를 **넘지** 않는다(⑤ 의 부분집합이지만
          방향을 이름으로 남긴다: 누출인지 누락인지가 진단에서 갈린다)
       ⑦ `available_date = date` ∧ basis 'derived' (fold 규약의 귀결을 산출로 증명한다)
@@ -251,7 +278,8 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
 
     기록형: 구간 없는 행 수 · 구간 규칙을 껐을 때 달라지는 행 수(= 이전 구간 계수 누출 크기) ·
     미조정 사건이 걸린 행·종목 수와 비율 · **사유(`factor_source`)별 내역** · 누적계수 분포 ·
-    매크로 최대 상대편차.
+    ⑤ 가 접힌 행·종목 수 · 가격 축 미해결 행·종목 수 · 가격 축 해소 표식(`price_resolution`)별
+    내역 · 매크로 최대 상대편차.
     """
     v = _q(ctx.out_view)
     r = _q(RECALC_TABLE)
@@ -266,7 +294,8 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
      n_ticker_bad, n_off_cal) = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {v} WHERE cum_price_factor IS NULL OR cum_share_factor IS NULL
-             OR cum_price_factor <= 0 OR cum_share_factor <= 0),
+             OR cum_price_only_factor IS NULL OR cum_price_factor <= 0 OR cum_share_factor <= 0
+             OR cum_price_only_factor <= 0),
           (SELECT count(*) FROM {v}
              WHERE abs(cum_price_factor * cum_share_factor - 1) > {tol_expr}),
           (SELECT count(*) FROM {r}
@@ -291,14 +320,17 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
           (SELECT count(*) FROM {v} o
              WHERE o.basis = 'evening'
                AND NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = o.date))""")
-    # 독립 재계산 대조 — 값 8축 + available_date. NULL 은 NULL 로 같아야 한다.
-    num_axes = (("adj_open", "raw_open * r_cum_share_factor"),
-                ("adj_high", "raw_high * r_cum_share_factor"),
-                ("adj_low", "raw_low * r_cum_share_factor"),
-                ("adj_close", "raw_close * r_cum_share_factor"),
+    # 독립 재계산 대조 — 값 8축 + available_date. NULL 은 NULL 로 같아야 한다. 조정 OHLC 는
+    # ⑤ 누적으로 나눈다(e1.26.0) — 곱셈으로 뒤집으면 여기서 걸린다.
+    po = "r_cum_price_only_factor"
+    num_axes = (("adj_open", f"raw_open * r_cum_share_factor / {po}"),
+                ("adj_high", f"raw_high * r_cum_share_factor / {po}"),
+                ("adj_low", f"raw_low * r_cum_share_factor / {po}"),
+                ("adj_close", f"raw_close * r_cum_share_factor / {po}"),
                 ("adj_volume_shr", "raw_volume_shr * r_cum_price_factor"),
                 ("cum_price_factor", "r_cum_price_factor"),
-                ("cum_share_factor", "r_cum_share_factor"))
+                ("cum_share_factor", "r_cum_share_factor"),
+                ("cum_price_only_factor", po))
     axis_conds = " OR ".join(
         f"(({_q(c)} IS NULL) <> (({e}) IS NULL) "
         f"OR abs(coalesce({_q(c)}, 0) - coalesce({e}, 0)) "
@@ -314,7 +346,8 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
           (SELECT count(*) FROM {r} WHERE available_date IS DISTINCT FROM r_available_date),
           (SELECT count(*) FROM {r} WHERE n_factors_applied IS DISTINCT FROM
                                           r_n_factors_applied),
-          (SELECT count(*) FROM {r} WHERE n_factors_applied > r_n_factors_applied),
+          (SELECT count(*) FROM {r} WHERE n_factors_applied > r_n_factors_applied
+                                       OR n_price_only_applied > r_n_price_only_applied),
           (SELECT count(*) FROM {r} WHERE span_first IS NULL),
           (SELECT count(*) FROM {r}
              WHERE abs(cum_share_factor - cum_share_factor_span_free)
@@ -331,7 +364,23 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
             FROM {r} o WHERE o.span_first IS NOT NULL
             GROUP BY o.ticker, o.span_first)
         SELECT count(*) FROM first_row f JOIN {v} o USING (ticker, date)
-        WHERE o.cum_price_factor <> 1 OR o.cum_share_factor <> 1 OR o.n_factors_applied <> 0""")
+        WHERE o.cum_price_factor <> 1 OR o.cum_share_factor <> 1 OR o.n_factors_applied <> 0
+           OR o.cum_price_only_factor <> 1 OR o.n_price_only_applied <> 0""")
+    # ⑤ (e1.26.0) — 가격 축 미해결 수·⑤ 접힌 수 독립 재계산 + 기록형(⑤ 가 걸린 행·종목, 가격 축
+    # 미해결이 걸린 행·종목, ⑤ 누적 범위)
+    (n_pu_bad, n_po_count_bad, n_rows_po, n_tickers_po, n_rows_pu, n_tickers_pu,
+     po_min, po_max) = _row(ctx, f"""
+        SELECT
+          (SELECT count(*) FROM {r} WHERE n_price_unresolved_events IS DISTINCT FROM
+                                          r_n_price_unresolved_events),
+          (SELECT count(*) FROM {r} WHERE n_price_only_applied IS DISTINCT FROM
+                                          r_n_price_only_applied),
+          (SELECT count(*) FROM {v} WHERE n_price_only_applied > 0),
+          (SELECT count(DISTINCT ticker) FROM {v} WHERE n_price_only_applied > 0),
+          (SELECT count(*) FROM {v} WHERE n_price_unresolved_events > 0),
+          (SELECT count(DISTINCT ticker) FROM {v} WHERE n_price_unresolved_events > 0),
+          (SELECT coalesce(min(cum_price_only_factor), 1) FROM {v}),
+          (SELECT coalesce(max(cum_price_only_factor), 1) FROM {v})""")
     # 기록형 — 누적계수 분포(조정이 걸린 행만) · 미조정 사건의 사유별 내역.
     # 사유(`adj_factor.factor_source`)를 여기서 세는 이유는 소비자가 "조정이 틀렸다" 와 "MVP 가
     # 안 덮는 축이다" 를 구별해야 하기 때문이다 — 대부분은 `unknown_price_only`(유상증자
@@ -357,6 +406,21 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
                count(DISTINCT ticker) FILTER (WHERE n_rows > 0),
                coalesce(sum(n_rows), 0)
         FROM hit GROUP BY factor_source ORDER BY factor_source""").fetchall()]
+    # ⑤ — 같은 축을 가격 축 해소 표식으로 나눈다(D6-4: 'unresolved' 만 가격 축 미해결)
+    by_resolution = [dict(zip(("price_resolution", "n_events", "n_events_counted", "n_tickers"),
+                              r, strict=True))
+                     for r in ctx.con.execute(f"""
+        WITH ev AS (SELECT event_id, ticker, apply_date, price_resolution
+                    FROM adj_factor WHERE NOT factor_ok),
+             hit AS (
+                 SELECT e.event_id, e.price_resolution, e.ticker, count(a.date) AS n_rows
+                 FROM ev e LEFT JOIN {r} a
+                   ON a.ticker = e.ticker
+                   AND e.apply_date >= a.span_first AND e.apply_date <= a.date
+                 GROUP BY e.event_id, e.price_resolution, e.ticker)
+        SELECT price_resolution, count(*), count(*) FILTER (WHERE n_rows > 0),
+               count(DISTINCT ticker) FILTER (WHERE n_rows > 0)
+        FROM hit GROUP BY price_resolution ORDER BY price_resolution""").fetchall()]
     n_macro_bad, macro_metrics = _macro_mismatch(ctx)
     n_out = ctx.n_out
     checks = {
@@ -366,6 +430,8 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
         "n_span_first_not_unit": n_first_bad,
         "n_recompute_mismatch": int(str(n_recalc)),
         "n_unadjusted_mismatch": int(str(n_unadj_bad)),
+        "n_price_unresolved_mismatch": int(str(n_pu_bad)),
+        "n_price_only_count_mismatch": int(str(n_po_count_bad)),
         "n_available_recompute_mismatch": int(str(n_avail_recalc)),
         "n_factor_count_mismatch": int(str(n_factor_count_bad)),
         "n_cross_span_factor": int(str(n_cross_span)),
@@ -394,6 +460,13 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
             "p50": None if q50 is None else float(str(q50)),
             "p90": None if q90 is None else float(str(q90))},
         "unadjusted_events_by_factor_source": by_source,
+        "unadjusted_events_by_price_resolution": by_resolution,
+        "n_rows_with_price_only": int(str(n_rows_po)),
+        "n_tickers_with_price_only": int(str(n_tickers_po)),
+        "n_rows_with_price_unresolved_events": int(str(n_rows_pu)),
+        "n_tickers_with_price_unresolved_events": int(str(n_tickers_pu)),
+        "cum_price_only_factor_min": float(str(po_min)),
+        "cum_price_only_factor_max": float(str(po_max)),
         "max_cum_product_dev": float(str(max_dev)),
         "product_tol_basis": tol_basis,
         "factor_product_tol_base": tol,
@@ -422,18 +495,22 @@ FIELDS: tuple[FieldProfile, ...] = (
         unit="KRW", value_type="price", frequency="session", recommended_lag_sessions=0,
         recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
         disclosure_basis="원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date "
-                         "다음 세션), KRX 기준가가 확정한 ok 계수는 min(공시 접수일, apply_date)"
-                         " — C-07) 중 나중 — 산출 available_date 는 항상 date 다",
+                         "다음 세션), KRX 기준가가 확정한 ok 계수와 ⑤ 가격 전용 계수는 min(공시 "
+                         "접수일, apply_date) — C-07) 중 나중 — 산출 available_date 는 항상 "
+                         "date 다",
         evidence="price_adj_daily.adj_close = close × Π(share_factor : factor_ok ∧ 같은 "
-                 "security_span 구간 ∧ greatest(apply_date, available_date) ≤ date). 첫 관측 "
+                 "security_span 구간 ∧ greatest(apply_date, available_date) ≤ date) ÷ "
+                 "Π(price_only_factor : ⑤ 계수 행 ∧ 같은 구간·fold 규칙)(e1.26.0 — 미해결 "
+                 "사건의 KRX 기준가 비율을 가격 축에만 접는다, 키움 수정주가와 같은 방식). 첫 관측 "
                  "수준 고정이라 창·as_of 에 무관하다(결정 6, 09-05). 카탈로그 매크로 "
                  "v_adj_price_fwd 는 같은 값을 내는 읽기 경로이고 매 빌드 EG3_price_adj_daily 가 "
                  "동일성을 증명한다. **FIELD_MAP §2 의 42 어휘 밖**(equity 내부 스코프, §3) 이라 "
-                 "field_scope='internal' 이다. n_unadjusted_events > 0 인 구간은 조정이 "
-                 "불완전하다 — 소비자가 거를 축이다. 저녁 잠정판(e1.15.0)에서는 basis='evening' "
-                 "T 행이 있고 그 adj_close = 키움 종가 × 그날까지의 누적 share_factor(과거 사건 "
-                 "누적 — 전방 조정이라 1 이 아니다), OHLC 조정값은 NULL 이다. corp_action_pending "
-                 "이 참이면 오늘 스코어에서 뺀다(결정 V2-2).",
+                 "field_scope='internal' 이다. 가격 축 미해결은 n_price_unresolved_events > 0 "
+                 "인 구간이다 — 조정가 소비자가 거를 축(n_unadjusted_events 는 보유 수량 축 "
+                 "미해결로 뜻 그대로). 저녁 잠정판(e1.15.0)에서는 basis='evening' "
+                 "T 행이 있고 그 adj_close = 키움 종가 × 그날까지의 누적 share_factor ÷ 누적 ⑤"
+                 "(과거 사건 누적 — 전방 조정이라 1 이 아니다), OHLC 조정값은 NULL 이다. "
+                 "corp_action_pending 이 참이면 오늘 스코어에서 뺀다(결정 V2-2).",
         coverage_axis="grid_session", scope="internal", axis_columns=("ticker", "date")),
 )
 
@@ -446,7 +523,10 @@ PRICE_ADJ_DAILY = register(EquityTable(
              "adj_open": "DOUBLE", "adj_high": "DOUBLE", "adj_low": "DOUBLE",
              "adj_close": "DOUBLE", "adj_volume_shr": "DOUBLE",
              "cum_price_factor": "DOUBLE", "cum_share_factor": "DOUBLE",
-             "n_factors_applied": "BIGINT", "n_unadjusted_events": "BIGINT",
+             # ⑤ 가격 전용 누적(e1.26.0) — 위 두 누적계수(시총 불변, 곱 1)와 분리된 가격 축
+             "cum_price_only_factor": "DOUBLE",
+             "n_factors_applied": "BIGINT", "n_price_only_applied": "BIGINT",
+             "n_unadjusted_events": "BIGINT", "n_price_unresolved_events": "BIGINT",
              "available_date": "DATE", "available_basis": "VARCHAR",
              # 저녁 잠정판 표식 — price_daily 의 값을 그대로 싣는다(e1.15.0, 검수 R2-04)
              "basis": "VARCHAR", "corp_action_pending": "BOOLEAN"},
@@ -470,8 +550,10 @@ PRICE_ADJ_DAILY = register(EquityTable(
                         "price_kind", "basis", "corp_action_pending"),
         # `factor_source`·`event_id` 는 산출식이 아니라 EG3 기록형(미조정 사건의 사유별 내역)이
         # 읽는다 — 사건 축은 event_id 다(같은 날 두 사건을 접으면 세는 축이 갈린다).
+        # `price_only_factor`·`price_resolution` 은 ⑤ 가격 전용 누적·가격 축 미해결 수(e1.26.0).
         "adj_factor": ("ticker", "apply_date", "available_date", "price_factor", "share_factor",
-                       "factor_ok", "factor_source", "event_id"),
+                       "factor_ok", "factor_source", "event_id", "price_only_factor",
+                       "price_resolution"),
         "security_span": ("ticker", "span_seq", "first_date"),
         "trading_calendar": ("date",)},
     available_basis=("derived",),

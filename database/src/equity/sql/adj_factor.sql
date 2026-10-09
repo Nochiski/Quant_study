@@ -92,6 +92,40 @@
 --   주식수 비 S 가 그 세션의 KRX 일별 행에서 온다; (b) 는 announce = apply 라 그날) · 정상 아닌 행은
 --   옛 식 그대로 — (b) krx_base_inconsistent·(d) 는 다음 세션, (a) 의 not-ok 행은 min(announce, 다음 세션).
 --   상수는 전부 _const.
+--
+-- ── ⑤ 가격 전용 계수 `price_only_factor` · 가격 축 표식 `price_resolution` (e1.26.0, N-32 ②·N-33) ──
+--   미해결(factor_ok=false) 사건 중 그날 KRX 기준가 근거가 있는 (ticker, d) **단위**마다 한 행에만
+--   r = 그날 기준가 ÷ 직전 행 종가(위 bp.r — 방향은 price_factor 와 같다)를 싣는다. 보유 수량 경로는
+--   그대로다: 계수를 실은 행도 factor_ok=false · price_factor = share_factor = 1 · factor_source
+--   그대로라 두 백테스트 어댑터와 EGC-04 가 보는 사건 집합이 바뀌지 않는다. 이 열을 읽는 곳은
+--   price_adj_daily 와 조정가 매크로뿐이다(가격 축만 — 거래량·누적계수 열은 그대로).
+--   단위 (ticker, d): ① bp 후보 ② 그날 apply_date 인 not-ok 행 중 factor_source ∈
+--   {krx_base_inconsistent, unknown_price_only} ∧ apply_basis='krx_base_price' 가 하나 이상 ③ 그날
+--   ok 계수가 접히지 않음(ok 행의 apply_date 와 greatest(apply_date, available_date) 모두) ④ 종목
+--   종류가 주식 계열(D6-1 — fund·ship_fund·reit 는 분배·배당락 반복 하락 추정이라 제외).
+--   계수 행 = ② 중 최소 event_id 1행, 값은 그 행의 계수가 아니라 그날 bp.r(성분 루트는 잔여 비율).
+--   available_date: 계수 행은 min(announce, apply_date)(C-07 을 이 행으로 넓힌다 — r 이 그 세션 KRX
+--   일별 행에서 온다; 옛 식 다음 세션이면 하루 늦은 가짜 급락·반등), 나머지 행은 옛 식 그대로.
+--   price_resolution(폐쇄 어휘):
+--     factor          factor_ok
+--     price_only      계수 행
+--     price_only_dup  같은 단위의 다른 not-ok 행(같은 날 DART 명목 행·성분 다른 멤버 등) — 계수 1
+--     factor_near     (D6-3, C-05 원안 '정상 사건의 중복본' — ok 계수 근처·같은 날 억제 중복)
+--                     (가) 억제 중복본(near_dup_suppressed·same_day_suppressed) 중 그 행을 누른 형제가
+--                          최종 ok 인 것 — 억제 중복본은 이 갈래로만 판정한다(형제가 미해결이면 근처에
+--                          다른 ok 계수가 있어도 아래 (나)(다)로 가지 않는다)
+--                     (나) 그날 기준가 후보가 없는 not-ok 행 중 [n − lookback, n + window] 세션 안에 ok
+--                          계수의 적용일이 있고 같은 창에 (c) 재발견 후보가 없는 것(D6-2 와 같은 모양)
+--                     (다) 그날 ok 계수가 접히는 not-ok 행(⑤ 단위 ③ 으로 빠지는 날)
+--                     (나)(다) 에서 빼는 것: ② 사유 행(krx_base_inconsistent·unknown_price_only) — 그 행
+--                     자체가 KRX 기준가 근거라 단위 밖이면 그 불연속은 아직 안 고쳐졌다(반증 행 포함) ·
+--                     capred_paid — 유상감자는 시총 불변 사건이 아니라 '정상 사건의 중복본' 근거가 약하다
+--     price_only_near (D6-2) 그날 기준가 후보가 없는 not-ok 행 중 [n − lookback, n + window] 세션 안에
+--                     ⑤ 단위가 있고 같은 창에 (c) 재발견 후보(행 없는 기준가 리셋)가 없는 것 — 그 날짜엔
+--                     가격 불연속이 없고 실제 불연속(⑤ 단위)은 고쳐졌다. 창은 사건 매칭 창과 같다
+--     unresolved      나머지(기준가 근거 없는 DART 행·D6-1 제외 종류·ok 접힘일과 겹친 단위 등)
+--   판정 순서는 위 순서(계수 행 > price_only_dup > factor_near > price_only_near > unresolved) —
+--   두 근처가 겹치면 factor_near 로 가고 EG3 가 겹친 수를 기록형으로 센다.
 -- 숫자 리터럴은 0·1·2 만 쓴다(test_sql파일에_상수_하드코딩_없음) — 창 폭·허용치는 _const 로만 들어온다.
 WITH RECURSIVE
 cal AS (
@@ -130,15 +164,18 @@ ranked AS (
                announce_date, effective_date, event_id)                                   AS rank_key
     FROM ev
 ),
-suppressed AS (
-    SELECT a.event_id
+sup_pair AS (
+    -- 근접 중복 쌍 (눌린 쪽 event_id, 누른 형제 sibling_id). 형제가 최종 ok 면 ⑤ factor_near(C-05)
+    SELECT a.event_id, b.event_id AS sibling_id
     FROM ranked a
     JOIN ranked b
       ON b.ticker = a.ticker AND b.event_type = a.event_type AND b.event_id <> a.event_id
      AND b.source <> a.source
      AND abs(date_diff('day', a.effective_date, b.effective_date)) <= (SELECT near_dup_days FROM k)
      AND b.rank_key < a.rank_key
-    GROUP BY a.event_id
+),
+suppressed AS (
+    SELECT DISTINCT event_id FROM sup_pair
 ),
 judged AS (
     SELECT r.*,
@@ -260,11 +297,14 @@ resolved AS (
     LEFT JOIN step_c sc ON sc.root = cr.root
 ),
 same_day AS (
-    -- 개별 매칭 ok 이벤트가 같은 (ticker, apply_date) 에 2건 이상 → 우선순위 낮은 쪽 억제
+    -- 개별 매칭 ok 이벤트가 같은 (ticker, apply_date) 에 2건 이상 → 우선순위 낮은 쪽 억제.
+    -- sibling_id = 이긴 쪽(rn 1) — ⑤ factor_near 판정에 쓴다
     SELECT event_id,
-           row_number() OVER (PARTITION BY ticker, apply_date ORDER BY rank_key) AS rn
+           row_number() OVER sd            AS rn,
+           first_value(event_id) OVER sd   AS sibling_id
     FROM resolved
     WHERE apply_basis IN ('nominal', 'price_matched')
+    WINDOW sd AS (PARTITION BY ticker, apply_date ORDER BY rank_key)
 ),
 final AS (
     SELECT n.*,
@@ -355,7 +395,7 @@ conflict AS (
 ),
 bp_new AS (
     -- (a) 에 쓰이지 않은 후보 → (b) unknown_krx · (c) 재발견(행 없음) · (d) unknown_price_only
-    SELECT b.ticker, b.date, b.r, b.share_ratio,
+    SELECT b.ticker, b.date, b.n, b.r, b.share_ratio,
            CASE WHEN b.share_ratio IS NOT NULL THEN 'unknown_krx'
                 WHEN b.prev_kind = 'reference'  THEN NULL
                 ELSE 'unknown_price_only' END                                          AS event_type
@@ -406,6 +446,123 @@ out_all AS (
     SELECT * FROM out_events
     UNION ALL
     SELECT * FROM out_new
+),
+out_rows AS (
+    -- 계수·사유가 정해진 전 행 + 적용 세션 번호(⑤ 창) + 옛 공개일(⑤ 계수 행 밖은 이 값 그대로)
+    SELECT o.*, ca.n AS n_apply, lt.last_trade_date,
+           -- 캘린더 마지막 세션의 기준가 사건은 다음 세션이 없다(서버 09-05 EG2 NULL 1) → 적용일
+           -- (당일)로. C-07(N-26 4.1, e1.25.0): KRX 기준가가 apply 세션에 확정한 ok 계수(사건
+           -- 교체 · unknown_krx 정상)는 그 세션에 알 수 있다 → min(announce, apply_date)(신규 행은
+           -- announce = apply). 정정 공시 접수일이 announce 라 apply 보다 늦거나 신규 행이면 옛 식이
+           -- 다음 세션이 되어 전방 조정이 하루 늦게 접혔다(002070 2026-07-31 수정수익률 −35.0% →
+           -- 08-03 +159.6%). 정상 아닌 행·가격 매칭 계수는 옛 식 그대로(⑤ 계수 행은 최종 SELECT).
+           coalesce(CASE WHEN o.apply_basis = 'krx_base_price' AND o.factor_source = 'mktcap_neutral'
+                              THEN least(o.announce_date, o.apply_date)
+                         WHEN o.is_new THEN nx.date
+                         ELSE least(o.announce_date, nx.date) END,
+                    o.apply_date)                                                     AS available_base
+    FROM out_all o
+    JOIN cal ca ON ca.date = o.apply_date
+    LEFT JOIN cal nx ON nx.n = ca.n + 1
+    LEFT JOIN last_trade lt ON lt.ticker = o.ticker
+),
+-- ── ⑤ 가격 전용 계수 (머리말 ⑤ 블록) ────────────────────────────────────────
+ok_fold AS (
+    -- ok 계수가 접히는 날 — 적용 세션 + price_adj_daily 의 fold_date(greatest(apply, available))
+    SELECT ticker, apply_date AS d FROM out_rows WHERE factor_source = 'mktcap_neutral'
+    UNION
+    SELECT ticker, greatest(apply_date, available_base) AS d
+    FROM out_rows WHERE factor_source = 'mktcap_neutral'
+),
+po_kind AS (
+    -- ④ D6-1 주식 계열 — rules_s06.PRICE_ONLY_SEC_TYPES 와 같다(테스트가 묶는다)
+    SELECT ticker FROM security WHERE sec_type IN ('common', 'preferred', 'spac', 'foreign', 'dr')
+),
+po_cand AS (
+    -- ② 계수를 실을 수 있는 행: KRX 기준가가 정한 세션의 정상 아닌 행
+    SELECT ticker, apply_date, event_id FROM out_rows
+    WHERE factor_source IN ('krx_base_inconsistent', 'unknown_price_only')
+      AND apply_basis = 'krx_base_price'
+),
+po_unit AS (
+    -- 단위 (ticker, d) = ① ∧ ② ∧ ③ ∧ ④. 계수 행 = ② 중 최소 event_id, 값 = 그날 bp.r
+    SELECT c.ticker, c.apply_date AS d, any_value(b.n) AS n, any_value(b.r) AS r,
+           min(c.event_id) AS carrier_id
+    FROM po_cand c
+    JOIN bp b ON b.ticker = c.ticker AND b.date = c.apply_date
+    JOIN po_kind s ON s.ticker = c.ticker
+    LEFT JOIN ok_fold f ON f.ticker = c.ticker AND f.d = c.apply_date
+    WHERE f.ticker IS NULL
+    GROUP BY c.ticker, c.apply_date
+),
+po_rows AS (
+    -- 단위 소속 행(같은 ticker·apply_date 의 not-ok 행 전부) — 계수 행이면 r
+    SELECT o.event_id, (u.carrier_id = o.event_id) AS is_carrier, u.r
+    FROM out_rows o
+    JOIN po_unit u ON u.ticker = o.ticker AND u.d = o.apply_date
+    WHERE o.factor_source <> 'mktcap_neutral'
+),
+sibling AS (
+    -- 억제 중복본 ↔ 그 행을 누른 형제 (C-05 원안: near_dup_suppressed · same_day_suppressed)
+    SELECT event_id, sibling_id FROM sup_pair
+    UNION ALL
+    SELECT event_id, sibling_id FROM same_day WHERE rn > 1
+),
+near_ok AS (
+    -- D6-3 factor_near (가): 형제가 최종 ok 인 억제 중복본
+    SELECT s.event_id
+    FROM sibling s
+    JOIN out_rows o ON o.event_id = s.sibling_id
+    WHERE o.factor_source = 'mktcap_neutral'
+    GROUP BY s.event_id
+),
+fold_day AS (
+    -- D6-3 factor_near (다): 그날 ok 계수가 접히는 not-ok 행
+    SELECT o.event_id
+    FROM out_rows o
+    JOIN ok_fold f ON f.ticker = o.ticker AND f.d = o.apply_date
+    WHERE o.factor_source <> 'mktcap_neutral'
+),
+po_free AS (
+    -- 단위 밖 not-ok 행 중 그날 기준가 후보가 없는 행(날짜가 다른 DART 행)
+    SELECT o.event_id, o.ticker, o.n_apply
+    FROM out_rows o
+    LEFT JOIN bp b ON b.ticker = o.ticker AND b.date = o.apply_date
+    WHERE o.factor_source <> 'mktcap_neutral' AND b.ticker IS NULL
+),
+po_c AS (
+    -- (c) 정지 재개 가격 재발견 — 행이 없는 기준가 후보(숨은 점프)
+    SELECT ticker, n FROM bp_new WHERE event_type IS NULL
+),
+near_c AS (
+    SELECT x.event_id
+    FROM po_free x CROSS JOIN k
+    JOIN po_c c ON c.ticker = x.ticker AND c.n BETWEEN x.n_apply - k.win_before
+                                               AND x.n_apply + k.win_after
+    GROUP BY x.event_id
+),
+near_po AS (
+    -- D6-2 price_only_near: 창 [n − lookback, n + window] 안 ⑤ 단위 ∧ 같은 창 (c) 없음
+    SELECT x.event_id
+    FROM po_free x CROSS JOIN k
+    JOIN po_unit u ON u.ticker = x.ticker AND u.n BETWEEN x.n_apply - k.win_before
+                                                  AND x.n_apply + k.win_after
+    LEFT JOIN near_c g ON g.event_id = x.event_id
+    WHERE g.event_id IS NULL
+    GROUP BY x.event_id
+),
+ok_apply AS (
+    SELECT ticker, n_apply AS n FROM out_rows WHERE factor_source = 'mktcap_neutral'
+),
+near_fac AS (
+    -- D6-3 factor_near (나): 창 [n − lookback, n + window] 안 ok 계수 적용일 ∧ 같은 창 (c) 없음
+    SELECT x.event_id
+    FROM po_free x CROSS JOIN k
+    JOIN ok_apply a ON a.ticker = x.ticker AND a.n BETWEEN x.n_apply - k.win_before
+                                                   AND x.n_apply + k.win_after
+    LEFT JOIN near_c g ON g.event_id = x.event_id
+    WHERE g.event_id IS NULL
+    GROUP BY x.event_id
 )
 SELECT
     o.ticker,
@@ -420,26 +577,33 @@ SELECT
     CASE WHEN o.factor_source = 'mktcap_neutral' THEN o.sf_raw ELSE 1 END             AS share_factor,
     o.factor_source,
     (o.factor_source = 'mktcap_neutral')                                             AS factor_ok,
+    -- ⑤ 가격 전용 계수 — 계수 행만 그날 기준가 ÷ 직전 행 종가, 다른 행은 1
+    CASE WHEN p.is_carrier THEN p.r ELSE 1 END                                       AS price_only_factor,
+    CASE WHEN o.factor_source = 'mktcap_neutral' THEN 'factor'
+         WHEN p.is_carrier                        THEN 'price_only'
+         WHEN p.event_id IS NOT NULL              THEN 'price_only_dup'
+         WHEN fn.event_id IS NOT NULL             THEN 'factor_near'
+         WHEN o.factor_source NOT IN ('near_dup_suppressed', 'same_day_suppressed',
+                                      'krx_base_inconsistent', 'unknown_price_only',
+                                      'capred_paid')
+              AND (fa.event_id IS NOT NULL OR fd.event_id IS NOT NULL) THEN 'factor_near'
+         WHEN pn.event_id IS NOT NULL             THEN 'price_only_near'
+         ELSE 'unresolved' END                                                       AS price_resolution,
     -- DEFECT-10: 적용일 이후 그 종목의 실거래 세션이 하나도 없으면 참. 커널은 사건 시점 이후
     -- 바가 있는 세션을 반드시 찾으므로(engine/loop.py `_settlement_session`) 이런 행을 그냥
     -- 내보내면 run 전체가 죽는다. equity 는 버리지 않고 **사실을 싣는다** — 정지 중 감자는
     -- 보유 수량을 실제로 바꾸고, 26건 중 18건은 거래소가 정지 기간에 기준가를 공표했다.
     -- 소비자가 이 열로 거르거나 정산 정책을 고른다.
-    (lt.last_trade_date IS NULL OR o.apply_date > lt.last_trade_date)                 AS no_bar_after_apply,
-    -- 캘린더 마지막 세션의 기준가 사건은 다음 세션이 없다(서버 09-05 EG2 NULL 1) → 적용일(당일)로.
-    -- C-07(N-26 4.1, e1.25.0): KRX 기준가가 apply 세션에 확정한 ok 계수(사건 교체 · unknown_krx
-    -- 정상)는 그 세션에 알 수 있다 → min(announce, apply_date)(신규 행은 announce = apply). 정정
-    -- 공시 접수일이 announce 라 apply 보다 늦거나 신규 행이면 옛 식이 다음 세션이 되어 전방 조정이
-    -- 하루 늦게 접혔다(002070 2026-07-31 수정수익률 −35.0% → 08-03 +159.6%). 정상 아닌 행·가격
-    -- 매칭 계수는 옛 식 그대로.
-    coalesce(CASE WHEN o.apply_basis = 'krx_base_price' AND o.factor_source = 'mktcap_neutral'
-                       THEN least(o.announce_date, o.apply_date)
-                  WHEN o.is_new THEN nx.date
-                  ELSE least(o.announce_date, nx.date) END,
-             o.apply_date)                                                            AS available_date,
+    (o.last_trade_date IS NULL OR o.apply_date > o.last_trade_date)                   AS no_bar_after_apply,
+    -- ⑤ 계수 행은 min(announce, apply_date) — r 이 그 세션 KRX 일별 행에서 온다(C-07 규칙 확장).
+    -- 나머지 행은 out_rows 의 옛 식 그대로
+    CASE WHEN p.is_carrier THEN least(o.announce_date, o.apply_date)
+         ELSE o.available_base END                                                   AS available_date,
     'derived'                                                                        AS available_basis,
     NULL::VARCHAR                                                                    AS reject_reason
-FROM out_all o
-JOIN cal ca ON ca.date = o.apply_date
-LEFT JOIN cal nx ON nx.n = ca.n + 1
-LEFT JOIN last_trade lt ON lt.ticker = o.ticker
+FROM out_rows o
+LEFT JOIN po_rows p  ON p.event_id = o.event_id
+LEFT JOIN near_ok fn ON fn.event_id = o.event_id
+LEFT JOIN near_fac fa ON fa.event_id = o.event_id
+LEFT JOIN fold_day fd ON fd.event_id = o.event_id
+LEFT JOIN near_po pn ON pn.event_id = o.event_id

@@ -160,6 +160,34 @@ def test_slice_adj_ok_ignores_events_outside_the_window(built) -> None:
                                    "WHERE ticker = '247540'")[0][0] is True
 
 
+def test_slice_adj_factor_is_adj_close_over_close(chain, built) -> None:
+    """`adj_factor` = adj_close ÷ 원가(계약 '원가 × 계수 = 수정가', fi1.3.0). 247540 은 창 밖
+    2022-05-09 ⑤ 계수(r = 491,300/498,500, equity 골든 fx2_015)가 창 안 전 행에 누적돼 있어
+    cum_share_factor 만으로는 맞지 않는다(옛 fi 는 cum_share_factor 를 그대로 냈다)."""
+    out, _ = built
+    pad = ", ".join(f"'{g}'" for g in inputs.resolve(chain[0], "price_adj_daily").globs)
+    paths = {t: out / t / f"v={manifest.load(out / t / 'MANIFEST.json').current_build}"
+             / "part0.parquet" for t in ("fi_prices", "fi_adj_prices")}
+    con = duckdb.connect()
+    try:
+        got = con.execute(
+            "SELECT count(*), count(*) FILTER (WHERE abs(a.adj_factor * p.close - a.adj_close) "
+            "> 1e-9 * a.adj_close), "
+            "count(*) FILTER (WHERE a.ticker = '247540'), "
+            "count(*) FILTER (WHERE a.ticker = '247540' AND abs(e.cum_price_only_factor "
+            "- 491300.0 / 498500.0) < 1e-12 "
+            "AND a.adj_factor = e.cum_share_factor / e.cum_price_only_factor) "
+            f"FROM read_parquet('{paths['fi_adj_prices']}', hive_partitioning=false) a "
+            f"JOIN read_parquet('{paths['fi_prices']}', hive_partitioning=false) p "
+            "USING (ticker, date) "
+            f"JOIN read_parquet([{pad}], hive_partitioning=false) e "
+            "ON e.ticker = a.ticker AND e.date = a.date AND e.basis = 'krx'").fetchone()
+    finally:
+        con.close()
+    assert got is not None and got[0] > 0 and got[1] == 0
+    assert got[2] > 0 and got[3] == got[2]
+
+
 def test_slice_windows(built) -> None:
     out, _ = built
     d = dt.date(2026, 8, 20)

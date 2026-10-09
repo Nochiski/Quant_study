@@ -36,6 +36,10 @@ shares_out: 기준가 원천)·`trading_calendar`·`security`(sec_type·corp_cod
                    쓴다; KRX 기준가가 확정한 ok 행 — 사건 교체·unknown_krx — 은 min(announce,
                    apply_date) — C-07)
                    · corp_event 정합. 기록형: 사유·apply_basis 별 건수, 오프셋 분포.
+  EG3_adj_factor ⑤(e1.26.0) — 가격 전용 계수 `price_only_factor`·표식 `price_resolution` 불변식:
+                   게이트가 단위를 다시 만들어 단위당 계수 행 정확히 1 · 계수 = 그날 기준가 ÷ 직전
+                   행 종가 · ok 접힘일·단위 밖 계수 행 0 · 계수 행은 factor_ok=false(보유 수량 축
+                   불변) — `_price_only`. 기록형: 사유·종류·r 분포·unresolved 사유·근처 판정 수.
   EG8            — P02 수정수익률(행 대 행) 점프를 **apply_date** 에서 건별로, P03 은 이벤트 집합의
                    조정 거래량 20세션 중앙값 비의 중앙값 ∈ [1/band, band](방향 오류 탐지, 3차)
                    (`views` 의 같은 템플릿을 TEMP MACRO 로 올려 계산). 상수 미등재면
@@ -125,6 +129,32 @@ VOLUME_MEDIAN_WINDOW = 20
 VOLUME_RATIO_REPORT_BAND = 10.0
 RETURN_REPORT_LIMIT = 0.30
 JUMP_SAMPLE_ROWS = 20
+
+# ⑤ 가격 전용 계수(e1.26.0, N-32 ②·N-33) — 정의는 `sql/adj_factor.sql` 머리말 ⑤ 블록.
+# `price_resolution` 폐쇄 어휘. 'factor' ⇔ factor_ok, 'price_only' = 계수 행(그날 기준가 ÷ 직전 행
+# 종가를 `price_only_factor` 에 싣는 유일한 행). 나머지 셋은 계수 1 의 not-ok 행이 가격 축에서
+# 해소됐다는 표식(같은 단위 · C-05 원안 정상 사건의 중복본(형제 ok·창 안 ok 적용일·ok 접힘일) ·
+# 근처 단위), 'unresolved' 만 가격 축 미해결이다.
+PRICE_RESOLUTION_VOCAB: tuple[str, ...] = ("factor", "price_only", "price_only_dup",
+                                           "factor_near", "price_only_near", "unresolved")
+PRICE_ONLY_RESOLUTION = "price_only"
+PRICE_UNRESOLVED = "unresolved"
+# ② 계수를 실을 수 있는 행의 사유(apply_basis='krx_base_price' 와 함께) — KRX 기준가가 정한 세션의
+# 정상 아닌 행.
+PRICE_ONLY_SOURCES: tuple[str, ...] = ("krx_base_inconsistent", "unknown_price_only")
+# ④ D6-1 대상 종류 = 주식 계열. fund·ship_fund·reit 는 분배·배당락 반복 하락(추정)이라 접으면
+# adj_close 가 분배 재투자 축이 된다. SQL `po_kind` 의 문자열 목록과 같아야 한다(테스트가 묶는다).
+PRICE_ONLY_SEC_TYPES: tuple[str, ...] = ("common", "preferred", "spac", "foreign", "dr")
+# D6-3 factor_near 갈래 판정 축 — 억제 중복본은 (가) 형제 ok 로만, (나)(다) 에서 빼는 사유(그 행
+# 자체가 기준가 근거인 ② 사유 · 시총 불변이 아닌 유상감자). `sql/adj_factor.sql` 최종 CASE 와 같다.
+SUPPRESSED_SOURCES: tuple[str, ...] = ("near_dup_suppressed", "same_day_suppressed")
+FACTOR_NEAR_EXCLUDED_SOURCES: tuple[str, ...] = (*PRICE_ONLY_SOURCES, "capred_paid")
+# 기록형 r 분포 보고 구간 |r − 1| (플랜 실측 ≤ 5% 838 · > 30% 610) — 판정축 아님.
+PRICE_ONLY_R_SMALL, PRICE_ONLY_R_LARGE = 0.05, 0.30
+# D6-5: EG8-P02(|수정수익률| ≤ adj_return_jump_max) 를 계수 행에도 같은 상수로 폐기형으로 건다 —
+# 10-09 6-5 서버 재연(운영 입력 D=20261008) 초과 0(최대 0.300) → 폐기형(D6-5, N-33). False 로
+# 되돌리면 기록형(metrics 만)으로 돌아간다.
+PRICE_ONLY_JUMP_GATE = True
 
 
 def _row(ctx: EquityGateContext, sql: str) -> tuple[object, ...]:
@@ -261,6 +291,8 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
                              AND share_factor IS DISTINCT FROM ratio),
           count(*) FILTER (WHERE available_date IS DISTINCT FROM
                                  CASE WHEN factor_ok AND apply_basis = '{krx}'
+                                      THEN least(e_ann, apply_date)
+                                      WHEN price_resolution = '{PRICE_ONLY_RESOLUTION}'
                                       THEN least(e_ann, apply_date)
                                       ELSE coalesce(least(e_ann, next_session), apply_date)
                                  END),
@@ -431,7 +463,10 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
         "n_krx_row_out_of_scope": int(str(n_krx_out_of_scope)),
         "n_unknown_krx_shared_apply_date": int(str(n_unknown_krx_shared)),
     })
+    po_checks, po_metrics = _price_only(ctx)
+    checks.update(po_checks)
     metrics: dict[str, object] = {
+        **po_metrics,
         # ── S06-2 기준가 원천 분류 (a)(b)(c)(d) ──
         "n_base_price_candidates": int(str(n_bp_candidates)),
         "n_base_price_etf_excluded": int(str(n_bp_etf)),
@@ -489,6 +524,198 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
 eg3_adj_factor.gate_name = "EG3_adj_factor"     # type: ignore[attr-defined]
 
 
+def _price_only(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, object]]:
+    """⑤ 가격 전용 계수 불변식(폐기형) + 기록형. 단위는 **게이트가 다시 만든다** — 산출 SQL 을
+    재사용하지 않고 price_daily 기준가 후보(`_BASE_PRICE_CANDIDATES_CTE`)·산출의 not-ok KRX 행·
+    ok 접힘일·security 종류로 (ticker, d) 를 세워 계수 행과 대조한다.
+
+    폐기 술어: 어휘 닫힘 · 'factor' ⇔ factor_ok · price_only_factor NULL 0 · 계수 행 아닌데
+    계수 ≠ 1 0 · 계수 행은 factor_ok=false ∧ apply_basis krx_base_price ∧ 사유 ② ∧ 허용 종류 ·
+    계수 = 그날 기준가 ÷ 직전 행 종가(FACTOR_PRODUCT_TOL) · 단위당 계수 행 정확히 1 · 단위 밖
+    계수 행 0 · ok 접힘일 계수 행 0 · price_only_dup 은 계수 행과 같은 (ticker, apply_date) ·
+    근처 표식의 **비보수 방향**(해소로 잘못 센 행, 리뷰 중-1): price_only_near 는 그날 기준가 후보
+    없음 ∧ 창 [n − lookback, n + window] 안 계수 행 ∃ ∧ 같은 창 (c) 재발견 후보 없음, 억제 중복본이
+    아닌 factor_near 는 제외 사유가 아니고 (나 그날 기준가 후보 없음 ∧ 창 안 ok 적용일 ∃ ∧ 창 안
+    (c) 없음) ∨ (다 그날 ok 접힘). 창·(c) 는 게이트가 기준가 후보에서 다시 세운다.
+    available_date 의 계수 행 분기는 eg3 본문 재계산식에 있다.
+    """
+    v = _q(ctx.out_view)
+    po, krx = PRICE_ONLY_RESOLUTION, KRX_BASE_APPLY_BASIS
+    srcs, kinds = _vocab_sql(PRICE_ONLY_SOURCES), _vocab_sql(PRICE_ONLY_SEC_TYPES)
+    (n_vocab, n_factor_mismatch, n_pof_null, n_noncarrier_ne_one, n_carrier_bad, n_pof_mismatch,
+     n_unit_ne_one, n_outside, n_on_fold, n_dup_outside, n_unit_no_row, n_r_small, n_r_large,
+     r_min, r_q10, r_med, r_q90, r_max) = _row(ctx, f"""
+        WITH {_BASE_PRICE_CANDIDATES_CTE},
+             scope AS (SELECT b.* FROM bpc b WHERE {_BP_IN_SCOPE}),
+             okf AS (SELECT ticker, apply_date AS d FROM {v} WHERE factor_ok
+                     UNION
+                     SELECT ticker, greatest(apply_date, available_date) FROM {v} WHERE factor_ok),
+             kind AS (SELECT ticker, sec_type FROM security),
+             cand AS (SELECT DISTINCT ticker, apply_date AS d FROM {v}
+                      WHERE NOT factor_ok AND factor_source IN ({srcs})
+                        AND apply_basis = '{krx}'),
+             gunit AS (
+          SELECT c.ticker, c.d FROM cand c
+          JOIN scope s ON s.ticker = c.ticker AND s.date = c.d
+          JOIN kind t ON t.ticker = c.ticker
+          LEFT JOIN okf f ON f.ticker = c.ticker AND f.d = c.d
+          WHERE t.sec_type IN ({kinds}) AND f.ticker IS NULL),
+             carrier AS (
+          SELECT a.*, t.sec_type FROM {v} a LEFT JOIN kind t ON t.ticker = a.ticker
+          WHERE a.price_resolution = '{po}'),
+             per_unit AS (
+          SELECT g.ticker, g.d, count(c.event_id) AS n_carrier FROM gunit g
+          LEFT JOIN carrier c ON c.ticker = g.ticker AND c.apply_date = g.d
+          GROUP BY g.ticker, g.d),
+             notok_dates AS (SELECT DISTINCT ticker, apply_date AS d FROM {v} WHERE NOT factor_ok),
+             unit_no_row AS (
+          SELECT n.ticker FROM notok_dates n
+          JOIN scope s ON s.ticker = n.ticker AND s.date = n.d
+          JOIN kind t ON t.ticker = n.ticker
+          LEFT JOIN okf f ON f.ticker = n.ticker AND f.d = n.d
+          LEFT JOIN cand c ON c.ticker = n.ticker AND c.d = n.d
+          WHERE t.sec_type IN ({kinds}) AND f.ticker IS NULL AND c.ticker IS NULL)
+        SELECT
+          (SELECT count(*) FROM {v} WHERE price_resolution IS NULL
+             OR price_resolution NOT IN ({_vocab_sql(PRICE_RESOLUTION_VOCAB)})),
+          (SELECT count(*) FROM {v} WHERE (price_resolution = 'factor') IS DISTINCT FROM factor_ok),
+          (SELECT count(*) FROM {v} WHERE price_only_factor IS NULL),
+          (SELECT count(*) FROM {v} WHERE price_resolution IS DISTINCT FROM '{po}'
+             AND price_only_factor IS DISTINCT FROM 1),
+          (SELECT count(*) FROM carrier WHERE factor_ok OR apply_basis IS DISTINCT FROM '{krx}'
+             OR factor_source NOT IN ({srcs}) OR sec_type IS NULL OR sec_type NOT IN ({kinds})),
+          (SELECT count(*) FROM carrier c
+             LEFT JOIN scope s ON s.ticker = c.ticker AND s.date = c.apply_date
+            WHERE s.r IS NULL OR abs(c.price_only_factor / s.r - 1) > {FACTOR_PRODUCT_TOL!r}),
+          (SELECT count(*) FROM per_unit WHERE n_carrier <> 1),
+          (SELECT count(*) FROM carrier c LEFT JOIN gunit g
+             ON g.ticker = c.ticker AND g.d = c.apply_date WHERE g.ticker IS NULL),
+          (SELECT count(*) FROM carrier c JOIN okf f ON f.ticker = c.ticker AND f.d = c.apply_date),
+          (SELECT count(*) FROM {v} a LEFT JOIN carrier c
+             ON c.ticker = a.ticker AND c.apply_date = a.apply_date
+            WHERE a.price_resolution = 'price_only_dup' AND c.ticker IS NULL),
+          (SELECT count(*) FROM unit_no_row),
+          (SELECT count(*) FROM carrier WHERE abs(price_only_factor - 1) <= {PRICE_ONLY_R_SMALL!r}),
+          (SELECT count(*) FROM carrier WHERE abs(price_only_factor - 1) > {PRICE_ONLY_R_LARGE!r}),
+          (SELECT min(price_only_factor) FROM carrier),
+          (SELECT quantile_cont(price_only_factor, 0.1) FROM carrier),
+          (SELECT median(price_only_factor) FROM carrier),
+          (SELECT quantile_cont(price_only_factor, 0.9) FROM carrier),
+          (SELECT max(price_only_factor) FROM carrier)""")
+    checks = {
+        "n_price_resolution_outside_vocab": int(str(n_vocab)),
+        "n_price_resolution_factor_mismatch": int(str(n_factor_mismatch)),
+        "n_price_only_factor_null": int(str(n_pof_null)),
+        "n_non_carrier_price_only_factor_ne_one": int(str(n_noncarrier_ne_one)),
+        "n_price_only_carrier_bad": int(str(n_carrier_bad)),
+        "n_price_only_factor_mismatch": int(str(n_pof_mismatch)),
+        "n_price_only_unit_carrier_ne_one": int(str(n_unit_ne_one)),
+        "n_price_only_outside_unit": int(str(n_outside)),
+        "n_price_only_on_ok_fold": int(str(n_on_fold)),
+        "n_price_only_dup_outside_unit": int(str(n_dup_outside)),
+    }
+
+    def _f(x: object) -> float | None:
+        return None if x is None else float(str(x))
+
+    by_source_kind = {f"{r[0]}:{r[1]}": int(str(r[2])) for r in ctx.con.execute(f"""
+        SELECT a.factor_source, t.sec_type, count(*) FROM {v} a
+        LEFT JOIN security t ON t.ticker = a.ticker
+        WHERE a.price_resolution = '{po}' GROUP BY 1, 2 ORDER BY 1, 2""").fetchall()}
+    unresolved_by_source = {str(r[0]): int(str(r[1])) for r in ctx.con.execute(f"""
+        SELECT factor_source, count(*) FROM {v} WHERE price_resolution = '{PRICE_UNRESOLVED}'
+        GROUP BY 1 ORDER BY 1""").fetchall()}
+    near_by_source = {f"{r[0]}:{r[1]}": int(str(r[2])) for r in ctx.con.execute(f"""
+        SELECT price_resolution, factor_source, count(*) FROM {v}
+        WHERE price_resolution IN ('price_only_near', 'factor_near')
+        GROUP BY 1, 2 ORDER BY 1, 2""").fetchall()}
+    # D6-3 factor_near 갈래(가 형제 ok · 다 ok 접힘일 · 나 창 안 ok 적용일) — 기록형
+    branch = {str(r[0]): int(str(r[1])) for r in ctx.con.execute(f"""
+        WITH okf AS (SELECT ticker, apply_date AS d FROM {v} WHERE factor_ok
+                     UNION
+                     SELECT ticker, greatest(apply_date, available_date) FROM {v} WHERE factor_ok)
+        SELECT CASE WHEN a.factor_source IN ('near_dup_suppressed', 'same_day_suppressed')
+                    THEN 'sibling_ok'
+                    WHEN f.ticker IS NOT NULL THEN 'ok_fold_day'
+                    ELSE 'near_ok_apply' END, count(*)
+        FROM {v} a LEFT JOIN okf f ON f.ticker = a.ticker AND f.d = a.apply_date
+        WHERE a.price_resolution = 'factor_near' GROUP BY 1 ORDER BY 1""").fetchall()}
+    # 근처 표식 재판정 — 게이트가 기준가 후보에서 창·(c) 재발견 후보·계수 행·ok 적용일을 다시
+    # 세운다. ① 비보수 방향 폐기형(price_only_near·factor_near 를 해소로 잘못 센 행) ② 두 근처(ok
+    # 적용일·⑤ 단위)가 겹친 행 — 판정 순서상 factor_near 로 갔다(기록형).
+    lookback = _const_or_none(ctx, ctx.rule.name, "price_match_lookback_sessions")
+    window = _const_or_none(ctx, ctx.rule.name, "price_match_window_sessions")
+    n_overlap: object | None = None
+    if lookback is not None and window is not None:
+        lb, wn = int(lookback), int(window)
+        sup, excl = _vocab_sql(SUPPRESSED_SOURCES), _vocab_sql(FACTOR_NEAR_EXCLUDED_SOURCES)
+        n_overlap, n_pon_bad, n_fn_bad = _row(ctx, f"""
+            WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n
+                         FROM trading_calendar),
+                 {_BASE_PRICE_CANDIDATES_CTE},
+                 scope AS (SELECT b.* FROM bpc b WHERE {_BP_IN_SCOPE}),
+                 consumed AS (SELECT DISTINCT ticker, apply_date AS d FROM {v}
+                              WHERE apply_basis = '{krx}'
+                                AND event_type IN ({_vocab_sql(FACTOR_BEARING_EVENTS)})),
+                 cfree AS (
+              SELECT s.ticker, c.n FROM scope s JOIN cal c ON c.date = s.date
+              LEFT JOIN consumed u ON u.ticker = s.ticker AND u.d = s.date
+              WHERE s.share_ratio IS NULL AND s.prev_kind = 'reference' AND u.ticker IS NULL),
+                 car AS (SELECT a.ticker, c.n FROM {v} a JOIN cal c ON c.date = a.apply_date
+                         WHERE a.price_resolution = '{po}'),
+                 okapp AS (SELECT a.ticker, c.n FROM {v} a JOIN cal c ON c.date = a.apply_date
+                           WHERE a.factor_ok),
+                 okf AS (SELECT ticker, apply_date AS d FROM {v} WHERE factor_ok
+                         UNION
+                         SELECT ticker, greatest(apply_date, available_date) FROM {v}
+                         WHERE factor_ok),
+                 nr AS (
+              SELECT a.event_id, a.ticker, a.price_resolution, a.factor_source, c.n,
+                     s.ticker IS NOT NULL AS own_bp, f.ticker IS NOT NULL AS on_fold
+              FROM {v} a JOIN cal c ON c.date = a.apply_date
+              LEFT JOIN scope s ON s.ticker = a.ticker AND s.date = a.apply_date
+              LEFT JOIN okf f ON f.ticker = a.ticker AND f.d = a.apply_date
+              WHERE a.price_resolution IN ('price_only_near', 'factor_near')),
+                 fl AS (
+              SELECT x.*,
+                     EXISTS (SELECT 1 FROM car p WHERE p.ticker = x.ticker
+                             AND p.n BETWEEN x.n - {lb} AND x.n + {wn}) AS has_car,
+                     EXISTS (SELECT 1 FROM okapp o WHERE o.ticker = x.ticker
+                             AND o.n BETWEEN x.n - {lb} AND x.n + {wn}) AS has_ok,
+                     EXISTS (SELECT 1 FROM cfree q WHERE q.ticker = x.ticker
+                             AND q.n BETWEEN x.n - {lb} AND x.n + {wn}) AS has_c
+              FROM nr x)
+            SELECT
+              count(*) FILTER (WHERE price_resolution = 'factor_near' AND NOT own_bp
+                               AND has_car AND NOT has_c),
+              count(*) FILTER (WHERE price_resolution = 'price_only_near'
+                               AND (own_bp OR NOT has_car OR has_c)),
+              count(*) FILTER (WHERE price_resolution = 'factor_near'
+                               AND factor_source NOT IN ({sup})
+                               AND (factor_source IN ({excl})
+                                    OR NOT ((NOT own_bp AND has_ok AND NOT has_c) OR on_fold)))
+            FROM fl""")
+        checks["n_price_only_near_bad"] = int(str(n_pon_bad))
+        checks["n_factor_near_bad"] = int(str(n_fn_bad))
+    metrics: dict[str, object] = {
+        "n_by_price_resolution": _counts(ctx, "price_resolution"),
+        "n_price_only_by_source_sec_type": by_source_kind,
+        "n_unresolved_by_factor_source": unresolved_by_source,
+        "n_near_by_factor_source": near_by_source,
+        "n_factor_near_by_branch": branch,
+        "n_near_overlap_to_factor_near": None if n_overlap is None else int(str(n_overlap)),
+        # 기록형 — (c) 재발견과 DART 행이 같은 날이면 1 이상일 수 있다(086830 2016-05-19 ratio_null)
+        "n_unit_without_carrier_row": int(str(n_unit_no_row)),
+        "n_price_only_r_dev_le_005": int(str(n_r_small)),
+        "n_price_only_r_dev_over_030": int(str(n_r_large)),
+        "price_only_factor_quantiles": {"min": _f(r_min), "p10": _f(r_q10), "p50": _f(r_med),
+                                        "p90": _f(r_q90), "max": _f(r_max)},
+        "price_only_sec_types": list(PRICE_ONLY_SEC_TYPES),
+        "price_resolution_vocab": list(PRICE_RESOLUTION_VOCAB),
+    }
+    return checks, metrics
+
+
 # ── EG8 — 적용 세션 점프 ─────────────────────────────────────────────────────
 
 def _jump_table(ctx: EquityGateContext, asof: str) -> None:
@@ -507,7 +734,7 @@ def _jump_table(ctx: EquityGateContext, asof: str) -> None:
     ctx.con.execute(f"""
         CREATE OR REPLACE TEMP TABLE _eg8 AS
         WITH ev AS (SELECT ticker, effective_date, apply_date, apply_basis, event_id, event_type,
-                           factor_ok FROM {v}),
+                           factor_ok, price_resolution FROM {v}),
              tk AS (SELECT DISTINCT ticker FROM ev),
              ap AS (SELECT a.*,
                            lag(a.adj_close) OVER (PARTITION BY a.ticker ORDER BY a.date)
@@ -540,7 +767,7 @@ def _jump_table(ctx: EquityGateContext, asof: str) -> None:
                SELECT e.event_id, av.adj_volume
                FROM evn e JOIN av ON av.ticker = e.ticker AND av.date = e.apply_date)
         SELECT e.ticker, e.effective_date, e.apply_date, e.apply_basis, e.event_id, e.event_type,
-               e.factor_ok,
+               e.factor_ok, e.price_resolution,
                r.adj_close, r.prev_adj_close,
                r.adj_close / nullif(r.prev_adj_close, 0) - 1     AS adj_return,
                r.raw_close / nullif(r.raw_prev_close, 0) - 1     AS raw_return,
@@ -601,6 +828,16 @@ def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
           coalesce(max(abs(raw_return)) FILTER (WHERE NOT factor_ok), 0),
           count(*) FILTER (WHERE factor_ok AND apply_date <> effective_date)
         FROM _eg8""")
+    # ⑤ 계수 행의 적용일 수정수익률(= 종가 ÷ 그날 기준가 − 1) — 폐기형(D6-5, 10-09 6-5 재연 근거,
+    # PRICE_ONLY_JUMP_GATE). v_adj_price 가 ⑤ 를 접으므로 같은 템플릿으로 잰다.
+    po = PRICE_ONLY_RESOLUTION
+    n_po, n_po_price, max_po_ret, n_po_over_030 = _row(ctx, f"""
+        SELECT count(*) FILTER (WHERE price_resolution = '{po}'),
+               count(*) FILTER (WHERE price_resolution = '{po}' AND adj_return IS NOT NULL),
+               coalesce(max(abs(adj_return)) FILTER (WHERE price_resolution = '{po}'), 0),
+               count(*) FILTER (WHERE price_resolution = '{po}'
+                                AND abs(adj_return) > {RETURN_REPORT_LIMIT!r})
+        FROM _eg8""")
     sample = [dict(zip(("event_id", "apply_basis", "adj_return", "raw_return", "volume_ratio",
                         "volume_jump", "factor_ok"), r, strict=True))
               for r in ctx.con.execute(f"""
@@ -628,16 +865,26 @@ def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
         "max_abs_raw_return_unadjusted": float(str(max_raw_unadj)),
         "n_ok_apply_ne_effective": int(str(n_apply_ne_eff)),
         "volume_median_window": VOLUME_MEDIAN_WINDOW,
+        "n_price_only_events": int(str(n_po)),
+        "n_price_only_with_price": int(str(n_po_price)),
+        "max_abs_price_only_adj_return": float(str(max_po_ret)),
+        "n_price_only_abs_adj_return_over_030": int(str(n_po_over_030)),
+        "price_only_jump_gate": PRICE_ONLY_JUMP_GATE,
         "events": sample,
     }
     ret_max = require_const(ctx, "adj_return_jump_max", metrics)
     band = require_const(ctx, "adj_volume_ratio_band", metrics)
     n_ret_over = _n(ctx, f"SELECT count(*) FROM _eg8 WHERE factor_ok "
                          f"AND abs(adj_return) > {ret_max!r}")
+    n_po_over = _n(ctx, f"SELECT count(*) FROM _eg8 WHERE price_resolution = '{po}' "
+                        f"AND abs(adj_return) > {ret_max!r}")
     out_of_band = int(ratio_median is not None and not (1 / band <= ratio_median <= band))
     checks = {"n_return_jump_over": n_ret_over,
               "n_volume_ratio_out_of_band": out_of_band}
-    metrics.update({"adj_return_jump_max": ret_max, "adj_volume_ratio_band": band})
+    if PRICE_ONLY_JUMP_GATE:
+        checks["n_price_only_return_jump_over"] = n_po_over
+    metrics.update({"adj_return_jump_max": ret_max, "adj_volume_ratio_band": band,
+                    "n_price_only_return_jump_over": n_po_over})
     return _result("EG8", checks, metrics, "적용 세션 수정수익률·조정 거래량 중앙값 비 이내")
 
 
@@ -660,16 +907,20 @@ ADJ_FACTOR = register(EquityTable(
              "corp_code": "VARCHAR", "event_type": "VARCHAR", "announce_date": "DATE",
              "apply_date": "DATE", "apply_basis": "VARCHAR",
              "price_factor": "DOUBLE", "share_factor": "DOUBLE", "factor_source": "VARCHAR",
-             "factor_ok": "BOOLEAN", "no_bar_after_apply": "BOOLEAN",
+             "factor_ok": "BOOLEAN",
+             # ⑤ 가격 전용 계수·가격 축 표식(e1.26.0) — 보유 수량 축(위 4열)과 분리
+             "price_only_factor": "DOUBLE", "price_resolution": "VARCHAR",
+             "no_bar_after_apply": "BOOLEAN",
              "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("corp_event", "price_daily", "trading_calendar", "stg_event_cr", "security",
             "security_span"),
     partition_class="date_axis",
     partition_key_expr="year(effective_date)",
     available_rule=("derived: min(corp_event.announce_date, apply_date 다음 세션) · 기준가 신규 "
-                    "행은 apply_date 다음 세션 · 기준가가 확정한 ok 행(사건 교체·unknown_krx)은 "
-                    "min(announce_date, apply_date)(C-07) — EG2-P02 축 없음(회고 기재 원천은 "
-                    "available < announce 가 정상), EG3_adj_factor 가 독립 재계산"),
+                    "행은 apply_date 다음 세션 · 기준가가 확정한 ok 행(사건 교체·unknown_krx)과 "
+                    "⑤ 가격 전용 계수 행(e1.26.0)은 min(announce_date, apply_date)(C-07) — "
+                    "EG2-P02 축 없음(회고 기재 원천은 available < announce 가 정상), "
+                    "EG3_adj_factor 가 독립 재계산"),
     # GATES §3-⑩ (S06-2): 좌변 행수 = corp_event 의 계수 대상 이벤트 수 + 기준가 신규 행 수(격리
     # 없음). 신규 행 수 = price_daily 기준가 후보(비ETF·구간 첫날 아님) − (a) 로 사건에 붙은 날짜 −
     # (c) 재발견(주식수 불변 ∧ 직전 행 reference). 후보·재발견은 입력에서 독립 재계산하고 (a) 소비
@@ -715,4 +966,7 @@ __all__ = ["ADJ_FACTOR", "APPLY_BASIS_VOCAB", "BASELINE_SEED", "BASE_PRICE_CONST
            "EVENT_TYPE_VOCAB", "FACTOR_BEARING_EVENTS", "FACTOR_PRODUCT_TOL",
            "FACTOR_SOURCE_VOCAB", "KRX_BASE_APPLY_BASIS", "KRX_BASE_EVENT_ID_INFIX",
            "KRX_BASE_EVENT_TYPES", "OK_APPLY_BASIS", "OK_FACTOR_SOURCE", "PRICE_MATCH_CONSTS",
-           "RETURN_REPORT_LIMIT", "TABLES", "VOLUME_MEDIAN_WINDOW", "VOLUME_RATIO_REPORT_BAND"]
+           "PRICE_ONLY_JUMP_GATE", "PRICE_ONLY_RESOLUTION", "PRICE_ONLY_SEC_TYPES",
+           "PRICE_ONLY_SOURCES", "PRICE_RESOLUTION_VOCAB", "PRICE_UNRESOLVED",
+           "FACTOR_NEAR_EXCLUDED_SOURCES", "SUPPRESSED_SOURCES", "RETURN_REPORT_LIMIT",
+           "TABLES", "VOLUME_MEDIAN_WINDOW", "VOLUME_RATIO_REPORT_BAND"]

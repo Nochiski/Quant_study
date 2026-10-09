@@ -170,9 +170,33 @@
   "source": "hand — not-ok 행의 계수는 1 (기준가 비율 0.9856 은 EG3 기록형에만)", "note": ""},
 
  {"case": "s062-price-only-available-next-session",
-  "key": {"event_id": "247540:krx_base:2022-05-09"}, "column": "available_date", "expect": "2022-05-10",
+  "key": {"event_id": "247540:krx_base:2022-05-09"}, "column": "available_date", "expect": "2022-05-09",
   "expect_source": "hand", "fixture_class": "positive",
-  "source": "hand — 기준가 신규 행의 available = apply_date(05-09, 월) 다음 세션 05-10", "note": ""},
+  "source": "hand — ⑤ 계수 행(e1.26.0)의 available = min(announce, apply_date) = 05-09 — 계수 r 이 그 세션 KRX 일별 행에서 온다(C-07 규칙을 계수 행으로 넓힘)",
+  "note": "옛 식(e1.25.0 까지)은 기준가 신규 행이라 다음 세션 05-10 — 그대로 접으면 하루 늦은 가짜 급락·반등이 생긴다"},
+
+ {"case": "price-only-carrier-resolution",
+  "key": {"event_id": "247540:krx_base:2022-05-09"}, "column": "price_resolution", "expect": "price_only",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — ⑤ 단위 (247540, 2022-05-09): 기준가 후보 r 0.9856 · 그날 KRX 기준가 행(unknown_price_only) 1개 · ok 접힘일 아님 · 보통주 → 계수 행",
+  "note": "factor_ok·price_factor·share_factor·factor_source 는 그대로(보유 수량 경로 불변)"},
+
+ {"case": "price-only-carrier-factor",
+  "key": {"event_id": "247540:krx_base:2022-05-09"}, "column": "price_only_factor", "expect": "0.9855566700100301",
+  "expect_source": "stage:stg_price_daily.change_krw", "fixture_class": "positive",
+  "source": "hand — 그날 KRX 기준가 491,300 / 직전 행 종가 498,500 (DOUBLE 그대로). 방향은 price_factor 와 같다(이후 가격 ÷ r = 연속)",
+  "note": "조정 수익률 481,000/491,300 − 1 = −2.10% (원수익률 −3.51%)"},
+
+ {"case": "price-only-ok-row-is-factor",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "price_resolution", "expect": "factor",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — factor_ok 행은 가격 축도 계수로 해소 — 표식 'factor' ⇔ factor_ok",
+  "note": ""},
+
+ {"case": "price-only-ok-row-factor-one",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "price_only_factor", "expect": "1.0",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 계수 행이 아닌 행의 price_only_factor 는 1", "note": ""},
 
  {"case": "s062-price-only-apply-basis",
   "key": {"event_id": "247540:krx_base:2022-05-09"}, "column": "apply_basis", "expect": "krx_base_price",

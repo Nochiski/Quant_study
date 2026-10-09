@@ -44,6 +44,15 @@ class TableMapping:
     cross_sources: tuple[tuple[str, str], ...] = ()
 
 
+# ── v3 `stocks` 집합(D-11) — `stocks`·`daily_prices`·`investor_detail_flows` 가 같이 쓰는 한 곳 ──
+# v3 `stocks` 는 KOSPI·KOSDAQ 의 보통주·스팩이다(아래 `stocks` 주석의 09-23 실측). v3 는 이 목록의
+# 종목만 가격·수급을 모으므로 두 표도 같은 집합이어야 한다(QL-A — 09-28 그림자에서 compat
+# `daily_prices` 3,817행 중 `stocks` 에 있는 것은 2,490행뿐이었다. ETF·우선주 등이 위키 동일가중
+# 수익률과 가설 입력에 섞였다). 판정은 같은 날 `universe_daily` 행(별칭 `u`)의 종목 유형·시장이다.
+# 시장 어휘는 v3 `stocks.market` CHECK 제약과 같다.
+V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'KOSDAQ')"
+
+
 # ── daily_prices ────────────────────────────────────────────────────────────────────────────
 # equity `price_daily`(OHLCV·거래대금) + `price_adj_daily.adj_close`(전방 조정).
 # v3 `adj_close` 는 소급 조정이지만 모멘텀은 **비율**만 쓰므로 전방 조정과 결과가 같다
@@ -69,9 +78,11 @@ SELECT
     CAST(round(p.value_krw / {KRW_PER_MN}.0) AS BIGINT)  AS amount,
     CAST(a.adj_close AS DOUBLE)                    AS adj_close
 FROM {{price_daily}} p
+JOIN {{universe_daily}} u ON u.ticker = p.ticker AND u.date = p.date
 LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
 WHERE p.basis = 'krx'
   AND p.date >= DATE '{{from_date}}' AND p.date <= DATE '{{date}}'
+  AND {V3_STOCK_FILTER}
 """
 
 # 같은 창에서 `basis='evening'` 이라 제외한 행 수 — `_compat_meta.n_evening_rows_skipped`.
@@ -133,8 +144,7 @@ JOIN {{security}} v ON v.ticker = u.ticker
 LEFT JOIN cap  ON cap.ticker = u.ticker AND cap.rn = 1
 LEFT JOIN sect ON sect.ticker = u.ticker AND sect.rn = 1
 WHERE u.rn = 1
-  AND u.sec_type IN ('common', 'spac')          -- D-11
-  AND u.market IN ('KOSPI', 'KOSDAQ')           -- v3 CHECK 제약과 같은 어휘
+  AND {V3_STOCK_FILTER}
 """
 
 # ── investor_detail_flows ───────────────────────────────────────────────────────────────────
@@ -156,8 +166,10 @@ WITH picked AS (
                PARTITION BY f.ticker, f.date
                ORDER BY CASE WHEN f.src = 'kiwoom' THEN 0 ELSE 1 END, f.src) AS rn
     FROM {{flow_daily}} f
+    JOIN {{universe_daily}} u ON u.ticker = f.ticker AND u.date = f.date
     WHERE f.date >= DATE '{{from_date}}' AND f.date <= DATE '{{date}}'
       AND coalesce({_FLOW_ANY}) IS NOT NULL
+      AND {V3_STOCK_FILTER}
 )
 SELECT f.ticker                   AS stock_code,
        CAST(f.date AS VARCHAR)    AS trade_date,
@@ -511,7 +523,7 @@ MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
         v3_table="daily_prices",
         source_kind=EQUITY,
-        sources=("price_daily", "price_adj_daily"),
+        sources=("price_daily", "price_adj_daily", "universe_daily"),
         columns=("stock_code", "trade_date", "open", "high", "low", "close", "volume",
                  "amount", "adj_close"),
         pk=("stock_code", "trade_date"),
@@ -536,7 +548,7 @@ MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
         v3_table="investor_detail_flows",
         source_kind=EQUITY,
-        sources=("flow_daily",),
+        sources=("flow_daily", "universe_daily"),
         columns=("stock_code", "trade_date") + tuple(c for c, _ in _FLOW_COLS),
         pk=("stock_code", "trade_date"),
         sql=_INVESTOR_FLOWS_SQL,

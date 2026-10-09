@@ -88,9 +88,10 @@ def _price_rows(*, bad_open: bool = False) -> list[dict]:
     return rows
 
 
-def _adj_rows(skip_last: bool = False) -> list[dict]:
+def _adj_rows(skip_last: bool = False, price_rows: list[dict] | None = None) -> list[dict]:
     """`price_adj_daily` 실물 15열. `skip_last` 면 마지막 krx 행의 조정가가 없다(R9)."""
-    src = [r for r in _price_rows() if r["basis"] == "krx"]
+    src = [r for r in (price_rows if price_rows is not None else _price_rows())
+           if r["basis"] == "krx"]
     if skip_last:
         src = src[:-1]
     out: list[dict] = []
@@ -105,18 +106,21 @@ def _adj_rows(skip_last: bool = False) -> list[dict]:
     return out
 
 
+def _flow_row(ticker: str, d: dt.date, offset: int = 0) -> dict:
+    """`flow_daily` 실물 23열 — 측정 셀 하나. 주체마다 +1,000,000원씩 어긋난다."""
+    row: dict = {"date": d, "ticker": ticker, "src": "kiwoom"}
+    for k, col in enumerate(_FLOW_SRC):
+        row[col] = FRGN_KRW + (offset + k) * 1_000_000
+    row.update(foreign_wght_pct=50.0, foreign_limit_exh_pct=50.0,
+               foreign_poss_shr=1_000, pension_net_buy_kiwoom_krw=1_000_000,
+               fill_kind="measured", available_date=d, available_basis="default")
+    return row
+
+
 def _flow_rows() -> list[dict]:
     """`flow_daily` 실물 23열."""
-    rows: list[dict] = []
-    for i, ticker in enumerate(REAL):
-        for j, d in enumerate(SESSIONS):
-            row: dict = {"date": d, "ticker": ticker, "src": "kiwoom"}
-            for k, col in enumerate(_FLOW_SRC):
-                row[col] = FRGN_KRW + (i + j + k) * 1_000_000
-            row.update(foreign_wght_pct=50.0, foreign_limit_exh_pct=50.0,
-                       foreign_poss_shr=1_000, pension_net_buy_kiwoom_krw=1_000_000,
-                       fill_kind="measured", available_date=d, available_basis="default")
-            rows.append(row)
+    rows = [_flow_row(ticker, d, i + j)
+            for i, ticker in enumerate(REAL) for j, d in enumerate(SESSIONS)]
     # 미측정 셀 — 전 주체 NULL. v3 는 수집한 행만 가지므로 내보내지 않는다.
     empty: dict = {"date": D22, "ticker": "000270", "src": None}
     empty.update(dict.fromkeys(_FLOW_SRC))
@@ -303,7 +307,8 @@ def _fin_std_rows() -> list[dict]:
 def _make_roots(base: Path, *, fillers: list[str] | None = None,
                 price_rows: list[dict] | None = None, adj_rows: list[dict] | None = None,
                 eq_build: str = EQ_BUILD, adj_build: str | None = None,
-                fin_wise_rows: list[dict] | None = None) -> tuple[Path, Path]:
+                fin_wise_rows: list[dict] | None = None,
+                flow_rows: list[dict] | None = None) -> tuple[Path, Path]:
     eq, st = base / "eq", base / "st"
     f = _filler_tickers(N_FILLER) if fillers is None else fillers
     equity = {
@@ -313,7 +318,7 @@ def _make_roots(base: Path, *, fillers: list[str] | None = None,
         "universe_daily": (_universe_rows(f), eq_build),
         "security": (_security_rows(f), eq_build),
         "sector_snapshot": (_sector_rows(), eq_build),
-        "flow_daily": (_flow_rows(), eq_build),
+        "flow_daily": (flow_rows if flow_rows is not None else _flow_rows(), eq_build),
         "fin_std": (_fin_std_rows(), eq_build),
     }
     for table, (rows, build) in equity.items():
@@ -428,6 +433,37 @@ def test_investor_flows_in_million_krw(roots, tmp_path: Path) -> None:
                         "WHERE stock_code='005930' AND trade_date='2026-09-21'")
     # ind = -3,456,000,000원 → -3,456 백만원. 주체마다 +1,000,000원(=+1 백만원)씩 어긋난다.
     assert got == [(-3456, -3455, -3454, -3445)]
+
+
+# ── QL-A — 가격·수급도 v3 `stocks` 집합(D-11)만 ──────────────────────────────
+# v3 는 `stocks` 에 든 종목만 가격·수급을 모은다. 09-28 그림자에서 compat `daily_prices` 3,817행 중
+# `stocks` 에 있는 것은 2,490행이었다 — ETF·우선주 등이 섞여 위키 동일가중 수익률·가설 입력이 바뀐다.
+# 여기서는 09-23 하루에 스팩 1 + 제외 7종(우선주·ETF·리츠·외국주·DR·펀드·KONEX) 행을 더 얹는다.
+@pytest.fixture(scope="module")
+def excluded_roots(tmp_path_factory) -> tuple[Path, Path]:
+    extra = [SPAC] + [t for t, _, _ in EXCLUDED]
+    prices = _price_rows() + [_price_row(t, D23, 10_000, value=VALUE_KRW, mktcap=MKTCAP_KRW)
+                              for t in extra]
+    flows = _flow_rows() + [_flow_row(t, D23) for t in extra]
+    return _make_roots(tmp_path_factory.mktemp("excluded"), price_rows=prices,
+                       adj_rows=_adj_rows(price_rows=prices), flow_rows=flows)
+
+
+def test_daily_prices_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    res = _run(excluded_roots, target, tables=["daily_prices"])
+    assert {r[0] for r in _rows(target, "SELECT DISTINCT stock_code FROM daily_prices")} == \
+        {*REAL, SPAC}
+    assert res.tables["daily_prices"].n_rows == 7           # 보통주 2 × 3세션 + 스팩 1
+
+
+def test_investor_flows_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    res = _run(excluded_roots, target, tables=["investor_detail_flows"])
+    assert {r[0] for r in _rows(target,
+                                "SELECT DISTINCT stock_code FROM investor_detail_flows")} == \
+        {*REAL, SPAC}
+    assert res.tables["investor_detail_flows"].n_rows == 7
 
 
 def test_consensus_revision_daily_and_compare(roots, tmp_path: Path) -> None:

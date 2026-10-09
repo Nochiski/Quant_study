@@ -29,6 +29,8 @@ class Handoff:
     equity_builds: dict[str, str]
     stage_builds: dict[str, str]
     health: dict[str, str]          # 키가 없거나 객체가 아니면 빈 dict(= ok 아님)
+    date: str | None = None         # 대상 거래일 D(YYYYMMDD) — 없으면 None, 검사는 읽는 쪽이 한다
+    basis: str | None = None        # 'morning'(아침 확정판) · 'evening' — 없으면 None
 
     @property
     def health_ok(self) -> bool:
@@ -54,7 +56,10 @@ def load(path: Path) -> Handoff:
             raise HandoffError(f"인계 이력(--builds-from)에 {key} 가 없다: {path}")
         builds[key] = {str(k): str(v) for k, v in got.items()}
     health = raw.get("health")
+    date, basis = raw.get("date"), raw.get("basis")
     return Handoff(path=Path(path), equity_builds=builds["equity_builds"],
                    stage_builds=builds["stage_builds"],
                    health={str(k): str(v) for k, v in health.items()}
-                   if isinstance(health, dict) else {})
+                   if isinstance(health, dict) else {},
+                   date=None if date is None else str(date),
+                   basis=None if basis is None else str(basis))

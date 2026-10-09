@@ -20,9 +20,14 @@
 판 manifest 에 남는다(V2-8).
 
 날짜로 고정(`--builds-from`, 컷오버 T-2): 인계 이력 `data/deliver/history/<D'>_morning.json` 이 적은
-판 id 를 읽는다(읽기는 `equity.handoff`, compat 과 공유). 이력이 없거나 · health 가 ok 가 아니거나 ·
-표가 이력에 없거나 · 그 판이 MANIFEST 에서 사라졌으면 `FactorInputsError`(rc 2) — 최신 판으로
-대신하지 않는다(P1). 이력 경로는 판 manifest `builds_from` 에 남는다.
+판 id 를 읽는다(읽기는 `equity.handoff`, compat 과 공유). 다음이면 `FactorInputsError`(rc 2) — 최신
+판으로 대신하지 않는다(P1):
+  이력이 없다 · health 가 stage=ok·equity=ok 가 아니다 · 이력 basis 가 morning 이 아니다 ·
+  이력 date 가 없거나 --date 보다 뒤다 · 표가 이력에 없다 · 그 판이 MANIFEST 에서 사라졌다.
+  예외: 선택 원천(`OPTIONAL_STAGE_SOURCES`, WISE 분기)은 이력에 키가 없으면 그날도 판이 없던 것이라
+  current 모드와 같이 빈 표(`absent`)로 대신한다(이력에 키가 있는데 판이 없으면 rc 2).
+이력이 D' = 직전 거래일인지는 여기서 보지 않는다(장 마감 체인 PR-8 이 경로를 고를 때 맞춘다).
+이력 경로·날짜는 판 manifest `builds_from`·`builds_from_date` 에 남는다.
 """
 from __future__ import annotations
 
@@ -168,9 +173,11 @@ def _resolve(root: Path, tables: tuple[str, ...], stage: bool,
     return ids, exprs
 
 
-def _load_handoff(path: Path) -> handoff.Handoff:
-    """인계 이력을 읽고 그날 stage·equity 가 둘 다 ok 인지 본다 — 실패한 날의 이력은 판 목록에
-    직전 판이 섞여 있어 그날 확정판으로 믿을 수 없다."""
+def _load_handoff(path: Path, d: date) -> handoff.Handoff:
+    """인계 이력을 읽고 다음을 본다.
+    ① 그날 stage·equity 가 둘 다 ok — 실패한 날의 이력은 판 목록에 직전 판이 섞여 있다
+    ② 아침 확정판(basis=morning) 이력
+    ③ 이력 날짜 ≤ 판 기준일 D — 뒤면 D 에 미래 판을 읽는다"""
     try:
         h = handoff.load(path)
     except handoff.HandoffError as e:
@@ -179,13 +186,25 @@ def _load_handoff(path: Path) -> handoff.Handoff:
         raise FactorInputsError(
             f"인계 이력의 health 가 ok 가 아니다(그날 확정판 실패 — 판 목록에 직전 판이 섞여 "
             f"있다): 이력={path} health={h.health} 기대={{'stage': 'ok', 'equity': 'ok'}}")
+    if h.basis != "morning":
+        raise FactorInputsError(f"인계 이력이 아침 확정판(basis=morning) 것이 아니다: 이력={path} "
+                                f"basis={h.basis}")
+    try:
+        hd = datetime.strptime(h.date or "", "%Y%m%d").date()
+    except ValueError as e:
+        raise FactorInputsError(f"인계 이력 date 가 YYYYMMDD 가 아니다: 이력={path} "
+                                f"date={h.date}") from e
+    if hd > d:
+        raise FactorInputsError(f"인계 이력 날짜가 판 기준일보다 뒤다(미래 판을 읽게 된다): "
+                                f"이력={path} date={h.date} --date={d.strftime('%Y%m%d')}")
     return h
 
 
-def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
+def _check_basis(equity_builds: dict[str, str], basis: str, pinned: bool) -> None:
     """아침판에 저녁 equity 판(`e_`)을 섞지 않는다. 수동 재빌드(`b_`)는 허용(compat R5 와 같다).
-    장 마감(evening) fi 는 직전 거래일 아침 확정판(`m_`)을 날짜로 고정해 읽으므로 허용한다(T-2)."""
-    allowed = ("manual", basis) + (("morning",) if basis == "evening" else ())
+    장 마감(evening) fi 가 아침 확정판(`m_`)을 읽는 것은 `--builds-from` 으로 날짜를 고정했을 때만
+    허용한다(T-2) — 고정 없이 읽으면 낡은 current 판을 조용히 쓰게 된다(P1)."""
+    allowed = ("manual", basis) + (("morning",) if basis == "evening" and pinned else ())
     for table, bid in sorted(equity_builds.items()):
         got = basis_of_build_id(bid)
         if got not in allowed:
@@ -274,14 +293,14 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     if basis_of_build_id(bid) not in ("manual", basis):
         raise FactorInputsError(f"build_id 접두어가 --basis 와 다르다: {bid} vs {basis}")
 
-    pin = None if builds_from is None else _load_handoff(Path(builds_from))
+    pin = None if builds_from is None else _load_handoff(Path(builds_from), d)
     equity_builds, eq_exprs = _resolve(Path(equity_root), EQUITY_SOURCES, stage=False,
                                        pinned=None if pin is None else pin.equity_builds,
                                        origin=builds_from)
     stage_builds, st_exprs = _resolve(Path(stage_root), STAGE_SOURCES, stage=True,
                                       pinned=None if pin is None else pin.stage_builds,
                                       origin=builds_from)
-    _check_basis(equity_builds, basis)
+    _check_basis(equity_builds, basis, pinned=pin is not None)
     _check_chain(equity_builds)
 
     root = Path(root)
@@ -365,6 +384,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         "equity_root": str(Path(equity_root).resolve()),
         "stage_root": str(Path(stage_root).resolve()),
         "builds_from": None if builds_from is None else str(Path(builds_from).resolve()),
+        "builds_from_date": None if pin is None else pin.date,
         "equity_builds": equity_builds, "stage_builds": stage_builds,
         "window": {"price_from": p.price_from, "flow_from": p.flow_from, "to": d_iso,
                    "credit_lag_sessions": p.credit_lag},

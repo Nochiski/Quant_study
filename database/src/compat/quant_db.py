@@ -36,7 +36,6 @@ from pathlib import Path
 import duckdb
 from deliver.reader import DeliverError, load_run
 from equity import handoff, inputs
-from stage import manifest
 from stage.model import basis_of_build_id, build_id_time
 
 from .mappings import (

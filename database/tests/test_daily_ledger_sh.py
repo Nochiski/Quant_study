@@ -10,17 +10,24 @@ D 산출(`-c` 의 `prev_trading_day`)은 진짜 python·진짜 `daily.calendar` 
 DART 번호표 갱신(A-01)의 런 로그 `-c`(source=dart_universe 판정·성공 기록)만은 진짜 python·진짜
 `daily.runlog` 로 넘겨 임시 루트의 `data/raw/daily_run.db` 를 실제로 읽고 쓴다. 마지막 성공은
 `univ_age`(KST 달력 며칠 전, 기본 1 — None 이면 기록 없음)로 미리 심는다.
+저녁 키움 보강 판정(`-m daily.kw_daily --cover`, T-13)은 calls.txt 에 `kw_cover` 로 적히고 rc 는 `RC_kw_cover`,
+받은 인자는 kw_cover_args.txt 에 남는다. `REAL_KW` 가 있으면 `-m daily.kw_daily` 는 진짜 python·진짜 kw_daily 로
+가고 `api` 만 `FAKE_API` 디렉터리의 가짜로 바뀐다(GH1-d 리허설 — 실제 키움 콜 없음).
+notify 대역은 본문(셋째 인자)을 notify_body.txt 에 따로 남긴다.
 """
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from daily import ledger_health as lh
 from daily import runlog
 
 DB_ROOT = Path(__file__).resolve().parents[1]
@@ -41,12 +48,18 @@ if [ "$1" != "-m" ]; then
   var="RC_$(basename "$1" .py)"
   exit "${!var:-0}"
 fi
-echo "$2" >> "$QL_HOME/calls.txt"
+name="$2"
+case " ${*:3} " in *" --cover "*) name=kw_cover; echo "${*:3}" >> "$QL_HOME/kw_cover_args.txt" ;; esac
+echo "$name" >> "$QL_HOME/calls.txt"
+if [ "$2" = "daily.kw_daily" ] && [ -n "${REAL_KW:-}" ]; then
+  PYTHONPATH="$FAKE_API:$REAL_SRC" exec "$REAL_PY" "$@"
+fi
 if [ "$2" = "daily.calendar_refresh" ]; then
   echo "${*:3}" >> "$QL_HOME/cal_args.txt"
   [ -z "${CAL_NO_SUMMARY:-}" ] && echo "휴장 달력 20260929 갱신: rc=${RC_daily_calendar_refresh:-0} (대역)"
 fi
-var="RC_${2//./_}"
+[ "$name" = kw_cover ] && echo "[kw_daily] cover 판정 D=대역 rc=${RC_kw_cover:-0}"
+var="RC_${name//./_}"
 exit "${!var:-0}"
 """
 
@@ -65,7 +78,7 @@ def _root(tmp_path: Path) -> Path:
         ".venv/bin/python": _PY,
         "scripts/sync_calendar.sh": "#!/usr/bin/env bash\nexit 0\n",
         "scripts/daily_wise.sh": "#!/usr/bin/env bash\necho daily_wise >> calls.txt\n",
-        "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2" >> notify.txt\n',
+        "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2" >> notify.txt\necho "$3" >> notify_body.txt\n',
         "scripts/dart_company_gap.sh": "#!/usr/bin/env bash\necho gap >> calls.txt\n",
     }
     for rel, body in stubs.items():
@@ -125,7 +138,8 @@ def _run(tmp_path: Path, *args: str, weekday: int = 3, univ_age: int | None = 1,
 def test_all_steps_ok(tmp_path: Path) -> None:
     rc, calls, notify, runlog = _run(tmp_path)
     assert rc == 0
-    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily",
+                     "gap"]
     assert notify.startswith("info|") and runlog.startswith("ok|")
 
 
@@ -133,7 +147,8 @@ def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:
     """09-25~28·09-30 재현 — 신용잔고 판정 실패(rc 2) 뒤에도 DART·회사정보 공백 메우기가 돈다."""
     rc, calls, notify, runlog = _run(tmp_path, daily_kis_daily=2)
     assert rc == 2
-    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily",
+                     "gap"]
     assert notify.startswith("crit|daily_ledger 실패: kis credit(rc=2)")
     assert runlog == "failed|kis credit(rc=2)\n"
 
@@ -141,22 +156,23 @@ def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:
 def test_dart_failure_skips_only_company_gap(tmp_path: Path) -> None:
     rc, calls, notify, _ = _run(tmp_path, daily_dart_daily=2)
     assert rc == 2
-    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily"]
     assert "dart(rc=2)" in notify
 
 
 def test_every_failed_step_is_reported(tmp_path: Path) -> None:
     rc, calls, notify, runlog = _run(tmp_path, daily_kw_daily=1, daily_kis_daily=2)
     assert rc == 2
-    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily",
+                     "gap"]
     assert "kiwoom fetch(rc=1), kis credit(rc=2)" in notify
     assert runlog == "failed|kiwoom fetch(rc=1), kis credit(rc=2)\n"
 
 
 # ── A-01 DART 번호표 갱신 — 월요일 + 마지막 성공 7일 초과 재시도(N-27 ⑤ · 배포 묶음 5-2) ─────────
-_ALL = [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+_ALL = [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily", "gap"]
 _WITH_UNIVERSE = [_CAL, "daily_wise", "src/dart_universe.py",
-                  "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+                  "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily", "gap"]
 
 
 def test_monday_refreshes_dart_universe_before_company_gap(tmp_path: Path) -> None:
@@ -238,7 +254,7 @@ def test_dry_run_skips_dart_universe(tmp_path: Path, univ_age: int | None) -> No
     """
     rc, calls, _, _ = _run(tmp_path, "--dry-run", weekday=1, univ_age=univ_age)
     assert rc == 0
-    assert calls == [_CAL, "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily", "gap"]
 
 
 def test_monday_refresh_runs_even_when_d_already_collected(tmp_path: Path) -> None:
@@ -377,3 +393,193 @@ def test_unreadable_calendar_stops_the_chain(tmp_path: Path) -> None:
     assert calls == [_CAL]                                   # 달력 갱신 뒤 D 산출에서 멈춘다
     notify = (root / "notify.txt").read_text(encoding="utf-8")
     assert "crit|daily_ledger 중단 — 대상 거래일 산출 실패" in notify
+
+
+# ── T-13(H1-5) 저녁 키움 보강 — KIS 뒤·DART 앞, 소스 단계 규약(실패 = FAILED → crit · rc 2) ─────────────
+def _read(tmp_path: Path, name: str) -> str:
+    f = tmp_path / "ql" / name
+    return f.read_text(encoding="utf-8") if f.exists() else ""
+
+
+def test_evening_cover_runs_after_kis_and_before_dart(tmp_path: Path) -> None:
+    """KIS 는 07:00(v3 토큰 재발급) 전에 끝나야 한다(실측 06:13→06:41, 여유 19분) — 보강(최대 ≈14분)은 그 뒤.
+
+    판정 대상은 저녁 체인이 받는 두 TR 이다.
+    """
+    rc, calls, _, _ = _run(tmp_path)
+    assert rc == 0
+    assert calls.index("daily.kis_daily") < calls.index("kw_cover") < calls.index("daily.dart_daily")
+    assert _read(tmp_path, "kw_cover_args.txt").split() == ["--cover", "--date", "20260929",
+                                                            "--tr", "ka10060,ka10014"]
+
+
+def test_evening_cover_still_short_is_crit_and_fails_the_chain(tmp_path: Path) -> None:
+    """보강 뒤에도 미달(rc 2)은 다른 소스 단계와 같다 — DART 는 계속 돌고, 끝에 crit · rc 2 · 런 로그 failed.
+
+    실패로 남은 D 는 같은 D 를 보는 다음 06:00(주말·연휴)이 처음부터 다시 판정한다.
+    """
+    rc, calls, notify, runlog_txt = _run(tmp_path, kw_cover=2)
+    assert rc == 2
+    assert calls == _ALL
+    assert notify.startswith("crit|daily_ledger 실패: kiwoom evening cover(rc=2)")
+    assert runlog_txt == "failed|kiwoom evening cover(rc=2)\n"
+
+
+def test_evening_cover_judgement_leads_the_summary(tmp_path: Path) -> None:
+    """판정 줄은 요약 맨 앞이다 — 뒤 단계(KIS·DART) 출력이 tail 창에서 밀어내지 않게."""
+    rc, _, _, _ = _run(tmp_path)
+    assert rc == 0
+    assert _read(tmp_path, "notify_body.txt").startswith("[kw_daily] cover 판정 D=대역")
+
+
+def test_skip_kw_also_skips_evening_cover(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    _seed_universe_ok(root, 1)
+    env = _env(root, QL_WEEKDAY="3")
+    env["QL_SKIP_KW"] = "1"
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"), "--date", "20260929"],
+                       env=env, capture_output=True, text=True, timeout=60, check=False)
+    assert p.returncode == 0, p.stderr
+    calls = (root / "calls.txt").read_text(encoding="utf-8").split()
+    assert calls == [_CAL, "daily_wise", "daily.kis_daily", "daily.dart_daily", "gap"]
+
+
+def test_dry_run_is_passed_to_evening_cover(tmp_path: Path) -> None:
+    """dry-run 은 판정만 한다(콜·원장·런 로그 없음 — kw_daily 쪽 테스트가 본다)."""
+    rc, calls, _, _ = _run(tmp_path, "--dry-run")
+    assert rc == 0 and "kw_cover" in calls
+    assert "--dry-run" in _read(tmp_path, "kw_cover_args.txt").split()
+
+
+# ── GH1-d 리허설 — 테스트 원장 사본에서 D 행을 지우고 격리 QL_HOME 으로 06:00 체인을 돌린다 ─────────────
+# 진짜 daily_ledger.sh · 진짜 kw_daily · 가짜 `api.kiwoom`(실제 키움 콜 없음). KIS·DART 는 대역.
+# 판정 달력은 주말만 휴장인 2026 연도 파일, D = 20260929(화).
+_FAKE_API = '''"""GH1-d 리허설 전용 가짜 `api` — `kiwoom()` 만 둔다. 실제 키움 콜은 없다.
+
+콜은 `$QL_HOME/kw_calls.txt` 에 'api_id ticker' 로 적고, `FAKE_KW_DATES`(쉼표) 날짜 행만 돌려준다.
+"""
+import os
+
+_KEYS = {"ka10014": "shrts_trnsn", "ka20068": "slb_rmnd", "ka10060": "invsr_trde"}
+
+
+def _row(api_id, d):
+    if api_id == "ka10014":
+        return {"dt": d, "close_pric": "1", "shrts_qty": "1", "ovr_shrts_qty": "1"}
+    if api_id == "ka20068":
+        return {"dt": d, "rmnd": "5"}
+    return {"dt": d, "ind_invsr": "1", "frgnr_invsr": "2"}
+
+
+def kiwoom(api_id, url, body, cont=None, next_key=None):
+    with open(os.path.join(os.environ["QL_HOME"], "kw_calls.txt"), "a", encoding="utf-8") as f:
+        f.write(f"{api_id} {body['stk_cd']}\\n")
+    dates = [d for d in os.environ["FAKE_KW_DATES"].split(",") if d]
+    return {"return_code": 0, "return_msg": "정상", _KEYS[api_id]: [_row(api_id, d) for d in dates]}, {}
+'''
+_RD = "20260929"
+_RD_PREV = "20260928"
+_R_HIST = ("20260922", "20260923", "20260924", "20260925", _RD_PREV)
+_R_TICKERS = tuple(f"{i:06d}" for i in range(10))
+
+
+def _full_ledger(path: Path) -> None:
+    """D 까지 저녁 직행을 다 받은 원장(마스터 + ka10060 + ka10014) — 리허설의 '정본'."""
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT, "
+                "marketName TEXT DEFAULT '거래소', mrkt_tp TEXT DEFAULT '0')")
+    con.executemany("INSERT INTO ka10099_stock_master (snap_date, code, upSizeName) VALUES (?,?,?)",
+                    [("20260930", t, "대형주") for t in _R_TICKERS])
+    con.execute('CREATE TABLE ka10060_investor_flows ("ticker" TEXT NOT NULL, "dt" TEXT, "ind_invsr" TEXT, '
+                '"frgnr_invsr" TEXT, "src_api" TEXT, "collected_at" TEXT, PRIMARY KEY ("ticker", "dt"))')
+    con.execute('CREATE TABLE ka10014_short_selling ("ticker" TEXT NOT NULL, "dt" TEXT, "close_pric" TEXT, '
+                '"shrts_qty" TEXT, "ovr_shrts_qty" TEXT, "src_api" TEXT, "collected_at" TEXT, '
+                'PRIMARY KEY ("ticker", "dt"))')
+    days = (*_R_HIST, _RD)
+    con.executemany("INSERT INTO ka10060_investor_flows VALUES (?,?,?,?,?,?)",
+                    [(t, d, "1", "2", "ka10060", "old") for d in days for t in _R_TICKERS])
+    con.executemany("INSERT INTO ka10014_short_selling VALUES (?,?,?,?,?,?,?)",
+                    [(t, d, "1", "1", "1", "ka10014", "old") for d in days for t in _R_TICKERS])
+    con.commit()
+    con.close()
+
+
+def _d_rows(root: Path, table: str) -> int:
+    con = sqlite3.connect(root / "data" / "raw" / "kiwoom.db")
+    try:
+        return int(con.execute(f'SELECT COUNT(*) FROM "{table}" WHERE dt=?', (_RD,)).fetchone()[0])
+    finally:
+        con.close()
+
+
+def _ka10060_rows_status(root: Path) -> lh.Status:
+    """08:10 확정 체인의 필수 검사 `kiwoom.ka10060.rows` 를 이 원장에 그대로 돌린 결과."""
+    con = sqlite3.connect(root / "data" / "raw" / "kiwoom.db")
+    try:
+        checks = {c.name: c for c in lh.check_kiwoom(con, None, _RD, _RD_PREV, len(_R_TICKERS))}
+    finally:
+        con.close()
+    return checks["kiwoom.ka10060.rows"].status
+
+
+def _rehearse(tmp_path: Path, *, source_dates: str) -> tuple[Path, subprocess.CompletedProcess[str]]:
+    root = _root(tmp_path)
+    _seed_universe_ok(root, 1)
+    cal = root / "data" / "calendar"
+    cal.mkdir(parents=True)
+    days = (dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(365))
+    (cal / "kis_holidays_2026.json").write_text(
+        json.dumps({"year": 2026, "holidays": [x.strftime("%Y%m%d") for x in days if x.weekday() >= 5]}),
+        encoding="utf-8")
+    full = tmp_path / "kiwoom_full.db"
+    _full_ledger(full)
+    copy = root / "data" / "raw" / "kiwoom.db"
+    shutil.copy(full, copy)                                   # 테스트 원장 사본에서 D 행을 지운다
+    con = sqlite3.connect(copy)
+    for table in ("ka10060_investor_flows", "ka10014_short_selling"):
+        con.execute(f'DELETE FROM "{table}" WHERE dt=?', (_RD,))
+    con.commit()
+    con.close()
+    assert _ka10060_rows_status(root) is lh.Status.FAIL        # 이대로면 08:10 확정판이 막힌다
+    fake = tmp_path / "fakeapi"
+    fake.mkdir()
+    (fake / "api.py").write_text(_FAKE_API, encoding="utf-8")
+    env = _env(root, QL_WEEKDAY="3", REAL_KW="1", FAKE_API=str(fake), FAKE_KW_DATES=source_dates,
+               QL_KW_NOT_BEFORE="00:00")                       # 06:00 하한은 운영 시각 — 테스트는 아무 때나 돈다
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"), "--date", _RD],
+                       env=env, capture_output=True, text=True, timeout=120, check=False)
+    return root, p
+
+
+def _chain_log(root: Path) -> str:
+    return "".join(f.read_text(encoding="utf-8") for f in (root / "logs").glob("daily_ledger_*.log"))
+
+
+def test_rehearsal_missing_evening_rows_are_backfilled_by_the_0600_chain(tmp_path: Path) -> None:
+    """GH1-d — 전날 저녁 키움 누락(사본에서 D 행 삭제) → 06:00 체인이 다시 받아 08:10 필수 검사가 통과한다."""
+    root, p = _rehearse(tmp_path, source_dates=f"{_RD},{_RD_PREV}")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert _d_rows(root, "ka10060_investor_flows") == len(_R_TICKERS)
+    assert _d_rows(root, "ka10014_short_selling") == len(_R_TICKERS)
+    assert _ka10060_rows_status(root) is lh.Status.PASS
+    kw_calls = (root / "kw_calls.txt").read_text(encoding="utf-8").split("\n")
+    assert sorted({ln.split()[0] for ln in kw_calls if ln}) == ["ka10014", "ka10060", "ka20068"]
+    log = _chain_log(root)
+    assert "보강 뒤 충족" in log and "──── kiwoom evening cover 종료 rc=0" in log
+    notify = (root / "notify.txt").read_text(encoding="utf-8")
+    assert notify.startswith("info|daily_ledger 완료")
+    assert (root / "notify_body.txt").read_text(encoding="utf-8").startswith("[kw_daily] cover 판정")
+    assert [(r.status, "보강 뒤 충족" in (r.detail or ""))
+            for r in runlog.recent(_run_db(root), source="kiwoom_cover")] == [("ok", True)]
+
+
+def test_rehearsal_source_also_empty_is_crit(tmp_path: Path) -> None:
+    """GH1-d 음성 — 원천도 D 행을 주지 않으면 보강 뒤에도 미달 → crit · rc 2(08:10 은 원장 필수 검사에서 막힌다)."""
+    root, p = _rehearse(tmp_path, source_dates=_RD_PREV)
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert _d_rows(root, "ka10060_investor_flows") == 0
+    assert _ka10060_rows_status(root) is lh.Status.FAIL
+    notify = (root / "notify.txt").read_text(encoding="utf-8")
+    assert notify.startswith("crit|daily_ledger 실패: kiwoom evening cover(rc=2)")
+    assert "보강 뒤에도 미달 ka10060,ka10014" in (root / "notify_body.txt").read_text(encoding="utf-8")
+    assert [r.status for r in runlog.recent(_run_db(root), source="kiwoom_cover")] == ["coverage_failed"]

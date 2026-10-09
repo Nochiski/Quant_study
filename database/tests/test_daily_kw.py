@@ -677,6 +677,138 @@ def test_commit_records_but_does_not_fail_without_history(tmp_path, monkeypatch)
     assert "coverage_basis=ka10014:none" in _run_detail(tmp_path, "kiwoom_fetch")
 
 
+# ── (i) 06:00 저녁 키움 보강 `--cover` (T-13 · H1-5) ─────────────────────────────
+# 21:05 저녁 직행(ka10060·ka10014)이 실패하면 다음 날 08:10 필수 검사 `kiwoom.ka10060.rows` 가 FAIL 이라
+# 확정판이 막힌다(R-5, 09-23 실발생 2,167/2,654). 06:00 체인이 원장에서 D 커버리지를 재고, 미달인 TR 만
+# 기존 저녁 직행 경로(`--fetch --commit`)로 다시 받은 뒤 다시 잰다. 판정 술어는 저녁 직행 게이트와 같다.
+COVER_TRS = "ka10060,ka10014"
+_HIST = ("20260901", "20260902", "20260903", "20260904", D_PREV)   # D 앞 세션 — ka10014 추세 기준선
+
+
+def _cover_setup(tmp_path, monkeypatch, n, *, d_10060, d_10014, hist_10014, source_has_d=True):
+    """n종목 유니버스 원장 + 가짜 `api.kiwoom`. 돌려주는 리스트에 (api_id, ticker) 콜이 쌓인다.
+
+    원장 ka10060 = 과거 세션 전 종목 + dt=D 앞 `d_10060` 종목. ka10014 = 과거 세션마다 앞 `hist_10014`
+    종목 + dt=D 앞 `d_10014` 종목. `source_has_d=False` 면 원천도 D 행을 주지 않는다(원천도 빈 상황).
+    """
+    monkeypatch.setenv("QL_HOME", str(tmp_path))
+    _write_calendar(tmp_path)
+    monkeypatch.setattr(kw_daily, "RATE_PER_SEC", 10_000.0)
+    tickers = _many_db(tmp_path, n)
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    con.execute('CREATE TABLE ka10060_investor_flows ("ticker" TEXT NOT NULL, "dt" TEXT, "ind_invsr" TEXT, '
+                '"frgnr_invsr" TEXT, "src_api" TEXT, "collected_at" TEXT, PRIMARY KEY ("ticker", "dt"))')
+    con.executemany("INSERT INTO ka10060_investor_flows VALUES (?,?,?,?,?,?)",
+                    [(t, d, "1", "2", "ka10060", "old") for d in _HIST for t in tickers]
+                    + [(t, D, "1", "2", "ka10060", "old") for t in tickers[:d_10060]])
+    con.commit()
+    con.close()
+    _ledger_history(tmp_path, "ka10014_short_selling", _HIST, tickers[:hist_10014])
+    _ledger_history(tmp_path, "ka10014_short_selling", (D,), tickers[:d_10014])
+    calls: list[tuple[str, str]] = []
+    dates = (D, D_PREV) if source_has_d else (D_PREV,)
+
+    def kiwoom(api_id, url, body, cont=None, next_key=None):
+        calls.append((api_id, body["stk_cd"]))
+        if api_id == "ka10014":
+            rows = [{"dt": d, "close_pric": "1", "shrts_qty": "1", "ovr_shrts_qty": "1"} for d in dates]
+            return {"return_code": 0, "return_msg": "정상", "shrts_trnsn": rows}, {}
+        rows = [{"dt": d, "ind_invsr": "1", "frgnr_invsr": "2"} for d in dates]
+        return {"return_code": 0, "return_msg": "정상", "invsr_trde": rows}, {}
+
+    module = types.ModuleType("api")
+    module.kiwoom = kiwoom
+    monkeypatch.setitem(sys.modules, "api", module)
+    return calls
+
+
+def _cover_run(tmp_path):
+    """가장 최근 `kiwoom_cover` 런의 (status, detail). 런 로그나 그 행이 없으면 None."""
+    db = tmp_path / "data" / "raw" / "daily_run.db"
+    if not db.exists():
+        return None
+    con = sqlite3.connect(db)
+    try:
+        return con.execute("SELECT status, detail FROM run WHERE source='kiwoom_cover' "
+                           "ORDER BY run_id DESC LIMIT 1").fetchone()
+    finally:
+        con.close()
+
+
+def test_cover_enough_does_nothing_and_only_reads(tmp_path, monkeypatch):
+    # ka10060 99/100(≥ 0.98) · ka10014 80/평균 80 → 콜 0, 원장·유니버스 상태 무변경, 판정만 런 로그에
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=99, d_10014=80, hist_10014=80)
+    ledger = tmp_path / "data" / "raw" / "kiwoom.db"
+    before = ledger.read_bytes()
+    assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS]) == 0
+    assert calls == []
+    assert ledger.read_bytes() == before
+    assert not (tmp_path / "data" / "daily" / "universe_kw.json").exists()
+    status, detail = _cover_run(tmp_path)
+    assert status == "ok" and "보강 없음" in detail and "ka10060 99/100" in detail
+
+
+def test_cover_short_backfills_only_the_short_tr_then_passes(tmp_path, monkeypatch, capsys):
+    # 저녁 직행 결손(R-5) — ka10060 D 가 90/100 뿐. ka10014 는 충분하니 다시 받지 않는다.
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=90, d_10014=80, hist_10014=80)
+    assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS]) == 0
+    assert {a for a, _ in calls} == {"ka10060"} and len(calls) == 100
+    assert _count(tmp_path, "ka10060_investor_flows", "dt=?", (D,)) == 100
+    status, detail = _cover_run(tmp_path)
+    assert status == "ok" and "보강 뒤 충족" in detail
+    assert "전 ka10060 90/100" in detail and "후 ka10060 100/100" in detail
+    assert "commit=1" in _run_detail(tmp_path, "kiwoom_fetch")        # 기존 저녁 직행 경로로 넣었다
+    assert "[kw_daily] cover 판정" in capsys.readouterr().out
+
+
+def test_cover_still_short_after_backfill_is_rc2(tmp_path, monkeypatch):
+    # 원천도 D 를 주지 않는 날(GH1-d '원천도 빈 상황') — 다시 받아도 미달이면 rc 2(체인이 crit 으로 올린다)
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=0, d_10014=0, hist_10014=80,
+                         source_has_d=False)
+    assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS]) == 2
+    assert {a for a, _ in calls} == {"ka10060", "ka10014"}
+    assert _count(tmp_path, "ka10060_investor_flows", "dt=?", (D,)) == 0
+    status, detail = _cover_run(tmp_path)
+    assert status == "coverage_failed" and "보강 뒤에도 미달 ka10060,ka10014" in detail
+
+
+def test_cover_skips_non_trading_day(tmp_path, monkeypatch, capsys):
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=0, d_10014=0, hist_10014=80)
+    assert kw_daily.main(["--cover", "--date", "20260912", "--tr", COVER_TRS]) == 0   # 토요일
+    assert calls == [] and _cover_run(tmp_path) is None
+    assert "휴장" in capsys.readouterr().out
+
+
+def test_cover_judges_short_selling_against_its_own_history(tmp_path, monkeypatch):
+    # ka10014 의 종목축은 요청 유니버스가 아니다(서버 실측 80~86%) — 유니버스 대비 0.70 이어도
+    # 자기 최근 평균 80 의 0.875 면 충분하다. 유니버스 0.98 을 물리면 매일 다시 받고 매일 crit 이다.
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=100, d_10014=70, hist_10014=80)
+    assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS]) == 0
+    assert calls == []
+    assert "ka10014 70/80(avg20)" in _cover_run(tmp_path)[1]
+
+
+def test_cover_backfills_short_selling_when_it_collapses(tmp_path, monkeypatch):
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=100, d_10014=40, hist_10014=80)
+    assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS]) == 0
+    assert {a for a, _ in calls} == {"ka10014"}
+    assert _count(tmp_path, "ka10014_short_selling", "dt=?", (D,)) == 100
+
+
+def test_cover_dry_run_measures_without_calls_or_writes(tmp_path, monkeypatch, capsys):
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=0, d_10014=80, hist_10014=80)
+    assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS, "--dry-run"]) == 0
+    assert calls == [] and not (tmp_path / "data" / "raw" / "daily_run.db").exists()
+    out = capsys.readouterr().out
+    assert "dry-run" in out and "ka10060 0/100" in out
+
+
+def test_cover_requires_explicit_trs():
+    # 기본(4 TR 전부)으로 재면 06:00 에 아직 머지 전인 ka10008·ka20068 까지 미달로 읽힌다
+    with pytest.raises(SystemExit):
+        kw_daily.main(["--cover", "--date", D])
+
+
 # ── call_tr: 비JSON 응답은 재시도 뒤 ERROR 로 센다 — 예외가 실행 전체를 죽이지 않는다(09-23 21:20 실측) ──
 def test_call_tr_counts_non_json_response_as_error_instead_of_raising(monkeypatch) -> None:
     import types

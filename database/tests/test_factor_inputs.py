@@ -1218,6 +1218,119 @@ def test_collection_lag_tolerates_exactly_one_session(tmp_path: Path, stop: dt.d
     assert (fresh.status.value == "pass") is passed, fresh.detail
 
 
+# ── 판 고정 --builds-from (T-2 · 컷오버 PR-3) ─────────────────────────────────
+EQ_OLD = "m_20260928T220500_000000Z"           # EQ_BUILD 보다 2시간 앞선 같은 체인 판
+EQ_TABLES = ("trading_calendar", "universe_daily", "security", "price_daily", "price_adj_daily",
+             "adj_factor", "flow_daily", "credit_daily", "sector_snapshot", "coverage_daily",
+             "fin_std", "dividend_event", "audit_opinion", "disclosure_version", "corp")
+ST_TABLES = ("stg_consensus_annual", "stg_consensus_matrix", "stg_fin_wise")
+HEALTH_OK = {"stage": "ok", "equity": "ok"}
+
+
+def _history(path: Path, equity_build: str = EQ_BUILD, **override: object) -> Path:
+    """`scripts/build_chain.sh` deliver_step 이 쓰는 인계 이력과 같은 모양. fi 가 안 읽는 표
+    (`stg_price_daily`)도 실물처럼 함께 싣는다. `override` 는 최상위 키를 바꾼다."""
+    payload: dict[str, object] = {
+        "date": D_S, "basis": "morning", "stage_snapshot_id": "snap_x",
+        "stage_builds": {**{t: ST_BUILD for t in ST_TABLES}, "stg_price_daily": ST_BUILD},
+        "equity_builds": {t: equity_build for t in EQ_TABLES},
+        "health": HEALTH_OK, **override}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _hashes(run_manifest: Path) -> dict[str, str]:
+    run = json.loads(run_manifest.read_text(encoding="utf-8"))
+    return {t: v["content_hash"] for t, v in run["tables"].items()}
+
+
+def test_pinned_build_hashes_equal_the_current_build_on_the_same_builds(roots,
+                                                                        tmp_path: Path) -> None:
+    """이력이 current 와 같은 판을 가리키면 고정 빌드(CLI)의 8표 해시가 current 빌드와 같다."""
+    hist = _history(tmp_path / f"{D_S}_morning.json")
+    cur = build(D_S, "morning", tmp_path / "cur", roots[1], roots[0], min_eligible=5,
+                golden_path=None)
+    assert cur.ok
+    rc = cli_main(["build", "--date", D_S, "--basis", "morning", "--root", str(tmp_path / "pin"),
+                   "--stage-root", str(roots[1]), "--equity-root", str(roots[0]),
+                   "--min-eligible", "5", "--builds-from", str(hist)])
+    assert rc == 0
+    pin_run = tmp_path / "pin" / "_runs" / f"{D_S}_morning.json"
+    assert _hashes(pin_run) == _hashes(cur.run_manifest)
+    run = json.loads(pin_run.read_text(encoding="utf-8"))
+    assert run["builds_from"] == str(hist.resolve())
+    assert run["equity_builds"] == {t: EQ_BUILD for t in EQ_TABLES}
+    # 이력에 없는 선택 원천(WISE 분기)은 그날도 판이 없던 것 — current 와 같이 'absent'
+    assert run["stage_builds"] == {**{t: ST_BUILD for t in ST_TABLES}, "stg_fin_wise_q": "absent"}
+    assert json.loads(cur.run_manifest.read_text(encoding="utf-8"))["builds_from"] is None
+
+
+def test_pinned_build_reads_the_history_build_not_the_newer_current(tmp_path: Path) -> None:
+    """current 가 더 새 판으로 넘어간 뒤에도 이력의 판을 읽는다 — 결과가 옛 판만 있던 트리의
+    current 빌드와 8표 해시까지 같다(최신 판으로 조용히 넘어가지 않는다)."""
+    eq_ref, st_ref = make_roots(tmp_path / "ref", eq_build=EQ_OLD)
+    ref = build(D_S, "morning", tmp_path / "fi_ref", st_ref, eq_ref, min_eligible=5,
+                golden_path=None)
+    eq, st = make_roots(tmp_path / "moved", eq_build=EQ_OLD)
+    newer = [{**r, "close": int(str(r["close"])) + 1_000} for r in _prices()]
+    _make_stage_tree(tmp_path / "moved" / "eq", "price_daily", newer, build_id=EQ_BUILD)
+    hist = _history(tmp_path / f"{D_S}_morning.json", equity_build=EQ_OLD)
+    pin = build(D_S, "morning", tmp_path / "fi_pin", st, eq, min_eligible=5, golden_path=None,
+                builds_from=hist)
+    cur = build(D_S, "morning", tmp_path / "fi_cur", st, eq, min_eligible=5, golden_path=None)
+    assert ref.ok and pin.ok and cur.ok
+    assert pin.tables["fi_prices"]["inputs"] == {"price_daily": EQ_OLD}
+    assert cur.tables["fi_prices"]["inputs"] == {"price_daily": EQ_BUILD}
+    assert _hashes(pin.run_manifest) == _hashes(ref.run_manifest)
+    assert _hashes(cur.run_manifest)["fi_prices"] != _hashes(ref.run_manifest)["fi_prices"]
+
+
+@pytest.mark.parametrize(("case", "want"), [
+    ("no_history", ["인계 이력", "없다"]),
+    ("health_fail", ["health", "'equity': 'fail'"]),
+    ("health_absent", ["health", "{}"]),
+    ("gc_removed", ["table=price_daily", "build_id=m_20260920T000500_000000Z", "MANIFEST"]),
+    ("gc_removed_optional", ["table=stg_fin_wise_q", f"build_id={ST_BUILD}", "MANIFEST"]),
+    ("missing_key", ["table=price_daily", "판이 없다"]),
+])
+def test_pinned_build_stops_with_rc2_and_names_the_history(roots, tmp_path: Path, capsys,
+                                                           case: str, want: list[str]) -> None:
+    """판 고정 실패 — 이력 없음 · health 가 ok 아님 · 이력의 판이 GC 로 사라짐 · 이력에 표가 없음.
+    어느 경우든 rc 2 로 멈추고(최신 판으로 대신하지 않는다, P1) 메시지에 이력 파일을 담는다."""
+    hist = tmp_path / f"{D_S}_morning.json"
+    eq = {t: EQ_BUILD for t in EQ_TABLES}
+    st = {t: ST_BUILD for t in ST_TABLES}
+    if case == "health_fail":
+        _history(hist, health={"stage": "ok", "equity": "fail"})
+    elif case == "health_absent":
+        _history(hist, health=None)
+    elif case == "gc_removed":
+        _history(hist, equity_builds={**eq, "price_daily": "m_20260920T000500_000000Z"})
+    elif case == "gc_removed_optional":       # 이력엔 WISE 분기 판이 있는데 MANIFEST 에 없다
+        _history(hist, stage_builds={**st, "stg_fin_wise_q": ST_BUILD})
+    elif case == "missing_key":
+        _history(hist, equity_builds={t: b for t, b in eq.items() if t != "price_daily"})
+    out = tmp_path / "fi"
+    rc = cli_main(["build", "--date", D_S, "--basis", "morning", "--root", str(out),
+                   "--stage-root", str(roots[1]), "--equity-root", str(roots[0]),
+                   "--min-eligible", "5", "--builds-from", str(hist)])
+    err = capsys.readouterr().err
+    assert rc == 2, err
+    assert str(hist) in err and all(w in err for w in want), err
+    assert not any((out / t / "MANIFEST.json").exists() for t in FI_TABLES)
+
+
+def test_evening_fi_may_read_morning_equity_builds() -> None:
+    """장 마감(evening) fi 는 직전 거래일 아침 확정판(m_)을 고정해 읽는다(T-2). 아침 fi 에 저녁
+    판(e_)을 섞지 않는 기존 검사와 수동 판(b_) 허용은 그대로다."""
+    from factor_inputs.build import _check_basis
+    _check_basis({"price_daily": EQ_BUILD}, "evening")
+    _check_basis({"price_daily": "e_20260928T121000_000000Z"}, "evening")
+    _check_basis({"price_daily": "b_manual_0001"}, "morning")
+    with pytest.raises(FactorInputsError, match="접두어"):
+        _check_basis({"price_daily": "e_20260928T121000_000000Z"}, "morning")
+
+
 def test_cli_return_codes(roots, tmp_path: Path, capsys) -> None:
     base = ["build", "--date", D_S, "--root", str(tmp_path / "fi"), "--stage-root",
             str(roots[1]), "--equity-root", str(roots[0])]

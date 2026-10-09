@@ -28,8 +28,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
-from equity import inputs
-from stage import manifest
+from equity import handoff, inputs
 from stage.model import basis_of_build_id, build_id_time
 
 from .mappings import (
@@ -213,36 +212,25 @@ def _parquet_source(root: Path, table: str, kind: str,
     if build_id is None:
         pb = inputs.resolve(root, table)
         return _globs_expr(pb.globs, kind), pb.build_id
-    table_root = root / table
-    m = manifest.load(table_root / "MANIFEST.json")
-    rec = next((b for b in m.builds if b.build_id == build_id), None)
-    if rec is None:
-        raise CompatError(
-            f"--builds-from 이 가리킨 판이 MANIFEST 에 없다: table={table} "
-            f"build_id={build_id} builds={[b.build_id for b in m.builds]}")
-    globs = [str(table_root / str(p["path"]) / "*.parquet") for p in rec.partitions]
-    return _globs_expr(globs, kind), build_id
+    try:
+        pb = inputs.resolve(root, table, build_id)
+    except FileNotFoundError as e:
+        raise CompatError(f"--builds-from 이 가리킨 판이 MANIFEST 에 없다: table={table} "
+                          f"build_id={build_id} ({e})") from e
+    return _globs_expr(pb.globs, kind), build_id
 
 
 def _load_builds_from(path: Path) -> dict[str, dict[str, str]]:
     """인계 이력 JSON(`data/deliver/history/<D>_<basis>.json`)의 판 목록.
 
-    `scripts/build_chain.sh:152-162` 가 쓰는
-    `{"equity_builds": {표: build_id}, "stage_builds": {…}}` 구조를 그대로 읽는다.
+    읽기 규약은 `equity.handoff.load` 한 곳(factor_inputs `--builds-from` 과 공유)이다.
+    compat 은 health 를 보지 않는다(지금 동작 유지).
     """
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise CompatError(f"--builds-from 을 읽지 못했다: {path} ({e})") from e
-    if not isinstance(raw, dict):
-        raise CompatError(f"--builds-from 이 객체가 아니다: {path}")
-    out: dict[str, dict[str, str]] = {}
-    for kind, key in ((EQUITY, "equity_builds"), (STAGE, "stage_builds")):
-        got = raw.get(key)
-        if not isinstance(got, dict) or not got:
-            raise CompatError(f"--builds-from 에 {key} 가 없다: {path}")
-        out[kind] = {str(k): str(v) for k, v in got.items()}
-    return out
+        h = handoff.load(path)
+    except handoff.HandoffError as e:
+        raise CompatError(str(e)) from e
+    return {EQUITY: h.equity_builds, STAGE: h.stage_builds}
 
 
 def _check_basis(equity_builds: dict[str, str], basis: str) -> None:

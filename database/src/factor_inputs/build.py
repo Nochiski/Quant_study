@@ -1,8 +1,9 @@
 """factor_inputs 판 빌드 — equity/stage 현재 판 → 8표 parquet → 게이트 → MANIFEST 교체.
 
 흐름 (equity `build.py` 와 같은 모양):
-  원천 판 해석(MANIFEST `current_build` — 맨 glob 금지) → 판 가드(아침판에 저녁 equity 판 금지 ·
-  가격·수정주가·계수 판이 같은 체인) → TEMP VIEW → `queries` 순서대로 임시 표
+  원천 판 해석(MANIFEST `current_build`, 또는 `--builds-from` 인계 이력이 가리킨 판 — 맨 glob 금지)
+  → 판 가드(아침판에 저녁 equity 판 금지 · 가격·수정주가·계수 판이 같은 체인)
+  → TEMP VIEW → `queries` 순서대로 임시 표
   → `_tmp/<build_id>/<표>/part0.parquet` → 게이트(FG0~FG4 · FG-fresh)
   → 통과: 8표 모두 `v=<build_id>` 로 옮기고 표마다 `stage.manifest.commit`(keep=KEEP_DEFAULT=60)
              + 판 manifest `_runs/<D>_<basis>.json` + `latest_<basis>.json`
@@ -17,6 +18,11 @@
 입력은 `_pinned/` 하드링크로 고정하지 않는다: 산출 자체가 창을 자른 사본이라 재현에 원천 판을
 붙잡을 필요가 없고, equity 루트에 쓰지 않기 위해서다. 읽은 판 id 는 표별 BuildRecord.inputs 와
 판 manifest 에 남는다(V2-8).
+
+날짜로 고정(`--builds-from`, 컷오버 T-2): 인계 이력 `data/deliver/history/<D'>_morning.json` 이 적은
+판 id 를 읽는다(읽기는 `equity.handoff`, compat 과 공유). 이력이 없거나 · health 가 ok 가 아니거나 ·
+표가 이력에 없거나 · 그 판이 MANIFEST 에서 사라졌으면 `FactorInputsError`(rc 2) — 최신 판으로
+대신하지 않는다(P1). 이력 경로는 판 manifest `builds_from` 에 남는다.
 """
 from __future__ import annotations
 
@@ -29,7 +35,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
-from equity import inputs
+from equity import handoff, inputs
 from equity.rules_s10 import FIELDS as CREDIT_FIELDS
 from model.contracts import FI_TABLES, UniverseRule
 from stage import manifest
@@ -130,14 +136,29 @@ def _expr(globs: tuple[str, ...], stage: bool) -> str:
     return f"read_parquet([{lit}], hive_partitioning=false)"
 
 
-def _resolve(root: Path, tables: tuple[str, ...],
-             stage: bool) -> tuple[dict[str, str], dict[str, str]]:
+def _resolve(root: Path, tables: tuple[str, ...], stage: bool,
+             pinned: dict[str, str] | None = None,
+             origin: Path | None = None) -> tuple[dict[str, str], dict[str, str]]:
+    """표 → (판 id, 읽기 식). `pinned`(인계 이력 `origin` 의 판 목록)를 주면 current 가 아니라
+    그 판을 읽는다."""
     ids: dict[str, str] = {}
     exprs: dict[str, str] = {}
     for t in tables:
+        want = None if pinned is None else pinned.get(t)
+        if pinned is not None and want is None:
+            # 그날도 판이 없던 선택 원천 — current 모드와 같이 빈 표로 대신한다
+            if stage and t in OPTIONAL_STAGE_SOURCES:
+                ids[t], exprs[t] = "absent", OPTIONAL_STAGE_SOURCES[t]
+                continue
+            raise FactorInputsError(f"인계 이력에 이 표의 판이 없다: 이력={origin} table={t} "
+                                    "— 최신 판으로 대신하지 않는다")
         try:
-            pb = inputs.resolve(root, t)
+            pb = inputs.resolve(root, t, want)
         except FileNotFoundError as e:
+            if want is not None:
+                raise FactorInputsError(
+                    f"인계 이력이 가리킨 판이 MANIFEST 에 없다(GC 로 지워짐?): 이력={origin} "
+                    f"table={t} build_id={want} — 최신 판으로 대신하지 않는다 ({e})") from e
             if stage and t in OPTIONAL_STAGE_SOURCES:
                 ids[t], exprs[t] = "absent", OPTIONAL_STAGE_SOURCES[t]
                 continue
@@ -147,11 +168,27 @@ def _resolve(root: Path, tables: tuple[str, ...],
     return ids, exprs
 
 
+def _load_handoff(path: Path) -> handoff.Handoff:
+    """인계 이력을 읽고 그날 stage·equity 가 둘 다 ok 인지 본다 — 실패한 날의 이력은 판 목록에
+    직전 판이 섞여 있어 그날 확정판으로 믿을 수 없다."""
+    try:
+        h = handoff.load(path)
+    except handoff.HandoffError as e:
+        raise FactorInputsError(str(e)) from e
+    if not h.health_ok:
+        raise FactorInputsError(
+            f"인계 이력의 health 가 ok 가 아니다(그날 확정판 실패 — 판 목록에 직전 판이 섞여 "
+            f"있다): 이력={path} health={h.health} 기대={{'stage': 'ok', 'equity': 'ok'}}")
+    return h
+
+
 def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
-    """아침판에 저녁 equity 판(`e_`)을 섞지 않는다. 수동 재빌드(`b_`)는 허용(compat R5 와 같다)."""
+    """아침판에 저녁 equity 판(`e_`)을 섞지 않는다. 수동 재빌드(`b_`)는 허용(compat R5 와 같다).
+    장 마감(evening) fi 는 직전 거래일 아침 확정판(`m_`)을 날짜로 고정해 읽으므로 허용한다(T-2)."""
+    allowed = ("manual", basis) + (("morning",) if basis == "evening" else ())
     for table, bid in sorted(equity_builds.items()):
         got = basis_of_build_id(bid)
-        if got not in ("manual", basis):
+        if got not in allowed:
             raise FactorInputsError(f"equity 판 접두어가 --basis 와 다르다: table={table} "
                                     f"build_id={bid} 판={got} --basis={basis}")
 
@@ -217,9 +254,10 @@ def _one(con: duckdb.DuckDBPyConnection, sql: str) -> object:
 def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Path, *,
           grace_days: int | None = None, min_eligible: int = MIN_ELIGIBLE_DEFAULT,
           golden_path: Path | None = GOLDEN_PATH, keep: int = KEEP_DEFAULT,
-          build_id: str | None = None) -> BuildResult:
+          build_id: str | None = None, builds_from: Path | None = None) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 factor_inputs 8표를 굽는다. 게이트 FAIL 은 결과 status 로,
-    입력·인자 오류는 `FactorInputsError` 로 낸다."""
+    입력·인자 오류는 `FactorInputsError` 로 낸다. `builds_from`(인계 이력 JSON)을 주면 원천 판을
+    current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정')."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
@@ -236,8 +274,13 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     if basis_of_build_id(bid) not in ("manual", basis):
         raise FactorInputsError(f"build_id 접두어가 --basis 와 다르다: {bid} vs {basis}")
 
-    equity_builds, eq_exprs = _resolve(Path(equity_root), EQUITY_SOURCES, stage=False)
-    stage_builds, st_exprs = _resolve(Path(stage_root), STAGE_SOURCES, stage=True)
+    pin = None if builds_from is None else _load_handoff(Path(builds_from))
+    equity_builds, eq_exprs = _resolve(Path(equity_root), EQUITY_SOURCES, stage=False,
+                                       pinned=None if pin is None else pin.equity_builds,
+                                       origin=builds_from)
+    stage_builds, st_exprs = _resolve(Path(stage_root), STAGE_SOURCES, stage=True,
+                                      pinned=None if pin is None else pin.stage_builds,
+                                      origin=builds_from)
     _check_basis(equity_builds, basis)
     _check_chain(equity_builds)
 
@@ -321,6 +364,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         "rules_version": RULES_VERSION,
         "equity_root": str(Path(equity_root).resolve()),
         "stage_root": str(Path(stage_root).resolve()),
+        "builds_from": None if builds_from is None else str(Path(builds_from).resolve()),
         "equity_builds": equity_builds, "stage_builds": stage_builds,
         "window": {"price_from": p.price_from, "flow_from": p.flow_from, "to": d_iso,
                    "credit_lag_sessions": p.credit_lag},

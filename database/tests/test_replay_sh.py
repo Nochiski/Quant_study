@@ -5,7 +5,8 @@ equity_order.txt`·`_engine/`·`data/{stage,equity,deliver}` 를 두고 저장�
 (test_equity_rebuild_all_sh 와 같은 방식). 대역 python 은 `-m equity|factor_inputs|model` 호출을
 calls.txt 에, 그때의 QL_HOME 을 envs.txt 에 적고 산출 MANIFEST·`_runs` 만 흉내 낸다 — 실제 빌드는
 돌지 않는다. 보조 스크립트 `scripts/replay_tool.py`(stage 입력 고정·해시·대조)는 진짜 python 으로
-넘긴다. rc 는 FAIL_EQ(그 표에서 rc 7)·RC_CATALOG·RC_CONTRACT·RC_FI·RC_MODEL 로 고른다.
+넘긴다. rc 는 FAIL_EQ(그 표에서 rc 7)·RC_CATALOG·RC_CONTRACT·RC_FI·RC_MODEL 로 고르고,
+CORRUPT_EQ(그 표 MANIFEST 를 깨진 JSON 으로 쓴다)로 해시 읽기 실패를 만든다.
 """
 from __future__ import annotations
 
@@ -57,6 +58,10 @@ if mod == "equity" and "build" in argv:
     if t == os.environ.get("FAIL_EQ"):
         sys.exit(7)
     bid = opt("--basis")[0] + "_fake"
+    if t == os.environ.get("CORRUPT_EQ"):
+        (Path(opt("--root")) / t).mkdir(parents=True, exist_ok=True)
+        (Path(opt("--root")) / t / "MANIFEST.json").write_text("{", encoding="utf-8")
+        sys.exit(0)
     write(Path(opt("--root")) / t / "MANIFEST.json",
           {"table": t, "current_build": bid,
            "builds": [{"build_id": bid, "content_hash": "h-" + t, "n_rows": 3}]})
@@ -82,7 +87,9 @@ if mod == "model":
               {"status": "ok", "build_id": "m_model", "specs": {"scope@1.0": {}}})
         write(root / "scope@1.0" / "MANIFEST.json",
               {"table": "scope@1.0", "current_build": "m_model",
-               "builds": [{"build_id": "m_model", "content_hash": "h-scope", "n_rows": 593}]})
+               "builds": [{"build_id": "m_model", "content_hash": "h-scope", "n_rows": 593,
+                           "partitions": [{"path": "v=m_model", "n_indicators": 4000,
+                                           "indicators_content_hash": "h-ind"}]}]})
     sys.exit(rc)
 sys.exit(0)
 '''
@@ -227,7 +234,7 @@ def test_인자_오류는_rc2_이고_아무것도_만들거나_돌리지_않는�
 
 
 @pytest.mark.parametrize("rel", ["quant-ledger/data/replay", "quant-ledger/r", "quant-ledger",
-                                 ".", "link/r"])
+                                 ".", "link/r", "/"])
 def test_운영_홈_안이나_그_조상을_출력_루트로_주면_거부한다(home: Path, rel: str) -> None:
     """심볼릭 링크로 돌아 들어가도(link → 운영 data) 실제 경로로 판정한다."""
     (home / "link").symlink_to(home / "quant-ledger" / "data")
@@ -237,6 +244,60 @@ def test_운영_홈_안이나_그_조상을_출력_루트로_주면_거부한다
     assert "운영" in r.out
     assert r.calls == []
     assert _snapshot(home / "quant-ledger") == before
+
+
+@pytest.mark.parametrize("rel", ["disk", "disk/data/r"])
+def test_운영_data_가_링크면_그_실제_경로의_안이나_조상도_거부한다(home: Path, rel: str) -> None:
+    """리뷰 BLOCKER-1 재현 ①: 운영 data 가 다른 디스크로 가는 링크일 때
+    그 실제 부모를 --out 으로 주면
+    출력 루트의 data/equity 가 곧 운영 equity 였다(둘째 실행에서 운영 MANIFEST 를 덮었다)."""
+    disk = home / "disk"
+    disk.mkdir()
+    (home / "quant-ledger" / "data").rename(disk / "data")
+    (home / "quant-ledger" / "data").symlink_to(disk / "data")
+    before = _snapshot(disk)
+    for _ in range(2):
+        r = _run(home, "--out", str(home / rel), "--date", D, "--steps", "equity")
+        assert r.rc == 2, r.out
+        assert r.calls == []
+    assert _snapshot(disk) == before
+
+
+@pytest.mark.parametrize("link, target", [("data/equity", "data/equity"), ("data", "data"),
+                                          ("logs", "logs"), ("stage_at", "data/stage")])
+def test_출력_루트_안에_링크가_있으면_거부한다(home: Path, link: str, target: str) -> None:
+    """리뷰 BLOCKER-1 재현 ②: 원형 루트처럼 data 아래를 운영으로 링크해 둔 출력 루트. 스크립트는
+    출력 루트에 링크를 만들지 않으므로 링크가 있으면 손으로 만든 것이다 — 쓰기 전에 멈춘다."""
+    ops = home / "quant-ledger"
+    (ops / "logs").mkdir()
+    out = home / "replay" / "old"
+    (out / link).parent.mkdir(parents=True, exist_ok=True)
+    (out / link).symlink_to(ops / target)
+    before = _snapshot(ops)
+    for _ in range(2):
+        r = _run(home, "--out", str(out), "--date", D, "--stage-at", D, "--steps", "equity")
+        assert r.rc == 2, r.out
+        assert "링크" in r.out
+        assert r.calls == []
+    assert _snapshot(ops) == before
+
+
+def test_매달린_링크를_거치는_out_은_거부한다(home: Path) -> None:
+    """아직 없는 경로 쪽 링크는 실제 경로로 풀리지 않는다 —
+    mkdir -p 가 링크를 따라 운영에 만든다."""
+    (home / "dl").symlink_to(home / "quant-ledger" / "data" / "newdir")
+    r = _run(home, "--out", str(home / "dl" / "r"), "--date", D, "--steps", "equity")
+    assert r.rc == 2, r.out
+    assert not (home / "quant-ledger" / "data" / "newdir").exists()
+
+
+def test_같은_패스_번호를_다른_실행이_잡았으면_멈춘다(home: Path) -> None:
+    """패스는 mkdir(‑p 없이)로 선점한다 — 같은 --out 으로 동시에 돌면 둘째가 rc 2."""
+    out = home / "replay" / "x"
+    (out / "logs" / "pass2").mkdir(parents=True)          # pass 1개 → 다음 번호 2 가 이미 있다
+    r = _run(home, "--out", str(out), "--date", D, "--steps", "catalog")
+    assert r.rc == 2, r.out
+    assert r.calls == []
 
 
 # ── 단계 순서 ─────────────────────────────────────────────────────────────────
@@ -284,7 +345,7 @@ def test_code_engine_을_주면_그_코드와_엔진으로_돈다(home: Path) ->
     assert r.rc == 0, r.out
     assert [c.split()[7] for c in r.builds if " build " in c] == ["corp"]
     assert r.builds[-1].endswith(f"contract --engine-src {engine}")
-    assert os.readlink(out / "scripts") == str(code / "scripts")
+    assert not (out / "scripts").exists() and not (out / "config").exists()   # 코드 링크 없음
 
 
 # ── 실패 전파 ─────────────────────────────────────────────────────────────────
@@ -304,6 +365,16 @@ def test_equity_표가_실패하면_남은_표와_뒤_단계를_돌지_않는다
     assert rows[("equity", "adj_factor")] == "skip"
     for step in ("catalog", "contract", "fi", "model"):
         assert rows[(step, "-")] == "skip"
+
+
+def test_해시를_못_읽으면_그_표를_실패로_세고_뒤를_막는다(home: Path) -> None:
+    out = home / "replay" / "x"
+    r = _run(home, "--out", str(out), "--date", D, CORRUPT_EQ="price_daily")
+    assert r.rc == 1, r.out
+    rows = {(x[0], x[1]): x for x in _tsv(out)[1:]}
+    assert rows[("equity", "price_daily")][4:] == ["-", "-", "-"]
+    assert rows[("equity", "adj_factor")][2] == "skip"
+    assert "price_daily(해시 읽기 실패)" in r.out
 
 
 def test_catalog_실패는_contract_만_막고_fi_model_은_돈다(home: Path) -> None:
@@ -364,6 +435,10 @@ def test_기준_파일은_첫_패스에만_운영에서_복사하고_표_폴더�
     assert json.loads((eq / "baseline.json").read_text(encoding="utf-8")) == {
         "name": "baseline.json"}
     assert sorted(p.name for p in (out / "logs").iterdir()) == ["pass1", "pass2"]
+    # 출력 루트에 baseline.json 이 없으면(지웠으면) 그 패스에서 다시 복사한다
+    (eq / "baseline.json").unlink()
+    assert _run(home, "--out", str(out), "--date", D, "--steps", "catalog").rc == 0
+    assert json.loads((eq / "baseline.json").read_text(encoding="utf-8")) == {"changed": True}
 
 
 # ── --stage-at ───────────────────────────────────────────────────────────────
@@ -378,18 +453,22 @@ def test_stage_at_은_인계_이력의_판을_가리키는_임시_stage_루트�
     def manifest(t: str) -> dict:
         return json.loads((tmp / t / "MANIFEST.json").read_text(encoding="utf-8"))
 
-    # 운영 stage keep 안의 판 → 운영 stage 판 디렉터리를 가리킨다, BuildRecord 는 그 판 1개
+    def same_files(t: str, src: Path) -> None:
+        """파일 단위 하드링크(equity inputs.pin 과 같은 방식) — 디렉터리 링크는 없다."""
+        got = tmp / t / "v=m_1008"
+        assert not any(x.is_symlink() for x in [got, *got.rglob("*")])
+        for name in ("part0.parquet", "_meta.json"):
+            f = got / "year=2020" / name
+            assert f.stat().st_ino == (src / "year=2020" / name).stat().st_ino
+
+    # 운영 stage keep 안의 판 → 운영 stage 파일, BuildRecord 는 그 판 1개
     m = manifest("stg_price_daily")
     assert m["current_build"] == "m_1008"
     assert [b["build_id"] for b in m["builds"]] == ["m_1008"]
     assert m["builds"][0]["partitions"] == [{"path": "v=m_1008/year=2020", "n_rows": 1}]
-    link = tmp / "stg_price_daily" / "v=m_1008"
-    assert link.is_symlink()
-    assert Path(os.readlink(link)) == ops / "stage" / "stg_price_daily" / "v=m_1008"
-    assert (link / "year=2020" / "part0.parquet").read_bytes() == b"stg_price_daily-m_1008"
-    # keep 밖이라 운영 stage 에서 지워진 판 → equity _pinned 사본
-    link = tmp / "stg_listing_daily" / "v=m_1008"
-    assert Path(os.readlink(link)) == ops / "equity" / "_pinned" / "stg_listing_daily" / "v=m_1008"
+    same_files("stg_price_daily", ops / "stage" / "stg_price_daily" / "v=m_1008")
+    # keep 밖이라 운영 stage 에서 지워진 판 → equity _pinned 파일
+    same_files("stg_listing_daily", ops / "equity" / "_pinned" / "stg_listing_daily" / "v=m_1008")
     assert manifest("stg_listing_daily")["current_build"] == "m_1008"
     # 어디에도 없는 판 → MANIFEST 만(판 디렉터리 없음), 기록과 출력에 남긴다
     assert manifest("stg_fin_wise_q")["current_build"] == "m_1008"
@@ -401,7 +480,7 @@ def test_stage_at_은_인계_이력의_판을_가리키는_임시_stage_루트�
     assert "stg_fin_wise_q" in r.out
     # 다음 패스는 새 경로에 다시 세운다
     assert _run(home, "--out", str(out), "--date", D, "--stage-at", D, "--steps", "fi").rc == 0
-    assert (out / "stage_at" / "pass2" / "stg_price_daily" / "v=m_1008").is_symlink()
+    assert (out / "stage_at" / "pass2" / "stg_price_daily" / "v=m_1008" / "year=2020").is_dir()
 
 
 # ── 요약 ──────────────────────────────────────────────────────────────────────
@@ -419,15 +498,18 @@ def test_요약은_단계별_rc_와_표별_해시를_남긴다(home: Path) -> No
         assert by[(step, "-")][2] == "0"
     assert by[("fi", "fi_universe")][4:] == ["m_fi", "h-fi", "5"]
     assert by[("model", "scope@1.0")][4:] == ["m_model", "h-scope", "593"]
+    assert by[("model", "scope@1.0:indicators")][4:] == ["m_model", "h-ind", "4000"]
     line = (out / "logs" / "pass1" / "summary.txt").read_text(encoding="utf-8").strip()
     assert "\n" not in line
     assert line in r.out
     for word in ("pass1", f"D={D}", "stage=current", "equity 3/3", "실패 없음"):
         assert word in line
+    assert f'rm -rf -- "{out}"' in r.out                  # 다 쓴 뒤 정리 명령
 
 
 # ── --compare ────────────────────────────────────────────────────────────────
-def _root(base: Path, eq: dict[str, tuple[str, str]], fi_hash: str, model_hash: str) -> Path:
+def _root(base: Path, eq: dict[str, tuple[str, str]], fi_hash: str, model_hash: str,
+          ind_hash: str = "h-ind") -> Path:
     """대조용 루트 — equity 표별 (current_build, hash) · fi·model 의 D 판."""
     data = base / "data"
     for t, (bid, h) in eq.items():
@@ -442,7 +524,9 @@ def _root(base: Path, eq: dict[str, tuple[str, str]], fi_hash: str, model_hash: 
            {"status": "ok", "build_id": "m_mo", "specs": {"scope@1.0": {}}})
     _write(data / "model" / "scope@1.0" / "MANIFEST.json",
            {"table": "scope@1.0", "current_build": "m_mo",
-            "builds": [{"build_id": "m_mo", "content_hash": model_hash, "n_rows": 593}]})
+            "builds": [{"build_id": "m_mo", "content_hash": model_hash, "n_rows": 593,
+                        "partitions": [{"path": "v=m_mo", "n_indicators": 40,
+                                        "indicators_content_hash": ind_hash}]}]})
     return base
 
 
@@ -460,6 +544,7 @@ def test_compare_는_표별_해시를_대조하고_운영쪽_equity_는_인계_�
     assert "equity\tcorp\tm_fake\th-old\tm_old\th-old\t같음" in r.out
     assert "fi\tfi_universe\tm_fi\th-fi\tm_fi\th-fi\t같음" in r.out
     assert "model\tscope@1.0\tm_mo\th-scope\tm_mo\th-scope\t같음" in r.out
+    assert "model\tscope@1.0:indicators\tm_mo\th-ind\tm_mo\th-ind\t같음" in r.out
     assert "다름 0" in r.out
     assert {k: v for k, v in _snapshot(home).items() if not k.endswith(".txt")} == {
         k: v for k, v in before.items() if not k.endswith(".txt")}       # 읽기 전용
@@ -472,6 +557,34 @@ def test_compare_는_다르거나_한쪽에_없으면_rc1(home: Path) -> None:
     assert r.rc == 1, r.out
     assert "equity\tcorp\tm_x\th-1\tm_y\th-2\t다름" in r.out
     assert "equity\tsecurity\tm_x\th-s\t-\t-\t없음" in r.out
+
+
+def test_compare_는_지표_해시만_달라도_다름이다(home: Path) -> None:
+    a = _root(home / "a", {"corp": ("m_x", "h")}, "h-fi", "h-m", ind_hash="h-i1")
+    b = _root(home / "b", {"corp": ("m_x", "h")}, "h-fi", "h-m", ind_hash="h-i2")
+    r = _run(home, "--out", str(a), "--compare", str(b), "--date", D)
+    assert r.rc == 1, r.out
+    assert "model\tscope@1.0:indicators\tm_mo\th-i1\tm_mo\th-i2\t다름" in r.out
+
+
+def test_compare_는_대조할_판이_없는_층을_없음으로_센다(home: Path) -> None:
+    """리뷰 MAJOR-2: 양쪽 다 fi·model 판이 없으면 0/0 '같음' 이 아니라 실패다."""
+    for side in ("a", "b"):
+        _write(home / side / "data" / "equity" / "corp" / "MANIFEST.json",
+               {"table": "corp", "current_build": "m_1",
+                "builds": [{"build_id": "m_1", "content_hash": "h", "n_rows": 1}]})
+    r = _run(home, "--out", str(home / "a"), "--compare", str(home / "b"), "--date", D)
+    assert r.rc == 1, r.out
+    assert f"fi\t_runs/{D}_morning.json\t-\t-\t-\t-\t없음" in r.out
+    assert f"model\t_runs/{D}_morning.json\t-\t-\t-\t-\t없음" in r.out
+
+
+def test_compare_는_운영_루트에_그날_인계_이력이_없으면_rc2(home: Path) -> None:
+    """data/deliver 가 있는 루트(운영)에서 D 의 인계 이력이 없으면 어느 판과 대조할지 모른다."""
+    a = _root(home / "a", {"corp": ("m_x", "h")}, "h-fi", "h-m")
+    r = _run(home, "--out", str(a), "--compare", str(home / "quant-ledger"), "--date", "20260101")
+    assert r.rc == 2, r.out
+    assert "인계 이력" in r.out
 
 
 # ── 임시 stage 루트 ↔ 실제 읽기 계약(equity.inputs · factor_inputs) ──────────────

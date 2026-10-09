@@ -8,19 +8,23 @@ BuildRecord 가 쌓이고 판 디렉터리는 stage 와 같은 상대 경로)를
   stage-at --ops-data DIR --date D --basis B --dest DIR
       인계 이력 `<ops-data>/deliver/history/<D>_<B>.json` 의 `stage_builds` 를 가리키는 임시 stage
       루트를 DEST 에 세운다. 표마다 그 판을 운영 stage(keep 3판)에서, 없으면 equity
-      `_pinned/`(인계 이력 30일 보호 — `build_chain.sh` gc_step)에서 찾아 `v=<build>` 디렉터리
-      심볼릭 링크로 걸고, 그 판 BuildRecord 1개만 담은 MANIFEST 를 쓴다. 운영 파일은 읽기만 한다.
+      `_pinned/`(인계 이력 30일 보호 — `build_chain.sh` gc_step)에서 찾아 파티션 파일을 하드링크로
+      옮기고(`equity.inputs.pin` 과 같은 방식 — 디렉터리 링크를 두지 않아 `rm -rf` 가 운영에 닿지
+      않는다), 그 판 BuildRecord 1개만 담은 MANIFEST 를 쓴다. 운영 파일은 읽기만 한다.
       어디에도 없는 판은 MANIFEST 만 쓰고 판 디렉터리는 만들지 않는다 — 그 표를 읽는 단계가 '파일
       없음'으로 실패한다. 표를 아예 빼면 fi 의 선택 원천(`stg_fin_wise_q`)이 조용히 빈 표로 대체돼
       해시만 달라지고 원인이 가려진다(P1).
       stdout: `표 build_id 출처(stage|pinned|missing) 실제 경로` TSV · stderr: 사람이 읽는 한 줄.
   rows --data DIR --layer equity|fi|model [--table T] [--date D] [--basis B]
       표별 `표 build_id content_hash n_rows` TSV. equity 는 current_build, fi·model 은 --date 가
-      있으면 `_runs/<D>_<B>.json` 의 판, 없으면 current_build.
+      있으면 `_runs/<D>_<B>.json` 의 판, 없으면 current_build. model 은 spec 마다 scores 행과
+      `<spec>:indicators` 행(파티션의 indicators_content_hash·n_indicators) 두 줄이다.
+      `_runs` 가 없거나 ok 가 아니면 `_runs/<파일>` 이름의 빈 행 하나를 낸다(대조에서 '없음').
   compare A B [--date D] [--basis B]
-      두 루트(`<root>/data/…`)의 표별 content_hash 대조(읽기 전용). equity 는 그 루트에 인계
-      이력 `data/deliver/history/<D>_<B>.json` 이 있으면 그 판(운영 루트 — current 는 이미 다음
-      판일 수 있다), 없으면 current_build(재생 루트). fi·model 은 rows 와 같다.
+      두 루트(`<root>/data/…`)의 표별 content_hash 대조(읽기 전용). `data/deliver/` 가 있는 루트
+      (운영)의 equity 는 인계 이력 `history/<D>_<B>.json` 이 가리키는 판(current 는 이미 다음 판일
+      수 있다) — 그 이력이 없으면 rc 2. `data/deliver/` 가 없는 루트(재생)는 current_build.
+      운영 equity keep(10판) 밖으로 밀린 판은 '없음'으로 나온다. fi·model 은 rows 와 같다.
 
 rc: 0 정상(compare 는 전부 같음) · 1 compare 다름·한쪽 없음 · 2 입력 오류.
 """
@@ -28,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -65,6 +70,14 @@ def _row(build_id: str | None, rec: dict | None) -> Row:
     return (str(build_id), str(rec.get("content_hash", NONE)), str(rec.get("n_rows", NONE)))
 
 
+def _model_rows(spec: str, build_id: str | None, rec: dict | None) -> dict[str, Row]:
+    """spec 의 scores 행 + indicators 행. 지표 해시는 첫 파티션에 있다(model/build.py commit)."""
+    part = ((rec or {}).get("partitions") or [{}])[0]
+    ind: Row = (build_id or NONE, str(part.get("indicators_content_hash", NONE)),
+                str(part.get("n_indicators", NONE)))
+    return {spec: _row(build_id, rec), f"{spec}:indicators": ind if rec else _row(build_id, None)}
+
+
 def _tables(layer_root: Path) -> list[str]:
     """MANIFEST 가 있는 표 디렉터리. `_`·`.` 로 시작하면 표가 아니다(equity.inputs 와 같은 규약)."""
     if not layer_root.is_dir():
@@ -86,6 +99,22 @@ def _locate(ops_data: Path, table: str, build_id: str) -> tuple[str, Path, dict]
         if all((table_root / str(p.get("path", ""))).is_dir() for p in rec.get("partitions") or []):
             return source, vdir, rec
     return None
+
+
+def _link_files(src_root: Path, rec: dict, dst_root: Path) -> None:
+    """파티션 파일을 하드링크한다. 하위 디렉터리(`_reject/`)는 입력이 아니라 건너뛴다
+    (inputs.pin 과 같다)."""
+    for p in rec.get("partitions") or []:
+        rel = str(p.get("path", ""))
+        out = dst_root / rel
+        out.mkdir(parents=True, exist_ok=True)
+        for f in sorted((src_root / rel).iterdir()):
+            if f.is_file():
+                try:
+                    os.link(f, out / f.name)
+                except OSError as e:
+                    raise ToolError(f"하드링크 실패: {f} → {out / f.name} ({e}) — 출력 루트는 운영 "
+                                    "data 와 같은 파일시스템이어야 한다") from e
 
 
 def stage_at(ops_data: Path, date: str, basis: str, dest: Path) -> int:
@@ -114,7 +143,7 @@ def stage_at(ops_data: Path, date: str, basis: str, dest: Path) -> int:
         else:
             source, vdir, rec = found
             path = str(vdir)
-            (tdir / f"v={build_id}").symlink_to(vdir, target_is_directory=True)
+            _link_files(vdir.parent, rec, tdir)
         (tdir / "MANIFEST.json").write_text(
             json.dumps({"table": table, "current_build": build_id, "keep": 1, "builds": [rec]},
                        ensure_ascii=False, indent=1), encoding="utf-8")
@@ -142,28 +171,38 @@ def layer_rows(data: Path, layer: str, date: str | None, basis: str,
     root = data / LAYER_DIR[layer]
     if layer == "equity":
         hist = data / "deliver" / "history" / f"{date}_{basis}.json"
-        if not (use_history and date and hist.exists()):
+        if not (use_history and date and (data / "deliver").is_dir()):
             return "current_build", _current_rows(root)
+        if not hist.exists():
+            raise ToolError(f"인계 이력이 없다: {hist} — 이 루트의 D 판을 정할 수 없다")
         builds = _load(hist).get("equity_builds") or {}
         return (f"인계 이력 {hist.name}",
                 {t: _row(str(b), _find(_builds(root / t / "MANIFEST.json")[1], str(b)))
                  for t, b in sorted(builds.items())})
     if not date:
-        return "current_build", _current_rows(root)
+        if layer == "fi":
+            return "current_build", _current_rows(root)
+        out: dict[str, Row] = {}
+        for spec in _tables(root):
+            cur, builds = _builds(root / spec / "MANIFEST.json")
+            out.update(_model_rows(spec, cur, _find(builds, cur)))
+        return "current_build", out
     runs = root / "_runs" / f"{date}_{basis}.json"
+    absent = {f"_runs/{runs.name}": (NONE, NONE, NONE)}     # 대조에서 '없음' 1 로 센다
     if not runs.exists():
-        return f"_runs/{runs.name} 없음", {}
+        return f"_runs/{runs.name} 없음", absent
     p = _load(runs)
     if p.get("status") != "ok":
-        return f"_runs/{runs.name} status={p.get('status')}", {}
+        return f"_runs/{runs.name} status={p.get('status')}", absent
     bid = str(p.get("build_id"))
     if layer == "fi":
         return (f"_runs/{runs.name}",
                 {t: (bid, str(i.get("content_hash", NONE)), str(i.get("n_rows", NONE)))
                  for t, i in sorted((p.get("tables") or {}).items())})
-    return (f"_runs/{runs.name}",
-            {s: _row(bid, _find(_builds(root / s / "MANIFEST.json")[1], bid))
-             for s in sorted(p.get("specs") or {})})
+    rows_: dict[str, Row] = {}
+    for spec in sorted(p.get("specs") or {}):
+        rows_.update(_model_rows(spec, bid, _find(_builds(root / spec / "MANIFEST.json")[1], bid)))
+    return f"_runs/{runs.name}", rows_
 
 
 def rows(data: Path, layer: str, table: str | None, date: str | None, basis: str) -> int:

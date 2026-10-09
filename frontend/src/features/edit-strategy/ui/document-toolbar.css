@@ -33,15 +33,25 @@
   font-size: 11px;
 }
 
+/*
+ * 한글은 음절마다 줄을 바꿀 수 있어, 좁아지면 버튼 글자가 "검/증"처럼 한 음절씩 선다(이슈 #260). 버튼
+ * 글자는 낱말 안에서 꺾지 않는다(`keep-all`). 편집기 칸이 버튼 줄보다 좁으면(1280px 등) 버튼을 다음 줄로
+ * 내린다 — 한 줄을 고집하면 버튼 줄이 칸을 넘어 옆 계약 칸 밑으로 들어가고, 가려진 버튼은 눌리지 않는다(#269).
+ */
 .doc-toolbar__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
 
+.doc-toolbar__actions .ui-button {
+  word-break: keep-all;
+}
+
+/* 오류 문장은 버튼 줄 아래 한 줄을 통째로 쓴다. 글자색·줄바꿈은 `FailureNotice` 가 정한다. */
 .doc-toolbar__error {
-  color: var(--status-error);
-  font-size: var(--text-size-small);
+  flex-basis: 100%;
 }
 
 .doc-toolbar__run-status {

@@ -50,10 +50,11 @@ def main(argv: list[str]) -> int:
         venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="KRW"
     )
     # 원장은 원주가다. 2018-05 액면분할(50:1) 이전 구간을 넣으면 가격 불연속이
-    # 그대로 수익률에 잡히므로 분할 이후 구간만 쓴다.
+    # 그대로 수익률에 잡히므로 분할 이후 구간만 쓴다. 봉인 구간(2016~2019)의 성과도 출력하지
+    # 않도록 연구 구간(2020-01-02 이후)에서 시작한다(검증 랩 spec D1).
     query = BarQuery(
         instruments=(instrument,),
-        start=date(2018, 6, 1),
+        start=date(2020, 6, 1),
         end=date(2024, 12, 31),
         ohlc_policy=OhlcPolicy.CLAMP,
     )
@@ -92,7 +93,6 @@ def main(argv: list[str]) -> int:
     elapsed_s = time.perf_counter() - started
 
     first, last = result.snapshots[0], result.snapshots[-1]
-    metrics = result.metrics
     print(f"source           {root}")
     print(f"core             {core} ({elapsed_s:.3f}s engine wall-clock)")
     print(f"run_id           {result.run_id}")
@@ -100,9 +100,6 @@ def main(argv: list[str]) -> int:
     print(f"initial equity   {first.equity:,.0f} KRW")
     print(f"final equity     {last.equity:,.0f} KRW")
     print(f"orders / fills   {len(result.orders)} / {len(result.fills)}")
-    print(f"total return     {metrics.total_return:+.2%}")
-    print(f"cagr             {metrics.cagr:+.2%}")
-    print(f"max drawdown     {metrics.max_drawdown:.2%}")
     return 0
 
 

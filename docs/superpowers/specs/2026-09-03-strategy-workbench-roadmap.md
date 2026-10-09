@@ -2,16 +2,26 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M5 완료 — YAML-first authoring initiative P6-06 마감 진행 중
+> 상태(2026-09-28): M0~M5 완료, M6·M7·M10 미착수, M8·M9는 일부 항목만 완료. 이 로드맵의
+> 하위 initiative 다섯 개 중 셋이 끝났고 schema 1.2·그래프 표현(P3-03 차례)과 검증 랩이 진행 중이다.
 >
-> 체크리스트: 150개 중 77개 완료, 73개 남음
+> 체크리스트: 150개 중 83개 완료, 67개 남음
 >
-> 다음 체크: YAML-first initiative 완료 후 M6-1 `domain.experiment`
-> SearchSpec/ParameterSpace/Constraint 추가
+> 다음 체크: M6-1 `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가
 >
-> 진행 중 initiative: YAML-first authoring 전환 — PR 단위 상태는
-> [docs/planning/strategy-workbench-yaml-ui/PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)만
-> 추적한다 (16절 참고).
+> initiative — PR 단위 상태는 각 PLAN.md만 추적한다(16절 참고).
+>
+> - YAML-first authoring 전환(완료 2026-09-06, 52 PR):
+>   [strategy-workbench-yaml-ui/PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)
+> - schema 1.1·GUI 편집(완료 2026-09-18, 19 PR, 감사 backlog 2026-09-19):
+>   [strategy-gui-editing/PLAN.md](../../planning/strategy-gui-editing/PLAN.md)
+> - AI 어시스턴트(완료 2026-09-27, 19 PR):
+>   [ai-assistant/PLAN.md](../../planning/ai-assistant/PLAN.md)
+> - schema 1.2·그래프 표현(진행 중, 30 PR 중 19 머지):
+>   [strategy-language-2-0/PLAN.md](../../planning/strategy-language-2-0/PLAN.md)
+> - 검증 랩(M6·M7 구체화, 시작 2026-09-29, 28 PR):
+>   [validation-lab/PLAN.md](../../planning/validation-lab/PLAN.md) · [설계 spec](./2026-09-29-validation-lab-design.md)
+>
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -26,6 +36,11 @@
 > (2026-09-06 개정: Quick Builder/Advanced Graph는 P6-06에서 제거한다. M6 Parameter Search는
 > StrategySpec/YAML source를 복제하지 않고 YAML route 위에 붙는 후속 milestone이다. 삭제 결정과
 > migration gate는 [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md) D9.)
+>
+> (2026-09-20 개정: 대상 사용자는 전문 트레이더만이 아니라 비전공자를 포함한다. 완료 정의를 원래
+> 문장 "코드를 몰라도 대부분의 cross-sectional 전략을 만들 수 있다"로 되돌렸고(ADR D8 개정), 전략
+> 문서는 전략 논리만 담으며 시장·기간·유니버스·비용 같은 실행 설정은 문서 밖으로 옮겼다.
+> 설계는 [schema 1.2·그래프 표현 spec](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md) D1·D3.)
 
 백엔드와 UX를 별도 단계로 만들지 않는다. 각 마일스톤은 항상
 `domain contract → application/API → 화면 → 사용자 시나리오 테스트`까지 닫는 수직 슬라이스다.
@@ -52,7 +67,7 @@
 ```text
 Frontend
   YAML/JSON source editor ─ compile ─ StrategySpec ── generated OpenAPI SDK
-  JSON/Form/Graph/Diff (read-only projection) ┘       │
+  JSON/Form/Graph/Diff (projection·source 편집) ┘     │
                                                     ▼
 Backend inbound adapter                         HTTP + SSE
                                                     │
@@ -181,19 +196,24 @@ identity (revision envelope가 소유, spec_hash 제외)
   strategy_id, revision
 schema_version (document top-level)
 title, description (document)
-data
-  market, date range, universe, eligibility, dataset lag overrides
-signal
-  factor graph, transforms, composite, rank/threshold/regime
+eligibility
+  point-in-time 필터(절대 규칙, 횡단면 상위 N·%)
+factors / signal
+  factor graph, transforms, 결합 전 정규화, composite, rank/threshold/regime
 portfolio
   long/short sides, selection count/percentile, weighting, rebalance, buffers
 risk
   gross/net exposure, per-name/sector caps, turnover/liquidity rules, stop policy
-execution
-  timing, order style, participation, fee/slippage/borrow/margin
 parameters
   named typed references with bounds/choices/defaults/constraints
 ```
+
+실행 설정은 문서 밖이다(schema 1.2, 2026-09-28 main 머지). 처음 설계의 `data`(시장·기간·유니버스)와
+`execution`(체결 시점·참여율·수수료·슬리피지), 팩터별 결측 정책은 `RunEnvironment`
+(`domain/backtest`)가 소유하고 실행 요청이 싣는다. `spec_hash`는 전략 논리만 덮고, 실행 설정은 run
+manifest의 `environment_hash`로 따로 남는다. 은퇴 schema(1.0·1.1) 문서는 업그레이드로 1.2가 되고,
+그때 문서에서 떼어 낸 옛 실행 설정이 실행 설정 패널을 채운다
+([schema 1.2 spec](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md) D3·D6·D7).
 
 지원 expression 노드군:
 
@@ -209,7 +229,10 @@ DAG cycle, unit mismatch, division risk, insufficient history, unavailable datas
 issue로 반환한다. UI는 그 issue를 node와 field에 연결해 보여준다.
 
 v1 authoring은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON source다. Form과
-Graph는 현재 valid spec을 읽는 projection이며 새 편집 모델이 아니다. 과거 Quick Builder와
+Graph는 runtime schema × parse tree projection 위의 **source 트랜잭션** 편집기다(2026-09-18 ADR D5
+개정). 편집 하나가 JSON pointer 범위의 원문 교체 한 번이고 주석·순서를 보존하며, 별도 편집 모델을
+두지 않는다. schema 1.2·그래프 표현 initiative는 Form·JSON 탭을 은퇴시키고 그래프 표현 세 수준으로
+바꿀 예정이다(P4-04 이후, 2026-09-28 현재 미착수). 과거 Quick Builder와
 Advanced Graph는 P6-06 migration gate 통과 후 제거됐고, 기존 URL은 YAML 신규 문서 route로
 이동한다(ADR D2, D5, D9).
 
@@ -302,6 +325,9 @@ Validation/Estimate panel로 구성한다. 아래 번호는 outline 섹션이지
 3. 포트폴리오: long/short, top/bottom N 또는 percentile, equal/factor/risk weight, rebalance.
 4. 위험/실행: 노출 cap, sector neutral, turnover buffer, 비용·슬리피지·지연·참여율.
 5. 파라미터: 탐색 대상 토글, 범위/분포/step, constraint, 예상 trial/time/memory.
+
+schema 1.2부터 1의 시장·기간·유니버스와 4의 비용·슬리피지·지연·참여율은 문서 섹션이 아니라 문서
+밖 실행 설정 패널이 받는다(7.1).
 
 YAML/JSON/Form/Graph/Diff view 전환은 페이지 이동이 아니라 같은 source의 표현 전환이며 source와
 undo history를 보존한다. 우측 panel은
@@ -519,7 +545,7 @@ Python/Rust 결과가 같다.
 - [ ] 사용자 preset/template은 spec revision reference로 구현.
 - [ ] keyboard navigation, screen reader label, focus management audit.
 - [ ] 대규모 table virtualization과 chart downsampling 구현.
-- [ ] draft autosave/recovery와 server revision conflict UX 구현.
+- [x] draft autosave/recovery와 server revision conflict UX 구현.
 - [ ] 임의 Python plugin은 sandbox/reproducibility 별도 spec 전까지 제외.
 
 완료 게이트: 코드를 몰라도 대부분의 cross-sectional 전략을 만들 수 있고, 전문 사용자는 typed
@@ -530,19 +556,19 @@ graph와 식으로 제약 없이 확장하며 결과를 재현할 수 있다. 20
 ### M9 — 실제 Equity DuckDB adapter 전환
 
 - [ ] Equity v0.2 view contract와 mock field mapping 확정.
-- [ ] data snapshot/manifest 판독과 read-only connection 구현.
-- [ ] security/security_span/corp_ticker identity mapping 구현.
+- [x] data snapshot/manifest 판독과 read-only connection 구현.
+- [x] security/security_span/corp_ticker identity mapping 구현.
 - [ ] universe_asof와 coverage_gap mapping 구현.
-- [ ] price/adjustment/corporate-action mapping 구현.
+- [x] price/adjustment/corporate-action mapping 구현.
 - [ ] financial/disclosure revision PIT mapping 구현.
 - [ ] consensus first-seen vintage와 broker opinion mapping 구현.
 - [ ] flow/short/credit missing-kind mapping 구현.
 - [ ] dataset_profile column-scope lag/capability mapping 구현.
 - [ ] parameterized query, row limit, timeout, cancellation 구현.
-- [ ] mock/DuckDB shared port contract suite 통과.
+- [x] mock/DuckDB shared port contract suite 통과.
 - [ ] hand-calculated PIT/leakage golden suite 통과.
 - [ ] schema mismatch/unsupported field fail-closed UX 추가.
-- [ ] composition root 설정으로 mock↔DuckDB 명시 전환.
+- [x] composition root 설정으로 mock↔DuckDB 명시 전환.
 
 완료 게이트: domain/application/frontend 수정 없이 adapter만 바꿔 실데이터를 사용하고, mock에서
 검증한 모든 PIT 불변식이 유지된다.
@@ -666,6 +692,31 @@ Contract:
   SSE progress API, Builder 6단계 run console, equity/drawdown/monthly/rolling Sharpe/exposure 차트,
   거래 원장·raw metric table·manifest/data warning drawer를 연결했고 Python/Rust golden parity를
   통합 테스트로 고정했다.
+- 2026-09-06 — YAML-first authoring 전환 initiative 완료(52 PR,
+  [PLAN](../../planning/strategy-workbench-yaml-ui/PLAN.md)): 전략을 verbose YAML/JSON source로 쓰고
+  backend가 compile·hash하며, revision history/diff, draft autosave/recovery, 서버 revision conflict,
+  계산 추적 화면을 YAML route 위에 올렸다. Quick Builder/Advanced Graph는 P6-06 migration gate를
+  통과한 뒤 제거했다. M8의 draft autosave/recovery·conflict 항목을 이 initiative가 닫았다.
+- 2026-09-07 — M9 첫 절단면: 실데이터 equity 층과 워크벤치 duckdb 어댑터(#80). 환경 변수
+  `STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb`로 composition root가 mock과 duckdb를 명시 전환한다.
+  2026-09-19에 로컬 동기화 도구 `ledger_sync`(#152)가 붙었고, 원천 필드는 이후 PR들이 넓혔다.
+  2026-09-28 main 코드 기준으로 어댑터는 판본 MANIFEST에서 snapshot id를 읽고 카탈로그를 read-only로
+  열며, `security`·`security_span`·`corp_ticker` 식별자와 수정주가·조정 계수·기업 행위를 매핑하고,
+  `tests/contract/test_raw_observation_port.py`가 두 어댑터를 같은 계약으로 돌린다. 이 다섯 항목을
+  M9에서 체크했다. 나머지 M9 항목은 코드로 완결을 확인하지 못해 두었다.
+- 2026-09-18 — schema 1.1·GUI 편집 initiative 완료(19 PR,
+  [PLAN](../../planning/strategy-gui-editing/PLAN.md), 감사 backlog은 2026-09-19까지 머지): YAML 규칙을
+  1.1로 정리하고(1.0 업그레이더·동결 이력), Form·Graph를 source 트랜잭션 편집기로 바꿨다(ADR D5 개정).
+- 2026-09-27 — AI 어시스턴트 initiative 완료(19 PR, [PLAN](../../planning/ai-assistant/PLAN.md)):
+  설정 화면의 LLM 공급자 연결, 전략 화면 사이드바의 전략 제안, 백테스트 결과 화면의 결과 설명.
+- 2026-09-27~28 — 데이터·결과 교정: 가격 변화 팩터의 수정주가 `price.adj_close` 전환(#218), 벤치마크
+  분할·병합 반영과 거래정지 세션 이어 쓰기(#223·#228), 벤치마크 경고 원인 분리(#239·#254), 재무 흐름
+  TTM과 공시일 기준 최근 기간·회계기간 축(#227·#233·#248), 신용잔고율 정의(#231·#244), 섹터 모름 종목의
+  섹터 상한 제외(#237), mock 필드 계약을 원장 정본에 맞춘 두 어댑터 대조(#221·#243).
+- 2026-09-28 — schema 1.2(실행 설정 분리) main 머지(통합 브랜치 #202, 30 PR 중 P0~P3-02의 19 PR 완료,
+  [PLAN](../../planning/strategy-language-2-0/PLAN.md)): 실행 설정이 문서 밖 `RunEnvironment`로
+  갔고(7.1), 결합 전 정규화·횡단면 eligibility·`risk_factor_id`·compile 단일 게이트·1.1 → 1.2
+  업그레이더와 frontend 실행 설정 패널이 들어갔다. 그래프 표현(P4~P6)과 P3-03이 남았다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.
@@ -679,13 +730,15 @@ authoring 방식을 verbose YAML/JSON source로 전환했다. 이 initiative의 
 상태를 복제하지 않는다.
 
 - 이 로드맵은 product milestone SoT로 남는다. M6~M10의 순서와 완료 게이트는 유지한다.
-- initiative Phase 1.5(backtest correctness gate)는 M6 parameter search보다 먼저 끝나야 한다.
-  현재 portfolio preview/backtest가 FactorGraph 대신 factor ID 기반 synthetic 값을 쓰는 결함을
-  제거한다.
+- initiative Phase 1.5(backtest correctness gate)는 M6 parameter search보다 먼저 끝났다.
+  portfolio preview/backtest가 FactorGraph 대신 factor ID 기반 synthetic 값을 쓰던 결함을
+  제거했다.
 - M6 parameter search UI는 initiative Phase 3(YAML MVP) 이후 YAML route 위에 연결한다.
 - M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard navigation은
-  initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 먼저 제공하며, 해당 PR merge 시 M8
-  체크박스를 갱신한다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
+  initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 제공했고 모두 머지됐다. 그래서 M8의 draft
+  autosave/recovery·conflict 항목을 체크했다. clone/diff/revision history 항목은 clone이 없어,
+  keyboard navigation 항목은 screen reader label·focus management audit이 확인되지 않아 체크하지
+  않았다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
   그래프 표현 세 수준(파이프라인·레시피·고급 노드 캔버스)은
   [schema 1.2·그래프 표현 initiative](../../planning/strategy-language-2-0/README.md)(2026-09-20)가
   제공하며, 표현식 DSL은 그 뒤에도 non-goal로 남는다.

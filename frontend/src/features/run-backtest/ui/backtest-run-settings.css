@@ -2,6 +2,7 @@
   position: relative;
 }
 
+/* 여는 단추는 낱말 안에서 꺾지 않는다. 한글은 음절마다 줄을 바꿀 수 있어, 좁아지면 "실/행/설/정"처럼 선다(이슈 #260). */
 .backtest-settings > summary {
   display: flex;
   align-items: center;
@@ -10,6 +11,7 @@
   padding: 0 var(--space-2);
   color: var(--text-muted);
   font-size: var(--text-size-small);
+  word-break: keep-all;
   cursor: pointer;
 }
 
@@ -46,7 +48,8 @@
   border: 0;
 }
 
-.backtest-settings label {
+.backtest-settings label,
+.backtest-settings__field {
   display: grid;
   gap: var(--space-1);
   color: var(--text-muted);
@@ -65,7 +68,6 @@
   font: inherit;
 }
 
-.backtest-settings__range,
 .backtest-settings__errors {
   margin: var(--space-3) 0 0;
   color: var(--text-muted);
@@ -80,15 +82,44 @@
   display: none;
 }
 
-@media (max-width: 760px) {
-  .backtest-settings__hint {
-  display: block;
-  margin-top: var(--space-1);
+.backtest-settings__popover {
+  max-height: min(70vh, 720px);
+  overflow-y: auto;
+}
+
+.backtest-settings fieldset + fieldset {
+  margin-top: var(--space-4);
+}
+
+.backtest-settings legend {
+  grid-column: 1 / -1;
+  padding: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.backtest-settings__note {
+  grid-column: 1 / -1;
+  margin: 0;
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
 
-.backtest-settings fieldset {
+.backtest-settings__trial {
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.backtest-settings__field-error {
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+}
+
+@media (max-width: 760px) {
+  .backtest-settings fieldset {
     grid-template-columns: 1fr;
   }
 }

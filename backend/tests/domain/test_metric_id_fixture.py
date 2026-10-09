@@ -4,7 +4,8 @@
 frontend 테스트는 backend를 부르지 못하므로 이 골든(`tests/fixtures/analytics/metric_ids.json`)을
 읽어 id마다 ko·en 문구가 있는지 본다. 이 테스트는 골든이 registry와 같은지를 지킨다. 지표를 더하면
 여기서 먼저 깨지고, 골든을 고치면 frontend 테스트가 문구를 쓰라고 깨진다 — 두 단계가 이어져야 새
-지표가 뜻 없이 화면에 나가지 않는다.
+지표가 뜻 없이 화면에 나가지 않는다. 지표 id는 wire에서 문자열이라 OpenAPI 생성 SDK가 목록을 주지
+않아 골든이 필요하다. 사용 불가 사유는 enum이라 SDK의 유니온이 그 목록이다(#293).
 """
 
 from __future__ import annotations

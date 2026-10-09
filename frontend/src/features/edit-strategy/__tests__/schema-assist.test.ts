@@ -137,7 +137,7 @@ const contractEnvelope = (
 });
 
 const YAML = [
-  'schema_version: "1.1"',
+  'schema_version: "1.2"',
   "title: 테스트",
   "risk:",
   "  gross_exposure: 1",
@@ -348,6 +348,8 @@ describe("schema-driven completion", () => {
     });
     expect(field!.options.map((o) => o.label)).toEqual(["close", "volume"]);
     expect(field!.options[0].detail).toBe("종가");
+    // 빈도는 backend 어휘 원문이 아니라 문구다(#350).
+    expect(field!.options[0].info).toBe("수정 종가 (KRW, 일별)");
     const node = await source({
       text: YAML,
       offset: offsetOf(YAML, "          input_node_id: "),
@@ -370,8 +372,9 @@ describe("schema-driven completion", () => {
       explicit: true,
     });
     expect(kind!.options.map((o) => o.label)).toEqual(
-      expect.arrayContaining(["field", "time_series", "saved_factor"]),
+      expect.arrayContaining(["field", "time_series", "conditional"]),
     );
+    expect(kind!.options.map((o) => o.label)).not.toContain("saved_factor");
     const parameterKind = await source({
       text: YAML,
       offset: offsetOf(YAML, "    kind: integer") - "integer".length,
@@ -380,6 +383,35 @@ describe("schema-driven completion", () => {
     expect(parameterKind!.options.map((o) => o.label)).toEqual(
       expect.arrayContaining(["float", "integer", "choice"]),
     );
+  });
+
+  it("completes risk_factor_id from the document's factors, not a catalog (P3-01)", async () => {
+    // schema 1.2 의 `risk.risk_factor_id`(P2-06)는 `x-reference: factor`다. 팩터 레지스트리 카탈로그
+    // (`saved_factor` 시절의 `x-catalog: factor`)가 아니라 이 문서의 팩터 id 가 후보다(BACKLOG-012).
+    const text = [
+      'schema_version: "1.2"',
+      "title: 역가중",
+      "factors:",
+      "  - factor_id: momentum",
+      "  - factor_id: volatility",
+      "portfolio:",
+      "  weighting: risk",
+      "risk:",
+      "  risk_factor_id: ",
+      "",
+    ].join("\n");
+    const source = buildCompletionSource(deps(stateFor(text)));
+    const result = await source({
+      text,
+      offset: offsetOf(text, "  risk_factor_id: "),
+      explicit: true,
+    });
+
+    expect(result!.options.map((option) => option.label)).toEqual([
+      "momentum",
+      "volatility",
+    ]);
+    expect(result!.options[0].detail).toBe("문서의 팩터");
   });
 
   it("stays silent during IME composition, without a schema, and in JSON", async () => {

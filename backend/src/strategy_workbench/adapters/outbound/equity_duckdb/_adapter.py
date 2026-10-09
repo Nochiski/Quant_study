@@ -18,8 +18,11 @@
            이고 `available_date` 는 그 관측의 공개일이다. 관측이 없으면 셀 없음.
 값이 있으면 `CellKind.OBSERVED`, 없으면 격자 3테이블(S08~S10)의 `fill_kind.kind` 가 말하는 종류
 (`_FILL_KIND_TO_CELL`: not_collected → NOT_COLLECTED, 나머지 → MISSING)이고 `fill_kind` 축이 없는
-원천은 MISSING 이다 — `load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다
-(둘의 셀 집합·값·공개일·kind 가 계약상 같아야 한다).
+원천은 MISSING 이다. 원천이 행을 뺀 칸(`src_omitted`)이 그날 0 인 원천
+(`SourceSpec.omitted_is_zero`)은 그 칸을 값 0 의 SOURCE_OMITTED_ZERO 로 낸다(#371). 원장 뷰가 일부러
+가린 행(`SourceSpec.masked_expr`)은 MASKED 다(#298).
+`load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다(둘의 셀 집합·값·공개일·kind
+가 계약상 같아야 한다).
 
 어휘(FIELD_MAP §1): `security_id = {ticker}:{span_seq}` · `market = 'KRX'` · `venue = 'XKRX'` ·
 `universe_id` 는 `universe_policy` 의 행(`krx.` || policy)이고 술어(`predicate`)를 `universe_daily`
@@ -29,13 +32,15 @@ PIT: 모든 셀은 `available_date ≤ as_of` 다. 랙은 컬럼군별 상수(`S
 `lag_basis`)이고 `dataset_profile`(S19)이 오면 프로필 값으로 바꾼다. 창 독립: `GRID` 는 (security,
 date) 의 값, `LATEST` 는 (security, cutoff) 의 값이라 질의 창을 바꿔도 같은 셀은 같다.
 
-`price.adj_close` = **전방 조정**(결정 09-05): **`price_adj_daily` 표를 직접 읽는다**(S23,
-2026-09-06). 원주가 × 그날까지 공개·적용된 계수의 누적 share_factor 이고, 종목의 첫 관측 수준을
-고정하고 사건마다 이후 가격을 올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 =
-2,595,000). 값은 (security, date) 의 순수 함수라 창·as_of 에 무관하다. 예전에는 카탈로그 매크로
-`v_adj_price_fwd` 를 불렀는데, 그러면 카탈로그가 낡거나(snapshot 불일치) 없으면 조정가가 통째로
-unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로는 같은 값을 내는 읽기 경로로 남고,
-동일성은 equity `EG3_price_adj_daily` 가 매 빌드 증명한다).
+`price.adj_close` = **전방 조정**(결정 09-05): S23 표 `price_adj_daily` 의 값이다. 원주가 × 그날까지
+공개·적용된 계수의 누적 share_factor 이고, 종목의 첫 관측 수준을 고정하고 사건마다 이후 가격을
+올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 = 2,595,000). 값은 (security, date)
+의 순수 함수라 창·as_of 에 무관하다. 워크벤치는 그 표를 **조정 공백 적용일 행만 가린 원장 뷰
+`v_adj_close`** 로 읽는다(#220) — 원장이 그날 사건을 접지 못한 행(기준가 재설정일에 늦게 공개된
+계수·계수를 못 낸 기준가 재설정)은 결측이다. S23 은 카탈로그가 낡으면 조정가가 통째로 unavailable
+이 되는 것을 피하려고 표를 만들었지만, 가림 규칙을 뷰가 소유하므로 워크벤치는 다시 카탈로그에
+기댄다. 낡으면 원천을 뺀다(fail-closed) — 표로 돌아가 읽으면 가린 공백이 조용히 다시 열린다. 표
+자체는 parquet 소비자를 위해 그대로 있다.
 
 법인 축 테이블(`fin_std`·`dividend_event`·`holder_daily`)은 티커 컬럼이 없어 `corp_ticker` 로
 전개하고 **한 법인의 종류주 티커 전부가 같은 값**을 받는다(`_specs` 모듈 docstring). `corp_ticker`
@@ -45,30 +50,43 @@ unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로
 생존편향 방지). `load_factor_observations` 는 유니버스 인자가 없어 `RESEARCH_UNIVERSE_ID` 로 답한다.
 `load_backtest_dataset` 은 원주가 bar(`price_kind='reference'` 행·GAP-14 행·저녁 잠정 행 미방출,
 경고로 **각각** 건수 기록) + `security_span` 구간 + `adj_factor` factor_ok 행(S07 과 같은 유형
-매핑)이며 `adj_factor` 가 없으면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다.
+매핑) + 원장이 접지 못한 층 이동(카탈로그 뷰 `v_unfolded_event` 의 `factor_ok` 거짓 행 — 적용일
+KRX 기준가 비로 수량을 바꾸는 분할·병합, 사건마다 경고, #369)이다. `adj_factor` 가 없거나 그 뷰를
+읽을 수 없는 카탈로그면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다.
 저녁 잠정 행(`basis='evening'`, 규칙 e1.15.0)은 KRX 확정 전 키움 종가라 확정 행과 한 카운터에
-섞지 않는다: "그날 데이터가 깨졌다"(`n_invalid`)와 "잠정이라 뺐다"(`n_provisional`)는 다른 사실이다.
+섞지 않는다: "그날 데이터가 깨졌다"(`invalid_bars`)와 "잠정이라 뺐다"(`n_provisional`)는 다른
+사실이다.
 창 안 마지막 bar 뒤의 사건(정지 중 감자 뒤 상폐)은 엔진이 정산 못 하므로 빼고 경고로 남긴다.
 
 duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑터 생성 시 지연 import
 하고 없으면 `EquityDuckdbSetupError` 로 알린다.
+
+사용자에게 가는 문장(포트 결과 `detail`, 원천을 뺀 사유, `snapshot().source`, 질의 중 예외)에는 서버
+경로를 싣지 않는다 — preview·trace 422 와 run `error` 로 그대로 나간다. 루트·카탈로그 경로는 운영자
+채널인 부팅 예외와 경고 로그에만 남긴다(#163).
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataNotReadyError,
     BacktestDataQuery,
     BacktestDataset,
+    BacktestDataUnavailableError,
     CorporateActionRecord,
+    InvalidBarRecord,
     MarketBarRecord,
     UniverseMembershipRecord,
 )
@@ -98,6 +116,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -109,6 +128,8 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 
 from ._source import (
+    CATALOG_REBUILD,
+    LEDGER_SYNC,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -116,12 +137,14 @@ from ._source import (
     resolve_table,
     snapshot_id,
     table_builds,
+    unreadable_catalog,
 )
 from ._specs import (
     CALENDAR_TABLE,
     CORP_TICKER_TABLE,
     FACTOR_TABLE,
     FIELD_BY_ID,
+    FIELD_NOT_IN_LEDGER,
     FIELD_SPECS,
     POLICY_TABLE,
     PRICE_TABLE,
@@ -129,7 +152,9 @@ from ._specs import (
     REQUIRED_TABLES,
     SECURITY_TABLE,
     SOURCE_BY_NAME,
+    SOURCE_SPECS,
     SPAN_TABLE,
+    UNFOLDED_MACRO,
     UNIVERSE_TABLE,
     UNSUPPORTED_FIELDS,
     FieldSpec,
@@ -142,11 +167,21 @@ from ._specs import (
 if TYPE_CHECKING:
     import duckdb
 
+logger = logging.getLogger(__name__)
+
 MARKET = "KRX"
 VENUE = "XKRX"
 SCHEMA_VERSION = "equity-v1.2"
 SECURITY_ID_SEP = ":"
 _CHECKPOINT_ROWS = 256  # 취소 체크포인트 간격(행) — 포트의 `_CHECKPOINT_BATCH` 와 같은 크기
+# duckdb 질의 동안 감시 스레드가 checkpoint 를 부르는 간격(초). 질의 하나는 나눌 수 없어 행 단위
+# checkpoint 가 닿지 않는다(#160).
+_INTERRUPT_POLL_SECONDS = 0.1
+# 종목·법인 목록을 질의에 넘기는 자리. 짝이 되는 파라미터는 `_keys_param` 이 만든다. duckdb Python
+# 클라이언트(1.5)는 리스트 파라미터를 원소마다 변환하며 pandas 가 없으면 원소마다 import 를 다시
+# 시도해, 2천 종목 목록 하나에 약 2초를 쓴다 — 질의가 돌기 전이라 interrupt 로도 끊지 못한다(#160).
+# JSON 문자열 하나로 넘기고 SQL 안에서 푼다(같은 목록 약 0.01초).
+_KEYS_SQL = """unnest(from_json(?, '["VARCHAR"]'))"""
 # 원시 로딩 진행 구간 경계(이슈 #162). 실데이터 4년 구간 실측(질의 약 7초, 격자 행 조립 약 16초,
 # 관측 조립 약 17.5초, 생성 시 계약 검증 약 4초) 비율을 따른다.
 _GRID_FETCHED = 0.3  # 격자 안: 질의·fetchall 완료
@@ -159,8 +194,9 @@ REFERENCE_KIND = "reference"
 # NULL). 옛 판 루트(e1.5.0 등)에는 컬럼 자체가 없고 그때는 전 행이 확정이다.
 BASIS_COLUMN = "basis"
 CONFIRMED_BASIS = "krx"
-# adj_factor.event_type → 커널 CorporateActionType 값 (S07 `EVENT_TYPE_MAP` 과 같은 판단: ok 행은
-# 전부 시총 불변이라 주식수 증가는 split, 감소는 reverse_split 로 보내 수량이 조정되게 한다)
+# adj_factor.event_type → 커널 CorporateActionType 값. ok 행은 전부 시총 불변이라 주식수 증가는
+# split, 감소는 reverse_split 로 보내 수량이 조정되게 한다. 원장 소비자 계약 EG-C ④
+# (`database/src/equity/contract.py`)가 서버 빌드마다 이 어댑터의 사건을 `adj_factor` 와 대조한다.
 EVENT_TYPE_MAP: dict[str, str] = {
     "split": "split",
     "bonus": "split",
@@ -168,19 +204,27 @@ EVENT_TYPE_MAP: dict[str, str] = {
     "capred": "reverse_split",
 }
 # S06-2 의 KRX 기준가 원천이 만든 사건 — `corp_event` 에 없어 유형을 모른다(기준가 변화 + 같은 날
-# 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → split, < 1 → reverse_split.
-# 엔진 어댑터(`backtest_engine/adapters/equity_duckdb.py::RATIO_DIRECTED_EVENT_TYPES`)와 **같은
-# 어휘를 써야 한다** — 한쪽만 알면 같은 데이터로 한쪽에서만 run 이 죽는다(서버 factor_ok 55행).
+# 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → split, < 1 → reverse_split
+# (서버 factor_ok 55행). 어휘 밖 ok 행은 run 을 멈추므로 원장이 새 유형을 내면 EG-C ④ 가 먼저
+# 잡는다.
 # `unknown_price_only`(기준가만 변화)는 항상 factor_ok=false 라 여기 오지 않고, ok 로 실려 오면
 # 어휘 밖이 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
 RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
+# 카탈로그 매크로 본문이 읽는 parquet 목록. duckdb 는 본문을 정규화해 목록은
+# `read_parquet(main.list_value('<절대경로>', ...), ...)`, 파일 하나는 문자열 그대로 돌려준다. 필드
+# 계약 판은 이 자리를 테이블 이름으로 바꿔, 기계마다 다른 경로와 파티션 수를 빼고 규칙만 해시한다
+# (#235). parquet 경로가 아닌 문자열 목록(값 필터 등)은 규칙이라 그대로 둔다.
+_PARQUET_PATH = r"'(?:[^']|'')*\.parquet'"
+_PARQUET_LIST = re.compile(
+    rf"main\.list_value\(\s*{_PARQUET_PATH}(?:\s*,\s*{_PARQUET_PATH})*\s*\)|{_PARQUET_PATH}"
+)
+_PARQUET_TABLE = re.compile(r"[\\/]([^\\/]+)[\\/]v=[^\\/]+[\\/]")
 _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
 # equity 격자 3테이블(S08~S10)의 `fill_kind.kind` → 워크벤치 `CellKind`. 정본 어휘는
-# `database/src/equity/model.py::FILL_KINDS` 이고 대응 원칙은 FIELD_MAP §1 「결측 어휘」다.
-# `src_omitted` 만 그 표와 다르게 접힌다 — 도메인이 `SOURCE_OMITTED_ZERO` 셀에 값을 요구하는데
-# (`RawFieldValue.__post_init__`·`ResearchPanelCell.__post_init__`) equity 는 그 자리를 NULL 로
-# 두기로 못박았다(DESIGN §9 결정 8 「격자 빈칸에 0 을 굽지 않는다」). 도메인을 고치지 않는 쪽을
-# 골랐으므로 라벨을 잃고 MISSING 으로 접는다 — 사유는 필드 프로필 description 이 문장으로 남긴다.
+# `database/src/equity/model.py::FILL_KINDS` 이고 원천별 대응은 FIELD_MAP §1 「결측 어휘」다.
+# `src_omitted` 는 여기서 MISSING 이다 — 그 칸이 그날 0 인 원천(`SourceSpec.omitted_is_zero`)만
+# `_cell_kind` 가 SOURCE_OMITTED_ZERO 로 낸다(#371). 원장은 그 칸을 NULL 로 두고(DESIGN §9 결정 8)
+# 도메인은 그 종류에 값을 요구하므로(`RawFieldValue.__post_init__`) 값 0 은 어댑터가 싣는다.
 _FILL_KIND_TO_CELL: dict[str, CellKind] = {
     "measured": CellKind.OBSERVED,
     "src_omitted": CellKind.MISSING,
@@ -189,17 +233,34 @@ _FILL_KIND_TO_CELL: dict[str, CellKind] = {
 }
 
 
-def _cell_kind(value: float | None, fill_kind: object) -> CellKind:
-    """셀 종류 — 값이 있으면 OBSERVED, 없으면 `fill_kind` 가 말하는 대로(없으면 MISSING).
+def _cell_kind(
+    value: float | None, fill_kind: object, masked: bool = False, omitted_is_zero: bool = False
+) -> tuple[float | None, CellKind]:
+    """셀 (값, 종류) — 원장 뷰가 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 `fill_kind` 가
+    말하는 대로(없으면 MISSING).
 
     값이 있는 셀을 무조건 OBSERVED 로 두는 것은 계약이다(관측 셀은 값을 가져야 한다). 값이
-    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다.
+    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다. 원천이
+    행을 뺀 칸이 그날 0 인 원천(`omitted_is_zero`)의 `src_omitted` 만 값 0 의 SOURCE_OMITTED_ZERO
+    다(#371). 가림 표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게
+    둔다. 결측 사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도
+    MASKED 다.
     """
+    if masked:
+        return value, CellKind.MASKED
     if value is not None:
-        return CellKind.OBSERVED
+        return value, CellKind.OBSERVED
+    if omitted_is_zero and fill_kind == "src_omitted":
+        return 0.0, CellKind.SOURCE_OMITTED_ZERO
     if fill_kind is None:
-        return CellKind.MISSING
-    return _FILL_KIND_TO_CELL.get(str(fill_kind), CellKind.MISSING)
+        return None, CellKind.MISSING
+    return None, _FILL_KIND_TO_CELL.get(str(fill_kind), CellKind.MISSING)
+
+
+def _parquet_table(match: re.Match[str]) -> str:
+    """parquet 경로 목록 하나를 테이블 이름으로(`<table>/v=<build>/…` 규약). 못 찾으면 자리표시."""
+    found = _PARQUET_TABLE.search(match.group(0))
+    return found.group(1) if found is not None else "<parquet>"
 
 
 def _noop_checkpoint() -> None:
@@ -274,6 +335,66 @@ class _Window:
         return (*self.history, *self.requested)
 
 
+def _catalog_error_types() -> tuple[type[Exception], ...]:
+    """원천을 빼도 되는 duckdb 오류 — 카탈로그·원장 파일의 성질이라 재시작해도 그대로인 것.
+
+    duckdb 예외 계층(`duckdb.Error` 아래 약 30종)을 훑어 고른다(#245 리뷰 P3-1·P3-4).
+    - 파일: `IOException`(누락·읽기 실패, `HTTPException` 포함) · `InvalidInputException`(손상·
+      0바이트 parquet) · `PermissionException`(권한)
+    - 카탈로그: `CatalogException`(매크로·표 누락) · `ParserException`(구운 매크로 본문을 못 읽음)
+      · `BinderException`(열·스키마 드리프트)
+    나머지는 일시적이거나 원천과 무관해 올린다 — `InterruptException` · `OutOfMemoryException` ·
+    `InternalException` · `FatalException` · `ConnectionException` · `TransactionException` ·
+    `SerializationException` 과 값 변환 계열(`ConversionException` 등, 바인딩만 하는 DESCRIBE 에서는
+    나지 않는다).
+    """
+    import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
+    return (
+        module.IOException,
+        module.InvalidInputException,
+        module.PermissionException,
+        module.CatalogException,
+        module.ParserException,
+        module.BinderException,
+    )
+
+
+# 잠금 충돌도 손상과 같은 `IOException` 이라 duckdb 가 붙이는 자기 문장(OS 로캘과 무관한 영문)으로만
+# 가른다. Windows 는 Restart Manager 가 찾은 점유 프로세스를 "File is already open in",
+# POSIX 는 fcntl 잠금 실패를 "Could not set lock on file" 로 적는다(duckdb 1.5.5 실측, #247).
+# Windows 표식은 Restart Manager 가 점유 프로세스를 찾았을 때만 붙는다. 못 찾으면(다른 사용자·서비스
+# 등) 잠김이 손상으로 분류돼 원천이 빠지고, 사유는 카탈로그 재생성을 안내한다(#275 리뷰 P3-3).
+_LOCK_CONFLICT_MARKERS = ("File is already open in", "Could not set lock on file")
+
+
+def _is_lock_conflict(error: Exception) -> bool:
+    """다른 프로세스가 카탈로그를 쓰기 모드로 잡아 열지 못했는가(`_LOCK_CONFLICT_MARKERS`)."""
+    return any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS)
+
+
+def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
+    """부팅 때 카탈로그를 열거나 읽다 난 duckdb 오류 중 원천을 빼도 되는 것만 돌려보낸다(#245·#247).
+
+    원천을 뺀 사유는 재시작 전까지 캐시되므로, 뺄 수 있는 오류는 손상·누락처럼 재시작해도 그대로인
+    카탈로그·파일 성격의 것(`_catalog_error_types`)뿐이다. 잠김과 일시 오류는 풀리면 원천이 돌아와야
+    하므로 빼지 않고 코드화된 `EquityDuckdbSetupError` 로 부팅을 멈춘다. 부팅 예외는 운영자 채널이라
+    경로와 duckdb 원문을 싣는다.
+    """
+    if _is_lock_conflict(error):
+        raise EquityDuckdbSetupError(
+            "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 부팅을 멈춘다 — 그 프로세스"
+            "(DuckDB CLI·DB 도구·카탈로그를 여는 스크립트)를 닫은 뒤 다시 띄워야 한다 "
+            f"(catalog_locked) — catalog={catalog} error={error!r}"
+        ) from error
+    if not isinstance(error, _catalog_error_types()):
+        raise EquityDuckdbSetupError(
+            "카탈로그를 확인하다 일시적인 duckdb 오류가 나서 부팅을 멈춘다 — 원천을 빼지 "
+            "않았으므로 다시 띄우면 다시 확인한다 (catalog_transient_error) — "
+            f"catalog={catalog} error={error!r}"
+        ) from error
+
+
 def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     """duckdb 연결 — 지연 import(optional extra `equity`). `path` 는 read_only 로 여는 카탈로그."""
     try:
@@ -286,6 +407,72 @@ def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     if path is None:
         return module.connect()
     return module.connect(str(path), read_only=True)
+
+
+def _open_catalog(path: Path) -> duckdb.DuckDBPyConnection:
+    """부팅 뒤 질의가 카탈로그를 연다. 다른 프로세스가 쓰기 모드로 잡은 잠김은 코드화된
+    실패다(#318).
+
+    duckdb 잠금 원문은 점유 프로세스 경로·PID·POSIX 계정명을 싣는데, 사유가 사용자에게 보이는
+    곳(run 실패 사유)으로 가면 안 된다. 사유 문장이 조치만 싣고 원문은 예외 사슬로 서버 로그에
+    남는다. 사유가 화면에 나가는 곳이 run 실패뿐이라 그 코드(`backtest.run.data_not_ready`)의
+    예외로 올린다 — 미리보기·추적은 예전처럼 서버 오류로 멈춘다. 부팅 검사는 잠김을 부팅 문장으로
+    분류하므로(`_raise_unless_persistent`) 이 함수를 쓰지 않는다.
+    """
+    try:
+        return _open(path)
+    except Exception as error:
+        if not _is_lock_conflict(error):
+            raise
+        raise BacktestDataNotReadyError(
+            "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 원장을 읽지 못했다 — 그 작업"
+            "(카탈로그 재생성·원장 동기화·DB 도구)이 끝난 뒤 다시 실행한다 (catalog_locked)"
+        ) from error
+
+
+def _keys_param(keys: Sequence[str]) -> str:
+    """`_KEYS_SQL` 자리에 넘길 파라미터 — 종목·법인 목록의 JSON 배열 문자열."""
+    return json.dumps(list(keys))
+
+
+def _fetchall(
+    con: duckdb.DuckDBPyConnection,
+    sql: str,
+    params: list[object],
+    checkpoint: Callable[[], None],
+) -> list[tuple[object, ...]]:
+    """`con.execute(sql, params).fetchall()` 과 같되, 도는 동안 취소되면 질의를 끊는다(#160).
+
+    질의와 결과 변환은 호출 한 번이라 행 단위 checkpoint 가 닿지 않는다(실원장 6개월 구간 실측:
+    격자 약 1초). 그동안 감시 스레드가 `_INTERRUPT_POLL_SECONDS` 마다 `checkpoint` 를 부르고,
+    예외가 나면 호출이 끝날 때까지 폴링마다 `con.interrupt()` 로 끊는다 — 질의가 시작되기 전에 보낸
+    interrupt 는 duckdb 가 버리므로 한 번으로는 모자란다. 끊긴 질의는 단계에 따라
+    `InterruptException` 이나 `InvalidInputException`("INTERRUPT Error")으로 오므로 종류로 가리지
+    않는다. 감시 스레드가 끊은 뒤의 오류면 `checkpoint()` 를 다시 불러 application 의 취소 예외로
+    올린다 — 예외 정책은 application 소유다.
+    """
+    done = Event()
+    interrupted = Event()
+
+    def watch() -> None:
+        while not done.wait(_INTERRUPT_POLL_SECONDS):
+            try:
+                checkpoint()
+            except BaseException:  # 취소 신호다. 예외 종류는 application 이 정하므로 가리지 않는다
+                interrupted.set()
+                con.interrupt()
+
+    watchdog = Thread(target=watch, name="equity-duckdb-interrupt", daemon=True)
+    watchdog.start()
+    try:
+        return con.execute(sql, params).fetchall()
+    except Exception:
+        if interrupted.is_set():
+            checkpoint()
+        raise
+    finally:
+        done.set()
+        watchdog.join()
 
 
 def _as_date(value: object, label: str) -> date:
@@ -332,10 +519,12 @@ class EquityDuckdbAdapter:
         equity_root: `trading_calendar`·`security_span`·`universe_daily`·`universe_policy`·
             `price_daily` MANIFEST 가 있는 equity 루트. 나머지 테이블·`equity.duckdb` 매크로는
             선택이며 없으면 그 원천의 field_id 가 `list_fields()` 에서 빠진다
-            (`load_backtest_dataset` 만은 `adj_factor` 를 요구해 예외를 던진다).
+            (`load_backtest_dataset` 만은 `adj_factor` 와 카탈로그 뷰 `v_unfolded_event` 를 요구해
+            예외를 던진다).
 
     Raises:
-        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST/카탈로그 meta 손상.
+        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST 손상 ·
+            카탈로그 파일 잠김(`catalog_locked`)·일시 오류(`catalog_transient_error`).
     """
 
     def __init__(self, equity_root: Path) -> None:
@@ -349,11 +538,14 @@ class EquityDuckdbAdapter:
                 f"built={sorted(builds)}"
             )
         self._builds = builds
-        self._snapshot_id = snapshot_id(builds)
+        ledger_snapshot_id = snapshot_id(builds)
         self._tables: dict[str, TableBuild] = {
             table: resolve_table(self._root, table) for table in builds
         }
-        self._catalog: CatalogState = read_catalog(self._root, self._snapshot_id)
+        self._catalog: CatalogState = self._checked_catalog(
+            read_catalog(self._root, ledger_snapshot_id)
+        )
+        self._event_feed_reason = self._unfolded_event_unavailable_reason()
         self._sessions: tuple[date, ...] = self._load_sessions()
         self._session_index = {session: index for index, session in enumerate(self._sessions)}
         self._policies: dict[str, tuple[str, ...]] = self._load_policies()
@@ -361,21 +553,75 @@ class EquityDuckdbAdapter:
             name: self._source_unavailable_reason(spec) for name, spec in SOURCE_BY_NAME.items()
         }
         self._fields: dict[str, FieldSpec] = {
-            spec.field_id: spec
-            for spec in FIELD_SPECS
-            if self._source_reason[spec.source] is None
+            spec.field_id: spec for spec in FIELD_SPECS if self._source_reason[spec.source] is None
         }
         self._profile: dict[str, tuple[int, str]] = self._load_profile()
+        self._warn_lag_fallback()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
+        self._snapshot_id = field_contract_snapshot_id(ledger_snapshot_id, self._field_contract())
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
 
-    def _connect(self) -> duckdb.DuckDBPyConnection:
-        """카탈로그가 쓸 만하면 그것을 read_only 로 연다(매크로 호출용), 아니면 메모리 연결."""
-        return _open(self._catalog.path if self._catalog.usable else None)
+    def _field_contract(self) -> dict[str, object]:
+        """필드 계약 판의 입력 — 선언표·카탈로그 매크로·표 모양 코드 규칙(#235).
+
+        같은 원장 빌드에서도 선언의 식·랙·고르는 규칙, 매크로 본문(재무 TTM 등), 셀 종류·기업행위
+        대응표가 바뀌면 값이 달라진다. 선언은 id 키로 넘겨 순서에 흔들리지 않고, 사람용 문장
+        칸은 `canonical_revision` 이 뺀다. 매크로 본문은 `_checked_catalog` 가 경로를 접어 읽어
+        둔 것이고, 카탈로그를 쓸 수 없으면 매크로를 읽는 원천이 빠지므로 매크로도 싣지 않는다.
+        """
+        return {
+            "sources": {spec.name: spec for spec in SOURCE_SPECS},
+            "fields": {spec.field_id: spec for spec in FIELD_SPECS},
+            "macro_signatures": sorted(self._catalog.macros) if self._catalog.usable else [],
+            "macros": dict(self._catalog.bodies),
+            "cell_kinds": _FILL_KIND_TO_CELL,
+            "event_types": EVENT_TYPE_MAP,
+            "ratio_directed_event_types": RATIO_DIRECTED_EVENT_TYPES,
+        }
+
+    def _connect(self, sources: Iterable[SourceSpec]) -> duckdb.DuckDBPyConnection:
+        """`sources` 를 읽을 연결 — 매크로 원천이 있으면 카탈로그를 read_only 로 연다(#278).
+
+        표 원천은 parquet 를 절대 경로로 읽어(`TableBuild.parquet_source`) 메모리 연결로 충분하다.
+        매크로를 읽지 않는 질의(유니버스·표 원천 격자)까지 카탈로그를 열면, 부팅 뒤 다른 프로세스가
+        카탈로그를 쓰기 모드로 잡은 동안 그 질의도 실패한다. 백테스트 데이터는 층 이동 사건을
+        카탈로그 뷰로 읽어 카탈로그를 연다(#369). 쓸 수 없는 카탈로그(stale 등)는 열지 않는다 —
+        옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다. 잠김은 `_open_catalog` 가
+        코드화한다(#318).
+        """
+        macro = self._catalog.usable and any(source.is_macro for source in sources)
+        return _open_catalog(self._catalog.path) if macro else _open(None)
+
+    def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
+        """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 매크로 본문을 읽는다(#247·#235).
+
+        열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 쓸 수 없는 것으로 두고 매크로를 읽는
+        원천을 모두 빼고 경고한다(`catalog_unreadable`, meta 손상과 같은 규칙). 잠김·일시 오류는
+        부팅을 멈춘다. 읽은 본문은 경로를 테이블 이름으로 접어 필드 계약 판에 싣는다.
+        """
+        if not catalog.usable:
+            return catalog  # 사유와 경고는 `read_catalog` 가 이미 냈다
+        import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
+        try:
+            with _open(catalog.path) as con:
+                rows = con.execute(
+                    "SELECT function_name, macro_definition FROM duckdb_functions() "
+                    "WHERE NOT internal AND function_type IN ('macro', 'table_macro')"
+                ).fetchall()
+        except module.Error as error:
+            _raise_unless_persistent(error, catalog.path)
+            return unreadable_catalog(catalog.path, catalog.path, error)
+        bodies = ((str(name), _PARQUET_LIST.sub(_parquet_table, str(body))) for name, body in rows)
+        return replace(catalog, bodies=tuple(bodies))
 
     def _source(self, table: str) -> str:
         return self._tables[table].parquet_source()
+
+    def trading_sessions(self, start: date, end: date) -> tuple[date, ...]:
+        sessions = self._sessions
+        return sessions[bisect_left(sessions, start) : bisect_right(sessions, end)]
 
     def _load_sessions(self) -> tuple[date, ...]:
         con = _open(None)
@@ -401,13 +647,17 @@ class EquityDuckdbAdapter:
         """
         if PROFILE_TABLE not in self._tables:
             return {}
+        # 지연 import — 모듈 머리의 duckdb 는 TYPE_CHECKING 전용이라 except 절이 이름으로 참조하면
+        # 이 경로에서 NameError 가 난다(#245).
+        import duckdb as module
+
         con = _open(None)
         try:
             rows = con.execute(
                 "SELECT field_id, recommended_lag_sessions, available_date_basis "
                 f"FROM {self._source(PROFILE_TABLE)}"
             ).fetchall()
-        except duckdb.Error as exc:  # 컬럼이 없는 구판 표 — 폴백으로 내려간다
+        except module.Error as exc:  # 파일이 빠졌거나 컬럼이 없는 구판 표 — 진단을 담아 멈춘다
             raise EquityDuckdbSetupError(
                 f"{PROFILE_TABLE} exists but is unreadable — root={self._root} error={exc}"
             ) from exc
@@ -419,12 +669,39 @@ class EquityDuckdbAdapter:
             if field_id is not None and lag is not None
         }
 
+    def _warn_lag_fallback(self) -> None:
+        """대장(`dataset_profile`)에 랙 행이 없는 필드가 있으면 부팅 때 한 번 경고한다(이슈 #246).
+
+        폴백 상수는 원장 선언과 같게 맞췄지만, 원장 선언이 바뀌면 이 루트에서만 조용히 어긋난다.
+        근거 문자열의 `fallback` 표시만으로는 아무도 보지 않으므로 운영 로그에 남긴다.
+        """
+        fallback = sorted(field_id for field_id in self._fields if field_id not in self._profile)
+        if not fallback:
+            return
+        rest = len(fallback) - 10
+        shown = ", ".join(fallback[:10]) + (f" (+{rest})" if rest > 0 else "")
+        logger.warning(
+            f"{PROFILE_TABLE} 에 랙 행이 없는 필드는 어댑터의 폴백 랙(원천 상수)으로 읽는다 — "
+            "폴백 값은 원장 선언과 맞췄지만 원장이 바뀌면 조용히 어긋나므로 원장의 "
+            f"{PROFILE_TABLE}(S19)을 동기화해야 한다(`ledger_sync`) (profile_lag_fallback) — "
+            f"table_present={PROFILE_TABLE in self._tables} fields={len(fallback)} "
+            f"field_ids=[{shown}] root={self._root}"
+        )
+
     def _field_lag(self, field_id: str) -> tuple[int, str]:
-        """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 원천 상수 폴백."""
+        """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 필드·원천 상수 폴백.
+
+        폴백 상수는 원장 선언과 같은 값이다(이슈 #246). 한 원천 안에서 랙이 갈리는 필드는
+        `FieldSpec.lag_sessions` 가 원천 값을 덮는다.
+        """
         entry = self._profile.get(field_id)
         if entry is not None:
             return entry
-        source = SOURCE_BY_NAME[self._fields[field_id].source]
+        spec = self._fields[field_id]
+        source = SOURCE_BY_NAME[spec.source]
+        if spec.lag_sessions is not None:
+            basis = spec.lag_basis or source.lag_basis
+            return spec.lag_sessions, f"{basis} (fallback: no {PROFILE_TABLE} row)"
         return source.lag_sessions, f"{source.lag_basis} (fallback: no {PROFILE_TABLE} row)"
 
     def _load_policies(self) -> dict[str, tuple[str, ...]]:
@@ -448,23 +725,100 @@ class EquityDuckdbAdapter:
         return {universe_id: tuple(rules) for universe_id, rules in policies.items()}
 
     def _source_unavailable_reason(self, spec: SourceSpec) -> str | None:
-        """원천을 읽을 수 없으면 왜인지 — 미빌드 테이블 · stale 카탈로그 · 건너뛴 매크로."""
+        """원천을 읽을 수 없으면 왜인지 — 미빌드 테이블 · 쓸 수 없는 카탈로그 · 없는 매크로."""
         macros = {name for name in spec.requires if name.startswith("v_")}
         tables = [name for name in spec.requires if name not in macros]
         absent = [table for table in tables if table not in self._builds]
         if absent:
-            return f"equity tables not built — missing={absent} root={self._root}"
+            return (
+                f"원장 표가 없어 이 원천의 필드를 뺀다 — {LEDGER_SYNC} (table_missing) — "
+                f"missing={absent}"
+            )
         if not macros:
             return None
         if not self._catalog.usable:
             return self._catalog.reason
         skipped = [name for name in sorted(macros) if not self._catalog.has_macro(name)]
         if skipped:
-            return (
-                f"catalog macros not published (macros_skipped) — missing={skipped} "
-                f"catalog={self._catalog.path} macros={list(self._catalog.macros)}"
+            # 매크로를 더한 코드를 받고 카탈로그를 다시 만들지 않은 루트가 여기 온다(입력 표가 없는
+            # 경우는 위 표 검사가 먼저 거른다) — 부팅 로그에 남겨야 운영 안내대로 재생성한다
+            # (#292 리뷰 P2-2).
+            reason = (
+                f"카탈로그에 원천 {spec.name} 이 읽는 매크로가 없어 이 원천의 필드를 뺀다 — "
+                f"{CATALOG_REBUILD} (catalog_macro_missing) — missing={skipped} "
+                f"macros={list(self._catalog.macros)}"
             )
-        return None
+            logger.warning(f"{reason} catalog={self._catalog.path}")
+            return reason
+        return self._macro_unavailable_reason(spec)
+
+    def _macro_unavailable_reason(self, spec: SourceSpec) -> str | None:
+        """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 뺄 사유를 돌려준다.
+
+        매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
+        원천이 읽는 열(`required_columns`·가림 표시 `masked_expr`·그 원천 필드의 `available_expr`)이
+        없으면 `catalog_columns_missing` 으로 경고한다.
+        읽어 보지 않고 두면 커버율 질의가 원시 duckdb 오류를 던져 `list_fields()` 전체가 죽는다
+        (#233 리뷰 P2-1, #275 리뷰 P3-5). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
+        """
+        if not spec.is_macro:
+            return None
+        import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
+        try:
+            # 부팅 검사라 질의용 `_connect`(잠김을 run 실패로 코드화) 대신 카탈로그를 직접 연다 —
+            # 잠김은 아래 분류기가 부팅 문장으로 올린다. 여기 오는 원천은 카탈로그를 쓸 수 있을
+            # 때뿐이다
+            with _open(self._catalog.path) as con:
+                described = con.execute(
+                    f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
+                ).fetchall()
+        except module.Error as error:
+            # 스냅샷은 맞는데 매크로가 가리키는 parquet 가 빠졌거나 손상된 카탈로그 등 — 생성자
+            # 밖으로 던지면 어댑터 전체가 뜨지 못한다(#233 리뷰 후속). 이 원천만 빼고 사유를 남긴다.
+            # 연결도 같은 판정을 받는다 — 잠김·일시 오류는 빼지 않고 부팅을 멈춘다(#245·#247).
+            _raise_unless_persistent(error, self._catalog.path)
+            reason = (
+                f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
+                f"뺀다 — 원장 파일을 확인하고(`ledger_sync verify`) {CATALOG_REBUILD} "
+                f"(catalog_macro_unreadable) — error={type(error).__name__}"
+            )
+            logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
+            return reason
+        present = {str(row[0]) for row in described}
+        # 원천이 읽는 열 — 선언한 필수 열, 가림 표시 열(#298), 그 원천 필드의 공개일 열(#238)
+        read = (
+            *spec.required_columns,
+            spec.masked_expr,
+            *(f.available_expr for f in FIELD_SPECS if f.source == spec.name),
+        )
+        missing = [column for column in dict.fromkeys(read) if column and column not in present]
+        if not missing:
+            return None
+        reason = (
+            f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
+            f"필드를 뺀다 — {CATALOG_REBUILD} (catalog_columns_missing) — missing={missing}"
+        )
+        logger.warning(f"{reason} catalog={self._catalog.path}")
+        return reason
+
+    def _unfolded_event_unavailable_reason(self) -> str | None:
+        """백테스트 사건 피드가 읽는 원장 뷰 `v_unfolded_event`(#369)를 쓸 수 없으면 왜인지.
+
+        매크로 원천과 같은 카탈로그 규칙이다 — 표(`adj_factor`)로 돌아가 술어를 다시 적지 않는다.
+        없거나 낡은 카탈로그는 `read_catalog` 가 이미 경고했고, 매크로만 없는 루트(코드를 받고
+        카탈로그를 다시 만들지 않았다)는 여기서 부팅 로그에 남긴다.
+        """
+        if not self._catalog.usable:
+            return self._catalog.reason
+        if self._catalog.has_macro(UNFOLDED_MACRO):
+            return None
+        reason = (
+            f"카탈로그에 백테스트가 읽는 매크로 {UNFOLDED_MACRO} 가 없다 — {CATALOG_REBUILD} "
+            f"(catalog_macro_missing) — macros={list(self._catalog.macros)}"
+        )
+        logger.warning(f"실데이터 백테스트를 멈춘다 — {reason} catalog={self._catalog.path}")
+        return reason
 
     @property
     def backfill_end(self) -> date:
@@ -477,7 +831,7 @@ class EquityDuckdbAdapter:
             snapshot_id=self._snapshot_id,
             schema_version=SCHEMA_VERSION,
             built_at=max(build.built_at for build in self._tables.values()),
-            source=f"equity_duckdb:{self._root}",
+            source="equity_duckdb",
             point_in_time=True,
             dataset_revisions=tuple(
                 DatasetRevision(table, build.build_id, self.backfill_end)
@@ -523,12 +877,16 @@ class EquityDuckdbAdapter:
         """이 원천이 낼 수 있는 셀 종류 — 선언(`kind_expr`)에서 곧바로 나온다.
 
         `fill_kind` 축이 없는 원천은 값 유무만 있어 OBSERVED/MISSING 이다. 격자 3테이블은
-        `not_collected` 를 더 낸다. `SOURCE_OMITTED_ZERO` 는 어느 원천도 내지 않는다 —
-        equity 가 그 셀을 NULL 로 두고 도메인은 그 종류에 값을 요구해서다(`_FILL_KIND_TO_CELL`).
-        `COVERAGE_GAP` 도 내지 않는다: 구간·백필 밖은 셀 자체가 없다(합성 금지).
+        `not_collected` 를 더 내고, 원천 생략이 0 인 원천(`omitted_is_zero`)은 SOURCE_OMITTED_ZERO
+        를, 원장 뷰가 가리는 원천(`masked_expr`)은 MASKED 를 더 낸다. `COVERAGE_GAP` 은 내지
+        않는다: 구간·백필 밖은 셀 자체가 없다(합성 금지).
         """
-        base = (CellKind.OBSERVED, CellKind.MISSING)
-        return base if source.kind_expr is None else (*base, CellKind.NOT_COLLECTED)
+        kinds = (CellKind.OBSERVED, CellKind.MISSING)
+        if source.kind_expr is not None:
+            kinds = (*kinds, CellKind.NOT_COLLECTED)
+        if source.omitted_is_zero:
+            kinds = (*kinds, CellKind.SOURCE_OMITTED_ZERO)
+        return kinds if source.masked_expr is None else (*kinds, CellKind.MASKED)
 
     def _coverage(self) -> dict[str, tuple[float, date]]:
         """필드별 (커버율 %, 시작 세션). 한 번 재고 캐시한다.
@@ -539,11 +897,10 @@ class EquityDuckdbAdapter:
         """
         if self._coverage_cache is not None:
             return self._coverage_cache
-        con = self._connect()
+        grouped = self._fields_by_source(tuple(self._fields))
+        con = self._connect(SOURCE_BY_NAME[name] for name in grouped)
         try:
-            grid = con.execute(
-                f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}"
-            ).fetchone()
+            grid = con.execute(f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}").fetchone()
             n_grid = max(_as_int((grid or (0,))[0], "universe_daily rows"), 1)
             n_ticker = _as_int(
                 (
@@ -568,7 +925,7 @@ class EquityDuckdbAdapter:
                     "universe corps",
                 )
             out: dict[str, tuple[float, date]] = {}
-            for name, fields in self._fields_by_source(tuple(self._fields)).items():
+            for name, fields in grouped.items():
                 source = SOURCE_BY_NAME[name]
                 relation = self._relation(source, self.backfill_end)
                 where = f"WHERE {source.row_filter}" if source.row_filter else ""
@@ -577,13 +934,18 @@ class EquityDuckdbAdapter:
                     if source.mode is SourceMode.GRID
                     else (n_ticker if source.axis is SourceAxis.TICKER else n_corp)
                 )
-                group = (
-                    f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
-                )
+                group = f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
                 for field_id in fields:
                     expr = self._fields[field_id].expr
                     if source.mode is SourceMode.GRID:
-                        sql = f"SELECT count({expr}) FROM {relation} {where}"
+                        # 원천 생략이 0 인 원천은 그 칸도 값 0 으로 나간다(`_cell_kind`, #371)
+                        omitted = (
+                            f" + count(*) FILTER (WHERE {expr} IS NULL "
+                            f"AND {source.kind_expr} = 'src_omitted')"
+                            if source.omitted_is_zero
+                            else ""
+                        )
+                        sql = f"SELECT count({expr}){omitted} FROM {relation} {where}"
                     else:
                         sql = (
                             f"SELECT count(DISTINCT k) FROM (SELECT {source.key_column} AS k, "
@@ -603,9 +965,7 @@ class EquityDuckdbAdapter:
         """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다."""
         if source.mode is SourceMode.GRID:
             return self._sessions[0]
-        row = con.execute(
-            f"SELECT min({source.available_expr}) FROM {relation} {where}"
-        ).fetchone()
+        row = con.execute(f"SELECT min({source.available_expr}) FROM {relation} {where}").fetchone()
         first = row[0] if row is not None else None
         if first is None:
             return self._sessions[0]
@@ -629,7 +989,7 @@ class EquityDuckdbAdapter:
             else ""
         )
         name_expr = "sec.name_current" if SECURITY_TABLE in self._tables else "NULL"
-        con = self._connect()
+        con = _open(None)
         try:
             rows = con.execute(
                 f"""
@@ -671,6 +1031,19 @@ class EquityDuckdbAdapter:
             )
         return UniverseHistoryResult(points, DataLoadStatus.OK, self._snapshot_id)
 
+    def universe_securities(
+        self, market: str, universe_id: str, as_of: date
+    ) -> tuple[SecurityRef, ...]:
+        """관측 질의와 같은 시장·유니버스로 그날 종목의 이름·티커를 준다(lang2 P4-03 기준일 요약).
+
+        이름은 `load_universe` 가 종목 마스터에서 붙인 것이다. 모르는 시장·유니버스·날짜면 빈
+        튜플이다.
+        """
+        if market != MARKET or universe_id not in self._policies:
+            return ()
+        result = self.load_universe(UniverseHistoryQuery(venue=VENUE, start=as_of, end=as_of))
+        return next((point.members for point in result.points if point.session == as_of), ())
+
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         unknown = self._unknown_fields(query.field_ids)
         if unknown:
@@ -698,7 +1071,7 @@ class EquityDuckdbAdapter:
                 DataLoadStatus.INVALID_QUERY,
                 self._snapshot_id,
                 (),
-                f"unknown security_id — not in {SPAN_TABLE}: {unknown_ids} root={self._root}",
+                f"unknown security_id — not in {SPAN_TABLE}: {unknown_ids}",
             )
         lags = self._lags(query.field_ids, tuple(query.lag_overrides))
         window = self._window(query.start, query.end, 0)
@@ -736,7 +1109,7 @@ class EquityDuckdbAdapter:
             status=DataLoadStatus.OK if cells else DataLoadStatus.NO_DATA,
             snapshot_id=self._snapshot_id,
             warnings=panel.warnings,
-            detail=None if cells else f"no panel cells — query={query} root={self._root}",
+            detail=None if cells else f"no panel cells — query={query}",
         )
 
     # ── FactorMetadataPort · FactorObservationPort ────────────────────────────
@@ -750,11 +1123,36 @@ class EquityDuckdbAdapter:
                     field_id=field_id,
                     unit=self._fields[field_id].unit,
                     value_type=NodeValueType.NUMERIC_SERIES,
+                    adjusted_field_id=self._fields[field_id].adjusted_field_id,
                 )
                 for field_id in field_ids
                 if field_id in self._fields
             ),
         )
+
+    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
+        """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다.
+
+        그룹 필드(`group_series`)는 주지 않으므로 그래프의 그룹 연산은 compile 에서 unsupported
+        다. P2-08 스파이크가 원장을 확인했다: `dataset_profile` 의 `classification.sector` 는 시점
+        축 없는 KSIC 현재값(`point_in_time=false`)이고, WICS `sector_snapshot` 은 스냅샷 하나뿐이라
+        과거 세션에 값이 없다. 월별 WICS 백필(`database/docs/WICS_PROBE.md` 7-5절, 라이선스 미결)이
+        들어와야 PIT 그룹 필드를 낼 수 있다.
+        """
+        return self.resolve_factor_fields(tuple(self._fields)).fields
+
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """선언했지만 주지 않는 필드 → 사유(#316). compile 진단과 질의 거절이 같은 표를 읽는다.
+
+        부팅 검사가 원천을 뺀 필드는 그 원천의 사유(조치 `CATALOG_REBUILD`·`LEDGER_SYNC`)이고,
+        원장에 없는 필드(`UNSUPPORTED_FIELDS`)는 `FIELD_NOT_IN_LEDGER` 한 문장이다.
+        """
+        reasons = {
+            spec.field_id: reason
+            for spec in FIELD_SPECS
+            if (reason := self._source_reason[spec.source]) is not None
+        }
+        return reasons | dict.fromkeys(UNSUPPORTED_FIELDS, FIELD_NOT_IN_LEDGER)
 
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
@@ -778,7 +1176,8 @@ class EquityDuckdbAdapter:
             for field_id in query.required_field_ids:
                 found = self._cell(panel, row, field_id, lags[field_id])
                 if found is not None:
-                    fields.append(FactorFieldValue(field_id, found.value))
+                    masked = found.kind is CellKind.MASKED
+                    fields.append(FactorFieldValue(field_id, found.value, masked=masked))
             observations.append(
                 FactorObservation(
                     as_of=row.session,
@@ -826,7 +1225,9 @@ class EquityDuckdbAdapter:
         `checkpoint` 는 (1) duckdb 로 내려가기 전 1회, (2) 행 조립 루프에서
         `_CHECKPOINT_ROWS` 행마다, (3) `RawObservationSet` 계약 검증 중
         (`validation_checkpoint`) 호출된다. 콜백이 던지는 예외는 그대로 올라간다 —
-        정책은 애플리케이션 소유다. duckdb 질의 자체는 원자적이라 그 안에서는 끊지 못한다.
+        정책은 애플리케이션 소유다. duckdb 질의 동안은 감시 스레드가 불러 취소면 질의를 끊는다
+        (`_fetchall`, #160). checkpoint 없이 가장 오래 도는 구간은 관측 정렬이다(실원장 6개월
+        구간 약 0.3초).
         """
 
         def failure(status: DataLoadStatus, detail: str) -> RawObservationSet:
@@ -885,8 +1286,9 @@ class EquityDuckdbAdapter:
                         field_id=field_id,
                         value=found.value,
                         available_date=found.available_date,
-                        # load_panel 과 **같은 `_Observed.kind`** 를 쓴다 — 값이 있으면 OBSERVED,
-                        # 없으면 격자 테이블의 `fill_kind` 가 말하는 종류(없으면 MISSING)다.
+                        # load_panel 과 **같은 `_Observed.kind`**(`_cell_kind`)를 쓴다 — 원장 뷰가
+                        # 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 격자 테이블의
+                        # `fill_kind` 가 말하는 종류(없으면 MISSING)다.
                         # 값 있는 셀을 OBSERVED 밖으로 보내면 포트 계약이 생성 시점에 깨지고,
                         # 두 포트가 다른 규칙을 쓰면 kind 가 셀 단위로 어긋난다.
                         kind=found.kind,
@@ -914,7 +1316,7 @@ class EquityDuckdbAdapter:
                 None
                 if observations
                 else f"no members in universe — universe_id={query.universe_id} "
-                f"start={query.start} end={query.end} root={self._root}"
+                f"start={query.start} end={query.end}"
             ),
             warnings=tuple(sorted({*window.warnings, *panel.warnings})),
             validation_checkpoint=checkpoint,
@@ -928,7 +1330,8 @@ class EquityDuckdbAdapter:
     # ── BacktestDataPort ──────────────────────────────────────────────────────
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
-        """원주가 bar + 구간 + adj_factor 사건. `BacktestDataset` 에 status 가 없어 실패는 예외."""
+        """원주가 bar + 구간 + adj_factor 사건. `BacktestDataset` 에 status 가 없어 실패는 예외다 —
+        모르거나 형식이 틀린 종목 id 는 `BacktestDataUnavailableError`(#361)."""
         requested = list(query.security_ids)
         if query.benchmark_security_id is not None and query.benchmark_security_id not in requested:
             requested.append(query.benchmark_security_id)
@@ -936,7 +1339,7 @@ class EquityDuckdbAdapter:
         for security_id in requested:
             item = _parse_security_id(security_id)
             if item is None:
-                raise ValueError(
+                raise BacktestDataUnavailableError(
                     f"malformed security_id — expected <ticker>{SECURITY_ID_SEP}<span_seq> "
                     f"got={security_id!r} (benchmark idx:* is not served — GAP-09)"
                 )
@@ -947,16 +1350,25 @@ class EquityDuckdbAdapter:
         }
         unknown = sorted(sid for sid, key in parsed.items() if key not in spans)
         if unknown:
-            raise ValueError(
-                f"unknown security_id — not in {SPAN_TABLE}: {unknown} root={self._root}"
+            raise BacktestDataUnavailableError(
+                f"unknown security_id — not in {SPAN_TABLE}: {unknown}"
             )
         if FACTOR_TABLE not in self._builds:
-            raise EquityDuckdbSetupError(
-                f"{FACTOR_TABLE} not built — a backtest without the corporate-action feed is "
-                f"silently wrong across splits; root={self._root}"
+            raise BacktestDataNotReadyError(
+                f"원장 표 {FACTOR_TABLE} 이 없어 백테스트를 멈춘다 — 기업행위 사건 없이 돌리면 "
+                f"분할·병합 구간의 손익이 조용히 틀린다. {LEDGER_SYNC} (table_missing)"
+            )
+        if self._event_feed_reason is not None:
+            raise BacktestDataNotReadyError(
+                f"원장이 접지 못한 층 이동({UNFOLDED_MACRO})을 읽지 못해 백테스트를 멈춘다 — 사건 "
+                f"없이 돌리면 그 종목을 든 동안 손익이 층 배수만큼 튄다 — {self._event_feed_reason}"
             )
         tickers = tuple(sorted({ticker for ticker, _ in parsed.values()}))
-        con = self._connect()
+        # 워밍업은 start 앞 거래일 달력으로 센다(`_window` 와 같은 달력). 모자라면 있는 만큼 읽는다.
+        warmup = query.history_sessions_before_start
+        first = max(bisect_left(self._sessions, query.start) - warmup, 0)
+        read_from = min(query.start, self._sessions[first]) if warmup else query.start
+        con = _open_catalog(self._catalog.path)  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
         try:
             price_columns = {
                 str(row[0])
@@ -964,35 +1376,52 @@ class EquityDuckdbAdapter:
                     f"DESCRIBE SELECT * FROM {self._source(PRICE_TABLE)}"
                 ).fetchall()
             }
-            basis_expr = (
-                BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
-            )
+            basis_expr = BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
             price_rows = con.execute(
                 f"""
-                SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
+                SELECT ticker, date, open, high, low, close, volume_shr, value_krw, price_kind,
                        {basis_expr} AS basis
                 FROM {self._source(PRICE_TABLE)}
-                WHERE ticker IN (SELECT unnest(?::VARCHAR[]))
-                  AND date BETWEEN {_lit(query.start)} AND {_lit(query.end)}
+                WHERE ticker IN (SELECT {_KEYS_SQL})
+                  AND date BETWEEN {_lit(read_from)} AND {_lit(query.end)}
                 ORDER BY ticker, date
                 """,
-                [list(tickers)],
+                [_keys_param(tickers)],
             ).fetchall()
-            factor_columns = {
-                str(row[0])
-                for row in con.execute(
-                    f"DESCRIBE SELECT * FROM {self._source(FACTOR_TABLE)}"
-                ).fetchall()
-            }
-            ts_column = "apply_date" if "apply_date" in factor_columns else "effective_date"
             factor_rows = con.execute(
                 f"""
-                SELECT ticker, event_id, event_type, share_factor, {ts_column}
+                SELECT ticker, event_id, event_type, share_factor, apply_date
                 FROM {self._source(FACTOR_TABLE)}
-                WHERE factor_ok AND ticker IN (SELECT unnest(?::VARCHAR[]))
-                ORDER BY ticker, {ts_column}, event_id
+                WHERE factor_ok AND ticker IN (SELECT {_KEYS_SQL})
+                ORDER BY ticker, apply_date, event_id
                 """,
-                [list(tickers)],
+                [_keys_param(tickers)],
+            ).fetchall()
+            # 원장이 접지 못한 층 이동(`v_unfolded_event` 의 `factor_ok` 거짓 행)과 적용일
+            # KRX 기준가, 그 앞 행 종가. PIT: 기준가는 적용일 개장 전에 공표되는 값이라 수량
+            # 조정이 미래 가격을 읽지 않는다. 어느 재설정이 미접힘인지는 원장이 다음 세션
+            # 정보로 가르지만(뷰의 PIT 예외) 수량 조정은 들고 있는 포지션의 회계라 전략
+            # 판단(target tape)이 읽지 않는다. 앞 행은 정지일 기준가 행을 포함한다 — 원장
+            # 기준가 원천이 비를 재는 분모(`sql/adj_factor.sql` bp)와 같아, 한 정지 구간에
+            # 재설정이 여럿이어도 비가 겹쳐 곱해지지 않는다.
+            unfolded_rows = con.execute(
+                f"""
+                WITH ev AS (
+                    SELECT ticker, apply_date FROM {UNFOLDED_MACRO}({_lit(query.end)})
+                    WHERE NOT factor_ok AND apply_date >= {_lit(read_from)}
+                      AND ticker IN (SELECT {_KEYS_SQL})
+                ),
+                px AS (
+                    SELECT ticker, date, close, base_price_krw FROM {self._source(PRICE_TABLE)}
+                    WHERE ticker IN (SELECT ticker FROM ev)
+                )
+                SELECT e.ticker, e.apply_date, p.close, b.base_price_krw
+                FROM ev e
+                LEFT JOIN px b ON b.ticker = e.ticker AND b.date = e.apply_date
+                ASOF LEFT JOIN px p ON p.ticker = e.ticker AND e.apply_date > p.date
+                ORDER BY e.ticker, e.apply_date
+                """,
+                [_keys_param(tickers)],
             ).fetchall()
         finally:
             con.close()
@@ -1000,34 +1429,36 @@ class EquityDuckdbAdapter:
         for security_id, key in parsed.items():
             by_ticker.setdefault(key[0], []).append((security_id, key))
         bars: list[MarketBarRecord] = []
+        history_bars: list[MarketBarRecord] = []
         n_reference = 0
-        n_invalid = 0
+        invalid_bars: list[InvalidBarRecord] = []
         n_provisional = 0
-        for ticker, raw_date, open_, high, low, close, volume, kind, basis in price_rows:
+        for ticker, raw_date, open_, high, low, close, volume, value, kind, basis in price_rows:
             session = _as_date(raw_date, "price_daily.date")
             if basis is not None and str(basis) != CONFIRMED_BASIS:
-                # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다(엔진 어댑터
-                # `backtest_engine/adapters/equity_duckdb.py` 와 같은 판단). 구간 루프 **밖**에서
+                # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다. 구간 루프 **밖**에서
                 # 세는 이유: `security_span` 은 KRX 축(stg_listing_daily)이라 저녁 판에서도 D 에
                 # 멈춰 T 행이 아래 구간 필터에 조용히 걸린다 — 안에서 세면 건수가 0 이 된다.
                 n_provisional += 1
                 continue
+            # 워밍업 행은 bar 와 같은 규칙으로 거르되 측정 구간 경고(버린 행 수)에는 세지 않는다.
+            measured = session >= query.start
             for security_id, key in by_ticker[str(ticker)]:
                 span = spans[key]
                 if not span.first_date <= session <= span.last_date:
                     continue
                 if kind == REFERENCE_KIND:
-                    n_reference += 1  # 기준가·정지일 — 커널 규약: 방출하지 않는다
+                    n_reference += int(measured)  # 기준가·정지일 — 커널 규약: 방출하지 않는다
                     continue
                 prices = [_as_float(v, "price") for v in (open_, high, low, close)]
-                if any(p is None or p <= 0 for p in prices):
-                    n_invalid += 1  # GAP-14(open NULL ∧ volume>0) 류 — Bar 가 거절하는 행
+                o, h, lo, c = (0.0 if p is None else float(p) for p in prices)
+                if min(o, h, lo, c) <= 0 or h < max(o, c) or lo > min(o, c):
+                    # GAP-14(open NULL ∧ volume>0) 류 — Bar 가 거절하는 행. 거래된 날이라 정지와
+                    # 가를 수 있게 세션을 넘긴다(이슈 #241).
+                    if measured:
+                        invalid_bars.append(InvalidBarRecord(session, security_id))
                     continue
-                o, h, lo, c = (float(p) for p in prices if p is not None)
-                if h < max(o, c) or lo > min(o, c):
-                    n_invalid += 1
-                    continue
-                bars.append(
+                (bars if measured else history_bars).append(
                     MarketBarRecord(
                         session=session,
                         security_id=security_id,
@@ -1036,16 +1467,31 @@ class EquityDuckdbAdapter:
                         low=lo,
                         close=c,
                         volume=_as_int(volume, "volume_shr"),
+                        trading_value=_as_float(value, "value_krw"),
                     )
                 )
         actions: list[CorporateActionRecord] = []
+        history_actions: list[CorporateActionRecord] = []
+
+        def holders(ticker: object, session: date) -> list[str]:
+            """구간이 세션을 품는 요청 종목 id. 읽은 창 [read_from, end] 밖 세션이면 없다."""
+            return [
+                security_id
+                for security_id, key in by_ticker[str(ticker)]
+                if spans[key].first_date <= session <= spans[key].last_date
+                and read_from <= session <= query.end
+            ]
+
+        def record(session: date, security_id: str, kind: str, ratio: float, detail: str) -> None:
+            # 창 앞 워밍업 사건은 엔진에 넘기지 않는다 — 충격 σ 가 분할 날 수익률을 빼는 데만 쓴다
+            (actions if session >= query.start else history_actions).append(
+                CorporateActionRecord(session, security_id, kind, repr(ratio), detail)
+            )
+
         for ticker, event_id, event_type, share_factor, raw_ts in factor_rows:
             if raw_ts is None:
-                raise ValueError(
-                    f"{ts_column} is NULL on a factor_ok row — event_id={event_id} "
-                    f"root={self._root}"
-                )
-            session = _as_date(raw_ts, ts_column)
+                raise ValueError(f"apply_date is NULL on a factor_ok row — event_id={event_id}")
+            session = _as_date(raw_ts, "apply_date")
             ratio = _as_float(share_factor, "share_factor")
             if str(event_type) in RATIO_DIRECTED_EVENT_TYPES:
                 if ratio is None or ratio == 1:
@@ -1068,20 +1514,41 @@ class EquityDuckdbAdapter:
                     f"share_factor direction contradicts event_type — event_id={event_id} "
                     f"event_type={event_type} share_factor={share_factor!r}"
                 )
-            for security_id, key in by_ticker[str(ticker)]:
-                span = spans[key]
-                in_span = span.first_date <= session <= span.last_date
-                if in_span and query.start <= session <= query.end:
-                    actions.append(
-                        CorporateActionRecord(
-                            session=session,
-                            security_id=security_id,
-                            action_type=action_type,
-                            ratio=repr(ratio),
-                            detail=str(event_id),
+            for security_id in holders(ticker, session):
+                record(session, security_id, action_type, ratio, str(event_id))
+        # 원장이 접지 못한 층 이동(#369)은 적용일 KRX 기준가 비(앞 행 종가 ÷ 기준가)만큼
+        # 보유 수량을 바꾸는 분할·병합으로 싣고 사건마다 경고한다. 원장은 그날의 기준가
+        # 후보(기준가와 앞 행 종가가 있는 행)에서만 이 사건을 내므로 비를 못 세우면 원장
+        # 모순이다 — 조정 없이 층 배수를 손익에 넣지 않고 멈춘다.
+        unfolded: list[DataWarning] = []
+        for ticker, raw_session, prev_close, base_price in unfolded_rows:
+            session = _as_date(raw_session, f"{UNFOLDED_MACRO}.apply_date")
+            prev = _as_float(prev_close, "price_daily.close")
+            base = _as_float(base_price, "price_daily.base_price_krw")
+            if not (prev and base and min(prev, base) > 0):
+                raise ValueError(
+                    "unfolded level shift without a base-price ratio — the ledger emits these "
+                    f"only on base-price candidates — ticker={ticker} apply_date={session} "
+                    f"prev_close={prev_close!r} base_price_krw={base_price!r}"
+                )
+            ratio = prev / base
+            prices = f"prev_close={prev_close} base={base_price}"
+            for security_id in holders(ticker, session):
+                kind = "split" if ratio > 1 else "reverse_split"
+                record(session, security_id, kind, ratio, f"원장 미접힘·기준가 비 {prices}")
+                if session >= query.start:
+                    unfolded.append(
+                        DataWarning(
+                            code="equity.unfolded_level_shift",
+                            message=(
+                                "원장이 계수를 내지 못한 층 이동을 적용일 KRX 기준가 비로 보유 "
+                                f"수량을 조정하는 사건으로 실었다 — {security_id}@{session} "
+                                f"ratio={ratio!r} {prices}"
+                            ),
                         )
                     )
-        bars.sort(key=lambda bar: (bar.session, bar.security_id))
+        for records in (bars, history_bars):
+            records.sort(key=lambda bar: (bar.session, bar.security_id))
         actions.sort(key=lambda action: (action.session, action.security_id, action.detail))
         # 창 안 마지막 bar 뒤에 오는 사건(정지 중 감자·병합 뒤 상폐)은 엔진이 정산할 세션이 없어
         # run 전체를 죽인다(`CorporateActionWithoutBar`, engine/loop.py). 그 포지션은 이미 마지막
@@ -1110,7 +1577,7 @@ class EquityDuckdbAdapter:
             DataWarning(
                 code="equity.reference_rows_dropped",
                 message=(
-                    f"price_kind='reference' rows (기준가·정지일) are not emitted as bars — "
+                    "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
                     f"dropped={n_reference}"
                 ),
                 severity=WarningSeverity.INFO,
@@ -1121,19 +1588,19 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.provisional_rows_dropped",
                     message=(
-                        f"price_daily.basis <> '{CONFIRMED_BASIS}' rows (저녁 잠정판 T 세션 — "
-                        f"KRX 확정 전 키움 종가) are not emitted as bars — "
+                        f"price_daily.basis <> '{CONFIRMED_BASIS}' 행(저녁 잠정판 T 세션 — "
+                        "KRX 확정 전 키움 종가)은 bar로 내보내지 않았다 — "
                         f"dropped={n_provisional}"
                     ),
                 )
             )
-        if n_invalid:
+        if invalid_bars:
             warnings.append(
                 DataWarning(
                     code="equity.invalid_ohlc_rows_dropped",
                     message=(
-                        f"rows with NULL/non-positive or inconsistent OHLC dropped (GAP-14) — "
-                        f"dropped={n_invalid}"
+                        "OHLC가 NULL·0 이하이거나 서로 맞지 않는 행을 버렸다(GAP-14) — "
+                        f"dropped={len(invalid_bars)}"
                     ),
                 )
             )
@@ -1142,8 +1609,8 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.corporate_action_without_bar_dropped",
                     message=(
-                        "corporate actions with no traded bar at/after the event inside the "
-                        "window were dropped (position frozen at its last trade) — "
+                        "창 안에서 사건 세션이나 그 뒤에 거래된 bar가 없는 기업 행동을 뺐다"
+                        "(포지션은 마지막 체결가에 동결된다) — "
                         f"dropped={len(unsettleable)} "
                         + ", ".join(
                             f"{a.security_id}@{a.session}:{a.action_type}"
@@ -1152,6 +1619,7 @@ class EquityDuckdbAdapter:
                     ),
                 )
             )
+        warnings.extend(unfolded)
         return BacktestDataset(
             data_snapshot_id=self._snapshot_id,
             bars=tuple(bars),
@@ -1159,6 +1627,9 @@ class EquityDuckdbAdapter:
             corporate_actions=tuple(actions),
             benchmark_security_id=query.benchmark_security_id,
             warnings=tuple(warnings),
+            invalid_bars=tuple(invalid_bars),
+            history_bars=tuple(history_bars),
+            history_corporate_actions=tuple(history_actions),
         )
 
     # ── 패널 코어 ─────────────────────────────────────────────────────────────
@@ -1167,13 +1638,8 @@ class EquityDuckdbAdapter:
         unknown = sorted(set(field_ids) - set(self._fields))
         if not unknown:
             return None
-        notes = []
-        for field_id in unknown:
-            if field_id in UNSUPPORTED_FIELDS:
-                notes.append(f"{field_id}: {UNSUPPORTED_FIELDS[field_id]}")
-            elif field_id in FIELD_BY_ID:
-                reason = self._source_reason[FIELD_BY_ID[field_id].source]
-                notes.append(f"{field_id}: {reason}")
+        reasons = self.unavailable_factor_fields()
+        notes = [f"{field_id}: {reasons[field_id]}" for field_id in unknown if field_id in reasons]
         detail = (
             f"unavailable field_id — unknown_fields={unknown} "
             f"supported={sorted(self._fields)} (mock 대체 없음)."
@@ -1198,17 +1664,18 @@ class EquityDuckdbAdapter:
         if start < self._sessions[0] or end > self.backfill_end:
             return (
                 f"query outside coverage — start={start} end={end} "
-                f"calendar={self._sessions[0]}..{self.backfill_end} root={self._root}"
+                f"calendar={self._sessions[0]}..{self.backfill_end}"
             )
         first = bisect_left(self._sessions, start)
         last = bisect_right(self._sessions, end)
         if first >= last:
-            return f"no sessions in range — start={start} end={end} root={self._root}"
+            return f"no sessions in range — start={start} end={end}"
         history_first = first - history
         warnings: tuple[str, ...] = ()
         if history_first < 0:
             warnings = (
-                f"insufficient calendar for warm-up history — requested={history} "
+                "워밍업 이력에 쓸 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"requested={history} "
                 f"available={first} calendar_start={self._sessions[0]} start={start}",
             )
             history_first = 0
@@ -1225,8 +1692,8 @@ class EquityDuckdbAdapter:
         try:
             rows = con.execute(
                 f"SELECT ticker, span_seq, first_date, last_date FROM {self._source(SPAN_TABLE)} "
-                "WHERE ticker IN (SELECT unnest(?::VARCHAR[])) ORDER BY ticker, span_seq",
-                [list(tickers)],
+                f"WHERE ticker IN (SELECT {_KEYS_SQL}) ORDER BY ticker, span_seq",
+                [_keys_param(tickers)],
             ).fetchall()
         finally:
             con.close()
@@ -1270,7 +1737,8 @@ class EquityDuckdbAdapter:
         `tickers` 가 없으면 `predicate` 가 창 안에서 한 번이라도 참인 종목 집합(정책 driven)이고,
         있으면 그 종목이다. GRID 원천은 랙만큼 앞 세션까지 더 읽고, LATEST 원천은 창 끝까지의
         관측을 전부 읽어 세션별 컷오프를 파이썬에서 bisect 한다. `progress` 는 격자(0~0.9)와
-        LATEST 원천(~1.0) 진행을, `checkpoint` 는 격자 행 조립 중 협조적 취소를 받는다.
+        LATEST 원천(~1.0) 진행을, `checkpoint` 는 duckdb 질의·격자 행·LATEST 관측 조립 중
+        협조적 취소를 받는다.
         """
         grouped = self._fields_by_source(field_ids)
         grid_sources = [name for name in grouped if SOURCE_BY_NAME[name].mode is SourceMode.GRID]
@@ -1280,7 +1748,8 @@ class EquityDuckdbAdapter:
         warnings: list[str] = []
         if first_index - max_lag < 0 and max_lag > 0:
             warnings.append(
-                f"insufficient calendar for lag — max_lag={max_lag} "
+                "랙만큼 거슬러 올라갈 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"max_lag={max_lag} "
                 f"first_session={window.sessions[0]} calendar_start={self._sessions[0]}"
             )
         fetch_start, fetch_end = self._sessions[fetch_first], window.sessions[-1]
@@ -1300,7 +1769,7 @@ class EquityDuckdbAdapter:
         ]
         corp_by_ticker: dict[str, str] = {}
         if any(SOURCE_BY_NAME[name].axis is SourceAxis.CORP for name in latest_sources):
-            corp_by_ticker = self._corp_map(panel_tickers)
+            corp_by_ticker = self._corp_map(panel_tickers, checkpoint=checkpoint)
         latest: dict[str, dict[str, _LatestSeries]] = {}
         for name in latest_sources:
             source = SOURCE_BY_NAME[name]
@@ -1309,7 +1778,9 @@ class EquityDuckdbAdapter:
                 if source.axis is SourceAxis.TICKER
                 else tuple(sorted(set(corp_by_ticker.values())))
             )
-            latest[name] = self._latest(source, grouped[name], keys, fetch_end)
+            latest[name] = self._latest(
+                source, grouped[name], keys, fetch_end, checkpoint=checkpoint
+            )
         progress(1.0)
         return _Panel(rows, latest, corp_by_ticker, tuple(warnings))
 
@@ -1336,9 +1807,9 @@ class EquityDuckdbAdapter:
         selection = (
             "SELECT DISTINCT ticker FROM u WHERE member"
             if tickers is None
-            else "SELECT unnest(?::VARCHAR[]) AS ticker"
+            else f"SELECT {_KEYS_SQL} AS ticker"
         )
-        params: list[object] = [] if tickers is None else [list(tickers)]
+        params: list[object] = [] if tickers is None else [_keys_param(tickers)]
         joins: list[str] = []
         selects: list[str] = []
         layout: list[tuple[str, tuple[str, ...]]] = []
@@ -1360,7 +1831,8 @@ class EquityDuckdbAdapter:
                 where.append(f"({source.row_filter})")
             picked = (
                 f"SELECT {source.key_column} AS k, date AS d, {source.available_expr} AS av, "
-                f"{source.content_expr} AS ct, {source.kind_expr or 'NULL'} AS kd, {columns} "
+                f"{source.content_expr} AS ct, {source.kind_expr or 'NULL'} AS kd, "
+                f"{source.masked_expr or 'FALSE'} AS mk, {columns} "
                 f"FROM {self._relation(source, fetch_end)} WHERE {' AND '.join(where)}"
             )
             if source.pick_order is not None:
@@ -1372,11 +1844,10 @@ class EquityDuckdbAdapter:
                     f"date ORDER BY {source.pick_order}) = 1"
                 )
             joins.append(
-                f"LEFT JOIN ({picked}) g{index} "
-                f"ON g{index}.k = r.ticker AND g{index}.d = r.date"
+                f"LEFT JOIN ({picked}) g{index} ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
-                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, "
+                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, g{index}.mk, "
                 + ", ".join(f"g{index}.c{position}" for position in range(len(fields)))
             )
             layout.append((name, fields))
@@ -1398,9 +1869,9 @@ class EquityDuckdbAdapter:
             {" ".join(joins)}
             ORDER BY r.date, r.ticker, r.span_seq
         """
-        con = self._connect()
+        con = self._connect(SOURCE_BY_NAME[name] for name in grid_sources)
         try:
-            raw_rows = con.execute(sql, params).fetchall()
+            raw_rows = _fetchall(con, sql, params, checkpoint)
         finally:
             con.close()
         progress(_GRID_FETCHED)
@@ -1418,17 +1889,23 @@ class EquityDuckdbAdapter:
                 available = raw[offset + 1]
                 content = raw[offset + 2]
                 fill_kind = raw[offset + 3]
+                masked = bool(raw[offset + 4])
                 if present and available is not None and content is not None:
                     source = SOURCE_BY_NAME[name]
                     for position, field_id in enumerate(fields):
-                        value = _as_float(raw[offset + 4 + position], field_id)
+                        value, kind = _cell_kind(
+                            _as_float(raw[offset + 5 + position], field_id),
+                            fill_kind,
+                            masked,
+                            source.omitted_is_zero,
+                        )
                         cells[field_id] = _Observed(
                             value,
                             _as_date(available, f"{source.relation}.{source.available_expr}"),
                             _as_date(content, f"{source.relation}.{source.content_expr}"),
-                            _cell_kind(value, fill_kind),
+                            kind,
                         )
-                offset += 4 + len(fields)
+                offset += 5 + len(fields)
             row = _Row(
                 session=session,
                 ticker=ticker,
@@ -1439,24 +1916,27 @@ class EquityDuckdbAdapter:
             key = (ticker, session)
             if key in rows:
                 raise EquityDuckdbSetupError(
-                    f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key} "
-                    f"root={self._root}"
+                    f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key}"
                 )
             rows[key] = row
         progress(1.0)
         return rows
 
-    def _corp_map(self, tickers: Sequence[str]) -> dict[str, str]:
+    def _corp_map(
+        self, tickers: Sequence[str], *, checkpoint: Callable[[], None]
+    ) -> dict[str, str]:
         """티커 → 법인. `corp_ticker` 는 시점축 없는 현재 스냅샷이다(DESIGN §4-5 6)."""
         if not tickers or CORP_TICKER_TABLE not in self._builds:
             return {}
         con = _open(None)
         try:
-            rows = con.execute(
+            rows = _fetchall(
+                con,
                 f"SELECT ticker, corp_code FROM {self._source(CORP_TICKER_TABLE)} "
-                "WHERE ticker IN (SELECT unnest(?::VARCHAR[])) AND corp_code IS NOT NULL",
-                [list(tickers)],
-            ).fetchall()
+                f"WHERE ticker IN (SELECT {_KEYS_SQL}) AND corp_code IS NOT NULL",
+                [_keys_param(tickers)],
+                checkpoint,
+            )
         finally:
             con.close()
         return {str(ticker): str(corp) for ticker, corp in rows}
@@ -1467,21 +1947,33 @@ class EquityDuckdbAdapter:
         fields: tuple[str, ...],
         keys: Sequence[str],
         fetch_end: date,
+        *,
+        checkpoint: Callable[[], None],
     ) -> dict[str, _LatestSeries]:
-        """축 키 → `available_date` 오름차순 관측열. `reduce` 가 grain 을 (키, 공개일)로 줄인다."""
+        """축 키 → `available_date` 오름차순 관측열. `reduce` 가 grain 을 (키, 공개일)로 줄인다.
+
+        `checkpoint` 는 질의 동안(`_fetchall`)과 관측 조립 중 `_CHECKPOINT_ROWS` 행마다 부른다.
+        """
         if not keys:
             return {}
-        columns = ", ".join(
-            f"{self._fields[field_id].expr} AS c{position}"
+        outputs = {
+            f"c{position}": self._fields[field_id].expr for position, field_id in enumerate(fields)
+        }
+        # 행보다 늦게 공개되는 필드(재무 TTM, #238)는 값 뒤에 그 공개일 열을 함께 읽는다.
+        late = {
+            position: expr
             for position, field_id in enumerate(fields)
-        )
+            if (expr := self._fields[field_id].available_expr) is not None
+        }
+        outputs |= {f"a{position}": expr for position, expr in late.items()}
+        columns = ", ".join(f"{expr} AS {name}" for name, expr in outputs.items())
         relation = self._relation(source, fetch_end)
         where = [f"{source.available_expr} <= {_lit(fetch_end)}"]
         if source.row_filter:
             where.append(f"({source.row_filter})")
-        where.append(f"{source.key_column} IN (SELECT unnest(?::VARCHAR[]))")
+        where.append(f"{source.key_column} IN (SELECT {_KEYS_SQL})")
         predicate = " AND ".join(where)
-        picks = ", ".join(f"c{position}" for position in range(len(fields)))
+        picks = ", ".join(outputs)
         if source.reduce is Reduce.SUM:
             sql = (
                 f"SELECT {source.key_column} AS k, {source.available_expr} AS av, "
@@ -1498,14 +1990,16 @@ class EquityDuckdbAdapter:
                 f"ORDER BY {source.pick_order}) AS rn "
                 f"FROM {relation} WHERE {predicate}) WHERE rn = 1 ORDER BY k, av"
             )
-        con = self._connect()
+        con = self._connect([source])
         try:
-            raw_rows = con.execute(sql, [list(keys)]).fetchall()
+            raw_rows = _fetchall(con, sql, [_keys_param(keys)], checkpoint)
         finally:
             con.close()
         dates: dict[str, list[date]] = {}
         cells: dict[str, list[dict[str, _Observed]]] = {}
-        for raw in raw_rows:
+        for index, raw in enumerate(raw_rows):
+            if index % _CHECKPOINT_ROWS == 0:
+                checkpoint()
             key = str(raw[0])
             available = _as_date(raw[1], f"{source.relation}.{source.available_expr}")
             content_raw = raw[2]
@@ -1515,17 +2009,19 @@ class EquityDuckdbAdapter:
                 else _as_date(content_raw, f"{source.relation}.{source.content_expr}")
             )
             # LATEST 원천에는 `fill_kind` 축이 없다 — 셀 종류는 값 유무로만 갈린다.
+            known = dict(zip(late, raw[3 + len(fields) :], strict=True))
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
-                value = _as_float(raw[3 + position], field_id)
-                entry[field_id] = _Observed(
-                    value, available, content, _cell_kind(value, None)
+                value, kind = _cell_kind(_as_float(raw[3 + position], field_id), None)
+                field_available = (
+                    _as_date(known[position], f"{source.relation}.{late[position]}")
+                    if position in known
+                    else available
                 )
+                entry[field_id] = _Observed(value, field_available, content, kind)
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
-        return {
-            key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates
-        }
+        return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}
 
     @staticmethod
     def _rows_in(panel: _Panel, sessions: Sequence[date]) -> Iterator[_Row]:
@@ -1545,12 +2041,17 @@ class EquityDuckdbAdapter:
             found = panel.rows.get((row.ticker, cutoff))
             return None if found is None else found.cells.get(field_id)
         key = (
-            row.ticker
-            if source.axis is SourceAxis.TICKER
-            else panel.corp_by_ticker.get(row.ticker)
+            row.ticker if source.axis is SourceAxis.TICKER else panel.corp_by_ticker.get(row.ticker)
         )
         series = panel.latest.get(source.name, {}).get(key) if key is not None else None
         if series is None:
             return None
         position = bisect_right(series.dates, cutoff) - 1
-        return None if position < 0 else series.cells[position][field_id]
+        if position < 0:
+            return None
+        found = series.cells[position][field_id]
+        # 행은 보이는데 이 필드 값은 더 늦게 공개된다(재무 TTM 창 안 분기의 늦은 정정본, #238).
+        # 그때까지는 다른 행 값으로 대신하지 않고 결측이다.
+        if found.available_date > cutoff:
+            return _Observed(None, series.dates[position], found.content_date, CellKind.MISSING)
+        return found

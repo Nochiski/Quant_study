@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import date, timedelta
 
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
+    BacktestDataUnavailableError,
     MarketBarRecord,
     UniverseMembershipRecord,
 )
@@ -31,9 +33,11 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
+    SecurityRef,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -44,10 +48,22 @@ from strategy_workbench.domain.factor.facade.expression import (
     NodeValueType,
 )
 
-from ._fixture import MOCK_SPLIT, Membership, Observation, adjusted_close, build_demo_fixture
+from ._fixture import (
+    ADJUSTED_FIELD_BY_RAW,
+    MOCK_SPLIT,
+    Membership,
+    MockEquityFixture,
+    Observation,
+    adjusted_close,
+    build_demo_fixture,
+)
 
 _MOCK_EPOCH = date(2000, 1, 3)  # Monday
 _MOCK_SECTORS = ("technology", "industrial", "consumer")
+# 합성 구간에서 완전자본잠식(자본총계 < 0)이면서 적자인 종목의 순번(세 번째, sec-035420-1).
+# 실데이터에 이런 기업이 있고(P2-08 리뷰 실측 28개), 자본총계를 분모로 쓰는 팩터가
+# 부호 함정에 빠지는지 테스트가 mock 에서 재현할 수 있어야 한다(DEFECT-P208-001).
+_CAPITAL_IMPAIRED_INDEX = 2
 # (market, universe_id) -> venue the fixture memberships are keyed by.
 _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKRX"}
 
@@ -55,31 +71,32 @@ _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKR
 class MockEquityDataAdapter:
     """Small but adversarial Equity v0.2 fixture with vintages, lags, and gaps."""
 
-    def __init__(
-        self,
-        *,
-        snapshot: DataSnapshot,
-        sessions: tuple[date, ...],
-        profiles: tuple[DatasetFieldProfile, ...],
-        memberships: tuple[Membership, ...],
-        observations: tuple[Observation, ...],
-    ) -> None:
-        self._snapshot = snapshot
-        self._sessions = sessions
-        self._profiles = profiles
-        self._memberships = memberships
-        self._observations = observations
+    def __init__(self, fixture: MockEquityFixture) -> None:
+        # fixture 의 원천 판 뒤에 필드 선언표의 판을 붙인다 — 선언(단위·랙·값 타입·조정 짝)이
+        # 바뀌면 같은 fixture 라도 다른 데이터 스냅샷이다(#235). 원천 판은 fixture 가 정하므로 이미
+        # 합친 id 를 다시 받을 길이 없다.
+        self._snapshot = replace(
+            fixture.snapshot,
+            snapshot_id=field_contract_snapshot_id(
+                fixture.snapshot.snapshot_id,
+                {
+                    "profiles": {profile.field_id: profile for profile in fixture.profiles},
+                    "adjusted_field_by_raw": ADJUSTED_FIELD_BY_RAW,
+                },
+            ),
+        )
+        self._sessions = fixture.sessions
+        self._profiles = fixture.profiles
+        self._memberships = fixture.memberships
+        self._observations = fixture.observations
 
     @classmethod
     def demo(cls) -> MockEquityDataAdapter:
-        fixture = build_demo_fixture()
-        return cls(
-            snapshot=fixture.snapshot,
-            sessions=fixture.sessions,
-            profiles=fixture.profiles,
-            memberships=fixture.memberships,
-            observations=fixture.observations,
-        )
+        """결정적 데모 fixture 로 만든다."""
+        return cls(build_demo_fixture())
+
+    def trading_sessions(self, start: date, end: date) -> tuple[date, ...]:
+        return _business_sessions(start, end)
 
     def snapshot(self) -> DataSnapshot:
         return self._snapshot
@@ -103,12 +120,22 @@ class MockEquityDataAdapter:
                             if profile.value_type is FieldValueType.CATEGORY
                             else NodeValueType.NUMERIC_SERIES
                         ),
+                        adjusted_field_id=ADJUSTED_FIELD_BY_RAW.get(field_id),
                     )
                 )
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot.snapshot_id,
             fields=tuple(fields),
         )
+
+    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
+        """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다."""
+        field_ids = tuple(profile.field_id for profile in self._profiles)
+        return self.resolve_factor_fields(field_ids).fields
+
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """mock 은 선언한 필드를 모두 준다 — 뺀 필드가 없다(#316)."""
+        return {}
 
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult:
         sessions = tuple(
@@ -133,6 +160,16 @@ class MockEquityDataAdapter:
             snapshot_id=self._snapshot.snapshot_id,
             detail=None if points else f"no mock universe sessions — query={query}",
         )
+
+    def universe_securities(
+        self, market: str, universe_id: str, as_of: date
+    ) -> tuple[SecurityRef, ...]:
+        """관측 질의와 같은 시장·유니버스로 종목의 이름·티커를 준다(lang2 P4-03 기준일 요약).
+
+        mock 의 이름은 날짜로 바뀌지 않고, 관측은 fixture 달력 밖도 합성하므로 날짜로 거르지 않는다.
+        """
+        venue = _MOCK_UNIVERSES.get((market, universe_id))
+        return tuple(item.security for item in self._memberships if item.security.venue == venue)
 
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         profile_by_id = {profile.field_id: profile for profile in self._profiles}
@@ -164,7 +201,8 @@ class MockEquityDataAdapter:
                 cutoff = self._cutoff(session, lag_by_field[field_id])
                 if cutoff is None:
                     warnings.add(
-                        f"insufficient mock calendar for lag — field_id={field_id} as_of={session}"
+                        "mock 거래일 달력이 랙만큼 거슬러 올라가기에 모자라다 — "
+                        f"field_id={field_id} as_of={session}"
                     )
                     continue
                 for security_id in query.security_ids:
@@ -329,7 +367,8 @@ class MockEquityDataAdapter:
             cutoff = self._cutoff(session, lag_sessions)
             if cutoff is None:
                 warnings.add(
-                    f"insufficient mock calendar for lag — field_id={field_id} as_of={session}"
+                    "mock 거래일 달력이 랙만큼 거슬러 올라가기에 모자라다 — "
+                    f"field_id={field_id} as_of={session}"
                 )
                 return None
             candidate = self._latest_observation(
@@ -369,26 +408,38 @@ class MockEquityDataAdapter:
         return _business_day_index(session) - _business_day_index(session.replace(day=1)) >= 2
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
-        """Generate deterministic OHLCV until the real Equity DB adapter is selected."""
-        sessions = _business_sessions(query.start, query.end)
-        if not sessions:
-            raise ValueError("mock backtest dataset requires at least one business session")
-        requested_ids = list(query.security_ids)
-        benchmark_id = query.benchmark_security_id or requested_ids[0]
-        if benchmark_id not in requested_ids:
-            requested_ids.append(benchmark_id)
-        security_ids = tuple(dict.fromkeys(requested_ids))
+        """Generate deterministic OHLCV until the real Equity DB adapter is selected.
+
+        요청한 종목과 벤치마크만 답한다. fixture 밖 id 는 duckdb 어댑터처럼
+        `BacktestDataUnavailableError` 로 거절하고, 요청하지 않은 벤치마크를 지어내지 않는다(#361).
+        세션이 없는 창도 duckdb 처럼 bar 없이 답한다 — 판단은 tape 단계 몫이다.
+        """
+        history, sessions = _sessions_with_history(
+            query.start, query.end, query.history_sessions_before_start
+        )
+        benchmark = () if query.benchmark_security_id is None else (query.benchmark_security_id,)
+        security_ids = tuple(dict.fromkeys((*query.security_ids, *benchmark)))
+        known = {membership.security.security_id for membership in self._memberships}
+        unknown = sorted(set(security_ids) - known)
+        if unknown:
+            raise BacktestDataUnavailableError(
+                f"unknown mock security_id — got={unknown} known={sorted(known)}"
+            )
         bars: list[MarketBarRecord] = []
+        history_bars: list[MarketBarRecord] = []
         for security_index, security_id in enumerate(security_ids):
             stable = int.from_bytes(hashlib.sha256(security_id.encode("utf-8")).digest()[:2], "big")
             base = 40_000.0 + security_index * 25_000.0 + stable % 5_000
             previous_close = base
-            for session_index, session in enumerate(sessions):
+            # 워밍업 세션은 음수 번호다. 가격 사슬은 start 에서 시작하므로 워밍업을 요청해도 측정
+            # 구간 bar 는 그대로다.
+            for session_index, session in enumerate((*history, *sessions), -len(history)):
                 cycle = ((session_index + stable) % 17 - 8) * 0.0008
                 trend = (security_index - 0.5) * 0.00015
                 open_price = previous_close * (1 + cycle * 0.35)
                 close_price = open_price * (1 + cycle + trend)
-                bars.append(
+                volume = 1_000_000 + security_index * 250_000 + session_index * 100
+                (history_bars if session_index < 0 else bars).append(
                     MarketBarRecord(
                         session=session,
                         security_id=security_id,
@@ -396,13 +447,16 @@ class MockEquityDataAdapter:
                         high=max(open_price, close_price) * 1.004,
                         low=min(open_price, close_price) * 0.996,
                         close=close_price,
-                        volume=1_000_000 + security_index * 250_000 + session_index * 100,
+                        volume=volume,
+                        trading_value=close_price * volume,
                     )
                 )
-                previous_close = close_price
+                if session_index >= 0:
+                    previous_close = close_price
         return BacktestDataset(
             data_snapshot_id=self._snapshot.snapshot_id,
             bars=tuple(bars),
+            history_bars=tuple(history_bars),
             memberships=tuple(
                 UniverseMembershipRecord(
                     security_id=security_id,
@@ -410,21 +464,22 @@ class MockEquityDataAdapter:
                     last_session=sessions[-1],
                 )
                 for security_id in security_ids
+                if sessions
             ),
             corporate_actions=(),
-            benchmark_security_id=benchmark_id,
+            benchmark_security_id=query.benchmark_security_id,
             warnings=(
                 DataWarning(
                     code="mock_equity_data",
                     message=(
-                        "Deterministic mock OHLCV is active; replace the adapter for "
-                        "production research."
+                        "결정적으로 생성한 mock OHLCV로 실행했다. 실제 연구에는 실데이터 "
+                        "어댑터로 바꿔야 한다."
                     ),
                     severity=WarningSeverity.INFO,
                 ),
                 DataWarning(
                     code="corporate_action_feed_empty",
-                    message="The mock run declares an empty corporate-action feed.",
+                    message="mock 실행은 기업 행동 피드를 비워 둔다(분할·병합 없음).",
                 ),
             ),
         )
@@ -526,14 +581,30 @@ def _factor_field_value(
     trend = (session_index + 1) * (security_index + 1) * scale
     if field_id == "price.market_cap":
         return 10_000_000_000.0 + security_index * 2_000_000_000.0 + trend * 10_000
+    impaired = security_index == _CAPITAL_IMPAIRED_INDEX
     if field_id == "financial.book_equity":
+        if impaired:
+            # 자본잠식 규모가 순손실보다 작다 — 음수/음수 ROE 가 크게 나와 함정이 1위로 드러난다.
+            return -(100_000_000.0 + trend * 10)
         return 4_000_000_000.0 + security_index * 900_000_000.0 + trend * 1_000
+    if field_id == "financial.net_income":
+        # TTM 은 분기 공시마다 한 번 바뀐다 — 약 63세션(한 분기) 동안 같은 값이다(#212).
+        quarter = session_index // 63
+        income = (
+            400_000_000.0 + security_index * 90_000_000.0 + quarter * (security_index + 1) * 1e6
+        )
+        # 자본잠식 종목은 순손실이다(P2-08 아이디어 함정). 크기는 TTM 규칙을 그대로 따른다.
+        return -income if impaired else income
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2
     if field_id == "flow.foreign_net_buy":
         return (security_index - 1) * 100_000_000.0 + trend * 10_000
     if field_id == "short.short_balance_ratio":
         return 0.01 + security_index * 0.015 + (session_index % 7) * 0.0001
+    if field_id == "price.shares_outstanding":
+        # 신용잔고(800만 주대)보다 커야 잔고율이 0~1 사이에 선다 — 잔고율은 약 0.2% 다. 창 안에서
+        # 바뀌지 않는다.
+        return 5_000_000_000.0 + security_index * 500_000_000.0
     if field_id == "credit.margin_balance":
         # 주식수 축(원장 정본 단위 shares, #207)
         return 8_000_000.0 + security_index * 1_000_000.0 + trend * 10

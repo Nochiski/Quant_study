@@ -8,13 +8,34 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, time
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from strategy_workbench.adapters.outbound.backtest_engine._adapter import _benchmark_series
+from backtest_engine import BacktestEngine, RunConfig
+from backtest_engine.engine.core import core_available
+from backtest_engine.types.actions import (
+    ActionKind,
+    ExecutionPolicy,
+    SetPortfolioTarget,
+    TargetScope,
+    WeightTarget,
+)
+from backtest_engine.types.decision import StrategyDecision
+from backtest_engine.types.events import CorporateActionEvent, CorporateActionType
+from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.market import MarketSnapshot
+from backtest_engine.types.requirements import EventKind, EverySession, StrategyRequirements
+from strategy_workbench.adapters.outbound.backtest_engine._adapter import (
+    _benchmark_series,
+    _benchmark_warnings,
+    _columnar_feed,
+    _instrument,
+)
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
@@ -23,7 +44,10 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
     CorporateActionRecord,
+    InvalidBarRecord,
+    UniverseMembershipRecord,
 )
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, DataWarning
 from tests.application.test_benchmark_corporate_actions import (
     BENCHMARK,
     _action,
@@ -168,3 +192,336 @@ def test_no_benchmark_means_no_values_and_no_carry() -> None:
     dataset = replace(_dataset((_bar(D1, 100.0),), ()), benchmark_security_id=None)
 
     assert _benchmark_series(dataset, 1_000.0, (D1, D2)) == ({}, ())
+
+
+# 이슈 #229: 이어 쓴 세션을 거래정지와 상장 종료 뒤 동결로 나누고, 창 시작이 첫 bar보다 앞서
+# 벤치마크 지표가 사용 불가가 되는 이유를 경고로 알린다.
+DELIST_CODE = "benchmark.delisted_sessions_frozen"
+LEADING_CODE = "benchmark.no_bar_at_start"
+RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
+
+
+class _BenchmarkGaps:
+    """벤치마크 종목의 bar를 `dropped` 세션에서 지우고, 멤버십 `last_session`을 바꿀 수 있다."""
+
+    def __init__(
+        self,
+        inner: BacktestDataPort,
+        *,
+        dropped: Callable[[date], bool],
+        last_session: date | None = None,
+    ) -> None:
+        self._inner = inner
+        self._dropped = dropped
+        self._last_session = last_session
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
+        dataset = self._inner.load_backtest_dataset(query)
+        bars = tuple(
+            bar
+            for bar in dataset.bars
+            if bar.security_id != BENCHMARK or not self._dropped(bar.session)
+        )
+        memberships = tuple(
+            replace(item, last_session=self._last_session)
+            if item.security_id == BENCHMARK and self._last_session is not None
+            else item
+            for item in dataset.memberships
+        )
+        return replace(dataset, bars=bars, memberships=memberships)
+
+
+def _warning(result: BacktestRunResult, code: str) -> DataWarning:
+    matches = [item for item in result.manifest.warnings if item.code == code]
+    assert len(matches) == 1, [item.code for item in result.manifest.warnings]
+    return matches[0]
+
+
+def test_frozen_sessions_after_delisting_are_reported_apart_from_suspensions(
+    tmp_path: Path,
+) -> None:
+    # 01-12·01-15 정지, 01-16이 마지막 상장일, 01-17~01-19는 상장 종료 뒤다.
+    last_listed = date(2024, 1, 16)
+    result = _run(
+        _BenchmarkGaps(
+            MockEquityDataAdapter.demo(),
+            dropped=lambda session: session in SUSPENDED or session > last_listed,
+            last_session=last_listed,
+        ),
+        tmp_path,
+        "delisted-run",
+    )
+
+    suspended = _warning(result, CARRY_CODE)
+    assert "carried_sessions=2 " in suspended.message
+    assert "2024-01-12, 2024-01-15" in suspended.message
+    assert "2024-01-17" not in suspended.message
+    frozen = _warning(result, DELIST_CODE)
+    assert BENCHMARK in frozen.message
+    assert "frozen_sessions=3 " in frozen.message
+    assert "last_session=2024-01-16" in frozen.message
+    assert "2024-01-17, 2024-01-18, 2024-01-19" in frozen.message
+    # 값 규칙은 그대로다: 상장 종료 뒤에도 마지막 값을 이어 써 지표가 살아 있다.
+    assert _metric(result, "benchmark_return") is not None
+
+
+def test_suspension_between_the_last_bar_and_delisting_counts_as_suspension() -> None:
+    dataset = replace(
+        _dataset((_bar(D1, 100.0), _bar(D2, 90.0)), ()),
+        memberships=(UniverseMembershipRecord(BENCHMARK, D1, D4),),
+    )
+    sessions = (D1, D2, D3, D4, D5)
+    values, carried = _benchmark_series(dataset, 1_000.0, sessions)
+
+    warnings = {
+        item.code: item.message for item in _benchmark_warnings(dataset, sessions, values, carried)
+    }
+
+    # D3·D4는 상장 기간 안의 정지, D5만 상장 종료(D4) 뒤다.
+    assert "carried_sessions=2 " in warnings[CARRY_CODE]
+    assert "frozen_sessions=1 " in warnings[DELIST_CODE]
+    assert "last_session=2021-05-21" in warnings[DELIST_CODE]
+
+
+def test_window_starting_inside_a_suspension_explains_the_unavailable_benchmark(
+    tmp_path: Path,
+) -> None:
+    result = _run(
+        _BenchmarkGaps(
+            MockEquityDataAdapter.demo(),
+            dropped=lambda session: session <= date(2024, 1, 9),
+        ),
+        tmp_path,
+        "leading-run",
+    )
+
+    benchmark_return = next(
+        item
+        for item in result.metrics
+        if item.metric_id == "benchmark_return" and item.scope == "full"
+    )
+    assert benchmark_return.value is None
+    leading = _warning(result, LEADING_CODE)
+    assert BENCHMARK in leading.message
+    assert "leading_sessions=2 " in leading.message
+    assert "first_bar=2024-01-10" in leading.message
+    assert "benchmark_return" in leading.message
+    # 상장은 창 시작부터라(멤버십 first_session) 이유는 거래정지다.
+    assert "창 시작부터 거래정지 중이었다" in leading.message
+    assert not [item for item in result.manifest.warnings if item.code == CARRY_CODE]
+
+
+def test_benchmark_listed_after_the_window_start_is_reported_as_not_yet_listed() -> None:
+    dataset = replace(
+        _dataset((_bar(D3, 100.0), _bar(D4, 110.0)), ()),
+        memberships=(UniverseMembershipRecord(BENCHMARK, D3, D5),),
+    )
+    sessions = (D1, D2, D3, D4)
+    values, carried = _benchmark_series(dataset, 1_000.0, sessions)
+
+    warnings = {
+        item.code: item.message for item in _benchmark_warnings(dataset, sessions, values, carried)
+    }
+
+    assert set(warnings) == {LEADING_CODE}
+    assert "leading_sessions=2 " in warnings[LEADING_CODE]
+    assert "상장 전" in warnings[LEADING_CODE]
+
+
+def test_benchmark_without_any_bar_in_the_window_is_reported() -> None:
+    dataset = _dataset((_bar(D1, 100.0, security_id="other"),), ())
+    sessions = (D1, D2)
+    values, carried = _benchmark_series(dataset, 1_000.0, sessions)
+
+    warnings = {
+        item.code: item.message for item in _benchmark_warnings(dataset, sessions, values, carried)
+    }
+
+    assert set(warnings) == {LEADING_CODE}
+    assert "leading_sessions=2 " in warnings[LEADING_CODE]
+    assert "first_bar=없음" in warnings[LEADING_CODE]
+
+
+def test_fully_valued_benchmark_raises_no_warning() -> None:
+    dataset = _dataset((_bar(D1, 100.0), _bar(D2, 101.0)), ())
+    sessions = (D1, D2)
+    values, carried = _benchmark_series(dataset, 1_000.0, sessions)
+
+    assert _benchmark_warnings(dataset, sessions, values, carried) == ()
+
+
+class _BuyAndHold:
+    """첫 bar에서 `instrument`를 한 번 사서 끝까지 들고 있는 엔진 전략."""
+
+    def __init__(self, instrument: InstrumentId) -> None:
+        self._instrument = instrument
+        self._done = False
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}),
+            features=frozenset(),
+        )
+
+    def on_event(self, ctx, event):
+        if not isinstance(event, MarketSnapshot) or self._done or not event.has(self._instrument):
+            return StrategyDecision.no_action(ctx.now, "hold")
+        self._done = True
+        return StrategyDecision.of(
+            ctx.now,
+            SetPortfolioTarget(
+                targets=(WeightTarget(self._instrument, 0.95),),
+                scope=TargetScope.PATCH,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason="buy",
+        )
+
+
+@pytest.mark.parametrize("core", ["python", pytest.param("rust", marks=RUST_ONLY)])
+def test_benchmark_curve_follows_the_engine_holder_through_suspension_split_and_delisting(
+    core: str,
+) -> None:
+    """이슈 #229(DEFECT-228-04): 벤치마크 곡선은 엔진이 같은 종목 보유자를 평가하는 규칙을 따른다.
+
+    정지(01-12·01-15), 정지 중 2:1 분할(01-15, 재개 bar 01-16에 정산), 상장 종료(01-17 이후 bar
+    없음)를 모두 담은 mock 데이터로 엔진에 buy-and-hold를 돌린다. 수수료·슬리피지 없이 한 번 산 뒤
+    현금은 그대로이므로 보유자 가치(`equity - cash`)의 상대 경로가 벤치마크 곡선의 상대 경로와
+    같아야 한다. 엔진의 정지 종목 평가·사건 정산 시점이 바뀌면 이 테스트가 먼저 깨진다.
+    """
+    last_listed = date(2024, 1, 16)
+    port = _BenchmarkGaps(
+        _SuspendedBenchmark(MockEquityDataAdapter.demo(), split=True),
+        dropped=lambda session: session > last_listed,
+        last_session=last_listed,
+    )
+    dataset = port.load_backtest_dataset(
+        BacktestDataQuery(
+            start=date(2024, 1, 8),
+            end=date(2024, 1, 19),
+            security_ids=("sec-005930-1",),
+            benchmark_security_id=BENCHMARK,
+        )
+    )
+    instrument = _instrument(BENCHMARK)
+    result = BacktestEngine(
+        RunConfig(run_id=f"buy-and-hold-{core}", initial_cash=1e9, fee_bps=0.0), core=core
+    ).run(
+        _BuyAndHold(instrument),
+        _columnar_feed(dataset.bars),
+        corporate_actions=tuple(
+            CorporateActionEvent(
+                ts=datetime.combine(item.session, time(15, 30)),
+                instrument=_instrument(item.security_id),
+                action_type=CorporateActionType(item.action_type),
+                ratio=Decimal(item.ratio),
+                detail=item.detail,
+            )
+            for item in dataset.corporate_actions
+        ),
+    )
+    fill_ts = next(item.ts for item in result.fills if item.instrument == instrument)
+    snapshots = [item for item in result.snapshots if item.ts >= fill_ts]
+    cash = snapshots[0].cash
+    holder = {item.ts.date(): item.equity - cash for item in snapshots}
+    sessions = tuple(sorted({bar.session for bar in dataset.bars}))
+    values, carried = _benchmark_series(dataset, 1_000.0, sessions)
+
+    start = min(holder)
+    # 정지·분할·상장 종료 세션이 모두 비교 구간 안에 있어야 이 테스트가 뜻을 가진다.
+    assert set(carried) == {*SUSPENDED, date(2024, 1, 17), date(2024, 1, 18), date(2024, 1, 19)}
+    assert start < min(carried)
+    for session, held in holder.items():
+        assert held / holder[start] == pytest.approx(values[session] / values[start], rel=1e-9), (
+            session
+        )
+
+
+# 이슈 #241: 무효 OHLC 행(GAP-14)으로 빠진 세션은 거래정지가 아니다. 거래된 날이다.
+INVALID_CODE = "benchmark.invalid_bar_sessions_carried"
+
+
+def _with_invalid(dataset: BacktestDataset, *sessions: date) -> BacktestDataset:
+    return replace(
+        dataset,
+        invalid_bars=tuple(InvalidBarRecord(session, BENCHMARK) for session in sessions),
+    )
+
+
+def _warnings_by_code(dataset: BacktestDataset, sessions: tuple[date, ...]) -> dict[str, str]:
+    values, carried = _benchmark_series(dataset, 1_000.0, sessions)
+    return {
+        item.code: item.message for item in _benchmark_warnings(dataset, sessions, values, carried)
+    }
+
+
+def test_invalid_ohlc_session_is_reported_apart_from_suspension() -> None:
+    # D2 는 무효 행, D3 은 정지(행 없음)다. D4 가 재개 bar 다.
+    dataset = _with_invalid(
+        replace(
+            _dataset((_bar(D1, 100.0), _bar(D4, 110.0)), ()),
+            memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+        ),
+        D2,
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2, D3, D4))
+
+    assert "invalid_sessions=1 " in warnings[INVALID_CODE]
+    assert "sessions=2021-05-18" in warnings[INVALID_CODE]
+    assert "GAP-14" in warnings[INVALID_CODE]
+    assert "carried_sessions=1 " in warnings[CARRY_CODE]
+    assert "sessions=2021-05-20" in warnings[CARRY_CODE]
+
+
+def test_window_starting_on_invalid_rows_names_the_invalid_rows_not_a_suspension() -> None:
+    dataset = _with_invalid(
+        replace(
+            _dataset((_bar(D3, 100.0), _bar(D4, 110.0)), ()),
+            memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+        ),
+        D1,
+        D2,
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2, D3, D4))
+
+    assert set(warnings) == {LEADING_CODE}
+    assert "창 시작 세션의 원장 행이 무효(GAP-14)였다" in warnings[LEADING_CODE]
+    assert "거래정지" not in warnings[LEADING_CODE]
+    assert "invalid_sessions=2 " in warnings[LEADING_CODE]
+
+
+def test_window_starting_in_a_suspension_with_an_invalid_row_names_both() -> None:
+    dataset = _with_invalid(
+        replace(
+            _dataset((_bar(D3, 100.0), _bar(D4, 110.0)), ()),
+            memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+        ),
+        D2,
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2, D3, D4))
+
+    assert (
+        "창 시작부터 거래정지 중이었고 그중 1세션은 원장 행이 무효(GAP-14)였다"
+        in warnings[LEADING_CODE]
+    )
+    assert "invalid_sessions=1 " in warnings[LEADING_CODE]
+
+
+def test_listed_benchmark_without_any_bar_in_the_window_says_so() -> None:
+    """#241 P3-2: 멤버십이 있어도 창 안에 bar 가 하나도 없으면 그 사실을 원인으로 적는다."""
+    dataset = replace(
+        _dataset((_bar(D1, 100.0, security_id="other"),), ()),
+        memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2))
+
+    assert set(warnings) == {LEADING_CODE}
+    assert "창 안에 벤치마크 종목의 bar가 하나도 없다" in warnings[LEADING_CODE]
+    assert "거래정지" not in warnings[LEADING_CODE]

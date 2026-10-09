@@ -4,7 +4,6 @@ from strategy_workbench.domain.strategy._constraints import (
     SEMANTIC_ONLY_CODES,
     STRATEGY_SCALAR_CONSTRAINTS,
     ApplicabilityCondition,
-    AppliedStage,
     ContractUnit,
     FieldApplicability,
     ScalarConstraint,
@@ -14,6 +13,7 @@ from strategy_workbench.domain.strategy._constraints import (
     resolve_scalar,
     scalar_constraint_index,
 )
+from strategy_workbench.domain.strategy._models import AppliedStage
 
 __all__ = [
     "EXPRESSION_CODES",

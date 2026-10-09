@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: IN_REVIEW
-current_phase: D
-current_pr: D-01,D-02,D-03
-active_prs: [D-01, D-02, D-03]
-parallel_window: [D-01, D-02, D-03]
-last_updated: 2026-09-27T11:24:14+09:00
+project_status: COMPLETE
+current_phase: complete
+current_pr: none
+active_prs: []
+parallel_window: []
+last_updated: 2026-09-28T12:16:52+09:00
 planned_prs: 19
-merged_prs: 16
-approved_prs: 16
-progress_percent: 84
+merged_prs: 19
+approved_prs: 19
+progress_percent: 100
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 84
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
-| Current phase | `D` |
-| Current/next PR | `D-01,D-02,D-03` |
-| Active PR | `D-01, D-02, D-03` |
-| Progress | `16 / 19 merged (84%)` |
-| Approved | `16 / 19` |
-| Aggregated at | `2026-09-27 11:24 KST` |
+| Project status | `COMPLETE` |
+| Current phase | `complete` |
+| Current/next PR | `none` |
+| Active PR | none |
+| Progress | `19 / 19 merged (100%)` |
+| Approved | `19 / 19` |
+| Aggregated at | `2026-09-28 12:16 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -70,7 +70,9 @@ progress_percent: 84
   설정을 "언어 밖"이라고 쓰지 않았다** — schema 1.1은 시장·기간·유니버스를 문서 안에 두고
   `data`를 필수로 요구하므로, 언어 밖이라고 지시하면 모델이 필수 절을 빼고 검증에 실패한다.
   대신 "사용자가 바꿔 달라고 하지 않으면 현재 문서 값을 그대로 옮긴다"로 썼다. schema 1.2가
-  머지되면 이 문장과 골든을 같이 갱신한다(WORKFLOW 1절 규칙).
+  머지되면 이 문장과 골든을 같이 갱신한다(WORKFLOW 1절 규칙). — **역사 기록(2026-09-28)**: lang2
+  schema 1.2 스택(`a7193eaa`, main 머지 #202 `a4be517a`)이 이 문장을 "실행 설정은 전략 문서에 넣지
+  않는다"로 바꾸고 골든·시나리오 fixture를 1.2 문서로 다시 만들었다.
 
 - 2026-09-21 A-07: 세션 `Usage` 집계와 시나리오 fixture 3개를 A-07 안에서 마무리했다(WORKFLOW
   A-07 원문이 정본). 집계는 저장하지 않고 이벤트 이력을 접는 application 순수 함수
@@ -86,7 +88,8 @@ progress_percent: 84
   달라진다.
 - 2026-09-21 A-07 **후속**: schema 1.2(`strategy-language-2-0` P2-03) 머지 뒤 프롬프트의 실행 설정
   문장과 `backend/tests/fixtures/assistant/` 골든·시나리오 fixture를 1.2 문서로 갱신한다
-  (WORKFLOW 1절 규칙). 담당은 그 시점의 A-07 후속 또는 B-05.
+  (WORKFLOW 1절 규칙). 담당은 그 시점의 A-07 후속 또는 B-05. — **닫힘**: 위 역사 기록처럼 lang2
+  스택(`a7193eaa`, #202)이 처리했다.
 - 2026-09-21 A-07 리뷰 APPROVE 반영: P2 1건·P3 3건을 마무리 커밋 하나로 닫았다. 검색 상한 통지를
   검색으로 세지 않도록 집계에 분기를 넣고, 모델이 읽는 고정 문장 2건을 `_prompt.py`로 옮겨 골든에
   넣었으며, live smoke가 검색 상한을 상수가 아니라 주입값에서 읽게 하고, "이력 `events` == SSE
@@ -183,24 +186,19 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
 | C | Phase A/B audit follow-up | 3 | 3 | `MERGED` |
-| D | Backtest result explanation (US-DM-08) | 3 | 0 | `IN_REVIEW` |
-| **Total** |  | **19** | **16** | **84%** |
+| D | Backtest result explanation (US-DM-08) | 3 | 3 | `MERGED` |
+| **Total** |  | **19** | **19** | **100%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
+트래커의 19개 PR이 모두 main에 머지돼 진행 중인 Packet이 없다(2026-09-28 기준). 마지막 머지는
+D-03 [#210](https://github.com/Nochiski/Quant_study/pull/210) `8fbf19f3`(2026-09-27)이다.
+
 | 항목 | 값 |
 |---|---|
-| PR | `P0-01` |
-| Intent | 기획 패키지·spec을 main에 올린다 |
-| Acceptance | WORKFLOW P0-01 |
-| Non-goals | 코드 변경 |
-| Branch/worktree | `docs/ai-assistant-plan` (PR #166) · A-01/A-02는 `wt-ai-a01` / `feat/ai-a-01-domain-ports` |
-| Base SHA | `5f97f8c` (origin/main) |
-| Head SHA | 4차 APPROVE 뒤 잔여 P2 반영 커밋 |
-| Diff stat | 문서 8개 |
-| Focused tests | `tools/update-plan-progress.ps1 -Check` |
-| Full gate | CI(문서만) |
+| PR | 없음(initiative 완료) |
+| 남은 후속 | D-04(D 절 backlog, 미착수, 트래커 행 없음) · live smoke 2건과 완료 정의 1(사용자 공급자 키 필요) |
 
 ---
 
@@ -214,10 +212,10 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [x] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `MERGED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
-| [x] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `MERGED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
+| [x] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `MERGED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · main 머지 `00d4342e`(2026-09-26) |
+| [x] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `MERGED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · main 머지 `9dfc304a`(2026-09-26) |
 | [x] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `MERGED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
-| [x] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `MERGED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
+| [x] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `MERGED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · main 머지 `78cf49fc`(2026-09-26) |
 | [x] | `A-05` | `llm_anthropic` adapter | A-04 | `MERGED` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋) · `review_ai_a_05` 3차 APPROVE(세 라운드 24건 전부 닫힘, 비인증 헤더 통과는 docstring 한 문장 P3 — A-06 rebase 뒤 A-05에 fast-forward) · live smoke 최우선: 선언되지 않은 서버 도구 결과 블록 history 수용 여부 |
 | [x] | `A-06` | `llm_openai` adapter | A-05 | `MERGED` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `6ada372f`(A-05 최종 `c0219894` 위 14커밋; org/project 헤더 `omit`, env 7종 기준선 테스트, spec D6 전수 표, P3 4 + A-05 P3 docstring 적재) · `review_ai_a_06` 2차 APPROVE · 확정 |
 | [x] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `MERGED` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring) → A-06 최종 `6ada372f` 위 rebase·캐시 필드·재생성 뒤 push·PR( 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) · **A-06 최종 `6ada372f` 위 replay 완료 `4fcad54c`**(10커밋, 33파일 +2971/−27; `UsageView` 성분 2칸·`TokenTotalsView` 성분+`total_input_tokens`, `MODEL_NOTICES`에 `search_budget_exhausted`, pytest 1957) · [#179](https://github.com/Nochiski/Quant_study/pull/179) · `review_ai_a_07` 1차 APPROVE(P2 1·P3 3) · 마무리 `e57ec183`(리뷰 4건) + `5009a03c`(B-05 발견: 첫 이벤트 전 취소 `Failure(CANCELLED)` 저장, 공급자 알린 취소 중복 억제; pytest 1964) — **최종 `5009a03c`**(`review_ai_a_07` 2차 APPROVE 유지, 돌연변이 3건 포착), B 스택 rebase 대상 |
@@ -260,7 +258,7 @@ C-01이 매뉴얼을 고치며 닫았고(C-02가 스크립트 경로와 변수 �
 |---|---|---|---|---|---|
 | [x] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `MERGED` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` · [#190](https://github.com/Nochiski/Quant_study/pull/190) · 최종 `707cd4f9` · main 머지 `a3cc5f8b` |
 | [x] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `MERGED` | [#192](https://github.com/Nochiski/Quant_study/pull/192) · 최종 `0a030884`, 머지 `16e6e994` · `review_ai_c_02` 1차 REQUEST_CHANGES(P1 1: 팩터 계획 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행) → `settling` 신호로 대기 유지 + 팩터 창 변경 e2e 시나리오 → 2차 APPROVE(blocking·non-blocking 0) · 전체 e2e 24/24 |
-| [x] | `C-03` | C 절 backlog 2건: 검색 상한 통지 전용 `ChatEvent`(`SearchBudgetExhausted`, 두 adapter·저장·SSE·SDK·리듀서·사이드바 안내 ko/en), `ChatMessageView.turn_id`와 id 짝짓기, assistant DB v2 제자리 업그레이드(옛 통지 행 재기록·`turn_id` 채움), 대본 "검색 상한" 시나리오와 US-CS-04 e2e | C-02 | `MERGED` | 구현자 `impl-ai-c03`, 워크트리 `wt-ai-c03`, 브랜치 `feat/ai-c-03-backlog`(origin/main `a4ccfd7a` 위) · PR 본문에 게이트 결과 · main 머지 `5213ffe2`(#204) |
+| [x] | `C-03` | C 절 backlog 2건: 검색 상한 통지 전용 `ChatEvent`(`SearchBudgetExhausted`, 두 adapter·저장·SSE·SDK·리듀서·사이드바 안내 ko/en), `ChatMessageView.turn_id`와 id 짝짓기, assistant DB v2 제자리 업그레이드(옛 통지 행 재기록·`turn_id` 채움), 대본 "검색 상한" 시나리오와 US-CS-04 e2e | C-02 | `MERGED` | 구현자 `impl-ai-c03`, 워크트리 `wt-ai-c03`, 브랜치 `feat/ai-c-03-backlog`(origin/main `a4ccfd7a` 위) · PR 본문에 게이트 결과 · #204 리뷰 `review_ai_c03` APPROVE(tip `3995e778`, blocking 0) · main 머지 `5213ffe2`(#204) |
 
 Phase exit:
 
@@ -268,7 +266,7 @@ Phase exit:
 - [x] no-extras job 확대판이 SDK 없는 환경에서 green.
 - [x] Phase B 감사 NB-1~NB-8 처리 결과(C-02 닫힘 6건, C-01 닫힘 1건, backlog 이관 1건)를 C-02 PR
   본문에 기록.
-- [ ] C 절 backlog 2건(NB-4 이관분)을 C-03이 닫는다 — 구현·게이트 완료, 머지 대기.
+- [x] C 절 backlog 2건(NB-4 이관분)을 C-03이 닫는다 — #204 main 머지 `5213ffe2`(2026-09-27).
 
 ### C 절 backlog (Phase B 감사 NB-4)
 
@@ -328,17 +326,19 @@ i18n이 `metric_id`를 키로 소유한다.
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_REVIEW` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` · [#208](https://github.com/Nochiski/Quant_study/pull/208) · tip `2e7fc03e`(origin/main C-03 merge 후 spec v3 정정) · 리뷰 대기 |
-| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `IN_REVIEW` | 브랜치 `feat/ai-d-02-result-explain-backend` · [#209](https://github.com/Nochiski/Quant_study/pull/209) · tip `2c07225e`(D-01 merge로 C-03 따라감, 스키마 v3·`version == 2` 분기·v2 선언 sha256 고정, v1→v3 직행·실패 롤백·재시도 멱등 테스트) · pytest 2314 · 리뷰 대기 |
-| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `IN_REVIEW` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · `review_ai_d` 1차 APPROVE(blocking 0, P3 7건 반영·1건 D-04) · 게이트 SHA `35d41a38`(pytest 2316, vitest 980, 전체 e2e 40/40, US-DM-08 `구현됨-e2e`) · 재확인 대기 |
+| [x] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `MERGED` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` · [#208](https://github.com/Nochiski/Quant_study/pull/208) · tip `2e7fc03e`(origin/main C-03 merge 후 spec v3 정정) · `review_ai_d` 1차 APPROVE(스택 세 PR 함께) · main 머지 `1b1ec8b1`(2026-09-27) |
+| [x] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `MERGED` | 브랜치 `feat/ai-d-02-result-explain-backend` · [#209](https://github.com/Nochiski/Quant_study/pull/209) · tip `2c07225e`(D-01 merge로 C-03 따라감, 스키마 v3·`version == 2` 분기·v2 선언 sha256 고정, v1→v3 직행·실패 롤백·재시도 멱등 테스트) · pytest 2314 · `review_ai_d` 1차 APPROVE(스택 세 PR 함께) · main 머지 `4c09491e`(2026-09-27) |
+| [x] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `MERGED` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · `review_ai_d` 1차 APPROVE(blocking 0, P3 7건 반영·1건 D-04) · 게이트 SHA `35d41a38`(pytest 2316, vitest 980, 전체 e2e 40/40, US-DM-08 `구현됨-e2e`) · 반영분 재확인 기록 없음 · main 머지 `8fbf19f3`(2026-09-27) |
 
 Phase exit:
 
-- [ ] spec 완료 정의 1~6 기록.
-- [ ] US-DM-08 `구현됨-e2e`, 전체 e2e 게이트에서 스토리 e2e 통과.
-- [ ] SoT·책임분리 점검 blocking 0.
+- [ ] spec 완료 정의 1~6 기록. — 항목별 충족 기록 없음(2026-09-28 확인: PLAN·#208~#210 본문 어디에도
+  1~6을 하나씩 대조한 기록이 없다).
+- [x] US-DM-08 `구현됨-e2e`, 전체 e2e 게이트에서 스토리 e2e 통과. — #210 게이트 SHA `35d41a38`에서 전체
+  e2e 40/40(`@US-DM-08` 포함), 스토리 표 `구현됨-e2e`.
+- [ ] SoT·책임분리 점검 blocking 0. — Phase D 점검 기록 없음. #208·#209·#210 스택 리뷰 `review_ai_d` 1차 APPROVE(blocking 0)만 있다.
 
-### D 절 backlog (D 스택 리뷰 P3-7) — 담당 AI 후속 D-04(미착수)
+### D 절 backlog (D 스택 리뷰 P3-7) — 담당 AI 후속 D-04(미착수, 트래커 행 없음 — initiative 완료 뒤 남은 후속)
 
 **결과 패널의 도구 활동이 요약 JSON 원문을 보인다**
 
@@ -403,6 +403,8 @@ Phase exit:
 | C-01 | `review_ai_c_01` | 3 | APPROVE | `707cd4f9`. P2-N1 닫힘, 리드 main 병합 커밋이 PLAN.md만 바꿈, 두 판 내용 손실 0 |
 | C-02 | `review_ai_c_02` | 1 | REQUEST_CHANGES | P1 1(팩터 그래프 변경 제안에서 explain 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행 — 기존 e2e는 캐시 경로라 미검출), P3 3 |
 | C-02 | `review_ai_c_02` | 2 | APPROVE | `0a030884`. 실제 훅 조합 프로브 4종 green(StrictMode 포함), settling 무시 돌연변이 6건 red, 영구 대기 경로 없음, blocking·non-blocking 0 |
+| C-03 | `review_ai_c03`(리뷰어 `review_lang2_p1_06`) | 1 | APPROVE | #204 리뷰(`review_ai_c03.md`), tip `3995e778`(#204 머지 head). blocking 0. main 코드로 만든 실제 v1 DB 업그레이드 손실 0·멱등·실패 롤백, `turn_id` 역채움 경계, 두 adapter 발화 대칭, US-CS-04 e2e 돌연변이 세 층 red 확인. 관찰 2(결함 아님: v1 턴 행 없는 질문 숨김, 소진 호출이 마지막이면 통지 없음). PLAN·#204 본문에는 없던 기록이라 2026-09-28 문서 최신화 감사가 더했다. main 머지 `5213ffe2` |
+| D-01·D-02·D-03 | `review_ai_d` | 1 | APPROVE | 스택 세 PR 함께, blocking 0. P3 8건 중 7건(P3-1~P3-6·P3-8)을 D-03 tip에 반영(게이트 SHA `35d41a38`), P3-7(결과 도구 활동의 JSON 원문)은 D 절 backlog D-04로. 근거는 #210 본문 "리뷰 반영" 절. 반영분 재확인 기록 없음 |
 
 ## 검증 기록
 
@@ -412,6 +414,11 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-28 — **AI 어시스턴트 initiative 19/19 PR main 머지 완료**(문서 최신화 감사 반영). C-03 #204
+  `5213ffe2`, D-01 #208 `1b1ec8b1`, D-02 #209 `4c09491e`, D-03 #210 `8fbf19f3`(모두 2026-09-27)을 트래커에
+  `MERGED`로 적고 집계 도구로 `COMPLETE`를 맞췄다. Review 기록에 C-03(`review_ai_c03` APPROVE)·D 스택
+  (`review_ai_d` 1차 APPROVE) 행, C·D Phase exit 결과, A-01·A-02·A-04 머지 SHA를 더했다. 현재 작업 Packet은 비웠다.
+  남은 후속은 D-04(D 절 backlog, 트래커 행 없음), 사용자 키가 필요한 live smoke 2건과 완료 정의 1이다.
 - 2026-09-27 — D 스택 리뷰(`review_ai_d`) 세 PR APPROVE(blocking 0). P3 8건 중 7건을 D-03 tip에 반영했다. P3-5 대본이 결과 턴에 새어 들어온 제안 도구로 검증 통과 제안을 시도(e2e가 카드 없음 단언으로 잡음, 돌연변이 red 확인), P3-6 실행 전환 초기화 회귀 테스트(로직 제거 시 red 확인), P3-2 고아 행 메시지에 표·외래 키·행 키·복구 안내, P3-1 spec 덜어 내기 순서에 팩터, P3-3 테스트 docstring 키 stem, P3-4 사이드바 props를 화면별 합집합으로(타입 테스트), P3-8 대본 조사. P3-7(결과 도구 활동의 JSON 원문)은 위 D 절 backlog로 D-04(미착수)에 넘겼다.
 - 2026-09-27 — D-02에 마이그레이션 테스트 셋을 보탰다: v1 파일의 v1→v2→v3 직행(메시지 `turn_id`·이벤트·세션 보존), v1·v2 파일에서 마지막 `foreign_key_check` 실패 시 원래 버전·DDL 그대로 롤백, 원인 제거 뒤 재시도와 재열기 멱등. C-03 마이그레이션 테스트는 그대로 통과. 최상단 `406e2fc0`에서 전체 게이트 재실행(pytest 2314, vitest 979, e2e 40/40).
 - 2026-09-27 — C-03(#204) main 머지를 D 스택이 merge로 따라갔다. assistant DB v2는 C-03(`chat_messages.turn_id`)이 가져갔고 결과 세션의 `chat_sessions.run_id`는 **v3**이다(`version == 2` 분기, 부모 표라 외래 키 끄고 `legacy_alter_table`로 비켜 두기). v2 선언은 sha256으로 고정. `send`의 `turn_id` 인자와 모드 분기를 함께 살렸다. 최상단 `b8a909d4`에서 pytest 2311, vitest 979, 전체 e2e 40/40, 하네스·목록 대조 통과.

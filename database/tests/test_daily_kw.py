@@ -4,10 +4,13 @@
 날짜는 20260908(화) 기준 — 직전 거래일 20260907(월)은 휴장 캐시가 있든 없든 거래일이라
 캘린더 폴백(주말만 거름)에서도 실물 캐시에서도 같은 답이 나온다.
 """
+import datetime as dt
 import sqlite3
 import sys
 import types
+from pathlib import Path
 
+import pytest
 from daily import kw_daily
 
 D = "20260908"
@@ -294,13 +297,30 @@ def test_dry_run_merge_reports_gate_without_writing(tmp_path, monkeypatch):
 
 
 # ── --not-before: 실행 하한 미달이면 rc 3 ────────────────────────────────────
-def test_not_before_blocks_with_rc3(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("clock_hour", "clock_minute", "not_before", "expected_rc"),
+    [(0, 0, "00:00", 0), (0, 0, "23:59", 3),
+     (12, 0, "00:00", 0), (23, 58, "23:59", 3),
+     (23, 59, "23:59", 0), (23, 59, "00:00", 0)],
+)
+def test_not_before_obeys_kst_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    clock_hour: int, clock_minute: int, not_before: str, expected_rc: int,
+) -> None:
+    class FixedDatetime(dt.datetime):
+        @classmethod
+        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
+            value = cls(2026, 9, 8, clock_hour, clock_minute, tzinfo=kw_daily.KST)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+    # 실제 자정 직전 CI에서도 같은 KST 경계를 검증하며 공용 datetime 모듈은 바꾸지 않는다.
+    monkeypatch.setattr(
+        kw_daily, "dt", types.SimpleNamespace(**(vars(dt) | {"datetime": FixedDatetime})),
+    )
     calls = []
     _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
-    assert kw_daily.main(["--fetch", "--date", D, "--not-before", "23:59"]) == 3
-    assert calls == []
-    assert kw_daily.main(["--fetch", "--date", D, "--not-before", "00:00"]) == 0
-    assert len(calls) == len(TICKERS) * len(kw_daily.TRS)
+    assert kw_daily.main(["--fetch", "--date", D, "--not-before", not_before]) == expected_rc
+    assert len(calls) == (0 if expected_rc == 3 else len(TICKERS) * len(kw_daily.TRS))
 
 
 # ── 콜 분류: 8005 는 조용히 건너뛰지 않고 rc 2 ───────────────────────────────

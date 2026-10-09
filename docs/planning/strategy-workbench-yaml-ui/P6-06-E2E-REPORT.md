@@ -1,5 +1,10 @@
 # P6-06 YAML-first migration E2E 보고서
 
+> **현행 안내(2026-09-28)**: 이 보고서는 2026-09-06 시점의 역사 기록이다. 아래 "CI green일 때만 병합"은
+> 지켜지지 않았다. 제품 소유자가 GitHub Actions 과금 차단을 알고 로컬 전체 gate를 근거로 #74~#79 직접
+> 머지를 지시했다([PLAN.md](./PLAN.md) P6 Phase exit 아래 문단). 보고서의 시나리오·화면 설명은 당시(schema
+> 1.0) 기준이다. 현재 전략 문서는 schema 1.2이고 실행 설정은 문서 밖에 있다.
+
 - 최종 검증: 2026-09-06 20:44 KST
 - 대상 PR: [#79](https://github.com/Nochiski/Quant_study/pull/79)
 - 대상 branch: `feat/p6-06-workflow-migration`

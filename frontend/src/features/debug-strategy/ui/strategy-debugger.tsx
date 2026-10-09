@@ -7,13 +7,30 @@ import {
   type ReactNode,
 } from "react";
 
+import { cellKindCopy, type CellKind } from "../../../entities/dataset";
 import { t } from "../../../shared/config";
 import { useVirtualWindow } from "../../../shared/lib/virtual-window";
-import { Badge, Button, Tabs, panelId, tabId } from "../../../shared/ui";
+import {
+  Badge,
+  Button,
+  FailureNotice,
+  Tabs,
+  panelId,
+  tabId,
+} from "../../../shared/ui";
 import {
   projectLinkedTraceRows,
   type LinkedTraceRow,
 } from "../model/linked-trace";
+import {
+  constraintEffectCopy,
+  contributionStatusCopy,
+  exclusionReasonLabel,
+  traceStatusCopy,
+  type ConstraintEffect,
+  type ExclusionReason,
+  type TraceStatus,
+} from "../model/trace-copy";
 import { projectTargetTapeRows } from "../model/target-tape";
 import type {
   StrategyDebuggerContext,
@@ -161,6 +178,46 @@ const VirtualTable = <Row,>({
   );
 };
 
+/** 노드 값·원시 셀·제약 결과는 backend 어휘 대신 문구로 보인다(#350). 색은 값에서 고른다. */
+const TraceStatusBadge = ({ status }: { status: TraceStatus }) => (
+  <Badge tone={status === "ok" ? "ok" : "warn"}>
+    {traceStatusCopy(status)}
+  </Badge>
+);
+
+const CellKindBadge = ({ kind }: { kind: CellKind }) => (
+  <Badge tone={kind === "observed" ? "ok" : "warn"}>{cellKindCopy(kind)}</Badge>
+);
+
+const ConstraintEffectBadge = ({ effect }: { effect: ConstraintEffect }) => (
+  <Badge
+    tone={
+      effect === "removed"
+        ? "error"
+        : effect === "adjusted"
+          ? "warn"
+          : "neutral"
+    }
+  >
+    {constraintEffectCopy(effect)}
+  </Badge>
+);
+
+/** 탈락·보류 사유는 사람 말이 먼저고 backend 코드는 보조 표기다(P3-01). */
+const ExclusionReasons = ({
+  reasons,
+}: {
+  reasons: readonly ExclusionReason[];
+}) => (
+  <span className="strategy-debugger__inputs">
+    {reasons.map((reason) => (
+      <span key={reason}>
+        {exclusionReasonLabel(reason)} <code>{reason}</code>
+      </span>
+    ))}
+  </span>
+);
+
 const VirtualNodeChain = ({
   nodes,
   selectedNodeId,
@@ -219,9 +276,7 @@ const VirtualNodeChain = ({
             <span className="strategy-debugger__numeric">
               {formatNumber(nodeRow.value)}
             </span>
-            <Badge tone={nodeRow.status === "ok" ? "ok" : "warn"}>
-              {nodeRow.status}
-            </Badge>
+            <TraceStatusBadge status={nodeRow.status} />
           </span>
         );
       })}
@@ -237,7 +292,6 @@ const VirtualNodeChain = ({
 };
 
 const BLOCKED_MESSAGES = {
-  document: "debugger.blocked.document",
   date: "debugger.blocked.date",
   security: "debugger.blocked.security",
   factor: "debugger.blocked.factor",
@@ -255,16 +309,23 @@ const STATE_MESSAGES = {
 const StateNotice = ({ state }: { state: StrategyTraceState }) => {
   if (state.kind === "error")
     return (
-      <div className="strategy-debugger__state" role="alert">
-        <strong>{t("debugger.state.error")}</strong>
-        <p>{state.message}</p>
+      <div className="strategy-debugger__state">
+        <FailureNotice
+          title={t("debugger.state.error")}
+          message={state.message}
+          reason={state.reason}
+        />
       </div>
     );
   if (state.kind === "success") return null;
   const key =
-    state.kind === "blocked"
-      ? BLOCKED_MESSAGES[state.reason]
-      : STATE_MESSAGES[state.kind];
+    state.kind !== "blocked"
+      ? STATE_MESSAGES[state.kind]
+      : // 문맥이 없는 이유는 식별 줄의 `debugger.unavailable.*` 한 문장이 말한다. 여기서 또 말하지 않는다.
+        state.reason === "unavailable"
+        ? null
+        : BLOCKED_MESSAGES[state.reason];
+  if (key === null) return null;
   return (
     <div className="strategy-debugger__state" role="status">
       <p>{t(key)}</p>
@@ -340,17 +401,9 @@ const LinkedTraceResult = ({
                       ? t("debugger.value.selected")
                       : t("debugger.value.excluded")}
                   </Badge>
-                  <Badge
-                    tone={
-                      construction.constraint_effect === "removed"
-                        ? "error"
-                        : construction.constraint_effect === "adjusted"
-                          ? "warn"
-                          : "neutral"
-                    }
-                  >
-                    {construction.constraint_effect}
-                  </Badge>
+                  <ConstraintEffectBadge
+                    effect={construction.constraint_effect}
+                  />
                 </>
               )}
             </header>
@@ -367,9 +420,7 @@ const LinkedTraceResult = ({
                         <span className="strategy-debugger__numeric">
                           {formatNumber(field.value)}
                         </span>
-                        <Badge tone={field.kind === "observed" ? "ok" : "warn"}>
-                          {field.kind}
-                        </Badge>
+                        <CellKindBadge kind={field.kind} />
                         <small>{field.available_date}</small>
                       </span>
                     ))
@@ -406,7 +457,7 @@ const LinkedTraceResult = ({
                           <Badge
                             tone={contribution.status === "ok" ? "ok" : "warn"}
                           >
-                            {contribution.status}
+                            {contributionStatusCopy(contribution.status)}
                           </Badge>
                         </span>
                       ))}
@@ -426,7 +477,9 @@ const LinkedTraceResult = ({
                       {construction.side ?? t("debugger.value.none")}
                     </span>
                     {construction.exclusion_reasons.length > 0 ? (
-                      <code>{construction.exclusion_reasons.join(", ")}</code>
+                      <ExclusionReasons
+                        reasons={construction.exclusion_reasons}
+                      />
                     ) : null}
                   </li>
                   <li>
@@ -440,17 +493,9 @@ const LinkedTraceResult = ({
                     <span className="strategy-debugger__stage-primary">
                       {formatWeight(construction.constrained_target_weight)}
                     </span>
-                    <Badge
-                      tone={
-                        construction.constraint_effect === "removed"
-                          ? "error"
-                          : construction.constraint_effect === "adjusted"
-                            ? "warn"
-                            : "neutral"
-                      }
-                    >
-                      {construction.constraint_effect}
-                    </Badge>
+                    <ConstraintEffectBadge
+                      effect={construction.constraint_effect}
+                    />
                   </li>
                   {construction.estimated_order_delta !== null ? (
                     <li>
@@ -516,9 +561,7 @@ const RawResult = ({ state }: { state: StrategyTraceState }) => {
           </td>
           <td>{row.available_date}</td>
           <td>
-            <Badge tone={row.kind === "observed" ? "ok" : "warn"}>
-              {row.kind}
-            </Badge>
+            <CellKindBadge kind={row.kind} />
           </td>
         </>
       )}
@@ -594,7 +637,7 @@ const TargetResult = ({
             {row.exclusionReasons.length === 0 ? (
               "—"
             ) : (
-              <code>{row.exclusionReasons.join(", ")}</code>
+              <ExclusionReasons reasons={row.exclusionReasons} />
             )}
           </td>
           <td className="strategy-debugger__numeric">
@@ -607,9 +650,7 @@ const TargetResult = ({
             {row.nodeStatus === null ? (
               "—"
             ) : (
-              <Badge tone={row.nodeStatus === "ok" ? "ok" : "warn"}>
-                {row.nodeStatus}
-              </Badge>
+              <TraceStatusBadge status={row.nodeStatus} />
             )}
           </td>
         </>
@@ -677,9 +718,7 @@ const NodeResult = ({
             {formatNumber(row.value)}
           </td>
           <td>
-            <Badge tone={row.status === "ok" ? "ok" : "warn"}>
-              {row.status}
-            </Badge>
+            <TraceStatusBadge status={row.status} />
           </td>
         </>
       )}
@@ -856,8 +895,8 @@ export const StrategyDebugger = ({
             type="date"
             aria-label={t("debugger.date")}
             value={selectedAsOf}
-            min={context?.start}
-            max={context?.end}
+            min={context?.environment.start}
+            max={context?.environment.end}
             aria-describedby={`${idBase}-date-note`}
             disabled={context === null}
             onChange={(event) => {

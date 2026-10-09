@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:strategy-workbench:run-environment:1",
+  "title": "RunEnvironment",
+  "type": "object",
+  "properties": {
+    "market": {
+      "type": "string",
+      "enum": [
+        "KRX"
+      ],
+      "default": "KRX",
+      "x-description-key": "run_environment.field.market"
+    },
+    "frequency": {
+      "type": "string",
+      "enum": [
+        "daily"
+      ],
+      "default": "daily",
+      "x-description-key": "run_environment.field.frequency"
+    },
+    "start": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "x-description-key": "run_environment.field.start"
+    },
+    "end": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "x-description-key": "run_environment.field.end"
+    },
+    "universe_id": {
+      "type": "string",
+      "x-description-key": "run_environment.field.universe_id",
+      "x-catalog": "universe"
+    },
+    "timing": {
+      "type": "string",
+      "enum": [
+        "next_open"
+      ],
+      "default": "next_open",
+      "x-description-key": "run_environment.field.timing"
+    },
+    "participation_rate": {
+      "type": "number",
+      "default": 0.1,
+      "x-description-key": "run_environment.field.participation_rate",
+      "x-unit": "ratio",
+      "x-applied-stage": "execution",
+      "exclusiveMinimum": 0.0,
+      "maximum": 1.0,
+      "x-display-unit": "%",
+      "examples": [
+        0.1
+      ]
+    },
+    "participation_basis": {
+      "type": "string",
+      "enum": [
+        "session_volume",
+        "adv20"
+      ],
+      "default": "adv20",
+      "x-description-key": "run_environment.field.participation_basis"
+    },
+    "fee_bps": {
+      "type": "number",
+      "default": 15.0,
+      "x-description-key": "run_environment.field.fee_bps",
+      "x-unit": "bps",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "x-display-unit": "bp",
+      "examples": [
+        15.0
+      ]
+    },
+    "slippage_bps": {
+      "type": "number",
+      "default": 10.0,
+      "x-description-key": "run_environment.field.slippage_bps",
+      "x-unit": "bps",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "x-display-unit": "bp",
+      "examples": [
+        10.0
+      ],
+      "x-applicable-when": {
+        "all_of": [
+          {
+            "pointer": "/impact_model",
+            "equals": "fixed_bps",
+            "not_null": false
+          }
+        ],
+        "description_key": "run_environment.field.slippage_bps",
+        "owned_by_error": null
+      }
+    },
+    "impact_model": {
+      "type": "string",
+      "enum": [
+        "fixed_bps",
+        "sqrt"
+      ],
+      "default": "fixed_bps",
+      "x-description-key": "run_environment.field.impact_model"
+    },
+    "impact_coefficient": {
+      "type": "number",
+      "default": 1.0,
+      "x-description-key": "run_environment.field.impact_coefficient",
+      "x-unit": "ratio",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "maximum": 10.0,
+      "examples": [
+        1.0
+      ],
+      "x-applicable-when": {
+        "all_of": [
+          {
+            "pointer": "/impact_model",
+            "equals": "sqrt",
+            "not_null": false
+          }
+        ],
+        "description_key": "run_environment.field.impact_coefficient",
+        "owned_by_error": null
+      }
+    },
+    "sell_tax": {
+      "type": "string",
+      "enum": [
+        "krx_statutory",
+        "custom",
+        "none"
+      ],
+      "default": "krx_statutory",
+      "x-description-key": "run_environment.field.sell_tax"
+    },
+    "sell_tax_bps": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "x-description-key": "run_environment.field.sell_tax_bps",
+      "x-unit": "bps",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "x-display-unit": "bp",
+      "examples": [
+        20.0
+      ],
+      "x-applicable-when": {
+        "all_of": [
+          {
+            "pointer": "/sell_tax",
+            "equals": "custom",
+            "not_null": false
+          }
+        ],
+        "description_key": "run_environment.field.sell_tax_bps",
+        "owned_by_error": null
+      }
+    },
+    "missing": {
+      "type": "string",
+      "enum": [
+        "drop",
+        "keep",
+        "zero",
+        "cross_sectional_median"
+      ],
+      "default": "drop",
+      "x-description-key": "run_environment.field.missing"
+    }
+  },
+  "required": [
+    "start",
+    "end",
+    "universe_id"
+  ],
+  "additionalProperties": false,
+  "$defs": {}
+}

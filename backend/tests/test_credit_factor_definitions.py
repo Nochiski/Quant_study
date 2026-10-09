@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 
 import pytest
@@ -31,34 +32,110 @@ def test_신용잔고율은_잔고_주식수를_상장주식수로_나눈다() -
     assert (numerator, denominator, definition.output_unit) == ("shares", "shares", "ratio")
 
 
-def _observations(balances: dict[str, list[float]]) -> tuple[FactorObservation, ...]:
-    start = date(2024, 1, 1)
+_SHARES = "price.shares_outstanding"
+_BALANCE = "credit.margin_balance"
+_START = date(2024, 1, 1)
+
+
+# 잔고 None 은 원장이 가린 결측이다(#249).
+_Series = Mapping[str, tuple[Sequence[float | None], Sequence[float]]]
+
+
+def _observations(series: _Series) -> tuple[FactorObservation, ...]:
+    """종목 → (세션별 잔고, 세션별 상장주식수). 값은 어댑터가 랙을 적용해 **건넨** 값이다."""
     return tuple(
         FactorObservation(
-            as_of=start + timedelta(days=index),
+            as_of=_START + timedelta(days=index),
             security_id=security_id,
-            fields=(FactorFieldValue("credit.margin_balance", value),),
+            fields=(FactorFieldValue(_BALANCE, balance), FactorFieldValue(_SHARES, shares)),
         )
-        for security_id, series in balances.items()
-        for index, value in enumerate(series)
+        for security_id, (balances, shares_series) in series.items()
+        for index, (balance, shares) in enumerate(zip(balances, shares_series, strict=True))
     )
 
 
-def test_신용잔고_변화는_규모와_무관한_20세션_변화율이다() -> None:
-    """같은 10% 증가는 잔고 규모가 달라도 같은 값이어야 횡단면으로 견줄 수 있다.
-
-    예전 기본 그래프는 DELTA(주식수 차이)라 선언 단위 ratio 와 달랐고, 큰 종목일수록 값이 컸다.
-    """
+def _change_at(series: _Series, day: int) -> dict[str, float]:
     definition = build_default_factor_registry().get("credit.margin_balance_change_20d")
     assert definition.default_graph is not None
-    assert definition.output_unit == "ratio"
-    small = [1_000.0] * 19 + [1_100.0]
-    large = [1_000_000.0] * 19 + [1_100_000.0]
     evaluation = evaluate_factor_graph(
         definition.default_graph,
-        observations=_observations({"SMALL": small, "LARGE": large}),
+        observations=_observations(series),
         missing=MissingPolicy.DROP,
     )
-    last = date(2024, 1, 1) + timedelta(days=19)
-    values = {item.security_id: item.value for item in evaluation.values if item.as_of == last}
-    assert values == {"SMALL": pytest.approx(0.1), "LARGE": pytest.approx(0.1)}
+    as_of = _START + timedelta(days=day)
+    return {
+        item.security_id: item.value
+        for item in evaluation.values
+        if item.as_of == as_of and item.value is not None
+    }
+
+
+def test_신용잔고_변화는_잔고율의_20세션_변화라_규모와_무관하다() -> None:
+    """잔고율 0.10 → 0.11 은 잔고 규모가 1,000배 달라도 같은 +0.01 이다."""
+    definition = build_default_factor_registry().get("credit.margin_balance_change_20d")
+    assert definition.required_field_ids == (_BALANCE, _SHARES)
+    assert definition.output_unit == "ratio"
+    n = 25
+    small = ([1_000.0] * (n - 1) + [1_100.0], [10_000.0] * n)
+    large = ([1_000_000.0] * (n - 1) + [1_100_000.0], [10_000_000.0] * n)
+    assert _change_at({"SMALL": small, "LARGE": large}, n - 1) == {
+        "SMALL": pytest.approx(0.01),
+        "LARGE": pytest.approx(0.01),
+    }
+
+
+def test_분할은_신용_증가로_읽히지_않는다() -> None:
+    """#234 — 035720 5:1 분할 뒤 원주식수 변화율은 +300% 안팎이었다(실제 잔고율은 약 −10%).
+
+    어댑터가 건네는 두 값이 같은 세션에 5배가 되는 경우다. 액면 분할·병합·감자에서 신용잔고
+    원천은 거래정지 첫날부터 새 주식수 단위로 바뀌어 주식수 급변일보다 대개 0~2세션 앞서고, 공개
+    랙(신용잔고 3 · 주식수 1)을 거치면 둘이 대개 같은 세션에 들어온다. 그러면 잔고율은 그대로라
+    변화는 0 이다. 무상증자는 원천 잔고가 새 단위로 일부만 바뀌어 이 불변성이 서지 않으므로 원장이
+    그 창의 잔고를 가린다(#249, 아래 테스트).
+    """
+    n, split = 40, 20
+    shares = [10_000.0 if day < split else 50_000.0 for day in range(n)]
+    balance = [1_000.0 if day < split else 5_000.0 for day in range(n)]
+    for day in range(19, n):
+        assert _change_at({"S": (balance, shares)}, day) == {"S": pytest.approx(0.0)}, day
+
+
+def test_원장이_가린_잔고가_20세션_창에_걸리면_변화도_결측이다() -> None:
+    """#249 — 무상증자 척도 창은 원장 뷰 `v_credit_balance` 가 잔고를 결측으로 가리고 팩터는 따른다.
+
+    팩터 graph 는 사건을 읽지 못하므로 스스로 창을 알 수 없다. 대신 20세션 창 안에 결측 잔고가
+    하나라도 있으면 변화가 결측이라, 가린 잔고 행에 닿는 모든 창이 결측이 된다. 가린 구간 가운데서
+    상장주식수가 2배가 되고 잔고가 새 척도로 바뀌어도, 창 밖 변화는 같은 척도끼리 견준 0 이다.
+    """
+    n, first, last, listing = 70, 20, 44, 30
+    shares = [10_000.0 if day < listing else 20_000.0 for day in range(n)]
+    balance = [
+        None if first <= day <= last else 1_000.0 if day < first else 2_000.0 for day in range(n)
+    ]
+    for day in range(19, n):
+        expected = {} if first <= day <= last + 19 else {"S": pytest.approx(0.0)}
+        assert _change_at({"S": (balance, shares)}, day) == expected, day
+
+
+def test_작은_첫_값과_0_에서_시작한_잔고도_유한한_변화를_낸다() -> None:
+    """#234 P3-2 — 1주에서 100주로 늘면 변화율은 +9,900% 였고, 0 에서 시작하면 값이 없었다."""
+    n = 25
+    tiny = ([1.0] * (n - 1) + [100.0], [1_000_000.0] * n)
+    zero = ([0.0] * (n - 1) + [1_000.0], [1_000_000.0] * n)
+    assert _change_at({"TINY": tiny, "ZERO": zero}, n - 1) == {
+        "TINY": pytest.approx(99 / 1_000_000),
+        "ZERO": pytest.approx(0.001),
+    }
+
+
+def test_변화는_20세션_창의_처음과_끝을_견준다() -> None:
+    """창 길이를 고정한다(#244 리뷰 P3-1) — 잔고율이 창 가운데(10세션째)에서 바뀐다.
+
+    DELTA(20) 은 24세션째에서 5세션째와 견주므로 +0.01 을 본다. 창이 10 으로 줄면 15세션째와
+    견주어 0 이 된다. 마지막 세션에서만 바뀌는 규모 테스트로는 창 길이를 가를 수 없었다.
+    """
+    definition = build_default_factor_registry().get("credit.margin_balance_change_20d")
+    assert definition.minimum_history_sessions == 20
+    n = 25
+    series = ([1_000.0] * 10 + [1_100.0] * (n - 10), [10_000.0] * n)
+    assert _change_at({"S": series}, n - 1) == {"S": pytest.approx(0.01)}

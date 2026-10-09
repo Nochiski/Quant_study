@@ -1,25 +1,103 @@
 # Factor Registry v1
 
 이 문서는 `domain.factor`의 `FactorRegistry`가 공개하는 50개 안정 ID와 Equity field 요구사항을
-사람이 검토할 수 있게 고정한 카탈로그입니다. 실행 의미의 SoT는 코드의 versioned registry이며,
-문서는 테스트로 registry와 드리프트하지 않는지 확인합니다.
+사람이 검토할 수 있게 고정한 카탈로그입니다. 실행 의미의 SoT는 코드의 versioned registry입니다.
+테스트(`tests/domain/test_factor_research.py`)는 registry의 모든 factor ID가 이 문서에 있는지와
+`implemented` 행이 7개인지만 확인합니다. 범주·선호·필드·최소 이력 열은 registry를 고칠 때 같은
+PR에서 사람이 맞춥니다.
 
-- 상태 `implemented`: M3 mock Equity adapter에서 즉시 preview 가능
+- 상태 `implemented`: 기본 graph가 registry에 있다. 편집기는 이 팩터만, 연결된 어댑터가 그 graph의
+  필드를 줄 때 예시 조각으로 넣어 주며, 넣으면 graph가 전략 문서에 복사된다
 - 상태 `catalog_only`: ID와 데이터 요구사항은 예약됐지만 기본 실행 graph는 후속 구현 대상
+- 상태 `unavailable`: 기본 graph는 있지만 연결된 어댑터가 그 graph의 필드를 주지 않는다. 아래 표의
+  상태가 아니라 팩터 카탈로그 응답과 AI 팩터 도구가 어댑터로 판정한 값이다(`factor_availability`,
+  이슈 #370). 실데이터 어댑터가 주지 않는 필드(`equity_duckdb/_specs.py`의 `UNSUPPORTED_FIELDS`)를
+  읽는 팩터가 이 상태다
 - 모든 입력은 `available_date <= as_of`인 PIT 관측값만 사용
 - 가격 변화(수익률·모멘텀·이평·변동성·낙폭·고점 거리·베타)는 수정주가 `price.adj_close`(전방
-  조정, 그날까지 적용·공개된 분할·증자·병합 계수만 곱해 과거 값이 바뀌지 않는다)를 읽는다. 대부분의
-  분할·증자를 반영하지만 원장 조정 공백이 남을 수 있다 — 확인 안 된 사건(`factor_ok=false`)은 조정되지
-  않고, 계수가 적용일보다 늦게 공개되면 적용일 하루에 스파이크가 남아 창 기반 계산이 창 길이만큼 읽는다
-  (#220). 원주가
+  조정, 그날까지 적용·공개된 분할·증자·병합 계수만 곱해 과거 값이 바뀌지 않는다)를 읽는다. 원주가
   `price.close`는 같은 날 두 값을 견주는 비율(장중 수익률·목표주가 괴리·배당수익률)과 거래대금에만
   쓴다. 야간 수익률은 수정 시가 필드가 없어 `adj_close[t]/adj_close[t-1] × open[t]/close[t]`로 만든다
   (이슈 #214)
+- **수정주가는 모든 사건을 잇지 않는다**(이슈 #220). 원장이 그날 사건을 접지 못한 적용일은 그 행이
+  결측이다 — KRX 기준가가 재설정된 날 계수가 다음 세션에야 공개된 사건(그날 하루 스파이크, 최대 약
+  38배)과 기준가는 바뀌었는데 주식수와 맞지 않아 계수를 못 낸 사건(`krx_base_inconsistent`, 층 이동).
+  창 연산(`time_series.*`)은 창에 결측이 하나라도 있으면 결측이라 그 행을 품는 창 전체가 결측이
+  된다. 실원장 2020-03-19 이후 12-1 모멘텀 셀의 1.30%(269종목)가 결측이 되고, 그중 85%는 사건
+  불연속을 품어 틀렸던 값이다. 틀린 값보다 결측을 낸다
+- **원장이 가린 칸은 사건 경계다**(이슈 #315·#337). 평가기는 값마다 그 값이 대표하는 시점 구간을
+  필드별로 잇고, 그 구간에 가린 칸이 들면 결측을 낸다. 창 연산은 구간을 창만큼 넓히고, `unary.lag` 는
+  k세션 옮기기만 하며, 두 값을 섞는 연산(이항·비교·조건)은 두 구간을 덮는 구간이다. 그래서 오늘 값을
+  다른 시점 값과 견주는 식은 식 모양과 무관하게 그 사이의 층 이동에서 결측이다 —
+  `adj_close / lag(adj_close, 20)`(예전에는 025440 층 ×4.26 뒤 19세션이 +247%~+317%)도, 건너뛰는 세션을
+  둔 창을 오늘 값과 견주는 `adj_close / mean(adj_close, 20, lag=5)`(예전에는 실원장 2020-03-19
+  이후 가린 칸을 건넌 lag 5 1,310셀 · lag 20 6,156셀 가운데 637셀 · 3,064셀이 2배를 넘거나 0.5배에
+  못 미치는 층 배수를 정상 값으로 냈다)도 같다. 창 연산은 창 안 값끼리 견주므로
+  건너뛴 세션(12-1 모멘텀의 최근 21세션)의 가린 칸과 무관해 맞는 값을 잃지 않는다. `lag` 단독 출력은
+  k세션 전 값 그 자체라 그 시점 값이 맞으면 맞다 — 가린 칸 너머의 옛 값은 다른 시점 값과 섞을 때
+  결측이 된다. 가린 칸은 이동평균 같은 중간 계산을 거쳐도 이어진다. 구간은 필드마다 따로라, 12-1
+  모멘텀에 다른 필드의 오늘 값을 섞어도 모멘텀 쪽 구간은 넓어지지 않는다. 가리지 않은 결측은 경계가
+  아니라 건너도 된다
+- 원장이 조정하지 않거나 적용일을 기준가로 확인하지 못한 사건은 가리지 않는다. 유상증자 권리락처럼
+  원장이 계수를 만들지 않는 사건(`unknown_price_only`)은 조정 없이 남아 그날 수익률에 가격 변화가
+  그대로 들어간다. 계수를 못 낸 명목일 사건(`no_price_match`·`ratio_null`·`near_dup_suppressed` 등 —
+  효력일 창에서 맞는 가격 변화를 못 찾았거나 비율을 모르거나 다른 원천의 중복인 사건)은 명목 효력일에
+  점프가 거의 없다. 명목일·가격 매칭으로 적용일을 정한 늦은 ok 계수도 그날 KRX 기준가 재설정이 없어
+  가리지 않는다(2020-03-19 이후 17행, 그날 값 오차 −12%~+10%)
+- 재무 흐름 필드 `financial.revenue`·`gross_profit`·`operating_income`·`net_income`·
+  `operating_cash_flow`는 **최근 4분기 합(TTM)** 이다. 최신 공시가 분기보고서든 사업보고서든 늘
+  12개월 값이고, 연속 4분기가 공시일 기준으로 전부 접수됐을 때만 값이 선다. 4분기를 채울 수 없으면
+  결측이며 3개월·연간 값으로 대신하지 않는다(이슈 #212). 잔고 필드 `financial.book_equity`·
+  `total_assets`·`total_liabilities`는 보고 기간 말 시점 값이라 TTM 대상이 아니다. ROE·ROA·이익수익률
+  같은 비율은 TTM 분자와 최신 잔고 분모를 쓴다. field_id·registry version·data snapshot id는
+  그대로라 이 변경(2026-09-27) 이전 실행과 데이터 스냅샷이 같아도 재무 팩터 값은 다르다 — 이전 실행
+  결과와 재무 팩터 값을 직접 비교하지 않는다(#235)
+- 연결재무제표(CFS)와 별도재무제표(OFS)를 오가는 법인은 전환 뒤 최대 약 7분기 동안 TTM이 비어 있다.
+  창 네 분기와, 사업보고서 4분기를 만드는 앞 3분기가 모두 같은 구분이어야 하기 때문이다. 영구 결측은
+  아니고 같은 구분의 분기가 다시 차면 값이 선다
 - `factor_id`, registry version, graph hash, data snapshot, parameters, as-of range가 재현성 키를 구성
+- `credit.margin_balance_change_20d`는 신용잔고율(잔고 주식수 ÷ 상장주식수)의 20세션 차이다(이슈 #234).
+  원 주식수의 변화율은 분할·병합을 신용 급증으로 읽고(035720 5:1 분할 뒤 +300%) 작은 첫 값에서
+  폭주했다. 두 필드는 각자 공개 랙(신용잔고 3세션 · 주식수 1세션)대로 나눈다 — **액면 분할·병합·감자**
+  에서는 신용잔고 원천이 거래정지 첫날부터 새 주식수 단위로 바뀌어(잔고 척도 전환 비율 중앙값 분할·병합
+  1.04 · 감자 1.00) 실원장에서는 이쪽이 사건 구간 튐이 가장 작다. 남는 튐은 사건 세션과 19세션 뒤 반대
+  부호로 한 쌍이다(분할·병합 38%에서 |값|>0.005, 사건별 최대 |값| 중앙값 0.0023 · p90 0.027, 사건의
+  약 10%가 p99 0.021 을 넘는다)
+- **무상증자 척도 창은 결측이다**(이슈 #249). 무상증자에서는 신용잔고 원천이 새 단위로 바뀌지 않거나
+  일부만 바뀌어(전환 비율 중앙값 0.41) 권리락일부터 옛 단위와 새 단위가 섞이고, 상장주식수는 신주
+  상장일에야 바뀐다. 가리기 전에는 신주 상장 뒤 약 20세션 동안 큰 음수가 나와(247540 −0.0135 ·
+  182360 −0.034 · 221610 −0.17) 무상증자 창 셀의 약 22%가 전체 하위 1%에 들어 선호 LOW 순위에서
+  우대받았다. 원장 뷰 `v_credit_balance`가 권리락일부터 정해진 세션 수의 잔고를 결측으로 내고, 이
+  팩터는 20세션 창 안에 결측이 하나라도 있으면 결측이라 그대로 따른다 — 창 25세션이면 권리락 3세션
+  뒤부터 46세션 뒤까지 값이 없다. 창 길이와 근거의 정본은 원장 뷰(`database/src/equity/views.py`)다.
+  실원장(2020-03-19 이후)에서 신주 상장 뒤 20세션 창의 하위 1% 셀은 1,545 → 3, 결측이 된 셀은 전체의
+  0.58%(22,121)다. 계수로 되돌리는 척도 보정은 전환이 부분적이라 쓰지 않는다
+- 가림은 공시 다음 행부터라(PIT) 공시가 권리락 당일·이후에 잡힌 무상증자(2019-10 이후 약 7%, 44건 —
+  정기보고서 회고 원천·정정본만 남은 사건)는 공시 전 세션을 가리지 못한다. 남는 값은 공시 전에 부푼
+  잔고율이라 주로 전체 상위 1%(선호 LOW 의 벌점 쪽)로 가고, 우대 쪽 잔여는 3셀이다. 권리락 → 신주
+  상장이 28세션 이상인 사건(약 2%)은 상장 뒤 주식수 전환 셀 일부가 가린 창 밖에 남는다(068270 7셀)
+- **원장이 가린 셀은 결측 정책이 채우지 않는다**(이슈 #298). 가린 잔고의 셀 종류는 모르는 결측
+  (`missing`)이 아니라 `masked` 라, 실행 결측 정책이 `zero`·`cross_sectional_median` 이어도 비어 있고
+  그 셀을 품는 창은 결측이 된다 — 가림은 모든 정책에서 같은 창을 지운다. 예전에는 두 정책이 가린
+  잔고를 채워, `zero` 에서 권리락 직후 창 셀의 60%가 전체 하위 1%로 갔다(가리기 전 10%). 수정주가도
+  같다 — 가린 적용일 행을 `zero` 가 0 으로 채워 그 행이 끝점인 12-1 모멘텀이 −100% 가 되던 셀
+  (2020-03-19 이후 324셀)이 이제 결측이다
+- **결측 정책은 빈 팩터 값을 횡단면으로 넘길 때만 채운다**(이슈 #312). `zero`·
+  `cross_sectional_median` 은 필드 원값을 채우지 않는다 — 원시 결측은 시계열 창·비율에서 결측으로
+  남고, 그 결과 팩터 값이 비면(이력이 모자란 새 상장 포함) 순위·그룹 같은 횡단면 연산에 들어갈 때나
+  그래프 출력에서 0 또는 동료의 중앙값을 받는다. 그룹 입력은 같은 그룹의 중앙값, 나머지는 같은 날
+  전체 동료의 중앙값을 쓴다. 다만 앞선 횡단면·그룹 노드가 채운 파생값을 뒤의 기간 계산·비율이 읽으면
+  그 채운 값은 계산에 들어가는 현재 한계가 있다(#312 리뷰 P2-3). 동료에 값이 하나도 없으면 채우지 않는다.
+  예전에는 원값을 채워 신용잔고 0 이 20세션 변화에 가짜 급변을(2024 하반기 1,451셀), 다른 회사
+  자본총계 중앙값이 `financial.book_to_market` median 순위를 틀리게(순위 차 0.1 초과 1,975셀)
+  만들었다. `drop` 은 그대로다
+- 2026-09-27 전에 저장한 전략은 옛 graph(원 주식수 변화율·차이)를 문서에 복사해 두었으므로 자동으로
+  바뀌지 않는다 — 같은 factor_id 아래 두 정의가 공존하고 값 척도도 다르다. 새 정의를 쓰려면 팩터를
+  다시 넣는다
 
 | # | Factor ID | Category | Preference | Required Equity fields | Min history | Status |
 |---:|---|---|---|---|---:|---|
-| 1 | `price.momentum_12_1` | price | high | `price.adj_close` | 252 | implemented |
+| 1 | `price.momentum_12_1` | price | high | `price.adj_close` | 273 | implemented |
 | 2 | `price.momentum_6_1` | price | high | `price.adj_close` | 126 | catalog_only |
 | 3 | `price.reversal_1m` | price | low | `price.adj_close` | 21 | catalog_only |
 | 4 | `price.volatility_60d` | price | low | `price.adj_close` | 60 | catalog_only |
@@ -58,7 +136,7 @@
 | 37 | `short.short_balance_change_20d` | short | low | `short.short_balance_ratio` | 20 | catalog_only |
 | 38 | `short.borrow_utilization` | short | low | `short.borrowed_quantity`, `price.shares_outstanding` | 1 | catalog_only |
 | 39 | `short.short_covering` | short | high | `short.short_balance_ratio`, `price.close` | 20 | catalog_only |
-| 40 | `credit.margin_balance_change_20d` | credit | low | `credit.margin_balance` | 20 | implemented |
+| 40 | `credit.margin_balance_change_20d` | credit | low | `credit.margin_balance`, `price.shares_outstanding` | 20 | implemented |
 | 41 | `credit.margin_balance_ratio` | credit | low | `credit.margin_balance`, `price.shares_outstanding` | 1 | catalog_only |
 | 42 | `credit.credit_net_buy_20d` | credit | low | `credit.net_buy` | 20 | catalog_only |
 | 43 | `credit.collateral_ratio` | credit | high | `credit.collateral_value`, `credit.loan_value` | 1 | catalog_only |
@@ -78,10 +156,10 @@ validator/compiler/evaluator를 통과하며 UI(YAML source editor, 그리고 �
 
 | Category | Executable default | Core operation |
 |---|---|---|
-| price | `price.momentum_12_1` | 252-session momentum, 21-session skip, cross-sectional rank |
-| financial | `financial.book_to_market` | PIT book equity / lagged market cap, rank |
+| price | `price.momentum_12_1` | 수정주가 `price.adj_close`의 252-session momentum, 21-session skip, cross-sectional rank |
+| financial | `financial.book_to_market` | PIT book equity / market cap(공개 랙은 원장 `dataset_profile`), rank |
 | consensus | `consensus.forward_eps_growth` | rolling forward EPS growth |
 | flow | `flow.foreign_net_buy_20d` | 20-session foreign net-buy mean |
 | short | `short.short_balance_ratio` | short balance ratio |
-| credit | `credit.margin_balance_change_20d` | 20-session margin balance rate of change |
+| credit | `credit.margin_balance_change_20d` | 20-session change of margin balance ratio (balance / shares outstanding) |
 | event | `event.earnings_surprise` | PIT earnings surprise |

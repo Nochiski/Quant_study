@@ -234,6 +234,8 @@ mod tests {
                 vec![100.0, 100.0, 100.0, 100.0],
                 vec![101.0, 101.0, 101.0, 101.0],
                 vec![1_000, 1_000, 1_000, 1_000],
+                None,
+                None,
             )
             .unwrap();
         runtime.configure_router(
@@ -252,6 +254,7 @@ mod tests {
             notify_fill: false,
             notify_order_update: false,
             notify_corporate_action: false,
+            sell_tax_rates: Vec::new(),
         }));
         runtime
     }

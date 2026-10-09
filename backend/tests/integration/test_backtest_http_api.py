@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import pytest
 from fastapi import FastAPI
@@ -23,11 +24,21 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
+    BacktestDataNotReadyError,
     BacktestDataPort,
+    BacktestDataQuery,
 )
-from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestRunService,
+    BacktestRunSpec,
+    InvalidBacktestRunError,
+    rejection_code,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCapabilityIssue,
     EngineCompatibility,
@@ -45,7 +56,7 @@ from strategy_workbench.domain.analytics.facade.metrics import build_default_met
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
-from tests.backtest_run_wait import wait_for_terminal_state
+from tests.backtest_run_wait import RawLoadBarrier, wait_for_terminal_state
 
 
 class _CommitBarrierStore:
@@ -65,48 +76,12 @@ class _CommitBarrierStore:
                 raise TimeoutError("artifact commit test barrier was not released")
         return self._delegate.commit(result)
 
+    def load(self, run_id: str, *, sha256: str) -> BacktestRunResult:
+        return self._delegate.load(run_id, sha256=sha256)
+
     def discard(self, run_id: str) -> None:
         self.discarded.append(run_id)
         self._delegate.discard(run_id)
-
-
-class _RawLoadBarrierPort:
-    """tape 단계의 원시 관측 로딩 안에서 멈추는 테스트용 관측 포트.
-
-    실제 mock 어댑터에 위임하되, 로딩 진입 시점에 `entered` 를 올리고 `release` 까지 기다린다.
-    해제 뒤 어댑터의 checkpoint 가 취소 플래그를 보므로 "로딩 도중 취소" 경로를 그대로 탄다.
-    `failure` 가 있으면 로딩 대신 그 예외를 던진다(데이터 부재 경로).
-    """
-
-    def __init__(
-        self,
-        delegate: MockEquityDataAdapter,
-        *,
-        failure: Exception | None = None,
-    ) -> None:
-        self._delegate = delegate
-        self._failure = failure
-        self.entered = Event()
-        self.release = Event()
-        self.loaded = False
-
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
-        return self.load_raw_observations_cancellable(query, checkpoint=lambda: None)
-
-    def load_raw_observations_cancellable(
-        self,
-        query: RawObservationQuery,
-        *,
-        checkpoint: Callable[[], None],
-    ) -> RawObservationSet:
-        self.entered.set()
-        if not self.release.wait(timeout=30):
-            raise TimeoutError("raw observation test barrier was not released")
-        if self._failure is not None:
-            raise self._failure
-        result = self._delegate.load_raw_observations_cancellable(query, checkpoint=checkpoint)
-        self.loaded = True
-        return result
 
 
 def _backtests_with_raw_load_barrier(
@@ -115,9 +90,10 @@ def _backtests_with_raw_load_barrier(
     run_id: str,
     *,
     failure: Exception | None = None,
-) -> tuple[BacktestRunService, _RawLoadBarrierPort]:
+    data_source: BacktestDataPort | None = None,
+) -> tuple[BacktestRunService, RawLoadBarrier]:
     adapter = cast(MockEquityDataAdapter, container.equity_data)
-    barrier = _RawLoadBarrierPort(adapter, failure=failure)
+    barrier = RawLoadBarrier(adapter, failure=failure)
     portfolio_design = PortfolioDesignService(
         barrier,
         BacktestEnginePortfolioAdapter(),
@@ -127,9 +103,10 @@ def _backtests_with_raw_load_barrier(
     backtests = BacktestRunService(
         portfolio_design,
         container.strategy_repository,
-        cast(BacktestDataPort, container.equity_data),
+        data_source or cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
     return backtests, barrier
@@ -151,9 +128,18 @@ def _app_with_backtests(container: BackendContainer, backtests: BacktestRunServi
     )
 
 
+def _environment(**overrides: Any) -> dict[str, Any]:
+    """실행 설정은 1.2 부터 요청 본문이 싣는다(P2-03)."""
+    return {
+        "start": "2026-01-02",
+        "end": "2026-02-20",
+        "universe_id": "krx.common-stock",
+        **overrides,
+    }
+
+
 def _run_body(client: TestClient, core: str = "rust") -> dict[str, Any]:
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"].update({"start": "2026-01-02", "end": "2026-02-20"})
     spec["portfolio"].update(
         {
             "selection_count": 2,
@@ -165,7 +151,8 @@ def _run_body(client: TestClient, core: str = "rust") -> dict[str, Any]:
     return {
         "strategy": spec,
         "core": core,
-        "benchmark_security_id": "005930",
+        "environment": _environment(),
+        "benchmark_security_id": "sec-005930-1",
         "metric_windows": [
             {
                 "scope": "out_of_sample",
@@ -181,8 +168,8 @@ def _wait(client: TestClient, run_id: str) -> dict[str, Any]:
     return wait_for_terminal_state(client, run_id)
 
 
-def _execute(client: TestClient, core: str) -> dict[str, Any]:
-    accepted = client.post("/api/v1/backtests", json=_run_body(client, core))
+def _execute(client: TestClient, body: dict[str, Any]) -> dict[str, Any]:
+    accepted = client.post("/api/v1/backtests", json=body)
     assert accepted.status_code == 202
     run_id = accepted.json()["run"]["run_id"]
     state = _wait(client, run_id)
@@ -192,7 +179,9 @@ def _execute(client: TestClient, core: str) -> dict[str, Any]:
     return response.json()
 
 
-def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts() -> None:
+def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
+    isolate_runtime_state_paths: Path,
+) -> None:
     client = TestClient(build_http_app())
     accepted = client.post("/api/v1/backtests", json=_run_body(client))
     assert accepted.status_code == 202
@@ -202,12 +191,30 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     assert accepted_request.status_code == 200
     assert accepted_request.json() == {
         **_run_body(client),
+        # 응답은 해소된 실행 설정을 전부 채워 돌려준다(요청은 기본값을 생략했다).
+        "environment": {
+            "market": "KRX",
+            "frequency": "daily",
+            "start": "2026-01-02",
+            "end": "2026-02-20",
+            "universe_id": "krx.common-stock",
+            "timing": "next_open",
+            "participation_rate": 0.1,
+            "participation_basis": "adv20",
+            "fee_bps": 15.0,
+            "slippage_bps": 10.0,
+            "impact_model": "fixed_bps",
+            "impact_coefficient": 1.0,
+            "sell_tax": "krx_statutory",
+            "sell_tax_bps": None,
+            "missing": "drop",
+        },
         "annualization_days": 252,
         "initial_cash": 100_000_000.0,
         "strategy_source": None,
-        # 요청 본문에 실행 설정을 주지 않으면 접수된 요청도 None 을 그대로 보존한다 —
-        # 브리지로 해소한 값은 run spec 에만 박히고 매니페스트로 나간다(P2-01).
-        "environment": None,
+        # 원본 요청이라 파라미터 값은 해소 전(비어 있음)이다. 해소 값은 매니페스트가 싣는다.
+        "parameter_values": {},
+        "lineage_strategy_id": None,
     }
 
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
@@ -216,19 +223,20 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
 
     assert state["status"] == "completed", state
     assert len(state["artifact_sha256"]) == 64
-    assert state["artifact_uri"].startswith("file:///")
     result = client.get(f"/api/v1/backtests/{run_id}/result").json()
     assert result["manifest"]["engine_core"] == "rust"
     assert len(result["manifest"]["run_fingerprint"]) == 64
     assert result["manifest"]["run_spec"]["strategy"] == _run_body(client)["strategy"]
-    assert result["manifest"]["run_spec"]["benchmark_security_id"] == "005930"
-    assert result["manifest"]["metric_registry_version"] == "metric-registry-v1"
+    assert result["manifest"]["run_spec"]["benchmark_security_id"] == "sec-005930-1"
+    assert result["manifest"]["metric_registry_version"] == "metric-registry-v5"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
         "corporate_action_feed_empty",
         "mock_equity_data",
     }
-    assert len(result["metric_definitions"]) == 21
-    assert len(result["metrics"]) == 42
+    # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
+    assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])
+    assert len(result["metric_definitions"]) == 24
+    assert len(result["metrics"]) == 48
     assert {item["scope"] for item in result["metrics"]} == {
         "full",
         "out_of_sample",
@@ -246,6 +254,19 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     assert events.headers["content-type"].startswith("text/event-stream")
     assert '"status":"completed"' in events.text
 
+    # 산출물은 서버의 런타임 상태 디렉터리 아래에만 있다 — run 응답 어디에도 그 절대 경로가 없다
+    # (#277). 역슬래시·file URI·JSON 이스케이프 표기와 무관하게 그 디렉터리 이름으로 본다.
+    for response in (
+        accepted,
+        accepted_request,
+        client.get(f"/api/v1/backtests/{run_id}"),
+        client.get("/api/v1/backtests"),
+        client.get(f"/api/v1/backtests/{run_id}/result"),
+        client.post(f"/api/v1/backtests/{run_id}/cancel"),
+        events,
+    ):
+        assert isolate_runtime_state_paths.name not in response.text, response.request.url
+
 
 def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     tmp_path: Path,
@@ -262,6 +283,7 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         barrier,
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: next(run_ids),
     )
     client = TestClient(_app_with_backtests(container, backtests))
@@ -282,7 +304,6 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
 
     state = _wait(client, first_run_id)
     assert state["status"] == "cancelled"
-    assert state["artifact_uri"] is None
     assert state["artifact_sha256"] is None
     assert barrier.discarded == [first_run_id]
     assert not (artifact_root / first_run_id).exists()
@@ -377,7 +398,7 @@ def test_cancel_during_raw_observation_loading_ends_cancelled_without_a_tape(
     assert state["status"] == "cancelled", state
     assert state["error"] is None
     assert state["error_code"] is None
-    assert state["artifact_uri"] is None
+    assert state["artifact_sha256"] is None
     # 취소는 mock 어댑터의 로딩 checkpoint 에서 관측되므로 로딩이 끝까지 가지 않는다.
     assert barrier.loaded is False
     events = client.get(f"/api/v1/backtests/{run_id}/events").text
@@ -441,6 +462,7 @@ def test_cancel_first_observed_by_a_progress_callback_ends_cancelled(tmp_path: P
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
     client = TestClient(_app_with_backtests(container, backtests))
@@ -535,7 +557,7 @@ def test_failure_that_races_a_cancel_keeps_its_reason(tmp_path: Path) -> None:
 class _RejectingEngine:
     """엔진이 구현하지 못하는 스펙으로 판정하는 포트 — preflight 반환값 소비 분기를 고정한다."""
 
-    def assess(self, spec: object) -> EngineCompatibility:
+    def assess(self, spec: object, environment: object) -> EngineCompatibility:
         return EngineCompatibility(
             compatible=False,
             requirements=EngineRequirementSummary("EverySession", (), (), ("unsupported",)),
@@ -566,15 +588,20 @@ def test_engine_incompatible_strategy_is_rejected_at_start_with_the_issue_list(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "must-not-be-accepted",
     )
     client = TestClient(_app_with_backtests(container, backtests))
 
-    response = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    body = _run_body(client, "python")
+    response = client.post("/api/v1/backtests", json=body)
+    # 실험 기반 검사(`admit`)도 시작과 같은 preflight 판정·코드로 거절하고 접수하지 않는다(V3-03).
+    with pytest.raises(InvalidBacktestRunError) as admitted:
+        backtests.admit(TypeAdapter(BacktestRunSpec).validate_python(body))
 
     assert response.status_code == 422, response.text
     detail = response.json()["detail"]
-    assert detail["code"] == "backtest.run.invalid"
+    assert detail["code"] == rejection_code(admitted.value) == "backtest.run.invalid"
     assert "feature.unsupported=not_implemented (no kernel)" in detail["message"]
     assert client.get("/api/v1/backtests/must-not-be-accepted").status_code == 404
 
@@ -608,6 +635,109 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
     assert client.get(f"/api/v1/backtests/{run_id}/result").status_code == 409
 
 
+def test_equity_wipeout_ends_the_run_with_its_own_failure_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """자본 잠식으로 멈춘 실행은 서버 오류(`backtest.run.internal`)가 아니라 전용 코드로 끝난다.
+
+    mock 데이터로 파산 경로를 만들기 어려워 커널 `run` 이 잠식 예외를 던지게 한다(#285). 여기서는
+    어댑터가 커널 예외를 포트 어휘로 옮기는지를 본다. 실제 잠식 판정은
+    `tests/test_rust_driver.py` 가 두 코어에서 지킨다.
+    """
+    from backtest_engine import BacktestEngine
+    from backtest_engine.errors import EquityWipedOut
+
+    def wiped_out(self: BacktestEngine, *args: object, **kwargs: object) -> None:
+        raise EquityWipedOut("equity fell to zero or below at session close — equity=0.0")
+
+    monkeypatch.setattr(BacktestEngine, "run", wiped_out)
+    client = TestClient(build_http_app())
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client))
+
+    assert accepted.status_code == 202, accepted.text
+    state = _wait(client, accepted.json()["run"]["run_id"])
+    assert state["status"] == "failed", state
+    assert state["error_code"] == "backtest.run.equity_wiped_out"
+    assert "equity=0.0" in state["error"]
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "status", "error_code"),
+    [
+        # 템플릿은 리밸런싱을 적지 않아 월별이다 — 달의 첫 세션에 고른다. 01-08~01-12 에는 달의 첫
+        # 세션(01-02)이 없어 한 번도 사지 않고, 12-26 부터면 01-02 에 산다.
+        ("2024-01-08", "2024-01-12", "failed", "backtest.run.no_positions"),
+        ("2023-12-26", "2024-01-12", "completed", None),
+    ],
+)
+def test_run_that_never_selects_a_position_ends_with_its_own_code(
+    start: str, end: str, status: str, error_code: str | None
+) -> None:
+    """한 번도 사지 않은 실행은 엔진 능력 거절(`backtest.run.invalid`)이 아니라 전용 코드로
+    끝난다(#360)."""
+    client = TestClient(build_http_app())
+    body = {
+        "strategy": client.get("/api/v1/strategies/template").json(),
+        "core": "python",
+        "environment": _environment(start=start, end=end),
+    }
+
+    accepted = client.post("/api/v1/backtests", json=body)
+
+    assert accepted.status_code == 202, accepted.text
+    state = _wait(client, accepted.json()["run"]["run_id"])
+    assert (state["status"], state["error_code"]) == (status, error_code), state
+    if error_code is not None:
+        assert "frames=0" in state["error"] and "rebalance=monthly" in state["error"]
+
+
+class _LedgerNotReady:
+    """카탈로그가 백테스트 뷰를 싣지 않은 데이터 포트 — 벤치마크가 없어도 tape 앞에서
+    멈춰야 한다."""
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> NoReturn:
+        raise BacktestDataNotReadyError(
+            f"카탈로그에 백테스트가 읽는 매크로가 없다 (catalog_macro_missing) — query={query}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("benchmark", "data_source", "error_code", "reason"),
+    [
+        ("KOSPI", None, "backtest.run.benchmark_unknown", "KOSPI"),
+        (None, _LedgerNotReady(), "backtest.run.data_not_ready", "catalog_macro_missing"),
+    ],
+)
+def test_data_port_failures_end_the_run_before_the_tape_stage(
+    tmp_path: Path,
+    benchmark: str | None,
+    data_source: BacktestDataPort | None,
+    error_code: str,
+    reason: str,
+) -> None:
+    """벤치마크 오타(#361)와 원장 준비 부족(#369)은 tape 계산을 다 쓴 뒤 알리지 않는다 — tape 앞
+    데이터 포트 확인에서 전용 코드로 멈춘다. 접수(202)는 여전히 데이터를 읽지 않는다(#158)."""
+    run_id = "run-data-port-failure"
+    container = build_container(artifact_root=tmp_path / "unused")
+    backtests, barrier = _backtests_with_raw_load_barrier(
+        container, tmp_path, run_id, data_source=data_source
+    )
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    body = {**_run_body(client, "python"), "benchmark_security_id": benchmark}
+    try:
+        accepted = client.post("/api/v1/backtests", json=body)
+        assert accepted.status_code == 202, accepted.text
+        state = _wait(client, run_id)
+    finally:
+        barrier.release.set()
+
+    assert (state["status"], state["error_code"]) == ("failed", error_code)
+    assert reason in state["error"]
+    assert not barrier.entered.is_set()  # tape 단계의 원시 관측 로딩에 들어가지 않았다
+
+
 @pytest.mark.parametrize(
     "failure",
     [RuntimeError("can't start new thread"), MemoryError("cannot allocate thread stack")],
@@ -615,7 +745,11 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
 def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
-    """스레드 기동 실패(상한 RuntimeError·메모리 압박 MemoryError)는 500 이되 run 은 `failed`."""
+    """스레드 기동 실패(상한 RuntimeError·메모리 압박 MemoryError)는 run `failed` 로 끝난다.
+
+    스레드는 대기열에서 자리가 날 때 뜨므로(#161) 기동 실패는 접수 뒤의 실행 실패다 — 시작 요청은
+    202 로 접수되고 run 이 `backtest.run.internal` 로 끝난다.
+    """
 
     class _UnstartableThread:
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -630,11 +764,12 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     run_id = "run-thread-unstartable"
     container = build_container(artifact_root=tmp_path / "unused")
     backtests, _barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
-    client = TestClient(_app_with_backtests(container, backtests), raise_server_exceptions=False)
+    client = TestClient(_app_with_backtests(container, backtests))
 
     response = client.post("/api/v1/backtests", json=_run_body(client, "python"))
 
-    assert response.status_code == 500
+    assert response.status_code == 202, response.text
+    assert response.json()["run"]["status"] == "queued"
     state = client.get(f"/api/v1/backtests/{run_id}").json()
     assert state["status"] == "failed", state
     assert state["error_code"] == "backtest.run.internal"
@@ -666,6 +801,23 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
             "OSError: [Errno 13] Permission denied: '<path>'",
         ),
         ("cannot open /Users/sangmok/Library/x", "cannot open <path>"),
+        # 따옴표로 감싼 드라이브·UNC 경로는 공백이 들어도 닫는 따옴표까지 가린다(#318).
+        (
+            r'IO Error: Cannot open file "C:\Users\John Smith\ledger\equity.duckdb": in use',
+            'IO Error: Cannot open file "<path>": in use',
+        ),
+        (
+            r"OSError: [Errno 2] No such file: 'C:\\Users\\John Smith\\x.parquet'",
+            "OSError: [Errno 2] No such file: '<path>'",
+        ),
+        (r'share "\\file server\quant share\x" gone', 'share "<path>" gone'),
+        # 여는 따옴표와 같은 종류에서만 끊는다 — 다른 따옴표가 든 계정명도 끝까지 가린다
+        # (#406 리뷰 P3-2)
+        (
+            r"""IO Error: Cannot open file "C:\Users\O'Brien\ledger\equity.duckdb": in use""",
+            'IO Error: Cannot open file "<path>": in use',
+        ),
+        (r'"C:\Users\홍길동\원장\equity.duckdb" busy', '"<path>" busy'),
         # 가리지 않아야 하는 것: 다른 URL·단위 표기·비율·JSON Pointer 진단 경로·흔한 영단어 루트.
         ("see https://example.com/docs for detail", "see https://example.com/docs for detail"),
         ("units 10 m/s and 3 /s", "units 10 m/s and 3 /s"),
@@ -687,7 +839,10 @@ def test_run_error_masks_server_paths_but_keeps_urls_and_units(raw: str, masked:
 
 
 def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() -> None:
-    """`_failure_code` 산출 집합 == `RunFailureCode` 어휘, 그중 422 코드는 계약 Literal 과 같다."""
+    """`_failure_code` 산출 집합 + `interrupted` == `RunFailureCode` 어휘.
+
+    그중 422 코드는 계약 Literal 과 같다.
+    """
     from typing import get_args, get_type_hints
 
     from strategy_workbench.adapters.inbound.http_api._backtest_contract import (
@@ -700,7 +855,13 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
     )
     from strategy_workbench.application.backtest_run._service import (
         InvalidBacktestRunError,
+        NoPositionsError,
         _failure_code,
+    )
+    from strategy_workbench.application.backtest_run.facade.ports import (
+        BacktestDataNotReadyError,
+        BacktestDataUnavailableError,
+        EquityWipedOutError,
     )
     from strategy_workbench.application.portfolio_design.facade.design import (
         InvalidPortfolioRequestError,
@@ -714,9 +875,14 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(RawObservationUnavailableError(DataLoadStatus.NO_DATA, None)),
         _failure_code(PortfolioSnapshotMismatchError(expected="a", actual="b")),
         _failure_code(InvalidBacktestRunError("x")),
+        _failure_code(EquityWipedOutError("x")),
+        _failure_code(BacktestDataNotReadyError("x")),
+        _failure_code(NoPositionsError("x")),
+        _failure_code(BacktestDataUnavailableError("x")),
         _failure_code(RuntimeError("x")),
     }
-    assert produced == RUN_FAILURE_CODES
+    # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3).
+    assert produced == RUN_FAILURE_CODES - {"backtest.run.interrupted"}
 
     def contract_code(detail_type: type) -> str:
         # future annotations 라 필드 타입이 문자열이다 — 평가해서 Literal 인자를 꺼낸다.
@@ -728,20 +894,53 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         contract_code(PortfolioDataUnavailableDetail),
         contract_code(PortfolioRawObservationInvalidDetail),
         contract_code(BacktestRunInvalidDetail),
-    } == RUN_FAILURE_CODES - {"backtest.run.internal"}
+    } == RUN_FAILURE_CODES - {
+        "backtest.run.internal",
+        "backtest.run.equity_wiped_out",
+        "backtest.run.data_not_ready",
+        "backtest.run.no_positions",
+        "backtest.run.benchmark_unknown",
+        "backtest.run.interrupted",
+    }
 
 
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:
     client = TestClient(build_http_app())
 
-    rust = _execute(client, "rust")
-    python = _execute(client, "python")
+    rust = _execute(client, _run_body(client, "rust"))
+    python = _execute(client, _run_body(client, "python"))
 
     assert rust["metrics"] == python["metrics"]
     assert rust["series"] == python["series"]
     assert rust["artifacts"] == python["artifacts"]
     assert rust["manifest"]["engine_core"] == "rust"
     assert python["manifest"]["engine_core"] == "python"
+
+
+def test_adjacent_metric_windows_chain_to_the_full_run_total_return() -> None:
+    """경계에서 나눈 두 구간의 총수익률을 이어 곱하면 전체 총수익률이다(#274 DEFECT-5).
+
+    뒤 구간은 직전 세션(1/30) 자산에서 시작하므로 2/2 하루 수익률이 어느 구간에서도 빠지지 않는다.
+    앞 구간은 실행 첫날부터라 직전 세션이 없고 첫 점이 기준이다.
+    """
+    client = TestClient(build_http_app())
+    body = _run_body(client)
+    body["metric_windows"] = [
+        {"scope": "in_sample", "start": "2026-01-02", "end": "2026-01-30", "label": "IS"},
+        {"scope": "out_of_sample", "start": "2026-02-02", "end": "2026-02-20", "label": "OOS"},
+    ]
+
+    result = _execute(client, body)
+
+    total = {
+        item["scope"]: item["value"]
+        for item in result["metrics"]
+        if item["metric_id"] == "total_return"
+    }
+    assert total["full"] != 0.0
+    assert (1 + total["in_sample"]) * (1 + total["out_of_sample"]) == pytest.approx(
+        1 + total["full"], rel=1e-12
+    )
 
 
 def test_backtest_unknown_run_and_invalid_metric_window_return_structured_errors() -> None:
@@ -778,9 +977,30 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
     # 관측 데이터 부재·계약 위반은 시작 요청이 아니라 run 상태 `failed` 로 전달된다(이슈 #158).
     assert set(detail["discriminator"]["mapping"]) == {
         "backtest.run.invalid",
+        "backtest.run.field_invalid",
+        "backtest.run.environment_required",
+        "backtest.run.research_window_violation",
+        "backtest.run.parameter_invalid",
         "backtest.strategy.requires_upgrade",
         "portfolio.strategy.invalid",
     }
+
+    # 실행 설정 없는 시작 요청은 코드화된 422 다 — schema 1.2 문서에는 되돌아갈 값이 없다(P2-03).
+    without_environment = _run_body(client, "python")
+    without_environment.pop("environment")
+    missing_environment = client.post("/api/v1/backtests", json=without_environment)
+    assert missing_environment.status_code == 422, missing_environment.text
+    assert missing_environment.json()["detail"]["code"] == "backtest.run.environment_required"
+    TypeAdapter(Backtest422Response).validate_python(missing_environment.json())
+
+    # 문서에 없는 파라미터 값은 어느 파라미터인지 싣고 거절한다(검증 랩 spec D4).
+    unknown_parameter = _run_body(client, "python")
+    unknown_parameter["parameter_values"] = {"missing": 1}
+    parameter_response = client.post("/api/v1/backtests", json=unknown_parameter)
+    assert parameter_response.status_code == 422, parameter_response.text
+    assert parameter_response.json()["detail"]["code"] == "backtest.run.parameter_invalid"
+    assert parameter_response.json()["detail"]["parameter_id"] == "missing"
+    TypeAdapter(Backtest422Response).validate_python(parameter_response.json())
 
     semantic = _run_body(client, "python")
     semantic["strategy"]["portfolio"]["weighting"] = "risk"
@@ -790,7 +1010,12 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
 
     assert semantic_response.status_code == malformed_response.status_code == 422
     assert semantic_response.json()["detail"]["code"] == "portfolio.strategy.invalid"
-    assert isinstance(malformed_response.json()["detail"], list)
+    # 본문 검증 실패도 FastAPI 기본 배열이 아니라 코드화된 detail 이다(이슈 #260). 422 계약에
+    # 배열 형식이 남아 있으면 프론트는 코드 없는 422 를 처리할 경로를 따로 가져야 한다.
+    assert malformed_response.json()["detail"]["code"] == "backtest.run.field_invalid"
+    assert malformed_response.json()["detail"]["field"] == "core"
+    responses_422 = operation["responses"]["422"]["content"]["application/json"]["schema"]
+    assert responses_422["$ref"].endswith("BacktestUnprocessableResponse"), responses_422
     adapter = TypeAdapter(Backtest422Response)
     adapter.validate_python(semantic_response.json())
     adapter.validate_python(malformed_response.json())
@@ -836,19 +1061,25 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
         "universe_id": "krx.common-stock",
         "timing": "next_open",
         "participation_rate": 0.1,
+        "participation_basis": "adv20",
         "fee_bps": 15.0,
         "slippage_bps": 10.0,
+        "impact_model": "fixed_bps",
+        "impact_coefficient": 1.0,
+        "sell_tax": "krx_statutory",
+        "sell_tax_bps": None,
         "missing": "drop",
     }
     body = _run_body(client, "python")
+    body.pop("environment")
 
-    # 422 본문의 `input` 은 요청한 environment 객체를 통째로 되돌려주므로 모든 필드 이름이
-    # 응답 텍스트에 들어 있다. 진단이 어느 필드를 지목하는지 보려면 `msg` 로 좁혀야 한다.
-    for field_name, bad, expected in (
-        ("participation_rate", 50.0, "field=participation_rate"),
-        ("fee_bps", -1.0, "field=fee_bps"),
-        ("start", "2026-12-31", "end must be on or after start"),
-        ("universe_id", "   ", "requires a universe id"),
+    # 거절은 코드화된 detail 의 `field` 로 어느 칸인지 가리킨다(이슈 #260).
+    # 기간 순서 위반은 종료일 칸이다.
+    for field_name, bad, field, expected in (
+        ("participation_rate", 50.0, "environment.participation_rate", "field=participation_rate"),
+        ("fee_bps", -1.0, "environment.fee_bps", "field=fee_bps"),
+        ("start", "2026-12-31", "environment.end", "end must be on or after start"),
+        ("universe_id", "   ", "environment.universe_id", "requires a universe id"),
     ):
         response = client.post(
             "/api/v1/backtests",
@@ -856,41 +1087,120 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
         )
         assert response.status_code == 422, (field_name, response.text)
         detail = response.json()["detail"]
-        assert len(detail) == 1, (field_name, detail)
-        assert expected in detail[0]["msg"], (field_name, detail[0]["msg"])
-        # 현재 `loc` 은 environment 객체까지만 가리킨다. 필드 단위 표면은 P3-02 결정 항목이다.
-        assert detail[0]["loc"][-1] == "environment", (field_name, detail[0]["loc"])
+        assert detail["code"] == "backtest.run.field_invalid", (field_name, detail)
+        assert detail["field"] == field, (field_name, detail)
+        assert expected in detail["message"], (field_name, detail["message"])
 
     accepted = client.post("/api/v1/backtests", json={**body, "environment": environment})
     assert accepted.status_code == 202, accepted.text
 
 
-def test_conflicting_legacy_missing_policies_are_refused_at_start_with_a_code() -> None:
-    """P2-02 리뷰 P2: 충돌 문서의 run 경로 응답 shape 를 고정한다.
+@pytest.mark.parametrize(
+    ("overrides", "field", "expected"),
+    [
+        ({"initial_cash": 0}, "initial_cash", "initial_cash must be a finite positive number"),
+        ({"initial_cash": -5}, "initial_cash", "initial_cash=-5"),
+        # 유한하지 않은 값은 비교(`<= 0`)를 빠져나가 202 로 접수된 뒤 엔진에서
+        # `InvalidOperation` 으로 죽었다(#268 리뷰 P3-5). 접수 단계에서 같은 코드로 거절한다.
+        ({"initial_cash": "NaN"}, "initial_cash", "initial_cash=nan"),
+        ({"initial_cash": "Infinity"}, "initial_cash", "initial_cash=inf"),
+        ({"initial_cash": "-Infinity"}, "initial_cash", "initial_cash=-inf"),
+        ({"annualization_days": 0}, "annualization_days", "annualization_days must be positive"),
+        ({"annualization_days": "abc"}, "annualization_days", "input='abc'"),
+    ],
+)
+def test_invalid_run_options_are_a_coded_422_naming_the_field(
+    overrides: dict[str, Any], field: str, expected: str
+) -> None:
+    """본문 검증 실패는 `backtest.run.field_invalid` 로 어느 칸이 왜 틀렸는지 말한다(이슈 #260).
 
-    거절 주체는 `start` 가 아니라 `preflight` 안의 브리지다. 그래서 코드는
-    `portfolio.strategy.invalid` 이고 사유는 `validation.issues` 안에 구조화되어 들어간다.
-    `start` 에 있던 도달 불가 catch 를 지워도 이 응답이 그대로여야 한다.
+    전에는 `BacktestRunSpec.__post_init__` 의 `ValueError` 가 FastAPI 기본 422(배열 `detail`,
+    `loc: ["body"]`, 코드 없음)로 나가, 프론트가 코드도 사유도 읽지 못하고 영문 진단을 띄웠다.
     """
     client = TestClient(build_http_app())
+    response = client.post("/api/v1/backtests", json={**_run_body(client, "python"), **overrides})
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "backtest.run.field_invalid"
+    assert detail["field"] == field
+    assert expected in detail["message"], detail["message"]
+    TypeAdapter(Backtest422Response).validate_python(response.json())
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("name", ["participation_rate", "fee_bps", "slippage_bps"])
+def test_non_finite_run_environment_numbers_are_a_coded_422(name: str, bad: str) -> None:
+    """실행 설정의 수치 칸도 유한하지 않으면 접수 단계에서 그 칸을 짚어 거절한다(#268 리뷰 P3-5)."""
+    client = TestClient(build_http_app())
     body = _run_body(client, "python")
-    factor = body["strategy"]["factors"][0]
-    body["strategy"]["factors"] = [
-        {**factor, "graph": {**factor["graph"], "missing_policy": "zero"}},
-        {
-            **factor,
-            "factor_id": f"{factor['factor_id']}_dropped",
-            "graph": {**factor["graph"], "missing_policy": "drop"},
-        },
-    ]
+    body["environment"] = {**body["environment"], name: bad}
 
     response = client.post("/api/v1/backtests", json=body)
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     detail = response.json()["detail"]
-    assert detail["code"] == "portfolio.strategy.invalid"
-    codes = [issue["code"] for issue in detail["validation"]["issues"]]
-    assert "run_environment.missing_policy_conflict" in codes
+    assert detail["code"] == "backtest.run.field_invalid"
+    assert detail["field"] == f"environment.{name}"
+
+
+def test_malformed_start_body_is_a_coded_422_without_a_field() -> None:
+    client = TestClient(build_http_app())
+    response = client.post(
+        "/api/v1/backtests",
+        content=b"{not json",
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "backtest.run.field_invalid"
+    assert detail["field"] is None
+    TypeAdapter(Backtest422Response).validate_python(response.json())
+
+
+def test_start_without_an_environment_is_a_coded_422() -> None:
+    """schema 1.2 문서에는 실행 설정이 없으므로 시작 요청이 반드시 실어야 한다(P2-03).
+
+    거절 주체는 `start` 이고 코드는 전용 `backtest.run.environment_required` 다 — 프론트가 이
+    한 코드를 보고 실행 설정 패널로 보낸다.
+    """
+    client = TestClient(build_http_app())
+    body = _run_body(client, "python")
+    body.pop("environment")
+
+    response = client.post("/api/v1/backtests", json=body)
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "backtest.run.environment_required"
+    assert "run_environment.required" in detail["message"]
+
+
+def test_start_measuring_the_sealed_window_is_a_coded_422() -> None:
+    """spec D1: 봉인 구간(2016-01-01~2019-12-31)을 측정하는 시작 요청은 전용 코드로 거절한다.
+
+    화면 문장의 날짜 자리표시자를 채울 값(봉인 구간·연구 하한)을 detail 이 싣는다.
+    """
+    client = TestClient(build_http_app())
+    body = _run_body(client, "python")
+    body["environment"] = _environment(start="2019-12-31")
+    body["metric_windows"] = []
+
+    response = client.post("/api/v1/backtests", json=body)
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert {
+        key: detail[key] for key in ("code", "sealed_start", "sealed_end", "research_start")
+    } == {
+        "code": "backtest.run.research_window_violation",
+        "sealed_start": "2016-01-01",
+        "sealed_end": "2019-12-31",
+        "research_start": "2020-01-02",
+    }
+    assert "expected=start>=2020-01-02 got=start=2019-12-31" in detail["message"]
+    TypeAdapter(Backtest422Response).validate_python(response.json())
 
 
 def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count() -> None:
@@ -919,4 +1229,6 @@ def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count
     assert min(tape_progress) == pytest.approx(0.02)
     assert max(tape_progress) <= 0.8
     assert len(tape) <= 100, len(tape)
-    assert {event["stage"] for event in events} >= {"queued", "tape", "data", "engine", "completed"}
+    # 완료 run 의 단계는 이 여섯이다 — 실행기 구간은 `engine` 하나다(#362 DR-B-03)
+    stages = {event["stage"] for event in events}
+    assert stages == {"queued", "tape", "data", "engine", "artifact", "completed"}

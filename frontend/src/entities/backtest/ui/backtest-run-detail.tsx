@@ -3,9 +3,19 @@ import type {
   MetricDefinition,
   MetricValue,
 } from "../../../shared/api";
-import { t } from "../../../shared/config";
-import { useId } from "react";
-import { metricPlainCopy } from "../model/metric-copy";
+import { t, tOptional } from "../../../shared/config";
+import { useId, useRef } from "react";
+import {
+  EXPLAINING_WARNING_CODES,
+  HIGHLIGHTED_METRIC_IDS,
+  metricPlainCopy,
+  metricUnavailableCopy,
+} from "../model/metric-copy";
+import {
+  runEnvironmentLabel,
+  runEnvironmentValueLabel,
+  type RunEnvironmentField,
+} from "../model/run-environment-fields";
 import "./backtest-run-detail.css";
 
 type ChartSeries = {
@@ -37,9 +47,11 @@ const chartPath = (
 const LineChart = ({
   title,
   series,
+  emptyText = t("backtest.result.chartEmpty"),
 }: {
   title: string;
   series: ChartSeries[];
+  emptyText?: string;
 }) => {
   const finite = series.flatMap((item) =>
     item.values.filter((value): value is number => value !== null),
@@ -50,7 +62,7 @@ const LineChart = ({
         <header>
           <h4>{title}</h4>
         </header>
-        <p className="inline-state">{t("backtest.result.chartEmpty")}</p>
+        <p className="inline-state">{emptyText}</p>
       </section>
     );
   }
@@ -118,29 +130,91 @@ const formatMetric = (
   return metric.value.toFixed(precision);
 };
 
+/** 사용 불가 지표 칸에서 이유를 적은 데이터 경고로 가는 연결. */
+type MetricExplanation = { href: string; open: () => void };
+
 const MetricCell = ({
   metric,
   definition,
+  explanation = null,
 }: {
   metric: MetricValue;
   definition: MetricDefinition;
+  explanation?: MetricExplanation | null;
 }) => (
   <>
     <strong className={metric.value === null ? "is-unavailable" : ""}>
       {formatMetric(metric, definition)}
     </strong>
-    {metric.value === null && (
-      <small>{metric.unavailable_reason?.replaceAll("_", " ")}</small>
+    {metric.value === null && metric.unavailable_reason && (
+      <small>
+        {metricUnavailableCopy(metric.unavailable_reason)}
+        {explanation === null ? null : (
+          <>
+            {" "}
+            {/* 접힌 manifest 를 먼저 펼친 뒤 기본 이동으로 그 경고까지 스크롤한다. */}
+            <a href={explanation.href} onClick={explanation.open}>
+              {t("backtest.result.metricUnavailable.explain")}
+            </a>
+          </>
+        )}
+      </small>
     )}
   </>
 );
 
+/**
+ * 실행된 실행 설정의 행. 칸 목록·순서·이름·단위·enum 값 이름은 실행 설정 스키마에서 읽는다
+ * (DEFECT-242-04). 스키마에 없는 기록 키(스키마를 아직 못 읽었거나, 그 뒤 스키마가 칸을 빼거나 이름을
+ * 바꿨다)는 그 뒤에 키와 값을 그대로 붙인다 — run 기록은 실행 설정의 유일한 사본이다(#251).
+ */
+const environmentRows = (
+  environment: BacktestRunResult["manifest"]["environment"],
+  fields: readonly RunEnvironmentField[] | null,
+): { key: string; label: string; value: string }[] => {
+  const record = environment as unknown as Record<string, unknown>;
+  const known = new Set(fields?.map((field) => field.name));
+  return [
+    ...(fields ?? []).map((field) => ({
+      key: field.name,
+      label: runEnvironmentLabel(field),
+      value: runEnvironmentValueLabel(field, record[field.name]),
+    })),
+    ...Object.entries(record)
+      .filter(([key]) => !known.has(key))
+      .map(([key, value]) => ({
+        key,
+        label: key,
+        value: value === null || value === undefined ? "—" : String(value),
+      })),
+  ];
+};
+
 export const BacktestRunDetail = ({
   result,
+  environmentFields = null,
 }: {
   result: BacktestRunResult;
+  /** 실행 설정 스키마의 칸. page 가 스키마 query 에서 넘긴다. 없으면 기록된 키 그대로 보인다. */
+  environmentFields?: readonly RunEnvironmentField[] | null;
 }) => {
   const titleId = useId();
+  const drawer = useRef<HTMLDetailsElement>(null);
+  const warnings = result.manifest.warnings ?? [];
+  const warningId = (index: number) => `${titleId}-warning-${index}`;
+  // 사용 불가 사유를 적은 경고로 가는 연결(이슈 #241). 이유 경고가 없으면 사유 문구만 보인다.
+  const explanationFor = (metric: MetricValue): MetricExplanation | null => {
+    if (metric.value !== null || !metric.unavailable_reason) return null;
+    const codes = EXPLAINING_WARNING_CODES[metric.unavailable_reason] ?? [];
+    const index = warnings.findIndex((warning) => codes.includes(warning.code));
+    if (index < 0) return null;
+    return {
+      href: `#${warningId(index)}`,
+      open: () => {
+        if (drawer.current !== null) drawer.current.open = true;
+      },
+    };
+  };
   const definitions = new Map(
     result.metric_definitions.map((item) => [item.metric_id, item]),
   );
@@ -149,15 +223,6 @@ export const BacktestRunDetail = ({
       .filter((item) => item.scope === "full")
       .map((item) => [item.metric_id, item]),
   );
-  const highlights = [
-    "total_return",
-    "sharpe",
-    "max_drawdown",
-    "calmar",
-    "turnover",
-    "trade_count",
-  ];
-
   return (
     <article className="run-detail" aria-labelledby={titleId}>
       <header className="run-detail__header">
@@ -176,7 +241,7 @@ export const BacktestRunDetail = ({
         className="metric-highlights"
         aria-label={t("backtest.result.highlights")}
       >
-        {highlights.map((metricId) => {
+        {HIGHLIGHTED_METRIC_IDS.map((metricId) => {
           const metric = fullMetrics.get(metricId);
           const definition = definitions.get(metricId);
           if (metric === undefined || definition === undefined) return null;
@@ -185,7 +250,11 @@ export const BacktestRunDetail = ({
           return (
             <div key={metricId}>
               <span>{definition.label}</span>
-              <MetricCell definition={definition} metric={metric} />
+              <MetricCell
+                definition={definition}
+                explanation={explanationFor(metric)}
+                metric={metric}
+              />
               {plain === null ? null : (
                 <p className="metric-highlights__plain">
                   <dfn>{plain.name}</dfn> {plain.description}
@@ -231,6 +300,17 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.rollingSharpe")}
+          // 창보다 짧은 실행만 창 길이로 이유를 말한다. 흔들림 0 등 다른 이유면 일반 문구다(#303).
+          emptyText={
+            result.series.rolling_sharpe_window_sessions != null &&
+            result.series.rolling_sharpe.length <=
+              result.series.rolling_sharpe_window_sessions
+              ? t("backtest.result.chartEmpty.rollingSharpe").replace(
+                  "{sessions}",
+                  String(result.series.rolling_sharpe_window_sessions),
+                )
+              : undefined
+          }
         />
         <LineChart
           series={[
@@ -308,7 +388,11 @@ export const BacktestRunDetail = ({
                     </td>
                     <td>{definition.category.replaceAll("_", " ")}</td>
                     <td>
-                      <MetricCell definition={definition} metric={metric} />
+                      <MetricCell
+                        definition={definition}
+                        explanation={explanationFor(metric)}
+                        metric={metric}
+                      />
                     </td>
                     <td>{metric.sample_count}</td>
                   </tr>
@@ -373,99 +457,140 @@ export const BacktestRunDetail = ({
       <details
         className="manifest-drawer"
         aria-label={t("backtest.result.manifest")}
+        ref={drawer}
       >
         <summary>{t("backtest.result.manifest")}</summary>
         <div className="manifest-grid">
-          <dl>
-            <div>
-              <dt>{t("backtest.result.manifest.schema")}</dt>
-              <dd>{result.manifest.schema_version}</dd>
+          <div className="manifest-records">
+            <dl>
+              <div>
+                <dt>{t("backtest.result.manifest.schema")}</dt>
+                <dd>{result.manifest.schema_version}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.engine")}</dt>
+                <dd>{result.manifest.engine_version}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.core")}</dt>
+                <dd>{result.manifest.engine_core.toUpperCase()}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.initialCash")}</dt>
+                <dd>{result.manifest.initial_cash.toLocaleString("ko-KR")}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.benchmark")}</dt>
+                <dd>{result.manifest.run_spec.benchmark_security_id ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.annualizationDays")}</dt>
+                <dd>{result.manifest.annualization_days}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.metricWindows")}</dt>
+                <dd>
+                  {result.manifest.run_spec.metric_windows?.length
+                    ? result.manifest.run_spec.metric_windows
+                        .map(
+                          (window) =>
+                            `${window.scope}: ${window.start} → ${window.end}`,
+                        )
+                        .join(" · ")
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.fingerprint")}</dt>
+                <dd title={result.manifest.run_fingerprint}>
+                  {result.manifest.run_fingerprint.slice(0, 16)}…
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.strategy")}</dt>
+                <dd>{result.manifest.run_spec.strategy?.title ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.source")}</dt>
+                <dd title={result.manifest.strategy_provenance.spec_hash}>
+                  {result.manifest.strategy_provenance.kind === "saved_revision"
+                    ? `${result.manifest.strategy_provenance.strategy_id} r${result.manifest.strategy_provenance.revision}`
+                    : t("backtest.result.manifest.inline")}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.strategyHash")}</dt>
+                <dd title={result.manifest.strategy_hash}>
+                  {result.manifest.strategy_hash.slice(0, 16)}…
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.targetHash")}</dt>
+                <dd title={result.manifest.target_tape_hash}>
+                  {result.manifest.target_tape_hash.slice(0, 16)}…
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.snapshot")}</dt>
+                <dd>{result.manifest.data_snapshot_id}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.completed")}</dt>
+                <dd>
+                  {new Date(result.manifest.completed_at).toLocaleString(
+                    "ko-KR",
+                  )}
+                </dd>
+              </div>
+            </dl>
+            {/* 실행 설정은 1.2 부터 전략 문서 밖에 있고 이 기록이 그 값의 유일한 사본이다(Phase 2 감사
+              #16). 같은 전략을 다른 기간으로 돌리면 strategy hash 는 같고 environment hash 만 갈린다. */}
+            <div
+              className="manifest-environment"
+              role="group"
+              aria-label={t("backtest.result.manifest.environment")}
+            >
+              <h5>{t("backtest.result.manifest.environment")}</h5>
+              <dl>
+                {environmentRows(
+                  result.manifest.environment,
+                  environmentFields,
+                ).map((row) => (
+                  <div key={row.key}>
+                    <dt>{row.label}</dt>
+                    <dd title={row.value}>{row.value}</dd>
+                  </div>
+                ))}
+                <div>
+                  <dt>{t("backtest.result.manifest.environment.hash")}</dt>
+                  <dd title={result.manifest.environment_hash}>
+                    {result.manifest.environment_hash.slice(0, 16)}…
+                  </dd>
+                </div>
+              </dl>
             </div>
-            <div>
-              <dt>{t("backtest.result.manifest.engine")}</dt>
-              <dd>{result.manifest.engine_version}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.core")}</dt>
-              <dd>{result.manifest.engine_core.toUpperCase()}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.initialCash")}</dt>
-              <dd>{result.manifest.initial_cash.toLocaleString("ko-KR")}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.benchmark")}</dt>
-              <dd>{result.manifest.run_spec.benchmark_security_id ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.annualizationDays")}</dt>
-              <dd>{result.manifest.annualization_days}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.metricWindows")}</dt>
-              <dd>
-                {result.manifest.run_spec.metric_windows?.length
-                  ? result.manifest.run_spec.metric_windows
-                      .map(
-                        (window) =>
-                          `${window.scope}: ${window.start} → ${window.end}`,
-                      )
-                      .join(" · ")
-                  : "—"}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.fingerprint")}</dt>
-              <dd title={result.manifest.run_fingerprint}>
-                {result.manifest.run_fingerprint.slice(0, 16)}…
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.strategy")}</dt>
-              <dd>{result.manifest.run_spec.strategy?.title ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.source")}</dt>
-              <dd title={result.manifest.strategy_provenance.spec_hash}>
-                {result.manifest.strategy_provenance.kind === "saved_revision"
-                  ? `${result.manifest.strategy_provenance.strategy_id} r${result.manifest.strategy_provenance.revision}`
-                  : t("backtest.result.manifest.inline")}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.strategyHash")}</dt>
-              <dd title={result.manifest.strategy_hash}>
-                {result.manifest.strategy_hash.slice(0, 16)}…
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.targetHash")}</dt>
-              <dd title={result.manifest.target_tape_hash}>
-                {result.manifest.target_tape_hash.slice(0, 16)}…
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.snapshot")}</dt>
-              <dd>{result.manifest.data_snapshot_id}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.completed")}</dt>
-              <dd>
-                {new Date(result.manifest.completed_at).toLocaleString("ko-KR")}
-              </dd>
-            </div>
-          </dl>
+          </div>
           <div className="manifest-warnings">
             <h5>{t("backtest.result.warnings")}</h5>
-            {(result.manifest.warnings ?? []).length === 0 ? (
+            {warnings.length === 0 ? (
               <p>{t("backtest.result.warnings.empty")}</p>
             ) : (
-              (result.manifest.warnings ?? []).map((warning) => (
-                <p key={warning.code}>
-                  <strong>{warning.code}</strong>
-                  {warning.message}
-                </p>
-              ))
+              warnings.map((warning, index) => {
+                // 제목은 경고 코드로 고른다. 문장(message)은 서버가 완성한 진단이라 그대로 두고, 제목이
+                // 없는 새 코드는 코드를 제목으로 보인다 — 서버가 코드를 늘려도 화면이 비지 않는다.
+                const title = tOptional(`backtest.warning.${warning.code}`);
+                return (
+                  <p id={warningId(index)} key={`${warning.code}:${index}`}>
+                    <strong>{title ?? warning.code}</strong>
+                    <span>{warning.message}</span>
+                    {title === null ? null : (
+                      <code className="manifest-warnings__code">
+                        {warning.code}
+                      </code>
+                    )}
+                  </p>
+                );
+              })
             )}
           </div>
         </div>

@@ -33,7 +33,7 @@ const API = "http://localhost:8000";
 const FIXTURE_SPEC = JSON.parse(
   readBackendFixture("strategy_documents/quality_momentum.legacy.json"),
 ) as StrategySpec;
-const MOMENTUM_FACTOR = FIXTURE_SPEC.factors[0]!;
+const MOMENTUM_FACTOR = FIXTURE_SPEC.factors![0]!;
 const SPEC: StrategySpec = {
   ...FIXTURE_SPEC,
   title: "멀티 팩터",
@@ -53,7 +53,6 @@ const SPEC: StrategySpec = {
           },
         ],
         output_node_id: "book",
-        missing_policy: "keep",
       },
     },
   ],
@@ -63,7 +62,7 @@ const catalogField = (
   fieldId: string,
   datasetId: string,
   label: string,
-  frequency: string,
+  frequency: DatasetFieldProfile["frequency"],
 ): DatasetFieldProfile => ({
   field_id: fieldId,
   dataset_id: datasetId,
@@ -133,7 +132,7 @@ const METADATA: ContractInspectorSource = {
   schema: {
     schema: { type: "object" },
     schema_hash: "schema-hash",
-    schema_version: "1.1",
+    schema_version: "1.2",
   },
   contract: {
     contract: {
@@ -142,7 +141,7 @@ const METADATA: ContractInspectorSource = {
       factor_registry_version: "registry-v1",
       fields: [],
       schema_hash: "schema-hash",
-      schema_version: "1.1",
+      schema_version: "1.2",
     },
     equity_catalog_url: "/api/v1/equity/catalog",
     factor_catalog_url: "/api/v1/factors/catalog",
@@ -166,7 +165,7 @@ const currentState = (): DocumentState => ({
     spec: SPEC,
     canonicalJson: JSON.stringify(SPEC),
     specHash: "s".repeat(64),
-    schemaVersion: "1.1",
+    schemaVersion: "1.2",
     sourceHash: "x".repeat(64),
     diagnostics: [],
   },
@@ -215,13 +214,13 @@ const explanation = (body: FactorGraphRequest): FactorExplanation => {
       required_field_ids: graph.nodes.flatMap((node) =>
         node.kind === "field" ? [node.field_id] : [],
       ),
-      referenced_factor_ids: [],
-      referenced_subgraph_ids: [],
       minimum_history_sessions: contracts.at(-1)?.minimum_history_sessions ?? 0,
-      missing_policy: body.missing ?? graph.missing_policy ?? "drop",
+      // schema 1.2 문서에는 결측 정책이 없다 — 요청이 명시하지 않으면 모델 기본값이다.
+      missing_policy: body.missing ?? "drop",
       as_of_policy: "available_date_lte_as_of",
     },
     narrative: [],
+    synthesized_nodes: [],
   };
 };
 
@@ -262,7 +261,6 @@ describe("execution plan orchestration", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0]).toMatchObject({
       parameter_ids: [],
-      factor_ids: ["momentum", "quality"],
     });
     expect(requests[0]).not.toHaveProperty("fields");
     expect(requests.map((request) => request.graph.output_node_id)).toEqual([
@@ -344,7 +342,7 @@ describe("execution plan orchestration", () => {
       status: "incompatible",
       resource: "schema-contract",
       expected: "2.0",
-      actual: "1.1:1.1",
+      actual: "1.2:1.2",
     });
     const { result } = renderHook(
       () => useExecutionPlans(currentState(), nextRuntime),
@@ -467,16 +465,36 @@ describe("execution plan orchestration", () => {
     expect(result.current).toEqual({ status: "blocked", reason: "stale" });
   });
 
+  it("carries the run settings' missing policy so the plan hash matches the run", () => {
+    // Phase 2 감사 #3: 패널에서 `zero` 를 골랐는데 sandbox 가 기본값으로 계획하면 `plan_hash` 가 갈린다.
+    const chosen = prepareExecutionPlans(currentState(), METADATA, "zero");
+    const unset = prepareExecutionPlans(currentState(), METADATA, null);
+
+    expect(chosen.status).toBe("prepared");
+    expect(unset.status).toBe("prepared");
+    if (chosen.status !== "prepared" || unset.status !== "prepared") return;
+    expect(chosen.requests.map((item) => item.request.missing)).toEqual(
+      chosen.requests.map(() => "zero"),
+    );
+    // 정하지 않았으면 싣지 않는다 — backend 가 실행 설정과 같은 기본값을 쓴다.
+    for (const item of unset.requests)
+      expect(item.request).not.toHaveProperty("missing");
+  });
+
   it("maps factor and node selections to exact RFC 6901 pointers", () => {
     const prepared = prepareExecutionPlans(currentState(), METADATA);
     expect(prepared.status).toBe("prepared");
     if (prepared.status !== "prepared") return;
 
+    const planned = {
+      ...prepared.requests[0],
+      explanation: explanation(prepared.requests[0].request),
+    };
     expect(factorNodePointer(1, 0)).toBe("/factors/1/graph/nodes/0");
-    expect(nodePointerById(prepared.requests[0], "mom_252")).toBe(
+    expect(nodePointerById(planned, "mom_252")).toBe(
       "/factors/0/graph/nodes/1",
     );
-    expect(nodePointerById(prepared.requests[0], "missing")).toBeNull();
+    expect(nodePointerById(planned, "missing")).toBeNull();
     expect(factorIndexAtPointer("/factors/1/graph/nodes/0/field_id")).toBe(1);
     expect(factorIndexAtPointer("/risk/max_name_weight")).toBeNull();
     expect(factorIndexAtPointer("/factors/01/graph")).toBeNull();

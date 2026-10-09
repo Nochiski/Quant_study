@@ -27,8 +27,11 @@ const context = (): StrategyDebuggerContext => ({
   specHash: "spec-hash",
   expectedSnapshotId: "snapshot-v1",
   expectedRegistryVersion: "registry-v1",
-  start: SPEC.data.start,
-  end: "2026-09-01",
+  environment: {
+    start: "2021-01-01",
+    end: "2026-09-01",
+    universe_id: "krx.common-stock",
+  },
   factors: [
     {
       factorId: "momentum",
@@ -169,6 +172,29 @@ describe("strategy trace request contract", () => {
     });
   });
 
+  it("sends the run settings with every linked and selected request", () => {
+    // 실행 설정이 없는 trace 는 backend 가 `run_environment.required` 로 거절한다(P3-02).
+    const prepared = prepareStrategyTrace(context(), {
+      asOf: "2026-08-31",
+      security: "sec-a",
+      factorId: "momentum",
+      nodeId: "ranked",
+    });
+
+    expect(prepared.kind).toBe("ready");
+    if (prepared.kind !== "ready") return;
+    const environment = context().environment;
+    for (const request of [
+      ...prepared.linkedRequests,
+      prepared.selectedRequest,
+    ])
+      expect(request.environment).toEqual(environment);
+    expect(prepared.expected).toMatchObject({
+      start: environment.start,
+      end: environment.end,
+    });
+  });
+
   it("chunks more than 100 reachable nodes below the server cap", () => {
     const expanded = context();
     expanded.factors[0]!.nodes = Array.from({ length: 101 }, (_, index) => ({
@@ -261,6 +287,37 @@ describe("strategy trace request contract", () => {
     if (inline.kind !== "ready" || saved.kind !== "ready") return;
     expect(saved.ownerKey).not.toBe(inline.ownerKey);
   });
+
+  // #351: 키가 실행 설정을 빼면 설정만 바꾼 추적이 옛 캐시 칸을 읽어 옛 결과가 새 설정의 성공으로 보인다.
+  it.each([
+    ["universe", { universe_id: "krx.kospi200" }],
+    ["period", { end: "2026-08-31" }],
+    ["cost", { fee_bps: 25 }],
+    ["execution", { participation_rate: 0.05 }],
+  ] as const)(
+    "gives a request whose run settings differ only in %s its own owner",
+    (_setting, change) => {
+      const selection = {
+        asOf: "2026-08-31",
+        security: "sec-a",
+        factorId: "momentum",
+        nodeId: "ranked",
+      };
+      const changedContext = context();
+      changedContext.environment = { ...changedContext.environment, ...change };
+      const before = prepareStrategyTrace(context(), selection);
+      const after = prepareStrategyTrace(changedContext, selection);
+
+      expect(before.kind).toBe("ready");
+      expect(after.kind).toBe("ready");
+      if (before.kind !== "ready" || after.kind !== "ready") return;
+      expect(after.request.environment).toEqual(changedContext.environment);
+      expect(after.ownerKey).not.toBe(before.ownerKey);
+      expect(prepareStrategyTrace(context(), selection)).toMatchObject({
+        ownerKey: before.ownerKey,
+      });
+    },
+  );
 
   it.each([
     [

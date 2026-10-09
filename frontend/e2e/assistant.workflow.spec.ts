@@ -34,6 +34,7 @@ import {
   currentSource,
   editor,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -51,12 +52,16 @@ const PROPOSED_TITLE = "KRX 12-1 모멘텀";
 const WINDOW_PROPOSED_TITLE = "KRX 6개월 모멘텀";
 const PROPOSED_WINDOW = 126;
 
-/** 전 시나리오가 같은 문서에서 돌지 않도록, 테스트마다 자기 리비전을 만든다. */
+/**
+ * 전 시나리오가 같은 문서에서 돌지 않도록, 테스트마다 자기 리비전을 만든다. "적용 후 백테스트"가 실행을
+ * 시작할 수 있게 실행 설정(기간·유니버스)도 정해 둔다 — 전략 문서 밖의 값이다(P3-02).
+ */
 const saveStrategyRevision = async (page: Page, title: string) => {
   await openEditor(page, "/research/strategies/new");
   await replaceSource(page, mustReplace(GOLDEN, "퀄리티 모멘텀", title));
   await expectPhase(page, "검증 통과");
   await saveAndWaitForRevision(page, 1);
+  await fillRunEnvironment(page);
   return strategyIdentity(page);
 };
 
@@ -202,8 +207,8 @@ test.describe("AI 어시스턴트", () => {
   );
 
   test(
-    "제안 카드를 미리 보고 적용한 뒤 적용 후 백테스트가 실행 화면까지 간다",
-    { tag: ["@story", "@US-DM-03"] },
+    "제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다",
+    { tag: ["@story", "@US-DM-03", "@US-DM-09"] },
     async ({ page }) => {
       await ensureProvider(page);
       await saveStrategyRevision(page, "B-05 제안 적용");
@@ -255,6 +260,15 @@ test.describe("AI 어시스턴트", () => {
         (line, index) => line !== beforeLines[index],
       );
       expect(changedLines).toEqual([`title: "${PROPOSED_TITLE}"`]);
+      await expectPhase(page, "검증 통과");
+
+      // 적용은 편집 이력의 격리된 한 단계다(SoT 편집 이력 행). 툴바 "실행 취소" 한 번이면 적용 전
+      // 원문 그대로라 저장된 리비전과 같아지고, "다시 실행"이 제안을 다시 넣는다(BACKLOG-009).
+      await page.getByRole("button", { name: "실행 취소" }).click();
+      expect(await currentSource(page)).toBe(before);
+      await expectPhase(page, "저장됨");
+      await page.getByRole("button", { name: "다시 실행" }).click();
+      expect(await currentSource(page)).toBe(applied);
       await expectPhase(page, "검증 통과");
 
       // "적용 후 백테스트": 문서가 제안 기준과 달라졌으므로 확인을 거쳐 덮어쓴다.

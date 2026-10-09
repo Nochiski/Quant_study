@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FactorDefinition } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { buildCanonicalSnippetCatalog } from "../model/canonical-snippets";
@@ -25,6 +26,7 @@ import {
   type SourceOperation,
 } from "../model/source-transactions";
 import type { SourceTransactions } from "../model/use-source-transactions";
+import type { FormProjectionState } from "../model/use-form-projection";
 import { StrategyFormPanel } from "../ui/strategy-form-panel";
 
 afterEach(cleanup);
@@ -44,7 +46,6 @@ const FACTOR: FactorDefinition = {
   default_graph: {
     nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
     output_node_id: "px",
-    missing_policy: "drop",
   },
   description: "Server factor",
   factor_id: "server.momentum",
@@ -63,6 +64,15 @@ const parsedState = (source: string): DocumentState => {
     parsedVersion: base.sourceVersion,
   };
 };
+
+/** Form 패널 입력 한 벌(`useFormProjection` 모양) — 정착한 parse 의 투영과 삭제 가드 tree. */
+const formOf = (state: DocumentState): FormProjectionState => ({
+  projection: projectForm(SCHEMA, state.parse, []),
+  firstParsePending: false,
+  stale: false,
+  tree:
+    state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {},
+});
 
 const listSection = (source: string, key: string): ListSection => {
   const found = projectForm(
@@ -123,15 +133,23 @@ describe("list transactions (P4-03)", () => {
     const factors = listSection(VERBOSE, "factors");
     expect(itemKinds(SCHEMA, factors)).toBeNull();
     const added = addItemOperation(SCHEMA, factors);
+    // identity(`x-authoring-identity`)는 빈 값 대신 목록에 없는 가장 작은 `factor_<n>` 이다(WORKFLOW P4-03).
     expect(added).toMatchObject({
       kind: "insert-item",
       parentPointer: "/factors",
       value: {
-        factor_id: "",
+        factor_id: "factor_1",
         direction: "high",
         weight: 1,
         graph: { nodes: [], output_node_id: "" },
       },
+    });
+    const taken = listSection(
+      VERBOSE.replace("factor_id: momentum", "factor_id: factor_1"),
+      "factors",
+    );
+    expect(addItemOperation(SCHEMA, taken)).toMatchObject({
+      value: { factor_id: "factor_2" },
     });
   });
 
@@ -185,24 +203,28 @@ describe("list transactions (P4-03)", () => {
       "yaml",
     );
     if (tree.status !== "ok") throw new Error("fixture");
+    // schema 1.2 에서 문서 안 팩터를 가리키는 필드는 리스크 역가중 팩터(`risk.risk_factor_id`)
+    // 하나뿐이다(P2-06, `saved_factor` 노드는 문법에서 빠졌다).
     const doc = {
       ...tree.tree,
+      risk: {
+        ...(tree.tree.risk as Record<string, unknown>),
+        risk_factor_id: "momentum",
+      },
       factors: [
         ...(tree.tree.factors as unknown[]),
         {
           factor_id: "blend",
           direction: "high",
           graph: {
-            nodes: [
-              { kind: "saved_factor", node_id: "m", factor_id: "momentum" },
-            ],
+            nodes: [{ kind: "field", node_id: "m", field_id: "price.close" }],
             output_node_id: "m",
           },
         },
       ],
     };
     expect(findReferences(doc, "factor", "momentum", "/factors/0")).toEqual([
-      { pointer: "/factors/1/graph/nodes/0/factor_id" },
+      { pointer: "/risk/risk_factor_id" },
     ]);
     expect(findReferences(doc, "factor", "blend", "/factors/1")).toEqual([]);
     expect(
@@ -295,15 +317,10 @@ describe("StrategyFormPanel list sections", () => {
     const state = parsedState(source);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={formOf(state)}
         schema={SCHEMA}
-        tree={
-          state.parse !== null && state.parse.status === "ok"
-            ? state.parse.tree
-            : {}
-        }
         transactions={transactions}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         catalogSnippets={buildCanonicalSnippetCatalog({
           schema: SCHEMA,
           factors: [FACTOR],
@@ -330,10 +347,10 @@ describe("StrategyFormPanel list sections", () => {
     const state = parsedState(VERBOSE);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={formOf(state)}
         schema={null}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: null }}
+        catalogs={{ equityFields: null }}
       />,
     );
     const noSchema = within(
@@ -351,7 +368,7 @@ describe("StrategyFormPanel list sections", () => {
     const onOpenGraph = renderList(VERBOSE, transactions);
     const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.selectOptions(
-      factors.getByRole("combobox", { name: "factors · 카탈로그에서 추가" }),
+      factors.getByRole("combobox", { name: "factors · 예시 팩터에서 추가" }),
       "factor:server.momentum",
     );
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -529,11 +546,10 @@ describe("StrategyFormPanel list sections", () => {
     const state = parsedState(VERBOSE);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={formOf(state)}
         schema={SCHEMA}
-        tree={state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {}}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         selectedPointer="/factors/0"
       />,
     );
@@ -575,21 +591,19 @@ describe("StrategyFormPanel list sections", () => {
     const user = userEvent.setup();
     const source = VERBOSE.replace(
       "portfolio:\n",
-      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: saved_factor\n          node_id: m\n          factor_id: momentum\n      output_node_id: m\nportfolio:\n",
+      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: field\n          node_id: m\n          field_id: price.close\n      output_node_id: m\nportfolio:\n",
+    ).replace(
+      "  max_name_weight: 0.05\n",
+      "  max_name_weight: 0.05\n  risk_factor_id: momentum\n",
     );
     const view = (text: string) => {
       const state = parsedState(text);
       return (
         <StrategyFormPanel
-          projection={projectForm(SCHEMA, state.parse, [])}
+          form={formOf(state)}
           schema={SCHEMA}
-          tree={
-            state.parse !== null && state.parse.status === "ok"
-              ? state.parse.tree
-              : {}
-          }
           transactions={stub()}
-          catalogs={{ equityFields: null, factors: [FACTOR] }}
+          catalogs={{ equityFields: null }}
         />
       );
     };
@@ -597,29 +611,83 @@ describe("StrategyFormPanel list sections", () => {
     const factors = () =>
       within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.click(factors().getByRole("button", { name: "momentum · 삭제" }));
-    expect(factors().getByRole("alert")).toHaveTextContent("/factors/1/");
+    expect(factors().getByRole("alert")).toHaveTextContent(
+      "/risk/risk_factor_id",
+    );
     rerender(view(source.replace("weight: 0.6", "weight: 0.5")));
     expect(factors().queryByRole("alert")).toBeNull();
   });
 
-  it("refuses to remove an item that another node references and lists the references", async () => {
+  it("refuses to remove an item that another field references and lists the references", async () => {
     const user = userEvent.setup();
     const transactions = stub();
     const source = VERBOSE.replace(
       "portfolio:\n",
-      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: saved_factor\n          node_id: m\n          factor_id: momentum\n      output_node_id: m\nportfolio:\n",
+      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: field\n          node_id: m\n          field_id: price.close\n      output_node_id: m\nportfolio:\n",
+    ).replace(
+      "  max_name_weight: 0.05\n",
+      "  max_name_weight: 0.05\n  risk_factor_id: momentum\n",
     );
     renderList(source, transactions);
     const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.click(factors.getByRole("button", { name: "momentum · 삭제" }));
     expect(transactions.apply).not.toHaveBeenCalled();
     expect(factors.getByRole("alert")).toHaveTextContent(
-      "/factors/1/graph/nodes/0/factor_id",
+      "/risk/risk_factor_id",
     );
     await user.click(factors.getByRole("button", { name: "blend · 삭제" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "remove", pointer: "/factors/1" },
       "blend",
+      "form",
+      { focusEditor: false },
+    );
+  });
+
+  it("identity 행 확정은 문서의 참조까지 한 번에 바꾸는 rename 이고, 빈 값·중복은 거부한다 (WORKFLOW P4-03 결정 1)", async () => {
+    // 예전에는 `factor_id` 만 바꿔 `risk_factor_id` 가 없는 팩터를 가리켰다.
+    const user = userEvent.setup();
+    const transactions = stub();
+    const source = VERBOSE.replace(
+      "portfolio:\n",
+      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes: []\n      output_node_id: \"\"\nportfolio:\n",
+    ).replace(
+      "  max_name_weight: 0.05\n",
+      "  max_name_weight: 0.05\n  risk_factor_id: momentum\n",
+    );
+    renderList(source, transactions);
+    const momentum = within(
+      screen.getByRole("region", { name: "factors · momentum" }),
+    );
+    const identity = momentum.getByRole("textbox", { name: /\bfactor_id/ });
+
+    for (const [typed, reason] of [
+      ["blend", "form.invalid.duplicateIdentity"],
+      ["", "form.invalid.emptyIdentity"],
+    ] as const) {
+      await user.clear(identity);
+      if (typed !== "") await user.type(identity, typed);
+      await user.keyboard("{Enter}");
+      expect(momentum.getByRole("alert")).toHaveTextContent(t(reason));
+    }
+    expect(transactions.apply).not.toHaveBeenCalled();
+
+    await user.clear(identity);
+    await user.type(identity, "mom{Enter}");
+    expect(transactions.apply).toHaveBeenCalledWith(
+      [
+        {
+          kind: "replace-scalar",
+          pointer: "/factors/0/factor_id",
+          value: "mom",
+        },
+        {
+          kind: "replace-scalar",
+          pointer: "/risk/risk_factor_id",
+          value: "mom",
+        },
+      ],
+      "factor_id",
       "form",
       { focusEditor: false },
     );

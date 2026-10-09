@@ -11,13 +11,14 @@ import {
   type DocumentDiagnostic,
   type DocumentState,
 } from "../model/document-state";
-import { projectForm } from "../model/form-projection";
+import { projectForm, type FormProjection } from "../model/form-projection";
 import { draftOf } from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   useSourceTransactions,
   type SourceTransactions,
 } from "../model/use-source-transactions";
+import type { FormProjectionState } from "../model/use-form-projection";
 import { StrategyFormPanel } from "../ui/strategy-form-panel";
 
 afterEach(cleanup);
@@ -58,7 +59,18 @@ const stubTransactions = (
   ...overrides,
 });
 
-const NO_CATALOGS = { equityFields: null, factors: null };
+const NO_CATALOGS = { equityFields: null };
+
+/** Form 패널 입력 한 벌(`useFormProjection` 모양) — 첫 parse 가 끝나 정착한 parse 로 그린다. */
+const settledForm = (
+  projection: FormProjection,
+  tree: unknown = {},
+): FormProjectionState => ({
+  projection,
+  firstParsePending: false,
+  stale: false,
+  tree,
+});
 
 const renderPanel = (
   source: string,
@@ -69,7 +81,7 @@ const renderPanel = (
   const projection = projectForm(SCHEMA, state.parse, diagnostics);
   render(
     <StrategyFormPanel
-      projection={projection}
+      form={settledForm(projection)}
       transactions={transactions}
       catalogs={NO_CATALOGS}
     />,
@@ -119,12 +131,21 @@ describe("StrategyFormPanel controls", () => {
       { focusEditor: false },
     );
 
-    const fee = section("execution").getByRole("spinbutton", named("fee_bps"));
-    await user.clear(fee);
-    await user.type(fee, "20{Enter}");
+    const gross = section("risk").getByRole(
+      "spinbutton",
+      named("gross_exposure"),
+    );
+    await user.clear(gross);
+    await user.type(gross, "1.5{Enter}");
+    // MINIMAL 문서에는 없는 키라 삽입 트랜잭션이 된다.
     expect(transactions.apply).toHaveBeenLastCalledWith(
-      { kind: "replace-scalar", pointer: "/execution/fee_bps", value: 20 },
-      "fee_bps",
+      {
+        kind: "insert-key",
+        parentPointer: "/risk",
+        key: "gross_exposure",
+        value: 1.5,
+      },
+      "gross_exposure",
       "form",
       { focusEditor: false },
     );
@@ -228,7 +249,7 @@ describe("StrategyFormPanel controls", () => {
     const state = { ...parsedState(MINIMAL), composing: true };
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={settledForm(projectForm(SCHEMA, state.parse, []))}
         transactions={transactions}
         catalogs={NO_CATALOGS}
       />,
@@ -244,7 +265,7 @@ describe("StrategyFormPanel controls", () => {
       feedback: {
         status: "error",
         owner: "form",
-        label: "fee_bps",
+        label: "max_name_weight",
         reason: "parse",
       },
     });
@@ -288,7 +309,9 @@ describe("StrategyFormPanel controls", () => {
         "현재 모드에서는 읽히지 않는 필드입니다",
       ).length,
     ).toBeGreaterThan(0);
-    expect(section("data").getByText("기본값 KRX")).toBeInTheDocument();
+    expect(
+      section("portfolio").getByText("기본값 long_only"),
+    ).toBeInTheDocument();
   });
 });
 
@@ -298,7 +321,9 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
     renderPanel(source, stubTransactions());
     const eligibility = section("eligibility");
     // `rules`는 더 이상 "기본값으로" 버튼이 있는 link 행이 아니라 항목 추가·삭제가 있는 목록 섹션이다.
-    expect(eligibility.queryByRole("button", { name: "rules · 기본값으로" })).toBeNull();
+    expect(
+      eligibility.queryByRole("button", { name: "rules · 기본값으로" }),
+    ).toBeNull();
     expect(
       eligibility.getByRole("button", { name: "rules · 항목 추가" }),
     ).toBeInTheDocument();
@@ -306,7 +331,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
       eligibility.getByRole("button", { name: "liquidity.adv · 삭제" }),
     ).toBeInTheDocument();
     const root = section("전략 문서");
-    expect(root.getByText("1.1")).toHaveAttribute("aria-labelledby");
+    expect(root.getByText("1.2")).toHaveAttribute("aria-labelledby");
     expect(root.queryByRole("textbox", named("schema_version"))).toBeNull();
     expect(root.queryByRole("button", { name: /schema_version ·/ })).toBeNull();
   });
@@ -317,7 +342,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
     const projection = projectForm(SCHEMA, state.parse, []);
     const Harness = ({ failed }: { failed: boolean }) => (
       <StrategyFormPanel
-        projection={projection}
+        form={settledForm(projection)}
         transactions={stubTransactions({
           apply,
           feedback: failed
@@ -402,7 +427,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
           feedback: {
             status: "error",
             owner: "form",
-            label: "fee_bps",
+            label: "max_name_weight",
             reason,
           },
         }),
@@ -420,13 +445,16 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
     const apply = vi.fn(() => true);
     const view = (source: string) => (
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, parsedState(source).parse, [])}
+        form={settledForm(projectForm(SCHEMA, parsedState(source).parse, []))}
         transactions={stubTransactions({ apply })}
         catalogs={NO_CATALOGS}
       />
     );
     const { rerender } = render(view(MINIMAL));
-    const weight = section("risk").getByRole("spinbutton", named("max_name_weight"));
+    const weight = section("risk").getByRole(
+      "spinbutton",
+      named("max_name_weight"),
+    );
     await user.clear(weight);
     await user.type(weight, "0.1{Enter}");
     expect(apply).toHaveBeenCalledTimes(1);
@@ -434,7 +462,9 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
     await user.clear(weight);
     await user.type(weight, "0.2");
     // parse가 도착해 projection이 0.1로 바뀐다 — 사용자가 고친 draft는 되돌리지 않는다.
-    rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.1")));
+    rerender(
+      view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.1")),
+    );
     expect(weight).toHaveValue(0.2);
     await user.keyboard("{Enter}");
     expect(apply).toHaveBeenLastCalledWith(
@@ -444,17 +474,26 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
       { focusEditor: false },
     );
     // 확정한 입력은 다시 pristine이라 다음 projection 값으로 정렬된다.
-    rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.3")));
+    rerender(
+      view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.3")),
+    );
     expect(weight).toHaveValue(0.3);
     // 한 번도 손대지 않은 다른 입력도 외부 변경(스니펫·소스 편집기·undo)을 따라간다(`draft === seen` 경로).
-    const fee = section("execution").getByRole("spinbutton", named("fee_bps"));
-    expect(fee).toHaveValue(15);
-    rerender(view(MINIMAL.replace("fee_bps: 15.0", "fee_bps: 20.0")));
-    expect(fee).toHaveValue(20);
+    const count = section("portfolio").getByRole(
+      "spinbutton",
+      named("selection_count"),
+    );
+    expect(count).toHaveValue(20);
+    rerender(
+      view(MINIMAL.replace("selection_count: 20", "selection_count: 25")),
+    );
+    expect(count).toHaveValue(25);
     // 예전에 확정했던 문자열을 경유해 치는 중에도(0.2까지 쳤을 때 외부 변경 도착) 되돌리지 않는다.
     await user.clear(weight);
     await user.type(weight, "0.2");
-    rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.4")));
+    rerender(
+      view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.4")),
+    );
     expect(weight).toHaveValue(0.2);
   });
 });
@@ -480,11 +519,50 @@ describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
   it("단위 접미사도 키와 띄어 읽는다", () => {
     renderPanel(MINIMAL, stubTransactions());
 
+    // schema 1.2(P2-03)에서 `execution` 절이 빠져 표시 단위가 있는 `risk.max_name_weight` 로 본다.
     expect(
-      section("execution").getByRole("spinbutton", {
-        name: "체결 금액에 적용할 수수료 가정 fee_bps · bp",
+      section("risk").getByRole("spinbutton", {
+        name: "종목별 최대 목표 비중 한도 max_name_weight · %",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("enum 선택지를 원문 값 대신 이름으로 보이고 고른 값의 뜻을 설명한다 (P3-01)", async () => {
+    const user = userEvent.setup();
+    const transactions = stubTransactions();
+    renderPanel(MINIMAL, transactions);
+
+    // 결합 전 정규화(P2-04)는 문서에 없어도 스키마 기본값(`rank`)으로 그려진다.
+    const normalization = section("signal").getByRole("combobox", {
+      name: /^점수 정규화 normalization/,
+    });
+    expect(normalization).toHaveDisplayValue("순위로 맞춘 뒤 가중 합");
+    expect(
+      within(normalization)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
+      "원시값 그대로 가중 합(단위가 같을 때만)",
+      "순위로 맞춘 뒤 가중 합",
+      "표준점수로 맞춘 뒤 가중 합",
+    ]);
+    // 필드 설명 대신 고른 값의 설명이 보인다.
+    expect(
+      section("signal").getByText(/기준일마다 종목 간 순위\(0~1\)로 바꾼 뒤/),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(normalization, "zscore");
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      {
+        kind: "insert-key",
+        parentPointer: "",
+        key: "signal",
+        value: { normalization: "zscore" },
+      },
+      "normalization",
+      "form",
+      { focusEditor: false },
+    );
   });
 
   it("스키마 키가 없는 섹션은 이름만 보인다", () => {
@@ -562,7 +640,7 @@ describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
             attach
           </button>
           <StrategyFormPanel
-            projection={projectForm(SCHEMA, state.parse, [])}
+            form={settledForm(projectForm(SCHEMA, state.parse, []))}
             transactions={transactions}
             catalogs={NO_CATALOGS}
           />
@@ -619,7 +697,7 @@ describe("StrategyFormPanel with the real transaction hook", () => {
             resync
           </button>
           <StrategyFormPanel
-            projection={projectForm(SCHEMA, state.parse, [])}
+            form={settledForm(projectForm(SCHEMA, state.parse, []))}
             transactions={transactions}
             catalogs={NO_CATALOGS}
           />
@@ -667,7 +745,7 @@ describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
     const state = parsedState(MINIMAL);
     return (
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [WEIGHT_ERROR])}
+        form={settledForm(projectForm(SCHEMA, state.parse, [WEIGHT_ERROR]))}
         transactions={stubTransactions()}
         catalogs={NO_CATALOGS}
         selectedPointer={selectedPointer}
@@ -683,9 +761,7 @@ describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
     const body = section("risk").getByText("너무 큽니다");
     expect(body).toBeVisible();
     // 사용자가 섹션을 접으면 본문이 가려진다.
-    await user.click(
-      section("risk").getByRole("button", { name: /risk/ }),
-    );
+    await user.click(section("risk").getByRole("button", { name: /risk/ }));
     expect(body).not.toBeVisible();
 
     // 문제 행 클릭 = pointer 선택 + reveal 신호: 접힌 섹션이 다시 펴진다.
@@ -700,14 +776,16 @@ describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
     const state = parsedState(MINIMAL);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [
-          WEIGHT_ERROR,
-          {
-            ...WEIGHT_ERROR,
-            pointer: "/portfolio/selection_count",
-            message: "종목 수가 너무 적습니다",
-          },
-        ])}
+        form={settledForm(
+          projectForm(SCHEMA, state.parse, [
+            WEIGHT_ERROR,
+            {
+              ...WEIGHT_ERROR,
+              pointer: "/portfolio/selection_count",
+              message: "종목 수가 너무 적습니다",
+            },
+          ]),
+        )}
         transactions={stubTransactions()}
         catalogs={NO_CATALOGS}
       />,
@@ -726,9 +804,11 @@ describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
     const state = parsedState(MINIMAL);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [
-          { ...WEIGHT_ERROR, severity: "warning", message: "조금 큽니다" },
-        ])}
+        form={settledForm(
+          projectForm(SCHEMA, state.parse, [
+            { ...WEIGHT_ERROR, severity: "warning", message: "조금 큽니다" },
+          ]),
+        )}
         transactions={stubTransactions()}
         catalogs={NO_CATALOGS}
       />,

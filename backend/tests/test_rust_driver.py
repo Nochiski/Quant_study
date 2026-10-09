@@ -28,12 +28,23 @@ INSTRUMENT = make_instrument()
 
 
 @RUST_ONLY
-def test_equity_wiped_out_is_raised_at_the_same_close_with_the_same_message() -> None:
+@pytest.mark.parametrize(
+    ("crash_close", "equity"),
+    [
+        # 숏 10주 @100 → 현금 3,000. 종가 400이면 3,000 - 4,000 = -1,000.
+        (400.0, "-1000.0"),
+        # 종가 300이면 자산이 정확히 0이다. 0도 파산이라 이어 가지 않는다(#274).
+        (300.0, "0.0"),
+    ],
+)
+def test_equity_wiped_out_is_raised_at_the_same_close_with_the_same_message(
+    crash_close: float, equity: str
+) -> None:
     """숏 포지션이 급등하면 Python과 Rust 모두 같은 세션 종가에서 EquityWipedOut을 낸다."""
     bars = (
         make_bar(day(1), INSTRUMENT, 100.0, 100.0),
         make_bar(day(2), INSTRUMENT, 100.0, 100.0),
-        make_bar(day(3), INSTRUMENT, 400.0, 400.0),
+        make_bar(day(3), INSTRUMENT, crash_close, crash_close),
     )
     outcomes: list[tuple[str, bytes]] = []
     for core in ("python", "rust"):
@@ -47,7 +58,8 @@ def test_equity_wiped_out_is_raised_at_the_same_close_with_the_same_message() ->
             )
         outcomes.append((str(caught.value), engine.event_store.trace_bytes()))
     assert outcomes[0] == outcomes[1]
-    assert outcomes[0][0].startswith("equity fell below zero at session close — ts=")
+    assert outcomes[0][0].startswith("equity fell to zero or below at session close — ts=")
+    assert f"equity={equity} " in outcomes[0][0]
     assert "positions=[('005930', '-10')]" in outcomes[0][0]
 
 
@@ -201,7 +213,13 @@ def test_partial_trace_keeps_decision_when_submit_fails_after_recording(
     with pytest.raises(ValueError, match="submit exploded"):
         engine.run(ScriptedStrategy(script=(target_70pct(),)), DataFeed(GOLDEN_BARS))
     kinds = [record.kind for record in engine.event_store.records]
-    assert kinds == [RecordKind.MARKET, RecordKind.SNAPSHOT, RecordKind.DECISION]
+    # Rust 라우팅은 끝나 목표 금액 → 수량 반올림 기록(V4-04)까지 남았다.
+    assert kinds == [
+        RecordKind.MARKET,
+        RecordKind.SNAPSHOT,
+        RecordKind.DECISION,
+        RecordKind.ROUNDING,
+    ]
     decision = engine.event_store.decisions()[0]
     assert decision.decision_id == "D-000001"
     assert decision.decision.actions == (target_70pct(),)

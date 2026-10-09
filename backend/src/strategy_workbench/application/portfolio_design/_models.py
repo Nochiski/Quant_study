@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from math import isfinite
 
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
@@ -9,7 +10,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioTraceSelection,
     TargetTape,
 )
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,8 @@ class PortfolioPipelineOptions:
     construction_trace_selection: PortfolioTraceSelection | None = None
     starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None
     require_engine_compatible: bool = False
+    # 문서 기본값 대신 쓸 파라미터 값(spec D4). 해소·허용 판정은 `resolve_parameter_values` 가 한다.
+    parameter_values: Mapping[str, ParameterValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if (self.trace_factor_id is None) != (self.trace_selection is None):

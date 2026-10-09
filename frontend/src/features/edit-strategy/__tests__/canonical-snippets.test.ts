@@ -19,7 +19,6 @@ const FACTOR: FactorDefinition = {
   default_graph: {
     nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
     output_node_id: "px",
-    missing_policy: "drop",
   },
   description: "Server factor",
   factor_id: "server.momentum",
@@ -47,26 +46,57 @@ const catalog = (
   buildCanonicalSnippetCatalog({ schema, factors, status });
 
 describe("canonical StrategySpec snippets", () => {
-  it("projects all five areas, defaults and factor graphs only from backend contracts", () => {
+  it("projects every area, defaults and factor graphs only from backend contracts", () => {
     const snippets = catalog();
 
-    expect(new Set(snippets.map((snippet) => snippet.category))).toEqual(
-      new Set(["data", "factor", "signal", "risk", "execution"]),
+    // schema 1.2: 섹션 스니펫은 스키마 루트의 object 섹션 전부를 스키마 순서로 싣고(`data`·
+    // `execution` 은 실행 설정으로 떠났다, P2-03), 팩터 preset 은 "예시" 그룹이다(P3-01).
+    const objectSections = Object.entries(
+      SCHEMA.properties as Record<string, JsonSchema>,
+    )
+      .filter(([, property]) => {
+        const ref = property.$ref;
+        const target =
+          typeof ref === "string"
+            ? (SCHEMA.$defs as Record<string, JsonSchema>)[
+                ref.replace("#/$defs/", "")
+              ]
+            : property;
+        return target?.type === "object";
+      })
+      .map(([key]) => key);
+    expect(objectSections).toEqual([
+      "eligibility",
+      "signal",
+      "portfolio",
+      "risk",
+    ]);
+    expect(
+      snippets
+        .filter((snippet) => snippet.category === "section")
+        .map((snippet) => [snippet.id, snippet.descriptionKey]),
+    ).toEqual(
+      objectSections.map((key) => [
+        `section:${key}`,
+        `strategy.section.${key}`,
+      ]),
     );
-    expect(findSnippet(snippets, "section:data").value).toEqual({
-      market: "KRX",
-      start: "",
-      end: "",
-      universe_id: "",
-      frequency: "daily",
+    expect(
+      snippets
+        .filter((snippet) => snippet.kind === "factor")
+        .map((snippet) => snippet.category),
+    ).toEqual(["example"]);
+    // `normalization`은 schema 1.2의 결합 전 정규화다. 기본값이 `rank`라 스니펫도
+    // 그 값을 그대로 materialize한다(P2-04).
+    expect(findSnippet(snippets, "section:signal").value).toEqual({
+      normalization: "rank",
+      score_threshold: null,
+      regime_field_id: null,
+      regime_minimum: null,
     });
     expect(findSnippet(snippets, "section:risk").value).toMatchObject({
       max_name_weight: 0.1,
       sector_neutral: false,
-    });
-    expect(findSnippet(snippets, "section:execution").value).toMatchObject({
-      timing: "next_open",
-      fee_bps: 15,
     });
     expect(findSnippet(snippets, "factor:server.momentum").value).toEqual({
       factor_id: "server.momentum",
@@ -88,9 +118,11 @@ describe("canonical StrategySpec snippets", () => {
     expect(catalog().some((snippet) => snippet.kind === "factor")).toBe(true);
   });
 
-  it("fails closed for catalog-only, missing graph and incomplete authoring metadata", () => {
+  it("fails closed for catalog-only, adapter-unavailable, missing graph and incomplete authoring metadata", () => {
     const unavailable = [
       { ...FACTOR, availability: "catalog_only" as const },
+      // 연결된 어댑터가 기본 graph 의 필드를 주지 않는 구현 팩터(#370) — 넣자마자 compile 이 막는다.
+      { ...FACTOR, availability: "unavailable" as const },
       { ...FACTOR, factor_id: "missing-graph", default_graph: null },
     ];
     expect(
@@ -140,7 +172,7 @@ describe("canonical StrategySpec snippets", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.edit.nextSource).toBe(
-      'schema_version: "1.1"\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
+      'schema_version: "1.1"\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
     );
     expect(result.edit).toMatchObject({
       from: source.length - 3,
@@ -183,19 +215,19 @@ describe("canonical StrategySpec snippets", () => {
   it.each([
     [
       "# 첫 키 설명\nsig\nrisk: {}\n",
-      "# 첫 키 설명\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+      "# 첫 키 설명\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
     ],
     [
-      "risk:\n  a: 1\n# 주석\nsig\ndata: {}\n",
-      "risk:\n  a: 1\n# 주석\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\ndata: {}\n",
+      "risk:\n  a: 1\n# 주석\nsig\nportfolio: {}\n",
+      "risk:\n  a: 1\n# 주석\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nportfolio: {}\n",
     ],
     [
       "\nsig\nrisk: {}\n",
-      "\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+      "\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
     ],
     [
       "# c\r\nsig\r\nrisk: {}\r\n",
-      "# c\r\nsignal:\r\n  score_threshold: null\r\n  regime_field_id: null\r\n  regime_minimum: null\r\nrisk: {}\r\n",
+      "# c\r\nsignal:\r\n  normalization: rank\r\n  score_threshold: null\r\n  regime_field_id: null\r\n  regime_minimum: null\r\nrisk: {}\r\n",
     ],
   ])(
     "keeps the snippet on the cursor line below leading comments and blank lines (review P1-1)",
@@ -263,8 +295,8 @@ describe("canonical StrategySpec snippets", () => {
   });
 
   it("fails without mutation for duplicate, selected, JSON and unsafe cursor contexts", () => {
-    const snippet = findSnippet(catalog(), "section:data");
-    const duplicate = "data:\n  market: TEST\n";
+    const snippet = findSnippet(catalog(), "section:risk");
+    const duplicate = "risk:\n  max_name_weight: 0.2\n";
     expect(
       planSnippetEdit(
         duplicate,

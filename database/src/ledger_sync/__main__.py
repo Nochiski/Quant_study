@@ -55,7 +55,6 @@ EXIT_ERROR = 2
 EXIT_DRIFTED = 3
 EXIT_MISMATCH = 4
 
-DEFAULT_USER = "quantshare"
 DEFAULT_KEY = "~/.ssh/kael_quant"
 DEFAULT_ROOT = "~/quant-ledger/data"
 LAYERS = ("equity", "stage")
@@ -75,7 +74,12 @@ def _endpoint(args: argparse.Namespace) -> SftpEndpoint:
     if not args.host:
         raise RemoteConnectError(
             "server host is not set — pass --host or set QL_SYNC_HOST "
-            f"(verb={args.verb}, user={args.user}, port={args.port})")
+            f"(verb={args.verb}, user={'set' if args.user else 'unset'}, port={args.port})")
+    if not args.user:
+        # 계정명도 주소처럼 기본값을 두지 않는다 — 공개 저장소라 코드에 적지 않는다.
+        raise RemoteConnectError(
+            "server user is not set — pass --user or set QL_SYNC_USER "
+            f"(verb={args.verb}, host={'set' if args.host else 'unset'}, port={args.port})")
     return SftpEndpoint(host=args.host, user=args.user, key_path=Path(args.key).expanduser(),
                         port=args.port)
 
@@ -605,7 +609,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=_env("QL_SYNC_HOST", ""),
                         help="서버 주소(기본 $QL_SYNC_HOST). 공개 저장소라 기본값을 두지 않는다")
     parser.add_argument("--port", type=int, default=int(_env("QL_SYNC_PORT", "22")))
-    parser.add_argument("--user", default=_env("QL_SYNC_USER", DEFAULT_USER))
+    parser.add_argument("--user", default=_env("QL_SYNC_USER", ""),
+                        help="SFTP 계정(기본 $QL_SYNC_USER). 공개 저장소라 기본값을 두지 않는다")
     parser.add_argument("--key", default=_env("QL_SYNC_KEY", DEFAULT_KEY))
     parser.add_argument("--accept-new", action="store_true",
                         help="known_hosts 에 없는 호스트키를 받아들인다(첫 접속만)")

@@ -24,11 +24,32 @@ paths:
   backend가 소유한다.
 - backend가 코드로 분기하는 422(`ApiRequestError.code`)는 `upgrade.error.<code>`·
   `backtest.error.<code>`처럼 코드를 키로 하는 문구로 번역한다. 번역이 없으면 일반 문구로
-  떨어지되 원문 detail을 그대로 노출하지 않는다.
+  떨어지되 원문 detail을 그대로 노출하지 않는다. 서버 원문(`ApiRequestError.detail`)은 접힌 진단
+  상세로 내린다. `Error.message`(`API request failed: …`)는 개발자 진단이라 화면에 쓰지 않는다.
+  코드 없는 FastAPI 배열 422의 요약은 `ApiRequestError.diagnostic`에만 둔다 — `detail`은 저장 상태 줄
+  (409·422)이 본문으로 읽는다. 접힌 상세에 둘 원문은 `shared/api`의 `failureReason` 하나가 고르고, 번역
+  본문과 접힌 서버 사유는 `shared/ui`의 `FailureNotice` 하나가 그린다 — 시작·재실행 거절, run 실패,
+  업그레이드·추적·실행 계획·서버 초안 실패가 함께 쓴다(#270).
+- 시작 거절(`startBacktest` 404·409·422)과 결과 조회 실패(`getBacktestResult` 404·409·410)는
+  `backtest.error.<code>`를 본문으로 쓴다. 코드 번역은 `entities/backtest`의 `backtestErrorSentence` 하나가
+  고른다. 시작 거절 문장(`backtestStartRejectionMessage`)은 편집기 툴바와 결과 화면 재실행이, 결과 조회
+  실패(`BacktestResultFailure`)는 결과 화면이 쓴다(표시는 `FailureNotice`, #330). 두 경로의 키 목록은
+  `backtest-error-contract.test.ts`가 `openapi.json`의 코드 전수와 대조한다. 추적 실패는 추적 고유
+  코드면 `trace.error.<code>`, 아니면 같은 `backtestErrorSentence`를 쓴다 — 실행 설정 거절은 추적과
+  시작이 같은 코드·detail이라 두 벌 번역하지 않는다(#351). 추적 경로 코드 전수는
+  `trace-error-message.test.ts`가 대조한다. 410(Gone)은 다시 물어도 같으므로
+  조회를 재시도하지 않는다(`app/providers/query-client.ts`). 요청 본문 검증
+  실패도 backend가 `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화한다 — FastAPI 기본
+  배열 422를 새 화면 계약으로 삼지 않는다. 거절의 `field`를 실행 설정 패널이 칸 이름으로 바꿀 수 있으면
+  `backtest.error.<code>.named`(`{field}` 자리)에 넣는다 — 경로→이름 대응은 `features/run-backtest`의
+  `runFieldLabel` 하나가 소유한다. detail의 문자열 값은 `{이름}` 자리표시자로 채운다(예: 연구 구간 날짜,
+  `ApiRequestError.values`). `message`는 싣지 않는다.
 - 폴링 본문의 실패 코드(`BacktestRunState.error_code`, 어휘 SoT는 backend `RunFailureCode`)는
   `backtest.run.error.<code>`로 번역하고, 번역이 있으면 서버 원문(`error`)은 접힌 진단 상세로
-  내린다. 422의 `backtest.error.*`와 키를 공유하지 않는다 — 편집기 툴바는 서버 detail을 본문으로
-  쓰는 화면이라 같은 키가 있으면 detail이 덮인다.
+  내린다. 시작 거절의 `backtest.error.*`와 키를 공유하지 않는다 — 같은 코드라도 시작 거절은 실행 전에
+  고칠 것을, run 실패는 실행 중에 난 일을 말한다. 이 문장 규칙은 `entities/backtest`의
+  `BacktestRunFailure`가 소유하고 결과 화면과 백테스트 이력이 함께 쓴다(#304). 목록의 지난 실행처럼 화면을
+  열 때 이미 있던 실패는 `FailureNotice`의 `announce={false}`로 경고 알림 없이 보인다.
 
 ## 상태
 

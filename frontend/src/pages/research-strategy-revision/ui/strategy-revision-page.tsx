@@ -13,20 +13,19 @@ import {
   DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
+  RecipePanel,
+  factorIndexAtPointer,
+  PipelinePanel,
   RecoveryBanner,
   ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
-  StrategyFormPanel,
-  StrategyProjectionPanel,
   StrategyDiffPanel,
   StrategyOutline,
   UpgradeBanner,
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
-  currentSpec,
-  projectStrategySpec,
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
@@ -53,6 +52,7 @@ import {
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
+  RunEnvironmentSummary,
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
@@ -60,6 +60,7 @@ import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
 import {
   StrategyDebuggerPanel,
+  StrategyPreviewPanel,
   StrategyIde,
 } from "../../../widgets/strategy-ide";
 
@@ -117,16 +118,16 @@ export const StrategyRevisionPage = () => {
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
-  const executionPlans = useExecutionPlans(document, assist.inspectorSource);
-  const executableSpec = currentSpec(document);
-  const runDateRange = useMemo(
-    () =>
-      executableSpec === null
-        ? null
-        : { start: executableSpec.data.start, end: executableSpec.data.end },
-    [executableSpec],
+  // 실행 설정(시장·기간·유니버스·체결·비용·결측)은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2,
+  // P3-02). 마지막 사용값은 이 전략의 local UI state 다.
+  const runSettings = useBacktestRunSettings(strategyId);
+  // 실행 계획 sandbox 도 실행과 같은 결측 정책을 싣는다(Phase 2 감사 #3). 기간·유니버스가 비어도
+  // 결측 정책 칸 값은 따로 싣는다(#357 C-P3-16).
+  const executionPlans = useExecutionPlans(
+    document,
+    assist.inspectorSource,
+    runSettings.missing,
   );
-  const runSettings = useBacktestRunSettings(runDateRange);
   const backtest = useRunBacktest(
     document,
     executionPlans,
@@ -154,14 +155,8 @@ export const StrategyRevisionPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
-  const projection = projectStrategySpec(document);
-  const availableViews: readonly StrategyView[] =
-    stored.format === "yaml"
-      ? PROJECTION_VIEWS
-      : ["json", "form", "graph", "diff"];
-  const requested: StrategyView = search.view ?? stored.format;
-  const implemented = availableViews.includes(requested);
-  const view: StrategyView = implemented ? requested : stored.format;
+  const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
+  const view: StrategyView = search.view === "yaml" ? "yaml" : "graph";
   // Include route params as well as the validated search generation; the debug feature only
   // compares this opaque lease and never interprets router state.
   const debuggerPublicationOwner = JSON.stringify([
@@ -181,9 +176,11 @@ export const StrategyRevisionPage = () => {
         search: {
           ...search,
           path,
-          view: origin === "outline" ? undefined : search.view,
+          view: origin === "outline" ? "yaml" : search.view,
         },
         replace: true,
+        // 문서 안 선택은 reveal 경로가 스크롤을 소유한다. URL 갱신이 페이지를 맨 위로 돌리면 안 된다.
+        resetScroll: false,
       });
     },
     [navigate, revision, search, strategyId],
@@ -191,7 +188,7 @@ export const StrategyRevisionPage = () => {
   const outline = useOutlineNavigation({
     state: document,
     schema: assist.schema,
-    revealSelectedPointer: view === stored.format,
+    revealSelectedPointer: view === "yaml",
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
@@ -201,28 +198,20 @@ export const StrategyRevisionPage = () => {
   const snippets = useSnippetInsertion(
     document,
     assist.snippetSource,
-    view === stored.format,
+    view === "yaml",
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
+  const catalogs = {
+    equityFields: assist.inspectorSource.equityCatalog?.fields ?? null,
+  };
   const openGraph = useCallback(
     (pointer: string): void => {
       void navigate({
         to: ROUTE,
         params: { strategyId, revision },
-        search: { ...search, path: pointer, view: "graph" },
-        replace: true,
-      });
-    },
-    [navigate, search, revision, strategyId],
-  );
-  const openForm = useCallback(
-    (pointer: string): void => {
-      void navigate({
-        to: ROUTE,
-        params: { strategyId, revision },
-        search: { ...search, path: pointer, view: "form" },
-        replace: true,
+        search: { ...search, path: pointer, view: "graph", recipe: true },
+        resetScroll: false,
       });
     },
     [navigate, search, revision, strategyId],
@@ -239,10 +228,10 @@ export const StrategyRevisionPage = () => {
   const problems = useDiagnosticNavigation({
     state: document,
     view,
-    sourceView: stored.format,
+    sourceView: "yaml",
     form: form.projection,
     tree: form.tree,
-    schemaLoaded: assist.schema !== null,
+    schema: assist.schema,
     onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
     onOpenSource: openSourceAt,
   });
@@ -281,7 +270,7 @@ export const StrategyRevisionPage = () => {
   // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
   const strategyAssistant = useStrategyAssistant(proposalApply, document, {
     draftId: serverDraftId,
-    environment: runSettings.requestOptions,
+    environment: runSettings.environment,
     backtest: { canRun, settling: backtest.settling, run: runBacktest },
   });
   const selectSymbol = useCallback(
@@ -363,7 +352,7 @@ export const StrategyRevisionPage = () => {
         onSelectSymbol={selectSymbol}
         saveTone={saveStatusTone(document, status)}
         view={view}
-        sourceView={stored.format}
+        sourceView="yaml"
         availableViews={availableViews}
         onViewChange={(next) =>
           void navigate({
@@ -371,11 +360,12 @@ export const StrategyRevisionPage = () => {
             params: { strategyId, revision },
             search: {
               ...search,
-              view: next === stored.format ? undefined : next,
+              view: next,
             },
             replace: true,
           })
         }
+        runEnvironment={<RunEnvironmentSummary controller={runSettings} />}
         documentHistory={<DocumentHistoryActions history={history} />}
         documentStatus={<DocumentStatus state={document} />}
         problems={
@@ -399,79 +389,90 @@ export const StrategyRevisionPage = () => {
             runBlockedReason={
               backtestRejectedForUpgrade
                 ? t("upgrade.backtestBlocked")
-                : runSettings.result.valid
-                  ? undefined
-                  : t("backtest.settings.blocked")
+                : (runSettings.blockedReason ?? undefined)
             }
             runSettings={
               <BacktestRunSettings
                 controller={runSettings}
                 disabled={backtest.status.kind === "starting"}
+                request={backtest.request}
               />
             }
+            runFieldLabel={runSettings.runFieldLabel}
+            runRejectionFix={runSettings.rejectionFix}
             decision={backtest.decision}
             runStatus={backtest.status}
           />
         }
+        comparisonOpen={search.compare}
+        onComparisonOpenChange={(open) =>
+          void navigate({
+            to: ROUTE,
+            params: { strategyId, revision },
+            search: { ...search, compare: open || undefined },
+            replace: true,
+          })
+        }
+        revisionDiff={(active) => (
+          <StrategyDiffPanel
+            state={document}
+            active={active}
+            revision={{ strategyId, currentRevision: Number(revision) }}
+          />
+        )}
         projections={{
-          json:
-            stored.format === "yaml" ? (
-              <StrategyProjectionPanel projection={projection} />
-            ) : undefined,
-          form: (
-            <StrategyFormPanel
-              projection={form.projection}
-              stale={form.stale}
-              tree={form.tree}
-              schema={assist.schema}
-              transactions={transactions}
-              catalogs={{
-                equityFields:
-                  assist.inspectorSource.equityCatalog?.fields ?? null,
-                factors: assist.inspectorSource.factorCatalog?.factors ?? null,
-              }}
-              catalogSnippets={snippets.snippets}
-              onOpenGraph={openGraph}
-              selectedPointer={search.path}
-              revealSignal={problems.revealSignal}
-            />
-          ),
           graph: (
-            <FactorGraphPanel
-              state={executionPlans}
-              diagnostics={currentDiagnostics(document)}
-              selectedPointer={search.path}
-              revealSignal={problems.revealSignal}
-              editing={{
-                tree: form.tree,
-                schema: assist.schema,
-                transactions,
-                catalogs: {
-                  equityFields:
-                    assist.inspectorSource.equityCatalog?.fields ?? null,
-                  factors:
-                    assist.inspectorSource.factorCatalog?.factors ?? null,
-                },
-                operators: assist.operators,
-                onOpenForm: openForm,
-                documentKey: document.documentEpoch,
-              }}
-              onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-              onOpenSource={(pointer) => {
-                outline.requestSourceReveal(pointer);
-                selectPointer(pointer, "outline");
-              }}
-            />
-          ),
-          diff: (
-            <StrategyDiffPanel
-              state={document}
-              active={view === "diff"}
-              revision={{
-                strategyId,
-                currentRevision: Number(revision),
-              }}
-            />
+            <>
+              {/* 그래프 1수준(파이프라인) 캔버스 위, 고급 수준(노드 편집·실행 계획) 아래(P4-02). */}
+              <PipelinePanel
+                form={form}
+                schema={assist.schema}
+                transactions={transactions}
+                catalogs={catalogs}
+                onOpenGraph={openGraph}
+                selectedPointer={search.path}
+                revealSignal={problems.revealSignal}
+              />
+              <StrategyPreviewPanel document={document} executionPlans={executionPlans} environment={runSettings.environment} />
+              {search.recipe && !form.firstParsePending && assist.schema !== null ? (
+                <RecipePanel
+                  tree={form.tree} schema={assist.schema}
+                  factorIndex={factorIndexAtPointer(search.path) ?? 0}
+                  transactions={transactions} catalogs={catalogs} operators={assist.operators}
+                  diagnostics={currentDiagnostics(document)} plans={executionPlans}
+                  selectedPointer={search.path} revealSignal={problems.revealSignal}
+                  onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                  onAdvanced={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined }, resetScroll: false })}
+                  onBack={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined, path: undefined }, resetScroll: false })}
+                />
+              ) : (
+              <FactorGraphPanel
+                state={executionPlans}
+                schema={assist.schema}
+                diagnostics={currentDiagnostics(document)}
+                selectedPointer={search.path}
+                revealSignal={problems.revealSignal}
+                // 첫 parse 전 tree 는 비어 있어 편집기가 "팩터가 없습니다"를 그린다. 캔버스처럼 기다린다(#413).
+                editing={
+                  form.firstParsePending
+                    ? undefined
+                    : {
+                        tree: form.tree,
+                        transactions,
+                        catalogs,
+                        operators: assist.operators,
+                        onOpenSource: openSourceAt,
+                        documentKey: document.documentEpoch,
+                      }
+                }
+                onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                onOpenSource={(pointer) => {
+                  outline.requestSourceReveal(pointer);
+                  selectPointer(pointer, "outline");
+                }}
+              />
+              )}
+            </>
           ),
         }}
         notice={
@@ -483,10 +484,12 @@ export const StrategyRevisionPage = () => {
             <ProposalApplyFeedback
               apply={proposalApply}
               chain={strategyAssistant.chain}
+              blockedReason={runSettings.blockedReason}
             />
             <UpgradeBanner
               upgrade={documentUpgrade}
               backtestRejected={backtestRejectedForUpgrade}
+              onApplyEnvironment={runSettings.applyEnvironment}
             />
             {status.kind === "conflict" &&
             status.strategyId !== null &&
@@ -541,6 +544,7 @@ export const StrategyRevisionPage = () => {
           <StrategyDebuggerPanel
             document={document}
             executionPlans={executionPlans}
+            environment={runSettings.environment}
             publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}
@@ -558,11 +562,6 @@ export const StrategyRevisionPage = () => {
         }
         editor={
           <>
-            {implemented ? null : (
-              <p className="page-state" role="status">
-                {t("page.revision.viewPending")} ({requested.toUpperCase()})
-              </p>
-            )}
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}

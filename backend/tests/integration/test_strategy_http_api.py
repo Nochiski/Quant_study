@@ -57,7 +57,9 @@ def test_http_adapter_exposes_real_mock_equity_catalog() -> None:
     )
     assert sector["value_type"] == "category"
     assert payload["snapshot"]["point_in_time"] is True
-    assert payload["total"] == 10  # 원주가·수정주가(이슈 #214) 포함
+    # 원주가·수정주가(이슈 #214), TTM 순이익(#212, P2-08 아이디어도 쓴다), 거래대금(P2-08),
+    # 신용잔고율 분모 상장주식수(#234) 포함
+    assert payload["total"] == 13
 
 
 def test_equity_catalog_filters_and_paginates_over_http() -> None:
@@ -70,9 +72,9 @@ def test_equity_catalog_filters_and_paginates_over_http() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 2
+    assert payload["total"] == 4
     assert payload["page"] == 2
-    assert payload["page_count"] == 2
+    assert payload["page_count"] == 4
     assert payload["fields"][0]["field_id"] == "price.market_cap"
 
 
@@ -124,9 +126,8 @@ def test_json_spec_api_keeps_label_required_while_document_defaults_apply() -> N
     relaxed = {
         k: v
         for k, v in template.items()
-        if k not in ("signal", "portfolio", "risk", "execution", "eligibility", "description")
+        if k not in ("signal", "portfolio", "risk", "eligibility", "description")
     }
-    relaxed["data"] = {k: v for k, v in template["data"].items() if k != "market"}
     relaxed["factors"] = [{k: v for k, v in template["factors"][0].items() if k != "weight"}]
     response = client.post("/api/v1/strategies/validate", json=relaxed)
     assert response.status_code == 200, response.text

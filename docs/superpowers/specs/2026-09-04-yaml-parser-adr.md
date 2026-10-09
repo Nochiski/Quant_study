@@ -94,8 +94,8 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
 ### D3. Cross-runtime fixture는 양쪽 테스트가 같은 파일을 읽는다
 
 - `backend/tests/fixtures/strategy_documents/yaml12/manifest.json`이 case 목록의 SoT다. 각 case는
-  `accepted/*.yaml` + 기대 JSON 또는 `rejected/*.yaml` + 기대 reason code를 가진다 (16 accepted, 27
-  rejected). manifest에 없는 fixture 파일은 backend 테스트가 실패시킨다. `.gitattributes`가 이 fixture를
+  `accepted/*.yaml` + 기대 JSON 또는 `rejected/*.yaml` + 기대 reason code를 가진다 (작성 당시 16 accepted,
+  27 rejected, 2026-09-28 기준 17 accepted, 35 rejected. 개수의 정본은 manifest다). manifest에 없는 fixture 파일은 backend 테스트가 실패시킨다. `.gitattributes`가 이 fixture를
   LF로 고정해 P1-02의 exact source hash 검증이 체크아웃 설정에 흔들리지 않게 한다.
 - backend: `backend/tests/contract/test_yaml12_cross_runtime.py`가 ruamel 기반 임시 loader로 manifest를
   검증한다. P1-02 codec이 이 loader를 대체한다.

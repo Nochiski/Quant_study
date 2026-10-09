@@ -11,19 +11,28 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import (
-    environment_from_legacy_spec,
+    RunEnvironment,
+    SellTax,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     ExecutionCore,
     InlineDraft,
+    MetricWindow,
     RunManifest,
     SavedRevisionReference,
     StrategyProvenance,
     StrategySourceKind,
     backtest_run_fingerprint,
+)
+from strategy_workbench.domain.strategy.facade.specification import (
+    FloatParameter,
+    IntegerParameter,
+    ParameterValue,
+    resolve_parameter_values,
 )
 
 
@@ -39,7 +48,7 @@ def _fingerprint(spec: BacktestRunSpec) -> str:
 
 def test_fingerprint_ignores_how_the_strategy_was_referenced() -> None:
     strategy = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
     legacy = BacktestRunSpec(strategy=strategy)
     saved = replace(
@@ -48,17 +57,63 @@ def test_fingerprint_ignores_how_the_strategy_was_referenced() -> None:
     )
     draft = replace(legacy, strategy_source=InlineDraft(strategy, "inline_draft", "b" * 64))
     other_draft = replace(legacy, strategy_source=InlineDraft(strategy, "inline_draft", "c" * 64))
+    # 인라인 초안의 계열도 출처 정보다(검증 랩 spec D2).
+    in_lineage = replace(draft, lineage_strategy_id="s1")
 
-    assert len({_fingerprint(s) for s in (legacy, saved, draft, other_draft)}) == 1
+    assert len({_fingerprint(s) for s in (legacy, saved, draft, other_draft, in_lineage)}) == 1
     assert _fingerprint(replace(legacy, initial_cash=1.0)) != _fingerprint(legacy)
+
+
+def test_fingerprint_ignores_metric_window_labels_but_not_their_dates() -> None:
+    """#335 DOMAIN-V1-02: 지표 창 표시 이름은 화면이 지은 문자열이라 실행을 가르지 않는다."""
+    strategy = StrategyDesignService(
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
+    ).template()
+    oos = MetricWindow(MetricScope.OUT_OF_SAMPLE, date(2024, 1, 2), date(2024, 6, 28), "OOS 1")
+    base = BacktestRunSpec(strategy=strategy, metric_windows=(oos,))
+
+    relabelled = replace(base, metric_windows=(replace(oos, label="다른 이름"),))
+    moved = replace(base, metric_windows=(replace(oos, start=date(2024, 2, 1)),))
+
+    assert _fingerprint(relabelled) == _fingerprint(base) != _fingerprint(moved)
+
+
+def test_omitted_and_explicit_default_parameter_values_share_one_fingerprint() -> None:
+    """검증 랩 V3-02: 접수가 해소한 값(`resolve_parameter_values`)이 지문에 든다.
+
+    생략한 요청과 기본값을 다른 표기(20.0)로 적은 요청은 같은 실행이고, 기본값이 아닌 값만 지문을
+    가른다.
+    """
+    parameters = (
+        IntegerParameter("lookback", 20, 10, 30, "integer"),
+        FloatParameter("weight", 0.5, 0.0, 2.0, "float"),
+    )
+    template = StrategyDesignService(
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
+    ).template()
+    base = BacktestRunSpec(strategy=replace(template, parameters=parameters))
+
+    def resolved(requested: dict[str, ParameterValue]) -> str:
+        values = resolve_parameter_values(parameters, requested)
+        return _fingerprint(replace(base, parameter_values=values))
+
+    omitted = resolved({})
+    assert resolved({"lookback": 20.0, "weight": 0.5}) == omitted
+    assert resolved({"lookback": 21}) != omitted
+    # 정규화가 빠지면 20.0 과 20 이 canonical JSON 에서 다른 표기가 되어 지문이 갈린다.
+    assert (
+        _fingerprint(replace(base, parameter_values={"lookback": 20.0, "weight": 0.5})) != omitted
+    )
 
 
 def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
     created = datetime(2026, 9, 3, tzinfo=UTC)
     strategy = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
-    environment = environment_from_legacy_spec(strategy)
+    environment = RunEnvironment(
+        start=date(2021, 1, 1), end=date(2026, 8, 31), universe_id="krx.common-stock"
+    )
     return RunManifest(
         run_id="run-001",
         created_at=created,
@@ -79,7 +134,7 @@ def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
         environment=environment,
         environment_hash=environment_hash(environment),
         strategy_provenance=StrategyProvenance(
-            StrategySourceKind.SAVED_REVISION, spec_hash, "1.1", "s1", 3, "b" * 64
+            StrategySourceKind.SAVED_REVISION, spec_hash, "1.2", "s1", 3, "b" * 64
         ),
     )
 
@@ -108,6 +163,17 @@ def test_manifest_rejects_a_cost_model_that_diverges_from_its_environment() -> N
     assert "run_id=run-001" in message
     assert "participation_rate: manifest=0.5" in message
     assert f"environment={base.environment.participation_rate!r}" in message
+
+
+def test_manifest_flat_cost_check_ignores_environment_only_cost_fields() -> None:
+    """매니페스트 평면 필드는 수수료·슬리피지·참여율 셋뿐이다. 실행 설정에만 있는 거래세 칸이
+    대조 집합에 들어가면 `AttributeError` 가 난다(spec D7)."""
+    manifest = _manifest("a" * 64, "a" * 64)
+    taxed = replace(manifest.environment, sell_tax=SellTax.CUSTOM, sell_tax_bps=20.0)
+
+    rebuilt = replace(manifest, environment=taxed, environment_hash=environment_hash(taxed))
+
+    assert rebuilt.environment.sell_tax_bps == 20.0
 
 
 def test_the_mismatch_message_names_both_producers_and_the_revision() -> None:

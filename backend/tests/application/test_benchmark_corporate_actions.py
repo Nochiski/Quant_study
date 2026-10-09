@@ -25,6 +25,9 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -42,6 +45,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, ExecutionCore
 from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
@@ -50,10 +54,8 @@ from strategy_workbench.domain.factor.facade.expression import (
     TimeSeriesOperator,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
-    DataStep,
     FactorDirection,
     FactorSignal,
-    Market,
     RebalanceFrequency,
     StrategySpec,
 )
@@ -104,9 +106,13 @@ class _SplitBenchmark:
         )
 
 
+# schema 1.2 문서는 기간·유니버스를 담지 않는다(lang2 P2-03). 실행 설정은 run 요청이 싣는다.
+_ENVIRONMENT = RunEnvironment(start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock")
+
+
 def _spec() -> StrategySpec:
     template = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: WINDOW[1]
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
     momentum = FactorSignal(
         factor_id="momentum_3",
@@ -123,9 +129,6 @@ def _spec() -> StrategySpec:
     )
     return replace(
         template,
-        data=DataStep(
-            market=Market.KRX, start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock"
-        ),
         factors=(momentum,),
         portfolio=replace(
             template.portfolio,
@@ -149,11 +152,15 @@ def _run(data: BacktestDataPort, tmp_path: Path, run_id: str) -> BacktestRunResu
         data,
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
     runs.start(
         BacktestRunSpec(
-            strategy=_spec(), core=ExecutionCore.PYTHON, benchmark_security_id=BENCHMARK
+            strategy=_spec(),
+            core=ExecutionCore.PYTHON,
+            benchmark_security_id=BENCHMARK,
+            environment=_ENVIRONMENT,
         )
     )
     state = wait_for_terminal_run(runs, run_id)

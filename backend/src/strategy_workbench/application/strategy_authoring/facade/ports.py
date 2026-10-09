@@ -3,6 +3,7 @@ from strategy_workbench.application.strategy_authoring.ports.outgoing.document_c
     SYNTAX_REASON,
     YAML_GRAMMAR_REASONS,
     CodecLimits,
+    DiagnosticAnchor,
     DiagnosticKind,
     DiagnosticSeverity,
     DocumentCodecPort,
@@ -21,15 +22,20 @@ from strategy_workbench.application.strategy_authoring.ports.outgoing.draft_repo
     StrategyDraftNotFoundError,
     StrategyDraftRepositoryPort,
 )
+from strategy_workbench.application.strategy_authoring.ports.outgoing.field_catalog import (
+    FieldCatalogPort,
+)
 
 __all__ = [
     "DOCUMENT_POLICY_REASONS",
     "SYNTAX_REASON",
     "YAML_GRAMMAR_REASONS",
     "CodecLimits",
+    "DiagnosticAnchor",
     "DiagnosticKind",
     "DiagnosticSeverity",
     "DocumentCodecPort",
+    "FieldCatalogPort",
     "ParsedDocument",
     "ParseStatus",
     "SourceDiagnostic",

@@ -1,0 +1,431 @@
+/**
+ * 그래프 1수준(파이프라인) 투영(WORKFLOW P4-01, spec D9): runtime schema × parse tree × compile 진단 →
+ * 표준 단계 모델과 전략 한 문장 요약. Form 투영의 필드 행과 목록(컨트롤·값·작성 여부·적용 여부·진단)을
+ * 그대로 쓰고 단계와 카드로만 다시 묶는다. 순수 함수이며 편집기·React를 모른다.
+ *
+ * 필드 목록을 여기 적지 않는다. 필드의 단계는 스키마 `x-stage`·`x-applied-stage`(읽는 규칙의 정본은 정본
+ * 대장 "그래프 표현 투영" 행), 카드 묶음은 같은 단계 안의 `x-applicable-when` 조건, 요약에 나올 필드는
+ * 스키마 설명 키 아래 i18n 조각이 정한다(리드 결정 2026-09-30).
+ */
+import { t, tName, tOptional } from "../../../shared/config";
+import type { DocumentDiagnostic } from "./document-state";
+import type {
+  FormField,
+  FormListItem,
+  FormListSection,
+  FormProjection,
+  FormSection,
+} from "./form-projection";
+import { defaultFromValueOf, type ObjectSection } from "./form-transactions";
+import {
+  displayValue,
+  formatContractValue,
+  schemaAt,
+  schemaFacts,
+  type JsonSchema,
+} from "./schema-navigator";
+
+/** 카드의 행 하나: Form 필드 행과 그 필드를 담은 섹션(미작성 필드를 확정할 때의 부모, `fieldOperation`). */
+export type PipelineRow = { field: FormField; section: ObjectSection };
+
+/** 카드 = 앵커 행 하나 + 같은 단계 안에서 적용 조건이 그 카드를 가리키는 행들(스키마 순서). */
+export type PipelineCard = { pointer: string; rows: PipelineRow[] };
+
+export type PipelineStage = {
+  /** `AppliedStage` 값(`eligibility`·`signal`·`portfolio`·`risk`). 이름은 i18n `strategy.stage.<값>`. */
+  stage: string;
+  /** 항목이 카드인 목록(`eligibility.rules`·`factors`). 항목 추가 자리와 목록 진단을 함께 가진다. */
+  lists: FormListSection[];
+  cards: PipelineCard[];
+  /** 이 단계 섹션 자신의 진단(어느 행·목록도 흡수하지 않은 것). */
+  diagnostics: DocumentDiagnostic[];
+};
+
+export type PipelineProjection = {
+  /** 스키마 최상위 property 순서로 처음 나온 단계부터. */
+  stages: PipelineStage[];
+  /** 단계가 없는 섹션(문서 머리·`parameters`)과 문서 전체 진단. 배치는 P4-02·P4-04가 정한다. */
+  unstaged: FormSection[];
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** 단계에 배정된 행과 그 행의 적용 조건이 가리키는 pointer(`x-applicable-when`, 조건표 순서). */
+type StagedRow = { row: PipelineRow; conditions: readonly string[] };
+
+/**
+ * 같은 단계의 행을 카드로 묶는다: 행의 적용 조건 중 같은 단계 행을 가리키는 첫 조건의 카드에 붙고, 없으면
+ * 자기 카드를 연다. 묶음의 정본은 backend 적용 조건표다.
+ */
+const cardsOf = (staged: readonly StagedRow[]): PipelineCard[] => {
+  const byPointer = new Map(
+    staged.map((entry) => [entry.row.field.pointer, entry]),
+  );
+  const anchorOf = (entry: StagedRow): string => {
+    const seen = new Set<string>();
+    let current = entry;
+    for (;;) {
+      seen.add(current.row.field.pointer);
+      const target = current.conditions.find(
+        (pointer) => byPointer.has(pointer) && !seen.has(pointer),
+      );
+      if (target === undefined) return current.row.field.pointer;
+      current = byPointer.get(target)!;
+    }
+  };
+  const anchors = staged.map(anchorOf);
+  const cards = new Map<string, PipelineCard>();
+  staged.forEach(({ row }, index) => {
+    if (anchors[index] === row.field.pointer)
+      cards.set(row.field.pointer, { pointer: row.field.pointer, rows: [row] });
+  });
+  staged.forEach(({ row }, index) => {
+    if (anchors[index] !== row.field.pointer)
+      cards.get(anchors[index])!.rows.push(row);
+  });
+  return [...cards.values()];
+};
+
+/**
+ * Form 투영(`useFormProjection` 이 stale parse·진단 규칙을 한 번 판정한 결과)을 단계와 카드로 다시 묶는다.
+ * `tree` 는 그 투영을 만든 parse tree 다(union 분기를 스키마에서 고른다).
+ */
+export const projectPipeline = (
+  schema: JsonSchema,
+  form: FormProjection,
+  tree: unknown,
+): PipelineProjection => {
+  const rootProperties = isRecord(schema.properties) ? schema.properties : {};
+  type Entry = {
+    lists: FormListSection[];
+    staged: StagedRow[];
+    diagnostics: DocumentDiagnostic[];
+  };
+  const stages = new Map<string, Entry>();
+  const entryOf = (stage: string): Entry => {
+    const entry = stages.get(stage) ?? {
+      lists: [],
+      staged: [],
+      diagnostics: [],
+    };
+    stages.set(stage, entry);
+    return entry;
+  };
+  const factsAt = (pointer: string) => {
+    const node = schemaAt(schema, pointer, tree)?.node;
+    return node === undefined ? null : schemaFacts(node);
+  };
+  const unstaged: FormSection[] = [];
+  for (const section of form.sections) {
+    // 섹션의 `x-stage`는 `$ref`를 풀기 전의 최상위 property에 있다(Form 섹션 이름과 같은 자리).
+    const property = rootProperties[section.key];
+    const sectionStage = isRecord(property)
+      ? schemaFacts(property).stage
+      : null;
+    if (section.kind === "list") {
+      if (sectionStage === null) unstaged.push(section);
+      else entryOf(sectionStage).lists.push(section);
+      continue;
+    }
+    // 행의 단계: 자기 `x-stage`·`x-applied-stage`, 없으면 섹션의 단계(정본 대장 "그래프 표현 투영" 행).
+    const fields = section.fields.filter((field) => {
+      const facts = factsAt(field.pointer);
+      const stage = facts?.stage ?? facts?.appliedStage ?? sectionStage;
+      if (stage === null) return true;
+      entryOf(stage).staged.push({
+        row: { field, section },
+        conditions: (facts?.applicableWhen?.all_of ?? []).map(
+          (condition) => condition.pointer,
+        ),
+      });
+      return false;
+    });
+    // 목록 property 는 자기 단계 마커가 없어(backend 배정표 테스트가 고정) 섹션의 단계를 따른다.
+    if (sectionStage === null) unstaged.push({ ...section, fields });
+    else {
+      entryOf(sectionStage).lists.push(...section.lists);
+      entryOf(sectionStage).diagnostics.push(...section.diagnostics);
+    }
+  }
+  return {
+    stages: [...stages].map(([stage, entry]) => ({
+      stage,
+      lists: entry.lists,
+      cards: cardsOf(entry.staged),
+      diagnostics: entry.diagnostics,
+    })),
+    unstaged,
+  };
+};
+
+/** 카탈로그 값(`price.trading_value`)의 화면 이름. 모르면 null이고 값을 그대로 보인다. */
+export type CatalogNames = (catalog: string, value: string) => string | null;
+
+/** 요약 문장의 이름 풀이: 카탈로그 값과, 참조 id(`risk_factor_id`)가 가리키는 문서 항목의 이름. */
+export type SummaryNames = {
+  catalog: CatalogNames;
+  reference: (id: string) => string | null;
+};
+
+/** 필드의 값. 생략했고 `x-default-from`이 있으면 backend가 채우는 형제 필드 값이다(`label` ← `factor_id`). */
+const valueOf = (field: FormField, card: readonly FormField[]): unknown =>
+  field.value ?? defaultFromValueOf(card, field);
+
+/**
+ * 필드 값을 문장에 넣을 글자로: enum은 값 이름, 카탈로그·참조는 이름, 비율은 표시 단위(`displayValue`),
+ * `percent`면 비율을 %로. 값이 없으면 null.
+ */
+export const fieldText = (
+  field: FormField,
+  card: readonly FormField[],
+  names: SummaryNames,
+  percent = false,
+): string | null => {
+  const value = valueOf(field, card);
+  if (value === null || value === undefined || value === "") return null;
+  const control = field.control;
+  if (percent && typeof value === "number")
+    return displayValue(value, "ratio", "%");
+  if (typeof value === "string") {
+    if (control.kind === "enum")
+      return tName(control.labelKeys?.[value]) ?? value;
+    if (control.kind === "catalog")
+      return names.catalog(control.catalog, value) ?? value;
+    if (control.kind === "reference") return names.reference(value) ?? value;
+  }
+  return (
+    displayValue(value, field.unit, field.displayUnit) ??
+    formatContractValue(value)
+  );
+};
+
+/**
+ * 조각 자리 `{<키>}`·`{<키>.percent}`·`{<키>.slider}`: 같은 카드 필드의 글자(`.percent` 는 요약에서 비율을 %로)
+ * 또는 컨트롤(`.slider` 는 카드에서 숫자 칸 옆에 끄는 막대를 둔다, WORKFLOW P4-03 결정 2).
+ */
+const PLACEHOLDER = /\{([a-z_]+)(\.percent|\.slider)?\}/g;
+
+/** 문장 틀 조각: 글자, 또는 같은 카드 필드의 자리. 카드 문장은 자리에 그 필드의 컨트롤을 넣는다(P4-02). */
+export type SentencePiece = { text: string } | { key: string; slider: boolean };
+
+/** 틀을 글자와 자리로 나눈다. 자리 규칙은 요약 조각과 같다(`.percent` 는 요약 표시 지시라 카드에선 뜻이 없다). */
+export const sentencePieces = (template: string): SentencePiece[] => {
+  const pieces: SentencePiece[] = [];
+  let last = 0;
+  for (const match of template.matchAll(PLACEHOLDER)) {
+    if (match.index > last)
+      pieces.push({ text: template.slice(last, match.index) });
+    pieces.push({ key: match[1]!, slider: match[2] === ".slider" });
+    last = match.index + match[0].length;
+  }
+  if (last < template.length) pieces.push({ text: template.slice(last) });
+  return pieces;
+};
+
+/**
+ * 카드 문장 틀(WORKFLOW P4-02 결정): 필드 순서로 enum 필드가 고른 값의 이름 키 아래 `.card` 를 먼저 찾고, 없으면
+ * `fallbackKey`(필드 카드는 앵커 설명 키, 목록 항목은 목록 설명 키) 아래 `.card` 다. 틀이 없으면 null — 카드는
+ * 이름 라벨 행으로 그린다. 어느 필드를 문장에 넣을지는 i18n 틀이 정하고 코드에 필드 목록이 없다.
+ */
+export const cardTemplate = (
+  fields: readonly FormField[],
+  fallbackKey: string | null,
+): string | null => {
+  for (const field of fields) {
+    if (field.control.kind !== "enum" || typeof field.value !== "string")
+      continue;
+    const labelKey = field.control.labelKeys?.[field.value];
+    const template =
+      labelKey === undefined ? null : tOptional(`${labelKey}.card`);
+    if (template !== null) return template;
+  }
+  return fallbackKey === null ? null : tOptional(`${fallbackKey}.card`);
+};
+
+/** 목록 항목의 이름: identity 를 기본값으로 삼는 필드(`label` ← `factor_id`)의 값, 없으면 identity 값. */
+export const itemName = (item: FormListItem): string | null => {
+  const named = item.fields.find(
+    (field) =>
+      field.defaultFrom !== null && field.defaultFrom === item.identityKey,
+  );
+  const value =
+    named === undefined
+      ? item.fields.find((field) => field.key === item.identityKey)?.value
+      : valueOf(named, item.fields);
+  return typeof value === "string" && value !== "" ? value : null;
+};
+
+/**
+ * 캔버스 밖에 남는 것(단계 없는 섹션)의 이름: 필드와 목록의 설명 키 이름, 스키마 스탬프(`const`)는 뺀다.
+ * 무엇이 빠지는지는 스키마 `x-stage` 가 정하므로 안내 카드가 목록을 손으로 적지 않는다(P4-02).
+ */
+export const unstagedNames = (pipeline: PipelineProjection): string[] =>
+  pipeline.unstaged
+    .flatMap((section) =>
+      section.kind === "list"
+        ? [section.descriptionKey]
+        : [
+            ...section.fields
+              .filter((field) => field.control.kind !== "const")
+              .map((field) => field.descriptionKey),
+            ...section.lists.map((list) => list.descriptionKey),
+          ],
+    )
+    .map((key) => tName(key))
+    .filter((name): name is string => name !== null);
+
+/**
+ * 필드 하나의 요약 조각: 설명 키 아래 `.summary`(enum은 고른 값의 이름 키 아래 `.summary`)에 같은 카드 필드의
+ * 글자를 끼운다. 조각 키가 없거나, 적용되지 않거나, 끼울 값이 없으면 null.
+ */
+export const fieldFragment = (
+  field: FormField,
+  card: readonly FormField[],
+  names: SummaryNames,
+): string | null => {
+  if (field.applicable === false) return null;
+  const control = field.control;
+  const key =
+    control.kind !== "enum"
+      ? field.descriptionKey
+      : typeof field.value === "string"
+        ? (control.labelKeys?.[field.value] ?? null)
+        : null;
+  const template = key === null ? null : tOptional(`${key}.summary`);
+  if (template === null) return null;
+  let missing = false;
+  const filled = template.replace(
+    PLACEHOLDER,
+    (_, name: string, suffix?: string) => {
+      const source = card.find((sibling) => sibling.key === name);
+      const text =
+        source === undefined
+          ? null
+          : fieldText(source, card, names, suffix === ".percent");
+      missing ||= text === null;
+      return text ?? "";
+    },
+  );
+  return missing ? null : filled;
+};
+
+/** 합성 점수에서 빠진 팩터(역가중 원천, P2-06)를 알리는 backend 진단. 제외 규칙을 여기서 다시 판정하지 않는다. */
+const EXCLUDED_FACTOR = "strategy.risk.risk_factor_excluded";
+
+const identity = (item: FormListItem): unknown =>
+  item.fields.find((field) => field.key === item.identityKey)?.value;
+
+/**
+ * 값 대신 보일 이름: 카탈로그 값은 카탈로그 항목 이름, 참조 id 는 그 id 의 목록 항목 이름(`itemName`). 요약
+ * 문장과 캔버스 컨트롤의 선택지가 같은 풀이를 쓴다 — 캔버스는 YAML 식별자 대신 이름을 보인다(P4-02).
+ */
+export const pipelineNames = (
+  pipeline: PipelineProjection,
+  catalog: CatalogNames,
+): SummaryNames => {
+  const items = pipeline.stages.flatMap((stage) =>
+    stage.lists.flatMap((list) => list.items),
+  );
+  return {
+    catalog,
+    reference: (id) => {
+      const item = items.find((candidate) => identity(candidate) === id);
+      return item === undefined ? null : itemName(item);
+    },
+  };
+};
+
+/**
+ * 문서 자리(pointer)의 화면 이름: 그 필드를 담은 섹션·항목 이름과 필드 이름("리스크 제약 · 위험 팩터"). 캔버스의
+ * 삭제 거부 문장이 pointer 대신 쓴다(WORKFLOW P4-03 결정 3). 이름을 하나도 모르면 pointer 그대로다.
+ */
+export const placeName = (
+  schema: JsonSchema,
+  tree: unknown,
+  pointer: string,
+): string => {
+  const nameAt = (at: string): string | null => {
+    const node = schemaAt(schema, at, tree)?.node;
+    return node === undefined ? null : tName(schemaFacts(node).descriptionKey);
+  };
+  const parts = [
+    nameAt(pointer.slice(0, pointer.lastIndexOf("/"))),
+    nameAt(pointer),
+  ].filter((part): part is string => part !== null);
+  return parts.length === 0 ? pointer : parts.join(" · ");
+};
+
+/**
+ * 전략 한 문장 요약(spec D9, 리드 결정 2026-09-30). 단계 순서대로 카드·목록 항목의 조각(`fieldFragment`)을
+ * 이어 단계 틀 `strategy.summary.stage.<단계>`에 넣고 문장 틀 `strategy.summary.sentence`로 닫는다. 목록은
+ * 자기 틀(`<목록 설명 키>.summary`)이 항목을 먼저 묶는다. 팩터는 방향을 붙인 이름("낮은 PBR")으로 보이고
+ * 백분율 몫(합성 분모)은 계산하지 않는다(리드 결정 4, #367 리뷰 P2-1 로 방향까지 넓힘).
+ */
+export const strategySummary = (
+  pipeline: PipelineProjection,
+  catalog: CatalogNames,
+): string => {
+  const names = pipelineNames(pipeline, catalog);
+  const cardPart = (
+    card: readonly FormField[],
+    shown: (field: FormField) => boolean = () => true,
+  ): string =>
+    card
+      .filter(shown)
+      .flatMap((field) => fieldFragment(field, card, names) ?? [])
+      .join(" ");
+  const excluded = new Set(
+    pipeline.stages
+      .flatMap((stage) => stage.cards.flatMap((card) => card.rows))
+      .filter(({ field }) =>
+        field.diagnostics.some(
+          (diagnostic) => diagnostic.code === EXCLUDED_FACTOR,
+        ),
+      )
+      .map(({ field }) => field.value),
+  );
+  const listParts = (list: FormListSection): string[] => {
+    const shownItems = list.items.filter(
+      (item) => !excluded.has(identity(item)),
+    );
+    // 숫자 조각(팩터 가중치)은 항목끼리 값이 다를 때만 보인다 — 모두 같으면 몫을 가르지 않는다.
+    const uniform = new Set(
+      (shownItems[0]?.fields ?? [])
+        .filter(
+          (field) =>
+            field.control.kind === "number" &&
+            shownItems.every(
+              (item) =>
+                item.fields.find((other) => other.key === field.key)?.value ===
+                field.value,
+            ),
+        )
+        .map((field) => field.key),
+    );
+    const parts = shownItems
+      .map((item) => cardPart(item.fields, (field) => !uniform.has(field.key)))
+      .filter((part) => part !== "");
+    const frame =
+      list.descriptionKey === null
+        ? null
+        : tOptional(`${list.descriptionKey}.summary`);
+    if (parts.length === 0 || frame === null) return parts;
+    return [frame.replace("{items}", parts.join("·"))];
+  };
+  const clauses = pipeline.stages.flatMap((stage) => {
+    const parts = [
+      ...stage.lists.flatMap(listParts),
+      ...stage.cards
+        .map((card) => cardPart(card.rows.map((row) => row.field)))
+        .filter((part) => part !== ""),
+    ];
+    const frame = tOptional(`strategy.summary.stage.${stage.stage}`);
+    return parts.length === 0 || frame === null
+      ? []
+      : [frame.replace("{parts}", parts.join(", "))];
+  });
+  return clauses.length === 0
+    ? ""
+    : t("strategy.summary.sentence").replace("{stages}", clauses.join(", "));
+};

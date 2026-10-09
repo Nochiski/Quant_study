@@ -1,12 +1,18 @@
+import { useMemo } from "react";
+
 import {
+  backtestStartRejectionMessage,
+  runEnvironmentFields,
   useCancelBacktest,
+  useRunEnvironmentSchema,
   useStartBacktest,
   type BacktestRunSpec,
   type BacktestRunState,
 } from "../../../entities/backtest";
-import { ApiRequestError } from "../../../shared/api";
+import { ApiRequestError, failureReason } from "../../../shared/api";
 import { t } from "../../../shared/config";
-import { Button } from "../../../shared/ui";
+import { Button, FailureNotice } from "../../../shared/ui";
+import { runFieldLabel } from "../model/run-settings-problems";
 import "./backtest-run-actions.css";
 
 type BacktestRunActionsProps = {
@@ -41,13 +47,27 @@ export const BacktestRunActions = ({
       onSuccess: (accepted) => onReplayed(accepted.run.run_id),
     });
   };
-  const actionError = cancel.error ?? replay.error;
-  const actionErrorDetail =
-    actionError instanceof ApiRequestError
-      ? (actionError.detail ?? actionError.message)
-      : actionError instanceof Error
-        ? actionError.message
-        : null;
+  const schema = useRunEnvironmentSchema();
+  const environmentFields = useMemo(
+    () =>
+      schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
+    [schema.data],
+  );
+  const actionErrorDetail = failureReason(cancel.error ?? replay.error);
+  // 재실행 거절은 시작 거절이다 — 편집기 툴바와 같은 문장 규칙(`backtestStartRejectionMessage`)을 쓴다.
+  const replayRejection =
+    replay.error === null
+      ? null
+      : backtestStartRejectionMessage(
+          replay.error instanceof ApiRequestError
+            ? (replay.error.code ?? null)
+            : null,
+          replay.error instanceof ApiRequestError &&
+            replay.error.field !== undefined
+            ? runFieldLabel(environmentFields, replay.error.field)
+            : null,
+          replay.error instanceof ApiRequestError ? replay.error.values : {},
+        );
 
   return (
     <div
@@ -55,7 +75,15 @@ export const BacktestRunActions = ({
       role="group"
       aria-label={t("backtest.actions.title")}
     >
-      {active ? (
+      {active &&
+      cancel.data?.run_id === runId &&
+      cancel.data.kept_by_owners === true ? (
+        // 내 몫은 빠졌지만 실험이 이 실행을 쓰고 있어 계속 돈다(#382). 멈추려면 실험을 취소한다. 같은
+        // 화면이 다른 run 으로 넘어가면 앞 run 의 취소 응답은 쓰지 않는다(#407 리뷰 P2-1).
+        <p className="backtest-run-actions__kept" role="status">
+          {t("backtest.actions.keptByExperiment")}
+        </p>
+      ) : active ? (
         <Button
           size="small"
           tone="danger"
@@ -78,11 +106,17 @@ export const BacktestRunActions = ({
             : t("backtest.actions.rerun")}
         </Button>
       )}
-      {cancel.isError || replay.isError || requestFailed ? (
-        <span role="alert">
-          {t("backtest.actions.error")}
-          {actionErrorDetail === null ? null : `: ${actionErrorDetail}`}
-        </span>
+      {replayRejection !== null && cancel.error === null ? (
+        <FailureNotice
+          title={t("backtest.actions.rerunFailed")}
+          message={replayRejection}
+          reason={actionErrorDetail}
+        />
+      ) : cancel.isError || replay.isError || requestFailed ? (
+        <FailureNotice
+          message={t("backtest.actions.error")}
+          reason={actionErrorDetail}
+        />
       ) : null}
     </div>
   );

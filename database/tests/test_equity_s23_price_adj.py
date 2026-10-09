@@ -757,25 +757,15 @@ def test_dataset_profile_이_이_표를_훑는다() -> None:
     assert "price_adj_daily" in rules_s19.SOURCE_TABLES
 
 
-def test_커널_어댑터는_조정가_표를_읽지_않는다() -> None:
-    """커널은 원주가 + 기업행위 이벤트로 수량을 조정한다 — 조정가를 주면 이중 계산이다."""
-    kernel = (Path(__file__).parents[2] / "backend" / "src" / "backtest_engine" / "adapters"
-              / "equity_duckdb.py")
-    assert kernel.exists(), kernel
-    assert "price_adj_daily" not in kernel.read_text(encoding="utf-8")
-
-
-def test_두_백테스트_어댑터는_가격_전용_계수를_읽지_않는다() -> None:
-    """⑤ 는 가격 축만 고친다 — 보유 수량을 조정하는 두 어댑터(워크벤치·커널)가 `price_only_factor`
-    를 읽으면 같은 사건이 수량으로 한 번 더 반영된다(기각한 안 ①)."""
-    backend = Path(__file__).parents[2] / "backend" / "src"
-    adapters = (backend / "backtest_engine" / "adapters" / "equity_duckdb.py",
-                backend / "strategy_workbench" / "adapters" / "outbound" / "equity_duckdb"
-                / "_adapter.py")
-    for src in adapters:
-        assert src.exists(), src
-        text = src.read_text(encoding="utf-8")
-        assert "price_only_factor" not in text and "price_resolution" not in text, src
+def test_백테스트_어댑터는_가격_전용_계수를_읽지_않는다() -> None:
+    """⑤ 는 가격 축만 고친다 — 보유 수량을 조정하는 백테스트 어댑터가 `price_only_factor` 를 읽으면
+    같은 사건이 수량으로 한 번 더 반영된다(기각한 안 ①). 커널 어댑터는 #372 에서 걷혀 워크벤치
+    어댑터 하나만 남았다(Q-4 병합)."""
+    src = (Path(__file__).parents[2] / "backend" / "src" / "strategy_workbench" / "adapters"
+           / "outbound" / "equity_duckdb" / "_adapter.py")
+    assert src.exists(), src
+    text = src.read_text(encoding="utf-8")
+    assert "price_only_factor" not in text and "price_resolution" not in text, src
 
 
 # ── 검수 R2-01·R2-04: 저녁 잠정 T 행이 있는 price_daily 위에서 S23 이 서고 표식을 싣는다 ──

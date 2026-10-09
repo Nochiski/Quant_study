@@ -1,10 +1,11 @@
 import { useState } from "react";
 
 import { t } from "../../../shared/config";
-import { Badge } from "../../../shared/ui";
+import { Badge, FailureNotice } from "../../../shared/ui";
 import {
   factorGraphPointer,
   factorIndexAtPointer,
+  compiledNodeOrigin,
   nodePointerById,
   pointerSelectsNode,
   type ExecutionPlansState,
@@ -29,6 +30,13 @@ const PlanState = ({
 }: {
   state: Exclude<ExecutionPlansState, { status: "ready" }>;
 }) => {
+  if (state.status === "error")
+    return (
+      <div className="execution-plan__state">
+        <strong>{t("plan.title")}</strong>
+        <FailureNotice message={t("plan.error")} reason={state.reason} />
+      </div>
+    );
   const message =
     state.status === "blocked"
       ? blockedMessage(state.reason)
@@ -36,9 +44,7 @@ const PlanState = ({
         ? t("plan.incompatible")
             .replace("{expected}", state.expected)
             .replace("{actual}", state.actual ?? "—")
-        : state.status === "error"
-          ? `${t("plan.error")} (${state.message})`
-          : t(`plan.${state.status}`);
+        : t(`plan.${state.status}`);
   return (
     <div className="execution-plan__state" role="status">
       <strong>{t("plan.title")}</strong>
@@ -81,6 +87,12 @@ export const ExecutionPlanPanel = ({
   const plan = factor.explanation.plan;
   const planSteps = new Map(
     (plan?.steps ?? []).map((step) => [step.node_id, step]),
+  );
+  // compile 이 붙인 상수는 문서에 대응하는 줄이 없어 보이지 않는다(BACKLOG-014).
+  const shown = (nodeId: string): boolean =>
+    compiledNodeOrigin(factor, nodeId) !== "support";
+  const visibleSteps = (plan?.steps ?? []).filter((step) =>
+    shown(step.node_id),
   );
 
   return (
@@ -170,9 +182,17 @@ export const ExecutionPlanPanel = ({
                 </tr>
               </thead>
               <tbody>
-                {plan.steps.map((step) => {
+                {visibleSteps.map((step) => {
                   const pointer = nodePointerById(factor, step.node_id);
+                  const booleanScore =
+                    compiledNodeOrigin(factor, step.node_id) ===
+                    "boolean-score";
+                  const name = booleanScore
+                    ? t("plan.node.booleanScore")
+                    : step.node_id;
+                  // 붙인 출력은 원래 출력 줄을 가리키므로 선택은 원래 출력 행이 받는다(리뷰 #232).
                   const selected =
+                    !booleanScore &&
                     pointer !== null &&
                     pointerSelectsNode(selectedPointer, pointer);
                   return (
@@ -184,14 +204,25 @@ export const ExecutionPlanPanel = ({
                           className="execution-plan__node"
                           disabled={pointer === null}
                           aria-label={t("plan.openNode")
-                            .replace("{node}", step.node_id)
+                            .replace("{node}", name)
                             .replace("{pointer}", pointer ?? "—")}
                           onClick={() =>
                             pointer !== null && onSelectPointer(pointer)
                           }
                         >
-                          <code>{step.node_id}</code>
-                          <span>{step.operation}</span>
+                          {booleanScore ? (
+                            <>
+                              <strong>{name}</strong>
+                              <span>
+                                {t("plan.node.booleanScore.description")}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <code>{step.node_id}</code>
+                              <span>{step.operation}</span>
+                            </>
+                          )}
                         </button>
                       </td>
                       <td>
@@ -199,7 +230,7 @@ export const ExecutionPlanPanel = ({
                           <span className="execution-plan__muted">—</span>
                         ) : (
                           <ul className="execution-plan__inputs">
-                            {step.input_node_ids.map((nodeId) => {
+                            {step.input_node_ids.filter(shown).map((nodeId) => {
                               const inputStep = planSteps.get(nodeId);
                               const inputPointer = nodePointerById(
                                 factor,

@@ -1,5 +1,11 @@
 # 로드맵 6단계: Rust 코어 포팅 설계 (2026-08-29)
 
+> **현행 안내(2026-09-28)**: 이 문서는 세션 루프를 Python에 남기고 "Rust 세션 루프 이전"을 측정
+> 결과로 닫았지만, 이 결정은 이후 뒤집혔다. 세션 루프는 #98(2026-09-18 종료)에서 Rust로 옮겨졌고(`core="rust"` 경로, 워크벤치 실행 요청의 기본
+> core), Python 코어는 parity 검증용 reference로 남았다. 현재 구조와 측정은
+> [Persistent Rust Engine 구현 계획](./2026-09-01-persistent-rust-engine-implementation.md)이 정본이다.
+> 아래는 2026-08-29 설계 기록이다.
+
 설계 노트의 마지막 단계. "성능·타입 안정성이 필요한 이벤트 루프, 체결, 회계는 Python 기준
 구현과 골든/Zipline 대조를 먼저 고정한 뒤 Rust + PyO3로 옮긴다"를 실행한다.
 `feat/basket-short` 위에 스택된다.

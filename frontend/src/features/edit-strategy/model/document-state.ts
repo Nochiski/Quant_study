@@ -342,6 +342,25 @@ export const canValidateDocument = (state: DocumentState): boolean =>
   state.parsedVersion === state.sourceVersion &&
   state.parse?.status === "ok";
 
+/**
+ * 이 문서의 첫 parse 가 아직 오지 않았다(문서를 연 직후 parse 디바운스 구간, `load` 가 parse 를 비운다).
+ * 이 구간에 Form·캔버스를 빈 parse 로 그리면 적힌 칸이 미작성·기본값으로 보이고, 그 사이 확정은 insert-key 가
+ * 되어 보류돼 버려진다 — 그래서 두 화면은 투영을 그리지 않는다(#413). `isDocumentSettled` 와 같은 owner 다.
+ */
+export const isFirstParsePending = (state: DocumentState): boolean =>
+  state.parse === null;
+
+/**
+ * 지금 텍스트의 검증이 끝났다: compile 이 이 버전을 따라잡았거나, 구문 오류라 compile 이 시작되지
+ * 않는다. 문서 상태 배지가 `data-settled` 로 드러내 e2e 가 중간 상태를 단언하지 않게 한다(#240).
+ */
+export const isDocumentSettled = (state: DocumentState): boolean =>
+  !state.composing &&
+  (state.compiledVersion === state.sourceVersion ||
+    (state.parsedVersion === state.sourceVersion &&
+      state.parse !== null &&
+      state.parse.status !== "ok"));
+
 /** A compiled spec that no longer matches the text: view-only, shown with an explicit badge. */
 export const isSpecStale = (state: DocumentState): boolean =>
   state.compiled?.spec != null && state.compiledVersion !== state.sourceVersion;

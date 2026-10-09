@@ -1,23 +1,26 @@
-"""P2-01: 실행 설정은 `RunEnvironment` 하나가 소유한다.
+"""P2-01·P2-02·P2-03: 실행 설정은 `RunEnvironment` 하나가 소유한다.
 
-유스케이스 서비스가 `spec.data.*` · `spec.execution.*` 를 직접 읽으면 호출자가 넘긴 명시
-`environment` 가 조용히 무시된다 — 매니페스트에는 명시 값이, 엔진에는 문서 값이 들어가는
-silent divergence 다. 소스 AST 로 세 서비스의 직접 참조가 0건인지 고정한다.
-`domain/backtest` 의 브리지(`_bridge.py`)는 1.1 문서를 읽는 것이 일이므로 대상이 아니다.
-
-P2-02 부터 결측 정책도 같은 규칙을 받는다: `graph.missing_policy` 는 1.1 호환 입력으로만 남고
-평가·플랜은 실행 설정의 `missing` 을 인자로 받는다. 브리지 밖에서 그 필드를 읽으면 실행 설정을
-바꿔도 결측 처리가 따라오지 않는다.
+1.2 는 `data`·`execution`·`graph.missing_policy` 를 전략 문서에서 지웠다(spec D3 S1~S3). 모델에서
+사라졌으므로 이 검사는 이제 "옛 경로가 되살아나지 않는다"를 지키는 회귀 그물이다 — 어딘가에
+호환 shim 을 다시 얹으면 명시 `environment` 가 조용히 무시되는 P2-01 P0 이 그대로 돌아온다.
+`src` 전체에서 `<무엇>.data.<필드>`·`<무엇>.execution.<필드>` 읽기와 `missing_policy` 속성 읽기가
+0건인지 소스 AST 로 고정한다.
 """
 
 from __future__ import annotations
 
 import ast
+from dataclasses import fields
 from pathlib import Path
+
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
+from strategy_workbench.domain.backtest.facade.trials import TRIAL_KEY_ROLES
 
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "strategy_workbench"
 
-# 실행 설정을 `environment` 로만 읽어야 하는 유스케이스 서비스.
+# 실행 설정을 `environment` 로만 읽어야 하는 유스케이스 서비스. 1.2 에서는 `src` 전체가 대상이지만
+# 진단 메시지가 읽히도록 유스케이스 서비스를 먼저 이름으로 건다.
 ENVIRONMENT_CONSUMERS = (
     "application/backtest_run/_service.py",
     "application/portfolio_design/_service.py",
@@ -46,6 +49,15 @@ def test_use_case_services_read_the_run_environment_only() -> None:
     assert offenders == [], (
         "유스케이스 서비스가 실행 설정을 전략 문서에서 직접 읽는다 — "
         f"reads={offenders} (RunEnvironment 를 거쳐야 한다)"
+    )
+
+
+def test_no_module_reads_the_retired_document_sections() -> None:
+    """1.2 에서 `spec.data.*`·`spec.execution.*` 는 어디에도 없다(P2-03)."""
+    offenders = [item for path in sorted(SRC_ROOT.glob("**/*.py")) for item in _legacy_reads(path)]
+    assert offenders == [], (
+        "은퇴한 전략 문서 섹션을 읽는 코드가 있다 — "
+        f"reads={offenders} (실행 설정은 RunEnvironment 가 소유한다)"
     )
 
 
@@ -87,28 +99,61 @@ def test_every_preview_request_carries_the_resolved_environment() -> None:
     )
 
 
-# 결측 정책을 `graph.missing_policy` 에서 읽어도 되는 유일한 곳(1.1 → 실행 설정 브리지).
-MISSING_POLICY_READERS = ("domain/backtest/_bridge.py",)
+def _graph_missing_policy_reads(path: Path) -> list[str]:
+    """`<무엇>.graph.missing_policy` 모양만 센다.
 
-
-def _missing_policy_reads(path: Path) -> list[str]:
+    이름만 보고 `missing_policy` 를 전부 잡으면 `FactorExecutionPlan.missing_policy`(실행 설정에서
+    인자로 받아 `plan_hash` 에 남는 정당한 필드)까지 걸린다 — 가드가 옳은 코드를 막으면 다음
+    사람이 가드를 지운다(P2-02 2차 리뷰 P3).
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return [
         f"{path.relative_to(SRC_ROOT).as_posix()}:{node.lineno} {ast.unparse(node)}"
         for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute) and node.attr == "missing_policy"
+        if isinstance(node, ast.Attribute)
+        and node.attr == "missing_policy"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "graph"
     ]
 
 
-def test_only_the_legacy_bridge_reads_the_graph_missing_policy() -> None:
-    allowed = {SRC_ROOT / name for name in MISSING_POLICY_READERS}
+def test_nothing_reads_a_graph_missing_policy_attribute() -> None:
+    """P2-03: 필드가 `FactorGraph` 에서 사라졌으므로 읽는 곳도 0 건이다.
+
+    필드 자체가 없다는 사실은 `tests/domain/test_factor_missing_policy.py` 가 고정한다. 이
+    가드는 호환 shim 이 되살아나는 것을 막는 그물이다.
+    """
     offenders = [
         item
         for path in sorted(SRC_ROOT.glob("**/*.py"))
-        if path not in allowed
-        for item in _missing_policy_reads(path)
+        for item in _graph_missing_policy_reads(path)
     ]
     assert offenders == [], (
-        "`graph.missing_policy` 를 브리지 밖에서 읽는다 — "
+        "`graph.missing_policy` 속성을 읽는 코드가 있다 — "
         f"reads={offenders} (실행 설정의 missing 을 인자로 받아야 한다)"
     )
+
+
+def test_every_run_environment_field_is_classified_for_the_trial_key() -> None:
+    """검증 랩 spec D2: 칸을 더하는 PR 은 같은 PR 에서 시도 키 분류표(`_trial_key.py`)에 넣는다."""
+    assert set(TRIAL_KEY_ROLES) == {item.name for item in fields(RunEnvironment)}
+
+
+# 시도 키는 실행 요청에서 전략·실행 설정(과 해소된 파라미터 값)만 읽고 나머지 칸은 키 밖이다.
+# 요청 칸이 늘면 시도 키에 드는지 `_trial_key.py` 에서 정하고 이 목록을 고친다.
+_RUN_SPEC_FIELDS = {
+    "strategy",
+    "strategy_source",
+    "environment",
+    "core",
+    "initial_cash",
+    "benchmark_security_id",
+    "annualization_days",
+    "metric_windows",
+    "parameter_values",
+    "lineage_strategy_id",
+}
+
+
+def test_a_new_run_request_field_is_placed_inside_or_outside_the_trial_key() -> None:
+    assert {item.name for item in fields(BacktestRunSpec)} == _RUN_SPEC_FIELDS

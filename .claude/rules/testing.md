@@ -1,9 +1,10 @@
 ---
 paths:
-  - "tests/**"
-  - "scripts/**"
   - "backend/tests/**"
   - "backend/scripts/**"
+  - "database/tests/**"
+  - "database/scripts/**"
+  - "tools/tests/**"
 ---
 
 # Testing Rules
@@ -26,6 +27,20 @@ paths:
 - 스키마·검증 로직 자체에 대한 테스트 (인라인 픽스처/임시 파일 사용)
 - 테스트 안에서 **직접 만든** 임시 데이터프레임/파일을 입력으로 주는 테스트
 - 알려진 정답이 있는 계산의 회귀 테스트 (손으로 계산 가능한 소형 시계열 픽스처)
+
+## 런타임 상태 경로 격리 (backend)
+
+테스트가 개발자 로컬의 런타임 상태(`backend/.local/`의 strategy·assistant DB, 백테스트 산출물,
+OS 사용자 설정 디렉터리의 공급자 비밀)를 열면 실제 대화 이력 DB가 업그레이드되어 브랜치를 바꾼
+뒤 옛 코드의 테스트가 깨진다(#211, #215).
+
+- `backend/tests/conftest.py`의 autouse fixture `isolate_runtime_state_paths`(와 session 범위
+  짝)가 기본 경로를 테스트마다 tmp로 옮기고 런타임 설정 환경 변수를 지운다. 경로가 필요한
+  테스트는 이 fixture 값을 받아 쓴다.
+- `backend/tests/runtime_path_guard.py`의 감사 훅이 이 프로세스가 감시 경로를 열면 그 테스트를
+  실패시킨다. 하위 프로세스와 네이티브 라이브러리가 C 코드에서 직접 여는 파일(in-memory 연결의
+  SQLite `ATTACH`, `duckdb.connect(path)`)은 보지 못한다. 그런 경로를 쓰는 테스트는 가드에 기대지
+  말고 경로를 직접 격리한다.
 
 ## 산출물 검증이 필요하다면
 

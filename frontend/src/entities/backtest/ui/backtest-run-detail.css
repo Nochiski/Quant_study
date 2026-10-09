@@ -54,7 +54,7 @@
 
 .run-detail .metric-highlights {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: var(--space-2);
 }
 
@@ -271,6 +271,16 @@
   margin-top: var(--space-4);
 }
 
+.run-detail .manifest-records {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.run-detail .manifest-environment h5 {
+  margin: 0 0 var(--space-2);
+}
+
 .run-detail .manifest-grid dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -315,6 +325,12 @@
 
 .run-detail .manifest-warnings strong {
   color: var(--status-warn);
+}
+
+.run-detail .manifest-warnings__code {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1100px) {

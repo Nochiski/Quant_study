@@ -5,6 +5,7 @@
  * `x-catalog` / `x-reference`. No allowed-value list lives in the frontend, and nothing here
  * marks errors: required/type/unknown-key diagnostics are the backend's (P3-04).
  */
+import { fieldFrequencyCopy } from "../../../entities/dataset";
 import type {
   DatasetFieldProfile,
   FactorCatalog,
@@ -27,12 +28,12 @@ import type {
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import {
-  formatContractValue,
   isSchemaContractCompatible,
   projectContractField,
 } from "./contract-inspector";
 import { describeApplicabilityConditions } from "./field-applicability";
 import {
+  formatContractValue,
   referenceCandidates,
   schemaFacts,
   propertyOptions,
@@ -122,12 +123,8 @@ const catalogLabel = (catalog: string): string => {
   switch (catalog) {
     case "equity-field":
       return t("assist.catalog.equityField");
-    case "factor":
-      return t("assist.catalog.factor");
     case "universe":
       return t("assist.catalog.universe");
-    case "subgraph":
-      return t("assist.catalog.subgraph");
     default:
       return catalog;
   }
@@ -139,6 +136,8 @@ const referenceLabel = (reference: string): string => {
       return t("assist.reference.node");
     case "parameter":
       return t("assist.reference.parameter");
+    case "factor":
+      return t("assist.reference.factor");
     default:
       return reference;
   }
@@ -157,19 +156,11 @@ const identifierOptions = (
       return catalogs.equityFields.map((field) => ({
         label: field.field_id,
         detail: field.label,
-        info: `${field.description} (${field.unit}, ${field.frequency})`,
+        info: `${field.description} (${field.unit}, ${fieldFrequencyCopy(field.frequency)})`,
         type: "value",
       }));
     }
-    if (catalog === "factor") {
-      return catalogs.factors.map((factor) => ({
-        label: factor.factor_id,
-        detail: factor.label,
-        info: factor.description,
-        type: "value",
-      }));
-    }
-    return []; // universe / subgraph: no catalog endpoint yet, and never a guessed list
+    return []; // universe: 전략 문서에 없는 카탈로그(실행 설정), 목록을 지어내지 않는다
   }
   const reference = schemaFacts(resolved.node).reference;
   if (typeof reference === "string") {

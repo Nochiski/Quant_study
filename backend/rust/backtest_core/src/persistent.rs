@@ -9,7 +9,7 @@ use crate::persistent_router::{
 use crate::portfolio::Portfolio;
 use crate::quote::parse_decimal_ratio;
 use crate::records::{RecordIndexWire, RecordStore};
-use crate::session::{self, BarTuple, EntryTuple, Op};
+use crate::session::{self, sell_tax, BarTuple, EntryTuple, Op};
 use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
@@ -291,7 +291,7 @@ impl PersistentEngine {
             .any(|order_id| self.order_index(order_id).is_some())
     }
 
-    fn apply_market_ops(&mut self, ops: &mut [Op]) -> PyResult<()> {
+    fn apply_market_ops(&mut self, ops: &mut [Op], sell_tax_rate: f64) -> PyResult<()> {
         for op in ops {
             match op.0.as_str() {
                 "fill" => {
@@ -299,6 +299,11 @@ impl PersistentEngine {
                     let key = self.orders[index].key.clone();
                     let side = self.orders[index].side.clone();
                     self.portfolio.apply(&key, &side, op.2, op.3, op.5)?;
+                    // 매도 거래세 청구. 비용 레코드는 FILL 레코드 바로 뒤에 드라이버가 남긴다.
+                    let tax = sell_tax(&side, op.2, op.3, sell_tax_rate);
+                    if tax > 0.0 {
+                        self.portfolio.charge(tax)?;
+                    }
                     self.settle_internal(&op.1, op.2)?;
                     op.6 = Self::next_id(&mut self.fill_seq, 'F');
                 }
@@ -338,6 +343,7 @@ impl PersistentEngine {
         fee_rate: f64,
         default_participation: Option<&str>,
         slippage: &(String, f64, f64),
+        sell_tax_rate: f64,
     ) -> PyResult<Vec<Op>> {
         let (_, positions, equity, _) = self.portfolio.snapshot()?;
         let power_positions = positions
@@ -361,6 +367,7 @@ impl PersistentEngine {
             fee_rate,
             default_participation,
             slippage,
+            sell_tax_rate,
         )
     }
 
@@ -409,6 +416,7 @@ impl PersistentEngine {
         fee_rate: f64,
         default_participation: Option<&str>,
         slippage: &(String, f64, f64),
+        sell_tax_rate: f64,
     ) -> PyResult<Vec<Op>> {
         self.feed
             .as_mut()
@@ -421,9 +429,16 @@ impl PersistentEngine {
                 .as_ref()
                 .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
             let (ts, bars) = feed.session_market(session_index);
-            self.plan_market_ops(ts, &bars, fee_rate, default_participation, slippage)?
+            self.plan_market_ops(
+                ts,
+                &bars,
+                fee_rate,
+                default_participation,
+                slippage,
+                sell_tax_rate,
+            )?
         };
-        self.apply_market_ops(&mut ops)?;
+        self.apply_market_ops(&mut ops, sell_tax_rate)?;
         Ok(ops)
     }
 
@@ -586,7 +601,10 @@ impl PersistentEngine {
 
     /// RunConfig와 requirements에서 온 실행 설정. `drive()` 전에 한 번 호출한다.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (fee_rate, default_participation, slippage, schedule, short_borrow_bps_annual, margin_interest_bps_annual, annualization_days, warmup_sessions, notify_fill, notify_order_update, notify_corporate_action))]
+    ///
+    /// `sell_tax_rates`는 세션 index마다의 매도 거래세율이다. 비었으면 세금이 없고, 있으면 적재한 피드의
+    /// 세션 수와 같아야 한다 — 날짜 → 세율 조회는 Python `RunConfig.sell_tax_rate`가 한다.
+    #[pyo3(signature = (fee_rate, default_participation, slippage, schedule, short_borrow_bps_annual, margin_interest_bps_annual, annualization_days, warmup_sessions, notify_fill, notify_order_update, notify_corporate_action, sell_tax_rates=Vec::new()))]
     fn configure_run(
         &mut self,
         fee_rate: f64,
@@ -600,10 +618,26 @@ impl PersistentEngine {
         notify_fill: bool,
         notify_order_update: bool,
         notify_corporate_action: bool,
+        sell_tax_rates: Vec<f64>,
     ) -> PyResult<()> {
         if !matches!(schedule.as_str(), "every_session" | "month_end") {
             return Err(PyValueError::new_err(format!(
                 "unsupported persistent schedule — schedule={schedule:?}"
+            )));
+        }
+        let sessions = self.feed.as_ref().map_or(0, |feed| feed.session_len());
+        if !sell_tax_rates.is_empty() && sell_tax_rates.len() != sessions {
+            return Err(PyValueError::new_err(format!(
+                "sell tax rates must match the loaded feed sessions — rates={} sessions={sessions}",
+                sell_tax_rates.len()
+            )));
+        }
+        if let Some(rate) = sell_tax_rates
+            .iter()
+            .find(|rate| !(rate.is_finite() && **rate >= 0.0))
+        {
+            return Err(PyValueError::new_err(format!(
+                "sell tax rate must be finite and >= 0 — rate={rate}"
             )));
         }
         self.run = Some(Arc::new(RunSettings {
@@ -618,6 +652,7 @@ impl PersistentEngine {
             notify_fill,
             notify_order_update,
             notify_corporate_action,
+            sell_tax_rates,
         }));
         Ok(())
     }
@@ -698,10 +733,8 @@ impl PersistentEngine {
 
     /// kind 하나의 payload를 `limit`개까지 넘기면서 그 자리를 해제한다. 빈 목록이면 끝이다.
     ///
-    /// 호출 순서 계약: Python은 `finish()` 직후 `equity_series`/`traded_notional`로 metrics를
-    /// 먼저 계산하고, 그 뒤 결과 조회에서만 kind를 넘겨받는다. 넘긴 payload를
-    /// `record_payloads`·`equity_series`·`traded_notional`로 다시 읽으면
-    /// 오류다. 모든 레코드를 넘기면 인덱스까지 돌려주므로 `record_batch`도 오류가 된다
+    /// 넘긴 payload를 `record_payloads`·`result_tables`로 다시 읽으면 오류다. 모든 레코드를
+    /// 넘기면 인덱스까지 돌려주므로 `record_batch`도 오류가 된다
     /// (인덱스는 `finish()`가 이미 Python에 넘겼다).
     fn drain_payloads(
         &mut self,
@@ -722,20 +755,15 @@ impl PersistentEngine {
         self.records.result_tables(py)
     }
 
-    fn equity_series(&self) -> PyResult<Vec<f64>> {
-        self.records.equity_series()
-    }
-
-    fn traded_notional(&self) -> PyResult<f64> {
-        self.records.traded_notional()
-    }
-
     #[doc(hidden)]
     fn _debug_force_panic_on_market(&mut self) {
         self.debug_panic_on_market = true;
     }
 
+    /// `liquidity_volumes`는 행별 유동성 캡 기준 거래량이다. 없으면 세션 거래량을 쓴다.
+    /// `impact_scales`는 행별 √ 충격 척도다. 없으면 0이다.
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (keys, symbols, sessions, offsets, instrument_ids, opens, highs, lows, closes, volumes, liquidity_volumes=None, impact_scales=None))]
     pub(crate) fn load_feed(
         &mut self,
         keys: Vec<String>,
@@ -748,19 +776,25 @@ impl PersistentEngine {
         lows: Vec<f64>,
         closes: Vec<f64>,
         volumes: Vec<i64>,
+        liquidity_volumes: Option<Vec<i64>>,
+        impact_scales: Option<Vec<f64>>,
     ) -> PyResult<()> {
-        self.feed = Some(PersistentFeed::new(
-            keys,
-            symbols,
-            sessions,
-            offsets,
-            instrument_ids,
-            opens,
-            highs,
-            lows,
-            closes,
-            volumes,
-        )?);
+        self.feed = Some(
+            PersistentFeed::new(
+                keys,
+                symbols,
+                sessions,
+                offsets,
+                instrument_ids,
+                opens,
+                highs,
+                lows,
+                closes,
+                volumes,
+            )?
+            .with_liquidity_volumes(liquidity_volumes)?
+            .with_impact_scales(impact_scales)?,
+        );
         Ok(())
     }
 
@@ -884,7 +918,7 @@ mod tests {
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
         runtime.orders.push(market_order("O-000001"));
-        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000))]);
+        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000, 1_000, 0.0))]);
 
         let mut ops = runtime
             .plan_market_ops(
@@ -893,9 +927,10 @@ mod tests {
                 0.0,
                 None,
                 &("none".into(), 0.0, 0.0),
+                0.0,
             )
             .unwrap();
-        runtime.apply_market_ops(&mut ops).unwrap();
+        runtime.apply_market_ops(&mut ops, 0.0).unwrap();
 
         assert!(runtime.orders.is_empty());
         assert_eq!(ops[0].0, "fill");

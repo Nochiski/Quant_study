@@ -25,6 +25,11 @@ jobs:
       - name: Equity layer tests
         working-directory: .
         run: uv run --project backend pytest database/tests -q
+      # 대응표(EQUITY_FIELD_MAP §2)가 레지스트리(backend/FACTORS.md) 요구 필드를 전부 덮는지 본다.
+      # #218 이 레지스트리를 바꾸고 대응표를 두고 가 이 검사가 CI 밖에서 조용히 rc=1 이었다(문서 감사 결정 5).
+      - name: Equity field map covers the factor registry
+        working-directory: .
+        run: uv run --project backend python database/scripts/check_field_map.py
       - name: Verify root server contract
         working-directory: .
         run: |
@@ -177,5 +182,22 @@ jobs:
           path: |
             frontend/playwright-report
             frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      # 전체 trace 묶음은 커질 수 있어 렌더 검토에 필요한 이미지·문맥도 별도 보관한다.
+      - name: Upload browser visual review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-review-${{ runner.os }}
+          path: |
+            frontend/test-results/**/*-actual.png
+            frontend/test-results/**/*-diff.png
+            frontend/test-results/**/test-failed-*.png
+            frontend/test-results/**/attachments/*.json
+            frontend/test-results/**/attachments/*.png
+            frontend/test-results/**/graph-selected.png
+            frontend/test-results/**/recipe-*.png
+            frontend/test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 7

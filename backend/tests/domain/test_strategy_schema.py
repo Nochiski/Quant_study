@@ -8,8 +8,8 @@ Schema itself (editor ADR D2).
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import fields as dataclass_fields
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +36,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_docum
 
 
 def _template_document() -> dict[str, Any]:
-    spec = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
+    spec = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
     return json.loads(json.dumps(canonical_strategy_payload(spec), default=str))
 
 
@@ -185,14 +183,13 @@ def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
 
 
 def test_minimal_document_passes_the_runtime_schema() -> None:
-    """schema 1.1 S3: hydrate가 받아 주는 생략형 문서를 runtime schema도 통과시킨다."""
+    """schema 1.2 S3: hydrate가 받아 주는 생략형 문서를 runtime schema도 통과시킨다."""
     schema = strategy_document_schema()
     minimal = yaml.safe_load(
         (FIXTURES / "quality_momentum.minimal.yaml").read_text(encoding="utf-8")
     )
     for key in ("description", "eligibility", "parameters"):
         assert key not in minimal
-    assert "market" not in minimal["data"]
     _check(schema, schema, minimal, "")
     without_label = json.loads(json.dumps(minimal))
     del without_label["factors"][0]["label"]
@@ -246,25 +243,21 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
     assert list(schema["properties"]) == ["schema_version", *model_fields]
     assert schema["properties"]["schema_version"] == {
         "type": "string",
-        "const": "1.1",
+        "const": "1.2",
         "x-description-key": "strategy.section.schema_version",
     }
     assert schema["required"][0] == "schema_version"
     assert schema["additionalProperties"] is False
-    data = schema["$defs"]["DataStep"]
-    assert data["properties"]["start"] == {
+    # 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다(spec D3).
+    assert schema["required"] == ["schema_version", "title"]
+    portfolio = schema["$defs"]["PortfolioStep"]
+    assert portfolio["properties"]["side"] == {
         "type": "string",
-        "format": "date",
-        "pattern": r"^\d{4}-\d{2}-\d{2}$",
-        "x-description-key": "strategy.field.data_step.start",
+        "enum": ["long_only", "long_short"],
+        "default": "long_only",
+        "x-description-key": "strategy.field.portfolio_step.side",
     }
-    assert data["properties"]["market"] == {
-        "type": "string",
-        "enum": ["KRX"],
-        "default": "KRX",
-        "x-description-key": "strategy.field.data_step.market",
-    }
-    assert data["required"] == ["start", "end", "universe_id"]
+    assert portfolio["required"] == []
 
 
 def test_schema_hash_is_stable_and_order_independent() -> None:
@@ -277,7 +270,7 @@ def test_schema_hash_is_stable_and_order_independent() -> None:
 
 def test_field_contracts_cover_every_scalar_path_with_catalog_metadata() -> None:
     contracts = {c.pointer: c for c in strategy_field_contracts()}
-    assert contracts["/schema_version"].const == "1.1"
+    assert contracts["/schema_version"].const == "1.2"
     weight = contracts["/factors/*/weight"]
     assert weight.type == "number" and not weight.required and weight.has_default
     name_weight = contracts["/risk/max_name_weight"]
@@ -295,6 +288,12 @@ def test_field_contracts_cover_every_scalar_path_with_catalog_metadata() -> None
     assert liquidity.nullable and liquidity.default is None and liquidity.has_default
     node_kind = contracts["/factors/*/graph/nodes/*/kind"]
     assert node_kind.type == "string"  # one row per union branch shares the pointer template
+    # 결합 전 정규화는 enum 이라 `ScalarConstraint`(수치 전용) 행이 없다. 그래도 contract 행은
+    # 모델에서 파생되므로 편집 화면이 선택지와 기본값을 여기서 읽는다(P2-04).
+    normalization = contracts["/signal/normalization"]
+    assert normalization.type == "string" and not normalization.nullable
+    assert normalization.enum == ("none", "rank", "zscore")
+    assert normalization.default == "rank" and normalization.has_default
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         assert constraint.pointer in contracts, constraint.pointer
     assert all(isinstance(c, FieldContract) for c in contracts.values())
@@ -333,54 +332,44 @@ def test_contract_rows_are_unique_per_pointer_and_branch() -> None:
     assert {row.branch for row in rows if row.pointer == "/risk/max_name_weight"} == {None}
 
 
-def _identifier_markers(schema: dict[str, Any]) -> tuple[dict[str, str], dict[str, str], list[str]]:
-    """(x-catalog by path, x-reference by path, unmarked `*_id` string properties)."""
-    catalogs: dict[str, str] = {}
-    references: dict[str, str] = {}
-    unmarked: list[str] = []
-
-    def walk(node: dict[str, Any], path: str) -> None:
+def _properties(schema: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """루트와 `$defs` 의 property 를 (경로, property)로(`/name`, `#/$defs/Def/name`)."""
+    definitions = [(f"#/$defs/{name}", node) for name, node in schema["$defs"].items()]
+    containers = [("", schema), *definitions]
+    for path, node in containers:
         for name, prop in node.get("properties", {}).items():
-            here = f"{path}/{name}"
-            if "x-catalog" in prop:
-                catalogs[here] = prop["x-catalog"]
-            elif "x-reference" in prop:
-                references[here] = prop["x-reference"]
-            elif name.endswith("_id"):
-                unmarked.append(here)
+            yield f"{path}/{name}", prop
 
-    walk(schema, "")
-    for name, definition in schema["$defs"].items():
-        walk(definition, f"#/$defs/{name}")
-    return catalogs, references, unmarked
+
+def _properties_with(schema: dict[str, Any], marker: str) -> dict[str, Any]:
+    """`marker` 를 가진 property 의 경로 → 마커 값."""
+    return {path: prop[marker] for path, prop in _properties(schema) if marker in prop}
 
 
 def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> None:
     """P3-03: an editor completes ids from the marker, never from a hand-written list."""
     schema = strategy_document_schema()
-    catalogs, references, unmarked = _identifier_markers(schema)
+    catalogs = _properties_with(schema, "x-catalog")
+    references = _properties_with(schema, "x-reference")
     assert catalogs == {
-        "#/$defs/DataStep/universe_id": "universe",
         "#/$defs/EligibilityRule/field_id": "equity-field",
         "#/$defs/FieldNode/field_id": "equity-field",
         "#/$defs/GroupNode/group_field_id": "equity-field",
-        "#/$defs/SavedFactorNode/factor_id": "factor",
-        "#/$defs/SavedSubgraphNode/subgraph_id": "subgraph",
         "#/$defs/SignalStep/regime_field_id": "equity-field",
         "#/$defs/PortfolioStep/liquidity_field_id": "equity-field",
         "#/$defs/RiskStep/risk_field_id": "equity-field",
     }
-    assert set(references.values()) == {"node", "parameter"}
-    defines = {
-        f"{path}/{name}": prop["x-defines"]
-        for path, node in [
-            ("", schema),
-            *[(f"#/$defs/{name}", definition) for name, definition in schema["$defs"].items()],
-        ]
-        for name, prop in node.get("properties", {}).items()
-        if "x-defines" in prop
+    assert set(references.values()) == {"node", "parameter", "factor"}
+    # 문서 안 팩터를 가리키는 참조는 리스크 역가중 팩터 하나뿐이다(P2-06, spec D3 S6).
+    assert [path for path, namespace in references.items() if namespace == "factor"] == [
+        "#/$defs/RiskStep/risk_factor_id"
+    ]
+    defines = _properties_with(schema, "x-defines")
+    assert defines == {
+        "/parameters": "parameter",
+        "/factors": "factor",
+        "#/$defs/FactorGraph/nodes": "node",
     }
-    assert defines == {"/parameters": "parameter", "#/$defs/FactorGraph/nodes": "node"}
     assert set(defines.values()) == set(references.values())
     for path, namespace in defines.items():
         container, name = path.rsplit("/", 1)
@@ -394,6 +383,11 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
     assert references["#/$defs/ParameterNode/parameter_id"] == "parameter"
     # The only unmarked ids are definitions (a node's own id, a user-named factor, a parameter
     # declaration), never lookups into a catalog or into the document.
+    unmarked = [
+        path
+        for path, prop in _properties(schema)
+        if path.endswith("_id") and "x-catalog" not in prop and "x-reference" not in prop
+    ]
     definitions = {"#/$defs/FactorSignal/factor_id"} | {
         f"#/$defs/{name}Parameter/parameter_id" for name in ("Float", "Integer", "Choice")
     }
@@ -404,7 +398,8 @@ def test_field_contracts_carry_the_identifier_markers() -> None:
     contracts = {c.pointer: c for c in strategy_field_contracts()}
     assert contracts["/eligibility/rules/*/field_id"].catalog == "equity-field"
     assert contracts["/signal/regime_field_id"].catalog == "equity-field"  # nullable keeps it
-    assert contracts["/factors/*/graph/nodes/*/factor_id"].catalog == "factor"
+    assert contracts["/risk/risk_factor_id"].reference == "factor"
+    assert contracts["/risk/risk_factor_id"].catalog is None
     assert contracts["/factors/*/graph/nodes/*/input_node_id"].reference == "node"
     assert contracts["/factors/*/graph/nodes/*/node_id"].catalog is None
     assert contracts["/factors/*/graph/nodes/*/node_id"].reference is None
@@ -422,6 +417,69 @@ def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
         "direction": {"x-authoring-source": "preference"},
         "weight": {"x-authoring-default": 1.0},
         "graph": {"x-authoring-source": "default_graph"},
+    }
+
+
+def _stage_by_pointer(schema: dict[str, Any]) -> dict[str, str | None]:
+    """스칼라 계약 행 pointer → 그래프 표현 단계. 규칙은 정본 대장 "그래프 표현 투영" 행이 소유하고
+    프론트 파이프라인 투영이 같은 규칙을 쓴다."""
+
+    def objects(node: dict[str, Any]) -> list[dict[str, Any]]:
+        node = _resolve(schema, node)
+        options = node.get("anyOf", node.get("oneOf"))
+        return [node] if options is None else [o for option in options for o in objects(option)]
+
+    stages: dict[str, str | None] = {}
+    for row in strategy_field_contracts():
+        nodes, inherited, prop = [schema], None, {}
+        for segment in row.pointer.strip("/").split("/"):
+            expanded = [found for node in nodes for found in objects(node)]
+            if segment == "*":
+                nodes = [node["items"] for node in expanded if "items" in node]
+                continue
+            prop = next(n["properties"][segment] for n in expanded if segment in n["properties"])
+            inherited = prop.get("x-stage", inherited)
+            nodes = [prop]
+        stages[row.pointer] = prop.get("x-stage") or prop.get("x-applied-stage") or inherited
+    return stages
+
+
+def test_pipeline_stages_follow_where_each_field_is_applied() -> None:
+    """P4-01a: 그래프 1수준이 필드를 보이는 단계 `x-stage` 의 배정표(리드 결정 2026-09-30).
+
+    유동성 필터는 후보를 거를 때, 리스크 역가중 원천은 비중을 정할 때 읽혀 섹션과 다른 단계다.
+    제약 행이 적용 시점을 이미 말하는 필드(`minimum_liquidity`)는 다시 선언하지 않는다.
+    """
+    schema = strategy_document_schema()
+    declared = _properties_with(schema, "x-stage")
+    assert declared == {
+        "/eligibility": "eligibility",
+        "/factors": "signal",
+        "/signal": "signal",
+        "/portfolio": "portfolio",
+        "/risk": "risk",
+        "#/$defs/PortfolioStep/liquidity_field_id": "eligibility",
+        "#/$defs/RiskStep/risk_field_id": "portfolio",
+        "#/$defs/RiskStep/risk_factor_id": "portfolio",
+    }
+    # 한 property 에 두 마커가 함께 오지 않는다 — 함께 오면 같은 단계를 두 곳에 적었거나 모순이다.
+    assert not declared.keys() & _properties_with(schema, "x-applied-stage").keys()
+    stages = _stage_by_pointer(schema)
+    section = {
+        pointer: schema["properties"][pointer.split("/")[1]].get("x-stage") for pointer in stages
+    }
+    assert {pointer: stage for pointer, stage in stages.items() if stage != section[pointer]} == {
+        "/portfolio/liquidity_field_id": "eligibility",
+        "/portfolio/minimum_liquidity": "eligibility",
+        "/risk/risk_field_id": "portfolio",
+        "/risk/risk_factor_id": "portfolio",
+    }
+    # 문서 머리(버전·이름·설명)와 탐색 파라미터는 단계가 없다 — 배치는 P4-02·P4-04 가 정한다.
+    assert {pointer.split("/")[1] for pointer, stage in stages.items() if stage is None} == {
+        "schema_version",
+        "title",
+        "description",
+        "parameters",
     }
 
 
@@ -445,15 +503,19 @@ def test_runtime_schema_fixture_is_current() -> None:
     )
 
 
-def test_deprecated_compat_field_is_marked_in_schema_and_contract() -> None:
-    """P2-02: `graph.missing_policy` 는 1.1 문서에서 여전히 유효하지만 화면 어휘에서 뺄 수 있다."""
-    schema = strategy_document_schema()
-    prop = schema["$defs"]["FactorGraph"]["properties"]["missing_policy"]
-    contracts = {row.pointer: row for row in strategy_field_contracts()}
-    row = contracts["/factors/*/graph/missing_policy"]
+def test_execution_settings_left_the_authoring_schema() -> None:
+    """P2-03: 실행 설정 세 자리는 1.2 문서 스키마에서 사라졌다(spec D3 S1~S3).
 
-    assert prop["x-deprecated"] is True
-    assert prop["default"] == "drop"  # 여전히 유효한 입력이다
-    assert row.deprecated is True
-    # 표시가 이 한 필드에만 붙어 있는지: 다른 행이 딸려 오면 편집기가 멀쩡한 필드를 감춘다.
-    assert [r.pointer for r in strategy_field_contracts() if r.deprecated] == [row.pointer]
+    스키마에 남아 있으면 편집 화면이 값을 받아 주고, hydrate 는 `structure.unknown_key` 로
+    거부한다 — 화면과 서버가 서로 다른 문법을 말하게 된다.
+    """
+    schema = strategy_document_schema()
+    pointers = {row.pointer for row in strategy_field_contracts()}
+
+    assert "data" not in schema["properties"] and "execution" not in schema["properties"]
+    assert "DataStep" not in schema["$defs"] and "ExecutionStep" not in schema["$defs"]
+    assert "missing_policy" not in schema["$defs"]["FactorGraph"]["properties"]
+    assert not [pointer for pointer in pointers if pointer.startswith(("/data/", "/execution/"))]
+    # `x-deprecated` 표기는 P2-02 의 `graph.missing_policy` 하나만 쓰던 마커라 같이 은퇴했다
+    # (WORKFLOW P2-03 잔재 삭제 항목). 다시 필요해지면 그때 되살린다.
+    assert "x-deprecated" not in json.dumps(schema)

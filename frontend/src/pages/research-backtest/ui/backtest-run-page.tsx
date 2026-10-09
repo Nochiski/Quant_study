@@ -1,16 +1,20 @@
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 
 import {
+  BacktestResultFailure,
   BacktestRunDetail,
+  BacktestRunFailure,
+  runEnvironmentFields,
   useBacktestRequest,
+  useBacktestSummary,
   useBacktestResult,
   useBacktestStatus,
-  type BacktestRunState,
+  useRunEnvironmentSchema,
 } from "../../../entities/backtest";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import { BacktestRunActions } from "../../../features/run-backtest";
-import { t, tOptional } from "../../../shared/config";
-import { useNavigate, useParams } from "../../../shared/lib/router";
+import { t } from "../../../shared/config";
+import { Link, useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import "./backtest-run-page.css";
 
@@ -22,46 +26,6 @@ const TONE = {
   failed: "error",
   completed: "ok",
 } as const;
-
-type BacktestRunErrorProps = {
-  status: BacktestRunState["status"];
-  error: string;
-  errorCode: NonNullable<BacktestRunState["error_code"]> | null;
-};
-
-/**
- * 실패 사유 표시. "failed" 배지만으로는 원인을 알 수 없다(이슈 #154). `error_code` 번역이 있으면
- * 그 복구 문구를 본문으로 두고 서버 사유는 접힌 진단 상세로 내린다 — 원문 detail 을 그대로
- * 노출하지 않는다는 `.claude/rules/frontend-api-state.md` 를 run 쪽에서도 지킨다(이슈 #158).
- * 번역이 없을 때만 서버 사유를 본문으로 쓴다. 취소와 겹친 실패는 "실행 오류" 대신 별도 라벨.
- */
-const BacktestRunError = ({
-  status,
-  error,
-  errorCode,
-}: BacktestRunErrorProps) => {
-  const label =
-    status === "cancelled"
-      ? t("page.backtest.cancelledError")
-      : t("page.backtest.runError");
-  const translated =
-    errorCode === null ? null : tOptional(`backtest.run.error.${errorCode}`);
-  return (
-    <div
-      className="page-state page-state--error backtest-run-error"
-      role="alert"
-      aria-label={label}
-    >
-      {label}: {translated ?? error}
-      {translated === null ? null : (
-        <details className="backtest-run-error__reason">
-          <summary>{t("page.backtest.serverReason")}</summary>
-          {error}
-        </details>
-      )}
-    </div>
-  );
-};
 
 /**
  * 결과 화면 우측 AI 패널의 열림 상태(결과 설명 spec R1). 페이지의 local UI state다.
@@ -78,8 +42,18 @@ export const BacktestRunPage = () => {
   const navigate = useNavigate();
   const status = useBacktestStatus(runId);
   const request = useBacktestRequest(runId);
+  const summary = useBacktestSummary(runId);
   const completed = status.data?.status === "completed";
   const result = useBacktestResult(runId, completed);
+  // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
+  const runEnvironmentSchema = useRunEnvironmentSchema();
+  const environmentFields = useMemo(
+    () =>
+      runEnvironmentSchema.data === undefined
+        ? null
+        : runEnvironmentFields(runEnvironmentSchema.data.schema),
+    [runEnvironmentSchema.data],
+  );
   const assistantId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
   const [panel, setPanel] = useState<AssistantPanel>({
@@ -104,13 +78,19 @@ export const BacktestRunPage = () => {
   };
 
   if (status.isPending) {
-    return <p className="page-state">{t("page.loading")}</p>;
+    return (
+      <div className="page">
+        <p className="page-state">{t("page.loading")}</p>
+      </div>
+    );
   }
   if (status.isError || !status.data) {
     return (
-      <p className="page-state page-state--error" role="alert">
-        {t("page.backtest.loadError")}
-      </p>
+      <div className="page">
+        <p className="page-state page-state--error" role="alert">
+          {t("page.backtest.loadError")}
+        </p>
+      </div>
     );
   }
   const state = status.data;
@@ -121,8 +101,8 @@ export const BacktestRunPage = () => {
     <div
       className={
         assistantOpen
-          ? "backtest-run-layout backtest-run-layout--assistant"
-          : "backtest-run-layout"
+          ? "page backtest-run-layout backtest-run-layout--assistant"
+          : "page backtest-run-layout"
       }
     >
       <div className="backtest-run-layout__main">
@@ -144,6 +124,18 @@ export const BacktestRunPage = () => {
               })
             }
           />
+          {/* 새 실험 화면이 이 실행의 요청을 기반으로 읽는다. 실험 trial·검증 실행의 요청은 창 구간과 칸 값으로
+              좁혀져 있어 단일 실행에서만 연다(종류는 서버 판정, #402 리뷰 P2-2). 저장 리비전만 기반이 되는지는
+              backend 가 판정한다. */}
+          {summary.data?.kind === "single" ? (
+            <Link
+              className="ui-button ui-button--secondary ui-button--small"
+              to="/research/experiments/new"
+              search={{ run: runId }}
+            >
+              {t("backtest.actions.experiment")}
+            </Link>
+          ) : null}
           {assistantAvailable ? (
             <Button
               ref={toggleRef}
@@ -163,24 +155,25 @@ export const BacktestRunPage = () => {
         >
           {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
         </p>
-        {state.error ? (
-          <BacktestRunError
-            status={state.status}
-            error={state.error}
-            errorCode={state.error_code ?? null}
-          />
-        ) : null}
+        <BacktestRunFailure
+          run={state}
+          className="page-state page-state--error"
+        />
         {completed && result.isPending ? (
           <p className="page-state" role="status">
             {t("page.loading")}
           </p>
         ) : null}
-        {result.isError ? (
-          <p className="page-state page-state--error" role="alert">
-            {t("page.backtest.resultError")}
-          </p>
+        <BacktestResultFailure
+          error={result.error}
+          className="page-state page-state--error"
+        />
+        {result.data ? (
+          <BacktestRunDetail
+            result={result.data}
+            environmentFields={environmentFields}
+          />
         ) : null}
-        {result.data ? <BacktestRunDetail result={result.data} /> : null}
       </div>
       {assistantAvailable && panel.mounted ? (
         // 결과 화면의 AI 패널. landmark·이름·제목은 여기가 소유하고 채팅 feature는 이름 없는

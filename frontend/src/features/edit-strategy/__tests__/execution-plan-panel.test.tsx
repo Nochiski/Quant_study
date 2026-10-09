@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -27,7 +27,6 @@ const graph = (fieldId: string): FactorGraphRequest["graph"] => ({
     },
   ],
   output_node_id: "momentum",
-  missing_policy: "drop",
 });
 
 const explanation = (
@@ -59,6 +58,7 @@ const explanation = (
     ],
   },
   plan: {
+    missing_policy: "drop",
     graph_hash: suffix.repeat(64),
     plan_hash: suffix.toUpperCase().repeat(64),
     registry_version: "factor-registry-v1",
@@ -86,13 +86,11 @@ const explanation = (
     required_field_ids: [
       value.nodes[0]?.kind === "field" ? value.nodes[0].field_id : "",
     ],
-    referenced_factor_ids: [],
-    referenced_subgraph_ids: [],
     minimum_history_sessions: 252,
-    missing_policy: "drop",
     as_of_policy: "available_date_lte_as_of",
   },
   narrative: [],
+  synthesized_nodes: [],
 });
 
 const factor = (
@@ -102,12 +100,13 @@ const factor = (
   fieldId: string,
   suffix: string,
 ): PlannedFactor => {
-  const request = { graph: graph(fieldId), parameter_ids: [], factor_ids: [] };
+  const request = { graph: graph(fieldId), parameter_ids: [] };
   return {
     factorIndex,
     factorId,
     label,
     request,
+    document: null,
     explanation: explanation(request.graph, suffix),
   };
 };
@@ -220,7 +219,6 @@ describe("ExecutionPlanPanel", () => {
       } as const,
       "expected dataset-v1 · actual dataset-v2",
     ],
-    [{ status: "error", message: "network down" } as const, "network down"],
   ])("renders the %o state without stale plan data", (state, message) => {
     render(
       <ExecutionPlanPanel
@@ -231,6 +229,23 @@ describe("ExecutionPlanPanel", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(message);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("renders a plan failure as a translated line with the server reason folded away (#270)", () => {
+    render(
+      <ExecutionPlanPanel
+        state={{ status: "error", reason: "network down" }}
+        selectedPointer="/factors/0"
+        onSelectPointer={vi.fn()}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("실행 계획을 불러오지 못했습니다.");
+    expect(
+      within(alert).getByText("서버 사유").closest("details"),
+    ).toHaveTextContent("network down");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 

@@ -208,7 +208,8 @@ def _macro_mismatch(ctx: EquityGateContext) -> tuple[int, dict[str, object]]:
         basis += "+factor_tickers"
     made = views.install_temp_macros(ctx.con, {
         "price_daily": "price_daily", "adj_factor": "adj_factor",
-        "trading_calendar": "trading_calendar", "security_span": "security_span"})
+        "trading_calendar": "trading_calendar", "security_span": "security_span"},
+        names=tuple(v for v, _ in MACRO_VIEWS))
     absent = [v for v, _ in MACRO_VIEWS if v not in made]
     if absent:
         raise RuntimeError(f"forward-adjust macros could not be installed: missing={absent} "
@@ -482,6 +483,8 @@ eg3_price_adj_daily.gate_name = "EG3_price_adj_daily"       # type: ignore[attr-
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
 # S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `price.adj_close`).
+# 2026-09-28 부터 `field_scope='field_map'`(기본값)이다 — #218 이 레지스트리 가격 변화 팩터를 이 필드로
+# 옮겨 FIELD_MAP §2 어휘가 됐다(main 계보 e1.19.0 · 병합판 e1.27.0).
 # **S06 에서 옮겨 왔다** — 조정가는 이제 뷰가 아니라 이 표의 컬럼이라 `view_name` 이 없고
 # 커버율도 자기 컬럼(`adj_close`)에서 직접 잰다(옛 선언은 매크로가 빌드 세션에 없어서
 # `price_daily.close` 를 대리 분모로 썼다). 랙 0 세션: 값이 (ticker, date) 의 순수 함수이고
@@ -504,14 +507,14 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "사건의 KRX 기준가 비율을 가격 축에만 접는다, 키움 수정주가와 같은 방식). 첫 관측 "
                  "수준 고정이라 창·as_of 에 무관하다(결정 6, 09-05). 카탈로그 매크로 "
                  "v_adj_price_fwd 는 같은 값을 내는 읽기 경로이고 매 빌드 EG3_price_adj_daily 가 "
-                 "동일성을 증명한다. **FIELD_MAP §2 의 42 어휘 밖**(equity 내부 스코프, §3) 이라 "
-                 "field_scope='internal' 이다. 가격 축 미해결은 n_price_unresolved_events > 0 "
-                 "인 구간이다 — 조정가 소비자가 거를 축(n_unadjusted_events 는 보유 수량 축 "
-                 "미해결로 뜻 그대로). 저녁 잠정판(e1.15.0)에서는 basis='evening' "
+                 "동일성을 증명한다. 레지스트리 가격 변화 팩터가 이 필드를 읽으므로(#218) "
+                 "FIELD_MAP §2 어휘이고 field_scope='field_map' 이다. 가격 축 미해결은 "
+                 "n_price_unresolved_events > 0 인 구간이다 — 조정가 소비자가 거를 축"
+                 "(n_unadjusted_events 는 보유 수량 축 미해결로 뜻 그대로). 저녁 잠정판(e1.15.0)에서는 basis='evening' "
                  "T 행이 있고 그 adj_close = 키움 종가 × 그날까지의 누적 share_factor ÷ 누적 ⑤"
                  "(과거 사건 누적 — 전방 조정이라 1 이 아니다), OHLC 조정값은 NULL 이다. "
                  "corp_action_pending 이 참이면 오늘 스코어에서 뺀다(결정 V2-2).",
-        coverage_axis="grid_session", scope="internal", axis_columns=("ticker", "date")),
+        coverage_axis="grid_session", axis_columns=("ticker", "date")),
 )
 
 

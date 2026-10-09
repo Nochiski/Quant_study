@@ -59,15 +59,15 @@ const Harness = () => {
       <DocumentHistoryActions history={history} />
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
+        schema={SCHEMA}
         diagnostics={[]}
         selectedPointer="/factors/0/graph"
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
         editing={{
           tree: form.tree,
-          schema: SCHEMA,
           transactions,
-          catalogs: { equityFields: null, factors: null },
+          catalogs: { equityFields: null },
         }}
       />
       {/* 편집기는 늘 마운트되어 있다 — Graph 탭에서는 hidden이라 포커스만 없다. */}

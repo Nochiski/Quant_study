@@ -10,6 +10,8 @@ import importlib
 import random
 import sys
 from collections.abc import Callable
+from dataclasses import replace
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -26,7 +28,7 @@ from backtest_engine.engine.core import (
     make_pricing,
 )
 from backtest_engine.engine.router import DecisionRouter
-from backtest_engine.engine.slippage import FixedBpsSlippage
+from backtest_engine.engine.slippage import FixedBpsSlippage, SqrtImpactSlippage
 from backtest_engine.errors import (
     CapabilityNotImplemented,
     CoreUnavailable,
@@ -38,6 +40,7 @@ from backtest_engine.errors import (
     UnknownOrderId,
     UnsupportedActionValue,
 )
+from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
@@ -68,6 +71,7 @@ from backtest_engine.types.events import (
     OrderEvent,
     OrderStatus,
     StrategyEvent,
+    TargetRounding,
 )
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
@@ -210,6 +214,7 @@ def fill(side: Side, quantity: int, price: float, fee: float = 0.0, seq: int = 1
         price=price,
         fee=fee,
         slippage_per_share=0.0,
+        cap_volume=1_000,
     )
 
 
@@ -319,8 +324,11 @@ def _engine_scenario(
     *,
     max_participation: float | None = None,
     corporate_actions: tuple[CorporateActionEvent, ...] | None = None,
+    slippage: SlippageModel | None = None,
 ) -> tuple[BacktestEngine, BacktestResult]:
-    engine = BacktestEngine(config, core=core, max_participation=max_participation)
+    engine = BacktestEngine(
+        config, core=core, max_participation=max_participation, slippage=slippage
+    )
     result = (
         engine.run(strategy, feed)
         if corporate_actions is None
@@ -394,6 +402,33 @@ def _delisted_replace_scenario(core: str) -> tuple[BacktestEngine, BacktestResul
     )
 
 
+# 매도 거래세 일정: 8/1 부터 20bp, 8/4 부터 25bp. 체결 세션마다 다른 세율이 붙는 경계를 덮는다.
+_SELL_TAX_SCHEDULE = ((date(2026, 8, 1), 20.0), (date(2026, 8, 4), 25.0))
+
+# 유동성 캡 기준 거래량(V2-02): 세션 거래량(1,000주)과 따로 싣는다. 8/2 는 0주라 체결 없이 넘어간다.
+LIQUIDITY_BARS = tuple(
+    replace(make_bar(day(session), INSTRUMENT, price, price), liquidity_volume=liquidity)
+    for session, price, liquidity in (
+        (1, 100.0, 3_000),
+        (2, 110.0, 0),
+        (3, 130.0, 3_000),
+        (4, 90.0, 3_000),
+        (5, 95.0, 3_000),
+    )
+)
+# √ 시장충격 척도(V2-03): 세션마다 다르고 8/3 은 척도가 없다(충격 0). 8/5 청산 매도(300주)는
+# 0.06 × √300 ≈ 1.04 라 상한 0.99 에서 잘린다.
+IMPACT_BARS = tuple(
+    replace(bar, impact_scale=scale)
+    for bar, scale in zip(LIQUIDITY_BARS, (0.002, 0.001, None, 0.0005, 0.06), strict=True)
+)
+# 잔량이 다음 세션으로 넘어가는 GTC 70% 목표.
+GTC_TARGET_70PCT = SetPortfolioTarget(
+    targets=(WeightTarget(INSTRUMENT, 0.7),),
+    scope=TargetScope.PATCH,
+    execution=replace(ExecutionPolicy.market_next_open(), time_in_force=TimeInForce.GTC),
+)
+
 ENGINE_SCENARIOS = {
     "golden": lambda core: _engine_scenario(
         core,
@@ -435,6 +470,55 @@ ENGINE_SCENARIOS = {
         max_participation=0.1,
     ),
     "delisted_replace": _delisted_replace_scenario,
+    # 매도 거래세(V2-01): 롱 청산 매도, 숏 진입·청산, 같은 세션 매도 대금으로 매수하는 바스켓.
+    "golden_sell_tax": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="gt", initial_cash=100_000.0, fee_bps=10.0, sell_tax_schedule=_SELL_TAX_SCHEDULE
+        ),
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
+        DataFeed(GOLDEN_BARS),
+    ),
+    "short_sell_tax": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="st",
+            initial_cash=10_000.0,
+            short_borrow_bps_annual=252.0,
+            sell_tax_schedule=_SELL_TAX_SCHEDULE,
+        ),
+        test_short_selling.ShortStrategy(
+            (test_short_selling.target(-10), test_short_selling.target(0))
+        ),
+        DataFeed(test_short_selling.BARS),
+    ),
+    "basket_sell_tax": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="bt", initial_cash=100_000.0, sell_tax_schedule=_SELL_TAX_SCHEDULE),
+        test_basket.BasketStrategy(
+            (test_basket.hold_b(10), test_basket.pair(test_basket.GroupPolicy.PROPORTIONAL))
+        ),
+        DataFeed(test_basket.BARS),
+        max_participation=0.1,
+    ),
+    # 참여 기준(V2-02): 캡은 기준 거래량 × 참여율, 0주 세션은 체결 없이 잔량 이월.
+    "liquidity_volume": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="lv", initial_cash=100_000.0),
+        ScriptedStrategy(script=(GTC_TARGET_70PCT,)),
+        DataFeed(LIQUIDITY_BARS),
+        max_participation=0.1,
+    ),
+    # √ 충격(V2-03): 캡으로 체결 수량이 세션마다 달라 √수량이 갈리고, 청산 매도는 아래로 밀되
+    # 상한에서 잘린다.
+    "sqrt_impact": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="si", initial_cash=100_000.0, fee_bps=10.0),
+        ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
+        DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
+    ),
     "split": lambda core: _engine_scenario(
         core,
         RunConfig(run_id="c", initial_cash=10_000.0, fee_bps=0.0),
@@ -456,6 +540,37 @@ def test_engine_records_identical_across_cores(name: str, rust_core: str) -> Non
         python_engine.event_store.decision_tape_bytes()
         == rust_engine.event_store.decision_tape_bytes()
     )
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_fills_record_the_cap_volume_the_liquidity_cap_used(core: str) -> None:
+    """V4-04 2/2: 체결은 캡을 곱한 기준 거래량을 싣는다 — 세션 거래량 1,000주가 아니라 참여 기준
+    3,000주다."""
+    _engine, result = ENGINE_SCENARIOS["liquidity_volume"](core)
+
+    assert [fill.cap_volume for fill in result.fills] == [3_000] * 3
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_target_roundings_record_each_notional_to_share_conversion(core: str) -> None:
+    """V4-04 2/2: 라우터가 목표 금액 Δ 를 1주 단위로 내릴 때마다 ROUNDING 을 남긴다 — 두 코어가 같은
+    값이다. 8/3 청산 쪽 목표 Δ −2,400 은 1주 단위로 −2,310 까지만 판다(반올림 오차 90)."""
+    engine, _result = ENGINE_SCENARIOS["delisted_replace"](core)
+
+    assert [
+        (
+            record.ts.date(),
+            record.payload.instrument.symbol,
+            record.payload.target_notional,
+            record.payload.rounded_notional,
+        )
+        for record in engine.event_store.records
+        if isinstance(record.payload, TargetRounding)
+    ] == [
+        (day(1).date(), "005930", 40_000.0, 40_000.0),
+        (day(1).date(), "000660", 40_000.0, 40_000.0),
+        (day(3).date(), "005930", -2_400.0, -2_310.0),
+    ]
 
 
 @RUST_ONLY
@@ -482,6 +597,7 @@ def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
                     price=price,
                     fee=0.0,
                     slippage_per_share=0.0,
+                    cap_volume=1_000,
                 )
             )
         portfolio.mark(
@@ -522,6 +638,7 @@ def test_instruments_differing_only_in_currency_are_distinct_positions() -> None
                     price=100.0,
                     fee=0.0,
                     slippage_per_share=0.0,
+                    cap_volume=1_000,
                 )
             )
         s = portfolio.snapshot(day(1))
@@ -957,7 +1074,6 @@ def test_promoted_rust_makes_no_per_session_ffi(
         "current_session_count",
         "drain_payloads",
         "drive",
-        "equity_series",
         "fail_callback",
         "failure_detail",
         "finish",
@@ -972,13 +1088,10 @@ def test_promoted_rust_makes_no_per_session_ffi(
         "result_tables",
         "settlement_session_index",
         "submit_decision",
-        "traded_notional",
     }
-    # 결과·지표 조회는 종료 배치와 Rust 누산값만 쓴다.
+    # 결과 조회는 종료 배치만 쓴다.
     assert len(result.fills) == 2
     assert calls["record_batch"] == 0
-    assert calls["equity_series"] == 1
-    assert calls["traded_notional"] == 1
     # fills 조회는 FILL kind 하나만 청크로 넘겨받는다 (레코드 2건 < 청크).
     # 해제하지 않는 `record_payloads`는 종료 전 partial trace 전용이라 여기서는 안 쓰인다.
     assert calls["drain_payloads"] == 1
@@ -989,8 +1102,8 @@ def test_promoted_rust_makes_no_per_session_ffi(
     # 넘긴 kind를 다시 읽으면 어느 조회가 어느 레코드에서 막혔는지 알린다.
     with pytest.raises(RuntimeError, match=r"already released — operation=record_payloads seq="):
         proxies[0].inner.record_payloads(RecordKind.FILL.code)
-    with pytest.raises(RuntimeError, match=r"already released — operation=traded_notional seq="):
-        proxies[0].inner.traded_notional()
+    with pytest.raises(RuntimeError, match=r"already released — operation=result_tables seq="):
+        proxies[0].inner.result_tables()
     assert proxies[0].inner.lifecycle_state() == "finished"
 
 
@@ -1091,10 +1204,10 @@ def test_legacy_rust_core_is_explicitly_deprecated() -> None:
 
 
 @pytest.mark.parametrize("core_name", ["python", pytest.param("rust", marks=RUST_ONLY)])
-def test_empty_feed_fails_identically_after_clean_finish(core_name: str) -> None:
+def test_empty_feed_finishes_identically_with_an_empty_result(core_name: str) -> None:
     engine = BacktestEngine(RunConfig(run_id="empty-feed", initial_cash=100_000.0), core=core_name)
-    with pytest.raises(ValueError, match="cannot compute metrics from an empty run"):
-        engine.run(ScriptedStrategy(script=()), DataFeed(()))
+    result = engine.run(ScriptedStrategy(script=()), DataFeed(()))
+    assert (result.snapshots, result.orders, result.fills) == ((), (), ())
     assert engine.event_store.records == ()
 
 

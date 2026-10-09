@@ -9,7 +9,6 @@ import dataclasses
 import re
 import types
 from dataclasses import replace
-from datetime import date
 from pathlib import Path
 from typing import Union, get_args, get_origin, get_type_hints
 
@@ -36,7 +35,7 @@ from strategy_workbench.domain.strategy.facade.constraints import (
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
-    ComparisonOperator,
+    EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
     FloatParameter,
@@ -58,9 +57,7 @@ CODE_PRODUCER_SOURCES = {
 
 
 def _template() -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
+    return StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
 
 
 def _with_scalar(spec: StrategySpec, pointer: str, value: float | int) -> StrategySpec:
@@ -101,7 +98,7 @@ def test_field_default_reads_the_dataclass_not_the_catalog() -> None:
     with pytest.raises(KeyError, match="unknown authoring pointer"):
         field_default("/risk/nope")
     with pytest.raises(KeyError, match="required field has no default"):
-        field_default("/data/universe_id")
+        field_default("/title")
 
 
 @pytest.mark.parametrize("constraint", STRATEGY_SCALAR_CONSTRAINTS, ids=lambda c: c.pointer)
@@ -203,16 +200,18 @@ def test_expression_node_kinds_cover_the_union_exactly() -> None:
         assert _args(get_type_hints(node_type)["kind"]) == (kind,)
 
 
-def test_fee_and_slippage_report_one_issue_each_with_their_own_path() -> None:
+def test_exposure_bounds_report_one_issue_each_with_their_own_path() -> None:
+    """한 코드를 공유하는 두 행이 각자의 경로로 따로 보고된다.
+
+    1.1 까지는 `execution.fee_bps`·`slippage_bps` 가 이 역할이었다. 비용이 실행 설정으로 옮겨간
+    1.2 에서는 노출 한도 두 행이 같은 모양이다.
+    """
     spec = _template()
-    spec = replace(spec, execution=replace(spec.execution, fee_bps=-1.0, slippage_bps=-2.0))
+    spec = replace(spec, risk=replace(spec.risk, max_name_weight=-1.0, max_sector_weight=-2.0))
 
-    issues = [i for i in validate_strategy(spec).issues if i.code == "strategy.execution.cost"]
+    issues = [i for i in validate_strategy(spec).issues if i.code.startswith("strategy.risk.max_")]
 
-    assert [(i.path, i.message[:4]) for i in issues] == [
-        ("execution.fee_bps", "수수료는"),
-        ("execution.slippage_bps", "슬리피지"),
-    ]
+    assert [i.path for i in issues] == ["risk.max_name_weight", "risk.max_sector_weight"]
 
 
 @pytest.mark.parametrize("constraint", STRATEGY_SCALAR_CONSTRAINTS, ids=lambda c: c.pointer)
@@ -256,7 +255,7 @@ def test_every_unbounded_strategy_numeric_leaf_must_be_finite(value: float) -> N
             replace(
                 spec,
                 eligibility=EligibilityStep(
-                    (EligibilityRule("price.close", ComparisonOperator.GREATER_THAN, value),)
+                    (EligibilityRule("price.close", EligibilityOperator.GREATER_THAN, value),)
                 ),
             ),
             "eligibility.rules.0.value",
@@ -297,14 +296,12 @@ def test_inclusive_minimum_boundaries_are_accepted() -> None:
         portfolio=replace(
             spec.portfolio, selection_count=1, minimum_trade_weight=0.0, turnover_buffer_count=0
         ),
-        execution=replace(spec.execution, fee_bps=0.0, slippage_bps=0.0),
     )
     codes = {issue.code for issue in validate_strategy(spec).issues}
     assert not codes & {
         "strategy.portfolio.selection_count",
         "strategy.portfolio.minimum_trade_weight",
         "strategy.portfolio.turnover_buffer_count",
-        "strategy.execution.cost",
     }
 
 
@@ -328,3 +325,55 @@ def test_every_factor_graph_code_has_a_strategy_expression_alias() -> None:
 def test_expression_alias_rejects_a_code_from_another_namespace() -> None:
     with pytest.raises(ValueError, match="only factor graph codes"):
         expression_code("strategy.expression.cycle")
+
+
+@pytest.mark.parametrize(
+    ("operator", "value"),
+    [
+        (EligibilityOperator.TOP_PERCENT, 0.0),
+        (EligibilityOperator.TOP_PERCENT, 1.5),
+        (EligibilityOperator.TOP_PERCENT, 20.0),
+        (EligibilityOperator.TOP_COUNT, 0.0),
+        (EligibilityOperator.TOP_COUNT, 2.5),
+        (EligibilityOperator.TOP_COUNT, -3.0),
+    ],
+)
+def test_out_of_range_cross_sectional_values_are_a_validation_error(
+    operator: EligibilityOperator, value: float
+) -> None:
+    """`top_percent: 20` 은 "상위 20%"로 읽히지만 cut 은 전부 통과다 — 조용히 필터가 사라진다."""
+    validation = validate_strategy(
+        replace(
+            _template(),
+            eligibility=EligibilityStep((EligibilityRule("price.turnover", operator, value),)),
+        )
+    )
+
+    issues = [
+        issue for issue in validation.issues if issue.code == "strategy.eligibility.rule_value"
+    ]
+    assert [issue.path for issue in issues] == ["eligibility.rules.0.value"]
+
+
+@pytest.mark.parametrize(
+    ("operator", "value"),
+    [
+        (EligibilityOperator.TOP_PERCENT, 0.2),
+        (EligibilityOperator.TOP_PERCENT, 1.0),
+        (EligibilityOperator.TOP_COUNT, 1.0),
+        (EligibilityOperator.TOP_COUNT, 200.0),
+        (EligibilityOperator.GREATER_THAN, -3.0),
+        (EligibilityOperator.EQUAL, 0.0),
+    ],
+)
+def test_values_the_cut_can_size_pass_validation(
+    operator: EligibilityOperator, value: float
+) -> None:
+    validation = validate_strategy(
+        replace(
+            _template(),
+            eligibility=EligibilityStep((EligibilityRule("price.turnover", operator, value),)),
+        )
+    )
+
+    assert "strategy.eligibility.rule_value" not in {issue.code for issue in validation.issues}

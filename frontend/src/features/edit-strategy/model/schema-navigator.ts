@@ -5,12 +5,11 @@
  * sibling `kind` value in the document, so a `kind` change re-selects the allowed fields.
  */
 
-import type { ApplicableWhen } from "../../../shared/api";
+import { isApplicableWhen, type ApplicableWhen } from "../../../shared/api";
 import {
   decodePointerSegment,
   pointerSegments,
 } from "../../../shared/lib/yaml12";
-import { isApplicableWhen } from "./field-applicability";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -41,7 +40,18 @@ export type SchemaFacts = {
    * 키를 조립하지 않도록 backend가 매핑을 통째로 내려준다(P1-03, spec D8).
    */
   operatorKeys: Readonly<Record<string, string>> | null;
+  /**
+   * enum 값 → 이름 키. 연산자 enum 은 `operatorKeys` 그대로이고, 나머지 enum 은 property 설명 키
+   * stem 아래 `<stem>.value.<값>`이다(P3-01: `top_percent`·`zscore` 같은 원문 값을 선택지에 보이지
+   * 않는다). 키 규칙만 여기 있고 값 목록은 스키마 `enum`에서 온다. 설명 키가 없으면 null.
+   */
+  valueLabelKeys: Readonly<Record<string, string>> | null;
   appliedStage: string | null;
+  /**
+   * `x-stage`: 그래프 표현(파이프라인)의 단계(P4-01). 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현
+   * 투영" 행이 소유하고 `pipeline-projection.ts`가 그 규칙을 쓴다.
+   */
+  stage: string | null;
   catalog: string | null;
   reference: string | null;
   applicableWhen: ApplicableWhen | null;
@@ -496,9 +506,12 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
         (candidate) => candidate !== null && candidate !== undefined,
       )
     : undefined;
+  const enumValues = Array.isArray(node.enum) ? node.enum.map(String) : [];
+  const descriptionKey = stringAt(node, "x-description-key");
+  const operatorKeys = stringRecordAt(node, "x-operator");
   return {
     type,
-    enumValues: Array.isArray(node.enum) ? node.enum.map(String) : [],
+    enumValues,
     hasConst: own("const"),
     constValue: node.const,
     hasDefault: own("default"),
@@ -509,9 +522,20 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
     format: stringAt(node, "format"),
     unit: stringAt(node, "x-unit"),
     displayUnit: stringAt(node, "x-display-unit"),
-    descriptionKey: stringAt(node, "x-description-key"),
-    operatorKeys: stringRecordAt(node, "x-operator"),
+    descriptionKey,
+    operatorKeys,
+    valueLabelKeys:
+      operatorKeys ??
+      (descriptionKey === null || enumValues.length === 0
+        ? null
+        : Object.fromEntries(
+            enumValues.map((value) => [
+              value,
+              `${descriptionKey}.value.${value}`,
+            ]),
+          )),
     appliedStage: stringAt(node, "x-applied-stage"),
+    stage: stringAt(node, "x-stage"),
     catalog: stringAt(node, "x-catalog"),
     reference: stringAt(node, "x-reference"),
     applicableWhen: isApplicableWhen(node["x-applicable-when"])
@@ -520,6 +544,34 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
     example,
     hasExample: example !== undefined,
   };
+};
+
+/** 값 하나를 화면 문자열로(문자열은 그대로, 나머지는 JSON). 값이 없으면 null. */
+export const formatContractValue = (value: unknown): string | null => {
+  if (value === undefined) return null;
+  if (typeof value === "string") return value;
+  const encoded = JSON.stringify(value);
+  return encoded === undefined ? String(value) : encoded;
+};
+
+const stableNumber = (value: number): string =>
+  Number(value.toPrecision(12)).toString();
+
+/**
+ * 값을 스키마의 표시 단위(`x-display-unit`)로: 비율(`x-unit: ratio`)을 `%` 로 보이면 100을 곱하고 유효숫자
+ * 12자리로 부동소수 꼬리를 지운다. 표시 단위가 없으면 null. Contract Inspector 와 요약 문장이 함께 쓴다.
+ */
+export const displayValue = (
+  value: unknown,
+  unit: string | null,
+  displayUnit: string | null,
+): string | null => {
+  if (displayUnit === null) return null;
+  if (typeof value === "number" && unit === "ratio" && displayUnit === "%")
+    return `${stableNumber(value * 100)}%`;
+  const formatted = formatContractValue(value);
+  if (formatted === null) return null;
+  return displayUnit === "%" ? `${formatted}%` : `${formatted} ${displayUnit}`;
 };
 
 /**

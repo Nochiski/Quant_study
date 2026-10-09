@@ -16,14 +16,11 @@
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Iterator
-from dataclasses import asdict
 from typing import Annotated, Any, Protocol
 
 from fastapi import FastAPI, Header, HTTPException, Query, status
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
 from strategy_workbench.application.assistant_chat.facade.chat import (
@@ -58,7 +55,6 @@ from ._assistant_contract import (
     ASSISTANT_EVENT_NAME,
     Assistant409Response,
     Assistant422Response,
-    AssistantEventEnvelopeView,
     AssistantNotFoundResponse,
     CreateProviderProfileRequest,
     CreateSessionRequest,
@@ -80,21 +76,11 @@ from ._assistant_contract import (
     session_usage_view,
     turn_view,
 )
+from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
 
-__all__ = [
-    "ASSISTANT_KEEPALIVE_SECONDS",
-    "ASSISTANT_POLL_SECONDS",
-    "register_assistant_routes",
-]
+__all__ = ["register_assistant_routes"]
 
 ASSISTANT_PREFIX = "/api/v1/assistant"
-
-# 열린 스트림이 조용해도 15초마다 주석 한 줄을 보낸다(spec D6). 중간의 프록시·브라우저가 아무
-# 바이트도 오지 않는 연결을 끊어 버리면, 클라이언트는 턴이 끝난 것으로 착각하지 않고 재연결을
-# 반복하게 된다. 주석 프레임은 SSE 파서가 무시하므로 이벤트 번호를 건드리지 않는다.
-ASSISTANT_KEEPALIVE_SECONDS = 15.0
-# 저장소를 다시 읽는 간격. 백테스트 스트림과 같은 폴링 구조다(spec D3: 러너는 저장소가 정본).
-ASSISTANT_POLL_SECONDS = 0.05
 
 
 class TurnEventSource(Protocol):
@@ -122,8 +108,8 @@ def register_assistant_routes(
     profiles: ProviderProfileService,
     chat: AssistantChatService,
     turns: AssistantTurnRunner,
-    keepalive_seconds: float = ASSISTANT_KEEPALIVE_SECONDS,
-    poll_seconds: float = ASSISTANT_POLL_SECONDS,
+    keepalive_seconds: float = SSE_KEEPALIVE_SECONDS,
+    poll_seconds: float = SSE_POLL_SECONDS,
 ) -> None:
     """어시스턴트 라우트를 `app`에 등록한다. 서비스는 bootstrap이 조립해 넘긴다."""
 
@@ -422,24 +408,16 @@ def _event_stream(
                 sequence = stored.sequence
                 continue
             sequence = stored.sequence
-            yield _frame(event_envelope_view(stored))
+            envelope = event_envelope_view(stored)
+            yield sse_frame(sequence=envelope.sequence, event=ASSISTANT_EVENT_NAME, data=envelope)
             last_frame_at = time.monotonic()
         if settled:
             return
         now = time.monotonic()
         if now - last_frame_at >= keepalive_seconds:
-            yield ": keepalive\n\n"
+            yield SSE_KEEPALIVE_FRAME
             last_frame_at = now
         time.sleep(poll_seconds)
-
-
-def _frame(envelope: AssistantEventEnvelopeView) -> str:
-    body = json.dumps(
-        jsonable_encoder(asdict(envelope)),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return f"id: {envelope.sequence}\nevent: {ASSISTANT_EVENT_NAME}\ndata: {body}\n\n"
 
 
 def _cancel(turns: AssistantTurnRunner, session_id: str, turn_id: str) -> Turn:

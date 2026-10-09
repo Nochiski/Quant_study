@@ -18,10 +18,12 @@ import { ensureProvider } from "../assistant-helpers";
 import {
   backtest,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
   replaceSource,
+  runSettingsInputs,
   saveAndWaitForRevision,
 } from "../workbench-helpers";
 
@@ -45,10 +47,12 @@ test(
     await expectPhase(page, "검증 통과");
     await saveAndWaitForRevision(page, 1);
 
-    const settingsToggle = page.getByLabel("실행 설정 열기");
+    // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02).
+    await fillRunEnvironment(page, { via: "band" });
+    const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
     await page
-      .getByRole("textbox", { name: "벤치마크 종목 ID" })
+      .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
       .fill(BENCHMARK);
     await settingsToggle.click();
     await expect(backtest(page)).toBeEnabled();
@@ -67,7 +71,14 @@ test(
     const cell = (label: string) =>
       highlights.getByText(label, { exact: true }).locator("xpath=..");
     await expect(cell("Sharpe ratio")).toContainText(
-      "샤프 비율 흔들림 한 단위당 얼마나 벌었는지입니다.",
+      "샤프 비율 흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다.",
+    );
+    // 샤프 옆의 표준오차는 95% 범위 읽는 법과 근사의 한계를 함께 말한다(이슈 #274).
+    await expect(cell("Sharpe standard error")).toContainText(
+      "샤프 비율 오차 샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다.",
+    );
+    await expect(cell("Sharpe standard error")).toContainText(
+      "샤프 ± 이 값의 2배가 대략 95% 범위이고, 날마다 독립이라고 본 근사라 실제로는 더 클 수 있습니다.",
     );
     await expect(cell("Maximum drawdown")).toContainText(
       "최대 낙폭 가장 높았던 때에서 가장 많이 떨어진 폭입니다.",

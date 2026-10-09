@@ -36,7 +36,7 @@ from strategy_workbench.domain.assistant.facade.tools import (
 from ..backtest_run_wait import wait_for_terminal_state
 
 _ASSISTANT = "/api/v1/assistant"
-_STRATEGY_CONTEXT = {"source_text": "schema_version: '1.1'\n", "source_format": "yaml"}
+_STRATEGY_CONTEXT = {"source_text": "schema_version: '1.2'\n", "source_format": "yaml"}
 
 
 class _ResultReadingProvider:
@@ -95,10 +95,16 @@ def client(tmp_path: Path, provider: _ResultReadingProvider) -> TestClient:
 
 def _completed_run(client: TestClient) -> str:
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"].update({"start": "2026-01-02", "end": "2026-02-20"})
+    # schema 1.2 문서는 기간·유니버스를 담지 않는다(lang2 P2-03). 실행 설정은 요청 본문이 싣는다.
+    environment = {"start": "2026-01-02", "end": "2026-02-20", "universe_id": "krx.common-stock"}
     accepted = client.post(
         "/api/v1/backtests",
-        json={"strategy": spec, "core": "python", "benchmark_security_id": "005930"},
+        json={
+            "strategy": spec,
+            "environment": environment,
+            "core": "python",
+            "benchmark_security_id": "sec-005930-1",
+        },
     )
     assert accepted.status_code == 202, accepted.text
     run_id = accepted.json()["run"]["run_id"]
@@ -144,7 +150,7 @@ def test_a_completed_run_is_explained_from_the_server_summary(
     assert provider.requests[0].research == frozenset()
     summary = json.loads(provider.tool_results[0].content)
     assert summary["run"]["run_id"] == run_id
-    assert summary["capital"]["benchmark_security_id"] == "005930"
+    assert summary["capital"]["benchmark_security_id"] == "sec-005930-1"
     assert {metric["metric_id"] for metric in summary["metrics"]} >= {"total_return", "sharpe"}
     assert [message["text"] for message in history["messages"]] == [
         "이 결과 좋은 거야?",

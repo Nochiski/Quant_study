@@ -36,12 +36,13 @@ def test_endpoint_serves_the_run_environment_schema_with_its_hash_as_etag() -> N
         "type": "string",
         "enum": ["next_open"],
         "default": "next_open",
-        "x-description-key": "strategy.field.run_environment.timing",
+        "x-description-key": "run_environment.field.timing",
     }
     # 화면 어휘는 frontend i18n 이 렌더하고 backend 는 키 줄기만 싣는다(P1-03 정책, 모든 필드 공통).
-    # 비용 세 필드는 `/execution/*` 제약 카탈로그 행을 재사용하므로 그 행의 키를 쓴다.
-    assert all("x-description-key" in prop for prop in properties.values())
-    assert properties["fee_bps"]["x-description-key"] == "strategy.contract.execution.fee_bps"
+    # 제약 행이 있는 칸도 같은 `run_environment.field.<칸>` 네임스페이스다(#357 C-P3-8).
+    assert {prop["x-description-key"] for prop in properties.values()} == {
+        f"run_environment.field.{name}" for name in properties
+    }
     assert properties["missing"]["enum"] == ["drop", "keep", "zero", "cross_sectional_median"]
     assert properties["universe_id"]["x-catalog"] == "universe"
 

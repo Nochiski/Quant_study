@@ -12,9 +12,10 @@ EQUITY_WORKFLOW §3-5(S21 축소): `build_container(equity_adapter="duckdb", equ
 
 사용 (backend venv — ruamel.yaml·numpy·pyarrow·duckdb 가 필요하다):
   uv run --project backend python database/scripts/run_mvp_backtest.py \\
-      --root <equity_root> --start 2011-01-03 --end 2026-08-20 --universe krx.common-stock \\
+      --root <equity_root> --start 2020-01-02 --end 2026-08-20 --universe krx.common-stock \\
       [--price-field price.adj_close] [--top 20] [--artifact-root <dir>]
       [--engine-src <repo>/backend/src]
+  `--start` 가 2020-01-02 앞이면 워크벤치가 봉인 구간 측정으로 거절한다(검증 랩 spec D1).
 
 종료 코드 0 = run COMPLETED, 1 = FAILED/CANCELLED(요약에 error), 2 = 인자·환경 오류.
 """
@@ -71,7 +72,8 @@ class RunSummary:
     max_drawdown: float | None
     tape_hash: str
     run_fingerprint: str | None
-    artifact_uri: str | None
+    artifact_root: Path
+    artifact_sha256: str | None
     warnings: tuple[str, ...]
     error: str | None
 
@@ -80,7 +82,14 @@ class RunSummary:
         return self.status == "completed"
 
 
-def momentum_spec(start: date, end: date, universe_id: str, price_field: str, top: int):
+def run_environment(start: date, end: date, universe_id: str):
+    """실행 설정. schema 1.2 부터 시장·기간·유니버스는 전략 문서가 아니라 실행이 소유한다."""
+    from strategy_workbench.domain.backtest.facade.environment import Market, RunEnvironment
+
+    return RunEnvironment(market=Market.KRX, start=start, end=end, universe_id=universe_id)
+
+
+def momentum_spec(price_field: str, top: int):
     """레지스트리 `price.momentum_12_1` 그래프의 FieldNode 만 `price_field` 로 바꾼 월간 롱온리."""
     from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
         InMemoryStrategyRepository,
@@ -88,12 +97,10 @@ def momentum_spec(start: date, end: date, universe_id: str, price_field: str, to
     from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
     from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
     from strategy_workbench.domain.strategy.facade.specification import (
-        DataStep,
         FactorDirection,
         FactorGraph,
         FactorSignal,
         FieldNode,
-        Market,
         PortfolioSide,
         RebalanceFrequency,
         SelectionMethod,
@@ -107,14 +114,11 @@ def momentum_spec(start: date, end: date, universe_id: str, price_field: str, to
             replace(node, field_id=price_field) if isinstance(node, FieldNode) else node
             for node in definition.default_graph.nodes),
         output_node_id=definition.default_graph.output_node_id,
-        missing_policy=definition.default_graph.missing_policy,
     )
-    template = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "mvp",
-                                     today=lambda: end).template()
+    template = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "mvp").template()
     return replace(
         template,
         title=f"MVP-B {FACTOR_ID} on {price_field}",
-        data=DataStep(market=Market.KRX, start=start, end=end, universe_id=universe_id),
         # schema 1.1: `factors`는 `FactorStep` 래퍼 없이 FactorSignal 시퀀스다
         # (GUI 편집 initiative P1-01 평탄화).
         factors=(FactorSignal(
@@ -138,15 +142,18 @@ def run(root: Path, start: date, end: date, universe_id: str, *, price_field: st
 
     if price_field not in PRICE_FIELDS:
         raise ValueError(f"price_field must be one of {PRICE_FIELDS} — got={price_field!r}")
+    # run 상태는 산출물 위치를 싣지 않는다(#277) — 이 스크립트가 고른 루트를 요약에 그대로 남긴다.
+    artifact_root = artifact_root or root / "_runs" / f"mvp_{uuid4().hex[:8]}"
     container = build_container(
-        equity_adapter="duckdb", equity_root=root,
-        artifact_root=artifact_root or root / "_runs" / f"mvp_{uuid4().hex[:8]}")
-    spec = momentum_spec(start, end, universe_id, price_field, top)
-    pipeline = container.portfolio_design.run_pipeline(PortfolioPreviewRequest(spec))
+        equity_adapter="duckdb", equity_root=root, artifact_root=artifact_root)
+    spec = momentum_spec(price_field, top)
+    environment = run_environment(start, end, universe_id)
+    pipeline = container.portfolio_design.run_pipeline(
+        PortfolioPreviewRequest(spec, environment=environment))
     tape = pipeline.preview.tape
     sessions = {o.as_of for o in pipeline.observations}
     response = container.backtest_runs.start(BacktestRunSpec(
-        strategy=spec, core=ExecutionCore.PYTHON))
+        strategy=spec, core=ExecutionCore.PYTHON, environment=environment))
     run_id = response.run.run_id
     terminal = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
     state = container.backtest_runs.state(run_id)
@@ -169,7 +176,8 @@ def run(root: Path, start: date, end: date, universe_id: str, *, price_field: st
         n_rebalances_with_positions=sum(1 for f in tape.frames if f.targets),
         total_return=metrics.get("total_return"), cagr=metrics.get("cagr"),
         max_drawdown=metrics.get("max_drawdown"), tape_hash=tape.tape_hash,
-        run_fingerprint=fingerprint, artifact_uri=state.artifact_uri,
+        run_fingerprint=fingerprint, artifact_root=artifact_root,
+        artifact_sha256=state.artifact_sha256,
         warnings=pipeline.preview.warnings, error=state.error)
 
 
@@ -180,7 +188,7 @@ def print_summary(s: RunSummary) -> None:
           f"rebalances={s.n_rebalances} (with positions {s.n_rebalances_with_positions})")
     print(f"  total_return={s.total_return} cagr={s.cagr} max_drawdown={s.max_drawdown}")
     print(f"  tape_hash={s.tape_hash} run_fingerprint={s.run_fingerprint}")
-    print(f"  artifact={s.artifact_uri}")
+    print(f"  artifact_root={s.artifact_root} artifact_sha256={s.artifact_sha256}")
     for w in s.warnings:
         print(f"  warning: {w}")
     if s.error:

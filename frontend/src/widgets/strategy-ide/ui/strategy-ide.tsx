@@ -9,14 +9,22 @@ import {
   useState,
 } from "react";
 
-import type { StrategyOutlineSymbol } from "../../../features/edit-strategy";
+import {
+  PROJECTION_VIEWS,
+  type StrategyOutlineSymbol,
+  type StrategyView,
+} from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
-import { useMediaQuery } from "../../../shared/lib/media";
+import {
+  useMediaQuery,
+  useScrollbarFreeWidth,
+} from "../../../shared/lib/media";
 import { useThemePreference } from "../../../shared/lib/theme";
 import {
   Badge,
   Button,
   CommandPalette,
+  SPLIT_HANDLE_SIZE,
   SplitHandle,
   Tabs,
   type CommandPaletteItem,
@@ -30,7 +38,7 @@ import {
 } from "../model/use-panel-layout";
 import "./strategy-ide.css";
 
-export type SourceView = "yaml" | "json" | "form" | "graph" | "diff";
+export type SourceView = StrategyView;
 
 export type StrategyIdeProps = {
   title: string;
@@ -69,11 +77,16 @@ export type StrategyIdeProps = {
   /** The source editor slot (P3). */
   editor: ReactNode;
   /** Source tab whose editor must stay mounted while read-only projections are selected. */
-  sourceView?: "yaml" | "json";
+  sourceView?: "yaml";
   /** Stable read-only tab content keyed by representation. */
   projections?: Partial<Record<SourceView, ReactNode>>;
   /** Document-level recovery or warning UI that must remain visible across every view. */
   notice?: ReactNode;
+  /**
+   * 실행 설정 요약 띠(P3-02, 시안 1). 제목 아래 모든 탭 위에 두어, 지금 실행이 어떤 환경으로 나갈지와
+   * 그 값이 전략 문서 밖이라는 것을 편집 중에 늘 보인다. 내용은 페이지가 주입한다.
+   */
+  runEnvironment?: ReactNode;
   /** Strategy document outline projection (P4-01). */
   outline?: ReactNode;
   /** P4-10 catalog UI; the P4-05 feature model owns schema projection and insertion. */
@@ -90,8 +103,11 @@ export type StrategyIdeProps = {
    * 보인다(WORKFLOW P1-01).
    */
   documentStatus?: ReactNode;
-  /** 문제 목록. 탭 패널 밖(편집 패널 아래)이라 다섯 탭 모두에서 보인다(WORKFLOW P1-01). */
+  /** 문제 목록. 탭 패널 밖(편집 패널 아래)이라 두 표현에서 함께 보인다(WORKFLOW P1-01). */
   problems?: ReactNode;
+  revisionDiff?: (active: boolean) => ReactNode;
+  comparisonOpen?: boolean;
+  onComparisonOpenChange?: (open: boolean) => void;
   view?: SourceView;
   onViewChange?: (view: SourceView) => void;
   /** Views the caller can render; the rest are shown disabled. */
@@ -147,14 +163,24 @@ const hasNativeUndo = (target: EventTarget | null): boolean => {
   );
 };
 
-/** 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭. 이 아래로 내려가면 오버레이로 돌린다. */
+/**
+ * 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭(B-04 정본 480px). 이 아래로 내려가면
+ * 오버레이로 돌린다. 판정은 패널마다 손잡이 폭을 따로 더한다(#290 리뷰 P3-3).
+ */
 const EDITOR_MIN_WIDTH = 480;
-const VIEWS: readonly SourceView[] = ["yaml", "json", "form", "graph", "diff"];
+/**
+ * 펼친 AI 사이드바로 포커스를 옮기는 방법 — 페이지를 굴리지 않는다. 제품 슬롯은 접기 버튼을 그리지 않아
+ * 창보다 긴 패널 자신이 포커스를 받는데, 그냥 옮기면 브라우저가 패널 아래 끝을 창 아래 끝에 맞추려 페이지를
+ * 굴려 서랍 머리 줄이 상단 바 밑에 깔렸다(#325, #290 리뷰 r3 P2-1). 여는 세 입구(상단 바 토글·Alt+A·명령
+ * 팔레트)가 이 값 하나로 옮긴다.
+ */
+const ASSISTANT_FOCUS: FocusOptions = { preventScroll: true };
+const VIEWS = PROJECTION_VIEWS;
 
 /**
  * Strategy IDE frame laid out like the concept: top bar (breadcrumb, save status, run), title
  * with meta line, left Outline + Snippets, centre editor with format/validate actions and the
- * YAML/JSON/Form/Graph/Diff tabs, right Contract Inspector, bottom Intermediate Results. All
+ * 그래프/YAML 표현, revision 비교, 오른쪽 계약 패널, 아래 중간 결과를 조합한다. All
  * panels resize and collapse; collapsed panels stay in the DOM (`hidden`) so every toggle's
  * `aria-controls` resolves. Below 1280px the inspector and debugger become non-modal drawers,
  * closed by default, toggled from the top bar and dismissed with Escape. There is deliberately
@@ -181,40 +207,50 @@ export const StrategyIde = ({
   sourceView,
   projections,
   notice,
+  runEnvironment,
   outline,
   snippets,
   editorActions,
   documentHistory,
   documentStatus,
   problems,
-  view = "yaml",
+  revisionDiff,
+  comparisonOpen = false,
+  onComparisonOpenChange,
+  view = "graph",
   onViewChange,
-  availableViews = ["yaml"],
+  availableViews = VIEWS,
   inspector,
   debugger: debuggerPanel,
   assistant,
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
-  const { layout, resize, toggle, close } = usePanelLayout(
+  const { layout, debuggerMaxHeight, resize, toggle, close } = usePanelLayout(
     narrow
       ? { ...DEFAULT_LAYOUT, inspectorOpen: false, debuggerOpen: false }
       : DEFAULT_LAYOUT,
   );
   // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가.
   //
-  // 사이드바 폭은 **기본값 상수**로 재고 지금 폭을 쓰지 않는다. 지금 폭을 쓰면 폭 조절 드래그가 질의를
+  // 뷰포트가 아니라 좌우 패널이 실제로 나눠 갖는 폭(`.ide__body` content box)으로 잰다. 뷰포트로 재면
+  // 앱 셸 사이드바와 여백(1440px에서 약 250px)을 빼먹어, 1440px에서 AI 사이드바를 열면 편집기가 266px로
+  // 눌리고 툴바가 계약 칸 밑으로 넘쳤다(#269). 페이지 세로 스크롤바는 빼지 않는다 — 판정이 페이지 높이를
+  // 바꿔 스크롤바를 켜고 끄면 판정 입력이 다시 흔들려 사이드바가 매 프레임 붙었다 떴다(#290 리뷰 P1-1).
+  //
+  // 사이드바 폭은 **기본값 상수**로 재고 지금 폭을 쓰지 않는다. 지금 폭을 쓰면 폭 조절 드래그가 판정을
   // 바꿔, 임계를 넘는 순간 패널이 오버레이로 바뀌며 핸들이 사라지고(포인터 캡처가 끊긴다) 저장된 폭
   // 때문에 다음 방문에도 오버레이로 굳는다(B-04 리뷰 P1-3). 오버레이 전환은 "패널을 열었다"로만
-  // 일어나야 한다. 접힌 패널은 자리를 차지하지 않으므로 더하지 않는다.
-  const squeezed = useMediaQuery(
-    `(max-width: ${
-      (layout.outlineOpen ? layout.outlineWidth : 0) +
-      (layout.inspectorOpen ? layout.inspectorWidth : 0) +
-      DEFAULT_LAYOUT.assistantWidth +
-      EDITOR_MIN_WIDTH -
-      1
-    }px)`,
-  );
+  // 일어나야 한다. 접힌 패널은 자리를 차지하지 않으므로 더하지 않는다. 펼친 패널은 손잡이 하나를 데려온다.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyWidth = useScrollbarFreeWidth(bodyRef);
+  const squeezed =
+    bodyWidth !== null &&
+    bodyWidth <
+      (layout.outlineOpen ? layout.outlineWidth + SPLIT_HANDLE_SIZE : 0) +
+        (layout.inspectorOpen ? layout.inspectorWidth + SPLIT_HANDLE_SIZE : 0) +
+        DEFAULT_LAYOUT.assistantWidth +
+        SPLIT_HANDLE_SIZE +
+        EDITOR_MIN_WIDTH;
   const outlineId = useId();
   const inspectorId = useId();
   const debuggerId = useId();
@@ -241,16 +277,35 @@ export const StrategyIde = ({
    * 빼앗지 않으면서 편집기 폭을 지키는 규칙이다.
    */
   const overlayRight =
-    !narrow && squeezed && hasAssistant && layout.inspectorOpen && layout.assistantOpen
+    !narrow &&
+    squeezed &&
+    hasAssistant &&
+    layout.inspectorOpen &&
+    layout.assistantOpen
       ? (layout.lastOpenedRight ?? "assistantOpen")
       : null;
   const inspectorFloating = narrow || overlayRight === "inspectorOpen";
   const assistantFloating = narrow || overlayRight === "assistantOpen";
+  // 넓은 화면의 오버레이 서랍은 붙어 있는 오른쪽 패널 자리만 덮는다 — 폭의 owner는 그 패널의 폭
+  // 상태다. 좁은 화면용 서랍 폭(420px)은 그 자리보다 넓어 편집기 오른쪽 칸을 가렸다(#290 리뷰 P2-1).
+  const railDrawer =
+    overlayRight === null
+      ? undefined
+      : {
+          width:
+            overlayRight === "assistantOpen"
+              ? layout.inspectorWidth
+              : layout.assistantWidth,
+        };
+  const drawerClass =
+    railDrawer === undefined ? "ide__drawer" : "ide__drawer ide__drawer--rail";
   // 기본이 접힘인데 내용을 미리 마운트하면 화면을 열 때마다 사이드바의 질의가 나간다. 한 번 펼친
   // 뒤에는 접어도 유지한다 — 진행 중 턴의 스트림이 접기로 끊기면 안 된다(B-04 리뷰 P3).
-  const [assistantMounted, setAssistantMounted] = useState(layout.assistantOpen);
+  const [assistantMounted, setAssistantMounted] = useState(
+    layout.assistantOpen,
+  );
   /**
-   * 오른쪽 패널 토글. 좁은 화면에서는 계약·AI 서랍이 같은 자리(`position: fixed; right: 0`)에 뜨므로
+   * 오른쪽 패널 토글. 좁은 화면에서는 계약·AI 서랍이 같은 자리(본문 오른쪽 끝)에 뜨므로
    * 한 번에 하나만 연다 — 겹치면 뒤에 깔린 패널이 보이지 않은 채 탭 순서와 접근성 트리에 남는다
    * (B-04 리뷰 P1-2).
    */
@@ -280,9 +335,7 @@ export const StrategyIde = ({
   );
   const closeAssistant = useCallback((): void => {
     close(["assistantOpen"]);
-    queueMicrotask(() =>
-      document.getElementById(assistantToggleId)?.focus(),
-    );
+    queueMicrotask(() => document.getElementById(assistantToggleId)?.focus());
   }, [assistantToggleId, close]);
   const theme = useThemePreference();
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -379,6 +432,7 @@ export const StrategyIde = ({
                 layout.assistantOpen
                   ? assistantRestore.current
                   : assistantFocusTarget(),
+              focusOptions: ASSISTANT_FOCUS,
               execute: () => toggleRight("assistantOpen"),
             },
           ]
@@ -502,9 +556,11 @@ export const StrategyIde = ({
         const opening = !layout.assistantOpen;
         toggleRight("assistantOpen");
         queueMicrotask(() =>
-          (opening ? assistantFocusTarget() : assistantRestore.current)?.focus(),
+          (opening ? assistantFocusTarget() : assistantRestore.current)?.focus(
+            ASSISTANT_FOCUS,
+          ),
         );
-      } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
+      } else if (event.altKey && !modifier && /^[1-2]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
         if (
           event.repeat ||
@@ -724,7 +780,9 @@ export const StrategyIde = ({
               size="small"
               onClick={() => {
                 toggleRight("assistantOpen");
-                queueMicrotask(() => assistantFocusTarget()?.focus());
+                queueMicrotask(() =>
+                  assistantFocusTarget()?.focus(ASSISTANT_FOCUS),
+                );
               }}
               aria-controls={ids.assistant}
               aria-expanded={layout.assistantOpen}
@@ -797,9 +855,10 @@ export const StrategyIde = ({
         </dl>
       </header>
 
+      {runEnvironment ?? null}
       {notice ? <div className="ide__notice">{notice}</div> : null}
 
-      <div className="ide__body">
+      <div className="ide__body" ref={bodyRef}>
         <div
           className="ide__left"
           hidden={!layout.outlineOpen}
@@ -878,10 +937,7 @@ export const StrategyIde = ({
                 idBase={ids.views}
                 items={VIEWS.map((id) => ({
                   id,
-                  label:
-                    id === "yaml" || id === "json"
-                      ? id.toUpperCase()
-                      : capitalize(id),
+                  label: id === "yaml" ? "YAML" : t("ide.view.graph"),
                   disabled: !availableViews.includes(id),
                 }))}
                 value={view}
@@ -912,9 +968,18 @@ export const StrategyIde = ({
                     : projections?.[id]}
               </div>
             ))}
-            {problems ? (
-              <div className="ide__problems">{problems}</div>
+            {revisionDiff ? (
+              <section className="ide__revision-diff">
+                <Button
+                  aria-expanded={comparisonOpen}
+                  onClick={() => onComparisonOpenChange?.(!comparisonOpen)}
+                >
+                  {t("ide.revision.diff")}
+                </Button>
+                <div hidden={!comparisonOpen}>{revisionDiff(comparisonOpen)}</div>
+              </section>
             ) : null}
+            {problems ? <div className="ide__problems">{problems}</div> : null}
           </section>
           {!narrow && layout.debuggerOpen ? (
             <SplitHandle
@@ -922,7 +987,7 @@ export const StrategyIde = ({
               label={t("ide.resizeDebugger")}
               value={layout.debuggerHeight}
               min={PANEL_BOUNDS.debuggerHeight.min}
-              max={PANEL_BOUNDS.debuggerHeight.max}
+              max={debuggerMaxHeight}
               invert
               onChange={(value) => resize("debuggerHeight", value)}
               controls={ids.debugger}
@@ -958,26 +1023,35 @@ export const StrategyIde = ({
           />
         ) : null}
         {assistantFloating ? null : assistantNode}
-      </div>
 
-      {inspectorFloating ? (
-        <div className="ide__drawer" hidden={!layout.inspectorOpen}>
-          {inspectorNode}
-        </div>
-      ) : null}
-      {narrow ? (
-        <div
-          className="ide__drawer ide__drawer--bottom"
-          hidden={!layout.debuggerOpen}
-        >
-          {debuggerNode}
-        </div>
-      ) : null}
-      {hasAssistant && assistantFloating ? (
-        <div className="ide__drawer" hidden={!layout.assistantOpen}>
-          {assistantNode}
-        </div>
-      ) : null}
+        {/* 서랍은 본문 안에 그린다 — 오른쪽 서랍의 세로 범위가 본문과 같아 상단 바 밑에 깔리지 않는다(#325). */}
+        {inspectorFloating ? (
+          <div
+            className={drawerClass}
+            style={railDrawer}
+            hidden={!layout.inspectorOpen}
+          >
+            {inspectorNode}
+          </div>
+        ) : null}
+        {narrow ? (
+          <div
+            className="ide__drawer ide__drawer--bottom"
+            hidden={!layout.debuggerOpen}
+          >
+            {debuggerNode}
+          </div>
+        ) : null}
+        {hasAssistant && assistantFloating ? (
+          <div
+            className={drawerClass}
+            style={railDrawer}
+            hidden={!layout.assistantOpen}
+          >
+            {assistantNode}
+          </div>
+        ) : null}
+      </div>
       <CommandPalette
         open={paletteOpen}
         label={t("command.palette")}
@@ -992,8 +1066,6 @@ export const StrategyIde = ({
   );
 };
 
-const capitalize = (value: string) =>
-  value.charAt(0).toUpperCase() + value.slice(1);
 
 const RESULT_TABS = [
   { id: "preview", label: t("ide.debugger.tab.preview") },

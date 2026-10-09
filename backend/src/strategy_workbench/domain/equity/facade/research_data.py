@@ -1,10 +1,12 @@
 from strategy_workbench.domain.equity._models import (
+    SNAPSHOT_CONTRACT_SEPARATOR,
     CellKind,
     DataLoadStatus,
     DatasetFieldProfile,
     DatasetRevision,
     DataSnapshot,
     FieldCoverageCapability,
+    FieldFrequency,
     FieldLag,
     FieldValueType,
     ResearchPanelCell,
@@ -14,15 +16,19 @@ from strategy_workbench.domain.equity._models import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    canonical_revision,
+    field_contract_snapshot_id,
 )
 
 __all__ = [
+    "SNAPSHOT_CONTRACT_SEPARATOR",
     "CellKind",
     "DataLoadStatus",
     "DataSnapshot",
     "DatasetRevision",
     "DatasetFieldProfile",
     "FieldCoverageCapability",
+    "FieldFrequency",
     "FieldLag",
     "FieldValueType",
     "ResearchPanelCell",
@@ -32,4 +38,6 @@ __all__ = [
     "UniverseHistoryQuery",
     "UniverseHistoryResult",
     "UniversePoint",
+    "canonical_revision",
+    "field_contract_snapshot_id",
 ]

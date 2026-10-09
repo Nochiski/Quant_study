@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
+GOLDEN_SPEC_HASH = "69064ce14c47ac2c94ad8a1620da4d4326313f1da4aa42b54d15643e5111ca44"
 
 
 def _source(name: str) -> str:
@@ -33,14 +33,17 @@ def test_yaml_and_json_sources_compile_to_the_same_backend_hash() -> None:
     yaml_result = _compile(client, _source("quality_momentum.yaml"))
     json_result = _compile(client, _source("quality_momentum.json"), format="json")
 
+    # 골든의 모멘텀은 수정주가 `price.adj_close` 를 읽는다 — 정상 예시는 경고도 없이 통과해야 한다
+    # (BACKLOG-018 후속, 리뷰 #232 DEFECT-232-05).
     assert yaml_result["diagnostics"] == []
+    assert json_result["diagnostics"] == []
     assert yaml_result["spec_hash"] == GOLDEN_SPEC_HASH == json_result["spec_hash"]
     assert yaml_result["source_hash"] != json_result["source_hash"]
-    assert yaml_result["schema_version"] == "1.1"
+    assert yaml_result["schema_version"] == "1.2"
     assert yaml_result["spec"]["identity"] == {
         "strategy_id": "draft",
         "revision": 0,
-        "schema_version": "1.1",
+        "schema_version": "1.2",
     }
     assert yaml_result["canonical_json"] == json_result["canonical_json"]
     assert '"max_name_weight":0.05' in yaml_result["canonical_json"]
@@ -68,7 +71,7 @@ def test_semantic_error_points_at_the_exact_yaml_scalar_and_withholds_spec() -> 
 
 def test_missing_field_points_at_the_nearest_parent_range() -> None:
     client = TestClient(build_http_app())
-    source = _source("quality_momentum.yaml").replace('  end: "2026-08-31"\n', "")
+    source = _source("quality_momentum.yaml").replace("      output_node_id: mom_252\n", "")
 
     result = _compile(client, source)
 
@@ -76,8 +79,8 @@ def test_missing_field_points_at_the_nearest_parent_range() -> None:
     (diagnostic,) = result["diagnostics"]
     assert diagnostic["code"] == "structure.missing_field"
     assert diagnostic["kind"] == "structural"
-    assert diagnostic["pointer"] == "/data/end"
-    assert diagnostic["range"]["start"]["line"] == source.splitlines().index("data:") + 1
+    assert diagnostic["pointer"] == "/factors/0/graph/output_node_id"
+    assert diagnostic["range"]["start"]["line"] == source.splitlines().index("    graph:") + 1
 
 
 def test_unknown_key_points_at_the_key_itself() -> None:
@@ -91,6 +94,9 @@ def test_unknown_key_points_at_the_key_itself() -> None:
     assert diagnostic["pointer"] == "/risk/max_name_wieght"
     start, end = diagnostic["range"]["start"], diagnostic["range"]["end"]
     assert source[start["offset"] : end["offset"]] == "max_name_wieght"
+    # 편집기도 자기 parse 지도에서 키를 짚는다. 어느 코드가 키를 가리키는지는 wire 가
+    # 알린다(#357 C-P3-13).
+    assert diagnostic["anchor"] == "key"
 
 
 def test_syntax_error_returns_a_positioned_syntax_diagnostic() -> None:

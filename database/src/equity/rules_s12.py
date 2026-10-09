@@ -865,14 +865,18 @@ def _fin(field_id: str, column: str, label: str, unit: str, value_type: str, evi
 
 
 FIELDS_FIN: tuple[FieldProfile, ...] = (
-    # FIELD_MAP §2 의 8 (레지스트리가 요구하는 것)
+    # FIELD_MAP §2 의 8 (레지스트리가 요구하는 것). 흐름 계정 5(매출·매출총이익·영업이익·순이익·
+    # 영업현금)의 **값은 v_fin_latest 의 ttm_*(최근 4분기 합)** 이다(#212). 여기 columns 는 그 TTM 을
+    # 만드는 원 계정이고 커버율 축으로만 쓴다 — TTM 커버율은 이 값보다 낮을 수 있다.
     _fin("financial.book_equity", "total_equity", "자본총계", "KRW", "amount",
          "fin_std.total_equity ← 표준계정 자본총계. 지배주주지분은 financial.equity_owners."),
-    _fin("financial.net_income", "net_income", "당기순이익", "KRW", "amount",
-         "분기는 3개월·사업보고서는 12개월 값이다(report_code 가 기간을 정한다). TTM 합성은 "
-         "팩터층이고 fin_std 에 ttm 컬럼은 없다. 4분기 파생은 net_income_q4_derived."),
-    _fin("financial.revenue", "revenue", "매출액", "KRW", "amount",
-         "금융업은 ifrs-full_Revenue 가 성립하지 않아 행마다 financial.revenue_basis 가 산출 "
+    _fin("financial.net_income", "net_income", "당기순이익(TTM)", "KRW", "amount",
+         "값은 v_fin_latest.ttm_net_income — 연속 4분기가 공시일 기준으로 다 보일 때만 서는 "
+         "최근 4분기 합이다(#212). 원 계정은 분기 3개월·사업보고서 12개월이라(report_code 가 "
+         "기간을 정한다) 그대로 내면 종목마다 기간이 섞인다. fin_std 에 ttm 컬럼은 없다(합성은 "
+         "뷰가 한다). 4분기 파생은 net_income_q4_derived."),
+    _fin("financial.revenue", "revenue", "매출액(TTM)", "KRW", "amount",
+         "값은 v_fin_latest.ttm_revenue(최근 4분기 합, #212). 금융업은 ifrs-full_Revenue 가 성립하지 않아 행마다 financial.revenue_basis 가 산출 "
          "규칙을 남긴다. **소비 규약** — ① 횡단면은 revenue_basis='standard' 끼리만 견주고 "
          "은행·보험 합산분(banking_gross·insurance_gross)은 업종 안에서만 쓴다. "
          "② financial.revenue_basis_prev 와 다르면 성장률은 결측으로 버린다. 값은 그대로 "
@@ -888,17 +892,20 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
          "한화생명 2023 standard 0 → 2024 insurance_gross 24.6조(0으로 나누기)."),
     _fin("financial.total_assets", "total_asset", "자산총계", "KRW", "amount",
          "fin_std.total_asset ← 표준계정 자산총계."),
-    _fin("financial.operating_income", "op_profit", "영업이익", "KRW", "amount",
-         "영업이익 아래로는 DART 와 컨센서스가 완전히 일치한다(FACTORS §8 실측)."),
-    _fin("financial.operating_cash_flow", "cf_operating_ytd", "영업활동현금흐름(연초누계)",
+    _fin("financial.operating_income", "op_profit", "영업이익(TTM)", "KRW", "amount",
+         "값은 v_fin_latest.ttm_op_profit(최근 4분기 합, #212). 영업이익 아래로는 DART 와 "
+         "컨센서스가 완전히 일치한다(FACTORS §8 실측)."),
+    _fin("financial.operating_cash_flow", "cf_operating_ytd", "영업활동현금흐름(TTM)",
          "KRW", "amount",
-         "**연초누계 축**이다(DEFECT-C02: 현금흐름은 분기보고서도 누계). 분기 차분 축은 별개 "
-         "필드 financial.cf_operating_q 로 갈랐다 — S19 가 두 축을 필드로 분리해 FIELD_MAP §2 의 "
-         "'소비 측이 축을 골라야 한다' 조건을 닫았다."),
+         "값은 v_fin_latest.ttm_cf_operating — 분기 차분 축(cf_operating_q) 4행 합이다(#212). "
+         "원장 현금흐름은 보고서 종류와 무관하게 연초누계라(DEFECT-C02) 3·6·9·12개월이 섞여 "
+         "손익 TTM 과 짝이 맞지 않았다. 분기 차분은 직전 보고서가 없으면 NULL 이라 결측이 손익 "
+         "TTM 보다 많을 수 있다. columns 의 cf_operating_ytd 는 커버율 축이고, 분기 차분 원값은 "
+         "내부 스코프 필드 financial.cf_operating_q 다."),
     _fin("financial.total_liabilities", "total_liab", "부채총계", "KRW", "amount",
          "fin_std.total_liab ← 표준계정 부채총계."),
-    _fin("financial.gross_profit", "gross_profit", "매출총이익", "KRW", "amount",
-         "fin_map.FIN_MAP['gross_profit'](concept GrossProfit·nm 매출총이익) 실재 — 24계정에 "
+    _fin("financial.gross_profit", "gross_profit", "매출총이익(TTM)", "KRW", "amount",
+         "값은 v_fin_latest.ttm_gross_profit(최근 4분기 합, #212). fin_map.FIN_MAP['gross_profit'](concept GrossProfit·nm 매출총이익) 실재 — 24계정에 "
          "실었다(DESIGN §10 P30). 금융업은 매출총이익 개념이 없어 결측이 정상이다."),
     # 매출 기준 두 축 — 계정이 아니라 **라벨**이다. `financial.revenue` 의 소비 규약이 이 둘을
     # 읽으라고 말하므로 선언하지 않으면 규약이 지킬 수 없는 약속이 된다(값만 내고 근거를 안 내는

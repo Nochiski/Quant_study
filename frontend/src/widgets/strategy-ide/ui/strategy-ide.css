@@ -1,6 +1,9 @@
 .ide {
+  /* 본문 좌우·아래 여백. 붙은 패널의 바깥 끝이라 넓은 화면 오버레이 서랍도 이 값을 읽는다. */
+  --ide-gutter: var(--space-5);
   display: flex;
   flex-direction: column;
+  min-width: 360px;
   min-height: 100vh;
   background: var(--surface-canvas);
 }
@@ -101,13 +104,19 @@
   padding: 0 var(--space-5);
 }
 
-/* body: left · centre · right */
+/*
+ * body: left · centre · right. 오른쪽 서랍(`.ide__drawer`)의 기준 상자다. 배경을 루트와 같은 색으로 불투명하게
+ * 칠한다 — 기준 상자가 된 본문은 겹침(Overlap) 때문에 따로 합성되는데, 투명한 합성 층의 글자는 LCD
+ * 안티앨리어싱을 못 써 계약·중간 결과·문제 목록 글자가 회색조로 흐려졌다(#290 리뷰 r3 P3-1).
+ */
 .ide__body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   gap: 0;
-  padding: 0 var(--space-5) var(--space-5);
+  padding: 0 var(--ide-gutter) var(--ide-gutter);
+  background: var(--surface-canvas);
 }
 
 .ide__left {
@@ -197,12 +206,13 @@
 
 /*
  * 문서 상태 배지는 탭 줄에 산다 — 탭 패널 밖이라 다섯 탭 모두에서 보인다(P1-01). 실행 취소·다시 실행도
- * 같은 줄이다(P1-02). 줄바꿈을 허용하면 편집기 높이가 한 줄만큼 줄어 1280px에서 레이아웃이 밀리므로
- * 한 줄을 유지하고, 남는 폭이 모자라면 탭과 배지가 줄어든다(`min-width: 0` + 말줄임).
+ * 같은 줄이다(P1-02). 넓은 칸에서는 한 줄이고 탭 목록이 남는 폭을 채운다. 칸이 좁으면(아래 container
+ * query) 툴바 버튼 줄(`.doc-toolbar__actions`, #269)처럼 다음 줄로 내린다.
  */
 .ide__editor-tabs {
+  container-type: inline-size;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: stretch;
   justify-content: space-between;
   gap: var(--space-2);
@@ -211,15 +221,16 @@
 }
 
 /*
- * 폭이 모자라면 탭 목록만 가로로 스크롤한다. 탭은 줄바꿈도 축소도 하지 않으므로 이 선언이 없으면
- * 버튼 슬롯을 덮는다 — 1440px에서 이미 넘친다(스트립 콘텐츠 304px < 탭 311px, 1차 리뷰 P3).
+ * 한 줄일 때 칸이 모자라면 탭 목록만 가로로 스크롤한다. 탭은 줄바꿈도 축소도 하지 않으므로 이 선언이
+ * 없으면 버튼 슬롯을 덮는다(1차 리뷰 P3). 줄을 나눈 뒤에도 칸이 탭 목록보다 좁으면(패널을 끌어 편집기를
+ * 아주 좁힌 경우) 같은 방식으로 스크롤한다.
  *
  * 이 상자를 **위아래로 넓히지 않는다**. 툴바 액션 줄과 탭 줄 사이 간격은 2px뿐이라, 스크롤포트를
  * 위로 키우면 검증 버튼 아래를 덮어 그 영역 클릭이 탭 스트립으로 간다(3차 리뷰 P2: 28px 버튼의
  * 하단 6px이 조용한 사각지대가 됐다). 포커스 링 클립은 링을 탭 안쪽에 그려 푼다(아래).
  */
 .ide__editor-tabs .ui-tabs {
-  flex: 1;
+  flex: 1 0 100%;
   min-width: 0;
   overflow-x: auto;
   border-bottom: 0;
@@ -231,6 +242,22 @@
  */
 .ide__editor-tabs .ui-tab:focus-visible {
   outline-offset: -2px;
+}
+
+/*
+ * 칸이 탭 목록(343px)·이력 버튼(183px)·가장 긴 문서 상태(영문 "Validation error", 139px)와 사이
+ * 간격을 한 줄에 담지 못하면(680px 이하) 탭 목록이 한 줄을 다 쓰고 이력 버튼과 배지는 다음 줄로
+ * 내려간다. 한 줄을 고집하던 때는 칸이 512px 이하이면 탭 목록이 줄어 Graph·Diff 탭이 이력 버튼 밑으로
+ * 밀려 눌리지 않았다(#296). 줄바꿈은 내용 폭이 아니라 칸 폭으로 정한다 — 내용 폭이면 1440px 기본
+ * 칸(632px)에서 문서 상태 글자가 바뀔 때마다("편집 중"은 한 줄, "검증 통과"는 두 줄) 줄 수가 오가
+ * 편집기가 위아래로 뛴다.
+ */
+@container (max-width: 680px) {
+  /* 탭 목록이 한 줄을 다 쓰므로 구분선도 그 줄에 긋는다 — 활성 탭 밑줄이 선에 붙는다(#290 리뷰 r2 P3-6). */
+  .ide__editor-tabs .ui-tabs {
+    flex-basis: 100%;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 /* 폭이 모자라도 두 버튼은 줄지 않는다 — 탭 목록이 먼저 스크롤된다. */
@@ -467,9 +494,13 @@
   background: var(--status-warn-soft);
 }
 
-/* drawers below 1280px */
+/*
+ * 오른쪽 서랍 — 1280px 미만, 또는 편집기 최소 폭 때문에 오른쪽 패널이 붙지 못할 때 뜬다. 본문
+ * (`.ide__body`) 안에서 떠 세로 범위가 붙은 패널과 같다. 창 전체 높이로 뜨면 머리 줄이 상단 바 밑에 깔려
+ * 서랍의 접기 버튼을 누를 수 없고 실행 설정 띠도 가렸다(#325).
+ */
 .ide__drawer {
-  position: fixed;
+  position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
@@ -481,7 +512,9 @@
   overflow: auto;
 }
 
+/* 1280px 미만의 중간 결과 서랍은 창 아래 끝에 붙는다. */
 .ide__drawer--bottom {
+  position: fixed;
   top: auto;
   left: 0;
   width: auto;
@@ -503,8 +536,60 @@
   display: none;
 }
 
+/*
+ * 1280px 이상에서 편집기 최소 폭 때문에 뜬 서랍(B-04 오버레이)은 붙어 있는 오른쪽 패널 자리만 덮는다.
+ * 폭은 그 패널의 폭(인라인)이고 오른쪽·아래 끝도 그 패널처럼 본문 여백 안쪽이다(#290 리뷰 P2-1).
+ */
+.ide__drawer--rail {
+  right: var(--ide-gutter);
+  bottom: var(--ide-gutter);
+}
+
 @media (max-width: 1279px) {
   .ide__results {
     grid-template-columns: 1fr;
+  }
+}
+
+.ide__revision-diff {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+/* 좁은 화면에서는 구조 패널이 편집기의 가독 폭을 빼앗지 않게 세로로 배치한다.
+ * 패널 열림·닫힘과 저장된 폭은 그대로 두고, 가로 크기 조절 손잡이만 숨긴다. */
+@media (max-width: 767px) {
+  .ide {
+    --ide-gutter: var(--space-2);
+    min-width: 0;
+  }
+  .ide__body {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .ide__left {
+    max-width: 100%;
+  }
+  .ide__body > .ui-split-handle--vertical {
+    display: none;
+  }
+  .ide__topbar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+  .ide__breadcrumb,
+  .ide__topbar-status {
+    flex: 1 1 100%;
+    min-width: 0;
+    text-align: left;
+  }
+  .ide__topbar-actions,
+  .ide__editor-header,
+  .ide__editor-actions {
+    flex-wrap: wrap;
+  }
+  .ide__topbar-actions .ui-button {
+    white-space: nowrap;
   }
 }

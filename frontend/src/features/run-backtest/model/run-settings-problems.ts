@@ -1,0 +1,183 @@
+import {
+  runEnvironmentName,
+  type RunEnvironmentField,
+} from "../../../entities/backtest";
+import type { BacktestRunSpec } from "../../../shared/api";
+import { t } from "../../../shared/config";
+import {
+  DATE_INPUT_MAXIMUM,
+  DATE_INPUT_MINIMUM,
+  type RunEnvironmentFieldError,
+} from "./run-environment";
+import {
+  OOS_START_FIELD,
+  type BacktestRunSettingsError,
+  type BacktestRunSettingsResult,
+} from "./run-settings";
+
+/**
+ * 실행을 막는 칸 하나(DEFECT-242-01). `target` 은 패널 입력의 `data-run-field` 값이라 "이 칸으로 가기"가 그
+ * 칸에 초점을 옮긴다. 실행 설정 칸은 필드 이름, 실행 옵션 칸은 오류 코드(`initial_cash` 등)다.
+ */
+export type RunSettingsProblem = {
+  target: string;
+  kind: "missing" | "invalid";
+  /** 칸 이름(스키마 라벨, 단위 없이). */
+  name: string;
+  /** 칸 이름과 이유를 담은 한 문장. */
+  sentence: string;
+};
+
+const boundOf = (
+  field: RunEnvironmentField,
+  error: RunEnvironmentFieldError,
+): number | null => {
+  if (error === "minimum") return field.minimum;
+  if (error === "exclusiveMinimum") return field.exclusiveMinimum;
+  if (error === "maximum") return field.maximum;
+  if (error === "exclusiveMaximum") return field.exclusiveMaximum;
+  return null;
+};
+
+/** 실행 옵션 오류 → 그 칸의 `data-run-field`. OOS 시작일 칸 하나에 오류 두 가지가 걸린다. */
+const OPTION_FIELD: Record<
+  Exclude<BacktestRunSettingsError, "environment">,
+  string
+> = {
+  initial_cash: "initial_cash",
+  annualization_days: "annualization_days",
+  oos_out_of_range: OOS_START_FIELD,
+  oos_incomplete: OOS_START_FIELD,
+};
+
+/** 칸 옆 오류 문장. 범위에는 스키마의 표시 단위를 붙인다(예: "0bp 이상이어야 합니다."). */
+export const runEnvironmentErrorMessage = (
+  field: RunEnvironmentField,
+  error: RunEnvironmentFieldError,
+): string => {
+  const bound = boundOf(field, error);
+  return t(`backtest.settings.environment.error.${error}`)
+    .replace(
+      "{bound}",
+      bound === null ? "" : `${bound}${field.displayUnit ?? ""}`,
+    )
+    .replace("{minimum}", DATE_INPUT_MINIMUM)
+    .replace("{maximum}", DATE_INPUT_MAXIMUM);
+};
+
+type RunOptionError = Exclude<BacktestRunSettingsError, "environment">;
+
+/** 실행 옵션 칸의 이름(단위 없이). 요약 띠와 패널 오류 목록이 같은 이름을 쓴다. */
+export const runOptionErrorName = (error: RunOptionError): string =>
+  t(`backtest.settings.problem.name.${error}`);
+
+/**
+ * 서버 거절이 가리킨 요청 본문의 칸(`backtest.run.field_invalid` 의 `field`, 점 경로)을 패널 칸 이름으로
+ * 바꾼다. 실행 설정 칸은 `environment.<이름>`, 실행 옵션은 `BacktestRunSpec` 필드 이름이다. 모르는 경로면
+ * 이름을 지어내지 않고 null 을 준다.
+ */
+export const runFieldLabel = (
+  fields: readonly RunEnvironmentField[],
+  path: string,
+): string | null => {
+  const [head, next] = path.split(".");
+  if (head === "environment") {
+    const field = fields.find((candidate) => candidate.name === next);
+    return field === undefined ? null : runEnvironmentName(field);
+  }
+  // 칸 이름을 요청 계약 타입으로 좁혀, 계약의 칸 이름이 바뀌면 typecheck 가 case 를 잡게 한다
+  // (#357 C-P3-14). 계약 밖 이름은 그대로 default 로 간다.
+  const option = head as keyof BacktestRunSpec;
+  switch (option) {
+    case "initial_cash":
+    case "annualization_days":
+      return runOptionErrorName(option);
+    case "metric_windows":
+      return runOptionErrorName("oos_out_of_range");
+    case "core":
+      return t("backtest.settings.core");
+    case "benchmark_security_id":
+      return t("backtest.settings.benchmark");
+    default:
+      return null;
+  }
+};
+
+/** 실행 옵션 칸의 오류 한 줄: "초기 자본: 0보다 큰 숫자를 입력하세요." 실행 환경 오류는 이유만. */
+export const runOptionErrorMessage = (
+  error: BacktestRunSettingsError,
+): string =>
+  error === "environment"
+    ? t("backtest.settings.error.environment")
+    : `${runOptionErrorName(error)}: ${t(`backtest.settings.error.${error}`)}`;
+
+/**
+ * 실행을 막는 칸을 패널 순서대로 모은다: 실행 설정 칸(스키마 순서) 다음 실행 옵션 칸. 실행 설정 전체가
+ * 무효라는 뜻의 `environment` 오류는 칸별 문제로 이미 드러나므로 따로 세지 않는다.
+ */
+export const runSettingsProblems = (
+  fields: readonly RunEnvironmentField[],
+  errors: Readonly<Record<string, RunEnvironmentFieldError>>,
+  result: BacktestRunSettingsResult,
+): RunSettingsProblem[] => [
+  ...fields.flatMap((field): RunSettingsProblem[] => {
+    const error = errors[field.name];
+    if (error === undefined) return [];
+    const name = runEnvironmentName(field);
+    return [
+      error === "required"
+        ? {
+            target: field.name,
+            kind: "missing",
+            name,
+            sentence: t("backtest.settings.problem.missing").replace(
+              "{field}",
+              name,
+            ),
+          }
+        : {
+            target: field.name,
+            kind: "invalid",
+            name,
+            sentence: t("backtest.settings.problem.invalid")
+              .replace("{field}", name)
+              .replace("{reason}", runEnvironmentErrorMessage(field, error)),
+          },
+    ];
+  }),
+  ...(result.errors as readonly BacktestRunSettingsError[])
+    .filter((error): error is RunOptionError => error !== "environment")
+    .map((error): RunSettingsProblem => {
+      const name = runOptionErrorName(error);
+      return {
+        target: OPTION_FIELD[error],
+        kind: "invalid",
+        name,
+        sentence: t("backtest.settings.problem.invalid")
+          .replace("{field}", name)
+          .replace("{reason}", t(`backtest.settings.error.${error}`)),
+      };
+    }),
+];
+
+/**
+ * 막힌 이유 한 문장. 빈 칸뿐이면 그 칸 이름을 모두 적고("실행 설정에서 시작일·종료일·유니버스 칸을
+ * 채우세요."), 값이 틀린 칸이 있으면 패널 순서의 첫 칸 이름과 이유를 적고 나머지 개수를 붙인다.
+ */
+export const runSettingsBlockedReason = (
+  problems: readonly RunSettingsProblem[],
+): string | null => {
+  const [first] = problems;
+  if (first === undefined) return null;
+  if (problems.every((problem) => problem.kind === "missing"))
+    return t("backtest.settings.incomplete").replace(
+      "{fields}",
+      problems.map((problem) => problem.name).join("·"),
+    );
+  return problems.length === 1
+    ? first.sentence
+    : `${first.sentence} ${t("backtest.settings.problem.more").replace(
+        "{count}",
+        String(problems.length - 1),
+      )}`;
+};

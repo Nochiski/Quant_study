@@ -30,10 +30,11 @@
 -- `period_end_basis='inferred'`, 아니면 `period_unresolved` 격리.
 --
 -- 기간 어휘(DEFECT-C02): 손익 `thstrm_amount` 는 분기 3개월 · 사업보고서 12개월. 4분기 값은
--- `<계정>_q4_derived` = 사업보고서 − Σ(1Q·2Q·3Q) 이고 **셋 중 하나라도 없으면 NULL**(부분합
--- 금지). 현금흐름은 연초누계 `_ytd` 를 그대로 싣고 `_q` = 자기 누계 − 직전 보고서 누계
--- (11013 은 누계 자체가 분기값). 두 파생 블록은 `*_available_date`(구성 행 max)와 `*_n_rows`
--- 를 동반한다.
+-- `<계정>_q4_derived` = 사업보고서 − Σ(같은 회계연도 1Q·2Q·3Q) 이고 **셋 중 하나라도 없으면
+-- NULL**(부분합 금지). 현금흐름은 연초누계 `_ytd` 를 그대로 싣고 `_q` = 자기 누계 − 같은 회계연도
+-- 직전 분기 보고서 누계(11013 은 누계 자체가 분기값). "같은 회계연도" 는 `bsns_year` 가 아니라
+-- 기간 말일로 찾는다(#236 — `bsns_year` 는 기간 말일의 연도라 비12월 결산에서 회계연도와 어긋난다).
+-- 두 파생 블록은 `*_available_date`(구성 행 max)와 `*_n_rows` 를 동반한다.
 --
 -- **재수집 판본 dedup**: `stg_fin`·`stg_disclosure` 는 `write_mode='append_only'` ·
 -- `key_unique=False` 라(rules_dart.py) 같은 자연키가 여러 번 실릴 수 있다. `grp` 는 GROUP BY 라
@@ -392,14 +393,51 @@ dup AS (
     WHERE pre_reject IS NULL
     GROUP BY corp_code, period_end, report_code, fs_div
 ),
+kept AS (
+    -- 산출에 남는 행(격리·`duplicate_vintage` 제외)의 회계기간 축. 4분기·현금흐름 분기 파생은
+    -- `bsns_year` 가 아니라 이 축으로 묶는다(#236) — DART `bsns_year` 는 기간 말일의 연도라,
+    -- 비12월 결산은 사업보고서와 같은 회계연도 분기의 연도가 다르다(3월 결산: 2021-03 사업보고서와
+    -- 2021-06·09·12 분기가 둘 다 2021). 같은 회계연도는 결산월 말일에서 보고서 종류만큼 당긴
+    -- 달의 말일로 찾는다(`pe_cand` 와 같은 달력 규약).
+    -- 공개일은 원천 `rcept_dt` 가 아니라 stage 보정 공개일 `avail_dt` 를 싣는다(Q-4 병합 — `head` 주석).
+    SELECT j.corp_code, j.bsns_year, j.reprt_code, j.fs_div, j.period_end, j.report_code,
+           j.avail_dt
+    FROM judged j
+    JOIN dup d
+      ON d.corp_code = j.corp_code AND d.period_end = j.period_end
+     AND d.report_code = j.report_code AND d.fs_div = j.fs_div
+    WHERE j.pre_reject IS NULL AND d.n_grain = 1
+),
+q4member AS (
+    -- 사업보고서 행과 같은 회계연도의 1Q·반기·3Q 행
+    SELECT a.corp_code, a.bsns_year, a.fs_div,
+           m.bsns_year                                           AS m_bsns_year,
+           m.reprt_code                                          AS m_reprt_code,
+           m.report_code                                         AS m_report_code,
+           m.avail_dt                                            AS m_avail_dt
+    FROM kept a
+    CROSS JOIN _const k
+    JOIN kept m
+      ON m.corp_code = a.corp_code AND m.fs_div = a.fs_div
+     AND m.report_code IN (SELECT reprt_code FROM _qcode)
+     AND m.period_end = last_day(a.period_end
+                                 - INTERVAL (CASE m.report_code
+                                                 WHEN '11013' THEN k.three_quarter_months
+                                                 WHEN '11012' THEN k.half_months
+                                                 ELSE k.quarter_months END) MONTH)
+    WHERE a.reprt_code = '11011'
+),
 q4src AS (
-    -- 1Q·2Q(반기)·3Q 의 3개월 손익 합. 세 판본이 다 있어야(n_q = 3) q4 가 선다(부분합 금지).
-    SELECT corp_code, bsns_year, fs_div, metric,
-           sum(v)                                                AS sum_q,
-           count(v)                                              AS n_q
-    FROM val
-    WHERE family = 'flow' AND reprt_code IN (SELECT reprt_code FROM _qcode)
-    GROUP BY corp_code, bsns_year, fs_div, metric
+    -- 같은 회계연도 1Q·반기·3Q 의 3개월 손익 합. 셋이 다 있어야(n_q = 3) q4 가 선다(부분합 금지).
+    SELECT q.corp_code, q.bsns_year, q.fs_div, v.metric,
+           sum(v.v)                                              AS sum_q,
+           count(v.v)                                            AS n_q
+    FROM q4member q
+    JOIN val v
+      ON v.corp_code = q.corp_code AND v.bsns_year = q.m_bsns_year
+     AND v.reprt_code = q.m_reprt_code AND v.fs_div = q.fs_div
+    WHERE v.family = 'flow'
+    GROUP BY q.corp_code, q.bsns_year, q.fs_div, v.metric
 ),
 q4 AS (
     SELECT a.corp_code, a.bsns_year, a.fs_div, a.metric,
@@ -412,38 +450,56 @@ q4 AS (
       AND q.n_q = (SELECT count(*) FROM _qcode)
 ),
 q4meta AS (
-    -- 구성 보고서 수(최대 4)와 그 접수일의 max — 파생 컬럼의 공개시점(DESIGN §3)
-    SELECT corp_code, bsns_year, fs_div,
-           count(DISTINCT reprt_code)                            AS n_rows,
-           max(avail_dt)                                         AS available_date
-    FROM head
-    WHERE reprt_code IN (SELECT reprt_code FROM _rcode)
-    GROUP BY corp_code, bsns_year, fs_div
+    -- 구성 보고서 수(사업보고서 + 같은 회계연도 분기, 최대 4)와 그 공개일의 max — 파생 컬럼의
+    -- 공개시점(DESIGN §3). 구성 행은 회계기간 축(#236), 공개일은 stage 보정 공개일 `avail_dt`
+    -- (J-41·C-11)다 — 구성 행 각자의 `available_date` 와 같은 축이어야 파생 값이 구성 행보다
+    -- 먼저 공개되지 않는다(Q-4 병합, e1.27.0).
+    SELECT a.corp_code, a.bsns_year, a.fs_div,
+           1 + count(DISTINCT q.m_report_code)                   AS n_rows,
+           greatest(a.avail_dt, coalesce(max(q.m_avail_dt), a.avail_dt)) AS available_date
+    FROM kept a
+    LEFT JOIN q4member q
+      ON q.corp_code = a.corp_code AND q.bsns_year = a.bsns_year AND q.fs_div = a.fs_div
+    WHERE a.reprt_code = '11011'
+    GROUP BY a.corp_code, a.bsns_year, a.fs_div, a.avail_dt
+),
+cfprev AS (
+    -- 현금흐름 분기값의 직전 보고서 — 같은 회계연도 바로 앞 분기(기간 말일 = 자기 말일에서
+    -- `quarter_months` 당긴 달의 말일)이고 보고서 종류가 대응표(`rules_s12.CF_PRIOR_REPORT`)대로다.
+    -- 공개일은 두 행 모두 `avail_dt`(Q-4 병합).
+    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.report_code, s.avail_dt,
+           p.bsns_year                                           AS p_bsns_year,
+           p.reprt_code                                          AS p_reprt_code,
+           p.avail_dt                                            AS p_avail_dt
+    FROM kept s
+    CROSS JOIN _const k
+    LEFT JOIN kept p
+      ON p.corp_code = s.corp_code AND p.fs_div = s.fs_div
+     AND p.report_code = CASE s.report_code WHEN '11012' THEN '11013'
+                                            WHEN '11014' THEN '11012'
+                                            WHEN '11011' THEN '11014' END
+     AND p.period_end = last_day(s.period_end - INTERVAL (k.quarter_months) MONTH)
 ),
 cfq AS (
-    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div, s.metric,
-           CASE WHEN s.reprt_code = '11013' THEN s.v
+    SELECT c.corp_code, c.bsns_year, c.reprt_code, c.fs_div, s.metric,
+           CASE WHEN c.report_code = '11013' THEN s.v
                 ELSE s.v - p.v END                               AS v
-    FROM val s
+    FROM cfprev c
+    JOIN val s
+      ON s.corp_code = c.corp_code AND s.bsns_year = c.bsns_year
+     AND s.reprt_code = c.reprt_code AND s.fs_div = c.fs_div
     LEFT JOIN val p
-      ON p.corp_code = s.corp_code AND p.bsns_year = s.bsns_year
-     AND p.fs_div = s.fs_div AND p.metric = s.metric
-     AND p.reprt_code = CASE s.reprt_code WHEN '11012' THEN '11013'
-                                          WHEN '11014' THEN '11012'
-                                          WHEN '11011' THEN '11014' END
+      ON p.corp_code = c.corp_code AND p.bsns_year = c.p_bsns_year
+     AND p.reprt_code = c.p_reprt_code AND p.fs_div = c.fs_div AND p.metric = s.metric
     WHERE s.family = 'cf'
 ),
 cfqmeta AS (
-    SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div,
-           CASE WHEN s.reprt_code = '11013' THEN 1
-                WHEN p.rcept_no IS NOT NULL THEN 2 ELSE 1 END    AS n_rows,
-           greatest(s.avail_dt, coalesce(p.avail_dt, s.avail_dt)) AS available_date
-    FROM head s
-    LEFT JOIN head p
-      ON p.corp_code = s.corp_code AND p.bsns_year = s.bsns_year AND p.fs_div = s.fs_div
-     AND p.reprt_code = CASE s.reprt_code WHEN '11012' THEN '11013'
-                                          WHEN '11014' THEN '11012'
-                                          WHEN '11011' THEN '11014' END
+    SELECT corp_code, bsns_year, reprt_code, fs_div,
+           CASE WHEN report_code = '11013' THEN 1
+                WHEN p_reprt_code IS NOT NULL THEN 2 ELSE 1 END  AS n_rows,
+           CASE WHEN report_code = '11013' THEN avail_dt
+                ELSE greatest(avail_dt, coalesce(p_avail_dt, avail_dt)) END AS available_date
+    FROM cfprev
 ),
 wide_acct AS (
     -- **그룹 축이 정본**이다 — 대응표 24 계정 중 하나도 안 걸린 그룹(표준계정 행은 있지만 전부

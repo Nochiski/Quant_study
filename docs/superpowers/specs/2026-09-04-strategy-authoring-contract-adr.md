@@ -18,6 +18,9 @@
 > 수 있다"로 되돌린다. 설계는
 > [schema 1.2·그래프 표현 spec](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md) D1~D2,
 > 진행은 [strategy-language-2-0 PLAN](../../planning/strategy-language-2-0/PLAN.md).
+> 같은 spec D3·D6에 따라 schema 1.2(#202, 2026-09-28 main 머지)부터 실행 설정(`data`·`execution`·
+> `graph.missing_policy`의 시장·기간·유니버스·체결·비용·결측)은 전략 문서 밖 `RunEnvironment`로 갔다.
+> 1.2 문서에 이 키를 쓰면 unknown key이고, `spec_hash`는 전략 논리만 덮는다.
 >
 > Initiative: [YAML Strategy Workbench](../../planning/strategy-workbench-yaml-ui/README.md) —
 > 범위는 [WORKFLOW.md](../../planning/strategy-workbench-yaml-ui/WORKFLOW.md), PR 진행은
@@ -52,7 +55,7 @@ M1~M5까지 Strategy Workbench는 Quick Builder와 Advanced Graph라는 두 no-c
 
 ### D2. v1 authoring 문법은 canonical verbose YAML/JSON이다
 
-- source의 key 이름과 값은 canonical payload와 1:1이다. `max_name_weight: 0.05`, `fee_bps: 15.0`,
+- source의 key 이름과 값은 canonical payload와 1:1이다. `max_name_weight: 0.05`,
   `rebalance: monthly`, `graph.nodes[]`를 그대로 쓴다.
 - 표현식 문자열 DSL(`rank(neutralize(...))`)과 단위 literal(`5%`, `15bps`, `month_end`)은 v1
   non-goal이다. 사람이 읽기 좋은 단위는 Contract Inspector가 backend contract metadata로
@@ -62,7 +65,8 @@ M1~M5까지 Strategy Workbench는 Quick Builder와 Advanced Graph라는 두 no-c
   한다.
 - 기준 문서는 `docs/planning/strategy-workbench-yaml-ui/WORKFLOW.md` 2.2의 완전한 YAML 예시이며,
   `backend/tests/fixtures/strategy_documents/quality_momentum.yaml`로 등록되어 P1-03 compile
-  golden fixture가 된다.
+  golden fixture가 된다. 이 golden은 지금 schema 1.2 문서이고, 1.0·1.1 원본은
+  `quality_momentum.v1_0.yaml`·`quality_momentum.v1_1.yaml`로 보존돼 업그레이드 입력으로 쓰인다.
 
 ### D3. Revision envelope와 두 종류의 hash
 
@@ -203,6 +207,11 @@ strategy design")과 그로부터 생성된 `backend/openapi.json`은 API 코드
 갱신한다. 로드맵 M3~M5 완료 기록의 Quick/Advanced 표현은 이력이므로 유지한다.
 
 ## 4. Acceptance fixture
+
+> **현행 안내(2026-09-28)**: 이 절은 P0-01 당시 acceptance다. 이후 fixture가 schema 1.1·1.2로
+> 옮겨 가며 목록과 hash가 바뀌었고, unknown key의 strict xfail은 P1-01이 걷었다. 현재 fixture hash와
+> 목록은 `backend/tests/contract/test_strategy_authoring_fixtures.py`가 정본이다(`9eb6872a…98fe`는 지금
+> hash 알고리즘 golden `ALGORITHM_HASH_2026_09_04`로 남아 있다).
 
 `backend/tests/fixtures/strategy_documents/`:
 

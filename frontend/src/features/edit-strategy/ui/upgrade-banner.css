@@ -28,6 +28,20 @@
   font-size: var(--text-size-small);
 }
 
-.upgrade__error {
-  color: var(--status-error);
+.upgrade__warnings {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-size-small);
+}
+
+.upgrade__warnings ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.upgrade__warnings li {
+  display: grid;
+  gap: var(--space-1);
 }

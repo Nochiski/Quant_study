@@ -29,6 +29,7 @@ import {
 } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { StrategyDebuggerContext } from "../model/strategy-trace";
+import { StrategyPreview } from "../ui/strategy-preview";
 import { StrategyDebugger } from "../ui/strategy-debugger";
 
 const API = "http://localhost:8000";
@@ -47,8 +48,11 @@ const context = (sourceVersion = 3): StrategyDebuggerContext => ({
   specHash: "spec-hash",
   expectedSnapshotId: "snapshot-v1",
   expectedRegistryVersion: "registry-v1",
-  start: "2025-01-01",
-  end: "2026-09-01",
+  environment: {
+    start: "2025-01-01",
+    end: "2026-09-01",
+    universe_id: "krx.common-stock",
+  },
   factors: [
     {
       factorId: "momentum",
@@ -373,6 +377,28 @@ const renderDebugger = (ui: ReactElement) => {
   });
 };
 
+// 이슈 #260 DEFECT-2: 추적할 수 없는 사유는 문장 하나로 말한다. 실행 설정만 비었는데 "현재 실행 가능한
+// 문서가 없습니다."가 함께 뜨면 문서가 문제라고 오진한다.
+describe("StrategyDebugger unavailable reasons", () => {
+  it.each([
+    ["environment", "추적은 실행 설정 위에서 돕니다."],
+    ["preparing", "현재 문서의 실행 계획과 데이터 계약을 확인하고 있습니다."],
+    ["no-factors", "추적할 팩터가 없습니다."],
+    ["execution-plan", "현재 FactorGraph 실행 계획을 확정할 수 없어"],
+  ] as const)("shows only the %s sentence", (reason, sentence) => {
+    renderDebugger(
+      <StrategyDebugger {...props(null)} unavailableReason={reason} />,
+    );
+    const notices = screen.getAllByRole("status");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toHaveTextContent(sentence);
+    expect(
+      screen.queryByText("현재 실행 가능한 문서가 없습니다."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
+  });
+});
+
 describe("StrategyDebugger", () => {
   it("uses the generated trace contract and prioritizes exact TargetTape fields", async () => {
     const user = userEvent.setup();
@@ -392,6 +418,10 @@ describe("StrategyDebugger", () => {
     });
     expect(screen.getByText("3.50%")).toBeInTheDocument();
     expect(screen.getByText("missing_factor")).toBeInTheDocument();
+    // 사유는 사람 말이 먼저고 코드는 보조 표기다(P3-01).
+    expect(screen.getByText("missing_factor").parentElement).toHaveTextContent(
+      "팩터 값 없음 missing_factor",
+    );
     expect(screen.getAllByText("1 원시 데이터")).toHaveLength(2);
     expect(screen.getAllByText("7 위험 제약 후")).toHaveLength(2);
     expect(screen.queryByText("8 주문 차이 추정")).not.toBeInTheDocument();
@@ -401,7 +431,9 @@ describe("StrategyDebugger", () => {
 
     await user.click(screen.getByRole("tab", { name: "선택 노드" }));
     expect(screen.getAllByText("cross_sectional.rank")).not.toHaveLength(0);
-    expect(screen.getByText("missing_input")).toBeInTheDocument();
+    // 노드 상태는 backend 원문이 아니라 문구로 보인다(#350).
+    expect(screen.getByText("입력 없음")).toBeInTheDocument();
+    expect(screen.queryByText("missing_input")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "실행 계획" }));
     expect(screen.getByText("backend execution plan")).toBeInTheDocument();
   });
@@ -930,7 +962,7 @@ describe("StrategyDebugger", () => {
     );
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
 
-    expect(await screen.findByText("source_omitted_zero")).toBeInTheDocument();
+    expect(await screen.findByText("원천 생략(0)")).toBeInTheDocument();
     expect(
       screen.getByText(
         (_content, element) =>
@@ -946,6 +978,54 @@ describe("StrategyDebugger", () => {
     ]);
     await user.click(screen.getByRole("tab", { name: "원시 데이터" }));
     expect(screen.getByText("flow.foreign_net_buy")).toBeInTheDocument();
+  });
+
+  // #350: 두 입력이 모두 값인데 사이에 원장이 가린 칸이 들어 결측이 된 노드 값은 "입력 없음"이 아니라
+  // "원장이 가림"이고, 원시 데이터의 가린 셀도 같은 말로 보인다.
+  it("says a node value and a raw cell the ledger masked as masked, not as a missing input", async () => {
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        requests.push((await request.json()) as StrategyTraceRequest);
+        const payload = traceResponse();
+        payload.trace.rows = payload.trace.rows.map((row) =>
+          row.security_id === "sec-b"
+            ? {
+                ...row,
+                status: "masked" as const,
+                inputs: [{ node_id: "winsorized", value: 0.4 }],
+              }
+            : row,
+        );
+        payload.raw = [
+          {
+            as_of: "2026-08-31",
+            security_id: "sec-b",
+            field_id: "credit.margin_balance",
+            value: null,
+            available_date: "2026-08-26",
+            kind: "masked",
+          },
+        ];
+        return HttpResponse.json(payload);
+      }),
+    );
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+
+    const pipeline = await screen.findByRole("listitem", { name: "sec-b" });
+    // 원시 데이터 셀과 노드 칩이 같은 말이다.
+    expect(within(pipeline).getAllByText("원장이 가림")).toHaveLength(2);
+    await user.click(screen.getByRole("tab", { name: "선택 노드" }));
+    const node = screen.getByRole("region", {
+      name: "선택한 FactorGraph 노드의 실제 계산 결과",
+    });
+    const masked = within(node)
+      .getAllByRole("row")
+      .find((row) => row.textContent?.includes("sec-b") === true);
+    expect(masked).toHaveTextContent("winsorized=0.4");
+    expect(masked).toHaveTextContent("원장이 가림");
+    expect(within(node).queryByText("입력 없음")).not.toBeInTheDocument();
   });
 
   it("refetches the same exact owner through the query cache", async () => {
@@ -973,6 +1053,68 @@ describe("StrategyDebugger", () => {
     expect(
       screen.getByText(/범위를 선택한 뒤 추적을 실행/),
     ).toBeInTheDocument();
+  });
+
+  // #351: 실행 설정만 바꿔도 앞 추적은 새 설정의 결과가 아니다 — 추적을 다시 누르기 전까지 결과를 비운다.
+  it("returns to idle when only the run settings change and traces the new settings on the next run", async () => {
+    const user = userEvent.setup();
+    const view = renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+
+    const otherUniverse = context();
+    otherUniverse.environment = {
+      ...otherUniverse.environment,
+      universe_id: "krx.kospi200",
+    };
+    view.rerender(<StrategyDebugger {...props(otherUniverse)} />);
+
+    expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("범위를 선택한 뒤 추적을 실행하세요."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+    expect(requests.map((request) => request.environment?.universe_id)).toEqual(
+      ["krx.common-stock", "krx.kospi200"],
+    );
+  });
+
+  it("neither shows nor publishes a response that arrives after the run settings changed", async () => {
+    let resolveTrace: ((value: StrategyTraceResponse) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const view = renderDebugger(
+      <StrategyDebugger {...props()} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    const laterPeriod = context();
+    laterPeriod.environment = {
+      ...laterPeriod.environment,
+      start: "2025-06-02",
+    };
+    view.rerender(
+      <StrategyDebugger
+        {...props(laterPeriod)}
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => resolveTrace?.(traceResponse()));
+
+    expect(
+      screen.getByText("범위를 선택한 뒤 추적을 실행하세요."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
+    expect(onSearchSelection).not.toHaveBeenCalled();
   });
 
   it("never requests an invalid or stale document", () => {
@@ -1143,5 +1285,135 @@ describe("StrategyDebugger", () => {
     expect(screen.getByText("추적 요청을 취소했습니다.")).toBeInTheDocument();
     expect(screen.getByText("backend execution plan")).toBeInTheDocument();
     expect(screen.queryByText("25.00%")).not.toBeInTheDocument();
+  });
+});
+
+describe("선정 미리보기의 요청·응답 소유권", () => {
+  const summaryResponse = (
+    request: StrategyTraceRequest,
+  ): StrategyTraceResponse => ({
+    ...pagedTraceResponse(request),
+    summary: {
+      signal_as_of: "2026-08-31",
+      execution_on: "2026-09-01",
+      counts: {
+        universe: 93,
+        eligible: 41,
+        eligibility_failed: 17,
+        eligibility_rank_cut: 23,
+        missing: 12,
+      },
+      targets: [
+        {
+          position: {
+            security_id: "sec-x",
+            rank: 7,
+            composite_score: 0.123456,
+            weight: 0.1,
+            side: "long",
+          },
+          security: {
+            security_id: "sec-x",
+            name: "서버 종목명",
+            ticker: "123456",
+            venue: "XKRX",
+          },
+        },
+      ],
+    },
+  });
+
+  it("명시적 새로고침만 빈 종목·첫 팩터로 요청하고 서버의 날짜·순위·이름·점수를 그대로 표시한다", async () => {
+    const requests: StrategyTraceRequest[] = [];
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        requests.push(body);
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    const user = userEvent.setup();
+    const view = renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    expect(requests).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    expect(await screen.findByText("서버 종목명")).toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      security_ids: [],
+      node_ids: [],
+      factor_id: "momentum",
+      include_raw: false,
+    });
+    expect(requests[0]).not.toHaveProperty("as_of");
+    expect(screen.getByText("2026-08-31")).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "7" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "0.123456" })).toBeInTheDocument();
+    for (const count of [93, 41, 17, 23, 12])
+      expect(screen.getByText(String(count))).toBeInTheDocument();
+    view.rerender(
+      <StrategyPreview context={context(4)} unavailableReason={null} />,
+    );
+    expect(screen.getByText("이전 요청 · 새로고침 필요")).toBeInTheDocument();
+    expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    view.rerender(
+      <StrategyPreview context={null} unavailableReason="document" />,
+    );
+    expect(
+      screen.getByRole("button", { name: "미리보기 새로고침" }),
+    ).toBeDisabled();
+  });
+
+  it("이전 문서의 지연 응답은 현재 미리보기를 채우지 않는다", async () => {
+    let finish: (() => void) | undefined;
+    const wait = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        await wait;
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    const user = userEvent.setup();
+    const view = renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByRole("status");
+    view.rerender(
+      <StrategyPreview context={context(4)} unavailableReason={null} />,
+    );
+    await act(async () => {
+      finish?.();
+      await wait;
+    });
+    expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
+    expect(screen.getByText("이전 요청 · 새로고침 필요")).toBeInTheDocument();
+  });
+
+  it("요약 날짜가 추적의 날짜와 다르면 응답을 버린다", async () => {
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const response = summaryResponse(
+          (await request.json()) as StrategyTraceRequest,
+        );
+        response.summary!.signal_as_of = "2026-08-30";
+        return HttpResponse.json(response);
+      }),
+    );
+    renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "문서 또는 실행 설정과 맞지 않는 응답",
+    );
+    expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
   });
 });

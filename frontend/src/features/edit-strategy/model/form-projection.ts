@@ -13,11 +13,12 @@ import {
   valueAtPointer,
   type ParsedSource,
 } from "../../../shared/lib/yaml12";
+import type { DatasetFieldProfile } from "../../../shared/api";
 import type { DocumentDiagnostic } from "./document-state";
 import {
   projectApplicability,
   type DefaultResolver,
-} from "./field-applicability";
+} from "../../../shared/api";
 import {
   resolveRef,
   schemaAt,
@@ -37,16 +38,19 @@ export type FormControl =
   | {
       kind: "enum";
       values: readonly string[];
-      /** `x-operator`: enum 값 → 이름 키 stem. 연산자 enum에만 있고 나머지는 null(P1-03). */
+      /**
+       * enum 값 → 이름 키 stem(`schemaFacts().valueLabelKeys`). 연산자 enum은 `x-operator`(P1-03),
+       * 나머지 enum은 `<property stem>.value.<값>`(P3-01)이다. 설명 키가 없는 enum만 null.
+       */
       labelKeys: Readonly<Record<string, string>> | null;
     }
   | {
       kind: "catalog";
-      catalog: "equity-field" | "universe" | "factor" | "subgraph";
+      catalog: (typeof CATALOGS)[number];
     }
   | {
       kind: "reference";
-      namespace: "node" | "parameter";
+      namespace: (typeof NAMESPACES)[number];
       candidates: readonly string[];
     }
   /** 스키마가 `const`로 고정한 값(`schema_version`): 편집 컨트롤 없이 읽기 전용으로 보인다. */
@@ -136,10 +140,24 @@ export type FormProjection = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Form이 picker를 아는 `x-catalog` 값. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
-export const CATALOGS = ["equity-field", "universe", "factor", "subgraph"] as const;
+/**
+ * Form이 후보 select를 아는 `x-catalog` 카탈로그. `universe`는 schema 1.2에서 전략 문서를 떠나
+ * 실행 설정 스키마로 옮겨갔지만(P2-03), 실행 설정 패널이 같은 컨트롤을 쓰므로 남겨 둔다
+ * (P3-02).
+ */
+export const CATALOGS = ["equity-field", "universe"] as const;
+/**
+ * `x-catalog` 카탈로그 → 화면이 받은 항목 목록(이름 포함). 목록을 아직 못 받았거나 목록이 없는 카탈로그
+ * (universe)는 null. Form select 옵션과 파이프라인 요약의 필드 이름이 같은 목록을 읽는다.
+ */
+export const catalogProfiles = (
+  catalogs: { equityFields: readonly DatasetFieldProfile[] | null },
+  catalog: string,
+): readonly DatasetFieldProfile[] | null =>
+  catalog === "equity-field" ? catalogs.equityFields : null;
+
 /** Form이 후보 select를 아는 `x-reference` 네임스페이스. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
-export const NAMESPACES = ["node", "parameter"] as const;
+export const NAMESPACES = ["node", "parameter", "factor"] as const;
 
 const controlFor = (
   root: JsonSchema,
@@ -164,11 +182,11 @@ const controlFor = (
       };
   }
   if (facts.enumValues.length > 0)
-    // 연산자 enum은 값마다 이름 키가 따로 온다(`x-operator`). 나머지 enum은 값을 그대로 보인다.
+    // 값마다 이름 키가 있다(연산자는 `x-operator`, 나머지는 `<stem>.value.<값>`). 번역이 없으면 값 그대로.
     return {
       kind: "enum",
       values: facts.enumValues,
-      labelKeys: facts.operatorKeys,
+      labelKeys: facts.valueLabelKeys,
     };
   if (facts.type === "boolean") return { kind: "boolean" };
   if (facts.type === "integer" || facts.type === "number")
@@ -311,7 +329,10 @@ const projectFields = (
 };
 
 /** 항목 스키마에서 `x-authoring-identity: true`인 속성 키(`$ref` 해소). 없으면 null. */
-const identityKeyOf = (root: JsonSchema, itemNode: JsonSchema): string | null => {
+export const identityKeyOf = (
+  root: JsonSchema,
+  itemNode: JsonSchema,
+): string | null => {
   const properties = isRecord(itemNode.properties) ? itemNode.properties : {};
   for (const [key, property] of Object.entries(properties)) {
     const node = isRecord(property) ? resolveRef(root, property) : null;

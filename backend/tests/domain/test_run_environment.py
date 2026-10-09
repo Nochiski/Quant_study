@@ -1,61 +1,48 @@
-"""P2-01: 실행 설정(`RunEnvironment`) 값 타입·canonical hash·1.1 브리지·런타임 스키마."""
+"""P2-01·P2-03·V1-01·V2-01·V2-02·V2-03(검증 랩): 실행 설정(`RunEnvironment`) 값 타입·canonical
+hash·필수 규칙·연구 구간 잠금·런타임 스키마·매도 거래세·참여 기준·√ 시장충격."""
 
 from __future__ import annotations
 
+import json
+import math
+import statistics
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
-from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
-    InMemoryStrategyRepository,
-)
-from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
-from strategy_workbench.domain.backtest._models import _execution_constraint_rows
+from backtest_engine import RunConfig
 from strategy_workbench.domain.backtest.facade.environment import (
     RUN_ENVIRONMENT_CONSTRAINTS,
-    LegacyMissingPolicyConflictError,
+    STATUTORY_SELL_TAX_BPS,
+    DataFrequency,
+    ExecutionTiming,
+    ImpactModel,
+    Market,
+    MissingRunEnvironmentError,
+    ParticipationBasis,
+    ResearchWindowViolationError,
     RunEnvironment,
-    environment_from_legacy_spec,
+    SellTax,
+    cost_history_sessions,
     environment_hash,
-    resolve_environment,
-    resolve_graph_missing_policy,
+    impact_scales,
+    participation_volumes,
+    require_environment,
     run_environment_canonical_json,
     run_environment_schema,
     run_environment_schema_hash,
+    sell_tax_schedule,
+    settlement_multipliers,
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
-from strategy_workbench.domain.strategy.facade.specification import (
-    DataFrequency,
-    ExecutionTiming,
-    Market,
-    StrategySpec,
-)
 
-
-def _template() -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
 
 def _environment() -> RunEnvironment:
     return RunEnvironment(start=date(2020, 1, 1), end=date(2020, 12, 31), universe_id="KOSPI200")
-
-
-def _spec_with_missing_policies(*policies: MissingPolicy) -> StrategySpec:
-    """팩터마다 1.1 `graph.missing_policy` 만 다른 문서."""
-    template = _template()
-    source = template.factors[0]
-    factors = tuple(
-        replace(
-            source,
-            factor_id=factor_id,
-            graph=replace(source.graph, missing_policy=policy),
-        )
-        for factor_id, policy in zip("ab", policies, strict=True)
-    )
-    return replace(template, factors=factors)
 
 
 def test_defaults_match_the_design_contract() -> None:
@@ -65,11 +52,17 @@ def test_defaults_match_the_design_contract() -> None:
     assert environment.frequency is DataFrequency.DAILY
     assert environment.timing is ExecutionTiming.NEXT_OPEN
     assert environment.missing is MissingPolicy.DROP
+    assert (environment.impact_model, environment.impact_coefficient) == (
+        ImpactModel.FIXED_BPS,
+        1.0,
+    )
     assert (
         environment.participation_rate,
         environment.fee_bps,
         environment.slippage_bps,
     ) == (0.1, 15.0, 10.0)
+    # 체결일 거래량은 look-ahead 라 기본은 판단일까지의 20일 평균 거래대금이다(#342 DOMAIN-V2-02).
+    assert environment.participation_basis is ParticipationBasis.ADV20
 
 
 def test_canonical_json_is_sorted_and_compact() -> None:
@@ -80,7 +73,7 @@ def test_canonical_json_is_sorted_and_compact() -> None:
 
 
 def test_environment_hash_splits_on_every_variable_field() -> None:
-    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 7 필드를 덮는다."""
+    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 12 필드를 덮는다."""
     base = _environment()
     variants = (
         replace(base, start=date(2019, 1, 1)),
@@ -89,7 +82,12 @@ def test_environment_hash_splits_on_every_variable_field() -> None:
         replace(base, fee_bps=30.0),
         replace(base, slippage_bps=0.0),
         replace(base, participation_rate=1.0),
+        replace(base, participation_basis=ParticipationBasis.SESSION_VOLUME),
+        replace(base, impact_model=ImpactModel.SQRT),
+        replace(base, impact_coefficient=0.5),
         replace(base, missing=MissingPolicy.ZERO),
+        replace(base, sell_tax=SellTax.NONE),
+        replace(base, sell_tax=SellTax.CUSTOM, sell_tax_bps=20.0),
     )
 
     hashes = {environment_hash(item) for item in (base, *variants)}
@@ -122,6 +120,8 @@ def test_environment_hash_ignores_int_versus_float_notation() -> None:
         ("participation_rate", 0.0),
         ("fee_bps", -1.0),
         ("slippage_bps", -0.5),
+        ("impact_coefficient", -0.1),
+        ("impact_coefficient", 10.5),
         ("universe_id", "   "),
     ],
 )
@@ -137,16 +137,24 @@ def test_reversed_dates_are_rejected_at_construction() -> None:
         replace(_environment(), start=date(2021, 1, 1), end=date(2020, 1, 1))
 
 
-def test_missing_constraint_row_names_the_pointer_instead_of_a_bare_key_error() -> None:
-    """포인터 rename 은 이 모듈의 import 를 깨뜨린다 — 즉 부팅이 죽는다. 맥락 없는 KeyError 로
-    떨어지지 않고 사라진 포인터와 현재 카탈로그를 실어야 추적할 수 있다."""
-    with pytest.raises(LookupError) as error:
-        # 부팅 시점 방어라 공개 심볼이 없다. 모듈 경로로 직접 부른다.
-        _execution_constraint_rows(("fee_bps", "no_such_field"))
+def test_constraint_rows_point_at_the_run_environment_document() -> None:
+    """P2-03: 범위 행의 owner 가 전략 제약 카탈로그에서 실행 설정으로 옮겨 왔다.
 
-    message = str(error.value)
-    assert "missing=['/execution/no_such_field']" in message
-    assert "/execution/fee_bps" in message
+    1.2 문서에는 `execution` 섹션이 없으므로 `/execution/*` 포인터는 가리킬 곳이 없다. 행이
+    전략 포인터를 그대로 들고 있으면 런타임 스키마가 실행 설정 필드에 남의 문서 경로를 싣는다.
+    """
+    from strategy_workbench.domain.strategy.facade.constraints import scalar_constraint_index
+
+    assert {name: row.pointer for name, row in RUN_ENVIRONMENT_CONSTRAINTS.items()} == {
+        "participation_rate": "/participation_rate",
+        "fee_bps": "/fee_bps",
+        "slippage_bps": "/slippage_bps",
+        "impact_coefficient": "/impact_coefficient",
+        "sell_tax_bps": "/sell_tax_bps",
+    }
+    # 진단 코드는 전략 문서 validator 의 것이다. 실행 설정 행은 코드를 내지 않는다(#357 C-P3-8).
+    assert {row.code for row in RUN_ENVIRONMENT_CONSTRAINTS.values()} == {""}
+    assert not [row for row in scalar_constraint_index() if row.startswith("/execution/")]
 
 
 def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> None:
@@ -166,76 +174,57 @@ def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> Non
     )
 
 
-def test_bridge_reads_data_execution_and_the_graph_missing_policy() -> None:
-    spec = _template()
-    graph = spec.factors[0].graph
+def test_environment_measured_from_the_research_floor_is_returned_unchanged() -> None:
+    """연구 하한 2020-01-02 당일부터 측정하는 실행 설정은 그대로 통과한다(spec D1)."""
+    explicit = replace(_environment(), start=date(2020, 1, 2))
 
-    environment = environment_from_legacy_spec(spec)
-
-    assert environment.market is spec.data.market
-    assert environment.frequency is spec.data.frequency
-    assert (environment.start, environment.end) == (spec.data.start, spec.data.end)
-    assert environment.universe_id == spec.data.universe_id
-    assert environment.timing is spec.execution.timing
-    assert environment.participation_rate == spec.execution.participation_rate
-    assert environment.fee_bps == spec.execution.fee_bps
-    assert environment.slippage_bps == spec.execution.slippage_bps
-    assert environment.missing is graph.missing_policy
+    assert require_environment(explicit, requested_by="test") is explicit
 
 
-def test_bridge_without_factors_falls_back_to_the_model_default() -> None:
-    spec = replace(_template(), factors=())
-
-    assert environment_from_legacy_spec(spec).missing is MissingPolicy.DROP
-
-
-def test_bridge_accepts_factors_that_agree_on_one_missing_policy() -> None:
-    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.ZERO)
-
-    assert environment_from_legacy_spec(spec).missing is MissingPolicy.ZERO
-
-
-def test_bridge_refuses_factors_that_disagree_on_the_missing_policy() -> None:
-    """P2-02: 팩터마다 결측 정책이 다르면 실행 설정 하나로 접을 수 없다 — 조용히 고르지 않는다."""
-    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.DROP)
-
-    with pytest.raises(LegacyMissingPolicyConflictError) as info:
-        environment_from_legacy_spec(spec)
+@pytest.mark.parametrize(
+    "start",
+    [
+        date(2020, 1, 1),  # 하한 전날(신정 휴장일)
+        date(2019, 12, 31),  # 봉인 구간 마지막 날
+        date(2015, 12, 31),  # 봉인 앞 구간도 측정하지 않는다
+    ],
+)
+def test_measurement_before_the_research_floor_is_refused(start: date) -> None:
+    """spec D1: 판정은 "측정 시작일 ≥ 2020-01-02" 하나다. 봉인 구간을 한 세션이라도 측정하면
+    홀드아웃이 이미 열람된 것과 같다."""
+    with pytest.raises(ResearchWindowViolationError) as info:
+        require_environment(
+            replace(_environment(), start=start),
+            requested_by="backtest.run('퀄리티 모멘텀')",
+        )
 
     message = str(info.value)
-    assert info.value.code == "run_environment.missing_policy_conflict"
-    assert info.value.by_factor == (("a", MissingPolicy.ZERO), ("b", MissingPolicy.DROP))
+    assert info.value.code == "run_environment.research_window"
+    assert "requested_by=backtest.run('퀄리티 모멘텀')" in message
+    assert f"expected=start>=2020-01-02 got=start={start}" in message
+    assert "2016-01-01~2019-12-31은 홀드아웃 봉인 구간" in message
+
+
+def test_pre_research_environment_is_still_a_constructible_value() -> None:
+    """잠금은 실행 관문의 판정이지 값 규칙이 아니다. 엔진 직접 테스트·벤치 스크립트·은퇴 문서
+    업그레이드 응답이 봉인 구간 환경을 값으로 만들 수 있어야 한다(spec D1)."""
+    sealed = RunEnvironment(start=date(2016, 1, 1), end=date(2019, 12, 31), universe_id="KOSPI200")
+
+    assert (sealed.start, sealed.end) == (date(2016, 1, 1), date(2019, 12, 31))
+
+
+def test_missing_environment_is_refused_with_a_coded_diagnostic() -> None:
+    """P2-03: 1.2 문서에는 기간·유니버스가 없다. 기본값을 지어내면 사용자가 지정한 적 없는
+    구간으로 백테스트가 돌고 매니페스트가 그 값을 사실로 기록한다."""
+    with pytest.raises(MissingRunEnvironmentError) as info:
+        require_environment(None, requested_by="portfolio.preview('퀄리티 모멘텀')")
+
+    message = str(info.value)
+    assert info.value.code == "run_environment.required"
     # error-messages.md: 식별자와 기대 vs 실제가 메시지에 들어간다.
-    assert "a=zero" in message and "b=drop" in message
-    assert "expected=" in message and "factors=2" in message
-    # 막다른 길이 아니라는 안내: 명시 실행 설정을 주면 이 문서로도 실행할 수 있다.
-    assert "environment 를 명시하면" in message and "통과한다" in message
-
-
-def test_single_graph_missing_policy_falls_back_to_the_document() -> None:
-    """실행 설정이 없는 팩터 sandbox 요청의 우선순위(2차 리뷰 P3).
-
-    `resolve_environment` 이 전략 실행에 대해 하는 판정과 같은 규칙이라 owner 옆에서 고정한다.
-    """
-    graph = replace(_template().factors[0].graph, missing_policy=MissingPolicy.ZERO)
-
-    assert resolve_graph_missing_policy(graph, None) is MissingPolicy.ZERO
-    assert resolve_graph_missing_policy(graph, MissingPolicy.DROP) is MissingPolicy.DROP
-
-
-def test_explicit_environment_skips_the_conflicting_legacy_values() -> None:
-    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.DROP)
-    explicit = _environment()
-
-    assert resolve_environment(spec, explicit) is explicit
-
-
-def test_explicit_environment_wins_over_the_legacy_document() -> None:
-    spec = _template()
-    explicit = replace(_environment(), fee_bps=99.0)
-
-    assert resolve_environment(spec, explicit) is explicit
-    assert resolve_environment(spec, None) == environment_from_legacy_spec(spec)
+    assert "requested_by=portfolio.preview('퀄리티 모멘텀')" in message
+    assert "expected=" in message and "got=None" in message
+    assert "실행 설정을 지정하라" in message
 
 
 def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
@@ -251,17 +240,58 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
         "universe_id",
         "timing",
         "participation_rate",
+        "participation_basis",
         "fee_bps",
         "slippage_bps",
+        "impact_model",
+        "impact_coefficient",
+        "sell_tax",
+        "sell_tax_bps",
         "missing",
     }
     assert schema["required"] == ["start", "end", "universe_id"]
     assert properties["market"]["enum"] == ["KRX"]
     assert properties["missing"]["enum"] == [member.value for member in MissingPolicy]
+    assert properties["sell_tax"]["enum"] == [member.value for member in SellTax]
+    assert properties["sell_tax"]["default"] == "krx_statutory"
+    assert properties["sell_tax_bps"]["default"] is None
+    assert properties["sell_tax_bps"]["minimum"] == 0.0
+    assert properties["participation_basis"]["enum"] == ["session_volume", "adv20"]
+    assert properties["participation_basis"]["default"] == "adv20"
+    assert properties["impact_model"]["enum"] == ["fixed_bps", "sqrt"]
+    assert properties["impact_model"]["default"] == "fixed_bps"
+    assert properties["impact_coefficient"]["default"] == 1.0
+    assert properties["impact_coefficient"]["minimum"] == 0.0
+    assert properties["impact_coefficient"]["maximum"] == 10.0
     assert properties["fee_bps"]["type"] == "number"
     assert properties["fee_bps"]["default"] == 15.0
     assert properties["start"]["format"] == "date"
     assert properties["universe_id"]["x-catalog"] == "universe"
+
+
+def _read_when(mode_pointer: str, mode: str, name: str) -> dict[str, object]:
+    return {
+        "all_of": [{"pointer": mode_pointer, "equals": mode, "not_null": False}],
+        "description_key": f"run_environment.field.{name}",
+        "owned_by_error": None,
+    }
+
+
+def test_schema_publishes_the_mode_that_reads_each_mode_dependent_field() -> None:
+    """칸 적용 조건(#352): 슬리피지는 고정 bp, 가격 충격 계수는 √, 직접 입력 세율은 `custom` 에서만
+    읽힌다. 전략 문서의 `x-applicable-when` 과 같은 모양이라 패널이 같은 코드로 읽어 칸을 끄거나
+    필수로 만든다. 나머지 칸은 늘 읽힌다."""
+    properties = run_environment_schema()["properties"]
+
+    assert {
+        name: node["x-applicable-when"]
+        for name, node in properties.items()
+        if "x-applicable-when" in node
+    } == {
+        "slippage_bps": _read_when("/impact_model", "fixed_bps", "slippage_bps"),
+        "impact_coefficient": _read_when("/impact_model", "sqrt", "impact_coefficient"),
+        "sell_tax_bps": _read_when("/sell_tax", "custom", "sell_tax_bps"),
+    }
 
 
 def test_schema_hash_is_stable_and_splits_on_content() -> None:
@@ -273,3 +303,336 @@ def test_schema_hash_is_stable_and_splits_on_content() -> None:
     assert run_environment_schema_hash({**schema, "title": "Other"}) != (
         run_environment_schema_hash(schema)
     )
+
+
+def test_run_environment_schema_fixture_is_current() -> None:
+    """frontend 실행 설정 패널 테스트가 읽는 사본이 실제 스키마와 같다(P3-02, BACKLOG-013)."""
+    fixture = json.loads((FIXTURES / "run-environment-schema.json").read_text(encoding="utf-8"))
+    assert fixture == run_environment_schema(), (
+        "run-environment-schema.json is stale; regenerate with: "
+        "uv run python tools/export_runtime_schema.py"
+    )
+
+
+def test_sell_tax_defaults_to_the_statutory_table() -> None:
+    environment = _environment()
+
+    assert (environment.sell_tax, environment.sell_tax_bps) == (SellTax.KRX_STATUTORY, None)
+    assert sell_tax_schedule(environment) == STATUTORY_SELL_TAX_BPS[Market.KRX]
+    assert sell_tax_schedule(replace(environment, sell_tax=SellTax.NONE)) == ()
+    custom = replace(environment, sell_tax=SellTax.CUSTOM, sell_tax_bps=12)
+    assert custom.sell_tax_bps == 12.0
+    assert sell_tax_schedule(custom) == ((date.min, 12.0),)
+
+
+@pytest.mark.parametrize(
+    ("sell_tax", "sell_tax_bps"),
+    [
+        (SellTax.CUSTOM, None),
+        (SellTax.KRX_STATUTORY, 20.0),
+        (SellTax.NONE, 0.0),
+        (SellTax.CUSTOM, -1.0),
+    ],
+)
+def test_sell_tax_rate_is_only_and_always_given_for_custom(
+    sell_tax: SellTax, sell_tax_bps: float | None
+) -> None:
+    """세율 칸은 `custom` 에서만 읽힌다. 다른 방식에 값이 있으면 매니페스트만 보고 무엇이 적용됐는지
+    알 수 없다."""
+    with pytest.raises(ValueError, match="sell_tax_bps") as error:
+        replace(_environment(), sell_tax=sell_tax, sell_tax_bps=sell_tax_bps)
+
+    assert getattr(error.value, "field", None) == "sell_tax_bps"
+
+
+@pytest.mark.parametrize(
+    ("session", "rate"),
+    [
+        # 합계 세율(증권거래세 + 코스피 농어촌특별세)은 결제일(체결일 + 2거래일)이 시행일에 닿는 첫
+        # 체결일에 바뀐다. 경계 전날과 당일을 손으로 옮긴 법정 값이다.
+        (date(2019, 5, 29), 0.0030),
+        (date(2019, 5, 30), 0.0025),
+        (date(2020, 12, 28), 0.0025),
+        (date(2020, 12, 29), 0.0023),
+        (date(2022, 12, 27), 0.0023),
+        (date(2022, 12, 28), 0.0020),
+        (date(2023, 12, 26), 0.0020),
+        (date(2023, 12, 27), 0.0018),
+        (date(2024, 12, 26), 0.0018),
+        (date(2024, 12, 27), 0.0015),
+        (date(2025, 12, 26), 0.0015),
+        (date(2025, 12, 29), 0.0020),
+    ],
+)
+def test_statutory_rate_changes_on_the_first_trade_date_that_settles_after_enactment(
+    session: date, rate: float
+) -> None:
+    config = RunConfig(
+        run_id="tax",
+        initial_cash=1.0,
+        sell_tax_schedule=sell_tax_schedule(_environment()),
+    )
+
+    assert config.sell_tax_rate(session) == pytest.approx(rate)
+
+
+def test_session_volume_basis_leaves_the_engine_on_session_volume() -> None:
+    """고른 `session_volume` 은 워밍업을 읽지 않고 기준 거래량도 넘기지 않는다(옛 실행 그대로)."""
+    environment = replace(_environment(), participation_basis=ParticipationBasis.SESSION_VOLUME)
+
+    assert cost_history_sessions(environment) == 0
+    assert participation_volumes(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)]) is None
+
+
+def test_adv20_gives_no_room_until_twenty_prior_rows_have_a_traded_value() -> None:
+    """거래대금이 있는 앞선 행이 20개가 안 되면 0주다(#342) — 상장 초기 며칠의 큰 거래대금으로
+    한도를 부풀리지 않는다. 종목마다 따로 세고, 거래대금이 없는 행(A 의 1/4)은 20개에 들지 않는다.
+    """
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 1_000.0),
+        (date(2024, 1, 2), "B", 70.0, 7_000.0),
+        (date(2024, 1, 3), "A", 200.0, 3_000.0),
+        (date(2024, 1, 3), "B", 10.0, 9_999.0),
+        (date(2024, 1, 4), "A", 50.0, None),
+        (date(2024, 1, 5), "A", 40.0, 8_000.0),
+    ]
+
+    volumes = participation_volumes(
+        replace(_environment(), participation_basis=ParticipationBasis.ADV20), reversed(rows)
+    )
+
+    assert volumes == {key: 0 for key in ((row[0], row[1]) for row in rows)}
+
+
+def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
+    """20행은 종목마다 거래대금이 있는 행만 센다(#396 리뷰 P3-2).
+
+    A: 종가 10, 거래대금 100 × k(k = 1..23)이고 k = 6 행만 거래대금이 없다.
+    - k = 21 행: 앞선 20행 중 거래대금이 있는 행이 19개라 0주다(빈 행을 0 으로 세면 102주가 된다).
+    - k = 22 행: k = 1..21 중 6 을 뺀 20개, 합 225 × 100 ÷ 20 = 1,125 ÷ 10 = 112.5 → 112주.
+    - k = 23 행: 가장 오래된 k = 1 이 빠져 k = 2..22 중 6 을 뺀 20개,
+      합 246 × 100 ÷ 20 ÷ 10 = 123주.
+    B: 같은 세션들에 종가 5, 거래대금 1,000 인 21행. A 와 창을 나누지 않아 21번째 행이
+    1,000 ÷ 5 = 200주, 20번째 행은 앞선 행이 19개라 0주다.
+    """
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(23)]
+    rows = [
+        (session, "A", 10.0, None if k == 6 else 100.0 * k) for k, session in enumerate(sessions, 1)
+    ] + [(session, "B", 5.0, 1_000.0) for session in sessions[:21]]
+
+    volumes = participation_volumes(environment, reversed(rows))
+
+    assert volumes is not None
+    assert [volumes[(sessions[index], "A")] for index in (20, 21, 22)] == [0, 112, 123]
+    assert [volumes[(sessions[index], "B")] for index in (19, 20)] == [0, 200]
+
+
+def test_adv20_warmup_reads_past_suspended_days_so_the_start_date_does_not_zero_the_limit() -> None:
+    """워밍업은 20세션의 두 배를 읽는다(#396 리뷰 P2-2). 세션 k = 1..46(거래대금 100 × k,
+    종가 10) 중 k = 36..38 이 거래정지로 행이 없다. 같은 세션 k = 46 의 한도를 두 시작일로 잰다.
+
+    - k = 46 에서 시작: 앞 40세션(k = 6..45)을 읽는다.
+    - k = 41 에서 시작: 앞 40세션(k = 1..40)을 읽고 k = 41..46 은 측정 구간이다.
+    두 실행 모두 k = 46 의 20행은 k = 39..45 와 23..35, 합 294 + 377 = 671 × 100 ÷ 20 ÷ 10 = 335.5
+    → 335주다. 앞 20세션(k = 26..45)만 읽었다면 거래대금이 있는 행이 17개라 0주였다 — 같은 세션의
+    한도가 시작일에 따라 갈렸다.
+    """
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+    history = cost_history_sessions(environment)
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(46)]
+    rows = [
+        (session, "A", 10.0, 100.0 * k)
+        for k, session in enumerate(sessions, 1)
+        if k not in (36, 37, 38)
+    ]
+
+    def limit(first_read: int) -> int | None:
+        read = [row for row in rows if row[0] >= sessions[first_read - 1]]
+        volumes = participation_volumes(environment, read)
+        return None if volumes is None else volumes[(sessions[-1], "A")]
+
+    assert history == 40
+    assert (limit(46 - history), limit(41 - history), limit(46 - 20)) == (335, 335, 0)
+
+
+def test_fixed_bps_impact_leaves_the_engine_on_fixed_slippage() -> None:
+    """기본값(`fixed_bps`)은 충격 척도를 넘기지 않고 워밍업도 늘리지 않는다 — 기존 실행 그대로다.
+
+    워밍업 40세션은 기본 참여 기준 `adv20` 의 몫이다(충격 모델 몫이 아니다).
+    """
+    environment = _environment()
+
+    assert environment.impact_model is ImpactModel.FIXED_BPS
+    assert cost_history_sessions(environment) == 40
+    assert impact_scales(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], {}) is None
+
+
+def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
+    """척도 = k × σ일 / √ADV. σ·ADV 모두 판단일(직전 행)까지만 본다.
+
+    k = 0.5, A 의 종가 100 → 110 → 99 → 99 → 1, 거래대금 1,000 → 1,000 → 3,000 → 1 → 1.
+    - 1/2·1/3·1/4: 앞선 수익률이 2개 미만이라 0.
+    - 1/5: 수익률 +10%·−10%, 표본 표준편차 √0.02, ADV (1,000 + 1,000 + 3,000) / 3 ÷ 99 ≈ 16.84주
+      (내림하지 않는다). 척도 0.5 × √0.02 / √16.84.
+    - 1/8: 수익률 +10%·−10%·0%, 표본 표준편차 0.1, ADV 5,001 / 4 ÷ 99 ≈ 12.63주. 척도 0.5 × 0.1 /
+      √12.63. 체결 세션(1/8)의 종가 1 은 쓰지 않는다.
+    B 는 A 와 섞이지 않는다(수익률이 없어 0).
+    """
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 1_000.0),
+        (date(2024, 1, 2), "B", 50.0, 9_999.0),
+        (date(2024, 1, 3), "A", 110.0, 1_000.0),
+        (date(2024, 1, 4), "A", 99.0, 3_000.0),
+        (date(2024, 1, 5), "A", 99.0, 1.0),
+        (date(2024, 1, 8), "A", 1.0, 1.0),
+    ]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT, impact_coefficient=0.5)
+
+    scales = impact_scales(environment, reversed(rows), {})
+
+    assert scales is not None
+    assert {key: scale for key, scale in scales.items() if key[0] < date(2024, 1, 5)} == {
+        (date(2024, 1, 2), "A"): 0.0,
+        (date(2024, 1, 2), "B"): 0.0,
+        (date(2024, 1, 3), "A"): 0.0,
+        (date(2024, 1, 4), "A"): 0.0,
+    }
+    assert scales[(date(2024, 1, 5), "A")] == pytest.approx(
+        0.5 * math.sqrt(0.02) / math.sqrt(5_000 / 3 / 99)
+    )
+    assert scales[(date(2024, 1, 8), "A")] == pytest.approx(0.5 * 0.1 / math.sqrt(5_001 / 4 / 99))
+
+
+def test_sqrt_adv_below_one_share_still_prices_impact() -> None:
+    """ADV 는 √ 안에서 내림하지 않는다. 평균 거래대금 50 ÷ 판단일 종가 99 ≈ 0.505주라도 척도는
+    √0.02 / √0.505 다 — 내림하면 0주가 되어 가장 비유동적인 종목이 충격 없이 체결된다."""
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 50.0),
+        (date(2024, 1, 3), "A", 110.0, 50.0),
+        (date(2024, 1, 4), "A", 99.0, 50.0),
+        (date(2024, 1, 5), "A", 99.0, 50.0),
+    ]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT)
+
+    scales = impact_scales(environment, rows, {})
+
+    assert scales is not None
+    assert scales[(date(2024, 1, 5), "A")] == pytest.approx(math.sqrt(0.02) / math.sqrt(50 / 99))
+
+
+def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action_sessions() -> None:
+    """σ 창은 수익률 20개다. 종가 100 → 200(분할 전 원주가 점프) 뒤 ±1% 가 번갈아 오는 행 23개.
+
+    - 23번째 행(판단일 22번째): 창은 수익률 2..21번째 20개. 첫 수익률(+100%)이 빠져 σ 가 ±1% 만의
+      표본 표준편차다 — 창이 20보다 길면 +100% 가 남아 σ 가 수십 배 커진다.
+    - 분할 세션을 자본변동으로 넘기면 +100% 는 처음부터 창에 들어가지 않는다 — 3번째 행 척도가
+      ±1% 두 개만 본 값이다.
+    """
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(23)]
+    closes = [100.0, 200.0]
+    for index in range(21):
+        closes.append(closes[-1] * (1.01 if index % 2 == 0 else 0.99))
+    rows = [
+        (session, "A", close, 1_000_000.0) for session, close in zip(sessions, closes, strict=True)
+    ]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT)
+
+    plain = impact_scales(environment, rows, {})
+    # 100 → 200 은 2주를 1주로 합친 병합(구주 1주당 신주 0.5주)이다.
+    adjusted = impact_scales(environment, rows, {(sessions[1], "A"): 0.5})
+
+    # σ 창(종가 21개)이 참여 기준 `adv20`(20행)보다 길어 21 × 여유 2 를 읽는다.
+    assert cost_history_sessions(environment) == 42
+    assert plain is not None and adjusted is not None
+
+    def expected(index: int, first_return: int) -> float:
+        returns = [closes[i] / closes[i - 1] - 1 for i in range(first_return, index)]
+        adv = (
+            sum(value for *_, value in rows[max(index - 20, 0) : index])
+            / min(index, 20)
+            / closes[index - 1]
+        )
+        return statistics.stdev(returns) / math.sqrt(adv)
+
+    assert plain[(sessions[22], "A")] == pytest.approx(expected(22, 2))
+    assert plain[(sessions[3], "A")] == pytest.approx(expected(3, 1))
+    assert adjusted[(sessions[4], "A")] == pytest.approx(expected(4, 2))
+    assert plain[(sessions[4], "A")] > 10 * adjusted[(sessions[4], "A")]
+
+
+def test_a_corporate_action_settles_on_the_first_row_at_or_after_its_session() -> None:
+    """#339: 엔진 `_settlement_session` 과 같은 규칙 — 사건 세션에 bar 가 없으면(거래정지) 그 종목의
+    다음 행에서 정산하고, 같은 행에 정산되는 사건은 곱하며, 뒤에 행이 없는 사건은 빠진다."""
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 1.0),
+        (date(2024, 1, 5), "A", 50.0, 1.0),
+        (date(2024, 1, 3), "B", 10.0, 1.0),
+    ]
+
+    settled = settlement_multipliers(
+        rows,
+        [
+            (date(2024, 1, 3), "A", 2.0),  # 1/3·1/4 정지 → 1/5 에서 정산
+            (date(2024, 1, 4), "A", 1.5),  # 같은 1/5 에 정산 → 2 × 1.5
+            (date(2024, 1, 3), "B", 0.1),  # 사건 세션에 bar 가 있다
+            (date(2024, 1, 9), "B", 2.0),  # 뒤에 행이 없다
+        ],
+    )
+
+    assert settled == {(date(2024, 1, 5), "A"): 3.0, (date(2024, 1, 3), "B"): 0.1}
+
+
+def test_a_split_on_a_halted_session_stays_out_of_the_sqrt_volatility() -> None:
+    """#339 DEFECT-V2A-1: 분할 세션(1/5)이 거래정지라 bar 가 없어도, 정지 뒤 첫 행(1/8)에서 끝나는
+    분할 전 원주가 수익률(51/102 − 1 = −50%)은 σ 창에 들지 않는다.
+
+    종가 100 → 101 → 102 → (1/5 정지·1:2 분할) → 51 → 51.51 → 52.0251, 거래대금은 행마다 1,000.
+    - 1/8(정산 행): 판단일 종가 102 를 정산 뒤 단위 51 로 바꿔 ADV = 1,000 ÷ 51 주. σ 는 +1%·
+      +0.990% 두 수익률.
+    - 1/10: 판단일(1/9)까지 +1%·+0.990%·+1% 세 수익률(−50% 없음). ADV = 1,000 ÷ 51.51 주.
+    """
+    sessions = [
+        date(2024, 1, 2),
+        date(2024, 1, 3),
+        date(2024, 1, 4),
+        date(2024, 1, 8),
+        date(2024, 1, 9),
+        date(2024, 1, 10),
+    ]
+    closes = [100.0, 101.0, 102.0, 51.0, 51.51, 52.0251]
+    rows = [(session, "A", close, 1_000.0) for session, close in zip(sessions, closes, strict=True)]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT)
+
+    settled = settlement_multipliers(rows, [(date(2024, 1, 5), "A", 2.0)])
+    scales = impact_scales(environment, rows, settled)
+
+    assert settled == {(date(2024, 1, 8), "A"): 2.0}
+    assert scales is not None
+    early = [101 / 100 - 1, 102 / 101 - 1]
+    assert scales[(date(2024, 1, 8), "A")] == pytest.approx(
+        statistics.stdev(early) / math.sqrt(1_000 / 51)
+    )
+    assert scales[(date(2024, 1, 10), "A")] == pytest.approx(
+        statistics.stdev([*early, 51.51 / 51 - 1]) / math.sqrt(1_000 / 51.51)
+    )
+
+
+def test_the_adv_on_a_settlement_row_is_counted_in_post_action_shares() -> None:
+    """#339 DEFECT-V2A-2: 앞선 20행(종가 10, 거래대금 1,000) 뒤 21번째 행에 10주를 1주로 합친
+    병합(구주 1주당 0.1주)이 정산된다. 그 행의 주문·체결·거래량은 병합 뒤 단위라, 판단일 종가 10 을
+    100 으로 바꿔 ADV = 1,000 ÷ 100 = 10주다 — 병합 전 종가로 나누면 100주로 한도가 10배 느슨해진다
+    (낙관). 다음 행은 판단일 종가가 이미 100 이라 그대로 10주다."""
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(22)]
+    rows = [
+        (session, "A", 10.0 if index < 20 else 100.0, 1_000.0)
+        for index, session in enumerate(sessions)
+    ]
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+
+    volumes = participation_volumes(
+        environment, rows, settlement_multipliers(rows, [(sessions[20], "A", 0.1)])
+    )
+
+    assert volumes is not None
+    assert (volumes[(sessions[20], "A")], volumes[(sessions[21], "A")]) == (10, 10)

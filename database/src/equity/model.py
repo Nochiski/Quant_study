@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.26.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.27.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -261,6 +261,44 @@ RULES_VERSION = "e1.26.0"                # BuildRecord.rules_version 에 실린�
 #          `v_adj_price_fwd`·`v_adj_price` 도 같은 ⑤ 누적(출력 열 불변) — `_asof/` 표본
 #          (v_adj_price·v_adj_price_fwd)이 ⑤ 종목에서 바뀌어 EG5c 는 `catalog --rebase-asof`
 #          승인이 필요하다(D6-6).
+# ── main 계보(#227·#248·#259, 2026-09-27~28) — 위 e1.17.0~e1.19.0 과 **같은 번호가 다른 규칙**이다.
+#    두 갈래가 d0372a4d(2026-09-20, e1.16.0)에서 갈라져 번호를 따로 올렸다. 서버 운영 판(배포
+#    브랜치)의 e1.17~e1.26 은 위 브랜치 계보이고, 아래 세 번호는 main 코드의 판본이다. 판의
+#    `rules_version` 문자열만으로 계보를 가를 수 없을 때는 빌드 rev 로 가른다.
+# main e1.17.0: 2026-09-27 재무 흐름 필드 TTM(#212·#227). `factor_readiness`(S20)의 evidence·caveat
+#         문구가 바뀐다 — V02·V04·G01·G02·G04 는 TTM 기간, Q04·Q05·V05·Q07 은 TTM 과 원 계정의
+#         기간 차이를 적는다. S12 `FIELDS_FIN` 의 흐름 5필드 label·evidence(TTM)도 바뀌어
+#         `fin_std` 의 `field_profiles` 를 거쳐 `dataset_profile`(S19) 산출도 달라진다(`fin_std`
+#         값 자체는 그대로다). 같은 입력에서 두 산출 해시가 달라지므로 EG5a 비교 판을 올린다.
+#         카탈로그 매크로 `v_fin_latest`(TTM 분기값을 회계기간 축에서 세운다)는 빌드 산출이 아니라
+#         `catalog` 재생성으로 반영된다.
+# main e1.18.0: 2026-09-27 `fin_std`(S12) 4분기·현금흐름 분기 파생의 묶음 축(#236). `bsns_year` 대신
+#         기간 말일(사업보고서 말일에서 보고서 종류만큼 당긴 달의 말일)로 같은 회계연도를 찾는다 —
+#         비12월 결산에서 다음 회계연도 분기를 빼던 값과 그 공개일이 바뀌고, 구성 행을 산출에 남는
+#         행으로 좁혀 격리된 분기로 만든 파생도 사라진다. `dataset_profile` 의 내부 스코프 필드
+#         `financial.cf_operating_q` 커버율도 따라 바뀐다.
+# main e1.19.0: 2026-09-28 `price.adj_close` 의 `field_scope` 가 `internal` → `field_map`(S23 선언). #218 이
+#         레지스트리 가격 변화 팩터를 이 필드로 옮겨 FIELD_MAP §2 어휘가 됐다(문서 감사 결정 5).
+#         값·랙·커버는 그대로이고 `dataset_profile` 한 행의 `field_scope`·`evidence` 만 바뀐다.
+# e1.27.0: Q-4 main 역병합(N-40 ③) — 두 계보의 합. 브랜치 e1.26.0 판과 견줘 빌드 산출이 바뀌는
+#          것은 main 계보의 세 변경뿐이다(브랜치 쪽 규칙은 그대로 들어온다):
+#          ① `fin_std`(S12) 4분기·현금흐름 분기 파생의 묶음 축을 회계기간 축으로(main e1.18.0, #236).
+#             비12월 결산 법인의 `*_q4_derived`·`cf_*_q`·`capex_q` 와 그 `*_available_date`·`*_n_rows`
+#             가 바뀌고, 구성 행을 산출에 남는 행(격리·duplicate_vintage 제외)으로 좁혀 격리된 분기로
+#             만든 파생과 격리 행 자신의 파생이 사라진다. 공개일 축은 브랜치 e1.25.0 의 stage 보정
+#             공개일(`avail_dt`, J-41·C-11)을 그대로 쓴다 — main 판은 원천 `rcept_dt` 였는데, 그대로
+#             두면 J-41 재제출본에서 파생 공개일이 자기 행 공개일보다 앞서 EG3 의
+#             `n_derived_available_before_row` 가 깨지고 파생 값이 구성 행보다 먼저 보인다.
+#          ② `dataset_profile`(S19): `FIELDS_FIN` 흐름 5필드 label·evidence(TTM, main e1.17.0) ·
+#             `price.adj_close` field_scope internal → field_map(main e1.19.0 — evidence 는 브랜치 ⑤
+#             문구와 합쳤다) · ① 에 따른 `financial.cf_operating_q` 커버율. 선언 84행(field_map 36 ·
+#             internal 48).
+#          ③ `factor_readiness`(S20): evidence·caveat 문구(TTM 기간, main e1.17.0).
+#          빌드 산출이 아닌 것: 카탈로그 매크로는 main `v_fin_latest`(TTM 분기값을 뷰가 회계기간 축에서
+#          세운다·`period_frontier`·TTM 공개일 열) · `v_credit_balance` · `v_unfolded_event` · `v_adj_close`
+#          와 브랜치 `v_sector` 의 합집합 12개, 계약(EG-C) 대상은 워크벤치 facade
+#          (`_engine/strategy_workbench`, #372). 판본이 바뀌어 첫 빌드는 EG5a 가 skip 이므로 두 번
+#          지어 재현성을 확인한다(EQUITY_HANDOFF §6).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

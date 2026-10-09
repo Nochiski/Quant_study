@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -10,20 +11,26 @@ from ._nodes import (
     ConditionalNode,
     ConstantNode,
     CrossSectionalNode,
+    CrossSectionalOperator,
     ExpressionNode,
     FactorGraph,
     FieldMetadata,
     FieldNode,
     GroupNode,
+    GroupOperator,
     NodeValueType,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     UnaryNode,
     UnaryOperator,
     field_minimum,
 )
+
+# 출력이 무차원인 횡단면 연산(BACKLOG-003). `demean`·`winsorize` 는 값의 단위를 그대로 둔다.
+_DIMENSIONLESS_SECTIONS = frozenset({CrossSectionalOperator.RANK, CrossSectionalOperator.ZSCORE})
+# 출력이 무차원인 그룹 연산(BACKLOG-015). 그룹 안 순위는 횡단면 순위와 같은 백분위 공식
+# (`cross_sectional_rank`)이다. `neutralize` 는 그룹 평균을 빼므로 입력 단위를 그대로 둔다.
+_DIMENSIONLESS_GROUP_OPERATIONS = frozenset({GroupOperator.RANK})
 
 # 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
 # 같은 값을 JSON Schema `minimum`으로 발행하므로 화면이 만든 기본값과 검증기가
@@ -74,6 +81,7 @@ FACTOR_GRAPH_CODES: frozenset[str] = frozenset(
         "factor.graph.branch_unit",
         "factor.graph.cycle",
         "factor.graph.duplicate_node",
+        "factor.graph.empty",
         "factor.graph.field_missing",
         "factor.graph.group_field_missing",
         "factor.graph.group_field_type",
@@ -85,8 +93,6 @@ FACTOR_GRAPH_CODES: frozenset[str] = frozenset(
         "factor.graph.output_missing",
         "factor.graph.parameter_missing",
         "factor.graph.predicate_type",
-        "factor.graph.saved_factor_missing",
-        "factor.graph.saved_subgraph_missing",
         "factor.graph.time_series_window",
         "factor.graph.unit_mismatch",
         "factor.graph.winsor_bounds",
@@ -101,6 +107,16 @@ def _issue(code: str, node_id: str | None, path: str, message: str) -> FactorVal
             f"strategy alias table: code={code!r} path={path!r} node_id={node_id!r}"
         )
     return FactorValidationIssue(code=code, node_id=node_id, path=path, message=message)
+
+
+def unavailable_field_message(field_id: str, reason: str) -> str:
+    """연결된 어댑터가 선언했지만 주지 않는 필드의 진단 문장(#316).
+
+    그래프 안(`factor.graph.field_missing`)과 밖(`strategy.field.missing`)이 같은 문장을 쓴다.
+    사유(원천을 뺀 `catalog_*` 사유와 조치 `CATALOG_REBUILD`, 원장에 없는 필드의 사유)는 어댑터가
+    완성한 문장을 그대로 싣고, 조치를 여기서 다시 적지 않는다.
+    """
+    return f"연결된 데이터가 이 필드를 주지 않습니다 — {reason}: field_id={field_id!r}"
 
 
 def node_dependencies(node: ExpressionNode) -> tuple[str, ...]:
@@ -129,10 +145,11 @@ def validate_factor_graph(
     *,
     fields: tuple[FieldMetadata, ...] = (),
     parameter_ids: tuple[str, ...] = (),
-    factor_ids: tuple[str, ...] = (),
-    subgraph_ids: tuple[str, ...] = (),
     require_field_metadata: bool = False,
+    unavailable_fields: Mapping[str, str] | None = None,
 ) -> FactorGraphValidation:
+    """`unavailable_fields` 는 어댑터가 선언했지만 주지 않는 필드 → 사유다. 없는 필드가 그 안에
+    있으면 진단이 "계약을 찾을 수 없다" 대신 그 사유(조치 포함)를 싣는다(#316)."""
     issues: list[FactorValidationIssue] = []
     nodes = {node.node_id: node for node in graph.nodes}
     # 중복 id를 쓴 자리마다(첫 자리는 빼고) 진단을 단다: 그래프 카드가 어느 노드를 고쳐야 하는지
@@ -151,7 +168,12 @@ def validate_factor_graph(
                 )
             )
         seen_node_ids.add(node.node_id)
-    if graph.output_node_id not in nodes:
+    if not graph.nodes:
+        # 노드가 없는 그래프("+ 팩터 추가"가 넣는 빈 레시피)는 출력을 잘못 가리킨 것이 아니라
+        # 아직 단계가 없는 것이다. 코드가 다르면 캔버스가 첫 단계 추가 안내를 코드로 고른다
+        # (P4-03 결정 4).
+        issues.append(_issue("factor.graph.empty", None, "nodes", "첫 단계를 추가하세요."))
+    elif graph.output_node_id not in nodes:
         issues.append(
             _issue(
                 "factor.graph.output_missing",
@@ -163,8 +185,6 @@ def validate_factor_graph(
 
     field_by_id = {field.field_id: field for field in fields}
     known_parameters = set(parameter_ids)
-    known_factors = set(factor_ids)
-    known_subgraphs = set(subgraph_ids)
     for index, node in enumerate(graph.nodes):
         path = f"nodes.{index}"
         for dependency in node_dependencies(node):
@@ -183,12 +203,15 @@ def validate_factor_graph(
             and (fields or require_field_metadata)
             and node.field_id not in field_by_id
         ):
+            reason = (unavailable_fields or {}).get(node.field_id)
             issues.append(
                 _issue(
                     "factor.graph.field_missing",
                     node.node_id,
                     path,
-                    f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}",
+                    f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}"
+                    if reason is None
+                    else unavailable_field_message(node.field_id, reason),
                 )
             )
         elif isinstance(node, ParameterNode) and node.parameter_id not in known_parameters:
@@ -198,24 +221,6 @@ def validate_factor_graph(
                     node.node_id,
                     path,
                     f"파라미터를 찾을 수 없습니다: parameter_id={node.parameter_id!r}",
-                )
-            )
-        elif isinstance(node, SavedFactorNode) and node.factor_id not in known_factors:
-            issues.append(
-                _issue(
-                    "factor.graph.saved_factor_missing",
-                    node.node_id,
-                    path,
-                    f"저장 팩터를 찾을 수 없습니다: factor_id={node.factor_id!r}",
-                )
-            )
-        elif isinstance(node, SavedSubgraphNode) and node.subgraph_id not in known_subgraphs:
-            issues.append(
-                _issue(
-                    "factor.graph.saved_subgraph_missing",
-                    node.node_id,
-                    path,
-                    f"저장 서브그래프를 찾을 수 없습니다: subgraph_id={node.subgraph_id!r}",
                 )
             )
         elif isinstance(node, UnaryNode):
@@ -428,8 +433,6 @@ def _infer_contract(
         history = 1
     elif isinstance(node, (ConstantNode, ParameterNode)):
         value_type, unit, history = NodeValueType.SCALAR, "1", 0
-    elif isinstance(node, (SavedFactorNode, SavedSubgraphNode)):
-        value_type, unit, history = NodeValueType.NUMERIC_SERIES, "unknown", 1
     elif isinstance(node, BinaryNode):
         left, right = dependencies
         for side, operand in (("left", left), ("right", right)):
@@ -521,6 +524,15 @@ def _infer_contract(
                 )
             )
         value_type = true_value.value_type
+        if (
+            value_type is NodeValueType.SCALAR
+            and false_value.value_type is NodeValueType.SCALAR
+            and predicate.value_type is NodeValueType.BOOLEAN_SERIES
+        ):
+            # 가지가 상수여도 조건이 종목·날짜마다 갈리므로 값은 시계열이다(P2-07). boolean
+            # 출력 승격(`domain/strategy/_promotion.py`)이 이 규칙으로 `조건 ? 1 : 0` 을 숫자
+            # 점수로 만든다.
+            value_type = NodeValueType.NUMERIC_SERIES
         unit = true_value.unit
         history = max(item.minimum_history_sessions for item in dependencies)
     else:
@@ -547,6 +559,13 @@ def _infer_contract(
             isinstance(node, UnaryNode) and node.operator is not UnaryOperator.NEGATE
         ):
             value_type = NodeValueType.NUMERIC_SERIES
+        if isinstance(node, CrossSectionalNode) and node.operator in _DIMENSIONLESS_SECTIONS:
+            # 순위·z-score 는 입력 단위를 지운다(BACKLOG-003). 카탈로그 `UnitRule.DIMENSIONLESS`
+            # 와 같은 규칙이며 `test_factor_operators.py` 가 둘을 대조한다.
+            unit = "1"
+        if isinstance(node, GroupNode) and node.operator in _DIMENSIONLESS_GROUP_OPERATIONS:
+            # 카탈로그 `UnitRule.DIMENSIONLESS` 와 같은 규칙이다(`test_factor_operators.py` 대조).
+            unit = "1"
         if isinstance(node, GroupNode):
             group_metadata = fields.get(node.group_field_id)
             if (fields or require_field_metadata) and group_metadata is None:

@@ -8,12 +8,11 @@ from enum import Enum
 from typing import TypeAlias
 
 from ._nodes import (
+    FILLING_MISSING_POLICIES,
     ExpressionNode,
     FactorGraph,
     FieldMetadata,
     MissingPolicy,
-    SavedFactorNode,
-    SavedSubgraphNode,
 )
 from ._validation import FactorGraphValidation, node_dependencies, validate_factor_graph
 
@@ -45,8 +44,6 @@ class FactorExecutionPlan:
     output_node_id: str
     steps: tuple[FactorExecutionStep, ...]
     required_field_ids: tuple[str, ...]
-    referenced_factor_ids: tuple[str, ...]
-    referenced_subgraph_ids: tuple[str, ...]
     minimum_history_sessions: int
     missing_policy: str
     as_of_policy: str = "available_date_lte_as_of"
@@ -92,16 +89,12 @@ def compile_factor_plan(
     missing: MissingPolicy,
     fields: tuple[FieldMetadata, ...] = (),
     parameter_ids: tuple[str, ...] = (),
-    factor_ids: tuple[str, ...] = (),
-    subgraph_ids: tuple[str, ...] = (),
     require_field_metadata: bool = False,
 ) -> FactorExecutionPlan:
     validation = validate_factor_graph(
         graph,
         fields=fields,
         parameter_ids=parameter_ids,
-        factor_ids=factor_ids,
-        subgraph_ids=subgraph_ids,
         require_field_metadata=require_field_metadata,
     )
     if not validation.valid:
@@ -130,6 +123,10 @@ def compile_factor_plan(
         # 결측 정책은 실행 설정으로 옮겼지만 plan 의 일부로 남는다: 이 값이 `plan_hash` 에서
         # 빠지면 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유한다(spec D6).
         "missing_policy": missing.value,
+        # 평가 규칙 판본의 첫 사례(#312 · #375 DR-A-10): 채우는 정책은 채움 자리를 잎에서 횡단면
+        # 진입으로 옮겨 같은 이름으로 전과 다른 값을 낸다. 그 정책의 판만 가른다 — drop·keep 은
+        # 채우지 않아 판(골든 `PLAN_HASH_1_2`)이 그대로다
+        **({"missing_fill": "cross_section"} if missing in FILLING_MISSING_POLICIES else {}),
         "as_of_policy": "available_date_lte_as_of",
     }
     plan_hash = hashlib.sha256(
@@ -142,14 +139,6 @@ def compile_factor_plan(
         output_node_id=graph.output_node_id,
         steps=steps,
         required_field_ids=validation.required_field_ids,
-        referenced_factor_ids=tuple(
-            sorted({node.factor_id for node in graph.nodes if isinstance(node, SavedFactorNode)})
-        ),
-        referenced_subgraph_ids=tuple(
-            sorted(
-                {node.subgraph_id for node in graph.nodes if isinstance(node, SavedSubgraphNode)}
-            )
-        ),
         minimum_history_sessions=validation.minimum_history_sessions,
         missing_policy=missing.value,
     )

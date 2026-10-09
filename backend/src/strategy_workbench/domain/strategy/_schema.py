@@ -19,13 +19,13 @@ Shape (JSON Schema 2020-12):
   the operator registry (`domain.factor._operators`) so no client assembles a key from a value;
 - catalog bounds appear as `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`, contract
   metadata as `x-unit`, `x-display-unit`, `x-applied-stage`, `x-description-key`, `examples`;
-- identifier fields carry `x-catalog` (equity-field, factor, universe, subgraph: complete from
-  that catalog) or `x-reference` (node, parameter: complete from the document itself), read from
+- identifier fields carry `x-catalog` (equity-field: complete from that catalog) or
+  `x-reference` (node, parameter, factor: complete from the document itself), read from
   the dataclass field metadata declared next to the field (P3-03).
 - required factor authoring fields carry `x-authoring-source` or `x-authoring-default`; this lets
   clients project a catalog row without duplicating FactorSignal field names or starter values.
-- 다음 schema 버전에서 사라지는 호환 전용 필드는 `x-deprecated`로 표시한다. 값은 여전히
-  유효하지만 편집 화면 어휘에서 빼도 되는 행이라는 뜻이다(P2-02, `graph.missing_policy`).
+- field metadata `stage` 는 `x-stage`(`AppliedStage` 값, 그래프 표현의 단계)로 싣는다. 어디에
+  선언하고 필드의 단계를 어떻게 읽는지는 정본 대장 "그래프 표현 투영" 행이 소유한다(P4-01).
 """
 
 from __future__ import annotations
@@ -81,9 +81,6 @@ class FieldContract:
     format: str | None = None
     catalog: str | None = None  # `x-catalog`: catalog the identifier completes from
     reference: str | None = None  # `x-reference`: document-internal namespace of the identifier
-    # `x-deprecated`: 다음 schema 버전에서 사라지는 호환 전용 필드. 편집 화면은 이 행을
-    # 어휘에서 빼도 된다(P2-02, `graph.missing_policy`).
-    deprecated: bool = False
     minimum: float | None = None
     maximum: float | None = None
     exclusive_minimum: bool = False
@@ -164,17 +161,21 @@ def dataclass_json_schema(
     *,
     schema_id: str,
     constraints: Mapping[str, ScalarConstraint] | None = None,
+    applicability: Mapping[str, FieldApplicability] | None = None,
+    property_namespace: str | None = None,
 ) -> dict[str, Any]:
     """dataclass 하나에서 유도한 JSON Schema(타입·기본값·enum·format·필드 마커).
 
     authoring 문서 스키마(`strategy_document_schema`)와 같은 빌더를 쓰지만 산출물이 다르다.
     전략 문서의 제약 카탈로그·적용 조건표를 자동으로 읽지 않는다 — 다른 문서의 `/fee_bps` 가
-    전략 포인터와 우연히 겹쳐 남의 단위·범위를 입는 일을 막는다. 범위를 실으려면 호출자가
-    자기 포인터로 다시 건 `constraints` 를 넘긴다. 소유자는 dataclass 를 가진 노드이고
-    (P2-01 의 `RunEnvironment` 는 `domain.backtest`), 이 함수는 표기법만 제공한다.
+    전략 포인터와 우연히 겹쳐 남의 단위·범위를 입는 일을 막는다. 범위·적용 조건을 실으려면
+    호출자가 자기 포인터로 다시 건 `constraints`·`applicability` 를 넘긴다. 칸 설명 키의
+    네임스페이스(`property_namespace`)도 같다 — 넘기지 않으면 전략 문서 규칙인
+    `strategy.field.<타입>` 이다. 소유자는 dataclass 를 가진 노드이고(P2-01 의 `RunEnvironment` 는
+    `domain.backtest`), 이 함수는 표기법만 제공한다.
     """
-    builder = _SchemaBuilder(constraints or {}, {})
-    root = builder.dataclass_schema(tp, "")
+    builder = _SchemaBuilder(constraints or {}, applicability or {})
+    root = builder.dataclass_schema(tp, "", property_namespace=property_namespace)
     return {
         "$schema": SCHEMA_DIALECT,
         "$id": schema_id,
@@ -325,7 +326,7 @@ class _SchemaBuilder:
                 "authoring-default",
                 "authoring-identity",
                 "default-from",
-                "deprecated",
+                "stage",
             ):
                 if marker in field.metadata:
                     schema = {**schema, f"x-{marker}": _json_value(field.metadata[marker])}
@@ -375,7 +376,6 @@ class _SchemaBuilder:
                 format=inner.get("format"),
                 catalog=schema.get("x-catalog"),
                 reference=schema.get("x-reference"),
-                deprecated=schema.get("x-deprecated", False) is True,
                 minimum=constraint.minimum if constraint else None,
                 maximum=constraint.maximum if constraint else None,
                 exclusive_minimum=constraint.exclusive_minimum if constraint else False,

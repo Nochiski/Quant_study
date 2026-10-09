@@ -9,15 +9,10 @@ from typing import Literal, TypeAlias, get_args, get_type_hints
 # `x-reference`: which catalog or document-internal namespace an identifier resolves in. The
 # engine never reads it; it exists so no client keeps a hand-written list of which ids are which.
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
-CATALOG_FACTOR = {"catalog": "factor"}
-CATALOG_SUBGRAPH = {"catalog": "subgraph"}
 REFERENCE_NODE = {"reference": "node"}
 REFERENCE_PARAMETER = {"reference": "parameter"}
 # The array that declares a namespace; its items carry the `<namespace>_id` definition.
 DEFINES_NODE = {"defines": "node"}
-# 1.2 에서 사라지는 1.1 호환 필드. 런타임 스키마가 `x-deprecated` 로 표시해 편집 화면
-# 어휘에서 뺄 수 있게 한다(P2-02).
-DEPRECATED_FIELD = {"deprecated": True}
 
 
 def minimum(value: int) -> dict[str, int]:
@@ -91,6 +86,10 @@ class MissingPolicy(StrEnum):
     CROSS_SECTIONAL_MEDIAN = "cross_sectional_median"
 
 
+# 빈 팩터 값을 채우는 정책. 채우는 자리는 평가기 `_filled` 하나다(#312)
+FILLING_MISSING_POLICIES = frozenset({MissingPolicy.ZERO, MissingPolicy.CROSS_SECTIONAL_MEDIAN})
+
+
 class NodeValueType(StrEnum):
     NUMERIC_SERIES = "numeric_series"
     BOOLEAN_SERIES = "boolean_series"
@@ -104,6 +103,10 @@ class FieldMetadata:
     unit: str
     value_type: NodeValueType = NodeValueType.NUMERIC_SERIES
     available_history_sessions: int | None = None
+    # 이 필드가 분할·증자·병합에 조정하지 않은 원주가 시계열이면, 시점 간 변화를 잴 때 대신 쓸 조정
+    # 필드 id(`price.close` → `price.adj_close`, 이슈 #214). 사실의 owner 는 어댑터 필드 계약이다.
+    # 원주가가 아니거나 조정 짝이 없으면 None 이다(BACKLOG-018).
+    adjusted_field_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -192,20 +195,6 @@ class ConditionalNode:
     kind: Literal["conditional"]
 
 
-@dataclass(frozen=True)
-class SavedFactorNode:
-    node_id: str
-    factor_id: str = field(metadata=CATALOG_FACTOR)
-    kind: Literal["saved_factor"]
-
-
-@dataclass(frozen=True)
-class SavedSubgraphNode:
-    node_id: str
-    subgraph_id: str = field(metadata=CATALOG_SUBGRAPH)
-    kind: Literal["saved_subgraph"]
-
-
 ExpressionNode: TypeAlias = (
     FieldNode
     | ConstantNode
@@ -217,20 +206,15 @@ ExpressionNode: TypeAlias = (
     | GroupNode
     | ComparisonNode
     | ConditionalNode
-    | SavedFactorNode
-    | SavedSubgraphNode
 )
+# `saved_factor`·`saved_subgraph` 는 schema 1.2 에서 union 을 떠났다(spec D3 S7). 실행 경로가 늘
+# 거부하던 노드라 문법이 받을 이유가 없다. 재사용 팩터 라이브러리(M8)가 되살릴 때 다시 넣는다.
 
 
 @dataclass(frozen=True)
 class FactorGraph:
     nodes: tuple[ExpressionNode, ...] = field(metadata=DEFINES_NODE)
     output_node_id: str = field(metadata=REFERENCE_NODE)
-    # 결측 정책은 P2-02 에서 실행 설정(`RunEnvironment.missing`)으로 옮겼다. 평가도 플랜도
-    # 이 값을 읽지 않는다 — 1.1 문서에서 실행 설정을 만들 때 브리지
-    # (`environment_from_legacy_spec`)만 읽는 legacy 입력이고, 1.2 문서에서는 사라진다
-    # (P2-03·P2-09). 새 코드는 `missing` 인자를 넘겨라.
-    missing_policy: MissingPolicy = field(default=MissingPolicy.DROP, metadata=DEPRECATED_FIELD)
 
 
 def _kind_of(node_type: type) -> str:

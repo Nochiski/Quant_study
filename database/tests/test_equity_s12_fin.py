@@ -424,13 +424,15 @@ def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | No
                 report_names: dict[str, str] | None = None,
                 extra_disclosures: list[tuple[str, str, str, date]] | None = None,
                 corrections: list[dict[str, object]] | None = None,
+                period_from: dict[str, date] | None = None,
                 **bl: object) -> build.BuildResult:
     """corps = [(corp_code, acc_mt)] · reports = [(rcept, corp, year, reprt, rcept_dt,
     period_to, doc_acode)] — period_to 가 None 이면 문서가 없는 그룹이다.
     `duplicate_disclosure` 는 첫 접수의 재수집 판본을 `stg_disclosure` 에 하나 더 실는다.
     정정 판본 시험용: `report_names` 는 접수번호별 공시명(기본 '사업보고서 (YYYY.12)'),
     `extra_disclosures` = [(rcept, corp, report_nm, rcept_dt)] 는 재무 행이 없는 공시(원본·중간 정정),
-    `corrections` 는 `stg_doc_correction` 행(기본 = 첫 접수 한 행)."""
+    `corrections` 는 `stg_doc_correction` 행(기본 = 첫 접수 한 행).
+    `period_from` 은 접수번호별 문서 기간 시작일이다 — 없으면 period_to 해의 1월 1일(12월 결산)."""
     names = report_names or {}
     tree = make_stage_tree(tmp_path, "stg_corp_map",
                            [{"corp_code": c, "ticker": f"{i:06d}", "corp_name_current": c}
@@ -459,7 +461,8 @@ def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | No
                      for r, *_ in reports], partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_meta",
                     [{"rcept_no": r, "member_role": "main", "doc_acode": ac,
-                      "period_from": None if pt is None else date(pt.year, 1, 1),
+                      "period_from": (None if pt is None
+                                      else (period_from or {}).get(r, date(pt.year, 1, 1))),
                       "period_to": pt}
                      for r, _c, _y, _rc, _dt, pt, ac in reports],
                     partition_class="receipt_axis")
@@ -1650,3 +1653,109 @@ def test_직전_판이_없으면_같은_판이_기록만_하고_통과한다(mak
     assert entry["n_expected"] == _BANKING_N
     assert entry["metrics"]["net_income"] == {"n_valid": 0, "ratio": 0.0}
     assert entry["metrics"]["revenue"] == {"n_valid": _BANKING_N, "ratio": 1.0}
+
+
+def _march_fy(rcept_dt: dict[str, date] | None = None,
+              ) -> tuple[list[tuple[str, str | None]],
+                         list[tuple[str, str, str, str, date, date | None, str | None]],
+                         list[dict[str, object]], dict[str, date]]:
+    """3월 결산 법인 — 2020-04 ~ 2021-03 회계연도와 다음 회계연도의 1~3분기.
+
+    DART `bsns_year` 는 기간 말일의 연도라, 2021-03 사업보고서와 2021-06·09·12 분기 보고서가 둘 다
+    2021 이다(실원장 비12월 결산 전부 같은 규칙). 같은 회계연도의 분기는 2020-06·09·12 다.
+    """
+    corp = "00000009"
+    # (rcept, 연도, API 보고서, 접수일, 기간 말일, 문서 종류, 기간 시작, 영업이익, 영업현금 누계)
+    spec = [
+        ("20200814000901", "2020", "11013", date(2020, 8, 14), date(2020, 6, 30), "11013",
+         date(2020, 4, 1), 10.0, 5.0),
+        ("20201113000901", "2020", "11012", date(2020, 11, 13), date(2020, 9, 30), "11012",
+         date(2020, 4, 1), 11.0, 11.0),
+        ("20210215000901", "2020", "11014", date(2021, 2, 15), date(2020, 12, 31), "11013",
+         date(2020, 4, 1), 12.0, 18.0),
+        ("20210621000901", "2021", "11011", date(2021, 6, 21), date(2021, 3, 31), "11011",
+         date(2020, 4, 1), 46.0, 30.0),
+        ("20210813000901", "2021", "11013", date(2021, 8, 13), date(2021, 6, 30), "11013",
+         date(2021, 4, 1), 20.0, 7.0),
+        ("20211115000901", "2021", "11012", date(2021, 11, 15), date(2021, 9, 30), "11012",
+         date(2021, 4, 1), 21.0, 15.0),
+        ("20220214000901", "2021", "11014", date(2022, 2, 14), date(2021, 12, 31), "11013",
+         date(2021, 4, 1), 22.0, 24.0),
+    ]
+    reports = [(r, corp, y, rc, (rcept_dt or {}).get(r, dt), pt, ac)
+               for r, y, rc, dt, pt, ac, _f, _o, _c in spec]
+    fin = [row for r, y, rc, _dt, _pt, _ac, _f, op, cf in spec for row in (
+        _fin_row(corp, y, rc, r, sj="IS", account_id="ifrs-full_OperatingIncomeLoss",
+                 account_nm="영업이익", amount=op),
+        _fin_row(corp, y, rc, r, sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=cf, ord_=2))]
+    return [(corp, "03")], reports, fin, {r: f for r, *_x, f, _o, _c in spec}
+
+
+def test_비12월_결산은_같은_회계연도_분기로_4분기와_현금흐름_분기값을_만든다(make_stage_tree,
+                                                                          tmp_path: Path) -> None:
+    """#236 — 예전 파생은 `bsns_year` 로 묶여 2021-03 사업보고서에서 **다음** 회계연도 분기를 뺐다.
+
+    4분기 영업이익은 46 − (10 + 11 + 12) = 13 이어야 하고(예전 46 − (20 + 21 + 22) = −17), 공개일은
+    같은 회계연도 보고서의 접수일 max = 2021-06-21 이다(예전 2022-02-14 = 미래 보고서). 사업보고서의
+    현금흐름 분기값은 30 − 18(2020-12 누계) = 12 다(예전 30 − 24).
+    """
+    corps, reports, fin, starts = _march_fy()
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210621000901", "period_end_basis", "document"), period_from=starts)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    assert [rows[k]["report_code"] for k in sorted(rows)] == [
+        "11013", "11012", "11014", "11011", "11013", "11012", "11014"]
+    annual = rows["20210621000901"]
+    assert _num(annual["op_profit_q4_derived"]) == Decimal(13)
+    assert annual["q4_derived_n_rows"] == 4
+    assert annual["q4_derived_available_date"] == date(2021, 6, 21)
+    assert _num(annual["cf_operating_q"]) == Decimal(12)
+    assert annual["cf_q_n_rows"] == 2
+    assert annual["cf_q_available_date"] == date(2021, 6, 21)
+    # 분기 행의 현금흐름 분기값은 같은 회계연도 직전 분기 누계를 뺀다
+    assert _num(rows["20210813000901"]["cf_operating_q"]) == Decimal(7)
+    assert _num(rows["20211115000901"]["cf_operating_q"]) == Decimal(8)
+    assert _num(rows["20220214000901"]["cf_operating_q"]) == Decimal(9)
+
+
+def test_파생_공개일은_구성_분기가_늦게_접수되면_그_접수일이다(make_stage_tree,
+                                                             tmp_path: Path) -> None:
+    """#248 리뷰 P2-1 — 3분기(2020-12) 보고서가 사업보고서(2021-06-21)보다 늦은 2021-07-01 에 접수됐다.
+
+    4분기 파생·사업보고서 현금흐름 분기값은 그 3분기 값을 빼므로 2021-07-01 전에는 알 수 없다.
+    파생 공개일이 사업보고서 접수일에 머물면 구성 행 공개 전에 파생이 보인다(look-ahead).
+    """
+    late = date(2021, 7, 1)
+    corps, reports, fin, starts = _march_fy({"20210215000901": late})
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210621000901", "period_end_basis", "document"), period_from=starts)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    annual = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}["20210621000901"]  # type: ignore[arg-type]
+    assert _num(annual["op_profit_q4_derived"]) == Decimal(13)
+    assert annual["q4_derived_available_date"] == late
+    assert _num(annual["cf_operating_q"]) == Decimal(12)
+    assert annual["cf_q_available_date"] == late
+    assert annual["available_date"] == date(2021, 6, 21)
+
+
+def test_격리된_분기는_파생의_구성_행이_되지_않는다(make_stage_tree, tmp_path: Path) -> None:
+    """#248 리뷰 P3-2 — 3분기 보고서가 접수지연 상한 밖이라 격리됐다(`rcept_lag_out_of_range`).
+
+    소비자가 볼 수 없는 행으로 파생을 만들면 검증할 수 없는 값이 나간다(예전 12월 결산 117행).
+    4분기 파생은 NULL(부분합 금지), 구성 수는 사업보고서 + 1·2분기 = 3, 사업보고서의 현금흐름
+    분기값도 직전 분기가 없어 NULL 이다.
+    """
+    corps, reports, fin, starts = _march_fy({"20210215000901": date(2026, 1, 15)})
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210621000901", "period_end_basis", "document"), period_from=starts)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert [x["reject_reason"] for x in _rejects(r.out_dir)] == [   # type: ignore[arg-type]
+        "rcept_lag_out_of_range"]
+    annual = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}["20210621000901"]  # type: ignore[arg-type]
+    assert annual["op_profit_q4_derived"] is None
+    assert annual["q4_derived_n_rows"] == 3
+    assert annual["cf_operating_q"] is None
+    assert annual["cf_q_n_rows"] == 1

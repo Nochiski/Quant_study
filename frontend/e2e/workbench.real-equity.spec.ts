@@ -23,11 +23,13 @@ import {
   backtest,
   currentSource,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
   replaceSource,
   requireData,
+  runSettingsInputs,
   saveAndWaitForRevision,
   strategyIdentity,
 } from "./workbench-helpers";
@@ -51,11 +53,15 @@ const START_TIMEOUT_MS = 15_000;
 const COMPLETE_TIMEOUT_MS = 420_000;
 const TEST_TIMEOUT_MS = 900_000;
 
-const realDataSource = (title: string): string => {
-  const titled = mustReplace(GOLDEN, "퀄리티 모멘텀", title);
-  const started = mustReplace(titled, 'start: "2021-01-01"', `start: "${BACKTEST_START}"`);
-  return mustReplace(started, 'end: "2026-08-31"', `end: "${BACKTEST_END}"`);
-};
+// 실행 기간·유니버스는 schema 1.2 부터 전략 문서가 아니라 실행 설정 패널이 정한다(P2-03·P3-02).
+const REAL_RUN_ENVIRONMENT = {
+  start: BACKTEST_START,
+  end: BACKTEST_END,
+  universe_id: "krx.common-stock",
+} as const;
+
+const realDataSource = (title: string): string =>
+  mustReplace(GOLDEN, "퀄리티 모멘텀", title);
 
 test.describe("real equity data", () => {
   test.skip(
@@ -76,7 +82,7 @@ test.describe("real equity data", () => {
     const { strategyId } = strategyIdentity(page);
 
     // Graph 편집: field 노드를 추가해 실데이터 필드(price.open)를 고르고, mom_252 의 입력을 그 노드로 재배선한다.
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const graphEditor = page.getByRole("region", { name: "그래프 편집" });
     await expect(graphEditor).toBeVisible();
     await expect(graphEditor.getByText("편집 가능")).toBeVisible();
@@ -110,8 +116,6 @@ test.describe("real equity data", () => {
     const edited = await currentSource(page);
     expect(edited).toContain(`\n          field_id: ${REWIRED_FIELD}\n`);
     expect(edited).toContain("\n          input_node_id: field\n");
-    expect(edited).toContain(`start: "${BACKTEST_START}"`);
-    expect(edited).toContain(`end: "${BACKTEST_END}"`);
     await saveAndWaitForRevision(page, 2);
     const saved = requireData(
       (
@@ -132,10 +136,16 @@ test.describe("real equity data", () => {
       "graph-edited compile",
     );
     expect(saved.spec_hash).toBe(compiled.spec_hash);
-    expect(saved.spec.data.universe_id).toBe("krx.common-stock");
+    // 유니버스는 schema 1.2 에서 전략 문서를 떠나 실행 설정이 소유한다(P2-03). 저장된 spec 으로
+    // 확인할 수 있는 것은 문서에 남은 쪽이다.
+    expect((saved.spec.factors ?? []).map((factor) => factor.factor_id)).toEqual([
+      "momentum",
+    ]);
 
-    // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다.
-    const settingsToggle = page.getByLabel("실행 설정 열기");
+    // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다. 기간·유니버스는
+    // 실행 설정 패널에서 정한다.
+    await fillRunEnvironment(page, {}, REAL_RUN_ENVIRONMENT);
+    const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
     await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
     await page
@@ -162,6 +172,7 @@ test.describe("real equity data", () => {
     expect((await submittedRun).postDataJSON()).toMatchObject({
       core: "rust",
       benchmark_security_id: BENCHMARK_SECURITY_ID,
+      environment: REAL_RUN_ENVIRONMENT,
       strategy_source: {
         kind: "saved_revision",
         strategy_id: strategyId,
@@ -222,9 +233,9 @@ test.describe("real equity data", () => {
         spec_hash: saved.spec_hash,
       },
     });
-    // 실데이터 스냅샷 id = equity 루트의 전 테이블 build_id 정렬 sha256 앞 16자리. mock id 는 hex 가
-    // 아니므로 이 정규식이 mock 어댑터를 배제한다.
-    expect(result.manifest.data_snapshot_id).toMatch(/^[0-9a-f]{16}$/u);
+    // 실데이터 스냅샷 id = 원장 판(전 테이블 build_id 정렬 sha256 앞 16자리):필드 계약 판(16자리,
+    // #235). mock id 는 앞부분이 hex 가 아니므로 이 정규식이 mock 어댑터를 배제한다.
+    expect(result.manifest.data_snapshot_id).toMatch(/^[0-9a-f]{16}:[0-9a-f]{16}$/u);
     expect(result.manifest.run_spec.strategy?.title).toBe(title);
     // 실제로 거래가 일어났다: 체결·스냅샷·자본 곡선이 비어 있지 않다.
     expect(result.artifacts.fills.length).toBeGreaterThan(0);

@@ -11,8 +11,13 @@
     "universe_id": "krx.common-stock",
     "timing": "next_open",
     "participation_rate": 0.1,
+    "participation_basis": "adv20",
     "fee_bps": 15.0,
     "slippage_bps": 10.0,
+    "impact_model": "fixed_bps",
+    "impact_coefficient": 1.0,
+    "sell_tax": "krx_statutory",
+    "sell_tax_bps": null,
     "missing": "drop"
   },
   "capital": {
@@ -151,7 +156,7 @@
       "scope": "full",
       "value": null,
       "sample_count": 820,
-      "unavailable_reason": "drawdown_not_recovered"
+      "unavailable_reason": "maximum_drawdown_not_recovered"
     },
     {
       "metric_id": "benchmark_return",

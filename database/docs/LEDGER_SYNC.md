@@ -5,7 +5,7 @@
 
 ## 0. 한 문장
 
-서버(주소는 `QL_SYNC_HOST` 로 지정 — 공개 저장소라 적지 않는다, 계정 `quantshare`, SFTP 전용·읽기 전용)의 `equity/<table>/MANIFEST.json` 이
+서버(주소는 `QL_SYNC_HOST`, 계정은 `QL_SYNC_USER` 로 지정 — 공개 저장소라 둘 다 적지 않는다. SFTP 전용·읽기 전용 계정)의 `equity/<table>/MANIFEST.json` 이
 가리키는 current_build 파티션만 받아 `~/quant-ledger/data/equity/` 에 서버와 같은 규약으로 두고,
 매일 한 번 새 빌드를 따라가며 세 층위(판본·파일·내용)로 같은지 확인한다.
 
@@ -25,10 +25,19 @@ database\scripts\ledger_sync.ps1 verify --offline
 database\scripts\register_daily_sync.ps1
 ```
 
-래퍼는 backend 프로젝트 환경(`uv sync --extra parquet --extra equity`)에 paramiko 만 얹어
+macOS·Linux 는 bash 래퍼 `database/scripts/ledger_sync.sh` 가 같은 인자를 받는다(예약 작업 등록 스크립트는
+Windows 용만 있다 — cron 등은 직접 건다).
+
+```bash
+database/scripts/ledger_sync.sh --accept-new plan
+database/scripts/ledger_sync.sh sync
+database/scripts/ledger_sync.sh verify --offline
+```
+
+두 래퍼는 backend 프로젝트 환경(`uv sync --extra parquet --extra equity`)에 paramiko 만 얹어
 `python -m ledger_sync` 를 돈다. 접속 정보는 `--host/--port/--user/--key` 또는 `QL_SYNC_HOST`·
 `QL_SYNC_PORT`·`QL_SYNC_USER`·`QL_SYNC_KEY`, 로컬 루트는 `--root` 또는 `QL_SYNC_ROOT`(기본
-`~/quant-ledger/data`). **서버 주소만은 기본값이 없다** — 공개 저장소라 코드에 두지 않는다. Windows 는 `setx QL_SYNC_HOST <주소>` 로 사용자 환경변수에 한 번 넣는다(예약 작업 `register_daily_sync.ps1` 은 `$PROFILE` 을 읽지 않으므로 `setx` 여야 한다 — 넣은 뒤 새 창부터 적용). macOS·Linux 는 셸 프로필에 `export QL_SYNC_HOST=<주소>`. 일회성이면 `--host` 로 준다. 빠지면 원격 명령(plan·pull·verify·sync)은 접속 전에 `error: server host is not set` 으로 끝나고, 로컬 명령(status·gc·catalog·`verify --offline`)은 그대로 돈다.
+`~/quant-ledger/data`). **서버 주소와 계정은 기본값이 없다** — 공개 저장소라 코드에 두지 않는다. Windows 는 `setx QL_SYNC_HOST <주소>`·`setx QL_SYNC_USER <계정>` 으로 사용자 환경변수에 한 번 넣는다(예약 작업 `register_daily_sync.ps1` 은 `$PROFILE` 을 읽지 않으므로 `setx` 여야 한다 — 넣은 뒤 새 창부터 적용). 계정 이름은 서버 운영자에게 받는다. macOS·Linux 는 셸 프로필에 `export QL_SYNC_HOST=<주소>`·`export QL_SYNC_USER=<계정>`. 일회성이면 `--host`·`--user` 로 준다. 빠지면 원격 명령(plan·pull·verify·sync·`status --remote`)은 접속 전에 `error: server host is not set` 또는 `error: server user is not set` 으로 2 를 내고 끝나며(sync 는 같은 문장을 콘솔·로그·`_sync/last_run.json` 에 남긴다), 로컬 명령(status·gc·catalog·`verify --offline`)은 그대로 돈다.
 
 **신뢰 경계**: 서버가 주는 이름(build_id·파티션 경로·파일 이름)은 그대로 로컬 경로 조각이 되므로
 `layout.is_safe_segment` 문법(`[A-Za-z0-9_][A-Za-z0-9._=%-]*`) 밖이면 그 테이블을 받지 않는다. `--accept-new`
@@ -40,13 +49,15 @@ database\scripts\register_daily_sync.ps1
 |---|---|---|
 | `plan` | 원격 MANIFEST 와 로컬 `_sync/state.json` 대조 — 테이블별 `new_build`/`up_to_date`/`error`, 받을 바이트·재사용 바이트. 로컬 변경 없음 | 0 · 2(해석 불가 테이블) |
 | `pull` | 새 빌드를 `<table>/_incoming/v=<build>/` 에 받아 크기 대조 → `v=<build>/` 로 rename → MANIFEST 원문 기록 → state 갱신 → 구판본 GC(`--keep`, 기본 2, build_id 시각순). 전송·로컬 IO 실패는 테이블 단위로 격리하고 `_incoming` 을 남겨 재개한다 | 0 · 2(전송·IO 실패) · 3(수신 중 서버 판본 변경 → 다시 pull) |
-| `verify` | `manifest`(current_build·카탈로그 snapshot) · `files`(이름·크기·MANIFEST 바이트) · `hash`(duckdb content_hash 재계산). `--offline` 은 hash 만. **검사 대상이 0건**(state 없음·`--tables` 오타)이면 통과가 아니라 4. stage 층은 파티션 content_hash 가 없어 hash 층위를 `skipped` 로 센다 | 0 · 4(불일치·검사 0건) |
+| `verify` | `manifest`(current_build·카탈로그 snapshot) · `files`(이름·크기·MANIFEST 바이트) · `hash`(duckdb content_hash 재계산). `--level manifest files hash` 로 층위를 고른다(여럿 가능). `--offline` 은 hash 만. **검사 대상이 0건**(state 없음·`--tables` 오타)이면 통과가 아니라 4. stage 층은 파티션 content_hash 가 없어 hash 층위를 `skipped` 로 센다 | 0 · 4(불일치·검사 0건) |
 | `gc` | current 를 제외한 `v=*` 중 최신 `keep-1` 개만 남긴다. `_incoming` 잔재 정리 | 0 |
-| `catalog` | `python -m equity catalog` 위임 — `equity.duckdb` 매크로가 서버 절대경로를 굽고 있어 로컬에서 재생성해야 재무·컨센서스 필드가 산다 | 0 · 2 |
-| `sync` | pull → catalog(전송 실패가 없을 때) → verify(manifest·files + 이번에 받은 표의 hash). 카탈로그를 verify 앞에서 돌려야 verify 의 「카탈로그 stale」 지적이 그 자리에서 해소된다. 판본이 안 바뀐 표의 로컬 손상은 보이지 않으므로 `--hash-all`(전 표 hash, 주 1회 권장)을 따로 돌린다. 같은 층에 pull·gc·sync 가 겹치면 `_sync/lock` 으로 거부(2). 비정상 종료가 남긴 락은 3시간이 지나면 자동 회수하고, 그 전이라도 죽은 실행이 확실하면 `--break-lock`. `status` 가 락 보유자·경과를 보여 준다. `_sync/last_run.json` 에 결과, `_sync/logs/` 에 verb 별 최근 60개 로그 | 첫 비영 코드: pull 실패 2 · drifted 3 · catalog 실패 2 · 불일치 4 |
+| `catalog` | `python -m equity catalog` 위임 — `equity.duckdb` 매크로가 서버 절대경로를 굽고 있어 로컬에서 재생성해야 카탈로그에 기대는 필드(`EQUITY_FIELD_MAP.md` §3 「부팅 검사」)가 산다 | 0 · 2 |
+| `sync` | pull → catalog(전송 실패가 없을 때, `--skip-catalog` 로 건너뜀) → verify(manifest·files + 이번에 받은 표의 hash). 카탈로그를 verify 앞에서 돌려야 verify 의 「카탈로그 stale」 지적이 그 자리에서 해소된다. 판본이 안 바뀐 표의 로컬 손상은 보이지 않으므로 `--hash-all`(전 표 hash, 주 1회 권장)을 따로 돌린다. 같은 층에 pull·gc·sync 가 겹치면 `_sync/lock` 으로 거부(2). 비정상 종료가 남긴 락은 3시간이 지나면 자동 회수하고, 그 전이라도 죽은 실행이 확실하면 `--break-lock`. `status` 가 락 보유자·경과를 보여 준다. `_sync/last_run.json` 에 결과, `_sync/logs/` 에 verb 별 최근 60개 로그 | 첫 비영 코드: pull 실패 2 · drifted 3 · catalog 실패 2 · 불일치 4 |
 | `status` | 마지막 실행 결과·테이블별 로컬 빌드. `--remote` 면 서버 current_build 와 대조해 `BEHIND` 표시 | 0 |
 
 `--tables a b` 로 일부 테이블만, `--json` 으로 기계용 출력, `--layer stage` 로 stage 층(같은 규약).
+`--remote-root` 는 서버 SFTP 루트(기본 `/`)다. `pull`·`sync` 는 받기 전에 받을 바이트와 재사용
+바이트만큼 로컬 여유 공간을 확인하고, `--no-space-check` 로 끌 수 있다.
 
 ## 3. 증분이 도는 방식
 
@@ -80,11 +91,23 @@ $env:STRATEGY_WORKBENCH_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"
 uv run server      # 저장소 루트에서. backend 에서 직접 띄우려면 cd backend && uv run server
 ```
 
-커널 어댑터(`backtest_engine.adapters.equity_duckdb`)도 같은 루트를 받는다. 실데이터 브라우저
+실데이터 브라우저
 E2E 는 `frontend`에서 `$env:E2E_REAL_EQUITY_ROOT = <루트>; npm run test:e2e`(변수가 있으면 실데이터
 project 만, 없으면 mock 릴리스 게이트만 돈다 — `frontend/e2e/README.md`). 서버 `_catalog_meta.json`·
 `_contract_meta.json` 원문은 `<루트>/_sync/remote/` 에만 두고, 루트의 `_catalog_meta.json` 은 로컬
 `catalog` 산출물이다(서버 것으로 덮으면 워크벤치의 stale-catalog 가드가 무력화된다).
+
+워크벤치 duckdb 어댑터는 뜰 때 원천마다 카탈로그 매크로를 읽을 수 있는지 보고, 못 읽는 원천의 필드만
+빼고 뜬다. 백테스트가 읽는 매크로(`v_unfolded_event`, 원장이 접지 못한 층 이동)를 못 읽으면 실데이터
+백테스트가 `backtest.run.data_not_ready` 로 멈춘다. 부팅 로그에 `catalog_*` 경고가 남으면 로컬
+카탈로그를 다시 만들고(`ledger_sync catalog`) 워크벤치를 다시 띄운다. 카탈로그 매크로를 더한 코드를
+받은 뒤에도 한 번 다시 만든다 — 그 전까지는 새 매크로를 읽는 필드가 `catalog_macro_missing` 으로
+빠지고(수정주가가 빠지면 가격 변화 팩터가 모두 멈춘다), 백테스트가 읽는 매크로면 실데이터 백테스트가
+멈춘다. 일일 `sync` 도 카탈로그를 다시 만든다. 파일 손상이 의심되면 만들기
+전에 `verify --offline` 으로 파티션 해시부터 확인한다. `profile_lag_fallback` 은 카탈로그 재생성으로
+풀리지 않는다 — `sync` 로 `dataset_profile` 표를 받는다. 부팅을 멈추는 `catalog_locked`·
+`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻과 카탈로그에 기대는 필드는
+`EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.
 
 ## 6. 하지 않는 것 · 서버 운영자에게 요청할 것
 

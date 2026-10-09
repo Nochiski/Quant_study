@@ -66,14 +66,16 @@ def _copy_root(published: tuple[Path, catalog.CatalogResult], tmp_path: Path) ->
 
 # ── 카탈로그 실체화 ───────────────────────────────────────────────────────────
 
-def test_카탈로그는_매크로_6개이고_뷰_게이트를_통과한다(
+def test_카탈로그는_매크로_7개이고_뷰_게이트를_통과한다(
         published: tuple[Path, catalog.CatalogResult]) -> None:
     root, p = published
-    assert len(p.macros) == 6
-    # S17 `v_consensus`(consensus_daily) 와 S21 `v_fin_latest`(fin_std·disclosure_version) 는
-    # 입력이 이 체인에 없어 렌더되지 않는다(깨진 매크로를 카탈로그에 싣지 않는다 —
-    # views.render_macros).
-    absent = {"v_consensus", "v_fin_latest", "v_sector"}      # v_sector: sector_snapshot(S25) 은 이 절단본에 없다
+    assert len(p.macros) == 7
+    # S17 `v_consensus`(consensus_daily) · S21 `v_fin_latest`(fin_std·disclosure_version) ·
+    # #249 `v_credit_balance`(credit_daily) · #220 `v_adj_close`(price_adj_daily) · S25
+    # `v_sector`(sector_snapshot) 는 입력이 이 체인에 없어 렌더되지 않는다(깨진 매크로를 카탈로그에
+    # 싣지 않는다 — views.render_macros). #369 `v_unfolded_event` 는 `adj_factor` 만 읽어 이
+    # 체인에서도 선다.
+    absent = {"v_consensus", "v_fin_latest", "v_credit_balance", "v_adj_close", "v_sector"}
     assert sorted(p.macros) == sorted(v for k, v in views.SIGNATURES.items() if k not in absent)
     assert sorted(p.skipped) == sorted(absent)
     assert [g.name for g in p.gates] == ["EG11", "EG5c", "EG3_firm_mktcap"]
@@ -594,7 +596,7 @@ def test_CLI_catalog는_뷰_게이트와_asof를_출력한다(published: tuple[P
     code = main(["--root", str(root), "--stage-root", str(STAGE_SLICE), "--baseline", str(bl),
                  "catalog"])
     out = capsys.readouterr().out
-    assert code == 0 and "ok catalog=" in out and "macros=6" in out
+    assert code == 0 and "ok catalog=" in out and "macros=7" in out
     assert "EG11  pass" in out and "EG5c  pass" in out and "EG3_firm_mktcap pass" in out
     assert f"_asof/v_adj_price: rows={ASOF_ROWS}" in out
     assert f"_asof/v_adj_price_fwd: rows={ASOF_ROWS}" in out

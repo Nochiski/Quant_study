@@ -14,14 +14,18 @@ frontend가 아니라 여기 있다. 기계가 읽는 디테일(`got=`·`expecte
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import re
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import strategy_workbench
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.application.strategy_authoring.ports.outgoing.document_codec import (
     CodecLimits,
@@ -36,13 +40,20 @@ from strategy_workbench.domain.factor.facade.expression import (
     FieldNode,
 )
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
+from strategy_workbench.domain.strategy._hydrate import _hydrate
+from strategy_workbench.domain.strategy.facade.constraints import STRATEGY_SCALAR_CONSTRAINTS
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
+    FROZEN_SCHEMA_VERSIONS,
     STRUCTURE_CODES,
+    UPGRADE_CHAIN,
     hydrate_strategy_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategyIdentity
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
+# 가장 최근 은퇴 버전과 가장 옛 버전. 버전 문자열은 domain 상수에서만 읽는다.
+RETIRED, OLDEST = UPGRADE_CHAIN[-2], UPGRADE_CHAIN[0]
 DRAFT = StrategyIdentity("draft", 0)
 
 # 문장과 기계 디테일을 가르는 구분자. 디테일이 없는 문장은 이 파일에 없다.
@@ -115,20 +126,27 @@ def _set(document: dict[str, Any], path: str, value: object) -> None:
         target[leaf] = value
 
 
+def _retired_with_nested_factors(document: dict[str, Any]) -> None:
+    """은퇴 버전을 선언했지만 본문에 그보다 옛 문법(1.0 의 factors 두 겹)이 섞인 문서."""
+    _set(document, "schema_version", RETIRED)
+    _set(document, "factors", {"factors": document["factors"]})
+
+
 # (이름, 문서를 망가뜨리는 함수, 기대 code, 기대 message) — message는 전문 golden이다.
 HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
     (
         "schema_version 누락",
         lambda d: d.pop("schema_version"),
         "structure.missing_field",
-        "문서 맨 위에 schema_version을 적어 주세요 — missing='schema_version' supported=('1.1',)",
+        "문서 맨 위에 schema_version을 적어 주세요 — missing='schema_version' "
+        f"supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
-        "지원하지 않는 버전",
-        lambda d: _set(d, "schema_version", "9.9"),
+        "지원이 끝난 버전",
+        lambda d: _set(d, "schema_version", RETIRED),
         "structure.unsupported_schema_version",
         "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 줍니다 — "
-        "got='9.9' supported=('1.1',)",
+        f"got='{RETIRED}' supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
         "모르는 키(오타)",
@@ -138,7 +156,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "got='max_name_wieght' suggestion='max_name_weight' "
         "allowed=['gross_exposure', 'max_name_weight', "
         "'max_sector_weight', "
-        "'net_exposure', 'risk_field_id', 'sector_neutral']",
+        "'net_exposure', 'risk_factor_id', 'risk_field_id', 'sector_neutral']",
     ),
     (
         "필수 키 누락",
@@ -153,15 +171,16 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "모르는 kind입니다 혹시 `time_series`인가요? — got='time_seris' "
         "suggestion='time_series' "
         "allowed=['binary', 'comparison', 'conditional', 'constant', 'cross_sectional', "
-        "'field', 'group', 'parameter', 'saved_factor', 'saved_subgraph', "
+        "'field', 'group', 'parameter', "
         "'time_series', 'unary']",
     ),
     (
         "고를 수 없는 값",
-        lambda d: _set(d, "execution.timing", "next_opne"),
+        # schema 1.2(P2-03)는 `execution` 을 문서에서 뺐으므로 남아 있는 enum 필드로 본다.
+        lambda d: _set(d, "portfolio.side", "long_onyl"),
         "structure.invalid_enum",
-        "고를 수 있는 값이 아닙니다 혹시 `next_open`인가요? — "
-        "got='next_opne' suggestion='next_open' allowed=['next_open']",
+        "고를 수 있는 값이 아닙니다 혹시 `long_only`인가요? — "
+        "got='long_onyl' suggestion='long_only' allowed=['long_only', 'long_short']",
     ),
     (
         "목록 자리에 블록",
@@ -200,27 +219,22 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "structure.type_mismatch",
         "참 또는 거짓(true·false)이 와야 합니다 — expected=bool got='yes'",
     ),
-    (
-        "날짜 형식",
-        lambda d: _set(d, "data.start", "2021/01/01"),
-        "structure.invalid_date",
-        "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
-        "expected=YYYY-MM-DD example=2021-01-01 got='2021/01/01'",
-    ),
+    # "날짜 형식"(`structure.invalid_date`)은 코드째 지웠다(P2-09, BACKLOG-011). 날짜 필드이던
+    # `data.start`·`data.end` 가 실행 요청의 `environment` 로 옮겨져 전략 문서에는 날짜 필드가 없다.
     (
         "1.0 문법 — factors 두 겹",
         lambda d: _set(d, "factors", {"factors": d["factors"]}),
         "structure.legacy_shape",
         "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 "
-        "못합니다. 안쪽 목록을 factors 바로 아래로 올리거나 업그레이드하세요 — "
+        "못합니다. 안쪽 목록을 factors 바로 아래로 올리세요 — "
         "expected=sequence got=dict",
     ),
     (
         "1.0 문법 — 은퇴한 키",
-        lambda d: _set(d, "execution.order_style", "market"),
+        # 1.0 의 `execution.order_style` 은 1.2 에서 섹션째 사라져 `signal.method` 로 본다.
+        lambda d: d.setdefault("signal", {}).update(method="weighted_sum"),
         "structure.legacy_shape",
-        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
-        "got='order_style' section='execution'",
+        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우세요 — got='method' section='signal'",
     ),
     (
         "1.0 문법 — unary alias 노드",
@@ -231,8 +245,29 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         ),
         "structure.legacy_shape",
         "1.0 문법입니다. unary rank는 지금 버전에서 cross_sectional의 rank로 옮겨졌습니다. "
-        "kind와 operator를 함께 바꾸거나 업그레이드하세요 — "
+        "kind와 operator를 함께 바꾸세요 — "
         "got=unary/rank expected=cross_sectional/rank",
+    ),
+    # 업그레이더가 거절할 버전 줄은 업그레이드를 시키지 않고 고칠 곳을 말한다(#267 DEFECT-2).
+    (
+        "업그레이드할 수 없는 버전 — 모르는 버전",
+        lambda d: _set(d, "schema_version", "9.9"),
+        "structure.not_upgradeable_schema_version",
+        "지금 버전도 지원이 끝난 버전도 아닌 schema_version이라 업그레이드할 수 없습니다. "
+        "버전 줄에는 본문을 쓴 버전을 따옴표로 감싸 적어 주세요. 지금 문법이면 "
+        f'schema_version: "{CURRENT_SCHEMA_VERSION}"입니다. 지원이 끝난 옛 문법'
+        f'("{OLDEST}"·"{RETIRED}")이면 그 버전을 적은 뒤 업그레이드하세요 — '
+        f"got='9.9' supported=('{CURRENT_SCHEMA_VERSION}',) "
+        f"retired={sorted(FROZEN_SCHEMA_VERSIONS)}",
+    ),
+    (
+        "업그레이드할 수 없는 버전 — 선언보다 옛 문법",
+        _retired_with_nested_factors,
+        "structure.not_upgradeable_schema_version",
+        "선언한 schema_version보다 옛 문법이 본문에 섞여 있어 업그레이드할 수 없습니다. 옛 문법 "
+        f"자리를 선언한 버전의 문법으로 고치거나, 문서 전체가 {OLDEST} 문법이면 버전 줄을 그 버전"
+        f'(schema_version: "{OLDEST}")으로 고쳐 주세요 — '
+        f"got='{RETIRED}' stage='{OLDEST}' pointers=['/factors']",
     ),
     (
         "identity는 봉투 소유",
@@ -405,6 +440,23 @@ def test_codec_limit_message_golden(
     assert _reject(source, limits=limits) == (code, message)
 
 
+@dataclass(frozen=True)
+class _Dated:
+    """날짜 필드 하나짜리 모델. 날짜 필드가 모델에 돌아오면 조용히 통과하지 않는지 본다."""
+
+    start: date
+
+
+def test_a_date_field_is_an_authoring_error_not_a_silent_pass() -> None:
+    """BACKLOG-011: `structure.invalid_date` 는 1.2 문서로 닿을 수 없어 코드째 지웠다.
+
+    날짜 필드를 모델에 다시 들이면 hydrate 가 그 자리에서 멈춰야 한다 — 그래야 코드와 문장
+    golden 을 함께 되살릴 일이 드러난다.
+    """
+    with pytest.raises(TypeError, match="unsupported hydrate type"):
+        _hydrate(_Dated, {"start": "2021-01-01"}, "", [])
+
+
 def test_every_declared_code_has_a_message_golden() -> None:
     """코드 레지스트리와 문장 golden이 1:1이다 — 코드를 늘리면 문장도 같은 PR에서 늘어난다."""
     structural = {code for _n, _m, code, _msg in HYDRATE_GOLDEN}
@@ -435,12 +487,55 @@ def test_no_english_sentence_reaches_the_reader(code: str, message: str) -> None
     assert not returned, f"{code}: 영어 원문이 돌아왔다 — {returned}"
 
 
+# 진단을 만드는 함수 → 문장 인자의 자리. `_issue` 는 구조 진단(hydrate)과 팩터 그래프 진단이다.
+_MESSAGE_ARGUMENT = {"semantic_issue": 2, "_issue": 3}
+
+
+def _sentence_head(message: ast.expr) -> str | None:
+    """문장 식의 첫 글자 조각. 변수·속성으로 받거나 자리표시자로 시작하면 None."""
+    if isinstance(message, ast.BinOp):
+        return _sentence_head(message.left)
+    if isinstance(message, ast.JoinedStr) and message.values:
+        return _sentence_head(message.values[0])
+    if isinstance(message, ast.Constant) and isinstance(message.value, str):
+        return message.value
+    return None
+
+
+def test_every_diagnostic_sentence_written_in_the_backend_opens_in_korean() -> None:
+    """compile 진단을 만드는 호출 지점의 문장을 전수로 훑는다(#357 C-P3-17).
+
+    위 golden 은 구조·codec 코드만 본다. `strategy.*` 문장은 validator·application 호출 지점마다
+    따로 적혀 있어, 영어 문장 하나(`strategy.number.non_finite`)가 테스트 없이 남았었다. 문장을
+    변수로 받는 지점(제약 행 `message`, 변수로 시작하는 f-string)은 훑을 수 없다. 제약 행만 따로
+    본다.
+    """
+    heads: list[tuple[str, str]] = []
+    for path in Path(strategy_workbench.__file__).parent.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            index = _MESSAGE_ARGUMENT.get(node.func.id)
+            if index is None:
+                continue
+            head = _sentence_head(node.args[index])
+            if head is not None:
+                heads.append((f"{path.name}:{node.lineno}", head))
+
+    assert len(heads) > 50, "훑기가 호출 지점을 찾지 못했다"
+    # 첫 `:`·` — ` 앞(문장)에 한글이 있어야 한다 — 뒤의 조각만 한글인 영어 문장도 잡는다.
+    sentences = [(site, re.split(r":| — ", head, maxsplit=1)[0]) for site, head in heads]
+    assert [site for site, sentence in sentences if not _HANGUL.search(sentence)] == []
+    rows = STRATEGY_SCALAR_CONSTRAINTS
+    assert [row.path for row in rows if not _HANGUL.search(row.message)] == []
+
+
 @pytest.mark.parametrize(
     ("name", "mutate", "expected"),
     [
         pytest.param("모르는 키", HYDRATE_GOLDEN[2][1], "max_name_weight", id="키"),
         pytest.param("모르는 kind", HYDRATE_GOLDEN[4][1], "time_series", id="kind"),
-        pytest.param("고를 수 없는 값", HYDRATE_GOLDEN[5][1], "next_open", id="enum"),
+        pytest.param("고를 수 없는 값", HYDRATE_GOLDEN[5][1], "long_only", id="enum"),
     ],
 )
 def test_near_miss_suggestion_appears_in_both_the_sentence_and_the_details(
@@ -529,6 +624,36 @@ def test_duplicate_node_diagnostic_names_the_repeated_id() -> None:
     assert duplicates[0].message == (
         "앞에서 이미 쓴 node_id입니다. 다른 이름을 붙여 주세요 — node_id='px'"
     )
+
+
+def test_empty_graph_asks_for_a_first_step_instead_of_a_missing_output() -> None:
+    """노드가 없는 그래프는 출력 진단 대신 첫 단계 안내 하나만 낸다(lang2 P4-03 결정 4).
+
+    "+ 팩터 추가"가 넣는 빈 레시피(`nodes: []`, `output_node_id: ""`)에 "출력 노드를 찾을 수
+    없습니다: node_id=''"는 사용자가 아직 하지 않은 일을 잘못이라고 말했다.
+    """
+    from strategy_workbench.domain.strategy.facade.validation import validate_strategy
+
+    validation = validate_factor_graph(_graph(output=""))
+
+    assert not validation.valid
+    assert [(i.code, i.node_id, i.path, i.message) for i in validation.issues] == [
+        ("factor.graph.empty", None, "nodes", "첫 단계를 추가하세요.")
+    ]
+
+    document = _document()
+    document["factors"].append(
+        {"factor_id": "factor_2", "direction": "high", "graph": {"nodes": [], "output_node_id": ""}}
+    )
+    hydrated = hydrate_strategy_document(document, identity=DRAFT)
+    assert hydrated.spec is not None, hydrated.issues
+    base = f"factors.{len(document['factors']) - 1}."
+
+    issues = validate_strategy(hydrated.spec).issues
+
+    assert [(i.code, i.path, i.message) for i in issues if i.path.startswith(base)] == [
+        ("strategy.expression.empty", base + "graph.nodes", "첫 단계를 추가하세요.")
+    ]
 
 
 def test_graph_diagnostics_reach_a_strategy_document_as_expression_codes() -> None:

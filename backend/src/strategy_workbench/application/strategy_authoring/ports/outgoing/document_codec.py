@@ -113,6 +113,17 @@ class DiagnosticSeverity(StrEnum):
     WARNING = "warning"
 
 
+class DiagnosticAnchor(StrEnum):
+    """진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.
+
+    편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는
+    backend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).
+    """
+
+    VALUE = "value"
+    KEY = "key"
+
+
 @dataclass(frozen=True)
 class SourcePosition:
     """0-based line/column and offset into the exact source text.
@@ -139,6 +150,8 @@ class SourceDiagnostic:
 
     `range` is None only when the source has no node to point at (empty document).
     `node_id` names the FactorGraph node a semantic issue is about, when known.
+    `anchor` 도 `severity` 처럼 기본값 없이 늘 보낸다 — `range` 가 키 자체를 가리키는지 값을
+    가리키는지다(`DiagnosticAnchor`). 새 생성 지점이 빠뜨리면 타입이 잡는다(#418 리뷰 P3-3).
     """
 
     code: str
@@ -146,6 +159,7 @@ class SourceDiagnostic:
     pointer: str
     message: str
     severity: DiagnosticSeverity
+    anchor: DiagnosticAnchor
     range: SourceRange | None = None
     node_id: str | None = None
 
@@ -200,7 +214,7 @@ class DocumentCodecPort(Protocol):
     def parse(self, source: str, *, format: SourceFormat) -> ParsedDocument: ...
 
     def upgrade_source(self, source: str, *, format: SourceFormat) -> str:
-        """Rewrite a schema 1.0 source as 1.1 text, keeping comments and order where the format
-        allows (spec D3 source path). Precondition: `parse` accepted the source and its tree is a
-        1.0 document; the caller re-parses the result and compares it with the domain dict path."""
+        """은퇴 schema 원문을 현재 버전 텍스트로 다시 쓴다. 형식이 허락하는 한 주석·순서를 남긴다
+        (spec D3·D7 source 경로). 전제: `parse` 가 받았고 domain 이 업그레이드 가능하다고 판정했다.
+        호출자가 결과를 다시 parse 해 domain dict 경로 결과와 대조한다."""
         ...

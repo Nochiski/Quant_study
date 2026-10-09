@@ -1,12 +1,89 @@
 const ko = {
+  "recipe.title": "팩터 레시피",
+  "recipe.edit": "레시피 편집",
+  "recipe.back": "파이프라인으로",
+  "recipe.advanced": "고급으로",
+  "recipe.nonChain": "이 팩터는 분기 그래프입니다. 고급 편집기에서 수정하세요.",
+  "recipe.empty": "데이터 필드를 골라 첫 단계를 만드세요.",
+  "recipe.step": "단계",
+  "recipe.inputs": "입력 선택",
+  "recipe.previousInput": "앞 단계가 들어갈 입력",
+  "recipe.input": "입력",
+  "recipe.field": "데이터 필드",
+  "recipe.confirm": "단계 반영",
+  "recipe.cancel": "취소",
+  "recipe.operand": "추가 입력",
+  "recipe.result": "결과",
+  "recipe.awaitCompile": "컴파일 대기",
+  "recipe.up": "위로",
+  "recipe.down": "아래로",
+  "recipe.remove": "단계 삭제",
+  "recipe.replace": "연산 교체",
+  "recipe.replacing": "{step}단계의 새 연산을 고르세요.",
+  "recipe.identifiers": "식별자(YAML)",
+  "recipe.type.numeric_series": "종목별 수치",
+  "recipe.type.boolean_series": "종목별 참·거짓",
+  "recipe.type.group_series": "종목별 그룹",
+  "recipe.type.scalar": "단일 값",
+  "recipe.error.advanced": "분기 그래프는 고급 편집기를 사용하세요.",
+  "recipe.error.not-found": "단계를 찾을 수 없습니다. 다시 선택하세요.",
+  "recipe.error.invalid-step": "이 위치에 넣을 수 없는 단계입니다.",
+  "recipe.error.invalid-inputs": "앞 단계와 추가 입력을 확인하세요.",
+  "recipe.error.chain-required": "연결된 단계 구조를 유지해야 합니다.",
+  "recipe.error.unknown-kind": "지원하지 않는 노드 종류입니다.",
+  "recipe.error.unsupported-schema": "노드 기본값을 만들 수 없습니다.",
+  "ide.view.graph": "그래프",
+  "ide.revision.diff": "리비전 변경 비교",
+  "strategy.preview.title": "선정 미리보기",
+  "strategy.preview.stale": "이전 요청 · 새로고침 필요",
+  "strategy.preview.date": "기준일 (선택)",
+  "strategy.preview.refresh": "미리보기 새로고침",
+  "strategy.preview.description":
+    "현재 실행 가능한 문서를 명시적으로 조회합니다. 기준일을 비우면 서버가 마지막 리밸런싱 기준일을 선택합니다.",
+  "strategy.preview.loading": "미리보기를 불러오는 중입니다.",
+  "strategy.preview.discarded":
+    "문서 또는 실행 설정과 맞지 않는 응답입니다. 다시 조회하세요.",
+  "strategy.preview.resolvedDate": "조회 기준일",
+  "strategy.preview.noFrame": "이 기준일에는 리밸런싱 프레임이 없습니다.",
+  "strategy.preview.count.universe": "전체 종목",
+  "strategy.preview.count.eligible": "적격 종목",
+  "strategy.preview.count.eligibility_failed": "조건 탈락",
+  "strategy.preview.count.eligibility_rank_cut": "순위 탈락",
+  "strategy.preview.count.missing": "결측 종목",
+  "strategy.preview.targets": "선정 종목",
+  "strategy.preview.rank": "순위",
+  "strategy.preview.name": "종목명",
+  "strategy.preview.score": "종합 점수",
+  "strategy.preview.unknownName": "이름 미제공",
+  "strategy.preview.empty": "선정된 종목이 없습니다.",
+
   "dataset.catalog.dataset": "데이터셋",
   "dataset.field.availability": "사용 가능 시점",
   "dataset.field.disclosure": "공개 기준",
   "dataset.field.evidence": "근거",
   "dataset.field.recommendedLag": "권장 랙",
+  // 필드 계약 어휘(owner backend `domain/equity`). 값마다 문구가 있어야 한다 — `entities/dataset` 의
+  // `field-copy.ts` 가 `tCode` 로 typecheck 에서 요구한다(#350).
+  "dataset.cellKind.observed": "관측값",
+  "dataset.cellKind.source_omitted_zero": "원천 생략(0)",
+  "dataset.cellKind.missing": "결측",
+  "dataset.cellKind.not_collected": "미수집",
+  "dataset.cellKind.coverage_gap": "수록 범위 밖",
+  "dataset.cellKind.masked": "원장이 가림",
+  "dataset.valueType.price": "가격",
+  "dataset.valueType.amount": "금액",
+  "dataset.valueType.ratio": "비율",
+  "dataset.valueType.count": "개수",
+  "dataset.valueType.category": "범주",
+  "dataset.frequency.daily": "일별",
+  "dataset.frequency.monthly": "월별",
+  "dataset.frequency.quarterly": "분기별",
+  "dataset.frequency.annual": "연간",
+  "dataset.frequency.event": "사건 발생 시",
   "ui.tabs.view": "표현 전환",
   "ui.splitHandle.resize": "패널 크기 조절",
   "ui.emptyState.noStrategies": "저장된 전략이 없습니다",
+  "ui.failure.serverReason": "서버 사유",
   "ui.status.ok": "정상",
   "ui.status.warn": "주의",
   "ui.status.error": "오류",
@@ -38,12 +115,12 @@ const ko = {
   "page.backtest.loadError": "백테스트 상태를 불러올 수 없습니다.",
   "page.backtest.status": "실행 상태",
   "page.backtest.progress": "실행 진행",
-  "page.backtest.runError": "실행 오류",
-  "page.backtest.cancelledError": "취소 전 발생한 오류",
-  "page.backtest.serverReason": "서버 사유",
-  // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 422 의
-  // `backtest.error.*` 와 namespace 를 나눈 이유: 툴바(422)는 서버 detail 을 그대로 보여 주는 화면이라
-  // 같은 키를 쓰면 그 문구가 detail 을 덮어쓴다.
+  // run 실패 한 줄(`entities/backtest` 의 `BacktestRunFailure`)의 제목. 결과 화면과 백테스트 이력이 함께 쓴다(#304).
+  "backtest.run.failed": "실행 오류",
+  "backtest.run.failedBeforeCancel": "취소 전 발생한 오류",
+  // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 거절의
+  // `backtest.error.*` 와 namespace 를 나눈다: 같은 코드(`backtest.run.invalid` 등)라도 시작 거절은 실행 전에
+  // 고칠 것을, run 실패는 실행 중에 난 일을 말한다.
   "backtest.run.error.portfolio.data.unavailable":
     "데이터 소스가 이 유니버스·기간의 관측을 제공하지 못했습니다. 유니버스 ID 와 데이터 기간을 확인하세요.",
   "backtest.run.error.portfolio.raw_observation.invalid":
@@ -52,12 +129,46 @@ const ko = {
     "전략 계산이 유효하지 않습니다. 서버 사유의 노드·경로를 확인하세요.",
   "backtest.run.error.backtest.run.invalid":
     "실행 요청이 이 환경에서 처리될 수 없습니다. 실행 설정과 엔진 능력을 확인하세요.",
+  "backtest.run.error.backtest.run.equity_wiped_out":
+    "세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식). 서버 오류가 아니라 전략이 자본을 모두 잃은 결과입니다. 레버리지·공매도 비중을 줄여 보세요.",
+  "backtest.run.error.backtest.run.data_not_ready":
+    "데이터 원장이 백테스트에 쓸 준비가 되지 않아 실행을 멈췄습니다(카탈로그를 다시 만들어야 하는 경우 등). 서버 사유에 적힌 조치를 한 뒤 다시 실행하세요.",
+  "backtest.run.error.backtest.run.no_positions":
+    "기간 안에 리밸런싱일이 없거나 조건을 통과한 종목이 없어 한 번도 사지 않았습니다. 실행 설정의 기간을 늘리거나 리밸런싱 주기·필터를 확인하세요.",
+  "backtest.run.error.backtest.run.benchmark_unknown":
+    "데이터 소스에 없는 벤치마크 종목 ID입니다. 실행 설정의 벤치마크 종목 ID 칸을 고치거나 비우세요.",
   "backtest.run.error.backtest.run.internal":
     "서버 내부 오류로 실행이 중단되었습니다. 서버 로그를 확인하세요.",
+  "backtest.run.error.backtest.run.interrupted":
+    "실행이 끝나기 전에 서버가 다시 시작되어 중단되었습니다. 같은 설정으로 다시 실행하세요.",
   "backtest.settings.title": "실행 설정",
   "backtest.settings.open": "실행 설정 열기",
   "backtest.settings.ready": "준비됨",
   "backtest.settings.invalid": "입력 확인",
+  "backtest.settings.environment": "실행 환경",
+  "backtest.settings.environment.note": "시장·기간·유니버스·체결·비용·결측 처리는 전략 문서 밖의 실행 설정입니다. 바꿔도 전략 버전은 늘지 않고, 실행 기록에만 남습니다.",
+  "backtest.settings.environment.schemaLoading": "실행 설정 항목을 불러오는 중입니다.",
+  "backtest.settings.environment.schemaError": "실행 설정 항목을 불러오지 못해 백테스트를 시작할 수 없습니다. 서버 연결을 확인하세요.",
+  "backtest.settings.environment.error.required": "값을 정하세요.",
+  "backtest.settings.environment.error.number": "숫자를 입력하세요.",
+  "backtest.settings.environment.error.minimum": "{bound} 이상이어야 합니다.",
+  "backtest.settings.environment.error.exclusiveMinimum": "{bound}보다 커야 합니다.",
+  "backtest.settings.environment.error.maximum": "{bound} 이하여야 합니다.",
+  "backtest.settings.environment.error.exclusiveMaximum": "{bound}보다 작아야 합니다.",
+  "backtest.settings.environment.error.date": "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01",
+  "backtest.settings.environment.error.dateRange": "{minimum}부터 {maximum} 사이의 날짜여야 합니다.",
+  "backtest.settings.environment.error.order": "종료일은 시작일과 같거나 그 뒤여야 합니다.",
+  "backtest.settings.options": "실행 옵션",
+  "runEnvironment.summary.label": "실행 설정 요약",
+  "runEnvironment.summary.title": "실행 설정",
+  "runEnvironment.summary.fill": "실행 설정 채우기",
+  "runEnvironment.summary.fix": "실행 설정 고치기",
+  "runEnvironment.summary.outside": "전략 문서 밖의 값입니다. 바꿔도 전략 버전은 그대로입니다.",
+  "runEnvironment.fix.researchStart": "시작일을 {research_start}로",
+  "backtest.trial.label": "시도 영향",
+  "backtest.trial.new_trial": "결과가 나오면 새 시도로 셉니다. 계열 시도 수 {count}회 → {after}회.",
+  "backtest.trial.recheck": "이미 센 시도의 재확인이라 시도 수가 늘지 않습니다. 계열 시도 수 {count}회 그대로.",
+  "backtest.trial.no_lineage": "저장한 적 없는 전략이라 이 실행은 시도 수에 들지 않습니다. 리비전을 저장한 뒤 실행하면 셉니다.",
   "backtest.settings.core": "실행 core",
   "backtest.settings.core.rust": "Persistent Rust",
   "backtest.settings.core.python": "Python reference",
@@ -67,23 +178,34 @@ const ko = {
     "비우면 벤치마크 없이 실행합니다. ID 형식은 연결된 데이터 어댑터가 정합니다(유니버스의 종목 ID 그대로).",
   "backtest.settings.annualizationDays": "연환산 거래일",
   "backtest.settings.oosStart": "OOS 시작일 (선택)",
-  "backtest.settings.rangeUnavailable":
-    "유효한 StrategySpec의 데이터 기간이 필요합니다.",
+  "backtest.settings.oosStart.hint": "실행 기간 안의 날짜입니다. 이날부터 종료일까지를 표본 밖 구간으로 따로 잽니다.",
   "backtest.settings.blocked": "실행 설정의 잘못된 값을 먼저 수정하세요.",
-  "backtest.settings.error.initial_cash":
-    "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
+  "backtest.settings.incomplete": "실행 설정에서 {fields} 칸을 채우세요.",
+  "backtest.settings.problem.missing": "실행 설정의 {field} 칸을 채우세요.",
+  "backtest.settings.problem.invalid": "실행 설정의 {field} 칸을 고치세요: {reason}",
+  "backtest.settings.problem.more": "이 밖에 {count}칸이 더 맞지 않습니다.",
+  "backtest.settings.problem.name.initial_cash": "초기 자본",
+  "backtest.settings.problem.name.annualization_days": "연환산 거래일",
+  "backtest.settings.problem.name.oos_out_of_range": "OOS 시작일",
+  "backtest.settings.problem.name.oos_incomplete": "OOS 시작일",
+  "backtest.settings.error.initial_cash": "0보다 큰 숫자를 입력하세요.",
   "backtest.settings.error.annualization_days":
-    "연환산 거래일을 정확히 전송 가능한 정수로 입력하세요. 허용 범위는 서버가 검증합니다.",
-  "backtest.settings.error.date_range_unavailable":
-    "OOS 구간을 만들려면 전략 검증을 먼저 완료하세요.",
+    "1 이상이고 정확히 전송 가능한 정수를 입력하세요.",
+  "backtest.settings.error.environment": "실행 환경 칸을 모두 올바르게 채우세요.",
+  "backtest.settings.error.oos_out_of_range": "실행 기간 안의 날짜여야 합니다.",
+  "backtest.settings.error.oos_incomplete":
+    "연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
   "backtest.actions.title": "백테스트 실행 제어",
   "backtest.actions.cancel": "실행 취소",
   "backtest.actions.cancelling": "취소 요청됨",
   "backtest.actions.rerun": "동일 설정 재실행",
   "backtest.actions.replaying": "재실행 중",
+  "backtest.actions.rerunFailed": "동일 설정으로 다시 실행하지 못했습니다",
   "backtest.actions.error":
     "실행 제어 요청에 실패했습니다. 상태를 새로 확인한 뒤 다시 시도하세요.",
   "backtest.result.chartEmpty": "이 구간에서 산출 가능한 값이 없습니다.",
+  "backtest.result.chartEmpty.rollingSharpe":
+    "실행이 롤링 창({sessions}세션)보다 짧아 롤링 샤프 값이 없습니다.",
   "backtest.result.chart": "차트",
   "backtest.result.kicker": "PROFESSIONAL RESULT",
   "backtest.result.title": "백테스트 결과",
@@ -120,7 +242,7 @@ const ko = {
   "backtest.result.column.closed": "Closed",
   "backtest.result.column.quantity": "Qty",
   "backtest.result.column.pnl": "P&L",
-  "backtest.result.column.fees": "Fees",
+  "backtest.result.column.fees": "비용(수수료·세금)",
   "backtest.result.column.slippage": "Slippage",
   "backtest.result.manifest": "Manifest · 데이터 경고 · 재현성 정보",
   "backtest.result.manifest.schema": "Schema",
@@ -131,6 +253,8 @@ const ko = {
   "backtest.result.manifest.annualizationDays": "연환산 거래일",
   "backtest.result.manifest.metricWindows": "평가 구간",
   "backtest.result.manifest.fingerprint": "Run fingerprint",
+  "backtest.result.manifest.environment": "실행 설정",
+  "backtest.result.manifest.environment.hash": "실행 설정 hash",
   "backtest.result.manifest.strategy": "Strategy",
   "backtest.result.manifest.source": "Strategy source",
   "backtest.result.manifest.inline": "inline draft",
@@ -140,6 +264,45 @@ const ko = {
   "backtest.result.manifest.completed": "Completed",
   "backtest.result.warnings": "Data warnings",
   "backtest.result.warnings.empty": "경고 없음",
+  "backtest.warning.portfolio.sector_unknown_excluded":
+    "섹터를 모르는 종목은 섹터 제약에서 뺐습니다",
+  "backtest.warning.benchmark.no_bar_at_start":
+    "벤치마크 첫 가격보다 앞선 구간이 있어 전체 구간 벤치마크 비교를 쓸 수 없습니다",
+  "backtest.warning.benchmark.suspended_sessions_carried":
+    "벤치마크 거래정지 세션은 직전 가격을 이어 썼습니다",
+  "backtest.warning.benchmark.delisted_sessions_frozen":
+    "벤치마크 상장이 끝난 뒤 세션은 마지막 값으로 멈췄습니다",
+  "backtest.warning.benchmark.invalid_bar_sessions_carried":
+    "벤치마크 원장 행이 무효인 거래일은 직전 가격을 이어 썼습니다",
+  "backtest.warning.analytics.base_rate_carried_forward":
+    "기준금리 이력을 확인한 날 뒤 세션은 마지막 기준금리를 이어 썼습니다",
+  "backtest.warning.participation.session_volume":
+    "체결일 거래량으로 체결 한도를 정해 결과가 낙관 쪽입니다",
+  // 지표 칸의 사용 불가 사유. 키는 backend `MetricUnavailableReason` 값이고, 사유가 늘면
+  // `metricUnavailableCopy`가 typecheck에서 문구를 요구한다(이슈 #241·#293).
+  "backtest.metricUnavailable.zero_return_variance":
+    "수익률 변동이 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_downside_variation":
+    "손실 쪽 변동이 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_drawdown":
+    "낙폭이 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.maximum_drawdown_not_recovered":
+    "최대 낙폭에서 아직 회복하지 않았습니다",
+  "backtest.metricUnavailable.benchmark_not_available":
+    "벤치마크 값이 비어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_closed_trades":
+    "청산된 거래가 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_losing_closed_trade":
+    "손실로 청산된 거래가 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_observations_in_scope":
+    "이 구간에 관측이 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.period_under_one_year":
+    "기간이 1년보다 짧아 연율로 바꾸지 않습니다",
+  "backtest.metricUnavailable.base_rate_not_covered":
+    "기준금리 이력이 시작되기 전 세션이 있어 계산하지 않습니다",
+  "backtest.metricUnavailable.two_valued_returns":
+    "수익률이 두 가지 값만 나와 오차를 잴 수 없습니다",
+  "backtest.result.metricUnavailable.explain": "데이터 경고에서 이유 보기",
   // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
   "backtest.metric.total_return": "총수익률",
@@ -153,10 +316,16 @@ const ko = {
     "수익률이 얼마나 크게 오르내렸는지입니다. 클수록 불안정합니다.",
   "backtest.metric.sharpe": "샤프 비율",
   "backtest.metric.sharpe.description":
-    "흔들림 한 단위당 얼마나 벌었는지입니다. 클수록 덜 흔들리며 벌었습니다.",
+    "흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다. 클수록 덜 흔들리며 더 벌었습니다.",
+  "backtest.metric.sharpe_standard_error": "샤프 비율 오차",
+  "backtest.metric.sharpe_standard_error.description":
+    "샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다. 샤프 ± 이 값의 2배가 대략 95% 범위이고, 날마다 독립이라고 본 근사라 실제로는 더 클 수 있습니다.",
+  "backtest.metric.probabilistic_sharpe": "기준금리를 넘을 확률",
+  "backtest.metric.probabilistic_sharpe.description":
+    "운을 걷어 낸 실력으로도 한국은행 기준금리보다 더 벌 확률입니다. 이 결과 하나로 잰 값이라, 여러 설정을 시도해 고른 결과면 실제로는 더 낮습니다.",
   "backtest.metric.sortino": "소르티노 비율",
   "backtest.metric.sortino.description":
-    "떨어질 때의 흔들림만 위험으로 보고 잰 샤프 비율입니다.",
+    "기준금리에 못 미친 흔들림만 위험으로 보고 잰 샤프 비율입니다.",
   "backtest.metric.max_drawdown": "최대 낙폭",
   "backtest.metric.max_drawdown.description":
     "가장 높았던 때에서 가장 많이 떨어진 폭입니다.",
@@ -199,6 +368,9 @@ const ko = {
   "backtest.metric.total_fees": "총수수료",
   "backtest.metric.total_fees.description":
     "거래하며 낸 수수료 합계입니다.",
+  "backtest.metric.total_taxes": "매도 거래세",
+  "backtest.metric.total_taxes.description":
+    "주식을 팔 때 낸 증권거래세·농어촌특별세 합계입니다.",
   "backtest.metric.total_slippage_cost": "슬리피지 비용",
   "backtest.metric.total_slippage_cost.description":
     "원하던 가격과 실제 체결 가격의 차이로 잃은 금액입니다.",
@@ -295,7 +467,8 @@ const ko = {
   "debugger.unavailable.no-factors": "추적할 팩터가 없습니다.",
   "debugger.unavailable.execution-plan":
     "현재 FactorGraph 실행 계획을 확정할 수 없어 추적을 차단했습니다.",
-  "debugger.blocked.document": "현재 실행 가능한 문서가 없습니다.",
+  "debugger.unavailable.environment":
+    "추적은 실행 설정 위에서 돕니다. 위 실행 설정 요약 띠가 고칠 칸을 알려 줍니다.",
   "debugger.blocked.date": "유효한 기준일을 선택하세요.",
   "debugger.blocked.security": "종목 ID를 1개 이상, 최대 100개 입력하세요.",
   "debugger.blocked.factor": "추적할 팩터를 선택하세요.",
@@ -307,7 +480,7 @@ const ko = {
   "debugger.state.cancelled": "추적 요청을 취소했습니다.",
   "debugger.state.discarded":
     "현재 문서·요청과 fingerprint가 다른 응답을 폐기했습니다.",
-  "debugger.state.error": "추적에 실패했습니다.",
+  "debugger.state.error": "추적 실패",
   "debugger.target.empty": "선택한 기준일에는 TargetTape frame이 없습니다.",
   "debugger.target.unavailable": "TargetTape 없음",
   "debugger.target.partial":
@@ -337,6 +510,34 @@ const ko = {
   "debugger.column.rank": "순위",
   "debugger.column.selected": "선택",
   "debugger.column.exclusion": "제외 사유",
+  "debugger.exclusion.not_in_universe": "유니버스 밖",
+  "debugger.exclusion.future_data": "기준일 이후에 공개된 값",
+  "debugger.exclusion.missing_eligibility": "거르기 필드 값 없음",
+  "debugger.exclusion.eligibility_failed": "거르기 조건 불통과",
+  "debugger.exclusion.eligibility_rank_cut": "상위 비율·개수 밖(순위로 잘림)",
+  "debugger.exclusion.missing_factor": "팩터 값 없음",
+  "debugger.exclusion.score_threshold": "점수 하한 미달",
+  "debugger.exclusion.regime_blocked": "레짐 조건으로 막힘",
+  "debugger.exclusion.liquidity_failed": "유동성 하한 미달",
+  "debugger.exclusion.outside_selection": "선정 순위 밖",
+  "debugger.exclusion.missing_risk": "위험 값 없음(역가중 불가)",
+  "debugger.exclusion.turnover_buffer": "회전 완충으로 보유 유지",
+  "debugger.exclusion.minimum_trade": "최소 거래 비중 미만이라 이전 비중 유지",
+  // 추적 응답의 backend 어휘(owner backend enum). `features/debug-strategy` 의 `trace-copy.ts` 가
+  // `tCode` 로 값마다 문구를 요구한다(#350). `masked` 는 원장이 가린 칸 때문에 결측이 된 칸이다.
+  "debugger.status.ok": "계산됨",
+  "debugger.status.missing_input": "입력 없음",
+  "debugger.status.warm_up": "이력 부족",
+  "debugger.status.divide_by_zero": "0으로 나눔",
+  "debugger.status.group_missing": "그룹 없음",
+  "debugger.status.masked": "원장이 가림",
+  "debugger.contributionStatus.ok": "반영됨",
+  "debugger.contributionStatus.missing": "팩터 값 없음",
+  "debugger.contributionStatus.future_data": "기준일 이후에 공개된 값",
+  "debugger.constraintEffect.not_selected": "선택되지 않음",
+  "debugger.constraintEffect.unchanged": "제약 영향 없음",
+  "debugger.constraintEffect.adjusted": "제약으로 조정됨",
+  "debugger.constraintEffect.removed": "제약으로 제거됨",
   "debugger.column.target": "목표 비중",
   "debugger.column.nodeValue": "노드 값",
   "debugger.column.nodeStatus": "노드 상태",
@@ -381,7 +582,6 @@ const ko = {
   "page.error.retry": "다시 시도",
   "page.revision.viewPending":
     "이 표현은 아직 제공되지 않아 소스 편집기를 표시합니다",
-  "page.backtest.resultError": "백테스트 결과를 불러올 수 없습니다.",
   "nav.backtests": "백테스트",
   "nav.experiments": "실험",
   "nav.realtime": "실시간",
@@ -440,11 +640,10 @@ const ko = {
   "snippet.empty": "현재 계약에 사용 가능한 항목이 없습니다.",
   "snippet.insert": "현재 커서에 삽입",
   "snippet.inserted": "삽입했고 YAML 문법 검사를 통과했습니다.",
-  "snippet.category.data": "데이터",
-  "snippet.category.factor": "팩터",
-  "snippet.category.signal": "신호",
-  "snippet.category.risk": "리스크",
-  "snippet.category.execution": "실행",
+  "snippet.category.section": "섹션",
+  "snippet.category.example": "예시 팩터",
+  "snippet.example.note":
+    "튜토리얼용 예시입니다. 전략은 빈 팩터에서 직접 구성하는 것을 권합니다.",
   "snippet.error.yaml-only": "YAML 편집 화면에서만 사용할 수 있습니다.",
   "snippet.error.selection":
     "선택 영역을 해제하고 빈 키 위치에 커서를 놓으세요.",
@@ -514,7 +713,8 @@ const ko = {
   "graph.incoming": "입력 연결",
   "graph.sourceNode": "소스 노드 · 입력 없음",
   "graph.selectNode": "그래프 노드 선택: {node}",
-  "graph.selectInput": "{role} 입력 노드 선택: {node}",
+  "graph.selectInput": "{role} 선택: {node}",
+  "graph.inputOrdinal": "{index}번째 입력",
   "graph.missingInput": "입력 누락",
   "graph.notExecuted": "미실행",
   "graph.unplannedTitle": "실행 계획에 포함되지 않은 정의",
@@ -573,16 +773,8 @@ const ko = {
   "contract.catalog.unsupported":
     "이 카탈로그의 상세 조회 API는 아직 없습니다.",
   "contract.fieldDetails": "데이터 필드 · PIT",
-  "contract.factorDetails": "팩터 레지스트리",
   "contract.snapshot": "데이터 스냅샷",
   "contract.registryVersion": "레지스트리 버전",
-  "contract.category": "분류",
-  "contract.availability": "가용 상태",
-  "contract.outputUnit": "출력 단위",
-  "contract.preference": "선호 방향",
-  "contract.minimumHistory": "최소 이력",
-  "contract.requiredFields": "필수 필드",
-  "contract.tags": "태그",
   "contract.frequency": "빈도",
   "contract.valueType": "값 타입",
   "contract.pointInTime": "Point-in-time",
@@ -618,6 +810,7 @@ const ko = {
   "strategy.contract.applicable.minimum_liquidity": "최소 유동성 하한",
   "strategy.contract.applicable.sector_neutral": "섹터 중립 여부",
   "strategy.contract.applicable.risk_field_id": "위험 가중에 쓰는 필드",
+  "strategy.contract.applicable.risk_factor_id": "위험 가중에 쓰는 팩터",
   "strategy.contract.applicable.regime_minimum": "레짐 값 하한",
   "strategy.contract.portfolio.selection_count":
     "롱 포트폴리오에 선택할 종목 수",
@@ -636,10 +829,48 @@ const ko = {
   "strategy.contract.risk.gross_exposure": "포트폴리오 총 익스포저",
   "strategy.contract.risk.max_name_weight": "종목별 최대 목표 비중 한도",
   "strategy.contract.risk.max_sector_weight": "섹터별 최대 목표 비중 한도",
-  "strategy.contract.execution.participation_rate":
-    "시장 거래량 대비 최대 주문 참여율",
-  "strategy.contract.execution.fee_bps": "체결 금액에 적용할 수수료 가정",
-  "strategy.contract.execution.slippage_bps": "체결 가격의 슬리피지 가정",
+  // 실행 설정 제약 행의 `x-description-key`. 발행처는 `GET /api/v1/run-environments/schema` 이며
+  // (owner `domain/backtest`), schema 1.2 에서 전략 문서의 `execution` 섹션이 사라지면서
+  // `strategy.contract.execution.*` 세 줄을 이 이름으로 옮겼다(P2-03). 렌더는 P3-02 패널이다.
+  "run_environment.field.participation_rate": "참여율",
+  "run_environment.field.fee_bps": "수수료",
+  "run_environment.field.slippage_bps": "슬리피지",
+  "run_environment.field.sell_tax_bps": "매도 거래세율",
+  "run_environment.field.impact_coefficient": "가격 충격 계수",
+  "run_environment.field.market": "시장",
+  "run_environment.field.market.description": "종목과 가격을 읽을 거래소입니다.",
+  "run_environment.field.market.value.KRX": "한국거래소(KRX)",
+  "run_environment.field.frequency": "빈도",
+  "run_environment.field.frequency.description": "신호를 계산하고 가격을 읽는 간격입니다.",
+  "run_environment.field.frequency.value.daily": "일봉",
+  "run_environment.field.start": "시작일",
+  "run_environment.field.start.description": "백테스트가 첫 신호를 내는 날입니다. 이력이 필요한 팩터는 이보다 앞선 값을 읽습니다.",
+  "run_environment.field.end": "종료일",
+  "run_environment.field.end.description": "백테스트가 마지막으로 평가하는 날입니다.",
+  "run_environment.field.universe_id": "유니버스",
+  "run_environment.field.universe_id.description": "기준일마다 후보로 삼을 종목 목록의 ID입니다. 예: krx.common-stock",
+  "run_environment.field.timing": "체결 시점",
+  "run_environment.field.timing.description": "신호가 나온 뒤 주문이 체결되는 시점입니다.",
+  "run_environment.field.timing.value.next_open": "다음 거래일 시가",
+  "run_environment.field.participation_basis": "참여 기준",
+  "run_environment.field.participation_basis.description": "참여율을 곱해 한 세션에 체결할 수 있는 주식 수 상한을 정할 거래량입니다. 체결일 거래량은 체결 시점에 모르는 그날 전체 거래량을 써서 결과가 낙관 쪽으로 나옵니다.",
+  "run_environment.field.participation_basis.value.session_volume": "체결일 거래량",
+  "run_environment.field.participation_basis.value.adv20": "20일 평균 거래대금",
+  "run_environment.field.impact_model": "가격 충격 모델",
+  "run_environment.field.impact_model.description": "주문이 자기 체결 가격을 얼마나 불리하게 미는지 셀 방식입니다.",
+  "run_environment.field.impact_model.value.fixed_bps": "고정 bp(슬리피지)",
+  "run_environment.field.impact_model.value.sqrt": "√ 가격 충격(변동성·거래량 비례)",
+  "run_environment.field.sell_tax": "매도 거래세",
+  "run_environment.field.sell_tax.description": "주식을 팔 때 체결 금액에 붙는 세금을 어떻게 셀지 정합니다.",
+  "run_environment.field.sell_tax.value.krx_statutory": "법정 세율(날짜별)",
+  "run_environment.field.sell_tax.value.custom": "직접 입력",
+  "run_environment.field.sell_tax.value.none": "세금 없음",
+  "run_environment.field.missing": "결측 처리",
+  "run_environment.field.missing.description": "팩터 값이 비었을 때(입력이 비었거나 이력이 모자랄 때) 같은 날 종목을 견주기 전에 그 값을 어떻게 할지 정합니다. 원래 빈 입력은 기간 계산에서 채우지 않지만, 앞선 횡단면·그룹 계산에서 채운 값은 뒤의 기간 계산에 들어갈 수 있습니다. 원장이 틀린 값이라 가린 칸(셀 상태 masked)은 어느 방식에서도 채우지 않습니다.",
+  "run_environment.field.missing.value.drop": "그 종목을 빼기",
+  "run_environment.field.missing.value.keep": "빈 값 그대로 두기",
+  "run_environment.field.missing.value.zero": "0으로 채우기",
+  "run_environment.field.missing.value.cross_sectional_median": "같은 날 중앙값으로 채우기",
   // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
   // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
   // 한 줄 설명. 연산자는 `<stem>.formula`로 계산식을 더한다. 목록 자체는 runtime schema의
@@ -647,7 +878,7 @@ const ko = {
   // `screen-vocabulary.test.ts`가 fixture를 순회해 누락 키를 잡는다.
   "strategy.document": "전략 문서",
   "strategy.document.description":
-    "유니버스·팩터·포트폴리오·리스크·실행을 한 벌로 적은 전략 정의입니다.",
+    "종목 거르기·팩터·포트폴리오·리스크를 한 벌로 적은 전략 정의입니다. 시장·기간·수수료는 실행 설정이 정합니다.",
   "strategy.section.schema_version": "문서 버전",
   "strategy.section.schema_version.description":
     "이 문서가 따르는 authoring 스키마 버전입니다.",
@@ -657,9 +888,6 @@ const ko = {
   "strategy.section.description": "전략 설명",
   "strategy.section.description.description":
     "이 전략이 무엇을 노리는지 자유롭게 적습니다.",
-  "strategy.section.data": "데이터",
-  "strategy.section.data.description":
-    "어느 시장의 어느 기간·유니버스를 읽을지 정합니다.",
   "strategy.section.eligibility": "종목 거르기",
   "strategy.section.eligibility.description":
     "팩터를 계산하기 전에 유니버스에서 뺄 조건입니다.",
@@ -674,28 +902,9 @@ const ko = {
     "몇 종목을 어떤 비중으로 담고 언제 다시 맞출지 정합니다.",
   "strategy.section.risk": "리스크 제약",
   "strategy.section.risk.description": "익스포저와 종목·섹터 비중 한도입니다.",
-  "strategy.section.execution": "체결 가정",
-  "strategy.section.execution.description":
-    "주문 시점과 참여율·수수료·슬리피지 가정입니다.",
   "strategy.section.parameters": "탐색 파라미터",
   "strategy.section.parameters.description":
     "최적화가 값을 바꿔 가며 시험할 파라미터 정의입니다.",
-  "strategy.type.data_step": "데이터 구간",
-  "strategy.type.data_step.description":
-    "시장·주기·기간·유니버스를 묶은 데이터 설정입니다.",
-  "strategy.field.data_step.market": "시장",
-  "strategy.field.data_step.market.description": "시세를 읽어 올 거래소입니다.",
-  "strategy.field.data_step.start": "시작일",
-  "strategy.field.data_step.start.description":
-    "백테스트가 읽기 시작하는 첫날입니다.",
-  "strategy.field.data_step.end": "종료일",
-  "strategy.field.data_step.end.description":
-    "백테스트가 읽는 마지막 날입니다.",
-  "strategy.field.data_step.universe_id": "유니버스",
-  "strategy.field.data_step.universe_id.description":
-    "후보 종목 집합의 식별자입니다.",
-  "strategy.field.data_step.frequency": "데이터 주기",
-  "strategy.field.data_step.frequency.description": "관측을 읽는 간격입니다.",
   "strategy.type.eligibility_rule": "거르기 규칙",
   "strategy.type.eligibility_rule.description":
     "데이터 필드 하나를 기준값과 견주는 조건입니다.",
@@ -705,9 +914,20 @@ const ko = {
   "strategy.field.eligibility_rule.operator": "비교 방식",
   "strategy.field.eligibility_rule.operator.description":
     "필드 값과 기준값을 견주는 방법입니다.",
+  "strategy.field.eligibility_rule.operator.value.gt": "기준값보다 큰",
+  "strategy.field.eligibility_rule.operator.value.gte": "기준값 이상인",
+  "strategy.field.eligibility_rule.operator.value.lt": "기준값보다 작은",
+  "strategy.field.eligibility_rule.operator.value.lte": "기준값 이하인",
+  "strategy.field.eligibility_rule.operator.value.eq": "기준값과 같은",
+  "strategy.field.eligibility_rule.operator.value.top_percent": "값이 큰 쪽 상위 비율 안에 드는",
+  "strategy.field.eligibility_rule.operator.value.top_percent.description":
+    "다른 조건을 통과한 종목 중 이 필드 값이 큰 순서로 기준값 비율(0.2 = 상위 20%)만 남깁니다.",
+  "strategy.field.eligibility_rule.operator.value.top_count": "값이 큰 쪽 상위 개수 안에 드는",
+  "strategy.field.eligibility_rule.operator.value.top_count.description":
+    "다른 조건을 통과한 종목 중 이 필드 값이 큰 순서로 기준값 개수만 남깁니다.",
   "strategy.field.eligibility_rule.value": "기준값",
   "strategy.field.eligibility_rule.value.description":
-    "비교에 쓰는 숫자입니다.",
+    "비교에 쓰는 숫자입니다. 상위 비율이면 0~1 사이 비율(0.2 = 상위 20%), 상위 개수면 종목 수입니다.",
   "strategy.type.eligibility_step": "종목 거르기",
   "strategy.type.eligibility_step.description":
     "팩터 계산 전에 유니버스를 좁히는 규칙 묶음입니다.",
@@ -739,12 +959,6 @@ const ko = {
   "strategy.node.conditional": "조건 분기",
   "strategy.node.conditional.description":
     "조건이 참일 때와 거짓일 때 다른 값을 냅니다.",
-  "strategy.node.saved_factor": "저장된 팩터",
-  "strategy.node.saved_factor.description":
-    "이미 저장한 팩터의 값을 들여옵니다.",
-  "strategy.node.saved_subgraph": "저장된 부분 그래프",
-  "strategy.node.saved_subgraph.description":
-    "이미 저장한 그래프 조각을 들여옵니다.",
   "strategy.field.node.kind": "노드 종류",
   "strategy.field.node.kind.description":
     "이 노드가 무엇을 하는 노드인지 정합니다.",
@@ -753,7 +967,7 @@ const ko = {
     "그래프 안에서 이 노드를 가리키는 이름입니다.",
   "strategy.field.node.field_id": "데이터 필드",
   "strategy.field.node.field_id.description":
-    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만, 원장에 확인된 계수가 없거나 계수가 늦게 공개된 사건은 조정 공백으로 남을 수 있습니다.",
+    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만 모든 사건을 잇지는 않습니다. 원장이 그날 사건을 반영하지 못한 날은 값이 비고, 그날을 품는 집계 기간과 그날을 사이에 두고 두 시점을 견주는 계산('며칠 전 값', 건너뛰는 세션을 둔 집계와 오늘 값의 비교)도 빕니다. 유상증자 권리락처럼 원장이 조정하지 않는 사건은 가격 변화가 그대로 남습니다.",
   "strategy.field.node.value": "값",
   "strategy.field.node.value.description": "이 노드가 내보낼 고정 숫자입니다.",
   "strategy.field.node.parameter_id": "파라미터 이름",
@@ -793,11 +1007,6 @@ const ko = {
   "strategy.field.node.false_node_id": "거짓일 때 값",
   "strategy.field.node.false_node_id.description":
     "조건이 거짓인 종목에 쓸 값입니다.",
-  "strategy.field.node.factor_id": "팩터 이름",
-  "strategy.field.node.factor_id.description": "값을 가져올 저장된 팩터입니다.",
-  "strategy.field.node.subgraph_id": "부분 그래프 이름",
-  "strategy.field.node.subgraph_id.description":
-    "값을 가져올 저장된 그래프 조각입니다.",
   "strategy.type.factor_graph": "팩터 계산 그래프",
   "strategy.type.factor_graph.description":
     "노드를 이어 팩터 값을 만드는 계산식입니다.",
@@ -807,9 +1016,6 @@ const ko = {
   "strategy.field.factor_graph.output_node_id": "출력 노드",
   "strategy.field.factor_graph.output_node_id.description":
     "팩터 값으로 쓸 마지막 노드입니다.",
-  "strategy.field.factor_graph.missing_policy": "결측 처리",
-  "strategy.field.factor_graph.missing_policy.description":
-    "값이 없는 종목을 어떻게 다룰지 정합니다.",
   "strategy.type.factor_signal": "알파 팩터",
   "strategy.type.factor_signal.description":
     "종목 점수 하나와 그 가중치입니다.",
@@ -822,6 +1028,8 @@ const ko = {
   "strategy.field.factor_signal.direction": "선호 방향",
   "strategy.field.factor_signal.direction.description":
     "값이 클수록 좋은지 작을수록 좋은지 정합니다.",
+  "strategy.field.factor_signal.direction.value.high": "클수록 좋음",
+  "strategy.field.factor_signal.direction.value.low": "작을수록 좋음",
   "strategy.field.factor_signal.weight": "가중치",
   "strategy.field.factor_signal.weight.description":
     "여러 팩터를 합칠 때 이 팩터가 갖는 비중입니다.",
@@ -831,6 +1039,18 @@ const ko = {
   "strategy.type.signal_step": "신호 결합",
   "strategy.type.signal_step.description":
     "팩터 점수를 합친 뒤 후보를 남기는 기준입니다.",
+  "strategy.field.signal_step.normalization": "점수 정규화",
+  "strategy.field.signal_step.normalization.description":
+    "팩터 점수를 합치기 전에 순위·표준점수로 맞출지 정합니다.",
+  "strategy.field.signal_step.normalization.value.none": "원시값 그대로 가중 합(단위가 같을 때만)",
+  "strategy.field.signal_step.normalization.value.none.description":
+    "팩터 값을 바꾸지 않고 가중치만 곱해 더합니다. 단위가 다른 팩터를 섞으면 큰 단위가 점수를 좌우합니다.",
+  "strategy.field.signal_step.normalization.value.rank": "순위로 맞춘 뒤 가중 합",
+  "strategy.field.signal_step.normalization.value.rank.description":
+    "기준일마다 종목 간 순위(0~1)로 바꾼 뒤 가중치를 곱해 더합니다.",
+  "strategy.field.signal_step.normalization.value.zscore": "표준점수로 맞춘 뒤 가중 합",
+  "strategy.field.signal_step.normalization.value.zscore.description":
+    "기준일마다 종목 간 평균 0, 표준편차 1로 바꾼 뒤 가중치를 곱해 더합니다.",
   "strategy.field.signal_step.score_threshold": "점수 하한",
   "strategy.field.signal_step.score_threshold.description":
     "이 점수보다 낮은 종목은 후보에서 뺍니다.",
@@ -839,22 +1059,34 @@ const ko = {
     "시장 국면을 판정할 데이터 필드입니다.",
   "strategy.field.signal_step.regime_minimum": "레짐 하한",
   "strategy.field.signal_step.regime_minimum.description":
-    "이 값보다 낮으면 신규 매수를 멈춥니다.",
+    "레짐 필드 값이 이보다 낮은 종목은 후보에서 빠지고, 갖고 있던 종목도 팝니다.",
   "strategy.type.portfolio_step": "포트폴리오 구성",
   "strategy.type.portfolio_step.description":
     "후보에서 담을 종목과 비중·리밸런싱을 정합니다.",
   "strategy.field.portfolio_step.side": "매매 방향",
   "strategy.field.portfolio_step.side.description":
     "매수만 할지 매수·매도를 함께 할지 정합니다.",
+  "strategy.field.portfolio_step.side.value.long_only": "매수만",
+  "strategy.field.portfolio_step.side.value.long_short": "매수와 공매도",
   "strategy.field.portfolio_step.weighting": "비중 산정",
   "strategy.field.portfolio_step.weighting.description":
     "선택한 종목에 비중을 주는 방법입니다.",
+  "strategy.field.portfolio_step.weighting.value.equal": "같은 비중",
+  "strategy.field.portfolio_step.weighting.value.factor_score": "점수 차이에 비례",
+  "strategy.field.portfolio_step.weighting.value.rank": "순위에 비례",
+  "strategy.field.portfolio_step.weighting.value.risk": "위험이 작을수록 크게",
   "strategy.field.portfolio_step.rebalance": "리밸런싱 주기",
   "strategy.field.portfolio_step.rebalance.description":
     "목표 비중을 다시 맞추는 간격입니다.",
+  "strategy.field.portfolio_step.rebalance.value.every_n_sessions": "지정한 거래일마다",
+  "strategy.field.portfolio_step.rebalance.value.weekly": "매주",
+  "strategy.field.portfolio_step.rebalance.value.monthly": "매월",
+  "strategy.field.portfolio_step.rebalance.value.quarterly": "분기마다",
   "strategy.field.portfolio_step.selection_method": "선택 방식",
   "strategy.field.portfolio_step.selection_method.description":
     "상위 개수로 고를지 상위 비율로 고를지 정합니다.",
+  "strategy.field.portfolio_step.selection_method.value.top_n": "상위 개수",
+  "strategy.field.portfolio_step.selection_method.value.percentile": "상위 비율",
   "strategy.field.portfolio_step.liquidity_field_id": "유동성 필드",
   "strategy.field.portfolio_step.liquidity_field_id.description":
     "거래 가능성을 판정할 데이터 필드입니다.",
@@ -869,11 +1101,9 @@ const ko = {
   "strategy.field.risk_step.risk_field_id": "위험 필드",
   "strategy.field.risk_step.risk_field_id.description":
     "위험 가중에 쓸 데이터 필드입니다.",
-  "strategy.type.execution_step": "체결 가정",
-  "strategy.type.execution_step.description": "주문 시점과 비용 가정입니다.",
-  "strategy.field.execution_step.timing": "주문 시점",
-  "strategy.field.execution_step.timing.description":
-    "신호가 난 뒤 언제 체결한다고 볼지 정합니다.",
+  "strategy.field.risk_step.risk_factor_id": "위험 팩터",
+  "strategy.field.risk_step.risk_factor_id.description":
+    "위험 가중에 쓸 팩터입니다. 비중 방식이 위험 가중(risk)일 때만 읽히고, 그때 이 팩터는 점수 합산에서 빠지며 원시값의 역수로 비중을 나눕니다.",
   "strategy.parameter.float": "실수 파라미터",
   "strategy.parameter.float.description":
     "소수 범위에서 값을 찾는 파라미터입니다.",
@@ -922,12 +1152,146 @@ const ko = {
     "종목 하나가 가질 수 있는 최대 목표 비중입니다.",
   "strategy.contract.risk.max_sector_weight.description":
     "섹터 하나가 가질 수 있는 최대 목표 비중입니다.",
-  "strategy.contract.execution.participation_rate.description":
-    "같은 세션 거래량 대비 주문이 차지할 수 있는 최대 비율입니다.",
-  "strategy.contract.execution.fee_bps.description":
+  // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
+  // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
+  // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다. 노드 설정 칸 조각은 레시피 요약이 쓴다.
+  "strategy.stage.eligibility": "유니버스",
+  "strategy.stage.eligibility.description": "어떤 종목을 후보로 둘지 정합니다.",
+  "strategy.stage.signal": "알파 팩터",
+  "strategy.stage.signal.description": "후보 종목에 점수를 매기는 방법입니다.",
+  "strategy.stage.portfolio": "포트폴리오 구성",
+  "strategy.stage.portfolio.description": "몇 종목을 어떤 비중으로 언제 다시 고를지 정합니다.",
+  "strategy.stage.risk": "리스크 제약",
+  "strategy.stage.risk.description": "한 종목·한 섹터에 비중이 몰리지 않게 막는 한도입니다.",
+  "strategy.summary.stage.eligibility": "{parts}인 종목 중에서",
+  "strategy.summary.stage.signal": "{parts}",
+  "strategy.summary.stage.portfolio": "{parts}",
+  "strategy.summary.stage.risk": "{parts} 한도 안에서",
+  "strategy.summary.sentence": "{stages} 골라 보유한다.",
+  "strategy.field.eligibility_rule.operator.value.gt.summary":
+    "{field_id} {value} 초과",
+  "strategy.field.eligibility_rule.operator.value.gte.summary":
+    "{field_id} {value} 이상",
+  "strategy.field.eligibility_rule.operator.value.lt.summary":
+    "{field_id} {value} 미만",
+  "strategy.field.eligibility_rule.operator.value.lte.summary":
+    "{field_id} {value} 이하",
+  "strategy.field.eligibility_rule.operator.value.eq.summary":
+    "{field_id} {value}",
+  "strategy.field.eligibility_rule.operator.value.top_percent.summary":
+    "{field_id} 상위 {value.percent}",
+  "strategy.field.eligibility_rule.operator.value.top_count.summary":
+    "{field_id} 상위 {value}개",
+  "strategy.contract.portfolio.minimum_liquidity.summary":
+    "{liquidity_field_id} {minimum_liquidity} 이상",
+  "strategy.section.factors.summary": "{items} 순으로",
+  "strategy.field.factor_signal.direction.value.high.summary": "높은 {label}",
+  "strategy.field.factor_signal.direction.value.low.summary": "낮은 {label}",
+  "strategy.field.factor_signal.weight.summary": "(가중치 {weight})",
+  "strategy.field.signal_step.score_threshold.summary":
+    "점수 {score_threshold} 이상만",
+  "strategy.field.signal_step.regime_minimum.summary":
+    "{regime_field_id} 값이 {regime_minimum} 이상인 종목만",
+  "strategy.field.portfolio_step.side.value.long_short.summary": "하위 종목은 공매도하고",
+  "strategy.field.portfolio_step.weighting.value.equal.summary": "같은 비중으로",
+  "strategy.field.portfolio_step.weighting.value.factor_score.summary":
+    "점수 차이에 비례한 비중으로",
+  "strategy.field.portfolio_step.weighting.value.rank.summary": "순위에 비례한 비중으로",
+  "strategy.field.risk_step.risk_field_id.summary":
+    "{risk_field_id} 값이 낮을수록 큰 비중으로",
+  "strategy.field.risk_step.risk_factor_id.summary":
+    "{risk_factor_id} 값이 낮을수록 큰 비중으로",
+  "strategy.field.portfolio_step.rebalance.value.weekly.summary": "매주",
+  "strategy.field.portfolio_step.rebalance.value.monthly.summary": "매월",
+  "strategy.field.portfolio_step.rebalance.value.quarterly.summary": "분기마다",
+  "strategy.contract.portfolio.rebalance_every_n_sessions.summary":
+    "{rebalance_every_n_sessions}거래일마다",
+  "strategy.contract.portfolio.selection_count.summary":
+    "상위 {selection_count}종목을",
+  "strategy.contract.portfolio.selection_percentile.summary":
+    "상위 {selection_percentile}를",
+  "strategy.contract.risk.max_name_weight.summary": "종목당 최대 {max_name_weight}",
+  "strategy.contract.risk.max_sector_weight.summary":
+    "섹터당 최대 {max_sector_weight}",
+  "strategy.field.node.periods.summary": "{periods}일 전",
+  "strategy.field.node.window.summary": "{window}일",
+  "strategy.field.node.lag.summary": "최근 {lag}일 제외",
+  "strategy.field.node.lower_quantile.summary": "아래 {lower_quantile}",
+  "strategy.field.node.upper_quantile.summary": "위 {upper_quantile}",
+  "strategy.field.node.group_field_id.summary": "{group_field_id}별",
+  "recipe.summary.previous": "앞 단계",
+  "recipe.summary.advanced": "노드 {count}개 · 고급",
+  // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →
+  // 앵커·목록 설명 키 순으로 찾고, `{<키>}` 자리에 같은 카드 필드의 컨트롤이 들어간다), 캔버스 chrome.
+  // 비율 칸은 입력 단위를 바꾸지 않고 틀이 예시로 단위를 말한다("0.1이 10%").
+  "strategy.stage.eligibility.term": "Universe",
+  "strategy.stage.signal.term": "Alpha",
+  "strategy.stage.portfolio.term": "Portfolio",
+  "strategy.stage.risk.term": "Risk",
+  "strategy.field.eligibility_step.rules.card":
+    "{field_id} 값이 {operator} 종목만 — 기준값 {value}",
+  "strategy.section.factors.card":
+    "{label} — {direction}, 가중치 {weight.slider}",
+  "strategy.field.eligibility_rule.operator.value.top_percent.card":
+    "{field_id} {operator} 종목만 — 상위 비율 {value}(0.2가 20%)",
+  "strategy.field.eligibility_rule.operator.value.top_count.card":
+    "{field_id} {operator} 종목만 — 상위 {value}개",
+  "strategy.field.portfolio_step.liquidity_field_id.card":
+    "{liquidity_field_id} 값이 {minimum_liquidity} 이상인 종목만",
+  "strategy.field.signal_step.normalization.card": "팩터 점수는 {normalization}",
+  "strategy.field.signal_step.score_threshold.card":
+    "합산 점수가 {score_threshold}보다 낮은 종목은 뺀다",
+  "strategy.field.signal_step.regime_field_id.card":
+    "{regime_field_id} 값이 {regime_minimum} 이상인 종목만 담는다",
+  "strategy.field.portfolio_step.side.card": "매매 방향은 {side}",
+  "strategy.field.portfolio_step.weighting.card": "비중은 {weighting}",
+  "strategy.field.portfolio_step.weighting.value.risk.card":
+    "비중은 {weighting} — 위험 팩터 {risk_factor_id} 또는 위험 필드 {risk_field_id} 기준",
+  "strategy.field.portfolio_step.rebalance.card": "{rebalance} 다시 고른다",
+  "strategy.field.portfolio_step.rebalance.value.every_n_sessions.card":
+    "{rebalance}: {rebalance_every_n_sessions}거래일마다 다시 고른다",
+  "strategy.field.portfolio_step.selection_method.value.top_n.card":
+    "합산 점수 {selection_method} {selection_count}종목을 고른다",
+  "strategy.field.portfolio_step.selection_method.value.percentile.card":
+    "합산 점수 {selection_method} {selection_percentile}(0.1이 10%)를 고른다",
+  "strategy.contract.portfolio.turnover_buffer_count.card":
+    "갖고 있던 종목은 순위가 {turnover_buffer_count}칸 더 밀려도 계속 갖고 있는다",
+  "strategy.contract.portfolio.minimum_trade_weight.card":
+    "비중 변화가 {minimum_trade_weight}(0.01이 1%)보다 작으면 주문하지 않는다",
+  "strategy.contract.risk.gross_exposure.card":
+    "매수와 공매도를 더한 전체 비중은 {gross_exposure}(1이 100%)",
+  "strategy.field.risk_step.net_exposure.card":
+    "매수에서 공매도를 뺀 비중은 {net_exposure}(1이 100%)",
+  "strategy.contract.risk.max_name_weight.card":
+    "한 종목은 최대 {max_name_weight}(0.05가 5%)까지",
+  "strategy.contract.risk.max_sector_weight.card":
+    "한 섹터는 최대 {max_sector_weight}(0.3이 30%)까지",
+  "strategy.field.risk_step.sector_neutral.card":
+    "{sector_neutral} 섹터마다 매수·공매도 비중을 맞춘다",
+  "graph.pipeline.label": "전략 파이프라인",
+  "graph.pipeline.summary": "요약",
+  "graph.pipeline.stages": "전략 단계",
+  "graph.pipeline.item": "{index}번째 항목",
+  "graph.pipeline.openRecipe": "레시피 열기",
+  "graph.pipeline.removeBlocked":
+    "다른 곳에서 쓰고 있어 지우지 않았습니다: {places}",
+  "graph.pipeline.execution": "실행",
+  "graph.pipeline.execution.term": "Execution",
+  "graph.pipeline.execution.description":
+    "시장·기간·유니버스·수수료는 전략 문서 밖의 실행 설정입니다. 화면 위 실행 설정에서 고릅니다.",
+  "graph.pipeline.notHere": "이 캔버스에 없는 것",
+  "graph.pipeline.notHere.document": "{names}: YAML 탭에서 고칩니다.",
+  "graph.pipeline.notHere.formula": "팩터 계산식: 아래 고급 편집기에서 고칩니다.",
+  "run_environment.field.participation_rate.description":
+    "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
+  "run_environment.field.fee_bps.description":
     "체결 금액에 bp 단위로 붙는 수수료 가정입니다.",
-  "strategy.contract.execution.slippage_bps.description":
-    "체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
+  "run_environment.field.slippage_bps.description":
+    "가격 충격 모델이 고정 bp일 때 체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
+  "run_environment.field.impact_coefficient.description":
+    "√ 가격 충격 = 계수 × 20일 변동성 × √(체결 수량 ÷ 20일 평균 거래량)의 계수입니다.",
+  "run_environment.field.sell_tax_bps.description":
+    "매도 거래세를 직접 입력할 때 매도 금액에 붙일 bp입니다.",
   "strategy.operator.unary.negate": "부호 뒤집기",
   "strategy.operator.unary.negate.description":
     "값의 부호를 뒤집습니다. 작을수록 좋은 지표를 클수록 좋게 바꿀 때 씁니다.",
@@ -1052,27 +1416,36 @@ const ko = {
   "leave.leave": "나가기",
   "page.revision.untitled": "제목 없는 전략",
   "page.revision.generated": "legacy JSON에서 생성된 문서",
-  "upgrade.title": "schema 1.0 문서",
-  "upgrade.body":
-    "이 문서는 schema 1.0입니다. 1.1로 업그레이드하면 주석과 순서를 유지한 채 현재 규칙으로 다시 씁니다(실행 취소 1단계).",
-  "upgrade.action": "1.1로 업그레이드",
+  "upgrade.title": "이전 schema 문서",
+  "upgrade.body": "이 문서는 지원이 끝난 schema 버전입니다. 업그레이드하면 주석과 순서를 유지한 채 현재 규칙으로 다시 씁니다(실행 취소 1단계).",
+  "upgrade.action": "현재 버전으로 업그레이드",
   "upgrade.pending": "업그레이드 중…",
-  "upgrade.applied": "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
-  "upgrade.frozenGenerated":
-    "schema 1.0 동결 revision입니다. 생성된 문서는 이미 1.1이므로 편집 후 새 revision으로 저장하세요.",
-  "upgrade.backtestBlocked":
-    "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "upgrade.applied": "현재 버전으로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
+  "upgrade.frozenGenerated": "이전 schema로 동결된 revision입니다. 생성된 문서는 이미 현재 버전이므로 편집 후 새 revision으로 저장하세요.",
+  "upgrade.backtestBlocked": "저장된 이전 schema revision으로는 백테스트를 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "upgrade.error.editor": "편집기가 준비되지 않아 업그레이드하지 못했습니다.",
   "upgrade.error.composing": "입력 중에는 업그레이드할 수 없습니다.",
   "upgrade.error.request":
-    "업그레이드 요청이 실패했습니다. 원문은 그대로입니다. ({detail})",
+    "업그레이드 요청이 실패했습니다. 원문은 그대로입니다.",
   "upgrade.error.strategy_document.upgrade_drift":
     "업그레이드 결과가 변환 규칙과 어긋나 중단했습니다. 원문은 그대로입니다.",
-  "upgrade.error.strategy_document.not_upgradeable":
-    "schema 1.0 문서만 업그레이드할 수 있습니다.",
+  "upgrade.error.strategy_document.not_upgradeable": "지원이 끝난 schema 버전의 문서만 업그레이드할 수 있습니다.",
+  "upgrade.warning.strategy_document.upgrade_missing_policy_conflict":
+    "팩터마다 달랐던 결측 처리를 하나로 합쳤습니다",
+  "upgrade.warning.strategy_document.upgrade_weighting_rule_changed":
+    "점수 비례 비중의 계산 규칙이 바뀌었습니다",
+  "upgrade.warning.strategy_document.upgrade_environment_unavailable":
+    "옛 문서의 실행 설정을 옮기지 못했습니다",
   "upgrade.error.strategy_document.invalid":
     "구문 오류가 있어 업그레이드할 수 없습니다. 먼저 구문을 고치세요.",
-  "history.frozen": "1.0 동결",
+  "upgrade.error.strategy_document.upgrade_unsupported_node": "새 버전에 없는 노드(저장된 팩터·서브그래프 참조)가 있어 업그레이드할 수 없습니다. 그 노드를 그래프로 풀어 쓴 뒤 다시 시도하세요.",
+  "upgrade.warnings": "업그레이드하면서 알아 둘 점",
+  "upgrade.environment.found": "옛 문서에 있던 실행 설정: {summary}",
+  "upgrade.environment.apply": "실행 설정에 채우기",
+  "upgrade.environment.applied": "옛 문서의 실행 설정을 채웠습니다. 실행 설정 요약에서 확인하세요.",
+  "upgrade.environment.unfilled": "채우지 않고 저장하거나 이 화면을 떠나면 이 실행 설정은 다시 볼 수 없습니다.",
+  "upgrade.environment.unavailable": "옛 문서의 실행 설정을 옮기지 못해 실행 설정을 채우지 않았습니다. 알아 둘 점을 보고 직접 정하세요.",
+  "history.frozen": "이전 버전 동결",
   "assist.type": "타입",
   "assist.required": "필수",
   "assist.optional": "선택",
@@ -1084,11 +1457,10 @@ const ko = {
   "assist.source": "값 출처",
   "assist.branch": "종류",
   "assist.catalog.equityField": "데이터 필드 카탈로그",
-  "assist.catalog.factor": "팩터 레지스트리",
   "assist.catalog.universe": "유니버스",
-  "assist.catalog.subgraph": "저장된 서브그래프",
   "assist.reference.node": "같은 그래프의 노드",
   "assist.reference.parameter": "문서의 parameters",
+  "assist.reference.factor": "문서의 팩터",
   "problems.title": "문제",
   "problems.summary": "오류 {errors} · 경고 {warnings}",
   "problems.error": "오류",
@@ -1136,6 +1508,9 @@ const ko = {
   "plan.sessions": "세션",
   "plan.pitPolicy": "PIT 정책",
   "plan.missingPolicy": "결측 정책",
+  "plan.node.booleanScore": "참/거짓을 1/0으로",
+  "plan.node.booleanScore.description":
+    "출력이 참/거짓이라 점수로 쓰도록 컴파일이 붙인 단계입니다. 참은 1, 거짓은 0입니다.",
   "plan.graphFingerprint": "Graph fingerprint",
   "plan.planFingerprint": "Plan/cache fingerprint",
   "plan.table": "백엔드가 컴파일한 topological factor execution plan",
@@ -1165,19 +1540,100 @@ const ko = {
   "toolbar.run.open": "백테스트 보기",
   "toolbar.run.accepted": "백테스트 {runId} 접수됨",
   "toolbar.run.failed": "백테스트 시작 실패",
-  "backtest.error.backtest.strategy.requires_upgrade":
-    "저장된 1.0 revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
-  "trace.error.trace.strategy.requires_upgrade":
-    "저장된 1.0 revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
-  "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
+  "backtest.start.failedGeneric":
+    "서버가 실행 요청을 받지 않았습니다. 실행 설정과 전략 문서를 확인한 뒤 다시 시작하세요.",
+  // 시작 거절(404·409·422)의 코드별 복구 문장. 코드 목록의 정본은 backend `startBacktest` 계약이고,
+  // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260). 추적도 추적 고유 코드가
+  // 아니면 이 문장을 쓰므로(#351) 추적이 받는 코드의 문장은 두 동작에 맞는 "다시 실행하세요"로 끝낸다.
+  // 이름 없는 `field_invalid` 는 추적 전용 칸(`as_of`·`security_ids`)에도 오므로 칸을 가리지 않는다.
+  "backtest.error.backtest.run.field_invalid":
+    "서버가 요청의 값 하나를 받지 않았습니다. 서버 사유가 짚은 칸을 고친 뒤 다시 실행하세요.",
+  "backtest.error.backtest.run.field_invalid.named":
+    "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 실행하세요.",
+  "backtest.error.backtest.run.invalid":
+    "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
+  "backtest.error.backtest.run.environment_required":
+    "실행 설정이 없습니다. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
+  "backtest.error.backtest.run.research_window_violation":
+    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 실행하세요.",
+  "backtest.error.backtest.run.parameter_invalid":
+    "전략 파라미터 {parameter_id}의 값을 쓸 수 없습니다. 문서에 선언된 파라미터인지, 값이 그 범위·선택지 안인지 확인한 뒤 다시 시작하세요.",
+  "backtest.error.portfolio.strategy.invalid":
+    "전략 문서가 실행 검증을 통과하지 못했습니다. 검증을 다시 돌려 표시된 줄을 고치세요.",
+  "backtest.error.backtest.strategy.not_found":
+    "저장된 전략 revision을 찾을 수 없습니다. 전략 목록에서 전략을 다시 여세요.",
+  "backtest.error.backtest.strategy.stale":
+    "저장된 revision이 그사이 바뀌었습니다. 전략을 다시 연 뒤 시작하세요.",
+  "backtest.error.backtest.strategy.requires_upgrade": "저장된 이전 schema revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  // 결과 조회 실패(`getBacktestResult` 404·409·410)의 코드별 문장. 결과 화면이 보이고, 코드 목록은 같은 계약
+  // 테스트가 `openapi.json` 과 대조한다(#330). 코드가 없거나 번역이 없으면 일반 문장이다.
+  "backtest.result.failedGeneric": "백테스트 결과를 불러올 수 없습니다.",
+  "backtest.error.backtest.run.not_found":
+    "이 실행을 찾을 수 없습니다. 백테스트 이력에서 다시 여세요.",
+  "backtest.error.backtest.result.not_ready":
+    "이 실행은 아직 결과가 없습니다. 실행이 끝난 뒤 다시 여세요.",
+  "backtest.error.backtest.result.unreadable":
+    "이 실행의 결과 파일을 읽을 수 없습니다. 파일이 없어졌거나 손상됐거나, 결과 형식이 바뀌기 전의 옛 결과일 수 있습니다. 다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
+  // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
+  "backtest.error.backtest.lineage.already_merged":
+    "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
+  "backtest.error.strategy.not_found":
+    "고른 전략을 찾을 수 없습니다. 전략 목록을 새로 고친 뒤 다시 고르세요.",
+  // 실행 종류(검증 랩 V5-03). 종류는 backend `RunKind` 가 정한다.
+  "backtest.runKind.single": "단일 실행",
+  "backtest.runKind.experiment_trial": "실험 시도",
+  "backtest.runKind.walk_forward_validation": "워크포워드 검증",
+  // 실험 run 이 쓰는 실험. 실험 화면(V5-01)이 생기기 전이라 id 만 보인다.
+  "history.backtests.experiment": "실험 {experiment}",
+  "history.backtests.experimentPaused": "실험 일시정지",
+  // 실험 거절(검증 랩 V3-03). 코드 목록의 정본은 backend `domain/experiment/_errors.py` 이고 화면은 V5-01 이 붙인다.
+  "backtest.error.experiment.base.unsaved":
+    "실험은 저장한 전략 리비전으로만 만들 수 있습니다. 전략을 저장한 뒤 그 리비전으로 실험을 만드세요.",
+  "backtest.error.experiment.base.invalid":
+    "기반 실행 요청을 실험에 쓸 수 없습니다. 측정 창은 분할 규칙이 정하므로 실행 요청에서 지표 창을 빼세요.",
+  "backtest.error.experiment.search.unknown_parameter":
+    "전략 문서에 없는 파라미터는 탐색할 수 없습니다. 문서에 선언된 파라미터만 고르세요.",
+  "backtest.error.experiment.search.invalid_values":
+    "탐색 값을 쓸 수 없습니다. 값이 파라미터의 범위·선택지 안에 있고 겹치지 않는지 확인하세요.",
+  "backtest.error.experiment.search.too_many_points":
+    "탐색 조합이 너무 많습니다. 값 수를 줄이거나 간격을 넓히세요.",
+  "backtest.error.experiment.split.invalid":
+    "분할 설정이 허용 범위를 벗어났습니다. 학습·검증 연수는 1 이상, 엠바고는 0 이상으로 두세요.",
+  "backtest.error.experiment.split.no_window":
+    "실행 기간이 학습 기간보다 짧아 검증할 창이 없습니다. 기간을 늘리거나 학습 연수를 줄이세요.",
+  "backtest.error.experiment.capacity.invalid_amounts":
+    "용량 확인 금액은 서로 다른 양수 3~12개여야 합니다. 겹치거나 0 이하인 금액을 빼세요.",
+  "backtest.error.experiment.capacity.base_not_run":
+    "용량 확인은 이 설정으로 돌린 백테스트 결과가 있어야 합니다. 먼저 이 설정으로 백테스트를 한 번 실행하세요.",
+  "backtest.error.experiment.not_found": "실험을 찾을 수 없습니다. 실험 목록에서 다시 여세요.",
+  "backtest.error.experiment.trial.not_found": "실험에 그 trial이 없습니다. 실험을 다시 여세요.",
+  "backtest.error.experiment.trial.not_retryable":
+    "실패하거나 취소된 trial만 다시 실행할 수 있고, 취소한 실험은 다시 실행하지 않습니다.",
+  "backtest.error.experiment.selection.not_completed":
+    "완료된 trial만 후보로 고를 수 있습니다. trial이 끝난 뒤 고르세요.",
+  "backtest.error.experiment.selection.not_finished":
+    "실험의 trial이 모두 끝난 뒤에 후보를 고를 수 있습니다. 실험이 끝나기를 기다리거나 실험을 취소하세요.",
+  "backtest.error.experiment.kind.mismatch":
+    "이 실험 종류에서는 볼 수 없는 결과입니다. 워크포워드·후보 선택은 파라미터 탐색에서, 용량 결과는 용량 확인에서 보세요.",
+  "backtest.error.experiment.cancel.completed":
+    "이미 완료한 실험이라 취소하지 않았습니다. 결과는 그대로 남아 있습니다.",
+  "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다. 어느 칸이 틀렸는지는 서버 사유를 보세요.",
   "trace.error.trace.engine.incompatible":
     "선택한 실행 엔진이 이 전략을 추적할 수 없습니다. 다른 실행 core를 고르세요.",
   "trace.error.trace.capability.unsupported":
-    "이 전략은 추적이 아직 지원하지 않는 기능을 씁니다: {detail}",
+    "이 전략은 추적이 아직 지원하지 않는 기능을 씁니다. 어떤 기능인지는 서버 사유를 보세요.",
   "trace.error.trace.strategy.stale":
     "편집 중인 문서가 저장본과 달라져 추적할 수 없습니다. 저장하거나 저장본을 다시 여세요.",
   "trace.error.trace.strategy.not_found": "추적할 저장 revision을 찾지 못했습니다.",
   "trace.error.trace.cancelled": "추적이 취소되었습니다.",
+  // 추적은 요청 안에서 관측을 읽으므로 데이터 실패도 거절로 온다. 실행 설정 거절처럼 백테스트 API 와 같은
+  // 코드는 `backtest.error.<code>` 를 그대로 쓴다(#351) — 코드 전수는 `trace-error-message.test.ts` 가 대조한다.
+  "trace.error.portfolio.data.unavailable":
+    "데이터 소스가 이 유니버스·기간의 관측을 주지 못해 추적할 수 없습니다. 실행 설정의 유니버스와 기간을 확인하세요.",
+  "trace.error.portfolio.raw_observation.invalid":
+    "데이터 어댑터가 계약을 어긴 관측을 돌려주어 추적을 멈췄습니다. 데이터 소스 쪽 문제이므로 운영자에게 알리세요.",
+  "trace.error.request": "서버가 추적 요청을 처리하지 못했습니다. 잠시 뒤 다시 추적하세요.",
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
   "ide.meta.specHash": "spec hash",
@@ -1297,6 +1753,38 @@ const ko = {
   "history.strategies.latest": "최신 revision",
   "history.strategies.updated": "최근 저장",
   "history.strategies.hash": "Spec hash",
+  "history.strategies.history": "전략 이력",
+  "history.revisions.tab": "리비전",
+  // 계열 시도 원장(검증 랩 V5-03, US-SM-12). 역할·N 은 backend 원장 집계가 정한다.
+  "history.trials.tab": "시도 원장",
+  "history.trials.loading": "시도 원장을 불러오는 중입니다.",
+  "history.trials.error": "시도 원장을 불러올 수 없습니다.",
+  "history.trials.empty": "아직 이 계열에서 실행한 백테스트가 없습니다.",
+  "history.trials.count": "계열 시도 수 {count}회",
+  "history.trials.mergedInto":
+    "이 전략의 시도는 {lineage} 계열에 합쳐져 있어 그 계열의 원장을 보입니다.",
+  "history.trials.caption": "시도 원장",
+  "history.trials.trial": "시도",
+  "history.trials.runs": "실행",
+  "history.trials.role.counted": "시도로 셈",
+  "history.trials.role.recheck": "재확인",
+  "history.trials.role.pending": "결과 대기",
+  "history.trials.role.no_result": "시도 수 제외",
+  "history.trials.blocked": "봉인 구간과 겹쳐 거절된 요청 · 시작일 {start}",
+  "history.trials.merge": "다른 계열과 합치기",
+  "history.trials.merge.title": "다른 계열과 합치기",
+  "history.trials.merge.description":
+    "같은 아이디어를 이어서 연구했다면 합쳐야 시도 수가 정직해집니다. 고른 전략의 시도가 {target} 계열로 들어와 함께 셉니다.",
+  "history.trials.merge.warning":
+    "합치기는 되돌릴 수 없습니다. 계열을 다시 나누거나 시도를 지우는 기능은 없습니다.",
+  "history.trials.merge.source": "합칠 전략",
+  "history.trials.merge.choose": "전략을 고르세요",
+  "history.trials.merge.noCandidates": "합칠 다른 저장 전략이 없습니다.",
+  "history.trials.merge.partial":
+    "저장 전략 {total}개 가운데 {shown}개만 고를 수 있습니다.",
+  "history.trials.merge.cancel": "취소",
+  "history.trials.merge.confirm": "합치기",
+  "history.trials.merge.failed": "계열을 합치지 못했습니다.",
   "history.revisions.loading": "Revision 이력을 불러오는 중입니다.",
   "history.revisions.error": "Revision 이력을 불러올 수 없습니다.",
   "history.revisions.empty": "저장된 revision이 없습니다.",
@@ -1312,11 +1800,14 @@ const ko = {
   "history.revisions.close": "Revision 접기",
   "history.backtests.title": "백테스트 이력",
   "history.backtests.description":
-    "현재 서버 프로세스에서 실행한 백테스트와 정확한 전략 provenance를 탐색합니다.",
+    "지금까지 실행한 백테스트와 정확한 전략 provenance를 탐색합니다. 서버를 다시 시작해도 남습니다.",
   "history.backtests.error": "백테스트 이력을 불러올 수 없습니다.",
   "history.backtests.emptyTitle": "백테스트 실행 이력이 없습니다",
   "history.backtests.empty": "전략에서 백테스트를 실행하면 이곳에 표시됩니다.",
   "history.backtests.filteredEmpty": "이 전략으로 실행한 백테스트가 없습니다.",
+  "history.backtests.kindEmpty": "이 종류의 백테스트가 없습니다.",
+  "history.backtests.kind": "종류",
+  "history.backtests.kindAll": "전체",
   "history.backtests.caption": "백테스트 실행 이력",
   "history.backtests.pagination": "백테스트 이력 페이지",
   "history.backtests.filter": "Strategy ID",
@@ -1336,12 +1827,101 @@ const ko = {
   "history.backtests.sourceUnavailable": "원문 hash 없음",
   "history.backtests.updated": "최근 상태",
   "history.backtests.open": "실행 열기",
+  // 실험 화면(검증 랩 V5-01). 상태·진행 수·슬롯·우선순위 상한은 backend 응답이다.
+  "backtest.actions.experiment": "이 실행으로 실험 만들기",
+  "experiments.title": "실험",
+  "experiments.description": "실험은 서버 대기열에서 돌아 창을 닫아도 계속 돕니다. 여러 실험이 동시 실행 슬롯을 나눠 씁니다.",
+  "experiments.error": "실험 목록을 불러올 수 없습니다.",
+  "experiments.slots": "동시 실행 슬롯 {running} / {total} 사용 중",
+  "experiments.emptyTitle": "아직 실험이 없습니다",
+  "experiments.empty": "실험은 저장한 전략 리비전으로 돈 백테스트에서 시작합니다. 백테스트 결과 화면의 “이 실행으로 실험 만들기”를 누르세요.",
+  "experiments.toBacktests": "백테스트 이력으로",
+  "experiments.caption": "실험 목록",
+  "experiments.experiment": "실험",
+  "experiments.base": "기반 전략 · 리비전",
+  "experiments.status": "상태",
+  "experiments.progress": "진행",
+  "experiments.priority": "우선순위",
+  "experiments.counts": "완료 {completed} / {total} · 실행 중 {running} · 실패 {failed}",
+  "experiments.pause": "일시정지",
+  "experiments.resume": "재개",
+  "experiments.raisePriority": "우선순위 올리기",
+  "experiments.cancel": "취소",
+  "experiments.cancelConfirm": "실험 취소 확인",
+  "experiments.cancelKeep": "그대로 두기",
+  "experiments.again": "같은 설정으로 새 실험",
+  "experiments.controlFailed": "실험을 바꾸지 못했습니다.",
+  "experiments.status.queued": "대기",
+  "experiments.status.running": "실행 중",
+  "experiments.status.paused": "일시정지",
+  "experiments.status.completed": "완료",
+  "experiments.status.cancelled": "취소됨",
+  "experiments.new.title": "새 실험",
+  "experiments.new.description": "탐색할 파라미터와 검증 방식을 고르면 조합·창·백테스트 실행 수와 계열 시도 수가 어떻게 바뀌는지 먼저 보여 줍니다.",
+  "experiments.new.noBase": "실험은 백테스트 실행이나 끝난 실험에서 시작합니다.",
+  "experiments.new.baseFailed": "실험의 기반을 불러올 수 없습니다.",
+  "experiments.new.space": "탐색 공간",
+  "experiments.new.explore": "탐색",
+  "experiments.new.parameter": "파라미터",
+  "experiments.new.values": "탐색 값(개수)",
+  "experiments.new.split": "검증 방식 — 워크포워드",
+  "experiments.new.mode": "창 방식",
+  "experiments.new.mode.rolling": "롤링",
+  "experiments.new.mode.anchored": "앵커드",
+  "experiments.new.trainYears": "학습(년)",
+  "experiments.new.testYears": "검증(년)",
+  "experiments.new.embargo": "엠바고(세션)",
+  "experiments.new.rule": "창마다 고르는 기준",
+  "experiments.new.rule.neighbor_mean_sharpe_max": "이웃 평균 샤프 최대",
+  "experiments.new.rule.train_sharpe_max": "학습 샤프 최대",
+  "experiments.new.previewFailed": "미리 계산 실패",
+  "experiments.new.createFailed": "실험 만들기 실패",
+  "experiments.new.failed": "이 설정으로는 실험을 만들 수 없습니다.",
+  "experiments.new.summary": "시작 전 확인",
+  "experiments.new.counts": "조합 {combinations}개 · 창 {windows}개 · 백테스트 실행 {runs}회 · 계열 시도 수 {before}회 → {after}회",
+  "experiments.new.windows": "창 목록",
+  "experiments.new.window": "창",
+  "experiments.new.train": "학습",
+  "experiments.new.test": "검증",
+  "experiments.new.enqueue": "대기열에 넣기",
+  "experiments.new.base": "기반 {strategy} · v{revision} · 연구 기간 {start} ~ {end}",
+  "experiments.more": "실험 더 보기",
+  "backtest.actions.keptByExperiment": "실험이 이 실행을 함께 쓰고 있어 계속 돕니다. 멈추려면 실험 화면에서 실험을 취소하세요.",
+  "experiments.detail.title": "실험 {id}",
+  "experiments.detail.error": "실험을 불러올 수 없습니다.",
+  "experiments.detail.back": "실험 목록으로",
+  "experiments.detail.trials": "trial 목록",
+  "experiments.detail.trial": "trial",
+  "experiments.detail.run": "실행",
+  "experiments.detail.retry": "다시 실행",
+  "experiments.detail.retryFailed": "다시 실행 실패",
+  "experiments.trial.queued": "대기",
+  "experiments.trial.running": "실행 중",
+  "experiments.trial.completed": "완료",
+  "experiments.trial.failed": "실패",
+  "experiments.trial.cancelled": "취소됨",
+  "experiments.trial.rejected": "실행 접수가 거절됐습니다.",
+  "experiments.walkForward.title": "워크포워드 결과",
+  "experiments.walkForward.summary": "검증 창만 이어 붙인 표본 밖 샤프(세션 단위) {sharpe} · 유지율 {retention}",
+  "experiments.walkForward.pick": "고른 칸",
+  "experiments.walkForward.trainScore": "학습 점수(세션 샤프)",
+  "experiments.walkForward.test": "검증 실행",
+  "experiments.gap.legacy_design": "워크포워드 전에 만든 실험이라 이어 붙인 결과가 없습니다.",
+  "experiments.gap.cancelled": "실험을 취소해 모든 검증 창이 돌지 않았습니다.",
+  "experiments.gap.result_unreadable": "검증 실행의 결과 파일을 읽을 수 없어 이어 붙이지 못했습니다.",
+  "experiments.gap.test_failed": "검증 실행이 실패한 창이 있어 요약을 비웠습니다. 빠진 창만 빼고 이으면 낙관 쪽으로 기웁니다.",
+  "experiments.gap.no_cell": "학습 결과가 있는 칸이 없는 창이 있어 요약을 비웠습니다.",
+  "experiments.gap.pending": "아직 도는 창이 있습니다.",
+  "experiments.notice.done": "실험 {id} 완료",
+  "experiments.notice.candidates": "후보 보기",
+  "experiments.notice.dismiss": "닫기",
   "problems.compileUnavailable":
-    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요. ({detail})",
+    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
   "form.panel.label": "Form 편집",
   "form.panel.notice": "YAML source에 바로 반영 · undo 가능",
   "form.panel.enabled": "편집 가능",
   "form.panel.loading": "runtime schema를 불러오는 중입니다.",
+  "form.panel.firstParsePending": "문서를 읽는 중입니다.",
   "form.panel.staleBadge": "STALE",
   "form.panel.stale":
     "현재 텍스트가 구문 오류라 마지막 유효 parse를 보여줍니다. source를 고치면 컨트롤이 풀립니다.",
@@ -1356,7 +1936,7 @@ const ko = {
   "form.section.omitted": "문서에 없음 · 값을 넣으면 섹션이 생깁니다",
   "form.list.count": "항목 {count}개",
   "form.list.add": "항목 추가",
-  "form.list.addFromCatalog": "카탈로그에서 추가",
+  "form.list.addExample": "예시 팩터에서 추가",
   "form.list.kind": "종류",
   "form.list.remove": "삭제",
   "form.list.empty": "항목이 없습니다",
@@ -1388,6 +1968,8 @@ const ko = {
   "form.invalid.duplicateNodeId": "같은 그래프에 이미 있는 node_id입니다",
   "form.invalid.emptyNodeId": "node_id는 비울 수 없습니다",
   "form.invalid.missingNode": "노드를 문서에서 찾지 못했습니다",
+  "form.invalid.duplicateIdentity": "같은 목록에 이미 있는 이름입니다",
+  "form.invalid.emptyIdentity": "이름은 비울 수 없습니다",
   "form.feedback.applied": "{label} 반영됨",
   "form.feedback.failed": "{label} 반영 실패",
   "form.feedback.parse":
@@ -1556,7 +2138,7 @@ const ko = {
   "assistant.error.document_ref_invalid":
     "이 문서로는 대화를 만들 수 없습니다. 전략을 먼저 저장하거나 초안을 다시 여세요.",
   "assistant.error.result_unavailable":
-    "이 백테스트 결과를 더 이상 읽을 수 없습니다. 서버를 다시 시작하면 결과가 사라집니다. 백테스트를 다시 실행한 뒤 물어보세요.",
+    "이 백테스트 결과를 더 이상 읽을 수 없습니다. 결과 파일이 없어졌거나 손상됐을 수 있습니다. 백테스트를 다시 실행한 뒤 물어보세요.",
   "assistant.error.turn_context_mismatch":
     "이 화면의 대화 종류와 맞지 않아 보내지 못했습니다. 화면을 새로 고친 뒤 다시 보내세요.",
 } as const;
@@ -1566,14 +2148,89 @@ export type MessageKey = keyof typeof ko;
 export const messages = {
   ko,
   en: {
+    "recipe.title": "Factor recipe",
+    "recipe.edit": "Edit recipe",
+    "recipe.back": "Back to pipeline",
+    "recipe.advanced": "Advanced",
+    "recipe.nonChain": "This factor branches. Use the advanced editor.",
+    "recipe.empty": "Choose a data field to create the first step.",
+    "recipe.step": "Step",
+    "recipe.inputs": "Choose inputs",
+    "recipe.previousInput": "Input for the previous step",
+    "recipe.input": "Input",
+    "recipe.field": "Data field",
+    "recipe.confirm": "Apply step",
+    "recipe.cancel": "Cancel",
+    "recipe.operand": "Additional input",
+    "recipe.result": "Result",
+    "recipe.awaitCompile": "Awaiting compilation",
+    "recipe.up": "Move up",
+    "recipe.down": "Move down",
+    "recipe.remove": "Delete step",
+    "recipe.replace": "Replace operation",
+    "recipe.replacing": "Choose a new operation for step {step}.",
+    "recipe.identifiers": "Identifiers (YAML)",
+    "recipe.type.numeric_series": "Numeric series",
+    "recipe.type.boolean_series": "Boolean series",
+    "recipe.type.group_series": "Group series",
+    "recipe.type.scalar": "Scalar",
+    "recipe.error.advanced": "Use the advanced editor for branching graphs.",
+    "recipe.error.not-found": "Step not found. Select it again.",
+    "recipe.error.invalid-step": "This step cannot be placed here.",
+    "recipe.error.invalid-inputs": "Check the previous step and additional inputs.",
+    "recipe.error.chain-required": "Keep a connected chain of steps.",
+    "recipe.error.unknown-kind": "Unknown node kind.",
+    "recipe.error.unsupported-schema": "Cannot create node defaults.",
+    "ide.view.graph": "Graph",
+    "ide.revision.diff": "Revision changes",
+    "strategy.preview.title": "Selection preview",
+    "strategy.preview.stale": "Outdated request · refresh needed",
+    "strategy.preview.date": "As-of date (optional)",
+    "strategy.preview.refresh": "Refresh preview",
+    "strategy.preview.description":
+      "Refresh the current executable document explicitly. Leave the date blank for the server to choose the last rebalance frame.",
+    "strategy.preview.loading": "Loading preview.",
+    "strategy.preview.discarded":
+      "The response does not match the document or run settings. Refresh again.",
+    "strategy.preview.resolvedDate": "Resolved as-of date",
+    "strategy.preview.noFrame": "No rebalance frame exists on this date.",
+    "strategy.preview.count.universe": "Universe",
+    "strategy.preview.count.eligible": "Eligible",
+    "strategy.preview.count.eligibility_failed": "Eligibility failed",
+    "strategy.preview.count.eligibility_rank_cut": "Eligibility rank cut",
+    "strategy.preview.count.missing": "Missing",
+    "strategy.preview.targets": "Selected targets",
+    "strategy.preview.rank": "Rank",
+    "strategy.preview.name": "Name",
+    "strategy.preview.score": "Composite score",
+    "strategy.preview.unknownName": "Name unavailable",
+    "strategy.preview.empty": "No targets selected.",
+
     "dataset.catalog.dataset": "Dataset",
     "dataset.field.availability": "Availability",
     "dataset.field.disclosure": "Disclosure basis",
     "dataset.field.evidence": "Evidence",
     "dataset.field.recommendedLag": "Recommended lag",
+    "dataset.cellKind.observed": "observed",
+    "dataset.cellKind.source_omitted_zero": "omitted by source (0)",
+    "dataset.cellKind.missing": "missing",
+    "dataset.cellKind.not_collected": "not collected",
+    "dataset.cellKind.coverage_gap": "outside coverage",
+    "dataset.cellKind.masked": "masked by the ledger",
+    "dataset.valueType.price": "price",
+    "dataset.valueType.amount": "amount",
+    "dataset.valueType.ratio": "ratio",
+    "dataset.valueType.count": "count",
+    "dataset.valueType.category": "category",
+    "dataset.frequency.daily": "daily",
+    "dataset.frequency.monthly": "monthly",
+    "dataset.frequency.quarterly": "quarterly",
+    "dataset.frequency.annual": "annual",
+    "dataset.frequency.event": "per event",
     "ui.tabs.view": "Switch view",
     "ui.splitHandle.resize": "Resize panel",
     "ui.emptyState.noStrategies": "No saved strategies",
+    "ui.failure.serverReason": "Server reason",
     "ui.status.ok": "OK",
     "ui.status.warn": "Warning",
     "ui.status.error": "Error",
@@ -1605,9 +2262,8 @@ export const messages = {
     "page.backtest.loadError": "The backtest status could not be loaded.",
     "page.backtest.status": "Run status",
     "page.backtest.progress": "Run progress",
-    "page.backtest.runError": "Run error",
-    "page.backtest.cancelledError": "Error before cancellation",
-    "page.backtest.serverReason": "Server reason",
+    "backtest.run.failed": "Run error",
+    "backtest.run.failedBeforeCancel": "Error before cancellation",
     "backtest.run.error.portfolio.data.unavailable":
       "The data source could not serve observations for this universe and period. Check the universe id and data range.",
     "backtest.run.error.portfolio.raw_observation.invalid":
@@ -1616,12 +2272,46 @@ export const messages = {
       "The strategy calculation is invalid. Check the node and path in the server reason.",
     "backtest.run.error.backtest.run.invalid":
       "The run request cannot be processed in this environment. Check the run settings and engine capabilities.",
+    "backtest.run.error.backtest.run.equity_wiped_out":
+      "Equity fell to zero or below at a session close, so the run stopped (wiped out). This is the strategy losing all its capital, not a server error. Try lower leverage or short exposure.",
+    "backtest.run.error.backtest.run.data_not_ready":
+      "The data ledger is not ready for backtests (for example, its catalog needs rebuilding), so the run stopped. Take the action in the server reason, then run it again.",
+    "backtest.run.error.backtest.run.no_positions":
+      "The run never bought anything: no rebalance day fell inside the period, or no security passed the filters. Lengthen the period in the run settings or check the rebalance frequency and filters.",
+    "backtest.run.error.backtest.run.benchmark_unknown":
+      "The data source does not know this benchmark security ID. Fix or clear the Benchmark security ID field in the run settings.",
     "backtest.run.error.backtest.run.internal":
       "The run stopped because of an internal server error. Check the server logs.",
+    "backtest.run.error.backtest.run.interrupted":
+      "The server restarted before the run finished. Run it again with the same settings.",
     "backtest.settings.title": "Run settings",
     "backtest.settings.open": "Open run settings",
     "backtest.settings.ready": "Ready",
     "backtest.settings.invalid": "Check input",
+    "backtest.settings.environment": "Run environment",
+    "backtest.settings.environment.note": "Market, period, universe, execution, costs and missing-value handling are run settings outside the strategy document. Changing them adds no strategy revision; only the run record keeps them.",
+    "backtest.settings.environment.schemaLoading": "Loading the run setting fields.",
+    "backtest.settings.environment.schemaError": "The run setting fields could not be loaded, so a backtest cannot start. Check the server connection.",
+    "backtest.settings.environment.error.required": "Choose a value.",
+    "backtest.settings.environment.error.number": "Enter a number.",
+    "backtest.settings.environment.error.minimum": "Must be at least {bound}.",
+    "backtest.settings.environment.error.exclusiveMinimum": "Must be greater than {bound}.",
+    "backtest.settings.environment.error.maximum": "Must be at most {bound}.",
+    "backtest.settings.environment.error.exclusiveMaximum": "Must be less than {bound}.",
+    "backtest.settings.environment.error.date": "Enter a full, valid year, month and day. Example: 2021-01-01",
+    "backtest.settings.environment.error.dateRange": "Must be a date from {minimum} to {maximum}.",
+    "backtest.settings.environment.error.order": "The end date must be on or after the start date.",
+    "backtest.settings.options": "Run options",
+    "runEnvironment.summary.label": "Run settings summary",
+    "runEnvironment.summary.title": "Run settings",
+    "runEnvironment.summary.fill": "Fill the run settings",
+    "runEnvironment.summary.fix": "Fix the run settings",
+    "runEnvironment.summary.outside": "These values live outside the strategy document; changing them keeps the strategy version.",
+    "runEnvironment.fix.researchStart": "Move the start date to {research_start}",
+    "backtest.trial.label": "Trial impact",
+    "backtest.trial.new_trial": "If this run produces a result it counts as a new trial. Lineage trials {count} → {after}.",
+    "backtest.trial.recheck": "This rechecks a trial already counted, so the count does not grow. Lineage trials stay at {count}.",
+    "backtest.trial.no_lineage": "This strategy has never been saved, so this run does not count as a trial. Save a revision and run it to count.",
     "backtest.settings.core": "Execution core",
     "backtest.settings.core.rust": "Persistent Rust",
     "backtest.settings.core.python": "Python reference",
@@ -1631,23 +2321,34 @@ export const messages = {
       "Leave empty to run without a benchmark. The ID format is owned by the connected data adapter (use a universe security ID as is).",
     "backtest.settings.annualizationDays": "Annualization sessions",
     "backtest.settings.oosStart": "OOS start date (optional)",
-    "backtest.settings.rangeUnavailable":
-      "A valid StrategySpec data range is required.",
+    "backtest.settings.oosStart.hint": "A date inside the run period. Measures from this date to the end date as the out-of-sample window.",
     "backtest.settings.blocked": "Fix the invalid run settings first.",
-    "backtest.settings.error.initial_cash":
-      "Enter initial capital as a number; the server validates its accepted range.",
+    "backtest.settings.incomplete": "Fill {fields} in the run settings.",
+    "backtest.settings.problem.missing": "Fill {field} in the run settings.",
+    "backtest.settings.problem.invalid": "Fix {field} in the run settings: {reason}",
+    "backtest.settings.problem.more": "{count} more field(s) need attention.",
+    "backtest.settings.problem.name.initial_cash": "Initial capital",
+    "backtest.settings.problem.name.annualization_days": "Annualization sessions",
+    "backtest.settings.problem.name.oos_out_of_range": "OOS start date",
+    "backtest.settings.problem.name.oos_incomplete": "OOS start date",
+    "backtest.settings.error.initial_cash": "Enter a number greater than 0.",
     "backtest.settings.error.annualization_days":
-      "Enter annualization sessions as a losslessly representable integer; the server validates its accepted range.",
-    "backtest.settings.error.date_range_unavailable":
-      "Validate the strategy before defining an OOS window.",
+      "Enter a losslessly representable integer of at least 1.",
+    "backtest.settings.error.environment": "Fill every run environment field correctly.",
+    "backtest.settings.error.oos_out_of_range": "Must be a date inside the run period.",
+    "backtest.settings.error.oos_incomplete":
+      "Enter the full year, month and day. Leave it empty to run without an OOS window.",
     "backtest.actions.title": "Backtest run controls",
     "backtest.actions.cancel": "Cancel run",
     "backtest.actions.cancelling": "Cancellation requested",
     "backtest.actions.rerun": "Rerun same settings",
     "backtest.actions.replaying": "Starting rerun",
+    "backtest.actions.rerunFailed": "Could not rerun the same settings",
     "backtest.actions.error":
       "The run-control request failed. Refresh the status and try again.",
     "backtest.result.chartEmpty": "No value can be calculated for this range.",
+    "backtest.result.chartEmpty.rollingSharpe":
+      "The run is shorter than the rolling window ({sessions} sessions), so there are no rolling Sharpe values.",
     "backtest.result.chart": "chart",
     "backtest.result.kicker": "PROFESSIONAL RESULT",
     "backtest.result.title": "Backtest result",
@@ -1685,7 +2386,7 @@ export const messages = {
     "backtest.result.column.closed": "Closed",
     "backtest.result.column.quantity": "Qty",
     "backtest.result.column.pnl": "P&L",
-    "backtest.result.column.fees": "Fees",
+    "backtest.result.column.fees": "Costs (fees + taxes)",
     "backtest.result.column.slippage": "Slippage",
     "backtest.result.manifest": "Manifest · data warnings · reproducibility",
     "backtest.result.manifest.schema": "Schema",
@@ -1696,6 +2397,8 @@ export const messages = {
     "backtest.result.manifest.annualizationDays": "Annualization sessions",
     "backtest.result.manifest.metricWindows": "Metric windows",
     "backtest.result.manifest.fingerprint": "Run fingerprint",
+    "backtest.result.manifest.environment": "Run settings",
+    "backtest.result.manifest.environment.hash": "Run settings hash",
     "backtest.result.manifest.strategy": "Strategy",
     "backtest.result.manifest.source": "Strategy source",
     "backtest.result.manifest.inline": "inline draft",
@@ -1705,6 +2408,43 @@ export const messages = {
     "backtest.result.manifest.completed": "Completed",
     "backtest.result.warnings": "Data warnings",
     "backtest.result.warnings.empty": "No warnings",
+    "backtest.warning.portfolio.sector_unknown_excluded":
+      "Securities without a sector were left out of sector constraints",
+    "backtest.warning.benchmark.no_bar_at_start":
+      "Sessions before the benchmark's first price make the full-period benchmark comparison unavailable",
+    "backtest.warning.benchmark.suspended_sessions_carried":
+      "Suspended benchmark sessions carried the previous price",
+    "backtest.warning.benchmark.delisted_sessions_frozen":
+      "Benchmark sessions after its listing ended were frozen at the last value",
+    "backtest.warning.benchmark.invalid_bar_sessions_carried":
+      "Benchmark trading days with an invalid ledger row carried the previous price",
+    "backtest.warning.analytics.base_rate_carried_forward":
+      "Sessions after the base rate history was last checked carried the last base rate",
+    "backtest.warning.participation.session_volume":
+      "Fill limits used the fill day's own volume, so results lean optimistic",
+    "backtest.metricUnavailable.zero_return_variance":
+      "Returns never varied, so this cannot be computed",
+    "backtest.metricUnavailable.no_downside_variation":
+      "There was no downside variation, so this cannot be computed",
+    "backtest.metricUnavailable.no_drawdown":
+      "There was no drawdown, so this cannot be computed",
+    "backtest.metricUnavailable.maximum_drawdown_not_recovered":
+      "The maximum drawdown has not recovered yet",
+    "backtest.metricUnavailable.benchmark_not_available":
+      "Benchmark values are missing, so this cannot be computed",
+    "backtest.metricUnavailable.no_closed_trades":
+      "No trade was closed, so this cannot be computed",
+    "backtest.metricUnavailable.no_losing_closed_trade":
+      "No trade closed at a loss, so this cannot be computed",
+    "backtest.metricUnavailable.no_observations_in_scope":
+      "This window has no observations, so this cannot be computed",
+    "backtest.metricUnavailable.period_under_one_year":
+      "The period is shorter than a year, so it is not annualized",
+    "backtest.metricUnavailable.base_rate_not_covered":
+      "Some sessions predate the base rate history, so this is not computed",
+    "backtest.metricUnavailable.two_valued_returns":
+      "Returns took only two values, so the error cannot be measured",
+    "backtest.result.metricUnavailable.explain": "See why in data warnings",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":
       "How much the starting money grew or shrank by the end.",
@@ -1716,10 +2456,16 @@ export const messages = {
       "How much returns swung up and down. Higher means bumpier.",
     "backtest.metric.sharpe": "Sharpe ratio",
     "backtest.metric.sharpe.description":
-      "Return earned per unit of swing. Higher means a smoother gain.",
+      "Return above the Bank of Korea base rate per unit of swing. Higher means a smoother gain.",
+    "backtest.metric.sharpe_standard_error": "Sharpe uncertainty",
+    "backtest.metric.sharpe_standard_error.description":
+      "How much the Sharpe ratio could differ by luck alone. Sharpe ± twice this covers about 95%; it assumes each day is independent, so the real error can be larger.",
+    "backtest.metric.probabilistic_sharpe": "Chance of beating the base rate",
+    "backtest.metric.probabilistic_sharpe.description":
+      "The probability that, with luck set aside, the strategy truly earns more than the Bank of Korea base rate. It is measured from this one result, so it is lower in reality if the result was picked from many tried settings.",
     "backtest.metric.sortino": "Sortino ratio",
     "backtest.metric.sortino.description":
-      "A Sharpe ratio that counts only downward swings as risk.",
+      "A Sharpe ratio that counts only swings below the base rate as risk.",
     "backtest.metric.max_drawdown": "Maximum drawdown",
     "backtest.metric.max_drawdown.description":
       "The deepest fall from a previous peak.",
@@ -1762,6 +2508,9 @@ export const messages = {
     "backtest.metric.total_fees": "Total fees",
     "backtest.metric.total_fees.description":
       "All commissions paid for trading.",
+    "backtest.metric.total_taxes": "Sell taxes",
+    "backtest.metric.total_taxes.description":
+      "Securities transaction and rural development taxes paid on sales.",
     "backtest.metric.total_slippage_cost": "Slippage cost",
     "backtest.metric.total_slippage_cost.description":
       "Money lost to the gap between the intended and the filled price.",
@@ -1859,7 +2608,8 @@ export const messages = {
     "debugger.unavailable.no-factors": "There is no factor to trace.",
     "debugger.unavailable.execution-plan":
       "Trace is blocked because the current FactorGraph execution plan cannot be pinned.",
-    "debugger.blocked.document": "There is no executable current document.",
+    "debugger.unavailable.environment":
+      "A trace runs on the run settings. The run settings summary above names the field to fix.",
     "debugger.blocked.date": "Select a valid as-of date.",
     "debugger.blocked.security": "Enter between 1 and 100 security IDs.",
     "debugger.blocked.factor": "Select a factor to trace.",
@@ -1871,7 +2621,7 @@ export const messages = {
     "debugger.state.cancelled": "The trace request was cancelled.",
     "debugger.state.discarded":
       "A response with a different document, request or fingerprint was discarded.",
-    "debugger.state.error": "Trace failed.",
+    "debugger.state.error": "Trace failed",
     "debugger.target.empty": "There is no TargetTape frame for this date.",
     "debugger.target.unavailable": "TargetTape unavailable",
     "debugger.target.partial":
@@ -1905,6 +2655,32 @@ export const messages = {
     "debugger.column.rank": "Rank",
     "debugger.column.selected": "Selected",
     "debugger.column.exclusion": "Exclusion",
+    "debugger.exclusion.not_in_universe": "outside the universe",
+    "debugger.exclusion.future_data": "value published after the as-of date",
+    "debugger.exclusion.missing_eligibility": "no eligibility field value",
+    "debugger.exclusion.eligibility_failed": "failed an eligibility rule",
+    "debugger.exclusion.eligibility_rank_cut": "outside the top fraction or count (rank cut)",
+    "debugger.exclusion.missing_factor": "no factor value",
+    "debugger.exclusion.score_threshold": "below the score floor",
+    "debugger.exclusion.regime_blocked": "blocked by the regime rule",
+    "debugger.exclusion.liquidity_failed": "below the liquidity floor",
+    "debugger.exclusion.outside_selection": "outside the selection rank",
+    "debugger.exclusion.missing_risk": "no risk value (inverse weighting impossible)",
+    "debugger.exclusion.turnover_buffer": "kept by the turnover buffer",
+    "debugger.exclusion.minimum_trade": "below the minimum trade, previous weight kept",
+    "debugger.status.ok": "computed",
+    "debugger.status.missing_input": "missing input",
+    "debugger.status.warm_up": "not enough history",
+    "debugger.status.divide_by_zero": "divided by zero",
+    "debugger.status.group_missing": "no group",
+    "debugger.status.masked": "masked by the ledger",
+    "debugger.contributionStatus.ok": "included",
+    "debugger.contributionStatus.missing": "no factor value",
+    "debugger.contributionStatus.future_data": "published after the as-of date",
+    "debugger.constraintEffect.not_selected": "not selected",
+    "debugger.constraintEffect.unchanged": "unchanged by constraints",
+    "debugger.constraintEffect.adjusted": "adjusted by constraints",
+    "debugger.constraintEffect.removed": "removed by constraints",
     "debugger.column.target": "Target weight",
     "debugger.column.nodeValue": "Node value",
     "debugger.column.nodeStatus": "Node status",
@@ -1948,7 +2724,6 @@ export const messages = {
     "page.error.retry": "Retry",
     "page.revision.viewPending":
       "This view is not available yet; showing the source editor",
-    "page.backtest.resultError": "The backtest result could not be loaded.",
     "nav.backtests": "Backtests",
     "nav.experiments": "Experiments",
     "nav.realtime": "Live",
@@ -2009,11 +2784,10 @@ export const messages = {
     "snippet.empty": "No entry is available in the current contract.",
     "snippet.insert": "Insert at cursor",
     "snippet.inserted": "Inserted and passed the YAML syntax check.",
-    "snippet.category.data": "Data",
-    "snippet.category.factor": "Factor",
-    "snippet.category.signal": "Signal",
-    "snippet.category.risk": "Risk",
-    "snippet.category.execution": "Execution",
+    "snippet.category.section": "Sections",
+    "snippet.category.example": "Example factors",
+    "snippet.example.note":
+      "Tutorial examples. Building the strategy from an empty factor is the recommended path.",
     "snippet.error.yaml-only":
       "Snippets are available only in the YAML editor.",
     "snippet.error.selection":
@@ -2083,7 +2857,8 @@ export const messages = {
     "graph.incoming": "Incoming edges",
     "graph.sourceNode": "Source node · no inputs",
     "graph.selectNode": "Select graph node: {node}",
-    "graph.selectInput": "Select {role} input node: {node}",
+    "graph.selectInput": "Select {role}: {node}",
+    "graph.inputOrdinal": "Input {index}",
     "graph.missingInput": "Missing input",
     "graph.notExecuted": "NOT EXECUTED",
     "graph.unplannedTitle": "Definitions outside the execution plan",
@@ -2143,16 +2918,8 @@ export const messages = {
     "contract.catalog.unsupported":
       "This catalog does not have a detail API yet.",
     "contract.fieldDetails": "Dataset field · PIT",
-    "contract.factorDetails": "Factor registry",
     "contract.snapshot": "Data snapshot",
     "contract.registryVersion": "Registry version",
-    "contract.category": "Category",
-    "contract.availability": "Availability",
-    "contract.outputUnit": "Output unit",
-    "contract.preference": "Preference",
-    "contract.minimumHistory": "Minimum history",
-    "contract.requiredFields": "Required fields",
-    "contract.tags": "Tags",
     "contract.frequency": "Frequency",
     "contract.valueType": "Value type",
     "contract.pointInTime": "Point-in-time",
@@ -2189,6 +2956,8 @@ export const messages = {
     "strategy.contract.applicable.sector_neutral": "Sector neutrality",
     "strategy.contract.applicable.risk_field_id":
       "Field used for risk weighting",
+    "strategy.contract.applicable.risk_factor_id":
+      "Factor used for risk weighting",
     "strategy.contract.applicable.regime_minimum": "Regime value floor",
     "strategy.contract.portfolio.selection_count":
       "Number of names in the long portfolio",
@@ -2209,12 +2978,45 @@ export const messages = {
       "Maximum target weight per security",
     "strategy.contract.risk.max_sector_weight":
       "Maximum target weight per sector",
-    "strategy.contract.execution.participation_rate":
-      "Maximum order participation relative to market volume",
-    "strategy.contract.execution.fee_bps":
-      "Fee assumption applied to notional traded",
-    "strategy.contract.execution.slippage_bps":
-      "Execution price slippage assumption",
+    "run_environment.field.participation_rate": "Participation",
+    "run_environment.field.fee_bps": "Fee",
+    "run_environment.field.slippage_bps": "Slippage",
+    "run_environment.field.sell_tax_bps": "Sell tax rate",
+    "run_environment.field.impact_coefficient": "Impact coefficient",
+    "run_environment.field.market": "Market",
+    "run_environment.field.market.description": "Exchange whose securities and prices are read.",
+    "run_environment.field.market.value.KRX": "Korea Exchange (KRX)",
+    "run_environment.field.frequency": "Frequency",
+    "run_environment.field.frequency.description": "Interval at which signals are computed and prices read.",
+    "run_environment.field.frequency.value.daily": "Daily",
+    "run_environment.field.start": "Start date",
+    "run_environment.field.start.description": "First date the backtest issues a signal. Factors that need history read earlier values.",
+    "run_environment.field.end": "End date",
+    "run_environment.field.end.description": "Last date the backtest evaluates.",
+    "run_environment.field.universe_id": "Universe",
+    "run_environment.field.universe_id.description": "ID of the security list considered on each date, e.g. krx.common-stock.",
+    "run_environment.field.timing": "Execution timing",
+    "run_environment.field.timing.description": "When an order fills after its signal.",
+    "run_environment.field.timing.value.next_open": "Next session open",
+    "run_environment.field.participation_basis": "Participation basis",
+    "run_environment.field.participation_basis.description": "The volume the participation rate is applied to when capping the shares filled in one session. Session volume uses the whole day's volume, which is not known at fill time, so results come out optimistic.",
+    "run_environment.field.participation_basis.value.session_volume": "Session volume",
+    "run_environment.field.participation_basis.value.adv20": "20-day average traded value",
+    "run_environment.field.impact_model": "Price impact model",
+    "run_environment.field.impact_model.description": "How far an order is assumed to push its own fill price.",
+    "run_environment.field.impact_model.value.fixed_bps": "Fixed bp (slippage)",
+    "run_environment.field.impact_model.value.sqrt": "Square-root price impact (volatility and volume)",
+    "run_environment.field.sell_tax": "Sell tax",
+    "run_environment.field.sell_tax.description": "How the tax charged on the proceeds of each sale is counted.",
+    "run_environment.field.sell_tax.value.krx_statutory": "Statutory rate (by date)",
+    "run_environment.field.sell_tax.value.custom": "Custom rate",
+    "run_environment.field.sell_tax.value.none": "No tax",
+    "run_environment.field.missing": "Missing values",
+    "run_environment.field.missing.description": "What to do with an empty factor value (an empty input or too little history) before securities are compared on the same day. Period calculations do not fill missing raw inputs, but values filled by an earlier cross-sectional or group calculation can enter a later period calculation. Cells the ledger masked as wrong (cell state masked) are never filled.",
+    "run_environment.field.missing.value.drop": "Drop the security",
+    "run_environment.field.missing.value.keep": "Keep the empty value",
+    "run_environment.field.missing.value.zero": "Fill with zero",
+    "run_environment.field.missing.value.cross_sectional_median": "Fill with the same-day median",
     // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
     // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
     // 한 줄 설명. 연산자는 `<stem>.formula`로 계산식을 더한다. 목록 자체는 runtime schema의
@@ -2222,7 +3024,7 @@ export const messages = {
     // `screen-vocabulary.test.ts`가 fixture를 순회해 누락 키를 잡는다.
     "strategy.document": "Strategy document",
     "strategy.document.description":
-      "One strategy definition: universe, factors, portfolio, risk and execution.",
+      "One strategy definition: eligibility, factors, portfolio and risk. Market, period and costs belong to the run settings.",
     "strategy.section.schema_version": "Document version",
     "strategy.section.schema_version.description":
       "The authoring schema version this document follows.",
@@ -2232,9 +3034,6 @@ export const messages = {
     "strategy.section.description": "Strategy description",
     "strategy.section.description.description":
       "Free text describing what this strategy is after.",
-    "strategy.section.data": "Data",
-    "strategy.section.data.description":
-      "Which market, period and universe the run reads.",
     "strategy.section.eligibility": "Eligibility",
     "strategy.section.eligibility.description":
       "Conditions that drop names from the universe before factors are computed.",
@@ -2250,29 +3049,9 @@ export const messages = {
     "strategy.section.risk": "Risk",
     "strategy.section.risk.description":
       "Exposure limits and per-name / per-sector weight caps.",
-    "strategy.section.execution": "Execution",
-    "strategy.section.execution.description":
-      "Order timing plus participation, fee and slippage assumptions.",
     "strategy.section.parameters": "Search parameters",
     "strategy.section.parameters.description":
       "Parameters an optimisation sweeps over.",
-    "strategy.type.data_step": "Data window",
-    "strategy.type.data_step.description":
-      "Market, frequency, period and universe in one block.",
-    "strategy.field.data_step.market": "Market",
-    "strategy.field.data_step.market.description":
-      "The exchange prices are read from.",
-    "strategy.field.data_step.start": "Start date",
-    "strategy.field.data_step.start.description":
-      "First day the backtest reads.",
-    "strategy.field.data_step.end": "End date",
-    "strategy.field.data_step.end.description": "Last day the backtest reads.",
-    "strategy.field.data_step.universe_id": "Universe",
-    "strategy.field.data_step.universe_id.description":
-      "Identifier of the candidate security set.",
-    "strategy.field.data_step.frequency": "Frequency",
-    "strategy.field.data_step.frequency.description":
-      "Interval at which observations are read.",
     "strategy.type.eligibility_rule": "Eligibility rule",
     "strategy.type.eligibility_rule.description":
       "One condition comparing a data field against a threshold.",
@@ -2282,9 +3061,21 @@ export const messages = {
     "strategy.field.eligibility_rule.operator": "Comparison",
     "strategy.field.eligibility_rule.operator.description":
       "How the field value is compared with the threshold.",
+    "strategy.field.eligibility_rule.operator.value.gt": "greater than the threshold",
+    "strategy.field.eligibility_rule.operator.value.gte": "at least the threshold",
+    "strategy.field.eligibility_rule.operator.value.lt": "less than the threshold",
+    "strategy.field.eligibility_rule.operator.value.lte": "at most the threshold",
+    "strategy.field.eligibility_rule.operator.value.eq": "equal to the threshold",
+    "strategy.field.eligibility_rule.operator.value.top_percent":
+      "within the top fraction by value",
+    "strategy.field.eligibility_rule.operator.value.top_percent.description":
+      "Keeps the names with the largest values, as a fraction of those passing the other rules (0.2 = top 20%).",
+    "strategy.field.eligibility_rule.operator.value.top_count": "within the top count by value",
+    "strategy.field.eligibility_rule.operator.value.top_count.description":
+      "Keeps the given number of names with the largest values among those passing the other rules.",
     "strategy.field.eligibility_rule.value": "Threshold",
     "strategy.field.eligibility_rule.value.description":
-      "The number used in the comparison.",
+      "The number used in the comparison. For a top fraction it is a ratio between 0 and 1 (0.2 = top 20%); for a top count it is a number of names.",
     "strategy.type.eligibility_step": "Eligibility step",
     "strategy.type.eligibility_step.description":
       "The rules that narrow the universe before factors run.",
@@ -2319,12 +3110,6 @@ export const messages = {
     "strategy.node.conditional": "Conditional",
     "strategy.node.conditional.description":
       "Yields one value when the condition holds and another when it does not.",
-    "strategy.node.saved_factor": "Saved factor",
-    "strategy.node.saved_factor.description":
-      "Brings in the value of an already saved factor.",
-    "strategy.node.saved_subgraph": "Saved subgraph",
-    "strategy.node.saved_subgraph.description":
-      "Brings in an already saved fragment of a graph.",
     "strategy.field.node.kind": "Node kind",
     "strategy.field.node.kind.description": "What kind of node this is.",
     "strategy.field.node.node_id": "Node name",
@@ -2332,7 +3117,7 @@ export const messages = {
       "The name other nodes use to refer to this one.",
     "strategy.field.node.field_id": "Data field",
     "strategy.field.node.field_id.description":
-      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits, but events without a confirmed ledger factor or with a late-published factor can still leave gaps.",
+      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits but does not bridge every event: on a day the ledger could not fold an event the value is missing, and so is any window holding that day or any comparison of two points in time that spans it (Lag, or a window with Window lag against today's value). Events the ledger does not adjust, such as rights-offering ex-dates, keep their price change.",
     "strategy.field.node.value": "Value",
     "strategy.field.node.value.description":
       "The fixed number this node emits.",
@@ -2376,12 +3161,6 @@ export const messages = {
     "strategy.field.node.false_node_id": "Value when false",
     "strategy.field.node.false_node_id.description":
       "The value used where the condition does not hold.",
-    "strategy.field.node.factor_id": "Factor name",
-    "strategy.field.node.factor_id.description":
-      "The saved factor the value comes from.",
-    "strategy.field.node.subgraph_id": "Subgraph name",
-    "strategy.field.node.subgraph_id.description":
-      "The saved graph fragment the value comes from.",
     "strategy.type.factor_graph": "Factor graph",
     "strategy.type.factor_graph.description":
       "The wired nodes that produce the factor value.",
@@ -2391,9 +3170,6 @@ export const messages = {
     "strategy.field.factor_graph.output_node_id": "Output node",
     "strategy.field.factor_graph.output_node_id.description":
       "The node whose value becomes the factor.",
-    "strategy.field.factor_graph.missing_policy": "Missing policy",
-    "strategy.field.factor_graph.missing_policy.description":
-      "What happens to names with no value.",
     "strategy.type.factor_signal": "Alpha factor",
     "strategy.type.factor_signal.description":
       "One scoring factor and its weight.",
@@ -2406,6 +3182,8 @@ export const messages = {
     "strategy.field.factor_signal.direction": "Direction",
     "strategy.field.factor_signal.direction.description":
       "Whether a higher or a lower value is preferred.",
+    "strategy.field.factor_signal.direction.value.high": "higher is better",
+    "strategy.field.factor_signal.direction.value.low": "lower is better",
     "strategy.field.factor_signal.weight": "Weight",
     "strategy.field.factor_signal.weight.description":
       "This factor's share when scores are combined.",
@@ -2415,6 +3193,19 @@ export const messages = {
     "strategy.type.signal_step": "Signal step",
     "strategy.type.signal_step.description":
       "What the combined score has to clear to stay a candidate.",
+    "strategy.field.signal_step.normalization": "Score normalization",
+    "strategy.field.signal_step.normalization.description":
+      "Whether factor scores are ranked or z-scored before they are combined.",
+    "strategy.field.signal_step.normalization.value.none":
+      "Weighted sum of raw values (same units only)",
+    "strategy.field.signal_step.normalization.value.none.description":
+      "Multiplies raw factor values by their weights and adds them. Mixing units lets the larger unit dominate.",
+    "strategy.field.signal_step.normalization.value.rank": "Weighted sum after ranking",
+    "strategy.field.signal_step.normalization.value.rank.description":
+      "Turns each factor into a cross-sectional rank (0 to 1) on each date, then adds the weighted ranks.",
+    "strategy.field.signal_step.normalization.value.zscore": "Weighted sum after z-scoring",
+    "strategy.field.signal_step.normalization.value.zscore.description":
+      "Turns each factor into a cross-sectional z-score (mean 0, sd 1) on each date, then adds them.",
     "strategy.field.signal_step.score_threshold": "Score floor",
     "strategy.field.signal_step.score_threshold.description":
       "Names scoring below this are dropped.",
@@ -2423,22 +3214,34 @@ export const messages = {
       "The data field that decides the market regime.",
     "strategy.field.signal_step.regime_minimum": "Regime floor",
     "strategy.field.signal_step.regime_minimum.description":
-      "Below this value no new buys are made.",
+      "Stocks whose regime field value is below this drop out of the candidates, and held ones are sold.",
     "strategy.type.portfolio_step": "Portfolio step",
     "strategy.type.portfolio_step.description":
       "Which candidates are held, at what weight, and how often.",
     "strategy.field.portfolio_step.side": "Side",
     "strategy.field.portfolio_step.side.description":
       "Long only, or long and short.",
+    "strategy.field.portfolio_step.side.value.long_only": "Long only",
+    "strategy.field.portfolio_step.side.value.long_short": "Long and short",
     "strategy.field.portfolio_step.weighting": "Weighting",
     "strategy.field.portfolio_step.weighting.description":
       "How weight is assigned to the selected names.",
+    "strategy.field.portfolio_step.weighting.value.equal": "Equal weight",
+    "strategy.field.portfolio_step.weighting.value.factor_score": "Proportional to score margin",
+    "strategy.field.portfolio_step.weighting.value.rank": "Proportional to rank",
+    "strategy.field.portfolio_step.weighting.value.risk": "Larger when risk is lower",
     "strategy.field.portfolio_step.rebalance": "Rebalance",
     "strategy.field.portfolio_step.rebalance.description":
       "How often target weights are reset.",
+    "strategy.field.portfolio_step.rebalance.value.every_n_sessions": "Every N sessions",
+    "strategy.field.portfolio_step.rebalance.value.weekly": "Weekly",
+    "strategy.field.portfolio_step.rebalance.value.monthly": "Monthly",
+    "strategy.field.portfolio_step.rebalance.value.quarterly": "Quarterly",
     "strategy.field.portfolio_step.selection_method": "Selection method",
     "strategy.field.portfolio_step.selection_method.description":
       "Select by top count or by top fraction.",
+    "strategy.field.portfolio_step.selection_method.value.top_n": "Top count",
+    "strategy.field.portfolio_step.selection_method.value.percentile": "Top fraction",
     "strategy.field.portfolio_step.liquidity_field_id": "Liquidity field",
     "strategy.field.portfolio_step.liquidity_field_id.description":
       "The data field used to judge tradability.",
@@ -2453,12 +3256,9 @@ export const messages = {
     "strategy.field.risk_step.risk_field_id": "Risk field",
     "strategy.field.risk_step.risk_field_id.description":
       "The data field used for risk weighting.",
-    "strategy.type.execution_step": "Execution step",
-    "strategy.type.execution_step.description":
-      "Order timing and cost assumptions.",
-    "strategy.field.execution_step.timing": "Timing",
-    "strategy.field.execution_step.timing.description":
-      "When a signal is assumed to be filled.",
+    "strategy.field.risk_step.risk_factor_id": "Risk factor",
+    "strategy.field.risk_step.risk_factor_id.description":
+      "The factor used for risk weighting. It is read only when weighting is risk; then it is left out of the combined score and weights follow the inverse of its raw value.",
     "strategy.parameter.float": "Float parameter",
     "strategy.parameter.float.description":
       "A parameter searched over a real-valued range.",
@@ -2509,12 +3309,155 @@ export const messages = {
       "Largest target weight a single name may take.",
     "strategy.contract.risk.max_sector_weight.description":
       "Largest target weight a single sector may take.",
-    "strategy.contract.execution.participation_rate.description":
-      "Largest share of the session's volume an order may take.",
-    "strategy.contract.execution.fee_bps.description":
+    // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
+    // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
+    // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다. 노드 설정 칸 조각은 레시피 요약이 쓴다.
+    "strategy.stage.eligibility": "Universe",
+    "strategy.stage.eligibility.description": "Which stocks are candidates.",
+    "strategy.stage.signal": "Alpha",
+    "strategy.stage.signal.description": "How candidates are scored.",
+    "strategy.stage.portfolio": "Portfolio",
+    "strategy.stage.portfolio.description":
+      "How many stocks to hold, at what weights, and how often to pick again.",
+    "strategy.stage.risk": "Risk",
+    "strategy.stage.risk.description":
+      "Limits that keep weight from piling into one stock or sector.",
+    "strategy.summary.stage.eligibility": "among stocks with {parts}",
+    "strategy.summary.stage.signal": "{parts}",
+    "strategy.summary.stage.portfolio": "{parts}",
+    "strategy.summary.stage.risk": "within limits of {parts}",
+    "strategy.summary.sentence": "Pick and hold {stages}.",
+    "strategy.field.eligibility_rule.operator.value.gt.summary":
+      "{field_id} above {value}",
+    "strategy.field.eligibility_rule.operator.value.gte.summary":
+      "{field_id} at least {value}",
+    "strategy.field.eligibility_rule.operator.value.lt.summary":
+      "{field_id} below {value}",
+    "strategy.field.eligibility_rule.operator.value.lte.summary":
+      "{field_id} at most {value}",
+    "strategy.field.eligibility_rule.operator.value.eq.summary":
+      "{field_id} equal to {value}",
+    "strategy.field.eligibility_rule.operator.value.top_percent.summary":
+      "{field_id} in the top {value.percent}",
+    "strategy.field.eligibility_rule.operator.value.top_count.summary":
+      "{field_id} in the top {value}",
+    "strategy.contract.portfolio.minimum_liquidity.summary":
+      "{liquidity_field_id} at least {minimum_liquidity}",
+    "strategy.section.factors.summary": "ranked by {items}",
+    "strategy.field.factor_signal.direction.value.high.summary": "high {label}",
+    "strategy.field.factor_signal.direction.value.low.summary": "low {label}",
+    "strategy.field.factor_signal.weight.summary": "(weight {weight})",
+    "strategy.field.signal_step.score_threshold.summary":
+      "only scores of at least {score_threshold}",
+    "strategy.field.signal_step.regime_minimum.summary":
+      "only stocks with {regime_field_id} at least {regime_minimum}",
+    "strategy.field.portfolio_step.side.value.long_short.summary":
+      "shorting the bottom stocks",
+    "strategy.field.portfolio_step.weighting.value.equal.summary":
+      "at equal weight",
+    "strategy.field.portfolio_step.weighting.value.factor_score.summary":
+      "weighted by score margin",
+    "strategy.field.portfolio_step.weighting.value.rank.summary":
+      "weighted by rank",
+    "strategy.field.risk_step.risk_field_id.summary":
+      "weighted inversely to {risk_field_id}",
+    "strategy.field.risk_step.risk_factor_id.summary":
+      "weighted inversely to {risk_factor_id}",
+    "strategy.field.portfolio_step.rebalance.value.weekly.summary": "weekly",
+    "strategy.field.portfolio_step.rebalance.value.monthly.summary": "monthly",
+    "strategy.field.portfolio_step.rebalance.value.quarterly.summary":
+      "quarterly",
+    "strategy.contract.portfolio.rebalance_every_n_sessions.summary":
+      "every {rebalance_every_n_sessions} sessions",
+    "strategy.contract.portfolio.selection_count.summary":
+      "the top {selection_count} stocks",
+    "strategy.contract.portfolio.selection_percentile.summary":
+      "the top {selection_percentile}",
+    "strategy.contract.risk.max_name_weight.summary":
+      "at most {max_name_weight} per stock",
+    "strategy.contract.risk.max_sector_weight.summary":
+      "at most {max_sector_weight} per sector",
+    "strategy.field.node.periods.summary": "{periods} sessions back",
+    "strategy.field.node.window.summary": "{window} sessions",
+    "strategy.field.node.lag.summary": "skipping the last {lag} sessions",
+    "strategy.field.node.lower_quantile.summary": "lower {lower_quantile}",
+    "strategy.field.node.upper_quantile.summary": "upper {upper_quantile}",
+    "strategy.field.node.group_field_id.summary": "by {group_field_id}",
+    "recipe.summary.previous": "previous step",
+    "recipe.summary.advanced": "{count} nodes · advanced",
+    // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →
+    // 앵커·목록 설명 키 순으로 찾고, `{<키>}` 자리에 같은 카드 필드의 컨트롤이 들어간다), 캔버스 chrome.
+    // 비율 칸은 입력 단위를 바꾸지 않고 틀이 예시로 단위를 말한다("0.1이 10%").
+    "strategy.stage.eligibility.term": "Universe",
+    "strategy.stage.signal.term": "Alpha",
+    "strategy.stage.portfolio.term": "Portfolio",
+    "strategy.stage.risk.term": "Risk",
+    "strategy.field.eligibility_step.rules.card":
+      "Only stocks whose {field_id} is {operator} — threshold {value}",
+    "strategy.section.factors.card":
+      "{label} — {direction}, weight {weight.slider}",
+    "strategy.field.eligibility_rule.operator.value.top_percent.card":
+      "Only stocks {operator} of {field_id} — top fraction {value} (0.2 means 20%)",
+    "strategy.field.eligibility_rule.operator.value.top_count.card":
+      "Only stocks {operator} of {field_id} — top {value}",
+    "strategy.field.portfolio_step.liquidity_field_id.card":
+      "Only stocks whose {liquidity_field_id} is at least {minimum_liquidity}",
+    "strategy.field.signal_step.normalization.card":
+      "Factor scores: {normalization}",
+    "strategy.field.signal_step.score_threshold.card":
+      "Drop stocks whose combined score is below {score_threshold}",
+    "strategy.field.signal_step.regime_field_id.card":
+      "Hold only stocks whose {regime_field_id} is at least {regime_minimum}",
+    "strategy.field.portfolio_step.side.card": "Direction: {side}",
+    "strategy.field.portfolio_step.weighting.card": "Weights: {weighting}",
+    "strategy.field.portfolio_step.weighting.value.risk.card":
+      "Weights: {weighting} — by risk factor {risk_factor_id} or risk field {risk_field_id}",
+    "strategy.field.portfolio_step.rebalance.card": "Re-pick {rebalance}",
+    "strategy.field.portfolio_step.rebalance.value.every_n_sessions.card":
+      "Re-pick {rebalance}: every {rebalance_every_n_sessions} sessions",
+    "strategy.field.portfolio_step.selection_method.value.top_n.card":
+      "Pick the {selection_method} {selection_count} stocks by combined score",
+    "strategy.field.portfolio_step.selection_method.value.percentile.card":
+      "Pick the {selection_method} {selection_percentile} (0.1 means 10%) by combined score",
+    "strategy.contract.portfolio.turnover_buffer_count.card":
+      "Keep a held stock until it falls {turnover_buffer_count} more places",
+    "strategy.contract.portfolio.minimum_trade_weight.card":
+      "Skip orders when the weight change is below {minimum_trade_weight} (0.01 means 1%)",
+    "strategy.contract.risk.gross_exposure.card":
+      "Total long plus short weight: {gross_exposure} (1 means 100%)",
+    "strategy.field.risk_step.net_exposure.card":
+      "Long minus short weight: {net_exposure} (1 means 100%)",
+    "strategy.contract.risk.max_name_weight.card":
+      "At most {max_name_weight} per stock (0.05 means 5%)",
+    "strategy.contract.risk.max_sector_weight.card":
+      "At most {max_sector_weight} per sector (0.3 means 30%)",
+    "strategy.field.risk_step.sector_neutral.card":
+      "{sector_neutral} Balance long and short weight within each sector",
+    "graph.pipeline.label": "Strategy pipeline",
+    "graph.pipeline.summary": "Summary",
+    "graph.pipeline.stages": "Strategy stages",
+    "graph.pipeline.item": "Item {index}",
+    "graph.pipeline.openRecipe": "Open recipe",
+    "graph.pipeline.removeBlocked": "Not removed: still used by {places}",
+    "graph.pipeline.execution": "Execution",
+    "graph.pipeline.execution.term": "Execution",
+    "graph.pipeline.execution.description":
+      "Market, period, universe and costs are run settings outside the strategy document. Choose them in the run settings above.",
+    "graph.pipeline.notHere": "Not on this canvas",
+    "graph.pipeline.notHere.document":
+      "{names}: edit them in the YAML tab.",
+    "graph.pipeline.notHere.formula":
+      "Factor formulas: edit them in the advanced editor below.",
+    "run_environment.field.participation_rate.description":
+      "Largest share of the participation-basis volume an order may take in one session.",
+    "run_environment.field.fee_bps.description":
       "Fee in basis points charged on notional traded.",
-    "strategy.contract.execution.slippage_bps.description":
-      "Basis points the fill price is assumed to move against the order.",
+    "run_environment.field.slippage_bps.description":
+      "Basis points the fill price is assumed to move against the order when the impact model is fixed bp.",
+    "run_environment.field.impact_coefficient.description":
+      "Coefficient k of square-root impact = k × 20-day volatility × √(filled shares ÷ 20-day average volume).",
+    "run_environment.field.sell_tax_bps.description":
+      "Basis points charged on sale proceeds when the sell tax is a custom rate.",
     "strategy.operator.unary.negate": "Negate",
     "strategy.operator.unary.negate.description":
       "Flips the sign, turning a lower-is-better measure into a higher-is-better one.",
@@ -2645,28 +3588,36 @@ export const messages = {
     "leave.leave": "Leave",
     "page.revision.untitled": "Untitled strategy",
     "page.revision.generated": "Generated from legacy JSON",
-    "upgrade.title": "Schema 1.0 document",
-    "upgrade.body":
-      "This document is schema 1.0. Upgrading rewrites it under the current rules while keeping comments and order (one undo step).",
-    "upgrade.action": "Upgrade to 1.1",
+    "upgrade.title": "Older schema document",
+    "upgrade.body": "This document uses a retired schema version. Upgrading rewrites it under the current rules while keeping comments and order (one undo step).",
+    "upgrade.action": "Upgrade to the current version",
     "upgrade.pending": "Upgrading…",
-    "upgrade.applied":
-      "Rewritten as 1.1. Review it, then save it as a new revision.",
-    "upgrade.frozenGenerated":
-      "This is a frozen schema 1.0 revision. The generated document is already 1.1: edit it and save a new revision.",
-    "upgrade.backtestBlocked":
-      "A stored 1.0 revision cannot run a backtest. Upgrade it and save a new revision first.",
+    "upgrade.applied": "Rewritten as the current version. Review it, then save it as a new revision.",
+    "upgrade.frozenGenerated": "This revision is frozen on an older schema. The generated document is already on the current version: edit it and save a new revision.",
+    "upgrade.backtestBlocked": "A stored older-schema revision cannot run a backtest. Upgrade it and save a new revision first.",
     "upgrade.error.editor": "The editor is not ready, so nothing was upgraded.",
     "upgrade.error.composing": "Cannot upgrade while composing input.",
     "upgrade.error.request":
-      "The upgrade request failed. The text is unchanged. ({detail})",
+      "The upgrade request failed. The text is unchanged.",
     "upgrade.error.strategy_document.upgrade_drift":
       "The rewritten text disagreed with the upgrade rules, so it was rejected. The text is unchanged.",
-    "upgrade.error.strategy_document.not_upgradeable":
-      "Only schema 1.0 documents can be upgraded.",
+    "upgrade.error.strategy_document.not_upgradeable": "Only documents on a retired schema version can be upgraded.",
+    "upgrade.warning.strategy_document.upgrade_missing_policy_conflict":
+      "Per-factor missing-value policies were merged into one",
+    "upgrade.warning.strategy_document.upgrade_weighting_rule_changed":
+      "The score-proportional weighting rule changed",
+    "upgrade.warning.strategy_document.upgrade_environment_unavailable":
+      "The old document's run settings could not be carried over",
     "upgrade.error.strategy_document.invalid":
       "Syntax errors block the upgrade. Fix the syntax first.",
-    "history.frozen": "1.0 frozen",
+    "upgrade.error.strategy_document.upgrade_unsupported_node": "A node the current version lacks (a saved factor or subgraph reference) blocks the upgrade. Expand it into the graph and try again.",
+    "upgrade.warnings": "Things to know about this upgrade",
+    "upgrade.environment.found": "Run settings from the old document: {summary}",
+    "upgrade.environment.apply": "Fill the run settings",
+    "upgrade.environment.applied": "Filled the run settings from the old document. Check the run settings summary.",
+    "upgrade.environment.unfilled": "If you save or leave this screen without filling them in, these run settings cannot be shown again.",
+    "upgrade.environment.unavailable": "The old document's run settings could not be carried over, so nothing was filled. Read the notes and set them yourself.",
+    "history.frozen": "Frozen (older schema)",
     "assist.type": "Type",
     "assist.required": "required",
     "assist.optional": "optional",
@@ -2678,11 +3629,10 @@ export const messages = {
     "assist.source": "Values from",
     "assist.branch": "kind",
     "assist.catalog.equityField": "dataset field catalog",
-    "assist.catalog.factor": "factor registry",
     "assist.catalog.universe": "universe",
-    "assist.catalog.subgraph": "saved subgraph",
     "assist.reference.node": "nodes of the same graph",
     "assist.reference.parameter": "the document's parameters",
+    "assist.reference.factor": "the document's factors",
     "problems.title": "Problems",
     "problems.summary": "{errors} errors · {warnings} warnings",
     "problems.error": "Error",
@@ -2731,6 +3681,9 @@ export const messages = {
     "plan.sessions": "sessions",
     "plan.pitPolicy": "PIT policy",
     "plan.missingPolicy": "Missing policy",
+    "plan.node.booleanScore": "True/false as 1/0",
+    "plan.node.booleanScore.description":
+      "Added by compile so a true/false output can be used as a score: true is 1, false is 0.",
     "plan.graphFingerprint": "Graph fingerprint",
     "plan.planFingerprint": "Plan/cache fingerprint",
     "plan.table": "Backend-compiled topological factor execution plan",
@@ -2761,19 +3714,88 @@ export const messages = {
     "toolbar.run.open": "View backtest",
     "toolbar.run.accepted": "Backtest {runId} accepted",
     "toolbar.run.failed": "Backtest could not start",
-    "backtest.error.backtest.strategy.requires_upgrade":
-      "A stored 1.0 revision cannot run. Upgrade it and save a new revision first.",
-    "trace.error.trace.strategy.requires_upgrade":
-      "A stored 1.0 revision cannot be traced. Upgrade it and save a new revision first.",
-    "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",
+    "backtest.start.failedGeneric":
+      "The server did not accept the run request. Check the run settings and the strategy document, then start again.",
+    "backtest.error.backtest.run.field_invalid":
+      "The server rejected a value in the request. Fix the field the server reason points to, then run it again.",
+    "backtest.error.backtest.run.field_invalid.named":
+      "The server rejected the {field} run setting. Fix that field in the strategy editor's run settings, then run it again.",
+    "backtest.error.backtest.run.invalid":
+      "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy in the strategy editor.",
+    "backtest.error.backtest.run.environment_required":
+      "There are no run settings. Fill the start date, end date and universe in the run settings.",
+    "backtest.error.backtest.run.research_window_violation":
+      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then run it again.",
+    "backtest.error.backtest.run.parameter_invalid":
+      "The value for strategy parameter {parameter_id} cannot be used. Check that the document declares the parameter and that the value is within its range or choices, then start again.",
+    "backtest.error.portfolio.strategy.invalid":
+      "The strategy document did not pass run validation. Validate again and fix the marked lines.",
+    "backtest.error.backtest.strategy.not_found":
+      "The saved strategy revision was not found. Open the strategy again from the strategy list.",
+    "backtest.error.backtest.strategy.stale":
+      "The saved revision changed in the meantime. Reopen the strategy, then start again.",
+    "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
+    "backtest.result.failedGeneric": "The backtest result could not be loaded.",
+    "backtest.error.backtest.run.not_found":
+      "This run was not found. Open it again from the backtest history.",
+    "backtest.error.backtest.result.not_ready":
+      "This run has no result yet. Open it again after the run finishes.",
+    "backtest.error.backtest.result.unreadable":
+      "This run's result file cannot be read. The file may be missing or damaged, or it is an old result saved before the result format changed. Loading it again will not help; run it again with the same settings.",
+    "backtest.error.backtest.lineage.already_merged":
+      "The two strategies are already one trial lineage. There is nothing to merge.",
+    "backtest.error.strategy.not_found":
+      "The chosen strategy was not found. Refresh the strategy list and choose again.",
+    "backtest.runKind.single": "Single run",
+    "backtest.runKind.experiment_trial": "Experiment trial",
+    "backtest.runKind.walk_forward_validation": "Walk-forward validation",
+    "history.backtests.experiment": "Experiment {experiment}",
+    "history.backtests.experimentPaused": "Experiment paused",
+    "backtest.error.experiment.base.unsaved":
+      "An experiment can only start from a saved strategy revision. Save the strategy, then create the experiment from that revision.",
+    "backtest.error.experiment.base.invalid":
+      "The base run request cannot be used for an experiment. The split decides the measurement windows, so remove the metric windows from the run request.",
+    "backtest.error.experiment.search.unknown_parameter":
+      "A parameter the strategy document does not declare cannot be searched. Choose declared parameters only.",
+    "backtest.error.experiment.search.invalid_values":
+      "The search values cannot be used. Check that every value is within the parameter's range or choices and appears once.",
+    "backtest.error.experiment.search.too_many_points":
+      "The search has too many combinations. Use fewer values or a wider step.",
+    "backtest.error.experiment.split.invalid":
+      "The split settings are out of range. Use at least 1 training year and 1 test year and a non-negative embargo.",
+    "backtest.error.experiment.split.no_window":
+      "The run period is shorter than the training period, so there is no window to test. Lengthen the period or shorten the training years.",
+    "backtest.error.experiment.capacity.invalid_amounts":
+      "A capacity check needs 3 to 12 distinct positive amounts. Remove duplicate amounts and amounts of zero or less.",
+    "backtest.error.experiment.capacity.base_not_run":
+      "A capacity check needs a backtest result with these settings. Run one backtest with these settings first.",
+    "backtest.error.experiment.not_found": "The experiment was not found. Open it again from the experiment list.",
+    "backtest.error.experiment.trial.not_found": "The experiment has no such trial. Open the experiment again.",
+    "backtest.error.experiment.trial.not_retryable":
+      "Only a failed or cancelled trial can run again, and a cancelled experiment does not run again.",
+    "backtest.error.experiment.selection.not_completed":
+      "Only a completed trial can be chosen as a candidate. Choose it after the trial finishes.",
+    "backtest.error.experiment.selection.not_finished":
+      "A candidate can be chosen only after every trial of the experiment has finished. Wait for the experiment to finish or cancel it.",
+    "backtest.error.experiment.kind.mismatch":
+      "This result does not exist for this kind of experiment. Walk-forward and candidate selection belong to a parameter search, capacity results to a capacity check.",
+    "backtest.error.experiment.cancel.completed":
+      "The experiment has already completed, so it was not cancelled. Its results are kept.",
+    "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
+    "trace.error.trace.request.invalid": "The trace request is invalid. See the server reason for the field.",
     "trace.error.trace.engine.incompatible":
       "The selected engine cannot trace this strategy. Choose another execution core.",
     "trace.error.trace.capability.unsupported":
-      "This strategy uses a capability tracing does not support yet: {detail}",
+      "This strategy uses a capability tracing does not support yet. See the server reason for which one.",
     "trace.error.trace.strategy.stale":
       "The edited document no longer matches the stored revision. Save it or reopen the stored revision.",
     "trace.error.trace.strategy.not_found": "The stored revision to trace was not found.",
     "trace.error.trace.cancelled": "The trace was cancelled.",
+    "trace.error.portfolio.data.unavailable":
+      "The data source could not serve observations for this universe and period, so the trace cannot run. Check the universe and period in the run settings.",
+    "trace.error.portfolio.raw_observation.invalid":
+      "The data adapter returned observations that violate its contract, so the trace stopped. This is a data-source problem; notify the operator.",
+    "trace.error.request": "The server could not process the trace request. Try again shortly.",
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
     "ide.meta.specHash": "spec hash",
@@ -2896,6 +3918,37 @@ export const messages = {
     "history.strategies.latest": "Latest revision",
     "history.strategies.updated": "Last saved",
     "history.strategies.hash": "Spec hash",
+    "history.strategies.history": "Strategy history",
+    "history.revisions.tab": "Revisions",
+    "history.trials.tab": "Trial ledger",
+    "history.trials.loading": "Loading the trial ledger.",
+    "history.trials.error": "The trial ledger could not be loaded.",
+    "history.trials.empty": "No backtest has run in this lineage yet.",
+    "history.trials.count": "Lineage trial count: {count}",
+    "history.trials.mergedInto":
+      "This strategy's trials were merged into the {lineage} lineage, so that lineage's ledger is shown.",
+    "history.trials.caption": "Trial ledger",
+    "history.trials.trial": "Trial",
+    "history.trials.runs": "Runs",
+    "history.trials.role.counted": "Counted",
+    "history.trials.role.recheck": "Recheck",
+    "history.trials.role.pending": "Waiting for result",
+    "history.trials.role.no_result": "Not counted",
+    "history.trials.blocked": "Request refused for overlapping the sealed window · start {start}",
+    "history.trials.merge": "Merge another lineage",
+    "history.trials.merge.title": "Merge another lineage",
+    "history.trials.merge.description":
+      "If you kept researching the same idea, merge so the trial count stays honest. The chosen strategy's trials join the {target} lineage and are counted together.",
+    "history.trials.merge.warning":
+      "Merging cannot be undone. There is no way to split a lineage or delete trials.",
+    "history.trials.merge.source": "Strategy to merge",
+    "history.trials.merge.choose": "Choose a strategy",
+    "history.trials.merge.noCandidates": "There is no other saved strategy to merge.",
+    "history.trials.merge.partial":
+      "Only {shown} of {total} saved strategies can be chosen.",
+    "history.trials.merge.cancel": "Cancel",
+    "history.trials.merge.confirm": "Merge",
+    "history.trials.merge.failed": "The lineages could not be merged.",
     "history.revisions.loading": "Loading revision history.",
     "history.revisions.error": "Revision history could not be loaded.",
     "history.revisions.empty": "There are no saved revisions.",
@@ -2911,11 +3964,14 @@ export const messages = {
     "history.revisions.close": "Collapse revisions",
     "history.backtests.title": "Backtest history",
     "history.backtests.description":
-      "Browse backtests from this server process and the exact strategy provenance each run used.",
+      "Browse every backtest you have run and the exact strategy provenance each used. History survives server restarts.",
     "history.backtests.error": "Backtest history could not be loaded.",
     "history.backtests.emptyTitle": "No backtest runs yet",
     "history.backtests.empty": "Run a strategy backtest to see it here.",
     "history.backtests.filteredEmpty": "No backtest used this strategy.",
+    "history.backtests.kindEmpty": "No backtest of this kind.",
+    "history.backtests.kind": "Kind",
+    "history.backtests.kindAll": "All",
     "history.backtests.caption": "Backtest run history",
     "history.backtests.pagination": "Backtest history pages",
     "history.backtests.filter": "Strategy ID",
@@ -2935,12 +3991,101 @@ export const messages = {
     "history.backtests.sourceUnavailable": "No source hash",
     "history.backtests.updated": "Last status",
     "history.backtests.open": "Open run",
+    "backtest.actions.experiment": "Create an experiment from this run",
+    "experiments.title": "Experiments",
+    "experiments.description": "Experiments run in the server queue and keep going when you close the page. Experiments share the concurrent run slots.",
+    "experiments.error": "The experiment list could not be loaded.",
+    "experiments.slots": "Run slots in use: {running} / {total}",
+    "experiments.emptyTitle": "No experiments yet",
+    "experiments.empty": "An experiment starts from a backtest of a saved strategy revision. Press “Create an experiment from this run” on a backtest result.",
+    "experiments.toBacktests": "Go to backtest history",
+    "experiments.caption": "Experiments",
+    "experiments.experiment": "Experiment",
+    "experiments.base": "Base strategy · revision",
+    "experiments.status": "Status",
+    "experiments.progress": "Progress",
+    "experiments.priority": "Priority",
+    "experiments.counts": "Completed {completed} / {total} · running {running} · failed {failed}",
+    "experiments.pause": "Pause",
+    "experiments.resume": "Resume",
+    "experiments.raisePriority": "Raise priority",
+    "experiments.cancel": "Cancel",
+    "experiments.cancelConfirm": "Confirm cancel",
+    "experiments.cancelKeep": "Keep it",
+    "experiments.again": "New experiment with the same settings",
+    "experiments.controlFailed": "The experiment could not be changed.",
+    "experiments.status.queued": "Queued",
+    "experiments.status.running": "Running",
+    "experiments.status.paused": "Paused",
+    "experiments.status.completed": "Completed",
+    "experiments.status.cancelled": "Cancelled",
+    "experiments.new.title": "New experiment",
+    "experiments.new.description": "Choose the parameters to explore and the validation split to see first how many combinations, windows and backtest runs it takes and how the lineage trial count changes.",
+    "experiments.new.noBase": "An experiment starts from a backtest run or a finished experiment.",
+    "experiments.new.baseFailed": "The experiment base could not be loaded.",
+    "experiments.new.space": "Search space",
+    "experiments.new.explore": "Explore",
+    "experiments.new.parameter": "Parameter",
+    "experiments.new.values": "Values (count)",
+    "experiments.new.split": "Validation — walk-forward",
+    "experiments.new.mode": "Window mode",
+    "experiments.new.mode.rolling": "Rolling",
+    "experiments.new.mode.anchored": "Anchored",
+    "experiments.new.trainYears": "Train (years)",
+    "experiments.new.testYears": "Test (years)",
+    "experiments.new.embargo": "Embargo (sessions)",
+    "experiments.new.rule": "Pick per window by",
+    "experiments.new.rule.neighbor_mean_sharpe_max": "Highest neighbour-mean Sharpe",
+    "experiments.new.rule.train_sharpe_max": "Highest training Sharpe",
+    "experiments.new.previewFailed": "Preview failed",
+    "experiments.new.createFailed": "Could not create the experiment",
+    "experiments.new.failed": "An experiment cannot be created with these settings.",
+    "experiments.new.summary": "Before you start",
+    "experiments.new.counts": "{combinations} combinations · {windows} windows · {runs} backtest runs · lineage trial count {before} → {after}",
+    "experiments.new.windows": "Windows",
+    "experiments.new.window": "Window",
+    "experiments.new.train": "Train",
+    "experiments.new.test": "Test",
+    "experiments.new.enqueue": "Add to queue",
+    "experiments.new.base":
+      "Base {strategy} · v{revision} · research period {start} to {end}",
+    "experiments.more": "Show more experiments",
+    "backtest.actions.keptByExperiment": "An experiment shares this run, so it keeps running. Cancel the experiment on the experiment screen to stop it.",
+    "experiments.detail.title": "Experiment {id}",
+    "experiments.detail.error": "The experiment could not be loaded.",
+    "experiments.detail.back": "Back to experiments",
+    "experiments.detail.trials": "Trials",
+    "experiments.detail.trial": "Trial",
+    "experiments.detail.run": "Run",
+    "experiments.detail.retry": "Run again",
+    "experiments.detail.retryFailed": "Could not run again",
+    "experiments.trial.queued": "Queued",
+    "experiments.trial.running": "Running",
+    "experiments.trial.completed": "Completed",
+    "experiments.trial.failed": "Failed",
+    "experiments.trial.cancelled": "Cancelled",
+    "experiments.trial.rejected": "The run request was refused.",
+    "experiments.walkForward.title": "Walk-forward result",
+    "experiments.walkForward.summary": "Out-of-sample Sharpe of the stitched test windows (per session) {sharpe} · retention {retention}",
+    "experiments.walkForward.pick": "Picked cell",
+    "experiments.walkForward.trainScore": "Training score (session Sharpe)",
+    "experiments.walkForward.test": "Test run",
+    "experiments.gap.legacy_design": "This experiment predates walk-forward, so there is no stitched result.",
+    "experiments.gap.cancelled": "The experiment was cancelled before every test window ran.",
+    "experiments.gap.result_unreadable": "A test run's result file cannot be read, so the windows were not stitched.",
+    "experiments.gap.test_failed": "A test window failed, so the summary is empty. Stitching only the rest would lean optimistic.",
+    "experiments.gap.no_cell": "A window had no trained cell to pick, so the summary is empty.",
+    "experiments.gap.pending": "Some windows are still running.",
+    "experiments.notice.done": "Experiment {id} finished",
+    "experiments.notice.candidates": "View candidates",
+    "experiments.notice.dismiss": "Dismiss",
     "problems.compileUnavailable":
-      "The validation server could not be reached, so this text is unverified. Try again shortly. ({detail})",
+      "The validation server could not be reached, so this text is unverified. Try again shortly.",
     "form.panel.label": "Form editing",
     "form.panel.notice": "Applied to the YAML source directly · undoable",
     "form.panel.enabled": "Editable",
     "form.panel.loading": "Loading the runtime schema.",
+    "form.panel.firstParsePending": "Reading the document.",
     "form.panel.staleBadge": "STALE",
     "form.panel.stale":
       "The current text has a syntax error, so the last valid parse is shown. Fix the source to unlock the controls.",
@@ -2956,7 +4101,7 @@ export const messages = {
       "Not in the document · entering a value creates the section",
     "form.list.count": "{count} items",
     "form.list.add": "Add item",
-    "form.list.addFromCatalog": "Add from catalog",
+    "form.list.addExample": "Add an example factor",
     "form.list.kind": "Kind",
     "form.list.remove": "Remove",
     "form.list.empty": "No items",
@@ -2987,6 +4132,8 @@ export const messages = {
     "form.invalid.duplicateNodeId": "This node_id already exists in the graph",
     "form.invalid.emptyNodeId": "node_id cannot be empty",
     "form.invalid.missingNode": "The node was not found in the document",
+    "form.invalid.duplicateIdentity": "This name is already used in the list",
+    "form.invalid.emptyIdentity": "The name cannot be empty",
     "form.feedback.applied": "{label} applied",
     "form.feedback.failed": "{label} not applied",
     "form.feedback.parse":
@@ -3160,7 +4307,7 @@ export const messages = {
     "assistant.error.document_ref_invalid":
       "A conversation cannot be created for this document. Save the strategy or reopen the draft first.",
     "assistant.error.result_unavailable":
-      "This backtest result can no longer be read. Results are lost when the server restarts. Run the backtest again and ask again.",
+      "This backtest result can no longer be read. Its result file may be missing or damaged. Run the backtest again and ask again.",
     "assistant.error.turn_context_mismatch":
       "The message does not fit the kind of conversation on this screen. Reload the screen and send it again.",
   } satisfies Record<MessageKey, string>,
@@ -3168,11 +4315,29 @@ export const messages = {
 
 export const t = (key: MessageKey): string => messages.ko[key];
 
+/** `{name}` 자리표시자를 값으로 채운 문장. */
+export const tFill = (
+  key: MessageKey,
+  values: Readonly<Record<string, unknown>>,
+): string =>
+  Object.entries(values).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+    t(key),
+  );
+
 /** Resolve a backend-provided description key without pretending an unknown key is translated. */
 export const tOptional = (key: string): string | null =>
   Object.prototype.hasOwnProperty.call(messages.ko, key)
     ? messages.ko[key as MessageKey]
     : null;
+
+/**
+ * backend 어휘(enum) 값 하나의 로케일 문구. 부르는 쪽이 키를 `<접두>.${값}` 으로 만들어 `MessageKey` 로
+ * 넘기므로, 생성 SDK 유니온에 값이 늘었는데 문구가 없으면 typecheck 가 깨진다(#293·#350). 생성 SDK 보다
+ * 새 값이 실려 오면 원문의 밑줄만 공백으로 바꿔 보인다 — 칸이 비지 않게 한다.
+ */
+export const tCode = (key: MessageKey, code: string): string =>
+  tOptional(key) ?? code.replaceAll("_", " ");
 
 /**
  * backend가 발행하는 설명 키(`x-description-key`, 연산자 카탈로그의 `description_key`)는 **stem**

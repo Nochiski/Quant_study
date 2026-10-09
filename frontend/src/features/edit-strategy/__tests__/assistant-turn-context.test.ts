@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { RunEnvironment } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import {
   assistantDocumentRef,
@@ -13,7 +14,12 @@ import {
   type DocumentState,
 } from "../model/document-state";
 
-const SOURCE = 'schema_version: "1.1"\ntitle: "t"\n';
+const SOURCE = 'schema_version: "1.2"\ntitle: "t"\n';
+const ENVIRONMENT: RunEnvironment = {
+  start: "2021-01-04",
+  end: "2021-12-30",
+  universe_id: "krx.common-stock",
+};
 
 const parsed = (state: DocumentState): DocumentState =>
   documentReducer(state, {
@@ -40,7 +46,7 @@ describe("assistantTurnContext", () => {
     const state = parsed(
       documentReducer(initialDocumentState("yaml", SOURCE), {
         type: "edit",
-        source: 'schema_version: "1.1"\ntitle: "edited"\n',
+        source: 'schema_version: "1.2"\ntitle: "edited"\n',
       }),
     );
     const compiled = documentReducer(state, {
@@ -54,31 +60,29 @@ describe("assistantTurnContext", () => {
         sourceHash: "h",
         diagnostics: [
           {
-            code: "structure.missing_key",
+            code: "structure.missing_field",
             kind: "structural",
             severity: "error",
-            pointer: "/data",
-            message: "data 섹션이 필요합니다.",
+            pointer: "/title",
+            message: "title 필드가 필요합니다.",
             range: null,
           },
         ],
       },
     });
 
-    const turnContext = assistantTurnContext(compiled, {
-      start: "2021-01-01",
-    });
+    const turnContext = assistantTurnContext(compiled, ENVIRONMENT);
     expect(turnContext).toEqual({
-      source_text: 'schema_version: "1.1"\ntitle: "edited"\n',
+      source_text: 'schema_version: "1.2"\ntitle: "edited"\n',
       source_format: "yaml",
-      diagnostics: ["[error] /data: data 섹션이 필요합니다."],
-      environment: { start: "2021-01-01" },
+      diagnostics: ["[error] /title: title 필드가 필요합니다."],
+      environment: ENVIRONMENT,
     });
   });
 
   it("편집기가 reducer보다 앞서 있으면 편집기 텍스트를 싣고 진단은 비운다", () => {
     const state = parsed(initialDocumentState("yaml", SOURCE));
-    const live = 'schema_version: "1.1"\ntitle: "방금 친 제목"\n';
+    const live = 'schema_version: "1.2"\ntitle: "방금 친 제목"\n';
     const withDiagnostics = documentReducer(state, {
       type: "compiled",
       version: state.sourceVersion,
@@ -90,11 +94,11 @@ describe("assistantTurnContext", () => {
         sourceHash: "h",
         diagnostics: [
           {
-            code: "structure.missing_key",
+            code: "structure.missing_field",
             kind: "structural",
             severity: "error",
-            pointer: "/data",
-            message: "data 섹션이 필요합니다.",
+            pointer: "/title",
+            message: "title 필드가 필요합니다.",
             range: null,
           },
         ],
@@ -118,14 +122,14 @@ describe("assistantTurnContext", () => {
         source: SOURCE,
         format: "yaml",
       }).diagnostics,
-    ).toEqual(["[error] /data: data 섹션이 필요합니다."]);
+    ).toEqual(["[error] /title: title 필드가 필요합니다."]);
   });
 
   it("텍스트가 진단보다 앞서 있으면 진단을 싣지 않는다", () => {
     const state = parsed(initialDocumentState("yaml", SOURCE));
     const typing = documentReducer(state, {
       type: "edit",
-      source: 'schema_version: "1.1"\ntitle: "typing"\n',
+      source: 'schema_version: "1.2"\ntitle: "typing"\n',
     });
     const turnContext = assistantTurnContext(typing);
     expect(turnContext.diagnostics).toEqual([]);
@@ -136,20 +140,19 @@ describe("assistantTurnContext", () => {
 describe("useAssistantTurnContext", () => {
   it("호출 시점의 편집기 텍스트를 싣는다 — reducer가 아직 따라오지 못했어도", () => {
     // 페이지 배선을 그대로 흉내 낸다: reducer는 SOURCE에 머물러 있고 편집기는 이미 앞서 있다.
-    let live = 'schema_version: "1.1"\ntitle: "편집기가 먼저"\n';
+    let live = 'schema_version: "1.2"\ntitle: "편집기가 먼저"\n';
     const readSource = vi.fn(() => live);
     const { result, rerender } = renderHook(
-      ({ state }) =>
-        useAssistantTurnContext(state, readSource, { start: "2021-01-01" }),
+      ({ state }) => useAssistantTurnContext(state, readSource, ENVIRONMENT),
       { initialProps: { state: parsed(initialDocumentState("yaml", SOURCE)) } },
     );
     expect(result.current().source_text).toBe(live);
     // 손잡이를 다시 부르면 값만 따라온다.
-    live = 'schema_version: "1.1"\ntitle: "그 다음 글자"\n';
+    live = 'schema_version: "1.2"\ntitle: "그 다음 글자"\n';
     const later = parsed(
       documentReducer(initialDocumentState("yaml", SOURCE), {
         type: "edit",
-        source: 'schema_version: "1.1"\ntitle: "중간"\n',
+        source: 'schema_version: "1.2"\ntitle: "중간"\n',
       }),
     );
     act(() => rerender({ state: later }));
@@ -157,7 +160,7 @@ describe("useAssistantTurnContext", () => {
       source_text: live,
       source_format: "yaml",
       diagnostics: [],
-      environment: { start: "2021-01-01" },
+      environment: ENVIRONMENT,
     });
   });
 

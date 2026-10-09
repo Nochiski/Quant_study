@@ -25,16 +25,14 @@ import { schemaFacts, type JsonSchema } from "../model/schema-navigator";
 import { factorGraphPointer } from "../model/use-execution-plans";
 import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
+import { NO_FOCUS, type CommitPlanner } from "../model/use-field-editing";
 import {
   DiagnosticNotes,
   FormFieldsEditor,
-  type CommitPlanner,
   type FormCatalogs,
 } from "./strategy-form-panel";
 import { OperatorPalette } from "./operator-palette";
 import { TransactionFeedbackNote } from "./transaction-feedback";
-
-const NO_FOCUS = { focusEditor: false } as const;
 
 /** 삭제 거부 안내의 참조 pointer가 이 팩터의 몇 번째 노드를 가리키는가. 그래프 출력이면 매치가 없다. */
 const NODE_INDEX = /\/graph\/nodes\/(\d+)(?:\/|$)/u;
@@ -58,7 +56,7 @@ type FactorGraphEditorProps = {
   /** plan projection이 없을 때는 팩터 선택도 편집기가 맡는다. */
   factorSelect: boolean;
   /** "Form에서 열기": 이 팩터의 Form 항목으로 간다(P5-03 왕복, pointer `/factors/N`). */
-  onOpenForm?: (pointer: string) => void;
+  onOpenSource?: (pointer: string) => void;
 };
 
 /**
@@ -79,7 +77,7 @@ export const FactorGraphEditor = ({
   revealSignal,
   onSelectPointer,
   factorSelect,
-  onOpenForm,
+  onOpenSource,
 }: FactorGraphEditorProps) => {
   const container = useRevealSelection<HTMLElement>(
     selectedPointer,
@@ -256,14 +254,14 @@ export const FactorGraphEditor = ({
           ) : (
             <Badge tone="ok">{t("graph.editable")}</Badge>
           )}
-          {onOpenForm !== undefined ? (
+          {onOpenSource !== undefined ? (
             <Button
               size="small"
               tone="ghost"
-              onClick={() => onOpenForm(factorPointer)}
-              aria-label={`${activeFactorId} · ${t("graph.openForm")}`}
+              onClick={() => onOpenSource(factorPointer)}
+              aria-label={`${activeFactorId} · ${t("graph.openSource")}`}
             >
-              {t("graph.openForm")}
+              {t("graph.openSource")}
             </Button>
           ) : null}
         </div>

@@ -44,19 +44,11 @@ def main() -> int:
     result = BacktestEngine(config).run(strategy, feed)
 
     first, last = result.snapshots[0], result.snapshots[-1]
-    metrics = result.metrics
     print(f"run_id           {result.run_id}")
     print(f"sessions         {len(result.snapshots)}  ({first.ts.date()} → {last.ts.date()})")
     print(f"initial equity   {first.equity:,.0f} KRW")
     print(f"final equity     {last.equity:,.0f} KRW")
     print(f"orders / fills   {len(result.orders)} / {len(result.fills)}")
-    print(f"total return     {metrics.total_return:+.2%}")
-    print(f"cagr             {metrics.cagr:+.2%}")
-    print(f"volatility       {metrics.volatility:.2%}")
-    sharpe_text = f"{metrics.sharpe:.2f}" if metrics.sharpe is not None else "n/a"
-    print(f"sharpe           {sharpe_text}")
-    print(f"max drawdown     {metrics.max_drawdown:.2%}")
-    print(f"turnover         {metrics.turnover:.2f}x")
     return 0
 
 

@@ -109,24 +109,24 @@ const renderEditor = (
   source: string,
   transactions: SourceTransactions,
   selectedPointer?: string,
-  onOpenForm?: (pointer: string) => void,
+  onOpenSource?: (pointer: string) => void,
   operators: OperatorCatalogState = CATALOG,
 ) => {
   const onSelectPointer = vi.fn();
   render(
     <FactorGraphPanel
       state={{ status: "blocked", reason: "invalid" }}
+      schema={SCHEMA}
       diagnostics={[]}
       selectedPointer={selectedPointer}
       onSelectPointer={onSelectPointer}
       onOpenSource={vi.fn()}
       editing={{
         tree: treeOf(source),
-        schema: SCHEMA,
         transactions,
-        catalogs: { equityFields: null, factors: null },
+        catalogs: { equityFields: null },
         operators,
-        onOpenForm,
+        onOpenSource,
       }}
     />,
   );
@@ -206,19 +206,12 @@ describe("FactorGraphEditor (P5-02)", () => {
       "graph",
       { focusEditor: false },
     );
-    // 그래프 설정: output_node_id(reference)·missing_policy(enum).
+    // 그래프 설정: output_node_id(reference). missing_policy 는 1.2 에서 실행 설정으로 갔다.
     const settings = within(editor().getByRole("group", { name: "그래프 설정" }));
     await user.selectOptions(settings.getByRole("combobox", { name: /\boutput_node_id/ }), "px");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/factors/0/graph/output_node_id", value: "px" },
       "output_node_id",
-      "graph",
-      { focusEditor: false },
-    );
-    await user.selectOptions(settings.getByRole("combobox", { name: /\bmissing_policy/ }), "zero");
-    expect(transactions.apply).toHaveBeenLastCalledWith(
-      { kind: "replace-scalar", pointer: "/factors/0/graph/missing_policy", value: "zero" },
-      "missing_policy",
       "graph",
       { focusEditor: false },
     );
@@ -324,10 +317,10 @@ describe("FactorGraphEditor (P5-02)", () => {
 
   it("opens the factor in the Form from the Graph editor (P5-03 round trip)", async () => {
     const user = userEvent.setup();
-    const onOpenForm = vi.fn();
-    renderEditor(WITH_SPARE, stub(), "/factors/0/graph", onOpenForm);
-    await user.click(editor().getByRole("button", { name: "momentum · Form에서 열기" }));
-    expect(onOpenForm).toHaveBeenCalledWith("/factors/0");
+    const onOpenSource = vi.fn();
+    renderEditor(WITH_SPARE, stub(), "/factors/0/graph", onOpenSource);
+    await user.click(editor().getByRole("button", { name: "momentum · 소스에서 열기" }));
+    expect(onOpenSource).toHaveBeenCalledWith("/factors/0");
   });
 
   it("locks the editor with the hook's reason and shows only graph-owned feedback", () => {
@@ -459,14 +452,14 @@ describe("연산자 팔레트와 조용하지 않은 실패 (P1-04)", () => {
     render(
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
+        schema={RECURSIVE_SCHEMA}
         diagnostics={[]}
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
         editing={{
           tree: treeOf(RECURSIVE_SOURCE),
-          schema: RECURSIVE_SCHEMA,
           transactions,
-          catalogs: { equityFields: null, factors: null },
+          catalogs: { equityFields: null },
           operators: { status: "ready", definitions: [] },
         }}
       />,
@@ -496,15 +489,15 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
     render(
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
+        schema={SCHEMA}
         diagnostics={[NODE_DIAGNOSTIC]}
         selectedPointer="/factors/0/graph/nodes/1"
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
         editing={{
           tree: treeOf(VERBOSE),
-          schema: SCHEMA,
           transactions: stub(),
-          catalogs: { equityFields: null, factors: null },
+          catalogs: { equityFields: null },
           operators: CATALOG,
         }}
       />,

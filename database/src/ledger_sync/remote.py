@@ -61,7 +61,17 @@ class SftpEndpoint:
 
     @property
     def label(self) -> str:
-        return f"{self.user}@{self.host}:{self.port} key={self.key_path}"
+        # 주소·계정은 값 대신 설정 여부만 적는다 — 오류 문장이 로그·`last_run.json`·공개 이슈로
+        # 옮겨져도 서버가 드러나지 않게 한다(#259 리뷰 P3-3). 포트·키 경로는 로컬 진단에 필요해 남긴다.
+        return (f"host={'set' if self.host else 'unset'} user={'set' if self.user else 'unset'} "
+                f"port={self.port} key={self.key_path}")
+
+    def redact(self, text: str) -> str:
+        """paramiko·소켓 오류 문장에 섞인 주소·계정 값을 자리표시로 바꾼다."""
+        for value, placeholder in ((self.host, "<host>"), (self.user, "<user>")):
+            if value:
+                text = text.replace(value, placeholder)
+        return text
 
 
 class RemoteConnectError(RuntimeError):
@@ -150,24 +160,27 @@ class SftpRemote:
                            banner_timeout=self._timeout, auth_timeout=self._timeout)
         except paramiko.BadHostKeyException as error:
             raise RemoteAuthError(
-                f"host key mismatch — {ep.label} known_hosts={known_hosts} error={error!r}"
+                f"host key mismatch — {ep.label} known_hosts={known_hosts} "
+                f"error={ep.redact(repr(error))}"
             ) from error
         except paramiko.AuthenticationException as error:
             raise RemoteAuthError(
-                f"authentication failed — {ep.label} error={error!r} "
+                f"authentication failed — {ep.label} error={ep.redact(repr(error))} "
                 f"(is the private key the one registered on the server?)"
             ) from error
         except paramiko.SSHException as error:
             unknown_host = "not found in known_hosts" in str(error)
             if unknown_host:
                 raise RemoteAuthError(
-                    f"unknown host key — {ep.label} error={error!r} (pass --accept-new once)"
+                    f"unknown host key — {ep.label} error={ep.redact(repr(error))} "
+                    f"(pass --accept-new once)"
                 ) from error
             raise RemoteConnectError(
-                f"ssh connect failed — {ep.label} error={error!r}"
+                f"ssh connect failed — {ep.label} error={ep.redact(repr(error))}"
             ) from error
         except OSError as error:
-            raise RemoteConnectError(f"socket error — {ep.label} error={error!r}") from error
+            raise RemoteConnectError(
+                f"socket error — {ep.label} error={ep.redact(repr(error))}") from error
         sftp = client.open_sftp()
         channel = sftp.get_channel()
         if channel is not None:
@@ -206,7 +219,8 @@ class SftpRemote:
             if attempt < self._retries:
                 time.sleep(2 ** (attempt - 1))
         raise RemoteTransferError(
-            f"{what} failed after {self._retries} attempts — {self._endpoint.label} error={last!r}"
+            f"{what} failed after {self._retries} attempts — {self._endpoint.label} "
+            f"error={self._endpoint.redact(repr(last))}"
         )
 
     # ── RemoteFS ──────────────────────────────────────────────────────────

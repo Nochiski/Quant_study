@@ -1,4 +1,5 @@
 import type {
+  RunEnvironment,
   StrategyTraceRequest,
   StrategyTraceResponse,
 } from "../../../shared/api";
@@ -30,15 +31,22 @@ export type StrategyDebuggerContext = {
   specHash: string;
   expectedSnapshotId: string;
   expectedRegistryVersion: string;
-  start: string;
-  end: string;
+  /**
+   * 추적이 놓일 실행 설정(schema 1.2 부터 전략 문서 밖, P3-02). 실행 요청과 같은 값을 trace 요청에
+   * 싣는다 — 없으면 backend 가 실행 설정이 없다고 거절한다. 응답 날짜 범위 가드와 날짜 입력 범위도 이
+   * 값의 기간(`start`·`end`)을 읽는다.
+   */
+  environment: RunEnvironment;
   factors: StrategyDebuggerFactor[];
 };
 
+/** `environment` 는 실행 설정 패널의 기간·유니버스가 아직 정해지지 않았다는 뜻이다. */
 export type StrategyDebuggerUnavailableReason =
-  "document" | "preparing" | "no-factors" | "execution-plan";
+  "document" | "preparing" | "no-factors" | "execution-plan" | "environment";
 
 export type StrategyTraceSelection = {
+  /** 요약은 첫 팩터의 지문으로 검증하며 종목별 추적을 요청하지 않는다. */
+  summaryOnly?: boolean;
   asOf: string;
   security: string;
   factorId: string;
@@ -49,7 +57,13 @@ export type StrategyTraceSelection = {
 export type PreparedStrategyTrace =
   | {
       kind: "blocked";
-      reason: "document" | "date" | "security" | "factor" | "node" | "holdings";
+      /**
+       * `unavailable` 은 추적 문맥이 없다는 뜻이다. 왜 없는지(문서·준비 중·팩터 없음·실행 계획·실행 설정)는
+       * 상위 `StrategyDebuggerUnavailableReason` 이 한 문장으로 말하므로 여기서 사유를 다시 짓지 않는다
+       * (이슈 #260: 실행 설정만 비었는데 "실행 가능한 문서가 없다"가 함께 떴다).
+       */
+      reason:
+        "unavailable" | "date" | "security" | "factor" | "node" | "holdings";
     }
   | {
       kind: "ready";
@@ -132,28 +146,41 @@ export const prepareStrategyTrace = (
   context: StrategyDebuggerContext | null,
   selection: StrategyTraceSelection,
 ): PreparedStrategyTrace => {
-  if (context === null) return { kind: "blocked", reason: "document" };
+  if (context === null) return { kind: "blocked", reason: "unavailable" };
   if (selection.asOf !== "" && !validIsoDate(selection.asOf))
     return { kind: "blocked", reason: "date" };
-  const securityIds = parseSecurityIds(selection.security);
-  if (securityIds.length === 0 || securityIds.length > 100)
+  const securityIds = selection.summaryOnly
+    ? []
+    : parseSecurityIds(selection.security);
+  if (
+    (!selection.summaryOnly && securityIds.length === 0) ||
+    securityIds.length > 100
+  )
     return { kind: "blocked", reason: "security" };
-  const factor = context.factors.find(
-    (candidate) => candidate.factorId === selection.factorId,
-  );
+  const factor = selection.summaryOnly
+    ? context.factors[0]
+    : context.factors.find(
+        (candidate) => candidate.factorId === selection.factorId,
+      );
   if (factor === undefined) return { kind: "blocked", reason: "factor" };
-  if (!factor.nodes.some((node) => node.nodeId === selection.nodeId))
+  if (
+    !selection.summaryOnly &&
+    !factor.nodes.some((node) => node.nodeId === selection.nodeId)
+  )
     return { kind: "blocked", reason: "node" };
   const startingHoldings = parseStartingHoldings(selection.startingHoldings);
   if (startingHoldings.kind === "invalid")
     return { kind: "blocked", reason: "holdings" };
 
-  const nodeIds = factor.nodes.map((node) => node.nodeId);
+  const nodeIds = selection.summaryOnly
+    ? []
+    : factor.nodes.map((node) => node.nodeId);
   const commonRequest: Omit<
     StrategyTraceRequest,
     "node_ids" | "include_raw" | "offset" | "limit"
   > = {
     strategy_source: context.strategySource,
+    environment: context.environment,
     security_ids: securityIds,
     factor_id: factor.factorId,
     ...(selection.asOf === "" ? {} : { as_of: selection.asOf }),
@@ -162,6 +189,14 @@ export const prepareStrategyTrace = (
       : {}),
   };
   const linkedRequests: StrategyTraceRequest[] = [];
+  if (selection.summaryOnly)
+    linkedRequests.push({
+      ...commonRequest,
+      node_ids: [],
+      include_raw: false,
+      offset: 0,
+      limit: 1,
+    });
   for (
     let index = 0;
     index < nodeIds.length;
@@ -184,13 +219,15 @@ export const prepareStrategyTrace = (
   }
   const request = linkedRequests[0];
   if (request === undefined) return { kind: "blocked", reason: "node" };
-  const selectedRequest: StrategyTraceRequest = {
-    ...commonRequest,
-    node_ids: [selection.nodeId],
-    include_raw: false,
-    offset: 0,
-    limit: securityIds.length,
-  };
+  const selectedRequest: StrategyTraceRequest = selection.summaryOnly
+    ? request
+    : {
+        ...commonRequest,
+        node_ids: [selection.nodeId],
+        include_raw: false,
+        offset: 0,
+        limit: securityIds.length,
+      };
   const sourceOwner =
     request.strategy_source.kind === "saved_revision"
       ? [
@@ -205,6 +242,9 @@ export const prepareStrategyTrace = (
         ];
   return {
     kind: "ready",
+    // 키는 요청에 싣는 값 전부(inline 원문은 그 신원 `sourceOwner` 로 줄인다)와 backend 지문이다. 요청
+    // 칸을 골라 다시 적으면 요청에 새 칸이 생길 때 키에서 빠진다 — 실행 설정이 그렇게 빠져, 설정을 바꿔도
+    // 옛 추적이 새 설정의 결과로 보였다(#351).
     ownerKey: JSON.stringify([
       context.documentEpoch,
       context.sourceVersion,
@@ -212,13 +252,9 @@ export const prepareStrategyTrace = (
       context.expectedSnapshotId,
       context.expectedRegistryVersion,
       factor.expectedPlanHash,
-      sourceOwner,
-      request.as_of,
-      request.security_ids,
-      request.factor_id,
+      { ...commonRequest, strategy_source: sourceOwner },
       nodeIds,
       selection.nodeId,
-      request.starting_holdings ?? null,
       STRATEGY_TRACE_CLIENT_BUDGET,
     ]),
     request,
@@ -230,8 +266,8 @@ export const prepareStrategyTrace = (
       registryVersion: context.expectedRegistryVersion,
       planHash: factor.expectedPlanHash,
       sourceVersion: context.sourceVersion,
-      start: context.start,
-      end: context.end,
+      start: context.environment.start,
+      end: context.environment.end,
     },
   };
 };
@@ -333,10 +369,11 @@ const responseDateMatches = (
   request: StrategyTraceRequest,
   response: StrategyTraceResponse,
 ): boolean => {
+  const { start, end } = prepared.expected;
   if (
     !validIsoDate(response.as_of) ||
-    response.as_of < prepared.expected.start ||
-    response.as_of > prepared.expected.end ||
+    response.as_of < start ||
+    response.as_of > end ||
     (request.as_of != null && response.as_of !== request.as_of)
   )
     return false;
@@ -345,7 +382,7 @@ const responseDateMatches = (
     response.target.signal_as_of === response.as_of &&
     validIsoDate(response.target.execution_on) &&
     response.target.execution_on > response.as_of &&
-    response.target.execution_on <= prepared.expected.end
+    response.target.execution_on <= end
   );
 };
 
@@ -376,6 +413,9 @@ export const responseMatchesStrategyTrace = (
     response.plan_hash === prepared.expected.planHash &&
     response.factor_id === request.factor_id &&
     responseDateMatches(prepared, request, response) &&
+    (response.summary == null ||
+      (response.summary.signal_as_of === response.as_of &&
+        response.summary.execution_on === response.target?.execution_on)) &&
     sameSourceProvenance(request, response) &&
     response.trace.offset === (request.offset ?? 0) &&
     response.trace.limit === (request.limit ?? 200) &&
@@ -389,7 +429,8 @@ export const responseMatchesStrategyTrace = (
     ) &&
     response.raw.every(
       (row) =>
-        row.as_of === response.as_of && requestedSecurities.has(row.security_id),
+        row.as_of === response.as_of &&
+        requestedSecurities.has(row.security_id),
     ) &&
     (response.target === null ||
       (response.target.signal_as_of === response.as_of &&

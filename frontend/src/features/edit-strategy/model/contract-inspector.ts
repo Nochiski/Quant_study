@@ -5,12 +5,15 @@
  * module joins those responses to one selected RFC 6901 path; it never re-declares constraints,
  * allowed values, field definitions or factor definitions in the frontend.
  */
-import type {
-  FactorCatalog,
-  FieldContract,
-  ResearchCatalog,
-  StrategyDocumentContractResponse,
-  StrategyDocumentSchema,
+import {
+  projectApplicability,
+  type DefaultResolver,
+  type FactorCatalog,
+  type FieldApplicability,
+  type FieldContract,
+  type ResearchCatalog,
+  type StrategyDocumentContractResponse,
+  type StrategyDocumentSchema,
 } from "../../../shared/api";
 import {
   escapePointerSegment,
@@ -18,12 +21,9 @@ import {
   valueAtPointer,
 } from "../../../shared/lib/yaml12";
 import {
-  projectApplicability,
-  type DefaultResolver,
-  type FieldApplicability,
-} from "./field-applicability";
-import {
   discriminatorAt,
+  displayValue,
+  formatContractValue,
   schemaAt,
   schemaFacts,
   type Bound,
@@ -118,27 +118,6 @@ export type ContractCatalogProjection =
       snapshot: ResearchCatalog["snapshot"];
     }
   | {
-      kind: "factor";
-      status:
-        | "loading"
-        | "error"
-        | "mismatch"
-        | "unselected"
-        | "not-loaded"
-        | "not-found";
-      id: string | null;
-      expectedVersion: string;
-      actualVersion: string | null;
-    }
-  | {
-      kind: "factor";
-      status: "ready";
-      id: string;
-      expectedVersion: string;
-      actualVersion: string;
-      factor: FactorCatalog["factors"][number];
-    }
-  | {
       kind: "other";
       status: "unsupported";
       namespace: string;
@@ -192,29 +171,6 @@ export const contractFor = (
   return (
     rows.find((row) => row.branch === branch) ?? rows.find((row) => !row.branch)
   );
-};
-
-export const formatContractValue = (value: unknown): string | null => {
-  if (value === undefined) return null;
-  if (typeof value === "string") return value;
-  const encoded = JSON.stringify(value);
-  return encoded === undefined ? String(value) : encoded;
-};
-
-const stableNumber = (value: number): string =>
-  Number(value.toPrecision(12)).toString();
-
-const displayValue = (
-  value: unknown,
-  unit: string | null,
-  displayUnit: string | null,
-): string | null => {
-  if (displayUnit === null) return null;
-  if (typeof value === "number" && unit === "ratio" && displayUnit === "%")
-    return `${stableNumber(value * 100)}%`;
-  const formatted = formatContractValue(value);
-  if (formatted === null) return null;
-  return displayUnit === "%" ? `${formatted}%` : `${formatted} ${displayUnit}`;
 };
 
 /** typed contract 행이 우선하고, 같은 사실의 runtime schema 값은 그 다음이다. */
@@ -452,64 +408,6 @@ const catalogProjection = (
         }
       : {
           kind: "equity-field",
-          status: "not-found",
-          id,
-          expectedVersion,
-          actualVersion,
-        };
-  }
-  if (field.catalog === "factor") {
-    const expectedVersion = source.contract!.contract.factor_registry_version;
-    const actualVersion = source.factorCatalog?.registry_version ?? null;
-    if (source.state.factorCatalog !== "ready" || source.factorCatalog === null)
-      return {
-        kind: "factor",
-        status:
-          source.state.factorCatalog === "ready"
-            ? "error"
-            : source.state.factorCatalog,
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    if (actualVersion !== expectedVersion)
-      return {
-        kind: "factor",
-        status: "mismatch",
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    if (id === null)
-      return {
-        kind: "factor",
-        status: "unselected",
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    const match = source.factorCatalog!.factors.find(
-      (candidate) => candidate.factor_id === id,
-    );
-    if (!match && source.factorCatalog!.page_count > 1)
-      return {
-        kind: "factor",
-        status: "not-loaded",
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    return match
-      ? {
-          kind: "factor",
-          status: "ready",
-          id,
-          expectedVersion,
-          actualVersion,
-          factor: match,
-        }
-      : {
-          kind: "factor",
           status: "not-found",
           id,
           expectedVersion,

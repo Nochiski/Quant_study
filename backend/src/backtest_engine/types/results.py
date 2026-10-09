@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 
 from backtest_engine.types.events import FillEvent, OrderEvent
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -14,10 +16,13 @@ class RunConfig:
     """한 번의 실행을 재현하는 데 필요한 엔진 설정.
 
     fee_bps: 체결 금액 대비 수수료 (basis point, 매수·매도 동일 적용).
-    annualization_days: 연율화 계수 (XKRX 거래일 기준 252). 비용 일할에도 쓴다.
+    annualization_days: 연 단위 비용(숏 차입·신용 이자)을 세션으로 나누는 연간 세션 수 (XKRX 252).
     short_borrow_bps_annual: 숏 평가액 대비 연 차입 비용 (bp). 세션마다 /annualization_days.
     margin_interest_bps_annual: 음수 현금 대비 연 이자 (bp). MARGIN 선언 전략에만 의미 있다.
     max_gross_leverage: 총노출/equity 상한. 1.0이면 현금 범위 매수(MARGIN 없음).
+    sell_tax_schedule: 매도 체결 금액 대비 거래세 일정 `(시작일, bp)`, 시작일 오름차순. 체결 세션
+        날짜 이하인 마지막 행의 세율을 쓰고, 그런 행이 없으면 세금이 없다. 세율의 출처(법정 세율표
+        등)는 호출자가 정한다.
     """
 
     run_id: str
@@ -27,6 +32,7 @@ class RunConfig:
     short_borrow_bps_annual: float = 0.0
     margin_interest_bps_annual: float = 0.0
     max_gross_leverage: float = 1.0
+    sell_tax_schedule: tuple[tuple[date, float], ...] = ()
 
     def __post_init__(self) -> None:
         if self.initial_cash <= 0:
@@ -51,25 +57,23 @@ class RunConfig:
                 f"annualization_days must be > 0 — run_id={self.run_id} "
                 f"annualization_days={self.annualization_days}"
             )
+        starts = [start for start, _bps in self.sell_tax_schedule]
+        if starts != sorted(set(starts)) or any(
+            not math.isfinite(bps) or bps < 0 for _start, bps in self.sell_tax_schedule
+        ):
+            raise ValueError(
+                "sell_tax_schedule must have strictly increasing start dates and finite bps >= 0 — "
+                f"run_id={self.run_id} sell_tax_schedule={self.sell_tax_schedule}"
+            )
 
-
-@dataclass(frozen=True)
-class PerformanceMetrics:
-    """실행 종료 후 equity curve와 fills에서 계산하는 성과 요약.
-
-    0으로 나눌 수 없는 지표는 0으로 위장하지 않고 None으로 표현한다.
-    max_drawdown은 음수 비율로 통일한다 (예: -0.12).
-    연율화 지표는 RunConfig.annualization_days 기준이다.
-    """
-
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe: float | None
-    sortino: float | None
-    max_drawdown: float
-    calmar: float | None
-    turnover: float
+    def sell_tax_rate(self, on: date) -> float:
+        """`on` 에 체결된 매도에 매길 거래세율(금액 대비 비율)."""
+        rate_bps = 0.0
+        for start, bps in self.sell_tax_schedule:
+            if start > on:
+                break
+            rate_bps = bps
+        return rate_bps / 10_000.0
 
 
 @dataclass(frozen=True, eq=False)
@@ -83,7 +87,6 @@ class BacktestResult:
     snapshots: tuple[PortfolioSnapshot, ...]
     orders: tuple[OrderEvent, ...]
     fills: tuple[FillEvent, ...]
-    metrics: PerformanceMetrics
 
     @classmethod
     def lazy(
@@ -93,10 +96,9 @@ class BacktestResult:
         snapshots: Callable[[], tuple[PortfolioSnapshot, ...]],
         orders: Callable[[], tuple[OrderEvent, ...]],
         fills: Callable[[], tuple[FillEvent, ...]],
-        metrics: PerformanceMetrics,
     ) -> BacktestResult:
         """snapshots/orders/fills tuple을 최초 접근 시에만 만드는 결과."""
-        return _LazyBacktestResult(run_id, snapshots, orders, fills, metrics)
+        return _LazyBacktestResult(run_id, snapshots, orders, fills)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, BacktestResult):
@@ -106,11 +108,10 @@ class BacktestResult:
             and self.snapshots == other.snapshots
             and self.orders == other.orders
             and self.fills == other.fills
-            and self.metrics == other.metrics
         )
 
     def __hash__(self) -> int:
-        return hash((self.run_id, self.snapshots, self.orders, self.fills, self.metrics))
+        return hash((self.run_id, self.snapshots, self.orders, self.fills))
 
 
 class _LazyBacktestResult(BacktestResult):
@@ -127,10 +128,8 @@ class _LazyBacktestResult(BacktestResult):
         snapshot_loader: Callable[[], tuple[PortfolioSnapshot, ...]],
         order_loader: Callable[[], tuple[OrderEvent, ...]],
         fill_loader: Callable[[], tuple[FillEvent, ...]],
-        metrics: PerformanceMetrics,
     ) -> None:
         object.__setattr__(self, "run_id", run_id)
-        object.__setattr__(self, "metrics", metrics)
         object.__setattr__(self, "_snapshot_loader", snapshot_loader)
         object.__setattr__(self, "_order_loader", order_loader)
         object.__setattr__(self, "_fill_loader", fill_loader)

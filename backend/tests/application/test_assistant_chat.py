@@ -9,11 +9,12 @@ import json
 import logging
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 
 import pytest
 
+from strategy_workbench.adapters.outbound.equity_mock._fixture import build_demo_fixture
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
@@ -57,6 +58,10 @@ from strategy_workbench.domain.assistant.facade.tools import (
     READ_CURRENT_STRATEGY,
     VALIDATE_STRATEGY_YAML,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    run_environment_canonical_json,
+)
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
@@ -78,10 +83,13 @@ TODAY = date(2026, 9, 20)
 VALID_YAML = "schema_version: '1.1'\ntitle: 모멘텀\n"
 INVALID_YAML = "schema_version: '1.1'\ntitle: 깨진 문서\n"
 DOCUMENT = DocumentRef(strategy_id="strategy-1", revision=3, draft_id=None)
+ENVIRONMENT = RunEnvironment(
+    start=date(2021, 1, 4), end=date(2026, 9, 1), universe_id="krx.common-stock"
+)
 CONTEXT = TurnContext(
     source_text="schema_version: '1.1'\ntitle: 현재 문서\n",
     source_format="yaml",
-    environment={"start": "2020-01-02", "end": "2026-09-01"},
+    environment=ENVIRONMENT,
     diagnostics=("strategy.factor.unknown /factors/0/factor_id",),
 )
 
@@ -289,6 +297,33 @@ def test_list_factor_catalog_reports_direction_and_availability() -> None:
     assert len(factors) == len(registry.all())
 
 
+def test_list_factor_catalog_judges_availability_by_the_connected_adapter_fields() -> None:
+    """#370: 연결된 어댑터가 주지 않는 필드를 읽는 구현 팩터는 `unavailable` 이다.
+
+    실데이터 어댑터에는 공매도 잔고 비율·실적 서프라이즈 필드가 없다. 모델이 이 둘을 예시로 골라
+    검증 도구로 되돌아오며 턴 예산을 쓰지 않게, 필드를 뺀 mock 어댑터로 같은 상황을 만든다.
+    """
+    missing = {"short.short_balance_ratio", "event.earnings_surprise"}
+    fixture = build_demo_fixture()
+    profiles = tuple(profile for profile in fixture.profiles if profile.field_id not in missing)
+    builder = AssistantContextBuilder(
+        equity_data=MockEquityDataAdapter(replace(fixture, profiles=profiles)),
+        factor_registry=build_default_factor_registry(),
+        compiler=FakeStrategyCompiler(),
+        backtest_results=FakeBacktestResults(),
+        today=lambda: TODAY,
+    )
+
+    call = ToolCall(call_id="call-1", name=LIST_FACTOR_CATALOG, arguments={})
+    result = builder.tool_result(call, CONTEXT)
+
+    availability = {
+        item["id"]: item["availability"] for item in json.loads(result.content)["factors"]
+    }
+    assert {factor for factor, value in availability.items() if value == "unavailable"} == missing
+    assert list(availability.values()).count("implemented") == 5
+
+
 def test_read_current_strategy_returns_the_turn_context() -> None:
     call = ToolCall(call_id="call-1", name=READ_CURRENT_STRATEGY, arguments={})
     harness = _harness((ToolStep(call), Done("end_turn")))
@@ -299,7 +334,7 @@ def test_read_current_strategy_returns_the_turn_context() -> None:
     assert payload["source_text"] == CONTEXT.source_text
     assert payload["source_format"] == "yaml"
     assert payload["diagnostics"] == list(CONTEXT.diagnostics)
-    assert payload["environment"] == CONTEXT.environment
+    assert payload["environment"] == json.loads(run_environment_canonical_json(ENVIRONMENT))
 
 
 def test_validate_strategy_yaml_runs_the_compiler_port() -> None:

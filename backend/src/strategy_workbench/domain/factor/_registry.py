@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -13,6 +14,7 @@ from ._nodes import (
     TimeSeriesNode,
     TimeSeriesOperator,
 )
+from ._validation import required_field_ids
 
 
 class FactorCategory(StrEnum):
@@ -33,6 +35,9 @@ class FactorPreference(StrEnum):
 class FactorAvailability(StrEnum):
     IMPLEMENTED = "implemented"
     CATALOG_ONLY = "catalog_only"
+    # 기본 graph 는 있지만 연결된 어댑터가 그 graph 의 필드를 주지 않는다. 레지스트리 정의에는
+    # 없고 `factor_availability` 만 낸다(#370)
+    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,23 @@ class FactorDefinition:
     availability: FactorAvailability
     default_graph: FactorGraph | None
     tags: tuple[str, ...] = ()
+
+
+def factor_availability(
+    definition: FactorDefinition, provided_field_ids: Collection[str]
+) -> FactorAvailability:
+    """연결된 어댑터가 주는 필드 id 집합에서 이 팩터의 가용성을 판정한다(#370).
+
+    `operator_availability` 와 같은 모양이다. 기본 graph 가 읽는 필드를 어댑터가 하나라도 주지
+    않으면 그 graph 는 compile 에서 필드 누락으로 막히므로 `unavailable` 이다. 기본 graph 가 없는
+    카탈로그 팩터는 정의 값 그대로다.
+    """
+    graph = definition.default_graph
+    if graph is None or all(
+        field_id in provided_field_ids for field_id in required_field_ids(graph)
+    ):
+        return definition.availability
+    return FactorAvailability.UNAVAILABLE
 
 
 class FactorRegistry:
@@ -144,10 +166,20 @@ def _implemented_graphs() -> dict[str, FactorGraph]:
             output_node_id="mean",
         ),
         "short.short_balance_ratio": _field_graph("short.short_balance_ratio"),
+        # 잔고율(잔고 주식수 / 상장주식수)의 20세션 변화. 원 주식수의 변화율은 분할·병합을 신용
+        # 급증으로 읽고(035720 5:1 분할 뒤 +300%) 작은 첫 값에서 폭주했다(#234).
+        # 두 필드는 각자 dataset_profile 랙(신용잔고 3 · 주식수 1)대로 들어온다. 기준일로 맞추려고
+        # 주식수를 2세션 더 물리지 않는다 — 액면 분할·병합·감자에서 신용잔고 원천은 거래정지
+        # 첫날부터 새 주식수 단위로 바뀌어(주식수 급변일보다 대개 0~2세션 앞) 랙 그대로 나눌 때
+        # 사건 구간 튐이 가장 작다. 무상증자는 원천이 새 단위로 일부만 바뀌어 척도를 맞출 수 없다
+        # — 원장 뷰 `v_credit_balance` 가 그 창의 잔고를 결측으로 가리고, DELTA 는 창 안 결측이
+        # 하나라도 있으면 결측이라 그대로 따른다(#249).
         "credit.margin_balance_change_20d": FactorGraph(
             nodes=(
                 FieldNode("balance", "credit.margin_balance", "field"),
-                TimeSeriesNode("change", TimeSeriesOperator.MOMENTUM, "balance", 20, "time_series"),
+                FieldNode("shares", "price.shares_outstanding", "field"),
+                BinaryNode("ratio", BinaryOperator.DIVIDE, "balance", "shares", "binary"),
+                TimeSeriesNode("change", TimeSeriesOperator.DELTA, "ratio", 20, "time_series"),
             ),
             output_node_id="change",
         ),
@@ -163,7 +195,10 @@ _SEEDS = (
         FactorPreference.HIGH,
         "ratio",
         (_ADJUSTED_CLOSE,),
-        252,
+        # 구현 그래프(`window=252` + `lag=21`)가 요구하는 이력이다. 구현 팩터의 이 값은
+        # 그래프 검증의 `minimum_history_sessions` 와 같아야 한다 — 테스트가 대조한다
+        # (BACKLOG-001).
+        273,
     ),
     _CatalogSeed(
         "price.momentum_6_1",
@@ -513,11 +548,11 @@ _SEEDS = (
     ),
     _CatalogSeed(
         "credit.margin_balance_change_20d",
-        "신용잔고 변화",
+        "신용잔고율 변화",
         FactorCategory.CREDIT,
         FactorPreference.LOW,
         "ratio",
-        ("credit.margin_balance",),
+        ("credit.margin_balance", "price.shares_outstanding"),
         20,
     ),
     _CatalogSeed(

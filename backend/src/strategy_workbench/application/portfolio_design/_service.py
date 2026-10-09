@@ -29,11 +29,10 @@ from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
-    LegacyMissingPolicyConflictError,
     RunEnvironment,
-    resolve_environment,
+    require_environment,
 )
-from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
+from strategy_workbench.domain.equity.facade.research_data import CellKind, DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
@@ -70,7 +69,10 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     compile_target_tape_with_trace,
 )
 from strategy_workbench.domain.strategy.facade.constraints import expression_code
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    StrategySpec,
+    resolve_parameter_values,
+)
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
     ValidationSeverity,
@@ -122,6 +124,20 @@ class InvalidPortfolioRequestError(ValueError):
     def __init__(self, validation: StrategyValidation) -> None:
         super().__init__("portfolio preview requires a valid StrategySpec")
         self.validation = validation
+
+
+def _non_finite_rejection(
+    path: str, error: Exception, node_id: str | None = None
+) -> InvalidPortfolioRequestError:
+    # 계산 예외의 원문(영문)은 문장 뒤 기계 디테일로만 싣는다(error-messages.md, #357 C-P3-17).
+    issue = semantic_issue(
+        "strategy.expression.calculation_non_finite",
+        path,
+        "계산 중에 NaN·무한대가 나와 결과를 만들 수 없습니다. 값이 넘칠 만큼 큰 곱셈·나눗셈이 "
+        f"없는지 확인하세요 — {error}",
+        node_id=node_id,
+    )
+    return InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=(issue,)))
 
 
 class RawObservationUnavailableError(RuntimeError):
@@ -248,12 +264,10 @@ class PortfolioDesignService:
         돌려주기 위한 사전 검사다(이슈 #158). 데이터에 의존하는 실패(관측 부재·계약 위반·스냅샷
         불일치·비유한 계산)는 여기서 잡히지 않는다.
 
-        **`request.environment` 를 읽는다**(P2-02). `_prepare` 가 문서 검증 뒤에 실행 설정을
-        해소하고 그 `missing` 으로 플랜을 컴파일하기 때문이다. 호출자는 해소 전 값을 그대로
-        넘겨야 검증이 브리지보다 먼저 돈다. 그래서 이 메서드는 엔진 호환성 말고도 문서·실행
-        설정 문제로 예외를 던진다 — `InvalidPortfolioRequestError`(팩터별 결측 정책 충돌
-        `run_environment.missing_policy_conflict` 포함)와 `RunEnvironment` 생성자 검증이다.
-        `run_pipeline` 과 같은 `spec.environment` 를 넘기는 한 두 경로의 해소 결과는 같다.
+        **`request.environment` 를 읽는다.** 1.2 부터 참여율(엔진 능력)과 결측 정책(플랜)이
+        실행 설정의 값이라 문서만으로는 같은 판정을 낼 수 없다. 그래서 실행 설정이 없으면 여기서도
+        코드화된 진단으로 거절한다 — 해소 단계가 사라져(문서 브리지 없음) `start()` 와 `_run` 이
+        서로 다른 값을 넘길 여지 자체가 없다(P2-03 결정 항목 종결).
         """
 
         # 엔진 호환성만은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게
@@ -359,8 +373,10 @@ class PortfolioDesignService:
             )
         )
         parameters = tuple(
-            ResolvedFactorParameter(parameter.parameter_id, parameter.default)
-            for parameter in spec.parameters
+            ResolvedFactorParameter(parameter_id, value)
+            for parameter_id, value in resolve_parameter_values(
+                spec.parameters, pipeline_options.parameter_values
+            ).items()
         )
         evaluations: list[FactorEvaluationRecord] = []
         factor_count = max(len(spec.factors), 1)
@@ -417,14 +433,8 @@ class PortfolioDesignService:
                     for index, node in enumerate(factor.graph.nodes)
                     if node.node_id == error.node_id
                 )
-                issue = semantic_issue(
-                    "strategy.expression.calculation_non_finite",
-                    f"factors.{factor_index}.graph.nodes.{node_index}",
-                    str(error),
-                    node_id=error.node_id,
-                )
-                raise InvalidPortfolioRequestError(
-                    StrategyValidation(valid=False, issues=(issue,))
+                raise _non_finite_rejection(
+                    f"factors.{factor_index}.graph.nodes.{node_index}", error, error.node_id
                 ) from error
             evaluations.append(
                 FactorEvaluationRecord(
@@ -457,6 +467,7 @@ class PortfolioDesignService:
             if pipeline_options.construction_trace_selection is None:
                 tape = compile_target_tape(
                     spec,
+                    environment=environment,
                     data_snapshot_id=raw.data_snapshot_id,
                     sessions=raw.sessions,
                     observations=observations,
@@ -468,6 +479,7 @@ class PortfolioDesignService:
             else:
                 compiled = compile_target_tape_with_trace(
                     spec,
+                    environment=environment,
                     data_snapshot_id=raw.data_snapshot_id,
                     sessions=raw.sessions,
                     observations=observations,
@@ -479,14 +491,7 @@ class PortfolioDesignService:
                 tape = compiled.tape
                 construction_trace = compiled.trace
         except NonFinitePortfolioCalculationError as error:
-            issue = semantic_issue(
-                "strategy.expression.calculation_non_finite",
-                "portfolio",
-                str(error),
-            )
-            raise InvalidPortfolioRequestError(
-                StrategyValidation(valid=False, issues=(issue,))
-            ) from error
+            raise _non_finite_rejection("portfolio", error) from error
         preview = PortfolioPreview(
             tape=tape,
             engine=engine,
@@ -512,17 +517,21 @@ class PortfolioDesignService:
     ) -> _PreparedPipeline:
         """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다.
 
-        실행 설정 해소도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
-        플랜 컴파일은 `environment.missing` 을 인자로 받아야 한다(P2-02).
+        실행 설정 확정도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
+        엔진 능력 판정은 `environment.participation_rate` 를, 플랜 컴파일은 `environment.missing`
+        을 인자로 받아야 한다(P2-02·P2-03). 실행 설정이 없거나 연구 구간 밖이면 domain 오류를 그대로
+        올린다 — 백테스트 시작과 같은 접수 거절 코드로 나간다(#351).
         """
 
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
         checkpoint()
-        resolved = _resolve_environment_or_reject(spec, environment)
+        resolved = require_environment(
+            environment, requested_by=f"portfolio.preview({spec.title!r})"
+        )
 
-        engine = self._engine_portfolio.assess(spec)
+        engine = self._engine_portfolio.assess(spec, resolved)
         if pipeline_options.require_engine_compatible and not engine.compatible:
             raise IncompatiblePortfolioRequestError(engine)
         trace_requested = (
@@ -547,7 +556,6 @@ class PortfolioDesignService:
         )
         plans = self._plans(spec, metadata, resolved.missing)
         _reject_non_numeric_factor_outputs(spec, plans)
-        _reject_saved_references(spec, plans)
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
         return _PreparedPipeline(
@@ -561,7 +569,6 @@ class PortfolioDesignService:
         missing: MissingPolicy,
     ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
-        factor_ids = tuple(factor.factor_id for factor in spec.factors)
         plans: dict[str, FactorExecutionPlan] = {}
         issues = []
         for factor_index, factor in enumerate(spec.factors):
@@ -572,7 +579,6 @@ class PortfolioDesignService:
                     missing=missing,
                     fields=metadata.fields,
                     parameter_ids=parameter_ids,
-                    factor_ids=factor_ids,
                     require_field_metadata=True,
                 )
             except InvalidFactorGraphError as error:
@@ -595,23 +601,6 @@ class PortfolioDesignService:
                 StrategyValidation(valid=False, issues=tuple(issues))
             )
         return plans
-
-
-def _resolve_environment_or_reject(
-    spec: StrategySpec, environment: RunEnvironment | None
-) -> RunEnvironment:
-    """실행 설정을 확정하고, 1.1 문서에서 못 만드는 경우는 요청 거부로 바꾼다.
-
-    브리지 실패는 서버 오류가 아니라 문서/요청 문제라 `portfolio.strategy.invalid` 진단으로
-    나간다. `run_environment.*` 코드는 `strategy.*` 레지스트리 밖이라 그대로 전달된다.
-    """
-    try:
-        return resolve_environment(spec, environment)
-    except LegacyMissingPolicyConflictError as error:
-        issue = semantic_issue(error.code, "factors", str(error))
-        raise InvalidPortfolioRequestError(
-            StrategyValidation(valid=False, issues=(issue,))
-        ) from error
 
 
 def _required_field_ids(
@@ -804,25 +793,6 @@ def _between(start: float, end: float, fraction: float) -> float:
     return min(start + (end - start) * fraction, end)
 
 
-def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
-    # TODO(PLAN P5-03): evaluate referenced factors/subgraphs in topological order instead.
-    issues = tuple(
-        # The domain owns the code registry; minting an issue here goes through the same gate.
-        semantic_issue(
-            "strategy.expression.reference_unsupported",
-            f"factors.{index}.graph",
-            "저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
-            f"factor_ids={plan.referenced_factor_ids} "
-            f"subgraph_ids={plan.referenced_subgraph_ids}",
-        )
-        for index, factor in enumerate(spec.factors)
-        for plan in (plans[factor.factor_id],)
-        if plan.referenced_factor_ids or plan.referenced_subgraph_ids
-    )
-    if issues:
-        raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
-
-
 def _reject_non_numeric_factor_outputs(
     spec: StrategySpec, plans: dict[str, FactorExecutionPlan]
 ) -> None:
@@ -832,13 +802,19 @@ def _reject_non_numeric_factor_outputs(
     executable portfolio boundary accepts only numeric series: group/boolean values are not
     scores, and a scalar cannot distinguish securities. This check must inspect the compiled plan
     so it consumes the same metadata-derived contract as execution.
+
+    P2-07 부터 같은 판정을 compile 이 먼저 한다(`validate_strategy` 의
+    `strategy.factor.output_type`, boolean 은 hydrate 가 0/1 로 승격). 이 검사는 방어선으로 남고,
+    compile 을 통과한 문서에서 발화하면 결함이다 —
+    `tests/integration/test_compile_gate_property.py` 가 그 불변식을 지킨다.
     """
     issues = tuple(
         semantic_issue(
-            "strategy.expression.output_type",
+            "strategy.factor.output_type",
             f"factors.{factor_index}.graph.output_node_id",
-            "FactorSignal output must be numeric_series for portfolio/backtest execution: "
-            f"actual={output.output_type!r}",
+            "팩터 출력은 종목별 숫자 점수여야 합니다: "
+            f"factor_id={factor.factor_id!r} actual={output.output_type!r} "
+            "expected='numeric_series'",
             node_id=plan.output_node_id,
         )
         for factor_index, factor in enumerate(spec.factors)
@@ -892,7 +868,7 @@ def _to_factor_observation(
         as_of=item.as_of,
         security_id=item.security_id,
         fields=tuple(
-            FactorFieldValue(field.field_id, field.value)
+            FactorFieldValue(field.field_id, field.value, masked=field.kind is CellKind.MASKED)
             for field in _checkpointed(item.fields, checkpoint)
         ),
         # Membership travels with the row so cross-sectional operators score members against

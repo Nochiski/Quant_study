@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import type { TurnContextPayload } from "../../../entities/assistant";
+import type { RunEnvironment } from "../../../shared/api";
 import { useCommittedRef } from "../../../shared/lib/react";
 import { assistantTurnContext } from "./assistant-turn-context";
 import type { DocumentState } from "./document-state";
@@ -29,7 +30,7 @@ import type { DocumentState } from "./document-state";
 export const useAssistantTurnContext = (
   state: DocumentState,
   readSource: () => string | null,
-  environment: Record<string, unknown> | null,
+  environment: RunEnvironment | null,
 ): (() => TurnContextPayload) => {
   const build = useCommittedRef(
     useMemo(

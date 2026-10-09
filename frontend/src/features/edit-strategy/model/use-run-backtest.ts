@@ -4,7 +4,7 @@ import {
   useStartBacktest,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
-import { ApiRequestError } from "../../../shared/api";
+import { ApiRequestError, failureReason } from "../../../shared/api";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
@@ -19,8 +19,19 @@ export type RunBacktestStatus =
   | { kind: "idle" }
   | { kind: "starting" }
   | { kind: "accepted"; runId: string }
-  /** `code`는 backend 422 detail의 코드(예: `backtest.strategy.requires_upgrade`), 없으면 null. */
-  | { kind: "failed"; detail: string; code: string | null };
+  /**
+   * `code`는 backend 거절 detail의 코드(예: `backtest.strategy.requires_upgrade`), 없으면 null.
+   * `detail`은 접힌 진단 상세에 둘 서버 사유다. 화면 본문은 `code`의 번역이 맡는다(이슈 #260).
+   */
+  | {
+      kind: "failed";
+      detail: string | null;
+      code: string | null;
+      /** 거절이 가리킨 요청 본문의 칸(점 경로). 없으면 null. */
+      field: string | null;
+      /** 거절 문장의 자리표시자를 채울 detail 값(`ApiRequestError.values`). */
+      values: Readonly<Record<string, string>>;
+    };
 
 export type BacktestRunOptions = Omit<
   BacktestRunSpec,
@@ -81,6 +92,24 @@ export const useRunBacktest = (
       ),
     [executionPlans, state],
   );
+  // 실행 버튼이 보낼 요청. 실행 전 시도 미리 계산(검증 랩 V5-05)도 같은 요청을 묻는다.
+  const request = useMemo<BacktestRunSpec | null>(
+    () =>
+      decision.kind === "blocked" || options === null
+        ? null
+        : decision.kind === "saved_revision"
+          ? { ...options, strategy_source: decision.reference }
+          : {
+              ...options,
+              strategy_source: decision.draft,
+              // 저장된 전략을 고친 초안도 그 전략 계열의 시도로 센다(검증 랩 spec D2). 저장 리비전은
+              // backend가 리비전에서 계열을 알아서 싣지 않는다.
+              ...(state.strategyId === null
+                ? {}
+                : { lineage_strategy_id: state.strategyId }),
+            },
+    [decision, options, state.strategyId],
+  );
   const status =
     ownedStatus !== null && sameOwner(ownedStatus, currentOwner)
       ? ownedStatus.status
@@ -96,8 +125,7 @@ export const useRunBacktest = (
       return;
     }
     if (
-      decision.kind === "blocked" ||
-      options === null ||
+      request === null ||
       status.kind === "starting" ||
       isPending ||
       activeRequest.current !== null
@@ -114,13 +142,7 @@ export const useRunBacktest = (
     setOwnedStatus({ ...snapshot, status: { kind: "starting" } });
     let runId: string;
     try {
-      const accepted = await mutateAsync({
-        ...options,
-        strategy_source:
-          decision.kind === "saved_revision"
-            ? decision.reference
-            : decision.draft,
-      });
+      const accepted = await mutateAsync(request);
       runId = accepted.run.run_id;
     } catch (error) {
       if (
@@ -131,9 +153,12 @@ export const useRunBacktest = (
           ...snapshot,
           status: {
             kind: "failed",
-            detail: error instanceof Error ? error.message : String(error),
+            detail: failureReason(error),
             code:
               error instanceof ApiRequestError ? (error.code ?? null) : null,
+            field:
+              error instanceof ApiRequestError ? (error.field ?? null) : null,
+            values: error instanceof ApiRequestError ? error.values : {},
           },
         });
       }
@@ -160,12 +185,11 @@ export const useRunBacktest = (
       params: { runId },
     });
   }, [
-    decision,
     isPending,
     mutateAsync,
     navigate,
-    options,
     optionsKey,
+    request,
     router,
     state,
     status,
@@ -174,6 +198,8 @@ export const useRunBacktest = (
   return {
     run,
     decision,
+    /** 실행 버튼이 보낼 요청. 실행할 수 없으면 null. */
+    request,
     status,
     /** 결정이 닫혀 있지만 팩터 계획 조회가 아직 끝나지 않았다(`isBacktestSettling`). */
     settling: isBacktestSettling(decision, executionPlans),

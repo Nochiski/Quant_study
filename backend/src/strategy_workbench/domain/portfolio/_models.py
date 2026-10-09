@@ -15,6 +15,9 @@ class ExclusionReason(StrEnum):
     FUTURE_DATA = "future_data"
     MISSING_ELIGIBILITY = "missing_eligibility"
     ELIGIBILITY_FAILED = "eligibility_failed"
+    # 값이 규칙을 어긴 것이 아니라 횡단면 순위에서 잘렸다(`top_percent`·`top_count`, spec D3 S5).
+    # `ELIGIBILITY_FAILED` 와 한 값을 쓰면 "상위 20%에 못 들었다"가 "조건을 어겼다"로 읽힌다.
+    ELIGIBILITY_RANK_CUT = "eligibility_rank_cut"
     MISSING_FACTOR = "missing_factor"
     SCORE_THRESHOLD = "score_threshold"
     REGIME_BLOCKED = "regime_blocked"
@@ -23,6 +26,24 @@ class ExclusionReason(StrEnum):
     MISSING_RISK = "missing_risk"
     TURNOVER_BUFFER = "turnover_buffer"
     MINIMUM_TRADE = "minimum_trade"
+
+
+class PortfolioWarningCode(StrEnum):
+    """tape 를 막지는 않지만 결과 해석을 바꾸는 컴파일러 경고의 코드.
+
+    값은 실행 결과 매니페스트의 `DataWarning.code` 로 그대로 나간다.
+    """
+
+    # 섹터를 모르는 종목(`sector_id is None`)을 섹터 상한·섹터 중립 계산에서 뺐다(이슈 #203).
+    SECTOR_UNKNOWN_EXCLUDED = "portfolio.sector_unknown_excluded"
+
+
+@dataclass(frozen=True)
+class PortfolioWarning:
+    """컴파일러가 tape 를 만들며 알린 경고 한 건. `message` 는 한글로 완성된 진단 문장이다."""
+
+    code: PortfolioWarningCode
+    message: str
 
 
 PortfolioInputValue = float | str | bool | None
@@ -103,3 +124,6 @@ class TargetTape:
     tape_hash: str
     frames: tuple[TargetFrame, ...]
     execution_timing: str = "next_open"
+    # 해시 밖의 파생 사실이다. `tape_hash` 는 frames 로 계산하고, 경고는 같은 입력에서 결정적으로
+    # 다시 나오므로 해시에 넣지 않는다(construction trace 와 같은 out-of-band 원칙).
+    warnings: tuple[PortfolioWarning, ...] = ()

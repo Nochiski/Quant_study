@@ -48,6 +48,7 @@
 | T-23 | v3 시장지표(insight) | 키움 지수 수집을 끄고 quant-ledger KRX 지수 원장(`index_daily`)으로 v3 `market_*` 를 채운다. ECOS 거시는 v3 유지 |
 | T-25 | 신규 스팩 | 2024-02 뒤 상장 스팩 71종목은 v3 `stocks` 에 없다(v3 누락). compat 은 싣는다 — 의도된 차이(COMPAT_LAYER §7) |
 | T-26 | 세션 시각이 바뀌는 날(수능일 등) | 장 마감 수집을 하지 않고(rc 3) v3 소비자 T 행은 21:05 저녁 값, 모델은 T-7 대체 발송 경로. 예외표 `session_exceptions.json`(첫 항목 2026-11-19, KRX 공지 확인 필요) — **새 정지 조건이라 사용자 확인 대기** |
+| T-27 | v3 시장지표(insight)의 키움 수집 | **v3 폴더 이관 때까지 v3 에 둔다**. 종목별이 아닌 시장 단위 TR(ka20006 지수·ka20001 폭·ka10051 시장 수급·ka90010 프로그램·ka20003 업종) 하루 십여 콜이라 무거운 크롤링(N-42 Q2)과 다르다. 끄면 KRX 지수가 T+1 08:00 공표라 그날 저녁 국면·다음 날 07:00 브리핑이 T 지수 없이 돌고(KOSPI 0.00), 원천 없는 4표가 컷오버 전날 값으로 굳는다(QL-P 조사). QL-L 감시의 예외로 등록. T-23·QL-P(market_indices 를 KRX 원장으로)는 보류 — 연결하면 같은 표의 쓰기 경로가 둘이 된다 |
 | T-24 | v3 휴장 파일 | v3 KIS 휴장 갱신을 끄고 quant-ledger 판정 달력(`data/calendar/kis_holidays_<YYYY>.json`)을 v3·uni 가 읽는 형식으로 넘긴다 |
 
 ## 3. phase 와 PR
@@ -112,7 +113,7 @@
 | QL-J | 키 이관(quant-ledger 자기 설정을 기본값으로) | S | ☐ |
 | QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ☐ |
 | QL-M·N | compat 만료 정리 · compare 기준 scope | S | ☐ |
-| QL-P | T-23 v3 `market_*` 를 KRX 지수 원장으로 | M | ☐ |
+| QL-P | T-23 v3 `market_*` 를 KRX 지수 원장으로 | M | ✕ 보류(T-27) — 구현 브랜치 `pr/QL-P` 3b9a5e04 는 v3 폴더 이관 때 쓴다(열 대응표: 지수 3종 대응·VKOSPI·폭·시장 수급·프로그램 없음·업종 부분) |
 | QL-Q | T-24 v3·uni 휴장 파일을 quant-ledger 달력에서 | S | ☐ |
 | V3-A~E | v3 쪽(`daily_post` 체인, `daily_all` 퀀트 단계 제거, 첫 반영, uni 날짜 조건) — 백업 뒤 컷오버 날(N-42 Q4 일괄 승인) | S×4 | ☐ |
 

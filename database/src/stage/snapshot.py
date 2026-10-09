@@ -10,16 +10,16 @@ import shutil
 import sqlite3
 from collections.abc import Collection
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from . import manifest
+from .health import KST
 
 SNAPSHOT_PREFIX = "snap_"
 # 스냅샷 id = 만든 시각(UTC). 만드는 쪽(`make_snapshot`)과 날짜로 읽는 쪽(`snapshot_kst_date`)의
 # 정본이다.
 SNAPSHOT_ID_FORMAT = "snap_%Y%m%dT%H%M%SZ"
-_KST = timezone(timedelta(hours=9))
 KEEP_DEFAULT = 3      # 판당 ≈16 GB(09-14 실측). 하루 2판이면 1.5거래일 — 결정 9(09-14 사용자): 디스크 우선
 
 
@@ -74,14 +74,14 @@ def snapshot_kst_date(snapshot_id: str) -> date:
     형식 밖(`--snapshot-id` 로 손으로 붙인 이름 등)이면 ValueError — 기준일을 추정하지 않는다.
     """
     try:
-        at = datetime.strptime(snapshot_id, SNAPSHOT_ID_FORMAT)
+        at = datetime.strptime(snapshot_id, SNAPSHOT_ID_FORMAT)  # noqa: DTZ007  # reason: id 는 'Z'(UTC) 고정 형식이라 아래에서 tzinfo=UTC 를 붙인다
     except ValueError as e:
         raise ValueError(f"snapshot id outside format {SNAPSHOT_ID_FORMAT!r} (UTC): "
                          f"got={snapshot_id!r}") from e
     if at.strftime(SNAPSHOT_ID_FORMAT) != snapshot_id:     # strptime 은 자릿수가 모자라도 받아 준다
         raise ValueError(f"snapshot id outside format {SNAPSHOT_ID_FORMAT!r} (UTC): "
                          f"got={snapshot_id!r}")
-    return at.replace(tzinfo=UTC).astimezone(_KST).date()
+    return at.replace(tzinfo=UTC).astimezone(KST).date()
 
 
 def load_snapshot(snap_dir: Path) -> Snapshot:

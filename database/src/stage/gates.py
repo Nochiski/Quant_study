@@ -142,17 +142,27 @@ def g3_invariants(ctx: GateContext) -> GateResult:
 
 
 def g4_fixtures(ctx: GateContext) -> GateResult:
-    """골든 픽스처. unit_scale 선언 컬럼은 픽스처 없음 = 실패(§9 — ×1e6 오적용의 유일 방어)."""
+    """골든 픽스처. unit_scale 선언 컬럼은 픽스처 없음 = 실패(§9 — ×1e6 오적용의 유일 방어).
+
+    `rule.golden_from` 표와 **같은 ColumnRule** 인 unit_scale 열은 그 표의 골든이 지킨다(물려받음 — 그 표의
+    빌드가 자기 G4 로 매번 대조한다). 이름이 같아도 규칙이 다르면 물려받지 않는다.
+    """
     covered = {str(fx["column"]) for fx in ctx.fixtures or ()}
-    uncovered = [c.name for c in ctx.rule.columns if c.unit_scale is not None
-                 and c.name not in covered]
+    parent = ctx.rule.golden_from
+    scaled = [c for c in ctx.rule.columns if c.unit_scale is not None and c.name not in covered]
+    inherited = [c.name for c in scaled if parent is not None and c in parent.columns]
+    uncovered = [c.name for c in scaled if c.name not in inherited]
+    via: dict[str, object] = ({"golden_from": parent.name, "unit_scale_inherited": inherited}
+                              if parent is not None and inherited else {})
     if uncovered:
         return GateResult("G4", GateStatus.FAIL,
                           f"unit_scale column without fixture: {uncovered}",
                           {"n_fixtures": len(ctx.fixtures or ()), "n_mismatch": 0,
-                           "unit_scale_uncovered": uncovered})
+                           "unit_scale_uncovered": uncovered, **via})
     if not ctx.fixtures:
-        return GateResult("G4", GateStatus.SKIP, "no_fixtures", {})
+        why = (f"no_fixtures — unit_scale {len(inherited)}열은 {parent.name} 골든이 지킨다"
+               if parent is not None and inherited else "no_fixtures")
+        return GateResult("G4", GateStatus.SKIP, why, via)
     n_mismatch = 0
     detail: list[str] = []
     for fx in ctx.fixtures:
@@ -173,7 +183,7 @@ def g4_fixtures(ctx: GateContext) -> GateResult:
     ok = n_mismatch == 0
     return GateResult("G4", GateStatus.PASS if ok else GateStatus.FAIL,
                       "골든 픽스처 일치" if ok else "; ".join(detail[:10]),
-                      {"n_fixtures": len(ctx.fixtures), "n_mismatch": n_mismatch})
+                      {"n_fixtures": len(ctx.fixtures), "n_mismatch": n_mismatch, **via})
 
 
 def g5_regression_delta(ctx: GateContext) -> GateResult:

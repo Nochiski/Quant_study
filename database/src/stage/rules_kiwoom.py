@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from .model import (
     AVAILABLE_NONE,
+    KIND_BOOL,
     KIND_DATE_YMD8,
     KIND_NUMERIC,
     KIND_TEXT,
@@ -46,23 +47,34 @@ def _flow_krw(src: str) -> ColumnRule:
 
 
 # ── stg_flow_daily_kiwoom (ka10060) ───────────────────────────────────────────
+# ka10060 열·파생·불변식 규칙 — 저녁 원장 표(이 표)와 장 마감 직후 원장 표(stg_flow_postclose_kiwoom)가 같은
+# 객체를 공유한다(P4 — 복사하면 한쪽만 고쳐진다).
+_FLOW_COLUMNS: tuple[ColumnRule, ...] = (
+    _DT, _TICKER,
+    # 부호는 전일 대비 방향 표시자 — abs 필수(KRX 종가 대조 abs 100% / raw 51.6%, SPEC §2-3)
+    ColumnRule("cur_prc", "close_krw", KIND_NUMERIC, *p_headroom(7), sign="abs"),
+    ColumnRule("pred_pre", "pred_pre_krw", KIND_NUMERIC, *p_headroom(6)),
+    # 명세 오표기: 이름은 누적거래대금이지만 실측은 거래량(주) — KRX ACC_TRDVOL 99.9864% 일치
+    ColumnRule("acc_trde_prica", "volume_shr", KIND_NUMERIC, *p_headroom(10)),
+    _flow_krw("ind_invsr"), _flow_krw("frgnr_invsr"), _flow_krw("orgn"),
+    _flow_krw("fnnc_invt"), _flow_krw("insrnc"), _flow_krw("invtrt"),
+    _flow_krw("etc_fnnc"), _flow_krw("bank"), _flow_krw("penfnd_etc"),
+    _flow_krw("samo_fund"), _flow_krw("natn"), _flow_krw("etc_corp"),
+    _flow_krw("natfor"),
+    _SRC_API,
+)
+_FLOW_EXTRAS: tuple[ExtraColumn, ...] = (
+    ExtraColumn("close_krw_dir", "CASE WHEN s.\"cur_prc\" LIKE '-%' THEN -1 ELSE 1 END"),
+)
+_FLOW_INVARIANTS: tuple[Invariant, ...] = (
+    Invariant("volume_negative", "volume_shr < 0"),      # survey 전수 n_neg=0
+    Invariant("close_negative", "close_krw < 0"),        # abs 정책 회귀 가드
+)
+
 STG_FLOW_DAILY_KIWOOM = TableRule(
     name="stg_flow_daily_kiwoom",
     sources=(SourceRef("kiwoom", "ka10060_investor_flows", "ka10060"),),
-    columns=(
-        _DT, _TICKER,
-        # 부호는 전일 대비 방향 표시자 — abs 필수(KRX 종가 대조 abs 100% / raw 51.6%, SPEC §2-3)
-        ColumnRule("cur_prc", "close_krw", KIND_NUMERIC, *p_headroom(7), sign="abs"),
-        ColumnRule("pred_pre", "pred_pre_krw", KIND_NUMERIC, *p_headroom(6)),
-        # 명세 오표기: 이름은 누적거래대금이지만 실측은 거래량(주) — KRX ACC_TRDVOL 99.9864% 일치
-        ColumnRule("acc_trde_prica", "volume_shr", KIND_NUMERIC, *p_headroom(10)),
-        _flow_krw("ind_invsr"), _flow_krw("frgnr_invsr"), _flow_krw("orgn"),
-        _flow_krw("fnnc_invt"), _flow_krw("insrnc"), _flow_krw("invtrt"),
-        _flow_krw("etc_fnnc"), _flow_krw("bank"), _flow_krw("penfnd_etc"),
-        _flow_krw("samo_fund"), _flow_krw("natn"), _flow_krw("etc_corp"),
-        _flow_krw("natfor"),
-        _SRC_API,
-    ),
+    columns=_FLOW_COLUMNS,
     natural_key=("ticker", "date"),
     partition_class="date_axis",
     partition_expr="substr(dt, 1, 4)",
@@ -74,13 +86,45 @@ STG_FLOW_DAILY_KIWOOM = TableRule(
     lag_known=False,                     # 수급 = 공표 시점 미상 (§6 주의 — lag 0 적용 금지)
     available=AvailableRule("column", column="date"),
     key_unique=True,                     # 원장 PK (ticker, dt) — load_kiwoom_raw.py DDL
-    extras=(
-        ExtraColumn("close_krw_dir", "CASE WHEN s.\"cur_prc\" LIKE '-%' THEN -1 ELSE 1 END"),
+    extras=_FLOW_EXTRAS,
+    invariants=_FLOW_INVARIANTS,
+)
+
+# ── stg_flow_postclose_kiwoom (장 마감 직후 ka10060 — 컷오버 PR-2 · T-4) ─────────
+# 원장 `data/raw/postclose.db`(수집기 daily.postclose, 15:41~16:00 KRX 코드)의 같은 TR 표. 키움 원장 표에 넣지 않는
+# 이유는 T-4(첫 관측 규칙이 21:05 의 하루 전체 수급을 버리게 된다). 파싱은 위 ka10060 규칙 그대로(같은 객체)이고,
+# unit_scale 13열의 골든도 stg_flow_daily_kiwoom 것을 물려받는다(golden_from) — 이 원장에는 고정 골든 행이 없다.
+# 덧붙인 열 둘:
+#   price_valid   수집기가 응답을 16:00 KST 전에 받았나(원장 '1'/'0' → BOOLEAN). false 면 수급 13열만 유효하다 —
+#                 종가·전일대비·거래량에는 애프터마켓 값이 섞인다(N-35 ①). 거르는 것은 소비층(PR-5) 몫이고
+#                 stage 는 원문을 1:1 로 싣는다.
+#   collected_at  그 **행을 받은 시각**(원장 원문 UTC 'YYYY-MM-DDTHH:MM:SS' 그대로 TEXT). 키움 원장의 같은 이름 열은
+#                 TR 실행 단위 스탬프(`kw_daily.fetch_tr` 가 실행 시작에 한 번 찍는 `_now_utc()`)라 이름은 같아도
+#                 뜻이 다르다 — 두 표의 이 값을 서로 견주지 않는다. observed_date(KST 날짜)도 이 열에서 나온다.
+# 원장 `fetched_at`(런 시작)은 싣지 않는다. 원장이 INSERT OR IGNORE(첫 관측 유지)라 write_mode 는 first_write_wins.
+# 연구 체인은 이 표를 짓지 않는다(원장이 연구 스냅샷 세트 밖 — rules.SOLO_LEDGER_FILES, run_stage_all.sh skipped).
+STG_FLOW_POSTCLOSE_KIWOOM = TableRule(
+    name="stg_flow_postclose_kiwoom",
+    sources=(SourceRef("postclose", "ka10060_investor_flows", "ka10060"),),
+    columns=(
+        *_FLOW_COLUMNS,
+        ColumnRule("price_valid", "price_valid", KIND_BOOL),
+        ColumnRule("collected_at", "collected_at", KIND_TEXT),
     ),
-    invariants=(
-        Invariant("volume_negative", "volume_shr < 0"),      # survey 전수 n_neg=0
-        Invariant("close_negative", "close_krw < 0"),        # abs 정책 회귀 가드
-    ),
+    natural_key=("ticker", "date"),
+    partition_class="date_axis",
+    partition_expr="substr(dt, 1, 4)",
+    partition_src="dt",
+    observed_src="collected_at",
+    write_mode="first_write_wins",       # INSERT OR IGNORE — daily.postclose.insert_first
+    fanout=1,
+    payload_exclude=("collected_at", "fetched_at"),
+    lag_known=False,                     # 수급 = 공표 시점 미상 (§6 주의 — lag 0 적용 금지)
+    available=AvailableRule("column", column="date"),
+    key_unique=True,                     # 원장 PK (ticker, dt) — kw_daily.ensure_table DDL
+    extras=_FLOW_EXTRAS,
+    invariants=_FLOW_INVARIANTS,
+    golden_from=STG_FLOW_DAILY_KIWOOM,
 )
 
 # ── stg_short_daily_kiwoom (ka10014) ──────────────────────────────────────────
@@ -289,4 +333,4 @@ STG_SHARDS_KIWOOM = TableRule(
 
 TABLES: tuple[TableRule, ...] = (STG_FLOW_DAILY_KIWOOM, STG_SHORT_DAILY_KIWOOM,
                                  STG_FOREIGN_DAILY, STG_LENDING_DAILY, STG_MASTER_DAILY,
-                                 STG_SHARDS_KIWOOM)
+                                 STG_SHARDS_KIWOOM, STG_FLOW_POSTCLOSE_KIWOOM)

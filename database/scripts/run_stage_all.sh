@@ -35,13 +35,15 @@ ORDER=(stg_rcept_dt_map
   stg_consensus_monthly stg_consensus_annual stg_consensus_quarterly stg_consensus_matrix stg_analyst_summary stg_analyst_broker stg_fin_wise stg_fin_wise_q
   stg_v3_revision_daily stg_v3_analyst_opinions stg_v3_consensus_annual stg_v3_revision_compare stg_wise_coverage stg_calls_wise
   stg_wics_components)
+# 장 마감 직후 원장 표(컷오버 PR-2)는 연구 체인이 짓지 않는다 — 원장 postclose.db 가 연구 스냅샷 세트
+# (stage.rules.LEDGER_FILES) 밖이고 연구 판은 이 표를 쓰지 않는다. 장 마감 체인이 단독 빌드한다.
+SKIPPED="stg_flow_postclose_kiwoom"
 # 문서층 4테이블은 같은 스냅샷의 프리패스 캐시(doc_prepass)가 있어야 빌드된다 — 없으면 건너뛰고 알린다.
 DOC_SUM="data/stage/_tmp/doc/$SNAP/summary.json"
-SKIPPED=""
 if [ -f "$DOC_SUM" ] && grep -q '"status": "ok"' "$DOC_SUM"; then
   ORDER+=(stg_doc_meta stg_doc_section stg_doc_correction stg_doc_parse_log)
 else
-  SKIPPED="stg_doc_meta stg_doc_section stg_doc_correction stg_doc_parse_log"
+  SKIPPED="$SKIPPED stg_doc_meta stg_doc_section stg_doc_correction stg_doc_parse_log"
   echo "stg_doc_*: prepass cache for $SNAP missing or gate_failed — run 'PYTHONPATH=src .venv/bin/python -m stage.doc_prepass --snapshot-id $SNAP' first (skipped)"
 fi
 if [ "$#" -gt 0 ]; then

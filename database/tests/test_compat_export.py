@@ -505,6 +505,23 @@ def test_daily_prices_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path
     assert res.tables["daily_prices"].n_rows == 7           # 보통주 2 × 3세션 + 스팩 1
 
 
+# QL-A2 — 거래정지일 참고가 행(`price_kind='reference'`)도 v3 처럼 싣는다. KRX 는 그날 O/H/L 을 '0' 으로
+# 주고 stage 가 NULL 로 두므로(결측은 결측) v3 NOT NULL 에 걸려 조용히 빠지고 있었다(10-01~08 재생에서
+# v3 에만 있는 102~104행). v3 는 그날을 open=high=low=close=참고가 · volume 0 · amount 0 으로 싣는다
+# (로컬 v3 사본 2026-07~08 정지 행 전부 같은 모양, 예: 000300 4200·4200·4200·4200·0·0).
+def test_daily_prices_keeps_halted_reference_row_like_v3(tmp_path: Path) -> None:
+    halted_ticker = _filler_tickers(1)[0]                   # D23 universe 행이 있는 보통주
+    halted = _price_row(halted_ticker, D23, 4_200, ohl=False, value=0)
+    halted.update(volume_shr=0, price_kind="reference")
+    prices = _price_rows() + [halted]
+    roots2 = _make_roots(tmp_path / "h", price_rows=prices, adj_rows=_adj_rows(price_rows=prices))
+    target = tmp_path / "quant.db"
+    res = _run(roots2, target, tables=["daily_prices"])
+    assert (res.tables["daily_prices"].n_rows, res.tables["daily_prices"].n_skipped) == (7, 0)
+    assert _rows(target, "SELECT open, high, low, close, volume, amount FROM daily_prices "
+                         f"WHERE stock_code='{halted_ticker}'") == [(4200, 4200, 4200, 4200, 0, 0)]
+
+
 def test_investor_flows_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path) -> None:
     target = tmp_path / "quant.db"
     res = _run(excluded_roots, target, tables=["investor_detail_flows"])

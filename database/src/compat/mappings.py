@@ -66,13 +66,19 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 #   `_compat_meta.n_evening_rows_skipped` 에 남는다.
 #   → D-8 결정 뒤 evening 행 처리 추가(`docs/COMPAT_LAYER.md` §4).
 #   M1 의 G-M2 비교는 확정판(morning, 전 행 krx)만 쓰므로 영향이 없다.
+# 거래정지일 참고가 행(`price_kind='reference'`, 거래량 0): KRX 가 O/H/L 을 '0' 으로 주고 stage 가
+#   NULL 로 둔다. v3 는 그날을 open=high=low=close=참고가 · volume 0 · amount 0 으로 싣는다(로컬 v3
+#   사본 2026-07~08 정지 행 전부 같은 모양). v3 NOT NULL 에 걸려 조용히 빠지던 행(QL-A2 — 10-01~08
+#   재생에서 하루 102~104행)이라 **그 행의 비어 있는 O/H/L 만** 종가로 채운다. v3 외부 계약 때문의
+#   채움이고 equity·모델 입력으로는 돌아가지 않는다(원칙 ④ 는 equity 층 규칙).
+_REF_FILL = "CASE WHEN p.price_kind = 'reference' THEN p.close END"
 _DAILY_PRICES_SQL = f"""
 SELECT
     p.ticker                                       AS stock_code,
     CAST(p.date AS VARCHAR)                        AS trade_date,
-    CAST(p.open AS BIGINT)                         AS open,
-    CAST(p.high AS BIGINT)                         AS high,
-    CAST(p.low AS BIGINT)                          AS low,
+    CAST(coalesce(p.open, {_REF_FILL}) AS BIGINT)  AS open,
+    CAST(coalesce(p.high, {_REF_FILL}) AS BIGINT)  AS high,
+    CAST(coalesce(p.low, {_REF_FILL}) AS BIGINT)   AS low,
     CAST(p.close AS BIGINT)                        AS close,
     CAST(p.volume_shr AS BIGINT)                   AS volume,
     CAST(round(p.value_krw / {KRW_PER_MN}.0) AS BIGINT)  AS amount,

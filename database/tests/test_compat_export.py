@@ -1270,6 +1270,66 @@ def test_score_empty_run_refuses_without_deleting(roots, tmp_path: Path) -> None
     assert _rows(target, "SELECT * FROM score_history") == old
 
 
+@pytest.mark.parametrize(("table", "spec", "col"), [
+    ("score_history", SCOPE, "composite_score"),
+    ("score_history", SCOPE, "stock_code"),
+    ("score_history_v2", V2, "total_score"),
+])
+def test_score_required_null_refuses_before_delete(roots, tmp_path: Path, table: str, spec: str,
+                                                   col: str) -> None:
+    """리뷰 MINOR-1 — v3 NOT NULL 열이 빈 행이 있으면 D 를 지우기 전에 멈춘다.
+
+    전에는 그 행만 건너뛰고(skip) 나머지를 지운 자리에 넣은 뒤, 커밋 후 비율 검사에서 예외가 나
+    D 가 일부 행만 남은 채로 끝났다.
+    """
+    root = tmp_path / "model"
+    rows = _scope_rows(D23_ISO) if spec == SCOPE else _v2_rows(D23_ISO)
+    rows[0][col] = None
+    _write_model_run(root, D23_ISO, MB_D23, {spec: rows})
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930", "999990"), 48 if spec == SCOPE else 21, 1.0)
+    _seed(target, table, old)
+    with pytest.raises(CompatError, match=col):
+        _run(roots, target, tables=[table], model_root=root)
+    assert sorted(_rows(target, f"SELECT * FROM {table}")) == sorted(old)
+
+
+def test_score_duplicate_code_refuses_before_delete(roots, tmp_path: Path) -> None:
+    """리뷰 MINOR-1 — 같은 종목이 두 번 오면 PK 덮어쓰기로 한 행이 조용히 사라진다.
+
+    지우기 전에 멈춘다.
+    """
+    root = tmp_path / "model"
+    rows = _scope_rows(D23_ISO)
+    rows[1]["stock_code"] = rows[0]["stock_code"]
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: rows})
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930", "999990"), 48, 1.0)
+    _seed(target, "score_history", old)
+    with pytest.raises(CompatError, match="중복"):
+        _run(roots, target, tables=["score_history"], model_root=root)
+    assert sorted(_rows(target, "SELECT * FROM score_history")) == sorted(old)
+
+
+def test_score_tables_all_checked_before_any_write(roots, tmp_path: Path) -> None:
+    """리뷰 MINOR-2 — 두 점수 표를 함께 내보낼 때 v2 가 깨졌으면 score_history 도 쓰지 않는다."""
+    root = tmp_path / "model"
+    v2 = _v2_rows(D23_ISO)
+    v2[2]["total_score"] = None
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: _scope_rows(D23_ISO), V2: v2})
+    target = tmp_path / "quant.db"
+    old_v3 = _old_v3_rows(D23_ISO, ("005930", "999990"), 48, 1.0)
+    old_v2 = _old_v3_rows(D23_ISO, ("005930", "999990"), 21, 50.0)
+    _seed(target, "score_history", old_v3)
+    _seed(target, "score_history_v2", old_v2)
+    with pytest.raises(CompatError, match="total_score"):
+        _run(roots, target, tables=["score_history", "score_history_v2"], model_root=root)
+    assert sorted(_rows(target, "SELECT * FROM score_history")) == sorted(old_v3)
+    assert sorted(_rows(target, "SELECT * FROM score_history_v2")) == sorted(old_v2)
+    assert _rows(target, "SELECT status, failed_table FROM _compat_meta") == [
+        ("failed", "score_history_v2")]
+
+
 def test_score_meta_records_spec_build_and_basis(roots, model_root, tmp_path: Path) -> None:
     target = tmp_path / "quant.db"
     res = _run(roots, target, tables=["score_history", "score_history_v2"],

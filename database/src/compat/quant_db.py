@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -457,17 +458,33 @@ def _stocks_rows(cur: duckdb.DuckDBPyConnection, columns: list[str]) -> list[tup
 
 
 def _score_rows(cur: duckdb.DuckDBPyConnection, columns: list[str], table: str,
-                d_iso: str) -> list[tuple]:
+                d_iso: str, required: list[str]) -> list[tuple]:
     """점수 표는 날짜 단위로 갈아 끼우므로(T-16) 다 올려 두고 지우기 전에 본다.
 
-    0행이면 D 의 기존 행을 지운 채 끝나지 않게 지우기 전에 멈춘다. 판 날짜(D)와 다른 `score_date`
-    행이 있으면 지운 날짜와 넣는 날짜가 어긋나므로 역시 멈춘다.
+    아래면 D 의 기존 행을 지운 채 일부만 남기지 않게 BEGIN 전에 멈춘다.
+      · 0행
+      · v3 필수 열(NOT NULL ∪ PK — `required`)이 빈 행 — `_upsert` 는 그 행만 건너뛰고
+        나머지를 넣는다
+      · 같은 `stock_code` 두 번 — PK 덮어쓰기로 한 행이 조용히 사라진다
+      · 판 날짜(D)와 다른 `score_date` — 지운 날짜와 넣는 날짜가 어긋난다
     """
     rows = cur.fetchall()
     if not rows:
         raise CompatEmptyError(
             f"upsert 0행: table={table} — 모델 판 점수 표가 비었다"
             f"(D={d_iso} 기존 행은 그대로 둔다)")
+    i_code = columns.index("stock_code")
+    for col in required:
+        i = columns.index(col)
+        bad = [r[i_code] for r in rows if r[i] is None]
+        if bad:
+            raise CompatError(
+                f"{table}: 필수 열 {col} 이 빈 행 {len(bad)}건 {bad[:5]} — 모델 판이 깨졌다, "
+                "쓰지 않는다")
+    dup = sorted(str(c) for c, n in Counter(r[i_code] for r in rows).items() if n > 1)
+    if dup:
+        raise CompatError(f"{table}: stock_code 중복 {len(dup)}종목 {dup[:5]} — 모델 판이 깨졌다, "
+                          "쓰지 않는다")
     i_date = columns.index("score_date")
     other = sorted({str(r[i_date]) for r in rows if r[i_date] != d_iso})
     if other:
@@ -475,6 +492,16 @@ def _score_rows(cur: duckdb.DuckDBPyConnection, columns: list[str], table: str,
             f"{table}: 판 날짜 {d_iso} 와 다른 score_date {other[:5]} — 모델 판이 깨졌다, "
             "쓰지 않는다")
     return rows
+
+
+def _score_checked(duck: duckdb.DuckDBPyConnection, mapping: TableMapping,
+                   params: dict[str, str], builds: dict[str, dict[str, str]],
+                   required: list[str]) -> tuple[list[str], list[tuple]]:
+    """점수 표 하나를 읽어 `_score_rows` 로 검사한다 — 쓰기 전 단계(리뷰 MINOR-2). (열, 행)."""
+    sql, _ = _render(mapping, params, builds)
+    cur = duck.execute(sql)
+    columns = [d[0] for d in (cur.description or [])]
+    return columns, _score_rows(cur, columns, mapping.v3_table, params["date"], required)
 
 
 def _replace_score_date(table: str, d_iso: str) -> Callable[[sqlite3.Connection], None]:
@@ -783,30 +810,41 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         if not full and any(m.v3_table == "daily_prices" for m in selected):
             _guard_incremental(con, existed)
         current: str | None = None
+        # 리뷰 MINOR-2 — 함께 고른 점수 표는 첫 점수 표를 쓰기 전에 전부 읽어 검사해 둔다
+        # (표 → (열, 행)).
+        # 한 표라도 깨졌으면 점수 표는 하나도 쓰지 않는다. 9표 한 트랜잭션은 QL-F 몫이다.
+        scores: dict[str, tuple[list[str], list[tuple]]] = {}
         try:
             for mapping in selected:
                 current = mapping.v3_table
                 sql, used = _render(mapping, params, builds)
-                cur = duck.execute(sql)
-                columns = [d[0] for d in (cur.description or [])]
-                if mapping.v3_table == "stocks":
-                    rows = _stocks_rows(cur, columns)
-                    if want_estimates:
-                        rows, n_with_est = _apply_model_universe(
-                            rows, columns,
-                            _estimate_tickers(
-                                duck, builds[STAGE][_EXPR + "stg_consensus_annual"], params))
-                    n_rows, n_skipped = _upsert(
-                        con, mapping, columns, [rows], required["stocks"],
-                        _mark_delisted(params["exported_at"]))
-                elif mapping.source_kind == MODEL:
-                    rows = _score_rows(cur, columns, mapping.v3_table, params["date"])
+                if mapping.source_kind == MODEL:
+                    if not scores:
+                        for m in (x for x in selected if x.source_kind == MODEL):
+                            current = m.v3_table
+                            scores[m.v3_table] = _score_checked(
+                                duck, m, params, builds, required[m.v3_table])
+                        current = mapping.v3_table
+                    columns, rows = scores[mapping.v3_table]
                     n_rows, n_skipped = _upsert(
                         con, mapping, columns, [rows], required[mapping.v3_table],
                         pre=_replace_score_date(mapping.v3_table, params["date"]))
                 else:
-                    n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
-                                                required[mapping.v3_table])
+                    cur = duck.execute(sql)
+                    columns = [d[0] for d in (cur.description or [])]
+                    if mapping.v3_table == "stocks":
+                        rows = _stocks_rows(cur, columns)
+                        if want_estimates:
+                            rows, n_with_est = _apply_model_universe(
+                                rows, columns,
+                                _estimate_tickers(
+                                    duck, builds[STAGE][_EXPR + "stg_consensus_annual"], params))
+                        n_rows, n_skipped = _upsert(
+                            con, mapping, columns, [rows], required["stocks"],
+                            _mark_delisted(params["exported_at"]))
+                    else:
+                        n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
+                                                    required[mapping.v3_table])
                 metrics = (_fin_source_counts(con)
                            if mapping.v3_table == "financial_summary" else {})
                 results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics)

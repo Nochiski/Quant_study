@@ -309,7 +309,15 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 - `--apply` 전 검사: ① 작업 트리가 깨끗한가 ② HEAD 가 `origin/main` 을 포함하는가 — 미머지 브랜치는
   `--allow-branch <그 브랜치 이름>` 으로만 허용 ③ `uv run --project backend pytest database/tests -q` 통과
   (`--skip-tests` 로 생략 가능하며 생략 사실이 서버에 남는다).
-- 전송 결과는 서버 `~/quant-ledger/DEPLOYED.json` 에 `{rev, branch, at_utc, by, tests}` 로 기록한다.
+- 그다음 서버 쪽 검사(K1-1e): ⑤ 서버 빌드 락(`/tmp/quant_ledger_build.lock`)을 비차단으로 잡아 rsync 와
+  DEPLOYED.json 기록을 마칠 때까지 쥔다 — 못 잡으면 "다른 빌드·배포가 실행 중" 으로 거부하고 기다리지 않는다(P9).
+  ⑦ 서버 `DEPLOYED.json` 의 rev 가 HEAD 의 조상인가 — main 을 역병합한 브랜치는 ② 를 늘 통과하므로
+  다른 브랜치에서 먼저 민 핫픽스는 이 검사가 지킨다. 알고 되돌릴 때만 `--allow-rollback <서버 rev>`
+  (서버 rev 와 정확히 같아야 한다). dry-run 은 ⑤·⑦ 판정만 출력한다(락은 잡았다가 바로 놓는다).
+- 빌드 크론 시각(06:00·08:10·18:05·21:20, 장 마감 15:41) 근처에는 배포하지 않는다 — 락을 쥔 동안 시작한
+  체인은 그 회차를 건너뛴다.
+- 전송 결과는 서버 `~/quant-ledger/DEPLOYED.json` 에 `{rev, branch, at_utc, by, tests}` 로 기록한다
+  (`--allow-rollback` 으로 덮었으면 `rollback_from` 도).
   **드리프트 조사는 여기서 시작한다** — 서버가 어느 리비전인지 알 수 없어 운영 시간표가 조용히
   되돌아간 사고가 있었다(DEFECT-D05).
 - 두 모드 모두 첫 줄에 "내용이 바뀔 파일 n개" 를 체크섬 기준으로 출력한다(워크트리 체크아웃은 mtime 이

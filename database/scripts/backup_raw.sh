@@ -18,7 +18,8 @@ BACKUP_ROOT="${QL_BACKUP_ROOT:-$HOME/backups/quant-ledger}"
 MIN_FREE_GB=60
 KEEP_SETS=1     # 성공 뒤 남길 세트 수(사용자 결정 09-14: 최신 1세트)
 BACKUP_TIMEOUT="${QL_BACKUP_TIMEOUT:-25m}"   # DB 하나당. 6 DB 최악 150분 = 03:30→06:00 창
-DBS="krx kiwoom kis dart wisereport wiseindex daily_run"   # wiseindex = WICS 주간 스냅샷(09-20)
+DBS="krx kiwoom kis dart wisereport wiseindex daily_run postclose"   # wiseindex = WICS 주간 스냅샷(09-20)
+# postclose = 15:41 장 마감 수집 원장(컷오버 PR-1) — 그날 16:00 창이 지나면 다시 받을 수 없다
 DATE_ARG=""; DRY=""
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -488,14 +488,55 @@ def _wq_rows(t: str, fetched: dt.date, accounts: dict[str, list[float]],
     return rows
 
 
+def _leak_rows(day: dt.date) -> dict[str, list[dict]]:
+    """D 뒤 `day` 날짜의 정보 행 — 재생이 D 뒤 자료를 담은 판을 고정했을 때의 모양(컷오버 PR-4).
+    장 마감 판(T = day, D' = D)이 이 행을 읽으면 A·B 의 컨센서스·재무·속성이 바뀐다. 달력·가격·수급
+    에는 넣지 않는다(연구 판 D' 의 거래일 축은 D' 에서 끝난다 — MD-SEAM)."""
+    stamp = day.strftime("%Y%m%d")
+    matrix = [{"ticker": A, "fetched_date": day, "target_period": period, "acc_cd": acc,
+               "lookback_idx": str(li + 1), "lookback": lb,
+               "target_label": f"{period[:4]}/{period[4:]}", "base_date": day,
+               "value": mval(A, day, period, acc, lb)}
+              for period in ("202612", "202712") for acc in ACC for lb, li in LB.items()]
+    return {
+        "stg_consensus_annual": [_annual_row(A, day, "202512", "A", 800.0, 600.0),
+                                 _annual_row(A, day, "202612", "E", 901.0, 701.0),
+                                 _annual_row(B, day, "202612", "E", 950.0, 750.0)],
+        "stg_consensus_matrix": matrix,
+        "stg_fin_wise": _fin_version(A, day, "cF3002", 50) + _fin_version(A, day, "cF4002", 50),
+        "fin_std": [_fin_std_row(A, dt.date(2026, 6, 30), "11012", day, scale=5.0)],
+        "coverage_daily": [{"ticker": A, "date": day, "analyst_count": 99}],
+        "universe_daily": [{"date": day, "ticker": A, "status": "delisted", "market": "KOSPI",
+                            "sec_type": "common", "halt_state": True, "admin_state": True,
+                            "adv20_krw": 1.0}],
+        "sector_snapshot": [{"ticker": A, "snapshot_date": day, "wics_l1_cd": "G30",
+                             "wics_l1_nm": "필수소비재", "wics_l2_cd": "G3010",
+                             "wics_l2_nm": "식품", "available_date": day}],
+        "audit_opinion": [{"corp_code": corp(A), "bsns_year": "2026", "reprt_code": "11011",
+                           "bsns_year_label": "제11기(당기)", "rcept_no": stamp + "000009",
+                           "adt_opinion": "의견거절의견", "adt_opinion_class": "의견거절",
+                           "available_date": day}],
+        "disclosure_version": [{"rcept_no": stamp + A, "corp_code": corp(A), "rcept_dt": day,
+                                "kind": "half", "is_correction": False,
+                                "legal_deadline": dt.date(2026, 9, 1),
+                                "delay_days": (day - dt.date(2026, 9, 1)).days,
+                                "available_date": day}],
+        "adj_factor": [{"ticker": A, "effective_date": dt.date(2026, 9, 21), "event_id": "a_leak",
+                        "apply_date": dt.date(2026, 9, 21), "factor_ok": False,
+                        "available_date": day, "price_resolution": "unresolved"}],
+    }
+
+
 def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
                drop_fetch_after: dt.date | None = None,
                wise_q: list[dict] | None = None,
                holding: frozenset[str] = frozenset(),
-               fin_wise: list[dict] | None = None) -> tuple[Path, Path]:
+               fin_wise: list[dict] | None = None,
+               leak: dt.date | None = None) -> tuple[Path, Path]:
     """(equity_root, stage_root). `drop_fetch_after` 를 주면 그날 뒤 WISE 수집이 없다(수집 정지).
     `wise_q` 를 주면 stg_fin_wise_q 판을 만든다(없으면 선택 원천 'absent' → 분기는 DART).
-    `fin_wise` 를 주면 stg_fin_wise 를 그 행으로 바꾼다(기본 `_fin_wise()`)."""
+    `fin_wise` 를 주면 stg_fin_wise 를 그 행으로 바꾼다(기본 `_fin_wise()`).
+    `leak` 를 주면 그날 날짜의 정보 행(`_leak_rows`)을 원천에 더한다."""
     eq, st = base / "eq", base / "st"
     equity = {"trading_calendar": _calendar(), "universe_daily": _universe(),
               "security": _security(), "price_daily": _prices(), "price_adj_daily": _adj(),
@@ -503,10 +544,13 @@ def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
               "sector_snapshot": _sector(), "coverage_daily": _coverage_daily(),
               "fin_std": _fin_std(), "dividend_event": _dividend(), "audit_opinion": _audit(),
               "disclosure_version": _disclosure(), "corp": _corp(holding)}
-    for table, rows in equity.items():
-        _make_stage_tree(eq, table, rows, build_id=eq_build)
     stage = {"stg_consensus_annual": _consensus_annual(), "stg_consensus_matrix": _matrix(),
              "stg_fin_wise": _fin_wise() if fin_wise is None else fin_wise}
+    if leak is not None:
+        for table, extra in _leak_rows(leak).items():
+            (equity if table in equity else stage)[table] += extra
+    for table, rows in equity.items():
+        _make_stage_tree(eq, table, rows, build_id=eq_build)
     for table, rows in stage.items():
         if drop_fetch_after is not None:
             rows = [r for r in rows if r["fetched_date"] <= drop_fetch_after]
@@ -1092,9 +1136,12 @@ def test_credit_waits_for_the_arrival_lag(built) -> None:
 
 
 # ── 실패 경로 ────────────────────────────────────────────────────────────────
-def test_evening_basis_is_not_implemented(roots, tmp_path: Path) -> None:
-    with pytest.raises(FactorInputsError, match="W1-a"):
-        build(D_S, "evening", tmp_path / "fi", roots[1], roots[0])
+def test_evening_basis_without_pin_is_refused(roots, tmp_path: Path) -> None:
+    """장 마감 판(evening)은 `--builds-from` 으로 직전 거래일 확정판을 고정해야만 짓는다(T-2 ·
+    PR-3 가드). 고정 없이 current 판을 읽으면 낡은 판을 조용히 쓰게 된다(P1)."""
+    with pytest.raises(FactorInputsError, match="--builds-from"):
+        build("20260929", "evening", tmp_path / "fi", roots[1], roots[0])
+    assert not (tmp_path / "fi").exists()
 
 
 def test_unknown_basis_and_bad_date_refuse(roots, tmp_path: Path) -> None:
@@ -1348,6 +1395,201 @@ def test_evening_fi_reads_morning_equity_builds_only_when_pinned() -> None:
     for pinned in (False, True):
         with pytest.raises(FactorInputsError, match="접두어"):
             _check_basis({"price_daily": evening_build}, "morning", pinned=pinned)
+
+
+# ── 장 마감 판(evening) 세션·유니버스·시점 (컷오버 PR-4 · T-2) ──────────────────────
+# 장 마감 판 T = D 다음 거래일. 판은 D 아침 확정판(D' = D)을 `--builds-from` 으로 고정해 읽는다.
+T = dt.date(2026, 9, 29)
+T_S = "20260929"
+# 과거 행만 담는 표 — 장 마감 판이 아침판(D')과 바이트까지 같아야 한다(과거 행 재계산 없음)
+INFO_TABLES = ("fi_prices", "fi_adj_prices", "fi_consensus", "fi_consensus_annual",
+               "fi_fin_summary")
+UNI_CARRIED = ("ticker, name, market, sec_type, listed_date, shares, sector_l1, sector_l1_name, "
+               "sector_l2, sector_l2_name, has_estimates, coverage_state, coverage_age_days, "
+               "n_analysts, adv20, is_admin, is_halted, audit_adverse, filing_late")
+
+
+def _cal_dir(base: Path, holidays: set[dt.date] = HOLIDAYS) -> Path:
+    """`daily.calendar` 판정 연도 파일(kis_holidays_2026.json) — 합성 트리와 같은 휴장일."""
+    d = base / "calendar"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "kis_holidays_2026.json").write_text(json.dumps(
+        {"year": 2026, "holidays": sorted(h.strftime("%Y%m%d") for h in holidays)}),
+        encoding="utf-8")
+    return d
+
+
+@pytest.fixture(scope="module")
+def evening(tmp_path_factory) -> SimpleNamespace:
+    """T 날짜 정보 행이 섞인 원천(`leak=T`) 위에 아침판(D)과 장 마감 판(T)을 같은 판으로 짓는다.
+    T 행(가격·수급)은 아직 없다 — 얹기는 PR-5 라 eligible 0 이고 하한도 0 으로 둔다."""
+    base = tmp_path_factory.mktemp("fi_evening")
+    eq, st = make_roots(base / "src", leak=T)
+    cal = _cal_dir(base)
+    hist = _history(base / f"{D_S}_morning.json")
+    m = build(D_S, "morning", base / "fi_m", st, eq, grace_days=5, min_eligible=5,
+              golden_path=None)
+    e = build(T_S, "evening", base / "fi_e", st, eq, grace_days=5, min_eligible=0,
+              golden_path=None, builds_from=hist, calendar_dir=cal)
+    return SimpleNamespace(st=st, m=m, e=e, out_m=base / "fi_m", out_e=base / "fi_e")
+
+
+def test_evening_build_commits_on_the_pinned_d_prime_build(evening) -> None:
+    """`--basis evening` 이 열린다 — 판 id e_, `_runs/<T>_evening.json`, asof = D'. T 행은 아직
+    없어(PR-5) 가격 T 행 0 · eligible 0 으로 통과한다."""
+    e = evening.e
+    assert evening.m.ok
+    assert e.ok, [(g.name, g.detail) for g in e.gates if g.status.value == "fail"]
+    assert e.build_id.startswith("e_") and (e.basis, e.date) == ("evening", "2026-09-29")
+    assert e.run_manifest == evening.out_e / "_runs" / f"{T_S}_evening.json"
+    run = json.loads(e.run_manifest.read_text(encoding="utf-8"))
+    assert (run["date"], run["asof"], run["builds_from_date"]) == ("2026-09-29", "2026-09-28", D_S)
+    latest = json.loads((evening.out_e / "latest_evening.json").read_text(encoding="utf-8"))
+    assert latest["build_id"] == e.build_id
+    assert all(manifest.load(evening.out_e / t / "MANIFEST.json").current_build == e.build_id
+               for t in FI_TABLES)
+    by_name = {g.name: g for g in e.gates}
+    assert by_name["FG2"].metrics["n_t_price_rows"] == 0
+    assert by_name["FG1"].metrics["n_eligible"] == 0
+    # 아침판은 asof = D(그대로)
+    assert json.loads(evening.m.run_manifest.read_text(encoding="utf-8"))["asof"] == "2026-09-28"
+
+
+def test_evening_sessions_are_the_research_calendar_plus_t(evening) -> None:
+    """세션 = 연구 판 trading_calendar(D' 까지) ∪ {T}. 수급 60 세션 창이 T 에서 끝나고(T 행 자리 —
+    지금은 59 세션), 신용잔고는 T 에 실입수되는 행(T 의 3 세션 전)까지 싣는다(아침판 D' 는 한 세션
+    앞까지)."""
+    sessions = [*SESSIONS, T]
+    run = json.loads(evening.e.run_manifest.read_text(encoding="utf-8"))
+    assert run["window"]["to"] == "2026-09-29"
+    assert run["window"]["flow_from"] == sessions[-60].isoformat()
+    flows = q(evening.out_e, "fi_flows", f"SELECT date FROM t WHERE ticker = '{A}' ORDER BY date")
+    assert [r[0] for r in flows] == sessions[-60:-1]
+    credit = q(evening.out_e, "fi_credit", "SELECT date, available_date FROM t "
+                                           f"WHERE ticker = '{A}' ORDER BY date")
+    assert credit[-1] == (sessions[-4], T)
+    assert q(evening.out_m, "fi_credit", "SELECT max(date), max(available_date) FROM t "
+                                         f"WHERE ticker = '{A}'") == [(SESSIONS[-4], D)]
+    assert q(evening.out_e, "fi_prices", "SELECT max(date) FROM t") == [(D,)]
+
+
+def test_evening_universe_carries_the_d_prime_rows(evening) -> None:
+    """유니버스 T 행 = universe_daily D' 행 이월. 종목·속성·신선도는 아침판(D')과 같고 다른 것은
+    date = T · 시총 기준 't1_shares_x_t_close' · T 종가가 없어 시총 NULL·no_price 뿐이다. 원천의
+    T 날짜 행(A 상장폐지·관리·정지, 추정기관 99, WICS G30, 감사 의견거절, 지연 제출)은 읽지
+    않는다."""
+    sql = f"SELECT {UNI_CARRIED} FROM t ORDER BY ticker"
+    assert q(evening.out_e, "fi_universe", sql) == q(evening.out_m, "fi_universe", sql)
+    assert q(evening.out_e, "fi_universe", "SELECT DISTINCT date, market_cap, mktcap_basis, "
+                                           "eligible FROM t") == [
+        (T, None, "t1_shares_x_t_close", False)]
+    reasons = dict(q(evening.out_e, "fi_universe", "SELECT ticker, exclude_reason FROM t"))
+    assert reasons == {**{t: "no_price" for t in LAYER}, G: "sec_type"}
+    assert q(evening.out_e, "fi_universe", "SELECT shares, n_analysts, sector_l1, is_admin, "
+                                           "is_halted, audit_adverse, filing_late FROM t "
+                                           f"WHERE ticker = '{A}'") == [
+        (SHARES[A], 10, "G15", False, False, False, False)]
+
+
+def test_evening_cuts_wise_dart_and_events_at_d_prime(evening) -> None:
+    """WISE·DART·재무·기업행위 입력은 fetched/available ≤ D' 로 자른다 — 원천에 T 날짜 행이 있어도
+    과거 행 표 5개가 아침판(D')과 바이트까지 같다. T 까지 읽으면 A·B 컨센서스(09-29 판)·A 재무
+    (+50 판·반기 재제출)·A adj_ok(09-21 미해결 사건)가 바뀐다. WISE 신선도 기준일도 D'."""
+    path = evening.st / "stg_consensus_annual" / f"v={ST_BUILD}" / "part0.parquet"
+    assert duckdb.sql(f"SELECT max(fetched_date) FROM read_parquet('{path}')").fetchone() == (T,)
+    for t in INFO_TABLES:
+        assert evening.e.tables[t]["content_hash"] == evening.m.tables[t]["content_hash"], t
+    assert q(evening.out_e, "fi_consensus", "SELECT ticker, max(fetched_date) FROM t WHERE ticker "
+                                            f"IN ('{A}', '{B}') GROUP BY 1 ORDER BY 1") == [
+        (A, D), (B, dt.date(2026, 9, 23))]
+    assert q(evening.out_e, "fi_fin_summary", "SELECT max(available_date) FROM t") == [(D,)]
+    fresh = next(g for g in evening.e.gates if g.name == "FG-fresh")
+    assert (fresh.metrics["last_collection_date"], fresh.metrics["collection_expected_date"],
+            fresh.metrics["collection_lag_sessions"]) == ("2026-09-28", "2026-09-28", 0)
+
+
+@pytest.mark.parametrize(("stop", "lag", "passed"), [
+    (None, 0, True),                     # 정상 — 전날 저녁(D') 수집
+    (dt.date(2026, 9, 23), 1, True),     # D' 수집 하나 빠짐 — 허용치 1(N-12)
+    (dt.date(2026, 9, 22), 2, False),    # 두 거래일 빠짐 → FAIL
+])
+def test_evening_wise_lag_counts_to_the_expected_collection_day(tmp_path: Path,
+                                                                stop: dt.date | None, lag: int,
+                                                                passed: bool) -> None:
+    """N-12 허용치 1거래일을 예상 수집일 D' 기준으로 잰다. T 기준으로 재면 정상 상태가 lag 1 이
+    되어, 하루만 빠져도(09-23 정지) lag 2 로 미발송된다."""
+    eq, st = make_roots(tmp_path / "src", drop_fetch_after=stop)
+    res = build(T_S, "evening", tmp_path / "fi", st, eq, grace_days=5, min_eligible=0,
+                golden_path=None, builds_from=_history(tmp_path / f"{D_S}_morning.json"),
+                calendar_dir=_cal_dir(tmp_path))
+    fresh = next(g for g in res.gates if g.name == "FG-fresh")
+    assert fresh.metrics["collection_lag_sessions"] == lag
+    assert fresh.metrics["collection_expected_date"] == "2026-09-28"
+    assert (fresh.status.value == "pass") is passed, fresh.detail
+
+
+@pytest.mark.parametrize(("case", "date", "want"), [
+    ("t_holiday", T_S, ["T=2026-09-29", "거래일이 아니다"]),
+    ("d_prime_behind", "20260930", ["MD-SEAM", "D'=2026-09-29", "마지막=2026-09-28"]),
+    ("t_already_in_build", D_S, ["MD-SEAM", "D'=2026-09-23", "마지막=2026-09-28"]),
+    ("calendar_missing", T_S, ["T=2026-09-29", "판정 불가"]),
+])
+def test_evening_session_mismatch_stops_with_rc2(roots, tmp_path: Path, capsys, case: str,
+                                                 date: str, want: list[str]) -> None:
+    """(a) T 가 daily.calendar 거래일 · (b) T 의 직전 거래일 = 연구 판 trading_calendar 마지막
+    (MD-SEAM). 어긋나면 판을 만들지 않고 rc 2 로 멈추며 사유를 남긴다 — T 가 휴장일 · 연구 판이
+    D' 까지 오지 않음(T 가 하루 뒤) · 연구 판이 이미 T 를 담음 · 판정 달력 없음."""
+    if case == "calendar_missing":
+        cal = tmp_path / "no_calendar"
+        cal.mkdir()
+    else:
+        cal = _cal_dir(tmp_path, HOLIDAYS | {T} if case == "t_holiday" else HOLIDAYS)
+    out = tmp_path / "fi"
+    rc = cli_main(["build", "--date", date, "--basis", "evening", "--root", str(out),
+                   "--stage-root", str(roots[1]), "--equity-root", str(roots[0]),
+                   "--min-eligible", "0", "--calendar-dir", str(cal),
+                   "--builds-from", str(_history(tmp_path / f"{D_S}_morning.json"))])
+    err = capsys.readouterr().err
+    assert rc == 2, err
+    assert all(w in err for w in want), err
+    assert not any((out / t / "MANIFEST.json").exists() for t in FI_TABLES)
+    assert not (out / "_tmp").exists() or not any((out / "_tmp").iterdir())
+
+
+def test_evening_market_cap_is_d_prime_shares_times_t_close(roots) -> None:
+    """시총 자리(B-24): T 행을 얹는 쪽(PR-5)이 `_t_prices` 에 T 종가를 채우면 market_cap =
+    round(D' 주식수 × T 종가 / 1e8) · 't1_shares_x_t_close' 이고 T 종가가 있는 종목만 no_price 를
+    벗는다. D' 주식수나 T 종가가 없으면 시총은 NULL(P1). PR-4 의 `_t_prices` 는 빈 표다."""
+    from factor_inputs import queries
+    from factor_inputs.build import EQUITY_SOURCES, STAGE_SOURCES, _resolve
+    con = duckdb.connect()
+    try:
+        for root, tables, stage in ((roots[0], EQUITY_SOURCES, False),
+                                    (roots[1], STAGE_SOURCES, True)):
+            for name, expr in _resolve(root, tables, stage)[1].items():
+                con.execute(f'CREATE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+        p = queries.Params(d=T.isoformat(), fy="202612", price_from="2025-03-28",
+                           flow_from=SESSIONS[-59].isoformat(), grace_days=5, credit_lag=3,
+                           basis="evening", asof=D.isoformat())
+        con.execute(queries.calendar_sql(T.isoformat()))
+        for sql in queries.coverage_sqls(p):
+            con.execute(sql)
+        sqls = dict(queries.table_sqls(p, UniverseRule(coverage_grace_days=5)))
+        con.execute(sqls["_t_prices"])
+        assert con.execute("SELECT count(*) FROM _t_prices").fetchone() == (0,)
+        con.execute("INSERT INTO _t_prices (ticker, date, close, price_source) VALUES "
+                    f"('{A}', DATE '{T}', 123456, 'evening_snapshot'), "
+                    f"('{K}', DATE '{T}', 7000, 'evening_snapshot')")
+        con.execute(sqls["fi_universe"])
+        got = {r[0]: r[1:] for r in con.execute(
+            "SELECT ticker, shares, market_cap, mktcap_basis, eligible, exclude_reason "
+            "FROM _fi_universe").fetchall()}
+    finally:
+        con.close()
+    assert got[A] == (SHARES[A], float(round(SHARES[A] * 123_456 / 1e8)), "t1_shares_x_t_close",
+                      True, None)
+    assert got[K] == (None, None, "t1_shares_x_t_close", True, None)   # D' KRX 행 없음
+    assert got[B] == (SHARES[B], None, "t1_shares_x_t_close", False, "no_price")
 
 
 def test_cli_return_codes(roots, tmp_path: Path, capsys) -> None:

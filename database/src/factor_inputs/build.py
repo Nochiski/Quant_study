@@ -28,6 +28,16 @@
   current 모드와 같이 빈 표(`absent`)로 대신한다(이력에 키가 있는데 판이 없으면 rc 2).
 이력이 D' = 직전 거래일인지는 여기서 보지 않는다(장 마감 체인 PR-8 이 경로를 고를 때 맞춘다).
 이력 경로·날짜는 판 manifest `builds_from`·`builds_from_date` 에 남는다.
+
+장 마감 판(`--basis evening`, 컷오버 T-2 · PR-4): --date 는 오늘 T, 원천은 직전 거래일 D' 아침
+확정판을 `--builds-from` 으로 고정한 것뿐이다(고정 없으면 rc 2). 세션 = 연구 판 trading_calendar ∪
+{T}, 유니버스 = D' 행 이월, 정보 시점(asof) = D' (`queries` 모듈 docstring '두 날짜'). 다음이면
+`FactorInputsError`(rc 2) — 사유를 메시지에 남긴다:
+  (a) T 가 `daily.calendar` 거래일이 아니다(휴장·주말) 또는 판정 달력을 못 읽는다
+  (b) MD-SEAM — `daily.calendar` 의 T 직전 거래일 D' ≠ 연구 판 trading_calendar 의 마지막 날
+      (연구 판이 D' 까지 오지 않았거나, 이미 T 를 담고 있다)
+T 행(가격·수정주가·수급)은 아직 얹지 않는다 — 자리(`queries.t_prices_sql`)만 있고 채우는 것은
+PR-5 다.
 """
 from __future__ import annotations
 
@@ -40,6 +50,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
+from daily import calendar as daily_calendar
 from equity import handoff, inputs
 from equity.rules_s10 import FIELDS as CREDIT_FIELDS
 from model.contracts import FI_TABLES, UniverseRule
@@ -59,9 +70,11 @@ from . import gates, queries
 # 1.4.0(2026-10-13 예정, 배포 묶음 7 · N-37): fi_fin_summary WISE 연간 판을 (종목, ep) 단위 최신 ≤ D 로
 # (stage 2.7.0 연속 판 접기 — D7-4), available_date 의 WISE 날짜가 '처음 본 날'로,
 # FG1 손익(op·ni) 비율 기록(D7-8)
-RULES_VERSION = "fi1.4.0"
+# 1.5.0(2026-10-10, 컷오버 PR-4 · T-2): 장 마감 판(evening) 세션·유니버스·시점 — 세션 = 연구 판
+# 달력 ∪ {T}, 유니버스 = D' 행 이월 · 시총 = D' 주식수 × T 종가(`t1_shares_x_t_close`, T 행 자리
+# `_t_prices`), WISE·DART·재무·속성·기업행위 입력 fetched/available ≤ D'(asof). 아침판 SQL 은 그대로
+RULES_VERSION = "fi1.5.0"
 LAYER = "factor_inputs"
-BASES_IMPLEMENTED = ("morning",)
 BASES_KNOWN = ("evening", "morning")
 # eligible 하한 — 09-23 실측 580 · 09-28 619 의 절반. 빈 유니버스를 성공으로 쓰지 않는다
 MIN_ELIGIBLE_DEFAULT = 300
@@ -200,6 +213,37 @@ def _load_handoff(path: Path, d: date) -> handoff.Handoff:
     return h
 
 
+def _evening_dprime(t: date, calendar_dir: Path | None) -> date:
+    """장 마감 판 조건 (a) — T 가 `daily.calendar` 거래일이어야 한다. T 의 직전 거래일 D' 를 준다.
+    달력을 못 읽거나 그 해를 덮지 않으면 영업일을 가정하지 않고 멈춘다(K1-9 ⑦)."""
+    try:
+        cal = (daily_calendar.load() if calendar_dir is None
+               else daily_calendar.load(calendar_dir))
+        is_session = cal.is_trading_day(t)
+        dprime = cal.prev_trading_day(t)
+    except (daily_calendar.CalendarUnavailable, KeyError) as e:
+        raise FactorInputsError(f"장 마감 판 T={t.isoformat()} 거래일 판정 불가 — "
+                                f"daily.calendar 를 읽지 못했다(calendar_dir={calendar_dir}): "
+                                f"{e}") from e
+    if not is_session:
+        raise FactorInputsError(f"장 마감 판 T={t.isoformat()} 는 daily.calendar 거래일이 아니다"
+                                "(휴장·주말) — 잠정 세션을 만들지 않는다")
+    return dprime
+
+
+def _check_seam(con: duckdb.DuckDBPyConnection, t: date, dprime: date,
+                origin: Path | None) -> None:
+    """장 마감 판 조건 (b) MD-SEAM — 고정한 연구 판의 거래일 축이 D'(T 의 직전 거래일)에서 끝나야
+    T 를 잠정 세션으로 붙일 수 있다. 앞이면 연구 판이 D' 까지 오지 않았고(낡은 판), 뒤면 판이 이미
+    T 를 담고 있다(T 가 두 번 선다)."""
+    last = _one(con, "SELECT max(date) FROM trading_calendar")
+    if last != dprime:
+        raise FactorInputsError(
+            f"장 마감 판 이음매(MD-SEAM) 불일치: T={t.isoformat()} 의 직전 거래일 "
+            f"D'={dprime.isoformat()}(daily.calendar) ≠ 연구 판 trading_calendar 마지막={last} "
+            f"— 연구 판이 D' 에서 끝나야 한다(이력={origin})")
+
+
 def _check_basis(equity_builds: dict[str, str], basis: str, pinned: bool) -> None:
     """아침판에 저녁 equity 판(`e_`)을 섞지 않는다. 수동 재빌드(`b_`)는 허용(compat R5 와 같다).
     장 마감(evening) fi 가 아침 확정판(`m_`)을 읽는 것은 `--builds-from` 으로 날짜를 고정했을 때만
@@ -273,19 +317,23 @@ def _one(con: duckdb.DuckDBPyConnection, sql: str) -> object:
 def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Path, *,
           grace_days: int | None = None, min_eligible: int = MIN_ELIGIBLE_DEFAULT,
           golden_path: Path | None = GOLDEN_PATH, keep: int = KEEP_DEFAULT,
-          build_id: str | None = None, builds_from: Path | None = None) -> BuildResult:
+          build_id: str | None = None, builds_from: Path | None = None,
+          calendar_dir: Path | None = None) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 factor_inputs 8표를 굽는다. 게이트 FAIL 은 결과 status 로,
     입력·인자 오류는 `FactorInputsError` 로 낸다. `builds_from`(인계 이력 JSON)을 주면 원천 판을
-    current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정')."""
+    current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정'). `calendar_dir` 는
+    장 마감 판의 거래일 판정 달력(`daily.calendar` 연도 파일 폴더, 없으면 그 모듈 기본 경로)."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
         raise FactorInputsError(f"--basis 는 {BASES_KNOWN} 중 하나: {basis!r}")
-    if basis not in BASES_IMPLEMENTED:
+    evening = basis == "evening"
+    if evening and builds_from is None:
         raise FactorInputsError(
-            "--basis evening 은 아직 미구현이다(W1-a: equity evening_snapshot 표가 선 뒤 "
-            "T 오버레이). "
-            "D-8 = 모델은 아침 확정판만 쓴다")
+            "--basis evening 은 --builds-from(직전 거래일 아침 확정판 인계 이력)으로 판을 "
+            "고정해야만 짓는다(T-2) — 고정 없이 current 판을 읽으면 낡은 판을 조용히 쓰게 "
+            "된다(P1)")
+    dprime = _evening_dprime(d, calendar_dir) if evening else None
     rule = UniverseRule() if grace_days is None else UniverseRule(coverage_grace_days=grace_days)
     if rule.coverage_grace_days < 0:
         raise FactorInputsError(f"--grace-days 는 0 이상: {rule.coverage_grace_days}")
@@ -317,7 +365,10 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         for name, expr in {**eq_exprs, **st_exprs}.items():
             con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
         _check_columns(con, equity_builds)
-        con.execute(queries.calendar_sql())
+        if dprime is not None:
+            _check_seam(con, d, dprime, builds_from)
+        asof = d_iso if dprime is None else dprime.isoformat()
+        con.execute(queries.calendar_sql(d_iso if evening else None))
         if not _one(con, f"SELECT count(*) FROM _calx WHERE date = DATE '{d_iso}'"):
             raise FactorInputsError(
                 f"D={d_iso} 는 trading_calendar 의 거래일이 아니다(휴장일 또는 달력 밖 — 달력 "
@@ -328,13 +379,15 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             d=d_iso, fy=f"{d.year}12",
             price_from=(d - timedelta(days=queries.PRICE_WINDOW_DAYS)).isoformat(),
             flow_from=str(flow_from), grace_days=rule.coverage_grace_days,
-            credit_lag=_credit_lag_sessions())
+            credit_lag=_credit_lag_sessions(), basis=basis, asof=asof)
         for sql in queries.coverage_sqls(p):
             con.execute(sql)
         dstar = _one(con, "SELECT dstar FROM _dstar")
+        # N-12 수집 지연 = (D*, 예상 수집일] 거래일 수. 예상 수집일 = asof — 장 마감 판은 D'(T 저녁
+        # 수집은 아직 없다). T 로 재면 정상 상태가 lag 1 이 되어 하루만 빠져도 FAIL 이다.
         lag = None if dstar is None else int(str(_one(
             con, f"SELECT count(*) FROM _calx WHERE date > DATE '{dstar}' "
-                 f"AND date <= DATE '{d_iso}'")))
+                 f"AND date <= DATE '{asof}'")))
         for _, sql in queries.table_sqls(p, rule):
             con.execute(sql)
 
@@ -355,7 +408,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         ctx = gates.GateContext(
             con=con, date=d_iso, basis=basis, price_from=p.price_from, flow_from=p.flow_from,
             rule=rule, min_eligible=min_eligible, dstar=None if dstar is None else str(dstar),
-            collection_lag_sessions=lag, golden=gates.load_golden(golden_path))
+            collection_lag_sessions=lag, golden=gates.load_golden(golden_path), asof=asof)
         results = gates.run_all(ctx)
     except BaseException:
         shutil.rmtree(tmp_root, ignore_errors=True)
@@ -379,6 +432,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     run_manifest = root / "_runs" / f"{d.strftime('%Y%m%d')}_{basis}.json"
     payload: dict[str, object] = {
         "layer": LAYER, "status": status, "build_id": bid, "date": d_iso, "basis": basis,
+        "asof": asof,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rules_version": RULES_VERSION,
         "equity_root": str(Path(equity_root).resolve()),

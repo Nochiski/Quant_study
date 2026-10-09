@@ -14,7 +14,15 @@ compat 가 나중에 이 층을 읽어 v3 `quant.db` 에 쓸 때 다시 반올�
   · eligible 에 시총 하한을 걸지 않는다(엔진이 spec.universe.min_market_cap 으로 건다)
 
 임시 표 이름 규약: 산출 8표는 `_<표>`(예 `_fi_universe` — 접두 `_` 는 원천 뷰와 섞이지 않게), 보조는
-`_calx`(거래일 번호)·`_dstar`(마지막 수집일)·`_cov`(종목별 신선도).
+`_calx`(거래일 번호)·`_dstar`(마지막 수집일)·`_cov`(종목별 신선도)·`_t_prices`(장 마감 판 T 행
+자리).
+
+두 날짜(컷오버 PR-4 · T-2): `Params.d` 는 판 기준일(세션·창의 끝), `Params.asof` 는 정보 시점이다.
+아침판은 둘 다 D 다. 장 마감 판(basis evening)은 d = 오늘 T, asof = D'(직전 거래일 = 고정한 연구
+판의 마지막 세션)이다. WISE·DART·재무·종목 속성·기업행위 입력은 fetched/available ≤ asof 로
+자른다(compat `--consensus-asof` 와 같은 개념 — 기본값이 D 인 것도 같다). 그래야 재생이 D' 뒤
+자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다. 세션 창(가격 550 달력일·수급·
+신용 60 세션)은 T 에서 끝난다.
 """
 from __future__ import annotations
 
@@ -79,17 +87,27 @@ DPS_STOCK_KINDS = ("보통주", "보통주식")
 DPS_FALLBACK_KIND = "-"
 QUARTER_REPORTS = ("11013", "11012", "11014", "11011")  # 1Q · 반기 · 3Q · 4Q(사업보고서 차감)
 
+# 장 마감 판(evening) T 행 어휘 — 계약 `fi_prices.price_source`·`fi_universe.mktcap_basis` 주석
+T_PRICE_SOURCE = "evening_snapshot"        # T 행 가격 출처(T 전 행은 'krx')
+T_MKTCAP_BASIS = "t1_shares_x_t_close"     # 시총 = D' 상장주식수 × T 종가(B-24)
+
 
 @dataclass(frozen=True)
 class Params:
     """한 판의 스칼라. 전부 `build.py` 가 검증한 값이다(SQL 에 리터럴로 들어간다)."""
 
-    d: str                  # 판 기준일 D (YYYY-MM-DD)
+    d: str                  # 판 기준일 D (YYYY-MM-DD) — 장 마감 판이면 오늘 T
     fy: str                 # 당해 12월기 'YYYY12' — 추정치 신선도 판정 기준(compat 과 같다)
     price_from: str         # D − 550 달력일
     flow_from: str          # D 까지 60 세션의 첫 세션
     grace_days: int         # UniverseRule.coverage_grace_days
     credit_lag: int         # 신용잔고 실입수 랙(세션, equity FieldProfile)
+    basis: str = "morning"  # morning | evening(장 마감 판 — 컷오버 T-2)
+    asof: str = ""          # 정보 시점(YYYY-MM-DD) — 비우면 d. 장 마감 판은 D'(모듈 docstring)
+
+    def __post_init__(self) -> None:
+        if not self.asof:
+            object.__setattr__(self, "asof", self.d)
 
 
 def _lit_list(values: tuple[str, ...]) -> str:
@@ -110,17 +128,22 @@ def create(table: str, inner: str) -> str:
 
 
 # ── 달력 · 신선도(T2.11) ──────────────────────────────────────────────────────
-def calendar_sql() -> str:
-    """거래일 번호표 — 세션 간격(유예 나이·신용 랙)을 번호 차로 센다."""
+def calendar_sql(t_session: str | None = None) -> str:
+    """거래일 번호표 — 세션 간격(유예 나이·신용 랙)을 번호 차로 센다.
+
+    장 마감 판은 연구 판 달력(D' 까지)에 오늘 `t_session`(T)을 잠정 세션으로 더한다(컷오버 PR-4).
+    T 가 거래일인지 · D' 가 T 의 직전 거래일인지는 `build` 가 `daily.calendar` 로 먼저 본다."""
+    extra = "" if t_session is None else f" UNION SELECT DATE '{t_session}'"
     return ("CREATE OR REPLACE TEMP TABLE _calx AS\n"
             "SELECT date, row_number() OVER (ORDER BY date) AS idx\n"
-            "FROM (SELECT DISTINCT date FROM trading_calendar WHERE date IS NOT NULL)")
+            f"FROM (SELECT DISTINCT date FROM trading_calendar WHERE date IS NOT NULL{extra})")
 
 
 def coverage_sqls(p: Params) -> list[str]:
     """종목별 신선도 `_cov`(T2.11 · 유예 규칙 = layer-fixes §3-2).
 
-    D* = `stg_consensus_annual` 에서 fetched_date ≤ D 인 **마지막 수집일**(전 종목 공통).
+    D* = `stg_consensus_annual` 에서 fetched_date ≤ asof 인 **마지막 수집일**(전 종목 공통 —
+    아침판 asof = D, 장 마감 판 asof = D').
     종목의 마지막 신선일 = 당해 12월기 추정(period_kind 'E', period = fy)의 op·ni 가 **둘 다** 있는
     fetched_date 의 최댓값(compat `ESTIMATE_TICKERS_SQL` 과 같은 판정).
       fresh  = 마지막 신선일 = D*               (나이 0)
@@ -131,12 +154,12 @@ def coverage_sqls(p: Params) -> list[str]:
     """
     dstar = ("CREATE OR REPLACE TEMP TABLE _dstar AS\n"
              "SELECT max(fetched_date) AS dstar FROM stg_consensus_annual\n"
-             f"WHERE fetched_date <= DATE '{p.d}'")
+             f"WHERE fetched_date <= DATE '{p.asof}'")
     cov = f"""CREATE OR REPLACE TEMP TABLE _cov AS
 WITH fresh AS (
     SELECT ticker, max(fetched_date) AS last_fresh
     FROM stg_consensus_annual
-    WHERE fetched_date <= DATE '{p.d}'
+    WHERE fetched_date <= DATE '{p.asof}'
       AND period_kind = 'E' AND period = '{p.fy}'
       AND op IS NOT NULL AND ni IS NOT NULL
     GROUP BY ticker
@@ -198,22 +221,42 @@ def universe_sql(p: Params, rule: UniverseRule) -> str:
                       `disclosure_version.legal_deadline` 은 기말 + 90/45 역일이라 주말·휴장 보정이
                       없다 → 기한이 휴장일이면 **다음 거래일**로 민다(정상 제출이 +1~+2 일로 '지연'
                       되는 오판 방지). 아직 제출하지 않은 보고서(미제출)는 이 열이 보지 못한다.
+
+    장 마감 판(basis evening, 컷오버 PR-4): 종목·속성(위 재료·업종·신선도)은 `universe_daily` 의
+    **D' 행 이월**이다(새 규칙 — 상태 변화는 다음 날 아침 확정판에서. T 신규 상장은 빠진다).
+    date 열만 T 다. 시총 = round(D' KRX 상장주식수 × T 종가 / 1e8), mktcap_basis =
+    `T_MKTCAP_BASIS`. T 종가는 T 행 자리 `_t_prices` 에서 읽는다 — 거기 종가가 없으면 close·시총
+    NULL(no_price, P1).
     """
+    if p.basis == "evening":
+        px = f"""px AS (
+    SELECT u.ticker, t.close, s.shares_out
+    FROM u
+    LEFT JOIN price_daily s
+           ON s.ticker = u.ticker AND s.date = DATE '{p.asof}' AND s.basis = 'krx'
+    LEFT JOIN _t_prices t
+           ON t.ticker = u.ticker AND t.date = DATE '{p.d}' AND t.close IS NOT NULL
+)"""
+        mktcap_basis = T_MKTCAP_BASIS
+    else:
+        px = f"""px AS (
+    SELECT ticker, close, shares_out FROM price_daily
+    WHERE date = DATE '{p.d}' AND basis = 'krx' AND close IS NOT NULL
+)"""
+        mktcap_basis = "krx"
+    mktcap_lit = f"'{mktcap_basis}'".ljust(42)      # 열 정렬 — 아침판 SQL 글자가 바뀌지 않게
     inner = f"""WITH u AS (
     SELECT ticker, market, sec_type, halt_state, admin_state, adv20_krw FROM universe_daily
-    WHERE date = DATE '{p.d}' AND status IN ({_lit_list(LIVE_STATUSES)})
+    WHERE date = DATE '{p.asof}' AND status IN ({_lit_list(LIVE_STATUSES)})
       AND market IN ({_lit_list(MARKETS_IN_LAYER)})
       AND sec_type NOT IN ({_lit_list(EXCLUDED_SEC_TYPES)})
 ),
-px AS (
-    SELECT ticker, close, shares_out FROM price_daily
-    WHERE date = DATE '{p.d}' AND basis = 'krx' AND close IS NOT NULL
-),
+{px},
 sect AS (
     SELECT ticker, wics_l1_cd, wics_l1_nm, wics_l2_cd, wics_l2_nm,
            row_number() OVER (PARTITION BY ticker ORDER BY snapshot_date DESC) AS rn
     FROM sector_snapshot
-    WHERE snapshot_date <= DATE '{p.d}' AND available_date <= DATE '{p.d}'
+    WHERE snapshot_date <= DATE '{p.asof}' AND available_date <= DATE '{p.asof}'
 ),
 aud AS (
     SELECT s.ticker, a.adt_opinion_class,
@@ -225,7 +268,7 @@ aud AS (
                             DESC NULLS LAST,
                         a.adt_opinion_class, a.rcept_no DESC) AS rn
     FROM audit_opinion a JOIN security s ON s.corp_code = a.corp_code
-    WHERE a.reprt_code = '{ANNUAL_REPORT}' AND a.available_date <= DATE '{p.d}'
+    WHERE a.reprt_code = '{ANNUAL_REPORT}' AND a.available_date <= DATE '{p.asof}'
       AND coalesce(a.bsns_year_label, '') NOT LIKE '%전%'
       AND a.adt_opinion IS NOT NULL
       AND s.ticker IN (SELECT ticker FROM u)
@@ -233,7 +276,7 @@ aud AS (
 filing AS (
     SELECT s.ticker, v.rcept_dt, v.rcept_no, v.legal_deadline
     FROM disclosure_version v JOIN security s ON s.corp_code = v.corp_code
-    WHERE NOT coalesce(v.is_correction, false) AND v.available_date <= DATE '{p.d}'
+    WHERE NOT coalesce(v.is_correction, false) AND v.available_date <= DATE '{p.asof}'
       AND v.legal_deadline IS NOT NULL AND s.ticker IN (SELECT ticker FROM u)
 ),
 fil AS (
@@ -253,14 +296,14 @@ base AS (
            coalesce(v.coverage_state, 'none')            AS coverage_state,
            v.coverage_age_days,
            CASE WHEN v.coverage_state IN ('fresh', 'grace') THEN v.last_fresh
-                ELSE DATE '{p.d}' END                    AS analyst_asof
+                ELSE DATE '{p.asof}' END                    AS analyst_asof
     FROM u
     LEFT JOIN security s USING (ticker)
     LEFT JOIN px USING (ticker)
     LEFT JOIN _cov v USING (ticker)
 ),
 na AS (
-    SELECT ticker, date, analyst_count FROM coverage_daily WHERE date <= DATE '{p.d}'
+    SELECT ticker, date, analyst_count FROM coverage_daily WHERE date <= DATE '{p.asof}'
 ),
 judged AS (
     SELECT b.*, n.analyst_count,
@@ -272,7 +315,7 @@ SELECT j.ticker, DATE '{p.d}' AS date, j.name, j.market, j.sec_type,
        j.list_date                               AS listed_date,
        j.shares_out                              AS shares,
        j.market_cap,
-       'krx'                                     AS mktcap_basis,
+       {mktcap_lit}AS mktcap_basis,
        t.wics_l1_cd AS sector_l1, t.wics_l1_nm AS sector_l1_name,
        t.wics_l2_cd AS sector_l2, t.wics_l2_nm AS sector_l2_name,
        j.coverage_state IN ('fresh', 'grace')    AS has_estimates,
@@ -323,7 +366,7 @@ def adj_prices_sql(p: Params) -> str:
     선다(fi1.3.0).
 
     `adj_ok` 는 창 안 가격 축 미해결 사건(`adj_factor.price_resolution = 'unresolved'`,
-    적용일 ∈ (창 시작, D], available ≤ D)의 **적용일마다 뒤집힌다** — 창 첫 구간 = True, 첫 사건
+    적용일 ∈ (창 시작, D], available ≤ asof)의 **적용일마다 뒤집힌다** — 창 첫 구간 = True, 첫 사건
     적용일부터 False, 둘째 사건부터 다시 True …(같은 날 사건 여럿은 한 번). 그래서 창 안에서 값이
     바뀌면 그 창이 사건을 넘는다(엔진 `v4_rank._Series.crosses_event`), 값이 한결같으면 척도가
     이어진다. 사건이 하나면 '사건 전 True · 사건부터 False' 다. 창 밖 옛 사건은 창 안 비율을 깨지
@@ -338,7 +381,7 @@ def adj_prices_sql(p: Params) -> str:
     SELECT DISTINCT ticker, apply_date FROM adj_factor
     WHERE price_resolution = '{PRICE_UNRESOLVED}'
       AND apply_date > DATE '{p.price_from}' AND apply_date <= DATE '{p.d}'
-      AND available_date <= DATE '{p.d}'
+      AND available_date <= DATE '{p.asof}'
 )
 SELECT a.ticker, a.date, a.adj_close,
        a.cum_share_factor / a.cum_price_only_factor AS adj_factor,
@@ -467,7 +510,7 @@ def consensus_annual_sql(p: Params) -> str:
     inner = f"""WITH latest AS (
     SELECT ticker, max(fetched_date) AS fetched_date
     FROM stg_consensus_annual
-    WHERE fetched_date <= DATE '{p.d}' AND {_IN_UNIVERSE}
+    WHERE fetched_date <= DATE '{p.asof}' AND {_IN_UNIVERSE}
     GROUP BY ticker
 ),
 typed AS (
@@ -575,7 +618,7 @@ def fin_summary_sql(p: Params) -> str:
     -- (종목, ep) 단위 D 이전 최신 판(배포 묶음 7 D7-4) — 두 ep 의 판 날짜가 다를 수 있다
     SELECT w.ticker, w.ep, max(w.fetched_date) AS fetched_date
     FROM stg_fin_wise w
-    WHERE w.fetched_date <= DATE '{p.d}'
+    WHERE w.fetched_date <= DATE '{p.asof}'
       AND w.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
       AND w.{_IN_UNIVERSE}
     GROUP BY w.ticker, w.ep
@@ -621,7 +664,7 @@ wqsnap AS (
     -- 종목별 D 이전 최신 WISE 분기 손익 스냅샷(신선·유예 종목만 — 연간 wsnap 과 같은 규약)
     SELECT q.ticker, max(q.fetched_date) AS fetched_date
     FROM stg_fin_wise_q q
-    WHERE q.pkey = 'Q:IS' AND q.fetched_date <= DATE '{p.d}'
+    WHERE q.pkey = 'Q:IS' AND q.fetched_date <= DATE '{p.asof}'
       AND q.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
       AND q.{_IN_UNIVERSE}
     GROUP BY q.ticker
@@ -661,7 +704,7 @@ fin AS (
                         f.available_date DESC, f.rcept_no DESC) AS rn
     FROM fin_std f
     WHERE f.report_code IN ({_lit_list(QUARTER_REPORTS)})
-      AND f.available_date <= DATE '{p.d}'
+      AND f.available_date <= DATE '{p.asof}'
 ),
 dsec AS (
     SELECT ticker, corp_code FROM security
@@ -686,7 +729,7 @@ div AS (
     FROM dividend_event e JOIN dsec s ON s.corp_code = e.corp_code
     WHERE e.reprt_code = '{ANNUAL_REPORT}'
       AND trim(e.stock_knd) IN ({_lit_list(DPS_STOCK_KINDS + (DPS_FALLBACK_KIND,))})
-      AND e.available_date <= DATE '{p.d}'
+      AND e.available_date <= DATE '{p.asof}'
 ),
 dart AS (
     SELECT s.ticker,
@@ -728,19 +771,19 @@ qtr AS (
     SELECT s.ticker,
            strftime(f.period_end, '%Y/%m') AS period,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.d}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
                          THEN f.revenue_q4_derived END
                 ELSE f.revenue END      AS q_revenue,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.d}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
                          THEN f.op_profit_q4_derived END
                 ELSE f.op_profit END    AS q_op,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.d}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
                          THEN f.net_income_q4_derived END
                 ELSE f.net_income END   AS q_ni,
            CASE WHEN f.report_code = '{ANNUAL_REPORT}' THEN
-                    CASE WHEN f.q4_derived_available_date <= DATE '{p.d}'
+                    CASE WHEN f.q4_derived_available_date <= DATE '{p.asof}'
                          THEN f.gross_profit_q4_derived END
                 ELSE f.gross_profit END AS q_gross_profit,
            f.total_asset, f.total_liab, f.total_equity, f.capex_basis, f.fs_div,
@@ -847,9 +890,21 @@ TABLE_SOURCES: Mapping[str, tuple[str, ...]] = {
 }
 
 
+# ── 장 마감 판 T 행 자리(컷오버 PR-4 · T-2) ────────────────────────────────────
+def t_prices_sql(p: Params) -> str:
+    """장 마감 판의 T 하루치 가격 행 `_t_prices`(열·타입 = `fi_prices` 계약, price_source =
+    `T_PRICE_SOURCE`). 지금(PR-4)은 **빈 표**다 — T 행 얹기(PR-5)가 장 마감 원천으로 채운다.
+    `universe_sql` 이 여기서 T 종가를 읽어 시총을 잰다. `p` 는 채우는 쪽이 T(`p.d`)로 쓴다."""
+    cols = ", ".join(f'CAST(NULL AS {c.dtype}) AS "{c.name}"'
+                     for c in FI_TABLES["fi_prices"].columns)
+    return f"CREATE OR REPLACE TEMP TABLE _t_prices AS SELECT {cols} WHERE false"
+
+
 def table_sqls(p: Params, rule: UniverseRule) -> list[tuple[str, str]]:
-    """(표, SQL) — 실행 순서. fi_universe 가 먼저여야 나머지가 그 종목으로 자른다."""
-    return [("fi_universe", universe_sql(p, rule)),
+    """(표, SQL) — 실행 순서. fi_universe 가 먼저여야 나머지가 그 종목으로 자른다.
+    장 마감 판은 그 앞에 T 행 자리 `_t_prices` 를 만든다."""
+    head = [("_t_prices", t_prices_sql(p))] if p.basis == "evening" else []
+    return head + [("fi_universe", universe_sql(p, rule)),
             ("fi_prices", prices_sql(p)),
             ("fi_adj_prices", adj_prices_sql(p)),
             ("fi_flows", flows_sql(p)),
@@ -862,9 +917,14 @@ def table_sqls(p: Params, rule: UniverseRule) -> list[tuple[str, str]]:
 # 판 manifest `gaps` — 원천이 없거나 의도적으로 비운 열(조용한 결측 금지 · V2-7).
 GAPS: tuple[dict[str, str], ...] = (
     {"table": "fi_prices", "column": "price_source",
-     "reason": "아침판만 구현 — 전 행 'krx'. 저녁 T 오버레이(evening_snapshot)는 W1-a 뒤"},
+     "reason": "아침판은 전 행 'krx'. 장 마감 판 T 행('evening_snapshot')은 T 행 얹기(컷오버 PR-5) "
+               "뒤 — 그 전엔 T 행이 없다"},
     {"table": "fi_universe", "column": "mktcap_basis",
-     "reason": "아침판만 구현 — 전 행 'krx'. 저녁 't1_shares_x_t_close'(B-24)는 W1-a 뒤"},
+     "reason": "아침판 'krx'. 장 마감 판은 전 행 't1_shares_x_t_close'(D' 주식수 × T 종가, B-24) — "
+               "T 종가가 없는 종목은 market_cap NULL"},
+    {"table": "fi_universe", "column": "*",
+     "reason": "장 마감 판은 universe_daily D' 행 이월(상태 변화는 다음 날 아침 확정판, "
+               "T 신규 상장 누락) · WISE·DART·재무·속성은 D' 까지(asof)"},
     {"table": "fi_universe", "column": "filing_late",
      "reason": "가장 최근 제출한 정기보고서만 판정 — 기한이 지났는데 아직 안 낸 보고서(미제출)는 "
                "보지 못한다(기대 보고서 목록이 층에 없다)"},

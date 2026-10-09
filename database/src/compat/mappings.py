@@ -101,9 +101,11 @@ WHERE p.basis = 'evening'
 #   09-23 그림자 실측 — v3 active 2,533 = common 2,413 + spac 117. 우리가 더 넣었던 236 은
 #   preferred 114 · reit 23 · foreign 12 · dr 10 · fund 3 이고 v3 수집기(키움 ka10099 + KIS MST)가
 #   애초에 담지 않는 종류다. 유니버스를 v3 와 같게 맞춰야 G-M2 ①의 티커 집합 차이가 선다.
-# `sector` 는 WICS L1 명(`sector_snapshot`)을 넣는다 — v3 는 KRX 업종명이라 **값이 다르다**.
-#   T1.4 소비자 감사에서 브리핑·리서치센터가 sector 를 표시용으로만 쓰는지 확인한 뒤
-#   WICS 유지 / KRX 업종으로 교체를 확정한다(플랜 §5 T1.2 2).
+# `sector` 는 v3 와 같은 KRX 업종명이다(QL-B · T-19 — U24 의 WICS L1 을 대체). v3 는 키움 ka10099
+#   `upName` 을 그대로 넣는다(v3 `clients/kiwoom/client.py` get_stock_list →
+#   `pipeline/daily_pipeline.py` _fetch_kiwoom_stocks, 공란은 `strip() or None`). 같은 원천이 stage
+#   `stg_master_daily.up_name`(06:00 마스터 스냅샷, 2026-09-01~ 누적)이고 equity 에는 이 열이 없어
+#   stage 를 직독한다. as-of D 이하 최신 스냅샷 한 행 — 공란이면 NULL(v3 와 같다), 행이 없으면 NULL.
 # `updated_at` 은 v3 가 `datetime('now')` 로 채우던 자리 — 우리는 export 시각을 넣어
 # 신선도를 남긴다.
 _STOCKS_SQL = f"""
@@ -122,16 +124,16 @@ cap AS (
       AND p.date >= DATE '{{snap_from}}' AND p.date <= DATE '{{date}}'
 ),
 sect AS (
-    SELECT s.ticker, s.wics_l1_nm,
-           row_number() OVER (PARTITION BY s.ticker ORDER BY s.snapshot_date DESC) AS rn
-    FROM {{sector_snapshot}} s
-    WHERE s.snapshot_date <= DATE '{{date}}'
+    SELECT m.ticker, nullif(m.up_name, '') AS up_name,
+           row_number() OVER (PARTITION BY m.ticker ORDER BY m.date DESC) AS rn
+    FROM {{stg_master_daily}} m
+    WHERE m.date <= DATE '{{date}}'
 )
 SELECT
     u.ticker                                              AS stock_code,
     coalesce(v.name_abbrv_current, v.name_current)        AS stock_name,   -- v3 도 약명
     u.market                                              AS market,
-    sect.wics_l1_nm                                       AS sector,
+    sect.up_name                                          AS sector,
     CAST(round(cap.mktcap_krw / {KRW_PER_EOK}.0) AS BIGINT)
                                                           AS market_cap,
     CAST(v.list_date AS VARCHAR)                          AS listed_date,
@@ -536,14 +538,15 @@ MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
         v3_table="stocks",
         source_kind=EQUITY,
-        sources=("universe_daily", "security", "price_daily", "sector_snapshot"),
+        sources=("universe_daily", "security", "price_daily"),
         columns=("stock_code", "stock_name", "market", "sector", "market_cap", "listed_date",
                  "is_active", "delisted_date", "updated_at"),
         pk=("stock_code",),
         sql=_STOCKS_SQL,
         retire_when="브리핑·리서치센터·뉴스 preview/naver_ir·api health·unitelegram kael_db 가 "
                     "equity security/universe_daily 직독으로 옮겨진 뒤",
-        note="sector 는 WICS L1 명 — v3 는 KRX 업종명이라 값이 다르다(T1.4 확인 대상)",
+        note="sector 는 v3 와 같은 KRX 업종명(키움 ka10099 upName) — stage stg_master_daily 직독(T-19)",
+        cross_sources=((STAGE, "stg_master_daily"),),
     ),
     TableMapping(
         v3_table="investor_detail_flows",

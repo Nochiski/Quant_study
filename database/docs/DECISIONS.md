@@ -168,7 +168,7 @@
 | U21 | compat stocks = 보통주 + 스팩(D-11, 승인 기록 없음) | `model/contracts.py:228` |
 | U22 | 비12월 결산 연간 제외(DQ-11, 09-29 오케스트레이터 지시) | `factor_inputs/queries.py:518-523` |
 | U23 | 영업이익 정의: 연간은 WISE 표준, 분기는 '발표기준' 우선. DQ-12 는 결정 대기 | `queries.py:494·566` |
-| U24 | compat `stocks.sector` = WICS L1. D2-6 권고(KRX 업종 유지)와 반대 | `compat/mappings.py:93-95` |
+| U24 | compat `stocks.sector` = WICS L1. D2-6 권고(KRX 업종 유지)와 반대 — **10-10 T-19(QL-B)로 해소: v3 와 같은 KRX 업종(키움 ka10099 `upName`, stage `stg_master_daily` 직독)** | `compat/mappings.py` `_STOCKS_SQL` |
 | U25 | 저녁 시총 어휘 `t1_shares_x_t_close`(M-7 미승인) | `model/contracts.py:105` — 지금 영향 없음 |
 | U26 | v4 설정 전부(D-13·D-13' 미확정). v4 는 비교 모델 | `config/models/v4_rank_0_*.toml` |
 

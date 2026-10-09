@@ -1051,8 +1051,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         today_kst = (dt.datetime.now(dt.UTC) + dt.timedelta(hours=9)).date()
         date_yyyymmdd = calendar.prev_trading_day(today_kst).strftime("%Y%m%d")
-    if calendar.detail:
-        print(f"  ⚠ {calendar.detail}", flush=True)
     trading_day = calendar.is_trading_day(to_date(date_yyyymmdd))
 
     result = run(date_yyyymmdd, home=home, skip_sweep=a.skip_sweep,

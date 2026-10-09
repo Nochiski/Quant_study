@@ -5,6 +5,8 @@
 스크립트 경로 호출(`src/<파일>.py`)은 경로를 적고 `RC_<파일>` 로 rc 를 낸다.
 런로그 "D 이미 수집" 검사의 rc 는 `RC_recent`(기본 1 = 미수집)다.
 요일은 `QL_WEEKDAY` 로 주입한다(기본 3 = 수요일 — 테스트를 돌리는 요일과 무관하게 고정).
+휴장 달력 직접 갱신(`-m daily.calendar_refresh`)은 calls.txt 맨 앞에 적히고, 받은 인자는 cal_args.txt 에 남는다.
+D 산출(`-c` 의 `prev_trading_day`)은 진짜 python·진짜 `daily.calendar` 로 넘긴다(`--date` 없는 실행만 닿는다).
 DART 번호표 갱신(A-01)의 런 로그 `-c`(source=dart_universe 판정·성공 기록)만은 진짜 python·진짜
 `daily.runlog` 로 넘겨 임시 루트의 `data/raw/daily_run.db` 를 실제로 읽고 쓴다. 마지막 성공은
 `univ_age`(KST 달력 며칠 전, 기본 1 — None 이면 기록 없음)로 미리 심는다.
@@ -27,7 +29,7 @@ SCRIPT = DB_ROOT / "scripts" / "daily_ledger.sh"
 _PY = """#!/usr/bin/env bash
 if [ "$1" = "-c" ]; then
   case "$2" in
-    *dart_universe*) PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
+    *dart_universe*|*prev_trading_day*) PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
     *runlog.start*) echo 7 ;;
     *runlog.recent*) exit "${RC_recent:-1}" ;;
     *runlog.finish*) echo "$4|$5" >> "$QL_HOME/runlog.txt" ;;
@@ -40,9 +42,16 @@ if [ "$1" != "-m" ]; then
   exit "${!var:-0}"
 fi
 echo "$2" >> "$QL_HOME/calls.txt"
+if [ "$2" = "daily.calendar_refresh" ]; then
+  echo "${*:3}" >> "$QL_HOME/cal_args.txt"
+  [ -z "${CAL_NO_SUMMARY:-}" ] && echo "휴장 달력 20260929 갱신: rc=${RC_daily_calendar_refresh:-0} (대역)"
+fi
 var="RC_${2//./_}"
 exit "${!var:-0}"
 """
+
+
+_CAL = "daily.calendar_refresh"
 
 
 def _root(tmp_path: Path) -> Path:
@@ -116,7 +125,7 @@ def _run(tmp_path: Path, *args: str, weekday: int = 3, univ_age: int | None = 1,
 def test_all_steps_ok(tmp_path: Path) -> None:
     rc, calls, notify, runlog = _run(tmp_path)
     assert rc == 0
-    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert notify.startswith("info|") and runlog.startswith("ok|")
 
 
@@ -124,7 +133,7 @@ def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:
     """09-25~28·09-30 재현 — 신용잔고 판정 실패(rc 2) 뒤에도 DART·회사정보 공백 메우기가 돈다."""
     rc, calls, notify, runlog = _run(tmp_path, daily_kis_daily=2)
     assert rc == 2
-    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert notify.startswith("crit|daily_ledger 실패: kis credit(rc=2)")
     assert runlog == "failed|kis credit(rc=2)\n"
 
@@ -132,21 +141,21 @@ def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:
 def test_dart_failure_skips_only_company_gap(tmp_path: Path) -> None:
     rc, calls, notify, _ = _run(tmp_path, daily_dart_daily=2)
     assert rc == 2
-    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily"]
     assert "dart(rc=2)" in notify
 
 
 def test_every_failed_step_is_reported(tmp_path: Path) -> None:
     rc, calls, notify, runlog = _run(tmp_path, daily_kw_daily=1, daily_kis_daily=2)
     assert rc == 2
-    assert calls == ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
     assert "kiwoom fetch(rc=1), kis credit(rc=2)" in notify
     assert runlog == "failed|kiwoom fetch(rc=1), kis credit(rc=2)\n"
 
 
 # ── A-01 DART 번호표 갱신 — 월요일 + 마지막 성공 7일 초과 재시도(N-27 ⑤ · 배포 묶음 5-2) ─────────
-_ALL = ["daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
-_WITH_UNIVERSE = ["daily_wise", "src/dart_universe.py",
+_ALL = [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+_WITH_UNIVERSE = [_CAL, "daily_wise", "src/dart_universe.py",
                   "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
 
 
@@ -229,14 +238,14 @@ def test_dry_run_skips_dart_universe(tmp_path: Path, univ_age: int | None) -> No
     """
     rc, calls, _, _ = _run(tmp_path, "--dry-run", weekday=1, univ_age=univ_age)
     assert rc == 0
-    assert calls == ["daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
+    assert calls == [_CAL, "daily.kw_daily", "daily.kis_daily", "daily.dart_daily", "gap"]
 
 
 def test_monday_refresh_runs_even_when_d_already_collected(tmp_path: Path) -> None:
     """평소 월요일 06:00 은 D(금요일)를 토요일에 이미 받아 건너뛰는 날이다 — 그날도 돈다."""
     rc, calls, notify, runlog_txt = _run(tmp_path, weekday=1, recent=0)
     assert rc == 0
-    assert calls == ["daily_wise", "src/dart_universe.py"]
+    assert calls == [_CAL, "daily_wise", "src/dart_universe.py"]
     assert notify.startswith("info|daily_ledger 건너뜀") and runlog_txt == ""
 
 
@@ -284,7 +293,7 @@ def test_weekday_is_judged_in_kst(tmp_path: Path) -> None:
                        env=env, capture_output=True, text=True, timeout=60, check=False)
     assert p.returncode == 0, p.stderr
     calls = (root / "calls.txt").read_text(encoding="utf-8").split()
-    assert calls[:2] == ["daily_wise", "src/dart_universe.py"]
+    assert calls[:3] == [_CAL, "daily_wise", "src/dart_universe.py"]
 
 
 def test_skip_day_monday_failure_is_warn_without_runlog(tmp_path: Path) -> None:
@@ -294,7 +303,77 @@ def test_skip_day_monday_failure_is_warn_without_runlog(tmp_path: Path) -> None:
     """
     rc, calls, notify, runlog_txt = _run(tmp_path, weekday=1, recent=0, dart_universe=1)
     assert rc == 0
-    assert calls == ["daily_wise", "src/dart_universe.py"]
+    assert calls == [_CAL, "daily_wise", "src/dart_universe.py"]
     assert notify.splitlines() == ["warn|daily_ledger dart universe 실패(rc=1)",
                                    "info|daily_ledger 건너뜀(D=20260929 이미 수집 완료)"]
     assert runlog_txt == ""
+
+
+# ── 휴장 달력 직접 갱신(K1-9 ①③④⑥ · N-31 ②) — 체인 rc·런 로그와 분리된 알림 ─────────────────
+def _cal_args(tmp_path: Path) -> str:
+    f = tmp_path / "ql" / "cal_args.txt"
+    return f.read_text(encoding="utf-8") if f.exists() else ""
+
+
+def test_calendar_refresh_runs_first_without_check_flag(tmp_path: Path) -> None:
+    rc, calls, notify, _ = _run(tmp_path)
+    assert rc == 0 and calls[0] == _CAL
+    assert _cal_args(tmp_path).strip() == ""
+    assert "휴장 달력" not in notify
+
+
+def test_dry_run_refreshes_calendar_in_check_mode(tmp_path: Path) -> None:
+    """dry-run 은 원장·달력 파일을 쓰지 않는다 — 달력 갱신도 `--check`(읽기 전용)로 부른다."""
+    rc, calls, _, _ = _run(tmp_path, "--dry-run")
+    assert rc == 0 and calls[0] == _CAL
+    assert _cal_args(tmp_path).split() == ["--check"]
+
+
+def test_calendar_crit_is_notified_but_the_chain_and_runlog_are_unchanged(tmp_path: Path) -> None:
+    """달력 갱신 crit(rc 2)는 crit 알림 한 줄 — 직전 판정 달력으로 수집은 계속한다.
+
+    체인 rc·FAILED·ledger_chain 런 로그에 넣으면 그날 D 가 '실패'로 남아 다음 06:00 이 전 소스를 다시 받는다.
+    """
+    rc, calls, notify, runlog_txt = _run(tmp_path, daily_calendar_refresh=2)
+    assert rc == 0
+    assert calls == _ALL
+    lines = notify.splitlines()
+    assert lines[0].startswith("crit|휴장 달력 갱신 crit(rc=2)")
+    assert lines[-1].startswith("info|daily_ledger 완료")
+    assert runlog_txt == "ok|\n"
+
+
+def test_calendar_warn_is_notified_as_warn(tmp_path: Path) -> None:
+    rc, _, notify, _ = _run(tmp_path, daily_calendar_refresh=1)
+    assert rc == 0
+    assert notify.splitlines()[0].startswith("warn|휴장 달력 경고")
+
+
+def test_calendar_rc1_without_summary_is_crit(tmp_path: Path) -> None:
+    """파이썬이 요약 없이 rc 1 로 죽으면(import 실패·traceback) warn 이 아니라 crit 이다."""
+    root = _root(tmp_path)
+    _seed_universe_ok(root, 1)
+    env = _env(root, QL_WEEKDAY="3", RC_daily_calendar_refresh="1", CAL_NO_SUMMARY="1")
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"), "--date", "20260929"],
+                       env=env, capture_output=True, text=True, timeout=60, check=False)
+    assert p.returncode == 0, p.stderr
+    notify = (root / "notify.txt").read_text(encoding="utf-8")
+    assert notify.splitlines()[0].startswith("crit|휴장 달력 갱신 crit(rc=1)")
+
+
+def test_unreadable_calendar_stops_the_chain(tmp_path: Path) -> None:
+    """K1-9 ⑦ — 달력을 못 읽으면 D 를 구하지 않고 중단한다(crit·rc 2, 수집 단계 0).
+
+    옛 코드는 `calendar.load()` 가 weekend_only 로 폴백해 D 를 '영업일 가정'으로 구하고 체인을 끝까지 돌렸다.
+    판정 디렉터리(`data/calendar/`)가 비어 있는 임시 루트에서 `--date` 없이 돌린다.
+    """
+    root = _root(tmp_path)
+    _seed_universe_ok(root, 1)
+    env = _env(root, QL_WEEKDAY="3")
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh")],
+                       env=env, capture_output=True, text=True, timeout=60, check=False)
+    assert p.returncode == 2, p.stdout + p.stderr
+    calls = (root / "calls.txt").read_text(encoding="utf-8").split()
+    assert calls == [_CAL]                                   # 달력 갱신 뒤 D 산출에서 멈춘다
+    notify = (root / "notify.txt").read_text(encoding="utf-8")
+    assert "crit|daily_ledger 중단 — 대상 거래일 산출 실패" in notify

@@ -5,7 +5,9 @@
 
 콜은 전부 `api.kis` monkeypatch 다 — 이 파일은 네트워크를 쓰지 않는다.
 """
+import datetime as dt
 import importlib
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -221,6 +223,13 @@ def _ql_home(tmp_path: Path, tickers: tuple[str, ...]) -> Path:
     kw.execute("CREATE TABLE ka10008_foreign_holdings (ticker TEXT, dt TEXT)")
     kw.commit()
     kw.close()
+    # 판정 달력 — 없으면 main 이 멈춘다(K1-9 ⑦, '영업일 가정' 폴백 폐지). 이 테스트들은 주말만 휴장인 2026 이면 된다.
+    cal_dir = home / "data" / "calendar"
+    cal_dir.mkdir(parents=True)
+    weekends = [(dt.date(2026, 1, 1) + dt.timedelta(days=i)).strftime("%Y%m%d") for i in range(365)
+                if (dt.date(2026, 1, 1) + dt.timedelta(days=i)).weekday() >= 5]
+    (cal_dir / "kis_holidays_2026.json").write_text(
+        json.dumps({"year": 2026, "holidays": weekends}), encoding="utf-8")
     return home
 
 

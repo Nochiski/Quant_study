@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # v3 의 KIS 휴장일 캐시(~/kael-system-v3/data/.kis_holidays.json)를 quant-ledger 로 복사 + 검증.
 # 플랜 P0 Task 0.3 / 결정 R7. 검증 실패면 이전 복사본을 그대로 두고 warn 알림, exit 1.
+#   10-10(결정 Q-2 = N-31 ②, 플랜 2026-10-10-holiday-calendar-direct): 판정 연도 파일
+#   `data/calendar/kis_holidays_<year>.json` 은 KIS 직접 갱신(`daily.calendar_refresh`)이 쓴다. v3 사본은
+#   병행 대조용으로 `data/calendar/v3/kis_holidays_<year>.json` 에만 쌓는다 — 판정 파일을 여기서 덮으면
+#   06:00 에 직접 받은 임시공휴일이 18:05 동기화에 지워진다. v3 사본 동기화는 일치 30일 뒤 끄는 결정까지 병행한다.
 #   형식(실측 09-09): {"year": 2026, "fetched_at", "last_reviewed_at", "holidays": ["20260101", ...121건], "review_history"}
 #   검증 규칙은 v3 holiday.py 와 같다 — 100건 이상 · 전건 해당 연도 · 주말(토·일) 90건 이상.
 #   원천은 단일 연도라 이듬해 판으로 교체되면 그해 휴장일이 사라진다(DEFECT-A07) — 그래서 응답의 year 로
-#   `kis_holidays_<year>.json` 에 쌓고 `kis_holidays.json` 은 옛 경로 호환용으로 계속 갱신한다.
-#   daily.calendar.load() 는 디렉터리의 `kis_holidays*.json` 을 합쳐 읽는다.
+#   `v3/kis_holidays_<year>.json` 에 쌓고 `kis_holidays.json` 은 옛 경로 호환용으로 계속 갱신한다.
+#   daily.calendar.load() 는 판정 디렉터리의 `kis_holidays_<YYYY>.json` 만 읽는다(옛 경로·v3/ 는 읽지 않음).
 set -uo pipefail
 cd "${QL_HOME:-$HOME/quant-ledger}"
 SRC="${1:-$HOME/kael-system-v3/data/.kis_holidays.json}"
@@ -40,12 +44,13 @@ then
     scripts/notify.sh warn "캘린더 검증 실패" "$SRC 에서 연도를 읽지 못했다 — 이전 복사본($DST) 유지"
     exit 1
   fi
-  # cp 는 truncate 뒤 재기록이라 중간에 죽으면 절단된 JSON 이 남고 calendar.load() 가 weekend_only 로
-  # 조용히 폴백한다 — 임시 파일에 쓰고 rename 으로 교체한다. 실패는 rc 1 + warn(리뷰 REC-8).
-  YEAR_TMP=$(mktemp data/calendar/.sync_year.XXXXXX)
-  if ! { cp "$TMP" "$YEAR_TMP" && chmod 600 "$YEAR_TMP" && mv -f "$YEAR_TMP" "data/calendar/kis_holidays_${YEAR}.json"; }; then
+  # cp 는 truncate 뒤 재기록이라 중간에 죽으면 절단된 JSON 이 남는다 — 임시 파일에 쓰고 rename 으로
+  # 교체한다. 실패는 rc 1 + warn(리뷰 REC-8).
+  mkdir -p data/calendar/v3
+  YEAR_TMP=$(mktemp data/calendar/v3/.sync_year.XXXXXX)
+  if ! { cp "$TMP" "$YEAR_TMP" && chmod 600 "$YEAR_TMP" && mv -f "$YEAR_TMP" "data/calendar/v3/kis_holidays_${YEAR}.json"; }; then
     rm -f "$YEAR_TMP"
-    scripts/notify.sh warn "캘린더 저장 실패" "data/calendar/kis_holidays_${YEAR}.json 을 쓰지 못했다 — 이전 파일 유지"
+    scripts/notify.sh warn "캘린더 저장 실패" "data/calendar/v3/kis_holidays_${YEAR}.json 을 쓰지 못했다 — 이전 파일 유지"
     exit 1
   fi
   chmod 600 "$TMP"

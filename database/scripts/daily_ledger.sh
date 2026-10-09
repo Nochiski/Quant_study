@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
-#   순서: 캘린더 동기화 → D(직전 거래일) 판정 → 키움 마스터(daily_wise.sh, 매일) →
+#   순서: v3 휴장 사본 동기화(병행 대조용) → 휴장 달력 직접 갱신(KIS chk-holiday 1콜, K1-9) → D(직전 거래일) 판정 →
+#         키움 마스터(daily_wise.sh, 매일) →
 #         [월요일 KST · 마지막 성공 7일 초과] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01) →
 #         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 신규 corp 회사정보 공백 메우기 → 수집 요약 알림
 #   소스별 단계는 서로 막지 않는다 — 한 단계가 rc≠0 이어도 다음 소스는 받고, 실패한 단계를 모두 모아 crit
@@ -46,7 +47,25 @@ step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 덧
 }
 {
 echo "════ [$(kst)] daily_ledger 시작 dry=${DRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
-scripts/sync_calendar.sh || echo "  ! 캘린더 동기화 실패 — 이전 복사본으로 진행"
+scripts/sync_calendar.sh || echo "  ! v3 휴장 사본 동기화 실패 — 판정 달력은 그대로(병행 대조만 빠진다)"
+# 휴장 달력 직접 갱신(결정 Q-2 = N-31 ②, RM K1-9 ①③④⑥ — 플랜 2026-10-10-holiday-calendar-direct).
+#   KIS chk-holiday 하루 1콜로 판정 연도 파일을 덧씌우고 trading_calendar·이듬해 기한·v3 사본을 대조한다.
+#   rc 0 정상 · 1 warn · 2 crit. 마지막 줄이 요약이 아니면(파이썬이 import 단계에서 죽은 rc 1 등) crit 로 본다.
+#   체인 rc·FAILED·ledger_chain 런 로그에는 넣지 않는다 — 달력 갱신 실패로 그날 D 가 '실패'로 남으면 다음
+#   06:00 이 전 소스를 다시 받는다. 판정은 직전 달력으로 계속하고, 달력 자체를 못 읽으면 아래 D 산출이 멈춘다(⑦).
+#   dry-run 은 --check(읽기 전용 — 1콜, 원장·달력·런 로그·보고서 무변경).
+echo "──── 휴장 달력 갱신 시작 $(kst) ────"
+CAL_OUT=$($PY -m daily.calendar_refresh ${DRY:+--check} 2>&1); CAL_RC=$?
+printf '%s\n' "$CAL_OUT"
+echo "──── 휴장 달력 갱신 종료 rc=$CAL_RC $(kst) ────"
+CAL_SUM=$(printf '%s\n' "$CAL_OUT" | tail -1 | cut -c1-700)
+if [ -z "$DRY" ] && [ "$CAL_RC" -ne 0 ]; then
+  if [ "$CAL_RC" -eq 1 ] && [[ "$CAL_SUM" == "휴장 달력 "* ]]; then
+    scripts/notify.sh warn "휴장 달력 경고" "$CAL_SUM | 로그 $LOG"
+  else
+    scripts/notify.sh crit "휴장 달력 갱신 crit(rc=$CAL_RC)" "${CAL_SUM:-출력 없음} | 로그 $LOG"
+  fi
+fi
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"

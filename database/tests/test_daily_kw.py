@@ -1,9 +1,11 @@
 """daily.kw_daily — 키움 일일 증분(fetch/merge)과 두 게이트. 플랜 P1 Task 1.3.
 
 콜은 전부 `api.kiwoom` 스텁으로 대체하고 원장은 tmp_path 소형 sqlite 로 만든다(서버 접근 없음).
-날짜는 20260908(화) 기준 — 직전 거래일 20260907(월)은 휴장 캐시가 있든 없든 거래일이라
-캘린더 폴백(주말만 거름)에서도 실물 캐시에서도 같은 답이 나온다.
+날짜는 20260908(화) 기준 — 직전 거래일 20260907(월). 판정 달력은 주말만 휴장인 2026 연도 파일을
+임시 루트에 둔다(달력이 없으면 main 이 멈춘다 — K1-9 ⑦, 예전 '주말만 거름' 폴백 폐지).
 """
+import datetime as dt
+import json
 import sqlite3
 import sys
 import types
@@ -96,8 +98,19 @@ def _stub_api(monkeypatch, calls, poss=None):
     monkeypatch.setitem(sys.modules, "api", module)
 
 
+def _write_calendar(home) -> None:
+    """주말만 휴장인 2026 판정 연도 파일(`data/calendar/kis_holidays_2026.json`)."""
+    d = home / "data" / "calendar"
+    d.mkdir(parents=True, exist_ok=True)
+    days = (dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(365))
+    (d / "kis_holidays_2026.json").write_text(
+        json.dumps({"year": 2026, "holidays": [x.strftime("%Y%m%d") for x in days if x.weekday() >= 5]}),
+        encoding="utf-8")
+
+
 def _prepare(tmp_path, monkeypatch, calls, poss=None, ledger_rows=()):
     monkeypatch.setenv("QL_HOME", str(tmp_path))
+    _write_calendar(tmp_path)
     monkeypatch.setattr(kw_daily, "RATE_PER_SEC", 10_000.0)      # 테스트에서 스로틀 대기 제거
     _stub_api(monkeypatch, calls, poss)
     return _kiwoom_db(tmp_path, ledger_rows)
@@ -512,6 +525,7 @@ def _many_db(tmp_path, n):
 def _prepare_many(tmp_path, monkeypatch, n, *, nodata=(), error=()):
     """n종목 유니버스 · 지정 종목만 무응답(1901)·오류(9999) 로 돌려주는 ka10060 스텁."""
     monkeypatch.setenv("QL_HOME", str(tmp_path))
+    _write_calendar(tmp_path)
     monkeypatch.setattr(kw_daily, "RATE_PER_SEC", 10_000.0)
     tickers = _many_db(tmp_path, n)
     bad_nodata, bad_error = set(nodata), set(error)

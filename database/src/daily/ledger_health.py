@@ -222,6 +222,37 @@ def check_krx_corp_actions(con: sqlite3.Connection, d: str, d_prev: str) -> Chec
                  f"후보 {len(items)}건 기록 — adj_factor·corp_event 가 매일 대조한다")
 
 
+# 08:10 `daily_build.sh` krx_step 의 재수집 창 폭(`prev_trading_day(D, n=10)` ~ D)과 같아야 한다 —
+# 그 창의 평일은 전부 KRX 를 다시 치므로(`backfill_krx.bdays`) 휴장 평일의 응답도 이 창 안에 남는다.
+KRX_RECHECK_SESSIONS = 10
+# K1-9 ② 가 보는 '시세' 엔드포인트 — `backfill_krx.EPS` 의 일별 매매(`*_trd`) 5개. 종목기본정보(`*_isu_base_info`)는
+# 시세가 아니라 휴장일에도 행을 줄 수 있어 뺀다. 정본은 backfill_krx.EPS(import 시점에 키를 요구해 여기서
+# 들여오지 못한다) — tests/test_daily_health.py 가 부분집합인지 대조한다.
+KRX_PRICE_ENDPOINTS = ("sto/stk_bydd_trd", "sto/ksq_bydd_trd", "idx/kospi_dd_trd", "idx/kosdaq_dd_trd",
+                       "etp/etf_bydd_trd")
+
+
+def check_krx_holiday_traded(con: sqlite3.Connection, d: str, cal: _cal.Calendar) -> Check:
+    """반대 방향 오판(K1-9 ②) — 달력상 휴장일에 KRX 시세 엔드포인트가 `status='ok'`·행 > 0 이면 중단.
+
+    `krx.holiday_misfire` 는 'KRX 휴장 응답 ↔ 달력 거래일' 한 방향만 본다. 달력이 거래일을 휴장으로
+    잘못 들고 있으면 체인은 그날을 건너뛰고(D 에서 빠짐) KRX 만 그날 시세를 남긴다 — 그 행이 달력이
+    틀렸다는 직접 증거다.
+    """
+    dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
+    lo = cal.prev_trading_day(dd, n=KRX_RECHECK_SESSIONS).strftime("%Y%m%d")
+    rows = con.execute("SELECT DISTINCT bas_dd FROM ingest_log WHERE bas_dd BETWEEN ? AND ? "
+                       f"AND status = 'ok' AND n_rows > 0 AND endpoint IN ({','.join('?' * len(KRX_PRICE_ENDPOINTS))}) "
+                       "ORDER BY 1", (lo, d, *KRX_PRICE_ENDPOINTS)).fetchall()
+    traded = [str(b) for (b,) in rows
+              if not cal.is_trading_day(dt.date(int(str(b)[:4]), int(str(b)[4:6]), int(str(b)[6:8])))]
+    return Check("krx.holiday_traded", Level.HALT, Status.FAIL if traded else Status.PASS, traded,
+                 f"0 KRX price ok rows on a calendar holiday in {lo}~{d} (K1-9 ②, 08:10 재수집 창, "
+                 f"시세 엔드포인트 {len(KRX_PRICE_ENDPOINTS)}개)",
+                 f"달력상 휴장일 {traded} 에 KRX 시세가 있다 — 달력 오판 의심, 원장 kis_holiday 원문과 "
+                 f"KRX 응답을 대조할 것" if traded else "")
+
+
 # ── KRX (A §6-1) ───────────────────────────────────────────────────────────
 def check_krx(con: sqlite3.Connection, d: str, d_prev: str, cal: _cal.Calendar) -> list[Check]:
     out: list[Check] = []
@@ -237,6 +268,7 @@ def check_krx(con: sqlite3.Connection, d: str, d_prev: str, cal: _cal.Calendar) 
     misfire = n_hol > 0 and cal.is_trading_day(dd)
     out.append(Check("krx.holiday_misfire", Level.HALT, Status.FAIL if misfire else Status.PASS,
                      n_hol, "0 holiday rows on a calendar trading day (DEFECT-A-01)"))
+    out.append(check_krx_holiday_traded(con, d, cal))
     if n_ok == 7:
         cnt = {}
         for tbl in ("krx_stk_bydd_trd", "krx_ksq_bydd_trd", "krx_stk_isu_base_info", "krx_ksq_isu_base_info",

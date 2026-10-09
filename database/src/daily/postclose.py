@@ -28,8 +28,9 @@
 
 종료코드: 0 완료·16:00 컷오프(cutoff)·16:00 뒤 시작(late)·거래일 아님 / 2 토큰 실패·전부 오류·
 예상 밖 예외(error)·대상 판 없음 / 3 15:41 전·세션 예외일·락 경합·거래일 15:40~16:00 의 dry-run.
-`--dry-run` 은 같은 규칙으로 돌되 원장·런 로그에 쓰지 않는다. `--check` 는 창·세션 예외를 보지 않고
-앞쪽 몇 종목(기본 `CHECK_DEFAULT_N`)만 불러 받은 행을 출력한다(읽기 전용 실호출 점검).
+`--dry-run` 은 대상 미리보기다 — 판·대상 순서·이미 받은 종목을 출력하고 원장·런 로그에 쓰지 않는다.
+실호출은 없다(15:41 전은 too_early, 거래일 15:40~16:00 은 거부, 16:00 뒤는 late). 실호출 점검은
+`--check` — 창·세션 예외를 보지 않고 앞쪽 몇 종목(기본 `CHECK_DEFAULT_N`)만 불러 받은 행을 출력한다.
 """
 from __future__ import annotations
 
@@ -449,8 +450,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--date", default=None, help="대상 거래일 T YYYYMMDD (기본: 오늘 KST)")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true",
-                      help="같은 규칙으로 돌되 원장·daily_run.db 에 쓰지 않는다. 거래일 15:40~16:00 에는 "
-                           "거부(rc 3)")
+                      help="대상 미리보기(판·대상 순서·이미 받은 종목), 실호출 없음 — 원장·daily_run.db 에 "
+                           "쓰지 않는다. 거래일 15:40~16:00 에는 거부(rc 3). 실호출 점검은 --check")
     mode.add_argument("--check", action="store_true",
                       help=f"읽기 전용 실호출 점검 — 창·세션 예외를 보지 않고 앞쪽 --limit "
                            f"(기본 {CHECK_DEFAULT_N})종목만 불러 받은 T 행을 출력, "

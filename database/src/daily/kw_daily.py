@@ -122,7 +122,7 @@ def pick_rows(api_id: str, rows: Sequence[Mapping[str, object]],
     """저장할 행만 — 일별 TR 은 target 날짜 행(ka10060 `dt` · ka10086 `date`), 묶음 TR 은 전부."""
     if api_id == "ka10060":
         return [dict(r) for r in rows if str(r.get("dt")) == target]
-    if api_id == "ka10086":
+    if api_id == "ka10086":          # 프로브 전용(`probe_postclose`) — 운영 수집기는 ka10086 을 부르지 않는다
         return [dict(r) for r in rows if str(r.get("date")) == target]
     return [dict(r) for r in rows]
 

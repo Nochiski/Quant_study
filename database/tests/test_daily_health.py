@@ -90,7 +90,7 @@ def _kis(tmp_path, max_deal, n=2500):
 
 def _paths(tmp_path, **kw):
     p = lh.Paths(krx=kw.get("krx", str(tmp_path / "none1.db")), kiwoom=kw.get("kiwoom", str(tmp_path / "none2.db")),
-                 kis=kw.get("kis", str(tmp_path / "none3.db")), dart=str(tmp_path / "none4.db"), wise=kw.get("wise", str(tmp_path / "none5.db")),
+                 kis=kw.get("kis", str(tmp_path / "none3.db")), dart=kw.get("dart", str(tmp_path / "none4.db")), wise=kw.get("wise", str(tmp_path / "none5.db")),
                  wiseindex=kw.get("wiseindex", ""),
                  calendar=_cal(tmp_path, kw.get("holidays", ())),
                  universe_state=str(tmp_path / "universe_kw.json"))
@@ -582,3 +582,105 @@ def test_wise_request_budget_follows_the_run_date():
     """재무 추가 3콜(10-01 수집부터) 전 런은 15콜 — 전환 다음 날 아침에 전날(09-30) 런을 18 로 판정하면 거짓 FAIL."""
     assert lh.req_covered_on("2026-09-30") == 15
     assert lh.req_covered_on("2026-10-01") == 18
+
+
+# ── K1-7b: 필수 검사 SKIP = 실패(N-42 Q4) ──────────────────────────────────────────
+# 필수 표의 기준 원천(모델이 쓰는 원천). 표와 실제 REQUIRED 검사가 어긋나지 않는지 아래 테스트가 대조한다.
+_MODEL_SOURCES = ("krx", "kiwoom", "wise", "dart")
+
+
+def _dart(tmp_path, n=410):
+    """공시 목록 D 행 n 건 + 빈 문서 저장소(문서 대상 0 → dart.docs 통과)."""
+    con = sqlite3.connect(tmp_path / "dart.db")
+    con.execute("CREATE TABLE dart_disclosure (rcept_no TEXT, rcept_dt TEXT, stock_code TEXT, report_nm TEXT)")
+    con.executemany("INSERT INTO dart_disclosure VALUES (?,?,?,?)",
+                    [(f"{D}{i:06d}", D, f"{i:06d}", "임원ㆍ주요주주특정증권등소유상황보고서") for i in range(n)])
+    con.execute("CREATE TABLE doc_store (rcept_no TEXT, zip_ok INTEGER, http_status TEXT)")
+    con.commit(); con.close()
+    return str(tmp_path / "dart.db")
+
+
+def _skip_rows(tmp_path):
+    """요청 유니버스 크기 미상(상태 파일 n_requested 0) — 키움 행수 3검사가 비율을 못 낸다."""
+    p = _paths(tmp_path, kiwoom=_kw(tmp_path))
+    (tmp_path / "universe_kw.json").write_text(json.dumps({"asof": D, "grace": {}, "n_requested": 0}),
+                                               encoding="utf-8")
+    return p
+
+
+def _skip_stale(tmp_path):
+    """ka10008 직전 거래일 행이 없다 — D·D-1 겹침 0 이라 오염률을 못 낸다."""
+    kw = _kw(tmp_path)
+    con = sqlite3.connect(kw)
+    con.execute("DELETE FROM ka10008_foreign_holdings WHERE dt=?", (DP,))
+    con.commit(); con.close()
+    return _paths(tmp_path, kiwoom=kw)
+
+
+def _skip_cross(tmp_path):
+    """KRX 행수는 정상인데 키움 티커와 맞는 종목이 0 — 교차 대조 matched 0."""
+    krx = _krx(tmp_path, stk=2563)
+    con = sqlite3.connect(krx)
+    for tbl in ("krx_stk_bydd_trd", "krx_ksq_bydd_trd"):
+        con.execute(f"UPDATE {tbl} SET ISU_CD = 'X' || ISU_CD")
+    con.commit(); con.close()
+    return _paths(tmp_path, krx=krx, kiwoom=_kw(tmp_path))
+
+
+@pytest.mark.parametrize(("make", "names"), [
+    (_skip_rows, ("kiwoom.ka10008.rows", "kiwoom.ka10060.rows", "kiwoom.ka20068.rows")),
+    (_skip_stale, ("kiwoom.ka10008.stale_pct",)),
+    (_skip_cross, ("kiwoom.krx_cross",)),
+])
+def test_required_skip_without_skip_record_fails(tmp_path, make, names):
+    """필수 검사가 판정을 못 하면(SKIP) 실패다 — 종전엔 ok 가 FAIL 만 봐서 SKIP 이 통과로 집계됐다
+    (DECISIONS §6-6 · RM K1-7). 리포트 JSON 의 status 도 fail 이어야 일일 리포트·워치독이 crit 로 센다."""
+    rep = lh.run(D, make(tmp_path))
+    c = _by(rep)
+    for n in names:
+        assert c[n].level is lh.Level.REQUIRED and c[n].status is lh.Status.FAIL, c[n]
+        assert "--skip kiwoom" in c[n].detail and "K1-7b" in c[n].detail
+    assert {x.name for x in rep.failed_required} == set(names)
+    assert not rep.ok and "K1-7b" in rep.summary()
+    data = json.loads(Path(lh.write_report(rep, str(tmp_path / "health"))).read_text(encoding="utf-8"))
+    assert data["ok"] is False
+    assert {x["name"] for x in data["checks"] if x["level"] == "required" and x["status"] == "fail"} == set(names)
+
+
+def test_required_skip_with_skip_record_passes_and_is_recorded(tmp_path):
+    """운영자가 `--skip kiwoom` 으로 뺐으면 통과 — 그 기록(`kiwoom.skipped`)이 리포트에 남는다."""
+    rep = lh.run(D, _skip_rows(tmp_path), skip=frozenset({"kiwoom"}))
+    assert rep.ok
+    data = json.loads(Path(lh.write_report(rep, str(tmp_path / "health"))).read_text(encoding="utf-8"))
+    assert data["ok"] is True
+    rec = [x for x in data["checks"] if x["name"] == "kiwoom.skipped"]
+    assert len(rec) == 1 and rec[0]["status"] == "skip" and "--skip" in rec[0]["expected"]
+    assert not any(x["name"].startswith("kiwoom.ka") for x in data["checks"])
+
+
+def test_non_required_skip_still_passes(tmp_path):
+    """필수 표 밖의 SKIP 은 종전대로 통과 — WARN(기업행위 후보: 직전일 기본정보 없음) · REQUIRED 지만
+    기준 원천 밖(WICS 첫 스냅샷 전 `wics.raw`) · HALT 기준선(KIS 중복쌍: 전날 리포트 없음)."""
+    wics = tmp_path / "wiseindex.db"
+    con = sqlite3.connect(wics)
+    con.execute("CREATE TABLE other (a TEXT)")
+    con.commit(); con.close()
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, base_prev=False), kis=_kis(tmp_path, "20260904"),
+                           wiseindex=str(wics)))
+    c = _by(rep)
+    assert c["krx.corp_action_candidates"].status is lh.Status.SKIP
+    assert c["wics.raw"].level is lh.Level.REQUIRED and c["wics.raw"].status is lh.Status.SKIP
+    assert c["kis.credit.dup_growth"].status is lh.Status.SKIP
+    assert rep.ok
+
+
+def test_required_table_is_exactly_the_required_checks_of_model_sources(tmp_path):
+    """필수 표(SoT)는 모델 원천 4개가 내는 REQUIRED 검사 이름과 정확히 같다 — 이름이 바뀌어 표가 조용히
+    무력화되거나, 새 REQUIRED 검사가 표 밖에서 SKIP = 통과로 남지 않게 한다. 항목마다 근거가 있다."""
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path),
+                           wise=_wise(tmp_path), dart=_dart(tmp_path)))
+    assert rep.ok                                   # 정상 픽스처 — 모든 검사가 실제로 판정됐다
+    emitted = {c.name for c in rep.checks
+               if c.level is lh.Level.REQUIRED and c.name.split(".", 1)[0] in _MODEL_SOURCES}
+    assert set(lh.REQUIRED_NO_SKIP) == emitted
+    assert all(isinstance(v, str) and v.strip() for v in lh.REQUIRED_NO_SKIP.values())

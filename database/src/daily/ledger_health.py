@@ -1,7 +1,7 @@
 """원장 5개의 "D 일자 수집 완료" 판정. 플랜 P1 Task 1.7.
 
 기대치는 전부 2026-09-09 서버 실측(reviews/2026-09-09-daily-findings-A §6·B §7)이다. 판정 3등급:
-  required — 실패면 rc 2(뒤 단계로 안 넘어간다)
+  required — 실패면 rc 2(뒤 단계로 안 넘어간다). 필수 표(`REQUIRED_NO_SKIP`)의 검사는 SKIP 도 실패(K1-7b)
   warn     — 로그·알림만
   halt     — 중단 신호(DEFECT-A-01 휴장 오확정 · DEFECT-A-03 KIS 중복 증식 · v3 키 사용): rc 2 + crit
 종목 단위 테이블은 절대 하한이 아니라 **요청 유니버스 대비 비율**로 본다(리뷰 B2). 결과는 JSON 으로
@@ -15,7 +15,7 @@ import json
 import os
 import sqlite3
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 
 from backfill_wise import (  # 종목당 일일 요청 수·실패 회복 규칙의 정본(커버는 런 날짜로 고른다)
@@ -78,6 +78,42 @@ class HealthReport:
         if warn:
             head += " | 경고: " + ", ".join(warn)
         return head
+
+
+# ── 필수 검사 표(K1-7b · N-42 Q4 '필수 검사 SKIP = 실패') ───────────────────────────────────
+# 이 표의 검사가 판정을 못 하면(SKIP) 실패로 센다. `run` 이 status 를 FAIL 로 바꿔 싣는다 — 리포트 JSON 을
+# 읽는 일일 리포트·워치독도 같은 판정을 보게 한다. 운영 결정으로 뺄 때는 `--skip <소스>` 를 쓴다(그 소스는
+# 판정하지 않고 `<소스>.skipped` 기록만 남는다).
+# 기준: 모델이 쓰는 원천(KRX·키움·WISE·DART)의 완결성 검사 = 그 네 원천의 REQUIRED 검사 전부
+# (tests/test_daily_health.py 가 이 표와 실제 REQUIRED 검사 이름이 같은지 대조한다). 값 = 근거 한 줄.
+# 기준 밖이라 SKIP 이 종전대로 통과인 것: KIS `kis.credit.fresh` · WICS `wics.*` · WARN·HALT 등급 전부.
+REQUIRED_NO_SKIP: dict[str, str] = {
+    "krx.ingest_log": "KRX 7 엔드포인트 응답 — 가격·주식수·지수·종목정보의 정본(price_daily·universe_daily·"
+                      "trading_calendar)",
+    "krx.rows": "KRX 시장별 행수 — 빠진 종목은 fi_universe 에서 가격 없음(no_price)으로 조용히 빠진다",
+    "kiwoom.ka10060.rows": "투자자별 순매수 — equity flow_daily → fi_flows 수급 입력",
+    "kiwoom.ka10008.rows": "외국인 보유 — 08:10 머지의 게이트 TR 이고 stale_pct·krx_cross 의 모집단",
+    "kiwoom.ka20068.rows": "대차 — 06:00 키움 수집이 빠진 날을 08:10 에 막는 유일한 검사(TECH_DEBT B-62)",
+    "kiwoom.ka10008.stale_pct": "키움이 전날 값을 되풀이한 오염(08-24 99.0%)을 잡는다 — D-1 대조가 없으면 못 가린다",
+    "kiwoom.krx_cross": "키움 D 행이 KRX D 와 같은 날 값인지(거래량 전건 일치) — 대조 0건이면 날짜 오염을 못 가린다",
+    "kiwoom.master": "ka10099 마스터 → universe_daily 정지·관리 상태(fi_universe is_halted·is_admin)",
+    "dart.disclosure.rows": "공시 목록 → universe_daily 공시 신호·disclosure_version(fi filing_late)",
+    "dart.docs": "정기보고서·분할/병합 문서 → 문서층 → fin_std 재무 기간·판본",
+    "wise.run": "WISE 스냅샷 런 완결 — 컨센서스·추정기관 수(유니버스 규칙)·WISE 재무 입력",
+    "wise.req_identity": "요청 수 항등식 — 커버·무커버 종목 중 빠진 요청이 없다",
+    "wise.raw": "원장 행수 = 항등식 기대치 — 받은 응답이 원장에 다 실렸다",
+}
+
+
+def _skip_is_fail(c: Check) -> Check:
+    """필수 표의 검사가 SKIP 이면 FAIL 로 바꾼다(K1-7b) — 판정 못 한 날을 통과로 세지 않는다."""
+    why = REQUIRED_NO_SKIP.get(c.name)
+    if c.status is not Status.SKIP or why is None:
+        return c
+    note = (f"필수 검사를 판정하지 못했다(SKIP) — `--skip {c.name.split('.', 1)[0]}` 기록이 없어 실패로 "
+            f"센다(K1-7b · N-42 Q4). 근거: {why}")
+    return replace(c, status=Status.FAIL, expected=f"{c.expected} · 필수 검사 SKIP 불가(K1-7b)",
+                   detail=f"{note} | {c.detail}" if c.detail else note)
 
 
 @dataclass
@@ -574,7 +610,9 @@ def check_wics(con: sqlite3.Connection, krx: sqlite3.Connection | None, d: str, 
 
 def run(d: str, paths: Paths, *, today: dt.date | None = None,
         skip: frozenset[str] = frozenset()) -> HealthReport:
-    """skip 에 든 소스(krx·kiwoom·kis·dart·wise·wics)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom)."""
+    """skip 에 든 소스(krx·kiwoom·kis·dart·wise·wics)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom).
+
+    skip 밖 소스에서 필수 표(`REQUIRED_NO_SKIP`)의 검사가 SKIP 이면 FAIL 로 싣는다(K1-7b)."""
     cal = _cal.load(paths.calendar)
     dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     d_prev = cal.prev_trading_day(dd).strftime("%Y%m%d")
@@ -621,7 +659,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
         for c in (krx, kw, kis, dart, wise, wics):
             if c is not None:
                 c.close()
-    return HealthReport(d, tuple(checks), n_req)
+    return HealthReport(d, tuple(_skip_is_fail(c) for c in checks), n_req)
 
 
 def write_report(report: HealthReport, out_dir: str) -> str:

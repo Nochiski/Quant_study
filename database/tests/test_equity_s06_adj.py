@@ -302,6 +302,58 @@ def test_EG8_점프는_apply_date의_조정가로_재고_원주가_점프는_사
     assert m["max_abs_raw_return_unadjusted"] == pytest.approx(10800 / 10250 - 1)
 
 
+def run_eg8(events: list[dict[str, object]], prices: list[dict[str, object]],
+            cal: list[date], jump_max: float):
+    """합성 입력 위에서 산출을 `out_pq` 로 올리고 EG8 만 돌린다. EG8 이 읽는 가격 축(OHLC·거래량·
+    basis·표식)은 같은 합성 종가로 채운다. 상수는 이 호출의 baseline 으로만 준다(운영 상수 불변)."""
+    from equity.gates import EquityGateContext
+
+    con = duckdb.connect()
+    try:
+        _setup(con, events, prices, cal, None, None)
+        con.execute(f"CREATE OR REPLACE TEMP TABLE out_pq AS {_body()}")
+        con.execute("CREATE TEMP TABLE px_full AS SELECT ticker, date, close AS open, "
+                    "close AS high, close AS low, close, "
+                    "CAST(1000 AS DECIMAL(13,0)) AS volume_shr, price_kind, 'krx' AS basis, "
+                    "FALSE AS corp_action_pending FROM price_daily")
+        con.execute("DROP VIEW price_daily")
+        con.execute("CREATE TEMP VIEW price_daily AS SELECT * FROM px_full")
+        n_out = con.execute("SELECT count(*) FROM out_pq").fetchone()[0]   # type: ignore[index]
+        bl = Baseline({"adj_factor": {"adj_return_jump_max": jump_max,
+                                      "adj_volume_ratio_band": 3.0}})
+        ctx = EquityGateContext(con=con, rule=ADJ, out_view="out_pq", reject_view=None,
+                                pinned={}, n_out=int(n_out), n_reject=0, reject_by_reason={},
+                                inputs={}, partition_hashes={}, baseline=bl)
+        return rules_s06.eg8_adj_jump(ctx)
+    finally:
+        con.close()
+
+
+def test_D6_5_계수_행_적용일_수정수익률이_상한을_넘으면_EG8이_폐기한다(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """D6-5 폐기형(10-09 승격): 계수 행(unknown_price_only, 기준가 ×0.9)의 적용일 수정수익률 =
+    종가 ÷ 기준가 − 1 = +60%. 상한 0.5 면 FAIL(`n_price_only_return_jump_over` 1), 상한 1.0 이면
+    PASS. 스위치(PRICE_ONLY_JUMP_GATE)를 끄면 같은 입력이 기록형으로만 남아 PASS 한다 — 스위치가
+    실제로 판정을 바꾼다."""
+    cal = sessions(80)
+    px = flat_prices("A00036", cal, 10000, jumps={40: 0.9 * 1.6}, base={40: 0.9})
+    f = run_adj_sql([], px, cal)[f"A00036:krx_base:{cal[40]}"]
+    assert f["price_resolution"] == "price_only" and f["price_only_factor"] == 0.9
+    over = run_eg8([], px, cal, jump_max=0.5)
+    assert over.status is GateStatus.FAIL
+    assert over.metrics["n_price_only_return_jump_over"] == 1
+    assert over.detail.startswith("n_price_only_return_jump_over=1")
+    assert over.metrics["max_abs_price_only_adj_return"] == pytest.approx(14400 / 9000 - 1)
+    assert over.metrics["n_return_jump_over"] == 0               # ok 계수 축은 깨끗하다
+    under = run_eg8([], px, cal, jump_max=1.0)
+    assert under.status is GateStatus.PASS
+    assert under.metrics["n_price_only_return_jump_over"] == 0
+    monkeypatch.setattr(rules_s06, "PRICE_ONLY_JUMP_GATE", False)
+    off = run_eg8([], px, cal, jump_max=0.5)
+    assert off.status is GateStatus.PASS and off.metrics["price_only_jump_gate"] is False
+    assert off.metrics["n_price_only_return_jump_over"] == 1     # 기록은 남는다
+
+
 def test_점프_상수가_없으면_EG8은_skip이되_metric은_계산한다(tmp_path: Path) -> None:
     bl = seed()
     keep = {k: v for k, v in bl.table("adj_factor").items()
@@ -1284,15 +1336,15 @@ def test_절단본_계수_행은_247540_900050이고_옛_열은_공개일_밖에
 
 
 def test_절단본_EG8은_계수_행_적용일_수정수익률을_기록한다(built: build.BuildResult) -> None:
-    """D6-5: 계수 행의 적용일 수정수익률 = 종가 ÷ 그날 기준가 − 1 — 기록형(폐기형 승격은 6-5 서버
-    재연 뒤). 900050 2011-02-16 원수익률 +5.4% → 10,800/10,150 − 1 = +6.4%, 247540 05-09
-    −3.51% → 481,000/491,300 − 1 = −2.10%."""
+    """D6-5: 계수 행의 적용일 수정수익률 = 종가 ÷ 그날 기준가 − 1 — 폐기형(10-09 6-5 서버 재연
+    초과 0, 최대 0.300 → ok 계수와 같은 상수 adj_return_jump_max). 900050 2011-02-16 원수익률
+    +5.4% → 10,800/10,150 − 1 = +6.4%, 247540 05-09 −3.51% → 481,000/491,300 − 1 = −2.10%."""
     m = _gate(built, "EG8").metrics
     assert m["n_price_only_events"] == 2 and m["n_price_only_with_price"] == 2
     assert m["max_abs_price_only_adj_return"] == pytest.approx(10800 / 10150 - 1)
     assert m["n_price_only_abs_adj_return_over_030"] == 0
     assert m["n_price_only_return_jump_over"] == 0
-    assert m["price_only_jump_gate"] is False and rules_s06.PRICE_ONLY_JUMP_GATE is False
+    assert m["price_only_jump_gate"] is True and rules_s06.PRICE_ONLY_JUMP_GATE is True
     ev = {e["event_id"]: e for e in m["events"]}                # type: ignore[union-attr]
     assert ev["247540:krx_base:2022-05-09"]["adj_return"] == pytest.approx(481000 / 491300 - 1)
     assert ev["247540:krx_base:2022-05-09"]["raw_return"] == pytest.approx(481000 / 498500 - 1)

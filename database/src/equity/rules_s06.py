@@ -151,9 +151,10 @@ SUPPRESSED_SOURCES: tuple[str, ...] = ("near_dup_suppressed", "same_day_suppress
 FACTOR_NEAR_EXCLUDED_SOURCES: tuple[str, ...] = (*PRICE_ONLY_SOURCES, "capred_paid")
 # 기록형 r 분포 보고 구간 |r − 1| (플랜 실측 ≤ 5% 838 · > 30% 610) — 판정축 아님.
 PRICE_ONLY_R_SMALL, PRICE_ONLY_R_LARGE = 0.05, 0.30
-# D6-5: EG8-P02(|수정수익률| ≤ adj_return_jump_max) 를 계수 행에도 폐기형으로 걸지는 6-5 서버 재연
-# (초과 0 확인) 뒤 정한다. 그때 True 로 바꾸면 같은 상수로 checks 에 들어간다 — 지금은 기록형.
-PRICE_ONLY_JUMP_GATE = False
+# D6-5: EG8-P02(|수정수익률| ≤ adj_return_jump_max) 를 계수 행에도 같은 상수로 폐기형으로 건다 —
+# 10-09 6-5 서버 재연(운영 입력 D=20261008) 초과 0(최대 0.300) → 폐기형(D6-5, N-33). False 로
+# 되돌리면 기록형(metrics 만)으로 돌아간다.
+PRICE_ONLY_JUMP_GATE = True
 
 
 def _row(ctx: EquityGateContext, sql: str) -> tuple[object, ...]:
@@ -827,8 +828,8 @@ def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
           coalesce(max(abs(raw_return)) FILTER (WHERE NOT factor_ok), 0),
           count(*) FILTER (WHERE factor_ok AND apply_date <> effective_date)
         FROM _eg8""")
-    # ⑤ 계수 행의 적용일 수정수익률(= 종가 ÷ 그날 기준가 − 1) — 기록형(D6-5, 폐기형 승격은 6-5 재연
-    # 뒤 PRICE_ONLY_JUMP_GATE). v_adj_price 가 ⑤ 를 접으므로 같은 템플릿으로 잰다.
+    # ⑤ 계수 행의 적용일 수정수익률(= 종가 ÷ 그날 기준가 − 1) — 폐기형(D6-5, 10-09 6-5 재연 근거,
+    # PRICE_ONLY_JUMP_GATE). v_adj_price 가 ⑤ 를 접으므로 같은 템플릿으로 잰다.
     po = PRICE_ONLY_RESOLUTION
     n_po, n_po_price, max_po_ret, n_po_over_030 = _row(ctx, f"""
         SELECT count(*) FILTER (WHERE price_resolution = '{po}'),

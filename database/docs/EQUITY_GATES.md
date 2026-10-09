@@ -1046,7 +1046,7 @@ SELECT (SELECT count(*) FROM adj_factor)
         - eg1_tail('adj_factor')) AS delta;
 ```
 
-⑤(e1.26.0) 는 **행을 만들지 않는다** — 열 2개(`price_only_factor`·`price_resolution`)와 계수 행의 공개일만 바뀌므로 위 등식은 그대로다. 값 축은 `EG3_adj_factor` ⑤ 술어(`rules_s06._price_only`)가 폐기형으로 본다: 어휘 닫힘 · `'factor' ⇔ factor_ok` · 계수 행은 `factor_ok=false` ∧ `apply_basis='krx_base_price'` ∧ 사유 ∈ {krx_base_inconsistent, unknown_price_only} ∧ 주식 계열 · 계수 = 기준가 후보 r(`FACTOR_PRODUCT_TOL`) · 게이트가 다시 만든 단위당 계수 행 정확히 1 · 단위 밖·ok 접힘일 계수 행 0 · 계수 행 아닌데 계수 ≠ 1 0 · `price_only_dup` 은 계수 행과 같은 (ticker, apply_date) · 공개일 재계산에 계수 행 분기. 기록형: 표식별·사유×종류별 수, r 분포, 계수를 실을 행이 없는 기준가 날짜 수, `unresolved` 사유별, 근처 판정 수. EG8 은 계수 행 적용일 수정수익률을 기록형으로 잰다(폐기형 승격은 D6-5 — `PRICE_ONLY_JUMP_GATE`).
+⑤(e1.26.0) 는 **행을 만들지 않는다** — 열 2개(`price_only_factor`·`price_resolution`)와 계수 행의 공개일만 바뀌므로 위 등식은 그대로다. 값 축은 `EG3_adj_factor` ⑤ 술어(`rules_s06._price_only`)가 폐기형으로 본다: 어휘 닫힘 · `'factor' ⇔ factor_ok` · 계수 행은 `factor_ok=false` ∧ `apply_basis='krx_base_price'` ∧ 사유 ∈ {krx_base_inconsistent, unknown_price_only} ∧ 주식 계열 · 계수 = 기준가 후보 r(`FACTOR_PRODUCT_TOL`) · 게이트가 다시 만든 단위당 계수 행 정확히 1 · 단위 밖·ok 접힘일 계수 행 0 · 계수 행 아닌데 계수 ≠ 1 0 · `price_only_dup` 은 계수 행과 같은 (ticker, apply_date) · 공개일 재계산에 계수 행 분기. 기록형: 표식별·사유×종류별 수, r 분포, 계수를 실을 행이 없는 기준가 날짜 수, `unresolved` 사유별, 근처 판정 수. EG8 은 계수 행 적용일 수정수익률도 ok 계수와 같은 상수 `adj_return_jump_max` 로 판정한다 — **폐기형(10-09 재연 근거)**: 6-5 서버 재연(운영 입력 D=20261008) 최대 0.300·초과 0 → D6-5 승격 (`PRICE_ONLY_JUMP_GATE = True`, 체크 `n_price_only_return_jump_over`).
 
 ### ⑪ `flow_daily` · `short_daily` · `credit_daily`
 ```sql

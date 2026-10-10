@@ -6,9 +6,10 @@
 하루(거래일 T) 통과 = 넷 다 참.
   ① 그날 장 마감 체인 단계 전부 ok — 런 로그 `data/raw/daily_run.db` 에서 date=T 인 `CHAIN_SOURCES` 런이 모두
      status 'ok'. 같은 단계를 다시 돌려 뒤 런이 ok 여도 앞 런 실패는 실패다. 수집기의 cutoff·late 도 'ok' 가 아니다.
-  ② 그날 날짜의 crit 0 — `logs/notify.log`(`scripts/notify.sh` 가 남김)의 crit 줄. 줄 시각은 UTC 라 KST 날짜로
-     바꿔 T 와 맞춘다. 일일 리포트 줄(`scripts/daily_report.py` 의 제목 `일일 리포트 <D>`)만은 D 다음 날 아침에
-     남으므로 제목의 D 로 맞춘다. warn 줄은 실패가 아니라 보고 대상으로 싣는다.
+  ② 그날 날짜의 crit 0 — `logs/notify.log`(`scripts/notify.sh` 가 남김)의 crit 줄 가운데 **점수에 영향을 주는 경로의
+     crit 만**(사용자 10-10 결정 — 제목 접두어 `COUNTED_CRIT_PREFIXES`). 줄 시각은 UTC 라 KST 날짜로 바꿔 T 와
+     맞춘다. 목록 밖 crit(DART·KIS·WISE·키움 저녁 등 수집 단계, 21:20 잠정판 빌드와 그 워치독, 요약 줄인 일일
+     리포트, 모르는 새 제목)은 세지 않고 '판정 밖 crit' 으로 보이기만 한다. warn 줄은 보고 대상으로 싣는다.
   ③ 수동 개입 0 — 장부 `data/cutover/manual_interventions.jsonl`(한 줄 = {date, what, by, recorded_at})의
      date=T 항목. 기록은 `record` 하위 명령.
   ④ 다음 날 두 판 대조(PR-7 `daily.board_compare`) 통과 — `data/model_db/compare/<T>.json` 의 verdict pass·rc 0.
@@ -81,11 +82,29 @@ WINDOW_JSON = Path("data/cutover/window.json")
 KST = cr.KST
 TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"    # notify.sh `date -u +%FT%TZ` · 장부 recorded_at
 _NOTIFY_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) (crit|warn|info) (.*)$")
-# 일일 리포트 제목 — `scripts/daily_report.py` main 의 `일일 리포트 {date}`(앞에 `⚠ 알림 실패 n · ` 이 붙을 수 있다)
-_REPORT_RE = re.compile(r"일일 리포트 (\d{8})$")
+# 세는 crit 제목(접두어) — 점수에 영향을 주는 경로만(사용자 10-10 결정). 제목은 각 스크립트의
+# `scripts/notify.sh crit "<제목>"` 호출부에서 옮겼다. 목록 밖 crit 은 세지 않고 '판정 밖 crit' 으로 보인다 — 모르는
+# 새 제목을 사람이 보게 한다. 수집 단계(daily_evening·daily_ledger·daily_master·WICS) 결손이 점수에 닿으면 아래
+# 아침 빌드·장 마감 판 실패로 잡힌다. 일일 리포트는 요약 줄이라 개별 원인과 이중으로 세므로 넣지 않는다
+COUNTED_CRIT_PREFIXES: tuple[str, ...] = (
+    # 장 마감 체인 — scripts/postclose_chain.sh close · refill · morning(PR-8)
+    "장 마감 체인 실패", "장 마감 재반영 실패", "장 마감 판 아침 잇기 실패",
+    # 연구 아침 빌드 — daily_build.sh(실패·중단·원장 락 날짜 바뀜) · build_morning.sh · build_chain.sh(확정판) ·
+    # model_daily.sh(아침 fi·모델·엑셀)
+    "daily_build ", "확정 빌드 시작 불가", "확정판 빌드 실패", "모델 단계 실패",
+    # v3 반영 — scripts/v3_post.sh
+    "v3_post ",
+    # 워치독 — watchdog.sh postclose_board · morning_build(확정 빌드 · 확정판 엑셀 발송 장부)
+    "watchdog: 16:30 까지 장 마감 판", "watchdog: 10:30 까지 확정", "watchdog: 확정판 엑셀 발송",
+)
 _YMD_RE = re.compile(r"^\d{8}$")
 _WEEKDAY = "월화수목금토일"
 SAMPLE_N = 5                    # 형식 밖 notify 줄 표본 수
+
+
+def counted_crit(title: str) -> bool:
+    """이 crit 제목이 '그날 crit 0' 에 드는가 — `COUNTED_CRIT_PREFIXES` 접두어."""
+    return title.startswith(COUNTED_CRIT_PREFIXES)
 
 
 class InputError(RuntimeError):
@@ -124,8 +143,7 @@ class Note:
 def read_notify(path: Path) -> tuple[dict[str, list[Note]], list[str]]:
     """crit·warn 줄을 판정 날짜(YYYYMMDD)별로 모은다. info 는 버린다. 형식 밖 줄은 따로 돌려준다.
 
-    판정 날짜 = 줄 시각(UTC)의 KST 날짜. 일일 리포트 줄만 제목의 D. 파일이 없으면 InputError — 'crit 0' 과
-    '못 읽음'은 다르다(공통 3).
+    판정 날짜 = 줄 시각(UTC)의 KST 날짜. 파일이 없으면 InputError — 'crit 0' 과 '못 읽음'은 다르다(공통 3).
     """
     if not path.is_file():
         raise InputError(f"notify.log 없음: {path} — 그날 crit 0 을 확인할 수 없다")
@@ -149,9 +167,7 @@ def read_notify(path: Path) -> tuple[dict[str, list[Note]], list[str]]:
                 if level == "info":
                     continue
                 title = rest.split(" | ", 1)[0]
-                rep = _REPORT_RE.search(title)
-                day = rep.group(1) if rep else stamp.astimezone(KST).strftime("%Y%m%d")
-                by_date[day].append(Note(level, at, title))
+                by_date[stamp.astimezone(KST).strftime("%Y%m%d")].append(Note(level, at, title))
     except OSError as e:
         raise InputError(f"notify.log 읽기 실패: {path} {type(e).__name__}: {e}") from e
     return by_date, unparsed
@@ -325,6 +341,7 @@ class Day:
     pending: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     warns: list[str] = field(default_factory=list)
+    ignored: list[str] = field(default_factory=list)    # 판정 밖 crit — 세지 않고 보이기만(목록 밖 제목)
 
     @property
     def key(self) -> str:
@@ -350,7 +367,7 @@ class Day:
     def to_dict(self) -> dict[str, object]:
         return {"date": self.key, "weekday": _WEEKDAY[self.date.weekday()], "status": self.status,
                 "skip_reason": self.skip, "fails": self.fails, "pending": self.pending,
-                "errors": self.errors, "warns": self.warns}
+                "errors": self.errors, "warns": self.warns, "ignored_crit": self.ignored}
 
 
 def _chain_reasons(runs: list[Run], later: bool) -> tuple[list[str], list[str]]:
@@ -375,9 +392,13 @@ def _chain_reasons(runs: list[Run], later: bool) -> tuple[list[str], list[str]]:
 
 
 def _add_records(day: Day, notes: list[Note], ledger: list[dict[str, str]], tail: str = "") -> None:
-    """crit·수동 개입은 실패, warn 은 경고로 싣는다. `tail` = 건너뛴 날에서 귀속한 표시(T-39)."""
+    """세는 crit·수동 개입은 실패, 목록 밖 crit 은 판정 밖, warn 은 경고로 싣는다. `tail` = 건너뛴 날에서 귀속한
+    표시(T-39)."""
     for n in notes:
-        (day.fails if n.level == "crit" else day.warns).append(n.text() + tail)
+        if n.level != "crit":
+            day.warns.append(n.text() + tail)
+        else:
+            (day.fails if counted_crit(n.title) else day.ignored).append(n.text() + tail)
     for m in ledger:
         day.fails.append(f"수동 개입: {m['what']} ({m['by']})" + tail)
 
@@ -553,6 +574,8 @@ def render(res: Result, out: Path | None) -> str:
     for d in res.days:
         why = " · ".join(d.reasons())
         lines.append(f"  {_label(d.date)} {_STATUS_KO[d.status]}" + (f" — {why}" if why else ""))
+        for x in d.ignored:
+            lines.append(f"      판정 밖 {x}")          # x = "crit MM-DD HH:MM KST 제목"
         for w in d.warns:
             lines.append(f"      경고 {w}")
     tail = (f" · 마지막 실패 {res.last_fail} → {res.restart_from} 부터 다시 셈" if res.last_fail else "")

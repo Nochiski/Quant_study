@@ -36,6 +36,15 @@ python -m factor_inputs build --date 20260929 --basis morning \
   equity 판을 거절한다. D 는 확정판의 거래일(예: 09-30 아침 체인 → `--date 20260929`).
 - 과거 날짜 검증(예: GC2 의 09-23 재현)은 **별도 `--root`** 로 돌린다 — `latest_morning.json` 은
   날짜와 무관하게 마지막 성공 판을 가리키므로 운영 루트에서 옛 날짜를 돌리면 덮인다.
+- **재생 `--replay`**(컷오버 PR-8b — `scripts/replay.sh --basis evening` 만 쓴다): 과거 D 의 판을
+  현판(최근 세션까지 온 equity)에서 짓는다. 정보 입력은 SQL 이 이미 asof 로 자르지만 세션 축은 자르지
+  않아, 현판으로는 장 마감 판 MD-SEAM(§2-1)이 서지 않고 아침판은 달력 뒤 세션이 filing_late 실효 기한을
+  정한다. `--replay` 는 equity 세션 축 7표(`build.REPLAY_SESSION_TABLES` — trading_calendar · universe_daily ·
+  price_daily · price_adj_daily · flow_daily · credit_daily · coverage_daily)의 뷰만 `date <= asof`(아침판 D ·
+  장 마감 판 D')로 자르고 판 manifest 에 `replay`(자른 날·표)를 남긴다. `queries` SQL·게이트·진입 조건은
+  그대로이고, 재생이 아니면 뷰 SQL 도 글자 그대로다(`tests/test_factor_inputs_replay.py`). 마스터
+  (security·corp)와 equity 재계산은 현판 그대로라 그날 판과 다를 수 있다 — 재생의 두 판(장 마감 판·연구
+  판)이 같은 현판을 읽어 대조에서는 상쇄된다.
 
 ### 2-1. 장 마감 판(`--basis evening`, 컷오버 PR-4)
 

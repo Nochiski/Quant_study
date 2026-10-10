@@ -44,6 +44,13 @@ rc 2). 읽은 판 id 는 판 manifest `postclose_builds`·`tables.<표>.inputs` 
 보류와 후보 커버리지 게이트 FG5 의 대상(직전 판 모델 후보 — `--candidates-root` 연구 fi 루트의
 `_runs/<D'>_morning.json`, 수집기 `daily.postclose.fi_candidates` 와 같은 함수)도 여기서 읽는다.
 후보를 못 읽으면 FG5 가 FAIL 이다(판 실패 rc 1).
+
+재생(`--replay`, 컷오버 PR-8b — `scripts/replay.sh --basis evening` 만 쓴다): 과거 D 의 판을
+현판(최근 세션까지 온 equity)에서 짓는다(X-1 '현판 + D 시점 자르기'). 정보 입력은 SQL 이 이미
+asof 로 자르지만 세션 축은 자르지 않는다 — 현판으로는 MD-SEAM 이 서지 않고(장 마감 판), 달력 뒤
+세션이 filing_late 실효 기한을 정한다(아침판). 그래서 equity 세션 축 표(`REPLAY_SESSION_TABLES`)의
+뷰만 `date <= asof`(아침판 D · 장 마감 판 D')로 자른다. `queries` SQL·게이트·진입 조건은 그대로이고,
+재생이 아니면 뷰 SQL 도 글자 그대로다. 판 manifest 에 `replay`(자른 날·표)를 남긴다(재생 판에만).
 """
 from __future__ import annotations
 
@@ -120,6 +127,10 @@ _EMPTY_FIN_WISE_Q = (
     + " WHERE false)")
 OPTIONAL_STAGE_SOURCES: dict[str, str] = {"stg_fin_wise_q": _EMPTY_FIN_WISE_Q}
 _CHAIN_TABLES = ("price_daily", "price_adj_daily", "adj_factor")
+# 재생(`--replay`)이 뷰를 asof 에서 자르는 equity 세션 축 표 — 세션 날짜 열 `date` 가 있는 원천.
+# 정보 표(공개일 축)는 SQL 이 asof 로 자르고, 마스터(security·corp)는 날짜 축이 없다
+REPLAY_SESSION_TABLES = ("trading_calendar", "universe_daily", "price_daily", "price_adj_daily",
+                         "flow_daily", "credit_daily", "coverage_daily")
 
 
 class FactorInputsError(Exception):
@@ -380,14 +391,15 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
           golden_path: Path | None = GOLDEN_PATH, keep: int = KEEP_DEFAULT,
           build_id: str | None = None, builds_from: Path | None = None,
           calendar_dir: Path | None = None, postclose_stage_root: Path | None = None,
-          candidates_root: Path | None = None) -> BuildResult:
+          candidates_root: Path | None = None, replay: bool = False) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 factor_inputs 8표를 굽는다. 게이트 FAIL 은 결과 status 로,
     입력·인자 오류는 `FactorInputsError` 로 낸다. `builds_from`(인계 이력 JSON)을 주면 원천 판을
     current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정'). `calendar_dir` 는
     장 마감 판의 거래일 판정 달력(`daily.calendar` 연도 파일 폴더, 없으면 그 모듈 기본 경로).
     장 마감 판만 읽는 것: `postclose_stage_root`(T 행 stage 루트, 없으면
     `default_postclose_stage_root()`) · `candidates_root`(직전 판 모델 후보를 읽을 연구 fi 루트,
-    없으면 `research_root()`)."""
+    없으면 `research_root()`). `replay` 는 재생 전용 — 세션 축 뷰를 asof 에서 자른다(모듈 docstring
+    '재생')."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
@@ -433,13 +445,17 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         shutil.rmtree(tmp_root)
     tmp_root.mkdir(parents=True)
     d_iso = d.isoformat()
+    asof = d_iso if dprime is None else dprime.isoformat()
     con = duckdb.connect()
     try:
         con.execute(f"SET threads = {DUCKDB_THREADS}")
         con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
         con.execute("SET enable_progress_bar = false")
         for name, expr in {**eq_exprs, **st_exprs}.items():
-            con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+            # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다
+            cut = (f" WHERE date <= DATE '{asof}'"
+                   if replay and name in REPLAY_SESSION_TABLES else "")
+            con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}{cut}')
         _check_columns(con, equity_builds)
         if dprime is not None:
             _check_seam(con, d, dprime, builds_from)
@@ -452,7 +468,6 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             got = _one(con, f'SELECT max(date) FROM "{queries.T_SOURCE_TABLE}"')
             t_src_max = None if got is None else str(got)
             t_cands, t_from = _t_candidates(Path(candidates_root or research_root()), dprime)
-        asof = d_iso if dprime is None else dprime.isoformat()
         con.execute(queries.calendar_sql(d_iso if evening else None))
         if not _one(con, f"SELECT count(*) FROM _calx WHERE date = DATE '{d_iso}'"):
             raise FactorInputsError(
@@ -543,6 +558,10 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         "gates": [g.as_dict() for g in results],
         "elapsed_s": elapsed,
     }
+    if replay:
+        # 재생 표시(재생 판에만) — 현판을 이 날에서 자른 판이다(운영 판과 구분)
+        payload["replay"] = {"session_cut": asof, "tables": list(REPLAY_SESSION_TABLES),
+                             "note": "재생(PR-8b) — 현판 equity 의 세션 축을 asof 에서 자른 판"}
 
     if failed:
         report = root / "_failed" / f"{bid}.json"

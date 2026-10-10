@@ -1402,6 +1402,89 @@ def test_E1_큰_사건은_창_안_어디든_기준가가_맞는_세션을_찾는
     assert g.status is GateStatus.PASS, g.detail
 
 
+def test_E1_원수익률_세션이_명목이_아닌_기준가_후보면_그_세션에서_반증한다() -> None:
+    """(d) 의 's 가 bp' 경로 중 옛 (b) 창 세션(raw_win): 분할 ratio 2(pf 0.5) 명목 30 은 변화 없고
+    세션 33 에 종가 ×0.5(원수익률 잔여 0)·기준가 ×0.8(비율 안 맞음). 기준가로는 못 찾고 옛 원수익률
+    세션 s = 33 이 기준가 후보라 옛 경로 그대로 그 세션에 두고 conflict 가 krx_base_inconsistent 로
+    내린다(apply_basis price_matched). 33 의 기준가는 unknown_price_only ⑤ 계수 행, 사건은
+    price_only_dup — s 를 명목 세션으로 두면 기준가 근거 없는 ok 가 된다(리뷰 변이 M10)."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00033", "event_type": "split", "effective_date": cal[30], "ratio": 2.0,
+           "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[30]}]
+    px = flat_prices("A00033", cal, 10000, jumps={33: 0.5}, base={33: 0.8})
+    f = run_adj_sql(ev, px, cal)
+    x, kb = f[f"A00033:split:{cal[30]}"], f[f"A00033:krx_base:{cal[33]}"]
+    assert x["factor_ok"] is False and x["factor_source"] == "krx_base_inconsistent"
+    assert x["apply_basis"] == "price_matched" and x["apply_date"] == cal[33]
+    assert x["price_resolution"] == "price_only_dup"
+    assert kb["event_type"] == "unknown_price_only" and kb["price_resolution"] == "price_only"
+    assert kb["price_only_factor"] == 0.8
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+@pytest.mark.parametrize("share_jumps", [{26: 0.5}, {40: 0.5}], ids=["같은날_주식수", "뒤_상장"])
+def test_E1_같은_날_억제는_기준가로_찾은_사건이_소유자다(share_jumps: dict[int, float]) -> None:
+    """E-1 리뷰 MAJOR-1: 결정공시 감자 A(ratio 0.4, 우선순위 높음)는 정지 뒤 세션 26 종가 ×2.4 와
+    원수익률로만 맞고(잔여 0.04) 기준가 ×2 와는 안 맞아 반증 경로 후보다. KRX 액면병합 B(ratio 0.5)
+    는 기준가 ×2 와 정확히 맞는다. 옛 순서(우선순위만)는 A 가 이겨 B 를 누르고 A 는 conflict 로
+    krx_base_inconsistent — 26 의 기준가는 주식수가 같은 날 바뀌면 unknown_krx 로 따로 서고, 아니면
+    직전 행이 참고가라 (c) 재발견(행 없음)이라 어디에도 안 접혔다. 새 순서는 기준가로 찾은 B 가
+    소유자다."""
+    cal = sessions(80)
+    ev = [_ev_capred("A00777", 20, 0.4, cal),
+          {"ticker": "A00777", "event_type": "reverse_split", "effective_date": cal[22],
+           "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[22]}]
+    px = flat_prices("A00777", cal, 1000, jumps={26: 2.4}, halt=(19, 25), base={26: 2.0},
+                     share_jumps=share_jumps)
+    f = run_adj_sql(ev, px, cal)
+    a, b = f[f"A00777:capred:{cal[20]}"], f[f"A00777:reverse_split:{cal[22]}"]
+    assert set(f) == {f"A00777:capred:{cal[20]}", f"A00777:reverse_split:{cal[22]}"}
+    assert b["factor_ok"] is True and b["apply_basis"] == "krx_base_price"
+    assert b["apply_date"] == cal[26] and (b["price_factor"], b["share_factor"]) == (2.0, 0.5)
+    assert a["factor_ok"] is False and a["factor_source"] == "same_day_suppressed"
+    assert a["apply_date"] == cal[26] and a["price_resolution"] == "factor_near"
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+def test_E1_성분도_기준가_근거가_있어야_ok다() -> None:
+    """(c) 성분 탐색도 기준가 후보 세션만 본다. 감자 0.5 + 액면병합 0.5(명목 20·22), 정지 뒤 세션 26
+    종가 ×4 인데 기준가는 직전 종가 그대로(조정 없음) — 옛 (c) 는 원수익률 곱 ×4 로 둘 다 combined
+    ok 였다(리뷰 변이 M13). 성분 원수익률은 사유 판정에 안 쓰고 개별 원수익률(×2 기대)은 안 맞아
+    둘 다 no_price_match."""
+    cal = sessions(80)
+    ev = [_ev_capred("A00044", 20, 0.5, cal),
+          {"ticker": "A00044", "event_type": "reverse_split", "effective_date": cal[22],
+           "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[22]}]
+    px = flat_prices("A00044", cal, 1000, jumps={26: 4.0}, halt=(19, 25))
+    f = run_adj_sql(ev, px, cal)
+    assert len(f) == 2
+    for x in f.values():
+        assert x["factor_ok"] is False and x["factor_source"] == "no_price_match"
+        assert x["apply_basis"] == "unmatched"
+
+
+def test_E1_명목_세션은_원수익률과_무관하게_기준가_비로_판정하고_창보다_먼저다() -> None:
+    """(a) 는 명목 세션의 기준가 비로 판정한다. 분할 ratio 2(pf 0.5) 명목 30 기준가 ×0.52(잔여
+    0.04 ≤ 0.075)인데 그날 종가 ×0.6(원수익률 잔여 0.2). 세션 40(명목 ± 5 밖)에 기준가 ×0.5(잔여 0)가
+    또 있어도 명목 30 이 먼저다 — (a) 를 원수익률로 재면 (b) 가 40 을 고른다(리뷰 변이 M11). 40 의
+    기준가는 unknown_price_only 로 따로 선다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00052", "event_type": "split", "effective_date": cal[30], "ratio": 2.0,
+           "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[30]}]
+    px = flat_prices("A00052", cal, 10000, jumps={30: 0.6, 40: 0.5}, base={30: 0.52, 40: 0.5})
+    f = run_adj_sql(ev, px, cal)
+    x = f[f"A00052:split:{cal[30]}"]
+    assert x["factor_ok"] is True and x["apply_basis"] == "krx_base_price"
+    assert x["apply_date"] == cal[30] and x["price_factor"] == pytest.approx(0.52)
+    assert f[f"A00052:krx_base:{cal[40]}"]["event_type"] == "unknown_price_only"
+
+
 def test_E1_기준가_NULL_저녁_잠정_행은_근거가_아니라_미해결이다() -> None:
     """기준가 NULL 은 저녁 잠정 T 행뿐이다(price_daily 가 KRX 기본정보 없이 만든다 — KRX 행 기준가
     채움 2010~2026 100%, 로컬 10-03 판). 명목 세션이 그 행이면 원수익률(키움 종가)이 맞아도 ok 가

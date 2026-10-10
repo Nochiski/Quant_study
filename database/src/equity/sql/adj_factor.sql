@@ -59,7 +59,8 @@
 --       게 낫다.
 --   같은 티커의 개별 매칭(nominal·price_matched) ok 이벤트 2건이 같은 apply_date 에 닿으면 같은 사건을 두 원천
 --   ·두 유형이 따로 실은 것(감자 cr + KRX 액면병합)이라 우선순위 낮은 쪽을 same_day_suppressed 로 누른다
---   (성분 매칭은 하나의 복합 사건이라 제외). 창 폭·허용치는 _const(baseline adj_factor.price_match_*).
+--   (성분 매칭은 하나의 복합 사건이라 제외). 순서는 기준가로 찾은 후보 먼저, (d) 반증 경로 후보 뒤(E-1),
+--   같은 축 안에서는 우선순위(rank_key). 창 폭·허용치는 _const(baseline adj_factor.price_match_*).
 --
 -- factor_ok=false 인 행 (격리가 아니다 — 이벤트는 실재하나 계수를 못 낸다. 계수 1 · 사유는 factor_source):
 --   near_dup_suppressed  : 같은 (ticker, event_type) 이 **다른 원천**에서 near_dup_window_days 안에 2건
@@ -371,7 +372,10 @@ resolved AS (
                 WHEN sc.root IS NOT NULL    THEN 'price_matched_combined'
                 WHEN rs.on_bp               THEN rs.apply_basis
                 ELSE 'unmatched' END                                      AS apply_basis,
-           rs.event_id IS NOT NULL                                        AS raw_hit
+           rs.event_id IS NOT NULL                                        AS raw_hit,
+           -- (d) 's 가 bp' 경로로만 선 후보 — 기준가 비율이 안 맞는다(같은 날 억제 순서에 쓴다)
+           (a.event_id IS NULL AND b.event_id IS NULL AND sc.root IS NULL
+            AND coalesce(rs.on_bp, FALSE))                                AS via_raw
     FROM cand c
     LEFT JOIN step_a a ON a.event_id = c.event_id
     LEFT JOIN step_b b ON b.event_id = c.event_id
@@ -382,12 +386,15 @@ resolved AS (
 same_day AS (
     -- 개별 매칭 ok 이벤트가 같은 (ticker, apply_date) 에 2건 이상 → 우선순위 낮은 쪽 억제.
     -- sibling_id = 이긴 쪽(rn 1) — ⑤ factor_near 판정에 쓴다
+    -- E-1: 기준가로 찾은 후보((a)(b))가 원수익률로만 선 반증 경로 후보(via_raw)보다 먼저다 — 우선순위
+    -- 높은 반증 후보가 이기면 기준가로 맞은 사건이 눌리고 그 세션 기준가가 어디에도 안 접힌다(직전 행이
+    -- 참고가면 (c) 재발견이라 신규 행도 없다). 같은 축 안에서는 옛 순위 그대로
     SELECT event_id,
            row_number() OVER sd            AS rn,
            first_value(event_id) OVER sd   AS sibling_id
     FROM resolved
     WHERE apply_basis IN ('nominal', 'price_matched')
-    WINDOW sd AS (PARTITION BY ticker, apply_date ORDER BY rank_key)
+    WINDOW sd AS (PARTITION BY ticker, apply_date ORDER BY via_raw, rank_key)
 ),
 final AS (
     SELECT n.*,

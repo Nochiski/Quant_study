@@ -303,12 +303,13 @@ RULES_VERSION = "e1.28.0"                # BuildRecord.rules_version 에 실린�
 #          (a)(b)(c) 가 원수익률 대신 기준가 후보(bp) 세션의 기준가 비 |r / pf − 1| ≤ tol 로 세션을
 #          고른다 — 기준가 = 직전 종가(조정 없음)인 날은 후보 밖. 소액은 명목 세션만(그 ±
 #          `base_match_window_sessions` 는 S06-2 (a)). 못 찾으면 옛 원수익률 판정의 세션 s 로 사유를
-#          가른다: s 가
-#          기준가 후보 → 옛 경로(conflict → krx_base_inconsistent), 아니면 신설 사유
+#          가른다: s 가 기준가 후보 → 옛 경로(conflict → krx_base_inconsistent), 아니면 신설 사유
 #          `no_base_price_evidence`(apply_basis unmatched·명목 세션), 원수익률도 못 맞추면
-#          no_price_match. ok 행의 apply_basis 는 krx_base_price 뿐(`OK_APPLY_BASIS`, EG3
-#          `n_ok_apply_basis_bad`). 로컬 10-03 판 재생: 238행·138종목 변화 — ok → 미해결 102
-#          (소액 자기주식 소각 감자 72 등), 다른 날로 옮긴 ok 12(240600 등), 미매칭 → ok 11,
+#          no_price_match. 같은 날 억제는 기준가로 찾은 후보가 반증 경로 후보보다 먼저(via_raw).
+#          ok 행의 apply_basis 는 krx_base_price 뿐(`OK_APPLY_BASIS`, EG3 `n_ok_apply_basis_bad`).
+#          로컬 10-03 판 재생: 238행·138종목 변화 — ok → not-ok 103(no_base_price_evidence 102 —
+#          소액 자기주식 소각 감자 72 등 · same_day_suppressed 1), 다른 날로 옮긴 ok 12(240600 등),
+#          미매칭 → ok 11,
 #          기준가가 안 바뀐 날의 계수 접힘 114 → 0, 그 밖 (종목, 날짜) 가격 단계는 KRX 기준가 사슬
 #          대조 범주 불변. 열·행 grain 불변 — fi·모델 계약 불변(값만 바뀜).
 

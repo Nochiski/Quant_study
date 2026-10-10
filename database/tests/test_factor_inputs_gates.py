@@ -218,16 +218,22 @@ T = "2026-09-29"            # 장 마감 판의 오늘. 직전 거래일 D' = D
 @pytest.fixture
 def con_evening(con) -> duckdb.DuckDBPyConnection:
     """장 마감 판 기준 상태 — D' 행은 KRX(종가 9,000), T 행은 장 마감 원천(종가 12,000),
-    시총 = D' 주식수 1,000,000 × T 종가 / 1e8 = 120억, 기준 't1_shares_x_t_close'."""
+    시총 = D' 주식수 1,000,000 × T 종가 / 1e8 = 120억, 기준 't1_shares_x_t_close'.
+    빌드가 남기는 임시 표 `_t_src`(장 마감 stage T 행)·`_t_pending`(T-6 보류)도 같은 모양으로 둔다."""
     con.execute(f"UPDATE g_fi_universe SET date = DATE '{T}', market_cap = 120.0, "
                 "mktcap_basis = 't1_shares_x_t_close'")
     con.execute("UPDATE g_fi_prices SET close = 9000")
     _insert(con, "fi_prices", ticker="000001", date=dt.date.fromisoformat(T), close=12_000,
             price_source="postclose")
+    con.execute("CREATE TABLE _t_src (ticker VARCHAR, price_valid BOOLEAN)")
+    con.execute("INSERT INTO _t_src VALUES ('000001', true)")
+    con.execute("CREATE TABLE _t_pending (ticker VARCHAR, kind VARCHAR)")
     return con
 
 
 def _ectx(con: duckdb.DuckDBPyConnection, **over: object) -> gates.GateContext:
+    over.setdefault("t_candidates", ("000001",))
+    over.setdefault("t_candidates_from", "m_20260928T233000Z")
     return _ctx(con, date=T, basis="evening", asof=D, **over)
 
 
@@ -235,8 +241,10 @@ def test_evening_baseline_passes_every_gate(con_evening) -> None:
     res = _by_name(gates.run_all(_ectx(con_evening)))
     assert {n: g.status for n, g in res.items()} == {
         "FG0": GateStatus.PASS, "FG1": GateStatus.PASS, "FG2": GateStatus.PASS,
-        "FG3": GateStatus.PASS, "FG4": GateStatus.SKIP, "FG-fresh": GateStatus.PASS}
+        "FG3": GateStatus.PASS, "FG4": GateStatus.SKIP, "FG-fresh": GateStatus.PASS,
+        "FG5": GateStatus.PASS}
     assert res["FG2"].metrics["n_t_price_rows"] == 1
+    assert (res["FG5"].metrics["n_candidates"], res["FG5"].metrics["n_missing"]) == (1, 0)
     # KRX 시총 대조는 장 마감 판에 대상이 없다(KRX 의 T 시총은 아직 없다) — 0 이 아니라 NULL
     assert res["FG3"].metrics["n_krx_mktcap_diff"] is None
     assert res["FG-fresh"].metrics["collection_expected_date"] == D
@@ -277,3 +285,79 @@ def test_fg_fresh_without_collection_is_skip(con) -> None:
                 "has_estimates = false, eligible = false, exclude_reason = 'estimates_none'")
     r = gates.fg_fresh(_ctx(con, dstar=None, collection_lag_sessions=None))
     assert r.status is GateStatus.SKIP
+
+
+# ── FG5 후보 커버리지(장 마감 판, 컷오버 PR-5 · N-42 Q4) ───────────────────────────
+def _candidates(con: duckdb.DuckDBPyConnection, n: int) -> tuple[str, ...]:
+    """후보 n 종목(000001 + 000002…) — 전부 유니버스·T 가격·장 마감 원천 행이 있다."""
+    t = dt.date.fromisoformat(T)
+    for i in range(2, n + 1):
+        code = f"{i:06d}"
+        _insert(con, "fi_universe", ticker=code, date=t, market="KOSPI", sec_type="common",
+                mktcap_basis="t1_shares_x_t_close", has_estimates=True,
+                coverage_state="fresh", coverage_age_days=0, eligible=False,
+                exclude_reason="estimates_none")
+        _insert(con, "fi_prices", ticker=code, date=t, close=1_000, price_source="postclose")
+        con.execute(f"INSERT INTO _t_src VALUES ('{code}', true)")
+    return tuple(f"{i:06d}" for i in range(1, n + 1))
+
+
+def _drop_t_price(con: duckdb.DuckDBPyConnection, code: str, *, row: bool) -> None:
+    """T 가격을 없앤다 — row=True 면 원장 행째 없음, False 면 price_valid 거짓(16:00 뒤 응답)."""
+    con.execute(f"DELETE FROM g_fi_prices WHERE ticker = '{code}' AND date = DATE '{T}'")
+    if row:
+        con.execute(f"DELETE FROM _t_src WHERE ticker = '{code}'")
+    else:
+        con.execute(f"UPDATE _t_src SET price_valid = false WHERE ticker = '{code}'")
+
+
+@pytest.mark.parametrize(("n_missing", "passed"), [(0, True), (1, True), (2, False)])
+def test_fg5_missing_ratio_boundary_is_inclusive(con_evening, n_missing: int,
+                                                 passed: bool) -> None:
+    """후보 50 중 T 가격 없음 1 = 0.02 = 상한 → 통과, 2 = 0.04 → FAIL(N-42 Q4 '상한 넘으면')."""
+    cands = _candidates(con_evening, 50)
+    for code in cands[-n_missing:] if n_missing else ():
+        _drop_t_price(con_evening, code, row=True)
+    r = gates.fg5_t_coverage(_ectx(con_evening, t_candidates=cands))
+    assert r.metrics["missing_max"] == gates.T_CANDIDATE_MISSING_MAX == 0.02
+    assert r.metrics["n_missing"] == n_missing and r.metrics["n_candidates"] == 50
+    assert (r.status is GateStatus.PASS) is passed, r.detail
+    if not passed:
+        assert r.detail.startswith("t_price_missing_over_max")
+
+
+def test_fg5_counts_no_row_and_invalid_price_but_not_corp_action_pending(con_evening) -> None:
+    """'T 가격 없음' = 원장 행 없음(no_row) + price_valid 아님(price_invalid). T-6 보류(corp_action_pending)
+    는 T 행이 있으므로 세지 않고 기록만 한다 — 수집 결손이 아니라 사건이다."""
+    cands = _candidates(con_evening, 4)
+    _drop_t_price(con_evening, "000002", row=True)
+    _drop_t_price(con_evening, "000003", row=False)
+    con_evening.execute("UPDATE g_fi_universe SET exclude_reason = 'corp_action_pending' "
+                        "WHERE ticker = '000004'")
+    con_evening.execute("INSERT INTO _t_pending VALUES ('000004', 'base_price')")
+    r = gates.fg5_t_coverage(_ectx(con_evening, t_candidates=cands))
+    assert r.status is GateStatus.FAIL
+    assert (r.metrics["n_missing"], r.metrics["n_no_row"], r.metrics["n_price_invalid"],
+            r.metrics["n_candidates_corp_action_pending"]) == (2, 1, 1, 1)
+    assert r.metrics["missing_tickers"] == ["000002", "000003"]
+    assert r.metrics["corp_action_pending"] == {"base_price": 1}
+    assert r.metrics["candidates_from"] == "m_20260928T233000Z"
+
+
+def test_fg5_without_candidates_fails(con_evening) -> None:
+    """직전 판 모델 후보를 못 읽으면(None) 커버리지를 잴 수 없다 — FAIL(SKIP 이 아니다)."""
+    r = gates.fg5_t_coverage(_ectx(con_evening, t_candidates=None,
+                                   t_candidates_from="InputUnavailable: 없음"))
+    assert r.status is GateStatus.FAIL
+    assert r.detail.startswith("candidates_unavailable") and "없음" in r.detail
+
+
+def test_fg5_runs_only_on_the_evening_board(con, con_evening) -> None:
+    """아침판 판 기록에는 FG5 가 없다(GATE_ORDER 그대로). 장 마감 판은 FG0 실패 때도 FG5 를
+    upstream_failed 로 적는다."""
+    assert [g.name for g in gates.run_all(_ctx(con))] == list(gates.GATE_ORDER)
+    assert "FG5" not in gates.GATE_ORDER
+    con_evening.execute("ALTER TABLE g_fi_prices ALTER close TYPE DOUBLE")
+    res = gates.run_all(_ectx(con_evening))
+    assert [g.name for g in res] == [*gates.GATE_ORDER, "FG5"]
+    assert res[-1].status is GateStatus.SKIP and res[-1].detail.startswith("upstream_failed")

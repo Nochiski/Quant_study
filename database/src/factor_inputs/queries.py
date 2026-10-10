@@ -14,8 +14,9 @@ compat 가 나중에 이 층을 읽어 v3 `quant.db` 에 쓸 때 다시 반올�
   · eligible 에 시총 하한을 걸지 않는다(엔진이 spec.universe.min_market_cap 으로 건다)
 
 임시 표 이름 규약: 산출 8표는 `_<표>`(예 `_fi_universe` — 접두 `_` 는 원천 뷰와 섞이지 않게), 보조는
-`_calx`(거래일 번호)·`_dstar`(마지막 수집일)·`_cov`(종목별 신선도)·`_t_prices`(장 마감 판 T 행
-자리).
+`_calx`(거래일 번호)·`_dstar`(마지막 수집일)·`_cov`(종목별 신선도)와 장 마감 판의 `_t_src`(장 마감
+stage T 행)·`_t_prices`(T 가격 행)·`_t_pending`(T-6 당일 기업행위 보류). 게이트 FG5 가 `_t_src`·
+`_t_pending` 을 읽는다.
 
 두 날짜(컷오버 PR-4 · T-2): `Params.d` 는 판 기준일(세션·창의 끝), `Params.asof` 는 정보 시점이다.
 아침판은 둘 다 D 다. 장 마감 판(basis evening)은 d = 오늘 T, asof = D'(직전 거래일 = 고정한 연구
@@ -47,8 +48,10 @@ LIVE_STATUSES = ("listed", "suspended")   # D 에 상장 중인 종목(compat st
 
 # 신선도 상태 어휘(계약 fi_universe.coverage_state)
 COVERAGE_STATES = ("fresh", "grace", "lapsed", "none")
-# eligible=False 사유 어휘 — 앞에서부터 먼저 걸린 것 하나를 적는다
-EXCLUDE_REASONS = ("sec_type", "market", "no_price", "estimates_lapsed", "estimates_none")
+# eligible=False 사유 어휘 — 앞에서부터 먼저 걸린 것 하나를 적는다. corp_action_pending 은 장 마감
+# 판에서만 난다(T-6, 컷오버 PR-5)
+EXCLUDE_REASONS = ("sec_type", "market", "no_price", "corp_action_pending", "estimates_lapsed",
+                   "estimates_none")
 
 # 수급 주체 — 계약 FLOW_SUBJECTS(백만원) ← equity flow_daily(원). compat `units.FLOW_SUBJECTS` 와
 # 같은 대응이다(`tests/test_factor_inputs.py` 가 두 선언을 대조한다). 이 층이 compat 을 import
@@ -92,6 +95,13 @@ QUARTER_REPORTS = ("11013", "11012", "11014", "11011")  # 1Q · 반기 · 3Q · 
 # 장 마감 판(evening) T 행 어휘 — 계약 `fi_prices.price_source`·`fi_universe.mktcap_basis` 주석
 T_PRICE_SOURCE = "postclose"               # T 행 가격 출처 = 15:41 장 마감 수집(T 전 행은 'krx')
 T_MKTCAP_BASIS = "t1_shares_x_t_close"     # 시총 = D' 상장주식수 × T 종가(B-24)
+# T 행 원천(컷오버 PR-2 · T-29) — 연구 stage 가 아니라 장 마감 stage 루트(`data/model_db/stage`)의 표
+T_SOURCE_TABLE = "stg_flow_postclose_kiwoom"
+# T-6 당일 기업행위 보류 갈래(기록용 — 사유 열은 하나, 'corp_action_pending')
+T6_NO_VALUE = "no_value"           # 키움 기준가(pred_pre) 또는 D' KRX 종가가 없다
+T6_BASE_PRICE = "base_price"       # 키움 기준가 ≠ D' KRX 종가(I-1: |cur_prc| − pred_pre = KRX 기준가)
+T6_PRICE_LIMIT = "price_limit"     # T 종가 / D' KRX 종가 − 1 이 ±가격제한폭 밖
+
 
 
 @dataclass(frozen=True)
@@ -182,15 +192,18 @@ FROM aged"""
 
 
 # ── fi_universe ──────────────────────────────────────────────────────────────
-def _exclude_case(rule: UniverseRule) -> str:
+def _exclude_case(rule: UniverseRule, t6: bool = False) -> str:
     """기본 UniverseRule 판정 — 먼저 걸린 사유 하나(EXCLUDE_REASONS 순서).
 
     `min_market_cap` 은 여기서 보지 않는다 — 엔진이 `spec.universe.min_market_cap` 으로 건다
     (오케스트레이터 09-29 · 이식 엔진 `v3_zscore._universe`).
+    `t6` 는 장 마감 판의 당일 기업행위 보류(T-6, 열 `t6_pending`)를 no_price 다음에 본다.
     """
     parts = [f"WHEN sec_type NOT IN ({_lit_list(rule.sec_types)}) THEN 'sec_type'",
              f"WHEN market NOT IN ({_lit_list(rule.markets)}) THEN 'market'",
              "WHEN close IS NULL THEN 'no_price'"]
+    if t6:
+        parts.append("WHEN t6_pending IS NOT NULL THEN 'corp_action_pending'")
     if rule.require_estimates:
         parts += ["WHEN coverage_state = 'lapsed' THEN 'estimates_lapsed'",
                   "WHEN coverage_state = 'none' THEN 'estimates_none'"]
@@ -231,23 +244,29 @@ def universe_sql(p: Params, rule: UniverseRule) -> str:
     NULL(no_price, P1). filing_late 는 세션 축(`_calx`)에 T 가 있어 법정기한이 (D', T] 에 드는
     보고서의 실효 기한이 T 가 된다 — 접수일 ≤ D' < T 라 false(아침판 D' 에서는 기한 뒤 세션이
     달력에 없어 NULL). 다음 날 연구 판 T 와 같은 판정이다.
+    T 가격이 있어도 당일 기업행위 보류(`_t_pending`, T-6 · PR-5)면 eligible=false · 사유
+    corp_action_pending(no_price 다음). 시총은 같은 식으로 잰다(eligible 이 이미 거른다).
     """
-    if p.basis == "evening":
+    t6 = p.basis == "evening"
+    if t6:
         px = f"""px AS (
-    SELECT u.ticker, t.close, s.shares_out
+    SELECT u.ticker, t.close, s.shares_out, c.kind AS t6_pending
     FROM u
     LEFT JOIN price_daily s
            ON s.ticker = u.ticker AND s.date = DATE '{p.asof}' AND s.basis = 'krx'
     LEFT JOIN _t_prices t
            ON t.ticker = u.ticker AND t.date = DATE '{p.d}' AND t.close IS NOT NULL
+    LEFT JOIN _t_pending c ON c.ticker = u.ticker
 )"""
         mktcap_basis = T_MKTCAP_BASIS
+        px_cols = "px.close, px.shares_out, px.t6_pending,"
     else:
         px = f"""px AS (
     SELECT ticker, close, shares_out FROM price_daily
     WHERE date = DATE '{p.d}' AND basis = 'krx' AND close IS NOT NULL
 )"""
         mktcap_basis = "krx"
+        px_cols = "px.close, px.shares_out,"
     mktcap_lit = f"'{mktcap_basis}'".ljust(42)      # 열 정렬 — 아침판 SQL 글자가 바뀌지 않게
     inner = f"""WITH u AS (
     SELECT ticker, market, sec_type, halt_state, admin_state, adv20_krw FROM universe_daily
@@ -294,7 +313,7 @@ base AS (
            coalesce(s.name_abbrv_current, s.name_current) AS name,  -- 약명(시장 호칭) 우선
            s.list_date,
            u.halt_state, u.admin_state, u.adv20_krw,
-           px.close, px.shares_out,
+           {px_cols}
            CAST(round(CAST(px.shares_out AS DECIMAL(38, 0)) * CAST(px.close AS DECIMAL(38, 0))
                       / {KRW_PER_EOK}.0) AS BIGINT)      AS market_cap,
            coalesce(v.coverage_state, 'none')            AS coverage_state,
@@ -311,7 +330,7 @@ na AS (
 ),
 judged AS (
     SELECT b.*, n.analyst_count,
-           {_exclude_case(rule)} AS reason
+           {_exclude_case(rule, t6)} AS reason
     FROM base b
     ASOF LEFT JOIN na n ON n.ticker = b.ticker AND n.date <= b.analyst_asof
 )
@@ -347,12 +366,19 @@ _IN_UNIVERSE = "ticker IN (SELECT ticker FROM _fi_universe)"
 
 # ── 가격 · 수정주가 ──────────────────────────────────────────────────────────
 def prices_sql(p: Params) -> str:
-    """KRX 원주가 550 달력일. 거래대금은 원(계약) — compat daily_prices 의 백만원과 다르다."""
+    """KRX 원주가 550 달력일. 거래대금은 원(계약) — compat daily_prices 의 백만원과 다르다.
+    장 마감 판은 T 행 `_t_prices`(출처 `T_PRICE_SOURCE`)를 잇는다(컷오버 PR-5)."""
     inner = f"""SELECT ticker, date, open, high, low, close,
        volume_shr AS volume, value_krw AS amount, 'krx' AS price_source
 FROM price_daily
 WHERE basis = 'krx' AND date >= DATE '{p.price_from}' AND date <= DATE '{p.d}'
   AND {_IN_UNIVERSE}"""
+    if p.basis == "evening":
+        inner += f"""
+UNION ALL
+SELECT ticker, date, open, high, low, close, volume, amount, price_source
+FROM _t_prices
+WHERE {_IN_UNIVERSE}"""
     return create("fi_prices", inner)
 
 
@@ -360,6 +386,15 @@ WHERE basis = 'krx' AND date >= DATE '{p.price_from}' AND date <= DATE '{p.d}'
 # (`build._check_columns`, 판 섞임을 조용히 넘기지 않는다).
 ADJ_REQUIRED_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "adj_factor": ("price_resolution",), "price_adj_daily": ("cum_price_only_factor",)}
+
+# KRX 일반 세션 가격제한폭(T-9 · T-6) — 날짜별 제한폭은 여기에만 둔다. 2015-06-15 부터 ±30%, 그 전
+# ±15%. H1-4(fi1.6.0)가 같은 이름·값으로 이 자리에 둔다 — 두 PR 이 베이스에서 만나면 정의 하나로
+# 합친다(P4).
+PRICE_LIMIT_CHANGE_DATE = "2015-06-15"
+PRICE_LIMIT_BEFORE, PRICE_LIMIT_AFTER = 0.15, 0.30
+# 부동소수 나눗셈 잡음 여유 — 상한가 하루(13,000 / 10,000 − 1 = 0.30000000000000004)를 제한폭을
+# 넘은 것으로 세지 않는다
+PRICE_LIMIT_EPS = 1e-9
 
 
 def adj_prices_sql(p: Params) -> str:
@@ -380,7 +415,14 @@ def adj_prices_sql(p: Params) -> str:
     중복본 · 창 안에 ok 계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행 — 뒤 둘은
     ② 사유 행·유상감자 제외) · `price_only_near`(근처 ⑤ 단위, (c) 후보 없음))은 수정종가가 이미
     이어지므로 세지 않는다 — 판정은 equity 열 하나만 읽는다(fi1.3.0, 배포 묶음 6-3).
+
+    장 마감 판 T 행(컷오버 PR-5 · T-2 전방 조정): T 행을 이 SQL 이 읽는 원천에 넣는다 — `_t_adj_src`
+    (`t_adj_source_sql`) = equity price_adj_daily + T 행. 그래서 T 행의 adj_factor · adj_ok(· 뒤에
+    붙는 표식)는 연구 판 행과 **같은 SQL** 에서 나온다 — T 에 적용일이 있는 사건이 없으면 D' 값과
+    같고, 있으면(D' 까지 공개된 것만) 다음 날 연구 판 T 행과 같은 계단이다. 표에 T 행을 따로 붙이면
+    표식이 비어 엔진 기본값(True)이 가짜 계단을 만든다(H1-4 리뷰 MINOR-2).
     """
+    src = "_t_adj_src" if p.basis == "evening" else "price_adj_daily"
     inner = f"""WITH bad AS (
     SELECT DISTINCT ticker, apply_date FROM adj_factor
     WHERE price_resolution = '{PRICE_UNRESOLVED}'
@@ -391,7 +433,7 @@ SELECT a.ticker, a.date, a.adj_close,
        a.cum_share_factor / a.cum_price_only_factor AS adj_factor,
        (SELECT count(*) FROM bad b
         WHERE b.ticker = a.ticker AND b.apply_date <= a.date) % 2 = 0 AS adj_ok
-FROM price_adj_daily a
+FROM {src} a
 WHERE a.basis = 'krx' AND a.date >= DATE '{p.price_from}' AND a.date <= DATE '{p.d}'
   AND a.{_IN_UNIVERSE}"""
     return create("fi_adj_prices", inner)
@@ -402,10 +444,25 @@ def flows_sql(p: Params) -> str:
     """12주체 순매수 60 세션(백만원 정수화 — compat investor_detail_flows 식 그대로).
 
     셀당 원천이 둘이면 키움 우선(compat 과 같은 결정 규칙), 전 주체 NULL 셀은 싣지 않는다.
+    장 마감 판은 T 행을 장 마감 수급(`_t_src`, 키움 KRX 코드 정규장 — N-35 ②)에서 잇는다. 수급은
+    price_valid 와 무관하게 유효하다(16:00 뒤 응답도 가격만 애프터마켓 값이다). 같은 식·같은 거르기.
     """
-    any_col = ", ".join(f"f.{src}" for _, src in FLOW_SOURCE)
-    sel = ",\n       ".join(f"CAST(round(f.{src} / {KRW_PER_MN}.0) AS BIGINT) AS {dst}"
-                           for dst, src in FLOW_SOURCE)
+    def any_col(a: str) -> str:
+        return ", ".join(f"{a}.{src}" for _, src in FLOW_SOURCE)
+
+    def sel(a: str) -> str:
+        return ",\n       ".join(f"CAST(round({a}.{src} / {KRW_PER_MN}.0) AS BIGINT) AS {dst}"
+                                  for dst, src in FLOW_SOURCE)
+
+    t_rows = ""
+    if p.basis == "evening":
+        t_rows = f"""
+UNION ALL
+SELECT t.ticker, DATE '{p.d}' AS date,
+       {sel("t")}
+FROM _t_src t
+WHERE t.{_IN_UNIVERSE}
+  AND coalesce({any_col("t")}) IS NOT NULL"""
     inner = f"""WITH picked AS (
     SELECT f.*, row_number() OVER (
                PARTITION BY f.ticker, f.date
@@ -413,12 +470,12 @@ def flows_sql(p: Params) -> str:
     FROM flow_daily f
     WHERE f.date >= DATE '{p.flow_from}' AND f.date <= DATE '{p.d}'
       AND f.{_IN_UNIVERSE}
-      AND coalesce({any_col}) IS NOT NULL
+      AND coalesce({any_col("f")}) IS NOT NULL
 )
 SELECT f.ticker, f.date,
-       {sel}
+       {sel("f")}
 FROM picked f
-WHERE f.rn = 1"""
+WHERE f.rn = 1{t_rows}"""
     return create("fi_flows", inner)
 
 
@@ -894,20 +951,101 @@ TABLE_SOURCES: Mapping[str, tuple[str, ...]] = {
 }
 
 
-# ── 장 마감 판 T 행 자리(컷오버 PR-4 · T-2) ────────────────────────────────────
+# 장 마감 판에서 T 행을 읽는 표(컷오버 PR-5) — 판 기록(inputs)에 장 마감 stage 판을 더한다
+T_ROW_TABLES = ("fi_universe", "fi_prices", "fi_adj_prices", "fi_flows")
+
+
+def table_sources(basis: str) -> dict[str, tuple[str, ...]]:
+    """basis 별 `TABLE_SOURCES` — 장 마감 판은 T 행 표에 `T_SOURCE_TABLE` 을 더한다."""
+    if basis != "evening":
+        return dict(TABLE_SOURCES)
+    return {t: (*s, T_SOURCE_TABLE) if t in T_ROW_TABLES else s
+            for t, s in TABLE_SOURCES.items()}
+
+
+# ── 장 마감 판 T 행(컷오버 PR-4 자리 · PR-5 얹기 · T-2) ─────────────────────────────
+def t_source_sql(p: Params) -> str:
+    """장 마감 판 T 원천 `_t_src` — stage `T_SOURCE_TABLE`(15:41 장 마감 직후 수집, 키움 KRX 코드
+    ka10060 — `data/model_db/stage`, T-29)의 T 행. 가격 열(close_krw · pred_pre_krw · volume_shr)은
+    `price_valid IS TRUE` 인 행만 쓴다(16:00 뒤 응답은 애프터마켓 값, N-35 ①) — 거르는 것은 쓰는
+    쪽(`t_prices_sql`)이다. 수급 열은 price_valid 와 무관하게 유효하다. 종목은 거르지 않는다 —
+    `fi_universe` 가 이 표보다 뒤에 선다(시총이 T 종가를 읽는다)."""
+    flows = ", ".join(src for _, src in FLOW_SOURCE)
+    return ("CREATE OR REPLACE TEMP TABLE _t_src AS\n"
+            f"SELECT ticker, close_krw, pred_pre_krw, volume_shr, price_valid,\n       {flows}\n"
+            f"FROM {T_SOURCE_TABLE} WHERE date = DATE '{p.d}'")
+
+
 def t_prices_sql(p: Params) -> str:
     """장 마감 판의 T 하루치 가격 행 `_t_prices`(열·타입 = `fi_prices` 계약, price_source =
-    `T_PRICE_SOURCE`). 지금(PR-4)은 **빈 표**다 — T 행 얹기(PR-5)가 장 마감 원천으로 채운다.
-    `universe_sql` 이 여기서 T 종가를 읽어 시총을 잰다. `p` 는 채우는 쪽이 T(`p.d`)로 쓴다."""
-    cols = ", ".join(f'CAST(NULL AS {c.dtype}) AS "{c.name}"'
-                     for c in FI_TABLES["fi_prices"].columns)
-    return f"CREATE OR REPLACE TEMP TABLE _t_prices AS SELECT {cols} WHERE false"
+    `T_PRICE_SOURCE`). `universe_sql` 이 여기서 T 종가를 읽어 시총을 재고, `prices_sql`·
+    `adj_prices_sql` 이 종목을 universe 로 잘라 잇는다.
+      · `price_valid IS TRUE` 이고 종가 > 0 인 `_t_src` 행만 — NULL·false 면 그 종목은 T 가격 없음(P1)
+      · close = |cur_prc|(키움 KRX 코드 정규장 종가 — N-35 ①), volume = 수집 시점 누적 거래량
+      · open·high·low·amount 는 원천(ka10060)에 없어 NULL — 엔진은 종가만 읽는다(GAPS)"""
+    inner = f"""SELECT ticker, DATE '{p.d}' AS date,
+       NULL AS open, NULL AS high, NULL AS low, close_krw AS close,
+       volume_shr AS volume, NULL AS amount, '{T_PRICE_SOURCE}' AS price_source
+FROM _t_src
+WHERE price_valid IS TRUE AND close_krw > 0"""
+    return "CREATE OR REPLACE TEMP TABLE _t_prices AS\n" + project(FI_TABLES["fi_prices"], inner)
+
+
+def t_adj_source_sql(p: Params) -> str:
+    """장 마감 판 수정주가 원천 `_t_adj_src`(뷰) = equity price_adj_daily + T 행 — `adj_prices_sql` 이
+    연구 판 행과 같은 SQL 로 T 행을 굽게 한다. T 행: adj_close = T 종가 × D' cum_share_factor ÷ D'
+    cum_price_only_factor(equity `price_adj_daily.sql` 과 같은 식 — 전방 조정이라 T 사건이 없으면 다음
+    날 연구 판 T 행과 같은 값), 누적계수 = D' 값. T 가격(`_t_prices`)과 D' 수정주가 행이 둘 다 있는
+    종목만. 열은 그 SQL 이 읽는 것만 둔다 — 새 열을 읽게 되면 여기서 바인딩 오류로 드러난다."""
+    return f"""CREATE OR REPLACE TEMP VIEW _t_adj_src AS
+SELECT ticker, date, adj_close, cum_share_factor, cum_price_only_factor, basis
+FROM price_adj_daily
+UNION ALL
+SELECT t.ticker, t.date, t.close * a.cum_share_factor / a.cum_price_only_factor,
+       a.cum_share_factor, a.cum_price_only_factor, a.basis
+FROM _t_prices t
+JOIN price_adj_daily a
+  ON a.ticker = t.ticker AND a.date = DATE '{p.asof}' AND a.basis = 'krx'"""
+
+
+def t_pending_sql(p: Params) -> str:
+    """T-6 당일 기업행위 보류 `_t_pending`(ticker, kind) — T 가격이 있는 종목 중 아래 하나면 그날
+    eligible=false · 사유 corp_action_pending(`universe_sql`). 갈래(kind)는 기록용(FG5 metrics).
+      `T6_NO_VALUE`     키움 pred_pre 가 없거나 D' KRX 종가(`price_daily` asof 행)가 없다·0 이하
+      `T6_BASE_PRICE`   키움 기준가 = |cur_prc| − pred_pre(I-1 — KRX 기준가와 사건일 4,219/4,219 일치)
+                        ≠ D' KRX 종가 — T 에 기준가를 바꾼 사건(분할·병합·무상증자 등)
+      `T6_PRICE_LIMIT`  |T 종가 / D' KRX 종가 − 1| > T 의 가격제한폭(+`PRICE_LIMIT_EPS`) — 정확히 ±30%
+                        (상·하한가)는 보류가 아니다
+    수정주가가 전방 조정이라 T 사건은 다음 날 아침 확정판이 반영한다(T-2) — 그 전까지 이 종목의 T
+    수정종가는 D' 계수를 그대로 쓴 값이라 믿을 수 없다."""
+    limit = PRICE_LIMIT_BEFORE if p.d < PRICE_LIMIT_CHANGE_DATE else PRICE_LIMIT_AFTER
+    # T-6 첫 조건 술어(키움 기준가 |cur_prc| − pred_pre ≠ D' KRX 종가 — stage 열로 close_krw −
+    # pred_pre_krw)는 fi 에서 여기 한 곳이다. QL-D 가 같은 술어를 공유 상수·함수로 두면 머지 때 그
+    # 정의로 합친다(P4).
+    return f"""CREATE OR REPLACE TEMP TABLE _t_pending AS
+SELECT ticker, kind FROM (
+    SELECT t.ticker,
+           CASE WHEN s.pred_pre_krw IS NULL OR k.close IS NULL OR k.close <= 0
+                     THEN '{T6_NO_VALUE}'
+                WHEN s.close_krw - s.pred_pre_krw <> k.close THEN '{T6_BASE_PRICE}'
+                WHEN abs(CAST(t.close AS DOUBLE) / k.close - 1) > {limit} + {PRICE_LIMIT_EPS}
+                     THEN '{T6_PRICE_LIMIT}'
+           END AS kind
+    FROM _t_prices t
+    JOIN _t_src s ON s.ticker = t.ticker
+    LEFT JOIN price_daily k
+           ON k.ticker = t.ticker AND k.date = DATE '{p.asof}' AND k.basis = 'krx'
+)
+WHERE kind IS NOT NULL"""
 
 
 def table_sqls(p: Params, rule: UniverseRule) -> list[tuple[str, str]]:
     """(표, SQL) — 실행 순서. fi_universe 가 먼저여야 나머지가 그 종목으로 자른다.
-    장 마감 판은 그 앞에 T 행 자리 `_t_prices` 를 만든다."""
-    head = [("_t_prices", t_prices_sql(p))] if p.basis == "evening" else []
+    장 마감 판은 그 앞에 T 원천 `_t_src` · T 가격 `_t_prices` · T 수정주가 원천 `_t_adj_src` · T-6 보류
+    `_t_pending` 을 만든다."""
+    head = ([("_t_src", t_source_sql(p)), ("_t_prices", t_prices_sql(p)),
+             ("_t_adj_src", t_adj_source_sql(p)), ("_t_pending", t_pending_sql(p))]
+            if p.basis == "evening" else [])
     return head + [("fi_universe", universe_sql(p, rule)),
             ("fi_prices", prices_sql(p)),
             ("fi_adj_prices", adj_prices_sql(p)),
@@ -921,8 +1059,16 @@ def table_sqls(p: Params, rule: UniverseRule) -> list[tuple[str, str]]:
 # 판 manifest `gaps` — 원천이 없거나 의도적으로 비운 열(조용한 결측 금지 · V2-7).
 GAPS: tuple[dict[str, str], ...] = (
     {"table": "fi_prices", "column": "price_source",
-     "reason": "아침판은 전 행 'krx'. 장 마감 판 T 행('postclose')은 T 행 얹기(컷오버 PR-5) "
-               "뒤 — 그 전엔 T 행이 없다"},
+     "reason": "아침판은 전 행 'krx'. 장 마감 판은 T 전 행 'krx' · T 행 'postclose'(15:41 장 마감 "
+               "직후 수집, 키움 KRX 코드 정규장 종가 — stage stg_flow_postclose_kiwoom 의 "
+               "price_valid 인 행만. 16:00 뒤 응답·원장 행 없음은 T 가격 없음 → no_price)"},
+    {"table": "fi_prices", "column": "open,high,low,amount(장 마감 판 T 행)",
+     "reason": "원천 ka10060 에 시·고·저가·거래대금이 없어 NULL — volume 은 수집 시점 누적 "
+               "거래량. 엔진은 종가만 읽는다(다음 날 아침 확정판 T 행은 KRX 값)"},
+    {"table": "fi_adj_prices", "column": "*(장 마감 판 T 행)",
+     "reason": "adj_close = T 종가 × D' 누적계수(T 의 새 계수는 아직 없다), adj_ok 등 표식은 연구 판 "
+               "행과 같은 SQL — T 에 기준가를 바꾼 사건(T-6)이 있으면 그 종목은 그날 eligible=false "
+               "(corp_action_pending)이고 반영은 다음 날 아침 확정판"},
     {"table": "fi_universe", "column": "mktcap_basis",
      "reason": "아침판 'krx'. 장 마감 판은 전 행 't1_shares_x_t_close'(D' 주식수 × T 종가, B-24) — "
                "T 종가가 없는 종목은 market_cap NULL"},

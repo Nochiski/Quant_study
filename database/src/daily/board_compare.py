@@ -5,7 +5,7 @@
 
 입력(읽기만 한다)
   장 마감 판 E    <evening-root>/{factor_inputs,model}/_runs/<T>_evening.json (운영 `data/model_db`, T-3)
-                  + 장 마감 stage `<evening-root>/stage` 의 T 행 판(fi 판 기록 `postclose_builds`, T-29)
+                  + 장 마감 stage T 행 판(fi 판 기록 `postclose_stage_root`·`postclose_builds`, PR-5·T-29)
   연구 판 T  R    <research-root>/{factor_inputs,model}/_runs/<T>_morning.json(다음 날 08:10 확정판)
                   + 그 판의 equity `adj_factor`(fi 판 기록 `equity_root`·`equity_builds`) — (D', T] 공개 사건
   연구 판 D' P    <research-root>/factor_inputs/_runs/<D'>_morning.json — 3자 대조의 기준
@@ -18,9 +18,10 @@
     연초 첫 거래일(D' 와 T 의 해가 다름)의 연도 창 차이만 3자 대조 없이 인정한다.
   · T 행: 종가 차이는 실운영 미설명(N-35 ①), `--replay`(T 행 = 21:05 원장)에서만 종가 정의. 거래량은
     장 마감 값 ≤ 연구 값이면 거래량 정의. 수급은 주체별 판 통계(중앙 상대 차이·부호 반전)가 상한 안이면
-    수급 정의. T 가격 없음은 장 마감 stage 증거(행 없음·price_valid 거짓)가 있어야 16:00 컷오프, 수집 대상
-    밖이면 '수집 대상 밖'. T-6 보류는 연구 판에 당일 기업행위 흔적이 있어야 한다. 수정주가 계수·표식은
-    (D', T] 에 공개된 기업행위가 있어야 정보 시점(T 전 행은 적용일부터 T−1 까지 끝 구간 모양).
+    수급 정의. T 가격 없음은 장 마감 stage 증거(행 없음·price_valid 참 아님)가 있어야 16:00 컷오프, 수집
+    대상(수집기 ① `daily.postclose.fi_candidates` · ② V3_STOCK_FILTER) 밖이면 '수집 대상 밖'. T-6 보류는
+    연구 판에 당일 기업행위 흔적이 있어야 한다. 수정주가 계수·표식은 (D', T] 에 공개된 기업행위가 있어야
+    정보 시점(T 전 행은 적용일부터 T−1 까지 끝 구간 모양).
   · T 전 가격·수급 행은 두 판이 같아야 한다 — 다르면 미설명.
   · 표 하나의 차이 행이 `DIFF_ROW_MAX` 를 넘으면 행 분류를 하지 않고 SQL 로 열별로 센 뒤 전부 미설명이다.
 모델 층: spec 마다 종합점수 Spearman · 엑셀 후보(`deliver.view.load_day`) 겹침 · 점수 열 |Δ| 상위 종목과 그
@@ -64,6 +65,7 @@ from model.contracts import FI_TABLES
 from stage import manifest
 
 from daily import calendar as daily_calendar
+from daily import kw_daily
 
 log = logging.getLogger(__name__)
 
@@ -89,8 +91,8 @@ SAMPLE_N = 20                  # 범주마다 JSON 에 싣는 표본 기록 수
 UNEXPLAINED_MAX = 1000         # JSON 에 싣는 미설명 기록 상한(넘으면 개수만)
 SCORE_TOL = 1e-9               # 점수 |Δ| 를 '다르다' 고 볼 절대 허용치(model.compare 와 같은 값)
 CROSS_SECTION = "교차 단면 — 자기 fi 입력 차이 없음(다른 종목 차이가 표준화·백분위로 번짐)"
-# 장 마감 판 T 행 원천 표(PR-2·T-29). PR-5 머지 뒤 `factor_inputs.queries.T_SOURCE_TABLE` 을 읽게 맞춘다
-T_SOURCE_TABLE = "stg_flow_postclose_kiwoom"
+# 장 마감 판 T 행 원천 표(PR-2·T-29) — fi 정본(PR-5)
+T_SOURCE_TABLE = fiq.T_SOURCE_TABLE
 
 # ── 등록 범주(한 곳) ──────────────────────────────────────────────────────────
 CLOSE_DEF = "close_definition"
@@ -137,8 +139,9 @@ CATEGORIES: dict[str, Category] = {c.key: c for c in (
              "장 마감 판 corp_action_pending 보류 — 연구 판 T 행 계수 ≠ D' 행 계수, 또는 연구 판 T 수익률이 "
              "가격제한폭(`queries.PRICE_LIMIT_*`) 밖일 때만"),
     Category(CUTOFF, "16:00 컷오프", "PR-1·N-35 ①③·N-42 Q3·T-36",
-             "수집 대상인데 장 마감 stage 에 그 종목 T 행이 없거나 price_valid 가 거짓이라 T 가격(행이 없으면 "
-             "수급도)이 없다 — no_price·시총 NULL"),
+             "수집 대상인데 장 마감 stage 에 그 종목 T 행이 없거나 price_valid 가 참이 아니라(16:00 뒤 응답·"
+             "NULL) T 가격(행이 없으면 수급도)이 없다 — no_price·시총 NULL. price_valid 참인데 종가·거래량이 "
+             "가격 술어(`kw_daily.ka10060_postclose_price_usable_sql`)를 못 넘는 행은 여기 들지 않는다"),
     Category(NOT_TARGETED, "수집 대상 밖", "PR-1(수집 대상 ①직전 판 후보 ②V3_STOCK_FILTER)·T-36",
              "장 마감 수집 대상 밖(직전 판 모델 후보도 v3 유니버스 종목도 아님)이라 T 가격·수급이 없다"),
     Category(CREDIT_T, "신용 available_date ≤ T", "PR-4 리뷰·FACTOR_INPUTS §2-1(세션 축)",
@@ -156,8 +159,13 @@ CATEGORIES: dict[str, Category] = {c.key: c for c in (
 NO_PRICE = "no_price"
 CARRY_REASONS = ("sec_type", "market")
 ESTIMATE_REASONS = ("estimates_lapsed", "estimates_none")
-# T-6 제외 사유. fi 어휘(`queries.EXCLUDE_REASONS`)에는 PR-5 가 넣는다 — PR-5 머지 뒤 그 어휘를 읽게 맞춘다
+# T-6 제외 사유 — fi 어휘 `queries.EXCLUDE_REASONS` 의 장 마감 판 사유(PR-5, 테스트가 대조)
 T6_REASON = "corp_action_pending"
+# 장 마감 stage T 행의 상태 — 가격 술어는 fi T 가격 행·compat T 행과 같은 정본
+# (`daily.kw_daily.ka10060_postclose_price_usable_sql`: price_valid 참 · 종가 > 0 · 거래량 있음, P4)
+STAGE_USABLE = "usable"            # 가격을 쓸 수 있다 — 장 마감 판에 T 가격이 있어야 한다
+STAGE_INVALID = "invalid"          # price_valid 가 참이 아니다(16:00 뒤 응답·NULL) — 16:00 컷오프
+STAGE_UNUSABLE = "unusable"        # price_valid 참인데 종가·거래량이 술어를 못 넘는다 — 등록 범주 밖
 
 # ── 열 묶음 ──────────────────────────────────────────────────────────────────
 UNI_CARRY = frozenset({"name", "listed_date", "market", "sec_type", "shares", "adv20", "is_admin",
@@ -339,8 +347,9 @@ class _Pair:
 class Evidence:
     """판 밖에서 읽는 증거."""
 
-    stage: Mapping[str, object]                    # 장 마감 stage T 행 종목 → price_valid
+    stage: Mapping[str, str]                       # 장 마감 stage T 행 종목 → STAGE_* 상태
     new_events: Mapping[str, tuple[date, ...]]     # (D', T] 에 공개된 기업행위 → 적용일
+    targeted: frozenset[str]                       # 장 마감 수집 대상(`read_targets`)
 
 
 @dataclass
@@ -357,7 +366,6 @@ class _Ctx:
     rt_factor_t: dict[str, object]          # 연구 판 T 행 adj_factor
     rt_factor_dp: dict[str, object]         # 연구 판 D' 행 adj_factor
     rt_close_dp: dict[str, object]          # 연구 판 D' 행 종가
-    targeted: frozenset[str]
     flow_over: frozenset[str] = frozenset()
     max_e: dict[str, dict[str, object]] = field(default_factory=dict)
     max_r: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -392,12 +400,14 @@ class _Ctx:
 
     def no_t_price(self, tk: str) -> tuple[str, str]:
         """장 마감 판에 T 가격이 없다 — 장 마감 stage 증거로만 설명한다."""
-        pv = self.ev.stage.get(tk, "absent")
-        if pv is True:
-            return UNEXPLAINED, "장 마감 stage 에 유효 가격(price_valid)이 있는데 T 가격이 없다"
-        if tk not in self.targeted:
-            return NOT_TARGETED, ""
-        return CUTOFF, "stage 행 없음" if pv == "absent" else "price_valid 거짓"
+        state = self.ev.stage.get(tk)
+        if state == STAGE_USABLE:
+            return UNEXPLAINED, "장 마감 stage 에 쓸 수 있는 가격이 있는데 T 가격이 없다"
+        if state == STAGE_UNUSABLE:
+            return UNEXPLAINED, "price_valid 참인데 종가·거래량이 가격 술어를 못 넘는다 — 16:00 컷오프 아님"
+        if state == STAGE_INVALID:
+            return CUTOFF, "price_valid 참 아님"
+        return (CUTOFF, "stage 행 없음") if tk in self.ev.targeted else (NOT_TARGETED, "")
 
     def halted_at_t(self, tk: str) -> bool:
         return self.uni3(tk, "is_halted") and self.uni_r.get(tk, {}).get("is_halted") is True
@@ -501,7 +511,7 @@ def _t_missing(p: _Pair, c: _Ctx, *, flows: bool = False) -> list[_Verdict] | No
             # 수급은 price_valid 와 무관하다 — stage 행이 있으면 T 수급도 있어야 한다
             if tk in c.ev.stage:
                 return [(UNEXPLAINED, (), "장 마감 stage 에 행이 있는데 T 수급이 없다")]
-            return [(NOT_TARGETED if tk not in c.targeted else CUTOFF, (), "")]
+            return [(CUTOFF if tk in c.ev.targeted else NOT_TARGETED, (), "")]
         if tk in c.tclose_e:
             return [(UNEXPLAINED, (), "T 가격은 있는데 이 표의 T 행이 없다")]
         cat, note = c.no_t_price(tk)
@@ -815,14 +825,6 @@ def _flow_stats(con: duckdb.DuckDBPyConnection, pe: str, pr: str,
     return out
 
 
-def _targeted(con: duckdb.DuckDBPyConnection, pd: str) -> frozenset[str]:
-    """장 마감 수집 대상(PR-1) — ① 직전 판 모델 후보(연구 판 D' 의 eligible) ② v3 유니버스
-    (`compat.mappings.V3_STOCK_FILTER`, 수집기와 같은 식). PR-5 머지 뒤 ① 을
-    `daily.postclose.fi_candidates` 로 맞춘다(같은 판·같은 열)."""
-    return frozenset(str(t) for (t,) in con.execute(
-        f"SELECT ticker FROM {_read(pd)} u WHERE u.eligible OR ({V3_STOCK_FILTER})").fetchall())
-
-
 def compare_fi(e: FiBoard, r: FiBoard, d: FiBoard, t: date, dprime: date, ev: Evidence, *,
                replay: bool = False) -> FiResult:
     """fi 8표 대조 — 장 마감 판 e · 연구 판 T r · 연구 판 D' d. 스키마가 다르면 `CompareInputError`."""
@@ -850,7 +852,7 @@ def compare_fi(e: FiBoard, r: FiBoard, d: FiBoard, t: date, dprime: date, ev: Ev
         ctx = _Ctx(t, dprime, replay, ev, by_ticker(pu[0]), by_ticker(pu[1]), by_ticker(pu[2]),
                    on_day(pp[0], "close", t), on_day(pp[1], "close", t),
                    on_day(pa[1], "adj_factor", t), on_day(pa[1], "adj_factor", dprime),
-                   on_day(pp[1], "close", dprime), _targeted(con, pu[2]))
+                   on_day(pp[1], "close", dprime))
         ctx.member = _membership(ctx)
         for name, col in INFO_DATE_COL.items():
             for side, store in ((0, ctx.max_e), (1, ctx.max_r)):
@@ -888,7 +890,7 @@ def compare_fi(e: FiBoard, r: FiBoard, d: FiBoard, t: date, dprime: date, ev: Ev
             info["n_rows_diff"] = n_rows
     finally:
         con.close()
-    return FiResult(tally, tables, flow_stats, len(ctx.targeted))
+    return FiResult(tally, tables, flow_stats, len(ev.targeted))
 
 
 # ── 판 ───────────────────────────────────────────────────────────────────────
@@ -1017,27 +1019,51 @@ def _check_versions(ev: Side, rt: Side, rd: Mapping[str, object]) -> None:
                                     f"연구 판 {mr}")
 
 
-def read_stage(ev: Side, t: date) -> dict[str, object]:
-    """장 마감 stage T 행 → 종목 → price_valid. 판은 장 마감 fi 판 기록 `postclose_builds`(T-29)."""
-    builds = ev.fi_run.get("postclose_builds")
+def read_stage(ev: Side, t: date) -> dict[str, str]:
+    """장 마감 stage T 행 → 종목 → STAGE_* 상태. 루트·판은 장 마감 fi 판 기록이 읽은 그대로다 —
+    `postclose_stage_root`·`postclose_builds[T_SOURCE_TABLE]`(PR-5, T-29)."""
+    builds, root = ev.fi_run.get("postclose_builds"), ev.fi_run.get("postclose_stage_root")
     bid = builds.get(T_SOURCE_TABLE) if isinstance(builds, dict) else None
-    if not bid:
-        raise CompareInputError(f"장 마감 판 기록에 postclose_builds[{T_SOURCE_TABLE}] 가 없다 — "
-                                "T 행 원천을 확인할 수 없다(PR-5 이전 판?)")
-    root = ev.root / "stage"
+    if not bid or not root:
+        raise CompareInputError(f"장 마감 판 기록에 postclose_stage_root·postclose_builds"
+                                f"[{T_SOURCE_TABLE}] 가 없다 — T 행 원천을 확인할 수 없다(PR-5 이전 판?)")
     try:
-        pb = eq_inputs.resolve(root, T_SOURCE_TABLE, str(bid))
+        pb = eq_inputs.resolve(Path(str(root)), T_SOURCE_TABLE, str(bid))
     except FileNotFoundError as e:
         raise CompareInputError(f"장 마감 stage 판이 없다 — root={root} build={bid}: {e}") from e
     lit = ", ".join(_lit(g) for g in pb.globs)
+    usable = kw_daily.ka10060_postclose_price_usable_sql("price_valid", "close_krw", "volume_shr")
     con = _connect()
     try:
-        rows = con.execute(f"SELECT ticker, price_valid FROM read_parquet([{lit}], "
-                           "hive_partitioning=true, union_by_name=true) "
+        rows = con.execute(f"SELECT ticker, price_valid IS TRUE, {usable} "
+                           f"FROM read_parquet([{lit}], hive_partitioning=true, "
+                           "union_by_name=true) "
                            f"WHERE date = DATE '{t.isoformat()}'").fetchall()
     finally:
         con.close()
-    return {str(tk): pv for tk, pv in rows}
+    return {str(tk): (STAGE_USABLE if ok else STAGE_UNUSABLE) if valid else STAGE_INVALID
+            for tk, valid, ok in rows}
+
+
+def read_targets(rt: Side, rd: Mapping[str, object], dprime: date) -> frozenset[str]:
+    """장 마감 수집 대상(PR-1 순서) — ① 직전 판 모델 후보 = 수집기·FG5 와 같은 함수
+    `daily.postclose.fi_candidates`(연구 fi 루트의 `_runs/<D'>_morning.json` eligible) ② v3 유니버스 =
+    수집기와 같은 식 `compat.mappings.V3_STOCK_FILTER` 를 연구 판 D' 유니버스에(수집기 ② 는 인계 이력의
+    universe_daily D' 행을 읽는다 — 층 유니버스 종목에서는 같은 판정이고, 재생 루트에 인계 이력이
+    없어도 돈다)."""
+    from daily import postclose  # 수집기 모듈은 무겁다 — 대조 때만 읽는다(fi build 와 같은 방식)
+    try:
+        cands, _ = postclose.fi_candidates(rt.fi_root, dprime.strftime("%Y%m%d"))
+    except postclose.BOARD_ERRORS as e:
+        raise CompareInputError(f"직전 판 모델 후보를 읽지 못했다 — {type(e).__name__}: {e}") from e
+    part = (rt.fi_root / "fi_universe" / f"v={rd['build_id']}" / "*.parquet").as_posix()
+    con = _connect()
+    try:
+        v3 = {str(t) for (t,) in con.execute(
+            f"SELECT ticker FROM {_read(part)} u WHERE {V3_STOCK_FILTER}").fetchall()}
+    finally:
+        con.close()
+    return frozenset(cands) | frozenset(v3)
 
 
 def read_new_events(rt: Side, dprime: date, t: date) -> dict[str, tuple[date, ...]]:
@@ -1271,7 +1297,8 @@ def compare(t: date, evening_root: Path, research_root: Path, *, calendar_dir: P
     if rd.get("asof") not in (None, dprime.isoformat()):
         raise CompareInputError(f"연구 판 D' asof={rd.get('asof')!r} ≠ D'={dprime.isoformat()}")
     _check_versions(ev, rt, rd)
-    evidence = Evidence(read_stage(ev, t), read_new_events(rt, dprime, t))
+    evidence = Evidence(read_stage(ev, t), read_new_events(rt, dprime, t),
+                        read_targets(rt, rd, dprime))
     fi = compare_fi(ev.fi, rt.fi, FiBoard(rt.fi_root, str(rd["build_id"])), t, dprime, evidence,
                     replay=replay)
     if ev.fi_run.get("equity_builds") != rd.get("equity_builds"):

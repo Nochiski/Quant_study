@@ -124,8 +124,10 @@ python -m daily.board_compare --date <T> --evening-root data/model_db --research
 
 - 장 마감 판 T(`data/model_db/{factor_inputs,model}/_runs/<T>_evening.json`)를 다음 날 08:10 연구 판
   T(`data/{factor_inputs,model}/_runs/<T>_morning.json`)와 맞대고, 연구 판 D'(`data/factor_inputs/_runs/
-  <D'>_morning.json`)를 3자 대조의 기준으로 읽는다. 증거 원천: 장 마감 stage T 행(`data/model_db/stage`,
-  판 기록 `postclose_builds`) · 연구 판 T 가 읽은 equity `adj_factor`((D', T] 에 공개된 기업행위) ·
+  <D'>_morning.json`)를 3자 대조의 기준으로 읽는다. 증거 원천: 장 마감 stage T 행(장 마감 판 기록
+  `postclose_stage_root`·`postclose_builds` 그대로, 가격 술어는 §2-2 와 같은
+  `kw_daily.ka10060_postclose_price_usable_sql`) · 수집 대상(① `daily.postclose.fi_candidates` ·
+  ② `V3_STOCK_FILTER`) · 연구 판 T 가 읽은 equity `adj_factor`((D', T] 에 공개된 기업행위) ·
   `daily.calendar`(D' = T 직전 거래일 = 장 마감 판 asof = `builds_from_date`).
 - 범주는 증거가 있을 때만 인정한다. 정의·정본 근거의 단일 정본은 `src/daily/board_compare.py` 의
   `CATEGORIES` 다. 이월·정보 시점·filing_late 는 '장 마감 T = 연구 D' 이고 연구 T ≠ 연구 D'' 이고, 연초 첫

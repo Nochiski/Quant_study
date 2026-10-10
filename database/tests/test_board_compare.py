@@ -28,6 +28,7 @@ from factor_inputs import queries as fiq
 from factor_inputs.build import RULES_VERSION as FI_RULES
 from model.build import build as model_build
 from model.contracts import FI_TABLES, FactorInputs
+from stage import manifest
 from test_model_build import SMALL, board_fi, write_fi_tree
 from test_model_v4_rank import _r
 
@@ -95,9 +96,15 @@ def _dprime_of(base: dict[str, list[dict[str, object]]],
 
 def write_fi(root: Path, tables: dict[str, list[dict[str, object]]], *, basis: str, bid: str,
              day: str, asof: str, latest: bool = True, **run: object) -> Path:
-    """fi 판(계약 dtype) + 판 기록 `_runs/<D>_<basis>.json`."""
+    """fi 판(계약 dtype) + 표마다 MANIFEST 기록(`stage.manifest.commit` — 수집기 `fi_candidates` 가
+    이것으로 판을 푼다) + 판 기록 `_runs/<D>_<basis>.json`."""
     write_fi_tree(root, FactorInputs(day, basis, bid, tables), bid, basis=basis, date=day,
                   latest=latest)
+    for name in FI_TABLES:
+        manifest.commit(root / name, manifest.BuildRecord(
+            build_id=bid, snapshot_id="", rules_version=FI_RULES, basis=basis,
+            built_at_utc="2026-09-29T00:00:00+00:00", n_rows=len(tables[name]), content_hash="",
+            partitions=[{"path": f"v={bid}"}]))
     rec = {"layer": "factor_inputs", "status": "ok", "build_id": bid, "date": day, "basis": basis,
            "asof": asof, "rules_version": FI_RULES, **run}
     (root / "_runs").mkdir(parents=True, exist_ok=True)
@@ -141,9 +148,11 @@ def _pair(base: Path, rs: dict[str, list[dict[str, object]]],
     mdb = base / "model_db"
     write_fi(mdb / "factor_inputs", ev, basis="evening", bid=EV_FI, day=T, asof=DP,
              builds_from_date=DP_S, equity_builds=pinned,
+             postclose_stage_root=str(mdb / "stage"),
              postclose_builds={bc.T_SOURCE_TABLE: PC_BID})
     stage = [{"ticker": str(r["ticker"]), "date": T_DATE,
-              "price_valid": r["ticker"] not in stage_invalid}
+              "price_valid": r["ticker"] not in stage_invalid, "close_krw": 10_000,
+              "volume_shr": 1_000}
              for r in ev["fi_universe"] if r["ticker"] not in stage_missing]
     _make_stage_tree(mdb, bc.T_SOURCE_TABLE, stage, build_id=PC_BID)
     res = model_build(T_S, "evening", mdb / "model", mdb / "factor_inputs", **SMALL)
@@ -445,7 +454,10 @@ INPUT_ERRORS: dict[str, tuple[Callable[[Path, Path], None], list[str]]] = {
     "postclose_builds_missing": (lambda ev, rs: _edit_json(
         ev / "factor_inputs" / "_runs" / f"{T_S}_evening.json", postclose_builds=None),
         ["postclose_builds"]),
-    "stage_build_gone": (lambda ev, rs: shutil.rmtree(ev / "stage"), ["장 마감 stage"]),
+    "stage_build_gone": (lambda ev, rs: (
+        _edit_json(ev / "factor_inputs" / "_runs" / f"{T_S}_evening.json",
+                   postclose_stage_root=str(ev / "stage")),
+        shutil.rmtree(ev / "stage")), ["장 마감 stage"]),
     "equity_adj_factor_gone": (lambda ev, rs: _edit_json(
         rs / "factor_inputs" / "_runs" / f"{T_S}_morning.json",
         equity_builds={"adj_factor": "m_gone"}), ["adj_factor"]),
@@ -641,7 +653,7 @@ Mut = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], None]
 
 
 def _fi3(tmp: Path, mutate: Mut, *, t: dt.date = T_DATE, dp: dt.date = DP_DATE,
-         stage: dict[str, object] | None = None,
+         stage: dict[str, str] | None = None,
          events: dict[str, tuple[dt.date, ...]] | None = None,
          replay: bool = False) -> bc.FiResult:
     """기준 판 → (장 마감 e, 연구 T r, 연구 D' d) 를 `mutate(e, r, d)` 로 고쳐 `compare_fi`."""
@@ -659,7 +671,8 @@ def _fi3(tmp: Path, mutate: Mut, *, t: dt.date = T_DATE, dp: dt.date = DP_DATE,
                                           ("d", d, "morning", RD_FI, dp.isoformat())):
         write_fi_tree(tmp / name, FactorInputs(day, basis, bid, tables), bid, basis=basis, date=day)
         boards.append(bc.FiBoard(tmp / name, bid))
-    ev = bc.Evidence({A: True, B: True} if stage is None else stage, events or {})
+    ev = bc.Evidence({A: bc.STAGE_USABLE, B: bc.STAGE_USABLE} if stage is None else stage,
+                     events or {}, frozenset({A, B}))     # C 는 우선주·후보 아님 — 수집 대상 밖
     return bc.compare_fi(*boards, t, dp, ev, replay=replay)
 
 
@@ -726,9 +739,10 @@ CASES: list[tuple[str, Mut, dict[tuple[str, str], set[str]], dict[str, Any]]] = 
                        for x in _rows(r, "fi_consensus_annual", A)]),
      {("fi_consensus_annual", A): {U}}, {}),
     ("info_row_dropped_with_newer_snapshot", lambda e, r, d: (
-        r.__setitem__("fi_consensus_annual", [x for x in r["fi_consensus_annual"] if x["ticker"] != A]
-                      + [_r("fi_consensus_annual", ticker=A, period="2027/12", data_type="E", op=1.0,
-                            ni=1.0, fetched_date=T_DATE)])),
+        r.__setitem__("fi_consensus_annual",
+                      [x for x in r["fi_consensus_annual"] if x["ticker"] != A]
+                      + [_r("fi_consensus_annual", ticker=A, period="2027/12", data_type="E",
+                            op=1.0, ni=1.0, fetched_date=T_DATE)])),
      {("fi_consensus_annual", A): {bc.INFO}}, {}),
     ("info_row_dropped_without_newer_snapshot", lambda e, r, d: r.__setitem__(
         "fi_consensus_annual", [x for x in r["fi_consensus_annual"] if x["ticker"] != A]),
@@ -781,7 +795,18 @@ CASES: list[tuple[str, Mut, dict[tuple[str, str], set[str]], dict[str, Any]]] = 
         _drop_t(e, A, "fi_prices", "fi_adj_prices", "fi_flows"),
         _uni(e, A, eligible=False, exclude_reason="no_price", market_cap=None)),
      {("fi_universe", A): {bc.CUTOFF}, ("fi_prices", A): {bc.CUTOFF},
-      ("fi_adj_prices", A): {bc.CUTOFF}, ("fi_flows", A): {bc.CUTOFF}}, {"stage": {B: True}}),
+      ("fi_adj_prices", A): {bc.CUTOFF}, ("fi_flows", A): {bc.CUTOFF}},
+     {"stage": {B: bc.STAGE_USABLE}}),
+    ("cutoff_price_invalid", lambda e, r, d: (
+        _drop_t(e, A, "fi_prices", "fi_adj_prices"),
+        _uni(e, A, eligible=False, exclude_reason="no_price", market_cap=None)),
+     {("fi_universe", A): {bc.CUTOFF}, ("fi_prices", A): {bc.CUTOFF},
+      ("fi_adj_prices", A): {bc.CUTOFF}}, {"stage": {A: bc.STAGE_INVALID, B: bc.STAGE_USABLE}}),
+    ("price_predicate_false_is_not_cutoff", lambda e, r, d: (
+        _drop_t(e, A, "fi_prices", "fi_adj_prices"),
+        _uni(e, A, eligible=False, exclude_reason="no_price", market_cap=None)),
+     {("fi_universe", A): {U}, ("fi_prices", A): {U}, ("fi_adj_prices", A): {U}},
+     {"stage": {A: bc.STAGE_UNUSABLE, B: bc.STAGE_USABLE}}),
     ("cutoff_stage_valid", lambda e, r, d: (
         _drop_t(e, A, "fi_prices", "fi_adj_prices"),
         _uni(e, A, eligible=False, exclude_reason="no_price", market_cap=None)),
@@ -915,9 +940,11 @@ def test_large_difference_is_counted_in_sql_not_classified(tmp_path, monkeypatch
     assert res.tally.by_column[bc.UNEXPLAINED]["fi_prices.volume"] == 18
 
 
-def test_reason_vocabulary_matches_factor_inputs() -> None:
-    """제외 사유 어휘는 fi 정본(`queries.EXCLUDE_REASONS`)과 같다(T-6 사유는 PR-5 가 더한다)."""
-    assert {bc.NO_PRICE, *bc.CARRY_REASONS, *bc.ESTIMATE_REASONS} <= set(fiq.EXCLUDE_REASONS)
+def test_vocabulary_is_the_factor_inputs_canon() -> None:
+    """제외 사유·T 행 원천 표는 fi 정본(`queries.EXCLUDE_REASONS`·`T_SOURCE_TABLE`, PR-5)이다."""
+    assert {bc.NO_PRICE, bc.T6_REASON, *bc.CARRY_REASONS, *bc.ESTIMATE_REASONS} <= set(
+        fiq.EXCLUDE_REASONS)
+    assert bc.T_SOURCE_TABLE == fiq.T_SOURCE_TABLE
 
 
 def test_category_table_cites_the_canon() -> None:
@@ -927,3 +954,123 @@ def test_category_table_cites_the_canon() -> None:
     assert all(c.basis and c.label and c.definition for c in bc.CATEGORIES.values())
     assert all("T-36" in bc.CATEGORIES[k].basis for k in (bc.CLOSE_DEF, bc.VOLUME_DEF, bc.CARRY,
                                                            bc.INFO, bc.T6, bc.CUTOFF, bc.FILING))
+
+
+# ── 왕복 — 실제 빌더(PR-5 픽스처 방식): 15:41 원장 → stage → fi 장 마감 판 → 모델 ────────────
+# 장 마감 판은 수집기 실물 함수로 `postclose.db` 를 쓰고(`test_factor_inputs.make_postclose_stage` —
+# `daily.postclose.insert_first` → stage 빌더 `stg_flow_postclose_kiwoom`), `factor_inputs.build
+# --basis evening`(D' 인계 이력 고정) → `model.build` 로 짓는다. 연구 판 D'·T 는 같은 합성 원천의
+# D' 상태·T 상태(KRX T 행 = 원장과 같은 값)에서 `factor_inputs.build` 아침판 → `model.build`.
+# 원장 계획: 보통 종목(종가 = KRX), C 분할(키움 기준가 ≠ D' 종가 · 연구 판 T 계수 2배) · H +100%(제한폭
+# 밖) — T-6, DD(price_valid 거짓)·F(NULL)·L(원장 행 없음) — 16:00 컷오프.
+RT_EQ = "m_20260930T000500_000000Z"
+V2 = "v2_percentrank@1.0"
+
+
+def _rt_plan(close_bump: str | None = None) -> dict[str, tuple[int, int | None, bool | None]]:
+    import test_factor_inputs as tf
+    plan = {t: v for t, v in tf.PC_PLAN.items() if t not in (tf.K, tf.ETF)}
+    plan[tf.P] = (*tf._moved(tf.P, 500), True)          # 후보라 T 가격이 있어야 한다(FG5)
+    if close_bump is not None:                          # 결함: 원장 종가 +1(기준가는 그대로)
+        close, pred, valid = plan[close_bump]
+        plan[close_bump] = (close + 1, None if pred is None else pred + 1, valid)
+    return plan
+
+
+def _t_state(plan: dict[str, tuple[int, int | None, bool | None]]) -> dict[str, list[dict]]:
+    """D' 상태 원천에 더할 T 행(KRX) — 종가·거래량·수급 = 원장 계획, C 는 T 에 누적계수 2배."""
+    import test_factor_inputs as tf
+    t = tf.T
+    out: dict[str, list[dict]] = {
+        "trading_calendar": [{"date": t, "prev_td": tf.D, "next_td": None}],
+        "universe_daily": [dict(r, date=t) for r in tf._universe()],
+        "price_daily": [], "price_adj_daily": [], "flow_daily": []}
+    closes = {tk: c for tk, (c, _, _) in _rt_plan().items()}   # KRX 종가 = 결함 없는 원장 종가
+    closes[tf.L] = tf.D_CLOSE[tf.L] + 500                       # 원장에는 없다(수집 못 함)
+    for tk, close in closes.items():
+        out["price_daily"].append(tf._price_row(tk, t, close))
+        share = tf.ADJ_FACTOR.get(tk, 1.0) * (2.0 if tk == tf.C else 1.0)
+        po = tf._price_only(tk, t)
+        out["price_adj_daily"].append({"ticker": tk, "date": t, "adj_close": close * share / po,
+                                       "cum_share_factor": share, "cum_price_only_factor": po,
+                                       "n_unadjusted_events": 0, "basis": "krx"})
+        if tk in plan and tk not in tf.PC_NO_FLOWS:
+            row: dict = {"date": t, "ticker": tk, "src": "kiwoom"}
+            for i, col in enumerate(tf._FLOW_COLS):
+                row[col] = (-1 if i == 0 else 1) * (tf.IDX[tk] * 10 + i) * 1_000_000
+            out["flow_daily"].append(row)
+    return out
+
+
+def _real_boards(base: Path, close_bump: str | None = None) -> tuple[Path, Path, Path]:
+    """(장 마감 루트, 연구 루트, 달력) — 전부 실제 빌더."""
+    import test_factor_inputs as tf
+    from factor_inputs import build as fi_build
+
+    plan = _rt_plan(close_bump)
+    eq1, st1 = tf.make_roots(base / "src_dp")
+    eq2, st2 = tf.make_roots(base / "src_t", eq_build=RT_EQ, extra=_t_state(plan))
+    cal = tf._cal_dir(base)
+    data = base / "data"
+    pc = tf.make_postclose_stage(base / "pc", plan)
+    mdb = pc.parent                                     # <pc>/model_db — stage 옆에 fi·model
+    hist = tf._history(base / f"{tf.D_S}_morning.json")
+    with allow_skips(("factor_inputs", "FG4", "no_fixtures",
+                      "합성 트리에는 운영 골든(fixtures/golden.json) 종목이 없다")):
+        rd = fi_build(tf.D_S, "morning", data / "factor_inputs", st1, eq1, grace_days=5,
+                      min_eligible=5, golden_path=None)
+        rt = fi_build(tf.T_S, "morning", data / "factor_inputs", st2, eq2, grace_days=5,
+                      min_eligible=5, golden_path=None)
+        ev = fi_build(tf.T_S, "evening", mdb / "factor_inputs", st1, eq1, grace_days=5,
+                      min_eligible=5, golden_path=None, builds_from=hist, calendar_dir=cal,
+                      postclose_stage_root=pc, candidates_root=data / "factor_inputs")
+    assert rd.ok and rt.ok and ev.ok, [(b.basis, b.date, b.summary()) for b in (rd, rt, ev)]
+    for root, basis in ((data, "morning"), (mdb, "evening")):
+        res = model_build(tf.T_S, basis, root / "model", root / "factor_inputs", specs=[V2],
+                          primary=V2, min_prices_on_d=1)
+        assert res.ok, res.summary()
+    return mdb, data, cal
+
+
+@pytest.fixture(scope="module")
+def real_pair(tmp_path_factory) -> tuple[Path, Path, Path]:
+    return _real_boards(tmp_path_factory.mktemp("real"))
+
+
+def _real_cli(pair: tuple[Path, Path, Path], out: Path, *extra: str) -> int:
+    import test_factor_inputs as tf
+    ev, rs, cal = pair
+    return bc.main(["--date", tf.T_S, "--evening-root", str(ev), "--research-root", str(rs),
+                    "--calendar-dir", str(cal), "--out-root", str(out), *extra])
+
+
+def test_real_builders_same_inputs_have_nothing_unexplained(real_pair, tmp_path) -> None:
+    """같은 입력이면 미설명 0 — 남는 차이는 증거가 있는 T-6(C 분할·H +100%)·16:00 컷오프
+    (DD price_valid 거짓 · F NULL · L 원장 행 없음)와 H 의 filing_late(합성 원천의 재제출본이 T 에
+    공개 — 장 마감 판 = 연구 D' = false, 연구 T = true)뿐이다. 판 기록 키(`postclose_stage_root`·
+    `postclose_builds`)를 그대로 읽는다."""
+    import test_factor_inputs as tf
+    rc = _real_cli(real_pair, tmp_path, "--spearman-min", "0")
+    rep = json.loads((tmp_path / "compare" / f"{tf.T_S}.json").read_text(encoding="utf-8"))
+    assert rep["unexplained"] == [] and rc == 0, rep["unexplained"]
+    tick = rep["ticker_categories"]
+    assert tick[tf.C] == [bc.T6] and tick[tf.H] == [bc.T6, bc.FILING]
+    assert tick[tf.DD] == tick[tf.F] == tick[tf.L] == [bc.CUTOFF]
+    assert {k for k, v in rep["categories"].items() if v["count"]} == {bc.T6, bc.CUTOFF, bc.FILING}
+    only = {e["ticker"]: e["categories"] for e in rep["model"][V2]["research_only"]}
+    assert only == {tf.C: [bc.T6], tf.H: [bc.T6, bc.FILING]}
+    ev_run = json.loads((real_pair[0] / "factor_inputs" / "_runs" / f"{tf.T_S}_evening.json")
+                        .read_text(encoding="utf-8"))
+    assert ev_run["postclose_stage_root"] and set(ev_run["postclose_builds"]) == {bc.T_SOURCE_TABLE}
+
+
+def test_real_builders_one_defect_gives_rc_1(tmp_path) -> None:
+    """원장 종가가 KRX 공식 종가와 1원 다르면(기준가는 그대로 — T-6 아님) 실운영 미설명 → rc 1.
+    같은 차이가 재생(`--replay`)이면 종가 정의다."""
+    import test_factor_inputs as tf
+    pair = _real_boards(tmp_path / "b", close_bump=tf.A)
+    assert _real_cli(pair, tmp_path / "live", "--spearman-min", "0") == 1
+    rep = json.loads((tmp_path / "live" / "compare" / f"{tf.T_S}.json").read_text(encoding="utf-8"))
+    assert {(u["table"], u["ticker"]) for u in rep["unexplained"]} >= {("fi_prices", tf.A)}
+    assert all(u["ticker"] == tf.A for u in rep["unexplained"]), rep["unexplained"]
+    assert _real_cli(pair, tmp_path / "replay", "--replay", "--spearman-min", "0") == 0

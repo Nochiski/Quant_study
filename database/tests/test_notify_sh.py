@@ -25,22 +25,30 @@ printf '{"ok":false}'
 """
 
 
-def _run(tmp_path: Path, *, telegram: bool, level: str = "crit",
+def _run(tmp_path: Path, *, telegram: bool, level: str = "crit", ql_env: bool = True,
          ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """ql_env=False 면 QL_ENV 를 빼고, HOME 의 옛 시스템 폴더에 토큰이 든 더미 파일을
+    둔다(폴백 대조)."""
     home = tmp_path / "home"
     ql_home = tmp_path / "ql"
     bin_dir = tmp_path / "bin"
     for d in (home, ql_home, bin_dir):
         d.mkdir()
+    if not ql_env:
+        (home / "kael-system-v3").mkdir()
+        (home / "kael-system-v3" / ".env").write_text("BOT_TOKEN=old-token\nCHAT_ID_LOG=999\n",
+                                                       encoding="utf-8")
     env_file = tmp_path / "fake.env"
     env_file.write_text("BOT_TOKEN=fake-token\nCHAT_ID_LOG=12345\n", encoding="utf-8")
     curl = bin_dir / "curl"
     curl.write_text(_FAKE_CURL, encoding="utf-8")
     curl.chmod(0o755)
     curl_log = tmp_path / "curl_calls.txt"
-    env = {k: v for k, v in os.environ.items() if k != "QL_NOTIFY_TELEGRAM"}
-    env.update(HOME=str(home), QL_HOME=str(ql_home), QL_ENV=str(env_file),
+    env = {k: v for k, v in os.environ.items() if k not in ("QL_NOTIFY_TELEGRAM", "QL_ENV")}
+    env.update(HOME=str(home), QL_HOME=str(ql_home),
                FAKE_CURL_LOG=str(curl_log), PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}")
+    if ql_env:
+        env["QL_ENV"] = str(env_file)
     if telegram:
         env["QL_NOTIFY_TELEGRAM"] = "1"
     proc = subprocess.run(["bash", str(SCRIPT), level, "병합 시험", "본문 첫 줄\n둘째 줄"],
@@ -66,4 +74,24 @@ def test_대조_켜면_가짜_curl_이_한_번_불린다(tmp_path: Path) -> None
     assert proc.returncode == 1               # 가짜 curl 이 실패 응답을 낸다
     calls = curl_log.read_text(encoding="utf-8").splitlines()
     assert len(calls) == 1 and "api.telegram.org/botfake-token/sendMessage" in calls[0]
+    assert not notify_log.exists()
+
+
+@pytest.mark.parametrize("level", ["crit", "warn", "info"])
+def test_기본값은_QL_ENV_없이도_rc_0_로그_한_줄(tmp_path: Path, level: str) -> None:
+    """RG-C7-4 — 비밀 파일은 텔레그램 분기에서만 요구한다. 기본(로그만) 분기는 QL_ENV 없이
+    돈다."""
+    proc, notify_log, curl_log = _run(tmp_path, telegram=False, level=level, ql_env=False)
+    assert proc.returncode == 0, proc.stderr
+    assert len(notify_log.read_text(encoding="utf-8").splitlines()) == 1
+    assert not curl_log.exists()
+
+
+def test_텔레그램_분기는_QL_ENV_없으면_옛_파일로_넘어가지_않고_rc_2(tmp_path: Path) -> None:
+    """RG-C7-4 — HOME 의 옛 시스템 폴더에 토큰이 있어도 읽지 않는다(옛 폴백이면 curl 이
+    불려 rc 1)."""
+    proc, notify_log, curl_log = _run(tmp_path, telegram=True, ql_env=False)
+    assert proc.returncode == 2
+    assert "QL_ENV" in proc.stderr
+    assert not curl_log.exists()
     assert not notify_log.exists()

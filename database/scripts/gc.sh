@@ -10,6 +10,7 @@
 set -euo pipefail
 cd "${QL_HOME:-$HOME/quant-ledger}"
 export PYTHONPATH="$PWD/src"
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 PY=.venv/bin/python
 APPLY=0
 # 주간 정리도 보고한다(결정 V2-7). set -e 로 죽는 어느 줄이든 warn 이 나간다.

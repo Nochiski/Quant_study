@@ -16,6 +16,7 @@
 set -uo pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 PY=.venv/bin/python
 # 인자는 락보다 먼저 읽는다 — 락 대기 알림이 dry-run 인지 알아야 한다
 DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""; PRC=""

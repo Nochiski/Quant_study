@@ -55,12 +55,25 @@ def test_read_secrets_only_wanted_keys(env: Path) -> None:
     assert tg.read_secrets(env.parent / "none.env", ("BOT_TOKEN",)) == {}
 
 
-def test_env_path_resolution(monkeypatch: pytest.MonkeyPatch, env: Path) -> None:
+def test_env_path_resolution(monkeypatch: pytest.MonkeyPatch, env: Path, doc: Path,
+                             tmp_path: Path) -> None:
+    """인자 > QL_ENV. 둘 다 없으면 FileNotFoundError — HOME 의 옛 시스템 폴더 파일로
+    넘어가지 않는다(RG-C7-4)."""
     monkeypatch.setenv("QL_ENV", str(env))
     assert tg.env_path() == env
     assert tg.env_path("/x/y.env") == Path("/x/y.env")
     monkeypatch.delenv("QL_ENV")
-    assert tg.env_path() == Path.home() / "kael-system-v3" / ".env"
+    home = tmp_path / "home"
+    (home / "kael-system-v3").mkdir(parents=True)
+    (home / "kael-system-v3" / ".env").write_text(f"BOT_TOKEN={TOKEN}\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    assert tg.env_path("/x/y.env") == Path("/x/y.env")
+    with pytest.raises(FileNotFoundError, match="QL_ENV"):
+        tg.env_path()
+    fake = Fake()
+    with pytest.raises(FileNotFoundError, match="QL_ENV"):
+        tg.send_document(doc, "c", transport=fake)
+    assert fake.calls == []
 
 
 def test_send_document_success(env: Path, doc: Path, caplog: pytest.LogCaptureFixture) -> None:

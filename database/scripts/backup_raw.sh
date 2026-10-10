@@ -14,6 +14,7 @@
 #   환경: QL_BACKUP_ROOT (기본 $HOME/backups/quant-ledger)
 set -uo pipefail
 cd "${QL_HOME:-$HOME/quant-ledger}"
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 BACKUP_ROOT="${QL_BACKUP_ROOT:-$HOME/backups/quant-ledger}"
 MIN_FREE_GB=60
 KEEP_SETS=1     # 성공 뒤 남길 세트 수(사용자 결정 09-14: 최신 1세트)

@@ -1,8 +1,9 @@
 """텔레그램 문서 발송 — 모델 채널(`CHAT_ID_AIPLAYGROUND`, 결정 D-12).
 
-비밀은 `scripts/notify.sh` 와 같은 규약으로 읽는다: env 파일 = 인자 → `QL_ENV` →
-`~/kael-system-v3/.env`, 그 안에서 `BOT_TOKEN` 과 채팅 키 **두 줄만**. 토큰·채팅 ID 는 로그·예외·
-반환값 어디에도 싣지 않는다(오류 문자열은 가림 처리). 전송은 표준 라이브러리 `urllib`(curl 없음).
+비밀은 `scripts/notify.sh` 와 같은 규약으로 읽는다: env 파일 = 인자 → `QL_ENV`
+(둘 다 없으면 FileNotFoundError — 다른 파일로 대신하지 않는다, RG-C7-4),
+그 안에서 `BOT_TOKEN` 과 채팅 키 **두 줄만**. 토큰·채팅 ID 는 로그·예외·반환값
+어디에도 싣지 않는다(오류 문자열은 가림 처리). 전송은 표준 라이브러리 `urllib`(curl 없음).
 `transport` 를 주입하면 네트워크 대신 그것을 부른다(테스트는 가짜 전송만 쓴다).
 """
 from __future__ import annotations
@@ -36,7 +37,8 @@ def env_path(env_file: str | Path | None = None) -> Path:
         return Path(env_file)
     if os.environ.get("QL_ENV"):
         return Path(os.environ["QL_ENV"])
-    return Path.home() / "kael-system-v3" / ".env"
+    raise FileNotFoundError("비밀 env 파일 경로가 없다 — --env-file 또는 QL_ENV"
+                            "(운영: $HOME/quant-ledger/.env)를 지정하라")
 
 
 def read_secrets(path: Path, keys: Sequence[str]) -> dict[str, str]:

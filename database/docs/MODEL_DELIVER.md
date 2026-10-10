@@ -155,7 +155,7 @@ data/factor_inputs/_runs/<YYYYMMDD>_<basis>.json      fi 판 manifest(equity 판
 
 - `send_document(path, caption, *, env_file=None, chat_key="CHAT_ID_AIPLAYGROUND", transport=None,
   dry_run=False) → {"ok", "description"}`.
-- 비밀: env 파일 = 인자 → `QL_ENV` → `~/kael-system-v3/.env`(`scripts/notify.sh` 와 같다). 그 안에서
+- 비밀: env 파일 = 인자 → `QL_ENV`(둘 다 없으면 FileNotFoundError — 다른 파일로 대신하지 않는다, RG-C7-4. 운영은 서버 `$HOME/quant-ledger/.env` — README "운영 (P6) → 비밀 파일"). 그 안에서
   `BOT_TOKEN` 과 채팅 키 두 줄만 읽는다(`export `·따옴표 허용). **토큰·채팅 ID 는 반환값·로그·예외
   문자열에 싣지 않는다** — 전송 예외·API 오류 문자열은 두 값을 `***` 로 가린다. 로그에는 키 이름만.
 - 캡션(1,024자 절단):

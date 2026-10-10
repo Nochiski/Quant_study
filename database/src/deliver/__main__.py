@@ -83,7 +83,7 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("--send", action="store_true", help="텔레그램으로 보낸다")
         sp.add_argument("--dry-run", action="store_true", help="보내지 않고 비밀 키 존재만 확인")
         sp.add_argument("--env-file", type=Path, default=None,
-                        help="비밀 env(기본 QL_ENV → ~/kael-system-v3/.env)")
+                        help="비밀 env 파일(없으면 QL_ENV, 둘 다 없으면 실패)")
         sp.add_argument("--chat-key", default=DEFAULT_CHAT_KEY)
 
     d = sub.add_parser("model-daily", help="매일 엑셀")

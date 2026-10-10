@@ -61,9 +61,12 @@
 #   실행 창: 08:10 아침 체인 끝 ~ 21:20 전(운영 stage 현판이 아침 확정판 m_ 인 때). 21:20 연구 저녁 빌드 뒤~다음
 #     아침 확정 전에는 stage 현판이 저녁 잠정판(e_)이라 equity(--basis morning 이라 m_ 판으로 선다)와 연구 판 T 가
 #     잠정 원천으로 지어진다. 그래서 운영 stage 현판 build_id 가 m_·b_ 가 아니면(e_ · 그 밖 접두어 — fail-closed)
-#     rc 2 로 거부한다(PR-8b 리뷰 MINOR-4). 판정은 replay_tool.py check_stage_basis 하나다 — 아무것도 쓰기 전에
-#     equity 단계가 읽는 stage 표(검증 대상 코드의 equity 규칙 입력)와 fi 가 stage 에서 직접 읽는 표로
-#     stage-guard, 고정 때 stage-pin 이 다시 건다(equity 를 짓는 사이 21:20 저녁 빌드가 섰을 수 있다).
+#     rc 2 로 거부한다(PR-8b 리뷰 MINOR-4). 판정은 replay_tool.py check_stage_basis 하나이고 세 번 건다 — ① 아무것도
+#     쓰기 전에 가드 목록(equity 단계가 읽는 stage 표 = 검증 대상 코드의 equity 규칙 입력 stg_* + fi 가 stage 에서
+#     직접 읽는 표)으로 stage-guard ② equity 단계가 끝난 직후 같은 목록으로 다시 stage-guard — equity 를 짓는 사이
+#     21:20 저녁 빌드가 앞쪽 표(stg_price_daily 등, fi 직독 표보다 먼저 지어진다)를 e_ 로 바꿨으면 여기서 잡힌다
+#     (e_ 는 다음 아침 확정까지 남으므로 끝난 뒤 한 번 보면 된다) ③ 고정 때 stage-pin 이 고정할 fi 직독 표를 본다.
+#     거부 메시지는 e_ 인 표와 가능한 원인 둘(저녁 빌드 창 / 아침 확정 빌드가 그 표를 m_ 로 못 바꿈)을 적는다.
 #   한 패스: equity → 고정 stage(fi 가 stage 에서 직접 읽는 표의 운영 현판을 <out>/stage_pin/passN 에 하드링크,
 #     replay_tool.py stage-pin) → 날짜마다 합성 인계 이력 <out>/data/deliver/history/<D>_morning.json(이 패스
 #     equity 현판 + 고정 stage 판, health ok, 재생 표시 replay — replay_tool.py handoff) → 연구 판 D'(fi 아침판)
@@ -215,28 +218,34 @@ if has board; then
   fi
 fi
 GUARD_MSG=""
+GUARD_TABLES=""
+GUARD_ERR=""
 if [ "$BASIS" = evening ]; then
-  # 실행 창 가드(머리 주석 '실행 창') — 읽을 운영 stage 표의 목록 정본은 검증 대상 코드다
-  guard=""
+  # 실행 창 가드(머리 주석 '실행 창') — 읽을 운영 stage 표의 목록 정본은 검증 대상 코드다. 목록을 뽑는
+  # python 의 stderr(경고 등)는 목록에 섞이지 않게 따로 받아 두었다가 run.txt 에 붙인다(출력 루트는 아직
+  # 쓰지 않는다 — 임시 파일은 시스템 임시 폴더, 끝나면 지운다)
+  GUARD_ERR=$(mktemp "${TMPDIR:-/tmp}/replay_guard.XXXXXX") || die "임시 파일을 만들 수 없다"
+  trap 'rm -f -- "$GUARD_ERR"' EXIT
   if has equity; then
     # equity 단계(equity_tables)가 운영 stage 현판에서 읽는 표 = 표 순서 파일의 규칙 입력 중 stg_*
     # shellcheck disable=SC2046  # reason: 표 순서 파일의 표 이름을 인자로 하나씩 넘긴다
-    guard=$(PYTHONPATH="$CODE/src" PYTHONDONTWRITEBYTECODE=1 "$PY" -c 'import sys
+    GUARD_TABLES=$(PYTHONPATH="$CODE/src" PYTHONDONTWRITEBYTECODE=1 "$PY" -c 'import sys
 import equity.__main__  # noqa: F401 — 등록 부작용(RULES)
 from equity.inputs import STAGE_PREFIX
 from equity.model import RULES
 print(",".join(sorted({i for t in sys.argv[1:] for i in RULES[t].inputs if i.startswith(STAGE_PREFIX)})))' \
-      $(grep -vE '^\s*(#|$)' "$CODE/scripts/equity_order.txt") 2>&1) \
-      || die "equity 단계가 읽는 stage 표를 정하지 못했다 — $guard"
+      $(grep -vE '^\s*(#|$)' "$CODE/scripts/equity_order.txt") 2>> "$GUARD_ERR") \
+      || die "equity 단계가 읽는 stage 표를 정하지 못했다 — $(tail -5 "$GUARD_ERR")"
   fi
   if has board; then
     # fi 가 stage 에서 직접 읽는 표(첫 줄 필수 · 둘째 줄 선택) — 고정 stage(stage-pin)도 이 목록을 쓴다
     FI_SRC=$(PYTHONPATH="$CODE/src" PYTHONDONTWRITEBYTECODE=1 "$PY" -c 'from factor_inputs.build import OPTIONAL_STAGE_SOURCES as o, STAGE_SOURCES as s
 print(",".join(t for t in s if t not in o))
-print(",".join(o))' 2>&1) || die "fi 가 stage 에서 읽는 표를 정하지 못했다 — $FI_SRC"
-    guard="$guard,$(echo "$FI_SRC" | paste -sd, -)"
+print(",".join(o))' 2>> "$GUARD_ERR") \
+      || die "fi 가 stage 에서 읽는 표를 정하지 못했다 — $(tail -5 "$GUARD_ERR")"
+    GUARD_TABLES="$GUARD_TABLES,$(echo "$FI_SRC" | paste -sd, -)"
   fi
-  GUARD_MSG=$("$PY" "$TOOL" stage-guard --ops-data "$OPS/data" --tables "$guard" 2>&1) \
+  GUARD_MSG=$("$PY" "$TOOL" stage-guard --ops-data "$OPS/data" --tables "$GUARD_TABLES" 2>&1) \
     || die "실행 창 밖이다 — ${GUARD_MSG#replay_tool stage-guard: }"
 fi
 
@@ -261,6 +270,7 @@ T0=$(date +%s)
   echo "out=$R code=$CODE date=${D:--} basis=$BASIS steps=$STEP_LIST engine=$ENGINE stage_at=${STAGE_AT:--}"
   [ -z "$DAYS" ] || echo "dates=${DATES:-$D} D'=$(echo "$DAYS" | head -1) T=$(echo "$DAYS" | tail -n +2 | paste -sd, -) spearman_min=${SPMIN:-기본}"
   [ -z "$GUARD_MSG" ] || echo "$GUARD_MSG"
+  [ ! -s "$GUARD_ERR" ] || { echo "가드 목록 stderr:"; cat "$GUARD_ERR"; }
 } > "$L/run.txt"
 echo "════ replay pass$PASS $(kst) — out=$R code=$CODE D=${D:--} basis=$BASIS steps=$STEP_LIST ════"
 
@@ -439,6 +449,12 @@ evening_main() {
   # equity — 연구(아침 확정) 판 규약. 장 마감 판이 고정하는 것도 연구 판이고 fi 는 m_·b_ equity 판만 읽는다
   if has equity; then
     equity_tables morning
+    # 실행 창 재판정 ② — equity 를 짓는 사이 21:20 저녁 빌드가 가드 목록 표를 e_ 로 바꿨으면 이 패스의
+    # equity 는 잠정 원천을 읽었을 수 있다. 뒤 단계로 가지 않고 rc 2 로 멈춘다
+    msg=$("$PY" "$TOOL" stage-guard --ops-data "$OPS/data" --tables "$GUARD_TABLES" 2>&1)
+    rc=$?
+    echo "equity 뒤 재판정: $msg" >> "$L/run.txt"
+    [ "$rc" -eq 0 ] || die "실행 창 밖이다(equity 단계 직후 재판정) — ${msg#replay_tool stage-guard: }"
   else
     BRIEF="$BRIEF · equity 앞 패스 판($eqp)"
   fi

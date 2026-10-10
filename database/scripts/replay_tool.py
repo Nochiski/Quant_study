@@ -30,17 +30,19 @@ BuildRecord 가 쌓이고 판 디렉터리는 stage 와 같은 상대 경로)를
 장 마감 판 재생(`replay.sh --basis evening`, 컷오버 PR-8b)이 쓰는 것:
   stage-guard --ops-data DIR --tables A,B[,…]
       실행 창 가드(PR-8b 리뷰 MINOR-4, `check_stage_basis`) — 표마다 운영 stage 현판 build_id 가 아침
-      확정(`m_`)·수동(`b_`) 판인가. 저녁 잠정판(`e_`)이면 21:20 연구 저녁 빌드 뒤~다음 아침 확정 전이라
-      재생 연구 판 T 가 잠정 원천으로 지어진다 — rc 2 로 거부한다. 그 밖의 접두어(구 레코드 등)도 판을
-      알 수 없어 거부한다(fail-closed). 현판이 없는 표는 판정하지 않는다(그 표를 읽는 단계가 실패하고,
-      선택 표는 absent 로 읽힌다). replay.sh 가 아무것도 쓰기 전에 equity 단계가 읽는 stage 표와 fi 가
-      stage 에서 직접 읽는 표로 부른다.
+      확정(`m_`)·수동(`b_`) 판인가. 저녁 잠정판(`e_`)이면 재생 연구 판 T 가 잠정 원천으로 지어진다 —
+      rc 2 로 거부하고 e_ 인 표 이름과 가능한 원인 둘(21:20 연구 저녁 빌드 뒤~다음 아침 확정 전인 저녁
+      빌드 창 / 아침 확정 빌드가 그 표를 m_ 로 바꾸지 못함 — 아침 stage 실패·문서 프리패스 건너뜀)을
+      적는다. 그 밖의 접두어(구 레코드 등)도 판을 알 수 없어 거부한다(fail-closed). 현판이 없는 표는
+      판정하지 않는다(그 표를 읽는 단계가 실패하고, 선택 표는 absent 로 읽힌다). replay.sh 가 아무것도
+      쓰기 전과 equity 단계가 끝난 직후에, equity 단계가 읽는 stage 표와 fi 가 stage 에서 직접 읽는
+      표로 부른다.
   stage-pin --ops-data DIR --tables A,B[,…] [--optional C,…] --dest DIR
       운영 stage 현판(표마다 current_build)을 DEST 에 stage-at 과 같은 방식(파일 하드링크 + 1판
       MANIFEST)으로 고정한다 — fi 가 stage 에서 직접 읽는 표를 패스 동안 붙잡아 운영 GC·새 판과
       무관하게 한다. 선택 표(--optional)는 운영에 현판이 없으면 건너뛴다(fi 가 'absent' 로 읽는다).
-      고정하기 전에 stage-guard 와 같은 판정(`check_stage_basis`)을 다시 건다 — equity 를 짓는 사이
-      21:20 저녁 빌드가 섰을 수 있다. stdout 은 stage-at 과 같은 TSV.
+      고정하기 전에 고정할 표에 stage-guard 와 같은 판정(`check_stage_basis`)을 다시 건다(이 표들만 —
+      equity 입력 표는 replay.sh 가 equity 단계 직후 stage-guard 로 본다). stdout 은 stage-at 과 같은 TSV.
   handoff --data DIR --stage-root DIR --date D [--note TEXT]
       재생 합성 인계 이력 `<data>/deliver/history/<D>_morning.json` — 장 마감 판 fi `--builds-from`
       과 수집기 대상(`daily.postclose.resolve_targets`)이 읽는 자리. equity = `<data>/equity` 현판,
@@ -294,22 +296,33 @@ STAGE_PREFIX_EVENING = "e_"
 def check_stage_basis(stage_root: Path, tables: list[str]) -> int:
     """표마다 운영 stage 현판 build_id 접두어가 `STAGE_PREFIXES_READ` 인가 — 아니면 `ToolError`(rc 2).
     현판이 없는 표는 판정하지 않는다. 판정한 표 수를 돌려준다."""
-    bad: list[str] = []
+    evening: list[str] = []          # 현판이 저녁 잠정판(e_)인 표
+    unknown: list[str] = []          # 접두어로 판을 알 수 없는 표(`표=build_id`)
     n = 0
     for table in dict.fromkeys(tables):
         cur, _ = _builds(stage_root / table / "MANIFEST.json")
         if cur is None:
             continue
         n += 1
-        if not str(cur).startswith(STAGE_PREFIXES_READ):
-            bad.append(f"{table}={cur}")
-    if bad:
-        evening = any(b.split("=", 1)[1].startswith(STAGE_PREFIX_EVENING) for b in bad)
-        why = ("저녁 잠정판(e_)이 있다 — 21:20 연구 저녁 빌드 뒤~다음 아침 확정(08:10 체인) 전이라 재생 연구 "
-               "판 T 가 잠정 원천으로 지어진다. 08:10 아침 체인이 끝난 뒤 ~ 21:20 전에 돌린다"
-               if evening else "접두어로 판을 알 수 없다(fail-closed)")
-        raise ToolError(f"운영 stage 현판이 아침 확정(m_)·수동(b_) 판이 아니다 {len(bad)}/{n}표 "
-                        f"({', '.join(bad[:5])}{' …' if len(bad) > 5 else ''}) — {why}")
+        if str(cur).startswith(STAGE_PREFIXES_READ):
+            continue
+        if str(cur).startswith(STAGE_PREFIX_EVENING):
+            evening.append(table)
+        else:
+            unknown.append(f"{table}={cur}")
+    if evening or unknown:
+        # 재생 연구 판 T 가 잠정·미상 원천으로 지어진다. e_ 가 남는 원인은 둘 — 시각만으로 단정하지 않는다
+        parts: list[str] = []
+        if evening:
+            parts.append(
+                f"저녁 잠정판(e_) {len(evening)}표: {', '.join(evening)} — 가능한 원인 ① 저녁 빌드 창(21:20 "
+                "연구 저녁 빌드 뒤~다음 아침 확정 08:10 체인 전 — 아침 체인이 끝난 뒤 ~ 21:20 전에 돌린다) "
+                "② 아침 확정 빌드가 이 표를 m_ 로 바꾸지 못했다(아침 stage 실패·문서 프리패스 건너뜀 등 — "
+                "그날 build_chain 로그와 stage skipped.txt 를 본다)")
+        if unknown:
+            parts.append(f"접두어로 판을 알 수 없는 {len(unknown)}표: {', '.join(unknown)} — fail-closed")
+        raise ToolError(f"운영 stage 현판이 아침 확정(m_)·수동(b_) 판이 아니다 "
+                        f"{len(evening) + len(unknown)}/{n}표 — {' / '.join(parts)}")
     return n
 
 

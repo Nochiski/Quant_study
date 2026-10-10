@@ -1,6 +1,6 @@
-"""v3 `quant.db` 9표 ← equity/stage 매핑 선언 (플랜 `2026-09-24-v3-merge.md` §5 T1.2 2).
+"""v3 `quant.db` 9표 ← equity/stage/model 매핑 선언 (플랜 `2026-09-24-v3-merge.md` §5 T1.2 2).
 
-표마다 ① 원천(equity 판 또는 stage 판) ② duckdb SELECT ③ v3 컬럼 순서 ④ PK
+표마다 ① 원천(equity 판 · stage 판 · 모델 판 점수 표) ② duckdb SELECT ③ v3 컬럼 순서 ④ PK
 ⑤ `retire_when`(만료 조건) ⑥ `null_columns`(소스에 재료가 없어 NULL 로 두는 v3 열)을 선언한다.
 SQL 은 `str.format` 자리를 쓴다 — 원천 표 실명 자리에는 `read_parquet([...])` 가, 나머지
 `{date}`·`{from_date}`·`{snap_from}`·`{consensus_asof}`·`{asof_ym}`·`{exported_at}` 자리에는
@@ -19,11 +19,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from model.contracts import V2_SCORE_COLUMNS, V3_SCORE_COLUMNS
+
 from . import units
 from .units import KRW_PER_EOK, KRW_PER_MN
 
 EQUITY = "equity"
 STAGE = "stage"
+MODEL = "model"                      # 모델 판 점수 표(QL-C) — 판 고정은 `quant_db._resolve_model`
 
 
 @dataclass(frozen=True)
@@ -31,8 +34,8 @@ class TableMapping:
     """v3 표 1개를 채우는 선언."""
 
     v3_table: str
-    source_kind: str | None          # 'equity' | 'stage' | None(이번 태스크에서는 안 채움)
-    sources: tuple[str, ...]         # 원천 표 실명(source_kind 루트 기준)
+    source_kind: str | None          # 'equity' | 'stage' | 'model' | None(안 채움)
+    sources: tuple[str, ...]         # 원천 표 실명(source_kind 루트 기준). model 은 spec_id 하나
     columns: tuple[str, ...]         # v3 컬럼 순서 = SELECT 출력 순서
     pk: tuple[str, ...]
     sql: str
@@ -526,6 +529,47 @@ WHERE a.period_kind = 'E' AND a.period = '{asof_fy}'
   AND a.op IS NOT NULL AND a.ni IS NOT NULL
 """
 
+# ── score_history · score_history_v2 (QL-C · T-16) ──────────────────────────────────────────
+# 원천은 모델 판 점수 표 `<model_root>/<spec_id>/v=<build_id>/scores.parquet` 다. 판은
+# `--date D --basis` 의 모델 성공 판 하나로 고정한다(`quant_db._resolve_model`).
+# 최신 판으로 대체하지 않는다(P1).
+#   score_history    ← scope@1.0(메인 모델 scope_v1.0, 엔진 v3_zscore)
+#   score_history_v2 ← v2_percentrank@1.0
+# 모델 점수 열 계약(`model.contracts.V3_SCORE_COLUMNS`·`V2_SCORE_COLUMNS`)은 v3 DDL 과 이름·순서가
+# 같다(엔진이 v3 원본 이식 — G-M3). 그래서 열은 **같은 이름끼리** 옮기고, 타입만 v3 DDL 에 맞춰 명시
+# CAST 한다(TEXT → VARCHAR · INTEGER → BIGINT · REAL → DOUBLE).
+# `null_columns` 는 원천 열이 있어도 옮기지 않고 NULL 로 둔다(임의로 채우지 않는다):
+#   · score_history 6열(growth·sentiment·volatility·size·foreign·shareholder_score) — v3 에서도 항상
+#     NULL(플랜 §8-1). 엔진도 NULL 이지만(MG3) 여기서 한 번 더 못 박는다.
+#   · score_history.val_ev_ebitda — scope@1.0 은 EV/EBITDA 를 밸류에서 뺐다. 원본 v3 에서 데이터가
+#     3/1,321 종목뿐이라 비어 있던 계산과 같게 만든 spec 이다(`config/models/scope_v1_0.toml`).
+#     엔진은 원값을 싣지만 v3 열 의미('밸류 입력')와 달라 비운다. v3 실물도 비어 있다
+#     (로컬 사본 08-07 0/1,283).
+# 종목 수는 v3 보다 적다(scope 593 · v2 625 vs v3 1,329 · 2,526) — 10-05 유니버스 결정, T-17 수용.
+# 쓰기는 날짜 단위 교체다(그 score_date 행 전부 삭제 → 삽입, 한 트랜잭션 — `quant_db`).
+SCORE_SPEC = "scope@1.0"
+SCORE_V2_SPEC = "v2_percentrank@1.0"
+_SCORE_NULL = ("growth_score", "sentiment_score", "volatility_score", "size_score",
+               "foreign_score", "shareholder_score", "val_ev_ebitda")
+
+
+def _score_type(col: str) -> str:
+    """v3 점수 표 DDL 타입 → duckdb CAST 타입."""
+    if col == "rank":
+        return "BIGINT"
+    if col in ("stock_code", "score_date") or col.endswith("_flag"):
+        return "VARCHAR"
+    return "DOUBLE"
+
+
+def _score_sql(columns: tuple[str, ...], null_columns: tuple[str, ...]) -> str:
+    """같은 이름 열을 v3 타입으로 옮기는 SELECT. `{scores}` 자리에 판의 read_parquet 이 온다."""
+    sel = ",\n       ".join(
+        f'CAST(NULL AS {_score_type(c)}) AS "{c}"' if c in null_columns
+        else f'CAST(s."{c}" AS {_score_type(c)}) AS "{c}"' for c in columns)
+    return f"SELECT {sel}\nFROM {{scores}} s\n"
+
+
 # ── 선언 ────────────────────────────────────────────────────────────────────────────────────
 MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
@@ -619,24 +663,26 @@ MAPPINGS: tuple[TableMapping, ...] = (
     ),
     TableMapping(
         v3_table="score_history",
-        source_kind=None,
-        sources=(),
-        columns=(),
+        source_kind=MODEL,
+        sources=(SCORE_SPEC,),
+        columns=V3_SCORE_COLUMNS,
         pk=("stock_code", "score_date"),
-        sql="",
+        sql=_score_sql(V3_SCORE_COLUMNS, _SCORE_NULL),
         retire_when="브리핑 상위 8·export·api health·unitelegram get_signal_insights 가 "
                     "model 판 직독으로 옮겨진 뒤",
-        note="T2.7 에서 model 판을 원천으로 연결한다. 이번 태스크는 DDL 만.",
+        null_columns=_SCORE_NULL,
+        note="scope@1.0 점수 표 → 같은 이름 열(T-16). score_date 단위 교체. "
+             "val_ev_ebitda 는 scope 가 밸류에 안 써 NULL",
     ),
     TableMapping(
         v3_table="score_history_v2",
-        source_kind=None,
-        sources=(),
-        columns=(),
+        source_kind=MODEL,
+        sources=(SCORE_V2_SPEC,),
+        columns=V2_SCORE_COLUMNS,
         pk=("stock_code", "score_date"),
-        sql="",
+        sql=_score_sql(V2_SCORE_COLUMNS, ()),
         retire_when="리서치센터 S6·export 가 model 판 직독으로 옮겨진 뒤",
-        note="T2.7 에서 model 판을 원천으로 연결한다. 이번 태스크는 DDL 만.",
+        note="v2_percentrank@1.0 점수 표 → 같은 이름 21열 전부(T-16). score_date 단위 교체",
     ),
 )
 

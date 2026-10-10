@@ -139,7 +139,8 @@ def _read_session_table(path: str) -> dict[str, str]:
             raise TypeError(f"days must be an object: got {type(days).__name__}")
         out: dict[str, str] = {}
         for k, v in days.items():
-            dt.datetime.strptime(str(k), "%Y%m%d")            # 없는 날(20261131)도 여기서 걸린다
+            # 없는 날(20261131)도 여기서 걸린다
+            dt.datetime.strptime(str(k), "%Y%m%d")  # noqa: DTZ007  # reason: 날짜 형식 검사만 한다 — 시각·시간대를 쓰지 않는다
             if len(str(k)) != 8 or not isinstance(v, str) or not v.strip():
                 raise ValueError(f"entry must be YYYYMMDD → non-empty reason: {k!r}: {v!r}")
             out[str(k)] = v

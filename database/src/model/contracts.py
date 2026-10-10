@@ -70,9 +70,10 @@ FI_PRICES = TableContract(
     (_c("ticker", "VARCHAR"), _c("date", "DATE"),
      _c("open", "BIGINT", "원"), _c("high", "BIGINT", "원"), _c("low", "BIGINT", "원"),
      _c("close", "BIGINT", "원"), _c("volume", "BIGINT", "주"), _c("amount", "BIGINT", "원"),
-     _c("price_source", "VARCHAR", note="krx | evening_snapshot — 저녁 판 T 행만 snapshot(FG2)")),
+     _c("price_source", "VARCHAR", note="krx | postclose — 장 마감 판의 T 행만 postclose(FG2)")),
     window="D 까지 550 달력일(v3 가격 이력 창과 같다)",
-    source="equity price_daily(KRX) + 저녁 판은 evening_snapshot 의 T 행 오버레이",
+    source="equity price_daily(KRX) + 장 마감 판 T 행은 15:41 장 마감 직후 수집, 키움 KRX 코드 "
+           "정규장 종가(postclose.db → stage stg_flow_postclose_kiwoom·PR-5)",
     readers=ALL_ENGINES)
 
 FI_ADJ_PRICES = TableContract(
@@ -88,7 +89,7 @@ FI_ADJ_PRICES = TableContract(
              "v4 계열은 해당 창을 결측 처리"),
      _c("adj_jump_ok", "BOOLEAN",
         note="adj_ok 와 같은 계단 표식이되 적용일 인접 행의 |수정수익률|이 그날 가격제한폭을 "
-             "넘는 미해결 사건만 센다(T-9 · H1-4, fi1.5.0 — 상수는 factor_inputs.queries "
+             "넘는 미해결 사건만 센다(T-9 · H1-4, fi1.6.0 — 상수는 factor_inputs.queries "
              "PRICE_LIMIT_*·ADJ_JUMP_NEIGHBOR_SESSIONS). scope(params.adj_jump_missing)는 "
              "모멘텀·20일 변동성 창 안에서 값이 바뀌면 그 지표를 결측 처리, v3@1.0·v2·v4 는 무시")),
     window="fi_prices 와 같다",
@@ -100,7 +101,8 @@ FI_FLOWS = TableContract(
     (_c("ticker", "VARCHAR"), _c("date", "DATE"),
      *(_c(s, "DOUBLE", "백만원", "순매수") for s in FLOW_SUBJECTS)),
     window="D 까지 60 세션(v3 20 · v2 40 달력일 · v4 외국인 60 세션)",
-    source="equity flow_daily(키움 ka10060, 저녁 판 T 행은 evening_snapshot)",
+    source="equity flow_daily(키움 ka10060) + 장 마감 판 T 행은 15:41 장 마감 직후 수집, 키움 KRX "
+           "코드 정규장 수급(postclose.db → stage stg_flow_postclose_kiwoom·PR-5)",
     readers=ALL_ENGINES)
 
 FI_UNIVERSE = TableContract(
@@ -110,7 +112,8 @@ FI_UNIVERSE = TableContract(
      _c("sec_type", "VARCHAR", note="common | spac | preferred …(D-11 어휘)"),
      _c("listed_date", "DATE"),
      _c("shares", "BIGINT", "주"), _c("market_cap", "DOUBLE", "억원"),
-     _c("mktcap_basis", "VARCHAR", note="krx | t1_shares_x_t_close(저녁 T, B-24)"),
+     _c("mktcap_basis", "VARCHAR", note="krx | t1_shares_x_t_close(장 마감 판 — D' 주식수 × T "
+                                         "종가, B-24)"),
      _c("sector_l1", "VARCHAR", note="WICS 대분류 코드(G10…)"), _c("sector_l1_name", "VARCHAR"),
      _c("sector_l2", "VARCHAR", note="WICS 중분류 코드(G1010…)"), _c("sector_l2_name", "VARCHAR"),
      _c("has_estimates", "BOOLEAN", note="당해 12월기 op·ni 추정치가 신선 또는 유예 상태"),

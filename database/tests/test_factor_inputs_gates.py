@@ -134,7 +134,7 @@ def test_fg1_min_eligible(con) -> None:
 
 
 def test_fg2_non_krx_rows_fail(con) -> None:
-    con.execute("UPDATE g_fi_prices SET price_source = 'evening_snapshot'")
+    con.execute("UPDATE g_fi_prices SET price_source = 'postclose'")
     assert gates.fg2_overlay(_ctx(con)).status is GateStatus.FAIL
 
 
@@ -209,6 +209,67 @@ def test_fg_fresh_collection_lag(con) -> None:
     r = gates.fg_fresh(_ctx(con, collection_lag_sessions=2))
     assert r.status is GateStatus.FAIL and r.metrics["collection_lag_over_max"] == 1
     assert r.metrics["collection_lag_max"] == gates.COLLECTION_LAG_MAX == 1
+
+
+# ── 장 마감 판(evening, 컷오버 PR-4 · T-2) ───────────────────────────────────
+T = "2026-09-29"            # 장 마감 판의 오늘. 직전 거래일 D' = D
+
+
+@pytest.fixture
+def con_evening(con) -> duckdb.DuckDBPyConnection:
+    """장 마감 판 기준 상태 — D' 행은 KRX(종가 9,000), T 행은 장 마감 원천(종가 12,000),
+    시총 = D' 주식수 1,000,000 × T 종가 / 1e8 = 120억, 기준 't1_shares_x_t_close'."""
+    con.execute(f"UPDATE g_fi_universe SET date = DATE '{T}', market_cap = 120.0, "
+                "mktcap_basis = 't1_shares_x_t_close'")
+    con.execute("UPDATE g_fi_prices SET close = 9000")
+    _insert(con, "fi_prices", ticker="000001", date=dt.date.fromisoformat(T), close=12_000,
+            price_source="postclose")
+    return con
+
+
+def _ectx(con: duckdb.DuckDBPyConnection, **over: object) -> gates.GateContext:
+    return _ctx(con, date=T, basis="evening", asof=D, **over)
+
+
+def test_evening_baseline_passes_every_gate(con_evening) -> None:
+    res = _by_name(gates.run_all(_ectx(con_evening)))
+    assert {n: g.status for n, g in res.items()} == {
+        "FG0": GateStatus.PASS, "FG1": GateStatus.PASS, "FG2": GateStatus.PASS,
+        "FG3": GateStatus.PASS, "FG4": GateStatus.SKIP, "FG-fresh": GateStatus.PASS}
+    assert res["FG2"].metrics["n_t_price_rows"] == 1
+    # KRX 시총 대조는 장 마감 판에 대상이 없다(KRX 의 T 시총은 아직 없다) — 0 이 아니라 NULL
+    assert res["FG3"].metrics["n_krx_mktcap_diff"] is None
+    assert res["FG-fresh"].metrics["collection_expected_date"] == D
+
+
+@pytest.mark.parametrize("breaker, gate, key", [
+    (f"UPDATE g_fi_prices SET price_source = 'krx' WHERE date = DATE '{T}'",
+     "FG2", "fi_prices.t_row_not_overlay"),
+    (f"UPDATE g_fi_prices SET price_source = 'postclose' WHERE date < DATE '{T}'",
+     "FG2", "fi_prices.non_krx_before_t"),
+    ("UPDATE g_fi_universe SET mktcap_basis = 'krx'", "FG2", "fi_universe.mktcap_basis_not_t1"),
+    ("UPDATE g_fi_universe SET mktcap_basis = 'krx'", "FG3", "non_t1_basis"),
+    ("UPDATE g_fi_universe SET market_cap = 90.0", "FG3", "market_cap_rule"),   # D' 종가로 잰 시총
+    (f"DELETE FROM g_fi_prices WHERE date = DATE '{T}'", "FG1", "eligible_without_price_on_d"),
+    (f"UPDATE g_fi_fin_summary SET available_date = DATE '{T}'",
+     "FG1", "fi_fin_summary.available_after_d"),
+    ("INSERT INTO g_fi_consensus_annual (ticker, period, data_type, fetched_date) VALUES "
+     f"('000001', '2026/12', 'E', DATE '{T}')",
+     "FG1", "fi_consensus_annual.outside_window_or_vocab"),
+])
+def test_evening_gates_fail_on_each_breach(con_evening, breaker: str, gate: str,
+                                           key: str) -> None:
+    """장 마감 판 FG2(T 전 행 KRX · T 행 장 마감 원천 · 시총 기준) · FG3(D' 주식수 × T 종가) ·
+    FG1(eligible 은 T 가격 · 재무·연간 컨센서스는 D' 까지 — 정보 시점)."""
+    con_evening.execute(breaker)
+    r = _by_name(gates.run_all(_ectx(con_evening)))[gate]
+    assert r.status is GateStatus.FAIL and r.metrics[key], (key, r.detail)
+
+
+def test_morning_fg2_refuses_the_evening_market_cap_basis(con) -> None:
+    con.execute("UPDATE g_fi_universe SET mktcap_basis = 't1_shares_x_t_close'")
+    r = gates.fg2_overlay(_ctx(con))
+    assert r.status is GateStatus.FAIL and r.metrics["fi_universe.non_krx_mktcap"] == 1
 
 
 def test_fg_fresh_without_collection_is_skip(con) -> None:

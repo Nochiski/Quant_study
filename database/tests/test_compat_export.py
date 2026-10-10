@@ -697,11 +697,13 @@ def test_financial_summary_financial_template_ni_op_by_account_name() -> None:
 
 
 # ── (b) 멱등 ─────────────────────────────────────────────────────────────────
-def test_second_run_is_idempotent(roots, tmp_path: Path) -> None:
+def test_second_run_is_idempotent(roots, model_root, tmp_path: Path) -> None:
+    # 표를 고르지 않으면 원천이 있는 표 전부 — 점수 두 표(QL-C)도 들어간다.
     target = tmp_path / "quant.db"
-    first = _run(roots, target)
+    first = _run(roots, target, model_root=model_root)
+    assert {"score_history", "score_history_v2"} <= set(first.tables)
     before = {t: _rows(target, f"SELECT * FROM {t} ORDER BY 1, 2") for t in first.tables}
-    second = _run(roots, target)
+    second = _run(roots, target, model_root=model_root)
     assert {t: r.n_rows for t, r in first.tables.items()} == \
            {t: r.n_rows for t, r in second.tables.items()}
     for table, rows in before.items():
@@ -982,9 +984,413 @@ def test_cli_returns_2_on_unexpected_exception(tmp_path: Path, capsys) -> None:
     assert "compat 실패" in capsys.readouterr().err
 
 
-def test_cli_rejects_unmapped_score_tables(roots, tmp_path: Path) -> None:
-    """score_history 는 T2.7 이 채운다 — 지금 요청하면 조용히 건너뛰지 않고 rc 2 다."""
+def test_cli_score_tables_without_model_root_refuse(roots, tmp_path: Path, capsys) -> None:
+    """점수 표(QL-C)는 모델 판 루트가 있어야 한다 — 없으면 조용히 건너뛰지 않고 rc 2 다."""
+    target = tmp_path / "quant.db"
     rc = cli_main(["export", "--date", AS_OF, "--basis", "morning",
                    "--equity-root", str(roots[0]), "--stage-root", str(roots[1]),
-                   "--target", str(tmp_path / "quant.db"), "--tables", "score_history"])
+                   "--target", str(target), "--tables", "score_history"])
     assert rc == 2
+    assert "--model-root" in capsys.readouterr().err
+    assert not target.exists()                       # 쓰기 전에 멈춘다
+
+
+def test_cli_exports_score_tables(roots, model_root, tmp_path: Path, capsys) -> None:
+    rc = cli_main(["export", "--date", AS_OF, "--basis", "morning",
+                   "--equity-root", str(roots[0]), "--stage-root", str(roots[1]),
+                   "--model-root", str(model_root), "--target", str(tmp_path / "quant.db"),
+                   "--tables", "score_history,score_history_v2"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"score_history={len(SCORE_CODES)}" in out
+    assert f"score_history_v2={len(SCORE_CODES)}" in out
+
+
+# ── (g) 점수 표 — QL-C(T-16 · T-17) ───────────────────────────────────────────
+# 모델 판 규약(`src/model/build.py` · `src/deliver/reader.py`):
+#   `<model_root>/<spec_id>/v=<build_id>/scores.parquet` + `_runs/<YYYYMMDD>_<basis>.json`
+#   + `latest_<basis>.json`. parquet 은 실제 writer(`model.build.write_parquet` + 레지스트리 spec 의
+#   `gates.score_dtypes`)로 쓴다 — 열 구성·순서·dtype 이 서버 판과 같다.
+# 합성 판 두 개: 09-23 판(MB_D23)과 다음 날 09-24 판(MB_D24, `latest_morning.json` 이 가리킨다).
+#   값은 열마다 다르게 두고 09-24 판은 +100 을 더해, 어느 판을 읽었는지 값으로 가린다.
+SCOPE, V2 = "scope@1.0", "v2_percentrank@1.0"
+MB_D23 = "m_20260924T040000_000000Z"
+MB_D24 = "m_20260925T040000_000000Z"
+D23_ISO, D24_ISO = "2026-09-23", "2026-09-24"
+SCORE_CODES = ("005930", "000660", "123450")
+# scope@1.0 에서 v3 `score_history` 로 옮기지 않는 열 — 리터럴로 고정한다(명세).
+#   6열: v3 에서도 항상 NULL(플랜 §8-1, 엔진 MG3 가 NULL 을 강제)
+#   val_ev_ebitda: scope 는 EV/EBITDA 를 밸류에 쓰지 않는다(원본 v3 에서 비어 있던 계산과 같게
+#                  만든 spec) — 값이 있어도 v3 열 의미('밸류 입력')와 달라 NULL 로 둔다
+SCOPE_NULL_COLS = ("growth_score", "sentiment_score", "volatility_score", "size_score",
+                   "foreign_score", "shareholder_score", "val_ev_ebitda")
+_ALWAYS_NULL = SCOPE_NULL_COLS[:6]
+
+
+def _score_row(columns: tuple[str, ...], total_col: str, code: str, d_iso: str, rank: int,
+               shift: float, null: tuple[str, ...] = ()) -> dict:
+    """열마다 다른 값 — 어느 열이 어디로 갔는지 값으로 가린다."""
+    row: dict = dict.fromkeys(columns)
+    for j, c in enumerate(columns):
+        if c in ("stock_code", "score_date", "rank") or c.endswith("_flag") or c in null:
+            continue
+        row[c] = round(shift + rank * 0.25 + j * 0.001, 6)
+    row.update(stock_code=code, score_date=d_iso, rank=rank)
+    row[total_col] = shift + 10.0 - rank
+    return row
+
+
+def _scope_rows(d_iso: str, shift: float = 0.0) -> list[dict]:
+    from model.contracts import V3_SCORE_COLUMNS
+    rows = [_score_row(V3_SCORE_COLUMNS, "composite_score", c, d_iso, i, shift, _ALWAYS_NULL)
+            for i, c in enumerate(SCORE_CODES, start=1)]
+    rows[0]["op_1w_flag"] = "흑전"                 # 플래그(TEXT) 열도 그대로 간다
+    rows[2]["r1m"] = None                          # 엔진 결측(T-9 등)은 결측 그대로
+    for r in rows:
+        r["val_ev_ebitda"] = 7.5                   # scope 엔진은 원값을 싣는다 → v3 에는 NULL
+    return rows
+
+
+def _v2_rows(d_iso: str, shift: float = 0.0) -> list[dict]:
+    from model.contracts import V2_SCORE_COLUMNS
+    rows = [_score_row(V2_SCORE_COLUMNS, "total_score", c, d_iso, i, shift)
+            for i, c in enumerate(SCORE_CODES, start=1)]
+    rows[1]["per_next"] = None
+    return rows
+
+
+def _write_model_run(root: Path, d_iso: str, build_id: str, scores: dict[str, list[dict]], *,
+                     status: str = "ok", excluded: tuple[str, ...] = (),
+                     runs: bool = True, latest: bool = True) -> None:
+    """`model.build.build` 가 남기는 모양 그대로의 판 하나(빠진 spec 은 parquet 도 없다)."""
+    from model import gates, registry
+    from model.build import write_parquet
+    for spec_id, rows in scores.items():
+        if spec_id in excluded or status != "ok":       # 실패 판·빠진 spec 은 parquet 이 없다
+            continue
+        write_parquet(rows, gates.score_dtypes(registry.get(spec_id)),
+                      root / spec_id / f"v={build_id}" / "scores.parquet")
+    payload = {
+        "layer": "model", "status": status, "build_id": build_id, "date": d_iso,
+        "basis": "morning", "fi_build_id": "m_20260924T030000_000000Z",
+        "generated_at": f"{d_iso}T04:00:00Z",
+        "specs": {s: {"n_scores": len(r), "n_ranked": len(r), "n_excluded": 0, "gates": {}}
+                  for s, r in scores.items() if s not in excluded},
+        "excluded_specs": {s: {"error": "ValueError: 합성 예외"} for s in excluded},
+        "primary_spec": SCOPE, "elapsed_s": 1.0}
+    text = json.dumps(payload, ensure_ascii=False)
+    if runs:
+        path = root / "_runs" / f"{d_iso.replace('-', '')}_morning.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    if latest:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "latest_morning.json").write_text(text, encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def model_root(tmp_path_factory) -> Path:
+    """09-23 판 + 09-24 판(latest). 읽기만 하므로 모듈에서 공유."""
+    root = tmp_path_factory.mktemp("model") / "model"
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: _scope_rows(D23_ISO),
+                                             V2: _v2_rows(D23_ISO)})
+    _write_model_run(root, D24_ISO, MB_D24, {SCOPE: _scope_rows(D24_ISO, 100.0),
+                                             V2: _v2_rows(D24_ISO, 100.0)})
+    return root
+
+
+def _v3_tuples(rows: list[dict], columns: tuple[str, ...],
+               null: tuple[str, ...] = ()) -> list[tuple]:
+    """모델 행 → v3 표에 들어가야 할 행(열 순서 = v3 스키마, `null` 열은 NULL)."""
+    return sorted(tuple(None if c in null else r[c] for c in columns) for r in rows)
+
+
+def _seed(target: Path, table: str, rows: list[tuple]) -> None:
+    """v3 스키마 대상에 기존 행을 미리 넣는다(v3 가 쓰던 옛 행 흉내)."""
+    from compat.quant_db import SCHEMA_SQL_PATH
+    con = sqlite3.connect(str(target))
+    try:
+        con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
+        n = len(rows[0])
+        con.executemany(f"INSERT INTO {table} VALUES ({', '.join('?' * n)})", rows)
+        con.commit()
+    finally:
+        con.close()
+
+
+def _old_v3_rows(d_iso: str, codes: tuple[str, ...], n_cols: int, total: float) -> list[tuple]:
+    """v3 가 쓰던 옛 행 — 종목코드·날짜·총점만 있고 나머지는 NULL(총점은 두 표 모두 7번째 열)."""
+    out = []
+    for code in codes:
+        row: list = [None] * n_cols
+        row[0], row[1], row[6] = code, d_iso, total
+        out.append(tuple(row))
+    return out
+
+
+def test_score_mappings_match_v3_schema_and_model_contract() -> None:
+    """두 점수 표의 열 = v3 DDL(`v3_schema.sql`) = 모델 spec 의 점수 열 계약(이름·순서)."""
+    from compat.mappings import BY_TABLE
+    from compat.quant_db import SCHEMA_SQL_PATH
+    from model import registry
+    from model.contracts import score_columns
+    con = sqlite3.connect(":memory:")
+    con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
+    for table, spec in (("score_history", SCOPE), ("score_history_v2", V2)):
+        m = BY_TABLE[table]
+        v3_cols = [r[1] for r in con.execute(f"PRAGMA table_info({table})")]
+        assert m.source_kind == "model" and m.sources == (spec,)
+        assert list(m.columns) == v3_cols
+        assert tuple(m.columns) == score_columns(registry.get(spec))
+        assert m.pk == ("stock_code", "score_date")
+    con.close()
+    assert set(BY_TABLE["score_history"].null_columns) == set(SCOPE_NULL_COLS)
+    assert BY_TABLE["score_history_v2"].null_columns == ()
+
+
+def test_score_history_from_scope_run(roots, model_root, tmp_path: Path) -> None:
+    """scope@1.0 → score_history 48열. 열 이름 그대로, 값 그대로, NULL 열 7개만 비운다."""
+    from model.contracts import V3_SCORE_COLUMNS
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["score_history"], model_root=model_root)
+    assert res.tables["score_history"].n_rows == len(SCORE_CODES)
+    got = sorted(_rows(target, f"SELECT {', '.join(V3_SCORE_COLUMNS)} FROM score_history"))
+    assert got == _v3_tuples(_scope_rows(D23_ISO), V3_SCORE_COLUMNS, SCOPE_NULL_COLS)
+    assert _rows(target, "SELECT count(*) FROM score_history WHERE val_ev_ebitda IS NOT NULL "
+                         "OR growth_score IS NOT NULL") == [(0,)]
+    assert _rows(target, "SELECT op_1w_flag FROM score_history WHERE rank = 1") == [("흑전",)]
+
+
+def test_score_history_v2_column_mapping(roots, model_root, tmp_path: Path) -> None:
+    """v2_percentrank@1.0 → score_history_v2 21열 전부 그대로(NULL 로 비우는 열 없음)."""
+    from model.contracts import V2_SCORE_COLUMNS
+    target = tmp_path / "quant.db"
+    _run(roots, target, tables=["score_history_v2"], model_root=model_root)
+    got = sorted(_rows(target, f"SELECT {', '.join(V2_SCORE_COLUMNS)} FROM score_history_v2"))
+    assert got == _v3_tuples(_v2_rows(D23_ISO), V2_SCORE_COLUMNS)
+
+
+@pytest.mark.parametrize("table", ["score_history", "score_history_v2"])
+def test_score_date_is_replaced_other_dates_kept(roots, model_root, tmp_path: Path,
+                                                 table: str) -> None:
+    """T-16 — 그 score_date 행을 모두 지우고 새로 넣는다. 다른 날짜는 그대로다.
+
+    v3 옛 행: 09-22(다른 날) 2종목 + 09-23 4종목(그중 999990·888880 은 새 판에 없다 — v3 유니버스
+    1,329 → scope 593 축소 흉내). 교체 뒤 09-23 은 새 판 3종목뿐이고 09-22 는 손대지 않는다.
+    """
+    from model.contracts import V2_SCORE_COLUMNS, V3_SCORE_COLUMNS
+    cols = V3_SCORE_COLUMNS if table == "score_history" else V2_SCORE_COLUMNS
+    old_other = _old_v3_rows("2026-09-22", ("005930", "999990"), len(cols), 1.5)
+    old_same = _old_v3_rows(D23_ISO, ("005930", "000660", "999990", "888880"), len(cols), -2.0)
+    target = tmp_path / "quant.db"
+    _seed(target, table, old_other + old_same)
+    _run(roots, target, tables=[table], model_root=model_root)
+    assert sorted(_rows(target, f"SELECT * FROM {table} WHERE score_date = '2026-09-22'")) == \
+        sorted(old_other)
+    assert _rows(target, f"SELECT stock_code FROM {table} WHERE score_date = '{D23_ISO}' "
+                         "ORDER BY rank") == [(c,) for c in SCORE_CODES]
+
+
+def test_score_rerun_is_idempotent(roots, model_root, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    tables = ["score_history", "score_history_v2"]
+    _run(roots, target, tables=tables, model_root=model_root)
+    before = {t: _rows(target, f"SELECT * FROM {t} ORDER BY 1, 2") for t in tables}
+    _run(roots, target, tables=tables, model_root=model_root)
+    assert {t: _rows(target, f"SELECT * FROM {t} ORDER BY 1, 2") for t in tables} == before
+
+
+def test_score_run_is_pinned_to_date_not_latest(roots, model_root, tmp_path: Path) -> None:
+    """P1 — `latest_morning.json` 은 09-24 판이지만 --date 09-23 은 09-23 판(`_runs`)을 읽는다."""
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["score_history"], model_root=model_root)
+    assert res.tables["score_history"].sources == {SCOPE: MB_D23}
+    assert _rows(target, "SELECT DISTINCT score_date FROM score_history") == [(D23_ISO,)]
+    assert _rows(target, "SELECT max(composite_score) FROM score_history") == [(9.0,)]
+
+
+def test_score_run_from_latest_of_same_date(roots, tmp_path: Path) -> None:
+    """`_runs/<D>` 가 없어도 `latest_<basis>.json` 의 날짜가 D 면 그 판이다(deliver.reader 규약)."""
+    root = tmp_path / "model"
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: _scope_rows(D23_ISO)}, runs=False)
+    res = _run(roots, tmp_path / "quant.db", tables=["score_history"], model_root=root)
+    assert res.tables["score_history"].sources == {SCOPE: MB_D23}
+
+
+@pytest.mark.parametrize("case", ["no_run", "gate_failed"])
+def test_score_without_run_of_that_date_refuses(roots, tmp_path: Path, case: str) -> None:
+    """P1 — 그날 성공 판이 없으면 다른 날(최신) 판으로 대체하지 않고 쓰기 전에 멈춘다."""
+    root = tmp_path / "model"
+    _write_model_run(root, D24_ISO, MB_D24, {SCOPE: _scope_rows(D24_ISO, 100.0)})
+    if case == "gate_failed":
+        _write_model_run(root, D23_ISO, "m_20260924T050000_000000Z",
+                         {SCOPE: _scope_rows(D23_ISO)}, status="gate_failed", latest=False)
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930",), 48, 1.0)
+    _seed(target, "score_history", old)
+    with pytest.raises(CompatError, match="모델 판"):
+        _run(roots, target, tables=["score_history"], model_root=root)
+    assert _rows(target, "SELECT * FROM score_history") == old
+
+
+def test_score_excluded_spec_refuses(roots, tmp_path: Path) -> None:
+    """비교 모델(v2)이 그날 판에서 빠졌으면(N-11 격리) 그 표는 쓰지 않고 멈춘다."""
+    root = tmp_path / "model"
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: _scope_rows(D23_ISO),
+                                             V2: _v2_rows(D23_ISO)}, excluded=(V2,))
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930",), 21, 50.0)
+    _seed(target, "score_history_v2", old)
+    with pytest.raises(CompatError, match="v2_percentrank@1.0"):
+        _run(roots, target, tables=["score_history_v2"], model_root=root)
+    assert _rows(target, "SELECT * FROM score_history_v2") == old
+
+
+def test_score_rows_of_other_date_refuse(roots, tmp_path: Path) -> None:
+    """판 날짜(D)와 다른 score_date 행이 있으면 D 를 지우기 전에 멈춘다."""
+    root = tmp_path / "model"
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: _scope_rows("2026-09-22")})
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930",), 48, 1.0)
+    _seed(target, "score_history", old)
+    with pytest.raises(CompatError, match="score_date"):
+        _run(roots, target, tables=["score_history"], model_root=root)
+    assert _rows(target, "SELECT * FROM score_history") == old
+
+
+def test_score_empty_run_refuses_without_deleting(roots, tmp_path: Path) -> None:
+    """0행 판은 CompatEmptyError — D 의 기존 행을 지운 채 끝나지 않는다."""
+    root = tmp_path / "model"
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: []})
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930",), 48, 1.0)
+    _seed(target, "score_history", old)
+    with pytest.raises(CompatEmptyError, match="score_history"):
+        _run(roots, target, tables=["score_history"], model_root=root)
+    assert _rows(target, "SELECT * FROM score_history") == old
+
+
+@pytest.mark.parametrize(("table", "spec", "col"), [
+    ("score_history", SCOPE, "composite_score"),
+    ("score_history", SCOPE, "stock_code"),
+    ("score_history_v2", V2, "total_score"),
+])
+def test_score_required_null_refuses_before_delete(roots, tmp_path: Path, table: str, spec: str,
+                                                   col: str) -> None:
+    """리뷰 MINOR-1 — v3 NOT NULL 열이 빈 행이 있으면 D 를 지우기 전에 멈춘다.
+
+    전에는 그 행만 건너뛰고(skip) 나머지를 지운 자리에 넣은 뒤, 커밋 후 비율 검사에서 예외가 나
+    D 가 일부 행만 남은 채로 끝났다.
+    """
+    root = tmp_path / "model"
+    rows = _scope_rows(D23_ISO) if spec == SCOPE else _v2_rows(D23_ISO)
+    rows[0][col] = None
+    _write_model_run(root, D23_ISO, MB_D23, {spec: rows})
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930", "999990"), 48 if spec == SCOPE else 21, 1.0)
+    _seed(target, table, old)
+    with pytest.raises(CompatError, match=col):
+        _run(roots, target, tables=[table], model_root=root)
+    assert sorted(_rows(target, f"SELECT * FROM {table}")) == sorted(old)
+
+
+def test_score_duplicate_code_refuses_before_delete(roots, tmp_path: Path) -> None:
+    """리뷰 MINOR-1 — 같은 종목이 두 번 오면 PK 덮어쓰기로 한 행이 조용히 사라진다.
+
+    지우기 전에 멈춘다.
+    """
+    root = tmp_path / "model"
+    rows = _scope_rows(D23_ISO)
+    rows[1]["stock_code"] = rows[0]["stock_code"]
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: rows})
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930", "999990"), 48, 1.0)
+    _seed(target, "score_history", old)
+    with pytest.raises(CompatError, match="중복"):
+        _run(roots, target, tables=["score_history"], model_root=root)
+    assert sorted(_rows(target, "SELECT * FROM score_history")) == sorted(old)
+
+
+def test_score_tables_all_checked_before_any_write(roots, tmp_path: Path) -> None:
+    """리뷰 MINOR-2 — 두 점수 표를 함께 내보낼 때 v2 가 깨졌으면 score_history 도 쓰지 않는다."""
+    root = tmp_path / "model"
+    v2 = _v2_rows(D23_ISO)
+    v2[2]["total_score"] = None
+    _write_model_run(root, D23_ISO, MB_D23, {SCOPE: _scope_rows(D23_ISO), V2: v2})
+    target = tmp_path / "quant.db"
+    old_v3 = _old_v3_rows(D23_ISO, ("005930", "999990"), 48, 1.0)
+    old_v2 = _old_v3_rows(D23_ISO, ("005930", "999990"), 21, 50.0)
+    _seed(target, "score_history", old_v3)
+    _seed(target, "score_history_v2", old_v2)
+    with pytest.raises(CompatError, match="total_score"):
+        _run(roots, target, tables=["score_history", "score_history_v2"], model_root=root)
+    assert sorted(_rows(target, "SELECT * FROM score_history")) == sorted(old_v3)
+    assert sorted(_rows(target, "SELECT * FROM score_history_v2")) == sorted(old_v2)
+    assert _rows(target, "SELECT status, failed_table FROM _compat_meta") == [
+        ("failed", "score_history_v2")]
+
+
+def test_score_meta_records_spec_build_and_basis(roots, model_root, tmp_path: Path) -> None:
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["score_history", "score_history_v2"],
+               model_root=model_root)
+    assert res.model_builds == {SCOPE: MB_D23, V2: MB_D23}
+    row = _rows(target, "SELECT date, basis, model_builds, tables, status FROM _compat_meta")[0]
+    assert row[0] == D23_ISO and row[1] == "morning" and row[4] == "ok"
+    assert json.loads(row[2]) == {SCOPE: MB_D23, V2: MB_D23}
+    tables = json.loads(row[3])
+    assert tables["score_history"]["sources"] == {SCOPE: MB_D23}
+    assert tables["score_history_v2"]["sources"] == {V2: MB_D23}
+
+
+def test_score_tables_require_model_root(roots, tmp_path: Path) -> None:
+    with pytest.raises(CompatError, match="--model-root"):
+        _run(roots, tmp_path / "quant.db", tables=["score_history_v2"])
+
+
+def test_score_tables_from_real_model_build(roots, tmp_path: Path) -> None:
+    """실제 `model.build.build` 가 쓴 판(40종목 합성 fi)을 그대로 읽는다 — 파일 계약 대조.
+
+    `_runs`·`v=<build_id>/scores.parquet` 규약을 손으로 흉내 낸 픽스처만으로는 빌더와 어긋나도
+    모른다. v3 표 행 = 그 판 scores.parquet 행(NULL 열만 비움)이어야 한다.
+    """
+    import duckdb
+    from model import build as mbuild
+    from model.contracts import FI_TABLES, V2_SCORE_COLUMNS, V3_SCORE_COLUMNS
+    from test_model_v4_rank import Board, _full
+
+    b = Board()
+    for i in range(40):
+        _full(b, f"{100000 + i:06d}", i, sector=("G10", "G20", "G30")[i % 3])
+    for r in b.tables["fi_prices"]:
+        r["close"] = round(float(r["close"]))                  # type: ignore[arg-type]
+    fi, fi_root, fi_bid = b.fi(), tmp_path / "fi", "m_20260929T000500_000000Z"
+    for name, t in FI_TABLES.items():
+        out = fi_root / name / f"v={fi_bid}" / "part0.parquet"
+        mbuild.write_parquet(list(fi.tables.get(name, ())),
+                             {c.name: c.dtype for c in t.columns}, out)
+        (out.parent / "_meta.json").write_text(json.dumps(
+            {"table": name, "build_id": fi_bid, "basis": "morning", "date": "2026-09-28"}))
+    (fi_root / "latest_morning.json").write_text(json.dumps(
+        {"layer": "factor_inputs", "status": "ok", "build_id": fi_bid, "date": "2026-09-28",
+         "basis": "morning"}))
+    model = tmp_path / "model"
+    res = mbuild.build("20260928", "morning", model, fi_root, specs=[SCOPE, V2], primary=SCOPE,
+                       min_prices_on_d=10, min_ranked=10)
+    assert res.ok and not res.excluded, res.specs
+
+    target = tmp_path / "quant.db"
+    got = _run(roots, target, date="20260928", tables=["score_history", "score_history_v2"],
+               model_root=model)
+    assert got.model_builds == {SCOPE: res.build_id, V2: res.build_id}
+    for table, spec, cols, null in (("score_history", SCOPE, V3_SCORE_COLUMNS, SCOPE_NULL_COLS),
+                                    ("score_history_v2", V2, V2_SCORE_COLUMNS, ())):
+        path = model / spec / f"v={res.build_id}" / "scores.parquet"
+        con = duckdb.connect()
+        cur = con.execute(f"SELECT * FROM read_parquet('{path}')")
+        names = [d[0] for d in cur.description]
+        src = [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
+        con.close()
+        assert len(src) == res.specs[spec]["n_scores"] > 0
+        assert sorted(_rows(target, f"SELECT {', '.join(cols)} FROM {table}")) == \
+            _v3_tuples(src, cols, null)

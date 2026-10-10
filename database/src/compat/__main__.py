@@ -4,7 +4,11 @@
         --equity-root data/equity --stage-root data/stage --target data/compat/quant.db \\
         [--tables daily_prices,stocks] [--full] [--window-days 730] [--consensus-asof 20260922] \\
         [--builds-from data/deliver/history/20260923_morning.json] \\
-        [--model-universe all|estimates] [--builds-from-missing error|current] [--in-place]
+        [--model-universe all|estimates] [--builds-from-missing error|current] [--in-place] \\
+        [--model-root data/model]
+
+점수 두 표(score_history·score_history_v2)는 --model-root 의 그날·그 basis 모델 판이 원천이다(QL-C).
+표를 고르지 않으면 점수 표도 들어가므로 --model-root 가 필요하다.
 
 rc 0 정상 · 2 예외. 표별 행수 한 줄을 stdout 에 낸다(`scripts/compat_export.sh` 가 로그로 받는다).
 """
@@ -41,6 +45,9 @@ def _parser() -> argparse.ArgumentParser:
                         "stocks.market_cap 을 NULL 로 둔다(사용자 결정 09-24). 그림자 전용")
     e.add_argument("--in-place", action="store_true",
                    help="v3 quant.db 제자리 반영 — --model-universe 는 all 만 허용(T-19)")
+    e.add_argument("--model-root", default=None, type=Path,
+                   help="모델 판 루트(data/model) — score_history·score_history_v2 의 원천. "
+                        "--date·--basis 의 판으로 고정한다(T-16)")
     return p
 
 
@@ -53,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
             tables=[t.strip() for t in args.tables.split(",")] if args.tables else None,
             full=args.full, window_days=args.window_days, consensus_asof=args.consensus_asof,
             builds_from=args.builds_from, builds_from_missing=args.builds_from_missing,
-            model_universe=args.model_universe, in_place=args.in_place)
+            model_universe=args.model_universe, in_place=args.in_place,
+            model_root=args.model_root)
     except CompatError as e:
         print(f"compat 실패: {e}", file=sys.stderr)
         return 2

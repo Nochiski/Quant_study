@@ -355,14 +355,18 @@ def _now_utc() -> str:
     return dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _atomic_write_json(path: Path, payload: object) -> None:
-    """같은 디렉터리 임시 파일 → 0600 → os.replace(원자 교체). 중간에 죽어도 절단된 JSON 이 남지 않는다."""
+def _atomic_write_json(path: Path, payload: object, mode: int = 0o600) -> None:
+    """같은 디렉터리 임시 파일 → mode(기본 0600) → os.replace(원자 교체). 중간에 죽어도 절단된 JSON 이 남지 않는다.
+
+    `mode` 는 남의 파일 내용만 바꿀 때 원래 권한을 지키려고 받는다
+    (`calendar_export` — v3 휴장 파일).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=1)
-        os.chmod(tmp, 0o600)
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):

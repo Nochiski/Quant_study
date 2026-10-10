@@ -456,10 +456,20 @@ def test_eg7_임계는_baseline이_코드기본값을_덮는다(con: duckdb.Duck
 
 
 # ── 프레임 ────────────────────────────────────────────────────────────────────
-def test_run_all_실행순서는_GATES_7_1(con: duckdb.DuckDBPyConnection) -> None:
+def _pinned_kw(tmp_path: Path, make_stage_tree) -> dict[str, object]:
+    """EG13 기준일이 서는 고정 입력 — 없으면 EG13 이 FAIL 해 뒤 게이트가 upstream_failed 로
+    빠지고 순서만 맞는 항진 테스트가 된다."""
+    pinned = _snap_pinned(tmp_path, make_stage_tree)
+    return {"pinned": pinned, "inputs": {t: pb.build_id for t, pb in pinned.items()}}
+
+
+def test_run_all_실행순서는_GATES_7_1(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                  make_stage_tree) -> None:
     fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
-    names = [g.name for g in gates.run_all(_ctx(con, _rule(), fixtures=fx))]
-    assert names == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG4", "EG5a"]
+    results = gates.run_all(_ctx(con, _rule(inputs=("stg_sample",)), fixtures=fx,
+                                 **_pinned_kw(tmp_path, make_stage_tree)))
+    assert [g.name for g in results] == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG4", "EG5a"]
+    assert not [g.name for g in results if g.detail == "upstream_failed"]   # 전부 실제로 돌았다
 
 
 def test_앞_게이트_실패시_뒤는_skip_upstream_failed(con: duckdb.DuckDBPyConnection) -> None:
@@ -470,15 +480,19 @@ def test_앞_게이트_실패시_뒤는_skip_upstream_failed(con: duckdb.DuckDBP
                for g in results[1:])
 
 
-def test_extra_gates_훅이_EG3_뒤에_붙는다(con: duckdb.DuckDBPyConnection) -> None:
+def test_extra_gates_훅이_EG3_뒤에_붙는다(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                    make_stage_tree) -> None:
     def eg6_version(ctx: EquityGateContext) -> GateResult:
         return GateResult("EG6", GateStatus.PASS, "판본 선택", {})
 
     eg6_version.gate_name = "EG6"   # pyright: ignore[reportFunctionMemberAccess]  # reason: 훅 규약
     fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
-    names = [g.name for g in gates.run_all(
-        _ctx(con, _rule(extra_gates=(eg6_version,)), fixtures=fx))]
-    assert names == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG6", "EG4", "EG5a"]
+    results = gates.run_all(_ctx(con, _rule(inputs=("stg_sample",), extra_gates=(eg6_version,)),
+                                 fixtures=fx, **_pinned_kw(tmp_path, make_stage_tree)))
+    assert [g.name for g in results] == ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG6", "EG4",
+                                         "EG5a"]
+    eg6 = next(g for g in results if g.name == "EG6")
+    assert eg6.status is GateStatus.PASS and eg6.detail == "판본 선택"    # 훅이 실제로 돌았다
 
 
 def test_없는_상수는_skip_no_baseline이고_metrics를_남긴다(con: duckdb.DuckDBPyConnection,

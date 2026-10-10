@@ -34,6 +34,7 @@
 | 키움 | `stg_lending_daily` | 6,988,296 | 6,988,296 | 0 | `remn_amt_krw` ×1e6 · 항등식 불변식 |
 | 키움 | `stg_master_daily` | 8,614 | 8,614 | 0 | first_write_wins · `coverage_from=2026-09-01` · state 파이프 분해 3불린 |
 | 키움 | `stg_shards_kiwoom` | 10,420 | 10,420 | 0 | 원구조 · collected_at 08-23~24 2일뿐 |
+| 키움(장 마감) | `stg_flow_postclose_kiwoom` | — | — | — | 장 마감 직후 판 전용(컷오버 PR-2, 2.8.0) · 연구 루트에 없음 · 아래 별도 메모 |
 | KIS | `stg_flow_split_daily` | 949,023 | 1,001,370 | 52,347 | 중복 52,347 접힘 · `*_ntby_tr_pbmn_krw` ×1e6(픽스처 13) · 수정주가 플래그 payload 보존 |
 | KIS | `stg_short_daily_kis` | 939,610 | 939,610 | 0 | `acml_valid`(창 첫 행) · `avrg_prc` '0' 결측 |
 | KIS | `stg_loan_daily_kis` | 493,445 | 493,445 | 0 | `rmnd_stcn_shr` 음수 2,691 keep · `rmnd_amt_krw` ×1e6 |
@@ -91,6 +92,27 @@
 | WISE | `stg_calls_wise` | 31,442 | 31,442 | 0 | unversioned 로그 · `pkey=''` 키 인정 |
 
 합계 62테이블 · stage 84,374,088행 / 원장 85,051,268행(접힘 677,180 — doc_index 재빌드·analyst_broker 추가 반영) · reject 0 · 1차 패스 23분 · 같은 스냅샷 재빌드 content_hash 60/60 동일(G5 Δ=0). 게이트 판정은 각 테이블 `MANIFEST.json` 의 `builds[].gates`.
+
+**`stg_flow_postclose_kiwoom`(장 마감 직후 판 — 컷오버 PR-2 · stage 2.8.0)** — 위 표의 숫자(09-03 1차 풀 빌드)에는 없다.
+- 원천: 15:41 장 마감 수집 원장 `data/raw/postclose.db` 의 `ka10060_investor_flows`(키움 KRX 코드, T 행만). 파싱은
+  `stg_flow_daily_kiwoom` 과 같은 규칙 객체라 공유 열(투자자 13열 `_krw` 등)의 뜻·단위가 같다. 더한 열은 둘이다.
+- `price_valid`(BOOLEAN): 수집기가 그 응답을 16:00 KST 전에 받았나. **`price_valid IS TRUE` 인 행만 가격으로 쓴다.**
+  NULL·false 면 수급 13열(`*_krw`)만 유효하고, 종가·전일대비·거래량(`close_krw`·`close_krw_dir`·`pred_pre_krw`·
+  `volume_shr`)에는 애프터마켓 값이 섞인다(N-35 ①). stage 는 거르지 않고 원문을 1:1 로 싣는다.
+- `collected_at`(TEXT): 그 **행**을 받은 시각, 원장 원문 UTC `YYYY-MM-DDTHH:MM:SS` 그대로이고 끝에 'Z' 가 없다.
+  저녁 키움 원장의 같은 이름 열(수집 실행 단위 스탬프)과 뜻이 달라 두 표의 값을 견주지 않는다.
+- `observed_date`: 두 표 모두 `collected_at` 의 KST 날짜지만, 저녁 표는 **실행 단위 스탬프**의 날짜(21:05 실행이면 T,
+  다음 날 06:00 재수집이면 T+1)이고 이 표는 **그 행을 받은 시각**의 날짜(15:41~ 수집이라 T)다. 원장이
+  INSERT OR IGNORE(첫 관측 유지)라 `write_mode` 는 `first_write_wins` 다.
+- 위치: 연구 루트(`data/stage`)가 아니라 **`data/model_db/stage`** 에 짓는다(정본 계획 T-29). 연구 체인 전량 빌드
+  (`run_stage_all.sh`)는 이 표를 짓지 않고 `skipped.txt` 에 남긴다. 원장은 연구 스냅샷 세트 밖
+  (`stage.rules.SOLO_LEDGER_FILES`)이라 단독 빌드(`python -m stage --table stg_flow_postclose_kiwoom`)만 뜬다.
+- G4: 첫 수집(10-14) 전에는 원장에 행이 없어 자기 골든이 없다. 단위 환산 13열은 `stg_flow_daily_kiwoom` 의 골든을
+  물려받고(`golden_from`, 원천 TR 이 같을 때만) SKIP 사유 코드는 `golden_inherited` 다. 수집 뒤 자기 골든을 다는
+  일은 후속.
+- **fi 가 이 표를 읽게 되면(PR-5)** K1-7a 허용표에 이 표 한정으로 G4 `golden_inherited` · G6 `first_write_wins`
+  (게이트가 내는 사유 문자열은 `write_mode=first_write_wins`) · G8 `not_blob` SKIP 을 등록해야 한다(등록 안 하면
+  목록 밖 SKIP = 실패). 그 밖의 SKIP(G5 첫 판 `no_baseline` · G9 `no_cross_check`)은 `stg_flow_daily_kiwoom` 과 같다.
 
 
 ## 4. equity 가 판단해야 하는 것 (stage 는 안 한다)

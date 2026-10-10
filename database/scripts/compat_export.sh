@@ -3,6 +3,8 @@
 #   equity/stage 판을 읽어 v3 `quant.db` 9표 중 우리가 채우는 표를 upsert 한다(읽기 전용 소비).
 #   M1~M3 대상은 별도 파일 `data/compat/quant.db`(기본값), M4 컷오버부터 QL_COMPAT_TARGET 으로
 #   v3 `~/kael-system-v3/data/quant.db` 제자리(결정 D-2).
+#   점수 두 표(score_history·_v2)는 모델 판(QL_MODEL_ROOT, 기본 data/model)의 그날·그 basis 판이
+#   원천이다(QL-C · T-16) — 그날 모델 성공 판이 없으면 export 가 실패한다(다른 날 판으로 대체 안 함).
 #
 #   락: 자체 락 `/tmp/quant_ledger_compat.lock` — 빌드 락(`/tmp/quant_ledger_build.lock`)은 잡지
 #       않는다. equity 판을 **읽기만** 하고 MANIFEST current_build 로 판을 고정해 읽으므로
@@ -20,6 +22,7 @@ PY=.venv/bin/python
 LOCK=/tmp/quant_ledger_compat.lock
 EQUITY_ROOT="${QL_EQUITY_ROOT:-data/equity}"
 STAGE_ROOT="${QL_STAGE_ROOT:-data/stage}"
+MODEL_ROOT="${QL_MODEL_ROOT:-data/model}"
 TARGET="${QL_COMPAT_TARGET:-data/compat/quant.db}"
 DATE_ARG=""; BASIS=""; FULL=""; DRY=""; CONS=""; BUILDS=""
 UNIV="${QL_COMPAT_UNIVERSE:-}"; BFMISS=""
@@ -65,14 +68,14 @@ echo "════ [$(kst)] compat_export 시작 date=$D basis=$BASIS target=$TA
 if [ -n "$DRY" ]; then
   echo "  dry-run — 실행할 명령:"
   echo "  $PY -m compat export --date $D --basis $BASIS --equity-root $EQUITY_ROOT" \
-       "--stage-root $STAGE_ROOT --target $TARGET $FULL" \
+       "--stage-root $STAGE_ROOT --model-root $MODEL_ROOT --target $TARGET $FULL" \
        "${CONS:+--consensus-asof $CONS} ${BUILDS:+--builds-from $BUILDS}" \
        "${UNIV:+--model-universe $UNIV} ${BFMISS:+--builds-from-missing $BFMISS}"
   RC=0
 else
   # shellcheck disable=SC2086  # reason: $FULL 은 있거나 없는 단일 플래그다
   $PY -m compat export --date "$D" --basis "$BASIS" --equity-root "$EQUITY_ROOT" \
-      --stage-root "$STAGE_ROOT" --target "$TARGET" $FULL \
+      --stage-root "$STAGE_ROOT" --model-root "$MODEL_ROOT" --target "$TARGET" $FULL \
       ${CONS:+--consensus-asof "$CONS"} ${BUILDS:+--builds-from "$BUILDS"} \
       ${UNIV:+--model-universe "$UNIV"} ${BFMISS:+--builds-from-missing "$BFMISS"}
   RC=$?

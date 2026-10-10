@@ -58,7 +58,7 @@ RULES_VERSION = "mb1.6.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에
                             # 1.5.0(2026-10-10): MG5 전판 = 같은 basis 의 직전 판(컷오버 PR-6)
                             #   — 점수·지표 불변, 게이트 기록(MG5 prev_build_id)만 달라진다
                             # 1.6.0(2026-10-10): scope 모멘텀·20일 변동성 — 창 안 제한폭 초과
-                            #   미해결 수정주가면 결측(컷오버 H1-4 · T-9, fi1.5.0 adj_jump_ok)
+                            #   미해결 수정주가면 결측(컷오버 H1-4 · T-9, fi1.6.0 adj_jump_ok)
                             #   · 판 manifest spec 요약에 엔진 메타(scope adj_jump_masked)
 LAYER = "model"
 BASES = ("evening", "morning")

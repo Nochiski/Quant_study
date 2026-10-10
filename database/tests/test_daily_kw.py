@@ -685,11 +685,12 @@ COVER_TRS = "ka10060,ka10014"
 _HIST = ("20260901", "20260902", "20260903", "20260904", D_PREV)   # D 앞 세션 — ka10014 추세 기준선
 
 
-def _cover_setup(tmp_path, monkeypatch, n, *, d_10060, d_10014, hist_10014, source_has_d=True):
+def _cover_setup(tmp_path, monkeypatch, n, *, d_10060, d_10014, hist_10014, source_d_n=None):
     """n종목 유니버스 원장 + 가짜 `api.kiwoom`. 돌려주는 리스트에 (api_id, ticker) 콜이 쌓인다.
 
     원장 ka10060 = 과거 세션 전 종목 + dt=D 앞 `d_10060` 종목. ka10014 = 과거 세션마다 앞 `hist_10014`
-    종목 + dt=D 앞 `d_10014` 종목. `source_has_d=False` 면 원천도 D 행을 주지 않는다(원천도 빈 상황).
+    종목 + dt=D 앞 `d_10014` 종목. 원천은 앞 `source_d_n` 종목에만 D 행을 준다(None = 전 종목,
+    0 = 원천도 빈 상황). D-1 행은 늘 준다.
     """
     monkeypatch.setenv("QL_HOME", str(tmp_path))
     _write_calendar(tmp_path)
@@ -706,10 +707,11 @@ def _cover_setup(tmp_path, monkeypatch, n, *, d_10060, d_10014, hist_10014, sour
     _ledger_history(tmp_path, "ka10014_short_selling", _HIST, tickers[:hist_10014])
     _ledger_history(tmp_path, "ka10014_short_selling", (D,), tickers[:d_10014])
     calls: list[tuple[str, str]] = []
-    dates = (D, D_PREV) if source_has_d else (D_PREV,)
+    with_d = set(tickers if source_d_n is None else tickers[:source_d_n])
 
     def kiwoom(api_id, url, body, cont=None, next_key=None):
         calls.append((api_id, body["stk_cd"]))
+        dates = (D, D_PREV) if body["stk_cd"] in with_d else (D_PREV,)
         if api_id == "ka10014":
             rows = [{"dt": d, "close_pric": "1", "shrts_qty": "1", "ovr_shrts_qty": "1"} for d in dates]
             return {"return_code": 0, "return_msg": "정상", "shrts_trnsn": rows}, {}
@@ -764,12 +766,35 @@ def test_cover_short_backfills_only_the_short_tr_then_passes(tmp_path, monkeypat
 def test_cover_still_short_after_backfill_is_rc2(tmp_path, monkeypatch):
     # 원천도 D 를 주지 않는 날(GH1-d '원천도 빈 상황') — 다시 받아도 미달이면 rc 2(체인이 crit 으로 올린다)
     calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=0, d_10014=0, hist_10014=80,
-                         source_has_d=False)
+                         source_d_n=0)
     assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS]) == 2
     assert {a for a, _ in calls} == {"ka10060", "ka10014"}
     assert _count(tmp_path, "ka10060_investor_flows", "dt=?", (D,)) == 0
     status, detail = _cover_run(tmp_path)
     assert status == "coverage_failed" and "보강 뒤에도 미달 ka10060,ka10014" in detail
+
+
+def _table_rows(tmp_path, table):
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        return con.execute(f'SELECT * FROM "{table}" ORDER BY ticker, dt').fetchall()
+    finally:
+        con.close()
+
+
+def test_cover_partial_source_commits_nothing_and_is_rc2(tmp_path, monkeypatch):
+    # 원천이 D 행을 90/100 만 주는 날 — 다시 받아도 0.98 미만이라 결손판을 원장에 넣지 않는다(저녁 게이트와
+    # 같은 규칙). 원장 본 표는 행 하나 바뀌지 않고 rc 2. (incoming 은 같은 kiwoom.db 에 있어 파일 바이트가
+    # 아니라 본 표 내용으로 본다.) 원천 D 0 건만 다루면 커밋 게이트를 없애는 변이가 살아남는다.
+    calls = _cover_setup(tmp_path, monkeypatch, 100, d_10060=0, d_10014=80, hist_10014=80, source_d_n=90)
+    before = {t: _table_rows(tmp_path, t) for t in ("ka10060_investor_flows", "ka10014_short_selling")}
+    assert kw_daily.main(["--cover", "--date", D, "--tr", COVER_TRS]) == 2
+    assert {a for a, _ in calls} == {"ka10060"} and len(calls) == 100
+    assert {t: _table_rows(tmp_path, t) for t in before} == before            # 원장 본 표는 그대로
+    assert _count(tmp_path, "_kw_incoming_ka10060", "dt=?", (D,)) == 90       # 받긴 받았다(08:10 몫)
+    status, detail = _cover_run(tmp_path)
+    assert status == "coverage_failed" and "후 ka10060 0/100" in detail and "fetch rc=2" in detail
+    assert "commit=1" not in _run_detail(tmp_path, "kiwoom_fetch")
 
 
 def test_cover_skips_non_trading_day(tmp_path, monkeypatch, capsys):

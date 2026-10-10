@@ -986,6 +986,9 @@ def _run_cover(*, date: str, prev_date: str, db_path: str, run_db: str, base: st
     저녁과 같은 `_run_fetch(commit=True)` 한 번 — 대기 한도·재시도 시각 없음(P9). 원장 락은 부르는 체인
     (daily_ledger.sh)이 쥔다. 그래도 미달이면 rc 2 — 체인이 소스 단계 실패로 crit 을 낸다.
     휴장일 D 는 판정하지 않는다(rc 0). dry-run 은 판정만 하고 콜·쓰기 없이 rc 0.
+    커밋은 다시 받은 TR 묶음 단위다 — 하나라도(예: ka10014) 게이트에 미달이면 같이 받은 ka10060 도 이 단계에서는
+    원장에 넣지 않는다. 남은 incoming 은 08:10 `--merge` 가 KRX 대조(ka10008 거래량) 통과 뒤 머지한다. TR 별
+    커밋은 후속이다.
     """
     if not cal.is_trading_day(_parse_date(date)):
         print(f"[kw_daily] cover 판정 D={date} 휴장 — 건너뜀")

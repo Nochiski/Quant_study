@@ -134,10 +134,13 @@ else
   step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT || true
   # 저녁 키움 보강(T-13 · H1-5) — 전날 21:05 저녁 직행(ka10060·ka10014)의 D 커버리지를 원장에서 재고(읽기만),
   #   미달인 TR 만 저녁과 같은 `--fetch --commit` 으로 한 번 다시 받은 뒤 다시 잰다. 그래도 미달이면 rc 2 →
-  #   다른 소스 단계처럼 FAILED → crit · rc 2 · ledger_chain failed(같은 D 를 보는 다음 06:00 이 다시 판정).
+  #   다른 소스 단계처럼 FAILED → crit · rc 2 · ledger_chain failed. 그 D 를 다음 06:00 이 다시 판정하는 것은
+  #   주말·연휴뿐이다(평일엔 다음 06:00 의 D 가 다음 거래일로 넘어간다).
   #   판정 줄(`[kw_daily] cover 판정`)은 아래 요약 맨 앞에 싣는다. 하한·술어는 kw_daily 한 곳(COMMIT_MIN_RATIO).
   #   KIS 뒤: KIS 는 07:00(v3 토큰 재발급) 전에 끝나야 한다(실측 06:13→06:41, 여유 19분) — 다시 받기(키움 ≈14분)를
   #   앞에 두면 여유가 5분으로 준다. DART 앞: 마감일 DART 는 2.3~3.8시간 더 걸려 그 뒤면 보강이 한참 밀린다.
+  #   공유 키움 앱키 슬롯: 미달인 날만 쓰는 조건부 슬롯(06:00 체인, KIS 뒤 약 10~15분)이다. 07:00 을 넘기면 v3 토큰
+  #   재발급과 겹치는데, 그때 나는 8005 는 api.kiwoom 이 강제 재발급 1회 재시도로 받아 양쪽 다 스스로 복구한다.
   if [ -z "${QL_SKIP_KW:-}" ]; then
     step "kiwoom evening cover" $PY -m daily.kw_daily --cover --date "$D" --tr ka10060,ka10014 $DRY $LIMIT || true
   fi

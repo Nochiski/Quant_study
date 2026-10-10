@@ -443,6 +443,27 @@ def test_같은_날_기록이_둘이면_마지막_기록의_행_수로_본다(tm
     assert (rec["exported_at"], rec["basis"], rec["n_rows"]) == ("2026-10-19T23:40:00.000000+00:00", "morning", 5)
 
 
+def test_같은_날_복원_기록은_반영_기록으로_보지_않는다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """QL-I 복원 기록(basis restore — 진짜 `v3_restore.write_record`)이 compat 기록보다 뒤에 있어도 건너뛴다. 그 행 수는
+    표 전체를 되돌린 수이고 판 id 가 없다 — 마지막 기록으로 고르면 행 수 불일치·판 id 없음 위반으로 잘못 본다."""
+    from compat import v3_restore
+    home = _home(tmp_path, monkeypatch)
+    inp = _inputs(tmp_path)
+    con = sqlite3.connect(str(inp["db"]), isolation_level=None)
+    try:
+        con.execute("BEGIN")
+        v3_restore.write_record(con, "2026-10-19T12:00:00.000000+00:00", D_ISO, Path("bak/quant_x.db"), "0" * 64,
+                                {t: {"n_before": 9, "n_rows": 999} for t in SCORE_TABLES})
+        con.execute("COMMIT")
+    finally:
+        con.close()
+    assert _run(home, inp) == 0
+    out = _out(home)
+    assert out["scores"]["violations"] == []
+    rec = out["scores"]["tables"]["score_history"]["record"]
+    assert (rec["exported_at"], rec["basis"]) == ("2026-10-19T07:19:30.000000+00:00", "evening")
+
+
 def test_점수_행도_기록도_없으면_위반이_아니다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """장 마감 판 실패일·휴장일 — 점수는 다음 날 아침 재반영이 채운다(T-38). 감시의 일이 아니다."""
     home = _home(tmp_path, monkeypatch)

@@ -16,8 +16,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
-from compat import CompatError, export, v3_post
+from compat import CompatError, export, v3_post, v3_restore
 from compat.mappings import MAPPINGS
 from compat.quant_db import SCHEMA_SQL_PATH, ExportResult, TableResult, _write_meta
 from compat.v3_post import (
@@ -132,11 +131,12 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
                  date_iso: str = D_ISO, basis: str = "evening",
                  drop_scores: bool = False, n_on_date: int = 1,
                  rebase: dict | None = None,
-                 exported_at: str = "2026-10-08T07:30:00.000000+00:00") -> None:
+                 exported_at: str = "2026-10-08T07:30:00.000000+00:00",
+                 full: bool = False) -> None:
     """스테이징에 compat 이 쓴 모양을 만든다(창 행 교체 · 점수 날짜 교체 · 스냅샷 · `_compat_meta` 1행).
 
     창 밖 날짜(BEFORE)와 점수 표의 다른 날(OTHER_SCORE_DATE)도 일부러 바꿔 둔다 — 반영이 창 밖을
-    옮기면 본 파일에 이 값이 나타난다.
+    옮기면 본 파일에 이 값이 나타난다. `full` 은 기록의 창 표시만 바꾼다(QL-I 복원 뒤 첫 반영 게이트).
     """
     con = sqlite3.connect(str(staging), isolation_level=None)
     try:
@@ -175,7 +175,7 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
         _write_meta(con, ExportResult(
             date=date_iso, basis=basis, target=str(staging),
             exported_at=exported_at,
-            window={"days": 14, "full": False, "from_date": FROM_ISO, "to_date": date_iso},
+            window={"days": 14, "full": full, "from_date": FROM_ISO, "to_date": date_iso},
             consensus_asof="2026-10-07", status=status,
             failed_table=None if status == "ok" else "stocks",
             tables={t: _tr(t, skipped=skipped.get(t, 0), n_on_date=n_on_date, rebase=rebase)
@@ -692,6 +692,82 @@ def test_no_scores_is_evening_only_in_python_and_cli(files, capsys) -> None:
         assert cli_main([*cmd, "--date", D, "--basis", "morning", "--no-scores"]) == 2
         assert "evening 전용" in capsys.readouterr().err
     assert _sha(main) == before
+
+
+# ── QL-I 복원 기록(되돌리기) ─────────────────────────────────────────────────
+# 복원 기록 = `compat.v3_restore` 가 9표를 백업으로 되돌린 COMMIT 에 함께 남기는 `_compat_meta` 1행(basis
+# 'restore'). 그 앞 반영 기록은 순서(T-35)·아침 반영 표(T-34) 판정에서 빠지고, 그 뒤 첫 제자리 반영은 --full 만
+# 받는다. 기록 시각은 시계와 무관하게 앞뒤가 정해지도록 2000-01 로 둔다(스테이징 compat 기록은 2026-10).
+BEFORE_RESTORE = "2000-01-01T00:00:00.000000+00:00"
+RESTORED_AT = "2000-01-02T00:00:00.000000+00:00"
+AFTER_RESTORE = "2000-01-03T00:00:00.000000+00:00"
+
+
+def _restored(main: Path, exported_at: str = RESTORED_AT) -> None:
+    """본 파일에 복원 기록 1행(`v3_restore.write_record` 그대로 — 복원 트랜잭션이 남기는 그 행)."""
+    con = sqlite3.connect(str(main), isolation_level=None)
+    try:
+        con.execute("BEGIN")
+        v3_restore.write_record(con, exported_at, "2026-10-08", Path("bak/quant_x.db"), "0" * 64,
+                                {t: {"n_before": 1, "n_rows": 1} for t in TABLES})
+        con.execute("COMMIT")
+    finally:
+        con.close()
+
+
+def test_restore_record_hides_older_records_from_the_order_guard(files) -> None:
+    """복원 앞의 더 나중 반영 기록은 복원 뒤 T-35 판정에 들지 않는다 — 복원이 9표를 백업 시점으로 되돌려 그
+    기록이 가리키던 값이 본 파일에 없다."""
+    main, stg = files
+    _main_record(main, "2026-10-09", "morning", BEFORE_RESTORE)
+    snapshot(main, stg)
+    _fake_compat(stg)
+    with pytest.raises(V3PostGateError, match="T-35"):            # 대조 — 복원 전엔 막힌다
+        apply(stg, main, D, "evening", shadow=True)
+    _restored(main)
+    snapshot(main, stg)
+    _fake_compat(stg)
+    assert apply(stg, main, D, "evening", shadow=True).ok
+
+
+def test_restore_record_hides_older_evening_from_the_morning_tables(files) -> None:
+    """T-34 — 복원 앞 장 마감 점수 반영 기록은 아침 7표 판정에 들지 않는다(복원이 그 점수를 지웠다)."""
+    main, _ = files
+    _main_record(main, D_ISO, "evening", BEFORE_RESTORE)
+    assert tables_for(main, D, "morning") == SEVEN
+    _restored(main)
+    assert tables_for(main, D, "morning") == TABLES
+    _main_record(main, D_ISO, "evening", AFTER_RESTORE)
+    assert tables_for(main, D, "morning") == SEVEN
+
+
+def test_first_in_place_after_restore_must_be_full(files) -> None:
+    """복원 뒤 첫 제자리 반영은 --full 만(QL-I) — 늦게 깬 증분 반영(락 대기)이나 꺼지지 않은 체인이 복원한 v3
+    행 위에 14일 창만 얹지 못한다. 그림자는 본 파일에 쓰지 않으므로 막지 않는다."""
+    main, stg = files
+    _restored(main)
+    snapshot(main, stg)
+    _fake_compat(stg)
+    before = _sha(main)
+    with pytest.raises(V3PostGateError, match="복원 뒤 첫 반영"):
+        apply(stg, main, D, "evening")
+    assert _sha(main) == before
+    assert apply(stg, main, D, "evening", shadow=True).ok
+    snapshot(main, stg)
+    _fake_compat(stg, full=True)
+    assert apply(stg, main, D, "evening").ok
+    # 복원 뒤 반영 기록이 생겼다 — 다음 증분은 평소대로
+    snapshot(main, stg)
+    _fake_compat(stg, exported_at="2026-10-08T08:00:00.000000+00:00")
+    assert apply(stg, main, D, "evening").ok
+
+
+def test_restore_record_never_counts_as_a_reflection(files) -> None:
+    """복원 기록은 반영 기록이 아니다 — 같은 날짜라도 순서·7표 판정에 쓰이지 않는다."""
+    main, _ = files
+    _restored(main)
+    assert tables_for(main, D, "morning") == TABLES
+    assert v3_post._newer(v3_post._main_rows(main), "2000-01-01", "evening") == []
 
 
 # ── COMMIT 표식 ──────────────────────────────────────────────────────────────

@@ -58,6 +58,12 @@
 #   --steps        equity(출력 루트에 equity 현판을 짓는다) · board(날짜별 ①~⑥). 기본 equity,board. board 만
 #                  주면 앞 패스가 지은 equity 판을 쓴다(그 패스 equity 표가 전부 rc 0 이어야 한다 — 아니면 rc 2)
 #   --spearman-min 대조의 Spearman 하한(기본 board_compare 기본값). P5 기록형 측정은 0(T-36)
+#   실행 창: 08:10 아침 체인 끝 ~ 21:20 전(운영 stage 현판이 아침 확정판 m_ 인 때). 21:20 연구 저녁 빌드 뒤~다음
+#     아침 확정 전에는 stage 현판이 저녁 잠정판(e_)이라 equity(--basis morning 이라 m_ 판으로 선다)와 연구 판 T 가
+#     잠정 원천으로 지어진다. 그래서 운영 stage 현판 build_id 가 m_·b_ 가 아니면(e_ · 그 밖 접두어 — fail-closed)
+#     rc 2 로 거부한다(PR-8b 리뷰 MINOR-4). 판정은 replay_tool.py check_stage_basis 하나다 — 아무것도 쓰기 전에
+#     equity 단계가 읽는 stage 표(검증 대상 코드의 equity 규칙 입력)와 fi 가 stage 에서 직접 읽는 표로
+#     stage-guard, 고정 때 stage-pin 이 다시 건다(equity 를 짓는 사이 21:20 저녁 빌드가 섰을 수 있다).
 #   한 패스: equity → 고정 stage(fi 가 stage 에서 직접 읽는 표의 운영 현판을 <out>/stage_pin/passN 에 하드링크,
 #     replay_tool.py stage-pin) → 날짜마다 합성 인계 이력 <out>/data/deliver/history/<D>_morning.json(이 패스
 #     equity 현판 + 고정 stage 판, health ok, 재생 표시 replay — replay_tool.py handoff) → 연구 판 D'(fi 아침판)
@@ -85,7 +91,7 @@
 # 실패: equity 표 하나가 실패하면 남은 표와 뒤 단계를 돌지 않는다(혼합 판 위에 짓지 않는다).
 #       catalog 실패는 contract 만, fi 실패는 model 만 막는다. contract 는 기록형(build_chain step_soft).
 # rc: 0 고른 단계 전부 성공(compare: 전부 같음) · 1 실패 단계 있음(compare: 다름·없음 · 장 마감 판 재생:
-#     어느 T 의 단계 실패·대조 rc≠0) · 2 인자·입력 오류
+#     어느 T 의 단계 실패·대조 rc≠0) · 2 인자·입력 오류(장 마감 판 재생: 실행 창 밖 · 고정 stage 실패 포함)
 # 빌드 락은 잡지 않는다 — 잡으면 운영 체인(flock -n)이 그 회차를 건너뛴다. 운영 빌드 체인과 겹치지 않는
 # 때에 돌린다(겹치면 메모리 경합, 기본 모드는 stage 현판이 도중에 바뀔 수 있다).
 set -uo pipefail
@@ -208,6 +214,31 @@ if has board; then
       || die "출력 루트의 equity 판을 쓸 수 없다 — $eqp (--steps equity,board 로 다시 짓는다)"
   fi
 fi
+GUARD_MSG=""
+if [ "$BASIS" = evening ]; then
+  # 실행 창 가드(머리 주석 '실행 창') — 읽을 운영 stage 표의 목록 정본은 검증 대상 코드다
+  guard=""
+  if has equity; then
+    # equity 단계(equity_tables)가 운영 stage 현판에서 읽는 표 = 표 순서 파일의 규칙 입력 중 stg_*
+    # shellcheck disable=SC2046  # reason: 표 순서 파일의 표 이름을 인자로 하나씩 넘긴다
+    guard=$(PYTHONPATH="$CODE/src" PYTHONDONTWRITEBYTECODE=1 "$PY" -c 'import sys
+import equity.__main__  # noqa: F401 — 등록 부작용(RULES)
+from equity.inputs import STAGE_PREFIX
+from equity.model import RULES
+print(",".join(sorted({i for t in sys.argv[1:] for i in RULES[t].inputs if i.startswith(STAGE_PREFIX)})))' \
+      $(grep -vE '^\s*(#|$)' "$CODE/scripts/equity_order.txt") 2>&1) \
+      || die "equity 단계가 읽는 stage 표를 정하지 못했다 — $guard"
+  fi
+  if has board; then
+    # fi 가 stage 에서 직접 읽는 표(첫 줄 필수 · 둘째 줄 선택) — 고정 stage(stage-pin)도 이 목록을 쓴다
+    FI_SRC=$(PYTHONPATH="$CODE/src" PYTHONDONTWRITEBYTECODE=1 "$PY" -c 'from factor_inputs.build import OPTIONAL_STAGE_SOURCES as o, STAGE_SOURCES as s
+print(",".join(t for t in s if t not in o))
+print(",".join(o))' 2>&1) || die "fi 가 stage 에서 읽는 표를 정하지 못했다 — $FI_SRC"
+    guard="$guard,$(echo "$FI_SRC" | paste -sd, -)"
+  fi
+  GUARD_MSG=$("$PY" "$TOOL" stage-guard --ops-data "$OPS/data" --tables "$guard" 2>&1) \
+    || die "실행 창 밖이다 — ${GUARD_MSG#replay_tool stage-guard: }"
+fi
 
 # 불변식: 이 스크립트는 출력 루트에 링크를 만들지 않는다. 링크가 있으면 손으로 둔 것이고, 그 링크를 따라
 # 운영에 쓸 수 있다(옛 원형 루트의 data 링크 — 리뷰 BLOCKER-1). 아무것도 쓰기 전에 멈춘다.
@@ -229,6 +260,7 @@ T0=$(date +%s)
   echo "시작 $(kst)"
   echo "out=$R code=$CODE date=${D:--} basis=$BASIS steps=$STEP_LIST engine=$ENGINE stage_at=${STAGE_AT:--}"
   [ -z "$DAYS" ] || echo "dates=${DATES:-$D} D'=$(echo "$DAYS" | head -1) T=$(echo "$DAYS" | tail -n +2 | paste -sd, -) spearman_min=${SPMIN:-기본}"
+  [ -z "$GUARD_MSG" ] || echo "$GUARD_MSG"
 } > "$L/run.txt"
 echo "════ replay pass$PASS $(kst) — out=$R code=$CODE D=${D:--} basis=$BASIS steps=$STEP_LIST ════"
 
@@ -401,7 +433,7 @@ board_day() {
   fi
 }
 evening_main() {
-  local dp0 ts t dp srcs msg rc x ready=1 board brief
+  local dp0 ts t dp msg rc x ready=1 board brief
   dp0=$(echo "$DAYS" | head -1)
   ts=$(echo "$DAYS" | tail -n +2)
   # equity — 연구(아침 확정) 판 규약. 장 마감 판이 고정하는 것도 연구 판이고 fi 는 m_·b_ equity 판만 읽는다
@@ -413,18 +445,13 @@ evening_main() {
   [ "$EQ_OK" -eq 1 ] || ready=0
   has board || ready=-1                         # equity 만 고른 패스 — 날짜별 단계 없음
   if [ "$ready" -eq 1 ]; then
-    # fi 가 stage 에서 직접 읽는 표 — 목록의 정본은 검증 대상 코드(factor_inputs.build)
-    if srcs=$("$PY" -c 'from factor_inputs.build import OPTIONAL_STAGE_SOURCES as o, STAGE_SOURCES as s
-print(",".join(t for t in s if t not in o))
-print(",".join(o))' 2>> "$L/run.txt"); then
-      msg=$("$PY" "$TOOL" stage-pin --ops-data "$OPS/data" --tables "$(echo "$srcs" | sed -n 1p)" \
-              --optional "$(echo "$srcs" | sed -n 2p)" --dest "$PIN" 2>&1 > "$L/stage_pin.tsv")
-      rc=$?
-      echo "$msg" | tee -a "$L/run.txt"
-      [ "$rc" -eq 0 ] || { FAILED="$FAILED stage-pin(rc=$rc)"; ready=0; }
-    else
-      FAILED="$FAILED stage-pin(fi 원천 목록을 읽지 못함)"; ready=0
-    fi
+    # fi 가 stage 에서 직접 읽는 표(앞 검사의 FI_SRC — 목록의 정본은 검증 대상 코드 factor_inputs.build).
+    # stage-pin 도 실행 창 판정을 다시 건다. 실패는 입력 오류라 rc 2(--stage-at 의 임시 stage 루트와 같다)
+    msg=$("$PY" "$TOOL" stage-pin --ops-data "$OPS/data" --tables "$(echo "$FI_SRC" | sed -n 1p)" \
+            --optional "$(echo "$FI_SRC" | sed -n 2p)" --dest "$PIN" 2>&1 > "$L/stage_pin.tsv")
+    rc=$?
+    echo "$msg" | tee -a "$L/run.txt"
+    [ "$rc" -eq 0 ] || die "고정 stage 를 세우지 못했다(rc=$rc) — ${msg#replay_tool stage-pin: }"
   fi
   if [ "$ready" -eq 1 ]; then
     for x in $DAYS; do

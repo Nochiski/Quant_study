@@ -579,6 +579,107 @@ def test_stage_pin_hardlinks_the_current_builds(tmp_path) -> None:
     assert missing.returncode == 2 and not (tmp_path / "out" / "p2").exists()
 
 
+def test_stage_guard_and_stage_pin_read_only_morning_or_manual_current_builds(tmp_path) -> None:
+    """PR-8b 리뷰 MINOR-4 — 운영 stage 현판이 아침 확정(m_)·수동(b_) 판이 아니면 rc 2. 저녁 잠정판(e_)은
+    21:20 연구 저녁 빌드 뒤~다음 아침 확정 전이라는 사유를, 그 밖의 접두어는 fail-closed 사유를 낸다.
+    stage-guard 와 stage-pin 이 같은 판정(`check_stage_basis`)을 부른다 — stage-pin 은 아무것도 고정하지
+    않고 멈춘다. 현판이 없는 표는 판정하지 않는다."""
+    ops = tmp_path / "ops" / "data"
+    _stage_table(ops / "stage", "stg_m", ["e_1", "m_2"])         # 아침 확정 뒤
+    _stage_table(ops / "stage", "stg_b", ["b_1"])
+    _stage_table(ops / "stage", "stg_e", ["m_1", "e_2"])         # 21:20 연구 저녁 빌드 뒤
+    _stage_table(ops / "stage", "stg_x", ["20261001"])           # 접두어 없는 옛 레코드
+    ok = _py(str(TOOL), "stage-guard", "--ops-data", str(ops), "--tables", "stg_m,stg_b,stg_none")
+    assert ok.returncode == 0, ok.stderr
+    assert "2표" in ok.stdout and "현판 없는 표 1" in ok.stdout
+    for bad, word in (("stg_e", "21:20"), ("stg_x", "fail-closed")):
+        p = _py(str(TOOL), "stage-guard", "--ops-data", str(ops), "--tables", f"stg_m,{bad}")
+        assert p.returncode == 2 and word in p.stderr and f"{bad}=" in p.stderr, p.stderr
+        assert "stg_m=" not in p.stderr
+        dest = tmp_path / "out" / bad
+        p = _py(str(TOOL), "stage-pin", "--ops-data", str(ops), "--tables", "stg_m",
+                "--optional", bad, "--dest", str(dest))
+        assert p.returncode == 2 and word in p.stderr and not dest.exists(), p.stderr
+    p = _py(str(TOOL), "stage-pin", "--ops-data", str(ops), "--tables", "stg_m,stg_b",
+            "--dest", str(tmp_path / "out" / "ok"))
+    assert p.returncode == 0, p.stderr
+    assert [ln.split("\t")[:2] for ln in p.stdout.splitlines()] == [["stg_m", "m_2"], ["stg_b", "b_1"]]
+    assert _py(str(TOOL), "stage-guard", "--ops-data", str(ops), "--tables", "").returncode == 2
+
+
+def _window_home(base: Path, stage: dict[str, list[str]]) -> SimpleNamespace:
+    """실행 창 검사용 — 운영 대역(달력·21:05 원장·주어진 stage 판)과 앞 패스 equity 기록만 있는 출력 루트."""
+    home = base / "home"
+    ops = home / "quant-ledger"
+    py = ops / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text(_SHIM.replace("{real}", sys.executable), encoding="utf-8")
+    py.chmod(0o755)
+    (ops / "data" / "stage").mkdir(parents=True)
+    for table, bids in stage.items():
+        _stage_table(ops / "data" / "stage", table, bids)
+    tf._cal_dir(ops / "data")
+    _kiwoom_db(ops / "data" / "raw" / "kiwoom.db")
+    out = home / "replay" / "w"
+    (out / "logs" / "pass1").mkdir(parents=True)
+    (out / "logs" / "pass1" / "summary.tsv").write_text(
+        "step\ttable\trc\nequity\tcorp\t0\n", encoding="utf-8")
+    return SimpleNamespace(home=home, ops=ops, out=out)
+
+
+FI_STAGE = ("stg_consensus_annual", "stg_consensus_matrix", "stg_fin_wise")
+
+
+@pytest.mark.parametrize(("steps", "stage", "flipped"), [
+    # equity 단계가 읽는 표(equity 규칙 입력)의 운영 현판이 저녁 잠정판
+    ("equity", {"stg_price_daily": ["m_1", "e_2"]}, "stg_price_daily=e_2"),
+    # fi 가 stage 에서 직접 읽는(고정 stage) 표의 운영 현판이 저녁 잠정판
+    ("board", {**{t: ["m_1"] for t in FI_STAGE}, "stg_consensus_matrix": ["m_1", "e_2"]},
+     "stg_consensus_matrix=e_2"),
+    ("equity,board", {**{t: ["m_1"] for t in FI_STAGE}, "stg_fin_wise_q": ["e_2"]},
+     "stg_fin_wise_q=e_2"),
+])
+def test_evening_replay_refuses_outside_the_run_window(tmp_path, steps: str,
+                                                       stage: dict[str, list[str]],
+                                                       flipped: str) -> None:
+    """PR-8b 리뷰 MINOR-4 — 21:20 연구 저녁 빌드 뒤~다음 아침 확정 전(운영 stage 현판 e_)이면 equity 단계·
+    고정 stage 어느 쪽 표든 rc 2 로 거부하고 아무것도 쓰거나 돌리지 않는다."""
+    w = _window_home(tmp_path.resolve(), stage)
+    r = _run(w.home, "--out", str(w.out), "--basis", "evening", "--date", T_S, "--steps", steps,
+             "--code", str(DB))
+    assert r.rc == 2, r.out
+    assert "실행 창 밖" in r.out and "21:20" in r.out and flipped in r.out
+    assert sorted(p.name for p in (w.out / "logs").iterdir()) == ["pass1"]
+    assert not (w.out / "data").exists() and not (w.out / "stage_pin").exists()
+    assert not [c for c in r.calls if c.startswith("-m ")]
+
+
+def test_evening_replay_inside_the_run_window_passes_the_guard(tmp_path) -> None:
+    """같은 판정이 m_·b_ 현판이면 통과한다 — equity 단계로 넘어가 판정 줄이 run.txt 에 남는다(합성 운영
+    stage 에 equity 입력이 다 없어 equity 첫 표에서 실패 — rc 1)."""
+    w = _window_home(tmp_path.resolve(), {"stg_price_daily": ["e_1", "m_2"],
+                                          "stg_listing_daily": ["b_1"]})
+    r = _run(w.home, "--out", str(w.out), "--basis", "evening", "--date", T_S, "--steps", "equity",
+             "--code", str(DB))
+    assert r.rc == 1, r.out
+    run = (w.out / "logs" / "pass2" / "run.txt").read_text(encoding="utf-8")
+    assert "stage-guard: 운영 stage 현판 2표" in run
+    assert any(c.startswith("-m equity ") for c in r.calls)
+
+
+def test_evening_replay_stage_pin_failure_is_an_input_error(tmp_path) -> None:
+    """고정 stage(stage-pin)가 서지 못하면 입력 오류 rc 2 로 멈춘다(--stage-at 의 임시 stage 루트와 같다) —
+    여기서는 현판 접두어는 m_ 인데 판 디렉터리가 없다. 날짜별 단계는 돌지 않는다."""
+    w = _window_home(tmp_path.resolve(), {t: ["m_1"] for t in FI_STAGE})
+    shutil.rmtree(w.ops / "data" / "stage" / "stg_fin_wise" / "v=m_1")
+    r = _run(w.home, "--out", str(w.out), "--basis", "evening", "--date", T_S, "--steps", "board",
+             "--code", str(DB))
+    assert r.rc == 2, r.out
+    assert "고정 stage 를 세우지 못했다" in r.out and "stg_fin_wise" in r.out
+    assert not [c for c in r.calls if c.startswith("-m ")]
+    assert not (w.out / "stage_pin" / "pass2").exists()
+
+
 def test_handoff_is_readable_by_the_real_reader_and_marked_as_replay(tmp_path) -> None:
     from equity import handoff
     data = tmp_path / "out" / "data"

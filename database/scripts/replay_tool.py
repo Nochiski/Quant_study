@@ -28,11 +28,19 @@ BuildRecord 가 쌓이고 판 디렉터리는 stage 와 같은 상대 경로)를
 
 
 장 마감 판 재생(`replay.sh --basis evening`, 컷오버 PR-8b)이 쓰는 것:
+  stage-guard --ops-data DIR --tables A,B[,…]
+      실행 창 가드(PR-8b 리뷰 MINOR-4, `check_stage_basis`) — 표마다 운영 stage 현판 build_id 가 아침
+      확정(`m_`)·수동(`b_`) 판인가. 저녁 잠정판(`e_`)이면 21:20 연구 저녁 빌드 뒤~다음 아침 확정 전이라
+      재생 연구 판 T 가 잠정 원천으로 지어진다 — rc 2 로 거부한다. 그 밖의 접두어(구 레코드 등)도 판을
+      알 수 없어 거부한다(fail-closed). 현판이 없는 표는 판정하지 않는다(그 표를 읽는 단계가 실패하고,
+      선택 표는 absent 로 읽힌다). replay.sh 가 아무것도 쓰기 전에 equity 단계가 읽는 stage 표와 fi 가
+      stage 에서 직접 읽는 표로 부른다.
   stage-pin --ops-data DIR --tables A,B[,…] [--optional C,…] --dest DIR
       운영 stage 현판(표마다 current_build)을 DEST 에 stage-at 과 같은 방식(파일 하드링크 + 1판
       MANIFEST)으로 고정한다 — fi 가 stage 에서 직접 읽는 표를 패스 동안 붙잡아 운영 GC·새 판과
       무관하게 한다. 선택 표(--optional)는 운영에 현판이 없으면 건너뛴다(fi 가 'absent' 로 읽는다).
-      stdout 은 stage-at 과 같은 TSV.
+      고정하기 전에 stage-guard 와 같은 판정(`check_stage_basis`)을 다시 건다 — equity 를 짓는 사이
+      21:20 저녁 빌드가 섰을 수 있다. stdout 은 stage-at 과 같은 TSV.
   handoff --data DIR --stage-root DIR --date D [--note TEXT]
       재생 합성 인계 이력 `<data>/deliver/history/<D>_morning.json` — 장 마감 판 fi `--builds-from`
       과 수집기 대상(`daily.postclose.resolve_targets`)이 읽는 자리. equity = `<data>/equity` 현판,
@@ -53,7 +61,7 @@ BuildRecord 가 쌓이고 판 디렉터리는 stage 와 같은 상대 경로)를
       끝 줄은 합계 한 줄. rc 0 = 모든 날 pass, 아니면 1.
 
 rc: 0 정상(compare 는 전부 같음) · 1 compare 다름·한쪽 없음(equity-pass 온전하지 않음 ·
-board-summary pass 아닌 날 있음) · 2 입력 오류.
+board-summary pass 아닌 날 있음) · 2 입력 오류(stage-guard·stage-pin 의 실행 창 밖 포함).
 """
 from __future__ import annotations
 
@@ -276,10 +284,48 @@ def compare(a: Path, b: Path, date: str | None, basis: str) -> int:
     return 0 if n_diff == 0 and n_none == 0 else 1
 
 
-# ── stage-pin · handoff · equity-pass · board-summary (장 마감 판 재생, PR-8b) ─────────────
+# ── stage-guard · stage-pin · handoff · equity-pass · board-summary (장 마감 판 재생, PR-8b) ──────
+# 실행 창 가드(PR-8b 리뷰 MINOR-4) — 재생은 운영 stage 현판이 아침 확정(m_)·수동(b_) 판일 때만 읽는다.
+# 접두어 규약은 `stage.model.BASIS_PREFIX`(이 도구는 검증 대상 코드를 읽지 않아 값을 옮겨 둔다)
+STAGE_PREFIXES_READ = ("m_", "b_")
+STAGE_PREFIX_EVENING = "e_"
+
+
+def check_stage_basis(stage_root: Path, tables: list[str]) -> int:
+    """표마다 운영 stage 현판 build_id 접두어가 `STAGE_PREFIXES_READ` 인가 — 아니면 `ToolError`(rc 2).
+    현판이 없는 표는 판정하지 않는다. 판정한 표 수를 돌려준다."""
+    bad: list[str] = []
+    n = 0
+    for table in dict.fromkeys(tables):
+        cur, _ = _builds(stage_root / table / "MANIFEST.json")
+        if cur is None:
+            continue
+        n += 1
+        if not str(cur).startswith(STAGE_PREFIXES_READ):
+            bad.append(f"{table}={cur}")
+    if bad:
+        evening = any(b.split("=", 1)[1].startswith(STAGE_PREFIX_EVENING) for b in bad)
+        why = ("저녁 잠정판(e_)이 있다 — 21:20 연구 저녁 빌드 뒤~다음 아침 확정(08:10 체인) 전이라 재생 연구 "
+               "판 T 가 잠정 원천으로 지어진다. 08:10 아침 체인이 끝난 뒤 ~ 21:20 전에 돌린다"
+               if evening else "접두어로 판을 알 수 없다(fail-closed)")
+        raise ToolError(f"운영 stage 현판이 아침 확정(m_)·수동(b_) 판이 아니다 {len(bad)}/{n}표 "
+                        f"({', '.join(bad[:5])}{' …' if len(bad) > 5 else ''}) — {why}")
+    return n
+
+
+def stage_guard(ops_data: Path, tables: list[str]) -> int:
+    if not tables:
+        raise ToolError("판정할 stage 표가 없다(--tables)")
+    n = check_stage_basis(ops_data / "stage", tables)
+    print(f"stage-guard: 운영 stage 현판 {n}표 — 전부 아침 확정(m_)·수동(b_) 판"
+          f"(현판 없는 표 {len(set(tables)) - n})")
+    return 0
+
+
 def stage_pin(ops_data: Path, tables: list[str], optional: list[str], dest: Path) -> int:
     if dest.exists():
         raise ToolError(f"고정 stage 루트가 이미 있다: {dest} — 패스마다 새 경로를 쓴다")
+    check_stage_basis(ops_data / "stage", [*tables, *optional])
     plan: list[tuple[str, str | None, tuple[str, Path, dict] | None]] = []
     for table in [*tables, *optional]:
         cur, _ = _builds(ops_data / "stage" / table / "MANIFEST.json")
@@ -471,6 +517,9 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("b", type=Path)
     c.add_argument("--date")
     c.add_argument("--basis", default="morning")
+    sg = sub.add_parser("stage-guard")
+    sg.add_argument("--ops-data", type=Path, required=True)
+    sg.add_argument("--tables", required=True, help="쉼표 목록 — 운영 stage 현판 접두어를 본다")
     sp = sub.add_parser("stage-pin")
     sp.add_argument("--ops-data", type=Path, required=True)
     sp.add_argument("--tables", required=True, help="쉼표 목록 — 현판이 없으면 rc 2")
@@ -501,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
             return stage_at(a.ops_data, a.date, a.basis, a.dest)
         if a.cmd == "rows":
             return rows(a.data, a.layer, a.table, a.date, a.basis)
+        if a.cmd == "stage-guard":
+            return stage_guard(a.ops_data, split(a.tables))
         if a.cmd == "stage-pin":
             return stage_pin(a.ops_data, split(a.tables), split(a.optional), a.dest)
         if a.cmd == "handoff":

@@ -764,6 +764,25 @@ def test_existing_schema_mismatch_raises(roots, tmp_path: Path) -> None:
                          "WHERE name='_compat_meta'") == [(0,)]
 
 
+def test_real_v3_stocks_column_order_is_accepted(roots, tmp_path: Path) -> None:
+    """실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션 ALTER 로 맨 뒤에 붙어 `updated_at` 뒤에 있다
+    (로컬 v3 사본 quant.db 실측 — 선언 DDL 은 CREATE 순서). 열 집합·타입이 같으면 받아들이고 열 이름으로
+    넣는다(QL-F: v3 사본 스테이징에 `--in-place` 를 돌리면 순서 비교 때문에 ②에서 멈췄다)."""
+    target = tmp_path / "quant.db"
+    con = sqlite3.connect(str(target))
+    con.execute("""CREATE TABLE stocks (
+        stock_code TEXT(6) PRIMARY KEY, stock_name TEXT NOT NULL,
+        market TEXT NOT NULL CHECK(market IN ('KOSPI', 'KOSDAQ')), sector TEXT,
+        market_cap INTEGER, listed_date TEXT, is_active INTEGER DEFAULT 1,
+        updated_at TEXT DEFAULT (datetime('now')), delisted_date TEXT)""")
+    con.commit()
+    con.close()
+    res = _run(roots, target, tables=["stocks"], in_place=True)
+    assert res.tables["stocks"].n_rows == N_STOCKS
+    assert _rows(target, "SELECT updated_at, delisted_date, listed_date FROM stocks "
+                         "WHERE stock_code='005930'") == [(res.exported_at, None, "1975-06-11")]
+
+
 # ── R2 — 이번 판에 없는 종목은 is_active=0 ───────────────────────────────────
 def test_missing_stocks_are_marked_inactive(roots, tmp_path: Path) -> None:
     target = tmp_path / "quant.db"

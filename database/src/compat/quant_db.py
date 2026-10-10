@@ -12,7 +12,8 @@
 **날짜 단위 교체**다: 같은 트랜잭션에서 그 `score_date` 행을 모두 지우고 새 판 행을 넣는다. 다른
 날짜는 건드리지 않는다. 판 id 는 `_compat_meta.model_builds` 에 spec 별로 남는다.
 
-M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다.
+M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다. 제자리 반영은 v3
+파일에 직접 쓰지 않고 `scripts/v3_post.sh`(`compat.v3_post` — 스테이징 → 게이트 → 9표 한 트랜잭션, QL-F)로 한다.
 
 가드(1차 그림자 실행 뒤 리뷰 R1~R10 반영) — 전부 **쓰기 전/직후에 예외**로 멈춘다:
   · `--basis` 와 equity 판 접두(`e_`/`m_`) 불일치            (R5)
@@ -108,8 +109,9 @@ MODEL_UNIVERSES = ("all", "estimates")
 BUILDS_MISSING = ("error", "current")
 MARKET_VOCAB = ("KOSPI", "KOSDAQ")      # v3 `stocks.market` CHECK 제약과 같은 어휘
 META_TABLE = "_compat_meta"
+# `main.` 한정 — `compat.v3_post` 가 스테이징을 ATTACH 한 연결에서 본 파일 쪽 메타 표를 만들 때도 같은 DDL 을 쓴다.
 META_DDL = f"""
-CREATE TABLE IF NOT EXISTS {META_TABLE} (
+CREATE TABLE IF NOT EXISTS main.{META_TABLE} (
     exported_at    TEXT PRIMARY KEY,
     date           TEXT NOT NULL,
     basis          TEXT NOT NULL,
@@ -326,6 +328,9 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
 
     다르면 `CompatSchemaError` — v3 가 마이그레이션으로 스키마를 바꾼 경우이므로 쓰지 않는다
     (플랜 §7 위험표 2행). 돌려주는 값은 표 → **필수 컬럼**(NOT NULL ∪ PK) 목록이다.
+    비교는 열 이름 → 타입이다(순서 무관). 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션 ALTER 로
+    `updated_at` 뒤에 붙어 선언 순서와 다르다(QL-F 로컬 v3 사본 실측). 쓰기는 열 이름으로 하므로 순서는
+    결과에 영향이 없다.
     """
     ref = _reference_schema()
     con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
@@ -333,7 +338,7 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
     for table in tables:
         info = con.execute(f"PRAGMA table_info({table})").fetchall()
         got = [(r[1], r[2]) for r in info]
-        if got != ref[table]:
+        if sorted(got) != sorted(ref[table]):
             raise CompatSchemaError(
                 f"대상 스키마가 v3 선언과 다르다: table={table} got={got} want={ref[table]}")
         # rowid 표의 TEXT PRIMARY KEY 는 notnull 플래그가 0 이라 PK 를 따로 더한다.
@@ -582,14 +587,17 @@ def _check_adj_close(con: sqlite3.Connection, params: dict[str, str]) -> int:
 
 
 def _ensure_meta_columns(con: sqlite3.Connection) -> None:
-    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식)."""
-    have = {r[1] for r in con.execute(f"PRAGMA table_info({META_TABLE})")}
+    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식).
+
+    `main.` 한정 — 스테이징을 ATTACH 한 연결(`compat.v3_post`)에서도 본 파일 쪽 표만 본다.
+    """
+    have = {r[1] for r in con.execute(f"PRAGMA main.table_info({META_TABLE})")}
     for name, decl in (("n_evening_rows_skipped", "INTEGER"), ("n_adj_close_null", "INTEGER"),
                        ("status", "TEXT"), ("failed_table", "TEXT"),
                        ("model_universe", "TEXT"), ("n_universe_with_estimates", "INTEGER"),
                        ("builds_fallback", "TEXT"), ("model_builds", "TEXT")):
         if name not in have:
-            con.execute(f"ALTER TABLE {META_TABLE} ADD COLUMN {name} {decl}")
+            con.execute(f"ALTER TABLE main.{META_TABLE} ADD COLUMN {name} {decl}")
 
 
 def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:

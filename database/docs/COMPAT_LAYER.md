@@ -338,3 +338,22 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
 
 - **신규 스팩 — compat 에만 있다(v3 누락 교정)**: v3 `stocks` 에는 옛 숫자코드 스팩 117개뿐이고, 그 뒤 상장한 스팩(2024-02-01~2026-09-22 상장, 숫자·영숫자 코드 모두)이 없다. compat 은 `sec_type='spac'` 이면 싣는다(10-01·06·07·08 재생에서 71종목, 10-10 판정).
 - **점수 종목 수 — compat 이 적다(유니버스 결정, T-17)**: 하루 행이 `score_history` 1,329 → 593(scope@1.0), `score_history_v2` 2,526 → 625(v2_percentrank@1.0)로 준다. 10-05 '추정치 보유 종목만' 결정을 받아들인 것이다(QL-C). 점수는 유니버스 안 표준화라 공통 종목도 값 크기가 다르다. 그래서 공통 종목끼리 순위(Spearman)로 대조한다. `score_history.val_ev_ebitda` 는 늘 NULL 이다. scope 가 EV/EBITDA 를 밸류에 쓰지 않기 때문이고, v3 도 거의 비어 있었다.
+
+---
+
+## 8. v3 quant.db 제자리 반영 — `scripts/v3_post.sh` (QL-F)
+
+compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 커밋하고(반영 도중 소비자가 일부 표만 바뀐 상태를 읽는다, G9) 필수 열이 빈 행을 5% 까지 건너뛴다(G11). 제자리 반영은 아래 순서로만 한다. 범위·게이트의 정본은 `src/compat/v3_post.py` 머리 주석이다.
+
+1. **스테이징**: v3 quant.db 를 sqlite 온라인 백업으로 임시 파일에 뜬다(`python -m compat stage`, 본 파일은 읽기 전용으로 연다).
+2. **compat export `--in-place`** 를 스테이징에 돌린다(QL-B 가드 — `stocks.market_cap` 은 `all`).
+3. **게이트**: 이번 compat 기록 1행·status ok·날짜·basis 일치 · 9표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1) · 표마다 반영 범위 행 > 0(점수 두 표는 `score_date = D`).
+4. **한 트랜잭션 반영**: `ATTACH` → `BEGIN IMMEDIATE` → 표별 범위 `DELETE` → 스테이징 범위 `INSERT` → `_compat_meta` 기록 1행 → `COMMIT`.
+
+| 표 | 반영 범위(= compat 이 쓴 범위) |
+|---|---|
+| `daily_prices` · `investor_detail_flows` | `trade_date` ∈ 이번 기록의 창 `[from_date, to_date]` |
+| `score_history` · `score_history_v2` | `score_date = D` |
+| `stocks` · `consensus_revision_daily` · `consensus_revision_compare` · `consensus_annual` · `financial_summary` | 표 전체(날짜 창 없는 as-of 스냅샷 — 스테이징이 같은 락 안의 사본이라 compat 이 안 건드린 행은 같은 값으로 다시 들어간다) |
+
+compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~3단계만, 본 파일 무변경)는 락을 잡지 않는다. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).

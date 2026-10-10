@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # v3 quant.db 호환 계층 export — 플랜 `docs/plans/2026-09-24-v3-merge.md` T1.3 2.
 #   equity/stage 판을 읽어 v3 `quant.db` 9표 중 우리가 채우는 표를 upsert 한다(읽기 전용 소비).
-#   M1~M3 대상은 별도 파일 `data/compat/quant.db`(기본값), M4 컷오버부터 QL_COMPAT_TARGET 으로
-#   v3 `~/kael-system-v3/data/quant.db` 제자리(결정 D-2).
+#   M1~M3 대상은 별도 파일 `data/compat/quant.db`(기본값 — 그림자). v3 quant.db 제자리 반영(결정 D-2)은
+#   이 스크립트로 하지 않는다 — `scripts/v3_post.sh`(스테이징 → 게이트 → 9표 한 트랜잭션, QL-F)를 쓴다.
+#   이 스크립트는 표마다 따로 커밋하고 필수 열 빈 행을 5% 까지 건너뛰므로 v3 파일에 직접 돌리지 않는다.
 #   점수 두 표(score_history·_v2)는 모델 판(QL_MODEL_ROOT, 기본 data/model)의 그날·그 basis 판이
 #   원천이다(QL-C · T-16) — 그날 모델 성공 판이 없으면 export 가 실패한다(다른 날 판으로 대체 안 함).
 #

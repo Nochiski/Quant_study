@@ -1,7 +1,8 @@
 """게이트 EG0~EG9·EG13 의 일반형 (EQUITY_GATES v1.0 §1·§6·§7).
 
 폐기형(FAIL = 버전 폐기): EG0·EG1·EG2·EG3·EG4·EG5·EG6·EG8·EG9·EG13. 행 격리형: EG7.
-실행 조건이 안 되는 게이트는 SKIP(사유)으로 남기고 폐기하지 않는다 — stage 규약 그대로.
+실행 조건이 안 되는 게이트는 SKIP(사유)으로 남는다. 다만 (게이트, 사유, 표) 가 허용표
+(`stage/skip_allow.py`, K1-7a)에 없으면 `run_all` 이 FAIL 로 센다 — 'SKIP = 통과' 가 아니다.
 결과 타입은 원장 의존이 없는 `stage.gates` 의 것을 그대로 쓴다.
 
 실행 순서는 GATES §7-1 이 고정한다: EG0 → EG7 → EG1 → EG2 → EG13 → EG3 → (테이블 특화) → EG4 → EG5.
@@ -20,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import duckdb
+from stage import skip_allow
 from stage import snapshot as stage_snapshot
 from stage.gates import GateResult, GateStatus
 from stage.manifest import BuildRecord
@@ -490,7 +492,11 @@ def _gate_name(fn: Callable[[EquityGateContext], GateResult]) -> str:
 
 
 def run_all(ctx: EquityGateContext) -> list[GateResult]:
-    """GATES §7-1 순서. 첫 FAIL 이후는 전부 `skip(upstream_failed)`."""
+    """GATES §7-1 순서. 첫 FAIL 이후는 전부 `skip(upstream_failed)`.
+
+    SKIP 은 허용표(`stage/skip_allow.py`)에 (게이트, 사유, 표) 가 있을 때만 통과다. 표 밖 SKIP 은
+    FAIL 로 세고(K1-7a — equity 게이트는 전부 폐기형) 뒤 게이트는 upstream_failed 가 된다.
+    """
     steps: list[tuple[str, Callable[[EquityGateContext], GateResult]]] = [
         ("EG0", eg0_inputs), ("EG7", eg7_range), ("EG1", eg1_equation), ("EG2", eg2_pit),
         ("EG13", eg13_available_future), ("EG3", eg3_keys)]
@@ -506,6 +512,7 @@ def run_all(ctx: EquityGateContext) -> list[GateResult]:
             r = fn(ctx)
         except SkipGate as s:                 # 상수 미등재 — 측정치는 남긴다 (GATES §7-3)
             r = GateResult(name, GateStatus.SKIP, s.reason, s.metrics)
+        r = skip_allow.judge("equity", r, table=ctx.rule.name)
         results.append(r)
         if r.status is GateStatus.FAIL:
             failed = True

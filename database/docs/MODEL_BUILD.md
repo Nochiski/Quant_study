@@ -165,7 +165,7 @@ data/model/
 | MG2 결정성 | 두 실행의 점수·지표 직렬화(JSON, 부동소수 repr) sha256 | 해시가 다르면 |
 | MG3 온전성 | NaN·inf · 종목 중복 · 순위 = 순위 행의 1…n · v3·v2 전 행 순위·종합 있음 · v3 항상 NULL 6열 · v4: 종합·버킷 점수·지표 백분위 ∈ [0, 100], `excluded` ⇔ `exclude_reason` ⇔ rank NULL, 순위 행은 종합 있음, `spec_id` 일치 | 위반이 하나라도 |
 | MG4 신선도 | 전체 `fi_prices`(eligible 로 자르기 전)에서 D 종가가 있는 종목 수 — v3 원본 stale guard(`backend/scoring/engine.py:40-51`, `V3_MIN_DAILY_PRICES_THRESHOLD`)와 같은 하한 | < **2,000**(`--min-prices-on-d`) |
-| MG5 전판 대비 | 같은 spec·같은 basis 의 직전 성공 판(MANIFEST `builds` 중 basis 가 같은 마지막 판 — 아침판과 장 마감 판을 섞지 않는다, PR-6 · mb1.5.0)과 종합 Spearman(공통 종목, 동률 평균순위)·상위 30 겹침·공통 종목 수 기록 | **FAIL 없음** — Spearman < **0.8**(또는 셀 수 없음)이면 `warn`. 첫 판·전판 파일 없음은 `skip(no_previous)` |
+| MG5 전판 대비 | 같은 spec·같은 basis 의 직전 성공 판(MANIFEST `builds` 중 basis 가 같은 마지막 판 — 아침판과 장 마감 판을 섞지 않는다, PR-6 · mb1.5.0)과 종합 Spearman(공통 종목, 동률 평균순위)·상위 30 겹침·공통 종목 수 기록 | **FAIL 없음** — Spearman < **0.8**(또는 셀 수 없음)이면 `warn`. 첫 판·전판 파일 없음은 `skip(no_previous)`(허용표 안). 그 밖의 MG5 skip 은 `warn`, MG0~MG4 의 skip 은 FAIL 이다(K1-7a, `src/stage/skip_allow.py`) |
 
 - 플랜 §3-4 원안(MG0 스키마 · MG1 행수 · MG2 NaN·rank · MG3 골든 · MG4 순위 상관 · MG5 manifest 완비)과
   번호가 다르다 — 09-29 W2-a 지시가 정본이다. 골든 대조(G-M3 ②)는 테스트(`test_model_v3_port`·

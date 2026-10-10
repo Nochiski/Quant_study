@@ -10,6 +10,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import gates, inputs
 from equity.baseline import Baseline
 from equity.gates import EquityGateContext, GateStatus, SkipGate
@@ -495,8 +496,10 @@ def test_extra_gates_훅이_EG3_뒤에_붙는다(con: duckdb.DuckDBPyConnection,
     assert eg6.status is GateStatus.PASS and eg6.detail == "판본 선택"    # 훅이 실제로 돌았다
 
 
-def test_없는_상수는_skip_no_baseline이고_metrics를_남긴다(con: duckdb.DuckDBPyConnection,
-                                                   tmp_path: Path, make_stage_tree) -> None:
+def test_없는_상수는_skip_no_baseline_이지만_허용표_밖이라_FAIL이고_metrics를_남긴다(
+        con: duckdb.DuckDBPyConnection, tmp_path: Path, make_stage_tree) -> None:
+    """K1-7a: 게이트는 SKIP(no_baseline) 을 내지만 층 판정은 FAIL 이다.
+    뒤 게이트는 upstream_failed."""
     def eg9_coverage(ctx: EquityGateContext) -> GateResult:
         gates.require_const(ctx, "coverage_min", {"measured_coverage": 0.97})
         return GateResult("EG9", GateStatus.PASS, "커버율", {})
@@ -508,8 +511,55 @@ def test_없는_상수는_skip_no_baseline이고_metrics를_남긴다(con: duckd
                                  fixtures=fx, pinned=pinned,
                                  inputs={t: pb.build_id for t, pb in pinned.items()}))
     eg9 = next(g for g in results if g.name == "EG9")
-    assert eg9.status is GateStatus.SKIP and eg9.detail == "no_baseline"
-    assert eg9.metrics == {"missing_metric": "t.coverage_min", "measured_coverage": 0.97}
+    assert eg9.status is GateStatus.FAIL and "no_baseline" in eg9.detail
+    assert eg9.metrics == {"missing_metric": "t.coverage_min", "measured_coverage": 0.97,
+                           "skip_reason": "no_baseline", "skip_not_allowed": True}
+    after = results[[g.name for g in results].index("EG9") + 1:]
+    assert [(g.name, g.status, g.detail) for g in after] == [
+        ("EG4", GateStatus.SKIP, "upstream_failed"), ("EG5a", GateStatus.SKIP, "upstream_failed")]
+
+
+def test_허용표_안_SKIP_만_있으면_판정은_통과(con: duckdb.DuckDBPyConnection) -> None:
+    """선언표 EG1 · 차원 표 EG2·EG13 · 첫 빌드 EG5a — 넷 다 SKIP 이고 FAIL 은 0 이다(K1-7a 시드).
+
+    EG13 dimension_table 은 K1-3a 가 팩트 표가 아닌 표에 내는 SKIP 이다. 허용표 밖이면
+    trading_calendar·corp·security 같은 차원 표가 매일 FAIL 한다(리뷰 B-1)."""
+    fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
+    rule = _rule(declaration_table=True, available_rule=AVAILABLE_NONE)
+    got = {g.name: (g.status, g.detail) for g in gates.run_all(_ctx(con, rule, fixtures=fx))}
+    assert got["EG1"] == (GateStatus.SKIP, "declaration_table")
+    assert got["EG2"] == (GateStatus.SKIP, "dimension_table")
+    assert got["EG13"] == (GateStatus.SKIP, "dimension_table")
+    assert got["EG5a"] == (GateStatus.SKIP, "no_previous_build")
+    assert not [n for n, (s, _) in got.items() if s is GateStatus.FAIL]
+
+
+def test_표_한정_허용은_그_표에서만_SKIP이다(con: duckdb.DuckDBPyConnection, tmp_path: Path,
+                                  make_stage_tree) -> None:
+    """음성 대조 — 표 한정 허용(여기서는 테스트 동안만 opinion_daily 에 EG21 no_coverage)은 그 표만
+    덮는다. 같은 SKIP 이 다른 표면 FAIL 이다. 운영 허용표에서는 이 항목을 지웠으므로(10-10 리뷰)
+    허용을 더하지 않으면 opinion_daily 도 FAIL 이다."""
+    fx = [{"case": "k1", "key": {"k": "1"}, "column": "val", "expect": "a", "source": "hand"}]
+    base = Baseline({name: {"recent_grid_window": 3, "recent_grid_baseline_window": 20,
+                            "recent_grid_row_ratio_min": 0.8, "recent_grid_lag_sessions": 0}
+                     for name in ("opinion_daily", "price_daily")})
+    pinned_kw = _pinned_kw(tmp_path, make_stage_tree)    # EG13 기준일 — 없으면 EG13 이 막는다
+
+    def eg21(name: str) -> GateResult:
+        rule = _rule(name=name, inputs=("stg_sample",), content_date_column="available_date",
+                     extra_gates=(gates.eg21_recent_grid,))
+        return next(g for g in gates.run_all(_ctx(con, rule, fixtures=fx, baseline=base,
+                                                  **pinned_kw))
+                    if g.name == "EG21")
+
+    with allow_skips(("equity", "EG21", "no_coverage",
+                      "테스트 전용 — 표 한정 허용이 그 표만 덮는지 본다", "opinion_daily")):
+        ok = eg21("opinion_daily")
+        assert ok.status is GateStatus.SKIP and ok.detail == "no_coverage"
+        bad = eg21("price_daily")
+        assert bad.status is GateStatus.FAIL and bad.metrics["skip_reason"] == "no_coverage"
+    gone = eg21("opinion_daily")                         # 운영 허용표 — 항목이 없다
+    assert gone.status is GateStatus.FAIL and gone.metrics["skip_reason"] == "no_coverage"
 
 
 def test_skip_사유는_폐쇄_어휘다() -> None:

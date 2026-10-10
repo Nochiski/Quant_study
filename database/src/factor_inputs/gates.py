@@ -18,7 +18,8 @@
                  `stocks.market_cap` 과 같은 반올림, 오케스트레이터 09-29). KRX 시총 대조는 기록형.
                  장 마감 판은 shares = D' 주식수, close = T 행 종가이고 KRX 대조는 대상이 없다.
   FG4 골든     — `fixtures/golden.json` 의 손계산 값과 정확히 같다. 창 밖·유니버스 밖 항목은 세지
-                 않고, 셀 수 있는 항목이 0 이면 `skip(no_fixtures)`.
+                 않고, 셀 수 있는 항목이 0 이면 `skip(no_fixtures)` — 허용표 밖이라 층 판정은
+                 FAIL 이다(K1-7a, `stage/skip_allow.py`).
   FG-fresh     — 신선도 상태 수를 기록하고, lapsed·none 은 eligible 이 아니며(require_estimates),
                  grace 나이 ≤ G, 마지막 수집일 D* 가 예상 수집일(asof — 아침판 D, 장 마감 판 D')
                  보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지 않는다(수집 중단 허용치는 유예 G 와
@@ -36,6 +37,7 @@ from pathlib import Path
 
 import duckdb
 from model.contracts import FI_TABLES, UniverseRule
+from stage import skip_allow
 from stage.gates import GateResult, GateStatus
 
 from .queries import (
@@ -390,11 +392,15 @@ GATES: tuple[Callable[[GateContext], GateResult], ...] = (
 
 
 def run_all(ctx: GateContext) -> list[GateResult]:
-    """GATE_ORDER 순서. FG0 이 FAIL 이면 나머지는 `skip(upstream_failed)`."""
+    """GATE_ORDER 순서. FG0 이 FAIL 이면 나머지는 `skip(upstream_failed)`.
+
+    허용표(`stage/skip_allow.py`) 밖 SKIP 은 FAIL 로 센다(K1-7a — FG 는 전부 폐기형).
+    """
     out = [fg0_schema(ctx)]
     if out[0].status is GateStatus.FAIL:
-        return out + [GateResult(name, GateStatus.SKIP, "upstream_failed — FG0", {})
-                      for name in GATE_ORDER[1:]]
-    for gate in GATES[1:]:
-        out.append(gate(ctx))
-    return out
+        out += [GateResult(name, GateStatus.SKIP, "upstream_failed — FG0", {})
+                for name in GATE_ORDER[1:]]
+    else:
+        for gate in GATES[1:]:
+            out.append(gate(ctx))
+    return [skip_allow.judge("factor_inputs", g) for g in out]

@@ -30,13 +30,14 @@ import inspect
 import itertools
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import duckdb
 import pytest
-from conftest import _make_stage_tree
+from conftest import _make_stage_tree, allow_skips
 from deliver.excel_weekly import _returns
 from deliver.view import DayView
 from factor_inputs import FactorInputsError, build
@@ -45,6 +46,17 @@ from model.build import load_inputs
 from model.contracts import FI_TABLES, UniverseRule
 from model.engines import v4_rank
 from stage import manifest
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("factor_inputs", "FG4", "no_fixtures",
+             "합성 트리에는 운영 골든(fixtures/golden.json) 종목이 없다")):
+        yield
+
 
 D = dt.date(2026, 9, 28)
 D_S = "20260928"
@@ -1383,6 +1395,39 @@ def test_old_equity_build_without_price_only_columns_refuses(tmp_path: Path, tab
     assert not tmp.exists() or not any(tmp.iterdir())
 
 
+def _set_stage_gates(stage_root: Path, table: str, recorded: list[dict]) -> None:
+    """stage 판 `_meta.json` 의 게이트 기록을 바꾼다 — fi 입력 가드가 읽는 곳(K1-7a)."""
+    for meta in (stage_root / table).glob("v=*/**/_meta.json"):
+        m = json.loads(meta.read_text(encoding="utf-8"))
+        m["gates"] = recorded
+        meta.write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+
+
+def _gate(name: str, status: str, detail: str = "") -> dict:
+    return {"name": name, "status": status, "detail": detail, "metrics": {}}
+
+
+def test_stage_input_skips_inside_the_skip_table_are_used(tmp_path: Path) -> None:
+    """K1-7a — WISE stage 판의 정상 SKIP(G4 골든 없음 · G9 교차 소스 없음 · G5 첫 빌드)은 쓴다."""
+    eq, st = make_roots(tmp_path)
+    _set_stage_gates(st, "stg_fin_wise", [
+        _gate("G1", "pass"), _gate("G4", "skip", "no_fixtures"),
+        _gate("G5", "skip", "no_baseline"), _gate("G9", "skip", "no_cross_check")])
+    res = build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=5, golden_path=None)
+    assert res.ok, [(g.name, g.detail) for g in res.gates if g.status.value == "fail"]
+
+
+def test_stage_input_skip_outside_the_skip_table_refuses_the_build(tmp_path: Path) -> None:
+    """음성 대조 — 교차 원장을 못 붙여 G9 가 건너뛴 판(ledger_unavailable)은 fi 가 쓰지 않는다."""
+    eq, st = make_roots(tmp_path)
+    _set_stage_gates(st, "stg_consensus_matrix", [
+        _gate("G1", "pass"), _gate("G9", "skip", "ledger_unavailable:wise")])
+    with pytest.raises(FactorInputsError,
+                       match=r"table=stg_consensus_matrix .*G9:ledger_unavailable"):
+        build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=5, golden_path=None)
+    assert not (tmp_path / "fi" / "fi_universe" / "MANIFEST.json").exists()
+
+
 def test_gate_failure_commits_nothing(roots, tmp_path: Path) -> None:
     out = tmp_path / "fi"
     ok = build(D_S, "morning", out, roots[1], roots[0], min_eligible=5, golden_path=None)
@@ -1537,6 +1582,20 @@ def test_pinned_build_reads_the_history_build_not_the_newer_current(tmp_path: Pa
     pin_run = json.loads(pin.run_manifest.read_text(encoding="utf-8"))
     assert pin_run["builds_from_date"] == "20260923"
     assert _hashes(cur.run_manifest)["fi_prices"] != _hashes(ref.run_manifest)["fi_prices"]
+
+
+def test_pinned_build_also_refuses_a_stage_skip_outside_the_skip_table(tmp_path: Path) -> None:
+    """K1-7a 가드는 `--builds-from` 고정 판에도 걸린다 — 이력이 가리킨 stage 판의 표 밖 SKIP
+    (G9 ledger_unavailable)도 current 모드와 같이 거부한다."""
+    eq, st = make_roots(tmp_path)
+    _set_stage_gates(st, "stg_consensus_matrix", [
+        _gate("G1", "pass"), _gate("G9", "skip", "ledger_unavailable:wise")])
+    hist = _history(tmp_path / f"{D_S}_morning.json")
+    with pytest.raises(FactorInputsError,
+                       match=r"table=stg_consensus_matrix .*G9:ledger_unavailable"):
+        build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=5, golden_path=None,
+              builds_from=hist)
+    assert not (tmp_path / "fi" / "fi_universe" / "MANIFEST.json").exists()
 
 
 @pytest.mark.parametrize(("case", "want"), [

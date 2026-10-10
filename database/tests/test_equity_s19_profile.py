@@ -23,15 +23,33 @@ EG2-P04 모집단이 빈다. 그래서 여기서는 `lag_known=false` 를 실은
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
 import pytest
-from conftest import apply_slice_override
+from conftest import allow_skips, apply_slice_override
 from equity import build, gates, inputs, rules_s19
 from equity.baseline import Baseline, load
 from equity.gates import EquityGateContext
 from equity.model import CELL_KINDS, RULES, VALUE_TYPES
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG8", "no_baseline",
+             "시드에 opinion_daily 겹침 일치율 하한이 없다(운영 값은 baseline_locked 0.99)",
+             "opinion_daily"),
+            ("equity", "EG6_fin_std", "no_coverage",
+             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다"),
+            ("equity", "EG21", "no_coverage",
+             "절단본은 base_date 세션이 판정 창(23)에 못 미친다 — 운영 허용표에서는 지웠다(10-10 리뷰)",
+             "opinion_daily")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SRC = Path(rules_s19.__file__).parent

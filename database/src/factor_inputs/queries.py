@@ -368,9 +368,9 @@ PRICE_LIMIT_BEFORE, PRICE_LIMIT_AFTER = 0.15, 0.30
 # 부동소수 나눗셈 잡음 여유 — 상한가 하루(13,000 / 10,000 − 1 = 0.30000000000000004)를 제한폭을
 # 넘은 것으로 세지 않는다
 PRICE_LIMIT_EPS = 1e-9
-# 미해결 사건의 '인접' = 적용일 앞뒤 이 세션 수 안의 행(그 행의 직전 행 대비 수익률). K1-6/H1-1 분해
-# (10-09)가 적용일 ±6 의 인접 수익률로 점프 흔적 7 · 제한폭 안 334 를 갈랐다 — 미해결 사건의 적용일은
-# 명목 세션이라(no_price_match 등) 실제 점프가 며칠 어긋날 수 있다.
+# 미해결 사건의 '인접' = 적용일 앞뒤 이 **거래일(세션)** 수 안의 행(그 행의 직전 행 대비 수익률) —
+# 달력일이 아니다. K1-6/H1-1 분해(10-09)가 적용일 ±6 의 인접 수익률로 점프 흔적 7 · 제한폭 안 334 를
+# 갈랐다 — 미해결 사건의 적용일은 명목 세션이라(no_price_match 등) 실제 점프가 며칠 어긋날 수 있다.
 ADJ_JUMP_NEIGHBOR_SESSIONS = 6
 
 
@@ -393,12 +393,15 @@ def adj_prices_sql(p: Params) -> str:
     ② 사유 행·유상감자 제외) · `price_only_near`(근처 ⑤ 단위, (c) 후보 없음))은 수정종가가 이미
     이어지므로 세지 않는다 — 판정은 equity 열 하나만 읽는다(fi1.3.0, 배포 묶음 6-3).
 
-    `adj_jump_ok`(T-9 · H1-4, fi1.6.0)는 같은 계단을 위 사건 중 **인접 수익률이 가격제한폭을 넘는
-    것**만으로 센다 — 적용일(첫 거래일 ≥ 적용일)의 앞뒤 `ADJ_JUMP_NEIGHBOR_SESSIONS` 세션 안 행 중
-    |수정종가 ÷ 그 종목 직전 행 수정종가 − 1| > 그 행 날짜의 제한폭(+`PRICE_LIMIT_EPS`)인 행이 하나라도
-    있는 사건. 뒤집는 날은 점프 날이 아니라 적용일이다(adj_ok 와 같은 축 — 창 판정이 하나다). 수익률은
-    D 이하 행만 본다(D 뒤 행을 읽으면 D 판이 미래를 안다). 제한폭 안 미해결 사건은 수정종가가 끊겼다고
-    볼 근거가 없어 세지 않는다(K1-6/H1-1 분해 — 주식 계열 미해결 중 점프 흔적 7, 제한폭 안 334).
+    `adj_jump_ok`(T-9 · H1-4, fi1.6.0)는 같은 모양의 계단이되 **점프 행**마다 뒤집힌다. 점프 행 = 위
+    사건(가격 축 미해결, available ≤ asof)의 적용일(첫 거래일 ≥ 적용일) 앞뒤
+    `ADJ_JUMP_NEIGHBOR_SESSIONS` **거래일(세션)** 안의 그 종목 행 중 |수정종가 ÷ 그 종목 직전 행 수정종가
+    − 1| > 그 행 날짜의 제한폭(+`PRICE_LIMIT_EPS`)인 행((종목, 날짜) 하나로 센다). 적용일이 아니라 점프
+    행에서 뒤집으므로 창이 [직전 행, 점프 행] 을 품을 때만 값이 바뀐다 — 적용일과 실제 점프가 며칠
+    어긋나도(명목 적용일, no_price_match 등) 그 사이에서 시작하는 창이 점프를 품고 빠져나가지 않는다.
+    수익률은 D 이하 행만 본다(D 뒤 행을 읽으면 D 판이 미래를 안다). 제한폭 안 미해결 사건은 수정종가가
+    끊겼다고 볼 근거가 없어 세지 않는다(K1-6/H1-1 분해 — 주식 계열 미해결 중 점프 흔적 7, 제한폭 안
+    334). 미해결 사건이 없는 끊김(B-65 정지 뒤 재개 기준가 리셋 등)은 이 표식 밖이다.
     """
     inner = f"""WITH bad AS (
     SELECT DISTINCT ticker, apply_date FROM adj_factor
@@ -407,7 +410,7 @@ def adj_prices_sql(p: Params) -> str:
       AND available_date <= DATE '{p.asof}'
 ),
 ret AS (
-    SELECT r.ticker, c.idx, abs(r.adj_close / nullif(r.prev_close, 0) - 1) AS abs_ret,
+    SELECT r.ticker, r.date, c.idx, abs(r.adj_close / nullif(r.prev_close, 0) - 1) AS abs_ret,
            CASE WHEN r.date < DATE '{PRICE_LIMIT_CHANGE_DATE}' THEN {PRICE_LIMIT_BEFORE}
                 ELSE {PRICE_LIMIT_AFTER} END AS price_limit
     FROM (SELECT ticker, date, adj_close,
@@ -418,9 +421,8 @@ ret AS (
     JOIN _calx c ON c.date = r.date
 ),
 jump AS (
-    SELECT DISTINCT b.ticker, b.apply_date
-    FROM (SELECT ticker, apply_date,
-                 (SELECT min(idx) FROM _calx WHERE date >= apply_date) AS apply_idx
+    SELECT DISTINCT r.ticker, r.date
+    FROM (SELECT ticker, (SELECT min(idx) FROM _calx WHERE date >= apply_date) AS apply_idx
           FROM bad) b
     JOIN ret r ON r.ticker = b.ticker
               AND r.idx BETWEEN b.apply_idx - {ADJ_JUMP_NEIGHBOR_SESSIONS}
@@ -432,7 +434,7 @@ SELECT a.ticker, a.date, a.adj_close,
        (SELECT count(*) FROM bad b
         WHERE b.ticker = a.ticker AND b.apply_date <= a.date) % 2 = 0 AS adj_ok,
        (SELECT count(*) FROM jump j
-        WHERE j.ticker = a.ticker AND j.apply_date <= a.date) % 2 = 0 AS adj_jump_ok
+        WHERE j.ticker = a.ticker AND j.date <= a.date) % 2 = 0 AS adj_jump_ok
 FROM price_adj_daily a
 WHERE a.basis = 'krx' AND a.date >= DATE '{p.price_from}' AND a.date <= DATE '{p.d}'
   AND a.{_IN_UNIVERSE}"""

@@ -106,7 +106,7 @@ asof = D' 다(§2-1). 창의 끝(D 포함 550 달력일 · D 까지 60 세션)�
 |---|---|---|---|
 | `fi_universe` | `universe_daily`(D 행 — 장 마감 판은 D' 행 이월: 상장·정지 · KOSPI/KOSDAQ · ETF 제외 · `adv20_krw`·`admin_state`·`halt_state`) · `security`(이름·상장일) · `price_daily`(D 의 KRX 종가·상장주식수 — 장 마감 판은 D' 주식수 × T 종가) · `sector_snapshot`(D 이하 최신 WICS(장 마감 판은 asof=D', §2-1)) · `coverage_daily.analyst_count` · `audit_opinion` · `disclosure_version` · 신선도(`stg_consensus_annual`, §5) | D 한 날 | 시총 = **round(주식수 × 종가 / 1e8) 정수 억원**(compat `stocks.market_cap` 과 같은 반올림) · adv20 억원 |
 | `fi_prices` | `price_daily`(basis `krx`) | D 포함 550 달력일 | 가격 원 · 거래량 주 · **거래대금 원**(compat 의 백만원이 아니다) |
-| `fi_adj_prices` | `price_adj_daily.adj_close`·`cum_share_factor`·`cum_price_only_factor` · `adj_factor.price_resolution`(가격 축 미해결 사건) · `trading_calendar`(인접 세션) | 550 달력일 | `adj_factor` = cum_share ÷ cum_price_only(원가 × 계수 = 수정가, fi1.3.0) · `adj_ok` = 가격 축 미해결 사건 **계단 표식**(아래) · `adj_jump_ok` = 그중 제한폭 초과 점프 사건만의 계단 표식(아래, fi1.6.0) |
+| `fi_adj_prices` | `price_adj_daily.adj_close`·`cum_share_factor`·`cum_price_only_factor` · `adj_factor.price_resolution`(가격 축 미해결 사건) · `trading_calendar`(인접 세션) | 550 달력일 | `adj_factor` = cum_share ÷ cum_price_only(원가 × 계수 = 수정가, fi1.3.0) · `adj_ok` = 가격 축 미해결 사건 **계단 표식**(아래) · `adj_jump_ok` = 그중 제한폭 초과 **점프 행**마다 뒤집히는 계단 표식(아래, fi1.6.0) |
 | `fi_flows` | `flow_daily` 12주체(키움 우선, 전 주체 NULL 칸은 행 없음) | D 까지 60 세션 | **round(원 / 1e6) 정수 백만원** |
 | `fi_credit` | `credit_daily.whol_loan_rmnd_stcn_shr`·`whol_loan_rmnd_rate_pct` | D 까지 60 세션, `available_date ≤ D` | 주 · % · `available_date` = 그날 + 3 세션(KIS 실입수, equity FieldProfile) |
 | `fi_consensus` | `stg_consensus_matrix`(c1050001 T4) — **한시 예외**(§7) | 신선·유예 종목의 마지막 신선일 판 × 결산기 3 × horizon cur/1w/1m/3m | 억원·원·배·% 원값(eps·bps 는 정수 — compat 과 같다). 판에 있는 (종목, 결산기)마다 네 horizon 행을 값이 NULL 이어도 만든다 |
@@ -167,15 +167,18 @@ fi1.3.0(배포 묶음 6-3, N-33): not-ok 행 중 가격 축에서 해소된 것(
 창 안에 ok 계수 적용일이 있는 행((c) 후보 없음) · ok 계수가 접히는 날의 행 — 뒤 둘은 ② 사유 행·유상감자
 제외) · `price_only_near`(근처 ⑤ 단위, (c) 후보 없음))은 수정종가가 이어지므로 세지 않는다. equity e1.26.0 이전 판(새 열 없음)을 읽으면 판을 만들지 않고 멈춘다.
 
-`fi_adj_prices.adj_jump_ok`(fi1.6.0, 컷오버 H1-4 · T-9): `adj_ok` 와 같은 계단(적용일마다 뒤집힘)을 위
-미해결 사건 중 **인접 수익률이 가격제한폭을 넘는 것**만으로 센다. 인접 = 적용일(첫 거래일 ≥ 적용일)
-앞뒤 `ADJ_JUMP_NEIGHBOR_SESSIONS`(6) 세션 안 행, 수익률 = 그 행 수정종가 ÷ 그 종목 직전 행 수정종가 − 1,
-제한폭 = 행 날짜 기준 2015-06-15 전 15%·뒤 30%(`queries.PRICE_LIMIT_*` — 날짜별 제한폭의 유일한
-정의, 상한가 그대로의 부동소수 잡음은 `PRICE_LIMIT_EPS` 로 넘지 않은 것으로 본다). D 이하 행만 본다
+`fi_adj_prices.adj_jump_ok`(fi1.6.0, 컷오버 H1-4 · T-9): `adj_ok` 와 같은 모양의 계단이되 **점프 행**마다
+뒤집힌다. 점프 행 = 위 미해결 사건(available ≤ asof)의 적용일(첫 거래일 ≥ 적용일) 앞뒤
+`ADJ_JUMP_NEIGHBOR_SESSIONS`(6) 세션 안의 그 종목 행 중 |수정종가 ÷ 그 종목 직전 행 수정종가 − 1| > 그 행
+날짜의 제한폭인 행. **±6 은 거래일(세션) 기준**이다(달력일 아님 — `_calx` 번호 차). 제한폭 = 행 날짜 기준
+2015-06-15 전 15%·뒤 30%(`queries.PRICE_LIMIT_*` — 날짜별 제한폭의 유일한 정의, 상한가 그대로의 부동소수
+잡음은 `PRICE_LIMIT_EPS` 로 넘지 않은 것으로 본다). 적용일이 아니라 점프 행에서 뒤집으므로, 명목 적용일과
+실제 점프가 며칠 어긋나도 그 사이에서 시작하는 창이 점프를 품고 빠져나가지 않는다. D 이하 행만 본다
 (D 뒤 점프는 그날 판이 모른다). scope 는 모멘텀(r1m~r12m)·20일 변동성 창 안에서 이 값이 바뀌면 그
 지표를 결측으로 둔다(`params.adj_jump_missing`, mb1.6.0). 제한폭 안 미해결 사건(10-09 분해: 주식 계열
 334)은 수정종가가 끊겼다고 볼 근거가 없어 세지 않는다 — 지금 scope 유니버스의 창 안 미해결 종목은
-전부 제한폭 안이라 이 규칙은 앞으로 생길 점프만 막는다.
+전부 제한폭 안이라 이 규칙은 앞으로 생길 점프만 막는다. 미해결 사건이 없는 끊김은 이 표식 밖이다 —
+B-65(정지 뒤 재개 기준가 리셋, 행도 표식도 없음)의 불연속은 scope 모멘텀·20일 변동성에 그대로 남는다.
 
 D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**, v4 가 `UniverseRule.exclude`·
 `min_adv20` 으로 건다):

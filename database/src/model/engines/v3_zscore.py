@@ -26,8 +26,10 @@ spec 파라미터로만 켜는 원본 밖 규칙(v3_zscore@1.0 은 끈 채로 �
     지표(gpa·roa·fcf_assets·gpa_change)에 쓰지 않는다. 기간을 모르면(NULL) 쓴다.
     부채비율·변동성은 그대로.
   - `adj_jump_missing`(scope, T-9 · H1-4): 모멘텀 창(rNm — 최근 lookback + 1 행)이나 20일 변동성 창
-    (최근 21 행)이 `fi_adj_prices.adj_jump_ok` 계단을 넘으면 — 인접 수익률이 가격제한폭을 넘는 가격 축
-    미해결 사건의 적용일이 창 안이면 — 그 지표를 결측으로 둔다(창 판정은 v4 와 같은 `crosses_step`).
+    (최근 21 행)이 `fi_adj_prices.adj_jump_ok` 계단을 넘으면 — 가격 축 미해결 사건 적용일 앞뒤 6세션
+    안에서 수익률이 그날 가격제한폭을 넘은 **점프 행**(fi1.6.0 — 계단은 적용일이 아니라 점프 행에서
+    뒤집힌다)과 그 직전 행이 둘 다 창 안이면 — 그 지표를 결측으로 둔다(창 판정은 v4 와 같은
+    `crosses_step`).
     결측 뒤는 원본 규칙 그대로다: 모멘텀은 남은 지표로 비례 재정규화하고 다 비면 원점수 0.0, 퀄리티는
     std_20d 없이 재정규화. `EngineResult.meta['adj_jump_masked']` = 그렇게 비운 칸 수(지표별)와 종목 수
     (규칙이 없었으면 값이 섰던 칸만 센다 — GH1-c).
@@ -149,7 +151,8 @@ def _price_histories(inputs: FactorInputs, codes: Sequence[str],
 def _jump_drops(steps: Mapping[str, Sequence[bool]]) -> dict[str, frozenset[str]]:
     """T-9: 종목 → 결측으로 둘 지표. 지표 창 = 그 값을 만드는 행 — rNm 은 최근 lookback + 1 행
     (`_period_return` 의 previous ~ current), std_20d 는 최근 STD_WINDOW 행(`_return_std`). 창 안에서
-    `adj_jump_ok` 가 바뀌면 넣는다. 창이 사건 적용일 행에서 시작하면 바뀌지 않으므로 넣지 않는다."""
+    `adj_jump_ok` 가 바뀌면 넣는다. 창이 점프 행에서 시작하면(점프가 창 첫 행 앞) 바뀌지 않으므로
+    넣지 않는다."""
     out: dict[str, frozenset[str]] = {}
     for code, flags in steps.items():
         names = {n for n, lb in LOOKBACKS.items() if crosses_step(flags[-(lb + 1):])}

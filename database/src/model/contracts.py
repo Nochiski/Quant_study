@@ -88,10 +88,11 @@ FI_ADJ_PRICES = TableContract(
              "'unresolved' — fi1.3.0). v3@1.0 은 무시(원본 동등성), "
              "v4 계열은 해당 창을 결측 처리"),
      _c("adj_jump_ok", "BOOLEAN",
-        note="adj_ok 와 같은 계단 표식이되 적용일 인접 행의 |수정수익률|이 그날 가격제한폭을 "
-             "넘는 미해결 사건만 센다(T-9 · H1-4, fi1.6.0 — 상수는 factor_inputs.queries "
-             "PRICE_LIMIT_*·ADJ_JUMP_NEIGHBOR_SESSIONS). scope(params.adj_jump_missing)는 "
-             "모멘텀·20일 변동성 창 안에서 값이 바뀌면 그 지표를 결측 처리, v3@1.0·v2·v4 는 무시")),
+        note="adj_ok 와 같은 모양의 계단 표식이되 점프 행마다 뒤집힌다 — 점프 행 = 가격 축 "
+             "미해결 사건 적용일 앞뒤 N 세션 안에서 |수정수익률|이 그날 가격제한폭을 넘는 행"
+             "(T-9 · H1-4, fi1.6.0 — 상수는 factor_inputs.queries PRICE_LIMIT_*·"
+             "ADJ_JUMP_NEIGHBOR_SESSIONS). scope(params.adj_jump_missing)는 모멘텀·20일 변동성 "
+             "창 안에서 값이 바뀌면 그 지표를 결측 처리, v3@1.0·v2·v4 는 무시")),
     window="fi_prices 와 같다",
     source="equity price_adj_daily · adj_factor · trading_calendar",
     readers=ALL_ENGINES)

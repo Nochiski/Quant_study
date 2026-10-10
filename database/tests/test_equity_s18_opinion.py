@@ -40,7 +40,10 @@ def _k17a_fixture_skips() -> Iterator[None]:
             ("equity", "EG8", "no_cross_source",
              "부정 합성 픽스처는 wise·v3 가 같은 (종목, 관측일) 을 갖지 않는다", "opinion_daily"),
             ("equity", "EG21", "no_baseline",
-             "EG8 겹침 픽스처는 opinion_daily 상수를 하한 하나로 갈아 끼운다", "opinion_daily")):
+             "EG8 겹침 픽스처는 opinion_daily 상수를 하한 하나로 갈아 끼운다", "opinion_daily"),
+            ("equity", "EG21", "no_coverage",
+             "절단본은 base_date 세션이 판정 창(23)에 못 미친다 — 운영 허용표에서는 지웠다(10-10 리뷰)",
+             "opinion_daily")):
         yield
 
 

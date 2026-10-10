@@ -48,6 +48,8 @@ class Allow:
 
 # 처음 내용(10-10) = 코드·테스트에서 찾은 '정상 운영에서 나는 SKIP' + 로컬 equity 사본
 # (10-03 아침 판 30표) 실측. 서버 판의 실제 목록은 `scripts/gate_skips.py` 로 확인한다.
+# 10-10 리뷰: EG21 no_coverage(opinion_daily 한정)를 지웠다 — 서버 `gate_skips.py --last 10` 에서
+# 마지막 발생이 m_20261003T004557_542182Z 이고, 그 뒤 판은 base_date 세션이 23 을 넘어 나지 않는다.
 ALLOW: tuple[Allow, ...] = (
     # ── equity ───────────────────────────────────────────────────────────────
     Allow("equity", ANY_GATE, "upstream_failed",
@@ -57,6 +59,8 @@ ALLOW: tuple[Allow, ...] = (
           "행수 등식이 정의되지 않는다(GATES §0-2)"),
     Allow("equity", "EG2", "dimension_table",
           "차원 표는 available_date 가 없어 PIT 불변식의 대상이 아니다(GATES §0-2)"),
+    Allow("equity", "EG13", "dimension_table",
+          "차원 표는 available_date 가 없다(EG2 와 같은 근거)"),
     Allow("equity", "EG5a", "no_previous_build",
           "첫 빌드 — 비교할 직전 판이 없다"),
     Allow("equity", "EG5a", "inputs_changed",
@@ -64,10 +68,6 @@ ALLOW: tuple[Allow, ...] = (
           "결정성은 같은 스냅샷 반복 빌드 해시(K1-5·DESIGN P42)가 본다"),
     Allow("equity", "EG5a", "rules_changed",
           "규칙 판본을 올린 첫 빌드는 같은 입력이어도 산출이 달라지는 것이 정상이다"),
-    Allow("equity", "EG21", "no_coverage",
-          "base_date 세션이 판정 창(lag + window + 기준창 = 23)에 못 미쳤다"
-          "(10-03 사본 22세션, C-06) — 서버에서 더 안 나면 지운다",
-          tables=("opinion_daily",)),
     # ── stage(fi 가 직접 읽는 WISE 4표) ──────────────────────────────────────
     Allow("stage", "G4", "no_fixtures",
           "stage 골든은 unit_scale 열만 필수다(STAGE_DESIGN §9) — "

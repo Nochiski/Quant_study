@@ -1334,6 +1334,20 @@ def test_pinned_build_reads_the_history_build_not_the_newer_current(tmp_path: Pa
     assert _hashes(cur.run_manifest)["fi_prices"] != _hashes(ref.run_manifest)["fi_prices"]
 
 
+def test_pinned_build_also_refuses_a_stage_skip_outside_the_skip_table(tmp_path: Path) -> None:
+    """K1-7a 가드는 `--builds-from` 고정 판에도 걸린다 — 이력이 가리킨 stage 판의 표 밖 SKIP
+    (G9 ledger_unavailable)도 current 모드와 같이 거부한다."""
+    eq, st = make_roots(tmp_path)
+    _set_stage_gates(st, "stg_consensus_matrix", [
+        _gate("G1", "pass"), _gate("G9", "skip", "ledger_unavailable:wise")])
+    hist = _history(tmp_path / f"{D_S}_morning.json")
+    with pytest.raises(FactorInputsError,
+                       match=r"table=stg_consensus_matrix .*G9:ledger_unavailable"):
+        build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=5, golden_path=None,
+              builds_from=hist)
+    assert not (tmp_path / "fi" / "fi_universe" / "MANIFEST.json").exists()
+
+
 @pytest.mark.parametrize(("case", "want"), [
     ("no_history", ["인계 이력", "없다"]),
     ("health_fail", ["health", "'equity': 'fail'"]),

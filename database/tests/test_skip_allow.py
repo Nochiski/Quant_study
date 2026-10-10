@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import allow_skips
 from model import gates as mgates
 from stage import skip_allow
 from stage.gates import GateResult, GateStatus
@@ -37,11 +38,14 @@ def test_entries_are_unique() -> None:
     assert len(keys) == len(set(keys))
 
 
-def test_seed_entries_named_in_the_plan_are_allowed() -> None:
-    """계획 §3 K1-7a 예시 — EG5a 첫 빌드, 원래 기준선이 없는 EG1(선언표)·EG2(차원 표)."""
+def test_basic_seed_entries_are_allowed() -> None:
+    """시드의 기본 항목 — EG5a 첫 빌드, 원래 기준선이 없는 EG1(선언표)·EG2·EG13(차원 표).
+    선언표·차원 표 허용은 게이트 등록부 RG-C1-05 ①(`docs/plans/2026-10-05-gate-register.md`)의
+    equity 허용 예시에 있다. EG13 차원 표는 K1-3a 뒤 리뷰 B-1 로 더했다."""
     assert skip_allow.find("equity", "EG5a", "no_previous_build", "price_daily")
     assert skip_allow.find("equity", "EG1", "declaration_table", "universe_policy")
     assert skip_allow.find("equity", "EG2", "dimension_table", "security")
+    assert skip_allow.find("equity", "EG13", "dimension_table", "trading_calendar")
 
 
 # ── 사유 코드 ─────────────────────────────────────────────────────────────────
@@ -80,10 +84,16 @@ def test_same_reason_on_another_layer_is_not_allowed() -> None:
 
 
 def test_table_scoped_entry_only_covers_its_tables() -> None:
-    allowed = skip_allow.judge("equity", _skip("EG21", "no_coverage"), table="opinion_daily")
-    assert allowed.status is GateStatus.SKIP
-    other = skip_allow.judge("equity", _skip("EG21", "no_coverage"), table="price_daily")
-    assert other.status is GateStatus.FAIL
+    """표 한정 항목은 그 표만 덮는다. 운영 허용표에는 지금 표 한정 항목이 없어(10-10 리뷰에서
+    EG21 no_coverage·opinion_daily 삭제) 테스트 동안만 더한다."""
+    with allow_skips(("equity", "EG21", "no_coverage",
+                      "테스트 전용 — 표 한정 허용의 성질만 본다", "opinion_daily")):
+        allowed = skip_allow.judge("equity", _skip("EG21", "no_coverage"), table="opinion_daily")
+        assert allowed.status is GateStatus.SKIP
+        other = skip_allow.judge("equity", _skip("EG21", "no_coverage"), table="price_daily")
+        assert other.status is GateStatus.FAIL
+    gone = skip_allow.judge("equity", _skip("EG21", "no_coverage"), table="opinion_daily")
+    assert gone.status is GateStatus.FAIL                   # 운영 허용표 — 항목이 없다
 
 
 def test_any_gate_entry_covers_upstream_failed() -> None:

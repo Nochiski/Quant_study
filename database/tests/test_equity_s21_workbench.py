@@ -88,7 +88,10 @@ def _k17a_fixture_skips() -> Iterator[None]:
              "시드에 opinion_daily 겹침 일치율 하한이 없다(운영 값은 baseline_locked 0.99)",
              "opinion_daily"),
             ("equity", "EG6_fin_std", "no_coverage",
-             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다")):
+             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다"),
+            ("equity", "EG21", "no_coverage",
+             "절단본은 base_date 세션이 판정 창(23)에 못 미친다 — 운영 허용표에서는 지웠다(10-10 리뷰)",
+             "opinion_daily")):
         yield
 
 

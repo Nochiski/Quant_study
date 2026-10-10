@@ -26,8 +26,8 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 # 아래 둘은 위 sys.path 주입 뒤에야 import 된다(scripts/ 는 패키지가 아니다)
-from factor_inputs.build import STAGE_SOURCES  # noqa: E402  # reason: 위 주석
-from stage import skip_allow  # noqa: E402  # reason: 위 주석
+from factor_inputs.build import STAGE_SOURCES
+from stage import skip_allow
 
 Row = tuple[str, str, str, str]          # (layer, table, gate, reason)
 
@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.last < 1:
         ap.error("--last 는 1 이상")
     seen = collect(a.home, a.last)
-    print("\t".join(("layer", "table", "gate", "reason", "n_builds", "allowed", "last_build")))
+    print("layer\ttable\tgate\treason\tn_builds\tallowed\tlast_build")
     n_out = 0
     for (layer, table, gate, reason), bids in sorted(seen.items()):
         ok = skip_allow.find(layer, gate, reason, None if table == "-" else table) is not None

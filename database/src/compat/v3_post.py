@@ -105,6 +105,7 @@ class GateReport:
     counts: dict[str, int] = field(default_factory=dict)   # 표 → 스테이징 반영 범위 행 수
     failures: tuple[str, ...] = ()
     rebase: tuple[str, ...] = ()                # daily_prices 창 앞 행도 옮길 종목(QL-E)
+    rebase_null: int = 0                        # 그 창 앞 행 중 equity 행이 없어 adj_close 를 NULL 로 둔 수(기록형)
 
     @property
     def ok(self) -> bool:
@@ -115,7 +116,8 @@ class GateReport:
         counts = " ".join(f"{t}={n}" for t, n in self.counts.items())
         head = "통과" if self.ok else "실패"
         return (f"v3_post 게이트 {head} date={self.date} basis={self.basis} "
-                f"tables={len(self.tables)} exported_at={self.exported_at} window={win} | {counts}")
+                f"tables={len(self.tables)} exported_at={self.exported_at} window={win} "
+                f"rebase={len(self.rebase)} rebase_null={self.rebase_null} | {counts}")
 
 
 def _ro(path: Path) -> sqlite3.Connection:
@@ -305,6 +307,7 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
                          "(다음 날 아침 T-34 판정이 기록의 표 목록을 본다)")
         rb = (written.get("daily_prices") or {}).get("rebase") or {}
         rebase = tuple(str(t) for t in rb.get("tickers") or ())
+        rebase_null = int(rb.get("n_null") or 0)
         _load_rebase(stg, rebase)
         counts: dict[str, int] = {}
         for table in tables:
@@ -330,7 +333,7 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
                 fails.append(f"{table}: 점수 행 0(score_date={d_iso})" if table in SCORE_TABLES
                              else f"{table}: 반영 범위 행 0")
         return GateReport(d_iso, basis, tables, meta["exported_at"], window, counts, tuple(fails),
-                          rebase)
+                          rebase, rebase_null)
     finally:
         stg.close()
 

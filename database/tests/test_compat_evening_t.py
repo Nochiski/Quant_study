@@ -274,19 +274,30 @@ def test_t_row_values_ohl_amount_and_adj_close(env) -> None:
     assert got[C][6] == 30_100
 
 
-def test_adj_close_is_null_when_base_price_differs_from_d_prime_close(env) -> None:
-    """키움 기준가 ≠ D' KRX 종가 = T 에 기업행위(계수 미상) — 조정가를 지어내지 않는다(P1)."""
+def test_t_row_adj_is_close_when_the_t_step_is_known_and_null_when_not(env, tmp_path: Path) -> None:
+    """QL-E MAJOR-A — 키움 기준가(종가 − 전일대비) ≠ D' KRX 종가인 B 도 단계를 안다(I-1) → T 행 adj_close = 종가.
+    전일대비가 없으면(기준가 미상) 단계를 모른다 → 조정가를 지어내지 않는다(NULL, P1)."""
     res = _evening(env)
     assert _t_prices(env["target"])[B][3] == 51_000
-    assert _t_prices(env["target"])[B][6] is None
-    assert res.n_adj_close_null == 1
+    assert _t_prices(env["target"])[B][6] == 51_000
+    assert res.n_adj_close_null == 0
+    rows = _postclose_rows()
+    rows[FILL[0]] = (_ledger_row(T, "+10200", "", "500000"), True)        # 전일대비 없음
+    pc = _postclose_db(tmp_path / "raw_np" / "postclose.db", rows=rows)
+    target2 = tmp_path / "np.db"
+    res2 = export(equity_root=env["equity"], stage_root=env["stage"], date=T, basis="evening",
+                  target=target2, full=True, tables=["daily_prices"], postclose_db=pc,
+                  kiwoom_db=env["kiwoom"], calendar_dir=env["calendar"])
+    got = _t_prices(target2)[FILL[0]]
+    assert (got[3], got[6]) == (10_200, None)
+    assert res2.n_adj_close_null == 1
 
 
 def test_evening_window_rows_take_the_t_basis(tmp_path: Path, env) -> None:
     """⑥ QL-E — 장 마감 판에서 T 가 최신 행이다. A 는 D' 에 KRX 기준가 단계(기준가 = D21 종가 ÷ 2, ks 2)가 있어
-    창 안 D21 행이 D' 기준(= T 기준 — T 기준가 = D' 종가라 T 단계 없음)으로 반값이다: adj_close = 종가 ÷ 2, 직전 행
-    덮어쓰기(T-41)로 종가 ÷ 2 · 거래량 × 2. T 행은 원종가. T-6 종목(B — 기준가 ≠ D' 종가)은 T 행만 NULL 이고 창 안
-    행은 D' 기준(D' 행 = 원종가)으로 둔다 — 다음 날 아침 KRX 반영이 맞춘다."""
+    창 안 D21 행이 반값이다: adj_close = 종가 ÷ 2, 직전 행 덮어쓰기(T-41)로 종가 ÷ 2 · 거래량 × 2. T 행은 원종가.
+    B 는 T 가 사건일이다(원장 기준가 51,000 − 1,000 = 50,000 ≠ D' 종가 100,000 → ks_T 2, MAJOR-A): 사슬 끝에 T 단계를
+    붙여 D' 이하 행(d 뒤 4번째 행이 T 인 행)도 그날 저녁 덮어쓴다 — v3 20:05 결과와 같다. T 행 adj_close = 종가."""
     equity = _equity(tmp_path / "ev_dp", DP_BUILD, (D21, D22), bases={A: {D22: 69_900 // 2}})
     res = _evening(env, equity_root=equity)
     got = {(r[0], r[1]): r[2:] for r in _rows(
@@ -296,18 +307,21 @@ def test_evening_window_rows_take_the_t_basis(tmp_path: Path, env) -> None:
     f = (69_900 // 2) / 69_900                       # K(D21) ÷ K(D22)
     assert got[(A, "2026-09-21")] == (round(69_900 * f), round(1_000_000 / f),
                                       pytest.approx(69_900 * f, rel=1e-12))
-    assert got[(B, T_ISO)] == (51_000, 300_000, None)
-    assert got[(B, "2026-09-22")] == (100_000, 1_000_000, 100_000)
+    assert got[(B, T_ISO)] == (51_000, 300_000, 51_000)
+    assert got[(B, "2026-09-22")] == (50_000, 2_000_000, 50_000)
+    assert got[(B, "2026-09-21")] == (49_950, 2_000_000, 49_950)
+    # 07:00 브리핑 등락률 — T 종가 ÷ D' 저장 종가 − 1 = 51,000 ÷ 50,000 − 1 = +2%(원값이면 −49%)
+    assert got[(B, T_ISO)][0] / got[(B, "2026-09-22")][0] - 1 == pytest.approx(0.02)
     rebase = res.tables["daily_prices"].rebase
-    assert rebase is not None and rebase["tickers"] == [A]
+    assert rebase is not None and rebase["tickers"] == sorted([A, B])
 
 
-def test_many_t6_tickers_trip_the_adj_null_guard(env, tmp_path: Path) -> None:
-    """R9(리뷰 NIT-1) — K 사슬은 종가가 있으면 늘 값이 있어 adj_close 결측은 장 마감 T-6 NULL 뿐이다. 그날 T-6 종목이
-    몰리면(원장 기준가·D' 판 어긋남) 창 결측 1% 를 넘겨 멈추고 실패를 `_compat_meta` 에 남긴다."""
+def test_many_unknown_t_steps_trip_the_adj_null_guard(env, tmp_path: Path) -> None:
+    """R9(리뷰 NIT-1) — K 사슬은 종가가 있으면 늘 값이 있어 adj_close 결측은 장 마감 T 단계 미상 NULL 뿐이다. 그날
+    미상 종목이 몰리면(원장 전일대비 빠짐 등) 창 결측 1% 를 넘겨 멈추고 실패를 `_compat_meta` 에 남긴다."""
     rows = _postclose_rows()
-    for t in FILL[:10]:                              # 기준가 5,200 − 200 = 5,000 ≠ D' 종가 10,000
-        rows[t] = (_ledger_row(T, "+5200", "+200", "500000"), True)
+    for t in FILL[:10]:                              # 전일대비 없음 — 기준가를 모른다
+        rows[t] = (_ledger_row(T, "+10200", "", "500000"), True)
     pc = _postclose_db(tmp_path / "raw9" / "postclose.db", rows=rows)
     with pytest.raises(CompatError, match="adj_close 결측"):
         _evening(env, postclose_db=pc)
@@ -315,18 +329,21 @@ def test_many_t6_tickers_trip_the_adj_null_guard(env, tmp_path: Path) -> None:
         ("failed", "daily_prices")]
 
 
-def test_next_morning_rebases_the_t6_ticker(env, tmp_path: Path) -> None:
-    """⑥ T-6 다음 날 — 아침 KRX 판의 B T 행 기준가가 D' 종가의 절반(ks 2)이면 B 의 창 안 앞 행이 T 기준으로 다시
-    맞춰진다(D' 행 adj_close = 종가 ÷ 2, 직전 행 덮어쓰기로 종가도 ÷ 2). T 행은 원종가."""
+def test_next_morning_rewrites_the_t_step_rows_with_the_same_values(env, tmp_path: Path) -> None:
+    """⑥ 멱등 — 장 마감 판이 원장 기준가로 붙인 B 의 T 단계(ks 2)를 다음 날 아침 KRX 판이 KRX 기준가(50,000 — I-1 로 같은
+    값)로 다시 세어 D' 이하 행을 같은 값으로 다시 쓴다. T 행만 KRX 행으로 바뀐다(adj_close = 종가)."""
     _evening(env)
+    q = (f"SELECT trade_date, open, high, low, close, volume, amount, adj_close FROM daily_prices "
+         f"WHERE stock_code = '{B}' ORDER BY 1")
+    evening = _rows(env["target"], q)
     morning = _equity(tmp_path / "tm", TM_BUILD, (D21, D22, D23), bases={B: {D23: 50_000}})
     export(equity_root=morning, stage_root=env["stage"], date=T, basis="morning",
            target=env["target"], full=True, tables=["daily_prices", "investor_detail_flows"])
-    got = {(r[0], r[1]): r[2:] for r in _rows(
-        env["target"], f"SELECT stock_code, trade_date, close, adj_close FROM daily_prices "
-                       f"WHERE stock_code = '{B}'")}
-    assert got[(B, T_ISO)] == (99_700, 99_700)
-    assert got[(B, "2026-09-22")] == (50_000, pytest.approx(100_000 / 2, rel=1e-12))
+    after = _rows(env["target"], q)
+    assert [r for r in after if r[0] != T_ISO] == [r for r in evening if r[0] != T_ISO]
+    assert next(r for r in after if r[0] == "2026-09-22")[4:] == (50_000, 2_000_000, 1_000, 50_000.0)
+    t_row = next(r for r in after if r[0] == T_ISO)
+    assert (t_row[4], t_row[7]) == (99_700, 99_700.0)
 
 
 def test_t_flows_in_million_krw(env) -> None:
@@ -376,6 +393,8 @@ def _not_t(target: Path) -> dict[str, list[tuple]]:
 
 
 def test_evening_leaves_other_dates_unchanged(env) -> None:
+    """T 행 밖은 그대로다 — 단, T 가 사건일인 종목(B, ks_T 2)의 D' 이하 행은 그날 저녁 T 단계로 다시 쓴다(QL-E
+    MAJOR-A · T-41: d 뒤 4번째 행이 T 인 행). 수급 표는 전부 그대로."""
     # 전날 밤 상태: D' 판의 아침 반영 + 창 밖 옛 행
     export(equity_root=env["equity"], stage_root=env["stage"], date="20260922",
            basis="morning", target=env["target"], full=True,
@@ -383,7 +402,15 @@ def test_evening_leaves_other_dates_unchanged(env) -> None:
     _seed_old(env["target"])
     before = _not_t(env["target"])
     _evening(env)
-    assert _not_t(env["target"]) == before
+    after = _not_t(env["target"])
+    assert after["investor_detail_flows"] == before["investor_detail_flows"]
+    assert [r for r in after["daily_prices"] if r[0] != B] == \
+        [r for r in before["daily_prices"] if r[0] != B]
+    b_before = {r[1]: r for r in before["daily_prices"] if r[0] == B}
+    for r in (r for r in after["daily_prices"] if r[0] == B):
+        o, h, low, c, v, amt, _adj = b_before[r[1]][2:]
+        assert r[2:8] == (round(o / 2), round(h / 2), round(low / 2), round(c / 2), v * 2, amt), r
+        assert r[8] == pytest.approx(c / 2, rel=1e-12)
 
 
 def test_next_morning_replaces_t_rows_with_krx(env, tmp_path: Path) -> None:
@@ -393,7 +420,9 @@ def test_next_morning_replaces_t_rows_with_krx(env, tmp_path: Path) -> None:
     _evening(env)
     _seed_old(env["target"])
     before = _not_t(env["target"])
-    morning = _equity(tmp_path / "tm", TM_BUILD, (D21, D22, D23), krx_t_skip=(D,))
+    # B 의 T KRX 기준가는 원장 기준가와 같다(I-1 — 51,000 − 1,000) → 저녁에 붙인 T 단계와 같은 값
+    morning = _equity(tmp_path / "tm", TM_BUILD, (D21, D22, D23), krx_t_skip=(D,),
+                      bases={B: {D23: 50_000}})
     export(equity_root=morning, stage_root=env["stage"], date=T, basis="morning",
            target=env["target"], full=True, tables=["daily_prices", "investor_detail_flows"])
     got = _t_prices(env["target"])
@@ -424,10 +453,11 @@ def test_evening_reads_the_dprime_morning_build_and_the_evening_build(env, tmp_p
     assert res2.n_evening_rows_skipped == 1
     assert _t_prices(target2)[A][3] == 69_500
     # 그 판의 evening 행(기준가 35,000)은 K 사슬에도 들지 않는다 — 들면 A 가 사건 종목이 되어 D' 행이 반값이 된다
+    # (다시 맞춘 종목은 원장 T 단계가 있는 B 뿐이다)
     assert _rows(target2, "SELECT close, adj_close FROM daily_prices "
                           f"WHERE stock_code = '{A}' AND trade_date = '2026-09-22'") == [(70_000, 70_000.0)]
     rebase = res2.tables["daily_prices"].rebase
-    assert rebase is not None and rebase["tickers"] == []
+    assert rebase is not None and rebase["tickers"] == [B]
 
 
 def test_evening_refuses_a_build_that_already_has_t(env, tmp_path: Path) -> None:

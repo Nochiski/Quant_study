@@ -9,6 +9,7 @@ compat 자체를 돌리는 왕복은 맨 아래 통합 테스트가 맡는다.
 """
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import sqlite3
@@ -751,8 +752,15 @@ def test_real_compat_export_into_staging_then_apply(tmp_path: Path) -> None:
     stg = tmp_path / "staging.db"
 
     snapshot(main, stg)
+    # 제자리 반영은 창 세션을 판정 달력으로 센다(QL-E MINOR-1) — 주말만 휴장인 2026 달력
+    cal = tmp_path / "calendar"
+    cal.mkdir()
+    days = (dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(365))
+    (cal / "kis_holidays_2026.json").write_text(json.dumps(
+        {"year": 2026, "holidays": [x.strftime("%Y%m%d") for x in days if x.weekday() >= 5]}),
+        encoding="utf-8")
     res = export(equity_root=eq_root, stage_root=st_root, date=tce.AS_OF, basis="morning",
-                 target=stg, full=True, in_place=True, model_root=model_root)
+                 target=stg, full=True, in_place=True, model_root=model_root, calendar_dir=cal)
     assert res.window["from_date"] == "2024-09-23"
     report = apply(stg, main, tce.AS_OF, "morning")
 

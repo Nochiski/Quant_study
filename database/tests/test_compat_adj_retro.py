@@ -19,11 +19,12 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import itertools
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
-from compat import export
+from compat import CompatError, export
 from compat.quant_db import SCHEMA_SQL_PATH
 from conftest import _make_stage_tree
 from test_compat_export import _price_row, _uni_row
@@ -117,9 +118,11 @@ def _c(d: dt.date, last: dt.date) -> dt.date:
     return rows[3] if len(rows) >= 4 else last
 
 
-def _roots(base: Path, prices: list[dict] | None = None) -> tuple[Path, Path]:
+def _roots(base: Path, prices: list[dict] | None = None,
+           sec_type: dict[str, str] | None = None) -> tuple[Path, Path]:
     prices = _prices() if prices is None else prices
-    uni = [_uni_row(r["ticker"], r["date"], "KOSPI", "common") for r in prices]
+    uni = [_uni_row(r["ticker"], r["date"], "KOSPI", (sec_type or {}).get(r["ticker"], "common"))
+           for r in prices]
     eq = base / "eq"
     for table, rows in (("price_daily", prices), ("universe_daily", uni)):
         _make_stage_tree(eq, table, rows, build_id=BUILD)
@@ -136,12 +139,18 @@ NO_EQUITY_DAY = "2025-03-19"                            # 대상에만 있는 �
 SEED = 7                                                # 창 앞 행의 시·고·저 표식 — 이번 실행이 건드리면 바뀐다
 
 
+def _bf(t: str, d: dt.date) -> int:
+    """대상의 창 밖 종가 — v3 옛 백필 모양(원종가가 아닌 다른 기준 값, 여기선 절반). 창 밖 adj_close 를 이 값이 아니라
+    equity 원종가로 계산하는지 본다(재리뷰 NIT)."""
+    return _close(t, d) // 2
+
+
 def _seed_target(target: Path) -> None:
-    """창 밖 옛 행 — 앞선 반영본(사건 전 기준: 그때 adj = 종가)."""
+    """창 밖 옛 행 — 앞선 반영본(시·고·저 표식, 종가는 백필 모양, adj = 그 종가)."""
     con = sqlite3.connect(str(target))
     try:
         con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
-        rows = [(t, d.isoformat(), SEED, SEED, SEED, _close(t, d), 1, 1, float(_close(t, d)))
+        rows = [(t, d.isoformat(), SEED, SEED, SEED, _bf(t, d), 1, 1, float(_bf(t, d)))
                 for t in TICKERS for d in (*OLD, *PRE)]
         rows.append((EV, NO_EQUITY_DAY, SEED, SEED, SEED, 1_100, 1, 1, 1_100.0))
         con.executemany("INSERT INTO daily_prices VALUES (?,?,?,?,?,?,?,?,?)", rows)
@@ -259,16 +268,21 @@ def test_adj_returns_are_the_krx_returns(done) -> None:
 
 
 # ── 창 밖 ────────────────────────────────────────────────────────────────────
-def test_step_tickers_get_outside_adj_rebased_from_raw_close(done) -> None:
-    """⑤ 창 안에 단계가 든 종목은 대상의 창 밖 옛 행 adj_close 를 원종가 × K(d)/K(L) 로 다시 쓴다(시·고·저·종가·
-    거래량은 그대로 — 그 행은 앞선 실행이 이미 최종값을 썼다). equity 행이 없는 날은 NULL(P1)."""
+def test_step_tickers_get_outside_rows_rewritten_from_equity(done) -> None:
+    """⑤ 창 안에 단계가 든 종목은 대상의 창 밖 옛 행을 다시 쓴다 — adj_close = equity 원종가 × K(d)/K(L)(대상의 백필
+    모양 종가 × 비가 아니다, 재리뷰 NIT), 시·고·저·종가·거래량 = T-41 값(MINOR-1 자가 복구), 거래대금은 그대로.
+    equity 행이 없는 날은 시·고·저·종가·거래량을 두고 adj_close 만 NULL(P1)."""
     res, got = done
     for t in (EV, PO, HALT):
         for d in (*OLD, *PRE):
-            o, h, low, c, _v, _amt, adj = got[(t, d.isoformat())]
-            assert (o, h, low, c) == (SEED, SEED, SEED, _close(t, d)), (t, d)
+            f = k_ratio(t, d, _c(d, LAST))
+            src = _price(t, d, None)
+            o, h, low, c, v, amt, adj = got[(t, d.isoformat())]
+            assert (o, h, low, c) == tuple(round(src[k] * f) for k in ("open", "high", "low", "close")), (t, d)
+            assert (v, amt) == (round(src["volume_shr"] / f), 1), (t, d)
             assert adj == pytest.approx(_close(t, d) * k_ratio(t, d, LAST), rel=1e-12), (t, d)
-    assert got[(EV, NO_EQUITY_DAY)][3:] == (1_100, 1, 1, None)
+            assert adj != pytest.approx(_bf(t, d) * k_ratio(t, d, LAST), rel=1e-6), (t, d)
+    assert got[(EV, NO_EQUITY_DAY)] == (SEED, SEED, SEED, 1_100, 1, 1, None)
     rebase = res.tables["daily_prices"].rebase
     assert rebase is not None
     assert rebase["before"] == FROM_ISO
@@ -281,7 +295,7 @@ def test_tickers_without_a_step_in_the_window_leave_outside_rows_alone(done) -> 
     _, got = done
     for t in (PAST, NONE):
         for d in (*OLD, *PRE):
-            c = _close(t, d)
+            c = _bf(t, d)
             assert got[(t, d.isoformat())] == (SEED, SEED, SEED, c, 1, 1, float(c)), (t, d)
 
 
@@ -294,8 +308,7 @@ def test_145210_reverse_split_shape_matches_v3(done) -> None:
 
 def test_window_start_boundary(roots, tmp_path: Path) -> None:
     """창 첫 행 근처 — 사건(07-24)이 창 둘째 행이면(D = 07-27, 창 4일 = 07-23~) 창 첫 행은 덮어쓰기 값(×10)이고,
-    창 앞 3행(07-20~22)의 시·고·저·종가는 이번 실행이 건드리지 않는다(adj_close 만 다시 맞춘다). 그래서 창은
-    5세션 이상이어야 한다(매일 14일 창 — 사건일 실행에서 그 행들이 창 안이다)."""
+    창 앞 3행(07-20~22)도 사건 종목이라 T-41 값(×10)으로 다시 쓴다(MINOR-1) — 07-31 실행 값과 같다."""
     target = tmp_path / "quant.db"
     _seed_target(target)
     _run(roots, target)                                 # 07-31 기준 반영본(창 07-17~)
@@ -305,8 +318,58 @@ def test_window_start_boundary(roots, tmp_path: Path) -> None:
     first = dt.date(2026, 7, 23)
     assert got[(EV, first.isoformat())][3] == round(_close(EV, first) * k_ratio(EV, first, last))
     for d in (dt.date(2026, 7, 20), dt.date(2026, 7, 21), dt.date(2026, 7, 22)):
-        assert got[(EV, d.isoformat())][3] == _close(EV, d) * 10            # 07-31 실행 값 그대로
+        assert got[(EV, d.isoformat())][3] == _close(EV, d) * 10            # 07-31 실행 값과 같다
         assert got[(EV, d.isoformat())][6] == pytest.approx(_close(EV, d) * k_ratio(EV, d, last))
+
+
+def test_missed_runs_self_heal_pre_window_rows(roots, tmp_path: Path) -> None:
+    """MINOR-1 — 사건일(07-24) 반영을 놓쳐 사건 직전 행(07-20~23)이 원값으로 남은 채 창(07-24~)이 그 행들을 지나쳐도,
+    사건이 창 안에 있는 동안의 다음 반영이 그 행들을 T-41 값(×10)으로 바로잡는다."""
+    target = tmp_path / "quant.db"
+    _run(roots, target, date="20260723", window_days=600)          # 사건 전날까지의 반영본(원값)
+    pre = [d for d in WINDOW if dt.date(2026, 7, 20) <= d < E_EV]
+    assert all(_all(target)[(EV, d.isoformat())][3] == _close(EV, d) for d in pre)
+    _run(roots, target, date="20260728", window_days=4)            # 창 07-24~07-28
+    got = _all(target)
+    for d in pre:
+        assert got[(EV, d.isoformat())][3] == _close(EV, d) * 10, d
+        assert got[(EV, d.isoformat())][4] == round((1_000_000 + DAYS.index(d)) / 10), d
+
+
+def _calendar(base: Path) -> Path:
+    d = base / "calendar"
+    d.mkdir(parents=True, exist_ok=True)
+    days = (dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(365))
+    hol = [x.strftime("%Y%m%d") for x in days if x.weekday() >= 5]
+    (d / "kis_holidays_2026.json").write_text(json.dumps({"year": 2026, "holidays": hol}),
+                                              encoding="utf-8")
+    return d
+
+
+def test_in_place_window_needs_five_sessions(roots, tmp_path: Path) -> None:
+    """MINOR-1 — 제자리 반영 창이 5거래일보다 좁으면(07-27~31 창 3일 = 07-28·29·30·31 4세션) 쓰기 전에 멈춘다(rc 2).
+    5세션(창 4일 → 07-27~31)이면 지난다. 달력을 못 읽으면 영업일을 가정하지 않고 멈춘다."""
+    cal = _calendar(tmp_path)
+    target = tmp_path / "quant.db"
+    kw = {"equity_root": roots[0], "stage_root": roots[1], "date": D, "basis": "morning",
+          "target": target, "tables": ["daily_prices"], "full": True, "in_place": True}
+    with pytest.raises(CompatError, match="5거래일"):
+        export(window_days=3, calendar_dir=cal, **kw)
+    assert not target.exists()
+    assert export(window_days=4, calendar_dir=cal, **kw).status == "ok"
+    with pytest.raises(CompatError, match="세션을 셀 수 없다"):
+        export(window_days=14, calendar_dir=tmp_path / "nocal", **kw)
+
+
+def test_rebase_tickers_are_v3_stocks_only(tmp_path: Path) -> None:
+    """재리뷰 NIT — 창 안 단계가 있어도 v3 종목 집합 밖(우선주 등)은 다시 맞춤 목록에 들지 않는다."""
+    prices = _prices() + [{**r, "ticker": "145215"} for r in _prices() if r["ticker"] == EV]
+    roots = _roots(tmp_path / "pref", prices, sec_type={"145215": "preferred"})
+    target = tmp_path / "quant.db"
+    _seed_target(target)
+    res = _run(roots, target)
+    rebase = res.tables["daily_prices"].rebase
+    assert rebase is not None and rebase["tickers"] == sorted([EV, PO, HALT])
 
 
 def test_daily_runs_equal_one_full_run(roots, tmp_path: Path) -> None:

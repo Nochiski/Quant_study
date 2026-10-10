@@ -136,7 +136,7 @@ v3 에 들어가는 값이다. 서버 재생(T=10-08, 21:05 경로만 — 장 �
 | `daily_prices.close` | `price_daily.close` ← ka10060 `cur_prc`(`rules_kiwoom.py:55`) | **있다**. 단 정의가 다르다 — KRX 공식 종가(15:30)가 아니라 **장후 마지막 체결가**(결정 11-(c)) | postclose 행 = KRX 공식 종가(정규장, T-33). 16:00 을 넘겨 21:05 원장으로 채운 종목만 장후 마지막 체결가 |
 | `daily_prices.volume` | `price_daily.volume_shr` ← ka10060 `acc_trde_prica`. 이름은 "누적거래대금" 이지만 **실측은 거래량(주)** — KRX `ACC_TRDVOL` 과 99.9864% 일치(`rules_kiwoom.py:57-58` 주석) | **있다** (애프터마켓 포함 — KRX 와 같은 정의, 결정 11-(a)) | postclose 행 = 16:00 전까지(애프터마켓 미포함), 21:05 원장 행 = 애프터마켓 포함 |
 | `daily_prices.amount` (백만원) | **없다**. 저녁 키움 4 TR 어디에도 거래대금 필드가 없다: ka10060 의 `acc_trde_prica` 는 위처럼 거래량이고, ka10014 의 `shrts_trde_prica_krw` 는 **공매도 거래대금만**(`rules_kiwoom.py:104-105`), ka20068 `remn_amt_krw` 는 대차잔고 금액이다 | **결측 · 원장에 대체 필드 없음** | 종가 × 거래량 ÷ 1e6 근사(T-32). 오차는 KRX 행으로만 쟀다(§4-2) — **21:05 원장 행(장후 체결가 × 애프터마켓 포함 거래량)의 오차는 미실측**(§6-2) |
-| `daily_prices.adj_close` | `price_adj_daily.adj_close` — T 행 존재(전방 조정, `price_adj_daily.sql` 이 evening 행을 그대로 싣는다) | **있다** | T 종가 그대로(T-40 — T 가 최신 행이고 그날 기준가 = D' 종가면 T 의 KRX 기준가 단계가 1 이다). 그날 기준가 ≠ D' KRX 종가(T-6 첫 조건)면 NULL 이고 그 종목의 D' 이하 행은 D' 기준으로 둔다 — 다음 날 아침 KRX 반영이 T 단계로 창 전체와 창 밖 adj_close 를 다시 쓴다(§7) |
+| `daily_prices.adj_close` | `price_adj_daily.adj_close` — T 행 존재(전방 조정, `price_adj_daily.sql` 이 evening 행을 그대로 싣는다) | **있다** | T 종가 그대로(T-40 — T 가 최신 행). 사슬 끝에 원장 T 단계 `ks_T = D' 종가 ÷ (종가_T − 전일대비_T)` 를 붙여(T-41 보완 — I-1: 키움 기준가 = KRX 기준가) 사건일 종목의 D'−3..D' 덮어쓰기·창 안 adj_close·창 밖 다시 맞춤이 그날 저녁 v3 20:05 결과와 같다. 전일대비·D' 종가가 없으면 단계를 모른다 → T 행 adj_close NULL, 창 행은 D' 기준 — 다음 날 아침 KRX 반영이 맞춘다(§7) |
 | `stocks.market_cap` (억원) | `price_daily.mktcap_krw` 는 evening 행에서 **NULL**(`shares_out` NULL). B-24 규칙(T-1 KRX `shares_out` × T 키움 `close`)으로 파생해야 한다 — 플랜 §3-2 가 `src/model/inputs.py` 한 곳에 두기로 한 규칙 | **파생 필요**(규칙은 이미 결정, 구현은 T2.2) | QL-D 범위 밖 — D' 값 그대로 |
 | `investor_detail_flows` 13열 | 원장·stage 에는 있다(`stg_flow_daily_kiwoom` T 행). 그런데 equity `flow_daily` 의 격자는 `universe_daily` = `trading_calendar` × `security_span` 이고, `trading_calendar` = `stg_index_daily`(KRX 지수) distinct date 라 **저녁에는 T 가 캘린더에 없다**. 그래서 T 의 ka10060 행은 `flow_daily.sql` 세 번째 분기로 가 `reject_reason='off_grid'`(`_reject/reject_reason=off_grid/`)에 격리된다 | **equity 산출 표에 T 행 없음** | 원장에서 12열(내외국인 `natfor` 는 자리 없음). 가격과 같은 종목 원천 |
 | `investor_detail_flows` T-1 이전 | `flow_daily` measured 행 | **있다** | 그대로 |
@@ -354,15 +354,22 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
 - **장 마감 판 T 행 — 원천·채움이 다르다(QL-D, N-42 Q3, T-32·T-33)**: `--basis evening` 의 `daily_prices`·`investor_detail_flows` T 행은 원장에서 만든다(규칙 정본 `src/compat/t_rows.py`). 종목마다 원천이 하나이고(두 표가 같은 선택) `_compat_meta.tables` 의 표별 `t_rows` 에 남는다(`postclose`·`kiwoom_2105` 수, 21:05 원장으로 대체한 종목, 행 없는 종목과 그 비율 `missing_ratio` — 기록형).
   - `postclose` 행(15:41~16:00, `price_valid='1'` · 종가 > 0 · 거래량 있음 — `daily.kw_daily.ka10060_postclose_price_usable_sql`, fi 장 마감 판 PR-5 와 같은 술어): 종가 = KRX 공식 종가(정규장, T-33), 거래량·수급 = 16:00 전까지. v3(20:05 ka10081·ka10059)는 애프터마켓까지 포함한 값이라 다르다.
   - `kiwoom_2105` 행(21:05 키움 원장 — 16:00 을 넘긴 종목, `price_valid` 가 '0'·NULL 이거나 종가가 비었거나 0 이하·거래량이 빈 종목): 지금 v3 와 같은 뜻(애프터마켓 포함)이다. 과거 T 재생(장 마감 원장이 없던 날)은 전 종목이 이 경로다.
-  - `open`·`high`·`low` = 종가, `amount` = 종가 × 거래량 ÷ 1e6(근사 — 오차는 §6-2 미실측), `adj_close` = T 종가(T 가 최신 행 — 아래 daily_prices 항목). 그날 기준가 ≠ D' 종가(T-6 첫 조건, `daily.kw_daily.ka10060_base_price_differs_sql`)면 `adj_close` NULL — 그날 저녁~다음 날 아침 동안만이다.
+  - `open`·`high`·`low` = 종가, `amount` = 종가 × 거래량 ÷ 1e6(근사 — 오차는 §6-2 미실측), `adj_close` = T 종가(T 가 최신 행 — 아래 daily_prices 항목). 사건일(기준가 ≠ D' 종가)이어도 원장 기준가(`daily.kw_daily.ka10060_base_price_sql`)로 T 단계를 알면 값이 있다. 전일대비·D' 종가가 없어 단계를 모를 때만 NULL — 그날 저녁~다음 날 아침 동안만이다.
   - 대상 = D' 유니버스 이월이라 T 당일 신규 상장 종목은 없다(v3 는 그날 ka10099 에 있으면 싣는다).
   - 다음 날 아침 `--basis morning --date T` 가 T 행을 날짜 단위로 KRX 행으로 바꾼다 — 아침 KRX 에 없는 종목의 저녁 행도 지워진다. 아침 판에 그날 행이 0 이면 지우지 않고 멈춘다. 반대로 대상에 이번(T, 장 마감)보다 나중 반영 기록(T-35 순서 — 날짜가 뒤이거나 같은 날 아침, 판정은 `v3_post._newer` 한 곳)이 있으면 장 마감 판이 멈춘다(재생은 `--allow-older`).
 
 - **`daily_prices` — v3 가 쌓던 모양 그대로(QL-E · T-18 · T-40 · T-41)**: 식 정본은 `src/compat/mappings.py` daily_prices 주석이다.
   - **adj_close = KRX 기준가 사슬 K(T-40)**: `ks(e) = 전일 종가 ÷ 기준가`(다를 때, 아니면 1), `adj_close(d) = 종가(d) × K(d) ÷ K(L)`, L = 그 종목의 마지막 행. v3(키움 ka10081 수정주가)가 곧 K 사슬이다 — 로컬 v3 08-07 사본 932,265행 중 1원·0.15% 밖 0행(리뷰 재현, 원천은 equity `price_daily` 종가·기준가). equity `price_adj_daily` 계수는 쓰지 않는다(기준가 무변화 날 접기·정지 해제 재평가 없음·호가 반올림이 키움과 다르다). equity·fi·모델의 전방 조정은 그대로다(T-3).
   - **시·고·저·종가·거래량 = v3 '최근 5행 덮어쓰기'(T-41)**: v3 는 매일 ka10081 최근 5행을 그날 기준 수정값으로 덮는다. 그래서 행 d 는 `c = min(d 뒤 4번째 행, L)` 기준값이다 — 가격 = 원값 × K(d)/K(c), 거래량 = 원값 × K(c)/K(d), 거래대금은 원값(로컬 사본: 덮인 행의 거래대금은 원값 82% · 조정값 45% 일치). 사건이 없으면 원값이다. 07:00 브리핑이 원종가로 등락률을 세면 사건일에 가짜 급등락(011930 병합 +900% 등)이 뜨므로 지키는 기존 동작이다. 장 마감 판 T 행은 T-32 채움 그대로(T 가 최신 행 — c = T).
-  - **창 밖**: 창 안에 기준가 단계가 든 종목은 대상의 창 밖 옛 행 adj_close 도 다시 쓴다(v3 가 사건 뒤 종목 전 기간 adj_close 를 다시 받는 것과 같은 결과). 값은 equity 원종가 × K(d)/K(L) 이고(대상 close 는 덮어쓰기 값일 수 있어 곱하지 않는다), 다른 열과 행 수는 그대로, equity 행이 없는 날은 NULL 이다. 기록은 `_compat_meta.tables.daily_prices.rebase`(종목·다시 쓴 행 수·NULL 수). 덮어쓰기(c)는 d 뒤 4행 안이라 행이 창(14달력일 ≥ 5세션)을 떠날 때는 이미 최종값이다. K 는 equity 규칙 판본과 무관하므로 equity 상향으로 창 밖 값이 낡지 않는다. 남는 한계는 반영이 창 길이보다 오래 끊긴 경우뿐이다 — `--full` 로 맞춘다. 배포 직후의 그림자 대상(`data/compat/quant.db` — 그때까지 전방 조정 값)도 `--full` 1회가 필요하다. v3 본 파일은 첫 반영(V3-C)이 `--full` 이다.
-  - **대조 기준**: 가격·거래량·거래대금은 ±1, adj_close 는 1원 또는 0.15% 안(키움이 원 단위로 반올림한다). 남는 차이는 서버 대조로 확인된 것만 적는다 — ① 종가 정의(T-33, 09-14 애프터마켓 연장 뒤 행). ② 장 마감 판 T-6 종목의 T 행 adj_close NULL(설계 — 그날 저녁~다음 날 아침). 10-08 사본 `--full` 대조(QL-E 보고의 명령) 결과로 나머지를 여기 더한다.
+  - **장 마감 판 T 단계(T-41 보완, QL-E 재리뷰 MAJOR-A)**: equity 판의 사슬은 D' 에서 끝나므로 원장 T 행의 단계 `ks_T = D' 종가 ÷ 기준가_T`(기준가_T = 종가_T − 전일대비_T, `daily.kw_daily.ka10060_base_price_sql` — I-1: 키움 기준가 = KRX 기준가 사건일 4,219/4,219)를 사슬 끝에 붙인다(`compat.t_rows.STEP_TABLE`). 사건일 종목의 D'−3..D' 행(d 뒤 4번째 행이 T)이 그날 저녁 덮어써져 07:00 브리핑 등락률이 KRX 수익률이 된다. 다음 날 아침 KRX 반영은 같은 단계를 KRX 기준가로 다시 세어 같은 값을 쓴다(멱등). 전일대비나 D' 종가가 없을 때만 단계를 모른다 — T 행 adj_close NULL, 창 행은 D' 기준.
+  - **창 밖**: 창 안에 기준가 단계가 든 v3 종목(`V3_STOCK_FILTER`)은 대상의 창 밖 옛 행도 다시 쓴다 — adj_close = equity 원종가 × K(d)/K(L)(대상 close 는 덮어쓰기·옛 백필 값일 수 있어 곱하지 않는다), 시·고·저·종가·거래량 = T-41 값(자가 복구, MINOR-1). 거래대금·행 수는 그대로이고, equity 행이 없는 날은 시·고·저·종가·거래량을 두고 adj_close 만 NULL 이다. 기록은 `_compat_meta.tables.daily_prices.rebase`(종목·다시 쓴 행 수·NULL 수) — NULL 이 0 이 아니면 `v3_post.sh` 가 warn 한 줄을 남긴다(정지 아님).
+  - **창 하한과 한계**: 제자리 반영(`--in-place`)은 창이 5거래일(`MIN_WINDOW_SESSIONS` = 덮어쓰기 4행 + 1, `daily.calendar`) 이상이어야 한다 — 아니면 쓰기 전에 멈춘다(rc 2). 매일 14달력일 창은 늘 넘는다. 반영이 며칠 끊겨 사건 직전 행이 창 밖으로 밀려도, 사건 단계가 창 안에 있는 동안의 다음 반영이 위 자가 복구로 그 행들을 바로잡는다. 못 잡는 경우는 둘이다: ① 반영이 끊긴 사이 사건 단계까지 창 밖으로 나간 경우(공백 > 창 길이) ② equity `price_daily` 원값(종가·기준가)이 판 상향으로 바뀐 경우 — K 는 그 원값이 바뀌지 않는 한 equity 판본과 무관하다. 둘 다 `--full` 로 맞춘다. 배포 직후의 그림자 대상(`data/compat/quant.db` — 그때까지 전방 조정 값)도 `--full` 1회가 필요하다. v3 본 파일은 첫 반영(V3-C)이 `--full` 이다.
+  - **대조 기준**: 가격·거래량·adj_close 는 ±1 또는 0.15%(키움이 조정값을 원·주 단위로 반올림한다), 거래대금은 ±1. 대조 스크립트는 QL-E 보고에 있다. 남는 차이(수치는 서버 10-08 사본 `--full` 재실행 뒤 채운다):
+    1. **T-33 종가 정의** — 09-14 애프터마켓 연장 뒤 전 거래일. v3 종가는 애프터마켓 마지막 체결가, compat 은 KRX 공식 종가라 수준이 아니라 adj/close 비(= K(d)/K(L))와 거래량으로 대조한다. (행 수: 서버 재실행 뒤)
+    2. **v3_backfill** — v3 옛 일괄 백필이 행 d 를 d+4 보다 뒤 날 기준 수정값으로 덮은 행(로컬 08-07 사본 34,339행·217종목). adj_close 는 같다. V3-C `--full` 뒤에는 v3 과거 OHLCV 가 T-41 규칙값으로 바뀐다(의도 — 소비자가 보는 과거 시·고·저·종가·거래량이 달라진다). (서버 수치: 재실행 뒤)
+    3. **v3 adj_close NULL · GAP-4 후보** — v3 adj_prices 가 못 채운 행·옛 기준에 남은 종목. `v3_defect`. (서버 수치: 재실행 뒤)
+    4. **v3 오류일 2026-03-27** — 그날 v3 종가가 전 종목에서 틀리다(로컬 사본 2,442행). `v3_defect`.
+    5. **장 마감 판 T 단계 미상 NULL** — MAJOR-A 로 사건일 NULL 은 사라지고, 원장 전일대비(또는 D' 종가)가 없는 종목의 그날 저녁~다음 날 아침 T 행 adj_close 만 남는다.
 
 ---
 
@@ -386,7 +393,7 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 
 | 표 | 반영 범위(= compat 이 쓴 범위) |
 |---|---|
-| `daily_prices` · `investor_detail_flows` | `trade_date` ∈ 이번 기록의 창 `[from_date, to_date]`. `daily_prices` 는 여기에 **창 밖 다시 맞춘 종목**(기록의 `tables.daily_prices.rebase.tickers`)의 `trade_date < from_date` 행을 더한다 — 창 안에 KRX 기준가 단계가 든 종목의 창 밖 adj_close(QL-E — §7 daily_prices) |
+| `daily_prices` · `investor_detail_flows` | `trade_date` ∈ 이번 기록의 창 `[from_date, to_date]`. `daily_prices` 는 여기에 **창 밖 다시 맞춘 종목**(기록의 `tables.daily_prices.rebase.tickers`)의 `trade_date < from_date` 행을 더한다 — 창 안에 KRX 기준가 단계가 든 v3 종목의 창 밖 행(OHLCV·adj_close, QL-E — §7 daily_prices). 그중 adj_close 를 NULL 로 둔 행(`rebase_null`)이 있으면 warn 한 줄 |
 | `score_history` · `score_history_v2` | `score_date = D` |
 | `stocks` · `consensus_revision_daily` · `consensus_revision_compare` · `consensus_annual` · `financial_summary` | 표 전체(날짜 창 없는 as-of 스냅샷 — 스테이징이 같은 락 안의 사본이라 compat 이 안 건드린 행은 같은 값으로 다시 들어간다) |
 

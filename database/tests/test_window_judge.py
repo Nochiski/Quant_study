@@ -137,30 +137,67 @@ def test_세션_예외일과_휴장일은_건너뛰고_연속을_끊지_않는�
     home = _home(tmp_path, holidays=("20261009", "20261013"),
                  session={"20261014": "시험용 세션 예외(수능 가정)"})
     _good(home, "20261012", "20261015", "20261016")
-    # 세션 예외일: 수집기만 session_exception 으로 남기고 체인은 건너뛴다(PR-8) · 그날 crit·개입은 판정 밖
+    # 세션 예외일: 수집기만 session_exception 으로 남기고 체인은 건너뛴다(PR-8)
     _chain(home, "20261014", {"kiwoom_postclose": "session_exception", "postclose_stage": None,
                               "postclose_fi": None, "postclose_model": None,
                               "postclose_excel": None, "postclose_v3": None})
-    _notify(home, "2026-10-14T06:41:00Z crit 세션 예외일 시험 crit | 본문")
-    wj.record(home / wj.LEDGER, date="20261013", what="휴장일 서버 점검", by="controller")
     res = _judge(home, "20261012", "20261016")
     st = {x.key: (x.status, x.skip) for x in res.days}
     assert st["20261013"] == ("skip", "휴장")
     assert st["20261014"][0] == "skip" and "세션 예외" in str(st["20261014"][1])
     assert res.streak == ["20261012", "20261015", "20261016"]
     assert res.rc == 0
-    # 건너뛴 날 기록은 버리지 않고 보인다(판정에는 넣지 않는다)
-    off = " ".join(res.off_window)
-    assert "세션 예외일 시험 crit" in off and "휴장일 서버 점검" in off
 
 
-def test_주말_crit_은_판정_밖_기록으로만_남는다(tmp_path: Path) -> None:
+# ── 건너뛴 날 기록의 귀속(T-39) — 직전 거래일 ─────────────────────────────────
+def test_토요일_crit_은_금요일_실패(tmp_path: Path) -> None:
+    """주말 06:00 체인이 처리하는 D 는 직전 거래일이다 — 토요일 crit 은 금요일 실패(T-39)."""
     home = _home(tmp_path)
     _good(home, "20261014", "20261015", "20261016", "20261019")
     _notify(home, "2026-10-17T03:10:00Z crit 토요일 시험 crit | 본문")   # 10-17(토) 12:10 KST
     res = _judge(home, "20261014", "20261019")
-    assert all(x.status == "pass" for x in res.days)
-    assert any("토요일 시험 crit" in r for r in res.off_window)
+    d16 = _day(res, "20261016")
+    assert d16.status == "fail"
+    assert any("토요일 시험 crit" in r and "귀속: 10-17(토" in r and "→ 10-16(금)" in r for r in d16.fails)
+    assert _day(res, "20261019").status == "pass"
+    assert res.streak == ["20261019"]
+    assert res.off_window == []
+
+
+def test_연휴_중_crit_과_수동_개입은_연휴_전_마지막_거래일_실패(tmp_path: Path) -> None:
+    home = _home(tmp_path, holidays=("20261009", "20261013", "20261014", "20261015"))
+    _good(home, "20261012", "20261016", "20261019")
+    _notify(home, "2026-10-14T01:00:00Z crit 연휴 시험 crit | 본문",        # 10-14(수) 휴장
+            "2026-10-18T02:00:00Z warn 일요일 시험 warn | 본문")          # 10-18(일) → 10-16 경고만
+    wj.record(home / wj.LEDGER, date="20261015", what="연휴 중 서버 점검", by="controller")
+    res = _judge(home, "20261012", "20261019")
+    d12 = _day(res, "20261012")
+    assert d12.status == "fail"
+    assert any("연휴 시험 crit" in r and "귀속: 10-14(수" in r and "→ 10-12(월)" in r for r in d12.fails)
+    assert any("연휴 중 서버 점검" in r and "귀속: 10-15(목" in r for r in d12.fails)
+    d16 = _day(res, "20261016")
+    assert d16.status == "pass"
+    assert any("일요일 시험 warn" in w and "→ 10-16(금)" in w for w in d16.warns)
+    assert res.streak == ["20261016", "20261019"]
+
+
+def test_세션_예외일_crit_은_직전_거래일_실패(tmp_path: Path) -> None:
+    home = _home(tmp_path, session={"20261014": "시험용 세션 예외"})
+    _good(home, "20261012", "20261013", "20261015")
+    _notify(home, "2026-10-14T06:41:00Z crit 세션 예외일 시험 crit | 본문")
+    res = _judge(home, "20261012", "20261015")
+    assert _day(res, "20261013").status == "fail"
+    assert res.streak == ["20261015"]
+
+
+def test_창_시작_전_거래일에_귀속될_기록은_판정_밖으로_보인다(tmp_path: Path) -> None:
+    """창 시작이 주말이면 그 주말 기록의 직전 거래일은 창 밖이다 — 버리지 않고 표시한다."""
+    home = _home(tmp_path)
+    _good(home, "20261012")
+    _notify(home, "2026-10-10T03:00:00Z crit 창 시작 전 토요일 crit | 본문")   # 10-10(토)
+    res = _judge(home, "20261010", "20261012")
+    assert _day(res, "20261012").status == "pass"
+    assert any("창 시작 전 토요일 crit" in x for x in res.off_window)
 
 
 # ── 하루 판정 ────────────────────────────────────────────────────────────────

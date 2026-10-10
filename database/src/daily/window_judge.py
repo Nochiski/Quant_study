@@ -18,7 +18,9 @@
 결과)이 이미 있으면 '아직'이 아니라 미실행이라 실패다(공통 3 — 못 쟀거나 건너뛰었으면 통과가 아니다).
 판정 불가: 대조 결과 파일을 못 읽거나 모양이 다르다 — 그날은 통과로 세지 않고 도구 rc 2.
 휴장일·세션 예외일(T-26)은 창에 넣지 않는다 — 실패로도 통과로도 세지 않는다. 거래일은 `daily.calendar`(판정 달력·
-세션 예외표)로 센다. 건너뛴 날(주말 포함)의 crit·warn·수동 개입은 '건너뛴 날 기록'으로 보이기만 한다.
+세션 예외표)로 센다. 건너뛴 날(주말 포함)의 crit·warn·수동 개입은 직전 거래일(창에 넣는 날)에 귀속한다(T-39 —
+주말 06:00 체인이 처리하는 D 는 직전 거래일이고, 모호하면 실패 쪽 P1). 사유에 '귀속: <원래 날짜> → <거래일>' 을
+붙인다. 직전 거래일이 판정 범위 앞이면(창 시작이 주말 등) 버리지 않고 '판정 밖 기록'으로 보인다.
 
 3일 창: --start 부터 거래일 순서로 센다. 실패 1건이면 그 다음 거래일부터 다시 센다(공통 3). 마지막 실패 뒤 연속
 통과가 3거래일 이상이면 통과. 미판정·판정 불가인 날에서 연속은 멈춘다 — 그날을 건너 이어 세지 않는다.
@@ -372,16 +374,21 @@ def _chain_reasons(runs: list[Run], later: bool) -> tuple[list[str], list[str]]:
     return fails, pending
 
 
+def _add_records(day: Day, notes: list[Note], ledger: list[dict[str, str]], tail: str = "") -> None:
+    """crit·수동 개입은 실패, warn 은 경고로 싣는다. `tail` = 건너뛴 날에서 귀속한 표시(T-39)."""
+    for n in notes:
+        (day.fails if n.level == "crit" else day.warns).append(n.text() + tail)
+    for m in ledger:
+        day.fails.append(f"수동 개입: {m['what']} ({m['by']})" + tail)
+
+
 def _judge_day(d: dt.date, *, runs: dict[str, list[Run]], last_run: str, notes: dict[str, list[Note]],
                ledger: dict[str, list[dict[str, str]]], compare_dir: Path, last_compare: str) -> Day:
     key = _key(d)
     day = Day(d)
     day.fails, day.pending = _chain_reasons(runs.get(key, []), later=last_run > key)
     chain_failed = bool(day.fails)
-    for n in notes.get(key, []):
-        (day.fails if n.level == "crit" else day.warns).append(n.text())
-    for m in ledger.get(key, []):
-        day.fails.append(f"수동 개입: {m['what']} ({m['by']})")
+    _add_records(day, notes.get(key, []), ledger.get(key, []))
     path = compare_dir / f"{key}.json"
     try:
         cmp = read_compare(path, d)
@@ -413,7 +420,7 @@ class Result:
     days: list[Day]                         # 3일 창(--start ~ --as-of), 건너뛴 평일 포함
     by_date: dict[dt.date, Day]             # 판정한 모든 날(되돌리기 창 포함)
     rollback_dates: list[dt.date]
-    off_window: list[str]
+    off_window: list[str]                   # 판정 범위 앞 거래일에 귀속될 건너뛴 날 기록(버리지 않고 표시)
     unparsed: list[str]
     restart_from: str | None
     generated_at: str = field(
@@ -508,19 +515,25 @@ def judge(home: Path, start: dt.date, as_of: dt.date, *, cutover: dt.date | None
     by_date: dict[dt.date, Day] = {}
     off_window: list[str] = []
     cur = min([start, *rollback_dates[:1]])
+    prev: dt.date | None = None             # 직전 거래일(창에 넣는 날) — 건너뛴 날 기록의 귀속처(T-39)
     while cur <= as_of:
         key = _key(cur)
         if cal.counted(cur):
             by_date[cur] = _judge_day(cur, runs=runs, last_run=last_run, notes=notes, ledger=ledger,
                                       compare_dir=compare_dir, last_compare=last_compare)
+            prev = cur
         else:
             reason = cal.skip_reason(cur)
             if reason:
                 by_date[cur] = Day(cur, skip=reason)
-            why = reason or "주말"
-            off_window += [f"{_label(cur)} {why} · {n.text()}" for n in notes.get(key, [])]
-            off_window += [f"{_label(cur)} {why} · 수동 개입: {m['what']} ({m['by']})"
-                           for m in ledger.get(key, [])]
+            origin = f"{_label(cur)} {reason or '주말'}"
+            if prev is not None:
+                _add_records(by_date[prev], notes.get(key, []), ledger.get(key, []),
+                             tail=f" (귀속: {origin} → {_label(prev)})")
+            else:
+                off_window += [f"{origin} · {n.text()}" for n in notes.get(key, [])]
+                off_window += [f"{origin} · 수동 개입: {m['what']} ({m['by']})"
+                               for m in ledger.get(key, [])]
         cur += dt.timedelta(days=1)
     days = [by_date[d] for d in sorted(by_date) if d >= start]
     fails = [d.date for d in days if d.status == "fail"]
@@ -558,7 +571,7 @@ def render(res: Result, out: Path | None) -> str:
         lines += [f"  실패 {f}" for f in fails]
         lines += [f"  {k} 건너뜀 — {' · '.join(why)}" for k, st, why in rows if st == "skip"]
     if res.off_window:
-        lines.append("건너뛴 날 기록(판정 밖):")
+        lines.append("판정 밖 기록(직전 거래일이 판정 범위 앞 — 창 시작이 주말·휴장):")
         lines += [f"  {x}" for x in res.off_window]
     if res.unparsed:
         lines.append(f"notify.log 형식 밖 줄 {len(res.unparsed)} — 날짜·등급을 몰라 판정에 넣지 못함:")

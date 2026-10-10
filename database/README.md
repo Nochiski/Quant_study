@@ -308,7 +308,8 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 그림자·실운영 3거래일 창과 되돌리기 5거래일 창을 판정 달력(`daily.calendar`)으로 센다. 규칙 정본은
 `docs/plans/2026-10-10-cutover-track.md` §4 이고 모듈 머리 주석에 옮겨 두었다. 거래일 T 통과 = 장 마감 체인 단계
 런 전부 ok · 그날(KST) crit 0(일일 리포트 줄은 제목의 D) · 수동 개입 0 · 다음 날 두 판 대조
-`data/model_db/compare/<T>.json` pass. 실패 1건이면 다음 거래일부터 다시 세고, 휴장·세션 예외일은 건너뛴다.
+`data/model_db/compare/<T>.json` pass. 실패 1건이면 다음 거래일부터 다시 세고, 휴장·세션 예외일은 건너뛴다
+— 그날(주말 포함)의 crit·수동 개입은 직전 거래일에 귀속한다(T-39).
 입력은 읽기만 하고 `data/cutover/window.json` 에 결과를 쓴다(`--dry-run` 이면 안 씀). rc 0 통과 · 1 아직·실패 · 2 입력 오류.
 
 ```bash

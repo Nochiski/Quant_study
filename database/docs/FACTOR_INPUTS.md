@@ -135,7 +135,7 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
 
 ```bash
 python -m daily.board_compare --date <T> --evening-root data/model_db --research-root data \
-    [--calendar-dir data/calendar] [--replay] [--out-root DIR] [--spearman-min 0.975] [--list-n 20]
+    [--calendar-dir data/calendar] [--replay] [--out-root DIR] [--spearman-min X] [--list-n 20]
 ```
 
 - 장 마감 판 T(`data/model_db/{factor_inputs,model}/_runs/<T>_evening.json`)를 다음 날 08:10 연구 판
@@ -152,9 +152,13 @@ python -m daily.board_compare --date <T> --evening-root data/model_db --research
   종가 = 정규장 종가라 미설명). 거래량·수급(주체별 판 통계 상한)·16:00 컷오프(stage)·수집 대상 밖·
   T-6(연구 판 흔적)·신용 T 실입수는 각자 증거를 본다. 맞는 범주가 없으면 미설명이다.
 - 모델은 spec 마다 종합점수 Spearman · 엑셀 후보 겹침 · 점수 열 |Δ| 상위 종목과 그 종목의 fi 범주.
-- rc 0 = 미설명 0 · 모든 spec Spearman ≥ 하한(0.975 임시 — `--spearman-min 0` 은 기록형) / 1 = 미설명
-  있음 또는 하한 미달 / 2 = 입력 오류. 결과는 `<out-root>/compare/<T>.json`(기본 out-root =
-  `--evening-root`, rc 2 도 `verdict: error` 로 남긴다).
+- Spearman 하한은 spec 별 표(T-47, `SPEARMAN_MIN_BY_SPEC`): scope@1.0 0.92 · v3_zscore@1.0 0.91 ·
+  v2_percentrank@1.0 0.96 · v4_rank@0.1 0.93 · v4_rank@0.2 0.94, 표에 없는 spec 은 0.975(보수 — 자기 재생 분포를
+  등록할 때까지). 근거는 P5 장 마감 재생 24거래일(09-02~10-08) 최저 − 0.03 내림이고, 여유 0.03 은 재생이 못 보는
+  정규장 대 21:05 수급 차이 몫이다 — 그림자 3거래일 값으로 다시 본다. `--spearman-min X` 는 전 spec 을 X 로
+  덮어쓴다(0 = 기록형). 적용한 하한은 JSON `thresholds.spearman_min` 에 spec 별로 실린다.
+- rc 0 = 미설명 0 · 모든 spec Spearman ≥ 그 spec 하한 / 1 = 미설명 있음 또는 하한 미달 / 2 = 입력 오류.
+  결과는 `<out-root>/compare/<T>.json`(기본 out-root = `--evening-root`, rc 2 도 `verdict: error` 로 남긴다).
 
 ## 3. 판 규약
 

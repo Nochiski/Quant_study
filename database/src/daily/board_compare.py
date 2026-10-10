@@ -36,14 +36,17 @@
 T 가격)로만, 한쪽만 종합점수가 빈 행은 자기 fi 차이로만 설명한다. fi 8표가 같은데 점수가 다르거나 spec 이
 한 판에만 있으면 미설명이다.
 
-rc: 0 = 미설명 0 이고 모든 spec Spearman ≥ 하한 / 1 = 미설명 있음 또는 하한 미달(셀 수 없음 포함) /
+Spearman 하한은 spec 별 표(`SPEARMAN_MIN_BY_SPEC`, T-47 — 표 밖 spec 은 `SPEARMAN_MIN_DEFAULT` 0.975)이고
+`--spearman-min X` 는 전 spec 을 X 로 덮어쓴다(0 = 기록형). 적용한 하한은 JSON `thresholds.spearman_min` 에 spec 별로 싣는다.
+
+rc: 0 = 미설명 0 이고 모든 spec Spearman ≥ 그 spec 하한 / 1 = 미설명 있음 또는 하한 미달(셀 수 없음 포함) /
 2 = 입력 오류(판 없음·실패 판·date·basis·asof·달력·규칙 판본·스키마·증거 원천 없음·보고서 쓰기 실패·
 예상 밖 예외). 산출: 표준 출력 한 화면 요약 + `<out-root>/compare/<T>.json`(기본 out-root =
 --evening-root). X-2 연속 창 집계·실운영 3거래일 판정이 읽는다 — rc 2 도 `verdict: error` 로 남긴다.
 
 사용: PYTHONPATH=src python -m daily.board_compare --date YYYYMMDD --evening-root data/model_db \\
           --research-root data [--calendar-dir DIR] [--replay] [--out-root DIR] \\
-          [--spearman-min 0.975]
+          [--spearman-min X]
 """
 from __future__ import annotations
 
@@ -77,13 +80,20 @@ from daily import kw_daily
 log = logging.getLogger(__name__)
 
 TOOL = "daily.board_compare"
-SCHEMA = 2                     # compare/<T>.json 모양 판본 — X-2 가 읽는다. 키를 바꾸면 올린다
-# 점수 Spearman 하한(T-36) — P5 장 마감 판 대 연구 판 행의 통과 기준은 미설명 0 이고, 이 하한은 임시다
-# (정본 P5 v3 소비자 행의 0.975~0.995 아래 끝). P5 재생(`--spearman-min 0` 기록형)의 분포는 하한 등록의
-# 참고값일 뿐이다 — 재생은 equity 소급 재판정·정규장 수급 차이를 구조적으로 못 본다(두 판이 같은 equity
-# 현판·같은 21:05 원장 수급). spec 별 하한은 그림자 3거래일 분포와 함께 보고 정하며, 정하면 이 상수와 이
-# 주석을 함께 고친다.
-SPEARMAN_MIN = 0.975
+SCHEMA = 3                     # compare/<T>.json 모양 판본 — X-2 가 읽는다. 키를 바꾸면 올린다(3: T-47 spec 별 하한)
+# 점수 Spearman 하한(T-47 — T-36 보완 3). spec 별 = P5 장 마감 재생 최저 − 0.03 을 0.01 단위로 내림.
+# 근거: P5 재생(`--spearman-min 0` 기록형) T=07-10~10-08 60일 중 대조 가능 24거래일(09-02~10-08 — 그 앞은 WISE
+# 추정치 수집 전이라 연구 판 fi 가 서지 않는다) pass 24·미설명 0. 최저 scope 0.9502·v3_zscore 0.9498(09-29) ·
+# v2 0.9971 · v4@0.1 0.9661 · v4@0.2 0.9780(09-18). 차이의 주 원인은 종가가 아니라 정보 시점이라 실운영에도 남는다
+# (T-36 보완 2 — 옛 전 spec 0.975 는 6일 중 2일 거짓 실패). 여유 0.03 은 재생이 구조적으로 못 보는 정규장 대
+# 21:05 수급 차이 몫이다(재생은 두 판이 같은 21:05 원장 수급·같은 equity 현판을 읽는다 — equity 소급 재판정
+# 차이도 못 본다). 그림자 3거래일 값(통과한 날)으로 다시 보고, 고치면 이 표·주석과 `daily.window_judge` 의
+# 사본(`COMPARE_SPEARMAN_MIN_BY_SPEC`)을 함께 고친다.
+SPEARMAN_MIN_BY_SPEC: dict[str, float] = {
+    "scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
+    "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
+# 표에 없는 spec 의 하한 — 옛 임시값(T-36) 그대로(보수). 새 spec 은 자기 재생 분포를 등록할 때까지 이 값이다
+SPEARMAN_MIN_DEFAULT = 0.975
 # 수급 정의 상한(T-36, 임시 굵은 상한) — 주체별 T 행 판 통계가 넘으면 그 주체 차이 전부 미설명.
 # 근거 N-35 ②: 15:40 정규장 대 21:05 하루 전체, 중앙 |차이|/|연구값| 외국인 0.8~2.6%·개인 1.1~2.9%·
 # 기관 0~0.1%, 부호 반전 0~2/100. 단위·부호·주체 뒤바뀜(×1e6·열 바뀜)은 100% 수준이라 잡힌다.
@@ -1220,10 +1230,19 @@ def _excluded_reason(side: Side, spec_id: str) -> str:
     return "게이트 FAIL " + ",".join(fails) if fails else "사유 불명"
 
 
-def compare_model(ev: Side, rt: Side, tally: Tally, spearman_min: float,
+def spearman_floor(spec_id: str, override: float | None = None) -> float:
+    """spec 의 Spearman 하한 — `override`(CLI `--spearman-min`, 전 spec 덮어쓰기)가 있으면 그 값, 없으면
+    `SPEARMAN_MIN_BY_SPEC`, 표 밖은 `SPEARMAN_MIN_DEFAULT`."""
+    if override is not None:
+        return override
+    return SPEARMAN_MIN_BY_SPEC.get(spec_id, SPEARMAN_MIN_DEFAULT)
+
+
+def compare_model(ev: Side, rt: Side, tally: Tally, spearman_min: float | None,
                   list_n: int) -> dict[str, dict[str, object]]:
-    """spec 마다 Spearman · 엑셀 후보 겹침 · 한 판에만 있는 점수 행 · 점수 열 |Δ| 상위. 미설명은 `tally`
-    에 더한다. 종목에 붙이는 fi 범주는 그 spec 엔진이 읽는 표의 것만이다."""
+    """spec 마다 Spearman(하한은 `spearman_floor` — `spearman_min` 은 전 spec 덮어쓰기, None 이면 spec 별 표) ·
+    엑셀 후보 겹침 · 한 판에만 있는 점수 행 · 점수 열 |Δ| 상위. 미설명은 `tally` 에 더한다. 종목에 붙이는 fi
+    범주는 그 spec 엔진이 읽는 표의 것만이다."""
     fi_same = tally.n_findings == 0
     e_specs, r_specs = set(ev.model_run.specs), set(rt.model_run.specs)
     for sid in sorted(e_specs ^ r_specs):
@@ -1246,10 +1265,11 @@ def compare_model(ev: Side, rt: Side, tally: Tally, spearman_min: float,
         factors = {col: _col_diff(common, _getter(er, col), _getter(rr, col), cats, FACTOR_TOP_N)
                    for col in _factor_cols(ve)}
         cand_e, cand_r = list(ve.candidates), list(vr.candidates)
+        floor = spearman_floor(sid, spearman_min)
         out[sid] = {
             "primary": sid == ev.model_run.primary_spec,
             "spearman": rho, "n_common": len(set(comp_e) & set(comp_r)),
-            "spearman_ok": rho is not None and rho >= spearman_min,
+            "spearman_min": floor, "spearman_ok": rho is not None and rho >= floor,
             "evening_only": [_tick(t, cats) for t in e_only],
             "research_only": [_tick(t, cats) for t in r_only],
             "candidates": {"top_n": ve.output.top_n, "evening": cand_e, "research": cand_r,
@@ -1286,7 +1306,7 @@ class Result:
     research_dprime: dict[str, object]
     fi: FiResult
     model: dict[str, dict[str, object]]
-    spearman_min: float
+    spearman_min: float | None          # CLI 덮어쓰기(None = spec 별 표) — 적용한 하한은 model[spec]
     generated_at: str = field(default_factory=_now)
 
     @property
@@ -1306,7 +1326,7 @@ class Result:
             if not m["spearman_ok"]:
                 rho = m["spearman"]
                 shown = "셀 수 없음" if rho is None else f"{float(str(rho)):.6f}"
-                out.append(f"{sid} Spearman {shown} < 하한 {self.spearman_min}")
+                out.append(f"{sid} Spearman {shown} < 하한 {m['spearman_min']}")
         return out
 
     @property
@@ -1326,7 +1346,8 @@ class Result:
             "dprime": self.dprime.isoformat(), "year_boundary": self.t.year != self.dprime.year,
             "replay": self.replay, "generated_at": self.generated_at,
             "verdict": "fail" if self.rc else "pass", "rc": self.rc, "reasons": self.reasons,
-            "thresholds": {"spearman_min": self.spearman_min, "flow_rel_max": FLOW_REL_MAX,
+            "thresholds": {"spearman_min": {sid: m["spearman_min"] for sid, m in self.model.items()},
+                           "flow_rel_max": FLOW_REL_MAX,
                            "flow_flip_max": FLOW_FLIP_MAX, "flow_stat_min_n": FLOW_STAT_MIN_N,
                            "diff_row_max": DIFF_ROW_MAX},
             "boards": {"evening": self.evening.to_dict(), "research": self.research.to_dict(),
@@ -1348,7 +1369,7 @@ class Result:
 
 
 def compare(t: date, evening_root: Path, research_root: Path, *, calendar_dir: Path | None = None,
-            replay: bool = False, spearman_min: float = SPEARMAN_MIN,
+            replay: bool = False, spearman_min: float | None = None,
             list_n: int = LIST_N) -> Result:
     ev = load_side(evening_root, "evening", t)
     rt = load_side(research_root, "morning", t)
@@ -1461,8 +1482,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                          "시행일)의 T 종가 차이를 '종가 정의'로 본다")
     ap.add_argument("--out-root", type=Path, default=None,
                     help="compare/<T>.json 을 쓸 곳(기본 --evening-root)")
-    ap.add_argument("--spearman-min", type=float, default=SPEARMAN_MIN,
-                    help=f"spec 마다 종합점수 Spearman 하한(기본 {SPEARMAN_MIN} 임시 — 0 이면 기록형)")
+    ap.add_argument("--spearman-min", type=float, default=None,
+                    help="종합점수 Spearman 하한을 전 spec 에 이 값으로 덮어쓴다(기본: spec 별 표 T-47, 표 밖 "
+                         f"spec {SPEARMAN_MIN_DEFAULT} — 0 이면 기록형)")
     ap.add_argument("--list-n", type=int, default=LIST_N, help="요약 목록 길이")
     args = ap.parse_args(argv)
     try:

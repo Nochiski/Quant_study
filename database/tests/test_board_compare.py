@@ -52,6 +52,9 @@ P_VOL, P_FLOW, P_HALT, P_INFO, P_SECTOR, P_FIN, P_T6, P_CUT, P_CREDIT, P_EV = (
 P_NEW = f"{100000 + N_STOCKS:06d}"     # 연구 판에만 있는 T 신규 상장
 P_PRE_T = "100020"                      # 범주 밖 — T 전 행 종가
 EV_FROM = dt.date(2026, 9, 21)          # P_EV 의 (D', T] 공개 기업행위 적용일
+# spec 별 Spearman 하한 — 정본 cutover-track §2 T-47 등록값(바꾸면 정본·`bc.SPEARMAN_MIN_BY_SPEC` 과 함께)
+T47_FLOORS = {"scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
+              "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
 
 
 def _tables(fi: FactorInputs) -> dict[str, list[dict[str, object]]]:
@@ -353,23 +356,61 @@ def test_one_unexplained_difference_gives_rc_1(unexplained_pair, tmp_path, capsy
 
 
 def test_spearman_floor_is_a_gate(planted_pair, tmp_path) -> None:
-    """미설명 0 이어도 Spearman 이 하한(기본 0.975 임시) 밑이면 rc 1. 0 이면 기록형."""
-    assert run_cli(planted_pair, tmp_path) == 1
-    rep = report(tmp_path)
-    assert rep["n_unexplained"] == 0 and rep["thresholds"]["spearman_min"] == bc.SPEARMAN_MIN
+    """미설명 0 이어도 Spearman 이 spec 하한 밑이면 rc 1(T-47). 심은 판 scope·v3_zscore 실측(약 0.937)은 spec 별
+    하한(0.92·0.91)으로는 통과하고, 옛 전 spec 0.975 로 덮어쓰면(`--spearman-min`) 미달이다. 0 이면 기록형."""
+    assert run_cli(planted_pair, tmp_path / "table") == 0
+    rep = report(tmp_path / "table")
+    assert rep["n_unexplained"] == 0 and rep["reasons"] == []
+    assert rep["thresholds"]["spearman_min"] == T47_FLOORS
+    assert {sid: m["spearman_min"] for sid, m in rep["model"].items()} == T47_FLOORS
+    assert 0.92 <= rep["model"]["scope@1.0"]["spearman"] < 0.975
+    assert run_cli(planted_pair, tmp_path / "old", "--spearman-min", "0.975") == 1
+    rep = report(tmp_path / "old")
+    assert rep["thresholds"]["spearman_min"] == dict.fromkeys(T47_FLOORS, 0.975)
     low = {sid for sid, m in rep["model"].items() if not m["spearman_ok"]}
-    assert "scope@1.0" in low
-    assert all(any(sid in r and "Spearman" in r for r in rep["reasons"]) for sid in low)
-    assert run_cli(planted_pair, tmp_path, "--spearman-min", "0") == 0
+    assert {"scope@1.0", "v3_zscore@1.0"} <= low
+    assert all(any(r.startswith(f"{sid} Spearman ") and r.endswith("< 하한 0.975") for r in rep["reasons"])
+               for sid in low)
+    assert run_cli(planted_pair, tmp_path / "record", "--spearman-min", "0") == 0
+
+
+@pytest.mark.parametrize(("rho", "extra", "low"), [
+    (0.93, (), {"v2_percentrank@1.0", "v4_rank@0.2"}),                    # scope 0.93 은 통과
+    (0.93, ("--spearman-min", "0.975"), set(T47_FLOORS)),                 # 옛 전 spec 0.975 면 scope 도 미달
+    (0.919, (), {"scope@1.0", "v2_percentrank@1.0", "v4_rank@0.1", "v4_rank@0.2"}),  # v3_zscore 0.91 만 통과
+    (0.5, ("--spearman-min", "0"), set()),                                # 기록형 — 전 spec 통과
+])
+def test_spearman_floor_is_per_spec(same_pair, tmp_path, monkeypatch, rho: float,
+                                    extra: tuple[str, ...], low: set[str]) -> None:
+    """하한은 spec 별 표(T-47), `--spearman-min` 은 전 spec 덮어쓰기. 사유 문구는 'spec Spearman x < 하한 y'.
+    같은 판 쌍에서 Spearman 만 고정값으로 바꿔 본다."""
+    monkeypatch.setattr(bc.mgates, "spearman", lambda a, b: rho)
+    assert run_cli(same_pair, tmp_path, *extra) == (1 if low else 0)
+    rep = report(tmp_path)
+    floors = dict.fromkeys(T47_FLOORS, float(extra[1])) if extra else T47_FLOORS
+    assert rep["thresholds"]["spearman_min"] == floors
+    assert {sid for sid, m in rep["model"].items() if not m["spearman_ok"]} == low
+    assert rep["reasons"] == [f"{sid} Spearman {rho:.6f} < 하한 {floors[sid]}" for sid in sorted(low)]
+
+
+def test_spec_outside_the_table_keeps_the_old_floor(same_pair, tmp_path, monkeypatch) -> None:
+    """표에 없는 spec 은 옛 0.975(보수 — 자기 재생 분포를 등록할 때까지). 0.97 이면 미달이다."""
+    monkeypatch.delitem(bc.SPEARMAN_MIN_BY_SPEC, "scope@1.0")
+    monkeypatch.setattr(bc.mgates, "spearman", lambda a, b: 0.97)
+    assert run_cli(same_pair, tmp_path) == 1
+    rep = report(tmp_path)
+    assert rep["thresholds"]["spearman_min"] == {**T47_FLOORS, "scope@1.0": 0.975}
+    assert rep["reasons"] == ["scope@1.0 Spearman 0.970000 < 하한 0.975"]
 
 
 def test_window_judge_reads_the_real_reports(same_pair, unexplained_pair, tmp_path) -> None:
     """X-2(`daily.window_judge.read_compare`)가 이 도구의 실제 `compare/<T>.json` 을 읽는다 — 키
-    (schema·tool·date·verdict·rc·n_unexplained·reasons·replay·thresholds.spearman_min) 계약.
+    (schema·tool·date·verdict·rc·n_unexplained·reasons·replay·thresholds.spearman_min spec 별) 계약.
     실운영 pass·fail 은 판정 재료, 재생(`--replay`)·기록형 하한(`--spearman-min 0`)의 pass 는 거절."""
     from daily import window_judge as wj
-    assert (wj.COMPARE_SCHEMA, wj.COMPARE_TOOL, wj.COMPARE_SPEARMAN_MIN) == (
-        bc.SCHEMA, bc.TOOL, bc.SPEARMAN_MIN)
+    assert (wj.COMPARE_SCHEMA, wj.COMPARE_TOOL, wj.COMPARE_SPEARMAN_MIN_BY_SPEC,
+            wj.COMPARE_SPEARMAN_MIN_DEFAULT) == (bc.SCHEMA, bc.TOOL, bc.SPEARMAN_MIN_BY_SPEC,
+                                                 bc.SPEARMAN_MIN_DEFAULT)
 
     def judged(pair: tuple[Path, Path], name: str, *extra: str) -> dict[str, object] | None:
         run_cli(pair, tmp_path / name, *extra)
@@ -377,6 +418,8 @@ def test_window_judge_reads_the_real_reports(same_pair, unexplained_pair, tmp_pa
 
     ok = judged(same_pair, "pass")
     assert ok is not None and (ok["verdict"], ok["rc"], ok["n_unexplained"]) == ("pass", 0, 0)
+    strict = judged(same_pair, "strict", "--spearman-min", "0.975")   # 등록 하한보다 높은 덮어쓰기는 인정
+    assert strict is not None and strict["verdict"] == "pass"
     bad = judged(unexplained_pair, "fail")
     assert bad is not None and (bad["verdict"], bad["rc"]) == ("fail", 1) and bad["reasons"]
     for name, extra in (("replay", ("--replay",)), ("record", ("--spearman-min", "0"))):
@@ -389,8 +432,13 @@ def test_window_judge_reads_the_real_reports(same_pair, unexplained_pair, tmp_pa
     assert err is not None and (err["verdict"], err["rc"]) == ("error", 2)
 
 
-def test_default_spearman_floor_is_the_temporary_t36_value() -> None:
-    assert bc.SPEARMAN_MIN == 0.975 and bc.FLOW_REL_MAX == bc.FLOW_FLIP_MAX == 0.10
+def test_spearman_floors_are_the_t47_registration() -> None:
+    """하한 표 = T-47 등록값, 표 밖 기본 = 옛 0.975. 표의 spec 은 레지스트리에 있는 것만(오타면 기본값으로
+    떨어져 거짓 실패를 낸다)."""
+    from model import registry
+    assert bc.SPEARMAN_MIN_BY_SPEC == T47_FLOORS and bc.SPEARMAN_MIN_DEFAULT == 0.975
+    assert set(T47_FLOORS) <= {s.spec_id for s in registry.all_specs()}
+    assert bc.FLOW_REL_MAX == bc.FLOW_FLIP_MAX == 0.10
 
 
 # ── 실제 빌더가 쓰는 판 기록 ─────────────────────────────────────────────────

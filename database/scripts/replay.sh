@@ -57,7 +57,7 @@
 #   --dates T1-T2  [T1, T2] 의 거래일 T 마다(판정 달력 운영 data/calendar) 차례로 — --date T 는 T 하루
 #   --steps        equity(출력 루트에 equity 현판을 짓는다) · board(날짜별 ①~⑥). 기본 equity,board. board 만
 #                  주면 앞 패스가 지은 equity 판을 쓴다(그 패스 equity 표가 전부 rc 0 이어야 한다 — 아니면 rc 2)
-#   --spearman-min 대조의 Spearman 하한(기본 board_compare 기본값). P5 기록형 측정은 0(T-36)
+#   --spearman-min 대조의 Spearman 하한을 전 spec 에 덮어쓴다(기본 board_compare 의 spec 별 표 T-47). P5 기록형 측정은 0(T-36)
 #   실행 창: 08:10 아침 체인 끝 ~ 21:20 전(운영 stage 현판이 아침 확정판 m_ 인 때). 21:20 연구 저녁 빌드 뒤~다음
 #     아침 확정 전에는 stage 현판이 저녁 잠정판(e_)이라 equity(--basis morning 이라 m_ 판으로 선다)와 연구 판 T 가
 #     잠정 원천으로 지어진다. 그래서 운영 stage 현판 build_id 가 m_·b_ 가 아니면(e_ · 그 밖 접두어 — fail-closed)

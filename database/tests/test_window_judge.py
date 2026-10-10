@@ -2,8 +2,8 @@
 
 정본 `docs/plans/2026-10-10-cutover-track.md` §3 X-2 · §4 · 로드맵 §8 공통 3. 입력은 전부 tmp 에 실제 모양으로
 조립한다 — 런 로그는 진짜 `daily.runlog` 로 쓰고, notify.log 는 `scripts/notify.sh` 가 남기는 한 줄 형식
-(`<UTC> <등급> <제목> | <본문>`), 두 판 대조 결과는 PR-7 `daily.board_compare` 의 `compare/<T>.json` 키(schema 2 —
-T-36 반영판, 실운영 결과는 `replay: false`).
+(`<UTC> <등급> <제목> | <본문>`), 두 판 대조 결과는 PR-7 `daily.board_compare` 의 `compare/<T>.json` 키(schema 3 —
+T-47 spec 별 Spearman 하한, 실운영 결과는 `replay: false`).
 
 2026-10 달력: 12(월) 13(화) 14(수) 15(목) 16(금) 17(토) 18(일) 19(월) 20(화) 21(수) 22(목) 23(금) · 09(금) 한글날 휴장.
 """
@@ -24,6 +24,9 @@ _SCRIPTS = str(Path(__file__).resolve().parents[1] / "scripts")
 NOTIFY_SH = Path(__file__).resolve().parents[1] / "scripts" / "notify.sh"
 
 HOLIDAYS_2026 = ("20261009",)
+# spec 별 Spearman 하한 — 정본 cutover-track §2 T-47 등록값(바꾸면 정본·`wj.COMPARE_SPEARMAN_MIN_BY_SPEC` 과 함께)
+T47_FLOORS = {"scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
+              "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
 
 
 # ── 픽스처 조립 ────────────────────────────────────────────────────────────
@@ -61,19 +64,20 @@ def _chain(home: Path, d: str, statuses: dict[str, str | None] | None = None) ->
 
 def _compare(home: Path, d: str, *, verdict: str = "pass", reasons: tuple[str, ...] = (),
              n_unexplained: int = 0, error: str = "", **over: object) -> Path:
-    """PR-7 `compare/<T>.json` — `Result.to_dict` 의 판정 키(schema 2: replay·thresholds 포함)와 `_write_error` 의
-    rc 2 모양."""
+    """PR-7 `compare/<T>.json` — `Result.to_dict` 의 판정 키(schema 3: replay·spec 별 thresholds.spearman_min
+    포함)와 `_write_error` 의 rc 2 모양."""
     p = home / "data" / "model_db" / "compare" / f"{d}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     iso = f"{d[:4]}-{d[4:6]}-{d[6:]}"
-    base: dict[str, object] = {"schema": 2, "tool": "daily.board_compare", "date": iso,
+    base: dict[str, object] = {"schema": 3, "tool": "daily.board_compare", "date": iso,
                                "generated_at": "2026-10-20T00:50:00Z"}
     if verdict == "error":
         payload = {**base, "verdict": "error", "rc": 2, "error": error}
     else:
         payload = {**base, "dprime": iso, "year_boundary": False, "replay": False, "verdict": verdict,
                    "rc": 0 if verdict == "pass" else 1,
-                   "thresholds": {"spearman_min": 0.975, "flow_rel_max": 0.10, "flow_flip_max": 0.10},
+                   "thresholds": {"spearman_min": dict(T47_FLOORS), "flow_rel_max": 0.10,
+                                  "flow_flip_max": 0.10},
                    "reasons": list(reasons), "n_unexplained": n_unexplained}
     payload.update(over)
     p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -666,7 +670,9 @@ def test_대조_결과_모양은_PR7_과_같다(tmp_path: Path) -> None:
     import datetime as dt
 
     from daily import board_compare as bc
-    assert (wj.COMPARE_SCHEMA, wj.COMPARE_TOOL, wj.COMPARE_SPEARMAN_MIN) == (bc.SCHEMA, bc.TOOL, bc.SPEARMAN_MIN)
+    assert (wj.COMPARE_SCHEMA, wj.COMPARE_TOOL, wj.COMPARE_SPEARMAN_MIN_BY_SPEC, wj.COMPARE_SPEARMAN_MIN_DEFAULT) == (
+        bc.SCHEMA, bc.TOOL, bc.SPEARMAN_MIN_BY_SPEC, bc.SPEARMAN_MIN_DEFAULT)
+    assert wj.COMPARE_SPEARMAN_MIN_BY_SPEC == T47_FLOORS and wj.COMPARE_SPEARMAN_MIN_DEFAULT == 0.975
     src = inspect.getsource(bc.Result.to_dict)
     for key in ("schema", "tool", "date", "replay", "verdict", "rc", "reasons", "thresholds", "spearman_min",
                 "n_unexplained"):
@@ -840,11 +846,28 @@ def test_대조_pass_에_replay_키가_없으면_판정_불가(tmp_path: Path) -
     assert d.status == "error" and any("replay" in e for e in d.errors)
 
 
-@pytest.mark.parametrize("thresholds", [{"spearman_min": 0.9}, {}, None, {"spearman_min": "0.975"}])
+@pytest.mark.parametrize("thresholds", [
+    {"spearman_min": {**T47_FLOORS, "scope@1.0": 0.919}},      # 등록 0.92 아래
+    {"spearman_min": {**T47_FLOORS, "new_spec@0.1": 0.97}},    # 표 밖 spec 은 0.975 아래
+    {"spearman_min": dict.fromkeys(T47_FLOORS, 0.0)},         # --spearman-min 0 기록형
+    {"spearman_min": {**T47_FLOORS, "v4_rank@0.2": True}},
+    {"spearman_min": {**T47_FLOORS, "v4_rank@0.2": "0.94"}},
+    {"spearman_min": {}}, {"spearman_min": 0.975},             # 빈 표 · schema 2 의 단일 하한 모양
+    {}, None])
 def test_대조_pass_가_등록_하한보다_낮은_하한이면_판정_불가(tmp_path: Path, thresholds: object) -> None:
-    """M-4 — 기록형 하한(--spearman-min 낮춤)으로 낸 pass 는 통과가 아니다."""
+    """M-4 — 기록형 하한(--spearman-min 낮춤)으로 낸 pass 는 통과가 아니다. 하한은 spec 마다 등록 하한(T-47 표,
+    표 밖은 0.975) 이상이어야 한다."""
     home = _home(tmp_path)
     _chain(home, "20261012")
     _compare(home, "20261012", thresholds=thresholds)
     d = _day(_judge(home, "20261012", "20261012"), "20261012")
     assert d.status == "error" and any("spearman_min" in e for e in d.errors)
+
+
+def test_대조_pass_가_등록_하한보다_높은_하한이면_인정(tmp_path: Path) -> None:
+    """등록 하한보다 엄한 하한(옛 전 spec 0.975 덮어쓰기)으로 낸 pass 는 통과 재료다."""
+    home = _home(tmp_path)
+    _chain(home, "20261012")
+    _compare(home, "20261012", thresholds={"spearman_min": dict.fromkeys(T47_FLOORS, 0.975)})
+    d = _day(_judge(home, "20261012", "20261012"), "20261012")
+    assert d.status == "pass", d.errors

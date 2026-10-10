@@ -5,10 +5,16 @@
         [--tables daily_prices,stocks] [--full] [--window-days 730] [--consensus-asof 20260922] \\
         [--builds-from data/deliver/history/20260923_morning.json] \\
         [--model-universe all|estimates] [--builds-from-missing error|current] [--in-place] \\
-        [--model-root data/model]
+        [--model-root data/model] \\
+        [--postclose-db data/raw/postclose.db --kiwoom-db data/raw/kiwoom.db] \\
+        [--calendar-dir DIR] [--allow-older]
 
 점수 두 표(score_history·score_history_v2)는 --model-root 의 그날·그 basis 모델 판이 원천이다(QL-C).
 표를 고르지 않으면 점수 표도 들어가므로 --model-root 가 필요하다.
+--basis evening 의 daily_prices·investor_detail_flows 는 T 행을 두 원장에서 만든다(QL-D) —
+--postclose-db·--kiwoom-db 가 필요하다. D' 는 판정 달력(--calendar-dir, 없으면 daily.calendar 기본
+경로)으로 센다. 대상에 이번(T, 장 마감)보다 나중 반영 기록(T-35 순서 — 날짜가 뒤이거나 같은 날
+아침)이 있으면 장 마감 판은 멈춘다(재생은 --allow-older).
 
 v3 제자리 반영(QL-F, `scripts/v3_post.sh` 가 부른다 — `compat.v3_post`):
 
@@ -58,6 +64,18 @@ def _parser() -> argparse.ArgumentParser:
     e.add_argument("--model-root", default=None, type=Path,
                    help="모델 판 루트(data/model) — score_history·score_history_v2 의 원천. "
                         "--date·--basis 의 판으로 고정한다(T-16)")
+    e.add_argument("--postclose-db", default=None, type=Path,
+                   help="장 마감 판 T 행 ① 원천 — 15:41 수집 원장(data/raw/postclose.db). "
+                        "--basis evening 전용")
+    e.add_argument("--kiwoom-db", default=None, type=Path,
+                   help="장 마감 판 T 행 ② 원천 — 키움 원장(data/raw/kiwoom.db, 21:05 저녁 T 행). "
+                        "--basis evening 전용")
+    e.add_argument("--calendar-dir", default=None, type=Path,
+                   help="T 직전 거래일 D' 를 셀 판정 달력 폴더(kis_holidays_<YYYY>.json). "
+                        "없으면 daily.calendar 기본 경로")
+    e.add_argument("--allow-older", action="store_true",
+                   help="장 마감 판이 대상의 더 나중 반영 기록(T-35 순서)을 무시하고 쓴다 — "
+                        "재생 전용")
     s = sub.add_parser("stage", help="v3 quant.db → 스테이징 사본(온라인 백업, QL-F)")
     s.add_argument("--v3-db", required=True, type=Path, help="v3 quant.db(읽기 전용으로 연다)")
     s.add_argument("--out", required=True, type=Path, help="스테이징 경로(있으면 지우고 새로 뜬다)")
@@ -119,7 +137,9 @@ def main(argv: list[str] | None = None) -> int:
             full=args.full, window_days=args.window_days, consensus_asof=args.consensus_asof,
             builds_from=args.builds_from, builds_from_missing=args.builds_from_missing,
             model_universe=args.model_universe, in_place=args.in_place,
-            model_root=args.model_root)
+            model_root=args.model_root, postclose_db=args.postclose_db,
+            kiwoom_db=args.kiwoom_db, calendar_dir=args.calendar_dir,
+            allow_older=args.allow_older)
     except CompatError as e:
         print(f"compat 실패: {e}", file=sys.stderr)
         return 2

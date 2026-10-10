@@ -40,9 +40,13 @@
 #                    [--v3-post-cmd CMD] [--shadow] [--allow-older] [--staging PATH] [--model-root PATH]
 #                    [--full] [--builds-from PATH] [--consensus-asof YYYYMMDD]
 #     --full 은 첫 반영(K3-2 — 730일 창을 한 트랜잭션으로)과 얕은 대상용이다. 매일 쓰지 않는다(COMPAT_LAYER §8 V3-C).
-#     --allow-older 는 재생 전용이다(T-35).
+#     --allow-older 는 재생 전용이다(T-35). ② compat export 와 ③④ apply 둘 다에 넘긴다 — compat 의 장 마감 판도
+#     같은 순서 판정으로 더 나중 반영 위에 쓰기를 거부한다(QL-D).
+#   ② 의 장 마감 판(--basis evening)은 가격·수급 T 행을 원장 두 개에서 만든다(QL-D) — QL_POSTCLOSE_DB(기본
+#     data/raw/postclose.db, 15:41 수집)·QL_KIWOOM_DB(기본 data/raw/kiwoom.db, 21:05 저녁 수집)를 저녁에만 넘긴다.
+#     T 의 직전 거래일은 compat 이 판정 달력(QL_HOME/data/calendar)으로 센다.
 #   환경변수: QL_V3_DB · QL_V3_POST_CMD(인자 대신) · QL_EQUITY_ROOT · QL_STAGE_ROOT · QL_MODEL_ROOT(compat 원천 루트,
-#     compat_export.sh 와 같다). QL_V3_LOCK_FILE · QL_V3_POST_TODAY(YYYYMMDD) 는 테스트 전용 — 락 경로·오늘 날짜를
+#     compat_export.sh 와 같다) · QL_POSTCLOSE_DB · QL_KIWOOM_DB(장 마감 판 T 행 원장). QL_V3_LOCK_FILE · QL_V3_POST_TODAY(YYYYMMDD) 는 테스트 전용 — 락 경로·오늘 날짜를
 #     덮어쓴다. 운영 크론·대화형 셸에 남겨 두지 않는다.
 set -uo pipefail
 cd "${QL_HOME:-$HOME/quant-ledger}" || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 4; }
@@ -53,6 +57,8 @@ V3_LOCK="${QL_V3_LOCK_FILE:-/tmp/kael_v3_daily_all.lock}"
 EQUITY_ROOT="${QL_EQUITY_ROOT:-data/equity}"
 STAGE_ROOT="${QL_STAGE_ROOT:-data/stage}"
 MODEL_ROOT="${QL_MODEL_ROOT:-data/model}"
+POSTCLOSE_DB="${QL_POSTCLOSE_DB:-data/raw/postclose.db}"
+KIWOOM_DB="${QL_KIWOOM_DB:-data/raw/kiwoom.db}"
 V3_DB="${QL_V3_DB:-}"; POST_CMD="${QL_V3_POST_CMD:-}"
 D=""; BASIS=""; SHADOW=""; STAGING=""; FULL=""; BUILDS=""; CONS=""; OLDER=""
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
@@ -104,6 +110,9 @@ esac
 STAGING="${STAGING:-data/_v3_post/staging_${BASIS}${SHADOW:+_shadow}.db}"
 same_as_v3 && die_arg "--staging 이 v3 본 파일과 같은 파일이다($STAGING = $V3_DB) — 스테이징을 뜨기 전에 지우므로 거부"
 MODE=$([ -n "$SHADOW" ] && echo shadow || echo in-place)
+# 장 마감 판 T 행 원천(QL-D) — 저녁에만 넘긴다(compat_export.sh 와 같은 방식)
+LEDGERS=()
+[ "$BASIS" = evening ] && LEDGERS=(--postclose-db "$POSTCLOSE_DB" --kiwoom-db "$KIWOOM_DB")
 mkdir -p logs/v3_post
 LOG="logs/v3_post/${D}_${BASIS}.log"
 if [ -z "$SHADOW" ]; then
@@ -142,7 +151,7 @@ step "①' 반영 표" plan_tables &&
 step "② compat export --in-place" "$PY" -m compat export --date "$D" --basis "$BASIS" \
     --equity-root "$EQUITY_ROOT" --stage-root "$STAGE_ROOT" --model-root "$MODEL_ROOT" \
     --target "$STAGING" --in-place --tables "$TABLES" $FULL ${CONS:+--consensus-asof "$CONS"} \
-    ${BUILDS:+--builds-from "$BUILDS"} &&
+    ${BUILDS:+--builds-from "$BUILDS"} ${OLDER:+--allow-older} ${LEDGERS[@]+"${LEDGERS[@]}"} &&
 step "③④ 게이트·반영" "$PY" -m compat apply --staging "$STAGING" --v3-db "$V3_DB" \
     --date "$D" --basis "$BASIS" --commit-flag "$CF" ${SHADOW:+--shadow} ${OLDER:+--allow-older}
 POST=""

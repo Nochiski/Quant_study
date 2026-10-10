@@ -88,7 +88,10 @@ from . import gates, queries
 # adj_ok·adj_jump_ok 포함)·수급(price_valid 무관), 연구 부분 D' 자르기, T-6 당일 기업행위 보류
 # (eligible=false · corp_action_pending — 기준가 술어는 compat 과 공유), FG5 후보 커버리지 게이트.
 # 아침판 SQL 은 그대로
-RULES_VERSION = "fi1.7.0"
+# 1.8.0(2026-10-10, 컷오버 F-1 · T-43): fi_fin_summary DART 4Q 파생 분기 행의 available_date — 파생값을
+# 실은 행(q4_derived_available_date ≤ asof)은 max(사업보고서 available_date, q4_derived_available_date)
+# (연간 행과 같은 '원천들의 max'). 값·엔진 입력은 그대로
+RULES_VERSION = "fi1.8.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)

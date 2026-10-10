@@ -761,6 +761,16 @@ def _scale_adj(tables: dict[str, Any], tk: str, start: dt.date, factor: float = 
             x.update(adj_factor=factor, adj_close=10_000.0 * factor)
 
 
+Q4_REPORT = dt.date(2026, 3, 20)      # 사업보고서 공개일(D' 훨씬 앞)
+
+
+def _q4(tables: dict[str, Any], avail: dt.date, revenue: int | None = None) -> None:
+    """A 의 DART 4Q 파생 분기 행(2025/12) — 값은 파생값이 섰을 때만 싣는다(fi_fin_summary)."""
+    tables["fi_fin_summary"].append(_r("fi_fin_summary", ticker=A, period="2025/12",
+                                       period_type="quarter", revenue=revenue,
+                                       fs_basis="DART:CFS", available_date=avail))
+
+
 U = bc.UNEXPLAINED
 # (이름, 변경, 기대 {(표, 종목): 범주}, compare_fi 추가 인자) — 범주마다 양성과 '증거 없음' 음성
 CASES: list[tuple[str, Mut, dict[tuple[str, str], set[str]], dict[str, Any]]] = [
@@ -804,6 +814,14 @@ CASES: list[tuple[str, Mut, dict[tuple[str, str], set[str]], dict[str, Any]]] = 
     ("info_evening_after_dprime",
      lambda e, r, d: [x.update(fetched_date=T_DATE) for x in _rows(e, "fi_consensus_annual", A)],
      {("fi_consensus_annual", A): {U}}, {}),
+    # 4Q 파생 분기 행(T-43 · fi1.8.0) — 1~3Q 정정이 (D', T] 에 들어와 연구 판 T 에 파생값이 처음 실린다.
+    # 행 날짜 = 파생값 날짜면 정보 시점, 사업보고서 날짜 그대로면(fi1.7.0 모양 — P5 시험 145720) 미설명
+    ("info_fin_q4_derived", lambda e, r, d: (_q4(e, Q4_REPORT), _q4(d, Q4_REPORT),
+                                             _q4(r, T_DATE, 800_000)),
+     {("fi_fin_summary", A): {bc.INFO}}, {}),
+    ("info_fin_q4_derived_report_date", lambda e, r, d: (_q4(e, Q4_REPORT), _q4(d, Q4_REPORT),
+                                                         _q4(r, Q4_REPORT, 800_000)),
+     {("fi_fin_summary", A): {U}}, {}),
     # filing_late — 3자 대조(또는 기한 ∈ (D', T] 라 장 마감 false · D' NULL)
     ("filing_ok", lambda e, r, d: _uni(r, B, filing_late=True),
      {("fi_universe", B): {bc.FILING}}, {}),

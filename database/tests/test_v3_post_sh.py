@@ -531,6 +531,55 @@ def test_next_morning_after_scored_evening_still_drops_scores(env, evening_sourc
     assert _score_sha(main) == before
 
 
+def test_rc6_evening_then_no_scores_refill_then_morning_is_seven(env, evening_sources, sources,
+                                                                 tmp_path) -> None:
+    """⑥ 이 COMMIT 뒤 daily_post 만 실패(rc 6) → refill(늘 --no-scores) → 다음 날 아침 7표. 점수는 ⑥ 값 그대로."""
+    _, main = env
+    r = _run(tmp_path, evening_sources, *_evening(main, "--v3-post-cmd", "exit 7"))
+    assert r.rc == 6, r.out
+    evening = _score_sha(main)
+    r = _run(tmp_path, evening_sources, *_evening(main, "--no-scores"))
+    assert r.rc == 0, r.out
+    assert _score_sha(main) == evening
+    r = _run(tmp_path, sources, *_base(main, "--model-root", str(tmp_path / "no-model")))
+    assert r.rc == 0, r.out
+    assert "반영 표: " + ",".join(SEVEN) in r.out
+    assert _score_sha(main) == evening
+    assert [sorted(t) for t in _meta_tables(main)] == [sorted(TABLES), sorted(SEVEN),
+                                                       sorted(SEVEN)]
+
+
+def test_scored_then_no_scores_evening_then_morning_is_seven(env, evening_sources, sources,
+                                                             tmp_path) -> None:
+    """점수 포함 저녁(⑥) → 점수 없는 저녁(refill) → 다음 날 아침 7표 — 뒤 기록에 점수가 없어도 앞 기록이 센다."""
+    _, main = env
+    assert _run(tmp_path, evening_sources, *_evening(main)).rc == 0
+    evening = _score_sha(main)
+    r = _run(tmp_path, evening_sources, *_evening(main, "--no-scores"))
+    assert r.rc == 0, r.out
+    r = _run(tmp_path, sources, *_base(main, "--model-root", str(tmp_path / "no-model")))
+    assert r.rc == 0, r.out
+    assert "반영 표: " + ",".join(SEVEN) in r.out
+    assert _score_sha(main) == evening
+
+
+def test_no_scores_staging_does_not_replace_a_failed_scored_staging(env, evening_sources,
+                                                                   tmp_path) -> None:
+    """MINOR-1 — ⑥(점수 포함)이 실패해 보존한 스테이징을 점수 없는 refill 이 지우지 않는다(기본 경로가 다르다)."""
+    home, main = env
+    r = _run(tmp_path, evening_sources, *_evening(main, "--model-root", str(tmp_path / "no-model")))
+    assert r.rc == 2, r.out
+    kept = home / "data" / "_v3_post" / "staging_evening.db"
+    before = _sha(kept)
+    r = _run(tmp_path, evening_sources, *_evening(main, "--no-scores"))
+    assert r.rc == 0, r.out
+    assert kept.exists() and _sha(kept) == before
+    assert "staging=data/_v3_post/staging_evening_noscores.db" in r.out
+    r = _run(tmp_path, evening_sources, *_evening(main, "--no-scores", "--shadow"))
+    assert r.rc == 0, r.out
+    assert (home / "data" / "_v3_post" / "staging_evening_noscores_shadow.db").exists()
+
+
 def test_no_scores_gate_failure_leaves_main_unchanged(env, evening_skip_sources, tmp_path) -> None:
     """점수 없는 반영도 필수 열 결측 0 게이트를 7표 기준으로 건다 — compat 5% 허용은 통과해도 막는다."""
     _, main = env

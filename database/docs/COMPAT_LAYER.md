@@ -367,7 +367,7 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 1. **스테이징**: v3 quant.db 를 sqlite 온라인 백업으로 임시 파일에 뜬다(`python -m compat stage`). 본 파일은 읽기 전용으로 연다. 스테이징 경로가 본 파일(링크·-wal/-shm 포함)과 같은 파일이면 거부한다(뜨기 전에 그 경로를 지우므로). 디스크 여유가 본 파일 크기 × 2 보다 작으면 뜨지 않고, 백업이 실패하면 부분 사본을 지운다.
 2. **반영 표**(T-34 · T-38, `python -m compat v3-tables`): 기본 9표.
    - `--basis morning` 은 본 파일 `_compat_meta` 에 같은 D 의 **점수 두 표를 반영한** 장 마감(evening) ok 기록이 있으면 점수 두 표를 뺀 7표다. 저녁에 보낸 엑셀과 v3 DB 점수가 같고, 가격 재반영이 아침 모델 판 실패에 묶이지 않는다. 그런 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻). 점수 표를 반영했는지는 기록의 `tables` 열(compat 이 쓴 표 → 결과 json) 키로 본다.
-   - `--no-scores`(`--basis evening` 전용, T-38)는 늘 7표다. 장 마감 판이 없는 날(판 실패일·세션 예외일 T-26) 21:05 원장 뒤 가격 등 7표만 반영한다. compat 이 점수 표를 고르지 않으므로 장 마감 모델 판이 없어도 된다. 이 기록엔 점수 표가 없어 위 판정이 세지 않으므로 다음 날 아침 재반영이 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다. daily_post 명령과 함께 주면 인자 오류(rc 5)다 — export_scores 를 그날 점수 없이 부르지 않는다.
+   - `--no-scores`(`--basis evening` 전용, T-38)는 늘 7표다. 21:05 원장 뒤 재반영(refill)은 늘 이 모드다 — 점수는 장 마감 반영(⑥)만 쓴다. compat 이 점수 표를 고르지 않으므로 장 마감 판이 없는 날(판 실패일·세션 예외일 T-26)에도 돈다. 이 기록엔 점수 표가 없어 위 판정이 세지 않으므로, 그날 ⑥ 의 점수 포함 기록이 있으면 다음 날 아침은 7표, 없으면 아침 모델 판으로 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다. 아침이나 daily_post 명령과 함께 주면 인자 오류(rc 5, 파이썬·CLI 층도 거부)다 — export_scores 를 그날 점수 없이 부르지 않는다.
 3. **compat export `--in-place --tables <반영 표>`** 를 스테이징에 돌린다(QL-B 가드 — `stocks.market_cap` 은 `all`). 장 마감 판(`--basis evening`)이면 T 행 원장 두 개(`QL_POSTCLOSE_DB` 기본 `data/raw/postclose.db` · `QL_KIWOOM_DB` 기본 `data/raw/kiwoom.db`)를 넘기고, `--allow-older` 는 apply 와 함께 export 에도 넘긴다(compat 장 마감 판이 같은 T-35 순서로 먼저 멈춘다 — QL-D).
 4. **게이트**(COMMIT 전):
    - 이번 compat 기록 1행·status ok·날짜·basis 일치·창 끝 = D
@@ -384,20 +384,19 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 | `score_history` · `score_history_v2` | `score_date = D` |
 | `stocks` · `consensus_revision_daily` · `consensus_revision_compare` · `consensus_annual` · `financial_summary` | 표 전체(날짜 창 없는 as-of 스냅샷 — 스테이징이 같은 락 안의 사본이라 compat 이 안 건드린 행은 같은 값으로 다시 들어간다) |
 
-compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~4단계만, 본 파일 무변경, 스테이징 기본 경로 `staging_<basis>_shadow.db`)는 락을 잡지 않는다. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
+compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~4단계만, 본 파일 무변경, 스테이징 기본 경로 `staging_<basis>[_noscores]_shadow.db`)는 락을 잡지 않는다. 기본 스테이징 경로는 점수 없는 반영에 `_noscores` 를 붙인다 — refill 이 그날 ⑥ 이 실패해 남긴 스테이징을 지우지 않게. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
 
 `daily_prices` 의 O/H/L 이 비고 종가가 있는 krx 행은 비어 있는 칸을 종가로 채운다(정지 참고가 행 · 정규장 체결 없이 시간외만 있던 날 — 서버 `--full` 게이트 실측 145210 2025-03-21, v3 사본 같은 행 O=H=L=C). 근거는 `mappings.py` `_REF_FILL` 주석.
 
-**호출 형태(PR-8 장 마감 체인 — QL-F2 연결 지점).** T = 그날 거래일, D = 아침 재반영 대상 거래일(전날).
+**호출 형태(PR-8 장 마감 체인 — QL-F2 연결 지점).** T = 그날 거래일, T' = T 의 직전 거래일, D = 아침 재반영 대상 거래일(전날). 판은 인계 이력으로 고정한다(`--builds-from` — PR-8 리뷰 MAJOR 와 같다).
 
-| 시점 | 조건 | 명령 |
-|---|---|---|
-| 장 마감 체인 ⑥ | 장 마감 판(모델·엑셀)까지 ok | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model [--shadow] [--v3-post-cmd <daily_post>]` |
-| refill(21:05 키움 원장 커밋 뒤) | 그날 ⑥ 마지막 런 ok | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model [--shadow]` (compat 만 — 9표) |
-| refill(21:05 키움 원장 커밋 뒤) | 그날 ⑥ 마지막 런이 ok 가 아님(판 실패·세션 예외일·⑥ 미실행) | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --no-scores [--shadow]` (compat 만 — 7표, `--model-root` 불필요) |
-| 다음 날 아침 | 연구 확정판·모델 뒤 | `scripts/v3_post.sh --date D --basis morning --v3-db <v3 quant.db> [--shadow]` (compat 만 — 7표·9표는 T-34 가 본 파일 기록으로 정한다) |
+| 시점 | 명령 |
+|---|---|
+| 장 마감 체인 ⑥ | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model --builds-from data/deliver/history/<T'>_morning.json [--shadow] [--v3-post-cmd <daily_post>]` (점수 포함 9표 — 점수는 여기서만 쓴다) |
+| refill(21:05 키움 원장 커밋 뒤) | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --no-scores --builds-from data/deliver/history/<T'>_morning.json [--shadow]` (늘 — ⑥ 결과와 무관, compat 만 7표, `--model-root` 불필요) |
+| 다음 날 아침 | `scripts/v3_post.sh --date D --basis morning --v3-db <v3 quant.db> --builds-from data/deliver/history/<D>_morning.json [--shadow]` (compat 만 — 7표·9표는 T-34 가 본 파일 기록으로 정한다) |
 
-지금 PR-8 refill(`pr/PR-8` 89f81ae5 `postclose_chain.sh` `refill_main`)은 ⑥ 이 ok 가 아니면 건너뛴다 — 위 셋째 줄로 바꿔야 T-38 이 닫힌다. ⑥ 이 COMMIT 뒤 daily_post 만 실패(rc 6)한 날은 본 파일에 점수 포함 저녁 기록이 이미 있으므로 어느 refill 을 불러도 다음 날 아침은 7표다.
+다음 날 아침 반영 표: 그날 ⑥ 이 점수 포함 반영을 COMMIT 했으면(뒤에 daily_post 만 실패한 rc 6 포함) 7표, ⑥ 이 실패했거나 없었으면(판 실패·세션 예외일) 9표다 — refill 기록은 판정에 들어가지 않는다. 지금 PR-8 refill(`pr/PR-8` 89f81ae5 `postclose_chain.sh` `refill_main`)은 ⑥ 이 ok 일 때만 점수 포함으로 부른다 — 위 둘째 줄(늘 `--no-scores`)로 바꿔야 T-38 이 닫힌다.
 
 ### 8-1. v3 쪽 변경 목록(V3-A~E — 컷오버 날, 백업 뒤, N-42 Q4)
 

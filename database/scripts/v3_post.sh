@@ -24,6 +24,8 @@
 #   --shadow(그림자 기간): ①~③ 만 한다. v3 본 파일에 쓰지 않고 v3 락도 잡지 않는다 — v3 20:05 daily_all 크론이
 #     `flock -n` 이라 우리가 락을 쥐고 있으면 그날 v3 체인이 조용히 건너뛰어진다. daily_post 도 부르지 않는다.
 #     스테이징 파일은 대조용으로 남긴다(기본 경로에 `_shadow` 접미 — 제자리 실행의 사본과 섞이지 않게).
+#   기본 스테이징 경로는 `data/_v3_post/staging_<basis>[_noscores][_shadow].db` — 점수 없는 refill 이 그날 ⑥(점수 포함)이
+#     실패해 남긴 스테이징을 지우지 않게 `_noscores` 를 붙인다(QL-F2 리뷰 MINOR-1).
 #   락(제자리 모드): v3 체인과 같은 `/tmp/kael_v3_daily_all.lock`(v3 crontab daily_all 줄의 `flock -n` — v3 로컬 사본
 #     `scripts/cron_schedule.sh:3`). ①~⑤ 동안 쥔다. 잡혀 있으면 풀릴 때까지 기다린다(시간 한도 없음 — P9, 늦어짐
 #     경보는 워치독 몫, 대기 순서 문제는 ③ 순서 가드가 막는다). --v3-post-cmd 는 같은 락을 다시 잡지 않는 형태여야
@@ -31,17 +33,19 @@
 #     (raw_lock.sh 5-3 리뷰 중-1 과 같은 이유).
 #   호출 시점(이 PR 은 기록만 — 크론·체인 연결은 PR-8·PR-9): ⓐ 장 마감 판 체인 끝 `--basis evening` + daily_post
 #     ⓑ 다음 날 아침 KRX 확정 반영 뒤 `--basis morning`, compat 만 — post 명령을 주면 인자 오류(rc 5)다.
-#     ⓒ 장 마감 판이 없는 날(그날 ⓐ 가 ok 가 아님 — 판 실패일·세션 예외일 T-26) 21:05 키움 원장 커밋 뒤
-#     `--basis evening --no-scores`, compat 만(T-38). 점수 두 표를 뺀 7표라 장 마감 모델 판이 없어도 돈다. T 행 원천은
-#     QL-D 그대로(postclose.db 에 그날 행이 없으면 전 종목 21:05 원장 — 파일 자체가 없으면 멈춘다). 점수는 다음 날
-#     아침 ⓑ 가 아침 모델 판으로 채운다(이 기록엔 점수 표가 없어 T-34 가 세지 않는다). 아침·post 명령과 함께 주면
-#     인자 오류(rc 5) — 아침 반영 표는 T-34 가 정하고, daily_post(export_scores)는 그날 점수 없이 부르지 않는다.
+#     ⓒ 21:05 키움 원장 커밋 뒤 재반영(refill) — 늘 `--basis evening --no-scores`, compat 만(T-38). 점수는 ⓐ 만 쓴다.
+#     점수 두 표를 뺀 7표라 장 마감 모델 판이 없는 날(판 실패일·세션 예외일 T-26)에도 돈다. T 행 원천은 QL-D
+#     그대로(postclose.db 에 그날 행이 없으면 전 종목 21:05 원장 — 파일 자체가 없으면 멈춘다). 그날 ⓐ 의 점수 포함
+#     기록이 있으면 다음 날 아침 ⓑ 는 7표, 없으면 아침 모델 판으로 점수를 채운다(이 기록엔 점수 표가 없어 T-34 가
+#     세지 않는다). 아침·post 명령과 함께 주면 인자 오류(rc 5) — 아침 반영 표는 T-34 가 정하고, daily_post
+#     (export_scores)는 그날 점수 없이 부르지 않는다.
 #     휴장 파일 내보내기(QL-Q)는 06:00 체인 몫이라 여기 없다.
 #   daily_post 의 v3 잡은 그날을 `date.today()`(프로세스 로컬 시간대)로 정한다(v3 `scripts/check_today_business.py:17`·
 #     `scripts/export_and_send.py:124`). 그래서 이 셸의 로컬 날짜(`date +%Y%m%d` — 자식과 같은 시간대)가 D 일 때만
 #     부른다. 다르면 부르지 않고 warn(플랜 `2026-09-24-v3-merge.md` 위험표 — 자정 넘김).
 #   rc: 0 완료 · 2 반영 실패(crit — COMMIT 전이면 v3 본 파일 무변경) · 3 락 실패(warn) · 4 홈 이동 실패 ·
-#       5 인자 오류(warn — 스테이징 경로가 본 파일과 같은 파일, 아침 + post 명령 포함) ·
+#       5 인자 오류(warn — 스테이징 경로가 본 파일과 같은 파일, 아침 + post 명령, --no-scores + 아침,
+#         --no-scores + post 명령 포함) ·
 #       6 반영 완료, daily_post 실패 또는 날짜가 달라 미호출(warn)
 #   사용: v3_post.sh --date YYYYMMDD --basis evening|morning --v3-db PATH
 #                    [--v3-post-cmd CMD] [--shadow] [--allow-older] [--staging PATH] [--model-root PATH]
@@ -119,7 +123,7 @@ esac
   die_arg "--no-scores 에 daily_post 명령(--v3-post-cmd·QL_V3_POST_CMD)을 줬다 — 점수 없는 반영은 compat 만(T-38)"
 [ -n "$V3_DB" ] || die_arg "--v3-db(또는 QL_V3_DB)가 없다 — v3 quant.db 경로는 인자로만 받는다"
 [ -f "$V3_DB" ] || die_arg "--v3-db 파일이 없다: $V3_DB"
-STAGING="${STAGING:-data/_v3_post/staging_${BASIS}${SHADOW:+_shadow}.db}"
+STAGING="${STAGING:-data/_v3_post/staging_${BASIS}${NOSCORES:+_noscores}${SHADOW:+_shadow}.db}"
 same_as_v3 && die_arg "--staging 이 v3 본 파일과 같은 파일이다($STAGING = $V3_DB) — 스테이징을 뜨기 전에 지우므로 거부"
 MODE=$([ -n "$SHADOW" ] && echo shadow || echo in-place)
 # 장 마감 판 T 행 원천(QL-D) — 저녁에만 넘긴다(compat_export.sh 와 같은 방식)

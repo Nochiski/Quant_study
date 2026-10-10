@@ -25,7 +25,8 @@ v3 제자리 반영(QL-F, `scripts/v3_post.sh` 가 부른다 — `compat.v3_post
     python -m compat apply --staging <스테이징> --v3-db <v3 quant.db> --date D --basis B
                            [--shadow] [--allow-older] [--commit-flag PATH] [--no-scores]
 
-`--no-scores`(T-38 — 장 마감 판이 없는 날 저녁)는 v3-tables·apply 에 같이 준다 — 점수 두 표를 뺀 7표.
+`--no-scores`(T-38 — 21:05 원장 뒤 재반영 refill)는 v3-tables·apply 에 같이 준다 — 점수 두 표를 뺀 7표.
+`--basis evening` 전용이다(아침이면 rc 2 — 아침 반영 표는 T-34 가 정한다).
 
 rc 0 정상 · 2 예외(apply 는 게이트 실패 포함 — v3 본 파일 무변경). 표별 행수 한 줄을 stdout 에 낸다
 (`scripts/compat_export.sh`·`scripts/v3_post.sh` 가 로그로 받는다).
@@ -87,7 +88,7 @@ def _parser() -> argparse.ArgumentParser:
     t.add_argument("--date", required=True, help="대상 거래일 YYYYMMDD")
     t.add_argument("--basis", required=True, choices=("evening", "morning"))
     t.add_argument("--no-scores", action="store_true",
-                   help="점수 두 표를 뺀 7표(T-38 — 장 마감 판이 없는 날 저녁)")
+                   help="점수 두 표를 뺀 7표(T-38 — 21:05 refill, evening 전용)")
     a = sub.add_parser("apply", help="스테이징 게이트 → 반영 표 한 트랜잭션 반영(QL-F)")
     a.add_argument("--staging", required=True, type=Path)
     a.add_argument("--v3-db", required=True, type=Path)

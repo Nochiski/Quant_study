@@ -639,6 +639,25 @@ def test_no_scores_evening_keeps_the_order_guard(files) -> None:
     assert _sha(main) == before
 
 
+def test_no_scores_is_evening_only_in_python_and_cli(files, capsys) -> None:
+    """`--basis morning` 과 점수 없는 반영은 파이썬·CLI 층에서도 거부한다 — 아침 반영 표는 T-34 가 정한다."""
+    from compat.__main__ import main as cli_main
+    main, stg = files
+    with pytest.raises(CompatError, match="evening 전용"):
+        tables_for(main, D, "morning", scores=False)
+    snapshot(main, stg)
+    _fake_compat(stg, basis="morning", tables=SEVEN)
+    before = _sha(main)
+    with pytest.raises(CompatError, match="evening 전용"):
+        apply(stg, main, D, "morning", scores=False)
+    assert _sha(main) == before
+    for cmd in (["v3-tables", "--v3-db", str(main)],
+                ["apply", "--staging", str(stg), "--v3-db", str(main)]):
+        assert cli_main([*cmd, "--date", D, "--basis", "morning", "--no-scores"]) == 2
+        assert "evening 전용" in capsys.readouterr().err
+    assert _sha(main) == before
+
+
 # ── COMMIT 표식 ──────────────────────────────────────────────────────────────
 def test_commit_flag_only_after_commit(files, tmp_path: Path) -> None:
     main, stg = files

@@ -17,9 +17,10 @@
     (evening) ok 기록이 있으면 점수 두 표를 뺀 7표다 — 저녁에 보낸 엑셀과 v3 DB 점수가 같게 두고, 가격 재반영이
     아침 모델 판 실패에 묶이지 않게 한다. 그런 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻).
     점수 표를 반영했는지는 기록의 `tables`(compat 이 쓴 표 → 결과) 키로 본다.
-  · 점수 없는 저녁 반영(`scores=False`, 셸 `--no-scores` — T-38): 장 마감 판이 없는 날(판 실패일·세션 예외일
-    T-26) 21:05 원장 뒤 가격 등 7표만 반영한다. compat 이 점수 표를 고르지 않으므로 장 마감 모델 판이 없어도
-    된다. 이 기록은 점수 표가 없으므로 다음 날 아침 재반영이 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다.
+  · 점수 없는 저녁 반영(`scores=False`, 셸 `--no-scores` — T-38): 21:05 원장 뒤 재반영(refill)은 늘 이 모드로
+    가격 등 7표만 반영한다 — 점수는 장 마감 반영(⑥)만 쓴다. compat 이 점수 표를 고르지 않으므로 장 마감 모델 판이
+    없는 날(판 실패일·세션 예외일 T-26)에도 돈다. 이 기록은 점수 표가 없으므로 그날 ⑥ 의 점수 포함 기록이 없으면
+    다음 날 아침 재반영이 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다. `evening` 전용(아침은 T-34 가 정한다).
 
 반영 범위 — compat 이 쓴 범위와 정확히 같다(스테이징 `_compat_meta` 의 이번 실행 기록이 정본):
   · `daily_prices`·`investor_detail_flows`: `trade_date` 가 기록의 창 `[from_date, to_date]` 안
@@ -208,6 +209,9 @@ def _tables_for(main_rows: list[dict], d_iso: str, basis: str,
     파일에 있으면 점수 두 표를 뺀다(T-34)."""
     seven = tuple(t for t in TABLES if t not in SCORE_TABLES)
     if not scores:
+        if basis != "evening":
+            raise CompatError(f"점수 없는 반영은 evening 전용이다(받은 basis {basis}) — 아침 반영 표는 "
+                              "T-34 가 정한다(T-38)")
         return seven
     if basis == "morning" and any(
             r.get("date") == d_iso and r.get("basis") == "evening" and r.get("status") == "ok"

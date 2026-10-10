@@ -43,8 +43,15 @@ python -m factor_inputs build --date 20260929 --basis morning \
   price_daily · price_adj_daily · flow_daily · credit_daily · coverage_daily)의 뷰만 `date <= asof`(아침판 D ·
   장 마감 판 D')로 자르고 판 manifest 에 `replay`(자른 날·표)를 남긴다. `queries` SQL·게이트·진입 조건은
   그대로이고, 재생이 아니면 뷰 SQL 도 글자 그대로다(`tests/test_factor_inputs_replay.py`). 마스터
-  (security·corp)와 equity 재계산은 현판 그대로라 그날 판과 다를 수 있다 — 재생의 두 판(장 마감 판·연구
-  판)이 같은 현판을 읽어 대조에서는 상쇄된다.
+  (security·corp)와 equity 재계산은 현판 그대로라 그날 판과 다를 수 있다.
+  **재생은 다음 차이를 볼 수 없다.** 재생의 두 판(장 마감 판·연구 판)이 같은 equity 현판과 같은 21:05 원장
+  수급을 읽어, 실운영에서 두 판을 가르는 아래 차이가 재생 대조에서는 구조적으로 0 이다 — 그림자 3거래일
+  (+ 컷오버 뒤 기록형) 몫이다.
+  - equity 소급 재판정이 낳는 T 전 행 차이 — adj_factor 기준가 창이 asof 뒤 세션을 본다 · universe_daily
+    corp_action_window 가 45세션 앞을 본다 · equity 규칙 변경. 실운영 장 마감 판은 D' 확정판 equity 를, 연구
+    판 T 는 다음 날 확정판 equity 를 읽어 갈릴 수 있다.
+  - 정규장 수급 대 21:05 원장 수급 차이 — 재생 T 행 수급과 연구 판 수급이 같은 21:05 키움 원장에서 온다.
+    실운영 장 마감 판 T 행 수급은 15:41 정규장 수집이다.
 
 ### 2-1. 장 마감 판(`--basis evening`, 컷오버 PR-4)
 

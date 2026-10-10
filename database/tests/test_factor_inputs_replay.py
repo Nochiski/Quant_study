@@ -15,7 +15,10 @@ keep 3 · equity keep 10)은 GC 로 사라졌으므로 X-1 원칙('현판 + D �
   ④ 판 manifest 의 재생 표시(`replay`)는 재생 판에만 있다
 
 원천은 `test_factor_inputs` 합성 트리다. '그날 판' = 세션이 D(09-28)에서 끝나는 원천, '현판' = 같은
-원천에 T(09-29)·T+1(09-30) 세션 행을 더한 것(D 이하 행은 바이트까지 같다).
+원천에 T(09-29)·T+1(09-30) 세션 행을 더한 것(D 이하 행은 바이트까지 같다). 'D 이하 행이 같다'는
+픽스처 전제이며 실서버에선 성립하지 않을 수 있다 — 현판 equity 는 소급 재판정(adj_factor 기준가 창이 asof
+뒤 세션을 봄 · universe_daily corp_action_window 45세션 · equity 규칙 변경)으로 D 이하 행도 그날 판과 다를
+수 있고, 재생은 그 차이를 볼 수 없다(`docs/FACTOR_INPUTS.md` §2 재생).
 """
 from __future__ import annotations
 

@@ -12,7 +12,8 @@
 #             [--steps equity,catalog,contract,fi,model] [--stage-at YYYYMMDD]
 #   replay.sh --out DIR --basis evening (--date T | --dates T1-T2) [--code DIR] [--steps equity,board]
 #             [--spearman-min X]
-#   replay.sh --out DIR --compare OTHER [--date YYYYMMDD] [--basis morning|evening]
+#   replay.sh --out DIR --compare OTHER [--date YYYYMMDD] [--basis morning|evening]   (evening = 옛 21:20 연구
+#             저녁 판 data/… 대조 — 장 마감 판 재생 출력 data/model_db 는 대조하지 않는다, 아래 --compare)
 #
 #   --out      출력 루트. 운영 홈이나 운영 data 의 실제 경로 안이거나 그 조상이면 거부한다. 아직 없는
 #              부분에 . · .. · 매달린 링크가 있어도 거부한다. data·logs·stage_at·stage_pin 아래에 링크가 있거나
@@ -43,7 +44,9 @@
 #              (읽기 전용). 운영 쪽(data/deliver 가 있는 루트) equity 는 인계 이력 D 가 가리키는 판이고,
 #              그 이력이 없으면 rc 2. fi·model 은 `_runs/<D>_<basis>.json` 이고, 없거나 ok 가 아니면 '없음'.
 #              model 은 scores 와 indicators 해시를 둘 다 대조한다. 운영 equity keep(10판) 밖으로 밀린
-#              D 의 판은 '없음'으로 나온다.
+#              D 의 판은 '없음'으로 나온다. --basis evening 은 연구 루트의 `<D>_evening`(옛 21:20 연구 저녁
+#              판 — data/{factor_inputs,model}/_runs · data/deliver/history)을 읽는다. 장 마감 판 재생 출력
+#              (data/model_db)은 이 대조가 아니라 board.tsv · data/model_db/compare/<T>.json 이 본다.
 #
 # 장 마감 판 재생(--basis evening, 컷오버 PR-8b — P5 '장 마감 판 60거래일 재생 대 연구 판'의 실행기):
 #   과거 T 의 장 마감 판과 다음 날 연구 판 T 를 다시 지어 두 판 대조(daily.board_compare --replay)까지 돈다.
@@ -69,8 +72,10 @@
 #     board-summary). 재생 표시는 postclose.db replay_source · 인계 이력 replay · fi 판 manifest replay(자른 날) ·
 #     대조 결과 replay: true 에 남는다.
 #   재생으로 못 보는 것: 도착 시각·락·크론·16:00 컷오프(대상인데 21:05 원장에 없는 종목만 T 가격 없음)·정규장
-#     수급 정의(재생 T 수급 = 하루 전체라 연구 판과 같다), 그날 마스터(security·corp)·equity 재계산 차이(두 판이
-#     같은 현판을 읽어 상쇄된다) — 그림자 3거래일 몫(§4). 체인의 stage 단독 건전성(C1~C6 — 커밋 시각·행수 단조·
+#     수급 정의(재생 T 수급과 연구 판 수급이 같은 21:05 원장에서 와 차이가 구조적으로 0 — 수급 상한은 재생으로 못
+#     정한다), 그날 마스터(security·corp)·equity 소급 재판정(adj_factor 기준가 창이 asof 뒤 세션을 봄 · universe_daily
+#     corp_action_window 45세션 · equity 규칙 변경)이 낳는 T 전 행 차이(두 판이 같은 equity 현판을 읽어 구조적으로
+#     0) — 그림자 3거래일(+ 컷오버 뒤 기록형) 몫(§4). 체인의 stage 단독 건전성(C1~C6 — 커밋 시각·행수 단조·
 #     신선도, 재생 원장은 T 하루치라 맞지 않는다)·스냅샷 GC·런 로그·알림·엑셀·v3 반영은 돌지 않는다.
 #
 # 기록: <out>/logs/passN/ — summary.tsv(step·table·rc·sec·build_id·content_hash·n_rows), summary.txt

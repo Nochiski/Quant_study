@@ -51,6 +51,11 @@ asof 로 자르지만 세션 축은 자르지 않는다 — 현판으로는 MD-S
 세션이 filing_late 실효 기한을 정한다(아침판). 그래서 equity 세션 축 표(`REPLAY_SESSION_TABLES`)의
 뷰만 `date <= asof`(아침판 D · 장 마감 판 D')로 자른다. `queries` SQL·게이트·진입 조건은 그대로이고,
 재생이 아니면 뷰 SQL 도 글자 그대로다. 판 manifest 에 `replay`(자른 날·표)를 남긴다(재생 판에만).
+마스터(security·corp)와 equity 재계산은 현판 그대로다. 재생의 두 판(장 마감 판·연구 판)이 같은 equity
+현판과 같은 21:05 원장 수급을 읽으므로, equity 소급 재판정(adj_factor 기준가 창이 asof 뒤 세션을 봄 ·
+universe_daily corp_action_window 45세션 · equity 규칙 변경)이 낳는 T 전 행 차이와 정규장 대 21:05 원장
+수급 차이는 재생 대조에서 구조적으로 0 이다 — 재생은 이 차이를 볼 수 없다(그림자 3거래일 + 컷오버 뒤
+기록형 몫, `docs/FACTOR_INPUTS.md` §2).
 """
 from __future__ import annotations
 

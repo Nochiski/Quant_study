@@ -15,9 +15,13 @@ import 한다: 거래일은 판정 달력 `daily.calendar`, 재생 T 행 원장�
       ROOT/data/factor_inputs/_runs/<D'>_morning.json 의 eligible → ②
       ROOT/data/deliver/history/<D'>_morning.json 의 universe_daily D' 행 v3 유니버스 나머지.
       행마다 price_valid='1'(재생 T 행은 21:05 원장 값 — 종가는 애프터마켓 마지막 체결가일 수 있어
-      두 판 대조 `--replay` 의 '종가 정의'), collected_at = 그 원장 행의 수집 시각, fetched_at = 이
-      실행 시각(UTC). 대상인데 21:05 원장에 행이 없는 종목은 쓰지 않는다(장 마감 판에서 T 가격 없음
-      — 실운영 16:00 컷오프 자리). 재생 표시는 같은 파일의 `replay_source` 표(T 하루 한 행).
+      두 판 대조 `--replay` 의 '종가 정의'), collected_at = 그 원장 행의 collected_at 그대로 — 종목별
+      수집 시각이 아니라 키움 TR 실행 단위 스탬프다(`kw_daily.fetch_tr` 가 실행마다 하나를 찍는다). 어느
+      실행의 스탬프인지는 원장 쓰기 규칙을 따른다: 일일 머지(`kw_daily.merge_tr`, 09-10 70cecba7 부터)는
+      INSERT OR IGNORE 라 그 행을 처음 넣은 실행, 그 전 일일 머지와 백필(`backfill_kw.py`)은 INSERT OR
+      REPLACE 라 마지막으로 덮어쓴 실행이다. fetched_at = 이 실행 시각(UTC). 대상인데 21:05 원장에 행이 없는 종목은
+      쓰지 않는다(장 마감 판에서 T 가격 없음 — 실운영 16:00 컷오프 자리). 재생 표시는 같은 파일의
+      `replay_source` 표(T 하루 한 행).
 rc: 0 정상 · 2 입력 오류(달력·원장·대상 판 없음, 그날 원장 행 0, 대상 0, OUT 이 이미 있음)
 """
 from __future__ import annotations

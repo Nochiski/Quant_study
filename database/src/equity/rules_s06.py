@@ -19,6 +19,11 @@ MVP 사건(성분은 곱)과 비율이 맞으면 그 사건의 계수·apply_dat
 (행 없음, 기록) · (d) 그 외는 `unknown_price_only` ok=false. 사건 매칭(2차)은 기준가 사건이 없을
 때의 폴백으로 남는다. ETF(분배락·설정환매)와 재상장 첫 행은 후보 밖 — 근거는 `.sql` 머리말.
 
+4차(E-1, e1.28.0): 사건 매칭 (a)(b)(c) 도 **기준가 후보 세션**만 고른다(잔여 = 기준가 비 ÷ 계수 − 1).
+원수익률만 맞고 그날 기준가가 직전 종가 그대로인 세션은 ok 가 아니다 — 못 찾으면 옛 원수익률
+판정의 세션이 기준가 후보면 옛 반증 경로(krx_base_inconsistent), 아니면 `no_base_price_evidence`.
+그래서 ok 행의 apply_basis 는 `krx_base_price` 뿐이다(`OK_APPLY_BASIS`).
+
 입력 — equity `corp_event`·`price_daily`(close·price_kind: 매칭 축 + EG8 · base_price_krw·
 shares_out: 기준가 원천)·`trading_calendar`·`security`(sec_type·corp_code)·`security_span`(구간
 첫날) + `stg_event_cr`(감자 유·무상 판정 축 `cr_mth`·`cr_rs`: corp_event 에는 구분 컬럼이 없다).
@@ -75,18 +80,27 @@ KRX_BASE_EVENT_ID_INFIX = ":krx_base:"
 # factor_source 폐쇄 어휘 — mktcap_neutral 만 factor_ok=true 다(사유 우선순위는 sql/adj_factor.sql).
 # S06-2: krx_base_inconsistent(기준가 비율 × 주식수 비가 1 ± factor_product_tol_base 밖, 또는 ok
 # 사건의 apply_date 에 기준가 후보가 있는데 비율이 안 맞음) · unknown_price_only(위 (d) 행의 사유).
+# E-1(e1.28.0): no_base_price_evidence — 원수익률로는 맞는 세션이 있었으나(옛 판정이 ok 로 받던
+# 것, 소액은 무조건) 창 안 KRX 기준가가 그 계수를 확인하지 않았다(기준가 = 직전 종가인 날의 가짜
+# 매칭 거부). 원수익률도 안 맞던 미매칭은 no_price_match 그대로.
 FACTOR_SOURCE_VOCAB: tuple[str, ...] = ("mktcap_neutral", "ratio_null", "capred_paid",
                                         "near_dup_suppressed", "no_share_change",
-                                        "no_price_match", "same_day_suppressed",
+                                        "no_price_match", "no_base_price_evidence",
+                                        "same_day_suppressed",
                                         "krx_base_inconsistent", "unknown_price_only")
 OK_FACTOR_SOURCE = "mktcap_neutral"
-# apply_basis 폐쇄 어휘. ok 행은 OK_APPLY_BASIS, no_price_match 행만 unmatched, 그 외 not-ok 행은
+# 미매칭 사유 — apply_basis 'unmatched' 와 짝(apply_date 는 명목 세션)
+UNMATCHED_FACTOR_SOURCES: tuple[str, ...] = ("no_price_match", "no_base_price_evidence")
+# apply_basis 폐쇄 어휘. ok 행은 OK_APPLY_BASIS, 미매칭 사유 행만 unmatched, 그 외 not-ok 행은
 # 매칭 결과(nominal·price_matched·krx_base_price) 유지. S06-2: krx_base_price = KRX 기준가가 정한
 # 세션.
 APPLY_BASIS_VOCAB: tuple[str, ...] = ("nominal", "price_matched", "price_matched_combined",
                                       "unmatched", "krx_base_price")
-OK_APPLY_BASIS: tuple[str, ...] = ("nominal", "price_matched", "price_matched_combined",
-                                   "krx_base_price")
+# E-1(e1.28.0): ok 행은 KRX 기준가가 확인한 세션뿐이다 — (a)(b)(c) 가 기준가 후보 세션만 고르고
+# S06-2 (a) 가 그 세션의 기준가 비로 계수를 교체하므로 nominal·price_matched·combined 는 ok 로
+# 남지 않는다(1:1 짝에서 진 단위는 conflict → krx_base_inconsistent). 기준가 근거 = 그 세션이
+# 기준가 후보(`n_krx_row_out_of_scope`)이고 계수 곱 = 기준가 비(`n_krx_price_factor_mismatch`).
+OK_APPLY_BASIS: tuple[str, ...] = ("krx_base_price",)
 KRX_BASE_APPLY_BASIS = "krx_base_price"
 # baseline 상수 — 가격 매칭 창·허용치 (adj_factor 네임스페이스) + 근접 중복 창 (corp_event)
 PRICE_MATCH_CONSTS: tuple[str, ...] = ("price_match_tol_rel", "price_match_tol_abs",
@@ -234,7 +248,8 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
           (SELECT count(*) FROM {v} WHERE factor_ok
              AND apply_basis NOT IN ({_vocab_sql(OK_APPLY_BASIS)})),
           (SELECT count(*) FROM {v}
-             WHERE (factor_source = 'no_price_match') IS DISTINCT FROM (apply_basis = 'unmatched')),
+             WHERE (factor_source IN ({_vocab_sql(UNMATCHED_FACTOR_SOURCES)}))
+                   IS DISTINCT FROM (apply_basis = 'unmatched')),
           (SELECT count(*) FROM {v} WHERE available_date IS NULL),
           (SELECT count(*) FROM {v} WHERE available_basis IS DISTINCT FROM 'derived'),
           (SELECT count(*) FROM {v} WHERE apply_date IS NULL),
@@ -500,6 +515,7 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
         "n_capred_paid": by_source.get("capred_paid", 0),
         "n_no_share_change": by_source.get("no_share_change", 0),
         "n_no_price_match": by_source.get("no_price_match", 0),
+        "n_no_base_price_evidence": by_source.get("no_base_price_evidence", 0),   # E-1
         "n_no_price_match_no_price_rows": n_unmatched_no_price,
         "n_nominal_small_expected": n_small_nominal,
         "n_ok_apply_ne_nominal": int(str(n_off_pos)),
@@ -969,4 +985,5 @@ __all__ = ["ADJ_FACTOR", "APPLY_BASIS_VOCAB", "BASELINE_SEED", "BASE_PRICE_CONST
            "PRICE_ONLY_JUMP_GATE", "PRICE_ONLY_RESOLUTION", "PRICE_ONLY_SEC_TYPES",
            "PRICE_ONLY_SOURCES", "PRICE_RESOLUTION_VOCAB", "PRICE_UNRESOLVED",
            "FACTOR_NEAR_EXCLUDED_SOURCES", "SUPPRESSED_SOURCES", "RETURN_REPORT_LIMIT",
-           "TABLES", "VOLUME_MEDIAN_WINDOW", "VOLUME_RATIO_REPORT_BAND"]
+           "TABLES", "UNMATCHED_FACTOR_SOURCES", "VOLUME_MEDIAN_WINDOW",
+           "VOLUME_RATIO_REPORT_BAND"]

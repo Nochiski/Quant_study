@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.27.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.28.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -299,6 +299,18 @@ RULES_VERSION = "e1.27.0"                # BuildRecord.rules_version 에 실린�
 #          와 브랜치 `v_sector` 의 합집합 12개, 계약(EG-C) 대상은 워크벤치 facade
 #          (`_engine/strategy_workbench`, #372). 판본이 바뀌어 첫 빌드는 EG5a 가 skip 이므로 두 번
 #          지어 재현성을 확인한다(EQUITY_HANDOFF §6).
+# e1.28.0: E-1(v3 컷오버 트랙, QL-E 리뷰 MAJOR-2) `adj_factor` — ok 계수는 KRX 기준가가 확인한 세션에만.
+#          (a)(b)(c) 가 원수익률 대신 기준가 후보(bp) 세션의 기준가 비 |r / pf − 1| ≤ tol 로 세션을
+#          고른다 — 기준가 = 직전 종가(조정 없음)인 날은 후보 밖. 소액은 명목 세션만(그 ±
+#          `base_match_window_sessions` 는 S06-2 (a)). 못 찾으면 옛 원수익률 판정의 세션 s 로 사유를
+#          가른다: s 가
+#          기준가 후보 → 옛 경로(conflict → krx_base_inconsistent), 아니면 신설 사유
+#          `no_base_price_evidence`(apply_basis unmatched·명목 세션), 원수익률도 못 맞추면
+#          no_price_match. ok 행의 apply_basis 는 krx_base_price 뿐(`OK_APPLY_BASIS`, EG3
+#          `n_ok_apply_basis_bad`). 로컬 10-03 판 재생: 238행·138종목 변화 — ok → 미해결 102
+#          (소액 자기주식 소각 감자 72 등), 다른 날로 옮긴 ok 12(240600 등), 미매칭 → ok 11,
+#          기준가가 안 바뀐 날의 계수 접힘 114 → 0, 그 밖 (종목, 날짜) 가격 단계는 KRX 기준가 사슬
+#          대조 범주 불변. 열·행 grain 불변 — fi·모델 계약 불변(값만 바뀜).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

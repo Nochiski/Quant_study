@@ -2702,3 +2702,41 @@ ssh kael-server 'cd quant-ledger && PYTHONPATH=src .venv/bin/python \
 
 JSON 보고서는 `--out` 이 없으면 **루트의 부모 아래** `logs/equity_diff/<표>_<before>_<after>.json`
 이다(표준 서버 루트에서는 `data/logs/equity_diff/`). 마크다운 요약은 stdout 으로 나간다.
+
+## 13. E-1 — `adj_factor` 사건 매칭에 KRX 기준가 근거 요구 (규칙 e1.28.0, 2026-10-10)
+
+v3 컷오버 트랙 QL-E 리뷰 MAJOR-2. 결함·규칙의 정본은 `sql/adj_factor.sql` 머리말 ※ E-1 · (a)~(d)
+블록이고, 여기에는 게이트 축만 적는다.
+
+- **결함**: (a)(b)(c) 가 원수익률 잔여로 세션을 골라, 그날 KRX 기준가가 직전 종가 그대로(조정 없음)여도
+  ok 계수를 접었다(069080·091700 자기주식 소각 · 240600 권리락 07-29 를 두고 09-15 급락 · 291230 감자
+  기준일 급등). 기준가가 같은 날 바뀌지 않으면 S06-2 (a)·conflict 가 손대지 못해 EG3·EG8·T-9 모두
+  통과했다(EG8 은 ok 계수의 적용일 수정수익률만 보고, 잘못 접힌 날은 수정수익률이 오히려 작아진다).
+- **규칙**: (a)(b)(c) 후보 세션 = 기준가 후보 bp, 잔여 = |기준가 비 ÷ 계수 − 1|. 기준가 NULL(저녁 잠정
+  행)은 결측. 못 찾으면 옛 원수익률 세션 s 로 사유를 가른다 — s 가 bp 면 옛 반증 경로
+  (`krx_base_inconsistent`, ⑤·`v_unfolded_event` 축 불변), 아니면 신설 `no_base_price_evidence`,
+  원수익률도 못 맞추면 `no_price_match`.
+
+| 게이트 축 | 바뀐 것 |
+|---|---|
+| `FACTOR_SOURCE_VOCAB` | + `no_base_price_evidence`(10종). 어휘 폐쇄 `n_factor_source_outside_vocab` 가 그대로 닫는다 |
+| `n_unmatched_source_mismatch` | `factor_source ∈ UNMATCHED_FACTOR_SOURCES(no_price_match·no_base_price_evidence)` ⇔ `apply_basis = 'unmatched'` |
+| `OK_APPLY_BASIS` | `krx_base_price` 하나 — `n_ok_apply_basis_bad` 가 '기준가 근거 없는 ok 행' 을 폐기형으로 잡는다. 근거의 나머지 두 조건(그 세션이 기준가 후보 · 계수 곱 = 기준가 비)은 기존 `n_krx_row_out_of_scope`·`n_krx_price_factor_mismatch` 가 묶는다. 부정 픽스처: 069080 옛 산출 모양 되살리기 → FAIL(`test_E1_부정_*`) |
+| 기록형 | + `n_no_base_price_evidence`. 원래 0 이 되는 기록형: `n_ok_without_base_price_event` · `n_nominal_small_expected` · `apply_offset_sessions_max_individual`·`_combined`(ok 행이 전부 `krx_base_price`) — 축 정리는 후속 |
+| EG8 | 술어 불변. ok 사건 집합이 기준가 세션으로 좁혀져 `n_ok_events` 가 줄고 P02·P03 은 그 집합에서 잰다 |
+| ⑤ ③(ok 접힘일 제외) | 술어 불변. ok 행의 `available_date ≤ apply_date` 라 접힘일 = 적용일 = 그 단위가 소비한 기준가 세션이 되어 ② 사유 행과 겹칠 수 없다 — 안전망으로 남긴다 |
+
+**미해결이 늘어난 몫과 하류**: ok → 미해결(`no_base_price_evidence`) 사건은 `price_resolution` 이
+대개 `unresolved`(근처에 ⑤ 단위·ok 계수가 있으면 `price_only_near`·`factor_near`)다. fi `adj_ok` 는 그
+적용일에서 뒤집히고, T-9 `adj_jump_ok`(H1-4)는 적용일 ±6 세션에 제한폭 초과 점프가 있을 때만
+뒤집힌다 — 새 미해결은 대부분 소액(자기주식 소각 0.1~4.5%)이라 점프가 없다. K1-7a SKIP 허용표:
+이 변경은 새 SKIP 경로를 만들지 않고, 판본 상향 뒤 첫 빌드의 EG5a `rules_changed` 는 이미 허용표에
+있다(`src/stage/skip_allow.py`).
+
+**로컬 실측(10-03 판 입력, 같은 상수)**: 5,605 → 5,547행, 238행·138종목 변화. ok → 미해결 102(소액 84 =
+자기주식 소각 감자 72 + 소액 무상증자 12 · 큰 사건 18), 다른 날로 옮긴 ok 12(240600 07-29 · 037760
+2010-03-19 등 — 옮긴 날의 unknown_price_only 13행 소멸), 미매칭 → ok 11(정지 뒤 재개 기준가가 명목 ± 5
+밖 — 같은 날 unknown_krx ok 10행 소멸), 미매칭 → 반증 38(같은 날 unknown_krx 반증 35행 소멸, ⑤ 계수 행만
+사건 행으로 옮겨감). (종목, 날짜) 가격 단계를 KRX 기준가 사슬 단계(전일 종가 ÷ 기준가)와 견주면
+기준가가 안 바뀐 날의 계수 접힘 114 → **0**, 나머지 범주(일치 4,058 · KRX 만 1,062 · 둘 다 다름 197)
+불변.

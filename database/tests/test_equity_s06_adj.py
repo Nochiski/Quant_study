@@ -629,31 +629,40 @@ def flat_prices(ticker: str, cal: list[date], close: float, *, jumps: dict[int, 
     return out
 
 
-def test_합성_명목_세션의_점프가_계수와_맞으면_nominal(tmp_path: Path) -> None:
+def test_합성_명목_세션의_기준가가_계수와_맞으면_그_세션(tmp_path: Path) -> None:
+    """(a) 명목 세션 기준가 ×0.5 · 주식수 ×2 → 그 세션(S06-2 (a) 가 기준가 비로 교체). E-1: 원수익률만
+    ×0.51 로 맞고 기준가가 그대로면(조정 없음) ok 가 아니다 — no_base_price_evidence."""
     cal = sessions(80)
     ev = [{"ticker": "A00001", "event_type": "split", "effective_date": cal[30], "ratio": 2.0,
            "source": "krx_listing", "effective_basis": "krx_shares_change",
            "announce_date": cal[30]}]
-    px = flat_prices("A00001", cal, 10000, jumps={30: 0.51})    # 기대 0.5, 잔여 0.02
+    px = flat_prices("A00001", cal, 10000, jumps={30: 0.51}, base={30: 0.5},
+                     share_jumps={30: 2.0})
     f = run_adj_sql(ev, px, cal)[f"A00001:split:{cal[30]}"]
-    assert f["apply_basis"] == "nominal" and f["apply_date"] == cal[30]
+    assert f["apply_basis"] == "krx_base_price" and f["apply_date"] == cal[30]
     assert f["factor_ok"] is True and (f["price_factor"], f["share_factor"]) == (0.5, 2.0)
-    assert f["available_date"] == cal[30]                        # min(announce, cal[31])
+    assert f["available_date"] == cal[30]                        # min(announce, apply)
+    g = run_adj_sql(ev, flat_prices("A00001", cal, 10000, jumps={30: 0.51}), cal)
+    x = g[f"A00001:split:{cal[30]}"]
+    assert x["factor_source"] == "no_base_price_evidence" and x["factor_ok"] is False
+    assert x["apply_basis"] == "unmatched" and x["apply_date"] == cal[30]
 
 
-def test_합성_정지_뒤_재개일에_기준가가_바뀌는_감자는_price_matched_두_축_상이(
+def test_합성_정지_뒤_재개일에_기준가가_바뀌는_감자는_창에서_찾고_두_축_상이(
         tmp_path: Path) -> None:
-    """FX-2-004. 기준일(세션 20)부터 정지(reference), 세션 31 재개일에 ×9.8 → 잔여 0.02 ≤ 0.135.
-    명목 세션의 원수익률은 0(정지) 이라 nominal 이 아니다. 오프셋 +11 세션."""
+    """FX-2-004. 기준일(세션 20)부터 정지(reference), 세션 31 재개일에 기준가 ×10 · 주식수 ×0.1
+    (종가 ×9.8). 명목 세션은 기준가가 안 바뀌어(정지) (a) 가 아니고 (b) 창 [15, 60] 에서 기준가로
+    찾는다(±base_match_window_sessions 5 밖 — 오프셋 +11 세션)."""
     cal = sessions(80)
     ev = [{"ticker": "A00002", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
            "source": "event_cr", "rcept_no": "20191202000001", "announce_date": cal[5]}]
-    px = flat_prices("A00002", cal, 1000, jumps={31: 9.8}, halt=(19, 30))
+    px = flat_prices("A00002", cal, 1000, jumps={31: 9.8}, halt=(19, 30), base={31: 10.0},
+                     share_jumps={31: 0.1})
     f = run_adj_sql(ev, px, cal)[f"A00002:capred:{cal[20]}"]
-    assert f["apply_basis"] == "price_matched" and f["apply_date"] == cal[31]
+    assert f["apply_basis"] == "krx_base_price" and f["apply_date"] == cal[31]
     assert f["factor_ok"] is True and f["factor_source"] == "mktcap_neutral"
     assert (f["price_factor"], f["share_factor"]) == (10.0, 0.1)     # 두 축 상이
-    assert f["available_date"] == cal[5]                          # 공시일 < cal[32]
+    assert f["available_date"] == cal[5]                          # 공시일 < apply
     # 창 [−5, +40] 밖(세션 61)에서만 점프가 나면 못 찾는다
     px2 = flat_prices("A00002", cal, 1000, jumps={61: 9.8}, halt=(19, 30))
     g = run_adj_sql(ev, px2, cal)[f"A00002:capred:{cal[20]}"]
@@ -665,15 +674,18 @@ def test_합성_정지_뒤_재개일에_기준가가_바뀌는_감자는_price_m
 def test_합성_참고가_행에_먼저_실린_기준가는_그_행이_apply_date다(tmp_path: Path) -> None:
     """3차(서버 2차 실측): KRX 는 정지 중 참고가 행의 close 에 새 기준가를 먼저 싣는다 — 시계열
     점프는 거래 재개일(세션 31)이 아니라 정지 중 세션 27(reference) 에서 일어난다. 행 대 행 정의라
-    세션 27 이 apply_date 이고, 재개일은 잔여 0 이라 후보가 아니다."""
+    세션 27 이 apply_date 이고, 재개일은 잔여 0 이라 후보가 아니다. E-1: 기준가도 세션 27 참고가
+    행에서 바뀐다(재개일 31 은 기준가 = 직전 행 종가라 기준가 후보 밖)."""
     cal = sessions(80)
     ev = [{"ticker": "A00006", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
            "source": "event_cr", "rcept_no": "20191202000006", "announce_date": cal[5]}]
-    px = flat_prices("A00006", cal, 1000, jumps={27: 9.9, 31: 1.02}, halt=(19, 30))
+    px = flat_prices("A00006", cal, 1000, jumps={27: 9.9, 31: 1.02}, halt=(19, 30),
+                     base={27: 9.9})
     assert px[27]["price_kind"] == "reference" and px[27]["close"] == 9900
     f = run_adj_sql(ev, px, cal)[f"A00006:capred:{cal[20]}"]
-    assert f["apply_basis"] == "price_matched" and f["apply_date"] == cal[27]
-    assert f["factor_ok"] is True and (f["price_factor"], f["share_factor"]) == (10.0, 0.1)
+    assert f["apply_basis"] == "krx_base_price" and f["apply_date"] == cal[27]
+    assert f["factor_ok"] is True and f["price_factor"] == pytest.approx(9.9)
+    assert f["share_factor"] == pytest.approx(1 / 9.9)        # 같은 날 주식수 불변 → 1/r
     # 직전 거래 종가 정의였다면 재개일 31 이 |1.02·9.9/10 − 1| = 0.01 로 매칭돼 정지 중 4개 참고가
     # 행(9,900)이 조정 전 가격으로 남았을 것이다 — 뷰가 조정하는 것은 행 시계열이다
 
@@ -694,25 +706,28 @@ def test_합성_ratio_1_은_주식수_불변이라_no_share_change(tmp_path: Pat
 
 def test_합성_복합_사건은_계수_곱으로_한_세션에_같이_적용된다(tmp_path: Path) -> None:
     """감자(cr, ratio 0.5) + KRX 액면병합(reverse_split, ratio 0.5) 명목 세션 20·22. 실제 점프는
-    세션 26 에 ×4(= 2 × 2) 한 번 — 개별 비율(×2)로는 어느 날도 안 맞고 곱으로만 맞는다."""
+    세션 26 에 기준가 ×4(= 2 × 2) 한 번 — 개별 비율(×2)로는 어느 날도 안 맞고 곱으로만 맞는다.
+    (c) 가 그 세션을 찾고 S06-2 (a) 가 성분을 한 단위로 기준가에 교체한다."""
     cal = sessions(80)
     ev = [{"ticker": "A00003", "event_type": "capred", "effective_date": cal[20], "ratio": 0.5,
            "source": "event_cr", "rcept_no": "20191202000002", "announce_date": cal[5]},
           {"ticker": "A00003", "event_type": "reverse_split", "effective_date": cal[22],
            "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
            "announce_date": cal[22]}]
-    px = flat_prices("A00003", cal, 1000, jumps={26: 4.0}, halt=(19, 25))
+    px = flat_prices("A00003", cal, 1000, jumps={26: 4.0}, halt=(19, 25), base={26: 4.0},
+                     share_jumps={26: 0.25})
     f = run_adj_sql(ev, px, cal)
     a, b = f[f"A00003:capred:{cal[20]}"], f[f"A00003:reverse_split:{cal[22]}"]
     for x in (a, b):
-        assert x["apply_basis"] == "price_matched_combined" and x["apply_date"] == cal[26]
+        assert x["apply_basis"] == "krx_base_price" and x["apply_date"] == cal[26]
         assert x["factor_ok"] is True and (x["price_factor"], x["share_factor"]) == (2.0, 0.5)
     assert a["available_date"] == cal[5] and b["available_date"] == cal[22]
-    # 점프가 ×2 뿐이면 둘 다 개별 매칭이 같은 날 → 우선순위 낮은 KRX 행을 same_day_suppressed
-    px2 = flat_prices("A00003", cal, 1000, jumps={26: 2.0}, halt=(19, 25))
+    # 기준가가 ×2 뿐이면 둘 다 개별 매칭이 같은 날 → 우선순위 낮은 KRX 행을 same_day_suppressed
+    px2 = flat_prices("A00003", cal, 1000, jumps={26: 2.0}, halt=(19, 25), base={26: 2.0},
+                      share_jumps={26: 0.5})
     g = run_adj_sql(ev, px2, cal)
     a2, b2 = g[f"A00003:capred:{cal[20]}"], g[f"A00003:reverse_split:{cal[22]}"]
-    assert a2["apply_basis"] == "price_matched" and a2["factor_ok"] is True
+    assert a2["apply_basis"] == "krx_base_price" and a2["factor_ok"] is True
     assert a2["apply_date"] == cal[26]
     assert b2["factor_source"] == "same_day_suppressed" and b2["factor_ok"] is False
     assert b2["apply_basis"] == "price_matched" and b2["apply_date"] == cal[26]
@@ -723,18 +738,20 @@ def test_합성_명목일이_떨어진_성분의_공통_apply_date는_성분_창
     """4차(서버 3차 EG3 FAIL `n_apply_outside_window` 3): 감자(명목 세션 20)와 액면병합(명목 50)이
     뒤쪽 명목일 +20 세션(70)에서 한 번에 ×4 조정 — 앞 멤버 자기 창 [15, 60] 밖이지만 성분 창
     [15, 90] 안이라 combined 유효(EG3 도 성분 창으로 판정). 점프가 성분 창 밖(95)이면 성분 전체
-    no_price_match."""
+    no_price_match. E-1: 세션 70 의 기준가 ×4 · 주식수 ×0.25 가 성분 곱의 근거라 ok 행은
+    krx_base_price 로 교체된다(EG3 는 교체 행도 같은 (ticker, apply_date) 단위 창으로 본다)."""
     cal = sessions(120)
     ev = [{"ticker": "A00008", "event_type": "capred", "effective_date": cal[20], "ratio": 0.5,
            "source": "event_cr", "rcept_no": "20191202000008", "announce_date": cal[5]},
           {"ticker": "A00008", "event_type": "reverse_split", "effective_date": cal[50],
            "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
            "announce_date": cal[50]}]
-    px = flat_prices("A00008", cal, 1000, jumps={70: 4.0}, halt=(19, 69))
+    px = flat_prices("A00008", cal, 1000, jumps={70: 4.0}, halt=(19, 69), base={70: 4.0},
+                     share_jumps={70: 0.25})
     f = run_adj_sql(ev, px, cal)
     a, b = f[f"A00008:capred:{cal[20]}"], f[f"A00008:reverse_split:{cal[50]}"]
     for x in (a, b):
-        assert x["apply_basis"] == "price_matched_combined" and x["apply_date"] == cal[70]
+        assert x["apply_basis"] == "krx_base_price" and x["apply_date"] == cal[70]
         assert x["factor_ok"] is True and (x["price_factor"], x["share_factor"]) == (2.0, 0.5)
     g = run_eg3(ev, px, cal)
     assert g.status is GateStatus.PASS, g.detail
@@ -742,8 +759,7 @@ def test_합성_명목일이_떨어진_성분의_공통_apply_date는_성분_창
     assert m["n_apply_outside_window"] == 0 and m["n_combined_apply_inconsistent"] == 0
     assert m["apply_offset_sessions_max"] == 50            # 앞 멤버 기준 실측(창 40 초과)
     assert m["apply_offset_sessions_max_individual"] == 0
-    assert m["apply_offset_sessions_max_combined"] == 50
-    assert m["n_by_apply_basis"] == {"price_matched_combined": 2}
+    assert m["n_by_apply_basis"] == {"krx_base_price": 2}
     # 성분 창 [15, 90] 밖(95)에서만 점프 → 성분 전체 no_price_match
     px2 = flat_prices("A00008", cal, 1000, jumps={95: 4.0}, halt=(19, 94))
     h = run_adj_sql(ev, px2, cal)
@@ -771,33 +787,21 @@ def test_합성_명목일이_떨어진_성분의_공통_apply_date는_성분_창
     assert bad.metrics["n_ok_same_apply_date_individual"] == 1
 
 
-def test_합성_소액_이벤트는_가격으로_못_가리므로_항상_nominal(tmp_path: Path) -> None:
-    """5% 무상증자(m 0.048 ≤ tol_abs 0.05): 권리락일 원수익률이 +3%(잡음)라도 창 탐색 없이 명목."""
-    cal = sessions(80)
-    ev = [{"ticker": "A00004", "event_type": "bonus", "effective_date": cal[30], "ratio": 1.05,
-           "source": "event_fric", "rcept_no": "20191202000003", "announce_date": cal[10]}]
-    px = flat_prices("A00004", cal, 10000, jumps={30: 1.03, 45: 0.952})   # 45 세션에 '정답' 점프
-    f = run_adj_sql(ev, px, cal)[f"A00004:bonus:{cal[30]}"]
-    assert f["apply_basis"] == "nominal" and f["apply_date"] == cal[30]
-    assert f["factor_ok"] is True and f["share_factor"] == 1.05
-    # 같은 가격에 큰 비율(1주당 1주 = ratio 2, m 0.5)이면 명목일 +3% 는 못 맞고 창에서 못 찾는다
-    ev2 = [{**ev[0], "ratio": 2.0}]
-    g = run_adj_sql(ev2, px, cal)[f"A00004:bonus:{cal[30]}"]
-    assert g["apply_basis"] == "unmatched" and g["factor_source"] == "no_price_match"
-
-
 def test_합성_창_밖_뒤쪽_경계는_lookback_상수다(tmp_path: Path) -> None:
-    """명목 세션 30, 점프가 세션 26(−4)이면 lookback 5 안 → price_matched; lookback 3 이면
-    못 찾는다."""
+    """명목 세션 30, 기준가 사건이 세션 23(−7). lookback 7 이면 (b) 창 안 → 그 세션; 기본 5 면 창
+    밖이고 ±base_match_window_sessions(5) 로도 안 닿아 못 찾는다(기준가는 신규 unknown_krx 로
+    따로 선다)."""
     cal = sessions(80)
     ev = [{"ticker": "A00005", "event_type": "bonus", "effective_date": cal[30], "ratio": 2.0,
            "source": "event_fric", "rcept_no": "20191202000004", "announce_date": cal[10]}]
-    px = flat_prices("A00005", cal, 10000, jumps={26: 0.5})
-    f = run_adj_sql(ev, px, cal)[f"A00005:bonus:{cal[30]}"]
-    assert f["apply_basis"] == "price_matched" and f["apply_date"] == cal[26]
-    assert f["available_date"] == cal[10]
-    g = run_adj_sql(ev, px, cal, const={"price_match_lookback_sessions": 3})
+    px = flat_prices("A00005", cal, 10000, jumps={23: 0.5}, base={23: 0.5}, share_jumps={23: 2.0})
+    f = run_adj_sql(ev, px, cal, const={"price_match_lookback_sessions": 7})
+    x = f[f"A00005:bonus:{cal[30]}"]
+    assert x["apply_basis"] == "krx_base_price" and x["apply_date"] == cal[23]
+    assert x["available_date"] == cal[10] and set(f) == {f"A00005:bonus:{cal[30]}"}
+    g = run_adj_sql(ev, px, cal)
     assert g[f"A00005:bonus:{cal[30]}"]["apply_basis"] == "unmatched"
+    assert g[f"A00005:krx_base:{cal[23]}"]["event_type"] == "unknown_krx"
 
 
 # ── 부정 픽스처 ──────────────────────────────────────────────────────────────
@@ -920,12 +924,18 @@ def test_합성_기준가_사건이_창_안에_있으면_no_price_match_사건�
     f2 = run_adj_sql(ev, px2, cal)[f"A00010:capred:{cal[20]}"]
     assert f2["apply_basis"] == "krx_base_price" and (f2["price_factor"], f2["share_factor"]) == (
         10.0, 0.1)
-    # 기준가 사건이 창(±5) 밖(세션 27)이면 못 살아난다 → (b) 신규 unknown_krx 가 대신 선다
-    px3 = flat_prices("A00010", cal, 1000, jumps={27: 12.5}, halt=(19, 26), base={27: 10.0},
-                      share_jumps={27: 0.1})
+    # E-1: ±5 밖(세션 27)이어도 사건 창 [15, 60] 안이면 (b) 가 기준가로 찾는다 — 신규 행 없음
+    px27 = flat_prices("A00010", cal, 1000, jumps={27: 12.5}, halt=(19, 26), base={27: 10.0},
+                       share_jumps={27: 0.1})
+    h27 = run_adj_sql(ev, px27, cal)
+    assert set(h27) == {f"A00010:capred:{cal[20]}"}
+    assert h27[f"A00010:capred:{cal[20]}"]["apply_date"] == cal[27]
+    # 사건 창 밖(세션 62)이면 못 살아난다 → (b) 신규 unknown_krx 가 대신 선다
+    px3 = flat_prices("A00010", cal, 1000, jumps={62: 12.5}, halt=(19, 61), base={62: 10.0},
+                      share_jumps={62: 0.1})
     h = run_adj_sql(ev, px3, cal)
     assert h[f"A00010:capred:{cal[20]}"]["factor_source"] == "no_price_match"
-    n = h[f"A00010:krx_base:{cal[27]}"]
+    n = h[f"A00010:krx_base:{cal[62]}"]
     assert n["event_type"] == "unknown_krx" and n["factor_ok"] is True
     assert (n["price_factor"], n["share_factor"]) == (10.0, 0.1)
     g3 = run_eg3(ev, px3, cal)
@@ -963,10 +973,10 @@ def test_합성_기준가_비율과_사건_비율이_어긋나면_krx_base_incon
     g2 = run_eg3(ev, px2, cal)
     assert g2.status is GateStatus.PASS, g2.detail
     assert g2.metrics["n_ok"] == 0 and g2.metrics["n_unknown_price_only"] == 1
-    # 기준가 사건이 없으면 2차 폴백 그대로 nominal ok — 회귀
+    # E-1: 기준가 사건이 없으면 원수익률만 맞아도 ok 가 아니다(옛 2차 폴백 nominal ok 폐지)
     c = run_adj_sql(ev, flat_prices("A00011", cal, 10000, jumps={30: 0.5}), cal)
-    assert c[f"A00011:split:{cal[30]}"]["apply_basis"] == "nominal"
-    assert c[f"A00011:split:{cal[30]}"]["factor_ok"] is True
+    assert c[f"A00011:split:{cal[30]}"]["factor_source"] == "no_base_price_evidence"
+    assert c[f"A00011:split:{cal[30]}"]["factor_ok"] is False
 
 
 def test_합성_정정_공시가_적용일보다_늦어도_기준가로_확정된_계수는_적용일에_공개된다(
@@ -975,7 +985,8 @@ def test_합성_정정_공시가_적용일보다_늦어도_기준가로_확정�
     보다 늦고, 옛 규칙 available = min(announce, apply 다음 세션) 이 다음 세션이 되어 전방 조정이
     하루 늦게 접혔다(07-31 수정수익률 −35.0% → 08-03 +159.6%). KRX 기준가가 apply 세션에 비율을
     확인한 계수(사건 교체 krx_base_price, ok)는 그 세션에 알 수 있다 → available = min(announce,
-    apply_date). 공시가 앞선 사건은 그대로 공시일이고, 가격 매칭(nominal) 계수는 옛 규칙 그대로."""
+    apply_date). 공시가 앞선 사건은 그대로 공시일이고, 기준가 근거가 없는 미해결 행(E-1 뒤로는
+    원수익률만 맞던 옛 nominal 계수가 여기로 온다)은 옛 규칙 그대로."""
     from equity.gates import EquityGateContext
 
     cal = sessions(80)
@@ -992,9 +1003,9 @@ def test_합성_정정_공시가_적용일보다_늦어도_기준가로_확정�
     # 공시가 apply 보다 앞서면 공시일 그대로(다른 행 불변)
     early = run_adj_sql([{**ev[0], "announce_date": cal[10]}], px, cal)
     assert early[f"A00016:bonus:{cal[30]}"]["available_date"] == cal[10]
-    # 기준가 사건이 없어 가격 매칭(nominal)으로 선 계수는 옛 규칙 — 다음 세션
+    # 기준가 사건이 없으면(E-1: 미해결 no_base_price_evidence) 옛 규칙 — 다음 세션
     nom = run_adj_sql(ev, flat_prices("A00016", cal, 10000, jumps={30: 0.5}), cal)
-    assert nom[f"A00016:bonus:{cal[30]}"]["apply_basis"] == "nominal"
+    assert nom[f"A00016:bonus:{cal[30]}"]["factor_source"] == "no_base_price_evidence"
     assert nom[f"A00016:bonus:{cal[30]}"]["available_date"] == cal[31]
     # EG3 독립 재계산도 새 규칙이다 — 산출을 옛 규칙(다음 세션)으로 되돌리면 잡는다
     con = duckdb.connect()
@@ -1249,6 +1260,184 @@ def test_정지_뒤_재개하지_않는_종목의_사건은_no_bar_after_apply(t
     assert ok["factor_ok"] is True and ok["no_bar_after_apply"] is False
 
 
+# ── E-1 KRX 기준가 근거 요구(QL-E 리뷰 MAJOR-2, e1.28.0) ─────────────────────────
+# 옛 판정은 창 안 **원수익률**이 기대 점프와 맞는 세션을 골랐다 — 그날 KRX 기준가가 직전 종가와
+# 같아(조정 없음) 시장 등락이 우연히 맞은 날에도 ok 계수를 접었다. 새 판정은 (a)(b)(c) 모두 고른
+# 세션의 기준가 비(기준가 ÷ 직전 행 종가)가 계수와 맞아야 하고, 못 찾으면 no_base_price_evidence.
+# 아래 픽스처는 리뷰어가 로컬 판·v3 사본으로 재현한 네 사건의 모양이다(가격은 실측 비율).
+
+def _ev_capred(ticker: str, n0: int, ratio: float, cal: list[date]) -> dict[str, object]:
+    return {"ticker": ticker, "event_type": "capred", "effective_date": cal[n0], "ratio": ratio,
+            "source": "event_cr", "rcept_no": f"2019120200{ticker[-4:]}", "announce_date": cal[5]}
+
+
+@pytest.mark.parametrize(("ratio", "noise_n", "noise_ret", "shares_n"), [
+    (31_0 / 34_6, 55, 11980 / 10920, 30),    # 069080: 소각 34.6M→31.0M, 06-15 +9.7% 에 접혔다
+    (50 / 55, 40, 7410 / 7040, 28),          # 091700: 55M→50M, 05-22 +5.3% 에 접혔다
+])
+def test_E1_기준가가_안_바뀐_자기주식_소각형_감자는_no_base_price_evidence(
+        ratio: float, noise_n: int, noise_ret: float, shares_n: int) -> None:
+    """069080·091700: 주식수만 줄고(자기주식 소각) KRX 기준가는 창 안 어디서도 안 바뀌었다. 옛
+    판정은 (b) 창 탐색이 시장 등락일(원수익률 잔여 ≤ 0.05)을 골라 ok 로 접어 그날 수익률을
+    −1.8%·−4.3% 로 바꿨다. 새 판정: 기준가 근거가 없으니 미해결 · 계수 1 · 적용일은 명목 세션."""
+    cal = sessions(80)
+    ev = [_ev_capred("A00069", 20, ratio, cal)]
+    px = flat_prices("A00069", cal, 10000, jumps={noise_n: noise_ret},
+                     share_jumps={shares_n: ratio})
+    f = run_adj_sql(ev, px, cal)
+    assert set(f) == {f"A00069:capred:{cal[20]}"}               # 기준가 사건 없음 → 신규 행 없음
+    x = f[f"A00069:capred:{cal[20]}"]
+    assert x["factor_ok"] is False and x["factor_source"] == "no_base_price_evidence"
+    assert x["apply_basis"] == "unmatched" and x["apply_date"] == cal[20]
+    assert (x["price_factor"], x["share_factor"], x["price_only_factor"]) == (1.0, 1.0, 1.0)
+    assert x["price_resolution"] == "unresolved"
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_ok"] == 0
+    assert g.metrics["n_by_factor_source"] == {"no_base_price_evidence": 1}
+
+
+def test_E1_240600형_무상증자는_권리락일_기준가에_접히고_뒤_급락에는_안_접힌다() -> None:
+    """240600: 무상증자 1주당 0.2(ratio 1.2) 권리락 07-29 — 기준가 2,095 ÷ 전일 종가 2,505 = 0.8363,
+    그날 종가 1,948(원수익률 −22.2%, 잔여 0.067 > 0.05 라 옛 (a) 실패). 신주 상장 08-25(주식수만
+    ×1.198). 옛 판정은 (b) 가 09-15 급락(−17.0%, 잔여 0.004)을 골라 ok 로 접고, 07-29 기준가는
+    unknown_price_only 로 따로 남겼다 — 같은 사건이 두 번(⑤ 가격 축 0.836 + 계수 1.2). 새 판정:
+    (a) 명목 세션 기준가 비가 맞아 그날 교체(krx_base_price, 계수 = 기준가 비), 09-15 는 원수익률
+    그대로, 07-29 기준가는 이 사건이 소비해 신규 행이 없다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00240", "event_type": "bonus", "effective_date": cal[30], "ratio": 1.2,
+           "source": "event_fric", "rcept_no": "20191202000240", "announce_date": cal[20]}]
+    px = flat_prices("A00240", cal, 2505, jumps={30: 1948 / 2505, 63: 1281 / 1544},
+                     base={30: 2095 / 2505}, share_jumps={49: 1.1979})
+    f = run_adj_sql(ev, px, cal)
+    assert set(f) == {f"A00240:bonus:{cal[30]}"}                # 07-29 기준가는 이 사건 몫
+    x = f[f"A00240:bonus:{cal[30]}"]
+    assert x["factor_ok"] is True and x["factor_source"] == "mktcap_neutral"
+    assert x["apply_basis"] == "krx_base_price" and x["apply_date"] == cal[30]
+    assert x["price_factor"] == pytest.approx(2095 / 2505)
+    assert x["share_factor"] == pytest.approx(2505 / 2095)      # 같은 날 주식수 불변 → 1/r
+    assert x["available_date"] == cal[20] and x["price_resolution"] == "factor"
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert g.metrics["n_unknown_price_only"] == 0 and g.metrics["n_krx_replaced_rows"] == 1
+
+
+def test_E1_291230형_명목일_급등은_기준가_근거가_없어_감자는_미해결이고_실제_감자일은_가격_전용_계수(
+        ) -> None:
+    """291230: 감자 결정(ratio 0.7927, 기준일 07-14)의 명목 세션 원수익률 +29.9% 가 기대 +26.2% 와
+    잔여 0.03 으로 맞아 옛 (a) nominal 로 접혔다(그날 수정수익률 +3.0%) — 그날 기준가는 전일 종가
+    그대로였다. 실제 감자는 정지 뒤 08-14(기준가 ×5 · 주식수 ×0.5445, 시총 불변 아님 → KRX 액면병합
+    행과 성분으로 묶어도 곱 2.32 가 기준가 비 5 와 안 맞는다). 새 판정: 감자는 기준가 근거 없음 →
+    미해결(no_base_price_evidence)이되 창 안 ⑤ 단위가 있어 price_only_near, 08-14 는 기준가 신규 행이
+    ⑤ 계수 행(r = 5)."""
+    cal = sessions(90)
+    ev = [_ev_capred("A00291", 20, 0.7927, cal),
+          {"ticker": "A00291", "event_type": "reverse_split", "effective_date": cal[43],
+           "ratio": 0.5445, "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[43]}]
+    px = flat_prices("A00291", cal, 485, jumps={20: 630 / 485, 43: 2740 / 588}, halt=(32, 42),
+                     base={43: 5.0}, share_jumps={43: 0.5445})
+    f = run_adj_sql(ev, px, cal)
+    cr, rs = f[f"A00291:capred:{cal[20]}"], f[f"A00291:reverse_split:{cal[43]}"]
+    kb = f[f"A00291:krx_base:{cal[43]}"]
+    assert cr["factor_ok"] is False and cr["factor_source"] == "no_base_price_evidence"
+    assert cr["apply_basis"] == "unmatched" and cr["apply_date"] == cal[20]
+    assert cr["price_resolution"] == "price_only_near"
+    assert rs["factor_source"] == "no_price_match" and rs["price_resolution"] == "price_only_dup"
+    assert kb["event_type"] == "unknown_krx" and kb["factor_source"] == "krx_base_inconsistent"
+    assert kb["price_resolution"] == "price_only" and kb["price_only_factor"] == 5.0
+    assert not any(x["factor_ok"] for x in f.values())
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+def test_E1_소액_이벤트도_명목_세션_근처_기준가로만_확인한다() -> None:
+    """소액(m ≤ tol_abs) 은 창 탐색을 안 한다(옛 규칙 그대로 — 2~5% 는 창 안 다른 권리락과 방향이
+    반대여도 tol_abs 안에 들어 잡음 매칭이 된다). 옛 규칙은 명목 세션에 무조건 ok 였다(기준가 무관 —
+    자기주식 소각 감자 0.1~4.5% 다수). 새 규칙: 명목 세션 또는 그 ± base_match_window_sessions 의
+    기준가가 맞을 때만 ok, 아니면 no_base_price_evidence."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00004", "event_type": "bonus", "effective_date": cal[30], "ratio": 1.05,
+           "source": "event_fric", "rcept_no": "20191202000003", "announce_date": cal[10]}]
+    key = f"A00004:bonus:{cal[30]}"
+    # 기준가 근거 없음(명목일 원수익률 +3% 잡음 · 세션 45 원수익률 '정답' 점프만) → 미해결
+    px_raw = flat_prices("A00004", cal, 10000, jumps={30: 1.03, 45: 0.952})
+    none = run_adj_sql(ev, px_raw, cal)[key]
+    assert none["factor_ok"] is False and none["factor_source"] == "no_base_price_evidence"
+    assert none["apply_basis"] == "unmatched" and none["apply_date"] == cal[30]
+    # 같은 가격에 큰 비율(ratio 2, m 0.5)은 원수익률도 어느 날도 안 맞는다 → no_price_match 그대로
+    big = run_adj_sql([{**ev[0], "ratio": 2.0}], px_raw, cal)[key]
+    assert big["apply_basis"] == "unmatched" and big["factor_source"] == "no_price_match"
+    # 명목 세션 기준가 ÷1.05 → 그날
+    at = run_adj_sql(ev, flat_prices("A00004", cal, 10000, jumps={30: 0.96},
+                                     base={30: 1 / 1.05}), cal)[key]
+    assert at["factor_ok"] is True and at["apply_basis"] == "krx_base_price"
+    assert at["apply_date"] == cal[30]
+    # ± base_match_window_sessions(5) 안(세션 33) → 그날(S06-2 (a))
+    near = run_adj_sql(ev, flat_prices("A00004", cal, 10000, jumps={33: 0.96},
+                                       base={33: 1 / 1.05}), cal)[key]
+    assert near["factor_ok"] is True and near["apply_date"] == cal[33]
+    # 창 안이지만 ±5 밖(세션 45)이면 소액은 못 찾는다 — 그 기준가는 unknown_price_only
+    far = run_adj_sql(ev, flat_prices("A00004", cal, 10000, jumps={45: 0.96},
+                                      base={45: 1 / 1.05}), cal)
+    assert far[key]["factor_source"] == "no_base_price_evidence"
+    assert far[f"A00004:krx_base:{cal[45]}"]["event_type"] == "unknown_price_only"
+
+
+def test_E1_큰_사건은_창_안_어디든_기준가가_맞는_세션을_찾는다() -> None:
+    """정지 뒤 재개(명목 +12 세션)에 기준가 ×10 인 감자 — 그 세션이 ± base_match_window_sessions
+    밖이어도 (b) 창 [n0 − lookback, n0 + window] 에서 기준가로 찾는다(옛 규칙은 원수익률이 안 맞으면
+    no_price_match 로 두고 기준가는 unknown_krx 로 따로 섰다). 원수익률은 재개 첫날 제한폭이 없어
+    ×12.5 여도 상관없다."""
+    cal = sessions(80)
+    ev = [_ev_capred("A00010", 20, 0.1, cal)]
+    px = flat_prices("A00010", cal, 1000, jumps={32: 12.5}, halt=(19, 31), base={32: 10.0},
+                     share_jumps={32: 0.1})
+    f = run_adj_sql(ev, px, cal)
+    assert set(f) == {f"A00010:capred:{cal[20]}"}
+    x = f[f"A00010:capred:{cal[20]}"]
+    assert x["factor_ok"] is True and x["apply_basis"] == "krx_base_price"
+    assert x["apply_date"] == cal[32] and (x["price_factor"], x["share_factor"]) == (10.0, 0.1)
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+def test_E1_기준가_NULL_저녁_잠정_행은_근거가_아니라_미해결이다() -> None:
+    """기준가 NULL 은 저녁 잠정 T 행뿐이다(price_daily 가 KRX 기본정보 없이 만든다 — KRX 행 기준가
+    채움 2010~2026 100%, 로컬 10-03 판). 명목 세션이 그 행이면 원수익률(키움 종가)이 맞아도 ok 가
+    아니다(P1 — 다음 아침 KRX 행이 기준가로 다시 판정). 옛 규칙은 nominal ok 였다."""
+    cal = sessions(40)
+    ev = [{"ticker": "A00039", "event_type": "split", "effective_date": cal[39], "ratio": 2.0,
+           "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[39]}]
+    px = flat_prices("A00039", cal, 10000, jumps={39: 0.5})
+    px[39] = {**px[39], "base_price_krw": None, "shares_out": None}     # 저녁 잠정 행
+    x = run_adj_sql(ev, px, cal)[f"A00039:split:{cal[39]}"]
+    assert x["factor_ok"] is False and x["factor_source"] == "no_base_price_evidence"
+    assert x["apply_basis"] == "unmatched" and x["apply_date"] == cal[39]
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+
+
+def test_E1_부정_기준가_근거_없는_세션의_ok_행은_EG3가_잡는다() -> None:
+    """옛 산출 모양(069080: 기준가가 안 바뀐 시장 등락일에 price_matched ok)을 되살리면
+    EG3_adj_factor 의 `n_ok_apply_basis_bad` 가 잡는다 — ok 행의 apply_basis 는 이제
+    krx_base_price 뿐이다(기준가 근거 = 그 세션이 기준가 후보이고 계수 = 기준가 비, 기존
+    `n_krx_row_out_of_scope`·`n_krx_price_factor_mismatch` 가 함께 묶는다)."""
+    cal = sessions(80)
+    ratio = 310 / 346
+    ev = [_ev_capred("A00069", 20, ratio, cal)]
+    px = flat_prices("A00069", cal, 10000, jumps={55: 11980 / 10920}, share_jumps={30: ratio})
+    tamper = ("UPDATE out_pq SET factor_ok = TRUE, factor_source = 'mktcap_neutral', "
+              f"apply_basis = 'price_matched', apply_date = DATE '{cal[55]}', "
+              f"price_factor = {1 / ratio!r}, share_factor = {ratio!r}, "
+              "price_resolution = 'factor'")
+    g = run_eg3(ev, px, cal, tamper=tamper)
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["n_ok_apply_basis_bad"] == 1
+    assert g.metrics["n_unmatched_source_mismatch"] == 0 and g.metrics["n_available_mismatch"] == 0
+
+
 # ── ⑤ 가격 전용 계수(N-32 ②·N-33, e1.26.0) ───────────────────────────────────
 # 미해결(factor_ok=false) 사건 중 그날 KRX 기준가 근거가 있는 (종목, 날짜) 단위마다 한 행에만
 # `price_only_factor` = 그날 기준가 ÷ 직전 행 종가를 싣는다. 보유 수량 경로(factor_ok·price_factor·
@@ -1467,8 +1656,10 @@ def test_D6_1_펀드_리츠_선박펀드는_계수_행이_아니라_unresolved(s
 
 
 def _ok_fold_overlap() -> tuple[list[date], list[dict[str, object]], list[dict[str, object]]]:
-    """ok 계수(명목 매칭 무상증자, 정정 공시가 늦어 접힘일 = 다음 세션 31)의 접힘일에 기준가
-    후보(r 0.95, 비율 안 맞음)가 겹친다 → unknown_price_only 신규 행."""
+    """e1.26.0 의 ③ 회귀 모양: 무상증자(ratio 2, 명목 30 원수익률 ×0.5, 정정 공시 35)와 다음 세션
+    31 의 기준가 후보(r 0.95, 비율 안 맞음). 옛 판정은 명목 세션에 원수익률로 ok 를 붙여 접힘일이
+    31 이 됐고 31 의 unknown_price_only 와 겹쳤다. E-1 뒤로는 30 에 기준가 근거가 없어 사건이
+    미해결이라 이 겹침이 생기지 않는다(ok 행은 기준가 세션에서 그날 접힌다)."""
     cal = sessions(80)
     ev = [{"ticker": "A00026", "event_type": "bonus", "effective_date": cal[30], "ratio": 2.0,
            "source": "event_fric", "rcept_no": "20191202000026", "announce_date": cal[35]}]
@@ -1476,15 +1667,16 @@ def _ok_fold_overlap() -> tuple[list[date], list[dict[str, object]], list[dict[s
     return cal, ev, px
 
 
-def test_회귀_ok_접힘일과_겹친_unknown_price_only는_unresolved_계수_1() -> None:
+def test_회귀_E1_옛_ok_접힘일_겹침_모양은_사건_미해결이고_다음_세션_기준가는_계수_행() -> None:
     cal, ev, px = _ok_fold_overlap()
     f = run_adj_sql(ev, px, cal)
-    ok, po = f[f"A00026:bonus:{cal[30]}"], f[f"A00026:krx_base:{cal[31]}"]
-    assert ok["factor_ok"] is True and ok["apply_basis"] == "nominal"
-    assert ok["available_date"] == cal[31] and ok["price_resolution"] == "factor"
+    ev_row, po = f[f"A00026:bonus:{cal[30]}"], f[f"A00026:krx_base:{cal[31]}"]
+    assert ev_row["factor_ok"] is False and ev_row["factor_source"] == "no_base_price_evidence"
+    assert ev_row["available_date"] == cal[31]                # 옛 식(다음 세션) 그대로
+    assert ev_row["price_resolution"] == "price_only_near"
     assert po["event_type"] == "unknown_price_only"
-    assert po["price_resolution"] == "unresolved" and po["price_only_factor"] == 1.0
-    assert po["available_date"] == cal[32]                    # 옛 식 그대로
+    assert po["price_resolution"] == "price_only" and po["price_only_factor"] == 0.95
+    assert po["available_date"] == cal[31]                    # ⑤ 계수 행 — 그날
     g = run_eg3(ev, px, cal)
     assert g.status is GateStatus.PASS, g.detail
 
@@ -1554,7 +1746,8 @@ def test_D6_3_ok_형제가_있는_억제_중복본은_factor_near_형제가_미�
            {"ticker": "A00030", "event_type": "reverse_split", "effective_date": cal[22],
             "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
             "announce_date": cal[22]}]
-    h = run_adj_sql(ev2, flat_prices("A00030", cal, 1000, jumps={26: 2.0}, halt=(19, 25)), cal)
+    h = run_adj_sql(ev2, flat_prices("A00030", cal, 1000, jumps={26: 2.0}, halt=(19, 25),
+                                     base={26: 2.0}, share_jumps={26: 0.5}), cal)
     sup = h[f"A00030:reverse_split:{cal[22]}"]
     assert sup["factor_source"] == "same_day_suppressed"
     assert sup["price_resolution"] == "factor_near"
@@ -1689,10 +1882,20 @@ def test_부정_한_단위에_계수_행이_2개면_EG3가_잡는다() -> None:
 
 
 def test_부정_ok_접힘일에_계수_행을_두면_EG3가_잡는다() -> None:
-    cal, ev, px = _ok_fold_overlap()
+    """ok 계수(감자, 세션 26 기준가 ×2)가 접히는 날의 같은 날 억제 행(액면병합)을 계수 행으로
+    위장 — E-1 뒤로는 ok 행이 늘 자기 기준가 세션에서 접혀 ② 사유 행과 같은 날에 설 수 없으므로
+    억제 행으로 겹침을 만든다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00030", "event_type": "capred", "effective_date": cal[20], "ratio": 0.5,
+           "source": "event_cr", "rcept_no": "20191202000030", "announce_date": cal[5]},
+          {"ticker": "A00030", "event_type": "reverse_split", "effective_date": cal[22],
+           "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[22]}]
+    px = flat_prices("A00030", cal, 1000, jumps={26: 2.0}, halt=(19, 25), base={26: 2.0},
+                     share_jumps={26: 0.5})
     g = run_eg3(ev, px, cal, tamper="UPDATE out_pq SET price_resolution = 'price_only', "
-                                    "price_only_factor = 0.95 "
-                                    "WHERE event_type = 'unknown_price_only'")
+                                    "price_only_factor = 2.0 "
+                                    "WHERE factor_source = 'same_day_suppressed'")
     assert g.status is GateStatus.FAIL
     assert g.metrics["n_price_only_on_ok_fold"] == 1
     assert g.metrics["n_price_only_outside_unit"] == 1

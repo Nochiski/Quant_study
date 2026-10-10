@@ -1,6 +1,7 @@
 # 장 마감 체인 설정 읽기 — config/postclose_chain.env 를 읽어 스위치를 정하는 공용 조각(컷오버 PR-8 · PR-9).
 #   쓰는 곳: postclose_chain.sh(세 모드) · model_daily.sh(아침 발송 — 전환 뒤 짓기만·대체 발송) ·
-#            watchdog.sh morning_build(B-57 발송 장부 — 전환 뒤 두 장부). 설정 판정은 이 파일 한 곳이다 —
+#            watchdog.sh morning_build(B-57 발송 장부 — 전환 뒤 두 장부) · daily_ledger.sh·daily_evening.sh(휴장 파일
+#            내보내기 스위치 calendar_export_v3_on 만 — T-48). 설정 판정은 이 파일 한 곳이다 —
 #            설정 파일이 셸 대입이라 셸이 읽은 결과를 쓰고, 워치독 파이썬에는 결과(CUTOVER)를 인자로 넘긴다.
 #   사용(quant-ledger 홈으로 cd 한 뒤, set -u 셸에서): . scripts/postclose_conf.sh; postclose_conf_load
 #   규칙 — 켜는 쪽만 정확한 값을 요구한다(P1). 그 밖의 값·빈 값·파일 없음은 꺼짐·그림자다. 읽기는 set +u 안에서 한다

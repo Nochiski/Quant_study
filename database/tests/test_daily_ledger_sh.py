@@ -441,8 +441,12 @@ def _closed(year: int, weekdays: tuple[str, ...] = ()) -> list[str]:
 
 
 def _run_export(tmp_path: Path, *args: str, conf: str | None, real: bool = False,
-                years: tuple[int, ...] = (), date: bool = True, **rcs: int) -> Exported:
-    """`conf` 를 config/calendar_export.env 로 두고(None 이면 파일 없음) 체인을 돌린다. 대상은 늘 임시 경로다."""
+                years: tuple[int, ...] = (), date: bool = True, home: Path | None = None,
+                **rcs: int) -> Exported:
+    """`conf` 를 config/calendar_export.env 로 두고(None 이면 파일 없음) 체인을 돌린다. 대상은 늘 임시 경로다.
+
+    `home` 을 주면 HOME 을 그 임시 폴더로 바꾸고 QL_V3_HOLIDAY_FILE 을 넣지 않는다 — 운영 기본 대상 경로를 본다.
+    """
     root = _root(tmp_path)
     _seed_universe_ok(root, 1)
     if conf is not None:
@@ -458,6 +462,10 @@ def _run_export(tmp_path: Path, *args: str, conf: str | None, real: bool = False
     target.write_text(_V3_BEFORE, encoding="utf-8")
     env = _env(root, QL_WEEKDAY="3", QL_V3_HOLIDAY_FILE=str(target),
                **{f"RC_{k}": str(v) for k, v in rcs.items()})
+    if home is not None:
+        home.mkdir(parents=True, exist_ok=True)
+        env["HOME"] = str(home)
+        env.pop("QL_V3_HOLIDAY_FILE")
     if real:
         env["REAL_EXPORT"] = "1"
     p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"),
@@ -561,6 +569,24 @@ def test_export_dry_run_only_prints_the_plan(tmp_path: Path) -> None:
     assert r.read("sync.txt") == ""
     plan = [ln for ln in r.log.splitlines() if "휴장 파일 내보내기" in ln]
     assert len(plan) == 1 and "dry-run" in plan[0] and f"--target {r.target}" in plan[0]
+
+
+@pytest.mark.parametrize("dry", [True, False])
+def test_export_default_target_is_the_v3_holiday_file(tmp_path: Path, dry: bool) -> None:
+    """운영 기본 대상(QL_V3_HOLIDAY_FILE 없음) = $HOME/kael-system-v3/data/.kis_holidays.json — sync_calendar.sh 의
+    원본과 같은 파일. HOME 은 임시 폴더이고 내보내기는 대역이라 아무 파일도 쓰지 않는다. dry-run 은 계획 줄, 실제
+    실행은 내보내기가 받은 `--target` 인자를 본다."""
+    home = tmp_path / "home"
+    r = _run_export(tmp_path, *(["--dry-run"] if dry else []), conf=_ON, home=home)
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    default = f"{home}/kael-system-v3/data/.kis_holidays.json"
+    if dry:
+        plan = [ln for ln in r.log.splitlines() if "휴장 파일 내보내기 계획" in ln]
+        assert len(plan) == 1 and plan[0].endswith(f"--target {default}"), plan
+        assert r.read("export_args.txt") == ""
+    else:
+        assert r.read("export_args.txt").split() == ["--target", default]
+    assert not (home / "kael-system-v3").exists()
 
 
 def _switch_on(tmp_path: Path, text: str | None) -> bool:

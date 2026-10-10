@@ -12,12 +12,12 @@
 |---|---|
 | v3 쪽 변경 V3-A·B·D·E(crontab · `job_runner.py` · 휴장 파일 · uni `kael_db.py`)와 컷오버 날 넣은 QL-L 감시 크론 | quant-ledger 연구 DB·원장·모델 DB(장 마감 판 산출물) |
 | v3 quant.db 의 가격 등 **7표**(compat 9표에서 점수 두 표를 뺀 것 — V3-C 와 그 뒤 반영, 표 단위 복원) | v3 quant.db 의 **점수 두 표**(`score_history`·`_v2` — 컷오버 기간에 실제로 엑셀로 나간 점수, T-42). 되돌리는 이유가 점수 오류일 때만 함께 되돌린다(`--with-scores`) |
-| quant-ledger 장 마감 체인의 v3 반영·발송 스위치(그림자로) | v3 quant.db 의 9표 밖 표(`market_*` · `research_reports` · `pipeline_runs` 등 — 컷오버 동안 v3 가 쓴 행 포함)와 `_compat_meta` 반영 기록(이력 — 복원 기록 1행이 덧붙는다) |
+| quant-ledger 스위치 둘 — 장 마감 체인의 v3 반영·발송(그림자로)과 휴장 파일 내보내기(`CALENDAR_EXPORT_V3=0`, T-48) | v3 quant.db 의 9표 밖 표(`market_*` · `research_reports` · `pipeline_runs` 등 — 컷오버 동안 v3 가 쓴 행 포함)와 `_compat_meta` 반영 기록(이력 — 복원 기록 1행이 덧붙는다) |
 
 | 단계 | 무엇 | 사람 승인 |
 |---|---|---|
 | 4-0 | 시각·장부·현재 상태 기록 | — |
-| 4-1 | quant-ledger 장 마감 체인을 그림자로(v3 반영·발송 끄기) | — |
+| 4-1 | quant-ledger 스위치 둘 끄기 — 장 마감 체인을 그림자로(v3 반영·발송 끄기) + 휴장 파일 내보내기 끄기(`CALENDAR_EXPORT_V3=0`, T-48) | — |
 | 4-2 | v3 quant.db 표 복원 | **[사람 승인 — v3 파일 변경]** |
 | 4-3 | v3 크론·코드 복구(V3-E → D·B·A, QL-L 감시 크론) | **[사람 승인 — v3 파일 변경]** |
 | 4-4 | v3 첫 실행(수집·스코어링) | 수동으로 돌릴 때만 **[사람 승인]** |
@@ -190,7 +190,7 @@ scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3"                  #
    ```
    - 기대하는 차이는 넷이다. (A) `--chain daily_insight` 줄이 있다 → 없다. (B) `--chain daily_all` 줄이 없다 → 있다. (D) `refresh_year_holidays`·`monthly_holiday_review` 두 줄이 없다(주석) → 있다. (QL-L) 23:30 `daily.cutover_watch` 감시 줄이 있다 → 없다(컷오버 날 V3-A~E 뒤에 넣은 줄이라 백업에 없다).
    - 그 밖의 줄도 다르면(컷오버 뒤 quant-ledger 크론 변경 등) 통째로 덮지 않는다. `crontab -e` 로 위 줄들만 고친다 — 감시 줄은 지우지 말고 주석 처리한다.
-   - 덮기 전에 4-1 의 `CALENDAR_EXPORT_V3=0` 이 서버에 배포돼 있는지 본다(`grep CALENDAR_EXPORT_V3 ~/quant-ledger/config/calendar_export.env` → `=0`). 켜진 채 (D)·(B) 의 v3 휴장 쓰기를 되살리면 v3 휴장 파일을 쓰는 주체가 둘이 된다(T-48).
+   - 덮기 전에 4-1 의 `CALENDAR_EXPORT_V3=0` 이 서버에 배포돼 있는지 본다(서버 quant-ledger 루트에서 `bash -c '. scripts/postclose_conf.sh; calendar_export_v3_on && echo 켜짐 || echo 꺼짐'` → `꺼짐` — 판정 함수를 그대로 부른다. 설정 파일을 grep 하면 머리 주석의 `CALENDAR_EXPORT_V3=1` 설명 줄까지 나온다). 켜진 채 (D)·(B) 의 v3 휴장 쓰기를 되살리면 v3 휴장 파일을 쓰는 주체가 둘이 된다(T-48).
    ```bash
    crontab "$B/crontab.bak.$S"
    ```
@@ -286,7 +286,7 @@ EOF
   - 사용자 확인 10-10(DECISIONS N-44).
 - 제자리 `--full` 은 손 복구용이다. 창 시작이 대상 v3 표(`daily_prices`·`investor_detail_flows`)의 이력 시작보다 앞이면 compat 이 쓰기 전에 멈춘다(rc 2, T-46). 메시지의 `--window-days N` 을 `--full` 과 함께 준다.
 - QL-L 감시(`daily.cutover_watch`)는 복원 기록을 반영 기록으로 세지 않는다.
-- 다시 컷오버하는 순서: 새 백업 2벌(§1 — 새 stamp, 옛 백업은 남긴다) → V3-A~E → `v3_post.sh --date <D> --basis morning --v3-db "$V3" --first-after-restore`(V3-C — 증분 창, 표식은 이 한 번만 사람이 준다. T-46) → QL-L 감시 크론 주석 풀기 → 4-1 스위치를 PR-9 값으로.
+- 다시 컷오버하는 순서: 새 백업 2벌(§1 — 새 stamp, 옛 백업은 남긴다) → V3-A~E(V3-D 와 같은 배포로 `config/calendar_export.env` 의 `CALENDAR_EXPORT_V3=1` — 4-1 에서 끈 채로 두면 V3-B·D 로 v3 휴장 쓰기가 다시 꺼져 v3 휴장 파일을 쓰는 주체가 없다, T-48) → `v3_post.sh --date <D> --basis morning --v3-db "$V3" --first-after-restore`(V3-C — 증분 창, 표식은 이 한 번만 사람이 준다. T-46) → QL-L 감시 크론 주석 풀기 → 4-1 스위치를 PR-9 값으로.
 
 ## 6. 리허설 — 서버 사본(컨트롤러)
 

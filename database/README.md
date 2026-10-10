@@ -303,6 +303,22 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —
 보고 누락 판정은 워치독(`watchdog.sh`)의 몫이다(플랜 v2 §2-1).
 
+### 연속 창 판정 — `python -m daily.window_judge` (컷오버 X-2)
+
+그림자·실운영 3거래일 창과 되돌리기 5거래일 창을 판정 달력(`daily.calendar`)으로 센다. 규칙 정본은
+`docs/plans/2026-10-10-cutover-track.md` §4 이고 모듈 머리 주석에 옮겨 두었다. 거래일 T 통과 = 장 마감 체인 단계
+런 전부 ok · 그날(KST) crit 0(일일 리포트 줄은 제목의 D) · 수동 개입 0 · 다음 날 두 판 대조
+`data/model_db/compare/<T>.json` pass. 실패 1건이면 다음 거래일부터 다시 세고, 휴장·세션 예외일은 건너뛴다.
+입력은 읽기만 하고 `data/cutover/window.json` 에 결과를 쓴다(`--dry-run` 이면 안 씀). rc 0 통과 · 1 아직·실패 · 2 입력 오류.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m daily.window_judge judge --start 20261014 [--cutover 20261019] [--dry-run]
+PYTHONPATH=src .venv/bin/python -m daily.window_judge record --date 20261015 --what "v3 반영 손 재실행" --by controller
+```
+
+손으로 개입한 날(재실행·데이터 손수정·스위치 조작)은 `record` 로 장부 `data/cutover/manual_interventions.jsonl` 에
+남긴다 — 그날은 무사고가 아니다.
+
 ### 배포 — `scripts/deploy.sh`
 
 저장소 `database/{src,scripts}` + `backend/src/backtest_engine/` 을 서버로 민다. 기본은 dry-run 이고

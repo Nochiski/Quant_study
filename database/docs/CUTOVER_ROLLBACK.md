@@ -34,7 +34,7 @@ cd ~/quant-ledger
 pgrep -af 'job_runner.py --chain daily_all|v3_post.sh|postclose_chain.sh' || echo "v3 체인·반영 없음"
 scripts/v3_backup.sh --v3-db "$HOME/kael-system-v3/data/quant.db" \
   --dest "$HOME/quant-ledger/data/_cutover/v3_backup" --dest "$HOME/v3_cutover_backup" \
-  --v3-root "$HOME/kael-system-v3" --uni-root "$HOME/unitelegram"
+  --v3-root "$HOME/kael-system-v3" --uni-root "$HOME/unitelegram/unitelegram"
 ```
 
 - **무엇을 남기나**(두 경로 각각, `stamp` = KST `YYYYMMDDTHHMMSS`, 전부 0444, `SHA256SUMS` 에 덧붙임).
@@ -293,7 +293,7 @@ export QL_HOME="$R/home" QL_V3_LOCK_FILE="$R/v3.lock" QL_EQUITY_ROOT="$HOME/quan
 H="$HOME/quant-ledger/data/deliver/history/${D}_morning.json"
 # ① 백업 2벌(사본 대상) — rc 0
 bash "$R/home/scripts/v3_backup.sh" --v3-db "$R/quant.db" --dest "$R/bak1" --dest "$HOME/qli_rehearsal_bak2" \
-  --v3-root "$HOME/kael-system-v3" --uni-root "$HOME/unitelegram"
+  --v3-root "$HOME/kael-system-v3" --uni-root "$HOME/unitelegram/unitelegram"
 S=$(ls "$R/bak1" | sed -n 's/^quant_\(.*\)\.db$/\1/p')
 # ② 첫 반영 --full(사본) — rc 0, 걸린 시간 기록
 time bash "$R/home/scripts/v3_post.sh" --date "$D" --basis morning --v3-db "$R/quant.db" --full --staging "$R/staging.db" --builds-from "$H"

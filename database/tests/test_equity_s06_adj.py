@@ -1424,20 +1424,27 @@ def test_E1_원수익률_세션이_명목이_아닌_기준가_후보면_그_세�
     assert g.status is GateStatus.PASS, g.detail
 
 
-@pytest.mark.parametrize("share_jumps", [{26: 0.5}, {40: 0.5}], ids=["같은날_주식수", "뒤_상장"])
-def test_E1_같은_날_억제는_기준가로_찾은_사건이_소유자다(share_jumps: dict[int, float]) -> None:
-    """E-1 리뷰 MAJOR-1: 결정공시 감자 A(ratio 0.4, 우선순위 높음)는 정지 뒤 세션 26 종가 ×2.4 와
-    원수익률로만 맞고(잔여 0.04) 기준가 ×2 와는 안 맞아 반증 경로 후보다. KRX 액면병합 B(ratio 0.5)
-    는 기준가 ×2 와 정확히 맞는다. 옛 순서(우선순위만)는 A 가 이겨 B 를 누르고 A 는 conflict 로
-    krx_base_inconsistent — 26 의 기준가는 주식수가 같은 날 바뀌면 unknown_krx 로 따로 서고, 아니면
-    직전 행이 참고가라 (c) 재발견(행 없음)이라 어디에도 안 접혔다. 새 순서는 기준가로 찾은 B 가
-    소유자다."""
+@pytest.mark.parametrize(("a_ratio", "close_jump", "share_jumps"), [
+    (0.4, 2.4, {26: 0.5}), (0.4, 2.4, {40: 0.5}),
+    (1 / 2.3, 2.12, {26: 0.5}), (1 / 2.3, 2.12, {40: 0.5}),
+], ids=["B원수익률불일치_같은날_주식수", "B원수익률불일치_뒤_상장",
+        "B원수익률일치_같은날_주식수", "B원수익률일치_뒤_상장"])
+def test_E1_같은_날_억제는_기준가로_찾은_사건이_소유자다(
+        a_ratio: float, close_jump: float, share_jumps: dict[int, float]) -> None:
+    """E-1 리뷰 MAJOR-1: 결정공시 감자 A(우선순위 높음)는 정지 뒤 세션 26 의 종가와 원수익률로만
+    맞고 기준가 ×2 와는 안 맞아 반증 경로 후보다. KRX 액면병합 B(ratio 0.5)는 기준가 ×2 와 정확히
+    맞는다. 옛 순서(우선순위만)는 A 가 이겨 B 를 누르고 A 는 conflict 로 krx_base_inconsistent — 26 의
+    기준가는 주식수가 같은 날 바뀌면 unknown_krx 로 따로 서고, 아니면 직전 행이 참고가라 (c)
+    재발견(행 없음)이라 어디에도 안 접혔다. 새 순서는 기준가로 찾은 B 가 소유자다.
+    두 모양: A 0.4·종가 ×2.4(B 원수익률 잔여 0.2 — 안 맞음) · A 1/2.3·종가 ×2.12(A 잔여 0.078 ≤
+    0.085, B 잔여 0.06 ≤ 0.075 — B 도 원수익률로 맞아 raw_hit·on_bp 가 참이다; via_raw 를
+    on_bp 만으로 두면 B 도 반증 경로로 밀려 이 모양이 깨진다, 리뷰 변이 X4)."""
     cal = sessions(80)
-    ev = [_ev_capred("A00777", 20, 0.4, cal),
+    ev = [_ev_capred("A00777", 20, a_ratio, cal),
           {"ticker": "A00777", "event_type": "reverse_split", "effective_date": cal[22],
            "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
            "announce_date": cal[22]}]
-    px = flat_prices("A00777", cal, 1000, jumps={26: 2.4}, halt=(19, 25), base={26: 2.0},
+    px = flat_prices("A00777", cal, 1000, jumps={26: close_jump}, halt=(19, 25), base={26: 2.0},
                      share_jumps=share_jumps)
     f = run_adj_sql(ev, px, cal)
     a, b = f[f"A00777:capred:{cal[20]}"], f[f"A00777:reverse_split:{cal[22]}"]

@@ -17,10 +17,11 @@
   ③ 수동 개입 0 — 장부 `data/cutover/manual_interventions.jsonl`(한 줄 = {"date": "YYYYMMDD", "what", "by",
      "recorded_at"})의 date=T 항목. 장부가 없으면 판정 불가다(그림자 시작일에 `record --init`).
   ④ 다음 날 두 판 대조(PR-7 `daily.board_compare`) 통과 — `data/model_db/compare/<T>.json` 의 verdict pass·rc 0 이고
-     실운영 결과(replay false)·등록 하한(thresholds.spearman_min ≥ `COMPARE_SPEARMAN_MIN`)일 때만 통과로 인정한다
-     (기록형 하한·재생 결과는 판정 불가). rc 1(미설명·Spearman 하한 미달)·rc 2(입력 오류 — 배포가 끼어 규칙 판본
-     불일치 등)는 실패이고 사유를 그대로 싣는다. 그날 대조 런(PR-8 런 로그 `postclose_compare`)에 ok 가 아닌 런이
-     하나라도 있으면 실패다(재실행으로 회복해도 — ① 과 같은 원칙).
+     실운영 결과(replay false)·등록 하한(spec 별 thresholds.spearman_min 이 모두 `COMPARE_SPEARMAN_MIN_BY_SPEC` —
+     표 밖 spec 은 `COMPARE_SPEARMAN_MIN_DEFAULT` — 이상, T-47)일 때만 통과로 인정한다(기록형 하한·재생 결과는
+     판정 불가). rc 1(미설명·Spearman 하한 미달)·rc 2(입력 오류 — 배포가 끼어 규칙 판본 불일치 등)는 실패이고
+     사유를 그대로 싣는다. 그날 대조 런(PR-8 런 로그 `postclose_compare`)에 ok 가 아닌 런이 하나라도 있으면
+     실패다(재실행으로 회복해도 — ① 과 같은 원칙).
 
 미판정: 실패 근거가 없는데 체인 런이나 대조 결과가 아직 없는 날. 그 뒤 거래일의 체인 런(대조는 뒤 거래일 대조
 결과)이 이미 있으면 '아직'이 아니라 미실행이라 실패다(공통 3 — 못 쟀거나 건너뛰었으면 통과가 아니다).
@@ -76,12 +77,15 @@ ROLLBACK_DAYS = 5               # 정본 §4 '되돌리기 창 5거래일'
 CHAIN_SOURCES: tuple[str, ...] = ("kiwoom_postclose", *POSTCLOSE_STEPS)
 # 두 판 대조 런 source — PR-8 `postclose_chain.sh morning`(`runlog.POSTCLOSE_FOLLOWUPS` 의 대조, rc 1 = mismatch)
 COMPARE_SOURCE = POSTCLOSE_COMPARE
-# 두 판 대조 결과 모양(PR-7 `daily.board_compare` SCHEMA·TOOL — T-36 반영판 schema 2 부터 `replay` 키) — 판본이
-# 바뀌면 판정 불가(rc 2)로 멈춘다. 통과로 인정하는 Spearman 하한은 PR-7 `SPEARMAN_MIN`(정본 P5 임시 하한)과 같다.
-# PR-7 머지 뒤에는 테스트가 세 상수를 대조한다
+# 두 판 대조 결과 모양(PR-7 `daily.board_compare` SCHEMA·TOOL — schema 2 부터 `replay` 키, schema 3 부터
+# thresholds.spearman_min 이 spec 별 표) — 판본이 바뀌면 판정 불가(rc 2)로 멈춘다. 통과로 인정하는 Spearman 하한은
+# PR-7 `SPEARMAN_MIN_BY_SPEC`·`SPEARMAN_MIN_DEFAULT`(T-47 등록값 — 근거는 그쪽 주석)와 같다. 테스트가 상수를 대조한다
 COMPARE_TOOL = "daily.board_compare"
-COMPARE_SCHEMA = 2
-COMPARE_SPEARMAN_MIN = 0.975
+COMPARE_SCHEMA = 3
+COMPARE_SPEARMAN_MIN_BY_SPEC: dict[str, float] = {
+    "scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
+    "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
+COMPARE_SPEARMAN_MIN_DEFAULT = 0.975
 _COMPARE_RC = {"pass": 0, "fail": 1, "error": 2}
 
 NOTIFY_LOG = Path("logs/notify.log")
@@ -322,7 +326,7 @@ def record(path: Path, *, date: str, what: str, by: str, now: dt.datetime | None
 
 def read_compare(path: Path, t: dt.date) -> dict[str, object] | None:
     """`compare/<T>.json` — 없으면 None. 못 읽거나 PR-7 모양(schema·tool·date·verdict↔rc 짝)이 아니거나, 판정에
-    쓸 수 없는 결과(재생 · replay 키 없음 · 등록 하한보다 낮은 하한으로 낸 pass)면 InputError."""
+    쓸 수 없는 결과(재생 · replay 키 없음 · spec 별 등록 하한보다 낮은 하한으로 낸 pass)면 InputError."""
     if not path.exists():
         return None
     try:
@@ -354,9 +358,16 @@ def read_compare(path: Path, t: dt.date) -> dict[str, object] | None:
     if verdict == "pass":
         th = payload.get("thresholds")
         smin = th.get("spearman_min") if isinstance(th, dict) else None
-        if not isinstance(smin, int | float) or isinstance(smin, bool) or smin < COMPARE_SPEARMAN_MIN:
-            bad.append(f"thresholds.spearman_min={smin!r} < 등록 하한 {COMPARE_SPEARMAN_MIN} — 기록형 하한으로 낸 "
-                       f"pass 는 통과로 인정하지 않는다")
+        if not isinstance(smin, dict) or not smin:      # 빈 표·schema 2 의 단일 하한 모양
+            low = [repr(smin)]
+        else:
+            low = [f"{sid}={v!r}" for sid, v in smin.items()
+                   if not isinstance(v, int | float) or isinstance(v, bool)
+                   or v < COMPARE_SPEARMAN_MIN_BY_SPEC.get(sid, COMPARE_SPEARMAN_MIN_DEFAULT)]
+        if low:
+            bad.append(f"thresholds.spearman_min {', '.join(low)} — spec 별 등록 하한(T-47 표, 표 밖 "
+                       f"{COMPARE_SPEARMAN_MIN_DEFAULT})보다 낮거나 모양이 다르다. 기록형 하한으로 낸 pass 는 "
+                       f"통과로 인정하지 않는다")
     if bad:
         raise InputError(f"두 판 대조 결과를 판정에 쓸 수 없다: {path} — {'; '.join(bad)}")
     return payload

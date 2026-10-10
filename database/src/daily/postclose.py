@@ -177,19 +177,29 @@ def board_universe(base: Path, d_prev: str) -> tuple[list[str], str, str]:
     return _tickers(pb.globs, where, f"universe_daily {bid} 의 D'={d_prev} v3 유니버스"), bid, health
 
 
-def board_candidates(base: Path, d_prev: str) -> tuple[list[str], str]:
-    """① 모델 후보 — fi 판 manifest `_runs/<D'>_morning.json`(status ok)의 `fi_universe.eligible`."""
-    rel = f"data/factor_inputs/_runs/{d_prev}_{BASIS}.json"
-    path = base / rel
+def fi_candidates(fi_root: Path, d_prev: str) -> tuple[list[str], str]:
+    """직전 판 모델 후보 — fi 판 manifest `<fi_root>/_runs/<D'>_morning.json`(status ok)의
+    `fi_universe.eligible`. 이 집합의 정본은 이 함수 하나다 — 수집 순서 ①(`board_candidates`)과 장 마감
+    판 후보 커버리지 게이트(fi FG5, 컷오버 PR-5)가 같이 쓴다(P4). 못 읽으면 `BOARD_ERRORS` 중 하나."""
+    path = fi_root / "_runs" / f"{d_prev}_{BASIS}.json"
     if not path.exists():
-        raise InputUnavailable(f"없음: {rel}")
+        raise InputUnavailable(f"없음: {path}")
     run = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(run, dict) or run.get("status") != "ok" or not run.get("build_id"):
         status = run.get("status") if isinstance(run, dict) else None
         raise InputUnavailable(f"D'={d_prev} fi 판이 성공 판이 아니다: status={status!r}")
     bid = str(run["build_id"])
-    pb = inputs.resolve(base / "data" / "factor_inputs", "fi_universe", bid)
+    pb = inputs.resolve(fi_root, "fi_universe", bid)
     return _tickers(pb.globs, "u.eligible", f"fi_universe {bid} 의 eligible"), bid
+
+
+def board_candidates(base: Path, d_prev: str) -> tuple[list[str], str]:
+    """① 모델 후보 — 연구 fi 루트 `data/factor_inputs` 의 `fi_candidates`."""
+    return fi_candidates(base / "data" / "factor_inputs", d_prev)
+
+
+# 판 파일이 없거나 깨졌다(JSON·MANIFEST·parquet) — 그 묶음만 비우고 사유를 남긴다
+BOARD_ERRORS = (InputUnavailable, OSError, ValueError, KeyError, TypeError, duckdb.Error)
 
 
 def resolve_targets(base: Path, d_prev: str) -> Targets:
@@ -200,7 +210,7 @@ def resolve_targets(base: Path, d_prev: str) -> Targets:
     fi_build = uni_build = None
     health = "없음"
     # 판 파일이 없거나 깨져도(JSON·MANIFEST·parquet) 16:00 창의 다른 묶음 수집은 막지 않는다
-    unusable = (InputUnavailable, OSError, ValueError, KeyError, TypeError, duckdb.Error)
+    unusable = BOARD_ERRORS
     try:
         cand, fi_build = board_candidates(base, d_prev)
     except unusable as e:

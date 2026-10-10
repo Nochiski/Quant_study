@@ -237,13 +237,14 @@ def _eq(ticker: str, day: dt.date, close: int, base: int) -> dict:
 @pytest.fixture(scope="module")
 def equity_root(tmp_path_factory) -> Path:
     """price_daily — 051910 07-01~07-09 7행(07-09 분할 2:1, ks = 2) · 051911 같은 7행에 07-07·07-08 두 번 분할(K 1,1,1,1,2,4,4)
-    · 088280·000880 D 행. security — 123450 스팩, 777770 상장일 = D."""
+    · 088280·000880·087010·087011 D 행(087010·087011 은 KRX 공식 종가 130,600). security — 123450 스팩, 777770 상장일 = D."""
     base = tmp_path_factory.mktemp("eq")
     days = [dt.date(2026, 7, d) for d in (1, 2, 3, 6, 7, 8, 9)]
     prices = [_eq("051910", d, 1000, 1000) if d.day < 9 else _eq("051910", d, 500, 500) for d in days]
     steps = {7: (500, 500), 8: (250, 250), 9: (250, 250)}
     prices += [_eq("051911", d, *steps.get(d.day, (1000, 1000))) for d in days]
-    prices += [_eq(t, dt.date(2026, 10, 8), c, c) for t, c in (("088280", 3000), ("000880", 6000))]
+    prices += [_eq(t, dt.date(2026, 10, 8), c, c) for t, c in (("088280", 3000), ("000880", 6000),
+                                                                ("087010", 130_600), ("087011", 130_600))]
     _make_stage_tree(base, "price_daily", prices, build_id=EQ_BUILD)
     sec = [tce._sec_row("051910", "LG화학", dt.date(2001, 4, 25)),
            {**tce._sec_row("123450", "스팩1호", dt.date(2025, 3, 1)), "sec_type": "spac"},
@@ -487,6 +488,23 @@ def test_delisting_window_and_adj_only_unconfirmed_bounds(tmp_path: Path, equity
                 if o["table"] == "daily_prices"}
     assert dp_other == {("900000", "2026-10-06"): "only_in_v3", ("900000", NEXT_ISO): "only_in_v3",
                         ("000270", "2026-10-05"): "T33_ratio_or_volume"}
+
+
+def test_market_cap_close_definition_rounding_bound(tmp_path: Path, equity_root) -> None:
+    """서버 10-07 087010 — compat 30,452(KRX 종가 130,600) · v3 22,595(애프터마켓 96,900), 함의 주식수 같음.
+    두 시총이 각각 억원 반올림이라 경계는 0.5·(1 + 종가 비) = 1.174 다: 이 행 |30,452 − 30,453.12| = 1.12 는 범주
+    (옛 경계 ±1 로는 미설명), 087011 의 1.18(27,286 대 20,246 × 1.3478) 은 경계 밖이라 미설명."""
+    rows = [_px("087010", D_ISO, 96_900), _px("087011", D_ISO, 96_900)]
+    compat, v3 = _bare_pair(tmp_path, rows, {})
+    for path, caps in ((v3, (22_595, 20_246)), (compat, (30_452, 27_286))):
+        con = sqlite3.connect(str(path))
+        _insert(con, "stocks", STOCK_COLS, [_stock("087010", caps[0], V3_TIME), _stock("087011", caps[1], V3_TIME)])
+        con.commit()
+        con.close()
+    rep = rp.compare(compat, v3, D, equity_root)
+    assert _keys(rep, "stocks", "market_cap_close_definition") == {"087010"}
+    assert [(o["key"]["stock_code"], o["reason"]) for o in rep["other"] if o["table"] == "stocks"] == \
+        [("087011", "column:market_cap")]
 
 
 def test_builds_fallback_tier_is_recorded_not_judged(tmp_path: Path, equity_root) -> None:

@@ -208,7 +208,8 @@ CATEGORIES: tuple[Category, ...] = (
     Category(BASE_DAY_OPEN, "기준일 행 미확정 — 다음 거래일 사본 없이 v3 20:05 값과 다르다", "§7 daily_prices 6"),
     Category(REBASE_ADJ_NULL, "창 밖 다시 맞춘 종목의 equity 행 없는 날 — adj_close 만 NULL(v3_post warn)",
              "§7 daily_prices 창 밖"),
-    Category(MCAP_CLOSE, "stocks.market_cap 종가 정의 — 함의 주식수(시총 ÷ 그날 종가)가 같고 억원 반올림 ±1",
+    Category(MCAP_CLOSE, "stocks.market_cap 종가 정의 — 함의 주식수(시총 ÷ 그날 종가)가 같다(두 쪽 억원 반올림 — "
+             "0.5·(1 + 종가 비))",
              "§7 T-45 ① · T-33"),
     Category(DELIST_TIMING, "상장폐지 반영 시점 — compat 은 KRX 폐지일로 is_active=0·시총·폐지일, v3 는 아직 1·NULL. "
              "v3 에만 있는 폐지일~D 가격·수급 행(v3 가 폐지 당일·뒤에 쓰는 거래량 0 행)도 여기", "§7 T-45 ②"),
@@ -555,7 +556,9 @@ def _stocks_column(duck: duckdb.DuckDBPyConnection, ctx: Context, col: str, a: M
     x, v = a.get(col), b.get(col)
     if col == "market_cap" and isinstance(x, int | float) and isinstance(v, int | float):
         cx, cv = ctx.close_x.get(code), ctx.close_v.get(code)
-        if cx and cv and abs(x - v * cx / cv) <= ROUND_ABS:
+        # 함의 주식수가 같으면 x ≈ v × cx/cv. 두 시총이 각각 억원 반올림(±0.5)이고 v 쪽 오차는 cx/cv 배로 커지므로 경계는
+        # 0.5·(1 + cx/cv)(+ 부동소수 여유). 서버 10-07 087010: 종가 130,600 대 96,900 → 경계 1.17, 실제 1.12(±1 이면 놓친다)
+        if cx and cv and abs(x - v * cx / cv) <= 0.5 * (1 + cx / cv) + 1e-9:
             return Verdict(category=MCAP_CLOSE)
     elif col == "market_cap" and x is not None and v is None:
         if delisted:

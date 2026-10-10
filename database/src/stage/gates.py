@@ -144,11 +144,20 @@ def g3_invariants(ctx: GateContext) -> GateResult:
 def g4_fixtures(ctx: GateContext) -> GateResult:
     """골든 픽스처. unit_scale 선언 컬럼은 픽스처 없음 = 실패(§9 — ×1e6 오적용의 유일 방어).
 
-    `rule.golden_from` 표와 **같은 ColumnRule** 인 unit_scale 열은 그 표의 골든이 지킨다(물려받음 — 그 표의
-    빌드가 자기 G4 로 매번 대조한다). 이름이 같아도 규칙이 다르면 물려받지 않는다.
+    `rule.golden_from` 표와 **원천 TR(src_tag)이 같고 같은 ColumnRule** 인 unit_scale 열은 그 표의 골든이 지킨다
+    (물려받음 — 그 표의 빌드가 자기 G4 로 매번 대조한다). 이름이 같아도 규칙이 다르면 물려받지 않는다. TR 이
+    다르면 같은 헬퍼 ColumnRule 이어도 원문 단위가 다를 수 있어 물려받지 않는다. 물려받아 건너뛴 사유 코드는
+    `golden_inherited` — 일반 `no_fixtures` 와 갈라 허용표(K1-7a)가 표를 한정해 허용할 수 있게 한다.
     """
     covered = {str(fx["column"]) for fx in ctx.fixtures or ()}
     parent = ctx.rule.golden_from
+    rejected: dict[str, object] = {}
+    if parent is not None:
+        mine = sorted({s.src_tag for s in ctx.rule.sources})
+        theirs = sorted({s.src_tag for s in parent.sources})
+        if mine != theirs:
+            rejected = {"golden_from_rejected": f"{parent.name}: 원천 TR {mine} != {theirs}"}
+            parent = None
     scaled = [c for c in ctx.rule.columns if c.unit_scale is not None and c.name not in covered]
     inherited = [c.name for c in scaled if parent is not None and c in parent.columns]
     uncovered = [c.name for c in scaled if c.name not in inherited]
@@ -158,11 +167,9 @@ def g4_fixtures(ctx: GateContext) -> GateResult:
         return GateResult("G4", GateStatus.FAIL,
                           f"unit_scale column without fixture: {uncovered}",
                           {"n_fixtures": len(ctx.fixtures or ()), "n_mismatch": 0,
-                           "unit_scale_uncovered": uncovered, **via})
+                           "unit_scale_uncovered": uncovered, **via, **rejected})
     if not ctx.fixtures:
-        why = (f"no_fixtures — unit_scale {len(inherited)}열은 {parent.name} 골든이 지킨다"
-               if parent is not None and inherited else "no_fixtures")
-        return GateResult("G4", GateStatus.SKIP, why, via)
+        return GateResult("G4", GateStatus.SKIP, "golden_inherited" if via else "no_fixtures", via)
     n_mismatch = 0
     detail: list[str] = []
     for fx in ctx.fixtures:

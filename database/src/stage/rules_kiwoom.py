@@ -93,7 +93,8 @@ STG_FLOW_DAILY_KIWOOM = TableRule(
 # ── stg_flow_postclose_kiwoom (장 마감 직후 ka10060 — 컷오버 PR-2 · T-4) ─────────
 # 원장 `data/raw/postclose.db`(수집기 daily.postclose, 15:41~16:00 KRX 코드)의 같은 TR 표. 키움 원장 표에 넣지 않는
 # 이유는 T-4(첫 관측 규칙이 21:05 의 하루 전체 수급을 버리게 된다). 파싱은 위 ka10060 규칙 그대로(같은 객체)이고,
-# unit_scale 13열의 골든도 stg_flow_daily_kiwoom 것을 물려받는다(golden_from) — 이 원장에는 고정 골든 행이 없다.
+# unit_scale 13열의 골든도 stg_flow_daily_kiwoom 것을 물려받는다(golden_from) — 첫 수집(10-14) 전에는 이 원장에 행이
+# 없어 골든 행을 둘 수 없다. 수집 뒤 이 표 자기 골든 픽스처를 다는 일은 후속이다.
 # 덧붙인 열 둘:
 #   price_valid   수집기가 응답을 16:00 KST 전에 받았나(원장 '1'/'0' → BOOLEAN). false 면 수급 13열만 유효하다 —
 #                 종가·전일대비·거래량에는 애프터마켓 값이 섞인다(N-35 ①). 거르는 것은 소비층(PR-5) 몫이고

@@ -208,9 +208,10 @@ class TableRule:
     # 아침 확정판 재사용(`reuse.py`, 묶음 7-3) — 원장 지문·규칙 판본·코드 rev 가 저녁 판과 같으면
     # 다시 짓지 않고 저녁 판 파일을 하드링크한 새 m_ 판으로 커밋한다. stg_fin_wise·_q 만
     morning_reuse: bool = False
-    # G4 골든 물려받기 — 이 표의 unit_scale 열이 golden_from 표의 열과 **같은 ColumnRule** 이면 그 표의 골든
-    # 픽스처가 스케일을 지킨다(규칙을 공유하면 검증도 한 곳, P4). 원장에 고정 행이 없어 골든 행을 둘 수 없는
-    # 표(장 마감 원장 — 날마다 T 행만 쌓인다)만 쓴다. stg_flow_postclose_kiwoom 만
+    # G4 골든 물려받기 — 원천 TR(src_tag)이 같고 이 표의 unit_scale 열이 golden_from 표의 열과 **같은 ColumnRule**
+    # 이면 그 표의 골든 픽스처가 스케일을 지킨다(규칙을 공유하면 검증도 한 곳, P4). 첫 수집(10-14) 전에는 원장에
+    # 행이 없어 골든 행을 둘 수 없는 표(장 마감 원장)만 쓴다. 수집 뒤 그 표 자기 골든 픽스처를 다는 일은
+    # 후속이다. stg_flow_postclose_kiwoom 만
     golden_from: TableRule | None = None
 
     def column(self, name: str) -> ColumnRule:

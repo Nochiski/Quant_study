@@ -121,6 +121,11 @@ def test_postclose_rule_shares_the_ka10060_rules_and_adds_two_columns() -> None:
     assert "postclose" not in rules.LEDGER_FILES            # 연구 체인 스냅샷 세트 밖
 
 
+def test_only_the_postclose_table_inherits_a_golden() -> None:
+    """골든 물려받기는 장 마감 표 하나만 — 다른 표가 조용히 G4 를 건너뛰지 못하게 레지스트리로 고정한다."""
+    assert {n for n, r in rules.RULES.items() if r.golden_from is not None} == {NAME}
+
+
 # ── 빌드 ──────────────────────────────────────────────────────────────────────
 def test_postclose_build_parses_like_ka10060_and_keeps_price_valid_and_receipt_time(
     tmp_path: Path
@@ -148,6 +153,7 @@ def test_postclose_build_parses_like_ka10060_and_keeps_price_valid_and_receipt_t
     # unit_scale 13열은 저녁 표의 골든이 지킨다 — 이 표에 고정 행이 없어 골든 행을 둘 수 없다
     g4 = _gate(r, "G4")
     assert g4.status is gates.GateStatus.SKIP
+    assert g4.detail == "golden_inherited"       # 일반 no_fixtures 와 갈라 허용표(K1-7a)가 표 한정으로 허용한다
     assert g4.metrics["golden_from"] == FLOW
     inherited = g4.metrics["unit_scale_inherited"]
     assert isinstance(inherited, list) and sorted(inherited) == sorted(
@@ -167,6 +173,21 @@ def test_g4_inherits_only_an_identical_rule(tmp_path: Path) -> None:
     assert r2.status is build.BuildStatus.GATE_FAILED
     uncovered = _gate(r2, "G4").metrics["unit_scale_uncovered"]
     assert isinstance(uncovered, list) and len(uncovered) == 13
+
+
+def test_g4_does_not_inherit_across_source_trs(tmp_path: Path) -> None:
+    """열 규칙이 같아도 원천 TR 이 다르면 물려받지 않는다 — 단위가 다른 TR 이 같은 헬퍼 ColumnRule 을 다시 쓰면
+    골든이 그 TR 의 단위를 지키지 않는다(1000배 오차가 SKIP 으로 통과하던 구멍)."""
+    post = rules.RULES[NAME]
+    snap = _snap(tmp_path, "postclose", _postclose_db(tmp_path / "postclose.db"), "snap_tr")
+    other_tr = (dataclasses.replace(post.sources[0], src_tag="ka10014"),)
+    r = build.build_table(dataclasses.replace(post, sources=other_tr), snap, tmp_path / "stage")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g4 = _gate(r, "G4")
+    uncovered = g4.metrics["unit_scale_uncovered"]
+    assert isinstance(uncovered, list) and len(uncovered) == 13
+    assert "unit_scale_inherited" not in g4.metrics
+    assert "원천 TR" in str(g4.metrics["golden_from_rejected"])
 
 
 def test_same_raw_rows_give_the_same_shared_columns_as_the_evening_table(tmp_path: Path) -> None:

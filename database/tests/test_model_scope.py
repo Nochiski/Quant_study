@@ -243,6 +243,7 @@ _RAW = tuple(c for c in V3_SCORE_COLUMNS if c not in _SCORES)
 # 종목 → (adj_ok 가 False 로 바뀌는 행, adj_jump_ok 가 False 로 바뀌는 행). 행 = 오래된 쪽부터 0…N−1
 _STEPS: dict[str, tuple[int | None, int | None]] = {
     "J5": (_N - 5, _N - 5),          # 점프가 모든 창 안 → 모멘텀 5개 · std_20d 결측
+    "J20": (_N - 20, _N - 20),       # r1m(21행) · std_20d(21행) 창의 둘째 행 → 다 결측(창 경계)
     "J21": (_N - 21, _N - 21),       # r1m(21행) · std_20d(21행) 창은 사건 행에서 시작 → 그대로
     "LIM": (_N - 5, None),           # 미해결이지만 제한폭 안(adj_ok 만 뒤집힘) → 그대로
     "OLD": (_N - 250, _N - 250),     # r12m 창(241행) 밖 → 그대로
@@ -291,7 +292,8 @@ def test_scope_spec_turns_on_the_adj_jump_rule_only_for_scope() -> None:
 def test_scope_nulls_exactly_the_windows_crossing_a_limit_breaking_unresolved_event() -> None:
     """GH1-c 반사실 — 같은 입력으로 규칙 있음·없음 두 번. 새로 NULL 이 된 칸 = 창이 adj_jump_ok
     계단을 넘는 칸 그대로, 그 밖의 원값은 하나도 바뀌지 않는다(점수는 정규화로만 움직인다).
-    미해결이지만 제한폭 안(LIM)·창 밖 점프(OLD)·사건 행에서 시작하는 창(J21 r1m·std_20d)은 그대로."""
+    미해결이지만 제한폭 안(LIM)·창 밖 점프(OLD)·사건 행에서 시작하는 창(J21 r1m·std_20d)은 그대로,
+    창 둘째 행의 사건(J20)은 r1m·std_20d 까지 결측(창 경계 — 한 행 짧은 창 변이를 잡는다)."""
     fi = _jump_fi()
     res = ENGINE.run(registry.get(SCOPE), fi)
     on = _by_code(res.scores)
@@ -299,7 +301,8 @@ def test_scope_nulls_exactly_the_windows_crossing_a_limit_breaking_unresolved_ev
     assert on.keys() == cf.keys() == set(_STEPS)
     assert all(cf[c][k] is not None for c in cf for k in (*_MOM, "qual_std_20d"))   # 반사실은 다 선다
     newly_null = {(c, k) for c in on for k in _RAW if on[c][k] is None and cf[c][k] is not None}
-    want = {("J5", k) for k in (*_MOM, "qual_std_20d")} | {("J21", k) for k in _MOM[1:]}
+    want = ({(c, k) for c in ("J5", "J20") for k in (*_MOM, "qual_std_20d")}
+            | {("J21", k) for k in _MOM[1:]})
     assert newly_null == want
     for c in on:
         for k in _RAW:
@@ -307,8 +310,8 @@ def test_scope_nulls_exactly_the_windows_crossing_a_limit_breaking_unresolved_ev
                 assert on[c][k] == cf[c][k], (c, k)
     assert on["J5"]["momentum_score"] != cf["J5"]["momentum_score"]    # 점수는 움직인다
     # 판 메타(GH1-c ④) — 종목 수와 지표별 칸 수. 규칙이 꺼진 spec 은 메타를 싣지 않는다
-    assert res.meta == {"adj_jump_masked": {"n_tickers": 2, "r1m": 1, "r3m": 2, "r6m": 2,
-                                            "r9m": 2, "r12m": 2, "std_20d": 1}}
+    assert res.meta == {"adj_jump_masked": {"n_tickers": 3, "r1m": 2, "r3m": 3, "r6m": 3,
+                                            "r9m": 3, "r12m": 3, "std_20d": 2}}
     assert ENGINE.run(_rule_off(registry.get(SCOPE)), fi).meta == {}
 
 

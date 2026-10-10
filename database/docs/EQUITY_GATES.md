@@ -43,6 +43,8 @@
 
 **skip 은 통과가 아니다.** 7단계 최종 게이트(§7-4)가 "전 테이블 `gates[]` 에 `status='fail'` 0 **이면서** `status='skip'` 중 `no_baseline` 잔존 0" 을 요구한다.
 
+K1-7a(2026-10-10)부터 `gates.run_all` 이 판마다 이것을 강제한다 — (게이트, 사유, 표) 가 허용표(`src/stage/skip_allow.py`)에 없는 skip 은 FAIL 로 세고 판을 폐기한다. `no_baseline` 은 허용표에 없으므로 새 게이트·새 표는 상수와 함께 배포한다(측정치는 `_failed/<build_id>.json` 의 그 게이트 metrics 에 남는다 — 배포 전에 재는 경로는 §7-3 ①). 아래 각 항의 "첫 빌드 `skip(no_baseline)`" 은 이 규칙 전의 기술이다.
+
 ### 0-3. 상수 참조 — `data/equity/baseline.json`
 
 파일 형식은 stage 와 동일(`baseline.py:measure` 반환 구조): 최상위 `{table: {metric: value}}` + `_measured[]` 에 `{table, metric, db, sql, value, measured_at, growing}`. equity 는 `db` 대신 **`inputs`(고정 stage build)** 를 provenance 로 싣는다.
@@ -1752,11 +1754,24 @@ stage `build.py:498-502` 의 형식을 계승하고 조인층 필드를 더한�
 ### 7-3. baseline 승인 루프
 
 ```
-① 첫 빌드: baseline 미등재 게이트는 skip(no_baseline) + 측정치를 _meta.gates[].metrics 에
-② 사람이 _meta 를 읽고 값을 판단 → data/equity/baseline.json 에 {table, metric, sql, value, measured_at, inputs}
+① 배포 전 측정(운영 판은 건드리지 않는다): 둘 중 하나로 새 게이트의 측정치를 얻는다
+   · 격리 재생(X-1): scripts/replay.sh --code <새 코드> --out <tmp> --steps equity
+     상수 없는 게이트는 skip(no_baseline) → 허용표 밖이라 FAIL, 그 표 빌드는 폐기된다.
+     측정치 = <tmp>/logs/passN/eq_<표>.log 의 게이트 줄 · <tmp>/data/equity/_failed/<build_id>.json
+     의 그 게이트 metrics(skip_reason=no_baseline). scripts/gate_skips.py --home <tmp> 는 커밋된 판
+     기록(MANIFEST·_runs)만 읽어 폐기된 표의 SKIP 은 보이지 않는다 — 측정치는 위 두 곳에서 읽는다
+   · 재판정: cd ~/quant-ledger && PYTHONPATH=<새 코드>/src .venv/bin/python -m equity
+     --root data/equity --stage-root data/stage gate <표>
+     운영 current_build 를 새 코드로 다시 판정만 한다(폐기 없음·쓰기 없음). 새 게이트가 옛 판에 없는
+     열을 읽으면 재생으로 잰다
+② 사람이 측정치를 읽고 값을 판단 → data/equity/baseline.json 에 {table, metric, sql, value, measured_at, inputs}
 ③ 커밋: diff 를 커밋 메시지에 (STAGE_DESIGN §9 규약)
-④ 2회차 빌드: 같은 게이트가 정식 pass/fail
+④ 배포: 게이트와 상수를 함께 → 첫 빌드부터 정식 pass/fail
 ```
+
+K1-7a(2026-10-10) 전에는 '첫 빌드 skip(no_baseline) → 승인 → 2회차 정식' 이었다. 지금은 상수 없이 배포하면
+첫 빌드에서 그 게이트가 FAIL 하고 판이 폐기되며, 일일 빌드(`scripts/equity_rebuild_all.sh`)는 그 패스를
+롤백한다(§0-2).
 
 **승인 없이 통과시키지 않는다.** `skip(no_baseline)` 이 남아 있는 테이블은 7단계 통과 조건(§7-4)에서 걸린다.
 **baseline 을 느슨하게 고치는 것으로 실패를 해소하지 않는다** — WORKFLOW §3-3 판단 열의 "EG9 커버율 미달 시 임계를 낮추지 않고 한계로 기록" 을 전 게이트로 확장한다. 임계를 바꾸려면 PR body 에 `.claude/rules/pr-review.md` 4요소 양식으로 근거를 적는다.

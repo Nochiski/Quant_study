@@ -211,11 +211,12 @@ def test_가짜_재상장이_늘면_EG16a가_폐기한다(tmp_path: Path) -> Non
     assert eg16a.metrics == {"n_multi_span_tickers": 2, "respan_count": 3, "delta": -1}
 
 
-def test_baseline_없으면_EG16a만_skip하고_EG3x는_돈다(tmp_path: Path) -> None:
-    """상수 없는 술어를 상수 있는 술어와 한 게이트에 묶으면 안 되는 이유 (GATES §0-3)."""
+def test_baseline_없으면_EG16a만_못_재고_EG3x는_돈다(tmp_path: Path) -> None:
+    """상수 없는 술어를 상수 있는 술어와 한 게이트에 묶으면 안 되는 이유 (GATES §0-3).
+    못 잰 EG16a(no_baseline)는 허용표 밖이라 판을 폐기한다(K1-7a)."""
     r = _build(tmp_path, baseline=Baseline({}))
-    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert not r.ok
     assert _gate(r, "EG3x").status is GateStatus.PASS
     eg16a = _gate(r, "EG16a")
-    assert eg16a.status is GateStatus.SKIP and eg16a.detail == "no_baseline"
+    assert eg16a.status is GateStatus.FAIL and eg16a.metrics["skip_reason"] == "no_baseline"
     assert eg16a.metrics["missing_metric"] == "security_span.respan_count"

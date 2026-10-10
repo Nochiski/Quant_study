@@ -2,7 +2,8 @@
 
 흐름 (equity `build.py` 와 같은 모양):
   원천 판 해석(MANIFEST `current_build`, 또는 `--builds-from` 인계 이력이 가리킨 판 — 맨 glob 금지)
-  → 판 가드(아침판에 저녁 equity 판 금지 · 가격·수정주가·계수 판이 같은 체인)
+  → 판 가드(아침판에 저녁 equity 판 금지 · 가격·수정주가·계수 판이 같은 체인
+    · stage 판 게이트 SKIP 은 허용표 안 — K1-7a, 고정 판에도 같다)
   → TEMP VIEW → `queries` 순서대로 임시 표
   → `_tmp/<build_id>/<표>/part0.parquet` → 게이트(FG0~FG4 · FG-fresh)
   → 통과: 8표 모두 `v=<build_id>` 로 옮기고 표마다 `stage.manifest.commit`(keep=KEEP_DEFAULT=60)
@@ -59,7 +60,7 @@ from daily import calendar as daily_calendar
 from equity import handoff, inputs
 from equity.rules_s10 import FIELDS as CREDIT_FIELDS
 from model.contracts import FI_TABLES, UniverseRule
-from stage import manifest
+from stage import manifest, skip_allow
 from stage.gates import GateResult, GateStatus
 from stage.model import basis_of_build_id, build_id_time, make_build_id
 
@@ -79,10 +80,13 @@ from . import gates, queries
 # 달력 ∪ {T}, 유니버스 = D' 행 이월 · 시총 = D' 주식수 × T 종가(`t1_shares_x_t_close`, T 행 자리
 # `_t_prices`, 출처 어휘 'postclose'), WISE·DART·universe_daily·WICS·기업행위 입력 fetched/available
 # ≤ D'(asof). 아침판 SQL 은 그대로
+# 1.6.0(2026-10-10, 컷오버 H1-4 · T-9): fi_adj_prices.adj_jump_ok 열 — 가격 축 미해결 사건 적용일 앞뒤
+# 6세션 안에서 수익률이 그날 가격제한폭을 넘는 점프 행마다 뒤집히는 계단 표식(scope 모멘텀·20일 변동성
+# 결측 판정의 재료)
 # 1.7.0(2026-10-10, 컷오버 PR-5 · T-2·T-6·N-42 Q4): 장 마감 판 T 행 얹기 — 가격(장 마감 stage
-# price_valid 행만, 'postclose')·수정주가(T 종가 × D' 누적계수, 연구 판 행과 같은 SQL)·수급(price_valid
-# 무관), T-6 당일 기업행위 보류(eligible=false · corp_action_pending), FG5 후보 커버리지 게이트.
-# 아침판 SQL 은 그대로
+# price_valid 행만, 'postclose')·수정주가(T 행을 원천에 넣어 연구 판 행과 같은 SQL — adj_ok·adj_jump_ok
+# 포함)·수급(price_valid 무관), T-6 당일 기업행위 보류(eligible=false · corp_action_pending), FG5 후보
+# 커버리지 게이트. 아침판 SQL 은 그대로
 RULES_VERSION = "fi1.7.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
@@ -210,9 +214,25 @@ def _resolve(root: Path, tables: tuple[str, ...], stage: bool,
                 ids[t], exprs[t] = "absent", OPTIONAL_STAGE_SOURCES[t]
                 continue
             raise FactorInputsError(f"원천 판이 없다: {root}/{t} ({e})") from e
+        if stage:
+            _check_stage_skips(pb)
         ids[t] = pb.build_id
         exprs[t] = _expr(pb.globs, stage)
     return ids, exprs
+
+
+def _check_stage_skips(pb: inputs.PinnedBuild) -> None:
+    """fi 가 직접 읽는 stage 판의 게이트 SKIP 이 허용표(`stage/skip_allow.py`) 안인지 본다(K1-7a).
+
+    stage 는 SKIP 을 통과로 커밋하므로 여기서 거른다 — 표 밖 SKIP 이 있는 판은 쓰지 않는다.
+    equity 표는 equity 빌드가 스스로 거르므로 다시 보지 않는다.
+    """
+    bad = skip_allow.violations("stage", pb.meta.get("gates"), table=pb.table)
+    if bad:
+        raise FactorInputsError(
+            f"stage 판의 게이트 SKIP 이 허용표(stage/skip_allow.py) 밖이다: table={pb.table} "
+            f"build_id={pb.build_id} skip={bad} — 원인을 고쳐 stage 를 다시 짓거나, 정상 SKIP 이면 "
+            f"근거와 함께 허용표에 올린다")
 
 
 def _load_handoff(path: Path, d: date) -> handoff.Handoff:

@@ -387,14 +387,18 @@ WHERE {_IN_UNIVERSE}"""
 ADJ_REQUIRED_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "adj_factor": ("price_resolution",), "price_adj_daily": ("cum_price_only_factor",)}
 
-# KRX 일반 세션 가격제한폭(T-9 · T-6) — 날짜별 제한폭은 여기에만 둔다. 2015-06-15 부터 ±30%, 그 전
-# ±15%. H1-4(fi1.6.0)가 같은 이름·값으로 이 자리에 둔다 — 두 PR 이 베이스에서 만나면 정의 하나로
-# 합친다(P4).
+# KRX 일반 세션 가격제한폭(T-9 · H1-4) — 날짜별 제한폭은 여기에만 둔다. 수익률이 난 날(행 날짜)
+# 기준으로 2015-06-15 부터 ±30%, 그 전 ±15%. 장 마감 판 T-6 수익률 판정(PR-5 `t_pending_sql`)도 이
+# 정의를 T 날짜로 쓴다.
 PRICE_LIMIT_CHANGE_DATE = "2015-06-15"
 PRICE_LIMIT_BEFORE, PRICE_LIMIT_AFTER = 0.15, 0.30
 # 부동소수 나눗셈 잡음 여유 — 상한가 하루(13,000 / 10,000 − 1 = 0.30000000000000004)를 제한폭을
 # 넘은 것으로 세지 않는다
 PRICE_LIMIT_EPS = 1e-9
+# 미해결 사건의 '인접' = 적용일 앞뒤 이 **거래일(세션)** 수 안의 행(그 행의 직전 행 대비 수익률) —
+# 달력일이 아니다. K1-6/H1-1 분해(10-09)가 적용일 ±6 의 인접 수익률로 점프 흔적 7 · 제한폭 안 334 를
+# 갈랐다 — 미해결 사건의 적용일은 명목 세션이라(no_price_match 등) 실제 점프가 며칠 어긋날 수 있다.
+ADJ_JUMP_NEIGHBOR_SESSIONS = 6
 
 
 def adj_prices_sql(p: Params) -> str:
@@ -416,11 +420,23 @@ def adj_prices_sql(p: Params) -> str:
     ② 사유 행·유상감자 제외) · `price_only_near`(근처 ⑤ 단위, (c) 후보 없음))은 수정종가가 이미
     이어지므로 세지 않는다 — 판정은 equity 열 하나만 읽는다(fi1.3.0, 배포 묶음 6-3).
 
+    `adj_jump_ok`(T-9 · H1-4, fi1.6.0)는 같은 모양의 계단이되 **점프 행**마다 뒤집힌다. 점프 행 = 위
+    사건(가격 축 미해결, available ≤ asof)의 적용일(첫 거래일 ≥ 적용일) 앞뒤
+    `ADJ_JUMP_NEIGHBOR_SESSIONS` **거래일(세션)** 안의 그 종목 행 중 |수정종가 ÷ 그 종목 직전 행 수정종가
+    − 1| > 그 행 날짜의 제한폭(+`PRICE_LIMIT_EPS`)인 행((종목, 날짜) 하나로 센다). 적용일이 아니라 점프
+    행에서 뒤집으므로 창이 [직전 행, 점프 행] 을 품을 때만 값이 바뀐다 — 적용일과 실제 점프가 며칠
+    어긋나도(명목 적용일, no_price_match 등) 그 사이에서 시작하는 창이 점프를 품고 빠져나가지 않는다.
+    수익률은 D 이하 행만 본다(D 뒤 행을 읽으면 D 판이 미래를 안다). 제한폭 안 미해결 사건은 수정종가가
+    끊겼다고 볼 근거가 없어 세지 않는다(K1-6/H1-1 분해 — 주식 계열 미해결 중 점프 흔적 7, 제한폭 안
+    334). 미해결 사건이 없는 끊김(B-65 정지 뒤 재개 기준가 리셋 등)은 이 표식 밖이다.
+
     장 마감 판 T 행(컷오버 PR-5 · T-2 전방 조정): T 행을 이 SQL 이 읽는 원천에 넣는다 — `_t_adj_src`
-    (`t_adj_source_sql`) = equity price_adj_daily + T 행. 그래서 T 행의 adj_factor · adj_ok(· 뒤에
-    붙는 표식)는 연구 판 행과 **같은 SQL** 에서 나온다 — T 에 적용일이 있는 사건이 없으면 D' 값과
-    같고, 있으면(D' 까지 공개된 것만) 다음 날 연구 판 T 행과 같은 계단이다. 표에 T 행을 따로 붙이면
-    표식이 비어 엔진 기본값(True)이 가짜 계단을 만든다(H1-4 리뷰 MINOR-2).
+    (`t_adj_source_sql`) = equity price_adj_daily + T 행. 그래서 T 행의 adj_factor · adj_ok ·
+    adj_jump_ok 는 연구 판 행과 **같은 SQL** 에서 나온다 — 점프 판정 수익률(`ret`)도 세션 축이라
+    T 행까지 본다(date ≤ T, asof 로 자르지 않는다). 사건은 available ≤ D' 만 센다. T 에 적용일이 있는
+    사건이 없고 T 수익률이 점프가 아니면 D' 값과 같고, 그 밖이면 다음 날 연구 판 T 행과 같은 판정이다
+    (D' 뒤 공개 사건은 두 판 대조 범주). 표에 T 행을 따로 붙이면 표식이 비어 엔진 기본값(True)이
+    가짜 계단을 만든다(H1-4 리뷰 MINOR-2).
     """
     src = "_t_adj_src" if p.basis == "evening" else "price_adj_daily"
     inner = f"""WITH bad AS (
@@ -428,11 +444,33 @@ def adj_prices_sql(p: Params) -> str:
     WHERE price_resolution = '{PRICE_UNRESOLVED}'
       AND apply_date > DATE '{p.price_from}' AND apply_date <= DATE '{p.d}'
       AND available_date <= DATE '{p.asof}'
+),
+ret AS (
+    SELECT r.ticker, r.date, c.idx, abs(r.adj_close / nullif(r.prev_close, 0) - 1) AS abs_ret,
+           CASE WHEN r.date < DATE '{PRICE_LIMIT_CHANGE_DATE}' THEN {PRICE_LIMIT_BEFORE}
+                ELSE {PRICE_LIMIT_AFTER} END AS price_limit
+    FROM (SELECT ticker, date, adj_close,
+                 lag(adj_close) OVER (PARTITION BY ticker ORDER BY date) AS prev_close
+          FROM {src}
+          WHERE basis = 'krx' AND date <= DATE '{p.d}'
+            AND ticker IN (SELECT ticker FROM bad) AND {_IN_UNIVERSE}) r
+    JOIN _calx c ON c.date = r.date
+),
+jump AS (
+    SELECT DISTINCT r.ticker, r.date
+    FROM (SELECT ticker, (SELECT min(idx) FROM _calx WHERE date >= apply_date) AS apply_idx
+          FROM bad) b
+    JOIN ret r ON r.ticker = b.ticker
+              AND r.idx BETWEEN b.apply_idx - {ADJ_JUMP_NEIGHBOR_SESSIONS}
+                            AND b.apply_idx + {ADJ_JUMP_NEIGHBOR_SESSIONS}
+    WHERE r.abs_ret > r.price_limit + {PRICE_LIMIT_EPS}
 )
 SELECT a.ticker, a.date, a.adj_close,
        a.cum_share_factor / a.cum_price_only_factor AS adj_factor,
        (SELECT count(*) FROM bad b
-        WHERE b.ticker = a.ticker AND b.apply_date <= a.date) % 2 = 0 AS adj_ok
+        WHERE b.ticker = a.ticker AND b.apply_date <= a.date) % 2 = 0 AS adj_ok,
+       (SELECT count(*) FROM jump j
+        WHERE j.ticker = a.ticker AND j.date <= a.date) % 2 = 0 AS adj_jump_ok
 FROM {src} a
 WHERE a.basis = 'krx' AND a.date >= DATE '{p.price_from}' AND a.date <= DATE '{p.d}'
   AND a.{_IN_UNIVERSE}"""
@@ -940,7 +978,7 @@ TABLE_SOURCES: Mapping[str, tuple[str, ...]] = {
                     "coverage_daily", "audit_opinion", "disclosure_version",
                     "stg_consensus_annual", "trading_calendar"),
     "fi_prices": ("price_daily",),
-    "fi_adj_prices": ("price_adj_daily", "adj_factor"),
+    "fi_adj_prices": ("price_adj_daily", "adj_factor", "trading_calendar"),
     "fi_flows": ("flow_daily", "trading_calendar"),
     "fi_credit": ("credit_daily", "trading_calendar"),
     "fi_consensus": ("stg_consensus_matrix", "stg_consensus_annual", "coverage_daily",

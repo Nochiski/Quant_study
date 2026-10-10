@@ -86,9 +86,15 @@ FI_ADJ_PRICES = TableContract(
      _c("adj_ok", "BOOLEAN",
         note="False = 가격 축 미해결 기업행위 사건 구간(DQ-1, adj_factor.price_resolution = "
              "'unresolved' — fi1.3.0). v3@1.0 은 무시(원본 동등성), "
-             "v4 계열은 해당 창을 결측 처리")),
+             "v4 계열은 해당 창을 결측 처리"),
+     _c("adj_jump_ok", "BOOLEAN",
+        note="adj_ok 와 같은 모양의 계단 표식이되 점프 행마다 뒤집힌다 — 점프 행 = 가격 축 "
+             "미해결 사건 적용일 앞뒤 N 세션 안에서 |수정수익률|이 그날 가격제한폭을 넘는 행"
+             "(T-9 · H1-4, fi1.6.0 — 상수는 factor_inputs.queries PRICE_LIMIT_*·"
+             "ADJ_JUMP_NEIGHBOR_SESSIONS). scope(params.adj_jump_missing)는 모멘텀·20일 변동성 "
+             "창 안에서 값이 바뀌면 그 지표를 결측 처리, v3@1.0·v2·v4 는 무시")),
     window="fi_prices 와 같다",
-    source="equity price_adj_daily · adj_factor",
+    source="equity price_adj_daily · adj_factor · trading_calendar",
     readers=ALL_ENGINES)
 
 FI_FLOWS = TableContract(
@@ -394,6 +400,9 @@ class FactorInputs:
 class EngineResult:
     scores: list[dict[str, object]]
     indicators: list[dict[str, object]] = field(default_factory=list)   # INDICATOR_COLUMNS
+    # 판 manifest 의 spec 요약에 그대로 얹는 엔진 기록(예: scope 의 `adj_jump_masked` — T-9). 점수가
+    # 아니라 MG2(결정성) 대조에 들어가지 않는다
+    meta: Mapping[str, object] = field(default_factory=dict)
 
 
 class Engine(Protocol):

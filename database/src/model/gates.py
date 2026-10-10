@@ -22,6 +22,8 @@
                  아침판과 장 마감 판을 섞지 않는다, PR-6)과 종합점수 Spearman·
                  상위 30 겹침을 기록만 한다. Spearman < 0.8(또는 셀 수 없음)이면 상태 `warn`
                  — 판은 올린다.
+  SKIP 판정    — 허용표(`stage/skip_allow.py`, K1-7a) 밖 SKIP 은 MG0~MG4 면 FAIL,
+                 기록형 MG5 면 `warn`.
 """
 from __future__ import annotations
 
@@ -32,6 +34,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from stage import skip_allow
 from stage.gates import GateResult, GateStatus
 
 from model.contracts import (
@@ -49,6 +52,8 @@ MIN_PRICES_ON_D = 2000       # MG4 — v3 `V3_MIN_DAILY_PRICES_THRESHOLD`(v2 가
 SPEARMAN_WARN = 0.8          # MG5 — 이 값 미만이면 warn
 TOP_N = 30                   # MG5 — 상위 겹침 크기(주간 후보 수)
 WARN = "warn"                # MG5 의 기록 상태(GateStatus 에는 없다 — PASS + metrics.warn)
+# 기록형 게이트 — 허용표(`stage/skip_allow.py`) 밖 SKIP 이어도 FAIL 이 아니라 경고만 남긴다(K1-7a)
+RECORD_ONLY = frozenset({"MG5"})
 SCORE_MIN, SCORE_MAX = 0.0, 100.0
 # v3 `score_history` 에만 있고 v3 엔진이 채우지 않는 6열(`engines/v3_zscore.py` dict.fromkeys)
 V3_ALWAYS_NULL = ("growth_score", "sentiment_score", "volatility_score", "size_score",
@@ -362,7 +367,11 @@ _AFTER_SCHEMA: tuple[tuple[str, Callable[[GateContext], GateResult]], ...] = (
 
 
 def run_all(ctx: GateContext) -> list[GateResult]:
-    """GATE_ORDER 순서. MG0 FAIL 이면 MG4 만 돌고 나머지는 `skip(upstream_failed)`."""
+    """GATE_ORDER 순서. MG0 FAIL 이면 MG4 만 돌고 나머지는 `skip(upstream_failed)`.
+
+    허용표(`stage/skip_allow.py`) 밖 SKIP 은 폐기형이면 FAIL, 기록형(`RECORD_ONLY`)이면
+    경고다(K1-7a).
+    """
     out = [mg0_schema(ctx)]
     schema_ok = out[0].status is not GateStatus.FAIL
     for name, gate in _AFTER_SCHEMA:
@@ -370,7 +379,8 @@ def run_all(ctx: GateContext) -> list[GateResult]:
             out.append(gate(ctx))
         else:
             out.append(GateResult(name, GateStatus.SKIP, "upstream_failed — MG0", {}))
-    return out
+    return [skip_allow.judge("model", g, table=ctx.spec.spec_id, record_only=RECORD_ONLY)
+            for g in out]
 
 
 def status_of(g: GateResult) -> str:

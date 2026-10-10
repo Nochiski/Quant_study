@@ -17,14 +17,35 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import build, rules_s01, rules_s02, rules_s18
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG8", "no_baseline",
+             "s18 시드에 겹침 일치율 하한이 없다(운영 값은 baseline_locked 0.99)",
+             "opinion_daily"),
+            ("equity", "EG8", "no_cross_source",
+             "부정 합성 픽스처는 wise·v3 가 같은 (종목, 관측일) 을 갖지 않는다", "opinion_daily"),
+            ("equity", "EG21", "no_baseline",
+             "EG8 겹침 픽스처는 opinion_daily 상수를 하한 하나로 갈아 끼운다", "opinion_daily"),
+            ("equity", "EG21", "no_coverage",
+             "절단본은 base_date 세션이 판정 창(23)에 못 미친다 — 운영 허용표에서는 지웠다(10-10 리뷰)",
+             "opinion_daily")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SEED = Baseline({**load(Path(rules_s01.__file__).parent / "baseline_seed_s01.json").data,

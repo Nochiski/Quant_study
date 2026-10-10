@@ -12,8 +12,10 @@
 --
 -- 인덱스는 v3 것 중 조회 경로에 쓰는 넷만 옮겼다(schema.py:29·49·167·187).
 
--- ── stocks — schema.py:4-14 + migration_sql.py:71(delisted_date, CREATE 에 이미 있어 no-op) ──
--- v3 에서 유일하게 WITHOUT ROWID 가 아닌 표다.
+-- ── stocks — schema.py:4-14 + migration_sql.py:71(delisted_date) ──────────────────────────────
+-- v3 에서 유일하게 WITHOUT ROWID 가 아닌 표다. 지금 schema.py CREATE 에는 delisted_date 가 있지만 실물
+-- quant.db 는 그 전에 만들어져 migration_sql.py:71 ALTER 로 **맨 뒤**(updated_at 다음)에 붙어 있다(로컬
+-- v3 사본 실측, QL-F). 여기 순서는 CREATE 순서 그대로 두고, compat 스키마 검사는 열 이름·타입으로 본다.
 CREATE TABLE IF NOT EXISTS stocks (
     stock_code TEXT(6) PRIMARY KEY,
     stock_name TEXT NOT NULL,

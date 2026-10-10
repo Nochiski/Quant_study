@@ -124,20 +124,28 @@ watchlist`/`holding-review` 일 09:00 · `brief morning`/`lunch`/`close` 07:10·
 `ka10008`(외국인 보유)은 다음 날 07:10 이고(`scripts/daily_build.sh:118`, 결정 7),
 `ka20068`(대차)은 06:00 이다.
 
-| v3 열 | 우리 저녁 T 원천 | 판정 |
-|---|---|---|
-| `daily_prices.open`·`high`·`low` | **없다** — `price_daily.sql` 의 evening 분기가 `NULL AS open_krw, NULL AS high_krw, NULL AS low_krw` 로 명시 고정(원칙 ④). ka10060·ka10014 에 OHL 필드 자체가 없다 | **결측**. 게다가 v3 DDL 이 `open/high/low/close/volume INTEGER NOT NULL`(`backend/db/schema.py:16-27`) 이라 **NULL 을 넣을 수 없다**(§4 DEFECT-C01) |
-| `daily_prices.close` | `price_daily.close` ← ka10060 `cur_prc`(`rules_kiwoom.py:55`) | **있다**. 단 정의가 다르다 — KRX 공식 종가(15:30)가 아니라 **장후 마지막 체결가**(결정 11-(c)) |
-| `daily_prices.volume` | `price_daily.volume_shr` ← ka10060 `acc_trde_prica`. 이름은 "누적거래대금" 이지만 **실측은 거래량(주)** — KRX `ACC_TRDVOL` 과 99.9864% 일치(`rules_kiwoom.py:57-58` 주석) | **있다** (애프터마켓 포함 — KRX 와 같은 정의, 결정 11-(a)) |
-| `daily_prices.amount` (백만원) | **없다**. 저녁 키움 4 TR 어디에도 거래대금 필드가 없다: ka10060 의 `acc_trde_prica` 는 위처럼 거래량이고, ka10014 의 `shrts_trde_prica_krw` 는 **공매도 거래대금만**(`rules_kiwoom.py:104-105`), ka20068 `remn_amt_krw` 는 대차잔고 금액이다 | **결측 · 원장에 대체 필드 없음** |
-| `daily_prices.adj_close` | `price_adj_daily.adj_close` — T 행 존재(전방 조정, `price_adj_daily.sql` 이 evening 행을 그대로 싣는다) | **있다** |
-| `stocks.market_cap` (억원) | `price_daily.mktcap_krw` 는 evening 행에서 **NULL**(`shares_out` NULL). B-24 규칙(T-1 KRX `shares_out` × T 키움 `close`)으로 파생해야 한다 — 플랜 §3-2 가 `src/model/inputs.py` 한 곳에 두기로 한 규칙 | **파생 필요**(규칙은 이미 결정, 구현은 T2.2) |
-| `investor_detail_flows` 13열 | 원장·stage 에는 있다(`stg_flow_daily_kiwoom` T 행). 그런데 equity `flow_daily` 의 격자는 `universe_daily` = `trading_calendar` × `security_span` 이고, `trading_calendar` = `stg_index_daily`(KRX 지수) distinct date 라 **저녁에는 T 가 캘린더에 없다**. 그래서 T 의 ka10060 행은 `flow_daily.sql` 세 번째 분기로 가 `reject_reason='off_grid'`(`_reject/reject_reason=off_grid/`)에 격리된다 | **equity 산출 표에 T 행 없음**. compat 는 stage 직독 또는 `_reject` 읽기가 필요하다 (§6 — 서버 실측 미확인) |
-| `investor_detail_flows` T-1 이전 | `flow_daily` measured 행 | **있다** |
+**QL-D(10-10) 뒤**: compat 은 equity 판의 T 행을 쓰지 않는다. `--basis evening` 의 `daily_prices`·
+`investor_detail_flows` T 행은 원장 두 개(① `postclose.db` 15:41~16:00 `price_valid='1'` → ② `kiwoom.db`
+21:05 T 행)에서 만든다(`src/compat/t_rows.py`). 아래 '판정' 열은 equity 판 기준(원래 근거), 'QL-D 뒤' 열이
+v3 에 들어가는 값이다. 서버 재생(T=10-08, 21:05 경로만 — 장 마감 원장이 없던 날)은 v3 10-08 사본과 종가
+2,529/2,529·수급 12열 2,532/2,532 일치, 거래량 19종목 차이, compat 에만 74종목(신규 스팩 T-25 등)이었다.
+
+| v3 열 | 우리 저녁 T 원천 | 판정 | QL-D 뒤 |
+|---|---|---|---|
+| `daily_prices.open`·`high`·`low` | **없다** — `price_daily.sql` 의 evening 분기가 `NULL AS open_krw, NULL AS high_krw, NULL AS low_krw` 로 명시 고정(원칙 ④). ka10060·ka10014 에 OHL 필드 자체가 없다 | **결측**. 게다가 v3 DDL 이 `open/high/low/close/volume INTEGER NOT NULL`(`backend/db/schema.py:16-27`) 이라 **NULL 을 넣을 수 없다**(§4 DEFECT-C01) | 종가로 채운다(T-32 = D2-9 (c)). 다음 날 아침 KRX 행으로 날짜 단위 교체 |
+| `daily_prices.close` | `price_daily.close` ← ka10060 `cur_prc`(`rules_kiwoom.py:55`) | **있다**. 단 정의가 다르다 — KRX 공식 종가(15:30)가 아니라 **장후 마지막 체결가**(결정 11-(c)) | postclose 행 = KRX 공식 종가(정규장, T-33). 16:00 을 넘겨 21:05 원장으로 채운 종목만 장후 마지막 체결가 |
+| `daily_prices.volume` | `price_daily.volume_shr` ← ka10060 `acc_trde_prica`. 이름은 "누적거래대금" 이지만 **실측은 거래량(주)** — KRX `ACC_TRDVOL` 과 99.9864% 일치(`rules_kiwoom.py:57-58` 주석) | **있다** (애프터마켓 포함 — KRX 와 같은 정의, 결정 11-(a)) | postclose 행 = 16:00 전까지(애프터마켓 미포함), 21:05 원장 행 = 애프터마켓 포함 |
+| `daily_prices.amount` (백만원) | **없다**. 저녁 키움 4 TR 어디에도 거래대금 필드가 없다: ka10060 의 `acc_trde_prica` 는 위처럼 거래량이고, ka10014 의 `shrts_trde_prica_krw` 는 **공매도 거래대금만**(`rules_kiwoom.py:104-105`), ka20068 `remn_amt_krw` 는 대차잔고 금액이다 | **결측 · 원장에 대체 필드 없음** | 종가 × 거래량 ÷ 1e6 근사(T-32). 오차는 KRX 행으로만 쟀다(§4-2) — **21:05 원장 행(장후 체결가 × 애프터마켓 포함 거래량)의 오차는 미실측**(§6-2) |
+| `daily_prices.adj_close` | `price_adj_daily.adj_close` — T 행 존재(전방 조정, `price_adj_daily.sql` 이 evening 행을 그대로 싣는다) | **있다** | T 종가 × D' 누적계수. 그날 기준가 ≠ D' KRX 종가(T-6 첫 조건)면 NULL. v3 소급 조정 값과의 차이는 QL-E |
+| `stocks.market_cap` (억원) | `price_daily.mktcap_krw` 는 evening 행에서 **NULL**(`shares_out` NULL). B-24 규칙(T-1 KRX `shares_out` × T 키움 `close`)으로 파생해야 한다 — 플랜 §3-2 가 `src/model/inputs.py` 한 곳에 두기로 한 규칙 | **파생 필요**(규칙은 이미 결정, 구현은 T2.2) | QL-D 범위 밖 — D' 값 그대로 |
+| `investor_detail_flows` 13열 | 원장·stage 에는 있다(`stg_flow_daily_kiwoom` T 행). 그런데 equity `flow_daily` 의 격자는 `universe_daily` = `trading_calendar` × `security_span` 이고, `trading_calendar` = `stg_index_daily`(KRX 지수) distinct date 라 **저녁에는 T 가 캘린더에 없다**. 그래서 T 의 ka10060 행은 `flow_daily.sql` 세 번째 분기로 가 `reject_reason='off_grid'`(`_reject/reject_reason=off_grid/`)에 격리된다 | **equity 산출 표에 T 행 없음** | 원장에서 12열(내외국인 `natfor` 는 자리 없음). 가격과 같은 종목 원천 |
+| `investor_detail_flows` T-1 이전 | `flow_daily` measured 행 | **있다** | 그대로 |
 
 요약: 저녁 잠정판에서 v3 `daily_prices` 의 **open·high·low·amount 가 결측이고 원장에 대체
 필드가 없다**. `close`·`volume`·`adj_close` 는 있다. `stocks.market_cap` 은 파생 가능.
 `investor_detail_flows` 의 T 행은 원장에는 있으나 equity 표에는 없다.
+**QL-D 뒤**: 두 표의 T 행은 원장에서 만들어 v3 에 들어간다 — OHL·amount 는 T-32 채움, 종가는 KRX 공식
+종가(postclose)가 기본이다. 새 원천에 그날 행이 0 이면 날짜 단위 교체를 하지 않고 멈춘다.
 
 ### 3-1. 07:00 브리핑이 T 행을 쓰는가 — 쓴다
 
@@ -254,6 +262,12 @@ NULL → 섹션 조용히 사라짐" 은 그대로 남는다 — 권장하지 �
 
 **사용자 결정이 필요한 것**: (a)/(b)/(c)/(d) 중 무엇을, 언제.
 
+**구현 상태(10-10, 컷오버 QL-D · T-32 확정)**: v3-merge v2 D2-9 권고대로 (c) 를 넣었다 — 장 마감 판
+T 행은 OHL = 종가, amount = 종가 × 거래량이다(`src/compat/t_rows.py`). v3 에서 "같은
+상황"은 확인되지 않는다: 로컬 v3 사본(2025-01-02~2026-08-07, 971,487행)에 O/H/L = 0 행이 0건이고(필드가 비면
+0 을 넣는 `collectors._int(None)` 경로가 실제로 타지 않았다), 거래 없는 날 행은 open=high=low=close 다(32,277행).
+D2-9 (a)(저녁 ka10081)가 들어오면 `t_rows.py` 의 채움만 바꾼다.
+
 ---
 
 ## 5. GAP-2 — `stock_info`(외인지분·베타·52주)
@@ -308,14 +322,13 @@ WHERE s.stock_code = ?
 
 정적으로 확인하지 못했고 서버·실행 없이는 못 닫는 것들. 추측으로 채우지 않는다.
 
-1. **저녁 `flow_daily` 의 T 행 격리** — §3 의 판정은 `flow_daily.sql` + `trading_calendar.sql`
-   + EG17 상한 규칙에서 유도한 것이다. 로컬 equity 사본에는 `e_` 판 파티션이 없어
-   (`~/quant-ledger/data/equity/flow_daily/` 에 `v=m_...` 하나뿐) 실제 `_reject/
-   reject_reason=off_grid/` 행수를 세지 못했다. **서버에서 저녁 판 1개로 확인해야 한다**
-   (`n_reject`·`reject_by_reason` 은 MANIFEST 에 있다).
-2. **저녁 키움 행의 거래대금 근사 오차** — §4-2 실측은 KRX 행(15:30 종가)으로 잰 것이다.
-   저녁 ka10060 종가(장후 마지막 체결가)와 애프터마켓 포함 거래량 조합에서의 오차는 미실측.
-   D-8 을 (c) 로 정한다면 컷오버 전 3일 프로브로 재야 한다.
+1. ~~**저녁 `flow_daily` 의 T 행 격리**~~ — QL-D 뒤 compat 은 T 수급 행을 equity `flow_daily` 가
+   아니라 원장에서 만든다(§3). 격리 행수 확인은 compat 에 더는 필요 없다(equity 층 자체의 사실로만 남는다).
+2. **21:05 원장 행의 거래대금 근사 오차** — §4-2 실측은 KRX 행(15:30 종가)으로 잰 것이다. QL-D 뒤
+   v3 에 근사 `amount` 가 들어가는 행은 postclose 행(KRX 공식 종가 × 16:00 전 거래량)과 21:05 원장 행(장후
+   마지막 체결가 × 애프터마켓 포함 거래량) 둘이고, **둘 다 오차 미실측**이다(T-32 로 근사는 확정). 그림자
+   3일에 v3 ka10081 `trde_prica` 와 대조해 잰다. 다음 날 아침 KRX 실값으로 바뀌므로 영향은 그날 저녁~
+   다음 날 아침(07:00 브리핑 포함)이다.
 3. **unitelegram `data/watchlist_peak_card.py` 가 `daily_prices` 의 어느 열을 읽는지** —
    서버 파일이라 스냅샷에 없다. `amount`·`open/high/low` 를 읽으면 §4 의 피해 표가 늘어난다.
 4. **unitelegram `kael_sync.py` 의 rsync 시각** — `quant.db` 사본을 언제 가져가는지 모른다.
@@ -338,3 +351,51 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
 
 - **신규 스팩 — compat 에만 있다(v3 누락 교정)**: v3 `stocks` 에는 옛 숫자코드 스팩 117개뿐이고, 그 뒤 상장한 스팩(2024-02-01~2026-09-22 상장, 숫자·영숫자 코드 모두)이 없다. compat 은 `sec_type='spac'` 이면 싣는다(10-01·06·07·08 재생에서 71종목, 10-10 판정).
 - **점수 종목 수 — compat 이 적다(유니버스 결정, T-17)**: 하루 행이 `score_history` 1,329 → 593(scope@1.0), `score_history_v2` 2,526 → 625(v2_percentrank@1.0)로 준다. 10-05 '추정치 보유 종목만' 결정을 받아들인 것이다(QL-C). 점수는 유니버스 안 표준화라 공통 종목도 값 크기가 다르다. 그래서 공통 종목끼리 순위(Spearman)로 대조한다. `score_history.val_ev_ebitda` 는 늘 NULL 이다. scope 가 EV/EBITDA 를 밸류에 쓰지 않기 때문이고, v3 도 거의 비어 있었다.
+- **장 마감 판 T 행 — 원천·채움이 다르다(QL-D, N-42 Q3, T-32·T-33)**: `--basis evening` 의 `daily_prices`·`investor_detail_flows` T 행은 원장에서 만든다(규칙 정본 `src/compat/t_rows.py`). 종목마다 원천이 하나이고(두 표가 같은 선택) `_compat_meta.tables` 의 표별 `t_rows` 에 남는다(`postclose`·`kiwoom_2105` 수, 21:05 원장으로 대체한 종목, 행 없는 종목과 그 비율 `missing_ratio` — 기록형).
+  - `postclose` 행(15:41~16:00, `price_valid='1'` 이고 종가·거래량이 있는 행): 종가 = KRX 공식 종가(정규장, T-33), 거래량·수급 = 16:00 전까지. v3(20:05 ka10081·ka10059)는 애프터마켓까지 포함한 값이라 다르다.
+  - `kiwoom_2105` 행(21:05 키움 원장 — 16:00 을 넘긴 종목, `price_valid` 가 '0'·NULL 이거나 가격 칸이 빈 종목): 지금 v3 와 같은 뜻(애프터마켓 포함)이다. 과거 T 재생(장 마감 원장이 없던 날)은 전 종목이 이 경로다.
+  - `open`·`high`·`low` = 종가, `amount` = 종가 × 거래량 ÷ 1e6(근사 — 오차는 §6-2 미실측), `adj_close` = T 종가 × D' 누적계수(전방 조정이라 값은 v3 와 다르고 비율만 같다 — QL-E). 그날 기준가 ≠ D' 종가(T-6 첫 조건, `daily.kw_daily.ka10060_base_price_differs_sql`)면 `adj_close` NULL.
+  - 대상 = D' 유니버스 이월이라 T 당일 신규 상장 종목은 없다(v3 는 그날 ka10099 에 있으면 싣는다).
+  - 다음 날 아침 `--basis morning --date T` 가 T 행을 날짜 단위로 KRX 행으로 바꾼다 — 아침 KRX 에 없는 종목의 저녁 행도 지워진다. 아침 판에 그날 행이 0 이면 지우지 않고 멈춘다. 반대로 대상에 이번(T, 장 마감)보다 나중 반영 기록(T-35 순서 — 날짜가 뒤이거나 같은 날 아침, 판정은 `v3_post._newer` 한 곳)이 있으면 장 마감 판이 멈춘다(재생은 `--allow-older`).
+
+---
+
+## 8. v3 quant.db 제자리 반영 — `scripts/v3_post.sh` (QL-F)
+
+compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 커밋하고(반영 도중 소비자가 일부 표만 바뀐 상태를 읽는다, G9) 필수 열이 빈 행을 5% 까지 건너뛴다(G11). 제자리 반영은 아래 순서로만 한다. 범위·게이트의 정본은 `src/compat/v3_post.py` 머리 주석이다.
+
+1. **스테이징**: v3 quant.db 를 sqlite 온라인 백업으로 임시 파일에 뜬다(`python -m compat stage`). 본 파일은 읽기 전용으로 연다. 스테이징 경로가 본 파일(링크·-wal/-shm 포함)과 같은 파일이면 거부한다(뜨기 전에 그 경로를 지우므로). 디스크 여유가 본 파일 크기 × 2 보다 작으면 뜨지 않고, 백업이 실패하면 부분 사본을 지운다.
+2. **반영 표**(T-34, `python -m compat v3-tables`): 기본 9표. `--basis morning` 은 본 파일 `_compat_meta` 에 같은 D 의 장 마감(evening) ok 반영 기록이 있으면 점수 두 표를 뺀 7표다. 저녁에 보낸 엑셀과 v3 DB 점수가 같고, 가격 재반영이 아침 모델 판 실패에 묶이지 않는다. 저녁 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻).
+3. **compat export `--in-place --tables <반영 표>`** 를 스테이징에 돌린다(QL-B 가드 — `stocks.market_cap` 은 `all`). 장 마감 판(`--basis evening`)이면 T 행 원장 두 개(`QL_POSTCLOSE_DB` 기본 `data/raw/postclose.db` · `QL_KIWOOM_DB` 기본 `data/raw/kiwoom.db`)를 넘기고, `--allow-older` 는 apply 와 함께 export 에도 넘긴다(compat 장 마감 판이 같은 T-35 순서로 먼저 멈춘다 — QL-D).
+4. **게이트**(COMMIT 전):
+   - 이번 compat 기록 1행·status ok·날짜·basis 일치·창 끝 = D
+   - 순서(T-35): 본 파일에 이번보다 (날짜, basis — 같은 날은 아침 > 장 마감) 가 큰 ok 반영 기록이 없다. 재생은 `--allow-older`. **새 정지 조건이라 사용자 확인 대기**
+   - 반영 표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1)
+   - 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`tables.daily_prices.metrics.n_on_date`). 스테이징은 본 파일 사본이라 'D 행 있음' 만으로는 옛 행에도 참이 된다. 비율 하한은 두지 않는다
+   - 표마다 반영 범위 행 > 0(점수 두 표는 `score_date = D`)
+5. **한 트랜잭션 반영**: `ATTACH` → `BEGIN IMMEDIATE` → 표별 범위 `DELETE` → 스테이징 범위 `INSERT` → `_compat_meta` 기록 1행 → `COMMIT`.
+
+| 표 | 반영 범위(= compat 이 쓴 범위) |
+|---|---|
+| `daily_prices` · `investor_detail_flows` | `trade_date` ∈ 이번 기록의 창 `[from_date, to_date]` |
+| `score_history` · `score_history_v2` | `score_date = D` |
+| `stocks` · `consensus_revision_daily` · `consensus_revision_compare` · `consensus_annual` · `financial_summary` | 표 전체(날짜 창 없는 as-of 스냅샷 — 스테이징이 같은 락 안의 사본이라 compat 이 안 건드린 행은 같은 값으로 다시 들어간다) |
+
+compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~4단계만, 본 파일 무변경, 스테이징 기본 경로 `staging_<basis>_shadow.db`)는 락을 잡지 않는다. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
+
+`daily_prices` 의 O/H/L 이 비고 종가가 있는 krx 행은 비어 있는 칸을 종가로 채운다(정지 참고가 행 · 정규장 체결 없이 시간외만 있던 날 — 서버 `--full` 게이트 실측 145210 2025-03-21, v3 사본 같은 행 O=H=L=C). 근거는 `mappings.py` `_REF_FILL` 주석.
+
+### 8-1. v3 쪽 변경 목록(V3-A~E — 컷오버 날, 백업 뒤, N-42 Q4)
+
+줄 번호는 v3 로컬 사본(25dd56b, 08-30) 기준이다. 서버 파일과 다를 수 있으니 적용 직전에 grep 으로 다시 찾는다.
+
+| ID | 파일·위치 | 변경 |
+|---|---|---|
+| V3-A | `scripts/job_runner.py:54`(`CHAINS["daily_all"]` 의 닫는 `],` 뒤) | 체인 둘을 더한다(T-31). `"daily_post": [("holiday_gate", 1, 30, True), ("export_scores", 1, 120, False)]` · `"daily_insight": [("holiday_gate", 1, 30, True), ("insight_pipeline", 1, 300, False), ("wiki_ingest", 1, 3600, False), ("wiki_lint", 1, 3600, False)]`. `calendar_refresh` 는 넣지 않는다(KIS 를 불러 `.kis_holidays.json` 을 덮는다 — 휴장 파일 정본은 `daily.calendar_export`, T-24). `--chain` 선택지는 CHAINS 키에서 자동으로 생긴다. 백업 `job_runner.py.bak.<ts>` |
+| V3-A | 서버 crontab | `daily_insight` 를 지금 daily_all 자리(`5 11 * * 1-5` UTC = 20:05 KST)에 둔다. 락은 **별도 파일** `/tmp/kael_v3_daily_insight.lock` 이다 — 공유 락 `/tmp/kael_v3_daily_all.lock` 에 `flock -n` 을 쓰면 v3_post 가 락을 쥔 순간 insight 가 조용히 건너뛰어져 T-27 장애(그날 국면·다음 날 07:00 브리핑 지수 없음)가 재발한다. `daily_post` 는 크론에 두지 않는다 — v3_post.sh 가 `--v3-post-cmd` 로 부른다(v3 crontab 줄에서 flock 만 뺀 형태: `cd "$HOME/kael-system-v3" && source "$HOME/.local/bin/env" && export $(grep -v "^#" .env | xargs) && PYTHONPATH=. .venv/bin/python scripts/job_runner.py --chain daily_post`) |
+| V3-B | 서버 crontab daily_all 줄(`5 11 * * 1-5 … flock -n /tmp/kael_v3_daily_all.lock … --chain daily_all` — 로컬 사본 `scripts/cron_schedule.sh:3` 에 같은 줄) | 줄을 지운다(`crontab -l` 백업). 퀀트 단계(`job_runner.py:46-49` daily_pipeline·adj_prices·scoring·scoring_v2)만 빼고 남기면 export(텔레그램)가 daily_post 와 두 번 돈다. `CHAINS["daily_all"]` 코드는 되돌리기용으로 둔다(되돌리기 = 줄 복원) |
+| V3-C | quant-ledger `scripts/v3_post.sh` | 첫 반영(K3-2): QL-I 백업 2벌 뒤 `scripts/v3_post.sh --date <D> --basis morning --v3-db "$HOME/kael-system-v3/data/quant.db" --full` 1회(`QL_V3_LOCK_FILE` 은 비운다). 아래 운영 메모 |
+| V3-D | 서버 crontab v3 휴장 쓰기 2줄 | `refresh_year_holidays`(`0 20 29 12 *`)·`monthly_holiday_review`(`0 0 1 * *`) — v3 `docs/system-guide/survey/08-ops.md:136·157`. QL-Q 연결과 같은 날 끈다(T-24) |
+| V3-E | unitelegram `sources/kael_db.py` `get_signal_insights`(서버 전용 파일 — 줄은 서버에서 확인) | 점수 조회에 `score_date = (SELECT max(score_date) FROM score_history)` 조건(T-17 — 593 유니버스 밖 종목의 옛 v3 행이 종목별 최신 행으로 잡히지 않게) |
+
+**V3-C 운영 메모.** `--full`(730일 창)은 서버에서 v3 쓰기 락을 30초 남짓 쥔다(서버 10-08 사본 `--full` 은 게이트 실패까지 전체 27.6초라 이동 자체는 아직 서버 미실측 — 로컬 465MB 사본에서 730일 이동 트랜잭션 21.8초). v3 연결의 busy_timeout 은 5초다(`backend/db/connection.py`). 그래서 v3 가 quant.db 에 쓰는 시각 — 07:00·12:15·15:35 브리핑(job_runner 가 `pipeline_runs` 를 쓴다)과 20:30 리서치·21:00 브로커 리서치 수집 — 을 피해 돌린다. 매일 증분 반영(14일 창)은 서버 실측 7.5초다. 서버 v3 프로세스는 UTC 다(v3 로그 시각이 크론 11:05 UTC 와 같아 `.env` 에 TZ 지정이 없다고 판단) — v3 의 `date.today()` 는 KST 09:00 전까지 전날이다.

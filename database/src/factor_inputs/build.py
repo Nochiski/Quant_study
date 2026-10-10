@@ -38,8 +38,12 @@
   (a) T 가 `daily.calendar` 거래일이 아니다(휴장·주말) 또는 판정 달력을 못 읽는다
   (b) MD-SEAM — `daily.calendar` 의 T 직전 거래일 D' ≠ 연구 판 trading_calendar 의 마지막 날
       (연구 판이 D' 까지 오지 않았거나, 이미 T 를 담고 있다)
-T 행(가격·수정주가·수급)은 아직 얹지 않는다 — 자리(`queries.t_prices_sql`)만 있고 채우는 것은
-PR-5 다.
+T 행(가격·수정주가·수급, PR-5): 장 마감 stage 루트(`--postclose-stage-root`, 기본
+`<QL_HOME>/data/model_db/stage` — T-29)의 `stg_flow_postclose_kiwoom` current 판을 읽는다(판이 없으면
+rc 2). 읽은 판 id 는 판 manifest `postclose_builds`·`tables.<표>.inputs` 에 남는다. T-6 당일 기업행위
+보류와 후보 커버리지 게이트 FG5 의 대상(직전 판 모델 후보 — `--candidates-root` 연구 fi 루트의
+`_runs/<D'>_morning.json`, 수집기 `daily.postclose.fi_candidates` 와 같은 함수)도 여기서 읽는다.
+후보를 못 읽으면 FG5 가 FAIL 이다(판 실패 rc 1).
 """
 from __future__ import annotations
 
@@ -79,7 +83,12 @@ from . import gates, queries
 # 1.6.0(2026-10-10, 컷오버 H1-4 · T-9): fi_adj_prices.adj_jump_ok 열 — 가격 축 미해결 사건 적용일 앞뒤
 # 6세션 안에서 수익률이 그날 가격제한폭을 넘는 점프 행마다 뒤집히는 계단 표식(scope 모멘텀·20일 변동성
 # 결측 판정의 재료)
-RULES_VERSION = "fi1.6.0"
+# 1.7.0(2026-10-10, 컷오버 PR-5 · T-2·T-6·N-42 Q4): 장 마감 판 T 행 얹기 — 가격(장 마감 stage 의 쓸 수
+# 있는 행만, 'postclose' — compat 과 같은 술어)·수정주가(T 행을 원천에 넣어 연구 판 행과 같은 SQL —
+# adj_ok·adj_jump_ok 포함)·수급(price_valid 무관), 연구 부분 D' 자르기, T-6 당일 기업행위 보류
+# (eligible=false · corp_action_pending — 기준가 술어는 compat 과 공유), FG5 후보 커버리지 게이트.
+# 아침판 SQL 은 그대로
+RULES_VERSION = "fi1.7.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
@@ -117,11 +126,21 @@ class FactorInputsError(Exception):
     """입력·판·인자 오류 — 판을 만들지 않고 멈춘다(CLI rc 2)."""
 
 
+def _home() -> Path:
+    return Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
+
+
 def research_root() -> Path:
     """연구(아침 확정판) fi 루트 `<QL_HOME>/data/factor_inputs`(없으면 저장소 `database/` 아래) —
-    CLI `--root` 기본값. 장 마감 판은 여기에 짓지 않는다(T-3, `build`)."""
-    base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
-    return base / "data" / "factor_inputs"
+    CLI `--root` 기본값. 장 마감 판은 여기에 짓지 않는다(T-3, `build`). 장 마감 판 후보 커버리지의
+    직전 판 모델 후보도 여기서 읽는다(CLI `--candidates-root` 기본값)."""
+    return _home() / "data" / "factor_inputs"
+
+
+def default_postclose_stage_root() -> Path:
+    """장 마감 stage 루트 `<QL_HOME>/data/model_db/stage`(T-29) — `stg_flow_postclose_kiwoom` 이 사는
+    곳. CLI `--postclose-stage-root` 기본값."""
+    return _home() / "data" / "model_db" / "stage"
 
 
 def _credit_lag_sessions() -> int:
@@ -275,6 +294,18 @@ def _check_seam(con: duckdb.DuckDBPyConnection, t: date, dprime: date,
             f"— 연구 판이 D' 에서 끝나야 한다(이력={origin})")
 
 
+def _t_candidates(fi_root: Path, dprime: date) -> tuple[tuple[str, ...] | None, str]:
+    """FG5 대상 = 직전 판 모델 후보 — 수집기 순서 ① 과 같은 함수(`daily.postclose.fi_candidates`, P4).
+    (종목, 읽은 fi 판 id). 못 읽으면 (None, 사유) — 판정은 FG5 가 한다(FAIL)."""
+    # 수집기 모듈은 compat·kw_daily 를 함께 끌어온다 — 장 마감 판에서만 읽는다
+    from daily import postclose
+    try:
+        tickers, bid = postclose.fi_candidates(Path(fi_root), dprime.strftime("%Y%m%d"))
+    except postclose.BOARD_ERRORS as e:
+        return None, f"{type(e).__name__}: {e} (candidates_root={fi_root})"
+    return tuple(tickers), bid
+
+
 def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
     """fi 는 아침 확정판(`m_`)과 수동 재빌드(`b_`) equity 판만 읽는다(compat R5 와 같다). 장 마감
     판도 직전 거래일 확정판을 `--builds-from` 으로 고정해 읽으므로(T-2 — 고정 없음은 `build` 가
@@ -348,11 +379,15 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
           grace_days: int | None = None, min_eligible: int = MIN_ELIGIBLE_DEFAULT,
           golden_path: Path | None = GOLDEN_PATH, keep: int = KEEP_DEFAULT,
           build_id: str | None = None, builds_from: Path | None = None,
-          calendar_dir: Path | None = None) -> BuildResult:
+          calendar_dir: Path | None = None, postclose_stage_root: Path | None = None,
+          candidates_root: Path | None = None) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 factor_inputs 8표를 굽는다. 게이트 FAIL 은 결과 status 로,
     입력·인자 오류는 `FactorInputsError` 로 낸다. `builds_from`(인계 이력 JSON)을 주면 원천 판을
     current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정'). `calendar_dir` 는
-    장 마감 판의 거래일 판정 달력(`daily.calendar` 연도 파일 폴더, 없으면 그 모듈 기본 경로)."""
+    장 마감 판의 거래일 판정 달력(`daily.calendar` 연도 파일 폴더, 없으면 그 모듈 기본 경로).
+    장 마감 판만 읽는 것: `postclose_stage_root`(T 행 stage 루트, 없으면
+    `default_postclose_stage_root()`) · `candidates_root`(직전 판 모델 후보를 읽을 연구 fi 루트,
+    없으면 `research_root()`)."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
@@ -387,6 +422,12 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     _check_chain(equity_builds)
 
     root = Path(root)
+    # 장 마감 판 T 행 원천·FG5 대상(진입 조건 뒤 con 안에서 연다)
+    post_root: Path | None = None
+    post_builds: dict[str, str] = {}
+    t_cands: tuple[str, ...] | None = None
+    t_from = ""
+    t_src_max: str | None = None
     tmp_root = root / "_tmp" / bid
     if tmp_root.exists():
         shutil.rmtree(tmp_root)
@@ -402,6 +443,15 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         _check_columns(con, equity_builds)
         if dprime is not None:
             _check_seam(con, d, dprime, builds_from)
+            # T 행 원천 — 진입 조건(달력·이음매) 뒤에 연다. 장 마감 stage 판은 고정하지 않는다(T 의 판)
+            post_root = Path(postclose_stage_root or default_postclose_stage_root())
+            post_builds, post_exprs = _resolve(post_root, (queries.T_SOURCE_TABLE,), stage=True)
+            for name, expr in post_exprs.items():
+                con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+            # FG5 기록 — 그 판이 T 수집 뒤에 섰는지(max(date) = T) 사람이 바로 본다
+            got = _one(con, f'SELECT max(date) FROM "{queries.T_SOURCE_TABLE}"')
+            t_src_max = None if got is None else str(got)
+            t_cands, t_from = _t_candidates(Path(candidates_root or research_root()), dprime)
         asof = d_iso if dprime is None else dprime.isoformat()
         con.execute(queries.calendar_sql(d_iso if evening else None))
         if not _one(con, f"SELECT count(*) FROM _calx WHERE date = DATE '{d_iso}'"):
@@ -428,6 +478,8 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
 
         tables: dict[str, dict[str, object]] = {}
         table_inputs: dict[str, dict[str, str]] = {}
+        sources = queries.table_sources(basis)
+        read_builds = {**stage_builds, **post_builds, **equity_builds}
         for name in FI_TABLES:
             out = tmp_root / name / "part0.parquet"
             out.parent.mkdir(parents=True)
@@ -435,15 +487,17 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             con.execute(f'CREATE OR REPLACE TEMP VIEW "g_{name}" AS '
                         f"SELECT * FROM read_parquet('{out}', hive_partitioning=false)")
             n = int(str(_one(con, f'SELECT count(*) FROM "g_{name}"')))
-            table_inputs[name] = {s: (equity_builds.get(s) or stage_builds[s])
-                                  for s in queries.TABLE_SOURCES[name]}
+            table_inputs[name] = {s: read_builds[s] for s in sources[name]}
             tables[name] = {"n_rows": n, "content_hash": _content_hash(con, out),
                             "inputs": table_inputs[name], "window": FI_TABLES[name].window}
 
         ctx = gates.GateContext(
             con=con, date=d_iso, basis=basis, price_from=p.price_from, flow_from=p.flow_from,
             rule=rule, min_eligible=min_eligible, dstar=None if dstar is None else str(dstar),
-            collection_lag_sessions=lag, golden=gates.load_golden(golden_path), asof=asof)
+            collection_lag_sessions=lag, golden=gates.load_golden(golden_path), asof=asof,
+            t_candidates=t_cands, t_candidates_from=t_from,
+            t_source_build=post_builds.get(queries.T_SOURCE_TABLE, ""),
+            t_source_max_date=t_src_max)
         results = gates.run_all(ctx)
     except BaseException:
         shutil.rmtree(tmp_root, ignore_errors=True)
@@ -475,6 +529,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         "builds_from": None if builds_from is None else str(Path(builds_from).resolve()),
         "builds_from_date": None if pin is None else pin.date,
         "equity_builds": equity_builds, "stage_builds": stage_builds,
+        # 장 마감 판 T 행 원천(T-29) — 연구 stage 판 목록과 루트가 달라 따로 적는다(아침판 None)
+        "postclose_stage_root": None if post_root is None else str(post_root.resolve()),
+        "postclose_builds": post_builds or None,
         "window": {"price_from": p.price_from, "flow_from": p.flow_from, "to": d_iso,
                    "credit_lag_sessions": p.credit_lag},
         "universe_rule": asdict(rule),

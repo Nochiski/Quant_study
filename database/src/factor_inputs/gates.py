@@ -12,13 +12,20 @@
                  WISE 연간 손익(op·ni, cF3002) 비율은 기록형(배포 묶음 7 D7-8 — 폐기형 승격은
                  `FIN_IS_COVERAGE_ENFORCED`).
   FG2 T 행 출처 — 아침판: fi_prices.price_source · fi_universe.mktcap_basis 가 전부 'krx'.
+                 장 마감 판(evening): T 전 행 'krx' · T 행 `T_PRICE_SOURCE` · 시총 기준 전부
+                 `T_MKTCAP_BASIS`(컷오버 PR-4). T 행 수는 기록만 한다(얹기·커버리지는 PR-5).
   FG3 시총     — market_cap = round(shares × close(D) / 1e8) 정수 억원(상대 1e-6 — compat
                  `stocks.market_cap` 과 같은 반올림, 오케스트레이터 09-29). KRX 시총 대조는 기록형.
+                 장 마감 판은 shares = D' 주식수, close = T 행 종가이고 KRX 대조는 대상이 없다.
   FG4 골든     — `fixtures/golden.json` 의 손계산 값과 정확히 같다. 창 밖·유니버스 밖 항목은 세지
                  않고, 셀 수 있는 항목이 0 이면 `skip(no_fixtures)`.
   FG-fresh     — 신선도 상태 수를 기록하고, lapsed·none 은 eligible 이 아니며(require_estimates),
-                 grace 나이 ≤ G, 마지막 수집일 D* 가 D 보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지
-                 않는다(수집 중단 허용치는 유예 G 와 따로 둔다).
+                 grace 나이 ≤ G, 마지막 수집일 D* 가 예상 수집일(asof — 아침판 D, 장 마감 판 D')
+                 보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지 않는다(수집 중단 허용치는 유예 G 와
+                 따로 둔다).
+
+정보 시점 `asof`(컷오버 PR-4): 재무·연간 컨센서스의 available/fetched 상한은 asof 로 본다(아침판은
+D 그대로). 신용 available_date 는 세션 축이라 D(장 마감 판 T)로 본다.
 """
 from __future__ import annotations
 
@@ -31,7 +38,13 @@ import duckdb
 from model.contracts import FI_TABLES, UniverseRule
 from stage.gates import GateResult, GateStatus
 
-from .queries import FIN_ANNUAL_PERIODS, FIN_QUARTERS, FLOW_SESSIONS
+from .queries import (
+    FIN_ANNUAL_PERIODS,
+    FIN_QUARTERS,
+    FLOW_SESSIONS,
+    T_MKTCAP_BASIS,
+    T_PRICE_SOURCE,
+)
 
 GATE_ORDER = ("FG0", "FG1", "FG2", "FG3", "FG4", "FG-fresh")
 MKTCAP_REL_TOL = 1e-6
@@ -60,9 +73,14 @@ class GateContext:
     rule: UniverseRule
     min_eligible: int
     dstar: str | None                       # 마지막 수집일 D*
-    collection_lag_sessions: int | None     # (D*, D] 거래일 수
+    collection_lag_sessions: int | None     # (D*, asof] 거래일 수
     golden: list[dict[str, object]] = field(default_factory=list)
     view: Callable[[str], str] = lambda t: f"g_{t}"
+    asof: str = ""                          # 정보 시점 — 비우면 date. 장 마감 판은 D'
+
+    def __post_init__(self) -> None:
+        if not self.asof:
+            self.asof = self.date
 
 
 def _scalar(con: duckdb.DuckDBPyConnection, sql: str) -> object:
@@ -147,7 +165,7 @@ def fg1_rows(ctx: GateContext) -> GateResult:
         con, f"SELECT count(*) FROM (SELECT ticker FROM {fin} WHERE period_type = 'quarter' "
              f"GROUP BY ticker HAVING count(*) > {FIN_QUARTERS})")
     viol["fi_fin_summary.available_after_d"] = _count(
-        con, f"SELECT count(*) FROM {fin} WHERE available_date > DATE '{ctx.date}'")
+        con, f"SELECT count(*) FROM {fin} WHERE available_date > DATE '{ctx.asof}'")
     viol["fi_consensus.horizon_outside_vocab"] = _count(
         con, f"SELECT count(*) FROM {v('fi_consensus')} "
              "WHERE horizon NOT IN ('cur', '1w', '1m', '3m') OR horizon IS NULL")
@@ -156,7 +174,7 @@ def fg1_rows(ctx: GateContext) -> GateResult:
     viol["fi_consensus_annual.outside_window_or_vocab"] = _count(
         con, f"SELECT count(*) FROM {v('fi_consensus_annual')} WHERE period NOT IN "
              f"({ca_periods}) OR data_type NOT IN ('E', 'A') OR data_type IS NULL "
-             f"OR fetched_date > DATE '{ctx.date}'")
+             f"OR fetched_date > DATE '{ctx.asof}'")
     n_fin = _count(
         con, f"SELECT count(*) FROM {uni} u WHERE u.eligible AND EXISTS ("
              f"SELECT 1 FROM {fin} f WHERE f.ticker = u.ticker AND f.period_type = 'annual' "
@@ -186,7 +204,26 @@ def fg1_rows(ctx: GateContext) -> GateResult:
 
 # ── FG2 ──────────────────────────────────────────────────────────────────────
 def fg2_overlay(ctx: GateContext) -> GateResult:
-    """아침판 — T 행을 포함한 전 행이 KRX 다. 저녁 오버레이(W1-a)가 붙으면 여기서 출처를 가른다."""
+    """아침판 — T 행을 포함한 전 행이 KRX 다. 장 마감 판(evening) — T 전 행은 연구 판 그대로 KRX,
+    T 행은 장 마감 원천(`T_PRICE_SOURCE`), 시총 기준은 전 종목 `T_MKTCAP_BASIS`(D' 주식수 × T
+    종가). T 행 수(`n_t_price_rows`)는 기록만 한다 — 얹기·커버리지 판정은 PR-5."""
+    if ctx.basis == "evening":
+        prices, uni = ctx.view("fi_prices"), ctx.view("fi_universe")
+        on_t = f"date = DATE '{ctx.date}'"
+        ev = {
+            "fi_prices.non_krx_before_t": _count(
+                ctx.con, f"SELECT count(*) FROM {prices} WHERE date < DATE '{ctx.date}' "
+                         "AND price_source IS DISTINCT FROM 'krx'"),
+            "fi_prices.t_row_not_overlay": _count(
+                ctx.con, f"SELECT count(*) FROM {prices} WHERE {on_t} "
+                         f"AND price_source IS DISTINCT FROM '{T_PRICE_SOURCE}'"),
+            "fi_universe.mktcap_basis_not_t1": _count(
+                ctx.con, f"SELECT count(*) FROM {uni} "
+                         f"WHERE mktcap_basis IS DISTINCT FROM '{T_MKTCAP_BASIS}'"),
+        }
+        n_t = _count(ctx.con, f"SELECT count(*) FROM {prices} WHERE {on_t}")
+        return _result("FG2", ev, {"basis": ctx.basis, "n_t_price_rows": n_t},
+                       "장 마감 판 — T 전 행 KRX · T 행 장 마감 원천 · 시총 D' 주식수 × T 종가")
     viol = {
         "fi_prices.non_krx": _count(ctx.con, f"SELECT count(*) FROM {ctx.view('fi_prices')} "
                                              "WHERE price_source IS DISTINCT FROM 'krx'"),
@@ -199,7 +236,11 @@ def fg2_overlay(ctx: GateContext) -> GateResult:
 
 # ── FG3 ──────────────────────────────────────────────────────────────────────
 def fg3_mktcap(ctx: GateContext) -> GateResult:
+    """시총 규칙. 장 마감 판은 shares = D' 주식수(universe 이월), close = fi_prices 의 T 행 종가라
+    같은 식이 'D' 주식수 × T 종가' 를 잰다. 시총 기준 열은 basis 에 맞는 값이어야 한다."""
     v = ctx.view
+    evening = ctx.basis == "evening"
+    want_basis = T_MKTCAP_BASIS if evening else "krx"
     base = (f"FROM {v('fi_universe')} u LEFT JOIN {v('fi_prices')} p "
             f"ON p.ticker = u.ticker AND p.date = DATE '{ctx.date}'")
     # 기대값을 DECIMAL 곱으로 다시 잰다(DOUBLE 곱은 2^53 을 넘는 시총에서 1원 단위가 흔들린다).
@@ -213,13 +254,15 @@ def fg3_mktcap(ctx: GateContext) -> GateResult:
         "market_cap_missing": _count(
             ctx.con, f"SELECT count(*) {base} WHERE u.market_cap IS NULL "
                      "AND u.shares IS NOT NULL AND p.close IS NOT NULL"),
-        "non_krx_basis": _count(ctx.con, f"SELECT count(*) FROM {v('fi_universe')} "
-                                         "WHERE mktcap_basis <> 'krx'"),
+        ("non_t1_basis" if evening else "non_krx_basis"): _count(
+            ctx.con, f"SELECT count(*) FROM {v('fi_universe')} "
+                     f"WHERE mktcap_basis <> '{want_basis}'"),
     }
     # 기록형 — KRX 가 준 시총(price_daily.mktcap_krw, compat 가 쓰는 값)을 같은 규칙으로 반올림한
     # 값과
     # 다른 종목 수. 원천 사실이라 FAIL 로 묶지 않지만, 0 이 아니면 compat 과 시총이 갈린 것이다.
-    n_krx_diff = _count(
+    # 장 마감 판은 KRX 의 T 시총이 아직 없어 대조 대상이 없다 — 0(일치)으로 보이지 않게 NULL.
+    n_krx_diff = None if evening else _count(
         ctx.con, f"SELECT count(*) FROM {v('fi_universe')} u JOIN price_daily k "
                  f"ON k.ticker = u.ticker AND k.date = DATE '{ctx.date}' AND k.basis = 'krx' "
                  f"WHERE u.market_cap IS NOT NULL AND k.mktcap_krw IS NOT NULL AND "
@@ -305,6 +348,7 @@ def fg_fresh(ctx: GateContext) -> GateResult:
         "n_lapsed_dropped": n_lapsed_dropped, "grace_days": g,
         "last_collection_date": ctx.dstar,
         "collection_lag_sessions": ctx.collection_lag_sessions,
+        "collection_expected_date": ctx.asof,
         "collection_lag_max": COLLECTION_LAG_MAX}
     viol = {
         "state_outside_vocab": _count(

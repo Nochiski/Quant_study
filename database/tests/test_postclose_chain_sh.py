@@ -4,7 +4,9 @@
 
 HOME 을 임시 폴더로 바꿔 `~/quant-ledger` 에 진짜 스크립트를 두고 돌린다(test_build_chain_sh 와 같은 방식).
 대역 python 은 `-m <모듈>` 만 가로채 calls.txt 에 '모듈 인자…' 한 줄을 적고 `RC_<모듈(점→밑줄)>` 로 끝낸다
-(fi 는 판 manifest `_runs/<T>_evening.json` 을, 대조는 `COMPARE_VERDICT` 가 있으면 `compare/<T>.json` 을 쓴다).
+(fi 는 판 manifest `_runs/<T>_evening.json` 을, 대조는 `COMPARE_VERDICT` 가 있으면 `compare/<T>.json` 을 쓴다.
+`compat` 하위 명령은 실물 v3_post.sh 계약 테스트용 — v3-tables 는 표 목록을 찍고 export 는 `--builds-from` 파일이
+없으면 rc 2).
 `-c`·heredoc(거래일·직전 거래일·세션 예외표·고정 판·런 로그·스냅샷 GC)은 진짜 python·진짜 `src/` 로 넘긴다 — 판정
 달력은 임시 루트의 `data/calendar/kis_holidays_2026.json`, 인계 이력은 `data/deliver/history/`, 런 로그는
 `data/raw/daily_run.db` 다. `scripts/v3_post.sh` 대역은 인자를 적고 `--builds-from` 파일이 없으면 rc 2(compat 이
@@ -52,6 +54,24 @@ if [ "$1" = "-m" ]; then
     mkdir -p "$QL_HOME/data/model_db/compare"
     printf '{"date": "%s-%s-%s", "verdict": "%s", "rc": %s}' "${d:0:4}" "${d:4:2}" "${d:6:2}" \\
       "$COMPARE_VERDICT" "${RC_daily_board_compare:-0}" > "$QL_HOME/data/model_db/compare/$d.json"
+  fi
+  if [ "$1" = compat ]; then
+    case "$2" in
+      v3-tables)
+        case " $* " in
+          *" --no-scores "*) echo "daily_prices,investor_detail_flows,stocks,consensus_annual" ;;
+          *) echo "daily_prices,investor_detail_flows,stocks,consensus_annual,score_history,score_history_v2" ;;
+        esac ;;
+      export)
+        prev=""
+        for a in "$@"; do
+          if [ "$prev" = "--builds-from" ] && [ ! -f "$a" ]; then
+            echo "compat 실패: 인계 이력(--builds-from)이 없다: $a" >&2; exit 2
+          fi
+          prev="$a"
+        done ;;
+    esac
+    exit 0
   fi
   var="RC_${1//./_}"
   exit "${!var:-0}"
@@ -610,6 +630,76 @@ def test_followup_sources_match_the_runlog_registry(tmp_path: Path) -> None:
     b = _chain(tmp_path, "morning", "--date", T)
     assert a.rc == 0 and b.rc == 0, a.out + b.out
     assert {s for s, _ in a.runs + b.runs} == set(runlog.POSTCLOSE_FOLLOWUPS)
+
+
+# ── 실물 v3_post.sh 와의 인자 계약(QL-F2 · COMPAT_LAYER §8 호출 표) ─────────────────────
+
+def _real_v3(home: Path, conf: str = SHADOW_CONF) -> Path:
+    """대역 대신 실물 scripts/v3_post.sh — compat 하위 명령만 대역 python 이 받는다."""
+    root = _root(home, conf=conf)
+    shutil.copy(SCRIPTS / "v3_post.sh", root / "scripts/v3_post.sh")
+    return root
+
+
+def _compat(r: Run, sub: str) -> list[str]:
+    return [c for c in r.calls if c.startswith(f"compat {sub} ")]
+
+
+@pytest.mark.parametrize("conf", [SHADOW_CONF, LIVE_CONF], ids=["shadow", "live"])
+def test_real_v3_post_accepts_all_three_call_shapes(tmp_path: Path, conf: str) -> None:
+    """체인의 세 호출(⑥ · refill · 아침)이 실물 v3_post.sh 인자 계약을 통과한다(rc 5 인자 오류 없음).
+    refill 은 `--no-scores` 가 v3-tables·apply 까지 가고 스테이징 기본 경로가 `_noscores` 를 붙인다. 셋 다
+    `--builds-from` 이 compat export 에 닿는다. 제자리(live)는 ⑥ 에만 daily_post 를 부른다."""
+    root = _real_v3(tmp_path, conf)
+    _seed(root, T, "postclose_model", "ok")
+    env = {"QL_V3_LOCK_FILE": str(tmp_path / "v3.lock"), "QL_V3_POST_TODAY": T}
+    shadow = "_shadow" if conf == SHADOW_CONF else ""
+    close = _chain(tmp_path, "close", "--date", T, **env)
+    assert close.rc == 0, close.out + close.log
+    assert close.runs[-1] == ("postclose_v3", "ok")
+    (stage,) = _compat(close, "stage")
+    assert stage.endswith(f"--out data/_v3_post/staging_evening{shadow}.db")
+    (export,) = _compat(close, "export")
+    assert f"--builds-from {H_PREV}" in export and "--model-root data/model_db/model" in export
+    assert "score_history" in export
+    (root / "calls.txt").unlink()
+    refill = _chain(tmp_path, "refill", "--date", T, **env)
+    assert refill.rc == 0, refill.out + refill.log
+    assert refill.runs == [("postclose_v3_refill", "ok")]
+    (stage,) = _compat(refill, "stage")
+    assert stage.endswith(f"--out data/_v3_post/staging_evening_noscores{shadow}.db")
+    (tables,) = _compat(refill, "v3-tables")
+    assert tables.endswith("--no-scores")
+    (export,) = _compat(refill, "export")
+    assert f"--builds-from {H_PREV}" in export and "score_history" not in export
+    (apply,) = _compat(refill, "apply")
+    assert apply.endswith("--no-scores")
+    (root / "calls.txt").unlink()
+    morning = _chain(tmp_path, "morning", "--date", T, **env)
+    assert morning.rc == 0, morning.out + morning.log
+    assert morning.runs[0] == ("postclose_v3_morning", "ok")
+    (export,) = _compat(morning, "export")
+    assert f"--builds-from {H_T}" in export and "--basis morning" in export
+    assert "--no-scores" not in " ".join(_compat(morning, "v3-tables"))
+    post = [n for n in morning.notify if "daily_post" in n]     # notify.txt 는 세 실행에 걸쳐 쌓인다
+    if conf == LIVE_CONF:      # 제자리 — ⑥ 만 daily_post('echo post')를 불렀다
+        assert any("v3_post 20261008 evening 반영 완료|daily_post 완료" in n for n in post)
+        assert sum("daily_post 완료" in n for n in post) == 1
+    else:
+        assert all("daily_post 완료" not in n for n in post)
+
+
+@pytest.mark.parametrize("mode", ["refill", "morning"])
+def test_real_v3_post_without_its_pinned_board_is_crit(tmp_path: Path, mode: str) -> None:
+    """MAJOR-1 — 고정 판(인계 이력)이 없으면 compat export 가 멈추고 실물 v3_post 가 rc 2·crit, 체인도 crit."""
+    root = _real_v3(tmp_path)
+    (root / (H_PREV if mode == "refill" else H_T)).unlink()
+    r = _chain(tmp_path, mode, "--date", T, QL_V3_LOCK_FILE=str(tmp_path / "v3.lock"))
+    assert r.rc == 2, r.out + r.log
+    crit = r.titles("crit")
+    assert any(t.startswith(f"v3_post {T} ") and "rc=2" in t for t in crit), crit
+    assert any(t.startswith(("장 마감 재반영 실패", "장 마감 판 아침 잇기 실패")) for t in crit), crit
+    assert not _compat(r, "apply")
 
 
 def test_shipped_config_is_off_and_shadow(tmp_path: Path) -> None:

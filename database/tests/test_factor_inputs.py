@@ -30,6 +30,7 @@ import inspect
 import itertools
 import json
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,12 +39,13 @@ from typing import cast
 import duckdb
 import pytest
 from conftest import _make_stage_tree, allow_skips
+from daily import kw_daily
 from deliver.excel_weekly import _returns
 from deliver.view import DayView
 from factor_inputs import FactorInputsError, build
 from factor_inputs.__main__ import main as cli_main
 from model.build import load_inputs
-from model.contracts import FI_TABLES, UniverseRule
+from model.contracts import FI_TABLES, FLOW_SUBJECTS, UniverseRule
 from model.engines import v4_rank
 from stage import manifest
 
@@ -561,11 +563,13 @@ def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
                wise_q: list[dict] | None = None,
                holding: frozenset[str] = frozenset(),
                fin_wise: list[dict] | None = None,
-               leak: dt.date | None = None) -> tuple[Path, Path]:
+               leak: dt.date | None = None,
+               extra: dict[str, list[dict]] | None = None) -> tuple[Path, Path]:
     """(equity_root, stage_root). `drop_fetch_after` 를 주면 그날 뒤 WISE 수집이 없다(수집 정지).
     `wise_q` 를 주면 stg_fin_wise_q 판을 만든다(없으면 선택 원천 'absent' → 분기는 DART).
     `fin_wise` 를 주면 stg_fin_wise 를 그 행으로 바꾼다(기본 `_fin_wise()`).
-    `leak` 를 주면 그날 날짜의 정보 행(`_leak_rows`)을 원천에 더한다."""
+    `leak` 를 주면 그날 날짜의 정보 행(`_leak_rows`)을 원천에 더한다.
+    `extra` 를 주면 equity 표(이름 → 행)에 그 행을 더한다."""
     eq, st = base / "eq", base / "st"
     equity = {"trading_calendar": _calendar(), "universe_daily": _universe(),
               "security": _security(), "price_daily": _prices(), "price_adj_daily": _adj(),
@@ -578,8 +582,10 @@ def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
     if wise_q is not None:
         stage["stg_fin_wise_q"] = wise_q
     if leak is not None:
-        for table, extra in _leak_rows(leak).items():
-            (equity if table in equity else stage).setdefault(table, []).extend(extra)
+        for table, rows in _leak_rows(leak).items():
+            (equity if table in equity else stage).setdefault(table, []).extend(rows)
+    for table, rows in (extra or {}).items():
+        equity[table] = equity[table] + rows
     for table, rows in equity.items():
         _make_stage_tree(eq, table, rows, build_id=eq_build)
     for table, rows in stage.items():
@@ -1680,26 +1686,106 @@ def _cal_dir(base: Path, holidays: set[dt.date] = HOLIDAYS) -> Path:
     return d
 
 
+# ── 장 마감 판 T 행(컷오버 PR-5) — 15:41 원장(postclose.db) → stage → fi ─────────────────
+# 원장은 수집기 실물 함수(`daily.postclose.connect`·`insert_first`)로, stage 표는 stage 빌더 실물
+# (`stage.build.build_table` + 규칙 `stg_flow_postclose_kiwoom`)로 짓는다 — 스키마를 손으로 베끼지 않는다.
+# D' = D 의 KRX 종가 = CLOSE + 400(PRICE_DAYS 다섯째 날). 키움 기준가 = |cur_prc| − pred_pre(I-1).
+PC_TABLE = "stg_flow_postclose_kiwoom"
+X2, X3, X4 = EXTRA[2:]
+D_CLOSE = {t: CLOSE[t] + 400 for t in SPEC if t != K}       # K 는 D 행이 없다
+
+
+def _moved(t: str, move: int) -> tuple[int, int]:
+    """(T 종가, pred_pre) — 기준가 = D' KRX 종가, T 종가 = 기준가 + move."""
+    return D_CLOSE[t] + move, move
+
+
+# 종목 → (T 종가, pred_pre(None = 값 없음), price_valid(None = NULL)). L 은 원장에 T 행이 없다.
+PC_PLAN: dict[str, tuple[int, int | None, bool | None]] = {
+    A: (*_moved(A, 500), True), B: (*_moved(B, -300), True), E: (*_moved(E, 500), True),
+    C: (D_CLOSE[C] // 2 + 100, 100, True),             # 기준가 15,200 ≠ D' 30,400(분할 모양)
+    H: (2 * D_CLOSE[H], D_CLOSE[H], True),             # 기준가 = D' 인데 +100% — 제한폭 밖
+    P: (D_CLOSE[P] + 500, None, True),                 # pred_pre 없음 — 기준가를 못 잰다
+    Q: (*_moved(Q, 500), True), X2: (*_moved(X2, 500), True),
+    X3: _moved(X3, -(D_CLOSE[X3] * 3 // 10)) + (True,),     # 정확히 −30%(하한가)
+    X4: _moved(X4, D_CLOSE[X4] * 3 // 10) + (True,),        # 정확히 +30%(상한가)
+    K: (7_000, 100, True),                             # D' KRX 종가 없음(후보 아님)
+    DD: (*_moved(DD, 500), False),                     # 16:00 뒤 응답 — 가격 무효·수급만
+    F: (*_moved(F, 500), None),                        # price_valid NULL — 가격 없음·수급만
+    G: (*_moved(G, 500), True),                        # 우선주(sec_type) · 수급 전 주체 NULL
+    ETF: (*_moved(ETF, 500), True),                    # 층 밖
+}
+PC_NO_FLOWS = (G,)
+# C 의 가격 축 미해결 사건 — 적용일 T, D' 에 이미 공개. T 행 adj_ok 는 D' 값을 잇는다(다시 세지 않는다)
+C_T_EVENT = {"ticker": C, "effective_date": T, "event_id": "c_t", "apply_date": T,
+             "factor_ok": False, "available_date": D, "price_resolution": "unresolved"}
+
+
+def _pc_flows(t: str) -> dict[str, str | None]:
+    """키움 투자자 13열(백만원 원문). 개인만 순매도."""
+    return {k: None if t in PC_NO_FLOWS else str((-1 if i == 0 else 1) * (IDX[t] * 10 + i))
+            for i, k in enumerate(kw_daily.FLOW_KEYS)}
+
+
+def pc_flows_mn(t: str) -> tuple[int, ...]:
+    """fi_flows 12주체(백만원) 기대값 — `_pc_flows` 의 앞 12열."""
+    return tuple((-1 if i == 0 else 1) * (IDX[t] * 10 + i) for i in range(12))
+
+
+def make_postclose_stage(base: Path,
+                         plan: dict[str, tuple[int, int | None, bool | None]] = PC_PLAN) -> Path:
+    """장 마감 원장 → stage `stg_flow_postclose_kiwoom` 판. 돌려주는 값은 장 마감 stage 루트
+    (운영의 `data/model_db/stage` 자리 — T-29)."""
+    from daily import postclose
+    from stage import build as stage_build
+    from stage import rules as stage_rules
+    from stage import snapshot
+    db = base / "raw" / "postclose.db"
+    con = postclose.connect(db)
+    try:
+        for t, (close, pred, valid) in plan.items():
+            row = {"dt": T_S, "cur_prc": f"{'-' if (pred or 0) < 0 else '+'}{close}",
+                   "pred_pre": None if pred is None else f"{pred:+d}",
+                   "acc_trde_prica": str(1_000 * IDX[t]), **_pc_flows(t)}
+            postclose.insert_first(con, postclose.COLS, t, [row],
+                                   collected_at="2026-09-29T06:41:05",
+                                   fetched_at="2026-09-29T06:41:00", price_valid=bool(valid))
+        nulls = [t for t, (_, _, v) in plan.items() if v is None]
+        con.executemany(f'UPDATE "{postclose.TABLE}" SET price_valid = NULL WHERE ticker = ?',
+                        [(t,) for t in nulls])
+        con.commit()
+    finally:
+        con.close()
+    snap = snapshot.make_snapshot({"postclose": db}, base / "snapshots", snapshot_id="snap_pc")
+    root = base / "model_db" / "stage"
+    r = stage_build.build_table(stage_rules.RULES[PC_TABLE], snap, root)
+    assert r.ok, [(g.name, g.detail) for g in r.gates]
+    return root
+
+
 @pytest.fixture(scope="module")
 def evening(tmp_path_factory) -> SimpleNamespace:
     """T 날짜 정보 행이 섞인 원천(`leak=T`) 위에 아침판(D)과 장 마감 판(T)을 같은 판으로 짓는다.
-    T 행(가격·수급)은 아직 없다 — 얹기는 PR-5 라 eligible 0 이고 하한도 0 으로 둔다."""
+    장 마감 판의 T 행은 장 마감 stage 판(`PC_PLAN`)에서, 후보는 아침판(D' = D)의 eligible 에서 읽는다."""
     base = tmp_path_factory.mktemp("fi_evening")
-    eq, st = make_roots(base / "src", leak=T)
+    eq, st = make_roots(base / "src", leak=T, extra={"adj_factor": [C_T_EVENT]})
     cal = _cal_dir(base)
+    pc = make_postclose_stage(base / "pc")
     # leak 이 WISE 분기(stg_fin_wise_q) 판을 만들므로 인계 이력에도 그 판을 싣는다
     hist = _history(base / f"{D_S}_morning.json",
                     stage_builds={**{t: ST_BUILD for t in ST_TABLES}, "stg_fin_wise_q": ST_BUILD})
     m = build(D_S, "morning", base / "fi_m", st, eq, grace_days=5, min_eligible=5,
               golden_path=None)
-    e = build(T_S, "evening", base / "fi_e", st, eq, grace_days=5, min_eligible=0,
-              golden_path=None, builds_from=hist, calendar_dir=cal)
-    return SimpleNamespace(st=st, m=m, e=e, out_m=base / "fi_m", out_e=base / "fi_e")
+    e = build(T_S, "evening", base / "fi_e", st, eq, grace_days=5, min_eligible=5,
+              golden_path=None, builds_from=hist, calendar_dir=cal, postclose_stage_root=pc,
+              candidates_root=base / "fi_m")
+    return SimpleNamespace(st=st, eq=eq, pc=pc, hist=hist, cal=cal, m=m, e=e,
+                           out_m=base / "fi_m", out_e=base / "fi_e")
 
 
 def test_evening_build_commits_on_the_pinned_d_prime_build(evening) -> None:
-    """`--basis evening` 이 열린다 — 판 id e_, `_runs/<T>_evening.json`, asof = D'. T 행은 아직
-    없어(PR-5) 가격 T 행 0 · eligible 0 으로 통과한다."""
+    """`--basis evening` 이 열린다 — 판 id e_, `_runs/<T>_evening.json`, asof = D'. T 가격 행은 장 마감
+    원천의 price_valid 행 중 층 종목 12 개, eligible 은 T 가격이 있고 당일 기업행위 보류가 아닌 7 종목."""
     e = evening.e
     assert evening.m.ok
     assert e.ok, [(g.name, g.detail) for g in e.gates if g.status.value == "fail"]
@@ -1712,42 +1798,41 @@ def test_evening_build_commits_on_the_pinned_d_prime_build(evening) -> None:
     assert all(manifest.load(evening.out_e / t / "MANIFEST.json").current_build == e.build_id
                for t in FI_TABLES)
     by_name = {g.name: g for g in e.gates}
-    assert by_name["FG2"].metrics["n_t_price_rows"] == 0
-    assert by_name["FG1"].metrics["n_eligible"] == 0
+    assert by_name["FG2"].metrics["n_t_price_rows"] == 12
+    assert by_name["FG1"].metrics["n_eligible"] == 7
+    assert by_name["FG5"].status.value == "pass"
     # 아침판은 asof = D(그대로)
     assert json.loads(evening.m.run_manifest.read_text(encoding="utf-8"))["asof"] == "2026-09-28"
 
 
 def test_evening_sessions_are_the_research_calendar_plus_t(evening) -> None:
-    """세션 = 연구 판 trading_calendar(D' 까지) ∪ {T}. 수급 60 세션 창이 T 에서 끝나고(T 행 자리 —
-    지금은 59 세션), 신용잔고는 T 에 실입수되는 행(T 의 3 세션 전)까지 싣는다(아침판 D' 는 한 세션
-    앞까지)."""
+    """세션 = 연구 판 trading_calendar(D' 까지) ∪ {T}. 수급 60 세션 창이 T 에서 끝나고(D' 까지 59 세션 +
+    장 마감 T 행), 신용잔고는 T 에 실입수되는 행(T 의 3 세션 전)까지 싣는다(아침판 D' 는 한 세션
+    앞까지 · 신용은 T 행이 없다 — 랙 3)."""
     sessions = [*SESSIONS, T]
     run = json.loads(evening.e.run_manifest.read_text(encoding="utf-8"))
     assert run["window"]["to"] == "2026-09-29"
     assert run["window"]["flow_from"] == sessions[-60].isoformat()
     flows = q(evening.out_e, "fi_flows", f"SELECT date FROM t WHERE ticker = '{A}' ORDER BY date")
-    assert [r[0] for r in flows] == sessions[-60:-1]
+    assert [r[0] for r in flows] == sessions[-60:]
     credit = q(evening.out_e, "fi_credit", "SELECT date, available_date FROM t "
                                            f"WHERE ticker = '{A}' ORDER BY date")
     assert credit[-1] == (sessions[-4], T)
     assert q(evening.out_m, "fi_credit", "SELECT max(date), max(available_date) FROM t "
                                          f"WHERE ticker = '{A}'") == [(SESSIONS[-4], D)]
-    assert q(evening.out_e, "fi_prices", "SELECT max(date) FROM t") == [(D,)]
+    assert q(evening.out_e, "fi_prices", "SELECT max(date) FROM t") == [(T,)]
 
 
 def test_evening_universe_carries_the_d_prime_rows(evening) -> None:
     """유니버스 T 행 = universe_daily D' 행 이월. 종목·속성·신선도는 아침판(D')과 같고 다른 것은
-    date = T · 시총 기준 't1_shares_x_t_close' · T 종가가 없어 시총 NULL·no_price 뿐이다. 원천의
-    T 날짜 행(A 상장폐지·관리·정지, 추정기관 A 99·F 77, WICS G30, 감사 의견거절, 지연 제출)은 읽지
-    않는다. filing_late 는 `test_evening_filing_deadline_between_d_prime_and_t_is_not_late`."""
+    date = T · 시총 기준 't1_shares_x_t_close' · 시총·eligible(T 종가 · 당일 기업행위 —
+    `test_evening_market_cap_is_d_prime_shares_times_t_close`·`test_evening_corp_action_pending…`)
+    뿐이다. 원천의 T 날짜 행(A 상장폐지·관리·정지, 추정기관 A 99·F 77, WICS G30, 감사 의견거절,
+    지연 제출)은 읽지 않는다. filing_late 는 `test_evening_filing_deadline_between_d_prime_and_t_is_not_late`."""
     sql = f"SELECT {UNI_CARRIED} FROM t ORDER BY ticker"
     assert q(evening.out_e, "fi_universe", sql) == q(evening.out_m, "fi_universe", sql)
-    assert q(evening.out_e, "fi_universe", "SELECT DISTINCT date, market_cap, mktcap_basis, "
-                                           "eligible FROM t") == [
-        (T, None, "t1_shares_x_t_close", False)]
-    reasons = dict(q(evening.out_e, "fi_universe", "SELECT ticker, exclude_reason FROM t"))
-    assert reasons == {**{t: "no_price" for t in LAYER}, G: "sec_type"}
+    assert q(evening.out_e, "fi_universe", "SELECT DISTINCT date, mktcap_basis FROM t") == [
+        (T, "t1_shares_x_t_close")]
     assert q(evening.out_e, "fi_universe", "SELECT shares, n_analysts, sector_l1, is_admin, "
                                            "is_halted, audit_adverse, filing_late FROM t "
                                            f"WHERE ticker = '{A}'") == [
@@ -1756,12 +1841,19 @@ def test_evening_universe_carries_the_d_prime_rows(evening) -> None:
 
 def test_evening_cuts_wise_dart_and_events_at_d_prime(evening) -> None:
     """WISE·DART·재무·기업행위 입력은 fetched/available ≤ D' 로 자른다 — 원천에 T 날짜 행이 있어도
-    과거 행 표 5개가 아침판(D')과 바이트까지 같다. T 까지 읽으면 바뀌는 것: A·B 컨센서스(09-29 판) ·
-    A 연간 재무(+50 판)·반기 재제출 · A 배당(2,000원) · A 분기(WISE 분기 판으로 넘어감) ·
-    E 4Q 파생값 · A adj_ok(09-21 미해결 사건). WISE 신선도 기준일도 D'."""
+    과거 행 표 5개가 아침판(D')과 바이트까지 같다(가격·수정주가는 PR-5 가 얹은 T 행을 뺀 D' 까지의
+    행 전부). T 까지 읽으면 바뀌는 것: A·B 컨센서스(09-29 판) · A 연간 재무(+50 판)·반기 재제출 ·
+    A 배당(2,000원) · A 분기(WISE 분기 판으로 넘어감) · E 4Q 파생값 · A adj_ok(09-21 미해결 사건).
+    WISE 신선도 기준일도 D'."""
     path = evening.st / "stg_consensus_annual" / f"v={ST_BUILD}" / "part0.parquet"
     assert duckdb.sql(f"SELECT max(fetched_date) FROM read_parquet('{path}')").fetchone() == (T,)
     for t in INFO_TABLES:
+        if t in ("fi_prices", "fi_adj_prices"):
+            before_t = f"SELECT * FROM t WHERE date < DATE '{T}' ORDER BY ticker, date"
+            m_rows = q(evening.out_m, t, "SELECT * FROM t ORDER BY ticker, date")
+            assert q(evening.out_e, t, before_t) == m_rows, t
+            assert len(m_rows) > 0
+            continue
         assert evening.e.tables[t]["content_hash"] == evening.m.tables[t]["content_hash"], t
     assert q(evening.out_e, "fi_consensus", "SELECT ticker, max(fetched_date) FROM t WHERE ticker "
                                             f"IN ('{A}', '{B}') GROUP BY 1 ORDER BY 1") == [
@@ -1799,7 +1891,7 @@ def test_evening_filing_deadline_between_d_prime_and_t_is_not_late(evening) -> N
     (dt.date(2026, 9, 23), 1, True),     # D' 수집 하나 빠짐 — 허용치 1(N-12)
     (dt.date(2026, 9, 22), 2, False),    # 두 거래일 빠짐 → FAIL
 ])
-def test_evening_wise_lag_counts_to_the_expected_collection_day(tmp_path: Path,
+def test_evening_wise_lag_counts_to_the_expected_collection_day(tmp_path: Path, evening,
                                                                 stop: dt.date | None, lag: int,
                                                                 passed: bool) -> None:
     """N-12 허용치 1거래일을 예상 수집일 D' 기준으로 잰다. T 기준으로 재면 정상 상태가 lag 1 이
@@ -1807,7 +1899,8 @@ def test_evening_wise_lag_counts_to_the_expected_collection_day(tmp_path: Path,
     eq, st = make_roots(tmp_path / "src", drop_fetch_after=stop)
     res = build(T_S, "evening", tmp_path / "fi", st, eq, grace_days=5, min_eligible=0,
                 golden_path=None, builds_from=_history(tmp_path / f"{D_S}_morning.json"),
-                calendar_dir=_cal_dir(tmp_path))
+                calendar_dir=_cal_dir(tmp_path), postclose_stage_root=evening.pc,
+                candidates_root=evening.out_m)
     fresh = next(g for g in res.gates if g.name == "FG-fresh")
     assert fresh.metrics["collection_lag_sessions"] == lag
     assert fresh.metrics["collection_expected_date"] == "2026-09-28"
@@ -1872,40 +1965,293 @@ def test_evening_refuses_the_research_root(roots, tmp_path: Path, capsys, monkey
     assert not (ql / "data" / "factor_inputs").exists()
 
 
-def test_evening_market_cap_is_d_prime_shares_times_t_close(roots) -> None:
-    """시총 자리(B-24): T 행을 얹는 쪽(PR-5)이 `_t_prices` 에 T 종가를 채우면 market_cap =
-    round(D' 주식수 × T 종가 / 1e8) · 't1_shares_x_t_close' 이고 T 종가가 있는 종목만 no_price 를
-    벗는다. D' 주식수나 T 종가가 없으면 시총은 NULL(P1). PR-4 의 `_t_prices` 는 빈 표다."""
+def test_evening_market_cap_is_d_prime_shares_times_t_close(evening) -> None:
+    """시총 자리(B-24): market_cap = round(D' 주식수 × T 종가 / 1e8) · 't1_shares_x_t_close'. T 종가는
+    장 마감 원천의 price_valid 행에서 온다. D' 주식수나 T 종가가 없으면 시총은 NULL(P1) — K 는 D' KRX
+    행이 없고, DD(가격 무효)·F(price_valid NULL)·L(원장 행 없음)은 T 종가가 없다."""
+    got = {r[0]: r[1:] for r in q(evening.out_e, "fi_universe",
+                                  "SELECT ticker, shares, market_cap, mktcap_basis FROM t")}
+    t_close_a = PC_PLAN[A][0]
+    assert got[A] == (SHARES[A], float(round(SHARES[A] * t_close_a / 1e8)), "t1_shares_x_t_close")
+    assert got[K] == (None, None, "t1_shares_x_t_close")
+    for t in (DD, F, L):
+        assert got[t] == (SHARES[t], None, "t1_shares_x_t_close"), t
+
+
+# ── T 행 얹기(컷오버 PR-5) ─────────────────────────────────────────────────────
+T_PRICED = (A, B, C, E, H, P, Q, X2, X3, X4, K, G)       # price_valid 참 · 층 종목
+
+
+def test_evening_t_price_rows_are_the_valid_postclose_closes(evening) -> None:
+    """fi_prices T 행 = 장 마감 stage 의 T 행 중 `price_valid IS TRUE` 인 층 종목. 출처 'postclose',
+    종가 = |cur_prc|, 거래량 = 수집 시점 누적 거래량, 시·고·저가·거래대금은 원천에 없어 NULL.
+    가격 무효(DD 16:00 뒤 응답)·NULL(F)·원장 행 없음(L)·층 밖(ETF)은 T 가격이 없다."""
+    rows = q(evening.out_e, "fi_prices", "SELECT ticker, open, high, low, close, volume, amount, "
+                                         f"price_source FROM t WHERE date = DATE '{T}' "
+                                         "ORDER BY ticker")
+    assert rows == sorted((t, None, None, None, PC_PLAN[t][0], 1_000 * IDX[t], None, "postclose")
+                          for t in T_PRICED)
+    assert q(evening.out_e, "fi_prices", "SELECT count(*) FROM t WHERE date < DATE "
+                                         f"'{T}' AND price_source <> 'krx'") == [(0,)]
+    run = json.loads(evening.e.run_manifest.read_text(encoding="utf-8"))
+    (bid,) = run["postclose_builds"].values()
+    assert run["postclose_builds"] == {PC_TABLE: bid}
+    assert run["postclose_stage_root"] == str(evening.pc.resolve())
+    for t in ("fi_universe", "fi_prices", "fi_adj_prices", "fi_flows"):
+        assert run["tables"][t]["inputs"][PC_TABLE] == bid, t
+    assert PC_TABLE not in run["tables"]["fi_credit"]["inputs"]
+    assert PC_TABLE not in run["stage_builds"]          # 연구 stage 판 목록과 섞지 않는다
+    fg5 = next(g for g in evening.e.gates if g.name == "FG5")
+    assert (fg5.metrics["t_source_build"], fg5.metrics["t_source_max_date"]) == (bid, "2026-09-29")
+    gap = next(g for g in run["gaps"] if g["table"] == "fi_prices"
+               and g["column"] == "price_source")
+    assert "postclose" in gap["reason"] and "price_valid" in gap["reason"]
+
+
+def test_evening_t_flow_rows_ignore_price_valid(evening) -> None:
+    """fi_flows T 행 = 장 마감 수급 12주체(백만원) — price_valid 와 무관하다(DD·F 도 싣는다). 전 주체
+    NULL(G)·원장 행 없음(L)·층 밖(ETF)은 행이 없다. 신용은 T 행이 없다(실입수 랙)."""
+    got = {r[0]: r[1:] for r in q(
+        evening.out_e, "fi_flows",
+        "SELECT ticker, " + ", ".join(FLOW_SUBJECTS) + f" FROM t WHERE date = DATE '{T}'")}
+    want = sorted(set(T_PRICED) - {G} | {DD, F})
+    assert sorted(got) == want
+    for t in want:
+        assert got[t] == tuple(float(v) for v in pc_flows_mn(t)), t
+    assert q(evening.out_e, "fi_credit", f"SELECT count(*) FROM t WHERE date = DATE '{T}'") == [
+        (0,)]
+
+
+def test_evening_adj_t_row_comes_from_the_same_sql_as_the_research_rows(evening) -> None:
+    """fi_adj_prices T 행은 T 행을 넣은 원천(`_t_adj_src`)에서 연구 판 행과 같은 SQL 로 나온다.
+    adj_close = T 종가 × D' cum_share_factor ÷ D' cum_price_only_factor(equity 수정가와 같은 식),
+    adj_factor·adj_ok 등 표식은 T 에 적용일이 있는 사건이 없으면 D' 행과 같다. C 는 적용일 T 인 가격 축
+    미해결 사건이 D' 에 이미 공개돼 있어 T 행부터 계단(adj_ok False — 다음 날 연구 판 T 행과 같은 판정)
+    이고, T 수익률(−49.7%, 제한폭 밖)이 그 사건의 인접 점프라 adj_jump_ok 도 T 행에서 뒤집힌다 — 점프
+    판정 수익률이 T 행을 본다(세션 축). D' 수정주가 행이 없는 종목(K)은 T 행도 없다. 표식 열이 NULL
+    인 T 행은 없다."""
+    cols = [c.name for c in FI_TABLES["fi_adj_prices"].columns]
+    marks = [c for c in cols if c not in ("ticker", "date", "adj_close")]
+    sel = ", ".join(["ticker", *marks])
+    t_rows = {r[0]: r for r in q(evening.out_e, "fi_adj_prices",
+                                 f"SELECT {sel} FROM t WHERE date = DATE '{T}'")}
+    d_rows = {r[0]: r for r in q(evening.out_e, "fi_adj_prices",
+                                 f"SELECT {sel} FROM t WHERE date = DATE '{D}'")}
+    assert sorted(t_rows) == sorted(set(T_PRICED) - {K})
+    assert all(v is not None for r in t_rows.values() for v in r)
+    for t, row in t_rows.items():
+        if t != C:
+            assert row == d_rows[t], t
+    adj = dict(q(evening.out_e, "fi_adj_prices",
+                 f"SELECT ticker, adj_close FROM t WHERE date = DATE '{T}'"))
+    assert adj[A] == PC_PLAN[A][0] * 2.0                       # cum_share 2.0
+    assert adj[P] == PC_PLAN[P][0] * 1.0 / P_R                 # ⑤ 가격 전용 계수 1.25
+    assert adj[B] == float(PC_PLAN[B][0])
+    ok = dict(q(evening.out_e, "fi_adj_prices",
+                f"SELECT ticker, adj_ok FROM t WHERE date = DATE '{T}'"))
+    assert (ok[A], ok[B], ok[E]) == (True, False, True)        # D' 값 그대로
+    assert (d_rows[C][marks.index("adj_ok") + 1], ok[C]) == (True, False)
+    jump = marks.index("adj_jump_ok") + 1
+    assert (d_rows[C][jump], t_rows[C][jump]) == (True, False)
+    assert all(r[jump] for t, r in t_rows.items() if t != C)
+
+
+def test_evening_corp_action_pending_three_cases(evening) -> None:
+    """T-6: T 가격이 있어도 ① 키움 기준가(|cur_prc| − pred_pre) ≠ D' KRX 종가(C) ② T 종가 / D' 종가 − 1
+    이 ±제한폭(30%) 밖(H) ③ 값 없음 — pred_pre 없음(P)·D' KRX 종가 없음(K) 이면 그날 eligible=false,
+    사유 corp_action_pending. 정확히 ±30%(X3 하한가·X4 상한가)는 보류가 아니다. 사유 순서는
+    no_price 다음 — T 가격이 없는 종목(DD·F·L)은 no_price 다."""
+    reasons = dict(q(evening.out_e, "fi_universe", "SELECT ticker, exclude_reason FROM t"))
+    assert reasons == {A: None, B: None, E: None, Q: None, X2: None, X3: None, X4: None,
+                       C: "corp_action_pending", H: "corp_action_pending",
+                       P: "corp_action_pending", K: "corp_action_pending",
+                       DD: "no_price", F: "no_price", L: "no_price", G: "sec_type"}
+    eligible = {r[0] for r in q(evening.out_e, "fi_universe", "SELECT ticker FROM t WHERE eligible")}
+    assert eligible == {A, B, E, Q, X2, X3, X4}
+    fg5 = next(g for g in evening.e.gates if g.name == "FG5")
+    assert fg5.metrics["corp_action_pending"] == {"base_price": 1, "no_value": 2, "price_limit": 1}
+    assert fg5.metrics["n_candidates_corp_action_pending"] == 3          # C·H·P(K 는 후보 아님)
+    assert fg5.metrics["n_pred_pre_missing"] == 1                        # P
+    # 후보 중 보류 3/10 > 0.02 — 경고만(기록형), 판정은 PASS(MINOR-3)
+    assert fg5.status.value == "pass" and fg5.metrics["warn"] is True and "warn:" in fg5.detail
+
+
+def test_evening_candidates_are_the_postclose_collection_candidates(evening, tmp_path) -> None:
+    """FG5 대상 = 수집기(PR-1) 순서 ① '직전 판 모델 후보'와 같은 집합(P4) — `postclose.board_candidates`
+    가 읽는 `<QL_HOME>/data/factor_inputs/_runs/<D'>_morning.json` 의 eligible. 후보는 전부 T 가격이
+    있어 결측 0(당일 기업행위 보류 3 은 T 행이 있으므로 세지 않는다)."""
+    from daily import postclose
+    home = tmp_path / "home"
+    (home / "data").mkdir(parents=True)
+    shutil.copytree(evening.out_m, home / "data" / "factor_inputs")
+    cands, bid = postclose.board_candidates(home, D_S)
+    assert set(cands) == ELIGIBLE and bid == evening.m.build_id
+    fg5 = next(g for g in evening.e.gates if g.name == "FG5")
+    assert fg5.status.value == "pass"
+    assert (fg5.metrics["n_candidates"], fg5.metrics["n_missing"],
+            fg5.metrics["candidates_from"]) == (len(cands), 0, bid)
+
+
+def test_t_price_and_t6_predicates_on_minimal_tables() -> None:
+    """T 가격 행 = 공유 술어 `ka10060_postclose_price_usable_sql`(price_valid 참 · 종가 > 0 · 거래량
+    있음, compat 과 같다). T-6 = 공유 술어 `ka10060_base_price_differs_sql`(기준가 ≠ D' 종가, 판정 불가도
+    참) — 갈래는 값 없음(pred_pre 없음 · D' KRX 종가 없음 · **D' 종가 ≤ 0**)이면 no_value, 아니면
+    base_price — 다음 ±제한폭 밖이면 price_limit. 정확히 +30% 는 보류가 아니다."""
     from factor_inputs import queries
-    from factor_inputs.build import EQUITY_SOURCES, STAGE_SOURCES, _resolve
+    flows = [src for _, src in queries.FLOW_SOURCE]
     con = duckdb.connect()
     try:
-        for root, tables, stage in ((roots[0], EQUITY_SOURCES, False),
-                                    (roots[1], STAGE_SOURCES, True)):
-            for name, expr in _resolve(root, tables, stage)[1].items():
-                con.execute(f'CREATE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+        con.execute("CREATE TABLE stg_flow_postclose_kiwoom (ticker VARCHAR, date DATE, "
+                    "close_krw DECIMAL(18, 0), pred_pre_krw DECIMAL(18, 0), "
+                    "volume_shr DECIMAL(18, 0), price_valid BOOLEAN, "
+                    + ", ".join(f"{c} DECIMAL(18, 0)" for c in flows) + ")")
+        con.execute("CREATE TABLE price_daily (ticker VARCHAR, date DATE, basis VARCHAR, "
+                    "close BIGINT)")
+        # 종목 → (T 종가, pred_pre, 거래량, price_valid, D' KRX 종가(None = 행 없음 · 'null' = 값 NULL))
+        cases: dict[str, tuple[int | None, int | None, int | None, bool | None, object]] = {
+            "ok": (10_500, 500, 1, True, 10_000),
+            "vol_null": (10_500, 500, None, True, 10_000),
+            "close_zero": (0, 0, 1, True, 10_000),
+            "invalid": (10_500, 500, 1, False, 10_000),
+            "d_zero": (10_500, 500, 1, True, 0),
+            "d_null": (10_500, 500, 1, True, "null"),
+            "d_missing": (10_500, 500, 1, True, None),
+            "pp_null": (10_500, None, 1, True, 10_000),
+            "base": (5_100, 100, 1, True, 10_000),
+            "limit": (13_100, 3_100, 1, True, 10_000),
+            "up30": (13_000, 3_000, 1, True, 10_000),
+        }
+        for t, (close, pred, vol, valid, dclose) in cases.items():
+            con.execute("INSERT INTO stg_flow_postclose_kiwoom VALUES (?, ?, ?, ?, ?, ?, "
+                        + ", ".join("1" for _ in flows) + ")", [t, T, close, pred, vol, valid])
+            if dclose is not None:
+                con.execute("INSERT INTO price_daily VALUES (?, ?, 'krx', ?)",
+                            [t, D, None if dclose == "null" else dclose])
         p = queries.Params(d=T.isoformat(), fy="202612", price_from="2025-03-28",
-                           flow_from=SESSIONS[-59].isoformat(), grace_days=5, credit_lag=3,
+                           flow_from=SESSIONS[-59].isoformat(), grace_days=0, credit_lag=3,
                            basis="evening", asof=D.isoformat())
-        con.execute(queries.calendar_sql(T.isoformat()))
-        for sql in queries.coverage_sqls(p):
+        for sql in (queries.t_source_sql(p), queries.t_prices_sql(p), queries.t_pending_sql(p)):
             con.execute(sql)
-        sqls = dict(queries.table_sqls(p, UniverseRule(coverage_grace_days=5)))
-        con.execute(sqls["_t_prices"])
-        assert con.execute("SELECT count(*) FROM _t_prices").fetchone() == (0,)
-        con.execute("INSERT INTO _t_prices (ticker, date, close, price_source) VALUES "
-                    f"('{A}', DATE '{T}', 123456, 'postclose'), "
-                    f"('{K}', DATE '{T}', 7000, 'postclose')")
-        con.execute(sqls["fi_universe"])
-        got = {r[0]: r[1:] for r in con.execute(
-            "SELECT ticker, shares, market_cap, mktcap_basis, eligible, exclude_reason "
-            "FROM _fi_universe").fetchall()}
+        priced = {r[0] for r in con.execute("SELECT ticker FROM _t_prices").fetchall()}
+        kinds = dict(con.execute("SELECT ticker, kind FROM _t_pending").fetchall())
     finally:
         con.close()
-    assert got[A] == (SHARES[A], float(round(SHARES[A] * 123_456 / 1e8)), "t1_shares_x_t_close",
-                      True, None)
-    assert got[K] == (None, None, "t1_shares_x_t_close", True, None)   # D' KRX 행 없음
-    assert got[B] == (SHARES[B], None, "t1_shares_x_t_close", False, "no_price")
+    assert priced == set(cases) - {"vol_null", "close_zero", "invalid"}
+    assert kinds == {"d_zero": "no_value", "d_null": "no_value", "d_missing": "no_value",
+                     "pp_null": "no_value", "base": "base_price", "limit": "price_limit"}
+
+
+def test_evening_research_rows_are_cut_at_d_prime(evening, tmp_path: Path) -> None:
+    """PR-5 리뷰 MINOR-5 — 장 마감 판은 수급·수정주가의 연구 부분을 D'(asof)에서 자른다(`_t_adj_src`
+    첫 갈래도). 연구 판에 T 날짜 행이 섞여 있어도 T 행은 장 마감 원천 하나뿐이다(중복·덮어쓰기 없음)."""
+    a_d = next(r for r in _adj() if r["ticker"] == A and r["date"] == D)
+    eq, st = make_roots(tmp_path / "src", extra={
+        "flow_daily": [_flow(A, T, "kiwoom", 9_000_000_000)],
+        "price_adj_daily": [{**a_d, "date": T, "adj_close": 1.0}]})
+    res = build(T_S, "evening", tmp_path / "fi", st, eq, grace_days=5, min_eligible=5,
+                golden_path=None, builds_from=_history(tmp_path / f"{D_S}_morning.json"),
+                calendar_dir=_cal_dir(tmp_path), postclose_stage_root=evening.pc,
+                candidates_root=evening.out_m)
+    assert res.ok, [(g.name, g.detail) for g in res.gates if g.status.value == "fail"]
+    flows = q(tmp_path / "fi", "fi_flows", "SELECT " + ", ".join(FLOW_SUBJECTS)
+              + f" FROM t WHERE ticker = '{A}' AND date = DATE '{T}'")
+    assert flows == [tuple(float(v) for v in pc_flows_mn(A))]
+    adj = q(tmp_path / "fi", "fi_adj_prices",
+            f"SELECT adj_close FROM t WHERE ticker = '{A}' AND date = DATE '{T}'")
+    assert adj == [(PC_PLAN[A][0] * 2.0,)]
+
+
+def _evening_with(evening, tmp_path: Path, plan: dict, **kw: object):
+    """`evening` 의 원천·후보에 다른 장 마감 원장(`plan`)을 얹어 장 마감 판을 다시 짓는다."""
+    kw.setdefault("candidates_root", evening.out_m)
+    return build(T_S, "evening", tmp_path / "fi", evening.st, evening.eq, grace_days=5,
+                 min_eligible=1, golden_path=None, builds_from=evening.hist,
+                 calendar_dir=evening.cal,
+                 postclose_stage_root=make_postclose_stage(tmp_path / "pc", plan), **kw)
+
+
+@pytest.mark.parametrize(("dropped", "invalid", "passed"), [
+    ((B,), (C,), True),            # 후보 10 중 2 = 0.2 — 상한과 같으면 통과
+    ((B, Q), (C,), False),         # 3/10 = 0.3 > 0.2 → 판 실패
+])
+def test_evening_candidate_coverage_gate_boundary(evening, tmp_path: Path, monkeypatch,
+                                                  dropped: tuple[str, ...],
+                                                  invalid: tuple[str, ...],
+                                                  passed: bool) -> None:
+    """N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패' — 후보 중 T 가격이 없는 종목(원장 행 없음 ·
+    price_valid 아님) 비율이 상한을 넘으면 FG5 FAIL 로 판을 올리지 않는다(rc 1). 상한과 같으면 통과."""
+    from factor_inputs import gates as fi_gates
+    monkeypatch.setattr(fi_gates, "T_CANDIDATE_MISSING_MAX", 0.2)
+    plan = {t: (c, p, False if t in invalid else v) for t, (c, p, v) in PC_PLAN.items()
+            if t not in dropped}
+    res = _evening_with(evening, tmp_path, plan)
+    fg5 = next(g for g in res.gates if g.name == "FG5")
+    assert (fg5.metrics["n_no_row"], fg5.metrics["n_price_invalid"]) == (len(dropped), len(invalid))
+    assert fg5.metrics["n_missing"] == len(dropped) + len(invalid)
+    assert sorted(fg5.metrics["missing_tickers"]) == sorted(dropped + invalid)
+    assert (fg5.status.value == "pass") is passed, fg5.detail
+    assert res.ok is passed
+    if not passed:
+        assert res.failed_report is not None
+        assert not (tmp_path / "fi" / "fi_prices" / "MANIFEST.json").exists()
+
+
+def test_evening_candidate_gate_default_max_fails_one_in_ten(evening, tmp_path: Path) -> None:
+    """기본 상한(`T_CANDIDATE_MISSING_MAX` = 0.02)에서는 후보 10 중 1 결측(0.1)도 판 실패다."""
+    from factor_inputs import gates as fi_gates
+    assert fi_gates.T_CANDIDATE_MISSING_MAX == 0.02
+    plan = {t: v for t, v in PC_PLAN.items() if t != B}
+    res = _evening_with(evening, tmp_path, plan)
+    fg5 = next(g for g in res.gates if g.name == "FG5")
+    assert fg5.status.value == "fail" and fg5.metrics["missing_ratio"] == 0.1
+
+
+def test_evening_without_candidates_fails_the_gate(evening, tmp_path: Path) -> None:
+    """직전 판 모델 후보(D' 아침 fi 판)를 못 읽으면 커버리지를 잴 수 없다 — FG5 FAIL(판 실패,
+    사유 candidates_unavailable). 최신 판·다른 집합으로 대신하지 않는다(P1)."""
+    res = _evening_with(evening, tmp_path, PC_PLAN, candidates_root=tmp_path / "no_fi")
+    fg5 = next(g for g in res.gates if g.name == "FG5")
+    assert fg5.status.value == "fail" and fg5.detail.startswith("candidates_unavailable")
+    assert f"{D_S}_morning.json" in fg5.detail
+    assert not res.ok
+
+
+def test_evening_without_postclose_stage_is_rc2(evening, tmp_path: Path, capsys) -> None:
+    """장 마감 stage 판(T-29 `data/model_db/stage`)이 없으면 입력 오류 rc 2 — 판을 만들지 않는다."""
+    out = tmp_path / "fi"
+    rc = cli_main(["build", "--date", T_S, "--basis", "evening", "--root", str(out),
+                   "--stage-root", str(evening.st), "--equity-root", str(evening.eq),
+                   "--calendar-dir", str(evening.cal), "--builds-from", str(evening.hist),
+                   "--postclose-stage-root", str(tmp_path / "model_db" / "stage"),
+                   "--candidates-root", str(evening.out_m)])
+    err = capsys.readouterr().err
+    assert rc == 2, err
+    assert PC_TABLE in err and "원천 판이 없다" in err, err
+    assert not any((out / t / "MANIFEST.json").exists() for t in FI_TABLES)
+
+
+def test_evening_cli_reads_the_postclose_root_and_candidates(evening, tmp_path: Path,
+                                                             capsys) -> None:
+    """CLI `--postclose-stage-root`·`--candidates-root` 가 build 로 그대로 간다 — 픽스처와 같은 8표."""
+    out = tmp_path / "fi"
+    rc = cli_main(["build", "--date", T_S, "--basis", "evening", "--root", str(out),
+                   "--stage-root", str(evening.st), "--equity-root", str(evening.eq),
+                   "--grace-days", "5", "--min-eligible", "5",
+                   "--calendar-dir", str(evening.cal), "--builds-from", str(evening.hist),
+                   "--postclose-stage-root", str(evening.pc),
+                   "--candidates-root", str(evening.out_m)])
+    assert rc == 0, capsys.readouterr().err
+    assert _hashes(out / "_runs" / f"{T_S}_evening.json") == _hashes(evening.e.run_manifest)
+
+
+def test_cli_postclose_defaults_are_model_db_stage_and_research_fi() -> None:
+    """기본값: 장 마감 stage 루트 = `<QL_HOME>/data/model_db/stage`(T-29), 후보 = 연구 fi 루트
+    (수집기 `board_candidates` 가 읽는 자리와 같다)."""
+    from factor_inputs.__main__ import _parser
+    from factor_inputs.build import research_root
+    args = _parser().parse_args(["build", "--date", T_S, "--basis", "evening"])
+    assert args.postclose_stage_root.parts[-3:] == ("data", "model_db", "stage")
+    assert args.candidates_root == research_root()
 
 
 def test_cli_return_codes(roots, tmp_path: Path, capsys) -> None:

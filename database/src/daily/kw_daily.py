@@ -139,6 +139,18 @@ def ka10060_base_price_differs_sql(close: str, pred_pre: str, prev_close: str) -
             f"OR {prev_close} <= 0 OR {close} - {pred_pre} <> {prev_close})")
 
 
+def ka10060_postclose_price_usable_sql(price_valid: str, close: str, volume: str) -> str:
+    """장 마감 원장(`postclose.db`) ka10060 행의 가격을 T 가격으로 쓸 수 있는가(SQL 불리언 식).
+
+    16:00 KST 전 응답(`price_valid` 참 — 그 뒤 응답은 가격이 애프터마켓 값, N-35 ①) · 종가 > 0 · 거래량
+    있음. 하나라도 아니면 그 행의 가격은 쓰지 않는다(수급은 따로 — price_valid 와 무관하다). 인자는 SQL
+    식이다 — `price_valid` 는 BOOLEAN(stage `price_valid`), `close` 는 부호를 뗀 종가(`close_krw`),
+    `volume` 은 거래량(`volume_shr`). fi 장 마감 판 T 가격 행(PR-5)과 compat T 행의 ① postclose 선택
+    (QL-D)이 같이 쓴다(P4).
+    """
+    return f"({price_valid} IS TRUE AND {close} > 0 AND {volume} IS NOT NULL)"
+
+
 def pick_rows(api_id: str, rows: Sequence[Mapping[str, object]],
               target: str) -> list[dict[str, object]]:
     """저장할 행만 — 일별 TR 은 target 날짜 행(ka10060 `dt` · ka10086 `date`), 묶음 TR 은 전부."""

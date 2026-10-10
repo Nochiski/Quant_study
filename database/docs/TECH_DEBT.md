@@ -1292,6 +1292,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
   - stage 룩업 표에는 J-41 이 민 행 수 기록형 지표가 없다(stg_disclosure 의 G3 `n_rcept_dt_before_no_prefix` 만 있음 — `stage/build.py` `_recorded_metrics` 를 룩업에도 넓히면 매 빌드 보인다).
   - 뜻이 바뀐 주석: `src/equity/rules_s16.py:6·455·497·548`, `rules_s15.py:5`, `sql/corp_event.sql:46`('announce_date = DART rcept_dt' — 이제 보정된 stage 값).
 - **위험성**: 정지 신호 창이 재제출본에서 앞당겨질 수 있다(미측정). 지연 판정은 재제출본에서 '기한 안'으로 볼 수 있다(원 제출일 확인 전이라 결함 여부 미정). 지표·주석은 운영 위험 없음 — 노출이 매 빌드 안 보이고 읽는 사람이 옛 뜻으로 오해할 수 있다(배포 묶음 4-1b 품질 검토 사소 5·8).
+- **10-10 실측(컷오버 K1-3b)**: 서버 stage 현판 `stg_disclosure` 에서 정지 신호 술어(`universe_daily.sql` `sig_day`)에 걸리는 has_ticker 공시 17,576건 중 `rcept_dt` < 접수번호 날짜 0건 · `rcept_dt` < `available_date` 0건 — stage 가 이미 늦은 쪽을 `rcept_dt` 에 싣는다. 정지 신호 앞당김 노출 0 이라 `sig_raw` 는 고치지 않는다(지연 판정·지표·주석 항목은 그대로 남는다).
 
 ## 2026-10-08 배포 묶음 5-3(원장 락 대기) 후속에서 분리한 항목
 

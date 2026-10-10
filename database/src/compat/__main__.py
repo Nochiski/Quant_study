@@ -28,6 +28,12 @@ v3 제자리 반영(QL-F, `scripts/v3_post.sh` 가 부른다 — `compat.v3_post
 `--no-scores`(T-38 — 21:05 원장 뒤 재반영 refill)는 v3-tables·apply 에 같이 준다 — 점수 두 표를 뺀 7표.
 `--basis evening` 전용이다(아침이면 rc 2 — 아침 반영 표는 T-34 가 정한다).
 
+v3 되돌리기(QL-I, `scripts/v3_backup.sh`·`scripts/v3_restore.sh` 가 부른다 — `compat.v3_restore`):
+
+    python -m compat backup --v3-db <v3 quant.db> --dest <경로1> --dest <경로2> --stamp <YYYYMMDDTHHMMSS>
+                            [--file <V3-A~E 대상 파일> …]
+    python -m compat restore --backup <백업 quant_<stamp>.db> --v3-db <v3 quant.db> [--tables a,b] [--dry-run]
+
 rc 0 정상 · 2 예외(apply 는 게이트 실패 포함 — v3 본 파일 무변경). 표별 행수 한 줄을 stdout 에 낸다
 (`scripts/compat_export.sh`·`scripts/v3_post.sh` 가 로그로 받는다).
 """
@@ -37,7 +43,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import v3_post
+from . import v3_post, v3_restore
 from .quant_db import CompatError, export
 
 
@@ -102,11 +108,35 @@ def _parser() -> argparse.ArgumentParser:
                    help="COMMIT 직후 만들 표식 파일(셸이 'COMMIT 뒤 실패' 를 가른다)")
     a.add_argument("--no-scores", action="store_true",
                    help="점수 두 표를 뺀 7표로 게이트·반영(T-38) — v3-tables 와 같이 준다")
+    b = sub.add_parser("backup", help="v3 quant.db 고정 백업 2벌 + V3-A~E 대상 파일 사본(QL-I)")
+    b.add_argument("--v3-db", required=True, type=Path, help="v3 quant.db(읽기 전용으로 연다)")
+    b.add_argument("--dest", required=True, type=Path, action="append",
+                   help="백업 경로 — 서로 다른 둘(두 번 준다, T-21)")
+    b.add_argument("--stamp", required=True, help="이름 꼬리표(KST YYYYMMDDTHHMMSS)")
+    b.add_argument("--file", default=[], type=Path, action="append",
+                   help="<이름>.bak.<stamp> 로 함께 남길 파일(여러 번)")
+    r = sub.add_parser("restore", help="백업 → v3 quant.db 표 단위 복원, 한 트랜잭션(QL-I)")
+    r.add_argument("--backup", required=True, type=Path,
+                   help="백업 파일 — 같은 폴더 SHA256SUMS 와 먼저 대조한다")
+    r.add_argument("--v3-db", required=True, type=Path)
+    r.add_argument("--tables", default=None,
+                   help="쉼표로 구분한 표 — compat 9표 안에서만(기본 9표 전부)")
+    r.add_argument("--dry-run", action="store_true", help="표별 행 수만 — 쓰지 않는다")
     return p
 
 
 def _v3_post(args: argparse.Namespace) -> int:
-    """stage · apply 하위 명령. 게이트 실패는 실패 사유를 한 줄씩 stderr 에 낸다."""
+    """stage · apply · backup · restore 하위 명령. 게이트 실패는 실패 사유를 한 줄씩 stderr 에 낸다."""
+    if args.cmd == "backup":
+        res = v3_restore.backup(args.v3_db, args.dest, args.stamp, args.file)
+        print("\n".join(res.lines()))
+        return 0
+    if args.cmd == "restore":
+        tables = ([t.strip() for t in args.tables.split(",")] if args.tables is not None
+                  else v3_post.TABLES)
+        report = v3_restore.restore(args.backup, args.v3_db, tables, dry_run=args.dry_run)
+        print("\n".join(report.lines()))
+        return 0
     if args.cmd == "stage":
         v3_post.snapshot(args.v3_db, args.out)
         print(f"compat stage {args.v3_db} → {args.out} ({args.out.stat().st_size} bytes)")
@@ -132,7 +162,7 @@ def _v3_post(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.cmd in ("stage", "v3-tables", "apply"):
+    if args.cmd in ("stage", "v3-tables", "apply", "backup", "restore"):
         try:
             return _v3_post(args)
         except Exception as e:  # noqa: BLE001  # reason: 셸이 rc 로만 보므로 어떤 예외든 원인을 남긴다

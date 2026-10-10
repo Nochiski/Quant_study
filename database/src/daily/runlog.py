@@ -18,10 +18,22 @@ TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # 러너가 '정상 종료지만 사람이 알아야 할' 상태로 정한 값(source → 상태). 일일 리포트
 # (`scripts/daily_report.py`)가 이 상태를 crit(수집 실패)이 아니라 warn 으로 센다. 상태 이름은 러너가
 # 정하고(장 마감 수집 `daily.postclose.Status`) 여기 한 곳에 등록한다 — 테스트가 둘을 맞춰 본다
+# 두 판 대조(PR-7) 런 source — 장 마감 체인 morning 이 남긴다(POSTCLOSE_FOLLOWUPS 의 하나). X-2 연속 창 판정이 읽는다
+POSTCLOSE_COMPARE = "postclose_compare"
 WARN_STATUSES: dict[str, frozenset[str]] = {
     # 16:00 컷오프 · 16:00 뒤 시작(콜 0) · 세션 예외일 건너뜀 — 남은 종목은 QL-D 가 21:05 저녁 값
     "kiwoom_postclose": frozenset({"cutoff", "late", "session_exception"}),
+    # 두 판 대조(PR-7) rc 1 — 미설명 차이·Spearman 하한 미달. 실패가 아니라 기록이고 판정은 연속 창 집계 몫
+    POSTCLOSE_COMPARE: frozenset({"mismatch"}),
 }
+# 장 마감 체인(`scripts/postclose_chain.sh close`, 컷오버 PR-8)이 ①(수집 — 수집기가 `kiwoom_postclose` 로 남김) 뒤
+# 단계마다 남기는 source, 체인 순서. 16:30 워치독(`watchdog.sh postclose_board`)이 그날 단계마다 마지막 런을 본다
+POSTCLOSE_STEPS: tuple[str, ...] = ("postclose_stage", "postclose_fi", "postclose_model",
+                                     "postclose_excel", "postclose_v3")
+# 그 뒤를 잇는 source — 21:05 저녁 원장 뒤 재반영(daily_evening.sh 훅) · 다음 날 아침 KRX 재반영 · 두 판 대조
+# (daily_build.sh 훅). 날짜는 모두 판의 거래일 T 다
+POSTCLOSE_FOLLOWUPS: tuple[str, ...] = ("postclose_v3_refill", "postclose_v3_morning",
+                                         POSTCLOSE_COMPARE)
 
 
 @dataclass(frozen=True)

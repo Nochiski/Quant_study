@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → 확정 빌드
-# → 모델 단계(fi → 모델 → 일간 엑셀 발송, scripts/model_daily.sh — N-25 Q0) → 요약.
+# → 모델 단계(fi → 모델 → 일간 엑셀 발송, scripts/model_daily.sh — N-25 Q0)
+# → 장 마감 판 아침 잇기(v3 아침 KRX 재반영 · 두 판 대조, scripts/postclose_chain.sh morning — 컷오버 PR-8) → 요약.
 # 플랜 P1 Task 1.8 / 결정 R1. 확정 빌드(stage·equity basis=morning)는 scripts/build_morning.sh 가 한다
 # (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
@@ -17,7 +18,7 @@ cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 # 인자는 락보다 먼저 읽는다 — 락 대기 알림이 dry-run 인지 알아야 한다
-DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""
+DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""; PRC=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --date) DATE_ARG="$2"; shift 2 ;;
@@ -152,6 +153,12 @@ if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
     echo "──── 모델 단계 시작 $(kst) ────"
     bash scripts/model_daily.sh --date "$D"; MRC=$?
     echo "──── 모델 단계 종료 rc=$MRC $(kst) ────"
+    # 장 마감 판 아침 잇기(컷오버 PR-8 ⑧) — 확정판 뒤 v3 아침 KRX 재반영(compat 만, T-34)과 두 판 대조(PR-7). 모델 단계
+    # 성패와 무관하게 돈다(T-34: 가격 재반영이 아침 모델 실패에 묶이지 않는다 — 반영 표는 compat 이 고른다). soft — 결과는
+    # 자기 런 로그·notify 로 남기고 확정판 rc·요약 등급은 그대로다. 종료 rc 는 요약 앞쪽(모델 단계 줄 뒤)에 싣고 0·1 이 아니면 warn(아래).
+    echo "──── 장 마감 판 아침 잇기 시작 $(kst) ────"
+    bash scripts/postclose_chain.sh morning --date "$D"; PRC=$?
+    echo "──── 장 마감 판 아침 잇기 종료 rc=$PRC $(kst) ────"
   fi
 fi
 # 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).
@@ -164,7 +171,14 @@ cat "$RUN" >> "$LOG"
 # 잘리지 않게. 확정판 부분은 종전 그대로 고르고 '모델 단계 시작' 앞에서 자른다(모델 단계 안쪽 줄
 # ──── factor_inputs 종료 … 이 tail 창을 밀어내지 않게). 모델 단계가 없는 날은 종전과 같은 바이트다.
 SUMMARY=$({ grep -E "^모델 단계 (완료|실패)|^──── 모델 단계 종료" "$RUN" | tail -2
+           grep -E "^──── 장 마감 판 아침 잇기 종료" "$RUN" | tail -1
            sed '/^──── 모델 단계 시작/,$d' "$RUN" | grep -E "원장 락 대기|^원장 건전성|──── .* 종료|아직 미완료|KRX 401" | tail -8; } | tr '\n' ' ' | cut -c1-900)
+# 장 마감 판 아침 잇기(PR-8 ⑧)가 0(완료·꺼짐)·1(대조 불일치 warn) 이 아니면 warn 1건 — 아침 잇기가 자기 crit 을 못 남기고
+# 죽은 경우(홈 이동·인자·설정 오류 등)도 사람에게 닿게(조용한 실패 금지). 확정판 rc·등급은 그대로다.
+if [ -n "$PRC" ] && [ "$PRC" -ne 0 ] && [ "$PRC" -ne 1 ]; then
+  scripts/notify.sh warn "daily_build 장 마감 판 아침 잇기 rc=$PRC" \
+    "D=$D | scripts/postclose_chain.sh morning 이 rc $PRC 로 끝났다 — 로그 logs/postclose/${D}_morning.log · $LOG"
+fi
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 확정판이 이미 있어 재수집·재빌드하지 않았다 — 다시 돌리려면 QL_FORCE=1 또는 --date $D | 로그 $LOG"
   rm -f "$RUN"; exit 0

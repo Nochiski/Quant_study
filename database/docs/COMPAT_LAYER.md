@@ -372,6 +372,7 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 4. **게이트**(COMMIT 전):
    - 이번 compat 기록 1행·status ok·날짜·basis 일치·창 끝 = D
    - 순서(T-35): 본 파일에 이번보다 (날짜, basis — 같은 날은 아침 > 장 마감) 가 큰 ok 반영 기록이 없다. 재생은 `--allow-older`. **새 정지 조건이라 사용자 확인 대기**
+   - 복원 뒤 첫 반영(QL-I · T-42): 본 파일 `_compat_meta` 의 마지막 복원 기록(basis `restore` — `scripts/v3_restore.sh` 가 남긴다. 기본 복원은 점수 두 표를 뺀 7표) 뒤에 ok 반영 기록이 아직 없으면 compat 기록이 `--full` 이어야 한다. 그 앞 반영 기록은 순서(T-35)·아침 7표(2, T-34) 판정에서 빠진다. 그림자(`--shadow`)는 보지 않는다. **새 정지 조건이라 사용자 확인 대기**. 되돌리기 절차는 [`CUTOVER_ROLLBACK.md`](CUTOVER_ROLLBACK.md)
    - 반영 표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1)
    - 기록에 반영 표 밖의 표가 없다 — 기록은 본 파일에 그대로 옮겨지고 2 의 아침 판정이 그 표 목록을 본다. 옮기지 않은 점수 표가 기록에 남으면 다음 날 아침이 점수를 건너뛴다(QL-F2)
    - 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`tables.daily_prices.metrics.n_on_date`). 스테이징은 본 파일 사본이라 'D 행 있음' 만으로는 옛 행에도 참이 된다. 비율 하한은 두지 않는다
@@ -396,7 +397,7 @@ compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등
 | refill(21:05 키움 원장 커밋 뒤) | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --no-scores --builds-from data/deliver/history/<T'>_morning.json [--shadow]` (늘 — ⑥ 결과와 무관, compat 만 7표, `--model-root` 불필요) |
 | 다음 날 아침 | `scripts/v3_post.sh --date D --basis morning --v3-db <v3 quant.db> --builds-from data/deliver/history/<D>_morning.json [--shadow]` (compat 만 — 7표·9표는 T-34 가 본 파일 기록으로 정한다) |
 
-다음 날 아침 반영 표: 그날 ⑥ 이 점수 포함 반영을 COMMIT 했으면(뒤에 daily_post 만 실패한 rc 6 포함) 7표, ⑥ 이 실패했거나 없었으면(판 실패·세션 예외일) 9표다 — refill 기록은 판정에 들어가지 않는다. 지금 PR-8 refill(`pr/PR-8` 89f81ae5 `postclose_chain.sh` `refill_main`)은 ⑥ 이 ok 일 때만 점수 포함으로 부른다 — 위 둘째 줄(늘 `--no-scores`)로 바꿔야 T-38 이 닫힌다.
+다음 날 아침 반영 표: 그날 ⑥ 이 점수 포함 반영을 COMMIT 했으면(뒤에 daily_post 만 실패한 rc 6 포함) 7표, ⑥ 이 실패했거나 없었으면(판 실패·세션 예외일) 9표다 — refill 기록은 판정에 들어가지 않는다. PR-8 `postclose_chain.sh` 의 세 호출(`close_main` ⑥ · `refill_main` · `morning_main`)이 위 표 그대로다 — refill 은 ⑥ 결과와 상관없이 늘 `--no-scores`(셸 테스트가 실물 v3_post.sh 로 인자 계약을 본다).
 
 ### 8-1. v3 쪽 변경 목록(V3-A~E — 컷오버 날, 백업 뒤, N-42 Q4)
 
@@ -407,7 +408,7 @@ compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등
 | V3-A | `scripts/job_runner.py:54`(`CHAINS["daily_all"]` 의 닫는 `],` 뒤) | 체인 둘을 더한다(T-31). `"daily_post": [("holiday_gate", 1, 30, True), ("export_scores", 1, 120, False)]` · `"daily_insight": [("holiday_gate", 1, 30, True), ("insight_pipeline", 1, 300, False), ("wiki_ingest", 1, 3600, False), ("wiki_lint", 1, 3600, False)]`. `calendar_refresh` 는 넣지 않는다(KIS 를 불러 `.kis_holidays.json` 을 덮는다 — 휴장 파일 정본은 `daily.calendar_export`, T-24). `--chain` 선택지는 CHAINS 키에서 자동으로 생긴다. 백업 `job_runner.py.bak.<ts>` |
 | V3-A | 서버 crontab | `daily_insight` 를 지금 daily_all 자리(`5 11 * * 1-5` UTC = 20:05 KST)에 둔다. 락은 **별도 파일** `/tmp/kael_v3_daily_insight.lock` 이다 — 공유 락 `/tmp/kael_v3_daily_all.lock` 에 `flock -n` 을 쓰면 v3_post 가 락을 쥔 순간 insight 가 조용히 건너뛰어져 T-27 장애(그날 국면·다음 날 07:00 브리핑 지수 없음)가 재발한다. `daily_post` 는 크론에 두지 않는다 — v3_post.sh 가 `--v3-post-cmd` 로 부른다(v3 crontab 줄에서 flock 만 뺀 형태: `cd "$HOME/kael-system-v3" && source "$HOME/.local/bin/env" && export $(grep -v "^#" .env | xargs) && PYTHONPATH=. .venv/bin/python scripts/job_runner.py --chain daily_post`) |
 | V3-B | 서버 crontab daily_all 줄(`5 11 * * 1-5 … flock -n /tmp/kael_v3_daily_all.lock … --chain daily_all` — 로컬 사본 `scripts/cron_schedule.sh:3` 에 같은 줄) | 줄을 지운다(`crontab -l` 백업). 퀀트 단계(`job_runner.py:46-49` daily_pipeline·adj_prices·scoring·scoring_v2)만 빼고 남기면 export(텔레그램)가 daily_post 와 두 번 돈다. `CHAINS["daily_all"]` 코드는 되돌리기용으로 둔다(되돌리기 = 줄 복원) |
-| V3-C | quant-ledger `scripts/v3_post.sh` | 첫 반영(K3-2): QL-I 백업 2벌 뒤 `scripts/v3_post.sh --date <D> --basis morning --v3-db "$HOME/kael-system-v3/data/quant.db" --full` 1회(`QL_V3_LOCK_FILE` 은 비운다). 아래 운영 메모 |
+| V3-C | quant-ledger `scripts/v3_post.sh` | 첫 반영(K3-2): QL-I 백업 2벌(`scripts/v3_backup.sh` — 이 표의 대상 파일 사본도 함께 뜬다, `CUTOVER_ROLLBACK.md` §1) 뒤 `scripts/v3_post.sh --date <D> --basis morning --v3-db "$HOME/kael-system-v3/data/quant.db" --full` 1회(`QL_V3_LOCK_FILE` 은 비운다). 아래 운영 메모 |
 | V3-D | 서버 crontab v3 휴장 쓰기 2줄 | `refresh_year_holidays`(`0 20 29 12 *`)·`monthly_holiday_review`(`0 0 1 * *`) — v3 `docs/system-guide/survey/08-ops.md:136·157`. QL-Q 연결과 같은 날 끈다(T-24) |
 | V3-E | unitelegram `sources/kael_db.py` `get_signal_insights`(서버 전용 파일 — 줄은 서버에서 확인) | 점수 조회에 `score_date = (SELECT max(score_date) FROM score_history)` 조건(T-17 — 593 유니버스 밖 종목의 옛 v3 행이 종목별 최신 행으로 잡히지 않게) |
 

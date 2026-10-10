@@ -345,10 +345,16 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
 
 compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 커밋하고(반영 도중 소비자가 일부 표만 바뀐 상태를 읽는다, G9) 필수 열이 빈 행을 5% 까지 건너뛴다(G11). 제자리 반영은 아래 순서로만 한다. 범위·게이트의 정본은 `src/compat/v3_post.py` 머리 주석이다.
 
-1. **스테이징**: v3 quant.db 를 sqlite 온라인 백업으로 임시 파일에 뜬다(`python -m compat stage`, 본 파일은 읽기 전용으로 연다).
-2. **compat export `--in-place`** 를 스테이징에 돌린다(QL-B 가드 — `stocks.market_cap` 은 `all`).
-3. **게이트**: 이번 compat 기록 1행·status ok·날짜·basis 일치 · 9표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1) · 표마다 반영 범위 행 > 0(점수 두 표는 `score_date = D`).
-4. **한 트랜잭션 반영**: `ATTACH` → `BEGIN IMMEDIATE` → 표별 범위 `DELETE` → 스테이징 범위 `INSERT` → `_compat_meta` 기록 1행 → `COMMIT`.
+1. **스테이징**: v3 quant.db 를 sqlite 온라인 백업으로 임시 파일에 뜬다(`python -m compat stage`). 본 파일은 읽기 전용으로 연다. 스테이징 경로가 본 파일(링크·-wal/-shm 포함)과 같은 파일이면 거부한다(뜨기 전에 그 경로를 지우므로). 디스크 여유가 본 파일 크기 × 2 보다 작으면 뜨지 않고, 백업이 실패하면 부분 사본을 지운다.
+2. **반영 표**(T-34, `python -m compat v3-tables`): 기본 9표. `--basis morning` 은 본 파일 `_compat_meta` 에 같은 D 의 장 마감(evening) ok 반영 기록이 있으면 점수 두 표를 뺀 7표다. 저녁에 보낸 엑셀과 v3 DB 점수가 같고, 가격 재반영이 아침 모델 판 실패에 묶이지 않는다. 저녁 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻).
+3. **compat export `--in-place --tables <반영 표>`** 를 스테이징에 돌린다(QL-B 가드 — `stocks.market_cap` 은 `all`).
+4. **게이트**(COMMIT 전):
+   - 이번 compat 기록 1행·status ok·날짜·basis 일치·창 끝 = D
+   - 순서(T-35): 본 파일에 이번보다 (날짜, basis — 같은 날은 아침 > 장 마감) 가 큰 ok 반영 기록이 없다. 재생은 `--allow-older`. **새 정지 조건이라 사용자 확인 대기**
+   - 반영 표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1)
+   - 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`tables.daily_prices.metrics.n_on_date`). 스테이징은 본 파일 사본이라 'D 행 있음' 만으로는 옛 행에도 참이 된다. 비율 하한은 두지 않는다
+   - 표마다 반영 범위 행 > 0(점수 두 표는 `score_date = D`)
+5. **한 트랜잭션 반영**: `ATTACH` → `BEGIN IMMEDIATE` → 표별 범위 `DELETE` → 스테이징 범위 `INSERT` → `_compat_meta` 기록 1행 → `COMMIT`.
 
 | 표 | 반영 범위(= compat 이 쓴 범위) |
 |---|---|
@@ -356,4 +362,21 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 | `score_history` · `score_history_v2` | `score_date = D` |
 | `stocks` · `consensus_revision_daily` · `consensus_revision_compare` · `consensus_annual` · `financial_summary` | 표 전체(날짜 창 없는 as-of 스냅샷 — 스테이징이 같은 락 안의 사본이라 compat 이 안 건드린 행은 같은 값으로 다시 들어간다) |
 
-compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~3단계만, 본 파일 무변경)는 락을 잡지 않는다. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
+compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~4단계만, 본 파일 무변경, 스테이징 기본 경로 `staging_<basis>_shadow.db`)는 락을 잡지 않는다. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
+
+`daily_prices` 의 O/H/L 이 비고 종가가 있는 krx 행은 비어 있는 칸을 종가로 채운다(정지 참고가 행 · 정규장 체결 없이 시간외만 있던 날 — 서버 `--full` 게이트 실측 145210 2025-03-21, v3 사본 같은 행 O=H=L=C). 근거는 `mappings.py` `_REF_FILL` 주석.
+
+### 8-1. v3 쪽 변경 목록(V3-A~E — 컷오버 날, 백업 뒤, N-42 Q4)
+
+줄 번호는 v3 로컬 사본(25dd56b, 08-30) 기준이다. 서버 파일과 다를 수 있으니 적용 직전에 grep 으로 다시 찾는다.
+
+| ID | 파일·위치 | 변경 |
+|---|---|---|
+| V3-A | `scripts/job_runner.py:54`(`CHAINS["daily_all"]` 의 닫는 `],` 뒤) | 체인 둘을 더한다(T-31). `"daily_post": [("holiday_gate", 1, 30, True), ("export_scores", 1, 120, False)]` · `"daily_insight": [("holiday_gate", 1, 30, True), ("insight_pipeline", 1, 300, False), ("wiki_ingest", 1, 3600, False), ("wiki_lint", 1, 3600, False)]`. `calendar_refresh` 는 넣지 않는다(KIS 를 불러 `.kis_holidays.json` 을 덮는다 — 휴장 파일 정본은 `daily.calendar_export`, T-24). `--chain` 선택지는 CHAINS 키에서 자동으로 생긴다. 백업 `job_runner.py.bak.<ts>` |
+| V3-A | 서버 crontab | `daily_insight` 를 지금 daily_all 자리(`5 11 * * 1-5` UTC = 20:05 KST)에 둔다. 락은 **별도 파일** `/tmp/kael_v3_daily_insight.lock` 이다 — 공유 락 `/tmp/kael_v3_daily_all.lock` 에 `flock -n` 을 쓰면 v3_post 가 락을 쥔 순간 insight 가 조용히 건너뛰어져 T-27 장애(그날 국면·다음 날 07:00 브리핑 지수 없음)가 재발한다. `daily_post` 는 크론에 두지 않는다 — v3_post.sh 가 `--v3-post-cmd` 로 부른다(v3 crontab 줄에서 flock 만 뺀 형태: `cd "$HOME/kael-system-v3" && source "$HOME/.local/bin/env" && export $(grep -v "^#" .env | xargs) && PYTHONPATH=. .venv/bin/python scripts/job_runner.py --chain daily_post`) |
+| V3-B | 서버 crontab daily_all 줄(`5 11 * * 1-5 … flock -n /tmp/kael_v3_daily_all.lock … --chain daily_all` — 로컬 사본 `scripts/cron_schedule.sh:3` 에 같은 줄) | 줄을 지운다(`crontab -l` 백업). 퀀트 단계(`job_runner.py:46-49` daily_pipeline·adj_prices·scoring·scoring_v2)만 빼고 남기면 export(텔레그램)가 daily_post 와 두 번 돈다. `CHAINS["daily_all"]` 코드는 되돌리기용으로 둔다(되돌리기 = 줄 복원) |
+| V3-C | quant-ledger `scripts/v3_post.sh` | 첫 반영(K3-2): QL-I 백업 2벌 뒤 `scripts/v3_post.sh --date <D> --basis morning --v3-db "$HOME/kael-system-v3/data/quant.db" --full` 1회(`QL_V3_LOCK_FILE` 은 비운다). 아래 운영 메모 |
+| V3-D | 서버 crontab v3 휴장 쓰기 2줄 | `refresh_year_holidays`(`0 20 29 12 *`)·`monthly_holiday_review`(`0 0 1 * *`) — v3 `docs/system-guide/survey/08-ops.md:136·157`. QL-Q 연결과 같은 날 끈다(T-24) |
+| V3-E | unitelegram `sources/kael_db.py` `get_signal_insights`(서버 전용 파일 — 줄은 서버에서 확인) | 점수 조회에 `score_date = (SELECT max(score_date) FROM score_history)` 조건(T-17 — 593 유니버스 밖 종목의 옛 v3 행이 종목별 최신 행으로 잡히지 않게) |
+
+**V3-C 운영 메모.** `--full`(730일 창)은 서버에서 v3 쓰기 락을 30초 남짓 쥔다(서버 10-08 사본 `--full` 은 게이트 실패까지 전체 27.6초라 이동 자체는 아직 서버 미실측 — 로컬 465MB 사본에서 730일 이동 트랜잭션 21.8초). v3 연결의 busy_timeout 은 5초다(`backend/db/connection.py`). 그래서 v3 가 quant.db 에 쓰는 시각 — 07:00·12:15·15:35 브리핑(job_runner 가 `pipeline_runs` 를 쓴다)과 20:30 리서치·21:00 브로커 리서치 수집 — 을 피해 돌린다. 매일 증분 반영(14일 창)은 서버 실측 7.5초다. 서버 v3 프로세스는 UTC 다(v3 로그 시각이 크론 11:05 UTC 와 같아 `.env` 에 TZ 지정이 없다고 판단) — v3 의 `date.today()` 는 KST 09:00 전까지 전날이다.

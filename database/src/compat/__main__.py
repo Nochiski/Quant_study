@@ -13,8 +13,10 @@
 v3 제자리 반영(QL-F, `scripts/v3_post.sh` 가 부른다 — `compat.v3_post`):
 
     python -m compat stage --v3-db <v3 quant.db> --out <스테이징>
-    python -m compat export … --target <스테이징> --in-place
-    python -m compat apply --staging <스테이징> --v3-db <v3 quant.db> --date D --basis B [--shadow]
+    python -m compat v3-tables --v3-db <v3 quant.db> --date D --basis B     # 반영 표(T-34), 쉼표 구분
+    python -m compat export … --target <스테이징> --in-place --tables <반영 표>
+    python -m compat apply --staging <스테이징> --v3-db <v3 quant.db> --date D --basis B
+                           [--shadow] [--allow-older] [--commit-flag PATH]
 
 rc 0 정상 · 2 예외(apply 는 게이트 실패 포함 — v3 본 파일 무변경). 표별 행수 한 줄을 stdout 에 낸다
 (`scripts/compat_export.sh`·`scripts/v3_post.sh` 가 로그로 받는다).
@@ -59,13 +61,21 @@ def _parser() -> argparse.ArgumentParser:
     s = sub.add_parser("stage", help="v3 quant.db → 스테이징 사본(온라인 백업, QL-F)")
     s.add_argument("--v3-db", required=True, type=Path, help="v3 quant.db(읽기 전용으로 연다)")
     s.add_argument("--out", required=True, type=Path, help="스테이징 경로(있으면 지우고 새로 뜬다)")
-    a = sub.add_parser("apply", help="스테이징 게이트 → 9표 한 트랜잭션 반영(QL-F)")
+    t = sub.add_parser("v3-tables", help="이번 반영 표 목록(T-34) — 쉼표 구분 한 줄(QL-F)")
+    t.add_argument("--v3-db", required=True, type=Path)
+    t.add_argument("--date", required=True, help="대상 거래일 YYYYMMDD")
+    t.add_argument("--basis", required=True, choices=("evening", "morning"))
+    a = sub.add_parser("apply", help="스테이징 게이트 → 반영 표 한 트랜잭션 반영(QL-F)")
     a.add_argument("--staging", required=True, type=Path)
     a.add_argument("--v3-db", required=True, type=Path)
     a.add_argument("--date", required=True, help="대상 거래일 YYYYMMDD")
     a.add_argument("--basis", required=True, choices=("evening", "morning"))
     a.add_argument("--shadow", action="store_true",
                    help="게이트까지만 — v3 본 파일에 쓰지 않는다")
+    a.add_argument("--allow-older", action="store_true",
+                   help="본 파일에 더 나중 반영 기록이 있어도 반영한다(재생 전용, T-35)")
+    a.add_argument("--commit-flag", default=None, type=Path,
+                   help="COMMIT 직후 만들 표식 파일(셸이 'COMMIT 뒤 실패' 를 가른다)")
     return p
 
 
@@ -75,9 +85,13 @@ def _v3_post(args: argparse.Namespace) -> int:
         v3_post.snapshot(args.v3_db, args.out)
         print(f"compat stage {args.v3_db} → {args.out} ({args.out.stat().st_size} bytes)")
         return 0
+    if args.cmd == "v3-tables":
+        print(",".join(v3_post.tables_for(args.v3_db, args.date, args.basis)))
+        return 0
     try:
         report = v3_post.apply(args.staging, args.v3_db, args.date, args.basis,
-                               shadow=args.shadow)
+                               shadow=args.shadow, allow_older=args.allow_older,
+                               commit_flag=args.commit_flag)
     except v3_post.V3PostGateError as e:
         print(e.report.summary())
         for f in e.report.failures:
@@ -85,13 +99,13 @@ def _v3_post(args: argparse.Namespace) -> int:
         return 2
     print(report.summary())
     print("compat apply 그림자 — v3 본 파일에 쓰지 않았다" if args.shadow
-          else f"compat apply 반영 완료 — 9표 한 트랜잭션 → {args.v3_db}")
+          else f"compat apply 반영 완료 — {len(report.tables)}표 한 트랜잭션 → {args.v3_db}")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.cmd in ("stage", "apply"):
+    if args.cmd in ("stage", "v3-tables", "apply"):
         try:
             return _v3_post(args)
         except Exception as e:  # noqa: BLE001  # reason: 셸이 rc 로만 보므로 어떤 예외든 원인을 남긴다

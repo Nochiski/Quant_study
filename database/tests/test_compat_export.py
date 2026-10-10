@@ -73,15 +73,16 @@ def _price_row(ticker: str, d: dt.date, close: int, *, basis: str = "krx",
         "corp_action_pending": False, "available_date": d, "available_basis": "default"}
 
 
-def _price_rows(*, bad_open: bool = False) -> list[dict]:
+def _price_rows(*, bad_volume: bool = False) -> list[dict]:
     rows: list[dict] = []
     for i, ticker in enumerate(REAL):
         for j, d in enumerate(SESSIONS):
             close = 70_000 + i * 1000 + j * 100
             rows.append(_price_row(ticker, d, close, value=VALUE_KRW + j,
                                    mktcap=(MKTCAP_KRW if i == 0 else MKTCAP_KRW_2) + j))
-    if bad_open:
-        rows[0]["open"] = None          # R7 — v3 NOT NULL 을 못 채우는 krx 행
+    if bad_volume:
+        # R7 — v3 NOT NULL 을 못 채우는 krx 행. O/H/L 공란은 종가로 채우므로(QL-F) 거래량을 비운다.
+        rows[0]["volume_shr"] = None
     # 저녁 잠정 T 행 — KRX 기본정보가 없어 OHL·거래대금·시총이 전부 NULL (GAP-1/D-8)
     rows.append(_price_row("000270", D23, 55_000, basis="evening", ohl=False,
                            value=None, mktcap=None))
@@ -522,6 +523,40 @@ def test_daily_prices_keeps_halted_reference_row_like_v3(tmp_path: Path) -> None
                          f"WHERE stock_code='{halted_ticker}'") == [(4200, 4200, 4200, 4200, 0, 0)]
 
 
+def test_daily_prices_fills_blank_ohl_on_trade_row_without_regular_session(tmp_path: Path) -> None:
+    """정규장 체결이 없던 날(price_kind='trade') KRX 가 O/H/L 을 공란으로 준 행 — v3 처럼 종가로 채운다.
+
+    서버 `v3_post --full`(730일) 게이트가 실측으로 잡은 모양: 145210 2025-03-21 close 1,126 · 거래량
+    1,015 · O/H/L 공란. v3 10-08 사본의 같은 행은 open=high=low=close=1126 이다(QL-F 리뷰). 정지 참고가
+    행만 채우던 규칙(QL-A2)으로는 v3 NOT NULL 에 걸려 빠졌다.
+    """
+    ticker = _filler_tickers(2)[1]                          # D23 universe 행이 있는 보통주
+    blank = _price_row(ticker, D23, 1_126, ohl=False, value=1_142_890)
+    blank.update(volume_shr=1_015)                          # price_kind 는 기본 'trade'
+    prices = _price_rows() + [blank]
+    roots2 = _make_roots(tmp_path / "b", price_rows=prices, adj_rows=_adj_rows(price_rows=prices))
+    target = tmp_path / "quant.db"
+    res = _run(roots2, target, tables=["daily_prices"])
+    assert (res.tables["daily_prices"].n_rows, res.tables["daily_prices"].n_skipped) == (7, 0)
+    assert _rows(target, "SELECT open, high, low, close, volume, amount FROM daily_prices "
+                         f"WHERE stock_code='{ticker}'") == [(1126, 1126, 1126, 1126, 1015, 1)]
+
+
+def test_daily_prices_counts_rows_written_on_date(roots, tmp_path: Path) -> None:
+    """신선도(T-31 ③) — 이번 실행이 **쓴** trade_date = D 행 수를 남긴다.
+
+    대상에 D 행이 이미 있어도(제자리 반영의 스테이징은 본 파일 사본이다) 이번에 안 썼으면 0 이다.
+    """
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["daily_prices"])
+    assert res.tables["daily_prices"].metrics == {"n_on_date": 2}     # 005930·000660 의 09-23
+    meta = json.loads(_rows(target, "SELECT tables FROM _compat_meta")[0][0])
+    assert meta["daily_prices"]["metrics"] == {"n_on_date": 2}
+    # 다음 날(09-24)을 D 로 — 판에 09-24 행이 없으니 기존 09-23 행이 대상에 있어도 0
+    res2 = _run(roots, target, date="20260924", tables=["daily_prices"])
+    assert res2.tables["daily_prices"].metrics == {"n_on_date": 0}
+
+
 def test_investor_flows_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path) -> None:
     target = tmp_path / "quant.db"
     res = _run(excluded_roots, target, tables=["investor_detail_flows"])
@@ -849,7 +884,7 @@ def test_adj_close_gap_refuses_and_records_failure(tmp_path: Path) -> None:
 
 # ── R7 — 건너뛴 행 비율 ──────────────────────────────────────────────────────
 def test_skip_ratio_over_limit_refuses(tmp_path: Path) -> None:
-    bad = _make_roots(tmp_path / "bad", price_rows=_price_rows(bad_open=True))
+    bad = _make_roots(tmp_path / "bad", price_rows=_price_rows(bad_volume=True))
     with pytest.raises(CompatError, match="건너뛴 행 비율"):
         _run(bad, tmp_path / "quant.db", tables=["daily_prices"])
 

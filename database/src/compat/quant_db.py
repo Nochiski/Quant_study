@@ -158,7 +158,8 @@ class TableResult:
     n_rows: int                 # 실제로 넣은 행
     n_skipped: int              # v3 NOT NULL/PK 를 못 채워 넣지 못한 행
     sources: dict[str, str]     # 원천 표 → build_id
-    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를 싣는다.
+    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를, `daily_prices` 는
+    # 이번에 쓴 trade_date = D 행 수(n_on_date — 제자리 반영 신선도 게이트, T-31 ③)를 싣는다.
     metrics: dict[str, int] = field(default_factory=dict)
 
 
@@ -390,6 +391,25 @@ def _chunks(cur: duckdb.DuckDBPyConnection) -> Iterator[list[tuple]]:
         yield rows
 
 
+def _complete(row: tuple, need: list[int]) -> bool:
+    """v3 필수 열(NOT NULL ∪ PK)이 다 찬 행 — `_upsert` 가 넣는 행의 정의."""
+    return all(row[i] is not None for i in need)
+
+
+def _count_on_date(chunks: Iterable[list[tuple]], columns: list[str], required: list[str],
+                   column: str, value: str, tally: dict[str, int]) -> Iterator[list[tuple]]:
+    """조각을 그대로 흘리며 `_upsert` 가 넣을 행 중 `column == value` 인 수를 `tally['n']` 에 센다.
+
+    신선도(컷오버 트랙 T-31 ③) — 제자리 반영의 대상은 v3 본 파일 사본이라 D 행이 이미 있을 수 있다.
+    '대상에 D 행이 있다' 가 아니라 '이번 실행이 D 행을 썼다' 를 남긴다.
+    """
+    i_col = columns.index(column)
+    need = [columns.index(c) for c in required]
+    for chunk in chunks:
+        tally["n"] += sum(1 for r in chunk if r[i_col] == value and _complete(r, need))
+        yield chunk
+
+
 def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
             chunks: Iterable[list[tuple]], required: list[str],
             post: Callable[[sqlite3.Connection], None] | None = None,
@@ -413,7 +433,7 @@ def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
         if pre is not None:
             pre(con)
         for chunk in chunks:
-            good = [r for r in chunk if all(r[i] is not None for i in need)]
+            good = [r for r in chunk if _complete(r, need)]
             n_skipped += len(chunk) - len(good)
             if good:
                 con.executemany(sql, good)
@@ -813,6 +833,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         try:
             for mapping in selected:
                 current = mapping.v3_table
+                on_date = {"n": 0}       # daily_prices 에 이번에 쓴 trade_date = D 행(T-31 ③)
                 sql, used = _render(mapping, params, builds)
                 if mapping.source_kind == MODEL:
                     if not scores:
@@ -839,10 +860,16 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                             con, mapping, columns, [rows], required["stocks"],
                             _mark_delisted(params["exported_at"]))
                     else:
-                        n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
+                        chunks: Iterable[list[tuple]] = _chunks(cur)
+                        if mapping.v3_table == "daily_prices":
+                            chunks = _count_on_date(chunks, columns, required["daily_prices"],
+                                                    "trade_date", params["date"], on_date)
+                        n_rows, n_skipped = _upsert(con, mapping, columns, chunks,
                                                     required[mapping.v3_table])
                 metrics = (_fin_source_counts(con)
-                           if mapping.v3_table == "financial_summary" else {})
+                           if mapping.v3_table == "financial_summary" else
+                           {"n_on_date": on_date["n"]}
+                           if mapping.v3_table == "daily_prices" else {})
                 results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics)
                 if mapping.v3_table == "daily_prices":
                     evening_skipped = _count_evening_skipped(

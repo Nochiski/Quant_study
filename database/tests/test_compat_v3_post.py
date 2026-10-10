@@ -16,10 +16,18 @@ from pathlib import Path
 
 import pytest
 
-from compat import export
+from compat import CompatError, export, v3_post
 from compat.mappings import MAPPINGS
 from compat.quant_db import SCHEMA_SQL_PATH, ExportResult, TableResult, _write_meta
-from compat.v3_post import TABLES, V3PostGateError, apply, gate, snapshot
+from compat.v3_post import (
+    SCORE_TABLES,
+    TABLES,
+    V3PostGateError,
+    apply,
+    gate,
+    snapshot,
+    tables_for,
+)
 
 D = "20261008"
 D_ISO = "2026-10-08"
@@ -89,10 +97,34 @@ def _make_main(path: Path) -> None:
         con.close()
 
 
+def _tr(table: str, *, n_rows: int = 2, skipped: int = 0, n_on_date: int = 1) -> TableResult:
+    """compat 표 결과 — daily_prices 는 이번에 쓴 D 행 수(`n_on_date`, T-31 ③)를 싣는다."""
+    return TableResult(n_rows=n_rows, n_skipped=skipped, sources={},
+                       metrics={"n_on_date": n_on_date} if table == "daily_prices" else {})
+
+
+def _meta(con: sqlite3.Connection, d_iso: str, basis: str, exported_at: str,
+          tables: tuple[str, ...] = TABLES, **kw) -> None:
+    """compat 실행 기록 1행(`quant_db._write_meta` 그대로)."""
+    _write_meta(con, ExportResult(
+        date=d_iso, basis=basis, target="x", exported_at=exported_at,
+        window={"days": 14, "full": False, "from_date": FROM_ISO, "to_date": d_iso},
+        consensus_asof=d_iso, tables={t: _tr(t, **kw) for t in tables}))
+
+
+def _main_record(main: Path, d_iso: str, basis: str, exported_at: str) -> None:
+    """본 파일에 앞선 ok 반영 기록을 둔다(v3_post 가 COMMIT 때 옮기는 그 행)."""
+    con = sqlite3.connect(str(main), isolation_level=None)
+    try:
+        _meta(con, d_iso, basis, exported_at)
+    finally:
+        con.close()
+
+
 def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
                  tables: tuple[str, ...] = TABLES, status: str = "ok",
                  date_iso: str = D_ISO, basis: str = "evening",
-                 drop_scores: bool = False) -> None:
+                 drop_scores: bool = False, n_on_date: int = 1) -> None:
     """스테이징에 compat 이 쓴 모양을 만든다(창 행 교체 · 점수 날짜 교체 · 스냅샷 · `_compat_meta` 1행).
 
     창 밖 날짜(BEFORE)와 점수 표의 다른 날(OTHER_SCORE_DATE)도 일부러 바꿔 둔다 — 반영이 창 밖을
@@ -138,8 +170,7 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
             window={"days": 14, "full": False, "from_date": FROM_ISO, "to_date": date_iso},
             consensus_asof="2026-10-07", status=status,
             failed_table=None if status == "ok" else "stocks",
-            tables={t: TableResult(n_rows=2, n_skipped=skipped.get(t, 0), sources={})
-                    for t in tables}))
+            tables={t: _tr(t, skipped=skipped.get(t, 0), n_on_date=n_on_date) for t in tables}))
     finally:
         con.close()
 
@@ -192,6 +223,67 @@ def test_snapshot_replaces_a_stale_staging_and_its_wal(files) -> None:
     snapshot(main, stg)
     assert not Path(f"{stg}-wal").exists() or Path(f"{stg}-wal").read_bytes() != b"stale wal"
     assert _rows(stg, "SELECT count(*) FROM daily_prices") == [(4,)]
+
+
+@pytest.mark.parametrize("how", ["same", "dotdot", "symlink", "hardlink", "wal"])
+def test_staging_on_main_path_is_refused_and_main_survives(files, how) -> None:
+    """MAJOR-1 — 스테이징이 본 파일(링크·사이드카 포함)이면 지우기 전에 거부한다. 가드가 없으면 본 파일이
+    사라진다."""
+    main, _ = files
+    if how == "same":
+        stg = main
+    elif how == "dotdot":
+        stg = main.parent / ".." / main.parent.name / main.name
+    elif how == "symlink":
+        stg = main.parent / "link.db"
+        stg.symlink_to(main)
+    elif how == "hardlink":
+        stg = main.parent / "hard.db"
+        stg.hardlink_to(main)
+    else:                                   # 본 파일의 -wal 경로 — 커밋된 데이터가 남아 있을 수 있다
+        stg = Path(f"{main}-wal")
+    before = _sha(main)
+    with pytest.raises(CompatError, match="같은 파일"):
+        snapshot(main, stg)
+    assert main.exists() and _sha(main) == before
+    with pytest.raises(CompatError, match="같은 파일"):
+        apply(stg, main, D, "evening")
+    assert _sha(main) == before
+
+
+def test_snapshot_refuses_when_disk_is_short(files, monkeypatch) -> None:
+    """MINOR-1 — 여유가 본 파일 크기 × 2 보다 작으면 스테이징을 뜨지 않는다(본 파일 무변경)."""
+    main, stg = files
+    need = main.stat().st_size * v3_post.DISK_FACTOR
+
+    class _Usage:
+        free = need - 1
+
+    monkeypatch.setattr(v3_post.shutil, "disk_usage", lambda _p: _Usage)
+    before = _sha(main)
+    with pytest.raises(CompatError, match="디스크 여유 부족"):
+        snapshot(main, stg)
+    assert not stg.exists() and _sha(main) == before
+
+
+def test_snapshot_failure_removes_partial_staging(files, monkeypatch) -> None:
+    """MINOR-1 — 백업이 도중에 실패하면 부분 사본을 남기지 않는다."""
+    main, stg = files
+
+    class _Src:
+        def backup(self, dst: sqlite3.Connection) -> None:
+            dst.execute("CREATE TABLE half (a)")
+            dst.commit()
+            raise sqlite3.OperationalError("disk I/O error")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(v3_post, "_ro", lambda _p: _Src())
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O"):
+        snapshot(main, stg)
+    assert not stg.exists()
+    assert not Path(f"{stg}-wal").exists() and not Path(f"{stg}-journal").exists()
 
 
 def test_snapshot_refuses_missing_main(tmp_path: Path) -> None:
@@ -300,7 +392,7 @@ def test_second_apply_appends_meta_and_replaces_window_again(files) -> None:
         exported_at="2026-10-08T23:30:00.000000+00:00",
         window={"days": 14, "full": False, "from_date": FROM_ISO, "to_date": D_ISO},
         consensus_asof="2026-10-08",
-        tables={t: TableResult(n_rows=1, n_skipped=0, sources={}) for t in TABLES}))
+        tables={t: _tr(t, n_rows=1) for t in TABLES if t not in SCORE_TABLES}))
     con.close()
     apply(stg, main, D, "morning")
     assert _rows(main, "SELECT basis FROM _compat_meta ORDER BY exported_at") == [
@@ -318,6 +410,7 @@ def test_second_apply_appends_meta_and_replaces_window_again(files) -> None:
     ({"tables": TABLES[:-1]}, "score_history_v2"),                   # 9표를 한 실행으로
     ({"date_iso": "2026-10-07"}, "날짜"),
     ({"basis": "morning"}, "basis"),
+    ({"n_on_date": 0}, "신선도"),                                    # T-31 ③ — 이번에 쓴 D 행 0
 ])
 def test_gate_failure_leaves_main_unchanged(files, kw, needle) -> None:
     main, stg = files
@@ -350,6 +443,101 @@ def test_gate_counts_rows_in_reflection_scope(files) -> None:
     assert report.counts["daily_prices"] == 4          # 창 안: 005930 ×2 · 000660 · 999990
     assert report.counts["score_history"] == 2
     assert report.counts["stocks"] == 3
+
+
+def test_gate_freshness_ignores_old_d_rows_already_in_main(files) -> None:
+    """스테이징은 본 파일 사본이라 옛 D 행(본 파일의 005930 10-08)이 이미 있다 — 그래도 이번 compat 이
+    D 행을 안 썼으면(n_on_date 0) 막는다."""
+    main, stg = files
+    snapshot(main, stg)
+    _fake_compat(stg, n_on_date=0)
+    report = gate(stg, main, D, "evening")
+    assert report.counts["daily_prices"] > 0
+    assert any("신선도" in f for f in report.failures)
+
+
+# ── T-34 아침 재반영 범위 ────────────────────────────────────────────────────
+def test_morning_after_evening_reflects_seven_tables_and_keeps_evening_scores(files) -> None:
+    main, stg = files
+    _main_record(main, D_ISO, "evening", "2026-10-08T07:30:00.000000+00:00")
+    assert tables_for(main, D, "morning") == tuple(t for t in TABLES if t not in SCORE_TABLES)
+    assert tables_for(main, D, "evening") == TABLES
+    snapshot(main, stg)
+    # 아침 compat 은 7표만 쓴다(점수 표는 compat 이 아예 안 고른다 — 아침 모델 판이 없어도 된다)
+    con = sqlite3.connect(str(stg), isolation_level=None)
+    con.execute("UPDATE daily_prices SET close = 555 WHERE trade_date = ?", (D_ISO,))
+    con.execute("UPDATE score_history SET composite_score = 99 WHERE score_date = ?", (D_ISO,))
+    _meta(con, D_ISO, "morning", "2026-10-08T23:30:00.000000+00:00",
+          tables=tables_for(main, D, "morning"))
+    con.close()
+    before = _rows(main, "SELECT * FROM score_history ORDER BY 1, 2")
+    report = apply(stg, main, D, "morning")
+    assert report.tables == tables_for(main, D, "morning")
+    assert _rows(main, "SELECT DISTINCT close FROM daily_prices WHERE trade_date=?",
+                 (D_ISO,)) == [(555,)]
+    assert _rows(main, "SELECT * FROM score_history ORDER BY 1, 2") == before   # 저녁 점수 그대로
+
+
+def test_morning_without_evening_record_needs_score_tables(files) -> None:
+    """장 마감 반영이 없던 날(T-7 대체 발송) — 아침이 점수 두 표까지 9표를 반영한다."""
+    main, stg = files
+    assert tables_for(main, D, "morning") == TABLES
+    snapshot(main, stg)
+    _fake_compat(stg, basis="morning", tables=tuple(t for t in TABLES if t not in SCORE_TABLES))
+    with pytest.raises(V3PostGateError, match="score_history"):
+        apply(stg, main, D, "morning")
+
+
+def test_failed_evening_record_does_not_count(files) -> None:
+    main, stg = files
+    con = sqlite3.connect(str(main), isolation_level=None)
+    _write_meta(con, ExportResult(
+        date=D_ISO, basis="evening", target="x", exported_at="2026-10-08T07:30:00+00:00",
+        window={}, consensus_asof=D_ISO, status="failed", failed_table="stocks"))
+    con.close()
+    assert tables_for(main, D, "morning") == TABLES
+
+
+# ── T-35 순서 가드 ───────────────────────────────────────────────────────────
+@pytest.mark.parametrize(("newer", "run"), [
+    (("2026-10-09", "evening"), "evening"),        # 다음 날 반영이 이미 있다
+    ((D_ISO, "morning"), "evening"),               # 같은 날 아침 확정이 이미 있다
+    (("2026-10-09", "evening"), "morning"),
+])
+def test_late_older_run_is_refused_and_main_unchanged(files, newer, run) -> None:
+    main, stg = files
+    _main_record(main, *newer, "2026-10-09T23:59:00.000000+00:00")
+    snapshot(main, stg)
+    _fake_compat(stg, basis=run, tables=tables_for(main, D, run))
+    before = _sha(main)
+    with pytest.raises(V3PostGateError, match="T-35"):
+        apply(stg, main, D, run)
+    assert _sha(main) == before
+    # 재생은 --allow-older 로 통과한다
+    assert apply(stg, main, D, run, allow_older=True).ok
+
+
+def test_same_date_and_basis_rerun_is_allowed(files) -> None:
+    main, stg = files
+    _main_record(main, D_ISO, "evening", "2026-10-08T07:00:00.000000+00:00")
+    snapshot(main, stg)
+    _fake_compat(stg)
+    assert apply(stg, main, D, "evening").ok
+
+
+# ── COMMIT 표식 ──────────────────────────────────────────────────────────────
+def test_commit_flag_only_after_commit(files, tmp_path: Path) -> None:
+    main, stg = files
+    flag = tmp_path / "committed"
+    snapshot(main, stg)
+    _fake_compat(stg, skipped={"daily_prices": 1})
+    with pytest.raises(V3PostGateError):
+        apply(stg, main, D, "evening", commit_flag=flag)
+    assert not flag.exists()
+    snapshot(main, stg)
+    _fake_compat(stg)
+    apply(stg, main, D, "evening", commit_flag=flag)
+    assert flag.exists()
 
 
 # ── 그림자 ───────────────────────────────────────────────────────────────────

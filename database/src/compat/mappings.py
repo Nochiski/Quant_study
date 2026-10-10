@@ -74,7 +74,12 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 #   사본 2026-07~08 정지 행 전부 같은 모양). v3 NOT NULL 에 걸려 조용히 빠지던 행(QL-A2 — 10-01~08
 #   재생에서 하루 102~104행)이라 **그 행의 비어 있는 O/H/L 만** 종가로 채운다. v3 외부 계약 때문의
 #   채움이고 equity·모델 입력으로는 돌아가지 않는다(원칙 ④ 는 equity 층 규칙).
-_REF_FILL = "CASE WHEN p.price_kind = 'reference' THEN p.close END"
+# 정지 행만이 아니다(QL-F): 정규장 체결 없이 시간외 체결만 있던 날도 KRX 가 O/H/L 을 공란으로 준다
+#   (price_kind='trade'). 서버 `v3_post --full`(730일) 게이트 실측 — 145210 2025-03-21 close 1,126 ·
+#   거래량 1,015 · O/H/L 공란 1행이 v3 NOT NULL 에 걸려 건너뛰어졌고, v3 10-08 사본의 같은 행은
+#   open=high=low=close=1126 이다. 그래서 **O/H/L 이 비고 종가가 있는 모든 krx 행**의 빈 칸을 종가로
+#   채운다(v3 와 같은 모양). 종가가 없으면 채우지 않는다(그 행은 NOT NULL 로 빠지고 게이트가 잡는다).
+_REF_FILL = "p.close"
 _DAILY_PRICES_SQL = f"""
 SELECT
     p.ticker                                       AS stock_code,

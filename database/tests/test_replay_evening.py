@@ -16,6 +16,9 @@ MG1/MG4 하한을 1 로, 운영 골든 종목이 없어 fi FG4 no_fixtures SKIP 
   · CLOSE_DIFF — 종가가 KRX 와 10원 다르다(애프터마켓 마지막 체결가 — 재생 대조의 '종가 정의')
   · L(대상)·K(대상, D' 가격 없음) — 원장 행 없음(장 마감 판에 T 가격 없음)
   · G(우선주 — 수집 대상 밖)·ETF — 원장에는 있지만 재생 원장에 옮기지 않는다
+연속 이틀 변형(`_home(second_day=True)`): T+1 도 성공하는 세계 — 21:05 원장에 T+1 행(종가 = KRX T+1
+종가, 기준가 = KRX T 종가), 현판에 T+1 수정주가·수급 행과 T+1 기준가, WISE 컨센서스(연간·매트릭스)에 T 수집분(D 수집분
+사본 — 없으면 연구 판 T+1 이 FG-fresh 수집 지연 2세션으로 실패한다).
 """
 from __future__ import annotations
 
@@ -39,10 +42,12 @@ TOOL = DB / "scripts" / "replay_tool.py"
 EVT = DB / "scripts" / "replay_evening.py"
 T, T_S = tf.T, tf.T_S                       # 2026-09-29
 DP_S = tf.D_S                               # D' = 2026-09-28
-T1 = dt.date(2026, 9, 30)                   # 현판이 온 마지막 세션(재생 대상 밖)
+T1 = dt.date(2026, 9, 30)                   # 현판이 온 마지막 세션(연속 이틀 변형에서만 재생 대상)
+T1_S = "20260930"
 EQ_CUR = "m_20261001T000500_000000Z"
 ST_BUILD = tf.ST_BUILD
 KW_STAMP = "2026-09-29T12:05:31"            # 21:05 KST(UTC) — 원장 행의 수집 시각
+KW_STAMP_T1 = "2026-09-30T12:05:44"         # 연속 이틀 변형의 T+1 행
 CLOSE_DIFF = tf.EXTRA[2]
 NO_ROW = (tf.L, tf.K)                       # 수집 대상인데 21:05 원장에 행이 없다
 NOT_TARGET = (tf.G, tf.ETF)                 # 21:05 원장에는 있지만 수집 대상 밖
@@ -86,8 +91,9 @@ def _kw_flows(t: str) -> list[int]:
 T_TICKERS = [t for t in tf.SPEC if t not in (tf.K, tf.DELISTED)]      # KRX T 가격이 있는 종목
 
 
-def _current_rows() -> dict[str, list[dict]]:
-    """현판에만 있는 D' 뒤 행 — T 는 연구 판 T(KRX) 값, T+1 은 달력·유니버스·가격만."""
+def _current_rows(second_day: bool = False) -> dict[str, list[dict]]:
+    """현판에만 있는 D' 뒤 행 — T 는 연구 판 T(KRX) 값, T+1 은 달력·유니버스·가격만(연속 이틀 변형은
+    T+1 수정주가·수급도)."""
     out: dict[str, list[dict]] = {
         "trading_calendar": [{"date": T, "prev_td": tf.D, "next_td": T1},
                              {"date": T1, "prev_td": T, "next_td": None}],
@@ -96,52 +102,58 @@ def _current_rows() -> dict[str, list[dict]]:
     for t in T_TICKERS:
         for day, close in ((T, _close(t)), (T1, _close(t) + 50)):
             out["price_daily"].append(tf._price_row(t, day, close))
-        share, po = tf.ADJ_FACTOR.get(t, 1.0), tf._price_only(t, T)
-        out["price_adj_daily"].append({"ticker": t, "date": T, "adj_close": _close(t) * share / po,
-                                       "cum_share_factor": share, "cum_price_only_factor": po,
-                                       "n_unadjusted_events": 0, "basis": "krx"})
-        if t in (tf.ETF, tf.L):                    # 21:05 수집 밖·원장 없음 — 연구 판 수급도 없다
-            continue
-        row: dict = {"date": T, "ticker": t, "src": "kiwoom"}
-        for i, col in enumerate(tf._FLOW_COLS):
-            row[col] = _kw_flows(t)[i] * 1_000_000
-        out["flow_daily"].append(row)
+        for day, close in ((T, _close(t)), (T1, _close(t) + 50))[:2 if second_day else 1]:
+            share, po = tf.ADJ_FACTOR.get(t, 1.0), tf._price_only(t, day)
+            out["price_adj_daily"].append({"ticker": t, "date": day, "adj_close": close * share / po,
+                                           "cum_share_factor": share, "cum_price_only_factor": po,
+                                           "n_unadjusted_events": 0, "basis": "krx"})
+            if t in (tf.ETF, tf.L):                # 21:05 수집 밖·원장 없음 — 연구 판 수급도 없다
+                continue
+            row: dict = {"date": day, "ticker": t, "src": "kiwoom"}
+            for i, col in enumerate(tf._FLOW_COLS):
+                row[col] = _kw_flows(t)[i] * 1_000_000
+            out["flow_daily"].append(row)
     return out
 
 
 def _with_krx_base(eq_root: Path) -> None:
     """현판 equity `price_daily` 에 KRX 기준가 열(`base_price_krw`)을 붙인다 — fi 는 읽지 않아 합성
     원천에 없고, 두 판 대조가 T-6 증거로 T 행을 읽는다(`test_board_compare._with_krx_base` 와 같은
-    방식). T 에 기업행위가 없으니 T 기준가 = D' 종가."""
+    방식). 기업행위가 없으니 T 기준가 = D' 종가, T+1 기준가 = T 종가."""
     import duckdb
     part = eq_root / "price_daily" / f"v={EQ_CUR}" / "part0.parquet"
-    vals = ", ".join(f"('{t}', {tf.D_CLOSE[t]})" for t in T_TICKERS)
+    vals = ", ".join(f"('{t}', {tf.D_CLOSE[t]}, {_close(t)})" for t in T_TICKERS)
     con = duckdb.connect()
     try:
-        con.execute(f"COPY (SELECT p.*, CASE WHEN p.date = DATE '{T.isoformat()}' THEN m.b END "
+        con.execute(f"COPY (SELECT p.*, CASE WHEN p.date = DATE '{T.isoformat()}' THEN m.b "
+                    f"WHEN p.date = DATE '{T1.isoformat()}' THEN m.b1 END "
                     f"AS base_price_krw FROM read_parquet('{part}') p LEFT JOIN (VALUES {vals}) "
-                    f"m(t, b) ON m.t = p.ticker) TO '{part}.x' (FORMAT PARQUET)")
+                    f"m(t, b, b1) ON m.t = p.ticker) TO '{part}.x' (FORMAT PARQUET)")
     finally:
         con.close()
     Path(f"{part}.x").replace(part)
 
 
-def _kiwoom_db(path: Path) -> None:
-    """21:05 키움 원장 — 운영 수집기와 같은 표 규약(`kw_daily.ensure_table`)."""
+def _kiwoom_db(path: Path, second_day: bool = False) -> None:
+    """21:05 키움 원장 — 운영 수집기와 같은 표 규약(`kw_daily.ensure_table`). 연속 이틀 변형은 T+1
+    행도(종가 = KRX T+1 종가, 전일 대비 = KRX T 종가 기준)."""
     from daily import kw_daily, postclose
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
     kw_daily.ensure_table(con, postclose.TABLE, postclose.COLS)
     names = ["ticker", *postclose.COLS, "src_api", "collected_at"]
-    for t in T_TICKERS:
-        if t in NO_ROW:
-            continue
-        close = _close(t) + (10 if t == CLOSE_DIFF else 0)
-        move = close - tf.D_CLOSE[t]
-        vals = [t, T_S, f"+{close}", f"{move:+d}", str(1_000 * tf.IDX[t]),
-                *[str(v) for v in _kw_flows(t)], "ka10060", KW_STAMP]
-        con.execute(f'INSERT INTO "{postclose.TABLE}" ({",".join(names)}) VALUES '
-                    f'({",".join("?" * len(names))})', vals)
+    days = ((T_S, tf.D_CLOSE.__getitem__, _close, KW_STAMP),
+            (T1_S, _close, lambda t: _close(t) + 50, KW_STAMP_T1))[:2 if second_day else 1]
+    for day, prev, krx, stamp in days:
+        for t in T_TICKERS:
+            if t in NO_ROW:
+                continue
+            close = krx(t) + (10 if t == CLOSE_DIFF else 0)
+            move = close - prev(t)
+            vals = [t, day, f"+{close}", f"{move:+d}", str(1_000 * tf.IDX[t]),
+                    *[str(v) for v in _kw_flows(t)], "ka10060", stamp]
+            con.execute(f'INSERT INTO "{postclose.TABLE}" ({",".join(names)}) VALUES '
+                        f'({",".join("?" * len(names))})', vals)
     # 다른 날 행 — 재생은 dt=T 만 옮긴다
     con.execute(f'INSERT INTO "{postclose.TABLE}" (ticker, dt, cur_prc, collected_at) VALUES '
                 "(?, ?, ?, ?)", (tf.A, DP_S, "+1", KW_STAMP))
@@ -164,19 +176,29 @@ def _snapshot(root: Path) -> dict[str, tuple[str, str]]:
     return out
 
 
-def _home(base: Path) -> SimpleNamespace:
-    """운영 루트 대역 + 앞 패스가 equity 를 지은 출력 루트."""
+def _home(base: Path, second_day: bool = False) -> SimpleNamespace:
+    """운영 루트 대역 + 앞 패스가 equity 를 지은 출력 루트. `second_day` 는 T+1 도 성공하는 연속 이틀
+    변형(모듈 docstring)."""
     home = base / "home"
     ops = home / "quant-ledger"
     py = ops / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True)
     py.write_text(_SHIM.replace("{real}", sys.executable), encoding="utf-8")
     py.chmod(0o755)
-    eq, st = tf.make_roots(base / "src", eq_build=EQ_CUR, extra=_current_rows())
+    eq, st = tf.make_roots(base / "src", eq_build=EQ_CUR, extra=_current_rows(second_day))
     _with_krx_base(eq)
+    if second_day:
+        # WISE 컨센서스 T 수집분(D 수집분 사본) — 같은 판(ST_BUILD)으로 두 표를 다시 세운다
+        from conftest import _make_stage_tree
+        for table, rows in (("stg_consensus_annual", tf._consensus_annual()),
+                            ("stg_consensus_matrix", tf._matrix())):
+            rows += [dict(r, fetched_date=T) for r in rows if r["fetched_date"] == tf.D]
+            _make_stage_tree(base / "src2", table, rows, build_id=ST_BUILD)
+            shutil.rmtree(st / table)
+            shutil.copytree(base / "src2" / "stage" / table, st / table)
     shutil.copytree(st, ops / "data" / "stage")
     tf._cal_dir(ops / "data")
-    _kiwoom_db(ops / "data" / "raw" / "kiwoom.db")
+    _kiwoom_db(ops / "data" / "raw" / "kiwoom.db", second_day)
     out = home / "replay" / "ev"
     shutil.copytree(eq, out / "data" / "equity")
     (out / "logs" / "pass1").mkdir(parents=True)
@@ -363,6 +385,57 @@ def test_dates_range_keeps_going_past_a_failed_day_and_a_second_pass_reproduces(
     def hashes(path: Path) -> dict[str, str]:
         return {x[1]: x[5] for x in _tsv(path)[1:] if x[0] == "fi_e@" + T_S and x[1] != "-"}
     assert hashes(log3 / "summary.tsv") == hashes(log / "summary.tsv") != {}
+
+
+def test_two_consecutive_days_both_pass_end_to_end(tmp_path) -> None:
+    """PR-8b 리뷰 MINOR-5 — 연속 이틀이 둘 다 성공하는 경로를 끝까지 본다(여러 날 테스트의 픽스처에 T+1
+    원장·현판 행을 더한 변형): 장 마감 stage 두 번째 단독 빌드(직전 판 대비 G5 통과) · 둘째 날 장 마감 판은
+    첫날 재생 연구 판 T 를 D' 로 고정(인계 이력 · 세션 자르기 · 후보) · board.tsv 두 줄 다 pass."""
+    w = _home(tmp_path.resolve(), second_day=True)
+    r = _run(w.home, "--out", str(w.out), "--basis", "evening", "--dates", f"{T_S}-{T1_S}",
+             "--steps", "board", "--code", str(DB), "--spearman-min", "0")
+    assert r.rc == 0, r.out
+    log, mdb = w.out / "logs" / "pass2", w.out / "data" / "model_db"
+    steps = [(x[0], x[2]) for x in _tsv(log / "summary.tsv")[1:] if x[1] == "-"]
+    want = ["fi_r@" + DP_S] + [f"{s}@{day}" for day in (T_S, T1_S)
+                               for s in ("postclose", "pc_stage", "fi_e", "model_e", "fi_r",
+                                         "model_r", "compare")]
+    assert [s for s, _ in steps] == want and {rc for _, rc in steps} == {"0"}, r.out
+
+    # ② 장 마감 stage 두 번째 단독 빌드 — 첫 판은 G5 기준 없음(skip), 둘째 판은 첫 판 대비 G5 pass
+    m = _json(mdb / "stage" / "stg_flow_postclose_kiwoom" / "MANIFEST.json")
+    builds = m["builds"]
+    assert len(builds) == 2 and m["current_build"] == builds[1]["build_id"]
+    g5 = [{g["name"]: g for g in b["gates"]}["G5"] for b in builds]
+    assert [g["status"] for g in g5] == ["skip", "pass"], g5
+    assert g5[1]["metrics"]["d_stage"] == 0                # 같은 대상 · 같은 원장 행 수
+
+    # ③ 둘째 날 장 마감 판 = 첫날 재생 연구 판 T 를 D' 로 고정
+    first_r = _json(w.out / "data" / "factor_inputs" / "_runs" / f"{T_S}_morning.json")
+    run = _json(mdb / "factor_inputs" / "_runs" / f"{T1_S}_evening.json")
+    hist = w.out / "data" / "deliver" / "history" / f"{T_S}_morning.json"
+    assert run["status"] == "ok" and run["asof"] == T.isoformat()
+    assert run["builds_from"] == str(hist) and run["builds_from_date"] == T_S
+    assert run["replay"]["session_cut"] == T.isoformat()
+    assert run["postclose_builds"] == {"stg_flow_postclose_kiwoom": builds[1]["build_id"]}
+    db = w.out / "data" / "postclose_replay" / "pass2" / T1_S / "postclose.db"
+    con = sqlite3.connect(db)
+    try:
+        (src,) = con.execute("SELECT d_prime, fi_build FROM replay_source").fetchall()
+    finally:
+        con.close()
+    assert src == (T_S, first_r["build_id"])               # 수집 대상 ① = 첫날 연구 판 후보
+    ev_t1 = {t: c for t, c in tf.q(mdb / "factor_inputs", "fi_prices",
+                                   f"SELECT ticker, close FROM t WHERE date = DATE '{T1}'")}
+    assert ev_t1[tf.A] == _close(tf.A) + 50 and ev_t1[CLOSE_DIFF] == _close(CLOSE_DIFF) + 60
+
+    # ⑥ 두 날 다 대조 pass, board.tsv 두 줄 pass
+    for day in (T_S, T1_S):
+        rep = _json(mdb / "compare" / f"{day}.json")
+        assert rep["replay"] is True and rep["verdict"] == "pass" and rep["n_unexplained"] == 0, rep
+    board = _tsv(log / "board.tsv")
+    assert [(x[0], x[1], x[7]) for x in board[1:3]] == [(T_S, "pass", "-"), (T1_S, "pass", "-")]
+    assert board[-1][0].startswith("대조 2일 — pass 2 · fail 0 · error 0 · 없음 0")
 
 
 # ── 인자 · 입력 검사(아무것도 쓰기 전) ──────────────────────────────────────────

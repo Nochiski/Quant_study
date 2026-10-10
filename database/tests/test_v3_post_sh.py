@@ -182,6 +182,10 @@ def _main_db(tmp_path: Path) -> Path:
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8") + MARKET_INDICES_DDL)
     con.execute("INSERT INTO daily_prices VALUES ('005930', '2020-01-02', 1, 1, 1, 7, 1, 1, 7.0)")
+    # 수급 표도 가격 표처럼 이력이 730일 창 앞에서 시작한다(실물 v3 모양) — 첫 `--full` 이 빈 수급 표에 09-21 부터
+    # 쓰면 다음 `--full` 이 제자리 하한(T-46 — 창 시작 < 이력 시작)에 걸려 이어 돌리는 시나리오가 막힌다
+    con.execute("INSERT INTO investor_detail_flows (stock_code, trade_date, individual) "
+                "VALUES ('005930', '2020-01-02', -1)")
     con.execute("INSERT INTO market_indices VALUES ('001', ?, 1, 1, 1, 2500, 1)", (D_ISO,))
     con.commit()
     con.close()
@@ -649,6 +653,31 @@ def test_gate_failure_leaves_main_unchanged(env, skip_sources, tmp_path) -> None
     assert (home / "data/_v3_post/staging_morning.db").exists()            # 실패하면 남긴다
 
 
+def test_in_place_full_before_v3_history_is_rc2_then_window_days_fits(env, sources,
+                                                                       tmp_path) -> None:
+    """T-46 — 제자리 `--full` 창(730일, 2024-09-23~)이 v3 investor_detail_flows 이력 시작(2025-01-23)보다 앞이면
+    compat 이 쓰기 전에 멈춘다(rc 2 crit, 본 파일 무변경). `--window-days` 로 창을 이력 안에 맞추면 반영된다."""
+    _, main = env
+    con = sqlite3.connect(str(main))
+    con.execute("DELETE FROM investor_detail_flows")
+    con.execute("INSERT INTO investor_detail_flows (stock_code, trade_date, individual) "
+                "VALUES ('005930', '2025-01-23', -1)")
+    con.commit()
+    con.close()
+    before = _sha(main)
+    r = _run(tmp_path, sources, *_base(main))
+    assert r.rc == 2, r.out
+    assert "investor_detail_flows 이력 시작 2025-01-23" in r.out
+    assert _sha(main) == before
+    crit = _levels(r, "crit")
+    assert len(crit) == 1 and "② compat export --in-place" in crit[0]
+    days = (dt.date(2026, 9, 23) - dt.date(2025, 1, 23)).days
+    r2 = _run(tmp_path, sources, *_base(main, "--window-days", str(days)))
+    assert r2.rc == 0, r2.out
+    window = json.loads(_q(main, 'SELECT "window" FROM _compat_meta')[0][0])
+    assert (window["from_date"], window["full"]) == ("2025-01-23", True)
+
+
 def test_compat_failure_leaves_main_unchanged(env, sources, tmp_path) -> None:
     """그날 모델 판이 없다 — compat 이 멈추고 반영·daily_post 는 돌지 않는다."""
     home, main = env
@@ -770,6 +799,7 @@ def test_morning_with_post_cmd_is_rc5(env, sources, tmp_path) -> None:
     ["--date", D, "--basis", "morning"],                             # v3 경로 없음
     ["--date", D, "--basis", "morning", "--v3-db", "NOPE"],
     ["--date", D, "--basis", "morning", "--v3-db", "MAIN", "--bogus"],
+    ["--date", D, "--basis", "morning", "--v3-db", "MAIN", "--window-days", "600"],  # --full 없음
 ])
 def test_argument_errors_are_rc5_warn(env, sources, tmp_path, args) -> None:
     home, main = env

@@ -980,6 +980,63 @@ def test_full_window_stays_730_calendar_days(roots, tmp_path: Path) -> None:
                           "to_date": "2026-09-23"}
 
 
+# ── T-46 — 제자리 --full 창은 대상 v3 표의 이력 시작보다 앞으로 가지 않는다 ─────────────
+# 창이 v3 이력 시작 앞이면 v3 소비자 표에 없던 앞 기간 행이 생긴다(서버 10-08 사본 `--full` 재생). 그래서
+# 대상에 쓰기 전에 멈추고(rc 2) `--window-days` 로 창을 이력 안에 맞추게 한다.
+_V3_HISTORY = {"daily_prices": "2025-01-02", "investor_detail_flows": "2025-01-23"}
+
+
+def _v3_target(path: Path, history: dict[str, str]) -> Path:
+    """v3 본 파일 모양의 대상(WAL — v3 `connection.py` 와 같다). 표마다 `history` 날짜에 첫 행 하나."""
+    con = sqlite3.connect(str(path))
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript(quant_db.SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
+        if "daily_prices" in history:
+            con.execute("INSERT INTO daily_prices VALUES ('005930', ?, 1, 1, 1, 7, 1, 1, 7.0)",
+                        (history["daily_prices"],))
+        if "investor_detail_flows" in history:
+            con.execute("INSERT INTO investor_detail_flows (stock_code, trade_date, individual) "
+                        "VALUES ('005930', ?, -1)", (history["investor_detail_flows"],))
+        con.commit()
+    finally:
+        con.close()
+    return path
+
+
+def test_in_place_full_before_target_history_refuses_before_writing(roots, tmp_path: Path,
+                                                                    capsys) -> None:
+    """730일 창(2024-09-23~)이 두 표의 이력 시작보다 앞 — rc 2, 대상 바이트 그대로. 메시지에 표·이력 시작·창 시작과
+    맞출 `--window-days`(as_of − 늦은 이력 시작)가 있다. 그 값으로 맞추면 지난다."""
+    target = _v3_target(tmp_path / "quant.db", _V3_HISTORY)
+    cal = _calendar(tmp_path)
+    before = target.read_bytes()
+    days = (D23 - dt.date(2025, 1, 23)).days
+    rc = cli_main(["export", "--date", AS_OF, "--basis", "morning", "--equity-root", str(roots[0]),
+                   "--stage-root", str(roots[1]), "--target", str(target),
+                   "--tables", "daily_prices,investor_detail_flows", "--full", "--in-place",
+                   "--calendar-dir", str(cal)])
+    err = capsys.readouterr().err
+    assert rc == 2
+    for needle in ("daily_prices 이력 시작 2025-01-02", "investor_detail_flows 이력 시작 2025-01-23",
+                   "창 시작 2024-09-23", f"--window-days {days}"):
+        assert needle in err, err
+    assert target.read_bytes() == before
+    res = _run(roots, target, tables=["daily_prices", "investor_detail_flows"], in_place=True,
+               window_days=days, calendar_dir=cal)
+    assert res.status == "ok" and res.window["from_date"] == "2025-01-23"
+
+
+@pytest.mark.parametrize("history, in_place", [({}, True),             # 대상 표가 비었다(이력 없음)
+                                                (_V3_HISTORY, False)])  # 그림자(별도 파일)
+def test_full_history_floor_skips_empty_tables_and_shadow(roots, tmp_path: Path, history,
+                                                         in_place) -> None:
+    target = _v3_target(tmp_path / "quant.db", history)
+    res = _run(roots, target, tables=["daily_prices", "investor_detail_flows"], in_place=in_place,
+               calendar_dir=_calendar(tmp_path))
+    assert res.status == "ok" and res.window["from_date"] == "2024-09-23"
+
+
 # ── --builds-from (과거 날짜 비교) ───────────────────────────────────────────
 def test_builds_from_pins_an_older_build(tmp_path: Path) -> None:
     """current_build 가 아니라 인계 이력이 가리킨 판을 읽는다."""

@@ -34,6 +34,7 @@ M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자
   · 날짜 단위 교체 표의 새 원천에 `--date` 행 0                                       (QL-D)
   · `daily_prices` 의 `adj_close` 결측 비율 > 1%              (R9 — 장 마감 판 T 단계 미상 NULL 이 몰린 날)
   · 제자리 반영(`--in-place`) 창이 5세션 미만(daily.calendar)    (QL-E MINOR-1 — T-41 덮어쓰기 행이 창 안에서 끝나야 한다)
+  · 제자리 `--full` 창 시작이 대상 가격·수급 표 이력 시작보다 앞  (T-46 — v3 에 없던 앞 기간 행, `--window-days` 로 맞춘다)
   · 증분 창 시작일(10거래일 전)을 판정 달력으로 못 센다          (K1-9d — 영업일 가정 없음, K1-9 ⑦)
   · 증분인데 대상 DB 가 얕다(종목당 세션 중앙값 < 260)         (R10)
   · `stocks` 종목 수 < 2,000 · `market` 어휘 위반             (R2 · R4)
@@ -104,6 +105,8 @@ MAX_SKIP_RATIO = 0.05
 MAX_ADJ_NULL_RATIO = 0.01
 # 증분 실행을 허용할 대상 DB 의 깊이(종목당 세션 수 중앙값). v3 모멘텀 240행 + 여유.
 MIN_MEDIAN_SESSIONS = 260
+# 제자리 `--full` 창이 대상 이력 시작보다 앞으로 가면 안 되는 날짜 창 표(T-46 — `_guard_history_floor`).
+HISTORY_TABLES = ("daily_prices", "investor_detail_flows")
 # 판 접두어가 말하는 basis 중 '어느 쪽으로 내보내도 되는' 값. 수동 재빌드(`b_`)가 여기 든다.
 _BASIS_ANY = "manual"
 # `--basis` 별로 더 받는 판 basis. 장 마감 판(evening, 컷오버 T-2)은 직전 거래일 연구 확정판
@@ -728,6 +731,28 @@ def _guard_window_sessions(as_of: date, from_iso: str, calendar_dir: Path | None
             "안에서 끝나지 않는다 — --window-days 를 늘린다")
 
 
+def _guard_history_floor(con: sqlite3.Connection, existed: set[str], tables: list[str],
+                         as_of: date, from_iso: str) -> None:
+    """T-46 — 제자리 `--full` 창 시작이 대상 표(`HISTORY_TABLES`)의 이력 시작(min(trade_date))보다 앞이면 쓰기 전에 멈춘다.
+
+    v3 소비자 표에 없던 앞 기간 행이 생긴다(서버 10-08 사본 `--full` 재생 — v3 이력 시작 앞 가격 142,640·수급 약
+    183,000행). 대상 표가 없거나 비었으면(이력 없음) 보지 않는다. 맞출 `--window-days` 는 as_of 에서 가장 늦은
+    이력 시작까지의 달력일이다(그 창이면 시작 = 이력 시작).
+    """
+    late: list[tuple[str, str]] = []
+    for table in (t for t in HISTORY_TABLES if t in tables and t in existed):
+        row = con.execute(f'SELECT min(trade_date) FROM "{table}"').fetchone()
+        if row is not None and row[0] is not None and from_iso < str(row[0]):
+            late.append((table, str(row[0])))
+    if late:
+        days = min((as_of - date.fromisoformat(start)).days for _, start in late)
+        raise CompatError(
+            "제자리 --full 창이 대상 v3 이력보다 앞이다: "
+            + " · ".join(f"{t} 이력 시작 {s}" for t, s in late)
+            + f" > 창 시작 {from_iso} — v3 소비자 표에 없던 앞 기간 행이 생긴다(T-46). 쓰기 전에 멈춘다. "
+            f"--window-days {days} 이하로 창을 이력 안에 맞춘다(as_of {as_of.isoformat()} 기준)")
+
+
 def _ensure_meta_columns(con: sqlite3.Connection) -> None:
     """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식).
 
@@ -1023,6 +1048,9 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         if evening and not allow_older:
             _guard_evening_order(con, params["date"])
         existed = _existing_tables(con)
+        if in_place and full:
+            _guard_history_floor(con, existed, [m.v3_table for m in selected], as_of,
+                                 params["from_date"])
         required = _ensure_schema(con, [m.v3_table for m in selected])
         if not full and any(m.v3_table == "daily_prices" for m in selected):
             _guard_incremental(con, existed)

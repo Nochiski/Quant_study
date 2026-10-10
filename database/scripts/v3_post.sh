@@ -51,8 +51,11 @@
 #       6 반영 완료, daily_post 실패 또는 날짜가 달라 미호출(warn)
 #   사용: v3_post.sh --date YYYYMMDD --basis evening|morning --v3-db PATH
 #                    [--v3-post-cmd CMD] [--shadow] [--allow-older] [--staging PATH] [--model-root PATH]
-#                    [--full] [--builds-from PATH] [--consensus-asof YYYYMMDD] [--no-scores]
-#     --full 은 첫 반영(K3-2 — 730일 창을 한 트랜잭션으로)과 얕은 대상용이다. 매일 쓰지 않는다(COMPAT_LAYER §8 V3-C).
+#                    [--full [--window-days N]] [--builds-from PATH] [--consensus-asof YYYYMMDD] [--no-scores]
+#     --full 은 손 복구(반영이 끊겨 사건 단계까지 창 밖으로 나갔거나 equity 원값이 바뀐 경우)와 얕은 대상용이다. 매일
+#     쓰지 않고, 첫 반영(V3-C)도 매일과 같은 증분 창이다(T-46, COMPAT_LAYER §8 V3-C). 제자리 --full 창 시작이 대상 v3
+#     표(daily_prices·investor_detail_flows)의 이력 시작보다 앞이면 ② compat 이 쓰기 전에 멈춘다(rc 2) — 그 메시지의
+#     --window-days N 으로 창을 이력 안에 맞춘다(--full 과 함께만, compat export 에 그대로 넘긴다).
 #     --allow-older 는 재생 전용이다(T-35). ② compat export 와 ③④ apply 둘 다에 넘긴다 — compat 의 장 마감 판도
 #     같은 순서 판정으로 더 나중 반영 위에 쓰기를 거부한다(QL-D).
 #   ② 의 장 마감 판(--basis evening)은 가격·수급 T 행을 원장 두 개에서 만든다(QL-D) — QL_POSTCLOSE_DB(기본
@@ -73,7 +76,7 @@ MODEL_ROOT="${QL_MODEL_ROOT:-data/model}"
 POSTCLOSE_DB="${QL_POSTCLOSE_DB:-data/raw/postclose.db}"
 KIWOOM_DB="${QL_KIWOOM_DB:-data/raw/kiwoom.db}"
 V3_DB="${QL_V3_DB:-}"; POST_CMD="${QL_V3_POST_CMD:-}"
-D=""; BASIS=""; SHADOW=""; STAGING=""; FULL=""; BUILDS=""; CONS=""; OLDER=""; NOSCORES=""
+D=""; BASIS=""; SHADOW=""; STAGING=""; FULL=""; BUILDS=""; CONS=""; OLDER=""; NOSCORES=""; WINDOW=""
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 die_arg() {
   echo "v3_post 인자 오류: $1" >&2
@@ -106,6 +109,7 @@ while [ $# -gt 0 ]; do
     --allow-older) OLDER=1; shift ;;
     --no-scores) NOSCORES=1; shift ;;
     --full) FULL="--full"; shift ;;
+    --window-days) need_val "$@"; WINDOW="$2"; shift 2 ;;
     *) die_arg "모르는 인자 '$1'" ;;
   esac
 done
@@ -121,6 +125,8 @@ esac
   die_arg "--basis morning 에 daily_post 명령(--v3-post-cmd·QL_V3_POST_CMD)을 줬다 — 아침 재반영은 compat 만(T-31)"
 [ -n "$NOSCORES" ] && [ "$BASIS" != evening ] &&
   die_arg "--no-scores 는 --basis evening 전용이다 — 아침 반영 표는 T-34 가 정한다(T-38)"
+[ -n "$WINDOW" ] && [ -z "$FULL" ] &&
+  die_arg "--window-days 는 --full 과 함께만 쓴다 — 제자리 --full 창을 대상 v3 이력 안에 맞출 때(T-46)"
 [ -n "$NOSCORES" ] && [ -n "$POST_CMD" ] &&
   die_arg "--no-scores 에 daily_post 명령(--v3-post-cmd·QL_V3_POST_CMD)을 줬다 — 점수 없는 반영은 compat 만(T-38)"
 [ -n "$V3_DB" ] || die_arg "--v3-db(또는 QL_V3_DB)가 없다 — v3 quant.db 경로는 인자로만 받는다"
@@ -170,7 +176,8 @@ step "①' 반영 표" plan_tables &&
 step "② compat export --in-place" "$PY" -m compat export --date "$D" --basis "$BASIS" \
     --equity-root "$EQUITY_ROOT" --stage-root "$STAGE_ROOT" --model-root "$MODEL_ROOT" \
     --target "$STAGING" --in-place --tables "$TABLES" $FULL ${CONS:+--consensus-asof "$CONS"} \
-    ${BUILDS:+--builds-from "$BUILDS"} ${OLDER:+--allow-older} ${LEDGERS[@]+"${LEDGERS[@]}"} &&
+    ${WINDOW:+--window-days "$WINDOW"} ${BUILDS:+--builds-from "$BUILDS"} ${OLDER:+--allow-older} \
+    ${LEDGERS[@]+"${LEDGERS[@]}"} &&
 step "③④ 게이트·반영" "$PY" -m compat apply --staging "$STAGING" --v3-db "$V3_DB" \
     --date "$D" --basis "$BASIS" --commit-flag "$CF" ${SHADOW:+--shadow} ${OLDER:+--allow-older} \
     ${NOSCORES:+--no-scores}

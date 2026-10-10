@@ -76,7 +76,10 @@ from . import gates, queries
 # 달력 ∪ {T}, 유니버스 = D' 행 이월 · 시총 = D' 주식수 × T 종가(`t1_shares_x_t_close`, T 행 자리
 # `_t_prices`, 출처 어휘 'postclose'), WISE·DART·universe_daily·WICS·기업행위 입력 fetched/available
 # ≤ D'(asof). 아침판 SQL 은 그대로
-RULES_VERSION = "fi1.5.0"
+# 1.6.0(2026-10-10, 컷오버 H1-4 · T-9): fi_adj_prices.adj_jump_ok 열 — 가격 축 미해결 사건 적용일 앞뒤
+# 6세션 안에서 수익률이 그날 가격제한폭을 넘는 점프 행마다 뒤집히는 계단 표식(scope 모멘텀·20일 변동성
+# 결측 판정의 재료)
+RULES_VERSION = "fi1.6.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)

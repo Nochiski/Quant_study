@@ -47,6 +47,9 @@ ALLOW_DAYS: dict[str, int] = {
     # 키움
     "stg_flow_daily_kiwoom": 10, "stg_short_daily_kiwoom": 10, "stg_foreign_daily": 10,
     "stg_lending_daily": 10, "stg_master_daily": 10,
+    # 장 마감 직후 판(컷오버 PR-2) — T 15:41 수집이라 장 마감 체인 판(D = T)에 D 가 그대로 든다. 연구 체인은 이 표를
+    # 짓지 않는다(run_stage_all.sh skipped). 장 마감 체인이 이 표를 판정할 때 쓰는 값이고 다른 키움 표와 같은 10
+    "stg_flow_postclose_kiwoom": 10,
     # KIS (일일 체인 대상은 신용잔고 하나 — 나머지 4표는 FROZEN)
     "stg_credit_daily": 10,
     # DART 공시·보조원장

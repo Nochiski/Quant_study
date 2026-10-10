@@ -4,6 +4,9 @@
         [--root data/factor_inputs] [--stage-root data/stage] [--equity-root data/equity] \\
         [--grace-days 5] [--min-eligible 300] [--keep 60] \\
         [--builds-from data/deliver/history/20260928_morning.json]
+    python -m factor_inputs build --date 20260929 --basis evening \\
+        --root data/model_db/factor_inputs \\
+        --builds-from data/deliver/history/20260928_morning.json [--calendar-dir data/calendar]
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — equity CLI 와 같은 규약.
@@ -15,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-from .build import KEEP_DEFAULT, MIN_ELIGIBLE_DEFAULT, FactorInputsError, build
+from .build import KEEP_DEFAULT, MIN_ELIGIBLE_DEFAULT, FactorInputsError, build, research_root
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -25,8 +28,11 @@ def _parser() -> argparse.ArgumentParser:
     b = sub.add_parser("build", help="equity/stage 현재 판 → factor_inputs 8표 판")
     b.add_argument("--date", required=True, help="판 기준일 D (YYYYMMDD, 거래일)")
     b.add_argument("--basis", required=True, choices=("evening", "morning"),
-                   help="morning 만 구현(evening 은 W1-a 뒤)")
-    b.add_argument("--root", type=Path, default=base / "data" / "factor_inputs")
+                   help="morning = 아침 확정판 · evening = 장 마감 판(--date 는 오늘 T, "
+                        "--builds-from 필수 — 컷오버 T-2)")
+    b.add_argument("--root", type=Path, default=research_root(),
+                   help="산출 루트(기본 연구 루트 — 장 마감 판은 "
+                        "data/model_db/factor_inputs 필수, T-3)")
     b.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
     b.add_argument("--equity-root", type=Path, default=base / "data" / "equity")
     b.add_argument("--grace-days", type=int, default=None,
@@ -37,6 +43,8 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--builds-from", default=None, type=Path,
                    help="인계 이력 JSON(data/deliver/history/<D>_<basis>.json) 의 판으로 고정 "
                         "— 이력 없음·health 실패·판 소멸이면 rc 2(최신 판으로 대신하지 않는다)")
+    b.add_argument("--calendar-dir", type=Path, default=base / "data" / "calendar",
+                   help="장 마감 판 거래일 판정 달력(daily.calendar 연도 파일 폴더)")
     return p
 
 
@@ -45,7 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = build(args.date, args.basis, args.root, args.stage_root, args.equity_root,
                        grace_days=args.grace_days, min_eligible=args.min_eligible,
-                       keep=args.keep, builds_from=args.builds_from)
+                       keep=args.keep, builds_from=args.builds_from,
+                       calendar_dir=args.calendar_dir)
     except FactorInputsError as e:
         print(f"factor_inputs 실패: {e}", file=sys.stderr)
         return 2

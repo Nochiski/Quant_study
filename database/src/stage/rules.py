@@ -21,6 +21,11 @@ from .model import TableRule
 LEDGER_FILES: dict[str, str] = {"krx": "krx.db", "kiwoom": "kiwoom.db", "kis": "kis.db",
                                 "dart": "dart.db", "wise": "wisereport.db",
                                 "wiseindex": "wiseindex.db"}   # WICS 주간 스냅샷(2026-09-20, 플랜 wics-weekly T1)
+# 연구 체인 스냅샷(`build_chain.sh` 가 위 LEDGER_FILES 전부를 한 세트로 뜬다) 밖 원장 — 그 원장을 읽는 표를
+# 단독 빌드(`python -m stage --table …`)할 때만 뜬다. postclose.db = 15:41 장 마감 직후 수집 원장(컷오버
+# PR-1·T-4). 연구 판은 이 원장 표를 쓰지 않고, 첫 수집 전에는 파일이 없어 연구 세트에 넣으면 연구 체인
+# 스냅샷이 멈춘다(`make_snapshot` 은 없는 원장에서 예외).
+SOLO_LEDGER_FILES: dict[str, str] = {"postclose": "postclose.db"}
 
 _MODULES = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise, rules_wics,
             rules_doc)

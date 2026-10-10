@@ -40,7 +40,8 @@ def main(argv: list[str] | None = None) -> int:
         snap = snapshot.load_snapshot(a.snapshot_root / a.snapshot_id)
     else:
         dbs = {s.db for s in rule.sources} | ({rule.cross_check.db} if rule.cross_check else set())
-        raw = {db: a.raw_dir / rules.LEDGER_FILES[db] for db in sorted(dbs)}
+        files = {**rules.LEDGER_FILES, **rules.SOLO_LEDGER_FILES}   # 연구 세트 밖 원장도 단독 빌드는 뜬다
+        raw = {db: a.raw_dir / files[db] for db in sorted(dbs)}
         print(f"snapshot: VACUUM INTO {sorted(dbs)} → {a.snapshot_root}", flush=True)
         snap = snapshot.make_snapshot(raw, a.snapshot_root)
     print(f"snapshot={snap.snapshot_id} " + " ".join(

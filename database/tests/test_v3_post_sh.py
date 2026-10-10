@@ -29,6 +29,7 @@ from typing import NamedTuple
 
 import pytest
 import test_compat_export as tce
+from compat import v3_restore
 from compat.quant_db import SCHEMA_SQL_PATH, ExportResult, TableResult, _write_meta
 from compat.v3_post import SCORE_TABLES, TABLES
 from daily import kw_daily, postclose
@@ -688,6 +689,70 @@ def test_compat_failure_leaves_main_unchanged(env, sources, tmp_path) -> None:
     crit = _levels(r, "crit")
     assert len(crit) == 1 and "② compat export --in-place" in crit[0]
     assert "③④" not in r.out
+
+
+# ── 복원 뒤 첫 반영(QL-I · T-42 · T-46) ─────────────────────────────────────────
+def _restored(main: Path) -> None:
+    """본 파일에 복원 기록 1행(`v3_restore.write_record` — 복원 트랜잭션이 남기는 그 행). 시각은 compat 기록보다
+    늘 앞이다(2000-01)."""
+    con = sqlite3.connect(str(main), isolation_level=None)
+    try:
+        con.execute("BEGIN")
+        v3_restore.write_record(con, "2000-01-02T00:00:00.000000+00:00", "2026-09-23",
+                                Path("bak/quant_x.db"), "0" * 64,
+                                {t: {"n_before": 1, "n_rows": 1} for t in TABLES})
+        con.execute("COMMIT")
+    finally:
+        con.close()
+
+
+def test_first_reflect_after_restore_needs_the_flag(env, sources, tmp_path) -> None:
+    """표식 없는 반영(체인 모양)은 복원 뒤에 계산됐어도 rc 2 crit·본 파일 무변경, 거부 사유에 사람이 하는 명령을
+    적는다. `--first-after-restore` 면 rc 0. 그 뒤 다시 표식을 주면(이미 복원 뒤 반영이 있다) rc 2 — 오용 방지."""
+    _, main = env
+    _restored(main)
+    before = _sha(main)
+    r = _run(tmp_path, sources, *_base(main))
+    assert r.rc == 2, r.out
+    assert "--first-after-restore" in r.out and "CUTOVER_ROLLBACK §5" in r.out
+    assert _sha(main) == before
+    crit = _levels(r, "crit")
+    assert len(crit) == 1 and "③④ 게이트·반영" in crit[0]
+    r2 = _run(tmp_path, sources, *_base(main, "--first-after-restore"))
+    assert r2.rc == 0, r2.out
+    assert [b for (b,) in _q(main, "SELECT basis FROM _compat_meta ORDER BY exported_at")] == [
+        "restore", "morning"]
+    after = _sha(main)
+    r3 = _run(tmp_path, sources, *_base(main, "--first-after-restore"))
+    assert r3.rc == 2, r3.out
+    assert "복원 뒤 첫 반영 전용" in r3.out
+    assert _sha(main) == after
+
+
+def test_flag_on_a_never_restored_main_is_refused(env, sources, tmp_path) -> None:
+    """평상시(복원 기록 없음) 대상에 `--first-after-restore` 를 주면 rc 2·본 파일 무변경(P1)."""
+    _, main = env
+    before = _sha(main)
+    r = _run(tmp_path, sources, *_base(main, "--first-after-restore"))
+    assert r.rc == 2, r.out
+    assert "복원 뒤 첫 반영 전용" in r.out
+    assert _sha(main) == before
+
+
+def test_chain_scripts_never_pass_first_after_restore() -> None:
+    """복원 뒤 첫 반영은 사람만 한다(T-42 · T-46) — 장 마감 체인(close·refill·morning)·`compat_export.sh`·아침
+    체인(`daily_build.sh`)과 그 설정은 표식을 넘기지 않는다. `v3_post.sh`(표식을 받는 쪽) 밖의 scripts·config
+    어디에도 표식 문자열이 없어야 한다."""
+    flag = "first-after-restore"
+    named = [DB_ROOT / "scripts" / n for n in ("postclose_chain.sh", "compat_export.sh", "daily_build.sh")]
+    assert all(p.is_file() for p in named)
+    files = [p for root in (DB_ROOT / "scripts", DB_ROOT / "config") for p in root.rglob("*")
+             if p.is_file() and p.name != "v3_post.sh"]
+    assert set(named) <= set(files)
+    hits = [str(p.relative_to(DB_ROOT)) for p in files
+            if flag in p.read_bytes().decode("utf-8", errors="replace")]
+    assert hits == []
+    assert flag in (DB_ROOT / "scripts" / "v3_post.sh").read_text(encoding="utf-8")
 
 
 # ── 그림자 ───────────────────────────────────────────────────────────────────

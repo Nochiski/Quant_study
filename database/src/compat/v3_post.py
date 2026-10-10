@@ -49,7 +49,8 @@ T-42, 로드맵 §8 K3-2·K3-3.
     스테이징은 본 파일 사본이라 'D 행이 있다' 만으로는 옛 D 행에도 참이 된다. 없으면 07:00 브리핑이 D−1 장을
     오늘 장으로 보고한다(DEFECT-C02). 비율 하한은 두지 않는다(새 정지 조건이라)
   · 표마다 반영 범위 행 > 0 — 점수 두 표는 `score_date = D` 행(점수 행 > 0)
-  · 복원 뒤 첫 제자리 반영은 복원 뒤에 계산된 것만(QL-I · T-46 — 아래). 그림자는 본 파일에 쓰지 않으므로 보지 않는다
+  · 복원 뒤 첫 제자리 반영은 사람이 준 표식(`first_after_restore`)이 있고 복원 뒤에 계산된 것만(QL-I · T-46 — 아래).
+    그림자는 본 파일에 쓰지 않으므로 보지 않는다. 표식은 그 반영 전용이다(오용 방지 — 아래)
 
 복원 기록(QL-I · T-42 — 되돌리기, `compat.v3_restore`): 표를 고정 백업으로 되돌린 COMMIT 은 `_compat_meta` 에
   basis = `RESTORE_BASIS` 인 기록 1행을 함께 남긴다(되돌린 표는 기록의 `tables` — 기본은 점수 두 표를 뺀 7표). 이
@@ -58,15 +59,19 @@ T-42, 로드맵 §8 K3-2·K3-3.
     본 파일을 설명하지 않는다. 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은
     키를 `INSERT OR REPLACE` 로 덮는다. 기록 자체는 지우지 않는다(이력).
   · 복원 기록은 반영 기록이 아니다 — 순서·7표 판정에 들지 않는다(basis 가 evening·morning 이 아니다).
-  · 그 뒤 첫 제자리 반영은 **복원 뒤에 계산된** compat 기록만 받는다(T-46): ① 이번 compat 기록 `exported_at` 이 그
-    복원 기록 `exported_at` 보다 뒤다(같은 시각·시각 없음·파싱 실패·시각대 없음은 거부, P1) ② 스테이징 `_compat_meta`
-    에 그 복원 기록이 있다 — 스테이징을 복원 COMMIT 뒤의 본 파일에서 떴다(온라인 백업은 한 시점 사본이라 복원 기록이
-    있으면 복원된 표도 있다). 창은 매일과 같은 증분이어도 된다 — v3 이력은 이미 KRX 기준가 사슬과 같다(QL-E). 다시
-    컷오버할 때의 첫 반영(V3-C)과 같은 뜻이다. **새 정지 조건이라 사용자 확인 대기**(T-42, 구현은 한다).
-    이 조건이 막는 것은 복원 앞 v3 파일로 계산한 기록이다. `v3_post.sh` 는 v3 락을 잡은 뒤에 스테이징을 뜨고 복원
-    (`v3_restore.sh`)도 같은 락 안에서 COMMIT 하므로 셸 경로에서는 생기지 않는다 — 단계를 손으로 나눠 돌렸거나
-    (`compat stage`·`export`·`apply`) 두 셸의 락 경로가 다를 때(`QL_V3_LOCK_FILE`) 생긴다. 락을 기다리다 복원 뒤에 깬
-    제자리 반영은 복원된 파일로 계산하므로 통과한다 — 되돌린 뒤 반영을 끄는 것은 절차서 4-1 몫이다.
+  · 그 뒤 첫 제자리 반영은 아래 셋을 모두 만족할 때만 받는다(T-42 · T-46). 창은 매일과 같은 증분이어도 된다 — v3
+    이력은 이미 KRX 기준가 사슬과 같다(QL-E). **새 정지 조건이라 사용자 확인 대기**(T-42, 구현은 한다).
+    ⓐ 사람의 표식 `first_after_restore`(셸·CLI `--first-after-restore`)가 있다. 장 마감 체인(close·refill·morning)·
+       `compat_export.sh`·아침 체인은 이 표식을 넘기지 않는다(`tests/test_v3_post_sh.py` 텍스트 검사). 그래서 덜 꺼진
+       체인이나 락을 기다리다 복원 뒤에 깬 체인 반영이 되돌린 표에 다시 쓰지 못한다 — `v3_post.sh` 는 락을 잡은 뒤에
+       스테이징을 뜨므로 그런 반영은 아래 ⓑ·ⓒ 만으로는 통과한다. 옛 규칙의 `--full` 요구가 하던 '의도 표식' 일이다.
+    ⓑ 이번 compat 기록 `exported_at` 이 그 복원 기록 `exported_at` 보다 뒤다(같은 시각·시각 없음·파싱 실패·시각대
+       없음은 거부, P1).
+    ⓒ 스테이징 `_compat_meta` 에 그 복원 기록이 있다 — 스테이징을 복원 COMMIT 뒤의 본 파일에서 떴다(온라인 백업은
+       한 시점 사본이라 복원 기록이 있으면 복원된 표도 있다). ⓑ·ⓒ 가 막는 것은 복원 앞 v3 파일로 계산한 기록이다 —
+       단계를 손으로 나눠 돌렸거나(`compat stage`·`export`·`apply`) 두 셸의 락 경로가 다를 때(`QL_V3_LOCK_FILE`) 생긴다.
+    표식은 이 반영 전용이다 — 복원 기록이 없는 본 파일(평상시)이나 복원 뒤 ok 반영이 이미 있는 본 파일에 주면 그림자
+    여부와 무관하게 거부한다(오용 방지, P1). 첫 컷오버(V3-C)에는 주지 않는다.
   앞뒤는 `exported_at`(UTC ISO, compat 과 같은 형식)으로 가른다 — 제자리 반영은 v3 락 안에서 스테이징을 뜨고
   export 를 시작하므로, 복원(같은 락)보다 뒤에 COMMIT 되는 기록은 시각도 뒤다.
 
@@ -316,25 +321,46 @@ def _instant(value: object) -> datetime | None:
     return t if t is not None and t.tzinfo is not None else None
 
 
-def _after_restore_failures(meta: dict, restored_at: str, stg_rows: list[dict]) -> list[str]:
-    """T-46 — 복원 뒤 첫 제자리 반영은 복원 뒤에 계산된 기록만(모듈 머리 주석 ①·②)."""
+# 복원 뒤 첫 반영 거부 메시지의 안내(T-46) — 사람이 하는 명령과 절차서 자리
+_FIRST_HOW = ("복원 뒤 첫 반영은 사람이 `v3_post.sh … --first-after-restore` 로 한다"
+              "(CUTOVER_ROLLBACK §5 다시 컷오버 순서)")
+
+
+def _after_restore_failures(meta: dict, restored_at: str, stg_rows: list[dict],
+                            first_after_restore: bool) -> list[str]:
+    """T-42 · T-46 — 복원 뒤 첫 제자리 반영은 표식이 있고 복원 뒤에 계산된 기록만(모듈 머리 주석 ⓐ·ⓑ·ⓒ)."""
     out: list[str] = []
+    if not first_after_restore:
+        out.append(f"복원 뒤 첫 반영(QL-I·T-42·T-46): 본 파일 마지막 기록이 복원({restored_at})이다 — 표식 없는 반영"
+                   f"(체인)은 받지 않는다(덜 꺼진 체인이 되돌린 표에 다시 쓰지 않게). {_FIRST_HOW}")
     mine, mark = _instant(meta.get("exported_at")), _instant(restored_at)
     if mine is None or mark is None or mine <= mark:
         out.append(f"복원 뒤 첫 반영(QL-I·T-46): 이번 compat 기록 시각 {meta.get('exported_at')!r} 이 본 파일 마지막 "
                    f"복원 기록 시각 {restored_at!r} 보다 뒤가 아니다(같음·없음·읽을 수 없음 포함) — 복원 앞 대상으로 "
-                   "계산한 반영일 수 있다")
+                   f"계산한 반영일 수 있다. {_FIRST_HOW}")
     if not any(r.get("basis") == RESTORE_BASIS and str(r.get("exported_at")) == restored_at
                for r in stg_rows):
         out.append(f"복원 뒤 첫 반영(QL-I·T-46): 스테이징에 본 파일 마지막 복원 기록({restored_at})이 없다 — "
-                   "스테이징을 복원 앞 v3 파일에서 떴다")
+                   f"스테이징을 복원 앞 v3 파일에서 떴다. {_FIRST_HOW}")
     return out
 
 
+def _flag_misuse(main_rows: list[dict], pending: str | None) -> str | None:
+    """표식 오용(P1) — 복원 뒤 첫 반영을 기다리는 본 파일이 아니면 거부 사유, 맞으면 None."""
+    if pending is not None:
+        return None
+    why = ("본 파일에 복원 기록이 없다(평상시)" if _since_restore(main_rows)[1] is None
+           else "복원 뒤 ok 반영 기록이 이미 있다")
+    return (f"--first-after-restore 는 복원 뒤 첫 반영 전용이다(QL-I·T-46) — {why}. 표식 없이 돌린다"
+            "(오용 방지, P1)")
+
+
 def gate(staging: Path, v3_db: Path, date: str, basis: str,
-         allow_older: bool = False, scores: bool = True, shadow: bool = False) -> GateReport:
+         allow_older: bool = False, scores: bool = True, shadow: bool = False,
+         first_after_restore: bool = False) -> GateReport:
     """스테이징을 읽어 게이트를 판정한다(쓰기 없음). 본 파일은 반영 기록 확인에만 읽는다.
-    `shadow` 면 복원 뒤 첫 반영 조건(QL-I · T-46)을 보지 않는다 — 그림자는 본 파일에 쓰지 않는다."""
+    `shadow` 면 복원 뒤 첫 반영 조건(QL-I · T-46)을 보지 않는다 — 그림자는 본 파일에 쓰지 않는다. 표식
+    `first_after_restore` 의 오용 검사는 그림자에서도 한다."""
     staging, v3_db = Path(staging), Path(v3_db)
     _require(staging, "스테이징")
     _require(v3_db, "v3 quant.db")
@@ -344,6 +370,10 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
     seen = {r["exported_at"] for r in main_rows}
     fails: list[str] = []
     newer = [] if allow_older else _newer(main_rows, d_iso, basis)
+    pending = _first_after_restore(main_rows)
+    misuse = _flag_misuse(main_rows, pending) if first_after_restore else None
+    if misuse:
+        fails.append(misuse)
     if newer:
         fails.append(f"순서(T-35): 본 파일에 이번({d_iso} {basis})보다 나중 반영 기록 {newer[-1]} 이 "
                      "있다 — 옛 D 를 늦게 반영하면 확정값이 옛 값으로 돌아간다(재생은 --allow-older)")
@@ -368,9 +398,8 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
             fails.append(f"compat 기록 basis {meta['basis']} ≠ 요청 {basis}")
         if window[1] != d_iso:
             fails.append(f"compat 창 끝 {window[1]} ≠ 요청 {d_iso}")
-        restored_at = None if shadow else _first_after_restore(main_rows)
-        if restored_at is not None:
-            fails += _after_restore_failures(meta, restored_at, stg_rows)
+        if pending is not None and not shadow:
+            fails += _after_restore_failures(meta, pending, stg_rows, first_after_restore)
         written = json.loads(meta["tables"])
         extra = sorted(set(written) - set(tables))
         if extra:
@@ -452,11 +481,11 @@ def _move(staging: Path, v3_db: Path, report: GateReport,
 
 def apply(staging: Path, v3_db: Path, date: str, basis: str, shadow: bool = False,
           allow_older: bool = False, commit_flag: Path | None = None,
-          scores: bool = True) -> GateReport:
+          scores: bool = True, first_after_restore: bool = False) -> GateReport:
     """게이트 → (그림자가 아니면) 한 트랜잭션 반영. 게이트 실패는 `V3PostGateError`(본 파일 무변경).
-    `scores=False` 는 점수 없는 반영(T-38 — 7표)."""
+    `scores=False` 는 점수 없는 반영(T-38 — 7표). `first_after_restore` 는 복원 뒤 첫 반영의 사람 표식(T-46)."""
     guard_paths(Path(v3_db), Path(staging))
-    report = gate(staging, v3_db, date, basis, allow_older, scores, shadow)
+    report = gate(staging, v3_db, date, basis, allow_older, scores, shadow, first_after_restore)
     if not report.ok:
         raise V3PostGateError(report)
     if not shadow:

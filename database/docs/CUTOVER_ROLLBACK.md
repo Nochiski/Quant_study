@@ -121,7 +121,7 @@ V3="$HOME/kael-system-v3/data/quant.db"
 - **QL-Q 연결**: 06:00 체인이 v3 `data/.kis_holidays.json` 을 쓰고 있으면 끈다. 자리는 연결 PR 이 정한다.
 - **성공 확인**
   - `bash scripts/postclose_chain.sh close --dry-run | head -1` 이 `켜짐 · 발송 off · v3 shadow` 를 보인다.
-  - `pgrep -af 'postclose_chain.sh|v3_post.sh'` 가 비어 있다. 돌고 있으면 끝날 때까지 기다린 뒤 4-2 로 간다. `v3_post.sh` 는 v3 락을 잡은 **뒤에** 스테이징을 뜬다. 그래서 복원(4-2)이 락을 쥔 동안 기다리던 제자리 반영은 복원 뒤에 깨어 복원된 파일로 계산하고, '복원 뒤 첫 반영' 게이트(§5, T-46)를 지나 **반영된다** — 되돌린 표에 compat 값이 다시 들어간다. 게이트가 막는 것은 복원 앞 파일로 계산한 반영뿐이다.
+  - `pgrep -af 'postclose_chain.sh|v3_post.sh'` 가 비어 있다. 돌고 있으면 끝날 때까지 기다린다. 락을 기다리던 체인의 제자리 반영이 복원 뒤에 깨면 '복원 뒤 첫 반영' 게이트(§5 — 체인은 `--first-after-restore` 표식을 넘기지 않는다)가 막는다. 다만 그 crit 이 남는다.
 
 ### 4-2. v3 quant.db 표 복원 **[사람 승인 — v3 파일 변경]**
 
@@ -261,7 +261,7 @@ EOF
 - [ ] v3 본 파일에 복원 기록 뒤 새 반영 기록이 0건이다. `SELECT count(*) FROM _compat_meta WHERE exported_at > (SELECT max(exported_at) FROM _compat_meta WHERE basis = 'restore')` → 0.
 - [ ] 20:05 v3 `daily_all` 이 성공했다(`pipeline_runs` 의 `chain:daily_all` success). v3 엑셀 텔레그램이 그날 한 번만 도착했다.
 - [ ] 다음 날 07:00 v3 브리핑과 07:10 uni 브리프가 그날 장(최신 `trade_date`)으로 나왔다.
-- [ ] `logs/notify.log` 에 복원 뒤 `v3_post … 반영 완료`(info)도 `v3_post … 실패`(crit)도 없다. 있으면 4-1 이 덜 꺼진 것이다. 복원 뒤에 계산된 제자리 반영은 게이트(§5)를 지나 반영되므로(T-46) 대개 '반영 완료' 로 남는다 — 위 '복원 기록 뒤 새 반영 기록 0건' 이 같은 것을 본다.
+- [ ] `logs/notify.log` 에 `v3_post … 실패` crit 이 없다. 있으면 '복원 뒤 첫 반영' 게이트에 걸린 반영(표식 없는 체인 반영)이 있었다는 뜻이다. 4-1 이 덜 꺼진 것이다.
 - [ ] `logs/notify.log` 에 그날 23:30 뒤 `컷오버 감시 …` crit 이 없다(감시 크론이 주석이다).
 - [ ] 수동 개입 장부에 기록했다(4-0).
 
@@ -270,16 +270,18 @@ EOF
 `_compat_meta` 의 복원 기록(basis `restore`)은 장벽이다. 규칙 정본은 `src/compat/v3_post.py` 머리 주석이다.
 
 - 복원 기록 **앞**의 반영 기록은 순서 가드(T-35)와 아침 7표 판정(T-34)에서 빠진다. 그 기록들은 복원 뒤 본 파일을 설명하지 않는다 — 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은 키를 덮는다. 기록은 지우지 않는다(이력).
-- 복원 기록 **뒤** 첫 제자리 반영은 **복원 뒤에 계산된** compat 기록만 받는다(T-46). 아니면 게이트 실패(rc 2, 본 파일 무변경)다.
-  - 조건 ①: compat 기록 시각(`exported_at`)이 복원 기록 시각보다 뒤다. 같은 시각·시각 없음·읽을 수 없는 시각은 거부한다.
-  - 조건 ②: 스테이징 `_compat_meta` 에 그 복원 기록이 있다. 곧 스테이징을 복원 뒤 v3 파일에서 떴다.
+- 복원 기록 **뒤** 첫 제자리 반영은 아래 셋을 모두 만족할 때만 받는다(T-42 · T-46). 아니면 게이트 실패(rc 2, 본 파일 무변경)다.
+  - 조건 ⓐ: 사람의 표식 `--first-after-restore`(`v3_post.sh` → compat apply)가 있다. 장 마감 체인(close·refill·morning)·`compat_export.sh`·아침 체인은 이 표식을 넘기지 않는다(셸 테스트가 텍스트로 고정한다). 그래서 덜 꺼진 체인이나 락을 기다리다 복원 뒤에 깬 체인 반영은 여기서 멈춘다 — `v3_post.sh` 는 락을 잡은 뒤에 스테이징을 뜨므로 그런 반영은 ⓑ·ⓒ 만으로는 통과한다. 옛 규칙의 `--full` 요구가 하던 '의도 표식' 일이다. 거부 메시지에 사람이 할 명령이 나온다.
+  - 조건 ⓑ: compat 기록 시각(`exported_at`)이 복원 기록 시각보다 뒤다. 같은 시각·시각 없음·읽을 수 없는 시각은 거부한다.
+  - 조건 ⓒ: 스테이징 `_compat_meta` 에 그 복원 기록이 있다. 곧 스테이징을 복원 뒤 v3 파일에서 떴다.
+  - 표식은 이 반영 전용이다. 복원 기록이 없는 본 파일(평상시·첫 컷오버)이나 복원 뒤 ok 반영이 이미 있는 본 파일에 주면 rc 2 다(오용 방지).
   - 창은 매일과 같은 증분(마지막 거래일 + 앞 10거래일)이어도 된다. v3 이력은 이미 KRX 기준가 사슬과 같다(QL-E 0행 차이). 창 안 종가는 compat 종가(KRX 정규장 종가 — T-33), 창 밖은 v3 종가(애프터마켓 포함)로 남는다 — 첫 컷오버(V3-C)와 같다.
-  - 막는 것은 복원 앞 v3 파일로 계산한 반영이다(단계를 손으로 나눠 돌렸거나 두 셸의 락 경로가 달랐던 경우). `v3_post.sh` 는 락을 잡은 뒤에 스테이징을 뜨므로, 락을 기다리다 복원 뒤에 깬 반영이나 꺼지지 않은 체인은 막지 **않는다** — 4-1 이 끄고 4-5 가 확인한다.
-  - 그림자(`--shadow`)는 본 파일에 쓰지 않으므로 이 조건을 보지 않는다.
+  - ⓑ·ⓒ 가 막는 것은 복원 앞 v3 파일로 계산한 반영이다(단계를 손으로 나눠 돌렸거나 두 셸의 락 경로가 달랐던 경우).
+  - 그림자(`--shadow`)는 본 파일에 쓰지 않으므로 ⓐ~ⓒ 를 보지 않는다(표식 오용 검사는 한다).
   - **새 정지 조건이라 사용자 확인 대기**(구현은 했다).
 - 제자리 `--full` 은 손 복구용이다. 창 시작이 대상 v3 표(`daily_prices`·`investor_detail_flows`)의 이력 시작보다 앞이면 compat 이 쓰기 전에 멈춘다(rc 2, T-46). 메시지의 `--window-days N` 을 `--full` 과 함께 준다.
 - QL-L 감시(`daily.cutover_watch`)는 복원 기록을 반영 기록으로 세지 않는다.
-- 다시 컷오버하는 순서: 새 백업 2벌(§1 — 새 stamp, 옛 백업은 남긴다) → V3-A~E → `v3_post.sh`(V3-C — 증분 창, T-46) → QL-L 감시 크론 주석 풀기 → 4-1 스위치를 PR-9 값으로.
+- 다시 컷오버하는 순서: 새 백업 2벌(§1 — 새 stamp, 옛 백업은 남긴다) → V3-A~E → `v3_post.sh --date <D> --basis morning --v3-db "$V3" --first-after-restore`(V3-C — 증분 창, 표식은 이 한 번만 사람이 준다. T-46) → QL-L 감시 크론 주석 풀기 → 4-1 스위치를 PR-9 값으로.
 
 ## 6. 리허설 — 서버 사본(컨트롤러)
 
@@ -316,12 +318,15 @@ P export --date "$D" --basis morning --equity-root "$QL_EQUITY_ROOT" --stage-roo
 # ⑥ 점수 오류 경로 — --with-scores 복원 → 4-2 확인 스크립트를 셋째 인자 all 로. 기대: all PASS(모든 표 0 · 0),
 #    _compat_meta 는 [morning ok, restore ok(7표), restore ok(9표)]
 bash "$R/home/scripts/v3_restore.sh" --backup "$R/bak1/quant_$S.db" --v3-db "$R/quant.db" --with-scores
-# ⑦ 복원 뒤 첫 반영 게이트(T-46) — ⑤ 의 반영은 rc 2('복원 뒤 첫 반영' 두 줄 — 기록 시각·스테이징), 본 파일 sha256 무변경.
-#    이어서 복원 뒤에 계산한 증분 v3_post.sh 는 rc 0(_compat_meta 끝 = restore ok(9표), morning ok)
+# ⑦ 복원 뒤 첫 반영 게이트(T-42 · T-46)
+#    ⑤ 의 손 apply(표식 있음)는 rc 2('복원 뒤 첫 반영' 두 줄 — 기록 시각·스테이징),
+#    표식 없는 v3_post.sh(체인 모양)도 rc 2('--first-after-restore' 안내) — 둘 다 본 파일 sha256 무변경.
+#    표식 있는 v3_post.sh 는 rc 0(_compat_meta 끝 = restore ok(9표), morning ok)
 sha256sum "$R/quant.db"
-P apply --staging "$R/staging_pre.db" --v3-db "$R/quant.db" --date "$D" --basis morning; echo "rc=$?"
-sha256sum "$R/quant.db"
+P apply --staging "$R/staging_pre.db" --v3-db "$R/quant.db" --date "$D" --basis morning --first-after-restore; echo "rc=$?"
 bash "$R/home/scripts/v3_post.sh" --date "$D" --basis morning --v3-db "$R/quant.db" --staging "$R/staging.db" --builds-from "$H"; echo "rc=$?"
+sha256sum "$R/quant.db"
+bash "$R/home/scripts/v3_post.sh" --date "$D" --basis morning --v3-db "$R/quant.db" --staging "$R/staging.db" --builds-from "$H" --first-after-restore; echo "rc=$?"
 # ⑧ 제자리 --full 하한(T-46) — 730일 창이 v3 이력 시작(가격 2025-01-02 · 수급 2025-01-23)보다 앞이라 ② compat 이 rc 2,
 #    본 파일 sha256 무변경, 로그에 표별 '이력 시작'과 맞출 --window-days
 sha256sum "$R/quant.db"

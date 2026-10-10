@@ -40,7 +40,8 @@
   compat 기록과 같은 형식이라 앞뒤를 문자열로 가른다) · date = 복원한 KST 날짜 · tables = 표 → {n_before, n_rows} ·
   window = {backup, sha256}(이 기록만 창 대신 원천 백업을 싣는다) · 판 열(equity·stage)은 빈 객체, consensus_asof
   는 빈 문자열. `v3_post` 는 이 기록을 장벽으로 본다 — 그 앞 반영 기록은 순서(T-35)·아침 반영 표(T-34) 판정에서
-  빠지고, 그 뒤 첫 제자리 반영은 복원 뒤에 계산된 기록만 받는다(`v3_post` 머리 주석, T-42 · T-46).
+  빠지고, 그 뒤 첫 제자리 반영은 사람의 표식(`--first-after-restore`)이 있고 복원 뒤에 계산된 기록만 받는다
+  (`v3_post` 머리 주석, T-42 · T-46).
 """
 from __future__ import annotations
 

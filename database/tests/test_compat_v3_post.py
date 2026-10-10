@@ -696,9 +696,10 @@ def test_no_scores_is_evening_only_in_python_and_cli(files, capsys) -> None:
 
 # ── QL-I 복원 기록(되돌리기) ─────────────────────────────────────────────────
 # 복원 기록 = `compat.v3_restore` 가 9표를 백업으로 되돌린 COMMIT 에 함께 남기는 `_compat_meta` 1행(basis
-# 'restore'). 그 앞 반영 기록은 순서(T-35)·아침 반영 표(T-34) 판정에서 빠지고, 그 뒤 첫 제자리 반영은 복원 뒤에
-# 계산된 것만 받는다(T-46 — compat 기록 시각 > 복원 시각, 스테이징에 그 복원 기록). 기록 시각은 시계와 무관하게
-# 앞뒤가 정해지도록 2000-01 로 둔다(스테이징 compat 기록 기본값은 2026-10).
+# 'restore'). 그 앞 반영 기록은 순서(T-35)·아침 반영 표(T-34) 판정에서 빠지고, 그 뒤 첫 제자리 반영은 사람이 준
+# `first_after_restore`(셸 `--first-after-restore`)가 있고 복원 뒤에 계산된 것만 받는다(T-46 — compat 기록 시각 >
+# 복원 시각, 스테이징에 그 복원 기록). 기록 시각은 시계와 무관하게 앞뒤가 정해지도록 2000-01 로 둔다(스테이징 compat
+# 기록 기본값은 2026-10).
 BEFORE_RESTORE = "2000-01-01T00:00:00.000000+00:00"
 RESTORED_AT = "2000-01-02T00:00:00.000000+00:00"
 AFTER_RESTORE = "2000-01-03T00:00:00.000000+00:00"
@@ -742,14 +743,30 @@ def test_restore_record_hides_older_evening_from_the_morning_tables(files) -> No
     assert tables_for(main, D, "morning") == SEVEN
 
 
-def test_first_in_place_after_restore_takes_an_incremental_computed_after_it(files) -> None:
-    """T-46 — 복원 뒤 첫 제자리 반영은 `--full` 이 아니어도 된다. 복원 뒤에 뜬 스테이징에 복원 뒤 시각의 compat
-    기록(증분 창)이면 받는다(전엔 '--full 이어야' 로 막혔다). 그 뒤 반영은 평소대로."""
+def test_first_in_place_after_restore_needs_the_flag(files) -> None:
+    """T-42 · T-46 — 복원 뒤에 계산된 반영이어도 `first_after_restore` 가 없으면(체인 모양) 거부한다. 체인은 이
+    표식을 넘기지 않으므로 덜 꺼진 체인이나 락을 기다리다 복원 뒤에 깬 체인 반영이 되돌린 표에 다시 쓰지 못한다.
+    그림자는 보지 않는다."""
+    main, stg = files
+    _restored(main)
+    snapshot(main, stg)
+    _fake_compat(stg)                                   # 2026-10 > 복원 2000-01-02, 복원 뒤 스테이징
+    before = _sha(main)
+    with pytest.raises(V3PostGateError, match="--first-after-restore") as e:
+        apply(stg, main, D, "evening")
+    assert "CUTOVER_ROLLBACK §5" in " ".join(e.value.report.failures)
+    assert _sha(main) == before
+    assert apply(stg, main, D, "evening", shadow=True).ok
+
+
+def test_first_in_place_after_restore_takes_an_incremental_with_the_flag(files) -> None:
+    """T-46 — 표식이 있고 복원 뒤에 계산된 기록이면 `--full` 이 아니어도(증분 창) 받는다(전엔 '--full 이어야'
+    로 막혔다). 그 뒤 반영은 표식 없이 평소대로."""
     main, stg = files
     _restored(main)
     snapshot(main, stg)
     _fake_compat(stg)                                   # 증분(full=False), 2026-10 > 복원 2000-01-02
-    assert apply(stg, main, D, "evening").ok
+    assert apply(stg, main, D, "evening", first_after_restore=True).ok
     snapshot(main, stg)
     _fake_compat(stg, exported_at="2026-10-08T08:00:00.000000+00:00")
     assert apply(stg, main, D, "evening").ok
@@ -779,7 +796,7 @@ def test_first_in_place_after_restore_refuses_what_was_computed_before_it(
         _fake_compat(stg, exported_at=exported_at)
     before = _sha(main)
     with pytest.raises(V3PostGateError, match="복원 뒤 첫 반영") as e:
-        apply(stg, main, D, "evening")
+        apply(stg, main, D, "evening", first_after_restore=True)
     failures = " ".join(e.value.report.failures)
     for needle in needles:
         assert needle in failures
@@ -806,8 +823,41 @@ def test_first_in_place_after_restore_refuses_equal_or_unreadable_times(
     _fake_compat(stg, exported_at=exported_at)
     before = _sha(main)
     with pytest.raises(V3PostGateError, match="복원 앞 대상으로 계산"):
-        apply(stg, main, D, "evening")
+        apply(stg, main, D, "evening", first_after_restore=True)
     assert _sha(main) == before
+
+
+@pytest.mark.parametrize("state", ["never_restored", "already_reflected"])
+def test_first_after_restore_flag_is_refused_where_no_first_reflect_is_pending(files, state) -> None:
+    """오용 방지(P1) — 복원 기록이 없는 평상시 대상이나 복원 뒤 ok 반영이 이미 있는 대상에 표식을 주면 거부한다.
+    그림자에서도 같다. 본 파일 무변경."""
+    main, stg = files
+    if state == "already_reflected":
+        _restored(main)
+        snapshot(main, stg)
+        _fake_compat(stg)
+        assert apply(stg, main, D, "evening", first_after_restore=True).ok
+    snapshot(main, stg)
+    _fake_compat(stg, exported_at="2026-10-08T08:00:00.000000+00:00")
+    before = _sha(main)
+    for shadow in (False, True):
+        with pytest.raises(V3PostGateError, match="복원 뒤 첫 반영 전용"):
+            apply(stg, main, D, "evening", shadow=shadow, first_after_restore=True)
+    assert _sha(main) == before
+    assert apply(stg, main, D, "evening").ok
+
+
+def test_cli_apply_takes_first_after_restore(files, capsys) -> None:
+    """CLI `apply --first-after-restore` — 없으면 rc 2(안내 메시지), 있으면 rc 0."""
+    from compat.__main__ import main as cli_main
+    main, stg = files
+    _restored(main)
+    snapshot(main, stg)
+    _fake_compat(stg)
+    args = ["apply", "--staging", str(stg), "--v3-db", str(main), "--date", D, "--basis", "evening"]
+    assert cli_main(args) == 2
+    assert "--first-after-restore" in capsys.readouterr().err
+    assert cli_main([*args, "--first-after-restore"]) == 0
 
 
 def test_restore_record_never_counts_as_a_reflection(files) -> None:

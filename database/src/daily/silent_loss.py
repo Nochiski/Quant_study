@@ -35,7 +35,9 @@ stage 판 기록에는 파티션 해시가 없어 표 전체를 조인한다.
   기록형: 체인을 막지 않는다. 결과 파일 + 런 로그 + 미설명 > 0 또는 판정 불가면 notify warn 한 줄.
   차단형: 미설명 > 0 또는 판정 불가(N-42 Q4 '필수 검사 SKIP = 실패')면 crit 한 줄(`TITLE_BLOCK` — X-2 세는 목록) +
           `gate` 가 막는다. 다음 모델 단계 = 이 D 의 아침 확정판을 고정해 읽는 15:41 장 마감 체인 close(T-2)가
-          빌드 락을 잡기 전에 `gate --date D'` 를 본다(`scripts/postclose_chain.sh`).
+          빌드 락을 잡기 전에 `gate --date D'` 를 본다(`scripts/postclose_chain.sh`). 체인은 스위치를 셸에서 먼저 읽어
+          (`scripts/postclose_conf.sh` silent_loss_block_on — 이 모듈 `block_enabled` 와 같은 규칙, 테스트가 대조) 꺼져
+          있으면 관문을 부르지 않는다 — 결과 파일·관문 예외·import 실패가 기록형 기간의 장 마감 체인을 막지 못한다.
 
 쓰는 것: `logs/silent_loss/<D>.json`(표별 갈래 수·미설명 표본 상위 N) · 런 로그 `data/raw/daily_run.db` source
 `silent_loss`(상태 ok·unexplained·undecidable·blocked — 앞의 둘이 아니면 일일 리포트 crit) · `scripts/notify.sh`
@@ -567,7 +569,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     a = ap.parse_args(argv)
     home = Path(a.home or os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
     if a.cmd == "gate":
-        rc, why = gate(home, a.date)
+        try:
+            rc, why = gate(home, a.date)
+        except Exception as e:  # noqa: BLE001  # reason: 관문은 차단형에서만 불린다 — 예상 밖 예외도 막음(rc 1, P1)
+            traceback.print_exc()
+            rc, why = 1, f"조용한 손실 관문 예외 {type(e).__name__}: {e} — 차단형, P1"
         print(why)
         return rc
     rid: int | None = None

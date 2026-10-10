@@ -34,12 +34,19 @@ EQ_SCHEMA = {"ticker": "VARCHAR", "date": "DATE", "close_krw": "DOUBLE", "availa
 ST_SCHEMA = {"ticker": "VARCHAR", "date": "DATE", "close_krw": "DOUBLE", "available_date": "DATE",
              "observed_date": "DATE"}
 ROOTS = {"equity": Path("data/equity"), "stage": Path("data/stage")}
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
 # ── 픽스처 ──────────────────────────────────────────────────────────────────
+class _Raw(str):
+    """SQL 리터럴을 그대로 쓰는 값 — STRUCT 같은 중첩 값 픽스처용."""
+
+
 def _lit(v: object) -> str:
     if v is None:
         return "NULL"
+    if isinstance(v, _Raw):
+        return str(v)
     if isinstance(v, str):
         return "'" + v.replace("'", "''") + "'"
     return repr(v)
@@ -68,11 +75,11 @@ def _build(home: Path, layer: str, table: str, bid: str, rows: list[dict], *,
     equity 판 기록에는 파티션 content_hash 가 있고 stage 판 기록에는 없다(실제 두 빌더와 같다)."""
     troot = home / ROOTS[layer] / table
     by_year: dict[str, list[dict]] = {}
-    for r in rows:
-        by_year.setdefault(str(r["date"])[:4], []).append(r)
+    for r in rows:                          # date 열이 없는 표는 whole(파티션 없음)
+        by_year.setdefault(str(r["date"])[:4] if "date" in r else "", []).append(r)
     parts = []
     for y, rs in sorted(by_year.items()):
-        rel = f"v={bid}/year={y}"
+        rel = f"v={bid}/year={y}" if y else f"v={bid}"
         _write_parquet(troot / rel / "part0.parquet", rs, schema)
         p: dict[str, object] = {"path": rel, "n_rows": len(rs)}
         if layer == "equity":
@@ -298,6 +305,36 @@ def test_stage_키_유일_표는_자연키로_판본_표는_관측일까지로_�
     assert res.totals["unexplained"] == 2
 
 
+def test_stage_목록_구조체_열은_동등_비교로_센다(tmp_path: Path) -> None:
+    """서버 10-08 결함 — stg_wise_coverage 의 `_cast_fail_cols`(INTEGER[])를 수치로 보고 DOUBLE 캐스트해 표 전체가
+    판정 불가였다. 수치 밖 열은 IS DISTINCT FROM 동등 비교: 같은 값 → 차이 0 · 값→NULL → 미설명 · 내용 변경 → 값 변경."""
+    home = _home(tmp_path)
+    schema = {"ticker": "VARCHAR", "status_current": "VARCHAR", "_cast_fail_cols": "INTEGER[]",
+              "miss_kind": "STRUCT(status_current VARCHAR, n VARCHAR)", "observed_date": "DATE"}
+
+    def row(t: str, fails: object, mk: str) -> dict:
+        return {"ticker": t, "status_current": "ok", "_cast_fail_cols": fails, "miss_kind": _Raw(mk),
+                "observed_date": "2026-10-01"}
+
+    same_mk = "{'status_current': NULL, 'n': 'ledger_zero'}"
+    before = [row("A", [1], same_mk), row("B", [], "{'status_current': NULL, 'n': NULL}"),
+              row("C", [2], same_mk), row("D", [1], same_mk)]
+    after = [row("A", [1], same_mk), row("B", [], "{'status_current': 'blank', 'n': NULL}"),
+             row("C", None, same_mk), row("D", [1, 2], same_mk)]
+    _build(home, "stage", "stg_wise_coverage", "m_b", before, schema=schema, rules="2.8.0")
+    _build(home, "stage", "stg_wise_coverage", "m_a", after, schema=schema, rules="2.8.0")
+    _handoff(home, DP, stage={"stg_wise_coverage": "m_b"}, equity={})
+    _handoff(home, D, stage={"stg_wise_coverage": "m_a"}, equity={})
+    res = sl.check(home, D, tables=[("stage", "stg_wise_coverage")])
+    t = _tbl(res, "stg_wise_coverage")
+    assert t["status"] == "compared", t["reason"]
+    assert t["window_column"] is None                         # whole 표 — 재수집 창 없음
+    c = t["counts"]
+    assert (c["value_to_null"], c["value_changed"], c["null_to_value"]) == (1, 2, 0)
+    assert c["unexplained"] == 1 and t["unexplained_by_kind"]["value_to_null"] == 1
+    assert t["samples"][0]["key"] == {"ticker": "C"} and t["samples"][0]["before"] == "[2]"
+
+
 # ── 폐포 ────────────────────────────────────────────────────────────────────
 def test_폐포는_fi_원천에서_equity_입력을_따라_닫힌다(monkeypatch: pytest.MonkeyPatch) -> None:
     from factor_inputs import queries
@@ -406,8 +443,25 @@ def test_스위치는_켜는_쪽만_정확한_값(tmp_path: Path, text: str, on:
     assert sl.block_enabled(tmp_path)[0] is on
 
 
+@pytest.mark.parametrize("text", [
+    None, "", "SILENT_LOSS_BLOCK=1\n", "SILENT_LOSS_BLOCK='1'\n", 'SILENT_LOSS_BLOCK="1"\n',
+    "SILENT_LOSS_BLOCK=0\n", "SILENT_LOSS_BLOCK=yes\n", "SILENT_LOSS_BLOCK=\n", "SILENT_LOSS_BLOCK=' 1'\n",
+    "  SILENT_LOSS_BLOCK = 1  \n", "SILENT_LOSS_BLOCK=1\r\n", "SILENT_LOSS_BLOCK=1\nSILENT_LOSS_BLOCK=0\n",
+    "SILENT_LOSS_BLOCK=0\nSILENT_LOSS_BLOCK=1\n", "# SILENT_LOSS_BLOCK=1\n", "export SILENT_LOSS_BLOCK=1\n",
+    "SILENT_LOSS_BLOCK=1 # 켬\n", "SILENT_LOSS_BLOCKX=1\n", "SILENT_LOSS_BLOCK\n"])
+def test_셸_스위치_판정은_파이썬과_같다(tmp_path: Path, text: str | None) -> None:
+    """15:41 장 마감 체인은 스위치를 파이썬 없이 셸에서 읽는다(scripts/postclose_conf.sh silent_loss_block_on) — 같은 파일을
+    읽는 두 곳이 다르게 판정하면 안 된다(P4)."""
+    if text is not None:
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config/silent_loss.env").write_bytes(text.encode("utf-8"))
+    p = subprocess.run(["bash", "-c", 'cd "$1" && . "$2" && silent_loss_block_on', "_", str(tmp_path),
+                        str(SCRIPTS / "postclose_conf.sh")], capture_output=True, text=True, check=False)
+    assert p.returncode in (0, 1), p.stderr
+    assert (p.returncode == 0) is sl.block_enabled(tmp_path)[0]
+
+
 # ── daily_build.sh — 체인 맨 끝, 실패해도 체인 rc 불변 ─────────────────────────
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 _BUILD_PY = """#!/usr/bin/env bash
 if [ "$1" = "-c" ]; then
   case "$2" in

@@ -35,3 +35,20 @@ postclose_conf_load() {
   CUTOVER=""; [ -n "$ENABLED" ] && [ -n "$SEND" ] && CUTOVER=1
   return 0
 }
+# 조용한 손실 차단 스위치(K1-4a) — config/silent_loss.env 의 SILENT_LOSS_BLOCK 이 정확히 1 일 때만 rc 0(켜짐). 그 밖의 값·
+# 빈 값·파일 없음·읽기 실패는 rc 1(꺼짐 — 기록형). 셸이 파이썬 없이 판정한다: 꺼져 있으면 15:41 장 마감 체인이 관문 파이썬을
+# 부르지도 않아, 결과 파일·관문 예외·모듈 import 실패 어느 것도 체인을 막지 못한다. 규칙은 `daily.silent_loss.block_enabled`
+# 와 같다(주석·빈 줄 건너뜀, 첫 '=' 로 가름, 이름·값 앞뒤 공백과 값 앞뒤 따옴표를 벗김, 마지막 대입이 이김) —
+# tests/test_silent_loss.py 가 같은 입력으로 둘을 대조한다. source 하지 않는다(파일 안 명령이 돌지 않게)
+silent_loss_block_on() {
+  local v
+  [ -f config/silent_loss.env ] || return 1
+  v=$(awk '{ line = $0; gsub(/^[ \t\r]+|[ \t\r]+$/, "", line)
+             if (line == "" || substr(line, 1, 1) == "#") next
+             i = index(line, "="); if (i == 0) next
+             name = substr(line, 1, i - 1); val = substr(line, i + 1)
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", name); if (name != "SILENT_LOSS_BLOCK") next
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", val); gsub(/^["\047]+|["\047]+$/, "", val); v = val }
+           END { printf "%s", v }' config/silent_loss.env 2>/dev/null) || return 1
+  [ "$v" = 1 ]
+}

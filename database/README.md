@@ -208,7 +208,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 | 모드 | 언제 | 단계(앞이 실패하면 뒤는 안 돈다) | 런 로그 source |
 |---|---|---|---|
-| `close` | 15:41 크론(T = 오늘 KST) | ⓪ 휴장이면 건너뜀 → ① `python -m daily.postclose`(수집기 자체 락, 원장 락 안 기다림 — T-4. rc 3 + 세션 예외일이면 그날 체인 전체 건너뜀 — T-26) → ①' 고정 판 확인(`data/deliver/history/<D'>_morning.json` 이 그 날짜·health ok — 아니면 빌드 락을 잡지 않고 crit, T-7 대체 발송 경로) + 조용한 손실 관문(`python -m daily.silent_loss gate --date D'` — 차단형일 때만 D' 검사에 미설명·판정 불가가 있거나 결과가 없으면 같은 자리에서 crit, 지금은 기록형이라 통과 · K1-4a) → [빌드 락] ② stage 단독 빌드 `stg_flow_postclose_kiwoom` + 그 표만 건전성(`stage.health --tables`, 리포트 `logs/health/postclose_stage_<T>.json`) + 장 마감 스냅샷 GC(기록형) → ③ fi 장 마감 판(`--builds-from <D'>_morning.json`, T-2 — 판 manifest 게이트의 `metrics.warn`(FG5, T-37)은 런 로그 `warn:FG5` + warn 한 줄) → ④ 모델 → ⑤ 엑셀(`data/model_db/deliver`) [빌드 락 놓음] → ⑥ `v3_post.sh --basis evening --model-root data/model_db/model --builds-from <D'>_morning.json` (점수 두 표는 여기서만 쓴다) | `kiwoom_postclose`(수집기) · `postclose_stage`·`_fi`·`_model`·`_excel`·`_v3` |
+| `close` | 15:41 크론(T = 오늘 KST) | ⓪ 휴장이면 건너뜀 → ① `python -m daily.postclose`(수집기 자체 락, 원장 락 안 기다림 — T-4. rc 3 + 세션 예외일이면 그날 체인 전체 건너뜀 — T-26) → ①' 고정 판 확인(`data/deliver/history/<D'>_morning.json` 이 그 날짜·health ok — 아니면 빌드 락을 잡지 않고 crit, T-7 대체 발송 경로) + 조용한 손실 관문(K1-4a — 스위치는 셸이 파이썬 없이 읽는다. 꺼져 있으면(지금) 관문을 부르지 않고 통과해 어떤 상태에서도 막지 않고, 켜져 있을 때만 `python -m daily.silent_loss gate --date D'` 가 D' 검사의 미설명·판정 불가·결과 없음·관문 실패에서 같은 자리 crit) → [빌드 락] ② stage 단독 빌드 `stg_flow_postclose_kiwoom` + 그 표만 건전성(`stage.health --tables`, 리포트 `logs/health/postclose_stage_<T>.json`) + 장 마감 스냅샷 GC(기록형) → ③ fi 장 마감 판(`--builds-from <D'>_morning.json`, T-2 — 판 manifest 게이트의 `metrics.warn`(FG5, T-37)은 런 로그 `warn:FG5` + warn 한 줄) → ④ 모델 → ⑤ 엑셀(`data/model_db/deliver`) [빌드 락 놓음] → ⑥ `v3_post.sh --basis evening --model-root data/model_db/model --builds-from <D'>_morning.json` (점수 두 표는 여기서만 쓴다) | `kiwoom_postclose`(수집기) · `postclose_stage`·`_fi`·`_model`·`_excel`·`_v3` |
 | `refill` | `daily_evening.sh` 끝(런 로그·최종 인계 파일 뒤, 키움 rc 0 일 때 — 원장 락을 먼저 놓는다) | ⑥ 결과와 상관없이 늘 점수 없는 7표 `v3_post.sh --basis evening --no-scores --builds-from <D'>_morning.json`(QL-F2 · T-38, compat 만). 16:00 컷오프 종목을 21:05 값으로 채우고, 장 마감 판이 없는 날(판 실패·세션 예외일)엔 그날 v3 T 행의 유일한 경로다. 부르기 전에 고정 판의 날짜·health 를 본다 — 쓸 수 없으면 v3_post 를 부르지 않고 crit(compat 은 health 를 보지 않는다, P1) | `postclose_v3_refill` |
 | `morning` | `daily_build.sh` 가 확정판(rc 0·1)·모델 단계 뒤 | ⓐ `v3_post.sh --date D --basis morning --builds-from <D>_morning.json`(compat 만, 반영 표는 compat 이 고른다 — T-34. 고정 판 health 가 ok 가 아니면 부르지 않고 crit) ⓑ 그날 장 마감 모델 판이 있으면 두 판 대조 `python -m daily.board_compare`(PR-7). 둘은 서로 막지 않는다. 대조 rc 1 은 이번 실행이 쓴 `data/model_db/compare/<D>.json` 이 불일치 판정(verdict fail)일 때만 `mismatch`(warn), 그 밖의 rc 1 은 실패. 그날 수집기 런(`kiwoom_postclose`)이 아예 없으면 15:41 크론 누락이라 끝 알림이 info 대신 warn | `postclose_v3_morning` · `postclose_compare` |
 
@@ -380,7 +380,8 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
   '조용한 손실 검사 종료 rc=N' 줄).
 - **차단 전환**: 설정 한 줄 `config/silent_loss.env` 의 `SILENT_LOSS_BLOCK=1`(저장소 값 0 — 기록형). 켜면 미설명 > 0 또는 판정
   불가 표(N-42 Q4 '필수 검사 SKIP = 실패')가 crit 한 줄 '조용한 손실 차단 D=…'(X-2 세는 목록)이 되고, 그 D 의 아침 확정판을 고정해
-  읽는 15:41 장 마감 체인 close 가 고정 판 확인 뒤·빌드 락 전에 멈춘다(`gate` — 결과 파일이 없거나 못 읽어도 막는다). 언제 켜나:
+  읽는 15:41 장 마감 체인 close 가 고정 판 확인 뒤·빌드 락 전에 멈춘다(`gate` — 결과 파일이 없거나 못 읽거나 관문이 죽어도 막는다).
+  꺼져 있으면 체인이 스위치를 셸에서 읽고(`scripts/postclose_conf.sh` `silent_loss_block_on`) 관문을 아예 부르지 않는다. 언제 켜나:
   **그림자 시작 10-14 부터 2주 기록한 뒤**(정본 K1-4a · N-42 Q4). 켜는 것은 이 한 줄을 바꿔 배포하는 일이다.
 - **비용**(로컬 실측 — §12-6): equity 는 파티션 해시가 같은 파티션을 건너뛰어 수 초, stage 는 판 기록에 파티션 해시가 없어 표
   전체를 조인한다(stg_fin 모양 1,540만 행 20.5초·RSS 5.05GB, `--memory-limit 6GB`). 서버 어림 2~4분.

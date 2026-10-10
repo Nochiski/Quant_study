@@ -2639,7 +2639,7 @@ CFS 4) 중 예상 대상 20 이상은 `CFS|standard|11011` 48 · `11012` 47 · `
 | 축 | 정의 |
 |---|---|
 | 비교 단위 | 표의 **선언 grain**(`rules_s*.py` 의 `EquityTable.grain`)으로 두 판을 FULL OUTER JOIN 한 행. `--key a,b` 로 덮어쓸 수 있다(선언이 없는 표·절단본 실험용) |
-| 컬럼 카운터 | `value_to_null`(값→NULL) · `null_to_value`(NULL→값) · `value_changed`. 수치 컬럼의 값 변경은 **상대 허용오차**(`--tol 1e-9` 기본, `--tol capex_ytd=1e-6` 로 컬럼별), 그 밖은 완전일치 |
+| 컬럼 카운터 | `value_to_null`(값→NULL) · `null_to_value`(NULL→값) · `value_changed`. 수치 컬럼의 값 변경은 **상대 허용오차**(`--tol 1e-9` 기본, `--tol capex_ytd=1e-6` 로 컬럼별), 그 밖(문자·날짜·불리언·LIST·STRUCT·MAP)은 `IS DISTINCT FROM` 동등 비교. 수치는 스칼라 타입만이다(`is_numeric` — 앞만 맞추던 옛 식이 `INTEGER[]` 를 수치로 보고 DOUBLE 캐스트해 서버 10-08 stg_wise_coverage 비교가 죽었다) |
 | 행 카운터 | `rows_added` · `rows_removed` |
 | 묶음 | `*_basis` 계열과 `available_date`·`*_available_date` 를 따로 합산한다 — 어휘 축과 공개시점 축은 값 축과 위험이 다르다 |
 | 제외 | 운영 메타(`v`·`build_id`·`built_at_utc` 류)와 **선언 컬럼이 아닌 하이브 키**(`year`). 보고서 `excluded_columns` 에 무엇을 뺐는지 싣는다. `_reject/` 는 산출이 아니므로 읽지 않는다 |
@@ -2739,7 +2739,9 @@ CLI 출력은 그대로다(로컬 price_daily 두 판 JSON 보고서가 바꾸�
 **차단 전환**: `config/silent_loss.env` 한 줄 `SILENT_LOSS_BLOCK=1`(켜는 쪽만 정확한 값, 저장소 값 0). **그림자 시작 10-14 부터
 2주 기록한 뒤** 켠다(정본 K1-4a · N-42 Q4). 켜면 미설명 > 0 **또는 판정 불가 표**(N-42 Q4 '필수 검사 SKIP = 실패')가 crit
 '조용한 손실 차단 D=…'(X-2 `COUNTED_CRIT_PREFIXES`)이고, 그 D 의 아침 확정판을 고정해 읽는 다음 모델 단계 — 15:41 장 마감 체인
-close(T-2) — 가 고정 판 확인 뒤·빌드 락 전에 `gate --date D'` 로 멈춘다(결과 파일이 없거나 못 읽어도 막는다, P1). 그날은 장 마감
+close(T-2) — 가 고정 판 확인 뒤·빌드 락 전에 `gate --date D'` 로 멈춘다(결과 파일이 없거나 못 읽거나 관문이 죽어도 막는다,
+P1). **꺼져 있을 때는 어떤 상태에서도 막지 않는다** — 체인이 스위치를 셸에서 파이썬 없이 읽고(`scripts/postclose_conf.sh`
+`silent_loss_block_on`, 모듈 `block_enabled` 와 같은 규칙 — 테스트가 대조) 꺼져 있으면 관문을 부르지 않는다. 그날은 장 마감
 판이 없는 날과 같다(T-7 대체 발송 경로 · T-38 점수 없는 7표). 켜는 쪽 동작은 테스트로만 고정했다
 (`tests/test_silent_loss.py::test_차단_*` · `tests/test_postclose_chain_sh.py::test_silent_loss_gate_*`).
 

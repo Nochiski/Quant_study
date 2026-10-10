@@ -152,6 +152,23 @@
 | 연구 DB 10거래일 재생 | EG13 미래 데이터 0, 설명 안 되는 값→NULL 0 |
 | phase 셀프 리뷰 | SoT·책임 분리·도메인 경계 BLOCKER 0 |
 
+## 6. 10-14(화) 배포 · 그림자 시작 절차(컨트롤러, 실행 직전 한 줄 보고 — N-42 Q4)
+
+그림자 = 새 장 마감 체인을 실제로 돌리되 엑셀 발송(`POSTCLOSE_SEND=0`)·v3 본 파일 쓰기(`POSTCLOSE_V3=shadow`)는 하지 않는 시험 운영. 3거래일(10-14·15·16) 판정 뒤 10-19 컷오버.
+
+**전제(10-13 까지)**: ① 10-12·13 예약 관측(묶음 5·6·7 첫 거래일) 이상 없음 ② 10-13 `wip/merge-cal`(휴장 달력) 배포·관측(weekend-merge 메모) ③ 서버 `$HOME/quant-ledger/.env`(QL-J — 10-10 생성 완료) ④ 베이스 전체 테스트 통과 ⑤ K1-4a(조용한 손실 기록 시작)·K1-6a 머지(못 하면 다음 배포로 — 컷오버 조건 아님).
+
+**10-14 순서**(낮 10:30~15:10 — 08:10 체인·10:30 워치독 뒤, 15:41 전. 맥 전원 연결. 15:40~16:30·21:00~21:30 배포 금지):
+1. 베이스에 그림자 켬 커밋: `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1`(`SEND=0`·`V3=shadow` 그대로).
+2. `scripts/deploy.sh --dry-run`(⑧ 비밀 파일 600 확인 · 삭제 대상 목록 확인) → `--apply`. 배포 rev 를 §5 에 기록.
+3. 배포 직후 확인: `postclose_chain.sh close --date <오늘> --dry-run` rc 0 · `python -m daily.window_judge record --init`(PR-9 ①) · notify.log 에 crit 없음.
+4. crontab(백업 `crontab -l > ~/cutover_tools/crontab.bak-20261014` 먼저): 15:41 `postclose_chain.sh close` · 16:30 `watchdog.sh postclose_board` 추가, 21:20 `build_evening.sh` · 23:55 `watchdog.sh evening_build` 줄 앞에 `#`(README 크론 표 '제안·중단 예정' 원문 그대로).
+5. 새 규칙 판(E-1 e1.28.0 · F-1 fi1.8.0)은 다음 08:10 체인(10-15)이 짓는다 — 10-14 15:41 그림자 판은 10-13 아침 판(옛 규칙)을 D' 로 읽는다(고정 판, 섞임 아님).
+6. 관측: 10-14 15:41~16:30 그림자 체인 · 16:30 워치독 · 10-15 08:10 아침 체인 끝 두 판 대조(`data/model_db/compare/<T>.json`) · QL-G 그림자 날 대조(COMPAT §8-2) · K1-4a 첫 기록.
+7. 판정: 10-17(금) 아침 `window_judge judge --start 20261014 --as-of 20261016`(PR-9 ②) rc 0 → 10-19 컷오버(V3-A~E, PR-9 스위치 `POSTCLOSE_SEND=1`·`POSTCLOSE_V3=in-place`, QL-L 감시 크론 23:30).
+
+되돌리기: 그림자 기간은 `POSTCLOSE_ENABLED=0` 재배포 + 크론 원복(백업 파일) — v3 는 아직 그대로라 소비자 영향 없음.
+
 ## 4. 검증 방식(N-42 Q1)
 - 'N거래일 연속' 게이트는 **과거 재생 + 실운영 3거래일**로 바꾼다. 3일 창은 실패 1건이면 처음부터 다시 센다(공통 3).
 - 되돌리기 창은 **5거래일**(v3 는 매 수집에서 최근 5행을 다시 받으므로 그 안이면 스스로 메운다).

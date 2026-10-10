@@ -72,12 +72,16 @@ fi
 # 장부(⑤ 의 --out-root data/model_db/deliver 아래)에 그 D 의 basis=evening 줄이 없을 때만 대체 발송한다(판 실패·세션
 # 예외일 등 — warn 한 줄). 줄 판정은 deliver 의 장부 읽기(_sent·LEDGER_NAME)를 그대로 쓰고, 파일이 아예 없으면 '줄
 # 없음'이다. 줄이 없으면 런 로그(data/raw/daily_run.db — 읽기는 daily.window_judge.read_runs, mode=ro)에서 그 D 의
-# 장 마감 엑셀(postclose_excel) 마지막 런을 본다(B-58): rc 3 은 발송 뒤 장부 기록 실패일 수 있어 판정 불가, rc 0·1·2 와
-# 런 없음은 보내지 않은 것이라 대체 발송이다(deliver 계약 — 발송이 성공하면 장부 줄을 쓰고, 그 쓰기가 실패하면 rc 3.
-# 그래서 rc 0 인데 줄이 없으면 --send 없이 끝난 런이다 — 그림자 SEND=0 때 지은 전환 첫날의 전날 판 등).
+# 장 마감 엑셀(postclose_excel) 런을 **전부** 본다(B-58 — 마지막 런만 보면 앞 런의 발송을 뒤 런이 가린다). 런의 rc·발송
+# 표시는 장 마감 체인 step() 이 detail 에 남긴 'rc=<rc> 발송 on|off …' 다. 보냈을 수 있는 런이 하나라도 있으면 판정
+# 불가: rc 3(발송 뒤 장부 기록 실패일 수 있다) · rc 0 '발송 on'(보냈거나 이미 보낸 D 를 건너뛴 런이라 장부 줄이 있어야
+# 한다 — 없으면 장부 유실) · rc·발송 표시를 모름(끝 기록 없는 running · 그 밖의 rc 등). 런이 없거나 전부 rc 1·2 · rc 0
+# '발송 off'(그림자 판)면 보내지 않은 것이라 대체 발송이다(deliver 계약 — 발송이 성공하면 장부 줄을 쓰고, 그 쓰기가
+# 실패하면 rc 3). rc 1 의 모호함은 받아들인다 — 텔레그램 업로드 뒤 응답 시간 초과도 rc 1 이라 그날 대체 발송은 중복일
+# 수 있다(docs/MODEL_DELIVER.md §2).
 # 판정 불가 — 장부를 못 읽음(열기·파싱 실패·자리가 파일이 아님) · 런 로그를 못 읽음(파일·run 표 없음·sqlite 오류) ·
-# 마지막 런 rc 3 이거나 rc 를 모름(끝 기록 없는 running 등) · 판정 코드 예외 — 이면 보냈는지 모르므로 보내지 않고
-# crit · rc 5(P1 — 중복 발송·무발송 어느 쪽도 자동으로 고르지 않는다. 사람이 텔레그램을 보고 --resend 로 정한다).
+# 위의 보냈을 수 있는 런 · 판정 코드 예외 — 이면 보냈는지 모르므로 보내지 않고 crit · rc 5(P1 — 중복 발송·무발송 어느
+# 쪽도 자동으로 고르지 않는다. 사람이 텔레그램을 보고 --resend 로 정한다).
 # ⑤ 엑셀 ok·⑥ v3 실패인 날은 장부 줄이 있으므로 대체 발송하지 않는다(그 D 의 v3 점수는 T-34 아침 재반영이 채운다).
 # --resend(사람 손 정정 발송)는 스위치와 무관하게 지금처럼 보낸다.
 # shellcheck source=scripts/postclose_conf.sh
@@ -86,7 +90,8 @@ postclose_conf_load
 SEND_ARG="--send"; SEND_NOTE=""; LEDGER_UNKNOWN=""
 EVENING_OUT=data/model_db/deliver
 if [ -n "$CUTOVER" ] && [ -z "$RESEND" ]; then
-  # rc 0 그 D 줄 있음 · 3 보내지 않음(줄 없음 + 엑셀 런 없음·rc 0·1·2) · 그 밖(2 판정 불가 · 1 예외 등)은 판정 불가.
+  # rc 0 그 D 줄 있음 · 3 보내지 않음(줄 없음 + 엑셀 런이 없거나 전부 보내지 않은 런) · 그 밖(2 판정 불가 · 1 예외 등)은
+  # 판정 불가.
   # 마지막 줄이 사람이 읽을 사유다
   EV_WHY=$($PY - "$EVENING_OUT" "$D" 2>&1 <<'PY'
 import re
@@ -118,18 +123,30 @@ except wj.InputError as e:
 if not runs:
     print(f"{head} · 런 로그 {wj.RUN_DB} 에 그 D 의 장 마감 엑셀(postclose_excel) 런 없음")
     sys.exit(3)
-last = runs[-1]
-# 장 마감 체인 step() 이 detail 을 'rc=<rc> <스위치>…' 로 남긴다(끝 기록이 없으면 detail 이 비어 있다)
-m = re.match(r"rc=(\d+)(?: |$)", last.detail or "")
-rc = int(m.group(1)) if m else None
-desc = f"{wj.RUN_DB} 의 그 D 장 마감 엑셀(postclose_excel) 마지막 런 run_id={last.run_id} status={last.status}"
-if rc in (0, 1, 2):
-    print(f"{head} · {desc} rc {rc} — 보내지 않았다(발송이 성공하면 장부 줄이 남는다)")
+
+
+def maybe_sent(r: wj.Run) -> str | None:
+    """보냈을 수 있으면 그 사유, 보내지 않은 런이면 None. detail 은 장 마감 체인 step() 의 'rc=<rc> 발송 on|off …'
+    (끝 기록이 없으면 비어 있다)."""
+    m = re.match(r"rc=(\d+)(?: 발송 (on|off))?(?: |$)", r.detail or "")
+    rc, send = (int(m.group(1)), m.group(2)) if m else (None, None)
+    if rc in (1, 2) or (rc == 0 and send == "off"):
+        return None
+    if rc == 3:
+        return "rc 3 — 장 마감 발송 뒤 장부 기록 실패일 수 있다(B-58)"
+    if rc == 0 and send == "on":
+        return "rc 0 · 발송 on — 보냈다면 장부 줄이 있어야 하는데 없다(장부 유실 가능)"
+    return f"status={r.status} detail={r.detail!r} — rc·발송 여부를 알 수 없다"
+
+
+src = f"{wj.RUN_DB} 의 그 D 장 마감 엑셀(postclose_excel) 런 {len(runs)}건"
+bad = [(r, why) for r in runs if (why := maybe_sent(r))]
+if not bad:
+    print(f"{head} · {src} 전부 보내지 않은 런({', '.join((r.detail or '?').split(' · ')[0] for r in runs)})")
     sys.exit(3)
-if rc == 3:
-    print(f"{head} · {desc} rc 3 — 장 마감 발송 뒤 장부 기록 실패일 수 있다(B-58). 텔레그램 확인 뒤 손 발송(--resend)")
-else:
-    print(f"{head} · {desc} detail={last.detail!r} — rc 를 알 수 없어 보냈는지 모른다")
+r, why = bad[0]
+more = f" 외 {len(bad) - 1}건" if len(bad) > 1 else ""
+print(f"{head} · {src} 중 run_id={r.run_id} {why}{more}. 텔레그램 확인 뒤 손 발송(--resend)")
 sys.exit(2)
 PY
 ); EV_RC=$?
@@ -147,7 +164,7 @@ PY
         "D=$D | $EV_WHY — 장 마감 판이 이 D 를 보내지 못했다(판 실패·세션 예외일 등). 아침판을 보낸다(T-7)" ;;
     *)
       SEND_ARG=""; LEDGER_UNKNOWN=1
-      echo "원천 전환 뒤 — 장 마감 발송 장부 판정 불가(rc=$EV_RC): $EV_WHY → 보내지 않는다(짓기만) D=$D"
+      echo "원천 전환 뒤 — 장 마감 발송 장부 판정 불가(rc=5): $EV_WHY → 보내지 않는다(짓기만) D=$D"
       scripts/notify.sh crit "모델 단계 실패: 장 마감 발송 장부 판정 불가(rc=5)" \
         "D=$D basis=morning | 장 마감 발송 장부($EVENING_OUT) — $EV_WHY — 장 마감 판을 보냈는지 몰라 아침판을 보내지 않는다(짓기만, P1). 텔레그램에서 그 D 장 마감 판 도착을 확인하고, 안 왔으면 손 발송 scripts/model_daily.sh --date $D --resend(장부가 손상됐으면 먼저 고친다)" ;;
   esac

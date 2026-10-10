@@ -517,26 +517,29 @@ def test_daily_build_summary_shows_the_cutover_result(tmp_path: Path, evening: s
     assert len(done) == 1 and done[0].split("|", 2)[2].startswith(line), r.notify
 
 
-# ── 장 마감 장부에 줄이 없을 때 — 런 로그의 그 D 엑셀(postclose_excel) 마지막 런(B-58 · P1) ──────────────────────
-# 장 마감 ⑤ deliver rc 3 은 '발송 뒤 장부 기록 실패'일 수 있어 보냈는지 모른다 → 판정 불가(발송 0 · crit · rc 5).
-# rc 0·1·2 와 런 없음은 보내지 않은 것이다(deliver 계약: 발송 성공 ⇒ 장부 줄, 줄 쓰기 실패 ⇒ rc 3) → 대체 발송.
+# ── 장 마감 장부에 줄이 없을 때 — 런 로그의 그 D 엑셀(postclose_excel) 런 전부(B-58 · P1) ──────────────────────
+# 보냈을 수 있는 런이 하나라도 있으면 판정 불가(발송 0 · crit · rc 5): rc 3(발송 뒤 장부 기록 실패일 수 있다) ·
+# rc 0 '발송 on'(보냈으면 장부 줄이 있어야 한다 — 장부 유실) · rc·발송 여부를 모름(끝 기록 없는 running 등).
+# 런이 없거나 전부 rc 1·2 · rc 0 '발송 off'(그림자 판)면 보내지 않은 것이다 → 대체 발송.
 EXCEL = "postclose_excel"
 
 
-def _excel(rc: int, date: str = D) -> RunSeed:
-    """장 마감 체인 step() 이 남기는 엑셀 런 — status ok/failed, detail 'rc=<rc> <스위치>'."""
-    return (date, EXCEL, "ok" if rc == 0 else "failed", f"rc={rc} 발송 on · v3 in-place")
+def _excel(rc: int, date: str = D, *, send: bool = True) -> RunSeed:
+    """장 마감 체인 step() 이 남기는 엑셀 런 — status ok/failed, detail 'rc=<rc> <스위치>'(SWITCH 문자열)."""
+    switch = "발송 on · v3 in-place" if send else "발송 off · v3 shadow"
+    return (date, EXCEL, "ok" if rc == 0 else "failed", f"rc={rc} {switch}")
 
 
 @pytest.mark.parametrize("runs", [
-    [_excel(1)],                                     # 텔레그램 발송 실패 — 보내지 않았다
+    [_excel(1)],                                     # 텔레그램 발송 실패 — 보내지 않았다(응답 시간 초과의 모호함은 받아들인다)
     [_excel(2)],                                     # 입력 오류(판 없음·장부 손상으로 발송 거부)
-    [_excel(0)],                                     # 발송 없이 끝난 런(그림자 SEND=0 때 — 전환 첫날의 전날 판)
-    [_excel(3), _excel(1)],                          # 마지막 런 규칙 — 뒤 런이 rc 1
+    [_excel(0, send=False)],                         # 발송 off 런(그림자 SEND=0 때 — 전환 첫날의 전날 판)
+    [_excel(1), _excel(2), _excel(0, send=False)],   # 여러 번 돌았어도 전부 보내지 않은 런
     [_excel(3, "20261005"), ("20261006", "postclose_model", "failed", "rc=2 발송 on · v3 in-place")],
-], ids=["rc1", "rc2", "rc0_unsent", "last_run_rc1", "no_excel_run_for_d"])
+], ids=["rc1", "rc2", "rc0_send_off", "all_unsent", "no_excel_run_for_d"])
 def test_after_cutover_unsent_excel_run_substitutes(tmp_path: Path, runs: list[RunSeed]) -> None:
-    """장 마감 장부에 그 D 줄이 없고 그 D 엑셀 마지막 런이 rc 0·1·2 이거나 런이 없으면 대체 발송(--send + warn)."""
+    """장 마감 장부에 그 D 줄이 없고 그 D 엑셀 런이 없거나 전부 보내지 않은 런(rc 1·2 · rc 0 발송 off)이면 대체 발송
+    (--send + warn). 다른 날·다른 단계의 런은 보지 않는다."""
     r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=None, runs=runs)
     assert r.rc == 0, r.out
     assert r.calls[-1] == SEND_CALL
@@ -546,10 +549,12 @@ def test_after_cutover_unsent_excel_run_substitutes(tmp_path: Path, runs: list[R
 
 @pytest.mark.parametrize("runs", [
     [_excel(3)],                                     # 발송 뒤 장부 기록 실패일 수 있다(B-58)
-    [_excel(1), _excel(3)],                          # 마지막 런 규칙 — 뒤 런이 rc 3
-], ids=["rc3", "last_run_rc3"])
+    [_excel(1), _excel(3)],                          # 뒤 런이 rc 3
+    [_excel(3), _excel(1)],                          # 앞 런 rc 3 — 뒤 런 rc 1 이 가리지 않는다(마지막 런만 보면 중복 발송)
+], ids=["rc3", "later_rc3", "earlier_rc3"])
 def test_after_cutover_excel_rc3_is_unknown(tmp_path: Path, runs: list[RunSeed]) -> None:
-    """B-58 — 장 마감 엑셀 마지막 런이 rc 3 이면 보냈는지 모른다. 발송 0 · crit · rc 5, 안내는 텔레그램 확인 뒤 --resend."""
+    """B-58 — 그 D 장 마감 엑셀 런 중 rc 3 이 하나라도 있으면 보냈는지 모른다. 발송 0 · crit · rc 5,
+    안내는 텔레그램 확인 뒤 --resend. 종료 rc 와 실시간 로그 줄의 rc 가 같다(rc=5)."""
     r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening="", runs=runs)
     assert r.rc == 5, r.out
     assert r.mods == MODEL_STEPS and r.calls[-1] == BUILD_ONLY_CALL
@@ -559,6 +564,24 @@ def test_after_cutover_excel_rc3_is_unknown(tmp_path: Path, runs: list[RunSeed])
     assert "텔레그램 확인 뒤 손 발송(--resend)" in crit[0]
     assert f"scripts/model_daily.sh --date {D} --resend" in crit[0]
     assert _level(r, "warn") == []
+    assert "장 마감 발송 장부 판정 불가(rc=5)" in r.out
+    assert "판정 불가(rc=2)" not in r.out                      # 판정 코드의 내부 rc 를 찍지 않는다
+
+
+@pytest.mark.parametrize("runs", [
+    [_excel(0)],                                     # rc 0 발송 on 인데 장부 줄이 없다
+    [_excel(0), _excel(1)],                          # 앞 런이 그렇고 뒤 런이 rc 1
+], ids=["rc0_send_on", "earlier_rc0_send_on"])
+def test_after_cutover_sent_run_without_ledger_line_is_unknown(tmp_path: Path,
+                                                               runs: list[RunSeed]) -> None:
+    """rc 0 '발송 on' 런은 보냈거나(장부 줄을 쓴다) 이미 보낸 D 를 건너뛴 것(장부 줄이 있다)이다 — 줄이 없으면 장부가
+    유실됐을 수 있어 판정 불가: 발송 0 · crit · rc 5."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=None, runs=runs)
+    assert r.rc == 5, r.out
+    assert r.calls[-1] == BUILD_ONLY_CALL
+    crit = _crit(r)
+    assert len(crit) == 1 and crit[0].split("|")[1] == UNKNOWN_TITLE, r.notify
+    assert "장부 유실" in crit[0] and "텔레그램 확인 뒤 손 발송(--resend)" in crit[0]
 
 
 @pytest.mark.parametrize("runs", [
@@ -566,7 +589,9 @@ def test_after_cutover_excel_rc3_is_unknown(tmp_path: Path, runs: list[RunSeed])
     b"not a sqlite database\n" * 4,                  # sqlite 가 아님
     NO_TABLE,                                        # run 표 없음
     [(D, EXCEL, "running", None)],                   # 끝 기록 없는 런(체인이 ⑤ 도중 죽음) — rc 를 모른다
-], ids=["no_file", "not_sqlite", "no_table", "running"])
+    [(D, EXCEL, "running", None), _excel(1)],        # 앞 런이 끝 기록 없이 죽었다 — 뒤 런 rc 1 이 가리지 않는다
+    [(D, EXCEL, "ok", "rc=0")],                      # rc 0 인데 발송 표시가 없다
+], ids=["no_file", "not_sqlite", "no_table", "running", "earlier_running", "rc0_no_switch"])
 def test_after_cutover_unreadable_run_log_is_unknown(tmp_path: Path,
                                                      runs: list[RunSeed] | bytes | str | None) -> None:
     """P1 — 장 마감 장부에 줄이 없는데 런 로그를 못 읽거나 마지막 런의 rc 를 모르면 판정 불가: 발송 0 · crit · rc 5."""

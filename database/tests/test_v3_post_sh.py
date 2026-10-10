@@ -29,6 +29,7 @@ from typing import NamedTuple
 
 import pytest
 import test_compat_export as tce
+from compat import v3_restore
 from compat.quant_db import SCHEMA_SQL_PATH, ExportResult, TableResult, _write_meta
 from compat.v3_post import SCORE_TABLES, TABLES
 from daily import kw_daily, postclose
@@ -182,6 +183,10 @@ def _main_db(tmp_path: Path) -> Path:
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8") + MARKET_INDICES_DDL)
     con.execute("INSERT INTO daily_prices VALUES ('005930', '2020-01-02', 1, 1, 1, 7, 1, 1, 7.0)")
+    # 수급 표도 가격 표처럼 이력이 730일 창 앞에서 시작한다(실물 v3 모양) — 첫 `--full` 이 빈 수급 표에 09-21 부터
+    # 쓰면 다음 `--full` 이 제자리 하한(T-46 — 창 시작 < 이력 시작)에 걸려 이어 돌리는 시나리오가 막힌다
+    con.execute("INSERT INTO investor_detail_flows (stock_code, trade_date, individual) "
+                "VALUES ('005930', '2020-01-02', -1)")
     con.execute("INSERT INTO market_indices VALUES ('001', ?, 1, 1, 1, 2500, 1)", (D_ISO,))
     con.commit()
     con.close()
@@ -649,6 +654,31 @@ def test_gate_failure_leaves_main_unchanged(env, skip_sources, tmp_path) -> None
     assert (home / "data/_v3_post/staging_morning.db").exists()            # 실패하면 남긴다
 
 
+def test_in_place_full_before_v3_history_is_rc2_then_window_days_fits(env, sources,
+                                                                       tmp_path) -> None:
+    """T-46 — 제자리 `--full` 창(730일, 2024-09-23~)이 v3 investor_detail_flows 이력 시작(2025-01-23)보다 앞이면
+    compat 이 쓰기 전에 멈춘다(rc 2 crit, 본 파일 무변경). `--window-days` 로 창을 이력 안에 맞추면 반영된다."""
+    _, main = env
+    con = sqlite3.connect(str(main))
+    con.execute("DELETE FROM investor_detail_flows")
+    con.execute("INSERT INTO investor_detail_flows (stock_code, trade_date, individual) "
+                "VALUES ('005930', '2025-01-23', -1)")
+    con.commit()
+    con.close()
+    before = _sha(main)
+    r = _run(tmp_path, sources, *_base(main))
+    assert r.rc == 2, r.out
+    assert "investor_detail_flows 이력 시작 2025-01-23" in r.out
+    assert _sha(main) == before
+    crit = _levels(r, "crit")
+    assert len(crit) == 1 and "② compat export --in-place" in crit[0]
+    days = (dt.date(2026, 9, 23) - dt.date(2025, 1, 23)).days
+    r2 = _run(tmp_path, sources, *_base(main, "--window-days", str(days)))
+    assert r2.rc == 0, r2.out
+    window = json.loads(_q(main, 'SELECT "window" FROM _compat_meta')[0][0])
+    assert (window["from_date"], window["full"]) == ("2025-01-23", True)
+
+
 def test_compat_failure_leaves_main_unchanged(env, sources, tmp_path) -> None:
     """그날 모델 판이 없다 — compat 이 멈추고 반영·daily_post 는 돌지 않는다."""
     home, main = env
@@ -659,6 +689,70 @@ def test_compat_failure_leaves_main_unchanged(env, sources, tmp_path) -> None:
     crit = _levels(r, "crit")
     assert len(crit) == 1 and "② compat export --in-place" in crit[0]
     assert "③④" not in r.out
+
+
+# ── 복원 뒤 첫 반영(QL-I · T-42 · T-46) ─────────────────────────────────────────
+def _restored(main: Path) -> None:
+    """본 파일에 복원 기록 1행(`v3_restore.write_record` — 복원 트랜잭션이 남기는 그 행). 시각은 compat 기록보다
+    늘 앞이다(2000-01)."""
+    con = sqlite3.connect(str(main), isolation_level=None)
+    try:
+        con.execute("BEGIN")
+        v3_restore.write_record(con, "2000-01-02T00:00:00.000000+00:00", "2026-09-23",
+                                Path("bak/quant_x.db"), "0" * 64,
+                                {t: {"n_before": 1, "n_rows": 1} for t in TABLES})
+        con.execute("COMMIT")
+    finally:
+        con.close()
+
+
+def test_first_reflect_after_restore_needs_the_flag(env, sources, tmp_path) -> None:
+    """표식 없는 반영(체인 모양)은 복원 뒤에 계산됐어도 rc 2 crit·본 파일 무변경, 거부 사유에 사람이 하는 명령을
+    적는다. `--first-after-restore` 면 rc 0. 그 뒤 다시 표식을 주면(이미 복원 뒤 반영이 있다) rc 2 — 오용 방지."""
+    _, main = env
+    _restored(main)
+    before = _sha(main)
+    r = _run(tmp_path, sources, *_base(main))
+    assert r.rc == 2, r.out
+    assert "--first-after-restore" in r.out and "CUTOVER_ROLLBACK §5" in r.out
+    assert _sha(main) == before
+    crit = _levels(r, "crit")
+    assert len(crit) == 1 and "③④ 게이트·반영" in crit[0]
+    r2 = _run(tmp_path, sources, *_base(main, "--first-after-restore"))
+    assert r2.rc == 0, r2.out
+    assert [b for (b,) in _q(main, "SELECT basis FROM _compat_meta ORDER BY exported_at")] == [
+        "restore", "morning"]
+    after = _sha(main)
+    r3 = _run(tmp_path, sources, *_base(main, "--first-after-restore"))
+    assert r3.rc == 2, r3.out
+    assert "복원 뒤 첫 반영 전용" in r3.out
+    assert _sha(main) == after
+
+
+def test_flag_on_a_never_restored_main_is_refused(env, sources, tmp_path) -> None:
+    """평상시(복원 기록 없음) 대상에 `--first-after-restore` 를 주면 rc 2·본 파일 무변경(P1)."""
+    _, main = env
+    before = _sha(main)
+    r = _run(tmp_path, sources, *_base(main, "--first-after-restore"))
+    assert r.rc == 2, r.out
+    assert "복원 뒤 첫 반영 전용" in r.out
+    assert _sha(main) == before
+
+
+def test_chain_scripts_never_pass_first_after_restore() -> None:
+    """복원 뒤 첫 반영은 사람만 한다(T-42 · T-46) — 장 마감 체인(close·refill·morning)·`compat_export.sh`·아침
+    체인(`daily_build.sh`)과 그 설정은 표식을 넘기지 않는다. `v3_post.sh`(표식을 받는 쪽) 밖의 scripts·config
+    어디에도 표식 문자열이 없어야 한다."""
+    flag = "first-after-restore"
+    named = [DB_ROOT / "scripts" / n for n in ("postclose_chain.sh", "compat_export.sh", "daily_build.sh")]
+    assert all(p.is_file() for p in named)
+    files = [p for root in (DB_ROOT / "scripts", DB_ROOT / "config") for p in root.rglob("*")
+             if p.is_file() and p.name != "v3_post.sh"]
+    assert set(named) <= set(files)
+    hits = [str(p.relative_to(DB_ROOT)) for p in files
+            if flag in p.read_bytes().decode("utf-8", errors="replace")]
+    assert hits == []
+    assert flag in (DB_ROOT / "scripts" / "v3_post.sh").read_text(encoding="utf-8")
 
 
 # ── 그림자 ───────────────────────────────────────────────────────────────────
@@ -770,6 +864,7 @@ def test_morning_with_post_cmd_is_rc5(env, sources, tmp_path) -> None:
     ["--date", D, "--basis", "morning"],                             # v3 경로 없음
     ["--date", D, "--basis", "morning", "--v3-db", "NOPE"],
     ["--date", D, "--basis", "morning", "--v3-db", "MAIN", "--bogus"],
+    ["--date", D, "--basis", "morning", "--v3-db", "MAIN", "--window-days", "600"],  # --full 없음
 ])
 def test_argument_errors_are_rc5_warn(env, sources, tmp_path, args) -> None:
     home, main = env

@@ -24,9 +24,11 @@ v3 제자리 반영(QL-F, `scripts/v3_post.sh` 가 부른다 — `compat.v3_post
     python -m compat export … --target <스테이징> --in-place --tables <반영 표>
     python -m compat apply --staging <스테이징> --v3-db <v3 quant.db> --date D --basis B
                            [--shadow] [--allow-older] [--commit-flag PATH] [--no-scores]
+                           [--first-after-restore]
 
 `--no-scores`(T-38 — 21:05 원장 뒤 재반영 refill)는 v3-tables·apply 에 같이 준다 — 점수 두 표를 뺀 7표.
 `--basis evening` 전용이다(아침이면 rc 2 — 아침 반영 표는 T-34 가 정한다).
+`--first-after-restore`(T-46)는 v3 표 복원 뒤 첫 제자리 반영에서 사람만 apply 에 준다 — 체인은 넘기지 않는다.
 
 v3 되돌리기(QL-I, `scripts/v3_backup.sh`·`scripts/v3_restore.sh` 가 부른다 — `compat.v3_restore`):
 
@@ -111,6 +113,9 @@ def _parser() -> argparse.ArgumentParser:
                    help="COMMIT 직후 만들 표식 파일(셸이 'COMMIT 뒤 실패' 를 가른다)")
     a.add_argument("--no-scores", action="store_true",
                    help="점수 두 표를 뺀 7표로 게이트·반영(T-38) — v3-tables 와 같이 준다")
+    a.add_argument("--first-after-restore", action="store_true",
+                   help="복원 뒤 첫 제자리 반영의 사람 표식(T-46) — 체인은 넘기지 않는다. 복원 뒤 첫 반영을 "
+                        "기다리는 본 파일이 아니면 거부(오용 방지)")
     b = sub.add_parser("backup", help="v3 quant.db 고정 백업 2벌 + V3-A~E 대상 파일 사본(QL-I)")
     b.add_argument("--v3-db", required=True, type=Path, help="v3 quant.db(읽기 전용으로 연다)")
     b.add_argument("--dest", required=True, type=Path, action="append",
@@ -153,7 +158,8 @@ def _v3_post(args: argparse.Namespace) -> int:
     try:
         report = v3_post.apply(args.staging, args.v3_db, args.date, args.basis,
                                shadow=args.shadow, allow_older=args.allow_older,
-                               commit_flag=args.commit_flag, scores=not args.no_scores)
+                               commit_flag=args.commit_flag, scores=not args.no_scores,
+                               first_after_restore=args.first_after_restore)
     except v3_post.V3PostGateError as e:
         print(e.report.summary())
         for f in e.report.failures:

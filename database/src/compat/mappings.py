@@ -82,7 +82,8 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 #   ② 시·고·저·종가·거래량을 함께 다시 쓴다(`REBASE_SQL` — 반영이 며칠 끊겨도 자가 복구). 사건 단계까지 창 밖으로 나갈
 #   만큼 끊겼거나 equity `price_daily` 원값(종가·기준가)이 바뀌면 `--full` 로 맞춘다.
 # v3 사본에는 이 규칙 밖의 옛 행도 있다(과거 일괄 백필 — 행 d 가 d+4 보다 뒤 날짜 기준 수정값, 08-07 사본
-#   34,310행·217종목). compat 은 규칙대로 다시 쓴다(V3-C `--full`).
+#   34,310행·217종목). compat 은 자기가 쓰는 범위(창 · 창 안 사건 종목의 창 밖 행)만 규칙대로 다시 쓴다 — V3-C 가
+#   증분 창이라(T-46) 그 밖의 옛 행은 v3 이력에 그대로 남는다(COMPAT_LAYER §7 ②).
 # `price_daily.basis`('krx'|'evening')는 v3 스키마에 자리가 없다 — `_compat_meta.basis` 에만 남는다.
 # ⚠ GAP-1: v3 `daily_prices` 는 open·high·low·close·volume 이 **NOT NULL** 이고(v3
 #   `backend/db/schema.py:16-27`, 완화 ALTER 없음) 우리 저녁 잠정 T 행(`basis='evening'`)은

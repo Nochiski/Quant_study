@@ -11,7 +11,9 @@
 #   ③ 게이트(COMMIT 전): 이번 compat 기록 1행·status ok·날짜·basis · 순서(T-35 — 본 파일에 더 나중 반영 기록이
 #      있으면 실패, 재생은 --allow-older) · 반영 표 전부(반영 표 밖의 표를 쓴 기록도 실패) · 필수 열이 빈 행 0건(그림자
 #      compat 의 5% 허용을 제자리에서는 0 으로 — P1) · 신선도(이번 compat 이 daily_prices 에 쓴 D 행 ≥ 1, T-31 ③) ·
-#      표마다 반영 범위 행 > 0
+#      표마다 반영 범위 행 > 0 · 복원 뒤 첫 반영(QL-I · T-42 · T-46 — 본 파일 마지막 기록이 v3_restore.sh 의 복원이면
+#      --first-after-restore 표식이 있고 복원 뒤에 계산된 기록만. 표식은 사람만 준다 — 장 마감 체인·compat_export.sh·
+#      아침 체인은 넘기지 않는다. 복원 뒤 첫 반영을 기다리는 본 파일이 아니면 표식 자체를 거부)
 #   ④ 통과하면 반영 표를 v3 quant.db 에 한 트랜잭션으로(ATTACH · BEGIN IMMEDIATE · 표별 범위 DELETE/INSERT · COMMIT).
 #      범위는 compat 이 쓴 그대로(스테이징 `_compat_meta` 기록의 창) — compat 이 쓰지 않는 표(market_* 등, T-27)는
 #      건드리지 않는다. 범위·게이트 정의는 `src/compat/v3_post.py` 머리 주석이 정본
@@ -47,12 +49,18 @@
 #     사건 종목의 창 밖 행을 다시 맞출 때 equity 행이 없는 날은 adj_close 를 NULL 로 둔다(P1).
 #   rc: 0 완료 · 2 반영 실패(crit — COMMIT 전이면 v3 본 파일 무변경) · 3 락 실패(warn) · 4 홈 이동 실패 ·
 #       5 인자 오류(warn — 스테이징 경로가 본 파일과 같은 파일, 아침 + post 명령, --no-scores + 아침,
-#         --no-scores + post 명령 포함) ·
+#         --no-scores + post 명령, --full 없는 --window-days 포함) ·
 #       6 반영 완료, daily_post 실패 또는 날짜가 달라 미호출(warn)
 #   사용: v3_post.sh --date YYYYMMDD --basis evening|morning --v3-db PATH
 #                    [--v3-post-cmd CMD] [--shadow] [--allow-older] [--staging PATH] [--model-root PATH]
-#                    [--full] [--builds-from PATH] [--consensus-asof YYYYMMDD] [--no-scores]
-#     --full 은 첫 반영(K3-2 — 730일 창을 한 트랜잭션으로)과 얕은 대상용이다. 매일 쓰지 않는다(COMPAT_LAYER §8 V3-C).
+#                    [--full [--window-days N]] [--builds-from PATH] [--consensus-asof YYYYMMDD] [--no-scores]
+#                    [--first-after-restore]
+#     --first-after-restore 는 v3 표 복원 뒤 다시 컷오버할 때의 첫 반영 전용이다(사람이 준다, CUTOVER_ROLLBACK §5).
+#     ③④ apply 에만 넘긴다. 첫 컷오버(V3-C)·평상시에는 주지 않는다(주면 rc 2).
+#     --full 은 손 복구(반영이 끊겨 사건 단계까지 창 밖으로 나갔거나 equity 원값이 바뀐 경우)용이다. 매일
+#     쓰지 않고, 첫 반영(V3-C)도 매일과 같은 증분 창이다(T-46, COMPAT_LAYER §8 V3-C). 제자리 --full 창 시작이 대상 v3
+#     표(daily_prices·investor_detail_flows)의 이력 시작보다 앞이면 ② compat 이 쓰기 전에 멈춘다(rc 2) — 그 메시지의
+#     --window-days N 으로 창을 이력 안에 맞춘다(--full 과 함께만, compat export 에 그대로 넘긴다).
 #     --allow-older 는 재생 전용이다(T-35). ② compat export 와 ③④ apply 둘 다에 넘긴다 — compat 의 장 마감 판도
 #     같은 순서 판정으로 더 나중 반영 위에 쓰기를 거부한다(QL-D).
 #   ② 의 장 마감 판(--basis evening)은 가격·수급 T 행을 원장 두 개에서 만든다(QL-D) — QL_POSTCLOSE_DB(기본
@@ -73,7 +81,8 @@ MODEL_ROOT="${QL_MODEL_ROOT:-data/model}"
 POSTCLOSE_DB="${QL_POSTCLOSE_DB:-data/raw/postclose.db}"
 KIWOOM_DB="${QL_KIWOOM_DB:-data/raw/kiwoom.db}"
 V3_DB="${QL_V3_DB:-}"; POST_CMD="${QL_V3_POST_CMD:-}"
-D=""; BASIS=""; SHADOW=""; STAGING=""; FULL=""; BUILDS=""; CONS=""; OLDER=""; NOSCORES=""
+D=""; BASIS=""; SHADOW=""; STAGING=""; FULL=""; BUILDS=""; CONS=""; OLDER=""; NOSCORES=""; WINDOW=""
+FIRST=""
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 die_arg() {
   echo "v3_post 인자 오류: $1" >&2
@@ -106,6 +115,8 @@ while [ $# -gt 0 ]; do
     --allow-older) OLDER=1; shift ;;
     --no-scores) NOSCORES=1; shift ;;
     --full) FULL="--full"; shift ;;
+    --window-days) need_val "$@"; WINDOW="$2"; shift 2 ;;
+    --first-after-restore) FIRST=1; shift ;;
     *) die_arg "모르는 인자 '$1'" ;;
   esac
 done
@@ -121,6 +132,8 @@ esac
   die_arg "--basis morning 에 daily_post 명령(--v3-post-cmd·QL_V3_POST_CMD)을 줬다 — 아침 재반영은 compat 만(T-31)"
 [ -n "$NOSCORES" ] && [ "$BASIS" != evening ] &&
   die_arg "--no-scores 는 --basis evening 전용이다 — 아침 반영 표는 T-34 가 정한다(T-38)"
+[ -n "$WINDOW" ] && [ -z "$FULL" ] &&
+  die_arg "--window-days 는 --full 과 함께만 쓴다 — 제자리 --full 창을 대상 v3 이력 안에 맞출 때(T-46)"
 [ -n "$NOSCORES" ] && [ -n "$POST_CMD" ] &&
   die_arg "--no-scores 에 daily_post 명령(--v3-post-cmd·QL_V3_POST_CMD)을 줬다 — 점수 없는 반영은 compat 만(T-38)"
 [ -n "$V3_DB" ] || die_arg "--v3-db(또는 QL_V3_DB)가 없다 — v3 quant.db 경로는 인자로만 받는다"
@@ -170,10 +183,11 @@ step "①' 반영 표" plan_tables &&
 step "② compat export --in-place" "$PY" -m compat export --date "$D" --basis "$BASIS" \
     --equity-root "$EQUITY_ROOT" --stage-root "$STAGE_ROOT" --model-root "$MODEL_ROOT" \
     --target "$STAGING" --in-place --tables "$TABLES" $FULL ${CONS:+--consensus-asof "$CONS"} \
-    ${BUILDS:+--builds-from "$BUILDS"} ${OLDER:+--allow-older} ${LEDGERS[@]+"${LEDGERS[@]}"} &&
+    ${WINDOW:+--window-days "$WINDOW"} ${BUILDS:+--builds-from "$BUILDS"} ${OLDER:+--allow-older} \
+    ${LEDGERS[@]+"${LEDGERS[@]}"} &&
 step "③④ 게이트·반영" "$PY" -m compat apply --staging "$STAGING" --v3-db "$V3_DB" \
     --date "$D" --basis "$BASIS" --commit-flag "$CF" ${SHADOW:+--shadow} ${OLDER:+--allow-older} \
-    ${NOSCORES:+--no-scores}
+    ${NOSCORES:+--no-scores} ${FIRST:+--first-after-restore}
 POST=""
 if [ "$RC" -eq 0 ]; then
   if [ -n "$SHADOW" ]; then

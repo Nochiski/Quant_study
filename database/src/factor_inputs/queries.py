@@ -19,10 +19,12 @@ compat 가 나중에 이 층을 읽어 v3 `quant.db` 에 쓸 때 다시 반올�
 
 두 날짜(컷오버 PR-4 · T-2): `Params.d` 는 판 기준일(세션·창의 끝), `Params.asof` 는 정보 시점이다.
 아침판은 둘 다 D 다. 장 마감 판(basis evening)은 d = 오늘 T, asof = D'(직전 거래일 = 고정한 연구
-판의 마지막 세션)이다. WISE·DART·재무·종목 속성·기업행위 입력은 fetched/available ≤ asof 로
-자른다(compat `--consensus-asof` 와 같은 개념 — 기본값이 D 인 것도 같다). 그래야 재생이 D' 뒤
-자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다. 세션 창(가격 550 달력일·수급·
-신용 60 세션)은 T 에서 끝난다.
+판의 마지막 세션)이다. 날짜 축이 있는 정보 입력 — WISE(컨센서스·재무)·DART(재무·배당·감사·
+공시)·`universe_daily`(D' 행)·WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor`) — 는
+fetched/available ≤ asof 로 자른다(compat `--consensus-asof` 와 같은 개념 — 기본값이 D 인 것도
+같다). 그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
+날짜 축이 없는 마스터(`security` 이름·상장일, `corp` 업종 코드)는 고정 판 그대로다. 세션 창(가격
+550 달력일·수급·신용 60 세션)·당해 12월기 `fy`·연간 컨센서스 연도 창은 T 기준이다.
 """
 from __future__ import annotations
 
@@ -88,7 +90,7 @@ DPS_FALLBACK_KIND = "-"
 QUARTER_REPORTS = ("11013", "11012", "11014", "11011")  # 1Q · 반기 · 3Q · 4Q(사업보고서 차감)
 
 # 장 마감 판(evening) T 행 어휘 — 계약 `fi_prices.price_source`·`fi_universe.mktcap_basis` 주석
-T_PRICE_SOURCE = "evening_snapshot"        # T 행 가격 출처(T 전 행은 'krx')
+T_PRICE_SOURCE = "postclose"               # T 행 가격 출처 = 15:41 장 마감 수집(T 전 행은 'krx')
 T_MKTCAP_BASIS = "t1_shares_x_t_close"     # 시총 = D' 상장주식수 × T 종가(B-24)
 
 
@@ -226,7 +228,9 @@ def universe_sql(p: Params, rule: UniverseRule) -> str:
     **D' 행 이월**이다(새 규칙 — 상태 변화는 다음 날 아침 확정판에서. T 신규 상장은 빠진다).
     date 열만 T 다. 시총 = round(D' KRX 상장주식수 × T 종가 / 1e8), mktcap_basis =
     `T_MKTCAP_BASIS`. T 종가는 T 행 자리 `_t_prices` 에서 읽는다 — 거기 종가가 없으면 close·시총
-    NULL(no_price, P1).
+    NULL(no_price, P1). filing_late 는 세션 축(`_calx`)에 T 가 있어 법정기한이 (D', T] 에 드는
+    보고서의 실효 기한이 T 가 된다 — 접수일 ≤ D' < T 라 false(아침판 D' 에서는 기한 뒤 세션이
+    달력에 없어 NULL). 다음 날 연구 판 T 와 같은 판정이다.
     """
     if p.basis == "evening":
         px = f"""px AS (
@@ -917,14 +921,15 @@ def table_sqls(p: Params, rule: UniverseRule) -> list[tuple[str, str]]:
 # 판 manifest `gaps` — 원천이 없거나 의도적으로 비운 열(조용한 결측 금지 · V2-7).
 GAPS: tuple[dict[str, str], ...] = (
     {"table": "fi_prices", "column": "price_source",
-     "reason": "아침판은 전 행 'krx'. 장 마감 판 T 행('evening_snapshot')은 T 행 얹기(컷오버 PR-5) "
+     "reason": "아침판은 전 행 'krx'. 장 마감 판 T 행('postclose')은 T 행 얹기(컷오버 PR-5) "
                "뒤 — 그 전엔 T 행이 없다"},
     {"table": "fi_universe", "column": "mktcap_basis",
      "reason": "아침판 'krx'. 장 마감 판은 전 행 't1_shares_x_t_close'(D' 주식수 × T 종가, B-24) — "
                "T 종가가 없는 종목은 market_cap NULL"},
     {"table": "fi_universe", "column": "*",
      "reason": "장 마감 판은 universe_daily D' 행 이월(상태 변화는 다음 날 아침 확정판, "
-               "T 신규 상장 누락) · WISE·DART·재무·속성은 D' 까지(asof)"},
+               "T 신규 상장 누락) · WISE·DART·universe_daily·WICS 는 D' 까지(asof), "
+               "security·corp 은 고정 판 마스터 그대로"},
     {"table": "fi_universe", "column": "filing_late",
      "reason": "가장 최근 제출한 정기보고서만 판정 — 기한이 지났는데 아직 안 낸 보고서(미제출)는 "
                "보지 못한다(기대 보고서 목록이 층에 없다)"},

@@ -134,7 +134,7 @@ def test_fg1_min_eligible(con) -> None:
 
 
 def test_fg2_non_krx_rows_fail(con) -> None:
-    con.execute("UPDATE g_fi_prices SET price_source = 'evening_snapshot'")
+    con.execute("UPDATE g_fi_prices SET price_source = 'postclose'")
     assert gates.fg2_overlay(_ctx(con)).status is GateStatus.FAIL
 
 
@@ -223,7 +223,7 @@ def con_evening(con) -> duckdb.DuckDBPyConnection:
                 "mktcap_basis = 't1_shares_x_t_close'")
     con.execute("UPDATE g_fi_prices SET close = 9000")
     _insert(con, "fi_prices", ticker="000001", date=dt.date.fromisoformat(T), close=12_000,
-            price_source="evening_snapshot")
+            price_source="postclose")
     return con
 
 
@@ -245,7 +245,7 @@ def test_evening_baseline_passes_every_gate(con_evening) -> None:
 @pytest.mark.parametrize("breaker, gate, key", [
     (f"UPDATE g_fi_prices SET price_source = 'krx' WHERE date = DATE '{T}'",
      "FG2", "fi_prices.t_row_not_overlay"),
-    (f"UPDATE g_fi_prices SET price_source = 'evening_snapshot' WHERE date < DATE '{T}'",
+    (f"UPDATE g_fi_prices SET price_source = 'postclose' WHERE date < DATE '{T}'",
      "FG2", "fi_prices.non_krx_before_t"),
     ("UPDATE g_fi_universe SET mktcap_basis = 'krx'", "FG2", "fi_universe.mktcap_basis_not_t1"),
     ("UPDATE g_fi_universe SET mktcap_basis = 'krx'", "FG3", "non_t1_basis"),

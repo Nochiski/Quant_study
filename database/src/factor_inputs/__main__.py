@@ -5,6 +5,7 @@
         [--grace-days 5] [--min-eligible 300] [--keep 60] \\
         [--builds-from data/deliver/history/20260928_morning.json]
     python -m factor_inputs build --date 20260929 --basis evening \\
+        --root data/model_db/factor_inputs \\
         --builds-from data/deliver/history/20260928_morning.json [--calendar-dir data/calendar]
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
@@ -17,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-from .build import KEEP_DEFAULT, MIN_ELIGIBLE_DEFAULT, FactorInputsError, build
+from .build import KEEP_DEFAULT, MIN_ELIGIBLE_DEFAULT, FactorInputsError, build, research_root
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -29,7 +30,9 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--basis", required=True, choices=("evening", "morning"),
                    help="morning = 아침 확정판 · evening = 장 마감 판(--date 는 오늘 T, "
                         "--builds-from 필수 — 컷오버 T-2)")
-    b.add_argument("--root", type=Path, default=base / "data" / "factor_inputs")
+    b.add_argument("--root", type=Path, default=research_root(),
+                   help="산출 루트(기본 연구 루트 — 장 마감 판은 "
+                        "data/model_db/factor_inputs 필수, T-3)")
     b.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
     b.add_argument("--equity-root", type=Path, default=base / "data" / "equity")
     b.add_argument("--grace-days", type=int, default=None,

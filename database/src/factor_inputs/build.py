@@ -30,7 +30,8 @@
 이력 경로·날짜는 판 manifest `builds_from`·`builds_from_date` 에 남는다.
 
 장 마감 판(`--basis evening`, 컷오버 T-2 · PR-4): --date 는 오늘 T, 원천은 직전 거래일 D' 아침
-확정판을 `--builds-from` 으로 고정한 것뿐이다(고정 없으면 rc 2). 세션 = 연구 판 trading_calendar ∪
+확정판을 `--builds-from` 으로 고정한 것뿐이다(고정 없으면 rc 2). 산출 루트는 연구 루트
+(`research_root()`)와 달라야 한다(T-3 — 같으면 rc 2). 세션 = 연구 판 trading_calendar ∪
 {T}, 유니버스 = D' 행 이월, 정보 시점(asof) = D' (`queries` 모듈 docstring '두 날짜'). 다음이면
 `FactorInputsError`(rc 2) — 사유를 메시지에 남긴다:
   (a) T 가 `daily.calendar` 거래일이 아니다(휴장·주말) 또는 판정 달력을 못 읽는다
@@ -72,10 +73,13 @@ from . import gates, queries
 # FG1 손익(op·ni) 비율 기록(D7-8)
 # 1.5.0(2026-10-10, 컷오버 PR-4 · T-2): 장 마감 판(evening) 세션·유니버스·시점 — 세션 = 연구 판
 # 달력 ∪ {T}, 유니버스 = D' 행 이월 · 시총 = D' 주식수 × T 종가(`t1_shares_x_t_close`, T 행 자리
-# `_t_prices`), WISE·DART·재무·속성·기업행위 입력 fetched/available ≤ D'(asof). 아침판 SQL 은 그대로
+# `_t_prices`, 출처 어휘 'postclose'), WISE·DART·universe_daily·WICS·기업행위 입력 fetched/available
+# ≤ D'(asof). 아침판 SQL 은 그대로
 RULES_VERSION = "fi1.5.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
+# fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
+EQUITY_BASES_READ = ("manual", "morning")
 # eligible 하한 — 09-23 실측 580 · 09-28 619 의 절반. 빈 유니버스를 성공으로 쓰지 않는다
 MIN_ELIGIBLE_DEFAULT = 300
 # 모델 판과 같은 수 — 모델 판이 가리키는 fi 판이 지워지지 않게(E-01·N-17)
@@ -107,6 +111,13 @@ _CHAIN_TABLES = ("price_daily", "price_adj_daily", "adj_factor")
 
 class FactorInputsError(Exception):
     """입력·판·인자 오류 — 판을 만들지 않고 멈춘다(CLI rc 2)."""
+
+
+def research_root() -> Path:
+    """연구(아침 확정판) fi 루트 `<QL_HOME>/data/factor_inputs`(없으면 저장소 `database/` 아래) —
+    CLI `--root` 기본값. 장 마감 판은 여기에 짓지 않는다(T-3, `build`)."""
+    base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
+    return base / "data" / "factor_inputs"
 
 
 def _credit_lag_sessions() -> int:
@@ -244,16 +255,15 @@ def _check_seam(con: duckdb.DuckDBPyConnection, t: date, dprime: date,
             f"— 연구 판이 D' 에서 끝나야 한다(이력={origin})")
 
 
-def _check_basis(equity_builds: dict[str, str], basis: str, pinned: bool) -> None:
-    """아침판에 저녁 equity 판(`e_`)을 섞지 않는다. 수동 재빌드(`b_`)는 허용(compat R5 와 같다).
-    장 마감(evening) fi 가 아침 확정판(`m_`)을 읽는 것은 `--builds-from` 으로 날짜를 고정했을 때만
-    허용한다(T-2) — 고정 없이 읽으면 낡은 current 판을 조용히 쓰게 된다(P1)."""
-    allowed = ("manual", basis) + (("morning",) if basis == "evening" and pinned else ())
+def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
+    """fi 는 아침 확정판(`m_`)과 수동 재빌드(`b_`) equity 판만 읽는다(compat R5 와 같다). 장 마감
+    판도 직전 거래일 확정판을 `--builds-from` 으로 고정해 읽으므로(T-2 — 고정 없음은 `build` 가
+    먼저 거절한다) 같은 규칙이다. 저녁 잠정판(`e_`)은 basis 와 상관없이 섞지 않는다."""
     for table, bid in sorted(equity_builds.items()):
         got = basis_of_build_id(bid)
-        if got not in allowed:
-            raise FactorInputsError(f"equity 판 접두어가 --basis 와 다르다: table={table} "
-                                    f"build_id={bid} 판={got} --basis={basis}")
+        if got not in EQUITY_BASES_READ:
+            raise FactorInputsError(f"equity 판 접두어가 허용 밖이다(아침 확정 m_·수동 b_ 만): "
+                                    f"table={table} build_id={bid} 판={got} --basis={basis}")
 
 
 def _check_chain(equity_builds: dict[str, str]) -> None:
@@ -333,6 +343,11 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             "--basis evening 은 --builds-from(직전 거래일 아침 확정판 인계 이력)으로 판을 "
             "고정해야만 짓는다(T-2) — 고정 없이 current 판을 읽으면 낡은 판을 조용히 쓰게 "
             "된다(P1)")
+    if evening and Path(root).resolve() == research_root().resolve():
+        raise FactorInputsError(
+            f"장 마감 판을 연구 fi 루트({research_root()})에 짓지 않는다 — 같은 루트를 쓰면 "
+            "keep 이 하루 2판씩 소모돼 모델 판이 가리키는 fi 판이 GC 된다. --root data/model_db/"
+            "factor_inputs 로 분리한다(T-3)")
     dprime = _evening_dprime(d, calendar_dir) if evening else None
     rule = UniverseRule() if grace_days is None else UniverseRule(coverage_grace_days=grace_days)
     if rule.coverage_grace_days < 0:
@@ -348,7 +363,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     stage_builds, st_exprs = _resolve(Path(stage_root), STAGE_SOURCES, stage=True,
                                       pinned=None if pin is None else pin.stage_builds,
                                       origin=builds_from)
-    _check_basis(equity_builds, basis, pinned=pin is not None)
+    _check_basis(equity_builds, basis)
     _check_chain(equity_builds)
 
     root = Path(root)

@@ -355,6 +355,32 @@ def test_spearman_floor_is_a_gate(planted_pair, tmp_path) -> None:
     assert run_cli(planted_pair, tmp_path, "--spearman-min", "0") == 0
 
 
+def test_window_judge_reads_the_real_reports(same_pair, unexplained_pair, tmp_path) -> None:
+    """X-2(`daily.window_judge.read_compare`)가 이 도구의 실제 `compare/<T>.json` 을 읽는다 — 키
+    (schema·tool·date·verdict·rc·n_unexplained·reasons·replay·thresholds.spearman_min) 계약.
+    실운영 pass·fail 은 판정 재료, 재생(`--replay`)·기록형 하한(`--spearman-min 0`)의 pass 는 거절."""
+    from daily import window_judge as wj
+    assert (wj.COMPARE_SCHEMA, wj.COMPARE_TOOL, wj.COMPARE_SPEARMAN_MIN) == (
+        bc.SCHEMA, bc.TOOL, bc.SPEARMAN_MIN)
+
+    def judged(pair: tuple[Path, Path], name: str, *extra: str) -> dict[str, object] | None:
+        run_cli(pair, tmp_path / name, *extra)
+        return wj.read_compare(tmp_path / name / "compare" / f"{T_S}.json", T_DATE)
+
+    ok = judged(same_pair, "pass")
+    assert ok is not None and (ok["verdict"], ok["rc"], ok["n_unexplained"]) == ("pass", 0, 0)
+    bad = judged(unexplained_pair, "fail")
+    assert bad is not None and (bad["verdict"], bad["rc"]) == ("fail", 1) and bad["reasons"]
+    for name, extra in (("replay", ("--replay",)), ("record", ("--spearman-min", "0"))):
+        with pytest.raises(wj.InputError, match="replay" if name == "replay" else "spearman_min"):
+            judged(same_pair, name, *extra)
+    ev, rs = _copy_pair(same_pair, tmp_path / "err")
+    (rs / "calendar" / "kis_holidays_2026.json").unlink()
+    assert bc.main(["--date", T_S, "--evening-root", str(ev), "--research-root", str(rs)]) == 2
+    err = wj.read_compare(ev / "compare" / f"{T_S}.json", T_DATE)
+    assert err is not None and (err["verdict"], err["rc"]) == ("error", 2)
+
+
 def test_default_spearman_floor_is_the_temporary_t36_value() -> None:
     assert bc.SPEARMAN_MIN == 0.975 and bc.FLOW_REL_MAX == bc.FLOW_FLIP_MAX == 0.10
 
@@ -938,6 +964,27 @@ def test_large_difference_is_counted_in_sql_not_classified(tmp_path, monkeypatch
     assert info["bulk"] is True and info["n_rows_diff"] == 18
     assert res.tally.count[bc.UNEXPLAINED] == 18
     assert res.tally.by_column[bc.UNEXPLAINED]["fi_prices.volume"] == 18
+
+
+def test_stage_states_follow_the_shared_price_predicate(tmp_path) -> None:
+    """장 마감 stage T 행 상태 = 공유 가격 술어(`kw_daily.ka10060_postclose_price_usable_sql`) — 쓸 수
+    있음 · price_valid 참 아님(16:00 컷오프) · price_valid 참인데 종가 0 이하·거래량 없음(범주 밖).
+    루트·판 id 는 장 마감 fi 판 기록의 `postclose_stage_root`·`postclose_builds` 그대로다."""
+    from types import SimpleNamespace
+
+    rows = [{"ticker": tk, "date": T_DATE, "price_valid": pv, "close_krw": close,
+             "volume_shr": vol}
+            for tk, pv, close, vol in (("100001", True, 10_000, 100), ("100002", False, 10_000, 100),
+                                       ("100003", None, 10_000, 100), ("100004", True, 0, 100),
+                                       ("100005", True, 10_000, None))]
+    rows.append({"ticker": "100009", "date": DP_DATE, "price_valid": True, "close_krw": 1,
+                 "volume_shr": 1})                       # T 가 아닌 날 — 읽지 않는다
+    _make_stage_tree(tmp_path, bc.T_SOURCE_TABLE, rows, build_id=PC_BID)
+    side = SimpleNamespace(fi_run={"postclose_stage_root": str(tmp_path / "stage"),
+                                   "postclose_builds": {bc.T_SOURCE_TABLE: PC_BID}})
+    assert bc.read_stage(side, T_DATE) == {  # type: ignore[arg-type]
+        "100001": bc.STAGE_USABLE, "100002": bc.STAGE_INVALID, "100003": bc.STAGE_INVALID,
+        "100004": bc.STAGE_UNUSABLE, "100005": bc.STAGE_UNUSABLE}
 
 
 def test_vocabulary_is_the_factor_inputs_canon() -> None:

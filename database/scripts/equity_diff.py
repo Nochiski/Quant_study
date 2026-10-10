@@ -56,7 +56,10 @@ REJECT_DIR = "_reject"                 # 격리 행은 산출이 아니다 — �
 META_EXACT = frozenset({"v", "build_id", "snapshot_id", "generated_at", "built_at_utc",
                         "generated_at_utc", "elapsed_s"})
 META_SUFFIX = ("_build", "_build_id", "_generated_at", "_at_utc")
-_NUMERIC_RE = re.compile(r"^(DECIMAL|DOUBLE|FLOAT|REAL|NUMERIC|[US]?(BIG|HUGE|SMALL|TINY)?INT)")
+# 수치 스칼라 타입만 — 끝까지 맞춘다. 앞만 보던 옛 식은 `INTEGER[]`(stage `_cast_fail_cols`)를 수치로 보고 DOUBLE 로
+# 캐스트해 조인 전체가 ConversionException 으로 죽었다(서버 10-08 stg_wise_coverage). LIST·STRUCT·MAP 은 수치가 아니다
+_NUMERIC_RE = re.compile(r"^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|UHUGEINT"
+                         r"|INT[1248]?|FLOAT|DOUBLE|REAL|(DECIMAL|NUMERIC)(\(\d+\s*,\s*\d+\))?)$")
 
 
 class UsageError(Exception):
@@ -294,8 +297,11 @@ def change_cond(column: str, kind: str, *, numeric: bool, tol: float) -> str:
             da, db = f"CAST({a} AS DOUBLE)", f"CAST({b} AS DOUBLE)"
             # 상대 허용오차 — 둘 다 0 이면 greatest 가 0 이라 '차이 > 0' 이 되어 안전하다.
             differs = f"abs({da} - {db}) > {tol} * greatest(abs({da}), abs({db}))"
-        else:
+        elif numeric:
             differs = f"{a} <> {b}"
+        else:
+            # 수치 밖(문자·날짜·불리언·LIST·STRUCT·MAP …)은 동등 비교 — 중첩 값 안의 NULL 도 같은 값으로 본다
+            differs = f"{a} IS DISTINCT FROM {b}"
         return f"{both} AND {b} IS NOT NULL AND {a} IS NOT NULL AND ({differs})"
     if kind == "rows_added":
         return f"{IN_AFTER} AND NOT {IN_BEFORE}"

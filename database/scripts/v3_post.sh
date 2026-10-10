@@ -57,7 +57,7 @@
 #     같은 순서 판정으로 더 나중 반영 위에 쓰기를 거부한다(QL-D).
 #   ② 의 장 마감 판(--basis evening)은 가격·수급 T 행을 원장 두 개에서 만든다(QL-D) — QL_POSTCLOSE_DB(기본
 #     data/raw/postclose.db, 15:41 수집)·QL_KIWOOM_DB(기본 data/raw/kiwoom.db, 21:05 저녁 수집)를 저녁에만 넘긴다.
-#     T 의 직전 거래일은 compat 이 판정 달력(QL_HOME/data/calendar)으로 센다.
+#     T 의 직전 거래일과 증분 창(--full 아니면 D + 앞 10거래일 = 08:10 KRX 재수집 창, K1-9d)은 compat 이 판정 달력(QL_HOME/data/calendar)으로 센다.
 #   환경변수: QL_V3_DB · QL_V3_POST_CMD(인자 대신) · QL_EQUITY_ROOT · QL_STAGE_ROOT · QL_MODEL_ROOT(compat 원천 루트,
 #     compat_export.sh 와 같다) · QL_POSTCLOSE_DB · QL_KIWOOM_DB(장 마감 판 T 행 원장). QL_V3_LOCK_FILE · QL_V3_POST_TODAY(YYYYMMDD) 는 테스트 전용 — 락 경로·오늘 날짜를
 #     덮어쓴다. 운영 크론·대화형 셸에 남겨 두지 않는다.

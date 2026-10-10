@@ -89,12 +89,11 @@ def _price_rows(*, bad_volume: bool = False) -> list[dict]:
     return rows
 
 
-def _adj_rows(skip_last: bool = False, price_rows: list[dict] | None = None) -> list[dict]:
-    """`price_adj_daily` 실물 15열. `skip_last` 면 마지막 krx 행의 조정가가 없다(R9)."""
+def _adj_rows(price_rows: list[dict] | None = None) -> list[dict]:
+    """`price_adj_daily` 실물 18열(e1.26.0 — ⑤ 가격 전용 계수 열 포함). compat 은 이 표를 읽지 않는다(QL-E T-40 —
+    v3 adj_close 는 KRX 기준가 사슬). 판 모양을 실물과 같게 두려고 짓는다."""
     src = [r for r in (price_rows if price_rows is not None else _price_rows())
            if r["basis"] == "krx"]
-    if skip_last:
-        src = src[:-1]
     out: list[dict] = []
     for r in src:
         close = float(r["close"])
@@ -102,7 +101,8 @@ def _adj_rows(skip_last: bool = False, price_rows: list[dict] | None = None) -> 
             "ticker": r["ticker"], "date": r["date"], "adj_open": close * 0.9,
             "adj_high": close * 0.9, "adj_low": close * 0.9, "adj_close": close * 0.9,
             "adj_volume_shr": 1_000_000.0, "cum_price_factor": 1.0, "cum_share_factor": 0.9,
-            "n_factors_applied": 1, "n_unadjusted_events": 0, "available_date": r["date"],
+            "cum_price_only_factor": 1.0, "n_factors_applied": 1, "n_price_only_applied": 0,
+            "n_unadjusted_events": 0, "n_price_unresolved_events": 0, "available_date": r["date"],
             "available_basis": "derived", "basis": "krx", "corp_action_pending": False})
     return out
 
@@ -321,7 +321,7 @@ def _fin_std_rows() -> list[dict]:
 
 def _make_roots(base: Path, *, fillers: list[str] | None = None,
                 price_rows: list[dict] | None = None, adj_rows: list[dict] | None = None,
-                eq_build: str = EQ_BUILD, adj_build: str | None = None,
+                eq_build: str = EQ_BUILD,
                 fin_wise_rows: list[dict] | None = None,
                 flow_rows: list[dict] | None = None,
                 universe_rows: list[dict] | None = None) -> tuple[Path, Path]:
@@ -329,8 +329,7 @@ def _make_roots(base: Path, *, fillers: list[str] | None = None,
     f = _filler_tickers(N_FILLER) if fillers is None else fillers
     equity = {
         "price_daily": (price_rows if price_rows is not None else _price_rows(), eq_build),
-        "price_adj_daily": (adj_rows if adj_rows is not None else _adj_rows(),
-                            adj_build or eq_build),
+        "price_adj_daily": (adj_rows if adj_rows is not None else _adj_rows(), eq_build),
         "universe_daily": (_universe_rows(f) if universe_rows is None else universe_rows,
                            eq_build),
         "security": (_security_rows(f), eq_build),
@@ -377,8 +376,9 @@ def test_daily_prices_columns_rows_and_units(roots, tmp_path: Path) -> None:
     got = _rows(target, "SELECT stock_code, trade_date, open, high, low, close, volume, "
                         "amount, adj_close FROM daily_prices "
                         "WHERE stock_code='005930' AND trade_date='2026-09-23'")
+    # adj_close = 종가 — 창 안 최신 행이고 창 안에 기준가 단계가 없다(v3 기준 K 사슬, QL-E. 전방 조정이면 63,180)
     assert got == [("005930", "2026-09-23", 69_700, 70_900, 69_300, 70_200, 1_000_000,
-                    1234, pytest.approx(63_180.0))]
+                    1234, 70_200.0)]
     assert res.n_adj_close_null == 0
 
 
@@ -870,30 +870,6 @@ def test_basis_mismatch_refuses(tmp_path: Path) -> None:
     evening = _make_roots(tmp_path / "ev", eq_build="e_20260923T122000_000000Z")
     with pytest.raises(CompatError, match="--basis"):
         _run(evening, tmp_path / "quant.db", basis="morning", tables=["daily_prices"])
-
-
-# ── R9 — 가격 두 표의 판 체인 · adj_close 결측 ───────────────────────────────
-def test_price_build_chain_gap_refuses(tmp_path: Path) -> None:
-    far = _make_roots(tmp_path / "far", adj_build="m_20260924T235911_000000Z")
-    with pytest.raises(CompatError, match="빌드 시각 차"):
-        _run(far, tmp_path / "quant.db", tables=["daily_prices"])
-
-
-def test_price_build_chain_basis_mismatch_refuses(tmp_path: Path) -> None:
-    # 수동 재빌드(`b_`)는 `--basis` 검사(R5)를 통과하지만 가격 두 표의 판 축은 어긋난다.
-    mixed = _make_roots(tmp_path / "mix", adj_build="b_20260924T035911_573147Z")
-    with pytest.raises(CompatError, match="판 축이 다르다"):
-        _run(mixed, tmp_path / "quant.db", tables=["daily_prices"])
-
-
-def test_adj_close_gap_refuses_and_records_failure(tmp_path: Path) -> None:
-    """R9 + R6 — 조정가가 빠지면 멈추고, 실패도 `_compat_meta` 에 남는다."""
-    gap = _make_roots(tmp_path / "gap", adj_rows=_adj_rows(skip_last=True))
-    target = tmp_path / "quant.db"
-    with pytest.raises(CompatError, match="adj_close 결측"):
-        _run(gap, target, tables=["daily_prices"])
-    assert _rows(target, "SELECT status, failed_table FROM _compat_meta") == [
-        ("failed", "daily_prices")]
 
 
 # ── R7 — 건너뛴 행 비율 ──────────────────────────────────────────────────────

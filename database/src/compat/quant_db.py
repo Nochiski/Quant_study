@@ -12,6 +12,12 @@
 **날짜 단위 교체**다: 같은 트랜잭션에서 그 `score_date` 행을 모두 지우고 새 판 행을 넣는다. 다른
 날짜는 건드리지 않는다. 판 id 는 `_compat_meta.model_builds` 에 spec 별로 남는다.
 
+`daily_prices` 는 v3 가 쌓던 모양이다 — adj_close 는 KRX 기준가 사슬 K 로 창 안 마지막 행 = 원종가(T-40),
+시·고·저·종가·거래량은 v3 '최근 5행 덮어쓰기' 관례(T-41, 식은 `mappings` daily_prices 주석). 창 안에 사건 단계가
+든 종목은 대상의 창 밖 옛 행 adj_close 도 같은 트랜잭션에서 다시 맞춘다(`_rebase_outside` — v3 가 사건 뒤 종목
+전 기간을 다시 쓰는 것과 같은 결과). 다시 맞춘 종목은 `_compat_meta.tables.daily_prices.rebase` 에 남고 제자리
+반영(`v3_post`)의 범위가 된다.
+
 `--basis evening`(장 마감 판, 컷오버 T-2)의 `daily_prices`·`investor_detail_flows` 는 판(직전
 거래일 D' 까지)에 T 날짜 행을 원장에서 얹는다(QL-D — `compat.t_rows`, 장 마감 판에서만 불러온다).
 두 표는 basis 와 무관하게 그 `--date` 행을 **날짜 단위로 교체**한다(QL-C 와 같은 규칙) — 저녁에
@@ -26,8 +32,8 @@ M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자
   · 장 마감 판: T 비거래일 · 원장 없음 · 판 이음매(마지막 세션 ≠ D') · T 행 0 ·
     대상에 이번보다 나중 ok 반영 기록(T-35 순서, 재생은 `--allow-older`)              (QL-D)
   · 날짜 단위 교체 표의 새 원천에 `--date` 행 0                                       (QL-D)
-  · `price_daily`·`price_adj_daily` 판이 서로 다른 체인       (R9)
-  · `daily_prices` 의 `adj_close` 결측 비율 > 1%              (R9)
+  · `daily_prices` 의 `adj_close` 결측 비율 > 1%              (R9 — 장 마감 판 T 단계 미상 NULL 이 몰린 날)
+  · 제자리 반영(`--in-place`) 창이 5세션 미만(daily.calendar)    (QL-E MINOR-1 — T-41 덮어쓰기 행이 창 안에서 끝나야 한다)
   · 증분인데 대상 DB 가 얕다(종목당 세션 중앙값 < 260)         (R10)
   · `stocks` 종목 수 < 2,000 · `market` 어휘 위반             (R2 · R4)
   · 표별 건너뛴 행 비율 > 5%                                   (R7)
@@ -45,9 +51,10 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
+from daily import calendar as daily_calendar
 from deliver.reader import DeliverError, load_run
 from equity import handoff, inputs
-from stage.model import basis_of_build_id, build_id_time
+from stage.model import basis_of_build_id
 
 from .mappings import (
     BY_TABLE,
@@ -56,7 +63,10 @@ from .mappings import (
     ESTIMATE_TICKERS_SQL,
     EVENING_SKIPPED_SQL,
     MAPPINGS,
+    MIN_WINDOW_SESSIONS,
     MODEL,
+    NO_T_STEP,
+    REBASE_SQL,
     STAGE,
     TableMapping,
 )
@@ -81,13 +91,12 @@ DUCKDB_MEMORY_LIMIT = "8GB"
 MIN_STOCK_COUNT = 2_000
 # 표별 '넣지 못한 행' 허용 비율. 저녁 행 제외(basis 필터)는 여기에 안 든다 — 그건 별도 카운트다.
 MAX_SKIP_RATIO = 0.05
-# `daily_prices.adj_close` 결측 허용 비율. v3 모멘텀은 adj_close 를 먼저 보므로 결측이 늘면
-# 같은 날 점수가 조용히 달라진다.
+# `daily_prices.adj_close` 결측 허용 비율. K 사슬(QL-E)은 종가가 있으면 늘 값이 있어 결측은 장 마감 판 T 행의
+# 단계 미상(전일대비 없음 · D' 종가 없음) NULL 뿐이다 — 한 날에 몰리면 원장이나 D' 판이 어긋난 것이다. 결측이 늘면
+# 리서치센터 S2·S11·drilldown·가설이 그 종목을 조용히 잃는다.
 MAX_ADJ_NULL_RATIO = 0.01
 # 증분 실행을 허용할 대상 DB 의 깊이(종목당 세션 수 중앙값). v3 모멘텀 240행 + 여유.
 MIN_MEDIAN_SESSIONS = 260
-# `price_daily` 와 `price_adj_daily` 판이 같은 체인인지 보는 시각 차 한도(시간).
-BUILD_CHAIN_MAX_GAP_H = 3
 # 판 접두어가 말하는 basis 중 '어느 쪽으로 내보내도 되는' 값. 수동 재빌드(`b_`)가 여기 든다.
 _BASIS_ANY = "manual"
 # `--basis` 별로 더 받는 판 basis. 장 마감 판(evening, 컷오버 T-2)은 직전 거래일 연구 확정판
@@ -179,6 +188,10 @@ class TableResult:
     # 장 마감 판 T 행(QL-D) — 원천별 행 수 · 21:05 원장으로 대체한 종목 · 행 없는 종목
     # (`t_rows._info`)
     t_rows: dict[str, object] | None = None
+    # `daily_prices` 창 밖 다시 맞춤(QL-E) — before(= 창 시작, 이 날 앞 행이 대상) · floor(대상 첫 날) ·
+    # tickers(창 안에 KRX 기준가 단계가 든 종목) · n_rows(다시 쓴 창 밖 행) · n_null(equity 행이 없어 NULL 이 된 행).
+    # `v3_post` 가 tickers 의 창 앞 행을 반영 범위에 더한다
+    rebase: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -222,6 +235,10 @@ class ExportResult:
         if self.builds_fallback:
             parts.append("fallback=" + ",".join(self.builds_fallback))
         for t, r in self.tables.items():
+            rb_tickers = (r.rebase or {}).get("tickers")
+            if isinstance(rb_tickers, list) and rb_tickers and r.rebase is not None:
+                parts.append(f"{t}.rebase={len(rb_tickers)}종목/{r.rebase['n_rows']}행"
+                             f"(null={r.rebase['n_null']})")
             if r.t_rows:
                 i = r.t_rows
                 parts.append(f"{t}.T={i['date']}(postclose={i['postclose']},"
@@ -291,28 +308,6 @@ def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
             raise CompatError(
                 f"판 접두어가 --basis 와 다르다: table={table} build_id={build_id} "
                 f"판={got} --basis={basis}")
-
-
-def _check_price_chain(equity_builds: dict[str, str]) -> None:
-    """R9 — `price_daily` 와 `price_adj_daily` 가 같은 체인에서 나온 판인지.
-
-    둘이 어긋나면 조정계수가 다른 날짜 기준이 되어 `adj_close` 가 조용히 틀린다. 판 접두어
-    (판 축)와 build_id 가 박은 UTC 시각(≤ 3시간)으로 본다. 시각을 못 읽는 id(픽스처·구 기록)는
-    접두어만 본다.
-    """
-    a, b = equity_builds.get("price_daily"), equity_builds.get("price_adj_daily")
-    if a is None or b is None:
-        return
-    if basis_of_build_id(a) != basis_of_build_id(b):
-        raise CompatError(f"price_daily 와 price_adj_daily 판 축이 다르다: {a} vs {b}")
-    ta, tb = build_id_time(a), build_id_time(b)
-    if ta is None or tb is None:
-        return
-    gap_h = abs((ta - tb).total_seconds()) / 3600
-    if gap_h > BUILD_CHAIN_MAX_GAP_H:
-        raise CompatError(
-            f"price_daily 와 price_adj_daily 빌드 시각 차가 {gap_h:.1f}시간 "
-            f"(한도 {BUILD_CHAIN_MAX_GAP_H}): {a} vs {b}")
 
 
 # ── 대상 sqlite ──────────────────────────────────────────────────────────────
@@ -626,8 +621,88 @@ def _check_adj_close(con: sqlite3.Connection, params: dict[str, str]) -> int:
     if total and nulls / total > MAX_ADJ_NULL_RATIO:
         raise CompatError(
             f"daily_prices.adj_close 결측 {nulls}/{total} = {nulls / total:.1%} > "
-            f"{MAX_ADJ_NULL_RATIO:.0%} — price_adj_daily 판을 확인해라(v3 모멘텀 입력)")
+            f"{MAX_ADJ_NULL_RATIO:.0%} — 장 마감 판이면 T 기준가를 모르는 종목(원장 전일대비 없음 · D' 종가 "
+            "없음)이 몰렸다: 원장과 D' 판 price_daily 를 확인해라")
     return nulls
+
+
+_REBASE_TABLE = "_compat_rebase"            # 임시 표(연결 단위) — 다시 쓸 (종목, 날짜, 시·고·저·종·거래량·adj)
+
+
+def _rebase_plan(duck: duckdb.DuckDBPyConnection, con: sqlite3.Connection,
+                 params: dict[str, str], builds: dict[str, dict[str, str]]
+                 ) -> tuple[str, list[str], list[tuple]]:
+    """QL-E — 창 안에 KRX 기준가 단계가 든 v3 종목과 그 종목의 창 밖 새 값(`mappings.REBASE_SQL`).
+
+    대상 `daily_prices` 의 가장 이른 날을 하한으로 둔다(대상이 비었으면 창 시작 — 다시 맞출 행이 없다).
+    돌려주는 값은 (하한, 종목 목록, [(종목, 날짜, 시, 고, 저, 종, 거래량, adj_close)]). 값이 없는 종목(그 구간에
+    종가·거래량이 있는 equity 행 없음)도 목록에는 든다 — 그 종목의 창 밖 행은 기준을 모르므로 adj_close 가 NULL 이
+    된다(P1).
+    """
+    row = con.execute("SELECT min(trade_date) FROM daily_prices").fetchone()
+    floor = str(row[0]) if row is not None and row[0] is not None else params["from_date"]
+    sources = {t: builds[EQUITY][_EXPR + t] for t in BY_TABLE["daily_prices"].sources}
+    rows = duck.execute(REBASE_SQL.format(**sources, **params, rebase_floor=floor)).fetchall()
+    tickers = sorted({str(r[0]) for r in rows})
+    return floor, tickers, [(str(r[0]), *r[1:]) for r in rows if r[1] is not None]
+
+
+def _rebase_outside(tickers: list[str], values: list[tuple], before: str,
+                    tally: dict[str, object]) -> Callable[[sqlite3.Connection], None]:
+    """QL-E — 목록 종목의 대상 창 밖 행(`trade_date < before`, 대상에 이미 있는 행만)을 다시 쓴다.
+
+    시·고·저·종가·거래량은 T-41 값, adj_close 는 equity 원종가 × K(d) ÷ K(L) 이다(대상 close 는 덮어쓰기·옛 백필
+    값일 수 있어 곱하지 않는다). 거래대금과 행 수는 그대로다(MINOR-1 — 반영이 며칠 끊겨 사건 직전 행이 창 밖으로
+    밀려도 다음 반영이 바로잡는다). 새 값이 없는 날(equity 에 종가·거래량이 있는 행이 없다)은 시·고·저·종가·
+    거래량을 두고 adj_close 만 NULL 로 한다(P1). `daily_prices` 를 넣는 트랜잭션 안(COMMIT 직전)에서 돈다. 다시 쓴
+    행 수와 그중 NULL 로 둔 수를 `tally` 에 남긴다.
+    """
+    def run(con: sqlite3.Connection) -> None:
+        t = _REBASE_TABLE
+        con.execute(f"CREATE TEMP TABLE IF NOT EXISTS {t}_tickers (stock_code TEXT PRIMARY KEY)")
+        con.execute(f"CREATE TEMP TABLE IF NOT EXISTS {t} (stock_code TEXT NOT NULL, "
+                    "trade_date TEXT NOT NULL, open INTEGER, high INTEGER, low INTEGER, "
+                    "close INTEGER, volume INTEGER, adj REAL, PRIMARY KEY (stock_code, trade_date))")
+        con.execute(f"DELETE FROM temp.{t}_tickers")
+        con.execute(f"DELETE FROM temp.{t}")
+        con.executemany(f"INSERT INTO temp.{t}_tickers VALUES (?)", [(x,) for x in tickers])
+        con.executemany(f"INSERT INTO temp.{t} VALUES (?, ?, ?, ?, ?, ?, ?, ?)", values)
+        set_rows = con.execute(
+            "INSERT OR REPLACE INTO daily_prices (stock_code, trade_date, open, high, low, close, "
+            "volume, amount, adj_close) "
+            "SELECT r.stock_code, r.trade_date, r.open, r.high, r.low, r.close, r.volume, d.amount, "
+            f"r.adj FROM temp.{t} r JOIN daily_prices d "
+            "ON d.stock_code = r.stock_code AND d.trade_date = r.trade_date "
+            "WHERE r.trade_date < ?", (before,)).rowcount
+        null_rows = con.execute(
+            "UPDATE daily_prices SET adj_close = NULL "
+            f"WHERE stock_code IN (SELECT stock_code FROM temp.{t}_tickers) AND trade_date < ? "
+            f"AND NOT EXISTS (SELECT 1 FROM temp.{t} r WHERE r.stock_code = daily_prices.stock_code "
+            "AND r.trade_date = daily_prices.trade_date)", (before,)).rowcount
+        tally["n_rows"] = set_rows + null_rows
+        tally["n_null"] = null_rows
+    return run
+
+
+def _guard_window_sessions(as_of: date, from_iso: str, calendar_dir: Path | None) -> None:
+    """MINOR-1 — 제자리 반영 창이 `MIN_WINDOW_SESSIONS` 거래일 이상인가(daily.calendar).
+
+    T-41 덮어쓰기 기준일 c 는 d 뒤 4번째 행이라 창이 그보다 좁으면 행이 최종값이 되기 전에 창을 떠난다. 창 끝(D, 휴장이면
+    직전 거래일)에서 거꾸로 `MIN_WINDOW_SESSIONS` 번째 거래일이 창 시작 이상이어야 한다 — 창 전체를 걷지 않으므로 `--full`
+    730일 창도 최근 연도 판정 파일만 있으면 된다. 달력을 못 읽으면 멈춘다(영업일 가정 없음, K1-9 ⑦).
+    """
+    try:
+        cal = daily_calendar.load() if calendar_dir is None else daily_calendar.load(calendar_dir)
+        last = as_of if cal.is_trading_day(as_of) else cal.prev_trading_day(as_of)
+        first = cal.prev_trading_day(last, MIN_WINDOW_SESSIONS - 1)
+    except (daily_calendar.CalendarUnavailable, KeyError) as e:
+        raise CompatError(f"제자리 반영 창 세션을 셀 수 없다(daily.calendar, calendar_dir={calendar_dir}): "
+                          f"{e}") from e
+    if first.isoformat() < from_iso:
+        raise CompatError(
+            f"제자리 반영 창이 {MIN_WINDOW_SESSIONS}거래일보다 좁다: [{from_iso}, {as_of.isoformat()}] — "
+            f"{MIN_WINDOW_SESSIONS}번째 거래일 {first.isoformat()} 이 창 밖이다. 사건 직전 행 덮어쓰기(T-41)가 창 "
+            "안에서 끝나지 않는다 — --window-days 를 늘린다")
 
 
 def _ensure_meta_columns(con: sqlite3.Connection) -> None:
@@ -691,7 +766,7 @@ def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
                      extra: Iterable[tuple[str, str]] = (),
                      on_missing: str = "error"
                      ) -> tuple[dict[str, dict[str, str]], tuple[str, ...]]:
-    """쓰기 전에 원천 판을 전부 해석한다 — 판 가드(R5 · R9)를 먼저 걸기 위해서다.
+    """쓰기 전에 원천 판을 전부 해석한다 — 판 가드(R5)를 먼저 걸기 위해서다.
 
     `on_missing='current'` 면 `--builds-from` 에 **키가 없는 표**와 그 build_id 가 이미
     **GC 로 MANIFEST 에서 사라진 표**를 `current_build` 로 떨어뜨리고 목록을 함께 돌려준다
@@ -831,7 +906,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     반드시 있어야 한다. 그날·그 basis 의 모델 판으로 고정하고 `score_date` 단위로 갈아 끼운다(T-16).
     `postclose_db`·`kiwoom_db`·`calendar_dir` 는 장 마감 판(`basis='evening'`)의 `daily_prices`·
     `investor_detail_flows` T 행 원천 원장(`data/raw/postclose.db`·`data/raw/kiwoom.db`)과 D' 를 셀
-    판정 달력 폴더(없으면 `daily.calendar` 기본 경로)다(QL-D). 아침판에서는 쓰지 않는다.
+    판정 달력 폴더(없으면 `daily.calendar` 기본 경로)다(QL-D). 원장은 아침판에서 쓰지 않는다. 달력은 제자리
+    반영(`in_place`)의 창 세션 가드에도 쓴다(QL-E MINOR-1 — 아침판 포함).
     `allow_older` 는 장 마감 판이 대상의 더 나중 반영 기록(T-35 순서)을 무시하게 한다(재생 전용).
     """
     as_of = _parse_date(date, "--date")
@@ -891,7 +967,6 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     equity_builds, stage_builds = _build_ids(builds[EQUITY]), _build_ids(builds[STAGE])
     model_builds = _build_ids(builds[MODEL])
     _check_basis(equity_builds, basis)
-    _check_price_chain(equity_builds)
     # 장 마감 판 이음매(MINOR-2) — T 행을 만들 때, 그리고 D' 아침 판(`m_`)을 받았을 때는 표 선택과
     # 무관하게 본다
     seam = t_mod is not None and reads_equity and (
@@ -900,12 +975,17 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         params.update(t_iso=params["date"], t_ymd=as_of.strftime("%Y%m%d"),
                       d_prime=t_mod.dprime(as_of, calendar_dir).isoformat())
 
+    if in_place and any(m.v3_table == "daily_prices" for m in selected):
+        _guard_window_sessions(as_of, params["from_date"], calendar_dir)
+    params["t_step"] = NO_T_STEP                    # 장 마감 판이면 T 행 원장으로 아래에서 바꾼다(QL-E)
+
     window = {"days": span, "full": full, "from_date": params["from_date"],
               "to_date": params["date"]}
     results: dict[str, TableResult] = {}
     evening_skipped: int | None = None
     adj_null: int | None = None
     n_with_est: int | None = None
+    rebase: dict[str, object] | None = None       # daily_prices 창 밖 다시 맞춤 기록(QL-E)
     con = _open_target(Path(target))
     duck = duckdb.connect()
     try:
@@ -933,6 +1013,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                     exprs = {k[len(_EXPR):]: v for k, v in builds[EQUITY].items()
                              if k.startswith(_EXPR)}
                     t_parts = t_mod.build(duck, selected, exprs, params, t_paths)
+                    if "daily_prices" in t_parts:   # 사슬 끝에 T 단계(QL-E MAJOR-A)
+                        params["t_step"] = t_mod.STEP_TABLE
             for mapping in selected:
                 current = mapping.v3_table
                 on_date = {"n": 0}       # daily_prices 에 이번에 쓴 trade_date = D 행(T-31 ③)
@@ -954,6 +1036,12 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                     if day_col is not None:         # 날짜 단위 교체 0행 가드 — 스트림 열기 전에
                         _guard_date_rows(duck, mapping, params, builds,
                                          0 if part is None else len(part.rows))
+                    post = None
+                    if mapping.v3_table == "daily_prices":   # QL-E — 스트림 열기 전에(같은 duckdb 연결)
+                        floor, rb_tickers, rb_values = _rebase_plan(duck, con, params, builds)
+                        rebase = {"before": params["from_date"], "floor": floor,
+                                  "tickers": rb_tickers, "n_rows": 0, "n_null": 0}
+                        post = _rebase_outside(rb_tickers, rb_values, params["from_date"], rebase)
                     cur = duck.execute(sql)
                     columns = [d[0] for d in (cur.description or [])]
                     if mapping.v3_table == "stocks":
@@ -977,14 +1065,16 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                                                     "trade_date", params["date"], on_date)
                         n_rows, n_skipped = _upsert(
                             con, mapping, columns, chunks, required[mapping.v3_table],
+                            post=post,
                             pre=None if day_col is None else _replace_date(
                                 mapping.v3_table, day_col, params["date"]))
                 metrics = (_fin_source_counts(con)
                            if mapping.v3_table == "financial_summary" else
                            {"n_on_date": on_date["n"]}
                            if mapping.v3_table == "daily_prices" else {})
-                results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics,
-                                                        None if part is None else part.info)
+                results[mapping.v3_table] = TableResult(
+                    n_rows, n_skipped, used, metrics, None if part is None else part.info,
+                    rebase if mapping.v3_table == "daily_prices" else None)
                 if mapping.v3_table == "daily_prices":
                     evening_skipped = _count_evening_skipped(
                         duck, builds[EQUITY][_EXPR + "price_daily"], params)

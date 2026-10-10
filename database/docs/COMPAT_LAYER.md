@@ -77,7 +77,7 @@ uv run --project backend python database/scripts/compat_consumer_audit.py \
 | 벤치마크 | `portfolio/benchmark.py` | `weekly review` 07:00 등 | `market_indices` (**범위 밖**) | 기간 |
 | 워치리스트 피크 카드 | `data/watchlist_peak_card.py` | `weekly watchlist` 일 09:00 | `daily_prices` | 기간 |
 | 휴장일 | `sources/holiday.py` | 전부 | v3 `data/.kis_holidays.json` (표 아님 — `calendar_refresh` 산출. 컷오버 뒤 원천은 quant-ledger `daily.calendar_export` — 06:00 `daily_ledger.sh` 가 판정 달력에서 쓴다, T-48 · QL-Q2) | — |
-| KIS 토큰 캐시 | `market/rest.py` | 전부 | v3 KIS 토큰 캐시 파일 (표 아님) | — |
+| KIS 토큰 캐시 | `market/rest.py` | 전부 | v3 KIS 토큰 캐시 파일 (표 아님) — v3 캐시를 먼저 보고 만료면 자기 캐시, 둘 다 만료면 스스로 발급(`_issue_new_token`, uni `data/.kis_token.json`). 컷오버로 v3 의 KIS 호출이 줄어도 uni 는 그대로 돈다(10-11 서버 코드 확인) | — |
 
 unitelegram 크론: `uni position eod` 06:35 · `weekly review` 07:00 · `weekly
 watchlist`/`holding-review` 일 09:00 · `brief morning`/`lunch`/`close` 07:10·12:15·15:40.
@@ -429,10 +429,10 @@ compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등
 
 | ID | 파일·위치 | 변경 |
 |---|---|---|
-| V3-A | `scripts/job_runner.py:54`(`CHAINS["daily_all"]` 의 닫는 `],` 뒤) | 체인 둘을 더한다(T-31). `"daily_post": [("holiday_gate", 1, 30, True), ("export_scores", 1, 120, False)]` · `"daily_insight": [("holiday_gate", 1, 30, True), ("insight_pipeline", 1, 300, False), ("wiki_ingest", 1, 3600, False), ("wiki_lint", 1, 3600, False)]`. `calendar_refresh` 는 넣지 않는다(KIS 를 불러 `.kis_holidays.json` 을 덮는다 — 휴장 파일 정본은 `daily.calendar_export`, T-24). `--chain` 선택지는 CHAINS 키에서 자동으로 생긴다. 백업 `job_runner.py.bak.<ts>` |
+| V3-A | `scripts/job_runner.py:54`(`CHAINS["daily_all"]` 의 닫는 `],` 뒤 — 서버 파일은 55행, 10-11 확인) | 체인 둘을 더한다(T-31). `"daily_post": [("holiday_gate", 1, 30, True), ("export_scores", 1, 120, False)]` · `"daily_insight": [("holiday_gate", 1, 30, True), ("insight_pipeline", 1, 300, False), ("wiki_ingest", 1, 3600, False), ("wiki_lint", 1, 3600, False)]`. `calendar_refresh` 는 넣지 않는다(KIS 를 불러 `.kis_holidays.json` 을 덮는다 — 휴장 파일 정본은 `daily.calendar_export`, T-24). `--chain` 선택지는 CHAINS 키에서 자동으로 생긴다. 백업 `job_runner.py.bak.<ts>` |
 | V3-A | 서버 crontab | `daily_insight` 를 지금 daily_all 자리(`5 11 * * 1-5` UTC = 20:05 KST)에 둔다. 락은 **별도 파일** `/tmp/kael_v3_daily_insight.lock` 이다 — 공유 락 `/tmp/kael_v3_daily_all.lock` 에 `flock -n` 을 쓰면 v3_post 가 락을 쥔 순간 insight 가 조용히 건너뛰어져 T-27 장애(그날 국면·다음 날 07:00 브리핑 지수 없음)가 재발한다. `daily_post` 는 크론에 두지 않는다 — v3_post.sh 가 `--v3-post-cmd` 로 부른다(v3 crontab 줄에서 flock 만 뺀 형태: `cd "$HOME/kael-system-v3" && source "$HOME/.local/bin/env" && export $(grep -v "^#" .env | xargs) && PYTHONPATH=. .venv/bin/python scripts/job_runner.py --chain daily_post`) |
 | V3-B | 서버 crontab daily_all 줄(`5 11 * * 1-5 … flock -n /tmp/kael_v3_daily_all.lock … --chain daily_all` — 로컬 사본 `scripts/cron_schedule.sh:3` 에 같은 줄) | 줄을 지운다(`crontab -l` 백업). 퀀트 단계(`job_runner.py:46-49` daily_pipeline·adj_prices·scoring·scoring_v2)만 빼고 남기면 export(텔레그램)가 daily_post 와 두 번 돈다. `CHAINS["daily_all"]` 코드는 되돌리기용으로 둔다(되돌리기 = 줄 복원) |
-| V3-C | quant-ledger `scripts/v3_post.sh` | 첫 반영(K3-2): QL-I 백업 2벌(`scripts/v3_backup.sh` — 이 표의 대상 파일 사본도 함께 뜬다, `CUTOVER_ROLLBACK.md` §1) 뒤 `scripts/v3_post.sh --date <D> --basis morning --v3-db "$HOME/kael-system-v3/data/quant.db"` 1회 — 매일과 같은 증분 창(K1-9d, T-46. `--full` 아님)이고 `QL_V3_LOCK_FILE` 은 비운다. 첫 컷오버라 `--first-after-restore` 는 주지 않는다(되돌린 뒤 다시 컷오버할 때만 준다 — `CUTOVER_ROLLBACK.md` §5). 아래 운영 메모 |
+| V3-C | quant-ledger `scripts/v3_post.sh` | 첫 반영(K3-2): QL-I 백업 2벌(`scripts/v3_backup.sh` — 이 표의 대상 파일 사본도 함께 뜬다, `CUTOVER_ROLLBACK.md` §1) 뒤 `scripts/v3_post.sh --date <D> --basis morning --v3-db "$HOME/kael-system-v3/data/quant.db" --builds-from data/deliver/history/<D>_morning.json` 1회(판은 매일 아침 반영과 같은 고정 판 — P1. 빼면 compat 이 그때의 current 판을 읽는다) — 매일과 같은 증분 창(K1-9d, T-46. `--full` 아님)이고 `QL_V3_LOCK_FILE` 은 비운다. 첫 컷오버라 `--first-after-restore` 는 주지 않는다(되돌린 뒤 다시 컷오버할 때만 준다 — `CUTOVER_ROLLBACK.md` §5). 아래 운영 메모 |
 | V3-D | 서버 crontab v3 휴장 쓰기 2줄 | `refresh_year_holidays`(`0 20 29 12 *`)·`monthly_holiday_review`(`0 0 1 * *`) — v3 `docs/system-guide/survey/08-ops.md:136·157`. QL-Q 연결과 같은 날 끈다(T-24) — QL-Q2 스위치 `CALENDAR_EXPORT_V3=1`(`config/calendar_export.env`)과 같은 배포(T-48) |
 | V3-E | unitelegram `sources/kael_db.py` `get_signal_insights`(서버 전용 파일 — 줄은 서버에서 확인) | 점수 조회에 `score_date = (SELECT max(score_date) FROM score_history)` 조건(T-17 — 593 유니버스 밖 종목의 옛 v3 행이 종목별 최신 행으로 잡히지 않게) |
 

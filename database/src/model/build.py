@@ -48,7 +48,7 @@ from model.engines import ENGINES
 
 log = logging.getLogger(__name__)
 
-RULES_VERSION = "mb1.5.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
+RULES_VERSION = "mb1.6.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
                             # 1.2.0(2026-10-05): 비교 모델 실패 격리(N-11)
                             # 1.3.0(2026-10-06): 비교 모델 엔진 예외도 그 spec 만 뺌(D-01)
                             #   · FAIL 재실행이 같은 날 ok `_runs` 기록을 덮지 않음(D-09)
@@ -57,6 +57,9 @@ RULES_VERSION = "mb1.5.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에
                             #   해제(min_analysts 삭제, 4-2c — 엑셀 비고로만)
                             # 1.5.0(2026-10-10): MG5 전판 = 같은 basis 의 직전 판(컷오버 PR-6)
                             #   — 점수·지표 불변, 게이트 기록(MG5 prev_build_id)만 달라진다
+                            # 1.6.0(2026-10-10): scope 모멘텀·20일 변동성 — 창 안 제한폭 초과
+                            #   미해결 수정주가면 결측(컷오버 H1-4 · T-9, fi1.6.0 adj_jump_ok)
+                            #   · 판 manifest spec 요약에 엔진 메타(scope adj_jump_masked)
 LAYER = "model"
 BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
@@ -297,7 +300,7 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
         results[spec.spec_id] = first
     summary: dict[str, dict[str, Any]] = {
         s.spec_id: ({"error": errors[s.spec_id]} if s.spec_id in errors else
-                    {**gates.counts(s, results[s.spec_id]),
+                    {**gates.counts(s, results[s.spec_id]), **results[s.spec_id].meta,
                      "gates": gates.as_dicts(gate_results[s.spec_id])}) for s in selected}
     # 엔진 예외로 뺀 비교 모델도 게이트 FAIL 과 같이 판에서 뺀다(주 모델은 위에서 이미 raise)
     failed_ids = {sid for sid, rs in gate_results.items() if gates.failed(rs)} | set(errors)

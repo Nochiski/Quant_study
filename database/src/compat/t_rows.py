@@ -40,7 +40,7 @@ from daily import calendar as daily_calendar
 from daily.kw_daily import ka10060_base_price_differs_sql
 from stage.build import _cast_expr
 from stage.model import KIND_NUMERIC, TableRule
-from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM
+from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM, STG_FLOW_POSTCLOSE_KIWOOM
 
 from .mappings import _FLOW_ANY, _FLOW_SELECT, V3_STOCK_FILTER, TableMapping
 from .quant_db import CompatEmptyError, CompatError
@@ -53,10 +53,9 @@ SOURCE_POSTCLOSE = "postclose"            # T-30 과 같은 이름
 SOURCE_KIWOOM_2105 = "kiwoom_2105"
 LEDGER_TABLE = STG_FLOW_DAILY_KIWOOM.sources[0].table    # 두 원장의 같은 TR 표 이름(ka10060)
 PICK_TABLE = "_t_pick"
-# 원장별 파싱 규칙. 장 마감 원장의 stage 규칙(PR-2 `STG_FLOW_POSTCLOSE_KIWOOM`)은 이 객체의 열
-# 규칙을 그대로 공유한다 — PR-2 가 들어온 베이스를 따라잡을 때(QL-F 머지 뒤) 그 객체를 가리키게
-# 한다.
-POSTCLOSE_RULE: TableRule = STG_FLOW_DAILY_KIWOOM
+# 원장별 파싱 규칙 — 장 마감 원장은 PR-2 stage 규칙(키움 원장 규칙과 같은 ka10060 열 객체 +
+# `price_valid` BOOLEAN), 21:05 원장은 연구 stage 규칙이다
+POSTCLOSE_RULE: TableRule = STG_FLOW_POSTCLOSE_KIWOOM
 KIWOOM_RULE: TableRule = STG_FLOW_DAILY_KIWOOM
 # (ATTACH 별칭, CLI 인자) — 원천 순서와 같다
 _LEDGERS = (("t_pc", "--postclose-db"), ("t_kw", "--kiwoom-db"))
@@ -84,6 +83,10 @@ SEAM_SQL = """
 SELECT max(u.date) FROM {universe_daily} u WHERE u.date <= DATE '{t_iso}'
 """
 
+# 장 마감 원장 `price_valid` — PR-2 열 규칙(BOOLEAN)대로 읽는다. '0'·NULL 은 거짓/NULL 이라 ② 로
+# 넘어간다
+_PRICE_VALID = _cast_expr(POSTCLOSE_RULE.column("price_valid"), 'r."price_valid"')
+
 # 종목마다 원천 하나 — ① postclose(가격 유효·종가·거래량 있음) → ② kiwoom_2105.
 # 두 표가 이 임시 표를 같이 쓴다.
 PICK_SQL = f"""
@@ -91,7 +94,7 @@ CREATE OR REPLACE TEMP TABLE {PICK_TABLE} AS
 WITH uni AS ({UNIVERSE_SQL}),
 raw AS (
     SELECT '{SOURCE_POSTCLOSE}' AS {SOURCE_COL}, 0 AS prio, CAST(r.ticker AS VARCHAR) AS ticker,
-           CAST(r.price_valid AS VARCHAR) = '1' AS price_ok,
+           {_PRICE_VALID} AS price_ok,
            {_parsed(POSTCLOSE_RULE)}
     FROM {{postclose}} r
     WHERE r.dt = '{{t_ymd}}'

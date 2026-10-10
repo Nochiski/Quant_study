@@ -12,6 +12,9 @@
 (f) 인계(엑셀)의 기본 주 모델은 scope@1.0 이다.
 (g) 짧은 첫 사업연도(G-28, N-25 Q5): scope 만 12개월 미만 연간 행을 퀄리티 손익 지표(gpa·roa·
     fcf_assets·gpa_change)에서 뺀다. v3_zscore@1.0 은 그대로(회귀 가드).
+(h) 창 안 제한폭 초과 미해결 수정주가(T-9 · H1-4): scope 만 모멘텀(r1m~r12m)·20일 변동성 창이
+    `fi_adj_prices.adj_jump_ok` 계단을 넘으면 그 지표를 결측으로 둔다(GH1-c 반사실). 판 메타에
+    종목 수·지표별 칸 수. v3_zscore@1.0 은 그대로(회귀 가드).
 """
 from __future__ import annotations
 
@@ -228,6 +231,119 @@ def test_quality_params_are_validated(bad: dict[str, object]) -> None:
     bent = replace(spec, params={**spec.params, "quality": quality})
     with pytest.raises(ValueError, match="params.quality"):
         ENGINE.run(bent, _short_year_fi())
+
+
+# ── (h) 창 안 제한폭 초과 미해결 수정주가(T-9 · H1-4) ───────────────────────────
+_N = 260                                     # 가격 행 수 — r12m(240 세션) 창이 서고 남는다
+_MOM = ("r1m", "r3m", "r6m", "r9m", "r12m")
+# 점수(정규화 결과)가 아닌 원값 열 — 처리 대상 밖이면 바뀌면 안 된다(GH1-c ③)
+_SCORES = ("stock_code", "score_date", "momentum_score", "revision_score", "flow_score",
+           "valuation_score", "composite_score", "rank", "quality_score")
+_RAW = tuple(c for c in V3_SCORE_COLUMNS if c not in _SCORES)
+# 종목 → (adj_ok 가 False 로 바뀌는 행, adj_jump_ok 가 False 로 바뀌는 행). 행 = 오래된 쪽부터 0…N−1
+_STEPS: dict[str, tuple[int | None, int | None]] = {
+    "J5": (_N - 5, _N - 5),          # 점프가 모든 창 안 → 모멘텀 5개 · std_20d 결측
+    "J20": (_N - 20, _N - 20),       # r1m(21행) · std_20d(21행) 창의 둘째 행 → 다 결측(창 경계)
+    "J21": (_N - 21, _N - 21),       # r1m(21행) · std_20d(21행) 창은 사건 행에서 시작 → 그대로
+    "LIM": (_N - 5, None),           # 미해결이지만 제한폭 안(adj_ok 만 뒤집힘) → 그대로
+    "OLD": (_N - 250, _N - 250),     # r12m 창(241행) 밖 → 그대로
+    "N1": (None, None), "N2": (None, None), "N3": (None, None), "N4": (None, None)}
+
+
+def _jump_fi() -> FactorInputs:
+    """종목 8개 × 가격 260행(달력일 연속) + 연간 2기. J5 는 점프 행부터 가격이 1.5배다."""
+    d0 = date.fromisoformat(_D)
+
+    def r(table: str, **v: object) -> dict[str, object]:
+        return {c: v.get(c) for c in FI_TABLES[table].column_names}
+
+    prices, adj, uni, fins = [], [], [], []
+    for i, (t, (ok_row, jump_row)) in enumerate(_STEPS.items()):
+        for k in range(_N):
+            day = d0 - timedelta(days=_N - 1 - k)
+            px = 100.0 + 3 * i + 0.05 * (i + 1) * k + 0.7 * ((k * (i + 2)) % 5)
+            if t == "J5" and k >= _N - 5:
+                px *= 1.5
+            prices.append(r("fi_prices", ticker=t, date=day, close=round(px)))
+            adj.append(r("fi_adj_prices", ticker=t, date=day, adj_close=px,
+                         adj_ok=ok_row is None or k < ok_row,
+                         adj_jump_ok=jump_row is None or k < jump_row))
+        uni.append(r("fi_universe", ticker=t, date=d0, market_cap=5000.0, eligible=True))
+        for period, gp in (("2025/12", 30.0 + i), ("2024/12", 20.0 + i)):
+            fins.append(r("fi_fin_summary", ticker=t, period=period, period_type="annual",
+                          gross_profit=gp, total_assets=100.0, roa=5.0 + i, fcf=10.0 + i,
+                          debt_ratio=50.0 + i, per=8.0 + i, pbr=1.0 + 0.1 * i,
+                          period_months=12))
+    tables = {"fi_prices": prices, "fi_adj_prices": adj, "fi_universe": uni, "fi_flows": [],
+              "fi_consensus": [], "fi_fin_summary": fins}
+    return FactorInputs(_D, "morning", "synthetic", tables)
+
+
+def _rule_off(spec: ModelSpec) -> ModelSpec:
+    return replace(spec, params={**spec.params, "adj_jump_missing": False})
+
+
+def test_scope_spec_turns_on_the_adj_jump_rule_only_for_scope() -> None:
+    scope, v3 = registry.get(SCOPE), registry.get(V3)
+    assert scope.params["adj_jump_missing"] is True
+    assert set(scope.params) ^ set(v3.params) == {"adj_jump_missing"}
+
+
+def test_scope_nulls_exactly_the_windows_crossing_a_limit_breaking_unresolved_event() -> None:
+    """GH1-c 반사실 — 같은 입력으로 규칙 있음·없음 두 번. 새로 NULL 이 된 칸 = 창이 adj_jump_ok
+    계단을 넘는 칸 그대로, 그 밖의 원값은 하나도 바뀌지 않는다(점수는 정규화로만 움직인다).
+    미해결이지만 제한폭 안(LIM)·창 밖 점프(OLD)·사건 행에서 시작하는 창(J21 r1m·std_20d)은 그대로,
+    창 둘째 행의 사건(J20)은 r1m·std_20d 까지 결측(창 경계 — 한 행 짧은 창 변이를 잡는다)."""
+    fi = _jump_fi()
+    res = ENGINE.run(registry.get(SCOPE), fi)
+    on = _by_code(res.scores)
+    cf = _by_code(ENGINE.run(_rule_off(registry.get(SCOPE)), fi).scores)
+    assert on.keys() == cf.keys() == set(_STEPS)
+    assert all(cf[c][k] is not None for c in cf for k in (*_MOM, "qual_std_20d"))   # 반사실은 다 선다
+    newly_null = {(c, k) for c in on for k in _RAW if on[c][k] is None and cf[c][k] is not None}
+    want = ({(c, k) for c in ("J5", "J20") for k in (*_MOM, "qual_std_20d")}
+            | {("J21", k) for k in _MOM[1:]})
+    assert newly_null == want
+    for c in on:
+        for k in _RAW:
+            if (c, k) not in want:
+                assert on[c][k] == cf[c][k], (c, k)
+    assert on["J5"]["momentum_score"] != cf["J5"]["momentum_score"]    # 점수는 움직인다
+    # 판 메타(GH1-c ④) — 종목 수와 지표별 칸 수. 규칙이 꺼진 spec 은 메타를 싣지 않는다
+    assert res.meta == {"adj_jump_masked": {"n_tickers": 3, "r1m": 2, "r3m": 3, "r6m": 3,
+                                            "r9m": 3, "r12m": 3, "std_20d": 2}}
+    assert ENGINE.run(_rule_off(registry.get(SCOPE)), fi).meta == {}
+
+
+def test_v3_zscore_ignores_adj_jump_ok_regression_guard() -> None:
+    """v3_zscore@1.0(원본 대조용)은 표식을 읽지 않는다 — 원값이 규칙 없는 scope 와 같다."""
+    fi = _jump_fi()
+    v3_res = ENGINE.run(registry.get(V3), fi)
+    v3 = _by_code(v3_res.scores)
+    cf = _by_code(ENGINE.run(_rule_off(registry.get(SCOPE)), fi).scores)
+    assert all(v3[c][k] == cf[c][k] for c in cf for k in _RAW)
+    assert v3_res.meta == {}
+
+
+def test_jump_masked_stock_follows_the_existing_missing_rules() -> None:
+    """J5 는 모멘텀 지표가 전부 결측 → 원본 규칙대로 모멘텀 원점수 0.0 으로 2단계 정규화에 들어가
+    모멘텀 점수가 남는다(`momentum.py:22-28`). 퀄리티는 std_20d 만 빠지고 남은 하위 지표로 비례
+    재정규화한다. 종합점수·순위도 그대로 매긴다(v3 에는 제외 개념이 없다)."""
+    on = _by_code(ENGINE.run(registry.get(SCOPE), _jump_fi()).scores)
+    j5 = on["J5"]
+    assert [j5[k] for k in (*_MOM, "qual_std_20d")] == [None] * 6
+    assert j5["momentum_score"] is not None and j5["quality_score"] is not None
+    assert j5["rank"] is not None
+    assert sorted(r["rank"] for r in on.values()) == list(range(1, len(on) + 1))
+
+
+@pytest.mark.parametrize("bad", [{"adj_jump_missing": 1},       # bool 만 받는다
+                                 {"adj_jump_mising": True}])    # 오타 — 조용히 꺼지면 안 된다
+def test_adj_jump_param_is_validated(bad: dict[str, object]) -> None:
+    spec = registry.get(SCOPE)
+    params = {k: v for k, v in spec.params.items() if k != "adj_jump_missing"} | bad
+    with pytest.raises(ValueError, match="params"):
+        ENGINE.run(replace(spec, params=params), _jump_fi())
 
 
 # ── (f) 주 모델 ────────────────────────────────────────────────────────────────

@@ -166,8 +166,8 @@ def test_registry_assembles_per_source_modules() -> None:
                                                   "stg_listing_daily", "stg_ingest_krx"}
     assert {t.name for t in rules_kiwoom.TABLES} == {
         "stg_flow_daily_kiwoom", "stg_short_daily_kiwoom", "stg_foreign_daily",
-        "stg_lending_daily", "stg_master_daily", "stg_shards_kiwoom"}
+        "stg_lending_daily", "stg_master_daily", "stg_shards_kiwoom", "stg_flow_postclose_kiwoom"}
     assert {t.name for t in rules_dart.TABLES} >= {"stg_rcept_dt_map", "stg_fin"}
     assert {t.name for t in rules_kis.TABLES} >= {"stg_flow_split_daily", "stg_credit_daily"}
     assert rules_wise.TABLES[0].name == "stg_consensus_monthly"
-    assert model.RULES_VERSION == "2.7.0"
+    assert model.RULES_VERSION == "2.8.0"

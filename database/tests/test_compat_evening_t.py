@@ -36,6 +36,7 @@ from compat import CompatEmptyError, CompatError, export
 from compat.__main__ import main as cli_main
 from conftest import _make_stage_tree
 from daily import kw_daily, postclose
+from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM, STG_FLOW_POSTCLOSE_KIWOOM
 from test_compat_export import (
     _adj_rows,
     _flow_row,
@@ -459,7 +460,7 @@ def test_morning_without_t_rows_refuses_and_keeps_evening_t_rows(env) -> None:
 
 
 def test_evening_does_not_overwrite_a_morning_reflect(env, tmp_path: Path) -> None:
-    """MINOR-1 — 대상에 date ≥ T 아침 확정 ok 기록이 있으면 장 마감 판은 멈춘다(T-35 와 같은 성질).
+    """MINOR-1 — 대상에 같은 날 아침 확정 ok 기록이 있으면 장 마감 판은 멈춘다(T-35 순서).
     재생은 `--allow-older` 로 돌린다."""
     morning = _equity(tmp_path / "tm", TM_BUILD, (D21, D22, D23))
     export(equity_root=morning, stage_root=env["stage"], date=T, basis="morning",
@@ -470,6 +471,41 @@ def test_evening_does_not_overwrite_a_morning_reflect(env, tmp_path: Path) -> No
     assert _t_prices(env["target"]) == krx                   # KRX 확정 행 그대로
     _evening(env, allow_older=True)
     assert _t_prices(env["target"])[A][3] == 69_500
+
+
+def test_late_evening_after_next_day_evening_is_refused(env) -> None:
+    """재리뷰 MINOR-1 재현 — 순서 판정은 QL-F T-35(`v3_post._newer`)와 한 곳이다. 대상에 (T+1, 장
+    마감, ok) 기록만 있어도 늦게 온 T 장 마감은 멈춘다(같은 날 아침만 보면 이 경우를 놓친다)."""
+    from compat.quant_db import META_DDL
+    con = sqlite3.connect(env["target"])
+    try:
+        con.execute(META_DDL)
+        con.execute("INSERT INTO _compat_meta (exported_at, date, basis, equity_builds, "
+                    "stage_builds, tables, \"window\", consensus_asof, status) VALUES "
+                    "('2026-09-28T07:00:00', '2026-09-28', 'evening', '{}', '{}', '{}', '{}', "
+                    "'2026-09-28', 'ok')")
+        con.commit()
+    finally:
+        con.close()
+    with pytest.raises(CompatError, match="2026-09-28"):
+        _evening(env)
+    assert _rows(env["target"], "SELECT count(*) FROM _compat_meta") == [(1,)]   # 대상 무변경
+
+
+def test_morning_on_a_holiday_refuses_and_leaves_tables(env, tmp_path: Path) -> None:
+    """아침 휴장 D(2026-09-24) — 판에 그날 행이 없으니 날짜 단위 교체 전에 CompatEmptyError,
+    가격·수급 표는 그대로다(실패 기록은 R6 대로 `_compat_meta` 에 남는다)."""
+    morning = _equity(tmp_path / "tm", TM_BUILD, (D21, D22, D23))
+    export(equity_root=morning, stage_root=env["stage"], date=T, basis="morning",
+           target=env["target"], full=True, tables=["daily_prices", "investor_detail_flows"])
+    before = {t: _rows(env["target"], f"SELECT * FROM {t} ORDER BY 1, 2")
+              for t in ("daily_prices", "investor_detail_flows")}
+    with pytest.raises(CompatEmptyError, match="2026-09-24"):
+        export(equity_root=morning, stage_root=env["stage"], date="20260924", basis="morning",
+               target=env["target"], full=True, tables=["daily_prices", "investor_detail_flows"])
+    assert {t: _rows(env["target"], f"SELECT * FROM {t} ORDER BY 1, 2") for t in before} == before
+    assert _rows(env["target"], "SELECT date, status FROM _compat_meta ORDER BY exported_at") == [
+        ("2026-09-23", "ok"), ("2026-09-24", "failed")]
 
 
 def test_evening_m_build_checks_the_seam_for_any_table(env, tmp_path: Path) -> None:
@@ -527,6 +563,9 @@ def test_postclose_row_without_usable_price_falls_back_to_2105(env, tmp_path: Pa
 def test_t6_base_price_predicate() -> None:
     """NIT 3 — T-6 첫 조건 술어(`daily.kw_daily.ka10060_base_price_differs_sql`, PR-5 와 공유).
     판정 불가(값 없음 · 직전 종가 0 이하)는 '다르다'로 닫는다."""
+    # 술어는 부호를 뗀 종가를 전제한다 — 두 원장 규칙이 cur_prc 를 abs 로 읽는지 함께 고정한다
+    assert STG_FLOW_DAILY_KIWOOM.column("close_krw").sign == "abs"
+    assert STG_FLOW_POSTCLOSE_KIWOOM.column("close_krw").sign == "abs"
     expr = kw_daily.ka10060_base_price_differs_sql("c", "p", "v")
     con = duckdb.connect()
     try:

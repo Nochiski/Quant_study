@@ -3,16 +3,18 @@
 #   순서: v3 휴장 사본 동기화(병행 대조용) → 휴장 달력 직접 갱신(KIS chk-holiday 1콜, K1-9) → D(직전 거래일) 판정 →
 #         키움 마스터(daily_wise.sh, 매일) →
 #         [월요일 KST · 마지막 성공 7일 초과] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01) →
-#         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 신규 corp 회사정보 공백 메우기 → 수집 요약 알림
+#         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → 저녁 키움 보강 판정(T-13) → DART 스윕·상세·문서 →
+#         신규 corp 회사정보 공백 메우기 → 수집 요약 알림
 #   소스별 단계는 서로 막지 않는다 — 한 단계가 rc≠0 이어도 다음 소스는 받고, 실패한 단계를 모두 모아 crit
 #   (플랜 2026-09-30 T-K3: 신용잔고 판정 실패가 DART 를 막던 결함). `dart company gap` 만 `dart` 성공에 묶는다.
 #   KIS 는 07:00(v3 토큰 재발급) 전에 끝나야 해서 순서는 키움 → KIS → DART 그대로다.
 #   사용: daily_ledger.sh [--date YYYYMMDD] [--dry-run] [--limit N]
 #   환경: QL_KW_NOT_BEFORE=HH:MM (키움 fetch 하한 시각, P0 프로브 판독값. 기본 06:00)
 #         QL_SKIP_KW=1 이면 키움 시계열 단계를 건너뛴다(앱키 분리 전 임시)
-#         키움은 대차(ka20068) 하나만 여기서 받는다 — 투자자·공매도(ka10060·ka10014)는 18:05
-#         daily_evening.sh 가 당일 저녁에 원장 직행으로 받고(결정 V2-1·V2-3), 외국인 보유(ka10008)는
-#         T-1 행이 07시 전후에 정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다.
+#         키움은 대차(ka20068) 하나만 여기서 늘 받는다 — 투자자·공매도(ka10060·ka10014)는 18:05
+#         daily_evening.sh 가 당일 저녁(21:05)에 원장 직행으로 받고(결정 V2-1·V2-3), 여기서는 그 D 커버리지를
+#         재서 미달일 때만 다시 받는다(T-13 · H1-5). 외국인 보유(ka10008)는 T-1 행이 07시 전후에 정정되므로
+#         (프로브 실측 09-10) daily_build.sh(08:10) 가 받는다.
 #   원장 락: 다른 원장 작업이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다(P9, 배포 묶음 5-3) — 규칙은
 #         scripts/raw_lock.sh 한 곳(대기자 1 · QL_RAW_LOCK_HELD · QL_RAW_LOCK_FILE 테스트 전용).
 set -uo pipefail
@@ -130,6 +132,18 @@ else
     step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka20068 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT || true
   fi
   step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT || true
+  # 저녁 키움 보강(T-13 · H1-5) — 전날 21:05 저녁 직행(ka10060·ka10014)의 D 커버리지를 원장에서 재고(읽기만),
+  #   미달인 TR 만 저녁과 같은 `--fetch --commit` 으로 한 번 다시 받은 뒤 다시 잰다. 그래도 미달이면 rc 2 →
+  #   다른 소스 단계처럼 FAILED → crit · rc 2 · ledger_chain failed. 그 D 를 다음 06:00 이 다시 판정하는 것은
+  #   주말·연휴뿐이다(평일엔 다음 06:00 의 D 가 다음 거래일로 넘어간다).
+  #   판정 줄(`[kw_daily] cover 판정`)은 아래 요약 맨 앞에 싣는다. 하한·술어는 kw_daily 한 곳(COMMIT_MIN_RATIO).
+  #   KIS 뒤: KIS 는 07:00(v3 토큰 재발급) 전에 끝나야 한다(실측 06:13→06:41, 여유 19분) — 다시 받기(키움 ≈14분)를
+  #   앞에 두면 여유가 5분으로 준다. DART 앞: 마감일 DART 는 2.3~3.8시간 더 걸려 그 뒤면 보강이 한참 밀린다.
+  #   공유 키움 앱키 슬롯: 미달인 날만 쓰는 조건부 슬롯(06:00 체인, KIS 뒤 약 10~15분)이다. 07:00 을 넘기면 v3 토큰
+  #   재발급과 겹치는데, 그때 나는 8005 는 api.kiwoom 이 강제 재발급 1회 재시도로 받아 양쪽 다 스스로 복구한다.
+  if [ -z "${QL_SKIP_KW:-}" ]; then
+    step "kiwoom evening cover" $PY -m daily.kw_daily --cover --date "$D" --tr ka10060,ka10014 $DRY $LIMIT || true
+  fi
   step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT \
     && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
   RC=0; [ -n "$FAILED" ] && RC=1
@@ -142,7 +156,9 @@ else
 fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
-SUMMARY=$(grep -E "^  |──── .* 종료" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
+# 저녁 키움 보강 판정 줄(T-13)은 맨 앞 — 뒤 단계(DART) 출력이 tail 창에서 밀어내지 않게 따로 집는다
+SUMMARY=$({ grep -E "^\[kw_daily\] cover 판정" "$RUN" | tail -1; grep -E "^  |──── .* 종료" "$RUN" | tail -8; } \
+  | tr '\n' ' ' | cut -c1-900)
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_ledger 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2

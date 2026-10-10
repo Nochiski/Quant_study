@@ -20,17 +20,34 @@ from __future__ import annotations
 import functools
 import json
 import re
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import build, inputs, rules_s01, rules_s11, rules_s12
 from equity.baseline import Baseline, load
 from equity.gates import EquityGateContext, GateStatus
 from fin_map import FIN_MAP
 from stage import manifest as stage_manifest
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG6_disclosure_version", "no_coverage",
+             "합성·절단본 접수에 정정 모집단이 없어 정정 링크 성립률을 못 잰다"),
+            ("equity", "EG8_disclosure_version", "no_coverage",
+             "합성·절단본에 나중에 정정된 사업보고서가 없어 정정 도달률을 못 잰다"),
+            ("equity", "EG6_fin_std", "no_coverage",
+             "절단본에 12월·비12월 결산 법인이 함께 있지 않아 결산월별 무매칭률 차이를 못 잰다")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 FIN_STD = rules_s12.FIN_STD

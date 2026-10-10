@@ -18,12 +18,13 @@
 원장으로 만든 T 행은 다음 날 아침 `--basis morning --date T` 가 KRX 행으로 통째로 바꾼다. 새 원천에
 그날 행이 0 이면 지우기 전에 멈춘다. 다른 날짜는 지금처럼 `INSERT OR REPLACE` 다.
 
-M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다.
+M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다. 제자리 반영은 v3
+파일에 직접 쓰지 않고 `scripts/v3_post.sh`(`compat.v3_post` — 스테이징 → 게이트 → 9표 한 트랜잭션, QL-F)로 한다.
 
 가드(1차 그림자 실행 뒤 리뷰 R1~R10 반영) — 전부 **쓰기 전/직후에 예외**로 멈춘다:
   · `--basis` 와 equity 판 접두(`e_`/`m_`) 불일치            (R5 — 장 마감 판은 `m_` 도 받는다)
   · 장 마감 판: T 비거래일 · 원장 없음 · 판 이음매(마지막 세션 ≠ D') · T 행 0 ·
-    대상에 date ≥ T 아침 확정 ok 기록(재생은 `--allow-older`)                        (QL-D)
+    대상에 이번보다 나중 ok 반영 기록(T-35 순서, 재생은 `--allow-older`)              (QL-D)
   · 날짜 단위 교체 표의 새 원천에 `--date` 행 0                                       (QL-D)
   · `price_daily`·`price_adj_daily` 판이 서로 다른 체인       (R9)
   · `daily_prices` 의 `adj_close` 결측 비율 > 1%              (R9)
@@ -123,8 +124,9 @@ MODEL_UNIVERSES = ("all", "estimates")
 BUILDS_MISSING = ("error", "current")
 MARKET_VOCAB = ("KOSPI", "KOSDAQ")      # v3 `stocks.market` CHECK 제약과 같은 어휘
 META_TABLE = "_compat_meta"
+# `main.` 한정 — `compat.v3_post` 가 스테이징을 ATTACH 한 연결에서 본 파일 쪽 메타 표를 만들 때도 같은 DDL 을 쓴다.
 META_DDL = f"""
-CREATE TABLE IF NOT EXISTS {META_TABLE} (
+CREATE TABLE IF NOT EXISTS main.{META_TABLE} (
     exported_at    TEXT PRIMARY KEY,
     date           TEXT NOT NULL,
     basis          TEXT NOT NULL,
@@ -171,7 +173,8 @@ class TableResult:
     n_rows: int                 # 실제로 넣은 행
     n_skipped: int              # v3 NOT NULL/PK 를 못 채워 넣지 못한 행
     sources: dict[str, str]     # 원천 표 → build_id
-    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를 싣는다.
+    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를, `daily_prices` 는
+    # 이번에 쓴 trade_date = D 행 수(n_on_date — 제자리 반영 신선도 게이트, T-31 ③)를 싣는다.
     metrics: dict[str, int] = field(default_factory=dict)
     # 장 마감 판 T 행(QL-D) — 원천별 행 수 · 21:05 원장으로 대체한 종목 · 행 없는 종목
     # (`t_rows._info`)
@@ -350,6 +353,9 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
 
     다르면 `CompatSchemaError` — v3 가 마이그레이션으로 스키마를 바꾼 경우이므로 쓰지 않는다
     (플랜 §7 위험표 2행). 돌려주는 값은 표 → **필수 컬럼**(NOT NULL ∪ PK) 목록이다.
+    비교는 열 이름 → 타입이다(순서 무관). 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션 ALTER 로
+    `updated_at` 뒤에 붙어 선언 순서와 다르다(QL-F 로컬 v3 사본 실측). 쓰기는 열 이름으로 하므로 순서는
+    결과에 영향이 없다.
     """
     ref = _reference_schema()
     con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
@@ -357,7 +363,7 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
     for table in tables:
         info = con.execute(f"PRAGMA table_info({table})").fetchall()
         got = [(r[1], r[2]) for r in info]
-        if got != ref[table]:
+        if sorted(got) != sorted(ref[table]):
             raise CompatSchemaError(
                 f"대상 스키마가 v3 선언과 다르다: table={table} got={got} want={ref[table]}")
         # rowid 표의 TEXT PRIMARY KEY 는 notnull 플래그가 0 이라 PK 를 따로 더한다.
@@ -409,6 +415,25 @@ def _chunks(cur: duckdb.DuckDBPyConnection) -> Iterator[list[tuple]]:
         yield rows
 
 
+def _complete(row: tuple, need: list[int]) -> bool:
+    """v3 필수 열(NOT NULL ∪ PK)이 다 찬 행 — `_upsert` 가 넣는 행의 정의."""
+    return all(row[i] is not None for i in need)
+
+
+def _count_on_date(chunks: Iterable[list[tuple]], columns: list[str], required: list[str],
+                   column: str, value: str, tally: dict[str, int]) -> Iterator[list[tuple]]:
+    """조각을 그대로 흘리며 `_upsert` 가 넣을 행 중 `column == value` 인 수를 `tally['n']` 에 센다.
+
+    신선도(컷오버 트랙 T-31 ③) — 제자리 반영의 대상은 v3 본 파일 사본이라 D 행이 이미 있을 수 있다.
+    '대상에 D 행이 있다' 가 아니라 '이번 실행이 D 행을 썼다' 를 남긴다.
+    """
+    i_col = columns.index(column)
+    need = [columns.index(c) for c in required]
+    for chunk in chunks:
+        tally["n"] += sum(1 for r in chunk if r[i_col] == value and _complete(r, need))
+        yield chunk
+
+
 def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
             chunks: Iterable[list[tuple]], required: list[str],
             post: Callable[[sqlite3.Connection], None] | None = None,
@@ -432,7 +457,7 @@ def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
         if pre is not None:
             pre(con)
         for chunk in chunks:
-            good = [r for r in chunk if all(r[i] is not None for i in need)]
+            good = [r for r in chunk if _complete(r, need)]
             n_skipped += len(chunk) - len(good)
             if good:
                 con.executemany(sql, good)
@@ -606,14 +631,17 @@ def _check_adj_close(con: sqlite3.Connection, params: dict[str, str]) -> int:
 
 
 def _ensure_meta_columns(con: sqlite3.Connection) -> None:
-    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식)."""
-    have = {r[1] for r in con.execute(f"PRAGMA table_info({META_TABLE})")}
+    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식).
+
+    `main.` 한정 — 스테이징을 ATTACH 한 연결(`compat.v3_post`)에서도 본 파일 쪽 표만 본다.
+    """
+    have = {r[1] for r in con.execute(f"PRAGMA main.table_info({META_TABLE})")}
     for name, decl in (("n_evening_rows_skipped", "INTEGER"), ("n_adj_close_null", "INTEGER"),
                        ("status", "TEXT"), ("failed_table", "TEXT"),
                        ("model_universe", "TEXT"), ("n_universe_with_estimates", "INTEGER"),
                        ("builds_fallback", "TEXT"), ("model_builds", "TEXT")):
         if name not in have:
-            con.execute(f"ALTER TABLE {META_TABLE} ADD COLUMN {name} {decl}")
+            con.execute(f"ALTER TABLE main.{META_TABLE} ADD COLUMN {name} {decl}")
 
 
 def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:
@@ -762,20 +790,18 @@ def _guard_date_rows(duck: duckdb.DuckDBPyConnection, mapping: TableMapping,
 
 
 def _guard_evening_order(con: sqlite3.Connection, d_iso: str) -> None:
-    """장 마감 판이 아침 확정을 덮지 않는다 — 대상 `_compat_meta` 에 date ≥ T 인 아침 ok 기록이
-    있으면 쓰기 전에 멈춘다. 늦게 돈 저녁 반영이 KRX 확정 행을 원장 값으로 되돌리는 것을 막는다(QL-F
-    반영 순서 가드 T-35 와 같은 성질 — 재생은 `allow_older`). 옛 기록의 빈 status 는 ok 로 본다.
+    """장 마감 판이 더 나중 반영을 덮지 않는다 — 대상 `_compat_meta` 에 이번(T, 장 마감)보다 순서가
+    뒤인 ok 기록(날짜가 뒤 · 같은 날 아침)이 있으면 쓰기 전에 멈춘다. 늦게 돈 저녁이 KRX 확정 행이나
+    다음 날 T 행을 옛 원장 값으로 되돌리는 것을 막는다. 순서 판정은 QL-F 반영 순서 가드(T-35)와 한
+    곳이다(`v3_post._newer` — v3_post 가 이 모듈을 import 하므로 함수 안에서 부른다). 재생은
+    `allow_older`.
     """
-    if META_TABLE not in _existing_tables(con):
-        return
-    have = {r[1] for r in con.execute(f"PRAGMA table_info({META_TABLE})")}
-    ok = "AND coalesce(status, 'ok') = 'ok'" if "status" in have else ""
-    row = con.execute(f"SELECT max(date) FROM {META_TABLE} WHERE basis = 'morning' "
-                      f"AND date >= ? {ok}", (d_iso,)).fetchone()
-    if row is not None and row[0] is not None:
+    from . import v3_post
+    newer = v3_post._newer(v3_post._meta_rows(con), d_iso, "evening")
+    if newer:
         raise CompatError(
-            f"대상에 이미 {row[0]} 아침 확정 반영(ok)이 있다 — 장 마감 판 {d_iso} 를 그 위에 "
-            "쓰면 KRX 확정 값이 원장 값으로 되돌아간다(T-35 와 같은 성질). 재생이면 --allow-older")
+            f"대상에 이번({d_iso} 장 마감)보다 나중 반영 기록 {newer[-1]} 이 있다 — 그 위에 쓰면 "
+            "확정 값이 옛 원장 값으로 되돌아간다(T-35 순서). 재생이면 --allow-older")
 
 
 def _build_ids(builds: dict[str, str]) -> dict[str, str]:
@@ -806,7 +832,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     `postclose_db`·`kiwoom_db`·`calendar_dir` 는 장 마감 판(`basis='evening'`)의 `daily_prices`·
     `investor_detail_flows` T 행 원천 원장(`data/raw/postclose.db`·`data/raw/kiwoom.db`)과 D' 를 셀
     판정 달력 폴더(없으면 `daily.calendar` 기본 경로)다(QL-D). 아침판에서는 쓰지 않는다.
-    `allow_older` 는 장 마감 판이 대상의 date ≥ T 아침 확정 기록을 무시하게 한다(재생 전용).
+    `allow_older` 는 장 마감 판이 대상의 더 나중 반영 기록(T-35 순서)을 무시하게 한다(재생 전용).
     """
     as_of = _parse_date(date, "--date")
     if basis not in BASES:
@@ -909,6 +935,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                     t_parts = t_mod.build(duck, selected, exprs, params, t_paths)
             for mapping in selected:
                 current = mapping.v3_table
+                on_date = {"n": 0}       # daily_prices 에 이번에 쓴 trade_date = D 행(T-31 ③)
                 sql, used = _render(mapping, params, builds)
                 part = t_parts.get(mapping.v3_table)
                 if mapping.source_kind == MODEL:
@@ -943,12 +970,19 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                         chunks: Iterable[list[tuple]] = _chunks(cur)
                         if part is not None:
                             chunks = itertools.chain(chunks, [part.rows])
+                        # 신선도 셈(T-31 ③)은 T 행을 얹은 뒤에 건다 — 거꾸로면 저녁 n_on_date 가
+                        # 0 이 되어 제자리 반영 게이트가 매일 멈춘다
+                        if mapping.v3_table == "daily_prices":
+                            chunks = _count_on_date(chunks, columns, required["daily_prices"],
+                                                    "trade_date", params["date"], on_date)
                         n_rows, n_skipped = _upsert(
                             con, mapping, columns, chunks, required[mapping.v3_table],
                             pre=None if day_col is None else _replace_date(
                                 mapping.v3_table, day_col, params["date"]))
                 metrics = (_fin_source_counts(con)
-                           if mapping.v3_table == "financial_summary" else {})
+                           if mapping.v3_table == "financial_summary" else
+                           {"n_on_date": on_date["n"]}
+                           if mapping.v3_table == "daily_prices" else {})
                 results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics,
                                                         None if part is None else part.info)
                 if mapping.v3_table == "daily_prices":

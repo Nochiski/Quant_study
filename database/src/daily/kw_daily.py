@@ -15,6 +15,10 @@ KRX 대조 없이 곧장 원장에 넣는다. KRX 는 T+1 08:00 공표라 그날
 응답이 역방향(최신→과거)이라 1콜이 캡만큼(ka10014 372 · ka10060 100 · ka20068 100 · ka10008 50)
 과거를 함께 준다. 그래서 갭이 며칠이든 **1회 실행 = 유니버스 × 4콜**이다.
 
+06:00 보강(`--cover`, T-13 · H1-5)은 저녁 직행이 실패한 날의 방어선이다 — 원장 본 표의 `dt=D` 커버리지를
+저녁 직행 게이트와 같은 술어(`judge_coverage`)로 재고, 미달인 TR 만 저녁과 같은 `--fetch --commit` 경로로
+한 번 다시 받은 뒤 다시 잰다. 그래도 미달이면 rc 2(06:00 체인이 crit 으로 올린다).
+
 종료코드(플랜 §4 공통 규약): 0 성공 / 2 게이트·토큰 실패 / 3 시각·대기 제약.
 `--dry-run` 은 콜은 하되(`--limit` 만큼) 원장·incoming·`daily_run.db`·유니버스 상태에 쓰지 않는다.
 """
@@ -46,6 +50,9 @@ BACKOFF_SEC = 0.5           # 429 복구 실측 419~759ms(backfill_kw.py:28)
 MAX_RETRY = 4
 STALE_PCT_MAX = 30.0        # 오염 게이트 (b). 실측 정상일 9.7% / 오염일 99.0% (findings A §3-2)
 # 저녁 직행(--commit) 전용 결손 게이트 (DEFECT-A01). 아침 경로는 08:10 KRX 대조가 판정하므로 적용하지 않는다.
+# 06:00 보강 판정(--cover, T-13)도 이 값을 원장에 그대로 물린다 — 08:10 확정 체인의 필수 검사
+# `kiwoom.ka10060.rows`(ledger_health, rows / requested ≥ 0.98, 2026-09-09 서버 실측 기대치)와 같은 하한이어야
+# 06:00 에 충분하다고 본 날 08:10 이 그 검사에서 막히지 않는다. 바꾸면 ledger_health 의 하한도 같이 본다.
 COMMIT_MIN_RATIO = 0.98     # dt=D 를 받은 종목 / 요청 종목. ledger_health 의 kiwoom.*.rows 하한과 같은 값
 # 종목축이 요청 유니버스인 TR 만 위 비율로 잰다. ka10014(공매도)는 아니다 — 서버 실측 09-16~09-18
 # 2,129~2,273 / 2,651(80~86%). 그래서 ledger_health 의 `kiwoom.ka10014.trend` 와 같은 술어로
@@ -63,6 +70,7 @@ INCOMING_PREFIX = "_kw_incoming_"
 WINDOW_RELATIVE_COLS: frozenset[str] = frozenset({"ovr_shrts_qty"})
 FETCH_SOURCE = "kiwoom_fetch"
 MERGE_SOURCE = "kiwoom_merge"
+COVER_SOURCE = "kiwoom_cover"   # 06:00 보강 판정(T-13) — 다시 받은 fetch 자체는 FETCH_SOURCE 에 따로 남는다
 _META_COLS = ("ticker", "src_api", "collected_at", "fetched_at")
 
 
@@ -219,6 +227,37 @@ class FetchResult:
     @property
     def ok(self) -> bool:
         return self.status is FetchStatus.OK
+
+
+@dataclass(frozen=True)
+class TrCoverage:
+    """TR 하나의 `dt=D` 커버리지 판정 — 저녁 직행 게이트(incoming)와 06:00 보강 판정(원장, T-13)이 같이 쓴다.
+
+    `base` 가 0 이면 기준선이 없어 판정하지 않는다(`short` 거짓, `basis='none'` 으로 남긴다).
+    """
+
+    api_id: str
+    got: int                    # dt=D 를 받은 요청 종목 수
+    base: float                 # 분모 — 요청 종목 수('universe') 또는 자기 최근 세션 평균('avg20')
+    min_ratio: float
+    basis: str                  # 'universe' | 'avg20' | 'none'
+
+    @property
+    def ratio(self) -> float | None:
+        return None if self.base <= 0 else self.got / self.base
+
+    @property
+    def short(self) -> bool:
+        ratio = self.ratio
+        return ratio is not None and ratio < self.min_ratio
+
+    def text(self) -> str:
+        """로그·런 로그 한 토막 — 예: `ka10060 2167/2654(universe) 0.8165<0.98`."""
+        head = f"{self.api_id} {self.got}/{self.base:.0f}({self.basis})"
+        ratio = self.ratio
+        if ratio is None:
+            return f"{head} 판정 불가(기준선 없음)"
+        return f"{head} {ratio:.4f}{'<' if self.short else '≥'}{self.min_ratio}"
 
 
 @dataclass(frozen=True)
@@ -554,6 +593,39 @@ def recent_ticker_avg(db_path: str, table: str, date: str,
     return None if row is None or row[0] is None else float(row[0])
 
 
+def judge_coverage(db_path: str, api_id: str, got: int, n_requested: int, date: str) -> TrCoverage:
+    """`dt=date` 커버리지 판정 술어 한 곳 — 저녁 직행 게이트(`fetch(commit=True)`)와 06:00 보강(`--cover`).
+
+    종목축이 요청 유니버스인 TR 은 요청 종목 수 대비 `COMMIT_MIN_RATIO`, 아닌 TR(ka10014)은 원장의 자기
+    최근 `COMMIT_TREND_SESSIONS` 세션 평균 대비 `COMMIT_TREND_MIN_RATIO` 다(유니버스 대비면 매일 80%대).
+    """
+    if api_id in COMMIT_UNIVERSE_TRS:
+        return TrCoverage(api_id, got, float(n_requested), COMMIT_MIN_RATIO, "universe")
+    avg = recent_ticker_avg(db_path, TRS[api_id].table, date)
+    return TrCoverage(api_id, got, avg or 0.0, COMMIT_TREND_MIN_RATIO,
+                      f"avg{COMMIT_TREND_SESSIONS}" if avg else "none")
+
+
+def ledger_coverage(db_path: str, tickers: Sequence[str], date: str,
+                    api_ids: Sequence[str]) -> tuple[TrCoverage, ...]:
+    """원장 본 표에서 `dt=date` 를 받은 **요청 종목** 수를 TR 별로 재 판정한다(읽기 전용, T-13).
+
+    분자는 요청 유니버스 안의 종목만 센다 — 저녁 직행 게이트가 재는 incoming 과 같은 축이다. 표가 없으면 0.
+    """
+    want = set(tickers)
+    got: dict[str, int] = {}
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        for api_id in api_ids:
+            table = TRS[api_id].table
+            have = ({str(r[0]) for r in con.execute(f'SELECT DISTINCT ticker FROM "{table}" WHERE dt=?', (date,))}
+                    if _table_exists(con, table) else set())
+            got[api_id] = len(have & want)
+    finally:
+        con.close()
+    return tuple(judge_coverage(db_path, a, got[a], len(tickers), date) for a in api_ids)
+
+
 def stale_gate(db_path: str, prev_date: str, holdings_d: Mapping[str, str],
                holdings_prev: Mapping[str, str]) -> StaleGate:
     """오염 게이트 (b). 비교 기준은 원장 `dt=D-1`, 원장에 그 날이 없으면 같은 응답의 `D-1` 행.
@@ -641,20 +713,12 @@ def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
             cap = commit_error_max(st.n_calls)
             if st.n_error > cap:
                 broken.append(f"{st.api_id} errors={st.n_error} > {cap}")
-            got = cover.get(st.api_id, 0)
-            if st.api_id in COMMIT_UNIVERSE_TRS:
-                base, min_ratio, basis = float(len(tickers)), COMMIT_MIN_RATIO, "universe"
-            else:
-                avg = recent_ticker_avg(db_path, TRS[st.api_id].table, date)
-                basis = f"avg{COMMIT_TREND_SESSIONS}" if avg else "none"
-                base, min_ratio = (avg or 0.0), COMMIT_TREND_MIN_RATIO
-            bases.append(f"{st.api_id}:{basis}")
-            if base <= 0:               # 기준선이 없다 — 조용히 통과시키되 basis 를 남긴다
-                continue
-            ratio = got / base
-            if ratio < min_ratio:
-                broken.append(f"{st.api_id} coverage={got}/{base:.0f}({basis}) "
-                              f"ratio={ratio:.4f} < {min_ratio}")
+            cov = judge_coverage(db_path, st.api_id, cover.get(st.api_id, 0), len(tickers), date)
+            bases.append(f"{st.api_id}:{cov.basis}")
+            # 기준선이 없으면(base 0) `short` 가 거짓 — 조용히 통과시키되 basis 를 남긴다
+            if cov.short:
+                broken.append(f"{st.api_id} coverage={cov.got}/{cov.base:.0f}({cov.basis}) "
+                              f"ratio={cov.ratio:.4f} < {cov.min_ratio}")
         detail += f" coverage_basis={','.join(bases)}"
         if broken:
             return FetchResult(FetchStatus.COVERAGE_FAILED, date, len(tickers), n_calls, n_rows, gate,
@@ -942,6 +1006,58 @@ def _run_merge(*, date: str, db_path: str, krx_db: str, run_db: str, dry_run: bo
     return _MERGE_RC[result.status]
 
 
+def _run_cover(*, date: str, prev_date: str, db_path: str, run_db: str, base: str,
+               cal: trading_calendar.Calendar, limit: int, dry_run: bool, trs: Sequence[str]) -> int:
+    """06:00 저녁 키움 보강(T-13 · H1-5) — 원장에서 D 커버리지를 재고, 미달 TR 만 다시 받고, 다시 잰다.
+
+    21:05 저녁 직행이 실패하면 08:10 필수 검사 `kiwoom.ka10060.rows` 가 FAIL 이라 그날 확정판이 막힌다(R-5).
+    판정은 원장을 읽기만 한다(요청 유니버스도 dry-run 과 같은 상태 파일 그림자 사본으로 구한다). 다시 받기는
+    저녁과 같은 `_run_fetch(commit=True)` 한 번 — 대기 한도·재시도 시각 없음(P9). 원장 락은 부르는 체인
+    (daily_ledger.sh)이 쥔다. 그래도 미달이면 rc 2 — 체인이 소스 단계 실패로 crit 을 낸다.
+    휴장일 D 는 판정하지 않는다(rc 0). dry-run 은 판정만 하고 콜·쓰기 없이 rc 0.
+    커밋은 다시 받은 TR 묶음 단위다 — 하나라도(예: ka10014) 게이트에 미달이면 같이 받은 ka10060 도 이 단계에서는
+    원장에 넣지 않는다. 남은 incoming 은 08:10 `--merge` 가 KRX 대조(ka10008 거래량) 통과 뒤 머지한다. TR 별
+    커밋은 후속이다.
+    """
+    if not cal.is_trading_day(_parse_date(date)):
+        print(f"[kw_daily] cover 판정 D={date} 휴장 — 건너뜀")
+        return 0
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        req = _requested_universe(con, base, cal, dry_run=True)
+    finally:
+        con.close()
+    tickers = req.tickers[:limit] if limit > 0 else req.tickers
+    before = ledger_coverage(db_path, tickers, date, trs)
+    short = [c.api_id for c in before if c.short]
+    head = f"D={date} 요청={len(tickers)} | 전 {' · '.join(c.text() for c in before)}"
+    if not short:
+        line = f"{head} | 충분 — 보강 없음"
+        print(f"[kw_daily] cover 판정 {line}")
+        if not dry_run:
+            runlog.finish(run_db, runlog.start(run_db, date=date, source=COVER_SOURCE),
+                          status=FetchStatus.OK.value, detail=line)
+        return 0
+    if dry_run:
+        print(f"[kw_daily] cover 판정 {head} | 미달 {','.join(short)} — dry-run: 보강 생략(콜·쓰기 없음)")
+        return 0
+    rid = runlog.start(run_db, date=date, source=COVER_SOURCE)
+    # flush — 로그 파일로 갈 때 stdout 은 블록 버퍼라, 다시 받기의 stderr 줄보다 늦게 찍혀 순서가 뒤집힌다
+    print(f"[kw_daily] cover 보강 시작 — D={date} trs={','.join(short)} ({head})", flush=True)
+    rc_fetch = _run_fetch(date=date, prev_date=prev_date, db_path=db_path, run_db=run_db, base=base,
+                          cal=cal, limit=limit, dry_run=False, not_before=None, trs=tuple(short),
+                          commit=True)
+    after = ledger_coverage(db_path, tickers, date, trs)
+    still = [c.api_id for c in after if c.short]
+    verdict = f"보강 뒤에도 미달 {','.join(still)}" if still else "보강 뒤 충족"
+    line = (f"{head} | 보강 {','.join(short)} fetch rc={rc_fetch} | "
+            f"후 {' · '.join(c.text() for c in after)} | {verdict}")
+    print(f"[kw_daily] cover 판정 {line}")
+    status = FetchStatus.COVERAGE_FAILED if still else FetchStatus.OK
+    runlog.finish(run_db, rid, status=status.value, detail=line)
+    return _FETCH_RC[status]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="daily.kw_daily",
@@ -949,6 +1065,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--fetch", action="store_true", help="콜 + _kw_incoming_<tr> 적재 + 오염 게이트")
     mode.add_argument("--merge", action="store_true", help="KRX 크로스소스 대조 후 원장 머지")
+    mode.add_argument("--cover", action="store_true",
+                      help="06:00 저녁 키움 보강(T-13) — 원장 dt=D 커버리지를 재고 미달 TR 만 --fetch --commit "
+                           "으로 다시 받은 뒤 다시 잰다. --tr 필수")
     p.add_argument("--date", default=None, help="대상 거래일 YYYYMMDD (기본: 캘린더상 직전 거래일)")
     p.add_argument("--dry-run", action="store_true",
                    help="콜은 하되 원장(ka* 본 테이블)·daily_run.db·유니버스 상태에 쓰지 않는다 — incoming 스크래치는 쓴다")
@@ -956,7 +1075,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--not-before", default=None, help="KST HH:MM 이전이면 rc 3")
     p.add_argument("--tr", default=None,
                    help="fetch 할 TR 을 쉼표로(기본 4개 전부). 운영: 18:05 체인 ka10060,ka10014(--commit) / "
-                        "06:00 체인 ka20068 / 08:10 체인 ka10008")
+                        "06:00 체인 ka20068 · 보강 판정 ka10060,ka10014(--cover) / 08:10 체인 ka10008")
     p.add_argument("--commit", action="store_true",
                    help="fetch 직후 선택 TR 을 KRX 대조 없이 원장에 넣고 그 incoming 을 비운다 — "
                         "저녁 슬롯(18:05) 전용, 결정 V2-1. --fetch 와만 쓴다")
@@ -971,6 +1090,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         unknown = [t for t in trs if t not in TRS]
         if unknown or not trs:
             p.error(f"--tr 에 모르는 TR: {unknown} (가능: {','.join(TRS)})")
+    if a.cover and trs is None:
+        p.error("--cover 는 --tr 로 판정할 TR 을 정해야 한다(운영: ka10060,ka10014) — 기본 4 TR 이면 "
+                "06:00 에 아직 머지 전인 ka10008·ka20068 까지 미달로 읽혀 매일 다시 받는다")
 
     base = _base()
     cal = trading_calendar.load(os.path.join(base, "data", "calendar", "kis_holidays.json"))
@@ -985,6 +1107,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                           base=base, cal=cal, limit=a.limit, dry_run=a.dry_run,
                           not_before=a.not_before,
                           trs=trs, commit=a.commit)
+    if a.cover:
+        return _run_cover(date=date, prev_date=prev_date, db_path=db_path, run_db=run_db, base=base,
+                          cal=cal, limit=a.limit, dry_run=a.dry_run,
+                          trs=trs or ())     # trs 없음은 위 p.error 로 이미 끝났다(타입 좁히기용)
     return _run_merge(date=date, db_path=db_path, krx_db=krx_db, run_db=run_db,
                       dry_run=a.dry_run, not_before=a.not_before)
 

@@ -108,7 +108,7 @@ data/model/
 | `date` · `basis` | 판 기준일 D(ISO) · `morning` |
 | `fi_build_id` | 읽은 factor_inputs 판 id |
 | `generated_at` | UTC(`…Z`) |
-| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(실행 예외 — 엔진 실행·재실행·직전 판 읽기·게이트 평가 — 를 낸 비교 모델은 `{error}` 하나) |
+| `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(실행 예외 — 엔진 실행·재실행·직전 판 읽기·게이트 평가 — 를 낸 비교 모델은 `{error}` 하나). 엔진 메타(`EngineResult.meta`)는 같은 자리에 얹는다 — scope 의 `adj_jump_masked: {n_tickers, r1m, r3m, r6m, r9m, r12m, std_20d}` = 창 안 제한폭 초과 미해결 수정주가로 비운 종목 수·지표별 칸 수(규칙이 없었으면 값이 섰던 칸만, 0 도 싣는다 — T-9 · H1-4, mb1.6.0). GH1-c 의 '매 모델 빌드 반사실 대조 [차단]'(같은 fi 로 규칙 있음·없음을 돌려 판 공개를 막는 게이트)은 이 PR 범위 밖 — 후속이다 |
 | `excluded_specs` | 게이트 FAIL·실행 예외(엔진 실행·재실행·직전 판 읽기·게이트 평가)로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`. 사유는 첫 줄만, model 루트 기준 상대 경로로 바꾼 뒤 500자에서 자른다(D-01, traceback 은 로컬 로그 경고에만). 없으면 `{}`(gate_failed 판도 `{}`) |
 | `primary_spec` | 인계 대표 모델(`--primary`) |
 | `elapsed_s` | 적재·엔진·게이트 소요(초) |
@@ -165,7 +165,7 @@ data/model/
 | MG2 결정성 | 두 실행의 점수·지표 직렬화(JSON, 부동소수 repr) sha256 | 해시가 다르면 |
 | MG3 온전성 | NaN·inf · 종목 중복 · 순위 = 순위 행의 1…n · v3·v2 전 행 순위·종합 있음 · v3 항상 NULL 6열 · v4: 종합·버킷 점수·지표 백분위 ∈ [0, 100], `excluded` ⇔ `exclude_reason` ⇔ rank NULL, 순위 행은 종합 있음, `spec_id` 일치 | 위반이 하나라도 |
 | MG4 신선도 | 전체 `fi_prices`(eligible 로 자르기 전)에서 D 종가가 있는 종목 수 — v3 원본 stale guard(`backend/scoring/engine.py:40-51`, `V3_MIN_DAILY_PRICES_THRESHOLD`)와 같은 하한 | < **2,000**(`--min-prices-on-d`) |
-| MG5 전판 대비 | 같은 spec·같은 basis 의 직전 성공 판(MANIFEST `builds` 중 basis 가 같은 마지막 판 — 아침판과 장 마감 판을 섞지 않는다, PR-6 · mb1.5.0)과 종합 Spearman(공통 종목, 동률 평균순위)·상위 30 겹침·공통 종목 수 기록 | **FAIL 없음** — Spearman < **0.8**(또는 셀 수 없음)이면 `warn`. 첫 판·전판 파일 없음은 `skip(no_previous)` |
+| MG5 전판 대비 | 같은 spec·같은 basis 의 직전 성공 판(MANIFEST `builds` 중 basis 가 같은 마지막 판 — 아침판과 장 마감 판을 섞지 않는다, PR-6 · mb1.5.0)과 종합 Spearman(공통 종목, 동률 평균순위)·상위 30 겹침·공통 종목 수 기록 | **FAIL 없음** — Spearman < **0.8**(또는 셀 수 없음)이면 `warn`. 첫 판·전판 파일 없음은 `skip(no_previous)`(허용표 안). 그 밖의 MG5 skip 은 `warn`, MG0~MG4 의 skip 은 FAIL 이다(K1-7a, `src/stage/skip_allow.py`) |
 
 - 플랜 §3-4 원안(MG0 스키마 · MG1 행수 · MG2 NaN·rank · MG3 골든 · MG4 순위 상관 · MG5 manifest 완비)과
   번호가 다르다 — 09-29 W2-a 지시가 정본이다. 골든 대조(G-M3 ②)는 테스트(`test_model_v3_port`·

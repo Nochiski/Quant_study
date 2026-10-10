@@ -12,7 +12,9 @@ from datetime import UTC, datetime
 # (10-09 핫픽스, 판본 그대로) 컨센서스 월간 G8: 5001·5002 한쪽만 빈 값은 불일치가 아니라 n_one_side_null 로 기록만 — 산출 행 불변
 # 2.7.0: stg_fin_wise·_q 연속 판 접기 — 같은 (종목, ep, pkey) 의 바로 앞 원장 blob 과 sha256 이 같으면
 #        파싱 전에 버린다(§1 예외 (f), 묶음 7 N-37). 두 표 fetched_date 뜻이 '그 원문을 처음 본 날'로 바뀐다
-RULES_VERSION = "2.7.0"
+# 2.8.0: stg_flow_postclose_kiwoom 추가 — 장 마감 직후 원장(postclose.db) ka10060, stg_flow_daily_kiwoom 과 같은
+#        열 규칙 + price_valid·collected_at(컷오버 PR-2). G4 골든 물려받기(golden_from). 다른 표 산출 불변
+RULES_VERSION = "2.8.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
@@ -206,6 +208,11 @@ class TableRule:
     # 아침 확정판 재사용(`reuse.py`, 묶음 7-3) — 원장 지문·규칙 판본·코드 rev 가 저녁 판과 같으면
     # 다시 짓지 않고 저녁 판 파일을 하드링크한 새 m_ 판으로 커밋한다. stg_fin_wise·_q 만
     morning_reuse: bool = False
+    # G4 골든 물려받기 — 원천 TR(src_tag)이 같고 이 표의 unit_scale 열이 golden_from 표의 열과 **같은 ColumnRule**
+    # 이면 그 표의 골든 픽스처가 스케일을 지킨다(규칙을 공유하면 검증도 한 곳, P4). 첫 수집(10-14) 전에는 원장에
+    # 행이 없어 골든 행을 둘 수 없는 표(장 마감 원장)만 쓴다. 수집 뒤 그 표 자기 골든 픽스처를 다는 일은
+    # 후속이다. stg_flow_postclose_kiwoom 만
+    golden_from: TableRule | None = None
 
     def column(self, name: str) -> ColumnRule:
         for c in self.columns:

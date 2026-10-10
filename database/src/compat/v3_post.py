@@ -1,7 +1,7 @@
 """v3 `quant.db` 제자리 반영 — 스테이징 → 게이트 → 표 한 트랜잭션 (컷오버 트랙 QL-F).
 
-정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-F·QL-F2 · T-16 · T-27 · T-31 · T-34 · T-35 · T-38,
-로드맵 §8 K3-2·K3-3.
+정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-F·QL-F2·QL-I · T-16 · T-27 · T-31 · T-34 · T-35 · T-38 ·
+T-42, 로드맵 §8 K3-2·K3-3.
 `scripts/v3_post.sh` 가 단계마다 부른다(`python -m compat stage` · `v3-tables` · `export --in-place` · `apply`).
 
 왜 compat 을 v3 파일에 직접 돌리지 않는가:
@@ -46,6 +46,21 @@
     스테이징은 본 파일 사본이라 'D 행이 있다' 만으로는 옛 D 행에도 참이 된다. 없으면 07:00 브리핑이 D−1 장을
     오늘 장으로 보고한다(DEFECT-C02). 비율 하한은 두지 않는다(새 정지 조건이라)
   · 표마다 반영 범위 행 > 0 — 점수 두 표는 `score_date = D` 행(점수 행 > 0)
+  · 복원 뒤 첫 제자리 반영은 `--full` 만(QL-I — 아래). 그림자는 본 파일에 쓰지 않으므로 보지 않는다
+
+복원 기록(QL-I · T-42 — 되돌리기, `compat.v3_restore`): 표를 고정 백업으로 되돌린 COMMIT 은 `_compat_meta` 에
+  basis = `RESTORE_BASIS` 인 기록 1행을 함께 남긴다(되돌린 표는 기록의 `tables` — 기본은 점수 두 표를 뺀 7표). 이
+  기록은 장벽이다.
+  · 그 앞 반영 기록은 순서(T-35, `_newer`)·아침 반영 표(T-34, `_tables_for`) 판정에서 뺀다 — 그 기록들은 복원 뒤
+    본 파일을 설명하지 않는다. 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은
+    키를 `INSERT OR REPLACE` 로 덮는다. 기록 자체는 지우지 않는다(이력).
+  · 복원 기록은 반영 기록이 아니다 — 순서·7표 판정에 들지 않는다(basis 가 evening·morning 이 아니다).
+  · 그 뒤 첫 제자리 반영은 compat `--full`(730일 창) 기록만 받는다 — 복원 뒤 v3 가 다시 쓴 행 위에 14일 증분만
+    얹으면 창 안은 compat 종가(KRX 정규장 종가 — T-33), 창 밖은 v3 종가(애프터마켓 포함)로 섞인다. 락을 기다리다
+    복원 뒤에 깬 옛 반영이나 꺼지지 않은 장 마감 체인도 여기서 멈춘다. 다시 컷오버할 때의 첫 반영(V3-C)과 같은
+    뜻이다. **새 정지 조건이라 사용자 확인 대기**(구현은 한다).
+  앞뒤는 `exported_at`(UTC ISO, compat 과 같은 형식)으로 가른다 — 제자리 반영은 v3 락 안에서 스테이징을 뜨고
+  export 를 시작하므로, 복원(같은 락)보다 뒤에 COMMIT 되는 기록은 시각도 뒤다.
 
 v3 파일은 열 때마다 읽기 전용 URI(`mode=ro`)거나 쓰기 전용(`mode=rw` — 없으면 만들지 않는다)이다.
 스테이징 경로가 v3 본 파일(또는 그 -wal/-shm/-journal)과 같은 파일이면 거부한다 — 스테이징을 뜨기 전에
@@ -72,6 +87,8 @@ _DATE_COLUMN = {"score_history": "score_date", "score_history_v2": "score_date"}
 SCORE_TABLES = tuple(_DATE_COLUMN)
 # 같은 날짜 안 반영 순서(T-35) — 아침 KRX 확정이 장 마감 판보다 나중이다.
 _BASIS_RANK = {"evening": 0, "morning": 1}
+# 복원 기록의 basis(QL-I, `compat.v3_restore`) — 반영 기록이 아니라 장벽이다(모듈 머리 주석).
+RESTORE_BASIS = "restore"
 # 본 파일 쓰기 락 대기(ms). v3 의 짧은 쓰기(pipeline_runs·research_reports 등)가 끝나기를 기다린다.
 BUSY_TIMEOUT_MS = 60_000
 # 스테이징을 뜨기 전에 확보할 여유 — 본 파일(+ -wal) 크기의 배수. 사본 1 + compat 쓰기(WAL) 여유.
@@ -203,10 +220,19 @@ def _meta_rows(con: sqlite3.Connection) -> list[dict]:
     return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
+def _since_restore(main_rows: list[dict]) -> tuple[list[dict], str | None]:
+    """(마지막 복원 기록 뒤의 기록, 그 복원 기록 exported_at) — 복원 기록이 없으면 (전부, None)(QL-I)."""
+    marks = [str(r["exported_at"]) for r in main_rows if r.get("basis") == RESTORE_BASIS]
+    if not marks:
+        return main_rows, None
+    last = max(marks)
+    return [r for r in main_rows if str(r["exported_at"]) > last], last
+
+
 def _tables_for(main_rows: list[dict], d_iso: str, basis: str,
                 scores: bool = True) -> tuple[str, ...]:
     """반영 표 — 점수 없는 반영(T-38)은 7표. 아침 재반영은 같은 D 의 점수 두 표를 반영한 장 마감 ok 기록이 본
-    파일에 있으면 점수 두 표를 뺀다(T-34)."""
+    파일에 있으면 점수 두 표를 뺀다(T-34). 마지막 복원 기록 앞의 기록은 보지 않는다(QL-I)."""
     seven = tuple(t for t in TABLES if t not in SCORE_TABLES)
     if not scores:
         if basis != "evening":
@@ -215,7 +241,8 @@ def _tables_for(main_rows: list[dict], d_iso: str, basis: str,
         return seven
     if basis == "morning" and any(
             r.get("date") == d_iso and r.get("basis") == "evening" and r.get("status") == "ok"
-            and set(SCORE_TABLES) <= set(json.loads(r["tables"])) for r in main_rows):
+            and set(SCORE_TABLES) <= set(json.loads(r["tables"]))
+            for r in _since_restore(main_rows)[0]):
         return seven
     return TABLES
 
@@ -236,16 +263,27 @@ def tables_for(v3_db: Path, date: str, basis: str, scores: bool = True) -> tuple
 
 
 def _newer(main_rows: list[dict], d_iso: str, basis: str) -> list[tuple[str, str]]:
-    """T-35 — 본 파일 ok 반영 기록 중 이번(d_iso, basis)보다 순서가 뒤인 것."""
+    """T-35 — 본 파일 ok 반영 기록 중 이번(d_iso, basis)보다 순서가 뒤인 것. 마지막 복원 기록 앞의 기록은 보지
+    않는다(QL-I)."""
     mine = (d_iso, _BASIS_RANK[basis])
-    return sorted({(str(r["date"]), str(r["basis"])) for r in main_rows
+    return sorted({(str(r["date"]), str(r["basis"])) for r in _since_restore(main_rows)[0]
                    if r.get("status") == "ok" and r.get("basis") in _BASIS_RANK
                    and (str(r["date"]), _BASIS_RANK[str(r["basis"])]) > mine})
 
 
+def _first_after_restore(main_rows: list[dict]) -> str | None:
+    """본 파일 마지막 복원 기록 뒤에 ok 반영 기록이 아직 없으면 그 복원 기록 exported_at, 아니면 None(QL-I)."""
+    after, mark = _since_restore(main_rows)
+    if mark is None or any(r.get("status") == "ok" and r.get("basis") in _BASIS_RANK
+                           for r in after):
+        return None
+    return mark
+
+
 def gate(staging: Path, v3_db: Path, date: str, basis: str,
-         allow_older: bool = False, scores: bool = True) -> GateReport:
-    """스테이징을 읽어 게이트를 판정한다(쓰기 없음). 본 파일은 반영 기록 확인에만 읽는다."""
+         allow_older: bool = False, scores: bool = True, shadow: bool = False) -> GateReport:
+    """스테이징을 읽어 게이트를 판정한다(쓰기 없음). 본 파일은 반영 기록 확인에만 읽는다.
+    `shadow` 면 복원 뒤 첫 반영 --full 조건(QL-I)을 보지 않는다 — 그림자는 본 파일에 쓰지 않는다."""
     staging, v3_db = Path(staging), Path(v3_db)
     _require(staging, "스테이징")
     _require(v3_db, "v3 quant.db")
@@ -278,6 +316,10 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
             fails.append(f"compat 기록 basis {meta['basis']} ≠ 요청 {basis}")
         if window[1] != d_iso:
             fails.append(f"compat 창 끝 {window[1]} ≠ 요청 {d_iso}")
+        restored_at = None if shadow else _first_after_restore(main_rows)
+        if restored_at is not None and win.get("full") is not True:
+            fails.append(f"복원 뒤 첫 반영(QL-I·T-42): 본 파일 마지막 기록이 복원({restored_at})이다 — 첫 제자리 "
+                         "반영은 --full 이어야 한다(14일 증분은 v3 가 다시 쓴 행 위에 정의가 다른 창만 얹는다)")
         written = json.loads(meta["tables"])
         extra = sorted(set(written) - set(tables))
         if extra:
@@ -357,7 +399,7 @@ def apply(staging: Path, v3_db: Path, date: str, basis: str, shadow: bool = Fals
     """게이트 → (그림자가 아니면) 한 트랜잭션 반영. 게이트 실패는 `V3PostGateError`(본 파일 무변경).
     `scores=False` 는 점수 없는 반영(T-38 — 7표)."""
     guard_paths(Path(v3_db), Path(staging))
-    report = gate(staging, v3_db, date, basis, allow_older, scores)
+    report = gate(staging, v3_db, date, basis, allow_older, scores, shadow)
     if not report.ok:
         raise V3PostGateError(report)
     if not shadow:

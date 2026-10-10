@@ -34,6 +34,9 @@ asctime 은 서버 TZ(Etc/UTC — v3 `docs/system-guide/survey/08-ops.md` §1-1)
      단위 교체라 뒤에 다른 쓰기가 끼면 수가 갈린다(v3 스코어링은 1,329·2,526 종목, compat 593·625 — T-17). 같은 수로
      값만 바꾼 쓰기는 이 검사로 못 보고 위 job 검사가 맡는다. 점수 행이 0 이면 위반이 아니다(판 실패일은 다음 날 아침
      재반영이 채운다 — T-38, 그 실패는 장 마감 체인 crit 이 잡는다).
+   · 복원 기록(basis `restore`, QL-I · T-42 — `scripts/v3_restore.sh`)은 반영 기록이 아니라 건너뛴다. 그 `tables` 는
+     표 전체를 되돌린 행 수라 그날 행 수와 견줄 값이 아니고 판 id 도 없다. 되돌린 뒤엔 이 감시 크론을 주석으로 돌린다
+     (절차서 `docs/CUTOVER_ROLLBACK.md` 4-3).
 ③ v3 크론 (V3-A·B·D) — `crontab -l` 출력(파일, `-` 이면 표준입력). 주석(#)·환경 대입 줄은 꺼진 줄로 본다.
    · `--chain daily_all` 줄이 있으면 위반(V3-B) · `--chain daily_insight` 줄이 없으면 위반(V3-A)
    · `--chain daily_post` 줄이 있으면 위반 — daily_post 는 `scripts/v3_post.sh` 가 `--v3-post-cmd` 로 부른다(COMPAT_LAYER
@@ -72,7 +75,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from compat.mappings import BY_TABLE
-from compat.v3_post import SCORE_TABLES, _meta_rows, _ro
+from compat.v3_post import RESTORE_BASIS, SCORE_TABLES, _meta_rows, _ro
 
 from daily import calendar_refresh as cr
 from daily.window_judge import parse_date
@@ -314,7 +317,7 @@ def read_scores(con: sqlite3.Connection, d_iso: str) -> tuple[dict[str, dict[str
         spec = BY_TABLE[t].sources[0]
         recs = []
         for r in meta:
-            if r.get("date") != d_iso or r.get("status") != "ok":
+            if r.get("date") != d_iso or r.get("status") != "ok" or r.get("basis") == RESTORE_BASIS:
                 continue
             try:
                 written = json.loads(r["tables"])

@@ -120,6 +120,7 @@ V3="$HOME/kael-system-v3/data/quant.db"
 - **PR-9 스위치**: 따로 바꿀 값이 없다. 위의 `POSTCLOSE_SEND=0` 이 곧 원천 전환 스위치를 끈다. 전환 판정은 `scripts/postclose_conf.sh` 한 곳이고, `POSTCLOSE_ENABLED=1` 그리고 `POSTCLOSE_SEND=1` 일 때만 '전환 뒤'다. 완전 정지(`POSTCLOSE_ENABLED=0`)도 전환 전이다.
   - 발송이 꺼지면 다음 08:10 아침판(`scripts/model_daily.sh`)이 컷오버 전처럼 `--send` 로 보낸다. 10:30 워치독(B-57)은 아침 장부 `data/deliver/sent_model_daily.jsonl` 만 본다.
   - 되돌린 다음 날 아침에는 전날 장 마감 판이 이미 나갔어도 아침판이 한 번 더 나간다. basis 가 다른 별개 엑셀이고 장부도 따로라 막지 않는다.
+  - 08:10 아침판이 '짓기만'으로 끝난 뒤 그날 10:30 전에 되돌렸으면, 그날 10:30 워치독 crit '확정판 엑셀 발송 기록 없음' 은 예상된 것이다(워치독이 아침 장부만 보는데 그 D 는 장 마감 판이 보냈다).
   - 확인: 아래 '성공 확인'의 `발송 off` 가 곧 전환 전이다. 다음 날 아침 장부에 그 D 의 basis=morning 줄이 생기고, 10:30 워치독이 정상 info 를 낸다.
 - **QL-Q 연결**: 06:00 체인이 v3 `data/.kis_holidays.json` 을 쓰고 있으면 끈다. 자리는 연결 PR 이 정한다.
 - **성공 확인**

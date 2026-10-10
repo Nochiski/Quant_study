@@ -56,8 +56,15 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
   - `model_daily.sh` 는 fi → 모델 → 엑셀을 그대로 짓는다. `--send` 는 장 마감 발송 장부
     `data/model_db/deliver/sent_model_daily.jsonl` 에 그 D 의 basis=evening 줄이 **없을 때만** 붙인다(대체 발송 —
     notify warn '장 마감 판 미발송 → 아침판 대체 발송'). 줄이 있으면 짓기만 한다(info).
-  - 장 마감 장부 파일이 없으면 '줄 없음'이다. 파일이 있는데 못 읽으면 보내지 않는다(crit '모델 단계 실패: 장 마감
-    발송 장부 판정 불가(rc=5)'·rc 5 — 사람이 정한다). 줄 판정은 deliver 의 장부 읽기(`_sent`·`LEDGER_NAME`) 그대로다.
+  - 장 마감 장부 파일이 없으면 '줄 없음'이다. 줄 판정은 deliver 의 장부 읽기(`_sent`·`LEDGER_NAME`) 그대로다.
+  - 줄이 없으면 런 로그 `data/raw/daily_run.db`(읽기는 `daily.window_judge.read_runs`, mode=ro)의 그 D 장 마감 엑셀
+    (`postclose_excel`) 마지막 런을 본다(B-58). 런이 없거나 rc 0·1·2 면 보내지 않은 것이라 대체 발송한다 — 발송이
+    성공하면 장부 줄을 쓰고, 그 쓰기가 실패하면 rc 3 이므로(§2 rc 표) rc 0 인데 줄이 없으면 `--send` 없이 끝난
+    런이다(그림자 `SEND=0` 때 지은 판 등).
+  - 판정 불가면 보내지 않는다(crit '모델 단계 실패: 장 마감 발송 장부 판정 불가(rc=5)'·rc 5 — 중복 발송·무발송 어느
+    쪽도 자동으로 고르지 않는다). 판정 불가는 장 마감 장부를 못 읽음 · 런 로그를 못 읽음(파일·`run` 표 없음) · 마지막
+    런 rc 3(발송 뒤 장부 기록 실패일 수 있다)이거나 rc 를 모름(끝 기록 없는 `running`)이다. 사람이 텔레그램에서 그 D
+    장 마감 판 도착을 확인하고, 안 왔으면 `scripts/model_daily.sh --date D --resend` 로 손 발송한다.
   - `--resend`(손 정정 발송)는 스위치와 무관하게 보낸다.
   - ⑤ 엑셀 ok·⑥ v3 반영 실패인 날은 장부 줄이 있으므로 대체 발송하지 않는다. 그 D 의 v3 점수는 다음 날 아침 재반영
     (T-34)이 아침 모델 판으로 채운다.

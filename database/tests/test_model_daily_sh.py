@@ -12,14 +12,16 @@ flock.txt 에 적음)을 쓴다. 락 파일은 늘 `QL_BUILD_LOCK_FILE`·`QL_RAW
 우분투) 돈다.
 KRX 단계의 sqlite3 는 PATH 대역('D 수집 완료')이다.
 원천 전환 스위치(PR-9 · T-7)는 임시 루트의 `config/postclose_chain.env` 로 켜고, 판정 조각
-`scripts/postclose_conf.sh` 는 진짜를 복사한다. 장 마감 발송 장부 판정(`-c` 중 `deliver.__main__` 을 읽는 것)은
-진짜 python·진짜 `src/` 로 넘긴다 — 장부는 임시 루트의 `data/model_db/deliver/sent_model_daily.jsonl` 이다.
+`scripts/postclose_conf.sh` 는 진짜를 복사한다. 장 마감 발송 판정(heredoc `python -`)은 진짜 python·진짜 `src/` 로
+넘긴다 — 장부는 임시 루트의 `data/model_db/deliver/sent_model_daily.jsonl`, 런 로그는 `data/raw/daily_run.db`
+(`daily.runlog` 로 심는다)다.
 """
 from __future__ import annotations
 
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -28,6 +30,8 @@ from typing import NamedTuple
 
 import pytest
 
+from daily import runlog
+
 DB_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = DB_ROOT / "scripts"
 D = "20261006"
@@ -35,12 +39,14 @@ D_ISO = "2026-10-06"
 MODEL_STEPS = ["factor_inputs", "model", "deliver"]
 
 # 대역 python — `-m` 은 "모듈 인자…" 한 줄을 calls.txt 에 적는다. `-c` 는 D 계산(20261006)과
-# '이미 확정판 있음' 가드(GUARD_RC — 0 = 있음 → 건너뜀, 기본 1 = 없음)에 답한다. 장 마감 발송 장부
-# 판정(deliver.__main__ 을 읽는 -c)만 진짜 python·진짜 src/ 로 넘긴다(REAL_SRC 를 비우면 import 가 실패한다).
+# '이미 확정판 있음' 가드(GUARD_RC — 0 = 있음 → 건너뜀, 기본 1 = 없음)에 답한다. heredoc(`python -`)은 장 마감
+# 발송 판정뿐이라 진짜 python·진짜 src/ 로 넘긴다(REAL_SRC 를 엉뚱한 곳으로 두면 import 가 실패한다).
 _PY = """#!/usr/bin/env bash
+if [ "$1" = "-" ]; then
+  PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@"
+fi
 if [ "$1" = "-c" ]; then
   case "$2" in
-    *deliver.__main__*) PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
     *_morning.json*) exit "${GUARD_RC:-1}" ;;
     *prev_trading_day*) echo 20261006 ;;
   esac
@@ -93,12 +99,33 @@ class Run(NamedTuple):
 
 DIR = "<dir>"     # 장부 자리에 디렉터리를 둔다(열기 실패)
 EVENING_LEDGER = "data/model_db/deliver/sent_model_daily.jsonl"
+RUN_DB = "data/raw/daily_run.db"
+NO_TABLE = "<no-table>"   # 런 로그 자리에 run 표 없는 sqlite 파일
+# 런 로그에 심는 런 — (date, source, status, detail). status 'running' 은 시작만 기록(끝 기록 없음)
+RunSeed = tuple[str, str, str, str | None]
+
+
+def _seed_runs(db: Path, runs: list[RunSeed] | bytes | str) -> None:
+    """런 로그 픽스처 — 목록이면 runlog 로 심고(빈 목록이면 표만), bytes 면 그 내용(sqlite 아님), NO_TABLE 이면
+    run 표 없는 sqlite 파일."""
+    db.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(runs, bytes):
+        db.write_bytes(runs)
+        return
+    if runs == NO_TABLE:
+        sqlite3.connect(db).close()
+        return
+    runlog.recent(db, limit=1)                     # 빈 런 로그(run 표만) — runlog 가 표를 만든다
+    for date, source, status, detail in runs:
+        rid = runlog.start(db, date=date, source=source)
+        if status != "running":
+            runlog.finish(db, rid, status=status, detail=detail)
 
 
 def _root(home: Path, *, stub_flock: bool = True, conf: str | None = None,
-          evening: str | bytes | None = None) -> Path:
+          evening: str | bytes | None = None, runs: list[RunSeed] | bytes | str | None = None) -> Path:
     """conf = config/postclose_chain.env 내용(None 이면 파일 없음), evening = 장 마감 발송 장부 내용
-    (None 이면 파일 없음, DIR 이면 디렉터리)."""
+    (None 이면 파일 없음, DIR 이면 디렉터리), runs = 런 로그(None 이면 파일 없음 — `_seed_runs`)."""
     root = home / "quant-ledger"
     for sub in ("scripts", "logs", ".venv/bin", "config", "data/model_db/deliver"):
         (root / sub).mkdir(parents=True, exist_ok=True)
@@ -115,6 +142,8 @@ def _root(home: Path, *, stub_flock: bool = True, conf: str | None = None,
         ledger.write_bytes(evening)
     elif evening is not None:
         ledger.write_text(evening, encoding="utf-8")
+    if runs is not None:
+        _seed_runs(root / RUN_DB, runs)
     stubs = {root / ".venv/bin/python": _PY,
              root / "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
              root / "scripts/build_morning.sh": _BUILD,
@@ -131,10 +160,11 @@ def _root(home: Path, *, stub_flock: bool = True, conf: str | None = None,
 
 def _run(home: Path, script: str, *args: str, held: bool = True, stub_flock: bool = True,
          build_lock: Path | None = None, conf: str | None = None,
-         evening: str | bytes | None = None, **rcs: int | str) -> Run:
+         evening: str | bytes | None = None, runs: list[RunSeed] | bytes | str | None = None,
+         **rcs: int | str) -> Run:
     """held=True 면 빌드 락을 물려받은 것으로(QL_BUILD_LOCK_HELD=1) model_daily 가 락을 건너뛴다.
-    build_lock 은 빌드 락 파일 경로(기본 home/build.lock). conf·evening 은 `_root`. rcs 는 대문자 환경변수."""
-    root = _root(home, stub_flock=stub_flock, conf=conf, evening=evening)
+    build_lock 은 빌드 락 파일 경로(기본 home/build.lock). conf·evening·runs 는 `_root`. rcs 는 대문자 환경변수."""
+    root = _root(home, stub_flock=stub_flock, conf=conf, evening=evening, runs=runs)
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"),
                PATH=f"{home / 'fakebin'}:{os.environ['PATH']}",
                QL_RAW_LOCK_HELD="1", QL_RAW_LOCK_FILE=str(home / "raw.lock"),
@@ -421,8 +451,8 @@ def test_after_cutover_evening_sent_builds_only(tmp_path: Path) -> None:
 ], ids=["no_file", "empty", "other_day", "other_basis"])
 def test_after_cutover_without_evening_line_substitutes(tmp_path: Path, evening: str | None) -> None:
     """T-7 대체 발송 — 장 마감 판이 그 D 를 못 보냈으면(판 실패·세션 예외일 등) 아침판을 --send 로 보낸다.
-    warn 1건('장 마감 판 미발송 → 아침판 대체 발송'), crit 0, rc 0."""
-    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=evening)
+    warn 1건('장 마감 판 미발송 → 아침판 대체 발송'), crit 0, rc 0. 런 로그에 그 D 의 엑셀 런은 없다."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=evening, runs=[])
     assert r.rc == 0, r.out
     assert r.calls[-1] == SEND_CALL
     warns = _level(r, "warn")
@@ -485,3 +515,64 @@ def test_daily_build_summary_shows_the_cutover_result(tmp_path: Path, evening: s
     assert r.calls[-1] == BUILD_ONLY_CALL
     done = [n for n in r.notify if n.startswith("info|daily_build 완료|")]
     assert len(done) == 1 and done[0].split("|", 2)[2].startswith(line), r.notify
+
+
+# ── 장 마감 장부에 줄이 없을 때 — 런 로그의 그 D 엑셀(postclose_excel) 마지막 런(B-58 · P1) ──────────────────────
+# 장 마감 ⑤ deliver rc 3 은 '발송 뒤 장부 기록 실패'일 수 있어 보냈는지 모른다 → 판정 불가(발송 0 · crit · rc 5).
+# rc 0·1·2 와 런 없음은 보내지 않은 것이다(deliver 계약: 발송 성공 ⇒ 장부 줄, 줄 쓰기 실패 ⇒ rc 3) → 대체 발송.
+EXCEL = "postclose_excel"
+
+
+def _excel(rc: int, date: str = D) -> RunSeed:
+    """장 마감 체인 step() 이 남기는 엑셀 런 — status ok/failed, detail 'rc=<rc> <스위치>'."""
+    return (date, EXCEL, "ok" if rc == 0 else "failed", f"rc={rc} 발송 on · v3 in-place")
+
+
+@pytest.mark.parametrize("runs", [
+    [_excel(1)],                                     # 텔레그램 발송 실패 — 보내지 않았다
+    [_excel(2)],                                     # 입력 오류(판 없음·장부 손상으로 발송 거부)
+    [_excel(0)],                                     # 발송 없이 끝난 런(그림자 SEND=0 때 — 전환 첫날의 전날 판)
+    [_excel(3), _excel(1)],                          # 마지막 런 규칙 — 뒤 런이 rc 1
+    [_excel(3, "20261005"), ("20261006", "postclose_model", "failed", "rc=2 발송 on · v3 in-place")],
+], ids=["rc1", "rc2", "rc0_unsent", "last_run_rc1", "no_excel_run_for_d"])
+def test_after_cutover_unsent_excel_run_substitutes(tmp_path: Path, runs: list[RunSeed]) -> None:
+    """장 마감 장부에 그 D 줄이 없고 그 D 엑셀 마지막 런이 rc 0·1·2 이거나 런이 없으면 대체 발송(--send + warn)."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=None, runs=runs)
+    assert r.rc == 0, r.out
+    assert r.calls[-1] == SEND_CALL
+    assert [n.split("|")[1] for n in _level(r, "warn")] == [SUBSTITUTE_TITLE], r.notify
+    assert _crit(r) == []
+
+
+@pytest.mark.parametrize("runs", [
+    [_excel(3)],                                     # 발송 뒤 장부 기록 실패일 수 있다(B-58)
+    [_excel(1), _excel(3)],                          # 마지막 런 규칙 — 뒤 런이 rc 3
+], ids=["rc3", "last_run_rc3"])
+def test_after_cutover_excel_rc3_is_unknown(tmp_path: Path, runs: list[RunSeed]) -> None:
+    """B-58 — 장 마감 엑셀 마지막 런이 rc 3 이면 보냈는지 모른다. 발송 0 · crit · rc 5, 안내는 텔레그램 확인 뒤 --resend."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening="", runs=runs)
+    assert r.rc == 5, r.out
+    assert r.mods == MODEL_STEPS and r.calls[-1] == BUILD_ONLY_CALL
+    crit = _crit(r)
+    assert len(crit) == 1 and crit[0].split("|")[1] == UNKNOWN_TITLE, r.notify
+    assert "장 마감 발송 뒤 장부 기록 실패일 수 있다" in crit[0]
+    assert "텔레그램 확인 뒤 손 발송(--resend)" in crit[0]
+    assert f"scripts/model_daily.sh --date {D} --resend" in crit[0]
+    assert _level(r, "warn") == []
+
+
+@pytest.mark.parametrize("runs", [
+    None,                                            # 런 로그 파일 없음
+    b"not a sqlite database\n" * 4,                  # sqlite 가 아님
+    NO_TABLE,                                        # run 표 없음
+    [(D, EXCEL, "running", None)],                   # 끝 기록 없는 런(체인이 ⑤ 도중 죽음) — rc 를 모른다
+], ids=["no_file", "not_sqlite", "no_table", "running"])
+def test_after_cutover_unreadable_run_log_is_unknown(tmp_path: Path,
+                                                     runs: list[RunSeed] | bytes | str | None) -> None:
+    """P1 — 장 마감 장부에 줄이 없는데 런 로그를 못 읽거나 마지막 런의 rc 를 모르면 판정 불가: 발송 0 · crit · rc 5."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=None, runs=runs)
+    assert r.rc == 5, r.out
+    assert r.calls[-1] == BUILD_ONLY_CALL
+    crit = _crit(r)
+    assert len(crit) == 1 and crit[0].split("|")[1] == UNKNOWN_TITLE, r.notify
+    assert RUN_DB in crit[0] or "postclose_excel" in crit[0]

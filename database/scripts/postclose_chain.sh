@@ -54,8 +54,9 @@
 #     POSTCLOSE_V3_POST_CMD 는 ⑥ 에만 넘긴다 — refill·morning 은 compat 만이다(v3_post.sh 가 아침·--no-scores + post 명령을
 #     인자 오류로 막는다). 환경의 QL_V3_POST_CMD 는 비운다(설정만 정본). 읽기·판정은 scripts/postclose_conf.sh 한 곳이다
 #     (model_daily.sh·watchdog.sh 와 공용 — ENABLED=1 그리고 SEND=1 이면 원천 전환 뒤라 아침판은 짓기만·대체 발송, PR-9).
-#     ⑤ 엑셀이 ok 면(발송 장부 줄) ⑥ v3 가 실패해도 다음 날 아침 대체 발송은 없다 — 대체 발송 조건은 장 마감 발송 장부뿐이고,
-#     그 D 의 v3 점수는 아침 재반영(T-34)이 아침 모델 판으로 채운다.
+#     ⑤ 엑셀이 ok 면(발송 장부 줄) ⑥ v3 가 실패해도 다음 날 아침 대체 발송은 없다 — 대체 발송은 장 마감 발송 장부에 그 D 줄이
+#     없을 때뿐이고(⑤ 런이 rc 3 이면 발송 뒤 장부 기록 실패일 수 있어 판정 불가 — B-58, model_daily.sh), 그 D 의 v3 점수는
+#     아침 재반영(T-34)이 아침 모델 판으로 채운다.
 #   v3 quant.db: QL_V3_DB(기본 $HOME/kael-system-v3/data/quant.db — COMPAT_LAYER §8 V3-C 와 같은 자리). 그림자도 읽는다
 #     (스테이징 사본을 뜬다).
 #   락 — 장 마감 체인 락 /tmp/quant_ledger_postclose_chain.lock: close 는 비대기(이미 돌면 warn·rc 3 — 같은 T 를 두 번 돌지

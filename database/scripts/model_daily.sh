@@ -71,19 +71,29 @@ fi
 # 엑셀을 먼저 보내므로 아침판은 짓기만 한다(deliver 에 --send 없음 — 판은 v3 아침 재반영 T-34 가 쓴다). 장 마감 발송
 # 장부(⑤ 의 --out-root data/model_db/deliver 아래)에 그 D 의 basis=evening 줄이 없을 때만 대체 발송한다(판 실패·세션
 # 예외일 등 — warn 한 줄). 줄 판정은 deliver 의 장부 읽기(_sent·LEDGER_NAME)를 그대로 쓰고, 파일이 아예 없으면 '줄
-# 없음'이다. 못 읽으면(열기·파싱 실패·자리가 파일이 아님·판정 코드 예외) 보냈는지 모르므로 보내지 않고 crit · rc 5
-# (P1 — 사람이 정한다). ⑤ 엑셀 ok·⑥ v3 실패인 날은 장부 줄이 있으므로 대체 발송하지 않는다(그 D 의 v3 점수는 T-34
-# 아침 재반영이 채운다). --resend(사람 손 정정 발송)는 스위치와 무관하게 지금처럼 보낸다.
+# 없음'이다. 줄이 없으면 런 로그(data/raw/daily_run.db — 읽기는 daily.window_judge.read_runs, mode=ro)에서 그 D 의
+# 장 마감 엑셀(postclose_excel) 마지막 런을 본다(B-58): rc 3 은 발송 뒤 장부 기록 실패일 수 있어 판정 불가, rc 0·1·2 와
+# 런 없음은 보내지 않은 것이라 대체 발송이다(deliver 계약 — 발송이 성공하면 장부 줄을 쓰고, 그 쓰기가 실패하면 rc 3.
+# 그래서 rc 0 인데 줄이 없으면 --send 없이 끝난 런이다 — 그림자 SEND=0 때 지은 전환 첫날의 전날 판 등).
+# 판정 불가 — 장부를 못 읽음(열기·파싱 실패·자리가 파일이 아님) · 런 로그를 못 읽음(파일·run 표 없음·sqlite 오류) ·
+# 마지막 런 rc 3 이거나 rc 를 모름(끝 기록 없는 running 등) · 판정 코드 예외 — 이면 보냈는지 모르므로 보내지 않고
+# crit · rc 5(P1 — 중복 발송·무발송 어느 쪽도 자동으로 고르지 않는다. 사람이 텔레그램을 보고 --resend 로 정한다).
+# ⑤ 엑셀 ok·⑥ v3 실패인 날은 장부 줄이 있으므로 대체 발송하지 않는다(그 D 의 v3 점수는 T-34 아침 재반영이 채운다).
+# --resend(사람 손 정정 발송)는 스위치와 무관하게 지금처럼 보낸다.
 # shellcheck source=scripts/postclose_conf.sh
 . scripts/postclose_conf.sh
 postclose_conf_load
 SEND_ARG="--send"; SEND_NOTE=""; LEDGER_UNKNOWN=""
 EVENING_OUT=data/model_db/deliver
 if [ -n "$CUTOVER" ] && [ -z "$RESEND" ]; then
-  # rc 0 그 D 줄 있음 · 3 줄 없음(파일 없음 포함) · 그 밖(2 장부 오류 · 1 예외 등)은 판정 불가
-  EV_WHY=$($PY -c 'import sys
+  # rc 0 그 D 줄 있음 · 3 보내지 않음(줄 없음 + 엑셀 런 없음·rc 0·1·2) · 그 밖(2 판정 불가 · 1 예외 등)은 판정 불가.
+  # 마지막 줄이 사람이 읽을 사유다
+  EV_WHY=$($PY - "$EVENING_OUT" "$D" 2>&1 <<'PY'
+import re
+import sys
 from pathlib import Path
 
+from daily import window_judge as wj
 from deliver.__main__ import LEDGER_NAME, _sent
 from deliver.reader import DeliverError
 
@@ -96,8 +106,33 @@ except DeliverError as e:
     print(e)
     sys.exit(2)
 where = p if p.exists() else f"{p}(파일 없음)"
-print(f"장 마감 발송 장부 {where} 의 D={d} basis=evening 줄 {len(rows)}건")
-sys.exit(0 if rows else 3)' "$EVENING_OUT" "$D" 2>&1); EV_RC=$?
+if rows:
+    print(f"장 마감 발송 장부 {where} 의 D={d} basis=evening 줄 {len(rows)}건")
+    sys.exit(0)
+head = f"장 마감 발송 장부 {where} 의 D={d} basis=evening 줄 0건"
+try:
+    runs = [r for r in wj.read_runs(wj.RUN_DB).get(d, []) if r.source == "postclose_excel"]
+except wj.InputError as e:
+    print(f"{head} — 런 로그로 장 마감 엑셀 런을 확인하지 못했다: {e}")
+    sys.exit(2)
+if not runs:
+    print(f"{head} · 런 로그 {wj.RUN_DB} 에 그 D 의 장 마감 엑셀(postclose_excel) 런 없음")
+    sys.exit(3)
+last = runs[-1]
+# 장 마감 체인 step() 이 detail 을 'rc=<rc> <스위치>…' 로 남긴다(끝 기록이 없으면 detail 이 비어 있다)
+m = re.match(r"rc=(\d+)(?: |$)", last.detail or "")
+rc = int(m.group(1)) if m else None
+desc = f"{wj.RUN_DB} 의 그 D 장 마감 엑셀(postclose_excel) 마지막 런 run_id={last.run_id} status={last.status}"
+if rc in (0, 1, 2):
+    print(f"{head} · {desc} rc {rc} — 보내지 않았다(발송이 성공하면 장부 줄이 남는다)")
+    sys.exit(3)
+if rc == 3:
+    print(f"{head} · {desc} rc 3 — 장 마감 발송 뒤 장부 기록 실패일 수 있다(B-58). 텔레그램 확인 뒤 손 발송(--resend)")
+else:
+    print(f"{head} · {desc} detail={last.detail!r} — rc 를 알 수 없어 보냈는지 모른다")
+sys.exit(2)
+PY
+); EV_RC=$?
   EV_WHY=$(printf '%s\n' "$EV_WHY" | tail -1)
   case "$EV_RC" in
     0)
@@ -114,7 +149,7 @@ sys.exit(0 if rows else 3)' "$EVENING_OUT" "$D" 2>&1); EV_RC=$?
       SEND_ARG=""; LEDGER_UNKNOWN=1
       echo "원천 전환 뒤 — 장 마감 발송 장부 판정 불가(rc=$EV_RC): $EV_WHY → 보내지 않는다(짓기만) D=$D"
       scripts/notify.sh crit "모델 단계 실패: 장 마감 발송 장부 판정 불가(rc=5)" \
-        "D=$D basis=morning | 장 마감 발송 장부($EVENING_OUT) — $EV_WHY — 장 마감 판을 보냈는지 몰라 아침판을 보내지 않는다(짓기만, P1). 장부를 확인·복구한 뒤 장 마감 판이 안 나갔으면 scripts/model_daily.sh --date $D" ;;
+        "D=$D basis=morning | 장 마감 발송 장부($EVENING_OUT) — $EV_WHY — 장 마감 판을 보냈는지 몰라 아침판을 보내지 않는다(짓기만, P1). 텔레그램에서 그 D 장 마감 판 도착을 확인하고, 안 왔으면 손 발송 scripts/model_daily.sh --date $D --resend(장부가 손상됐으면 먼저 고친다)" ;;
   esac
 fi
 FAILED=""

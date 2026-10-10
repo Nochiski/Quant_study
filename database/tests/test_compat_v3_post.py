@@ -31,8 +31,9 @@ from compat.v3_post import (
 
 D = "20261008"
 D_ISO = "2026-10-08"
-FROM_ISO = "2026-09-24"          # compat 증분 창 14달력일
-BEFORE = "2026-09-23"            # 창 밖(바로 앞날)
+# compat 증분 창 첫날 — D 에서 거꾸로 10거래일(추석 09-24·25 · 개천절 대체 10-05 휴장, K1-9d)
+FROM_ISO = "2026-09-22"
+BEFORE = "2026-09-21"            # 창 밖(바로 앞 거래일)
 OTHER_SCORE_DATE = "2026-10-07"  # 점수 표의 다른 날
 
 MARKET_INDICES_DDL = """
@@ -112,7 +113,7 @@ def _meta(con: sqlite3.Connection, d_iso: str, basis: str, exported_at: str,
     """compat 실행 기록 1행(`quant_db._write_meta` 그대로)."""
     _write_meta(con, ExportResult(
         date=d_iso, basis=basis, target="x", exported_at=exported_at,
-        window={"days": 14, "full": False, "from_date": FROM_ISO, "to_date": d_iso},
+        window={"days": 16, "full": False, "from_date": FROM_ISO, "to_date": d_iso},
         consensus_asof=d_iso, tables={t: _tr(t, **kw) for t in tables}))
 
 
@@ -175,7 +176,7 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
         _write_meta(con, ExportResult(
             date=date_iso, basis=basis, target=str(staging),
             exported_at=exported_at,
-            window={"days": 14, "full": full, "from_date": FROM_ISO, "to_date": date_iso},
+            window={"days": 16, "full": full, "from_date": FROM_ISO, "to_date": date_iso},
             consensus_asof="2026-10-07", status=status,
             failed_table=None if status == "ok" else "stocks",
             tables={t: _tr(t, skipped=skipped.get(t, 0), n_on_date=n_on_date, rebase=rebase)
@@ -428,7 +429,7 @@ def test_second_apply_appends_meta_and_replaces_window_again(files) -> None:
     _write_meta(con, ExportResult(
         date=D_ISO, basis="morning", target=str(stg),
         exported_at="2026-10-08T23:30:00.000000+00:00",
-        window={"days": 14, "full": False, "from_date": FROM_ISO, "to_date": D_ISO},
+        window={"days": 16, "full": False, "from_date": FROM_ISO, "to_date": D_ISO},
         consensus_asof="2026-10-08",
         tables={t: _tr(t, n_rows=1) for t in TABLES if t not in SCORE_TABLES}))
     con.close()
@@ -743,7 +744,7 @@ def test_restore_record_hides_older_evening_from_the_morning_tables(files) -> No
 
 def test_first_in_place_after_restore_must_be_full(files) -> None:
     """복원 뒤 첫 제자리 반영은 --full 만(QL-I) — 늦게 깬 증분 반영(락 대기)이나 꺼지지 않은 체인이 복원한 v3
-    행 위에 14일 창만 얹지 못한다. 그림자는 본 파일에 쓰지 않으므로 막지 않는다."""
+    행 위에 증분 창만 얹지 못한다. 그림자는 본 파일에 쓰지 않으므로 막지 않는다."""
     main, stg = files
     _restored(main)
     snapshot(main, stg)

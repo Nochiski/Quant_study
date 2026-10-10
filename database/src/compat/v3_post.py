@@ -58,7 +58,7 @@ T-42, 로드맵 §8 K3-2·K3-3.
     본 파일을 설명하지 않는다. 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은
     키를 `INSERT OR REPLACE` 로 덮는다. 기록 자체는 지우지 않는다(이력).
   · 복원 기록은 반영 기록이 아니다 — 순서·7표 판정에 들지 않는다(basis 가 evening·morning 이 아니다).
-  · 그 뒤 첫 제자리 반영은 compat `--full`(730일 창) 기록만 받는다 — 복원 뒤 v3 가 다시 쓴 행 위에 14일 증분만
+  · 그 뒤 첫 제자리 반영은 compat `--full`(730일 창) 기록만 받는다 — 복원 뒤 v3 가 다시 쓴 행 위에 10거래일 증분만
     얹으면 창 안은 compat 종가(KRX 정규장 종가 — T-33), 창 밖은 v3 종가(애프터마켓 포함)로 섞인다. 락을 기다리다
     복원 뒤에 깬 옛 반영이나 꺼지지 않은 장 마감 체인도 여기서 멈춘다. 다시 컷오버할 때의 첫 반영(V3-C)과 같은
     뜻이다. **새 정지 조건이라 사용자 확인 대기**(구현은 한다).
@@ -341,7 +341,7 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
         restored_at = None if shadow else _first_after_restore(main_rows)
         if restored_at is not None and win.get("full") is not True:
             fails.append(f"복원 뒤 첫 반영(QL-I·T-42): 본 파일 마지막 기록이 복원({restored_at})이다 — 첫 제자리 "
-                         "반영은 --full 이어야 한다(14일 증분은 v3 가 다시 쓴 행 위에 정의가 다른 창만 얹는다)")
+                         "반영은 --full 이어야 한다(10거래일 증분은 v3 가 다시 쓴 행 위에 정의가 다른 창만 얹는다)")
         written = json.loads(meta["tables"])
         extra = sorted(set(written) - set(tables))
         if extra:

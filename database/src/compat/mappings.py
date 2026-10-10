@@ -77,7 +77,7 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 #   반올림 차이)를 쓰지 않는다. equity·fi·모델의 전방 조정은 그대로다(T-3).
 #   계수비를 먼저 계산하므로 사건 없는 행은 정확히 원값이다(1.0 곱). 가격·거래량은 v3 열 타입(INTEGER)대로 반올림한다.
 # 장 마감 판(`--basis evening`)은 equity 판이 D' 까지라 사슬 끝에 원장 T 단계를 붙인다(`NO_T_STEP` 주석 · `compat.t_rows`).
-# 창 밖 행: 위 ② 의 c 는 d 뒤 4행 안이라 창(`INCREMENTAL_DAYS` 14달력일 ≥ 5세션 — 제자리 반영은 `MIN_WINDOW_SESSIONS`
+# 창 밖 행: 위 ② 의 c 는 d 뒤 4행 안이라 창(`INCREMENTAL_SESSIONS` 10거래일 ≥ 5세션 — 제자리 반영은 `MIN_WINDOW_SESSIONS`
 #   가드) 안에서 끝난다 — 행이 창을 떠날 때는 이미 최종값이다. 그래도 창 안에 단계가 든 종목은 창 밖 행의 ① adj_close 와
 #   ② 시·고·저·종가·거래량을 함께 다시 쓴다(`REBASE_SQL` — 반영이 며칠 끊겨도 자가 복구). 사건 단계까지 창 밖으로 나갈
 #   만큼 끊겼거나 equity `price_daily` 원값(종가·기준가)이 바뀌면 `--full` 로 맞춘다.

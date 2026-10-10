@@ -84,8 +84,8 @@ def _parser() -> argparse.ArgumentParser:
                    help="장 마감 판 T 행 ② 원천 — 키움 원장(data/raw/kiwoom.db, 21:05 저녁 T 행). "
                         "--basis evening 전용")
     e.add_argument("--calendar-dir", default=None, type=Path,
-                   help="T 직전 거래일 D' 를 셀 판정 달력 폴더(kis_holidays_<YYYY>.json). "
-                        "없으면 daily.calendar 기본 경로")
+                   help="T 직전 거래일 D' 와 증분 창(10거래일)을 셀 판정 달력 폴더"
+                        "(kis_holidays_<YYYY>.json). 없으면 daily.calendar 기본 경로")
     e.add_argument("--allow-older", action="store_true",
                    help="장 마감 판이 대상의 더 나중 반영 기록(T-35 순서)을 무시하고 쓴다 — "
                         "재생 전용")

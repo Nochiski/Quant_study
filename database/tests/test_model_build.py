@@ -22,6 +22,7 @@ from typing import Any
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from model import build as mbuild
 from model import gates as mgates
 from model import registry
@@ -237,7 +238,9 @@ def test_real_factor_inputs_build_feeds_the_model(tmp_path) -> None:
     from test_factor_inputs import make_roots
 
     eq, st = make_roots(tmp_path / "src")
-    fi = fi_build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=5, golden_path=None)
+    with allow_skips(("factor_inputs", "FG4", "no_fixtures",
+                      "합성 트리에는 운영 골든(fixtures/golden.json) 종목이 없다")):
+        fi = fi_build(D_S, "morning", tmp_path / "fi", st, eq, min_eligible=5, golden_path=None)
     assert fi.ok
     res = build(D_S, "morning", tmp_path / "model", tmp_path / "fi", specs=[V2], primary=V2,
                 min_prices_on_d=1)
@@ -602,6 +605,43 @@ def test_mg5_records_against_previous_build_and_warns(board_tree, tmp_path, monk
     latest = json.loads((root / "latest_morning.json").read_text())
     assert latest["build_id"] == third.build_id
     assert latest["specs"][V2]["gates"]["MG5"]["status"] == "warn"
+
+
+def _skip_gate(monkeypatch, name: str, detail: str) -> None:
+    """MG1~MG5 중 하나를 SKIP 만 내는 게이트로 바꾼다(`run_all` 이 `_AFTER_SCHEMA` 를 돈다)."""
+    swapped = tuple((n, (lambda ctx, n=n: mgates.GateResult(n, mgates.GateStatus.SKIP, detail,
+                                                             {})) if n == name else fn)
+                    for n, fn in mgates._AFTER_SCHEMA)
+    monkeypatch.setattr(mgates, "_AFTER_SCHEMA", swapped)
+
+
+def test_mg5_first_build_skip_is_allowed(built) -> None:
+    """K1-7a 허용표 — MG5 no_previous(같은 spec 의 첫 판)는 SKIP 그대로이고 판은 올라간다."""
+    _, res = built
+    assert res.ok
+    assert all(gate(res, s, "MG5")["status"] == "skip" for s in res.specs)
+
+
+def test_record_only_mg5_skip_outside_the_table_only_warns(board_tree, tmp_path,
+                                                           monkeypatch) -> None:
+    """기록형 MG5 의 표 밖 SKIP 은 경고 — 판은 올라간다(음성 대조는 아래 MG1)."""
+    _skip_gate(monkeypatch, "MG5", "not_measured — 셀 수 없음")
+    res = build(D_S, "morning", tmp_path / "model", board_tree, specs=[V2, V4], primary=V4,
+                **SMALL)
+    assert res.ok
+    g = gate(res, V4, "MG5")
+    assert g["status"] == "warn" and g["metrics"]["skip_reason"] == "not_measured"
+
+
+def test_disposal_gate_skip_outside_the_table_fails_the_build(board_tree, tmp_path,
+                                                              monkeypatch) -> None:
+    """폐기형 MG1 이 SKIP 이면(허용표 밖) 판을 올리지 않는다."""
+    _skip_gate(monkeypatch, "MG1", "no_universe — 셀 수 없음")
+    res = build(D_S, "morning", tmp_path / "model", board_tree, specs=[V2, V4], primary=V4,
+                **SMALL)
+    assert not res.ok
+    g = gate(res, V4, "MG1")
+    assert g["status"] == "fail" and g["metrics"]["skip_reason"] == "no_universe"
 
 
 def test_mg5_compares_only_with_the_same_basis(tmp_path) -> None:

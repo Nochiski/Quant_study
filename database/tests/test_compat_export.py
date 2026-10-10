@@ -323,14 +323,16 @@ def _make_roots(base: Path, *, fillers: list[str] | None = None,
                 price_rows: list[dict] | None = None, adj_rows: list[dict] | None = None,
                 eq_build: str = EQ_BUILD, adj_build: str | None = None,
                 fin_wise_rows: list[dict] | None = None,
-                flow_rows: list[dict] | None = None) -> tuple[Path, Path]:
+                flow_rows: list[dict] | None = None,
+                universe_rows: list[dict] | None = None) -> tuple[Path, Path]:
     eq, st = base / "eq", base / "st"
     f = _filler_tickers(N_FILLER) if fillers is None else fillers
     equity = {
         "price_daily": (price_rows if price_rows is not None else _price_rows(), eq_build),
         "price_adj_daily": (adj_rows if adj_rows is not None else _adj_rows(),
                             adj_build or eq_build),
-        "universe_daily": (_universe_rows(f), eq_build),
+        "universe_daily": (_universe_rows(f) if universe_rows is None else universe_rows,
+                           eq_build),
         "security": (_security_rows(f), eq_build),
         "flow_daily": (flow_rows if flow_rows is not None else _flow_rows(), eq_build),
         "fin_std": (_fin_std_rows(), eq_build),
@@ -552,9 +554,17 @@ def test_daily_prices_counts_rows_written_on_date(roots, tmp_path: Path) -> None
     assert res.tables["daily_prices"].metrics == {"n_on_date": 2}     # 005930·000660 의 09-23
     meta = json.loads(_rows(target, "SELECT tables FROM _compat_meta")[0][0])
     assert meta["daily_prices"]["metrics"] == {"n_on_date": 2}
-    # 다음 날(09-24)을 D 로 — 판에 09-24 행이 없으니 기존 09-23 행이 대상에 있어도 0
-    res2 = _run(roots, target, date="20260924", tables=["daily_prices"])
-    assert res2.tables["daily_prices"].metrics == {"n_on_date": 0}
+    # 대상에만 있는 09-23 행(본 파일 사본의 옛 행)은 세지 않는다 — 날짜 단위 교체로 지워지고 이번에
+    # 쓴 2행만 남는다. 판에 D 행이 아예 없는 실행은 쓰기 전에 멈춘다(QL-D MAJOR-1 — n_on_date 0 으로
+    # 끝나지 않는다, test_compat_evening_t.test_morning_on_a_holiday_refuses_and_leaves_tables)
+    con = sqlite3.connect(str(target))
+    con.execute("INSERT INTO daily_prices VALUES ('999999','2026-09-23',1,1,1,1,1,1,1.0)")
+    con.commit()
+    con.close()
+    res2 = _run(roots, target, tables=["daily_prices"])
+    assert res2.tables["daily_prices"].metrics == {"n_on_date": 2}
+    assert _rows(target, "SELECT count(*) FROM daily_prices WHERE trade_date='2026-09-23'") == \
+        [(2,)]
 
 
 def test_investor_flows_keep_only_v3_stock_universe(excluded_roots, tmp_path: Path) -> None:
@@ -853,9 +863,13 @@ def test_stocks_market_vocabulary_guard() -> None:
 
 
 # ── R5 — 판 접두와 --basis ───────────────────────────────────────────────────
-def test_basis_mismatch_refuses(roots, tmp_path: Path) -> None:
+def test_basis_mismatch_refuses(tmp_path: Path) -> None:
+    # 저녁 판(`e_`)을 아침 확정으로 내보내지 않는다. 반대 방향(장 마감 판이 D' 아침 판 `m_` 을
+    # 읽는 것)은 컷오버 T-2 의 정상 경로라 R5 가 막지 않고 이음매 검사가 본다(QL-D,
+    # test_compat_evening_t).
+    evening = _make_roots(tmp_path / "ev", eq_build="e_20260923T122000_000000Z")
     with pytest.raises(CompatError, match="--basis"):
-        _run(roots, tmp_path / "quant.db", basis="evening", tables=["daily_prices"])
+        _run(evening, tmp_path / "quant.db", basis="morning", tables=["daily_prices"])
 
 
 # ── R9 — 가격 두 표의 판 체인 · adj_close 결측 ───────────────────────────────

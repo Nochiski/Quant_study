@@ -6,7 +6,8 @@
         [--builds-from data/deliver/history/20260928_morning.json]
     python -m factor_inputs build --date 20260929 --basis evening \\
         --root data/model_db/factor_inputs \\
-        --builds-from data/deliver/history/20260928_morning.json [--calendar-dir data/calendar]
+        --builds-from data/deliver/history/20260928_morning.json [--calendar-dir data/calendar] \\
+        [--postclose-stage-root data/model_db/stage] [--candidates-root data/factor_inputs]
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — equity CLI 와 같은 규약.
@@ -18,7 +19,14 @@ import os
 import sys
 from pathlib import Path
 
-from .build import KEEP_DEFAULT, MIN_ELIGIBLE_DEFAULT, FactorInputsError, build, research_root
+from .build import (
+    KEEP_DEFAULT,
+    MIN_ELIGIBLE_DEFAULT,
+    FactorInputsError,
+    build,
+    default_postclose_stage_root,
+    research_root,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,6 +53,12 @@ def _parser() -> argparse.ArgumentParser:
                         "— 이력 없음·health 실패·판 소멸이면 rc 2(최신 판으로 대신하지 않는다)")
     b.add_argument("--calendar-dir", type=Path, default=base / "data" / "calendar",
                    help="장 마감 판 거래일 판정 달력(daily.calendar 연도 파일 폴더)")
+    b.add_argument("--postclose-stage-root", type=Path, default=default_postclose_stage_root(),
+                   help="장 마감 판 T 행 stage 루트(stg_flow_postclose_kiwoom — 기본 "
+                        "data/model_db/stage, T-29). 판이 없으면 rc 2")
+    b.add_argument("--candidates-root", type=Path, default=research_root(),
+                   help="장 마감 판 FG5 후보(직전 판 모델 후보 = _runs/<D'>_morning.json 의 eligible)"
+                        "를 읽을 연구 fi 루트(기본 연구 루트 — 수집기 순서 ① 과 같은 자리)")
     return p
 
 
@@ -54,7 +68,9 @@ def main(argv: list[str] | None = None) -> int:
         result = build(args.date, args.basis, args.root, args.stage_root, args.equity_root,
                        grace_days=args.grace_days, min_eligible=args.min_eligible,
                        keep=args.keep, builds_from=args.builds_from,
-                       calendar_dir=args.calendar_dir)
+                       calendar_dir=args.calendar_dir,
+                       postclose_stage_root=args.postclose_stage_root,
+                       candidates_root=args.candidates_root)
     except FactorInputsError as e:
         print(f"factor_inputs 실패: {e}", file=sys.stderr)
         return 2

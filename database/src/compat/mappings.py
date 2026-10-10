@@ -65,9 +65,9 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 # ⚠ GAP-1: v3 `daily_prices` 는 open·high·low·close·volume 이 **NOT NULL** 이고(v3
 #   `backend/db/schema.py:16-27`, 완화 ALTER 없음) 우리 저녁 잠정 T 행(`basis='evening'`)은
 #   KRX 기본정보가 없어 open/high/low/value_krw 가 NULL 이다. 그대로 넣으면 표 트랜잭션이
-#   통째로 깨지므로 **지금은 `basis='krx'` 행만 내보낸다**. 건너뛴 저녁 행 수는
-#   `_compat_meta.n_evening_rows_skipped` 에 남는다.
-#   → D-8 결정 뒤 evening 행 처리 추가(`docs/COMPAT_LAYER.md` §4).
+#   통째로 깨지므로 **이 SELECT 는 `basis='krx'` 행만 내보낸다**. 건너뛴 저녁 행 수는
+#   `_compat_meta.n_evening_rows_skipped` 에 남는다. `--basis evening` 의 T 행은 equity 판이 아니라
+#   원장에서 따로 만든다(아래 '장 마감 판 T 행' 절 — QL-D).
 #   M1 의 G-M2 비교는 확정판(morning, 전 행 krx)만 쓰므로 영향이 없다.
 # 거래정지일 참고가 행(`price_kind='reference'`, 거래량 0): KRX 가 O/H/L 을 '0' 으로 주고 stage 가
 #   NULL 로 둔다. v3 는 그날을 open=high=low=close=참고가 · volume 0 · amount 0 으로 싣는다(로컬 v3
@@ -171,7 +171,7 @@ WHERE u.rn = 1
 # v3 PK 는 (stock_code, trade_date) 하나뿐이므로 키움 우선으로 **결정적으로** 하나를 고른다.
 # 미측정 셀(전 주체 NULL)은 v3 에 행을 만들지 않는다 — v3 는 수집한 행만 가진다.
 # ⚠ 저녁 판에는 T 행이 아예 없다 — `flow_daily` 격자가 T-1 까지라 T 원장 행이 `off_grid` 로
-#   격리된다. daily_prices 의 저녁 T 행과 같은 D-8 범위이며 여기서는 손대지 않는다.
+#   격리된다. `--basis evening` 의 T 행은 원장에서 따로 만든다(아래 '장 마감 판 T 행' 절 — QL-D).
 _FLOW_COLS = units.FLOW_SUBJECTS        # 주체 대응의 정본은 units.py 다(중복 선언 금지)
 _FLOW_SELECT = ",\n       ".join(
     f"CAST(round(f.{src} / {KRW_PER_MN}.0) AS BIGINT) AS {dst}" for dst, src in _FLOW_COLS)
@@ -193,6 +193,16 @@ SELECT f.ticker                   AS stock_code,
 FROM picked f
 WHERE f.rn = 1
 """
+
+# ── 장 마감 판 T 행 (QL-D · N-42 Q3 · T-2) ──────────────────────────────────────────────────
+# `--basis evening` 의 위 두 표 T 행은 equity 판이 아니라 원장에서 만든다. 원천·대상·채움 규칙과
+# SQL 의 정본은 `compat.t_rows` 다 — 원장 파싱에 stage 규칙 객체를 쓰므로 이 모듈과 떼어 둔다
+# (장 마감 수집기 `daily.postclose` 가 이 모듈의 `V3_STOCK_FILTER` 만 읽는다 — 16:00 창이라
+# import 를 가볍게).
+# 아래는 날짜 단위로 갈아 끼우는 표와 그 날짜 열이다(QL-C 와 같은 규칙 — `quant_db._replace_date`).
+# 저녁에 원장으로 만든 T 행은 다음 날 아침 `--basis morning --date T` 가 KRX 행으로 통째로 바꾼다.
+DATE_REPLACED: dict[str, str] = {"daily_prices": "trade_date",
+                                 "investor_detail_flows": "trade_date"}
 
 # ── 컨센서스 리비전 (한시 예외) ──────────────────────────────────────────────────────────────
 # equity `consensus_daily` 에 영업이익·순이익이 없어(B-23 · 플랜 §1-4 GAP-6) stage
@@ -588,7 +598,7 @@ MAPPINGS: tuple[TableMapping, ...] = (
         retire_when="브리핑 kr_market·리서치센터 S1/S2/S11·가설 store·unitelegram 이 "
                     "equity price_daily 직독으로 옮겨진 뒤",
         note="basis='krx' 행만 내보낸다 — 저녁 잠정 T 행은 v3 NOT NULL(open·high·low)을 "
-             "못 채운다(GAP-1). D-8 결정 뒤 처리 추가(docs/COMPAT_LAYER.md §4)",
+             "못 채운다(GAP-1). 장 마감 판 T 행은 compat.t_rows 가 원장에서 만든다(QL-D · T-32)",
     ),
     TableMapping(
         v3_table="stocks",

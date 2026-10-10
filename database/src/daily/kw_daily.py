@@ -125,6 +125,32 @@ FLOW_KEYS = ("ind_invsr", "frgnr_invsr", "orgn", "fnnc_invt", "insrnc", "invtrt"
              "bank", "penfnd_etc", "samo_fund", "natn", "etc_corp", "natfor")
 
 
+def ka10060_base_price_differs_sql(close: str, pred_pre: str, prev_close: str) -> str:
+    """컷오버 T-6 첫 조건 — ka10060 그날 기준가가 직전 KRX 종가와 다른가(SQL 불리언 식).
+
+    기준가 = |cur_prc| − pred_pre(조사 I-1: KRX `base_price_krw` 와 사건일 4,219/4,219 · 표본
+    19,082/19,082 일치). 다르면 그날 기업행위·기준가 변경이다. 인자는 SQL 식이다 — `close` 는 부호를
+    뗀 종가(stage `close_krw`), `pred_pre` 는 부호를 지킨 전일대비(`pred_pre_krw`), `prev_close` 는
+    직전 KRX 종가. 셋 중 하나라도 없거나 직전 종가가 0 이하면 판정 불가 = 다르다(참)로 닫는다(P1 —
+    3치 논리로 NULL 이 새면 `NOT` 거름망을 통과한다). compat 장 마감 T 행(QL-D)과 fi T 행(PR-5)이
+    같이 쓴다.
+    """
+    return (f"({close} IS NULL OR {pred_pre} IS NULL OR {prev_close} IS NULL "
+            f"OR {prev_close} <= 0 OR {close} - {pred_pre} <> {prev_close})")
+
+
+def ka10060_postclose_price_usable_sql(price_valid: str, close: str, volume: str) -> str:
+    """장 마감 원장(`postclose.db`) ka10060 행의 가격을 T 가격으로 쓸 수 있는가(SQL 불리언 식).
+
+    16:00 KST 전 응답(`price_valid` 참 — 그 뒤 응답은 가격이 애프터마켓 값, N-35 ①) · 종가 > 0 · 거래량
+    있음. 하나라도 아니면 그 행의 가격은 쓰지 않는다(수급은 따로 — price_valid 와 무관하다). 인자는 SQL
+    식이다 — `price_valid` 는 BOOLEAN(stage `price_valid`), `close` 는 부호를 뗀 종가(`close_krw`),
+    `volume` 은 거래량(`volume_shr`). fi 장 마감 판 T 가격 행(PR-5)과 compat T 행의 ① postclose 선택
+    (QL-D)이 같이 쓴다(P4).
+    """
+    return f"({price_valid} IS TRUE AND {close} > 0 AND {volume} IS NOT NULL)"
+
+
 def pick_rows(api_id: str, rows: Sequence[Mapping[str, object]],
               target: str) -> list[dict[str, object]]:
     """저장할 행만 — 일별 TR 은 target 날짜 행(ka10060 `dt` · ka10086 `date`), 묶음 TR 은 전부."""

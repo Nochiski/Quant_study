@@ -9,9 +9,13 @@ FLOCK_WAIT_RC 로 끝난다)뿐이다. 락 파일은 늘 `QL_V3_LOCK_FILE` 임�
 (/tmp/kael_v3_daily_all.lock)을 건드리지 않는다. 실물 flock 테스트는 flock 이 있을 때만(서버·CI 우분투) 돈다.
 v3 본 파일은 compat 이 쓰는 9표 DDL(`v3_schema.sql`) + compat 밖 표 `market_indices` 다. 얕은 본 파일이라
 compat 은 `--full` 로 돈다(730일 창).
+장 마감 판(QL-D)은 판이 D'(09-22)까지이고 T(09-23) 가격·수급 행을 원장에서 만든다 — 임시 홈의
+`data/raw/postclose.db`·`kiwoom.db`(실물 `daily.postclose`·`daily.kw_daily` 코드로 만든다)와 판정
+달력 `data/calendar/kis_holidays_2026.json` 을 둔다(셸 기본 경로).
 """
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import os
@@ -25,9 +29,9 @@ from typing import NamedTuple
 
 import pytest
 import test_compat_export as tce
-
 from compat.quant_db import SCHEMA_SQL_PATH, ExportResult, TableResult, _write_meta
 from compat.v3_post import SCORE_TABLES, TABLES
+from daily import kw_daily, postclose
 
 DB_ROOT = Path(__file__).resolve().parents[1]
 D = tce.AS_OF                       # 20260923
@@ -81,9 +85,43 @@ def sources(tmp_path_factory) -> tuple[Path, Path, Path]:
 
 @pytest.fixture(scope="module")
 def evening_sources(tmp_path_factory) -> tuple[Path, Path, Path]:
-    """장 마감 판(`e_` 판 · evening 모델 판) — daily_post 를 부르는 경로."""
+    """장 마감 판(`e_` 판 · evening 모델 판) — daily_post 를 부르는 경로. 판은 D'(09-22)까지다(QL-D
+    이음매): KRX 행·유니버스·수급에 T(09-23)가 없고, 09-23 에만 있던 종목(스팩·필러 등)은 D' 로
+    옮긴다. T 의 가격·수급 행은 임시 홈의 원장(`_ledgers`)에서 온다."""
     base = tmp_path_factory.mktemp("eve")
-    return (*tce._make_roots(base, eq_build=EVENING_BUILD), _model_root(base, "evening"))
+    fillers = tce._filler_tickers(tce.N_FILLER)
+    prices = [r for r in tce._price_rows() if not (r["basis"] == "krx" and r["date"] == tce.D23)]
+    uni = [tce._uni_row(t, d, "KOSPI", "common") for t in tce.REAL for d in (tce.D21, tce.D22)]
+    uni.append(tce._uni_row(tce.SPAC, tce.D22, "KOSDAQ", "spac"))
+    uni += [tce._uni_row(t, tce.D22, m, s) for t, m, s in tce.EXCLUDED]
+    uni += [tce._uni_row(t, tce.D22, "KOSPI", "common") for t in fillers]
+    roots = tce._make_roots(base, eq_build=EVENING_BUILD, price_rows=prices,
+                            adj_rows=tce._adj_rows(price_rows=prices), universe_rows=uni,
+                            flow_rows=[r for r in tce._flow_rows() if r["date"] != tce.D23])
+    return (*roots, _model_root(base, "evening"))
+
+
+def _ledgers(raw: Path) -> tuple[Path, Path]:
+    """장 마감 판 T 행 원장 두 개 — postclose 에 보통주 2종목의 T 행(기준가 = D' 종가 — 조정가가
+    선다), 21:05 키움 원장은 표만(16:00 컷오프로 넘긴 종목이 없는 날)."""
+    raw.mkdir(parents=True, exist_ok=True)
+    pc, kw = raw / "postclose.db", raw / "kiwoom.db"
+    con = postclose.connect(pc)
+    try:
+        for ticker, cur, pred in (("005930", "+70300", "+200"), ("000660", "-71000", "-100")):
+            row = {"dt": D, "cur_prc": cur, "pred_pre": pred, "acc_trde_prica": "1000",
+                   **{k: "-12" for k in kw_daily.FLOW_KEYS}}
+            postclose.insert_first(con, list(postclose.COLS), ticker, [row],
+                                   collected_at="2026-09-23T06:45:00",
+                                   fetched_at="2026-09-23T06:41:00", price_valid=True)
+    finally:
+        con.close()
+    con = sqlite3.connect(kw)
+    try:
+        kw_daily.ensure_table(con, kw_daily.TRS["ka10060"].table, list(postclose.COLS))
+    finally:
+        con.close()
+    return pc, kw
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +149,14 @@ def _home(tmp_path: Path) -> Path:
     for p, body in stubs.items():
         p.write_text(body, encoding="utf-8")
         p.chmod(0o755)
+    # 장 마감 판(QL-D) — 판정 달력(주말만 휴장)과 T 행 원장을 셸 기본 경로에
+    cal = home / "data" / "calendar"
+    cal.mkdir(parents=True)
+    days = (dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(365))
+    hol = [x.strftime("%Y%m%d") for x in days if x.weekday() >= 5]
+    (cal / "kis_holidays_2026.json").write_text(json.dumps({"year": 2026, "holidays": hol}),
+                                                encoding="utf-8")
+    _ledgers(home / "data" / "raw")
     return home
 
 
@@ -296,6 +342,43 @@ def test_late_older_run_is_refused_unless_allow_older(env, sources, tmp_path) ->
     assert r2.rc == 0, r2.out
     assert _q(main, f"SELECT count(*) FROM score_history WHERE score_date='{D_ISO}'") == [(3,)]
 
+
+
+# ── 장 마감 판 원장 인자(QL-D) ───────────────────────────────────────────────
+def test_evening_export_gets_the_ledger_env(env, evening_sources, tmp_path) -> None:
+    """② compat export 에 QL_POSTCLOSE_DB·QL_KIWOOM_DB 가 넘어간다 — 기본 경로를 비우고 다른 곳에 둔
+    원장으로 T 행이 선다. 원천 기록(`t_rows`)이 그 경로를 남긴다."""
+    home, main = env
+    moved = tmp_path / "ledgers"
+    moved.mkdir()
+    for name in ("postclose.db", "kiwoom.db"):
+        shutil.move(str(home / "data" / "raw" / name), str(moved / name))
+    r = _run(tmp_path, evening_sources, *_evening(main),
+             QL_POSTCLOSE_DB=str(moved / "postclose.db"), QL_KIWOOM_DB=str(moved / "kiwoom.db"))
+    assert r.rc == 0, r.out
+    assert _q(main, "SELECT stock_code, open, close, volume FROM daily_prices "
+                    f"WHERE trade_date='{D_ISO}' ORDER BY 1") == [
+        ("000660", 71_000, 71_000, 1_000), ("005930", 70_300, 70_300, 1_000)]
+    tables = json.loads(_q(main, "SELECT tables FROM _compat_meta")[0][0])
+    info = tables["daily_prices"]["t_rows"]
+    assert info["ledgers"] == {"postclose": str(moved / "postclose.db"),
+                               "kiwoom_2105": str(moved / "kiwoom.db")}
+    assert tables["daily_prices"]["metrics"]["n_on_date"] == 2      # 신선도 게이트(T-31 ③)
+
+
+def test_allow_older_reaches_the_evening_export(env, evening_sources, tmp_path) -> None:
+    """`--allow-older` 는 apply 뿐 아니라 ② export 에도 간다 — compat 장 마감 판이 같은 T-35 순서로
+    먼저 멈추므로, export 에 안 넘기면 재생도 ② 에서 실패한다."""
+    _, main = env
+    _seed_record(main, "2026-09-24", "evening")
+    before = _sha(main)
+    r = _run(tmp_path, evening_sources, *_evening(main))
+    assert r.rc == 2, r.out
+    assert "실패(② compat export --in-place)" in _levels(r, "crit")[0]
+    assert _sha(main) == before
+    r2 = _run(tmp_path, evening_sources, *_evening(main, "--allow-older"))
+    assert r2.rc == 0, r2.out
+    assert _q(main, f"SELECT count(*) FROM daily_prices WHERE trade_date='{D_ISO}'") == [(2,)]
 
 # ── 실패하면 본 파일 무변경 ──────────────────────────────────────────────────
 def test_gate_failure_leaves_main_unchanged(env, skip_sources, tmp_path) -> None:

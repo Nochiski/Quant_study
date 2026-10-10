@@ -110,9 +110,9 @@
 - G4: 첫 수집(10-14) 전에는 원장에 행이 없어 자기 골든이 없다. 단위 환산 13열은 `stg_flow_daily_kiwoom` 의 골든을
   물려받고(`golden_from`, 원천 TR 이 같을 때만) SKIP 사유 코드는 `golden_inherited` 다. 수집 뒤 자기 골든을 다는
   일은 후속.
-- **fi 가 이 표를 읽게 되면(PR-5)** K1-7a 허용표에 이 표 한정으로 G4 `golden_inherited` · G6 `first_write_wins`
-  (게이트가 내는 사유 문자열은 `write_mode=first_write_wins`) · G8 `not_blob` SKIP 을 등록해야 한다(등록 안 하면
-  목록 밖 SKIP = 실패). 그 밖의 SKIP(G5 첫 판 `no_baseline` · G9 `no_cross_check`)은 `stg_flow_daily_kiwoom` 과 같다.
+- **fi 장 마감 판이 이 표를 읽는다(PR-5, `FACTOR_INPUTS.md` §2-2)** — K1-7a 허용표(`stage/skip_allow.py`)에 이 표
+  한정으로 G4 `golden_inherited` · G6 `write_mode=first_write_wins` · G8 `not_blob` SKIP 을 등록했다(다른 stage 표에서
+  같은 SKIP 은 실패). 그 밖의 SKIP(G5 첫 판 `no_baseline` · G9 `no_cross_check`)은 `stg_flow_daily_kiwoom` 과 같다.
 
 
 ## 4. equity 가 판단해야 하는 것 (stage 는 안 한다)

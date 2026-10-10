@@ -71,6 +71,23 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
   lag 1).
 - 산출은 `_runs/<T>_evening.json` · `latest_evening.json`, 판 id 접두 `e_`.
 
+### 2-2. 두 판 대조(컷오버 PR-7)
+
+```bash
+python -m daily.board_compare --date <T> --evening-root data/model_db --research-root data \
+    [--out-root DIR] [--spearman-min 0.975] [--list-n 20]
+```
+
+- 장 마감 판 T(`data/model_db/{factor_inputs,model}/_runs/<T>_evening.json`)와 다음 날 08:10 연구 판
+  T(`data/{factor_inputs,model}/_runs/<T>_morning.json`)를 맞댄다. 두 판 모두 성공 판·같은 규칙 판본
+  이어야 하고 모델 판은 자기 fi 판을 가리켜야 한다(어긋나면 rc 2).
+- fi 8표는 해시가 같으면 끝, 다르면 행 단위 차이를 등록 범주로 나눈다. 범주 정의·정본 근거의 단일
+  정본은 `src/daily/board_compare.py` 의 `CATEGORIES` 다(종가 정의·수급 정의·이월·정보 시점·T-6·16:00
+  컷오프·신용 available_date ≤ T·연도 창·filing_late). 맞는 범주가 없으면 미설명이다.
+- 모델은 spec 마다 종합점수 Spearman · 엑셀 후보 겹침 · 점수 열 |Δ| 상위 종목과 그 종목의 fi 범주.
+- rc 0 = 미설명 0 · 모든 spec Spearman ≥ 하한 / 1 = 미설명 있음 또는 하한 미달 / 2 = 입력 오류. 결과는
+  `<out-root>/compare/<T>.json`(기본 out-root = `--evening-root`, rc 2 도 `verdict: error` 로 남긴다).
+
 ## 3. 판 규약
 
 ```

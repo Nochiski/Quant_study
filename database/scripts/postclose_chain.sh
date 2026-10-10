@@ -35,12 +35,16 @@
 #     v3_post.sh --basis evening --no-scores --builds-from <D'>_morning.json(QL-F2, compat 만 — daily_post 없음).
 #     16:00 컷오프로 못 받은 종목을 21:05 원장 값으로 채우고, 장 마감 판이 없는 날(판 실패·세션 예외일)엔 그날 저녁 v3
 #     T 행을 넣는 유일한 경로다(T-26 · T-38). 점수는 ⑥ 만 쓴다 — 판이 없던 날의 점수는 다음 날 아침 재반영이 채운다(T-34).
+#     부르기 전에 고정 판(<D'>_morning.json)의 날짜·health 를 본다 — 쓸 수 없으면 v3_post 를 부르지 않고 crit(compat 은
+#     health 를 보지 않아 equity 일부만 실패한 날 옛 판이 7표에 조용히 섞인다, P1).
 #   morning — 다음 날 아침 잇기. ⓐ v3_post.sh --date D --basis morning --builds-from data/deliver/history/<D>_morning.json
-#     (compat 만 — 반영 표 7·9 는 compat 이 장 마감 반영 기록으로 고른다, T-34) ⓑ 두 판 대조 python -m daily.board_compare
+#     (compat 만 — 반영 표 7·9 는 compat 이 장 마감 반영 기록으로 고른다, T-34. 고정 판 <D>_morning.json 의 날짜·health 를
+#     먼저 보고 쓸 수 없으면 부르지 않고 crit — refill 과 같은 이유) ⓑ 두 판 대조 python -m daily.board_compare
 #     --date D --evening-root data/model_db --research-root data(PR-7) — 그날 장 마감 모델 판(④ 의 마지막 런 ok)이 있을
 #     때만. 둘은 서로 막지 않는다(대조는 v3 반영의 소비자가 아니다). 대조 rc 1 은 **이번 실행이 쓴**
 #     data/model_db/compare/<D>.json 이 불일치 판정(verdict fail · rc 1 · 그 날짜)일 때만 mismatch(warn — 판정은 연속 창
-#     집계 몫)이고, 그 밖의 rc 1(모듈 없음·예외)은 실패다.
+#     집계 몫)이고, 그 밖의 rc 1(모듈 없음·예외)은 실패다. 그날(D) 수집기 런(kiwoom_postclose)이 아예 없으면 15:41 close
+#     크론이 돌지 않은 것이라 끝 알림을 info 대신 warn 으로 낸다(세션 예외일엔 수집기 런 session_exception 이 남는다).
 #
 #   설정 config/postclose_chain.env(배포로 코드와 함께 나간다) — 켜고 끄는 자리. 컷오버(PR-9)가 켠다. 켜는 쪽만 정확한
 #     값을 요구한다(P1) — 그 밖의 값·빈 값·파일 없음은 꺼짐·그림자다.
@@ -327,8 +331,10 @@ if [ -n "$DRY" ]; then
     refill)
       DPREV=$(prev_day "$D" 2>/dev/null)
       echo "  0. 체인 락 $CHAIN_LOCK (돌고 있는 close 가 끝날 때까지 기다림)"
+      echo "  -  고정 판 $HIST/${DPREV:-?}_morning.json — 지금: $( [ -n "$DPREV" ] && board_ok "$DPREV" 2>&1 || echo 'D 계산 불가')"
       echo "  1. 점수 없는 7표(⑥ 결과와 무관, T-38): scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --no-scores --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}" ;;
     morning)
+      echo "  -  고정 판 $HIST/${D}_morning.json — 지금: $(board_ok "$D" 2>&1)"
       echo "  1. scripts/v3_post.sh --date $D --basis morning --v3-db $V3_DB --builds-from $HIST/${D}_morning.json${SHADOW:+ --shadow}   (compat 만)"
       echo "  2. 그날 ④ postclose_model 마지막 런이 ok 일 때만: $PY -m daily.board_compare --date $D --evening-root $MDB --research-root data" ;;
   esac
@@ -375,7 +381,7 @@ build_lock() {   # ②~⑤ 앞. 쥐여 있으면 끝날 때까지 기다린다(�
 build_unlock() { [ -n "$BUILD_HELD" ] && flock -u 6; BUILD_HELD=""; return 0; }
 
 # ── 단계 실행 ─────────────────────────────────────────────────────────────────
-FAILED=""; FAILED_SOFT=""; WARNED=""; DONE=""; SKIP=""; SKIP_LEVEL=""; NOTE=""
+FAILED=""; FAILED_SOFT=""; WARNED=""; DONE=""; SKIP=""; SKIP_LEVEL=""; NOTE=""; NO_CLOSE=""
 ALT_RC=""; ALT_STATUS=""   # 그 단계의 rc 하나를 다른 상태로 기록한다 — 대조 1 → mismatch(warn)
 step() {  # step <런 로그 source> <이름> <명령…> — source 한 행(running → 상태). 실패하면 FAILED 에 남기고 1
   local src="$1" name="$2" rid rc t0 status
@@ -460,19 +466,37 @@ close_main() {
 refill_main() {
   DPREV=$(prev_day "$D")
   if [ -z "$DPREV" ]; then FAILED="직전 거래일 계산"; return; fi
+  local board
+  if ! board=$(board_ok "$DPREV" 2>&1); then
+    FAILED="고정 판 확인"; NOTE="$board — v3_post 를 부르지 않았다(옛 판이 7표에 섞이지 않게, P1)"
+    echo "  $NOTE"
+    return
+  fi
   NOTE="점수 없는 7표 — 16:00 컷오프 종목은 21:05 원장 값, 장 마감 판이 없던 날은 그날 v3 T 행의 유일한 경로(T-38 · T-26)"
-  echo "  T=$D D'=$DPREV $NOTE"
+  echo "  T=$D D'=$DPREV $board · $NOTE"
   step postclose_v3_refill "21:05 원장 뒤 7표 반영" v3_noscores_cmd
 }
 
 morning_main() {
-  step postclose_v3_morning "v3 아침 KRX 재반영" v3_morning_cmd
+  local board
+  if board=$(board_ok "$D" 2>&1); then
+    echo "  $board"
+    step postclose_v3_morning "v3 아침 KRX 재반영" v3_morning_cmd
+  else
+    FAILED="고정 판 확인"
+    NOTE="$board — v3 아침 재반영(v3_post)을 부르지 않았다(옛 판이 섞이지 않게, P1)"
+    echo "  $NOTE"
+  fi
+  if [ -z "$(last_status kiwoom_postclose)" ]; then
+    NO_CLOSE="그날 장 마감 수집 런(kiwoom_postclose)이 없다 — 15:41 close 크론이 돌지 않았다(크론 누락?)"
+    echo "  D=$D $NO_CLOSE"
+  fi
   if [ "$(last_status postclose_model)" = ok ]; then
     ALT_RC=1; ALT_STATUS=mismatch
     step postclose_compare "두 판 대조" compare_cmd
     ALT_RC=""; ALT_STATUS=""
   else
-    NOTE="그날 장 마감 모델 판(④ postclose_model 마지막 런 ok)이 없다 — 두 판 대조 건너뜀"
+    NOTE="${NOTE:+$NOTE · }그날 장 마감 모델 판(④ postclose_model 마지막 런 ok)이 없다 — 두 판 대조 건너뜀"
     echo "  D=$D $NOTE"
   fi
 }
@@ -490,7 +514,7 @@ esac
 echo "════ 종료 $(( ($(date +%s) - T0) / 60 ))분 failed=${FAILED:-없음} warned=${WARNED:-없음} skip=${SKIP:-없음} $(kst) ════"
 } >> "$LOG" 2>&1
 
-BODY="D=$D · $SWITCH | 완료:${DONE:- 없음}${NOTE:+ | $NOTE} | 로그 $LOG"
+BODY="D=$D · $SWITCH | 완료:${DONE:- 없음}${NOTE:+ | $NOTE}${NO_CLOSE:+ | $NO_CLOSE} | 로그 $LOG"
 case "$MODE" in close) LABEL="장 마감 체인" ;; refill) LABEL="장 마감 재반영" ;; *) LABEL="장 마감 판 아침 잇기" ;; esac
 RC=0
 if [ -n "$FAILED" ]; then
@@ -503,6 +527,8 @@ elif [ -n "$WARNED" ]; then
   RC=1
 elif [ "$MODE" = close ]; then
   scripts/notify.sh info "장 마감 판 준비 $(TZ=Asia/Seoul date +%H:%M)" "$BODY | $(( ($(date +%s) - T0) / 60 ))분"
+elif [ -n "$NO_CLOSE" ]; then
+  scripts/notify.sh warn "$LABEL 완료 — 그날 장 마감 체인 런 없음" "$BODY"
 else
   scripts/notify.sh info "$LABEL 완료" "$BODY"
 fi

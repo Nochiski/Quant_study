@@ -517,19 +517,29 @@ def test_refill_in_place_passes_no_post_command(tmp_path: Path) -> None:
     assert v3.endswith("QL_V3_POST_CMD=unset")
 
 
-@pytest.mark.parametrize("why", ["v3_post_rc2", "no_pinned_board"])
-def test_refill_failure_is_crit(tmp_path: Path, why: str) -> None:
-    """v3_post 가 실패하면 crit — 고정 판(D' 인계 이력)이 없으면 compat 이 멈추고 v3_post 가 실패한다(MAJOR-1)."""
-    root = _root(tmp_path)
-    env = {}
-    if why == "v3_post_rc2":
-        env["RC_v3_post"] = "2"
-    else:
-        (root / H_PREV).unlink()
-    r = _chain(tmp_path, "refill", "--date", T, **env)
+def test_refill_failure_is_crit(tmp_path: Path) -> None:
+    """v3_post 가 실패하면 crit."""
+    _root(tmp_path)
+    r = _chain(tmp_path, "refill", "--date", T, RC_v3_post="2")
     assert r.rc == 2, r.out + r.log
     assert r.runs == [("postclose_v3_refill", "failed")]
     assert r.titles("crit") == ["장 마감 재반영 실패: 21:05 원장 뒤 7표 반영(rc=2)"]
+
+
+@pytest.mark.parametrize("broken", ["missing", "health_fail"])
+def test_refill_checks_its_pinned_board_first(tmp_path: Path, broken: str) -> None:
+    """재리뷰 MINOR-A — 고정 판(D' 아침 인계 이력)이 없거나 health 가 ok 가 아니면 v3_post 를 부르지 않고 crit 1건.
+    compat 은 health 를 보지 않아 equity 일부만 실패한 날 옛 판이 7표에 조용히 섞인다(P1)."""
+    root = _root(tmp_path)
+    if broken == "missing":
+        (root / H_PREV).unlink()
+    else:
+        _history(root, D_PREV, health="fail")
+    r = _chain(tmp_path, "refill", "--date", T)
+    assert r.rc == 2, r.out + r.log
+    assert r.mods == [] and r.runs == []
+    assert r.titles("crit") == ["장 마감 재반영 실패: 고정 판 확인"]
+    assert H_PREV in r.notify[-1]
 
 
 # ── morning: 다음 날 아침 잇기 ⑧ ───────────────────────────────────────────────
@@ -569,14 +579,44 @@ def test_morning_without_an_evening_board_skips_only_the_compare(tmp_path: Path)
     assert "대조 건너뜀" in r.notify[-1]
 
 
-def test_morning_without_its_pinned_board_is_crit(tmp_path: Path) -> None:
-    """MAJOR-1 — 아침 재반영은 D 아침 인계 이력으로 고정한다. 없으면 v3_post 가 실패하고 crit."""
+@pytest.mark.parametrize("broken", ["missing", "health_fail"])
+def test_morning_checks_its_pinned_board_first(tmp_path: Path, broken: str) -> None:
+    """재리뷰 MINOR-A — 아침 재반영 앞에서 고정 판(D 아침 인계 이력)의 날짜·health 를 본다. 쓸 수 없으면
+    v3_post 를 부르지 않고 crit 1건. 대조는 v3 반영의 소비자가 아니라 그대로 돈다."""
     root = _root(tmp_path)
-    (root / H_T).unlink()
+    _seed(root, T, "kiwoom_postclose", "ok")
+    _seed(root, T, "postclose_model", "ok")
+    if broken == "missing":
+        (root / H_T).unlink()
+    else:
+        _history(root, T, health="fail")
     r = _chain(tmp_path, "morning", "--date", T)
     assert r.rc == 2, r.out + r.log
-    assert r.runs == [("postclose_v3_morning", "failed")]
-    assert r.titles("crit") == ["장 마감 판 아침 잇기 실패: v3 아침 KRX 재반영(rc=2)"]
+    assert r.mods == ["daily.board_compare"]
+    assert r.runs == [("postclose_compare", "ok")]
+    assert r.titles("crit") == ["장 마감 판 아침 잇기 실패: 고정 판 확인"]
+    assert H_T in r.notify[-1]
+
+
+@pytest.mark.parametrize(("seed", "level"), [(None, "warn"), ("ok", "info"), ("cutoff", "info"),
+                                             ("session_exception", "info")],
+                         ids=["no_collect_run", "collect_ok", "collect_cutoff", "session_day"])
+def test_morning_warns_when_the_close_chain_never_ran(tmp_path: Path, seed: str | None,
+                                                     level: str) -> None:
+    """재리뷰 NIT-2 — 켜져 있는데 그날(D) 수집기 런(kiwoom_postclose)이 아예 없으면 15:41 close 크론이 돌지 않은
+    것이라 아침 잇기 끝 알림이 info 대신 warn 이다. 세션 예외일엔 수집기 런(session_exception)이 남아 구분된다.
+    rc 는 그대로 0."""
+    root = _root(tmp_path)
+    if seed is not None:
+        _seed(root, T, "kiwoom_postclose", seed)
+    r = _chain(tmp_path, "morning", "--date", T)
+    assert r.rc == 0, r.out + r.log
+    assert [n.split("|")[0] for n in r.notify] == [level]
+    if level == "warn":
+        assert r.titles("warn") == ["장 마감 판 아침 잇기 완료 — 그날 장 마감 체인 런 없음"]
+        assert "kiwoom_postclose" in r.notify[0]
+    else:
+        assert r.titles("info") == ["장 마감 판 아침 잇기 완료"]
 
 
 def test_morning_compare_mismatch_is_warn(tmp_path: Path) -> None:
@@ -690,16 +730,16 @@ def test_real_v3_post_accepts_all_three_call_shapes(tmp_path: Path, conf: str) -
 
 
 @pytest.mark.parametrize("mode", ["refill", "morning"])
-def test_real_v3_post_without_its_pinned_board_is_crit(tmp_path: Path, mode: str) -> None:
-    """MAJOR-1 — 고정 판(인계 이력)이 없으면 compat export 가 멈추고 실물 v3_post 가 rc 2·crit, 체인도 crit."""
+def test_real_v3_post_is_not_called_without_its_pinned_board(tmp_path: Path, mode: str) -> None:
+    """MAJOR-1 · 재리뷰 MINOR-A — 고정 판(인계 이력)이 health ok 가 아니면 체인이 실물 v3_post 를 아예 부르지 않는다
+    (compat 하위 명령 0회 — 스테이징도 뜨지 않는다). crit 은 체인의 '고정 판 확인' 1건."""
     root = _real_v3(tmp_path)
-    (root / (H_PREV if mode == "refill" else H_T)).unlink()
+    _history(root, D_PREV if mode == "refill" else T, health="fail")
     r = _chain(tmp_path, mode, "--date", T, QL_V3_LOCK_FILE=str(tmp_path / "v3.lock"))
     assert r.rc == 2, r.out + r.log
-    crit = r.titles("crit")
-    assert any(t.startswith(f"v3_post {T} ") and "rc=2" in t for t in crit), crit
-    assert any(t.startswith(("장 마감 재반영 실패", "장 마감 판 아침 잇기 실패")) for t in crit), crit
-    assert not _compat(r, "apply")
+    assert not [c for c in r.calls if c.startswith("compat ")]
+    label = "장 마감 재반영" if mode == "refill" else "장 마감 판 아침 잇기"
+    assert r.titles("crit") == [f"{label} 실패: 고정 판 확인"]
 
 
 def test_shipped_config_is_off_and_shadow(tmp_path: Path) -> None:

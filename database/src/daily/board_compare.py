@@ -20,10 +20,14 @@
     장 마감 값 ≤ 연구 값이면 거래량 정의. 수급은 주체별 판 통계(중앙 상대 차이·부호 반전)가 상한 안이면
     수급 정의. T 가격 없음은 장 마감 stage 증거(행 없음·price_valid 참 아님)가 있어야 16:00 컷오프, 수집
     대상(수집기 ① `daily.postclose.fi_candidates` · ② V3_STOCK_FILTER) 밖이면 '수집 대상 밖'. T-6 보류는
-    연구 판에 당일 기업행위 흔적이 있어야 한다. 수정주가 계수·표식은 (D', T] 에 공개된 기업행위가 있어야
+    정의의 갈래만큼 증거를 본다(`_Ctx.t6_verdict` — KRX 기준가 ≠ D' 종가 · pred_pre 없음·D' 종가 없음 ·
+    제한폭 밖 수익률 · 연구 판 계수 변경). 수정주가 계수·표식은 (D', T] 에 공개된 기업행위가 있어야
     정보 시점(T 전 행은 적용일부터 T−1 까지 끝 구간 모양).
   · T 전 가격·수급 행은 두 판이 같아야 한다 — 다르면 미설명.
   · 표 하나의 차이 행이 `DIFF_ROW_MAX` 를 넘으면 행 분류를 하지 않고 SQL 로 열별로 센 뒤 전부 미설명이다.
+  · 한계(리뷰 MINOR-4): 기업행위 정보 시점은 (D', T] 에 **공개된** 사건(`read_new_events`)만 본다. 이미 공개된
+    사건의 판정이 소급으로 바뀐 경우(가격 축 해소 결과·계수가 새 판에서 달라짐 — 공개일은 그대로)는
+    수정주가 차이가 미설명으로 남는다. P5 재생에서 드러나면 그때 범주를 정한다.
 모델 층: spec 마다 종합점수 Spearman · 엑셀 후보(`deliver.view.load_day`) 겹침 · 점수 열 |Δ| 상위 종목과 그
 종목의 fi 범주(그 spec 엔진이 읽는 표만). 한 판에만 있는 점수 행은 적격성 범주(종목 집합·eligible·시총·
 T 가격)로만, 한쪽만 종합점수가 빈 행은 자기 fi 차이로만 설명한다. fi 8표가 같은데 점수가 다르거나 spec 이
@@ -135,9 +139,10 @@ CATEGORIES: dict[str, Category] = {c.key: c for c in (
              "3자 대조 — 장 마감 판 = 연구 판 D' 이고 연구 판 T 가 다르며, 정보 표는 연구 판 수집·공개일이 "
              "장 마감 판보다 늦다(WISE·DART·WICS·추정기관 수). 수정주가 계수·표식은 (D', T] 에 공개된 "
              "기업행위가 있을 때(T 전 행은 적용일부터 T−1 까지 끝 구간 모양)"),
-    Category(T6, "T-6 당일 기업행위", "T-6·T-36",
-             "장 마감 판 corp_action_pending 보류 — 연구 판 T 행 계수 ≠ D' 행 계수, 또는 연구 판 T 수익률이 "
-             "가격제한폭(`queries.PRICE_LIMIT_*`) 밖일 때만"),
+    Category(T6, "T-6 당일 기업행위", "T-6·T-36·I-1·PR-7 재리뷰 MAJOR-1",
+             "장 마감 판 corp_action_pending 보류 — T-6 정의의 갈래만큼 증거가 있을 때만: KRX 기준가"
+             "(연구 판 equity base_price_krw) ≠ D' 종가 · 키움 pred_pre 없음(장 마감 stage)·연구 판 D' 종가 "
+             "없음 · 연구 판 T 수익률이 가격제한폭(`queries.PRICE_LIMIT_*`) 밖 · 연구 판 T 행 계수 ≠ D' 행 계수"),
     Category(CUTOFF, "16:00 컷오프", "PR-1·N-35 ①③·N-42 Q3·T-36",
              "수집 대상인데 장 마감 stage 에 그 종목 T 행이 없거나 price_valid 가 참이 아니라(16:00 뒤 응답·"
              "NULL) T 가격(행이 없으면 수급도)이 없다 — no_price·시총 NULL. price_valid 참인데 종가·거래량이 "
@@ -350,6 +355,8 @@ class Evidence:
     stage: Mapping[str, str]                       # 장 마감 stage T 행 종목 → STAGE_* 상태
     new_events: Mapping[str, tuple[date, ...]]     # (D', T] 에 공개된 기업행위 → 적용일
     targeted: frozenset[str]                       # 장 마감 수집 대상(`read_targets`)
+    krx_base: Mapping[str, object] = field(default_factory=dict)   # 연구 판 equity T 기준가
+    pred_pre_missing: frozenset[str] = frozenset()  # 장 마감 stage T 행 중 키움 pred_pre 가 없는 종목
 
 
 @dataclass
@@ -412,17 +419,33 @@ class _Ctx:
     def halted_at_t(self, tk: str) -> bool:
         return self.uni3(tk, "is_halted") and self.uni_r.get(tk, {}).get("is_halted") is True
 
-    def t6_evidence(self, tk: str) -> bool:
-        """연구 판에 당일 기업행위 흔적 — T 행 계수 ≠ D' 행 계수 또는 T 수익률이 제한폭 밖."""
+    def t6_verdict(self, tk: str) -> tuple[str, str]:
+        """장 마감 판 T-6 보류(corp_action_pending)의 증거 — T-6 정의의 갈래만큼 본다(판정은 여기 한 곳).
+          ① 기준가 갈래: KRX 쪽에서도 기준가(연구 판 equity `price_daily.base_price_krw`, T) ≠ D' 종가 —
+             키움 기준가(|cur_prc| − pred_pre)와 KRX 기준가는 같다(조사 I-1, 19,082/19,082)
+          ② 판정 불가 갈래(no_value): 장 마감 stage T 행에 키움 pred_pre 가 없거나, 연구 판 D' 종가가
+             없거나 0 이하
+          ③ 제한폭 갈래: 연구 판 T 수익률(T 종가 / D' 종가 − 1)이 T 의 가격제한폭(`queries.PRICE_LIMIT_*`) 밖
+          ④ 당일 기업행위: 연구 판 T 행 계수 ≠ D' 행 계수
+        넷 다 아니면 미설명이다."""
+        cd = _num(self.rt_close_dp.get(tk))
+        kb = _num(self.ev.krx_base.get(tk))
+        if kb is not None and cd is not None and kb != cd:
+            return T6, "KRX 기준가 ≠ D' 종가"
+        if tk in self.ev.pred_pre_missing:
+            return T6, "키움 pred_pre 없음"
+        if cd is None or cd <= 0:
+            return T6, "연구 판 D' 종가 없음"
         ft, fd = _num(self.rt_factor_t.get(tk)), _num(self.rt_factor_dp.get(tk))
         if ft is not None and fd is not None and abs(ft - fd) > SCORE_TOL * max(1.0, abs(fd)):
-            return True
-        ct, cd = _num(self.tclose_r.get(tk)), _num(self.rt_close_dp.get(tk))
-        if ct is None or cd is None or cd <= 0:
-            return False
+            return T6, "연구 판 T 계수 변경"
+        ct = _num(self.tclose_r.get(tk))
         before = self.t.isoformat() < fiq.PRICE_LIMIT_CHANGE_DATE
         limit = fiq.PRICE_LIMIT_BEFORE if before else fiq.PRICE_LIMIT_AFTER
-        return abs(ct / cd - 1) > limit + fiq.PRICE_LIMIT_EPS
+        if ct is not None and abs(ct / cd - 1) > limit + fiq.PRICE_LIMIT_EPS:
+            return T6, "제한폭 밖 수익률"
+        return UNEXPLAINED, ("T-6 보류인데 KRX 기준가 = D' 종가 · pred_pre 있음 · 연구 판 계수 변경·제한폭 밖 "
+                             "수익률 없음")
 
 
 _Verdict = tuple[str, tuple[str, ...], str]          # (범주, 열, 메모)
@@ -486,8 +509,7 @@ def _eligibility(p: _Pair, c: _Ctx) -> tuple[str, str]:
     tk = p.ticker
     er, rr = p.e.get("exclude_reason"), p.r.get("exclude_reason")
     if er == T6_REASON:
-        return ((T6, "") if c.t6_evidence(tk) else
-                (UNEXPLAINED, "T-6 보류인데 연구 판에 당일 기업행위 흔적(계수 변경·제한폭 밖 수익률)이 없다"))
+        return c.t6_verdict(tk)
     if rr == T6_REASON:
         return UNEXPLAINED, "연구 판에 T-6 사유가 있다"
     if er == NO_PRICE and tk not in c.tclose_e and tk in c.tclose_r:
@@ -570,8 +592,8 @@ def _rule_adj(p: _Pair, c: _Ctx) -> list[_Verdict]:
     if missing is not None:
         return missing
     if c.reason_e(tk) == T6_REASON:
-        return [(T6, p.diff, "") if c.t6_evidence(tk) else
-                (UNEXPLAINED, p.diff, "T-6 보류인데 연구 판에 당일 기업행위 흔적이 없다")]
+        cat, note = c.t6_verdict(tk)
+        return [(cat, p.diff, note)]
     items = []
     for col in p.diff:
         if events and col in ADJ_EVENT_COLS | {"adj_close"}:
@@ -1019,9 +1041,10 @@ def _check_versions(ev: Side, rt: Side, rd: Mapping[str, object]) -> None:
                                     f"연구 판 {mr}")
 
 
-def read_stage(ev: Side, t: date) -> dict[str, str]:
-    """장 마감 stage T 행 → 종목 → STAGE_* 상태. 루트·판은 장 마감 fi 판 기록이 읽은 그대로다 —
-    `postclose_stage_root`·`postclose_builds[T_SOURCE_TABLE]`(PR-5, T-29)."""
+def read_stage(ev: Side, t: date) -> tuple[dict[str, str], frozenset[str]]:
+    """장 마감 stage T 행 → (종목 → STAGE_* 상태, 키움 pred_pre 가 없는 종목 — T-6 판정 불가 갈래).
+    루트·판은 장 마감 fi 판 기록이 읽은 그대로다 — `postclose_stage_root`·`postclose_builds
+    [T_SOURCE_TABLE]`(PR-5, T-29)."""
     builds, root = ev.fi_run.get("postclose_builds"), ev.fi_run.get("postclose_stage_root")
     bid = builds.get(T_SOURCE_TABLE) if isinstance(builds, dict) else None
     if not bid or not root:
@@ -1035,14 +1058,15 @@ def read_stage(ev: Side, t: date) -> dict[str, str]:
     usable = kw_daily.ka10060_postclose_price_usable_sql("price_valid", "close_krw", "volume_shr")
     con = _connect()
     try:
-        rows = con.execute(f"SELECT ticker, price_valid IS TRUE, {usable} "
+        rows = con.execute(f"SELECT ticker, price_valid IS TRUE, {usable}, pred_pre_krw IS NULL "
                            f"FROM read_parquet([{lit}], hive_partitioning=true, "
                            "union_by_name=true) "
                            f"WHERE date = DATE '{t.isoformat()}'").fetchall()
     finally:
         con.close()
-    return {str(tk): (STAGE_USABLE if ok else STAGE_UNUSABLE) if valid else STAGE_INVALID
-            for tk, valid, ok in rows}
+    states = {str(tk): (STAGE_USABLE if ok else STAGE_UNUSABLE) if valid else STAGE_INVALID
+              for tk, valid, ok, _ in rows}
+    return states, frozenset(str(tk) for tk, _, _, no_pred in rows if no_pred)
 
 
 def read_targets(rt: Side, rd: Mapping[str, object], dprime: date) -> frozenset[str]:
@@ -1066,20 +1090,42 @@ def read_targets(rt: Side, rd: Mapping[str, object], dprime: date) -> frozenset[
     return frozenset(cands) | frozenset(v3)
 
 
-def read_new_events(rt: Side, dprime: date, t: date) -> dict[str, tuple[date, ...]]:
-    """(D', T] 에 공개된 기업행위 — 연구 판 T 가 읽은 equity `adj_factor` 판(판 기록 `equity_root`·
-    `equity_builds`). 장 마감 판은 available ≤ D' 만 센다(asof)."""
+def _research_equity(rt: Side, table: str) -> str:
+    """연구 판 T 가 읽은 equity 판(판 기록 `equity_root`·`equity_builds[table]`)의 파일 목록(SQL 식)."""
     root, builds = rt.fi_run.get("equity_root"), rt.fi_run.get("equity_builds")
-    bid = builds.get("adj_factor") if isinstance(builds, dict) else None
+    bid = builds.get(table) if isinstance(builds, dict) else None
     if not root or not bid:
-        raise CompareInputError("연구 판 기록에 equity_root·equity_builds[adj_factor] 가 없다 — "
-                                "기업행위 공개를 확인할 수 없다")
+        raise CompareInputError(f"연구 판 기록에 equity_root·equity_builds[{table}] 가 없다 — "
+                                "연구 판 증거를 확인할 수 없다")
     try:
-        pb = eq_inputs.resolve(Path(str(root)), "adj_factor", str(bid))
+        pb = eq_inputs.resolve(Path(str(root)), table, str(bid))
     except FileNotFoundError as e:
-        raise CompareInputError(f"연구 판 equity adj_factor 판이 없다 — root={root} build={bid}: "
+        raise CompareInputError(f"연구 판 equity {table} 판이 없다 — root={root} build={bid}: "
                                 f"{e}") from e
-    lit = ", ".join(_lit(g) for g in pb.globs)
+    return ", ".join(_lit(g) for g in pb.globs)
+
+
+def read_krx_base(rt: Side, t: date) -> dict[str, object]:
+    """연구 판 T 가 읽은 equity `price_daily` 의 T 기준가(`base_price_krw` = KRX 기준가 — T-6 ① 의
+    KRX 쪽 증거)."""
+    lit = _research_equity(rt, "price_daily")
+    con = _connect()
+    try:
+        rows = con.execute(f"SELECT ticker, base_price_krw FROM read_parquet([{lit}], "
+                           f"hive_partitioning=false) WHERE date = DATE '{t.isoformat()}' "
+                           "AND basis = 'krx' AND base_price_krw IS NOT NULL").fetchall()
+    except duckdb.Error as e:
+        raise CompareInputError(f"연구 판 equity price_daily 의 base_price_krw 를 읽지 못했다: "
+                                f"{type(e).__name__}: {e}") from e
+    finally:
+        con.close()
+    return {str(tk): v for tk, v in rows}
+
+
+def read_new_events(rt: Side, dprime: date, t: date) -> dict[str, tuple[date, ...]]:
+    """(D', T] 에 공개된 기업행위 — 연구 판 T 가 읽은 equity `adj_factor` 판. 장 마감 판은
+    available ≤ D' 만 센다(asof)."""
+    lit = _research_equity(rt, "adj_factor")
     con = _connect()
     try:
         rows = con.execute(f"SELECT ticker, apply_date FROM read_parquet([{lit}], "
@@ -1297,8 +1343,9 @@ def compare(t: date, evening_root: Path, research_root: Path, *, calendar_dir: P
     if rd.get("asof") not in (None, dprime.isoformat()):
         raise CompareInputError(f"연구 판 D' asof={rd.get('asof')!r} ≠ D'={dprime.isoformat()}")
     _check_versions(ev, rt, rd)
-    evidence = Evidence(read_stage(ev, t), read_new_events(rt, dprime, t),
-                        read_targets(rt, rd, dprime))
+    stage, no_pred = read_stage(ev, t)
+    evidence = Evidence(stage, read_new_events(rt, dprime, t), read_targets(rt, rd, dprime),
+                        read_krx_base(rt, t), no_pred)
     fi = compare_fi(ev.fi, rt.fi, FiBoard(rt.fi_root, str(rd["build_id"])), t, dprime, evidence,
                     replay=replay)
     if ev.fi_run.get("equity_builds") != rd.get("equity_builds"):

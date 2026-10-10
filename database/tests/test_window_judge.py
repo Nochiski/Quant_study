@@ -661,10 +661,11 @@ def test_체인_단계_이름은_러너와_같다() -> None:
 
 
 def test_대조_결과_모양은_PR7_과_같다(tmp_path: Path) -> None:
-    """PR-7 머지 뒤에 돈다 — 상수 대조, pass·fail 결과가 싣는 키, PR-7 이 실제로 쓰는 rc 2 파일 읽기."""
+    """상수 대조, pass·fail 결과가 싣는 키, PR-7 이 실제로 쓰는 rc 2 파일 읽기(실제 대조 결과 왕복은
+    `test_board_compare.test_window_judge_reads_the_real_reports`)."""
     import datetime as dt
 
-    bc = pytest.importorskip("daily.board_compare", reason="PR-7 머지 전 — 머지 때 이 대조가 돈다")
+    from daily import board_compare as bc
     assert (wj.COMPARE_SCHEMA, wj.COMPARE_TOOL, wj.COMPARE_SPEARMAN_MIN) == (bc.SCHEMA, bc.TOOL, bc.SPEARMAN_MIN)
     src = inspect.getsource(bc.Result.to_dict)
     for key in ("schema", "tool", "date", "replay", "verdict", "rc", "reasons", "thresholds", "spearman_min",

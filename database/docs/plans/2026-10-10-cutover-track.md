@@ -130,7 +130,7 @@
 | QL-F2 | 점수 없는 저녁 7표 반영(T-38) — `v3_post.sh --no-scores`, T-34 저녁 ok 판정을 점수 포함 반영으로 한정 | S | ☑ 91ed5e57(스테이징 경로 분리, Python·CLI 도 아침+no-scores 거부). 서버 그림자(v3 10-08 사본, 빈 장 마감 원장): rc 0·7표·T 행 2,603 전부 21:05 원장·점수 표 차이 0·T 종가 2,529/2,529 = v3 · 10-07 아침판 stage 판이 GC 돼 고정 판 없음이면 rc 2 로 멈춤(정상) |
 | QL-I | 되돌리기 절차서 · 표 단위 복원 스크립트 · 고정 백업 2벌 | S | ◐ 구현 완료(086acf8b — 백업 2벌·표 단위 복원·절차서 `CUTOVER_ROLLBACK.md`·복원 장벽 게이트 T-42, 로컬 465MB 사본 백업 4.7초·9표 복원 9.1초) → 리뷰 중 |
 | QL-J | 키 이관(quant-ledger 자기 설정을 기본값으로) | S | ☐ |
-| QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ◐ 구현 완료(2d375f86 — `python -m daily.cutover_watch`, 로컬 v3 사본 기준선 job 26종 분류 안 된 것 0) → 리뷰 중 |
+| QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ☑ (QL-L 머지 — `python -m daily.cutover_watch`: 허용·금지·스코어링 job 분류(서버 실측 26종 전부 분류), 로그 표지는 실제 메시지 모양만, 점수는 compat 기록과 대조, 크론 daily_all·daily_post·직접 진입점·휴장 쓰기 금지, 그림자 `--baseline`. 크론은 컷오버 날 연결) |
 | QL-M·N | compat 만료 정리 · compare 기준 scope | S | ☐ |
 | QL-P | T-23 v3 `market_*` 를 KRX 지수 원장으로 | M | ✕ 보류(T-27) — 구현 브랜치 `pr/QL-P` 3b9a5e04 는 v3 폴더 이관 때 쓴다(열 대응표: 지수 3종 대응·VKOSPI·폭·시장 수급·프로그램 없음·업종 부분) |
 | QL-Q | T-24 v3·uni 휴장 파일을 quant-ledger 달력에서 | S | ☑ 5478538d(서버: 내보낸 파일 = v3 파일 121일·키 5개 같음). 연결 PR 전제 — ① 매일(주말·휴장 포함) KST 00:00 뒤·v3 20:05 전 1회 이상(06:00 체인 휴장일에도 도는 자리) ② 쓰기 전 서버 v3 `data/.kis_holidays.json` 링크 여부·소유자 확인과 백업 ③ 연결 당일 `sync_calendar.sh` v3 대조를 끄거나 일치 일수를 세지 않음(자기 사본 비교) ④ `COMPAT_LAYER.md:79` uni 휴장 원천을 `daily.calendar_export` 로 |

@@ -92,7 +92,7 @@
 | ID | 무엇 | 크기 | 상태 |
 |---|---|---|---|
 | PR-1 | 15:41 수집기 + `postclose.db`(자체 락, 대상 = 직전 판 모델 후보 먼저 → v3 유니버스 나머지, 16:00 뒤 받은 가격은 무효·수급만) | M | ☑ 296c13ad + PR-1b f68806ee(서버 --check 5종목 통과) |
-| PR-2 | stage `stg_flow_postclose_kiwoom`(기존 ka10060 규칙 그대로) | S | ◐ 구현 중 |
+| PR-2 | stage `stg_flow_postclose_kiwoom`(기존 ka10060 규칙 그대로) | S | ◐ 리뷰 '머지 가능'(2d99c9c9) — 골든 물려받기에 원천 TR 일치·SKIP 사유 `golden_inherited` 분리·STAGE_HANDOFF 설명 보완 중. 서버 재생 10-06~08 공유 44열 차이 0. 넘길 것 — PR-5: `price_valid IS TRUE` 만 가격, `collected_at` 은 UTC, fi 원천에 넣으면 K1-7a 허용표에 이 표 한정 G4 `golden_inherited`·G6 `first_write_wins`·G8 `not_blob` 등록 / PR-8: `python -m stage` 에 `--stage-root`·`--snapshot-root` 를 `data/model_db/` 로 명시(T-29, 빠뜨리면 연구 인계 `stage_builds` 에 섞임)·빌드 락 직접 처리·단독 건전성은 `health.check_stage(..., tables=)` |
 | PR-3 | fi 입력 판을 날짜로 고정(인계 이력 `data/deliver/history/<D'>_morning.json`) | S | ☑ b5225b9f |
 | PR-4 | 잠정 T 세션(달력 ∪ T, 유니버스 이월, 시총 = 직전 주식수 × T 종가, D' 시점 자르기, WISE 신선도 기준일) | M | ◐ 리뷰 중(01f0f28d). 서버 재생: PR-4 코드로 10-08 연구 판 격리 재빌드(equity 30/30·fi ok) → 그 판 고정 장 마감 판 T=10-12 rc 0, 컨센서스·연간·재무 3표 해시 = 아침판, 게이트 전부 pass, 음성 대조 3건(휴장 T·MD-SEAM·고정 없음) rc 2 |
 | PR-5 | T 행 얹기(가격·수정주가·수급) + T-6 + 후보 커버리지 게이트(상한 넘으면 판 실패 — N-42 Q4) | M~L | ☐ |

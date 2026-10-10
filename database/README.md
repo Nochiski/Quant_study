@@ -303,6 +303,34 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —
 보고 누락 판정은 워치독(`watchdog.sh`)의 몫이다(플랜 v2 §2-1).
 
+### 연속 창 판정 — `python -m daily.window_judge` (컷오버 X-2)
+
+그림자·실운영 3거래일 창과 되돌리기 5거래일 창을 판정 달력(`daily.calendar`)으로 센다. 규칙 정본은
+`docs/plans/2026-10-10-cutover-track.md` §4 · T-39 이고 모듈 머리 주석에 옮겨 두었다. 거래일 T 통과 = 장 마감 체인 단계
+런 전부 ok · 그날(KST) crit 0 · 수동 개입 0 · 다음 날 두 판 대조 `data/model_db/compare/<T>.json` pass(실운영
+결과·등록 하한, 그날 대조 런 전부 ok). 실패 1건이면 다음 거래일부터 다시 세고, 휴장·세션 예외일은 건너뛴다
+— 그날(주말 포함)의 crit·수동 개입은 직전 거래일에 귀속한다(T-39, 기준일 뒤 주말도 본다).
+crit 은 제목으로 가른다(N-43): 점수에 영향을 주는 경로(장 마감 체인·연구 아침 빌드·v3 반영·그 워치독,
+`COUNTED_CRIT_PREFIXES`)는 실패, 제외 목록(수집 단계·21:20 잠정판과 그 워치독·일일 리포트·백업·수동 도구,
+`EXCLUDED_CRIT_PREFIXES`)은 '판정 밖 crit' 으로 표시만, **두 목록 어디에도 없으면 '분류 안 된 crit' 으로 실패**다.
+스크립트에 새 crit 제목을 만들면 `test_window_judge.py::test_스크립트_crit_제목은_빠짐없이_분류된다` 가 깨진다 — 둘 중
+한 곳에 넣는다. 입력은 읽기만 하고 `data/cutover/window.json` 에 결과를 쓴다(`--dry-run` 이면 안 씀).
+rc 0 통과 · 1 아직·실패 · 2 입력 오류(장부 없음·notify.log 가 범위 시작 뒤에 시작·ISO 시각으로 시작하는 형식 밖 줄 포함).
+
+```bash
+# 그림자 시작일(10-14)에 한 번 — 빈 수동 개입 장부(없으면 판정 불가)
+PYTHONPATH=src .venv/bin/python -m daily.window_judge record --init
+# 손으로 개입한 날
+PYTHONPATH=src .venv/bin/python -m daily.window_judge record --date 20261015 --what "v3 반영 손 재실행" --by controller
+# PR-9 스위치 판정 — 그림자 3거래일(10-14~16). 셋째 날 대조는 토요일 08:10 체인(D=금요일)이 낸다
+PYTHONPATH=src .venv/bin/python -m daily.window_judge judge --start 20261014 --as-of 20261016
+# 컷오버 뒤 — 실운영 창 + 되돌리기 창
+PYTHONPATH=src .venv/bin/python -m daily.window_judge judge --start 20261019 --cutover 20261019
+```
+
+손으로 개입한 날(재실행·데이터 손수정·스위치 조작)은 `record` 로 장부 `data/cutover/manual_interventions.jsonl` 에
+남긴다 — 그날은 무사고가 아니다.
+
 ### 배포 — `scripts/deploy.sh`
 
 저장소 `database/{src,scripts}` + `backend/src/backtest_engine/` 을 서버로 민다. 기본은 dry-run 이고

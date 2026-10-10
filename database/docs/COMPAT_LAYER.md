@@ -396,7 +396,7 @@ compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등
 | refill(21:05 키움 원장 커밋 뒤) | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --no-scores --builds-from data/deliver/history/<T'>_morning.json [--shadow]` (늘 — ⑥ 결과와 무관, compat 만 7표, `--model-root` 불필요) |
 | 다음 날 아침 | `scripts/v3_post.sh --date D --basis morning --v3-db <v3 quant.db> --builds-from data/deliver/history/<D>_morning.json [--shadow]` (compat 만 — 7표·9표는 T-34 가 본 파일 기록으로 정한다) |
 
-다음 날 아침 반영 표: 그날 ⑥ 이 점수 포함 반영을 COMMIT 했으면(뒤에 daily_post 만 실패한 rc 6 포함) 7표, ⑥ 이 실패했거나 없었으면(판 실패·세션 예외일) 9표다 — refill 기록은 판정에 들어가지 않는다. 지금 PR-8 refill(`pr/PR-8` 89f81ae5 `postclose_chain.sh` `refill_main`)은 ⑥ 이 ok 일 때만 점수 포함으로 부른다 — 위 둘째 줄(늘 `--no-scores`)로 바꿔야 T-38 이 닫힌다.
+다음 날 아침 반영 표: 그날 ⑥ 이 점수 포함 반영을 COMMIT 했으면(뒤에 daily_post 만 실패한 rc 6 포함) 7표, ⑥ 이 실패했거나 없었으면(판 실패·세션 예외일) 9표다 — refill 기록은 판정에 들어가지 않는다. PR-8 `postclose_chain.sh` 의 세 호출(`close_main` ⑥ · `refill_main` · `morning_main`)이 위 표 그대로다 — refill 은 ⑥ 결과와 상관없이 늘 `--no-scores`(셸 테스트가 실물 v3_post.sh 로 인자 계약을 본다).
 
 ### 8-1. v3 쪽 변경 목록(V3-A~E — 컷오버 날, 백업 뒤, N-42 Q4)
 

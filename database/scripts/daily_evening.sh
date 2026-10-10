@@ -2,6 +2,7 @@
 # 18:05 KST 저녁 원장 슬롯 — 그날 확정된 축을 그날 저녁에 원장에 넣는다. 플랜 v2 §3 Task A.2.
 #   순서: 원장 락 → 캘린더 동기화 → D(오늘 KST) 거래일 판정 → [D 미완료면] 병렬 3갈래 →
 #         rc 취합 → runlog(evening_chain) → data/deliver/ledger_evening.json → 알림
+#         → [키움 rc 0 이면] 원장 락을 놓고 장 마감 판 재반영 훅 scripts/postclose_chain.sh refill(컷오버 PR-8 ⑦)
 #   ① 키움 ka10060·ka10014 fetch + --commit — KRX 대조 없이 원장 직행(결정 V2-1). 대조 상대인 KRX 는
 #      T+1 08:00 공표라 그날 저녁엔 없다. 오염 게이트(b)만 통과 조건이다(ka10008 이 없으니 basis=skipped).
 #   ② DART 당일 스윕·상세 — 접수 마감 18:00 직후.
@@ -30,6 +31,7 @@ done
 #   실패하면 warn 후 rc 3(락 없이 원장을 쓰지 않는다). 인자를 먼저 읽는 것은 대기 알림이 dry-run 인지
 #   알아야 해서다. 규칙(QL_RAW_LOCK_HELD · QL_RAW_LOCK_FILE 테스트 전용)은 scripts/raw_lock.sh 한 곳.
 #   대기 중 KST 날짜가 바뀌면(자정을 넘는 점유) crit 후 rc 3 으로 멈춘다 — D(오늘)를 대기 뒤에 정해서다(B-51).
+RAW_INHERITED="${QL_RAW_LOCK_HELD:-}"   # 부모가 쥔 원장 락은 이 셸이 놓지 않는다(재반영 훅 앞 락 반납)
 . scripts/raw_lock.sh
 raw_lock_acquire daily_evening "$DRY" || exit $?
 deliver_json() {
@@ -52,7 +54,7 @@ print("  deliver/ledger_evening.json 기록 " + json.dumps(payload, ensure_ascii
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_evening_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
-D=""; FAILED=""; SKIPPED=""
+D=""; FAILED=""; SKIPPED=""; REFILL_RC=""
 RC_KW=0; RC_DART=0; RC_WISE=0
 KW_LOG=""; DART_LOG=""; WISE_LOG=""; KW_DONE=""; WISE_DONE=""; WISE_N_BAD=""; WISE_BAD_SUMMARY=""; WISE_FROM=""
 # 세 갈래는 서로 다른 원장(kiwoom.db · dart.db · wise.db)만 건드리므로 병렬이 안전하다.
@@ -184,6 +186,19 @@ print(n_fail, json.dumps(kinds, ensure_ascii=False))' "$WISE_FROM")
       "kiwoom_rc=$RC_KW dart_rc=$RC_DART wise_rc=$RC_WISE kiwoom_done_at=${KW_DONE:-none} wise_done_at=${WISE_DONE:-none}${FAILED:+ failed=$FAILED}"
   fi
   [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "$RC_DART" "$RC_WISE" "$KW_DONE" "$WISE_DONE" "$WISE_N_BAD" "$WISE_BAD_SUMMARY"
+  # 장 마감 판 재반영(컷오버 PR-8 ⑦ · QL-D 후속 · T-38) — 21:05 키움 원장 커밋이 끝났으면(rc 0) 그 완료를 받아 v3 에 한 번 더
+  # 반영한다(compat 만, daily_post 없음 — 9표·점수 없는 7표 판정은 postclose_chain.sh). 고정 시각 크론이 아니라 이 체인의
+  # 끝(런 로그·최종 인계 파일 뒤)에 잇는다(P9). 재반영은 원장을 읽기만 하므로 원장 락을 먼저 놓는다 — 세 갈래는 이미
+  # 끝났다(wait). 부모가 물려준 락이면 놓지 않는다. rc 는 이 체인의 rc·FAILED 에 넣지 않고, 0·1 이 아니면 아래에서 warn.
+  if [ -z "$DRY" ] && [ "$RC_KW" -eq 0 ]; then
+    if [ -z "$RAW_INHERITED" ]; then
+      exec 9>&-
+      unset QL_RAW_LOCK_HELD
+      echo "  원장 락 반납 — 장 마감 재반영은 원장을 읽기만 한다 $(kst)"
+    fi
+    bash scripts/postclose_chain.sh refill --date "$D"; REFILL_RC=$?
+    echo "  장 마감 재반영 rc=$REFILL_RC — logs/postclose/${D}_refill.log $(kst)"
+  fi
 fi
 echo "════ 종료 키움=$RC_KW DART=$RC_DART WISE=$RC_WISE $(kst) ════"
 } > "$RUN" 2>&1
@@ -191,8 +206,9 @@ cat "$RUN" >> "$LOG"
 SUM_KW=$(grep -E "^\[kw_daily\] (fetch status|commit )" "$RUN" | tail -2 | tr '\n' ' ')
 SUM_DART=$(grep -E "^── DART 일일 증분|^  공시 " "$RUN" | tail -2 | tr '\n' ' ')
 SUM_WISE=$(grep -E "④ 종료|⚠⚠|무커버" "$RUN" | tail -2 | tr '\n' ' ')
-SUMMARY=$(printf 'D=%s | 키움 %s| DART %s| WISE %s| 종료 키움 %s · WISE %s' \
-  "$D" "${SUM_KW:-없음 }" "${SUM_DART:-없음 }" "${SUM_WISE:-없음 }" "${KW_DONE:-?}" "${WISE_DONE:-?}" | cut -c1-900)
+SUMMARY=$(printf 'D=%s | 키움 %s| DART %s| WISE %s| 종료 키움 %s · WISE %s%s' \
+  "$D" "${SUM_KW:-없음 }" "${SUM_DART:-없음 }" "${SUM_WISE:-없음 }" "${KW_DONE:-?}" "${WISE_DONE:-?}" \
+  "${REFILL_RC:+ | 장 마감 재반영 rc=$REFILL_RC}" | cut -c1-900)
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_evening $SKIPPED — 건너뜀" "D=$D | 로그 $LOG"
   rm -f "$RUN"; exit 0
@@ -205,6 +221,12 @@ if [ "${WISE_N_BAD:-0}" -gt 0 ] && [ -z "$DRY" ]; then
     "D=$D | 종류 $WISE_BAD_SUMMARY | 같은 날 재실행: README 'WISE 같은 날 재실행'(자정 전) | 로그 $WISE_LOG"
 elif [ -z "$WISE_N_BAD" ] && [ "$RC_WISE" -eq 0 ] && [ -z "$DRY" ]; then
   scripts/notify.sh warn "WISE 실패 콜 수 확인 불가" "D=$D | 수집기 rc 0, 런 로그(run_at>=$WISE_FROM) 못 읽음 | 로그 $LOG"
+fi
+# 장 마감 재반영 훅이 0(완료·건너뜀·꺼짐)·1 이 아니면 warn 1건 — 재반영 체인이 자기 crit 을 못 남기고 죽은 경우
+# (홈 이동·인자·설정 오류 등)도 사람에게 닿게(조용한 실패 금지). 저녁 체인 rc·FAILED 는 그대로다.
+if [ -n "$REFILL_RC" ] && [ "$REFILL_RC" -ne 0 ] && [ "$REFILL_RC" -ne 1 ]; then
+  scripts/notify.sh warn "daily_evening 장 마감 재반영 rc=$REFILL_RC" \
+    "D=$D | scripts/postclose_chain.sh refill 이 rc $REFILL_RC 로 끝났다 — 로그 logs/postclose/${D}_refill.log · $LOG"
 fi
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_evening 실패:$FAILED" "$SUMMARY | 로그 $LOG $KW_LOG $DART_LOG $WISE_LOG"

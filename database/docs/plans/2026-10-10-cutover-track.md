@@ -94,7 +94,7 @@
 |---|---|---|---|
 | K1-3a | EG13 미래 데이터 0(equity 팩트 표, 기준일 T-12, 음성 대조) | M | ☑ 17bb8340 + 후속 c0fd8528(서버 현판 22표 PASS) |
 | K1-3b | `universe_daily` 정지 신호 공개일을 stage 공개일 축으로(B-61, 노출 실측 먼저) | S×2 | ☐ |
-| K1-4a | 조용한 손실 검사: 확정판 뒤 모델 폐포 27표 diff(기록형, 2주 뒤 차단 전환 — N-42 Q4) | M | ☐ |
+| K1-4a | 조용한 손실 검사: 확정판 뒤 모델 폐포 27표 diff(기록형, 2주 뒤 차단 전환 — N-42 Q4) | M | ◐ 구현 중(equity_diff 재사용 · 폐포 표는 fi 원천 + equity 규칙 입력을 코드로 따라감 · 08:10 체인 끝 기록형, 차단 스위치 꺼짐 — 10-14 배포에 넣어 2주 기록 시작) |
 | K1-5a | 결정성 3/3(재생 실측, 컨트롤러) | S | ☑ 서버 격리 재생 3패스(베이스 224a8ba6 시점 코드, D=10-08 morning, `--stage-at 20261008` 로 인계 이력의 stage 판 고정): equity 30표·fi 9·모델 11 = 50행의 content_hash·행 수 3/3 완전 일치 |
 | K1-6a | 미해결 수정주가 4묶음 기록형 지표 + 묶음별 처리 규칙 | S | ☐ |
 | K1-7a | SKIP 허용표 — 모델 원천·fi·모델에서 목록 밖 SKIP = 실패 | M | ☑ 266040fc(허용표 `src/stage/skip_allow.py` — 목록 밖 SKIP = 층 FAIL, EG13 dimension_table 허용, opinion_daily EG21 허용 삭제. 병합본 전체 2,651 통과. 서버 운영 판 현재·최근 3판 허용표 밖 0) |
@@ -139,7 +139,7 @@
 | QL-J | 키 이관(quant-ledger 자기 설정을 기본값으로) | S | ☑ e4f26c05(QL_ENV = `$HOME/quant-ledger/.env` 하나 — api·deliver·notify 텔레그램 분기는 없으면 폴백 없이 실패, 진입점 12개가 cd 직후 고정, deploy.sh ⑧ 이 rsync 전에 원격 비밀 파일 존재·소유·600 확인(내용 안 읽음). 리뷰 '수정 후 머지' → 손 절차서·deliver rc 2·DART 값 규칙 반영. 서버 비밀 파일은 배포(10-14) 전에 만든다 — 아래 §5) |
 | QL-S | T-46 — V3-C·복원 뒤 첫 반영 = 증분 창, 제자리 `--full` 이 대상 이력 시작 앞이면 거부, 문서(CUTOVER_ROLLBACK·COMPAT §7·§8) | S | ◐ 구현 4330c92b(복원 뒤 첫 반영 = `--first-after-restore` + 복원 뒤 계산 + 스테이징에 그 복원 기록, 제자리 `--full` 이력 시작 하한·`v3_post.sh --window-days`) → 리뷰 중. 서버 리허설(베이스+QL-S, v3 10-08 사본): ① 백업 2벌 ② 첫 반영 증분 rc 0·22.9초 ③ 7표 복원 21.3초 ④ seven PASS ⑥ --with-scores all PASS ⑦ 손 apply(복원 앞 계산) rc 2·표식 없는 v3_post rc 2·sha 불변·표식 있는 v3_post rc 0 ⑧ 제자리 --full rc 2·sha 불변('이력 시작 2025-01-02·2025-01-23 > 창 시작 2024-10-08') |
 | QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ☑ (QL-L 머지 — `python -m daily.cutover_watch`: 허용·금지·스코어링 job 분류(서버 실측 26종 전부 분류), 로그 표지는 실제 메시지 모양만, 점수는 compat 기록과 대조, 크론 daily_all·daily_post·직접 진입점·휴장 쓰기 금지, 그림자 `--baseline`. 크론은 컷오버 날 연결) |
-| QL-M·N | compat 만료 정리 · compare 기준 scope | S | ☐ |
+| QL-M·N | compat 만료 정리 · compare 기준 scope | S | ◇ 컷오버 뒤(QL-M: consensus_annual·financial_summary 의 retire_when = v3 점수 엔진 제거(V3-B) — 그 전에 빼면 복원 7표·refill 코드를 다시 고친다. 두 표는 T-45 상 소비자 없음이라 그동안 쓰기는 무해 · QL-N: model_compare.sh 는 크론 없는 손 도구) |
 | QL-P | T-23 v3 `market_*` 를 KRX 지수 원장으로 | M | ✕ 보류(T-27) — 구현 브랜치 `pr/QL-P` 3b9a5e04 는 v3 폴더 이관 때 쓴다(열 대응표: 지수 3종 대응·VKOSPI·폭·시장 수급·프로그램 없음·업종 부분) |
 | QL-Q | T-24 v3·uni 휴장 파일을 quant-ledger 달력에서 | S | ☑ 5478538d(서버: 내보낸 파일 = v3 파일 121일·키 5개 같음). 연결 PR 전제 — ① 매일(주말·휴장 포함) KST 00:00 뒤·v3 20:05 전 1회 이상(06:00 체인 휴장일에도 도는 자리) ② 쓰기 전 서버 v3 `data/.kis_holidays.json` 링크 여부·소유자 확인과 백업 ③ 연결 당일 `sync_calendar.sh` v3 대조를 끄거나 일치 일수를 세지 않음(자기 사본 비교) ④ `COMPAT_LAYER.md:79` uni 휴장 원천을 `daily.calendar_export` 로 |
 | V3-A~E | v3 쪽 — A `daily_post`·`daily_insight` 체인(T-31) · B `daily_all` 크론 제거 · C 첫 반영(`v3_post.sh --full`) · D v3 휴장 쓰기 크론 2줄 끄기(`refresh_year_holidays`·`monthly_holiday_review`, QL-Q 연결과 같은 날) · E uni 점수 날짜 조건 — 백업 뒤 컷오버 날(N-42 Q4 일괄 승인). 변경 목록은 COMPAT_LAYER §8 | S×5 | ☐ |

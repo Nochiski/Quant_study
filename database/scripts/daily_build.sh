@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → 확정 빌드
 # → 모델 단계(fi → 모델 → 일간 엑셀 발송, scripts/model_daily.sh — N-25 Q0)
-# → 장 마감 판 아침 잇기(v3 아침 KRX 재반영 · 두 판 대조, scripts/postclose_chain.sh morning — 컷오버 PR-8) → 요약.
+# → 장 마감 판 아침 잇기(v3 아침 KRX 재반영 · 두 판 대조, scripts/postclose_chain.sh morning — 컷오버 PR-8)
+# → 조용한 손실 검사(직전 아침 확정판 대조, python -m daily.silent_loss — 컷오버 K1-4a, 기록형) → 요약.
 # 플랜 P1 Task 1.8 / 결정 R1. 확정 빌드(stage·equity basis=morning)는 scripts/build_morning.sh 가 한다
 # (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
@@ -19,7 +20,7 @@ export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 PY=.venv/bin/python
 # 인자는 락보다 먼저 읽는다 — 락 대기 알림이 dry-run 인지 알아야 한다
-DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""; PRC=""
+DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""; PRC=""; SLRC=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --date) DATE_ARG="$2"; shift 2 ;;
@@ -160,6 +161,13 @@ if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
     echo "──── 장 마감 판 아침 잇기 시작 $(kst) ────"
     bash scripts/postclose_chain.sh morning --date "$D"; PRC=$?
     echo "──── 장 마감 판 아침 잇기 종료 rc=$PRC $(kst) ────"
+    # 조용한 손실 검사(컷오버 K1-4a · N-42 Q4) — 체인 맨 끝(확정판·모델 단계·아침 잇기가 끝난 뒤 이어서, 시간 한도 없음 P9).
+    # 모델 폐포 표를 직전 거래일 아침 확정판과 대조해 결과 logs/silent_loss/<D>.json · 런 로그 silent_loss · 미설명·판정
+    # 불가면 notify 한 줄을 모듈이 스스로 남긴다. 기록형(config/silent_loss.env — 그림자 시작 10-14 부터 2주 기록 뒤 차단 전환)
+    # 이라 rc 는 확정판 rc·요약 등급에 영향이 없다. 모듈 rc 0~3 밖(모듈이 죽음)만 아래에서 warn 1건
+    echo "──── 조용한 손실 검사 시작 $(kst) ────"
+    $PY -m daily.silent_loss check --date "$D"; SLRC=$?
+    echo "──── 조용한 손실 검사 종료 rc=$SLRC $(kst) ────"
   fi
 fi
 # 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).
@@ -173,12 +181,19 @@ cat "$RUN" >> "$LOG"
 # ──── factor_inputs 종료 … 이 tail 창을 밀어내지 않게). 모델 단계가 없는 날은 종전과 같은 바이트다.
 SUMMARY=$({ grep -E "^모델 단계 (완료|실패)|^──── 모델 단계 종료" "$RUN" | tail -2
            grep -E "^──── 장 마감 판 아침 잇기 종료" "$RUN" | tail -1
+           grep -E "^──── 조용한 손실 검사 종료" "$RUN" | tail -1
            sed '/^──── 모델 단계 시작/,$d' "$RUN" | grep -E "원장 락 대기|^원장 건전성|──── .* 종료|아직 미완료|KRX 401" | tail -8; } | tr '\n' ' ' | cut -c1-900)
 # 장 마감 판 아침 잇기(PR-8 ⑧)가 0(완료·꺼짐)·1(대조 불일치 warn) 이 아니면 warn 1건 — 아침 잇기가 자기 crit 을 못 남기고
 # 죽은 경우(홈 이동·인자·설정 오류 등)도 사람에게 닿게(조용한 실패 금지). 확정판 rc·등급은 그대로다.
 if [ -n "$PRC" ] && [ "$PRC" -ne 0 ] && [ "$PRC" -ne 1 ]; then
   scripts/notify.sh warn "daily_build 장 마감 판 아침 잇기 rc=$PRC" \
     "D=$D | scripts/postclose_chain.sh morning 이 rc $PRC 로 끝났다 — 로그 logs/postclose/${D}_morning.log · $LOG"
+fi
+# 조용한 손실 검사(K1-4a)가 자기 rc(0 미설명 0 · 1 미설명 · 2 판정 불가 · 3 차단)가 아닌 값으로 끝나면(모듈이 기록·알림을
+# 못 남기고 죽음) warn 1건 — 조용한 실패 금지. 확정판 rc·등급은 그대로다
+if [ -n "$SLRC" ] && { [ "$SLRC" -lt 0 ] || [ "$SLRC" -gt 3 ]; }; then
+  scripts/notify.sh warn "daily_build 조용한 손실 검사 rc=$SLRC" \
+    "D=$D | python -m daily.silent_loss check 가 rc $SLRC 로 끝났다(결과 logs/silent_loss/${D}.json 없음일 수 있다) — $LOG"
 fi
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 확정판이 이미 있어 재수집·재빌드하지 않았다 — 다시 돌리려면 QL_FORCE=1 또는 --date $D | 로그 $LOG"

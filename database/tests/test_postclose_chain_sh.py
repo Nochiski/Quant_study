@@ -316,6 +316,52 @@ def test_missing_pinned_board_fails_before_the_build_lock(tmp_path: Path, broken
     assert H_PREV in r.notify[0]
 
 
+def _silent_loss(root: Path, d: str, *, unexplained: int, undecidable: int = 0) -> None:
+    """D 의 조용한 손실 검사 결과(daily.silent_loss check 가 쓰는 모양 — gate 가 읽는 키만)."""
+    from daily import silent_loss
+
+    p = root / silent_loss.OUT_DIR / f"{d}.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"schema": silent_loss.SCHEMA, "tool": silent_loss.TOOL, "date": d, "error": None,
+                             "totals": {"unexplained": unexplained, "undecidable": undecidable}}),
+                 encoding="utf-8")
+
+
+@pytest.mark.parametrize(("block", "unexplained", "blocked"), [
+    ("1", 3, True),        # 차단형 + 미설명 → 막음
+    ("1", 0, False),       # 차단형 + 미설명 0 → 통과
+    ("0", 3, False),       # 기록형(저장소 값) → 결과와 무관하게 통과
+])
+def test_silent_loss_gate_blocks_before_the_build_lock_only_when_switched_on(
+        tmp_path: Path, block: str, unexplained: int, blocked: bool) -> None:
+    """K1-4a — 조용한 손실 차단 스위치(config/silent_loss.env)가 켜져 있고 D' 아침 확정판 검사에 미설명이 있으면
+    고정 판 확인 뒤·빌드 락 전에 crit(그날 장 마감 판 없음 — T-7 대체 발송 경로). 꺼져 있으면 지금처럼 다 돈다."""
+    root = _root(tmp_path)
+    (root / "config/silent_loss.env").write_text(f"SILENT_LOSS_BLOCK={block}\n", encoding="utf-8")
+    _silent_loss(root, D_PREV, unexplained=unexplained)
+    r = _chain(tmp_path, "close", "--date", T)
+    if blocked:
+        assert r.rc == 2, r.out + r.log
+        assert r.mods == ["daily.postclose"]
+        assert not any(c.startswith("flock") and " 6" in c for c in r.calls)
+        assert r.titles("crit") == ["장 마감 체인 실패: 조용한 손실 차단"]
+        assert "미설명 3" in r.notify[0]
+    else:
+        assert r.rc == 0, r.out + r.log
+        assert r.mods == STEP_MODULES
+        assert r.titles("crit") == []
+
+
+def test_silent_loss_gate_blocks_a_missing_result_when_switched_on(tmp_path: Path) -> None:
+    """차단형인데 D' 검사 결과가 없으면(08:10 끝 검사가 돌지 않음) 막는다 — 못 쟀으면 통과가 아니다(P1)."""
+    root = _root(tmp_path)
+    (root / "config/silent_loss.env").write_text("SILENT_LOSS_BLOCK=1\n", encoding="utf-8")
+    r = _chain(tmp_path, "close", "--date", T)
+    assert r.rc == 2, r.out + r.log
+    assert r.mods == ["daily.postclose"]
+    assert r.titles("crit") == ["장 마감 체인 실패: 조용한 손실 차단"]
+
+
 def test_session_exception_day_skips_the_whole_chain(tmp_path: Path) -> None:
     """T-26 — 세션 시각이 바뀌는 날 수집기는 rc 3 이고, 체인은 그날 전체를 건너뛴다(기록만: warn 1건).
 

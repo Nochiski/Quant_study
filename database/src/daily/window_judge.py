@@ -113,6 +113,9 @@ COUNTED_CRIT_PREFIXES: tuple[str, ...] = (
     # 연구 아침 빌드 — daily_build.sh(실패·중단·원장 락 날짜 바뀜) · build_morning.sh · build_chain.sh(확정판) ·
     # model_daily.sh(아침 fi·모델·엑셀)
     "daily_build ", "확정 빌드 시작 불가", "확정판 빌드 실패", "모델 단계 실패",
+    # 연구 아침 빌드 끝 조용한 손실 검사의 차단형 crit — 파이썬 `daily.silent_loss.TITLE_BLOCK`(K1-4a, 지금은 기록형이라
+    # 나오지 않는다). 셸 훑기 테스트에 안 잡혀 `tests/test_silent_loss.py` 가 상수로 대조한다
+    "조용한 손실 차단",
     # v3 반영 — scripts/v3_post.sh
     "v3_post ",
     # v3 반영 경로 감시 — 파이썬 `daily.cutover_watch`(QL-L)의 `TITLE_VIOLATION`·`TITLE_ERROR`(v3 수집 0·점수 쓰기 한 곳·

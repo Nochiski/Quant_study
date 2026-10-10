@@ -313,6 +313,9 @@ def test_model_daily_real_build_lock_released_then_runs(tmp_path: Path) -> None:
 # ── daily_build.sh → 모델 단계 ──────────────────────────────────────────────────
 # 원장 단계의 -m 호출(KRX 는 대역 python 이 파일로 실행해 calls 에 남지 않는다)
 LEDGER_STEPS = ["daily.kw_daily", "daily.kw_daily", "daily.ledger_health"]
+# 체인 맨 끝 조용한 손실 검사(K1-4a — 확정판이 선 날 아침 잇기 뒤, 기록형). 동작은 tests/test_silent_loss.py
+SILENT_LOSS_CALL = f"daily.silent_loss check --date {D}"
+TAIL = ["daily.silent_loss"]
 
 
 def test_daily_build_runs_model_step_after_the_morning_build(tmp_path: Path) -> None:
@@ -321,8 +324,8 @@ def test_daily_build_runs_model_step_after_the_morning_build(tmp_path: Path) -> 
     보인다."""
     r = _run(tmp_path, "daily_build.sh", "--date", D)
     assert r.rc == 0, r.out
-    assert r.mods == [*LEDGER_STEPS, "build_morning", *MODEL_STEPS]
-    assert r.calls[-1] == f"deliver model-daily --date {D} --basis morning --send"
+    assert r.mods == [*LEDGER_STEPS, "build_morning", *MODEL_STEPS, *TAIL]
+    assert r.calls[-2:] == [f"deliver model-daily --date {D} --basis morning --send", SILENT_LOSS_CALL]
     assert _crit(r) == []
     done = [n for n in r.notify if n.startswith("info|daily_build 완료|")]
     assert len(done) == 1 and f"모델 단계 완료 D={D}" in done[0]
@@ -335,7 +338,7 @@ def test_daily_build_soft_build_failure_still_runs_model_step(tmp_path: Path) ->
     체인 rc 1·warn 은 종전 그대로."""
     r = _run(tmp_path, "daily_build.sh", "--date", D, build_rc=1)
     assert r.rc == 1, r.out
-    assert r.mods[-3:] == MODEL_STEPS
+    assert r.mods[-4:] == [*MODEL_STEPS, *TAIL]
     assert [n.split("|")[0] for n in r.notify] == ["warn"]
 
 
@@ -355,7 +358,7 @@ def test_daily_build_model_failure_is_soft_and_recorded(tmp_path: Path) -> None:
     확정판 rc(0)·요약 등급(info)을 실패로 바꾸지 않고, 요약 본문에 실패 단계가 보인다."""
     r = _run(tmp_path, "daily_build.sh", "--date", D, fi_rc=2)
     assert r.rc == 0, r.out
-    assert r.mods == [*LEDGER_STEPS, "build_morning", "factor_inputs"]
+    assert r.mods == [*LEDGER_STEPS, "build_morning", "factor_inputs", *TAIL]
     crit = _crit(r)
     assert len(crit) == 1 and "모델 단계 실패: factor_inputs(rc=2)" in crit[0]
     done = [n for n in r.notify if n.startswith("info|daily_build 완료|")]
@@ -382,7 +385,7 @@ def test_daily_build_model_step_takes_the_build_lock_itself(tmp_path: Path) -> N
     daily_build 가 비우므로 대역 flock 이 `-n 9` 한 번 불린다."""
     r = _run(tmp_path, "daily_build.sh", "--date", D)
     assert r.rc == 0, r.out
-    assert r.mods[-3:] == MODEL_STEPS
+    assert r.mods[-4:] == [*MODEL_STEPS, *TAIL]
     assert r.flock == ["-n 9"]
     assert (tmp_path / "build.lock").exists()
     assert _waits(r) == []
@@ -512,7 +515,7 @@ def test_daily_build_summary_shows_the_cutover_result(tmp_path: Path, evening: s
     rc·요약 등급은 그대로(info 'daily_build 완료')."""
     r = _run(tmp_path, "daily_build.sh", "--date", D, conf=LIVE_CONF, evening=evening)
     assert r.rc == 0, r.out
-    assert r.calls[-1] == BUILD_ONLY_CALL
+    assert r.calls[-2:] == [BUILD_ONLY_CALL, SILENT_LOSS_CALL]
     done = [n for n in r.notify if n.startswith("info|daily_build 완료|")]
     assert len(done) == 1 and done[0].split("|", 2)[2].startswith(line), r.notify
 

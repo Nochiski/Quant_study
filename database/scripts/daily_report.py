@@ -11,7 +11,8 @@
          · 게이트 폐기(stage·빌드 health 실패)
          · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB
   warn — 건전성 warn 항목 실패, 아직 `running` 인 런, 러너가 정상 종료로 정한 상태
-         (`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception · 두 판 대조 mismatch),
+         (`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception · 두 판 대조 mismatch ·
+         조용한 손실 기록형 unexplained·undecidable),
          저녁 WISE 부분 실패(인계 파일
          `wise_n_bad` > 0 — 수집기 rc 0 인 채 일부 콜 실패, N-27 ③. 같은 리포트의 원장 `wise.run`
          이 pass 면 '회복'으로만 적는다) · 그 실패 수 확인 불가(키가 있는데 null, wise_rc 0)

@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import duckdb
+from daily.kw_daily import COMMIT_MIN_RATIO
 from model.contracts import FI_TABLES, UniverseRule
 from stage import skip_allow
 from stage.gates import GateResult, GateStatus
@@ -73,10 +74,15 @@ COLLECTION_LAG_MAX = 1
 #   · N-35 ③ 장 마감 프로브 3일(10-06~08): 후보 100종목 15:46 회차 100/100, 한도 초과·오류 0. ka10060
 #     종목당 0.32초라 후보(약 600)를 먼저 받으면 약 3.2분 — 15:41 시작이면 16:00 컷오프 전에 끝난다.
 #     정상 날의 결측은 0 에 가깝다.
-#   · 크기는 저녁 키움 직행 게이트의 ka10060 커버 하한 0.98(`daily.kw_daily.COMMIT_MIN_RATIO` — 요청
-#     종목 중 dt=D 를 받은 비율, T-28 이 06:00 보강에도 그대로 쓴다)과 같게 둔다 — 같은 TR 의 종목 단위
-#     결측 허용치. 후보 600 이면 12 종목까지 통과한다.
-T_CANDIDATE_MISSING_MAX = 0.02
+#   · 크기는 저녁 키움 직행 게이트의 ka10060 커버 하한(`daily.kw_daily.COMMIT_MIN_RATIO` 0.98 — 요청
+#     종목 중 dt=D 를 받은 비율, T-28 이 06:00 보강에도 그대로 쓴다)에서 끌어온다 — 같은 TR 의 종목 단위
+#     결측 허용치(1 − 0.98). 후보 600 이면 12 종목까지 통과한다. round 는 부동소수 잡음(1 − 0.98 =
+#     0.020000000000000018)을 지운다.
+T_CANDIDATE_MISSING_MAX = round(1.0 - COMMIT_MIN_RATIO, 6)
+# 후보 중 T-6 당일 기업행위 보류 비율 경고선(기록형 — FG5 metrics `warn`, 판정은 바꾸지 않는다. 새 정지
+# 조건을 만들지 않는다, P3). 보류가 한꺼번에 몰리면 원천(pred_pre·D' 종가) 쪽 결함일 수 있어 사람이 본다.
+# 크기는 결측 상한과 같다
+T_CANDIDATE_PENDING_WARN = T_CANDIDATE_MISSING_MAX
 DATE_KEYED = ("fi_prices", "fi_adj_prices", "fi_flows", "fi_credit")
 
 
@@ -97,6 +103,8 @@ class GateContext:
     # 장 마감 판 FG5 대상 = 직전 판 모델 후보(`daily.postclose.fi_candidates`). 못 읽었으면 None
     t_candidates: tuple[str, ...] | None = None
     t_candidates_from: str = ""             # 후보를 읽은 fi 판 id, 못 읽었으면 그 사유
+    t_source_build: str = ""                # 장 마감 stage 판 id(T 행 원천)
+    t_source_max_date: str | None = None    # 그 판의 max(date) — T 가 아니면 판이 T 수집 전에 섰다
 
     def __post_init__(self) -> None:
         if not self.asof:
@@ -226,7 +234,7 @@ def fg1_rows(ctx: GateContext) -> GateResult:
 def fg2_overlay(ctx: GateContext) -> GateResult:
     """아침판 — T 행을 포함한 전 행이 KRX 다. 장 마감 판(evening) — T 전 행은 연구 판 그대로 KRX,
     T 행은 장 마감 원천(`T_PRICE_SOURCE`), 시총 기준은 전 종목 `T_MKTCAP_BASIS`(D' 주식수 × T
-    종가). T 행 수(`n_t_price_rows`)는 기록만 한다 — 얹기·커버리지 판정은 PR-5."""
+    종가). T 행 수(`n_t_price_rows`)는 기록만 한다 — 후보 커버리지 판정은 FG5."""
     if ctx.basis == "evening":
         prices, uni = ctx.view("fi_prices"), ctx.view("fi_universe")
         on_t = f"date = DATE '{ctx.date}'"
@@ -413,7 +421,9 @@ def fg5_t_coverage(ctx: GateContext) -> GateResult:
     'T 가격 없음' = fi_prices 에 그 종목의 T 종가 행이 없다: 장 마감 원장에 행이 없거나(no_row)
     price_valid 가 참이 아니거나(price_invalid — 16:00 뒤 응답) 그 밖(종가 0 이하·층 밖 — other).
     T-6 당일 기업행위 보류(corp_action_pending)는 T 행이 있으므로 세지 않는다 — 수집 결손이 아니라
-    사건이다(후보 중 수 · 층 전체 갈래별 수는 기록만).
+    사건이다(후보 중 수 · 층 전체 갈래별 수 · T 가격은 있는데 pred_pre 가 없는 층 종목 수는 기록만).
+    후보 중 보류 비율이 `T_CANDIDATE_PENDING_WARN` 을 넘으면 metrics `warn`(판정은 그대로).
+    장 마감 stage 판 id 와 그 판의 max(date)를 함께 남긴다.
     FAIL: 결측 비율 > `T_CANDIDATE_MISSING_MAX` · 후보를 못 읽음(candidates_unavailable).
     """
     con = ctx.con
@@ -422,7 +432,9 @@ def fg5_t_coverage(ctx: GateContext) -> GateResult:
                           f"candidates_unavailable — 직전 판 모델 후보를 못 읽었다(커버리지를 잴 수 "
                           f"없다): {ctx.t_candidates_from}",
                           {"n_candidates": None, "candidates_from": ctx.t_candidates_from,
-                           "missing_max": T_CANDIDATE_MISSING_MAX})
+                           "missing_max": T_CANDIDATE_MISSING_MAX,
+                           "t_source_build": ctx.t_source_build,
+                           "t_source_max_date": ctx.t_source_max_date})
     con.execute("CREATE OR REPLACE TEMP TABLE _fg5_cand (ticker VARCHAR)")
     con.executemany("INSERT INTO _fg5_cand VALUES (?)", [(t,) for t in ctx.t_candidates])
     rows = con.execute(
@@ -443,23 +455,33 @@ def fg5_t_coverage(ctx: GateContext) -> GateResult:
     pending = {str(k): int(v) for k, v in con.execute(
         f"SELECT kind, count(*) FROM _t_pending WHERE ticker IN "
         f"(SELECT ticker FROM {ctx.view('fi_universe')}) GROUP BY kind ORDER BY kind").fetchall()}
+    n_pred_pre_missing = _count(
+        con, f"SELECT count(*) FROM _t_src s JOIN {ctx.view('fi_prices')} p ON p.ticker = s.ticker "
+             f"AND p.date = DATE '{ctx.date}' WHERE s.pred_pre_krw IS NULL")
+    n_cand_pending = sum(1 for *_, r in rows if r == "corp_action_pending")
+    pending_ratio = n_cand_pending / n if n else None
+    warn = pending_ratio is not None and pending_ratio > T_CANDIDATE_PENDING_WARN
     metrics: dict[str, object] = {
         "n_candidates": n, "n_missing": len(missing), "missing_ratio": ratio,
         "missing_max": T_CANDIDATE_MISSING_MAX, "n_no_row": len(no_row),
         "n_price_invalid": len(invalid), "n_missing_other": len(missing) - len(no_row) - len(invalid),
         "missing_tickers": missing[:50], "candidates_from": ctx.t_candidates_from,
-        "n_candidates_corp_action_pending": sum(1 for *_, r in rows
-                                                if r == "corp_action_pending"),
-        "corp_action_pending": pending}
+        "n_candidates_corp_action_pending": n_cand_pending,
+        "candidates_corp_action_pending_ratio": pending_ratio,
+        "corp_action_pending_warn_ratio": T_CANDIDATE_PENDING_WARN, "warn": warn,
+        "corp_action_pending": pending, "n_pred_pre_missing": n_pred_pre_missing,
+        "t_source_build": ctx.t_source_build, "t_source_max_date": ctx.t_source_max_date}
+    warn_note = (f" · warn: 후보 중 T-6 보류 {n_cand_pending}/{n} > {T_CANDIDATE_PENDING_WARN}"
+                 if warn else "")
     if ratio is None or ratio > T_CANDIDATE_MISSING_MAX:
         return GateResult(
             "FG5", GateStatus.FAIL,
             f"t_price_missing_over_max — 후보 {len(missing)}/{n} 이 T 가격 없음"
             f"(no_row {len(no_row)} · price_invalid {len(invalid)}) > 상한 "
-            f"{T_CANDIDATE_MISSING_MAX}: {','.join(missing[:20])}", metrics)
+            f"{T_CANDIDATE_MISSING_MAX}: {','.join(missing[:20])}{warn_note}", metrics)
     return GateResult("FG5", GateStatus.PASS,
-                      f"후보 {n} 중 T 가격 없음 {len(missing)} ≤ 상한 {T_CANDIDATE_MISSING_MAX}",
-                      metrics)
+                      f"후보 {n} 중 T 가격 없음 {len(missing)} ≤ 상한 {T_CANDIDATE_MISSING_MAX}"
+                      f"{warn_note}", metrics)
 
 
 GATES: tuple[Callable[[GateContext], GateResult], ...] = (

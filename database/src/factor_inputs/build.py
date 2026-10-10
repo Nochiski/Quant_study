@@ -83,10 +83,11 @@ from . import gates, queries
 # 1.6.0(2026-10-10, 컷오버 H1-4 · T-9): fi_adj_prices.adj_jump_ok 열 — 가격 축 미해결 사건 적용일 앞뒤
 # 6세션 안에서 수익률이 그날 가격제한폭을 넘는 점프 행마다 뒤집히는 계단 표식(scope 모멘텀·20일 변동성
 # 결측 판정의 재료)
-# 1.7.0(2026-10-10, 컷오버 PR-5 · T-2·T-6·N-42 Q4): 장 마감 판 T 행 얹기 — 가격(장 마감 stage
-# price_valid 행만, 'postclose')·수정주가(T 행을 원천에 넣어 연구 판 행과 같은 SQL — adj_ok·adj_jump_ok
-# 포함)·수급(price_valid 무관), T-6 당일 기업행위 보류(eligible=false · corp_action_pending), FG5 후보
-# 커버리지 게이트. 아침판 SQL 은 그대로
+# 1.7.0(2026-10-10, 컷오버 PR-5 · T-2·T-6·N-42 Q4): 장 마감 판 T 행 얹기 — 가격(장 마감 stage 의 쓸 수
+# 있는 행만, 'postclose' — compat 과 같은 술어)·수정주가(T 행을 원천에 넣어 연구 판 행과 같은 SQL —
+# adj_ok·adj_jump_ok 포함)·수급(price_valid 무관), 연구 부분 D' 자르기, T-6 당일 기업행위 보류
+# (eligible=false · corp_action_pending — 기준가 술어는 compat 과 공유), FG5 후보 커버리지 게이트.
+# 아침판 SQL 은 그대로
 RULES_VERSION = "fi1.7.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
@@ -426,6 +427,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     post_builds: dict[str, str] = {}
     t_cands: tuple[str, ...] | None = None
     t_from = ""
+    t_src_max: str | None = None
     tmp_root = root / "_tmp" / bid
     if tmp_root.exists():
         shutil.rmtree(tmp_root)
@@ -446,6 +448,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             post_builds, post_exprs = _resolve(post_root, (queries.T_SOURCE_TABLE,), stage=True)
             for name, expr in post_exprs.items():
                 con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+            # FG5 기록 — 그 판이 T 수집 뒤에 섰는지(max(date) = T) 사람이 바로 본다
+            got = _one(con, f'SELECT max(date) FROM "{queries.T_SOURCE_TABLE}"')
+            t_src_max = None if got is None else str(got)
             t_cands, t_from = _t_candidates(Path(candidates_root or research_root()), dprime)
         asof = d_iso if dprime is None else dprime.isoformat()
         con.execute(queries.calendar_sql(d_iso if evening else None))
@@ -490,7 +495,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             con=con, date=d_iso, basis=basis, price_from=p.price_from, flow_from=p.flow_from,
             rule=rule, min_eligible=min_eligible, dstar=None if dstar is None else str(dstar),
             collection_lag_sessions=lag, golden=gates.load_golden(golden_path), asof=asof,
-            t_candidates=t_cands, t_candidates_from=t_from)
+            t_candidates=t_cands, t_candidates_from=t_from,
+            t_source_build=post_builds.get(queries.T_SOURCE_TABLE, ""),
+            t_source_max_date=t_src_max)
         results = gates.run_all(ctx)
     except BaseException:
         shutil.rmtree(tmp_root, ignore_errors=True)

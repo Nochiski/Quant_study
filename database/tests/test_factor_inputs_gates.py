@@ -241,8 +241,8 @@ def con_evening(con) -> duckdb.DuckDBPyConnection:
     con.execute("UPDATE g_fi_prices SET close = 9000")
     _insert(con, "fi_prices", ticker="000001", date=dt.date.fromisoformat(T), close=12_000,
             price_source="postclose")
-    con.execute("CREATE TABLE _t_src (ticker VARCHAR, price_valid BOOLEAN)")
-    con.execute("INSERT INTO _t_src VALUES ('000001', true)")
+    con.execute("CREATE TABLE _t_src (ticker VARCHAR, price_valid BOOLEAN, pred_pre_krw BIGINT)")
+    con.execute("INSERT INTO _t_src VALUES ('000001', true, 0)")
     con.execute("CREATE TABLE _t_pending (ticker VARCHAR, kind VARCHAR)")
     return con
 
@@ -250,6 +250,8 @@ def con_evening(con) -> duckdb.DuckDBPyConnection:
 def _ectx(con: duckdb.DuckDBPyConnection, **over: object) -> gates.GateContext:
     over.setdefault("t_candidates", ("000001",))
     over.setdefault("t_candidates_from", "m_20260928T233000Z")
+    over.setdefault("t_source_build", "e_20260929T064500Z")
+    over.setdefault("t_source_max_date", T)
     return _ctx(con, date=T, basis="evening", asof=D, **over)
 
 
@@ -316,7 +318,7 @@ def _candidates(con: duckdb.DuckDBPyConnection, n: int) -> tuple[str, ...]:
                 coverage_state="fresh", coverage_age_days=0, eligible=False,
                 exclude_reason="estimates_none")
         _insert(con, "fi_prices", ticker=code, date=t, close=1_000, price_source="postclose")
-        con.execute(f"INSERT INTO _t_src VALUES ('{code}', true)")
+        con.execute(f"INSERT INTO _t_src VALUES ('{code}', true, 0)")
     return tuple(f"{i:06d}" for i in range(1, n + 1))
 
 
@@ -338,6 +340,9 @@ def test_fg5_missing_ratio_boundary_is_inclusive(con_evening, n_missing: int,
         _drop_t_price(con_evening, code, row=True)
     r = gates.fg5_t_coverage(_ectx(con_evening, t_candidates=cands))
     assert r.metrics["missing_max"] == gates.T_CANDIDATE_MISSING_MAX == 0.02
+    # 상한은 저녁 키움 직행 ka10060 커버 하한에서 끌어온다(T-28 — 같은 근거, 한 곳)
+    from daily.kw_daily import COMMIT_MIN_RATIO
+    assert gates.T_CANDIDATE_MISSING_MAX == round(1 - COMMIT_MIN_RATIO, 6)
     assert r.metrics["n_missing"] == n_missing and r.metrics["n_candidates"] == 50
     assert (r.status is GateStatus.PASS) is passed, r.detail
     if not passed:
@@ -379,3 +384,34 @@ def test_fg5_runs_only_on_the_evening_board(con, con_evening) -> None:
     res = gates.run_all(_ectx(con_evening))
     assert [g.name for g in res] == [*gates.GATE_ORDER, "FG5"]
     assert res[-1].status is GateStatus.SKIP and res[-1].detail.startswith("upstream_failed")
+
+
+@pytest.mark.parametrize(("n_pending", "warn"), [(1, False), (2, True)])
+def test_fg5_warns_on_mass_corp_action_pending_without_failing(con_evening, n_pending: int,
+                                                               warn: bool) -> None:
+    """PR-5 리뷰 MINOR-3 — 후보 중 T-6 보류 비율이 `T_CANDIDATE_PENDING_WARN`(0.02)을 넘으면 metrics
+    `warn` 과 detail 의 'warn:' 만 남기고 판정은 PASS(새 정지 조건을 만들지 않는다, P3). 후보 50 중
+    1 = 0.02 는 경고가 아니고 2 는 경고다."""
+    cands = _candidates(con_evening, 50)
+    for code in cands[:n_pending]:
+        con_evening.execute("UPDATE g_fi_universe SET exclude_reason = 'corp_action_pending' "
+                            f"WHERE ticker = '{code}'")
+        con_evening.execute(f"INSERT INTO _t_pending VALUES ('{code}', 'base_price')")
+    r = gates.fg5_t_coverage(_ectx(con_evening, t_candidates=cands))
+    assert r.status is GateStatus.PASS
+    assert r.metrics["n_candidates_corp_action_pending"] == n_pending
+    assert r.metrics["warn"] is warn and ("warn:" in r.detail) is warn
+    assert r.metrics["corp_action_pending_warn_ratio"] == gates.T_CANDIDATE_PENDING_WARN == 0.02
+
+
+def test_fg5_records_pred_pre_missing_and_the_source_build(con_evening) -> None:
+    """MINOR-3·NIT 4 — T 가격은 있는데 pred_pre 가 없는 층 종목 수, 장 마감 stage 판 id 와 그 판의
+    max(date)(T 가 아니면 판이 T 수집 전에 섰다)를 기록한다."""
+    cands = _candidates(con_evening, 3)
+    con_evening.execute("UPDATE _t_src SET pred_pre_krw = NULL WHERE ticker = '000002'")
+    con_evening.execute("INSERT INTO _t_src VALUES ('999999', true, NULL)")   # T 가격 행 없음
+    r = gates.fg5_t_coverage(_ectx(con_evening, t_candidates=cands,
+                                   t_source_max_date="2026-09-28"))
+    assert r.metrics["n_pred_pre_missing"] == 1
+    assert (r.metrics["t_source_build"], r.metrics["t_source_max_date"]) == (
+        "e_20260929T064500Z", "2026-09-28")

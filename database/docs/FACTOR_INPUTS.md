@@ -80,10 +80,14 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
   와 `tables.<표>.inputs` 에 남는다(연구 stage 판 목록 `stage_builds` 와 섞지 않는다). K1-7a 허용표에
   이 표 한정 stage SKIP 3종(G4 `golden_inherited` · G6 `write_mode=first_write_wins` · G8 `not_blob`)이
   올라 있다.
-- **가격(`fi_prices` T 행)** = `price_valid IS TRUE` 이고 종가 > 0 인 행만, `price_source = 'postclose'`.
-  close = |cur_prc|(키움 KRX 코드 정규장 종가, N-35 ①), volume = 수집 시점 누적 거래량, open·high·low·
-  amount = NULL(ka10060 에 없다 — 엔진은 종가만 읽는다). price_valid 가 NULL·false(16:00 뒤 응답)거나
-  원장 행이 없으면 그 종목은 T 가격이 없다(`no_price`).
+- **가격(`fi_prices` T 행)** = 가격을 쓸 수 있는 행만 — price_valid 참 · 종가 > 0 · 거래량 있음
+  (`daily.kw_daily.ka10060_postclose_price_usable_sql`, compat T 행 ① 선택과 같은 술어). `price_source =
+  'postclose'`, close = |cur_prc|(키움 KRX 코드 정규장 종가, N-35 ①), volume = 수집 시점 누적 거래량,
+  open·high·low·amount = NULL(ka10060 에 없다 — 엔진은 종가만 읽는다). 술어가 거짓(16:00 뒤 응답 ·
+  price_valid NULL · 종가 0 이하 · 거래량 없음)이거나 원장 행이 없으면 그 종목은 T 가격이 없다(`no_price`).
+- **연구 부분은 D'(asof)에서 자른다**: 수급(`flow_daily`)과 수정주가 원천(`price_adj_daily` — `_t_adj_src`
+  첫 갈래)은 date ≤ D' 만 읽는다 — 연구 판에 T 날짜 행이 섞여도 T 행은 장 마감 원천 하나다(아침판은
+  asof = D 라 SQL 이 그대로다).
 - **수정주가(`fi_adj_prices` T 행)** = T 행을 연구 판 SQL 이 읽는 원천에 넣는다(`_t_adj_src` =
   equity `price_adj_daily` + T 행: adj_close = T 종가 × D' cum_share_factor ÷ D' cum_price_only_factor,
   누적계수 = D' 값). 그래서 adj_factor · adj_ok · adj_jump_ok 가 연구 판 행과 같은 SQL 에서 나온다 —
@@ -93,17 +97,23 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
 - **수급(`fi_flows` T 행)** = 장 마감 수급 12주체(KRX 정규장, N-35 ②), price_valid 와 무관하다. 같은
   단위(round(원 / 1e6))·같은 거르기(전 주체 NULL 은 행 없음). 신용은 T 행이 없다(실입수 랙 3).
 - **T-6 당일 기업행위(`_t_pending`)**: T 가격이 있어도 아래 하나면 그날 eligible=false, 사유
-  `corp_action_pending`(no_price 다음 순서). 갈래는 FG5 metrics `corp_action_pending` 에 기록한다.
+  `corp_action_pending`(no_price 다음 순서). 첫 조건은 compat T 행(QL-D)과 같은 술어
+  `daily.kw_daily.ka10060_base_price_differs_sql`(판정 불가도 참)이고, 갈래 이름은 FG5 metrics
+  `corp_action_pending` 에 기록만 한다.
   - `base_price` — 키움 기준가(stage `close_krw − pred_pre_krw` = |cur_prc| − pred_pre, I-1: KRX 기준가와
     사건일 4,219/4,219 일치) ≠ D' KRX 종가
   - `price_limit` — |T 종가 / D' KRX 종가 − 1| > T 날짜의 가격제한폭(`queries.PRICE_LIMIT_*`, H1-4 와
     같은 정의) + 1e-9. 정확히 ±30%(상·하한가)는 보류가 아니다
-  - `no_value` — pred_pre 가 없거나 D' KRX 종가가 없다
+  - `no_value` — pred_pre 가 없거나 D' KRX 종가가 없거나 **0 이하**다
 - **후보 커버리지(FG5, N-42 Q4)**: 대상 = 직전 판 모델 후보 — 연구 fi 루트(`--candidates-root`, 기본
   연구 루트)의 `_runs/<D'>_morning.json`(status ok) `fi_universe.eligible`. 수집기 순서 ① 과 같은 함수
   (`daily.postclose.fi_candidates`)로 읽는다. 대상 중 T 가격이 없는 종목(원장 행 없음 · price_valid
-  아님 · 그 밖) 비율이 `T_CANDIDATE_MISSING_MAX`(0.02)를 **넘으면** 판 실패(rc 1). T-6 보류는 T 행이
-  있으므로 세지 않는다(수집 결손이 아니라 사건 — 기록만). 후보를 못 읽으면 FG5 FAIL.
+  아님 · 그 밖) 비율이 `T_CANDIDATE_MISSING_MAX`(= 1 − `kw_daily.COMMIT_MIN_RATIO` = 0.02)를 **넘으면** 판
+  실패(rc 1). T-6 보류는 T 행이 있으므로 세지 않는다(수집 결손이 아니라 사건 — 기록만). 후보 중 보류
+  비율이 `T_CANDIDATE_PENDING_WARN`(0.02)을 넘으면 metrics `warn`·detail 'warn:' 만 남기고 판정은 그대로다
+  (기록형 — 새 정지 조건이 아니다, P3). T 가격은 있는데 pred_pre 가 없는 층 종목 수(`n_pred_pre_missing`)와
+  장 마감 stage 판 id·그 판의 max(date)(`t_source_build`·`t_source_max_date` — T 가 아니면 판이 T 수집
+  전에 섰다)도 남긴다. 후보를 못 읽으면 FG5 FAIL.
 
 ## 3. 판 규약
 
@@ -140,7 +150,7 @@ asof = D' 다(§2-1). 창의 끝(D 포함 550 달력일 · D 까지 60 세션)�
 | 표 | 원천 (equity 는 판, stage 는 `stg_`) | 창 | 단위·정수화 |
 |---|---|---|---|
 | `fi_universe` | `universe_daily`(D 행 — 장 마감 판은 D' 행 이월: 상장·정지 · KOSPI/KOSDAQ · ETF 제외 · `adv20_krw`·`admin_state`·`halt_state`) · `security`(이름·상장일) · `price_daily`(D 의 KRX 종가·상장주식수 — 장 마감 판은 D' 주식수 × T 종가) · `sector_snapshot`(D 이하 최신 WICS(장 마감 판은 asof=D', §2-1)) · `coverage_daily.analyst_count` · `audit_opinion` · `disclosure_version` · 신선도(`stg_consensus_annual`, §5) | D 한 날 | 시총 = **round(주식수 × 종가 / 1e8) 정수 억원**(compat `stocks.market_cap` 과 같은 반올림) · adv20 억원 |
-| `fi_prices` | `price_daily`(basis `krx`) — 장 마감 판 T 행은 `stg_flow_postclose_kiwoom` price_valid 행(§2-2) | D 포함 550 달력일 | 가격 원 · 거래량 주 · **거래대금 원**(compat 의 백만원이 아니다) |
+| `fi_prices` | `price_daily`(basis `krx`) — 장 마감 판 T 행은 `stg_flow_postclose_kiwoom` 의 가격을 쓸 수 있는 행(§2-2) | D 포함 550 달력일 | 가격 원 · 거래량 주 · **거래대금 원**(compat 의 백만원이 아니다) |
 | `fi_adj_prices` | `price_adj_daily.adj_close`·`cum_share_factor`·`cum_price_only_factor` · `adj_factor.price_resolution`(가격 축 미해결 사건) · `trading_calendar`(인접 세션) — 장 마감 판은 T 행을 넣은 원천 `_t_adj_src`(§2-2) | 550 달력일 | `adj_factor` = cum_share ÷ cum_price_only(원가 × 계수 = 수정가, fi1.3.0) · `adj_ok` = 가격 축 미해결 사건 **계단 표식**(아래) · `adj_jump_ok` = 그중 제한폭 초과 **점프 행**마다 뒤집히는 계단 표식(아래, fi1.6.0) |
 | `fi_flows` | `flow_daily` 12주체(키움 우선, 전 주체 NULL 칸은 행 없음) — 장 마감 판 T 행은 `stg_flow_postclose_kiwoom`(price_valid 무관, §2-2) | D 까지 60 세션 | **round(원 / 1e6) 정수 백만원** |
 | `fi_credit` | `credit_daily.whol_loan_rmnd_stcn_shr`·`whol_loan_rmnd_rate_pct` | D 까지 60 세션, `available_date ≤ D` | 주 · % · `available_date` = 그날 + 3 세션(KIS 실입수, equity FieldProfile) |
@@ -265,7 +275,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | FG3 시총 | market_cap = round(shares × close(D) / 1e8) (상대 1e-6) | 규칙 위반 · 주식수·종가가 있는데 NULL · basis ≠ krx(장 마감 판은 ≠ t1). KRX `mktcap_krw` 반올림값과 다른 수는 기록형(`n_krx_mktcap_diff` — 장 마감 판은 KRX T 시총이 없어 NULL). 장 마감 판의 shares 는 D' 주식수, close 는 T 행 종가 |
 | FG4 골든 | `src/factor_inputs/fixtures/golden.json`(3종목 005930·000660·161890, 22항목, stage 원장에서 손으로 옮긴 값) | 창·유니버스 안 항목이 값이 다르거나 행이 없다. 셀 수 있는 항목이 0 이면 `skip(no_fixtures)` — 허용표 밖이라 판은 **FAIL**(K1-7a). 창이 지나가면 골든을 갱신한다(수급·신용 항목은 2026-08 날짜라 11월 중순에 창 밖, 가격 항목은 550일 창이라 2028-02 까지 남는다) |
 | FG-fresh | 상태 수·eligible 상태 수·`n_lapsed_dropped`·D\*·수집 지연 기록 | 어휘 밖 · has_estimates ≠ 상태 · fresh 나이 ≠ 0 · grace 나이 > G · lapsed 나이 ≤ G · lapsed/none 인데 eligible · **D\* 가 예상 수집일(asof — 아침판 D, 장 마감 판 D')보다 1거래일 넘게 뒤처짐**(`COLLECTION_LAG_MAX`, N-12 — 유예 G 와 따로 둔다. 수집 정지 — 전 종목이 '신선' 으로 보이는 조용한 낡음). D 이전 수집 기록이 없으면 `skip(no_collection)` — 허용표 밖이라 판은 **FAIL**(K1-7a) |
-| FG5 후보 커버리지(장 마감 판만, 컷오버 PR-5) | 직전 판 모델 후보(수집기 순서 ① 과 같은 집합) 중 T 가격이 없는 종목 수·비율과 갈래(`n_no_row`·`n_price_invalid`·`n_missing_other`·`missing_tickers`) · T-6 보류 수(후보 중 · 층 전체 갈래별) | **비율 > `T_CANDIDATE_MISSING_MAX`(0.02)** — N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패'. 근거: N-35 ③ 프로브 후보 100/100(3일, 오류 0)·후보 먼저 수집이라 16:00 전 완료, 크기는 저녁 키움 직행 ka10060 커버 하한 0.98(`kw_daily.COMMIT_MIN_RATIO`, T-28)과 같다 · 후보를 못 읽음(`candidates_unavailable`). 아침판 판 기록에는 없다 |
+| FG5 후보 커버리지(장 마감 판만, 컷오버 PR-5) | 직전 판 모델 후보(수집기 순서 ① 과 같은 집합) 중 T 가격이 없는 종목 수·비율과 갈래(`n_no_row`·`n_price_invalid`·`n_missing_other`·`missing_tickers`) · T-6 보류 수(후보 중 · 층 전체 갈래별)와 후보 중 비율 > 0.02 이면 `warn`(기록형) · `n_pred_pre_missing` · 장 마감 stage 판 id·max(date) | **비율 > `T_CANDIDATE_MISSING_MAX`(= 1 − `kw_daily.COMMIT_MIN_RATIO` = 0.02)** — N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패'. 근거: N-35 ③ 프로브 후보 100/100(3일, 오류 0)·후보 먼저 수집이라 16:00 전 완료, 크기는 저녁 키움 직행 ka10060 커버 하한(T-28)에서 끌어온다 · 후보를 못 읽음(`candidates_unavailable`). 아침판 판 기록에는 없다 |
 
 아침판 가드(게이트 전, rc 2): equity 판 접두어가 `e_` 이면 거절 · `price_daily`·`price_adj_daily`·
 `adj_factor` 판의 빌드 시각 차 > 3시간이면 거절(compat R5·R9 와 같은 값).
@@ -274,7 +284,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 
 | 표.열 | 사유 |
 |---|---|
-| `fi_prices.price_source` · `fi_universe.mktcap_basis` | 아침판 전 행 `krx`. 장 마감 판은 T 전 행 `krx` · T 행 `postclose`(15:41 장 마감 직후 수집, 키움 KRX 코드 정규장 종가 — `stg_flow_postclose_kiwoom` 의 price_valid 행만. 16:00 뒤 응답·원장 행 없음은 T 가격 없음 → `no_price`, 시총 NULL) · 시총 기준 `t1_shares_x_t_close`(B-24) |
+| `fi_prices.price_source` · `fi_universe.mktcap_basis` | 아침판 전 행 `krx`. 장 마감 판은 T 전 행 `krx` · T 행 `postclose`(15:41 장 마감 직후 수집, 키움 KRX 코드 정규장 종가 — `stg_flow_postclose_kiwoom` 의 가격을 쓸 수 있는 행(price_valid 참 · 종가 > 0 · 거래량 있음)만. 그 밖·원장 행 없음은 T 가격 없음 → `no_price`, 시총 NULL) · 시총 기준 `t1_shares_x_t_close`(B-24) |
 | `fi_prices` 장 마감 판 T 행 open·high·low·amount | 원천 ka10060 에 없어 NULL — volume 은 수집 시점 누적 거래량. 엔진은 종가만 읽는다(다음 날 아침 확정판 T 행은 KRX 값) |
 | `fi_adj_prices` 장 마감 판 T 행 | adj_close = T 종가 × D' 누적계수(T 의 새 계수는 아직 없다), 표식은 연구 판 행과 같은 SQL(§2-2) — T 에 기준가를 바꾼 사건은 T-6 이 그날 eligible 에서 빼고 반영은 다음 날 아침 확정판 |
 | `fi_universe` 장 마감 판 | `universe_daily` D' 행 이월(상태 변화는 다음 날 아침 확정판, T 신규 상장 누락) · WISE·DART·`universe_daily`·WICS 는 D' 까지, `security`·`corp` 은 고정 판 마스터 그대로 |
@@ -292,7 +302,9 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 - `tests/test_factor_inputs.py` — 합성 트리 왕복(판·계약·신선도 4상태 + 복귀·유예 경계·유니버스·
   컨센서스·재무·창·수급·신용·실패 경로·CLI · 장 마감 판 세션·이월·D' 자르기·수집 지연·진입 조건 ·
   T 행 얹기(수집기 실물 함수로 만든 `postclose.db` → stage 빌더 실물 → 장 마감 판): price_valid 별
-  가격·수급, 수정주가 같은 SQL, T-6 세 갈래·±30% 경계, FG5 경계·후보 없음, 장 마감 stage 판 없음 rc 2).
+  가격·수급, 수정주가 같은 SQL, 연구 부분 D' 자르기, T-6 세 갈래·±30% 경계·D' 종가 ≤ 0, FG5 경계·
+  후보 없음·대량 보류 경고, 장 마감 stage 판 없음 rc 2). 공유 술어 두 개의 진리표와 compat 쪽 쓰임은
+  `tests/test_compat_evening_t.py`.
 - `tests/test_factor_inputs_gates.py` — 게이트마다 한 가지씩 망가뜨려 FAIL 을 확인.
 - `tests/test_factor_inputs_slice.py` — 커밋된 stage 절단본 위 equity 16표 체인 → 판 빌드(FG4 골든
   통과) · `fi_fin_summary` 연간 = compat `financial_summary` SQL(겹치는 열 전부 — 금융업 연간 매출

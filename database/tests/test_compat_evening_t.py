@@ -533,15 +533,18 @@ def test_both_tables_share_one_source_per_ticker(env) -> None:
     assert {k: dp[k] for k in keys} == {k: fl[k] for k in keys}
 
 
-@pytest.mark.parametrize("case", ["empty_price", "price_valid_null"])
+@pytest.mark.parametrize("case", ["empty_price", "price_valid_null", "zero_close"])
 def test_postclose_row_without_usable_price_falls_back_to_2105(env, tmp_path: Path,
                                                                 case: str) -> None:
     """NIT 1·5 — `price_valid='1'` 인데 가격 칸이 빈 행, `price_valid` 가 NULL 인 행은 건너뛰지 않고
-    그 종목을 21:05 원장으로 넘긴다(가격·수급 모두)."""
+    그 종목을 21:05 원장으로 넘긴다(가격·수급 모두). 종가 0 도 같다 — '쓸 수 있는 장 마감 가격 행'은
+    fi 장 마감 판과 같은 공유 술어다(PR-5 리뷰 MINOR-2)."""
     rows = _postclose_rows()
     ticker = FILL[0]
     if case == "empty_price":
         rows[ticker] = (_ledger_row(T, "", "+200", "500000", ind="-9"), True)
+    if case == "zero_close":
+        rows[ticker] = (_ledger_row(T, "0", "+0", "500000", ind="-9"), True)
     path = _postclose_db(tmp_path / "raw3" / "postclose.db", rows=rows)
     if case == "price_valid_null":
         con = sqlite3.connect(path)
@@ -580,6 +583,33 @@ def test_t6_base_price_predicate() -> None:
         assert differs(0, 0, 0)
     finally:
         con.close()
+
+
+def test_postclose_price_usable_predicate() -> None:
+    """PR-5 리뷰 MINOR-2 — '쓸 수 있는 장 마감 가격 행'(`daily.kw_daily.ka10060_postclose_price_usable_sql`)
+    = price_valid 참 · 종가 > 0 · 거래량 있음. compat ① postclose 선택과 fi 장 마감 판 T 가격 행이 같은
+    식을 쓴다(P4)."""
+    from compat import t_rows
+    from factor_inputs import queries
+    expr = kw_daily.ka10060_postclose_price_usable_sql("v", "c", "q")
+    con = duckdb.connect()
+    try:
+        def usable(v: bool | None, c: int | None, q: int | None) -> bool:
+            row = con.execute(f"SELECT coalesce({expr}, false) FROM (SELECT ?::BOOLEAN v, "
+                              "?::BIGINT c, ?::BIGINT q)", [v, c, q]).fetchone()
+            assert row is not None
+            return bool(row[0])
+        assert usable(True, 70_000, 0)
+        assert not usable(False, 70_000, 1) and not usable(None, 70_000, 1)
+        assert not usable(True, 0, 1) and not usable(True, None, 1) and not usable(True, 1, None)
+    finally:
+        con.close()
+    assert t_rows._PRICE_USABLE in t_rows.PICK_SQL
+    p = queries.Params(d="2026-09-23", fy="202612", price_from="2025-03-22",
+                       flow_from="2026-06-26", grace_days=0, credit_lag=3, basis="evening",
+                       asof="2026-09-22")
+    assert kw_daily.ka10060_postclose_price_usable_sql(
+        "price_valid", "close_krw", "volume_shr") in queries.t_prices_sql(p)
 
 
 def test_collector_import_stays_light() -> None:

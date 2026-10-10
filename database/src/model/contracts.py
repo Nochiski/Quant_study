@@ -94,7 +94,8 @@ FI_ADJ_PRICES = TableContract(
              "ADJ_JUMP_NEIGHBOR_SESSIONS). scope(params.adj_jump_missing)는 모멘텀·20일 변동성 "
              "창 안에서 값이 바뀌면 그 지표를 결측 처리, v3@1.0·v2·v4 는 무시")),
     window="fi_prices 와 같다",
-    source="equity price_adj_daily · adj_factor · trading_calendar",
+    source="equity price_adj_daily · adj_factor · trading_calendar + 장 마감 판 T 행은 T 종가(postclose) "
+           "× D' 누적계수를 같은 SQL 원천에 넣어 굽는다(PR-5)",
     readers=ALL_ENGINES)
 
 FI_FLOWS = TableContract(

@@ -15,8 +15,8 @@ compat 가 나중에 이 층을 읽어 v3 `quant.db` 에 쓸 때 다시 반올�
 
 임시 표 이름 규약: 산출 8표는 `_<표>`(예 `_fi_universe` — 접두 `_` 는 원천 뷰와 섞이지 않게), 보조는
 `_calx`(거래일 번호)·`_dstar`(마지막 수집일)·`_cov`(종목별 신선도)와 장 마감 판의 `_t_src`(장 마감
-stage T 행)·`_t_prices`(T 가격 행)·`_t_pending`(T-6 당일 기업행위 보류). 게이트 FG5 가 `_t_src`·
-`_t_pending` 을 읽는다.
+stage T 행)·`_t_prices`(T 가격 행)·`_t_adj_src`(T 행을 넣은 수정주가 원천 뷰)·`_t_pending`(T-6 당일
+기업행위 보류). 게이트 FG5 가 `_t_src`·`_t_pending` 을 읽는다.
 
 두 날짜(컷오버 PR-4 · T-2): `Params.d` 는 판 기준일(세션·창의 끝), `Params.asof` 는 정보 시점이다.
 아침판은 둘 다 D 다. 장 마감 판(basis evening)은 d = 오늘 T, asof = D'(직전 거래일 = 고정한 연구
@@ -32,6 +32,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from daily.kw_daily import (
+    ka10060_base_price_differs_sql,
+    ka10060_postclose_price_usable_sql,
+)
 from equity.rules_s06 import PRICE_UNRESOLVED
 from model.contracts import FI_TABLES, TableContract, UniverseRule
 
@@ -98,7 +102,7 @@ T_MKTCAP_BASIS = "t1_shares_x_t_close"     # 시총 = D' 상장주식수 × T �
 # T 행 원천(컷오버 PR-2 · T-29) — 연구 stage 가 아니라 장 마감 stage 루트(`data/model_db/stage`)의 표
 T_SOURCE_TABLE = "stg_flow_postclose_kiwoom"
 # T-6 당일 기업행위 보류 갈래(기록용 — 사유 열은 하나, 'corp_action_pending')
-T6_NO_VALUE = "no_value"           # 키움 기준가(pred_pre) 또는 D' KRX 종가가 없다
+T6_NO_VALUE = "no_value"           # 키움 pred_pre 가 없거나 D' KRX 종가가 없다·0 이하
 T6_BASE_PRICE = "base_price"       # 키움 기준가 ≠ D' KRX 종가(I-1: |cur_prc| − pred_pre = KRX 기준가)
 T6_PRICE_LIMIT = "price_limit"     # T 종가 / D' KRX 종가 − 1 이 ±가격제한폭 밖
 
@@ -482,8 +486,9 @@ def flows_sql(p: Params) -> str:
     """12주체 순매수 60 세션(백만원 정수화 — compat investor_detail_flows 식 그대로).
 
     셀당 원천이 둘이면 키움 우선(compat 과 같은 결정 규칙), 전 주체 NULL 셀은 싣지 않는다.
-    장 마감 판은 T 행을 장 마감 수급(`_t_src`, 키움 KRX 코드 정규장 — N-35 ②)에서 잇는다. 수급은
-    price_valid 와 무관하게 유효하다(16:00 뒤 응답도 가격만 애프터마켓 값이다). 같은 식·같은 거르기.
+    장 마감 판은 연구 부분을 D'(asof)에서 자르고 T 행을 장 마감 수급(`_t_src`, 키움 KRX 코드
+    정규장 — N-35 ②)에서 잇는다(아침판은 asof = D 라 SQL 이 그대로다). 수급은 price_valid 와 무관하게
+    유효하다(16:00 뒤 응답도 가격만 애프터마켓 값이다). 같은 식·같은 거르기.
     """
     def any_col(a: str) -> str:
         return ", ".join(f"{a}.{src}" for _, src in FLOW_SOURCE)
@@ -506,7 +511,7 @@ WHERE t.{_IN_UNIVERSE}
                PARTITION BY f.ticker, f.date
                ORDER BY CASE WHEN f.src = 'kiwoom' THEN 0 ELSE 1 END, f.src) AS rn
     FROM flow_daily f
-    WHERE f.date >= DATE '{p.flow_from}' AND f.date <= DATE '{p.d}'
+    WHERE f.date >= DATE '{p.flow_from}' AND f.date <= DATE '{p.asof}'
       AND f.{_IN_UNIVERSE}
       AND coalesce({any_col("f")}) IS NOT NULL
 )
@@ -1005,8 +1010,8 @@ def table_sources(basis: str) -> dict[str, tuple[str, ...]]:
 def t_source_sql(p: Params) -> str:
     """장 마감 판 T 원천 `_t_src` — stage `T_SOURCE_TABLE`(15:41 장 마감 직후 수집, 키움 KRX 코드
     ka10060 — `data/model_db/stage`, T-29)의 T 행. 가격 열(close_krw · pred_pre_krw · volume_shr)은
-    `price_valid IS TRUE` 인 행만 쓴다(16:00 뒤 응답은 애프터마켓 값, N-35 ①) — 거르는 것은 쓰는
-    쪽(`t_prices_sql`)이다. 수급 열은 price_valid 와 무관하게 유효하다. 종목은 거르지 않는다 —
+    가격을 쓸 수 있는 행만 쓴다(16:00 뒤 응답은 애프터마켓 값, N-35 ①) — 거르는 것은 쓰는
+    쪽(`t_prices_sql`, 공유 술어)이다. 수급 열은 price_valid 와 무관하게 유효하다. 종목은 거르지 않는다 —
     `fi_universe` 가 이 표보다 뒤에 선다(시총이 T 종가를 읽는다)."""
     flows = ", ".join(src for _, src in FLOW_SOURCE)
     return ("CREATE OR REPLACE TEMP TABLE _t_src AS\n"
@@ -1018,14 +1023,15 @@ def t_prices_sql(p: Params) -> str:
     """장 마감 판의 T 하루치 가격 행 `_t_prices`(열·타입 = `fi_prices` 계약, price_source =
     `T_PRICE_SOURCE`). `universe_sql` 이 여기서 T 종가를 읽어 시총을 재고, `prices_sql`·
     `adj_prices_sql` 이 종목을 universe 로 잘라 잇는다.
-      · `price_valid IS TRUE` 이고 종가 > 0 인 `_t_src` 행만 — NULL·false 면 그 종목은 T 가격 없음(P1)
+      · 가격을 쓸 수 있는 `_t_src` 행만 — `daily.kw_daily.ka10060_postclose_price_usable_sql`(price_valid
+        참 · 종가 > 0 · 거래량 있음, compat T 행과 같은 정의). 아니면 그 종목은 T 가격 없음(P1)
       · close = |cur_prc|(키움 KRX 코드 정규장 종가 — N-35 ①), volume = 수집 시점 누적 거래량
       · open·high·low·amount 는 원천(ka10060)에 없어 NULL — 엔진은 종가만 읽는다(GAPS)"""
     inner = f"""SELECT ticker, DATE '{p.d}' AS date,
        NULL AS open, NULL AS high, NULL AS low, close_krw AS close,
        volume_shr AS volume, NULL AS amount, '{T_PRICE_SOURCE}' AS price_source
 FROM _t_src
-WHERE price_valid IS TRUE AND close_krw > 0"""
+WHERE {ka10060_postclose_price_usable_sql("price_valid", "close_krw", "volume_shr")}"""
     return "CREATE OR REPLACE TEMP TABLE _t_prices AS\n" + project(FI_TABLES["fi_prices"], inner)
 
 
@@ -1034,10 +1040,12 @@ def t_adj_source_sql(p: Params) -> str:
     연구 판 행과 같은 SQL 로 T 행을 굽게 한다. T 행: adj_close = T 종가 × D' cum_share_factor ÷ D'
     cum_price_only_factor(equity `price_adj_daily.sql` 과 같은 식 — 전방 조정이라 T 사건이 없으면 다음
     날 연구 판 T 행과 같은 값), 누적계수 = D' 값. T 가격(`_t_prices`)과 D' 수정주가 행이 둘 다 있는
-    종목만. 열은 그 SQL 이 읽는 것만 둔다 — 새 열을 읽게 되면 여기서 바인딩 오류로 드러난다."""
+    종목만. 열은 그 SQL 이 읽는 것만 둔다 — 새 열을 읽게 되면 여기서 바인딩 오류로 드러난다. 연구 판
+    갈래는 D'(asof)에서 자른다 — T 행은 둘째 갈래 하나뿐이다."""
     return f"""CREATE OR REPLACE TEMP VIEW _t_adj_src AS
 SELECT ticker, date, adj_close, cum_share_factor, cum_price_only_factor, basis
 FROM price_adj_daily
+WHERE date <= DATE '{p.asof}'
 UNION ALL
 SELECT t.ticker, t.date, t.close * a.cum_share_factor / a.cum_price_only_factor,
        a.cum_share_factor, a.cum_price_only_factor, a.basis
@@ -1057,15 +1065,15 @@ def t_pending_sql(p: Params) -> str:
     수정주가가 전방 조정이라 T 사건은 다음 날 아침 확정판이 반영한다(T-2) — 그 전까지 이 종목의 T
     수정종가는 D' 계수를 그대로 쓴 값이라 믿을 수 없다."""
     limit = PRICE_LIMIT_BEFORE if p.d < PRICE_LIMIT_CHANGE_DATE else PRICE_LIMIT_AFTER
-    # T-6 첫 조건 술어(키움 기준가 |cur_prc| − pred_pre ≠ D' KRX 종가 — stage 열로 close_krw −
-    # pred_pre_krw)는 fi 에서 여기 한 곳이다. QL-D 가 같은 술어를 공유 상수·함수로 두면 머지 때 그
-    # 정의로 합친다(P4).
+    # T-6 첫 조건 술어(키움 기준가 |cur_prc| − pred_pre ≠ D' KRX 종가, 판정 불가도 참)는 compat T 행
+    # (QL-D)과 공유한다(`daily.kw_daily.ka10060_base_price_differs_sql`, P4). 갈래 이름은 기록용이다.
+    differs = ka10060_base_price_differs_sql("s.close_krw", "s.pred_pre_krw", "k.close")
     return f"""CREATE OR REPLACE TEMP TABLE _t_pending AS
 SELECT ticker, kind FROM (
     SELECT t.ticker,
-           CASE WHEN s.pred_pre_krw IS NULL OR k.close IS NULL OR k.close <= 0
-                     THEN '{T6_NO_VALUE}'
-                WHEN s.close_krw - s.pred_pre_krw <> k.close THEN '{T6_BASE_PRICE}'
+           CASE WHEN {differs}
+                     THEN CASE WHEN s.pred_pre_krw IS NULL OR k.close IS NULL OR k.close <= 0
+                               THEN '{T6_NO_VALUE}' ELSE '{T6_BASE_PRICE}' END
                 WHEN abs(CAST(t.close AS DOUBLE) / k.close - 1) > {limit} + {PRICE_LIMIT_EPS}
                      THEN '{T6_PRICE_LIMIT}'
            END AS kind
@@ -1099,7 +1107,8 @@ GAPS: tuple[dict[str, str], ...] = (
     {"table": "fi_prices", "column": "price_source",
      "reason": "아침판은 전 행 'krx'. 장 마감 판은 T 전 행 'krx' · T 행 'postclose'(15:41 장 마감 "
                "직후 수집, 키움 KRX 코드 정규장 종가 — stage stg_flow_postclose_kiwoom 의 "
-               "price_valid 인 행만. 16:00 뒤 응답·원장 행 없음은 T 가격 없음 → no_price)"},
+               "가격을 쓸 수 있는 행(price_valid 참 · 종가 > 0 · 거래량 있음)만. 그 밖·원장 행 "
+               "없음은 T 가격 없음 → no_price)"},
     {"table": "fi_prices", "column": "open,high,low,amount(장 마감 판 T 행)",
      "reason": "원천 ka10060 에 시·고·저가·거래대금이 없어 NULL — volume 은 수집 시점 누적 "
                "거래량. 엔진은 종가만 읽는다(다음 날 아침 확정판 T 행은 KRX 값)"},

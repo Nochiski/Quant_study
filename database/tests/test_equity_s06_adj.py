@@ -531,11 +531,12 @@ def _setup(con: duckdb.DuckDBPyConnection, events: list[dict[str, object]],
         evs.append(full)
     _view(con, "corp_event", evs, ev_types)
     # S06-2: 기준가·주식수 축. 합성 행이 안 주면 base = close(기준가 사건 없음) · shares_out NULL
-    prices = [{"base_price_krw": p.get("close"), **p} for p in prices]
+    # K1-6a: 행 원천 basis(인접 수익률은 KRX 확정 행만) — 합성 행은 기본 'krx'
+    prices = [{"base_price_krw": p.get("close"), "basis": "krx", **p} for p in prices]
     _view(con, "price_daily", prices,
           {"ticker": "VARCHAR", "date": "DATE", "close": "DECIMAL(9,0)",
            "price_kind": "VARCHAR", "base_price_krw": "DECIMAL(10,0)",
-           "shares_out": "DECIMAL(13,0)"})
+           "shares_out": "DECIMAL(13,0)", "basis": "VARCHAR"})
     _view(con, "trading_calendar", [{"date": d} for d in cal], {"date": "DATE"})
     tickers = sorted({str(p["ticker"]) for p in prices} | {str(e["ticker"]) for e in evs})
     _view(con, "security", [{"ticker": t,
@@ -2068,3 +2069,159 @@ def test_sql파일에_상수_하드코딩_없음() -> None:
     text = re.sub(r"--[^\n]*", "", ADJ.sql_path.read_text(encoding="utf-8"))
     nums = set(re.findall(r"(?<![\w.])\d+(?:\.\d+)?", text))
     assert nums <= {"0", "1", "2", "-1"}, sorted(nums)
+
+
+# ── K1-6a not-ok 행 묶음(기록형, v3 컷오버 트랙 K1-6a · e1.29.0) ─────────────────────
+# 매 빌드 not-ok 행을 배타·완전한 묶음 하나씩으로 나눠 EG3_adj_factor metrics 에 싣는다 — 가격 축
+# 해소 4갈래(price_resolution 그대로) + 미해결 4묶음(① D6-1 제외 종류 ② 적용일 뒤 바 없음 ③ 적용일
+# ±6 세션 인접 수익률이 가격제한폭 안 ④ 제한폭 넘는 점프 흔적) + unclassified. 정본 SQL 은
+# `rules_s06.not_ok_bucket_sql`. 묶음은 factor_source 를 보지 않고 술어로만 정한다 — E-1 이 더한 사유
+# (no_base_price_evidence · same_day_suppressed)도 같은 술어로 간다. 판정(PASS/FAIL)은 안 바꾼다.
+
+def _buckets(g) -> dict[str, int]:      # type: ignore[no-untyped-def]
+    return {k: v for k, v in g.metrics["n_not_ok_by_bucket"].items() if v}
+
+
+def test_K1_6a_not_ok_행은_묶음_하나씩이고_E1_새_사유도_술어로_간다() -> None:
+    """종목별 한 모양씩: ① 펀드 기준가 하락(D6-1) · ② 세션 50 부터 끝까지 참고가(적용일 60 뒤 실거래
+    없음) · ③ 인접 +5% · ④ 인접 세션 23 에 −40%(기준가는 직전 종가 그대로 — 근거 없는 제한폭 밖 변화)
+    · E-1 no_base_price_evidence(069080 모양, 시장 등락 55 는 ±6 밖 → ③; 240600 옛 모양 A00026 은
+    근처 ⑤ 단위 → price_only_near) · E-1 same_day_suppressed(형제 ok → factor_near) · price_only_dup ·
+    price_only. 합 = not-ok 행 수, unclassified 0."""
+    cal = sessions(80)
+    _, ev26, px26 = _ok_fold_overlap()                       # A00026 — price_only_near · price_only
+    ev = [_ev_capred("A00602", 60, 0.1, cal), _ev_capred("A00603", 20, 0.1, cal),
+          _ev_capred("A00604", 20, 0.1, cal), _ev_capred("A00605", 20, 310 / 346, cal),
+          _ev_capred("A00777", 20, 0.4, cal),
+          {"ticker": "A00777", "event_type": "reverse_split", "effective_date": cal[22],
+           "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[22]},
+          {"ticker": "A00033", "event_type": "split", "effective_date": cal[30], "ratio": 2.0,
+           "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[30]},
+          *ev26]
+    px = [*flat_prices("A00601", cal, 10000, jumps={40: 0.97}, base={40: 0.97}),
+          *flat_prices("A00602", cal, 1000, jumps={}, halt=(50, 79)),
+          *flat_prices("A00603", cal, 1000, jumps={22: 1.05}),
+          *flat_prices("A00604", cal, 1000, jumps={23: 0.6}),
+          *flat_prices("A00605", cal, 10000, jumps={55: 11980 / 10920},
+                       share_jumps={30: 310 / 346}),
+          *flat_prices("A00777", cal, 1000, jumps={26: 2.4}, halt=(19, 25), base={26: 2.0},
+                       share_jumps={26: 0.5}),
+          *flat_prices("A00033", cal, 10000, jumps={33: 0.5}, base={33: 0.8}),
+          *px26]
+    st = {"A00601": "fund"}
+    f = run_adj_sql(ev, px, cal, sec_types=st)
+    assert f[f"A00605:capred:{cal[20]}"]["factor_source"] == "no_base_price_evidence"
+    assert f[f"A00026:bonus:{cal[30]}"]["factor_source"] == "no_base_price_evidence"
+    assert f[f"A00777:capred:{cal[20]}"]["factor_source"] == "same_day_suppressed"
+    assert f[f"A00602:capred:{cal[60]}"]["no_bar_after_apply"] is True
+    g = run_eg3(ev, px, cal, sec_types=st)
+    assert g.status is GateStatus.PASS, g.detail
+    assert _buckets(g) == {"price_only": 2, "price_only_dup": 1, "factor_near": 1,
+                           "price_only_near": 1, "unresolved_excluded_kind": 1,
+                           "unresolved_no_bar_after": 1, "unresolved_within_limit": 2,
+                           "unresolved_jump": 1}
+    assert set(g.metrics["n_not_ok_by_bucket"]) == set(rules_s06.NOT_OK_BUCKET_VOCAB)
+    assert sum(g.metrics["n_not_ok_by_bucket"].values()) == sum(
+        1 for x in f.values() if not x["factor_ok"])
+    assert g.metrics["n_not_ok_unclassified"] == 0
+    assert g.metrics["unresolved_jump_event_ids"] == [f"A00604:capred:{cal[20]}"]
+    bs = g.metrics["n_not_ok_by_bucket_factor_source"]
+    assert bs["unresolved_within_limit:no_base_price_evidence"] == 1
+    assert bs["price_only_near:no_base_price_evidence"] == 1
+    assert bs["factor_near:same_day_suppressed"] == 1
+    assert g.metrics["n_unresolved_within_limit_no_adjacent_return"] == 0
+
+
+def test_K1_6a_가격제한폭은_수익률_날짜로_2015_06_15에_15에서_30으로_바뀐다() -> None:
+    """H1-4 와 같은 정의: 2015-06-12(금) +20% 는 15% 를 넘어 점프, 2015-06-15(월) +20% 는 30% 안.
+    정확히 +30%(13,000 / 10,000)는 부동소수 여유(PRICE_LIMIT_EPS)로 점프가 아니다."""
+    cal = sessions(60, start=date(2015, 5, 4))
+    i12, i15 = cal.index(date(2015, 6, 12)), cal.index(date(2015, 6, 15))
+    ev = [_ev_capred("B00001", i12 - 2, 0.1, cal), _ev_capred("B00002", i15 - 2, 0.1, cal),
+          _ev_capred("B00003", i15 - 2, 0.1, cal)]
+    px = [*flat_prices("B00001", cal, 10000, jumps={i12: 1.2}),
+          *flat_prices("B00002", cal, 10000, jumps={i15: 1.2}),
+          *flat_prices("B00003", cal, 10000, jumps={i15: 1.3})]
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert _buckets(g) == {"unresolved_jump": 1, "unresolved_within_limit": 2}
+    assert g.metrics["unresolved_jump_event_ids"] == [f"B00001:capred:{cal[i12 - 2]}"]
+
+
+@pytest.mark.parametrize(("offset", "bucket"), [
+    (-7, "unresolved_within_limit"), (-6, "unresolved_jump"),
+    (6, "unresolved_jump"), (7, "unresolved_within_limit")])
+def test_K1_6a_인접은_적용일_앞뒤_6_세션의_행이다(offset: int, bucket: str) -> None:
+    """적용일(명목 30) ± ADJ_JUMP_NEIGHBOR_SESSIONS 세션 안의 행 수익률만 본다 — H1-4 와 같은 창."""
+    cal = sessions(80)
+    ev = [_ev_capred("A00607", 30, 0.1, cal)]
+    g = run_eg3(ev, flat_prices("A00607", cal, 1000, jumps={30 + offset: 0.6}), cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert _buckets(g) == {bucket: 1}
+
+
+@pytest.mark.parametrize(("basis", "bucket"), [("krx", "unresolved_jump"),
+                                               ("evening", "unresolved_within_limit")])
+def test_K1_6a_인접_수익률은_KRX_확정_행만_본다(basis: str, bucket: str) -> None:
+    """저녁 잠정 T 행(basis evening, 키움 종가)의 수익률은 점프 판정에 안 쓴다 — 다음 아침 KRX 행이 본다."""
+    cal = sessions(80)
+    ev = [_ev_capred("A00608", 76, 0.1, cal)]
+    px = flat_prices("A00608", cal, 1000, jumps={79: 0.6})
+    px[79] = {**px[79], "basis": basis}
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    assert _buckets(g) == {bucket: 1}
+
+
+@pytest.mark.parametrize("sec_type", ["other", "etf"])
+def test_K1_6a_묶음_밖_종류는_unclassified_로_세고_판정은_바꾸지_않는다(sec_type: str) -> None:
+    """etf·other 는 D6-1 제외 종류도 주식 계열도 아니다 — 미분류로 세되 기록형이라 PASS 그대로."""
+    cal = sessions(80)
+    ev = [_ev_capred("A00606", 20, 0.1, cal)]
+    g = run_eg3(ev, flat_prices("A00606", cal, 1000, jumps={}), cal,
+                sec_types={"A00606": sec_type})
+    assert g.status is GateStatus.PASS, g.detail
+    assert _buckets(g) == {"unclassified": 1}
+    assert g.metrics["n_not_ok_unclassified"] == 1
+
+
+def test_K1_6a_절단본_not_ok_7행은_계수_행_2와_인접_가격_없는_미해결_5(
+        built: build.BuildResult) -> None:
+    """101970 사건 5행(no_price_match 3 · ratio_null · near_dup_suppressed)은 상장폐지 기간이라 ±6
+    세션 안에 가격 행이 없고 재상장 뒤 실거래가 있어 ③(인접 가격 없음 수로 따로 센다)."""
+    m = _gate(built, "EG3_adj_factor").metrics
+    assert {k: v for k, v in m["n_not_ok_by_bucket"].items() if v} == {
+        "price_only": 2, "unresolved_within_limit": 5}
+    assert m["n_unresolved_within_limit_no_adjacent_return"] == 5
+    assert m["n_not_ok_unclassified"] == 0 and m["unresolved_jump_event_ids"] == []
+
+
+def test_K1_6a_지표를_빼도_표_내용과_게이트_판정이_같다(
+        built: build.BuildResult, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """기록형 — 묶음 지표가 없던 때(빈 dict)로 되돌려 지어도 판 해시·파티션 해시·게이트 판정이 같다."""
+    monkeypatch.setattr(rules_s06, "_not_ok_buckets", lambda ctx: {})
+    r = build_chain(STAGE_SLICE, tmp_path / "equity", seed())
+    assert r.ok and built.ok
+    assert r.content_hash == built.content_hash
+    assert ([p["content_hash"] for p in r.partitions]
+            == [p["content_hash"] for p in built.partitions])
+    assert [(g.name, g.status) for g in r.gates] == [(g.name, g.status) for g in built.gates]
+    assert "n_not_ok_by_bucket" in _gate(built, "EG3_adj_factor").metrics
+    assert "n_not_ok_by_bucket" not in _gate(r, "EG3_adj_factor").metrics
+
+
+def test_K1_6a_가격제한폭_인접_세션_상수는_fi_H1_4_정의와_같다() -> None:
+    """equity 가 fi 를 import 할 수 없어(fi queries 가 rules_s06 을 읽는다 — 순환) 값을 따로 둔다.
+    두 정의가 갈리면 K1-6a ③④ 와 H1-4 adj_jump_ok 의 '점프' 가 달라진다."""
+    from factor_inputs import queries as fiq
+    names = ("PRICE_LIMIT_CHANGE_DATE", "PRICE_LIMIT_BEFORE", "PRICE_LIMIT_AFTER",
+             "PRICE_LIMIT_EPS", "ADJ_JUMP_NEIGHBOR_SESSIONS")
+    assert {n: getattr(rules_s06, n) for n in names} == {n: getattr(fiq, n) for n in names}
+
+
+def test_K1_6a_종류_축은_sec_type_어휘를_겹침_없이_가르고_나머지는_unclassified() -> None:
+    inc, exc = set(rules_s06.PRICE_ONLY_SEC_TYPES), set(rules_s06.PRICE_ONLY_EXCLUDED_SEC_TYPES)
+    assert not inc & exc
+    assert set(rules_s01.SEC_TYPE_VOCAB) - inc - exc == {"etf", "other"}

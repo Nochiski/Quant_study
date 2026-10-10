@@ -28,7 +28,8 @@ import pytest
 from compat import CompatError, v3_post, v3_restore
 from compat.__main__ import main as cli_main
 from compat.quant_db import ExportResult, TableResult, _write_meta
-from compat.v3_post import TABLES
+from compat.v3_post import SCORE_TABLES, TABLES
+from compat.v3_restore import DEFAULT_TABLES
 
 DB_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "v3_daily_copy.sql"
@@ -316,6 +317,28 @@ def test_backup_failure_removes_what_it_made(tmp_path, v3, monkeypatch) -> None:
         assert [p.name for p in (tmp_path / d).iterdir()] == [], d
 
 
+def test_backup_failure_on_second_sums_restores_the_first_sums(tmp_path, v3, monkeypatch) -> None:
+    """둘째 경로 SHA256SUMS 덧붙이기에서 실패 — 첫 경로에 이미 덧붙인 줄을 걷어 내 SHA256SUMS 가 그 전 내용(앞 백업
+    줄)으로 돌아가고, 이번 파일은 지워진다(지워진 파일을 가리키는 줄이 남지 않는다)."""
+    _backup(v3, tmp_path, stamp="20261018T090000")              # 앞 백업 — SHA256SUMS 에 줄이 있다
+    before = {d: (tmp_path / d / "SHA256SUMS").read_bytes() for d in ("bak1", "bak2")}
+    calls = {"n": 0}
+    real = v3_restore._append_sums
+
+    def flaky(folder, sums):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("SUMS 쓰기 오류(시험)")
+        return real(folder, sums)
+
+    monkeypatch.setattr(v3_restore, "_append_sums", flaky)
+    with pytest.raises(OSError, match="시험"):
+        _backup(v3, tmp_path)
+    for d in ("bak1", "bak2"):
+        assert (tmp_path / d / "SHA256SUMS").read_bytes() == before[d], d
+        assert not list((tmp_path / d).glob(f"*{STAMP}*")), d
+
+
 def test_backup_sh_missing_v3_file_is_rc5_and_writes_nothing(tmp_path, v3) -> None:
     _home(tmp_path)
     v3_root, _ = _v3_files(tmp_path)
@@ -346,9 +369,10 @@ def test_backup_sh_argument_errors_are_rc5(tmp_path, v3, args) -> None:
 
 
 # ── 복원: 리허설(백업 → 컷오버 기간 쓰기 → 계획 → 복원) ─────────────────────────────
-def test_rehearsal_restores_nine_tables_and_leaves_the_rest(tmp_path, v3) -> None:
-    """정본 QL-I 리허설 — 9표는 백업과 같아지고, 9표 밖(v3 가 계속 쓴 행 포함)은 그대로, `_compat_meta` 에
-    복원 기록 1행이 붙는다. --dry-run 은 표별 행 수만 보이고 락도 잡지 않는다. 백업 파일은 바뀌지 않는다."""
+def test_rehearsal_restores_seven_tables_and_leaves_the_rest(tmp_path, v3) -> None:
+    """정본 QL-I 리허설(T-42) — 기본 7표는 백업과 같아지고, 점수 두 표(컷오버 기간에 실제로 나간 점수)와 9표 밖(v3 가
+    계속 쓴 행 포함)은 그대로, `_compat_meta` 에 복원 기록 1행이 붙는다. --dry-run 은 표별 행 수만 보이고 락도 잡지
+    않는다. 백업 파일은 바뀌지 않는다."""
     _home(tmp_path)
     _v3_files(tmp_path)
     assert _backup_sh(tmp_path, v3).rc == 0
@@ -357,7 +381,7 @@ def test_rehearsal_restores_nine_tables_and_leaves_the_rest(tmp_path, v3) -> Non
     _cutover_writes(v3)
     outside = [t for t in _user_tables(v3) if t not in TABLES and t != "_compat_meta"]
     assert "market_indices" in outside and "pipeline_runs" in outside
-    keep = {t: _dump(v3, t) for t in outside}
+    keep = {t: _dump(v3, t) for t in (*outside, *SCORE_TABLES)}
     meta_before = _dump(v3, "_compat_meta")
     assert len(meta_before) == 2
     assert all(_dump(v3, t) != _dump(backup, t) for t in TABLES)
@@ -369,14 +393,15 @@ def test_rehearsal_restores_nine_tables_and_leaves_the_rest(tmp_path, v3) -> Non
     assert _sha(v3) == before
     assert "daily_prices: 본 파일 19행 → 백업 18행 (-1)" in dry.out
     assert "stocks: 본 파일 4행 → 백업 3행 (-1)" in dry.out
+    assert "score_history" not in dry.out
     assert "쓰지 않았다" in dry.out
 
     r = _restore_sh(tmp_path, backup, v3)
     assert r.rc == 0, r.out
     assert r.flock == ["-n 9"]
-    for t in TABLES:
+    for t in DEFAULT_TABLES:
         assert _dump(v3, t) == _dump(backup, t), t
-    for t in outside:
+    for t in (*outside, *SCORE_TABLES):
         assert _dump(v3, t) == keep[t], t
     # 반영 기록은 지우지 않고(이력) 복원 기록 1행만 덧붙는다
     after = _dump(v3, "_compat_meta")
@@ -388,7 +413,7 @@ def test_rehearsal_restores_nine_tables_and_leaves_the_rest(tmp_path, v3) -> Non
     assert rec[0] > max(m[0] for m in meta_before)
     assert rec[2:4] == ("restore", "ok")
     counts = json.loads(rec[4])
-    assert set(counts) == set(TABLES)
+    assert set(counts) == set(DEFAULT_TABLES) and len(counts) == 7
     assert counts["daily_prices"] == {"n_before": 19, "n_rows": 18}
     win = json.loads(rec[5])
     assert win["sha256"] == bak_sha and win["backup"].endswith(backup.name)
@@ -397,6 +422,45 @@ def test_rehearsal_restores_nine_tables_and_leaves_the_rest(tmp_path, v3) -> Non
     assert list((tmp_path / "ql/logs/v3_restore").glob("*.log"))
     # 복원 뒤 다음 반영은 '첫 반영' — 복원 앞 장 마감 점수 기록은 T-34 판정에 들지 않는다
     assert v3_post.tables_for(v3, NEW_DAY.replace("-", ""), "morning") == TABLES
+
+
+def test_with_scores_restores_all_nine(tmp_path, v3) -> None:
+    """되돌리는 이유가 점수 오류일 때(T-42) — `--with-scores` 면 점수 두 표까지 9표가 백업과 같아진다."""
+    _home(tmp_path)
+    backup = _backup(v3, tmp_path)
+    _cutover_writes(v3)
+    r = _restore_sh(tmp_path, backup, v3, "--with-scores")
+    assert r.rc == 0, r.out
+    for t in TABLES:
+        assert _dump(v3, t) == _dump(backup, t), t
+    rec = _q(v3, "SELECT tables FROM _compat_meta WHERE basis = 'restore'")
+    assert sorted(json.loads(rec[0][0])) == sorted(TABLES)
+
+
+def test_score_tables_need_with_scores(tmp_path, v3) -> None:
+    """점수 표를 --tables 로 골라도 --with-scores 없이는 거부한다(T-42 — 실수로 발송된 점수를 지우지 않게)."""
+    backup = _backup(v3, tmp_path)
+    _cutover_writes(v3)
+    before = _sha(v3)
+    with pytest.raises(CompatError, match="with-scores"):
+        v3_restore.restore(backup, v3, tables=("daily_prices", "score_history"))
+    assert _sha(v3) == before
+
+
+def test_verification_runs_before_the_lock(tmp_path, v3) -> None:
+    """백업 sha 검증은 락을 잡기 전 — 손상된 백업이면 v3 락을 한 번도 잡지 않고 rc 2."""
+    _home(tmp_path)
+    backup = _backup(v3, tmp_path)
+    _cutover_writes(v3)
+    backup.chmod(0o644)
+    with open(backup, "ab") as f:
+        f.write(b"x")
+    before = _sha(v3)
+    r = _restore_sh(tmp_path, backup, v3)
+    assert r.rc == 2, r.out
+    assert r.flock == []
+    assert "sha256" in r.out and "락을 잡지 않았다" in r.out
+    assert _sha(v3) == before
 
 
 # ── 복원: 락 ──────────────────────────────────────────────────────────────────
@@ -441,12 +505,12 @@ def test_real_lock_held_by_v3_chain_is_waited_for(tmp_path, v3) -> None:
 
 # ── 복원: 원자성·검증 ─────────────────────────────────────────────────────────
 def test_restore_failure_rolls_back_the_whole_transaction(tmp_path, v3) -> None:
-    """마지막 표 INSERT 에서 실패 — 앞 8표의 DELETE·INSERT 도 되돌아가 본 파일 바이트가 그대로다."""
+    """마지막 표 INSERT 에서 실패 — 앞 6표의 DELETE·INSERT 도 되돌아가 본 파일 바이트가 그대로다."""
     _home(tmp_path)
     backup = _backup(v3, tmp_path)
     _cutover_writes(v3)
     con = sqlite3.connect(str(v3))
-    con.execute(f"CREATE TRIGGER boom BEFORE INSERT ON {TABLES[-1]} "
+    con.execute(f"CREATE TRIGGER boom BEFORE INSERT ON {DEFAULT_TABLES[-1]} "
                 "BEGIN SELECT RAISE(ABORT, '시험 실패'); END")
     con.commit()
     con.close()
@@ -509,12 +573,12 @@ def test_restore_refuses_tables_outside_the_nine(tmp_path, v3, tables) -> None:
 
 
 def test_restore_cli_tables_subset_only(tmp_path, v3, capsys) -> None:
-    """--tables 로 고른 표만 되돌린다(창 밖 되돌리기에서 가격·수급을 남기는 선택지)."""
+    """--tables 로 고른 표만 되돌린다(창 밖 되돌리기에서 가격·수급을 남기는 선택지). 점수 표는 --with-scores 와 함께."""
     backup = _backup(v3, tmp_path)
     _cutover_writes(v3)
     prices = _dump(v3, "daily_prices")
     assert cli_main(["restore", "--backup", str(backup), "--v3-db", str(v3),
-                     "--tables", "score_history,score_history_v2"]) == 0
+                     "--tables", "score_history,score_history_v2", "--with-scores"]) == 0
     assert "2표" in capsys.readouterr().out
     assert _dump(v3, "score_history") == _dump(backup, "score_history")
     assert _dump(v3, "score_history_v2") == _dump(backup, "score_history_v2")

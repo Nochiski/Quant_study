@@ -15,7 +15,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from compat import CompatError, export, v3_post, v3_restore
 from compat.mappings import MAPPINGS
 from compat.quant_db import SCHEMA_SQL_PATH, ExportResult, TableResult, _write_meta
@@ -729,7 +728,7 @@ def test_first_in_place_after_restore_must_be_full(files) -> None:
 
 def test_restore_record_never_counts_as_a_reflection(files) -> None:
     """복원 기록은 반영 기록이 아니다 — 같은 날짜라도 순서·7표 판정에 쓰이지 않는다."""
-    main, stg = files
+    main, _ = files
     _restored(main)
     assert tables_for(main, D, "morning") == TABLES
     assert v3_post._newer(v3_post._main_rows(main), "2000-01-01", "evening") == []

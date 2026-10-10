@@ -1,6 +1,6 @@
 """v3 `quant.db` 고정 백업 2벌 · 표 단위 복원 — 컷오버 되돌리기(컷오버 트랙 QL-I).
 
-정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-I · T-21 · §4(되돌리기 창 5거래일), 절차서
+정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-I · T-21 · T-42 · §4(되돌리기 창 5거래일), 절차서
 `docs/CUTOVER_ROLLBACK.md`. `scripts/v3_backup.sh`(`python -m compat backup`)와 `scripts/v3_restore.sh`
 (`python -m compat restore`)가 부른다. 서버 밖 백업은 하지 않는다(N-39 보류).
 
@@ -16,27 +16,31 @@
   · 디스크 여유: 파일시스템마다 (본 파일 + -wal + 사본 파일) 크기 × `DISK_FACTOR`(2, 스테이징과 같은 규칙) × 그
     파일시스템에 뜨는 벌 수.
   · 전부 뜬 뒤에 권한 0444, 각 경로의 SHA256SUMS(`sha256sum -c` 형식)에 덧붙인다. 복원은 SHA256SUMS 에 줄이 없는
-    파일을 받지 않으므로 중간에 멈춘 벌은 쓰이지 않는다. 실패하면 이번에 만든 파일을 지운다.
+    파일을 받지 않으므로 중간에 멈춘 벌은 쓰이지 않는다. 실패하면 이번에 만든 파일을 지우고, 이미 덧붙인 SHA256SUMS 도
+    덧붙이기 전 내용으로 되돌린다(둘째 경로에서 실패해도 첫 경로에 지워진 파일의 줄이 남지 않게).
   · v3 락은 잡지 않는다 — 온라인 백업은 한 시점의 일관된 사본이고, 락(`flock -n` 인 v3 체인)을 쥐면 그 시각 v3
     체인이 조용히 건너뛰어진다. 절차서는 v3 체인이 돌지 않는 때 뜨게 한다.
 
 복원(`restore`) — 되돌릴 때:
   · 백업이 v3 본 파일(링크·사이드카 포함)과 같은 파일이면 거부한다.
-  · 표는 compat 9표(`v3_post.TABLES`) 안에서만 고른다(기본 9표 전부). 9표 밖 — v3 가 계속 쓰는 `market_*`·
-    `pipeline_runs`·`research_reports` 등(T-27)과 반영 기록 `_compat_meta` — 은 고를 수 없다.
+  · 기본은 점수 두 표를 뺀 7표(`DEFAULT_TABLES`, T-42)다. 점수 두 표는 컷오버 기간에 실제로 엑셀로 나간 점수라 남기고,
+    되돌리는 이유가 점수 오류일 때만 `with_scores` 로 함께 되돌린다(점수 표를 고르면 `with_scores` 가 있어야 한다).
+    표는 compat 9표(`v3_post.TABLES`) 안에서만 고른다. 9표 밖 — v3 가 계속 쓰는 `market_*`·`pipeline_runs`·
+    `research_reports` 등(T-27)과 반영 기록 `_compat_meta` — 은 고를 수 없다.
   · 백업 sha256 을 그 폴더 SHA256SUMS 와 먼저 대조한다(줄이 없거나 다르면 멈춤 — 본 파일을 열지 않는다).
   · 표마다 백업과 본 파일의 열 이름 집합이 같아야 한다(백업 뒤 v3 마이그레이션이 열을 바꿨으면 멈춘다).
   · 한 트랜잭션: 본 파일 `mode=rw` · 백업 ATTACH `mode=ro` → BEGIN IMMEDIATE → 표마다 전체 DELETE → 백업 INSERT
     (열 이름으로) → `_compat_meta` 복원 기록 1행 → COMMIT. 중간에 실패하면 ROLLBACK 이라 본 파일은 그대로다
     (`v3_post._move` 와 같은 원자성).
-  · `dry_run`: 위 검증 뒤 표별 행 수(본 파일 → 백업)만 내고 쓰지 않는다.
-  · 락(v3 체인과 같은 `/tmp/kael_v3_daily_all.lock`)은 셸이 잡는다.
+  · `dry_run`: 위 검증 뒤 표별 행 수(본 파일 → 백업)만 내고 쓰지 않는다. 셸은 락을 잡기 전에 이것으로 sha·표·열을
+    먼저 본다.
+  · 락(v3 체인과 같은 `/tmp/kael_v3_daily_all.lock`)은 셸이 잡는다. 락 안의 복원도 sha 를 다시 대조한다(수 초).
 
 복원 기록(`_compat_meta` 1행): basis = `v3_post.RESTORE_BASIS` · status ok · exported_at = 복원 시각(UTC ISO —
   compat 기록과 같은 형식이라 앞뒤를 문자열로 가른다) · date = 복원한 KST 날짜 · tables = 표 → {n_before, n_rows} ·
   window = {backup, sha256}(이 기록만 창 대신 원천 백업을 싣는다) · 판 열(equity·stage)은 빈 객체, consensus_asof
   는 빈 문자열. `v3_post` 는 이 기록을 장벽으로 본다 — 그 앞 반영 기록은 순서(T-35)·아침 반영 표(T-34) 판정에서
-  빠지고, 그 뒤 첫 제자리 반영은 `--full` 만 받는다(`v3_post` 머리 주석).
+  빠지고, 그 뒤 첫 제자리 반영은 `--full` 만 받는다(`v3_post` 머리 주석, T-42).
 """
 from __future__ import annotations
 
@@ -56,12 +60,15 @@ from .v3_post import (
     BUSY_TIMEOUT_MS,
     DISK_FACTOR,
     RESTORE_BASIS,
+    SCORE_TABLES,
     TABLES,
     _require,
     _ro,
     _same_file,
 )
 
+# 기본 복원 표 — 점수 두 표를 뺀 7표(T-42). 점수 두 표는 `with_scores` 일 때만.
+DEFAULT_TABLES: tuple[str, ...] = tuple(t for t in TABLES if t not in SCORE_TABLES)
 SUMS = "SHA256SUMS"
 _KST = timezone(timedelta(hours=9))
 _READ_CHUNK = 1 << 20
@@ -140,8 +147,7 @@ def _append_sums(folder: Path, sums: dict[str, str]) -> None:
     if path.exists():
         path.chmod(0o644)
     with open(path, "a", encoding="utf-8") as f:
-        for name, sha in sums.items():
-            f.write(f"{sha}  {name}\n")
+        f.writelines(f"{sha}  {name}\n" for name, sha in sums.items())
         f.flush()
         os.fsync(f.fileno())
     path.chmod(0o444)
@@ -201,6 +207,8 @@ def backup(v3_db: Path, dests: Sequence[Path], stamp: str,
                               f"{len(ds)}벌 = {need:,} bytes — 뜨지 않는다")
 
     made: list[Path] = []
+    # 덧붙이기 전 SHA256SUMS(없으면 None) — 실패하면 되돌린다
+    sums_before = {d: (d / SUMS).read_bytes() if (d / SUMS).exists() else None for d in dests}
     try:
         first = dests[0] / db_name
         part = Path(f"{first}.partial")
@@ -235,6 +243,14 @@ def backup(v3_db: Path, dests: Sequence[Path], stamp: str,
     except BaseException:
         for p in made:
             p.unlink(missing_ok=True)
+        for d, before in sums_before.items():
+            path = d / SUMS
+            if before is None:
+                path.unlink(missing_ok=True)
+            elif path.exists() and path.read_bytes() != before:
+                path.chmod(0o644)
+                path.write_bytes(before)
+                path.chmod(0o444)
         raise
     return BackupResult(stamp, db_name, dests, sha)
 
@@ -271,9 +287,10 @@ def _columns(con: sqlite3.Connection, schema: str, table: str) -> list[str]:
     return [r[1] for r in con.execute(f'PRAGMA {schema}.table_info("{table}")')]
 
 
-def restore(backup_path: Path, v3_db: Path, tables: Sequence[str] = TABLES,
-            dry_run: bool = False) -> RestoreReport:
-    """백업의 표들을 v3 본 파일로 한 트랜잭션에 되돌린다(모듈 머리 주석). 락은 부르는 쪽이 쥔다."""
+def restore(backup_path: Path, v3_db: Path, tables: Sequence[str] | None = None,
+            dry_run: bool = False, with_scores: bool = False) -> RestoreReport:
+    """백업의 표들을 v3 본 파일로 한 트랜잭션에 되돌린다(모듈 머리 주석). 락은 부르는 쪽이 쥔다.
+    `tables` 를 안 주면 7표(`DEFAULT_TABLES`), `with_scores` 면 9표. 점수 표는 `with_scores` 일 때만 고를 수 있다(T-42)."""
     backup_path, v3_db = Path(backup_path), Path(v3_db)
     _require(backup_path, "백업")
     _require(v3_db, "v3 quant.db")
@@ -281,12 +298,16 @@ def restore(backup_path: Path, v3_db: Path, tables: Sequence[str] = TABLES,
         for b in _SIDECARS:
             if _same_file(Path(f"{backup_path}{a}"), Path(f"{v3_db}{b}")):
                 raise CompatError(f"백업이 v3 본 파일과 같은 파일이다: {backup_path}{a} = {v3_db}{b}")
-    tables = tuple(tables)
+    tables = tuple(tables) if tables is not None else (TABLES if with_scores else DEFAULT_TABLES)
     bad = sorted({t for t in tables if t not in TABLES})
     if not tables or bad or len(set(tables)) != len(tables):
         raise CompatError(f"복원 표는 compat 9표({','.join(TABLES)}) 안에서 겹치지 않게 고른다 — 받은 "
                           f"{','.join(tables) or '(없음)'}"
                           + (f", 9표 밖 {bad}" if bad else ""))
+    scores = [t for t in tables if t in SCORE_TABLES]
+    if scores and not with_scores:
+        raise CompatError(f"점수 표 {scores} 는 --with-scores 로만 되돌린다(T-42 — 컷오버 기간에 실제로 나간 점수다. "
+                          "되돌리는 이유가 점수 오류일 때만)")
     sha = verify_backup(backup_path)
 
     con = sqlite3.connect(f"{v3_db.resolve().as_uri()}?mode={'ro' if dry_run else 'rw'}", uri=True,

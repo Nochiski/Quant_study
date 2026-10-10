@@ -1,7 +1,7 @@
 """v3 `quant.db` 제자리 반영 — 스테이징 → 게이트 → 표 한 트랜잭션 (컷오버 트랙 QL-F).
 
-정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-F·QL-F2 · T-16 · T-27 · T-31 · T-34 · T-35 · T-38,
-로드맵 §8 K3-2·K3-3.
+정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-F·QL-F2·QL-I · T-16 · T-27 · T-31 · T-34 · T-35 · T-38 ·
+T-42, 로드맵 §8 K3-2·K3-3.
 `scripts/v3_post.sh` 가 단계마다 부른다(`python -m compat stage` · `v3-tables` · `export --in-place` · `apply`).
 
 왜 compat 을 v3 파일에 직접 돌리지 않는가:
@@ -48,13 +48,15 @@
   · 표마다 반영 범위 행 > 0 — 점수 두 표는 `score_date = D` 행(점수 행 > 0)
   · 복원 뒤 첫 제자리 반영은 `--full` 만(QL-I — 아래). 그림자는 본 파일에 쓰지 않으므로 보지 않는다
 
-복원 기록(QL-I — 되돌리기, `compat.v3_restore`): 9표를 고정 백업으로 되돌린 COMMIT 은 `_compat_meta` 에
-  basis = `RESTORE_BASIS` 인 기록 1행을 함께 남긴다. 이 기록은 장벽이다.
-  · 그 앞 반영 기록은 순서(T-35, `_newer`)·아침 반영 표(T-34, `_tables_for`) 판정에서 뺀다 — 복원이 9표를 백업
-    시점으로 되돌려 그 기록이 가리키던 값이 본 파일에 없다. 기록 자체는 지우지 않는다(이력).
+복원 기록(QL-I · T-42 — 되돌리기, `compat.v3_restore`): 표를 고정 백업으로 되돌린 COMMIT 은 `_compat_meta` 에
+  basis = `RESTORE_BASIS` 인 기록 1행을 함께 남긴다(되돌린 표는 기록의 `tables` — 기본은 점수 두 표를 뺀 7표). 이
+  기록은 장벽이다.
+  · 그 앞 반영 기록은 순서(T-35, `_newer`)·아침 반영 표(T-34, `_tables_for`) 판정에서 뺀다 — 그 기록들은 복원 뒤
+    본 파일을 설명하지 않는다. 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은
+    키를 `INSERT OR REPLACE` 로 덮는다. 기록 자체는 지우지 않는다(이력).
   · 복원 기록은 반영 기록이 아니다 — 순서·7표 판정에 들지 않는다(basis 가 evening·morning 이 아니다).
   · 그 뒤 첫 제자리 반영은 compat `--full`(730일 창) 기록만 받는다 — 복원 뒤 v3 가 다시 쓴 행 위에 14일 증분만
-    얹으면 창 안은 compat 정의(KRX 정규장 종가 T-33·전방 조정 수정가 QL-E), 창 밖은 v3 정의로 섞인다. 락을 기다리다
+    얹으면 창 안은 compat 종가(KRX 정규장 종가 — T-33), 창 밖은 v3 종가(애프터마켓 포함)로 섞인다. 락을 기다리다
     복원 뒤에 깬 옛 반영이나 꺼지지 않은 장 마감 체인도 여기서 멈춘다. 다시 컷오버할 때의 첫 반영(V3-C)과 같은
     뜻이다. **새 정지 조건이라 사용자 확인 대기**(구현은 한다).
   앞뒤는 `exported_at`(UTC ISO, compat 과 같은 형식)으로 가른다 — 제자리 반영은 v3 락 안에서 스테이징을 뜨고
@@ -316,7 +318,7 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
             fails.append(f"compat 창 끝 {window[1]} ≠ 요청 {d_iso}")
         restored_at = None if shadow else _first_after_restore(main_rows)
         if restored_at is not None and win.get("full") is not True:
-            fails.append(f"복원 뒤 첫 반영(QL-I): 본 파일 마지막 기록이 복원({restored_at})이다 — 첫 제자리 "
+            fails.append(f"복원 뒤 첫 반영(QL-I·T-42): 본 파일 마지막 기록이 복원({restored_at})이다 — 첫 제자리 "
                          "반영은 --full 이어야 한다(14일 증분은 v3 가 다시 쓴 행 위에 정의가 다른 창만 얹는다)")
         written = json.loads(meta["tables"])
         extra = sorted(set(written) - set(tables))

@@ -372,7 +372,7 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 4. **게이트**(COMMIT 전):
    - 이번 compat 기록 1행·status ok·날짜·basis 일치·창 끝 = D
    - 순서(T-35): 본 파일에 이번보다 (날짜, basis — 같은 날은 아침 > 장 마감) 가 큰 ok 반영 기록이 없다. 재생은 `--allow-older`. **새 정지 조건이라 사용자 확인 대기**
-   - 복원 뒤 첫 반영(QL-I): 본 파일 `_compat_meta` 의 마지막 복원 기록(basis `restore` — `scripts/v3_restore.sh` 가 남긴다) 뒤에 ok 반영 기록이 아직 없으면 compat 기록이 `--full` 이어야 한다. 그 앞 반영 기록은 순서(T-35)·아침 7표(2, T-34) 판정에서 빠진다. 그림자(`--shadow`)는 보지 않는다. **새 정지 조건이라 사용자 확인 대기**. 되돌리기 절차는 [`CUTOVER_ROLLBACK.md`](CUTOVER_ROLLBACK.md)
+   - 복원 뒤 첫 반영(QL-I · T-42): 본 파일 `_compat_meta` 의 마지막 복원 기록(basis `restore` — `scripts/v3_restore.sh` 가 남긴다. 기본 복원은 점수 두 표를 뺀 7표) 뒤에 ok 반영 기록이 아직 없으면 compat 기록이 `--full` 이어야 한다. 그 앞 반영 기록은 순서(T-35)·아침 7표(2, T-34) 판정에서 빠진다. 그림자(`--shadow`)는 보지 않는다. **새 정지 조건이라 사용자 확인 대기**. 되돌리기 절차는 [`CUTOVER_ROLLBACK.md`](CUTOVER_ROLLBACK.md)
    - 반영 표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1)
    - 기록에 반영 표 밖의 표가 없다 — 기록은 본 파일에 그대로 옮겨지고 2 의 아침 판정이 그 표 목록을 본다. 옮기지 않은 점수 표가 기록에 남으면 다음 날 아침이 점수를 건너뛴다(QL-F2)
    - 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`tables.daily_prices.metrics.n_on_date`). 스테이징은 본 파일 사본이라 'D 행 있음' 만으로는 옛 행에도 참이 된다. 비율 하한은 두지 않는다

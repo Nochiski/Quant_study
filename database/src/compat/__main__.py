@@ -32,7 +32,10 @@ v3 되돌리기(QL-I, `scripts/v3_backup.sh`·`scripts/v3_restore.sh` 가 부른
 
     python -m compat backup --v3-db <v3 quant.db> --dest <경로1> --dest <경로2> --stamp <YYYYMMDDTHHMMSS>
                             [--file <V3-A~E 대상 파일> …]
-    python -m compat restore --backup <백업 quant_<stamp>.db> --v3-db <v3 quant.db> [--tables a,b] [--dry-run]
+    python -m compat restore --backup <백업 quant_<stamp>.db> --v3-db <v3 quant.db> [--tables a,b]
+                             [--with-scores] [--dry-run]
+
+복원 기본은 점수 두 표를 뺀 7표다(T-42). 점수 두 표는 `--with-scores` 일 때만(되돌리는 이유가 점수 오류일 때).
 
 rc 0 정상 · 2 예외(apply 는 게이트 실패 포함 — v3 본 파일 무변경). 표별 행수 한 줄을 stdout 에 낸다
 (`scripts/compat_export.sh`·`scripts/v3_post.sh` 가 로그로 받는다).
@@ -120,7 +123,9 @@ def _parser() -> argparse.ArgumentParser:
                    help="백업 파일 — 같은 폴더 SHA256SUMS 와 먼저 대조한다")
     r.add_argument("--v3-db", required=True, type=Path)
     r.add_argument("--tables", default=None,
-                   help="쉼표로 구분한 표 — compat 9표 안에서만(기본 9표 전부)")
+                   help="쉼표로 구분한 표 — compat 9표 안에서만(기본 점수 두 표를 뺀 7표, T-42)")
+    r.add_argument("--with-scores", action="store_true",
+                   help="점수 두 표도 되돌린다(기본 9표, 점수 표를 --tables 로 고를 때도 필요) — 점수 오류일 때만")
     r.add_argument("--dry-run", action="store_true", help="표별 행 수만 — 쓰지 않는다")
     return p
 
@@ -132,9 +137,9 @@ def _v3_post(args: argparse.Namespace) -> int:
         print("\n".join(res.lines()))
         return 0
     if args.cmd == "restore":
-        tables = ([t.strip() for t in args.tables.split(",")] if args.tables is not None
-                  else v3_post.TABLES)
-        report = v3_restore.restore(args.backup, args.v3_db, tables, dry_run=args.dry_run)
+        tables = [t.strip() for t in args.tables.split(",")] if args.tables is not None else None
+        report = v3_restore.restore(args.backup, args.v3_db, tables, dry_run=args.dry_run,
+                                    with_scores=args.with_scores)
         print("\n".join(report.lines()))
         return 0
     if args.cmd == "stage":

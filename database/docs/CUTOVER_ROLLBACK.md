@@ -1,6 +1,6 @@
 # v3 컷오버 되돌리기 절차서 (QL-I)
 
-> 정본: [컷오버 트랙](plans/2026-10-10-cutover-track.md) §0·§4·T-20·T-21·T-35, [`COMPAT_LAYER.md`](COMPAT_LAYER.md) §8·§8-1(V3-A~E), [`DECISIONS.md`](DECISIONS.md) N-39(서버 밖 백업 보류)·N-42 Q4.
+> 정본: [컷오버 트랙](plans/2026-10-10-cutover-track.md) §0·§4·T-20·T-21·T-35·**T-42**, [`COMPAT_LAYER.md`](COMPAT_LAYER.md) §8·§8-1(V3-A~E), [`DECISIONS.md`](DECISIONS.md) N-39(서버 밖 백업 보류)·N-42 Q4.
 > 도구: `scripts/v3_backup.sh` · `scripts/v3_restore.sh`. 규칙 정본은 `src/compat/v3_restore.py` 머리 주석이고, 복원 뒤 반영 규칙은 `src/compat/v3_post.py` 머리 주석이다.
 > 명령은 서버의 quant-ledger 홈(`cd ~/quant-ledger`)에서 친다. 아래 예시 경로는 `$HOME` 표기다. 저장소가 공개라 실제 홈 경로·계정은 적지 않는다.
 
@@ -10,18 +10,20 @@
 
 | 되돌리는 것 | 그대로 두는 것 |
 |---|---|
-| v3 쪽 변경 V3-A·B·D·E(crontab · `job_runner.py` · 휴장 파일 · uni `kael_db.py`) | quant-ledger 연구 DB·원장·모델 DB(장 마감 판 산출물) |
-| v3 quant.db 의 compat 9표(V3-C 와 그 뒤 반영 — 표 단위 복원) | v3 quant.db 의 9표 밖 표(`market_*` · `research_reports` · `pipeline_runs` 등 — 컷오버 동안 v3 가 쓴 행 포함) |
-| quant-ledger 장 마감 체인의 v3 반영·발송 스위치 | `_compat_meta` 반영 기록(이력 — 복원 기록 1행이 덧붙는다) |
+| v3 쪽 변경 V3-A·B·D·E(crontab · `job_runner.py` · 휴장 파일 · uni `kael_db.py`)와 컷오버 날 넣은 QL-L 감시 크론 | quant-ledger 연구 DB·원장·모델 DB(장 마감 판 산출물) |
+| v3 quant.db 의 가격 등 **7표**(compat 9표에서 점수 두 표를 뺀 것 — V3-C 와 그 뒤 반영, 표 단위 복원) | v3 quant.db 의 **점수 두 표**(`score_history`·`_v2` — 컷오버 기간에 실제로 엑셀로 나간 점수, T-42). 되돌리는 이유가 점수 오류일 때만 함께 되돌린다(`--with-scores`) |
+| quant-ledger 장 마감 체인의 v3 반영·발송 스위치(그림자로) | v3 quant.db 의 9표 밖 표(`market_*` · `research_reports` · `pipeline_runs` 등 — 컷오버 동안 v3 가 쓴 행 포함)와 `_compat_meta` 반영 기록(이력 — 복원 기록 1행이 덧붙는다) |
 
 | 단계 | 무엇 | 사람 승인 |
 |---|---|---|
 | 4-0 | 시각·장부·현재 상태 기록 | — |
-| 4-1 | quant-ledger 장 마감 체인의 v3 반영·발송 끄기 | — |
-| 4-2 | v3 크론·체인 원복(V3-E → D·B·A) | **[사람 승인 — v3 파일 변경]** |
-| 4-3 | v3 quant.db 표 복원 | **[사람 승인 — v3 파일 변경]** |
+| 4-1 | quant-ledger 장 마감 체인을 그림자로(v3 반영·발송 끄기) | — |
+| 4-2 | v3 quant.db 표 복원 | **[사람 승인 — v3 파일 변경]** |
+| 4-3 | v3 크론·코드 복구(V3-E → D·B·A, QL-L 감시 크론) | **[사람 승인 — v3 파일 변경]** |
 | 4-4 | v3 첫 실행(수집·스코어링) | 수동으로 돌릴 때만 **[사람 승인]** |
 | 4-5 | 확인 체크 | — |
+
+복원(4-2)을 v3 크론 복구(4-3)보다 먼저 한다. 그 시점에는 V3-B 로 `daily_all` 크론이 없고 4-1 로 제자리 반영이 꺼져 있다. 그래서 공유 락(`/tmp/kael_v3_daily_all.lock`)을 쥘 주체가 없는 상태에서 복원하게 되고, 되살린 `daily_all` 이 복원 전 DB 에 도는 일도 없다.
 
 N-42 Q4 의 일괄 승인은 '컷오버 날 v3 수정'에 대한 것이다. 되돌리기의 v3 파일 변경은 따로 사람이 승인한다. 실행 직전에 한 줄로 보고한다.
 
@@ -37,13 +39,13 @@ scripts/v3_backup.sh --v3-db "$HOME/kael-system-v3/data/quant.db" \
 
 - **무엇을 남기나**(두 경로 각각, `stamp` = KST `YYYYMMDDTHHMMSS`, 전부 0444, `SHA256SUMS` 에 덧붙임).
   - `quant_<stamp>.db` — 온라인 백업이다. integrity_check ok 를 확인하고, rollback journal 로 바꿔 둔다.
-  - `job_runner.py.bak.<stamp>`(V3-A) · `.kis_holidays.json.bak.<stamp>`(V3-D·QL-Q 연결) · `kael_db.py.bak.<stamp>`(V3-E) · `crontab.bak.<stamp>`(V3-A·B·D — `crontab -l`).
+  - `job_runner.py.bak.<stamp>`(V3-A) · `.kis_holidays.json.bak.<stamp>`(V3-D·QL-Q 연결, 숨김 파일) · `kael_db.py.bak.<stamp>`(V3-E) · `crontab.bak.<stamp>`(V3-A·B·D — `crontab -l`).
   - 대상 목록의 정본은 COMPAT_LAYER §8-1 이다.
 - **언제**: v3 체인·반영이 돌지 않을 때(§4-0 의 피할 시각 밖)에 뜬다. 스크립트는 v3 락을 잡지 않는다. v3 크론은 `flock -n` 이라 락을 쥐면 그 시각 체인이 조용히 건너뛰어지기 때문이다.
 - **성공 확인**
-  - rc 0 이고 마지막 줄이 `compat backup 완료 — 2벌 × 5파일 …` 이다.
-  - `(cd data/_cutover/v3_backup && sha256sum -c SHA256SUMS)` · `(cd "$HOME/v3_cutover_backup" && sha256sum -c SHA256SUMS)` 가 전부 `OK` 다.
-  - `ls -la` 가 `-r--r--r--` 이다.
+  - rc 0 이고 마지막 줄이 `════ 종료 rc=0 ════`, 그 앞 줄이 `compat backup 완료 — 2벌 × 5파일 …` 이다.
+  - `(cd data/_cutover/v3_backup && sha256sum -c SHA256SUMS)` · `(cd "$HOME/v3_cutover_backup" && sha256sum -c SHA256SUMS)` 가 전부 `OK`(5줄)다.
+  - `ls -la data/_cutover/v3_backup` 에서(숨김 파일 `.kis_holidays.json.bak.<stamp>` 이 보이게 `-a`) 다섯 파일이 `-r--r--r--` 이다.
   - 두 경로의 `quant_<stamp>.db` sha256 이 같다.
   - **stamp 를 적어 둔다**(아래 `S`).
 - **멈춤**
@@ -51,7 +53,7 @@ scripts/v3_backup.sh --v3-db "$HOME/kael-system-v3/data/quant.db" \
   - 디스크 여유가 모자라면 멈춘다. 기준은 파일시스템마다 '백업 크기 × 2 × 그 파일시스템에 뜨는 벌 수'다. 두 경로가 같은 디스크면 × 4 다.
   - crontab 을 못 읽으면 멈춘다.
   - 사본 대상 파일이 없으면 rc 5 로 멈춘다. 이때는 경로를 서버에서 grep 으로 다시 찾는다(§8-1 줄 번호는 로컬 사본 기준이다).
-  - 실패하면 이번에 만든 파일을 지운다.
+  - 실패하면 이번에 만든 파일을 지우고, 이미 덧붙인 `SHA256SUMS` 도 덧붙이기 전으로 되돌린다.
 - **소요**: 로컬 465MB 사본에서 4.7초(integrity_check 포함)다. 서버는 아직 재지 않았다.
 - **한계**: 두 경로는 같은 서버 디스크일 수 있다. 우리 도구의 실수(덮어쓰기·삭제)는 막지만 디스크 고장은 못 막는다. 서버 밖 백업은 N-39 로 보류 중이다.
 
@@ -63,8 +65,9 @@ scripts/v3_backup.sh --v3-db "$HOME/kael-system-v3/data/quant.db" \
   2. v3 소비자 장애. 07:00 v3 브리핑 · v3 엑셀 텔레그램(T-20, daily_post) · uni 브리프가 틀리거나 나오지 않는다.
   3. 사람 판단.
 - **결정은 사람(사용자)이 한다.** 판정 실패는 후보 신호다. 실패한 하루가 곧 되돌리기를 뜻하지는 않는다.
+- **점수 표도 되돌릴지**도 이때 정한다. 기본은 되돌리지 않는다(T-42). 되돌리는 이유가 점수 오류(compat 점수가 틀렸다)일 때만 4-2 에서 `--with-scores` 를 준다.
 
-## 3. 창 안과 창 밖
+## 3. 창 안과 창 밖, 점수 표
 
 - **창 안**(복원 뒤 v3 첫 수집일이 10-23 이하)
   - v3 수집은 종목마다 최근 5행을 다시 받는다. 가격은 `backend/pipeline/collectors.py` 의 `items[:5]`, 수급은 `records[:5]` 다(로컬 사본 25dd56b).
@@ -73,11 +76,13 @@ scripts/v3_backup.sh --v3-db "$HOME/kael-system-v3/data/quant.db" \
 - **창 밖**(첫 수집이 여섯째 거래일 이후)
   - 10-19 부터 (X 의 4거래일 전) 전날까지 두 표가 빈다.
   - 선택지(결정은 사람):
-    - ① **권고** — 9표를 복원한 뒤 v3 자체 백필로 메운다. v3 저장소에서 `scripts/backfill.py --mode prices --days N` · `--mode investor_detail --days N` 을 돌린다. 키움 호출이므로 `--dry-run` 으로 예상 콜 수를 먼저 본다. `data/.backfill.lock` 을 쓴다. 이렇게 하면 v3 정의로 통일된다.
-    - ② 가격·수급 두 표는 복원하지 않는다(`--tables` 에서 뺀다). compat 행이 남아 그 날들은 KRX 정규장 종가(T-33)와 전방 조정 수정가(QL-E)가 되고, v3 정의와 섞여 모멘텀 창에 계단이 생긴다.
-- **점수 두 표**(창 안·밖 공통)
-  - v3 스코어링은 그날만 계산한다. 그래서 컷오버~복원 사이 날짜의 점수 행은 복원 뒤 없다(9표 복원이 compat 점수를 지운다). 그날 엑셀은 이미 나갔다.
-  - 점수를 남기려면 `--tables` 에서 점수 두 표를 뺀다. 남는 행은 593 유니버스다(T-17).
+    - ① **권고** — 7표를 복원한 뒤 v3 자체 백필로 메운다. v3 저장소에서 `scripts/backfill.py --mode prices --days N` · `--mode investor_detail --days N` 을 돌린다. 키움 호출이므로 `--dry-run` 으로 예상 콜 수를 먼저 본다. `data/.backfill.lock` 을 쓴다. 이렇게 하면 v3 정의로 통일된다.
+    - ② 가격·수급 두 표는 복원하지 않는다(`--tables` 에서 뺀다). compat 행이 남아 그 날들의 종가는 KRX 정규장 종가(T-33)다. v3 종가(애프터마켓 포함)와 섞인다.
+- **점수 두 표 — 기본은 복원하지 않는다(T-42)**
+  - 컷오버 기간 점수는 그날 실제로 엑셀로 나간 점수다. 그래서 기본 복원(7표)은 점수 두 표를 건드리지 않는다. 컷오버 기간 날짜의 점수 행은 compat 값(593·625 유니버스 — T-17)으로 남는다.
+  - **예외**: 되돌리는 이유가 점수 오류일 때만 `--with-scores` 로 함께 되돌린다. 그러면 컷오버 기간 날짜의 점수 행은 사라진다(백업에 없다. v3 스코어링은 그날만 계산한다).
+  - **부수 효과 — compat 행과 v3 행이 섞인다.** v3 점수 쓰기는 `INSERT OR REPLACE` 다(v3 `backend/db/repositories/score_repo.py:37` · `backend/scoring/v2_repo.py:21`, 로컬 사본 25dd56b). 같은 날짜를 compat 과 v3 가 둘 다 쓰면 겹치는 종목은 v3 행으로 바뀌고, v3 유니버스 밖 종목의 compat 행은 그대로 남는다(예: 그날 ⑥ 이 점수를 쓴 뒤 4-4 수동 실행이 같은 날짜를 다시 쓸 때). 날짜로 보면 컷오버 기간은 compat 행, 그 뒤는 v3 행이다.
+  - **확인 필요**: uni `get_signal_insights`(`sources/kael_db.py` — 4-3 에서 V3-E 날짜 조건을 걷어 낸 뒤) 가 종목별 최신 행을 고를 때의 영향. 복원 뒤 v3 유니버스에서 빠진 종목은 컷오버 기간의 compat 행이 '최신'으로 잡힐 수 있다. 서버 파일에서 조회 식을 보고 정한다.
 
 ## 4. 순서
 
@@ -92,38 +97,82 @@ V3="$HOME/kael-system-v3/data/quant.db"
 
 ### 4-0. 준비
 
-- **시각**: 복원은 v3 본 파일 쓰기 락을 수 초~수십 초 쥔다(로컬 465MB 사본에서 9표 230만 행에 9.1초, 서버는 미실측). v3 연결의 busy_timeout 은 5초다(`backend/db/connection.py`). 복원이 v3 락을 쥔 동안에는 v3 크론의 `flock -n` 줄도 건너뛰어진다. 그래서 아래 시각(KST)을 피한다.
+- **시각**: 복원은 v3 본 파일 쓰기 락을 수 초~수십 초 쥔다(로컬 465MB 사본에서 9표 230만 행에 9.1초 — 7표는 그보다 짧다. 서버는 미실측). v3 연결의 busy_timeout 은 5초다(`backend/db/connection.py`). 그래서 아래 시각(KST)을 피한다.
   - v3 브리핑 07:00 · 12:15 · 15:35
   - uni(quant.db rsync) 06:35 · 07:10 · 12:15 · 15:40
   - 장 마감 체인 15:41~16:30
-  - v3 daily_all·daily_insight 20:05 · 리서치 20:30 · 브로커 리서치 21:00
+  - v3 daily_insight 20:05 · 리서치 20:30 · 브로커 리서치 21:00
   - quant-ledger 키움 저녁 수집·refill 21:05~
-  - 권장 창은 평일 09:30~11:30 · 13:00~15:00 또는 22:00 뒤다.
-  - 4-1~4-3 은 한 자리에서 이어서 한다. 4-2 에서 되살린 20:05 daily_all 이 복원 전 DB 에 돌면, 그날 쓴 행을 4-3 이 지운다.
+  - 권장 창은 평일 09:30~11:30 · 13:00~15:00 또는 22:00 뒤다. 그날 v3 엑셀이 이미 나간 날(4-4 분기)은 22:00 뒤가 편하다 — 그날 20:05 daily_insight 가 끝났고 다음 daily_all 은 내일이다.
+  - 4-1~4-3 은 한 자리에서 이어서 한다.
 - **맥 전원**: 맥을 전원에 연결한다. 연결이 끊기면 서버 락이 남는다(정본 §5 10-10 기록).
 - **수동 개입 장부**: `PYTHONPATH=src .venv/bin/python -m daily.window_judge record --date <오늘 YYYYMMDD> --what "v3 되돌리기(QL-I) — <사유>" --by <누가>`
 - **지금 상태 기록**(되돌리기의 되돌리기용): `crontab -l > "$HOME/v3_cutover_backup/crontab.before_rollback.$(date +%Y%m%dT%H%M%S)"`
 - **백업 검증**: `(cd "$B" && sha256sum -c SHA256SUMS)` 가 전부 `OK` 여야 한다. 아니면 둘째 벌을 `B` 로 둔다.
 
-### 4-1. 장 마감 체인의 v3 반영·발송 끄기(quant-ledger, PR-8 스위치)
+### 4-1. 장 마감 체인을 그림자로 — v3 반영·발송 끄기(quant-ledger, PR-8 스위치, T-42)
 
-`config/postclose_chain.env`(PR-8)를 아래 둘 중 하나로 둔다.
+`config/postclose_chain.env`(PR-8)를 그림자 상태로 둔다: `POSTCLOSE_ENABLED=1` · `POSTCLOSE_SEND=0` · `POSTCLOSE_V3=shadow` · `POSTCLOSE_V3_POST_CMD=''`.
 
-| 상태 | 값 | 언제 |
-|---|---|---|
-| **그림자로(권고)** | `POSTCLOSE_ENABLED=1` · `POSTCLOSE_SEND=0` · `POSTCLOSE_V3=shadow` · `POSTCLOSE_V3_POST_CMD=''` | 기본. 컷오버 전 그림자(10-14~16)와 같은 상태다. v3 본 파일과 텔레그램에 닿는 것이 없다. 크론·16:30 워치독은 그대로 두고, 다시 컷오버할 대조 기록이 계속 쌓인다 |
-| 완전 정지 | `POSTCLOSE_ENABLED=0` · `POSTCLOSE_SEND=0` · `POSTCLOSE_V3=shadow` | 체인 자체(수집기·판)가 원인일 때. 꺼져 있으면 16:30 워치독이 crit 을 내므로 4-2 에서 crontab 의 15:41 `postclose_chain.sh close`·16:30 `watchdog.sh postclose_board` 줄을 주석 처리한다 |
-
+- 컷오버 전 그림자(10-14~16)와 같은 상태다. v3 본 파일과 텔레그램에 닿는 것이 없다(세 모드의 v3_post 가 전부 `--shadow` 로 돌고 v3 락도 잡지 않는다). 크론·16:30 워치독은 그대로 두고, 다시 컷오버할 대조 기록이 계속 쌓인다.
+- 체인 자체(수집기·판)가 원인이라 아예 세워야 하면 사람이 정한다. 그때는 `POSTCLOSE_ENABLED=0` 이고, 꺼져 있으면 16:30 워치독이 crit 을 내므로 4-3 의 crontab 편집 때 15:41 `postclose_chain.sh close`·16:30 `watchdog.sh postclose_board` 줄도 주석 처리한다.
 - **바꾸는 방법**: 저장소에서 고쳐 `scripts/deploy.sh` 로 배포한다. 배포 금지 창은 15:40~16:30 · 21:00~21:30 이다. 급해서 서버 파일을 직접 고쳤으면 같은 값을 저장소에도 커밋한다. deploy 가 `config/` 를 `--delete` 로 맞추므로, 커밋하지 않으면 다음 배포가 되돌린다.
-- **PR-9 스위치**: 아침판 '짓기만' · 대체 발송 · 10:30 워치독(B-57)을 컷오버 전 값으로 되돌린다. 이름·명령은 PR-9 머지 때 이 줄에 적는다.
+- **PR-9 스위치**: 아침판 '짓기만' · 대체 발송 · 10:30 워치독(B-57)을 컷오버 전 값으로 되돌린다. 이름·명령은 PR-9 머지 때 이 줄에 적는다(PR-9 체크리스트 ⑥).
 - **QL-Q 연결**: 06:00 체인이 v3 `data/.kis_holidays.json` 을 쓰고 있으면 끈다. 자리는 연결 PR 이 정한다.
 - **성공 확인**
-  - `bash scripts/postclose_chain.sh close --dry-run | head -1` 이 `켜짐 · 발송 off · v3 shadow` 를 보인다. 완전 정지면 `꺼짐(…)` 이다.
+  - `bash scripts/postclose_chain.sh close --dry-run | head -1` 이 `켜짐 · 발송 off · v3 shadow` 를 보인다.
   - `pgrep -af 'postclose_chain.sh|v3_post.sh'` 가 비어 있다. 돌고 있으면 끝날 때까지 기다린다. 락을 기다리던 제자리 반영이 복원 뒤에 깨면 '복원 뒤 첫 반영은 --full' 게이트(§5)가 막는다. 다만 그 crit 이 남는다.
 
-### 4-2. v3 크론·체인 원복 — V3-E → D·B·A **[사람 승인 — v3 파일 변경]**
+### 4-2. v3 quant.db 표 복원 **[사람 승인 — v3 파일 변경]**
+
+```bash
+scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3" --dry-run
+scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3"                  # 기본 7표
+# 되돌리는 이유가 점수 오류일 때만(T-42): scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3" --with-scores
+```
+
+- **① 검증(락을 잡기 전)**: 백업 sha256 을 SHA256SUMS 와 대조하고, 표·열 이름을 보고, 표별 `본 파일 N행 → 백업 M행 (차이)` 을 낸다. 본 파일은 읽기만 한다. `--dry-run` 이면 여기서 끝난다(락 없음). 차이는 컷오버 동안 늘어난 날짜 몫쯤이어야 한다. 백업 0행처럼 큰 이상이 보이면 멈춘다.
+- **② 복원(v3 락 안)**: sha 를 다시 대조한 뒤 고른 표를 한 트랜잭션에 되돌린다. 순서는 ATTACH · BEGIN IMMEDIATE · 표별 전체 DELETE · 백업 INSERT · `_compat_meta` 복원 기록 1행 · COMMIT 이다. 9표 밖 표와 반영 기록은 건드리지 않는다.
+- **락**: v3 체인·`v3_post.sh` 와 같은 `/tmp/kael_v3_daily_all.lock` 이고 대기형이다. 이 순서(4-1 뒤, 4-3 전)에서는 쥘 주체가 없어야 한다. `v3 락 대기 시작` 줄이 나오면 **무엇이 쥐었는지 먼저 본다** — 다른 터미널에서 `pgrep -af 'kael_v3_daily_all.lock|v3_post.sh|job_runner.py'`. 4-1 이 덜 꺼졌거나(v3_post 제자리) 손으로 돌린 v3 체인이면 그것이 끝나기를 기다리거나 원인을 정리한다.
+- **rc**
+  - 0 완료.
+  - 2 실패. COMMIT 전이라 본 파일은 그대로다. sha 불일치·SHA256SUMS 줄 없음·9표 밖 표·점수 표인데 `--with-scores` 없음·열 불일치(백업 뒤 v3 스키마 변경)가 여기에 든다. 검증 실패면 락도 잡지 않았다. 로그 `logs/v3_restore/*.log` 의 원인을 본다. sha 불일치면 둘째 벌로 다시 한다.
+  - 3 락 실패.
+  - 5 인자 오류.
+- **표 고르기**: `--tables a,b`(9표 안에서만, 점수 표는 `--with-scores` 와 함께)로 고른다. 창 밖 선택지 ②(§3)에 쓴다.
+- **성공 확인**(복원 직후, v3 첫 실행 **전**에 한다). 셋째 인자는 견줄 표다 — 생략하면 기본 7표, `--with-scores` 로 복원했으면 `nine`, 리허설처럼 모든 표가 같아야 하면 `all`.
+  ```bash
+  .venv/bin/python - "$V3" "$B/quant_$S.db" <<'EOF'
+  import sqlite3, sys
+  from pathlib import Path
+  NINE = ["daily_prices", "stocks", "investor_detail_flows", "consensus_revision_daily",
+          "consensus_revision_compare", "consensus_annual", "financial_summary",
+          "score_history", "score_history_v2"]
+  mode = sys.argv[3] if len(sys.argv) > 3 else "seven"
+  cur, ref = (Path(p).resolve().as_uri() for p in sys.argv[1:3])
+  c = sqlite3.connect(f"{cur}?mode=ro", uri=True)
+  c.execute("ATTACH ? AS r", (f"{ref}?mode=ro",))
+  names = [t for (t,) in c.execute("SELECT name FROM r.sqlite_master WHERE type='table' "
+                                   "AND name NOT LIKE 'sqlite_%' AND name <> '_compat_meta' ORDER BY name")]
+  want = set(names) if mode == "all" else set(NINE if mode == "nine" else NINE[:7])
+  bad = 0
+  for t in names:
+      a = c.execute(f'SELECT count(*) FROM (SELECT * FROM main."{t}" EXCEPT SELECT * FROM r."{t}")').fetchone()[0]
+      b = c.execute(f'SELECT count(*) FROM (SELECT * FROM r."{t}" EXCEPT SELECT * FROM main."{t}")').fetchone()[0]
+      print(f"{'견줌' if t in want else '참고'} {t}: 지금에만 {a} · 기준에만 {b}")
+      bad += (a + b) if t in want else 0
+  print(c.execute("SELECT basis, status, date, tables FROM main._compat_meta ORDER BY exported_at DESC LIMIT 1").fetchone())
+  print(c.execute("PRAGMA main.quick_check").fetchone())
+  print(f"{mode} PASS" if bad == 0 else f"{mode} FAIL")
+  EOF
+  ```
+  기대: '견줌' 줄이 전부 `0 · 0` 이고 `seven PASS` 다. '참고' 줄(점수 두 표·9표 밖)은 컷오버 동안 쓴 만큼 다를 수 있다. 마지막 기록은 `('restore', 'ok', <오늘>, <7표 행 수 json>)` 이고 `('ok',)` 이다.
+
+### 4-3. v3 크론·코드 복구 — V3-E → D·B·A, QL-L 감시 크론 **[사람 승인 — v3 파일 변경]**
 
 공통 규칙이 있다. 사본으로 덮기 전에 `diff` 로 V3-x 변경만 있는지 본다. 다른 변경이 섞였으면 덮지 말고 그 줄만 손으로 되돌린다. 덮을 때는 `cp` 를 쓴다(기존 파일의 권한은 그대로 남는다).
+
+**그날 v3 엑셀이 이미 나갔으면**(4-4 분기 — ⑥ daily_post 가 그날 엑셀을 보냈다) 아래 2(crontab)는 그날 20:05 daily_insight 가 끝난 뒤에 한다. 먼저 되살리면 그날 20:05 `daily_all` 이 엑셀을 한 번 더 보낸다.
 
 1. **V3-E — uni 점수 조회**
    ```bash
@@ -131,17 +180,17 @@ V3="$HOME/kael-system-v3/data/quant.db"
    cp "$B/kael_db.py.bak.$S" "$HOME/unitelegram/sources/kael_db.py"
    ```
    확인: `sha256sum "$HOME/unitelegram/sources/kael_db.py"` 이 `grep "kael_db.py.bak.$S" "$B/SHA256SUMS"` 의 값과 같다.
-2. **V3-D·B·A — crontab**
+2. **V3-D·B·A·QL-L — crontab**
    ```bash
    diff <(crontab -l) "$B/crontab.bak.$S"
    ```
-   - 기대하는 차이는 셋이다. (A) `--chain daily_insight` 줄이 있다 → 없다. (B) `--chain daily_all` 줄이 없다 → 있다. (D) `refresh_year_holidays`·`monthly_holiday_review` 두 줄이 없다(주석) → 있다.
-   - 그 밖의 줄도 다르면(컷오버 뒤 quant-ledger 크론 변경 등) 통째로 덮지 않는다. `crontab -e` 로 위 네 줄만 고친다.
+   - 기대하는 차이는 넷이다. (A) `--chain daily_insight` 줄이 있다 → 없다. (B) `--chain daily_all` 줄이 없다 → 있다. (D) `refresh_year_holidays`·`monthly_holiday_review` 두 줄이 없다(주석) → 있다. (QL-L) 23:30 `daily.cutover_watch` 감시 줄이 있다 → 없다(컷오버 날 V3-A~E 뒤에 넣은 줄이라 백업에 없다).
+   - 그 밖의 줄도 다르면(컷오버 뒤 quant-ledger 크론 변경 등) 통째로 덮지 않는다. `crontab -e` 로 위 줄들만 고친다 — 감시 줄은 지우지 말고 주석 처리한다.
    ```bash
    crontab "$B/crontab.bak.$S"
    ```
    - 4-1 에서 완전 정지를 골랐으면 이어서 `crontab -e` 로 15:41·16:30 장 마감 줄을 주석 처리한다.
-   - 확인: `crontab -l | grep -c -- '--chain daily_all'` → 1 · `crontab -l | grep -c daily_insight` → 0 · `crontab -l | grep -cE 'refresh_year_holidays|monthly_holiday_review'` → 2.
+   - 확인: `crontab -l | grep -c -- '--chain daily_all'` → 1 · `crontab -l | grep -c daily_insight` → 0 · `crontab -l | grep -cE 'refresh_year_holidays|monthly_holiday_review'` → 2 · `crontab -l | grep -v '^[[:space:]]*#' | grep -c 'daily.cutover_watch'` → 0(감시 줄이 없거나 주석이다 — 남아 있으면 되살린 daily_all·v3 스코어링을 매일 위반 crit 으로 본다).
 3. **V3-D — 휴장 파일**: QL-Q 연결이 v3 휴장 파일을 썼을 때만 한다(4-1 에서 쓰기를 끈 뒤). 연결 전이면 건너뛴다. 되살린 daily_all 의 `calendar_refresh` 가 20:05 에 이 파일을 다시 쓴다.
    ```bash
    diff "$B/.kis_holidays.json.bak.$S" "$HOME/kael-system-v3/data/.kis_holidays.json"
@@ -154,98 +203,80 @@ V3="$HOME/kael-system-v3/data/quant.db"
    ```
    확인: sha256 이 SHA256SUMS 줄과 같고, `grep -cE '"daily_post"|"daily_insight"' "$HOME/kael-system-v3/scripts/job_runner.py"` → 0.
 
-### 4-3. v3 quant.db 표 복원 **[사람 승인 — v3 파일 변경]**
-
-```bash
-scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3" --dry-run
-scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3"
-```
-
-- **`--dry-run`**
-  - 출력은 sha256 확인과 표별 `본 파일 N행 → 백업 M행 (차이)` 9줄이다. 락을 잡지 않고 쓰지 않는다.
-  - 차이는 컷오버 동안 늘어난 날짜 몫쯤이어야 한다. 백업 0행처럼 큰 이상이 보이면 멈춘다.
-- **복원**: 백업 sha256 을 SHA256SUMS 와 대조한 뒤 9표를 한 트랜잭션에 되돌린다. 순서는 ATTACH · BEGIN IMMEDIATE · 표별 전체 DELETE · 백업 INSERT · `_compat_meta` 복원 기록 1행 · COMMIT 이다.
-  - 락은 v3 체인·`v3_post.sh` 와 같은 `/tmp/kael_v3_daily_all.lock` 이다. 잡혀 있으면 `v3 락 대기 시작` 줄을 남기고 풀릴 때까지 기다린다.
-  - 9표 밖 표와 반영 기록은 건드리지 않는다.
-- **rc**
-  - 0 완료.
-  - 2 실패. COMMIT 전이라 본 파일은 그대로다. sha 불일치·SHA256SUMS 줄 없음·9표 밖 표·열 불일치(백업 뒤 v3 스키마 변경)가 여기에 든다. 로그 `logs/v3_restore/*.log` 의 원인을 본다. sha 불일치면 둘째 벌로 다시 한다.
-  - 3 락 실패.
-  - 5 인자 오류.
-- **표 고르기**: `--tables a,b`(9표 안에서만)로 고른다. 창 밖 선택지 ②나 점수를 남기는 경우(§3)에 쓴다.
-- **성공 확인**(복원 직후, v3 첫 실행 **전**에 한다 — 9표는 0·0, 9표 밖은 컷오버 동안 v3 가 쓴 만큼 다를 수 있다)
-  ```bash
-  .venv/bin/python - "$V3" "$B/quant_$S.db" <<'EOF'
-  import sqlite3, sys
-  from pathlib import Path
-  NINE = {"daily_prices", "stocks", "investor_detail_flows", "consensus_revision_daily",
-          "consensus_revision_compare", "consensus_annual", "financial_summary",
-          "score_history", "score_history_v2"}
-  cur, ref = (Path(p).resolve().as_uri() for p in sys.argv[1:3])
-  c = sqlite3.connect(f"{cur}?mode=ro", uri=True)
-  c.execute("ATTACH ? AS r", (f"{ref}?mode=ro",))
-  bad = 0
-  for (t,) in c.execute("SELECT name FROM r.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
-                        "AND name <> '_compat_meta' ORDER BY name").fetchall():
-      a = c.execute(f'SELECT count(*) FROM (SELECT * FROM main."{t}" EXCEPT SELECT * FROM r."{t}")').fetchone()[0]
-      b = c.execute(f'SELECT count(*) FROM (SELECT * FROM r."{t}" EXCEPT SELECT * FROM main."{t}")').fetchone()[0]
-      print(f"{'9표' if t in NINE else '밖 '} {t}: 지금에만 {a} · 기준에만 {b}")
-      bad += (a + b) if t in NINE else 0
-  print(c.execute("SELECT basis, status, date FROM main._compat_meta ORDER BY exported_at DESC LIMIT 1").fetchall())
-  print(c.execute("PRAGMA main.quick_check").fetchone())
-  print("9표 PASS" if bad == 0 else "9표 FAIL")
-  EOF
-  ```
-  기대: 9표 줄이 전부 `0 · 0` 이고 `9표 PASS` 다. 마지막 기록은 `[('restore', 'ok', <오늘>)]` 이고 `('ok',)` 이다.
-
 ### 4-4. v3 첫 실행
 
-- **그날 20:05 전에 복원했으면**: 4-2 에서 되살린 20:05 `daily_all` 크론이 첫 실행이다. 수집(최근 5행) → 수정주가 → 스코어링 2종 → 엑셀 텔레그램 → insight·위키 순으로 돈다. 장중에 수동으로 돌리지 않는다. v3 수집은 그날 행의 종가를 현재가로 채운다(`collectors.py` 의 `cur_prc` 대체).
-- **20:05 뒤에 복원했으면 [사람 승인]**: 그날 엑셀은 이미 나갔다(daily_post, T-20). 그래서 엑셀 잡 `export_scores` 를 빼고 잡만 돌린다. 시각은 21:05 quant-ledger 키움 저녁 수집이 끝난 뒤다(v3 와 앱키를 같이 쓴다 — README 크론 표 결정 11). 휴장일이면 하지 않는다.
+분기 기준은 **그날 v3 엑셀(⑥ daily_post 의 `export_scores`)이 이미 나갔는가**다. 같은 날 v3 엑셀이 두 번 나가지 않게 하려는 것이다. 텔레그램 채팅방과 아래 기록으로 본다(`started_at` 은 UTC — KST 그날 = UTC 전날 15:00 ~ 그날 15:00).
+
+```bash
+.venv/bin/python - "$V3" <<'EOF'
+import sqlite3, sys
+from pathlib import Path
+c = sqlite3.connect(f"{Path(sys.argv[1]).resolve().as_uri()}?mode=ro", uri=True)
+print(c.execute("SELECT job_name, status, started_at FROM pipeline_runs WHERE job_name IN "
+                "('chain:daily_post', 'export_scores') ORDER BY run_id DESC LIMIT 4").fetchall())
+EOF
+```
+
+- **아직 안 나갔으면**(되돌리기가 그날 ⑥ 전이거나, ⑥ 이 실패·그림자라 daily_post 가 돌지 않은 날): 첫 실행은 4-3 에서 되살린 20:05 `daily_all` 크론이다. 수집(최근 5행) → 수정주가 → 스코어링 2종 → 엑셀 텔레그램 → insight·위키 순으로 돌고 엑셀은 한 번 나간다. 장중에 수동으로 돌리지 않는다. v3 수집은 그날 행의 종가를 현재가로 채운다(`collectors.py` 의 `cur_prc` 대체). 20:05 가 이미 지났으면 21:05 quant-ledger 키움 저녁 수집이 끝난 뒤(v3 와 앱키를 같이 쓴다 — README 크론 표 결정 11) `--chain daily_all` 을 손으로 한 번 돌린다 **[사람 승인]**(v3 crontab 줄에서 cron 시각만 뺀 형태).
+- **이미 나갔으면 [사람 승인]**: 엑셀 잡 `export_scores` 를 빼고 잡만 돌린다. 시각은 21:05 키움 저녁 수집이 끝난 뒤, 그날 20:05 daily_insight 가 끝난 뒤다. 휴장일이면 하지 않는다. 재시도·시간 한도·치명 여부는 고정 숫자를 쓰지 않고 **실행 직전 서버 `scripts/job_runner.py` 의 `CHAINS["daily_all"]` 에서 읽는다**(서버는 10-02 패치로 `adj_prices` 시간 한도가 로컬 사본과 다르다 — 3600). 치명(True) 단계(`holiday_gate`·`daily_pipeline`)만 실패하면 멈추고, 비치명(False) 단계(`adj_prices`·`scoring`·`scoring_v2`) 실패는 체인 정의대로 다음 단계로 간다.
   ```bash
-  cd "$HOME/kael-system-v3" && flock -n /tmp/kael_v3_daily_all.lock bash -c 'source "$HOME/.local/bin/env" && export $(grep -v "^#" .env | xargs) && for j in "daily_pipeline 3 10800" "adj_prices 1 1800" "scoring 2 300" "scoring_v2 2 300"; do set -- $j; PYTHONPATH=. .venv/bin/python scripts/job_runner.py --job "$1" --retry "$2" --timeout "$3" || exit 1; done' \
-    || echo "rc≠0 — v3 락이 잡혀 있었거나(flock -n) 잡이 실패했다. pipeline_runs·v3 로그를 보고 다시"
+  cd "$HOME/kael-system-v3"
+  grep -n -A12 '"daily_all": \[' scripts/job_runner.py          # 눈으로 확인
+  STEPS=$(.venv/bin/python - <<'EOF'
+  import ast
+  tree = ast.parse(open("scripts/job_runner.py", encoding="utf-8").read())
+  for n in ast.walk(tree):
+      tgt = n.target if isinstance(n, ast.AnnAssign) else (n.targets[0] if isinstance(n, ast.Assign) else None)
+      if getattr(tgt, "id", None) == "CHAINS":
+          for job, retry, timeout, critical in ast.literal_eval(n.value)["daily_all"]:
+              if job in ("holiday_gate", "daily_pipeline", "adj_prices", "scoring", "scoring_v2"):
+                  print(job, retry, timeout, int(critical))
+  EOF
+  )
+  echo "$STEPS"                                                  # 다섯 줄: 잡 재시도 시간한도 치명(1/0)
+  flock -n /tmp/kael_v3_daily_all.lock bash -c 'source "$HOME/.local/bin/env" && export $(grep -v "^#" .env | xargs) && while read -r job retry timeout crit; do PYTHONPATH=. .venv/bin/python scripts/job_runner.py --job "$job" --retry "$retry" --timeout "$timeout" && continue; [ "$crit" = 1 ] && { echo "치명 단계 $job 실패 — 멈춘다"; exit 1; }; echo "비치명 단계 $job 실패 — 다음 단계로(체인 정의와 같다)"; done <<< "$1"' _ "$STEPS" \
+    || echo "rc≠0 — v3 락이 잡혀 있었거나(flock -n) 치명 단계가 실패했다. pipeline_runs·v3 로그를 보고 다시"
   ```
-  재시도·시간 한도는 `job_runner.py` `CHAINS["daily_all"]` 값이다.
 - **성공 확인**
   ```bash
   .venv/bin/python - "$V3" <<'EOF'
   import sqlite3, sys
   from pathlib import Path
   c = sqlite3.connect(f"{Path(sys.argv[1]).resolve().as_uri()}?mode=ro", uri=True)
-  d = c.execute("SELECT max(trade_date) FROM daily_prices").fetchone()[0]
-  print("daily_prices 최신", d)
+  print("daily_prices 최신", c.execute("SELECT max(trade_date) FROM daily_prices").fetchone()[0])
   print(c.execute("SELECT trade_date, count(*) FROM daily_prices WHERE trade_date >= '2026-10-19' GROUP BY 1").fetchall())
   for t in ("score_history", "score_history_v2"):
-      print(t, c.execute(f"SELECT score_date, count(*) FROM {t} WHERE score_date = (SELECT max(score_date) FROM {t})").fetchall())
+      print(t, c.execute(f"SELECT score_date, count(*) FROM {t} WHERE score_date >= '2026-10-19' GROUP BY 1").fetchall())
   print(c.execute("SELECT job_name, status, finished_at FROM pipeline_runs ORDER BY run_id DESC LIMIT 6").fetchall())
   EOF
   ```
   - `daily_prices` 최신일이 그날이다. 창 안이면 10-19 뒤 거래일마다 행이 다시 있다.
-  - 점수 행 수는 v3 유니버스다. `score_history` 는 1,300 안팎, `score_history_v2` 는 2,500 안팎이다(compat 593·625 가 아니다 — T-17).
-  - 잡이 전부 `success` 다.
+  - 점수: v3 가 쓴 날짜(첫 실행일)는 v3 유니버스 — `score_history` 1,300 안팎, `score_history_v2` 2,500 안팎이다. 컷오버 기간 날짜는 compat 값 593·625 그대로다(T-42 — 점수 표를 복원하지 않았다. `--with-scores` 였으면 그 날짜 행이 없다). 같은 날짜를 둘 다 썼으면 §3 의 섞임이 생긴다.
+  - 잡이 `success` 다(비치명 단계 실패는 로그에 남는다 — 원인을 본다).
 
 ### 4-5. 확인 체크(다음 날 아침까지)
 
 - [ ] 4-1~4-4 의 확인을 전부 통과했다.
-- [ ] 다음 장 마감(15:41) 체인이 그림자다. 로그 `logs/postclose/<T>_close.log` 머리 줄이 `발송 off · v3 shadow` 다. 완전 정지면 크론 줄이 없다.
+- [ ] 다음 장 마감(15:41) 체인이 그림자다. 로그 `logs/postclose/<T>_close.log` 머리 줄이 `발송 off · v3 shadow` 다.
 - [ ] v3 본 파일에 복원 기록 뒤 새 반영 기록이 0건이다. `SELECT count(*) FROM _compat_meta WHERE exported_at > (SELECT max(exported_at) FROM _compat_meta WHERE basis = 'restore')` → 0.
-- [ ] 20:05 v3 `daily_all` 이 성공했다(`pipeline_runs` 의 `chain:daily_all` success). v3 엑셀 텔레그램이 도착했다.
+- [ ] 20:05 v3 `daily_all` 이 성공했다(`pipeline_runs` 의 `chain:daily_all` success). v3 엑셀 텔레그램이 그날 한 번만 도착했다.
 - [ ] 다음 날 07:00 v3 브리핑과 07:10 uni 브리프가 그날 장(최신 `trade_date`)으로 나왔다.
 - [ ] `logs/notify.log` 에 `v3_post … 실패` crit 이 없다. 있으면 '복원 뒤 첫 반영' 게이트에 걸린 반영이 있었다는 뜻이다. 4-1 이 덜 꺼진 것이다.
+- [ ] `logs/notify.log` 에 그날 23:30 뒤 `컷오버 감시 …` crit 이 없다(감시 크론이 주석이다).
 - [ ] 수동 개입 장부에 기록했다(4-0).
 
-## 5. 복원 뒤 반영 규칙 — 다시 컷오버할 때
+## 5. 복원 뒤 반영 규칙 — 다시 컷오버할 때(T-42)
 
 `_compat_meta` 의 복원 기록(basis `restore`)은 장벽이다. 규칙 정본은 `src/compat/v3_post.py` 머리 주석이다.
 
-- 복원 기록 **앞**의 반영 기록은 순서 가드(T-35)와 아침 7표 판정(T-34)에서 빠진다. 복원이 9표를 백업 시점으로 되돌렸으므로 그 기록이 가리키던 값이 본 파일에 없다. 기록은 지우지 않는다(이력).
+- 복원 기록 **앞**의 반영 기록은 순서 가드(T-35)와 아침 7표 판정(T-34)에서 빠진다. 그 기록들은 복원 뒤 본 파일을 설명하지 않는다 — 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은 키를 덮는다. 기록은 지우지 않는다(이력).
 - 복원 기록 **뒤** 첫 제자리 반영은 compat `--full`(730일 창) 기록만 받는다. 아니면 게이트 실패(rc 2, 본 파일 무변경)다.
-  - 이유: 14일 증분만 얹으면 창 안은 compat 정의(KRX 종가·전방 조정 수정가), 창 밖은 v3 정의로 섞인다.
+  - 이유: 14일 증분만 얹으면 창 안은 compat 종가(KRX 정규장 종가 — T-33), 창 밖은 v3 종가(애프터마켓 포함)로 섞인다.
   - 락을 기다리다 복원 뒤에 깬 옛 반영이나 꺼지지 않은 체인도 여기서 멈춘다.
   - 그림자(`--shadow`)는 본 파일에 쓰지 않으므로 이 조건을 보지 않는다.
   - **새 정지 조건이라 사용자 확인 대기**(구현은 했다).
-- 다시 컷오버하는 순서: 새 백업 2벌(§1 — 새 stamp, 옛 백업은 남긴다) → V3-A~E → `v3_post.sh --full`(V3-C) → 4-1 스위치를 PR-9 값으로.
+- QL-L 감시(`daily.cutover_watch`)는 복원 기록을 반영 기록으로 세지 않는다.
+- 다시 컷오버하는 순서: 새 백업 2벌(§1 — 새 stamp, 옛 백업은 남긴다) → V3-A~E → `v3_post.sh --full`(V3-C) → QL-L 감시 크론 주석 풀기 → 4-1 스위치를 PR-9 값으로.
 
 ## 6. 리허설 — 서버 사본(컨트롤러)
 
@@ -266,12 +297,16 @@ bash "$R/home/scripts/v3_backup.sh" --v3-db "$R/quant.db" --dest "$R/bak1" --des
 S=$(ls "$R/bak1" | sed -n 's/^quant_\(.*\)\.db$/\1/p')
 # ② 첫 반영 --full(사본) — rc 0, 걸린 시간 기록
 time bash "$R/home/scripts/v3_post.sh" --date "$D" --basis morning --v3-db "$R/quant.db" --full --staging "$R/staging.db" --builds-from "$H"
-# ③ 복원 계획 → 복원 — rc 0, 걸린 시간 기록
+# ③ 기본 복원(7표) — 계획 → 복원, rc 0, 걸린 시간 기록
 bash "$R/home/scripts/v3_restore.sh" --backup "$R/bak1/quant_$S.db" --v3-db "$R/quant.db" --dry-run
 time bash "$R/home/scripts/v3_restore.sh" --backup "$R/bak1/quant_$S.db" --v3-db "$R/quant.db"
-# ④ 대조 — 4-3 확인 스크립트를 "$R/quant.db" "data/_cutover/v3_daily/quant_$D.db" 로. 기대: 9표·밖 전부 0 · 0,
-#    _compat_meta 마지막 = restore. 전체 기록은 [morning ok, restore ok]
-# ⑤ 복원 뒤 첫 반영 게이트 — 증분은 rc 2('복원 뒤 첫 반영'), 본 파일 sha256 무변경
+# ④ 대조 — 4-2 확인 스크립트를 인자 "$R/quant.db" "data/_cutover/v3_daily/quant_$D.db" 로(셋째 인자 생략 = 7표).
+#    기대: seven PASS. '참고' 줄 중 score_history·_v2 만 다르다(② 가 쓴 score_date = D 행 — compat 593·625 대 원본 v3).
+#    나머지 9표 밖 표는 0 · 0
+# ⑤ 점수 오류 경로 — --with-scores 복원 → 4-2 확인 스크립트를 셋째 인자 all 로. 기대: all PASS(모든 표 0 · 0),
+#    _compat_meta 는 [morning ok, restore ok(7표), restore ok(9표)]
+bash "$R/home/scripts/v3_restore.sh" --backup "$R/bak1/quant_$S.db" --v3-db "$R/quant.db" --with-scores
+# ⑥ 복원 뒤 첫 반영 게이트 — 증분은 rc 2('복원 뒤 첫 반영'), 본 파일 sha256 무변경
 sha256sum "$R/quant.db"
 bash "$R/home/scripts/v3_post.sh" --date "$D" --basis morning --v3-db "$R/quant.db" --staging "$R/staging.db" --builds-from "$H"; echo "rc=$?"
 sha256sum "$R/quant.db"
@@ -282,4 +317,3 @@ rm -rf "$R" "$HOME/qli_rehearsal_bak2"
 ```
 
 - 그날 판이 GC 됐으면 ②에서 compat 이 rc 2 로 멈춘다(QL-F2 기록). 이때는 D 를 판이 남은 가장 최근 QL-H 사본 날짜로 바꾼다.
-- ④는 원본(`v3_daily`) 대 복원된 사본을 견준다. ②가 9표만 바꿨고 ③이 9표를 되돌렸으므로 **모든** 표가 0 · 0 이어야 한다.

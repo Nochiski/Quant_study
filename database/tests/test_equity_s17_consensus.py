@@ -48,8 +48,8 @@ N_OVERLAP_KEYS = 45          # src 가 둘인 키 = 티커 5 × 월 5 × 202612 
 N_COVERAGE_DEGRADED = 36     # v3 collected_date 결측(2026-04-03·04-06·04-08) 행에서 고른 관측
 N_REVISED_POINTS = 12        # 두 판본의 consensus 가 실제로 다른 관측점 수 (기록형)
 N_FOLDED = 886 - N_WISE      # 410 — 접힌 wise 판본 수 (같은 키의 두 번째 fetched_date 행)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_consensus_daily", "EG6_consensus_daily",
-              "EG8_consensus_daily", "EG9_consensus_daily", "EG4", "EG5a"]
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_consensus_daily",
+              "EG6_consensus_daily", "EG8_consensus_daily", "EG9_consensus_daily", "EG4", "EG5a"]
 
 # FX-5-001 — 뒤 판본이 덮어쓴 관측점(000660 · obs 2026-08-31 · 202812 · eps). stage 원자료 두 값
 REVISED_FIRST = Decimal("458131.6800")      # fetched_date 2026-09-01 (최초 관측)

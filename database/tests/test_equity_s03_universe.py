@@ -64,7 +64,7 @@ UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_S
             rules_s06.ADJ_FACTOR)
 UNIVERSE = rules_s03.UNIVERSE_DAILY
 BACKFILL_END = date(2026, 8, 20)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_universe", "EG4", "EG5a"]
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_universe", "EG4", "EG5a"]
 
 N_GRID = 41066                       # = 절단본 Σ n_days (test_equity_s02_span.N_EXIST_PAIRS)
 N_SPANS = 17                         # 15 티커 + 재상장 2

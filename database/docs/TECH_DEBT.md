@@ -9,7 +9,7 @@
 > | 10 | 정지 종목 감자가 run 을 죽인다 | **equity 몫 완료** `ae0b549` — `no_bar_after_apply` 표기. 정산 정책은 커널 몫(워크벤치 어댑터는 `7f9c7e15` 부터 그런 사건을 빼고 경고한다, §10 머리) |
 > | 1·3·5·6·7·8·9 | | **미완** — 우선순위는 아래 표 |
 >
-> **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG13·EG14·EG19 미구현 · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고, 남은 위험이던 `dataset_profile` 부재 시 랙 0 폴백(플랜 Task 5.4)도 2026-09-28 워크벤치 #255 로 해소됐다(폴백 랙을 원장 선언과 같게 맞추고, 폴백을 쓰면 부팅 때 `profile_lag_fallback` 경고).
+> **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG14·EG19 미구현(EG13 은 10-10 K1-3a 로 구현 — `gates.eg13_available_future`) · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고, 남은 위험이던 `dataset_profile` 부재 시 랙 0 폴백(플랜 Task 5.4)도 2026-09-28 워크벤치 #255 로 해소됐다(폴백 랙을 원장 선언과 같게 맞추고, 폴백을 쓰면 부팅 때 `profile_lag_fallback` 경고).
 >
 > **2026-09-10 첫 적재분 검수에서 나온 등재 전 후보**(상세·근거는 `reviews/2026-09-10-intake-audit-summary.md`): 키움 폐지 직전 4축 영구 결측 3종목(096610 7세션 등 — 복구 불가, 알려진 구멍) · KIS 재수집 판본 중복 536군이 equity `credit_daily` 격자 유일성을 깨뜨릴 전망(판본 선택 규칙 미정) · ~~키움 merge `INSERT OR REPLACE` 가 매일 전체 이력을 재기록(`collected_at` 소실)~~(09-10 결정 6-1 로 신규 행만 적재로 전환) · KIS 잔고율 분모는 공표일(T+2) 주식수 · 액면병합 종목의 KIS 잔고 항등식 파괴 · WISE 커버 판정 오탐·키움 유예 로직·DART 분기 창은 **09-10 핫픽스 완료**(`52d0f48`, 서버 배포).
 >
@@ -1438,3 +1438,19 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **인풋**: `tests/test_daily_kw.py::test_not_before_blocks_with_rc3` 가 `--not-before 23:59` 로 rc 3 을 기대한다. 실행 순간이 23:59 KST 면 `now == not_before` 라 막히지 않고 rc 0.
 - **에러 위치**: `tests/test_daily_kw.py:313`(시계 고정 없음), `src/daily/kw_daily.py:825-835`.
 - **위험성**: 운영 결함은 아니다(가드 자체는 맞다). 10-09 23:59 KST 무렵 CI(`wip/cal-direct` run 37947870744)에서 이 한 건만 실패했다 — 같은 테스트가 다른 시각엔 통과한다. 23:59 에 `deploy.sh` 테스트 단계가 돌면 배포가 헛되이 거부된다. 고칠 방향: 테스트에서 `kw_daily` 의 현재 시각을 monkeypatch 로 고정한다.
+
+## 2026-10-10 컷오버 트랙 K1-3a(EG13) 리뷰에서 남긴 항목
+
+### B-79: `_pinned/` GC 가 전이 계보를 보호하지 않는다 — 옛 `price_adj_daily` 판 재판정에서 EG13 이 기준일을 못 세울 수 있다
+
+- **상황**: EG13 기준일은 고정 입력의 전이 폐포에 있는 stage 판 스냅샷이다. `price_adj_daily` 는 stage 입력이 없어 `price_daily`·`adj_factor` 등 equity 판의 `inputs` 를 따라 `_pinned/stg_*/` 까지 내려간다. `gc_pinned` 의 보호 축은 ① 살아 있는 equity MANIFEST 기록의 **직접** 입력 ② 전달 이력 보호 id ③ 표별 최신 keep 뿐이다.
+- **인풋**:
+  1. 저녁·아침 체인이 몇 번 돌아 `price_daily` MANIFEST(keep 3)에서 판 X 가 빠진다. 같은 시점 `price_adj_daily` MANIFEST 에는 X 를 가리키는 옛 판 P 가 아직 남아 있다(체인 실패·되돌림 등으로 두 표의 keep 창이 어긋난 경우).
+  2. 빌드 체인 GC 단계 `equity.inputs.gc_pinned(data/equity, protect=이력 id)` 가 X 의 stage 입력 `_pinned/stg_price_daily/v=Y` 를 지운다. Y 를 가리키던 것은 빠진 X 기록뿐이었고, Y 는 보호 id·최신 keep 에도 없다.
+  3. `python -m equity gate price_adj_daily --build P` 로 재판정한다.
+- **에러 위치**:
+  - `src/equity/inputs.py:277-290` `referenced_pins` — MANIFEST 기록의 직접 `inputs` 만 모으고 전이 폐포는 보지 않는다.
+  - `src/equity/inputs.py:306-350` `gc_pinned` — 판정이 위 집합 기준이다.
+  - `src/equity/inputs.py:158-180` `input_snapshot_ids` → `load_pinned`(`:119-125`)가 FileNotFoundError 를 낸다.
+  - `src/equity/gates.py:271-276` 에서 EG13 이 그 예외를 FAIL("input snapshot lineage unresolvable")로 바꾼다.
+- **위험성**: 운영 정지 오탐(재판정 한정). 현행 판은 같은 체인에서 함께 지어져 해당 없고, 10-10 서버 현판 22표 재판정은 전부 PASS 였다. 옛 판 재판정·DoD-5 재생 집계에서만 거짓 FAIL 이 나 '미래 데이터' 로 오독될 수 있다(실제는 계보 소실). 노출 미측정. 고칠 방향은 `referenced_pins` 를 equity 입력의 `inputs` 까지 전이로 넓히는 것 — GC 보존량이 늘어 용량 영향을 먼저 잰다.

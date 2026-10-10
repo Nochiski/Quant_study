@@ -10,12 +10,16 @@ import shutil
 import sqlite3
 from collections.abc import Collection
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from . import manifest
+from .health import KST
 
 SNAPSHOT_PREFIX = "snap_"
+# 스냅샷 id = 만든 시각(UTC). 만드는 쪽(`make_snapshot`)과 날짜로 읽는 쪽(`snapshot_kst_date`)의
+# 정본이다.
+SNAPSHOT_ID_FORMAT = "snap_%Y%m%dT%H%M%SZ"
 KEEP_DEFAULT = 3      # 판당 ≈16 GB(09-14 실측). 하루 2판이면 1.5거래일 — 결정 9(09-14 사용자): 디스크 우선
 
 
@@ -40,7 +44,7 @@ def make_snapshot(raw: dict[str, Path], snap_root: Path,
 
     원장은 읽기 전용 URI 로 열고 VACUUM INTO 만 실행한다 (원장 무변경).
     """
-    sid = snapshot_id or datetime.now(UTC).strftime("snap_%Y%m%dT%H%M%SZ")
+    sid = snapshot_id or datetime.now(UTC).strftime(SNAPSHOT_ID_FORMAT)
     d = snap_root / sid
     d.mkdir(parents=True, exist_ok=False)
     files: dict[str, SnapshotFile] = {}
@@ -61,6 +65,23 @@ def make_snapshot(raw: dict[str, Path], snap_root: Path,
                     "files": {k: asdict(v) for k, v in files.items()}},
                    ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     return snap
+
+
+def snapshot_kst_date(snapshot_id: str) -> date:
+    """스냅샷 id 시각(UTC)의 KST 날짜 — equity EG13 이 공개일 상한으로 쓴다(K1-3a · 컷오버 T-12).
+
+    아침 체인 스냅샷(06:00 KST)은 UTC 로 전날이라 id 의 날짜 숫자를 그대로 쓰면 하루 이르다.
+    형식 밖(`--snapshot-id` 로 손으로 붙인 이름 등)이면 ValueError — 기준일을 추정하지 않는다.
+    """
+    try:
+        at = datetime.strptime(snapshot_id, SNAPSHOT_ID_FORMAT)  # noqa: DTZ007  # reason: id 는 'Z'(UTC) 고정 형식이라 아래에서 tzinfo=UTC 를 붙인다
+    except ValueError as e:
+        raise ValueError(f"snapshot id outside format {SNAPSHOT_ID_FORMAT!r} (UTC): "
+                         f"got={snapshot_id!r}") from e
+    if at.strftime(SNAPSHOT_ID_FORMAT) != snapshot_id:     # strptime 은 자릿수가 모자라도 받아 준다
+        raise ValueError(f"snapshot id outside format {SNAPSHOT_ID_FORMAT!r} (UTC): "
+                         f"got={snapshot_id!r}")
+    return at.replace(tzinfo=UTC).astimezone(KST).date()
 
 
 def load_snapshot(snap_dir: Path) -> Snapshot:

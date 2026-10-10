@@ -1541,6 +1541,7 @@ SELECT count(*) AS n FROM ${T}
 WHERE available_date > (SELECT bl_date('trading_calendar','backfill_end'))
   AND available_basis <> 'unknown';
 ```
+- **구현(K1-3a, 2026-10-10 — 위 초안을 대체)** `gates.eg13_available_future`, 실행 위치는 §7-1 대로 EG2 바로 뒤. 기준일은 상수가 아니라 **입력 stage 스냅샷의 KST 날짜**(컷오버 T-12)다 — 고정 입력의 전이 폐포(`inputs.input_snapshot_ids`, equity 내부 입력은 그 판의 `inputs` 를 따라간다)에 있는 stage 판 `BuildRecord.snapshot_id`(`snap_YYYYMMDDTHHMMSSZ`, UTC → KST) 중 가장 늦은 날짜. 판정은 `available_date > 기준일` 행 0(basis 무관). NULL 은 EG2-P01 몫이라 세지 않고 `n_available_null` 로 남긴다. 기준일을 못 세우면(입력 없음·형식 밖 id·위쪽 고정본 소실) FAIL. 산출이 안 바뀌어 RULES_VERSION 은 그대로다. 음성 대조는 `tests/test_equity_build.py::test_EG13_미래_공개일_한_행을_심으면_판을_폐기하고_MANIFEST는_그대로`
 
 ### EG14 — 파티션 경계 누락
 - **분류** 폐기형 · **적용** `date_axis`·`receipt_axis` 테이블 · 전 단계
@@ -1675,7 +1676,7 @@ WHERE p.close IS DISTINCT FROM coalesce(s.close_krw, e.close_krw)
 | EG10 | **팩터 준비도** | 폐기형+기록형 | 6 | `factor_readiness.ready_min`(미등재) | (신규) 재료 무성 소실 · 목적 판정 부재 |
 | EG11 | 뷰 결과 결정성 | 폐기형 | 7 | `<view>.determinism_asof` | 재현성 |
 | EG12 | 단위 접미사 전수 | 폐기형 | 전 | — | (신규) 단위 오적용 |
-| EG13 | `available_date` 미래값 | 폐기형 | 전 | — (기존 상수 재사용) | look-ahead(거울상: 조용한 결측) |
+| EG13 | `available_date` 미래값 | 폐기형 | 전 | 입력 스냅샷 KST 날짜 | look-ahead(거울상: 조용한 결측) |
 | EG14 | 파티션 경계 누락 | 폐기형 | 전 | `<table>.expected_partitions` | 레짐 편향 |
 | EG15 | 폐지 직전 가격 존재 | 기록형→폐기형 | 1·2 | `security.pre_delist_price_days`·`_min` | 생존편향 |
 | EG16 | 가짜 재상장 | 폐기형 | 1 | `security_span.respan_verified_n` | 생존편향 |

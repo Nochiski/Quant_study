@@ -7,6 +7,11 @@
 쓰기는 표 단위 한 트랜잭션(`BEGIN … INSERT OR REPLACE … COMMIT`)이다. 부분 기록이 읽히면
 안 되기 때문(플랜 §2-1). 표 하나라도 0행이면 `CompatEmptyError` — 조용한 실패 금지(V2-7).
 
+점수 두 표(`score_history`·`_v2`, QL-C · T-16)는 모델 판(`--model-root`)이 원천이다. 판은 `--date D
+--basis` 의 모델 성공 판 하나로 고정하고(`_resolve_model` — 최신 판으로 대체하지 않는다, P1), 쓰기는
+**날짜 단위 교체**다: 같은 트랜잭션에서 그 `score_date` 행을 모두 지우고 새 판 행을 넣는다. 다른
+날짜는 건드리지 않는다. 판 id 는 `_compat_meta.model_builds` 에 spec 별로 남는다.
+
 M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다.
 
 가드(1차 그림자 실행 뒤 리뷰 R1~R10 반영) — 전부 **쓰기 전/직후에 예외**로 멈춘다:
@@ -22,14 +27,15 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
-from equity import inputs
-from stage import manifest
+from deliver.reader import DeliverError, load_run
+from equity import handoff, inputs
 from stage.model import basis_of_build_id, build_id_time
 
 from .mappings import (
@@ -38,6 +44,7 @@ from .mappings import (
     ESTIMATE_TICKERS_SQL,
     EVENING_SKIPPED_SQL,
     MAPPINGS,
+    MODEL,
     STAGE,
     TableMapping,
 )
@@ -73,12 +80,18 @@ BUILD_CHAIN_MAX_GAP_H = 3
 _BASIS_ANY = "manual"
 # 원천 관계식을 판 목록과 같은 dict 에 실을 때 쓰는 접두 — build_id 키와 섞이지 않게.
 _EXPR = "__expr__"
+# 모델 판의 점수 표 파일 이름 — `model/build.py` SCORES_FILE · `deliver/reader.py` 파일 규약과 같다.
+SCORES_FILE = "scores.parquet"
 
 BASES = ("evening", "morning")
 # 사용자 결정 09-24 — "v3 유니버스는 추정치 데이터가 있는 종목만".
 #   all       : `stocks.market_cap` 을 있는 그대로 싣는다(지금까지의 동작)
 #   estimates : 당해 12월기 WISE 추정치(op·ni)가 없는 종목의 `market_cap` 을 NULL 로 둔다
 #               → v3 엔진의 `market_cap >= min_market_cap` 필터가 그 종목을 빼고 돈다
+# **estimates 는 그림자(별도 파일) 전용이다**(T-19, QL-B). 제자리 반영(`in_place`) 뒤에는 v3 스코어링이
+#   꺼지고(T-16) `market_cap` 소비자는 뉴스 preview 상위 100 · naver_ir 상위 600 · 엑셀 ·
+#   unitelegram 이다 — NULL 을 넣으면 그들이 대부분의 종목을 잃는다. 그래서 제자리는 all 고정이고
+#   estimates 를 함께 주면 쓰기 전에 멈춘다.
 MODEL_UNIVERSES = ("all", "estimates")
 # `--builds-from` 이 가리킨 판을 못 찾았을 때의 처리(서버 4일 재실행 실측).
 #   error   : 멈춘다(기본). 그 판으로 재현해야 하는 비교에서는 이쪽이 맞다.
@@ -90,6 +103,7 @@ MODEL_UNIVERSES = ("all", "estimates")
 # ⚠ **equity 표 폴백은 다르다** — 격자·조정계수 표는 판마다 값이 바뀔 수 있어 과거 날짜 재현이
 #   깨진다. `sector_snapshot` 처럼 표시용이고 자체 `snapshot_date` as-of 를 갖는 표만 안전하다
 #   (09-18 실측: 그날 인계 JSON 에 `sector_snapshot` 키 자체가 없었다 — 표가 아직 없던 날).
+#   QL-B(T-19) 뒤 `stocks.sector` 원천은 stage `stg_master_daily`(append-only)라 위 stage 규칙을 따른다.
 #   가격·수급 표가 폴백 목록에 뜨면 그 날짜 비교 결과는 믿지 말고 원인을 먼저 본다.
 BUILDS_MISSING = ("error", "current")
 MARKET_VOCAB = ("KOSPI", "KOSDAQ")      # v3 `stocks.market` CHECK 제약과 같은 어휘
@@ -116,7 +130,9 @@ CREATE TABLE IF NOT EXISTS {META_TABLE} (
     model_universe TEXT,
     n_universe_with_estimates INTEGER,
     -- --builds-from 이 가리킨 판을 못 찾아 current_build 로 폴백한 표 목록(json 배열).
-    builds_fallback TEXT
+    builds_fallback TEXT,
+    -- QL-C: 점수 표 원천 모델 판 json 객체(spec_id → build_id). 판 basis 는 위 basis 와 같다.
+    model_builds   TEXT
 )
 """
 
@@ -168,6 +184,8 @@ class ExportResult:
     tables: dict[str, TableResult] = field(default_factory=dict)
     equity_builds: dict[str, str] = field(default_factory=dict)
     stage_builds: dict[str, str] = field(default_factory=dict)
+    # QL-C — 점수 표 원천 모델 판 {spec_id: build_id}
+    model_builds: dict[str, str] = field(default_factory=dict)
 
     def summary(self) -> str:
         """stdout 한 줄 요약 — 표별 행수(괄호는 못 넣은 행)."""
@@ -213,36 +231,25 @@ def _parquet_source(root: Path, table: str, kind: str,
     if build_id is None:
         pb = inputs.resolve(root, table)
         return _globs_expr(pb.globs, kind), pb.build_id
-    table_root = root / table
-    m = manifest.load(table_root / "MANIFEST.json")
-    rec = next((b for b in m.builds if b.build_id == build_id), None)
-    if rec is None:
-        raise CompatError(
-            f"--builds-from 이 가리킨 판이 MANIFEST 에 없다: table={table} "
-            f"build_id={build_id} builds={[b.build_id for b in m.builds]}")
-    globs = [str(table_root / str(p["path"]) / "*.parquet") for p in rec.partitions]
-    return _globs_expr(globs, kind), build_id
+    try:
+        pb = inputs.resolve(root, table, build_id)
+    except FileNotFoundError as e:
+        raise CompatError(f"--builds-from 이 가리킨 판이 MANIFEST 에 없다: table={table} "
+                          f"build_id={build_id} ({e})") from e
+    return _globs_expr(pb.globs, kind), build_id
 
 
 def _load_builds_from(path: Path) -> dict[str, dict[str, str]]:
     """인계 이력 JSON(`data/deliver/history/<D>_<basis>.json`)의 판 목록.
 
-    `scripts/build_chain.sh:152-162` 가 쓰는
-    `{"equity_builds": {표: build_id}, "stage_builds": {…}}` 구조를 그대로 읽는다.
+    읽기 규약은 `equity.handoff.load` 한 곳(factor_inputs `--builds-from` 과 공유)이다.
+    compat 은 health 를 보지 않는다(지금 동작 유지).
     """
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise CompatError(f"--builds-from 을 읽지 못했다: {path} ({e})") from e
-    if not isinstance(raw, dict):
-        raise CompatError(f"--builds-from 이 객체가 아니다: {path}")
-    out: dict[str, dict[str, str]] = {}
-    for kind, key in ((EQUITY, "equity_builds"), (STAGE, "stage_builds")):
-        got = raw.get(key)
-        if not isinstance(got, dict) or not got:
-            raise CompatError(f"--builds-from 에 {key} 가 없다: {path}")
-        out[kind] = {str(k): str(v) for k, v in got.items()}
-    return out
+        h = handoff.load(path)
+    except handoff.HandoffError as e:
+        raise CompatError(str(e)) from e
+    return {EQUITY: h.equity_builds, STAGE: h.stage_builds}
 
 
 def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
@@ -358,6 +365,11 @@ def _render(mapping: TableMapping, params: dict[str, str],
     """매핑 SQL 의 원천 자리를 `read_parquet(...)` 로, 나머지를 스칼라로 채운다."""
     kind = mapping.source_kind
     assert kind is not None
+    if kind == MODEL:
+        # 점수 표 자리는 `{scores}` 하나다 — spec_id('scope@1.0')는 format 자리 이름이 될 수 없다
+        spec = mapping.sources[0]
+        return (mapping.sql.format(scores=builds[MODEL][_EXPR + spec], **params),
+                {spec: builds[MODEL][spec]})
     pairs = [(kind, t) for t in mapping.sources] + list(mapping.cross_sources)
     sources = {t: builds[k][_EXPR + t] for k, t in pairs}
     used = {t: builds[k][t] for k, t in pairs}
@@ -375,9 +387,11 @@ def _chunks(cur: duckdb.DuckDBPyConnection) -> Iterator[list[tuple]]:
 
 def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
             chunks: Iterable[list[tuple]], required: list[str],
-            post: Callable[[sqlite3.Connection], None] | None = None) -> tuple[int, int]:
+            post: Callable[[sqlite3.Connection], None] | None = None,
+            pre: Callable[[sqlite3.Connection], None] | None = None) -> tuple[int, int]:
     """표 하나를 한 트랜잭션으로 넣는다. 돌려주는 값은 (넣은 행, 못 넣은 행).
 
+    `pre` 는 BEGIN 직후 같은 트랜잭션에서 도는 앞정리다(점수 표의 그 날짜 행 삭제 — T-16).
     `post` 는 COMMIT 직전에 같은 트랜잭션에서 도는 뒷정리다(`stocks` 의 `is_active=0` 표시).
     """
     cols = list(mapping.columns)
@@ -391,6 +405,8 @@ def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
     n_rows = n_skipped = 0
     con.execute("BEGIN")
     try:
+        if pre is not None:
+            pre(con)
         for chunk in chunks:
             good = [r for r in chunk if all(r[i] is not None for i in need)]
             n_skipped += len(chunk) - len(good)
@@ -427,6 +443,64 @@ def _stocks_rows(cur: duckdb.DuckDBPyConnection, columns: list[str]) -> list[tup
         raise CompatError(
             f"stocks.market 어휘 위반 {len(bad)}건(v3 CHECK {MARKET_VOCAB}): {bad[:5]}")
     return rows
+
+
+def _score_rows(cur: duckdb.DuckDBPyConnection, columns: list[str], table: str,
+                d_iso: str, required: list[str]) -> list[tuple]:
+    """점수 표는 날짜 단위로 갈아 끼우므로(T-16) 다 올려 두고 지우기 전에 본다.
+
+    아래면 D 의 기존 행을 지운 채 일부만 남기지 않게 BEGIN 전에 멈춘다.
+      · 0행
+      · v3 필수 열(NOT NULL ∪ PK — `required`)이 빈 행 — `_upsert` 는 그 행만 건너뛰고
+        나머지를 넣는다
+      · 같은 `stock_code` 두 번 — PK 덮어쓰기로 한 행이 조용히 사라진다
+      · 판 날짜(D)와 다른 `score_date` — 지운 날짜와 넣는 날짜가 어긋난다
+    """
+    rows = cur.fetchall()
+    if not rows:
+        raise CompatEmptyError(
+            f"upsert 0행: table={table} — 모델 판 점수 표가 비었다"
+            f"(D={d_iso} 기존 행은 그대로 둔다)")
+    i_code = columns.index("stock_code")
+    for col in required:
+        i = columns.index(col)
+        bad = [r[i_code] for r in rows if r[i] is None]
+        if bad:
+            raise CompatError(
+                f"{table}: 필수 열 {col} 이 빈 행 {len(bad)}건 {bad[:5]} — 모델 판이 깨졌다, "
+                "쓰지 않는다")
+    dup = sorted(str(c) for c, n in Counter(r[i_code] for r in rows).items() if n > 1)
+    if dup:
+        raise CompatError(f"{table}: stock_code 중복 {len(dup)}종목 {dup[:5]} — 모델 판이 깨졌다, "
+                          "쓰지 않는다")
+    i_date = columns.index("score_date")
+    other = sorted({str(r[i_date]) for r in rows if r[i_date] != d_iso})
+    if other:
+        raise CompatError(
+            f"{table}: 판 날짜 {d_iso} 와 다른 score_date {other[:5]} — 모델 판이 깨졌다, "
+            "쓰지 않는다")
+    return rows
+
+
+def _score_checked(duck: duckdb.DuckDBPyConnection, mapping: TableMapping,
+                   params: dict[str, str], builds: dict[str, dict[str, str]],
+                   required: list[str]) -> tuple[list[str], list[tuple]]:
+    """점수 표 하나를 읽어 `_score_rows` 로 검사한다 — 쓰기 전 단계(리뷰 MINOR-2). (열, 행)."""
+    sql, _ = _render(mapping, params, builds)
+    cur = duck.execute(sql)
+    columns = [d[0] for d in (cur.description or [])]
+    return columns, _score_rows(cur, columns, mapping.v3_table, params["date"], required)
+
+
+def _replace_score_date(table: str, d_iso: str) -> Callable[[sqlite3.Connection], None]:
+    """T-16 — 그 `score_date` 행을 전부 지운다(새 행을 넣는 트랜잭션 안). 다른 날짜는 그대로다.
+
+    `INSERT OR REPLACE` 만 쓰면 이번 판에 없는 종목의 그날 옛 행(v3 가 쓴 1,329종목 중 593 밖)이
+    순위표에 남는다. 지우고 넣어야 그날 행이 이번 판과 정확히 같다.
+    """
+    def run(con: sqlite3.Connection) -> None:
+        con.execute(f'DELETE FROM "{table}" WHERE score_date = ?', (d_iso,))
+    return run
 
 
 def _estimate_tickers(duck: duckdb.DuckDBPyConnection, expr: str,
@@ -513,7 +587,7 @@ def _ensure_meta_columns(con: sqlite3.Connection) -> None:
     for name, decl in (("n_evening_rows_skipped", "INTEGER"), ("n_adj_close_null", "INTEGER"),
                        ("status", "TEXT"), ("failed_table", "TEXT"),
                        ("model_universe", "TEXT"), ("n_universe_with_estimates", "INTEGER"),
-                       ("builds_fallback", "TEXT")):
+                       ("builds_fallback", "TEXT"), ("model_builds", "TEXT")):
         if name not in have:
             con.execute(f"ALTER TABLE {META_TABLE} ADD COLUMN {name} {decl}")
 
@@ -527,8 +601,8 @@ def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:
             f'INSERT OR REPLACE INTO {META_TABLE} (exported_at, date, basis, equity_builds, '
             f'stage_builds, tables, "window", consensus_asof, n_evening_rows_skipped, '
             f"n_adj_close_null, status, failed_table, model_universe, "
-            f"n_universe_with_estimates, builds_fallback) "
-            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"n_universe_with_estimates, builds_fallback, model_builds) "
+            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (result.exported_at, result.date, result.basis,
              json.dumps(result.equity_builds, ensure_ascii=False, sort_keys=True),
              json.dumps(result.stage_builds, ensure_ascii=False, sort_keys=True),
@@ -538,7 +612,8 @@ def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:
              result.consensus_asof, result.n_evening_rows_skipped, result.n_adj_close_null,
              result.status, result.failed_table, result.model_universe,
              result.n_universe_with_estimates,
-             json.dumps(list(result.builds_fallback), ensure_ascii=False)))
+             json.dumps(list(result.builds_fallback), ensure_ascii=False),
+             json.dumps(result.model_builds, ensure_ascii=False, sort_keys=True)))
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
@@ -572,7 +647,8 @@ def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
     """
     builds: dict[str, dict[str, str]] = {EQUITY: {}, STAGE: {}}
     fallback: set[str] = set()
-    wanted = [(m.source_kind, t) for m in selected for t in m.sources]
+    # 모델 판 점수 표는 MANIFEST 가 아니라 그날 판 manifest 로 고정한다 — `_resolve_model`
+    wanted = [(m.source_kind, t) for m in selected if m.source_kind != MODEL for t in m.sources]
     wanted += [pair for m in selected for pair in m.cross_sources]
     wanted += list(extra)
     for kind, table in wanted:
@@ -596,6 +672,44 @@ def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
     return builds, tuple(sorted(fallback))
 
 
+def _resolve_model(selected: list[TableMapping], model_root: Path | None, d_iso: str,
+                   basis: str) -> dict[str, str]:
+    """점수 표 원천 — `--date D --basis` 의 모델 성공 판 하나로 고정한다(P1).
+
+    판 해석은 `deliver.reader.load_run` 한 곳이다: `_runs/<D>_<basis>.json`(정본) → 없으면 날짜가
+    D 인 `latest_<basis>.json`. 그날 성공 판이 없거나, spec 이 그 판에서 빠졌거나(N-11 격리), 점수
+    파일이 없으면 다른 날 판으로 대체하지 않고 멈춘다 — 쓰기 전이라 대상의 D 행은 그대로 남는다.
+    돌려주는 값은 `_resolve_sources` 와 같은 모양(spec_id → build_id, `_EXPR`+spec_id → 관계식).
+    """
+    picked = [m for m in selected if m.source_kind == MODEL]
+    out: dict[str, str] = {}
+    if not picked:
+        return out
+    if model_root is None:
+        raise CompatError(f"{', '.join(m.v3_table for m in picked)} 은 모델 판이 원천이다 — "
+                          "--model-root(모델 판 루트, 예: data/model)가 필요하다")
+    root = Path(model_root)
+    try:
+        run = load_run(root, d_iso, basis)
+    except DeliverError as e:
+        raise CompatError(f"점수 표 원천 모델 판을 고정하지 못했다 — 다른 날 판으로 대체하지 "
+                          f"않는다(P1): {e}") from e
+    for spec in sorted({m.sources[0] for m in picked}):
+        if spec not in run.specs:
+            excluded = run.meta.get("excluded_specs")
+            why = excluded.get(spec) if isinstance(excluded, dict) else None
+            raise CompatError(
+                f"모델 판 {run.build_id}({run.date} {basis})에 {spec} 가 없다"
+                + (f" — 이번 판에서 빠졌다(N-11): {why}" if why else "")
+                + " — 그 점수 표는 쓰지 않는다")
+        path = root / spec / f"v={run.build_id}" / SCORES_FILE
+        if not path.exists():
+            raise CompatError(f"모델 판 점수 표가 없다: spec={spec} build={run.build_id} {path}")
+        out[spec] = run.build_id
+        out[_EXPR + spec] = f"read_parquet('{path.resolve()}', hive_partitioning=false)"
+    return out
+
+
 def _build_ids(builds: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in builds.items() if not k.startswith(_EXPR)}
 
@@ -604,8 +718,9 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
            tables: list[str] | None = None, full: bool = False,
            window_days: int | None = None, consensus_asof: str | None = None,
            builds_from: Path | None = None, builds_from_missing: str = "error",
-           model_universe: str = "all") -> ExportResult:
-    """equity/stage 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
+           model_universe: str = "all", in_place: bool = False,
+           model_root: Path | None = None) -> ExportResult:
+    """equity/stage/model 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
 
     date·consensus_asof 는 YYYYMMDD. `full=False`(기본)면 최근 `INCREMENTAL_DAYS` 달력일만,
     `full=True` 면 `window_days`(기본 `FULL_WINDOW_DAYS`) 창 전체를 다시 넣는다. 스냅샷
@@ -614,7 +729,10 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     그 판을 못 찾았을 때 `builds_from_missing='current'` 면 `current_build` 로 폴백하고
     폴백한 표를 `_compat_meta.builds_fallback` 에 남긴다(기본 'error' 는 멈춘다).
     `model_universe='estimates'` 면 당해 12월기 WISE 추정치가 없는 종목의 `stocks.market_cap`
-    을 NULL 로 두어 v3 엔진 유니버스에서 뺀다(사용자 결정 09-24).
+    을 NULL 로 두어 v3 엔진 유니버스에서 뺀다(사용자 결정 09-24). 그림자 전용 —
+    `in_place=True`(v3 quant.db 제자리 반영)이면 `all` 만 허용한다(T-19).
+    `model_root` 는 모델 판 루트(`data/model`) — 점수 두 표를 고르면(표를 안 고르면 기본으로 고른다)
+    반드시 있어야 한다. 그날·그 basis 의 모델 판으로 고정하고 `score_date` 단위로 갈아 끼운다(T-16).
     """
     as_of = _parse_date(date, "--date")
     if basis not in BASES:
@@ -626,6 +744,10 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     if model_universe not in MODEL_UNIVERSES:
         raise CompatError(
             f"--model-universe 는 {MODEL_UNIVERSES} 중 하나여야 한다: {model_universe!r}")
+    if in_place and model_universe != "all":
+        raise CompatError(
+            f"--model-universe {model_universe} 는 그림자 전용이다 — 제자리 반영(--in-place)의 "
+            "stocks.market_cap 은 전 종목(all) 고정(T-19)")
     asof_cons = _parse_date(consensus_asof, "--consensus-asof") if consensus_asof else as_of
     if window_days is not None and not full:
         raise CompatError("--window-days 는 --full 과 함께만 쓴다 — 증분 창은 "
@@ -652,7 +774,9 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         selected, roots, pinned,
         [(STAGE, "stg_consensus_annual")] if want_estimates else [],
         builds_from_missing)
+    builds[MODEL] = _resolve_model(selected, model_root, params["date"], basis)
     equity_builds, stage_builds = _build_ids(builds[EQUITY]), _build_ids(builds[STAGE])
+    model_builds = _build_ids(builds[MODEL])
     _check_basis(equity_builds, basis)
     _check_price_chain(equity_builds)
 
@@ -674,25 +798,41 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         if not full and any(m.v3_table == "daily_prices" for m in selected):
             _guard_incremental(con, existed)
         current: str | None = None
+        # 리뷰 MINOR-2 — 함께 고른 점수 표는 첫 점수 표를 쓰기 전에 전부 읽어 검사해 둔다
+        # (표 → (열, 행)).
+        # 한 표라도 깨졌으면 점수 표는 하나도 쓰지 않는다. 9표 한 트랜잭션은 QL-F 몫이다.
+        scores: dict[str, tuple[list[str], list[tuple]]] = {}
         try:
             for mapping in selected:
                 current = mapping.v3_table
                 sql, used = _render(mapping, params, builds)
-                cur = duck.execute(sql)
-                columns = [d[0] for d in (cur.description or [])]
-                if mapping.v3_table == "stocks":
-                    rows = _stocks_rows(cur, columns)
-                    if want_estimates:
-                        rows, n_with_est = _apply_model_universe(
-                            rows, columns,
-                            _estimate_tickers(
-                                duck, builds[STAGE][_EXPR + "stg_consensus_annual"], params))
+                if mapping.source_kind == MODEL:
+                    if not scores:
+                        for m in (x for x in selected if x.source_kind == MODEL):
+                            current = m.v3_table
+                            scores[m.v3_table] = _score_checked(
+                                duck, m, params, builds, required[m.v3_table])
+                        current = mapping.v3_table
+                    columns, rows = scores[mapping.v3_table]
                     n_rows, n_skipped = _upsert(
-                        con, mapping, columns, [rows], required["stocks"],
-                        _mark_delisted(params["exported_at"]))
+                        con, mapping, columns, [rows], required[mapping.v3_table],
+                        pre=_replace_score_date(mapping.v3_table, params["date"]))
                 else:
-                    n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
-                                                required[mapping.v3_table])
+                    cur = duck.execute(sql)
+                    columns = [d[0] for d in (cur.description or [])]
+                    if mapping.v3_table == "stocks":
+                        rows = _stocks_rows(cur, columns)
+                        if want_estimates:
+                            rows, n_with_est = _apply_model_universe(
+                                rows, columns,
+                                _estimate_tickers(
+                                    duck, builds[STAGE][_EXPR + "stg_consensus_annual"], params))
+                        n_rows, n_skipped = _upsert(
+                            con, mapping, columns, [rows], required["stocks"],
+                            _mark_delisted(params["exported_at"]))
+                    else:
+                        n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
+                                                    required[mapping.v3_table])
                 metrics = (_fin_source_counts(con)
                            if mapping.v3_table == "financial_summary" else {})
                 results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics)
@@ -712,7 +852,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                 model_universe=model_universe,
                 n_universe_with_estimates=n_with_est, builds_fallback=builds_fallback,
                 tables=results,
-                equity_builds=equity_builds, stage_builds=stage_builds))
+                equity_builds=equity_builds, stage_builds=stage_builds,
+                model_builds=model_builds))
             raise
         result = ExportResult(
             date=params["date"], basis=basis, target=str(target),
@@ -721,7 +862,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
             n_evening_rows_skipped=evening_skipped, n_adj_close_null=adj_null,
             model_universe=model_universe, n_universe_with_estimates=n_with_est,
             builds_fallback=builds_fallback,
-            tables=results, equity_builds=equity_builds, stage_builds=stage_builds)
+            tables=results, equity_builds=equity_builds, stage_builds=stage_builds,
+            model_builds=model_builds)
         _write_meta(con, result)
         return result
     finally:

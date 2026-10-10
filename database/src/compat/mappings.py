@@ -1,6 +1,6 @@
-"""v3 `quant.db` 9표 ← equity/stage 매핑 선언 (플랜 `2026-09-24-v3-merge.md` §5 T1.2 2).
+"""v3 `quant.db` 9표 ← equity/stage/model 매핑 선언 (플랜 `2026-09-24-v3-merge.md` §5 T1.2 2).
 
-표마다 ① 원천(equity 판 또는 stage 판) ② duckdb SELECT ③ v3 컬럼 순서 ④ PK
+표마다 ① 원천(equity 판 · stage 판 · 모델 판 점수 표) ② duckdb SELECT ③ v3 컬럼 순서 ④ PK
 ⑤ `retire_when`(만료 조건) ⑥ `null_columns`(소스에 재료가 없어 NULL 로 두는 v3 열)을 선언한다.
 SQL 은 `str.format` 자리를 쓴다 — 원천 표 실명 자리에는 `read_parquet([...])` 가, 나머지
 `{date}`·`{from_date}`·`{snap_from}`·`{consensus_asof}`·`{asof_ym}`·`{exported_at}` 자리에는
@@ -19,11 +19,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from model.contracts import V2_SCORE_COLUMNS, V3_SCORE_COLUMNS
+
 from . import units
 from .units import KRW_PER_EOK, KRW_PER_MN
 
 EQUITY = "equity"
 STAGE = "stage"
+MODEL = "model"                      # 모델 판 점수 표(QL-C) — 판 고정은 `quant_db._resolve_model`
 
 
 @dataclass(frozen=True)
@@ -31,8 +34,8 @@ class TableMapping:
     """v3 표 1개를 채우는 선언."""
 
     v3_table: str
-    source_kind: str | None          # 'equity' | 'stage' | None(이번 태스크에서는 안 채움)
-    sources: tuple[str, ...]         # 원천 표 실명(source_kind 루트 기준)
+    source_kind: str | None          # 'equity' | 'stage' | 'model' | None(안 채움)
+    sources: tuple[str, ...]         # 원천 표 실명(source_kind 루트 기준). model 은 spec_id 하나
     columns: tuple[str, ...]         # v3 컬럼 순서 = SELECT 출력 순서
     pk: tuple[str, ...]
     sql: str
@@ -42,6 +45,15 @@ class TableMapping:
     # 다른 루트의 원천 — (kind, 표). `financial_summary` 가 stage WISE 와 equity DART 를
     # 함께 읽는다(T1.5 · D-10). SQL 자리 이름은 `sources` 와 같은 규칙이다.
     cross_sources: tuple[tuple[str, str], ...] = ()
+
+
+# ── v3 `stocks` 집합(D-11) — `stocks`·`daily_prices`·`investor_detail_flows` 가 같이 쓰는 한 곳 ──
+# v3 `stocks` 는 KOSPI·KOSDAQ 의 보통주·스팩이다(아래 `stocks` 주석의 09-23 실측). v3 는 이 목록의
+# 종목만 가격·수급을 모으므로 두 표도 같은 집합이어야 한다(QL-A — 09-28 그림자에서 compat
+# `daily_prices` 3,817행 중 `stocks` 에 있는 것은 2,490행뿐이었다. ETF·우선주 등이 위키 동일가중
+# 수익률과 가설 입력에 섞였다). 판정은 같은 날 `universe_daily` 행(별칭 `u`)의 종목 유형·시장이다.
+# 시장 어휘는 v3 `stocks.market` CHECK 제약과 같다.
+V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'KOSDAQ')"
 
 
 # ── daily_prices ────────────────────────────────────────────────────────────────────────────
@@ -57,21 +69,29 @@ class TableMapping:
 #   `_compat_meta.n_evening_rows_skipped` 에 남는다.
 #   → D-8 결정 뒤 evening 행 처리 추가(`docs/COMPAT_LAYER.md` §4).
 #   M1 의 G-M2 비교는 확정판(morning, 전 행 krx)만 쓰므로 영향이 없다.
+# 거래정지일 참고가 행(`price_kind='reference'`, 거래량 0): KRX 가 O/H/L 을 '0' 으로 주고 stage 가
+#   NULL 로 둔다. v3 는 그날을 open=high=low=close=참고가 · volume 0 · amount 0 으로 싣는다(로컬 v3
+#   사본 2026-07~08 정지 행 전부 같은 모양). v3 NOT NULL 에 걸려 조용히 빠지던 행(QL-A2 — 10-01~08
+#   재생에서 하루 102~104행)이라 **그 행의 비어 있는 O/H/L 만** 종가로 채운다. v3 외부 계약 때문의
+#   채움이고 equity·모델 입력으로는 돌아가지 않는다(원칙 ④ 는 equity 층 규칙).
+_REF_FILL = "CASE WHEN p.price_kind = 'reference' THEN p.close END"
 _DAILY_PRICES_SQL = f"""
 SELECT
     p.ticker                                       AS stock_code,
     CAST(p.date AS VARCHAR)                        AS trade_date,
-    CAST(p.open AS BIGINT)                         AS open,
-    CAST(p.high AS BIGINT)                         AS high,
-    CAST(p.low AS BIGINT)                          AS low,
+    CAST(coalesce(p.open, {_REF_FILL}) AS BIGINT)  AS open,
+    CAST(coalesce(p.high, {_REF_FILL}) AS BIGINT)  AS high,
+    CAST(coalesce(p.low, {_REF_FILL}) AS BIGINT)   AS low,
     CAST(p.close AS BIGINT)                        AS close,
     CAST(p.volume_shr AS BIGINT)                   AS volume,
     CAST(round(p.value_krw / {KRW_PER_MN}.0) AS BIGINT)  AS amount,
     CAST(a.adj_close AS DOUBLE)                    AS adj_close
 FROM {{price_daily}} p
+JOIN {{universe_daily}} u ON u.ticker = p.ticker AND u.date = p.date
 LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
 WHERE p.basis = 'krx'
   AND p.date >= DATE '{{from_date}}' AND p.date <= DATE '{{date}}'
+  AND {V3_STOCK_FILTER}
 """
 
 # 같은 창에서 `basis='evening'` 이라 제외한 행 수 — `_compat_meta.n_evening_rows_skipped`.
@@ -90,9 +110,11 @@ WHERE p.basis = 'evening'
 #   09-23 그림자 실측 — v3 active 2,533 = common 2,413 + spac 117. 우리가 더 넣었던 236 은
 #   preferred 114 · reit 23 · foreign 12 · dr 10 · fund 3 이고 v3 수집기(키움 ka10099 + KIS MST)가
 #   애초에 담지 않는 종류다. 유니버스를 v3 와 같게 맞춰야 G-M2 ①의 티커 집합 차이가 선다.
-# `sector` 는 WICS L1 명(`sector_snapshot`)을 넣는다 — v3 는 KRX 업종명이라 **값이 다르다**.
-#   T1.4 소비자 감사에서 브리핑·리서치센터가 sector 를 표시용으로만 쓰는지 확인한 뒤
-#   WICS 유지 / KRX 업종으로 교체를 확정한다(플랜 §5 T1.2 2).
+# `sector` 는 v3 와 같은 KRX 업종명이다(QL-B · T-19 — U24 의 WICS L1 을 대체). v3 는 키움 ka10099
+#   `upName` 을 그대로 넣는다(v3 `clients/kiwoom/client.py` get_stock_list →
+#   `pipeline/daily_pipeline.py` _fetch_kiwoom_stocks, 공란은 `strip() or None`). 같은 원천이 stage
+#   `stg_master_daily.up_name`(06:00 마스터 스냅샷, 2026-09-01~ 누적)이고 equity 에는 이 열이 없어
+#   stage 를 직독한다. as-of D 이하 최신 스냅샷 한 행 — 공란이면 NULL(v3 와 같다), 행이 없으면 NULL.
 # `updated_at` 은 v3 가 `datetime('now')` 로 채우던 자리 — 우리는 export 시각을 넣어
 # 신선도를 남긴다.
 _STOCKS_SQL = f"""
@@ -111,16 +133,16 @@ cap AS (
       AND p.date >= DATE '{{snap_from}}' AND p.date <= DATE '{{date}}'
 ),
 sect AS (
-    SELECT s.ticker, s.wics_l1_nm,
-           row_number() OVER (PARTITION BY s.ticker ORDER BY s.snapshot_date DESC) AS rn
-    FROM {{sector_snapshot}} s
-    WHERE s.snapshot_date <= DATE '{{date}}'
+    SELECT m.ticker, nullif(m.up_name, '') AS up_name,
+           row_number() OVER (PARTITION BY m.ticker ORDER BY m.date DESC) AS rn
+    FROM {{stg_master_daily}} m
+    WHERE m.date <= DATE '{{date}}'
 )
 SELECT
     u.ticker                                              AS stock_code,
     coalesce(v.name_abbrv_current, v.name_current)        AS stock_name,   -- v3 도 약명
     u.market                                              AS market,
-    sect.wics_l1_nm                                       AS sector,
+    sect.up_name                                          AS sector,
     CAST(round(cap.mktcap_krw / {KRW_PER_EOK}.0) AS BIGINT)
                                                           AS market_cap,
     CAST(v.list_date AS VARCHAR)                          AS listed_date,
@@ -133,8 +155,7 @@ JOIN {{security}} v ON v.ticker = u.ticker
 LEFT JOIN cap  ON cap.ticker = u.ticker AND cap.rn = 1
 LEFT JOIN sect ON sect.ticker = u.ticker AND sect.rn = 1
 WHERE u.rn = 1
-  AND u.sec_type IN ('common', 'spac')          -- D-11
-  AND u.market IN ('KOSPI', 'KOSDAQ')           -- v3 CHECK 제약과 같은 어휘
+  AND {V3_STOCK_FILTER}
 """
 
 # ── investor_detail_flows ───────────────────────────────────────────────────────────────────
@@ -156,8 +177,10 @@ WITH picked AS (
                PARTITION BY f.ticker, f.date
                ORDER BY CASE WHEN f.src = 'kiwoom' THEN 0 ELSE 1 END, f.src) AS rn
     FROM {{flow_daily}} f
+    JOIN {{universe_daily}} u ON u.ticker = f.ticker AND u.date = f.date
     WHERE f.date >= DATE '{{from_date}}' AND f.date <= DATE '{{date}}'
       AND coalesce({_FLOW_ANY}) IS NOT NULL
+      AND {V3_STOCK_FILTER}
 )
 SELECT f.ticker                   AS stock_code,
        CAST(f.date AS VARCHAR)    AS trade_date,
@@ -506,12 +529,53 @@ WHERE a.period_kind = 'E' AND a.period = '{asof_fy}'
   AND a.op IS NOT NULL AND a.ni IS NOT NULL
 """
 
+# ── score_history · score_history_v2 (QL-C · T-16) ──────────────────────────────────────────
+# 원천은 모델 판 점수 표 `<model_root>/<spec_id>/v=<build_id>/scores.parquet` 다. 판은
+# `--date D --basis` 의 모델 성공 판 하나로 고정한다(`quant_db._resolve_model`).
+# 최신 판으로 대체하지 않는다(P1).
+#   score_history    ← scope@1.0(메인 모델 scope_v1.0, 엔진 v3_zscore)
+#   score_history_v2 ← v2_percentrank@1.0
+# 모델 점수 열 계약(`model.contracts.V3_SCORE_COLUMNS`·`V2_SCORE_COLUMNS`)은 v3 DDL 과 이름·순서가
+# 같다(엔진이 v3 원본 이식 — G-M3). 그래서 열은 **같은 이름끼리** 옮기고, 타입만 v3 DDL 에 맞춰 명시
+# CAST 한다(TEXT → VARCHAR · INTEGER → BIGINT · REAL → DOUBLE).
+# `null_columns` 는 원천 열이 있어도 옮기지 않고 NULL 로 둔다(임의로 채우지 않는다):
+#   · score_history 6열(growth·sentiment·volatility·size·foreign·shareholder_score) — v3 에서도 항상
+#     NULL(플랜 §8-1). 엔진도 NULL 이지만(MG3) 여기서 한 번 더 못 박는다.
+#   · score_history.val_ev_ebitda — scope@1.0 은 EV/EBITDA 를 밸류에서 뺐다. 원본 v3 에서 데이터가
+#     3/1,321 종목뿐이라 비어 있던 계산과 같게 만든 spec 이다(`config/models/scope_v1_0.toml`).
+#     엔진은 원값을 싣지만 v3 열 의미('밸류 입력')와 달라 비운다. v3 실물도 비어 있다
+#     (로컬 사본 08-07 0/1,283).
+# 종목 수는 v3 보다 적다(scope 593 · v2 625 vs v3 1,329 · 2,526) — 10-05 유니버스 결정, T-17 수용.
+# 쓰기는 날짜 단위 교체다(그 score_date 행 전부 삭제 → 삽입, 한 트랜잭션 — `quant_db`).
+SCORE_SPEC = "scope@1.0"
+SCORE_V2_SPEC = "v2_percentrank@1.0"
+_SCORE_NULL = ("growth_score", "sentiment_score", "volatility_score", "size_score",
+               "foreign_score", "shareholder_score", "val_ev_ebitda")
+
+
+def _score_type(col: str) -> str:
+    """v3 점수 표 DDL 타입 → duckdb CAST 타입."""
+    if col == "rank":
+        return "BIGINT"
+    if col in ("stock_code", "score_date") or col.endswith("_flag"):
+        return "VARCHAR"
+    return "DOUBLE"
+
+
+def _score_sql(columns: tuple[str, ...], null_columns: tuple[str, ...]) -> str:
+    """같은 이름 열을 v3 타입으로 옮기는 SELECT. `{scores}` 자리에 판의 read_parquet 이 온다."""
+    sel = ",\n       ".join(
+        f'CAST(NULL AS {_score_type(c)}) AS "{c}"' if c in null_columns
+        else f'CAST(s."{c}" AS {_score_type(c)}) AS "{c}"' for c in columns)
+    return f"SELECT {sel}\nFROM {{scores}} s\n"
+
+
 # ── 선언 ────────────────────────────────────────────────────────────────────────────────────
 MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
         v3_table="daily_prices",
         source_kind=EQUITY,
-        sources=("price_daily", "price_adj_daily"),
+        sources=("price_daily", "price_adj_daily", "universe_daily"),
         columns=("stock_code", "trade_date", "open", "high", "low", "close", "volume",
                  "amount", "adj_close"),
         pk=("stock_code", "trade_date"),
@@ -524,19 +588,20 @@ MAPPINGS: tuple[TableMapping, ...] = (
     TableMapping(
         v3_table="stocks",
         source_kind=EQUITY,
-        sources=("universe_daily", "security", "price_daily", "sector_snapshot"),
+        sources=("universe_daily", "security", "price_daily"),
         columns=("stock_code", "stock_name", "market", "sector", "market_cap", "listed_date",
                  "is_active", "delisted_date", "updated_at"),
         pk=("stock_code",),
         sql=_STOCKS_SQL,
         retire_when="브리핑·리서치센터·뉴스 preview/naver_ir·api health·unitelegram kael_db 가 "
                     "equity security/universe_daily 직독으로 옮겨진 뒤",
-        note="sector 는 WICS L1 명 — v3 는 KRX 업종명이라 값이 다르다(T1.4 확인 대상)",
+        note="sector 는 v3 와 같은 KRX 업종명(키움 ka10099 upName) — stage stg_master_daily 직독(T-19)",
+        cross_sources=((STAGE, "stg_master_daily"),),
     ),
     TableMapping(
         v3_table="investor_detail_flows",
         source_kind=EQUITY,
-        sources=("flow_daily",),
+        sources=("flow_daily", "universe_daily"),
         columns=("stock_code", "trade_date") + tuple(c for c, _ in _FLOW_COLS),
         pk=("stock_code", "trade_date"),
         sql=_INVESTOR_FLOWS_SQL,
@@ -598,24 +663,26 @@ MAPPINGS: tuple[TableMapping, ...] = (
     ),
     TableMapping(
         v3_table="score_history",
-        source_kind=None,
-        sources=(),
-        columns=(),
+        source_kind=MODEL,
+        sources=(SCORE_SPEC,),
+        columns=V3_SCORE_COLUMNS,
         pk=("stock_code", "score_date"),
-        sql="",
+        sql=_score_sql(V3_SCORE_COLUMNS, _SCORE_NULL),
         retire_when="브리핑 상위 8·export·api health·unitelegram get_signal_insights 가 "
                     "model 판 직독으로 옮겨진 뒤",
-        note="T2.7 에서 model 판을 원천으로 연결한다. 이번 태스크는 DDL 만.",
+        null_columns=_SCORE_NULL,
+        note="scope@1.0 점수 표 → 같은 이름 열(T-16). score_date 단위 교체. "
+             "val_ev_ebitda 는 scope 가 밸류에 안 써 NULL",
     ),
     TableMapping(
         v3_table="score_history_v2",
-        source_kind=None,
-        sources=(),
-        columns=(),
+        source_kind=MODEL,
+        sources=(SCORE_V2_SPEC,),
+        columns=V2_SCORE_COLUMNS,
         pk=("stock_code", "score_date"),
-        sql="",
+        sql=_score_sql(V2_SCORE_COLUMNS, ()),
         retire_when="리서치센터 S6·export 가 model 판 직독으로 옮겨진 뒤",
-        note="T2.7 에서 model 판을 원천으로 연결한다. 이번 태스크는 DDL 만.",
+        note="v2_percentrank@1.0 점수 표 → 같은 이름 21열 전부(T-16). score_date 단위 교체",
     ),
 )
 

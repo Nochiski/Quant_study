@@ -644,6 +644,34 @@ def test_disposal_gate_skip_outside_the_table_fails_the_build(board_tree, tmp_pa
     assert g["status"] == "fail" and g["metrics"]["skip_reason"] == "no_universe"
 
 
+def test_mg5_compares_only_with_the_same_basis(tmp_path) -> None:
+    """PR-6 — MG5 는 같은 basis 의 직전 판과만 견준다(장 마감 판 = evening, 컷오버 트랙 T-1).
+
+    상황: 한 model 루트에 아침판(morning)과 장 마감 판(evening)이 번갈아 커밋된다.
+    음성 대조: 아침판이 더 최근에 있어도 evening 판은 evening 직전 판을 고른다. 옛 코드는 basis 를
+    보지 않고 MANIFEST current_build(가장 최근 판)를 골라 아침판과 견줬다."""
+    fi = board_fi()
+    ev_fi = "e_20260928T063000_000000Z"
+    tree = write_fi_tree(tmp_path / "fi", fi, FI_BID, basis="morning")
+    write_fi_tree(tree, fi, ev_fi, basis="evening")
+    root = tmp_path / "model"
+
+    def run(basis: str):
+        res = build(D_S, basis, root, tree, specs=[V2], primary=V2, **SMALL)
+        assert res.ok, res.specs
+        return res, gate(res, V2, "MG5")
+
+    m1, _ = run("morning")
+    e1, g = run("evening")                     # 앞에 아침판만 있다 — 견줄 evening 판이 없다
+    assert g["status"] == "skip", g
+    _, g = run("morning")                      # 아침판은 아침판끼리(e1 을 건너뛴다)
+    assert g["metrics"]["prev_build_id"] == m1.build_id
+    # 가장 최근 판은 바로 위 아침판이지만 evening 은 evening 직전 판 e1 을 고른다
+    e2, g = run("evening")
+    assert g["metrics"]["prev_build_id"] == e1.build_id
+    assert manifest.load(root / V2 / "MANIFEST.json").current_build == e2.build_id
+
+
 def test_keep_default_holds_three_months_of_runs() -> None:
     """엑셀 Δ순위 1W·1M·순위 흐름이 한 달 전 판까지 연다 — 3 이면 같은 날 재빌드에
     전날 판이 지워졌다."""

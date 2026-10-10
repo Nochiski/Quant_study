@@ -32,7 +32,7 @@ equity      parquet 29표 + equity.duckdb   data/equity/                ← EQUI
 | 경로 | 내용 |
 |---|---|
 | `src/` | 수집기(`backfill_*.py`, `api.py`, `dart_universe.py`, `sweep_disclosure.py`, `master_daily.py`), stage 패키지(`src/stage/`, `python -m stage --table <t>`), equity 패키지(`src/equity/`, `python -m equity build|gate|catalog|contract`), 동기화 패키지(`src/ledger_sync/`, `python -m ledger_sync` — 협업자 로컬이 서버 equity 층을 SFTP 로 받아 증분 유지, 동사 목록은 `docs/LEDGER_SYNC.md`), 파일럿 통합층(`build_*.py`·`finalize.py`·`fin_map.py` — STAGE_DESIGN §8 이 파일럿 보존·로직 재사용으로 명시) |
-| `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`watchdog.sh`·`daily_wise.sh`(마스터만), 빌드 체인 `build_chain.sh`·`build_evening.sh`·`build_morning.sh`, 운영 `backup_raw.sh`·`gc.sh`·`rotate_logs.sh`·`daily_report.py`·`notify.sh`·`deploy.sh`(아래 "운영 (P6)"), `doc_prepass_daily.sh`·`sync_calendar.sh`, `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `check_baseline_lock.py`, `fetch_equity_local.sh`(운영자 rsync 용), **`ledger_sync.ps1`·`.sh`·`register_daily_sync.ps1`**(협업자 SFTP 동기화 — `LEDGER_SYNC.md`), `run_survey*.sh` |
+| `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`watchdog.sh`·`daily_wise.sh`(마스터만), 빌드 체인 `build_chain.sh`·`build_evening.sh`·`build_morning.sh`, 운영 `backup_raw.sh`·`gc.sh`·`rotate_logs.sh`·`daily_report.py`·`notify.sh`·`deploy.sh`(아래 "운영 (P6)"), `doc_prepass_daily.sh`·`sync_calendar.sh`, `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `replay.sh`·`replay_tool.py`(격리 재생 — 운영 루트에 쓰지 않고 출력 루트에 equity→catalog→contract→fi→model 을 다시 지어 표별 해시를 남기고 `--compare` 로 대조, `--stage-at D` 는 그날 인계 이력의 stage 판), `check_baseline_lock.py`, `fetch_equity_local.sh`(운영자 rsync 용), **`ledger_sync.ps1`·`.sh`·`register_daily_sync.ps1`**(협업자 SFTP 동기화 — `LEDGER_SYNC.md`), `run_survey*.sh` |
 | `src/daily/` | 일일 증분 러너(`kw_daily.py`·`kis_daily.py`·`dart_daily.py`)와 공용 모듈(거래일 `calendar.py`, 요청 유니버스 `universe.py`, 실행 기록 `runlog.py`, 원장 건전성 `ledger_health.py`) |
 | `tests/` | stage·equity 테스트 |
 | `survey/`, `survey_out/v2/` | 원장 전 테이블·컬럼 어휘 전수 측정과 결과. stage (p,s)·부호·결측 규칙의 실측 근거. 재생성은 서버에서 `scripts/run_survey_v2.sh` |
@@ -198,6 +198,8 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 - 기다리는 동안 KST 날짜가 바뀌면(자정을 넘는 점유) 락을 잡아도 본 작업을 하지 않는다 — crit '<이름> 원장 락 대기 중 날짜가 바뀜(시작 … → 지금 …) — 이번 실행 중단' 후 락을 놓고 rc 3(dry-run 은 알림 없이 같은 rc). 수집 대상일(D·오늘)을 대기 뒤에 정하므로 그날 값을 그대로 받을 수 없다(TECH_DEBT B-51). 다시 돌릴지는 사람이 정한다 — 원래 날의 슬롯을 `--date` 로 다시 돌리는 것이 맞는지(저녁 WISE·키움은 그날 안에만 받을 수 있다) 먼저 본다.
 - 서로 다른 스크립트가 함께 기다리다 풀리면 누가 먼저 잡을지는 정해져 있지 않다(TECH_DEBT B-62 — 08:10 이 06:00 보다 먼저 잡으면 그날 확정판이 원장 게이트에서 멈춘다).
 - 손으로 돌리는 수집기는 이 조각을 쓰지 않고 `flock -w <초>` 로 대기 상한을 둔다(아래 절차서 — 사람이 정한 마감이 있어서).
+- 예외: 장 마감 수집기 `python -m daily.postclose`(15:41, 컷오버 PR-1)는 별도 원장 `data/raw/postclose.db` 에만 쓰고 원장 락을 잡지도 기다리지도 않는다 — 자체 락 `/tmp/quant_ledger_postclose.lock` 을 비대기로 잡고 쥐고 있으면 rc 3(16:00 창, 컷오버 정본 T-4).
+  세션 시각이 바뀌는 날(수능일 등)은 rc 3 으로 건너뛴다 — 표는 저장소 기본 `config/calendar/session_exceptions.json`(배포로 나감) ∪ 운영 `data/calendar/session_exceptions.json`(급할 때 더하고 같은 항목을 PR 로 기본 표에도), 읽기는 `daily.calendar.load_session_exceptions` 한 곳.
 
 ### WISE 같은 날 재실행 — `src/backfill_wise.py` (A-03, 10-07)
 
@@ -264,7 +266,7 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 
-- 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run}.db` (`QL_BACKUP_ROOT` 로 변경). 한 세트 19 GB(09-19 실측. `data/raw` 전체는 46 GB 지만 `documents/` 27 GB 는 백업 대상이 아니다).
+- 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run,postclose}.db` (`QL_BACKUP_ROOT` 로 변경). 한 세트 19 GB(09-19 실측. `data/raw` 전체는 46 GB 지만 `documents/` 27 GB 는 백업 대상이 아니다).
 - 방식: `sqlite3 .backup` **온라인 백업만**(DB 당 `timeout 25m`, 외부 쓰기가 계속되면 재시작만 반복하므로). 원장이 18 GB 라 `cp`·`rsync`·하드링크는 금지고, 원장 락도 잡지
   않는다(18 GB 를 뜨는 동안 수집 체인이 막힌다). 03:30 은 어느 체인과도 겹치지 않는다.
 - 판정: DB 별로 격리해 하나가 실패해도 나머지를 끝까지 뜨고, 실패 목록을 모아 crit 한 번. 사본마다
@@ -309,7 +311,15 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 - `--apply` 전 검사: ① 작업 트리가 깨끗한가 ② HEAD 가 `origin/main` 을 포함하는가 — 미머지 브랜치는
   `--allow-branch <그 브랜치 이름>` 으로만 허용 ③ `uv run --project backend pytest database/tests -q` 통과
   (`--skip-tests` 로 생략 가능하며 생략 사실이 서버에 남는다).
-- 전송 결과는 서버 `~/quant-ledger/DEPLOYED.json` 에 `{rev, branch, at_utc, by, tests}` 로 기록한다.
+- 그다음 서버 쪽 검사(K1-1e): ⑤ 서버 빌드 락(`/tmp/quant_ledger_build.lock`)을 비차단으로 잡아 rsync 와
+  DEPLOYED.json 기록을 마칠 때까지 쥔다 — 못 잡으면 "다른 빌드·배포가 실행 중" 으로 거부하고 기다리지 않는다(P9).
+  ⑦ 서버 `DEPLOYED.json` 의 rev 가 HEAD 의 조상인가 — main 을 역병합한 브랜치는 ② 를 늘 통과하므로
+  다른 브랜치에서 먼저 민 핫픽스는 이 검사가 지킨다. 알고 되돌릴 때만 `--allow-rollback <서버 rev>`
+  (서버 rev 와 정확히 같아야 한다). dry-run 은 ⑤·⑦ 판정만 출력한다(락은 잡았다가 바로 놓는다).
+- 빌드 크론 시각(06:00·08:10·18:05·21:20, 장 마감 15:41) 근처에는 배포하지 않는다 — 락을 쥔 동안 시작한
+  체인은 그 회차를 건너뛴다.
+- 전송 결과는 서버 `~/quant-ledger/DEPLOYED.json` 에 `{rev, branch, at_utc, by, tests}` 로 기록한다
+  (`--allow-rollback` 으로 덮었으면 `rollback_from` 도).
   **드리프트 조사는 여기서 시작한다** — 서버가 어느 리비전인지 알 수 없어 운영 시간표가 조용히
   되돌아간 사고가 있었다(DEFECT-D05).
 - 두 모드 모두 첫 줄에 "내용이 바뀔 파일 n개" 를 체크섬 기준으로 출력한다(워크트리 체크아웃은 mtime 이

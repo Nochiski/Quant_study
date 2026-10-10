@@ -1397,18 +1397,19 @@ def test_meta_records_excel_time_and_deployed_rev(world: dict[str, Path], tmp_pa
         assert dict(_meta_pairs(load_workbook(res.path)))["코드 rev"] == "알 수 없음"
 
 
-def _write_rank_run(model_root: Path, day: str, spec: str, ranks: dict[str, int]) -> None:
-    """순위만 있는 최소 model 판(순위 흐름 재료)."""
-    bid = f"m_{day.replace('-', '')}T000000Z"
+def _write_rank_run(model_root: Path, day: str, spec: str, ranks: dict[str, int],
+                    basis: str = "morning") -> None:
+    """순위만 있는 최소 model 판(순위 흐름 재료). 판 id 접두어는 basis 를 따른다(m_ · e_)."""
+    bid = f"{'e' if basis == 'evening' else 'm'}_{day.replace('-', '')}T000000Z"
     _write(model_root / spec / f"v={bid}" / "scores.parquet",
            pa.schema([("ticker", pa.string()), ("rank", pa.int64())]),
            [{"ticker": t, "rank": r} for t, r in ranks.items()])
     runs = model_root / "_runs"
     runs.mkdir(parents=True, exist_ok=True)
-    meta = {"layer": "model", "status": "ok", "build_id": bid, "date": day, "basis": "morning",
+    meta = {"layer": "model", "status": "ok", "build_id": bid, "date": day, "basis": basis,
             "fi_build_id": "x", "generated_at": f"{day}T00:00:00Z", "specs": {spec: {}},
             "primary_spec": spec}
-    (runs / f"{day.replace('-', '')}_morning.json").write_text(json.dumps(meta), encoding="utf-8")
+    (runs / f"{day.replace('-', '')}_{basis}.json").write_text(json.dumps(meta), encoding="utf-8")
 
 
 def test_trend_line_direction_matches_its_color_when_universe_grows(tmp_path: Path) -> None:
@@ -1437,6 +1438,88 @@ def test_trend_line_direction_matches_its_color_when_universe_grows(tmp_path: Pa
     groups = spark_groups(["X"], trend, date.fromisoformat(d1), {"1M": "M"}, {"1M": {"X": delta}})
     assert [g.color for g in groups] == [LINE_DOWN]          # 선 색 = 하락
     assert last < first                                       # 선도 내려간다(색과 같은 방향)
+
+
+def test_evening_trend_and_previous_run_read_only_evening_runs(tmp_path: Path) -> None:
+    """PR-6 — 1M 순위 흐름·전일 비교 판은 같은 basis 의 `_runs` 만 읽는다. 한 루트에 아침판과
+    장 마감 판(evening)이 섞여 있어도(운영은 루트부터 다르다 — T-3) evening 흐름에 아침판 날짜·순위가
+    끼지 않는다. 음성 대조: 아침판은 매일(09-01·09-15·10-01) 있고 evening 은 09-01·10-01 뿐이다."""
+    from deliver.reader import load_run, previous_run
+    from deliver.trend import load_trend
+    spec, d0, d1, d2 = "v4_rank@0.1", "2026-09-01", "2026-09-15", "2026-10-01"
+    for day in (d0, d1, d2):
+        _write_rank_run(tmp_path, day, spec, {"X": 10, "Y": 20})
+    _write_rank_run(tmp_path, d0, spec, {"X": 30, "Y": 1}, basis="evening")
+    _write_rank_run(tmp_path, d2, spec, {"X": 5, "Y": 2}, basis="evening")
+    run = load_run(tmp_path, d2, "evening")
+    trend = load_trend(tmp_path, run, spec, "evening")
+    assert trend.dates == (d0, d2) and trend.base["1M"] == d0
+    assert trend.line["X"] == (-30, -5) and trend.delta("1M", "X", 5) == 25
+    prev = previous_run(tmp_path, d2, "evening")
+    assert prev is not None and (prev.date, prev.basis) == (d0, "evening")
+    morning = load_trend(tmp_path, load_run(tmp_path, d2, "morning"), spec, "morning")
+    assert morning.dates == (d0, d1, d2) and morning.line["X"] == (-10, -10, -10)
+
+
+# ── 장 마감 직후 판(PR-6) — 별도 루트 data/model_db · basis evening ───────────────
+POSTCLOSE_NOTE = "장 마감 직후 판(가격 15:35·수급 15:40 정규장 기준) · 컨센서스 기준일 = 직전 거래일"
+
+
+def _tree_state(root: Path) -> dict[str, object]:
+    """폴더 아래 경로마다 (파일이면 크기·mtime_ns·sha256, 폴더면 'dir') — 건드렸는지 대조용."""
+    return {p.relative_to(root).as_posix():
+            "dir" if p.is_dir() else (p.stat().st_size, p.stat().st_mtime_ns,
+                                      hashlib.sha256(p.read_bytes()).hexdigest())
+            for p in sorted(root.rglob("*"))}
+
+
+def test_postclose_run_in_model_db_leaves_operating_roots_alone(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """PR-6(T-3·T-7) — 장 마감 판은 `data/model_db/{factor_inputs,model,deliver}` 를 루트 인자로만
+    받아 model CLI·deliver CLI 를 돈다. 같은 D 의 아침판이 운영 루트(CLI 기본 `data/…`)에 있어도
+    읽지도 쓰지도 않는다. 그림자 기간처럼 `--send` 없이 돌리면 엑셀만 짓는다 — 전송·발송 장부 0.
+    엑셀 메타에는 판 성격 줄이 붙고, 같은 루트에 직전 evening 판이 없으니 전일 비교 판은 '없음'."""
+    from model.__main__ import main as model_cli
+    from test_model_build import board_fi, write_fi_tree
+
+    home = tmp_path / "ql_home"
+    monkeypatch.setenv("QL_HOME", str(home))
+    ops, mdb = home / "data", home / "data" / "model_db"
+    small = ["--min-prices-on-d", "10", "--min-ranked", "10"]
+    # 운영 루트 — 같은 D 의 아침판 fi·model·엑셀·발송 장부(전부 CLI 기본 루트)
+    write_fi_tree(ops / "factor_inputs", board_fi())
+    assert model_cli(["build", "--date", "20260928", "--basis", "morning", *small]) == 0
+    assert cli.main(["model-daily", "--date", "20260928", "--basis", "morning"]) == 0
+    (ops / "deliver" / LEDGER).write_text(
+        '{"date": "2026-09-28", "basis": "morning"}\n', encoding="utf-8")
+    morning_meta = dict(_meta_pairs(load_workbook(
+        ops / "deliver" / "daily" / "model_scores_20260928_morning.xlsx")))
+    assert morning_meta["basis"] == "morning" and "판 성격" not in morning_meta
+    before = {n: _tree_state(ops / n) for n in ("factor_inputs", "model", "deliver")}
+    assert all(before.values())
+
+    write_fi_tree(mdb / "factor_inputs", board_fi(), "e_20260928T063000_000000Z",
+                  basis="evening")
+    fi = ["--fi-root", str(mdb / "factor_inputs")]
+    assert model_cli(["build", "--date", "20260928", "--basis", "evening", *small, *fi,
+                      "--root", str(mdb / "model")]) == 0
+    calls = _fake_send(monkeypatch)
+    capsys.readouterr()
+    assert cli.main(["model-daily", "--date", "20260928", "--basis", "evening", *fi,
+                     "--model-root", str(mdb / "model"),
+                     "--out-root", str(mdb / "deliver")]) == 0
+    out = capsys.readouterr().out
+
+    assert {n: _tree_state(ops / n) for n in ("factor_inputs", "model", "deliver")} == before
+    assert calls == [] and not (mdb / "deliver" / LEDGER).exists()
+    assert POSTCLOSE_NOTE in out                                  # 표준출력 캡션
+    xlsx = mdb / "deliver" / "daily" / "model_scores_20260928_evening.xlsx"
+    meta = dict(_meta_pairs(load_workbook(xlsx)))
+    assert meta["basis"] == "evening" and meta["판 성격"] == POSTCLOSE_NOTE
+    assert meta["전일 비교 판"] == "없음"
+    assert meta["순위 흐름 판"] == "2026-09-28 ~ 2026-09-28 · 1개"
+    assert json.loads((mdb / "model" / "latest_evening.json").read_text())["basis"] == "evening"
 
 
 def test_rank_delta_cell_color_is_centered_on_zero(daily) -> None:

@@ -18,7 +18,8 @@
                  제외 ⇔ 사유 ⇔ 순위 NULL, 순위 행은 종합이 있다.
   MG4 신선도   — 전체 fi_prices(eligible 로 자르기 전)에서 D 종가가 있는 종목 ≥ 2,000
                  (v3 원본 stale guard `backend/scoring/engine.py:40-51` 과 같은 하한).
-  MG5 전판 대비 — 같은 spec 의 직전 성공 판(MANIFEST current_build)과 종합점수 Spearman·
+  MG5 전판 대비 — 같은 spec·같은 basis 의 직전 성공 판(MANIFEST 기록 중 basis 가 같은 마지막 판 —
+                 아침판과 장 마감 판을 섞지 않는다, PR-6)과 종합점수 Spearman·
                  상위 30 겹침을 기록만 한다. Spearman < 0.8(또는 셀 수 없음)이면 상태 `warn`
                  — 판은 올린다.
   SKIP 판정    — 허용표(`stage/skip_allow.py`, K1-7a) 밖 SKIP 은 MG0~MG4 면 FAIL,
@@ -162,7 +163,7 @@ def spearman(a: Mapping[str, float], b: Mapping[str, float]) -> float | None:
 # ── 문맥 ─────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class Previous:
-    """같은 spec 의 직전 성공 판(MG5)."""
+    """같은 spec·같은 basis 의 직전 성공 판(MG5)."""
 
     build_id: str
     score_date: str | None
@@ -336,7 +337,8 @@ def mg4_freshness(ctx: GateContext) -> GateResult:
 def mg5_day_over_day(ctx: GateContext) -> GateResult:
     prev = ctx.previous
     if prev is None:
-        return GateResult("MG5", GateStatus.SKIP, "no_previous — 같은 spec 의 성공 판이 없다", {})
+        return GateResult("MG5", GateStatus.SKIP,
+                          "no_previous — 같은 spec·basis 의 성공 판이 없다", {})
     tcol, comp = ticker_col(ctx.spec), composite_col(ctx.spec)
     cur_comp = {str(r[tcol]): v for r in ctx.result.scores
                 if (v := _num(r[comp])) is not None}

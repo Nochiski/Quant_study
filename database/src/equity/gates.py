@@ -1,11 +1,11 @@
-"""게이트 EG0~EG9 의 일반형 (EQUITY_GATES v1.0 §1·§7).
+"""게이트 EG0~EG9·EG13 의 일반형 (EQUITY_GATES v1.0 §1·§6·§7).
 
-폐기형(FAIL = 버전 폐기): EG0·EG1·EG2·EG3·EG4·EG5·EG6·EG8·EG9. 행 격리형: EG7.
+폐기형(FAIL = 버전 폐기): EG0·EG1·EG2·EG3·EG4·EG5·EG6·EG8·EG9·EG13. 행 격리형: EG7.
 실행 조건이 안 되는 게이트는 SKIP(사유)으로 남는다. 다만 (게이트, 사유, 표) 가 허용표
 (`stage/skip_allow.py`, K1-7a)에 없으면 `run_all` 이 FAIL 로 센다 — 'SKIP = 통과' 가 아니다.
 결과 타입은 원장 의존이 없는 `stage.gates` 의 것을 그대로 쓴다.
 
-실행 순서는 GATES §7-1 이 고정한다: EG0 → EG7 → EG1 → EG2 → EG3 → (테이블 특화) → EG4 → EG5.
+실행 순서는 GATES §7-1 이 고정한다: EG0 → EG7 → EG1 → EG2 → EG13 → EG3 → (테이블 특화) → EG4 → EG5.
 **앞 게이트가 FAIL 하면 뒤는 실행하지 않고 `skip(upstream_failed)`** — 조인층은 EG0 실패
 상태에서 EG1 을 돌리면 오해를 부르는 숫자가 나온다.
 
@@ -22,6 +22,7 @@ from pathlib import Path
 
 import duckdb
 from stage import skip_allow
+from stage import snapshot as stage_snapshot
 from stage.gates import GateResult, GateStatus
 from stage.manifest import BuildRecord
 
@@ -247,6 +248,66 @@ def eg2_pit(ctx: EquityGateContext) -> GateResult:
                       f"available<content={n_early}", metrics)
 
 
+def eg13_available_future(ctx: EquityGateContext) -> GateResult:
+    """EG13 — 판의 모든 행 `available_date ≤ 입력 stage 스냅샷의 KST 날짜` (K1-3a · 컷오버 T-12).
+
+    EG2 는 하한(`≥ 내용일`)만 본다. 판을 지은 원장 스냅샷보다 뒤의 공개일은 그 판이 알 수 없었던
+    값이다 — 연도 오타·참조표 조인 오류로 튀면 어떤 as-of 에서도 안 보이는 조용한 결측이 되고,
+    EG2 와 함께 내용일도 스냅샷 뒤에 있을 수 없게 묶는다.
+
+    기준일 = 고정 입력의 전이 폐포(`inputs.input_snapshot_ids`)에 있는 stage 판들의 스냅샷 KST 날짜
+    중 **가장 늦은 것**. 한 stage 표가 그날 폐기돼 전날 판에 머물러도 나머지 입력은 오늘 원장에서
+    왔다 — 가장 이른 날짜로 자르면 정상 행을 미래로 버린다.
+    기준일을 못 세우면(입력 없음·스냅샷 id 형식 밖·위쪽 고정본 소실) FAIL 이다 — 모호하면 통과로
+    두지 않는다(P1). 공개일 NULL 은 EG2-P01 규약(basis='unknown' 일 때만 허용)이 판정하므로
+    여기서는 세지 않고 `n_available_null` 로만 남긴다.
+    """
+    rule = ctx.rule
+    if not rule.is_fact:
+        return GateResult("EG13", GateStatus.SKIP, "dimension_table",
+                          {"available_rule": rule.available_rule})
+    if "available_date" not in rule.columns:
+        return GateResult("EG13", GateStatus.FAIL,
+                          f"팩트 테이블에 available_date 가 없다: table={rule.name}",
+                          {"missing_columns": ["available_date"]})
+    try:
+        snaps = inputs_mod.input_snapshot_ids(ctx.pinned)
+    except FileNotFoundError as e:
+        return GateResult("EG13", GateStatus.FAIL,
+                          f"input snapshot lineage unresolvable — 기준일 없음: {e}",
+                          {"inputs": dict(ctx.inputs)})
+    kst: dict[str, str] = {}
+    unparsed: dict[str, str] = {}
+    for key, sid in snaps.items():
+        try:
+            kst[key] = stage_snapshot.snapshot_kst_date(sid).isoformat()
+        except ValueError:
+            unparsed[key] = sid
+    metrics: dict[str, object] = {"input_snapshot_ids": sorted(set(snaps.values())),
+                                  "unparsed_snapshot_ids": unparsed}
+    if not snaps:
+        return GateResult("EG13", GateStatus.FAIL,
+                          f"no stage input snapshot — 기준일 없음: table={rule.name} "
+                          f"inputs={dict(ctx.inputs)}", metrics)
+    if unparsed:
+        return GateResult("EG13", GateStatus.FAIL,
+                          f"snapshot id outside {stage_snapshot.SNAPSHOT_ID_FORMAT!r} — 기준일 "
+                          f"없음: {unparsed}", metrics)
+    ref = max(kst.values())
+    row = _one(ctx.con, f"SELECT count(*) FILTER (WHERE available_date > DATE '{ref}'), "
+                        "count(*) FILTER (WHERE available_date IS NULL), "
+                        f"CAST(max(available_date) AS VARCHAR) FROM {_q(ctx.out_view)}")
+    n_future, n_null = int(str(row[0])), int(str(row[1]))
+    max_available = None if row[2] is None else str(row[2])
+    metrics.update({"snapshot_kst_date": ref, "n_available_after_snapshot": n_future,
+                    "n_available_null": n_null, "max_available_date": max_available})
+    if n_future:
+        return GateResult("EG13", GateStatus.FAIL,
+                          f"n_available_after_snapshot={n_future} snapshot_kst_date={ref} "
+                          f"max_available_date={max_available}", metrics)
+    return GateResult("EG13", GateStatus.PASS, "공개일이 입력 스냅샷 KST 날짜 이하", metrics)
+
+
 def eg3_keys(ctx: EquityGateContext) -> GateResult:
     """EG3 — PK 유일(P01) + 격리 사유 어휘 폐쇄. 테이블 특화 불변식은 extra_gates 로."""
     grain = ", ".join(_q(g) for g in ctx.rule.grain)
@@ -438,7 +499,7 @@ def run_all(ctx: EquityGateContext) -> list[GateResult]:
     """
     steps: list[tuple[str, Callable[[EquityGateContext], GateResult]]] = [
         ("EG0", eg0_inputs), ("EG7", eg7_range), ("EG1", eg1_equation), ("EG2", eg2_pit),
-        ("EG3", eg3_keys)]
+        ("EG13", eg13_available_future), ("EG3", eg3_keys)]
     steps += [(_gate_name(fn), fn) for fn in ctx.rule.extra_gates]
     steps += [("EG4", eg4_fixtures), ("EG5a", eg5a_reproducibility)]
     results: list[GateResult] = []

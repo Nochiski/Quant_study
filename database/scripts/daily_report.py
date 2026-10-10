@@ -10,7 +10,8 @@
          그 D 마지막 dart 런이 ok 면 '회복', `_recovery`)
          · 게이트 폐기(stage·빌드 health 실패)
          · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB
-  warn — 건전성 warn 항목 실패, 아직 `running` 인 런, 저녁 WISE 부분 실패(인계 파일
+  warn — 건전성 warn 항목 실패, 아직 `running` 인 런, 러너가 정상 종료로 정한 상태
+         (`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception), 저녁 WISE 부분 실패(인계 파일
          `wise_n_bad` > 0 — 수집기 rc 0 인 채 일부 콜 실패, N-27 ③. 같은 리포트의 원장 `wise.run`
          이 pass 면 '회복'으로만 적는다) · 그 실패 수 확인 불가(키가 있는데 null, wise_rc 0)
   info — 그 밖의 일일 요약
@@ -35,7 +36,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 
-from daily.runlog import Run
+from daily.runlog import WARN_STATUSES, Run
 
 KST = dt.timezone(dt.timedelta(hours=9))
 MAX_TEXT = 3900                 # notify.sh 가 텔레그램에 넘기는 상한과 같다
@@ -47,7 +48,8 @@ NOTIFY_WINDOW_H = 24
 # 같은 D 의 런마다 그 D 전체를 다시 판정하는 source — 마지막 런이 ok 면 앞 런 실패는 '회복'이다
 # (dart: 18:05 저녁 실패 → 06:00 재시도가 설계된 경로, 배포 묶음 3 A-05). 키움 fetch 처럼 런마다
 # TR 이 다른 source 는 뒤 런 ok 가 앞 런의 결손을 메웠다는 뜻이 아니라 넣지 않는다.
-LAST_RUN_SOURCES = frozenset({"dart"})
+# kiwoom_postclose: 같은 날 재실행이 그날 대상 전체를 다시 보고(이미 받은 종목만 빼고) 남은 종목을 받는다.
+LAST_RUN_SOURCES = frozenset({"dart", "kiwoom_postclose"})
 # 뒤 런이 ok 여도 회복으로 덮지 않는 상태 — v3 프로덕션 키 사용은 수집 실패가 아니라 사고다(P1)
 NEVER_RECOVERED = frozenset({"kael_key_used"})
 # 저녁 체인 런 detail 의 갈래별 rc — `kiwoom_rc=0 dart_rc=2 wise_rc=0 …`. 이 리포트가
@@ -332,12 +334,15 @@ def _runs_section(runs: list[Run] | None) -> tuple[str, list[str], list[str]]:
     if not runs:
         return "■ 런 기록 0건", [], []
     parts = [f"{r.source} {r.status}({_hhmm_kst(r.started)}→{_hhmm_kst(r.ended)})" for r in runs]
-    bad = {r.source for r in runs if r.status not in ("ok", "running")}
+    noted = [r for r in runs if r.status in WARN_STATUSES.get(r.source, frozenset())]
+    bad = {r.source for r in runs if r.status not in ("ok", "running") and r not in noted}
     healed = {s: why for s in sorted(bad) if (why := _recovery(runs, s))}
     failed = sorted(bad - healed.keys())
     running = sorted({r.source for r in runs if r.status == "running"})
     crit = [f"수집 실패 런 {', '.join(failed)}"] if failed else []
     warns = [f"미완 런 {', '.join(running)}"] if running else []
+    if noted:
+        warns.append("주의 런 " + ", ".join(sorted({f"{r.source} {r.status}" for r in noted})))
     parts += [f"회복 {s}({why})" for s, why in healed.items()]
     return "■ 런 " + " · ".join(parts), crit, warns
 

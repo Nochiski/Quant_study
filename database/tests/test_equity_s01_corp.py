@@ -49,9 +49,9 @@ def built(tmp_path: Path) -> build.BuildResult:
 def test_절단본_왕복이_ok이고_게이트는_pass나_skip뿐(built: build.BuildResult) -> None:
     assert built.ok, _fail_names(built)
     assert [g.name for g in built.gates] == [
-        "EG0", "EG7", "EG1", "EG2", "EG3", "EG3_corp", "EG4", "EG5a"]
+        "EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_corp", "EG4", "EG5a"]
     assert {g.name: g.status.value for g in built.gates} == {
-        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "skip", "EG3": "pass",
+        "EG0": "pass", "EG7": "pass", "EG1": "pass", "EG2": "skip", "EG13": "skip", "EG3": "pass",
         "EG3_corp": "pass", "EG4": "pass", "EG5a": "skip"}
     assert built.n_rows == 11 and built.n_reject == 0     # 손계산: stg_corp_map 11행
     assert built.out_dir is not None and (built.out_dir / "part0.parquet").exists()

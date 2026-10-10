@@ -80,6 +80,27 @@ def test_gate는_커밋된_빌드를_폐기하지_않는다(tmp_path: Path, make
     assert (eq / "sample_table" / "v=b_eq_1").exists()
 
 
+def test_gate_재판정은_고정한_stage_판의_스냅샷으로_EG13을_다시_잰다(
+        tmp_path: Path, make_stage_tree, capsys) -> None:
+    """컨트롤러가 서버에서 최근 판을 `equity gate <표> --build <bid>` 로 재판정한다(K1-3a).
+    기준일은 `_pinned/<stg>/MANIFEST.json` 의 BuildRecord.snapshot_id 에서 온다 — stage 쪽이
+    keep 으로 지워져도 재판정이 선다. 고정 기록의 스냅샷을 공개일보다 이르게 바꾸면 EG13 이
+    FAIL 한다."""
+    base, eq = _env(tmp_path, make_stage_tree)
+    assert main([*base, "build", "sample_table", "--build-id", "b_eq_1"]) == 0
+    capsys.readouterr()
+    assert main([*base, "gate", "sample_table", "--build", "b_eq_1"]) == 0
+    assert "EG13  pass" in capsys.readouterr().out
+    pinned_manifest = eq / "_pinned" / "stg_sample" / "MANIFEST.json"
+    raw = json.loads(pinned_manifest.read_text(encoding="utf-8"))
+    raw["builds"][-1]["snapshot_id"] = "snap_20210103T000000Z"     # 공개일 2021-01-04 행보다 이르다
+    pinned_manifest.write_text(json.dumps(raw), encoding="utf-8")
+    assert main([*base, "gate", "sample_table", "--build", "b_eq_1"]) == 1
+    out = capsys.readouterr().out
+    assert "EG13  fail" in out and "n_available_after_snapshot=1" in out
+    assert manifest.load(eq / "sample_table" / "MANIFEST.json").current_build == "b_eq_1"
+
+
 def test_gate는_커밋이_없으면_예외(tmp_path: Path, make_stage_tree) -> None:
     base, _ = _env(tmp_path, make_stage_tree)
     with pytest.raises(FileNotFoundError, match="no committed build to re-adjudicate"):

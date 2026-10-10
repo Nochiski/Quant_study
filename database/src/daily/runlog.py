@@ -15,6 +15,13 @@ _DDL = """CREATE TABLE IF NOT EXISTS run (
 # started·ended 의 형식(UTC, Z 접미). 쓰는 곳은 `_now()`, 읽는 곳은 `first_started_utc()`
 # (dart_daily 가 씀) — `scripts/daily_report.py` 는 아직 같은 형식을 직접 적는다
 TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+# 러너가 '정상 종료지만 사람이 알아야 할' 상태로 정한 값(source → 상태). 일일 리포트
+# (`scripts/daily_report.py`)가 이 상태를 crit(수집 실패)이 아니라 warn 으로 센다. 상태 이름은 러너가
+# 정하고(장 마감 수집 `daily.postclose.Status`) 여기 한 곳에 등록한다 — 테스트가 둘을 맞춰 본다
+WARN_STATUSES: dict[str, frozenset[str]] = {
+    # 16:00 컷오프 · 16:00 뒤 시작(콜 0) · 세션 예외일 건너뜀 — 남은 종목은 QL-D 가 21:05 저녁 값
+    "kiwoom_postclose": frozenset({"cutoff", "late", "session_exception"}),
+}
 
 
 @dataclass(frozen=True)

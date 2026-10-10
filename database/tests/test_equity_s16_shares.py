@@ -36,10 +36,12 @@ N_SHARES = 237
 N_TREASURY = 977
 N_DIVIDEND = 221
 GATE_ORDER = {
-    "shares_outstanding": ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_shares_outstanding",
+    "shares_outstanding": ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_shares_outstanding",
                            "EG4", "EG5a"],
-    "treasury_stock": ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_treasury_stock", "EG4", "EG5a"],
-    "dividend_event": ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_dividend_event", "EG4", "EG5a"],
+    "treasury_stock": ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_treasury_stock", "EG4",
+                       "EG5a"],
+    "dividend_event": ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_dividend_event", "EG4",
+                       "EG5a"],
 }
 
 

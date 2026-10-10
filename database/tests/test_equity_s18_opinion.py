@@ -56,9 +56,9 @@ N_BROKER = 249                  # stg_analyst_broker 전건 (1:1)
 N_OVERLAP = 5                   # 두 원천이 같은 (ticker, obs_date) 를 가진 키
 N_V3_NULL = 301                 # v3 값 전 축이 NULL 인 행 (커버 안 되는 종목·날)
 
-OPINION_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_opinion_daily", "EG6", "EG8", "EG9",
-                 "EG21", "EG4", "EG5a"]
-BROKER_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_opinion_broker_daily", "EG9",
+OPINION_GATES = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_opinion_daily", "EG6", "EG8",
+                 "EG9", "EG21", "EG4", "EG5a"]
+BROKER_GATES = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_opinion_broker_daily", "EG9",
                 "EG4", "EG5a"]
 
 # S18 두 테이블이 읽는 equity 입력을 짓기 위한 선행 체인 (WORKFLOW §3-2 S00─S01─S02).

@@ -35,7 +35,7 @@ STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 ADJ = rules_s06.ADJ_FACTOR
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
             rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_adj_factor", "EG8", "EG4", "EG5a"]
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG3_adj_factor", "EG8", "EG4", "EG5a"]
 N_CORP_EVENTS = 8
 # S06-2: 기준가 원천 신규 행 2(unknown_price_only, ok=false) — 247540 2022-05-09 · 900050 2011-02-16
 PRICE_ONLY_IDS = {"247540:krx_base:2022-05-09", "900050:krx_base:2011-02-16"}

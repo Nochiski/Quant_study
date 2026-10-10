@@ -59,7 +59,7 @@ UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_S
             rules_s01.CORP, rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT,
             rules_s06.ADJ_FACTOR, rules_s03.UNIVERSE_DAILY)
 CREDIT = rules_s10.CREDIT_DAILY
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_credit_daily", "EG3_credit_daily",
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG13", "EG3", "EG1_credit_daily", "EG3_credit_daily",
               "EG21", "EG4", "EG5a"]
 
 N_UNIVERSE = 41066                   # universe_daily 전 행 (test_equity_s03_universe.N_GRID)

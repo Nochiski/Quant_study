@@ -36,6 +36,22 @@ python -m factor_inputs build --date 20260929 --basis morning \
   equity 판을 거절한다. D 는 확정판의 거래일(예: 09-30 아침 체인 → `--date 20260929`).
 - 과거 날짜 검증(예: GC2 의 09-23 재현)은 **별도 `--root`** 로 돌린다 — `latest_morning.json` 은
   날짜와 무관하게 마지막 성공 판을 가리키므로 운영 루트에서 옛 날짜를 돌리면 덮인다.
+- **재생 `--replay`**(컷오버 PR-8b — `scripts/replay.sh --basis evening` 만 쓴다): 과거 D 의 판을
+  현판(최근 세션까지 온 equity)에서 짓는다. 정보 입력은 SQL 이 이미 asof 로 자르지만 세션 축은 자르지
+  않아, 현판으로는 장 마감 판 MD-SEAM(§2-1)이 서지 않고 아침판은 달력 뒤 세션이 filing_late 실효 기한을
+  정한다. `--replay` 는 equity 세션 축 7표(`build.REPLAY_SESSION_TABLES` — trading_calendar · universe_daily ·
+  price_daily · price_adj_daily · flow_daily · credit_daily · coverage_daily)의 뷰만 `date <= asof`(아침판 D ·
+  장 마감 판 D')로 자르고 판 manifest 에 `replay`(자른 날·표)를 남긴다. `queries` SQL·게이트·진입 조건은
+  그대로이고, 재생이 아니면 뷰 SQL 도 글자 그대로다(`tests/test_factor_inputs_replay.py`). 마스터
+  (security·corp)와 equity 재계산은 현판 그대로라 그날 판과 다를 수 있다.
+  **재생은 다음 차이를 볼 수 없다.** 재생의 두 판(장 마감 판·연구 판)이 같은 equity 현판과 같은 21:05 원장
+  수급을 읽어, 실운영에서 두 판을 가르는 아래 차이가 재생 대조에서는 구조적으로 0 이다 — 그림자 3거래일
+  (+ 컷오버 뒤 기록형) 몫이다.
+  - equity 소급 재판정이 낳는 T 전 행 차이 — adj_factor 기준가 창이 asof 뒤 세션을 본다 · universe_daily
+    corp_action_window 가 45세션 앞을 본다 · equity 규칙 변경. 실운영 장 마감 판은 D' 확정판 equity 를, 연구
+    판 T 는 다음 날 확정판 equity 를 읽어 갈릴 수 있다.
+  - 정규장 수급 대 21:05 원장 수급 차이 — 재생 T 행 수급과 연구 판 수급이 같은 21:05 키움 원장에서 온다.
+    실운영 장 마감 판 T 행 수급은 15:41 정규장 수집이다.
 
 ### 2-1. 장 마감 판(`--basis evening`, 컷오버 PR-4)
 
@@ -131,9 +147,10 @@ python -m daily.board_compare --date <T> --evening-root data/model_db --research
   `daily.calendar`(D' = T 직전 거래일 = 장 마감 판 asof = `builds_from_date`).
 - 범주는 증거가 있을 때만 인정한다. 정의·정본 근거의 단일 정본은 `src/daily/board_compare.py` 의
   `CATEGORIES` 다. 이월·정보 시점·filing_late 는 '장 마감 T = 연구 D' 이고 연구 T ≠ 연구 D'' 이고, 연초 첫
-  거래일의 연도 창만 예외다. 실운영 T 종가 차이는 미설명이고 `--replay`(T 행 = 21:05 원장)에서만 종가
-  정의다. 거래량·수급(주체별 판 통계 상한)·16:00 컷오프(stage)·수집 대상 밖·T-6(연구 판 흔적)·신용 T
-  실입수는 각자 증거를 본다. 맞는 범주가 없으면 미설명이다.
+  거래일의 연도 창만 예외다. 실운영 T 종가 차이는 미설명이고 `--replay`(T 행 = 21:05 원장)이면서 T 가
+  KRX 애프터마켓 시행일(2026-09-14, `AFTER_MARKET_START`) 이후일 때만 종가 정의다(그 전 날은 21:05 키움
+  종가 = 정규장 종가라 미설명). 거래량·수급(주체별 판 통계 상한)·16:00 컷오프(stage)·수집 대상 밖·
+  T-6(연구 판 흔적)·신용 T 실입수는 각자 증거를 본다. 맞는 범주가 없으면 미설명이다.
 - 모델은 spec 마다 종합점수 Spearman · 엑셀 후보 겹침 · 점수 열 |Δ| 상위 종목과 그 종목의 fi 범주.
 - rc 0 = 미설명 0 · 모든 spec Spearman ≥ 하한(0.975 임시 — `--spearman-min 0` 은 기록형) / 1 = 미설명
   있음 또는 하한 미달 / 2 = 입력 오류. 결과는 `<out-root>/compare/<T>.json`(기본 out-root =
@@ -208,7 +225,10 @@ compat 은 한 기에 E 하나(E 우선)만 남기지만 이 표는 E·A 를 둘
   fs_basis)이 조용히 빈다(fi1.2.0 까지의 쿼리). 한쪽 ep 가 그날 수집되지 않았으면 그 ep 의 직전 판을
   잇는다(결손 자체는 WISE 부분 실패 알림 — N-30 ③ — 이 따로 알린다). compat `financial_summary` 도 같은 규칙.
 - `available_date` = 행을 이룬 원천의 max(WISE fetched_date, DART·배당 available_date). 연간 행의
-  WISE 날짜는 두 ep 판 중 늦은 날, 분기 WISE 행은 Q:IS 판 날짜다. stage 2.7.0 부터 WISE fetched_date 는
+  WISE 날짜는 두 ep 판 중 늦은 날, 분기 WISE 행은 Q:IS 판 날짜다. DART 4Q 행(사업보고서 − 1~3Q)은
+  파생값(`q4_derived_available_date` ≤ asof)을 실었으면 max(사업보고서 available_date,
+  `q4_derived_available_date`), 못 실었으면(값 NULL) 사업보고서 날짜다(fi1.8.0, 컷오버 F-1 · T-43 —
+  1~3Q 정정이 뒤에 들어오면 파생값이 그날 처음 선다). stage 2.7.0 부터 WISE fetched_date 는
   '그 원문을 처음 본 날'(그 전엔 '마지막으로 확인한 날')이라 원문이 그대로인 종목은 D 보다 이르다 —
   '알게 된 날' 뜻은 그대로이고 ≤ D(장 마감 판은 asof=D', §2-1) 다(FG1). 엔진은 읽지 않는다.
 - 연간 매출은 분기와 같은 계정(최상위 '매출액(수익)' → 보험 '영업수익' → 은행·증권·금융지주

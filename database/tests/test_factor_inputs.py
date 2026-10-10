@@ -1067,6 +1067,33 @@ def test_fin_summary_reads_folded_versions_per_ep_on_each_d(tmp_path: Path) -> N
              float(round(1_234.4 * ix + 5)), d[0])], day
 
 
+def test_fin_summary_q4_derived_row_dates_from_the_derived_values(tmp_path: Path) -> None:
+    """T-43(fi1.8.0): E 의 2025 사업보고서는 03-20 공개지만 4Q 파생값은 09-16 에 선다(1~3Q 정정 —
+    서버 145720 모양). 그 전 D 는 4Q 행 값 NULL · available_date = 사업보고서 날짜, 그날부터는 값이
+    실리고 available_date = 파생값 날짜(행을 이룬 원천들의 max). 1~3Q 행은 그대로다."""
+    y = dt.date
+    q4_day = FETCH[2]
+    fin = [_fin_std_row(E, y(2025, 3, 31), "11013", y(2025, 5, 15), scale=0.25),
+           _fin_std_row(E, y(2025, 6, 30), "11012", y(2025, 8, 14), scale=0.26),
+           _fin_std_row(E, y(2025, 9, 30), "11014", y(2025, 11, 14), scale=0.27),
+           _fin_std_row(E, y(2025, 12, 31), "11011", y(2026, 3, 20),
+                        q4_derived_available_date=q4_day)]
+    roots = make_roots(tmp_path / "src", extra={"fin_std": fin})
+    sql = ("SELECT period, revenue, op, ni, gross_profit, available_date FROM _fi_fin_summary "
+           f"WHERE ticker = '{E}' AND period_type = 'quarter' ORDER BY period")
+    first3 = [("2025/03", round(70 * 0.25 * 1e4), round(10 * 0.25 * 1e4),
+               round(40 * 0.25 * 1e4), round(50 * 0.25 * 1e4), y(2025, 5, 15)),
+              ("2025/06", round(70 * 0.26 * 1e4), round(10 * 0.26 * 1e4),
+               round(40 * 0.26 * 1e4), round(50 * 0.26 * 1e4), y(2025, 8, 14)),
+              ("2025/09", round(70 * 0.27 * 1e4), round(10 * 0.27 * 1e4),
+               round(40 * 0.27 * 1e4), round(50 * 0.27 * 1e4), y(2025, 11, 14))]
+    assert _fin_summary_at(roots, FETCH[1], sql) == [
+        *first3, ("2025/12", None, None, None, None, y(2026, 3, 20))]
+    for d in (q4_day, D):
+        assert _fin_summary_at(roots, d, sql) == [
+            *first3, ("2025/12", 800_000, 110_000, 90_000, 200_000, q4_day)], d
+
+
 def test_fg1_wise_income_statement_ratio_on_the_full_tree(built) -> None:
     """FG1 손익 비율(7-2 D7-8, 기록형) — 기본 합성 트리에서 손익(op·ni)이 있는 eligible 은
     per·eps 가 있는 eligible 과 같은 9곳(eligible 10 중 C 는 3월 결산이라 연간 행이 없다)."""

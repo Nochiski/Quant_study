@@ -635,6 +635,37 @@ def test_t_close_difference_is_unexplained_live_and_close_definition_in_replay(
     assert rep["replay"] is True and rep["ticker_categories"]["100025"] == [bc.CLOSE_DEF]
 
 
+@pytest.mark.parametrize(("t", "dp", "want"), [
+    (dt.date(2026, 9, 11), dt.date(2026, 9, 10), bc.UNEXPLAINED),    # 애프터마켓 시행 전(금)
+    (dt.date(2026, 9, 14), dt.date(2026, 9, 11), bc.CLOSE_DEF)])     # 시행일(월)부터
+def test_replay_close_definition_starts_with_the_after_market(t: dt.date, dp: dt.date,
+                                                              want: str) -> None:
+    """PR-8b 리뷰 MINOR-2 — 재생 T 종가 차이는 T ≥ 2026-09-14(KRX 애프터마켓 시행일)일 때만 종가 정의다.
+    그 전 날은 21:05 키움 종가 = 정규장 종가라 재생에서도 미설명이다. 실운영은 날짜와 무관하게 미설명."""
+    def verdict(replay: bool) -> tuple[str, str]:
+        return bc._Ctx(t, dp, replay, bc.Evidence({}, {}, frozenset()),
+                       {}, {}, {}, {}, {}, {}, {}, {}).close_verdict()
+    assert bc.AFTER_MARKET_START == dt.date(2026, 9, 14)
+    cat, note = verdict(True)
+    assert cat == want
+    assert ("애프터마켓 시행일" in note) == (want == bc.UNEXPLAINED)
+    assert verdict(False)[0] == bc.UNEXPLAINED
+
+
+def test_replay_close_difference_before_the_after_market_is_unexplained(tmp_path,
+                                                                        monkeypatch) -> None:
+    """같은 T 종가 차이를 재생으로 대조해도, T 가 애프터마켓 시행일 전이면(시행일을 T 다음 날로 옮겨
+    본다) 종가 정의가 아니라 미설명이다 — `compare_fi` 가 T 를 판정에 넘긴다."""
+    def close_up(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        _on(e, "fi_prices", A, T_DATE, close=10_050)
+    assert _cats(_fi3(tmp_path / "after", close_up, replay=True))[("fi_prices", A)] == {
+        bc.CLOSE_DEF}
+    monkeypatch.setattr(bc, "AFTER_MARKET_START", T_DATE + dt.timedelta(days=1))
+    res = _fi3(tmp_path / "before", close_up, replay=True)
+    assert _cats(res)[("fi_prices", A)] == {bc.UNEXPLAINED}
+    assert any("애프터마켓 시행일" in f.note for f in res.tally.samples[bc.UNEXPLAINED])
+
+
 def test_flow_unit_or_subject_swap_breaks_the_flow_cap(research_tables, tmp_path) -> None:
     """단위(×1e6)·주체 열 뒤바뀜 — 주체 판 통계가 상한을 넘거나 한쪽만 값이 있어 미설명."""
     def swap(rs: dict[str, Any], ev: dict[str, Any]) -> None:
@@ -761,6 +792,16 @@ def _scale_adj(tables: dict[str, Any], tk: str, start: dt.date, factor: float = 
             x.update(adj_factor=factor, adj_close=10_000.0 * factor)
 
 
+Q4_REPORT = dt.date(2026, 3, 20)      # 사업보고서 공개일(D' 훨씬 앞)
+
+
+def _q4(tables: dict[str, Any], avail: dt.date, revenue: int | None = None) -> None:
+    """A 의 DART 4Q 파생 분기 행(2025/12) — 값은 파생값이 섰을 때만 싣는다(fi_fin_summary)."""
+    tables["fi_fin_summary"].append(_r("fi_fin_summary", ticker=A, period="2025/12",
+                                       period_type="quarter", revenue=revenue,
+                                       fs_basis="DART:CFS", available_date=avail))
+
+
 U = bc.UNEXPLAINED
 # (이름, 변경, 기대 {(표, 종목): 범주}, compare_fi 추가 인자) — 범주마다 양성과 '증거 없음' 음성
 CASES: list[tuple[str, Mut, dict[tuple[str, str], set[str]], dict[str, Any]]] = [
@@ -804,6 +845,14 @@ CASES: list[tuple[str, Mut, dict[tuple[str, str], set[str]], dict[str, Any]]] = 
     ("info_evening_after_dprime",
      lambda e, r, d: [x.update(fetched_date=T_DATE) for x in _rows(e, "fi_consensus_annual", A)],
      {("fi_consensus_annual", A): {U}}, {}),
+    # 4Q 파생 분기 행(T-43 · fi1.8.0) — 1~3Q 정정이 (D', T] 에 들어와 연구 판 T 에 파생값이 처음 실린다.
+    # 행 날짜 = 파생값 날짜면 정보 시점, 사업보고서 날짜 그대로면(fi1.7.0 모양 — P5 시험 145720) 미설명
+    ("info_fin_q4_derived", lambda e, r, d: (_q4(e, Q4_REPORT), _q4(d, Q4_REPORT),
+                                             _q4(r, T_DATE, 800_000)),
+     {("fi_fin_summary", A): {bc.INFO}}, {}),
+    ("info_fin_q4_derived_report_date", lambda e, r, d: (_q4(e, Q4_REPORT), _q4(d, Q4_REPORT),
+                                                         _q4(r, Q4_REPORT, 800_000)),
+     {("fi_fin_summary", A): {U}}, {}),
     # filing_late — 3자 대조(또는 기한 ∈ (D', T] 라 장 마감 false · D' NULL)
     ("filing_ok", lambda e, r, d: _uni(r, B, filing_late=True),
      {("fi_universe", B): {bc.FILING}}, {}),

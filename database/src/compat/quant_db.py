@@ -34,6 +34,7 @@ M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자
   · 날짜 단위 교체 표의 새 원천에 `--date` 행 0                                       (QL-D)
   · `daily_prices` 의 `adj_close` 결측 비율 > 1%              (R9 — 장 마감 판 T 단계 미상 NULL 이 몰린 날)
   · 제자리 반영(`--in-place`) 창이 5세션 미만(daily.calendar)    (QL-E MINOR-1 — T-41 덮어쓰기 행이 창 안에서 끝나야 한다)
+  · 증분 창 시작일(10거래일 전)을 판정 달력으로 못 센다          (K1-9d — 영업일 가정 없음, K1-9 ⑦)
   · 증분인데 대상 DB 가 얕다(종목당 세션 중앙값 < 260)         (R10)
   · `stocks` 종목 수 < 2,000 · `market` 어휘 위반             (R2 · R4)
   · 표별 건너뛴 행 비율 > 5%                                   (R7)
@@ -52,6 +53,7 @@ from pathlib import Path
 
 import duckdb
 from daily import calendar as daily_calendar
+from daily.ledger_health import KRX_RECHECK_SESSIONS
 from deliver.reader import DeliverError, load_run
 from equity import handoff, inputs
 from stage.model import basis_of_build_id
@@ -75,8 +77,13 @@ SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "v3_schema.sql"
 
 # `--full` 초기 적재 창(달력일). v3 모멘텀이 보는 240 행 ≈ 1년에 여유를 둔 2년.
 FULL_WINDOW_DAYS = 730
-# 증분 창 — 최근 10세션을 확실히 덮는 달력일. 연휴를 포함해도 10세션이 들어온다.
-INCREMENTAL_DAYS = 14
+# 증분 창 — as_of 이하 마지막 거래일 L 과 그 앞 이 수만큼의 거래일(L 포함 11세션, daily.calendar
+# — K1-9d · T-14). 08:10 KRX 재수집 창(`daily_build.sh` krx_step `prev_trading_day(D, n=10)` ~ D)과
+# 같다 — 재수집으로 고친 앞쪽 날이 `--full` 전까지 v3 에 안 들어가는 일이 없게(P4). 정본은
+# `ledger_health.KRX_RECHECK_SESSIONS`(셸 리터럴과는 tests/test_daily_health.py, 이 창과는
+# tests/test_compat_export.py 가 대조). 달력일로 세면 설·추석처럼 평일 휴장이 끼는 연휴에
+# 7~8세션으로 줄어 T-41 덮어쓰기 재현·자가 복구 창도 좁아진다.
+INCREMENTAL_PRIOR_SESSIONS = KRX_RECHECK_SESSIONS
 # 스냅샷 표(`stocks`)가 as_of 이하 최신 세션 행을 찾을 때 훑는 창. 최장 연휴보다 넉넉하다.
 SNAPSHOT_LOOKBACK_DAYS = 30
 # 한 번에 sqlite 로 넘기는 행 수. duckdb 결과를 통째로 파이썬 객체로 올리지 않기 위한 값이다.
@@ -684,6 +691,22 @@ def _rebase_outside(tickers: list[str], values: list[tuple], before: str,
     return run
 
 
+def _incremental_from(as_of: date, calendar_dir: Path | None) -> date:
+    """K1-9d — 증분 창 시작일. as_of 이하 마지막 거래일 L 의 `INCREMENTAL_PRIOR_SESSIONS` 번째
+    앞 거래일 = 08:10 KRX 재수집 시작일(L 이 D 일 때).
+
+    `_guard_window_sessions` 와 같은 달력·같은 계산이다. 달력을 못 읽으면 멈춘다(영업일 가정 없음,
+    K1-9 ⑦).
+    """
+    try:
+        cal = daily_calendar.load() if calendar_dir is None else daily_calendar.load(calendar_dir)
+        last = as_of if cal.is_trading_day(as_of) else cal.prev_trading_day(as_of)
+        return cal.prev_trading_day(last, INCREMENTAL_PRIOR_SESSIONS)
+    except (daily_calendar.CalendarUnavailable, KeyError) as e:
+        raise CompatError(f"증분 창 시작일을 셀 수 없다(daily.calendar, "
+                          f"calendar_dir={calendar_dir}): {e}") from e
+
+
 def _guard_window_sessions(as_of: date, from_iso: str, calendar_dir: Path | None) -> None:
     """MINOR-1 — 제자리 반영 창이 `MIN_WINDOW_SESSIONS` 거래일 이상인가(daily.calendar).
 
@@ -893,7 +916,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
            allow_older: bool = False) -> ExportResult:
     """equity/stage/model 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
 
-    date·consensus_asof 는 YYYYMMDD. `full=False`(기본)면 최근 `INCREMENTAL_DAYS` 달력일만,
+    date·consensus_asof 는 YYYYMMDD. `full=False`(기본)면 as_of 이하 마지막 거래일과 그 앞
+    `INCREMENTAL_PRIOR_SESSIONS` 거래일(08:10 KRX 재수집 창, 판정 달력 `calendar_dir`)만,
     `full=True` 면 `window_days`(기본 `FULL_WINDOW_DAYS`) 창 전체를 다시 넣는다. 스냅샷
     표(`stocks`·리비전·재무)는 창과 무관하게 as_of 최신 한 판이다.
     `builds_from` 은 인계 이력 JSON 경로 — 그 판으로 고정해 읽는다(과거 날짜 비교용).
@@ -907,7 +931,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     `postclose_db`·`kiwoom_db`·`calendar_dir` 는 장 마감 판(`basis='evening'`)의 `daily_prices`·
     `investor_detail_flows` T 행 원천 원장(`data/raw/postclose.db`·`data/raw/kiwoom.db`)과 D' 를 셀
     판정 달력 폴더(없으면 `daily.calendar` 기본 경로)다(QL-D). 원장은 아침판에서 쓰지 않는다. 달력은 제자리
-    반영(`in_place`)의 창 세션 가드에도 쓴다(QL-E MINOR-1 — 아침판 포함).
+    반영(`in_place`)의 창 세션 가드에도 쓴다(QL-E MINOR-1 — 아침판 포함). 증분(`full=False`)이면
+    창 시작일도 이 달력으로 센다(K1-9d — 못 읽으면 멈춘다).
     `allow_older` 는 장 마감 판이 대상의 더 나중 반영 기록(T-35 순서)을 무시하게 한다(재생 전용).
     """
     as_of = _parse_date(date, "--date")
@@ -926,14 +951,16 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
             "stocks.market_cap 은 전 종목(all) 고정(T-19)")
     asof_cons = _parse_date(consensus_asof, "--consensus-asof") if consensus_asof else as_of
     if window_days is not None and not full:
-        raise CompatError("--window-days 는 --full 과 함께만 쓴다 — 증분 창은 "
-                          f"{INCREMENTAL_DAYS}일 고정이다")
+        raise CompatError("--window-days 는 --full 과 함께만 쓴다 — 증분 창은 마지막 거래일과 "
+                          f"그 앞 {INCREMENTAL_PRIOR_SESSIONS}거래일 고정이다(08:10 KRX 재수집 창)")
     if window_days is not None and window_days <= 0:
         raise CompatError(f"--window-days 는 양수여야 한다: {window_days}")
-    span = (window_days or FULL_WINDOW_DAYS) if full else INCREMENTAL_DAYS
+    from_d = (as_of - timedelta(days=window_days or FULL_WINDOW_DAYS) if full
+              else _incremental_from(as_of, calendar_dir))
+    span = (as_of - from_d).days        # `_compat_meta.window.days` — 증분도 달력일 폭으로 남긴다
     params = {
         "date": as_of.isoformat(),
-        "from_date": (as_of - timedelta(days=span)).isoformat(),
+        "from_date": from_d.isoformat(),
         "snap_from": (as_of - timedelta(days=SNAPSHOT_LOOKBACK_DAYS)).isoformat(),
         "consensus_asof": asof_cons.isoformat(),
         "asof_ym": as_of.strftime("%Y%m"),

@@ -8,6 +8,7 @@
 #   원천이다(QL-C · T-16) — 그날 모델 성공 판이 없으면 export 가 실패한다(다른 날 판으로 대체 안 함).
 #   --basis evening 의 가격·수급 T 행은 원장 두 개(QL_POSTCLOSE_DB 기본 data/raw/postclose.db ·
 #   QL_KIWOOM_DB 기본 data/raw/kiwoom.db)에서 만든다(QL-D). 원장은 읽기만 한다.
+#   증분 실행(--full 없음)은 판정 달력(QL_HOME/data/calendar)이 필요하다 — 없으면 rc 2(K1-9d).
 #
 #   락: 자체 락 `/tmp/quant_ledger_compat.lock` — 빌드 락(`/tmp/quant_ledger_build.lock`)은 잡지
 #       않는다. equity 판을 **읽기만** 하고 MANIFEST current_build 로 판을 고정해 읽으므로

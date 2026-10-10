@@ -44,6 +44,18 @@ rc 2). 읽은 판 id 는 판 manifest `postclose_builds`·`tables.<표>.inputs` 
 보류와 후보 커버리지 게이트 FG5 의 대상(직전 판 모델 후보 — `--candidates-root` 연구 fi 루트의
 `_runs/<D'>_morning.json`, 수집기 `daily.postclose.fi_candidates` 와 같은 함수)도 여기서 읽는다.
 후보를 못 읽으면 FG5 가 FAIL 이다(판 실패 rc 1).
+
+재생(`--replay`, 컷오버 PR-8b — `scripts/replay.sh --basis evening` 만 쓴다): 과거 D 의 판을
+현판(최근 세션까지 온 equity)에서 짓는다(X-1 '현판 + D 시점 자르기'). 정보 입력은 SQL 이 이미
+asof 로 자르지만 세션 축은 자르지 않는다 — 현판으로는 MD-SEAM 이 서지 않고(장 마감 판), 달력 뒤
+세션이 filing_late 실효 기한을 정한다(아침판). 그래서 equity 세션 축 표(`REPLAY_SESSION_TABLES`)의
+뷰만 `date <= asof`(아침판 D · 장 마감 판 D')로 자른다. `queries` SQL·게이트·진입 조건은 그대로이고,
+재생이 아니면 뷰 SQL 도 글자 그대로다. 판 manifest 에 `replay`(자른 날·표)를 남긴다(재생 판에만).
+마스터(security·corp)와 equity 재계산은 현판 그대로다. 재생의 두 판(장 마감 판·연구 판)이 같은 equity
+현판과 같은 21:05 원장 수급을 읽으므로, equity 소급 재판정(adj_factor 기준가 창이 asof 뒤 세션을 봄 ·
+universe_daily corp_action_window 45세션 · equity 규칙 변경)이 낳는 T 전 행 차이와 정규장 대 21:05 원장
+수급 차이는 재생 대조에서 구조적으로 0 이다 — 재생은 이 차이를 볼 수 없다(그림자 3거래일 + 컷오버 뒤
+기록형 몫, `docs/FACTOR_INPUTS.md` §2).
 """
 from __future__ import annotations
 
@@ -88,7 +100,10 @@ from . import gates, queries
 # adj_ok·adj_jump_ok 포함)·수급(price_valid 무관), 연구 부분 D' 자르기, T-6 당일 기업행위 보류
 # (eligible=false · corp_action_pending — 기준가 술어는 compat 과 공유), FG5 후보 커버리지 게이트.
 # 아침판 SQL 은 그대로
-RULES_VERSION = "fi1.7.0"
+# 1.8.0(2026-10-10, 컷오버 F-1 · T-43): fi_fin_summary DART 4Q 파생 분기 행의 available_date — 파생값을
+# 실은 행(q4_derived_available_date ≤ asof)은 max(사업보고서 available_date, q4_derived_available_date)
+# (연간 행과 같은 '원천들의 max'). 값·엔진 입력은 그대로
+RULES_VERSION = "fi1.8.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
@@ -120,6 +135,10 @@ _EMPTY_FIN_WISE_Q = (
     + " WHERE false)")
 OPTIONAL_STAGE_SOURCES: dict[str, str] = {"stg_fin_wise_q": _EMPTY_FIN_WISE_Q}
 _CHAIN_TABLES = ("price_daily", "price_adj_daily", "adj_factor")
+# 재생(`--replay`)이 뷰를 asof 에서 자르는 equity 세션 축 표 — 세션 날짜 열 `date` 가 있는 원천.
+# 정보 표(공개일 축)는 SQL 이 asof 로 자르고, 마스터(security·corp)는 날짜 축이 없다
+REPLAY_SESSION_TABLES = ("trading_calendar", "universe_daily", "price_daily", "price_adj_daily",
+                         "flow_daily", "credit_daily", "coverage_daily")
 
 
 class FactorInputsError(Exception):
@@ -380,14 +399,15 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
           golden_path: Path | None = GOLDEN_PATH, keep: int = KEEP_DEFAULT,
           build_id: str | None = None, builds_from: Path | None = None,
           calendar_dir: Path | None = None, postclose_stage_root: Path | None = None,
-          candidates_root: Path | None = None) -> BuildResult:
+          candidates_root: Path | None = None, replay: bool = False) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 factor_inputs 8표를 굽는다. 게이트 FAIL 은 결과 status 로,
     입력·인자 오류는 `FactorInputsError` 로 낸다. `builds_from`(인계 이력 JSON)을 주면 원천 판을
     current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정'). `calendar_dir` 는
     장 마감 판의 거래일 판정 달력(`daily.calendar` 연도 파일 폴더, 없으면 그 모듈 기본 경로).
     장 마감 판만 읽는 것: `postclose_stage_root`(T 행 stage 루트, 없으면
     `default_postclose_stage_root()`) · `candidates_root`(직전 판 모델 후보를 읽을 연구 fi 루트,
-    없으면 `research_root()`)."""
+    없으면 `research_root()`). `replay` 는 재생 전용 — 세션 축 뷰를 asof 에서 자른다(모듈 docstring
+    '재생')."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
@@ -433,13 +453,17 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         shutil.rmtree(tmp_root)
     tmp_root.mkdir(parents=True)
     d_iso = d.isoformat()
+    asof = d_iso if dprime is None else dprime.isoformat()
     con = duckdb.connect()
     try:
         con.execute(f"SET threads = {DUCKDB_THREADS}")
         con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
         con.execute("SET enable_progress_bar = false")
         for name, expr in {**eq_exprs, **st_exprs}.items():
-            con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}')
+            # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다
+            cut = (f" WHERE date <= DATE '{asof}'"
+                   if replay and name in REPLAY_SESSION_TABLES else "")
+            con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}{cut}')
         _check_columns(con, equity_builds)
         if dprime is not None:
             _check_seam(con, d, dprime, builds_from)
@@ -452,7 +476,6 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             got = _one(con, f'SELECT max(date) FROM "{queries.T_SOURCE_TABLE}"')
             t_src_max = None if got is None else str(got)
             t_cands, t_from = _t_candidates(Path(candidates_root or research_root()), dprime)
-        asof = d_iso if dprime is None else dprime.isoformat()
         con.execute(queries.calendar_sql(d_iso if evening else None))
         if not _one(con, f"SELECT count(*) FROM _calx WHERE date = DATE '{d_iso}'"):
             raise FactorInputsError(
@@ -543,6 +566,10 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         "gates": [g.as_dict() for g in results],
         "elapsed_s": elapsed,
     }
+    if replay:
+        # 재생 표시(재생 판에만) — 현판을 이 날에서 자른 판이다(운영 판과 구분)
+        payload["replay"] = {"session_cut": asof, "tables": list(REPLAY_SESSION_TABLES),
+                             "note": "재생(PR-8b) — 현판 equity 의 세션 축을 asof 에서 자른 판"}
 
     if failed:
         report = root / "_failed" / f"{bid}.json"

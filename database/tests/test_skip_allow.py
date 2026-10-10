@@ -84,8 +84,8 @@ def test_same_reason_on_another_layer_is_not_allowed() -> None:
 
 
 def test_table_scoped_entry_only_covers_its_tables() -> None:
-    """표 한정 항목은 그 표만 덮는다. 운영 허용표에는 지금 표 한정 항목이 없어(10-10 리뷰에서
-    EG21 no_coverage·opinion_daily 삭제) 테스트 동안만 더한다."""
+    """표 한정 항목은 그 표만 덮는다. 운영 허용표에 이 성질을 볼 equity 표 한정 항목이 없어(10-10
+    리뷰에서 EG21 no_coverage·opinion_daily 삭제) 테스트 동안만 더한다."""
     with allow_skips(("equity", "EG21", "no_coverage",
                       "테스트 전용 — 표 한정 허용의 성질만 본다", "opinion_daily")):
         allowed = skip_allow.judge("equity", _skip("EG21", "no_coverage"), table="opinion_daily")
@@ -94,6 +94,17 @@ def test_table_scoped_entry_only_covers_its_tables() -> None:
         assert other.status is GateStatus.FAIL
     gone = skip_allow.judge("equity", _skip("EG21", "no_coverage"), table="opinion_daily")
     assert gone.status is GateStatus.FAIL                   # 운영 허용표 — 항목이 없다
+
+
+@pytest.mark.parametrize("gate, detail", [
+    ("G4", "golden_inherited"), ("G6", "write_mode=first_write_wins"), ("G8", "not_blob")])
+def test_postclose_stage_skips_are_allowed_only_for_that_table(gate: str, detail: str) -> None:
+    """장 마감 판 T 행 원천(컷오버 PR-5)의 stage SKIP 3종은 `stg_flow_postclose_kiwoom` 한정 허용이다
+    (STAGE_HANDOFF · PR-2 리뷰). fi 가 직접 읽는 다른 stage 표에서 같은 SKIP 은 실패다."""
+    ok = skip_allow.judge("stage", _skip(gate, detail), table="stg_flow_postclose_kiwoom")
+    assert ok.status is GateStatus.SKIP
+    other = skip_allow.judge("stage", _skip(gate, detail), table="stg_consensus_annual")
+    assert other.status is GateStatus.FAIL
 
 
 def test_any_gate_entry_covers_upstream_failed() -> None:

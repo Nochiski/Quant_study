@@ -1,4 +1,5 @@
-"""factor_inputs 판 게이트 FG0~FG4 · FG-fresh (플랜 `2026-09-24-v3-merge.md` M2 W1-b · T2.11).
+"""factor_inputs 판 게이트 FG0~FG4 · FG-fresh · FG5 (플랜 `2026-09-24-v3-merge.md` M2 W1-b · T2.11 ·
+컷오버 PR-5).
 
 `build.py` 가 판을 임시 경로에 parquet 으로 쓴 뒤, 그 파일 위 뷰(`g_<표>`)로 여기 게이트를 돈다.
 **FAIL 이 하나라도 있으면 판을 올리지 않는다**(MANIFEST 포인터를 바꾸지 않는다 — equity 규약).
@@ -13,7 +14,7 @@
                  `FIN_IS_COVERAGE_ENFORCED`).
   FG2 T 행 출처 — 아침판: fi_prices.price_source · fi_universe.mktcap_basis 가 전부 'krx'.
                  장 마감 판(evening): T 전 행 'krx' · T 행 `T_PRICE_SOURCE` · 시총 기준 전부
-                 `T_MKTCAP_BASIS`(컷오버 PR-4). T 행 수는 기록만 한다(얹기·커버리지는 PR-5).
+                 `T_MKTCAP_BASIS`(컷오버 PR-4). T 행 수는 기록만 한다(커버리지는 FG5).
   FG3 시총     — market_cap = round(shares × close(D) / 1e8) 정수 억원(상대 1e-6 — compat
                  `stocks.market_cap` 과 같은 반올림, 오케스트레이터 09-29). KRX 시총 대조는 기록형.
                  장 마감 판은 shares = D' 주식수, close = T 행 종가이고 KRX 대조는 대상이 없다.
@@ -24,6 +25,9 @@
                  grace 나이 ≤ G, 마지막 수집일 D* 가 예상 수집일(asof — 아침판 D, 장 마감 판 D')
                  보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지 않는다(수집 중단 허용치는 유예 G 와
                  따로 둔다).
+  FG5 후보 커버리지 — 장 마감 판만(컷오버 PR-5 · N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패').
+                 직전 판 모델 후보 중 T 가격이 없는 종목 비율 ≤ `T_CANDIDATE_MISSING_MAX`. 후보를 못
+                 읽으면 FAIL. 아침판 판 기록에는 이 게이트가 없다(`GATE_ORDER` 그대로).
 
 정보 시점 `asof`(컷오버 PR-4): 재무·연간 컨센서스의 available/fetched 상한은 asof 로 본다(아침판은
 D 그대로). 신용 available_date 는 세션 축이라 D(장 마감 판 T)로 본다.
@@ -36,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import duckdb
+from daily.kw_daily import COMMIT_MIN_RATIO
 from model.contracts import FI_TABLES, UniverseRule
 from stage import skip_allow
 from stage.gates import GateResult, GateStatus
@@ -49,6 +54,8 @@ from .queries import (
 )
 
 GATE_ORDER = ("FG0", "FG1", "FG2", "FG3", "FG4", "FG-fresh")
+# 장 마감 판만 도는 게이트(컷오버 PR-5) — GATE_ORDER 뒤에 붙는다
+EVENING_GATE_ORDER = (*GATE_ORDER, "FG5")
 MKTCAP_REL_TOL = 1e-6
 # eligible 중 WISE 연간 재무(per·eps 중 하나라도)가 있는 종목 비율 하한. 09-23 실측 결측 6/621
 # (≈1%, 전부 DQ-7 lapsed) — 이 선 아래면 수집·파싱 쪽이 통째로 빠진 것이다.
@@ -62,6 +69,20 @@ FIN_IS_COVERAGE_ENFORCED = False
 # 올리지 않는다(2026-10-05 사용자 결정 N-12 '1거래일'). 추정치 유예(coverage_grace_days)와 값을
 # 공유하지 않는다 — 유예는 종목의 추정치가 사라진 경우, 이것은 수집 자체가 멈춘 경우다.
 COLLECTION_LAG_MAX = 1
+# 장 마감 판 후보 커버리지 상한(FG5) — 직전 판 모델 후보 중 T 가격이 없는 종목 비율이 이것을 **넘으면**
+# 판 실패(N-42 Q4, 정본엔 숫자가 없어 PR-5 가 정했다). 근거:
+#   · N-35 ③ 장 마감 프로브 3일(10-06~08): 후보 100종목 15:46 회차 100/100, 한도 초과·오류 0. ka10060
+#     종목당 0.32초라 후보(약 600)를 먼저 받으면 약 3.2분 — 15:41 시작이면 16:00 컷오프 전에 끝난다.
+#     정상 날의 결측은 0 에 가깝다.
+#   · 크기는 저녁 키움 직행 게이트의 ka10060 커버 하한(`daily.kw_daily.COMMIT_MIN_RATIO` 0.98 — 요청
+#     종목 중 dt=D 를 받은 비율, T-28 이 06:00 보강에도 그대로 쓴다)에서 끌어온다 — 같은 TR 의 종목 단위
+#     결측 허용치(1 − 0.98). 후보 600 이면 12 종목까지 통과한다. round 는 부동소수 잡음(1 − 0.98 =
+#     0.020000000000000018)을 지운다.
+T_CANDIDATE_MISSING_MAX = round(1.0 - COMMIT_MIN_RATIO, 6)
+# 후보 중 T-6 당일 기업행위 보류 비율 경고선(기록형 — FG5 metrics `warn`, 판정은 바꾸지 않는다. 새 정지
+# 조건을 만들지 않는다, P3). 보류가 한꺼번에 몰리면 원천(pred_pre·D' 종가) 쪽 결함일 수 있어 사람이 본다.
+# 크기는 결측 상한과 같다
+T_CANDIDATE_PENDING_WARN = T_CANDIDATE_MISSING_MAX
 DATE_KEYED = ("fi_prices", "fi_adj_prices", "fi_flows", "fi_credit")
 
 
@@ -79,6 +100,11 @@ class GateContext:
     golden: list[dict[str, object]] = field(default_factory=list)
     view: Callable[[str], str] = lambda t: f"g_{t}"
     asof: str = ""                          # 정보 시점 — 비우면 date. 장 마감 판은 D'
+    # 장 마감 판 FG5 대상 = 직전 판 모델 후보(`daily.postclose.fi_candidates`). 못 읽었으면 None
+    t_candidates: tuple[str, ...] | None = None
+    t_candidates_from: str = ""             # 후보를 읽은 fi 판 id, 못 읽었으면 그 사유
+    t_source_build: str = ""                # 장 마감 stage 판 id(T 행 원천)
+    t_source_max_date: str | None = None    # 그 판의 max(date) — T 가 아니면 판이 T 수집 전에 섰다
 
     def __post_init__(self) -> None:
         if not self.asof:
@@ -208,7 +234,7 @@ def fg1_rows(ctx: GateContext) -> GateResult:
 def fg2_overlay(ctx: GateContext) -> GateResult:
     """아침판 — T 행을 포함한 전 행이 KRX 다. 장 마감 판(evening) — T 전 행은 연구 판 그대로 KRX,
     T 행은 장 마감 원천(`T_PRICE_SOURCE`), 시총 기준은 전 종목 `T_MKTCAP_BASIS`(D' 주식수 × T
-    종가). T 행 수(`n_t_price_rows`)는 기록만 한다 — 얹기·커버리지 판정은 PR-5."""
+    종가). T 행 수(`n_t_price_rows`)는 기록만 한다 — 후보 커버리지 판정은 FG5."""
     if ctx.basis == "evening":
         prices, uni = ctx.view("fi_prices"), ctx.view("fi_universe")
         on_t = f"date = DATE '{ctx.date}'"
@@ -387,20 +413,95 @@ def fg_fresh(ctx: GateContext) -> GateResult:
                    f"신선도 기록 · lapsed {n_lapsed_dropped}종목 제외 · D* {ctx.dstar}")
 
 
+# ── FG5 ──────────────────────────────────────────────────────────────────────
+def fg5_t_coverage(ctx: GateContext) -> GateResult:
+    """장 마감 판 후보 커버리지(N-42 Q4 · 컷오버 PR-5).
+
+    대상 = 직전 판 모델 후보 — 수집기(PR-1)가 먼저 부르는 집합과 같다(`ctx.t_candidates`).
+    'T 가격 없음' = fi_prices 에 그 종목의 T 종가 행이 없다: 장 마감 원장에 행이 없거나(no_row)
+    price_valid 가 참이 아니거나(price_invalid — 16:00 뒤 응답) 그 밖(종가 0 이하·층 밖 — other).
+    T-6 당일 기업행위 보류(corp_action_pending)는 T 행이 있으므로 세지 않는다 — 수집 결손이 아니라
+    사건이다(후보 중 수 · 층 전체 갈래별 수 · T 가격은 있는데 pred_pre 가 없는 층 종목 수는 기록만).
+    후보 중 보류 비율이 `T_CANDIDATE_PENDING_WARN` 을 넘으면 metrics `warn`(판정은 그대로).
+    장 마감 stage 판 id 와 그 판의 max(date)를 함께 남긴다.
+    FAIL: 결측 비율 > `T_CANDIDATE_MISSING_MAX` · 후보를 못 읽음(candidates_unavailable).
+    """
+    con = ctx.con
+    if ctx.t_candidates is None:
+        return GateResult("FG5", GateStatus.FAIL,
+                          f"candidates_unavailable — 직전 판 모델 후보를 못 읽었다(커버리지를 잴 수 "
+                          f"없다): {ctx.t_candidates_from}",
+                          {"n_candidates": None, "candidates_from": ctx.t_candidates_from,
+                           "missing_max": T_CANDIDATE_MISSING_MAX,
+                           "t_source_build": ctx.t_source_build,
+                           "t_source_max_date": ctx.t_source_max_date})
+    con.execute("CREATE OR REPLACE TEMP TABLE _fg5_cand (ticker VARCHAR)")
+    con.executemany("INSERT INTO _fg5_cand VALUES (?)", [(t,) for t in ctx.t_candidates])
+    rows = con.execute(
+        f"SELECT c.ticker, p.ticker IS NOT NULL, s.ticker IS NOT NULL, "
+        f"coalesce(s.price_valid, false), u.exclude_reason "
+        f"FROM (SELECT DISTINCT ticker FROM _fg5_cand) c "
+        f"LEFT JOIN {ctx.view('fi_prices')} p ON p.ticker = c.ticker "
+        f"AND p.date = DATE '{ctx.date}' AND p.close IS NOT NULL "
+        f"LEFT JOIN _t_src s ON s.ticker = c.ticker "
+        f"LEFT JOIN {ctx.view('fi_universe')} u ON u.ticker = c.ticker "
+        f"ORDER BY c.ticker").fetchall()
+    missing = [str(t) for t, priced, _, _, _ in rows if not priced]
+    no_row = [str(t) for t, priced, has_row, _, _ in rows if not priced and not has_row]
+    invalid = [str(t) for t, priced, has_row, valid, _ in rows
+               if not priced and has_row and not valid]
+    n = len(rows)
+    ratio = len(missing) / n if n else None
+    pending = {str(k): int(v) for k, v in con.execute(
+        f"SELECT kind, count(*) FROM _t_pending WHERE ticker IN "
+        f"(SELECT ticker FROM {ctx.view('fi_universe')}) GROUP BY kind ORDER BY kind").fetchall()}
+    n_pred_pre_missing = _count(
+        con, f"SELECT count(*) FROM _t_src s JOIN {ctx.view('fi_prices')} p ON p.ticker = s.ticker "
+             f"AND p.date = DATE '{ctx.date}' WHERE s.pred_pre_krw IS NULL")
+    n_cand_pending = sum(1 for *_, r in rows if r == "corp_action_pending")
+    pending_ratio = n_cand_pending / n if n else None
+    warn = pending_ratio is not None and pending_ratio > T_CANDIDATE_PENDING_WARN
+    metrics: dict[str, object] = {
+        "n_candidates": n, "n_missing": len(missing), "missing_ratio": ratio,
+        "missing_max": T_CANDIDATE_MISSING_MAX, "n_no_row": len(no_row),
+        "n_price_invalid": len(invalid), "n_missing_other": len(missing) - len(no_row) - len(invalid),
+        "missing_tickers": missing[:50], "candidates_from": ctx.t_candidates_from,
+        "n_candidates_corp_action_pending": n_cand_pending,
+        "candidates_corp_action_pending_ratio": pending_ratio,
+        "corp_action_pending_warn_ratio": T_CANDIDATE_PENDING_WARN, "warn": warn,
+        "corp_action_pending": pending, "n_pred_pre_missing": n_pred_pre_missing,
+        "t_source_build": ctx.t_source_build, "t_source_max_date": ctx.t_source_max_date}
+    warn_note = (f" · warn: 후보 중 T-6 보류 {n_cand_pending}/{n} > {T_CANDIDATE_PENDING_WARN}"
+                 if warn else "")
+    if ratio is None or ratio > T_CANDIDATE_MISSING_MAX:
+        return GateResult(
+            "FG5", GateStatus.FAIL,
+            f"t_price_missing_over_max — 후보 {len(missing)}/{n} 이 T 가격 없음"
+            f"(no_row {len(no_row)} · price_invalid {len(invalid)}) > 상한 "
+            f"{T_CANDIDATE_MISSING_MAX}: {','.join(missing[:20])}{warn_note}", metrics)
+    return GateResult("FG5", GateStatus.PASS,
+                      f"후보 {n} 중 T 가격 없음 {len(missing)} ≤ 상한 {T_CANDIDATE_MISSING_MAX}"
+                      f"{warn_note}", metrics)
+
+
 GATES: tuple[Callable[[GateContext], GateResult], ...] = (
     fg0_schema, fg1_rows, fg2_overlay, fg3_mktcap, fg4_golden, fg_fresh)
+EVENING_GATES: tuple[Callable[[GateContext], GateResult], ...] = (*GATES, fg5_t_coverage)
 
 
 def run_all(ctx: GateContext) -> list[GateResult]:
-    """GATE_ORDER 순서. FG0 이 FAIL 이면 나머지는 `skip(upstream_failed)`.
+    """GATE_ORDER 순서(장 마감 판은 EVENING_GATE_ORDER). FG0 이 FAIL 이면 나머지는
+    `skip(upstream_failed)`.
 
     허용표(`stage/skip_allow.py`) 밖 SKIP 은 FAIL 로 센다(K1-7a — FG 는 전부 폐기형).
     """
+    evening = ctx.basis == "evening"
+    order, gates = ((EVENING_GATE_ORDER, EVENING_GATES) if evening else (GATE_ORDER, GATES))
     out = [fg0_schema(ctx)]
     if out[0].status is GateStatus.FAIL:
         out += [GateResult(name, GateStatus.SKIP, "upstream_failed — FG0", {})
-                for name in GATE_ORDER[1:]]
+                for name in order[1:]]
     else:
-        for gate in GATES[1:]:
+        for gate in gates[1:]:
             out.append(gate(ctx))
     return [skip_allow.judge("factor_inputs", g) for g in out]

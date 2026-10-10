@@ -1,6 +1,7 @@
 """v3 `quant.db` 제자리 반영 — 스테이징 → 게이트 → 표 한 트랜잭션 (컷오버 트랙 QL-F).
 
-정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-F · T-16 · T-27 · T-31 · T-34 · T-35, 로드맵 §8 K3-2·K3-3.
+정본 `docs/plans/2026-10-10-cutover-track.md` §3 P4 QL-F·QL-F2 · T-16 · T-27 · T-31 · T-34 · T-35 · T-38,
+로드맵 §8 K3-2·K3-3.
 `scripts/v3_post.sh` 가 단계마다 부른다(`python -m compat stage` · `v3-tables` · `export --in-place` · `apply`).
 
 왜 compat 을 v3 파일에 직접 돌리지 않는가:
@@ -10,11 +11,16 @@
 그래서 v3 파일의 온라인 백업 사본(스테이징)에 compat 을 돌리고, 게이트를 통과할 때만 표들을 v3 파일에
 **한 트랜잭션**으로 옮긴다. 그림자 compat(별도 파일 `data/compat/quant.db`)의 5% 허용은 그대로 둔다.
 
-반영 표(T-34): 기본은 compat 9표 전부. `--basis morning`(다음 날 아침 KRX 확정 재반영)은 본 파일에 같은 D 의
-  장 마감(evening) ok 반영 기록이 있으면 점수 두 표를 뺀 7표다 — 저녁에 보낸 엑셀과 v3 DB 점수가 같게 두고,
-  가격 재반영이 아침 모델 판 실패에 묶이지 않게 한다. 저녁 기록이 없으면 아침 모델 판 점수를 쓴다(T-7
-  대체 발송과 같은 뜻). 셸이 compat 에 넘기는 `--tables` 와 게이트·반영이 보는 표 목록은 같은 함수
-  (`tables_for`)에서 나온다.
+반영 표(T-34 · T-38): 기본은 compat 9표 전부. 셸이 compat 에 넘기는 `--tables` 와 게이트·반영이 보는 표 목록은
+  같은 함수(`tables_for`)에서 나온다.
+  · `--basis morning`(다음 날 아침 KRX 확정 재반영)은 본 파일에 같은 D 의 **점수 두 표를 반영한** 장 마감
+    (evening) ok 기록이 있으면 점수 두 표를 뺀 7표다 — 저녁에 보낸 엑셀과 v3 DB 점수가 같게 두고, 가격 재반영이
+    아침 모델 판 실패에 묶이지 않게 한다. 그런 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻).
+    점수 표를 반영했는지는 기록의 `tables`(compat 이 쓴 표 → 결과) 키로 본다.
+  · 점수 없는 저녁 반영(`scores=False`, 셸 `--no-scores` — T-38): 21:05 원장 뒤 재반영(refill)은 늘 이 모드로
+    가격 등 7표만 반영한다 — 점수는 장 마감 반영(⑥)만 쓴다. compat 이 점수 표를 고르지 않으므로 장 마감 모델 판이
+    없는 날(판 실패일·세션 예외일 T-26)에도 돈다. 이 기록은 점수 표가 없으므로 그날 ⑥ 의 점수 포함 기록이 없으면
+    다음 날 아침 재반영이 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다. `evening` 전용(아침은 T-34 가 정한다).
 
 반영 범위 — compat 이 쓴 범위와 정확히 같다(스테이징 `_compat_meta` 의 이번 실행 기록이 정본):
   · `daily_prices`·`investor_detail_flows`: `trade_date` 가 기록의 창 `[from_date, to_date]` 안
@@ -36,6 +42,8 @@
     락 대기가 길어 옛 D 가 나중에 반영되면 확정값이 조용히 옛 값으로 돌아간다. 재생은 `allow_older`
   · 기록에 반영 표가 전부 있고 표마다 넣은 행 > 0 · **필수 열이 빈 행을 건너뛴 수 0**(P1 — 빈 행을 빼고
     나머지만 넣으면 v3 소비자는 그 종목이 '없는' 줄로 읽는다)
+  · 기록에 반영 표 밖의 표가 없다 — 기록은 본 파일에 그대로 옮겨지고 T-34 가 그 표 목록으로 점수 반영 여부를
+    판정한다. 옮기지 않은 점수 표가 기록에 있으면 다음 날 아침이 점수를 건너뛴다(QL-F2)
   · 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`metrics.n_on_date`).
     스테이징은 본 파일 사본이라 'D 행이 있다' 만으로는 옛 D 행에도 참이 된다. 없으면 07:00 브리핑이 D−1 장을
     오늘 장으로 보고한다(DEFECT-C02). 비율 하한은 두지 않는다(새 정지 조건이라)
@@ -214,11 +222,20 @@ def _meta_rows(con: sqlite3.Connection) -> list[dict]:
     return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
-def _tables_for(main_rows: list[dict], d_iso: str, basis: str) -> tuple[str, ...]:
-    """T-34 — 아침 재반영은 같은 D 의 장 마감 ok 반영 기록이 본 파일에 있으면 점수 두 표를 뺀다."""
-    if basis == "morning" and any(r.get("date") == d_iso and r.get("basis") == "evening"
-                                  and r.get("status") == "ok" for r in main_rows):
-        return tuple(t for t in TABLES if t not in SCORE_TABLES)
+def _tables_for(main_rows: list[dict], d_iso: str, basis: str,
+                scores: bool = True) -> tuple[str, ...]:
+    """반영 표 — 점수 없는 반영(T-38)은 7표. 아침 재반영은 같은 D 의 점수 두 표를 반영한 장 마감 ok 기록이 본
+    파일에 있으면 점수 두 표를 뺀다(T-34)."""
+    seven = tuple(t for t in TABLES if t not in SCORE_TABLES)
+    if not scores:
+        if basis != "evening":
+            raise CompatError(f"점수 없는 반영은 evening 전용이다(받은 basis {basis}) — 아침 반영 표는 "
+                              "T-34 가 정한다(T-38)")
+        return seven
+    if basis == "morning" and any(
+            r.get("date") == d_iso and r.get("basis") == "evening" and r.get("status") == "ok"
+            and set(SCORE_TABLES) <= set(json.loads(r["tables"])) for r in main_rows):
+        return seven
     return TABLES
 
 
@@ -230,11 +247,11 @@ def _main_rows(v3_db: Path) -> list[dict]:
         con.close()
 
 
-def tables_for(v3_db: Path, date: str, basis: str) -> tuple[str, ...]:
+def tables_for(v3_db: Path, date: str, basis: str, scores: bool = True) -> tuple[str, ...]:
     """이번 반영 표 — 셸이 compat `--tables` 로 넘기는 목록(게이트·반영과 같은 판정)."""
     v3_db = Path(v3_db)
     _require(v3_db, "v3 quant.db")
-    return _tables_for(_main_rows(v3_db), _iso(date), basis)
+    return _tables_for(_main_rows(v3_db), _iso(date), basis, scores)
 
 
 def _newer(main_rows: list[dict], d_iso: str, basis: str) -> list[tuple[str, str]]:
@@ -246,14 +263,14 @@ def _newer(main_rows: list[dict], d_iso: str, basis: str) -> list[tuple[str, str
 
 
 def gate(staging: Path, v3_db: Path, date: str, basis: str,
-         allow_older: bool = False) -> GateReport:
+         allow_older: bool = False, scores: bool = True) -> GateReport:
     """스테이징을 읽어 게이트를 판정한다(쓰기 없음). 본 파일은 반영 기록 확인에만 읽는다."""
     staging, v3_db = Path(staging), Path(v3_db)
     _require(staging, "스테이징")
     _require(v3_db, "v3 quant.db")
     d_iso = _iso(date)
     main_rows = _main_rows(v3_db)
-    tables = _tables_for(main_rows, d_iso, basis)
+    tables = _tables_for(main_rows, d_iso, basis, scores)
     seen = {r["exported_at"] for r in main_rows}
     fails: list[str] = []
     newer = [] if allow_older else _newer(main_rows, d_iso, basis)
@@ -281,6 +298,10 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
         if window[1] != d_iso:
             fails.append(f"compat 창 끝 {window[1]} ≠ 요청 {d_iso}")
         written = json.loads(meta["tables"])
+        extra = sorted(set(written) - set(tables))
+        if extra:
+            fails.append(f"compat 이 반영 표 밖의 표 {extra} 를 썼다 — 기록이 본 파일에 옮긴 표와 달라진다"
+                         "(다음 날 아침 T-34 판정이 기록의 표 목록을 본다)")
         rb = (written.get("daily_prices") or {}).get("rebase") or {}
         rebase = tuple(str(t) for t in rb.get("tickers") or ())
         _load_rebase(stg, rebase)
@@ -355,10 +376,12 @@ def _move(staging: Path, v3_db: Path, report: GateReport,
 
 
 def apply(staging: Path, v3_db: Path, date: str, basis: str, shadow: bool = False,
-          allow_older: bool = False, commit_flag: Path | None = None) -> GateReport:
-    """게이트 → (그림자가 아니면) 한 트랜잭션 반영. 게이트 실패는 `V3PostGateError`(본 파일 무변경)."""
+          allow_older: bool = False, commit_flag: Path | None = None,
+          scores: bool = True) -> GateReport:
+    """게이트 → (그림자가 아니면) 한 트랜잭션 반영. 게이트 실패는 `V3PostGateError`(본 파일 무변경).
+    `scores=False` 는 점수 없는 반영(T-38 — 7표)."""
     guard_paths(Path(v3_db), Path(staging))
-    report = gate(staging, v3_db, date, basis, allow_older)
+    report = gate(staging, v3_db, date, basis, allow_older, scores)
     if not report.ok:
         raise V3PostGateError(report)
     if not shadow:

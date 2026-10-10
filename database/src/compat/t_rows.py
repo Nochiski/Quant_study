@@ -8,9 +8,10 @@ T 는 캘린더 밖). v3 소비자(07:00 브리핑·위키·uni)는 T 저녁에 
 대상 종목 — D' `universe_daily` 이월 ∩ `V3_STOCK_FILTER`(PR-4 와 같은 전제, 장 마감 수집 PR-1 의
   대상과 같은 술어). 상태 변화는 다음 날 아침 확정판에서 본다. **T 당일 신규 상장 종목은 빠진다.**
 원천 — 종목마다 하나. 가격·수급을 섞지 않고, 두 표가 같은 선택(임시 표 `PICK_TABLE`)을 쓴다.
-  ① `postclose`    `data/raw/postclose.db` 의 T 행 중 `price_valid='1'` 이고 종가·거래량이 있는 행
+  ① `postclose`    `data/raw/postclose.db` 의 T 행 중 `price_valid='1'` · 종가 > 0 · 거래량 있음
+                   (`daily.kw_daily.ka10060_postclose_price_usable_sql` — fi 장 마감 판 PR-5 와 공유)
                    (16:00 전 응답 — 종가 = KRX 공식 종가(정규장, T-33), 수급 = 15:40 확정, N-35)
-  ② `kiwoom_2105`  그 밖(행 없음 · `price_valid` 가 '0'·NULL · 가격 칸 빈 행 — PR-1 리뷰 s4)은
+  ② `kiwoom_2105`  그 밖(행 없음 · `price_valid` 가 '0'·NULL · 종가 빈·0 이하·거래량 빈 행 — PR-1 리뷰 s4)은
                    키움 원장 `data/raw/kiwoom.db` 의 같은 TR 표 T 행(21:05 저녁 수집, 애프터마켓
                    포함 — 지금 v3 와 같은 뜻). 21:05 전에 돌면 '행 없음'으로 남고 다시 돌면
                    채워진다.
@@ -39,7 +40,10 @@ from pathlib import Path
 
 import duckdb
 from daily import calendar as daily_calendar
-from daily.kw_daily import ka10060_base_price_differs_sql
+from daily.kw_daily import (
+    ka10060_base_price_differs_sql,
+    ka10060_postclose_price_usable_sql,
+)
 from stage.build import _cast_expr
 from stage.model import KIND_NUMERIC, TableRule
 from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM, STG_FLOW_POSTCLOSE_KIWOOM
@@ -89,7 +93,10 @@ SELECT max(u.date) FROM {universe_daily} u WHERE u.date <= DATE '{t_iso}'
 # 넘어간다
 _PRICE_VALID = _cast_expr(POSTCLOSE_RULE.column("price_valid"), 'r."price_valid"')
 
-# 종목마다 원천 하나 — ① postclose(가격 유효·종가·거래량 있음) → ② kiwoom_2105.
+# ① 을 고르는 술어 — 가격을 쓸 수 있는 장 마감 행(fi 장 마감 판 T 가격 행과 같은 정의, P4)
+_PRICE_USABLE = ka10060_postclose_price_usable_sql("s.price_ok", "s.close_krw", "s.volume_shr")
+
+# 종목마다 원천 하나 — ① postclose(`_PRICE_USABLE`) → ② kiwoom_2105.
 # 두 표가 이 임시 표를 같이 쓴다.
 PICK_SQL = f"""
 CREATE OR REPLACE TEMP TABLE {PICK_TABLE} AS
@@ -109,7 +116,7 @@ raw AS (
 )
 SELECT s.* EXCLUDE (prio, price_ok)
 FROM raw s JOIN uni u ON u.ticker = s.ticker
-WHERE s.prio = 1 OR (s.price_ok AND s.close_krw IS NOT NULL AND s.volume_shr IS NOT NULL)
+WHERE s.prio = 1 OR {_PRICE_USABLE}
 QUALIFY row_number() OVER (PARTITION BY s.ticker ORDER BY s.prio) = 1
 """
 

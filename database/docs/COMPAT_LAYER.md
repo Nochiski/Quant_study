@@ -352,8 +352,8 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
 - **신규 스팩 — compat 에만 있다(v3 누락 교정)**: v3 `stocks` 에는 옛 숫자코드 스팩 117개뿐이고, 그 뒤 상장한 스팩(2024-02-01~2026-09-22 상장, 숫자·영숫자 코드 모두)이 없다. compat 은 `sec_type='spac'` 이면 싣는다(10-01·06·07·08 재생에서 71종목, 10-10 판정).
 - **점수 종목 수 — compat 이 적다(유니버스 결정, T-17)**: 하루 행이 `score_history` 1,329 → 593(scope@1.0), `score_history_v2` 2,526 → 625(v2_percentrank@1.0)로 준다. 10-05 '추정치 보유 종목만' 결정을 받아들인 것이다(QL-C). 점수는 유니버스 안 표준화라 공통 종목도 값 크기가 다르다. 그래서 공통 종목끼리 순위(Spearman)로 대조한다. `score_history.val_ev_ebitda` 는 늘 NULL 이다. scope 가 EV/EBITDA 를 밸류에 쓰지 않기 때문이고, v3 도 거의 비어 있었다.
 - **장 마감 판 T 행 — 원천·채움이 다르다(QL-D, N-42 Q3, T-32·T-33)**: `--basis evening` 의 `daily_prices`·`investor_detail_flows` T 행은 원장에서 만든다(규칙 정본 `src/compat/t_rows.py`). 종목마다 원천이 하나이고(두 표가 같은 선택) `_compat_meta.tables` 의 표별 `t_rows` 에 남는다(`postclose`·`kiwoom_2105` 수, 21:05 원장으로 대체한 종목, 행 없는 종목과 그 비율 `missing_ratio` — 기록형).
-  - `postclose` 행(15:41~16:00, `price_valid='1'` 이고 종가·거래량이 있는 행): 종가 = KRX 공식 종가(정규장, T-33), 거래량·수급 = 16:00 전까지. v3(20:05 ka10081·ka10059)는 애프터마켓까지 포함한 값이라 다르다.
-  - `kiwoom_2105` 행(21:05 키움 원장 — 16:00 을 넘긴 종목, `price_valid` 가 '0'·NULL 이거나 가격 칸이 빈 종목): 지금 v3 와 같은 뜻(애프터마켓 포함)이다. 과거 T 재생(장 마감 원장이 없던 날)은 전 종목이 이 경로다.
+  - `postclose` 행(15:41~16:00, `price_valid='1'` · 종가 > 0 · 거래량 있음 — `daily.kw_daily.ka10060_postclose_price_usable_sql`, fi 장 마감 판 PR-5 와 같은 술어): 종가 = KRX 공식 종가(정규장, T-33), 거래량·수급 = 16:00 전까지. v3(20:05 ka10081·ka10059)는 애프터마켓까지 포함한 값이라 다르다.
+  - `kiwoom_2105` 행(21:05 키움 원장 — 16:00 을 넘긴 종목, `price_valid` 가 '0'·NULL 이거나 종가가 비었거나 0 이하·거래량이 빈 종목): 지금 v3 와 같은 뜻(애프터마켓 포함)이다. 과거 T 재생(장 마감 원장이 없던 날)은 전 종목이 이 경로다.
   - `open`·`high`·`low` = 종가, `amount` = 종가 × 거래량 ÷ 1e6(근사 — 오차는 §6-2 미실측), `adj_close` = T 종가(T 가 최신 행 — 아래 adj_close 항목). 그날 기준가 ≠ D' 종가(T-6 첫 조건, `daily.kw_daily.ka10060_base_price_differs_sql`)면 `adj_close` NULL — 그날 저녁~다음 날 아침 동안만이다.
   - 대상 = D' 유니버스 이월이라 T 당일 신규 상장 종목은 없다(v3 는 그날 ka10099 에 있으면 싣는다).
   - 다음 날 아침 `--basis morning --date T` 가 T 행을 날짜 단위로 KRX 행으로 바꾼다 — 아침 KRX 에 없는 종목의 저녁 행도 지워진다. 아침 판에 그날 행이 0 이면 지우지 않고 멈춘다. 반대로 대상에 이번(T, 장 마감)보다 나중 반영 기록(T-35 순서 — 날짜가 뒤이거나 같은 날 아침, 판정은 `v3_post._newer` 한 곳)이 있으면 장 마감 판이 멈춘다(재생은 `--allow-older`).
@@ -369,17 +369,20 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
 
 ---
 
-## 8. v3 quant.db 제자리 반영 — `scripts/v3_post.sh` (QL-F)
+## 8. v3 quant.db 제자리 반영 — `scripts/v3_post.sh` (QL-F·QL-F2)
 
 compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 커밋하고(반영 도중 소비자가 일부 표만 바뀐 상태를 읽는다, G9) 필수 열이 빈 행을 5% 까지 건너뛴다(G11). 제자리 반영은 아래 순서로만 한다. 범위·게이트의 정본은 `src/compat/v3_post.py` 머리 주석이다.
 
 1. **스테이징**: v3 quant.db 를 sqlite 온라인 백업으로 임시 파일에 뜬다(`python -m compat stage`). 본 파일은 읽기 전용으로 연다. 스테이징 경로가 본 파일(링크·-wal/-shm 포함)과 같은 파일이면 거부한다(뜨기 전에 그 경로를 지우므로). 디스크 여유가 본 파일 크기 × 2 보다 작으면 뜨지 않고, 백업이 실패하면 부분 사본을 지운다.
-2. **반영 표**(T-34, `python -m compat v3-tables`): 기본 9표. `--basis morning` 은 본 파일 `_compat_meta` 에 같은 D 의 장 마감(evening) ok 반영 기록이 있으면 점수 두 표를 뺀 7표다. 저녁에 보낸 엑셀과 v3 DB 점수가 같고, 가격 재반영이 아침 모델 판 실패에 묶이지 않는다. 저녁 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻).
+2. **반영 표**(T-34 · T-38, `python -m compat v3-tables`): 기본 9표.
+   - `--basis morning` 은 본 파일 `_compat_meta` 에 같은 D 의 **점수 두 표를 반영한** 장 마감(evening) ok 기록이 있으면 점수 두 표를 뺀 7표다. 저녁에 보낸 엑셀과 v3 DB 점수가 같고, 가격 재반영이 아침 모델 판 실패에 묶이지 않는다. 그런 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻). 점수 표를 반영했는지는 기록의 `tables` 열(compat 이 쓴 표 → 결과 json) 키로 본다.
+   - `--no-scores`(`--basis evening` 전용, T-38)는 늘 7표다. 21:05 원장 뒤 재반영(refill)은 늘 이 모드다 — 점수는 장 마감 반영(⑥)만 쓴다. compat 이 점수 표를 고르지 않으므로 장 마감 판이 없는 날(판 실패일·세션 예외일 T-26)에도 돈다. 이 기록엔 점수 표가 없어 위 판정이 세지 않으므로, 그날 ⑥ 의 점수 포함 기록이 있으면 다음 날 아침은 7표, 없으면 아침 모델 판으로 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다. 아침이나 daily_post 명령과 함께 주면 인자 오류(rc 5, 파이썬·CLI 층도 거부)다 — export_scores 를 그날 점수 없이 부르지 않는다.
 3. **compat export `--in-place --tables <반영 표>`** 를 스테이징에 돌린다(QL-B 가드 — `stocks.market_cap` 은 `all`). 장 마감 판(`--basis evening`)이면 T 행 원장 두 개(`QL_POSTCLOSE_DB` 기본 `data/raw/postclose.db` · `QL_KIWOOM_DB` 기본 `data/raw/kiwoom.db`)를 넘기고, `--allow-older` 는 apply 와 함께 export 에도 넘긴다(compat 장 마감 판이 같은 T-35 순서로 먼저 멈춘다 — QL-D).
 4. **게이트**(COMMIT 전):
    - 이번 compat 기록 1행·status ok·날짜·basis 일치·창 끝 = D
    - 순서(T-35): 본 파일에 이번보다 (날짜, basis — 같은 날은 아침 > 장 마감) 가 큰 ok 반영 기록이 없다. 재생은 `--allow-older`. **새 정지 조건이라 사용자 확인 대기**
    - 반영 표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1)
+   - 기록에 반영 표 밖의 표가 없다 — 기록은 본 파일에 그대로 옮겨지고 2 의 아침 판정이 그 표 목록을 본다. 옮기지 않은 점수 표가 기록에 남으면 다음 날 아침이 점수를 건너뛴다(QL-F2)
    - 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`tables.daily_prices.metrics.n_on_date`). 스테이징은 본 파일 사본이라 'D 행 있음' 만으로는 옛 행에도 참이 된다. 비율 하한은 두지 않는다
    - 표마다 반영 범위 행 > 0(점수 두 표는 `score_date = D`)
 5. **한 트랜잭션 반영**: `ATTACH` → `BEGIN IMMEDIATE` → 표별 범위 `DELETE` → 스테이징 범위 `INSERT` → `_compat_meta` 기록 1행 → `COMMIT`.
@@ -390,9 +393,19 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 | `score_history` · `score_history_v2` | `score_date = D` |
 | `stocks` · `consensus_revision_daily` · `consensus_revision_compare` · `consensus_annual` · `financial_summary` | 표 전체(날짜 창 없는 as-of 스냅샷 — 스테이징이 같은 락 안의 사본이라 compat 이 안 건드린 행은 같은 값으로 다시 들어간다) |
 
-compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~4단계만, 본 파일 무변경, 스테이징 기본 경로 `staging_<basis>_shadow.db`)는 락을 잡지 않는다. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
+compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~4단계만, 본 파일 무변경, 스테이징 기본 경로 `staging_<basis>[_noscores]_shadow.db`)는 락을 잡지 않는다. 기본 스테이징 경로는 점수 없는 반영에 `_noscores` 를 붙인다 — refill 이 그날 ⑥ 이 실패해 남긴 스테이징을 지우지 않게. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
 
 `daily_prices` 의 O/H/L 이 비고 종가가 있는 krx 행은 비어 있는 칸을 종가로 채운다(정지 참고가 행 · 정규장 체결 없이 시간외만 있던 날 — 서버 `--full` 게이트 실측 145210 2025-03-21, v3 사본 같은 행 O=H=L=C). 근거는 `mappings.py` `_REF_FILL` 주석.
+
+**호출 형태(PR-8 장 마감 체인 — QL-F2 연결 지점).** T = 그날 거래일, T' = T 의 직전 거래일, D = 아침 재반영 대상 거래일(전날). 판은 인계 이력으로 고정한다(`--builds-from` — PR-8 리뷰 MAJOR 와 같다).
+
+| 시점 | 명령 |
+|---|---|
+| 장 마감 체인 ⑥ | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model --builds-from data/deliver/history/<T'>_morning.json [--shadow] [--v3-post-cmd <daily_post>]` (점수 포함 9표 — 점수는 여기서만 쓴다) |
+| refill(21:05 키움 원장 커밋 뒤) | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --no-scores --builds-from data/deliver/history/<T'>_morning.json [--shadow]` (늘 — ⑥ 결과와 무관, compat 만 7표, `--model-root` 불필요) |
+| 다음 날 아침 | `scripts/v3_post.sh --date D --basis morning --v3-db <v3 quant.db> --builds-from data/deliver/history/<D>_morning.json [--shadow]` (compat 만 — 7표·9표는 T-34 가 본 파일 기록으로 정한다) |
+
+다음 날 아침 반영 표: 그날 ⑥ 이 점수 포함 반영을 COMMIT 했으면(뒤에 daily_post 만 실패한 rc 6 포함) 7표, ⑥ 이 실패했거나 없었으면(판 실패·세션 예외일) 9표다 — refill 기록은 판정에 들어가지 않는다. 지금 PR-8 refill(`pr/PR-8` 89f81ae5 `postclose_chain.sh` `refill_main`)은 ⑥ 이 ok 일 때만 점수 포함으로 부른다 — 위 둘째 줄(늘 `--no-scores`)로 바꿔야 T-38 이 닫힌다.
 
 ### 8-1. v3 쪽 변경 목록(V3-A~E — 컷오버 날, 백업 뒤, N-42 Q4)
 

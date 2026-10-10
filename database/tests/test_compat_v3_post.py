@@ -116,11 +116,12 @@ def _meta(con: sqlite3.Connection, d_iso: str, basis: str, exported_at: str,
         consensus_asof=d_iso, tables={t: _tr(t, **kw) for t in tables}))
 
 
-def _main_record(main: Path, d_iso: str, basis: str, exported_at: str) -> None:
+def _main_record(main: Path, d_iso: str, basis: str, exported_at: str,
+                 tables: tuple[str, ...] = TABLES) -> None:
     """본 파일에 앞선 ok 반영 기록을 둔다(v3_post 가 COMMIT 때 옮기는 그 행)."""
     con = sqlite3.connect(str(main), isolation_level=None)
     try:
-        _meta(con, d_iso, basis, exported_at)
+        _meta(con, d_iso, basis, exported_at, tables=tables)
     finally:
         con.close()
 
@@ -129,7 +130,8 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
                  tables: tuple[str, ...] = TABLES, status: str = "ok",
                  date_iso: str = D_ISO, basis: str = "evening",
                  drop_scores: bool = False, n_on_date: int = 1,
-                 rebase: dict | None = None) -> None:
+                 rebase: dict | None = None,
+                 exported_at: str = "2026-10-08T07:30:00.000000+00:00") -> None:
     """스테이징에 compat 이 쓴 모양을 만든다(창 행 교체 · 점수 날짜 교체 · 스냅샷 · `_compat_meta` 1행).
 
     창 밖 날짜(BEFORE)와 점수 표의 다른 날(OTHER_SCORE_DATE)도 일부러 바꿔 둔다 — 반영이 창 밖을
@@ -171,7 +173,7 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
         skipped = skipped or {}
         _write_meta(con, ExportResult(
             date=date_iso, basis=basis, target=str(staging),
-            exported_at="2026-10-08T07:30:00.000000+00:00",
+            exported_at=exported_at,
             window={"days": 14, "full": False, "from_date": FROM_ISO, "to_date": date_iso},
             consensus_asof="2026-10-07", status=status,
             failed_table=None if status == "ok" else "stocks",
@@ -558,6 +560,137 @@ def test_same_date_and_basis_rerun_is_allowed(files) -> None:
     snapshot(main, stg)
     _fake_compat(stg)
     assert apply(stg, main, D, "evening").ok
+
+
+# ── T-38 점수 없는 저녁 반영(QL-F2) ─────────────────────────────────────────
+SEVEN = tuple(t for t in TABLES if t not in SCORE_TABLES)
+
+
+def _score_sha(path: Path) -> str:
+    """본 파일 점수 두 표 전 행의 지문."""
+    rows = {t: _rows(path, f"SELECT * FROM {t} ORDER BY 1, 2") for t in SCORE_TABLES}
+    return hashlib.sha256(repr(rows).encode()).hexdigest()
+
+
+def test_no_scores_evening_reflects_seven_tables_and_leaves_scores(files) -> None:
+    """장 마감 판이 없는 날(T-38) — 가격 등 7표만 반영하고 점수 두 표는 본 파일 그대로다. 스테이징의 점수 표를
+    바꿔 둬도(`_fake_compat`) 옮기지 않는다."""
+    main, stg = files
+    assert tables_for(main, D, "evening", scores=False) == SEVEN
+    snapshot(main, stg)
+    _fake_compat(stg, tables=SEVEN)
+    before = _score_sha(main)
+    report = apply(stg, main, D, "evening", scores=False)
+    assert report.ok and report.tables == SEVEN
+    assert _score_sha(main) == before
+    # 가격·수급 T 행은 반영된다
+    assert _rows(main, "SELECT stock_code, close FROM daily_prices WHERE trade_date=? "
+                       "ORDER BY 1", (D_ISO,)) == [("000660", 300), ("005930", 202)]
+    assert _rows(main, "SELECT individual FROM investor_detail_flows WHERE trade_date=?",
+                 (D_ISO,)) == [(22,)]
+    # 기록에 반영한 표 목록(7표)이 남는다 — 다음 날 아침 T-34 판정이 이것을 본다
+    meta = _rows(main, "SELECT date, basis, status, tables FROM _compat_meta")
+    assert len(meta) == 1 and meta[0][:3] == (D_ISO, "evening", "ok")
+    assert set(json.loads(meta[0][3])) == set(SEVEN)
+
+
+@pytest.mark.parametrize(("records", "want"), [
+    ((SEVEN,), TABLES),             # 점수 없는 저녁만 — 다음 날 아침이 점수를 채운다(T-38)
+    ((TABLES,), SEVEN),             # 점수 포함 저녁 — 지금처럼 아침은 점수를 뺀다(T-34)
+    ((SEVEN, TABLES), SEVEN),       # 둘 다 있으면 점수 포함 기록이 있으므로 뺀다
+    ((TABLES, SEVEN), SEVEN),
+])
+def test_morning_counts_only_evening_records_with_scores(files, records, want) -> None:
+    main, _ = files
+    for i, tables in enumerate(records):
+        _main_record(main, D_ISO, "evening", f"2026-10-08T1{i}:00:00.000000+00:00", tables)
+    assert tables_for(main, D, "morning") == want
+
+
+def test_next_morning_after_no_scores_evening_fills_scores(files) -> None:
+    """점수 없는 저녁 반영 → 다음 날 아침 재반영이 아침 모델 판 점수로 9표를 반영한다."""
+    main, stg = files
+    snapshot(main, stg)
+    _fake_compat(stg, tables=SEVEN)
+    apply(stg, main, D, "evening", scores=False)
+    assert tables_for(main, D, "morning") == TABLES
+    snapshot(main, stg)
+    _fake_compat(stg, basis="morning", exported_at="2026-10-08T23:30:00.000000+00:00")
+    report = apply(stg, main, D, "morning")
+    assert report.tables == TABLES
+    for table, total in (("score_history", "composite_score"), ("score_history_v2", "total_score")):
+        assert _rows(main, f"SELECT stock_code, {total} FROM {table} WHERE score_date=? "
+                           "ORDER BY 1", (D_ISO,)) == [("000660", 30.0), ("005930", 20.0)]
+
+
+@pytest.mark.parametrize(("kw", "wipe", "needle"), [
+    ({"skipped": {"daily_prices": 1}}, None, "필수 열"),
+    ({"n_on_date": 0}, None, "신선도"),
+    ({"tables": SEVEN[:-1]}, None, SEVEN[-1]),          # 7표를 한 실행으로
+    ({}, "consensus_annual", "consensus_annual: 반영 범위 행 0"),
+    # 점수 표까지 쓴 compat 기록 — 옮기지 않은 점수 표가 기록에 남으면 다음 날 아침이 점수를 건너뛴다
+    ({"tables": TABLES}, None, "반영 표 밖"),
+])
+def test_no_scores_gate_failure_leaves_main_unchanged(files, kw, wipe, needle) -> None:
+    main, stg = files
+    snapshot(main, stg)
+    _fake_compat(stg, **{"tables": SEVEN, **kw})
+    if wipe is not None:
+        con = sqlite3.connect(str(stg))
+        con.execute(f"DELETE FROM {wipe}")
+        con.commit()
+        con.close()
+    before = _sha(main)
+    with pytest.raises(V3PostGateError) as e:
+        apply(stg, main, D, "evening", scores=False)
+    assert needle in str(e.value)
+    assert _sha(main) == before
+
+
+def test_scored_record_with_extra_tables_is_refused(files) -> None:
+    """반영 표 밖의 표를 쓴 compat 기록은 점수 포함 반영에서도 막는다 — 기록의 표 목록 = 옮긴 표."""
+    main, stg = files
+    _main_record(main, D_ISO, "evening", "2026-10-08T07:00:00.000000+00:00")
+    snapshot(main, stg)
+    _fake_compat(stg, basis="morning", exported_at="2026-10-08T23:30:00.000000+00:00")
+    with pytest.raises(V3PostGateError, match="반영 표 밖"):
+        apply(stg, main, D, "morning")
+
+
+def test_no_scores_evening_keeps_the_order_guard(files) -> None:
+    """T-35 그대로 — 점수 없는 저녁도 (D, evening) 순위다. 같은 날 아침 기록이 있으면 막고, 같은 날 저녁
+    기록 위에는 다시 반영한다."""
+    main, stg = files
+    _main_record(main, D_ISO, "evening", "2026-10-08T07:00:00.000000+00:00")
+    snapshot(main, stg)
+    _fake_compat(stg, tables=SEVEN)
+    assert apply(stg, main, D, "evening", scores=False).ok
+    _main_record(main, D_ISO, "morning", "2026-10-08T23:59:00.000000+00:00", SEVEN)
+    snapshot(main, stg)
+    _fake_compat(stg, tables=SEVEN, exported_at="2026-10-09T00:10:00.000000+00:00")
+    before = _sha(main)
+    with pytest.raises(V3PostGateError, match="T-35"):
+        apply(stg, main, D, "evening", scores=False)
+    assert _sha(main) == before
+
+
+def test_no_scores_is_evening_only_in_python_and_cli(files, capsys) -> None:
+    """`--basis morning` 과 점수 없는 반영은 파이썬·CLI 층에서도 거부한다 — 아침 반영 표는 T-34 가 정한다."""
+    from compat.__main__ import main as cli_main
+    main, stg = files
+    with pytest.raises(CompatError, match="evening 전용"):
+        tables_for(main, D, "morning", scores=False)
+    snapshot(main, stg)
+    _fake_compat(stg, basis="morning", tables=SEVEN)
+    before = _sha(main)
+    with pytest.raises(CompatError, match="evening 전용"):
+        apply(stg, main, D, "morning", scores=False)
+    assert _sha(main) == before
+    for cmd in (["v3-tables", "--v3-db", str(main)],
+                ["apply", "--staging", str(stg), "--v3-db", str(main)]):
+        assert cli_main([*cmd, "--date", D, "--basis", "morning", "--no-scores"]) == 2
+        assert "evening 전용" in capsys.readouterr().err
+    assert _sha(main) == before
 
 
 # ── COMMIT 표식 ──────────────────────────────────────────────────────────────

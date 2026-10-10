@@ -6,8 +6,9 @@ DECISIONS §6-6('SKIP = 통과' 결함) · N-42 Q4(정지 조건 '필수 검사 
 
   equity         `equity.gates.run_all` — equity 표 전부
                  (빌드와 재판정 `gate` 가 같은 함수를 쓴다)
-  stage          `factor_inputs.build` 가 직접 읽는 stage 표(`STAGE_SOURCES`)의 판 기록
-                 — fi 입력 가드. stage 층 전체(68표)는 범위 밖이다
+  stage          `factor_inputs.build` 가 직접 읽는 stage 표(`STAGE_SOURCES` + 장 마감 판 T 행 원천
+                 `stg_flow_postclose_kiwoom`)의 판 기록 — fi 입력 가드. stage 층 전체(68표)는
+                 범위 밖이다
   factor_inputs  `factor_inputs.gates.run_all`
   model          `model.gates.run_all` — 기록형 게이트는 `model.gates.RECORD_ONLY`
 
@@ -76,6 +77,19 @@ ALLOW: tuple[Allow, ...] = (
           "첫 빌드 — 직전 판의 G1 계수가 없다"),
     Allow("stage", "G9", "no_cross_check",
           "교차 소스 선언(cross_check)이 없는 표 — 원천이 WISE 하나다"),
+    # ── stage(장 마감 판 T 행 원천 — 컷오버 PR-5, `data/model_db/stage` 의 이 표 한정) ──────
+    Allow("stage", "G4", "golden_inherited",
+          "첫 수집(10-14) 전엔 원장에 행이 없어 자기 골든을 둘 수 없다 — unit_scale 13열은 같은 "
+          "규칙·같은 원천 TR(ka10060) 의 stg_flow_daily_kiwoom 골든이 지킨다(PR-2 golden_from)",
+          ("stg_flow_postclose_kiwoom",)),
+    Allow("stage", "G6", "write_mode=first_write_wins",
+          "원장이 INSERT OR IGNORE(첫 관측 유지)라 같은 키의 나중 값이 없다 — 판 사이 덮어쓰기 "
+          "검사의 대상이 아니다(daily.postclose.insert_first)",
+          ("stg_flow_postclose_kiwoom",)),
+    Allow("stage", "G8", "not_blob",
+          "원장이 JSON blob 이 아니라 열 단위 표(ka10060_investor_flows)다 — blob 보존 등식이 "
+          "정의되지 않는다",
+          ("stg_flow_postclose_kiwoom",)),
     # ── factor_inputs ────────────────────────────────────────────────────────
     Allow("factor_inputs", ANY_GATE, "upstream_failed",
           "FG0 이 이미 FAIL 이라 판은 폐기된다 — 판정을 바꾸지 않는다"),

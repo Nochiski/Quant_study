@@ -147,9 +147,10 @@ python -m daily.board_compare --date <T> --evening-root data/model_db --research
   `daily.calendar`(D' = T 직전 거래일 = 장 마감 판 asof = `builds_from_date`).
 - 범주는 증거가 있을 때만 인정한다. 정의·정본 근거의 단일 정본은 `src/daily/board_compare.py` 의
   `CATEGORIES` 다. 이월·정보 시점·filing_late 는 '장 마감 T = 연구 D' 이고 연구 T ≠ 연구 D'' 이고, 연초 첫
-  거래일의 연도 창만 예외다. 실운영 T 종가 차이는 미설명이고 `--replay`(T 행 = 21:05 원장)에서만 종가
-  정의다. 거래량·수급(주체별 판 통계 상한)·16:00 컷오프(stage)·수집 대상 밖·T-6(연구 판 흔적)·신용 T
-  실입수는 각자 증거를 본다. 맞는 범주가 없으면 미설명이다.
+  거래일의 연도 창만 예외다. 실운영 T 종가 차이는 미설명이고 `--replay`(T 행 = 21:05 원장)이면서 T 가
+  KRX 애프터마켓 시행일(2026-09-14, `AFTER_MARKET_START`) 이후일 때만 종가 정의다(그 전 날은 21:05 키움
+  종가 = 정규장 종가라 미설명). 거래량·수급(주체별 판 통계 상한)·16:00 컷오프(stage)·수집 대상 밖·
+  T-6(연구 판 흔적)·신용 T 실입수는 각자 증거를 본다. 맞는 범주가 없으면 미설명이다.
 - 모델은 spec 마다 종합점수 Spearman · 엑셀 후보 겹침 · 점수 열 |Δ| 상위 종목과 그 종목의 fi 범주.
 - rc 0 = 미설명 0 · 모든 spec Spearman ≥ 하한(0.975 임시 — `--spearman-min 0` 은 기록형) / 1 = 미설명
   있음 또는 하한 미달 / 2 = 입력 오류. 결과는 `<out-root>/compare/<T>.json`(기본 out-root =

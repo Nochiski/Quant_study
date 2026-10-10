@@ -16,7 +16,8 @@
   · 이월·정보 시점·filing_late: 3자 대조 — E = P(장 마감 판이 D' 를 그대로 실었다)이고 R ≠ P(T 에 바뀌었다).
     정보 표는 연구 판 수집·공개일이 장 마감 판보다 늦어야 하고, 장 마감 판에 D' 뒤 정보가 있으면 미설명.
     연초 첫 거래일(D' 와 T 의 해가 다름)의 연도 창 차이만 3자 대조 없이 인정한다.
-  · T 행: 종가 차이는 실운영 미설명(N-35 ①), `--replay`(T 행 = 21:05 원장)에서만 종가 정의. 거래량은
+  · T 행: 종가 차이는 실운영 미설명(N-35 ①), `--replay`(T 행 = 21:05 원장)이고 T ≥ 애프터마켓 시행일
+    (`AFTER_MARKET_START`)일 때만 종가 정의(그 전 날은 21:05 키움 종가 = 정규장 종가라 미설명). 거래량은
     장 마감 값 ≤ 연구 값이면 거래량 정의. 수급은 주체별 판 통계(중앙 상대 차이·부호 반전)가 상한 안이면
     수급 정의. T 가격 없음은 장 마감 stage 증거(행 없음·price_valid 참 아님)가 있어야 16:00 컷오프, 수집
     대상(수집기 ① `daily.postclose.fi_candidates` · ② V3_STOCK_FILTER) 밖이면 '수집 대상 밖'. T-6 보류는
@@ -91,6 +92,9 @@ SPEARMAN_MIN = 0.975
 FLOW_REL_MAX = 0.10
 FLOW_FLIP_MAX = 0.10
 FLOW_STAT_MIN_N = 20           # 이보다 적게 관측된 주체는 판정하지 않는다(중앙값이 몇 칸의 잡음)
+# KRX 애프터마켓(16:00~20:00) 시행일 — 이날부터 21:05 키움 일별 종가가 애프터마켓 마지막 체결가다. 그 전
+# 날은 21:05 키움 종가 = 정규장 종가라 재생에서도 T 종가 차이를 '종가 정의'로 보지 않는다(PR-8b 리뷰 MINOR-2)
+AFTER_MARKET_START = date(2026, 9, 14)
 # 표 하나의 차이 행 상한 — 정상인 날은 T 행(≈ 유니버스 2,800)·신규 상장 종목 행·정보 표 판 교체(수만)뿐이다.
 # 넘으면 행 분류 없이 SQL 로 열별로 세고 표본만 올린다(전부 미설명 — 그런 날은 어차피 실패다)
 DIFF_ROW_MAX = 100_000
@@ -128,9 +132,11 @@ class Category:
 
 CATEGORIES: dict[str, Category] = {c.key: c for c in (
     Category(CLOSE_DEF, "종가 정의", "T-36·N-35 ①·T-33",
-             "재생(`--replay`)에서만 — T 행이 21:05 원장(애프터마켓 마지막 체결가)이라 KRX 공식 종가와 "
-             "다르다. 실운영 T 종가 차이는 미설명이다(15:35 회차부터 공식 종가와 전 종목 일치). 시총·"
-             "수정종가·수정주가 표식의 T 행 차이도 T 종가가 다를 때 여기 든다"),
+             "재생(`--replay`)이고 T ≥ 2026-09-14(KRX 애프터마켓 시행일 `AFTER_MARKET_START`)일 때만 — "
+             "T 행이 21:05 원장(애프터마켓 마지막 체결가)이라 KRX 공식 종가와 다르다. 그 전 날은 21:05 "
+             "키움 종가 = 정규장 종가라 재생에서도 미설명이다. 실운영 T 종가 차이는 미설명이다(15:35 "
+             "회차부터 공식 종가와 전 종목 일치). 시총·수정종가·수정주가 표식의 T 행 차이도 T 종가가 다를 "
+             "때 여기 든다"),
     Category(VOLUME_DEF, "거래량 정의", "T-36·PR-5(T 행 volume = 수집 시점 누적)",
              "T 행 거래량 — 장 마감 판은 15:41 수집 시점 누적, 연구 판은 KRX 일 거래량(시간외·애프터마켓 "
              "포함)이라 장 마감 값 ≤ 연구 값일 때만. 엔진은 거래량을 읽지 않는다"),
@@ -406,9 +412,12 @@ class _Ctx:
         return not _same(self.tclose_e.get(tk), self.tclose_r.get(tk))
 
     def close_verdict(self) -> tuple[str, str]:
-        if self.replay:
+        if not self.replay:
+            return UNEXPLAINED, "실운영 T 종가 차이(N-35 ① 전 종목 일치 — T-36)"
+        if self.t >= AFTER_MARKET_START:
             return CLOSE_DEF, ""
-        return UNEXPLAINED, "실운영 T 종가 차이(N-35 ① 전 종목 일치 — T-36)"
+        return UNEXPLAINED, (f"재생 T 종가 차이 — T 가 애프터마켓 시행일({AFTER_MARKET_START}) 전이라 21:05 "
+                             "키움 종가 = 정규장 종가(종가 정의 아님)")
 
     def no_t_price(self, tk: str) -> tuple[str, str]:
         """장 마감 판에 T 가격이 없다 — 장 마감 stage 증거로만 설명한다."""
@@ -1448,7 +1457,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--calendar-dir", type=Path, default=None,
                     help="daily.calendar 연도 파일 폴더(기본 <research-root>/calendar = 운영 data/calendar)")
     ap.add_argument("--replay", action="store_true",
-                    help="재생 판 — T 행이 21:05 원장(애프터마켓 종가)이라 T 종가 차이를 '종가 정의'로 본다")
+                    help="재생 판 — T 행이 21:05 원장(애프터마켓 종가)이라 T ≥ 2026-09-14(애프터마켓 "
+                         "시행일)의 T 종가 차이를 '종가 정의'로 본다")
     ap.add_argument("--out-root", type=Path, default=None,
                     help="compare/<T>.json 을 쓸 곳(기본 --evening-root)")
     ap.add_argument("--spearman-min", type=float, default=SPEARMAN_MIN,

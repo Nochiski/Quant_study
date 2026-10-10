@@ -635,6 +635,37 @@ def test_t_close_difference_is_unexplained_live_and_close_definition_in_replay(
     assert rep["replay"] is True and rep["ticker_categories"]["100025"] == [bc.CLOSE_DEF]
 
 
+@pytest.mark.parametrize(("t", "dp", "want"), [
+    (dt.date(2026, 9, 11), dt.date(2026, 9, 10), bc.UNEXPLAINED),    # 애프터마켓 시행 전(금)
+    (dt.date(2026, 9, 14), dt.date(2026, 9, 11), bc.CLOSE_DEF)])     # 시행일(월)부터
+def test_replay_close_definition_starts_with_the_after_market(t: dt.date, dp: dt.date,
+                                                              want: str) -> None:
+    """PR-8b 리뷰 MINOR-2 — 재생 T 종가 차이는 T ≥ 2026-09-14(KRX 애프터마켓 시행일)일 때만 종가 정의다.
+    그 전 날은 21:05 키움 종가 = 정규장 종가라 재생에서도 미설명이다. 실운영은 날짜와 무관하게 미설명."""
+    def verdict(replay: bool) -> tuple[str, str]:
+        return bc._Ctx(t, dp, replay, bc.Evidence({}, {}, frozenset()),
+                       {}, {}, {}, {}, {}, {}, {}, {}).close_verdict()
+    assert bc.AFTER_MARKET_START == dt.date(2026, 9, 14)
+    cat, note = verdict(True)
+    assert cat == want
+    assert ("애프터마켓 시행일" in note) == (want == bc.UNEXPLAINED)
+    assert verdict(False)[0] == bc.UNEXPLAINED
+
+
+def test_replay_close_difference_before_the_after_market_is_unexplained(tmp_path,
+                                                                        monkeypatch) -> None:
+    """같은 T 종가 차이를 재생으로 대조해도, T 가 애프터마켓 시행일 전이면(시행일을 T 다음 날로 옮겨
+    본다) 종가 정의가 아니라 미설명이다 — `compare_fi` 가 T 를 판정에 넘긴다."""
+    def close_up(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        _on(e, "fi_prices", A, T_DATE, close=10_050)
+    assert _cats(_fi3(tmp_path / "after", close_up, replay=True))[("fi_prices", A)] == {
+        bc.CLOSE_DEF}
+    monkeypatch.setattr(bc, "AFTER_MARKET_START", T_DATE + dt.timedelta(days=1))
+    res = _fi3(tmp_path / "before", close_up, replay=True)
+    assert _cats(res)[("fi_prices", A)] == {bc.UNEXPLAINED}
+    assert any("애프터마켓 시행일" in f.note for f in res.tally.samples[bc.UNEXPLAINED])
+
+
 def test_flow_unit_or_subject_swap_breaks_the_flow_cap(research_tables, tmp_path) -> None:
     """단위(×1e6)·주체 열 뒤바뀜 — 주체 판 통계가 상한을 넘거나 한쪽만 값이 있어 미설명."""
     def swap(rs: dict[str, Any], ev: dict[str, Any]) -> None:

@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
 # 워치독 — 예정 시각까지 체인 보고가 없거나 실패면 crit. 플랜 v2 Task A.4 / 결정 V2-7(조용한 실패 금지).
-#   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly>
+#   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly|postclose_board>
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 12 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh evening_ledger   # 21:50 KST (결정 11: 키움 저녁 수집 21:05)
 #     55 14 * * 1-5 cd ~/quant-ledger && scripts/watchdog.sh evening_build    # 23:55 KST (F-11 10-06·10-07: 빌드가 거래일마다 약 2분씩 길어져 23:30 → 23:55, 10-02 종료 23:02. 자정을 넘기면 안 된다 — TODAY 가 다음 날이 되어 정상 판을 '오늘 것이 아니다'로 찍고, 금요일 판은 토요일 휴장 판정으로 건너뛴다(10-07 00:00 실측). D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
 #     30 2 * * 6    cd ~/quant-ledger && scripts/watchdog.sh wics_weekly      # 토 11:30 KST — 금요일 dt WICS 스냅샷 38코드(행>0)
 #     30 1 * * *    cd ~/quant-ledger && scripts/watchdog.sh morning_build    # 10:30 KST 매일 (F-11 10-06: 10:00 → 10:30, 10-03 종료 09:49 로 여유 11분. D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #     morning_build 은 확정판이 정상이면 그 D 의 엑셀 발송 장부 줄(data/deliver/sent_model_daily.jsonl, basis=morning)까지 본다(B-57)
+#     30 7 * * 1-5  cd ~/quant-ledger && scripts/watchdog.sh postclose_board  # 16:30 KST(제안 — 컷오버 PR-8, 그림자 시작 때 등록)
+#     postclose_board 는 오늘(T) 장 마감 체인(scripts/postclose_chain.sh close) 런 로그를 단계마다 본다 — 수집(kiwoom_postclose)
+#     ok·cutoff·late, 나머지 단계(daily.runlog.POSTCLOSE_STEPS) ok 가 아니거나(없음·실패·아직 running) 하면 crit. 세션 예외일(T-26)은 정상
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
-CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build>}"
+CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly|postclose_board>}"
 case "$CHECK" in
   evening_ledger) TITLE_OK="watchdog evening_ledger 정상"; TITLE_BAD="watchdog: 21:50 까지 저녁 원장 보고 없음/실패" ;;
   evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:55 까지 잠정판 보고 없음/실패" ;;
   morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 10:30 까지 확정 빌드 보고 없음/실패" ;;
   wics_weekly)    TITLE_OK="watchdog wics_weekly 정상";    TITLE_BAD="watchdog: 토 11:30 까지 WICS 주간 스냅샷 없음/불완전" ;;
-  *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build, wics_weekly)" >&2; exit 2 ;;
+  postclose_board) TITLE_OK="watchdog postclose_board 정상"; TITLE_BAD="watchdog: 16:30 까지 장 마감 판 보고 없음/실패" ;;
+  *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build, wics_weekly, postclose_board)" >&2; exit 2 ;;
 esac
 TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
 # 오늘이 거래일인가 — 캘린더를 못 읽으면 1(거래일)로 본다. 조용히 넘어가는 쪽이 아니라 판정하는 쪽으로 기운다.
@@ -27,7 +31,7 @@ TRADING=$($PY -c 'import datetime as dt, sys
 from daily import calendar as c
 d = sys.argv[1]
 print(1 if c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))) else 0)' "$TODAY" 2>/dev/null || echo 1)
-# 저녁 두 검사는 "오늘" 을 판정하므로 휴장이면 건너뛴다. morning_build 는 직전 거래일의 확정판을 보므로 매일 돈다.
+# 저녁 두 검사와 postclose_board 는 "오늘" 을 판정하므로 휴장이면 건너뛴다. morning_build 는 직전 거래일의 확정판을 보므로 매일 돈다.
 # wics_weekly 는 토요일(휴장) 검사라 거래일 가드 밖이다 — 직전 거래일(금요일) 스냅샷을 본다.
 if [ "$CHECK" != "morning_build" ] && [ "$CHECK" != "wics_weekly" ] && [ "$TRADING" != "1" ]; then
   scripts/notify.sh info "watchdog $CHECK — 휴장" "$TODAY(KST)는 거래일이 아니다 — 판정 건너뜀"
@@ -231,6 +235,49 @@ if check == "wics_weekly":
     except ValueError:
         stamp = ""
     out(stamp, summary, 0)
+
+if check == "postclose_board":
+    # 장 마감 체인(scripts/postclose_chain.sh close, 컷오버 PR-8)이 단계마다 남긴 런 로그 — 오늘(T) 단계마다 마지막 런
+    # (같은 날 손으로 다시 돌려 성공했으면 그것으로 본다). 수집기(kiwoom_postclose)는 ok·cutoff·late 가 정상 종료다
+    # (16:00 컷오프 — 남은 종목은 21:05 값, daily.runlog.WARN_STATUSES). 나머지 단계는 ok 만 정상이고 없음·실패·아직
+    # running 이면 crit. 세션 예외일(수집기와 같은 예외표)은 체인이 통째로 건너뛰는 날이라 정상이다(T-26).
+    import sqlite3
+
+    from daily import calendar as cal_mod
+    from daily.runlog import POSTCLOSE_STEPS
+    try:
+        sessions = cal_mod.load_session_exceptions("data/calendar")
+    except Exception as e:  # noqa: BLE001  # reason: 예외표를 못 읽으면 판정 불가 — 정상으로 넘기지 않는다
+        out("", f"세션 예외표를 읽지 못해 판정 불가 ({type(e).__name__}: {e})", 1)
+    if today in sessions:
+        out("", f"T={today} 세션 예외일 — {sessions[today]} — 장 마감 체인을 건너뛰는 날이다(T-26)", 0)
+    path = "data/raw/daily_run.db"
+    log = f"logs/postclose/{today}_close.log"
+    if not os.path.exists(path):
+        out("", f"{path} 없음 — 15:41 장 마감 체인이 돌지 않았다 · 로그 {log}", 1)
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT source, status, ended FROM run WHERE date = ? ORDER BY run_id",
+                           (today,)).fetchall()
+    except sqlite3.Error as e:
+        out("", f"{path} 를 읽을 수 없다 ({type(e).__name__}: {e})", 1)
+    finally:
+        con.close()
+    last = {src: (status, ended) for src, status, ended in rows}     # run_id 순이라 마지막 런이 남는다
+    steps = ("kiwoom_postclose", *POSTCLOSE_STEPS)
+    collect_ok = {"ok", "cutoff", "late"}
+    bad = [f"{s} {last[s][0] if s in last else '없음'}" for s in steps
+           if s not in last or not (last[s][0] == "ok"
+                                    or (s == "kiwoom_postclose" and last[s][0] in collect_ok))]
+    summary = " · ".join(f"{s}={last[s][0] if s in last else '없음'}" for s in steps)
+    if bad:
+        out("", f"T={today} 장 마감 판 미완/실패 — {', '.join(bad)} | {summary} | 로그 {log}", 1)
+    try:     # 런 로그 ended 는 UTC(Z) — 제목 시각은 KST 로 바꾼다(evening_ledger 와 같은 규약)
+        stamp = dt.datetime.strptime(str(last[steps[-1]][1]), "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc).astimezone(KST).strftime("%H:%M")
+    except ValueError:
+        stamp = ""
+    out(stamp, f"T={today} {summary}", 0)
 
 out("", f"판정 로직이 없는 check: {check}", 1)
 PY

@@ -645,10 +645,7 @@ def test_record_는_빈_값과_틀린_날짜를_거부한다(tmp_path: Path) -> 
 def test_체인_단계_이름은_러너와_같다() -> None:
     from daily import postclose
     assert wj.CHAIN_SOURCES[0] == postclose.SOURCE
-    steps = getattr(runlog, "POSTCLOSE_STEPS", None)
-    if steps is None:
-        pytest.skip("PR-8 머지 전 — runlog.POSTCLOSE_STEPS 없음(머지 때 이 대조가 돈다)")
-    assert wj.CHAIN_SOURCES[1:] == tuple(steps)
+    assert wj.CHAIN_SOURCES[1:] == runlog.POSTCLOSE_STEPS
     assert wj.COMPARE_SOURCE in runlog.POSTCLOSE_FOLLOWUPS
 
 

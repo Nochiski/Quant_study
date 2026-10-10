@@ -111,7 +111,7 @@
 | PR-5 | T 행 얹기(가격·수정주가·수급) + T-6 + 후보 커버리지 게이트(상한 넘으면 판 실패 — N-42 Q4) | M~L | ☑ b411972d(fi1.7.0 — T 행 가격·수정주가·수급, T-6 `corp_action_pending`(기준가 술어는 `daily.kw_daily` 공유 — compat 과 같은 식), 쓸 수 있는 장 마감 가격 술어 공유, FG5 ≤ 2%·T-6 비율 경고(기록형), 장 마감 판 연구 부분 D' 자르기). 서버 스모크 정상 rc 0·음성 rc 1, 모델 장 마감 판 Spearman 0.985. 서버 원장 09-01 뒤 종가 0 행 0/66,238 |
 | PR-6 | 모델·엑셀 정비(별도 루트, 같은 basis 끼리 MG5, 문구 '장 마감 직후·수급 15:40', 1M 흐름 이력) | S | ☑ 0b51040a(mb1.5.0) |
 | PR-7 | 두 판 대조 도구(장 마감 판 T 대 다음 날 연구 판 T, 허용 범주) | M | ◐ 리뷰 수정 완료(0663b4a8 — T-36 증거 규칙·3자 대조·거래량 범주·수급 굵은 상한·음성 테스트 52) — 리뷰어 결함 7종 전부 rc 1, 변이 45 생존 0, 판당 100만 행 0.5~0.8초 → PR-5 상수 연결·왕복 테스트 뒤 재리뷰 |
-| PR-8 | 장 마감 체인(15:41 시작, 완료 감지로 잇기, 16:30 워치독) | M | ◐ 구현 완료(89f81ae5 — `postclose_chain.sh` close·refill·morning, 스위치 `config/postclose_chain.env` 기본 그림자, 16:30 워치독 `postclose_board`) → 리뷰 '수정 후 머지'(MAJOR: v3_post 에 고정 판 `--builds-from` 을 넘기지 않음) → 수정 완료(8fa5606f — 고정 판 인자·활성 스위치 기본 꺼짐·판 확인 먼저·refill 훅 저녁 체인 끝·refill 늘 7표·FG5 경고 연결·X-2 상수 연결, 관련 553 통과) → 재리뷰 중. `replay.sh` 정비는 PR-8b 로 분리 — 함께: `replay.sh --basis evening` 을 D' 아침 이력 고정·T/D' 분리·`--calendar-dir` 로 정비(PR-4 리뷰 후속-1, P5 장 마감 판 60거래일 재생의 전제) · 재생 T 행 원천 = 21:05 키움 원장으로 만든 임시 `postclose.db`(재생 표시, 첫 수집 10-14 전 날짜는 원장이 없음) + PR-7 `--replay` |
+| PR-8 | 장 마감 체인(15:41 시작, 완료 감지로 잇기, 16:30 워치독) | M | ☑ 7b0aca67(`postclose_chain.sh` close·refill·morning, 스위치 `config/postclose_chain.env` — `POSTCLOSE_ENABLED` 기본 꺼짐·그림자 기본, 세 v3 반영 모두 고정 판 `--builds-from` + health 확인, refill 은 저녁 체인 끝에서 늘 7표, 16:30 워치독 `postclose_board`, FG5 경고 연결, X-2 상수 연결). 관련 테스트 439 통과. 남은 것: PR-8b `replay.sh --basis evening`(재생 T 행 = 21:05 원장 임시 postclose.db + PR-7 `--replay`) |
 | PR-9 | 원천 전환 스위치(발송·대체 발송·워치독) — 10-19 에 켬. 21:20 연구 저녁 빌드 중단은 그림자 시작(10-14) 때(N-42 Q4) — 부수 효과: e_ 판이 없어 아침 stg_fin_wise 재사용(약 3~6분 절감)이 매일 거절된다(기록) · v3 21:00 리서치 수집 쓰기와 refill 제자리 반영 겹침 실측 필요 | S | ☐ · 체크리스트: ① 10-14 그림자 시작일 `window_judge record --init` ② 스위치 직전 `judge --start 20261014 --as-of 20261016` 다시 실행(주말 crit 귀속 반영) rc 0 확인 ③ 전환 뒤 아침판 '짓기만'이면 10:30 워치독 '확정판 엑셀 발송 기록 없음'(B-57)이 매일 crit — 같이 바꾼다 ④ ⑤ 엑셀 ok·⑥ 실패한 날의 대체 발송 조건 ⑤ v3 21:00 리서치 수집과 refill 제자리 반영 겹침 실측 |
 | PR-10 | equity 저녁 가격 분기 정리(전환 직후) | S | ☐ |
 
@@ -128,7 +128,7 @@
 | QL-F2 | 점수 없는 저녁 7표 반영(T-38) — `v3_post.sh --no-scores`, T-34 저녁 ok 판정을 점수 포함 반영으로 한정 | S | ☑ 91ed5e57(스테이징 경로 분리, Python·CLI 도 아침+no-scores 거부). 서버 그림자(v3 10-08 사본, 빈 장 마감 원장): rc 0·7표·T 행 2,603 전부 21:05 원장·점수 표 차이 0·T 종가 2,529/2,529 = v3 · 10-07 아침판 stage 판이 GC 돼 고정 판 없음이면 rc 2 로 멈춤(정상) |
 | QL-I | 되돌리기 절차서 · 표 단위 복원 스크립트 · 고정 백업 2벌 | S | ◐ 구현 중(베이스 bcfca209 — 백업 2벌·표 단위 복원·절차서 `CUTOVER_ROLLBACK.md`) |
 | QL-J | 키 이관(quant-ledger 자기 설정을 기본값으로) | S | ☐ |
-| QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ◐ 구현 중(베이스 bcfca209 — v3 무거운 수집 0·점수 쓰기 한 곳·v3 크론 상태, 그림자 기간 `--baseline`) |
+| QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ◐ 구현 완료(2d375f86 — `python -m daily.cutover_watch`, 로컬 v3 사본 기준선 job 26종 분류 안 된 것 0) → 리뷰 중 |
 | QL-M·N | compat 만료 정리 · compare 기준 scope | S | ☐ |
 | QL-P | T-23 v3 `market_*` 를 KRX 지수 원장으로 | M | ✕ 보류(T-27) — 구현 브랜치 `pr/QL-P` 3b9a5e04 는 v3 폴더 이관 때 쓴다(열 대응표: 지수 3종 대응·VKOSPI·폭·시장 수급·프로그램 없음·업종 부분) |
 | QL-Q | T-24 v3·uni 휴장 파일을 quant-ledger 달력에서 | S | ☑ 5478538d(서버: 내보낸 파일 = v3 파일 121일·키 5개 같음). 연결 PR 전제 — ① 매일(주말·휴장 포함) KST 00:00 뒤·v3 20:05 전 1회 이상(06:00 체인 휴장일에도 도는 자리) ② 쓰기 전 서버 v3 `data/.kis_holidays.json` 링크 여부·소유자 확인과 백업 ③ 연결 당일 `sync_calendar.sh` v3 대조를 끄거나 일치 일수를 세지 않음(자기 사본 비교) ④ `COMPAT_LAYER.md:79` uni 휴장 원천을 `daily.calendar_export` 로 |

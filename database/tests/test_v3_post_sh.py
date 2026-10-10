@@ -83,14 +83,17 @@ def sources(tmp_path_factory) -> tuple[Path, Path, Path]:
     return (*tce._make_roots(base), _model_root(base))
 
 
-@pytest.fixture(scope="module")
-def evening_sources(tmp_path_factory) -> tuple[Path, Path, Path]:
-    """장 마감 판(`e_` 판 · evening 모델 판) — daily_post 를 부르는 경로. 판은 D'(09-22)까지다(QL-D
-    이음매): KRX 행·유니버스·수급에 T(09-23)가 없고, 09-23 에만 있던 종목(스팩·필러 등)은 D' 로
-    옮긴다. T 의 가격·수급 행은 임시 홈의 원장(`_ledgers`)에서 온다."""
-    base = tmp_path_factory.mktemp("eve")
+def _evening_roots(base: Path, *, bad_volume: bool = False) -> tuple[Path, Path, Path]:
+    """장 마감 판(`e_` 판 · evening 모델 판) — 판은 D'(09-22)까지다(QL-D 이음매): KRX 행·유니버스·수급에
+    T(09-23)가 없고, 09-23 에만 있던 종목(스팩·필러 등)은 D' 로 옮긴다. T 의 가격·수급 행은 임시 홈의
+    원장(`_ledgers`)에서 온다. `bad_volume` 이면 daily_prices 1행(005930 09-21)의 거래량이 비고 필러 30종목의
+    D' 행을 더한다 — compat 5% 허용(1/36)은 통과, 제자리 게이트 0건은 실패."""
     fillers = tce._filler_tickers(tce.N_FILLER)
-    prices = [r for r in tce._price_rows() if not (r["basis"] == "krx" and r["date"] == tce.D23)]
+    prices = [r for r in tce._price_rows(bad_volume=bad_volume)
+              if not (r["basis"] == "krx" and r["date"] == tce.D23)]
+    if bad_volume:
+        prices += [tce._price_row(t, tce.D22, 10_000, value=1_000_000, mktcap=1_000_000_000)
+                   for t in fillers[:30]]
     uni = [tce._uni_row(t, d, "KOSPI", "common") for t in tce.REAL for d in (tce.D21, tce.D22)]
     uni.append(tce._uni_row(tce.SPAC, tce.D22, "KOSDAQ", "spac"))
     uni += [tce._uni_row(t, tce.D22, m, s) for t, m, s in tce.EXCLUDED]
@@ -99,6 +102,18 @@ def evening_sources(tmp_path_factory) -> tuple[Path, Path, Path]:
                             adj_rows=tce._adj_rows(price_rows=prices), universe_rows=uni,
                             flow_rows=[r for r in tce._flow_rows() if r["date"] != tce.D23])
     return (*roots, _model_root(base, "evening"))
+
+
+@pytest.fixture(scope="module")
+def evening_sources(tmp_path_factory) -> tuple[Path, Path, Path]:
+    """장 마감 판 — daily_post 를 부르는 경로(`_evening_roots`)."""
+    return _evening_roots(tmp_path_factory.mktemp("eve"))
+
+
+@pytest.fixture(scope="module")
+def evening_skip_sources(tmp_path_factory) -> tuple[Path, Path, Path]:
+    """장 마감 판 + 필수 열이 빈 daily_prices 1행(`_evening_roots(bad_volume=True)`)."""
+    return _evening_roots(tmp_path_factory.mktemp("eveskip"), bad_volume=True)
 
 
 def _ledgers(raw: Path) -> tuple[Path, Path]:
@@ -379,6 +394,173 @@ def test_allow_older_reaches_the_evening_export(env, evening_sources, tmp_path) 
     r2 = _run(tmp_path, evening_sources, *_evening(main, "--allow-older"))
     assert r2.rc == 0, r2.out
     assert _q(main, f"SELECT count(*) FROM daily_prices WHERE trade_date='{D_ISO}'") == [(2,)]
+
+# ── T-38 점수 없는 저녁 반영(QL-F2) ─────────────────────────────────────────
+SEVEN = tuple(t for t in TABLES if t not in SCORE_TABLES)
+
+
+def _seed_scores(main: Path) -> None:
+    """v3 가 쓰던 점수 행(D·전날) — 점수 없는 반영이 건드리면 지문이 바뀐다."""
+    con = sqlite3.connect(str(main))
+    for table, col in (("score_history", "composite_score"), ("score_history_v2", "total_score")):
+        con.executemany(f"INSERT INTO {table} (stock_code, score_date, {col}) VALUES (?, ?, ?)",
+                        [("005930", D_ISO, 1.5), ("777770", D_ISO, 2.5),
+                         ("005930", "2026-09-22", 3.5)])
+    con.commit()
+    con.close()
+
+
+def _score_sha(main: Path) -> str:
+    rows = {t: _q(main, f"SELECT * FROM {t} ORDER BY 1, 2") for t in SCORE_TABLES}
+    return hashlib.sha256(repr(rows).encode()).hexdigest()
+
+
+def _t_prices(main: Path) -> list[tuple]:
+    return _q(main, "SELECT stock_code, open, close, volume FROM daily_prices "
+                    f"WHERE trade_date='{D_ISO}' ORDER BY 1")
+
+
+def _meta_tables(main: Path) -> list[dict]:
+    return [json.loads(r[0]) for r in _q(main, "SELECT tables FROM _compat_meta ORDER BY exported_at")]
+
+
+def test_no_scores_evening_reflects_seven_tables_without_model_board(env, evening_sources,
+                                                                    tmp_path) -> None:
+    """장 마감 판 실패일(T-38) — 장 마감 모델 판이 없어도 가격 등 7표를 반영한다. 점수 두 표는 본 파일 그대로다."""
+    _, main = env
+    _seed_scores(main)
+    before = _score_sha(main)
+    r = _run(tmp_path, evening_sources,
+             *_evening(main, "--no-scores", "--model-root", str(tmp_path / "no-model")))
+    assert r.rc == 0, r.out
+    assert "반영 표: " + ",".join(SEVEN) in r.out
+    assert "scores=no" in r.out
+    assert _score_sha(main) == before
+    assert _t_prices(main) == [("000660", 71_000, 71_000, 1_000), ("005930", 70_300, 70_300, 1_000)]
+    assert _q(main, f"SELECT count(*) FROM investor_detail_flows WHERE trade_date='{D_ISO}'") == [
+        (2,)]
+    (tables,) = _meta_tables(main)
+    assert set(tables) == set(SEVEN)                     # 기록에 반영한 표 목록
+    assert "daily_post 명령 없음" in r.out
+    assert [n.split("|")[1] for n in _levels(r, "info")] == [f"v3_post {D} evening 반영 완료"]
+
+
+def _session_exception_ledgers(raw: Path) -> None:
+    """세션 예외일(T-26) — 장 마감 수집을 하지 않아 postclose.db 에 T 행이 없다(D' 행만). 21:05 키움 원장에
+    T 행이 있다(기준가 = D' 종가)."""
+    for name in ("postclose.db", "kiwoom.db"):
+        (raw / name).unlink()
+    con = postclose.connect(raw / "postclose.db")
+    try:
+        row = {"dt": "20260922", "cur_prc": "+70100", "pred_pre": "+100", "acc_trde_prica": "9",
+               **{k: "-1" for k in kw_daily.FLOW_KEYS}}
+        postclose.insert_first(con, list(postclose.COLS), "005930", [row],
+                               collected_at="2026-09-22T06:45:00",
+                               fetched_at="2026-09-22T06:41:00", price_valid=True)
+    finally:
+        con.close()
+    con = sqlite3.connect(raw / "kiwoom.db")
+    try:
+        table = kw_daily.TRS["ka10060"].table
+        kw_daily.ensure_table(con, table, list(postclose.COLS))
+        for ticker, cur, pred, vol in (("005930", "+70500", "+400", "2000"),
+                                       ("000660", "-70900", "-200", "3000")):
+            kw_daily.insert_rows(con, table, list(postclose.COLS), ticker,
+                                 [{"dt": D, "cur_prc": cur, "pred_pre": pred, "acc_trde_prica": vol,
+                                   **{k: "-7" for k in kw_daily.FLOW_KEYS}}],
+                                 "ka10060", "2026-09-23T12:05:00")
+        con.commit()
+    finally:
+        con.close()
+
+
+def test_no_scores_on_session_exception_day_takes_t_rows_from_2105_ledger(env, evening_sources,
+                                                                         tmp_path) -> None:
+    """세션 예외일 — postclose.db 에 그날 행이 없으면 전 종목이 21:05 원장 경로를 탄다(QL-D 그대로)."""
+    home, main = env
+    _session_exception_ledgers(home / "data" / "raw")
+    r = _run(tmp_path, evening_sources, *_evening(main, "--no-scores"))
+    assert r.rc == 0, r.out
+    assert _t_prices(main) == [("000660", 70_900, 70_900, 3_000), ("005930", 70_500, 70_500, 2_000)]
+    info = _meta_tables(main)[0]["daily_prices"]["t_rows"]
+    assert (info["postclose"], info["kiwoom_2105"]) == (0, 2)
+    assert info["kiwoom_2105_tickers"] == ["000660", "005930"]
+
+
+def test_no_scores_without_postclose_ledger_file_stops(env, evening_sources, tmp_path) -> None:
+    """postclose.db 파일 자체가 없으면 멈춘다(QL-D P1 — 경로 실수를 '그날 행 없음'으로 읽지 않는다). 본 파일
+    무변경."""
+    home, main = env
+    (home / "data" / "raw" / "postclose.db").unlink()
+    before = _sha(main)
+    r = _run(tmp_path, evening_sources, *_evening(main, "--no-scores"))
+    assert r.rc == 2, r.out
+    assert "T 행 원장 파일이 없다" in r.out
+    assert _sha(main) == before
+    crit = _levels(r, "crit")
+    assert len(crit) == 1 and "② compat export --in-place" in crit[0]
+
+
+def test_next_morning_after_no_scores_evening_fills_scores(env, evening_sources, sources,
+                                                          tmp_path) -> None:
+    """T-34 판정 변경(QL-F2) — 점수 없는 저녁 반영만 있던 날은 다음 날 아침이 아침 모델 판 점수로 9표를 반영한다."""
+    _, main = env
+    r = _run(tmp_path, evening_sources, *_evening(main, "--no-scores"))
+    assert r.rc == 0, r.out
+    assert _q(main, f"SELECT count(*) FROM score_history WHERE score_date='{D_ISO}'") == [(0,)]
+    r2 = _run(tmp_path, sources, *_base(main))
+    assert r2.rc == 0, r2.out
+    assert "반영 표: " + ",".join(TABLES) in r2.out
+    for table in SCORE_TABLES:
+        assert _q(main, f"SELECT count(*) FROM {table} WHERE score_date='{D_ISO}'") == [
+            (len(tce.SCORE_CODES),)]
+    assert _q(main, "SELECT basis FROM _compat_meta ORDER BY exported_at") == [
+        ("evening",), ("morning",)]
+
+
+def test_next_morning_after_scored_evening_still_drops_scores(env, evening_sources, sources,
+                                                             tmp_path) -> None:
+    """점수 포함 저녁 반영이 있던 날은 지금처럼 아침이 점수를 빼고 7표다(아침 모델 판 없어도 된다)."""
+    _, main = env
+    r = _run(tmp_path, evening_sources, *_evening(main))
+    assert r.rc == 0, r.out
+    before = _score_sha(main)
+    r2 = _run(tmp_path, sources, *_base(main, "--model-root", str(tmp_path / "no-model")))
+    assert r2.rc == 0, r2.out
+    assert "반영 표: " + ",".join(SEVEN) in r2.out
+    assert _score_sha(main) == before
+
+
+def test_no_scores_gate_failure_leaves_main_unchanged(env, evening_skip_sources, tmp_path) -> None:
+    """점수 없는 반영도 필수 열 결측 0 게이트를 7표 기준으로 건다 — compat 5% 허용은 통과해도 막는다."""
+    _, main = env
+    _seed_scores(main)
+    before = _sha(main)
+    r = _run(tmp_path, evening_skip_sources, *_evening(main, "--no-scores"))
+    assert r.rc == 2, r.out
+    assert "+1 skipped" in r.out and "필수 열" in r.out
+    assert _sha(main) == before
+    crit = _levels(r, "crit")
+    assert len(crit) == 1 and "③④ 게이트·반영" in crit[0]
+
+
+def test_no_scores_is_evening_and_compat_only(env, sources, tmp_path) -> None:
+    """`--no-scores` 는 장 마감(evening) 반영 전용이고 daily_post 를 부르지 않는다 — 어기면 인자 오류 rc 5."""
+    _, main = env
+    marker = tmp_path / "post.txt"
+    before = _sha(main)
+    for args, extra in (
+            (_base(main, "--no-scores"), {}),                                  # 아침은 T-34 가 정한다
+            (_evening(main, "--no-scores", "--v3-post-cmd", f"echo x >> {marker}"), {}),
+            (_evening(main, "--no-scores"), {"QL_V3_POST_CMD": f"echo x >> {marker}"})):
+        r = _run(tmp_path, sources, *args, **extra)
+        assert r.rc == 5, r.out
+        assert "T-38" in r.out                          # 모르는 인자가 아니라 이 규칙으로 멈췄다
+        assert r.flock == []
+    assert not marker.exists()
+    assert _sha(main) == before
+    assert not (tmp_path / "ql" / "data" / "_v3_post").exists()
+
 
 # ── 실패하면 본 파일 무변경 ──────────────────────────────────────────────────
 def test_gate_failure_leaves_main_unchanged(env, skip_sources, tmp_path) -> None:

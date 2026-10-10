@@ -360,17 +360,20 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
 
 ---
 
-## 8. v3 quant.db 제자리 반영 — `scripts/v3_post.sh` (QL-F)
+## 8. v3 quant.db 제자리 반영 — `scripts/v3_post.sh` (QL-F·QL-F2)
 
 compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 커밋하고(반영 도중 소비자가 일부 표만 바뀐 상태를 읽는다, G9) 필수 열이 빈 행을 5% 까지 건너뛴다(G11). 제자리 반영은 아래 순서로만 한다. 범위·게이트의 정본은 `src/compat/v3_post.py` 머리 주석이다.
 
 1. **스테이징**: v3 quant.db 를 sqlite 온라인 백업으로 임시 파일에 뜬다(`python -m compat stage`). 본 파일은 읽기 전용으로 연다. 스테이징 경로가 본 파일(링크·-wal/-shm 포함)과 같은 파일이면 거부한다(뜨기 전에 그 경로를 지우므로). 디스크 여유가 본 파일 크기 × 2 보다 작으면 뜨지 않고, 백업이 실패하면 부분 사본을 지운다.
-2. **반영 표**(T-34, `python -m compat v3-tables`): 기본 9표. `--basis morning` 은 본 파일 `_compat_meta` 에 같은 D 의 장 마감(evening) ok 반영 기록이 있으면 점수 두 표를 뺀 7표다. 저녁에 보낸 엑셀과 v3 DB 점수가 같고, 가격 재반영이 아침 모델 판 실패에 묶이지 않는다. 저녁 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻).
+2. **반영 표**(T-34 · T-38, `python -m compat v3-tables`): 기본 9표.
+   - `--basis morning` 은 본 파일 `_compat_meta` 에 같은 D 의 **점수 두 표를 반영한** 장 마감(evening) ok 기록이 있으면 점수 두 표를 뺀 7표다. 저녁에 보낸 엑셀과 v3 DB 점수가 같고, 가격 재반영이 아침 모델 판 실패에 묶이지 않는다. 그런 기록이 없으면 아침 모델 판 점수를 쓴다(T-7 대체 발송과 같은 뜻). 점수 표를 반영했는지는 기록의 `tables` 열(compat 이 쓴 표 → 결과 json) 키로 본다.
+   - `--no-scores`(`--basis evening` 전용, T-38)는 늘 7표다. 장 마감 판이 없는 날(판 실패일·세션 예외일 T-26) 21:05 원장 뒤 가격 등 7표만 반영한다. compat 이 점수 표를 고르지 않으므로 장 마감 모델 판이 없어도 된다. 이 기록엔 점수 표가 없어 위 판정이 세지 않으므로 다음 날 아침 재반영이 점수를 채운다. 순서(T-35)는 (D, evening) 그대로다. daily_post 명령과 함께 주면 인자 오류(rc 5)다 — export_scores 를 그날 점수 없이 부르지 않는다.
 3. **compat export `--in-place --tables <반영 표>`** 를 스테이징에 돌린다(QL-B 가드 — `stocks.market_cap` 은 `all`). 장 마감 판(`--basis evening`)이면 T 행 원장 두 개(`QL_POSTCLOSE_DB` 기본 `data/raw/postclose.db` · `QL_KIWOOM_DB` 기본 `data/raw/kiwoom.db`)를 넘기고, `--allow-older` 는 apply 와 함께 export 에도 넘긴다(compat 장 마감 판이 같은 T-35 순서로 먼저 멈춘다 — QL-D).
 4. **게이트**(COMMIT 전):
    - 이번 compat 기록 1행·status ok·날짜·basis 일치·창 끝 = D
    - 순서(T-35): 본 파일에 이번보다 (날짜, basis — 같은 날은 아침 > 장 마감) 가 큰 ok 반영 기록이 없다. 재생은 `--allow-older`. **새 정지 조건이라 사용자 확인 대기**
    - 반영 표 전부 · 필수 열 빈 행을 건너뛴 수 0(그림자 compat 의 5% 허용을 제자리에서는 0 으로, P1)
+   - 기록에 반영 표 밖의 표가 없다 — 기록은 본 파일에 그대로 옮겨지고 2 의 아침 판정이 그 표 목록을 본다. 옮기지 않은 점수 표가 기록에 남으면 다음 날 아침이 점수를 건너뛴다(QL-F2)
    - 신선도(T-31 ③): compat 이 이번에 `daily_prices` 에 **쓴** trade_date = D 행 ≥ 1(`tables.daily_prices.metrics.n_on_date`). 스테이징은 본 파일 사본이라 'D 행 있음' 만으로는 옛 행에도 참이 된다. 비율 하한은 두지 않는다
    - 표마다 반영 범위 행 > 0(점수 두 표는 `score_date = D`)
 5. **한 트랜잭션 반영**: `ATTACH` → `BEGIN IMMEDIATE` → 표별 범위 `DELETE` → 스테이징 범위 `INSERT` → `_compat_meta` 기록 1행 → `COMMIT`.
@@ -384,6 +387,17 @@ compat 을 v3 파일에 직접 돌리지 않는다. compat 은 표마다 따로 
 compat 이 쓰지 않는 표(`market_*`·`pipeline_runs`·`research_reports` 등, T-27)는 건드리지 않는다. 락은 v3 체인과 같은 `/tmp/kael_v3_daily_all.lock` 이고 `--shadow`(1~4단계만, 본 파일 무변경, 스테이징 기본 경로 `staging_<basis>_shadow.db`)는 락을 잡지 않는다. 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션으로 `updated_at` 뒤에 붙어 열 순서가 `v3_schema.sql` 과 다르다 — compat 스키마 검사는 열 이름·타입으로 본다(순서 무관).
 
 `daily_prices` 의 O/H/L 이 비고 종가가 있는 krx 행은 비어 있는 칸을 종가로 채운다(정지 참고가 행 · 정규장 체결 없이 시간외만 있던 날 — 서버 `--full` 게이트 실측 145210 2025-03-21, v3 사본 같은 행 O=H=L=C). 근거는 `mappings.py` `_REF_FILL` 주석.
+
+**호출 형태(PR-8 장 마감 체인 — QL-F2 연결 지점).** T = 그날 거래일, D = 아침 재반영 대상 거래일(전날).
+
+| 시점 | 조건 | 명령 |
+|---|---|---|
+| 장 마감 체인 ⑥ | 장 마감 판(모델·엑셀)까지 ok | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model [--shadow] [--v3-post-cmd <daily_post>]` |
+| refill(21:05 키움 원장 커밋 뒤) | 그날 ⑥ 마지막 런 ok | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model [--shadow]` (compat 만 — 9표) |
+| refill(21:05 키움 원장 커밋 뒤) | 그날 ⑥ 마지막 런이 ok 가 아님(판 실패·세션 예외일·⑥ 미실행) | `scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --no-scores [--shadow]` (compat 만 — 7표, `--model-root` 불필요) |
+| 다음 날 아침 | 연구 확정판·모델 뒤 | `scripts/v3_post.sh --date D --basis morning --v3-db <v3 quant.db> [--shadow]` (compat 만 — 7표·9표는 T-34 가 본 파일 기록으로 정한다) |
+
+지금 PR-8 refill(`pr/PR-8` 89f81ae5 `postclose_chain.sh` `refill_main`)은 ⑥ 이 ok 가 아니면 건너뛴다 — 위 셋째 줄로 바꿔야 T-38 이 닫힌다. ⑥ 이 COMMIT 뒤 daily_post 만 실패(rc 6)한 날은 본 파일에 점수 포함 저녁 기록이 이미 있으므로 어느 refill 을 불러도 다음 날 아침은 7표다.
 
 ### 8-1. v3 쪽 변경 목록(V3-A~E — 컷오버 날, 백업 뒤, N-42 Q4)
 

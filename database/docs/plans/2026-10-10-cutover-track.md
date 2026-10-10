@@ -159,7 +159,7 @@
 
 그림자 = 새 장 마감 체인을 실제로 돌리되 엑셀 발송(`POSTCLOSE_SEND=0`)·v3 본 파일 쓰기(`POSTCLOSE_V3=shadow`)는 하지 않는 시험 운영. 3거래일(10-14·15·16) 판정 뒤 10-19 컷오버. 코드는 하루 앞서 10-13 에 스위치를 다 끈 채 배포한다(T-49 — 10-14 그림자 판의 D' 가 새 규칙 판이어야 첫날 대조가 판본 불일치 rc 2 로 멈추지 않는다).
 
-**전제(10-13 배포 전)**: ① 10-12·13 예약 관측(묶음 5·6·7 첫 거래일) 이상 없음 ② 서버 `$HOME/quant-ledger/.env`(QL-J — 10-10 생성, 10-11 dry-run ⑧ 통과) ③ 베이스 전체 테스트 통과 ④ QL-Q2 머지(T-48 — 스위치 꺼진 채 싣는다. 컷오버 조건) ⑤ origin/main 이 e8400fba 그대로(바뀌었으면 베이스에 역병합부터).
+**전제(10-13 배포 전)**: ① 10-12·13 예약 관측(묶음 5·6·7 첫 거래일) 이상 없음 ② 서버 `$HOME/quant-ledger/.env`(QL-J — 10-10 생성, 10-11 dry-run ⑧ 통과) ③ 베이스 전체 테스트 통과 ④ QL-Q2 머지(T-48 — 스위치 꺼진 채 싣는다. 컷오버 조건) ⑤ origin/main 이 e8400fba 그대로(바뀌었으면 베이스에 역병합부터) ⑥ 배포하는 워크트리의 `backend/.venv` 가 CI 와 같은 extra 로 sync 돼 있다(`uv sync --project backend --locked --extra parquet --extra equity --extra llm` — extra 없이 만들면 `requests`·`duckdb` 가 없어 deploy ③ `uv run --project backend pytest database/tests -q` 가 수집 오류 92건으로 거부한다. 10-11 재현 뒤 베이스 워크트리에 만들어 두었고 같은 명령으로 3,608 통과·rc 0 — `uv run` 이 extra 를 지우지 않음도 확인).
 
 **10-13 코드 배포**(낮 10:30~15:10 — 10:43 관측 뒤. 맥 전원 연결. 15:40~16:30·21:00~21:30 배포 금지). 트랙 베이스가 병합(5084c68d)·휴장 달력(`wip/merge-cal`)을 품으므로 두 배포를 이 하나로 대신한다:
 1. 배포 전 기록: 되돌릴 rev(서버 `DEPLOYED.json` — 10-11 기준 e9fba64a) · 서버 판정 달력 목록·해시(`ls -la data/calendar` · `sha256sum data/calendar/kis_holidays_*.json` — 휴장 달력 플랜 §8) · 체인·락 비어 있음.

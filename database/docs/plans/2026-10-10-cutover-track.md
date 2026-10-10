@@ -158,7 +158,7 @@
 
 그림자 = 새 장 마감 체인을 실제로 돌리되 엑셀 발송(`POSTCLOSE_SEND=0`)·v3 본 파일 쓰기(`POSTCLOSE_V3=shadow`)는 하지 않는 시험 운영. 3거래일(10-14·15·16) 판정 뒤 10-19 컷오버.
 
-**전제(10-13 까지)**: ① 10-12·13 예약 관측(묶음 5·6·7 첫 거래일) 이상 없음 ② 10-13 `wip/merge-cal`(휴장 달력) 배포·관측(weekend-merge 메모) ③ 서버 `$HOME/quant-ledger/.env`(QL-J — 10-10 생성 완료) ④ 베이스 전체 테스트 통과 ⑤ K1-4a(조용한 손실 기록 시작)·K1-6a 머지(못 하면 다음 배포로 — 컷오버 조건 아님).
+**전제(10-13 까지)**: ① 10-12·13 예약 관측(묶음 5·6·7 첫 거래일) 이상 없음 ② 10-13 `wip/merge-cal`(휴장 달력) 배포·관측(weekend-merge 메모) ③ 서버 `$HOME/quant-ledger/.env`(QL-J — 10-10 생성 완료) ④ 베이스 전체 테스트 통과 ⑤ K1-4a(조용한 손실 기록 시작)·K1-6a 머지(못 하면 다음 배포로 — 컷오버 조건 아님) ⑥ QL-Q2 머지(T-48 — 스위치 꺼진 채 이 배포에 싣는다. 컷오버 조건).
 
 **10-14 순서**(낮 10:30~15:10 — 08:10 체인·10:30 워치독 뒤, 15:41 전. 맥 전원 연결. 15:40~16:30·21:00~21:30 배포 금지):
 1. 베이스에 그림자 켬 커밋: `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1`(`SEND=0`·`V3=shadow` 그대로).
@@ -167,9 +167,29 @@
 4. crontab(백업 `crontab -l > ~/cutover_tools/crontab.bak-20261014` 먼저): 15:41 `postclose_chain.sh close` · 16:30 `watchdog.sh postclose_board` 추가, 21:20 `build_evening.sh` · 23:55 `watchdog.sh evening_build` 줄 앞에 `#`(README 크론 표 '제안·중단 예정' 원문 그대로).
 5. 새 규칙 판(E-1 e1.28.0 · F-1 fi1.8.0)은 다음 08:10 체인(10-15)이 짓는다 — 10-14 15:41 그림자 판은 10-13 아침 판(옛 규칙)을 D' 로 읽는다(고정 판, 섞임 아님).
 6. 관측: 10-14 15:41~16:30 그림자 체인 · 16:30 워치독 · 10-15 08:10 아침 체인 끝 두 판 대조(`data/model_db/compare/<T>.json`) · QL-G 그림자 날 대조(COMPAT §8-2) · K1-4a 첫 기록.
-7. 판정: 10-17(금) 아침 `window_judge judge --start 20261014 --as-of 20261016`(PR-9 ②) rc 0 → 10-19 컷오버(V3-A~E, PR-9 스위치 `POSTCLOSE_SEND=1`·`POSTCLOSE_V3=in-place`, QL-L 감시 크론 23:30).
+7. 판정: 10-17(금) 아침 `window_judge judge --start 20261014 --as-of 20261016`(PR-9 ②) rc 0 → 10-19 컷오버(§7 — V3-A~E, PR-9 스위치 `POSTCLOSE_SEND=1`·`POSTCLOSE_V3=in-place`, QL-Q2 `CALENDAR_EXPORT_V3=1`, QL-L 감시 크론 23:30).
 
 되돌리기: 그림자 기간은 `POSTCLOSE_ENABLED=0` 재배포 + 크론 원복(백업 파일) — v3 는 아직 그대로라 소비자 영향 없음.
+
+## 7. 10-19(월) 컷오버 절차(컨트롤러, 실행 직전 한 줄 보고 — N-42 Q4)
+
+컷오버 = v3 의 무거운 수집·스코어링 크론(`daily_all`)을 끄고, quant-ledger 장 마감 체인이 엑셀을 보내며(`POSTCLOSE_SEND=1`) v3 quant.db 에 직접 쓰는(`POSTCLOSE_V3=in-place`) 상태로 바꾸는 일. 명령·멈춤 조건의 정본은 CUTOVER_ROLLBACK §1(백업)·COMPAT_LAYER §8-1(V3-A~E)·README(크론 원문)이고, 여기는 순서와 시각만 묶는다.
+
+**전제**: ① 10-17 `window_judge judge` rc 0(§6-7) ② 10-16 저녁 사용자 실물 확인(§0) ③ QL-Q2 머지·배포(스위치는 꺼진 채) ④ 10-19 08:10 아침 체인 정상 종료 — `data/deliver/history/20261016_morning.json` 있음(V3-C 가 읽는 고정 판). 이날 아침 엑셀(D = 10-16)은 스위치 전이라 평소대로 아침 판이 보낸다 ⑤ 맥 전원 연결.
+
+**시각**: v3 가 quant.db 에 쓰는 07:00·12:15·15:35(브리핑의 `pipeline_runs` 기록)·20:30(리서치)·21:00(브로커 리서치)을 피한다. 1~5(v3 파일 변경과 첫 반영)는 10:30~12:10, 6(스위치 배포)은 15:10 까지. 15:40~16:30 배포 금지.
+
+**순서**(CUTOVER_ROLLBACK §0 ①→④ — v3 를 먼저 끄고 스위치를 나중에 켠다. 거꾸로 하다 중간에 멈추면 15:41 장 마감 반영과 20:05 v3 스코어링이 같은 점수 표에 둘 다 쓴다. 이 순서로 멈추면 그날 v3 T 행을 쓰는 주체가 없는 쪽이라 크론 줄 복원으로 되돌린다):
+1. **백업 2벌**: CUTOVER_ROLLBACK §1 명령 그대로, 성공 확인 5가지(rc 0 · 두 경로 `sha256sum -c` OK · 0444 · 두 사본 sha 같음 · stamp 기록). 서버 확인(10-11, 읽기만): 사본 대상 3파일 있음(`scripts/job_runner.py` · `data/.kis_holidays.json` 일반 파일 · uni `sources/kael_db.py`), quant.db 647MB, 디스크 여유 140GB.
+2. **V3-A 코드**: `job_runner.py` `CHAINS["daily_all"]` 의 닫는 `],` 뒤(서버 10-11 확인 55행 — 로컬 사본 54행과 한 줄 차이)에 `daily_post`·`daily_insight` 두 체인(COMPAT §8-1 원문). 확인: `py_compile` 통과, `grep -c '"daily_post"\|"daily_insight"'` = 2. 잡은 돌리지 않는다.
+3. **V3-E**: uni `sources/kael_db.py` `get_signal_insights` 의 점수 조회(서버 10-11 확인 178~183행 `FROM score_history WHERE stock_code = ? ORDER BY score_date DESC LIMIT 1`)에 `AND score_date = (SELECT max(score_date) FROM score_history)`. 확인: `py_compile` 통과.
+4. **crontab 한 번에**(1 의 `crontab.bak.<stamp>` 가 백업): ⓐ V3-B `--chain daily_all` 줄(`5 11 * * 1-5`) 삭제 ⓑ V3-A daily_insight 줄 추가 — 같은 시각 `5 11 * * 1-5`, 별도 락 `/tmp/kael_v3_daily_insight.lock`, 로그는 지운 daily_all 줄과 같은 파일 ⓒ V3-D 휴장 2줄(`monthly_holiday_review`·`refresh_year_holidays`) 앞에 `#`. 확인: `crontab -l` 에 `chain daily_all` 0줄 · `chain daily_insight` 1줄 · 휴장 2줄 주석.
+5. **V3-C 첫 반영**(12:10 전): `scripts/v3_post.sh --date 20261016 --basis morning --v3-db "$HOME/kael-system-v3/data/quant.db" --builds-from data/deliver/history/20261016_morning.json` — 매일과 같은 증분 창, `--first-after-restore` 없음(T-46), 판은 매일 아침 반영과 같은 고정 판(P1). 본 파일에 같은 D 의 장 마감 기록이 없어 점수 두 표까지 9표다(T-34 — v3 10-16 점수 행이 compat 판으로 바뀐다). 확인: rc 0, 본 파일 `_compat_meta` 끝 행 = (2026-10-16, morning, ok), 걸린 시간 기록(QL-S 재생 22.9초).
+6. **스위치 커밋·배포**(15:10 전): `config/postclose_chain.env` `POSTCLOSE_SEND=1` · `POSTCLOSE_V3=in-place` · `POSTCLOSE_V3_POST_CMD='…'`(COMPAT §8-1 V3-A 의 daily_post 명령) + `config/calendar_export.env` `CALENDAR_EXPORT_V3=1`(T-48 — V3-D 와 같은 날) 한 커밋 → `deploy.sh --dry-run` → `--apply`, 배포 rev 를 §5 에 기록. 배포 직후 ⓐ `postclose_chain.sh close --date 20261019 --dry-run` 계획의 ⑥ 에 `--shadow` 가 없고 `--v3-post-cmd` 가 있다 ⓑ `python -m daily.calendar_export --target "$HOME/kael-system-v3/data/.kis_holidays.json"` 1회 rc 0, 휴장 목록이 1 의 백업 사본과 같다(바뀌는 것은 `fetched_at`·`last_reviewed_at` 뿐).
+7. **QL-L 감시 크론** 23:30(`30 14 * * *`, README '컷오버 감시' 원문 — `--v3-log` 는 4ⓑ daily_insight 줄의 로그 파일).
+8. **관측**: 15:41 장 마감 체인(엑셀 1건 발송 · ⑥ 제자리 반영 rc 0 · v3 daily_post 엑셀) → 16:30 워치독 → 20:05 daily_insight(`market_*` 10-19 행) → 21:05 refill 제자리 7표 → 23:30 감시 rc 0 → 10-20 07:00 브리핑(10-19 행) → 08:10 아침 체인(발송 없음 — 장 마감 장부 줄이 있다 · 아침 재반영 7표) → 10:30 워치독 B-57(두 장부).
+
+**멈춤과 되돌리기**: 1~5 중 하나라도 확인이 어긋나면 거기서 멈추고 보고한다. 바꾼 v3 파일의 정본은 1 의 백업이다. 6 을 15:10 까지 끝내지 못하면 그날 20:05 전에 4 의 crontab 을 백업에서 복원한다(V3-A 코드는 체인을 더한 것뿐이라 그대로 둬도 무해). 이는 되돌리기의 v3 파일 변경이라 **[사람 승인]**(CUTOVER_ROLLBACK §0 — N-42 Q4 일괄 승인 밖). V3-C 로 쓴 가격 7표는 v3 가 다음 수집에서 종목마다 최근 5행을 다시 받아 덮고, 10-16 점수 행은 compat 판으로 남는다(T-42 — 되돌릴 이유가 점수면 `--with-scores` 복원). 컷오버 뒤 되돌리기는 CUTOVER_ROLLBACK §4.
 
 ## 4. 검증 방식(N-42 Q1)
 - 'N거래일 연속' 게이트는 **과거 재생 + 실운영 3거래일**로 바꾼다. 3일 창은 실패 1건이면 처음부터 다시 센다(공통 3).

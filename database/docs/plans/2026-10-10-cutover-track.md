@@ -87,7 +87,7 @@
 | X-1 | 격리 재생 실행기 `scripts/replay.sh`(출력 루트·D·basis 인자, 과거 D 의 고정 stage 판) | M | ☑ 1a5d6e09(운영 재현: fi 8/8·model 5/5 같음) |
 | X-2 | 연속 창 판정 집계(notify.log·daily_report·수동 개입 장부, 달력으로 셈) | S | ☑ 36a9ee10(`python -m daily.window_judge` — 하루 판정·3일 창·되돌리기 5일, fail-closed crit 분류, 수동 개입 장부 `record --init`). 서버: notify.log 분류 안 된 crit 0, 저장소 밖 스크립트 notify 호출 0 |
 | K1-1e | deploy.sh: 서버 DEPLOYED.rev 가 HEAD 조상인지 검사 + 빌드 락 | S | ☑ ca546488 |
-| QL-G | v3 소비자 재생 하네스(날짜별 v3 사본 대 compat 반영본) | M | ◐ 구현 중 |
+| QL-G | v3 소비자 재생 하네스(날짜별 v3 사본 대 compat 반영본) | M | ☑ 61ac86d0(`scripts/v3_replay.sh` + `python -m compat.v3_replay compare|dates|tsv|shadow-merge` — 판정은 매일 소비자 열만(T-45), 범주 §7 등록, `--allow-current-builds` 옵트인·대체 판 갈래 기록형, X-1 격리·v3_post.sh 인자 드리프트 테스트, 변이 51 잡음). 서버 v3 사본 증분 재생: 10-01·10-06·10-08 매일 소비자 미설명 0, 10-07 1(시총 반올림 경계 결함 → 61ac86d0 로 수정, 087010), 10-02 대체 판 스키마 차이로 대조 불가. 점수 Spearman score_history 0.986~0.989 |
 
 ### P2 연구 DB 필수 게이트
 | ID | 무엇 | 크기 | 상태 |

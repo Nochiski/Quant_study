@@ -7,6 +7,8 @@
   09-22  사본 없음                          → no_copy
   09-23  반영·대조(다음 거래일 사본 09-24)   → 대조 보고(사본이 얕아 compat 에만 있는 행이 많다 — rc 1)
   09-24  인계 이력 없음                      → reflect_failed:export
+드리프트(리뷰 MINOR-2)는 가짜 python 이 compat 하위 명령의 인자를 받아 적게 하고 v3_replay.sh 와 v3_post.sh 를 같은
+날로 돌려 단계·인자 목록을 맞댄다(경로 값과 알려진 차이 셋을 정규화한 뒤).
 """
 from __future__ import annotations
 
@@ -61,7 +63,9 @@ def root(tmp_path_factory) -> Path:
     (cal / "kis_holidays_2026.json").write_text(json.dumps({"year": 2026, "holidays": hol}), encoding="utf-8")
     py = r / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True)
-    py.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    # V3R_CWD_LOG 를 주면 자기 cwd 를 받아 적는다(MINOR-1 — DuckDB 는 넘칠 때 cwd 의 .tmp 에 쓴다)
+    py.write_text(f'#!/bin/sh\n[ -n "${{V3R_CWD_LOG:-}}" ] && pwd -P >> "$V3R_CWD_LOG"\n'
+                  f'exec "{sys.executable}" "$@"\n', encoding="utf-8")
     py.chmod(0o755)
     return r
 
@@ -101,8 +105,8 @@ def _state(d: Path) -> dict[str, tuple]:
     return out
 
 
-def _run(*args: str, cwd: Path) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("QL_")}
+def _run(*args: str, cwd: Path, **extra_env: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("QL_")} | extra_env
     return subprocess.run(["bash", str(SCRIPT), *args], cwd=cwd, env=env, capture_output=True, text=True,
                           timeout=600)
 
@@ -188,3 +192,147 @@ def test_refuses_unsafe_out_and_bad_args(root: Path, copies: Path, tmp_path: Pat
     assert res.stderr.startswith("v3_replay:")
     assert _state(root) == before
     assert not (root / "data" / "replay").exists() and not (copies / "replay").exists()
+
+
+def test_running_from_the_research_root_writes_nothing_there(root: Path, copies: Path, tmp_path: Path) -> None:
+    """리뷰 MINOR-1 — DuckDB 는 메모리를 넘칠 때 cwd 의 `.tmp` 를 임시 폴더로 쓴다(TMPDIR 무시, 닫을 때 지운다). 작은
+    픽스처로는 넘치지 않으므로 python 들이 어느 cwd 에서 돌았는지를 직접 본다 — 전부 출력 루트 아래여야 한다."""
+    before = _state(root)
+    log = tmp_path / "cwd.log"
+    res = _run("--v3-copies", str(copies), "--dates", "20260923", "--out", str(tmp_path / "out"),
+               "--root", ".", "--full", cwd=root, V3R_CWD_LOG=str(log))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert _state(root) == before
+    cwds = set(log.read_text(encoding="utf-8").split())
+    assert cwds == {str((tmp_path / "out" / "tmp").resolve())}
+    assert not (root / ".tmp").exists()
+    assert json.loads((tmp_path / "out" / "20260923" / "v3_replay.json").read_text(encoding="utf-8"))["tool"]
+
+
+def test_allow_current_builds_falls_back_and_is_recorded(root: Path, copies: Path, tmp_path: Path) -> None:
+    """T-45 — 인계 이력의 판이 보관 판 밖이면 기본은 반영 실패, `--allow-current-builds` 면 현판으로 대체하고 JSON 에 남긴다."""
+    r2 = tmp_path / "ql"
+    shutil.copytree(root, r2, symlinks=True)
+    hist = r2 / "data" / "deliver" / "history" / f"{tce.AS_OF}_morning.json"
+    doc = json.loads(hist.read_text(encoding="utf-8"))
+    doc["equity_builds"]["fin_std"] = "m_20250101T000000_000000Z"           # GC 로 사라진 판
+    hist.write_text(json.dumps(doc), encoding="utf-8")
+    strict = _run("--v3-copies", str(copies), "--dates", "20260923", "--out", str(tmp_path / "a"),
+                  "--root", str(r2), "--full", cwd=tmp_path)
+    assert strict.returncode == 1
+    a = json.loads((tmp_path / "a" / "20260923" / "v3_replay.json").read_text(encoding="utf-8"))
+    assert a["status"] == "reflect_failed:export"
+    loose = _run("--v3-copies", str(copies), "--dates", "20260923", "--out", str(tmp_path / "b"),
+                 "--root", str(r2), "--full", "--allow-current-builds", cwd=tmp_path)
+    assert loose.returncode == 1, loose.stdout + loose.stderr
+    b = json.loads((tmp_path / "b" / "20260923" / "v3_replay.json").read_text(encoding="utf-8"))
+    assert b["tool"] == "compat.v3_replay" and b["inputs"]["builds_fallback"] == ["fin_std"]
+    assert "allow_current_builds=current" in (tmp_path / "b" / "run.txt").read_text(encoding="utf-8")
+
+
+# ── 드리프트 — v3_post.sh 와 같은 compat 단계·인자(리뷰 MINOR-2) ─────────────────────
+_PATH_FLAGS = {"--v3-db", "--out", "--staging", "--equity-root", "--stage-root", "--model-root", "--target",
+               "--calendar-dir", "--commit-flag"}
+# 알려진 차이 — 실행기에만: export --allow-older·--calendar-dir, apply --allow-older / v3_post.sh 에만: apply --commit-flag
+_KNOWN = {("export", "--allow-older"), ("export", "--calendar-dir"), ("apply", "--allow-older"),
+          ("apply", "--commit-flag")}
+
+
+def _argv_python(path: Path, log: Path, extra: str = "") -> None:
+    """compat 하위 명령은 인자만 받아 적고 성공한다(v3-tables 는 표 목록을 낸다). 그 밖(대조기 등)은 진짜 python."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"""#!/bin/bash
+if [ "$1" = "-m" ] && [ "$2" = "compat" ]; then
+  echo "$*" >> "{log}"
+  {extra}
+  [ "$3" = "v3-tables" ] && echo "daily_prices,stocks,score_history"
+  exit 0
+fi
+exec "{sys.executable}" "$@"
+""", encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _calls(log: Path) -> dict[str, list[tuple[str, str | None]]]:
+    out: dict[str, list[tuple[str, str | None]]] = {}
+    for line in log.read_text(encoding="utf-8").splitlines():
+        toks = line.split()
+        assert toks[:2] == ["-m", "compat"], line
+        rest, args, i = toks[3:], [], 0
+        while i < len(rest):
+            flag, val = rest[i], None
+            if i + 1 < len(rest) and not rest[i + 1].startswith("--"):
+                val, i = rest[i + 1], i + 1
+            i += 1
+            args.append((flag, "<path>" if flag in _PATH_FLAGS else
+                         Path(val).name if flag == "--builds-from" and val else val))
+        out[toks[2]] = args
+    return out
+
+
+def _drift_root(tmp_path: Path, log: Path, extra: str = "") -> Path:
+    r = tmp_path / "droot"
+    cal = r / "data" / "calendar"
+    cal.mkdir(parents=True)
+    days = (dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(365))
+    hol = [x.strftime("%Y%m%d") for x in days if x.weekday() >= 5]
+    (cal / "kis_holidays_2026.json").write_text(json.dumps({"year": 2026, "holidays": hol}), encoding="utf-8")
+    _argv_python(r / ".venv" / "bin" / "python", log, extra)
+    return r
+
+
+def test_runner_calls_compat_like_v3_post(copies: Path, tmp_path: Path) -> None:
+    runner_log, post_log = tmp_path / "argv_runner.log", tmp_path / "argv_post.log"
+    droot = _drift_root(tmp_path, runner_log)
+    res = _run("--v3-copies", str(copies), "--dates", "20260923", "--out", str(tmp_path / "out"),
+               "--root", str(droot), cwd=tmp_path)
+    assert res.returncode == 1                                     # 대조기는 진짜라 반영 기록이 없어 입력 오류
+    home = tmp_path / "home"
+    (home / "scripts").mkdir(parents=True)
+    shutil.copy(DB_ROOT / "scripts" / "v3_post.sh", home / "scripts" / "v3_post.sh")
+    (home / "scripts" / "notify.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (home / "scripts" / "notify.sh").chmod(0o755)
+    _argv_python(home / ".venv" / "bin" / "python", post_log)
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    (fakebin / "flock").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (fakebin / "flock").chmod(0o755)
+    v3 = tmp_path / "v3.db"
+    shutil.copy(copies / "quant_20260923.db", v3)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("QL_")}
+    env.update(QL_HOME=str(home), QL_V3_LOCK_FILE=str(tmp_path / "lock"), PATH=f"{fakebin}:{env['PATH']}")
+    post = subprocess.run(["bash", str(home / "scripts" / "v3_post.sh"), "--date", tce.AS_OF, "--basis", "morning",
+                           "--v3-db", str(v3), "--builds-from",
+                           str(droot / "data" / "deliver" / "history" / f"{tce.AS_OF}_morning.json")],
+                          cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
+    assert post.returncode == 0, post.stdout + post.stderr
+    runner, posted = _calls(runner_log), _calls(post_log)
+    assert list(runner) == list(posted) == ["stage", "v3-tables", "export", "apply"]
+    assert ("--allow-older", None) in runner["export"] and ("--calendar-dir", "<path>") in runner["export"]
+    assert ("--allow-older", None) in runner["apply"] and ("--commit-flag", "<path>") in posted["apply"]
+    norm = {name: {s: [a for a in args if (s, a[0]) not in _KNOWN] for s, args in calls.items()}
+            for name, calls in (("runner", runner), ("post", posted))}
+    assert norm["runner"] == norm["post"]
+    assert ("--builds-from", f"{tce.AS_OF}_morning.json") in runner["export"]
+    assert all(flag != "--builds-from-missing" for flag, _ in runner["export"])
+
+
+def test_allow_current_builds_passes_builds_from_missing(copies: Path, tmp_path: Path) -> None:
+    log = tmp_path / "argv.log"
+    droot = _drift_root(tmp_path, log)
+    _run("--v3-copies", str(copies), "--dates", "20260923", "--out", str(tmp_path / "out"), "--root", str(droot),
+         "--allow-current-builds", cwd=tmp_path)
+    assert ("--builds-from-missing", "current") in _calls(log)["export"]
+
+
+def test_a_step_that_touches_the_original_copy_is_rc_2(copies: Path, tmp_path: Path) -> None:
+    """원본 sha 대조 — 반영 단계가 원본 사본을 건드리면(가짜 python 이 stage 에서 한 바이트 덧붙인다) X-1 위반 rc 2."""
+    orig = copies / "quant_20260923.db"
+    droot = _drift_root(tmp_path, tmp_path / "argv.log",
+                        extra=f'[ "$3" = "stage" ] && chmod u+w "{orig}" && printf x >> "{orig}"')
+    res = _run("--v3-copies", str(copies), "--dates", "20260923", "--out", str(tmp_path / "out"),
+               "--root", str(droot), cwd=tmp_path)
+    assert res.returncode == 2, res.stdout + res.stderr
+    assert "X-1 위반" in res.stderr
+    row = (tmp_path / "out" / "hashes.tsv").read_text(encoding="utf-8").splitlines()[1].split("\t")
+    assert row[1] != row[2]

@@ -75,7 +75,7 @@
 | ID | 무엇 | 크기 | 상태 |
 |---|---|---|---|
 | X-1 | 격리 재생 실행기 `scripts/replay.sh`(출력 루트·D·basis 인자, 과거 D 의 고정 stage 판) | M | ☑ 1a5d6e09(운영 재현: fi 8/8·model 5/5 같음) |
-| X-2 | 연속 창 판정 집계(notify.log·daily_report·수동 개입 장부, 달력으로 셈) | S | ☐ |
+| X-2 | 연속 창 판정 집계(notify.log·daily_report·수동 개입 장부, 달력으로 셈) | S | ◐ 구현 중(베이스 94317d60 — 하루 통과 = 장 마감 체인 ok·crit 0·수동 개입 0·다음 날 PR-7 rc 0, 실패 1건이면 재시작) |
 | K1-1e | deploy.sh: 서버 DEPLOYED.rev 가 HEAD 조상인지 검사 + 빌드 락 | S | ☑ ca546488 |
 | QL-G | v3 소비자 재생 하네스(날짜별 v3 사본 대 compat 반영본) | M | ☐ |
 
@@ -118,7 +118,7 @@
 | QL-B | T-19 시총 `all`·업종 KRX(키움 마스터 upName — v3 와 같은 원천) | S | ☑ daa5bcb5(업종 불일치 0) |
 | QL-C | T-16 `score_history`·`_v2` 날짜 단위 쓰기 + `_compat_meta` spec·판 id | M | ☑ 5b7cde5c |
 | QL-D | v3 소비자 T 행 원천 = `postclose.db`(전 종목), 16:00 넘긴 종목만 21:05 저녁 원장 값 | M | ☑ 22601c97(종목마다 원천 하나 `_t_pick`, 0행 가드, 저녁이 아침을 덮지 않음 — T-35 순서 함수 공유, `compat/t_rows.py` 분리, T-6 기준가 술어 `daily/kw_daily.py` `ka10060_base_price_differs_sql`, `v3_post.sh` 원장 인자). 서버 재생 T=10-08(21:05 경로): 종가 2,529/2,529·수급 12열 = v3 |
-| QL-E | T-18 사건일 이전 행 수정가 소급 | M | ☐ — 함께 볼 것: compat `adj_close` 는 equity 전방 조정이라 과거 기업행위가 있는 종목(10-08 기준 약 1,080/2,529)에서 v3(최신일 = 원종가, 소급 조정)와 값 수준이 다르다. 비율만 쓰는 소비자는 같지만 drilldown·시세 시트처럼 수준을 보이는 곳은 다르다 — 반영 창을 최신일 기준으로 다시 맞출지 QL-E 에서 정한다 |
+| QL-E | T-18 사건일 이전 행 수정가 소급 | M | ◐ 구현 중(베이스 94317d60 — v3 소비자 adj_close 를 '최신 행 = 원종가' 소급 기준으로, compat 층만) |
 | QL-F | `v3_post.sh`: 스테이징 → 게이트 → 9표 한 트랜잭션 반영 → v3 `daily_post` 호출(같은 락), 아침 KRX 재반영 | M | ☑ 83c66a64(경로 가드·디스크 여유·fd 비상속·T-31 daily_post/daily_insight·신선도 게이트·T-34 아침 7표·T-35 순서 가드·OHL 공란 채움 확장). 서버(v3 10-08 사본): 그림자 rc 0·사본 불변 / 증분 14일 창 게이트+반영 단계 약 2초(v3 busy_timeout 5초 안) / `--full` 730일 rc 0 57.5초(반영 약 29초 — 브리핑·리서치 수집 시각 회피) |
 | QL-I | 되돌리기 절차서 · 표 단위 복원 스크립트 · 고정 백업 2벌 | S | ☐ |
 | QL-J | 키 이관(quant-ledger 자기 설정을 기본값으로) | S | ☐ |

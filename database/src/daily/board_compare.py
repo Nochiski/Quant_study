@@ -94,10 +94,10 @@ CATEGORIES: dict[str, Category] = {c.key: c for c in (
     Category(FLOW_DEF, "수급 정의", "N-35 ②④",
              "T 행 수급 — 장 마감 판은 15:40 KRX 정규장 확정 수급, 연구 판은 21:05 하루 전체(애프터마켓 "
              "포함) 수급"),
-    Category(CARRY, "이월", "T-2·FACTOR_INPUTS §2-1·§7 · PR-5(T 행 adj_ok 이월)",
+    Category(CARRY, "이월", "T-2·FACTOR_INPUTS §2-1·§7 · PR-5(T 행 adj_ok·adj_jump_ok 이월)",
              "장 마감 판 유니버스는 D' universe_daily 행 이월(종목 구성·시장·종류·정지·관리·adv20·주식수)과 "
              "고정 판 마스터(이름·상장일)다 — T 신규 상장·폐지·정지 변경과 D' 주식수 시총이 여기 든다. "
-             "T 행 adj_ok 는 D' 값 이월"),
+             "T 행 adj_ok·adj_jump_ok 는 D' 값 이월"),
     Category(INFO, "정보 시점", "T-2·T-5·FACTOR_INPUTS §2-1",
              "장 마감 판은 정보 입력을 D' 로 자른다 — WISE(컨센서스·연간 컨센서스·재무·신선도)·DART(재무·"
              "배당·감사)·WICS·추정기관 수·기업행위 계수·미해결 사건. 연구 판은 T 에 도착한 것까지 본다"),
@@ -144,7 +144,9 @@ T_PRICE_COLS = frozenset({"close", "volume"})
 INFO_DATE_COL: Mapping[str, str] = {"fi_consensus": "fetched_date",
                                     "fi_consensus_annual": "fetched_date",
                                     "fi_fin_summary": "available_date"}
-ADJ_EVENT_COLS = frozenset({"adj_factor", "adj_ok"})
+# 수정주가 표식 — 미해결 사건 계단. adj_jump_ok 는 H1-4(T-9, fi1.6.0)가 더하는 열이다(판에 없으면 안 쓰인다)
+ADJ_FLAG_COLS = frozenset({"adj_ok", "adj_jump_ok"})
+ADJ_EVENT_COLS = ADJ_FLAG_COLS | {"adj_factor"}
 
 
 class CompareInputError(RuntimeError):
@@ -387,8 +389,8 @@ def _rule_adj(p: _Pair, c: _Ctx) -> list[_Verdict]:
                 items.append((col, CLOSE_DEF, ""))
             else:
                 items.append((col, UNEXPLAINED, "계수·T 종가가 같은데 수정종가가 다르다"))
-        elif col == "adj_ok":
-            items.append((col, INFO, "") if earlier else (col, CARRY, "T 행 adj_ok 는 D' 값"))
+        elif col in ADJ_FLAG_COLS:
+            items.append((col, INFO, "") if earlier else (col, CARRY, "T 행 표식은 D' 값"))
         else:
             items.append((col, UNEXPLAINED, "등록 범주가 없는 열"))
     return _group(items)

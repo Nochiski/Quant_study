@@ -456,6 +456,22 @@ def test_t_row_factor_change(tmp_path, pre_t_factor: float, want: str) -> None:
     assert {f.category for f in found} == {want}, found
 
 
+def test_t_row_unresolved_flag_is_carried(tmp_path) -> None:
+    """T 행 adj_ok 는 장 마감 판이 D' 값을 잇는다(PR-5) — T 행에서만 다르면 이월. H1-4 가 더하는
+    adj_jump_ok 도 같은 규칙이다(계약에 아직 없어 행 쌍으로 직접 본다)."""
+    pre = T_DATE - dt.timedelta(days=1)
+    ev = _mini(T_DATE, adj={A: [(pre, 1000.0, 1.0, True), (T_DATE, 1000.0, 1.0, True)]})
+    rs = _mini(T_DATE, adj={A: [(pre, 1000.0, 1.0, True), (T_DATE, 1000.0, 1.0, False)]})
+    (f,) = _fi_pair(tmp_path, T_DATE, ev, rs)
+    assert (f.table, f.category, f.columns) == ("fi_adj_prices", bc.CARRY, ("adj_ok",))
+    uni = {A: {"exclude_reason": None}}
+    ctx = bc._Ctx(T_DATE, DP_DATE, uni, uni, {A: 1000}, {A: 1000})
+    pair = bc._Pair({"ticker": A, "date": T_DATE}, True, True, {"adj_jump_ok": True},
+                    {"adj_jump_ok": False}, ("adj_jump_ok",))
+    assert bc.classify("fi_adj_prices", pair, ctx) == [(bc.CARRY, ("adj_jump_ok",),
+                                                         "T 행 표식은 D' 값")]
+
+
 def test_reason_vocabulary_matches_factor_inputs() -> None:
     """제외 사유 어휘는 fi 정본(`queries.EXCLUDE_REASONS`)과 같다(T-6 사유는 PR-5 가 더한다)."""
     assert {bc.NO_PRICE, *bc.CARRY_REASONS, *bc.ESTIMATE_REASONS} <= set(fiq.EXCLUDE_REASONS)

@@ -52,8 +52,11 @@
 #     POSTCLOSE_SEND=1 일 때만 엑셀 발송, POSTCLOSE_V3=in-place 일 때만 제자리 반영(그 밖은 미발송 · --shadow).
 #     in-place 인데 발송이 꺼져 있으면 rc 5 로 거부한다(crit — 보내지 않은 점수가 v3 에 들어간다).
 #     POSTCLOSE_V3_POST_CMD 는 ⑥ 에만 넘긴다 — refill·morning 은 compat 만이다(v3_post.sh 가 아침·--no-scores + post 명령을
-#     인자 오류로 막는다). 환경의 QL_V3_POST_CMD 는 비운다(설정만 정본). 읽기는 set +u 안에서 한다(빈 변수 참조가 셸을
-#     조용히 끝내지 않게).
+#     인자 오류로 막는다). 환경의 QL_V3_POST_CMD 는 비운다(설정만 정본). 읽기·판정은 scripts/postclose_conf.sh 한 곳이다
+#     (model_daily.sh·watchdog.sh 와 공용 — ENABLED=1 그리고 SEND=1 이면 원천 전환 뒤라 아침판은 짓기만·대체 발송, PR-9).
+#     ⑤ 엑셀이 ok 면(발송 장부 줄) ⑥ v3 가 실패해도 다음 날 아침 대체 발송은 없다 — 대체 발송은 장 마감 발송 장부에 그 D 줄이
+#     없을 때뿐이고(그 D ⑤ 런 중 보냈을 수 있는 런 — rc 3 등 — 이 있으면 판정 불가, B-58 · model_daily.sh), 그 D 의 v3 점수는
+#     아침 재반영(T-34)이 아침 모델 판으로 채운다.
 #   v3 quant.db: QL_V3_DB(기본 $HOME/kael-system-v3/data/quant.db — COMPAT_LAYER §8 V3-C 와 같은 자리). 그림자도 읽는다
 #     (스테이징 사본을 뜬다).
 #   락 — 장 마감 체인 락 /tmp/quant_ledger_postclose_chain.lock: close 는 비대기(이미 돌면 warn·rc 3 — 같은 T 를 두 번 돌지
@@ -83,7 +86,6 @@ PY=.venv/bin/python
 MDB=data/model_db
 RUN_DB=data/raw/daily_run.db
 HIST=data/deliver/history
-CONF=config/postclose_chain.env
 CHAIN_LOCK="${QL_POSTCLOSE_CHAIN_LOCK_FILE:-/tmp/quant_ledger_postclose_chain.lock}"
 BUILD_LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"
 V3_DB="${QL_V3_DB:-$HOME/kael-system-v3/data/quant.db}"
@@ -114,21 +116,10 @@ if [[ "$D" > "$TODAY_KST" ]]; then
   exit 2
 fi
 
-# ── 설정 — 켜는 쪽만 정확한 값. 파일이 없거나 값이 다르면 꺼짐·그림자 ─────────────────────
-POSTCLOSE_ENABLED=""; POSTCLOSE_SEND=""; POSTCLOSE_V3=""; POSTCLOSE_V3_POST_CMD=""
-CONF_NOTE="설정 $CONF"
-if [ -f "$CONF" ]; then
-  set +u
-  # shellcheck source=/dev/null  # reason: 배포 산출물 설정 파일(변수 대입만)이라 정적 분석 대상이 아니다
-  . "$CONF" || CONF_NOTE="설정 $CONF 읽기 오류 — 읽힌 값만 쓴다"
-  set -u
-else
-  CONF_NOTE="설정 $CONF 없음 — 꺼짐·그림자 기본값"
-fi
-ENABLED=""; [ "${POSTCLOSE_ENABLED:-}" = 1 ] && ENABLED=1
-SEND=""; [ "${POSTCLOSE_SEND:-}" = 1 ] && SEND=1
-SHADOW=1; [ "${POSTCLOSE_V3:-}" = in-place ] && SHADOW=""
-POST_CMD=""; [ -z "$SHADOW" ] && POST_CMD="${POSTCLOSE_V3_POST_CMD:-}"
+# ── 설정 — 켜는 쪽만 정확한 값. 파일이 없거나 값이 다르면 꺼짐·그림자(규칙은 scripts/postclose_conf.sh 한 곳) ──
+# shellcheck source=scripts/postclose_conf.sh
+. scripts/postclose_conf.sh
+postclose_conf_load
 unset QL_V3_POST_CMD
 SWITCH="발송 $([ -n "$SEND" ] && echo on || echo off) · v3 $([ -n "$SHADOW" ] && echo shadow || echo in-place)$([ -n "$POST_CMD" ] && echo ' + daily_post')"
 CONF_ERR=""

@@ -7,6 +7,7 @@
 #     30 2 * * 6    cd ~/quant-ledger && scripts/watchdog.sh wics_weekly      # 토 11:30 KST — 금요일 dt WICS 스냅샷 38코드(행>0)
 #     30 1 * * *    cd ~/quant-ledger && scripts/watchdog.sh morning_build    # 10:30 KST 매일 (F-11 10-06: 10:00 → 10:30, 10-03 종료 09:49 로 여유 11분. D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #     morning_build 은 확정판이 정상이면 그 D 의 엑셀 발송 장부 줄(data/deliver/sent_model_daily.jsonl, basis=morning)까지 본다(B-57)
+#     — 원천 전환 뒤(컷오버 PR-9, 판정 scripts/postclose_conf.sh)는 장 마감 발송 장부 basis=evening 줄 또는 아침 장부 줄
 #     30 7 * * 1-5  cd ~/quant-ledger && scripts/watchdog.sh postclose_board  # 16:30 KST(제안 — 컷오버 PR-8, 그림자 시작 때 등록)
 #     postclose_board 는 오늘(T) 장 마감 체인(scripts/postclose_chain.sh close) 런 로그를 단계마다 본다 — 수집(kiwoom_postclose)
 #     ok·cutoff·late, 나머지 단계(daily.runlog.POSTCLOSE_STEPS) ok 가 아니거나(없음·실패·아직 running) 하면 crit. 세션 예외일(T-26)은 정상
@@ -38,17 +39,25 @@ if [ "$CHECK" != "morning_build" ] && [ "$CHECK" != "wics_weekly" ] && [ "$TRADI
   scripts/notify.sh info "watchdog $CHECK — 휴장" "$TODAY(KST)는 거래일이 아니다 — 판정 건너뜀"
   exit 0
 fi
+# morning_build 의 발송 장부 검사(B-57)는 원천 전환 여부(컷오버 PR-9)에 따라 볼 장부가 다르다 — 설정 판정은 장 마감 체인·
+# model_daily 와 같은 scripts/postclose_conf.sh 한 곳이고, 파이썬에는 결과(CUTOVER — 1 이면 전환 뒤)만 넘긴다.
+CUTOVER=""
+if [ "$CHECK" = morning_build ]; then
+  # shellcheck source=scripts/postclose_conf.sh
+  . scripts/postclose_conf.sh
+  postclose_conf_load
+fi
 # 판정은 파이썬이 한다(jq 없음). 1줄 = 알림 제목에 붙일 시각, 2줄~ = 본문. rc 0 = 정상, 1 = 이상.
 # morning_build 의 발송 장부 검사(B-57)만 rc 3 = 발송 기록 없음, 4 = 발송 여부 판정 불가 — 아래에서
 # crit 제목을 확정 빌드 실패와 가른다.
-OUT=$($PY - "$CHECK" "$TODAY" <<'PY'
+OUT=$($PY - "$CHECK" "$TODAY" "$CUTOVER" <<'PY'
 import datetime as dt
 import json
 import os
 import sys
 
 KST = dt.timezone(dt.timedelta(hours=9))
-check, today = sys.argv[1], sys.argv[2]
+check, today, cutover = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 today_d = dt.date(int(today[:4]), int(today[4:6]), int(today[6:8]))
 
 
@@ -172,28 +181,51 @@ if check == "morning_build":
     # (data/deliver), 줄의 date 는 YYYY-MM-DD 다. 장부를 못 읽으면 보냈는지 모르므로
     # crit(P1). deliver(_sent)보다 엄격하다 — 장부 경로가 디렉터리면 deliver 는 is_file()
     # 거짓이라 빈 장부로 보지만, 워치독은 열기 실패(IsADirectoryError)로 판정 불가 crit 이다.
+    # 원천 전환 뒤(컷오버 PR-9 · T-7)는 장 마감 체인 ⑤ 가 그 D 의 엑셀을 먼저 보내고 아침판은 짓기만이다 — 발송 기록 =
+    # 장 마감 장부(⑤ 의 --out-root data/model_db/deliver) basis=evening 줄 또는 아침 장부 basis=morning 줄(대체 발송).
+    # 둘 다 없으면 rc 3, 어느 장부든 못 읽으면 rc 4(손상된 장부는 다음 발송·대체 발송을 막는다).
     spath = "data/deliver/sent_model_daily.jsonl"
+    epath = "data/model_db/deliver/sent_model_daily.jsonl"
     unknown = f"확정판 D={d_prev} 엑셀 발송 여부 판정 불가 — 발송 장부"
     tail = f" · {lsum}{warn_txt}"
-    try:
-        with open(spath, encoding="utf-8") as f:
-            slines = f.read().splitlines()
-    except FileNotFoundError:
-        slines = []
-    except (OSError, ValueError) as e:
-        out("", f"{unknown} {spath} 를 읽을 수 없다 ({type(e).__name__}: {e}){tail}", 4)
-    sent = []
-    for i, line in enumerate(slines, start=1):
-        if not line.strip():
-            continue
+
+    def sent_rows(path: str, basis: str) -> list[dict]:
+        """장부에서 그 D·basis 줄(보낸 순서). 파일이 없으면 빈 목록, 못 읽으면 rc 4."""
         try:
-            entry = json.loads(line)
-            if not isinstance(entry, dict):
-                raise ValueError(f"JSON 객체가 아니다({type(entry).__name__})")
-        except ValueError as e:
-            out("", f"{unknown} {spath}:{i} 를 읽을 수 없다 ({e}){tail}", 4)
-        if entry.get("date") == d_prev_d.isoformat() and entry.get("basis") == "morning":
-            sent.append(entry)
+            with open(path, encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except FileNotFoundError:
+            return []
+        except (OSError, ValueError) as e:
+            out("", f"{unknown} {path} 를 읽을 수 없다 ({type(e).__name__}: {e}){tail}", 4)
+        rows = []
+        for i, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                if not isinstance(entry, dict):
+                    raise ValueError(f"JSON 객체가 아니다({type(entry).__name__})")
+            except ValueError as e:
+                out("", f"{unknown} {path}:{i} 를 읽을 수 없다 ({e}){tail}", 4)
+            if entry.get("date") == d_prev_d.isoformat() and entry.get("basis") == basis:
+                rows.append(entry)
+        return rows
+
+    sent = sent_rows(spath, "morning")
+    if cutover:
+        esent = sent_rows(epath, "evening")
+        if not (sent or esent):
+            where = spath if os.path.exists(spath) else f"{spath} 파일 없음"
+            ewhere = epath if os.path.exists(epath) else f"{epath} 파일 없음"
+            out("", f"확정판 D={d_prev} 엑셀 발송 기록 없음 — 원천 전환 뒤인데 장 마감 장부 {ewhere}(basis=evening)·"
+                    f"아침 장부 {where}(basis=morning, 대체 발송) 둘 다 그 D 줄이 없다 — "
+                    f"scripts/model_daily.sh --date {d_prev} 로 손 발송(사용자 승인 뒤 — 장 마감 장부에 줄이 없으면 "
+                    f"아침판을 대체 발송한다) · notify.log 에 같은 D 의 엑셀·deliver(rc=3) 실패가 있으면 이미 보냈을 수 있다(B-58)"
+                    f" — 손 발송 전에 확인{tail}", 3)
+        seen = " · ".join(f"{name} 정정 {rc_txt(rows[-1].get('correction'))}"
+                          for name, rows in (("장 마감 판", esent), ("아침 대체 발송", sent)) if rows)
+        out(when.split(" ")[-1], f"D={d_prev} 원장 건전성 OK ({when} KST) · 발송 기록 있음({seen}){tail}", 0)
     if not sent:
         where = spath if os.path.exists(spath) else f"{spath} 파일 없음"
         out("", f"확정판 D={d_prev} 엑셀 발송 기록 없음 — scripts/model_daily.sh --date "

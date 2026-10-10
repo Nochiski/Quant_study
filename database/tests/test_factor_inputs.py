@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import inspect
+import itertools
 import json
 import os
 from pathlib import Path
@@ -1167,9 +1168,10 @@ def _jump_sessions() -> list[dt.date]:
 
 
 def _mini_adj_prices(d: dt.date, cases: dict[str, tuple[dt.date, dt.date, float, str]],
-                     ) -> list[dict[str, object]]:
+                     more_events: tuple[tuple[str, dt.date], ...] = ()) -> list[dict[str, object]]:
     """작은 equity 표(달력·price_adj_daily·adj_factor) 위에서 fi_adj_prices SQL 만 돌린 결과 행
-    (계약 열 전부, 종목·날짜순). `cases` 모양은 JUMP_CASES."""
+    (계약 열 전부, 종목·날짜순). `cases` 모양은 JUMP_CASES. `more_events` = 같은 종목에 더할 미해결
+    사건(종목, 적용일) — 가격은 바꾸지 않는다."""
     from factor_inputs import queries
     sessions = _jump_sessions()
     con = duckdb.connect()
@@ -1187,6 +1189,8 @@ def _mini_adj_prices(d: dt.date, cases: dict[str, tuple[dt.date, dt.date, float,
                 rows.append((t, s, float(px), 1.0, 1.0, "krx"))
             con.executemany("INSERT INTO price_adj_daily VALUES (?, ?, ?, ?, ?, ?)", rows)
             con.execute("INSERT INTO adj_factor VALUES (?, ?, ?, ?)", [t, apply, apply, res])
+        for t, apply in more_events:
+            con.execute("INSERT INTO adj_factor VALUES (?, ?, ?, 'unresolved')", [t, apply, apply])
         con.execute("CREATE TABLE _fi_universe AS SELECT DISTINCT ticker FROM price_adj_daily")
         p = queries.Params(d=d.isoformat(), fy=f"{d.year}12",
                            price_from=(d - dt.timedelta(days=queries.PRICE_WINDOW_DAYS)).isoformat(),
@@ -1255,6 +1259,24 @@ def test_adj_jump_does_not_look_past_d(jump_steps) -> None:
     있어도) — 08-04 판에서야 점프 행 08-03 부터 False 다."""
     assert _first_false(jump_steps[JUMP_D]["LATE"], 2) is None
     assert _first_false(jump_steps[JUMP_D2]["LATE"], 2) == dt.date(2015, 8, 3)
+
+
+def test_jump_row_shared_by_two_unresolved_events_flips_once() -> None:
+    """MINOR-A: 같은 종목의 미해결 사건 둘(적용일 07-01 · 07-06)이 같은 점프 행(07-03 +100%)을 이웃
+    (±6 세션)으로 공유한다. 점프 행은 (종목, 날짜) 하나로 세므로 계단은 07-03 에서 한 번만 뒤집힌다 —
+    사건마다 세면 두 번 뒤집혀 07-03 부터 다시 True 가 되어(짝수) 점프가 통째로 사라진다. adj_ok 는
+    사건 축이라 07-01·07-06 두 번 뒤집힌다."""
+    rows = _mini_adj_prices(JUMP_D, {"SH": (dt.date(2015, 7, 1), dt.date(2015, 7, 3), 2.0,
+                                            "unresolved")},
+                            more_events=(("SH", dt.date(2015, 7, 6)),))
+    jump_ok = [(r["date"], r["adj_jump_ok"]) for r in rows]
+    flips = [d for (_, prev), (d, cur) in itertools.pairwise(jump_ok) if prev != cur]
+    assert flips == [dt.date(2015, 7, 3)]
+    assert all(ok for d, ok in jump_ok if d < dt.date(2015, 7, 3))
+    assert not any(ok for d, ok in jump_ok if d >= dt.date(2015, 7, 3))
+    ok = [(r["date"], r["adj_ok"]) for r in rows]
+    assert [d for (_, prev), (d, cur) in itertools.pairwise(ok) if prev != cur] == [
+        dt.date(2015, 7, 1), dt.date(2015, 7, 6)]
 
 
 def test_scope_window_starting_between_apply_date_and_a_late_jump_is_masked() -> None:

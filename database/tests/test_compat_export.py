@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -26,6 +27,7 @@ import pytest
 from compat import CompatEmptyError, CompatError, CompatSchemaError, export, quant_db
 from compat.__main__ import main as cli_main
 from conftest import _make_stage_tree
+from daily import calendar as daily_calendar
 
 AS_OF = "20260923"
 D21, D22, D23 = dt.date(2026, 9, 21), dt.date(2026, 9, 22), dt.date(2026, 9, 23)
@@ -913,20 +915,21 @@ def test_window_days_without_full_refuses(roots, tmp_path: Path) -> None:
              window_days=550)
 
 
-# ── K1-9d · T-14 — 증분 창은 10거래일(daily.calendar) ──────────────────────
-# 14달력일 창은 설·추석처럼 평일 휴장이 끼면 7~8거래일로 줄어 T-41 덮어쓰기 재현·자가 복구
-# 창이 좁아진다.
+# ── K1-9d · T-14 — 증분 창 = 08:10 KRX 재수집 창(daily.calendar) ────────────
+# 창은 as_of 이하 마지막 거래일 L 과 그 앞 10거래일(L 포함 11세션)이다. 14달력일 창은 평시엔 같은
+# 11세션이지만 설·추석처럼 평일 휴장이 끼면 7~8세션으로 줄어, 아침 재수집으로 고친 앞쪽 날이
+# `--full` 전까지 v3 에 반영되지 않고 T-41 덮어쓰기 재현·자가 복구 창도 좁아진다.
 _LONG_BREAK = ("20260916", "20260917", "20260918")                 # 합성 사흘 연휴(수~금)
 _CHUSEOK_2026 = ("20260924", "20260925", "20261005", "20261009")   # 추석·개천절 대체·한글날
 
 
-def test_incremental_window_is_ten_sessions_across_holidays(roots, tmp_path: Path) -> None:
-    """09-23 에서 거꾸로 10번째 거래일(그날 포함)은 연휴를 건너 09-07 이다 — 14달력일(09-09~)
-    이면 8거래일뿐. 창은 `_compat_meta.window` 에 그대로 남는다(days 는 달력일 폭)."""
+def test_incremental_window_spans_krx_refetch_across_holidays(roots, tmp_path: Path) -> None:
+    """09-23 과 그 앞 10거래일(11세션)은 연휴를 건너 09-04 부터다 — 14달력일(09-09~)이면
+    8세션뿐. 창은 `_compat_meta.window` 에 그대로 남는다(days 는 달력일 폭)."""
     target = tmp_path / "quant.db"
     res = _run(roots, target, tables=["investor_detail_flows"], full=False,
                calendar_dir=_calendar(tmp_path, _LONG_BREAK))
-    want = {"days": 16, "full": False, "from_date": "2026-09-07", "to_date": "2026-09-23"}
+    want = {"days": 19, "full": False, "from_date": "2026-09-04", "to_date": "2026-09-23"}
     assert res.window == want
     assert json.loads(_rows(target, 'SELECT "window" FROM _compat_meta')[0][0]) == want
     assert res.tables["investor_detail_flows"].n_rows == 6
@@ -937,10 +940,23 @@ def test_incremental_window_is_ten_sessions_across_holidays(roots, tmp_path: Pat
                                    dt.date(2026, 10, 11)])   # 일요일
 def test_incremental_from_counts_back_from_last_trading_day(tmp_path: Path,
                                                             as_of: dt.date) -> None:
-    """2026 추석·개천절 대체공휴일 뒤 — 10-08 에서 10거래일이면 09-22 다(14달력일 09-24~ 는
-    8거래일)."""
+    """2026 추석·개천절 대체공휴일 뒤 — 10-08 과 그 앞 10거래일이면 09-21 부터다(14달력일 09-24~
+    는 8세션)."""
     cal = _calendar(tmp_path, _CHUSEOK_2026)
-    assert quant_db._incremental_from(as_of, cal) == dt.date(2026, 9, 22)
+    assert quant_db._incremental_from(as_of, cal) == dt.date(2026, 9, 21)
+
+
+def test_incremental_window_starts_at_daily_build_krx_refetch(tmp_path: Path) -> None:
+    """P4 계약 — 증분 창 시작 = 08:10 `daily_build.sh` krx_step 재수집 시작
+    (`prev_trading_day(D, n=N)`). 셸의 N 이 바뀌면 compat 창도 따라가야 한다."""
+    sh = (Path(__file__).resolve().parents[1] / "scripts" / "daily_build.sh").read_text(
+        encoding="utf-8")
+    step = sh[sh.index("krx_step() {"):sh.index("for attempt in")]
+    (n,) = re.findall(r"prev_trading_day\(.*, n=(\d+)\)", step)
+    cal_dir = _calendar(tmp_path, _CHUSEOK_2026)
+    d = dt.date(2026, 10, 8)
+    want = daily_calendar.load(cal_dir).prev_trading_day(d, n=int(n))
+    assert quant_db._incremental_from(d, cal_dir) == want
 
 
 @pytest.mark.parametrize("date, cal", [("20260923", "nocal"),        # 달력 폴더 없음

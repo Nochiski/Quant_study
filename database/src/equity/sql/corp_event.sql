@@ -377,8 +377,8 @@ out AS (
 --   · 감자는 유상증자와 묶여 돌아 창 안에서 주식수가 내려갔다 올라온다(75분위 2.0 · 방향 위반
 --     148/516) → **유도하지 않는다**.
 --   · 어긋나는 23.7% 는 창 안의 유상증자·전환·스톡옵션이 원인이고 과대 추정 방향이다.
---     adj_factor 가 apply_date 가격으로 검산해 안 맞으면 no_price_match 로 거부하므로
---     틀린 비율이 조용히 반영될 경로가 없다.
+--     adj_factor 가 KRX 기준가 비로 검산해(E-1, e1.28.0) 안 맞으면 no_base_price_evidence·
+--     no_price_match(또는 krx_base_inconsistent)로 거부하므로 틀린 비율이 조용히 반영될 경로가 없다.
 -- 판정(pool·judged·ranked)은 건드리지 않는다 — 비어 있던 열을 채울 뿐이라 행 수(EG1)가 불변이다.
 listing_seq AS (
     SELECT ticker, date, list_shrs,

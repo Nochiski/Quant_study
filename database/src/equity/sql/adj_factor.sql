@@ -26,19 +26,41 @@
 --   0.9 · 5% 무상증자 0.048). 원수익률 기준 |r − pf| ≤ max(0.15|pf−1|, 0.05)(서버 실측에 쓴 식)과 감자에선
 --   같고 분할에선 더 엄격하다 — 원수익률 기준은 50:1 분할에 r ∈ [0, 0.167] 을 허용해 조정 후 +735% 까지
 --   통과시킨다(EG8-P02 가 잡을 구멍을 판정에서 미리 막는다).
---   (a) nominal        : 명목 세션의 dev ≤ tol. 기대 점프가 tol_abs 이하인 소액 이벤트(m ≤ tol_abs, 예 2~5%
---                        무상증자)는 가격으로 날짜를 가릴 수 없으므로 항상 명목 세션(창 탐색은 잡음 매칭이
---                        된다 — 서버 실측 (3)).
---   (b) price_matched  : 창 [n0 − lookback, n0 + window] 세션의 거래 행 중 dev 최소 세션이 tol 안.
---   (c) price_matched_combined : (a)(b) 실패 후보 중 같은 티커·명목 세션 거리 ≤ window 로 이어진 성분
---                        (연결 성분, 재귀 CTE)의 계수 곱으로 성분 창 [min n0 − lookback, max n0 + window] 에서
---                        한 세션을 찾아 성분 전부에 같은 apply_date — 감자 + 액면병합 같은 복합 사건은 개별
---                        비율로는 어느 날도 맞지 않고 따로 적용하면 이중 계산이다.
---   (d) unmatched      : 못 찾으면 factor_ok=false · factor_source='no_price_match' · 계수 1 — 틀린 날에
---                        적용하는 것보다 안 하는 게 낫다. apply_date 는 명목 세션(기록용).
+--   ※ E-1(e1.28.0, v3 컷오버 트랙 QL-E 리뷰 MAJOR-2): 위 원수익률 잔여는 **세션을 고르는 근거로 쓰지
+--     않는다**. 원수익률은 그날 시장 등락을 품어 기준가가 안 바뀐 날(조정 없음)에도 기대 점프와 맞을 수
+--     있다 — 069080·091700(자기주식 소각, 주식수만 감소)·240600(권리락 07-29 를 두고 09-15 급락)·
+--     291230(감자 기준일 급등)이 그렇게 ok 로 접혀 수정수익률을 틀었다(서버·로컬 사건 목록 같음).
+--     KRX 기준가 사슬 Π 전일종가 ÷ 기준가 는 키움 수정주가와 932,265행 중 0행만 달라(I-1 실측과 같다)
+--     '조정이 실제로 일어난 세션' 의 정본 증거다. 그래서 (a)(b)(c) 의 후보 세션은 아래 S06-2 기준가 후보
+--     bp(기준가 ÷ 직전 행 종가 r 이 1 ± base_tol 밖, ETF·구간 첫날 제외)뿐이고 잔여는 dev = |r / pf − 1|
+--     (같은 tol)이다. 기준가 NULL(저녁 잠정 행 — KRX 기본정보 없음)도 후보가 아니다: KRX 행 기준가 채움은
+--     2010-01-04 ~ 2026-10-02 전 행 100%(로컬 10-03 판 실측)라 '옛 원천에 기준가가 없는 구간' 이 없고,
+--     결측 행은 저녁 잠정 T 행뿐이라 결측으로 본다(P1 — 다음 아침 KRX 행이 다시 판정한다).
+--   (a) nominal        : 명목 세션이 bp 이고 dev ≤ tol. 소액 이벤트(m ≤ tol_abs, 예 2~5% 무상증자·자기주식
+--                        소각 감자)도 같은 조건 — 옛 규칙은 가격으로 날짜를 못 가린다며 명목 세션에 무조건
+--                        ok 였다. 소액은 창 탐색((b)(c))을 안 한다(tol_abs 가 방향이 반대인 다른 권리락까지
+--                        품는다) — 명목 세션 ± base_match_window_sessions 의 기준가는 S06-2 (a) 가 본다.
+--   (b) price_matched  : 창 [n0 − lookback, n0 + window] 의 bp 세션(참고가 행 포함) 중 dev 최소가 tol 안.
+--   (c) price_matched_combined : (a)(b) 실패 후보(소액 제외) 중 같은 티커·명목 세션 거리 ≤ window 로 이어진
+--                        성분(연결 성분, 재귀 CTE)의 계수 곱으로 성분 창 [min n0 − lookback, max n0 + window]
+--                        의 bp 세션에서 찾아 성분 전부에 같은 apply_date — 감자 + 액면병합 같은 복합 사건은
+--                        개별 비율로는 어느 날도 맞지 않고 따로 적용하면 이중 계산이다.
+--   (a)(b)(c) 로 고른 세션은 늘 기준가 후보라 S06-2 (a) 가 같은 세션(거리 0)에서 기준가 비로 계수를 교체한다
+--   — ok 행의 apply_basis 는 결국 krx_base_price 뿐이다(1:1 짝에서 진 단위는 conflict 로 내려간다).
+--   (d) (a)(b)(c) 가 못 찾으면 옛 원수익률 판정(소액은 명목 세션, 아니면 명목 세션 잔여 ≤ tol, 아니면 창 안
+--       잔여 최소 세션 — 성분 (c) 는 사유 판정에 안 쓴다)이 고르던 세션 s 로 사유를 가른다:
+--       · s 가 bp(비율은 안 맞았다) → 옛 경로 그대로 s 에 계수 후보로 두고 S06-2 (a)·conflict 가 판정한다
+--         (대개 krx_base_inconsistent — 기준가가 계수를 반증, ⑤·v_unfolded_event 축 불변)
+--       · s 가 bp 가 아님 → factor_ok=false · factor_source='no_base_price_evidence' · 계수 1 (기준가가 그
+--         세션에 조정이 없었다고 말한다 — 옛 판정이 ok 로 접던 것)
+--       · s 없음 → factor_source='no_price_match' · 계수 1
+--       미매칭 둘은 apply_basis 'unmatched' · apply_date 명목 세션(기록용)이고 S06-2 (a) 단위로 남아 명목
+--       세션 ± base_match_window_sessions 의 기준가로 다시 살아날 수 있다. 틀린 날에 적용하는 것보다 안 하는
+--       게 낫다.
 --   같은 티커의 개별 매칭(nominal·price_matched) ok 이벤트 2건이 같은 apply_date 에 닿으면 같은 사건을 두 원천
 --   ·두 유형이 따로 실은 것(감자 cr + KRX 액면병합)이라 우선순위 낮은 쪽을 same_day_suppressed 로 누른다
---   (성분 매칭은 하나의 복합 사건이라 제외). 창 폭·허용치는 _const(baseline adj_factor.price_match_*).
+--   (성분 매칭은 하나의 복합 사건이라 제외). 순서는 기준가로 찾은 후보 먼저, (d) 반증 경로 후보 뒤(E-1),
+--   같은 축 안에서는 우선순위(rank_key). 창 폭·허용치는 _const(baseline adj_factor.price_match_*).
 --
 -- factor_ok=false 인 행 (격리가 아니다 — 이벤트는 실재하나 계수를 못 낸다. 계수 1 · 사유는 factor_source):
 --   near_dup_suppressed  : 같은 (ticker, event_type) 이 **다른 원천**에서 near_dup_window_days 안에 2건
@@ -53,11 +75,13 @@
 --                          '유상' 이 있는 event_cr 행으로 판정한다
 --   no_share_change      : ratio = 1 — 주식수가 안 바뀐 사건(액면가만 바뀐 KRX 관측 등). 계수 1 이라 조정할
 --                          것이 없고, ok 로 두면 EG8 이 그날 원수익률(정지 뒤 재개일 ±)을 점프로 잰다
---   no_price_match       : 위 (d)
+--   no_base_price_evidence : 위 (d) — 원수익률로는 맞았으나 KRX 기준가 근거 없음(E-1)
+--   no_price_match       : 위 (d) — 원수익률로도 못 찾음
 --   same_day_suppressed  : 위 같은 apply_date 규칙
---   사유 우선순위: near_dup_suppressed > ratio_null > capred_paid > no_share_change > no_price_match
---   > same_day_suppressed.
---   ok 가 아닌 행의 apply_date 는 명목 세션, apply_basis 는 no_price_match 만 'unmatched' 나머지 'nominal'.
+--   사유 우선순위: near_dup_suppressed > ratio_null > capred_paid > no_share_change > no_base_price_evidence
+--   · no_price_match > same_day_suppressed.
+--   ok 가 아닌 행의 apply_date 는 명목 세션, apply_basis 는 미매칭 둘(no_base_price_evidence·no_price_match)만
+--   'unmatched' 나머지 'nominal'.
 --
 -- available_date = min(announce_date, apply_date 다음 세션) · basis derived — 공시가 없어도 KRX 가격·주식수
 --   변화가 그 다음 세션에 관측된다. 회고 기재 원천(자본변동, announce 가 수년 뒤)은 available < announce
@@ -82,6 +106,11 @@
 --       no_price_match 사건도 창 안에 기준가 사건이 있으면 여기서 살아난다.
 --       기준가 후보가 ok 사건의 apply_date 에 있는데 비율이 안 맞아 묶이지 않은 사건은 기준가가 계수를 반증한
 --       것이라 krx_base_inconsistent 로 내린다(같은 날 두 원천이 다른 값을 낸 채 둘 다 ok 일 수 없다 — 이중 적용).
+--       E-1 뒤로 이 반증은 (d) 의 's 가 bp' 경로와 1:1 짝에서 진 단위에서만 생긴다.
+--       이중 적용 방지(E-1): 한 기준가 세션의 비율은 소유자 하나만 접는다 — ok 단위 1개(1:1 짝 · 같은 날 개별
+--       매칭은 same_day 억제) 또는 unknown_krx ok 행 또는 ⑤ 계수 행(ok 접힘일 제외). bp 가 아닌 세션에는 어떤
+--       계수도 접히지 않는다((a)(b)(c) 가 bp 만 고르고 ok 행은 krx_base_price 뿐). 240600 의 07-29 기준가
+--       0.836 과 09-15 계수 1.2 처럼 같은 사건이 두 날에 접히던 모양이 사라진다.
 --   (b) 사건과 안 맞고 S 가 있으면 신규 행 event_id '<ticker>:krx_base:<date>' · event_type 'unknown_krx' ·
 --       effective = announce = apply = date · corp_code = security.corp_code · 계수 (r, S) · ok 는 곱 검사
 --       (2010~2014 DART 공백기의 액면분할·감자 변경상장일이 여기로 온다).
@@ -193,7 +222,33 @@ nominal AS (
     FROM judged j
     ASOF JOIN cal c ON j.effective_date <= c.date
 ),
--- ── 가격 축: 후보 티커의 가격 행 + 직전 행 종가(참고가 행 포함, 행 대 행) ────────
+-- ── KRX 기준가 후보 bp (S06-2 원천 · E-1 사건 매칭의 근거, 머리말 S06-2 · E-1) ──────────
+bpx AS (
+    -- 비ETF 전 가격 행 + 직전 행(참고가 행 포함)의 close·shares_out·price_kind
+    SELECT p.ticker, p.date, p.close, p.base_price_krw, p.shares_out, p.price_kind, c.n,
+           lag(p.close) OVER w        AS prev_close,
+           lag(p.shares_out) OVER w   AS prev_shares,
+           lag(p.price_kind) OVER w   AS prev_kind
+    FROM price_daily p
+    JOIN cal c ON c.date = p.date
+    WHERE p.ticker NOT IN (SELECT ticker FROM security WHERE sec_type = 'etf')
+    WINDOW w AS (PARTITION BY p.ticker ORDER BY p.date)
+),
+bp AS (
+    -- 후보: r = 기준가 / 직전 행 close 가 1 ± base_tol 밖. 구간 첫날(재상장 첫 행)은 제외.
+    -- 기준가 NULL(저녁 잠정 행 — price_daily 가 KRX 기본정보 없이 만든다)은 후보가 아니다(E-1)
+    SELECT x.ticker, x.date, x.n, x.prev_kind,
+           x.base_price_krw / x.prev_close                                             AS r,
+           CASE WHEN x.prev_shares > 0 AND abs(x.shares_out / x.prev_shares - 1) > k.share_tol
+                THEN x.shares_out / x.prev_shares END                                  AS share_ratio
+    FROM bpx x CROSS JOIN k
+    WHERE x.prev_close > 0 AND x.base_price_krw IS NOT NULL
+      AND abs(x.base_price_krw / x.prev_close - 1) > k.base_tol
+      AND NOT EXISTS (SELECT 1 FROM security_span sp
+                      WHERE sp.ticker = x.ticker AND sp.first_date = x.date)
+),
+-- ── 원수익률 축: 후보 티커의 가격 행 + 직전 행 종가(참고가 행 포함, 행 대 행) — E-1 뒤로는
+--    매칭에 안 쓰고 미해결 사유(no_base_price_evidence ↔ no_price_match)를 가르는 데만 쓴다 ────
 px AS (
     SELECT p.ticker, p.date, p.close, p.price_kind,
            lag(p.close) OVER (PARTITION BY p.ticker ORDER BY p.date)                    AS prev_close
@@ -209,25 +264,23 @@ cand AS (
     WHERE n.base_source = 'mktcap_neutral'
 ),
 nom_dev AS (
-    -- (a) 명목 세션의 잔여 (기준가가 안 바뀐 정지일 reference 행은 close = 직전 행 종가라 dev = |1/pf − 1|)
-    SELECT c.event_id, abs(x.close / x.prev_close / c.pf - 1) AS dev
+    -- (a) 명목 세션이 기준가 후보일 때 기준가 비의 잔여 (E-1: 기준가 = 직전 종가인 세션은 후보 밖)
+    SELECT c.event_id, abs(b.r / c.pf - 1) AS dev
     FROM cand c
-    JOIN px x ON x.ticker = c.ticker AND x.date = c.nominal_date
-    WHERE x.prev_close > 0
+    JOIN bp b ON b.ticker = c.ticker AND b.n = c.n0
 ),
 step_a AS (
     SELECT c.event_id
-    FROM cand c CROSS JOIN k
-    LEFT JOIN nom_dev d ON d.event_id = c.event_id
-    WHERE c.jump_mag <= k.tol_abs OR d.dev <= c.tol
+    FROM cand c
+    JOIN nom_dev d ON d.event_id = c.event_id
+    WHERE d.dev <= c.tol
 ),
 win AS (
-    -- (b) 창 안 가격 행(참고가 행 포함)의 잔여 (개별)
-    SELECT c.event_id, x.date, c.tol, abs(x.close / x.prev_close / c.pf - 1) AS dev
+    -- (b) 창 안 기준가 후보 세션(참고가 행 포함)의 기준가 비 잔여 (개별). 소액은 창 탐색 없음
+    SELECT c.event_id, b.date, c.tol, abs(b.r / c.pf - 1) AS dev
     FROM cand c CROSS JOIN k
-    JOIN cal w ON w.n BETWEEN c.n0 - k.win_before AND c.n0 + k.win_after
-    JOIN px x ON x.ticker = c.ticker AND x.date = w.date
-    WHERE x.prev_close > 0
+    JOIN bp b ON b.ticker = c.ticker AND b.n BETWEEN c.n0 - k.win_before AND c.n0 + k.win_after
+    WHERE c.jump_mag > k.tol_abs
       AND c.event_id NOT IN (SELECT event_id FROM step_a)
 ),
 step_b AS (
@@ -237,9 +290,10 @@ step_b AS (
     QUALIFY row_number() OVER (PARTITION BY event_id ORDER BY dev, date) = 1
 ),
 unm AS (
-    -- (a)(b) 둘 다 실패한 후보 → 복합 사건 성분 탐색 대상
-    SELECT c.* FROM cand c
-    WHERE c.event_id NOT IN (SELECT event_id FROM step_a)
+    -- (a)(b) 둘 다 실패한 후보 → 복합 사건 성분 탐색 대상 (소액 제외 — 창 탐색을 안 한다)
+    SELECT c.* FROM cand c CROSS JOIN k
+    WHERE c.jump_mag > k.tol_abs
+      AND c.event_id NOT IN (SELECT event_id FROM step_a)
       AND c.event_id NOT IN (SELECT event_id FROM step_b)
 ),
 links AS (
@@ -265,14 +319,13 @@ groups AS (
     HAVING count(*) > 1
 ),
 gwin AS (
-    -- (c) 성분 창에서 계수 곱과 맞는 세션
-    SELECT g.root, x.date,
-           abs(x.close / x.prev_close / g.pf_prod - 1)                                    AS dev,
+    -- (c) 성분 창의 기준가 후보 세션에서 기준가 비가 계수 곱과 맞는 세션
+    SELECT g.root, b.date,
+           abs(b.r / g.pf_prod - 1)                                                       AS dev,
            greatest(k.tol_rel * abs(least(g.pf_prod, 1 / g.pf_prod) - 1), k.tol_abs)   AS tol
     FROM groups g CROSS JOIN k
-    JOIN cal w ON w.n BETWEEN g.n_min - k.win_before AND g.n_max + k.win_after
-    JOIN px x ON x.ticker = g.ticker AND x.date = w.date
-    WHERE x.prev_close > 0
+    JOIN bp b ON b.ticker = g.ticker AND b.n BETWEEN g.n_min - k.win_before
+                                               AND g.n_max + k.win_after
 ),
 step_c AS (
     SELECT root, date AS apply_date
@@ -280,37 +333,76 @@ step_c AS (
     WHERE dev <= tol
     QUALIFY row_number() OVER (PARTITION BY root ORDER BY dev, date) = 1
 ),
+-- ── (d) 기준가로 못 찾은 후보의 사유 — 옛 원수익률 판정(E-1 전 (a)(b))이 고르던 세션 s ──────
+raw_nom AS (
+    -- 옛 (a): 소액은 무조건, 아니면 명목 세션 원수익률 잔여 ≤ tol
+    SELECT c.event_id, c.nominal_date AS apply_date, 'nominal' AS apply_basis
+    FROM cand c CROSS JOIN k
+    LEFT JOIN px x ON x.ticker = c.ticker AND x.date = c.nominal_date AND x.prev_close > 0
+    WHERE c.jump_mag <= k.tol_abs OR abs(x.close / x.prev_close / c.pf - 1) <= c.tol
+),
+raw_win AS (
+    -- 옛 (b): 창 안 가격 행 중 원수익률 잔여 최소 세션
+    SELECT c.event_id, x.date AS apply_date, 'price_matched' AS apply_basis
+    FROM cand c CROSS JOIN k
+    JOIN cal w ON w.n BETWEEN c.n0 - k.win_before AND c.n0 + k.win_after
+    JOIN px x ON x.ticker = c.ticker AND x.date = w.date
+    WHERE x.prev_close > 0 AND abs(x.close / x.prev_close / c.pf - 1) <= c.tol
+      AND c.event_id NOT IN (SELECT event_id FROM raw_nom)
+    QUALIFY row_number() OVER (PARTITION BY c.event_id
+                               ORDER BY abs(x.close / x.prev_close / c.pf - 1), x.date) = 1
+),
+raw_sel AS (
+    -- on_bp: s 가 기준가 후보(비율은 (a)(b)(c) 에서 안 맞았다) → 옛 경로 그대로(아래 conflict 가
+    -- krx_base_inconsistent 로 내린다 — 기준가 반증). 후보가 아니면 기준가 근거 없음
+    SELECT r.*, b.ticker IS NOT NULL AS on_bp
+    FROM (SELECT * FROM raw_nom UNION ALL SELECT * FROM raw_win) r
+    JOIN cand c ON c.event_id = r.event_id
+    LEFT JOIN bp b ON b.ticker = c.ticker AND b.date = r.apply_date
+),
 resolved AS (
     SELECT c.event_id, c.ticker, c.rank_key,
            CASE WHEN a.event_id IS NOT NULL THEN c.nominal_date
                 WHEN b.event_id IS NOT NULL THEN b.apply_date
                 WHEN sc.root IS NOT NULL    THEN sc.apply_date
+                WHEN rs.on_bp               THEN rs.apply_date
                 ELSE c.nominal_date END                                   AS apply_date,
            CASE WHEN a.event_id IS NOT NULL THEN 'nominal'
                 WHEN b.event_id IS NOT NULL THEN 'price_matched'
                 WHEN sc.root IS NOT NULL    THEN 'price_matched_combined'
-                ELSE 'unmatched' END                                      AS apply_basis
+                WHEN rs.on_bp               THEN rs.apply_basis
+                ELSE 'unmatched' END                                      AS apply_basis,
+           rs.event_id IS NOT NULL                                        AS raw_hit,
+           -- (d) 's 가 bp' 경로로만 선 후보 — 기준가 비율이 안 맞는다(같은 날 억제 순서에 쓴다)
+           (a.event_id IS NULL AND b.event_id IS NULL AND sc.root IS NULL
+            AND coalesce(rs.on_bp, FALSE))                                AS via_raw
     FROM cand c
     LEFT JOIN step_a a ON a.event_id = c.event_id
     LEFT JOIN step_b b ON b.event_id = c.event_id
     LEFT JOIN comp_root cr ON cr.event_id = c.event_id
     LEFT JOIN step_c sc ON sc.root = cr.root
+    LEFT JOIN raw_sel rs ON rs.event_id = c.event_id
 ),
 same_day AS (
     -- 개별 매칭 ok 이벤트가 같은 (ticker, apply_date) 에 2건 이상 → 우선순위 낮은 쪽 억제.
     -- sibling_id = 이긴 쪽(rn 1) — ⑤ factor_near 판정에 쓴다
+    -- E-1: 기준가로 찾은 후보((a)(b))가 원수익률로만 선 반증 경로 후보(via_raw)보다 먼저다 — 우선순위
+    -- 높은 반증 후보가 이기면 기준가로 맞은 사건이 눌리고 그 세션 기준가가 어디에도 안 접힌다(직전 행이
+    -- 참고가면 (c) 재발견이라 신규 행도 없다). 같은 축 안에서는 옛 순위 그대로
     SELECT event_id,
            row_number() OVER sd            AS rn,
            first_value(event_id) OVER sd   AS sibling_id
     FROM resolved
     WHERE apply_basis IN ('nominal', 'price_matched')
-    WINDOW sd AS (PARTITION BY ticker, apply_date ORDER BY rank_key)
+    WINDOW sd AS (PARTITION BY ticker, apply_date ORDER BY via_raw, rank_key)
 ),
 final AS (
     SELECT n.*,
            coalesce(r.apply_date, n.nominal_date)                          AS apply_date,
            coalesce(r.apply_basis, 'nominal')                               AS apply_basis,
            CASE WHEN n.base_source <> 'mktcap_neutral' THEN n.base_source
+                WHEN r.apply_basis = 'unmatched' AND r.raw_hit
+                                                        THEN 'no_base_price_evidence'
                 WHEN r.apply_basis = 'unmatched'        THEN 'no_price_match'
                 WHEN sd.rn > 1                          THEN 'same_day_suppressed'
                 ELSE 'mktcap_neutral' END                                   AS factor_source
@@ -319,36 +411,13 @@ final AS (
     LEFT JOIN same_day sd ON sd.event_id = n.event_id
 ),
 -- ── S06-2 KRX 기준가 원천 ───────────────────────────────────────────────────
-bpx AS (
-    -- 비ETF 전 가격 행 + 직전 행(참고가 행 포함)의 close·shares_out·price_kind
-    SELECT p.ticker, p.date, p.close, p.base_price_krw, p.shares_out, p.price_kind, c.n,
-           lag(p.close) OVER w        AS prev_close,
-           lag(p.shares_out) OVER w   AS prev_shares,
-           lag(p.price_kind) OVER w   AS prev_kind
-    FROM price_daily p
-    JOIN cal c ON c.date = p.date
-    WHERE p.ticker NOT IN (SELECT ticker FROM security WHERE sec_type = 'etf')
-    WINDOW w AS (PARTITION BY p.ticker ORDER BY p.date)
-),
-bp AS (
-    -- 후보: r = 기준가 / 직전 행 close 가 1 ± base_tol 밖. 구간 첫날(재상장 첫 행)은 제외
-    SELECT x.ticker, x.date, x.n, x.prev_kind,
-           x.base_price_krw / x.prev_close                                             AS r,
-           CASE WHEN x.prev_shares > 0 AND abs(x.shares_out / x.prev_shares - 1) > k.share_tol
-                THEN x.shares_out / x.prev_shares END                                  AS share_ratio
-    FROM bpx x CROSS JOIN k
-    WHERE x.prev_close > 0 AND x.base_price_krw IS NOT NULL
-      AND abs(x.base_price_krw / x.prev_close - 1) > k.base_tol
-      AND NOT EXISTS (SELECT 1 FROM security_span sp
-                      WHERE sp.ticker = x.ticker AND sp.first_date = x.date)
-),
 elig AS (
     -- (a) 대상 단위: 계수 후보(same_day 억제 제외). 성분(combined)은 (ticker, apply_date) 한 단위
     SELECT f.event_id, f.ticker, f.apply_date, f.factor_source, 1 / f.ratio AS pf, f.ratio,
            CASE WHEN f.apply_basis = 'price_matched_combined'
                 THEN f.ticker || '@' || CAST(f.apply_date AS VARCHAR) ELSE f.event_id END AS unit_id
     FROM final f
-    WHERE f.factor_source IN ('mktcap_neutral', 'no_price_match')
+    WHERE f.factor_source IN ('mktcap_neutral', 'no_price_match', 'no_base_price_evidence')
 ),
 unit AS (
     SELECT unit_id, any_value(ticker) AS ticker, any_value(apply_date) AS apply_date,

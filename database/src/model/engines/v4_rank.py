@@ -44,7 +44,7 @@ from model.contracts import (
     UniverseRule,
     score_columns,
 )
-from model.engines._common import weighted_available
+from model.engines._common import crosses_step, weighted_available
 
 Row = Mapping[str, object]   # fi_* 행 — 값 타입은 계약(contracts.FI_TABLES)이 정한다
 
@@ -179,8 +179,7 @@ class _Series:
 
     def crosses_event(self, lo: int, hi: int) -> bool:
         """[lo, hi] 창 안에서 adj_ok 가 바뀌나 — 바뀌면 미해결 사건을 넘는 창이다."""
-        seg = self.ok[lo:hi + 1]
-        return any(seg) and not all(seg)
+        return crosses_step(self.ok[lo:hi + 1])
 
 
 def _series(inputs: FactorInputs, codes: set[str], d: str) -> dict[str, _Series]:

@@ -78,7 +78,7 @@ v1.1 은 "엔진에 재무·컨센서스 포트가 없다" 고 결론지었으�
 
 EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 전 테이블) · EG2 PIT 불변식(`<col>_available_date` 포함) · EG3 키·불변식(독립 재계산) · EG4 골든 픽스처(FX 카탈로그 54 + 부정 10) · EG5 재현성(a 해시 · b 등식 · c as-of 불변 `_asof/`) · EG6 판본 선택(E-G6a/b/c 링크) · EG7 범위(격리형, `sec_type='other'` 는 격리 아님) · EG8 교차 소스(가격·거래량 점프·recall) · EG9 레짐 커버리지(커버율 ∧ evidence_rate ∧ 상관) · **EG10 팩터 준비도**(`factor_readiness` 54행) · EG11 뷰 결정성 · EG12 단위 접미사 · EG13 available 미래값 · EG14 파티션 경계 · EG15 폐지 전 가격 · EG16 가짜 재상장 · EG17 캘린더 · EG18 조인 팬아웃 · EG19 as-of 단조성 · EG20 원주가 불변 · EG-C 소비자 계약 ①~⑩(⑥ 는 커버 밖 팩터 `skip(no_coverage)`).
 
-상수는 전부 `baseline.json`(`{table}.{metric}`), 첫 빌드 `skip(no_baseline)` + `_meta.gates[].metrics` 기록 → 사람 승인 → 2회차 정식. 실행 순서·실패 리포트·부정 픽스처 규약은 GATES §7.
+상수는 전부 `baseline.json`(`{table}.{metric}`). 상수 없는 게이트는 `skip(no_baseline)` 이고 허용표(`src/stage/skip_allow.py`) 밖이라 그 빌드는 FAIL·폐기된다(K1-7a) — 그래서 배포 전에 잰다: 격리 재생(X-1 `scripts/replay.sh --code <새 코드> --out <tmp>`) 또는 `python -m equity gate` 재판정(폐기 없음)의 그 게이트 metrics → 사람 승인 → 게이트와 상수를 함께 배포 → 첫 빌드부터 정식(GATES §7-3). 실행 순서·실패 리포트·부정 픽스처 규약은 GATES §7.
 
 ---
 

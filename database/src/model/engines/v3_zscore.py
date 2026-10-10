@@ -25,6 +25,14 @@ spec 파라미터로만 켜는 원본 밖 규칙(v3_zscore@1.0 은 끈 채로 �
     (`fi_fin_summary.period_months`)이 이보다 짧으면(짧은 첫 사업연도) 그 행을 퀄리티 손익
     지표(gpa·roa·fcf_assets·gpa_change)에 쓰지 않는다. 기간을 모르면(NULL) 쓴다.
     부채비율·변동성은 그대로.
+  - `adj_jump_missing`(scope, T-9 · H1-4): 모멘텀 창(rNm — 최근 lookback + 1 행)이나 20일 변동성 창
+    (최근 21 행)이 `fi_adj_prices.adj_jump_ok` 계단을 넘으면 — 가격 축 미해결 사건 적용일 앞뒤 6세션
+    안에서 수익률이 그날 가격제한폭을 넘은 **점프 행**(fi1.6.0 — 계단은 적용일이 아니라 점프 행에서
+    뒤집힌다)과 그 직전 행이 둘 다 창 안이면 — 그 지표를 결측으로 둔다(창 판정은 v4 와 같은
+    `crosses_step`).
+    결측 뒤는 원본 규칙 그대로다: 모멘텀은 남은 지표로 비례 재정규화하고 다 비면 원점수 0.0, 퀄리티는
+    std_20d 없이 재정규화. `EngineResult.meta['adj_jump_masked']` = 그렇게 비운 칸 수(지표별)와 종목 수
+    (규칙이 없었으면 값이 섰던 칸만 센다 — GH1-c).
 """
 from __future__ import annotations
 
@@ -41,7 +49,7 @@ from model.contracts import (
     ModelSpec,
     UniverseRule,
 )
-from model.engines._common import weighted_available, z_score_winsorized
+from model.engines._common import crosses_step, weighted_available, z_score_winsorized
 
 Row = Mapping[str, Any]     # fi_* 행 — 값 타입은 계약(contracts.FI_TABLES)이 정한다
 
@@ -60,6 +68,10 @@ VALUATION_REVERSE = frozenset({"per", "pbr", "ev_ebitda"})       # valuation.py:
 STD_MIN_PRICES, STD_WINDOW, STD_MIN_RETURNS = 10, 21, 5          # quality.py:118-130
 # params.quality 에 올 수 있는 키 — 오타가 규칙을 조용히 끄지 않게 이 밖은 거절한다
 QUALITY_PARAM_KEYS = frozenset({"sub_weights", "min_period_months"})
+ADJ_JUMP_PARAM = "adj_jump_missing"          # T-9 — True 면 창 안 제한폭 초과 미해결 사건 지표 결측
+PARAM_KEYS = frozenset({*FACTORS, ADJ_JUMP_PARAM})   # params 최상위 키 — 밖은 거절(위와 같은 이유)
+JUMP_KEYS = (*LOOKBACKS, "std_20d")          # T-9 가 비우는 지표(메타 순서)
+_NO_DROP: Mapping[str, frozenset[str]] = {}
 
 
 def _rows(inputs: FactorInputs, name: str) -> Sequence[Row]:
@@ -103,17 +115,20 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> tuple[list[str],
     return codes, caps
 
 
-def _price_histories(inputs: FactorInputs, codes: Sequence[str], d: str) -> dict[str, list[float]]:
+def _price_histories(inputs: FactorInputs, codes: Sequence[str],
+                     d: str) -> tuple[dict[str, list[float]], dict[str, list[bool]]]:
     """v3 `engine.py:232-242` + `price_repo.py:51-60`: [D−550일, D] 날짜 오름차순.
 
     값 = `adj_close if not None else close`(`momentum.py:60-65`) — fi_adj_prices 에 없거나 NULL
     이면 fi_prices.close. 행 집합은 fi_prices(compat daily_prices 와 같은 자리).
+    둘째 값 = 같은 행의 `adj_jump_ok` 계단 표식(T-9) — fi_adj_prices 행이 없거나 NULL 이면 True
+    (v4 `adj_ok` 와 같은 기본). 규칙이 꺼진 spec 은 쓰지 않는다.
     """
     start = (date.fromisoformat(d) - timedelta(days=HISTORY_DAYS)).isoformat()
     want = set(codes)
-    adj = {(r["ticker"], _iso(r["date"])): r["adj_close"]
+    adj = {(r["ticker"], _iso(r["date"])): r
            for r in _rows(inputs, "fi_adj_prices") if r["ticker"] in want}
-    rows: dict[str, list[tuple[str, float]]] = {c: [] for c in codes}
+    rows: dict[str, list[tuple[str, float, bool]]] = {c: [] for c in codes}
     for r in _rows(inputs, "fi_prices"):
         t = r["ticker"]
         if t not in want:
@@ -121,8 +136,31 @@ def _price_histories(inputs: FactorInputs, codes: Sequence[str], d: str) -> dict
         day = _iso(r["date"])
         if start <= day <= d:
             a = adj.get((t, day))
-            rows[t].append((day, a if a is not None else r["close"]))
-    return {c: [px for _, px in sorted(v, key=lambda x: x[0])] for c, v in rows.items()}
+            a_px = None if a is None else a["adj_close"]
+            ok = True if a is None or a["adj_jump_ok"] is None else bool(a["adj_jump_ok"])
+            rows[t].append((day, a_px if a_px is not None else r["close"], ok))
+    histories: dict[str, list[float]] = {}
+    steps: dict[str, list[bool]] = {}
+    for c, v in rows.items():
+        v.sort(key=lambda x: x[0])
+        histories[c] = [px for _, px, _ in v]
+        steps[c] = [ok for _, _, ok in v]
+    return histories, steps
+
+
+def _jump_drops(steps: Mapping[str, Sequence[bool]]) -> dict[str, frozenset[str]]:
+    """T-9: 종목 → 결측으로 둘 지표. 지표 창 = 그 값을 만드는 행 — rNm 은 최근 lookback + 1 행
+    (`_period_return` 의 previous ~ current), std_20d 는 최근 STD_WINDOW 행(`_return_std`). 창 안에서
+    `adj_jump_ok` 가 바뀌면 넣는다. 창이 점프 행에서 시작하면(점프가 창 첫 행 앞) 바뀌지 않으므로
+    넣지 않는다."""
+    out: dict[str, frozenset[str]] = {}
+    for code, flags in steps.items():
+        names = {n for n, lb in LOOKBACKS.items() if crosses_step(flags[-(lb + 1):])}
+        if crosses_step(flags[-STD_WINDOW:]):
+            names.add("std_20d")
+        if names:
+            out[code] = frozenset(names)
+    return out
 
 
 # ── 모멘텀 ───────────────────────────────────────────────────────────────────
@@ -136,15 +174,21 @@ def _period_return(history: Sequence[float], lookback: int) -> float | None:
     return (current - previous) / previous
 
 
-def _momentum(histories: Mapping[str, Sequence[float]], sub_weights: Mapping[str, float]):
-    """v3 `momentum.py:11-52`."""
+def _momentum(histories: Mapping[str, Sequence[float]], sub_weights: Mapping[str, float],
+              drop: Mapping[str, frozenset[str]] = _NO_DROP):
+    """v3 `momentum.py:11-52`. `drop`(T-9 `_jump_drops`)에 든 지표는 값이 서도 싣지 않는다 —
+    셋째 반환 = 그렇게 비운 (종목, 지표)."""
     raw: dict[str, dict[str, float]] = {c: {} for c in histories}
     scored: dict[str, dict[str, float]] = {c: {} for c in histories}
+    dropped: set[tuple[str, str]] = set()
     for name, lookback in LOOKBACKS.items():
         codes, vals = [], []
         for code, history in histories.items():
             r = _period_return(history, lookback)
             if r is None:
+                continue
+            if name in drop.get(code, ()):
+                dropped.add((code, name))
                 continue
             raw[code][name] = r
             codes.append(code)
@@ -155,7 +199,7 @@ def _momentum(histories: Mapping[str, Sequence[float]], sub_weights: Mapping[str
     for code in histories:
         s = weighted_available(scored[code], sub_weights)
         scores[code] = 0.0 if s is None else s          # momentum.py:22-28 — 지표 없으면 0.0
-    return scores, raw
+    return scores, raw, dropped
 
 
 # ── 리비전 ───────────────────────────────────────────────────────────────────
@@ -322,11 +366,15 @@ def _full_year(row: Row, min_period_months: int | None) -> bool:
 
 def _quality_raw(annual: Mapping[str, Sequence[Row]], codes: Sequence[str],
                  histories: Mapping[str, Sequence[float]],
-                 min_period_months: int | None = None) -> dict[str, dict[str, float]]:
+                 min_period_months: int | None = None,
+                 drop: Mapping[str, frozenset[str]] = _NO_DROP,
+                 ) -> tuple[dict[str, dict[str, float]], set[tuple[str, str]]]:
     """v3 `quality.py:66-115` — 최신 연간 2기에서 gpa·roa·fcf_assets·debt_ratio·gpa_change,
     가격 이력에서 std_20d. `min_period_months` 를 주면 그보다 짧은 기는 손익 지표에서 뺀다
-    (최신 기 → gpa·roa·fcf_assets·gpa_change, 전기 → gpa_change, G-28)."""
+    (최신 기 → gpa·roa·fcf_assets·gpa_change, 전기 → gpa_change, G-28). `drop`(T-9)에 std_20d 가
+    든 종목은 값이 서도 싣지 않는다 — 둘째 반환 = 그렇게 비운 (종목, 'std_20d')."""
     raw: dict[str, dict[str, float]] = {}
+    dropped: set[tuple[str, str]] = set()
     for code in codes:
         rows = annual.get(code, [])[:2]
         if not rows:
@@ -351,11 +399,13 @@ def _quality_raw(annual: Mapping[str, Sequence[Row]], codes: Sequence[str],
                 if prev_gpa != 0:
                     m["gpa_change"] = (m["gpa"] - prev_gpa) / abs(prev_gpa)
         std = _return_std(histories.get(code, []))
-        if std is not None:
+        if std is not None and "std_20d" in drop.get(code, ()):
+            dropped.add((code, "std_20d"))
+        elif std is not None:
             m["std_20d"] = std
         if m:
             raw[code] = m
-    return raw
+    return raw, dropped
 
 
 def _valuation_raw(annual: Mapping[str, Sequence[Row]],
@@ -412,6 +462,13 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> None:
     if replace(spec.universe, min_market_cap=None, min_analysts=None) != UniverseRule():
         raise ValueError(f"{spec.spec_id}: v3_zscore 는 기본 유니버스 규칙"
                          "(+min_market_cap·min_analysts)만 지원")
+    extra = sorted(set(spec.params) - PARAM_KEYS)
+    if extra:
+        raise ValueError(f"{spec.spec_id}: params 모르는 키 {extra} — 허용 {sorted(PARAM_KEYS)}")
+    jump = spec.params.get(ADJ_JUMP_PARAM)
+    if jump is not None and not isinstance(jump, bool):
+        raise ValueError(f"{spec.spec_id}: params.{ADJ_JUMP_PARAM}={jump!r} — true/false 여야 "
+                         "한다(T-9)")
     quality = spec.params.get("quality")
     if isinstance(quality, Mapping):
         extra = sorted(set(quality) - QUALITY_PARAM_KEYS)
@@ -440,15 +497,17 @@ class V3ZScoreEngine:
         p: Mapping[str, Any] = spec.params      # 구조는 config/models/v3_zscore.toml
         d = inputs.date
         codes, caps = _universe(spec, inputs, d)
-        histories = _price_histories(inputs, codes, d)
+        histories, steps = _price_histories(inputs, codes, d)
         annual = _annual_rows(inputs, codes)
+        jump_rule = p.get(ADJ_JUMP_PARAM) is True
+        drop = _jump_drops(steps) if jump_rule else _NO_DROP
 
-        mom, mom_raw = _momentum(histories, p["momentum"]["sub_weights"])
+        mom, mom_raw, mom_dropped = _momentum(histories, p["momentum"]["sub_weights"], drop)
         rev, rev_raw = _revision(inputs, codes, d, p["revision"]["metrics"],
                                  p["revision"]["periods"])
         flow, flow_raw = _flow(inputs, codes, caps, d, p["flow"]["sub_weights"])
-        qual_raw = _quality_raw(annual, codes, histories,
-                                p["quality"].get("min_period_months"))
+        qual_raw, qual_dropped = _quality_raw(annual, codes, histories,
+                                              p["quality"].get("min_period_months"), drop)
         qual = _score_subs(qual_raw, p["quality"]["sub_weights"], QUALITY_REVERSE)
         val_raw = _valuation_raw(annual, codes)
         val = _score_subs(val_raw, p["valuation"]["sub_weights"], VALUATION_REVERSE)
@@ -488,7 +547,13 @@ class V3ZScoreEngine:
         out.sort(key=lambda r: (-r["composite_score"], r["stock_code"]))
         for i, row in enumerate(out, start=1):                          # engine.py:155-157
             row["rank"] = i
-        return EngineResult(scores=out, indicators=[])
+        meta: dict[str, object] = {}
+        if jump_rule:                       # 판 메타(GH1-c) — 0 이어도 싣는다(규칙이 돌았다는 기록)
+            dropped = mom_dropped | qual_dropped
+            meta["adj_jump_masked"] = {"n_tickers": len({c for c, _ in dropped}),
+                                       **{k: sum(1 for _, n in dropped if n == k)
+                                          for k in JUMP_KEYS}}
+        return EngineResult(scores=out, indicators=[], meta=meta)
 
 
 ENGINE = V3ZScoreEngine()

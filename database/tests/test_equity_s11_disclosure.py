@@ -14,14 +14,29 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import allow_skips
 from equity import build, rules_s11
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _k17a_fixture_skips() -> Iterator[None]:
+    """K1-7a — 이 모듈의 픽스처가 표본이 작아 못 재는 게이트의 SKIP 만 테스트에서 허용한다
+    (운영 허용표 `src/stage/skip_allow.py` 는 그대로다)."""
+    with allow_skips(
+            ("equity", "EG6_disclosure_version", "no_coverage",
+             "합성·절단본 접수에 정정 모집단이 없어 정정 링크 성립률을 못 잰다"),
+            ("equity", "EG8_disclosure_version", "no_coverage",
+             "합성·절단본에 나중에 정정된 사업보고서가 없어 정정 도달률을 못 잰다")):
+        yield
+
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 DV = rules_s11.DISCLOSURE_VERSION
@@ -519,19 +534,20 @@ def test_부정_링크_성립률_임계를_못_넘기면_폐기된다(make_stage
     assert g.metrics["link_rate"] == 0.0
 
 
-def test_baseline_미등재면_임계를_걸지_않고_기록만_한다(built: build.BuildResult,
-                                                     tmp_path: Path) -> None:
-    """WORKFLOW §3-4 — 사다리 baseline 등재 전에는 E-G6a·E-G7 이 skip(no_baseline)."""
+def test_baseline_미등재면_측정치는_남기고_판은_폐기한다(built: build.BuildResult,
+                                                    tmp_path: Path) -> None:
+    """WORKFLOW §3-4 — 사다리 baseline 등재 전에는 E-G6a 가 skip(no_baseline) 이다. K1-7a 부터
+    허용표 밖 SKIP 이라 판을 폐기하고(뒤 E-G7 은 upstream_failed) 측정치는 남긴다."""
     bare = Baseline({DV.name: {"deadline_days_annual": 90,
                                "deadline_days_interim": 45,
                                "date_check_near_days": 7}})
     r = build.build_table(DV, STAGE_SLICE, tmp_path / "equity", bare, build_id="b_s11_bare")
-    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    for name, metric in (("EG6_disclosure_version", "link_rate"),
-                         ("EG8_disclosure_version", "reach_rate")):
-        g = next(x for x in r.gates if x.name == name)
-        assert g.status is GateStatus.SKIP and g.detail == "no_baseline"
-        assert g.metrics[metric] == 1.0            # 판정은 안 해도 값은 남는다
+    assert not r.ok
+    g6 = next(x for x in r.gates if x.name == "EG6_disclosure_version")
+    assert g6.status is GateStatus.FAIL and g6.metrics["skip_reason"] == "no_baseline"
+    assert g6.metrics["link_rate"] == 1.0              # 판정은 안 해도 값은 남는다
+    g8 = next(x for x in r.gates if x.name == "EG8_disclosure_version")
+    assert g8.status is GateStatus.SKIP and g8.detail == "upstream_failed"
 
 
 # ── DEFECT-F02: 미파싱 정정은 `not_parsed` (감사 09-19) ───────────────────────

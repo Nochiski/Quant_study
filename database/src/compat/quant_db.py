@@ -12,10 +12,20 @@
 **날짜 단위 교체**다: 같은 트랜잭션에서 그 `score_date` 행을 모두 지우고 새 판 행을 넣는다. 다른
 날짜는 건드리지 않는다. 판 id 는 `_compat_meta.model_builds` 에 spec 별로 남는다.
 
-M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다.
+`--basis evening`(장 마감 판, 컷오버 T-2)의 `daily_prices`·`investor_detail_flows` 는 판(직전
+거래일 D' 까지)에 T 날짜 행을 원장에서 얹는다(QL-D — `compat.t_rows`, 장 마감 판에서만 불러온다).
+두 표는 basis 와 무관하게 그 `--date` 행을 **날짜 단위로 교체**한다(QL-C 와 같은 규칙) — 저녁에
+원장으로 만든 T 행은 다음 날 아침 `--basis morning --date T` 가 KRX 행으로 통째로 바꾼다. 새 원천에
+그날 행이 0 이면 지우기 전에 멈춘다. 다른 날짜는 지금처럼 `INSERT OR REPLACE` 다.
+
+M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다. 제자리 반영은 v3
+파일에 직접 쓰지 않고 `scripts/v3_post.sh`(`compat.v3_post` — 스테이징 → 게이트 → 9표 한 트랜잭션, QL-F)로 한다.
 
 가드(1차 그림자 실행 뒤 리뷰 R1~R10 반영) — 전부 **쓰기 전/직후에 예외**로 멈춘다:
-  · `--basis` 와 equity 판 접두(`e_`/`m_`) 불일치            (R5)
+  · `--basis` 와 equity 판 접두(`e_`/`m_`) 불일치            (R5 — 장 마감 판은 `m_` 도 받는다)
+  · 장 마감 판: T 비거래일 · 원장 없음 · 판 이음매(마지막 세션 ≠ D') · T 행 0 ·
+    대상에 이번보다 나중 ok 반영 기록(T-35 순서, 재생은 `--allow-older`)              (QL-D)
+  · 날짜 단위 교체 표의 새 원천에 `--date` 행 0                                       (QL-D)
   · `price_daily`·`price_adj_daily` 판이 서로 다른 체인       (R9)
   · `daily_prices` 의 `adj_close` 결측 비율 > 1%              (R9)
   · 증분인데 대상 DB 가 얕다(종목당 세션 중앙값 < 260)         (R10)
@@ -24,6 +34,7 @@ M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자
 """
 from __future__ import annotations
 
+import itertools
 import json
 import sqlite3
 import statistics
@@ -40,6 +51,7 @@ from stage.model import basis_of_build_id, build_id_time
 
 from .mappings import (
     BY_TABLE,
+    DATE_REPLACED,
     EQUITY,
     ESTIMATE_TICKERS_SQL,
     EVENING_SKIPPED_SQL,
@@ -78,6 +90,10 @@ MIN_MEDIAN_SESSIONS = 260
 BUILD_CHAIN_MAX_GAP_H = 3
 # 판 접두어가 말하는 basis 중 '어느 쪽으로 내보내도 되는' 값. 수동 재빌드(`b_`)가 여기 든다.
 _BASIS_ANY = "manual"
+# `--basis` 별로 더 받는 판 basis. 장 마감 판(evening, 컷오버 T-2)은 직전 거래일 연구 확정판
+# `m_`(D') 위에 T 행만 원장에서 얹는다(QL-D). 그 판이 이미 T 의 KRX 행을 가졌는지 — R5 가 막으려던
+# '아침 판을 저녁으로' 의 위험 — 는 접두가 아니라 데이터(판 이음매, `t_rows.check_seam`)로 본다.
+_BASIS_ALSO: dict[str, tuple[str, ...]] = {"evening": ("morning",)}
 # 원천 관계식을 판 목록과 같은 dict 에 실을 때 쓰는 접두 — build_id 키와 섞이지 않게.
 _EXPR = "__expr__"
 # 모델 판의 점수 표 파일 이름 — `model/build.py` SCORES_FILE · `deliver/reader.py` 파일 규약과 같다.
@@ -108,8 +124,9 @@ MODEL_UNIVERSES = ("all", "estimates")
 BUILDS_MISSING = ("error", "current")
 MARKET_VOCAB = ("KOSPI", "KOSDAQ")      # v3 `stocks.market` CHECK 제약과 같은 어휘
 META_TABLE = "_compat_meta"
+# `main.` 한정 — `compat.v3_post` 가 스테이징을 ATTACH 한 연결에서 본 파일 쪽 메타 표를 만들 때도 같은 DDL 을 쓴다.
 META_DDL = f"""
-CREATE TABLE IF NOT EXISTS {META_TABLE} (
+CREATE TABLE IF NOT EXISTS main.{META_TABLE} (
     exported_at    TEXT PRIMARY KEY,
     date           TEXT NOT NULL,
     basis          TEXT NOT NULL,
@@ -156,8 +173,12 @@ class TableResult:
     n_rows: int                 # 실제로 넣은 행
     n_skipped: int              # v3 NOT NULL/PK 를 못 채워 넣지 못한 행
     sources: dict[str, str]     # 원천 표 → build_id
-    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를 싣는다.
+    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를, `daily_prices` 는
+    # 이번에 쓴 trade_date = D 행 수(n_on_date — 제자리 반영 신선도 게이트, T-31 ③)를 싣는다.
     metrics: dict[str, int] = field(default_factory=dict)
+    # 장 마감 판 T 행(QL-D) — 원천별 행 수 · 21:05 원장으로 대체한 종목 · 행 없는 종목
+    # (`t_rows._info`)
+    t_rows: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -200,6 +221,11 @@ class ExportResult:
                          f"{self.n_universe_with_estimates}")
         if self.builds_fallback:
             parts.append("fallback=" + ",".join(self.builds_fallback))
+        for t, r in self.tables.items():
+            if r.t_rows:
+                i = r.t_rows
+                parts.append(f"{t}.T={i['date']}(postclose={i['postclose']},"
+                             f"kiwoom_2105={i['kiwoom_2105']},missing={i['missing']})")
         return (f"compat date={self.date} basis={self.basis} target={self.target} "
                 f"consensus_asof={self.consensus_asof} | " + " ".join(parts))
 
@@ -256,11 +282,12 @@ def _check_basis(equity_builds: dict[str, str], basis: str) -> None:
     """R5 — 저녁 판을 아침으로(또는 그 반대로) 내보내지 않는다.
 
     수동 재빌드(`b_`)는 판 축이 없으므로 어느 쪽으로도 허용한다 — 접두어가 명시적으로
-    `e_`/`m_` 인 판만 `--basis` 와 맞춘다.
+    `e_`/`m_` 인 판만 `--basis` 와 맞춘다. 장 마감 판(evening)은 D' 아침 판 `m_` 도 받는다
+    (`_BASIS_ALSO`).
     """
     for table, build_id in sorted(equity_builds.items()):
         got = basis_of_build_id(build_id)
-        if got not in (_BASIS_ANY, basis):
+        if got not in (_BASIS_ANY, basis, *_BASIS_ALSO.get(basis, ())):
             raise CompatError(
                 f"판 접두어가 --basis 와 다르다: table={table} build_id={build_id} "
                 f"판={got} --basis={basis}")
@@ -326,6 +353,9 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
 
     다르면 `CompatSchemaError` — v3 가 마이그레이션으로 스키마를 바꾼 경우이므로 쓰지 않는다
     (플랜 §7 위험표 2행). 돌려주는 값은 표 → **필수 컬럼**(NOT NULL ∪ PK) 목록이다.
+    비교는 열 이름 → 타입이다(순서 무관). 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션 ALTER 로
+    `updated_at` 뒤에 붙어 선언 순서와 다르다(QL-F 로컬 v3 사본 실측). 쓰기는 열 이름으로 하므로 순서는
+    결과에 영향이 없다.
     """
     ref = _reference_schema()
     con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
@@ -333,7 +363,7 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
     for table in tables:
         info = con.execute(f"PRAGMA table_info({table})").fetchall()
         got = [(r[1], r[2]) for r in info]
-        if got != ref[table]:
+        if sorted(got) != sorted(ref[table]):
             raise CompatSchemaError(
                 f"대상 스키마가 v3 선언과 다르다: table={table} got={got} want={ref[table]}")
         # rowid 표의 TEXT PRIMARY KEY 는 notnull 플래그가 0 이라 PK 를 따로 더한다.
@@ -385,6 +415,25 @@ def _chunks(cur: duckdb.DuckDBPyConnection) -> Iterator[list[tuple]]:
         yield rows
 
 
+def _complete(row: tuple, need: list[int]) -> bool:
+    """v3 필수 열(NOT NULL ∪ PK)이 다 찬 행 — `_upsert` 가 넣는 행의 정의."""
+    return all(row[i] is not None for i in need)
+
+
+def _count_on_date(chunks: Iterable[list[tuple]], columns: list[str], required: list[str],
+                   column: str, value: str, tally: dict[str, int]) -> Iterator[list[tuple]]:
+    """조각을 그대로 흘리며 `_upsert` 가 넣을 행 중 `column == value` 인 수를 `tally['n']` 에 센다.
+
+    신선도(컷오버 트랙 T-31 ③) — 제자리 반영의 대상은 v3 본 파일 사본이라 D 행이 이미 있을 수 있다.
+    '대상에 D 행이 있다' 가 아니라 '이번 실행이 D 행을 썼다' 를 남긴다.
+    """
+    i_col = columns.index(column)
+    need = [columns.index(c) for c in required]
+    for chunk in chunks:
+        tally["n"] += sum(1 for r in chunk if r[i_col] == value and _complete(r, need))
+        yield chunk
+
+
 def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
             chunks: Iterable[list[tuple]], required: list[str],
             post: Callable[[sqlite3.Connection], None] | None = None,
@@ -408,7 +457,7 @@ def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
         if pre is not None:
             pre(con)
         for chunk in chunks:
-            good = [r for r in chunk if all(r[i] is not None for i in need)]
+            good = [r for r in chunk if _complete(r, need)]
             n_skipped += len(chunk) - len(good)
             if good:
                 con.executemany(sql, good)
@@ -582,14 +631,17 @@ def _check_adj_close(con: sqlite3.Connection, params: dict[str, str]) -> int:
 
 
 def _ensure_meta_columns(con: sqlite3.Connection) -> None:
-    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식)."""
-    have = {r[1] for r in con.execute(f"PRAGMA table_info({META_TABLE})")}
+    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식).
+
+    `main.` 한정 — 스테이징을 ATTACH 한 연결(`compat.v3_post`)에서도 본 파일 쪽 표만 본다.
+    """
+    have = {r[1] for r in con.execute(f"PRAGMA main.table_info({META_TABLE})")}
     for name, decl in (("n_evening_rows_skipped", "INTEGER"), ("n_adj_close_null", "INTEGER"),
                        ("status", "TEXT"), ("failed_table", "TEXT"),
                        ("model_universe", "TEXT"), ("n_universe_with_estimates", "INTEGER"),
                        ("builds_fallback", "TEXT"), ("model_builds", "TEXT")):
         if name not in have:
-            con.execute(f"ALTER TABLE {META_TABLE} ADD COLUMN {name} {decl}")
+            con.execute(f"ALTER TABLE main.{META_TABLE} ADD COLUMN {name} {decl}")
 
 
 def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:
@@ -710,6 +762,48 @@ def _resolve_model(selected: list[TableMapping], model_root: Path | None, d_iso:
     return out
 
 
+def _replace_date(table: str, column: str, d_iso: str) -> Callable[[sqlite3.Connection], None]:
+    """그 날짜 행을 전부 지운다(넣는 트랜잭션 안 — `_replace_score_date` 와 같은 규칙, QL-C).
+
+    `INSERT OR REPLACE` 만 쓰면 이번 판에 없는 종목의 그날 옛 행(저녁에 원장으로 만든 T 행 중 아침
+    KRX 에 없는 종목)이 남는다. 다른 날짜는 그대로다.
+    """
+    def run(con: sqlite3.Connection) -> None:
+        con.execute(f'DELETE FROM "{table}" WHERE "{column}" = ?', (d_iso,))
+    return run
+
+
+def _guard_date_rows(duck: duckdb.DuckDBPyConnection, mapping: TableMapping,
+                     params: dict[str, str], builds: dict[str, dict[str, str]],
+                     n_extra: int) -> None:
+    """날짜 단위 교체 전 — 새 원천에 `--date` 행이 하나도 없으면 BEGIN 전에 멈춘다(`_score_rows` 와
+    같은 규칙). 판이 그날을 담지 못했는데(예: 저녁 반영 뒤 D' 판으로 아침 `--date T`) 지우고 넣으면
+    그날 행이 조용히 사라진다. `n_extra` 는 판 밖에서 얹는 그날 행 수(장 마감 판 T 행).
+    """
+    sql, _ = _render(mapping, {**params, "from_date": params["date"]}, builds)
+    row = duck.execute(f"SELECT count(*) FROM ({sql}) q").fetchone()
+    n_day = (0 if row is None else int(row[0])) + n_extra
+    if n_day == 0:
+        raise CompatEmptyError(
+            f"{mapping.v3_table}: 새 원천에 {params['date']} 행이 0 — 날짜 단위 교체로 그날 "
+            "기존 행을 지우지 않는다(아침이면 그날 KRX 확정판, 저녁이면 T 원장을 확인)")
+
+
+def _guard_evening_order(con: sqlite3.Connection, d_iso: str) -> None:
+    """장 마감 판이 더 나중 반영을 덮지 않는다 — 대상 `_compat_meta` 에 이번(T, 장 마감)보다 순서가
+    뒤인 ok 기록(날짜가 뒤 · 같은 날 아침)이 있으면 쓰기 전에 멈춘다. 늦게 돈 저녁이 KRX 확정 행이나
+    다음 날 T 행을 옛 원장 값으로 되돌리는 것을 막는다. 순서 판정은 QL-F 반영 순서 가드(T-35)와 한
+    곳이다(`v3_post._newer` — v3_post 가 이 모듈을 import 하므로 함수 안에서 부른다). 재생은
+    `allow_older`.
+    """
+    from . import v3_post
+    newer = v3_post._newer(v3_post._meta_rows(con), d_iso, "evening")
+    if newer:
+        raise CompatError(
+            f"대상에 이번({d_iso} 장 마감)보다 나중 반영 기록 {newer[-1]} 이 있다 — 그 위에 쓰면 "
+            "확정 값이 옛 원장 값으로 되돌아간다(T-35 순서). 재생이면 --allow-older")
+
+
 def _build_ids(builds: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in builds.items() if not k.startswith(_EXPR)}
 
@@ -719,7 +813,9 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
            window_days: int | None = None, consensus_asof: str | None = None,
            builds_from: Path | None = None, builds_from_missing: str = "error",
            model_universe: str = "all", in_place: bool = False,
-           model_root: Path | None = None) -> ExportResult:
+           model_root: Path | None = None, postclose_db: Path | None = None,
+           kiwoom_db: Path | None = None, calendar_dir: Path | None = None,
+           allow_older: bool = False) -> ExportResult:
     """equity/stage/model 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
 
     date·consensus_asof 는 YYYYMMDD. `full=False`(기본)면 최근 `INCREMENTAL_DAYS` 달력일만,
@@ -733,6 +829,10 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     `in_place=True`(v3 quant.db 제자리 반영)이면 `all` 만 허용한다(T-19).
     `model_root` 는 모델 판 루트(`data/model`) — 점수 두 표를 고르면(표를 안 고르면 기본으로 고른다)
     반드시 있어야 한다. 그날·그 basis 의 모델 판으로 고정하고 `score_date` 단위로 갈아 끼운다(T-16).
+    `postclose_db`·`kiwoom_db`·`calendar_dir` 는 장 마감 판(`basis='evening'`)의 `daily_prices`·
+    `investor_detail_flows` T 행 원천 원장(`data/raw/postclose.db`·`data/raw/kiwoom.db`)과 D' 를 셀
+    판정 달력 폴더(없으면 `daily.calendar` 기본 경로)다(QL-D). 아침판에서는 쓰지 않는다.
+    `allow_older` 는 장 마감 판이 대상의 더 나중 반영 기록(T-35 순서)을 무시하게 한다(재생 전용).
     """
     as_of = _parse_date(date, "--date")
     if basis not in BASES:
@@ -767,18 +867,38 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     roots = {EQUITY: Path(equity_root), STAGE: Path(stage_root)}
     selected = _selected(tables)
     pinned = _load_builds_from(builds_from) if builds_from is not None else None
+    # QL-D — 장 마감 판. T 행 모듈은 stage 빌더·규칙을 끌어오므로 저녁에만 불러온다
+    # (t_rows docstring).
+    # 인자·달력·판 이음매 준비는 대상 파일을 열기 전에 끝낸다.
+    evening = basis == "evening"
+    t_mod = None
+    if evening:
+        from . import t_rows as t_mod
+    t_tables = [m.v3_table for m in selected if t_mod is not None and m.v3_table in t_mod.TABLE_SQL]
+    t_paths = t_mod.ledgers(postclose_db, kiwoom_db) if t_mod is not None and t_tables else None
+    # 이음매 검사에 쓰는 `universe_daily` — 장 마감 판이 equity 표를 하나라도 읽으면 함께 고정한다
+    reads_equity = any(m.source_kind == EQUITY or any(k == EQUITY for k, _ in m.cross_sources)
+                       for m in selected)
 
     want_estimates = (model_universe == "estimates"
                       and any(m.v3_table == "stocks" for m in selected))
     builds, builds_fallback = _resolve_sources(
         selected, roots, pinned,
-        [(STAGE, "stg_consensus_annual")] if want_estimates else [],
+        ([(STAGE, "stg_consensus_annual")] if want_estimates else [])
+        + ([(EQUITY, "universe_daily")] if evening and reads_equity else []),
         builds_from_missing)
     builds[MODEL] = _resolve_model(selected, model_root, params["date"], basis)
     equity_builds, stage_builds = _build_ids(builds[EQUITY]), _build_ids(builds[STAGE])
     model_builds = _build_ids(builds[MODEL])
     _check_basis(equity_builds, basis)
     _check_price_chain(equity_builds)
+    # 장 마감 판 이음매(MINOR-2) — T 행을 만들 때, 그리고 D' 아침 판(`m_`)을 받았을 때는 표 선택과
+    # 무관하게 본다
+    seam = t_mod is not None and reads_equity and (
+        bool(t_tables) or any(basis_of_build_id(b) == "morning" for b in equity_builds.values()))
+    if t_mod is not None and seam:
+        params.update(t_iso=params["date"], t_ymd=as_of.strftime("%Y%m%d"),
+                      d_prime=t_mod.dprime(as_of, calendar_dir).isoformat())
 
     window = {"days": span, "full": full, "from_date": params["from_date"],
               "to_date": params["date"]}
@@ -793,6 +913,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         duck.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
         # 진행 막대가 `| tee` 로그를 제어문자로 덮는다(1차 그림자 실행 관찰).
         duck.execute("SET enable_progress_bar=false")
+        if evening and not allow_older:
+            _guard_evening_order(con, params["date"])
         existed = _existing_tables(con)
         required = _ensure_schema(con, [m.v3_table for m in selected])
         if not full and any(m.v3_table == "daily_prices" for m in selected):
@@ -802,10 +924,20 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         # (표 → (열, 행)).
         # 한 표라도 깨졌으면 점수 표는 하나도 쓰지 않는다. 9표 한 트랜잭션은 QL-F 몫이다.
         scores: dict[str, tuple[list[str], list[tuple]]] = {}
+        t_parts: dict = {}                  # 표 → t_rows.TPart
         try:
+            if t_mod is not None and seam:
+                current = t_tables[0] if t_tables else selected[0].v3_table
+                t_mod.check_seam(duck, builds[EQUITY][_EXPR + "universe_daily"], params)
+                if t_paths is not None:
+                    exprs = {k[len(_EXPR):]: v for k, v in builds[EQUITY].items()
+                             if k.startswith(_EXPR)}
+                    t_parts = t_mod.build(duck, selected, exprs, params, t_paths)
             for mapping in selected:
                 current = mapping.v3_table
+                on_date = {"n": 0}       # daily_prices 에 이번에 쓴 trade_date = D 행(T-31 ③)
                 sql, used = _render(mapping, params, builds)
+                part = t_parts.get(mapping.v3_table)
                 if mapping.source_kind == MODEL:
                     if not scores:
                         for m in (x for x in selected if x.source_kind == MODEL):
@@ -818,6 +950,10 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                         con, mapping, columns, [rows], required[mapping.v3_table],
                         pre=_replace_score_date(mapping.v3_table, params["date"]))
                 else:
+                    day_col = DATE_REPLACED.get(mapping.v3_table)
+                    if day_col is not None:         # 날짜 단위 교체 0행 가드 — 스트림 열기 전에
+                        _guard_date_rows(duck, mapping, params, builds,
+                                         0 if part is None else len(part.rows))
                     cur = duck.execute(sql)
                     columns = [d[0] for d in (cur.description or [])]
                     if mapping.v3_table == "stocks":
@@ -831,11 +967,24 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                             con, mapping, columns, [rows], required["stocks"],
                             _mark_delisted(params["exported_at"]))
                     else:
-                        n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
-                                                    required[mapping.v3_table])
+                        chunks: Iterable[list[tuple]] = _chunks(cur)
+                        if part is not None:
+                            chunks = itertools.chain(chunks, [part.rows])
+                        # 신선도 셈(T-31 ③)은 T 행을 얹은 뒤에 건다 — 거꾸로면 저녁 n_on_date 가
+                        # 0 이 되어 제자리 반영 게이트가 매일 멈춘다
+                        if mapping.v3_table == "daily_prices":
+                            chunks = _count_on_date(chunks, columns, required["daily_prices"],
+                                                    "trade_date", params["date"], on_date)
+                        n_rows, n_skipped = _upsert(
+                            con, mapping, columns, chunks, required[mapping.v3_table],
+                            pre=None if day_col is None else _replace_date(
+                                mapping.v3_table, day_col, params["date"]))
                 metrics = (_fin_source_counts(con)
-                           if mapping.v3_table == "financial_summary" else {})
-                results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics)
+                           if mapping.v3_table == "financial_summary" else
+                           {"n_on_date": on_date["n"]}
+                           if mapping.v3_table == "daily_prices" else {})
+                results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics,
+                                                        None if part is None else part.info)
                 if mapping.v3_table == "daily_prices":
                     evening_skipped = _count_evening_skipped(
                         duck, builds[EQUITY][_EXPR + "price_daily"], params)

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # v3 quant.db 호환 계층 export — 플랜 `docs/plans/2026-09-24-v3-merge.md` T1.3 2.
 #   equity/stage 판을 읽어 v3 `quant.db` 9표 중 우리가 채우는 표를 upsert 한다(읽기 전용 소비).
-#   M1~M3 대상은 별도 파일 `data/compat/quant.db`(기본값), M4 컷오버부터 QL_COMPAT_TARGET 으로
-#   v3 `~/kael-system-v3/data/quant.db` 제자리(결정 D-2).
+#   M1~M3 대상은 별도 파일 `data/compat/quant.db`(기본값 — 그림자). v3 quant.db 제자리 반영(결정 D-2)은
+#   이 스크립트로 하지 않는다 — `scripts/v3_post.sh`(스테이징 → 게이트 → 9표 한 트랜잭션, QL-F)를 쓴다.
+#   이 스크립트는 표마다 따로 커밋하고 필수 열 빈 행을 5% 까지 건너뛰므로 v3 파일에 직접 돌리지 않는다.
 #   점수 두 표(score_history·_v2)는 모델 판(QL_MODEL_ROOT, 기본 data/model)의 그날·그 basis 판이
 #   원천이다(QL-C · T-16) — 그날 모델 성공 판이 없으면 export 가 실패한다(다른 날 판으로 대체 안 함).
+#   --basis evening 의 가격·수급 T 행은 원장 두 개(QL_POSTCLOSE_DB 기본 data/raw/postclose.db ·
+#   QL_KIWOOM_DB 기본 data/raw/kiwoom.db)에서 만든다(QL-D). 원장은 읽기만 한다.
 #
 #   락: 자체 락 `/tmp/quant_ledger_compat.lock` — 빌드 락(`/tmp/quant_ledger_build.lock`)은 잡지
 #       않는다. equity 판을 **읽기만** 하고 MANIFEST current_build 로 판을 고정해 읽으므로
@@ -24,6 +27,8 @@ EQUITY_ROOT="${QL_EQUITY_ROOT:-data/equity}"
 STAGE_ROOT="${QL_STAGE_ROOT:-data/stage}"
 MODEL_ROOT="${QL_MODEL_ROOT:-data/model}"
 TARGET="${QL_COMPAT_TARGET:-data/compat/quant.db}"
+POSTCLOSE_DB="${QL_POSTCLOSE_DB:-data/raw/postclose.db}"
+KIWOOM_DB="${QL_KIWOOM_DB:-data/raw/kiwoom.db}"
 DATE_ARG=""; BASIS=""; FULL=""; DRY=""; CONS=""; BUILDS=""
 UNIV="${QL_COMPAT_UNIVERSE:-}"; BFMISS=""
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
@@ -53,6 +58,9 @@ case "$BASIS" in
   evening|morning) ;;
   *) die_arg "--basis 는 evening|morning 이어야 한다(받은 값 '${BASIS}')" ;;
 esac
+# 장 마감 판 T 행 원천(QL-D) — 저녁에만 넘긴다
+LEDGERS=()
+[ "$BASIS" = evening ] && LEDGERS=(--postclose-db "$POSTCLOSE_DB" --kiwoom-db "$KIWOOM_DB")
 mkdir -p logs/compat
 LOG="logs/compat/${D}_${BASIS}.log"
 exec 9>"$LOCK"
@@ -70,14 +78,16 @@ if [ -n "$DRY" ]; then
   echo "  $PY -m compat export --date $D --basis $BASIS --equity-root $EQUITY_ROOT" \
        "--stage-root $STAGE_ROOT --model-root $MODEL_ROOT --target $TARGET $FULL" \
        "${CONS:+--consensus-asof $CONS} ${BUILDS:+--builds-from $BUILDS}" \
-       "${UNIV:+--model-universe $UNIV} ${BFMISS:+--builds-from-missing $BFMISS}"
+       "${UNIV:+--model-universe $UNIV} ${BFMISS:+--builds-from-missing $BFMISS}" \
+       ${LEDGERS[@]+"${LEDGERS[*]}"}
   RC=0
 else
   # shellcheck disable=SC2086  # reason: $FULL 은 있거나 없는 단일 플래그다
   $PY -m compat export --date "$D" --basis "$BASIS" --equity-root "$EQUITY_ROOT" \
       --stage-root "$STAGE_ROOT" --model-root "$MODEL_ROOT" --target "$TARGET" $FULL \
       ${CONS:+--consensus-asof "$CONS"} ${BUILDS:+--builds-from "$BUILDS"} \
-      ${UNIV:+--model-universe "$UNIV"} ${BFMISS:+--builds-from-missing "$BFMISS"}
+      ${UNIV:+--model-universe "$UNIV"} ${BFMISS:+--builds-from-missing "$BFMISS"} \
+      ${LEDGERS[@]+"${LEDGERS[@]}"}
   RC=$?
   echo "──── compat export 종료 rc=$RC $(kst) ────"
 fi

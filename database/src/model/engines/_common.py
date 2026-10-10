@@ -30,6 +30,13 @@ def z_score_winsorized(values: Sequence[float], sigma: float = 3.0) -> list[floa
     return [(v - mean) / std for v in clipped]
 
 
+def crosses_step(flags: Sequence[bool]) -> bool:
+    """창 안 행들의 계단 표식(`fi_adj_prices.adj_ok`·`adj_jump_ok`)이 바뀌나 — 바뀌면 그 창이 표시된
+    사건의 적용일을 넘는다(값이 한결같으면 척도가 이어진다). v4 `_Series.crosses_event`·scope(T-9)
+    가 같이 쓴다."""
+    return any(flags) and not all(flags)
+
+
 def weighted_available(scores: Mapping[str, float], weights: Mapping[str, float]) -> float | None:
     """있는 하위 점수만으로 비례 재정규화한 가중합 Σ s·(w/Σw). 하나도 없거나 Σw = 0 이면 None.
 

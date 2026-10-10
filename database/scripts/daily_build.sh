@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → 확정 빌드
-# → 모델 단계(fi → 모델 → 일간 엑셀 발송, scripts/model_daily.sh — N-25 Q0) → 요약.
+# → 모델 단계(fi → 모델 → 일간 엑셀 발송, scripts/model_daily.sh — N-25 Q0)
+# → 장 마감 판 아침 잇기(v3 아침 KRX 재반영 · 두 판 대조, scripts/postclose_chain.sh morning — 컷오버 PR-8) → 요약.
 # 플랜 P1 Task 1.8 / 결정 R1. 확정 빌드(stage·equity basis=morning)는 scripts/build_morning.sh 가 한다
 # (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
@@ -152,6 +153,12 @@ if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
     echo "──── 모델 단계 시작 $(kst) ────"
     bash scripts/model_daily.sh --date "$D"; MRC=$?
     echo "──── 모델 단계 종료 rc=$MRC $(kst) ────"
+    # 장 마감 판 아침 잇기(컷오버 PR-8 ⑧) — 확정판 뒤 v3 아침 KRX 재반영(compat 만, T-34)과 두 판 대조(PR-7). 모델 단계
+    # 성패와 무관하게 돈다(T-34: 가격 재반영이 아침 모델 실패에 묶이지 않는다 — 반영 표는 compat 이 고른다). soft — 결과는
+    # 자기 런 로그·notify 로 남기고 확정판 rc·요약 등급은 그대로다. 요약 줄은 '모델 단계 시작' 앞에서 잘라 영향 없음.
+    echo "──── 장 마감 판 아침 잇기 시작 $(kst) ────"
+    bash scripts/postclose_chain.sh morning --date "$D"; PRC=$?
+    echo "──── 장 마감 판 아침 잇기 종료 rc=$PRC $(kst) ────"
   fi
 fi
 # 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).

@@ -2,6 +2,8 @@
 # 18:05 KST 저녁 원장 슬롯 — 그날 확정된 축을 그날 저녁에 원장에 넣는다. 플랜 v2 §3 Task A.2.
 #   순서: 원장 락 → 캘린더 동기화 → D(오늘 KST) 거래일 판정 → [D 미완료면] 병렬 3갈래 →
 #         rc 취합 → runlog(evening_chain) → data/deliver/ledger_evening.json → 알림
+#         (키움·WISE 가 끝나 인계 파일을 처음 쓴 직후, 키움 rc 0 이면 장 마감 판 재반영 훅
+#          scripts/postclose_chain.sh refill — 컷오버 PR-8 ⑦)
 #   ① 키움 ka10060·ka10014 fetch + --commit — KRX 대조 없이 원장 직행(결정 V2-1). 대조 상대인 KRX 는
 #      T+1 08:00 공표라 그날 저녁엔 없다. 오염 게이트(b)만 통과 조건이다(ka10008 이 없으니 basis=skipped).
 #   ② DART 당일 스윕·상세 — 접수 마감 18:00 직후.
@@ -169,6 +171,13 @@ print(n_fail, json.dumps(kinds, ensure_ascii=False))' "$WISE_FROM")
   WISE_N_BAD="${WISE_FAIL%% *}"; WISE_BAD_SUMMARY="${WISE_FAIL#* }"
   echo "  WISE 이번 저녁 런 실패 콜 ${WISE_N_BAD:-모름} ${WISE_BAD_SUMMARY} $(kst)"
   [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "" "$RC_WISE" "$KW_DONE" "$WISE_DONE" "$WISE_N_BAD" "$WISE_BAD_SUMMARY"
+  # 장 마감 판 재반영(컷오버 PR-8 ⑦ · QL-D 후속) — 21:05 키움 원장 커밋이 끝났으면(rc 0) 그 완료를 받아 16:00 컷오프로 못 받은
+  # 종목을 21:05 값으로 v3 에 한 번 더 반영한다(compat 만, daily_post 없음 — 그날 장 마감 반영이 ok 였을 때만, 판정은
+  # postclose_chain.sh). 고정 시각 크론이 아니라 키움 갈래 종료에 잇는다(P9). 잠정 빌드 트리거인 첫 인계 파일 쓰기 뒤라
+  # 그 시각을 늦추지 않고, DART 를 기다리지 않는다. 결과는 자기 런 로그·notify 로 남기고 이 체인의 rc·FAILED 는 그대로다.
+  if [ -z "$DRY" ] && [ "$RC_KW" -eq 0 ]; then
+    bash scripts/postclose_chain.sh refill --date "$D" || echo "  ! 장 마감 재반영 rc=$? — logs/postclose/${D}_refill.log"
+  fi
   wait "$PID_DART"; RC_DART=$?
   echo "  DART 종료 rc=$RC_DART $(kst)"
   for f in "$KW_LOG" "$DART_LOG" "$WISE_LOG"; do

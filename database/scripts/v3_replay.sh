@@ -41,7 +41,9 @@
 #                  K1-9d — T-46 뒤 첫 반영 V3-C 도 이 창이다)
 #   --allow-current-builds  인계 이력이 가리킨 equity·stage 판이 보관 판 밖이면(GC) 현판으로 대체한다(T-45 — 옵트인).
 #                  compat `--builds-from-missing current` 를 넘기고, 대체한 표는 compat 기록을 거쳐 JSON
-#                  `inputs.builds_fallback` 에 남는다. 기본은 그날 판이 없으면 반영 실패(reflect_failed:export)
+#                  `inputs.builds_fallback` 에 남는다(그 표가 원천인 v3 표·열의 차이는 대조기 `builds_fallback` 갈래 —
+#                  수만 기록). 기본은 그날 판이 없으면 반영 실패(reflect_failed:export). 옛 날짜는 대체 판 조합에
+#                  따라 export 가 실패할 수 있다(판 스키마 차이 — 예: 현판과 옛 판이 섞여 security 열이 없다) — 그날은 대조 불가
 #   --min-spearman 대조기 점수 Spearman 하한(기본 0 = 기록형 — P5 분포를 잰다)
 #   --keep-db      날짜 폴더의 db(v3·compat·v3_next)를 남긴다. 기본은 대조 뒤 지운다(날마다 사본 크기 × 3)
 # 날짜 폴더 `<out>/<D>/`: v3_replay.json(대조 보고, 대조 못 한 날은 상태 기록) · run.log(단계별 출력)

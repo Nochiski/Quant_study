@@ -21,11 +21,15 @@ daily_prices(전 열이 매일 소비자 열 — §2-2 워치리스트)
   005380 10-05 거래대금만 · 08-04 v3 거래대금 NULL · 01-05 v3 첫 날 전 · 08-05 compat 에만(KRX 행 없음)
                 → other amount · amount_null_v3 · only_in_compat_before_v3 · only_in_compat
   096770 D      v3 에만 → other only_in_v3 · 123450 D 신규 스팩 → new_spac · 005490 08-06 adj 0.04% → 허용 오차 안
+  900000 10-07·D v3 에만(거래량 0) — compat 폐지일 10-07 ≤ 행 날짜 ≤ D → delisting_timing ×2(수급 D 행도)
+  378800 08-12  adj 만 다르다(v3 가 사건 뒤 과거 수정주가를 다음 날 갱신) → 다음 거래일 사본 없으면
+                v3_adj_next_day_unconfirmed, 있고 맞으면 v3_adj_next_day, 맞지 않으면 other pre_mismatch
 stocks
   005930 시총 +5(종가 없음) → other column:market_cap, 상장일 다름 → no_consumer column:listed_date
   000660 시총 +1 → 허용 오차 안 · 051910 시총 100 → 98(종가 510 → 500) → market_cap_close_definition(T-45 ①)
   051911 시총 100 → 90(종가 255 → 250, 함의 주식수 다름) → other column:market_cap
-  000880 v3 시총 NULL 인데 v3 에 그날 행이 있다(수집 누락 아님) → other column:market_cap
+  000880 v3 시총 NULL · v3 에 그날 행 있음 · KRX 근거 있음 → v3_missing_value(v3 값 결측을 compat 이 채움)
+  000990 v3 시총 NULL · KRX 근거 없음 → other column:market_cap
   900000 compat 폐지(10-07)·is_active 0·시총 50, v3 1·NULL → delisting_timing(T-45 ②)
   088280 v3 시총 NULL · v3 그날 행 없음 · KRX 행 있음 → v3_missed_day · 123450 → new_spac · 777777 compat 에만 → other
 consensus_revision_daily op 0.5% → manual_consumer(§2-3 S10) · eps +10 → no_consumer · financial_summary compat 에만 → no_consumer
@@ -80,6 +84,8 @@ V3_PRICES = [
     _px("005380", "2026-08-04", 9000, amount=None),
     _px("096770", D_ISO, 7000),
     _px("005490", "2026-08-06", 1000, adj=1000.0),
+    _px("900000", "2026-10-07", 100, vol=0), _px("900000", D_ISO, 100, vol=0),
+    _px("378800", "2026-08-12", 5000, adj=2094),
 ]
 # compat 이 바꾼 값(키 → 행) — 없는 키는 v3 와 같다. None 은 compat 이 지운 행
 COMPAT_PRICES = {
@@ -105,6 +111,8 @@ COMPAT_PRICES = {
     ("096770", D_ISO): None,
     ("123450", D_ISO): _px("123450", D_ISO, 2000),
     ("005490", "2026-08-06"): _px("005490", "2026-08-06", 1000, adj=1000.4),
+    ("900000", "2026-10-07"): None, ("900000", D_ISO): None,
+    ("378800", "2026-08-12"): _px("378800", "2026-08-12", 5000, adj=10468),
 }
 REBASE = {"before": "2026-09-24", "tickers": ["000100"], "n_rows": 1, "n_null": 1}
 STOCK_COLS = ("stock_code", "stock_name", "market", "sector", "market_cap", "listed_date", "is_active",
@@ -118,13 +126,15 @@ def _stock(code: str, cap: int | None, updated: str, *, listed: str = "2000-01-0
 
 V3_TIME, X_TIME = "2026-10-08 11:05:00", "2026-10-09T00:10:00"
 V3_STOCKS = [_stock("005930", 1000, V3_TIME), _stock("000660", 2000, V3_TIME), _stock("051910", 100, V3_TIME),
-             _stock("051911", 100, V3_TIME), _stock("000880", None, V3_TIME),
+             _stock("051911", 100, V3_TIME), _stock("000880", None, V3_TIME), _stock("000990", None, V3_TIME),
              _stock("900000", None, V3_TIME), _stock("088280", None, V3_TIME)]
 COMPAT_STOCKS = [_stock("005930", 1005, X_TIME, listed="1975-06-11"), _stock("000660", 2001, X_TIME),
                  _stock("051910", 98, X_TIME), _stock("051911", 90, X_TIME), _stock("000880", 60, X_TIME),
+                 _stock("000990", 40, X_TIME),
                  _stock("900000", 50, X_TIME, active=0, delisted="2026-10-07"),
                  _stock("088280", 70, X_TIME), _stock("123450", 50, X_TIME), _stock("777777", 10, X_TIME)]
 REVISION_COLS = BY_TABLE["consensus_revision_daily"].columns
+_FLOW = tuple(c for c in BY_TABLE["investor_detail_flows"].columns if c not in ("stock_code", "trade_date"))
 
 
 def _revision(op: float, eps: int) -> dict:
@@ -171,6 +181,8 @@ def _v3_file(path: Path, prices: list[tuple]) -> Path:
         _insert(con, "daily_prices", BY_TABLE["daily_prices"].columns, prices)
         _insert(con, "stocks", STOCK_COLS, V3_STOCKS)
         _insert(con, "consensus_revision_daily", REVISION_COLS, [_revision(100.0, 5000)])
+        con.execute(f"INSERT INTO investor_detail_flows (stock_code, trade_date, {', '.join(_FLOW)}) "
+                    f"VALUES ('900000', ?, {', '.join('0' * len(_FLOW))})", (D_ISO,))
         _insert(con, "score_history", V3_SCORE_COLUMNS, V3_SCORES)
         _insert(con, "score_history_v2", V2_SCORE_COLUMNS, V2_SCORES)
         con.commit()
@@ -181,14 +193,14 @@ def _v3_file(path: Path, prices: list[tuple]) -> Path:
 
 def _meta(path: Path, basis: str = "morning", t_rows: dict | None = None, day: str = D_ISO, *,
           rebase: dict | None = None, at: str = "2026-10-09T00:10:00.000000+00:00",
-          builds: dict | None = None) -> None:
+          builds: dict | None = None, fallback: tuple[str, ...] = ()) -> None:
     con = sqlite3.connect(str(path), isolation_level=None)
     try:
         _write_meta(con, ExportResult(
             date=day, basis=basis, target=str(path), exported_at=at,
             window={"days": 14, "full": False, "from_date": "2026-09-24", "to_date": day},
             consensus_asof=day, tables={"daily_prices": TableResult(1, 0, {}, {}, t_rows, rebase)},
-            equity_builds=BUILDS if builds is None else builds))
+            equity_builds=BUILDS if builds is None else builds, builds_fallback=fallback))
     finally:
         con.close()
 
@@ -204,6 +216,7 @@ def _compat_file(v3: Path, path: Path, prices: dict, *, basis: str = "morning",
                 _insert(con, "daily_prices", BY_TABLE["daily_prices"].columns, [row])
         _insert(con, "stocks", STOCK_COLS, COMPAT_STOCKS)
         _insert(con, "consensus_revision_daily", REVISION_COLS, [_revision(100.5, 5010)])
+        con.execute("DELETE FROM investor_detail_flows WHERE stock_code = '900000'")
         con.execute("INSERT INTO financial_summary (stock_code, period, period_type) "
                     "VALUES ('005930', '2025/12', 'annual')")
         con.execute("DELETE FROM score_history")
@@ -259,8 +272,9 @@ def _keys(report: dict, table: str, category: str) -> set[str]:
 def test_daily_prices_categories_follow_qle_order(pair, equity_root) -> None:
     rep = rp.compare(pair[0], pair[1], D, equity_root)
     cats, other = _tables(rep, "daily_prices")
-    assert cats == {"T33": 2, "base_day_unconfirmed": 1, "new_spac": 1, "rebase_adj_null": 1,
-                    "v3_adj_null": 1, "v3_backfill": 1, "v3_bad_day": 3, "v3_missed_day": 2}
+    assert cats == {"T33": 2, "base_day_unconfirmed": 1, "delisting_timing": 2, "new_spac": 1, "rebase_adj_null": 1,
+                    "v3_adj_next_day_unconfirmed": 1, "v3_adj_null": 1, "v3_backfill": 1, "v3_bad_day": 3,
+                    "v3_missed_day": 2}
     assert other == {"T33_ratio_or_volume": 1, "amount": 1, "amount_null_v3": 1, "only_in_compat": 1,
                      "only_in_compat_before_v3": 1, "only_in_v3": 1, "pre_mismatch": 3}
     t = rep["tables"]["daily_prices"]
@@ -270,6 +284,9 @@ def test_daily_prices_categories_follow_qle_order(pair, equity_root) -> None:
     assert _keys(rep, "daily_prices", "v3_missed_day") == {"051910", "088280"}
     assert _keys(rep, "daily_prices", "v3_bad_day") == {"A00001", "A00002", "A00003"}
     assert _keys(rep, "daily_prices", "rebase_adj_null") == {"000100"}
+    assert _keys(rep, "daily_prices", "delisting_timing") == {"900000"}
+    assert _keys(rep, "daily_prices", "v3_adj_next_day_unconfirmed") == {"378800"}   # 000660(거래량만)은 안 든다
+    assert _keys(rep, "investor_detail_flows", "delisting_timing") == {"900000"}
     assert rep["daily_prices"]["bad_days_detected"] == ["2026-03-26", "2026-03-27"]
     assert rep["daily_prices"]["bad_days_unregistered"] == ["2026-03-26"]
     assert rep["daily_prices"]["v3_first_trade_date"] == "2026-03-26"
@@ -284,8 +301,10 @@ def test_daily_prices_categories_follow_qle_order(pair, equity_root) -> None:
 def test_stocks_t45_categories_and_consumer_tiers(pair, equity_root) -> None:
     rep = rp.compare(pair[0], pair[1], D, equity_root)
     cats, other = _tables(rep, "stocks")
-    assert cats == {"delisting_timing": 1, "market_cap_close_definition": 1, "new_spac": 1, "v3_missed_day": 1}
-    assert other == {"column:market_cap": 3, "only_in_compat": 1}    # 005930(종가 없음)·051911·000880 · 777777
+    assert cats == {"delisting_timing": 1, "market_cap_close_definition": 1, "new_spac": 1, "v3_missed_day": 1,
+                    "v3_missing_value": 1}
+    assert other == {"column:market_cap": 3, "only_in_compat": 1}    # 005930(종가 없음)·051911·000990 · 777777
+    assert _keys(rep, "stocks", "v3_missing_value") == {"000880"}
     assert rep["tables"]["stocks"]["no_consumer"] == {"column:listed_date": 1}
     assert rep["tables"]["stocks"]["n_within_tol"] == 1              # 000660 +1억원(반올림)
     assert _keys(rep, "stocks", "market_cap_close_definition") == {"051910"}
@@ -330,7 +349,7 @@ def test_rc_and_totals(pair, equity_root) -> None:
     rep = rp.compare(pair[0], pair[1], D, equity_root)
     assert rep["n_other"] == 14 and rep["rc"] == 1 and rep["status"] == "other"
     assert rep["basis"] == "morning"
-    assert rep["undetermined"] == {"base_day_unconfirmed": 1}
+    assert rep["undetermined"] == {"base_day_unconfirmed": 1, "v3_adj_next_day_unconfirmed": 1}
     assert rep["categories_total"]["new_spac"] == 2                  # daily_prices + stocks
     assert rep["inputs"]["price_daily_build"] == EQ_BUILD and rep["inputs"]["builds_fallback"] == []
 
@@ -428,7 +447,7 @@ def test_base_day_row_is_judged_with_next_copy(pair, equity_root, tmp_path: Path
     assert "base_day_unconfirmed" not in cats
     assert {k: v for k, v in cats.items() if k.startswith("base_day")} == want_cat
     assert {k: v for k, v in other.items() if k.startswith("base_day")} == want_other
-    assert rep["undetermined"] == {"base_day_unconfirmed": 0}
+    assert rep["undetermined"] == {"base_day_unconfirmed": 0, "v3_adj_next_day_unconfirmed": 0}
 
 
 def test_base_day_row_missing_in_next_copy_is_other(pair, equity_root, tmp_path: Path) -> None:
@@ -437,8 +456,71 @@ def test_base_day_row_missing_in_next_copy_is_other(pair, equity_root, tmp_path:
     assert other["base_day_next_missing"] == 1
 
 
+@pytest.mark.parametrize(("next_adj", "want_cat", "want_pre"), [(10_468, {"v3_adj_next_day": 1}, 3),
+                                                             (2094, {}, 4)])
+def test_adj_updated_next_day_is_judged_with_next_copy(pair, equity_root, tmp_path: Path, next_adj: float,
+                                                       want_cat: dict, want_pre: int) -> None:
+    """378800 — 다음 거래일 사본의 같은 행이 compat 과 맞으면 v3_adj_next_day, 여전히 옛 값이면 미설명 pre_mismatch."""
+    nxt = _v3_file(tmp_path / "quant_20261012.db", [_px("378800", "2026-08-12", 5000, adj=next_adj)])
+    cats, other = _tables(rp.compare(pair[0], pair[1], D, equity_root, next_v3_db=nxt), "daily_prices")
+    assert {k: v for k, v in cats.items() if k.startswith("v3_adj_next")} == want_cat
+    assert other["pre_mismatch"] == want_pre
+
+
+def test_delisting_window_and_adj_only_unconfirmed_bounds(tmp_path: Path, equity_root) -> None:
+    """v3 에만 있는 폐지 종목 행은 compat 폐지일(10-07) ≤ 날짜 ≤ D 일 때만 delisting_timing — 10-06·10-12 는 미설명.
+    다음 거래일 사본이 없을 때 미확정으로 두는 것은 adj_close 가 다른 행뿐이다(09-14 뒤 종가만 다르고 adj 가 같은 행은
+    미설명 T33_ratio_or_volume)."""
+    rows = [_px("900000", d, 100, vol=0) for d in ("2026-10-06", "2026-10-07", D_ISO, NEXT_ISO)]
+    rows.append(_px("000270", "2026-10-05", 50_500, adj=50_000))
+    changes: dict = {("900000", d): None for d in ("2026-10-06", "2026-10-07", D_ISO, NEXT_ISO)}
+    changes[("000270", "2026-10-05")] = _px("000270", "2026-10-05", 50_000, adj=50_000)
+    compat, v3 = _bare_pair(tmp_path, rows, changes)
+    con = sqlite3.connect(str(compat))
+    con.execute("UPDATE stocks SET is_active = 0, delisted_date = '2026-10-07' WHERE stock_code = '900000'")
+    con.commit()
+    con.close()
+    rep = rp.compare(compat, v3, D, equity_root)
+    assert _keys(rep, "daily_prices", "delisting_timing") == {"900000"}
+    assert rep["tables"]["daily_prices"]["categories"]["delisting_timing"]["rows"] == 2
+    dp_other = {(o["key"]["stock_code"], o["key"]["trade_date"]): o["reason"] for o in rep["other"]
+                if o["table"] == "daily_prices"}
+    assert dp_other == {("900000", "2026-10-06"): "only_in_v3", ("900000", NEXT_ISO): "only_in_v3",
+                        ("000270", "2026-10-05"): "T33_ratio_or_volume"}
+
+
+def test_builds_fallback_tier_is_recorded_not_judged(tmp_path: Path, equity_root) -> None:
+    """--allow-current-builds 로 현판이 쓰인 원천 표(security)가 원천인 v3 표·열 차이는 builds_fallback 갈래(rc 밖)."""
+    assert rp.fallback_columns(["security"]) == {
+        "stocks": frozenset({"stock_name", "listed_date", "is_active", "delisted_date"}),
+        "financial_summary": rp.ALL}
+    assert rp.fallback_columns([]) == {}
+
+    def run(fallback: tuple[str, ...]) -> dict:
+        base = tmp_path / ("fb" if fallback else "plain")
+        v3 = _v3_file(base / "v3.db", V3_PRICES)
+        compat = base / "compat.db"
+        shutil.copy(v3, compat)
+        con = sqlite3.connect(str(compat))
+        con.execute("UPDATE stocks SET stock_name = '국일제지' WHERE stock_code = '005930'")
+        con.execute("UPDATE stocks SET market_cap = 1005 WHERE stock_code = '005930'")
+        con.execute("INSERT INTO financial_summary (stock_code, period, period_type) VALUES ('005930', '2025/12', 'annual')")
+        con.commit()
+        con.close()
+        _meta(compat, fallback=fallback)
+        return rp.compare(compat, v3, D, equity_root)
+
+    fb = run(("security",))
+    assert fb["tables"]["stocks"]["builds_fallback"] == {"column:stock_name": 1}
+    assert fb["tables"]["stocks"]["other"] == {"column:market_cap": 1}    # 시총은 security 가 원천이 아니다
+    assert fb["tables"]["financial_summary"]["builds_fallback"] == {"only_in_compat": 1}
+    assert (fb["n_builds_fallback"], fb["n_other"], fb["inputs"]["builds_fallback"]) == (2, 1, ["security"])
+    plain = run(())
+    assert plain["tables"]["stocks"]["other"] == {"column:market_cap": 1, "column:stock_name": 1}
+    assert plain["n_builds_fallback"] == 0
+
+
 # ── 장 마감 판 T 행(§7 장 마감 판 · daily_prices 5) ───────────────────────────
-_FLOW = tuple(c for c in BY_TABLE["investor_detail_flows"].columns if c not in ("stock_code", "trade_date"))
 EVENING_V3 = [_px("P00001", D_ISO, 10_100, vol=1200), _px("P00002", D_ISO, 10_000, ohl=9_900),
               _px("P00003", D_ISO, 10_000), _px("K00001", D_ISO, 10_000, vol=900),
               _px("K00002", D_ISO, 10_000, ohl=9_900),
@@ -565,7 +647,7 @@ def test_cli_writes_json_and_returns_rc(pair, equity_root, tmp_path: Path, capsy
                   "--equity-root", str(equity_root), "--json", str(out)])
     assert rc == 1
     doc = json.loads(out.read_text(encoding="utf-8"))
-    assert (doc["rc"], doc["n_other"], doc["tool"], doc["schema"]) == (1, 14, "compat.v3_replay", 2)
+    assert (doc["rc"], doc["n_other"], doc["tool"], doc["schema"]) == (1, 14, "compat.v3_replay", 3)
     assert set(doc["registry"]) == {c.key for c in rp.CATEGORIES}
     assert {"other", "manual_consumer", "no_consumer"} <= set(doc)
     assert "v3_replay D=2026-10-08 basis=morning rc=1" in capsys.readouterr().out
@@ -597,9 +679,9 @@ def test_tsv_merges_reports_and_status_stubs(pair, equity_root, tmp_path: Path) 
     assert lines[0].split("\t") == list(rp.TSV_HEAD)
     first, second = (ln.split("\t") for ln in lines[1:])
     assert first[:4] == ["20261007", "no_copy", "1", "-"]
-    assert second[:8] == ["20261008", "other", "1", "14", "1", "3", "1.0000", "1.0000"]
-    assert "new_spac=2" in second[8] and "daily_prices.pre_mismatch=3" in second[9]
-    assert "listed_date" not in second[9]                            # 소비자 없는 갈래는 other 열에 안 든다
+    assert second[:9] == ["20261008", "other", "1", "14", "1", "3", "0", "1.0000", "1.0000"]
+    assert "new_spac=2" in second[9] and "daily_prices.pre_mismatch=3" in second[10]
+    assert "listed_date" not in second[10]                           # 소비자 없는 갈래는 other 열에 안 든다
 
 
 # ── 그림자 날 합치기(COMPAT §8-2) ─────────────────────────────────────────────

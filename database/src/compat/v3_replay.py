@@ -28,6 +28,8 @@ Spearman 분포로 임계 등록') · `docs/COMPAT_LAYER.md` §7(의도된 차�
   · `other`            매일 도는 소비자가 읽는 열(`DAILY_CONSUMER` — COMPAT §2-1 crontab · §2-2 unitelegram) — rc 를 정한다
   · `manual_consumer`  §2-3 리서치센터(crontab 밖, 수동)만 읽는 열(`MANUAL_CONSUMER`) — 수만 기록
   · `no_consumer`      읽는 곳이 없는 표·열(§2-4 등) — 수만 기록
+  · `builds_fallback`  `--allow-current-builds` 로 현판을 쓴 원천 표(기록 `builds_fallback`)가 원천인 v3 표·열의 차이 —
+                       수만 기록(그날 판이 아니라 그 뒤 판의 값이 섞인다. 위 세 갈래보다 먼저 본다)
   한쪽에만 있는 행은 그 표의 소비 열이 있으면 그 갈래다. 기록 수는 일반 표(가격·점수 밖)는 허용 오차 밖 열마다 1건
   (`column:<열>`), 그 밖은 행마다 1건이다.
 rc: 0 = `other` 0 · 1 = `other` 있음 · 2 = 입력 오류(파일·표·compat 기록·equity 판 없음, 잘못된 날짜).
@@ -60,13 +62,13 @@ from daily import calendar as daily_calendar
 from model.compare import TABLES as SCORE_TOTAL_COLUMN
 from model.compare import spearman
 
-from .mappings import BY_TABLE, DATE_REPLACED, EQUITY, V3_OVERWRITE_ROWS, _k_chain
+from .mappings import BY_TABLE, DATE_REPLACED, EQUITY, MAPPINGS, V3_OVERWRITE_ROWS, _k_chain
 from .quant_db import META_TABLE, CompatError, _parquet_source, _reference_schema
 from .t_rows import SOURCE_KIWOOM_2105
 from .v3_post import SCORE_TABLES, TABLES, _meta_rows, _scope, snapshot
 
 TOOL = "compat.v3_replay"
-SCHEMA = 2                     # JSON 모양 판본 — 키를 바꾸면 올린다(2: T-45 세 갈래·범주 넷 추가)
+SCHEMA = 3                     # JSON 모양 판본 — 키를 바꾸면 올린다(2: T-45 세 갈래·범주 넷, 3: 대체 판 갈래)
 
 # ── 판정 상수(근거를 같이 적는다) ─────────────────────────────────────────────
 # T-33 · §7 daily_prices 1 — KRX 애프터마켓(16:00~20:00) 시행일. 이날부터 v3 종가는 장후 마지막 체결가라 수준이
@@ -113,6 +115,8 @@ MANUAL_CONSUMER: dict[str, frozenset[str]] = {
     "consensus_revision_compare": frozenset({"stock_code", "op_1w"}),
 }
 DAILY, MANUAL, NONE = "other", "manual_consumer", "no_consumer"     # 갈래 = JSON 키
+FALLBACK = "builds_fallback"
+TIERS = (DAILY, MANUAL, NONE, FALLBACK)
 
 
 def consumer_tier(table: str, cols: Iterable[str] | None) -> str:
@@ -123,6 +127,29 @@ def consumer_tier(table: str, cols: Iterable[str] | None) -> str:
     if manual and (cols is None or set(cols) & manual):
         return MANUAL
     return NONE
+
+
+# ── 대체 판 갈래 — 원천 표 → v3 표·열 ─────────────────────────────────────────
+# 매핑 선언(`TableMapping.sources`·`cross_sources`)은 원천을 표 단위로만 적는다. 열 단위 대응은 매핑 SQL 을 보고 여기
+# 적고, 없는 조합은 그 v3 표 전 열로 본다(표 단위). 근거 — mappings `_STOCKS_SQL`: stock_name ← security
+# name_abbrv_current·name_current, listed_date ← list_date, is_active·delisted_date ← delist_date(10-01 실측 078130 등
+# 개명이 섞인 열). 시총·업종·시장은 price_daily·stg_master_daily·universe_daily 가 원천이다.
+FALLBACK_COLUMNS: dict[tuple[str, str], frozenset[str]] = {
+    ("security", "stocks"): frozenset({"stock_name", "listed_date", "is_active", "delisted_date"}),
+}
+
+
+def fallback_columns(fallback: Iterable[str]) -> dict[str, frozenset[str] | str]:
+    """현판으로 대체된 원천 표 → 그 표가 원천인 v3 표의 열(모르면 ALL)."""
+    fb = set(fallback)
+    out: dict[str, frozenset[str] | str] = {}
+    for m in MAPPINGS:
+        hit = sorted((set(m.sources) | {t for _, t in m.cross_sources}) & fb)
+        if not hit:
+            continue
+        known = [FALLBACK_COLUMNS.get((src, m.v3_table)) for src in hit]
+        out[m.v3_table] = ALL if any(c is None for c in known) else frozenset().union(*known)  # type: ignore[arg-type]
+    return out
 
 
 # ── 등록 범주(한 곳) ──────────────────────────────────────────────────────────
@@ -152,6 +179,9 @@ REBASE_ADJ_NULL = "rebase_adj_null"
 MCAP_CLOSE = "market_cap_close_definition"
 DELIST_TIMING = "delisting_timing"
 V3_MISSED_DAY = "v3_missed_day"
+V3_MISSING_VALUE = "v3_missing_value"
+V3_ADJ_NEXT = "v3_adj_next_day"
+V3_ADJ_NEXT_OPEN = "v3_adj_next_day_unconfirmed"
 
 CATEGORIES: tuple[Category, ...] = (
     Category(NEW_SPAC, "신규 스팩 — compat 에만 있는 행(v3 stocks 누락 교정)", "§7 신규 스팩 · T-25"),
@@ -180,10 +210,16 @@ CATEGORIES: tuple[Category, ...] = (
              "§7 daily_prices 창 밖"),
     Category(MCAP_CLOSE, "stocks.market_cap 종가 정의 — 함의 주식수(시총 ÷ 그날 종가)가 같고 억원 반올림 ±1",
              "§7 T-45 ① · T-33"),
-    Category(DELIST_TIMING, "상장폐지 반영 시점 — compat 은 KRX 폐지일로 is_active=0·시총·폐지일, v3 는 아직 1·NULL",
-             "§7 T-45 ②"),
+    Category(DELIST_TIMING, "상장폐지 반영 시점 — compat 은 KRX 폐지일로 is_active=0·시총·폐지일, v3 는 아직 1·NULL. "
+             "v3 에만 있는 폐지일~D 가격·수급 행(v3 가 폐지 당일·뒤에 쓰는 거래량 0 행)도 여기", "§7 T-45 ②"),
     Category(V3_MISSED_DAY, "v3 그날 수집 누락 — v3 가 아는 종목의 그날 행이 v3 에 없고 KRX price_daily 에 있다",
              "§7 T-45 ③"),
+    Category(V3_MISSING_VALUE, "v3 값 결측 — stocks.market_cap 이 v3 NULL·compat 값(v3 가 아는 종목, KRX 시총 행 있음)",
+             "§7 T-45 ③"),
+    Category(V3_ADJ_NEXT, "v3 과거 수정주가 다음 날 갱신 — D 사본과 다르고 다음 거래일 사본의 같은 행과는 맞다",
+             "§7 daily_prices 7"),
+    Category(V3_ADJ_NEXT_OPEN, "v3 과거 수정주가 다음 날 갱신 후보 — adj_close 만 다르고 다음 거래일 사본이 없다",
+             "§7 daily_prices 7"),
 )
 
 # 설명되지 않은 차이의 사유(범주가 아니다)
@@ -238,8 +274,7 @@ class TableTally:
     n_within_tol: int = 0      # 허용 오차 안이라 같다고 본 키
     categories: Counter = field(default_factory=Counter)
     samples: dict[str, list[dict]] = field(default_factory=lambda: defaultdict(list))
-    tiers: dict[str, Counter] = field(default_factory=lambda: {DAILY: Counter(), MANUAL: Counter(),
-                                                               NONE: Counter()})
+    tiers: dict[str, Counter] = field(default_factory=lambda: {t: Counter() for t in TIERS})
 
     def to_dict(self) -> dict[str, object]:
         return {"pk": list(self.pk), "n_compat": self.n_compat, "n_v3": self.n_v3,
@@ -254,8 +289,9 @@ class Tally:
     """표 전체 — 갈래마다 기록은 (표, 사유)마다 `OTHER_PER_REASON`, 모두 `OTHER_MAX` 까지만 싣고 개수는 다 센다."""
 
     tables: dict[str, TableTally] = field(default_factory=dict)
-    records: dict[str, list[dict]] = field(default_factory=lambda: {DAILY: [], MANUAL: [], NONE: []})
+    records: dict[str, list[dict]] = field(default_factory=lambda: {t: [] for t in TIERS})
     counts: Counter = field(default_factory=Counter)
+    fallback: Mapping[str, frozenset[str] | str] = field(default_factory=dict)   # `fallback_columns` 결과
     _kept: Counter = field(default_factory=Counter)
 
     def explain(self, t: TableTally, key: str, rec: dict) -> None:
@@ -264,8 +300,10 @@ class Tally:
             t.samples[key].append(rec)
 
     def miss(self, t: TableTally, reason: str, rec: dict, cols: Iterable[str] | None) -> None:
-        """설명되지 않은 차이 — `cols` 를 읽는 소비자 갈래로 센다(None 이면 행 전체)."""
-        tier = consumer_tier(t.table, cols)
+        """설명되지 않은 차이 — 대체 판이 원천인 열이면 그 갈래, 아니면 `cols` 를 읽는 소비자 갈래로 센다(None 이면 행 전체)."""
+        fb = self.fallback.get(t.table)
+        hit = fb is not None and (cols is None or fb == ALL or bool(set(cols) & set(fb)))
+        tier = FALLBACK if hit else consumer_tier(t.table, cols)
         t.tiers[tier][reason] += 1
         self.counts[tier] += 1
         kept = self.records[tier]
@@ -293,10 +331,16 @@ class Context:
     krx_on_d: frozenset[str]         # equity price_daily(그날 판) D 의 KRX 행 종목
     close_x: Mapping[str, float]     # compat 시총의 종가 — equity 판에서 시총이 있는 D 이하 마지막 KRX 종가
     close_v: Mapping[str, float]     # v3 사본 daily_prices D 종가
+    compat_delisted: Mapping[str, str]   # compat stocks 폐지일(KRX — T-45 ②)
 
     @property
     def evening(self) -> bool:
         return self.basis == "evening"
+
+    def delisted_by(self, code: str, day: str) -> bool:
+        """compat 폐지일 ≤ 그 행 날짜 ≤ D — v3 가 폐지 당일·뒤에 쓰는 행(T-45 ② 확장)."""
+        d = self.compat_delisted.get(code)
+        return d is not None and d <= day <= self.d_iso
 
     def v3_knows(self, code: str, day: str) -> bool:
         """v3 가 아는 종목 — v3 stocks 에 있거나 그날 앞에 v3 daily_prices 행이 있다(T-45 ③)."""
@@ -406,6 +450,8 @@ def _context(con: sqlite3.Connection, duck: duckdb.DuckDBPyConnection, pd_expr: 
         "AND mktcap_krw IS NOT NULL AND close IS NOT NULL GROUP BY ticker").fetchall()}
     close_v = {str(r[0]): float(r[1]) for r in con.execute(
         "SELECT stock_code, close FROM v3.daily_prices WHERE trade_date = ? AND close IS NOT NULL", (d_iso,))}
+    delisted = {str(r[0]): str(r[1]) for r in con.execute(
+        "SELECT stock_code, delisted_date FROM main.stocks WHERE delisted_date IS NOT NULL")}
     return Context(d_iso=d_iso, basis=str(record["basis"]),
                    kiwoom_2105=frozenset(str(t) for t in t_rows.get(KIWOOM_TICKERS_KEY) or ()),
                    missing=frozenset(str(t) for t in t_rows.get(MISSING_TICKERS_KEY) or ()),
@@ -415,7 +461,7 @@ def _context(con: sqlite3.Connection, duck: duckdb.DuckDBPyConnection, pd_expr: 
                    v3_first_by_code=first_by_code,
                    rebase_tickers=frozenset(str(t) for t in rebase.get("tickers") or ()),
                    rebase_before=None if rebase.get("before") is None else str(rebase["before"]),
-                   krx_on_d=frozenset(krx_d), close_x=close_x, close_v=close_v)
+                   krx_on_d=frozenset(krx_d), close_x=close_x, close_v=close_v, compat_delisted=delisted)
 
 
 def _k_table(con: sqlite3.Connection, duck: duckdb.DuckDBPyConnection, pd_expr: str, d_iso: str) -> None:
@@ -516,6 +562,8 @@ def _stocks_column(duck: duckdb.DuckDBPyConnection, ctx: Context, col: str, a: M
             return Verdict(category=DELIST_TIMING)
         if code not in ctx.close_v and ctx.v3_knows(code, ctx.d_iso) and _krx_row(duck, ctx, code, ctx.d_iso):
             return Verdict(category=V3_MISSED_DAY)
+        if ctx.v3_knows(code, ctx.d_iso) and code in ctx.close_x:    # KRX 시총 행이 compat 값의 근거
+            return Verdict(category=V3_MISSING_VALUE)
     elif col == "is_active" and x == 0 and v == 1 and delisted:
         return Verdict(category=DELIST_TIMING)
     elif col == "delisted_date" and delisted and v is None:
@@ -540,6 +588,8 @@ def _compare_generic(con: sqlite3.Connection, duck: duckdb.DuckDBPyConnection, c
                 v = Verdict(category=EVE_NEW_LISTING)
             elif t_rows_table and day == ctx.d_iso and code in ctx.missing:
                 v = Verdict(category=EVE_MISSING)
+            elif day is not None and ctx.delisted_by(code, day):
+                v = Verdict(category=DELIST_TIMING)
             else:
                 v = Verdict(reason=ONLY_V3)
             if v.category:
@@ -694,8 +744,8 @@ def _price_rows(con: sqlite3.Connection, duck: duckdb.DuckDBPyConnection, d_iso:
     if next_db is not None:
         nxt = sqlite3.connect(_ro_uri(next_db), uri=True)
         try:
-            _load_prices(duck, "np_", nxt.execute(f"SELECT {cols} FROM daily_prices WHERE trade_date = ?", (d_iso,)),
-                         "n", "다음 거래일 사본")
+            # 기준일 행(§7 daily_prices 6)과 과거 행 다음 날 갱신(§7 daily_prices 7)을 같이 보므로 전 행
+            _load_prices(duck, "np_", nxt.execute(f"SELECT {cols} FROM daily_prices"), "n", "다음 거래일 사본")
         except sqlite3.Error as e:
             raise ReplayInputError(f"다음 거래일 사본 daily_prices 를 못 읽는다: {next_db} {e}") from e
         finally:
@@ -746,12 +796,29 @@ def _base_day(r: Mapping[str, object], ctx: Context, reason: str, core_only: boo
         return Verdict(category=BASE_DAY_OPEN)
     if not r["n_present"]:
         return Verdict(reason=NEXT_MISSING)
+    if _next_ok(r, core_only):
+        return Verdict(category=BASE_DAY)
+    return Verdict(reason=f"base_day_next:{reason}")
+
+
+def _next_ok(r: Mapping[str, object], core_only: bool) -> bool:
+    """다음 거래일 사본의 같은 행이 compat 과 허용 오차 안인가 — 수준으로, 09-14 뒤면 비·거래량으로(T-33)."""
     level = bool(r["n_close_ok"] and r["n_vol_ok"] and r["n_adj_ok"])
     t33 = bool(r["post"] and r["n_ratio_ok"] and r["n_vol_ok"])
     tail = True if core_only else bool(r["n_amt_ok"] and (r["n_ohl_ok"] or t33))
-    if (level or t33) and tail:
-        return Verdict(category=BASE_DAY)
-    return Verdict(reason=f"base_day_next:{reason}")
+    return (level or t33) and tail
+
+
+def _adj_next_day(r: Mapping[str, object], ctx: Context, reason: str) -> Verdict:
+    """§7 daily_prices 7 — 사건 뒤 v3 가 과거 수정주가를 다음 날 갱신한다. D 사본과 다른 행이 다음 거래일 사본의 같은
+    행과 맞으면 그 갱신이다. 다음 거래일 사본이 없으면 미확정으로 두는 것은 adj_close 만 다른 행뿐이다(기준일 행과 같은
+    방식) — v3 adj_prices 는 adj_close 만 다시 쓰므로 두 쪽 adj 가 다 있고, 거래량·거래대금(09-14 전이면 시·고·저·종가도)은
+    맞아야 한다. 다른 열까지 다른 행(미등록 오류일 등)은 미설명 그대로다."""
+    if ctx.has_next:
+        return Verdict(category=V3_ADJ_NEXT) if r["n_present"] and _next_ok(r, False) else Verdict(reason=reason)
+    adj_only = (r["x_adj_close"] is not None and r["v_adj_close"] is not None and not r["v_adj_ok"]
+                and r["v_vol_ok"] and r["v_amt_ok"] and (r["post"] or (r["v_close_ok"] and r["v_ohl_ok"])))
+    return Verdict(category=V3_ADJ_NEXT_OPEN) if adj_only else Verdict(reason=reason)
 
 
 def _price_verdict(r: Mapping[str, object], ctx: Context) -> Verdict:
@@ -772,6 +839,8 @@ def _price_verdict(r: Mapping[str, object], ctx: Context) -> Verdict:
                 return Verdict(category=EVE_NEW_LISTING)
             if code in ctx.missing:
                 return Verdict(category=EVE_MISSING)
+        if ctx.delisted_by(code, day):
+            return Verdict(category=DELIST_TIMING)
         return Verdict(reason=ONLY_V3)
     core = bool(r["v_close_ok"] and r["v_vol_ok"] and r["v_adj_ok"])
     if ctx.evening and day == ctx.d_iso:                       # 장 마감 판 T 행(QL-D)
@@ -807,7 +876,9 @@ def _price_verdict(r: Mapping[str, object], ctx: Context) -> Verdict:
                   AMOUNT_NULL_COMPAT if r["x_amount"] is None else AMOUNT)
     else:
         return Verdict()
-    return _base_day(r, ctx, reason, False) if day == ctx.d_iso else Verdict(reason=reason)
+    if day == ctx.d_iso:
+        return _base_day(r, ctx, reason, False)
+    return _adj_next_day(r, ctx, reason) if reason in (T33_BAD, PRE_BAD) else Verdict(reason=reason)
 
 
 def _price_rec(r: Mapping[str, object], with_next: bool) -> dict:
@@ -861,7 +932,8 @@ def compare(compat_db: Path, v3_db: Path, date_ymd: str, equity_root: Path,
         sec_expr, sec_build = _equity(equity_root, "security", builds)
         ctx = _context(con, duck, pd_expr, sec_expr, record, d_iso, nxt is not None)
         _k_table(con, duck, pd_expr, d_iso)
-        tally = Tally()
+        fallback = [str(x) for x in (_json_field(record, "builds_fallback") or [])]
+        tally = Tally(fallback=fallback_columns(fallback))
         scores: dict[str, object] = {}
         prices: dict[str, object] = {}
         for table in TABLES:
@@ -889,12 +961,15 @@ def compare(compat_db: Path, v3_db: Path, date_ymd: str, equity_root: Path,
         "tool": TOOL, "schema": SCHEMA, "date": d_iso, "basis": ctx.basis,
         "status": "ok" if n_other == 0 else "other", "rc": 0 if n_other == 0 else 1,
         "n_other": n_other, "n_manual_consumer": tally.counts[MANUAL], "n_no_consumer": tally.counts[NONE],
+        "n_builds_fallback": tally.counts[FALLBACK],
         "categories_total": dict(sorted(totals.items())),
-        "undetermined": {BASE_DAY_OPEN: totals.get(BASE_DAY_OPEN, 0)},
+        "undetermined": {k: totals.get(k, 0) for k in (BASE_DAY_OPEN, V3_ADJ_NEXT_OPEN)},
         "inputs": {"compat_db": str(compat_db), "v3_db": str(v3_db),
                    "next_v3_db": None if nxt is None else str(nxt),
                    "equity_root": str(equity_root), "price_daily_build": pd_build, "security_build": sec_build,
-                   "builds_fallback": _json_field(record, "builds_fallback") or [],
+                   "builds_fallback": fallback,
+                   "builds_fallback_columns": {t: (c if c == ALL else sorted(c))
+                                               for t, c in tally.fallback.items()},
                    "compat_exported_at": record["exported_at"], "compat_window": _json_field(record, "window")},
         "registry": {c.key: {"label": c.label, "basis": c.basis} for c in CATEGORIES},
         "consumers": {"daily": {t: (c if c == ALL else sorted(c)) for t, c in DAILY_CONSUMER.items()},
@@ -911,13 +986,14 @@ def summary_lines(report: Mapping[str, object]) -> list[str]:
     """표준 출력 요약 — 표마다 범주·미설명(갈래별) 수, 점수 Spearman."""
     out = [f"v3_replay D={report['date']} basis={report['basis']} rc={report['rc']} "
            f"미설명(매일 소비자)={report['n_other']} 리서치센터만={report['n_manual_consumer']} "
-           f"소비자 없음={report['n_no_consumer']} 범주={report['categories_total']}"]
+           f"소비자 없음={report['n_no_consumer']} 대체 판={report['n_builds_fallback']} "
+           f"범주={report['categories_total']}"]
     tables = report["tables"]
     assert isinstance(tables, dict)
     for name, t in tables.items():
         cats = " ".join(f"{k}={v['rows']}" for k, v in t["categories"].items())
         tiers = " ".join(f"{tier}[{' '.join(f'{k}={v}' for k, v in t[tier].items())}]"
-                         for tier in (DAILY, MANUAL, NONE) if t[tier])
+                         for tier in TIERS if t[tier])
         out.append(f"  {name}: compat={t['n_compat']} v3={t['n_v3']} 차이 키={t['n_diff']} "
                    f"허용오차 안={t['n_within_tol']} | {cats or '-'} | {tiers or '미설명 0'}")
     scores = report["scores"]
@@ -1017,7 +1093,7 @@ def trading_days(a: str, b: str, calendar_dir: Path | None = None) -> list[tuple
     return out
 
 
-TSV_HEAD = ("date", "status", "rc", "n_other", "n_manual_consumer", "n_no_consumer",
+TSV_HEAD = ("date", "status", "rc", "n_other", "n_manual_consumer", "n_no_consumer", "n_builds_fallback",
             *(f"spearman_{t}" for t in SCORE_TABLES), "categories", "other", "json")
 
 
@@ -1041,7 +1117,8 @@ def tsv_rows(paths: Sequence[Path]) -> list[tuple[str, ...]]:
                 other[f"{name}.{reason}"] += n
         rows.append((str(doc.get("date", "-")).replace("-", ""), str(doc.get("status", "-")),
                      str(doc.get("rc", "-")), str(doc.get("n_other", "-")),
-                     str(doc.get("n_manual_consumer", "-")), str(doc.get("n_no_consumer", "-")), *sp,
+                     str(doc.get("n_manual_consumer", "-")), str(doc.get("n_no_consumer", "-")),
+                     str(doc.get("n_builds_fallback", "-")), *sp,
                      cats or "-", ";".join(f"{k}={v}" for k, v in sorted(other.items())) or "-", str(p)))
     return sorted(rows)
 

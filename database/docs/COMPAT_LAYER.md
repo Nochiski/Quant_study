@@ -351,15 +351,15 @@ WHERE s.stock_code = ?
 
 v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 고치지 않는 것이다. 여기 없는 차이는 결함 후보로 본다.
 
-판정 범위(T-45): 결함 후보(rc)로 세는 것은 **매일 도는 소비자가 읽는 열**(§2-1 crontab · §2-2 unitelegram — 표만 적거나 '등'으로 적은 곳은 그 표 전 열)의 차이뿐이다. §2-3 리서치센터(crontab 밖 수동)만 읽는 열은 `manual_consumer`, 읽는 곳이 없는 표·열(§2-4 의 `consensus_annual`·`financial_summary` 전부, `stocks.listed_date`·`delisted_date` 등)은 `no_consumer` 로 수만 기록한다. 표.열 목록의 정본은 `v3_replay.DAILY_CONSUMER`·`MANUAL_CONSUMER` 다.
+판정 범위(T-45): 결함 후보(rc)로 세는 것은 **매일 도는 소비자가 읽는 열**(§2-1 crontab · §2-2 unitelegram — 표만 적거나 '등'으로 적은 곳은 그 표 전 열)의 차이뿐이다. §2-3 리서치센터(crontab 밖 수동)만 읽는 열은 `manual_consumer`, 읽는 곳이 없는 표·열(§2-4 의 `consensus_annual`·`financial_summary` 전부, `stocks.listed_date`·`delisted_date` 등)은 `no_consumer` 로 수만 기록한다. 표.열 목록의 정본은 `v3_replay.DAILY_CONSUMER`·`MANUAL_CONSUMER` 다. 옛 날짜를 `--allow-current-builds` 로 재생해 현판으로 대체한 원천 표가 있으면, 그 표가 원천인 v3 표·열(`v3_replay.fallback_columns` — 매핑의 원천 표, 열 대응을 모르면 표 전 열)의 차이는 `builds_fallback` 으로 수만 기록한다(그 뒤 판의 값이 섞인다 — 서버 10-01: security 대체로 078130 등 개명 3건).
 
 - **신규 스팩 — compat 에만 있다(v3 누락 교정)**: v3 `stocks` 에는 옛 숫자코드 스팩 117개뿐이고, 그 뒤 상장한 스팩(2024-02-01~2026-09-22 상장, 숫자·영숫자 코드 모두)이 없다. compat 은 `sec_type='spac'` 이면 싣는다(10-01·06·07·08 재생에서 71종목, 10-10 판정).
 - **점수 종목 수 — compat 이 적다(유니버스 결정, T-17)**: 하루 행이 `score_history` 1,329 → 593(scope@1.0), `score_history_v2` 2,526 → 625(v2_percentrank@1.0)로 준다. 10-05 '추정치 보유 종목만' 결정을 받아들인 것이다(QL-C). 점수는 유니버스 안 표준화라 공통 종목도 값 크기가 다르다. 그래서 공통 종목끼리 순위(Spearman)로 대조한다. `score_history.val_ev_ebitda` 는 늘 NULL 이다. scope 가 EV/EBITDA 를 밸류에 쓰지 않기 때문이고, v3 도 거의 비어 있었다.
 - **단위 환산 반올림 ±1(`ROUNDED`)**: compat 이 원 → 백만원·억원으로 바꾸며 반올림한 정수 열(수급 12열 · `stocks.market_cap` · 컨센서스 eps·bps · `financial_summary` 억원 열·주식수)은 ±1 을 같다고 본다. 그 밖 정수·문자 열은 정확히 같아야 하고, 실수 열은 부동소수 잡음(상대 1e-9)만 허용한다.
 - **`stocks.updated_at` 은 대조하지 않는다**: 값이 아니라 쓰기 시각이다(v3 `datetime('now')` 자리에 compat 은 export 시각).
 - **`stocks.market_cap` 종가 정의(T-45 ① · T-33)**: 함의 주식수(시총 ÷ 그날 종가)가 같고 억원 반올림 ±1 이다 — compat 시총은 KRX 공식 종가, v3 시총은 애프터마켓 종가로 센 값이다. compat 쪽 종가는 시총을 고른 equity 행(D 이하 마지막 KRX 행), v3 쪽은 v3 사본의 D 종가다(서버 10-08 사본 증분 재생: 시총 차이 1,823 중 1,809 + 반올림 1건 335870).
-- **상장폐지 반영 시점(T-45 ②)**: compat 은 KRX 폐지일(`delisted_date ≤ D`)로 `is_active=0`·시총·폐지일을 두고, v3 는 아직 `is_active=1`·시총 NULL 이다 — v3 지연(서버 10-08: 196490, 한쪽 NULL 시총의 폐지 종목).
-- **v3 그날 수집 누락(T-45 ③)**: v3 가 아는 종목(v3 `stocks` 에 있거나 그날 앞 v3 `daily_prices` 행이 있음)의 그날 행이 v3 에 없고 KRX equity `price_daily` 에 있다 — compat 에만 있는 가격·수급 행과 그 종목의 v3 시총 NULL(서버 10-08: 035290·066430·088280). v3 이력 시작 앞 날짜는 여기 들지 않는다.
+- **상장폐지 반영 시점(T-45 ②)**: compat 은 KRX 폐지일(`delisted_date ≤ D`)로 `is_active=0`·시총·폐지일을 두고, v3 는 아직 `is_active=1`·시총 NULL 이다 — v3 지연(서버 10-08: 196490, 한쪽 NULL 시총의 폐지 종목). v3 에만 있는 가격·수급 행 중 compat 폐지일 ≤ 행 날짜 ≤ D 인 것(v3 가 폐지 당일·뒤에 쓰는 거래량 0 행 — 서버 196490 10-07 · 084180 10-01)도 여기다.
+- **v3 그날 수집 누락(T-45 ③)**: v3 가 아는 종목(v3 `stocks` 에 있거나 그날 앞 v3 `daily_prices` 행이 있음)의 그날 행이 v3 에 없고 KRX equity `price_daily` 에 있다 — compat 에만 있는 가격·수급 행과 그 종목의 v3 시총 NULL(서버 10-08: 035290·066430·088280). v3 이력 시작 앞 날짜는 여기 들지 않는다. v3 에 그날 행은 있는데 `stocks.market_cap` 만 v3 NULL·compat 값(KRX 시총 행 근거)인 것은 `v3_missing_value` — v3 값 결측을 compat 이 채운 것이다(서버 009770·011760 10-07, 057030·060150 10-08).
 - **장 마감 판 T 행 — 원천·채움이 다르다(QL-D, N-42 Q3, T-32·T-33)**: `--basis evening` 의 `daily_prices`·`investor_detail_flows` T 행은 원장에서 만든다(규칙 정본 `src/compat/t_rows.py`). 종목마다 원천이 하나이고(두 표가 같은 선택) `_compat_meta.tables` 의 표별 `t_rows` 에 남는다(`postclose`·`kiwoom_2105` 수, 21:05 원장으로 대체한 종목, 행 없는 종목과 그 비율 `missing_ratio` — 기록형).
   - `postclose` 행(15:41~16:00, `price_valid='1'` · 종가 > 0 · 거래량 있음 — `daily.kw_daily.ka10060_postclose_price_usable_sql`, fi 장 마감 판 PR-5 와 같은 술어): 종가 = KRX 공식 종가(정규장, T-33), 거래량·수급 = 16:00 전까지. v3(20:05 ka10081·ka10059)는 애프터마켓까지 포함한 값이라 다르다.
   - `kiwoom_2105` 행(21:05 키움 원장 — 16:00 을 넘긴 종목, `price_valid` 가 '0'·NULL 이거나 종가가 비었거나 0 이하·거래량이 빈 종목): 지금 v3 와 같은 뜻(애프터마켓 포함)이다. 과거 T 재생(장 마감 원장이 없던 날)은 전 종목이 이 경로다.
@@ -380,6 +380,7 @@ v3 날짜별 사본과 compat 반영본을 대조할 때 차이로 나오지만 
     4. **v3 오류일 2026-03-27** — 그날 v3 종가가 전 종목에서 틀리다. `v3_defect`. 행 수는 가격·거래량·adj 가 다른 행에 거래대금만 다른 행을 더해 센다(로컬 08-07 사본 2,442 + 89 = 2,531행. 서버 수치: 재생 뒤). 오류일은 등록된 날(`V3_BAD_DAYS`)만 범주로 인정한다 — 대조기가 탐지한 다른 날은 보고서 `bad_days_unregistered` 에 싣고 결함 후보로 둔다.
     5. **장 마감 판 T 단계 미상 NULL** — MAJOR-A 로 사건일 NULL 은 사라지고, 원장 전일대비(또는 D' 종가)가 없는 종목의 그날 저녁~다음 날 아침 T 행 adj_close 만 남는다.
     6. **v3 사본 기준일 행 = 20:05 수집 시점 값** — v3 는 다음 날 최근 5행을 다시 받아 기준일 행을 덮는다. 애프터마켓 거래가 많은 대형주의 거래량·거래대금이 최종값과 다를 수 있다(서버 10-08 사본: 기준일 10-08 대형주 17행 — 005930 v3 20,157,893 대 KRX 최종 21,259,056). 기준일 행은 다음 거래일 사본으로 대조한다(10-09 는 휴장이라 v3 가 덮지 않았음 — 10-12 사본으로 확정 예정). 저가 차이(000660)는 T-33 정의 차이일 수 있어 여기 원인으로 적지 않는다.
+    7. **v3 과거 수정주가 다음 날 갱신(`v3_adj_next_day`)** — 사건 뒤 v3 adj_prices 가 과거 행 adj_close 를 다음 날 고친다. D 사본과는 다르고(09-14 전 `pre_mismatch`·뒤 `T33_ratio_or_volume` 으로 떨어진 행) 다음 거래일 사본의 같은 행과는 맞으면 이 범주다(서버 378800 2025-09-11: 10-01 사본 adj 2,094 · compat 10,468 · 10-02 사본 10,468). 다음 거래일 사본이 없으면 adj_close 만 다른 행(나머지 열은 맞음)을 `v3_adj_next_day_unconfirmed` 로 두고 rc 를 막지 않는다 — 기준일 행(6)과 같은 방식.
 
 ---
 
@@ -459,5 +460,7 @@ export PYTHONPATH=~/quant-ledger/src PYTHONDONTWRITEBYTECODE=1 PY=~/quant-ledger
 "$PY" -m compat.v3_replay compare --compat-db compat.db --v3-db v3.db --date <T> \
   --equity-root ~/quant-ledger/data/equity [--next-v3-db <다음 거래일 사본의 복사본>] --json v3_replay.json
 ```
+
+옛 날짜 재생(`scripts/v3_replay.sh --allow-current-builds`)은 대체 판 조합에 따라 export 가 실패할 수 있다(판 스키마 차이 — 서버 10-02: 현판과 옛 판이 섞여 `security` 의 `name_abbrv_current` 열이 없다). 그날은 대조 불가다.
 
 대조기는 compat 기록의 basis(evening)로 T 행을 장 마감 판 범주(§7 — `evening_t_*`)로 나누고, 21:05 원장 종목의 T 행은 다음 거래일 사본이 있으면 기준일 행(§7 daily_prices 6)으로 판정한다. equity 판은 compat 기록의 `equity_builds`(장 마감 판은 D' 아침 판)를 읽으므로 그 판이 보관 판 안에 있을 때 돌린다.

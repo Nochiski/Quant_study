@@ -331,6 +331,38 @@ PYTHONPATH=src .venv/bin/python -m daily.window_judge judge --start 20261019 --c
 손으로 개입한 날(재실행·데이터 손수정·스위치 조작)은 `record` 로 장부 `data/cutover/manual_interventions.jsonl` 에
 남긴다 — 그날은 무사고가 아니다.
 
+### 컷오버 감시 — `python -m daily.cutover_watch` (컷오버 QL-L)
+
+컷오버 뒤 하루(KST D, 휴장·주말 포함)마다 v3 를 읽기만 하고 셋을 본다. 규칙·근거 줄은 모듈 머리 주석이 정본이다.
+① **v3 무거운 수집 0**(N-42 Q2) — v3 quant.db `pipeline_runs` 의 그날 job 과 v3 체인 로그(`pipeline.log`)의 `job=` 줄을
+분류표(`JOBS`)로 가른다. 허용 = 브리핑·daily_post·daily_insight(holiday_gate·export_scores·insight·위키)·증권사 리포트·
+뉴스·관세청, 금지 = `chain:daily_all`·`daily_pipeline`(하위 단계 holiday_check·stock_master·daily_prices·
+investor_flows·consensus)·`adj_prices`·`calendar_refresh`. **분류표에 없는 job 도 위반**(fail-closed). 로그의 허용 밖
+키움 TR(허용은 T-27 insight 시장 단위 ka20006·ka20001·ka10051·ka90010·ka20003)·KIS·WiseReport 표지도 위반.
+② **점수 쓰기 한 곳**(T-16) — v3 `scoring`·`scoring_v2` 가 돌았거나, `score_history`·`_v2` 의 그날 행 수가 그날
+`_compat_meta` ok 기록(그 표를 쓴 마지막 기록, 판 id 포함)의 넣은 행 수와 다르거나 기록이 없으면 위반.
+③ **v3 크론**(V3-A·B·D) — `crontab -l` 출력에 `--chain daily_all` 줄이 있거나 `--chain daily_insight` 줄이 없거나 v3 휴장
+쓰기(`refresh_year_holidays`·`monthly_holiday_review`) 줄이 있으면 위반. `daily_post` 는 v3_post.sh 가 부르므로 크론 줄을
+요구하지 않고 그날 `chain:daily_post` 실행 수만 보인다(COMPAT_LAYER §8-1).
+결과는 화면 요약 + `data/cutover/watch_<D>.json`. rc 0 정상 · 1 위반 · 2 입력 오류(파일·표 없음, 빈 crontab).
+위반이면 `notify.sh crit "컷오버 감시 위반 …"`, 입력 오류면 `crit "컷오버 감시 판정 불가 …"` 한 줄 — 둘 다 X-2 세는
+목록이다(v3 반영 경로). `--baseline`(컷오버 전 그림자 기간)은 같은 분석을 기록만 하고 rc 0·알림 없음 — 지금 v3 의
+실제 job 목록으로 허용 목록을 확인하는 용도다. `--dry-run` 은 결과 파일·알림 없이 요약만.
+
+```bash
+# 그림자 기간 — 지금 v3 기준선(읽기 전용, 날짜마다 한 번)
+crontab -l | PYTHONPATH=src .venv/bin/python -m daily.cutover_watch --baseline --date 20261014 \
+  --v3-db ~/kael-system-v3/data/quant.db --v3-log ~/logs/kael-v3/pipeline.log --crontab -
+```
+
+크론 제안(**아직 넣지 않는다** — 컨트롤러가 컷오버 날 V3-A~E 적용 뒤 넣는다. 매일 23:30 KST, D = 그날 KST. `--v3-log` 는
+daily_insight 크론 줄의 리다이렉트 대상과 같게 둔다. 연구 리포트 로그는 넣지 않는다 — 리포트 수집의 KIS 휴장 1콜이
+표지로 잡힌다). 되돌리기(V3-B 줄 복원) 때는 이 줄도 주석으로 돌린다 — 아니면 매일 위반 crit 이다.
+
+```cron
+30 14 * * * cd ~/quant-ledger && crontab -l | PYTHONPATH=src .venv/bin/python -m daily.cutover_watch --v3-db ~/kael-system-v3/data/quant.db --v3-log ~/logs/kael-v3/pipeline.log --crontab - >> logs/cutover_watch.log 2>&1
+```
+
 ### 배포 — `scripts/deploy.sh`
 
 저장소 `database/{src,scripts}` + `backend/src/backtest_engine/` 을 서버로 민다. 기본은 dry-run 이고

@@ -113,6 +113,9 @@ COUNTED_CRIT_PREFIXES: tuple[str, ...] = (
     "daily_build ", "확정 빌드 시작 불가", "확정판 빌드 실패", "모델 단계 실패",
     # v3 반영 — scripts/v3_post.sh
     "v3_post ",
+    # v3 반영 경로 감시 — 파이썬 `daily.cutover_watch`(QL-L)의 `TITLE_VIOLATION`·`TITLE_ERROR`(v3 수집 0·점수 쓰기 한 곳·
+    # v3 크론, 판정 불가 포함). 셸 훑기 테스트에 안 잡혀 `test_컷오버_감시_crit_제목은_세는_목록이다` 가 상수로 대조한다
+    "컷오버 감시 ",
     # 워치독 — watchdog.sh postclose_board · morning_build(확정 빌드 · 확정판 엑셀 발송 장부)
     "watchdog: HH:MM 까지 장 마감 판", "watchdog: HH:MM 까지 확정", "watchdog: 확정판 엑셀 발송",
 )

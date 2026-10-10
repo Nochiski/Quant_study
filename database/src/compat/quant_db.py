@@ -13,16 +13,18 @@
 날짜는 건드리지 않는다. 판 id 는 `_compat_meta.model_builds` 에 spec 별로 남는다.
 
 `--basis evening`(장 마감 판, 컷오버 T-2)의 `daily_prices`·`investor_detail_flows` 는 판(직전
-거래일 D' 까지)에 T 날짜 행을 원장에서 얹는다(QL-D — `_t_rows`, SQL 은 `mappings.T_ROWS_SQL`).
+거래일 D' 까지)에 T 날짜 행을 원장에서 얹는다(QL-D — `compat.t_rows`, 장 마감 판에서만 불러온다).
 두 표는 basis 와 무관하게 그 `--date` 행을 **날짜 단위로 교체**한다(QL-C 와 같은 규칙) — 저녁에
-원장으로 만든 T 행은 다음 날 아침 `--basis morning --date T` 가 KRX 행으로 통째로 바꾼다. 다른
-날짜는 지금처럼 `INSERT OR REPLACE` 다.
+원장으로 만든 T 행은 다음 날 아침 `--basis morning --date T` 가 KRX 행으로 통째로 바꾼다. 새 원천에
+그날 행이 0 이면 지우기 전에 멈춘다. 다른 날짜는 지금처럼 `INSERT OR REPLACE` 다.
 
 M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다.
 
 가드(1차 그림자 실행 뒤 리뷰 R1~R10 반영) — 전부 **쓰기 전/직후에 예외**로 멈춘다:
   · `--basis` 와 equity 판 접두(`e_`/`m_`) 불일치            (R5 — 장 마감 판은 `m_` 도 받는다)
-  · 장 마감 판 T 행: T 비거래일 · 원장 없음 · 판 이음매(마지막 세션 ≠ D') · T 행 0  (QL-D)
+  · 장 마감 판: T 비거래일 · 원장 없음 · 판 이음매(마지막 세션 ≠ D') · T 행 0 ·
+    대상에 date ≥ T 아침 확정 ok 기록(재생은 `--allow-older`)                        (QL-D)
+  · 날짜 단위 교체 표의 새 원천에 `--date` 행 0                                       (QL-D)
   · `price_daily`·`price_adj_daily` 판이 서로 다른 체인       (R9)
   · `daily_prices` 의 `adj_close` 결측 비율 > 1%              (R9)
   · 증분인데 대상 DB 가 얕다(종목당 세션 중앙값 < 260)         (R10)
@@ -42,7 +44,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
-from daily import calendar as daily_calendar
 from deliver.reader import DeliverError, load_run
 from equity import handoff, inputs
 from stage.model import basis_of_build_id, build_id_time
@@ -56,12 +57,6 @@ from .mappings import (
     MAPPINGS,
     MODEL,
     STAGE,
-    T_LEDGER_TABLE,
-    T_ROWS_SQL,
-    T_SEAM_SQL,
-    T_SOURCE_COL,
-    T_SOURCE_EVENING,
-    T_UNIVERSE_SQL,
     TableMapping,
 )
 
@@ -96,7 +91,7 @@ BUILD_CHAIN_MAX_GAP_H = 3
 _BASIS_ANY = "manual"
 # `--basis` 별로 더 받는 판 basis. 장 마감 판(evening, 컷오버 T-2)은 직전 거래일 연구 확정판
 # `m_`(D') 위에 T 행만 원장에서 얹는다(QL-D). 그 판이 이미 T 의 KRX 행을 가졌는지 — R5 가 막으려던
-# '아침 판을 저녁으로' 의 위험 — 는 접두가 아니라 데이터(판 이음매, `_t_rows`)로 본다.
+# '아침 판을 저녁으로' 의 위험 — 는 접두가 아니라 데이터(판 이음매, `t_rows.check_seam`)로 본다.
 _BASIS_ALSO: dict[str, tuple[str, ...]] = {"evening": ("morning",)}
 # 원천 관계식을 판 목록과 같은 dict 에 실을 때 쓰는 접두 — build_id 키와 섞이지 않게.
 _EXPR = "__expr__"
@@ -178,7 +173,8 @@ class TableResult:
     sources: dict[str, str]     # 원천 표 → build_id
     # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를 싣는다.
     metrics: dict[str, int] = field(default_factory=dict)
-    # 장 마감 판 T 행(QL-D) — 원천별 행 수 · 저녁 원장으로 대체한 종목 · 행 없는 종목(`_t_rows`)
+    # 장 마감 판 T 행(QL-D) — 원천별 행 수 · 21:05 원장으로 대체한 종목 · 행 없는 종목
+    # (`t_rows._info`)
     t_rows: dict[str, object] | None = None
 
 
@@ -226,7 +222,7 @@ class ExportResult:
             if r.t_rows:
                 i = r.t_rows
                 parts.append(f"{t}.T={i['date']}(postclose={i['postclose']},"
-                             f"evening={i['evening']},missing={i['missing']})")
+                             f"kiwoom_2105={i['kiwoom_2105']},missing={i['missing']})")
         return (f"compat date={self.date} basis={self.basis} target={self.target} "
                 f"consensus_asof={self.consensus_asof} | " + " ".join(parts))
 
@@ -738,115 +734,6 @@ def _resolve_model(selected: list[TableMapping], model_root: Path | None, d_iso:
     return out
 
 
-# ── 장 마감 판 T 행 (QL-D · N-42 Q3 · T-2) ────────────────────────────────────
-# 원천·대상·채움 규칙은 `mappings` '장 마감 판 T 행' 절이 정본이다. 여기는 D'·원장·판 이음매를
-# 확인하고 표마다 T 행과 원천 기록을 만든다. 쓰기는 `export` 의 표 트랜잭션 안에서 날짜 단위
-# 교체로 한다.
-_T_ALIASES = (("t_pc", "--postclose-db"), ("t_kw", "--kiwoom-db"))
-
-
-@dataclass(frozen=True)
-class _TPart:
-    """표 하나의 T 행(v3 열 순서)과 원천 기록(`TableResult.t_rows`)."""
-
-    rows: list[tuple]
-    info: dict[str, object]
-
-
-def _t_dprime(t: date, calendar_dir: Path | None) -> date:
-    """T 가 `daily.calendar` 거래일인지 보고 직전 거래일 D' 를 준다(PR-4 `_evening_dprime` 과
-    같은 판정)."""
-    try:
-        cal = daily_calendar.load() if calendar_dir is None else daily_calendar.load(calendar_dir)
-        trading = cal.is_trading_day(t)
-        dprime = cal.prev_trading_day(t)
-    except (daily_calendar.CalendarUnavailable, KeyError) as e:
-        raise CompatError(f"장 마감 판 T 행: daily.calendar 를 읽지 못했다"
-                          f"(calendar_dir={calendar_dir}): {e}") from e
-    if not trading:
-        raise CompatError(f"장 마감 판 T={t.isoformat()} 는 daily.calendar 거래일이 아니다 — "
-                          "T 행을 만들지 않는다")
-    return dprime
-
-
-def _t_ledgers(postclose_db: Path | None, kiwoom_db: Path | None) -> tuple[Path, Path]:
-    """T 행 원천 원장 두 파일. 빠졌거나 없으면 멈춘다 — 경로 실수를 '그날 행 없음'으로 읽지
-    않는다(P1). 과거 T 재생처럼 장 마감 원장이 아직 없던 날은 `daily.postclose.connect` 로 세운 빈
-    원장을 준다.
-    """
-    out: list[Path] = []
-    for (_, flag), path in zip(_T_ALIASES, (postclose_db, kiwoom_db), strict=True):
-        if path is None:
-            raise CompatError(f"--basis evening 의 daily_prices·investor_detail_flows 는 T 행 "
-                              f"원천 원장이 필요하다 — {flag} 가 없다(QL-D)")
-        if not Path(path).is_file():
-            raise CompatError(f"T 행 원장 파일이 없다: {flag} {path}")
-        out.append(Path(path))
-    return out[0], out[1]
-
-
-def _t_rows(duck: duckdb.DuckDBPyConnection, selected: list[TableMapping],
-            builds: dict[str, dict[str, str]], params: dict[str, str],
-            ledgers: tuple[Path, Path]) -> dict[str, _TPart]:
-    """장 마감 판 T 행 — 쓰기 전에 전부 만든다(한 표라도 막히면 아무 표도 쓰지 않는다).
-
-    멈추는 경우: 판 이음매(판 `universe_daily` 의 T 이하 마지막 날 ≠ D' — T 가 이미 있으면 KRX
-    확정 행을 원장 값으로 덮게 되고, D' 보다 앞이면 D' 행 없이 T 가 붙는다) · 원장에 그 TR 표가
-    없다 · 표의 T 행이 0(07:00 브리핑이 D' 를 T 로 읽게 된다 — COMPAT_LAYER §4-1 DEFECT-C02).
-    """
-    eq = builds[EQUITY]
-    uni = eq[_EXPR + "universe_daily"]
-    row = duck.execute(T_SEAM_SQL.format(universe_daily=uni, **params)).fetchone()
-    last = None if row is None or row[0] is None else row[0].isoformat()
-    if last != params["d_prime"]:
-        why = ("판에 이미 T 가 있다(아침 확정판) — --basis morning 으로 내보낸다"
-               if last == params["date"]
-               else "판이 D' 까지 오지 않았다 — D' 행 없이 T 를 얹지 않는다")
-        raise CompatError(f"장 마감 판 이음매 불일치: T={params['date']} 의 직전 거래일 "
-                          f"D'={params['d_prime']}(daily.calendar) ≠ 판 universe_daily 의 T 이하 "
-                          f"마지막 날 {last} — {why}")
-    universe = {str(r[0]) for r in duck.execute(
-        T_UNIVERSE_SQL.format(universe_daily=uni, **params)).fetchall()}
-    try:
-        for (alias, flag), path in zip(_T_ALIASES, ledgers, strict=True):
-            lit = str(path.resolve()).replace("'", "''")
-            duck.execute(f"ATTACH '{lit}' AS {alias} (TYPE sqlite, READ_ONLY)")
-            n = duck.execute("SELECT count(*) FROM duckdb_tables() WHERE database_name = ? "
-                             "AND table_name = ?", [alias, T_LEDGER_TABLE]).fetchone()
-            if not n or not n[0]:
-                raise CompatError(f"T 행 원장에 {T_LEDGER_TABLE} 표가 없다: {flag} {path}")
-        out: dict[str, _TPart] = {}
-        for m in selected:
-            if m.v3_table not in T_ROWS_SQL:
-                continue
-            cur = duck.execute(T_ROWS_SQL[m.v3_table].format(
-                postclose=f't_pc."{T_LEDGER_TABLE}"', evening=f't_kw."{T_LEDGER_TABLE}"',
-                **{t: eq[_EXPR + t] for t in m.sources}, **params))
-            cols = [d[0] for d in (cur.description or [])]
-            if cols != [*m.columns, T_SOURCE_COL]:
-                raise CompatError(f"T 행 SELECT 컬럼이 선언과 다르다: table={m.v3_table} "
-                                  f"got={cols}")
-            got = cur.fetchall()
-            if not got:
-                raise CompatEmptyError(
-                    f"T 행 0: table={m.v3_table} T={params['date']} — postclose·저녁 원장에 "
-                    f"그날 행이 없다(D'={params['d_prime']} 를 T 로 읽게 두지 않는다, 기존 행은 "
-                    "그대로)")
-            source = {str(r[0]): str(r[-1]) for r in got}
-            evening = sorted(t for t, s in source.items() if s == T_SOURCE_EVENING)
-            missing = sorted(universe - set(source))
-            out[m.v3_table] = _TPart([r[:-1] for r in got], {
-                "date": params["date"], "d_prime": params["d_prime"],
-                "n_universe": len(universe), "postclose": len(source) - len(evening),
-                "evening": len(evening), "missing": len(missing),
-                "evening_tickers": evening, "missing_tickers": missing,
-                "ledgers": {"postclose": str(ledgers[0]), "evening": str(ledgers[1])}})
-        return out
-    finally:
-        for alias, _ in _T_ALIASES:
-            duck.execute(f"DETACH DATABASE IF EXISTS {alias}")
-
-
 def _replace_date(table: str, column: str, d_iso: str) -> Callable[[sqlite3.Connection], None]:
     """그 날짜 행을 전부 지운다(넣는 트랜잭션 안 — `_replace_score_date` 와 같은 규칙, QL-C).
 
@@ -856,6 +743,39 @@ def _replace_date(table: str, column: str, d_iso: str) -> Callable[[sqlite3.Conn
     def run(con: sqlite3.Connection) -> None:
         con.execute(f'DELETE FROM "{table}" WHERE "{column}" = ?', (d_iso,))
     return run
+
+
+def _guard_date_rows(duck: duckdb.DuckDBPyConnection, mapping: TableMapping,
+                     params: dict[str, str], builds: dict[str, dict[str, str]],
+                     n_extra: int) -> None:
+    """날짜 단위 교체 전 — 새 원천에 `--date` 행이 하나도 없으면 BEGIN 전에 멈춘다(`_score_rows` 와
+    같은 규칙). 판이 그날을 담지 못했는데(예: 저녁 반영 뒤 D' 판으로 아침 `--date T`) 지우고 넣으면
+    그날 행이 조용히 사라진다. `n_extra` 는 판 밖에서 얹는 그날 행 수(장 마감 판 T 행).
+    """
+    sql, _ = _render(mapping, {**params, "from_date": params["date"]}, builds)
+    row = duck.execute(f"SELECT count(*) FROM ({sql}) q").fetchone()
+    n_day = (0 if row is None else int(row[0])) + n_extra
+    if n_day == 0:
+        raise CompatEmptyError(
+            f"{mapping.v3_table}: 새 원천에 {params['date']} 행이 0 — 날짜 단위 교체로 그날 "
+            "기존 행을 지우지 않는다(아침이면 그날 KRX 확정판, 저녁이면 T 원장을 확인)")
+
+
+def _guard_evening_order(con: sqlite3.Connection, d_iso: str) -> None:
+    """장 마감 판이 아침 확정을 덮지 않는다 — 대상 `_compat_meta` 에 date ≥ T 인 아침 ok 기록이
+    있으면 쓰기 전에 멈춘다. 늦게 돈 저녁 반영이 KRX 확정 행을 원장 값으로 되돌리는 것을 막는다(QL-F
+    반영 순서 가드 T-35 와 같은 성질 — 재생은 `allow_older`). 옛 기록의 빈 status 는 ok 로 본다.
+    """
+    if META_TABLE not in _existing_tables(con):
+        return
+    have = {r[1] for r in con.execute(f"PRAGMA table_info({META_TABLE})")}
+    ok = "AND coalesce(status, 'ok') = 'ok'" if "status" in have else ""
+    row = con.execute(f"SELECT max(date) FROM {META_TABLE} WHERE basis = 'morning' "
+                      f"AND date >= ? {ok}", (d_iso,)).fetchone()
+    if row is not None and row[0] is not None:
+        raise CompatError(
+            f"대상에 이미 {row[0]} 아침 확정 반영(ok)이 있다 — 장 마감 판 {d_iso} 를 그 위에 "
+            "쓰면 KRX 확정 값이 원장 값으로 되돌아간다(T-35 와 같은 성질). 재생이면 --allow-older")
 
 
 def _build_ids(builds: dict[str, str]) -> dict[str, str]:
@@ -868,7 +788,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
            builds_from: Path | None = None, builds_from_missing: str = "error",
            model_universe: str = "all", in_place: bool = False,
            model_root: Path | None = None, postclose_db: Path | None = None,
-           kiwoom_db: Path | None = None, calendar_dir: Path | None = None) -> ExportResult:
+           kiwoom_db: Path | None = None, calendar_dir: Path | None = None,
+           allow_older: bool = False) -> ExportResult:
     """equity/stage/model 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
 
     date·consensus_asof 는 YYYYMMDD. `full=False`(기본)면 최근 `INCREMENTAL_DAYS` 달력일만,
@@ -885,6 +806,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     `postclose_db`·`kiwoom_db`·`calendar_dir` 는 장 마감 판(`basis='evening'`)의 `daily_prices`·
     `investor_detail_flows` T 행 원천 원장(`data/raw/postclose.db`·`data/raw/kiwoom.db`)과 D' 를 셀
     판정 달력 폴더(없으면 `daily.calendar` 기본 경로)다(QL-D). 아침판에서는 쓰지 않는다.
+    `allow_older` 는 장 마감 판이 대상의 date ≥ T 아침 확정 기록을 무시하게 한다(재생 전용).
     """
     as_of = _parse_date(date, "--date")
     if basis not in BASES:
@@ -918,27 +840,39 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     }
     roots = {EQUITY: Path(equity_root), STAGE: Path(stage_root)}
     selected = _selected(tables)
-    # QL-D — 장 마감 판 T 행. 인자·달력은 대상 파일을 열기 전에 본다
-    t_tables = ([m.v3_table for m in selected if m.v3_table in T_ROWS_SQL]
-                if basis == "evening" else [])
-    ledgers: tuple[Path, Path] | None = None
-    if t_tables:
-        ledgers = _t_ledgers(postclose_db, kiwoom_db)
-        params.update(t_iso=params["date"], t_ymd=as_of.strftime("%Y%m%d"),
-                      d_prime=_t_dprime(as_of, calendar_dir).isoformat())
     pinned = _load_builds_from(builds_from) if builds_from is not None else None
+    # QL-D — 장 마감 판. T 행 모듈은 stage 빌더·규칙을 끌어오므로 저녁에만 불러온다
+    # (t_rows docstring).
+    # 인자·달력·판 이음매 준비는 대상 파일을 열기 전에 끝낸다.
+    evening = basis == "evening"
+    t_mod = None
+    if evening:
+        from . import t_rows as t_mod
+    t_tables = [m.v3_table for m in selected if t_mod is not None and m.v3_table in t_mod.TABLE_SQL]
+    t_paths = t_mod.ledgers(postclose_db, kiwoom_db) if t_mod is not None and t_tables else None
+    # 이음매 검사에 쓰는 `universe_daily` — 장 마감 판이 equity 표를 하나라도 읽으면 함께 고정한다
+    reads_equity = any(m.source_kind == EQUITY or any(k == EQUITY for k, _ in m.cross_sources)
+                       for m in selected)
 
     want_estimates = (model_universe == "estimates"
                       and any(m.v3_table == "stocks" for m in selected))
     builds, builds_fallback = _resolve_sources(
         selected, roots, pinned,
-        [(STAGE, "stg_consensus_annual")] if want_estimates else [],
+        ([(STAGE, "stg_consensus_annual")] if want_estimates else [])
+        + ([(EQUITY, "universe_daily")] if evening and reads_equity else []),
         builds_from_missing)
     builds[MODEL] = _resolve_model(selected, model_root, params["date"], basis)
     equity_builds, stage_builds = _build_ids(builds[EQUITY]), _build_ids(builds[STAGE])
     model_builds = _build_ids(builds[MODEL])
     _check_basis(equity_builds, basis)
     _check_price_chain(equity_builds)
+    # 장 마감 판 이음매(MINOR-2) — T 행을 만들 때, 그리고 D' 아침 판(`m_`)을 받았을 때는 표 선택과
+    # 무관하게 본다
+    seam = t_mod is not None and reads_equity and (
+        bool(t_tables) or any(basis_of_build_id(b) == "morning" for b in equity_builds.values()))
+    if t_mod is not None and seam:
+        params.update(t_iso=params["date"], t_ymd=as_of.strftime("%Y%m%d"),
+                      d_prime=t_mod.dprime(as_of, calendar_dir).isoformat())
 
     window = {"days": span, "full": full, "from_date": params["from_date"],
               "to_date": params["date"]}
@@ -953,6 +887,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         duck.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
         # 진행 막대가 `| tee` 로그를 제어문자로 덮는다(1차 그림자 실행 관찰).
         duck.execute("SET enable_progress_bar=false")
+        if evening and not allow_older:
+            _guard_evening_order(con, params["date"])
         existed = _existing_tables(con)
         required = _ensure_schema(con, [m.v3_table for m in selected])
         if not full and any(m.v3_table == "daily_prices" for m in selected):
@@ -962,11 +898,15 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         # (표 → (열, 행)).
         # 한 표라도 깨졌으면 점수 표는 하나도 쓰지 않는다. 9표 한 트랜잭션은 QL-F 몫이다.
         scores: dict[str, tuple[list[str], list[tuple]]] = {}
-        t_parts: dict[str, _TPart] = {}
+        t_parts: dict = {}                  # 표 → t_rows.TPart
         try:
-            if ledgers is not None:
-                current = t_tables[0]
-                t_parts = _t_rows(duck, selected, builds, params, ledgers)
+            if t_mod is not None and seam:
+                current = t_tables[0] if t_tables else selected[0].v3_table
+                t_mod.check_seam(duck, builds[EQUITY][_EXPR + "universe_daily"], params)
+                if t_paths is not None:
+                    exprs = {k[len(_EXPR):]: v for k, v in builds[EQUITY].items()
+                             if k.startswith(_EXPR)}
+                    t_parts = t_mod.build(duck, selected, exprs, params, t_paths)
             for mapping in selected:
                 current = mapping.v3_table
                 sql, used = _render(mapping, params, builds)
@@ -983,6 +923,10 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                         con, mapping, columns, [rows], required[mapping.v3_table],
                         pre=_replace_score_date(mapping.v3_table, params["date"]))
                 else:
+                    day_col = DATE_REPLACED.get(mapping.v3_table)
+                    if day_col is not None:         # 날짜 단위 교체 0행 가드 — 스트림 열기 전에
+                        _guard_date_rows(duck, mapping, params, builds,
+                                         0 if part is None else len(part.rows))
                     cur = duck.execute(sql)
                     columns = [d[0] for d in (cur.description or [])]
                     if mapping.v3_table == "stocks":
@@ -999,7 +943,6 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                         chunks: Iterable[list[tuple]] = _chunks(cur)
                         if part is not None:
                             chunks = itertools.chain(chunks, [part.rows])
-                        day_col = DATE_REPLACED.get(mapping.v3_table)
                         n_rows, n_skipped = _upsert(
                             con, mapping, columns, chunks, required[mapping.v3_table],
                             pre=None if day_col is None else _replace_date(

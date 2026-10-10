@@ -6,13 +6,14 @@
         [--builds-from data/deliver/history/20260923_morning.json] \\
         [--model-universe all|estimates] [--builds-from-missing error|current] [--in-place] \\
         [--model-root data/model] \\
-        [--postclose-db data/raw/postclose.db --kiwoom-db data/raw/kiwoom.db] [--calendar-dir DIR]
+        [--postclose-db data/raw/postclose.db --kiwoom-db data/raw/kiwoom.db] \\
+        [--calendar-dir DIR] [--allow-older]
 
 점수 두 표(score_history·score_history_v2)는 --model-root 의 그날·그 basis 모델 판이 원천이다(QL-C).
 표를 고르지 않으면 점수 표도 들어가므로 --model-root 가 필요하다.
 --basis evening 의 daily_prices·investor_detail_flows 는 T 행을 두 원장에서 만든다(QL-D) —
 --postclose-db·--kiwoom-db 가 필요하다. D' 는 판정 달력(--calendar-dir, 없으면 daily.calendar 기본
-경로)으로 센다.
+경로)으로 센다. 대상에 date ≥ T 아침 확정 기록이 있으면 장 마감 판은 멈춘다(재생은 --allow-older).
 
 rc 0 정상 · 2 예외. 표별 행수 한 줄을 stdout 에 낸다(`scripts/compat_export.sh` 가 로그로 받는다).
 """
@@ -61,6 +62,8 @@ def _parser() -> argparse.ArgumentParser:
     e.add_argument("--calendar-dir", default=None, type=Path,
                    help="T 직전 거래일 D' 를 셀 판정 달력 폴더(kis_holidays_<YYYY>.json). "
                         "없으면 daily.calendar 기본 경로")
+    e.add_argument("--allow-older", action="store_true",
+                   help="장 마감 판이 대상의 date ≥ T 아침 확정 기록을 무시하고 쓴다 — 재생 전용")
     return p
 
 
@@ -75,7 +78,8 @@ def main(argv: list[str] | None = None) -> int:
             builds_from=args.builds_from, builds_from_missing=args.builds_from_missing,
             model_universe=args.model_universe, in_place=args.in_place,
             model_root=args.model_root, postclose_db=args.postclose_db,
-            kiwoom_db=args.kiwoom_db, calendar_dir=args.calendar_dir)
+            kiwoom_db=args.kiwoom_db, calendar_dir=args.calendar_dir,
+            allow_older=args.allow_older)
     except CompatError as e:
         print(f"compat 실패: {e}", file=sys.stderr)
         return 2

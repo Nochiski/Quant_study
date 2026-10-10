@@ -24,15 +24,28 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
+import duckdb
 import pytest
 from compat import CompatEmptyError, CompatError, export
 from compat.__main__ import main as cli_main
 from conftest import _make_stage_tree
 from daily import kw_daily, postclose
-from test_compat_export import _adj_rows, _flow_row, _price_row, _uni_row
+from test_compat_export import (
+    _adj_rows,
+    _flow_row,
+    _master_rows,
+    _price_row,
+    _sec_row,
+    _uni_row,
+)
+
+SRC = Path(__file__).resolve().parents[1] / "src"
 
 T = "20260923"
 T_ISO = "2026-09-23"
@@ -102,21 +115,26 @@ def _ledger_row(day: str, cur: str, pred: str, vol: str, ind: str = "-4321",
             **_flows(ind, frgn)}
 
 
+def _postclose_rows() -> dict[str, tuple[dict[str, str], bool]]:
+    """장 마감 원장 기본 행 — (종목 → (행, price_valid))."""
+    rows = {t: (_ledger_row(T, "+10200", "+200", "500000"), True) for t in FILL}
+    rows.update({
+        A: (_ledger_row(T, "-69500", "-500", "1000000"), True),
+        # 기준가 51,000 − 1,000 = 50,000 ≠ D' 종가 100,000 — 2:1 분할 같은 기업행위
+        B: (_ledger_row(T, "+51000", "+1000", "300000"), True),
+        C: (_ledger_row(T, "+31000", "+1000", "70000"), False),   # 16:00 뒤 — 가격 무효
+        X: (_ledger_row(T, "60000", "0", "100"), True),
+        N: (_ledger_row(T, "+5000", "0", "100"), True),
+    })
+    # 전 거래일 행 — T 가 아니라 쓰이면 안 된다
+    rows["__d22__"] = (_ledger_row("20260922", "70000", "0", "1"), True)
+    return rows
+
+
 def _postclose_db(path: Path, *, rows: dict[str, tuple[dict[str, str], bool]] | None = None
                   ) -> Path:
-    """`daily.postclose` 원장 — (종목 → (행, price_valid))."""
-    if rows is None:
-        rows = {t: (_ledger_row(T, "+10200", "+200", "500000"), True) for t in FILL}
-        rows.update({
-            A: (_ledger_row(T, "-69500", "-500", "1000000"), True),
-            # 기준가 51,000 − 1,000 = 50,000 ≠ D' 종가 100,000 — 2:1 분할 같은 기업행위
-            B: (_ledger_row(T, "+51000", "+1000", "300000"), True),
-            C: (_ledger_row(T, "+31000", "+1000", "70000"), False),   # 16:00 뒤 — 가격 무효
-            X: (_ledger_row(T, "60000", "0", "100"), True),
-            N: (_ledger_row(T, "+5000", "0", "100"), True),
-        })
-        # 전 거래일 행 — T 가 아니라 쓰이면 안 된다
-        rows["__d22__"] = (_ledger_row("20260922", "70000", "0", "1"), True)
+    """`daily.postclose` 원장(실물 `connect`·`insert_first`)."""
+    rows = _postclose_rows() if rows is None else rows
     con = postclose.connect(path)
     try:
         for t, (r, valid) in rows.items():
@@ -213,10 +231,12 @@ def test_t_rows_take_postclose_first_then_evening_ledger(env) -> None:
     info = res.tables["daily_prices"].t_rows
     assert info is not None
     assert (info["date"], info["d_prime"]) == (T_ISO, "2026-09-22")
-    assert (info["postclose"], info["evening"], info["missing"]) == (len(FILL) + 2, 2, 1)
-    assert info["evening_tickers"] == sorted([C, D])
+    assert (info["postclose"], info["kiwoom_2105"], info["missing"]) == (len(FILL) + 2, 2, 1)
+    assert info["kiwoom_2105_tickers"] == sorted([C, D])
     assert info["missing_tickers"] == [E]
     assert info["n_universe"] == len(UNIVERSE)
+    # MINOR-3 — 행 없는 종목 비율은 기록만 한다(상한으로 막지 않는다)
+    assert info["missing_ratio"] == pytest.approx(1 / len(UNIVERSE))
 
 
 def test_price_valid_0_falls_back_to_evening_ledger(env) -> None:
@@ -258,7 +278,7 @@ def test_t_flows_in_million_krw(env) -> None:
                                f"WHERE stock_code = '{A}' AND trade_date = '{T_ISO}'")
     assert got == [(-4321, 12, 12)]                    # orgn = FLOW_KEYS[2] → '12'
     info = res.tables["investor_detail_flows"].t_rows
-    assert info is not None and (info["postclose"], info["evening"], info["missing"]) == \
+    assert info is not None and (info["postclose"], info["kiwoom_2105"], info["missing"]) == \
         (len(FILL) + 2, 2, 1)
 
 
@@ -269,7 +289,7 @@ def test_evening_ledger_rows_before_21h_are_missing_then_rerun_fills(env, tmp_pa
     res = _evening(env, kiwoom_db=early)
     info = res.tables["daily_prices"].t_rows
     assert info is not None
-    assert (info["evening"], info["missing_tickers"]) == (0, sorted([C, D, E]))
+    assert (info["kiwoom_2105"], info["missing_tickers"]) == (0, sorted([C, D, E]))
     assert C not in _t_prices(env["target"])
     _evening(env)
     got = _t_prices(env["target"])
@@ -401,8 +421,8 @@ def test_t_sources_are_recorded_in_compat_meta(env) -> None:
     _evening(env)
     tables = json.loads(_rows(env["target"], "SELECT tables FROM _compat_meta")[0][0])
     info = tables["daily_prices"]["t_rows"]
-    assert (info["postclose"], info["evening"], info["missing"]) == (len(FILL) + 2, 2, 1)
-    assert info["evening_tickers"] == sorted([C, D]) and info["missing_tickers"] == [E]
+    assert (info["postclose"], info["kiwoom_2105"], info["missing"]) == (len(FILL) + 2, 2, 1)
+    assert info["kiwoom_2105_tickers"] == sorted([C, D]) and info["missing_tickers"] == [E]
 
 
 def test_cli_passes_ledgers_and_prints_t_sources(env, capsys) -> None:
@@ -410,7 +430,127 @@ def test_cli_passes_ledgers_and_prints_t_sources(env, capsys) -> None:
                    "--equity-root", str(env["equity"]), "--stage-root", str(env["stage"]),
                    "--target", str(env["target"]), "--tables", "daily_prices",
                    "--postclose-db", str(env["postclose"]), "--kiwoom-db", str(env["kiwoom"]),
-                   "--calendar-dir", str(env["calendar"])])
+                   "--calendar-dir", str(env["calendar"]), "--allow-older"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert f"T={T_ISO}" in out and f"postclose={len(FILL) + 2}" in out and "evening=2" in out
+    assert f"T={T_ISO}" in out and f"postclose={len(FILL) + 2}" in out and "kiwoom_2105=2" in out
+
+
+# ── 리뷰 수정(MAJOR-1 · MINOR-1~5 · NIT) ────────────────────────────────────
+def _t_count(target: Path) -> list[tuple]:
+    return _rows(target, f"SELECT count(*) FROM daily_prices WHERE trade_date = '{T_ISO}'")
+
+
+def test_morning_without_t_rows_refuses_and_keeps_evening_t_rows(env) -> None:
+    """MAJOR-1 재현 — 저녁 반영 뒤 D' 판(T 를 못 담은 판)으로 아침 `--date T` 를 돌리면 날짜 단위
+    교체가 T 행을 지우고 0행을 넣는다. 지우기 전에 멈추고 T 행은 그대로 남아야 한다(QL-C
+    `_score_rows` 규칙)."""
+    _evening(env)
+    before = _rows(env["target"], f"SELECT * FROM daily_prices WHERE trade_date = '{T_ISO}' "
+                                  "ORDER BY 1")
+    with pytest.raises(CompatEmptyError, match="행이 0"):
+        export(equity_root=env["equity"], stage_root=env["stage"], date=T, basis="morning",
+               target=env["target"], full=True,
+               tables=["daily_prices", "investor_detail_flows"])
+    assert _rows(env["target"], f"SELECT * FROM daily_prices WHERE trade_date = '{T_ISO}' "
+                                "ORDER BY 1") == before
+    assert _rows(env["target"], "SELECT count(*) FROM investor_detail_flows "
+                                f"WHERE trade_date = '{T_ISO}'") == [(len(FILL) + 4,)]
+
+
+def test_evening_does_not_overwrite_a_morning_reflect(env, tmp_path: Path) -> None:
+    """MINOR-1 — 대상에 date ≥ T 아침 확정 ok 기록이 있으면 장 마감 판은 멈춘다(T-35 와 같은 성질).
+    재생은 `--allow-older` 로 돌린다."""
+    morning = _equity(tmp_path / "tm", TM_BUILD, (D21, D22, D23))
+    export(equity_root=morning, stage_root=env["stage"], date=T, basis="morning",
+           target=env["target"], full=True, tables=["daily_prices", "investor_detail_flows"])
+    krx = _t_prices(env["target"])
+    with pytest.raises(CompatError, match="--allow-older"):
+        _evening(env)
+    assert _t_prices(env["target"]) == krx                   # KRX 확정 행 그대로
+    _evening(env, allow_older=True)
+    assert _t_prices(env["target"])[A][3] == 69_500
+
+
+def test_evening_m_build_checks_the_seam_for_any_table(env, tmp_path: Path) -> None:
+    """MINOR-2 — 장 마감 판이 `m_` 판을 받으면 T 표를 고르지 않아도 이음매를 본다. T 의 KRX 행을
+    가진 아침 판으로 `stocks` 만 내보내도 멈춘다."""
+    base = tmp_path / "tm"
+    morning = _equity(base, TM_BUILD, (D21, D22, D23))
+    _make_stage_tree(base, "security", [_sec_row(t, f"종목{t}", dt.date(2015, 1, 2))
+                                        for t in (*UNIVERSE, X)], build_id=TM_BUILD)
+    stage = tmp_path / "st2"
+    _make_stage_tree(stage, "stg_master_daily", _master_rows(), partition_class="date_axis",
+                     build_id="b_20260902T164532_554736Z")
+    with pytest.raises(CompatError, match="이음매"):
+        export(equity_root=morning, stage_root=stage / "stage", date=T, basis="evening",
+               target=env["target"], full=True, tables=["stocks"],
+               calendar_dir=env["calendar"])
+
+
+def test_both_tables_share_one_source_per_ticker(env) -> None:
+    """MINOR-4 — 원천 선택은 한 번(임시 표)이고 두 표가 같은 선택을 쓴다."""
+    res = _evening(env)
+    dp, fl = res.tables["daily_prices"].t_rows, res.tables["investor_detail_flows"].t_rows
+    assert dp is not None and fl is not None
+    keys = ("postclose", "kiwoom_2105", "missing", "kiwoom_2105_tickers", "missing_tickers")
+    assert {k: dp[k] for k in keys} == {k: fl[k] for k in keys}
+
+
+@pytest.mark.parametrize("case", ["empty_price", "price_valid_null"])
+def test_postclose_row_without_usable_price_falls_back_to_2105(env, tmp_path: Path,
+                                                                case: str) -> None:
+    """NIT 1·5 — `price_valid='1'` 인데 가격 칸이 빈 행, `price_valid` 가 NULL 인 행은 건너뛰지 않고
+    그 종목을 21:05 원장으로 넘긴다(가격·수급 모두)."""
+    rows = _postclose_rows()
+    ticker = FILL[0]
+    if case == "empty_price":
+        rows[ticker] = (_ledger_row(T, "", "+200", "500000", ind="-9"), True)
+    path = _postclose_db(tmp_path / "raw3" / "postclose.db", rows=rows)
+    if case == "price_valid_null":
+        con = sqlite3.connect(path)
+        con.execute("UPDATE ka10060_investor_flows SET price_valid = NULL WHERE ticker = ?",
+                    (ticker,))
+        con.commit()
+        con.close()
+    res = _evening(env, postclose_db=path)
+    info = res.tables["daily_prices"].t_rows
+    assert info is not None
+    tickers = info["kiwoom_2105_tickers"]
+    assert isinstance(tickers, list) and ticker in tickers
+    assert _t_prices(env["target"])[ticker][3:5] == (10_300, 600_000)       # 21:05 원장 값
+    assert _rows(env["target"], "SELECT individual FROM investor_detail_flows "
+                                f"WHERE stock_code = '{ticker}' AND trade_date = '{T_ISO}'") == \
+        [(-4321,)]
+
+
+def test_t6_base_price_predicate() -> None:
+    """NIT 3 — T-6 첫 조건 술어(`daily.kw_daily.ka10060_base_price_differs_sql`, PR-5 와 공유).
+    판정 불가(값 없음 · 직전 종가 0 이하)는 '다르다'로 닫는다."""
+    expr = kw_daily.ka10060_base_price_differs_sql("c", "p", "v")
+    con = duckdb.connect()
+    try:
+        def differs(c: int | None, p: int | None, v: int | None) -> bool:
+            row = con.execute(f"SELECT {expr} FROM (SELECT ?::BIGINT c, ?::BIGINT p, "
+                              "?::BIGINT v)", [c, p, v]).fetchone()
+            assert row is not None
+            return bool(row[0])
+        assert not differs(69_500, -500, 70_000)       # 기준가 70,000 = 직전 종가
+        assert differs(51_000, 1_000, 100_000)         # 기준가 50,000 — 기업행위
+        assert differs(None, 0, 1) and differs(1, None, 1) and differs(1, 0, None)
+        assert differs(0, 0, 0)
+    finally:
+        con.close()
+
+
+def test_collector_import_stays_light() -> None:
+    """MINOR-5 — 장 마감 수집기(16:00 창)는 `compat.mappings` 를 읽지만 T 행 모듈·stage 빌더·규칙을
+    끌어오지 않는다. 남는 stage 모듈은 판 해석(`equity.inputs` → `stage.manifest`)과 판 이름
+    (`compat.quant_db` → `stage.model`)뿐이다."""
+    code = ("import sys, daily.postclose; "
+            "print(','.join(sorted(m for m in sys.modules "
+            "if m == 'stage' or m.startswith('stage.') or m == 'compat.t_rows')))")
+    env = {**os.environ, "PYTHONPATH": str(SRC)}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
+                         text=True, check=True).stdout.strip()
+    assert set(out.split(",")) <= {"stage", "stage.manifest", "stage.model"}

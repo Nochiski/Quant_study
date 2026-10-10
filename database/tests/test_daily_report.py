@@ -286,6 +286,36 @@ def test_장_마감_수집_error_는_crit(tmp_path: Path) -> None:
     assert "수집 실패 런 kiwoom_postclose" in r.text
 
 
+@pytest.mark.parametrize("source", [*runlog.POSTCLOSE_STEPS, *runlog.POSTCLOSE_FOLLOWUPS])
+def test_장_마감_체인_단계는_같은_날_재실행이_ok_면_회복(tmp_path: Path, source: str) -> None:
+    """장 마감 체인(PR-8)의 단계 source 는 다시 돌면 그 T 의 그 단계를 통째로 다시 한다(stage 단독 빌드·fi·모델·엑셀·
+    v3 반영·재반영·아침 재반영·대조) — 앞 런 failed 뒤 같은 날 손 재실행이 ok 면 마지막 런 기준 회복이다."""
+    home = _full(tmp_path)
+    _runs(home, rows=(("ledger_chain", "ok"), ("evening_chain", "ok"),
+                      (source, "failed"), (source, "ok")))
+    r = _build(home)
+    assert r.status is dr.ReportStatus.INFO, r.text
+    assert f"회복 {source}" in r.text and "수집 실패 런" not in r.text
+
+
+def test_장_마감_체인_단계_실패는_crit(tmp_path: Path) -> None:
+    home = _full(tmp_path)
+    _runs(home, rows=(("ledger_chain", "ok"), ("evening_chain", "ok"), ("postclose_fi", "failed")))
+    r = _build(home)
+    assert r.status is dr.ReportStatus.CRIT
+    assert "수집 실패 런 postclose_fi" in r.text
+
+
+def test_두_판_대조_불일치는_crit_이_아니라_warn(tmp_path: Path) -> None:
+    """대조 rc 1(mismatch)은 기록이다 — 판정은 연속 창 집계 몫이라 즉시 등급으로 올리지 않는다."""
+    home = _full(tmp_path)
+    _runs(home, rows=(("ledger_chain", "ok"), ("evening_chain", "ok"),
+                      ("postclose_compare", "mismatch")))
+    r = _build(home)
+    assert r.status is dr.ReportStatus.WARN, r.text
+    assert "postclose_compare mismatch" in r.text and "수집 실패 런" not in r.text
+
+
 def test_런이_아직_running_이면_warn(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _ledger(home)

@@ -340,3 +340,44 @@ def test_YAML_expect_도_읽는다(tmp_path: Path) -> None:
                    "    note: 규칙에서 제외\n", encoding="utf-8")
     _, rep = _run(root, "--expect", str(exp))
     assert _counter(rep, "val", "value_to_null")["explained"] == 1
+
+
+@pytest.mark.parametrize(("sql_type", "numeric"), [
+    ("INTEGER", True), ("BIGINT", True), ("UBIGINT", True), ("HUGEINT", True), ("DOUBLE", True),
+    ("FLOAT", True), ("DECIMAL(38,4)", True), ("DECIMAL(18, 3)", True),
+    ("INTEGER[]", False), ("BIGINT[]", False), ("DOUBLE[]", False),
+    ("STRUCT(n VARCHAR)", False), ("MAP(VARCHAR, INTEGER)", False), ("VARCHAR", False),
+    ("DATE", False), ("BOOLEAN", False), ("INTERVAL", False),
+])
+def test_수치_판정은_스칼라_타입만이다(sql_type: str, numeric: bool) -> None:
+    """옛 식은 앞만 맞춰 `INTEGER[]` 를 수치로 보고 DOUBLE 캐스트했다(서버 10-08 stg_wise_coverage 판정 불가)."""
+    assert ed.is_numeric(sql_type) is numeric
+
+
+def test_목록_구조체_열은_동등_비교로_센다(tmp_path: Path) -> None:
+    schema = {"k1": "VARCHAR", "k2": "BIGINT", "fails": "INTEGER[]", "mk": "STRUCT(a VARCHAR)"}
+    before = [{"k1": "A", "k2": 1, "fails": [1], "mk": {"a": None}},
+              {"k1": "A", "k2": 2, "fails": [2], "mk": {"a": None}},
+              {"k1": "A", "k2": 3, "fails": [3], "mk": {"a": None}}]
+    after = [{"k1": "A", "k2": 1, "fails": [1], "mk": {"a": None}},
+             {"k1": "A", "k2": 2, "fails": None, "mk": {"a": "x"}},
+             {"k1": "A", "k2": 3, "fails": [3, 4], "mk": {"a": None}}]
+    root = tmp_path / "data" / "equity"
+    for bid, rows in (("b1", before), ("b2", after)):
+        path = root / TABLE / f"v={bid}" / "year=2025" / "part0.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        con = duckdb.connect()
+        try:
+            con.execute(f"CREATE TABLE t ({', '.join(f'{c} {ty}' for c, ty in schema.items())})")
+            con.executemany("INSERT INTO t VALUES (?, ?, ?, ?)",
+                            [[r[c] for c in schema] for r in rows])
+            con.execute(f"COPY t TO '{path}' (FORMAT PARQUET)")
+        finally:
+            con.close()
+    _write_manifest(root / TABLE, [_record("b1", 3, content_hash="h1", part_hash="p1"),
+                                   _record("b2", 3, content_hash="h2", part_hash="p2")])
+    rc, rep = _run(root)
+    assert rc == 0
+    assert _counter(rep, "fails", "value_to_null")["total"] == 1
+    assert _counter(rep, "fails", "value_changed")["total"] == 1
+    assert _counter(rep, "mk", "value_changed")["total"] == 1

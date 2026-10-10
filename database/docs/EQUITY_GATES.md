@@ -2639,7 +2639,7 @@ CFS 4) 중 예상 대상 20 이상은 `CFS|standard|11011` 48 · `11012` 47 · `
 | 축 | 정의 |
 |---|---|
 | 비교 단위 | 표의 **선언 grain**(`rules_s*.py` 의 `EquityTable.grain`)으로 두 판을 FULL OUTER JOIN 한 행. `--key a,b` 로 덮어쓸 수 있다(선언이 없는 표·절단본 실험용) |
-| 컬럼 카운터 | `value_to_null`(값→NULL) · `null_to_value`(NULL→값) · `value_changed`. 수치 컬럼의 값 변경은 **상대 허용오차**(`--tol 1e-9` 기본, `--tol capex_ytd=1e-6` 로 컬럼별), 그 밖은 완전일치 |
+| 컬럼 카운터 | `value_to_null`(값→NULL) · `null_to_value`(NULL→값) · `value_changed`. 수치 컬럼의 값 변경은 **상대 허용오차**(`--tol 1e-9` 기본, `--tol capex_ytd=1e-6` 로 컬럼별), 그 밖(문자·날짜·불리언·LIST·STRUCT·MAP)은 `IS DISTINCT FROM` 동등 비교. 수치는 스칼라 타입만이다(`is_numeric` — 앞만 맞추던 옛 식이 `INTEGER[]` 를 수치로 보고 DOUBLE 캐스트해 서버 10-08 stg_wise_coverage 비교가 죽었다) |
 | 행 카운터 | `rows_added` · `rows_removed` |
 | 묶음 | `*_basis` 계열과 `available_date`·`*_available_date` 를 따로 합산한다 — 어휘 축과 공개시점 축은 값 축과 위험이 다르다 |
 | 제외 | 운영 메타(`v`·`build_id`·`built_at_utc` 류)와 **선언 컬럼이 아닌 하이브 키**(`year`). 보고서 `excluded_columns` 에 무엇을 뺐는지 싣는다. `_reject/` 는 산출이 아니므로 읽지 않는다 |
@@ -2702,6 +2702,56 @@ ssh kael-server 'cd quant-ledger && PYTHONPATH=src .venv/bin/python \
 
 JSON 보고서는 `--out` 이 없으면 **루트의 부모 아래** `logs/equity_diff/<표>_<before>_<after>.json`
 이다(표준 서버 루트에서는 `data/logs/equity_diff/`). 마크다운 요약은 stdout 으로 나간다.
+
+### 12-6. 매일 아침 조용한 손실 검사 — `python -m daily.silent_loss` (컷오버 K1-4a, 2026-10-10)
+
+정본 `plans/2026-10-10-cutover-track.md` §3 K1-4a · DECISIONS N-42 Q4('조용한 손실 검사 2주 기록 뒤 차단 전환') · 로드맵
+K1-4('매 아침 직전 아침 확정판과 비교해, 설명 안 되는 값→NULL·행 삭제 0'). 같은 diff 를 사람이 규칙을 바꿀 때만이 아니라
+**매일 아침 확정판 뒤** 모델 입력 전체에 돌린다. 새 엔진은 없다 — 이 스크립트에서 함수 셋을 꺼내 라이브러리로 쓴다:
+`load_equity_rules`(선언 등록 한 곳) · `diff_core`(뷰·키 위생·조인·한 번의 집계 — CLI `run_diff` 도 이것을 부른다) · 집계의
+선택 술어 `split`(카운터마다 술어에 걸린 수 `in_split` 을 같은 한 번의 집계로 더 센다)과 키 위생의 `nullable`(NULL 허용 키 열).
+CLI 출력은 그대로다(로컬 price_daily 두 판 JSON 보고서가 바꾸기 전과 같다).
+
+| 축 | 정의 |
+|---|---|
+| 대상 | 모델 폐포 — fi 직접 원천 `factor_inputs.queries.TABLE_SOURCES` 에서 equity `RULES[t].inputs` 를 거꾸로 따라 닫은 stage·equity 표(원장 제외, `closure_tables`). 10-10 코드 기준 **53표 = equity 18 + stage 35**(정본 문구 '27표'와 다르다 — stage 입력까지 닫으면 35표가 붙는다). 목록은 박지 않는다 |
+| 판 | 오늘 아침 인계 이력 `data/deliver/history/<D>_morning.json` 의 stage_builds·equity_builds 대 직전 거래일(판정 달력) 아침 인계 이력의 판. 판이 MANIFEST·디스크에서 사라졌으면(stage keep 3 · equity keep 10) 그 표는 **판정 불가**(P1) |
+| grain | equity 는 선언 grain. stage 는 `key_unique` 면 자연키, 판본 표(append_only — G6 이 유일성 보장)면 자연키 + `observed_date`, 판본 없는 로그면 선언 열 전부 + `observed_date`. NULL 키는 막지 않는다(조인이 NULL 안전 — equity 격자 flow_daily 의 not_collected 셀은 src NULL 이 설계, 로컬 10-03 판 25,685행). 중복 키만 판정 불가 |
+| 건너뛰기 | 같은 판 id → 읽지 않음(`same_build`). 표 content_hash·행 수가 같음 → 읽지 않음(`same_content`). equity 는 **파티션 content_hash 가 같은 파티션을 양쪽에서 함께 뺀다** — 같은 해시 = 같은 행 집합이고 grain 이 표 전체에서 유일하므로 남은 파티션끼리의 조인이 표 전체 조인과 같은 숫자를 낸다. stage 판 기록에는 파티션 해시가 없어 표 전체를 조인한다 |
+
+**갈래**(기록형 첫 판 — 보수적으로, 설명 못 하면 미설명):
+
+| 갈래 | 무엇 | 판정 |
+|---|---|---|
+| 새 행 · NULL→값 | `rows_added` · `null_to_value` | 정상(수만 남김) |
+| 재수집 창 | 날짜 열(date_axis 파티션 표의 날짜형 grain 열 — `date`·`snapshot_date`·`effective_date`·`fetched_date`)이 D 와 그 앞 `ledger_health.KRX_RECHECK_SESSIONS`(10)세션 안인 행의 값 변경 · 값→NULL(available_date 계열 열 제외) | 설명됨, 수는 남김 |
+| 규칙 변경 | 두 판의 `rules_version`(equity `e*` · stage 판본)이 다른 표 — 아래 미설명 후보 전부가 이 갈래로 간다 | 설명됨, 수는 남김 |
+| **미설명** | 창 밖 값→NULL · **행 삭제(창 안 포함)** · **available_date 계열 변경(창 안 포함 — 공개시점 축은 창으로 설명하지 않는다)** | 기록형: warn · 차단형: crit + 다음 모델 단계 차단 |
+| 보고만 | 창 밖 값 변경 | 12-3 과 같은 이유(정의 교정·결측 복구의 정상 산출) |
+
+날짜 열이 없는 표(마스터 `whole` · DART 접수 축 `receipt_axis`)는 grain 으로 비교하고 재수집 창 없이 같은 규칙이다. 규칙
+판본은 그 표 자신의 것만 본다 — stage 판본이 올라 equity 표 값이 바뀌면(equity 판본은 그대로) 그 equity 표는 미설명이다(보수적).
+
+**산출**: `logs/silent_loss/<D>.json`(표별 상태·판·규칙 판본·비교/건너뛴 파티션·갈래 수·미설명 종류별 수·미설명 표본 상위 5 —
+키와 전/후 값) · 런 로그 source `silent_loss`(ok · unexplained · undecidable · blocked) · notify 한 줄. rc(check) 0 미설명 0 ·
+1 미설명 > 0 · 2 판정 불가 · 3 차단. `daily_build.sh` 는 rc 와 무관하게 확정판 rc 를 그대로 둔다(0~3 밖이면 warn 1건).
+
+**차단 전환**: `config/silent_loss.env` 한 줄 `SILENT_LOSS_BLOCK=1`(켜는 쪽만 정확한 값, 저장소 값 0). **그림자 시작 10-14 부터
+2주 기록한 뒤** 켠다(정본 K1-4a · N-42 Q4). 켜면 미설명 > 0 **또는 판정 불가 표**(N-42 Q4 '필수 검사 SKIP = 실패')가 crit
+'조용한 손실 차단 D=…'(X-2 `COUNTED_CRIT_PREFIXES`)이고, 그 D 의 아침 확정판을 고정해 읽는 다음 모델 단계 — 15:41 장 마감 체인
+close(T-2) — 가 고정 판 확인 뒤·빌드 락 전에 `gate --date D'` 로 멈춘다(결과 파일이 없거나 못 읽거나 관문이 죽어도 막는다,
+P1). **꺼져 있을 때는 어떤 상태에서도 막지 않는다** — 체인이 스위치를 셸에서 파이썬 없이 읽고(`scripts/postclose_conf.sh`
+`silent_loss_block_on`, 모듈 `block_enabled` 와 같은 규칙 — 테스트가 대조) 꺼져 있으면 관문을 부르지 않는다. 그날은 장 마감
+판이 없는 날과 같다(T-7 대체 발송 경로 · T-38 점수 없는 7표). 켜는 쪽 동작은 테스트로만 고정했다
+(`tests/test_silent_loss.py::test_차단_*` · `tests/test_postclose_chain_sh.py::test_silent_loss_gate_*`).
+
+**비용 실측(로컬 맥, threads 3 · memory_limit 6GB)**: 로컬 equity 두 판(m_0929 → m_1003, 17파티션 표는 2026 만 조인) 폐포
+equity 18표 전부 **2.7초**. 파티션 건너뛰기를 끈 전체 조인은 큰 다섯 표(price_daily·price_adj_daily·universe_daily 각 1,100만 ·
+flow_daily·credit_daily 각 930만 행 — 5,200만 행) **27.5초 · 최대 RSS 2.7GB**(≈ 190만 행/초). stage 는 전체 조인이라 stg_fin
+모양 합성(8키 + Decimal(38,4) 6 + 글자 열, 1,540만 행 두 판) **20.5초 · 최대 RSS 5.05GB**. 행 수 비례로 stage 35표(≈ 7,000만 행 —
+stg_fin 1,540만 · 가격·상장·신용·외인·키움 수급 각 800~940만 · 공시 340만 …) ≈ 50초(맥) → 서버(4코어) 어림 **2~4분**, 메모리는
+`--memory-limit` 6GB 안(넘으면 duckdb 가 디스크로 넘긴다). 시간 한도는 두지 않는다(체인 맨 끝, P9). 더 줄이려면 stage 빌더가
+파티션 해시를 기록하게 하는 것이 다음 수다(후속).
 
 ## 13. E-1 — `adj_factor` 사건 매칭에 KRX 기준가 근거 요구 (규칙 e1.28.0, 2026-10-10)
 

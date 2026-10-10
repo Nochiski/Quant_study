@@ -15,6 +15,11 @@
 #     ①' 고정 판 확인 — 직전 거래일 D' 아침 인계 이력 data/deliver/history/<D'>_morning.json 이 그 날짜이고 health ok
 #             (읽기는 equity.handoff 한 곳)인지 **빌드 락을 잡기 전에** 본다. 아니면 락 없이 crit — 그날 판은 없고 다음 날
 #             아침판이 대체 발송 경로다(T-7). 수집(①)은 그보다 앞이라 판이 없는 날에도 21:05 경로(T-38)의 원장은 쌓인다.
+#             이어서 조용한 손실 관문(K1-4a) — 스위치는 셸이 파이썬 없이 읽는다(postclose_conf.sh silent_loss_block_on).
+#             꺼져 있으면(설정 config/silent_loss.env 없음·0·그 밖의 값 — 저장소 값, 그림자 시작 10-14 부터 2주 기록 뒤 전환)
+#             관문 파이썬을 부르지 않고 통과한다 — 결과 파일·관문 예외·모듈 import 실패 어느 것도 장 마감 체인을 막지 못한다.
+#             켜져 있을 때만 python -m daily.silent_loss gate --date D' 를 부르고, 그 D' 검사 결과(logs/silent_loss/<D'>.json)에
+#             미설명·판정 불가가 있거나 결과가 없거나 관문이 rc 0 으로 끝나지 않으면 같은 자리에서 crit(빌드 락 없음, P1)
 #     ② stage python -m stage --table stg_flow_postclose_kiwoom --basis evening --stage-root data/model_db/stage
 #             --snapshot-root data/model_db/snapshots(T-29 — 연구 루트에 지으면 연구 인계 stage_builds 에 섞인다), 이어서
 #             그 표만 건전성 stage.health --tables(리포트 logs/health/postclose_stage_<T>.json — 연구 판 리포트
@@ -183,6 +188,12 @@ if h.date != d or not h.health_ok:
     sys.exit(1)
 print(f"고정 판 {path} date={d} health ok")' "$1" "$HIST/${1}_morning.json"
 }
+loss_gate() {  # 조용한 손실 관문(K1-4a) — 스위치가 켜졌을 때만 부른다(close_main). D' 검사 결과로 막으면 rc 1. 판정은
+  # daily.silent_loss.gate 한 곳. 사유를 찍는다
+  $PY -c 'import sys
+from daily import silent_loss
+sys.exit(silent_loss.main(["gate", "--date", sys.argv[1]]))' "$1"
+}
 last_status() {  # 그 D·source 의 마지막 런 상태(없으면 빈 출력)
   $PY -c 'import sys
 from daily import runlog
@@ -312,6 +323,11 @@ if [ -n "$DRY" ]; then
       echo "  0. 체인 락 $CHAIN_LOCK flock -n (이미 돌면 rc 3)"
       echo "  1. $PY -m daily.postclose --date $D   (rc 3 + 세션 예외일이면 체인 전체 건너뜀)"
       echo "  1' 고정 판 $HIST/${DPREV:-?}_morning.json — 지금: $( [ -n "$DPREV" ] && board_ok "$DPREV" 2>&1 || echo 'D 계산 불가')"
+      if silent_loss_block_on; then
+        echo "     조용한 손실 관문(K1-4a, 차단형) — 지금: $(if [ -n "$DPREV" ]; then loss_gate "$DPREV" 2>&1; else echo 'D 계산 불가'; fi)"
+      else
+        echo "     조용한 손실 관문(K1-4a) — 차단 스위치 off(config/silent_loss.env), 관문을 부르지 않고 통과"
+      fi
       echo "  -  빌드 락 $BUILD_LOCK (쥐여 있으면 기다림) — 2~5 동안만"
       echo "  2. $PY -m stage --table stg_flow_postclose_kiwoom --basis evening --stage-root $MDB/stage --snapshot-root $MDB/snapshots"
       echo "     $PY -m stage.health --stage-root $MDB/stage --basis evening --date $D --tables stg_flow_postclose_kiwoom --out logs/health/postclose_stage_${D}.json"
@@ -443,6 +459,19 @@ close_main() {
     return
   fi
   echo "  $board"
+  # 조용한 손실 관문(K1-4a) — 스위치가 꺼져 있으면 파이썬을 부르지 않고 통과(어떤 상태에서도 15:41 체인을 막지 않는다)
+  if silent_loss_block_on; then
+    local loss
+    if ! loss=$(loss_gate "$DPREV" 2>&1); then
+      FAILED="조용한 손실 차단"
+      NOTE="$loss — 빌드 락을 잡지 않았다. 그날 장 마감 판 없음(T-7 대체 발송 경로 · 21:05 뒤 점수 없는 7표 반영 T-38)"
+      echo "  $NOTE"
+      return
+    fi
+    echo "  $loss"
+  else
+    echo "  조용한 손실 관문 — 차단 스위치 off(config/silent_loss.env), 통과(기록형)"
+  fi
   if ! build_lock; then FAILED="빌드 락 대기(rc=3)"; return; fi
   if step postclose_stage "stage 단독 빌드" stage_step; then
     echo "──── 장 마감 스냅샷 GC 시작 $(kst) ────"

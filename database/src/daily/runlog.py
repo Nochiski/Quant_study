@@ -20,11 +20,16 @@ TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # 정하고(장 마감 수집 `daily.postclose.Status`) 여기 한 곳에 등록한다 — 테스트가 둘을 맞춰 본다
 # 두 판 대조(PR-7) 런 source — 장 마감 체인 morning 이 남긴다(POSTCLOSE_FOLLOWUPS 의 하나). X-2 연속 창 판정이 읽는다
 POSTCLOSE_COMPARE = "postclose_compare"
+# 조용한 손실 검사(K1-4a, `daily.silent_loss`) 런 source — 08:10 체인 맨 끝. 날짜 = 확정판의 거래일 D
+SILENT_LOSS = "silent_loss"
 WARN_STATUSES: dict[str, frozenset[str]] = {
     # 16:00 컷오프 · 16:00 뒤 시작(콜 0) · 세션 예외일 건너뜀 — 남은 종목은 QL-D 가 21:05 저녁 값
     "kiwoom_postclose": frozenset({"cutoff", "late", "session_exception"}),
     # 두 판 대조(PR-7) rc 1 — 미설명 차이·Spearman 하한 미달. 실패가 아니라 기록이고 판정은 연속 창 집계 몫
     POSTCLOSE_COMPARE: frozenset({"mismatch"}),
+    # 조용한 손실 기록형(N-42 Q4 — 그림자 시작 10-14 부터 2주 기록) — 미설명 > 0 · 판정 불가 표. 차단형으로 바꾸면
+    # 같은 경우가 blocked(이 목록 밖 — 일일 리포트 crit)다
+    SILENT_LOSS: frozenset({"unexplained", "undecidable"}),
 }
 # 장 마감 체인(`scripts/postclose_chain.sh close`, 컷오버 PR-8)이 ①(수집 — 수집기가 `kiwoom_postclose` 로 남김) 뒤
 # 단계마다 남기는 source, 체인 순서. 16:30 워치독(`watchdog.sh postclose_board`)이 그날 단계마다 마지막 런을 본다

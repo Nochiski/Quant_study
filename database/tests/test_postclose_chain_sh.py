@@ -76,6 +76,10 @@ if [ "$1" = "-m" ]; then
   var="RC_${1//./_}"
   exit "${!var:-0}"
 fi
+# 조용한 손실 관문(-c … silent_loss …)을 SL_GATE_RC 로 죽인다 — 관문 예외·모듈 import 실패 대역
+if [ "$1" = "-c" ] && [ -n "${SL_GATE_RC:-}" ] && [[ "$2" == *silent_loss* ]]; then
+  echo "관문 대역 실패(ImportError 흉내)" >&2; exit "$SL_GATE_RC"
+fi
 PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@"
 """
 _V3_POST = """#!/usr/bin/env bash
@@ -314,6 +318,87 @@ def test_missing_pinned_board_fails_before_the_build_lock(tmp_path: Path, broken
     assert r.runs == []
     assert r.titles("crit") == ["장 마감 체인 실패: 고정 판 확인"]
     assert H_PREV in r.notify[0]
+
+
+def _silent_loss(root: Path, d: str, *, unexplained: int, undecidable: int = 0) -> None:
+    """D 의 조용한 손실 검사 결과(daily.silent_loss check 가 쓰는 모양 — gate 가 읽는 키만)."""
+    from daily import silent_loss
+
+    p = root / silent_loss.OUT_DIR / f"{d}.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"schema": silent_loss.SCHEMA, "tool": silent_loss.TOOL, "date": d, "error": None,
+                             "totals": {"unexplained": unexplained, "undecidable": undecidable}}),
+                 encoding="utf-8")
+
+
+@pytest.mark.parametrize(("block", "unexplained", "blocked"), [
+    ("1", 3, True),        # 차단형 + 미설명 → 막음
+    ("1", 0, False),       # 차단형 + 미설명 0 → 통과
+    ("0", 3, False),       # 기록형(저장소 값) → 결과와 무관하게 통과
+])
+def test_silent_loss_gate_blocks_before_the_build_lock_only_when_switched_on(
+        tmp_path: Path, block: str, unexplained: int, blocked: bool) -> None:
+    """K1-4a — 조용한 손실 차단 스위치(config/silent_loss.env)가 켜져 있고 D' 아침 확정판 검사에 미설명이 있으면
+    고정 판 확인 뒤·빌드 락 전에 crit(그날 장 마감 판 없음 — T-7 대체 발송 경로). 꺼져 있으면 지금처럼 다 돈다."""
+    root = _root(tmp_path)
+    (root / "config/silent_loss.env").write_text(f"SILENT_LOSS_BLOCK={block}\n", encoding="utf-8")
+    _silent_loss(root, D_PREV, unexplained=unexplained)
+    r = _chain(tmp_path, "close", "--date", T)
+    if blocked:
+        assert r.rc == 2, r.out + r.log
+        assert r.mods == ["daily.postclose"]
+        assert not any(c.startswith("flock") and " 6" in c for c in r.calls)
+        assert r.titles("crit") == ["장 마감 체인 실패: 조용한 손실 차단"]
+        assert "미설명 3" in r.notify[0]
+    else:
+        assert r.rc == 0, r.out + r.log
+        assert r.mods == STEP_MODULES
+        assert r.titles("crit") == []
+
+
+def test_silent_loss_gate_blocks_a_missing_result_when_switched_on(tmp_path: Path) -> None:
+    """차단형인데 D' 검사 결과가 없으면(08:10 끝 검사가 돌지 않음) 막는다 — 못 쟀으면 통과가 아니다(P1)."""
+    root = _root(tmp_path)
+    (root / "config/silent_loss.env").write_text("SILENT_LOSS_BLOCK=1\n", encoding="utf-8")
+    r = _chain(tmp_path, "close", "--date", T)
+    assert r.rc == 2, r.out + r.log
+    assert r.mods == ["daily.postclose"]
+    assert r.titles("crit") == ["장 마감 체인 실패: 조용한 손실 차단"]
+
+
+@pytest.mark.parametrize("conf", [None, "SILENT_LOSS_BLOCK=0\n", "SILENT_LOSS_BLOCK=yes\n", "SILENT_LOSS_BLOCK=\n"],
+                         ids=["no_file", "zero", "odd", "empty"])
+@pytest.mark.parametrize("state", ["missing", "broken_json", "rc1", "rc2", "rc3", "gate_crash"])
+def test_silent_loss_gate_never_blocks_when_switched_off(tmp_path: Path, conf: str | None, state: str) -> None:
+    """K1-4a 꺼짐 보장 — 차단 스위치가 꺼져 있으면(파일 없음·0·이상한 값·빈 값) D' 검사 결과가 어떤 상태든(없음·깨진 JSON·
+    미설명 rc 1·판정 불가 rc 2·차단 rc 3) 관문 파이썬이 죽어도(예외·import 실패) 15:41 장 마감 체인은 끝까지 돈다."""
+    root = _root(tmp_path)
+    if conf is not None:
+        (root / "config/silent_loss.env").write_text(conf, encoding="utf-8")
+    out = root / "logs/silent_loss" / f"{D_PREV}.json"
+    if state == "broken_json":
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("{", encoding="utf-8")
+    elif state in ("rc1", "rc2", "rc3"):
+        _silent_loss(root, D_PREV, unexplained=3 if state != "rc2" else 0,
+                     undecidable=0 if state == "rc1" else 2)
+    env = {"SL_GATE_RC": "1"} if state == "gate_crash" else {}
+    r = _chain(tmp_path, "close", "--date", T, **env)
+    assert r.rc == 0, r.out + r.log
+    assert r.mods == STEP_MODULES
+    assert r.titles("crit") == []
+    assert "차단 스위치 off" in r.log
+
+
+def test_silent_loss_gate_crash_blocks_only_when_switched_on(tmp_path: Path) -> None:
+    """켜져 있으면 관문이 죽어도(예외·import 실패) 통과로 보지 않는다(P1) — 결과가 깨끗해도 막는다."""
+    root = _root(tmp_path)
+    (root / "config/silent_loss.env").write_text("SILENT_LOSS_BLOCK=1\n", encoding="utf-8")
+    _silent_loss(root, D_PREV, unexplained=0)
+    r = _chain(tmp_path, "close", "--date", T, SL_GATE_RC="1")
+    assert r.rc == 2, r.out + r.log
+    assert r.mods == ["daily.postclose"]
+    assert r.titles("crit") == ["장 마감 체인 실패: 조용한 손실 차단"]
 
 
 def test_session_exception_day_skips_the_whole_chain(tmp_path: Path) -> None:

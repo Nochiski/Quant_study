@@ -23,6 +23,9 @@ ad-hoc DuckDB 스크립트(두 판을 grain 으로 FULL OUTER JOIN → 컬럼별
 
 새 의존성 없음 — duckdb(이미 서버 venv 에 있다) + 표준 라이브러리. YAML expect 는 PyYAML 이
 있을 때만 읽고(로컬 backend venv 에 있다), 없으면 JSON 을 쓰라고 분명히 거절한다.
+
+라이브러리로도 쓴다 — 매일 아침 조용한 손실 검사(`daily.silent_loss`, 컷오버 K1-4a)가 `load_equity_rules`·`diff_core`
+(+ 집계 선택 술어 `split`·NULL 허용 키 `nullable`)를 부른다. 비교 규칙은 이 파일 한 곳이다(docs/EQUITY_GATES.md §12-6).
 """
 from __future__ import annotations
 
@@ -53,7 +56,10 @@ REJECT_DIR = "_reject"                 # 격리 행은 산출이 아니다 — �
 META_EXACT = frozenset({"v", "build_id", "snapshot_id", "generated_at", "built_at_utc",
                         "generated_at_utc", "elapsed_s"})
 META_SUFFIX = ("_build", "_build_id", "_generated_at", "_at_utc")
-_NUMERIC_RE = re.compile(r"^(DECIMAL|DOUBLE|FLOAT|REAL|NUMERIC|[US]?(BIG|HUGE|SMALL|TINY)?INT)")
+# 수치 스칼라 타입만 — 끝까지 맞춘다. 앞만 보던 옛 식은 `INTEGER[]`(stage `_cast_fail_cols`)를 수치로 보고 DOUBLE 로
+# 캐스트해 조인 전체가 ConversionException 으로 죽었다(서버 10-08 stg_wise_coverage). LIST·STRUCT·MAP 은 수치가 아니다
+_NUMERIC_RE = re.compile(r"^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|UHUGEINT"
+                         r"|INT[1248]?|FLOAT|DOUBLE|REAL|(DECIMAL|NUMERIC)(\(\d+\s*,\s*\d+\))?)$")
 
 
 class UsageError(Exception):
@@ -74,21 +80,29 @@ class ExpectEntry:
 
 
 # ── 선언 읽기 (grain) ────────────────────────────────────────────────────────
-def declared_table(table: str, *, required: bool):
-    """`EquityTable` 선언. import 가 안 되면 required 일 때만 거절하고 아니면 None."""
+def load_equity_rules() -> dict:
+    """equity 표 선언 전부(`equity.model.RULES`). import 가 안 되면 ImportError 를 그대로 올린다.
+
+    조용한 손실 검사(`daily.silent_loss`, K1-4a)가 모델 폐포를 닫을 때도 이 함수를 쓴다(등록 규칙 한 곳)."""
     src = Path(__file__).resolve().parents[1] / "src"
     if str(src) not in sys.path:
         sys.path.insert(0, str(src))
-    try:
-        import importlib
-        import pkgutil
+    import importlib
+    import pkgutil
 
-        import equity
-        from equity.model import RULES
-        # `rules_s*` 는 import 부작용으로 RULES 에 등록한다 — 목록을 여기 박지 않고 훑는다.
-        for mod in pkgutil.iter_modules(equity.__path__):
-            if mod.name.startswith("rules_"):
-                importlib.import_module(f"equity.{mod.name}")
+    import equity
+    from equity.model import RULES
+    # `rules_s*` 는 import 부작용으로 RULES 에 등록한다 — 목록을 여기 박지 않고 훑는다.
+    for mod in pkgutil.iter_modules(equity.__path__):
+        if mod.name.startswith("rules_"):
+            importlib.import_module(f"equity.{mod.name}")
+    return RULES
+
+
+def declared_table(table: str, *, required: bool):
+    """`EquityTable` 선언. import 가 안 되면 required 일 때만 거절하고 아니면 None."""
+    try:
+        RULES = load_equity_rules()
     except ImportError as e:                                  # duckdb·stage 없는 환경
         if required:
             raise UsageError(f"equity 선언을 import 할 수 없다 — --key 로 grain 을 직접 "
@@ -283,8 +297,11 @@ def change_cond(column: str, kind: str, *, numeric: bool, tol: float) -> str:
             da, db = f"CAST({a} AS DOUBLE)", f"CAST({b} AS DOUBLE)"
             # 상대 허용오차 — 둘 다 0 이면 greatest 가 0 이라 '차이 > 0' 이 되어 안전하다.
             differs = f"abs({da} - {db}) > {tol} * greatest(abs({da}), abs({db}))"
-        else:
+        elif numeric:
             differs = f"{a} <> {b}"
+        else:
+            # 수치 밖(문자·날짜·불리언·LIST·STRUCT·MAP …)은 동등 비교 — 중첩 값 안의 NULL 도 같은 값으로 본다
+            differs = f"{a} IS DISTINCT FROM {b}"
         return f"{both} AND {b} IS NOT NULL AND {a} IS NOT NULL AND ({differs})"
     if kind == "rows_added":
         return f"{IN_AFTER} AND NOT {IN_BEFORE}"
@@ -312,10 +329,16 @@ def make_join_view(con: duckdb.DuckDBPyConnection, key: tuple[str, ...],
                 f"FROM _before b FULL OUTER JOIN _after a ON {on}")
 
 
-def key_issues(con: duckdb.DuckDBPyConnection, alias: str, key: tuple[str, ...]) -> dict:
-    """키 중복·NULL 을 **먼저** 본다 — 중복이 있으면 조인이 팬아웃해 아래 숫자를 못 믿는다."""
+def key_issues(con: duckdb.DuckDBPyConnection, alias: str, key: tuple[str, ...],
+               nullable: frozenset[str] = frozenset()) -> dict:
+    """키 중복·NULL 을 **먼저** 본다 — 중복이 있으면 조인이 팬아웃해 아래 숫자를 못 믿는다.
+
+    `nullable` 은 NULL 을 허용하는 키 열이다 — 조인이 IS NOT DISTINCT FROM 이고 중복 검사의 GROUP BY 도 NULL 을
+    같은 값으로 묶어 둘의 뜻이 같다. 조용한 손실 검사(K1-4a)가 설계상 NULL 키(equity 격자 flow_daily 의
+    not_collected 셀 src)를 위해 쓴다. CLI 는 쓰지 않는다(NULL 키 = 위생 실패 그대로)."""
     keys = ", ".join(q(k) for k in key)
-    null_pred = " OR ".join(f"{q(k)} IS NULL" for k in key)
+    strict = [k for k in key if k not in nullable]
+    null_pred = " OR ".join(f"{q(k)} IS NULL" for k in strict) or "FALSE"
     dup = con.execute(f"SELECT count(*) FROM (SELECT {keys} FROM {alias} GROUP BY {keys} "
                       "HAVING count(*) > 1)").fetchone()
     nulls = con.execute(f"SELECT count(*) FROM {alias} WHERE {null_pred}").fetchone()
@@ -357,6 +380,66 @@ def examples(con: duckdb.DuckDBPyConnection, key: tuple[str, ...], column: str, 
 
 
 # ── diff 본체 ───────────────────────────────────────────────────────────────
+@dataclass
+class DiffCore:
+    """`diff_core` 결과 — 조인 뷰 `j` 는 같은 연결에 남는다(대표 사례를 이어서 뽑을 수 있다).
+
+    `counters` 가 None 이면 키 위생 실패(`key_issues` 에 사유)라 조인·집계를 하지 않았다."""
+
+    key: tuple[str, ...]
+    a_types: dict[str, str]
+    excluded: list[str]
+    compared: list[str]
+    only_after: list[str]
+    only_before: list[str]
+    key_issues: dict
+    counters: dict | None
+    n_join: int
+
+
+def diff_core(con: duckdb.DuckDBPyConnection, b_files: list[Path], a_files: list[Path],
+              key: tuple[str, ...], *, table_root: Path, rule_cols: set[str],
+              tol_default: float = DEFAULT_TOL, tol_by_col: dict[str, float] | None = None,
+              split: str | None = None, nullable: frozenset[str] = frozenset()) -> DiffCore:
+    """두 판의 파일 목록을 grain 으로 FULL OUTER JOIN 해 전 컬럼 × 3종 + 행 추가·삭제를 한 번에 센다.
+
+    CLI(`run_diff`)와 조용한 손실 검사(`daily.silent_loss`, K1-4a)가 같이 쓰는 비교 정본이다. `split` 은
+    조인 뷰 `j` 위의 SQL 술어로, 주면 카운터마다 그 술어에 걸린 수를 `in_split` 으로 함께 센다(같은 한 번의
+    집계 — 컬럼당 질의를 더 쏘지 않는다). `nullable` 은 `key_issues` 참고."""
+    tol_by_col = tol_by_col or {}
+    make_views(con, b_files, a_files)
+    b_types, a_types = column_types(con, "_before"), column_types(con, "_after")
+    hive = hive_keys(a_files, table_root) | hive_keys(b_files, table_root)
+    present = set(b_types) | set(a_types)
+    # 제외 = 운영 메타 + 선언 컬럼이 아닌 하이브 키(`v` 는 곧 판 id, `year` 는 파티션 축).
+    # 선언에 있는 이름(예 `year` 를 진짜 컬럼으로 내는 표)은 하이브 키여도 비교한다.
+    excluded = sorted({c for c in present if is_meta_column(c)}
+                      | ((hive & present) - rule_cols))
+    keep = [c for c in present if c not in excluded]
+    for c in keep:
+        if c.startswith((BEFORE_PREFIX, KEY_PREFIX)) or c in (MARK, IN_AFTER, IN_BEFORE):
+            raise UsageError(f"컬럼 이름이 diff 내부 접두어와 겹친다 — {c!r} "
+                             f"(예약: {BEFORE_PREFIX}* · {KEY_PREFIX}* · {MARK})")
+    missing = [k for k in key if k not in b_types or k not in a_types or k in excluded]
+    if missing:
+        raise UsageError(f"키 컬럼이 양쪽 판에 다 있지 않다 — key={list(key)} "
+                         f"missing={missing} columns={sorted(keep)}")
+    after_cols = [c for c in a_types if c in keep]
+    before_cols = [c for c in b_types if c in keep]
+    compared = [c for c in after_cols if c in set(before_cols)]
+    issues = {"before": key_issues(con, "_before", key, nullable),
+              "after": key_issues(con, "_after", key, nullable)}
+    core = DiffCore(key, a_types, excluded, compared, sorted(set(after_cols) - set(before_cols)),
+                    sorted(set(before_cols) - set(after_cols)), issues, None, 0)
+    if any(v["duplicate_keys"] or v["null_keys"] for v in issues.values()):
+        return core
+    make_join_view(con, key, before_cols, after_cols)
+    counters = _count_all(con, compared, a_types, tol_default, tol_by_col, split=split)
+    core.n_join = counters.pop(("", "n_join"))
+    core.counters = counters
+    return core
+
+
 def run_diff(a: argparse.Namespace) -> tuple[int, dict, str]:
     table_root = a.root / a.table
     mf = load_manifest(table_root)
@@ -371,30 +454,11 @@ def run_diff(a: argparse.Namespace) -> tuple[int, dict, str]:
     try:
         con.execute(f"SET threads = {int(a.threads)}")
         con.execute(f"SET memory_limit = '{a.memory_limit}'")
-        make_views(con, b_files, a_files)
-        b_types, a_types = column_types(con, "_before"), column_types(con, "_after")
-        hive = hive_keys(a_files, table_root) | hive_keys(b_files, table_root)
-        present = set(b_types) | set(a_types)
-        # 제외 = 운영 메타 + 선언 컬럼이 아닌 하이브 키(`v` 는 곧 판 id, `year` 는 파티션 축).
-        # 선언에 있는 이름(예 `year` 를 진짜 컬럼으로 내는 표)은 하이브 키여도 비교한다.
         rule = declared_table(a.table, required=False)
         rule_cols = set(rule.columns) if rule is not None else set()
-        excluded = sorted({c for c in present if is_meta_column(c)}
-                          | ((hive & present) - rule_cols))
-        keep = [c for c in present if c not in excluded]
-        for c in keep:
-            if c.startswith((BEFORE_PREFIX, KEY_PREFIX)) or c in (MARK, IN_AFTER, IN_BEFORE):
-                raise UsageError(f"컬럼 이름이 diff 내부 접두어와 겹친다 — {c!r} "
-                                 f"(예약: {BEFORE_PREFIX}* · {KEY_PREFIX}* · {MARK})")
-        missing = [k for k in key if k not in b_types or k not in a_types or k in excluded]
-        if missing:
-            raise UsageError(f"키 컬럼이 양쪽 판에 다 있지 않다 — key={list(key)} "
-                             f"missing={missing} columns={sorted(keep)}")
-        after_cols = [c for c in a_types if c in keep]
-        before_cols = [c for c in b_types if c in keep]
-        compared = [c for c in after_cols if c in set(before_cols)]
-        only_after = sorted(set(after_cols) - set(before_cols))
-        only_before = sorted(set(before_cols) - set(after_cols))
+        core = diff_core(con, b_files, a_files, key, table_root=table_root, rule_cols=rule_cols,
+                         tol_default=tol_default, tol_by_col=tol_by_col)
+        a_types, compared = core.a_types, core.compared
 
         rep: dict[str, object] = {
             "table": a.table, "root": str(a.root), "before": before, "after": after,
@@ -402,24 +466,20 @@ def run_diff(a: argparse.Namespace) -> tuple[int, dict, str]:
             "after_record": _rec_brief(record_of(mf, after)),
             "key": list(key), "key_source": "--key" if a.key else "rules 선언",
             "tol_default": tol_default, "tol_by_column": tol_by_col,
-            "excluded_columns": excluded, "compared_columns": compared,
-            "columns_only_in_after": only_after, "columns_only_in_before": only_before,
+            "excluded_columns": core.excluded, "compared_columns": compared,
+            "columns_only_in_after": core.only_after, "columns_only_in_before": core.only_before,
         }
-        issues = {"before": key_issues(con, "_before", key),
-                  "after": key_issues(con, "_after", key)}
+        issues = core.key_issues
         rep["key_issues"] = issues
-        bad = [s for s, v in issues.items()
-               if v["duplicate_keys"] or v["null_keys"]]
-        if bad:
+        if core.counters is None:
+            bad = [s for s, v in issues.items() if v["duplicate_keys"] or v["null_keys"]]
             rep["status"] = "key_error"
             rep["gate"] = {"enabled": bool(a.gate), "rc": 1, "reasons": [
                 f"{s}: 중복 키 {issues[s]['duplicate_keys']} · NULL 키 {issues[s]['null_keys']}"
                 for s in bad]}
             return 1, rep, render_markdown(rep)
 
-        make_join_view(con, key, before_cols, after_cols)
-        counters = _count_all(con, compared, a_types, tol_default, tol_by_col)
-        n_join = counters.pop(("", "n_join"))
+        counters, n_join = core.counters, core.n_join
         _explain(con, counters, expect, compared, a_types, tol_default, tol_by_col)
         n_examples = max(0, int(a.max_examples))
         for (col, kind), c in counters.items():
@@ -468,8 +528,11 @@ def _scalar(con: duckdb.DuckDBPyConnection, sql: str) -> int:
 
 
 def _count_all(con: duckdb.DuckDBPyConnection, compared: list[str], a_types: dict[str, str],
-               tol_default: float, tol_by_col: dict[str, float]) -> dict:
-    """한 번의 집계로 전 컬럼 × 3종 + 행 추가·삭제를 센다(컬럼당 질의를 쏘지 않는다)."""
+               tol_default: float, tol_by_col: dict[str, float], *,
+               split: str | None = None) -> dict:
+    """한 번의 집계로 전 컬럼 × 3종 + 행 추가·삭제를 센다(컬럼당 질의를 쏘지 않는다).
+
+    `split` 이 있으면 같은 집계에서 카운터마다 그 술어에 걸린 수를 `in_split` 으로 더 센다."""
     specs: list[tuple[str, str]] = [(c, k) for c in compared for k in KINDS_COLUMN]
     specs += [(ROW_COLUMN, k) for k in KINDS_ROW]
     parts = ["count(*) AS n_join"]
@@ -477,13 +540,19 @@ def _count_all(con: duckdb.DuckDBPyConnection, compared: list[str], a_types: dic
         cond = change_cond(col, kind, numeric=is_numeric(a_types.get(col, "VARCHAR")),
                            tol=tol_by_col.get(col, tol_default))
         parts.append(f"coalesce(sum(CASE WHEN {cond} THEN 1 ELSE 0 END), 0) AS n{i}")
+        if split is not None:
+            parts.append(f"coalesce(sum(CASE WHEN ({cond}) AND coalesce({split}, FALSE) "
+                         f"THEN 1 ELSE 0 END), 0) AS s{i}")
     row = con.execute(f"SELECT {', '.join(parts)} FROM j").fetchone()
     if row is None:
         raise UsageError("집계가 빈 결과를 냈다 — 판이 비었는가")
     out: dict = {("", "n_join"): int(row[0])}
+    step = 1 if split is None else 2
     for i, spec in enumerate(specs):
-        n = int(row[i + 1])
+        n = int(row[1 + i * step])
         out[spec] = {"total": n, "explained": 0, "unexplained": n, "examples": []}
+        if split is not None:
+            out[spec]["in_split"] = int(row[2 + i * step])
     return out
 
 

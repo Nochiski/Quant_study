@@ -149,7 +149,7 @@ uv run --project backend pytest database/tests -q
 | 토 03:30 | `30 18 * * 5` | `backup_raw.sh` — 원장 6 DB 온라인 백업, 금요일 장마감분. 성공 시 최신 1세트만 보관(결정 9, 09-14) | 가동 |
 | 06:00 | `0 21 * * *` | `daily_ledger.sh` — v3 휴장 사본 동기화(`data/calendar/v3/`, 병행 대조용) → 휴장 달력 직접 갱신 `python -m daily.calendar_refresh`(KIS chk-holiday 하루 1콜, 판정 연도 파일 `data/calendar/kis_holidays_<YYYY>.json`·원장 `kis.db.kis_holiday`·보고서 `logs/calendar/<날짜>.json`, K1-9 — 플랜 `docs/plans/2026-10-10-holiday-calendar-direct.md`. 달력을 못 읽으면 D 산출에서 중단) → 키움 마스터 → (월요일 KST, 또는 마지막 성공이 7일을 넘었거나 기록이 없으면) DART 번호표 갱신 `dart_universe.py`(A-01 — 'D 이미 수집' 건너뜀 검사보다 앞. 성공은 런 로그 `source=dart_universe`, 실패는 warn 한 줄이고 체인 rc 는 그대로 — 배포 묶음 5-2) → 대차(ka20068) → KIS 신용 → 저녁 키움 보강 판정 `kw_daily --cover --tr ka10060,ka10014`(T-13 · H1-5 — 전날 21:05 저녁 직행의 D 커버리지를 원장에서 재고, 저녁 직행 게이트와 같은 술어(ka10060 요청 종목 대비 ≥ 0.98 · ka10014 자기 최근 20세션 평균 대비 ≥ 0.80)에 미달인 TR 만 `--fetch --commit` 으로 한 번 다시 받은 뒤 다시 잰다. 그래도 미달이면 소스 단계 실패 → crit · rc 2. 판정은 런 로그 `source=kiwoom_cover`) → DART 재스윕 → 회사 정보 공백 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
-| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:51) → `model_daily.sh`(확정판 rc 0·1 일 때만 fi → 모델 → 일간 엑셀 발송, 발송 장부로 D 당 1건 — N-25 Q0 임시, 실패는 notify.log crit 만·체인 rc 불변. 원천 전환 뒤(PR-9 — `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 그리고 `POSTCLOSE_SEND=1`, 판정 `scripts/postclose_conf.sh`)엔 짓기만 하고, 장 마감 발송 장부 `data/model_db/deliver/sent_model_daily.jsonl` 에 그 D 의 basis=evening 줄이 없을 때만 대체 발송 + warn. 줄이 없는데 런 로그의 그 D 장 마감 엑셀(`postclose_excel`) 런 중 보냈을 수 있는 런(rc 3 — 발송 뒤 장부 기록 실패일 수 있다, B-58 · rc 0 발송 on · rc 를 모름)이 하나라도 있거나 장부·런 로그를 못 읽으면 보내지 않고 crit · rc 5. 상세 `docs/MODEL_DELIVER.md` §2) → `daily_report.py`. 06:00 체인이 아직 원장 락을 쥐고 있으면 끝날 때까지 기다렸다가 이어서 돈다(P9, 시간 한도 없음 — 대기 시작은 notify.log 에 info). 06:00 체인이 일찍 끝나도 08:10 전엔 시작하지 않는다 — KRX 확정 데이터(전날 애프터마켓까지 반영) 공개·T-1 정정(07시 전후)을 기다리는 시각이다. 모델 단계 뒤 장 마감 판 아침 잇기(`postclose_chain.sh morning` — v3 아침 KRX 재반영·두 판 대조, 컷오버 PR-8 ⑧. 확정판 rc 0·1 일 때, 모델 단계 성패와 무관) | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") · 아침 잇기는 PR-8 배포 때 · 아침판 짓기만은 **예정**(원천 전환 10-19, PR-9 설정) |
+| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:51) → `model_daily.sh`(확정판 rc 0·1 일 때만 fi → 모델 → 일간 엑셀 발송, 발송 장부로 D 당 1건 — N-25 Q0 임시, 실패는 notify.log crit 만·체인 rc 불변. 원천 전환 뒤(PR-9 — `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 그리고 `POSTCLOSE_SEND=1`, 판정 `scripts/postclose_conf.sh`)엔 짓기만 하고, 장 마감 발송 장부 `data/model_db/deliver/sent_model_daily.jsonl` 에 그 D 의 basis=evening 줄이 없을 때만 대체 발송 + warn. 줄이 없는데 런 로그의 그 D 장 마감 엑셀(`postclose_excel`) 런 중 보냈을 수 있는 런(rc 3 — 발송 뒤 장부 기록 실패일 수 있다, B-58 · rc 0 발송 on · rc 를 모름)이 하나라도 있거나 장부·런 로그를 못 읽으면 보내지 않고 crit · rc 5. 상세 `docs/MODEL_DELIVER.md` §2) → `daily_report.py`. 06:00 체인이 아직 원장 락을 쥐고 있으면 끝날 때까지 기다렸다가 이어서 돈다(P9, 시간 한도 없음 — 대기 시작은 notify.log 에 info). 06:00 체인이 일찍 끝나도 08:10 전엔 시작하지 않는다 — KRX 확정 데이터(전날 애프터마켓까지 반영) 공개·T-1 정정(07시 전후)을 기다리는 시각이다. 모델 단계 뒤 장 마감 판 아침 잇기(`postclose_chain.sh morning` — v3 아침 KRX 재반영·두 판 대조, 컷오버 PR-8 ⑧. 확정판 rc 0·1 일 때, 모델 단계 성패와 무관). 그 뒤 체인 맨 끝에 조용한 손실 검사(`python -m daily.silent_loss check`, 컷오버 K1-4a — 모델 폐포 표를 직전 거래일 아침 확정판과 대조, 기록형이라 체인 rc 불변, 아래 '조용한 손실 검사') | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") · 아침 잇기는 PR-8 배포 때 · 아침판 짓기만은 **예정**(원천 전환 10-19, PR-9 설정) |
 | 10:30 | `30 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 확정판이 정상이면 그 D 의 엑셀 발송 장부 줄(`data/deliver/sent_model_daily.jsonl`, basis=morning)까지 보고, 없거나 장부를 못 읽으면 crit(B-57, 배포 묶음 5-1 — 손 발송은 사용자 승인 뒤 `scripts/model_daily.sh --date D`). 원천 전환 뒤(PR-9)엔 장 마감 장부(`data/model_db/deliver/sent_model_daily.jsonl`, basis=evening) 줄 또는 아침 장부 줄(대체 발송)을 발송 기록으로 보고, 둘 다 없으면 crit, 어느 장부든 못 읽으면 crit. 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) → 10:30(F-11, 10-06: 빌드가 거래일마다 약 2분씩 길어져 10-03 종료 09:49). 08:10 체인이 원장 락을 기다리는 날엔 이 crit 은 예상된 것이다 — 아래 'DART 완료 판정 실패 · 놓친 확정판' 2번 | 가동 |
 | 15:41 | `41 6 * * 1-5` | `postclose_chain.sh close` — 장 마감 수집(키움 ka10060 KRX, 15:41~16:00) → stage 단독 빌드 → fi → 모델 → 엑셀(그림자 미발송 — 원천 전환 10-19 부터 발송, D 의 엑셀은 이것이 먼저 간다) → v3 그림자 반영. 아래 "장 마감 체인" | **제안**(컷오버 PR-8, 그림자 시작 10-14 에 등록) |
 | 16:30 | `30 7 * * 1-5` | `watchdog.sh postclose_board` — 오늘 장 마감 체인 런 로그(수집 + 단계 5개)가 없거나 실패·미완이면 crit. 세션 예외일·휴장은 정상 | **제안**(컷오버 PR-8) |
@@ -208,7 +208,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 | 모드 | 언제 | 단계(앞이 실패하면 뒤는 안 돈다) | 런 로그 source |
 |---|---|---|---|
-| `close` | 15:41 크론(T = 오늘 KST) | ⓪ 휴장이면 건너뜀 → ① `python -m daily.postclose`(수집기 자체 락, 원장 락 안 기다림 — T-4. rc 3 + 세션 예외일이면 그날 체인 전체 건너뜀 — T-26) → ①' 고정 판 확인(`data/deliver/history/<D'>_morning.json` 이 그 날짜·health ok — 아니면 빌드 락을 잡지 않고 crit, T-7 대체 발송 경로) → [빌드 락] ② stage 단독 빌드 `stg_flow_postclose_kiwoom` + 그 표만 건전성(`stage.health --tables`, 리포트 `logs/health/postclose_stage_<T>.json`) + 장 마감 스냅샷 GC(기록형) → ③ fi 장 마감 판(`--builds-from <D'>_morning.json`, T-2 — 판 manifest 게이트의 `metrics.warn`(FG5, T-37)은 런 로그 `warn:FG5` + warn 한 줄) → ④ 모델 → ⑤ 엑셀(`data/model_db/deliver`) [빌드 락 놓음] → ⑥ `v3_post.sh --basis evening --model-root data/model_db/model --builds-from <D'>_morning.json` (점수 두 표는 여기서만 쓴다) | `kiwoom_postclose`(수집기) · `postclose_stage`·`_fi`·`_model`·`_excel`·`_v3` |
+| `close` | 15:41 크론(T = 오늘 KST) | ⓪ 휴장이면 건너뜀 → ① `python -m daily.postclose`(수집기 자체 락, 원장 락 안 기다림 — T-4. rc 3 + 세션 예외일이면 그날 체인 전체 건너뜀 — T-26) → ①' 고정 판 확인(`data/deliver/history/<D'>_morning.json` 이 그 날짜·health ok — 아니면 빌드 락을 잡지 않고 crit, T-7 대체 발송 경로) + 조용한 손실 관문(K1-4a — 스위치는 셸이 파이썬 없이 읽는다. 꺼져 있으면(지금) 관문을 부르지 않고 통과해 어떤 상태에서도 막지 않고, 켜져 있을 때만 `python -m daily.silent_loss gate --date D'` 가 D' 검사의 미설명·판정 불가·결과 없음·관문 실패에서 같은 자리 crit) → [빌드 락] ② stage 단독 빌드 `stg_flow_postclose_kiwoom` + 그 표만 건전성(`stage.health --tables`, 리포트 `logs/health/postclose_stage_<T>.json`) + 장 마감 스냅샷 GC(기록형) → ③ fi 장 마감 판(`--builds-from <D'>_morning.json`, T-2 — 판 manifest 게이트의 `metrics.warn`(FG5, T-37)은 런 로그 `warn:FG5` + warn 한 줄) → ④ 모델 → ⑤ 엑셀(`data/model_db/deliver`) [빌드 락 놓음] → ⑥ `v3_post.sh --basis evening --model-root data/model_db/model --builds-from <D'>_morning.json` (점수 두 표는 여기서만 쓴다) | `kiwoom_postclose`(수집기) · `postclose_stage`·`_fi`·`_model`·`_excel`·`_v3` |
 | `refill` | `daily_evening.sh` 끝(런 로그·최종 인계 파일 뒤, 키움 rc 0 일 때 — 원장 락을 먼저 놓는다) | ⑥ 결과와 상관없이 늘 점수 없는 7표 `v3_post.sh --basis evening --no-scores --builds-from <D'>_morning.json`(QL-F2 · T-38, compat 만). 16:00 컷오프 종목을 21:05 값으로 채우고, 장 마감 판이 없는 날(판 실패·세션 예외일)엔 그날 v3 T 행의 유일한 경로다. 부르기 전에 고정 판의 날짜·health 를 본다 — 쓸 수 없으면 v3_post 를 부르지 않고 crit(compat 은 health 를 보지 않는다, P1) | `postclose_v3_refill` |
 | `morning` | `daily_build.sh` 가 확정판(rc 0·1)·모델 단계 뒤 | ⓐ `v3_post.sh --date D --basis morning --builds-from <D>_morning.json`(compat 만, 반영 표는 compat 이 고른다 — T-34. 고정 판 health 가 ok 가 아니면 부르지 않고 crit) ⓑ 그날 장 마감 모델 판이 있으면 두 판 대조 `python -m daily.board_compare`(PR-7). 둘은 서로 막지 않는다. 대조 rc 1 은 이번 실행이 쓴 `data/model_db/compare/<D>.json` 이 불일치 판정(verdict fail)일 때만 `mismatch`(warn), 그 밖의 rc 1 은 실패. 그날 수집기 런(`kiwoom_postclose`)이 아예 없으면 15:41 크론 누락이라 끝 알림이 info 대신 warn | `postclose_v3_morning` · `postclose_compare` |
 
@@ -359,6 +359,39 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 
 입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —
 보고 누락 판정은 워치독(`watchdog.sh`)의 몫이다(플랜 v2 §2-1).
+
+### 조용한 손실 검사 — `python -m daily.silent_loss` (컷오버 K1-4a)
+
+08:10 체인(`daily_build.sh`)의 맨 끝 — 확정판·모델 단계·장 마감 판 아침 잇기가 끝난 뒤 이어서(시간 한도 없음, P9) — 모델 폐포
+표를 직전 거래일 아침 확정판과 대조해 '설명 안 되는 값→NULL·행 삭제·available_date 변경'을 센다(로드맵 K1-4 · N-42 Q4).
+확정판이 선 날(build_morning rc 0·1)에만 돈다. 비교 엔진은 `scripts/equity_diff.py` 의 `diff_core` 하나다 — 갈래 정의·비용 실측은
+`docs/EQUITY_GATES.md` §12-6, 규칙은 모듈 머리 주석이 정본이다.
+
+- **대상(모델 폐포)**: fi 직접 원천(`factor_inputs.queries.TABLE_SOURCES`)에서 equity 선언 입력(`RULES[t].inputs`)을 따라 닫은
+  stage·equity 표(원장 제외). 코드로 만든다 — 10-10 기준 53표(equity 18 · stage 35).
+- **판**: `data/deliver/history/<D>_morning.json` 대 직전 거래일(판정 달력) `<D'>_morning.json` 의 판. 판이 GC 돼 없으면 그 표는
+  판정 불가(P1).
+- **갈래**: 새 행·NULL→값은 정상 · 재수집 창(D 와 그 앞 10세션, `ledger_health.KRX_RECHECK_SESSIONS`) 안 행의 값 변경·값→NULL 은
+  '재수집 창' · 두 판의 규칙 판본이 다른 표는 '규칙 변경' · 그 밖의 값→NULL·행 삭제·available_date 변경은 **미설명**. 앞의 둘(창·
+  규칙)은 설명됨으로 보되 수를 남긴다.
+- **결과**: `logs/silent_loss/<D>.json`(표별 갈래 수·미설명 표본 상위 5) · 런 로그 source `silent_loss`(상태 ok · unexplained ·
+  undecidable · blocked — unexplained·undecidable 은 일일 리포트 '주의 런', blocked 는 crit) · 미설명 > 0 또는 판정 불가면 notify
+  warn 한 줄 '조용한 손실 기록 D=…'. 모듈이 rc 0~3 밖으로 죽으면 `daily_build.sh` 가 warn 1건. 체인 rc·요약 등급은 그대로다(요약에
+  '조용한 손실 검사 종료 rc=N' 줄).
+- **차단 전환**: 설정 한 줄 `config/silent_loss.env` 의 `SILENT_LOSS_BLOCK=1`(저장소 값 0 — 기록형). 켜면 미설명 > 0 또는 판정
+  불가 표(N-42 Q4 '필수 검사 SKIP = 실패')가 crit 한 줄 '조용한 손실 차단 D=…'(X-2 세는 목록)이 되고, 그 D 의 아침 확정판을 고정해
+  읽는 15:41 장 마감 체인 close 가 고정 판 확인 뒤·빌드 락 전에 멈춘다(`gate` — 결과 파일이 없거나 못 읽거나 관문이 죽어도 막는다).
+  꺼져 있으면 체인이 스위치를 셸에서 읽고(`scripts/postclose_conf.sh` `silent_loss_block_on`) 관문을 아예 부르지 않는다. 언제 켜나:
+  **그림자 시작 10-14 부터 2주 기록한 뒤**(정본 K1-4a · N-42 Q4). 켜는 것은 이 한 줄을 바꿔 배포하는 일이다.
+- **비용**(로컬 실측 — §12-6): equity 는 파티션 해시가 같은 파티션을 건너뛰어 수 초, stage 는 판 기록에 파티션 해시가 없어 표
+  전체를 조인한다(stg_fin 모양 1,540만 행 20.5초·RSS 5.05GB, `--memory-limit 6GB`). 서버 어림 2~4분.
+
+```bash
+# 손으로 한 번(결과 파일·런 로그·알림 없이, 결과를 다른 곳에) — 과거 D 도 그날 인계 이력의 판이 GC 전이면 된다
+PYTHONPATH=src .venv/bin/python -m daily.silent_loss check --date 20261008 --dry-run --out /tmp/silent_loss_20261008.json
+# 관문만 — 차단형일 때 그 D 결과로 rc 1
+PYTHONPATH=src .venv/bin/python -m daily.silent_loss gate --date 20261008
+```
 
 ### 연속 창 판정 — `python -m daily.window_judge` (컷오버 X-2)
 

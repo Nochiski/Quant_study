@@ -41,9 +41,15 @@ BuildRecord 가 쌓이고 판 디렉터리는 stage 와 같은 상대 경로)를
   equity-pass --logs DIR
       출력 루트 equity 판이 온전한가 — equity 를 지은 마지막 패스(summary.tsv 에 equity 행이 있는
       가장 큰 passN)의 표가 전부 rc 0 이면 0, 아니면 1(사유 stderr). 그런 패스가 없어도 1.
-  board-summary --compare-dir DIR --dates T1,T2,… [--since EPOCH]
+  board-summary --compare-dir DIR --dates T1,T2,… [--since EPOCH] [--summary FILE]
+                [--postclose-dir DIR] [--d-prime D']
       날짜별 두 판 대조 결과(`daily.board_compare` 의 `<T>.json`) 집계 TSV — verdict · rc ·
-      미설명 수 · spec 별 Spearman. --since 보다 오래된 파일은 이번 패스 것이 아니라 '없음'.
+      미설명 수 · spec 별 Spearman · 그날 실패 단계 · 재생 원장 결손. --since 보다 오래된 파일은 이번
+      패스 것이 아니라 '없음'. 실패 단계 = 패스 summary.tsv(--summary)에서 `<단계>@T` 의 rc≠0
+      (skip 은 실패가 아니다)과 그 T 의 연구 판 D'(`fi_r@D'` — 첫 T 의 D' 는 --d-prime, 다음 T 는 앞
+      T)가 실패했으면 그것. 결과가 '없음'인 날의 사유는 실패 단계가 있으면 '실패 단계 X', 없으면
+      '미실행'(앞 단계 건너뜀·준비 실패). 재생 원장 결손 = `<postclose-dir>/<T>/postclose.db` 의
+      `replay_source`(scripts/replay_evening.py) n_missing · n_candidates_missing(파일·행이 없으면 '-').
       끝 줄은 합계 한 줄. rc 0 = 모든 날 pass, 아니면 1.
 
 rc: 0 정상(compare 는 전부 같음) · 1 compare 다름·한쪽 없음(equity-pass 온전하지 않음 ·
@@ -54,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from collections import Counter
 from datetime import UTC, datetime
@@ -353,16 +360,68 @@ def equity_pass(logs: Path) -> int:
     return 1
 
 
-def board_summary(compare_dir: Path, dates: list[str], since: float) -> int:
-    print("date\tverdict\trc\tn_unexplained\tn_unexplained_tickers\tspearman_min\tspearman\treasons")
+# 재생 원장의 재생 표시 표 — scripts/replay_evening.py REPLAY_TABLE 과 같다(이 도구는 그 모듈을 읽지 않는다)
+REPLAY_SOURCE_TABLE = "replay_source"
+
+
+def _failed_steps(summary: Path) -> dict[str, list[str]]:
+    """패스 summary.tsv 의 날짜 단계(`<단계>@<날짜>`) 중 rc≠0 — {날짜: [단계…]}(실행 순서).
+    skip 은 돌지 않은 것이라 실패가 아니다."""
+    out: dict[str, list[str]] = {}
+    for ln in summary.read_text(encoding="utf-8").splitlines()[1:]:
+        r = ln.split("\t")
+        if len(r) < 3 or r[1] != NONE or "@" not in r[0] or r[2] in ("0", "skip"):
+            continue
+        out.setdefault(r[0].rsplit("@", 1)[1], []).append(r[0])
+    return out
+
+
+def _replay_missing(postclose_dir: Path | None, d: str) -> tuple[str, str]:
+    """(n_missing, n_candidates_missing) — 재생 원장이 없거나 그날 행이 없으면 NONE."""
+    path = None if postclose_dir is None else postclose_dir / d / "postclose.db"
+    if path is None or not path.is_file():
+        return NONE, NONE
+    try:
+        con = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
+        try:
+            row = con.execute(f'SELECT n_missing, n_candidates_missing FROM "{REPLAY_SOURCE_TABLE}" '
+                              "WHERE dt = ?", (d,)).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return NONE, NONE
+    return (NONE, NONE) if row is None else (str(row[0]), str(row[1]))
+
+
+def board_summary(compare_dir: Path, dates: list[str], since: float,
+                  summary: Path | None = None, postclose_dir: Path | None = None,
+                  d_prime: str | None = None) -> int:
+    print("date\tverdict\trc\tn_unexplained\tn_unexplained_tickers\tspearman_min\tspearman\t"
+          "failed_steps\tn_missing\tn_candidates_missing\treasons")
+    if summary is not None and not summary.is_file():
+        raise ToolError(f"패스 summary.tsv 가 없다: {summary}")
+    failed_by_day = {} if summary is None else _failed_steps(summary)
     count: Counter[str] = Counter()
-    n_unexp = 0
+    n_unexp = n_failed_days = 0
     worst: tuple[float, str, str] | None = None
-    for d in dates:
+    for i, d in enumerate(dates):
+        # 그날 실패 단계 — 그 T 의 단계 + 그 T 의 연구 판 D'(fi_r@D') 가 실패했으면 그것(앞에 둔다)
+        dp = dates[i - 1] if i else d_prime
+        failed = [f"fi_r@{dp}"] if dp and f"fi_r@{dp}" in failed_by_day.get(dp, []) else []
+        failed += failed_by_day.get(d, [])
+        shown_failed = ",".join(failed) or NONE
+        missing = "\t".join(_replay_missing(postclose_dir, d))
         path = compare_dir / f"{d}.json"
         if not path.exists() or path.stat().st_mtime < since:
             count["없음"] += 1
-            print(f"{d}\t없음" + f"\t{NONE}" * 5 + "\t이번 패스의 대조 결과가 없다")
+            if summary is None:
+                why = "이번 패스의 대조 결과가 없다"
+            elif failed:
+                n_failed_days += 1
+                why = f"실패 단계 {', '.join(failed)} — 이번 패스의 대조 결과가 없다"
+            else:
+                why = "미실행 — 이번 패스의 대조 결과가 없고 그날 실패 단계도 없다(앞 단계 건너뜀·준비 실패)"
+            print(f"{d}\t없음" + f"\t{NONE}" * 5 + f"\t{shown_failed}\t{missing}\t{why}")
             continue
         rep = _load(path)
         verdict = str(rep.get("verdict"))
@@ -381,10 +440,13 @@ def board_summary(compare_dir: Path, dates: list[str], since: float) -> int:
         print(f"{d}\t{verdict}\t{rep.get('rc')}\t{NONE if n is None else n}\t"
               f"{rep.get('n_unexplained_tickers', NONE)}\t"
               f"{NONE if not vals else f'{vals[0][0]:.4f}'}\t{shown or NONE}\t"
+              f"{shown_failed}\t{missing}\t"
               f"{'; '.join(str(r) for r in reasons) or NONE}")
     low = NONE if worst is None else f"{worst[0]:.4f}({worst[1]} {worst[2]})"
+    none_split = ("" if summary is None or not count["없음"] else
+                  f"(실패 단계 {n_failed_days} · 미실행 {count['없음'] - n_failed_days})")
     print(f"대조 {len(dates)}일 — pass {count['pass']} · fail {count['fail']} · "
-          f"error {count['error']} · 없음 {count['없음']} · 미설명 합 {n_unexp:,} · "
+          f"error {count['error']} · 없음 {count['없음']}{none_split} · 미설명 합 {n_unexp:,} · "
           f"Spearman 최저 {low}")
     return 0 if count["pass"] == len(dates) else 1
 
@@ -426,6 +488,10 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--dates", required=True, help="쉼표 목록 YYYYMMDD")
     b.add_argument("--since", type=float, default=0.0,
                    help="이보다 오래된 결과 파일은 '없음'(epoch 초)")
+    b.add_argument("--summary", type=Path, help="그 패스 summary.tsv — 날짜별 실패 단계(rc≠0)")
+    b.add_argument("--postclose-dir", type=Path,
+                   help="재생 원장 폴더(<T>/postclose.db) — replay_source 의 결손 수")
+    b.add_argument("--d-prime", help="첫 T 의 연구 판 D' — 그 fi_r 실패를 첫 T 에 싣는다")
     a = ap.parse_args(argv)
 
     def split(v: str) -> list[str]:
@@ -442,7 +508,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "equity-pass":
             return equity_pass(a.logs)
         if a.cmd == "board-summary":
-            return board_summary(a.compare_dir, split(a.dates), a.since)
+            return board_summary(a.compare_dir, split(a.dates), a.since, a.summary,
+                                 a.postclose_dir, a.d_prime)
         return compare(a.a, a.b, a.date, a.basis)
     except ToolError as e:
         print(f"replay_tool {a.cmd}: {e}", file=sys.stderr)

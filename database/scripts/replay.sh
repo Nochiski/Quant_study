@@ -68,9 +68,10 @@
 #     --postclose-stage-root·--candidates-root 출력 루트) ④ 모델 장 마감 판 ⑤ 연구 판 T(fi 아침판 --replay + 모델)
 #     ⑥ 두 판 대조(daily.board_compare --replay → <out>/data/model_db/compare/<T>.json). 앞 단계가 실패하면 그 T
 #     의 뒤 단계는 건너뛰되 ⑤ 는 돈다(다음 T 의 연구 판 D'). 연구 판 D' 가 없는 T 는 ②~④·⑥ 을 건너뛴다.
-#   집계: <out>/logs/passN/board.tsv — 날짜별 verdict · rc · 미설명 수 · spec 별 Spearman, 끝 줄 합계(replay_tool.py
-#     board-summary). 재생 표시는 postclose.db replay_source · 인계 이력 replay · fi 판 manifest replay(자른 날) ·
-#     대조 결과 replay: true 에 남는다.
+#   집계: <out>/logs/passN/board.tsv — 날짜별 verdict · rc · 미설명 수 · spec 별 Spearman · 그날 rc≠0 단계(그 T 의
+#     연구 판 D' fi_r 포함) · 재생 원장 결손(replay_source n_missing·n_candidates_missing), 결과가 없는 날의 사유는
+#     '실패 단계 X' 또는 '미실행', 끝 줄 합계(replay_tool.py board-summary). 재생 표시는 postclose.db
+#     replay_source · 인계 이력 replay · fi 판 manifest replay(자른 날) · 대조 결과 replay: true 에 남는다.
 #   재생으로 못 보는 것: 도착 시각·락·크론·16:00 컷오프(대상인데 21:05 원장에 없는 종목만 T 가격 없음)·정규장
 #     수급 정의(재생 T 수급과 연구 판 수급이 같은 21:05 원장에서 와 차이가 구조적으로 0 — 수급 상한은 재생으로 못
 #     정한다), 그날 마스터(security·corp)·equity 소급 재판정(adj_factor 기준가 창이 asof 뒤 세션을 봄 · universe_daily
@@ -447,7 +448,8 @@ print(",".join(o))' 2>> "$L/run.txt"); then
   brief="${brief%%" · fi_r@"*}"                 # 단계별 ok 목록은 summary.tsv 에 — 요약 줄에는 equity 만
   if has board; then
     board=$("$PY" "$TOOL" board-summary --compare-dir "$MDB/compare" \
-              --dates "$(echo "$ts" | paste -sd, -)" --since "$T0")
+              --dates "$(echo "$ts" | paste -sd, -)" --since "$T0" --summary "$SUM" \
+              --postclose-dir "$PCR" --d-prime "$dp0")
     printf '%s\n' "$board" > "$L/board.tsv"
     printf '%s\n' "$board"
     LINE="replay pass$PASS basis=evening D'=$dp0 T=$(echo "$ts" | head -1)..$(echo "$ts" | tail -1)"

@@ -308,7 +308,10 @@ def test_evening_t_prices_are_the_2105_values(replayed) -> None:
 def test_board_summary_lists_the_day(replayed) -> None:
     rows = _tsv(replayed.log / "board.tsv")
     assert rows[0][:4] == ["date", "verdict", "rc", "n_unexplained"]
+    assert rows[0][7:] == ["failed_steps", "n_missing", "n_candidates_missing", "reasons"]
     assert rows[1][0] == T_S
+    # 실패 단계 없음 · 재생 원장 결손 = replay_source(대상 중 원장에 없는 L·K·상장폐지 3, 후보 0)
+    assert rows[1][7:10] == ["-", "3", "0"]
     assert rows[-1][0].startswith("대조 1일")
     line = (replayed.log / "summary.txt").read_text(encoding="utf-8")
     for word in ("basis=evening", f"D'={DP_S}", f"T={T_S}..{T_S}(1일)", "대조 1일"):
@@ -344,6 +347,11 @@ def test_dates_range_keeps_going_past_a_failed_day_and_a_second_pass_reproduces(
     assert rc["fi_e@" + T_S] == "0"
     board = _tsv(log / "board.tsv")
     assert [x[0] for x in board[1:3]] == [T_S, "20260930"] and board[2][1] == "없음"
+    # 결과가 없는 날의 사유는 실패 단계(② rc 2 · ⑤ 연구 판 T+1 — 현판에 T+1 수정주가·수급 행이 없다) —
+    # 재생 원장을 못 썼으니 결손 수는 '-'
+    assert board[2][7:10] == ["postclose@20260930,fi_r@20260930", "-", "-"]
+    assert board[2][10].startswith("실패 단계 postclose@20260930")
+    assert "없음 1(실패 단계 1 · 미실행 0)" in board[-1][0]
     assert "dt=20260930" in (log / "postclose_20260930.log").read_text(encoding="utf-8")
 
     r2 = _run(w.home, "--out", str(w.out), "--basis", "evening", "--date", T_S, "--steps", "board",
@@ -562,8 +570,75 @@ def test_board_summary_counts_verdicts_and_skips_stale_files(tmp_path) -> None:
         ["20261001", "error", "2", "-"], ["20261002", "없음", "-", "-"],
         ["20261005", "없음", "-", "-"]]
     assert rows[1][5] == "0.9820" and rows[1][6] == "scope@1.0=0.9910,v2@1.0=0.9820"
-    assert rows[3][7] == "판 없음"
+    assert rows[3][10] == "판 없음"
+    # --summary 가 없으면 실패 단계·원장 결손은 모른다('-')
+    assert {tuple(r[7:10]) for r in rows[1:6]} == {("-", "-", "-")}
     assert rows[-1][0] == ("대조 5일 — pass 1 · fail 1 · error 1 · 없음 2 · 미설명 합 3 · "
                            "Spearman 최저 0.9500(scope@1.0 20260930)")
     one = _py(str(TOOL), "board-summary", "--compare-dir", str(d), "--dates", "20260929")
     assert one.returncode == 0
+
+
+def _summary_tsv(path: Path, steps: list[tuple[str, str]]) -> Path:
+    path.write_text("step\ttable\trc\tsec\tbuild_id\tcontent_hash\tn_rows\n" + "".join(
+        f"{s}\t-\t{rc}\t1\t-\t-\t-\n" for s, rc in steps), encoding="utf-8")
+    return path
+
+
+def test_board_summary_tells_a_failed_step_from_a_day_not_run(tmp_path) -> None:
+    """PR-8b 리뷰 MINOR-3 — 결과가 없는 날의 사유가 '실패 단계 X'(그날 rc≠0 단계, 그 T 의 연구 판 D'
+    fi_r 포함)인지 '미실행'인지 board.tsv 에서 갈린다. 재생 원장 결손은 replay_source 에서 싣는다."""
+    d = tmp_path / "compare"
+    d.mkdir()
+    (d / "20260929.json").write_text(json.dumps(
+        {"verdict": "fail", "rc": 1, "n_unexplained": 2, "reasons": ["미설명 2건"],
+         "model": {"scope@1.0": {"spearman": 0.99}}}), encoding="utf-8")
+    summary = _summary_tsv(tmp_path / "summary.tsv", [
+        ("fi_r@20260928", "0"),
+        ("postclose@20260929", "0"), ("pc_stage@20260929", "0"), ("fi_e@20260929", "0"),
+        ("model_e@20260929", "0"), ("fi_r@20260929", "0"), ("model_r@20260929", "0"),
+        ("compare@20260929", "1"),
+        ("postclose@20260930", "0"), ("pc_stage@20260930", "0"), ("fi_e@20260930", "1"),
+        ("model_e@20260930", "skip"), ("fi_r@20260930", "1"), ("model_r@20260930", "skip"),
+        ("compare@20260930", "skip"),
+        # 연구 판 D'(fi_r@20260930) 실패 — ②~④·⑥ 건너뜀
+        ("postclose@20261001", "skip"), ("pc_stage@20261001", "skip"), ("fi_e@20261001", "skip"),
+        ("model_e@20261001", "skip"), ("fi_r@20261001", "0"), ("model_r@20261001", "0"),
+        ("compare@20261001", "skip")])               # 20261002 — 한 단계도 돌지 않았다
+    with summary.open("a", encoding="utf-8") as f:
+        f.write("fi_e@20260929\tfi_prices\t7\t-\tb\th\t1\n")     # 표 행은 단계가 아니다
+    pcr = tmp_path / "postclose_replay"
+    for day, miss, cand in (("20260929", 3, 0), ("20260930", 5, 2)):
+        (pcr / day).mkdir(parents=True)
+        con = sqlite3.connect(pcr / day / "postclose.db")
+        con.execute("CREATE TABLE replay_source (dt TEXT PRIMARY KEY, n_missing INTEGER, "
+                    "n_candidates_missing INTEGER)")
+        con.execute("INSERT INTO replay_source VALUES (?, ?, ?)", (day, miss, cand))
+        con.commit()
+        con.close()
+    p = _py(str(TOOL), "board-summary", "--compare-dir", str(d), "--dates",
+            "20260929,20260930,20261001,20261002", "--summary", str(summary),
+            "--postclose-dir", str(pcr), "--d-prime", "20260928")
+    assert p.returncode == 1, p.stderr
+    lines = p.stdout.splitlines()
+    rows = {r[0]: r for r in (ln.split("\t") for ln in lines[1:-1])}
+    # 결과가 있는 날도 그날 rc≠0 단계를 싣는다
+    assert rows["20260929"][1] == "fail"
+    assert rows["20260929"][7:] == ["compare@20260929", "3", "0", "미설명 2건"]
+    assert rows["20260930"][7:10] == ["fi_e@20260930,fi_r@20260930", "5", "2"]
+    assert rows["20260930"][10].startswith("실패 단계 fi_e@20260930, fi_r@20260930")
+    # 그 T 의 연구 판 D'(앞 T 의 fi_r)가 실패해 건너뛴 날 — 그 단계가 실패 단계로 보인다
+    assert rows["20261001"][7:10] == ["fi_r@20260930", "-", "-"]
+    assert rows["20261001"][10].startswith("실패 단계 fi_r@20260930")
+    # 그날 실패 단계가 없다 — 미실행
+    assert rows["20261002"][7:10] == ["-", "-", "-"] and rows["20261002"][10].startswith("미실행")
+    assert "없음 3(실패 단계 2 · 미실행 1)" in lines[-1]
+    # 첫 T 의 연구 판 D' 는 --d-prime 으로 찾는다
+    first = _summary_tsv(tmp_path / "first.tsv", [("fi_r@20260928", "1"),
+                                                  ("postclose@20260929", "skip")])
+    p = _py(str(TOOL), "board-summary", "--compare-dir", str(tmp_path / "none"), "--dates",
+            "20260929", "--summary", str(first), "--d-prime", "20260928")
+    assert p.stdout.splitlines()[1].split("\t")[7] == "fi_r@20260928"
+    gone = _py(str(TOOL), "board-summary", "--compare-dir", str(d), "--dates", "20260929",
+               "--summary", str(tmp_path / "none.tsv"))
+    assert gone.returncode == 2 and "summary.tsv" in gone.stderr

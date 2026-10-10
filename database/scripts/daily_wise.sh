@@ -12,6 +12,7 @@
 set -o pipefail
 cd "$HOME/quant-ledger"
 export QL_HOME="$HOME/quant-ledger"
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 . scripts/raw_lock.sh
 raw_lock_acquire daily_master "" || exit $?
 LOG="logs/daily_wise_$(TZ=Asia/Seoul date +%m%d).log"

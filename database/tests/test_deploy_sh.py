@@ -17,13 +17,15 @@
 적는다. 락 파일은 `QL_BUILD_LOCK_FILE` 임시 경로라 운영 락 `/tmp/quant_ledger_build.lock` 을
 건드리지 않는다. 맥에는 flock 명령이 없어 fcntl.flock 으로 같은 일을 하는 대역을 두고(커널
 락이라 의미가 같다), 진짜 flock 이 있으면(서버·CI 우분투) 그것을 쓴다. 테스트는 `--skip-tests`
-로 ③(uv pytest)을 건너뛴다.
+로 ③(uv pytest)을 건너뛴다. 가짜 원격에는 비밀 파일 `quant-ledger/.env`(빈 더미, 600)를 기본으로
+둔다 — ⑧ 비밀 파일 검사(RG-C7-4)를 통과시키기 위해서다. 실제 비밀 파일은 없다.
 """
 from __future__ import annotations
 
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -172,6 +174,9 @@ def _scenario(tmp_path: Path) -> Scenario:
     _commit(repo, env, "database/src/feat.py", "f = 1\n", "B")
     _git(repo, env, "merge", "-q", "--no-ff", "-m", "merge main", "main")
     head = _git(repo, env, "rev-parse", "HEAD")
+    secret = remote / ROOT / ".env"          # ⑧ 비밀 파일 — 빈 더미, 권한 600
+    secret.write_text("", encoding="utf-8")
+    secret.chmod(0o600)
     return Scenario(repo, remote, lock, log, env, base, hotfix, head)
 
 
@@ -229,6 +234,7 @@ def test_apply_passes_when_server_rev_is_ancestor_and_holds_lock(tmp_path: Path)
     assert r.deployed is not None and r.deployed["rev"] == sc.head
     assert "rollback_from" not in r.deployed
     assert f"서버 {sc.base} 가 HEAD" in r.out
+    assert "비밀 파일: " in r.out and "권한 600" in r.out
     assert _lock_free(sc.lock)
 
 
@@ -353,3 +359,60 @@ def test_dry_run_passing_checks_leaves_lock_free(tmp_path: Path) -> None:
     assert "--apply 라면 거부" not in r.out
     assert r.pushes == [] and r.writes == []
     assert _lock_free(sc.lock)
+
+
+# ── ⑧ 비밀 파일(RG-C7-4) ─────────────────────────────────────────────────────
+def _break_secret(sc: Scenario, how: str) -> None:
+    secret = sc.remote / ROOT / ".env"
+    secret.unlink()
+    if how == "mode644":
+        secret.write_text("", encoding="utf-8")
+        secret.chmod(0o644)
+    elif how == "symlink":                   # 다른 시스템의 비밀 파일을 가리키는 링크
+        other = sc.remote / "other-system" / ".env"
+        other.parent.mkdir()
+        other.write_text("", encoding="utf-8")
+        other.chmod(0o600)
+        secret.symlink_to(other)
+
+
+def test_apply_refuses_when_secret_file_not_ready(tmp_path: Path) -> None:
+    """서버 `~/quant-ledger/.env` 가 없거나·600 이 아니거나·링크면 rsync 전에 거부(rc 2) —
+    체인 스크립트가 QL_ENV 를 그 경로로 고정하므로 그대로 밀면 다음 체인이 비밀을 못 읽는다.
+    rsync 실전송 0 · DEPLOYED.json 그대로 · 빌드 락은 잡지도 않는다(락보다 먼저 판정)."""
+    for how, needle in (("missing", "가 없다"), ("mode644", "권한이 644"),
+                        ("symlink", "일반 파일이 아니다(SYMLINK)")):
+        sc = _scenario(tmp_path / how)
+        _server_rev(sc, sc.base)
+        _break_secret(sc, how)
+        r = _deploy(sc, "--apply", "--skip-tests")
+        assert r.rc == 2, (how, r.out + r.err)
+        assert needle in r.err, (how, r.err)
+        assert "서버 비밀 파일 ~/quant-ledger/.env" in r.err
+        assert "README '운영 (P6) → 비밀 파일'" in r.err
+        assert r.pushes == [] and r.writes == []
+        assert not any("flock" in c for _s, c in r.ssh)          # 락 명령 전에 멈췄다
+        assert r.deployed is not None and r.deployed["rev"] == sc.base
+
+
+def test_dry_run_reports_secret_file_problem(tmp_path: Path) -> None:
+    """dry-run 도 같은 검사를 하고 결과만 출력한다(rc 0, 실전송·쓰기 0)."""
+    sc = _scenario(tmp_path)
+    _server_rev(sc, sc.base)
+    _break_secret(sc, "missing")
+    r = _deploy(sc)
+    assert r.rc == 0, r.out + r.err
+    assert "(dry-run) --apply 라면 거부: 서버 비밀 파일 ~/quant-ledger/.env 가 없다" in r.out
+    assert "README '운영 (P6) → 비밀 파일'" in r.out
+    assert r.rsync and r.pushes == [] and r.writes == []
+
+
+def test_secret_check_never_reads_content(tmp_path: Path) -> None:
+    """⑧ 은 존재·권한만 본다 — `.env` 를 다루는 원격 명령에 내용을 읽는 명령이 없다."""
+    sc = _scenario(tmp_path)
+    _server_rev(sc, sc.base)
+    r = _deploy(sc)
+    cmds = [c for _s, c in r.ssh if ".env" in c]
+    assert len(cmds) == 1, r.ssh
+    assert re.search(r"\b(cat|grep|head|tail|sed|awk|cut|source|xargs|less|more|od|xxd)\b",
+                     cmds[0]) is None, cmds[0]

@@ -25,11 +25,12 @@ SCRIPTS = DB_ROOT / "scripts"
 OLD = "kael-system-v3"                 # 옛 시스템 폴더 이름
 FIXED = 'export QL_ENV="$HOME/quant-ledger/.env"'
 
-# 크론이 부르는 진입점(README '운영 (P6)' 크론 원문·제안 블록) + 손 발송 진입점 model_daily.sh
-# (README: 손 발송은 `scripts/model_daily.sh --date D` — 체인과 같은 환경으로 돌아야 한다).
+# 크론이 부르는 진입점(README '운영 (P6)' 크론 원문·제안 블록) + 손으로 단독 실행하는 진입점
+# model_daily.sh(손 발송 `scripts/model_daily.sh --date D`)·daily_wise.sh·dart_company_gap.sh
+# (README 'DART 완료 판정 실패' 복구 절차). 체인 안에서는 부모와 같은 값이라 해가 없다.
 ENTRY_POINTS = ("daily_ledger.sh", "daily_build.sh", "daily_evening.sh", "build_evening.sh",
                 "watchdog.sh", "backup_raw.sh", "gc.sh", "wics_weekly.sh", "postclose_chain.sh",
-                "model_daily.sh")
+                "model_daily.sh", "daily_wise.sh", "dart_company_gap.sh")
 
 
 def _sentinel_home(tmp_path: Path) -> Path:

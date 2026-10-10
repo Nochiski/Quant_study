@@ -1014,9 +1014,22 @@ def test_cli_send_uses_transport_and_errors(world: dict[str, Path], tmp_path: Pa
                    *_roots(world, tmp_path)])
     assert rc == 2
     assert cli.main(["model-weekly", "--week", "2026W39", *_roots(world, tmp_path)]) == 2
+    nokey = tmp_path / "nokey.env"
+    nokey.write_text("OTHER=x\n", encoding="utf-8")
+    rc = cli.main(["model-daily", "--date", "20260925", "--basis", "morning", "--dry-run",
+                   "--env-file", str(nokey), *_roots(world, tmp_path)])
+    assert rc == 1                                                       # 비밀 키 없음
+    capsys.readouterr()
+    # 비밀 파일 없음·QL_ENV 미설정은 설정 오류 rc 2 — rc 3(예상 밖 예외)이 아니다(RG-C7-4)
     rc = cli.main(["model-daily", "--date", "20260925", "--basis", "morning", "--dry-run",
                    "--env-file", str(tmp_path / "none.env"), *_roots(world, tmp_path)])
-    assert rc == 1                                                       # 비밀 키 없음
+    err = capsys.readouterr().err
+    assert rc == 2 and "비밀 파일 설정 오류" in err and "none.env" in err
+    monkeypatch.delenv("QL_ENV", raising=False)
+    rc = cli.main(["model-daily", "--date", "20260925", "--basis", "morning", "--dry-run",
+                   *_roots(world, tmp_path)])
+    err = capsys.readouterr().err
+    assert rc == 2 and "비밀 파일 설정 오류" in err and "QL_ENV" in err
 
 
 # ── 발송 장부·재발송 가드(N-25 Q9) · 생성 실패 rc 3(E-13) ──────────────────────────

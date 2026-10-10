@@ -49,7 +49,7 @@ T-42, 로드맵 §8 K3-2·K3-3.
     스테이징은 본 파일 사본이라 'D 행이 있다' 만으로는 옛 D 행에도 참이 된다. 없으면 07:00 브리핑이 D−1 장을
     오늘 장으로 보고한다(DEFECT-C02). 비율 하한은 두지 않는다(새 정지 조건이라)
   · 표마다 반영 범위 행 > 0 — 점수 두 표는 `score_date = D` 행(점수 행 > 0)
-  · 복원 뒤 첫 제자리 반영은 `--full` 만(QL-I — 아래). 그림자는 본 파일에 쓰지 않으므로 보지 않는다
+  · 복원 뒤 첫 제자리 반영은 복원 뒤에 계산된 것만(QL-I · T-46 — 아래). 그림자는 본 파일에 쓰지 않으므로 보지 않는다
 
 복원 기록(QL-I · T-42 — 되돌리기, `compat.v3_restore`): 표를 고정 백업으로 되돌린 COMMIT 은 `_compat_meta` 에
   basis = `RESTORE_BASIS` 인 기록 1행을 함께 남긴다(되돌린 표는 기록의 `tables` — 기본은 점수 두 표를 뺀 7표). 이
@@ -58,10 +58,15 @@ T-42, 로드맵 §8 K3-2·K3-3.
     본 파일을 설명하지 않는다. 가격 등 7표는 백업 시점으로 돌아갔고, 남겨 둔 점수 두 표는 복원 뒤 v3 스코어링이 같은
     키를 `INSERT OR REPLACE` 로 덮는다. 기록 자체는 지우지 않는다(이력).
   · 복원 기록은 반영 기록이 아니다 — 순서·7표 판정에 들지 않는다(basis 가 evening·morning 이 아니다).
-  · 그 뒤 첫 제자리 반영은 compat `--full`(730일 창) 기록만 받는다 — 복원 뒤 v3 가 다시 쓴 행 위에 11세션 증분만
-    얹으면 창 안은 compat 종가(KRX 정규장 종가 — T-33), 창 밖은 v3 종가(애프터마켓 포함)로 섞인다. 락을 기다리다
-    복원 뒤에 깬 옛 반영이나 꺼지지 않은 장 마감 체인도 여기서 멈춘다. 다시 컷오버할 때의 첫 반영(V3-C)과 같은
-    뜻이다. **새 정지 조건이라 사용자 확인 대기**(구현은 한다).
+  · 그 뒤 첫 제자리 반영은 **복원 뒤에 계산된** compat 기록만 받는다(T-46): ① 이번 compat 기록 `exported_at` 이 그
+    복원 기록 `exported_at` 보다 뒤다(같은 시각·시각 없음·파싱 실패·시각대 없음은 거부, P1) ② 스테이징 `_compat_meta`
+    에 그 복원 기록이 있다 — 스테이징을 복원 COMMIT 뒤의 본 파일에서 떴다(온라인 백업은 한 시점 사본이라 복원 기록이
+    있으면 복원된 표도 있다). 창은 매일과 같은 증분이어도 된다 — v3 이력은 이미 KRX 기준가 사슬과 같다(QL-E). 다시
+    컷오버할 때의 첫 반영(V3-C)과 같은 뜻이다. **새 정지 조건이라 사용자 확인 대기**(T-42, 구현은 한다).
+    이 조건이 막는 것은 복원 앞 v3 파일로 계산한 기록이다. `v3_post.sh` 는 v3 락을 잡은 뒤에 스테이징을 뜨고 복원
+    (`v3_restore.sh`)도 같은 락 안에서 COMMIT 하므로 셸 경로에서는 생기지 않는다 — 단계를 손으로 나눠 돌렸거나
+    (`compat stage`·`export`·`apply`) 두 셸의 락 경로가 다를 때(`QL_V3_LOCK_FILE`) 생긴다. 락을 기다리다 복원 뒤에 깬
+    제자리 반영은 복원된 파일로 계산하므로 통과한다 — 되돌린 뒤 반영을 끄는 것은 절차서 4-1 몫이다.
   앞뒤는 `exported_at`(UTC ISO, compat 과 같은 형식)으로 가른다 — 제자리 반영은 v3 락 안에서 스테이징을 뜨고
   export 를 시작하므로, 복원(같은 락)보다 뒤에 COMMIT 되는 기록은 시각도 뒤다.
 
@@ -302,10 +307,34 @@ def _first_after_restore(main_rows: list[dict]) -> str | None:
     return mark
 
 
+def _instant(value: object) -> datetime | None:
+    """기록 시각(UTC ISO) → 시각대 있는 datetime. 없음·파싱 실패·시각대 없음은 None — 앞뒤를 가를 수 없다(T-46)."""
+    try:
+        t = datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+    return t if t is not None and t.tzinfo is not None else None
+
+
+def _after_restore_failures(meta: dict, restored_at: str, stg_rows: list[dict]) -> list[str]:
+    """T-46 — 복원 뒤 첫 제자리 반영은 복원 뒤에 계산된 기록만(모듈 머리 주석 ①·②)."""
+    out: list[str] = []
+    mine, mark = _instant(meta.get("exported_at")), _instant(restored_at)
+    if mine is None or mark is None or mine <= mark:
+        out.append(f"복원 뒤 첫 반영(QL-I·T-46): 이번 compat 기록 시각 {meta.get('exported_at')!r} 이 본 파일 마지막 "
+                   f"복원 기록 시각 {restored_at!r} 보다 뒤가 아니다(같음·없음·읽을 수 없음 포함) — 복원 앞 대상으로 "
+                   "계산한 반영일 수 있다")
+    if not any(r.get("basis") == RESTORE_BASIS and str(r.get("exported_at")) == restored_at
+               for r in stg_rows):
+        out.append(f"복원 뒤 첫 반영(QL-I·T-46): 스테이징에 본 파일 마지막 복원 기록({restored_at})이 없다 — "
+                   "스테이징을 복원 앞 v3 파일에서 떴다")
+    return out
+
+
 def gate(staging: Path, v3_db: Path, date: str, basis: str,
          allow_older: bool = False, scores: bool = True, shadow: bool = False) -> GateReport:
     """스테이징을 읽어 게이트를 판정한다(쓰기 없음). 본 파일은 반영 기록 확인에만 읽는다.
-    `shadow` 면 복원 뒤 첫 반영 --full 조건(QL-I)을 보지 않는다 — 그림자는 본 파일에 쓰지 않는다."""
+    `shadow` 면 복원 뒤 첫 반영 조건(QL-I · T-46)을 보지 않는다 — 그림자는 본 파일에 쓰지 않는다."""
     staging, v3_db = Path(staging), Path(v3_db)
     _require(staging, "스테이징")
     _require(v3_db, "v3 quant.db")
@@ -320,7 +349,8 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
                      "있다 — 옛 D 를 늦게 반영하면 확정값이 옛 값으로 돌아간다(재생은 --allow-older)")
     stg = _ro(staging)
     try:
-        new = [r for r in _meta_rows(stg) if r["exported_at"] not in seen]
+        stg_rows = _meta_rows(stg)
+        new = [r for r in stg_rows if r["exported_at"] not in seen]
         if len(new) != 1:
             fails.append("compat 기록 없음 — 스테이징 _compat_meta 에 이번 실행 행이 없다(compat 이 안 "
                          "돌았다)" if not new else
@@ -339,9 +369,8 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
         if window[1] != d_iso:
             fails.append(f"compat 창 끝 {window[1]} ≠ 요청 {d_iso}")
         restored_at = None if shadow else _first_after_restore(main_rows)
-        if restored_at is not None and win.get("full") is not True:
-            fails.append(f"복원 뒤 첫 반영(QL-I·T-42): 본 파일 마지막 기록이 복원({restored_at})이다 — 첫 제자리 "
-                         "반영은 --full 이어야 한다(11세션 증분은 v3 가 다시 쓴 행 위에 정의가 다른 창만 얹는다)")
+        if restored_at is not None:
+            fails += _after_restore_failures(meta, restored_at, stg_rows)
         written = json.loads(meta["tables"])
         extra = sorted(set(written) - set(tables))
         if extra:

@@ -124,7 +124,9 @@ def _run(home: Path, wise_fail: str, *, dry: bool = False, kw_rc: int = 0) -> Ru
     shutil.copy(SCRIPT.parent / "raw_lock.sh", root / "scripts" / "raw_lock.sh")
     stubs = {".venv/bin/python": _PY,
              "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
-             "scripts/sync_calendar.sh": "#!/usr/bin/env bash\nexit 0\n"}
+             "scripts/sync_calendar.sh": "#!/usr/bin/env bash\nexit 0\n",
+             # 장 마감 재반영 훅(PR-8 ⑦) — 이 파일은 WISE 경보만 보므로 rc 0 대역(훅 자체는 test_postclose_chain_sh)
+             "scripts/postclose_chain.sh": "#!/usr/bin/env bash\nexit 0\n"}
     for rel, body in stubs.items():
         p = root / rel
         p.write_text(body, encoding="utf-8")

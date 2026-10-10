@@ -65,19 +65,17 @@ from pathlib import Path
 
 from daily import calendar as cal_mod
 from daily import calendar_refresh as cr
-from daily.runlog import Run
+from daily.runlog import POSTCLOSE_COMPARE, POSTCLOSE_STEPS, Run
 
 TOOL = "daily.window_judge"
 SCHEMA = 1                      # window.json 모양 판본 — 읽는 쪽(세션 시작 보고·아티팩트)이 본다. 키를 바꾸면 올린다
 REQUIRED_DAYS = 3               # 정본 §4 '실운영 3거래일'
 ROLLBACK_DAYS = 5               # 정본 §4 '되돌리기 창 5거래일'
 # 장 마감 체인 단계 런 로그 source, 체인 순서 — ① 수집기(`daily.postclose.SOURCE`) → ②~⑥ PR-8
-# `scripts/postclose_chain.sh close` 가 남기는 단계. PR-8 머지 때 `runlog.POSTCLOSE_STEPS` 를 읽게 바꾼다
-# (그때까지 테스트가 두 이름을 대조한다)
-CHAIN_SOURCES: tuple[str, ...] = ("kiwoom_postclose", "postclose_stage", "postclose_fi",
-                                  "postclose_model", "postclose_excel", "postclose_v3")
-# 두 판 대조 런 source — PR-8 `postclose_chain.sh morning`(`runlog.POSTCLOSE_FOLLOWUPS`, 대조 rc 1 = mismatch)
-COMPARE_SOURCE = "postclose_compare"
+# `scripts/postclose_chain.sh close` 가 남기는 단계(이름의 정본은 `daily.runlog.POSTCLOSE_STEPS`)
+CHAIN_SOURCES: tuple[str, ...] = ("kiwoom_postclose", *POSTCLOSE_STEPS)
+# 두 판 대조 런 source — PR-8 `postclose_chain.sh morning`(`runlog.POSTCLOSE_FOLLOWUPS` 의 대조, rc 1 = mismatch)
+COMPARE_SOURCE = POSTCLOSE_COMPARE
 # 두 판 대조 결과 모양(PR-7 `daily.board_compare` SCHEMA·TOOL — T-36 반영판 schema 2 부터 `replay` 키) — 판본이
 # 바뀌면 판정 불가(rc 2)로 멈춘다. 통과로 인정하는 Spearman 하한은 PR-7 `SPEARMAN_MIN`(정본 P5 임시 하한)과 같다.
 # PR-7 머지 뒤에는 테스트가 세 상수를 대조한다
@@ -107,7 +105,7 @@ _HHMM_RE = re.compile(r"\d{1,2}:\d{2}")
 # 세는 목록 = 점수에 영향을 주는 경로
 COUNTED_CRIT_PREFIXES: tuple[str, ...] = (
     # 장 마감 체인 — scripts/postclose_chain.sh close · refill · morning(PR-8)
-    "장 마감 체인 실패", "장 마감 재반영 실패", "장 마감 판 아침 잇기 실패",
+    "장 마감 체인 실패", "장 마감 재반영 실패", "장 마감 판 아침 잇기 실패", "장 마감 체인 설정 오류",
     # 연구 아침 빌드 — daily_build.sh(실패·중단·원장 락 날짜 바뀜) · build_morning.sh · build_chain.sh(확정판) ·
     # model_daily.sh(아침 fi·모델·엑셀)
     "daily_build ", "확정 빌드 시작 불가", "확정판 빌드 실패", "모델 단계 실패",

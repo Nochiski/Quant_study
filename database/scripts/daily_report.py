@@ -11,7 +11,8 @@
          · 게이트 폐기(stage·빌드 health 실패)
          · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB
   warn — 건전성 warn 항목 실패, 아직 `running` 인 런, 러너가 정상 종료로 정한 상태
-         (`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception), 저녁 WISE 부분 실패(인계 파일
+         (`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception · 두 판 대조 mismatch),
+         저녁 WISE 부분 실패(인계 파일
          `wise_n_bad` > 0 — 수집기 rc 0 인 채 일부 콜 실패, N-27 ③. 같은 리포트의 원장 `wise.run`
          이 pass 면 '회복'으로만 적는다) · 그 실패 수 확인 불가(키가 있는데 null, wise_rc 0)
   info — 그 밖의 일일 요약
@@ -36,7 +37,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 
-from daily.runlog import WARN_STATUSES, Run
+from daily.runlog import POSTCLOSE_FOLLOWUPS, POSTCLOSE_STEPS, WARN_STATUSES, Run
 
 KST = dt.timezone(dt.timedelta(hours=9))
 MAX_TEXT = 3900                 # notify.sh 가 텔레그램에 넘기는 상한과 같다
@@ -49,7 +50,9 @@ NOTIFY_WINDOW_H = 24
 # (dart: 18:05 저녁 실패 → 06:00 재시도가 설계된 경로, 배포 묶음 3 A-05). 키움 fetch 처럼 런마다
 # TR 이 다른 source 는 뒤 런 ok 가 앞 런의 결손을 메웠다는 뜻이 아니라 넣지 않는다.
 # kiwoom_postclose: 같은 날 재실행이 그날 대상 전체를 다시 보고(이미 받은 종목만 빼고) 남은 종목을 받는다.
-LAST_RUN_SOURCES = frozenset({"dart", "kiwoom_postclose"})
+# 장 마감 체인 단계(PR-8 — stage 단독 빌드·fi·모델·엑셀·v3 반영·재반영·아침 재반영·대조): 다시 돌면 그 T 의 그 단계를
+# 통째로 다시 한다(scripts/postclose_chain.sh).
+LAST_RUN_SOURCES = frozenset({"dart", "kiwoom_postclose", *POSTCLOSE_STEPS, *POSTCLOSE_FOLLOWUPS})
 # 뒤 런이 ok 여도 회복으로 덮지 않는 상태 — v3 프로덕션 키 사용은 수집 실패가 아니라 사고다(P1)
 NEVER_RECOVERED = frozenset({"kael_key_used"})
 # 저녁 체인 런 detail 의 갈래별 rc — `kiwoom_rc=0 dart_rc=2 wise_rc=0 …`. 이 리포트가

@@ -12,7 +12,7 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 | stage | 66테이블. 저녁 잠정판(`basis=evening`)·아침 확정판(`basis=morning`)을 매일 빌드한다(플랜 v2 페이즈 B) |
 | equity | 30표·코드 규칙 **e1.27.0**(`src/equity/model.py` `RULES_VERSION` — Q-4 main 병합판. 브랜치 e1.17~e1.26 · main e1.17~e1.19 두 계보의 이력은 그 파일 주석). 판본을 올리는 규칙은 `EQUITY_HANDOFF.md` §6 |
 | 진행 중 | **일일 증분 플랜 v2** `docs/plans/2026-09-11-daily-incremental-v2.md`(상태 블록이 정본) — 페이즈 A 저녁 원장 슬롯·페이즈 B 잠정/확정 빌드 **가동**(09-17 전체 체인), 페이즈 C Kael-alpha 인계 완료, 페이즈 D 범위 확정. 09-19 전수 감사 수정은 `docs/plans/2026-09-19-pipeline-audit-fix.md`. v1 `docs/plans/2026-09-09-daily-incremental.md` 는 P0~P3 기록. 사용자 행동 대기: 키움 앱키 추가 발급(`DECISIONS_PENDING.md` 결정 5 R5 후속) |
-| 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도는 21:05 원장 직행 ∥ DART ∥ WISE 스냅샷) · 21:20 `build_evening.sh`(잠정 빌드) · 06:00 `daily_ledger.sh`(키움 마스터, 월요일 DART 번호표, 대차, KIS, 저녁 키움 보강 판정, DART 재스윕) · 08:10 `daily_build.sh`(KRX → 외국인 보유 → 머지 → 건전성 → **확정 빌드 포함**, 09-17 `--no-build` 제거) · 워치독 21:50/23:55/10:30(F-11, 10-06·10-07) · 토 03:30 백업 · 일 04:30 gc. 전체는 아래 "운영 (P6) → 크론 전체표" |
+| 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도는 21:05 원장 직행 ∥ DART ∥ WISE 스냅샷) · 21:20 `build_evening.sh`(잠정 빌드) · 06:00 `daily_ledger.sh`(키움 마스터, 월요일 DART 번호표, 대차, KIS, 저녁 키움 보강 판정, DART 재스윕) · 08:10 `daily_build.sh`(KRX → 외국인 보유 → 머지 → 건전성 → **확정 빌드 포함**, 09-17 `--no-build` 제거) · 워치독 21:50/23:55/10:30(F-11, 10-06·10-07) · 토 03:30 백업 · 일 04:30 gc. **장 마감 체인 15:41 `postclose_chain.sh close` + 16:30 워치독은 제안(컷오버 PR-8 — 그림자 시작 때 등록, 그때 21:20 잠정 빌드·23:55 워치독은 뺀다)**. 전체는 아래 "운영 (P6) → 크론 전체표" |
 
 ## 층 구조
 
@@ -32,7 +32,7 @@ equity      parquet 29표 + equity.duckdb   data/equity/                ← EQUI
 | 경로 | 내용 |
 |---|---|
 | `src/` | 수집기(`backfill_*.py`, `api.py`, `dart_universe.py`, `sweep_disclosure.py`, `master_daily.py`), stage 패키지(`src/stage/`, `python -m stage --table <t>`), equity 패키지(`src/equity/`, `python -m equity build|gate|catalog|contract`), 동기화 패키지(`src/ledger_sync/`, `python -m ledger_sync` — 협업자 로컬이 서버 equity 층을 SFTP 로 받아 증분 유지, 동사 목록은 `docs/LEDGER_SYNC.md`), 파일럿 통합층(`build_*.py`·`finalize.py`·`fin_map.py` — STAGE_DESIGN §8 이 파일럿 보존·로직 재사용으로 명시) |
-| `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`watchdog.sh`·`daily_wise.sh`(마스터만), 빌드 체인 `build_chain.sh`·`build_evening.sh`·`build_morning.sh`, 운영 `backup_raw.sh`·`gc.sh`·`rotate_logs.sh`·`daily_report.py`·`notify.sh`·`deploy.sh`(아래 "운영 (P6)"), `doc_prepass_daily.sh`·`sync_calendar.sh`, `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `replay.sh`·`replay_tool.py`(격리 재생 — 운영 루트에 쓰지 않고 출력 루트에 equity→catalog→contract→fi→model 을 다시 지어 표별 해시를 남기고 `--compare` 로 대조, `--stage-at D` 는 그날 인계 이력의 stage 판), `check_baseline_lock.py`, `fetch_equity_local.sh`(운영자 rsync 용), **`ledger_sync.ps1`·`.sh`·`register_daily_sync.ps1`**(협업자 SFTP 동기화 — `LEDGER_SYNC.md`), `run_survey*.sh` |
+| `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`postclose_chain.sh`(15:41 장 마감 체인 — 아래 "장 마감 체인")·`watchdog.sh`·`daily_wise.sh`(마스터만), 빌드 체인 `build_chain.sh`·`build_evening.sh`·`build_morning.sh`, 운영 `backup_raw.sh`·`gc.sh`·`rotate_logs.sh`·`daily_report.py`·`notify.sh`·`deploy.sh`(아래 "운영 (P6)"), `doc_prepass_daily.sh`·`sync_calendar.sh`, `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `replay.sh`·`replay_tool.py`(격리 재생 — 운영 루트에 쓰지 않고 출력 루트에 equity→catalog→contract→fi→model 을 다시 지어 표별 해시를 남기고 `--compare` 로 대조, `--stage-at D` 는 그날 인계 이력의 stage 판), `check_baseline_lock.py`, `fetch_equity_local.sh`(운영자 rsync 용), **`ledger_sync.ps1`·`.sh`·`register_daily_sync.ps1`**(협업자 SFTP 동기화 — `LEDGER_SYNC.md`), `run_survey*.sh` |
 | `src/daily/` | 일일 증분 러너(`kw_daily.py`·`kis_daily.py`·`dart_daily.py`)와 공용 모듈(거래일 `calendar.py`, 요청 유니버스 `universe.py`, 실행 기록 `runlog.py`, 원장 건전성 `ledger_health.py`) |
 | `tests/` | stage·equity 테스트 |
 | `survey/`, `survey_out/v2/` | 원장 전 테이블·컬럼 어휘 전수 측정과 결과. stage (p,s)·부호·결측 규칙의 실측 근거. 재생성은 서버에서 `scripts/run_survey_v2.sh` |
@@ -149,12 +149,14 @@ uv run --project backend pytest database/tests -q
 | 토 03:30 | `30 18 * * 5` | `backup_raw.sh` — 원장 6 DB 온라인 백업, 금요일 장마감분. 성공 시 최신 1세트만 보관(결정 9, 09-14) | 가동 |
 | 06:00 | `0 21 * * *` | `daily_ledger.sh` — v3 휴장 사본 동기화(`data/calendar/v3/`, 병행 대조용) → 휴장 달력 직접 갱신 `python -m daily.calendar_refresh`(KIS chk-holiday 하루 1콜, 판정 연도 파일 `data/calendar/kis_holidays_<YYYY>.json`·원장 `kis.db.kis_holiday`·보고서 `logs/calendar/<날짜>.json`, K1-9 — 플랜 `docs/plans/2026-10-10-holiday-calendar-direct.md`. 달력을 못 읽으면 D 산출에서 중단) → 키움 마스터 → (월요일 KST, 또는 마지막 성공이 7일을 넘었거나 기록이 없으면) DART 번호표 갱신 `dart_universe.py`(A-01 — 'D 이미 수집' 건너뜀 검사보다 앞. 성공은 런 로그 `source=dart_universe`, 실패는 warn 한 줄이고 체인 rc 는 그대로 — 배포 묶음 5-2) → 대차(ka20068) → KIS 신용 → 저녁 키움 보강 판정 `kw_daily --cover --tr ka10060,ka10014`(T-13 · H1-5 — 전날 21:05 저녁 직행의 D 커버리지를 원장에서 재고, 저녁 직행 게이트와 같은 술어(ka10060 요청 종목 대비 ≥ 0.98 · ka10014 자기 최근 20세션 평균 대비 ≥ 0.80)에 미달인 TR 만 `--fetch --commit` 으로 한 번 다시 받은 뒤 다시 잰다. 그래도 미달이면 소스 단계 실패 → crit · rc 2. 판정은 런 로그 `source=kiwoom_cover`) → DART 재스윕 → 회사 정보 공백 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
-| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:51) → `model_daily.sh`(확정판 rc 0·1 일 때만 fi → 모델 → 일간 엑셀 발송, 발송 장부로 D 당 1건 — N-25 Q0 임시, 실패는 notify.log crit 만·체인 rc 불변) → `daily_report.py`. 06:00 체인이 아직 원장 락을 쥐고 있으면 끝날 때까지 기다렸다가 이어서 돈다(P9, 시간 한도 없음 — 대기 시작은 notify.log 에 info). 06:00 체인이 일찍 끝나도 08:10 전엔 시작하지 않는다 — KRX 확정 데이터(전날 애프터마켓까지 반영) 공개·T-1 정정(07시 전후)을 기다리는 시각이다 | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") |
+| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:51) → `model_daily.sh`(확정판 rc 0·1 일 때만 fi → 모델 → 일간 엑셀 발송, 발송 장부로 D 당 1건 — N-25 Q0 임시, 실패는 notify.log crit 만·체인 rc 불변) → `daily_report.py`. 06:00 체인이 아직 원장 락을 쥐고 있으면 끝날 때까지 기다렸다가 이어서 돈다(P9, 시간 한도 없음 — 대기 시작은 notify.log 에 info). 06:00 체인이 일찍 끝나도 08:10 전엔 시작하지 않는다 — KRX 확정 데이터(전날 애프터마켓까지 반영) 공개·T-1 정정(07시 전후)을 기다리는 시각이다. 모델 단계 뒤 장 마감 판 아침 잇기(`postclose_chain.sh morning` — v3 아침 KRX 재반영·두 판 대조, 컷오버 PR-8 ⑧. 확정판 rc 0·1 일 때, 모델 단계 성패와 무관) | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") · 아침 잇기는 PR-8 배포 때 |
 | 10:30 | `30 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 확정판이 정상이면 그 D 의 엑셀 발송 장부 줄(`data/deliver/sent_model_daily.jsonl`, basis=morning)까지 보고, 없거나 장부를 못 읽으면 crit(B-57, 배포 묶음 5-1 — 손 발송은 사용자 승인 뒤 `scripts/model_daily.sh --date D`). 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) → 10:30(F-11, 10-06: 빌드가 거래일마다 약 2분씩 길어져 10-03 종료 09:49). 08:10 체인이 원장 락을 기다리는 날엔 이 crit 은 예상된 것이다 — 아래 'DART 완료 판정 실패 · 놓친 확정판' 2번 | 가동 |
-| 18:05 | `5 9 * * 1-5` | `QL_KW_EVENING_HHMM=2105 daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피) | 가동 |
-| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, 실측 종료 22:38~22:41), 한도 21:45 | 가동 (09-17) |
+| 15:41 | `41 6 * * 1-5` | `postclose_chain.sh close` — 장 마감 수집(키움 ka10060 KRX, 15:41~16:00) → stage 단독 빌드 → fi → 모델 → 엑셀(그림자 미발송) → v3 그림자 반영. 아래 "장 마감 체인" | **제안**(컷오버 PR-8, 그림자 시작 10-14 에 등록) |
+| 16:30 | `30 7 * * 1-5` | `watchdog.sh postclose_board` — 오늘 장 마감 체인 런 로그(수집 + 단계 5개)가 없거나 실패·미완이면 crit. 세션 예외일·휴장은 정상 | **제안**(컷오버 PR-8) |
+| 18:05 | `5 9 * * 1-5` | `QL_KW_EVENING_HHMM=2105 daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피). 체인 끝(키움 rc 0)에 원장 락을 놓고 장 마감 재반영 훅(`postclose_chain.sh refill` — 점수 없는 7표, 컷오버 PR-8 ⑦ · T-38) | 가동 · 재반영 훅은 PR-8 배포 때 |
+| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, 실측 종료 22:38~22:41), 한도 21:45 | 가동 (09-17) — **그림자 시작 때 중단**(N-42 Q4 — 장 마감 판이 대신한다) |
 | 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
-| 23:55 | `55 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) → 23:55(F-11, 10-06 에 00:00 으로 옮겼다가 10-07 수정 — 자정을 넘기면 날짜 판정이 다음 날이 되어 거짓 crit·금요일 무감시. 10-02 종료 23:02) | 가동 |
+| 23:55 | `55 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) → 23:55(F-11, 10-06 에 00:00 으로 옮겼다가 10-07 수정 — 자정을 넘기면 날짜 판정이 다음 날이 되어 거짓 crit·금요일 무감시. 10-02 종료 23:02) | 가동 — **21:20 잠정 빌드와 함께 중단**(잠정판이 없어 매일 crit 이 난다) |
 | 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
 | 토 03:00 | `0 18 * * 5` | `wics_weekly.sh` — WICS 섹터 구성 주간 스냅샷(dt=금요일, L2 28 + L1 10 = 38콜, 멱등) → `data/raw/wiseindex.db`. 전부 빈 응답이면 rc 4 + warn | 가동 (09-20 10:15 등록) |
 | 토 10:00 | `0 1 * * 6` | `wics_weekly.sh --retry` — 빈 코드만 다시 콜(행>0 판본은 skip). 그래도 비면 crit | 가동 (09-20) |
@@ -181,9 +183,55 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 30 2 * * 6 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh wics_weekly >> logs/watchdog.log 2>&1
 ```
 
+장 마감 체인 크론 **제안**(컷오버 PR-8 — 아직 등록하지 않았다. 등록·삭제는 컨트롤러가 그림자 시작(10-14) 때 한다. 같은 날 `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 을 배포한다 — 꺼져 있으면 체인은 info 한 줄로 끝나고 16:30 워치독이 crit 을 낸다. 등록하면 위 복구용 원문에 옮긴다):
+
+```cron
+# 15:41 KST 장 마감 체인 — 수급 확정 15:40(N-35 ②, 외부 공개 시각) 뒤. 수집기도 15:41 전이면 rc 3 으로 받지 않는다
+41 6 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/postclose_chain.sh close >> logs/cron_postclose_chain.log 2>&1
+# 16:30 KST 장 마감 판 워치독 — 수집 ≈3.4분(N-35 ③) + 단독 빌드·fi·모델·엑셀·v3 그림자 반영이 16:1x 에 끝나는 것을 본다
+30 7 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh postclose_board >> logs/watchdog.log 2>&1
+# 21:20 연구 잠정 빌드와 그 워치독은 그림자 시작 때 끈다(N-42 Q4) — 줄 앞에 # 를 붙여 남긴다(되돌리기 = # 삭제)
+#20 12 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/build_evening.sh >> logs/build_evening.log 2>&1
+#55 14 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
+```
+
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`
 (잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
-`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다) · `QL_RAW_LOCK_FILE`(테스트 전용 — 원장 락 파일 경로, `scripts/raw_lock.sh` 를 쓰는 다섯 스크립트 공통, 운영 크론·대화형 셸에 남기지 않는다) · `QL_RAW_LOCK_WAKE_DATE`(테스트 전용 — 원장 락을 잡은 직후의 KST 날짜 YYYY-MM-DD 를 덮어쓴다, 운영에선 비운다).
+`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다) · `QL_RAW_LOCK_FILE`(테스트 전용 — 원장 락 파일 경로, `scripts/raw_lock.sh` 를 쓰는 다섯 스크립트 공통, 운영 크론·대화형 셸에 남기지 않는다) · `QL_RAW_LOCK_WAKE_DATE`(테스트 전용 — 원장 락을 잡은 직후의 KST 날짜 YYYY-MM-DD 를 덮어쓴다, 운영에선 비운다) · `QL_V3_DB`(v3 quant.db 경로 — `v3_post.sh`·`postclose_chain.sh`, 체인 기본 `$HOME/kael-system-v3/data/quant.db`) · `QL_BUILD_LOCK_FILE`·`QL_POSTCLOSE_CHAIN_LOCK_FILE`(테스트 전용 — 빌드 락·장 마감 체인 락 파일 경로, 운영 크론·대화형 셸에 남기지 않는다).
+
+### 장 마감 체인 — `scripts/postclose_chain.sh` (컷오버 PR-8)
+
+15:41 장 마감 수집에서 v3 반영까지를 **완료 감지로** 잇는다(P9 — 대기 한도·재시도 시각 없음, 고정 시각은 외부 공개
+시각인 수급 확정 15:40 뒤 15:41 하나). 정본은 `docs/plans/2026-10-10-cutover-track.md` §3 PR-8, 단계별 상세·rc 는
+스크립트 머리 주석. 산출은 `data/model_db/` 아래만이고 stage·equity 연구 판은 읽기만 한다(T-3 · T-29).
+
+| 모드 | 언제 | 단계(앞이 실패하면 뒤는 안 돈다) | 런 로그 source |
+|---|---|---|---|
+| `close` | 15:41 크론(T = 오늘 KST) | ⓪ 휴장이면 건너뜀 → ① `python -m daily.postclose`(수집기 자체 락, 원장 락 안 기다림 — T-4. rc 3 + 세션 예외일이면 그날 체인 전체 건너뜀 — T-26) → ①' 고정 판 확인(`data/deliver/history/<D'>_morning.json` 이 그 날짜·health ok — 아니면 빌드 락을 잡지 않고 crit, T-7 대체 발송 경로) → [빌드 락] ② stage 단독 빌드 `stg_flow_postclose_kiwoom` + 그 표만 건전성(`stage.health --tables`, 리포트 `logs/health/postclose_stage_<T>.json`) + 장 마감 스냅샷 GC(기록형) → ③ fi 장 마감 판(`--builds-from <D'>_morning.json`, T-2 — 판 manifest 게이트의 `metrics.warn`(FG5, T-37)은 런 로그 `warn:FG5` + warn 한 줄) → ④ 모델 → ⑤ 엑셀(`data/model_db/deliver`) [빌드 락 놓음] → ⑥ `v3_post.sh --basis evening --model-root data/model_db/model --builds-from <D'>_morning.json` (점수 두 표는 여기서만 쓴다) | `kiwoom_postclose`(수집기) · `postclose_stage`·`_fi`·`_model`·`_excel`·`_v3` |
+| `refill` | `daily_evening.sh` 끝(런 로그·최종 인계 파일 뒤, 키움 rc 0 일 때 — 원장 락을 먼저 놓는다) | ⑥ 결과와 상관없이 늘 점수 없는 7표 `v3_post.sh --basis evening --no-scores --builds-from <D'>_morning.json`(QL-F2 · T-38, compat 만). 16:00 컷오프 종목을 21:05 값으로 채우고, 장 마감 판이 없는 날(판 실패·세션 예외일)엔 그날 v3 T 행의 유일한 경로다. 부르기 전에 고정 판의 날짜·health 를 본다 — 쓸 수 없으면 v3_post 를 부르지 않고 crit(compat 은 health 를 보지 않는다, P1) | `postclose_v3_refill` |
+| `morning` | `daily_build.sh` 가 확정판(rc 0·1)·모델 단계 뒤 | ⓐ `v3_post.sh --date D --basis morning --builds-from <D>_morning.json`(compat 만, 반영 표는 compat 이 고른다 — T-34. 고정 판 health 가 ok 가 아니면 부르지 않고 crit) ⓑ 그날 장 마감 모델 판이 있으면 두 판 대조 `python -m daily.board_compare`(PR-7). 둘은 서로 막지 않는다. 대조 rc 1 은 이번 실행이 쓴 `data/model_db/compare/<D>.json` 이 불일치 판정(verdict fail)일 때만 `mismatch`(warn), 그 밖의 rc 1 은 실패. 그날 수집기 런(`kiwoom_postclose`)이 아예 없으면 15:41 크론 누락이라 끝 알림이 info 대신 warn | `postclose_v3_morning` · `postclose_compare` |
+
+- v3_post 세 호출은 `docs/COMPAT_LAYER.md` §8 호출 표가 정본이다. 셋 다 인계 이력으로 판을 고정한다(`--builds-from`) —
+  이력이 없으면 compat 이 멈추고 v3_post·체인이 crit 을 낸다.
+- **스위치**(`config/postclose_chain.env`): `POSTCLOSE_ENABLED=1` 이어야 세 모드가 돈다 — 저장소 값은 **꺼짐**이라 머지·배포만으로는
+  아무것도 돌지 않는다(꺼져 있으면 info 한 줄·rc 0. 크론을 등록한 뒤에도 꺼져 있으면 16:30 워치독이 crit). 그림자 시작 때 켠다.
+  `POSTCLOSE_SEND=1` 이면 엑셀 발송, `POSTCLOSE_V3=in-place` 면 v3 제자리 반영(+ `POSTCLOSE_V3_POST_CMD` 가 있으면 ⑥ 에만
+  `--v3-post-cmd`) — PR-9 가 켠다. 켜는 쪽만 정확한 값을 요구하고, in-place 인데 발송이 꺼져 있으면 rc 5 로 거부한다(보내지 않은
+  점수가 v3 에 들어가는 조합).
+- **락**: 장 마감 체인 락 `/tmp/quant_ledger_postclose_chain.lock` — `close` 는 비대기(이미 돌면 warn·rc 3), `refill` 은
+  돌고 있는 `close` 가 끝날 때까지 기다린다(같은 v3 반영을 겹치지 않게), `morning` 은 안 잡는다. 빌드 락은 ②~⑤ 동안만 쥐고 쥐여
+  있으면 기다린다(`model_daily.sh` 와 같은 모양). ①·①' 은 빌드 락 밖이다 — 16:00 창을 빌드·배포에 묶지 않는다.
+- **연구 21:20 잠정 빌드 중단**(N-42 Q4): 그림자 시작 때 `build_evening.sh`·`watchdog.sh evening_build` 두 줄을 크론에서
+  뺀다(위 '크론 제안'). 장 마감 판이 그 자리를 대신하고, 체인끼리 빌드 락이 겹치지 않는다.
+- **감시**: 16:30 `watchdog.sh postclose_board` 가 오늘 단계마다 마지막 런을 본다 — 수집은 ok·cutoff·late, 나머지는 ok 만
+  정상, 없음·실패·running 은 crit. 세션 예외일·휴장은 정상. 다음 날 08:10 일일 리포트도 이 source 들을 '마지막 런'
+  규칙으로 센다(손 재실행이 ok 면 회복). `daily_evening.sh`·`daily_build.sh` 는 훅 rc 를 요약에 싣고 0·1 이 아니면 warn 1건.
+- **배포 창**: 15:40~16:30(장 마감 체인)·21:00~21:30(21:05 키움 저녁 수집 → 재반영)에는 배포하지 않는다 — 배포가 빌드 락을
+  쥐면 장 마감 체인이 기다리고, 스크립트가 도중에 바뀐다.
+- **손 재실행**: 같은 T 를 다시 돌리면 ① 은 이미 받은 종목을 빼고(16:00 뒤면 콜 0 — `late`) 나머지 단계를 다시 짓는다 —
+  `bash scripts/postclose_chain.sh close --date T`. 계획만 보려면 `--dry-run`(락·단계·런 로그·알림 없음, 꺼져 있어도 계획은 보인다).
+- 알림은 `notify.sh`(기록만): 준비 info · 단계 실패 crit · 휴장·꺼짐 info · 세션 예외일 warn · 락 경합 warn · 게이트 경고 warn ·
+  설정 오류 crit.
 
 ### 원장 락 — `scripts/raw_lock.sh` (배포 묶음 5-3 · TECH_DEBT B-52 해결)
 
@@ -296,8 +344,8 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 
 | 등급 | 조건 | 행동 |
 |---|---|---|
-| crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB. 단 같은 D 의 dart 는 **마지막 런**으로 판정한다 — 앞 런 실패가 뒤 런 ok 로 회복됐으면 '회복'으로 표시하고 crit 이 아니다(kael 키 런이 있으면 회복 아님). DART 하나로만 실패한 `evening_chain`(그 런 detail 의 다른 `*_rc` 가 모두 0)과 저녁 원장 dart_rc 도 같다(N-24 3.15) | `notify.sh crit` (쿨다운 없음) |
-| warn | 건전성 warn 항목 실패, 아직 `running` 인 런, 저녁 WISE 부분 실패(`ledger_evening.json` 의 `wise_n_bad` > 0 — 같은 리포트의 원장 `wise.run` 이 pass 면 '회복'으로만 적고 올리지 않는다) · 그 실패 수 확인 불가(`wise_n_bad` null · `wise_rc` 0) | `notify.sh warn` |
+| crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB. 단 같은 D 의 dart 는 **마지막 런**으로 판정한다 — 앞 런 실패가 뒤 런 ok 로 회복됐으면 '회복'으로 표시하고 crit 이 아니다(kael 키 런이 있으면 회복 아님). DART 하나로만 실패한 `evening_chain`(그 런 detail 의 다른 `*_rc` 가 모두 0)과 저녁 원장 dart_rc 도 같다(N-24 3.15). 장 마감 수집(`kiwoom_postclose`)·장 마감 체인 단계(`postclose_*`, PR-8)도 마지막 런으로 판정한다 | `notify.sh crit` (쿨다운 없음) |
+| warn | 건전성 warn 항목 실패, 아직 `running` 인 런, 러너가 정한 주의 상태(`daily.runlog.WARN_STATUSES` — 장 마감 수집 cutoff·late·session_exception · 두 판 대조 mismatch), 저녁 WISE 부분 실패(`ledger_evening.json` 의 `wise_n_bad` > 0 — 같은 리포트의 원장 `wise.run` 이 pass 면 '회복'으로만 적고 올리지 않는다) · 그 실패 수 확인 불가(`wise_n_bad` null · `wise_rc` 0) | `notify.sh warn` |
 | info | 그 밖의 일일 요약 | `notify.sh info` |
 
 입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —
@@ -376,7 +424,7 @@ daily_insight 크론 줄의 리다이렉트 대상과 같게 둔다. 연구 리�
   ⑦ 서버 `DEPLOYED.json` 의 rev 가 HEAD 의 조상인가 — main 을 역병합한 브랜치는 ② 를 늘 통과하므로
   다른 브랜치에서 먼저 민 핫픽스는 이 검사가 지킨다. 알고 되돌릴 때만 `--allow-rollback <서버 rev>`
   (서버 rev 와 정확히 같아야 한다). dry-run 은 ⑤·⑦ 판정만 출력한다(락은 잡았다가 바로 놓는다).
-- 빌드 크론 시각(06:00·08:10·18:05·21:20, 장 마감 15:41) 근처에는 배포하지 않는다 — 락을 쥔 동안 시작한
+- 빌드 크론 시각(06:00·08:10·18:05·21:20, 장 마감 15:40~16:30 · 21:05 재반영 21:00~21:30) 근처에는 배포하지 않는다 — 락을 쥔 동안 시작한
   체인은 그 회차를 건너뛴다.
 - 전송 결과는 서버 `~/quant-ledger/DEPLOYED.json` 에 `{rev, branch, at_utc, by, tests}` 로 기록한다
   (`--allow-rollback` 으로 덮었으면 `rollback_from` 도).

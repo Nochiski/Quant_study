@@ -974,7 +974,8 @@ def test_stage_states_follow_the_shared_price_predicate(tmp_path) -> None:
 
     rows = [{"ticker": tk, "date": T_DATE, "price_valid": pv, "close_krw": close,
              "volume_shr": vol}
-            for tk, pv, close, vol in (("100001", True, 10_000, 100), ("100002", False, 10_000, 100),
+            for tk, pv, close, vol in (("100001", True, 10_000, 100),
+                                       ("100002", False, 10_000, 100),
                                        ("100003", None, 10_000, 100), ("100004", True, 0, 100),
                                        ("100005", True, 10_000, None))]
     rows.append({"ticker": "100009", "date": DP_DATE, "price_valid": True, "close_krw": 1,

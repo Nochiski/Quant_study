@@ -20,11 +20,12 @@ T 는 캘린더 밖). v3 소비자(07:00 브리핑·위키·uni)는 T 저녁에 
 v3 NOT NULL 채움(T-32 = D2-9 (c)) — v3 T 행은 ka10081 이 늘 시·고·저·거래대금을 줘서 같은 상황이
   없다. open·high·low = 종가, amount = 종가 × 거래량 ÷ 1e6(백만원, 근사 — NULL 이면 07:00 브리핑
   거래대금 상위가 TypeError, COMPAT_LAYER §4-1). 다음 날 아침 KRX 행으로 날짜 단위 교체된다.
-adj_close — T 종가 그대로(QL-E · T-18). v3 기준은 '종목의 창 안 최신 행 = 원종가'이고 장 마감 판에서는 T 가
-  최신 행이다. 그날 기준가 = D' KRX 종가면 T 에 사건이 없어 g(T) = g(D') 이고, 창 안 D' 이하 행(`mappings`
-  daily_prices — D' 기준)과 같은 기준이다. 그날 기준가가 D' KRX 종가와 다르면(T-6 첫 조건
-  `daily.kw_daily.ka10060_base_price_differs_sql`) 계수를 모른다 → NULL(P1). 그 종목의 D' 이하 행은 D' 기준으로
-  두고(계수를 모르는 T 로 기준을 옮기지 않는다), 다음 날 아침 KRX 반영이 T 에 접힌 계수로 창 전체를 다시 맞춘다.
+adj_close — T 종가 그대로(QL-E · T-40). v3 기준(KRX 기준가 사슬 K)에서 장 마감 판의 최신 행은 T 이고, 그날
+  기준가 = D' KRX 종가면 T 의 단계가 1 이라 K(T) = K(D') 다 — 창 안 D' 이하 행(`mappings` daily_prices 는 D' 까지의
+  사슬로 짓는다)과 같은 기준이고, 직전 행 덮어쓰기(T-41)도 값이 같다. 그날 기준가가 D' KRX 종가와 다르면(T-6 첫
+  조건 `daily.kw_daily.ka10060_base_price_differs_sql`) T 에 사건 단계가 있다 → NULL. 그 종목의 D' 이하 행은
+  D' 기준으로 두고, 다음 날 아침 KRX 반영(`--basis morning --date T`)이 T 단계로 창 전체(adj_close·덮어쓰기 행)와
+  창 밖 adj_close 를 다시 쓴다.
 이 채움들은 v3 외부 계약 때문이고 equity·모델 입력으로는 돌아가지 않는다. 만료 = D2-9 (a)(저녁
 ka10081) 또는 v3 소비자 직독 전환.
 

@@ -28,7 +28,7 @@ def test_krw_constants() -> None:
     ("daily_prices", "amount", "백만원", "price_daily.value_krw", 1_000_000),
     ("daily_prices", "close", "원", "price_daily.close", 1),
     ("daily_prices", "volume", "주", "price_daily.volume_shr", 1),
-    ("daily_prices", "adj_close", "원", "price_adj_daily.adj_close", 1),
+    ("daily_prices", "adj_close", "원", "price_daily.close·base_price_krw", 1),
     # v3 `backend/db/CLAUDE.md:37` · `backend/clients/CLAUDE.md:54,64` — ka10059 amt_qty_tp=1
     ("investor_detail_flows", "individual", "백만원", "flow_daily.ind_invsr_krw", 1_000_000),
     ("investor_detail_flows", "foreign_investor", "백만원", "flow_daily.frgnr_invsr_krw",

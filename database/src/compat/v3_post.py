@@ -25,8 +25,9 @@
 반영 범위 — compat 이 쓴 범위와 정확히 같다(스테이징 `_compat_meta` 의 이번 실행 기록이 정본):
   · `daily_prices`·`investor_detail_flows`: `trade_date` 가 기록의 창 `[from_date, to_date]` 안
     (compat SQL 의 `date >= from_date AND date <= date` 와 같은 창).
-    `daily_prices` 는 여기에 **창 밖 다시 맞춘 종목의 창 앞 행**(`trade_date < from_date`)을 더한다 — compat 이 창 안
-    사건 종목의 옛 행 adj_close 를 v3 기준으로 다시 썼다(QL-E · T-18, 목록은 기록의 `tables.daily_prices.rebase.tickers`).
+    `daily_prices` 는 여기에 **창 밖 다시 맞춘 종목의 창 앞 행**(`trade_date < from_date`)을 더한다 — compat 이 창 안에
+    KRX 기준가 단계가 든 종목의 옛 행 adj_close 를 v3 기준으로 다시 썼다(QL-E · T-40, 목록은 기록의
+    `tables.daily_prices.rebase.tickers`).
   · `score_history`·`score_history_v2`: `score_date = date`(compat 이 그날 행을 지우고 넣는다 — T-16).
   · 나머지 5표(`stocks`·컨센서스 3표·`financial_summary`): **표 전체**. 날짜 창이 없는 as-of 스냅샷이라
     compat 이 쓰는 행이 날짜 범위로 묶이지 않는다(`stocks` 는 이번 유니버스 밖 행 전부를 `is_active=0`

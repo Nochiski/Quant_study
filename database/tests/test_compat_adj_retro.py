@@ -1,24 +1,22 @@
-"""QL-E(T-18) — v3 소비자 `daily_prices.adj_close` 를 v3 와 같은 소급 조정 기준으로.
+"""QL-E(T-18 · T-40 · T-41) — v3 소비자 `daily_prices` 를 v3 가 쌓던 모양으로.
 
-v3 는 키움 ka10081 수정주가(`upd_stkpc_tp=1`)를 그날 기준일로 다시 받아 종목의 전 기간 adj_close 를
-덮는다(v3 `scripts/_backfill_mode_helpers.py` run_adj_price_backfill — 20:05 시세 수집이 최근 5행을
-adj_close NULL 로 덮으므로 사실상 매일 전 종목). 그래서 **최신 행 = 원종가**이고 과거 행은 그 뒤 사건으로
-소급 조정된 값이다. equity `price_adj_daily` 는 전방 조정(첫 관측 수준 고정)이라 값 수준이 다르다.
+v3 는 키움 ka10081 수정주가(`upd_stkpc_tp=1`)를 매일 그날 기준일로 받는다. 그 값은 KRX 기준가 사슬 K 다(T-40):
+  ks(e) = 전일 종가 ÷ 기준가(다를 때), K(d) = Π ks,  adj_close(d) = 종가(d) × K(d) ÷ K(L)
+그리고 매일 최근 5행을 그날 기준 수정값으로 덮는다(T-41): 행 d 의 시·고·저·종가 = 원값 × K(d)/K(c),
+거래량 = 원값 × K(c)/K(d), c = min(d 뒤 4번째 행, L). 거래대금은 그대로다.
 
-compat 은 v3 쪽으로만 기준을 옮긴다(equity·fi 는 그대로):
-  adj_close(d) = close(d) × g(d) / g(창 안 마지막 행),  g = cum_share_factor ÷ cum_price_only_factor
-창 안에서 g 가 바뀐(사건이 접힌) 종목은 대상 파일의 창 밖 옛 행도 같은 기준으로 다시 쓴다.
-
-합성 판(D = 2026-07-31, 창 14일 = 07-17~07-31, equity 판 `m_`):
-  EV    145210 — 2017·2024 사건으로 g = 2.358… × 1.996… 인 채로 07-24 에 10:1 액면병합(share 0.09999998…).
-                 서버 실측 모양 그대로 — v3 10-08 사본 2025-03-21 adj 11,260(= 10 × 종가 1,126),
-                 옛 compat 5,300.3(= 1,126 × 4.707)
-  PO    035720 — 07-27 에 가격 전용 계수(⑤ price_only 1.25)만 접힌다
-  PAST  005930 — 창 앞 사건만(g = 2.5 고정) — 창 안 사건 없음
-  NONE  000660 — 사건 없음(g = 1)
+합성 판(D = 2026-07-31, 창 14일 = 07-17~07-31, equity 판 `m_`). 기준가는 기본 '전일 종가'(사건 없음)이고 사건 날만 다르다.
+  EV    145210 — 07-24 10:1 병합(기준가 = 전일 종가 × 10). 서버 실측 모양 — v3 10-08 사본 2025-03-21 adj 11,260
+  PO    035720 — 07-27 유상증자류 기준가 하향, 기준가가 호가 단위로 반올림됨(29,950 — 이론가 29,987.5, 범주 C)
+  HALT  011930 — 07-20~07-23 거래정지(참고가 행), 07-24 재개 기준가 재평가 4,200(직전 5,000 — 범주 B, 사건 공시 없음)
+  PAST  005930 — 창 앞(07-16) 사건만 — 창 안 단계 없음
+  NONE  000660 — 사건 없음
+`compat_v3_0807_kchain.csv` 는 로컬 equity 판(10-03 `price_daily`)과 로컬 v3 08-07 사본의 같은 행이다(145210 07-01~,
+011930 04-27~ · 97행) — 리뷰어 재현(T-40 · 0행 차이)과 같은 대조를 compat 출력으로 한다.
 """
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import itertools
 import sqlite3
@@ -33,67 +31,97 @@ from test_compat_export import _price_row, _uni_row
 D = "20260731"
 BUILD = "m_20260731T231000_000000Z"
 FROM_ISO = "2026-07-17"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "compat_v3_0807_kchain.csv"
 
-EV, PO, PAST, NONE = "145210", "035720", "005930", "000660"
-G_PRE = 2.3580246913580245 * 1.9962616822429908        # 2017-12-19 · 2024-09-25 사건 누적
-G_POST = G_PRE * 0.09999998105911195                    # 2026-07-24 10:1 액면병합(mktcap_neutral)
-FOLD_EV = dt.date(2026, 7, 24)
-FOLD_PO = dt.date(2026, 7, 27)
-PO_FACTOR = 1.25
-
+EV, PO, HALT, PAST, NONE = "145210", "035720", "011930", "005930", "000660"
+TICKERS = (EV, PO, HALT, PAST, NONE)
 OLD = (dt.date(2025, 3, 20), dt.date(2025, 3, 21))       # 창 밖 옛 날짜(서버 실측 145210 행)
-BEFORE = dt.date(2026, 7, 16)                            # 창 바로 앞
-WINDOW = tuple(dt.date(2026, 7, 17) + dt.timedelta(days=i) for i in range(15)
-               if (dt.date(2026, 7, 17) + dt.timedelta(days=i)).weekday() < 5)
+PRE = tuple(dt.date(2026, 7, 13) + dt.timedelta(days=i) for i in range(4))   # 07-13~07-16 창 앞
+WINDOW = tuple(d for d in (dt.date(2026, 7, 17) + dt.timedelta(days=i) for i in range(15))
+               if d.weekday() < 5)
+DAYS = (*OLD, *PRE, *WINDOW)
+E_EV = dt.date(2026, 7, 24)
+E_PO = dt.date(2026, 7, 27)
+E_HALT = dt.date(2026, 7, 24)
+HALTED = tuple(d for d in WINDOW if dt.date(2026, 7, 20) <= d < E_HALT)
+E_PAST = dt.date(2026, 7, 16)
+PO_BASE = 29_950                                         # 이론가 29,987.5 → 호가 50원 단위
+HALT_REF, HALT_BASE = 5_000, 4_200
 
 
-def _close(ticker: str, d: dt.date) -> int:
-    if ticker == EV:
-        if d in OLD:
-            return 1_126
-        base = 100 + (d - BEFORE).days                   # 액면병합 전 100원대
-        return base * 10 if d >= FOLD_EV else base
-    return {PO: 30_000, PAST: 70_000, NONE: 50_000}[ticker] + (d - BEFORE).days * 100
+def _close(t: str, d: dt.date) -> int:
+    i = DAYS.index(d)
+    if t == EV:
+        return 1_126 if d in OLD else (1_000 + 10 * i if d >= E_EV else 100 + i)
+    if t == PO:
+        return 30_000 + 100 * i if d < E_PO else 30_000 + 50 * i
+    if t == HALT:
+        if d in HALTED or d == WINDOW[0]:              # 정지 전날 종가 = 참고가
+            return HALT_REF
+        return HALT_BASE + 10 * i if d >= E_HALT else 5_100 + i
+    if t == PAST:
+        return 70_000 + 100 * i if d < E_PAST else 35_000 + 100 * i
+    return 50_000 + 100 * i
 
 
-def _factors(ticker: str, d: dt.date) -> tuple[float, float]:
-    """(cum_share_factor, cum_price_only_factor)."""
-    if ticker == EV:
-        return (G_POST if d >= FOLD_EV else G_PRE), 1.0
-    if ticker == PO:
-        return 1.0, (PO_FACTOR if d >= FOLD_PO else 1.0)
-    if ticker == PAST:
-        return 2.5, 1.0
-    return 1.0, 1.0
+def _base(t: str, d: dt.date, prev: int | None) -> int | None:
+    """그날 KRX 기준가 — 사건 날만 전일 종가와 다르다."""
+    if prev is None:
+        return _close(t, d)
+    if t == EV and d == E_EV:
+        return prev * 10
+    if t == PO and d == E_PO:
+        return PO_BASE
+    if t == HALT and d == E_HALT:
+        return HALT_BASE
+    if t == PAST and d == E_PAST:
+        return prev // 2
+    return prev
 
 
-def g(ticker: str, d: dt.date) -> float:
-    share, price_only = _factors(ticker, d)
-    return share / price_only
+def _price(t: str, d: dt.date, prev: int | None) -> dict:
+    close = _close(t, d)
+    row = _price_row(t, d, close, value=close * 1_000_000, mktcap=10**12)
+    row.update(open=close - 10, high=close + 20, low=close - 30, volume_shr=1_000_000 + DAYS.index(d),
+               base_price_krw=_base(t, d, prev))
+    if t == HALT and d in HALTED:                       # 정지 참고가 행 — O/H/L 공란·거래량 0
+        row.update(open=None, high=None, low=None, volume_shr=0, value_krw=0,
+                   price_kind="reference")
+    return row
 
 
-def _adj_row(ticker: str, d: dt.date) -> dict:
-    """`price_adj_daily` 실물 18열(e1.26.0) — adj = 원주가 × share ÷ price_only."""
-    share, price_only = _factors(ticker, d)
-    adj = _close(ticker, d) * share / price_only
-    return {"ticker": ticker, "date": d, "adj_open": adj, "adj_high": adj, "adj_low": adj,
-            "adj_close": adj, "adj_volume_shr": 1_000_000.0, "cum_price_factor": 1.0,
-            "cum_share_factor": share, "cum_price_only_factor": price_only,
-            "n_factors_applied": 0, "n_price_only_applied": 0, "n_unadjusted_events": 0,
-            "n_price_unresolved_events": 0, "available_date": d, "available_basis": "derived",
-            "basis": "krx", "corp_action_pending": False}
+def _prices() -> list[dict]:
+    rows = []
+    for t in TICKERS:
+        prev = None
+        for d in DAYS:
+            rows.append(_price(t, d, prev))
+            prev = _close(t, d)
+    return rows
 
 
-def _roots(base: Path) -> tuple[Path, Path]:
-    tickers = (EV, PO, PAST, NONE)
-    days = (*OLD, BEFORE, *WINDOW)
-    prices = [_price_row(t, d, _close(t, d), value=1_000_000_000, mktcap=10**12)
-              for t in tickers for d in days]
-    adj = [_adj_row(t, d) for t in tickers for d in days]
-    uni = [_uni_row(t, d, "KOSPI", "common") for t in tickers for d in days]
+def k_ratio(t: str, d: dt.date, x: dt.date) -> float:
+    """K(d) ÷ K(x)(x ≥ d) = 1 ÷ Π_{d < e ≤ x} ks(e) — 명세 쪽 계산(픽스처 기준가로)."""
+    r = 1.0
+    for prev_d, e in itertools.pairwise(DAYS):
+        if d < e <= x:
+            prev, base = _close(t, prev_d), _base(t, e, _close(t, prev_d))
+            assert base is not None
+            r /= prev / base
+    return r
+
+
+def _c(d: dt.date, last: dt.date) -> dt.date:
+    """v3 가 d 를 마지막으로 덮은 날 — d 뒤 4번째 행, 없으면 마지막 행."""
+    rows = [x for x in DAYS if d < x <= last]
+    return rows[3] if len(rows) >= 4 else last
+
+
+def _roots(base: Path, prices: list[dict] | None = None) -> tuple[Path, Path]:
+    prices = _prices() if prices is None else prices
+    uni = [_uni_row(r["ticker"], r["date"], "KOSPI", "common") for r in prices]
     eq = base / "eq"
-    for table, rows in (("price_daily", prices), ("price_adj_daily", adj),
-                        ("universe_daily", uni)):
+    for table, rows in (("price_daily", prices), ("universe_daily", uni)):
         _make_stage_tree(eq, table, rows, build_id=BUILD)
     (base / "st" / "stage").mkdir(parents=True)
     return eq / "stage", base / "st" / "stage"
@@ -104,36 +132,35 @@ def roots(tmp_path_factory) -> tuple[Path, Path]:
     return _roots(tmp_path_factory.mktemp("qle"))
 
 
-# 대상 파일의 창 밖 옛 행 — 앞선 반영본(사건 전 기준: 그때의 최신 행 = 원종가)
-NO_EQUITY_DAY = "2025-03-19"                            # equity 에 행이 없는 날(대상에만 있다)
+NO_EQUITY_DAY = "2025-03-19"                            # 대상에만 있는 날(equity 행 없음)
+SEED = 7                                                # 창 앞 행의 시·고·저 표식 — 이번 실행이 건드리면 바뀐다
 
 
 def _seed_target(target: Path) -> None:
+    """창 밖 옛 행 — 앞선 반영본(사건 전 기준: 그때 adj = 종가)."""
     con = sqlite3.connect(str(target))
     try:
         con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
-        rows = []
-        for t in (EV, PO, PAST, NONE):
-            for d in (*OLD, BEFORE):
-                c = _close(t, d)
-                rows.append((t, d.isoformat(), c, c, c, c, 1, 1, float(c)))
-        rows.append((EV, NO_EQUITY_DAY, 1_100, 1_100, 1_100, 1_100, 1, 1, 1_100.0))
+        rows = [(t, d.isoformat(), SEED, SEED, SEED, _close(t, d), 1, 1, float(_close(t, d)))
+                for t in TICKERS for d in (*OLD, *PRE)]
+        rows.append((EV, NO_EQUITY_DAY, SEED, SEED, SEED, 1_100, 1, 1, 1_100.0))
         con.executemany("INSERT INTO daily_prices VALUES (?,?,?,?,?,?,?,?,?)", rows)
         con.commit()
     finally:
         con.close()
 
 
-def _run(roots: tuple[Path, Path], target: Path, date: str = D):
+def _run(roots: tuple[Path, Path], target: Path, date: str = D, window_days: int = 14):
     return export(equity_root=roots[0], stage_root=roots[1], date=date, basis="morning",
-                  target=target, tables=["daily_prices"], full=True, window_days=14)
+                  target=target, tables=["daily_prices"], full=True, window_days=window_days)
 
 
-def _adj(target: Path) -> dict[tuple[str, str], tuple[int, float | None]]:
+def _all(target: Path) -> dict[tuple[str, str], tuple]:
     con = sqlite3.connect(str(target))
     try:
-        return {(r[0], r[1]): (r[2], r[3]) for r in con.execute(
-            "SELECT stock_code, trade_date, close, adj_close FROM daily_prices")}
+        return {(r[0], r[1]): r[2:] for r in con.execute(
+            "SELECT stock_code, trade_date, open, high, low, close, volume, amount, adj_close "
+            "FROM daily_prices")}
     finally:
         con.close()
 
@@ -142,108 +169,217 @@ def _adj(target: Path) -> dict[tuple[str, str], tuple[int, float | None]]:
 def done(roots, tmp_path: Path):
     target = tmp_path / "quant.db"
     _seed_target(target)
-    return _run(roots, target), _adj(target)
+    return _run(roots, target), _all(target)
+
+
+LAST = WINDOW[-1]
 
 
 # ── 창 안 ────────────────────────────────────────────────────────────────────
-def test_latest_row_is_the_raw_close(done) -> None:
-    """① 각 종목 창 안 마지막 행 = 원종가(v3 ka10081 수정주가와 같은 기준)."""
+def test_latest_row_is_raw_and_adj_equals_close(done) -> None:
+    """① 마지막 행 = 원값(시·고·저·종가·거래량), adj_close = 종가(정확히 같다)."""
     _, got = done
-    last = WINDOW[-1].isoformat()
-    for t in (EV, PO, PAST, NONE):
-        close, adj = got[(t, last)]
-        assert adj == close, t                          # 근사가 아니라 정확히 같다
+    for t in TICKERS:
+        o, h, low, c, v, _amt, adj = got[(t, LAST.isoformat())]
+        assert (o, h, low, c, v) == (c - 10, c + 20, c - 30, _close(t, LAST),
+                                     1_000_000 + DAYS.index(LAST)), t
+        assert adj == c, t
 
 
-def test_rows_before_the_event_are_scaled_by_the_factor_ratio(done) -> None:
-    """② 사건 전 행 = 종가 × g(d) ÷ g(마지막) — 액면병합 10:1 이면 10배, 가격 전용 1.25 면 1.25배."""
+def test_adj_close_is_the_krx_base_price_chain(done) -> None:
+    """② adj_close = 원종가 × K(d)/K(L) — 병합 10배, 호가 반올림 기준가(29,950 ÷ 30,600 그대로, 범주 C), 정지 해제
+    재평가(4,200 ÷ 5,000, 범주 B). equity 계수가 아니라 KRX 기준가로 센다."""
     _, got = done
-    for d in WINDOW:
-        close, adj = got[(EV, d.isoformat())]
-        want = close * (G_PRE / G_POST) if d < FOLD_EV else close
-        assert adj == pytest.approx(want, rel=1e-12), d
-        close, adj = got[(PO, d.isoformat())]
-        assert adj == pytest.approx(close * PO_FACTOR if d < FOLD_PO else close, rel=1e-12), d
-    close, adj = got[(EV, "2026-07-23")]
-    assert (close, adj) == (107, pytest.approx(1_070.0, rel=1e-6))     # 액면병합 전 107원 × 10
+    for t in TICKERS:
+        for d in WINDOW:
+            want = _close(t, d) * k_ratio(t, d, LAST)
+            assert got[(t, d.isoformat())][6] == pytest.approx(want, rel=1e-12), (t, d)
+    d = WINDOW[WINDOW.index(E_PO) - 1]
+    assert got[(PO, d.isoformat())][6] == pytest.approx(PO_BASE, rel=1e-12)   # 종가 × 29,950/종가
+    d = HALTED[-1]
+    assert got[(HALT, d.isoformat())][6] == pytest.approx(HALT_BASE, rel=1e-12)   # 5,000 × 0.84
+    d = WINDOW[WINDOW.index(E_EV) - 1]
+    assert got[(EV, d.isoformat())][6] == pytest.approx(_close(EV, d) * 10, rel=1e-12)
 
 
-def test_tickers_without_an_event_in_the_window_keep_adj_equal_close(done) -> None:
-    """③ 창 안에 사건이 없으면 창 앞 사건이 있어도(g 고정) adj_close = close 다(전방 조정이면 2.5배)."""
+def test_four_rows_before_an_event_are_overwritten_like_v3(done) -> None:
+    """T-41 — 사건 직전 4행의 시·고·저·종가 = 원값 × K(d)/K(c), 거래량 = 원값 × K(c)/K(d), 거래대금은 원값.
+    5번째 앞 행부터는 원값이다(그 행을 마지막으로 덮은 날이 사건 전)."""
+    _, got = done
+    for t, e in ((EV, E_EV), (PO, E_PO), (HALT, E_HALT)):
+        i = WINDOW.index(e)
+        for d in WINDOW[max(0, i - 6):i]:
+            f = k_ratio(t, d, _c(d, LAST))
+            src = _price(t, d, None)
+            o, h, low, c, v, amt, _ = got[(t, d.isoformat())]
+            fill = src["close"]
+            assert (o, h, low, c) == tuple(round((x if x is not None else fill) * f) for x in (
+                src["open"], src["high"], src["low"], src["close"])), (t, d)
+            assert v == round(src["volume_shr"] / f), (t, d)
+            assert amt == round(src["value_krw"] / 1e6), (t, d)
+            if d < WINDOW[i - 4]:
+                assert c == _close(t, d), (t, d)              # 덮인 날이 사건 전 — 원값
+            else:
+                assert c != _close(t, d), (t, d)
+
+
+def test_briefing_return_on_the_event_day_is_the_real_return(done) -> None:
+    """T-41 의 목적 — 07:00 브리핑 등락률 `(d.close − p.close) / p.close` 가 사건일에 가짜 급등락(병합 +900%)이
+    아니라 KRX 수익률(종가 ÷ 기준가 − 1)이다."""
+    _, got = done
+    for t, e in ((EV, E_EV), (HALT, E_HALT), (PO, E_PO)):
+        p = WINDOW[WINDOW.index(e) - 1]
+        ret = got[(t, e.isoformat())][3] / got[(t, p.isoformat())][3] - 1
+        base = _base(t, e, _close(t, p))
+        assert base is not None
+        assert ret == pytest.approx(_close(t, e) / base - 1, abs=1e-3), t
+    assert got[(EV, E_EV.isoformat())][3] / _close(EV, WINDOW[WINDOW.index(E_EV) - 1]) > 9   # 원값이면 +900%
+
+
+def test_tickers_without_a_step_in_the_window_are_raw(done) -> None:
+    """③ 창 안에 기준가 단계가 없으면 창 앞 사건이 있어도 원값 그대로, adj_close = close."""
     _, got = done
     for t in (PAST, NONE):
         for d in WINDOW:
-            close, adj = got[(t, d.isoformat())]
-            assert adj == close, (t, d)
+            o, h, low, c, v, _amt, adj = got[(t, d.isoformat())]
+            assert (o, h, low, c, v) == (c - 10, c + 20, c - 30, _close(t, d),
+                                         1_000_000 + DAYS.index(d)), (t, d)
+            assert adj == c, (t, d)
 
 
-def test_returns_are_the_same_as_forward_adjusted(done) -> None:
-    """④ 하루 수익률은 전방 조정(equity adj_close)과 같다 — 비율만 쓰는 소비자(모멘텀 등)는 불변."""
+def test_adj_returns_are_the_krx_returns(done) -> None:
+    """④ adj_close 하루 수익률 = 종가 ÷ 기준가 − 1(기준가 = 전일 종가면 보통 수익률) — 비율 소비자 불변."""
     _, got = done
-    for t in (EV, PO, PAST, NONE):
-        for prev, cur in itertools.pairwise(WINDOW):
-            ours = got[(t, cur.isoformat())][1] / got[(t, prev.isoformat())][1]
-            fwd = (_close(t, cur) * g(t, cur)) / (_close(t, prev) * g(t, prev))
-            assert ours == pytest.approx(fwd, rel=1e-12), (t, cur)
+    for t in TICKERS:
+        for p, d in itertools.pairwise(WINDOW):
+            base = _base(t, d, _close(t, p))
+            assert base is not None
+            ours = got[(t, d.isoformat())][6] / got[(t, p.isoformat())][6]
+            assert ours == pytest.approx(_close(t, d) / base, rel=1e-12), (t, d)
 
 
 # ── 창 밖 ────────────────────────────────────────────────────────────────────
-def test_event_tickers_rows_outside_the_window_are_rebased(done) -> None:
-    """⑤ 창 안에서 g 가 바뀐 종목은 대상의 창 밖 옛 행도 같은 기준으로 다시 쓴다(v3 가 사건 뒤 종목
-    전 기간을 다시 받는 것과 같은 결과). equity 행이 없는 날은 기준을 모르므로 NULL(P1)."""
+def test_step_tickers_get_outside_adj_rebased_from_raw_close(done) -> None:
+    """⑤ 창 안에 단계가 든 종목은 대상의 창 밖 옛 행 adj_close 를 원종가 × K(d)/K(L) 로 다시 쓴다(시·고·저·종가·
+    거래량은 그대로 — 그 행은 앞선 실행이 이미 최종값을 썼다). equity 행이 없는 날은 NULL(P1)."""
     res, got = done
-    close, adj = got[(EV, BEFORE.isoformat())]
-    assert adj == pytest.approx(close * G_PRE / G_POST, rel=1e-12)
-    close, adj = got[(PO, BEFORE.isoformat())]
-    assert adj == pytest.approx(close * PO_FACTOR, rel=1e-12)
-    assert got[(EV, NO_EQUITY_DAY)] == (1_100, None)
+    for t in (EV, PO, HALT):
+        for d in (*OLD, *PRE):
+            o, h, low, c, _v, _amt, adj = got[(t, d.isoformat())]
+            assert (o, h, low, c) == (SEED, SEED, SEED, _close(t, d)), (t, d)
+            assert adj == pytest.approx(_close(t, d) * k_ratio(t, d, LAST), rel=1e-12), (t, d)
+    assert got[(EV, NO_EQUITY_DAY)][3:] == (1_100, 1, 1, None)
     rebase = res.tables["daily_prices"].rebase
     assert rebase is not None
     assert rebase["before"] == FROM_ISO
-    assert rebase["tickers"] == sorted([EV, PO])
-    assert (rebase["n_rows"], rebase["n_null"]) == (7, 1)   # EV 옛 3행 + 빈 날 1 · PO 옛 3행
+    assert rebase["tickers"] == sorted([EV, PO, HALT])
+    assert (rebase["n_rows"], rebase["n_null"]) == (19, 1)   # 3종목 × 옛 6행 + 빈 날 1
 
 
-def test_tickers_without_an_event_in_the_window_leave_outside_rows_alone(done) -> None:
-    """⑤ 창 안 사건이 없는 종목의 창 밖 행은 건드리지 않는다(쓴 범위 = 창 + 다시 맞춘 종목)."""
+def test_tickers_without_a_step_in_the_window_leave_outside_rows_alone(done) -> None:
+    """⑤ 창 앞 사건(PAST 07-16)은 이번 창의 단계가 아니다 — 창 밖 행은 그대로(그 사건 때 다시 맞췄다)."""
     _, got = done
     for t in (PAST, NONE):
-        for d in (*OLD, BEFORE):
+        for d in (*OLD, *PRE):
             c = _close(t, d)
-            assert got[(t, d.isoformat())] == (c, float(c)), (t, d)
+            assert got[(t, d.isoformat())] == (SEED, SEED, SEED, c, 1, 1, float(c)), (t, d)
 
 
 def test_145210_reverse_split_shape_matches_v3(done) -> None:
-    """서버 실측(10-08): v3 사본 145210 2025-03-21 adj 11,260 = 10 × 종가 1,126, 옛 compat 5,300.3
-    (= 1,126 × 누적계수 4.707 — 전방 조정). 새 기준은 v3 와 같다(계수 0.09999998 이라 0.002원 차)."""
+    """서버 실측(10-08): v3 사본 145210 2025-03-21 adj 11,260 = 10 × 종가 1,126(옛 compat 5,300.3 — 전방 조정)."""
     _, got = done
-    close, adj = got[(EV, "2025-03-21")]
-    assert close == 1_126
-    assert adj == pytest.approx(11_260, rel=1e-6)
-    assert adj != pytest.approx(1_126 * G_PRE, rel=1e-3)
+    assert got[(EV, "2025-03-21")][3] == 1_126
+    assert got[(EV, "2025-03-21")][6] == pytest.approx(11_260, rel=1e-12)
+
+
+def test_window_start_boundary(roots, tmp_path: Path) -> None:
+    """창 첫 행 근처 — 사건(07-24)이 창 둘째 행이면(D = 07-27, 창 4일 = 07-23~) 창 첫 행은 덮어쓰기 값(×10)이고,
+    창 앞 3행(07-20~22)의 시·고·저·종가는 이번 실행이 건드리지 않는다(adj_close 만 다시 맞춘다). 그래서 창은
+    5세션 이상이어야 한다(매일 14일 창 — 사건일 실행에서 그 행들이 창 안이다)."""
+    target = tmp_path / "quant.db"
+    _seed_target(target)
+    _run(roots, target)                                 # 07-31 기준 반영본(창 07-17~)
+    _run(roots, target, date="20260727", window_days=4)
+    got = _all(target)
+    last = dt.date(2026, 7, 27)
+    first = dt.date(2026, 7, 23)
+    assert got[(EV, first.isoformat())][3] == round(_close(EV, first) * k_ratio(EV, first, last))
+    for d in (dt.date(2026, 7, 20), dt.date(2026, 7, 21), dt.date(2026, 7, 22)):
+        assert got[(EV, d.isoformat())][3] == _close(EV, d) * 10            # 07-31 실행 값 그대로
+        assert got[(EV, d.isoformat())][6] == pytest.approx(_close(EV, d) * k_ratio(EV, d, last))
+
+
+def test_daily_runs_equal_one_full_run(roots, tmp_path: Path) -> None:
+    """매일 증분(창 7일 ≥ 5세션)을 이어 돌린 결과 = 마지막 날 한 번의 전체 반영 — 덮어쓰기 행이 창을 떠날 때 최종값이다."""
+    daily, full = tmp_path / "daily.db", tmp_path / "full.db"
+    _run(roots, daily, date="20260716", window_days=600)
+    for d in WINDOW:
+        _run(roots, daily, date=d.strftime("%Y%m%d"), window_days=7)
+    _run(roots, full, window_days=600)
+    a, b = _all(daily), _all(full)
+    assert a.keys() == b.keys()
+    for key, row in b.items():
+        assert a[key][:6] == row[:6], key
+        assert a[key][6] == pytest.approx(row[6], rel=1e-12), key
 
 
 def test_rerun_is_idempotent(roots, tmp_path: Path) -> None:
-    """같은 판으로 다시 돌려도 값이 같다 — 창 밖 행도 옛 adj 가 아니라 종가 × 계수비로 다시 계산한다."""
     target = tmp_path / "quant.db"
     _seed_target(target)
     _run(roots, target)
-    first = _adj(target)
+    first = _all(target)
     _run(roots, target)
-    assert _adj(target) == first
+    assert _all(target) == first
 
 
-def test_no_rebase_when_no_event_falls_in_the_window(roots, tmp_path: Path) -> None:
-    """D = 07-22(창 07-08~07-22) — 사건이 창 밖 뒤라 아직 모른다. 창 밖 행은 그대로, 기록은 빈 종목."""
+def test_no_rebase_when_no_step_falls_in_the_window(roots, tmp_path: Path) -> None:
+    """D = 07-21(창 4일 = 07-17~) — 07-24·27 사건은 아직 없고 07-16 사건은 창 앞이다. 창 밖 행은 그대로,
+    기록은 빈 종목 목록."""
     target = tmp_path / "quant.db"
     _seed_target(target)
-    before = _adj(target)
-    res = _run(roots, target, date="20260722")
-    after = _adj(target)
+    before = _all(target)
+    res = _run(roots, target, date="20260721", window_days=4)
+    after = _all(target)
     for key, val in before.items():
-        if key[1] < "2026-07-08":
+        if key[1] < FROM_ISO:
             assert after[key] == val, key
     rebase = res.tables["daily_prices"].rebase
     assert rebase is not None and rebase["tickers"] == []
-    # 창 안 EV 는 그날 기준(07-22 = 원종가)
-    assert after[(EV, "2026-07-22")][1] == after[(EV, "2026-07-22")][0]
+
+
+# ── v3 08-07 사본 형식(실데이터) ─────────────────────────────────────────────
+def _fixture_rows() -> list[dict]:
+    with FIXTURE.open(encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _num(x: str) -> int | None:
+    return None if x == "" else int(x)
+
+
+def test_matches_the_v3_0807_copy_rows(tmp_path: Path) -> None:
+    """T-40 · T-41 — 로컬 v3 08-07 사본의 145210(07-24 병합·정지)·011930(05-15 병합·정지) 97행과 같다:
+    시·고·저·종가·거래량·거래대금 정확히(±1), adj_close 1원 또는 0.15% 안(키움 원 단위 반올림)."""
+    fx = _fixture_rows()
+    prices = []
+    for r in fx:
+        d = dt.date.fromisoformat(r["date"])
+        row = _price_row(r["ticker"], d, int(r["close"]), value=_num(r["value"]), mktcap=10**12)
+        row.update(open=_num(r["open"]), high=_num(r["high"]), low=_num(r["low"]),
+                   volume_shr=int(r["volume"]), base_price_krw=_num(r["base"]),
+                   price_kind=r["price_kind"])
+        prices.append(row)
+    roots = _roots(tmp_path / "fx", prices)
+    target = tmp_path / "quant.db"
+    export(equity_root=roots[0], stage_root=roots[1], date="20260807", basis="morning",
+           target=target, tables=["daily_prices"], full=True, window_days=110)
+    got = _all(target)
+    assert len(got) == len(fx) == 97
+    for r in fx:
+        o, h, low, c, v, amt, adj = got[(r["ticker"], r["date"])]
+        want = tuple(int(r[k]) for k in ("v3_open", "v3_high", "v3_low", "v3_close", "v3_volume",
+                                         "v3_amount"))
+        assert all(abs(x - y) <= 1 for x, y in zip((o, h, low, c, v, amt), want, strict=True)), (
+            r["ticker"], r["date"], (o, h, low, c, v, amt), want)
+        v3_adj = float(r["v3_adj_close"])
+        assert abs(adj - v3_adj) <= 1.0 or abs(adj / v3_adj - 1) <= 0.0015, (r, adj)

@@ -106,10 +106,13 @@ wisereport failed for 005930 after 3 attempts: TimeoutError
 [holiday_gate] 20261019 영업일 → 진행
 2026-10-19T11:05:01 INFO job=holiday_gate status=success attempt=1
 2026-10-19T11:05:01 INFO job=insight_pipeline attempt=1/1
-2026-10-19 11:05:30,123 WARNING ka20006 업종일봉 001 응답 지연 — 재시도
-2026-10-19 11:05:31,456 WARNING ka10051 업종별 투자자 순매수 0 행
+2026-10-19 11:05:30,123 INFO HTTP Request: POST https://api.kiwoom.com/api/dostk/chart "HTTP/1.1 200 OK"
+2026-10-19 11:05:31,456 WARNING ka20006 failed for 001 page 0: ReadTimeout
 2026-10-19T11:06:01 INFO job=insight_pipeline status=success attempt=1
 2026-10-19T11:06:01 INFO job=wiki_ingest attempt=1/1
+- 컨센서스(WiseReport 기준) 상향 상위 3종목 정리
+  · ka10081 일봉 기준 52주 신고가 5종목 · KIS rate limit exceeded 경고는 어제 없었다
+요약: wisereport failed 0건
 [ingest] 전체 완료: 2026-10-19
 2026-10-19T11:28:01 INFO job=wiki_ingest status=success attempt=1
 2026-10-19T11:28:01 INFO job=wiki_lint attempt=1/1
@@ -119,6 +122,8 @@ wisereport failed for 005930 after 3 attempts: TimeoutError
 ka10059 failed for 005930 page 0: 429
 """
 
+# NORMAL_LOG 의 insight 줄 `ka20006 failed for …` 는 허용 TR 갈래를 보려고 실제 메시지 모양(`kiwoom/client.py:234`)에
+# 허용 TR id 를 넣은 것이다. 위키 줄 셋은 LLM 산문 — 표지 모양이 아니라 잡히지 않는다(QL-L 리뷰 MINOR-1).
 # 그날 daily_all 이 그대로 돈 로그(①의 금지 표지 셋 — 키움 종목별 TR·KIS·WiseReport)
 PRECUTOVER_LOG = """\
 2026-10-19T11:05:01 INFO job=calendar_refresh attempt=1/1
@@ -187,18 +192,29 @@ def _write_v3_db(path: Path, *, runs: tuple[tuple[str, str, str], ...] = NORMAL_
             other[0], other[1], other[6] = "999999", "2026-10-16", 1.0
             rows.append(tuple(other))
             con.executemany(f"INSERT INTO {table} VALUES ({', '.join('?' * ncols)})", rows)
-        if record is not None:
-            tables = {t: TableResult(n_rows=2, n_skipped=0, sources={}) for t in BY_TABLE}
-            for t, n in zip(SCORE_TABLES, record, strict=True):
-                tables[t] = TableResult(n_rows=n, n_skipped=0, sources={})
-            _write_meta(con, ExportResult(
-                date=D_ISO, basis="evening", target=str(path), exported_at="2026-10-19T07:19:30.000000+00:00",
-                window={"days": 14, "full": False, "from_date": "2026-10-05", "to_date": D_ISO},
-                consensus_asof="2026-10-16", tables=tables,
-                model_builds=MODEL_BUILDS if model_builds is None else model_builds))
     finally:
         con.close()
+    if record is not None:
+        _add_record(path, n=record, model_builds=model_builds)
     return path
+
+
+def _add_record(db: Path, *, n: tuple[int, int] = (5, 6), status: str = "ok", date_iso: str = D_ISO,
+                basis: str = "evening", exported_at: str = "2026-10-19T07:19:30.000000+00:00",
+                model_builds: dict[str, str] | None = None) -> None:
+    """`_compat_meta` 반영 기록 1행(진짜 `_write_meta`) — 점수 두 표 포함 9표, `n` = 점수 표에 넣은 행 수."""
+    tables = {t: TableResult(n_rows=2, n_skipped=0, sources={}) for t in BY_TABLE}
+    for t, k in zip(SCORE_TABLES, n, strict=True):
+        tables[t] = TableResult(n_rows=k, n_skipped=0, sources={})
+    con = sqlite3.connect(str(db), isolation_level=None)
+    try:
+        _write_meta(con, ExportResult(
+            date=date_iso, basis=basis, target=str(db), exported_at=exported_at, status=status,
+            window={"days": 14, "full": False, "from_date": "2026-10-05", "to_date": date_iso},
+            consensus_asof="2026-10-16", tables=tables,
+            model_builds=MODEL_BUILDS if model_builds is None else model_builds))
+    finally:
+        con.close()
 
 
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -257,9 +273,11 @@ def test_정상_허용_job_만이면_rc0_이고_알림이_없다(tmp_path: Path,
     assert jobs["briefing_morning"] == "allowed" and jobs["chain:daily_insight"] == "allowed"
     assert jobs["research_broker_nh"] == "allowed"
     assert set(jobs.values()) == {"allowed"}
-    # 허용 TR(T-27) 표지는 보이기만 한다 · 시각 없는 줄은 앞 시각 줄 날짜(전날 ka10081·wisereport 는 창 밖)
-    marks = {(m["token"], m["allowed"]) for m in out["collect"]["markers"]}
-    assert marks == {("ka20006", True), ("ka10051", True)}
+    # 허용 TR(T-27) 표지는 보이기만 한다 · 시각 없는 줄은 앞 시각 줄 날짜(전날 ka10081·wisereport 는 창 밖) ·
+    # 위키 LLM 산문(WiseReport·ka10081·KIS 단어)은 표지가 아니다
+    marks = {(m["token"], m["level"]) for m in out["collect"]["markers"]}
+    assert marks == {("ka20006", "allowed")}
+    assert out["collect"]["warnings"] == []
     sh = out["scores"]["tables"]["score_history"]
     assert (sh["rows"], sh["record"]["n_rows"], sh["record"]["build_id"]) == (5, 5, MODEL_BUILDS["scope@1.0"])
     assert out["cron"]["daily_post_runs"] == 1
@@ -283,7 +301,7 @@ def test_금지_수집_job_이_돌면_위반이고_세는_crit_한_줄(tmp_path:
     assert jobs["scoring"] == "scoring"                     # 로그에서 본 스코어링은 ② 위반
     v1 = " ".join(out["collect"]["violations"])
     assert "daily_pipeline" in v1 and "consensus" in v1 and "calendar_refresh" in v1
-    bad = {m["token"] for m in out["collect"]["markers"] if not m["allowed"]}
+    bad = {m["token"] for m in out["collect"]["markers"] if m["level"] == "violation"}
     assert bad == {"ka10081", "kis", "wisereport"}
     assert any("scoring" in v for v in out["scores"]["violations"])
     crits = _crits(home)
@@ -307,14 +325,56 @@ def test_분류표에_없는_job_은_허용_목록_밖이라_위반(tmp_path: Pa
     assert "분류 안 된 job: chain:daily_data · new_collector" in capsys.readouterr().out
 
 
-def test_허용_job_안이라도_허용_밖_TR_표지는_위반(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_허용_job_에_붙은_허용_밖_표지는_경고만(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                      capsys: pytest.CaptureFixture[str]) -> None:
+    """허용 job(insight·위키 등) 안의 표지는 위반이 아니라 경고 — job 이 허용이면 수집 위반의 근거가 job 이 아니다
+    (QL-L 리뷰 MINOR-1)."""
     home = _home(tmp_path, monkeypatch)
-    log = NORMAL_LOG.replace("ka10051 업종별 투자자 순매수 0 행", "ka10059 failed for 005930 page 0: 429")
+    log = NORMAL_LOG.replace("ka20006 failed for 001 page 0: ReadTimeout", "ka10059 failed for 005930 page 0: 429")
+    log = log.replace("요약: wisereport failed 0건", "wisereport worker1: 812 processed")
+    assert _run(home, _inputs(tmp_path, log=log)) == 0
+    out = _out(home)
+    lv = {(m["token"], m["job"]): m["level"] for m in out["collect"]["markers"]}
+    assert lv == {("ka10059", "insight_pipeline"): "warn", ("wisereport", "wiki_ingest"): "warn"}
+    assert len(out["collect"]["warnings"]) == 2 and out["violations"] == []
+    assert _crits(home) == []
+    assert "경고(허용 job 에 붙은 표지 — 위반 아님)" in capsys.readouterr().out
+
+
+def test_job_없는_줄의_표지는_위반(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """앞에 job 줄이 없는 표지 — 어느 허용 job 에도 붙지 않으므로 위반이다."""
+    home = _home(tmp_path, monkeypatch)
+    log = ("2026-10-19T00:10:00 INFO 수동 실행\n"
+           "2026-10-19 00:10:01,001 WARNING KIS rate limit exceeded tr_id=FHKST01010100 attempt=1 wait=1s\n")
     assert _run(home, _inputs(tmp_path, log=log)) == 1
     out = _out(home)
-    m = [x for x in out["collect"]["markers"] if x["token"] == "ka10059"]
-    assert len(m) == 1 and m[0]["allowed"] is False and m[0]["job"] == "insight_pipeline"
-    assert out["scores"]["violations"] == [] and out["cron"]["violations"] == []
+    assert [(m["token"], m["job"], m["level"]) for m in out["collect"]["markers"]] == [("kis", None, "violation")]
+
+
+@pytest.mark.parametrize(("line", "tokens"), [
+    # v3 실제 메시지 모양 — 앞머리 없음(lastResort)·basicConfig format·basicConfig 기본
+    ("ka10081 ohlcv 005930 page 0: ReadTimeout", ["ka10081"]),                         # kiwoom/client.py:192
+    ("2026-10-19 11:05:30,123 WARNING ka10059 failed for 005930 page 1: 429", ["ka10059"]),  # :234
+    ("WARNING:backend.clients.kiwoom.client:ka10081 ohlcv 005930 page 2: x", ["ka10081"]),
+    ("KIS rate limit exceeded tr_id=CTCA0903R attempt=1 wait=1s", ["kis"]),             # kis/client.py:98
+    ("holiday_check attempt 1 failed: Server error '500 Internal Server Error' for url "
+     "'https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/chk-holiday'", ["kis"]),
+    ("wisereport retry 1 for 005930: TimeoutError", ["wisereport"]),                   # collect_wisereport.py:111
+    ("wisereport failed for 005930 after 3 attempts: x", ["wisereport"]),              # :113
+    ("wisereport save failed for 005930: x", ["wisereport"]),                          # :130
+    ("wisereport worker0: 500 processed", ["wisereport"]),                             # :138
+    ("wisereport failed stocks (2): 005930,000660", ["wisereport"]),                   # :142
+    ("WiseReport page load failed for https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd=005930: x",
+     ["wisereport"]),                                                                  # naver/scraper.py:117
+    # 산문(위키 LLM 출력 등) — 표지가 아니다
+    ("- 컨센서스(WiseReport 기준) 상향 상위 3종목 정리", []),
+    ("  · ka10081 일봉 기준 52주 신고가 5종목", []),
+    ("[ingest] KIS rate limit exceeded 라는 경고가 어제 있었다", []),
+    ("요약: wisereport failed 3건", []),
+    ("2026-10-19 11:05:30,123 INFO HTTP Request: POST https://api.kiwoom.com/api/dostk/sect \"HTTP/1.1 200 OK\"", []),
+])
+def test_표지는_v3_실제_메시지_모양에만_맞는다(line: str, tokens: list[str]) -> None:
+    assert cw.line_markers(line) == tokens
 
 
 # ── ② 점수 쓰기 한 곳 ───────────────────────────────────────────────────────
@@ -349,6 +409,40 @@ def test_compat_기록에_판_id_가_없으면_위반(tmp_path: Path, monkeypatc
     assert len(v2) == 1 and "v2_percentrank@1.0" in v2[0]
 
 
+def test_실패한_compat_기록만_있으면_compat_밖_쓰기다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """status 필터 — 실패 기록(R6 흔적)은 반영이 아니다. 행 수가 같아도 위반(변이 M6 status 필터 제거를 잡는다)."""
+    home = _home(tmp_path, monkeypatch)
+    inp = _inputs(tmp_path, record=None)
+    _add_record(inp["db"], status="failed")
+    assert _run(home, inp) == 1
+    out = _out(home)
+    assert out["scores"]["tables"]["score_history"]["record"] is None
+    assert len(out["scores"]["violations"]) == 2
+    assert all("compat 반영 기록" in v for v in out["scores"]["violations"])
+
+
+def test_다른_날_compat_기록만_있으면_compat_밖_쓰기다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """date 필터 — 다른 날 반영 기록은 그날 점수의 출처가 아니다(변이 M7 date 필터 제거를 잡는다)."""
+    home = _home(tmp_path, monkeypatch)
+    inp = _inputs(tmp_path, record=None)
+    _add_record(inp["db"], date_iso="2026-10-16", exported_at="2026-10-16T07:19:30.000000+00:00")
+    assert _run(home, inp) == 1
+    out = _out(home)
+    assert out["scores"]["tables"]["score_history_v2"]["record"] is None
+    assert all("compat 반영 기록" in v for v in out["scores"]["violations"])
+
+
+def test_같은_날_기록이_둘이면_마지막_기록의_행_수로_본다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """장 마감 ⑥(07:19 UTC, 7·8행) 뒤 다음 날 아침 재반영이 점수를 다시 썼다(23:40 UTC, 5·6행 — T-34 대체 경로).
+    v3 행 5·6 = 마지막 기록이라 정상(변이 M8 max→min 이면 앞 기록 7·8 과 갈려 위반으로 잘못 본다)."""
+    home = _home(tmp_path, monkeypatch)
+    inp = _inputs(tmp_path, record=(7, 8))
+    _add_record(inp["db"], n=(5, 6), basis="morning", exported_at="2026-10-19T23:40:00.000000+00:00")
+    assert _run(home, inp) == 0
+    rec = _out(home)["scores"]["tables"]["score_history"]["record"]
+    assert (rec["exported_at"], rec["basis"], rec["n_rows"]) == ("2026-10-19T23:40:00.000000+00:00", "morning", 5)
+
+
 def test_점수_행도_기록도_없으면_위반이_아니다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """장 마감 판 실패일·휴장일 — 점수는 다음 날 아침 재반영이 채운다(T-38). 감시의 일이 아니다."""
     home = _home(tmp_path, monkeypatch)
@@ -364,6 +458,42 @@ def test_daily_all_크론이_남으면_위반(tmp_path: Path, monkeypatch: pytes
     assert len(out["cron"]["lines"]["daily_all"]) == 1
     assert len(out["cron"]["violations"]) == 1 and "daily_all" in out["cron"]["violations"][0]
     assert len(_crits(home)) == 1
+
+
+def test_daily_post_크론_줄이_있으면_위반(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """daily_post 는 v3_post.sh 가 부른다(V3-A) — 크론에도 있으면 v3 엑셀이 두 번 나가고 반영 전 옛 점수가 간다."""
+    home = _home(tmp_path, monkeypatch)
+    line = "35 7 * * 1-5 " + _V3.format(lock="kael_v3_daily_post", cmd="scripts/job_runner.py --chain daily_post",
+                                        log="pipeline")
+    assert _run(home, _inputs(tmp_path, cron=NORMAL_CRON + line + "\n")) == 1
+    v3 = _out(home)["cron"]["violations"]
+    assert len(v3) == 1 and v3[0].startswith("daily_post 크론 줄 남음")
+
+
+@pytest.mark.parametrize(("name", "cmd"), [
+    ("backfill.py", "scripts/backfill.py --mode adj_prices"),
+    ("backend.pipeline", "-m backend.pipeline"),
+    ("backend.scoring", "-m backend.scoring.engine"),
+    ("scoring_then_ingest", "scripts/scoring_then_ingest.sh"),
+])
+def test_job_runner_밖_직접_진입점_크론은_위반(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                      name: str, cmd: str) -> None:
+    """pipeline_runs 에 안 남는 무거운 수집·스코어링 직접 실행(QL-L 리뷰 MINOR-3)."""
+    home = _home(tmp_path, monkeypatch)
+    line = "0 12 * * 1-5 " + _V3.format(lock="kael_x", cmd=cmd, log="x")
+    assert _run(home, _inputs(tmp_path, cron=NORMAL_CRON + line + "\n")) == 1
+    v3 = _out(home)["cron"]["violations"]
+    assert len(v3) == 1 and v3[0].startswith(f"{name} 크론 줄 남음")
+
+
+def test_비슷한_이름의_유지_크론은_위반이_아니다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """리포트(backend.research.pipeline)·브리핑·insight 진입점, 증권사 리포트 백필 스크립트는 금지 패턴에 안 걸린다."""
+    home = _home(tmp_path, monkeypatch)
+    extra = ["0 12 * * 1-5 " + _V3.format(lock="a", cmd="-m backend.research.brokers.run", log="x"),
+             "0 13 * * 1-5 " + _V3.format(lock="b", cmd="-m backend.briefing.pipeline --slot close --send", log="x"),
+             "0 14 * * 1-5 " + _V3.format(lock="c", cmd="-m backend.insight.pipeline", log="x"),
+             "0 15 * * 0 " + _V3.format(lock="d", cmd="scripts/backfill_broker_reports.py", log="x")]
+    assert _run(home, _inputs(tmp_path, cron=NORMAL_CRON + "\n".join(extra) + "\n")) == 0
 
 
 @pytest.mark.parametrize("line", [CRON_YEAR, CRON_MONTHLY])

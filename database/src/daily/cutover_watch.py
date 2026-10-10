@@ -16,12 +16,17 @@ asctime 은 서버 TZ(Etc/UTC — v3 `docs/system-guide/survey/08-ops.md` §1-1)
      `job_runner.py:121·150`), DailyPipeline 하위 단계(`daily_pipeline.py:121·165`), 증권사 리포트
      (`research_broker_<소스>`, `_store.py:26-35`). 뉴스·DART·이벤트 크론은 이 표에 쓰지 않는다.
    · v3 체인 로그(`~/logs/kael-v3/pipeline.log`)의 그날 줄. job_runner 줄 `<시각> <등급> job=<이름> …`
-     (`job_runner.py:15-19·93`)에서 job 이름을, 모든 줄에서 표지를 본다 — 허용 TR(T-27 insight 시장 단위 5종) 밖
-     키움 TR id · KIS(도메인·속도 제한 경고 `backend/clients/kis/client.py:98`) · WiseReport. 키움 클라이언트는 실패만
-     로그에 남겨(`backend/clients/kiwoom/client.py:108·192·234`) 표지는 보조 근거다. 시각 없는 줄(자식 프로세스
-     경고 — `backend.pipeline` 은 로깅 설정이 없어 WARNING 만 시각 없이 나온다)은 바로 앞 시각 줄의 날짜·job 을 따른다.
+     (`job_runner.py:15-19·93`)에서 job 이름을, 모든 줄에서 표지를 본다. 표지는 v3 가 실제로 남기는 메시지 모양에만
+     맞춘다(위키 LLM 출력 같은 산문이 잡히지 않게 — QL-L 리뷰 MINOR-1): 키움 `ka<5자리> ohlcv|failed for`
+     (`backend/clients/kiwoom/client.py:192·234`) · KIS `KIS rate limit exceeded`(`backend/clients/kis/client.py:98`)·
+     `koreainvestment.com`(KIS 오류 URL) · WiseReport `wisereport retry|failed|save failed|worker`
+     (`backend/pipeline/collect_wisereport.py:111-142`)·`WiseReport page load failed`(`backend/clients/naver/scraper.py:117`).
+     메시지 앞에는 로깅 설정에 따라 `<시각> <등급> `·`<등급>:<로거>:` 가 붙거나 아무것도 없다. 키움 클라이언트는
+     실패만 로그에 남겨 표지는 보조 근거다. 허용 TR(T-27 insight 시장 단위 5종) 표지는 허용, 허용 job(위키·insight 등)에
+     붙은 표지는 경고(위반 아님), 그 밖의 job·job 없는 줄에 붙은 표지는 위반이다. 시각 없는 줄(자식 프로세스 경고 —
+     `backend.pipeline` 은 로깅 설정이 없어 WARNING 만 시각 없이 나온다)은 바로 앞 시각 줄의 날짜·job 을 따른다.
      연구 리포트 로그(research.log)는 넣지 않는다 — 리포트 수집의 KIS 휴장 1콜(`backend/research/pipeline.py:20-37`)은
-     유지 대상이라 표지가 위반으로 잡힌다.
+     유지 대상인데 그 로그에는 job 줄이 없어 표지가 위반으로 잡힌다.
 ② 점수 쓰기 한 곳 (T-16)
    · v3 스코어링 job(`scoring`·`scoring_v2`)이 그날 돌았으면(`pipeline_runs`·로그) 위반.
    · `score_history`·`_v2` 의 score_date = D 행이 있으면 `_compat_meta` 에 그날 ok 기록 중 그 표를 쓴 기록이 있어야
@@ -31,9 +36,12 @@ asctime 은 서버 TZ(Etc/UTC — v3 `docs/system-guide/survey/08-ops.md` §1-1)
      재반영이 채운다 — T-38, 그 실패는 장 마감 체인 crit 이 잡는다).
 ③ v3 크론 (V3-A·B·D) — `crontab -l` 출력(파일, `-` 이면 표준입력). 주석(#)·환경 대입 줄은 꺼진 줄로 본다.
    · `--chain daily_all` 줄이 있으면 위반(V3-B) · `--chain daily_insight` 줄이 없으면 위반(V3-A)
+   · `--chain daily_post` 줄이 있으면 위반 — daily_post 는 `scripts/v3_post.sh` 가 `--v3-post-cmd` 로 부른다(COMPAT_LAYER
+     §8-1 V3-A). 크론에도 있으면 v3 엑셀이 두 번 나가고 반영 전 옛 점수가 갈 수 있다. 그날 `chain:daily_post` 실행 수는
+     보이기만 한다
    · v3 휴장 쓰기 `refresh_year_holidays`·`monthly_holiday_review` 줄이 있으면 위반(V3-D, T-24)
-   · `daily_post` 는 크론에 두지 않는다 — `scripts/v3_post.sh` 가 `--v3-post-cmd` 로 부른다(COMPAT_LAYER §8-1 V3-A).
-     크론 줄 수와 그날 `chain:daily_post` 실행 수는 보이기만 한다.
+   · job_runner 를 거치지 않아 `pipeline_runs` 에 안 남는 무거운 수집·스코어링 직접 진입점(`scripts/backfill.py`·
+     `backend.pipeline`·`backend.scoring.`·`scoring_then_ingest`) 줄이 있으면 위반
 
 모드: 기본(감시)은 위반이면 rc 1 + `scripts/notify.sh crit` 한 줄(제목 `TITLE_VIOLATION`). `--baseline`(컷오버 전 그림자
 기간 — v3 가 아직 전부 돈다)은 같은 분석을 기록만 하고 rc 0, 알림 없음 — 허용 목록이 실제 v3 job 과 맞는지 실측하는
@@ -92,9 +100,11 @@ JOBS: dict[str, tuple[str, str]] = {
     "insight_pipeline": (ALLOWED, "시장 단위 키움 TR 5종 + ECOS(backend/insight/collector.py:172-188) — T-27"),
     "wiki_ingest": (ALLOWED, "kael-wiki 위키 갱신 — daily_insight(T-31)"),
     "wiki_lint": (ALLOWED, "kael-wiki 주간 점검 — daily_insight(T-31)"),
-    "briefing_morning": (ALLOWED, "07:00 브리핑 — v3 소비자(정본 §0), 시장 단위 시황"),
-    "briefing_midday": (ALLOWED, "12:15 브리핑 — v3 소비자(정본 §0)"),
-    "briefing_close": (ALLOWED, "15:35 브리핑 — v3 소비자(정본 §0)"),
+    # 브리핑 — 시장 단위 시황: 키움 시장 TR(backend/briefing/collectors/kr_intraday.py:42-60)·KIS 해외 지수·관심종목
+    # (backend/briefing/context.py:35-46 `_collect_us_sync` — KisOverseasClient). 종목별 국내 크롤링이 아니다
+    "briefing_morning": (ALLOWED, "07:00 브리핑 — v3 소비자(정본 §0), 키움 시장 TR·KIS 해외(briefing/context.py:35-46)"),
+    "briefing_midday": (ALLOWED, "12:15 브리핑 — v3 소비자(정본 §0), 키움 시장 TR·KIS 해외(briefing/context.py:35-46)"),
+    "briefing_close": (ALLOWED, "15:35 브리핑 — v3 소비자(정본 §0), 키움 시장 TR·KIS 해외(briefing/context.py:35-46)"),
     "news_ingest": (ALLOWED, "뉴스 수집 — 유지(N-42 Q2)"),
     "trade_ingest": (ALLOWED, "관세청 수출입 — 키움·KIS·WiseReport 아님(N-42 Q2 끄는 목록 밖)"),
     "trade_backfill": (ALLOWED, "관세청 수출입 백필 — 키움·KIS·WiseReport 아님(N-42 Q2 끄는 목록 밖)"),
@@ -126,21 +136,34 @@ ALLOWED_TR = frozenset({"ka20006", "ka20001", "ka10051", "ka90010", "ka20003"})
 
 _TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})")
 _JOB_RE = re.compile(r"\bjob=(\S+)")
-_TR_RE = re.compile(r"\bk[at]\d{5}\b")
-_KIS_RE = re.compile(r"koreainvestment\.com|KIS rate limit", re.IGNORECASE)
-_WISE_RE = re.compile(r"wisereport", re.IGNORECASE)
+# 로그 표지 — v3 가 실제로 남기는 메시지 모양에만 맞춘다(머리 주석 ①). 메시지 앞머리: basicConfig format
+# `<시각> <등급> `(job_runner·insight) · basicConfig 기본 `<등급>:<로거>:` · 설정 없음(lastResort — 메시지만)
+_MSG_HEAD = r"^(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:,\d+)? [A-Z]+ |[A-Z]+:[\w.]+:)?"
+_KIWOOM_RE = re.compile(_MSG_HEAD + r"(ka\d{5}) (?:ohlcv|failed for) ")
+_KIS_RE = re.compile(rf"(?:{_MSG_HEAD}KIS rate limit exceeded)|koreainvestment\.com")
+_WISE_RE = re.compile(_MSG_HEAD + r"(?:wisereport (?:retry|failed|save failed|worker)|WiseReport page load failed)")
 _MARKER_LABEL = {"kis": "KIS 호출", "wisereport": "네이버 WiseReport"}
 
-# 크론 규칙 — (이름, 패턴, 종류, 근거). forbid = 켜진 줄이 있으면 위반, require = 없으면 위반, info = 보이기만
+# 크론 규칙 — (이름, 패턴, 종류, 근거). forbid = 켜진 줄이 있으면 위반, require = 없으면 위반
 _CRON_ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 CRON_RULES: tuple[tuple[str, re.Pattern[str], str, str], ...] = (
     ("daily_all", re.compile(r"--chain[= ]+daily_all\b"), "forbid", "V3-B — daily_all 줄을 지운다"),
     ("daily_insight", re.compile(r"--chain[= ]+daily_insight\b"), "require", "V3-A — 20:05 자리 daily_insight 체인"),
+    ("daily_post", re.compile(r"--chain[= ]+daily_post\b"), "forbid",
+     "V3-A — daily_post 는 v3_post.sh 가 --v3-post-cmd 로 부른다. 크론에도 있으면 v3 엑셀이 두 번 나가고 반영 전 "
+     "옛 점수가 갈 수 있다"),
     ("refresh_year_holidays", re.compile(r"refresh_year_holidays"), "forbid", "V3-D — v3 휴장 쓰기(KIS) 끄기, T-24"),
     ("monthly_holiday_review", re.compile(r"monthly_holiday_review"), "forbid",
      "V3-D — v3 휴장 쓰기(KIS) 끄기, T-24"),
-    ("daily_post", re.compile(r"\bdaily_post\b"), "info",
-     "v3_post.sh 가 --v3-post-cmd 로 부른다 — 크론 줄을 요구하지 않는다(COMPAT_LAYER §8-1 V3-A)"),
+    # job_runner 를 거치지 않는 직접 진입점 — pipeline_runs 에 안 남는 무거운 수집·스코어링(QL-L 리뷰 MINOR-3)
+    ("backfill.py", re.compile(r"scripts/backfill\.py"), "forbid",
+     "키움 종목별 백필 직접 진입점(scripts/backfill.py — adj_prices·investor_detail 등, N-42 Q2)"),
+    ("backend.pipeline", re.compile(r"\bbackend\.pipeline\b"), "forbid",
+     "daily_pipeline 직접 진입점(-m backend.pipeline — KIS·키움·WiseReport, N-42 Q2)"),
+    ("backend.scoring", re.compile(r"\bbackend\.scoring\."), "forbid",
+     "v3 스코어링 직접 진입점(-m backend.scoring.engine·v2_engine — T-16)"),
+    ("scoring_then_ingest", re.compile(r"scoring_then_ingest"), "forbid",
+     "스코어링 직접 진입점(서버 crontab 의 이름 — 로컬 사본엔 없다, QL-L 리뷰) — T-16"),
 )
 
 _WEEKDAY = "월화수목금토일"
@@ -188,9 +211,30 @@ class Marker:
 
     token: str                  # 키움 TR id · 'kis' · 'wisereport'
     job: str | None             # 바로 앞 job_runner 줄의 job(없으면 None)
-    allowed: bool
     lines: int = 0
     sample: str = ""
+
+    @property
+    def level(self) -> str:
+        """'allowed'(허용 TR, T-27) · 'warn'(허용 job 에 붙음 — 위키 출력 등, 위반 아님) · 'violation'."""
+        if self.token in ALLOWED_TR:
+            return "allowed"
+        if self.job is not None and classify_job(self.job)[0] == ALLOWED:
+            return "warn"
+        return "violation"
+
+
+def line_markers(line: str) -> list[str]:
+    """한 줄의 표지(키움 TR id · 'kis' · 'wisereport') — v3 실제 메시지 모양만(머리 주석 ①)."""
+    out: list[str] = []
+    km = _KIWOOM_RE.match(line)
+    if km:
+        out.append(km.group(1))
+    if _KIS_RE.search(line):
+        out.append("kis")
+    if _WISE_RE.match(line):
+        out.append("wisereport")
+    return out
 
 
 @dataclass(frozen=True)
@@ -243,13 +287,8 @@ def read_log(path: Path, lo: dt.datetime, hi: dt.datetime, jobs: dict[str, JobSe
             n_in += 1
             if jm:
                 jobs.setdefault(jm.group(1), JobSeen()).log_lines += 1
-            hits = [(t, t in ALLOWED_TR) for t in dict.fromkeys(_TR_RE.findall(line))]
-            if _KIS_RE.search(line):
-                hits.append(("kis", False))
-            if _WISE_RE.search(line):
-                hits.append(("wisereport", False))
-            for token, allowed in hits:
-                mk = markers.setdefault((token, job), Marker(token, job, allowed))
+            for token in line_markers(line):
+                mk = markers.setdefault((token, job), Marker(token, job))
                 mk.lines += 1
                 mk.sample = mk.sample or line.strip()[:200]
     return LogInfo(str(path), n_in, at.strftime(_TS_OUT) if at else None)
@@ -337,6 +376,7 @@ class Result:
     v_collect: list[str]
     v_scores: list[str]
     v_cron: list[str]
+    w_collect: list[str] = field(default_factory=list)    # 허용 job 에 붙은 표지 — 경고만(위반 아님)
     notified: bool | None = None
 
     @property
@@ -368,11 +408,12 @@ class Result:
                 "jobs": [{"job": j, "class": classify_job(j)[0], "why": classify_job(j)[1], "runs": s.runs,
                           "log_lines": s.log_lines, "statuses": dict(s.statuses)}
                          for j, s in _sorted_jobs(self.jobs)],
-                "markers": [{"token": m.token, "job": m.job, "allowed": m.allowed, "lines": m.lines,
+                "markers": [{"token": m.token, "job": m.job, "level": m.level, "lines": m.lines,
                              "sample": m.sample} for m in self.markers],
                 "logs": [{"path": x.path, "lines_in_day": x.lines_in_day, "last_at_utc": x.last_at_utc}
                          for x in self.logs],
                 "violations": self.v_collect,
+                "warnings": self.w_collect,
             },
             "scores": {"tables": self.scores, "violations": self.v_scores},
             "cron": {"lines": self.cron_lines, "daily_post_runs": self.daily_post_runs, "violations": self.v_cron},
@@ -425,11 +466,14 @@ def watch(d: dt.date, *, v3_db: Path, v3_logs: Sequence[Path], crontab: str, bas
             v_collect.append(f"허용 목록 밖 job {job} — {why} {_evidence(seen)}")
         elif cls == SCORING:
             v_scoring.append(f"v3 스코어링 job {job} 실행 — {why} {_evidence(seen)}")
-    marks = sorted(markers.values(), key=lambda m: (m.allowed, m.token, m.job or ""))
+    marks = sorted(markers.values(), key=lambda m: (m.level, m.token, m.job or ""))
+    w_collect: list[str] = []
     for m in marks:
-        if not m.allowed:
-            label = _MARKER_LABEL.get(m.token, f"키움 TR {m.token}(허용 TR 밖)")
-            v_collect.append(f"로그 표지 {label} {m.lines}줄(job {m.job or '?'}) — 예: {m.sample}")
+        if m.level == "allowed":
+            continue
+        label = _MARKER_LABEL.get(m.token, f"키움 TR {m.token}(허용 TR 밖)")
+        text = f"로그 표지 {label} {m.lines}줄(job {m.job or '?'}) — 예: {m.sample}"
+        (w_collect if m.level == "warn" else v_collect).append(text)
 
     cron_lines = {name: [ln for ln in cron if pat.search(ln)] for name, pat, _kind, _why in CRON_RULES}
     v_cron: list[str] = []
@@ -443,7 +487,7 @@ def watch(d: dt.date, *, v3_db: Path, v3_logs: Sequence[Path], crontab: str, bas
     inputs: dict[str, object] = {"v3_db": str(v3_db), "v3_logs": [str(p) for p in v3_logs], "crontab": crontab}
     post = jobs.get("chain:daily_post")
     return Result(d, baseline, (lo, hi), inputs, jobs, marks, logs, scores, cron_lines,
-                  post.runs if post else 0, v_collect, v_scoring + v_scores, v_cron)
+                  post.runs if post else 0, v_collect, v_scoring + v_scores, v_cron, w_collect)
 
 
 # ── 출력 ───────────────────────────────────────────────────────────────────
@@ -469,9 +513,10 @@ def render(res: Result, out: Path | None) -> str:
     if allowed:
         lines.append("   허용: " + " · ".join(allowed[:SAMPLE_N * 2])
                      + (f" 외 {len(allowed) - SAMPLE_N * 2}" if len(allowed) > SAMPLE_N * 2 else ""))
-    ok_marks = [f"{m.token} {m.lines}줄({m.job or '?'})" for m in res.markers if m.allowed]
+    ok_marks = [f"{m.token} {m.lines}줄({m.job or '?'})" for m in res.markers if m.level == "allowed"]
     if ok_marks:
         lines.append("   허용 TR 표지(T-27): " + " · ".join(ok_marks))
+    lines += [f"   경고(허용 job 에 붙은 표지 — 위반 아님) {w}" for w in res.w_collect[:SAMPLE_N]]
     lines.append(f"② 점수 쓰기 한 곳 — 위반 {len(res.v_scores)}")
     for t, info in res.scores.items():
         rec = info["record"]
@@ -481,9 +526,11 @@ def render(res: Result, out: Path | None) -> str:
         else:
             lines.append(f"   {t} {info['rows']}행 · 그날 compat 기록 없음")
     lines += _cap(res.v_scores)
-    counts = " · ".join(f"{name} {len(res.cron_lines[name])}줄" for name, *_ in CRON_RULES)
-    lines.append(f"③ v3 크론 — 위반 {len(res.v_cron)} · {counts} · 그날 chain:daily_post {res.daily_post_runs}회"
-                 "(daily_post 는 v3_post.sh 가 부른다)")
+    forbid = [f"{name} {len(res.cron_lines[name])}" for name, _p, kind, _w in CRON_RULES
+              if kind == "forbid" and res.cron_lines[name]]
+    lines.append(f"③ v3 크론 — 위반 {len(res.v_cron)} · daily_insight {len(res.cron_lines['daily_insight'])}줄 · "
+                 f"금지 줄 {' · '.join(forbid) if forbid else '없음'} · 그날 chain:daily_post {res.daily_post_runs}회"
+                 "(v3_post.sh 가 부른다)")
     lines += _cap(res.v_cron)
     tail = f" — 감시 모드였다면 위반 {len(res.violations)}건" if res.baseline else ""
     lines.append(f"판정: {_VERDICT_KO[res.verdict]}(rc {res.rc}){tail}")

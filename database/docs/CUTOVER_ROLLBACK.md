@@ -122,7 +122,7 @@ V3="$HOME/kael-system-v3/data/quant.db"
   - 되돌린 다음 날 아침에는 전날 장 마감 판이 이미 나갔어도 아침판이 한 번 더 나간다. basis 가 다른 별개 엑셀이고 장부도 따로라 막지 않는다.
   - 08:10 아침판이 '짓기만'으로 끝난 뒤 그날 10:30 전에 되돌렸으면, 그날 10:30 워치독 crit '확정판 엑셀 발송 기록 없음' 은 예상된 것이다(워치독이 아침 장부만 보는데 그 D 는 장 마감 판이 보냈다).
   - 확인: 아래 '성공 확인'의 `발송 off` 가 곧 전환 전이다. 다음 날 아침 장부에 그 D 의 basis=morning 줄이 생기고, 10:30 워치독이 정상 info 를 낸다.
-- **QL-Q 연결**: 06:00 체인이 v3 `data/.kis_holidays.json` 을 쓰고 있으면 끈다. 자리는 연결 PR 이 정한다.
+- **QL-Q 연결(QL-Q2 스위치, T-48)**: 같은 배포로 `config/calendar_export.env` 의 `CALENDAR_EXPORT_V3=0` 을 내보낸다 — 06:00 체인이 v3 `data/.kis_holidays.json` 을 더 쓰지 않고, 06:00·18:05 v3 사본 동기화(병행 대조)가 다시 돈다. 4-3 에서 v3 휴장 쓰기(V3-D 크론 2줄·되살린 daily_all 의 `calendar_refresh`)를 되살리기 전에 꺼져 있어야 한다 — 켜진 채면 이 파일을 쓰는 주체가 둘이 된다.
 - **성공 확인**
   - `bash scripts/postclose_chain.sh close --dry-run | head -1` 이 `켜짐 · 발송 off · v3 shadow` 를 보인다.
   - `pgrep -af 'postclose_chain.sh|v3_post.sh'` 가 비어 있다. 돌고 있으면 끝날 때까지 기다린다. 락을 기다리던 체인의 제자리 반영이 복원 뒤에 깨면 '복원 뒤 첫 반영' 게이트(§5 — 체인은 `--first-after-restore` 표식을 넘기지 않는다)가 막는다. 다만 그 crit 이 남는다.
@@ -190,6 +190,7 @@ scripts/v3_restore.sh --backup "$B/quant_$S.db" --v3-db "$V3"                  #
    ```
    - 기대하는 차이는 넷이다. (A) `--chain daily_insight` 줄이 있다 → 없다. (B) `--chain daily_all` 줄이 없다 → 있다. (D) `refresh_year_holidays`·`monthly_holiday_review` 두 줄이 없다(주석) → 있다. (QL-L) 23:30 `daily.cutover_watch` 감시 줄이 있다 → 없다(컷오버 날 V3-A~E 뒤에 넣은 줄이라 백업에 없다).
    - 그 밖의 줄도 다르면(컷오버 뒤 quant-ledger 크론 변경 등) 통째로 덮지 않는다. `crontab -e` 로 위 줄들만 고친다 — 감시 줄은 지우지 말고 주석 처리한다.
+   - 덮기 전에 4-1 의 `CALENDAR_EXPORT_V3=0` 이 서버에 배포돼 있는지 본다(`grep CALENDAR_EXPORT_V3 ~/quant-ledger/config/calendar_export.env` → `=0`). 켜진 채 (D)·(B) 의 v3 휴장 쓰기를 되살리면 v3 휴장 파일을 쓰는 주체가 둘이 된다(T-48).
    ```bash
    crontab "$B/crontab.bak.$S"
    ```

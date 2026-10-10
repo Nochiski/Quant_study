@@ -52,3 +52,20 @@ silent_loss_block_on() {
            END { printf "%s", v }' config/silent_loss.env 2>/dev/null) || return 1
   [ "$v" = 1 ]
 }
+# 휴장 파일 내보내기 스위치(T-48 · QL-Q2) — config/calendar_export.env 의 CALENDAR_EXPORT_V3 가 정확히 1 일 때만 rc 0(켜짐).
+# 그 밖의 값·빈 값·파일 없음·읽기 실패는 rc 1(꺼짐 — 지금 동작). 쓰는 곳: daily_ledger.sh(06:00 내보내기 + v3 사본 동기화
+# 건너뜀) · daily_evening.sh(18:05 v3 사본 동기화 건너뜀) — 두 체인이 같은 판정을 쓰도록 여기 한 곳에 둔다. 읽기 규칙은
+# 위 silent_loss_block_on 과 같다(주석·빈 줄 건너뜀, 첫 '=' 로 가름, 앞뒤 공백·값 따옴표를 벗김, 마지막 대입이 이김).
+# source 하지 않는다 — 수집 체인이 설정 파일 안의 명령에 막히지 않게
+calendar_export_v3_on() {
+  local v
+  [ -f config/calendar_export.env ] || return 1
+  v=$(awk '{ line = $0; gsub(/^[ \t\r]+|[ \t\r]+$/, "", line)
+             if (line == "" || substr(line, 1, 1) == "#") next
+             i = index(line, "="); if (i == 0) next
+             name = substr(line, 1, i - 1); val = substr(line, i + 1)
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", name); if (name != "CALENDAR_EXPORT_V3") next
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", val); gsub(/^["\047]+|["\047]+$/, "", val); v = val }
+           END { printf "%s", v }' config/calendar_export.env 2>/dev/null) || return 1
+  [ "$v" = 1 ]
+}

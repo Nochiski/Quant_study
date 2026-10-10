@@ -131,6 +131,8 @@ EXCLUDED_CRIT_PREFIXES: tuple[str, ...] = (
     # (daily_master) · wics_weekly.sh · 그 원장 락(raw_lock.sh 의 이름) · 저녁 원장·WICS 워치독
     "daily_evening ", "daily_ledger ", "daily_master ", "wics_weekly ", "휴장 달력 갱신", "WICS 주간 스냅샷",
     "watchdog: HH:MM 까지 저녁 원장", "watchdog: 토 HH:MM 까지 WICS",
+    # 06:00 daily_ledger.sh 의 v3·uni 휴장 파일 내보내기(daily.calendar_export) — 점수 경로 밖(T-48)
+    "휴장 파일 내보내기",
     # 21:20 연구 저녁 잠정판 빌드(build_evening.sh · build_chain.sh 잠정판)와 그 워치독 — 그림자 시작 때 중단
     "잠정판 빌드 실패", "잠정 빌드 시작 불가", "watchdog: HH:MM 까지 잠정판",
     # 일일 리포트 요약 줄(scripts/daily_report.py — 개별 원인과 이중으로 센다)

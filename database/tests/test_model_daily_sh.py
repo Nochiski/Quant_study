@@ -93,6 +93,8 @@ def _root(home: Path, *, stub_flock: bool = True) -> Path:
     stubs = {root / ".venv/bin/python": _PY,
              root / "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
              root / "scripts/build_morning.sh": _BUILD,
+             # 장 마감 판 아침 잇기 훅(PR-8 ⑧) — 이 파일은 모델 단계만 보므로 rc 0 대역(훅은 test_postclose_chain_sh)
+             root / "scripts/postclose_chain.sh": "#!/usr/bin/env bash\nexit 0\n",
              home / "fakebin/sqlite3": _SQLITE}
     if stub_flock:
         stubs[home / "fakebin/flock"] = _FLOCK

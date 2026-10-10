@@ -404,6 +404,9 @@ def test_진짜_일일_리포트와_notify_sh_가_남긴_줄을_읽는다(
     ("모델 단계 실패: fi(rc=2)", "counted"),
     # v3 반영 — v3_post.sh
     ("v3_post 20261014 evening 실패(gate) rc=2", "counted"),
+    # v3 반영 경로 감시 — daily.cutover_watch(QL-L)
+    ("컷오버 감시 위반 D=20261019: ① 수집 1 · ② 점수 0 · ③ 크론 0", "counted"),
+    ("컷오버 감시 판정 불가 D=20261019", "counted"),
     # 워치독 — postclose_board · morning_build(확정 빌드 · 확정판 엑셀 발송 장부)
     ("watchdog: 16:30 까지 장 마감 판 보고 없음/실패", "counted"),
     ("watchdog: 10:30 까지 확정 빌드 보고 없음/실패", "counted"),
@@ -478,6 +481,14 @@ def test_스크립트_crit_제목은_빠짐없이_분류된다() -> None:
     assert any(f == "watchdog.sh" for f, _ in titles)
     left = [(f, t) for f, t in titles if not t.strip() or wj.classify_crit(t) == "unclassified"]
     assert left == [], f"분류 안 된 crit 제목 — COUNTED/EXCLUDED_CRIT_PREFIXES 에 넣을 것: {left}"
+
+
+def test_컷오버_감시_crit_제목은_세는_목록이다() -> None:
+    """QL-L 은 파이썬 모듈이 notify.sh 를 부른다 — 위 셸 훑기에 안 잡히므로 제목 상수로 대조한다(v3 반영 경로, T-39)."""
+    from daily import cutover_watch as cw
+
+    for title in (cw.TITLE_VIOLATION, cw.TITLE_ERROR):
+        assert wj.classify_crit(f"{title} D=20261019: 무엇") == "counted", title
 
 
 def test_DART_crit_만_있는_날은_통과하고_판정_밖으로_보인다(tmp_path: Path) -> None:
@@ -645,10 +656,7 @@ def test_record_는_빈_값과_틀린_날짜를_거부한다(tmp_path: Path) -> 
 def test_체인_단계_이름은_러너와_같다() -> None:
     from daily import postclose
     assert wj.CHAIN_SOURCES[0] == postclose.SOURCE
-    steps = getattr(runlog, "POSTCLOSE_STEPS", None)
-    if steps is None:
-        pytest.skip("PR-8 머지 전 — runlog.POSTCLOSE_STEPS 없음(머지 때 이 대조가 돈다)")
-    assert wj.CHAIN_SOURCES[1:] == tuple(steps)
+    assert wj.CHAIN_SOURCES[1:] == runlog.POSTCLOSE_STEPS
     assert wj.COMPARE_SOURCE in runlog.POSTCLOSE_FOLLOWUPS
 
 

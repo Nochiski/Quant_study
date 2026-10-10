@@ -130,7 +130,7 @@ uv run --project backend pytest database/tests -q
 
 - 테스트: backend 환경 없이(`--no-project` 등) 돌리면 워크벤치 연동 테스트(`test_equity_s21_workbench.py`)가 조용히 skip 되므로 위 명령을 쓴다.
 - 서버 배포: `database/scripts/deploy.sh`(기본 dry-run, `--apply` 만 전송 — 아래 "운영 (P6) → 배포"). `rebuild_share.py` 의 정본은 `backend/ops/` 다.
-- 키·토큰: 코드는 `QL_ENV` 또는 `~/kael-system-v3/.env` 에서만 읽는다. 레포에는 넣지 않는다.
+- 키·토큰: 코드는 `QL_ENV` 가 가리키는 파일에서만 읽는다(비었거나 파일이 없으면 실패 — 다른 파일로 대신하지 않는다). 운영은 서버 `$HOME/quant-ledger/.env` 이고 체인 스크립트가 시작부에서 고정한다 — 아래 "운영 (P6) → 비밀 파일". 레포에는 넣지 않는다.
 - 협업자 로컬 동기화(서버 equity 층 → `~/quant-ledger/data/equity`): `database\scripts\ledger_sync.ps1 sync`, 검증 `verify --offline`, 일일 등록 `register_daily_sync.ps1`. 절차·판단 기준은 `docs/LEDGER_SYNC.md`.
 
 ## 작업 규칙
@@ -197,7 +197,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`
 (잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
-`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다) · `QL_RAW_LOCK_FILE`(테스트 전용 — 원장 락 파일 경로, `scripts/raw_lock.sh` 를 쓰는 다섯 스크립트 공통, 운영 크론·대화형 셸에 남기지 않는다) · `QL_RAW_LOCK_WAKE_DATE`(테스트 전용 — 원장 락을 잡은 직후의 KST 날짜 YYYY-MM-DD 를 덮어쓴다, 운영에선 비운다) · `QL_V3_DB`(v3 quant.db 경로 — `v3_post.sh`·`postclose_chain.sh`, 체인 기본 `$HOME/kael-system-v3/data/quant.db`) · `QL_BUILD_LOCK_FILE`·`QL_POSTCLOSE_CHAIN_LOCK_FILE`(테스트 전용 — 빌드 락·장 마감 체인 락 파일 경로, 운영 크론·대화형 셸에 남기지 않는다).
+`QL_ENV`(비밀 파일 경로 — 체인 진입점이 `$HOME/quant-ledger/.env` 로 고정, 아래 "비밀 파일") · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy) · `QL_WEEKDAY`(테스트 전용 — `daily_ledger.sh` 의 KST 요일 판정을 덮어쓴다, 운영 크론에는 넣지 않는다) · `QL_RAW_LOCK_FILE`(테스트 전용 — 원장 락 파일 경로, `scripts/raw_lock.sh` 를 쓰는 다섯 스크립트 공통, 운영 크론·대화형 셸에 남기지 않는다) · `QL_RAW_LOCK_WAKE_DATE`(테스트 전용 — 원장 락을 잡은 직후의 KST 날짜 YYYY-MM-DD 를 덮어쓴다, 운영에선 비운다) · `QL_V3_DB`(v3 quant.db 경로 — `v3_post.sh`·`postclose_chain.sh`, 체인 기본 `$HOME/kael-system-v3/data/quant.db`) · `QL_BUILD_LOCK_FILE`·`QL_POSTCLOSE_CHAIN_LOCK_FILE`(테스트 전용 — 빌드 락·장 마감 체인 락 파일 경로, 운영 크론·대화형 셸에 남기지 않는다).
 
 ### 장 마감 체인 — `scripts/postclose_chain.sh` (컷오버 PR-8)
 
@@ -299,10 +299,10 @@ DART 완료 판정은 plan 의 전 유닛(정기 7종·주요사항 15종·지�
 
    못 받은 유닛 다시 부르기 — 소요는 실패 줄의 `units − received` × 약 0.8초로 가늠하고, 18:05 전에 끝날 때만:
    ```bash
-   cd ~/quant-ledger && export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
+   cd ~/quant-ledger && export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src" QL_ENV="$HOME/quant-ledger/.env"
    flock -w 600 /tmp/quant_ledger_raw.lock .venv/bin/python -m daily.dart_daily --date D --skip-sweep
    ```
-   06:00 체인 crit 직후(08:10 전)에 돌리면 08:10 체인이 그 끝을 기다렸다가 회복된 DART 로 확정판을 짓는다. 그날 일일 리포트에서 dart 는 '회복'으로 보이지만 `ledger_chain` 실패는 crit 으로 남는다(`dart company gap` 을 실제로 건너뛰었으므로 — 아래처럼 따로 돌린다). 08:10 뒤에 고쳤다면 그 D 확정판에는 빠져 있다 — 다시 지을지는 3번. DART 가 실패하면 06:00 체인의 `dart company gap` 도 건너뛰므로 회복 뒤 `bash scripts/dart_company_gap.sh` 를 돌린다. '재무 반영 지연 N건'은 판정을 막지 않는다 — 다음 런이 다시 확인한다. 다음 거래일 저녁 런 뒤에 돌리면 다른 D 의 늦은 공시가 섞여 판정에 들어온다(TECH_DEBT B-54).
+   06:00 체인 crit 직후(08:10 전)에 돌리면 08:10 체인이 그 끝을 기다렸다가 회복된 DART 로 확정판을 짓는다. 그날 일일 리포트에서 dart 는 '회복'으로 보이지만 `ledger_chain` 실패는 crit 으로 남는다(`dart company gap` 을 실제로 건너뛰었으므로 — 아래처럼 따로 돌린다). 08:10 뒤에 고쳤다면 그 D 확정판에는 빠져 있다 — 다시 지을지는 3번. DART 가 실패하면 06:00 체인의 `dart company gap` 도 건너뛰므로 회복 뒤 `bash scripts/dart_company_gap.sh` 를 돌린다(이 스크립트는 `QL_ENV` 를 스스로 고정한다). '재무 반영 지연 N건'은 판정을 막지 않는다 — 다음 런이 다시 확인한다. 다음 거래일 저녁 런 뒤에 돌리면 다른 D 의 늦은 공시가 섞여 판정에 들어온다(TECH_DEBT B-54).
 2. **10:30 워치독이 확정판 없음으로 crit** — 08:10 체인이 기다리는 중인지, 기다리는 상대가 살아 있는지 먼저 본다:
    ```bash
    grep "원장 락 대기" ~/quant-ledger/logs/notify.log | tail -1; pgrep -af "daily_build.sh|daily_ledger.sh"
@@ -431,6 +431,9 @@ daily_insight 크론 줄의 리다이렉트 대상과 같게 둔다. 연구 리�
   ⑦ 서버 `DEPLOYED.json` 의 rev 가 HEAD 의 조상인가 — main 을 역병합한 브랜치는 ② 를 늘 통과하므로
   다른 브랜치에서 먼저 민 핫픽스는 이 검사가 지킨다. 알고 되돌릴 때만 `--allow-rollback <서버 rev>`
   (서버 rev 와 정확히 같아야 한다). dry-run 은 ⑤·⑦ 판정만 출력한다(락은 잡았다가 바로 놓는다).
+- ⑧ 비밀 파일(RG-C7-4): rsync 전에 서버 `~/quant-ledger/.env` 가 일반 파일(심볼릭 링크 아님)·권한 600·배포 계정 소유인지
+  ssh 로 확인한다(`stat` 으로 존재·권한만 — 내용은 읽지 않는다). 아니면 `--apply` 는 거부(rc 2), dry-run 은 결과만 출력한다.
+  **처음 이관 때는 아래 "비밀 파일" 절차로 파일을 먼저 만든 뒤 배포한다** — 체인 스크립트가 그 경로로 고정돼 있어 파일 없이 밀면 다음 체인이 실패한다.
 - 빌드 크론 시각(06:00·08:10·18:05·21:20, 장 마감 15:40~16:30 · 21:05 재반영 21:00~21:30) 근처에는 배포하지 않는다 — 락을 쥔 동안 시작한
   체인은 그 회차를 건너뛴다.
 - 전송 결과는 서버 `~/quant-ledger/DEPLOYED.json` 에 `{rev, branch, at_utc, by, tests}` 로 기록한다
@@ -443,6 +446,39 @@ daily_insight 크론 줄의 리다이렉트 대상과 같게 둔다. 연구 리�
   사본 `_engine/backtest_engine/` 이었고 그 디렉터리는 이제 아무도 읽지 않는다). 갱신 경로가 없어
   2026-09-05 판에서 멈춰 있던 것(DEFECT-C05)을 이제 배포가 같이 민다.
 - 서버에만 있어야 하는 것(제외): 토큰 캐시 2종, `sync_v3_wise.py`, `rebuild_share.py`(정본은 `backend/ops/`).
+
+### 비밀 파일 — `$HOME/quant-ledger/.env` (RG-C7-4)
+
+quant-ledger 는 API 키·텔레그램 토큰을 **자기 파일 하나**에서만 읽는다. 옛 시스템(kael-system-v3) 폴더의 비밀 파일로 넘어가는 경로는 없다.
+
+- 경로 = 환경변수 `QL_ENV`. 크론 진입점(`daily_ledger`·`daily_build`·`daily_evening`·`build_evening`·`watchdog`·`backup_raw`·`gc`·`wics_weekly`·`postclose_chain`)과
+  손으로 단독 실행하는 `model_daily.sh`·`daily_wise.sh`·`dart_company_gap.sh` 가 `cd` 직후 `export QL_ENV="$HOME/quant-ledger/.env"` 로 **고정**한다(바깥 값을 물려받지 않는다). 크론 줄은 그대로다.
+  그 밖의 손 명령(`python -m daily.dart_daily`·`python -m deliver`·`daily_dart.sh` 등)은 앞에 `QL_ENV="$HOME/quant-ledger/.env"` 를 붙인다.
+- 읽는 곳: `src/api.py`(import 시점) · `src/deliver/telegram.py`(`--env-file` > `QL_ENV`) · `scripts/notify.sh`(`QL_NOTIFY_TELEGRAM=1` 분기만 — 기본 로그 분기는 파일 없이 돈다).
+  경로가 비었거나 가리킨 파일이 없으면 셋 다 실패한다 — `import api`·`telegram.env_path` 는 FileNotFoundError, `python -m deliver` 는 설정 오류 rc 2, notify 텔레그램 분기는 rc 2.
+- 배포 순서: 이 파일을 **먼저** 만든 뒤 배포한다 — `deploy.sh` 가 rsync 전에 원격 파일의 존재·권한 600·소유자를 확인하고, 아니면 멈춘다(아래 "배포").
+- 위치: 운영 루트 바로 아래 — `deploy.sh` 의 `rsync --delete` 대상(`src/`·`scripts/`·`config/`·`_engine/`) 밖이라 배포가 지우지 않는다. `config/` 아래에 두지 않는다.
+- 만들기(서버에서 한 번, 값은 셸 기록·화면에 남기지 않는다 — 편집기로 넣는다):
+
+  ```bash
+  ( umask 077 && touch "$HOME/quant-ledger/.env" ) && chmod 600 "$HOME/quant-ledger/.env"
+  # 편집기로 KEY=값 줄을 넣은 뒤 — 키 이름만 확인(값 출력 금지)·권한 600 확인
+  cut -d= -f1 "$HOME/quant-ledger/.env" | sort
+  stat -c '%a %U' "$HOME/quant-ledger/.env"
+  ```
+
+  | 키 | 읽는 곳 | 넣는가 |
+  |---|---|---|
+  | `KRX_API_KEY` | `api.py` import 시점(없으면 import 가 KeyError) | 필수 |
+  | `KIS_APP_KEY` · `KIS_APP_SECRET` | `api.py` KIS 토큰 · `backfill_kis.py` | 필수 |
+  | `KIWOOM_APP_KEY` · `KIWOOM_SECRET_KEY` | `api.py` 키움 토큰 | 필수 |
+  | `DART_API_KEY_2` ~ `DART_API_KEY_5` | `api.dart_keys()` — 번호순이 소진 순서 | 지금 쓰는 번호 그대로(하나 이상) |
+  | `BOT_TOKEN` · `CHAT_ID_AIPLAYGROUND` | `deliver/telegram.py` — 모델 엑셀 발송 | 필수 |
+  | `KRX_ID` · `KRX_PW` | `api.py` 가 환경변수로 내보내기만 한다(저장소 코드에 소비처 없음) | 선택 |
+  | `CHAT_ID_LOG` | `notify.sh` 텔레그램 분기만(`QL_NOTIFY_TELEGRAM=1` — 로그 알림 텔레그램 금지, 10-01) | 넣지 않아도 된다 |
+  | `DART_API_KEY` | v3 프로덕션 키 — `api.dart_keys()` 가 쓰지 않는다 | **넣지 않는다** |
+
+  `DART_API_KEY_2`~`_5` 의 **값**도 v3 프로덕션 `DART_API_KEY` 값과 달라야 한다 — 이름만 바꾼 같은 키 금지(그 키를 쓰면 v3 한도를 같이 태운다).
 
 ### 공유 소비자 완료 신호 — `data/{stage,equity}/_READY.json`
 

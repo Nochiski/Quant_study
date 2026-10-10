@@ -7,6 +7,7 @@
 set -uo pipefail
 cd "${QL_HOME:-$HOME/quant-ledger}"
 export QL_HOME="${QL_HOME:-$HOME/quant-ledger}" PYTHONPATH="${PYTHONPATH:-$HOME/quant-ledger/src}"
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일 고정(RG-C7-4) — 배포 rsync --delete 밖, 바깥 값·옛 시스템 파일을 쓰지 않는다
 PY=.venv/bin/python
 DRY=""; [ "${1:-}" = "--dry-run" ] && DRY=1
 MISSING=$(sqlite3 "file:data/raw/dart.db?mode=ro" \

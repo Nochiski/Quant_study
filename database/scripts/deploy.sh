@@ -22,7 +22,10 @@
 #   ⑦ 서버 DEPLOYED.json 의 rev 가 HEAD 의 조상이어야 한다(K1-1e). main 을 역병합한 브랜치는 ② 를 늘
 #      통과하므로, 다른 브랜치에서 먼저 민 핫픽스를 모르고 덮는 일은 ② 로 못 막는다. 의도한 되돌림은
 #      `--allow-rollback <서버 rev>` 로만 허용하고 DEPLOYED.json 에 rollback_from 으로 남긴다.
-#   dry-run 은 ⑤·⑦ 을 똑같이 판정해 결과만 출력한다(락은 잡았다가 바로 놓는다).
+#   ⑧ 서버 비밀 파일 ~/quant-ledger/.env(RG-C7-4) — 체인 스크립트가 QL_ENV 를 그 경로로 고정하므로 rsync 전에
+#      일반 파일(심볼릭 링크 아님)·권한 600·배포 계정 소유인지 본다. 존재·권한만 보고 내용은 읽지 않는다.
+#      아니면 거부 — 절차는 README '운영 (P6) → 비밀 파일'(파일을 먼저 만든 뒤 배포).
+#   dry-run 은 ⑤·⑦·⑧ 을 똑같이 판정해 결과만 출력한다(락은 잡았다가 바로 놓는다).
 # 서버에는 pytest·ruff 가 없다(맨 pip venv) — 검사는 이 저장소 쪽에서만 돈다.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"     # …/database
@@ -112,7 +115,7 @@ if [ "$APPLY" -eq 1 ]; then
   fi
 fi
 
-# ⑤·⑦ 은 두 모드 모두 판정한다. --apply 면 실패 시 거부(rc 2 — 락은 cleanup 이 놓는다), dry-run 이면
+# ⑤·⑦·⑧ 은 두 모드 모두 판정한다. --apply 면 실패 시 거부(rc 2 — 락은 cleanup 이 놓는다), dry-run 이면
 # 결과만 출력하고 계속한다. 테스트(③) 뒤에 두는 이유: 락을 쥔 채 몇 분짜리 테스트를 돌리면 그동안 시작하는
 # 체인이 락 실패로 그 회차를 건너뛴다.
 verdict_fail() {   # 첫 인자는 판정, 나머지는 안내 줄
@@ -125,6 +128,33 @@ verdict_fail() {   # 첫 인자는 판정, 나머지는 안내 줄
   printf '== (dry-run) --apply 라면 거부: %s\n' "$msg"
   [ $# -eq 0 ] || printf '      %s\n' "$@"
 }
+
+# ⑧ 비밀 파일 — 존재·종류·소유자·권한만 본다(cat·grep 등으로 내용을 읽지 않는다). 락보다 먼저 판정해
+# 거부될 배포가 락을 쥐지 않게 한다. stat 형식은 GNU(-c, 서버)·BSD(-f, 맥의 가짜 원격) 둘 다 받는다.
+SECRET="$ROOT/.env"
+SECRET_CMD='f='"$SECRET"'; if [ -L "$f" ]; then echo SYMLINK; elif [ ! -e "$f" ]; then echo MISSING;'
+SECRET_CMD+=' elif [ ! -f "$f" ]; then echo NOTFILE; elif [ ! -O "$f" ]; then echo NOTOWNER;'
+SECRET_CMD+=' else echo "MODE $(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f" 2>/dev/null)"; fi'
+SECRET_STATE="$(ssh "$REMOTE" "$SECRET_CMD" </dev/null || true)"
+SECRET_HELP="README '운영 (P6) → 비밀 파일' 절차로 서버에 파일을 먼저 만든 뒤(권한 600·배포 계정 소유) 다시 실행한다."
+case "$SECRET_STATE" in
+  "MODE 600")
+    echo "== 비밀 파일: $REMOTE:~/$SECRET 있음 · 권한 600 · 배포 계정 소유" ;;
+  MISSING)
+    verdict_fail "서버 비밀 파일 ~/$SECRET 가 없다 — 체인 스크립트가 QL_ENV 를 그 경로로 고정해 배포 뒤 체인이 비밀을 읽지 못한다." \
+                 "$SECRET_HELP" ;;
+  SYMLINK|NOTFILE)
+    verdict_fail "서버 비밀 파일 ~/$SECRET 가 일반 파일이 아니다($SECRET_STATE) — 링크로 다른 시스템의 비밀 파일을 가리키지 않는다." \
+                 "$SECRET_HELP" ;;
+  NOTOWNER)
+    verdict_fail "서버 비밀 파일 ~/$SECRET 의 소유자가 배포 계정이 아니다." "$SECRET_HELP" ;;
+  MODE\ [0-7]*)
+    verdict_fail "서버 비밀 파일 ~/$SECRET 의 권한이 ${SECRET_STATE#MODE } 이다 — 600(소유자만 읽기·쓰기)이어야 한다." \
+                 "chmod 600 ~/$SECRET 뒤 다시 실행한다 — 절차는 README '운영 (P6) → 비밀 파일'." ;;
+  *)   # ssh 실패·stat 실패(빈 MODE)
+    verdict_fail "서버 비밀 파일 ~/$SECRET 를 확인하지 못했다(ssh 실패, 응답='$SECRET_STATE') — 비밀 파일이 준비됐는지 판정할 수 없다." \
+                 "$SECRET_HELP" ;;
+esac
 
 # ⑤ 빌드 락 — 원격에서 비차단으로 잡고 LOCKED 를 찍은 뒤 stdin 이 닫힐 때까지 쥔다. 못 잡으면 BUSY.
 BUILD_LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"   # QL_BUILD_LOCK_FILE 은 테스트 전용(model_daily.sh 와 같다)

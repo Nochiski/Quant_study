@@ -17,8 +17,8 @@
 시각' 이 붙는다. 장부 줄을 읽지 못하면 보냈는지 모르므로 보내지 않는다(rc 2).
 
 rc: 0 성공(이미 보내 건너뜀 포함) · 1 발송 실패(dry-run 은 비밀 키 없음) · 2 입력·인자 오류(판 없음·
-    발송 장부 손상·읽기 실패 등) · 3 그 밖 예상 밖 예외(엑셀 생성 실패 등 — E-13, 1 '발송 실패'와
-    섞지 않는다. 발송 뒤 장부 기록 실패면 메시지에 '발송은 됐다')
+    발송 장부 손상·읽기 실패·비밀 파일 미설정·없음 등) · 3 그 밖 예상 밖 예외(엑셀 생성 실패 등 —
+    E-13, 1 '발송 실패'와 섞지 않는다. 발송 뒤 장부 기록 실패면 메시지에 '발송은 됐다')
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from pathlib import Path
 from .excel_daily import build_daily
 from .excel_weekly import build_weekly, parse_week
 from .reader import DeliverError, ql_home
-from .telegram import DEFAULT_CHAT_KEY, caption_daily, caption_weekly, send_document
+from .telegram import DEFAULT_CHAT_KEY, caption_daily, caption_weekly, env_path, send_document
 
 # 발송 장부 — out-root(기본 data/deliver) 바로 아래. out-root 를 따르므로 임시 루트 리허설
 # (`--out-root $(mktemp -d)`)이 운영 장부를 읽거나 쓰지 않는다. history/(확정판 인계 이력 —
@@ -83,7 +83,7 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("--send", action="store_true", help="텔레그램으로 보낸다")
         sp.add_argument("--dry-run", action="store_true", help="보내지 않고 비밀 키 존재만 확인")
         sp.add_argument("--env-file", type=Path, default=None,
-                        help="비밀 env(기본 QL_ENV → ~/kael-system-v3/.env)")
+                        help="비밀 env 파일(없으면 QL_ENV, 둘 다 없으면 실패)")
         sp.add_argument("--chat-key", default=DEFAULT_CHAT_KEY)
 
     d = sub.add_parser("model-daily", help="매일 엑셀")
@@ -103,7 +103,12 @@ def _deliver(args: argparse.Namespace, path: Path, caption: str) -> int:
     print(f"caption:\n{caption}")
     if not (args.send or args.dry_run):
         return 0
-    res = send_document(path, caption, env_file=args.env_file, chat_key=args.chat_key,
+    try:
+        envp = env_path(args.env_file)
+    except FileNotFoundError as e:
+        # 비밀 파일 미설정·없음은 설정 오류다 — rc 2(DeliverError)로, rc 3(예상 밖 예외)과 가른다
+        raise DeliverError(f"비밀 파일 설정 오류 — {e}") from e
+    res = send_document(path, caption, env_file=envp, chat_key=args.chat_key,
                         dry_run=args.dry_run)
     print(f"telegram: {'ok' if res['ok'] else 'FAIL'} — {res['description']}")
     return 0 if res["ok"] else 1

@@ -55,12 +55,32 @@ def test_read_secrets_only_wanted_keys(env: Path) -> None:
     assert tg.read_secrets(env.parent / "none.env", ("BOT_TOKEN",)) == {}
 
 
-def test_env_path_resolution(monkeypatch: pytest.MonkeyPatch, env: Path) -> None:
+def test_env_path_resolution(monkeypatch: pytest.MonkeyPatch, env: Path, doc: Path,
+                             tmp_path: Path) -> None:
+    """인자 > QL_ENV. 둘 다 없거나 가리킨 파일이 없으면 FileNotFoundError — HOME 의 옛 시스템
+    폴더 파일로 넘어가지 않는다(RG-C7-4, `api._find_env` 와 같은 규칙)."""
+    other = tmp_path / "other.env"
+    other.write_text("X=1\n", encoding="utf-8")
     monkeypatch.setenv("QL_ENV", str(env))
     assert tg.env_path() == env
-    assert tg.env_path("/x/y.env") == Path("/x/y.env")
+    assert tg.env_path(other) == other
+    with pytest.raises(FileNotFoundError, match="none.env"):
+        tg.env_path(tmp_path / "none.env")
+    monkeypatch.setenv("QL_ENV", str(tmp_path / "gone.env"))
+    with pytest.raises(FileNotFoundError, match="gone.env"):
+        tg.env_path()
     monkeypatch.delenv("QL_ENV")
-    assert tg.env_path() == Path.home() / "kael-system-v3" / ".env"
+    home = tmp_path / "home"
+    (home / "kael-system-v3").mkdir(parents=True)
+    (home / "kael-system-v3" / ".env").write_text(f"BOT_TOKEN={TOKEN}\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    assert tg.env_path(other) == other
+    with pytest.raises(FileNotFoundError, match="QL_ENV"):
+        tg.env_path()
+    fake = Fake()
+    with pytest.raises(FileNotFoundError, match="QL_ENV"):
+        tg.send_document(doc, "c", transport=fake)
+    assert fake.calls == []
 
 
 def test_send_document_success(env: Path, doc: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -115,10 +135,14 @@ def test_missing_secrets_or_file_do_not_send(tmp_path: Path, doc: Path) -> None:
 def test_dry_run_checks_presence_without_network(env: Path, doc: Path, tmp_path: Path,
                                                  caplog: pytest.LogCaptureFixture) -> None:
     fake = Fake()
+    nokey = tmp_path / "nokey.env"
+    nokey.write_text("OTHER=x\n", encoding="utf-8")
     with caplog.at_level(logging.DEBUG, logger="deliver.telegram"):
         res = tg.send_document(doc, "c", env_file=env, transport=fake, dry_run=True)
-        res2 = tg.send_document(doc, "c", env_file=tmp_path / "none.env", transport=fake,
-                                dry_run=True)
+        res2 = tg.send_document(doc, "c", env_file=nokey, transport=fake, dry_run=True)
+        with pytest.raises(FileNotFoundError):          # 파일 자체가 없으면 실패(RG-C7-4)
+            tg.send_document(doc, "c", env_file=tmp_path / "none.env", transport=fake,
+                             dry_run=True)
     assert fake.calls == []
     assert res["ok"] is True and "BOT_TOKEN 있음" in str(res["description"])
     assert res2["ok"] is False and "없음" in str(res2["description"])

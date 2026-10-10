@@ -38,8 +38,8 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
 | rc | 뜻 |
 |---|---|
 | 0 | 성공(매일 엑셀을 이미 보내 장부로 건너뜀 포함) |
-| 1 | 발송 실패(텔레그램 `ok=false`·예외) · dry-run 에서 비밀 키 없음 |
-| 2 | 입력·인자 오류 — 그날 판 없음 · 실패 판(status ≠ ok) · 점수/fi 파일 없음 · 날짜·주 형식 · 발송 장부 줄 손상·읽기 실패(권한·인코딩 — 보냈는지 몰라 보내지 않음) · `--send` 없는 `--resend` |
+| 1 | 발송 실패(텔레그램 `ok=false`·예외) · dry-run 에서 비밀 키 없음(파일은 있으나 `BOT_TOKEN`·채팅 키 줄이 없음) |
+| 2 | 입력·인자 오류 — 그날 판 없음 · 실패 판(status ≠ ok) · 점수/fi 파일 없음 · 날짜·주 형식 · 발송 장부 줄 손상·읽기 실패(권한·인코딩 — 보냈는지 몰라 보내지 않음) · `--send` 없는 `--resend` · `--send`·`--dry-run` 인데 비밀 파일 미설정·없음(`--env-file`·`QL_ENV`, 설정 오류 — RG-C7-4) |
 | 3 | 그 밖 예상 밖 예외 — 엑셀 생성 실패 등(E-13). 트레이스백과 인자를 stderr 에 남긴다. 발송 성공 뒤 장부 기록 실패(B-58)면 메시지에 '발송은 됐다 — 장부 기록 실패'(장부에 없어 다음 실행이 다시 보낼 수 있다). 1(발송 실패)과 섞지 않는다 — 재시도 래퍼가 rc 1 을 '다시 보내기'로 다뤄도 이전 실행의 엑셀을 보내지 않게 |
 
 - 발송 장부(매일만, N-25 Q9 · 로드맵 K0-1): `<out-root>/sent_model_daily.jsonl`(기본 `data/deliver/`), 실제 발송이
@@ -155,7 +155,7 @@ data/factor_inputs/_runs/<YYYYMMDD>_<basis>.json      fi 판 manifest(equity 판
 
 - `send_document(path, caption, *, env_file=None, chat_key="CHAT_ID_AIPLAYGROUND", transport=None,
   dry_run=False) → {"ok", "description"}`.
-- 비밀: env 파일 = 인자 → `QL_ENV` → `~/kael-system-v3/.env`(`scripts/notify.sh` 와 같다). 그 안에서
+- 비밀: env 파일 = 인자 → `QL_ENV`(둘 다 없거나 가리킨 파일이 없으면 `env_path` 가 FileNotFoundError, CLI 는 rc 2 — 다른 파일로 대신하지 않는다, RG-C7-4. 운영은 서버 `$HOME/quant-ledger/.env` — README "운영 (P6) → 비밀 파일"). 그 안에서
   `BOT_TOKEN` 과 채팅 키 두 줄만 읽는다(`export `·따옴표 허용). **토큰·채팅 ID 는 반환값·로그·예외
   문자열에 싣지 않는다** — 전송 예외·API 오류 문자열은 두 값을 `***` 로 가린다. 로그에는 키 이름만.
 - 캡션(1,024자 절단):
@@ -208,6 +208,7 @@ uv run --project backend pytest database/tests/test_deliver_excel.py database/te
 
 ```bash
 cd ~/quant-ledger
+export QL_ENV="$HOME/quant-ledger/.env"   # 비밀 파일(RG-C7-4) — 없으면 rc 2
 # dry-run(엑셀 생성 + 비밀 키 존재 확인, 발송 없음)
 QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-daily --date 20260929 --basis morning --dry-run
 QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-weekly --week 2026-W40 --dry-run

@@ -91,6 +91,7 @@ def _root(home: Path) -> Path:
     for s in ALL:
         shutil.copy(SCRIPTS / s.script, root / "scripts" / s.script)
     shutil.copy(SCRIPTS / "raw_lock.sh", root / "scripts" / "raw_lock.sh")
+    shutil.copy(SCRIPTS / "postclose_conf.sh", root / "scripts" / "postclose_conf.sh")   # 06:00·18:05 휴장 스위치 판정
     stubs = {".venv/bin/python": _PY,
              "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
              "scripts/sync_calendar.sh": "#!/usr/bin/env bash\necho sync_calendar >> calls.txt\n",

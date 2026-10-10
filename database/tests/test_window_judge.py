@@ -424,6 +424,8 @@ def test_진짜_일일_리포트와_notify_sh_가_남긴_줄을_읽는다(
     ("daily_master 실패", "excluded"),
     ("daily_evening 원장 락 대기 중 날짜가 바뀜(시작 2026-10-14 → 지금 2026-10-15) — 이번 실행 중단", "excluded"),
     ("휴장 달력 갱신 crit(rc=2)", "excluded"),
+    # 06:00 v3·uni 휴장 파일 내보내기(T-48 · QL-Q2) — 점수 경로 밖
+    ("휴장 파일 내보내기 실패(rc=2)", "excluded"),
     ("WICS 주간 스냅샷 dt=20261016 실패 rc=2", "excluded"),
     ("watchdog: 21:50 까지 저녁 원장 보고 없음/실패", "excluded"),
     ("watchdog: 토 11:30 까지 WICS 주간 스냅샷 없음/불완전", "excluded"),

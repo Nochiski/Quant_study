@@ -1,6 +1,7 @@
 # 장 마감 체인 설정 읽기 — config/postclose_chain.env 를 읽어 스위치를 정하는 공용 조각(컷오버 PR-8 · PR-9).
 #   쓰는 곳: postclose_chain.sh(세 모드) · model_daily.sh(아침 발송 — 전환 뒤 짓기만·대체 발송) ·
-#            watchdog.sh morning_build(B-57 발송 장부 — 전환 뒤 두 장부). 설정 판정은 이 파일 한 곳이다 —
+#            watchdog.sh morning_build(B-57 발송 장부 — 전환 뒤 두 장부) · daily_ledger.sh·daily_evening.sh(휴장 파일
+#            내보내기 스위치 calendar_export_v3_on 만 — T-48). 설정 판정은 이 파일 한 곳이다 —
 #            설정 파일이 셸 대입이라 셸이 읽은 결과를 쓰고, 워치독 파이썬에는 결과(CUTOVER)를 인자로 넘긴다.
 #   사용(quant-ledger 홈으로 cd 한 뒤, set -u 셸에서): . scripts/postclose_conf.sh; postclose_conf_load
 #   규칙 — 켜는 쪽만 정확한 값을 요구한다(P1). 그 밖의 값·빈 값·파일 없음은 꺼짐·그림자다. 읽기는 set +u 안에서 한다
@@ -50,5 +51,22 @@ silent_loss_block_on() {
              gsub(/^[ \t\r]+|[ \t\r]+$/, "", name); if (name != "SILENT_LOSS_BLOCK") next
              gsub(/^[ \t\r]+|[ \t\r]+$/, "", val); gsub(/^["\047]+|["\047]+$/, "", val); v = val }
            END { printf "%s", v }' config/silent_loss.env 2>/dev/null) || return 1
+  [ "$v" = 1 ]
+}
+# 휴장 파일 내보내기 스위치(T-48 · QL-Q2) — config/calendar_export.env 의 CALENDAR_EXPORT_V3 가 정확히 1 일 때만 rc 0(켜짐).
+# 그 밖의 값·빈 값·파일 없음·읽기 실패는 rc 1(꺼짐 — 지금 동작). 쓰는 곳: daily_ledger.sh(06:00 내보내기 + v3 사본 동기화
+# 건너뜀) · daily_evening.sh(18:05 v3 사본 동기화 건너뜀) — 두 체인이 같은 판정을 쓰도록 여기 한 곳에 둔다. 읽기 규칙은
+# 위 silent_loss_block_on 과 같다(주석·빈 줄 건너뜀, 첫 '=' 로 가름, 앞뒤 공백·값 따옴표를 벗김, 마지막 대입이 이김).
+# source 하지 않는다 — 수집 체인이 설정 파일 안의 명령에 막히지 않게
+calendar_export_v3_on() {
+  local v
+  [ -f config/calendar_export.env ] || return 1
+  v=$(awk '{ line = $0; gsub(/^[ \t\r]+|[ \t\r]+$/, "", line)
+             if (line == "" || substr(line, 1, 1) == "#") next
+             i = index(line, "="); if (i == 0) next
+             name = substr(line, 1, i - 1); val = substr(line, i + 1)
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", name); if (name != "CALENDAR_EXPORT_V3") next
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", val); gsub(/^["\047]+|["\047]+$/, "", val); v = val }
+           END { printf "%s", v }' config/calendar_export.env 2>/dev/null) || return 1
   [ "$v" = 1 ]
 }

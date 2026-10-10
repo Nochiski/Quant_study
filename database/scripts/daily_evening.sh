@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 18:05 KST 저녁 원장 슬롯 — 그날 확정된 축을 그날 저녁에 원장에 넣는다. 플랜 v2 §3 Task A.2.
-#   순서: 원장 락 → 캘린더 동기화 → D(오늘 KST) 거래일 판정 → [D 미완료면] 병렬 3갈래 →
+#   순서: 원장 락 → 캘린더 동기화(휴장 파일 내보내기 스위치가 켜져 있으면 건너뜀 — T-48) → D(오늘 KST) 거래일 판정 →
+#         [D 미완료면] 병렬 3갈래 →
 #         rc 취합 → runlog(evening_chain) → data/deliver/ledger_evening.json → 알림
 #         → [키움 rc 0 이면] 원장 락을 놓고 장 마감 판 재반영 훅 scripts/postclose_chain.sh refill(컷오버 PR-8 ⑦)
 #   ① 키움 ka10060·ka10014 fetch + --commit — KRX 대조 없이 원장 직행(결정 V2-1). 대조 상대인 KRX 는
@@ -35,6 +36,8 @@ done
 RAW_INHERITED="${QL_RAW_LOCK_HELD:-}"   # 부모가 쥔 원장 락은 이 셸이 놓지 않는다(재반영 훅 앞 락 반납)
 . scripts/raw_lock.sh
 raw_lock_acquire daily_evening "$DRY" || exit $?
+# shellcheck source=scripts/postclose_conf.sh
+. scripts/postclose_conf.sh   # calendar_export_v3_on — 휴장 파일 내보내기 스위치 판정 한 곳(daily_ledger.sh 와 공용)
 deliver_json() {
   # 18:15 잠정 빌드·워치독이 읽는 인계 파일. dart_rc 가 빈 문자열이면 아직 도는 중(null) — 빌드 조건이 아니다.
   # 임시 파일에 쓰고 원자 교체한다(읽는 쪽이 부분 JSON 을 보지 않게). wise_n_bad = Σ(n_req − n_ok) — 런 로그 n_bad(검증 실패만)와 다르다.
@@ -98,7 +101,13 @@ branch_wise() {
 }
 {
 echo "════ [$(kst)] daily_evening 시작 dry=${DRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
-scripts/sync_calendar.sh || echo "  ! v3 휴장 사본 동기화 실패 — 판정 달력은 그대로(병행 대조만 빠진다)"
+# 휴장 파일 내보내기 스위치(T-48)가 켜져 있으면 v3 휴장 파일은 06:00 daily_ledger.sh 의 내보내기 산출이다 — v3 사본
+#   동기화(병행 대조)는 자기 사본 대조라 건너뛴다. 내보내기 자체는 06:00 체인 몫이다
+if calendar_export_v3_on; then
+  echo "  v3 휴장 사본 동기화 건너뜀 — CALENDAR_EXPORT_V3=1(v3 휴장 파일이 06:00 내보내기 산출이라 자기 사본 대조, T-48)"
+else
+  scripts/sync_calendar.sh || echo "  ! v3 휴장 사본 동기화 실패 — 판정 달력은 그대로(병행 대조만 빠진다)"
+fi
 D="${DATE_ARG:-$(TZ=Asia/Seoul date +%Y%m%d)}"
 echo "  대상 거래일 D=$D (기본은 오늘 KST — 저녁 슬롯은 당일 데이터를 받는다)"
 # rc 0 거래일 · 1 휴장 · 2 판정 불가. 종전 `if ! …` 는 KeyError(연도 파일 부재)의 exit 1 을 휴장으로 읽어

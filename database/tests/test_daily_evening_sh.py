@@ -8,6 +8,7 @@
 
 HOME 을 임시 폴더로 바꿔 `~/quant-ledger` 에 대역 `.venv/bin/python`·`scripts/notify.sh`·
 `scripts/sync_calendar.sh` 를 두고 진짜 스크립트를 돌린다(test_daily_build_sh 와 같은 방식).
+v3 휴장 사본 동기화 대역은 부를 때마다 sync.txt 에 한 줄을 적고, 스위치 판정(`scripts/postclose_conf.sh`)은 진짜를 복사한다.
 대역 python 은 캘린더·runlog 질의에만 답하고, 인계 파일 쓰기·런 로그 읽기 `-c` 는 진짜 python 에
 넘긴다. WISE 갈래는 **진짜 `backfill_wise.main()`** 을 돌린다 — 네트워크(`fetch`·`encparam`)와
 유니버스만 대역이라, 런 로그(`ws_run_log`)의 n_req·n_ok·n_bad·bad_summary 는 실물 수집기가 쓴다.
@@ -115,16 +116,21 @@ class Run(NamedTuple):
         return [n for n in self.notify if n.startswith(f"{level}|")]
 
 
-def _run(home: Path, wise_fail: str, *, dry: bool = False, kw_rc: int = 0) -> Run:
+def _run(home: Path, wise_fail: str, *, dry: bool = False, kw_rc: int = 0, conf: str | None = None) -> Run:
+    """`conf` 는 config/calendar_export.env 내용(None 이면 파일 없음 — 꺼짐)."""
     root = home / "quant-ledger"
     for sub in ("scripts", "logs", ".venv/bin", "data/raw"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     (home / "tmp").mkdir(exist_ok=True)
     shutil.copy(SCRIPT, root / "scripts" / "daily_evening.sh")
     shutil.copy(SCRIPT.parent / "raw_lock.sh", root / "scripts" / "raw_lock.sh")
+    shutil.copy(SCRIPT.parent / "postclose_conf.sh", root / "scripts" / "postclose_conf.sh")
+    if conf is not None:
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "calendar_export.env").write_text(conf, encoding="utf-8")
     stubs = {".venv/bin/python": _PY,
              "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
-             "scripts/sync_calendar.sh": "#!/usr/bin/env bash\nexit 0\n",
+             "scripts/sync_calendar.sh": "#!/usr/bin/env bash\necho sync >> sync.txt\nexit 0\n",
              # 장 마감 재반영 훅(PR-8 ⑦) — 이 파일은 WISE 경보만 보므로 rc 0 대역(훅 자체는 test_postclose_chain_sh)
              "scripts/postclose_chain.sh": "#!/usr/bin/env bash\nexit 0\n"}
     for rel, body in stubs.items():
@@ -306,3 +312,30 @@ def test_other_branch_crit_and_wise_warn_both_go_out(tmp_path: Path) -> None:
     for w in (first, final):
         assert (w["kiwoom_rc"], w["wise_rc"]) == (1, 0)
         assert (w["wise_n_bad"], w["wise_bad_summary"]) == (1, {"invalid_stock": 1})
+
+
+# ── 휴장 파일 내보내기 스위치(T-48 · QL-Q2) — 켜져 있으면 v3 사본 동기화(병행 대조)를 건너뛴다 ─────────
+def _synced(home: Path) -> str:
+    f = home / "quant-ledger" / "sync.txt"
+    return f.read_text(encoding="utf-8") if f.exists() else ""
+
+
+@pytest.mark.parametrize("conf", [None, "shipped", "CALENDAR_EXPORT_V3=yes\n", "CALENDAR_EXPORT_V3=0\n"])
+def test_export_switch_off_keeps_the_v3_calendar_sync(tmp_path: Path, conf: str | None) -> None:
+    """꺼짐(파일 없음·저장소 값·다른 값) — 지금처럼 v3 사본 동기화를 부르고 건너뜀 줄이 없다."""
+    text = (DB_ROOT / "config" / "calendar_export.env").read_text(encoding="utf-8") if conf == "shipped" else conf
+    r = _run(tmp_path, "none", dry=True, conf=text)
+    assert r.rc == 0, r.out + r.log
+    assert _synced(tmp_path) == "sync\n"
+    assert "동기화 건너뜀" not in r.log
+
+
+def test_export_switch_on_skips_the_v3_calendar_sync(tmp_path: Path) -> None:
+    """켜짐 — v3 휴장 파일이 06:00 내보내기 산출이라 v3 사본 대조는 자기 사본 대조다(T-48). 동기화를 부르지 않고
+    이유 한 줄을 남긴다. 저녁 슬롯은 내보내기를 부르지 않는다(06:00 체인 몫)."""
+    r = _run(tmp_path, "none", dry=True, conf="CALENDAR_EXPORT_V3=1\n")
+    assert r.rc == 0, r.out + r.log
+    assert _synced(tmp_path) == ""
+    assert "  v3 휴장 사본 동기화 건너뜀 — CALENDAR_EXPORT_V3=1" in r.log
+    calls = tmp_path / "quant-ledger" / "calls.txt"
+    assert "daily.calendar_export" not in (calls.read_text(encoding="utf-8") if calls.exists() else "")

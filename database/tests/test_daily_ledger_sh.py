@@ -14,17 +14,23 @@ DART 번호표 갱신(A-01)의 런 로그 `-c`(source=dart_universe 판정·성�
 받은 인자는 kw_cover_args.txt 에 남는다. `REAL_KW` 가 있으면 `-m daily.kw_daily` 는 진짜 python·진짜 kw_daily 로
 가고 `api` 만 `FAKE_API` 디렉터리의 가짜로 바뀐다(GH1-d 리허설 — 실제 키움 콜 없음).
 notify 대역은 본문(셋째 인자)을 notify_body.txt 에 따로 남긴다.
+v3 휴장 사본 동기화 대역(`scripts/sync_calendar.sh`)은 부를 때마다 sync.txt 에 한 줄을 적는다. 스위치 판정
+(`scripts/postclose_conf.sh`)은 진짜를 복사한다. 휴장 파일 내보내기(`-m daily.calendar_export`, T-48)는 calls.txt 에
+적히고 받은 인자는 export_args.txt 에 남으며 rc 는 `RC_daily_calendar_export` 다. `REAL_EXPORT` 가 있으면 진짜
+python·진짜 모듈로 가서 `QL_V3_HOLIDAY_FILE`(테스트가 늘 임시 경로로 준다)에 실제로 쓴다.
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from daily import ledger_health as lh
@@ -58,6 +64,11 @@ if [ "$2" = "daily.calendar_refresh" ]; then
   echo "${*:3}" >> "$QL_HOME/cal_args.txt"
   [ -z "${CAL_NO_SUMMARY:-}" ] && echo "휴장 달력 20260929 갱신: rc=${RC_daily_calendar_refresh:-0} (대역)"
 fi
+if [ "$2" = "daily.calendar_export" ]; then
+  echo "${*:3}" >> "$QL_HOME/export_args.txt"
+  [ -n "${REAL_EXPORT:-}" ] && PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@"
+  echo "휴장 달력 내보내기 대역: rc=${RC_daily_calendar_export:-0}"
+fi
 [ "$name" = kw_cover ] && echo "[kw_daily] cover 판정 D=대역 rc=${RC_kw_cover:-0}"
 var="RC_${name//./_}"
 exit "${!var:-0}"
@@ -74,9 +85,10 @@ def _root(tmp_path: Path) -> Path:
     (root / ".venv" / "bin").mkdir(parents=True)
     shutil.copy(SCRIPT, root / "scripts" / "daily_ledger.sh")
     shutil.copy(DB_ROOT / "scripts" / "raw_lock.sh", root / "scripts" / "raw_lock.sh")
+    shutil.copy(DB_ROOT / "scripts" / "postclose_conf.sh", root / "scripts" / "postclose_conf.sh")
     stubs = {
         ".venv/bin/python": _PY,
-        "scripts/sync_calendar.sh": "#!/usr/bin/env bash\nexit 0\n",
+        "scripts/sync_calendar.sh": "#!/usr/bin/env bash\necho sync >> sync.txt\nexit 0\n",
         "scripts/daily_wise.sh": "#!/usr/bin/env bash\necho daily_wise >> calls.txt\n",
         "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2" >> notify.txt\necho "$3" >> notify_body.txt\n',
         "scripts/dart_company_gap.sh": "#!/usr/bin/env bash\necho gap >> calls.txt\n",
@@ -393,6 +405,218 @@ def test_unreadable_calendar_stops_the_chain(tmp_path: Path) -> None:
     assert calls == [_CAL]                                   # 달력 갱신 뒤 D 산출에서 멈춘다
     notify = (root / "notify.txt").read_text(encoding="utf-8")
     assert "crit|daily_ledger 중단 — 대상 거래일 산출 실패" in notify
+
+
+# ── 휴장 파일 내보내기(T-48 · QL-Q2) — 스위치 config/calendar_export.env, 꺼짐이면 지금 동작 그대로 ─────────
+_EXPORT = "daily.calendar_export"
+_ON = "CALENDAR_EXPORT_V3=1\n"
+_SHIPPED_CONF = DB_ROOT / "config" / "calendar_export.env"
+_V3_BEFORE = '{"year": 2026, "holidays": ["20260101"], "note": "v3 가 쓴 옛 판(대역)"}'
+_KST_TS = r"\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST"
+
+
+class Exported(NamedTuple):
+    p: subprocess.CompletedProcess[str]
+    root: Path
+    target: Path                    # QL_V3_HOLIDAY_FILE — v3 data/.kis_holidays.json 자리(임시)
+
+    def read(self, name: str) -> str:
+        f = self.root / name
+        return f.read_text(encoding="utf-8") if f.exists() else ""
+
+    @property
+    def calls(self) -> list[str]:
+        return self.read("calls.txt").split()
+
+    @property
+    def log(self) -> str:
+        return "".join(f.read_text(encoding="utf-8") for f in (self.root / "logs").glob("daily_ledger_*.log"))
+
+
+def _closed(year: int, weekdays: tuple[str, ...] = ()) -> list[str]:
+    """그해 휴장 = 토·일 전부 + 주어진 평일 — 판정 연도 파일의 `holidays` 모양."""
+    days = (dt.date(year, 1, 1) + dt.timedelta(days=i) for i in range(366))
+    return [d.strftime("%Y%m%d") for d in days
+            if d.year == year and (d.weekday() >= 5 or d.strftime("%Y%m%d") in weekdays)]
+
+
+def _run_export(tmp_path: Path, *args: str, conf: str | None, real: bool = False,
+                years: tuple[int, ...] = (), date: bool = True, home: Path | None = None,
+                **rcs: int) -> Exported:
+    """`conf` 를 config/calendar_export.env 로 두고(None 이면 파일 없음) 체인을 돌린다. 대상은 늘 임시 경로다.
+
+    `home` 을 주면 HOME 을 그 임시 폴더로 바꾸고 QL_V3_HOLIDAY_FILE 을 넣지 않는다 — 운영 기본 대상 경로를 본다.
+    """
+    root = _root(tmp_path)
+    _seed_universe_ok(root, 1)
+    if conf is not None:
+        (root / "config").mkdir()
+        (root / "config" / "calendar_export.env").write_text(conf, encoding="utf-8")
+    for y in years:
+        cal = root / "data" / "calendar"
+        cal.mkdir(parents=True, exist_ok=True)
+        (cal / f"kis_holidays_{y}.json").write_text(
+            json.dumps({"year": y, "holidays": _closed(y, (f"{y}0101",))}), encoding="utf-8")
+    target = tmp_path / "v3" / "data" / ".kis_holidays.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(_V3_BEFORE, encoding="utf-8")
+    env = _env(root, QL_WEEKDAY="3", QL_V3_HOLIDAY_FILE=str(target),
+               **{f"RC_{k}": str(v) for k, v in rcs.items()})
+    if home is not None:
+        home.mkdir(parents=True, exist_ok=True)
+        env["HOME"] = str(home)
+        env.pop("QL_V3_HOLIDAY_FILE")
+    if real:
+        env["REAL_EXPORT"] = "1"
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"),
+                        *(["--date", "20260929"] if date else []), *args],
+                       env=env, capture_output=True, text=True, timeout=60, check=False)
+    return Exported(p, root, target)
+
+
+@pytest.mark.parametrize("conf", [None, "shipped", "CALENDAR_EXPORT_V3=yes\n", "CALENDAR_EXPORT_V3=\n",
+                                  "CALENDAR_EXPORT_V3=0\n"])
+def test_export_switch_off_is_todays_chain(tmp_path: Path, conf: str | None) -> None:
+    """꺼짐(파일 없음·저장소 값·다른 값·빈 값) — 내보내기를 부르지 않고 v3 사본 동기화를 부른다. 로그 줄도 늘지 않는다."""
+    text = _SHIPPED_CONF.read_text(encoding="utf-8") if conf == "shipped" else conf
+    r = _run_export(tmp_path, conf=text)
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    assert r.calls == _ALL
+    assert r.read("sync.txt") == "sync\n"
+    assert r.read("export_args.txt") == ""
+    assert "내보내기" not in r.log and "동기화 건너뜀" not in r.log
+    assert r.target.read_text(encoding="utf-8") == _V3_BEFORE
+    assert "crit|" not in r.read("notify.txt")
+
+
+def test_export_switch_off_log_is_the_same_with_or_without_the_file(tmp_path: Path) -> None:
+    """꺼짐이면 설정 파일 유무와 무관하게 체인 로그가 시각만 빼고 같다(스위치가 출력에 흔적을 남기지 않는다)."""
+    logs = [re.sub(_KST_TS, "T", _run_export(tmp_path / str(i), conf=c).log)
+            for i, c in enumerate((None, _SHIPPED_CONF.read_text(encoding="utf-8"), "CALENDAR_EXPORT_V3=yes\n"))]
+    assert logs[0] and logs[0] == logs[1] == logs[2]
+
+
+def test_export_switch_on_runs_after_calendar_refresh_and_skips_sync(tmp_path: Path) -> None:
+    """켜짐 — v3 사본 동기화는 건너뛰고(자기 사본 대조) 휴장 달력 갱신 바로 뒤·D 산출 앞에 대상 경로로 내보낸다."""
+    r = _run_export(tmp_path, conf=_ON)
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    assert r.calls == [_CAL, _EXPORT, *_ALL[1:]]
+    assert r.read("export_args.txt").split() == ["--target", str(r.target)]
+    assert r.read("sync.txt") == ""
+    log = r.log
+    assert "v3 휴장 사본 동기화 건너뜀 — CALENDAR_EXPORT_V3=1" in log
+    assert (log.index("──── 휴장 달력 갱신 종료") < log.index("──── 휴장 파일 내보내기 시작")
+            < log.index("──── 휴장 파일 내보내기 종료 rc=0") < log.index("  대상 거래일 D="))
+    notify = r.read("notify.txt")
+    assert "crit|" not in notify and notify.splitlines()[-1].startswith("info|daily_ledger 완료")
+    assert r.read("runlog.txt") == "ok|\n"
+
+
+def test_export_switch_on_writes_the_v3_file_with_the_real_module(tmp_path: Path) -> None:
+    """진짜 `daily.calendar_export` — 판정 달력(QL_HOME/data/calendar)의 올해 판을 v3 형식으로 대상에 쓴다."""
+    this_year = (dt.datetime.now(dt.UTC) + dt.timedelta(hours=9)).year
+    r = _run_export(tmp_path, conf=_ON, real=True, years=(this_year, this_year + 1))
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    out = json.loads(r.target.read_text(encoding="utf-8"))
+    assert set(out) == {"year", "fetched_at", "last_reviewed_at", "holidays", "review_history"}
+    assert out["year"] in (this_year, this_year + 1)                 # 연말 자정 경계에서 돌아도 깨지지 않게
+    assert out["holidays"] == _closed(out["year"], (f"{out['year']}0101",))
+    assert f"rc=0 year={out['year']}" in r.log and f"target={r.target}" in r.log
+    assert "crit|" not in r.read("notify.txt")
+
+
+def test_export_runs_even_when_calendar_refresh_is_crit(tmp_path: Path) -> None:
+    """달력 갱신 rc 와 무관하게 부른다 — 판정 연도 파일을 못 읽으면 내보내기 자신이 rc 2·대상 무변경으로 멈춘다."""
+    r = _run_export(tmp_path, conf=_ON, daily_calendar_refresh=2)
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    assert r.calls[:2] == [_CAL, _EXPORT]
+    assert r.read("notify.txt").splitlines()[0].startswith("crit|휴장 달력 갱신 crit(rc=2)")
+
+
+def test_export_failure_is_one_crit_and_the_chain_is_unchanged(tmp_path: Path) -> None:
+    """내보내기 rc 2 — crit 한 줄('휴장 파일 내보내기 실패', 본문은 출력 마지막 줄 + 로그 경로). 수집은 계속하고
+    체인 rc·FAILED·ledger_chain 런 로그·완료 info 는 그대로다(점수 경로 밖 — 창 판정 제외 목록)."""
+    r = _run_export(tmp_path, conf=_ON, daily_calendar_export=2)
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    assert r.calls == [_CAL, _EXPORT, *_ALL[1:]]
+    lines = r.read("notify.txt").splitlines()
+    assert [ln for ln in lines if ln.startswith("crit|")] == ["crit|휴장 파일 내보내기 실패(rc=2)"]
+    assert lines[-1].startswith("info|daily_ledger 완료")
+    body = r.read("notify_body.txt").splitlines()[0]
+    assert body.startswith("휴장 달력 내보내기 대역: rc=2 | 로그 logs/daily_ledger_")
+    assert r.read("runlog.txt") == "ok|\n"
+    assert "──── 휴장 파일 내보내기 종료 rc=2" in r.log
+
+
+def test_export_failure_with_the_real_module_leaves_the_target_and_d_stops_the_chain(tmp_path: Path) -> None:
+    """판정 달력이 없는 임시 루트(`--date` 없음) — 진짜 내보내기는 rc 2·대상 무변경(crit), 이어 D 산출이 체인을 멈춘다."""
+    r = _run_export(tmp_path, conf=_ON, real=True, date=False)
+    assert r.p.returncode == 2, r.p.stdout + r.p.stderr
+    assert r.calls == [_CAL, _EXPORT]
+    assert r.target.read_text(encoding="utf-8") == _V3_BEFORE
+    crits = [ln for ln in r.read("notify.txt").splitlines() if ln.startswith("crit|")]
+    assert crits == ["crit|휴장 파일 내보내기 실패(rc=2)", "crit|daily_ledger 중단 — 대상 거래일 산출 실패"]
+    assert "calendar_unavailable" in r.read("notify_body.txt").splitlines()[0]
+
+
+def test_export_dry_run_only_prints_the_plan(tmp_path: Path) -> None:
+    """dry-run — 내보내기를 부르지 않고(대상 무변경) 계획 한 줄만. v3 사본 동기화도 건너뛴다."""
+    this_year = (dt.datetime.now(dt.UTC) + dt.timedelta(hours=9)).year
+    r = _run_export(tmp_path, "--dry-run", conf=_ON, real=True, years=(this_year, this_year + 1))
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    assert _EXPORT not in r.calls and r.read("export_args.txt") == ""
+    assert r.target.read_text(encoding="utf-8") == _V3_BEFORE
+    assert r.read("sync.txt") == ""
+    plan = [ln for ln in r.log.splitlines() if "휴장 파일 내보내기" in ln]
+    assert len(plan) == 1 and "dry-run" in plan[0] and f"--target {r.target}" in plan[0]
+
+
+@pytest.mark.parametrize("dry", [True, False])
+def test_export_default_target_is_the_v3_holiday_file(tmp_path: Path, dry: bool) -> None:
+    """운영 기본 대상(QL_V3_HOLIDAY_FILE 없음) = $HOME/kael-system-v3/data/.kis_holidays.json — sync_calendar.sh 의
+    원본과 같은 파일. HOME 은 임시 폴더이고 내보내기는 대역이라 아무 파일도 쓰지 않는다. dry-run 은 계획 줄, 실제
+    실행은 내보내기가 받은 `--target` 인자를 본다."""
+    home = tmp_path / "home"
+    r = _run_export(tmp_path, *(["--dry-run"] if dry else []), conf=_ON, home=home)
+    assert r.p.returncode == 0, r.p.stdout + r.p.stderr
+    default = f"{home}/kael-system-v3/data/.kis_holidays.json"
+    if dry:
+        plan = [ln for ln in r.log.splitlines() if "휴장 파일 내보내기 계획" in ln]
+        assert len(plan) == 1 and plan[0].endswith(f"--target {default}"), plan
+        assert r.read("export_args.txt") == ""
+    else:
+        assert r.read("export_args.txt").split() == ["--target", default]
+    assert not (home / "kael-system-v3").exists()
+
+
+def _switch_on(tmp_path: Path, text: str | None) -> bool:
+    """`scripts/postclose_conf.sh` `calendar_export_v3_on` 판정 — rc 0 켜짐 · 1 꺼짐."""
+    if text is not None:
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "calendar_export.env").write_bytes(text.encode("utf-8"))
+    p = subprocess.run(["bash", "-c", 'set -u; cd "$1" && . "$2" && calendar_export_v3_on', "_", str(tmp_path),
+                        str(DB_ROOT / "scripts" / "postclose_conf.sh")],
+                       capture_output=True, text=True, timeout=30, check=False)
+    assert p.returncode in (0, 1), p.stderr
+    return p.returncode == 0
+
+
+@pytest.mark.parametrize(("text", "on"), [
+    (None, False), ("", False), ("CALENDAR_EXPORT_V3=1\n", True), ("CALENDAR_EXPORT_V3='1'\n", True),
+    ('CALENDAR_EXPORT_V3="1"\n', True), ("CALENDAR_EXPORT_V3=0\n", False), ("CALENDAR_EXPORT_V3=yes\n", False),
+    ("CALENDAR_EXPORT_V3=\n", False), ("# CALENDAR_EXPORT_V3=1\n", False),
+    ("CALENDAR_EXPORT_V3=1\nCALENDAR_EXPORT_V3=0\n", False), ("CALENDAR_EXPORT_V3=0\nCALENDAR_EXPORT_V3=1\n", True),
+    ("CALENDAR_EXPORT_V3X=1\n", False), ("SILENT_LOSS_BLOCK=1\n", False)])
+def test_calendar_export_switch_requires_exactly_one(tmp_path: Path, text: str | None, on: bool) -> None:
+    """켜는 쪽만 정확한 값(P1) — 판정은 daily_ledger.sh·daily_evening.sh 가 같이 쓰는 한 곳이다."""
+    assert _switch_on(tmp_path, text) is on
+
+
+def test_shipped_calendar_export_conf_is_off(tmp_path: Path) -> None:
+    """저장소 값은 꺼짐 — 머지·배포만으로는 v3 휴장 파일을 쓰지 않는다(컷오버 날 V3-D 와 같은 배포로 켠다, T-48)."""
+    text = _SHIPPED_CONF.read_text(encoding="utf-8")
+    assert "CALENDAR_EXPORT_V3=0" in text.splitlines()
+    assert _switch_on(tmp_path, text) is False
 
 
 # ── T-13(H1-5) 저녁 키움 보강 — KIS 뒤·DART 앞, 소스 단계 규약(실패 = FAILED → crit · rc 2) ─────────────

@@ -931,7 +931,7 @@ def _evening(home: Path, *, kw_rc: int = 0, dry: bool = False, inherited: bool =
         (root / sub).mkdir(parents=True, exist_ok=True)
     (home / "tmp").mkdir(exist_ok=True)
     (home / "fakebin").mkdir(exist_ok=True)
-    for name in ("daily_evening.sh", "raw_lock.sh"):
+    for name in ("daily_evening.sh", "raw_lock.sh", "postclose_conf.sh"):
         shutil.copy(SCRIPTS / name, root / "scripts" / name)
     stubs = {root / ".venv/bin/python": _EVENING_PY, root / "scripts/postclose_chain.sh": _HOOK,
              root / "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',

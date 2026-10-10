@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
-#   순서: v3 휴장 사본 동기화(병행 대조용) → 휴장 달력 직접 갱신(KIS chk-holiday 1콜, K1-9) → D(직전 거래일) 판정 →
+#   순서: v3 휴장 사본 동기화(병행 대조용) → 휴장 달력 직접 갱신(KIS chk-holiday 1콜, K1-9) →
+#         [스위치 켜짐] v3·uni 휴장 파일 내보내기(T-48 — 켜져 있으면 앞의 v3 사본 동기화는 건너뜀) → D(직전 거래일) 판정 →
 #         키움 마스터(daily_wise.sh, 매일) →
 #         [월요일 KST · 마지막 성공 7일 초과] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01) →
 #         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → 저녁 키움 보강 판정(T-13) → DART 스윕·상세·문서 →
@@ -10,6 +11,7 @@
 #   KIS 는 07:00(v3 토큰 재발급) 전에 끝나야 해서 순서는 키움 → KIS → DART 그대로다.
 #   사용: daily_ledger.sh [--date YYYYMMDD] [--dry-run] [--limit N]
 #   환경: QL_KW_NOT_BEFORE=HH:MM (키움 fetch 하한 시각, P0 프로브 판독값. 기본 06:00)
+#         QL_V3_HOLIDAY_FILE (휴장 파일 내보내기 대상 덮어쓰기 — 테스트용. 기본은 아래 V3_HOLIDAY_FILE)
 #         QL_SKIP_KW=1 이면 키움 시계열 단계를 건너뛴다(앱키 분리 전 임시)
 #         키움은 대차(ka20068) 하나만 여기서 늘 받는다 — 투자자·공매도(ka10060·ka10014)는 18:05
 #         daily_evening.sh 가 당일 저녁(21:05)에 원장 직행으로 받고(결정 V2-1·V2-3), 여기서는 그 D 커버리지를
@@ -35,6 +37,8 @@ while [ $# -gt 0 ]; do
 done
 . scripts/raw_lock.sh
 raw_lock_acquire daily_ledger "$DRY" || exit $?
+# shellcheck source=scripts/postclose_conf.sh
+. scripts/postclose_conf.sh   # calendar_export_v3_on — 휴장 파일 내보내기 스위치 판정 한 곳(daily_evening.sh 와 공용)
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_ledger_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
@@ -50,7 +54,14 @@ step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 덧
 }
 {
 echo "════ [$(kst)] daily_ledger 시작 dry=${DRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
-scripts/sync_calendar.sh || echo "  ! v3 휴장 사본 동기화 실패 — 판정 달력은 그대로(병행 대조만 빠진다)"
+# 휴장 파일 내보내기 스위치(T-48) — 켜져 있으면 v3 휴장 파일은 아래 내보내기 산출이라 v3 사본 동기화(병행 대조)가 자기
+#   사본 대조가 된다. 건너뛴다. 한 번만 판정해 두 자리(동기화·내보내기)가 같은 값을 쓴다
+EXPORT_V3=""; calendar_export_v3_on && EXPORT_V3=1
+if [ -n "$EXPORT_V3" ]; then
+  echo "  v3 휴장 사본 동기화 건너뜀 — CALENDAR_EXPORT_V3=1(v3 휴장 파일이 06:00 내보내기 산출이라 자기 사본 대조, T-48)"
+else
+  scripts/sync_calendar.sh || echo "  ! v3 휴장 사본 동기화 실패 — 판정 달력은 그대로(병행 대조만 빠진다)"
+fi
 # 휴장 달력 직접 갱신(결정 Q-2 = N-31 ②, RM K1-9 ①③④⑥ — 플랜 2026-10-10-holiday-calendar-direct).
 #   KIS chk-holiday 하루 1콜로 판정 연도 파일을 덧씌우고 trading_calendar·이듬해 기한·v3 사본을 대조한다.
 #   rc 0 정상 · 1 warn · 2 crit. 마지막 줄이 요약이 아니면(파이썬이 import 단계에서 죽은 rc 1 등) crit 로 본다.
@@ -67,6 +78,27 @@ if [ -z "$DRY" ] && [ "$CAL_RC" -ne 0 ]; then
     scripts/notify.sh warn "휴장 달력 경고" "$CAL_SUM | 로그 $LOG"
   else
     scripts/notify.sh crit "휴장 달력 갱신 crit(rc=$CAL_RC)" "${CAL_SUM:-출력 없음} | 로그 $LOG"
+  fi
+fi
+# v3·uni 휴장 파일 내보내기(T-48 · QL-Q2) — 스위치(config/calendar_export.env CALENDAR_EXPORT_V3=1)가 켜져 있을 때만.
+#   컷오버로 v3 의 휴장 쓰기(daily_all 의 calendar_refresh · 휴장 크론 2줄)가 꺼지면 그 파일(uni 도 읽는다)을 여기서
+#   판정 달력으로 쓴다. 이 체인은 주말·휴장 포함 매일 06:00 KST 라 'KST 00:00 뒤·v3 20:05 전 하루 1회 이상' 전제를
+#   채운다(src/daily/calendar_export.py 머리 주석). 위 달력 갱신의 rc 와 무관하게 부른다 — 판정 연도 파일을 못 읽으면
+#   내보내기 자신이 rc 2·대상 무변경으로 멈춘다. 실패는 crit 한 줄이고 체인 rc·FAILED·ledger_chain 런 로그에는 넣지
+#   않는다(달력 갱신과 같은 자리 — 점수 경로 밖이라 창 판정 제외 목록). dry-run 은 쓰지 않고 계획 한 줄만 찍는다.
+if [ -n "$EXPORT_V3" ]; then
+  V3_HOLIDAY_FILE="${QL_V3_HOLIDAY_FILE:-$HOME/kael-system-v3/data/.kis_holidays.json}"   # sync_calendar.sh SRC 기본값과 같은 파일
+  if [ -n "$DRY" ]; then
+    echo "  휴장 파일 내보내기 계획(dry-run — 쓰지 않음): $PY -m daily.calendar_export --target $V3_HOLIDAY_FILE"
+  else
+    echo "──── 휴장 파일 내보내기 시작 $(kst) ────"
+    EXP_OUT=$($PY -m daily.calendar_export --target "$V3_HOLIDAY_FILE" 2>&1); EXP_RC=$?
+    printf '%s\n' "$EXP_OUT"
+    echo "──── 휴장 파일 내보내기 종료 rc=$EXP_RC $(kst) ────"
+    if [ "$EXP_RC" -ne 0 ]; then
+      EXP_SUM=$(printf '%s\n' "$EXP_OUT" | tail -1 | cut -c1-700)
+      scripts/notify.sh crit "휴장 파일 내보내기 실패(rc=$EXP_RC)" "${EXP_SUM:-출력 없음} | 로그 $LOG"
+    fi
   fi
 fi
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c

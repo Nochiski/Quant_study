@@ -692,6 +692,7 @@ def fin_summary_sql(p: Params) -> str:
       · 분기 행을 더한다(DART 1Q·반기·3Q 는 3개월 값, 4Q 는 사업보고서 − 1~3Q 파생). WISE 분기
         슬롯(val_q*)은 기간 라벨이 없어 못 쓴다. 분기 capex·FCF 는 싣지 않는다 — `_q` 가 부호가
         섞인 누계의 차라 크기가 틀어진다(절단본 003540: 1Q −7.2억 → 반기 +13.7억).
+        4Q 파생값을 실은 행의 `available_date` = max(사업보고서, 파생값 날짜)(T-43, fi1.8.0).
       · `fs_basis` = WISE 라벨, WISE 가 없는 행은 'DART:' || fs_div. `capex_basis` 는 DART 그대로.
       · `dps`(보통주 주당배당금, 원) = equity `dividend_event`(사업보고서 11011 · stock_knd
         보통주/보통주식, 값이 없으면 법인 축 '-' · available_date ≤ D, 결산기 = stlm_dt 의
@@ -891,7 +892,10 @@ qtr AS (
                          THEN f.gross_profit_q4_derived END
                 ELSE f.gross_profit END AS q_gross_profit,
            f.total_asset, f.total_liab, f.total_equity, f.capex_basis, f.fs_div,
-           f.available_date,
+           CASE WHEN f.report_code = '{ANNUAL_REPORT}'
+                     AND f.q4_derived_available_date <= DATE '{p.asof}'
+                THEN greatest(f.available_date, f.q4_derived_available_date)
+                ELSE f.available_date END AS available_date,
            row_number() OVER (PARTITION BY s.ticker ORDER BY f.period_end DESC,
                               f.report_code) AS k
     FROM fin f JOIN dsec s ON s.corp_code = f.corp_code

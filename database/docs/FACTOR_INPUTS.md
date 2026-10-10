@@ -208,7 +208,10 @@ compat 은 한 기에 E 하나(E 우선)만 남기지만 이 표는 E·A 를 둘
   fs_basis)이 조용히 빈다(fi1.2.0 까지의 쿼리). 한쪽 ep 가 그날 수집되지 않았으면 그 ep 의 직전 판을
   잇는다(결손 자체는 WISE 부분 실패 알림 — N-30 ③ — 이 따로 알린다). compat `financial_summary` 도 같은 규칙.
 - `available_date` = 행을 이룬 원천의 max(WISE fetched_date, DART·배당 available_date). 연간 행의
-  WISE 날짜는 두 ep 판 중 늦은 날, 분기 WISE 행은 Q:IS 판 날짜다. stage 2.7.0 부터 WISE fetched_date 는
+  WISE 날짜는 두 ep 판 중 늦은 날, 분기 WISE 행은 Q:IS 판 날짜다. DART 4Q 행(사업보고서 − 1~3Q)은
+  파생값(`q4_derived_available_date` ≤ asof)을 실었으면 max(사업보고서 available_date,
+  `q4_derived_available_date`), 못 실었으면(값 NULL) 사업보고서 날짜다(fi1.8.0, 컷오버 F-1 · T-43 —
+  1~3Q 정정이 뒤에 들어오면 파생값이 그날 처음 선다). stage 2.7.0 부터 WISE fetched_date 는
   '그 원문을 처음 본 날'(그 전엔 '마지막으로 확인한 날')이라 원문이 그대로인 종목은 D 보다 이르다 —
   '알게 된 날' 뜻은 그대로이고 ≤ D(장 마감 판은 asof=D', §2-1) 다(FG1). 엔진은 읽지 않는다.
 - 연간 매출은 분기와 같은 계정(최상위 '매출액(수익)' → 보험 '영업수익' → 은행·증권·금융지주

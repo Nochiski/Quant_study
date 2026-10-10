@@ -321,14 +321,16 @@ def test_기본은_다섯_단계를_운영_흐름_순서로_출력_루트에_짓
 
 
 def test_steps_는_적은_순서와_무관하게_정해진_순서로_돈다(home: Path) -> None:
+    """`--basis evening` 은 장 마감 판 재생(PR-8b, `test_replay_evening.py`)이라 아침판 단계를
+    고르지 않는다."""
     out = home / "replay" / "x"
     r = _run(home, "--out", str(out), "--date", D, "--steps", "model,equity", "--basis",
-             "evening")
+             "morning")
     assert r.rc == 0, r.out
     stage = home / "quant-ledger" / "data" / "stage"
     assert r.builds == [
-        *[_eq_build(out, stage, t, "evening") for t in EQ_TABLES],
-        f"-m model build --date {D} --basis evening --fi-build latest --specs all "
+        *[_eq_build(out, stage, t) for t in EQ_TABLES],
+        f"-m model build --date {D} --basis morning --fi-build latest --specs all "
         f"--root {out}/data/model --fi-root {out}/data/factor_inputs",
     ]
 

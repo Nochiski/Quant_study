@@ -8,6 +8,7 @@
         --root data/model_db/factor_inputs \\
         --builds-from data/deliver/history/20260928_morning.json [--calendar-dir data/calendar] \\
         [--postclose-stage-root data/model_db/stage] [--candidates-root data/factor_inputs]
+    재생 전용 `--replay`(현판 세션 축을 asof 에서 자른다 — scripts/replay.sh --basis evening)
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — equity CLI 와 같은 규약.
@@ -59,6 +60,10 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--candidates-root", type=Path, default=research_root(),
                    help="장 마감 판 FG5 후보(직전 판 모델 후보 = _runs/<D'>_morning.json 의 eligible)"
                         "를 읽을 연구 fi 루트(기본 연구 루트 — 수집기 순서 ① 과 같은 자리)")
+    b.add_argument("--replay", action="store_true",
+                   help="재생 전용(scripts/replay.sh --basis evening, 컷오버 PR-8b) — "
+                        "equity 세션 축 표를 asof(아침판 D · 장 마감 판 D')에서 잘라 현판으로 "
+                        "그날 판을 짓는다. 판 manifest 에 replay 표시. 운영 체인은 쓰지 않는다")
     return p
 
 
@@ -70,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
                        keep=args.keep, builds_from=args.builds_from,
                        calendar_dir=args.calendar_dir,
                        postclose_stage_root=args.postclose_stage_root,
-                       candidates_root=args.candidates_root)
+                       candidates_root=args.candidates_root, replay=args.replay)
     except FactorInputsError as e:
         print(f"factor_inputs 실패: {e}", file=sys.stderr)
         return 2

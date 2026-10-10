@@ -859,6 +859,20 @@ def test_category_needs_evidence(tmp_path, name: str, mutate: Mut,
         assert got.get(key) == cats_want, (name, key, got)
 
 
+@pytest.mark.parametrize(("t", "dp"), [(dt.date(2027, 1, 4), dt.date(2026, 12, 30)),
+                                       (T_DATE, DP_DATE)])
+def test_evening_info_after_dprime_is_never_covered(tmp_path, t: dt.date, dp: dt.date) -> None:
+    """장 마감 판 정보가 D' 뒤면 D' 자르기 위반 — 연초 첫 거래일의 연도 창 예외(3자 대조 없음)로도 덮지
+    않는다."""
+    def leak(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        for x in _rows(e, "fi_consensus_annual", A):
+            x["fetched_date"] = t
+    res = _fi3(tmp_path, leak, t=t, dp=dp)
+    (f,) = res.tally.samples[bc.UNEXPLAINED]
+    assert (f.table, f.ticker) == ("fi_consensus_annual", A) and "D' 자르기 위반" in f.note
+    assert res.tally.count[bc.FY] == 0
+
+
 @pytest.mark.parametrize(("t", "dp", "want_annual", "want_uni"), [
     (dt.date(2027, 1, 4), dt.date(2026, 12, 30), bc.FY, bc.FY),
     (T_DATE, DP_DATE, bc.UNEXPLAINED, bc.INFO)])

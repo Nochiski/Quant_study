@@ -12,6 +12,11 @@
 **날짜 단위 교체**다: 같은 트랜잭션에서 그 `score_date` 행을 모두 지우고 새 판 행을 넣는다. 다른
 날짜는 건드리지 않는다. 판 id 는 `_compat_meta.model_builds` 에 spec 별로 남는다.
 
+`daily_prices.adj_close` 는 v3 와 같은 기준이다 — 종목마다 창 안 마지막 행 = 원종가, 앞 행은 equity 누적계수비로
+소급 조정(QL-E · T-18, 식은 `mappings` daily_prices 주석). 창 안에 사건이 접힌 종목은 대상의 창 밖 옛 행
+adj_close 도 같은 트랜잭션에서 다시 맞춘다(`_rebase_outside` — v3 가 사건 뒤 종목 전 기간을 다시 쓰는 것과
+같은 결과). 다시 맞춘 종목은 `_compat_meta.tables.daily_prices.rebase` 에 남고 제자리 반영(`v3_post`)의 범위가 된다.
+
 `--basis evening`(장 마감 판, 컷오버 T-2)의 `daily_prices`·`investor_detail_flows` 는 판(직전
 거래일 D' 까지)에 T 날짜 행을 원장에서 얹는다(QL-D — `compat.t_rows`, 장 마감 판에서만 불러온다).
 두 표는 basis 와 무관하게 그 `--date` 행을 **날짜 단위로 교체**한다(QL-C 와 같은 규칙) — 저녁에
@@ -57,6 +62,7 @@ from .mappings import (
     EVENING_SKIPPED_SQL,
     MAPPINGS,
     MODEL,
+    REBASE_SQL,
     STAGE,
     TableMapping,
 )
@@ -179,6 +185,10 @@ class TableResult:
     # 장 마감 판 T 행(QL-D) — 원천별 행 수 · 21:05 원장으로 대체한 종목 · 행 없는 종목
     # (`t_rows._info`)
     t_rows: dict[str, object] | None = None
+    # `daily_prices` 창 밖 다시 맞춤(QL-E) — before(= 창 시작, 이 날 앞 행이 대상) · floor(대상 첫 날) ·
+    # tickers(창 안에서 계수가 바뀐 종목) · n_rows(다시 쓴 창 밖 행) · n_null(equity 행이 없어 NULL 이 된 행).
+    # `v3_post` 가 tickers 의 창 앞 행을 반영 범위에 더한다
+    rebase: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -222,6 +232,10 @@ class ExportResult:
         if self.builds_fallback:
             parts.append("fallback=" + ",".join(self.builds_fallback))
         for t, r in self.tables.items():
+            rb_tickers = (r.rebase or {}).get("tickers")
+            if isinstance(rb_tickers, list) and rb_tickers and r.rebase is not None:
+                parts.append(f"{t}.rebase={len(rb_tickers)}종목/{r.rebase['n_rows']}행"
+                             f"(null={r.rebase['n_null']})")
             if r.t_rows:
                 i = r.t_rows
                 parts.append(f"{t}.T={i['date']}(postclose={i['postclose']},"
@@ -630,6 +644,55 @@ def _check_adj_close(con: sqlite3.Connection, params: dict[str, str]) -> int:
     return nulls
 
 
+_REBASE_TABLE = "_compat_rebase"            # 임시 표(연결 단위) — 다시 맞출 (종목, 날짜, 계수비)
+
+
+def _rebase_plan(duck: duckdb.DuckDBPyConnection, con: sqlite3.Connection,
+                 params: dict[str, str], builds: dict[str, dict[str, str]]
+                 ) -> tuple[str, list[str], list[tuple]]:
+    """QL-E — 창 안에서 계수가 바뀐 종목과 그 종목의 창 밖 계수비(`mappings.REBASE_SQL`).
+
+    대상 `daily_prices` 의 가장 이른 날을 하한으로 둔다(대상이 비었으면 창 시작 — 다시 맞출 행이 없다).
+    돌려주는 값은 (하한, 종목 목록, [(종목, 날짜, 계수비)]). 계수비가 없는 종목(그 구간 equity 행 없음)도
+    목록에는 든다 — 그 종목의 창 밖 행은 기준을 모르므로 NULL 이 된다(P1).
+    """
+    row = con.execute("SELECT min(trade_date) FROM daily_prices").fetchone()
+    floor = str(row[0]) if row is not None and row[0] is not None else params["from_date"]
+    sources = {t: builds[EQUITY][_EXPR + t] for t in BY_TABLE["daily_prices"].sources}
+    rows = duck.execute(REBASE_SQL.format(**sources, **params, rebase_floor=floor)).fetchall()
+    tickers = sorted({str(r[0]) for r in rows})
+    return floor, tickers, [(str(r[0]), r[1], r[2]) for r in rows if r[1] is not None]
+
+
+def _rebase_outside(tickers: list[str], ratios: list[tuple], before: str,
+                    tally: dict[str, object]) -> Callable[[sqlite3.Connection], None]:
+    """QL-E — 목록 종목의 대상 창 밖 행(`trade_date < before`) adj_close 를 `close × 계수비` 로 다시 쓴다.
+
+    `daily_prices` 를 넣는 트랜잭션 안(COMMIT 직전)에서 돈다. 다른 열과 행 수는 그대로다. 계수비가 없는 날
+    (equity 에 그 행이 없다)은 NULL 이다. 다시 쓴 행 수와 NULL 수를 `tally` 에 남긴다.
+    """
+    def run(con: sqlite3.Connection) -> None:
+        t = _REBASE_TABLE
+        con.execute(f"CREATE TEMP TABLE IF NOT EXISTS {t}_tickers (stock_code TEXT PRIMARY KEY)")
+        con.execute(f"CREATE TEMP TABLE IF NOT EXISTS {t} (stock_code TEXT NOT NULL, "
+                    "trade_date TEXT NOT NULL, ratio REAL, PRIMARY KEY (stock_code, trade_date))")
+        con.execute(f"DELETE FROM temp.{t}_tickers")
+        con.execute(f"DELETE FROM temp.{t}")
+        con.executemany(f"INSERT INTO temp.{t}_tickers VALUES (?)", [(x,) for x in tickers])
+        con.executemany(f"INSERT INTO temp.{t} VALUES (?, ?, ?)", ratios)
+        where = (f"stock_code IN (SELECT stock_code FROM temp.{t}_tickers) "
+                 "AND trade_date < ?")
+        cur = con.execute(
+            f"UPDATE daily_prices SET adj_close = close * (SELECT r.ratio FROM temp.{t} r "
+            "WHERE r.stock_code = daily_prices.stock_code "
+            f"AND r.trade_date = daily_prices.trade_date) WHERE {where}", (before,))
+        tally["n_rows"] = cur.rowcount
+        row = con.execute(f"SELECT count(*) FROM daily_prices WHERE {where} "
+                          "AND adj_close IS NULL", (before,)).fetchone()
+        tally["n_null"] = 0 if row is None else int(row[0])
+    return run
+
+
 def _ensure_meta_columns(con: sqlite3.Connection) -> None:
     """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식).
 
@@ -906,6 +969,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     evening_skipped: int | None = None
     adj_null: int | None = None
     n_with_est: int | None = None
+    rebase: dict[str, object] | None = None       # daily_prices 창 밖 다시 맞춤 기록(QL-E)
     con = _open_target(Path(target))
     duck = duckdb.connect()
     try:
@@ -954,6 +1018,12 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                     if day_col is not None:         # 날짜 단위 교체 0행 가드 — 스트림 열기 전에
                         _guard_date_rows(duck, mapping, params, builds,
                                          0 if part is None else len(part.rows))
+                    post = None
+                    if mapping.v3_table == "daily_prices":   # QL-E — 스트림 열기 전에(같은 duckdb 연결)
+                        floor, rb_tickers, rb_ratios = _rebase_plan(duck, con, params, builds)
+                        rebase = {"before": params["from_date"], "floor": floor,
+                                  "tickers": rb_tickers, "n_rows": 0, "n_null": 0}
+                        post = _rebase_outside(rb_tickers, rb_ratios, params["from_date"], rebase)
                     cur = duck.execute(sql)
                     columns = [d[0] for d in (cur.description or [])]
                     if mapping.v3_table == "stocks":
@@ -977,14 +1047,16 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                                                     "trade_date", params["date"], on_date)
                         n_rows, n_skipped = _upsert(
                             con, mapping, columns, chunks, required[mapping.v3_table],
+                            post=post,
                             pre=None if day_col is None else _replace_date(
                                 mapping.v3_table, day_col, params["date"]))
                 metrics = (_fin_source_counts(con)
                            if mapping.v3_table == "financial_summary" else
                            {"n_on_date": on_date["n"]}
                            if mapping.v3_table == "daily_prices" else {})
-                results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics,
-                                                        None if part is None else part.info)
+                results[mapping.v3_table] = TableResult(
+                    n_rows, n_skipped, used, metrics, None if part is None else part.info,
+                    rebase if mapping.v3_table == "daily_prices" else None)
                 if mapping.v3_table == "daily_prices":
                     evening_skipped = _count_evening_skipped(
                         duck, builds[EQUITY][_EXPR + "price_daily"], params)

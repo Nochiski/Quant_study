@@ -19,6 +19,8 @@
 반영 범위 — compat 이 쓴 범위와 정확히 같다(스테이징 `_compat_meta` 의 이번 실행 기록이 정본):
   · `daily_prices`·`investor_detail_flows`: `trade_date` 가 기록의 창 `[from_date, to_date]` 안
     (compat SQL 의 `date >= from_date AND date <= date` 와 같은 창).
+    `daily_prices` 는 여기에 **창 밖 다시 맞춘 종목의 창 앞 행**(`trade_date < from_date`)을 더한다 — compat 이 창 안
+    사건 종목의 옛 행 adj_close 를 v3 기준으로 다시 썼다(QL-E · T-18, 목록은 기록의 `tables.daily_prices.rebase.tickers`).
   · `score_history`·`score_history_v2`: `score_date = date`(compat 이 그날 행을 지우고 넣는다 — T-16).
   · 나머지 5표(`stocks`·컨센서스 3표·`financial_summary`): **표 전체**. 날짜 창이 없는 as-of 스냅샷이라
     compat 이 쓰는 행이 날짜 범위로 묶이지 않는다(`stocks` 는 이번 유니버스 밖 행 전부를 `is_active=0`
@@ -69,6 +71,9 @@ BUSY_TIMEOUT_MS = 60_000
 # 스테이징을 뜨기 전에 확보할 여유 — 본 파일(+ -wal) 크기의 배수. 사본 1 + compat 쓰기(WAL) 여유.
 DISK_FACTOR = 2
 _SIDECARS = ("", "-wal", "-shm", "-journal")
+# QL-E — 창 밖 다시 맞춘 종목 목록을 담는 연결 단위 임시 표(범위 WHERE 가 읽는다). 종목 수만큼 `?` 를 펼치면
+# 옛 sqlite 의 변수 한도(999)에 걸릴 수 있다.
+_REBASE_TABLE = "_v3_post_rebase"
 
 
 class V3PostGateError(CompatError):
@@ -90,6 +95,7 @@ class GateReport:
     window: tuple[str, str] | None = None       # (from_date, to_date) ISO
     counts: dict[str, int] = field(default_factory=dict)   # 표 → 스테이징 반영 범위 행 수
     failures: tuple[str, ...] = ()
+    rebase: tuple[str, ...] = ()                # daily_prices 창 앞 행도 옮길 종목(QL-E)
 
     @property
     def ok(self) -> bool:
@@ -176,10 +182,23 @@ def snapshot(v3_db: Path, out: Path) -> None:
         raise
 
 
-def _scope(table: str, window: tuple[str, str], d_iso: str) -> tuple[str, tuple[str, ...]]:
-    """표의 반영 범위 WHERE 절과 인자(모듈 머리 주석)."""
+def _load_rebase(con: sqlite3.Connection, tickers: tuple[str, ...]) -> None:
+    """창 밖 다시 맞춘 종목을 이 연결의 임시 표에 싣는다 — `_scope(..., rebase=True)` 앞에 부른다."""
+    con.execute(f"CREATE TEMP TABLE IF NOT EXISTS {_REBASE_TABLE} (stock_code TEXT PRIMARY KEY)")
+    con.execute(f"DELETE FROM temp.{_REBASE_TABLE}")
+    con.executemany(f"INSERT INTO temp.{_REBASE_TABLE} VALUES (?)", [(t,) for t in tickers])
+
+
+def _scope(table: str, window: tuple[str, str], d_iso: str,
+           rebase: bool = False) -> tuple[str, tuple[str, ...]]:
+    """표의 반영 범위 WHERE 절과 인자(모듈 머리 주석). `rebase` 면 `daily_prices` 에 임시 표 종목의 창 앞
+    행을 더한다(QL-E)."""
     if table in _WINDOW_COLUMN:
         col = _WINDOW_COLUMN[table]
+        if rebase and table == "daily_prices":
+            where = (f'("{col}" >= ? AND "{col}" <= ?) OR ("{col}" < ? AND "stock_code" IN '
+                     f"(SELECT stock_code FROM temp.{_REBASE_TABLE}))")
+            return where, (*window, window[0])
         return f'"{col}" >= ? AND "{col}" <= ?', window
     if table in _DATE_COLUMN:
         return f'"{_DATE_COLUMN[table]}" = ?', (d_iso,)
@@ -262,6 +281,9 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
         if window[1] != d_iso:
             fails.append(f"compat 창 끝 {window[1]} ≠ 요청 {d_iso}")
         written = json.loads(meta["tables"])
+        rb = (written.get("daily_prices") or {}).get("rebase") or {}
+        rebase = tuple(str(t) for t in rb.get("tickers") or ())
+        _load_rebase(stg, rebase)
         counts: dict[str, int] = {}
         for table in tables:
             res = written.get(table)
@@ -278,14 +300,15 @@ def gate(staging: Path, v3_db: Path, date: str, basis: str,
                 if n_on < 1:
                     fails.append(f"신선도(T-31 ③): 이번 compat 이 daily_prices 에 쓴 {d_iso} 행 0 — "
                                  "07:00 브리핑이 D−1 장을 오늘로 보고한다(DEFECT-C02)")
-            where, params = _scope(table, window, d_iso)
+            where, params = _scope(table, window, d_iso, bool(rebase))
             n = int(stg.execute(f'SELECT count(*) FROM "{table}" WHERE {where}',
                                 params).fetchone()[0])
             counts[table] = n
             if n == 0:
                 fails.append(f"{table}: 점수 행 0(score_date={d_iso})" if table in SCORE_TABLES
                              else f"{table}: 반영 범위 행 0")
-        return GateReport(d_iso, basis, tables, meta["exported_at"], window, counts, tuple(fails))
+        return GateReport(d_iso, basis, tables, meta["exported_at"], window, counts, tuple(fails),
+                          rebase)
     finally:
         stg.close()
 
@@ -302,10 +325,11 @@ def _move(staging: Path, v3_db: Path, report: GateReport,
     try:
         con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         con.execute("ATTACH DATABASE ? AS stg", (f"{staging.resolve().as_uri()}?mode=ro",))
+        _load_rebase(con, report.rebase)
         con.execute("BEGIN IMMEDIATE")
         try:
             for table in report.tables:
-                where, params = _scope(table, report.window, report.date)
+                where, params = _scope(table, report.window, report.date, bool(report.rebase))
                 cols = ", ".join(f'"{r[1]}"' for r in
                                  con.execute(f'PRAGMA stg.table_info("{table}")'))
                 con.execute(f'DELETE FROM main."{table}" WHERE {where}', params)

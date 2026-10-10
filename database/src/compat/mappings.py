@@ -57,10 +57,23 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 
 
 # ── daily_prices ────────────────────────────────────────────────────────────────────────────
-# equity `price_daily`(OHLCV·거래대금) + `price_adj_daily.adj_close`(전방 조정).
-# v3 `adj_close` 는 소급 조정이지만 모멘텀은 **비율**만 쓰므로 전방 조정과 결과가 같다
-# (EQUITY_DESIGN §7 · 플랜 §1-4 GAP-4 — v3 쪽은 한 번 채워진 종목을 갱신하지 않아 최근 기업행위
-#  종목에서 v3 가 틀리다. 우리 값이 정본이고 차이는 비교 도구가 `v3_defect` 로 분류한다).
+# equity `price_daily`(OHLCV·거래대금) + `price_adj_daily` 누적계수로 만든 **v3 기준 수정주가**(QL-E · T-18).
+# v3 `adj_close` 는 키움 ka10081 수정주가(`upd_stkpc_tp=1`)를 그날 기준일로 받은 값이라 **최신 행 = 원종가**이고
+#   과거 행은 그 뒤 사건으로 소급 조정돼 있다. v3 는 사건이 나면 그 종목 전 기간을 다시 쓴다 — 20:05 시세
+#   수집이 종목마다 최근 5행을 adj_close NULL 로 덮고(`INSERT OR REPLACE`), adj_prices 가 NULL 이 있는 종목을
+#   최대 3페이지 다시 받아 전 행을 UPDATE 한다(v3 `scripts/_backfill_mode_helpers.py` run_adj_price_backfill).
+#   로컬 v3 사본(08-07)에서 145210 은 첫 행 2025-01-02 까지 10배(07-24 액면병합)로 다시 쓰여 있다.
+# equity `adj_close` 는 전방 조정(첫 관측 수준 고정)이라 수익률은 같아도 **값 수준이 다르다**(서버 10-08:
+#   2,529종목 중 adj_close = close 가 compat 1,448 · v3 2,529). 수준을 쓰는 소비자(리서치센터 S2 시세·S11
+#   특이점·drilldown `price_history`·base_rates·가설 store — COMPAT_LAYER §2)가 있어 compat 이 v3 기준으로
+#   다시 맞춘다. equity·fi·모델의 전방 조정은 그대로다(T-3 — 이 변환은 v3 외부 계약 층에만 있다).
+#     adj_close(d) = close(d) × (g(d) ÷ g(L)),   g = cum_share_factor ÷ cum_price_only_factor
+#   g 는 equity 식 `adj_close = close × cum_share_factor ÷ cum_price_only_factor`(price_adj_daily.sql)의
+#   계수 부분이고 L 은 그 종목의 창 안 마지막 행이다. 계수비를 먼저 계산하므로 L 행과 창 안 사건이 없는
+#   종목은 정확히 close 다. L 행의 계수가 없으면 기준을 모르므로 그 종목 창 전체가 NULL 이다(P1 — R9 가 잡는다).
+#   창 안에서 g 가 바뀐 종목은 대상의 창 밖 옛 행도 같은 기준으로 다시 쓴다(`REBASE_SQL`).
+#   v3 가 그 종목을 다시 받지 못한 날(adj_prices 타임아웃 — 09-22~10-01 약 600종목, 플랜 §1-4 GAP-4)은
+#   v3 쪽이 틀리고, 비교 도구가 `v3_defect` 로 분류한다.
 # `price_daily.basis`('krx'|'evening')는 v3 스키마에 자리가 없다 — `_compat_meta.basis` 에만 남는다.
 # ⚠ GAP-1: v3 `daily_prices` 는 open·high·low·close·volume 이 **NOT NULL** 이고(v3
 #   `backend/db/schema.py:16-27`, 완화 ALTER 없음) 우리 저녁 잠정 T 행(`basis='evening'`)은
@@ -80,7 +93,27 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 #   open=high=low=close=1126 이다. 그래서 **O/H/L 이 비고 종가가 있는 모든 krx 행**의 빈 칸을 종가로
 #   채운다(v3 와 같은 모양). 종가가 없으면 채우지 않는다(그 행은 NOT NULL 로 빠지고 게이트가 잡는다).
 _REF_FILL = "p.close"
+# 창 안 행과 그 기준 계수 — `daily_prices` SELECT 와 창 밖 다시 맞춤(`REBASE_SQL`)이 같이 쓴다.
+#   g      = 그 행의 계수(cum_share_factor ÷ cum_price_only_factor, 위 주석)
+#   g_last = 그 종목 창 안 마지막 행의 g(그 행 계수가 없으면 NULL — 종목 전체가 기준을 모른다)
+_DP_WINDOW_CTE = f"""
+win AS (
+    SELECT p.*, a.cum_share_factor / a.cum_price_only_factor AS g
+    FROM {{price_daily}} p
+    JOIN {{universe_daily}} u ON u.ticker = p.ticker AND u.date = p.date
+    LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
+    WHERE p.basis = 'krx'
+      AND p.date >= DATE '{{from_date}}' AND p.date <= DATE '{{date}}'
+      AND {V3_STOCK_FILTER}
+),
+based AS (
+    SELECT w.*, last_value(w.g) OVER (PARTITION BY w.ticker ORDER BY w.date
+                                      ROWS BETWEEN UNBOUNDED PRECEDING
+                                               AND UNBOUNDED FOLLOWING) AS g_last
+    FROM win w
+)"""
 _DAILY_PRICES_SQL = f"""
+WITH {_DP_WINDOW_CTE}
 SELECT
     p.ticker                                       AS stock_code,
     CAST(p.date AS VARCHAR)                        AS trade_date,
@@ -90,13 +123,37 @@ SELECT
     CAST(p.close AS BIGINT)                        AS close,
     CAST(p.volume_shr AS BIGINT)                   AS volume,
     CAST(round(p.value_krw / {KRW_PER_MN}.0) AS BIGINT)  AS amount,
-    CAST(a.adj_close AS DOUBLE)                    AS adj_close
-FROM {{price_daily}} p
-JOIN {{universe_daily}} u ON u.ticker = p.ticker AND u.date = p.date
-LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
-WHERE p.basis = 'krx'
-  AND p.date >= DATE '{{from_date}}' AND p.date <= DATE '{{date}}'
-  AND {V3_STOCK_FILTER}
+    CAST(CAST(p.close AS DOUBLE) * (p.g / p.g_last) AS DOUBLE)  AS adj_close
+FROM based p
+"""
+
+# ── 창 밖 다시 맞춤(QL-E · T-18) ──────────────────────────────────────────────────────────────
+# 위 기준은 창 안 마지막 행에 묶여 있어 창 안에 사건이 접히면(g 가 바뀌면) 대상 파일의 창 밖 옛 행이 옛
+#   기준으로 남아 창 경계에서 수정주가가 끊긴다. v3 는 사건 뒤 종목 전 기간을 다시 쓰므로(위 주석) 같은
+#   결과가 되게 **그 종목만** 창 밖 행의 adj_close 를 `close × g(d) ÷ g(L)` 로 다시 쓴다(`quant_db._rebase_outside`
+#   가 대상의 `trade_date < from_date` 행을 UPDATE — 다른 열·행 수는 그대로).
+# 출력: 창 안에서 g 가 바뀐 종목마다 (종목, 날짜, 계수비) — 날짜는 [rebase_floor, from_date) 의 equity krx 행.
+#   그 구간에 equity 행이 없는 종목도 (종목, NULL, NULL) 한 행으로 나온다(목록에는 들어간다). rebase_floor =
+#   대상 `daily_prices` 의 가장 이른 날(그 앞 equity 이력은 대상에 행이 없어 쓸 데가 없다 — `--full` 에서 수백만
+#   행을 올리지 않게).
+# 창이 사건을 놓치는 경우(반영이 창 길이보다 오래 끊겼다 · equity 규칙 상향으로 옛 계수가 바뀌었다)는 이 규칙이
+#   못 잡는다 — `--full` 재적재로 맞춘다(창 밖 가격 행 자체가 빠지는 것과 같은 복구).
+REBASE_SQL = f"""
+WITH {_DP_WINDOW_CTE},
+moved AS (
+    SELECT ticker, any_value(g_last) AS g_last
+    FROM based
+    GROUP BY ticker
+    HAVING count(DISTINCT g) > 1
+)
+SELECT m.ticker,
+       CAST(a.date AS VARCHAR)                                        AS trade_date,
+       (a.cum_share_factor / a.cum_price_only_factor) / m.g_last      AS ratio
+FROM moved m
+LEFT JOIN {{price_adj_daily}} a
+       ON a.ticker = m.ticker AND a.basis = 'krx'
+      AND a.date >= DATE '{{rebase_floor}}' AND a.date < DATE '{{from_date}}'
+ORDER BY 1, 2
 """
 
 # 같은 창에서 `basis='evening'` 이라 제외한 행 수 — `_compat_meta.n_evening_rows_skipped`.

@@ -90,7 +90,8 @@ def _price_rows(*, bad_volume: bool = False) -> list[dict]:
 
 
 def _adj_rows(skip_last: bool = False, price_rows: list[dict] | None = None) -> list[dict]:
-    """`price_adj_daily` 실물 15열. `skip_last` 면 마지막 krx 행의 조정가가 없다(R9)."""
+    """`price_adj_daily` 실물 18열(e1.26.0 — ⑤ 가격 전용 계수 열 포함). `skip_last` 면 마지막 krx 행의
+    조정가가 없다(R9). 누적계수는 창 안 고정(share 0.9 — 전방 조정이면 adj = 종가 × 0.9)."""
     src = [r for r in (price_rows if price_rows is not None else _price_rows())
            if r["basis"] == "krx"]
     if skip_last:
@@ -102,7 +103,8 @@ def _adj_rows(skip_last: bool = False, price_rows: list[dict] | None = None) -> 
             "ticker": r["ticker"], "date": r["date"], "adj_open": close * 0.9,
             "adj_high": close * 0.9, "adj_low": close * 0.9, "adj_close": close * 0.9,
             "adj_volume_shr": 1_000_000.0, "cum_price_factor": 1.0, "cum_share_factor": 0.9,
-            "n_factors_applied": 1, "n_unadjusted_events": 0, "available_date": r["date"],
+            "cum_price_only_factor": 1.0, "n_factors_applied": 1, "n_price_only_applied": 0,
+            "n_unadjusted_events": 0, "n_price_unresolved_events": 0, "available_date": r["date"],
             "available_basis": "derived", "basis": "krx", "corp_action_pending": False})
     return out
 
@@ -377,8 +379,9 @@ def test_daily_prices_columns_rows_and_units(roots, tmp_path: Path) -> None:
     got = _rows(target, "SELECT stock_code, trade_date, open, high, low, close, volume, "
                         "amount, adj_close FROM daily_prices "
                         "WHERE stock_code='005930' AND trade_date='2026-09-23'")
+    # adj_close = 종가 — 창 안 최신 행이고 창 안에 사건이 없다(v3 기준, QL-E. 전방 조정이면 63,180)
     assert got == [("005930", "2026-09-23", 69_700, 70_900, 69_300, 70_200, 1_000_000,
-                    1234, pytest.approx(63_180.0))]
+                    1234, 70_200.0)]
     assert res.n_adj_close_null == 0
 
 

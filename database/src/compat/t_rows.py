@@ -19,9 +19,11 @@ T 는 캘린더 밖). v3 소비자(07:00 브리핑·위키·uni)는 T 저녁에 
 v3 NOT NULL 채움(T-32 = D2-9 (c)) — v3 T 행은 ka10081 이 늘 시·고·저·거래대금을 줘서 같은 상황이
   없다. open·high·low = 종가, amount = 종가 × 거래량 ÷ 1e6(백만원, 근사 — NULL 이면 07:00 브리핑
   거래대금 상위가 TypeError, COMPAT_LAYER §4-1). 다음 날 아침 KRX 행으로 날짜 단위 교체된다.
-adj_close — T 종가 × D' 누적계수(D' 조정가 ÷ D' 종가). equity 저녁 잠정 행(price_adj_daily
-  e1.15.0)과 같은 계수 이월이다. 그날 기준가가 D' KRX 종가와 다르면(T-6 첫 조건
-  `daily.kw_daily.ka10060_base_price_differs_sql`) 계수를 모른다 → NULL(P1).
+adj_close — T 종가 그대로(QL-E · T-18). v3 기준은 '종목의 창 안 최신 행 = 원종가'이고 장 마감 판에서는 T 가
+  최신 행이다. 그날 기준가 = D' KRX 종가면 T 에 사건이 없어 g(T) = g(D') 이고, 창 안 D' 이하 행(`mappings`
+  daily_prices — D' 기준)과 같은 기준이다. 그날 기준가가 D' KRX 종가와 다르면(T-6 첫 조건
+  `daily.kw_daily.ka10060_base_price_differs_sql`) 계수를 모른다 → NULL(P1). 그 종목의 D' 이하 행은 D' 기준으로
+  두고(계수를 모르는 T 로 기준을 옮기지 않는다), 다음 날 아침 KRX 반영이 T 에 접힌 계수로 창 전체를 다시 맞춘다.
 이 채움들은 v3 외부 계약 때문이고 equity·모델 입력으로는 돌아가지 않는다. 만료 = D2-9 (a)(저녁
 ka10081) 또는 v3 소비자 직독 전환.
 
@@ -115,9 +117,8 @@ _BASE_DIFFERS = ka10060_base_price_differs_sql("t.close_krw", "t.pred_pre_krw", 
 
 DAILY_PRICES_SQL = f"""
 WITH prev AS (
-    SELECT p.ticker, p.close AS prev_close, a.adj_close AS prev_adj
+    SELECT p.ticker, p.close AS prev_close
     FROM {{price_daily}} p
-    LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
     WHERE p.date = DATE '{{d_prime}}' AND p.basis = 'krx'
 )
 SELECT
@@ -131,7 +132,7 @@ SELECT
     CAST(round(CAST(t.close_krw AS DOUBLE) * CAST(t.volume_shr AS DOUBLE) / {KRW_PER_MN}.0)
          AS BIGINT)                                AS amount,
     CAST(CASE WHEN NOT {_BASE_DIFFERS}
-              THEN CAST(t.close_krw AS DOUBLE) * v.prev_adj / CAST(v.prev_close AS DOUBLE)
+              THEN CAST(t.close_krw AS DOUBLE)
          END AS DOUBLE)                            AS adj_close,
     t.{SOURCE_COL}
 FROM {PICK_TABLE} t

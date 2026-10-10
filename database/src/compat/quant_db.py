@@ -12,7 +12,8 @@
 **날짜 단위 교체**다: 같은 트랜잭션에서 그 `score_date` 행을 모두 지우고 새 판 행을 넣는다. 다른
 날짜는 건드리지 않는다. 판 id 는 `_compat_meta.model_builds` 에 spec 별로 남는다.
 
-M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다.
+M1~M3 대상은 별도 파일 `data/compat/quant.db`, M4 부터 v3 파일 제자리(결정 D-2)다. 제자리 반영은 v3
+파일에 직접 쓰지 않고 `scripts/v3_post.sh`(`compat.v3_post` — 스테이징 → 게이트 → 9표 한 트랜잭션, QL-F)로 한다.
 
 가드(1차 그림자 실행 뒤 리뷰 R1~R10 반영) — 전부 **쓰기 전/직후에 예외**로 멈춘다:
   · `--basis` 와 equity 판 접두(`e_`/`m_`) 불일치            (R5)
@@ -108,8 +109,9 @@ MODEL_UNIVERSES = ("all", "estimates")
 BUILDS_MISSING = ("error", "current")
 MARKET_VOCAB = ("KOSPI", "KOSDAQ")      # v3 `stocks.market` CHECK 제약과 같은 어휘
 META_TABLE = "_compat_meta"
+# `main.` 한정 — `compat.v3_post` 가 스테이징을 ATTACH 한 연결에서 본 파일 쪽 메타 표를 만들 때도 같은 DDL 을 쓴다.
 META_DDL = f"""
-CREATE TABLE IF NOT EXISTS {META_TABLE} (
+CREATE TABLE IF NOT EXISTS main.{META_TABLE} (
     exported_at    TEXT PRIMARY KEY,
     date           TEXT NOT NULL,
     basis          TEXT NOT NULL,
@@ -156,7 +158,8 @@ class TableResult:
     n_rows: int                 # 실제로 넣은 행
     n_skipped: int              # v3 NOT NULL/PK 를 못 채워 넣지 못한 행
     sources: dict[str, str]     # 원천 표 → build_id
-    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를 싣는다.
+    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를, `daily_prices` 는
+    # 이번에 쓴 trade_date = D 행 수(n_on_date — 제자리 반영 신선도 게이트, T-31 ③)를 싣는다.
     metrics: dict[str, int] = field(default_factory=dict)
 
 
@@ -326,6 +329,9 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
 
     다르면 `CompatSchemaError` — v3 가 마이그레이션으로 스키마를 바꾼 경우이므로 쓰지 않는다
     (플랜 §7 위험표 2행). 돌려주는 값은 표 → **필수 컬럼**(NOT NULL ∪ PK) 목록이다.
+    비교는 열 이름 → 타입이다(순서 무관). 실물 v3 `stocks` 는 `delisted_date` 가 마이그레이션 ALTER 로
+    `updated_at` 뒤에 붙어 선언 순서와 다르다(QL-F 로컬 v3 사본 실측). 쓰기는 열 이름으로 하므로 순서는
+    결과에 영향이 없다.
     """
     ref = _reference_schema()
     con.executescript(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
@@ -333,7 +339,7 @@ def _ensure_schema(con: sqlite3.Connection, tables: list[str]) -> dict[str, list
     for table in tables:
         info = con.execute(f"PRAGMA table_info({table})").fetchall()
         got = [(r[1], r[2]) for r in info]
-        if got != ref[table]:
+        if sorted(got) != sorted(ref[table]):
             raise CompatSchemaError(
                 f"대상 스키마가 v3 선언과 다르다: table={table} got={got} want={ref[table]}")
         # rowid 표의 TEXT PRIMARY KEY 는 notnull 플래그가 0 이라 PK 를 따로 더한다.
@@ -385,6 +391,25 @@ def _chunks(cur: duckdb.DuckDBPyConnection) -> Iterator[list[tuple]]:
         yield rows
 
 
+def _complete(row: tuple, need: list[int]) -> bool:
+    """v3 필수 열(NOT NULL ∪ PK)이 다 찬 행 — `_upsert` 가 넣는 행의 정의."""
+    return all(row[i] is not None for i in need)
+
+
+def _count_on_date(chunks: Iterable[list[tuple]], columns: list[str], required: list[str],
+                   column: str, value: str, tally: dict[str, int]) -> Iterator[list[tuple]]:
+    """조각을 그대로 흘리며 `_upsert` 가 넣을 행 중 `column == value` 인 수를 `tally['n']` 에 센다.
+
+    신선도(컷오버 트랙 T-31 ③) — 제자리 반영의 대상은 v3 본 파일 사본이라 D 행이 이미 있을 수 있다.
+    '대상에 D 행이 있다' 가 아니라 '이번 실행이 D 행을 썼다' 를 남긴다.
+    """
+    i_col = columns.index(column)
+    need = [columns.index(c) for c in required]
+    for chunk in chunks:
+        tally["n"] += sum(1 for r in chunk if r[i_col] == value and _complete(r, need))
+        yield chunk
+
+
 def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
             chunks: Iterable[list[tuple]], required: list[str],
             post: Callable[[sqlite3.Connection], None] | None = None,
@@ -408,7 +433,7 @@ def _upsert(con: sqlite3.Connection, mapping: TableMapping, columns: list[str],
         if pre is not None:
             pre(con)
         for chunk in chunks:
-            good = [r for r in chunk if all(r[i] is not None for i in need)]
+            good = [r for r in chunk if _complete(r, need)]
             n_skipped += len(chunk) - len(good)
             if good:
                 con.executemany(sql, good)
@@ -582,14 +607,17 @@ def _check_adj_close(con: sqlite3.Connection, params: dict[str, str]) -> int:
 
 
 def _ensure_meta_columns(con: sqlite3.Connection) -> None:
-    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식)."""
-    have = {r[1] for r in con.execute(f"PRAGMA table_info({META_TABLE})")}
+    """옛 판이 만든 `_compat_meta` 에 뒤에 생긴 열을 덧댄다(v3 MIGRATION_SQL 과 같은 방식).
+
+    `main.` 한정 — 스테이징을 ATTACH 한 연결(`compat.v3_post`)에서도 본 파일 쪽 표만 본다.
+    """
+    have = {r[1] for r in con.execute(f"PRAGMA main.table_info({META_TABLE})")}
     for name, decl in (("n_evening_rows_skipped", "INTEGER"), ("n_adj_close_null", "INTEGER"),
                        ("status", "TEXT"), ("failed_table", "TEXT"),
                        ("model_universe", "TEXT"), ("n_universe_with_estimates", "INTEGER"),
                        ("builds_fallback", "TEXT"), ("model_builds", "TEXT")):
         if name not in have:
-            con.execute(f"ALTER TABLE {META_TABLE} ADD COLUMN {name} {decl}")
+            con.execute(f"ALTER TABLE main.{META_TABLE} ADD COLUMN {name} {decl}")
 
 
 def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:
@@ -805,6 +833,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
         try:
             for mapping in selected:
                 current = mapping.v3_table
+                on_date = {"n": 0}       # daily_prices 에 이번에 쓴 trade_date = D 행(T-31 ③)
                 sql, used = _render(mapping, params, builds)
                 if mapping.source_kind == MODEL:
                     if not scores:
@@ -831,10 +860,16 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                             con, mapping, columns, [rows], required["stocks"],
                             _mark_delisted(params["exported_at"]))
                     else:
-                        n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
+                        chunks: Iterable[list[tuple]] = _chunks(cur)
+                        if mapping.v3_table == "daily_prices":
+                            chunks = _count_on_date(chunks, columns, required["daily_prices"],
+                                                    "trade_date", params["date"], on_date)
+                        n_rows, n_skipped = _upsert(con, mapping, columns, chunks,
                                                     required[mapping.v3_table])
                 metrics = (_fin_source_counts(con)
-                           if mapping.v3_table == "financial_summary" else {})
+                           if mapping.v3_table == "financial_summary" else
+                           {"n_on_date": on_date["n"]}
+                           if mapping.v3_table == "daily_prices" else {})
                 results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics)
                 if mapping.v3_table == "daily_prices":
                     evening_skipped = _count_evening_skipped(

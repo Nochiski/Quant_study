@@ -2747,3 +2747,58 @@ same_day_suppressed 1 — 같은 무상증자 중복 공시 109860, 계수는 �
 사건 행으로 옮겨감). (종목, 날짜) 가격 단계를 KRX 기준가 사슬 단계(전일 종가 ÷ 기준가)와 견주면
 기준가가 안 바뀐 날의 계수 접힘 114 → **0**, 나머지 범주(일치 4,058 · KRX 만 1,062 · 둘 다 다름 197)
 불변.
+
+## 14. K1-6a — `adj_factor` not-ok 행 묶음 (기록형, 규칙 e1.29.0, 2026-10-10)
+
+v3 컷오버 트랙 K1-6a. K1-6/H1-1 분해(10-09, 운영 판 e1.26.0 — not-ok 3,561 = 가격 축 해소 2,962 +
+미해결 599)를 **매 빌드** 같은 술어로 다시 세어 `EG3_adj_factor` metrics 에 싣는다. 기록형이다 — checks 에
+넣지 않아 PASS/FAIL 을 바꾸지 않고, 산출 SQL(`sql/adj_factor.sql`)은 그대로라 표 내용도 같다. 판본 상향은
+'규칙 파일이 바뀌면 올린다'(K1-13)를 따른 것이다(e1.24.0 과 같은 '게이트 변경, 산출 불변').
+
+**정본 SQL**: `rules_s06.not_ok_bucket_sql(adj)` — not-ok 행마다 한 행(event_id · factor_source ·
+price_resolution · sec_type · no_bar_after_apply · 인접 수익률 행 수·최댓값 · bucket). 게이트 지표와 서버
+재판정이 같은 함수를 쓴다. 묶음은 아래 CASE 순서로 **배타·완전**하다(어디에도 안 맞으면 `unclassified`).
+
+| 순서 | bucket | 술어 | 처리 규칙 |
+|---|---|---|---|
+| 1 | `price_only`·`price_only_dup`·`factor_near`·`price_only_near` | `price_resolution` 그대로(가격 축 해소, e1.26.0 ⑤) | ⑤ 가 처리했다 — `price_only` 계수 행이 그날 기준가 비를 가격 축에 접고, 나머지 셋은 수정종가가 이미 이어져 fi `adj_ok`·`adj_jump_ok` 계단이 세지 않는다. 보유 수량 축(factor_ok=false·계수 1)은 그대로 |
+| 2 | `unresolved_excluded_kind` ① | 미해결 ∧ `sec_type ∈ PRICE_ONLY_EXCLUDED_SEC_TYPES`(fund·ship_fund·reit) | **설계상 제외(D6-1)** — 처리 없음. 분배·배당락 반복 하락이라 접으면 `adj_close` 가 분배 재투자 축이 된다. 가격 축 표식은 다른 미해결과 같다 |
+| 3 | `unresolved_no_bar_after` ② | 미해결 ∧ 주식 계열(`PRICE_ONLY_SEC_TYPES`) ∧ `no_bar_after_apply` | **가격 축 영향 없음** — 적용일 뒤 실거래 바가 없어 끊길 뒤 구간이 없다. 처리 없음(백테스트 정산은 DEFECT-10 그대로 소비자가 그 열로 고른다) |
+| 4 | `unresolved_jump` ④ | 미해결 ∧ 주식 계열 ∧ 바 있음 ∧ 적용일 ±`ADJ_JUMP_NEIGHBOR_SESSIONS`(6) 세션 안 원종가 수익률이 그 행 날짜의 가격제한폭(+`PRICE_LIMIT_EPS`) 밖 | **점프 흔적 — 표식만(T-10)**. 기준가 근거가 없어 계수를 내려면 점프 비율로 추정해야 하므로 적재하지 않는다. 분해 때 7행 전부 2010~2014(fi 가격 창 550 달력일·연구 창 2016+ 밖). 창 안으로 새 행이 오면 H1-4 `adj_jump_ok` 가 점프 행에서 뒤집혀 scope 가 그 창의 모멘텀·20일 변동성을 결측으로 둔다(T-9). 목록은 `unresolved_jump_event_ids` |
+| 5 | `unresolved_within_limit` ③ | 그 밖의 주식 계열 미해결(창 안 수익률 행이 없는 경우 포함) | **점프 아님** — 수정종가가 끊겼다는 근거가 없다. fi `adj_ok=false` 표식(창 안 사건 계단)만 남고, 모델은 H1-4 `adj_jump_ok` 가 뒤집히지 않으므로 scope 결측 규칙(T-9) 밖이다(scope `v3_zscore` 는 `adj_ok` 를 읽지 않는다). 창 안 가격 행이 하나도 없는 행(상장폐지 기간 사건 등)은 `n_unresolved_within_limit_no_adjacent_return` 로 따로 센다 |
+| 6 | `unclassified` | 위 어디에도 안 맞음 — 종류 etf·other·security 없음 · 적용일 캘린더 밖 · `price_resolution` 이 not-ok 행에서 어휘 밖·`factor` | 0 이 정상. 0 이 아니면 묶음 정의(종류·표식 어휘)를 다시 본다 — 기록형이라 빌드는 막지 않는다 |
+
+- **인접 수익률**: `price_daily` 의 KRX 확정 행(`basis='krx'` — 저녁 잠정 T 행 제외) 원종가, 그 종목
+  직전 행(참고가 행 포함) 대비. 가격제한폭은 수익률이 난 행 날짜 기준 2015-06-15 전 15% · 그날부터 30%.
+  상수(`PRICE_LIMIT_*`·`ADJ_JUMP_NEIGHBOR_SESSIONS`)는 fi `factor_inputs.queries` 의 H1-4 정의와 같은
+  값이다(fi queries 가 `rules_s06` 을 import 해 equity 가 fi 를 읽으면 순환 — 값 동치를
+  `test_K1_6a_가격제한폭_인접_세션_상수는_fi_H1_4_정의와_같다` 가 묶는다).
+- **H1-4 와 다른 점**: H1-4 `adj_jump_ok` 는 **수정종가**(`price_adj_daily`) 수익률을 본다. 이 지표는
+  adj_factor 게이트 시점에 수정종가 표가 없어 원종가를 본다 — 미해결 행 ±6 세션 안에 접힌 ok·⑤ 계수가
+  있으면 원종가에서만 점프로 보일 수 있다(그런 행은 대개 `factor_near`·`price_only_near` 로 먼저 빠진다).
+- **새 사유 어휘**: 묶음은 `factor_source` 를 보지 않고 위 술어로만 정한다. E-1(e1.28.0)이 ok → not-ok 로
+  돌린 103행(`no_base_price_evidence` 102 · `same_day_suppressed` 1)도 같은 술어로 간다 — 기준가가 안
+  바뀐 소액 자기주식 소각형 감자는 인접 수익률이 제한폭 안이라 대개 ③, 근처에 ⑤ 단위·ok 계수가 있으면
+  `price_only_near`·`factor_near`, 형제가 ok 인 `same_day_suppressed` 는 `factor_near`(가). 분포는
+  `n_not_ok_by_bucket_factor_source` 가 매 빌드 남긴다.
+
+| 지표(`EG3_adj_factor` metrics) | 뜻 |
+|---|---|
+| `n_not_ok_by_bucket` | bucket → 행 수(어휘 `not_ok_bucket_vocab` 전부, 0 포함). 합 = not-ok 행 수 |
+| `n_not_ok_unclassified` | `unclassified` 행 수 — 0 이 정상 |
+| `n_not_ok_by_bucket_factor_source` | `bucket:factor_source` → 행 수 |
+| `n_unresolved_within_limit_no_adjacent_return` | ③ 중 창 안 수익률 행이 0 인 행 |
+| `unresolved_jump_event_ids` | ④ event_id(정렬, 최대 `JUMP_SAMPLE_ROWS`) |
+
+**서버 확인(운영 판은 건드리지 않는다)**: §7 ① 재판정 — `cd ~/quant-ledger && PYTHONPATH=<새 코드>/src
+.venv/bin/python -B -m equity --root data/equity --stage-root data/stage gate adj_factor` 의
+`EG3_adj_factor` 줄. 운영 판이 e1.28.0 전이면 E-1 술어(`n_ok_apply_basis_bad` 등)로 FAIL 할 수 있으나
+metrics 는 그대로 실린다(묶음 지표는 판정 밖).
+
+**후속(출력이 바뀌어 컷오버 뒤 별도 PR)**:
+- `no_adjustment` 표시 — 자기주식 소각형 감자(주식수만 줄고 KRX 기준가 불변, E-1 이 not-ok·계수 1 로 둔
+  소액 감자)를 '조정 불필요' 로 표시한다. 지금은 ③ 에 섞여 있다.
+- E-1 리뷰 MINOR-3 — 기준가 단계가 매칭 창 밖인 진짜 주식수 증가 2건(017180 bonus 2011-07-08 · 225220
+  bonus 2023-03-31)의 보유 수량 경로 누락.
+- 가격제한폭·인접 세션 상수의 단일 정본 — fi queries 가 `rules_s06` 상수를 import 하게 바꾼다(fi 규칙
+  파일 변경이라 fi 판본 상향을 동반 — fi 를 고치는 다음 PR 에).

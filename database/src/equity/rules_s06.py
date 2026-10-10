@@ -45,6 +45,9 @@ shares_out: 기준가 원천)·`trading_calendar`·`security`(sec_type·corp_cod
                    게이트가 단위를 다시 만들어 단위당 계수 행 정확히 1 · 계수 = 그날 기준가 ÷ 직전
                    행 종가 · ok 접힘일·단위 밖 계수 행 0 · 계수 행은 factor_ok=false(보유 수량 축
                    불변) — `_price_only`. 기록형: 사유·종류·r 분포·unresolved 사유·근처 판정 수.
+  EG3_adj_factor K1-6a(e1.29.0) — 기록형만: not-ok 행의 배타·완전한 묶음별 수(가격 축 해소 4갈래 ·
+                   미해결 ① 제외 종류 ② 적용일 뒤 바 없음 ③ 인접 수익률 제한폭 안 ④ 점프 흔적 ·
+                   unclassified) — 정본 `not_ok_bucket_sql`, 판정에 안 쓴다(EQUITY_GATES §14).
   EG8            — P02 수정수익률(행 대 행) 점프를 **apply_date** 에서 건별로, P03 은 이벤트 집합의
                    조정 거래량 20세션 중앙값 비의 중앙값 ∈ [1/band, band](방향 오류 탐지, 3차)
                    (`views` 의 같은 템플릿을 TEMP MACRO 로 올려 계산). 상수 미등재면
@@ -169,6 +172,91 @@ PRICE_ONLY_R_SMALL, PRICE_ONLY_R_LARGE = 0.05, 0.30
 # 10-09 6-5 서버 재연(운영 입력 D=20261008) 초과 0(최대 0.300) → 폐기형(D6-5, N-33). False 로
 # 되돌리면 기록형(metrics 만)으로 돌아간다.
 PRICE_ONLY_JUMP_GATE = True
+
+# ── K1-6a not-ok 행 묶음(기록형, v3 컷오버 트랙 K1-6a · e1.29.0) — 정의·처리 규칙은 EQUITY_GATES §14 ──
+# not-ok 행마다 배타·완전한 묶음 하나(`not_ok_bucket_sql` 의 CASE 순서). factor_source 는 보지 않는다 —
+# 새 사유 어휘(E-1 no_base_price_evidence 등)도 같은 술어로 간다.
+#   가격 축 해소 4갈래 = price_resolution 그대로(⑤ 가 수정종가를 이었다)
+#   unresolved_excluded_kind  : ① 미해결 ∧ D6-1 제외 종류(fund·ship_fund·reit) — 설계상 제외
+#   unresolved_no_bar_after   : ② 미해결 ∧ 주식 계열 ∧ no_bar_after_apply — 가격 축 영향 없음
+#   unresolved_jump           : ④ 미해결 ∧ 주식 계열 ∧ 바 있음 ∧ 적용일 ±ADJ_JUMP_NEIGHBOR_SESSIONS 세션
+#                               안 원종가 수익률(행 대 행, KRX 확정 행)이 그 행 날짜의 가격제한폭 밖
+#   unresolved_within_limit   : ③ 그 밖의 주식 계열 미해결(인접 가격 행이 없는 경우 포함 — 수는 따로)
+#   unclassified              : 위 어디에도 안 맞음(종류 etf·other·NULL · 적용일 캘린더 밖 · 표식 어휘
+#                               밖). 0 이 정상이고 기록형이라 판정은 안 바꾼다
+PRICE_RESOLVED_BRANCHES: tuple[str, ...] = tuple(
+    v for v in PRICE_RESOLUTION_VOCAB if v not in ("factor", PRICE_UNRESOLVED))
+UNRESOLVED_BUCKETS: tuple[str, ...] = ("unresolved_excluded_kind", "unresolved_no_bar_after",
+                                       "unresolved_within_limit", "unresolved_jump")
+NOT_OK_UNCLASSIFIED = "unclassified"
+NOT_OK_BUCKET_VOCAB: tuple[str, ...] = (*PRICE_RESOLVED_BRANCHES, *UNRESOLVED_BUCKETS,
+                                        NOT_OK_UNCLASSIFIED)
+# D6-1 제외 종류 — 주식 계열(PRICE_ONLY_SEC_TYPES)과 겹치지 않고, 둘 밖(etf·other)은 unclassified
+PRICE_ONLY_EXCLUDED_SEC_TYPES: tuple[str, ...] = ("fund", "ship_fund", "reit")
+# KRX 일반 세션 가격제한폭(수익률이 난 행 날짜 기준)과 '인접' 세션 폭 — fi `factor_inputs.queries` 의
+# 같은 이름 상수(H1-4 adj_jump_ok)와 값이 같아야 한다(테스트가 묶는다). fi queries 가 이 모듈을
+# import 하므로 equity 쪽에서 fi 를 읽으면 순환이다 — 단일 정본으로 합치는 것은 fi 판본을 올리는
+# 다음 fi PR 몫(EQUITY_GATES §14 후속).
+PRICE_LIMIT_CHANGE_DATE = "2015-06-15"
+PRICE_LIMIT_BEFORE, PRICE_LIMIT_AFTER = 0.15, 0.30
+PRICE_LIMIT_EPS = 1e-9
+ADJ_JUMP_NEIGHBOR_SESSIONS = 6
+
+
+def not_ok_bucket_sql(adj: str = "adj_factor") -> str:
+    """K1-6a 묶음 분류의 정본 SQL — `adj`(adj_factor 산출 뷰·표)의 not-ok 행마다 한 행.
+
+    읽는 것: `adj` · `price_daily`(ticker·date·close·basis) · `security`(ticker·sec_type) ·
+    `trading_calendar`(date). 열: event_id · ticker · apply_date · factor_source · price_resolution ·
+    sec_type · no_bar_after_apply · n_adjacent_returns(창 안 수익률 행 수) · max_adjacent_abs_return ·
+    bucket. EG3_adj_factor 기록형 지표와 서버 재판정(`python -m equity … gate adj_factor`)이 이것을 쓴다.
+    """
+    po = _vocab_sql(PRICE_RESOLVED_BRANCHES)
+    exc, inc = _vocab_sql(PRICE_ONLY_EXCLUDED_SEC_TYPES), _vocab_sql(PRICE_ONLY_SEC_TYPES)
+    w = ADJ_JUMP_NEIGHBOR_SESSIONS
+    return f"""
+        WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n FROM trading_calendar),
+             nk AS (
+          SELECT a.event_id, a.ticker, a.apply_date, a.factor_source, a.price_resolution,
+                 a.no_bar_after_apply, s.sec_type, c.n AS n_apply
+          FROM {adj} a
+          LEFT JOIN security s ON s.ticker = a.ticker
+          LEFT JOIN cal c ON c.date = a.apply_date
+          WHERE NOT a.factor_ok),
+             ret AS (
+          -- 원종가 행 대 행 수익률(참고가 행 포함) — 저녁 잠정 T 행(basis evening)은 뺀다
+          SELECT r.ticker, c.n, abs(r.close / r.prev_close - 1) AS abs_ret,
+                 CASE WHEN r.date < DATE '{PRICE_LIMIT_CHANGE_DATE}' THEN {PRICE_LIMIT_BEFORE!r}
+                      ELSE {PRICE_LIMIT_AFTER!r} END AS price_limit
+          FROM (SELECT ticker, date, close,
+                       lag(close) OVER (PARTITION BY ticker ORDER BY date) AS prev_close
+                FROM price_daily
+                WHERE basis = '{PRICE_BASIS_KRX}'
+                  AND ticker IN (SELECT ticker FROM nk
+                                 WHERE price_resolution = '{PRICE_UNRESOLVED}')) r
+          JOIN cal c ON c.date = r.date
+          WHERE r.prev_close > 0),
+             adj_ret AS (
+          SELECT k.event_id, count(r.n) AS n_adjacent_returns,
+                 max(r.abs_ret) AS max_adjacent_abs_return,
+                 coalesce(bool_or(r.abs_ret > r.price_limit + {PRICE_LIMIT_EPS!r}), FALSE) AS jump
+          FROM nk k
+          LEFT JOIN ret r ON r.ticker = k.ticker AND r.n BETWEEN k.n_apply - {w} AND k.n_apply + {w}
+          WHERE k.price_resolution = '{PRICE_UNRESOLVED}'
+          GROUP BY k.event_id)
+        SELECT k.event_id, k.ticker, k.apply_date, k.factor_source, k.price_resolution, k.sec_type,
+               k.no_bar_after_apply, j.n_adjacent_returns, j.max_adjacent_abs_return,
+               CASE WHEN k.price_resolution IN ({po})                THEN k.price_resolution
+                    WHEN k.price_resolution IS DISTINCT FROM '{PRICE_UNRESOLVED}'
+                                                                     THEN '{NOT_OK_UNCLASSIFIED}'
+                    WHEN k.sec_type IN ({exc})                       THEN 'unresolved_excluded_kind'
+                    WHEN k.sec_type IS NULL OR k.sec_type NOT IN ({inc})
+                                                                     THEN '{NOT_OK_UNCLASSIFIED}'
+                    WHEN k.no_bar_after_apply                        THEN 'unresolved_no_bar_after'
+                    WHEN k.n_apply IS NULL                           THEN '{NOT_OK_UNCLASSIFIED}'
+                    WHEN j.jump                                      THEN 'unresolved_jump'
+                    ELSE 'unresolved_within_limit' END                AS bucket
+        FROM nk k LEFT JOIN adj_ret j ON j.event_id = k.event_id"""
 
 
 def _row(ctx: EquityGateContext, sql: str) -> tuple[object, ...]:
@@ -482,6 +570,7 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
     checks.update(po_checks)
     metrics: dict[str, object] = {
         **po_metrics,
+        **_not_ok_buckets(ctx),                 # K1-6a 기록형(판정 밖)
         # ── S06-2 기준가 원천 분류 (a)(b)(c)(d) ──
         "n_base_price_candidates": int(str(n_bp_candidates)),
         "n_base_price_etf_excluded": int(str(n_bp_etf)),
@@ -730,6 +819,32 @@ def _price_only(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, objec
         "price_resolution_vocab": list(PRICE_RESOLUTION_VOCAB),
     }
     return checks, metrics
+
+
+def _not_ok_buckets(ctx: EquityGateContext) -> dict[str, object]:
+    """K1-6a 기록형 — not-ok 행의 묶음별 수(`not_ok_bucket_sql`). checks 에 넣지 않는다(판정 불변)."""
+    ctx.con.execute("CREATE OR REPLACE TEMP TABLE _not_ok_bucket AS "
+                    + not_ok_bucket_sql(_q(ctx.out_view)))
+    got = {str(r[0]): int(str(r[1])) for r in ctx.con.execute(
+        "SELECT bucket, count(*) FROM _not_ok_bucket GROUP BY 1").fetchall()}
+    by_bucket = {b: got.get(b, 0) for b in NOT_OK_BUCKET_VOCAB}
+    by_source = {f"{r[0]}:{r[1]}": int(str(r[2])) for r in ctx.con.execute(
+        "SELECT bucket, factor_source, count(*) FROM _not_ok_bucket "
+        "GROUP BY 1, 2 ORDER BY 1, 2").fetchall()}
+    n_no_adjacent = _n(ctx, "SELECT count(*) FROM _not_ok_bucket "
+                            "WHERE bucket = 'unresolved_within_limit' AND n_adjacent_returns = 0")
+    jump_ids = [str(r[0]) for r in ctx.con.execute(
+        "SELECT event_id FROM _not_ok_bucket WHERE bucket = 'unresolved_jump' "
+        f"ORDER BY event_id LIMIT {JUMP_SAMPLE_ROWS}").fetchall()]
+    return {
+        "n_not_ok_by_bucket": by_bucket,
+        "n_not_ok_unclassified": by_bucket[NOT_OK_UNCLASSIFIED],
+        "n_not_ok_by_bucket_factor_source": by_source,
+        "n_unresolved_within_limit_no_adjacent_return": n_no_adjacent,
+        "unresolved_jump_event_ids": jump_ids,
+        "not_ok_bucket_vocab": list(NOT_OK_BUCKET_VOCAB),
+        "adj_jump_neighbor_sessions": ADJ_JUMP_NEIGHBOR_SESSIONS,
+    }
 
 
 # ── EG8 — 적용 세션 점프 ─────────────────────────────────────────────────────
@@ -986,4 +1101,9 @@ __all__ = ["ADJ_FACTOR", "APPLY_BASIS_VOCAB", "BASELINE_SEED", "BASE_PRICE_CONST
            "PRICE_ONLY_SOURCES", "PRICE_RESOLUTION_VOCAB", "PRICE_UNRESOLVED",
            "FACTOR_NEAR_EXCLUDED_SOURCES", "SUPPRESSED_SOURCES", "RETURN_REPORT_LIMIT",
            "TABLES", "UNMATCHED_FACTOR_SOURCES", "VOLUME_MEDIAN_WINDOW",
-           "VOLUME_RATIO_REPORT_BAND"]
+           "VOLUME_RATIO_REPORT_BAND",
+           # K1-6a
+           "ADJ_JUMP_NEIGHBOR_SESSIONS", "NOT_OK_BUCKET_VOCAB", "NOT_OK_UNCLASSIFIED",
+           "PRICE_LIMIT_AFTER", "PRICE_LIMIT_BEFORE", "PRICE_LIMIT_CHANGE_DATE", "PRICE_LIMIT_EPS",
+           "PRICE_ONLY_EXCLUDED_SEC_TYPES", "PRICE_RESOLVED_BRANCHES", "UNRESOLVED_BUCKETS",
+           "not_ok_bucket_sql"]

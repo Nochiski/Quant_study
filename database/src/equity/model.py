@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.28.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.29.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -312,6 +312,10 @@ RULES_VERSION = "e1.28.0"                # BuildRecord.rules_version 에 실린�
 #          미매칭 → ok 11,
 #          기준가가 안 바뀐 날의 계수 접힘 114 → 0, 그 밖 (종목, 날짜) 가격 단계는 KRX 기준가 사슬
 #          대조 범주 불변. 열·행 grain 불변 — fi·모델 계약 불변(값만 바뀜).
+# e1.29.0: K1-6a(v3 컷오버 트랙) EG3_adj_factor 기록형 지표 — not-ok 행을 배타·완전한 묶음(가격 축
+#          해소 4갈래 + 미해결 4묶음 + unclassified, 정본 `rules_s06.not_ok_bucket_sql`)으로 센다.
+#          게이트 판정·산출 불변(e1.24.0 과 같은 '게이트 변경, 산출 불변' — 규칙 파일이 바뀌면
+#          올린다는 K1-13 을 따른다). 정의·처리 규칙은 EQUITY_GATES §14.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

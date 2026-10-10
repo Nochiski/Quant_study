@@ -51,6 +51,7 @@
 | T-27 | v3 시장지표(insight)의 키움 수집 | **v3 폴더 이관 때까지 v3 에 둔다**. 종목별이 아닌 시장 단위 TR(ka20006 지수·ka20001 폭·ka10051 시장 수급·ka90010 프로그램·ka20003 업종) 하루 십여 콜이라 무거운 크롤링(N-42 Q2)과 다르다. 끄면 KRX 지수가 T+1 08:00 공표라 그날 저녁 국면·다음 날 07:00 브리핑이 T 지수 없이 돌고(KOSPI 0.00), 원천 없는 4표가 컷오버 전날 값으로 굳는다(QL-P 조사). QL-L 감시의 예외로 등록. T-23·QL-P(market_indices 를 KRX 원장으로)는 보류 — 연결하면 같은 표의 쓰기 경로가 둘이 된다 |
 | T-24 | v3 휴장 파일 | v3 KIS 휴장 갱신을 끄고 quant-ledger 판정 달력(`data/calendar/kis_holidays_<YYYY>.json`)을 v3·uni 가 읽는 형식으로 넘긴다 |
 | T-30 | 장 마감 판 T 행 출처 이름 | `price_source = 'postclose'`(원천 이름과 같게). 옛 W1-a 어휘 `evening_snapshot`(21:05 스냅샷)은 모델 T 행에 쓰지 않는다 — 계약 설명도 함께 바꾼다(PR-4) |
+| T-31 | v3 `daily_post` 구성(QL-F·V3-A) | ① v3 `calendar_refresh`(KIS 호출 → `.kis_holidays.json` 덮어씀)는 넣지 않는다 — 휴장 파일 정본은 `daily.calendar_export`(T-24, P4). ② insight·wiki 는 v3 의 지금 20:05 자리에 따로 둔다(`daily_insight` = holiday_gate·insight_pipeline·wiki_ingest·wiki_lint — T-27 기존 동작 보존, 16:30 으로 당기면 시장 수급·프로그램이 잠정값). `daily_post` = holiday_gate·export_scores. 다음 날 아침 KRX 재반영은 compat 만(daily_post 안 부름). ③ 반영 게이트에 신선도 추가 — 반영 창 `daily_prices` 에 trade_date = D 행이 있어야 COMMIT(없으면 07:00 브리핑이 D−1 장을 오늘로 보고 — DEFECT-C02). 장 마감 반영은 QL-D 전까지 이 게이트에서 멈추는 것이 맞다(P1). ④ 락 대기 순서(저녁·아침 둘 다 대기 시 덮어쓰기 순서)는 PR-8 워치독. ⑤ 필수 열 결측 0건 게이트 유지 — 현 트랙 코드 재생(10-01~08) 건너뜀 0 확인 |
 | T-28 | 06:00 보강 판정 하한(H1-5) | ka10060 = 요청 유니버스 대비 0.98, ka10014 = 자기 최근 20세션 평균 대비 0.80 — 저녁 직행 게이트가 이미 쓰는 판정을 그대로(기존 동작 보존). ka10014 는 원래 유니버스의 80~86% 라 T-13 문구(유니버스 0.98)대로면 매일 crit. 서버 최근 5거래일(10-01~08) 발동 0 |
 | T-29 | 장 마감 stage 표의 루트 | `stg_flow_postclose_kiwoom` 은 `data/model_db/stage`·`data/model_db/snapshots` 에 짓는다(T-3 '연구 판은 읽기만' — 연구 루트에 두면 스냅샷 GC 자리·아침 인계 `stage_builds` 에 장 마감 판이 섞임). 원장 `postclose.db` 는 연구 원장 목록 밖(`SOLO_LEDGER_FILES`) — 첫 수집 전 06:00 체인이 멈추지 않게 |
 
@@ -112,14 +113,14 @@
 | QL-C | T-16 `score_history`·`_v2` 날짜 단위 쓰기 + `_compat_meta` spec·판 id | M | ☑ 5b7cde5c |
 | QL-D | v3 소비자 T 행 원천 = `postclose.db`(전 종목), 16:00 넘긴 종목만 21:05 저녁 원장 값 | M | ◐ 구현 중 |
 | QL-E | T-18 사건일 이전 행 수정가 소급 | M | ☐ |
-| QL-F | `v3_post.sh`: 스테이징 → 게이트 → 9표 한 트랜잭션 반영 → v3 `daily_post` 호출(같은 락), 아침 KRX 재반영 | M | ◐ 구현 중 |
+| QL-F | `v3_post.sh`: 스테이징 → 게이트 → 9표 한 트랜잭션 반영 → v3 `daily_post` 호출(같은 락), 아침 KRX 재반영 | M | ◐ 구현 완료(135c45d2) → 리뷰·T-31 반영 중. 범위 밖 수정 1(compat `_ensure_schema` 열 순서 비교 → 이름·타입 — 실물 v3 `stocks.delisted_date` 순서 차이로 제자리 export 가 반드시 멈추던 결함) |
 | QL-I | 되돌리기 절차서 · 표 단위 복원 스크립트 · 고정 백업 2벌 | S | ☐ |
 | QL-J | 키 이관(quant-ledger 자기 설정을 기본값으로) | S | ☐ |
 | QL-L | 컷오버 감시: v3 퀀트 수집 0 · 점수 쓰기 한 곳 | S | ☐ |
 | QL-M·N | compat 만료 정리 · compare 기준 scope | S | ☐ |
 | QL-P | T-23 v3 `market_*` 를 KRX 지수 원장으로 | M | ✕ 보류(T-27) — 구현 브랜치 `pr/QL-P` 3b9a5e04 는 v3 폴더 이관 때 쓴다(열 대응표: 지수 3종 대응·VKOSPI·폭·시장 수급·프로그램 없음·업종 부분) |
 | QL-Q | T-24 v3·uni 휴장 파일을 quant-ledger 달력에서 | S | ☑ 5478538d(서버: 내보낸 파일 = v3 파일 121일·키 5개 같음). 연결 PR 전제 — ① 매일(주말·휴장 포함) KST 00:00 뒤·v3 20:05 전 1회 이상(06:00 체인 휴장일에도 도는 자리) ② 쓰기 전 서버 v3 `data/.kis_holidays.json` 링크 여부·소유자 확인과 백업 ③ 연결 당일 `sync_calendar.sh` v3 대조를 끄거나 일치 일수를 세지 않음(자기 사본 비교) ④ `COMPAT_LAYER.md:79` uni 휴장 원천을 `daily.calendar_export` 로 |
-| V3-A~E | v3 쪽(`daily_post` 체인, `daily_all` 퀀트 단계 제거, 첫 반영, uni 날짜 조건) — 백업 뒤 컷오버 날(N-42 Q4 일괄 승인) | S×4 | ☐ |
+| V3-A~E | v3 쪽 — A `daily_post`·`daily_insight` 체인(T-31) · B `daily_all` 크론 제거 · C 첫 반영(`v3_post.sh --full`) · D v3 휴장 쓰기 크론 2줄 끄기(`refresh_year_holidays`·`monthly_holiday_review`, QL-Q 연결과 같은 날) · E uni 점수 날짜 조건 — 백업 뒤 컷오버 날(N-42 Q4 일괄 승인). 변경 목록은 COMPAT_LAYER §8 | S×5 | ☐ |
 
 ### P5 전체 재생 검증 · phase 셀프 리뷰
 | 무엇 | 통과 기준 |

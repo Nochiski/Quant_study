@@ -11,27 +11,36 @@ flock.txt 에 적음)을 쓴다. 락 파일은 늘 `QL_BUILD_LOCK_FILE`·`QL_RAW
 (/tmp/quant_ledger_*.lock)을 건드리지 않는다. 실물 flock 테스트는 flock 이 있을 때만(서버·CI
 우분투) 돈다.
 KRX 단계의 sqlite3 는 PATH 대역('D 수집 완료')이다.
+원천 전환 스위치(PR-9 · T-7)는 임시 루트의 `config/postclose_chain.env` 로 켜고, 판정 조각
+`scripts/postclose_conf.sh` 는 진짜를 복사한다. 장 마감 발송 장부 판정(`-c` 중 `deliver.__main__` 을 읽는 것)은
+진짜 python·진짜 `src/` 로 넘긴다 — 장부는 임시 루트의 `data/model_db/deliver/sent_model_daily.jsonl` 이다.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+DB_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = DB_ROOT / "scripts"
 D = "20261006"
+D_ISO = "2026-10-06"
 MODEL_STEPS = ["factor_inputs", "model", "deliver"]
 
 # 대역 python — `-m` 은 "모듈 인자…" 한 줄을 calls.txt 에 적는다. `-c` 는 D 계산(20261006)과
-# '이미 확정판 있음' 가드(GUARD_RC — 0 = 있음 → 건너뜀, 기본 1 = 없음)에 답한다.
+# '이미 확정판 있음' 가드(GUARD_RC — 0 = 있음 → 건너뜀, 기본 1 = 없음)에 답한다. 장 마감 발송 장부
+# 판정(deliver.__main__ 을 읽는 -c)만 진짜 python·진짜 src/ 로 넘긴다(REAL_SRC 를 비우면 import 가 실패한다).
 _PY = """#!/usr/bin/env bash
 if [ "$1" = "-c" ]; then
   case "$2" in
+    *deliver.__main__*) PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
     *_morning.json*) exit "${GUARD_RC:-1}" ;;
     *prev_trading_day*) echo 20261006 ;;
   esac
@@ -82,14 +91,30 @@ class Run(NamedTuple):
         return [c.split()[0] for c in self.calls]
 
 
-def _root(home: Path, *, stub_flock: bool = True) -> Path:
+DIR = "<dir>"     # 장부 자리에 디렉터리를 둔다(열기 실패)
+EVENING_LEDGER = "data/model_db/deliver/sent_model_daily.jsonl"
+
+
+def _root(home: Path, *, stub_flock: bool = True, conf: str | None = None,
+          evening: str | bytes | None = None) -> Path:
+    """conf = config/postclose_chain.env 내용(None 이면 파일 없음), evening = 장 마감 발송 장부 내용
+    (None 이면 파일 없음, DIR 이면 디렉터리)."""
     root = home / "quant-ledger"
-    for sub in ("scripts", "logs", ".venv/bin"):
+    for sub in ("scripts", "logs", ".venv/bin", "config", "data/model_db/deliver"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     (home / "tmp").mkdir(exist_ok=True)
     (home / "fakebin").mkdir(exist_ok=True)
-    for name in ("daily_build.sh", "model_daily.sh", "raw_lock.sh"):
+    for name in ("daily_build.sh", "model_daily.sh", "raw_lock.sh", "postclose_conf.sh"):
         shutil.copy(SCRIPTS / name, root / "scripts" / name)
+    if conf is not None:
+        (root / "config/postclose_chain.env").write_text(conf, encoding="utf-8")
+    ledger = root / EVENING_LEDGER
+    if evening == DIR:
+        ledger.mkdir()
+    elif isinstance(evening, bytes):
+        ledger.write_bytes(evening)
+    elif evening is not None:
+        ledger.write_text(evening, encoding="utf-8")
     stubs = {root / ".venv/bin/python": _PY,
              root / "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
              root / "scripts/build_morning.sh": _BUILD,
@@ -105,15 +130,17 @@ def _root(home: Path, *, stub_flock: bool = True) -> Path:
 
 
 def _run(home: Path, script: str, *args: str, held: bool = True, stub_flock: bool = True,
-         build_lock: Path | None = None, **rcs: int) -> Run:
+         build_lock: Path | None = None, conf: str | None = None,
+         evening: str | bytes | None = None, **rcs: int | str) -> Run:
     """held=True 면 빌드 락을 물려받은 것으로(QL_BUILD_LOCK_HELD=1) model_daily 가 락을 건너뛴다.
-    build_lock 은 빌드 락 파일 경로(기본 home/build.lock)."""
-    root = _root(home, stub_flock=stub_flock)
+    build_lock 은 빌드 락 파일 경로(기본 home/build.lock). conf·evening 은 `_root`. rcs 는 대문자 환경변수."""
+    root = _root(home, stub_flock=stub_flock, conf=conf, evening=evening)
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"),
                PATH=f"{home / 'fakebin'}:{os.environ['PATH']}",
                QL_RAW_LOCK_HELD="1", QL_RAW_LOCK_FILE=str(home / "raw.lock"),
                QL_BUILD_LOCK_FILE=str(build_lock or home / "build.lock"),
-               FLOCK_LOG=str(home / "flock.txt"))
+               FLOCK_LOG=str(home / "flock.txt"),
+               REAL_PY=sys.executable, REAL_SRC=str(DB_ROOT / "src"))
     for k in ("QL_BUILD_LOCK_HELD", "QL_SKIP_KW", "QL_FORCE"):
         env.pop(k, None)
     if held:
@@ -329,3 +356,132 @@ def test_daily_build_model_step_takes_the_build_lock_itself(tmp_path: Path) -> N
     assert r.flock == ["-n 9"]
     assert (tmp_path / "build.lock").exists()
     assert _waits(r) == []
+
+
+# ── 원천 전환 스위치(컷오버 PR-9 · T-7) ─────────────────────────────────────────
+# 전환 뒤 = config/postclose_chain.env 의 POSTCLOSE_ENABLED=1 그리고 POSTCLOSE_SEND=1(판정은 scripts/postclose_conf.sh
+# 한 곳). 장 마감 체인 ⑤ 가 같은 D 의 엑셀을 먼저 보내므로 아침판은 짓기만 하고, 장 마감 발송 장부에 그 D 의
+# basis=evening 줄이 없을 때만 대체 발송한다.
+LIVE_CONF = "POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=1\nPOSTCLOSE_V3=in-place\n"
+SEND_CALL = f"deliver model-daily --date {D} --basis morning --send"
+BUILD_ONLY_CALL = f"deliver model-daily --date {D} --basis morning"
+SUBSTITUTE_TITLE = "장 마감 판 미발송 → 아침판 대체 발송"
+UNKNOWN_TITLE = "모델 단계 실패: 장 마감 발송 장부 판정 불가(rc=5)"
+
+
+def _sent_line(date: str = D_ISO, basis: str = "evening") -> str:
+    """deliver 가 발송 성공 뒤 남기는 장부 한 줄."""
+    return json.dumps({"date": date, "basis": basis, "build_id": "e_x", "sha256": "0" * 64,
+                       "sent_utc": "2026-10-06T07:05:00Z", "correction": 0}) + "\n"
+
+
+def _level(r: Run, level: str) -> list[str]:
+    return [n for n in r.notify if n.startswith(f"{level}|")]
+
+
+@pytest.mark.parametrize("conf", [
+    None,                                                    # 설정 파일 없음
+    "",                                                      # 빈 파일
+    "POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=0\n",               # 그림자(10-14~16) · 되돌리기 4-1
+    "POSTCLOSE_ENABLED=0\nPOSTCLOSE_SEND=1\n",               # 체인 꺼짐
+    "POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=yes\n",             # 정확한 값이 아님
+    "POSTCLOSE_ENABLED=true\nPOSTCLOSE_SEND=1\n",
+    "POSTCLOSE_ENABLED=' 1'\nPOSTCLOSE_SEND=1\n",
+], ids=["no_file", "empty", "shadow", "disabled", "send_yes", "enabled_true", "enabled_space"])
+def test_before_cutover_sends_like_today(tmp_path: Path, conf: str | None) -> None:
+    """회귀 — 전환 전(두 값이 정확히 1 이 아닌 모든 경우)은 지금 그대로 --send. 장 마감 장부에 그 D 줄이
+    있어도 보지 않는다(스위치가 정하고 장부가 정하지 않는다). 알림 0."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=conf, evening=_sent_line())
+    assert r.rc == 0, r.out
+    assert r.mods == MODEL_STEPS
+    assert r.calls[-1] == SEND_CALL
+    assert r.notify == []
+    assert f"모델 단계 완료 D={D}" in r.out
+
+
+def test_after_cutover_evening_sent_builds_only(tmp_path: Path) -> None:
+    """T-7 — 전환 뒤 장 마감 장부에 그 D 의 evening 줄이 있으면 fi·모델·엑셀은 그대로 짓고 --send 는 없다.
+    info 1건(기록만), rc 0."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF,
+             evening=_sent_line("2026-10-05") + _sent_line())
+    assert r.rc == 0, r.out
+    assert r.mods == MODEL_STEPS
+    assert r.calls[-1] == BUILD_ONLY_CALL
+    infos = _level(r, "info")
+    assert [n.split("|")[0] for n in r.notify] == ["info"]
+    assert "짓기만" in infos[0] and f"D={D}" in infos[0]
+    assert f"모델 단계 완료 D={D}" in r.out and "짓기만" in r.out
+
+
+@pytest.mark.parametrize("evening", [
+    None,                                                    # 장부 파일 없음(장 마감 판이 한 번도 안 나감)
+    "",                                                      # 빈 파일
+    _sent_line("2026-10-05"),                                # 전날 D 만
+    _sent_line(basis="morning"),                             # 같은 D 라도 basis 가 다르면 장 마감 발송이 아니다
+], ids=["no_file", "empty", "other_day", "other_basis"])
+def test_after_cutover_without_evening_line_substitutes(tmp_path: Path, evening: str | None) -> None:
+    """T-7 대체 발송 — 장 마감 판이 그 D 를 못 보냈으면(판 실패·세션 예외일 등) 아침판을 --send 로 보낸다.
+    warn 1건('장 마감 판 미발송 → 아침판 대체 발송'), crit 0, rc 0."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=evening)
+    assert r.rc == 0, r.out
+    assert r.calls[-1] == SEND_CALL
+    warns = _level(r, "warn")
+    assert len(warns) == 1 and warns[0].split("|")[1] == SUBSTITUTE_TITLE, r.notify
+    assert f"D={D}" in warns[0] and EVENING_LEDGER in warns[0]
+    assert ("파일 없음" in warns[0]) == (evening is None)
+    assert _crit(r) == []
+
+
+@pytest.mark.parametrize("evening", [
+    _sent_line() + "{not json\n",                            # 줄이 JSON 이 아님(그 D 줄이 앞에 있어도)
+    _sent_line() + "[1, 2]\n",                               # JSON 이지만 객체가 아님
+    b"\xff\xfe" + _sent_line().encode(),                     # UTF-8 로 읽을 수 없음
+    DIR,                                                     # 장부 자리가 디렉터리
+], ids=["not_json", "not_object", "not_utf8", "directory"])
+def test_after_cutover_unreadable_evening_ledger_never_sends(tmp_path: Path,
+                                                             evening: str | bytes) -> None:
+    """P1 — 장 마감 장부를 못 읽으면 보냈는지 모르므로 보내지 않는다(아침판은 짓는다 — T-34 아침 재반영이 쓴다).
+    crit 1건(세는 목록 '모델 단계 실패'), rc 5(이 판정 불가만의 rc)."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=evening)
+    assert r.rc == 5, r.out
+    assert r.mods == MODEL_STEPS
+    assert r.calls[-1] == BUILD_ONLY_CALL
+    crit = _crit(r)
+    assert len(crit) == 1 and crit[0].split("|")[1] == UNKNOWN_TITLE, r.notify
+    assert "sent_model_daily.jsonl" in crit[0] and f"D={D}" in crit[0]
+    assert _level(r, "warn") == []
+    assert UNKNOWN_TITLE in r.out
+
+
+def test_after_cutover_ledger_check_crash_is_unknown_not_unsent(tmp_path: Path) -> None:
+    """판정 코드가 죽으면(import 실패 등 — python rc 1) '줄 없음'으로 읽어 대체 발송하지 않는다. 발송 0 · crit · rc 5."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, conf=LIVE_CONF, evening=None,
+             real_src=str(tmp_path / "no_src"))
+    assert r.rc == 5, r.out
+    assert r.calls[-1] == BUILD_ONLY_CALL
+    assert [n.split("|")[1] for n in _crit(r)] == [UNKNOWN_TITLE]
+
+
+def test_after_cutover_resend_still_sends(tmp_path: Path) -> None:
+    """사람 손 정정 발송(--resend)은 스위치와 무관하게 지금처럼 --send --resend — 장 마감 장부를 보지 않는다
+    (손상돼 있어도 crit 없이 보낸다)."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, "--resend", conf=LIVE_CONF,
+             evening=_sent_line() + "{not json\n")
+    assert r.rc == 0, r.out
+    assert r.calls[-1] == f"{SEND_CALL} --resend"
+    assert r.notify == []
+
+
+@pytest.mark.parametrize(("evening", "line"), [
+    (_sent_line(), f"모델 단계 완료 D={D}"),
+    (DIR, "모델 단계 실패: 장 마감 발송 장부 판정 불가(rc=5)"),
+], ids=["built_only", "unknown"])
+def test_daily_build_summary_shows_the_cutover_result(tmp_path: Path, evening: str,
+                                                      line: str) -> None:
+    """daily_build 요약 맨 앞 줄(모델 단계 완료·실패 grep)에 전환 뒤 결과가 실린다. 모델 단계는 soft 라 체인
+    rc·요약 등급은 그대로(info 'daily_build 완료')."""
+    r = _run(tmp_path, "daily_build.sh", "--date", D, conf=LIVE_CONF, evening=evening)
+    assert r.rc == 0, r.out
+    assert r.calls[-1] == BUILD_ONLY_CALL
+    done = [n for n in r.notify if n.startswith("info|daily_build 완료|")]
+    assert len(done) == 1 and done[0].split("|", 2)[2].startswith(line), r.notify

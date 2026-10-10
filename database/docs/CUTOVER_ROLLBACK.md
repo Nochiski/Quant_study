@@ -117,7 +117,10 @@ V3="$HOME/kael-system-v3/data/quant.db"
 - 컷오버 전 그림자(10-14~16)와 같은 상태다. v3 본 파일과 텔레그램에 닿는 것이 없다(세 모드의 v3_post 가 전부 `--shadow` 로 돌고 v3 락도 잡지 않는다). 크론·16:30 워치독은 그대로 두고, 다시 컷오버할 대조 기록이 계속 쌓인다.
 - 체인 자체(수집기·판)가 원인이라 아예 세워야 하면 사람이 정한다. 그때는 `POSTCLOSE_ENABLED=0` 이고, 꺼져 있으면 16:30 워치독이 crit 을 내므로 4-3 의 crontab 편집 때 15:41 `postclose_chain.sh close`·16:30 `watchdog.sh postclose_board` 줄도 주석 처리한다.
 - **바꾸는 방법**: 저장소에서 고쳐 `scripts/deploy.sh` 로 배포한다. 배포 금지 창은 15:40~16:30 · 21:00~21:30 이다. 급해서 서버 파일을 직접 고쳤으면 같은 값을 저장소에도 커밋한다. deploy 가 `config/` 를 `--delete` 로 맞추므로, 커밋하지 않으면 다음 배포가 되돌린다.
-- **PR-9 스위치**: 아침판 '짓기만' · 대체 발송 · 10:30 워치독(B-57)을 컷오버 전 값으로 되돌린다. 이름·명령은 PR-9 머지 때 이 줄에 적는다(PR-9 체크리스트 ⑥).
+- **PR-9 스위치**: 따로 바꿀 값이 없다. 위의 `POSTCLOSE_SEND=0` 이 곧 원천 전환 스위치를 끈다. 전환 판정은 `scripts/postclose_conf.sh` 한 곳이고, `POSTCLOSE_ENABLED=1` 그리고 `POSTCLOSE_SEND=1` 일 때만 '전환 뒤'다. 완전 정지(`POSTCLOSE_ENABLED=0`)도 전환 전이다.
+  - 발송이 꺼지면 다음 08:10 아침판(`scripts/model_daily.sh`)이 컷오버 전처럼 `--send` 로 보낸다. 10:30 워치독(B-57)은 아침 장부 `data/deliver/sent_model_daily.jsonl` 만 본다.
+  - 되돌린 다음 날 아침에는 전날 장 마감 판이 이미 나갔어도 아침판이 한 번 더 나간다. basis 가 다른 별개 엑셀이고 장부도 따로라 막지 않는다.
+  - 확인: 아래 '성공 확인'의 `발송 off` 가 곧 전환 전이다. 다음 날 아침 장부에 그 D 의 basis=morning 줄이 생기고, 10:30 워치독이 정상 info 를 낸다.
 - **QL-Q 연결**: 06:00 체인이 v3 `data/.kis_holidays.json` 을 쓰고 있으면 끈다. 자리는 연결 PR 이 정한다.
 - **성공 확인**
   - `bash scripts/postclose_chain.sh close --dry-run | head -1` 이 `켜짐 · 발송 off · v3 shadow` 를 보인다.

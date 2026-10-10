@@ -9,6 +9,8 @@ WD_PREV 로 고정한다 — 실행 날짜와 무관하게 확정판 D 가 정�
 달력의 몫이고 여기서는 워치독이 그 D 로 장부를 찾는지만 본다).
 픽스처: 건전성 리포트 `logs/health/<D>.json`(mtime = D+1 09:30 KST), 확정판 인계
 `data/deliver/latest_morning.json`, 발송 장부 `data/deliver/sent_model_daily.jsonl`.
+원천 전환 뒤(컷오버 PR-9 — `config/postclose_chain.env` 의 POSTCLOSE_ENABLED=1·POSTCLOSE_SEND=1, 판정 조각
+`scripts/postclose_conf.sh` 는 진짜를 복사)는 장 마감 발송 장부 `data/model_db/deliver/sent_model_daily.jsonl` 도 본다.
 """
 from __future__ import annotations
 
@@ -31,6 +33,10 @@ KST = dt.timezone(dt.timedelta(hours=9))
 TITLE_BUILD = "watchdog: 10:30 까지 확정 빌드 보고 없음/실패"
 TITLE_NOT_SENT = "watchdog: 10:30 까지 확정판 엑셀 발송 기록 없음"
 TITLE_UNKNOWN = "watchdog: 확정판 엑셀 발송 여부 판정 불가"
+MORNING_LEDGER = "data/deliver/sent_model_daily.jsonl"
+EVENING_LEDGER = "data/model_db/deliver/sent_model_daily.jsonl"
+LIVE_CONF = "POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=1\nPOSTCLOSE_V3=in-place\n"
+DIR = "<dir>"     # 장부 자리에 디렉터리를 둔다(열기 실패)
 
 _CALENDAR = """import datetime as dt
 import os
@@ -55,11 +61,27 @@ class Run(NamedTuple):
     notify: list[str]   # 줄마다 "등급|제목|본문"
 
 
-def _root(home: Path, *, ledger: str | bytes | None, morning_ok: bool = True) -> Path:
+def _write(path: Path, body: str | bytes | None) -> None:
+    """장부 픽스처 — None 이면 파일 없음, DIR 이면 디렉터리."""
+    if body == DIR:
+        path.mkdir()
+    elif isinstance(body, bytes):
+        path.write_bytes(body)
+    elif body is not None:
+        path.write_text(body, encoding="utf-8")
+
+
+def _root(home: Path, *, ledger: str | bytes | None, morning_ok: bool = True,
+          conf: str | None = None, evening: str | bytes | None = None) -> Path:
+    """ledger = 아침 발송 장부, evening = 장 마감 발송 장부, conf = config/postclose_chain.env(None 이면 파일 없음)."""
     root = home / "quant-ledger"
-    for sub in ("scripts", "logs/health", ".venv/bin", "src/daily", "data/deliver"):
+    for sub in ("scripts", "logs/health", ".venv/bin", "src/daily", "data/deliver", "config",
+                "data/model_db/deliver"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     shutil.copy(SCRIPT, root / "scripts" / "watchdog.sh")
+    shutil.copy(SCRIPT.parent / "postclose_conf.sh", root / "scripts" / "postclose_conf.sh")
+    if conf is not None:
+        (root / "config/postclose_chain.env").write_text(conf, encoding="utf-8")
     stubs = {".venv/bin/python": f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n',
              "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n'}
     for rel, body in stubs.items():
@@ -76,11 +98,8 @@ def _root(home: Path, *, ledger: str | bytes | None, morning_ok: bool = True) ->
            "health": {"stage": "ok", "equity": "ok" if morning_ok else "fail"},
            "stage_builds": {"s": {}}, "equity_builds": {"e": {}}}
     (root / "data/deliver/latest_morning.json").write_text(json.dumps(lat), encoding="utf-8")
-    sent = root / "data/deliver/sent_model_daily.jsonl"
-    if isinstance(ledger, bytes):
-        sent.write_bytes(ledger)
-    elif ledger is not None:
-        sent.write_text(ledger, encoding="utf-8")
+    _write(root / MORNING_LEDGER, ledger)
+    _write(root / EVENING_LEDGER, evening)
     return root
 
 
@@ -168,3 +187,77 @@ def test_unreadable_ledger_is_crit(tmp_path: Path, ledger: str | bytes) -> None:
     level, title, body = r.notify[0].split("|", 2)
     assert (level, title) == ("crit", TITLE_UNKNOWN)
     assert "sent_model_daily.jsonl" in body and "발송 여부 판정 불가" in body
+
+
+# ── 원천 전환 뒤(컷오버 PR-9 · T-7) — D 의 발송 기록 = 장 마감 장부 evening 줄 또는 아침 장부 morning 줄 ──────────
+@pytest.mark.parametrize("conf", [
+    None,
+    "POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=0\n",               # 그림자 · 되돌리기 4-1
+    "POSTCLOSE_ENABLED=0\nPOSTCLOSE_SEND=1\n",
+    "POSTCLOSE_ENABLED=1\nPOSTCLOSE_SEND=yes\n",
+], ids=["no_file", "shadow", "disabled", "send_yes"])
+def test_before_cutover_evening_ledger_does_not_count(tmp_path: Path, conf: str | None) -> None:
+    """회귀 — 전환 전은 지금 그대로 아침 장부만 본다. 장 마감 장부에 그 D 줄이 있어도 '발송 기록 없음' crit 이고
+    문구도 종전 그대로(장 마감 장부 경로를 싣지 않는다)."""
+    _root(tmp_path, ledger=None, conf=conf, evening=_line(D_ISO, basis="evening"))
+    r = _run(tmp_path)
+    assert r.rc == 2, r.out
+    assert len(r.notify) == 1, r.notify
+    level, title, body = r.notify[0].split("|", 2)
+    assert (level, title) == ("crit", TITLE_NOT_SENT)
+    assert EVENING_LEDGER not in body
+
+
+@pytest.mark.parametrize(("ledger", "evening", "seen"), [
+    (None, _line(D_ISO, basis="evening"), "장 마감 판"),          # 정상 — 장 마감 체인 ⑤ 가 보냈다
+    (_line(D_ISO), None, "아침 대체 발송"),                       # 장 마감 판 실패 → 다음 날 아침판 대체 발송
+    (_line(D_ISO), _line(D_ISO, basis="evening"), "장 마감 판"),  # 둘 다(손 재발송 등)
+], ids=["evening_only", "morning_only", "both"])
+def test_after_cutover_either_ledger_counts_as_sent(tmp_path: Path, ledger: str | None,
+                                                     evening: str | None, seen: str) -> None:
+    """전환 뒤 아침판은 짓기만이라 아침 장부엔 보통 줄이 없다 — 장 마감 장부 basis=evening 줄 또는 아침 장부
+    basis=morning 줄이면 정상 info 1건(어느 쪽인지 싣는다)."""
+    _root(tmp_path, ledger=ledger, conf=LIVE_CONF, evening=evening)
+    r = _run(tmp_path)
+    assert r.rc == 0, r.out
+    assert len(r.notify) == 1, r.notify
+    level, title, body = r.notify[0].split("|", 2)
+    assert level == "info" and title.startswith("watchdog morning_build 정상"), r.notify
+    assert "발송 기록 있음(" in body and seen in body
+
+
+@pytest.mark.parametrize(("ledger", "evening"), [
+    (None, None),                                                    # 두 장부 다 없음
+    (_line("2026-10-06"), _line("2026-10-06", basis="evening")),     # 전날 D 만
+    (_line(D_ISO, basis="evening"), _line(D_ISO)),                   # 장부와 basis 가 엇갈린 줄은 세지 않는다
+], ids=["no_files", "other_day", "crossed_basis"])
+def test_after_cutover_no_record_in_either_ledger_is_crit(tmp_path: Path, ledger: str | None,
+                                                          evening: str | None) -> None:
+    """전환 뒤 두 장부 어디에도 그 D 줄이 없으면 지금처럼 '발송 기록 없음' crit — 본문에 두 장부 경로."""
+    _root(tmp_path, ledger=ledger, conf=LIVE_CONF, evening=evening)
+    r = _run(tmp_path)
+    assert r.rc == 2, r.out
+    assert len(r.notify) == 1, r.notify
+    level, title, body = r.notify[0].split("|", 2)
+    assert (level, title) == ("crit", TITLE_NOT_SENT)
+    assert f"확정판 D={D} 엑셀 발송 기록 없음" in body
+    assert MORNING_LEDGER in body and EVENING_LEDGER in body
+    assert f"scripts/model_daily.sh --date {D}" in body
+
+
+@pytest.mark.parametrize(("ledger", "evening", "bad"), [
+    (_line(D_ISO), "{not json\n", EVENING_LEDGER),                   # 장 마감 장부 손상 — 아침 줄이 있어도
+    (_line(D_ISO), DIR, EVENING_LEDGER),                             # 장 마감 장부 자리가 디렉터리
+    ("{not json\n", _line(D_ISO, basis="evening"), MORNING_LEDGER),  # 아침 장부 손상 — 장 마감 줄이 있어도
+], ids=["evening_not_json", "evening_dir", "morning_not_json"])
+def test_after_cutover_unreadable_either_ledger_is_crit(tmp_path: Path, ledger: str,
+                                                        evening: str, bad: str) -> None:
+    """P1 — 전환 뒤 어느 장부든 못 읽으면 판정 불가 crit(다른 장부에 그 D 줄이 있어도 정상으로 넘기지 않는다 —
+    손상된 장부는 다음 발송·대체 발송을 막는다)."""
+    _root(tmp_path, ledger=ledger, conf=LIVE_CONF, evening=evening)
+    r = _run(tmp_path)
+    assert r.rc == 2, r.out
+    assert len(r.notify) == 1, r.notify
+    level, title, body = r.notify[0].split("|", 2)
+    assert (level, title) == ("crit", TITLE_UNKNOWN)
+    assert bad in body and "발송 여부 판정 불가" in body

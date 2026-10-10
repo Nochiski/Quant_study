@@ -50,6 +50,18 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
   락이 없으니 손 발송은 `model_daily.sh` 로 한다. 손 실행은 08:10 체인~확정판 종료(보통 10:00 전),
   21:20~잠정판 종료(보통 23:10 전)를 피한다 — 그동안 빌드 락을 쥐면 그 시각의 build_chain 이 `flock -n` 으로
   건너뛰어 판이 생기지 않는다.
+- **원천 전환 뒤(컷오버 PR-9 · T-7)**: `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 그리고 `POSTCLOSE_SEND=1`
+  이면 전환 뒤다. 판정은 `scripts/postclose_conf.sh` 한 곳이고, 그 밖(그림자 `SEND=0` 등)은 지금처럼 아침이 보낸다.
+  - 전환 뒤에는 장 마감 체인 ⑤(15:41~, `--basis evening --out-root data/model_db/deliver`)가 D 의 엑셀을 먼저 보낸다.
+  - `model_daily.sh` 는 fi → 모델 → 엑셀을 그대로 짓는다. `--send` 는 장 마감 발송 장부
+    `data/model_db/deliver/sent_model_daily.jsonl` 에 그 D 의 basis=evening 줄이 **없을 때만** 붙인다(대체 발송 —
+    notify warn '장 마감 판 미발송 → 아침판 대체 발송'). 줄이 있으면 짓기만 한다(info).
+  - 장 마감 장부 파일이 없으면 '줄 없음'이다. 파일이 있는데 못 읽으면 보내지 않는다(crit '모델 단계 실패: 장 마감
+    발송 장부 판정 불가(rc=5)'·rc 5 — 사람이 정한다). 줄 판정은 deliver 의 장부 읽기(`_sent`·`LEDGER_NAME`) 그대로다.
+  - `--resend`(손 정정 발송)는 스위치와 무관하게 보낸다.
+  - ⑤ 엑셀 ok·⑥ v3 반영 실패인 날은 장부 줄이 있으므로 대체 발송하지 않는다. 그 D 의 v3 점수는 다음 날 아침 재반영
+    (T-34)이 아침 모델 판으로 채운다.
+  - 10:30 워치독(B-57)은 장 마감 장부 basis=evening 줄 또는 아침 장부 basis=morning 줄을 그 D 의 발송 기록으로 본다.
 
 - 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
 - 산출 경로: 매일 `data/deliver/daily/model_scores_<YYYYMMDD>_<basis>.xlsx`, 주간
@@ -219,4 +231,5 @@ QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-weekly --week 2026
 D-12: 매일 v4 점수는 파일 저장이 기본이고 발송은 스위치(`--send`)다. 주간은 토요일 아침 금요일
 확정판 기준. 매일 엑셀은 08:10 `daily_build.sh` 가 확정판(rc 0·1) 뒤 `scripts/model_daily.sh --date D` 로
 fi → 모델 → `--send` 를 잇는다(N-25 Q0, 임시 — N-13 전까지). 손으로 다시 돌릴 때도 같은 명령이고, 정정
-발송은 `--resend` 를 붙인다. 주간 발송은 체인에 없다.
+발송은 `--resend` 를 붙인다. 원천 전환 뒤(PR-9)에는 아침판은 짓기만 하고 장 마감 판이 그 D 를 못 보낸 날만 대체
+발송한다(§2 발송 장부 아래). 주간 발송은 체인에 없다.

@@ -5,6 +5,7 @@
 #   호출: scripts/daily_build.sh 가 확정 빌드(build_morning) rc 0·1(판을 쓸 수 있음) 뒤에 자기 D 를 넘긴다.
 #         손으로 다시 돌릴 때도 같은 명령이다(체인과 같은 환경 — 아래 cd·export).
 #   순서: factor_inputs build → model build → deliver model-daily --send (전부 --basis morning).
+#         원천 전환 뒤(컷오버 PR-9 · T-7)엔 deliver 의 --send 를 장 마감 발송 장부로 정한다 — 아래 '원천 전환' 절.
 #         한 단계라도 실패하면 뒤 단계는 돌지 않는다(발송 0). 실패 단계 이름·rc 는 notify crit 로
 #         남긴다 — notify.sh 는 logs/notify.log 기록만이다(운영 로그 텔레그램 금지, P8). 모델 엑셀
 #         발송은 deliver 몫이다.
@@ -13,6 +14,7 @@
 #   빌드 락: 세 단계 전체를 stage·equity 와 같은 빌드 락 안에서 돈다 — 아래 락 절 주석.
 #   rc: 0 완료 · 실패하면 그 단계의 rc(deliver: 1 발송 실패 · 2 입력 오류 · 3 예상 밖 예외) · 2 인자 오류
 #       · 3 빌드 락 열기·대기 실패 · 4 홈(~/quant-ledger) 이동 실패
+#       · 5 원천 전환 뒤 장 마감 발송 장부 판정 불가(세 단계는 돌았고 엑셀은 보내지 않았다)
 set -uo pipefail
 cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 돌지 않는다" >&2; exit 4; }
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
@@ -64,6 +66,57 @@ if [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
   fi
   export QL_BUILD_LOCK_HELD=1
 fi
+# 원천 전환(컷오버 PR-9 · T-7) — 판정은 scripts/postclose_conf.sh 한 곳(config/postclose_chain.env 의 POSTCLOSE_ENABLED=1
+# 그리고 POSTCLOSE_SEND=1 이면 전환 뒤, 그 밖은 전환 전 = 지금처럼 --send). 전환 뒤에는 장 마감 체인 ⑤ 가 같은 D 의
+# 엑셀을 먼저 보내므로 아침판은 짓기만 한다(deliver 에 --send 없음 — 판은 v3 아침 재반영 T-34 가 쓴다). 장 마감 발송
+# 장부(⑤ 의 --out-root data/model_db/deliver 아래)에 그 D 의 basis=evening 줄이 없을 때만 대체 발송한다(판 실패·세션
+# 예외일 등 — warn 한 줄). 줄 판정은 deliver 의 장부 읽기(_sent·LEDGER_NAME)를 그대로 쓰고, 파일이 아예 없으면 '줄
+# 없음'이다. 못 읽으면(열기·파싱 실패·자리가 파일이 아님·판정 코드 예외) 보냈는지 모르므로 보내지 않고 crit · rc 5
+# (P1 — 사람이 정한다). ⑤ 엑셀 ok·⑥ v3 실패인 날은 장부 줄이 있으므로 대체 발송하지 않는다(그 D 의 v3 점수는 T-34
+# 아침 재반영이 채운다). --resend(사람 손 정정 발송)는 스위치와 무관하게 지금처럼 보낸다.
+# shellcheck source=scripts/postclose_conf.sh
+. scripts/postclose_conf.sh
+postclose_conf_load
+SEND_ARG="--send"; SEND_NOTE=""; LEDGER_UNKNOWN=""
+EVENING_OUT=data/model_db/deliver
+if [ -n "$CUTOVER" ] && [ -z "$RESEND" ]; then
+  # rc 0 그 D 줄 있음 · 3 줄 없음(파일 없음 포함) · 그 밖(2 장부 오류 · 1 예외 등)은 판정 불가
+  EV_WHY=$($PY -c 'import sys
+from pathlib import Path
+
+from deliver.__main__ import LEDGER_NAME, _sent
+from deliver.reader import DeliverError
+
+p, d = Path(sys.argv[1]) / LEDGER_NAME, sys.argv[2]
+try:
+    if p.exists() and not p.is_file():
+        raise DeliverError(f"발송 장부 {p} 가 파일이 아니다")
+    rows = _sent(p, f"{d[:4]}-{d[4:6]}-{d[6:]}", "evening")
+except DeliverError as e:
+    print(e)
+    sys.exit(2)
+where = p if p.exists() else f"{p}(파일 없음)"
+print(f"장 마감 발송 장부 {where} 의 D={d} basis=evening 줄 {len(rows)}건")
+sys.exit(0 if rows else 3)' "$EVENING_OUT" "$D" 2>&1); EV_RC=$?
+  EV_WHY=$(printf '%s\n' "$EV_WHY" | tail -1)
+  case "$EV_RC" in
+    0)
+      SEND_ARG=""; SEND_NOTE="짓기만(장 마감 판 발송됨)"
+      echo "원천 전환 뒤 — $EV_WHY → 아침판은 짓기만(발송 없음, T-7) D=$D"
+      scripts/notify.sh info "모델 단계 짓기만 — 장 마감 판 발송됨" \
+        "D=$D basis=morning | $EV_WHY — 아침판은 짓기만 한다(T-7)" ;;
+    3)
+      SEND_NOTE="대체 발송(장 마감 판 미발송)"
+      echo "원천 전환 뒤 — $EV_WHY → 아침판 대체 발송(T-7) D=$D"
+      scripts/notify.sh warn "장 마감 판 미발송 → 아침판 대체 발송" \
+        "D=$D | $EV_WHY — 장 마감 판이 이 D 를 보내지 못했다(판 실패·세션 예외일 등). 아침판을 보낸다(T-7)" ;;
+    *)
+      SEND_ARG=""; LEDGER_UNKNOWN=1
+      echo "원천 전환 뒤 — 장 마감 발송 장부 판정 불가(rc=$EV_RC): $EV_WHY → 보내지 않는다(짓기만) D=$D"
+      scripts/notify.sh crit "모델 단계 실패: 장 마감 발송 장부 판정 불가(rc=5)" \
+        "D=$D basis=morning | 장 마감 발송 장부($EVENING_OUT) — $EV_WHY — 장 마감 판을 보냈는지 몰라 아침판을 보내지 않는다(짓기만, P1). 장부를 확인·복구한 뒤 장 마감 판이 안 나갔으면 scripts/model_daily.sh --date $D" ;;
+  esac
+fi
 FAILED=""
 step() {
   local name="$1"; shift
@@ -76,12 +129,14 @@ step() {
 echo "════ [$(kst)] model_daily D=$D basis=morning${RESEND:+ $RESEND} ════"
 step "factor_inputs" $PY -m factor_inputs build --date "$D" --basis morning \
   && step "model" $PY -m model build --date "$D" --basis morning \
-  && step "deliver" $PY -m deliver model-daily --date "$D" --basis morning --send $RESEND
+  && step "deliver" $PY -m deliver model-daily --date "$D" --basis morning $SEND_ARG $RESEND
 RC=$?
 if [ "$RC" -ne 0 ]; then
-  if [[ "$FAILED" == deliver* ]]; then
+  if [[ "$FAILED" == deliver* ]] && [ -n "$SEND_ARG" ]; then
     # deliver 실패는 '발송 0' 이라 단정할 수 없다 — rc 3 은 발송 성공 뒤 장부 쓰기 실패일 수 있다(B-58)
     SENT="발송 여부는 deliver 출력과 장부(data/deliver/sent_model_daily.jsonl)로 확인 — rc 3 은 발송 뒤 장부 기록 실패일 수 있다"
+  elif [[ "$FAILED" == deliver* ]]; then
+    SENT="--send 없는 실행(원천 전환 뒤 짓기만)이라 엑셀 발송 0"
   else
     SENT="그 뒤 단계는 돌지 않았다(엑셀 발송 0)"
   fi
@@ -90,4 +145,9 @@ if [ "$RC" -ne 0 ]; then
     "D=$D basis=morning | $SENT. 원인을 고친 뒤 scripts/model_daily.sh --date $D"
   exit "$RC"
 fi
-echo "모델 단계 완료 D=$D"
+if [ -n "$LEDGER_UNKNOWN" ]; then
+  # crit 은 판정 때 냈다. daily_build 요약이 이 줄을 맨 앞에 싣는다
+  echo "모델 단계 실패: 장 마감 발송 장부 판정 불가(rc=5) — 아침판은 지었고 보내지 않았다 D=$D"
+  exit 5
+fi
+echo "모델 단계 완료 D=$D${SEND_NOTE:+ · $SEND_NOTE}"

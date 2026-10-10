@@ -20,6 +20,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from model.contracts import V2_SCORE_COLUMNS, V3_SCORE_COLUMNS
+from stage.build import _cast_expr
+from stage.model import KIND_NUMERIC
+from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM
 
 from . import units
 from .units import KRW_PER_EOK, KRW_PER_MN
@@ -65,9 +68,9 @@ V3_STOCK_FILTER = "u.sec_type IN ('common', 'spac') AND u.market IN ('KOSPI', 'K
 # ⚠ GAP-1: v3 `daily_prices` 는 open·high·low·close·volume 이 **NOT NULL** 이고(v3
 #   `backend/db/schema.py:16-27`, 완화 ALTER 없음) 우리 저녁 잠정 T 행(`basis='evening'`)은
 #   KRX 기본정보가 없어 open/high/low/value_krw 가 NULL 이다. 그대로 넣으면 표 트랜잭션이
-#   통째로 깨지므로 **지금은 `basis='krx'` 행만 내보낸다**. 건너뛴 저녁 행 수는
-#   `_compat_meta.n_evening_rows_skipped` 에 남는다.
-#   → D-8 결정 뒤 evening 행 처리 추가(`docs/COMPAT_LAYER.md` §4).
+#   통째로 깨지므로 **이 SELECT 는 `basis='krx'` 행만 내보낸다**. 건너뛴 저녁 행 수는
+#   `_compat_meta.n_evening_rows_skipped` 에 남는다. `--basis evening` 의 T 행은 equity 판이 아니라
+#   원장에서 따로 만든다(아래 '장 마감 판 T 행' 절 — QL-D).
 #   M1 의 G-M2 비교는 확정판(morning, 전 행 krx)만 쓰므로 영향이 없다.
 # 거래정지일 참고가 행(`price_kind='reference'`, 거래량 0): KRX 가 O/H/L 을 '0' 으로 주고 stage 가
 #   NULL 로 둔다. v3 는 그날을 open=high=low=close=참고가 · volume 0 · amount 0 으로 싣는다(로컬 v3
@@ -166,7 +169,7 @@ WHERE u.rn = 1
 # v3 PK 는 (stock_code, trade_date) 하나뿐이므로 키움 우선으로 **결정적으로** 하나를 고른다.
 # 미측정 셀(전 주체 NULL)은 v3 에 행을 만들지 않는다 — v3 는 수집한 행만 가진다.
 # ⚠ 저녁 판에는 T 행이 아예 없다 — `flow_daily` 격자가 T-1 까지라 T 원장 행이 `off_grid` 로
-#   격리된다. daily_prices 의 저녁 T 행과 같은 D-8 범위이며 여기서는 손대지 않는다.
+#   격리된다. `--basis evening` 의 T 행은 원장에서 따로 만든다(아래 '장 마감 판 T 행' 절 — QL-D).
 _FLOW_COLS = units.FLOW_SUBJECTS        # 주체 대응의 정본은 units.py 다(중복 선언 금지)
 _FLOW_SELECT = ",\n       ".join(
     f"CAST(round(f.{src} / {KRW_PER_MN}.0) AS BIGINT) AS {dst}" for dst, src in _FLOW_COLS)
@@ -188,6 +191,125 @@ SELECT f.ticker                   AS stock_code,
 FROM picked f
 WHERE f.rn = 1
 """
+
+# ── 장 마감 판 T 행 (QL-D · N-42 Q3 · T-2) ──────────────────────────────────────────────────
+# `--basis evening` 의 equity 판은 직전 거래일 D' 까지다(D' 연구 확정판 `m_` — 그날 저녁 판 `e_` 도
+# T 는 캘린더 밖). v3 소비자(07:00 브리핑·위키·uni)는 T 저녁에 T 행이 필요하므로 `daily_prices`·
+# `investor_detail_flows` 의 T 행을 **원장 두 개**에서 만든다. D'·원장·판 이음매 확인은
+# `quant_db`(`_t_dprime`·`_t_ledgers`·`_t_rows`)가 하고, 여기는 행을 만드는 SQL 이다.
+#   대상 종목  D' `universe_daily` 이월 ∩ `V3_STOCK_FILTER`(PR-4 와 같은 전제, 장 마감 수집 PR-1
+#              의 대상과 같은 술어). 상태 변화는 다음 날 아침 확정판에서 본다.
+#              **T 당일 신규 상장 종목은 빠진다.**
+#   원천(종목마다 하나 — 가격·수급을 섞지 않는다)
+#     ① `postclose`  `data/raw/postclose.db` 의 T 행 중 `price_valid='1'`(16:00 전 응답 —
+#                    종가 = 정규장 종가, 수급 = 15:40 확정, N-35)
+#     ② `evening`    그 밖(행 없음 · `price_valid='0'` — PR-1 리뷰 s4)은 키움 원장
+#                    `data/raw/kiwoom.db` 의 같은 TR 표 T 행(21:05 저녁 수집, 애프터마켓 포함 —
+#                    지금 v3 와 같은 뜻)
+#   파싱은 stage 규칙 `stg_flow_daily_kiwoom` 의 열 규칙 그대로다(`stage.build._cast_expr` —
+#   부호·쉼표·단위 스케일을 두 곳에 적지 않는다, P4). 수급은 원문 백만원 → 원(stage ×1e6) →
+#   v3 백만원(`_FLOW_SELECT`).
+#   v3 NOT NULL 을 채우는 값 — D2-9 (c) 권고(결정 대기 Q-8). v3 에는 같은 상황이 없다: v3 T 행은
+#   ka10081 이 늘 시·고·저·거래대금을 준다. 거래 없는 날 v3 행은 open=high=low=close 모양이다
+#   (QL-A2).
+#     open·high·low = 종가                    원장 ka10060 에 시·고·저가 없다
+#     amount        = 종가 × 거래량 ÷ 1e6     원장에 거래대금이 없다(`acc_trde_prica` 는 실측
+#                     (백만원)                거래량). NULL 이면 07:00 브리핑 거래대금 상위가
+#                                             TypeError 로 죽는다(COMPAT_LAYER §4-1)
+#   adj_close = T 종가 × D' 누적계수(D' 조정가 ÷ D' 종가) — equity 저녁 잠정 행(price_adj_daily
+#     e1.15.0)과 같은 계수 이월이다. 단 키움 기준가(종가 − 전일대비 = KRX 기준가, 조사 I-1)가 D' KRX
+#     종가와 다르면 T 에 기업행위·기준가 변경이 있어 계수를 모른다 → NULL(P1). 다음 날 아침
+#     확정판이 KRX 계수로 채운다.
+#   이 채움들은 v3 외부 계약 때문이고 equity·모델 입력으로는 돌아가지 않는다.
+#   만료 = D2-9 (a)(저녁 ka10081) 또는 v3 소비자 직독 전환.
+# 행 원천 열 — v3 표에 넣기 전에 떼어 `_compat_meta`(표별 `t_rows`)에 남긴다
+T_SOURCE_COL = "t_source"
+T_SOURCE_POSTCLOSE = "postclose"
+T_SOURCE_EVENING = "evening"
+T_LEDGER_TABLE = STG_FLOW_DAILY_KIWOOM.sources[0].table   # 두 원장의 같은 TR 표 이름(ka10060)
+# 원장 원문 수치 열(종가·전일대비·거래량·수급 13) — 열 이름·파싱 규칙은 stage 규칙 객체가 정본이다
+_T_NUMERIC = tuple(c for c in STG_FLOW_DAILY_KIWOOM.columns if c.kind == KIND_NUMERIC)
+_T_RAW = ", ".join(f'CAST(r."{c.src}" AS VARCHAR) AS "{c.src}"' for c in _T_NUMERIC)
+_T_PARSED = ",\n           ".join(_cast_expr(c, 's."' + c.src + '"') + " AS " + c.name
+                                  for c in _T_NUMERIC)
+
+T_UNIVERSE_SQL = f"""
+SELECT DISTINCT u.ticker
+FROM {{universe_daily}} u
+WHERE u.date = DATE '{{d_prime}}' AND {V3_STOCK_FILTER}
+"""
+
+# 판 이음매 — 판의 마지막 세션(≤ T)이 D' 여야 T 를 얹는다(PR-4 MD-SEAM 과 같은 전제)
+T_SEAM_SQL = """
+SELECT max(u.date) FROM {universe_daily} u WHERE u.date <= DATE '{t_iso}'
+"""
+
+_T_ROWS = f"""
+WITH uni AS ({T_UNIVERSE_SQL}),
+raw AS (
+    SELECT '{T_SOURCE_POSTCLOSE}' AS {T_SOURCE_COL}, 0 AS prio,
+           CAST(r.ticker AS VARCHAR) AS ticker, {_T_RAW}
+    FROM {{postclose}} r
+    WHERE r.dt = '{{t_ymd}}' AND r.price_valid = '1'
+    UNION ALL
+    SELECT '{T_SOURCE_EVENING}' AS {T_SOURCE_COL}, 1 AS prio,
+           CAST(r.ticker AS VARCHAR) AS ticker, {_T_RAW}
+    FROM {{evening}} r
+    WHERE r.dt = '{{t_ymd}}'
+),
+picked AS (
+    SELECT s.* FROM raw s JOIN uni u ON u.ticker = s.ticker
+    QUALIFY row_number() OVER (PARTITION BY s.ticker ORDER BY s.prio) = 1
+),
+t AS (
+    SELECT s.ticker, s.{T_SOURCE_COL},
+           {_T_PARSED}
+    FROM picked s
+)"""
+
+T_DAILY_PRICES_SQL = _T_ROWS + f""",
+prev AS (
+    SELECT p.ticker, p.close AS prev_close, a.adj_close AS prev_adj
+    FROM {{price_daily}} p
+    LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
+    WHERE p.date = DATE '{{d_prime}}' AND p.basis = 'krx'
+)
+SELECT
+    t.ticker                                       AS stock_code,
+    '{{t_iso}}'                                    AS trade_date,
+    CAST(t.close_krw AS BIGINT)                    AS open,
+    CAST(t.close_krw AS BIGINT)                    AS high,
+    CAST(t.close_krw AS BIGINT)                    AS low,
+    CAST(t.close_krw AS BIGINT)                    AS close,
+    CAST(t.volume_shr AS BIGINT)                   AS volume,
+    CAST(round(CAST(t.close_krw AS DOUBLE) * CAST(t.volume_shr AS DOUBLE) / {KRW_PER_MN}.0)
+         AS BIGINT)                                AS amount,
+    CAST(CASE WHEN v.prev_close > 0 AND t.close_krw - t.pred_pre_krw = v.prev_close
+              THEN CAST(t.close_krw AS DOUBLE) * v.prev_adj / CAST(v.prev_close AS DOUBLE)
+         END AS DOUBLE)                            AS adj_close,
+    t.{T_SOURCE_COL}
+FROM t
+LEFT JOIN prev v ON v.ticker = t.ticker
+ORDER BY t.ticker
+"""
+
+# 미측정(전 주체 NULL) 행은 만들지 않는다 — 위 `_INVESTOR_FLOWS_SQL` 과 같은 규칙
+T_INVESTOR_FLOWS_SQL = _T_ROWS + f"""
+SELECT f.ticker                   AS stock_code,
+       '{{t_iso}}'                AS trade_date,
+       {_FLOW_SELECT},
+       f.{T_SOURCE_COL}
+FROM t f
+WHERE coalesce({_FLOW_ANY}) IS NOT NULL
+ORDER BY f.ticker
+"""
+
+# v3 표 → T 행 SQL. 열 순서는 표 매핑의 `columns` + `T_SOURCE_COL` 이다(`quant_db._t_rows` 가 확인)
+T_ROWS_SQL: dict[str, str] = {"daily_prices": T_DAILY_PRICES_SQL,
+                              "investor_detail_flows": T_INVESTOR_FLOWS_SQL}
+# 날짜 단위로 갈아 끼우는 표와 그 날짜 열(QL-C 와 같은 규칙 — `quant_db._replace_date`)
+DATE_REPLACED: dict[str, str] = {"daily_prices": "trade_date",
+                                 "investor_detail_flows": "trade_date"}
 
 # ── 컨센서스 리비전 (한시 예외) ──────────────────────────────────────────────────────────────
 # equity `consensus_daily` 에 영업이익·순이익이 없어(B-23 · 플랜 §1-4 GAP-6) stage

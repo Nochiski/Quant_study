@@ -799,9 +799,13 @@ def test_stocks_market_vocabulary_guard() -> None:
 
 
 # ── R5 — 판 접두와 --basis ───────────────────────────────────────────────────
-def test_basis_mismatch_refuses(roots, tmp_path: Path) -> None:
+def test_basis_mismatch_refuses(tmp_path: Path) -> None:
+    # 저녁 판(`e_`)을 아침 확정으로 내보내지 않는다. 반대 방향(장 마감 판이 D' 아침 판 `m_` 을
+    # 읽는 것)은 컷오버 T-2 의 정상 경로라 R5 가 막지 않고 이음매 검사가 본다(QL-D,
+    # test_compat_evening_t).
+    evening = _make_roots(tmp_path / "ev", eq_build="e_20260923T122000_000000Z")
     with pytest.raises(CompatError, match="--basis"):
-        _run(roots, tmp_path / "quant.db", basis="evening", tables=["daily_prices"])
+        _run(evening, tmp_path / "quant.db", basis="morning", tables=["daily_prices"])
 
 
 # ── R9 — 가격 두 표의 판 체인 · adj_close 결측 ───────────────────────────────

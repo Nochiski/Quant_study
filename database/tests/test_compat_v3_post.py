@@ -9,6 +9,7 @@ compat 자체를 돌리는 왕복은 맨 아래 통합 테스트가 맡는다.
 """
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import sqlite3
@@ -96,10 +97,14 @@ def _make_main(path: Path) -> None:
         con.close()
 
 
-def _tr(table: str, *, n_rows: int = 2, skipped: int = 0, n_on_date: int = 1) -> TableResult:
-    """compat 표 결과 — daily_prices 는 이번에 쓴 D 행 수(`n_on_date`, T-31 ③)를 싣는다."""
+def _tr(table: str, *, n_rows: int = 2, skipped: int = 0, n_on_date: int = 1,
+        rebase: dict | None = None) -> TableResult:
+    """compat 표 결과 — daily_prices 는 이번에 쓴 D 행 수(`n_on_date`, T-31 ③)와 창 밖 다시 맞춤
+    기록(`rebase`, QL-E)을 싣는다."""
+    dp = table == "daily_prices"
     return TableResult(n_rows=n_rows, n_skipped=skipped, sources={},
-                       metrics={"n_on_date": n_on_date} if table == "daily_prices" else {})
+                       metrics={"n_on_date": n_on_date} if dp else {},
+                       rebase=rebase if dp else None)
 
 
 def _meta(con: sqlite3.Connection, d_iso: str, basis: str, exported_at: str,
@@ -125,6 +130,7 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
                  tables: tuple[str, ...] = TABLES, status: str = "ok",
                  date_iso: str = D_ISO, basis: str = "evening",
                  drop_scores: bool = False, n_on_date: int = 1,
+                 rebase: dict | None = None,
                  exported_at: str = "2026-10-08T07:30:00.000000+00:00",
                  full: bool = False) -> None:
     """스테이징에 compat 이 쓴 모양을 만든다(창 행 교체 · 점수 날짜 교체 · 스냅샷 · `_compat_meta` 1행).
@@ -172,7 +178,8 @@ def _fake_compat(staging: Path, *, skipped: dict[str, int] | None = None,
             window={"days": 14, "full": full, "from_date": FROM_ISO, "to_date": date_iso},
             consensus_asof="2026-10-07", status=status,
             failed_table=None if status == "ok" else "stocks",
-            tables={t: _tr(t, skipped=skipped.get(t, 0), n_on_date=n_on_date) for t in tables}))
+            tables={t: _tr(t, skipped=skipped.get(t, 0), n_on_date=n_on_date, rebase=rebase)
+                    for t in tables}))
     finally:
         con.close()
 
@@ -334,6 +341,35 @@ def test_apply_moves_nine_tables_window_only(files) -> None:
     # 이번 compat 기록 1행이 본 파일에도 남는다(어느 판을 반영했는지)
     assert _rows(main, "SELECT date, basis, status FROM _compat_meta") == [
         (D_ISO, "evening", "ok")]
+
+
+def test_apply_moves_rebased_rows_before_the_window_for_listed_tickers_only(files) -> None:
+    """QL-E — compat 이 창 안 사건 종목의 창 밖 행 adj_close 를 다시 맞췄으면(기록 `rebase.tickers`) 그 종목의
+    창 앞 행도 반영 범위다(v3 가 사건 뒤 종목 전 기간을 다시 받는 것과 같은 결과). 목록 밖 종목의 창 밖
+    행은 그대로다."""
+    main, stg = files
+    con = sqlite3.connect(str(main))
+    con.execute("INSERT INTO daily_prices VALUES ('000660', ?, 1, 1, 1, 300, 10, 1, 300.0)",
+                (BEFORE,))
+    con.commit()
+    con.close()
+    snapshot(main, stg)
+    _fake_compat(stg, rebase={"before": FROM_ISO, "tickers": ["000660"], "n_rows": 1,
+                              "n_null": 0})
+    con = sqlite3.connect(str(stg))
+    con.execute("UPDATE daily_prices SET close = 300, adj_close = 600.0 "
+                "WHERE stock_code = '000660' AND trade_date = ?", (BEFORE,))
+    con.commit()
+    con.close()
+    report = apply(stg, main, D, "evening")
+    assert report.ok, report.failures
+    assert report.rebase == ("000660",)
+    assert report.counts["daily_prices"] == 5          # 창 안 4 + 다시 맞춘 창 앞 1
+    assert _rows(main, "SELECT close, adj_close FROM daily_prices WHERE stock_code = '000660' "
+                       "AND trade_date = ?", (BEFORE,)) == [(300, 600.0)]
+    # 005930 창 밖 행은 스테이징에서 close = -1 로 바꿔 뒀지만 목록 밖이라 넘어오지 않는다
+    assert _rows(main, "SELECT close FROM daily_prices WHERE stock_code = '005930' "
+                       "AND trade_date = ?", (BEFORE,)) == [(100,)]
 
 
 def test_apply_keeps_rows_written_to_untouched_tables_after_staging(files) -> None:
@@ -792,8 +828,15 @@ def test_real_compat_export_into_staging_then_apply(tmp_path: Path) -> None:
     stg = tmp_path / "staging.db"
 
     snapshot(main, stg)
+    # 제자리 반영은 창 세션을 판정 달력으로 센다(QL-E MINOR-1) — 주말만 휴장인 2026 달력
+    cal = tmp_path / "calendar"
+    cal.mkdir()
+    days = (dt.date(2026, 1, 1) + dt.timedelta(days=i) for i in range(365))
+    (cal / "kis_holidays_2026.json").write_text(json.dumps(
+        {"year": 2026, "holidays": [x.strftime("%Y%m%d") for x in days if x.weekday() >= 5]}),
+        encoding="utf-8")
     res = export(equity_root=eq_root, stage_root=st_root, date=tce.AS_OF, basis="morning",
-                 target=stg, full=True, in_place=True, model_root=model_root)
+                 target=stg, full=True, in_place=True, model_root=model_root, calendar_dir=cal)
     assert res.window["from_date"] == "2024-09-23"
     report = apply(stg, main, tce.AS_OF, "morning")
 

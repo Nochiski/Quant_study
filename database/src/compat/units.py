@@ -77,8 +77,8 @@ UNIT_RULES: tuple[UnitRule, ...] = (
     UnitRule("daily_prices", "volume", "주", "price_daily.volume_shr", "주", 1, f"{_DB_DOC}:29"),
     UnitRule("daily_prices", "amount", "백만원", "price_daily.value_krw", "원", KRW_PER_MN,
              f"{_DB_DOC}:29 · {_CLIENTS_DOC}:56"),
-    UnitRule("daily_prices", "adj_close", "원", "price_adj_daily.adj_close", "원", 1,
-             f"{_DB_DOC}:29 (전방 조정 — 비율은 v3 소급 조정과 같다)"),
+    UnitRule("daily_prices", "adj_close", "원", "price_daily.close·base_price_krw", "원", 1,
+             f"{_DB_DOC}:29 (KRX 기준가 사슬로 v3 기준 소급 조정 — 최신 행 = 원종가, QL-E T-40)"),
     *(UnitRule("investor_detail_flows", v3_col, "백만원", f"flow_daily.{src_col}", "원",
                KRW_PER_MN, f"{_DB_DOC}:37 · {_CLIENTS_DOC}:54,64 · flow.py:64-70")
       for v3_col, src_col in FLOW_SUBJECTS),

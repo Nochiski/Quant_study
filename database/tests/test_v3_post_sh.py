@@ -263,6 +263,26 @@ def test_in_place_reflects_nine_tables_and_keeps_other_tables(env, sources, tmp_
     assert (home / f"logs/v3_post/{D}_morning.log").exists()
 
 
+def test_rebase_null_rows_are_one_warn_line(env, tmp_path) -> None:
+    """QL-E — 창 안 사건 종목(005930, D23 기준가 = D22 종가 ÷ 2)의 창 밖 본 파일 행(2020-01-02)에 equity 행이 없으면
+    adj_close 를 NULL 로 다시 맞추고 warn 한 줄을 남긴다(기록형 — 정지 아님, rc 0). 그 행의 종가는 그대로다."""
+    _, main = env
+    base = tmp_path / "ev_src"
+    rows = tce._price_rows()
+    for r in rows:
+        if r["ticker"] == "005930" and r["date"] == tce.D23 and r["basis"] == "krx":
+            r["base_price_krw"] = 70_100 // 2
+    src = (*tce._make_roots(base, price_rows=rows, adj_rows=tce._adj_rows(price_rows=rows)),
+           _model_root(base))
+    r = _run(tmp_path, src, *_base(main))
+    assert r.rc == 0, r.out
+    assert _q(main, "SELECT close, adj_close FROM daily_prices WHERE trade_date='2020-01-02'") == [(7, None)]
+    assert "rebase=1 rebase_null=1" in r.out
+    warns = _levels(r, "warn")
+    assert len(warns) == 1 and f"v3_post {D} morning 창 밖 adj_close NULL 1행" in warns[0]
+    assert [n.split("|")[1] for n in _levels(r, "info")] == [f"v3_post {D} morning 반영 완료"]
+
+
 def test_daily_post_runs_after_reflection_when_today_is_d(env, evening_sources, tmp_path) -> None:
     home, main = env
     marker = tmp_path / "post.txt"

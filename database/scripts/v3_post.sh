@@ -43,6 +43,8 @@
 #   daily_post 의 v3 잡은 그날을 `date.today()`(프로세스 로컬 시간대)로 정한다(v3 `scripts/check_today_business.py:17`·
 #     `scripts/export_and_send.py:124`). 그래서 이 셸의 로컬 날짜(`date +%Y%m%d` — 자식과 같은 시간대)가 D 일 때만
 #     부른다. 다르면 부르지 않고 warn(플랜 `2026-09-24-v3-merge.md` 위험표 — 자정 넘김).
+#   창 밖 adj_close NULL(QL-E): 게이트 줄의 `rebase_null=N` 이 0 이 아니면 warn 한 줄(정지 아님) — compat 이 창 안
+#     사건 종목의 창 밖 행을 다시 맞출 때 equity 행이 없는 날은 adj_close 를 NULL 로 둔다(P1).
 #   rc: 0 완료 · 2 반영 실패(crit — COMMIT 전이면 v3 본 파일 무변경) · 3 락 실패(warn) · 4 홈 이동 실패 ·
 #       5 인자 오류(warn — 스테이징 경로가 본 파일과 같은 파일, 아침 + post 명령, --no-scores + 아침,
 #         --no-scores + post 명령 포함) ·
@@ -196,6 +198,13 @@ RC=$(sed -n 1p "$RCF" 2>/dev/null); STEP=$(sed -n 2p "$RCF" 2>/dev/null); POST=$
 COMMITTED=""; [ -f "$CF" ] && COMMITTED=1
 rm -f "$RCF" "$CF"
 RC="${RC:-9}"
+if [ "$RC" = 0 ] || [ "$RC" = 6 ]; then        # 이번 실행의 게이트 줄(로그 맨 끝 쪽)
+  RB_NULL=$(grep -oE "rebase_null=[0-9]+" "$LOG" | tail -1 | cut -d= -f2)
+  if [ "${RB_NULL:-0}" -gt 0 ]; then
+    scripts/notify.sh warn "v3_post $D $BASIS 창 밖 adj_close NULL ${RB_NULL}행" \
+      "창 안 사건 종목의 창 밖 행 중 equity 행이 없는 날(QL-E, P1) — 정지 아님, 대상 행 확인 | 로그 $LOG"
+  fi
+fi
 SUMMARY=$(grep -E "^compat |compat 실패|Error|Traceback" "$LOG" | tail -6 | tr '\n' ' ' | cut -c1-900)
 case "$RC" in
   0)

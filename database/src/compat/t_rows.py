@@ -20,9 +20,14 @@ T 는 캘린더 밖). v3 소비자(07:00 브리핑·위키·uni)는 T 저녁에 
 v3 NOT NULL 채움(T-32 = D2-9 (c)) — v3 T 행은 ka10081 이 늘 시·고·저·거래대금을 줘서 같은 상황이
   없다. open·high·low = 종가, amount = 종가 × 거래량 ÷ 1e6(백만원, 근사 — NULL 이면 07:00 브리핑
   거래대금 상위가 TypeError, COMPAT_LAYER §4-1). 다음 날 아침 KRX 행으로 날짜 단위 교체된다.
-adj_close — T 종가 × D' 누적계수(D' 조정가 ÷ D' 종가). equity 저녁 잠정 행(price_adj_daily
-  e1.15.0)과 같은 계수 이월이다. 그날 기준가가 D' KRX 종가와 다르면(T-6 첫 조건
-  `daily.kw_daily.ka10060_base_price_differs_sql`) 계수를 모른다 → NULL(P1).
+T 단계(QL-E 재리뷰 MAJOR-A · T-41 보완) — equity 판의 사슬은 D' 에서 끝나므로 원장 T 행의 KRX 기준가 단계를 사슬
+  끝에 붙인다: `ks_T = D' 종가 ÷ 기준가_T`(`mappings.ks_sql` — 기준가 = D' 종가면 1), 기준가_T = 종가_T − 전일대비_T
+  (`daily.kw_daily.ka10060_base_price_sql` — 조사 I-1: 키움 기준가 = KRX 기준가, 사건일 4,219/4,219). 종목별 값은
+  임시 표 `STEP_TABLE` 이고 `mappings` daily_prices·REBASE_SQL 이 `{t_step}` 자리로 읽는다 — 사건일 종목의
+  D'−3..D' 덮어쓰기·창 안 adj_close·창 밖 다시 맞춤이 그날 저녁 v3 20:05 결과와 같아진다(07:00 브리핑 가짜 급등락
+  방지). 다음 날 아침 KRX 반영은 같은 단계를 KRX 기준가로 다시 세어 같은 값을 쓴다.
+  전일대비가 없거나(기준가 미상) D' 종가가 없으면 단계를 모른다 → `ks_t` NULL — 창 행은 D' 기준, T 행 adj_close NULL.
+adj_close — 단계를 알면 T 종가 그대로(T 가 최신 행 L 이다 — T-40), 모르면 NULL.
 이 채움들은 v3 외부 계약 때문이고 equity·모델 입력으로는 돌아가지 않는다. 만료 = D2-9 (a)(저녁
 ka10081) 또는 v3 소비자 직독 전환.
 
@@ -38,15 +43,12 @@ from pathlib import Path
 
 import duckdb
 from daily import calendar as daily_calendar
-from daily.kw_daily import (
-    ka10060_base_price_differs_sql,
-    ka10060_postclose_price_usable_sql,
-)
+from daily.kw_daily import ka10060_base_price_sql, ka10060_postclose_price_usable_sql
 from stage.build import _cast_expr
 from stage.model import KIND_NUMERIC, TableRule
 from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM, STG_FLOW_POSTCLOSE_KIWOOM
 
-from .mappings import _FLOW_ANY, _FLOW_SELECT, V3_STOCK_FILTER, TableMapping
+from .mappings import _FLOW_ANY, _FLOW_SELECT, V3_STOCK_FILTER, TableMapping, ks_sql
 from .quant_db import CompatEmptyError, CompatError
 from .units import KRW_PER_MN
 
@@ -57,6 +59,7 @@ SOURCE_POSTCLOSE = "postclose"            # T-30 과 같은 이름
 SOURCE_KIWOOM_2105 = "kiwoom_2105"
 LEDGER_TABLE = STG_FLOW_DAILY_KIWOOM.sources[0].table    # 두 원장의 같은 TR 표 이름(ka10060)
 PICK_TABLE = "_t_pick"
+STEP_TABLE = "_t_step"                    # 종목별 T 단계 ks_t(모듈 머리 주석 'T 단계')
 # 원장별 파싱 규칙 — 장 마감 원장은 PR-2 stage 규칙(키움 원장 규칙과 같은 ka10060 열 객체 +
 # `price_valid` BOOLEAN), 21:05 원장은 연구 stage 규칙이다
 POSTCLOSE_RULE: TableRule = STG_FLOW_POSTCLOSE_KIWOOM
@@ -118,15 +121,23 @@ WHERE s.prio = 1 OR {_PRICE_USABLE}
 QUALIFY row_number() OVER (PARTITION BY s.ticker ORDER BY s.prio) = 1
 """
 
-_BASE_DIFFERS = ka10060_base_price_differs_sql("t.close_krw", "t.pred_pre_krw", "v.prev_close")
-
-DAILY_PRICES_SQL = f"""
+_BASE_T = ka10060_base_price_sql("t.close_krw", "t.pred_pre_krw")
+# 종목별 T 단계 — 기준가·D' 종가가 둘 다 양수일 때만 값(같으면 1), 아니면 NULL(모른다)
+STEP_SQL = f"""
+CREATE OR REPLACE TEMP TABLE {STEP_TABLE} AS
 WITH prev AS (
-    SELECT p.ticker, p.close AS prev_close, a.adj_close AS prev_adj
+    SELECT p.ticker, p.close AS prev_close
     FROM {{price_daily}} p
-    LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
     WHERE p.date = DATE '{{d_prime}}' AND p.basis = 'krx'
 )
+SELECT t.ticker,
+       CASE WHEN v.prev_close > 0 AND {_BASE_T} > 0
+            THEN {ks_sql("v.prev_close", _BASE_T)} END AS ks_t
+FROM {PICK_TABLE} t
+LEFT JOIN prev v ON v.ticker = t.ticker
+"""
+
+DAILY_PRICES_SQL = f"""
 SELECT
     t.ticker                                       AS stock_code,
     '{{t_iso}}'                                    AS trade_date,
@@ -137,12 +148,12 @@ SELECT
     CAST(t.volume_shr AS BIGINT)                   AS volume,
     CAST(round(CAST(t.close_krw AS DOUBLE) * CAST(t.volume_shr AS DOUBLE) / {KRW_PER_MN}.0)
          AS BIGINT)                                AS amount,
-    CAST(CASE WHEN NOT {_BASE_DIFFERS}
-              THEN CAST(t.close_krw AS DOUBLE) * v.prev_adj / CAST(v.prev_close AS DOUBLE)
+    CAST(CASE WHEN k.ks_t IS NOT NULL
+              THEN CAST(t.close_krw AS DOUBLE)
          END AS DOUBLE)                            AS adj_close,
     t.{SOURCE_COL}
 FROM {PICK_TABLE} t
-LEFT JOIN prev v ON v.ticker = t.ticker
+LEFT JOIN {STEP_TABLE} k ON k.ticker = t.ticker
 ORDER BY t.ticker
 """
 
@@ -224,7 +235,8 @@ def build(duck: duckdb.DuckDBPyConnection, selected: list[TableMapping],
     """표마다 T 행 — 쓰기 전에 전부 만든다(한 표라도 막히면 아무 표도 쓰지 않는다).
 
     `exprs` 는 equity 표 → `read_parquet(...)` 관계식. 원천 선택은 임시 표 하나로 한 번만 한다(두
-    표가 같은 종목 원천을 쓴다). 멈추는 경우: 원장에 그 TR 표가 없다 · 표의 T 행이 0(07:00 브리핑이
+    표가 같은 종목 원천을 쓴다). `price_daily` 가 있으면 T 단계 표(`STEP_TABLE`)도 만든다 — 호출부가 창 행 SQL 의
+    `{t_step}` 자리에 넣는다. 멈추는 경우: 원장에 그 TR 표가 없다 · 표의 T 행이 0(07:00 브리핑이
     D' 를 T 로 읽게 된다 — COMPAT_LAYER §4-1 DEFECT-C02).
     """
     universe = {str(r[0]) for r in duck.execute(
@@ -243,6 +255,8 @@ def build(duck: duckdb.DuckDBPyConnection, selected: list[TableMapping],
     finally:
         for alias, _ in _LEDGERS:
             duck.execute(f"DETACH DATABASE IF EXISTS {alias}")
+    if "price_daily" in exprs:                 # daily_prices 를 고르면 늘 있다(그 표의 원천)
+        duck.execute(STEP_SQL.format(price_daily=exprs["price_daily"], **params))
     out: dict[str, TPart] = {}
     for m in selected:
         if m.v3_table not in TABLE_SQL:

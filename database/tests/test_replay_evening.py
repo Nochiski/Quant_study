@@ -8,8 +8,6 @@ python 이고 `-m` 실행 앞에서 **합성 픽스처 크기만** 맞춘다(15�
 MG1/MG4 하한을 1 로, 운영 골든 종목이 없어 fi FG4 no_fixtures SKIP 허용 — `test_factor_inputs` 의
 `allow_skips`·min_eligible 과 같은 조정). 빌드 코드·SQL·게이트는 그대로다.
 
-⑥ 두 판 대조(`daily.board_compare`)는 PR-7 머지 뒤에만 있다 — 없으면 그 단계는 rc 1 로 실패하고,
-대조 결과를 보는 테스트만 건너뛴다(①~⑤·운영 무쓰기·재생 표시는 늘 본다).
 
 합성 세계: D' = 2026-09-28(월) · T = 2026-09-29(화). 현판은 T+1(09-30)까지 왔다(그래서 `--replay`
 세션 자르기 없이는 장 마감 판 MD-SEAM 이 서지 않고 연구 판 T 가격에 T+1 행이 섞인다).
@@ -23,7 +21,6 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -49,7 +46,6 @@ KW_STAMP = "2026-09-29T12:05:31"            # 21:05 KST(UTC) — 원장 행의 �
 CLOSE_DIFF = tf.EXTRA[2]
 NO_ROW = (tf.L, tf.K)                       # 수집 대상인데 21:05 원장에 행이 없다
 NOT_TARGET = (tf.G, tf.ETF)                 # 21:05 원장에는 있지만 수집 대상 밖
-HAVE_COMPARE = importlib.util.find_spec("daily.board_compare") is not None
 
 # 운영 venv python 대역 — 진짜 python. `-m` 실행만 합성 픽스처 크기에 맞춰 하한을 낮춘다(빌드
 # 코드는 그대로)
@@ -113,6 +109,23 @@ def _current_rows() -> dict[str, list[dict]]:
     return out
 
 
+def _with_krx_base(eq_root: Path) -> None:
+    """현판 equity `price_daily` 에 KRX 기준가 열(`base_price_krw`)을 붙인다 — fi 는 읽지 않아 합성
+    원천에 없고, 두 판 대조가 T-6 증거로 T 행을 읽는다(`test_board_compare._with_krx_base` 와 같은
+    방식). T 에 기업행위가 없으니 T 기준가 = D' 종가."""
+    import duckdb
+    part = eq_root / "price_daily" / f"v={EQ_CUR}" / "part0.parquet"
+    vals = ", ".join(f"('{t}', {tf.D_CLOSE[t]})" for t in T_TICKERS)
+    con = duckdb.connect()
+    try:
+        con.execute(f"COPY (SELECT p.*, CASE WHEN p.date = DATE '{T.isoformat()}' THEN m.b END "
+                    f"AS base_price_krw FROM read_parquet('{part}') p LEFT JOIN (VALUES {vals}) "
+                    f"m(t, b) ON m.t = p.ticker) TO '{part}.x' (FORMAT PARQUET)")
+    finally:
+        con.close()
+    Path(f"{part}.x").replace(part)
+
+
 def _kiwoom_db(path: Path) -> None:
     """21:05 키움 원장 — 운영 수집기와 같은 표 규약(`kw_daily.ensure_table`)."""
     from daily import kw_daily, postclose
@@ -160,6 +173,7 @@ def _home(base: Path) -> SimpleNamespace:
     py.write_text(_SHIM.replace("{real}", sys.executable), encoding="utf-8")
     py.chmod(0o755)
     eq, st = tf.make_roots(base / "src", eq_build=EQ_CUR, extra=_current_rows())
+    _with_krx_base(eq)
     shutil.copytree(st, ops / "data" / "stage")
     tf._cal_dir(ops / "data")
     _kiwoom_db(ops / "data" / "raw" / "kiwoom.db")
@@ -205,18 +219,14 @@ def _json(path: Path) -> dict:
 
 # ── ①~⑥ 한 날 끝까지 ─────────────────────────────────────────────────────────
 def test_one_day_runs_every_step_in_order(replayed) -> None:
-    """연구 판 D' → ② T 행 원천·stage → ③ fi 장 마감 판 → ④ 모델 → ⑤ 연구 판 T → ⑥ 대조. ⑥ 이 없으면
-    (PR-7 머지 전) 그 단계만 실패하고 rc 1 이다."""
+    """연구 판 D' → ② T 행 원천·stage → ③ fi 장 마감 판 → ④ 모델 → ⑤ 연구 판 T → ⑥ 대조 —
+    전부 rc 0."""
     r = replayed.r
     steps = [(x[0], x[2]) for x in _tsv(replayed.log / "summary.tsv")[1:] if x[1] == "-"]
     want = ["fi_r@" + DP_S, "postclose@" + T_S, "pc_stage@" + T_S, "fi_e@" + T_S,
             "model_e@" + T_S, "fi_r@" + T_S, "model_r@" + T_S, "compare@" + T_S]
     assert [s for s, _ in steps] == want, r.out
-    assert all(rc == "0" for s, rc in steps if not s.startswith("compare@")), r.out
-    if HAVE_COMPARE:
-        assert r.rc == 0 and dict(steps)["compare@" + T_S] == "0", r.out
-    else:
-        assert r.rc == 1 and dict(steps)["compare@" + T_S] != "0", r.out
+    assert all(rc == "0" for _, rc in steps) and r.rc == 0, r.out
     # 표별 해시도 남는다(같은 루트 두 패스의 재현성 대조 — EG5a)
     rows = {(x[0], x[1]) for x in _tsv(replayed.log / "summary.tsv")[1:]}
     assert ("fi_e@" + T_S, "fi_universe") in rows and ("model_r@" + T_S, "scope@1.0") in rows
@@ -305,7 +315,6 @@ def test_board_summary_lists_the_day(replayed) -> None:
         assert word in line
 
 
-@pytest.mark.skipif(not HAVE_COMPARE, reason="daily.board_compare(PR-7) 머지 전")
 def test_compare_runs_in_replay_mode_and_explains_every_difference(replayed) -> None:
     """⑥ 두 판 대조는 재생 모드다(`replay: true`) — T 종가 차이(애프터마켓)는 '종가 정의', 원장 행
     없는 대상 종목은 16:00 컷오프 자리, 대상 밖 종목은 '수집 대상 밖'. 미설명 0."""

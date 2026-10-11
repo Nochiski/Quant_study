@@ -1645,6 +1645,11 @@ def test_t50_evening_1m_base_falls_back_to_the_morning_board(
                      "--out-root", str(out), "--trend-fallback-root", str(fb)]) == 0
     path = out / "daily" / "model_scores_20260925_evening.xlsx"
     wb = load_workbook(path)
+    # 장 마감 엑셀 4행 기준일 말 = '장 마감 데이터'(아침은 '아침 확정 데이터') — 확정 양식 시트 모두
+    for name in ("Score", "Sector", "Earnings", "Compare", "Raw", "Meta"):
+        a4 = str(wb[name]["A4"].value)
+        assert a4 == f"기준일: {FRI} 장 마감 데이터" or a4.startswith(
+            f"기준일: {FRI} 장 마감 데이터 · "), (name, a4)
     meta = dict(_meta_pairs(wb))
     assert meta["1M 비교 데이터"] == f"2026-08-24 {T50_NOTE}"
     assert meta["순위 흐름 날짜"] == "2026-08-24 ~ 2026-09-25 · 3개"

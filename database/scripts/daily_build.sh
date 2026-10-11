@@ -43,6 +43,7 @@ fi
 # 공시 마감일엔 06:00 체인이 10시를 넘기는데, 예전처럼 exit 3 으로 물러나면 그 D 확정판이 영구히 빠졌다.
 # 대기 info 는 기록만(notify.sh → logs/notify.log) — 10:30 워치독 crit 를 '미실행'이 아니라 '대기'로 읽게 하고,
 # 손으로 --date 를 또 돌려 체인을 한 번 더 도는 일을 막는다. LOCK_WAITED("N초 (시작 ~ 끝)")는 체인 로그에도 남긴다.
+RAW_INHERITED="${QL_RAW_LOCK_HELD:-}"   # 부모가 쥔 원장 락은 이 셸이 놓지 않는다(주말 보강판 앞 락 반납)
 . scripts/raw_lock.sh
 raw_lock_acquire daily_build "$DRY" \
   "다른 원장 작업(06:00 수집 등)이 $LOCK 을 쥐고 있다. 끝나면 이어서 돈다. 손으로 --date 를 돌리기 전에 확인" || exit $?
@@ -199,8 +200,18 @@ if [ -z "$DRY" ]; then
         "오늘 $SUPP_TODAY D=$D | $SUPP_D — 보강판을 짓지 않았다(정규 판 그대로) | 로그 $LOG"
     elif [ -n "$SUPP_D" ] && [ "$SUPP_D" = "$D" ]; then
       if SUPP_WHY=$(supplement_wise_ok "$SUPP_TODAY"); then
+        # 원장 락을 먼저 놓는다 — 보강판은 지어진 stage·equity 를 읽고 fi·모델·엑셀만 쓴다(원장 무변경). 쥔 채면 토요일
+        # 10:00 wics_weekly --retry 같은 원장 작업이 보강판이 끝날 때까지 막힌다. 부모가 물려준 락이면 놓지 않는다
+        # (daily_evening.sh 의 장 마감 재반영 훅과 같은 모양). 이 뒤 이 체인은 원장을 쓰지 않는다(요약·알림뿐). 빌드 락은
+        # weekend_supplement.sh 가 직접 잡는다 — 물려받은 표식(QL_BUILD_LOCK_HELD)을 비워 넘긴다
+        if [ -z "$RAW_INHERITED" ]; then
+          exec 9>&-
+          unset QL_RAW_LOCK_HELD
+          echo "  원장 락 반납 — 주말 보강판은 원장을 쓰지 않는다 $(kst)"
+        fi
         echo "──── 주말 보강판 시작 (D=$D · WISE $SUPP_TODAY) $(kst) ────"
-        QL_FORCE="" bash scripts/weekend_supplement.sh --date "$D" --wise-asof "$SUPP_TODAY"; SUPP_RC=$?
+        QL_FORCE="" QL_BUILD_LOCK_HELD="" bash scripts/weekend_supplement.sh --date "$D" \
+          --wise-asof "$SUPP_TODAY"; SUPP_RC=$?
         echo "──── 주말 보강판 종료 rc=$SUPP_RC $(kst) ────"
       else
         echo "  주말 보강판 안 지음 — 오늘 보강 WISE 수집이 ok 가 아니다: $SUPP_WHY"
@@ -235,9 +246,10 @@ if [ -n "$SLRC" ] && { [ "$SLRC" -lt 0 ] || [ "$SLRC" -gt 3 ]; }; then
   scripts/notify.sh warn "daily_build 조용한 손실 검사 rc=$SLRC" \
     "D=$D | python -m daily.silent_loss check 가 rc $SLRC 로 끝났다(결과 logs/silent_loss/${D}.json 없음일 수 있다) — $LOG"
 fi
-# 주말 보강판(N-45)이 0(완료·건너뜀)·1(짓지 못함 — 자기 알림을 남겼다)이 아니면 warn 1건 — 인자·락·홈 이동 오류처럼 스스로
-# 알림을 못 남긴 경우도 사람에게 닿게(조용한 실패 금지). 확정판 rc·등급은 그대로다
-if [ -n "$SUPP_RC" ] && [ "$SUPP_RC" -ne 0 ] && [ "$SUPP_RC" -ne 1 ]; then
+# 주말 보강판(N-45)이 0(완료·건너뜀)·1(짓지 못함)·3(빌드 락 실패)이 아니면 warn 1건 — 1·3 은 스크립트가 자기 crit 을
+# 남겼으므로 더하지 않는다(한 사건에 알림 한 줄). 인자·홈 이동 오류처럼 스스로 알림을 못 남긴 경우만 사람에게 닿게(조용한
+# 실패 금지). 확정판 rc·등급은 그대로다
+if [ -n "$SUPP_RC" ] && [ "$SUPP_RC" -ne 0 ] && [ "$SUPP_RC" -ne 1 ] && [ "$SUPP_RC" -ne 3 ]; then
   scripts/notify.sh warn "daily_build 주말 보강판 rc=$SUPP_RC" \
     "D=$D | scripts/weekend_supplement.sh --date $D 가 rc $SUPP_RC 로 끝났다 — 정규 판은 그대로 | $LOG"
 fi

@@ -47,6 +47,9 @@ if [ "$1" = "-" ]; then
   PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@"
 fi
 if [ "$1" = "-c" ]; then
+  if [ -n "${CRASH_DONE_CHECK:-}" ]; then   # 완료 판정 파이썬만 import 단계에서 죽인다(rc 1)
+    case "$2" in *"완료 판정"*) echo "ModuleNotFoundError: 대역" >&2; exit 1 ;; esac
+  fi
   case "$2" in
     *supplement*) PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
     *_morning.json*) exit "${GUARD_RC:-1}" ;;
@@ -93,7 +96,7 @@ def _write(path: Path, text: str, mode: int | None = None) -> None:
 
 def _home(home: Path, *, conf: str | None = ON, history: dict | None = None,
           wise: str | None = "ok", fi_gates: list[dict] | None = None,
-          stub_supplement: str | None = None) -> Path:
+          stub_supplement: str | None = None, history_date: str = D) -> Path:
     """conf = config/supplement.env 내용(None 이면 없음) · history = <D>_morning.json 내용(None 이면 없음 — 기본은
     health ok 판) · wise = 오늘(W) 보강 WISE 수집 런 상태(None 이면 기록 없음) · fi_gates = 보강 fi 판 manifest 의 게이트
     · stub_supplement = weekend_supplement.sh 를 이 본문의 대역으로 바꾼다."""
@@ -122,7 +125,7 @@ def _home(home: Path, *, conf: str | None = ON, history: dict | None = None,
         history = {"date": D, "basis": "morning", "stage_builds": {"stg_consensus_annual": "m_x"},
                    "equity_builds": {"price_daily": "m_y"}, "health": {"stage": "ok", "equity": "ok"}}
     if history:
-        _write(root / f"data/deliver/history/{D}_morning.json", json.dumps(history))
+        _write(root / f"data/deliver/history/{history_date}_morning.json", json.dumps(history))
     for basis, gates in (("morning", []), ("supplement", fi_gates or [])):
         _write(root / f"data/factor_inputs/_runs/{D}_{basis}.json",
                json.dumps({"status": "ok", "basis": basis, "gates": gates}))
@@ -135,17 +138,22 @@ def _home(home: Path, *, conf: str | None = ON, history: dict | None = None,
     return root
 
 
-def _run(home: Path, script: str, *args: str, held: bool = True, **env_extra: str | int) -> Run:
+def _run(home: Path, script: str, *args: str, held: bool = True, raw_held: bool = True,
+         **env_extra: str | int) -> Run:
+    """held = 빌드 락을 물려받음(QL_BUILD_LOCK_HELD=1) · raw_held = 원장 락을 물려받음(QL_RAW_LOCK_HELD=1 — 아니면
+    daily_build 가 대역 flock 으로 직접 잡는다)."""
     root = home / "quant-ledger"
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"),
                PATH=f"{home / 'fakebin'}:{os.environ['PATH']}",
-               QL_RAW_LOCK_HELD="1", QL_RAW_LOCK_FILE=str(home / "raw.lock"),
+               QL_RAW_LOCK_FILE=str(home / "raw.lock"),
                QL_BUILD_LOCK_FILE=str(home / "build.lock"), FLOCK_LOG=str(home / "flock.txt"),
                REAL_PY=sys.executable, REAL_SRC=str(DB_ROOT / "src"), QL_TODAY=W)
-    for k in ("QL_BUILD_LOCK_HELD", "QL_SKIP_KW", "QL_FORCE"):
+    for k in ("QL_BUILD_LOCK_HELD", "QL_RAW_LOCK_HELD", "QL_SKIP_KW", "QL_FORCE"):
         env.pop(k, None)
     if held:
         env["QL_BUILD_LOCK_HELD"] = "1"
+    if raw_held:
+        env["QL_RAW_LOCK_HELD"] = "1"
     env.update({k.upper() if k.islower() else k: str(v) for k, v in env_extra.items()})
     p = subprocess.run(["bash", str(root / "scripts" / script), *args], env=env,
                        capture_output=True, text=True, timeout=120, check=False)
@@ -343,13 +351,15 @@ def test_daily_build_supplement_failure_never_changes_the_chain(tmp_path: Path) 
     assert "daily_build 완료" in r.titles("info") and not r.titles("warn")
 
 
-@pytest.mark.parametrize("rc", [2, 3, 4])
-def test_daily_build_warns_when_the_supplement_dies_without_its_own_alert(tmp_path: Path,
-                                                                         rc: int) -> None:
+@pytest.mark.parametrize(("rc", "warned"), [(2, True), (4, True), (1, False), (3, False)])
+def test_daily_build_warns_only_when_the_supplement_left_no_alert(tmp_path: Path, rc: int,
+                                                                  warned: bool) -> None:
+    """리뷰 M-5 — 1(짓지 못함)·3(빌드 락 실패)은 스크립트가 자기 crit 을 남긴다 — daily_build 가 warn 을 더하지 않는다
+    (한 사건에 알림 한 줄). 인자(2)·홈 이동(4) 오류처럼 스스로 알림을 못 남긴 rc 만 warn 한 줄."""
     _home(tmp_path, stub_supplement=f"exit {rc}\n")
     r = _run(tmp_path, "daily_build.sh", "--date", D)
     assert r.rc == 0, r.out
-    assert r.titles("warn") == [f"daily_build 주말 보강판 rc={rc}"]
+    assert r.titles("warn") == ([f"daily_build 주말 보강판 rc={rc}"] if warned else [])
 
 
 def test_daily_build_supplement_is_once_even_with_ql_force(tmp_path: Path) -> None:
@@ -418,7 +428,74 @@ def test_supplement_done_check_runs_under_the_build_lock(tmp_path: Path) -> None
 def test_supplement_done_check_crash_is_not_read_as_not_yet(tmp_path: Path) -> None:
     """완료 판정 파이썬이 죽으면(import 실패 등 — rc 1) '아직'으로 읽지 않는다 — 짓지 않고 crit · rc 1."""
     _home(tmp_path)
-    r = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W,
-             REAL_SRC=str(tmp_path / "no_src"))
+    r = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W, CRASH_DONE_CHECK=1)
     assert r.rc == 1, r.out
     assert r.calls == [] and r.titles("crit") == ["주말 보강판 실패: 완료 판정 불가"]
+
+
+
+# ── 리뷰 M-1 · M-2 ───────────────────────────────────────────────────────────
+_LOCK_PROBE = ('if { true >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi\n'
+               'echo "probe fd9=$fd9 raw_held=${QL_RAW_LOCK_HELD:-} build_held=${QL_BUILD_LOCK_HELD:-}" '
+               '>> "$HOME/quant-ledger/calls.txt"\nexit 0\n')
+
+
+def test_daily_build_releases_the_raw_lock_before_the_supplement(tmp_path: Path) -> None:
+    """리뷰 M-1 — 보강판은 원장을 쓰지 않는다(지어진 stage·equity 를 읽고 fi·모델·엑셀만 쓴다). daily_build 가 직접 잡은
+    원장 락(fd 9)을 놓고 부른다 — 쥔 채면 토요일 10:00 wics_weekly --retry 같은 원장 작업이 보강판 동안 막힌다. 빌드 락
+    표식은 비워 넘겨 weekend_supplement.sh 가 빌드 락을 직접 잡는다."""
+    _home(tmp_path, stub_supplement=_LOCK_PROBE)
+    r = _run(tmp_path, "daily_build.sh", "--date", D, raw_held=False)
+    assert r.rc == 0, r.out
+    assert "probe fd9=closed raw_held= build_held=" in r.calls, r.calls
+    assert r.flock[0] == "-n 9"                       # 원장 락은 daily_build 가 직접 잡았다
+    log = "".join(f.read_text(encoding="utf-8")
+                  for f in (tmp_path / "quant-ledger" / "logs").glob("daily_build_*.log"))
+    assert "원장 락 반납 — 주말 보강판은 원장을 쓰지 않는다" in log
+
+
+def test_daily_build_keeps_an_inherited_raw_lock(tmp_path: Path) -> None:
+    """부모가 물려준 원장 락(QL_RAW_LOCK_HELD=1)은 놓지 않는다(daily_evening 재반영 훅과 같은 규칙)."""
+    _home(tmp_path, stub_supplement=_LOCK_PROBE)
+    r = _run(tmp_path, "daily_build.sh", "--date", D)
+    assert r.rc == 0, r.out
+    assert "probe fd9=closed raw_held=1 build_held=" in r.calls, r.calls
+    assert "원장 락 반납" not in r.out
+
+
+def test_weekend_supplement_takes_the_build_lock_after_the_release(tmp_path: Path) -> None:
+    """원장 락을 놓은 뒤에도 보강판은 빌드 락(fd 9 — 새로 연다)을 직접 잡는다."""
+    _home(tmp_path)
+    r = _run(tmp_path, "daily_build.sh", "--date", D, raw_held=False)
+    assert r.rc == 0, r.out
+    assert r.supp_calls == SUPP_STEPS
+    # 원장 락 1 · 아침 모델 단계 빌드 락 1 · 보강판 빌드 락 1 — 모두 비대기로 잡혔다
+    assert r.flock == ["-n 9", "-n 9", "-n 9"], r.flock
+
+
+@pytest.mark.parametrize(("d", "w"), [(D, "20261010"),            # 한글날 다음 토요일 — 연휴 둘째 날
+                                      ("20261007", W),            # W 의 D 는 10-08 이다
+                                      ("20261002", "20261005")])  # 10-05(월)은 10-03~05 연휴 셋째 날
+def test_supplement_rejects_a_w_that_is_not_ds_first_holiday(tmp_path: Path, d: str, w: str) -> None:
+    """리뷰 M-2 — W 는 D 다음 첫 휴일이어야 한다(supplement_target(W) = D). 아니면 아무것도 하지 않고 rc 2(알림 없음).
+    --force(손 복구)는 이 검사를 건너뛴다."""
+    _home(tmp_path, history={"date": d, "basis": "morning", "stage_builds": {"a": "m_x"},
+                             "equity_builds": {"b": "m_y"}, "health": {"stage": "ok", "equity": "ok"}},
+          history_date=d)
+    r = _run(tmp_path, "weekend_supplement.sh", "--date", d, "--wise-asof", w)
+    assert r.rc == 2, r.out
+    assert (r.calls, r.notify, r.board) == ([], [], [])
+    assert f"W={w} 는 D={d} 다음 첫 휴일이 아니다" in r.out and "--force" in r.out
+    forced = _run(tmp_path, "weekend_supplement.sh", "--date", d, "--wise-asof", w, "--force")
+    assert forced.rc == 0, forced.out
+    assert forced.calls[0].startswith(f"factor_inputs build --date {d} --basis supplement "
+                                      f"--wise-asof {w}")
+
+
+def test_supplement_without_a_calendar_rejects_w(tmp_path: Path) -> None:
+    """판정 달력을 못 읽으면 W 를 확인할 수 없다 — 짐작하지 않고 rc 2."""
+    root = _home(tmp_path)
+    (root / "data/calendar/kis_holidays_2026.json").unlink()
+    r = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W)
+    assert r.rc == 2 and r.calls == [], r.out
+    assert "판정 불가" in r.out

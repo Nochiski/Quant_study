@@ -22,20 +22,37 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import unicodedata
 import zipfile
 from collections.abc import Mapping, Sequence
 from copy import copy
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
+from openpyxl.chart import BarChart, LineChart
+from openpyxl.chart.axis import DateAxis
+from openpyxl.chart.marker import Marker
+from openpyxl.chart.series import Series
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.chart.text import RichText
 from openpyxl.comments import Comment
+from openpyxl.drawing.line import LineProperties
+from openpyxl.drawing.text import (
+    CharacterProperties,
+    Paragraph,
+    ParagraphProperties,
+    RichTextProperties,
+)
+from openpyxl.drawing.text import Font as DFont
 from openpyxl.formatting.rule import ColorScaleRule, Rule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.styles.cell_style import StyleArray
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.utils.indexed_list import IndexedList
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.page import PageMargins
@@ -813,9 +830,11 @@ def write_confirmed(wb: Workbook, sheet: str, band: Band, groups: Sequence[Group
 
 def write_meta_confirmed(wb: Workbook, band: Band, pairs: Sequence[tuple[str, object]],
                          dictionary: Sequence[tuple[str, str, str, str]],
-                         tail: Sequence[tuple[str, str, str, str]] = ()) -> Worksheet:
+                         tail: Sequence[tuple[str, str, str, str]] = (),
+                         extra: Sequence[tuple[str, str, str]] = ()) -> Worksheet:
     """확정 양식 Meta — 키·값 표(8행~) 뒤 열 사전. `tail` = 사전 끝에 붙이는 줄(그룹 · 열 이름이
-    길어 B 칸도 줄바꿈). band.notes 의 '{hdr}' 는 열 사전 머리 행 번호로 바꾼다."""
+    길어 B 칸도 줄바꿈), `extra` = 그 뒤 새 시트 줄(시트, B 칸 이름, 정의 — 서식은 tail 과 같다).
+    band.notes 의 '{hdr}' 는 열 사전 머리 행 번호로 바꾼다."""
     ws = wb.create_sheet("Meta")
     ws.sheet_view.showGridLines = False
     ws.sheet_format.defaultRowHeight = ROW_HEIGHT
@@ -861,8 +880,7 @@ def write_meta_confirmed(wb: Workbook, band: Band, pairs: Sequence[tuple[str, ob
         lines = math.ceil(text_width(str(definition or "")) / (def_width - 1))
         ws.row_dimensions[r].height = ROW_HEIGHT * max(1, lines)
         r += 1
-    for sheet, group, label, definition in tail:
-        name = f"{group} · {label}"
+    for sheet, name, definition in [*((s, f"{g} · {lb}", d) for s, g, lb, d in tail), *extra]:
         for c, v in ((1, sheet), (2, name), (3, definition)):
             put(ws, r, c, v).font = font()
         ws.cell(r, 1).alignment = Alignment(vertical="top")
@@ -939,8 +957,36 @@ def add_sparklines(path: Path, sheet: str, groups: Sequence[SparkGroup]) -> int:
     groups = [g for g in groups if g.cells]
     if not groups:
         return 0
-    path = Path(path)
-    tmp = path.with_name(f".{path.name}.spark.tmp")
+    _add_ext(Path(path), sheet, sparkline_xml(groups))
+    return sum(len(g.cells) for g in groups)
+
+
+def add_column_sparklines(path: Path, sheet: str, cells: Sequence[tuple[str, str]]) -> int:
+    """셀 안 막대(세로 막대 스파크라인) — 위 = 초록 · 아래 = 빨강, 원자료가 숨긴 열이라
+    `displayHidden` 을 켠다(안 켜면 엑셀에서 빈 칸 — 샘플 24~25 결함). cells = (원자료, 그릴 칸)."""
+    if not cells:
+        return 0
+    items = "".join(f"<x14:sparkline><xm:f>{escape(ref)}</xm:f><xm:sqref>{escape(cell)}"
+                    "</xm:sqref></x14:sparkline>" for ref, cell in cells)
+    dark = "FF1E8C45"
+    ext = (f'<ext uri="{_SPARK_URI}" '
+           'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'
+           '<x14:sparklineGroups xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">'
+           '<x14:sparklineGroup type="column" displayEmptyCellsAs="gap" negative="1" '
+           'displayHidden="1">'
+           f'<x14:colorSeries rgb="FF{GREEN}"/><x14:colorNegative rgb="FF{RED}"/>'
+           '<x14:colorAxis rgb="FF000000"/>'
+           + "".join(f'<x14:{k} rgb="{dark}"/>' for k in (
+               "colorMarkers", "colorFirst", "colorLast", "colorHigh", "colorLow"))
+           + f"<x14:sparklines>{items}</x14:sparklines></x14:sparklineGroup>"
+           "</x14:sparklineGroups></ext>")
+    _add_ext(Path(path), sheet, ext)
+    return len(cells)
+
+
+def _add_ext(path: Path, sheet: str, ext: str) -> None:
+    """저장된 xlsx 의 `sheet` XML 끝 extLst 에 ext 하나를 넣는다(파일은 원자적 교체)."""
+    tmp = path.with_name(f".{path.name}.ext.tmp")
     with zipfile.ZipFile(path) as zin:
         part = _sheet_part(zin, sheet)
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -948,7 +994,6 @@ def add_sparklines(path: Path, sheet: str, groups: Sequence[SparkGroup]) -> int:
                 data = zin.read(item.filename)
                 if item.filename == part:
                     xml = data.decode("utf-8")
-                    ext = sparkline_xml(groups)
                     if "</extLst>" in xml:
                         xml = xml.replace("</extLst>", ext + "</extLst>", 1)
                     else:
@@ -956,7 +1001,300 @@ def add_sparklines(path: Path, sheet: str, groups: Sequence[SparkGroup]) -> int:
                     data = xml.encode("utf-8")
                 zout.writestr(item, data)
     os.replace(tmp, path)
-    return sum(len(g.cells) for g in groups)
+
+
+# ── 새 시트 문법(ETF · Analyst · Events · Market · Flow · Short — 확정 샘플 28 · 30) ─────────
+# 1~5행 띠 · 6·7행 머리 · 본문 칸의 서식은 Sector 시트 칸에서 옮긴다(확정 샘플이 그렇게 만들었다 —
+# 같은 엑셀 안에서 띠 · 머리 색이 시트마다 같다). 표마다 머리 색 · 테두리는 그 표의 마지막 데이터
+# 열까지, 코드 없는 표는 A · B 를 이름 칸 하나로 합친다. 색은 빨강 · 노랑 · 초록 그라데이션
+# (백분위 5 · 0 · 백분위 95). 틀 고정은 1~5행 띠와 B 열(C6) — 표를 위아래로 쌓은 시트라 표 하나의
+# 머리를 고정하면 아래 표 열과 어긋난다(샘플 26 결함).
+CHART_BLUE, CHART_BLACK = "0078C8", "000000"
+CHART_W_CM, CHART_H_CM = 12.6, 5.6
+
+
+@dataclass(frozen=True)
+class XRefs:
+    """새 시트가 옮겨 쓰는 서식(StyleArray) — 기준 시트(Sector)의 1~5행 칸 · A6 그룹 머리 ·
+    A7 열 머리 · C8 글자 본문 · H8 숫자 본문."""
+
+    band: Mapping[tuple[int, int], StyleArray]
+    max_col: int
+    group: StyleArray
+    head: StyleArray
+    text: StyleArray
+    num: StyleArray
+
+    @classmethod
+    def of(cls, ws: Worksheet) -> XRefs:
+        n = ws.max_column
+        return cls({(r, c): copy(ws.cell(r, c)._style) for r in range(1, 6)
+                    for c in range(1, n + 1)}, n, copy(ws["A6"]._style),
+                   copy(ws["A7"]._style), copy(ws["C8"]._style), copy(ws["H8"]._style))
+
+
+class XSheet:
+    """새 시트 하나 — 1~5행 띠를 깔고 표 · 그래프를 얹는 도우미(샘플 28 · 30 의 st · header ·
+    put · lab · close · cs · title_cell 그대로)."""
+
+    def __init__(self, wb: Workbook, name: str, widths: Mapping[str, float], refs: XRefs,
+                 *, ncol: int | None = None, index: int | None = None) -> None:
+        self.ws = ws = wb.create_sheet(name, index)
+        self.refs = refs
+        ws.sheet_view.showGridLines = False
+        for k, v in widths.items():
+            ws.column_dimensions[k].width = v
+        for r in range(1, 6):
+            for c in range(1, (ncol or len(widths)) + 1):
+                cell = ws.cell(r, c)
+                cell._style = copy(refs.band[(r, min(c, refs.max_col))])
+                cell.value = None
+            ws.row_dimensions[r].height = ROW_HEIGHT
+
+    def texts(self, texts: Mapping[str, str]) -> None:
+        """1~5행 글 — A 열 밖 칸은 그 행 A 칸 서식."""
+        for k, v in texts.items():
+            self.ws[k] = v
+            if k[0] != "A":
+                self.ws[k]._style = copy(self.ws[f"A{k[1:]}"]._style)
+
+    def hide(self, first: int, n: int, width: float) -> None:
+        """그래프 · 셀 안 막대 원자료 열(숨김)."""
+        for c in range(first, first + n):
+            dim = self.ws.column_dimensions[get_column_letter(c)]
+            dim.hidden, dim.width = True, width
+
+    def header(self, r: int, groups: Sequence[tuple[str, str]], heads: Sequence[str],
+               ab: bool = False) -> None:
+        """r 행 그룹 · r+1 행 열 이름 — 칠은 이 표의 마지막 열까지. ab = A · B 를 이름 칸 하나로."""
+        ws = self.ws
+        for c in range(1, len(heads) + 1):
+            ws.cell(r, c)._style = copy(self.refs.group)
+            ws.cell(r, c).value = None
+            ws.cell(r + 1, c)._style = copy(self.refs.head)
+            ws.cell(r + 1, c).value = None
+        for col, t in groups:
+            ws[f"{col}{r}"] = t
+        for i, t in enumerate(heads, 1):
+            if t:
+                ws.cell(r + 1, i).value = t
+        if ab:
+            ws.cell(r + 1, 1).value = heads[1]
+            ws.cell(r + 1, 2).value = None
+            for rr in (r, r + 1):
+                ws.merge_cells(start_row=rr, start_column=1, end_row=rr, end_column=2)
+        ws.row_dimensions[r].height = ROW_HEIGHT
+        ws.row_dimensions[r + 1].height = HEADER_HEIGHT
+
+    def put(self, r: int, c: int, v: object, fmt: str | None = None, text: bool = False,
+            bold: bool = False, indent: int = 0) -> None:
+        cell = put(self.ws, r, c, v)                       # 값만('=' 글자도 수식이 아니게)
+        cell._style = copy(self.refs.text if text else self.refs.num)
+        if fmt:
+            cell.number_format = fmt
+        if bold or indent:
+            cell.font = Font(name=cell.font.name, sz=cell.font.sz, b=bold)
+            if indent:
+                cell.alignment = Alignment(horizontal="left", indent=indent)
+
+    def lab(self, r: int, v: object, bold: bool = False, indent: int = 0) -> None:
+        """코드 없는 표의 이름 칸(A · B 합침)."""
+        self.put(r, 1, v, text=True, bold=bold, indent=indent)
+        self.ws.cell(r, 2)._style = copy(self.refs.text)
+        self.ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+
+    def stock(self, r: int, code: str, name: object, big: object, rank: object,
+              extra: Sequence[tuple[object, str | None, bool]]) -> None:
+        """종목 열 A 코드 · B 이름 · C 대분류 · D 종합 순위 · E~ = extra[(값, 서식, 글자?)]."""
+        self.put(r, 1, code, text=True)
+        self.put(r, 2, name, text=True)
+        self.put(r, 3, big, text=True)
+        self.put(r, 4, rank, "#,##0")
+        for i, (v, fmt, text) in enumerate(extra, 5):
+            self.put(r, i, v, fmt, text)
+
+    def close(self, r: int, last: int) -> None:
+        """표 끝 선 — 마지막 행 아래쪽 medium."""
+        for c in range(1, last + 1):
+            b = copy(self.ws.cell(r, c).border)
+            self.ws.cell(r, c).border = Border(left=b.left, right=b.right, top=b.top,
+                                               bottom=SIDE_BLOCK)
+
+    def cs(self, rng: str) -> None:
+        """빨강 · 노랑 · 초록 그라데이션 — 백분위 5 · 0(가운데) · 백분위 95. 빈 범위는 건너뛴다."""
+        a, b = rng.split(":")
+        if int("".join(ch for ch in b if ch.isdigit())) < int("".join(ch for ch in a
+                                                                      if ch.isdigit())):
+            return
+        self.ws.conditional_formatting.add(rng, ColorScaleRule(
+            start_type="percentile", start_value=5, start_color="FF" + RED,
+            mid_type="num", mid_value=0, mid_color="FF" + YELLOW,
+            end_type="percentile", end_value=95, end_color="FF" + GREEN))
+
+    def tight(self, first: int, stop: int) -> None:
+        """그래프 자리 행 높이 11.25 — first ≤ 행 < stop."""
+        for r in range(first, stop):
+            self.ws.row_dimensions[r].height = ROW_HEIGHT
+
+    def title(self, cell: str, text: str) -> None:
+        """그래프 제목 칸(그래프 안 제목 대신 위 칸)."""
+        self.ws[cell] = text
+        self.ws[cell].font = Font(name=FONT_NAME, sz=8, b=True)
+
+    def page(self, area: str) -> None:
+        ws = self.ws
+        ws.freeze_panes = "C6"
+        ws.print_title_rows = "2:5"
+        ws.print_area = area
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+def x_note(text: str) -> Comment:
+    """머리 칸 메모(새 시트) — 줄 300px · 기호 붙임 없이(샘플 그대로)."""
+    return note(text, "설명", glue=False)
+
+
+# ── 그래프(Q.Pack FICC 문법) — 계열 1~2개 · 파랑 0078C8 / 검정 1.5pt 실선 · 점 없음 · 제목은 위 칸 ·
+# 격자선 · 테두리 · 채움 없음 · 축 가는 검정 · 글자 8pt 맑은 고딕(latin · ea · cs — 글자 깨짐 방지).
+# 가로축은 날짜 축(눈금 간격 단위라 글자가 세로로 쪼개지거나 눕지 않는다), 대분류 이름 축은 글자
+def chart_text() -> RichText:
+    cp = CharacterProperties(sz=800, solidFill=CHART_BLACK, latin=DFont(typeface=FONT_NAME),
+                             ea=DFont(typeface=FONT_NAME), cs=DFont(typeface=FONT_NAME))
+    return RichText(bodyPr=RichTextProperties(rot=0, vert="horz"),
+                    p=[Paragraph(pPr=ParagraphProperties(defRPr=cp), endParaRPr=cp)])
+
+
+def _noline() -> GraphicalProperties:
+    return GraphicalProperties(noFill=True, ln=LineProperties(noFill=True))
+
+
+def _plain(ch: BarChart | LineChart) -> None:
+    """채움 · 테두리 없음, 숨긴 원자료도 그림('숨긴 데이터 표시' — 안 켜면 엑셀에서 빈 그래프), 크기."""
+    ch.roundedCorners = False
+    ch.graphical_properties = _noline()
+    ch.plot_area.graphicalProperties = _noline()
+    ch.visible_cells_only = False
+    ch.width = CHART_W_CM  # pyright: ignore[reportAttributeAccessIssue]  # reason: openpyxl stub 이 width 를 int 로 적었다(실제 cm 실수)
+    ch.height = CHART_H_CM
+
+
+def _axes(ch: BarChart | LineChart) -> None:
+    for a in (ch.x_axis, ch.y_axis):
+        a.delete = False
+        a.majorGridlines = None
+        a.majorTickMark = "out"
+        a.minorTickMark = "none"
+        a.txPr = chart_text()
+        a.graphicalProperties = GraphicalProperties(ln=LineProperties(solidFill=CHART_BLACK,
+                                                                      w=3175))
+
+
+TimeUnit = Literal["days", "months", "years"]
+
+
+def date_frame(ch: BarChart | LineChart, yfmt: str, xfmt: str, base: TimeUnit, major: int,
+               unit: TimeUnit) -> None:
+    """날짜 가로축 그래프 틀 — 축 칸은 Q.Pack(엑셀 저장본) 날짜 축과 같게(아래 · autoZero · auto ·
+    lblOffset 100). 원자료가 숨긴 열이라 '숨긴 데이터도 표시'."""
+    ax = DateAxis(crossAx=100, axPos="b", crosses="autoZero", auto=True, lblOffset=100,
+                  baseTimeUnit=base, majorUnit=major, majorTimeUnit=unit)
+    ax.number_format = xfmt
+    vars(ch)["x_axis"] = ax                 # openpyxl 은 막대그래프에 날짜 축 대입을 막아서 직접 넣는다
+    ch.y_axis.crossAx = 500
+    _axes(ch)
+    ch.x_axis.tickLblPos = "low"
+    ch.y_axis.number_format = yfmt
+    if ch.legend is not None:
+        ch.legend.txPr = chart_text()
+    _plain(ch)
+
+
+def cat_frame(ch: BarChart | LineChart, yfmt: str) -> None:
+    """글자(대분류 이름) 가로축 그래프 틀 — 범례 없음."""
+    _axes(ch)
+    ch.x_axis.tickLblPos = "low"
+    ch.y_axis.number_format = yfmt
+    ch.legend = None
+    _plain(ch)
+
+
+def line_series(s: Series, color: str) -> None:
+    s.graphicalProperties.line.solidFill = color
+    s.graphicalProperties.line.width = 19050
+    if s.marker is None:                    # 꺾은선 계열은 늘 표식이 있다 — 형 좁히기
+        s.marker = Marker()
+    s.marker.symbol = "none"
+    s.smooth = False
+
+
+def bar_series(s: Series, color: str) -> None:
+    s.graphicalProperties.solidFill = color
+    s.graphicalProperties.line.solidFill = color
+
+
+_REF = re.compile(r"'([^']+)'!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?")
+
+
+def finish_charts(path: Path, wb: Workbook) -> int:
+    """저장된 xlsx 의 그래프 XML 손질 — 제목 자동 생성 끔(autoTitleDeleted) · 빈 글 조각 제거 ·
+    날짜 축 `auto` · 값 사본(cache: 엑셀 밖 미리보기는 셀을 다시 읽지 않고 이것만 그린다, 날짜는 엑셀
+    일련번호 · 대분류 이름 축은 글자 strRef). 값은 `wb` 의 칸에서 읽는다. 손질한 그래프 수."""
+    def vals(ref: str) -> list[object]:
+        m = _REF.fullmatch(ref)
+        if m is None:
+            raise ValueError(f"그래프 범위를 읽지 못했다: {ref}")
+        w = wb[m[1]]
+        c0, r0 = column_index_from_string(m[2]), int(m[3])
+        c1, r1 = (column_index_from_string(m[4]), int(m[5])) if m[4] else (c0, r0)
+        return [w.cell(r, c).value for c in range(c0, c1 + 1) for r in range(r0, r1 + 1)]
+
+    def cache(kind: str, ref: str) -> str:
+        v = vals(ref)
+        if kind == "date":
+            v = [(x - date(1899, 12, 30)).days if isinstance(x, date) else x for x in v]
+        pts = "".join(f'<pt idx="{i}"><v>{escape(str(x))}</v></pt>'
+                      for i, x in enumerate(v) if x is not None)
+        if kind == "str":
+            return f'<strCache><ptCount val="{len(v)}" />{pts}</strCache>'
+        fc = "yyyy\\-mm\\-dd" if kind == "date" else "General"
+        return f'<numCache><formatCode>{fc}</formatCode><ptCount val="{len(v)}" />{pts}</numCache>'
+
+    def cat(m: re.Match[str]) -> str:
+        if any(isinstance(x, str) for x in vals(m[1])):
+            return f"<cat><strRef><f>{m[1]}</f>{cache('str', m[1])}</strRef></cat>"
+        return f"<cat><numRef><f>{m[1]}</f>{cache('date', m[1])}</numRef></cat>"
+
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.chart.tmp")
+    n = 0
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            name = item.filename
+            if name.startswith("xl/charts/chart") and name.endswith(".xml"):
+                s = data.decode("utf-8")        # openpyxl 은 차트를 기본 이름공간(접두사 없음)으로 쓴다
+                if (s.count("<chart><plotArea>") != 1 or "autoTitleDeleted" in s
+                        or "majorGridlines" in s):
+                    raise ValueError(f"그래프 XML 모양이 예상과 다르다(openpyxl 판 변경?): {name}")
+                s = s.replace("<chart><plotArea>", '<chart><autoTitleDeleted val="1" /><plotArea>')
+                s = s.replace("<a:r><a:t /></a:r>", "")
+                s = s.replace('<crosses val="autoZero" /><lblOffset',
+                              '<crosses val="autoZero" /><auto val="1" /><lblOffset')
+                s = re.sub(r"<cat><numRef><f>(.*?)</f></numRef></cat>", cat, s)
+                s = re.sub(r"<val><numRef><f>(.*?)</f></numRef></val>",
+                           lambda m: f"<val><numRef><f>{m[1]}</f>{cache('num', m[1])}</numRef></val>",
+                           s)
+                s = re.sub(r"<tx><strRef><f>(.*?)</f></strRef></tx>",
+                           lambda m: f"<tx><strRef><f>{m[1]}</f>{cache('str', m[1])}</strRef></tx>",
+                           s)
+                data = s.encode("utf-8")
+                n += 1
+            zout.writestr(item, data)
+    os.replace(tmp, path)
+    return n
 
 
 __all__ = [
@@ -969,4 +1307,7 @@ __all__ = [
     "C_COLHDR", "C_CORE", "C_GROUP", "SIDE_BLOCK", "SIDE_HDR", "SIDE_INNER", "SIDE_PAIR",
     "SIGN_COLORS", "Band", "Page", "Sheet", "note", "note_lines", "note_px", "page_setup",
     "scale_zero_anchor", "text_lines", "text_width", "write_confirmed", "write_meta_confirmed",
+    # 새 시트(ETF · Analyst · Events · Market · Flow · Short)
+    "CHART_BLACK", "CHART_BLUE", "XRefs", "XSheet", "add_column_sparklines", "bar_series",
+    "cat_frame", "chart_text", "date_frame", "finish_charts", "line_series", "x_note",
 ]

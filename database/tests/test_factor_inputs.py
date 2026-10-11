@@ -570,7 +570,7 @@ def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
     `wise_q` 를 주면 stg_fin_wise_q 판을 만든다(없으면 선택 원천 'absent' → 분기는 DART).
     `fin_wise` 를 주면 stg_fin_wise 를 그 행으로 바꾼다(기본 `_fin_wise()`).
     `leak` 를 주면 그날 날짜의 정보 행(`_leak_rows`)을 원천에 더한다.
-    `extra` 를 주면 equity 표(이름 → 행)에 그 행을 더한다."""
+    `extra` 를 주면 그 표(equity·stage 이름 → 행)에 그 행을 더한다(없는 stage 표면 새로 만든다)."""
     eq, st = base / "eq", base / "st"
     equity = {"trading_calendar": _calendar(), "universe_daily": _universe(),
               "security": _security(), "price_daily": _prices(), "price_adj_daily": _adj(),
@@ -586,7 +586,8 @@ def make_roots(base: Path, *, eq_build: str = EQ_BUILD,
         for table, rows in _leak_rows(leak).items():
             (equity if table in equity else stage).setdefault(table, []).extend(rows)
     for table, rows in (extra or {}).items():
-        equity[table] = equity[table] + rows
+        target = equity if table in equity else stage
+        target[table] = target.get(table, []) + rows
     for table, rows in equity.items():
         _make_stage_tree(eq, table, rows, build_id=eq_build)
     for table, rows in stage.items():

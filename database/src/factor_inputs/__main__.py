@@ -8,6 +8,8 @@
         --root data/model_db/factor_inputs \\
         --builds-from data/deliver/history/20260928_morning.json [--calendar-dir data/calendar] \\
         [--postclose-stage-root data/model_db/stage] [--candidates-root data/factor_inputs]
+    python -m factor_inputs build --date 20261008 --basis supplement --wise-asof 20261009 \\
+        --builds-from data/deliver/history/20261008_morning.json
     재생 전용 `--replay`(현판 세션 축을 asof 에서 자른다 — scripts/replay.sh --basis evening)
 
 rc 0 판 커밋 · 1 게이트 FAIL(판 안 올림, `_failed/<build_id>.json`) · 2 입력·인자 오류·예외.
@@ -36,9 +38,10 @@ def _parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build", help="equity/stage 현재 판 → factor_inputs 8표 판")
     b.add_argument("--date", required=True, help="판 기준일 D (YYYYMMDD, 거래일)")
-    b.add_argument("--basis", required=True, choices=("evening", "morning"),
+    b.add_argument("--basis", required=True, choices=("evening", "morning", "supplement"),
                    help="morning = 아침 확정판 · evening = 장 마감 판(--date 는 오늘 T, "
-                        "--builds-from 필수 — 컷오버 T-2)")
+                        "--builds-from 필수 — 컷오버 T-2) · supplement = 주말 보강판(--date 는 D, "
+                        "--builds-from <D>_morning.json · --wise-asof 필수 — N-45)")
     b.add_argument("--root", type=Path, default=research_root(),
                    help="산출 루트(기본 연구 루트 — 장 마감 판은 "
                         "data/model_db/factor_inputs 필수, T-3)")
@@ -65,6 +68,9 @@ def _parser() -> argparse.ArgumentParser:
                    help="재생 전용(scripts/replay.sh --basis evening, 컷오버 PR-8b) — "
                         "equity 세션 축 표를 asof(아침판 D · 장 마감 판 D')에서 잘라 현판으로 "
                         "그날 판을 짓는다. 판 manifest 에 replay 표시. 운영 체인은 쓰지 않는다")
+    b.add_argument("--wise-asof", default=None,
+                   help="WISE 컨센서스 입력의 시점(YYYYMMDD) — 보강판은 휴일 수집일(D 보다 뒤) 필수, "
+                        "그 밖은 생략(= asof). 가격·수급·DART 등은 asof 그대로")
     return p
 
 
@@ -76,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
                        keep=args.keep, builds_from=args.builds_from,
                        calendar_dir=args.calendar_dir,
                        postclose_stage_root=args.postclose_stage_root,
-                       candidates_root=args.candidates_root, replay=args.replay)
+                       candidates_root=args.candidates_root, replay=args.replay,
+                       wise_asof=args.wise_asof)
     except FactorInputsError as e:
         print(f"factor_inputs 실패: {e}", file=sys.stderr)
         return 2

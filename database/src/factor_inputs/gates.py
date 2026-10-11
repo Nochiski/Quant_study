@@ -32,6 +32,10 @@
 
 정보 시점 `asof`(컷오버 PR-4): 재무·연간 컨센서스의 available/fetched 상한은 asof 로 본다(아침판은
 D 그대로). 신용 available_date 는 세션 축이라 D(장 마감 판 T)로 본다.
+WISE 시점 `wise_asof`(주말 보강판 N-45 — 아침·장 마감 판은 asof 와 같다): 연간 컨센서스 fetched_date ·
+재무 available_date(WISE 판 날짜가 섞인다) 상한과 수집 지연의 예상 수집일은 wise_asof 로 본다. 보강판은
+D* 가 wise_asof(휴일 수집일)와 같아야 한다 — 다르면 그 휴일 WISE 가 판에 없다(FG-fresh FAIL, 정규 판과
+같은 판을 '보강판'으로 내보내지 않는다).
 """
 from __future__ import annotations
 
@@ -45,6 +49,7 @@ from daily.kw_daily import COMMIT_MIN_RATIO
 from model.contracts import FI_TABLES, UniverseRule
 from stage import skip_allow
 from stage.gates import GateResult, GateStatus
+from stage.model import BASIS_SUPPLEMENT
 
 from .queries import (
     FIN_ANNUAL_PERIODS,
@@ -111,10 +116,13 @@ class GateContext:
     t_candidates_from: str = ""             # 후보를 읽은 fi 판 id, 못 읽었으면 그 사유
     t_source_build: str = ""                # 장 마감 stage 판 id(T 행 원천)
     t_source_max_date: str | None = None    # 그 판의 max(date) — T 가 아니면 판이 T 수집 전에 섰다
+    wise_asof: str = ""                     # WISE 컨센서스 입력 시점 — 비우면 asof. 보강판은 휴일 수집일
 
     def __post_init__(self) -> None:
         if not self.asof:
             self.asof = self.date
+        if not self.wise_asof:
+            self.wise_asof = self.asof
 
 
 def _scalar(con: duckdb.DuckDBPyConnection, sql: str) -> object:
@@ -198,8 +206,9 @@ def fg1_rows(ctx: GateContext) -> GateResult:
     viol[f"fi_fin_summary.quarter_over_{FIN_QUARTERS}"] = _count(
         con, f"SELECT count(*) FROM (SELECT ticker FROM {fin} WHERE period_type = 'quarter' "
              f"GROUP BY ticker HAVING count(*) > {FIN_QUARTERS})")
+    # 연간 행 available_date 는 WISE 판 날짜와 DART 날짜의 max 라 상한은 wise_asof 다(DART 쪽은 SQL 이 asof 로 자른다)
     viol["fi_fin_summary.available_after_d"] = _count(
-        con, f"SELECT count(*) FROM {fin} WHERE available_date > DATE '{ctx.asof}'")
+        con, f"SELECT count(*) FROM {fin} WHERE available_date > DATE '{ctx.wise_asof}'")
     viol["fi_consensus.horizon_outside_vocab"] = _count(
         con, f"SELECT count(*) FROM {v('fi_consensus')} "
              "WHERE horizon NOT IN ('cur', '1w', '1m', '3m') OR horizon IS NULL")
@@ -208,7 +217,7 @@ def fg1_rows(ctx: GateContext) -> GateResult:
     viol["fi_consensus_annual.outside_window_or_vocab"] = _count(
         con, f"SELECT count(*) FROM {v('fi_consensus_annual')} WHERE period NOT IN "
              f"({ca_periods}) OR data_type NOT IN ('E', 'A') OR data_type IS NULL "
-             f"OR fetched_date > DATE '{ctx.asof}'")
+             f"OR fetched_date > DATE '{ctx.wise_asof}'")
     n_fin = _count(
         con, f"SELECT count(*) FROM {uni} u WHERE u.eligible AND EXISTS ("
              f"SELECT 1 FROM {fin} f WHERE f.ticker = u.ticker AND f.period_type = 'annual' "
@@ -382,7 +391,7 @@ def fg_fresh(ctx: GateContext) -> GateResult:
         "n_lapsed_dropped": n_lapsed_dropped, "grace_days": g,
         "last_collection_date": ctx.dstar,
         "collection_lag_sessions": ctx.collection_lag_sessions,
-        "collection_expected_date": ctx.asof,
+        "collection_expected_date": ctx.wise_asof,
         "collection_lag_max": COLLECTION_LAG_MAX}
     viol = {
         "state_outside_vocab": _count(
@@ -415,6 +424,9 @@ def fg_fresh(ctx: GateContext) -> GateResult:
                           "no_collection — D 이전 추정치 수집 기록이 없다", {**viol, **metrics})
     lag = ctx.collection_lag_sessions or 0
     viol["collection_lag_over_max"] = int(lag > COLLECTION_LAG_MAX)
+    if ctx.basis == BASIS_SUPPLEMENT:
+        # 휴일은 거래일이 아니라 수집 지연(거래일 수)이 휴일 수집이 빠진 판도 0 으로 센다 — D* 를 직접 본다
+        viol["supplement_wise_not_on_wise_asof"] = int(ctx.dstar != ctx.wise_asof)
     # 유예 종목이 몰리면 경고만(N-47 — WISE 부분 수집 실패가 소멸 대신 유예로 숨는다)
     n_grace = counts.get("grace", 0)
     warn = n_grace > GRACE_WARN_MAX

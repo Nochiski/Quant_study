@@ -22,15 +22,22 @@ PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 =
 # equity 층도 같은 접두어를 쓴다 — MANIFEST 의 `basis` 는 이 접두어에서 파생한다.
 BASIS_MANUAL = "manual"
 BASIS_PREFIX: dict[str, str] = {"evening": "e_", "morning": "m_", BASIS_MANUAL: "b_"}
-_BASIS_BY_PREFIX: dict[str, str] = {v: k for k, v in BASIS_PREFIX.items()}
+# 주말 보강판(N-45) `s_` — factor_inputs·모델 층만 짓는 판이다. stage·equity 의 `--basis` 선택지(위
+# BASIS_PREFIX)에는 넣지 않고 빌드 id 접두어 대응에만 더한다(두 층은 이 판을 짓지 않는다)
+BASIS_SUPPLEMENT = "supplement"
+_DERIVED_BASIS_PREFIX: dict[str, str] = {BASIS_SUPPLEMENT: "s_"}
+_BASIS_BY_PREFIX: dict[str, str] = {v: k for k, v in {**BASIS_PREFIX,
+                                                     **_DERIVED_BASIS_PREFIX}.items()}
 BUILD_ID_TIME_FORMAT = "%Y%m%dT%H%M%S_%fZ"
 
 
 def make_build_id(basis: str, now: datetime | None = None) -> str:
     """`<접두어><UTC 시각>` 빌드 id. 모르는 basis 는 예외 — 조용히 `b_` 로 떨어지지 않는다."""
-    if basis not in BASIS_PREFIX:
-        raise ValueError(f"unknown build basis: basis={basis!r} allowed={sorted(BASIS_PREFIX)}")
-    return BASIS_PREFIX[basis] + (now or datetime.now(UTC)).strftime(BUILD_ID_TIME_FORMAT)
+    prefix = BASIS_PREFIX.get(basis) or _DERIVED_BASIS_PREFIX.get(basis)
+    if prefix is None:
+        raise ValueError(f"unknown build basis: basis={basis!r} "
+                         f"allowed={sorted({**BASIS_PREFIX, **_DERIVED_BASIS_PREFIX})}")
+    return prefix + (now or datetime.now(UTC)).strftime(BUILD_ID_TIME_FORMAT)
 
 
 def basis_of_build_id(build_id: str) -> str:

@@ -402,6 +402,19 @@ def test_compat_기록_없이_점수_행이_있으면_위반(tmp_path: Path, mon
     assert any("compat 반영 기록" in v for v in out["scores"]["violations"])
 
 
+@pytest.mark.parametrize("spec", ["scope@2.0", "scope@1.0"])
+def test_compat_기록의_판_id_키는_실제로_쓴_spec_이다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                            spec: str) -> None:
+    """N-47 — compat 이 앞 주 모델로 대신했거나 주 모델을 바꾸기 전 코드가 같은 날 쓴 기록은 판 id 키가
+    scope@1.0 이다. 그 키도 판 id 로 받는다(위반 아님). 바꾼 뒤 기록(scope@2.0)은 그대로다."""
+    home = _home(tmp_path, monkeypatch)
+    builds = {spec: "m_20261019_0741_ab12", "v2_percentrank@1.0": "m_20261019_0741_cd34"}
+    assert _run(home, _inputs(tmp_path, model_builds=builds)) == 0
+    sh = _out(home)["scores"]["tables"]["score_history"]
+    assert (sh["record"]["spec"], sh["record"]["build_id"]) == (spec, "m_20261019_0741_ab12")
+    assert _out(home)["scores"]["violations"] == []
+
+
 def test_compat_기록에_판_id_가_없으면_위반(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = _home(tmp_path, monkeypatch)
     assert _run(home, _inputs(tmp_path, model_builds={"scope@2.0": "m_x"})) == 1

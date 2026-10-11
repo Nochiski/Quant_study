@@ -30,9 +30,11 @@ asctime 은 서버 TZ(Etc/UTC — v3 `docs/system-guide/survey/08-ops.md` §1-1)
 ② 점수 쓰기 한 곳 (T-16)
    · v3 스코어링 job(`scoring`·`scoring_v2`)이 그날 돌았으면(`pipeline_runs`·로그) 위반.
    · `score_history`·`_v2` 의 score_date = D 행이 있으면 `_compat_meta` 에 그날 ok 기록 중 그 표를 쓴 기록이 있어야
-     하고(마지막 것 — 판 id = `model_builds` 의 그 표 spec), 행 수가 그 기록의 넣은 행 수와 같아야 한다. compat 은 날짜
-     단위 교체라 뒤에 다른 쓰기가 끼면 수가 갈린다(v3 스코어링은 1,329·2,526 종목, compat 593·625 — T-17). 같은 수로
-     값만 바꾼 쓰기는 이 검사로 못 보고 위 job 검사가 맡는다. 점수 행이 0 이면 위반이 아니다(판 실패일은 다음 날 아침
+     하고(마지막 것 — 판 id = `model_builds` 의 그 표 spec. compat 이 앞 주 모델로 대신했거나(N-47 · Q-E1)
+     주 모델을 바꾸기 전 코드가 쓴 기록이면 키가 앞 주 모델 spec(scope@1.0)이다 — 그 키도 받는다), 행 수가
+     그 기록의 넣은 행 수와 같아야 한다. compat 은 날짜 단위 교체라 뒤에 다른 쓰기가 끼면 수가 갈린다(v3
+     스코어링은 1,329·2,526 종목, compat 593·625 — T-17). 같은 수로 값만 바꾼 쓰기는 이 검사로 못 보고 위
+     job 검사가 맡는다. 점수 행이 0 이면 위반이 아니다(판 실패일은 다음 날 아침
      재반영이 채운다 — T-38, 그 실패는 장 마감 체인 crit 이 잡는다).
    · 복원 기록(basis `restore`, QL-I · T-42 — `scripts/v3_restore.sh`)은 반영 기록이 아니라 건너뛴다. 그 `tables` 는
      표 전체를 되돌린 행 수라 그날 행 수와 견줄 값이 아니고 판 id 도 없다. 되돌린 뒤엔 이 감시 크론을 주석으로 돌린다
@@ -74,7 +76,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from compat.mappings import BY_TABLE
+from compat.mappings import BY_TABLE, score_spec_used
 from compat.v3_post import RESTORE_BASIS, SCORE_TABLES, _meta_rows, _ro
 
 from daily import calendar_refresh as cr
@@ -332,6 +334,8 @@ def read_scores(con: sqlite3.Connection, d_iso: str) -> tuple[dict[str, dict[str
             exported_at, basis, res, builds = max(recs, key=lambda x: x[0])
             if not isinstance(res, dict) or not isinstance(res.get("n_rows"), int):
                 raise InputError(f"_compat_meta {exported_at} 의 {t} 결과에 n_rows 가 없다: {res!r}")
+            # 판 id 키 = compat 이 실제로 쓴 spec(앞 주 모델 대신 · 바꾸기 전 기록이면 scope@1.0 — N-47)
+            spec = score_spec_used(spec, builds)
             rec = {"exported_at": exported_at, "basis": basis, "n_rows": res["n_rows"], "spec": spec,
                    "build_id": builds.get(spec) if isinstance(builds, dict) else None}
             if n != res["n_rows"]:

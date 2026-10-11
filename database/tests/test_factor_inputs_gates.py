@@ -219,6 +219,23 @@ def test_fg_fresh_fails_on_each_breach(con, breaker: str, key: str) -> None:
     assert r.status is GateStatus.FAIL and r.metrics[key], (key, r.detail)
 
 
+@pytest.mark.parametrize("n_grace, warn", [(gates.GRACE_WARN_MAX, False),
+                                           (gates.GRACE_WARN_MAX + 1, True)])
+def test_fg_fresh_warns_when_grace_stocks_pile_up(con, n_grace: int, warn: bool) -> None:
+    """N-47 — 유예 창 5 라 WISE 부분 수집 실패는 소멸 대신 유예로 숨는다. grace 종목이 경고선(30)을 넘으면
+    metrics `warn` 과 detail 메모만 남기고 판정은 PASS 그대로다(장 마감 체인이 metrics.warn 을 읽는다)."""
+    d = dt.date.fromisoformat(D)
+    for i in range(n_grace):
+        _insert(con, "fi_universe", ticker=f"{900000 + i:06d}", date=d, market="KOSPI",
+                sec_type="common", mktcap_basis="krx", has_estimates=True,
+                coverage_state="grace", coverage_age_days=1, eligible=True)
+    r = gates.fg_fresh(_ctx(con, rule=UniverseRule(coverage_grace_days=5)))
+    assert r.status is GateStatus.PASS, r.detail
+    assert r.metrics["counts"]["grace"] == n_grace
+    assert (r.metrics["warn"], r.metrics["grace_warn_max"]) == (warn, 30)
+    assert ("warn: grace" in r.detail) is warn
+
+
 def test_fg_fresh_collection_lag(con) -> None:
     """수집 중단 허용치는 1거래일(N-12) — 유예 G 와 무관하다."""
     assert gates.fg_fresh(_ctx(con, collection_lag_sessions=1)).status is GateStatus.PASS

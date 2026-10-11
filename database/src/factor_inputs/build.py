@@ -106,7 +106,7 @@ from . import gates, queries
 # 1.9.0(2026-10-12, N-47 · 엑셀 확정분 E2): 추정치 유예 창 기본 0 → FI_COVERAGE_GRACE_MAX(5)
 # — 나이 1~5 grace 종목이 eligible 이고 컨센서스·WISE 재무·추정기관 수를 마지막 신선일 판으로
 # 싣는다. 유예가 더 짧은 spec(원본 미러·scope_v1.0 = 0)은 엔진이 coverage 열로 다시 자른다
-# (창은 `--grace-days` 로 덮을 수 있다)
+# (창은 `--grace-days` 로 덮을 수 있다) · FG-fresh grace 종목 수 경고(기록형 `GRACE_WARN_MAX`)
 RULES_VERSION = "fi1.9.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")

@@ -24,7 +24,8 @@
   FG-fresh     — 신선도 상태 수를 기록하고, lapsed·none 은 eligible 이 아니며(require_estimates),
                  grace 나이 ≤ G, 마지막 수집일 D* 가 예상 수집일(asof — 아침판 D, 장 마감 판 D')
                  보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지 않는다(수집 중단 허용치는 유예 G 와
-                 따로 둔다).
+                 따로 둔다). grace 종목이 `GRACE_WARN_MAX` 를 넘으면 metrics `warn`(판정은 그대로 —
+                 WISE 부분 수집 실패 의심, N-47).
   FG5 후보 커버리지 — 장 마감 판만(컷오버 PR-5 · N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패').
                  직전 판 모델 후보 중 T 가격이 없는 종목 비율 ≤ `T_CANDIDATE_MISSING_MAX`. 후보를 못
                  읽으면 FAIL. 아침판 판 기록에는 이 게이트가 없다(`GATE_ORDER` 그대로).
@@ -69,6 +70,11 @@ FIN_IS_COVERAGE_ENFORCED = False
 # 올리지 않는다(2026-10-05 사용자 결정 N-12 '1거래일'). 추정치 유예(coverage_grace_days)와 값을
 # 공유하지 않는다 — 유예는 종목의 추정치가 사라진 경우, 이것은 수집 자체가 멈춘 경우다.
 COLLECTION_LAG_MAX = 1
+# 유예(grace) 종목 수 경고선(기록형 — FG-fresh metrics `warn`, 판정은 바꾸지 않는다, P3). 유예 창이 5(N-47)라
+# WISE 가 일부 종목만 못 받은 날(부분 수집 실패) 그 종목들이 소멸(lapsed — 유니버스에서 빠져 드러난다) 대신
+# 유예로 남아 마지막 신선일 값으로 조용히 채점된다. 수집 지연 게이트(D* 기준, 전 종목 공통)는 이것을 못 본다.
+# 평소 약 10종목(`docs/DECISIONS.md` N-47 근거 '하루 평균 약 10종목')의 세 배를 넘으면 사람이 본다
+GRACE_WARN_MAX = 30
 # 장 마감 판 후보 커버리지 상한(FG5) — 직전 판 모델 후보 중 T 가격이 없는 종목 비율이 이것을 **넘으면**
 # 판 실패(N-42 Q4, 정본엔 숫자가 없어 PR-5 가 정했다). 근거:
 #   · N-35 ③ 장 마감 프로브 3일(10-06~08): 후보 100종목 15:46 회차 100/100, 한도 초과·오류 0. ka10060
@@ -409,8 +415,17 @@ def fg_fresh(ctx: GateContext) -> GateResult:
                           "no_collection — D 이전 추정치 수집 기록이 없다", {**viol, **metrics})
     lag = ctx.collection_lag_sessions or 0
     viol["collection_lag_over_max"] = int(lag > COLLECTION_LAG_MAX)
-    return _result("FG-fresh", viol, metrics,
-                   f"신선도 기록 · lapsed {n_lapsed_dropped}종목 제외 · D* {ctx.dstar}")
+    # 유예 종목이 몰리면 경고만(N-47 — WISE 부분 수집 실패가 소멸 대신 유예로 숨는다)
+    n_grace = counts.get("grace", 0)
+    warn = n_grace > GRACE_WARN_MAX
+    metrics.update(grace_warn_max=GRACE_WARN_MAX, warn=warn)
+    warn_note = (f" · warn: grace {n_grace}종목 > {GRACE_WARN_MAX}(WISE 부분 수집 실패 의심 — 그날 "
+                 "수집 기록 확인)" if warn else "")
+    res = _result("FG-fresh", viol, metrics,
+                  f"신선도 기록 · lapsed {n_lapsed_dropped}종목 제외 · D* {ctx.dstar}{warn_note}")
+    if warn and res.status is GateStatus.FAIL:
+        res = GateResult(res.name, res.status, res.detail + warn_note, res.metrics)
+    return res
 
 
 # ── FG5 ──────────────────────────────────────────────────────────────────────

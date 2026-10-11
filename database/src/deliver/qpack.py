@@ -14,6 +14,9 @@
   Δ순위 열(`zero_mid`)은 가운데 = 0, 끝점 ±|값| 90 백분위(N-25 Q8). 레벨 값은 무색.
 
 **값만 쓴다.** '=' 로 시작하는 문자열도 수식이 되지 않게 문자열 형으로 고정한다.
+
+매일 엑셀은 위 문법을 고친 확정 양식(샘플 22 — `write_confirmed` · `write_meta_confirmed`)을 쓴다.
+주간 엑셀은 위 문법(`write_table` · `write_meta`) 그대로.
 """
 from __future__ import annotations
 
@@ -29,11 +32,14 @@ from typing import Any
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
+from openpyxl.comments import Comment
 from openpyxl.formatting.rule import ColorScaleRule, Rule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.indexed_list import IndexedList
 from openpyxl.workbook import Workbook
+from openpyxl.worksheet.page import PageMargins
+from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .stats import quantile
@@ -114,6 +120,23 @@ def scale_zero_mid(values: Sequence[object]) -> Rule:
     return scale_fixed_zero(m if m > 0 else 1.0)
 
 
+def scale_zero_anchor(values: Sequence[object]) -> Rule:
+    """부호가 뜻을 갖는 증감 열(Earnings YoY) — 가운데 = 0(노랑), 음수 끝 = −lo · 양수 끝 = +hi.
+    lo · hi = 음수 · 양수 |값|의 90% 분위(정렬한 값의 int(0.9·(n−1)) 번째)를 유효숫자 2자리로
+    반올림. 한쪽 부호가 없으면 다른 쪽 값, 둘 다 없으면 1. 글자 칸은 뺀다."""
+    nums = [float(v) for v in values
+            if isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v)]
+
+    def p90(xs: list[float]) -> float | None:
+        return sorted(xs)[int(0.9 * (len(xs) - 1))] if xs else None
+    pos, neg = p90([v for v in nums if v > 0]), p90([-v for v in nums if v < 0])
+    hi = float(f"{(pos or neg or 1):.2g}")
+    lo = float(f"{(neg or pos or 1):.2g}")
+    return ColorScaleRule(start_type="num", start_value=-lo, start_color=RED,
+                          mid_type="num", mid_value=0, mid_color=YELLOW,
+                          end_type="num", end_value=hi, end_color=GREEN)
+
+
 def scale_rank() -> Rule:
     """순위 열 — 1위(작은 값) = 초록(좋음)."""
     return ColorScaleRule(start_type="percentile", start_value=10, start_color=GREEN,
@@ -156,6 +179,13 @@ class Col:
     color: bool | None = None   # None = kind 기본(pct·chg·rank 만 색)
     zero_mid: bool = False      # 색 가운데 = 0(Δ순위 — 부호와 색이 같은 쪽, E-06)
     span: float | None = None   # 색 가운데 0 · 끝점 ±span 고정(z 칸 — −3·0·+3)
+    # 아래는 확정 양식(write_confirmed)만 쓴다
+    fit_label: str | None = None  # 폭을 잴 때 쓸 머리 글(없으면 label) — 머리를 줄여도 폭은 그대로
+    fmt_all: str | None = None  # 값과 무관하게 데이터 칸 전부에 거는 숫자 서식(빈칸·글자 칸 포함)
+    fixed: float | None = None  # 값에 맞추지 않는 고정 폭
+    core: bool = False          # 6·7행 핵심 블록 색(8064A2)
+    fit_lines: bool = False     # 머리 폭을 낱말이 아니라 줄 단위로 잰다(줄 안에서 접지 않는 머리)
+    dict_label: str | None = None   # Meta 열 사전 이름(없으면 머리 글의 줄바꿈을 공백으로)
 
     @property
     def colored(self) -> bool:
@@ -167,6 +197,7 @@ class Group:
     name: str
     cols: tuple[Col, ...]
     core: bool = False          # 종합·순위 그룹(금색)
+    gap: bool = True            # 앞 그룹과 사이에 빈 구분 열을 둔다(False = 바로 붙인 하위 블록)
 
 
 @dataclass(frozen=True)
@@ -201,11 +232,15 @@ def fit_width(col: Col, rows: Sequence[Mapping[str, object]]) -> float:
     """열 너비 = 값·헤더가 들어가는 최소 폭(Q.Pack 처럼 촘촘히). 숫자는 '####' 가 안 나게 넉넉히 재고,
     헤더는 낱말(공백·줄바꿈으로 나뉨)이 한 줄에 온전히 들어가게 잰다 — 7행 3줄 안에서 낱말 사이로만
     접혀 '유니버/스' 처럼 가운데서 끊기지 않는다(10-05 렌더 확인). 상한 = 지정 너비 또는 종류별 기본."""
+    if col.fixed is not None:
+        return col.fixed
     if col.kind == "spark":
         return col.width or MIN_WIDTH
     numeric = col.kind not in ("id", "txt")
     wide, narrow, pad = (1.6, 0.85, 1.0) if numeric else (1.55, 0.8, 0.7)
-    need_hdr = max((_text_width(w, 1.55, 0.8) for w in col.label.split()), default=0.0) + 0.7
+    label = col.label if col.fit_label is None else col.fit_label
+    words = label.split("\n") if col.fit_lines else label.split()
+    need_hdr = max((_text_width(w, 1.55, 0.8) for w in words), default=0.0) + 0.7
     need_val = max((_text_width(_shown(r.get(col.key), col.fmt), wide, narrow) for r in rows),
                    default=0.0) + pad
     cap = col.width or (NUM_MAX_WIDTH if numeric else TXT_MAX_WIDTH)
@@ -216,7 +251,7 @@ def _layout(groups: Sequence[Group]) -> list[tuple[int, Group | None, Col | None
     out: list[tuple[int, Group | None, Col | None]] = []
     c = 1
     for gi, g in enumerate(groups):
-        if gi > 0:
+        if gi > 0 and g.gap:
             out.append((c, None, None))
             c += 1
         for col in g.cols:
@@ -395,6 +430,460 @@ def write_meta(wb: Workbook, title: Title, pairs: Sequence[tuple[str, object]],
     tighten_rows(ws)
 
 
+# ── 확정 양식(샘플 22 — DECISIONS §7 #6·#7) ─────────────────────────────────
+# 매일 엑셀만 이 양식을 쓴다(주간 엑셀은 위 write_table · write_meta 그대로).
+#   1행   A1 '정렬: …'(왼쪽) · 정렬 열 위에만 '▲'
+#   2행   'Sheet: 설명'(파랑 띠) · 3·4행 연한 파랑 DCE6F1 + 진남색 글자 — 틀 고정 폭에 다 들어가지
+#         않으면 ' · ' 뒷부분을 첫 스크롤 열로 나눈다
+#   5행   A5 읽는 법 + 블록 첫 열 위에 그 블록 설명
+#   6·7행 그룹 595959 · 열 7F7F7F · 핵심 블록 8064A2, 그룹 이름은 칠이 같은 여러 칸이면 가운데 맞춤
+#   선    블록 첫 열 왼쪽 · 표 오른쪽 끝 medium 595959, 블록 안 thin D9D9D9, 표 끝 = 다음 행 위쪽
+#   인쇄  A4 · 1쪽 너비 · 2~7행 반복 · 바닥글 '&A' · '&P / &N'
+C_GROUP = "FF595959"        # 6행 그룹 머리
+C_COLHDR = "FF7F7F7F"       # 7행 열 머리
+C_CORE = "FF8064A2"         # 핵심 블록
+C_BAND34 = "FFDCE6F1"       # 3·4행 띠
+C_BAND34_TXT = "FF1F497D"
+C_POS_TXT, C_NEG_TXT = "FF0070C0", "FFC00000"     # 흑자 파랑 · 적자 빨강 글자
+SIDE_BLOCK = Side(style="medium", color="FF595959")
+SIDE_INNER = Side(style="thin", color="FFD9D9D9")
+SIDE_PAIR = Side(style="thin", color="FFA6A6A6")    # Earnings 연도 묶음 사이 · 분기 YoY 앞
+SIDE_HDR = Side(style="thin", color="FF808080")
+_THIN_SECTOR = Side(style="thin", color="1F3864")   # Sector 머리 — 옛 medium 과 같은 색의 thin
+SIGN_COLORS = {"흑자전환": C_POS_TXT, "흑전": C_POS_TXT, "적자전환": C_NEG_TXT,
+               "적자지속": C_NEG_TXT, "적전": C_NEG_TXT, "적확": C_NEG_TXT, "적축": C_NEG_TXT,
+               "적자": C_NEG_TXT}
+PRINT_MARGINS = dict(left=0.25, right=0.25, top=0.35, bottom=0.45, header=0.15, footer=0.2)
+
+
+def text_width(s: str) -> float:
+    """맑은 고딕 8 글 폭(열 너비 단위) — 전각 1.55 · 그 밖 0.8."""
+    return _text_width(s, 1.55, 0.8)
+
+
+def text_lines(text: str, cap: float) -> int:
+    """공백에서 끊었을 때 폭 cap 안에 드는 줄 수(Meta 여러 줄 칸 높이)."""
+    n, cur = 1, 0.0
+    for word in text.split(" "):
+        w = text_width(word)
+        if cur and cur + 0.8 + w > cap:
+            n, cur = n + 1, w
+        else:
+            cur = cur + 0.8 + w if cur else w
+    return n
+
+
+# 셀 메모 — 엑셀 메모 상자는 글에 맞춰 자라지 않는다. 줄을 300px 로 끊고 상자 크기를 줄 수 ·
+# 글 폭으로 정한다(한글 14px · 그 밖 8px · 줄 21px · 여백 30px — 메모 기본 글꼴에 한글 대체 글꼴이
+# 쓰여 넉넉히 잡는다).
+NOTE_CJK, NOTE_OTHER, NOTE_LINE_H, NOTE_LINE_W, NOTE_PAD = 14, 8, 21, 300, 30
+NOTE_GLUE = frozenset({"=", "<", ">", "≥", "≤", "−", "+", "×", "÷", "~"})
+NBSP = "\xa0"
+
+
+def note_px(s: str) -> int:
+    return sum(NOTE_CJK if ord(ch) > 0x2E80 else NOTE_OTHER for ch in s)
+
+
+def _wrap_px(text: str) -> list[str]:
+    """공백에서 끊어 한 줄 폭 NOTE_LINE_W 이하로."""
+    out: list[str] = []
+    cur = ""
+    for word in text.split(" "):
+        cand = f"{cur} {word}" if cur else word
+        if cur and note_px(cand) > NOTE_LINE_W:
+            out.append(cur)
+            cur = word
+        else:
+            cur = cand
+    out.append(cur)
+    return out
+
+
+def _wrap_glued(text: str) -> list[str]:
+    """기호(= < ≥ − × ÷ ~ …)는 앞뒤 낱말과, '·' 는 앞 낱말과 붙여(줄 안 공백 = NBSP) 줄 머리·끝에
+    홀로 남지 않게 끊는다."""
+    units: list[str] = []
+    glue_next = False
+    for word in text.split(" "):
+        if units and (glue_next or word in NOTE_GLUE or word == "·"):
+            units[-1] += " " + word
+        else:
+            units.append(word)
+        glue_next = word in NOTE_GLUE
+    return _wrap_px(" ".join(u.replace(" ", NBSP) for u in units))
+
+
+def note_lines(text: str, *, glue: bool = True, wrap: bool = True) -> list[str]:
+    """메모 줄 — 문단('\\n')마다 끊는다. wrap=False 면 문단 그대로(줄을 직접 정한 범례)."""
+    paras = text.split("\n")
+    if not wrap:
+        return paras
+    cut = _wrap_glued if glue else _wrap_px
+    return [line for p in paras for line in cut(p)]
+
+
+def note(text: str, author: str = "설명", *, glue: bool = True, wrap: bool = True) -> Comment:
+    """셀 메모 + 상자 크기(너비 = 가장 긴 줄 + 여백, 높이 = 줄 수 × 21 + 여백)."""
+    lines = note_lines(text, glue=glue, wrap=wrap)
+    cm = Comment("\n".join(lines), author)
+    cm.width = max(note_px(line) for line in lines) + NOTE_PAD
+    cm.height = NOTE_LINE_H * len(lines) + NOTE_PAD
+    return cm
+
+
+@dataclass(frozen=True)
+class Band:
+    """확정 양식 1~5행. model·source = (앞, 뒤) — 틀 고정 폭에 다 들어가면 'A · B' 한 칸, 아니면
+    뒤를 첫 스크롤 열로. notes = (열 key — None 이면 A 열, 글)."""
+
+    sort_label: str | None
+    title: str
+    model: tuple[str, str]
+    source: tuple[str, str]
+    notes: tuple[tuple[str | None, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class Page:
+    """인쇄 — A4, fit_width 쪽 너비(높이는 fit_height, 0 = 제한 없음)."""
+
+    portrait: bool = False
+    fit_width: int = 1
+    fit_height: int = 0
+    over_then_down: bool = False
+    title_cols: str | None = None
+
+
+@dataclass
+class Sheet:
+    """write_confirmed 결과 — 표 뒤 손질(시트별 색 규칙·메모)에 쓴다."""
+
+    ws: Worksheet
+    cols: dict[str, int]                    # 열 key → 열 번호
+    blocks: list[tuple[int, int, int]]      # 표마다 (6행 머리 행, 첫 데이터 행, 끝 데이터 행)
+    last_col: int
+    dictionary: list[tuple[str, str, str, str]]
+
+    def letter(self, key: str) -> str:
+        return get_column_letter(self.cols[key])
+
+
+def _band_rows(ws: Worksheet, band: Band, ncol: int, sort_col: int | None, freeze_col: int,
+               cols: Mapping[str, int]) -> None:
+    for i in range(1, ncol + 1):
+        cell = put(ws, 1, i, None)
+        cell.font = font()
+        cell.fill = fill(C_STRIP)
+        cell.alignment = Alignment(horizontal="center")
+        ws.cell(2, i).fill = fill(C_BAND)
+        for r in (3, 4):
+            c34 = ws.cell(r, i)
+            c34.fill = fill(C_BAND34)
+            c34.font = Font(name=NORMAL_FONT.name, sz=NORMAL_FONT.sz, family=NORMAL_FONT.family,
+                            color=C_BAND34_TXT)
+    if band.sort_label:
+        a1 = put(ws, 1, 1, band.sort_label)
+        a1.alignment = Alignment(horizontal="left")
+    if sort_col is not None:
+        put(ws, 1, sort_col, "▲")
+    a2 = put(ws, 2, 1, band.title)
+    a2.font = font(bold=True, color=C_WHITE)
+    a2.alignment = Alignment(horizontal="left")
+
+    def visible(c: int) -> bool:
+        return not ws.column_dimensions[get_column_letter(c)].hidden
+    room = (sum(ws.column_dimensions[get_column_letter(c)].width or 8.43
+                for c in range(1, freeze_col) if visible(c)) if freeze_col > 1 else math.inf)
+    scroll = freeze_col
+    while scroll <= ncol and not visible(scroll):
+        scroll += 1
+    for r, (head, tail) in ((3, band.model), (4, band.source)):
+        whole = f"{head} · {tail}"
+        parts = ([(1, whole)] if text_width(whole) <= room - 1
+                 else [(1, head), (scroll, tail)])
+        for c, text in parts:
+            cell = put(ws, r, c, text)
+            cell.font = font(color=C_BAND34_TXT)
+            cell.alignment = Alignment(horizontal="left")
+    for key, text in band.notes:
+        cell = put(ws, 5, 1 if key is None else cols[key], text)
+        cell.font = font(italic=True, color=C_NOTE)
+        cell.alignment = Alignment()
+
+
+def _group_align(gi: int, g: Group) -> str:
+    """그룹 이름 맞춤 — 칠이 같은 여러 칸 그룹은 '선택 영역의 가운데로', 첫(식별) 그룹 · 한 칸
+    그룹 · 칠이 섞인 그룹(핵심 열만 보라)은 첫 칸 가운데."""
+    uniform = len({c.core for c in g.cols}) == 1
+    return "centerContinuous" if gi > 0 and len(g.cols) >= 2 and uniform else "center"
+
+
+def _header_rows(ws: Worksheet, groups: Sequence[Group], layout: Sequence[tuple[int, Group | None,
+                 Col | None]], r6: int, style: str) -> None:
+    align = {id(g): _group_align(gi, g) for gi, g in enumerate(groups)}
+    seen: set[int] = set()
+    for c, g, col in layout:
+        if g is None or col is None:
+            continue
+        first = id(g) not in seen
+        seen.add(id(g))
+        h6 = put(ws, r6, c, g.name if first else None)
+        h6.fill = fill(C_CORE if col.core else C_GROUP)
+        dark = g.core and not col.key_col and style != "sector"     # 옛 금색 그룹 칸은 검정 글자
+        h6.font = font(bold=True, color="000000" if dark else C_WHITE)
+        h6.alignment = Alignment(horizontal=align[id(g)], vertical="top", wrap_text=False)
+        h7 = put(ws, r6 + 1, c, col.label)
+        h7.fill = fill(C_CORE if col.core else C_COLHDR)
+        h7.font = font(bold=col.key_col or style == "sector", color=C_WHITE)
+        h7.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
+    ws.row_dimensions[r6 + 1].height = HEADER_HEIGHT
+
+
+def _body_rows(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | None]],
+               rows: Sequence[Mapping[str, object]], r0: int, sign_colors: bool) -> None:
+    for ri, row in enumerate(rows, start=r0):
+        fills = row.get("_fills") or {}
+        assert isinstance(fills, Mapping)
+        for c, _g, col in layout:
+            if col is None:
+                continue
+            cell = put(ws, ri, c, row.get(col.key))
+            color = (C_KEY if col.item else SIGN_COLORS.get(cell.value)
+                     if sign_colors and isinstance(cell.value, str) else None)
+            cell.font = font(color=color) if color else font()
+            text_like = col.kind in ("id", "txt") or isinstance(cell.value, str)
+            cell.alignment = Alignment(vertical="top",
+                                       horizontal="left" if text_like else "right")
+            if col.fmt_all:
+                cell.number_format = col.fmt_all
+            elif col.fmt and col.kind not in ("id", "txt") and isinstance(cell.value, int | float):
+                cell.number_format = col.fmt
+            if col.key in fills:
+                cell.fill = fill(str(fills[col.key]))
+
+
+def _color_rules(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | None]],
+                 rows: Sequence[Mapping[str, object]], r0: int) -> None:
+    if not rows:
+        return
+    r1 = r0 + len(rows) - 1
+    for c, _g, col in layout:
+        if col is None or not col.colored:
+            continue
+        letter = get_column_letter(c)
+        if col.span is not None:
+            rule = scale_fixed_zero(col.span)
+        elif col.zero_mid:
+            rule = scale_zero_mid([r.get(col.key) for r in rows])
+        else:
+            rule = scale_rank() if col.kind == "rank" else scale_high_good()
+        ws.conditional_formatting.add(f"{letter}{r0}:{letter}{r1}", rule)
+
+
+def _block_lines(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | None]],
+                 starts: set[int], last_col: int, r6: int, r1: int, hdr_side: Side,
+                 inner_sides: Mapping[str, Side] | None) -> None:
+    """블록 세로선 — 블록 첫 열 왼쪽 · 표 오른쪽 끝 medium, 블록 안은 데이터 행만 thin D9D9D9
+    (`inner_sides` 를 주면 머리 행까지 그 열의 선). 머리 행의 나머지 선은 hdr_side 그대로."""
+    r0 = r6 + 2
+    for r in range(r6, r1 + 1):
+        for c, _g, col in layout:
+            if col is None:
+                continue
+            if c in starts:
+                left = SIDE_BLOCK
+            elif inner_sides is not None:
+                left = inner_sides.get(col.key, SIDE_INNER)
+            else:
+                left = SIDE_INNER if r >= r0 else hdr_side
+            right = SIDE_BLOCK if c == last_col else (hdr_side if r < r0 else None)
+            ws.cell(r, c).border = Border(left=left, right=right,
+                                          top=hdr_side if r == r6 else None,
+                                          bottom=hdr_side if r == r6 + 1 else None)
+
+
+def _close_line(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | None]],
+                r: int) -> None:
+    """표 끝 선 — 마지막 행 다음 행의 위쪽(정렬 범위 밖이라 정렬해도 표 끝에 남는다)."""
+    for c, _g, col in layout:
+        if col is not None:
+            ws.cell(r, c).border = Border(top=SIDE_BLOCK)
+
+
+def page_setup(ws: Worksheet, page: Page, area: str) -> None:
+    ws.sheet_view.zoomScale = 100
+    ps = ws.page_setup
+    ps.paperSize = 9
+    ps.orientation = "portrait" if page.portrait else "landscape"
+    ps.fitToWidth = page.fit_width
+    ps.fitToHeight = page.fit_height
+    if page.over_then_down:
+        ps.pageOrder = "overThenDown"
+    if page.title_cols:
+        ws.print_title_cols = page.title_cols
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.print_options.horizontalCentered = True
+    ws.page_margins = PageMargins(**PRINT_MARGINS)
+    ws.print_area = area
+    ws.print_title_rows = "2:7"
+    ws.oddFooter.left.text, ws.oddFooter.left.size = "&A", 8
+    ws.oddFooter.center.text, ws.oddFooter.center.size = "&P / &N", 8
+
+
+def write_confirmed(wb: Workbook, sheet: str, band: Band, groups: Sequence[Group],
+                    blocks: Sequence[Sequence[Mapping[str, object]]], *,
+                    sort_key: str | None = None, n_freeze_groups: int = 1, style: str = "table",
+                    defs_notes: bool = False, inner_sides: Mapping[str, Side] | None = None,
+                    sign_colors: bool = False, page: Page | None = None) -> Sheet:
+    """확정 양식 표 시트. `blocks` = 세로로 쌓는 표(행 목록)들 — 둘째 표부터는 빈 줄 하나 뒤에
+    6·7행 머리를 다시 쓴다(Sector 대분류 · 업종). 열 폭은 모든 표의 값으로 잰다.
+
+    `defs_notes` = 열 정의를 7행 머리 칸 메모로(5행 정의 칸은 서식만 남긴다 — 확정 샘플 그대로),
+    `inner_sides` = 블록 안 열 사이 선을 열마다 정한다(Earnings 3단 선 — 머리 행까지),
+    `sign_colors` = 흑자 · 적자 글자 색(`SIGN_COLORS`)."""
+    ws = wb.create_sheet(sheet)
+    ws.sheet_view.showGridLines = False
+    ws.sheet_format.defaultRowHeight = ROW_HEIGHT
+    ws.sheet_format.customHeight = True
+    layout = _layout(groups)
+    ncol = layout[-1][0] if layout else 1
+    every = [r for b in blocks for r in b]
+    cols = {col.key: c for c, _g, col in layout if col is not None}
+    for c, _g, col in layout:
+        dim = ws.column_dimensions[get_column_letter(c)]
+        if col is None:
+            dim.width, dim.hidden, dim.outlineLevel = SEP_WIDTH, True, 1
+        else:
+            dim.width = fit_width(col, every)
+    freeze_col = 1 + max(c for c, g, _col in layout
+                         if g is not None and any(g is x for x in groups[:n_freeze_groups]))
+    visible = [c for c, _g, col in layout if col is not None]
+    last_col = visible[-1]
+    starts = {visible[0]}
+    seen: set[int] = set()
+    for c, g, _col in layout:
+        if g is not None and id(g) not in seen:
+            seen.add(id(g))
+            starts.add(c)
+    hdr_side = _THIN_SECTOR if style == "sector" else _THIN
+
+    _header_rows(ws, groups, layout, 6, style)
+    if defs_notes:
+        ident = {id(g) for g in groups[:n_freeze_groups]}
+        for c, g, col in layout:
+            if g is None or col is None or not col.definition or col.kind == "id" \
+                    or id(g) in ident:
+                continue
+            d5 = ws.cell(5, c)
+            d5.font = font(italic=True, color=C_NOTE)
+            d5.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.cell(7, c).comment = note(col.definition.replace(" — ", ": "), "정의", glue=False)
+    sort_col = None if sort_key is None else cols.get(sort_key)
+    _band_rows(ws, band, ncol, sort_col, freeze_col, cols)
+
+    spans: list[tuple[int, int, int]] = []
+    r6 = 6
+    for bi, rows in enumerate(blocks):
+        if bi > 0:
+            _close_line(ws, layout, r6)            # 앞 표 끝 선 = 빈 줄 위쪽
+            r6 += 1
+            _header_rows(ws, groups, layout, r6, style)
+        r0 = r6 + 2
+        _body_rows(ws, layout, rows, r0, sign_colors)
+        _color_rules(ws, layout, rows, r0)
+        r1 = r0 + len(rows) - 1
+        _block_lines(ws, layout, starts, last_col, r6, max(r1, r6 + 1), hdr_side, inner_sides)
+        spans.append((r6, r0, r1))
+        r6 = r1 + 1
+    last = spans[-1][2] if every else FIRST_DATA_ROW - 1
+    ws.freeze_panes = ws.cell(FIRST_DATA_ROW, freeze_col)
+    h7 = spans[-1][0] + 1
+    ws.auto_filter.ref = f"A{h7}:{get_column_letter(ncol)}{max(h7, spans[-1][2])}"
+    tighten_rows(ws)
+    if every:
+        _close_line(ws, layout, last + 1)
+    page_setup(ws, page or Page(), f"A1:{get_column_letter(ncol)}{max(last, 7)}")
+    dictionary = [(sheet, g.name, col.dict_label or col.label.replace("\n", " "),
+                   col.definition)
+                  for _c, g, col in layout if g is not None and col is not None]
+    return Sheet(ws, cols, spans, last_col, dictionary)
+
+
+def write_meta_confirmed(wb: Workbook, band: Band, pairs: Sequence[tuple[str, object]],
+                         dictionary: Sequence[tuple[str, str, str, str]],
+                         tail: Sequence[tuple[str, str, str, str]] = ()) -> Worksheet:
+    """확정 양식 Meta — 키·값 표(8행~) 뒤 열 사전. `tail` = 사전 끝에 붙이는 줄(그룹 · 열 이름이
+    길어 B 칸도 줄바꿈). band.notes 의 '{hdr}' 는 열 사전 머리 행 번호로 바꾼다."""
+    ws = wb.create_sheet("Meta")
+    ws.sheet_view.showGridLines = False
+    ws.sheet_format.defaultRowHeight = ROW_HEIGHT
+    ws.sheet_format.customHeight = True
+    def_width = 110.0
+    key_width = max((text_width(str(k)) + 1 for k, _ in pairs), default=0.0)
+    for letter, width in (("A", max(18.0, key_width)), ("B", 34.0), ("C", def_width)):
+        ws.column_dimensions[letter].width = width
+    hdr = FIRST_DATA_ROW + len(pairs) + 1
+    band = Band(band.sort_label, band.title, band.model, band.source,
+                tuple((k, t.replace("{hdr}", str(hdr))) for k, t in band.notes))
+    _band_rows(ws, band, 3, None, 1, {})
+
+    def header(r: int, labels: Sequence[str]) -> None:
+        for i, text in enumerate(labels, start=1):
+            cell = put(ws, r, i, text)
+            cell.fill = fill(C_COLHDR)
+            cell.font = font(bold=True, color=C_WHITE)
+            cell.alignment = Alignment(horizontal="center", vertical="top")
+            cell.border = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+
+    put(ws, 6, 1, "Meta").font = font(bold=True, color=C_WHITE)
+    for i in (1, 2, 3):
+        ws.cell(6, i).fill = fill(C_GROUP)
+    header(7, ("항목", "값", ""))
+    r = FIRST_DATA_ROW
+    for key, value in pairs:
+        put(ws, r, 1, key).font = font(bold=True)
+        ws.cell(r, 1).alignment = Alignment(vertical="top")
+        cell = put(ws, r, 2, value)
+        cell.font = font()
+        cell.alignment = Alignment(vertical="top", horizontal="left")
+        r += 1
+    header(hdr, ("시트", "그룹 · 열", "정의"))
+    r = hdr + 1
+    for sheet, group, label, definition in dictionary:
+        put(ws, r, 1, sheet).font = font()
+        put(ws, r, 2, f"{group} · {label}").font = font()
+        cell = put(ws, r, 3, definition)
+        cell.font = font()
+        cell.alignment = Alignment(vertical="top", wrap_text=True)
+        # 정의가 접히는 줄 수만큼만 높인다(자동 높이는 기본 글꼴 기준이라 헐겁다 — tighten_rows)
+        lines = math.ceil(text_width(str(definition or "")) / (def_width - 1))
+        ws.row_dimensions[r].height = ROW_HEIGHT * max(1, lines)
+        r += 1
+    for sheet, group, label, definition in tail:
+        name = f"{group} · {label}"
+        for c, v in ((1, sheet), (2, name), (3, definition)):
+            put(ws, r, c, v).font = font()
+        ws.cell(r, 1).alignment = Alignment(vertical="top")
+        ws.cell(r, 2).alignment = Alignment(vertical="top", wrap_text=True)
+        ws.cell(r, 3).alignment = Alignment(vertical="top", wrap_text=True)
+        # 폭 110 · 34 에서 실제로 끊기는 줄 수(여백 3 · 2)
+        ws.row_dimensions[r].height = ROW_HEIGHT * max(text_lines(str(definition), def_width - 3),
+                                                      text_lines(name, 34.0 - 2))
+        r += 1
+    # 여러 줄 행은 시트 · 열 이름도 위로 맞춘다(설명 첫 줄과 나란히)
+    for row in range(hdr + 1, r):
+        if (ws.row_dimensions[row].height or ROW_HEIGHT) > ROW_HEIGHT:
+            for c in (1, 2):
+                a = ws.cell(row, c).alignment
+                ws.cell(row, c).alignment = Alignment(horizontal=a.horizontal, vertical="top",
+                                                      wrap_text=a.wrap_text)
+    ws.freeze_panes = ws.cell(FIRST_DATA_ROW, 1)
+    tighten_rows(ws)
+    page_setup(ws, Page(), f"A1:C{r - 1}")
+    return ws
+
+
 # ── 셀 안 꺾은선(엑셀 스파크라인) ───────────────────────────────────────────
 # openpyxl 은 스파크라인을 읽지도 쓰지도 못한다. 저장한 xlsx 의 시트 XML 끝 extLst 에 x14
 # sparklineGroups 를 넣는다(엑셀 2010+ 확장. LibreOffice 도 읽는다 — 10-06 왕복 확인).
@@ -475,4 +964,8 @@ __all__ = [
     "SparkGroup", "add_sparklines", "new_workbook", "put", "scale_high_good", "scale_rank",
     "scale_fixed_zero", "scale_zero_mid", "sparkline_xml", "title_block", "write_meta",
     "write_table",
+    # 확정 양식
+    "C_COLHDR", "C_CORE", "C_GROUP", "SIDE_BLOCK", "SIDE_HDR", "SIDE_INNER", "SIDE_PAIR",
+    "SIGN_COLORS", "Band", "Page", "Sheet", "note", "note_lines", "note_px", "page_setup",
+    "scale_zero_anchor", "text_lines", "text_width", "write_confirmed", "write_meta_confirmed",
 ]

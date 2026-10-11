@@ -164,26 +164,26 @@ def test_captions_fixed_format() -> None:
     w = tg.caption_weekly("2026-W39", "2026-09-25", "v4_rank@0.1", top, 30, 5, 5, 4)
     assert w.splitlines() == ["[주간 후보] 2026-W39 (기준 2026-09-25) · v4_rank@0.1",
                               "상위5: 1.삼성전자 · 2.SK하이닉스 · 3.035420",
-                              "후보 30 · 신규 5 · 이탈 5 · 거래일 판 4/5"]
+                              "후보 30 · 신규 5 · 이탈 5 · 거래일 데이터 4/5"]
     assert tg.caption_daily("d", "b", "s", [], 0, 0).splitlines()[1] == "상위5: -"
 
 
 def test_caption_daily_evening_says_postclose_basis() -> None:
-    """PR-6 — 장 마감 직후 판(basis evening)은 둘째 줄에 판 성격(가격·수급 시각, 컨센서스 기준일)을
-    단다. 아침판 캡션은 그대로(위 고정 형식 테스트)."""
+    """PR-6 — 장 마감 직후 데이터(basis evening)는 둘째 줄에 데이터 성격(가격·수급 시각, 컨센서스
+    기준일)을 단다. 아침 캡션은 그대로(위 고정 형식 테스트). '판' 대신 '데이터'(10-11 사용자)."""
     top = [(1, "005930", "삼성전자")]
     morning = tg.caption_daily("2026-10-14", "morning", "scope@1.0", top, 593, 600)
     c = tg.caption_daily("2026-10-14", "evening", "scope@1.0", top, 593, 600)
     lines = c.splitlines()
     assert lines[0] == "[모델 점수] 2026-10-14 evening · scope@1.0"
-    assert lines[1] == ("장 마감 직후 판(가격 15:35·수급 15:40 정규장 기준) · "
+    assert lines[1] == ("장 마감 직후 데이터(가격 15:35·수급 15:40 정규장 기준) · "
                         "컨센서스 기준일 = 직전 거래일")
     assert lines[2:] == morning.splitlines()[1:]
     assert "장 마감" not in morning and "컨센서스" not in morning
 
 
 def test_caption_daily_correction_line() -> None:
-    """Q9 — 정정 발송(n ≥ 1)만 끝에 '정정 n · 판 id · 생성 시각' 줄을 단다.
+    """Q9 — 정정 발송(n ≥ 1)만 끝에 '정정 n · 데이터 id · 생성 시각' 줄을 단다.
     첫 발송(n = 0)은 그대로."""
     top = [(1, "005930", "삼성전자")]
     base = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603)
@@ -192,7 +192,8 @@ def test_caption_daily_correction_line() -> None:
     assert first == base
     c = tg.caption_daily("2026-09-25", "morning", "scope@1.0", top, 317, 603,
                          correction=2, build_id="m_x", generated_at="2026-09-25T00:43:12Z")
-    assert c.splitlines() == [*base.splitlines(), "정정 2 · 판 m_x · 생성 2026-09-25T00:43:12Z"]
+    assert c.splitlines() == [*base.splitlines(), "정정 2 · 데이터 m_x · 생성 2026-09-25T00:43:12Z"]
+    assert "판" not in c
 
 
 def test_multipart_body_shape() -> None:

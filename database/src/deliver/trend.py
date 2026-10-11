@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 SHEET = "순위 흐름"          # 그래프 원자료(숨김 시트). 행 번호를 점수 시트와 맞춘다
 WINDOWS = ("1M",)             # 엑셀에 싣는 창(1W 는 10-06 사용자 결정으로 뺐다)
 LINE_UP, LINE_DOWN, LINE_FLAT = "1E8C45", "D0312D", "8C8C8C"   # 상승 초록 · 하락 빨강 · 같음 회색
-FALLBACK_NOTE = "(아침 확정판 — 장 마감 판 이력 없음, T-50)"   # 메타 '1M 비교 판' 값 뒤에 붙인다
+FALLBACK_NOTE = "(아침 확정판 — 장 마감 판 비교 판 없음, T-50)"   # 메타 '1M 비교 판' 값 뒤에 붙인다
 
 
 def month_back(d: date) -> date:
@@ -108,17 +108,24 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
     if basis == "evening" and fallback_root is not None and base["1M"] is None:
         # T-50 — 대체 루트 아침 확정판의 같은 규칙 판(D−1개월 이하 마지막 성공 판). 그 날짜는
         # evening 흐름 판들(D−1개월 다음 날부터)보다 앞이라 흐름 첫 점이 된다
+        cut, why = month_back(d), ""
         try:
-            fb = _on_or_before(fallback_root, month_back(d), "morning")
+            fb = _on_or_before(fallback_root, cut, "morning")
             got = None if fb is None else _ranks(fallback_root, fb, spec_id)
         except (DeliverError, OSError, ValueError, duckdb.Error) as e:
             # 보조 입력이라 연구 루트가 깨져도 장 마감 판 엑셀은 멈추지 않는다 — 대체 없이 빈칸(P1)
-            log.warning("T-50 1M 비교 판 대체를 쓰지 않는다(Δ순위 1M 빈칸) — "
-                        "대체 루트 %s 읽기 실패: %s: %s", fallback_root, type(e).__name__, e)
-            fb = got = None
+            fb, got, why = None, None, f"읽기 실패({type(e).__name__}: {e})"
         if fb is not None and got is not None:
             by_date[fb.date] = got
             base["1M"], base_rank["1M"], fallback = fb.date, got, frozenset({"1M"})
+        else:
+            # 대체를 시도했는데 못 쓴 경우 — evening 1M 판이 없는 이행 기간에만 오는 자리다
+            if not why:
+                why = ("판 없음" if fb is None
+                       else f"주 모델 없음({fb.date} 판 specs 에 {spec_id} 없음)"
+                       if spec_id not in fb.specs else f"점수 표 없음({fb.date} 판 {spec_id})")
+            log.warning("T-50 1M 비교 판 대체 안 씀(Δ순위 1M 빈칸) — 대체 루트 %s · 기준일 %s"
+                        "(D−1개월) 이하 · 사유 %s", fallback_root, cut, why)
     dates = tuple(sorted(by_date))
     line: dict[str, list[int | None]] = {}
     for i, day in enumerate(dates):

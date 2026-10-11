@@ -1537,7 +1537,7 @@ def test_postclose_run_in_model_db_leaves_operating_roots_alone(
 
 
 # ── T-50(PR-6b) — 장 마감 판 1M 비교 판이 evening 이력에 없으면 아침 확정판으로 ─────────────
-T50_NOTE = "(아침 확정판 — 장 마감 판 이력 없음, T-50)"
+T50_NOTE = "(아침 확정판 — 장 마감 판 비교 판 없음, T-50)"
 
 
 def _evening_copy(src: Path, dst: Path, day: str) -> None:
@@ -1569,6 +1569,11 @@ def _d1m(wb, tickers: tuple[str, ...]) -> dict[str, object]:
     sc = wb["점수"]
     h, rows = header(sc), rows_by_code(sc)
     return {t: sc.cell(rows[t], h["Δ순위 1M"]).value for t in tickers}
+
+
+def _t50_warns(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records
+            if r.name == "deliver.trend" and r.levelname == "WARNING" and "T-50" in r.getMessage()]
 
 
 def test_t50_evening_1m_base_falls_back_to_the_morning_board(
@@ -1616,14 +1621,17 @@ def test_t50_evening_1m_base_falls_back_to_the_morning_board(
     ("v3_zscore@1.0", f"2026-08-24 {T50_NOTE}", 29),
 ], ids=["evening_board_readable", "evening_board_without_primary"])
 def test_t50_evening_history_wins_and_unreadable_board_falls_back(
-        world: dict[str, Path], tmp_path: Path, spec: str, base: str, d0: int) -> None:
+        world: dict[str, Path], tmp_path: Path, spec: str, base: str, d0: int,
+        caplog: pytest.LogCaptureFixture) -> None:
     """T-50 — evening 이력이 D−1개월까지 닿으면(08-21 evening 판) 대체 루트를 줘도 그 evening
     판을 쓴다(아침 08-24 가 더 가까워도 — 표시 없음). 그 판에 주 모델 순위가 없으면(다른 spec
-    만) 못 읽은 것이라 아침 판으로 메운다."""
+    만) 못 읽은 것이라 아침 판으로 메운다. 어느 쪽도 'T-50 대체 안 씀' 경고는 없다(이행 기간 밖)."""
     ev, fb = _t50_roots(world, tmp_path)
     _write_rank_run(ev, "2026-08-21", spec, {tick(0): 10, tick(1): 1}, basis="evening")
-    res = build_daily(FRI, "evening", model_root=ev, fi_root=world["fi"], out_root=tmp_path / "o",
-                      trend_fallback_root=fb)
+    with caplog.at_level("WARNING", logger="deliver.trend"):
+        res = build_daily(FRI, "evening", model_root=ev, fi_root=world["fi"],
+                          out_root=tmp_path / "o", trend_fallback_root=fb)
+    assert _t50_warns(caplog) == []
     wb = load_workbook(res.path)
     meta = dict(_meta_pairs(wb))
     assert meta["1M 비교 판"] == base
@@ -1644,18 +1652,32 @@ def test_t50_evening_without_fallback_root_keeps_the_blank(
     assert set(_d1m(wb, tuple(tick(i) for i in range(N))).values()) == {None}
 
 
-@pytest.mark.parametrize("broken", ["manifest", "scores_parquet"])
-def test_t50_broken_fallback_root_leaves_the_blank_and_does_not_stop_the_excel(
-        world: dict[str, Path], tmp_path: Path, broken: str,
+@pytest.mark.parametrize(("case", "reason"), [
+    ("manifest", "읽기 실패(DeliverError"),
+    ("scores_parquet", "읽기 실패(InvalidInputException"),
+    ("no_board", "판 없음"),
+    ("no_primary", "주 모델 없음(2026-08-24 판 specs 에 v4_rank@0.1 없음)"),
+    ("no_scores", "점수 표 없음(2026-08-24 판 v4_rank@0.1)"),
+], ids=["manifest", "scores_parquet", "no_board", "no_primary", "no_scores"])
+def test_t50_unusable_fallback_board_leaves_the_blank_with_one_warning(
+        world: dict[str, Path], tmp_path: Path, case: str, reason: str,
         caplog: pytest.LogCaptureFixture) -> None:
-    """T-50 컨트롤러 결정 — 대체 루트는 표시 열 하나를 채우는 보조 입력이다. 그 루트의 08-24 아침판
-    manifest(`_runs`)나 점수 parquet 이 깨져 있어도 장 마감 판 엑셀은 rc 0 으로 나가고, 대체 없이
-    PR-6 그대로 빈칸이다(P1 — 모호하면 결측). 경고 로그 한 줄만 남긴다. 옛 처리는 그 예외가 그대로
-    올라가 rc 2(manifest) · rc 3(parquet)으로 15:41 발송이 연구 루트 상태에 묶였다."""
+    """T-50 컨트롤러 결정 — 대체 루트는 표시 열 하나를 채우는 보조 입력이다. 08-24 아침판을
+    못 쓰면(manifest·점수 parquet 깨짐 · 판 없음 · 판에 주 모델 없음 · 점수 표 없음) 장 마감 판
+    엑셀은 rc 0 으로 나가고, 대체 없이 PR-6 그대로 빈칸이다(P1 — 모호하면 결측). 경고는 정확히 한
+    줄 — 대체 루트 · 기준일(D−1개월 08-25) · 사유. 깨짐을 삼키기 전에는 rc 2(manifest) ·
+    rc 3(parquet)으로 15:41 발송이 연구 루트 상태에 묶였다."""
     ev, fb = _t50_roots(world, tmp_path)
-    target = (fb / "_runs" / "20260824_morning.json" if broken == "manifest"
-              else fb / PRIMARY / "v=m_20260824T000000Z" / "scores.parquet")
-    target.write_text("{깨진", encoding="utf-8")
+    manifest = fb / "_runs" / "20260824_morning.json"
+    scores = fb / PRIMARY / "v=m_20260824T000000Z" / "scores.parquet"
+    if case in ("manifest", "scores_parquet"):
+        (manifest if case == "manifest" else scores).write_text("{깨진", encoding="utf-8")
+    elif case == "no_board":
+        manifest.unlink()
+    elif case == "no_primary":
+        _write_rank_run(fb, "2026-08-24", "v3_zscore@1.0", {tick(0): 30})
+    else:
+        scores.unlink()
     out = tmp_path / "deliver"
     with caplog.at_level("WARNING", logger="deliver.trend"):
         rc = cli.main(["model-daily", "--date", "20260925", "--basis", "evening",
@@ -1667,9 +1689,35 @@ def test_t50_broken_fallback_root_leaves_the_blank_and_does_not_stop_the_excel(
     assert meta["1M 비교 판"] == "없음(그 전 판이 없다)"
     assert meta["순위 흐름 판"] == "2026-09-24 ~ 2026-09-25 · 2개"
     assert set(_d1m(wb, tuple(tick(i) for i in range(N))).values()) == {None}
-    warns = [r.getMessage() for r in caplog.records
-             if r.name == "deliver.trend" and r.levelname == "WARNING"]
-    assert len(warns) == 1 and "T-50" in warns[0] and str(fb) in warns[0]
+    warns = _t50_warns(caplog)
+    assert len(warns) == 1, warns
+    assert str(fb) in warns[0] and "기준일 2026-08-25" in warns[0]
+    assert f"사유 {reason}" in warns[0]
+
+
+def test_t50_fallback_board_on_the_month_back_day_counts(
+        world: dict[str, Path], tmp_path: Path) -> None:
+    """MINOR-1 — 같은 규칙은 D−1개월 **이하** 마지막 판이다. 대체 루트에 경계 날짜 08-25 아침판이
+    있으면 08-24 가 아니라 08-25 판을 쓴다(미만으로 고르면 하루 앞 판이 끼어든다)."""
+    ev, fb = _t50_roots(world, tmp_path)
+    _write_rank_run(fb, "2026-08-25", PRIMARY, {tick(0): 20, tick(1): 1})
+    res = build_daily(FRI, "evening", model_root=ev, fi_root=world["fi"], out_root=tmp_path / "o",
+                      trend_fallback_root=fb)
+    wb = load_workbook(res.path)
+    assert dict(_meta_pairs(wb))["1M 비교 판"] == f"2026-08-25 {T50_NOTE}"
+    assert _d1m(wb, (tick(0),)) == {tick(0): 19}
+
+
+def test_t50_fallback_programming_error_is_not_swallowed(
+        world: dict[str, Path], tmp_path: Path) -> None:
+    """MINOR-3 (나) — 삼키는 것은 입력 깨짐(DeliverError · OSError · ValueError · duckdb.Error)
+    뿐이다. manifest 가 JSON 은 맞지만 객체가 아니면(`[1, 2]` → reader 의 `meta["date"]`
+    TypeError) 코드가 다루지 못한 모양이라 그대로 전파한다(CLI 는 rc 3)."""
+    ev, fb = _t50_roots(world, tmp_path)
+    (fb / "_runs" / "20260824_morning.json").write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(TypeError):
+        build_daily(FRI, "evening", model_root=ev, fi_root=world["fi"], out_root=tmp_path / "o",
+                    trend_fallback_root=fb)
 
 
 def test_t50_morning_excel_ignores_the_fallback_root(world: dict[str, Path], daily,

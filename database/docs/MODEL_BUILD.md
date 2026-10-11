@@ -19,7 +19,7 @@
 ```bash
 python -m model build --date 20260928 --basis morning \
     [--fi-build latest|<factor_inputs build_id>] [--specs all|<spec_id,…>] \
-    [--primary scope@1.0] [--root data/model] [--fi-root data/factor_inputs] \
+    [--primary scope@2.0] [--root data/model] [--fi-root data/factor_inputs] \
     [--min-prices-on-d 2000] [--min-ranked 100] [--keep 60]
 ```
 
@@ -34,8 +34,9 @@ python -m model build --date 20260928 --basis morning \
   `data/factor_inputs/latest_<basis>.json` 의 판을 쓰고, 그 판의 date·basis 가 `--date`·`--basis` 와
   다르면 거절한다(어제 판으로 오늘 점수를 내지 않는다). id 를 주면 그 판의 8표 `_meta.json` 으로 같은
   검사를 한다.
-- `--specs` 기본 `all` = 레지스트리 전부(지금 `v2_percentrank@1.0` · `v3_zscore@1.0` · `v4_rank@0.1` ·
-  `v4_rank@0.2`). `--primary`(기본 `scope@1.0` — 10-05 v4_rank@0.1 에서 바꿈)는 레지스트리와 무관한 인계 설정이고, 선택한 spec 안에
+- `--specs` 기본 `all` = 레지스트리 전부(지금 `scope@1.0` · `scope@2.0` · `v2_percentrank@1.0` · `v3_zscore@1.0` ·
+  `v4_rank@0.1` · `v4_rank@0.2`). `--primary`(기본 `scope@2.0` — 10-05 v4_rank@0.1 → scope@1.0, 10-12 scope@1.0 → scope@2.0
+  추정치 유예 5거래일 N-47)는 레지스트리와 무관한 인계 설정이고, 선택한 spec 안에
   있어야 한다.
 - 일부 spec 만 돌려도 latest 가 그 판으로 바뀐다(판 manifest 의 `specs` 에 그 spec 만 있다). 운영 루트는
   `--specs all` 로만 돌리고, 과거 날짜·실험은 **별도 `--root`** 로 돌린다(factor_inputs 와 같은 규약).

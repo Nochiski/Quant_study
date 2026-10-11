@@ -55,10 +55,21 @@ if [ "$1" = "-c" ]; then
   esac
   exit 0
 fi
+probe() {  # probe <기다릴 표식> <보면 남길 표식> — 나란히 도는지 보는 탐침(최대 약 5초, 못 보면 그냥 끝)
+  for _ in $(seq 1 100); do
+    if [ -e "$QL_HOME/$1" ]; then touch "$QL_HOME/$2"; return 0; fi
+    sleep 0.05
+  done
+}
 if [ "$1" != "-m" ]; then
   echo "$1" >> "$QL_HOME/calls.txt"
-  if [ "$1" = "src/backfill_wise.py" ] && [ -n "${WISE_RUNLOG:-}" ]; then
-    "$REAL_PY" -c "$WISE_RUNLOG_PY" "${WISE_N_REQ:-10}" "${WISE_N_OK:-10}"
+  if [ "$1" = "src/backfill_wise.py" ]; then
+    echo "${*:2}" >> "$QL_HOME/wise_args.txt"
+    if [ -n "${PARALLEL_PROBE:-}" ]; then touch "$QL_HOME/wise_started"; probe dart_started wise_saw_dart; fi
+    for i in $(seq 1 "${WISE_PROGRESS:-0}"); do echo "  $i/2,400  요청 진행 줄(대역)"; done
+    if [ -n "${WISE_RUNLOG:-}" ]; then
+      "$REAL_PY" -c "$WISE_RUNLOG_PY" "${WISE_N_REQ:-10}" "${WISE_N_OK:-10}" "${*:2}"
+    fi
   fi
   var="RC_$(basename "$1" .py)"
   exit "${!var:-0}"
@@ -66,6 +77,9 @@ fi
 name="$2"
 case " ${*:3} " in *" --cover "*) name=kw_cover; echo "${*:3}" >> "$QL_HOME/kw_cover_args.txt" ;; esac
 echo "$name" >> "$QL_HOME/calls.txt"
+if [ "$name" = "daily.dart_daily" ] && [ -n "${PARALLEL_PROBE:-}" ]; then
+  touch "$QL_HOME/dart_started"; probe wise_started dart_saw_wise
+fi
 if [ "$2" = "daily.kw_daily" ] && [ -n "${REAL_KW:-}" ]; then
   PYTHONPATH="$FAKE_API:$REAL_SRC" exec "$REAL_PY" "$@"
 fi
@@ -829,8 +843,9 @@ os.makedirs("data/raw", exist_ok=True)
 con = sqlite3.connect("data/raw/wisereport.db")
 con.execute("CREATE TABLE IF NOT EXISTS ws_run_log (run_at TEXT NOT NULL, mode TEXT, n_stocks INTEGER, "
             "n_req INTEGER, n_ok INTEGER, n_bad INTEGER, bad_summary TEXT)")
+mode = "supplement" if "--run-tag supplement" in sys.argv[3] else "full"
 con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
-            (dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S"), "full", 1,
+            (dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S"), mode, 1,
              int(sys.argv[1]), int(sys.argv[2]), 0, "{}"))
 con.commit()
 """
@@ -842,7 +857,15 @@ class Supp(NamedTuple):
     notify: list[str]          # "등급|제목"
     body: str                  # notify 본문(셋째 인자) 전부
     runs: list[tuple[str, str, str | None]]   # 런 로그 supplement_wise (date, status, detail) — 오래된 것부터
-    log: str
+    log: str                   # 체인 로그 + 표준 출력·오류
+    supp_log: str              # 갈래 로그 logs/supplement_wise_<오늘>.log
+    wise_args: list[str]       # 대역 수집기가 받은 인자(실행마다 한 줄)
+    root: Path
+
+
+def _wise_once(calls: list[str]) -> bool:
+    """정규 단계 순서는 그대로이고 수집기가 한 번 — 갈래가 DART 와 나란히 돌아 calls 안 자리는 정해져 있지 않다."""
+    return [c for c in calls if c != _WISE] == _ALL and calls.count(_WISE) == 1
 
 
 def _run_supp(tmp_path: Path, *args: str, conf: str | None = "SUPPLEMENT_ENABLED=1\n",
@@ -880,7 +903,8 @@ def _run_supp(tmp_path: Path, *args: str, conf: str | None = "SUPPLEMENT_ENABLED
     runs = [(r.date, r.status, r.detail) for r in reversed(runlog.recent(_run_db(root),
                                                                          source="supplement_wise"))]
     return Supp(p.returncode, read("calls.txt").split(), read("notify.txt").splitlines(),
-                read("notify_body.txt"), runs, _chain_log(root) + p.stdout + p.stderr)
+                read("notify_body.txt"), runs, _chain_log(root) + p.stdout + p.stderr,
+                read(f"logs/supplement_wise_{today}.log"), read("wise_args.txt").splitlines(), root)
 
 
 def test_supplement_wise_runs_once_at_the_chain_end_on_the_first_holiday(tmp_path: Path) -> None:
@@ -889,11 +913,13 @@ def test_supplement_wise_runs_once_at_the_chain_end_on_the_first_holiday(tmp_pat
     보강 WISE 줄이 실린다."""
     r = _run_supp(tmp_path)
     assert r.rc == 0, r.log
-    assert r.calls == [*_ALL, _WISE]
+    assert _wise_once(r.calls), r.calls
+    assert r.wise_args == ["--mode full --run-tag supplement"]     # 런 로그 표식 — 건전성이 정규 수집으로 세지 않는다
     assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]
     assert r.notify == ["info|daily_ledger 완료"], r.notify
     assert "──── 주말 보강 WISE 종료 rc=0" in r.body and f"주말 보강 WISE D={_SAT_D}" in r.body
-    assert f"──── 주말 보강 WISE 시작 (D={_SAT_D} · 오늘 {_SAT})" in r.log
+    assert f"──── 주말 보강 WISE 시작 (D={_SAT_D} · 오늘 {_SAT} · DART 와 나란히" in r.log
+    assert "──── 주말 보강 WISE 수집 시작" in r.supp_log and "DONE_AT=" in r.supp_log
 
 
 @pytest.mark.parametrize("conf", [None, "SUPPLEMENT_ENABLED=0\n", "SUPPLEMENT_ENABLED=yes\n",
@@ -920,7 +946,7 @@ def test_supplement_wise_only_on_the_first_holiday_of_a_streak(tmp_path: Path, t
 def test_supplement_wise_on_a_weekday_holiday_targets_the_day_before(tmp_path: Path) -> None:
     """금요일 한글날(10-09)은 그날이 첫 휴일 — D = 10-08(목)."""
     r = _run_supp(tmp_path, today="20261009")
-    assert r.calls == [*_ALL, _WISE]
+    assert _wise_once(r.calls), r.calls
     assert r.runs == [("20261009", "ok", "D=20261008 wise_rc=0 fail_calls=0")]
 
 
@@ -937,7 +963,7 @@ def test_supplement_wise_failure_is_a_warn_and_never_a_ledger_failure(
     그대로다(crit 없음)."""
     r = _run_supp(tmp_path, wise_log=wise_log, n_ok=n_ok, **rcs)
     assert r.rc == 0, r.log
-    assert r.calls == [*_ALL, _WISE]
+    assert _wise_once(r.calls), r.calls
     assert [x[:2] for x in r.runs] == [(_SAT, status)]
     assert r.notify == [f"warn|{warn}", "info|daily_ledger 완료"], r.notify
     assert not any(n.startswith("crit|") for n in r.notify)
@@ -949,7 +975,7 @@ def test_supplement_wise_already_ok_today_is_not_fetched_again(tmp_path: Path) -
     assert r.calls == _ALL and [x[1] for x in r.runs] == ["ok"], r.log
     assert "주말 보강 WISE 이미 받음" in r.log
     r2 = _run_supp(tmp_path / "retry", seed=[(_SAT, "failed")])
-    assert r2.calls == [*_ALL, _WISE] and [x[1] for x in r2.runs] == ["failed", "ok"]
+    assert _wise_once(r2.calls) and [x[1] for x in r2.runs] == ["failed", "ok"]
 
 
 def test_supplement_wise_without_a_calendar_is_a_warn(tmp_path: Path) -> None:
@@ -972,6 +998,41 @@ def test_supplement_wise_ignores_warning_lines_on_stderr(tmp_path: Path) -> None
     읽는다 — 경고 줄이 D 나 실패 콜 수에 섞이면 엉뚱한 D 로 받거나 '완주 기록 없음'으로 떨어진다."""
     r = _run_supp(tmp_path, STDERR_NOISE="1")
     assert r.rc == 0, r.log
-    assert r.calls == [*_ALL, _WISE]
+    assert _wise_once(r.calls), r.calls
     assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]
     assert r.notify == ["info|daily_ledger 완료"]
+
+
+
+def test_supplement_wise_runs_alongside_dart(tmp_path: Path) -> None:
+    """리뷰 I-3 — 보강 WISE 는 DART 와 나란한 갈래다(다른 원장). 체인 끝에 줄 세우면 원장 락을 그만큼 더 쥐어 08:10
+    확정 빌드가 늦어진다(평소 6~7분, WISE 가 느리면 몇 시간 — 원장 락 대기에는 한도가 없다). 두 대역이 서로의 시작을
+    본다(줄 세우면 DART 가 먼저 끝나 WISE 를 못 본다)."""
+    r = _run_supp(tmp_path, PARALLEL_PROBE="1")
+    assert r.rc == 0, r.log
+    assert (r.root / "dart_saw_wise").exists() and (r.root / "wise_saw_dart").exists()
+    assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]
+
+
+def test_supplement_wise_already_collected_d_still_runs_and_waits(tmp_path: Path) -> None:
+    """D 를 이미 받은 날(손 재실행)엔 겹칠 단계가 없다 — 띄우고 체인 끝에서 기다린다(결과는 같다)."""
+    r = _run_supp(tmp_path, recent=0)
+    assert r.rc == 0, r.log
+    assert r.calls == [_CAL, "daily_wise", _WISE]
+    assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]
+    assert r.notify == ["info|daily_ledger 건너뜀(D=20260929 이미 수집 완료)"]
+
+
+def test_holiday_summary_keeps_source_failures_and_wise_progress_stays_in_its_log(
+        tmp_path: Path) -> None:
+    """리뷰 I-4 — 휴일 수집 요약(tail 창)에서 KIS·DART 실패 줄이 수집기 진행 줄에 밀려나지 않는다. 진행 줄은 갈래 로그
+    logs/supplement_wise_<오늘>.log 에만 가고, 체인 로그·요약엔 시작·종료와 결과 한 줄만 남는다."""
+    r = _run_supp(tmp_path, WISE_PROGRESS="30", daily_kis_daily=2, daily_dart_daily=2)
+    assert r.rc == 2, r.log
+    crit = [n for n in r.notify if n.startswith("crit|")]
+    assert crit == ["crit|daily_ledger 실패: kis credit(rc=2), dart(rc=2)"]
+    body = r.body
+    assert "──── kis credit 종료 rc=2" in body and "──── dart 종료 rc=2" in body
+    assert "──── 주말 보강 WISE 종료 rc=0" in body and "요청 진행 줄" not in body
+    assert "요청 진행 줄" not in r.log and r.supp_log.count("요청 진행 줄(대역)") == 30
+    assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]

@@ -130,7 +130,8 @@ FI_UNIVERSE = TableContract(
      _c("audit_adverse", "BOOLEAN", note="최근 연간 감사의견 한정·부적정·의견거절"),
      _c("filing_late", "BOOLEAN", note="정기보고서 법정기한 지연 제출(최근 1건)"),
      _c("eligible", "BOOLEAN",
-        note="기본 UniverseRule()(v3 미러) 통과 여부. 규칙이 다른 spec 은 엔진이 속성 열로 재판정"),
+        note="기본 UniverseRule()(v3 미러)에 추정치 유예 창 FI_COVERAGE_GRACE_MAX(N-47)를 건 판정 "
+             "통과 여부. 규칙이 다른 spec(유예가 더 짧은 spec 포함)은 엔진이 속성 열로 재판정"),
      _c("exclude_reason", "VARCHAR", note="eligible=False 사유(표시용)")),
     window="D 한 날",
     source="equity universe_daily · security · sector_snapshot(WICS) · consensus 신선도(T2.11)",
@@ -248,6 +249,13 @@ class Gate:
     value: float | None = None
 
 
+# factor_inputs 의 추정치 유예 창(거래일) — fi 는 이 창으로 fresh·grace·lapsed 를 판정해
+# eligible 을 정하고(나이 ≤ 이 값이면 grace), 엔진이 spec 의 `coverage_grace_days` 로 다시
+# 자른다. 2026-10-11 사용자 결정 N-47(주 모델 유예 5거래일 = scope_v2.0)로 0 → 5. spec 유예는
+# 이 창보다 길 수 없다(엔진은 fi 가 이미 뺀 종목을 되살리지 못한다 — `ModelSpec.validate`).
+FI_COVERAGE_GRACE_MAX = 5
+
+
 @dataclass(frozen=True)
 class UniverseRule:
     require_estimates: bool = True                  # D-10
@@ -255,8 +263,10 @@ class UniverseRule:
     markets: tuple[str, ...] = ("KOSPI", "KOSDAQ")
     min_market_cap: float | None = None              # 억원
     # 추정치 유예(거래일). 0 = 최신 WISE 스냅샷에 없으면 바로 제외(2026-10-05 사용자 결정
-    # N-14 — 이탈은 WISE 의 추정치 3개월 만료라 유예하면 만료된 추정치로 채점한다).
-    # v4 TOML 은 5 를 명시한다.
+    # N-14 — 이탈은 WISE 의 추정치 3개월 만료라 유예하면 만료된 추정치로 채점한다). 기본 0 은 원본
+    # 미러(v3_zscore@1.0·v2_percentrank@1.0)와 scope_v1.0 의 정의다. scope_v2.0 · v4 TOML 은 5 를
+    # 명시한다(N-47). fi 는 유예 창 FI_COVERAGE_GRACE_MAX 로 판정하고, 엔진이 이 값으로 다시 자른다
+    # (`engines._common.estimates_lapsed`).
     coverage_grace_days: int = 0
     min_adv20: float | None = None                   # 억원. D-13 적격성(v4 = 10)
     # 추정기관수(fi_universe.n_analysts — 최근 3개월 투자의견을 낸 증권사 수) 하한. 0 은 원천이
@@ -331,6 +341,12 @@ class ModelSpec:
             errs.append("output.top_n·max_per_sector 는 양수")
         if self.universe.coverage_grace_days < 0:
             errs.append("universe.coverage_grace_days 는 0 이상")
+        # spec 유예 상한은 fi 유예 창 FI_COVERAGE_GRACE_MAX 에 묶여 있다 — 유예를 더 길게 하려면 그
+        # 상수(fi 판정 창)와 spec 을 함께 올린다(엔진은 fi 가 뺀 종목을 되살리지 못한다, N-47)
+        if self.universe.coverage_grace_days > FI_COVERAGE_GRACE_MAX:
+            errs.append(f"universe.coverage_grace_days {self.universe.coverage_grace_days} > "
+                        f"fi 유예 창 {FI_COVERAGE_GRACE_MAX} — fi 가 먼저 빼므로 엔진이 "
+                        "넓힐 수 없다")
         bad_flags = set(self.universe.exclude) - set(ELIGIBILITY_FLAGS)
         if bad_flags:
             errs.append(f"universe.exclude {sorted(bad_flags)} ∉ {ELIGIBILITY_FLAGS}")
@@ -454,7 +470,7 @@ def score_columns(spec: ModelSpec) -> tuple[str, ...]:
 
 __all__ = [
     "ALL_ENGINES", "DTYPES", "ELIGIBILITY_FLAGS", "FI_ADJ_PRICES",
-    "FI_CONSENSUS", "FI_CONSENSUS_ANNUAL",
+    "FI_CONSENSUS", "FI_CONSENSUS_ANNUAL", "FI_COVERAGE_GRACE_MAX",
     "FI_CREDIT", "FI_FIN_SUMMARY",
     "FI_FLOWS", "FI_PRICES", "FI_TABLES", "FI_UNIVERSE", "FLOW_SUBJECTS", "GATE_RULES",
     "INDICATOR_COLUMNS", "ROLES", "SCORE_BASE_COLUMNS", "SECTOR_LEVELS", "UNITS",

@@ -152,8 +152,13 @@ python -m daily.board_compare --date <T> --evening-root data/model_db --research
   종가 = 정규장 종가라 미설명). 거래량·수급(주체별 판 통계 상한)·16:00 컷오프(stage)·수집 대상 밖·
   T-6(연구 판 흔적)·신용 T 실입수는 각자 증거를 본다. 맞는 범주가 없으면 미설명이다.
 - 모델은 spec 마다 종합점수 Spearman · 엑셀 후보 겹침 · 점수 열 |Δ| 상위 종목과 그 종목의 fi 범주.
+  한 판에만 있는 점수 행은 적격성 차이(종목 집합·eligible·시총·T 가격)나, spec 유예로 다시 잰 추정치 소멸
+  판정(엔진과 같은 `estimates_lapsed`)이 두 판에서 갈린 경우로만 설명한다(N-47 — fi 유예 창 5 안이라 두 판
+  모두 eligible 이고 신선도만 다른 종목: T 에 추정치가 사라진 종목은 유예 0 spec 이 연구 판에서만, 복귀한
+  종목은 장 마감 판에서만 뺀다). 신선도 차이만 있고 그 spec 의 소멸 판정이 같으면 설명하지 않는다.
 - Spearman 하한은 spec 별 표(T-47, `SPEARMAN_MIN_BY_SPEC`): scope@1.0 0.92 · v3_zscore@1.0 0.91 ·
-  v2_percentrank@1.0 0.96 · v4_rank@0.1 0.93 · v4_rank@0.2 0.94, 표에 없는 spec 은 0.975(보수 — 자기 재생 분포를
+  v2_percentrank@1.0 0.96 · v4_rank@0.1 0.93 · v4_rank@0.2 0.94 · scope@2.0 0.92(N-47 — 재생 분포가 없어 scope@1.0
+  값 그대로), 표에 없는 spec 은 0.975(보수 — 자기 재생 분포를
   등록할 때까지). 근거는 P5 장 마감 재생 24거래일(09-02~10-08) 최저 − 0.03 내림이고, 여유 0.03 은 재생이 못 보는
   정규장 대 21:05 수급 차이 몫이다 — 그림자 3거래일 값으로 다시 본다. `--spearman-min X` 는 전 spec 을 X 로
   덮어쓴다(0 = 기록형). 적용한 하한은 JSON `thresholds.spearman_min` 에 spec 별로 실린다.
@@ -304,10 +309,13 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | `lapsed` | 나이 > G | false → 유니버스 제외, `n_lapsed_dropped` | 없음(추정·WISE 재무 NULL) |
 | `none` | 신선일이 한 번도 없다 | false | 없음 |
 
-- G = `--grace-days`(기본 `UniverseRule().coverage_grace_days` = **0** — 2026-10-05 사용자 결정 N-14.
-  WISE 는 증권사 추정치를 약 3개월(91~92일)만 쓰므로 이탈은 만료이고, 유예하면 만료 추정치로 채점한다.
-  근거 `DECISIONS.md` U1 원인). 복귀(fresh 재진입)는
-  마지막 신선일이 D\* 로 바뀌는 것이라 나이가 저절로 0 이 된다.
+- G = `--grace-days`(기본 유예 창 `FI_COVERAGE_GRACE_MAX` = **5** — 2026-10-11 사용자 결정 N-47, fi1.9.0.
+  그 전 기본은 0(N-14 — WISE 는 증권사 추정치를 약 3개월(91~92일)만 쓰므로 이탈은 만료라는 근거, `DECISIONS.md`
+  U1 원인)이었다). spec 마다 다른 유예는 엔진이 다시 자른다: fi eligible 종목 중 grace 이고 나이 >
+  `spec.universe.coverage_grace_days` 면 뺀다(`model/engines/_common.py` `estimates_lapsed` — v3·v2·v4 엔진과
+  MG1 이 같이 쓴다). 원본 미러(v3_zscore@1.0 · v2_percentrank@1.0)·scope_v1.0 은 0, scope_v2.0 · v4 는 5.
+  나이 0 grace(휴장일 수집 — 마지막 신선일과 D\* 사이에 거래일이 없다)는 유예 0 spec 에도 남는다. 복귀(fresh
+  재진입)는 마지막 신선일이 D\* 로 바뀌는 것이라 나이가 저절로 0 이 된다.
 - `n_lapsed_dropped` = 다른 조건은 다 통과했는데 lapsed 라 빠진 종목 수(판 manifest 최상위와
   `coverage`).
 - compat 그림자에는 적용하지 않는다(v3 미러). 그래서 compat 추정치 유니버스와 이 층의 eligible 은

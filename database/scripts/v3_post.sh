@@ -47,6 +47,8 @@
 #     부른다. 다르면 부르지 않고 warn(플랜 `2026-09-24-v3-merge.md` 위험표 — 자정 넘김).
 #   창 밖 adj_close NULL(QL-E): 게이트 줄의 `rebase_null=N` 이 0 이 아니면 warn 한 줄(정지 아님) — compat 이 창 안
 #     사건 종목의 창 밖 행을 다시 맞출 때 equity 행이 없는 날은 adj_close 를 NULL 로 둔다(P1).
+#   점수 앞 주 모델 대신(N-47 · Q-E1): 이번 실행의 compat 요약 줄에 `score_fallback=` 이 있으면 warn 한 줄(정지 아님)
+#     — 주 모델을 scope@2.0 으로 바꾸기 전에 지은 날은 그날 모델 판에 scope@2.0 이 없어 scope@1.0 점수로 채운다.
 #   rc: 0 완료 · 2 반영 실패(crit — COMMIT 전이면 v3 본 파일 무변경) · 3 락 실패(warn) · 4 홈 이동 실패 ·
 #       5 인자 오류(warn — 스테이징 경로가 본 파일과 같은 파일, 아침 + post 명령, --no-scores + 아침,
 #         --no-scores + post 명령, --full 없는 --window-days 포함) ·
@@ -162,6 +164,9 @@ fi
 # COMMIT 표식(CF)은 `compat apply` 가 COMMIT 직후 만든다 — 실패 알림의 '무변경' 을 사실일 때만 쓴다(NIT 2).
 RCF=$(mktemp)
 CF="$RCF.commit"
+# 이번 실행 줄만 보려고 시작 줄 수를 적어 둔다(로그는 같은 D·basis 재실행이 이어 쓴다)
+LOG_START=0
+[ -f "$LOG" ] && LOG_START=$(wc -l < "$LOG")
 {
 echo "════ [$(kst)] v3_post 시작 date=$D basis=$BASIS scores=$([ -n "$NOSCORES" ] && echo no || echo yes) mode=$MODE v3_db=$V3_DB staging=$STAGING ════"
 RC=0; STEP=""; TABLES=""
@@ -217,6 +222,11 @@ if [ "$RC" = 0 ] || [ "$RC" = 6 ]; then        # 이번 실행의 게이트 줄(
   if [ "${RB_NULL:-0}" -gt 0 ]; then
     scripts/notify.sh warn "v3_post $D $BASIS 창 밖 adj_close NULL ${RB_NULL}행" \
       "창 안 사건 종목의 창 밖 행 중 equity 행이 없는 날(QL-E, P1) — 정지 아님, 대상 행 확인 | 로그 $LOG"
+  fi
+  SC_FB=$(tail -n +$((LOG_START + 1)) "$LOG" | grep -oE "score_fallback=[^ ]+" | tail -1 | cut -d= -f2-)
+  if [ -n "$SC_FB" ]; then
+    scripts/notify.sh warn "v3_post $D $BASIS 점수 앞 주 모델로 대신" \
+      "$SC_FB — 그날 모델 판에 주 모델 spec 이 없다(N-47 · Q-E1, 바꾸기 전에 지은 날) — 정지 아님 | 로그 $LOG"
   fi
 fi
 SUMMARY=$(grep -E "^compat |compat 실패|Error|Traceback" "$LOG" | tail -6 | tr '\n' ' ' | cut -c1-900)

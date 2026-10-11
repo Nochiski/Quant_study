@@ -12,6 +12,9 @@
 #   중복 발송: deliver 가 발송 장부(data/deliver/sent_model_daily.jsonl)를 보고 이미 보낸 D 는 건너뛴다
 #         (rc 0). 같은 날 다시 보내려면 --resend(캡션에 '정정 n'·판 id·생성 시각).
 #   빌드 락: 세 단계 전체를 stage·equity 와 같은 빌드 락 안에서 돈다 — 아래 락 절 주석.
+#   fi 게이트 경고: fi 가 돌았으면 판 manifest(data/factor_inputs/_runs/<D>_morning.json)의 metrics.warn(FG-fresh 유예
+#         종목 몰림 N-47 등)을 읽어 notify warn 한 줄(기록만). 판정·rc 는 그대로다(장 마감 체인과 같은 읽기 —
+#         postclose_conf.sh fi_gate_warns).
 #   rc: 0 완료 · 실패하면 그 단계의 rc(deliver: 1 발송 실패 · 2 입력 오류 · 3 예상 밖 예외) · 2 인자 오류
 #       · 3 빌드 락 열기·대기 실패 · 4 홈(~/quant-ledger) 이동 실패
 #       · 5 원천 전환 뒤 장 마감 발송 장부 판정 불가(세 단계는 돌았고 엑셀은 보내지 않았다)
@@ -184,6 +187,15 @@ step "factor_inputs" $PY -m factor_inputs build --date "$D" --basis morning \
   && step "model" $PY -m model build --date "$D" --basis morning \
   && step "deliver" $PY -m deliver model-daily --date "$D" --basis morning $SEND_ARG $RESEND
 RC=$?
+# fi 게이트 경고 — 판정은 통과지만 사람이 볼 것(metrics.warn). fi 가 실패했으면 그 crit 이 따로 나간다
+if [[ "$FAILED" != factor_inputs* ]]; then
+  FI_WARNS=$(fi_gate_warns "data/factor_inputs/_runs/${D}_morning.json")
+  if [ -n "$FI_WARNS" ]; then
+    echo "fi 게이트 경고 — $(printf '%s\n' "$FI_WARNS" | cut -f1 | paste -sd, -) D=$D"
+    scripts/notify.sh warn "모델 단계 fi 게이트 경고" \
+      "D=$D basis=morning | $(printf '%s\n' "$FI_WARNS" | tr '\t\n' ' ;')| 판정은 그대로 — 사람이 본다"
+  fi
+fi
 if [ "$RC" -ne 0 ]; then
   if [[ "$FAILED" == deliver* ]] && [ -n "$SEND_ARG" ]; then
     # deliver 실패는 '발송 0' 이라 단정할 수 없다 — rc 3 은 발송 성공 뒤 장부 쓰기 실패일 수 있다(B-58)

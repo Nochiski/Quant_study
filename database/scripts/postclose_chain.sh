@@ -236,25 +236,10 @@ PY
 fi_cmd() {
   $PY -m factor_inputs build --date "$D" --basis evening --root "$MDB/factor_inputs" \
      --builds-from "$HIST/${DPREV}_morning.json" --calendar-dir data/calendar || return $?
-  # 판정은 통과지만 사람이 봐야 하는 게이트 경고(FG5 metrics.warn — T-37)를 판 manifest 에서 읽는다(fi 코드는 그대로)
+  # 판정은 통과지만 사람이 봐야 하는 게이트 경고(metrics.warn — FG5 T-37 · FG-fresh N-47)를 판 manifest 에서 읽는다
+  # (읽기는 postclose_conf.sh fi_gate_warns 한 곳 — 아침 model_daily 와 같다)
   local warns
-  warns=$($PY - "$MDB/factor_inputs/_runs/${D}_evening.json" <<'PY'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as f:
-        run = json.load(f)
-    gates = run["gates"]
-except (OSError, ValueError, KeyError, TypeError) as e:
-    print(f"manifest_unreadable\t판 manifest {sys.argv[1]} 를 읽지 못해 게이트 경고를 확인하지 못했다"
-          f"({type(e).__name__})")
-    raise SystemExit(0) from None
-for g in gates:
-    if isinstance(g, dict) and isinstance(g.get("metrics"), dict) and g["metrics"].get("warn") is True:
-        print(f"{g.get('name')}\t{str(g.get('detail'))[:300]}")
-PY
-)
+  warns=$(fi_gate_warns "$MDB/factor_inputs/_runs/${D}_evening.json")
   if [ -n "$warns" ]; then
     STEP_NOTE="warn:$(printf '%s\n' "$warns" | cut -f1 | paste -sd, -)"
     CHAIN_WARN="${CHAIN_WARN:+$CHAIN_WARN; }fi $(printf '%s\n' "$warns" | tr '\t\n' ' ;')"

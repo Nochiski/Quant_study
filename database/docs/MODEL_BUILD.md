@@ -19,7 +19,7 @@
 ```bash
 python -m model build --date 20260928 --basis morning \
     [--fi-build latest|<factor_inputs build_id>] [--specs all|<spec_id,…>] \
-    [--primary scope@1.0] [--root data/model] [--fi-root data/factor_inputs] \
+    [--primary scope@2.0] [--root data/model] [--fi-root data/factor_inputs] \
     [--min-prices-on-d 2000] [--min-ranked 100] [--keep 60]
 ```
 
@@ -27,16 +27,22 @@ python -m model build --date 20260928 --basis morning \
 |---|---|
 | 0 | 판 커밋 · `latest_<basis>.json` 갱신(MG5 warn 이 있어도 0 · 비교 모델이 FAIL·예외로 빠져도 0 — `excluded_specs`) |
 | 1 | 주 모델 게이트 FAIL — 아무 spec 도 올리지 않는다(`_failed/<build_id>.json`, MANIFEST·latest 는 직전 성공 판 유지) |
-| 2 | 입력·인자 오류(factor_inputs 판 없음 · 판의 date·basis 가 요청과 다름 · 모르는 spec · `--primary` 가 선택 밖 · 날짜 형식) 또는 주 모델·입력 단계 예외 |
+| 2 | 입력·인자 오류(factor_inputs 판 없음 · 판의 date·basis 가 요청과 다름 · 모르는 spec · `--primary` 가 선택 밖 · 날짜 형식 · 주 모델 추정치 유예 > fi 판 유예 창) 또는 주 모델·입력 단계 예외 |
 
 - 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
 - `--date` 는 factor_inputs 판의 기준일 D 다. `--fi-build latest`(기본)는
   `data/factor_inputs/latest_<basis>.json` 의 판을 쓰고, 그 판의 date·basis 가 `--date`·`--basis` 와
   다르면 거절한다(어제 판으로 오늘 점수를 내지 않는다). id 를 주면 그 판의 8표 `_meta.json` 으로 같은
   검사를 한다.
-- `--specs` 기본 `all` = 레지스트리 전부(지금 `v2_percentrank@1.0` · `v3_zscore@1.0` · `v4_rank@0.1` ·
-  `v4_rank@0.2`). `--primary`(기본 `scope@1.0` — 10-05 v4_rank@0.1 에서 바꿈)는 레지스트리와 무관한 인계 설정이고, 선택한 spec 안에
+- `--specs` 기본 `all` = 레지스트리 전부(지금 `scope@1.0` · `scope@2.0` · `v2_percentrank@1.0` · `v3_zscore@1.0` ·
+  `v4_rank@0.1` · `v4_rank@0.2`). `--primary`(기본 `scope@2.0` — 10-05 v4_rank@0.1 → scope@1.0, 10-12 scope@1.0 → scope@2.0
+  추정치 유예 5거래일 N-47)는 레지스트리와 무관한 인계 설정이고, 선택한 spec 안에
   있어야 한다.
+- **추정치 유예 가드(N-47, mb1.7.0)**: fi 판의 유예 창(판 manifest `universe_rule.coverage_grace_days` — 그 판이
+  아니면 `fi_universe/v=<id>/_meta.json` 게이트 FG-fresh `grace_days`)보다 spec 유예(`universe.coverage_grace_days`)가
+  길면 엔진이 넓힐 수 없어 그 spec 이 조용히 짧은 유예로 채점된다. 그래서 주 모델이면 rc 2(판 없음), 비교 모델이면
+  엔진을 돌리지 않고 `excluded_specs` 에 `{error: "추정치 유예 부족 — …"}` 로 뺀다. 창을 알 수 없는 판(손으로 만든 판)은
+  로그 warn 만 남기고 대조를 건너뛴다.
 - 일부 spec 만 돌려도 latest 가 그 판으로 바뀐다(판 manifest 의 `specs` 에 그 spec 만 있다). 운영 루트는
   `--specs all` 로만 돌리고, 과거 날짜·실험은 **별도 `--root`** 로 돌린다(factor_inputs 와 같은 규약).
 - **언제 돌리나**: 아침 체인에서 factor_inputs 바로 뒤(M3 에서 `build_chain.sh` 에 잇는다 —
@@ -49,6 +55,20 @@ python -m model build --date 20260928 --basis morning \
 cd ~/quant-ledger && QL_HOME=~/quant-ledger PYTHONPATH=~/quant-ledger/src \
     .venv/bin/python -m model build --date 20260928 --basis morning
 ```
+
+### E2 배포 직후(추정치 유예 5거래일 · scope_v2.0 — N-47) 알고 있을 것
+
+- **v4 비교 모델 점수가 바뀐다**: `v4_rank@0.1`·`@0.2` TOML 의 유예 5거래일이 처음으로 실제로 걸린다.
+  전에는 fi 가 유예 0 으로 먼저 걸러 TOML 값이 죽은 설정이었다(10-06 감사 D-03 — 이것으로 해소). 그날부터
+  v4 유니버스에 유예 1~5 종목이 들어와 점수·순위가 움직인다(정상 — 결함 아님).
+- **두 판 대조(`daily.board_compare`) 첫날 rc 2(알려진 일)**: 배포 뒤 첫 장 마감 판 T 의 대조는 연구 판 D'
+  가 배포 전 판(fi1.8.0 · mb1.6.0)이고 장 마감 판 T·연구 판 T 가 새 판(fi1.9.0 · mb1.7.0)이라 '규칙 판본이
+  다르다'(rules_version)로 rc 2(`verdict: error`)다. 다음 T 부터 세 판이 같은 판본이라 정상이다. 그날은
+  알려진 일로 기록하고 되돌리기 판단(`daily.window_judge` 의 대조 항목)의 근거로 쓰지 않는다.
+- **배포 전에 지은 날의 모델 판 다시 짓기**: 그날 fi 판이 옛 판(유예 창 0)이면 주 모델 scope@2.0(유예 5)이
+  유예 가드에 걸려 rc 2 다. fi 를 새 코드로 다시 지은 뒤(창 5) 모델을 짓거나, 그날 판으로 꼭 다시 지어야 하면
+  `--primary scope@1.0` 으로 짓는다(scope@2.0 · v4 는 `excluded_specs` 로 빠진다). compat 이 그런 날을 다시
+  내보내면 앞 주 모델 scope@1.0 점수로 채운다(`docs/COMPAT_LAYER.md` — warn 한 줄).
 
 ## 3. 판 규약
 
@@ -109,7 +129,7 @@ data/model/
 | `fi_build_id` | 읽은 factor_inputs 판 id |
 | `generated_at` | UTC(`…Z`) |
 | `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(실행 예외 — 엔진 실행·재실행·직전 판 읽기·게이트 평가 — 를 낸 비교 모델은 `{error}` 하나). 엔진 메타(`EngineResult.meta`)는 같은 자리에 얹는다 — scope 의 `adj_jump_masked: {n_tickers, r1m, r3m, r6m, r9m, r12m, std_20d}` = 창 안 제한폭 초과 미해결 수정주가로 비운 종목 수·지표별 칸 수(규칙이 없었으면 값이 섰던 칸만, 0 도 싣는다 — T-9 · H1-4, mb1.6.0). GH1-c 의 '매 모델 빌드 반사실 대조 [차단]'(같은 fi 로 규칙 있음·없음을 돌려 판 공개를 막는 게이트)은 이 PR 범위 밖 — 후속이다 |
-| `excluded_specs` | 게이트 FAIL·실행 예외(엔진 실행·재실행·직전 판 읽기·게이트 평가)로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`. 사유는 첫 줄만, model 루트 기준 상대 경로로 바꾼 뒤 500자에서 자른다(D-01, traceback 은 로컬 로그 경고에만). 없으면 `{}`(gate_failed 판도 `{}`) |
+| `excluded_specs` | 게이트 FAIL·실행 예외(엔진 실행·재실행·직전 판 읽기·게이트 평가)·추정치 유예 부족(N-47)으로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`. 사유는 첫 줄만, model 루트 기준 상대 경로로 바꾼 뒤 500자에서 자른다(D-01, traceback 은 로컬 로그 경고에만). 없으면 `{}`(gate_failed 판도 `{}`) |
 | `primary_spec` | 인계 대표 모델(`--primary`) |
 | `elapsed_s` | 적재·엔진·게이트 소요(초) |
 

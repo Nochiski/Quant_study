@@ -62,7 +62,15 @@ from daily import calendar as daily_calendar
 from model.compare import TABLES as SCORE_TOTAL_COLUMN
 from model.compare import spearman
 
-from .mappings import BY_TABLE, DATE_REPLACED, EQUITY, MAPPINGS, V3_OVERWRITE_ROWS, _k_chain
+from .mappings import (
+    BY_TABLE,
+    DATE_REPLACED,
+    EQUITY,
+    MAPPINGS,
+    V3_OVERWRITE_ROWS,
+    _k_chain,
+    score_spec_used,
+)
 from .quant_db import META_TABLE, CompatError, _parquet_source, _reference_schema
 from .t_rows import SOURCE_KIWOOM_2105
 from .v3_post import SCORE_TABLES, TABLES, _meta_rows, _scope, snapshot
@@ -620,6 +628,23 @@ def _compare_generic(con: sqlite3.Connection, duck: duckdb.DuckDBPyConnection, c
 
 
 # ── 점수 두 표 ────────────────────────────────────────────────────────────────
+def _score_spec(con: sqlite3.Connection, d_iso: str, table: str) -> str:
+    """그날 그 점수 표를 실제로 채운 spec — 대조 대상(main)의 그날 마지막 ok 반영 기록 `model_builds` 의
+    키(앞 주 모델로 대신했으면 그 spec — N-47 · Q-E1). 기록이 없으면 선언 spec."""
+    spec = BY_TABLE[table].sources[0]
+    recs = []
+    for r in _meta_rows(con):
+        if r.get("date") != d_iso or r.get("status") != "ok":
+            continue
+        try:
+            written, builds = json.loads(r["tables"] or "{}"), json.loads(r.get("model_builds") or "{}")
+        except (TypeError, ValueError):
+            continue
+        if table in written:
+            recs.append((str(r["exported_at"]), builds))
+    return score_spec_used(spec, max(recs, key=lambda x: x[0])[1]) if recs else spec
+
+
 def _compare_scores(con: sqlite3.Connection, ctx: Context, tally: Tally, t: TableTally,
                     kinds: Mapping[str, str], min_spearman: float) -> dict[str, object]:
     """그날 행: 한쪽에만 있음 = 유니버스, 공통 종목 값 차이 = 순위로 대조(Spearman), val_ev_ebitda NULL."""
@@ -662,7 +687,7 @@ def _compare_scores(con: sqlite3.Connection, ctx: Context, tally: Tally, t: Tabl
                     "columns": {total: [rho, min_spearman], "n_common": [len(common), None]}}, (total,))
     compat_only = sorted(set(sides["main"]) - set(sides["v3"]))
     v3_only = sorted(set(sides["v3"]) - set(sides["main"]))
-    return {"spec": BY_TABLE[t.table].sources[0], "total_column": total, "n_common": len(common),
+    return {"spec": _score_spec(con, ctx.d_iso, t.table), "total_column": total, "n_common": len(common),
             "n_compat_only": len(compat_only), "n_v3_only": len(v3_only),
             "compat_only": compat_only, "v3_only": v3_only,          # 종목 집합 차이(T-17 — 그날 수백 종목)
             "spearman": rho, "min_spearman": min_spearman, "judged": judged, "ok": ok}

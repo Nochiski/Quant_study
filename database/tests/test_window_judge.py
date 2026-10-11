@@ -26,7 +26,7 @@ NOTIFY_SH = Path(__file__).resolve().parents[1] / "scripts" / "notify.sh"
 HOLIDAYS_2026 = ("20261009",)
 # spec 별 Spearman 하한 — 정본 cutover-track §2 T-47 등록값(바꾸면 정본·`wj.COMPARE_SPEARMAN_MIN_BY_SPEC` 과 함께)
 T47_FLOORS = {"scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
-              "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
+              "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94, "scope@2.0": 0.92}
 
 
 # ── 픽스처 조립 ────────────────────────────────────────────────────────────

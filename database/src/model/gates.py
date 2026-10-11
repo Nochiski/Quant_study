@@ -10,7 +10,8 @@
                  (MG4 는 입력 판정이라 돈다).
   MG1 커버리지 — v3·v2: 그 spec 자신의 유니버스 규칙으로 센 종목 중 점수가 나온 비율 ≥ 0.95
                  (v3 = eligible ∧ D 가격 행 ∧ 시총 ≥ min_market_cap ∧ 추정기관수 ≥ min_analysts
-                 (NULL 은 통과), v2 = eligible ∧ 시총 > 0).
+                 (NULL 은 통과), v2 = eligible ∧ 시총 > 0. 둘 다 spec 추정치 유예를 넘은 grace
+                 종목은 뺀다 — 엔진과 같은 `engines._common.estimates_lapsed`, N-47).
                  그 밖(v4 계열): 순위가 매겨진 종목 ≥ `min_ranked`(기본 100).
   MG2 결정성   — 같은 FactorInputs 두 번 실행의 점수·지표 직렬화 sha256 이 같다.
   MG3 온전성   — NaN·inf 없음 · 종목 중복 없음 · 순위 = 순위 있는 행의 1…n · v3·v2 는 전 행 순위 ·
@@ -44,6 +45,7 @@ from model.contracts import (
     ModelSpec,
     score_columns,
 )
+from model.engines._common import estimates_lapsed
 
 GATE_ORDER = ("MG0", "MG1", "MG2", "MG3", "MG4", "MG5")
 COVERAGE_MIN = 0.95          # MG1 v3·v2 — 자기 유니버스 대비 점수 비율 하한
@@ -225,7 +227,8 @@ def mg0_schema(ctx: GateContext) -> GateResult:
 # ── MG1 ──────────────────────────────────────────────────────────────────────
 def _spec_universe(ctx: GateContext) -> set[str] | None:
     """v3·v2 가 자기 규칙으로 점수를 내야 하는 종목. 규칙이 엔진 안에만 있는 v4 계열은 None."""
-    uni = [r for r in ctx.inputs.rows("fi_universe") if r["eligible"]]
+    uni = [r for r in ctx.inputs.rows("fi_universe")
+           if r["eligible"] and not estimates_lapsed(ctx.spec.universe, r)]
     if ctx.spec.engine == "v2_percentrank":
         return {str(r["ticker"]) for r in uni if (_num(r["market_cap"]) or 0) > 0}
     if ctx.spec.engine == "v3_zscore":

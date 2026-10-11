@@ -14,7 +14,9 @@ KRX 단계의 sqlite3 는 PATH 대역('D 수집 완료')이다.
 원천 전환 스위치(PR-9 · T-7)는 임시 루트의 `config/postclose_chain.env` 로 켜고, 판정 조각
 `scripts/postclose_conf.sh` 는 진짜를 복사한다. 장 마감 발송 판정(heredoc `python -`)은 진짜 python·진짜 `src/` 로
 넘긴다 — 장부는 임시 루트의 `data/model_db/deliver/sent_model_daily.jsonl`, 런 로그는 `data/raw/daily_run.db`
-(`daily.runlog` 로 심는다)다.
+(`daily.runlog` 로 심는다)다. fi 게이트 경고 읽기(`postclose_conf.sh` fi_gate_warns — 역시 heredoc)는 임시 루트의 fi 판
+manifest `data/factor_inputs/_runs/<D>_morning.json` 을 읽는다 — 대역 fi 는 판을 쓰지 않으므로 `_root` 가 경고 없는
+기록을 기본으로 둔다(`fi_gates`).
 """
 from __future__ import annotations
 
@@ -103,6 +105,12 @@ RUN_DB = "data/raw/daily_run.db"
 NO_TABLE = "<no-table>"   # 런 로그 자리에 run 표 없는 sqlite 파일
 # 런 로그에 심는 런 — (date, source, status, detail). status 'running' 은 시작만 기록(끝 기록 없음)
 RunSeed = tuple[str, str, str, str | None]
+FI_RUN = "data/factor_inputs/_runs/{d}_morning.json"
+# fi 판 manifest 의 게이트 — 경고 없는 기본(대역 fi 가 rc 0 으로 끝난 판)
+FI_GATES_OK: list[dict[str, object]] = [
+    {"name": "FG1", "status": "pass", "detail": "행수", "metrics": {}},
+    {"name": "FG-fresh", "status": "pass", "detail": "신선도 기록", "metrics": {"warn": False}}]
+NO_FI_RUN = "<no-fi-run>"     # fi 판 manifest 를 두지 않는다
 
 
 def _seed_runs(db: Path, runs: list[RunSeed] | bytes | str) -> None:
@@ -123,9 +131,11 @@ def _seed_runs(db: Path, runs: list[RunSeed] | bytes | str) -> None:
 
 
 def _root(home: Path, *, stub_flock: bool = True, conf: str | None = None,
-          evening: str | bytes | None = None, runs: list[RunSeed] | bytes | str | None = None) -> Path:
+          evening: str | bytes | None = None, runs: list[RunSeed] | bytes | str | None = None,
+          fi_gates: list[dict[str, object]] | str = FI_GATES_OK) -> Path:
     """conf = config/postclose_chain.env 내용(None 이면 파일 없음), evening = 장 마감 발송 장부 내용
-    (None 이면 파일 없음, DIR 이면 디렉터리), runs = 런 로그(None 이면 파일 없음 — `_seed_runs`)."""
+    (None 이면 파일 없음, DIR 이면 디렉터리), runs = 런 로그(None 이면 파일 없음 — `_seed_runs`),
+    fi_gates = fi 판 manifest 의 게이트 목록(NO_FI_RUN 이면 manifest 없음)."""
     root = home / "quant-ledger"
     for sub in ("scripts", "logs", ".venv/bin", "config", "data/model_db/deliver"):
         (root / sub).mkdir(parents=True, exist_ok=True)
@@ -144,6 +154,11 @@ def _root(home: Path, *, stub_flock: bool = True, conf: str | None = None,
         ledger.write_text(evening, encoding="utf-8")
     if runs is not None:
         _seed_runs(root / RUN_DB, runs)
+    if fi_gates != NO_FI_RUN:
+        fi_run = root / FI_RUN.format(d=D)
+        fi_run.parent.mkdir(parents=True, exist_ok=True)
+        fi_run.write_text(json.dumps({"status": "ok", "date": D_ISO, "basis": "morning",
+                                      "gates": fi_gates}, ensure_ascii=False), encoding="utf-8")
     stubs = {root / ".venv/bin/python": _PY,
              root / "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n',
              root / "scripts/build_morning.sh": _BUILD,
@@ -161,10 +176,11 @@ def _root(home: Path, *, stub_flock: bool = True, conf: str | None = None,
 def _run(home: Path, script: str, *args: str, held: bool = True, stub_flock: bool = True,
          build_lock: Path | None = None, conf: str | None = None,
          evening: str | bytes | None = None, runs: list[RunSeed] | bytes | str | None = None,
-         **rcs: int | str) -> Run:
+         fi_gates: list[dict[str, object]] | str = FI_GATES_OK, **rcs: int | str) -> Run:
     """held=True 면 빌드 락을 물려받은 것으로(QL_BUILD_LOCK_HELD=1) model_daily 가 락을 건너뛴다.
     build_lock 은 빌드 락 파일 경로(기본 home/build.lock). conf·evening·runs 는 `_root`. rcs 는 대문자 환경변수."""
-    root = _root(home, stub_flock=stub_flock, conf=conf, evening=evening, runs=runs)
+    root = _root(home, stub_flock=stub_flock, conf=conf, evening=evening, runs=runs,
+                 fi_gates=fi_gates)
     env = dict(os.environ, HOME=str(home), TMPDIR=str(home / "tmp"),
                PATH=f"{home / 'fakebin'}:{os.environ['PATH']}",
                QL_RAW_LOCK_HELD="1", QL_RAW_LOCK_FILE=str(home / "raw.lock"),
@@ -220,6 +236,55 @@ def test_model_daily_failure_stops_later_steps_and_records_crit(tmp_path: Path, 
     # deliver 실패는 '발송 0' 이라 단정하지 않는다 — rc 3 은 발송 뒤 장부 기록 실패일 수 있다(B-58)
     note = ("발송 여부는 deliver 출력과 장부" if failing == "deliver" else "엑셀 발송 0")
     assert note in crit[0] and note in r.out
+
+
+# ── fi 게이트 경고(N-47 — 아침 체인도 metrics.warn 을 사람에게) ─────────────────────
+FI_WARN_TITLE = "모델 단계 fi 게이트 경고"
+FI_GATES_WARN: list[dict[str, object]] = [
+    {"name": "FG1", "status": "pass", "detail": "행수", "metrics": {}},
+    {"name": "FG-fresh", "status": "pass",
+     "detail": "신선도 기록 · warn: grace 31종목 > 30(WISE 부분 수집 실패 의심 — 그날 수집 기록 확인)",
+     "metrics": {"warn": True, "grace_warn_max": 30}}]
+
+
+def _fi_warns(r: Run) -> list[str]:
+    return [n for n in r.notify if n.startswith(f"warn|{FI_WARN_TITLE}|")]
+
+
+def test_model_daily_fi_gate_warning_is_one_warn_line(tmp_path: Path) -> None:
+    """fi 판 manifest 의 게이트 경고(metrics.warn — FG-fresh 유예 종목 몰림)는 notify warn 한 줄(기록만 —
+    notify.sh 는 logs/notify.log)이다. 판정·rc 와 세 단계·발송은 그대로다."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, fi_gates=FI_GATES_WARN)
+    assert r.rc == 0, r.out
+    assert r.mods == MODEL_STEPS and r.calls[-1].endswith("--send")
+    warns = _fi_warns(r)
+    assert len(warns) == 1 and [n.split("|")[0] for n in r.notify] == ["warn"], r.notify
+    assert f"D={D} basis=morning" in warns[0] and "FG-fresh" in warns[0] and "grace 31종목" in warns[0]
+    assert "fi 게이트 경고 — FG-fresh" in r.out and f"모델 단계 완료 D={D}" in r.out
+
+
+def test_model_daily_without_fi_gate_warning_sends_no_warn(tmp_path: Path) -> None:
+    r = _run(tmp_path, "model_daily.sh", "--date", D)
+    assert r.rc == 0 and r.notify == [] and "fi 게이트 경고" not in r.out, r.out
+
+
+def test_model_daily_unreadable_fi_manifest_is_one_warn_line(tmp_path: Path) -> None:
+    """fi 가 rc 0 인데 판 manifest 를 못 읽으면 경고를 확인하지 못한 것도 warn 한 줄이다(장 마감 체인과 같다)."""
+    r = _run(tmp_path, "model_daily.sh", "--date", D, fi_gates=NO_FI_RUN)
+    assert r.rc == 0, r.out
+    warns = _fi_warns(r)
+    assert len(warns) == 1 and "manifest_unreadable" in warns[0], r.notify
+
+
+@pytest.mark.parametrize(("rcs", "rc", "n_warn"), [
+    ({"fi_rc": 1}, 1, 0),           # fi 실패 — crit 만(그 판 기록의 경고는 읽지 않는다)
+    ({"model_rc": 1}, 1, 1),        # fi 는 돌았다 — 경고 한 줄 + model crit
+])
+def test_model_daily_fi_gate_warning_with_a_failed_step_keeps_rc(tmp_path: Path, rcs: dict[str, int],
+                                                                 rc: int, n_warn: int) -> None:
+    r = _run(tmp_path, "model_daily.sh", "--date", D, fi_gates=FI_GATES_WARN, **rcs)
+    assert r.rc == rc, r.out
+    assert len(_fi_warns(r)) == n_warn and len(_crit(r)) == 1, r.notify
 
 
 def test_model_daily_resend_is_passed_to_deliver(tmp_path: Path) -> None:

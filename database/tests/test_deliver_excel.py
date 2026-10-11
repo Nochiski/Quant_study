@@ -1281,7 +1281,7 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
     d = build_daily("2026-09-28", "morning", model_root=tmp_path / "model", fi_root=fi_root,
                     out_root=tmp_path / "out")
     wb = load_workbook(d.path)
-    primary = res.primary_spec                 # 기본 주 모델(scope@1.0)
+    primary = res.primary_spec                 # 기본 주 모델(scope@2.0 — N-47)
     n_scores = res.specs[primary]["n_scores"]
     assert d.n_rows == n_scores and d.n_ranked == res.specs[primary]["n_ranked"]
     assert wb["Score"].max_row == 8 + n_scores                 # + 표 끝 선 행
@@ -1291,7 +1291,9 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
     assert "MG1 pass" in pairs[f"데이터 검사 {primary}"]
     rule = pairs["유니버스 규칙"]
     # N-30 ①(10-08): scope 는 의견 0 종목도 남긴다 — 메타 유니버스 규칙 줄에서 추정기관수 조건이 빠진다
-    assert "추정기관수" not in rule and "추정치 유예 없음" in rule
+    # scope_v2.0 은 추정치 유예 5거래일(N-47)
+    assert "추정기관수" not in rule
+    assert "추정치 유예 5 거래일" in rule
     # scope(v3 엔진) 점수 행엔 업종 열이 없다 — fi_universe 업종으로 채워 업종 시트가 3 대분류로 선다
     sector_rows = [wb["Sector"].cell(r, 1).value for r in range(8, wb["Sector"].max_row + 1)]
     assert len(sector_rows) >= 3, sector_rows
@@ -1849,7 +1851,7 @@ def test_daily_earnings_estimated_prior_year_yoy_is_grey_too(tmp_path: Path) -> 
     assert grey == est                                   # y-y 회색 = 'E' 칸 행 그대로
 
 
-# ── scope 실물 모양 판(실제 model.build — 주 모델 scope@1.0) ─────────────────────
+# ── scope 실물 모양 판(실제 model.build — 주 모델 scope@2.0) ─────────────────────
 # 연간 확정 PER·PBR·배당수익률이 없는 종목 → scope 밸류 버킷 결측(279570 모양)
 NO_VAL = "100007"
 # 연간 행은 있는데(WISE 매출·PER) 손익·자산 재료가 다 빈 종목 → 퀄리티 = 변동성만(241560 모양)
@@ -1874,7 +1876,7 @@ def _write_fi_tree(b, fi_root: Path, fi_bid: str, day: str) -> None:
 
 
 def _scope_board(root: Path, edit: Callable[[object], None] | None = None):
-    """실제 `model.build` 판(40종목, 다섯 spec) — 주 모델 scope@1.0 은 원값을 점수 표 열로 싣고
+    """실제 `model.build` 판(40종목, 여섯 spec) — 주 모델 scope@2.0 은 원값을 점수 표 열로 싣고
     지표 긴 표는 0행이다(서버 10-02 판과 같은 모양). NO_VAL 만 밸류 재료가 없다.
     `edit(board)` = fi 를 쓰기 직전에 합성 판을 고친다."""
     from model import build as mbuild
@@ -1898,11 +1900,11 @@ def _scope_board(root: Path, edit: Callable[[object], None] | None = None):
     _write_fi_tree(b, fi_root, SCOPE_FI_BID, "2026-09-28")
     res = mbuild.build("20260928", "morning", root / "model", fi_root,
                        min_prices_on_d=10, min_ranked=10)
-    assert res.ok and res.primary_spec == "scope@1.0", res.specs
+    assert res.ok and res.primary_spec == "scope@2.0", res.specs
     d = build_daily("2026-09-28", "morning", model_root=root / "model", fi_root=fi_root,
                     out_root=root / "out")
     scores = {str(r["stock_code"]): r for r in duckdb_rows(
-        root / "model" / "scope@1.0" / f"v={res.build_id}" / "scores.parquet")}
+        root / "model" / "scope@2.0" / f"v={res.build_id}" / "scores.parquet")}
     return res, load_workbook(d.path), scores, root
 
 
@@ -2129,7 +2131,7 @@ def test_scope_raw_columns_survive_a_missing_engine_column(scope_board, tmp_path
     res, _, scores, root = scope_board
     model = tmp_path / "model"
     shutil.copytree(root / "model", model)
-    path = model / "scope@1.0" / f"v={res.build_id}" / "scores.parquet"
+    path = model / "scope@2.0" / f"v={res.build_id}" / "scores.parquet"
     tmp = path.with_name("cut.parquet")
     con = duckdb.connect()
     con.execute(f"COPY (SELECT * EXCLUDE (val_ev_ebitda) FROM read_parquet('{path}')) "

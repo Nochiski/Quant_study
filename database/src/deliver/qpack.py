@@ -649,8 +649,9 @@ def _body_rows(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | No
             if col is None:
                 continue
             cell = put(ws, ri, c, row.get(col.key))
-            color = (C_KEY if col.item else SIGN_COLORS.get(cell.value)
-                     if sign_colors and isinstance(cell.value, str) else None)
+            color = C_KEY if col.item else None
+            if sign_colors and isinstance(cell.value, str):
+                color = SIGN_COLORS.get(cell.value, color)
             cell.font = font(color=color) if color else font()
             text_like = col.kind in ("id", "txt") or isinstance(cell.value, str)
             cell.alignment = Alignment(vertical="top",

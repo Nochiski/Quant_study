@@ -55,7 +55,7 @@ from .reader import (
     read_scores,
     ymd,
 )
-from .trend import WINDOWS, Trend, load_trend, spark_groups
+from .trend import FALLBACK_NOTE, WINDOWS, Trend, load_trend, spark_groups
 from .trend import write_sheet as write_trend_sheet
 from .view import DayView, composite_of, load_day, rank_of, ticker_of
 
@@ -1100,7 +1100,10 @@ def save_atomic(wb: Workbook, path: Path) -> None:
 
 
 def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, out_root: Path,
-                config_dir: Path | None = None) -> DailyResult:
+                config_dir: Path | None = None,
+                trend_fallback_root: Path | None = None) -> DailyResult:
+    """`trend_fallback_root` = 장 마감 판(evening) 1M 비교 판이 evening 이력에 없을 때 대신 읽을
+    아침 확정판 model 루트(T-50, `load_trend`). None 이면 대체하지 않는다. 아침 판은 받아도 무시."""
     run = load_run(model_root, d, basis)
     view = load_day(model_root, fi_root, run, config_dir=config_dir)
     fi = load_fi(fi_root, view)
@@ -1113,7 +1116,7 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
         except DeliverError:
             prev_rank = {}
 
-    trend = load_trend(model_root, run, view.spec_id, basis)
+    trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root)
 
     wb = new_workbook()
     wb.remove(wb.worksheets[0])
@@ -1127,7 +1130,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     pairs = meta_pairs(view, fi_run_meta(fi_root, run.date, basis, run.fi_build_id), fi)
     insert_after(pairs, "model 생성 시각", [
         ("전일 비교 판", "없음" if prev is None else f"{prev.date} {prev.build_id}"),
-        *((f"{w} 비교 판", trend.base[w] or "없음(그 전 판이 없다)") for w in WINDOWS),
+        *((f"{w} 비교 판", f"{trend.base[w]} {FALLBACK_NOTE}" if w in trend.fallback
+           else trend.base[w] or "없음(그 전 판이 없다)") for w in WINDOWS),
         ("순위 흐름 판", f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"
                      if trend.dates else "없음")])
     # 같은 model 판으로 코드만 바뀐 정정판을 파일로 구별한다(E-08)

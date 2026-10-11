@@ -1,6 +1,7 @@
 """CLI — 모델 엑셀 만들기와 발송.
 
   python -m deliver model-daily  --date YYYYMMDD --basis morning [--send [--resend]] [--dry-run]
+                                 [--trend-fallback-root data/model]   (장 마감 판만 — T-50)
   python -m deliver model-weekly --week YYYY-Www                 [--send] [--dry-run]
 
 공통: [--model-root data/model] [--fi-root data/factor_inputs] [--out-root data/deliver]
@@ -92,6 +93,10 @@ def _parser() -> argparse.ArgumentParser:
     d.add_argument("--resend", action="store_true",
                    help="이미 보낸 D·basis 를 정정으로 다시 보낸다(--send 와 함께, "
                         "캡션에 '정정 n')")
+    d.add_argument("--trend-fallback-root", type=Path, default=None,
+                   help="장 마감 판(evening) 1M 비교 판이 evening 이력에 없을 때 대신 읽을 "
+                        "아침 확정판 model 루트(T-50 — 연구 루트 data/model). 없으면 대체하지 "
+                        "않는다. 아침 판(morning)은 받아도 무시")
     common(d)
     w = sub.add_parser("model-weekly", help="주간 엑셀(아침 확정판)")
     w.add_argument("--week", required=True, help="YYYY-Www (ISO 주)")
@@ -139,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
                       f"{last.get('sent_utc')}, 장부 {ledger} {len(prior)}건). 엑셀도 다시 만들지 "
                       f"않았다 — 다시 보내려면 --resend")
                 return 0
-            r = build_daily(day, args.basis, **roots)
+            r = build_daily(day, args.basis, **roots,
+                            trend_fallback_root=args.trend_fallback_root)
             print(f"daily: {r.path} · {r.spec_id} · 모집단 {r.n_rows} · 순위 {r.n_ranked} · "
                   f"시트 {', '.join(r.sheets)}")
             sha256 = hashlib.sha256(r.path.read_bytes()).hexdigest()

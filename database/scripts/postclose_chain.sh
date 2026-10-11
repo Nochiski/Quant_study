@@ -31,6 +31,7 @@
 #             비율, T-37)은 런 로그 detail 에 warn:<게이트> 를 남기고 notify warn 한 줄을 낸다(판정은 그대로)
 #     ④ 모델  python -m model build --date T --basis evening --root data/model_db/model --fi-root data/model_db/factor_inputs
 #     ⑤ 엑셀  python -m deliver model-daily --date T --basis evening --model-root … --fi-root … --out-root data/model_db/deliver
+#             --trend-fallback-root data/model(T-50 — 1M 비교 판이 장 마감 판 이력에 없으면 연구 루트 아침 확정판으로, 읽기만)
 #             — 발송(--send)은 설정 POSTCLOSE_SEND=1 일 때만(T-7: 그림자 기간 미발송)
 #     ⑥ v3    scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model
 #             --builds-from data/deliver/history/<D'>_morning.json — fi 와 같은 고정 판(P1). 그림자는 --shadow(v3 본 파일
@@ -265,7 +266,7 @@ model_cmd() { $PY -m model build --date "$D" --basis evening --root "$MDB/model"
 excel_cmd() {
   # shellcheck disable=SC2086  # reason: ${SEND:+--send} 는 있거나 없는 단일 플래그다
   $PY -m deliver model-daily --date "$D" --basis evening --model-root "$MDB/model" \
-     --fi-root "$MDB/factor_inputs" --out-root "$MDB/deliver" ${SEND:+--send}
+     --trend-fallback-root data/model --fi-root "$MDB/factor_inputs" --out-root "$MDB/deliver" ${SEND:+--send}
 }
 # v3_post 세 갈래 — 셋 다 고정 판(--builds-from)을 넘긴다(P1 — fi 와 같은 판). 판이 없으면 compat 이 멈추고 v3_post 가
 # crit 을 낸다. 락 fd 는 v3 쪽 자식에 넘기지 않는다
@@ -334,7 +335,7 @@ if [ -n "$DRY" ]; then
       echo "     스냅샷 GC $MDB/snapshots (keep ${KEEP:-?} = snapshot.KEEP_DEFAULT, 현재 판 보호 — 기록형)"
       echo "  3. $PY -m factor_inputs build --date $D --basis evening --root $MDB/factor_inputs --builds-from $HIST/${DPREV:-?}_morning.json --calendar-dir data/calendar"
       echo "  4. $PY -m model build --date $D --basis evening --root $MDB/model --fi-root $MDB/factor_inputs"
-      echo "  5. $PY -m deliver model-daily --date $D --basis evening --model-root $MDB/model --fi-root $MDB/factor_inputs --out-root $MDB/deliver${SEND:+ --send}"
+      echo "  5. $PY -m deliver model-daily --date $D --basis evening --model-root $MDB/model --trend-fallback-root data/model --fi-root $MDB/factor_inputs --out-root $MDB/deliver${SEND:+ --send}"
       echo "  6. scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --model-root $MDB/model --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}${POST_CMD:+ --v3-post-cmd '<설정 POSTCLOSE_V3_POST_CMD>'}" ;;
     refill)
       DPREV=$(prev_day "$D" 2>/dev/null)

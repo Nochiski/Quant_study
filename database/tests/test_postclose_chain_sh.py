@@ -220,6 +220,7 @@ def test_close_runs_every_step_in_order_and_logs_each_step(tmp_path: Path) -> No
 
     단계마다 런 로그 source 한 행(ok)이 `daily.runlog.POSTCLOSE_STEPS` 순서로 남고, 준비 info 1건.
     산출 루트는 전부 data/model_db(T-3·T-29), fi 와 v3 반영은 같은 D' 아침 인계 이력으로 고정한다(T-2 · P1).
+    엑셀은 1M 비교 판 대체 루트로 연구 모델 루트 data/model 을 받는다(T-50 — 읽기만).
     """
     _root(tmp_path)
     r = _chain(tmp_path, "close", "--date", T)
@@ -240,6 +241,7 @@ def test_close_runs_every_step_in_order_and_logs_each_step(tmp_path: Path) -> No
                                "--fi-root data/model_db/factor_inputs")
     assert r.call("deliver") == (
         f"deliver model-daily --date {T} --basis evening --model-root data/model_db/model "
+        "--trend-fallback-root data/model "
         "--fi-root data/model_db/factor_inputs --out-root data/model_db/deliver")
     assert r.call("v3_post.sh") == (
         f"v3_post.sh --date {T} --basis evening --v3-db {tmp_path / 'v3_quant.db'} "
@@ -549,6 +551,7 @@ def test_dry_run_prints_the_plan_only(tmp_path: Path, conf: str | None) -> None:
     assert f"D'={D_PREV}" in r.out and "--shadow" in r.out and "--send" not in r.out
     assert f"--builds-from {H_PREV}" in r.out and "health ok" in r.out
     assert f"keep {snapshot.KEEP_DEFAULT} = snapshot.KEEP_DEFAULT" in r.out
+    assert "--model-root data/model_db/model --trend-fallback-root data/model " in r.out   # T-50
     assert ("꺼짐" in r.out) == (conf is None)
 
 

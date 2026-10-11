@@ -104,6 +104,54 @@ def test_year_without_a_cache_file_raises_instead_of_assuming_weekdays(tmp_path)
         c.prev_trading_day(dt.date(2027, 1, 4))
 
 
+# ── 주말 보강판 대상일(N-45) — 휴장 연속의 첫 휴일에만 직전 거래일 D ─────────────────────
+# 2026 실제 휴장일 일부: 추석 9/24(목)·9/25(금) · 개천절 대체 10/5(월) · 한글날 10/9(금) · 연말 12/31(목) · 신정 1/1(금)
+_HOLIDAYS_2026 = ["20260924", "20260925", "20261005", "20261009", "20261225", "20261231"]
+
+
+@pytest.mark.parametrize(("today", "want"), [
+    (dt.date(2026, 10, 17), dt.date(2026, 10, 16)),   # 보통 주말 — 토요일이 금요일 D
+    (dt.date(2026, 10, 18), None),                    # 일요일 — 연휴 둘째 날
+    (dt.date(2026, 10, 19), None),                    # 월요일 거래일
+    (dt.date(2026, 10, 16), None),                    # 금요일 거래일 자신
+    (dt.date(2026, 10, 3), dt.date(2026, 10, 2)),     # 월요일 공휴일 연휴(10/3~10/5) — 토요일 한 번
+    (dt.date(2026, 10, 4), None),
+    (dt.date(2026, 10, 5), None),                     # 대체공휴일 월요일 — 직전 달력일이 일요일
+    (dt.date(2026, 10, 9), dt.date(2026, 10, 8)),     # 금요일 한글날 — 그날이 첫 휴일(목요일 D)
+    (dt.date(2026, 10, 10), None),                    # 이어지는 토요일
+    (dt.date(2026, 9, 24), dt.date(2026, 9, 23)),     # 추석(목·금 + 주말) — 첫날 한 번
+    (dt.date(2026, 9, 25), None),
+    (dt.date(2026, 9, 26), None),
+])
+def test_supplement_target_is_the_first_holiday_of_a_streak(tmp_path, today, want):
+    c = cal.load(_write(tmp_path, _HOLIDAYS_2026))
+    assert c.supplement_target(today) == want
+
+
+def test_supplement_target_across_the_year_end(tmp_path):
+    # 연말 휴장 12/31(목) 이 첫 휴일(→ 12/30) · 신정 1/1(금) 은 이어지는 휴일이라 None(전 해 파일도 읽는다)
+    _write_year(tmp_path, 2026, _HOLIDAYS_2026)
+    _write_year(tmp_path, 2027, ["20270101"])
+    c = cal.load(tmp_path)
+    assert c.supplement_target(dt.date(2026, 12, 31)) == dt.date(2026, 12, 30)
+    assert c.supplement_target(dt.date(2027, 1, 1)) is None
+    assert c.supplement_target(dt.date(2027, 1, 2)) is None
+
+
+def test_supplement_target_needs_the_previous_year_file(tmp_path):
+    # 1/1 판정은 12/31 이 거래일인지 알아야 한다 — 전 해 파일이 없으면 영업일을 가정하지 않고 KeyError
+    _write_year(tmp_path, 2027, ["20270101"])
+    c = cal.load(tmp_path)
+    with pytest.raises(KeyError, match="2026"):
+        c.supplement_target(dt.date(2027, 1, 1))
+
+
+def test_supplement_target_with_no_calendar_stops(tmp_path):
+    # 달력이 없으면 load 단계에서 CalendarUnavailable — 휴장 아님(보강판 없음)으로 위장하지 않는다
+    with pytest.raises(cal.CalendarUnavailable):
+        cal.load(tmp_path).supplement_target(dt.date(2026, 10, 17))
+
+
 def test_legacy_unsuffixed_file_is_not_read(tmp_path):
     # 옛 경로 `kis_holidays.json` 은 v3 사본 호환용으로 남는다. 판정에 섞으면(합집합) 직접 갱신이
     # 지운 휴장일(지정 취소)이 옛 사본으로 되살아난다 — 판정은 연도 파일만 읽는다.

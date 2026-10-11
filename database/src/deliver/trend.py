@@ -20,9 +20,12 @@
             못 읽으면, 대체 루트(연구 루트 data/model)가 주어졌을 때만 그 루트 아침
             확정판(morning)의 같은 규칙 비교 판을 쓴다. 흐름 첫 점도 그 판이라 위 '처음 → 끝 = Δ'
             가 그대로다. evening 이력이 D−1개월까지 닿으면 저절로 evening 판만 쓴다.
-  비교 이력 basis  주말 보강판(supplement)은 휴장 앞 마지막 거래일에만 서는 드문 판이라(N-45) 비교 판 ·
-            흐름은 아침 확정판(morning) 이력에서 읽고 흐름 끝 점(D)만 보강판 자신이다
-            (`HISTORY_BASIS` — 전일 순위도 같은 이력, `excel_daily.build_daily`).
+  비교 이력 basis  주말 보강판(supplement)은 휴장 앞 마지막 거래일에만 서는 드문 판이라 자기 이력이 없다.
+            컷오버 뒤 사용자가 매일 받는 엑셀이 장 마감 판이라 장 마감 판처럼 견준다(N-45 · 10-12 결정):
+            전일 순위 · 비교 판 · 흐름 = 장 마감 판 이력(`history_root` — data/model_db/model), 그 판이
+            없는 날(10-14 전 · 빠진 날)은 날짜마다 아침 확정판(보강판과 같은 연구 루트)으로 메운다 —
+            T-50 대체와 같은 뜻을 날짜마다 적용(`HISTORY_BASIS` · `history_sources` · `latest_in`).
+            흐름 끝 점(D)만 보강판 자신이다.
 """
 from __future__ import annotations
 
@@ -55,15 +58,32 @@ WINDOWS = ("1M",)             # 엑셀에 싣는 창(1W 는 10-06 사용자 결�
 LINE_UP, LINE_DOWN, LINE_FLAT = "1E8C45", "D0312D", "8C8C8C"   # 상승 초록 · 하락 빨강 · 같음 회색
 # Meta '1M 비교 데이터' 값 뒤에 붙인다
 FALLBACK_NOTE = "(아침 확정 데이터 — 장 마감 데이터 비교 데이터 없음, T-50)"
-# 비교 이력을 다른 basis 에서 읽는 판 — 주말 보강판(N-45)은 D 아침 확정판과 같은 이력으로 견준다:
-# 전일 순위 = 직전 거래일 아침판, Δ순위 · 1M 흐름 = 아침판 이력(보강판은 연휴마다 하나뿐이다).
-# 표에 없는 basis(morning · evening)는 자기 이력이다 — evening 의 1M 비교 판 대체는 아래 T-50 이 따로 한다
-HISTORY_BASIS: dict[str, str] = {"supplement": "morning"}
+# 비교 이력을 다른 basis 에서 읽는 판 — 주말 보강판(N-45)은 장 마감 판처럼 견준다(컷오버 뒤 사용자가
+# 받는 엑셀 = 장 마감 판, 10-12 결정). 그 이력이 없는 날은 `FILL_BASIS`(아침 확정판)로 메운다 — 장 마감 판
+# 1M 비교 판의 T-50 대체와 같은 뜻. 표에 없는 basis(morning · evening)는 자기 이력이다
+HISTORY_BASIS: dict[str, str] = {"supplement": "evening"}
+FILL_BASIS = "morning"
+Source = tuple[Path, str]           # (model 루트, basis)
 
 
-def history_basis(basis: str) -> str:
-    """전일 순위 · 비교 판 · 흐름을 읽을 basis(`HISTORY_BASIS`)."""
-    return HISTORY_BASIS.get(basis, basis)
+def history_sources(model_root: Path, basis: str, history_root: Path | None = None) -> list[Source]:
+    """전일 순위 · 비교 판 · 흐름을 읽을 (루트, basis) — 앞이 우선. 주말 보강판은 장 마감 판
+    루트(`history_root`, 없으면 건너뜀) 다음 자기 루트(연구 루트)의 아침 확정판."""
+    hist = HISTORY_BASIS.get(basis)
+    if hist is None:
+        return [(model_root, basis)]
+    return [*([] if history_root is None else [(history_root, hist)]), (model_root, FILL_BASIS)]
+
+
+def latest_in(sources: Sequence[Source], before: str | date) -> tuple[Path, ModelRun] | None:
+    """`before` 보다 앞선 가장 최근 성공 판과 그 루트 — 원천 여럿이면 날짜가 늦은 것, 같은 날이면
+    앞 원천(장 마감 판이 빠진 날만 아침판이 메운다)."""
+    best: tuple[Path, ModelRun] | None = None
+    for root, b in sources:
+        r = previous_run(root, before, b)
+        if r is not None and (best is None or r.date > best[1].date):
+            best = (root, r)
+    return best
 
 
 def month_back(d: date) -> date:
@@ -78,6 +98,12 @@ def window_start(d: date, which: str) -> date:
 
 def _on_or_before(model_root: Path, d: date, basis: str) -> ModelRun | None:
     return previous_run(model_root, d + timedelta(days=1), basis)
+
+
+def source_word(r: ModelRun) -> str:
+    """주말 보강판 Meta 비교 표시 — 장 마감 판이면 '장 마감 데이터', 메운 아침판이면 '아침 확정
+    데이터(대체)'."""
+    return "장 마감 데이터" if r.basis == "evening" else "아침 확정 데이터(대체)"
 
 
 @dataclass(frozen=True)
@@ -118,12 +144,13 @@ def _ranks(model_root: Path, run: ModelRun,
 
 
 def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
-               fallback_root: Path | None = None) -> Trend:
+               fallback_root: Path | None = None, history_root: Path | None = None) -> Trend:
+    """`history_root` = 주말 보강판의 장 마감 판 model 루트(`history_sources`, 그 밖 basis 는 무시)."""
     d = date.fromisoformat(run.date)
-    hist = history_basis(basis)
-    bases = {w: _on_or_before(model_root, window_start(d, w), hist) for w in WINDOWS}
+    srcs = history_sources(model_root, basis, history_root)
+    bases = {w: latest_in(srcs, window_start(d, w) + timedelta(days=1)) for w in WINDOWS}
     b1m = bases["1M"]
-    start = b1m.date if b1m is not None else (month_back(d) + timedelta(days=1)).isoformat()
+    start = b1m[1].date if b1m is not None else (month_back(d) + timedelta(days=1)).isoformat()
     by_date: dict[str, dict[str, int | None]] = {}
     older: dict[str, str] = {}
     runs: dict[str, ModelRun] = {}
@@ -134,21 +161,29 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
         if sid != spec_id:
             older[r.date] = sid
         return ranks
-    # 흐름 끝 점(D)은 이 판 자신 — 보강판이면 이력(아침판)의 D 판 대신이다(N-45)
-    for r in [*(x for x in runs_between(model_root, start, run.date, hist) if x.date != run.date),
-              run]:
-        got = _ranks(model_root, r, spec_id)
-        if got is not None:
-            take(r, got)
+    # 날짜마다 앞 원천의 판, 없거나 순위를 못 읽으면 다음 원천(보강판: 장 마감 판 → 아침 확정판).
+    # 흐름 끝 점(D)은 이 판 자신이다
+    cands: dict[str, list[tuple[Path, ModelRun]]] = {}
+    for root, b in srcs:
+        for x in runs_between(root, start, run.date, b):
+            if x.date != run.date:
+                cands.setdefault(x.date, []).append((root, x))
+    cands[run.date] = [(model_root, run)]
+    for day in sorted(cands):
+        for root, r in cands[day]:
+            if (got := _ranks(root, r, spec_id)) is not None:
+                take(r, got)
+                break
     base: dict[str, str | None] = {}
     base_rank: dict[str, Mapping[str, int | None]] = {}
-    for w, b in bases.items():
+    for w, found in bases.items():
         ranks = None
-        if b is not None:
+        if found is not None:
+            root, b = found
             ranks = by_date.get(b.date)
-            if ranks is None and (got := _ranks(model_root, b, spec_id)) is not None:
+            if ranks is None and (got := _ranks(root, b, spec_id)) is not None:
                 ranks = take(b, got)
-        base[w] = None if ranks is None or b is None else b.date
+        base[w] = None if ranks is None or found is None else found[1].date
         base_rank[w] = ranks or {}
     fallback: frozenset[str] = frozenset()
     if basis == "evening" and fallback_root is not None and base["1M"] is None:
@@ -233,5 +268,6 @@ def spark_groups(tickers: Sequence[str], trend: Trend, d: date,
     return out
 
 
-__all__ = ["FALLBACK_NOTE", "HISTORY_BASIS", "SHEET", "Trend", "history_basis", "line_color",
-           "load_trend", "month_back", "spark_groups", "window_start", "write_sheet"]
+__all__ = ["FALLBACK_NOTE", "FILL_BASIS", "HISTORY_BASIS", "SHEET", "Source", "Trend",
+           "history_sources", "latest_in", "line_color", "load_trend", "month_back", "source_word",
+           "spark_groups", "window_start", "write_sheet"]

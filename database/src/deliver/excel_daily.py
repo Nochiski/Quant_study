@@ -80,7 +80,6 @@ from .reader import (
     history_spec,
     iso,
     load_run,
-    previous_run,
     read_fi,
     read_scores,
     ymd,
@@ -88,10 +87,13 @@ from .reader import (
 from .sources import open_sources
 from .trend import (
     FALLBACK_NOTE,
+    HISTORY_BASIS,
     WINDOWS,
     Trend,
-    history_basis,
+    history_sources,
+    latest_in,
     load_trend,
+    source_word,
     spark_groups,
 )
 from .trend import write_sheet as write_trend_sheet
@@ -479,9 +481,11 @@ class Grace:
     month: Mapping[str, int] = field(default_factory=dict)
 
 
-def grace_of(view: DayView, fi_root: Path, trend: Trend) -> Grace:
+def grace_of(view: DayView, fi_root: Path, trend: Trend,
+             more_fi_roots: Sequence[Path] = ()) -> Grace:
     """주 모델 유예가 있으면 1M 흐름 날짜(`trend.dates` — 1M 흐름과 같은 창)마다 그날 fi 판
-    fi_universe 에서 coverage_state 가 grace(나이 ≥ 1)인 종목을 센다. 그날 판을 못 읽으면(지운 fi
+    fi_universe 에서 coverage_state 가 grace(나이 ≥ 1)인 종목을 센다. fi 판은
+    `fi_root` 다음 `more_fi_roots`(주말 보강판의 장 마감 판 fi 루트)에서 찾고, 어디서도 못 읽으면(지운 fi
     판 · 다른 루트의 T-50 아침 판 · 열이 없는 옛 판) 그날은 세지 않는다."""
     days = 0 if view.spec is None else view.spec.universe.coverage_grace_days
     if not days:
@@ -491,15 +495,17 @@ def grace_of(view: DayView, fi_root: Path, trend: Trend) -> Grace:
         r = trend.runs.get(day)
         if r is None:
             continue
-        try:
-            rows = read_fi(fi_root, "fi_universe", r.fi_build_id,
-                           columns=("ticker", "coverage_age_days"),
-                           where="coverage_state = 'grace'")
-        except (DeliverError, duckdb.Error) as e:
-            log.info("1M 유예 일수 — %s fi 판 %s 를 읽지 못해 그날은 세지 않는다: %s",
-                     day, r.fi_build_id, e)
-            continue
-        for x in rows:
+        rows = None
+        for root in (fi_root, *more_fi_roots):
+            try:
+                rows = read_fi(root, "fi_universe", r.fi_build_id,
+                               columns=("ticker", "coverage_age_days"),
+                               where="coverage_state = 'grace'")
+                break
+            except (DeliverError, duckdb.Error) as e:
+                log.info("1M 유예 일수 — %s fi 판 %s 를 %s 에서 읽지 못했다: %s",
+                         day, r.fi_build_id, root, e)
+        for x in rows or ():
             age = x.get("coverage_age_days")
             if isinstance(age, int) and age >= 1:
                 t = str(x["ticker"])
@@ -517,6 +523,20 @@ def grace_notes(grace: Grace, t: str, state: object, age: object) -> tuple[str |
     return now, (f"1M 유예 {n}일" if n else None)
 
 
+def flow_sources(trend: Trend, d: str) -> str:
+    """주말 보강판 '순위 흐름 날짜' 꼬리 — D 앞 점들이 장 마감 판인지 메운 아침판인지(N-45)."""
+    rest = [trend.runs[x] for x in trend.dates if x != d and x in trend.runs]
+    filled = [r.date[5:] for r in rest if r.basis != "evening"]
+    if not rest:
+        return ""
+    if not filled:
+        return " · 장 마감 데이터"
+    if len(filled) == len(rest):
+        return " · 아침 확정 데이터(대체)"
+    span = filled[0] if len(filled) == 1 else f"{filled[0]}~{filled[-1]}"
+    return f" · 장 마감 데이터 · 아침 확정 데이터(대체) {len(filled)}일({span})"
+
+
 def older_mark(trend: Trend) -> tuple[str, str] | None:
     """(앞 주 모델 라벨, 마지막으로 앞 주 모델 순위를 쓴 날 MM-DD) — 1M 흐름 · 비교 데이터를 앞 주
     모델로 이은 날이 없으면 None."""
@@ -532,6 +552,8 @@ def switch_day(trend: Trend) -> str | None:
     if not trend.older:
         return None
     return next((d[5:] for d in trend.dates if d not in trend.older), None)
+
+
 
 
 # ── 후보 30 과 변화(확정 샘플 Score AM · AN) ─────────────────────────────────
@@ -1573,15 +1595,20 @@ def finish_extra(path: Path, wb: Workbook, sparks: Mapping[str, Sequence[tuple[s
 def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, out_root: Path,
                 config_dir: Path | None = None,
                 trend_fallback_root: Path | None = None, equity_root: Path | None = None,
-                stage_root: Path | None = None) -> DailyResult:
+                stage_root: Path | None = None, history_root: Path | None = None,
+                history_fi_root: Path | None = None) -> DailyResult:
     """`trend_fallback_root` = 장 마감 판(evening) 1M 비교 판이 evening 이력에 없을 때 대신 읽을
     아침 확정판 model 루트(T-50, `load_trend`). None 이면 대체하지 않는다. 아침 판은 받아도 무시.
-    `equity_root` · `stage_root` = 새 시트 원천 루트(없으면 fi 판 JSON 의 루트)."""
+    `equity_root` · `stage_root` = 새 시트 원천 루트(없으면 fi 판 JSON 의 루트).
+    `history_root` · `history_fi_root` = 주말 보강판(supplement)이 견줄 장 마감 판 model · fi 루트
+    (`trend.history_sources` — 없는 날은 model_root 아침 확정판으로 메운다). 그 밖 basis 는 무시."""
     run = load_run(model_root, d, basis)
     view = load_day(model_root, fi_root, run, config_dir=config_dir)
     fi = load_fi(fi_root, view)
-    # 전일 비교 판 — 같은 basis 직전 판. 주말 보강판은 직전 거래일 아침 확정판(N-45, `HISTORY_BASIS`)
-    prev = previous_run(model_root, run.date, history_basis(basis))
+    # 전일 비교 판 — 같은 basis 직전 판. 주말 보강판은 장 마감 판 이력, 빠진 날은 아침 확정판(N-45)
+    supplement = basis in HISTORY_BASIS
+    found = latest_in(history_sources(model_root, basis, history_root), run.date)
+    prev_root, prev = (model_root, None) if found is None else found
     prev_rank: dict[str, int | None] = {}
     # 전일 순위 spec — 직전 판에 주 모델이 없으면 앞 주 모델(N-47 · Q-E1), 둘 다 없으면
     # 전일 데이터 없음
@@ -1592,12 +1619,12 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     elif prev is not None and prev_spec is not None:
         try:
             prev_rank = {ticker_of(r): rank_of(r)
-                         for r in read_scores(model_root, prev, prev_spec)}
+                         for r in read_scores(prev_root, prev, prev_spec)}
         except DeliverError as e:
             log.warning("전일 순위를 읽지 못했다(%s %s): %s", prev.date, prev.build_id, e)
             prev_rank = {}
 
-    trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root)
+    trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root, history_root)
     cands = candidates(view, prev_rank)
 
     # 시트 순서 = 확정 양식(Score · Sector · Earnings · 새 시트 여섯 · Compare · Raw · Meta · trend).
@@ -1605,8 +1632,9 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     # 새 시트(ETF · Analyst · Events · Market · Flow · Short)
     wb = new_workbook()
     wb.remove(wb.worksheets[0])
+    more_fi = (history_fi_root,) if supplement and history_fi_root is not None else ()
     score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands,
-                                          grace_of(view, fi_root, trend))
+                                          grace_of(view, fi_root, trend, more_fi))
     sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
     earnings_dict = sheet_earnings(wb, view, fi)
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
@@ -1620,6 +1648,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     pairs = meta_pairs(view, fi_meta, fi, cands)
     # 전일 비교 데이터 — 직전 데이터가 있어도 순위를 쓸 수 없으면 그 말을 붙인다(변화 열을 비운 날)
     prev_text = NO_PREV if prev is None else f"{prev.date} {prev.build_id}"
+    if prev is not None and supplement:
+        prev_text += f" · {source_word(prev)}"                   # 장 마감 · 아침(대체)(N-45)
     if prev is not None and cands.no_prev:
         prev_text += f" — 순위를 쓸 수 없어 {NO_PREV}"
     elif prev_spec is not None and prev_spec != view.spec_id:
@@ -1629,11 +1659,15 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
         b = trend.base[w]
         text = (f"{b} {FALLBACK_NOTE}" if w in trend.fallback
                 else b or "없음(그 전 데이터가 없다)")
+        if b is not None and supplement:
+            text += f" · {source_word(trend.runs[b])}"
         if b is not None and b in trend.older:
             text += f" · {model_label(trend.older[b])} 순위"
         base_text[w] = text
     flow_text = (f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"
                  if trend.dates else "없음")
+    if supplement:
+        flow_text += flow_sources(trend, run.date)
     if (mark := older_mark(trend)) is not None:
         flow_text += f" · {mark[1]}까지 {mark[0]}"
     insert_after(pairs, "model 생성 시각", [

@@ -2829,6 +2829,7 @@ def test_grace_remark_rules() -> None:
     assert grace_notes(Grace(5, {}), "x", "fresh", None) == (None, None)
 
 
+
 # ── E5(N-45) — 주말 보강판(basis supplement) ─────────────────────────────────────────────
 SUPP_NOTE = ("휴일 아침에 WISE 를 다시 받아 기준일 추정치까지 넣은 데이터 · "
              "컨센서스 기준일 = 기준일 당일")
@@ -2836,17 +2837,18 @@ MODEL_SHEETS = ("Score", "Sector", "Earnings", "Compare", "Raw", "Meta")
 
 
 def _supplement_root(world: dict[str, Path], tmp_path: Path) -> Path:
-    """world model 루트 사본 + D = 09-25 주말 보강판(아침판과 같은 점수 파일을 가리키는 basis
-    supplement 판). 음성 대조 둘 — 09-18 보강판 · 09-24 장 마감 판(둘 다 순위만, 거꾸로): 보강판이
-    자기 basis(드문 보강판)나 장 마감 이력을 읽으면 전일 순위 · 흐름이 아침판과 달라진다."""
+    """world model(연구) 루트 사본 + D = 09-25 주말 보강판(아침판과 같은 점수 파일을 가리키는 basis
+    supplement 판) + 1M 비교 재료 08-24 아침판(순위만). 음성 대조 둘 — 연구 루트의 09-18 보강판 ·
+    09-21 장 마감 판(순위만, 거꾸로): 비교 원천(장 마감 루트 evening → 연구 루트 morning)이 아니다."""
     model = tmp_path / "model"
     shutil.copytree(world["model"], model)
     meta = json.loads((model / "_runs" / "20260925_morning.json").read_text(encoding="utf-8"))
     (model / "_runs" / "20260925_supplement.json").write_text(
         json.dumps({**meta, "basis": "supplement"}, ensure_ascii=False), encoding="utf-8")
     rev = {tick(i): N - i for i in range(N)}
+    _write_rank_run(model, "2026-08-24", PRIMARY, {tick(0): 30, tick(1): 1})
     _write_rank_run(model, "2026-09-18", PRIMARY, rev, basis="supplement")
-    _write_rank_run(model, THU, PRIMARY, rev, basis="evening")
+    _write_rank_run(model, MON, PRIMARY, rev, basis="evening")
     return model
 
 
@@ -2854,31 +2856,41 @@ def _rows_from(ws, first: int) -> list[list[object]]:
     return [[c.value for c in row] for row in ws.iter_rows(min_row=first)]
 
 
-def test_supplement_board_compares_like_the_morning_board(world: dict[str, Path],
+def test_supplement_board_compares_like_the_evening_board(world: dict[str, Path],
                                                           tmp_path: Path) -> None:
-    """N-45 · E5 — 주말 보강판(D = 09-25)은 D 아침판처럼 견준다: 전일 순위 = 직전 거래일(09-24)
-    아침판, Δ순위 1M · 1M 흐름 = 아침판 이력, 흐름 끝 점(D)만 보강판 자신(`trend.HISTORY_BASIS`).
-    09-18 보강판 · 09-24 장 마감 판(순위 거꾸로)은 끼지 않는다. 확정 양식 시트 4행은 '주말 보강
-    데이터', Meta 에 데이터 성격 줄. 새 시트 4행은 원천 날짜 규칙(Q-E2) 그대로."""
-    from deliver.reader import load_run
-    from deliver.trend import load_trend
+    """N-45 · E5 · 10-12 결정 — 주말 보강판(D = 09-25)은 장 마감 판처럼 견준다(컷오버 뒤 사용자가
+    매일 받는 엑셀 = 장 마감 판): 전일 순위 · 비교 판 · 흐름 = 장 마감 루트(model_db)의 evening 판,
+    그 판이 없는 날은 보강판 루트의 아침 확정판으로 메운다(T-50 대체를 날짜마다). 흐름 끝 점만 보강판
+    자신. 연구 루트의 09-18 보강판 · 09-21 장 마감 판은 원천이 아니다. Meta 세 줄은 쓴 데이터를 적는다.
+    장 마감 루트가 비면(10-14 전) 전부 아침 확정 데이터(대체)라 아침판과 같은 비교가 된다. 4행 '주말
+    보강 데이터' · 데이터 성격 줄 · WISE 재수집일 줄, 새 시트 4행은 원천 날짜 규칙(Q-E2) 그대로."""
     model = _supplement_root(world, tmp_path)
-    mo = build_daily(FRI, "morning", model_root=model, fi_root=world["fi"], out_root=tmp_path / "m")
-    su = build_daily(FRI, "supplement", model_root=model, fi_root=world["fi"],
-                     out_root=tmp_path / "s")
+    ev = tmp_path / "model_db" / "model"
+    rev = {tick(i): N - i for i in range(N)}
+    _write_rank_run(ev, TUE, PRIMARY, rev, basis="evening")
+    _write_rank_run(ev, THU, PRIMARY, {**rev, tick(0): 7}, basis="evening")
+    kw = {"model_root": model, "fi_root": world["fi"]}
+    mo = build_daily(FRI, "morning", out_root=tmp_path / "m", **kw)
+    su = build_daily(FRI, "supplement", out_root=tmp_path / "s", history_root=ev, **kw)
     assert su.path.name == "model_scores_20260925_supplement.xlsx" and su.basis == "supplement"
     wm, wsu = load_workbook(mo.path), load_workbook(su.path)
     mm, ms = dict(_meta_pairs(wm)), dict(_meta_pairs(wsu))
-    for k in ("전일 비교 데이터", "1M 비교 데이터", "순위 흐름 날짜"):
-        assert ms[k] == mm[k], k
-    assert ms["전일 비교 데이터"] == f"{THU} m_20260924T000000Z"
+    assert ms["전일 비교 데이터"] == f"{THU} e_20260924T000000Z · 장 마감 데이터"
+    assert ms["1M 비교 데이터"] == "2026-08-24 · 아침 확정 데이터(대체)"
+    assert ms["순위 흐름 날짜"] == (f"2026-08-24 ~ {FRI} · 7개 · 장 마감 데이터 · "
+                                "아침 확정 데이터(대체) 4일(08-24~09-21)")
+    sc, tr, tm = wsu["Score"], wsu["trend"], wm["trend"]
+    assert sc.cell(rows_by_code(sc)[tick(0)], header(sc)["전일 순위"]).value == 7
+    days = ["08-24", "09-17", "09-18", "09-21", "09-22", "09-24", "09-25"]
+    assert [tr.cell(7, c).value for c in range(2, tr.max_column + 1)] == days
+    r1 = rows_by_code(tr)[tick(1)]
+    line, morning = ([w.cell(r1, c).value for c in range(2, 9)] for w in (tr, tm))
+    assert line[:4] == morning[:4]                          # 08-24 ~ 09-21 = 아침판(메움)
+    assert line[4:6] == [-(N - 1), -(N - 1)] != morning[4:6]   # 09-22 · 09-24 = 장 마감 판
     assert ms["basis"] == "supplement" and ms["데이터 성격"] == SUPP_NOTE
     assert "데이터 성격" not in mm and "판" not in SUPP_NOTE
     # WISE 재수집일 줄은 보강판만 — 이 합성 세계엔 보강 fi 판 JSON 이 없어 '알 수 없음'
     assert ms["WISE 재수집일"] == "알 수 없음(fi 기록에 없음)" and "WISE 재수집일" not in mm
-    # 전일 순위 · 변화 · Δ순위 1M · 후보와 흐름 원자료가 아침판과 같다(같은 점수 파일이라)
-    for name in ("Score", "trend"):
-        assert _rows_from(wsu[name], 7) == _rows_from(wm[name], 7), name
     for name in MODEL_SHEETS:
         a4 = str(wsu[name]["A4"].value)
         assert a4 == f"기준일: {FRI} 주말 보강 데이터" or a4.startswith(
@@ -2886,10 +2898,16 @@ def test_supplement_board_compares_like_the_morning_board(world: dict[str, Path]
     for name in wsu.sheetnames:
         if name not in (*MODEL_SHEETS, "trend"):
             assert wsu[name]["A4"].value == wm[name]["A4"].value, name
-    # 흐름 끝 점은 보강판, 나머지는 아침판
-    trend = load_trend(model, load_run(model, FRI, "supplement"), PRIMARY, "supplement")
-    assert trend.runs[FRI].basis == "supplement"
-    assert {r.basis for d, r in trend.runs.items() if d != FRI} == {"morning"}
+    # 장 마감 루트가 비면 — 전부 아침 확정판으로 메워 아침판과 같은 비교
+    s2 = build_daily(FRI, "supplement", out_root=tmp_path / "s2",
+                     history_root=tmp_path / "none", **kw)
+    w2 = load_workbook(s2.path)
+    m2 = dict(_meta_pairs(w2))
+    assert m2["전일 비교 데이터"] == f"{THU} m_20260924T000000Z · 아침 확정 데이터(대체)"
+    assert m2["1M 비교 데이터"] == "2026-08-24 · 아침 확정 데이터(대체)"
+    assert m2["순위 흐름 날짜"] == f"2026-08-24 ~ {FRI} · 7개 · 아침 확정 데이터(대체)"
+    for name in ("Score", "trend"):
+        assert _rows_from(w2[name], 7) == _rows_from(wm[name], 7), name
 
 
 def test_cli_supplement_send_has_its_own_ledger_key(world: dict[str, Path], tmp_path: Path,

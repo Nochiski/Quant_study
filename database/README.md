@@ -266,7 +266,8 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
   D·health ok — 아니면 warn·rc 1)으로 판을 고정하고 빌드 락 안에서 fi(`--basis supplement --wise-asof 오늘 --builds-from …` —
   WISE 컨센서스 입력만 오늘까지, 가격·수급·DART 는 D — `docs/FACTOR_INPUTS.md` §2-4) → 모델(`--basis supplement`) → 엑셀
   (`deliver model-daily --basis supplement --send` — `model_scores_<D>_supplement.xlsx`, 4행 '주말 보강 데이터', 캡션 '주말 보강',
-  전일 순위 · 1M 흐름은 D 아침판처럼 아침 확정판 이력, 발송 장부는 아침과 같은 파일의 (D, supplement) 줄 —
+  전일 순위 · 1M 흐름은 장 마감 판처럼 장 마감 판 이력(data/model_db/model, 없는 날은 아침 확정판), 발송 장부는
+  아침과 같은 파일의 (D, supplement) 줄 —
   `docs/MODEL_DELIVER.md` §6)을 돈다. 판 기록은 `_runs/<D>_supplement.json`·`latest_supplement.json` 으로
   정규 판과 갈리고, 이 체인이 지은 D 아침판은 휴일 수집분을 담은 stage 위에서도 수집일 ≤ D 로 잘라 바뀌지 않는다.
   장 마감 체인의 v3 반영(⑥ · refill)도 컨센서스를 D' 까지만 읽는다(`--consensus-asof D'` — 같은 판의 fi·점수와 같은 시점).

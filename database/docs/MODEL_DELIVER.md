@@ -36,6 +36,7 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
 | `--send --resend` | (매일만) 이미 보낸 D·basis 를 정정으로 다시 보낸다 — 캡션 끝에 `정정 n · 판 <model 판 id> · 생성 <model 생성 시각>` (N-25 Q9). 이행 기간(evening 이력 1개월 미만)에 장 마감 판을 손으로 다시 보낼 때는 `--trend-fallback-root data/model` 을 같이 줘야 체인 발송본과 같다(T-50) |
 | `--dry-run` | 엑셀을 만들고, 네트워크 없이 env 파일의 `BOT_TOKEN`·채팅 키 **존재만** 확인한다(`--send` 와 함께 줘도 보내지 않는다) |
 | `--equity-root PATH` · `--stage-root PATH` | (매일만) 새 시트 여섯(§4-1)의 원천 루트. 없으면 fi 판 JSON(`factor_inputs/_runs/<D>_<basis>.json`)의 `equity_root` · `stage_root`. 로컬 사본 대조 · 리허설용 |
+| `--history-root PATH` · `--history-fi-root PATH` | (매일 · 주말 보강판만) 보강판이 견줄 장 마감 판 model · fi 루트(기본 `data/model_db/model` · `data/model_db/factor_inputs`). 없는 날은 `--model-root` 아침 확정판으로 메운다(§6) |
 | `--trend-fallback-root PATH` | (매일만) 장 마감 판(`--basis evening`)의 1M 비교 판이 그 루트 evening 이력에 없거나 주 모델 순위를 못 읽으면 PATH(연구 루트 `data/model`)의 아침 확정판 중 같은 규칙 판을 대신 쓴다(T-50, §6). 없으면 대체하지 않는다. 아침 판은 받아도 무시. 장 마감 체인 ⑤ 가 `data/model` 을 넘긴다 |
 
 | rc | 뜻 |
@@ -228,14 +229,20 @@ Score 시트 축 칸은 **엔진 단위를 따른다**(10-08 사용자 결정 '�
   예전처럼 그날을 뺀다.
 - 추정치 유예 표시(N-47): 주 모델 유예가 있으면(scope_v2.0 · v4 = 5거래일) Score 비고에 '유예 n일째'
   (지금 유예 중 — n = 마지막 신선일부터 거래일, 나이 0 은 생략) · '1M 유예 n일'(1M 흐름 날짜 중 그날 fi 판
-  fi_universe 가 유예였던 날 수 — 못 읽는 판은 건너뛴다), 비고 머리 메모 범례 두 줄, 1M 흐름 머리 메모에
+  fi_universe 가 유예였던 날 수 — 못 읽는 판은 건너뛴다. 주말 보강판은 장 마감 판 fi 루트 `--history-fi-root`
+  도 찾는다), 비고 머리 메모 범례 두 줄, 1M 흐름 머리 메모에
   '유예 중 순위는 마지막 신선일 추정치로 매긴 값'. Meta 유니버스 규칙은 '추정치 유예 5거래일'.
 - 주말 보강판(supplement, N-45 · DECISIONS §7 #8 — `scripts/weekend_supplement.sh` 가 `--basis supplement --send`
   로 부른다): 산출 `model_scores_<D>_supplement.xlsx`, 확정 양식 시트 4행 '기준일: D 주말 보강 데이터'(10-11 보강판
-  발송본 = 샘플 22 그대로), Meta 데이터 성격 줄, 캡션 첫 줄 basis 자리 '주말 보강' + 데이터 성격 줄. 비교는 D
-  아침판처럼 — 전일 순위 = 직전 거래일 아침 확정판, Δ순위 1M · 1M 흐름 = 아침 확정판 이력이고 흐름 끝 점(D)만
-  보강판 자신이다(`trend.HISTORY_BASIS = {"supplement": "morning"}` — 보강판은 연휴마다 하나뿐이라 자기 이력이
-  없다). 유예 표시의 D 줄은 보강판 fi 를 읽는다. 새 시트는 원천 날짜 규칙(Q-E2) 그대로이고, WISE 원천(Analyst)만
+  발송본 = 샘플 22 그대로), Meta 데이터 성격 줄, 캡션 첫 줄 basis 자리 '주말 보강' + 데이터 성격 줄. 비교는 장 마감
+  판처럼(컷오버 뒤 사용자가 매일 받는 엑셀 = 장 마감 판, 10-12 결정) — 전일 순위 · 1M 비교 판 · 흐름 = 장 마감 판
+  이력(`--history-root`, 기본 `data/model_db/model`)이고, 그 판이 없는 날(10-14 전 · 빠진 날)은 날짜마다 보강판과
+  같은 연구 루트(`--model-root`)의 아침 확정판으로 메운다(T-50 대체와 같은 뜻 — `trend.HISTORY_BASIS =
+  {"supplement": "evening"}` · `history_sources` · `latest_in`, 같은 날이면 장 마감 판). 흐름 끝 점(D)만 보강판
+  자신이다(보강판은 연휴마다 하나뿐이라 자기 이력이 없다). Meta '전일 비교 데이터' · '1M 비교 데이터' 끝에
+  '· 장 마감 데이터' 또는 '· 아침 확정 데이터(대체)', '순위 흐름 날짜' 끝에 '· 장 마감 데이터' · '· 아침 확정
+  데이터(대체)' · 섞이면 '· 장 마감 데이터 · 아침 확정 데이터(대체) n일(MM-DD~MM-DD)'(그 뒤에 앞 주 모델 표시).
+  `--trend-fallback-root` 는 보강판에 쓰지 않는다. 유예 표시의 D 줄은 보강판 fi 를 읽는다. 새 시트는 원천 날짜 규칙(Q-E2) 그대로이고, WISE 원천(Analyst)만
   수집일 상한이 fi 판 JSON 의 `wise_asof`(휴일 수집일 W)라 D 분 보고서가 들어와 일별 그래프가 D 까지 간다. 그
   시트 글의 날짜는 WISE 기준일 D — 4행 '기준일: D(WISE 휴일 아침 재수집 MM-DD)', 5행 보고서 날짜 창 끝 D, 'D 보고서는
   WISE 가 다음 날 올림' 대신 'D 보고서는 휴일 아침 WISE 재수집(MM-DD)으로 포함', 보고서는 D 날짜까지만 센다. Meta 에

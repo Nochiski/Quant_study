@@ -2,6 +2,8 @@
 
   python -m deliver model-daily  --date YYYYMMDD --basis morning [--send [--resend]] [--dry-run]
                                  (basis = morning · evening · supplement(주말 보강판 N-45))
+                                 [--history-root data/model_db/model]
+                                 [--history-fi-root data/model_db/factor_inputs] (보강판만)
                                  [--trend-fallback-root data/model]   (장 마감 판만 — T-50)
                                  [--equity-root PATH] [--stage-root PATH] (새 시트 원천 — 기본 fi 판 JSON)
   python -m deliver model-weekly --week YYYY-Www                 [--send] [--dry-run]
@@ -106,6 +108,15 @@ def _parser() -> argparse.ArgumentParser:
                    help="장 마감 판(evening) 1M 비교 판이 evening 이력에 없을 때 대신 읽을 "
                         "아침 확정판 model 루트(T-50 — 연구 루트 data/model). 없으면 대체하지 "
                         "않는다. 아침 판(morning)은 받아도 무시")
+    # 주말 보강판은 장 마감 판처럼 견준다(N-45 · 10-12 결정) — 장 마감 체인 루트(T-3)가 기본
+    d.add_argument("--history-root", type=Path, default=base / "data" / "model_db" / "model",
+                   help="주말 보강판(supplement)이 견줄 장 마감 판 model 루트(기본 "
+                        "data/model_db/model). 없는 날은 --model-root 의 아침 확정판으로 메운다. "
+                        "그 밖 basis 는 무시")
+    d.add_argument("--history-fi-root", type=Path,
+                   default=base / "data" / "model_db" / "factor_inputs",
+                   help="주말 보강판 '1M 유예' 일수에 읽을 장 마감 판 fi 루트(기본 "
+                        "data/model_db/factor_inputs). 그 밖 basis 는 무시")
     common(d)
     w = sub.add_parser("model-weekly", help="주간 엑셀(아침 확정판)")
     w.add_argument("--week", required=True, help="YYYY-Www (ISO 주)")
@@ -155,7 +166,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             r = build_daily(day, args.basis, **roots,
                             trend_fallback_root=args.trend_fallback_root,
-                            equity_root=args.equity_root, stage_root=args.stage_root)
+                            equity_root=args.equity_root, stage_root=args.stage_root,
+                            history_root=args.history_root,
+                            history_fi_root=args.history_fi_root)
             print(f"daily: {r.path} · {r.spec_id} · 모집단 {r.n_rows} · 순위 {r.n_ranked} · "
                   f"시트 {', '.join(r.sheets)}")
             sha256 = hashlib.sha256(r.path.read_bytes()).hexdigest()

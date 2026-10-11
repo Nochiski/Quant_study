@@ -9,7 +9,8 @@ Meta 에 적는다.
 `--stage-root` 로 덮는다(로컬 사본 대조 · 리허설).
 
 원천 날짜 상한은 엑셀 D 다. 단 WISE 에서 나온 원천(Analyst)은 fi 판 JSON 의 `wise_asof` 까지 —
-정규 판은 D 와 같고, 주말 보강판은 휴일 수집일 W(그 수집이 D 분 보고서 · 추정치를 담는다, N-45).
+아침판은 D, 장 마감 판은 D'(직전 거래일 — 장 마감 fi 의 asof, factor_inputs `build`), 주말 보강판은
+휴일 수집일 W(그 수집이 D 분 보고서 · 추정치를 담는다, N-45).
 """
 from __future__ import annotations
 
@@ -43,7 +44,7 @@ class Sources:
     stage_root: Path | None
     equity_pins: Mapping[str, str] = field(default_factory=dict)
     used: dict[str, str] = field(default_factory=dict)      # '층/표' → 판 id
-    # WISE 원천 상한 — fi 판 JSON 의 wise_asof(정규 판 = D, 주말 보강판 = 휴일 수집일 W, N-45).
+    # WISE 원천 상한 — fi 판 JSON 의 wise_asof(아침판 D · 장 마감 판 D' · 주말 보강판 W, N-45).
     # 없으면 엑셀 D 와 같다(`wise_upto`)
     wise_asof: date | None = None
 

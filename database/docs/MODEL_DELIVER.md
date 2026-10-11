@@ -225,12 +225,14 @@ Score 시트 축 칸은 **엔진 단위를 따른다**(10-08 사용자 결정 '�
   그런 판에서 앞 주 모델(`model.contracts.PRIMARY_PREDECESSOR`, `reader.history_spec`) 순위로 잇는다
   (바뀐 날부터 약 4주). 실제로 이은 날만 표시한다: Meta '전일 비교 데이터' · '1M 비교 데이터' 끝에
   '· scope_v1.0 순위', '순위 흐름 날짜' 끝에 '· MM-DD까지 scope_v1.0', Score 1M 흐름 머리 메모에
-  'MM-DD 이전은 scope_v1.0 순위', 주간 Meta '앞 주 모델로 이은 날'. 주 모델도 앞 주 모델도 없는 판은
-  예전처럼 그날을 뺀다.
+  'MM-DD까지는 scope_v1.0 순위(주 모델이 scope_v2.0으로 바뀌기 전)' — 두 곳의 MM-DD 는 같은 정의(앞 주 모델을
+  쓴 마지막 날, `older_mark`), 주간 Meta '앞 주 모델로 이은 날'(MM-DD scope_v1.0 순위(그날 데이터에 scope_v2.0
+  없음)). 주 모델도 앞 주 모델도 없는 판은 예전처럼 그날을 뺀다.
 - 추정치 유예 표시(N-47): 주 모델 유예가 있으면(scope_v2.0 · v4 = 5거래일) Score 비고에 '유예 n일째'
-  (지금 유예 중 — n = 마지막 신선일부터 거래일, 나이 0 은 생략) · '1M 유예 n일'(1M 흐름 날짜 중 그날 fi 판
-  fi_universe 가 유예였던 날 수 — 못 읽는 판은 건너뛴다. 주말 보강판은 장 마감 판 fi 루트 `--history-fi-root`
-  도 찾는다), 비고 머리 메모 범례 두 줄, 1M 흐름 머리 메모에
+  (지금 유예 중 — n = 마지막 신선일부터 거래일, 1 ≤ n ≤ 주 모델 유예 일수만 — 나이 0 · spec 유예 밖은 생략,
+  `in_grace`) · '1M 유예 n일'(1M 흐름 날짜 중 그날 fi 판 fi_universe 가 같은 규칙으로 유예였던 날 수 — 못 읽는
+  판은 건너뛴다. 주말 보강판은 장 마감 판 fi 루트 `--history-fi-root` 도 찾는다), 비고 머리 메모 범례 두 줄,
+  1M 흐름 머리 메모에
   '유예 중 순위는 마지막 신선일 추정치로 매긴 값'. Meta 유니버스 규칙은 '추정치 유예 5거래일'.
 - 주말 보강판(supplement, N-45 · DECISIONS §7 #8 — `scripts/weekend_supplement.sh` 가 `--basis supplement --send`
   로 부른다): 산출 `model_scores_<D>_supplement.xlsx`, 확정 양식 시트 4행 '기준일: D 주말 보강 데이터'(10-11 보강판

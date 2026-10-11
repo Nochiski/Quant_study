@@ -504,27 +504,27 @@ def test_analyst_saturday_fetch_counts_windows_from_friday(tmp_path: Path, con) 
     assert (tick(0), "F증권") in {(x.code, x.broker) for x in a.acts}
 
 
-@pytest.mark.parametrize(("case", "fetch_last", "wise", "end", "a4", "clause"), [
-    # 아침: 최신 수집 = D(18:05) — 그날 보고서는 다음 날 올라와 그래프는 D 전날까지(지금 규칙 그대로)
-    ("morning", D, None, DAYS[-2], "기준일: 2026-09-25", "기준일 보고서는 WISE 가 다음 날 올려 전날까지"),
-    # 장 마감(16시대): D 18:05 수집 전이라 최신 수집 = D−1 — 그래프는 그 전 거래일까지(지금 그대로)
-    ("evening", DAYS[-2], D, DAYS[-3], "기준일: 2026-09-24(원천 최신 · 엑셀 09-25)",
+@pytest.mark.parametrize(("case", "wise", "end", "a4", "clause"), [
+    # 아침: wise_asof = D — 최신 수집 = D(18:05), 그날 보고서는 다음 날 올라와 그래프는 D 전날까지
+    ("morning", D, DAYS[-2], "기준일: 2026-09-25", "기준일 보고서는 WISE 가 다음 날 올려 전날까지"),
+    # 장 마감: fi wise_asof = D'(직전 거래일, factor_inputs/build.py evening asof) — D 18:05 수집이 원천에
+    # 있어도(재생) 읽지 않아 최신 수집 = D', 그래프는 그 전 거래일까지
+    ("evening", DAYS[-2], DAYS[-3], "기준일: 2026-09-24(원천 최신 · 엑셀 09-25)",
      "기준일 보고서는 WISE 가 다음 날 올려 전날까지"),
     # 주말 보강: wise_asof = 휴일 수집일(토) — 그 수집이 D 보고서를 담아 그래프가 D 까지
-    ("supplement", D, SATURDAY, D, "기준일: 2026-09-25(WISE 휴일 아침 재수집 09-26)",
+    ("supplement", SATURDAY, D, "기준일: 2026-09-25(WISE 휴일 아침 재수집 09-26)",
      "휴일 수집이 기준일 보고서까지 담아 기준일까지"),
 ])
 def test_analyst_daily_chart_ends_at_the_last_report_day_wise_can_hold(
-        tmp_path: Path, con, case: str, fetch_last: date, wise: date | None, end: date, a4: str,
-        clause: str) -> None:
+        tmp_path: Path, con, case: str, wise: date, end: date, a4: str, clause: str) -> None:
     """N-45 · E5 — Analyst 일별 그래프 끝 = WISE 자료가 담을 수 있는 마지막 보고서 날짜 = 최신 수집일
-    앞 마지막 거래일. WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto` — 정규
-    판은 엑셀 D). 아침 · 장 마감은 지금 그대로, 주말 보강판은 토요일 수집(D 보고서, F증권 상향)이
-    들어와 D 까지 그린다. 같은 원천에 wise_asof 만 다른 아침판에는 토요일 수집이 없다. 보강판 글의
-    날짜는 WISE 기준일 D — 4행 '기준일: D(WISE 휴일 아침 재수집 W)', 5행 보고서 날짜 창 끝 D, 'D 보고서는
-    WISE 가 다음 날 올림' 대신 휴일 재수집으로 포함됐다는 말. 휴일(W) 날짜 보고서는 세지 않는다."""
+    앞 마지막 거래일. WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto` — 아침판
+    D · 장 마감 판 D' · 보강판 W). 같은 원천(D 수집 · 토요일 수집 모두 있음)에서 wise_asof 만 다르다.
+    주말 보강판은 토요일 수집(D 보고서, F증권 상향)이 들어와 D 까지 그린다. 보강판 글의 날짜는 WISE
+    기준일 D — 4행 '기준일: D(WISE 휴일 아침 재수집 W)', 5행 보고서 날짜 창 끝 D, 'D 보고서는 WISE 가
+    다음 날 올림' 대신 휴일 재수집으로 포함됐다는 말. 휴일(W) 날짜 보고서는 세지 않는다."""
     eq = tmp_path / "equity"
-    build_equity(eq, last=fetch_last, saturday_fetch=fetch_last == D)
+    build_equity(eq, saturday_fetch=True)
     wb, refs = book_with_refs()
     a = sheet_analyst.load(con, Sources(eq, None, {}, wise_asof=wise), D, UNI)
     defs = sheet_analyst.write(wb, a, UNI, refs, D)

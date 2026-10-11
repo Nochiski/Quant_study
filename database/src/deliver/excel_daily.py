@@ -481,10 +481,16 @@ class Grace:
     month: Mapping[str, int] = field(default_factory=dict)
 
 
+def in_grace(age: object, days: int) -> bool:
+    """주 모델 유예 안 — 1 ≤ 나이 ≤ spec 유예 일수. fi 유예 창(5)이 spec 보다 길어도 spec 밖 나이는
+    엔진이 이미 뺐으니 표지를 달지 않는다(나이 0 = 휴장 수집은 유예가 아니다)."""
+    return isinstance(age, int) and 1 <= age <= days
+
+
 def grace_of(view: DayView, fi_root: Path, trend: Trend,
              more_fi_roots: Sequence[Path] = ()) -> Grace:
     """주 모델 유예가 있으면 1M 흐름 날짜(`trend.dates` — 1M 흐름과 같은 창)마다 그날 fi 판
-    fi_universe 에서 coverage_state 가 grace(나이 ≥ 1)인 종목을 센다. fi 판은
+    fi_universe 에서 coverage_state 가 grace 이고 주 모델 유예 안(`in_grace`)인 종목을 센다. fi 판은
     `fi_root` 다음 `more_fi_roots`(주말 보강판의 장 마감 판 fi 루트)에서 찾고, 어디서도 못 읽으면(지운 fi
     판 · 다른 루트의 T-50 아침 판 · 열이 없는 옛 판) 그날은 세지 않는다."""
     days = 0 if view.spec is None else view.spec.universe.coverage_grace_days
@@ -506,19 +512,18 @@ def grace_of(view: DayView, fi_root: Path, trend: Trend,
                 log.info("1M 유예 일수 — %s fi 판 %s 를 %s 에서 읽지 못했다: %s",
                          day, r.fi_build_id, root, e)
         for x in rows or ():
-            age = x.get("coverage_age_days")
-            if isinstance(age, int) and age >= 1:
+            if in_grace(x.get("coverage_age_days"), days):
                 t = str(x["ticker"])
                 month[t] = month.get(t, 0) + 1
     return Grace(days, month)
 
 
 def grace_notes(grace: Grace, t: str, state: object, age: object) -> tuple[str | None, ...]:
-    """Score 비고 유예 표지 — 지금 유예 중이면 '유예 n일째'(n = 마지막 신선일부터 거래일),
-    1M 흐름 날짜 중 유예였던 날이 있으면 '1M 유예 n일'."""
+    """Score 비고 유예 표지 — 지금 유예 중이면 '유예 n일째'(n = 마지막 신선일부터 거래일,
+    `in_grace`), 1M 흐름 날짜 중 유예였던 날이 있으면 '1M 유예 n일'."""
     if not grace.days:
         return ()
-    now = f"유예 {age}일째" if state == "grace" and isinstance(age, int) and age >= 1 else None
+    now = f"유예 {age}일째" if state == "grace" and in_grace(age, grace.days) else None
     n = grace.month.get(t)
     return now, (f"1M 유예 {n}일" if n else None)
 
@@ -544,14 +549,6 @@ def older_mark(trend: Trend) -> tuple[str, str] | None:
         return None
     last = max(trend.older)
     return model_label(trend.older[last]), last[5:]
-
-
-def switch_day(trend: Trend) -> str | None:
-    """1M 흐름에서 주 모델 순위를 처음 쓴 날 MM-DD(그 앞은 앞 주 모델) — 앞 주 모델을 안 썼으면
-    None."""
-    if not trend.older:
-        return None
-    return next((d[5:] for d in trend.dates if d not in trend.older), None)
 
 
 
@@ -835,9 +832,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
     if grace.days:
         flow.append(f"유예: 추정치가 사라진 종목도 {grace.days}거래일 동안 유니버스에 남는다. 그동안 "
                     "순위는 마지막 신선일 추정치로 매긴 값(비고 '유예 n일째' · '1M 유예 n일')")
-    if (sw := switch_day(trend)) is not None and (mark := older_mark(trend)) is not None:
-        flow.append(f"{sw} 이전은 {mark[0]} 순위(주 모델이 {model_label(view.spec_id)} 로 "
-                    "바뀌기 전 — N-47)")
+    if (mark := older_mark(trend)) is not None:     # Meta '순위 흐름 날짜' 와 같은 날(older_mark)
+        flow.append(f"{mark[1]}까지는 {mark[0]} 순위(주 모델이 {model_label(view.spec_id)}으로 "
+                    "바뀌기 전)")
     if flow:
         ws.cell(7, sh.cols["t1m"]).comment = note(
             "\n".join(["1M 흐름: 1M 동안 날짜별 순위 꺾은선(위 = 상승, 선 색 = Δ순위 1M 부호)",
@@ -1638,6 +1635,10 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
     earnings_dict = sheet_earnings(wb, view, fi)
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
+    if supplement and not fi_meta.get("wise_asof"):
+        log.warning("주말 보강판 fi 판 JSON(%s _runs/%s_supplement.json, 판 %s)의 wise_asof 를 못 "
+                    "읽었다 — Analyst 는 휴일 재수집 없이 엑셀 D 까지만 읽는다", fi_root,
+                    ymd(run.date), run.fi_build_id)
     src = open_sources(fi_meta, equity_root, stage_root)
     extra = sheets_extra.build(wb, src, XRefs.of(wb["Sector"]), date.fromisoformat(run.date),
                                extra_universe(view), index=len(wb.worksheets),

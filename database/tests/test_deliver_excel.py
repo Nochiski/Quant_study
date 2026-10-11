@@ -2746,7 +2746,9 @@ def test_history_continues_from_the_predecessor_model(grace_board, tmp_path: Pat
     assert ws.cell(rows[T_A], h["전일 순위"]).value == 5
     assert ws.cell(rows[T_A], h["Δ순위 1M"]).value == 30 - int(cast(int, now_a))
     memo = ws.cell(7, h["1M 흐름"]).comment
-    assert memo is not None and "09-25 이전은 scope_v1.0 순위" in memo.text.replace("\xa0", " ")
+    assert memo is not None and (
+        "09-24까지는 scope_v1.0 순위(주 모델이 scope_v2.0으로 바뀌기 전)"
+        in memo.text.replace("\xa0", " ").replace("\n", " ")), memo.text
     tr = load_workbook(res.path)["trend"]
     assert [tr.cell(7, c).value for c in range(2, tr.max_column + 1)] == [
         "08-28", "09-15", "09-24", "09-25", "09-28"]
@@ -2762,7 +2764,7 @@ def test_history_continues_from_the_predecessor_model(grace_board, tmp_path: Pat
     assert ws.cell(rows[T_A], h["전일 순위"]).value == 10
     assert {ws.cell(r, h["변화"]).value for r in rows.values()} - {None}   # 변화를 매긴다
     memo = ws.cell(7, h["1M 흐름"]).comment
-    assert memo is not None and "09-28 이전은 scope_v1.0 순위" in memo.text.replace("\xa0", " ")
+    assert memo is not None and "09-24까지는 scope_v1.0 순위" in memo.text.replace("\xa0", " ")
     # 앞 주 모델도 없는 판은 빠진다(그날 다른 모델만) — 표시도 없다
     model2 = _history(grace_board, tmp_path / "c", {"2026-09-24": ("v3_zscore@1.0", "x")})
     res = build_daily(day0, "morning", model_root=model2, fi_root=grace_board[3] / "fi",
@@ -2785,12 +2787,48 @@ def test_weekly_marks_use_the_predecessor_model_on_older_days(grace_board,
     wb = load_workbook(w.path)
     meta = {wb["메타"].cell(r, 1).value: wb["메타"].cell(r, 2).value
             for r in range(8, wb["메타"].max_row + 1)}
-    assert meta["앞 주 모델로 이은 날"] == "09-24 scope_v1.0 순위(그날 판에 scope_v2.0 없음 — N-47)"
+    assert meta["앞 주 모델로 이은 날"] == "09-24 scope_v1.0 순위(그날 데이터에 scope_v2.0 없음)"
     from deliver.excel_weekly import load_week
     last = load_week(model, "2026-W39", "scope@2.0", fi_root=fi)
     assert {d: v.spec_id for d, v in last.views.items()} == {
         "2026-09-24": "scope@1.0", "2026-09-25": "scope@2.0"}
     assert last.views["2026-09-24"].rank(T_A) == 30         # 그날 scope@1.0 순위
+
+
+def test_t50_and_supplement_mark_the_predecessor(grace_board, tmp_path: Path) -> None:
+    """리뷰 M-6 — 앞 주 모델(N-47)과 대체 원천이 겹친 날의 Meta 글. ① 장 마감 판: evening 1M 비교 판이
+    없어 T-50 아침판(08-27, scope@1.0 뿐)을 쓰면 '1M 비교 데이터' = T-50 표시 뒤 '· scope_v1.0 순위', 전일
+    (09-25 evening, scope@1.0 뿐)도 '· scope_v1.0 순위'. ② 주말 보강판: 같은 재료(장 마감 루트 · 연구
+    루트)로 원천 표시 뒤에 앞 주 모델 표시가 붙고, 흐름 머리 메모는 Meta 와 같은 날(앞 주 모델을 쓴 마지막
+    날 09-25)을 적는다."""
+    _res, _wb, _scores, root = grace_board
+    research, ev, fi = tmp_path / "model", tmp_path / "model_db" / "model", root / "fi"
+    shutil.copytree(root / "model", research)
+    _evening_copy(research, ev, "2026-09-28")
+    _write_rank_run(ev, "2026-09-25", "scope@1.0", {T_A: 5, T_B: 6}, basis="evening")
+    _write_rank_run(research, "2026-08-27", "scope@1.0", {T_A: 30, T_B: 2})
+    e = build_daily("2026-09-28", "evening", model_root=ev, fi_root=fi, out_root=tmp_path / "e",
+                    trend_fallback_root=research)
+    me = dict(_meta_pairs(load_workbook(e.path)))
+    assert me["1M 비교 데이터"] == f"2026-08-27 {T50_NOTE} · scope_v1.0 순위"
+    assert me["전일 비교 데이터"] == "2026-09-25 e_20260925T000000Z · scope_v1.0 순위"
+    assert me["순위 흐름 날짜"] == "2026-08-27 ~ 2026-09-28 · 3개 · 09-25까지 scope_v1.0"
+    meta = json.loads((research / "_runs" / "20260928_morning.json").read_text(encoding="utf-8"))
+    (research / "_runs" / "20260928_supplement.json").write_text(
+        json.dumps({**meta, "basis": "supplement"}), encoding="utf-8")
+    sb = build_daily("2026-09-28", "supplement", model_root=research, fi_root=fi,
+                     out_root=tmp_path / "s", history_root=ev)
+    wb = load_workbook(sb.path)
+    ms = dict(_meta_pairs(wb))
+    assert ms["전일 비교 데이터"] == "2026-09-25 e_20260925T000000Z · 장 마감 데이터 · scope_v1.0 순위"
+    assert ms["1M 비교 데이터"] == "2026-08-27 · 아침 확정 데이터(대체) · scope_v1.0 순위"
+    assert ms["순위 흐름 날짜"] == ("2026-08-27 ~ 2026-09-28 · 3개 · 장 마감 데이터 · 아침 확정 "
+                                "데이터(대체) 1일(08-27) · 09-25까지 scope_v1.0")
+    sc = wb["Score"]
+    h, rows = header(sc), rows_by_code(sc)
+    assert sc.cell(rows[T_A], h["전일 순위"]).value == 5
+    memo = sc.cell(7, h["1M 흐름"]).comment
+    assert memo is not None and "09-25까지는 scope_v1.0 순위" in memo.text.replace("\xa0", " ")
 
 
 def test_grace_stock_remarks_and_flow_memo(grace_board, tmp_path: Path) -> None:
@@ -2827,7 +2865,9 @@ def test_grace_remark_rules() -> None:
     assert grace_notes(Grace(5, {"x": 4}), "x", "grace", 3) == ("유예 3일째", "1M 유예 4일")
     assert grace_notes(Grace(5, {}), "x", "grace", 0) == (None, None)    # 나이 0(휴장 수집)
     assert grace_notes(Grace(5, {}), "x", "fresh", None) == (None, None)
-
+    # 리뷰 M-3 — 주 모델 유예(2일)보다 나이가 많으면(fi 유예 창 5 안이어도) 표지 없음
+    assert grace_notes(Grace(2, {}), "x", "grace", 3) == (None, None)
+    assert grace_notes(Grace(2, {}), "x", "grace", 2) == ("유예 2일째", None)
 
 
 # ── E5(N-45) — 주말 보강판(basis supplement) ─────────────────────────────────────────────
@@ -2908,6 +2948,21 @@ def test_supplement_board_compares_like_the_evening_board(world: dict[str, Path]
     assert m2["순위 흐름 날짜"] == f"2026-08-24 ~ {FRI} · 7개 · 아침 확정 데이터(대체)"
     for name in ("Score", "trend"):
         assert _rows_from(w2[name], 7) == _rows_from(wm[name], 7), name
+
+
+def test_supplement_without_wise_asof_warns(world: dict[str, Path], tmp_path: Path,
+                                            caplog: pytest.LogCaptureFixture) -> None:
+    """리뷰 M-4 — 보강판의 fi 판 JSON(`_runs/<D>_supplement.json`)이나 그 wise_asof 를 못 읽으면 경고
+    한 줄(Analyst 는 휴일 재수집 없이 엑셀 D 까지만 읽는다). 아침판은 경고하지 않는다."""
+    model = _supplement_root(world, tmp_path)
+
+    def warned(basis: str) -> list[str]:
+        caplog.clear()
+        with caplog.at_level("WARNING", logger="deliver.excel_daily"):
+            build_daily(FRI, basis, model_root=model, fi_root=world["fi"],
+                        out_root=tmp_path / basis)
+        return [r.getMessage() for r in caplog.records if "wise_asof" in r.getMessage()]
+    assert len(warned("supplement")) == 1 and warned("morning") == []
 
 
 def test_cli_supplement_send_has_its_own_ledger_key(world: dict[str, Path], tmp_path: Path,

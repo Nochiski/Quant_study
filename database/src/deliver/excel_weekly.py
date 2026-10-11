@@ -511,7 +511,7 @@ def _meta_pairs(base: DayView, week: Week, last: Week | None,
     if older:
         pairs.append(("앞 주 모델로 이은 날", " · ".join(f"{d[5:]} {model_label(sid)}"
                                                     for d, sid in older)
-                      + f" 순위(그날 판에 {model_label(base.spec_id)} 없음 — N-47)"))
+                      + f" 순위(그날 데이터에 {model_label(base.spec_id)} 없음)"))
     pairs += [("유니버스 규칙", universe_text(base)),
               ("후보 규칙", f"상위 {base.output.top_n} · {base.output.sector_level} 업종당 최대 "
                         f"{base.output.max_per_sector} · 기준일 순위순")]

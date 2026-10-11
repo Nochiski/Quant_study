@@ -20,8 +20,9 @@
   100099 J      common, delisted  — 층에 싣지 않는다
   100120~160    common KOSPI      전 수집일(보통 종목 5 — eligible 을 10 으로 채운다)
 
-기대 상태는 유예 G=5 기준이다 — `built` 픽스처가 유예 경로를 시험하려고 `grace_days=5` 를 명시한다.
-기본값은 0(N-14)이라 기본 빌드에서는 B·C 도 lapsed 다(`test_default_grace_is_zero…`).
+기대 상태는 유예 창 G=5 기준이다 — fi 기본 창 `FI_COVERAGE_GRACE_MAX`(N-47)와 같다. `built` 픽스처의
+`grace_days=5` 는 기본이 0(N-14)이던 때부터 명시한 인자다(`test_default_grace_window_is_five…`).
+spec 마다 다른 유예(scope_v1.0 = 0)는 엔진이 다시 자른다(`tests/test_model_grace.py`).
 """
 from __future__ import annotations
 
@@ -45,7 +46,7 @@ from deliver.view import DayView
 from factor_inputs import FactorInputsError, build
 from factor_inputs.__main__ import main as cli_main
 from model.build import load_inputs
-from model.contracts import FI_TABLES, FLOW_SUBJECTS, UniverseRule
+from model.contracts import FI_COVERAGE_GRACE_MAX, FI_TABLES, FLOW_SUBJECTS, UniverseRule
 from model.engines import v4_rank
 from stage import manifest
 
@@ -712,19 +713,69 @@ def test_grace_days_parameter_moves_the_boundary(roots, tmp_path: Path) -> None:
     assert res.coverage["n_lapsed_dropped"] == 2
 
 
-def test_default_grace_is_zero_so_absent_estimates_lapse(roots, tmp_path: Path) -> None:
-    """기본 유예 0(N-14) — 최신 수집일(D*)에 추정치가 없으면 나이와 상관없이 lapsed 로 빠진다."""
-    assert UniverseRule().coverage_grace_days == 0
-    out = tmp_path / "fi"
-    res = build(D_S, "morning", out, roots[1], roots[0], min_eligible=1, golden_path=None)
+@pytest.fixture(scope="module")
+def built_default(roots, tmp_path_factory):
+    """인자 없는 기본 빌드(유예 창 = FI_COVERAGE_GRACE_MAX)."""
+    out = tmp_path_factory.mktemp("fi_default") / "factor_inputs"
+    return out, build(D_S, "morning", out, roots[1], roots[0], min_eligible=1, golden_path=None)
+
+
+def test_default_grace_window_is_five_so_grace_stocks_stay_eligible(built_default) -> None:
+    """기본 유예 창 5거래일(N-47, 옛 기본 0 — N-14) — 나이 1·5 인 B·C 는 grace 로 eligible, 나이 6 인
+    Dd 만 lapsed 로 빠진다. spec 기본 유예(UniverseRule)는 0 그대로다(엔진이 다시 자른다)."""
+    assert FI_COVERAGE_GRACE_MAX == 5 and UniverseRule().coverage_grace_days == 0
+    out, res = built_default
     assert res.ok
     got = {r[0]: r[1:] for r in q(out, "fi_universe",
            "SELECT ticker, coverage_state, coverage_age_days, eligible, exclude_reason FROM t")}
-    assert got[B] == ("lapsed", 1, False, "estimates_lapsed")
-    assert got[C] == ("lapsed", 5, False, "estimates_lapsed")
+    assert got[B] == ("grace", 1, True, None)
+    assert got[C] == ("grace", 5, True, None)
+    assert got[DD] == ("lapsed", 6, False, "estimates_lapsed")
     assert got[A][0] == "fresh" and got[E][0] == "fresh"
-    assert res.coverage["n_lapsed_dropped"] == 3
-    assert "grace" not in res.coverage["counts"]
+    assert res.coverage["n_lapsed_dropped"] == 1 and res.coverage["grace_days"] == 5
+    assert res.coverage["counts"] == {"fresh": 10, "grace": 2, "lapsed": 1, "none": 2}
+    run = json.loads(res.run_manifest.read_text(encoding="utf-8"))
+    assert run["universe_rule"]["coverage_grace_days"] == FI_COVERAGE_GRACE_MAX
+
+
+def _coverage_states(fresh: dict[str, list[dt.date]], fetched: list[dt.date],
+                     grace_days: int) -> dict[str, tuple[str, int]]:
+    """판 빌드 없이 신선도 SQL(`_cov`)만 돌린다. `fresh` = 종목 → 당해 12월기 op·ni 추정이 있는
+    수집일, `fetched` = 그 밖의 수집일(전 종목 공통 D* 를 만든다). 달력 = 합성 트리 SESSIONS."""
+    from factor_inputs import queries
+    con = duckdb.connect()
+    try:
+        con.execute("CREATE TABLE trading_calendar (date DATE)")
+        con.executemany("INSERT INTO trading_calendar VALUES (?)", [(s,) for s in SESSIONS])
+        con.execute("CREATE TABLE stg_consensus_annual (ticker VARCHAR, fetched_date DATE, "
+                    "period_kind VARCHAR, period VARCHAR, op DOUBLE, ni DOUBLE)")
+        rows = [(t, f, "E", "202612", 1.0, 1.0) for t, days in fresh.items() for f in days]
+        rows += [("100999", f, "A", "202512", 1.0, 1.0) for f in fetched]
+        con.executemany("INSERT INTO stg_consensus_annual VALUES (?, ?, ?, ?, ?, ?)", rows)
+        p = queries.Params(d=D.isoformat(), fy="202612", price_from=D.isoformat(),
+                           flow_from=D.isoformat(), grace_days=grace_days, credit_lag=0)
+        con.execute(queries.calendar_sql())
+        for sql in queries.coverage_sqls(p):
+            con.execute(sql)
+        return {str(t): (str(s), int(a)) for t, s, a in con.execute(
+            "SELECT ticker, coverage_state, coverage_age_days FROM _cov").fetchall()}
+    finally:
+        con.close()
+
+
+def test_grace_window_five_marks_ages_one_to_five_grace_and_six_lapsed() -> None:
+    """N-47 유예 창(FI_COVERAGE_GRACE_MAX) — 마지막 신선일이 D* 보다 k 거래일 앞이면 나이 k:
+    0 fresh · 1~5 grace · 6 lapsed. 휴장일 수집(09-25 — 마지막 신선일 09-23 과 D* 사이에 거래일이
+    없다)은 나이 0 인데 D* 가 아니라 grace 다(유예 0 spec 도 남긴다 — 엔진 `estimates_lapsed`)."""
+    fresh = {f"A{k}": [SESSIONS[-1 - k]] for k in range(7)}
+    got = _coverage_states(fresh, [D], FI_COVERAGE_GRACE_MAX)
+    assert got == {"A0": ("fresh", 0), **{f"A{k}": ("grace", k) for k in range(1, 6)},
+                   "A6": ("lapsed", 6)}
+    holiday = dt.date(2026, 9, 25)
+    assert holiday in HOLIDAYS and SESSIONS[SESSIONS.index(dt.date(2026, 9, 23)) + 1] == D
+    got = _coverage_states({"HOL": [dt.date(2026, 9, 23)]}, [holiday],
+                           FI_COVERAGE_GRACE_MAX)
+    assert got == {"HOL": ("grace", 0)}
 
 
 def test_universe_attributes_market_cap_and_sector(built) -> None:

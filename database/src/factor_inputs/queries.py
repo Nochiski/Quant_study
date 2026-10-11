@@ -116,7 +116,7 @@ class Params:
     fy: str                 # 당해 12월기 'YYYY12' — 추정치 신선도 판정 기준(compat 과 같다)
     price_from: str         # D − 550 달력일
     flow_from: str          # D 까지 60 세션의 첫 세션
-    grace_days: int         # UniverseRule.coverage_grace_days
+    grace_days: int         # 유예 창 — build 기본 FI_COVERAGE_GRACE_MAX(5, N-47) · --grace-days
     credit_lag: int         # 신용잔고 실입수 랙(세션, equity FieldProfile)
     basis: str = "morning"  # morning | evening(장 마감 판 — 컷오버 T-2)
     asof: str = ""          # 정보 시점(YYYY-MM-DD) — 비우면 d. 장 마감 판은 D'(모듈 docstring)

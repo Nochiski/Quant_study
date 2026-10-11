@@ -71,7 +71,7 @@ import duckdb
 from daily import calendar as daily_calendar
 from equity import handoff, inputs
 from equity.rules_s10 import FIELDS as CREDIT_FIELDS
-from model.contracts import FI_TABLES, UniverseRule
+from model.contracts import FI_COVERAGE_GRACE_MAX, FI_TABLES, UniverseRule
 from stage import manifest, skip_allow
 from stage.gates import GateResult, GateStatus
 from stage.model import basis_of_build_id, build_id_time, make_build_id
@@ -103,7 +103,11 @@ from . import gates, queries
 # 1.8.0(2026-10-10, 컷오버 F-1 · T-43): fi_fin_summary DART 4Q 파생 분기 행의 available_date — 파생값을
 # 실은 행(q4_derived_available_date ≤ asof)은 max(사업보고서 available_date, q4_derived_available_date)
 # (연간 행과 같은 '원천들의 max'). 값·엔진 입력은 그대로
-RULES_VERSION = "fi1.8.0"
+# 1.9.0(2026-10-12, N-47 · 엑셀 확정분 E2): 추정치 유예 창 기본 0 → FI_COVERAGE_GRACE_MAX(5)
+# — 나이 1~5 grace 종목이 eligible 이고 컨센서스·WISE 재무·추정기관 수를 마지막 신선일 판으로
+# 싣는다. 유예가 더 짧은 spec(원본 미러·scope_v1.0 = 0)은 엔진이 coverage 열로 다시 자른다
+# (창은 `--grace-days` 로 덮을 수 있다)
+RULES_VERSION = "fi1.9.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
@@ -424,7 +428,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             "keep 이 하루 2판씩 소모돼 모델 판이 가리키는 fi 판이 GC 된다. --root data/model_db/"
             "factor_inputs 로 분리한다(T-3)")
     dprime = _evening_dprime(d, calendar_dir) if evening else None
-    rule = UniverseRule() if grace_days is None else UniverseRule(coverage_grace_days=grace_days)
+    # 유예 창 기본 = FI_COVERAGE_GRACE_MAX(5, N-47) — spec 마다 다른 유예는 엔진이 다시 자른다
+    rule = UniverseRule(
+        coverage_grace_days=FI_COVERAGE_GRACE_MAX if grace_days is None else grace_days)
     if rule.coverage_grace_days < 0:
         raise FactorInputsError(f"--grace-days 는 0 이상: {rule.coverage_grace_days}")
     bid = build_id or make_build_id(basis)

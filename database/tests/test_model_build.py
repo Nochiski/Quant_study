@@ -251,7 +251,10 @@ def test_real_factor_inputs_build_feeds_the_model(tmp_path) -> None:
                 min_prices_on_d=1)
     assert res.ok, res.specs
     assert res.fi_build_id == fi.build_id
-    assert res.specs[V2]["n_scores"] == fi.coverage["n_eligible"]
+    # fi 유예 창 5(N-47)라 grace 종목 B(나이 1)·C(나이 5)도 eligible 이지만 v2(유예 0)는 다시 뺀다
+    n_grace = fi.coverage["counts_eligible"]["grace"]
+    assert n_grace == 2
+    assert res.specs[V2]["n_scores"] == fi.coverage["n_eligible"] - n_grace
 
 
 # ── 게이트 FAIL · 판 유지 ────────────────────────────────────────────────────

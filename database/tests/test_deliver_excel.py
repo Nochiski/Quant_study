@@ -408,8 +408,11 @@ def test_daily_sheets_and_row_counts(daily) -> None:
     res, wb = daily
     assert res.path.name == "model_scores_20260925_morning.xlsx"
     assert res.path.parent.name == "daily"
-    # 확정 양식 순서(샘플 22) — 지표(표시용) 시트는 뺐다(10-11 사용자)
-    assert wb.sheetnames == ["Score", "Sector", "Earnings", "Compare", "Raw", "Meta", "trend"]
+    # 확정 양식 순서(샘플 22 · 30) — 지표(표시용) 시트는 뺐다(10-11 사용자). 새 시트 여섯은 이
+    # 합성 세계에 equity · stage 원천이 없어 '데이터 없음' 한 줄로 선다(test_deliver_extra_sheets)
+    assert wb.sheetnames == ["Score", "Sector", "Earnings", "Analyst", "Events", "Market", "ETF",
+                             "Flow", "Short", "Compare", "Raw", "Meta", "trend"]
+    assert wb["ETF"]["A6"].value.startswith("데이터 없음: ")
     assert wb["trend"].sheet_state == "hidden"                 # 그래프 원자료(숨김)
     assert res.sheets == wb.sheetnames[:-1]                         # 보이는 시트만 알린다
     for name in ("Score", "Raw", "Earnings", "Compare"):

@@ -1,7 +1,8 @@
 """매일 엑셀 `data/deliver/daily/model_scores_<YYYYMMDD>_<basis>.xlsx` (MODEL_EXCEL_SPEC A).
 
-확정 양식(샘플 22 — DECISIONS §7 #6·#7)을 직접 만든다. 시트: Score → Sector → Earnings → Compare →
-Raw → Meta → trend(숨김, 1M 흐름 원자료). 값만(수식 없음).
+확정 양식(샘플 22 — DECISIONS §7 #6·#7)을 직접 만든다. 시트: Score → Sector → Earnings →
+Analyst · Events · Market · ETF · Flow · Short(새 시트 — 샘플 28 · 30, `sheets_extra`) → Compare → Raw →
+Meta → trend(숨김, 1M 흐름 원자료). 값만(수식 없음).
 행 = 주 모델(run.primary_spec) 모집단 — 순위 종목(순위순) 뒤에 제외 종목(코드순).
 Raw 지표 열은 레지스트리 `role` 이 가른다(score). 표시용(display) 지표 시트는 10-11 사용자
 결정으로 뺐다.
@@ -23,6 +24,7 @@ from openpyxl.formatting.rule import FormulaRule, Rule
 from openpyxl.styles import Alignment, Border, Font, PatternFill
 from openpyxl.styles.differential import DifferentialStyle
 
+from . import sheets_extra
 from .common import (
     BASIS_NOTES,
     PREV_NEGATIVE_FLAGS,
@@ -38,6 +40,7 @@ from .common import (
     split_flags,
     yoy,
 )
+from .extra_common import Stock
 from .qpack import (
     C_HDR,
     SIDE_HDR,
@@ -48,7 +51,10 @@ from .qpack import (
     Group,
     Page,
     Title,
+    XRefs,
+    add_column_sparklines,
     add_sparklines,
+    finish_charts,
     font,
     new_workbook,
     note,
@@ -70,6 +76,7 @@ from .reader import (
     read_scores,
     ymd,
 )
+from .sources import open_sources
 from .trend import FALLBACK_NOTE, WINDOWS, Trend, load_trend, spark_groups
 from .trend import write_sheet as write_trend_sheet
 from .view import DayView, composite_of, load_day, rank_of, ticker_of
@@ -1402,11 +1409,26 @@ def save_atomic(wb: Workbook, path: Path) -> None:
     os.replace(tmp, path)
 
 
+def extra_universe(view: DayView) -> dict[str, Stock]:
+    """새 시트의 종목 유니버스 = Score 시트 행(같은 순서) — 이름 · 대분류 · 종합 순위 · 시총 ·
+    Raw 모멘텀 1M(%)."""
+    out: dict[str, Stock] = {}
+    for row in view.rows:
+        t = ticker_of(row)
+        v = id_values(view, t)
+        r1m = _num(row.get("r1m"))
+        out[t] = Stock(t, str(v["name"]), str(v["l1"]), rank_of(row), _num(v["mcap"]),
+                       None if r1m is None else r1m * 100)
+    return out
+
+
 def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, out_root: Path,
                 config_dir: Path | None = None,
-                trend_fallback_root: Path | None = None) -> DailyResult:
+                trend_fallback_root: Path | None = None, equity_root: Path | None = None,
+                stage_root: Path | None = None) -> DailyResult:
     """`trend_fallback_root` = 장 마감 판(evening) 1M 비교 판이 evening 이력에 없을 때 대신 읽을
-    아침 확정판 model 루트(T-50, `load_trend`). None 이면 대체하지 않는다. 아침 판은 받아도 무시."""
+    아침 확정판 model 루트(T-50, `load_trend`). None 이면 대체하지 않는다. 아침 판은 받아도 무시.
+    `equity_root` · `stage_root` = 새 시트 원천 루트(없으면 fi 판 JSON 의 루트)."""
     run = load_run(model_root, d, basis)
     view = load_day(model_root, fi_root, run, config_dir=config_dir)
     fi = load_fi(fi_root, view)
@@ -1422,17 +1444,22 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root)
     cands = candidates(view, prev_rank)
 
-    # 시트 순서 = 확정 양식(Score · Sector · Earnings · Compare · Raw · Meta · trend).
-    # Meta 열 사전은 옛 순서(Score · Raw · Earnings · Sector · Compare) 뒤에 Score 후보 두 줄
+    # 시트 순서 = 확정 양식(Score · Sector · Earnings · 새 시트 여섯 · Compare · Raw · Meta · trend).
+    # Meta 열 사전은 옛 순서(Score · Raw · Earnings · Sector · Compare) 뒤에 Score 후보 두 줄, 그 뒤
+    # 새 시트(ETF · Analyst · Events · Market · Flow · Short)
     wb = new_workbook()
     wb.remove(wb.worksheets[0])
     score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands)
     sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
     earnings_dict = sheet_earnings(wb, view, fi)
+    fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
+    src = open_sources(fi_meta, equity_root, stage_root)
+    extra = sheets_extra.build(wb, src, XRefs.of(wb["Sector"]), date.fromisoformat(run.date),
+                               extra_universe(view), index=len(wb.worksheets))
     compare_dict = sheet_models(wb, view)
     raw_dict = sheet_raw(wb, view, fi)
     dictionary: Dictionary = [*score_dict, *raw_dict, *earnings_dict, *sector_dict, *compare_dict]
-    pairs = meta_pairs(view, fi_run_meta(fi_root, run.date, basis, run.fi_build_id), fi, cands)
+    pairs = meta_pairs(view, fi_meta, fi, cands)
     insert_after(pairs, "model 생성 시각", [
         ("전일 비교 데이터", "없음" if prev is None else f"{prev.date} {prev.build_id}"),
         *((f"{w} 비교 데이터", f"{trend.base[w]} {FALLBACK_NOTE}" if w in trend.fallback
@@ -1443,14 +1470,18 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     insert_after(pairs, "equity 데이터 id", [
         ("엑셀 생성 시각", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
         ("코드 rev", deployed_rev())])
+    insert_after(pairs, "코드 rev", [("새 시트 데이터 id", src.used_text())])
     write_meta_confirmed(wb, band(view, "Meta: 데이터 정보와 열 사전", None,
                                   [(None, "위: 데이터 정보 · 아래({hdr}행~): 시트별 열 사전")],
                                   meta=True),
-                         pairs, dictionary, score_tail)
+                         pairs, dictionary, score_tail, extra.defs)
     tickers = [ticker_of(r) for r in view.rows]
     write_trend_sheet(wb, tickers, trend)
     path = daily_path(out_root, run.date, basis)
     save_atomic(wb, path)
+    finish_charts(path, wb)
+    for sheet, cells in extra.sparks.items():
+        add_column_sparklines(path, sheet, cells)
     score_ws = wb["Score"]
     heads = {str(score_ws.cell(7, c).value): score_ws.cell(7, c).column_letter
              for c in range(1, score_ws.max_column + 1)}

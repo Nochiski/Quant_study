@@ -1,5 +1,5 @@
 # 장 마감 체인 설정 읽기 — config/postclose_chain.env 를 읽어 스위치를 정하는 공용 조각(컷오버 PR-8 · PR-9).
-#   쓰는 곳: postclose_chain.sh(세 모드) · model_daily.sh(아침 발송 — 전환 뒤 짓기만·대체 발송) ·
+#   쓰는 곳: postclose_chain.sh(세 모드) · model_daily.sh(아침 발송 — 전환 뒤 짓기만·대체 발송 · fi 게이트 경고) ·
 #            watchdog.sh morning_build(B-57 발송 장부 — 전환 뒤 두 장부) · daily_ledger.sh·daily_evening.sh(휴장 파일
 #            내보내기 스위치 calendar_export_v3_on 만 — T-48). 설정 판정은 이 파일 한 곳이다 —
 #            설정 파일이 셸 대입이라 셸이 읽은 결과를 쓰고, 워치독 파이썬에는 결과(CUTOVER)를 인자로 넘긴다.
@@ -69,4 +69,29 @@ calendar_export_v3_on() {
              gsub(/^[ \t\r]+|[ \t\r]+$/, "", val); gsub(/^["\047]+|["\047]+$/, "", val); v = val }
            END { printf "%s", v }' config/calendar_export.env 2>/dev/null) || return 1
   [ "$v" = 1 ]
+}
+# fi 게이트 경고 읽기 — 판정은 통과지만 사람이 봐야 하는 게이트 경고(metrics.warn 이 참 — FG5 후보 중 T-6 보류 T-37 ·
+# FG-fresh 유예 종목 몰림 N-47)를 fi 판 manifest(`_runs/<D>_<basis>.json`)에서 읽는다(fi 코드는 그대로). 두 체인이 같은
+# 판정을 쓰도록 여기 한 곳에 둔다 — 쓰는 곳: postclose_chain.sh ③ fi(장 마감 판) · model_daily.sh(아침 확정판).
+#   사용: fi_gate_warns <판 manifest 경로>   ($PY = 체인의 python)
+#   출력: 경고마다 한 줄 "<게이트>\t<detail 앞 300자>". manifest 를 못 읽으면 "manifest_unreadable\t<사유>" 한 줄
+#         (경고를 확인하지 못한 것도 사람이 봐야 한다). 경고가 없으면 빈 출력. 파이썬은 늘 rc 0 으로 끝난다
+#         (판정을 바꾸지 않는다 — 부르는 쪽은 출력만 본다).
+fi_gate_warns() {
+  $PY - "$1" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        run = json.load(f)
+    gates = run["gates"]
+except (OSError, ValueError, KeyError, TypeError) as e:
+    print(f"manifest_unreadable\t판 manifest {sys.argv[1]} 를 읽지 못해 게이트 경고를 확인하지 못했다"
+          f"({type(e).__name__})")
+    raise SystemExit(0) from None
+for g in gates:
+    if isinstance(g, dict) and isinstance(g.get("metrics"), dict) and g["metrics"].get("warn") is True:
+        print(f"{g.get('name')}\t{str(g.get('detail'))[:300]}")
+PY
 }

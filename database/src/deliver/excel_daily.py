@@ -1457,6 +1457,19 @@ def extra_universe(view: DayView) -> dict[str, Stock]:
     return out
 
 
+def finish_extra(path: Path, wb: Workbook, sparks: Mapping[str, Sequence[tuple[str, str]]]) -> None:
+    """새 시트 저장 뒤 손질 — 그래프 값 사본 · 날짜 축 · 제목 끔(`finish_charts`)과 셀 안 막대.
+    실패해도 엑셀은 낸다: 손질 전 파일도 그대로 열리는 엑셀이고(그래프는 엑셀이 셀에서 다시 그린다),
+    손질 함수는 임시 파일을 스스로 지운다. 경고 로그만 남긴다."""
+    try:
+        finish_charts(path, wb)
+        for sheet, cells in sparks.items():
+            add_column_sparklines(path, sheet, cells)
+    except Exception:  # noqa: BLE001  # reason: 저장 뒤 손질 실패가 그날 엑셀을 막지 않는다(I-3)
+        log.warning("새 시트 저장 뒤 손질(그래프 값 사본 · 셀 안 막대)을 못 했다 — 손질 전 엑셀을 "
+                    "그대로 낸다: %s", path.name, exc_info=True)
+
+
 def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, out_root: Path,
                 config_dir: Path | None = None,
                 trend_fallback_root: Path | None = None, equity_root: Path | None = None,
@@ -1520,9 +1533,7 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     write_trend_sheet(wb, tickers, trend)
     path = daily_path(out_root, run.date, basis)
     save_atomic(wb, path)
-    finish_charts(path, wb)
-    for sheet, cells in extra.sparks.items():
-        add_column_sparklines(path, sheet, cells)
+    finish_extra(path, wb, extra.sparks)
     score_ws = wb["Score"]
     heads = {str(score_ws.cell(7, c).value): score_ws.cell(7, c).column_letter
              for c in range(1, score_ws.max_column + 1)}

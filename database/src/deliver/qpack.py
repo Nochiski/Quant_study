@@ -25,7 +25,7 @@ import os
 import re
 import unicodedata
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import copy
 from dataclasses import dataclass
 from datetime import date
@@ -982,23 +982,34 @@ def add_column_sparklines(path: Path, sheet: str, cells: Sequence[tuple[str, str
     return len(cells)
 
 
+def _rewrite(path: Path, suffix: str, edit: Callable[[str, bytes], bytes]) -> None:
+    """저장된 xlsx 의 파트마다 edit(이름, 내용)을 거쳐 원자적으로 바꾼다. 도중에 실패하면 임시 파일을
+    지우고 원본은 그대로 둔다(손질 전 엑셀도 그대로 열린다)."""
+    tmp = path.with_name(f".{path.name}.{suffix}.tmp")
+    try:
+        with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                zout.writestr(item, edit(item.filename, zin.read(item.filename)))
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def _add_ext(path: Path, sheet: str, ext: str) -> None:
     """저장된 xlsx 의 `sheet` XML 끝 extLst 에 ext 하나를 넣는다(파일은 원자적 교체)."""
-    tmp = path.with_name(f".{path.name}.ext.tmp")
-    with zipfile.ZipFile(path) as zin:
-        part = _sheet_part(zin, sheet)
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                if item.filename == part:
-                    xml = data.decode("utf-8")
-                    if "</extLst>" in xml:
-                        xml = xml.replace("</extLst>", ext + "</extLst>", 1)
-                    else:
-                        xml = xml.replace("</worksheet>", f"<extLst>{ext}</extLst></worksheet>", 1)
-                    data = xml.encode("utf-8")
-                zout.writestr(item, data)
-    os.replace(tmp, path)
+    with zipfile.ZipFile(path) as z:
+        part = _sheet_part(z, sheet)
+
+    def edit(name: str, data: bytes) -> bytes:
+        if name != part:
+            return data
+        xml = data.decode("utf-8")
+        if "</extLst>" in xml:
+            xml = xml.replace("</extLst>", ext + "</extLst>", 1)
+        else:
+            xml = xml.replace("</worksheet>", f"<extLst>{ext}</extLst></worksheet>", 1)
+        return xml.encode("utf-8")
+    _rewrite(path, "ext", edit)
 
 
 # ── 새 시트 문법(ETF · Analyst · Events · Market · Flow · Short — 확정 샘플 28 · 30) ─────────
@@ -1265,33 +1276,27 @@ def finish_charts(path: Path, wb: Workbook) -> int:
             return f"<cat><strRef><f>{m[1]}</f>{cache('str', m[1])}</strRef></cat>"
         return f"<cat><numRef><f>{m[1]}</f>{cache('date', m[1])}</numRef></cat>"
 
-    path = Path(path)
-    tmp = path.with_name(f".{path.name}.chart.tmp")
     n = 0
-    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
-        for item in zin.infolist():
-            data = zin.read(item.filename)
-            name = item.filename
-            if name.startswith("xl/charts/chart") and name.endswith(".xml"):
-                s = data.decode("utf-8")        # openpyxl 은 차트를 기본 이름공간(접두사 없음)으로 쓴다
-                if (s.count("<chart><plotArea>") != 1 or "autoTitleDeleted" in s
-                        or "majorGridlines" in s):
-                    raise ValueError(f"그래프 XML 모양이 예상과 다르다(openpyxl 판 변경?): {name}")
-                s = s.replace("<chart><plotArea>", '<chart><autoTitleDeleted val="1" /><plotArea>')
-                s = s.replace("<a:r><a:t /></a:r>", "")
-                s = s.replace('<crosses val="autoZero" /><lblOffset',
-                              '<crosses val="autoZero" /><auto val="1" /><lblOffset')
-                s = re.sub(r"<cat><numRef><f>(.*?)</f></numRef></cat>", cat, s)
-                s = re.sub(r"<val><numRef><f>(.*?)</f></numRef></val>",
-                           lambda m: f"<val><numRef><f>{m[1]}</f>{cache('num', m[1])}</numRef></val>",
-                           s)
-                s = re.sub(r"<tx><strRef><f>(.*?)</f></strRef></tx>",
-                           lambda m: f"<tx><strRef><f>{m[1]}</f>{cache('str', m[1])}</strRef></tx>",
-                           s)
-                data = s.encode("utf-8")
-                n += 1
-            zout.writestr(item, data)
-    os.replace(tmp, path)
+
+    def edit(name: str, data: bytes) -> bytes:
+        nonlocal n
+        if not (name.startswith("xl/charts/chart") and name.endswith(".xml")):
+            return data
+        s = data.decode("utf-8")        # openpyxl 은 차트를 기본 이름공간(접두사 없음)으로 쓴다
+        if s.count("<chart><plotArea>") != 1 or "autoTitleDeleted" in s or "majorGridlines" in s:
+            raise ValueError(f"그래프 XML 모양이 예상과 다르다(openpyxl 판 변경?): {name}")
+        s = s.replace("<chart><plotArea>", '<chart><autoTitleDeleted val="1" /><plotArea>')
+        s = s.replace("<a:r><a:t /></a:r>", "")
+        s = s.replace('<crosses val="autoZero" /><lblOffset',
+                      '<crosses val="autoZero" /><auto val="1" /><lblOffset')
+        s = re.sub(r"<cat><numRef><f>(.*?)</f></numRef></cat>", cat, s)
+        s = re.sub(r"<val><numRef><f>(.*?)</f></numRef></val>",
+                   lambda m: f"<val><numRef><f>{m[1]}</f>{cache('num', m[1])}</numRef></val>", s)
+        s = re.sub(r"<tx><strRef><f>(.*?)</f></strRef></tx>",
+                   lambda m: f"<tx><strRef><f>{m[1]}</f>{cache('str', m[1])}</strRef></tx>", s)
+        n += 1
+        return s.encode("utf-8")
+    _rewrite(Path(path), "chart", edit)
     return n
 
 

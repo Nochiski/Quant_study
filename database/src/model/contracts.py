@@ -386,7 +386,7 @@ class ModelSpec:
 class FactorInputs:
     """판 하나의 입력. `tables` = 표 이름 → 행(dict) 목록. 엔진은 이 밖을 읽지 않는다."""
     date: str             # 판 기준일 D (YYYY-MM-DD)
-    basis: str            # evening | morning
+    basis: str            # evening | morning | supplement(주말 보강판 N-45)
     build_id: str         # factor_inputs 판 id
     tables: Mapping[str, Sequence[Mapping[str, object]]]
 

@@ -751,6 +751,38 @@ def test_mg5_compares_only_with_the_same_basis(tmp_path) -> None:
     assert manifest.load(root / V2 / "MANIFEST.json").current_build == e2.build_id
 
 
+def test_supplement_basis_is_its_own_board(tmp_path, capsys) -> None:
+    """주말 보강판(N-45) — basis supplement 는 fi `latest_supplement.json` 을 읽어 `_runs/<D>_supplement.json`·
+    `latest_supplement.json` 에 쓴다(판 id s_). 같은 루트의 아침판 기록·포인터는 그대로고, MG5 는 보강판끼리만
+    견준다(아침판이 있어도 첫 보강판은 견줄 판이 없다). CLI 도 받는다."""
+    fi = board_fi()
+    sup_fi = "s_20261010T003000_000000Z"
+    tree = write_fi_tree(tmp_path / "fi", fi, FI_BID, basis="morning", grace=5)
+    write_fi_tree(tree, replace(fi, basis="supplement", build_id=sup_fi), sup_fi,
+                  basis="supplement", grace=5)
+    root = tmp_path / "model"
+    m1 = build(D_S, "morning", root, tree, specs=[V2], primary=V2, **SMALL)
+    s1 = build(D_S, "supplement", root, tree, specs=[V2], primary=V2, **SMALL)
+    assert m1.ok and s1.ok, s1.specs
+    assert s1.build_id.startswith("s_") and s1.fi_build_id == sup_fi
+    assert s1.run_manifest == root / "_runs" / f"{D_S}_supplement.json"
+    assert json.loads((root / "latest_supplement.json").read_text())["build_id"] == s1.build_id
+    assert json.loads((root / "latest_morning.json").read_text())["build_id"] == m1.build_id
+    assert json.loads((root / "_runs" / f"{D_S}_morning.json").read_text())["build_id"] == \
+        m1.build_id
+    assert gate(s1, V2, "MG5")["status"] == "skip"
+    rec = manifest.load(root / V2 / "MANIFEST.json").builds[-1]
+    assert (rec.build_id, rec.basis) == (s1.build_id, "supplement")
+    m2 = build(D_S, "morning", root, tree, specs=[V2], primary=V2, **SMALL)
+    assert gate(m2, V2, "MG5")["metrics"]["prev_build_id"] == m1.build_id
+    rc = cli_main(["build", "--date", D_S, "--basis", "supplement", "--fi-root", str(tree),
+                   "--root", str(root), "--specs", V2, "--primary", V2,
+                   "--min-prices-on-d", "10", "--min-ranked", "10"])
+    assert rc == 0, capsys.readouterr().err
+    s2 = json.loads((root / "latest_supplement.json").read_text())
+    assert s2["specs"][V2]["gates"]["MG5"]["metrics"]["prev_build_id"] == s1.build_id
+
+
 def test_keep_default_holds_three_months_of_runs() -> None:
     """엑셀 Δ순위 1W·1M·순위 흐름이 한 달 전 판까지 연다 — 3 이면 같은 날 재빌드에
     전날 판이 지워졌다."""

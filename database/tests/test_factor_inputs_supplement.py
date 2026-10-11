@@ -299,6 +299,21 @@ def test_supplement_cli_round_trip(supp, tmp_path: Path) -> None:
         {t: v["content_hash"] for t, v in supp.s.tables.items()}
 
 
+def test_supplement_fi_feeds_the_supplement_model(supp, tmp_path: Path) -> None:
+    """보강 fi(`latest_supplement.json`)가 모델 basis supplement 로 이어진다. 유예 0 spec(v2)은 grace 종목
+    (E — W 판에서 빠진 나이 1)을 다시 뺀다 — 나이 0 grace 였다면 낡은 추정치로 채점됐다."""
+    from model.build import build as model_build
+    res = model_build(tf.D_S, "supplement", tmp_path / "model", supp.out,
+                      specs=["v2_percentrank@1.0"], primary="v2_percentrank@1.0",
+                      min_prices_on_d=1)
+    assert res.ok, res.specs
+    assert res.fi_build_id == supp.s.build_id and res.build_id.startswith("s_")
+    assert res.run_manifest == tmp_path / "model" / "_runs" / f"{tf.D_S}_supplement.json"
+    n_grace = supp.s.coverage["counts_eligible"]["grace"]
+    assert n_grace == 1
+    assert res.specs["v2_percentrank@1.0"]["n_scores"] == supp.s.coverage["n_eligible"] - n_grace
+
+
 def test_supplement_build_id_prefix_is_not_a_stage_or_equity_basis() -> None:
     """`s_` 는 fi·모델 층만 쓴다 — stage·equity 의 --basis 선택지에는 없다(그 층은 보강판을 짓지 않는다)."""
     from equity.model import BUILD_BASES

@@ -499,8 +499,11 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
         con.execute("SET enable_progress_bar = false")
         for name, expr in {**eq_exprs, **st_exprs}.items():
-            # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다
-            cut = (f" WHERE date <= DATE '{asof}'"
+            # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다.
+            # coverage_daily 는 날짜가 WISE 수집일이라 wise_asof 에서 자른다(정규 판은 asof 와 같다 —
+            # 보강판 재생만 다르다. asof 에서 자르면 휴일 수집분의 추정기관 수가 빠진다)
+            cut_at = wise_iso if name == "coverage_daily" else asof
+            cut = (f" WHERE date <= DATE '{cut_at}'"
                    if replay and name in REPLAY_SESSION_TABLES else "")
             con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}{cut}')
         _check_columns(con, equity_builds)
@@ -612,6 +615,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         # 재생 표시(재생 판에만) — 현판을 이 날에서 자른 판이다(운영 판과 구분)
         payload["replay"] = {"session_cut": asof, "tables": list(REPLAY_SESSION_TABLES),
                              "note": "재생(PR-8b) — 현판 equity 의 세션 축을 asof 에서 자른 판"}
+        if wise_iso != asof:
+            # 보강판 재생 — coverage_daily 는 wise_asof 에서 잘랐다(정규 판 재생 표시는 그대로)
+            payload["replay"]["wise_cut"] = wise_iso
 
     if failed:
         report = root / "_failed" / f"{bid}.json"

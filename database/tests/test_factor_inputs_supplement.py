@@ -325,3 +325,16 @@ def test_supplement_build_id_prefix_is_not_a_stage_or_equity_basis() -> None:
         build(tf.D_S, "supplement", Path("/nonexistent"), Path("/nonexistent"),
               Path("/nonexistent"), builds_from=Path("/nonexistent.json"), wise_asof=W_S,
               build_id="m_20260929T000000_000000Z")
+
+
+def test_supplement_replay_cuts_analyst_counts_at_wise_asof(supp, tmp_path: Path) -> None:
+    """재생(`--replay` — 현판에서 그날 판을 다시 짓는 길, 보강판 재생 대조가 쓴다)도 같은 보강판이다. 세션 축 표는
+    asof(D)에서 자르지만 coverage_daily 는 날짜가 WISE 수집일이라 wise_asof(W)에서 자른다 — D 에서 자르면 휴일
+    수집분의 추정기관 수(A 99 · F 77)가 빠져 재생 판이 실제 보강판과 갈린다."""
+    res = build(tf.D_S, "supplement", tmp_path / "fi", supp.st, supp.eq, grace_days=5,
+                min_eligible=5, golden_path=None, builds_from=supp.hist, wise_asof=W_S, replay=True)
+    assert res.ok, _fail(res)
+    assert {t: v["content_hash"] for t, v in res.tables.items()} == \
+        {t: v["content_hash"] for t, v in supp.s.tables.items()}
+    mark = json.loads(res.run_manifest.read_text(encoding="utf-8"))["replay"]
+    assert (mark["session_cut"], mark["wise_cut"]) == ("2026-09-28", "2026-09-29")

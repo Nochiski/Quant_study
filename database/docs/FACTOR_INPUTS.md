@@ -43,7 +43,8 @@ python -m factor_inputs build --date 20260929 --basis morning \
   않아, 현판으로는 장 마감 판 MD-SEAM(§2-1)이 서지 않고 아침판은 달력 뒤 세션이 filing_late 실효 기한을
   정한다. `--replay` 는 equity 세션 축 7표(`build.REPLAY_SESSION_TABLES` — trading_calendar · universe_daily ·
   price_daily · price_adj_daily · flow_daily · credit_daily · coverage_daily)의 뷰만 `date <= asof`(아침판 D ·
-  장 마감 판 D')로 자르고 판 manifest 에 `replay`(자른 날·표)를 남긴다. `queries` SQL·게이트·진입 조건은
+  장 마감 판 D')로 자르고 판 manifest 에 `replay`(자른 날·표)를 남긴다. 주말 보강판(§2-4)은 coverage_daily 만
+  wise_asof(휴일 수집일 — 날짜가 WISE 수집일이다)에서 자르고 `replay.wise_cut` 에 남긴다. `queries` SQL·게이트·진입 조건은
   그대로이고, 재생이 아니면 뷰 SQL 도 글자 그대로다(`tests/test_factor_inputs_replay.py`). 마스터
   (security·corp)와 equity 재계산은 현판 그대로라 그날 판과 다를 수 있다.
   **재생은 다음 차이를 볼 수 없다.** 재생의 두 판(장 마감 판·연구 판)이 같은 equity 현판과 같은 21:05 원장

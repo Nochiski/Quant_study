@@ -7,6 +7,9 @@ Meta 에 적는다.
 
 루트는 fi 판 JSON 의 `equity_root` · `stage_root` 가 기본이고, deliver CLI `--equity-root` ·
 `--stage-root` 로 덮는다(로컬 사본 대조 · 리허설).
+
+원천 날짜 상한은 엑셀 D 다. 단 WISE 에서 나온 원천(Analyst)은 fi 판 JSON 의 `wise_asof` 까지 —
+정규 판은 D 와 같고, 주말 보강판은 휴일 수집일 W(그 수집이 D 분 보고서 · 추정치를 담는다, N-45).
 """
 from __future__ import annotations
 
@@ -40,6 +43,13 @@ class Sources:
     stage_root: Path | None
     equity_pins: Mapping[str, str] = field(default_factory=dict)
     used: dict[str, str] = field(default_factory=dict)      # '층/표' → 판 id
+    # WISE 원천 상한 — fi 판 JSON 의 wise_asof(정규 판 = D, 주말 보강판 = 휴일 수집일 W, N-45).
+    # 없으면 엑셀 D 와 같다(`wise_upto`)
+    wise_asof: date | None = None
+
+    def wise_upto(self, d: date) -> date:
+        """WISE 에서 나온 원천(증권사 의견 · 컨센서스 요약)을 읽을 수집일 상한."""
+        return self.wise_asof or d
 
     def _read(self, layer: str, root: Path | None, table: str, build_id: str | None) -> str:
         # 사유 글은 엑셀 시트에 그대로 실린다 — 서버 경로는 로그에만 남기고, 읽는 사람이 모르는
@@ -77,13 +87,23 @@ class Sources:
 
 def open_sources(fi_meta: Mapping[str, object], equity_root: Path | None = None,
                  stage_root: Path | None = None) -> Sources:
-    """fi 판 JSON 에서 루트 · equity 판 고정표를 읽는다. 인자로 준 루트가 이긴다."""
+    """fi 판 JSON 에서 루트 · equity 판 고정표 · WISE 상한(wise_asof)을 읽는다. 인자로 준 루트가
+    이긴다."""
     def root(v: object) -> Path | None:
         return Path(v) if isinstance(v, str) and v else None
     pins = fi_meta.get("equity_builds")
+    wise: date | None = None
+    if isinstance(fi_meta.get("wise_asof"), str) and fi_meta["wise_asof"]:
+        try:
+            wise = date.fromisoformat(str(fi_meta["wise_asof"]))
+        except ValueError:
+            # 보조 표시라 엑셀을 멈추지 않는다 — WISE 원천도 엑셀 D 까지만 읽는다
+            log.warning("fi 판 JSON wise_asof %r 를 날짜로 못 읽어 엑셀 D 를 쓴다",
+                        fi_meta["wise_asof"])
     return Sources(equity_root or root(fi_meta.get("equity_root")),
                    stage_root or root(fi_meta.get("stage_root")),
-                   {str(k): str(v) for k, v in pins.items()} if isinstance(pins, Mapping) else {})
+                   {str(k): str(v) for k, v in pins.items()} if isinstance(pins, Mapping) else {},
+                   wise_asof=wise)
 
 
 def connect(temp_dir: Path | None = None) -> duckdb.DuckDBPyConnection:

@@ -3,8 +3,10 @@
 원천: equity `opinion_broker_daily`(WISE 종목 화면 '제공처별 투자의견'을 매일 수집, 09-01~) ·
 `opinion_daily`(WISE 컨센서스, src 'wise' — 09-01 까지는 v3 판과 겹친다) · `price_daily`(종가).
 기준일 = 증권사 의견 최신 수집일(토요일 수집이면 창은 그 앞 마지막 거래일에서 센다).
-같은 날 같은 증권사 보고서는 한 건(나중 수집이 이긴다). 일별 그래프는 기준일 전날까지 —
-WISE 가 그날 보고서를 다음 날 올려 기준일은 늘 비어 보인다.
+같은 날 같은 증권사 보고서는 한 건(나중 수집이 이긴다). 일별 그래프는 기준일(최신 수집일) 앞
+마지막 거래일까지 — WISE 가 그날 보고서를 다음 날 올려 수집일은 늘 비어 보인다.
+WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto`) — 정규 판은 엑셀 D,
+주말 보강판은 휴일 수집일 W 라 D 분 보고서가 들어오고 일별 그래프가 D 까지 간다(N-45).
 """
 from __future__ import annotations
 
@@ -123,7 +125,9 @@ def _opt(x: object) -> str | None:
 
 def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe) -> AnalystData:
     ob = src.equity("opinion_broker_daily")
-    day = latest(con, ob, "fetched_date", upto, "true", "WISE 증권사별 투자의견")
+    # WISE 원천은 수집일 ≤ wise_asof — 정규 판은 엑셀 D, 주말 보강판은 휴일 수집일 W(N-45). 종가는 D
+    wise = src.wise_upto(upto)
+    day = latest(con, ob, "fetched_date", wise, "true", "WISE 증권사별 투자의견")
     cal = krx_calendar(con, src, day, upto)
     d1m = cal.win["1M"]
     got = con.execute(f"SELECT min(fetched_date) FROM {ob}").fetchone()
@@ -143,7 +147,7 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
     od_ = src.equity("opinion_daily")
     # 컨센서스 · 종가는 그 원천의 최신 날짜(≤ 엑셀 D) — 의견 수집일과 따로 늦을 수 있다
     got = con.execute(f"SELECT max(obs_date) FROM {od_} WHERE src = 'wise' "
-                      f"AND obs_date <= {lit(upto)}").fetchone()
+                      f"AND obs_date <= {lit(wise)}").fetchone()
     cons_day = day_of(got[0]) if got and got[0] else None
     cons: dict[str, Consensus] = {}
     if cons_day is not None:
@@ -247,7 +251,10 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
         return r
     # 그래프 4개 — 원자료는 숨긴 AD~AJ 열
     xs.hide(G1, 7, 12)
-    td = [x for x in cal.days if win["1M"] < x < day]                 # 기준일 보고서는 다음 날 올라온다
+    # 일별 그래프 끝 = WISE 자료가 담을 수 있는 마지막 보고서 날짜 = 최신 수집일 앞 마지막 거래일
+    # (WISE 는 그날 보고서를 다음 날 올린다). 아침 · 장 마감 = 수집일 전날, 주말 보강판은 휴일 수집이
+    # D 분 보고서를 담아 D 까지(N-45)
+    td = [x for x in cal.days if win["1M"] < x < day]
     cnt = {x: [0, 0] for x in td}
     for x in oa:
         i = bisect.bisect_left(td, x.day)                               # 휴일 날짜 보고서는 다음 거래일로
@@ -389,8 +396,10 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
              f"{cday} WISE 컨센서스(최근 3개월 의견) 목표가 · 그 목표가 ÷ {pday} 종가 − 1 · 의견 낸 "
              "증권사 수"),
             ("Analyst", "그래프 4개",
-             "일별 목표가 상향 · 하향 건수(휴일 보고서는 다음 거래일, 기준일 보고서는 WISE 가 다음 날 올려 "
-             "전날까지) · 상향 비율 5거래일 이동 · 대분류별 1M 상향 비율 · 대분류별 목표가 여력 중앙값. "
+             "일별 목표가 상향 · 하향 건수(휴일 보고서는 다음 거래일, "
+             + ("휴일 수집이 기준일 보고서까지 담아 기준일까지" if day > d
+                else "기준일 보고서는 WISE 가 다음 날 올려 전날까지")
+             + ") · 상향 비율 5거래일 이동 · 대분류별 1M 상향 비율 · 대분류별 목표가 여력 중앙값. "
              "원자료는 숨긴 AD~AJ 열"),
             ("Analyst", "이력 한계",
              f"증권사별 의견 수집은 {md(a.first)} 시작"

@@ -163,7 +163,8 @@ def span(d0: date, day: date) -> str:
 
 
 def base_text(day: date, d: date) -> str:
-    """4행 기준일 — 원천 최신일이 엑셀 D 보다 이르면(장 마감 데이터 등) 그렇다고 적는다."""
+    """4행 기준일 — 원천 최신일이 엑셀 D 와 다르면(장 마감 데이터는 이르고, 주말 보강판 Analyst 는
+    휴일 수집일이라 늦다 — N-45) 그렇다고 적는다."""
     return (f"기준일: {day.isoformat()}" if day == d
             else f"기준일: {day.isoformat()}(원천 최신 · 엑셀 {md(d)})")
 

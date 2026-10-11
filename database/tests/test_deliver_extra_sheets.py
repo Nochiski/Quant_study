@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import zipfile
 from collections.abc import Iterator
 from datetime import date, timedelta
@@ -501,6 +502,41 @@ def test_analyst_saturday_fetch_counts_windows_from_friday(tmp_path: Path, con) 
     assert (tick(0), "F증권") in {(x.code, x.broker) for x in a.acts}
 
 
+@pytest.mark.parametrize(("case", "fetch_last", "wise", "end", "a4", "clause"), [
+    # 아침: 최신 수집 = D(18:05) — 그날 보고서는 다음 날 올라와 그래프는 D 전날까지(지금 규칙 그대로)
+    ("morning", D, None, DAYS[-2], "기준일: 2026-09-25", "기준일 보고서는 WISE 가 다음 날 올려 전날까지"),
+    # 장 마감(16시대): D 18:05 수집 전이라 최신 수집 = D−1 — 그래프는 그 전 거래일까지(지금 그대로)
+    ("evening", DAYS[-2], D, DAYS[-3], "기준일: 2026-09-24(원천 최신 · 엑셀 09-25)",
+     "기준일 보고서는 WISE 가 다음 날 올려 전날까지"),
+    # 주말 보강: wise_asof = 휴일 수집일(토) — 그 수집이 D 보고서를 담아 그래프가 D 까지
+    ("supplement", D, SATURDAY, D, "기준일: 2026-09-26(원천 최신 · 엑셀 09-25)",
+     "휴일 수집이 기준일 보고서까지 담아 기준일까지"),
+])
+def test_analyst_daily_chart_ends_at_the_last_report_day_wise_can_hold(
+        tmp_path: Path, con, case: str, fetch_last: date, wise: date | None, end: date, a4: str,
+        clause: str) -> None:
+    """N-45 · E5 — Analyst 일별 그래프 끝 = WISE 자료가 담을 수 있는 마지막 보고서 날짜 = 최신 수집일
+    앞 마지막 거래일. WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto` — 정규
+    판은 엑셀 D). 아침 · 장 마감은 지금 그대로, 주말 보강판은 토요일 수집(D 보고서, F증권 상향)이
+    들어와 D 까지 그린다. 같은 원천에 wise_asof 만 다른 아침판에는 토요일 수집이 없다."""
+    eq = tmp_path / "equity"
+    build_equity(eq, last=fetch_last, saturday_fetch=fetch_last == D)
+    wb, refs = book_with_refs()
+    a = sheet_analyst.load(con, Sources(eq, None, {}, wise_asof=wise), D, UNI)
+    defs = sheet_analyst.write(wb, a, UNI, refs, D)
+    ws = wb["Analyst"]
+    rows = [r for r in range(8, 60) if ws.cell(r, 30).value]
+    assert ws.cell(rows[-1], 30).value == end
+    assert ws["A4"].value == a4
+    assert any(isinstance(v, str) and v.startswith(f"일별 목표가 상향 · 하향 건수: 최근 1M({end:%m-%d}까지)")
+               for v in values(ws))
+    assert clause in next(text for _s, name, text in defs if name == "그래프 4개")
+    sat = (tick(0), "F증권") in {(x.code, x.broker) for x in a.acts}
+    assert sat == (case == "supplement")
+    if case == "supplement":                       # D 줄 = 토요일 수집의 D 보고서 상향 1건
+        assert [ws.cell(rows[-1], c).value for c in (31, 32)] == [1, 0]
+
+
 def test_analyst_bar_chart_without_values_is_skipped(src: Sources, con) -> None:
     """그릴 막대가 없으면 빈 범위 그래프(가짜 막대) 대신 제목 칸에 '데이터 없음'."""
     wb, refs = book_with_refs()
@@ -595,6 +631,39 @@ def test_daily_excel_has_new_sheets_in_order_with_meta(fi_world: dict[str, Path]
         assert any('type="column"' in z.read(n).decode("utf-8") and 'displayHidden="1"'
                    in z.read(n).decode("utf-8") for n in z.namelist()
                    if n.startswith("xl/worksheets/sheet"))
+
+
+def test_supplement_board_analyst_reads_the_holiday_fetch(fi_world: dict[str, Path],
+                                                          tmp_path: Path) -> None:
+    """N-45 · E5 — 주말 보강판 엑셀은 fi 판 JSON(supplement)의 wise_asof(토요일 수집일)까지 WISE
+    원천을 읽는다: Analyst 일별 그래프가 D 까지 가고 4행이 휴일 수집일을 적는다. 같은 원천 · 같은
+    점수의 아침판 엑셀(wise_asof = D)은 D 전날까지. WISE 밖 새 시트는 두 엑셀이 같다."""
+    eq = tmp_path / "equity"
+    build_equity(eq, saturday_fetch=True)
+    model, fi = tmp_path / "model", tmp_path / "fi"
+    shutil.copytree(fi_world["model"], model)
+    shutil.copytree(fi_world["fi"], fi)
+    m = json.loads((model / "_runs" / "20260925_morning.json").read_text(encoding="utf-8"))
+    (model / "_runs" / "20260925_supplement.json").write_text(
+        json.dumps({**m, "basis": "supplement"}), encoding="utf-8")
+    f = json.loads((fi / "_runs" / "20260925_morning.json").read_text(encoding="utf-8"))
+    for basis, wise in (("morning", FRI), ("supplement", SATURDAY.isoformat())):
+        (fi / "_runs" / f"20260925_{basis}.json").write_text(
+            json.dumps({**f, "equity_root": str(eq), "wise_asof": wise}), encoding="utf-8")
+    books = {b: load_workbook(build_daily(FRI, b, model_root=model, fi_root=fi,
+                                          out_root=tmp_path / b).path)
+             for b in ("morning", "supplement")}
+
+    def chart_end(wb) -> date:
+        ws = wb["Analyst"]
+        return max(ws.cell(r, 30).value for r in range(8, 60) if ws.cell(r, 30).value).date()
+    assert chart_end(books["morning"]) == DAYS[-2]
+    assert chart_end(books["supplement"]) == D
+    assert books["supplement"]["Analyst"]["A4"].value == "기준일: 2026-09-26(원천 최신 · 엑셀 09-25)"
+    for name in ("Events", "Market", "ETF", "Flow", "Short"):
+        a, b = books["morning"][name], books["supplement"][name]
+        assert [[c.value for c in r] for r in a.iter_rows()] == [
+            [c.value for c in r] for r in b.iter_rows()], name
 
 
 def test_missing_source_gives_one_line_sheet_and_warning(fi_world: dict[str, Path],

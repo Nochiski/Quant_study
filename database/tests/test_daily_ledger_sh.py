@@ -47,6 +47,7 @@ _PY = """#!/usr/bin/env bash
 if [ "$1" = "-c" ]; then
   case "$2" in
     *dart_universe*|*prev_trading_day*|*supplement*|*ws_run_log*)
+      [ -n "${STDERR_NOISE:-}" ] && echo "DeprecationWarning: 대역 경고 줄" >&2
       PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
     *runlog.start*) echo 7 ;;
     *runlog.recent*) exit "${RC_recent:-1}" ;;
@@ -847,7 +848,7 @@ class Supp(NamedTuple):
 def _run_supp(tmp_path: Path, *args: str, conf: str | None = "SUPPLEMENT_ENABLED=1\n",
               today: str = _SAT, calendar: bool = True, wise_log: bool = True,
               n_req: int = 10, n_ok: int = 10, seed: list[tuple[str, str]] = (),
-              **rcs: int) -> Supp:
+              **rcs: int | str) -> Supp:
     """주말 보강 WISE 를 보는 실행. conf = config/supplement.env 내용(None 이면 파일 없음), today = QL_TODAY,
     calendar = 판정 연도 파일을 둘지, wise_log = 대역 수집기가 완주 증거를 남길지, seed = 미리 심을
     supplement_wise 런 (date, status)."""
@@ -867,7 +868,9 @@ def _run_supp(tmp_path: Path, *args: str, conf: str | None = "SUPPLEMENT_ENABLED
              "WISE_N_REQ": str(n_req), "WISE_N_OK": str(n_ok)}
     if wise_log:
         extra["WISE_RUNLOG"] = "1"
-    env = _env(root, QL_WEEKDAY="3", **extra, **{f"RC_{k}": str(v) for k, v in rcs.items()})
+    # 소문자 키는 대역 rc(RC_<키>), 대문자 키는 환경변수 그대로
+    env = _env(root, QL_WEEKDAY="3", **extra,
+               **{(k if k.isupper() else f"RC_{k}"): str(v) for k, v in rcs.items()})
     p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"), "--date", "20260929",
                         *args], env=env, capture_output=True, text=True, timeout=60, check=False)
 
@@ -962,3 +965,13 @@ def test_supplement_wise_dry_run_prints_the_plan_only(tmp_path: Path) -> None:
     assert r.rc == 0 and _WISE not in r.calls and r.runs == [], r.log
     assert f"주말 보강 WISE 계획(dry-run — 받지 않음): D={_SAT_D}" in r.log
     assert r.notify == []
+
+
+def test_supplement_wise_ignores_warning_lines_on_stderr(tmp_path: Path) -> None:
+    """판정 파이썬이 표준 오류에 경고 줄을 내도(서버 파이썬의 Deprecation 경고 등) 대상일·완주 판정은 표준 출력만
+    읽는다 — 경고 줄이 D 나 실패 콜 수에 섞이면 엉뚱한 D 로 받거나 '완주 기록 없음'으로 떨어진다."""
+    r = _run_supp(tmp_path, STDERR_NOISE="1")
+    assert r.rc == 0, r.log
+    assert r.calls == [*_ALL, _WISE]
+    assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]
+    assert r.notify == ["info|daily_ledger 완료"]

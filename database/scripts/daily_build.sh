@@ -191,8 +191,9 @@ if [ -z "$DRY" ]; then
   . scripts/postclose_conf.sh   # supplement_on · supplement_target_day · supplement_wise_ok — 판정 한 곳
   if supplement_on; then
     SUPP_TODAY="${QL_TODAY:-$TODAY_KST}"
-    SUPP_D=$(supplement_target_day "$SUPP_TODAY" 2>&1); SUPP_T=$?
-    if [ "$SUPP_T" -ne 0 ]; then
+    # 표준 출력만 받는다(경고 줄은 로그로) — 사유는 판정 코드가 표준 출력에 찍는다. 8자리 날짜·빈 값이 아니면 판정 불가
+    SUPP_D=$(supplement_target_day "$SUPP_TODAY"); SUPP_T=$?
+    if [ "$SUPP_T" -ne 0 ] || [[ ! "$SUPP_D" =~ ^([0-9]{8})?$ ]]; then
       echo "  ! 주말 보강판 대상일 판정 불가 — $SUPP_D"
       scripts/notify.sh warn "주말 보강판 대상일 판정 불가" \
         "오늘 $SUPP_TODAY D=$D | $SUPP_D — 보강판을 짓지 않았다(정규 판 그대로) | 로그 $LOG"

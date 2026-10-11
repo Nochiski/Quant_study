@@ -77,7 +77,7 @@ except Exception as e:  # noqa: BLE001  # reason: 읽기 실패는 완주를 확
 if not rows:
     print(f"WISE 런 로그(ws_run_log) 없음 run_at>={sys.argv[1]} — 수집기가 완주하지 않았다")
     sys.exit(1)
-print(sum(int(a or 0) - int(b or 0) for a, b in rows))' "$from" 2>&1) || got="? ($got)"
+print(sum(int(a or 0) - int(b or 0) for a, b in rows))' "$from") || got="? ($got)"
   status=ok
   if [ "$rc" -ne 0 ]; then
     status=failed; warn_title="주말 보강 WISE 수집 실패(rc=$rc)"
@@ -245,8 +245,9 @@ fi
 #   한 줄만. QL_TODAY(YYYYMMDD)는 테스트 전용 — 오늘(KST) 날짜를 덮어쓴다. 운영 크론·대화형 셸에 남기지 않는다.
 if supplement_on; then
   TODAY_KST="${QL_TODAY:-$(TZ=Asia/Seoul date +%Y%m%d)}"
-  SUPP_D=$(supplement_target_day "$TODAY_KST" 2>&1); SUPP_T=$?
-  if [ "$SUPP_T" -ne 0 ]; then
+  # 표준 출력만 받는다(경고 줄은 로그로) — 사유는 판정 코드가 표준 출력에 찍는다. 8자리 날짜·빈 값이 아니면 판정 불가
+  SUPP_D=$(supplement_target_day "$TODAY_KST"); SUPP_T=$?
+  if [ "$SUPP_T" -ne 0 ] || [[ ! "$SUPP_D" =~ ^([0-9]{8})?$ ]]; then
     echo "  ! 주말 보강 WISE 대상일 판정 불가 — $SUPP_D"
     [ -z "$DRY" ] && scripts/notify.sh warn "주말 보강 WISE 대상일 판정 불가" \
       "오늘 $TODAY_KST | $SUPP_D — 보강 WISE 를 받지 않았다(정규 체인 rc·판은 그대로) | 로그 $LOG"

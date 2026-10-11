@@ -71,6 +71,8 @@ def _root(home: Path) -> Path:
     (home / "tmp").mkdir(exist_ok=True)
     shutil.copy(SCRIPT, root / "scripts" / "daily_build.sh")
     shutil.copy(SCRIPT.parent / "raw_lock.sh", root / "scripts" / "raw_lock.sh")
+    # 체인 끝 주말 보강판 스위치 판정(N-45) — 설정 파일이 없으니 꺼짐
+    shutil.copy(SCRIPT.parent / "postclose_conf.sh", root / "scripts" / "postclose_conf.sh")
     stubs = {".venv/bin/python": _PY,
              "scripts/notify.sh": '#!/usr/bin/env bash\necho "$1|$2|$3" >> notify.txt\n'}
     for rel, body in stubs.items():

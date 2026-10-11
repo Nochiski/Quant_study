@@ -141,6 +141,9 @@ EXCLUDED_CRIT_PREFIXES: tuple[str, ...] = (
     "일일 리포트 ", "⚠ 알림 실패 ",
     # 백업 · 수동 도구(compat_export.sh 그림자 export · model_compare.sh 점수 대조)
     "backup_raw ", "compat export ", "점수 대조 ",
+    # 주말 보강판(weekend_supplement.sh — N-45) — 정규 판과 섞지 않는 별도 판이라 정규 체인 판정 밖이다(휴일 줄은
+    # 직전 거래일에 귀속되므로 세면 정규 판이 멀쩡한 D 가 실패가 된다)
+    "주말 보강판 ",
 )
 _YMD_RE = re.compile(r"^\d{8}$")
 _WEEKDAY = "월화수목금토일"

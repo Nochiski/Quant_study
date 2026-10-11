@@ -2,12 +2,14 @@
 # 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → 확정 빌드
 # → 모델 단계(fi → 모델 → 일간 엑셀 발송, scripts/model_daily.sh — N-25 Q0)
 # → 장 마감 판 아침 잇기(v3 아침 KRX 재반영 · 두 판 대조, scripts/postclose_chain.sh morning — 컷오버 PR-8)
-# → 조용한 손실 검사(직전 아침 확정판 대조, python -m daily.silent_loss — 컷오버 K1-4a, 기록형) → 요약.
+# → 조용한 손실 검사(직전 아침 확정판 대조, python -m daily.silent_loss — 컷오버 K1-4a, 기록형)
+# → [스위치 켜짐 · 휴장 연속 첫 휴일 · 보강 WISE 수집 ok] 주말 보강판(scripts/weekend_supplement.sh — N-45) → 요약.
 # 플랜 P1 Task 1.8 / 결정 R1. 확정 빌드(stage·equity basis=morning)는 scripts/build_morning.sh 가 한다
 # (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
 #   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
 #         QL_FORCE=1 이면 "이미 확정판 있음" 가드를 무시하고 다시 돈다(--date 명시도 같은 효과)
+#         QL_TODAY=YYYYMMDD (테스트 전용 — 주말 보강판 판정의 오늘 KST 날짜 덮어쓰기. 운영에선 비워 둔다)
 #   원장 락: 다른 원장 작업(06:00 수집 체인 등)이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다 — 시간 한도 없음
 #         (N-23 ①, P9). 대기 시작은 실시간 출력과 notify 기록(dry-run 제외)에, 대기 시간은 체인 로그에 남고,
 #         늦어짐은 10:30 워치독이 알린다. 원장 락 래퍼(`flock <원장 락> daily_build.sh …`) 안에서 부르지
@@ -174,15 +176,52 @@ fi
 [ -z "$DRY" ] && [ -x scripts/daily_report.py ] && { $PY scripts/daily_report.py --date "$D" || true; }
 echo "════ 종료 rc=$RC $(kst) ════"
 fi
+# 주말 보강판(N-45 · DECISIONS §7 #8) — 체인 맨 끝(확정판·모델 단계·아침 잇기·조용한 손실 검사·일일 리포트 뒤, 또는 확정판
+#   완료로 건너뛴 날). 스위치(config/supplement.env SUPPLEMENT_ENABLED=1 — postclose_conf.sh supplement_on)가 켜져 있고 오늘
+#   (KST)이 휴장 연속의 첫 휴일이며 그 직전 거래일이 이 체인의 D 이고, 오늘 06:00 체인 끝의 보강 WISE 수집이 ok(런 로그
+#   supplement_wise · date=오늘)일 때만 scripts/weekend_supplement.sh --date D --wise-asof 오늘 을 잇는다(완료 감지 — P9).
+#   이 체인이 지은 D 아침판의 stage 에는 휴일 수집분(fetched_date = 오늘 > D)이 이미 들어 있지만 아침 fi 는 WISE 를
+#   fetched_date ≤ D 로 자르므로(factor_inputs queries — 정규 판은 wise_asof = asof) 정규 판은 바뀌지 않는다. 보강판은 D 당
+#   한 번(weekend_supplement.sh 가 런 로그 supplement_board 로 본다 — QL_FORCE 는 넘기지 않는다). rc 는 이 체인의 rc·요약
+#   등급에 넣지 않는다 — 실패 알림은 weekend_supplement.sh 가 남기고, 0·1 이 아닌 rc(알림을 못 남기고 죽음)만 아래에서 warn.
+#   수집이 ok 가 아니면 warn 한 줄(보강판 없음). dry-run 은 하지 않는다. QL_TODAY 는 테스트 전용(오늘 KST 덮어쓰기).
+SUPP_RC=""
+if [ -z "$DRY" ]; then
+  # shellcheck source=scripts/postclose_conf.sh
+  . scripts/postclose_conf.sh   # supplement_on · supplement_target_day · supplement_wise_ok — 판정 한 곳
+  if supplement_on; then
+    SUPP_TODAY="${QL_TODAY:-$TODAY_KST}"
+    SUPP_D=$(supplement_target_day "$SUPP_TODAY" 2>&1); SUPP_T=$?
+    if [ "$SUPP_T" -ne 0 ]; then
+      echo "  ! 주말 보강판 대상일 판정 불가 — $SUPP_D"
+      scripts/notify.sh warn "주말 보강판 대상일 판정 불가" \
+        "오늘 $SUPP_TODAY D=$D | $SUPP_D — 보강판을 짓지 않았다(정규 판 그대로) | 로그 $LOG"
+    elif [ -n "$SUPP_D" ] && [ "$SUPP_D" = "$D" ]; then
+      if SUPP_WHY=$(supplement_wise_ok "$SUPP_TODAY"); then
+        echo "──── 주말 보강판 시작 (D=$D · WISE $SUPP_TODAY) $(kst) ────"
+        QL_FORCE="" bash scripts/weekend_supplement.sh --date "$D" --wise-asof "$SUPP_TODAY"; SUPP_RC=$?
+        echo "──── 주말 보강판 종료 rc=$SUPP_RC $(kst) ────"
+      else
+        echo "  주말 보강판 안 지음 — 오늘 보강 WISE 수집이 ok 가 아니다: $SUPP_WHY"
+        scripts/notify.sh warn "주말 보강판 안 지음 — 보강 WISE 수집 ok 아님" \
+          "D=$D 오늘 $SUPP_TODAY | $SUPP_WHY — 정규 판은 그대로 | 로그 $LOG"
+      fi
+    fi
+  fi
+fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
 # 모델 단계 결과 줄(완료/실패 단계·rc)과 종료 rc 를 맨 앞에 둔다 — 확정판 줄이 길어도 cut -c1-900 에
 # 잘리지 않게. 확정판 부분은 종전 그대로 고르고 '모델 단계 시작' 앞에서 자른다(모델 단계 안쪽 줄
 # ──── factor_inputs 종료 … 이 tail 창을 밀어내지 않게). 모델 단계가 없는 날은 종전과 같은 바이트다.
+# 주말 보강판(N-45) 종료 줄도 앞에 싣고, 확정판 부분은 '주말 보강판 시작' 앞에서도 자른다(보강판 안쪽 단계 줄 — 모델
+# 단계가 없는 날(확정판 실패)에도 tail 창을 밀어내지 않게). 보강판이 없는 날은 종전과 같은 바이트다.
 SUMMARY=$({ grep -E "^모델 단계 (완료|실패)|^──── 모델 단계 종료" "$RUN" | tail -2
            grep -E "^──── 장 마감 판 아침 잇기 종료" "$RUN" | tail -1
            grep -E "^──── 조용한 손실 검사 종료" "$RUN" | tail -1
-           sed '/^──── 모델 단계 시작/,$d' "$RUN" | grep -E "원장 락 대기|^원장 건전성|──── .* 종료|아직 미완료|KRX 401" | tail -8; } | tr '\n' ' ' | cut -c1-900)
+           grep -E "^──── 주말 보강판 종료" "$RUN" | tail -1
+           sed -e '/^──── 모델 단계 시작/,$d' -e '/^──── 주말 보강판 시작/,$d' "$RUN" \
+             | grep -E "원장 락 대기|^원장 건전성|──── .* 종료|아직 미완료|KRX 401" | tail -8; } | tr '\n' ' ' | cut -c1-900)
 # 장 마감 판 아침 잇기(PR-8 ⑧)가 0(완료·꺼짐)·1(대조 불일치 warn) 이 아니면 warn 1건 — 아침 잇기가 자기 crit 을 못 남기고
 # 죽은 경우(홈 이동·인자·설정 오류 등)도 사람에게 닿게(조용한 실패 금지). 확정판 rc·등급은 그대로다.
 if [ -n "$PRC" ] && [ "$PRC" -ne 0 ] && [ "$PRC" -ne 1 ]; then
@@ -194,6 +233,12 @@ fi
 if [ -n "$SLRC" ] && { [ "$SLRC" -lt 0 ] || [ "$SLRC" -gt 3 ]; }; then
   scripts/notify.sh warn "daily_build 조용한 손실 검사 rc=$SLRC" \
     "D=$D | python -m daily.silent_loss check 가 rc $SLRC 로 끝났다(결과 logs/silent_loss/${D}.json 없음일 수 있다) — $LOG"
+fi
+# 주말 보강판(N-45)이 0(완료·건너뜀)·1(짓지 못함 — 자기 알림을 남겼다)이 아니면 warn 1건 — 인자·락·홈 이동 오류처럼 스스로
+# 알림을 못 남긴 경우도 사람에게 닿게(조용한 실패 금지). 확정판 rc·등급은 그대로다
+if [ -n "$SUPP_RC" ] && [ "$SUPP_RC" -ne 0 ] && [ "$SUPP_RC" -ne 1 ]; then
+  scripts/notify.sh warn "daily_build 주말 보강판 rc=$SUPP_RC" \
+    "D=$D | scripts/weekend_supplement.sh --date $D 가 rc $SUPP_RC 로 끝났다 — 정규 판은 그대로 | $LOG"
 fi
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 확정판이 이미 있어 재수집·재빌드하지 않았다 — 다시 돌리려면 QL_FORCE=1 또는 --date $D | 로그 $LOG"

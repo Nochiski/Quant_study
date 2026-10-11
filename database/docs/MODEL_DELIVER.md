@@ -34,6 +34,7 @@ python -m deliver model-weekly --week 2026-W40                [--send] [--dry-ru
 | `--send` | 엑셀을 만들고 텔레그램 `sendDocument` 로 보낸다. 매일 엑셀은 같은 D·basis 를 이미 보냈으면(발송 장부) 엑셀도 만들지 않고 건너뛴다(rc 0) |
 | `--send --resend` | (매일만) 이미 보낸 D·basis 를 정정으로 다시 보낸다 — 캡션 끝에 `정정 n · 판 <model 판 id> · 생성 <model 생성 시각>` (N-25 Q9). 이행 기간(evening 이력 1개월 미만)에 장 마감 판을 손으로 다시 보낼 때는 `--trend-fallback-root data/model` 을 같이 줘야 체인 발송본과 같다(T-50) |
 | `--dry-run` | 엑셀을 만들고, 네트워크 없이 env 파일의 `BOT_TOKEN`·채팅 키 **존재만** 확인한다(`--send` 와 함께 줘도 보내지 않는다) |
+| `--equity-root PATH` · `--stage-root PATH` | (매일만) 새 시트 여섯(§4-1)의 원천 루트. 없으면 fi 판 JSON(`factor_inputs/_runs/<D>_<basis>.json`)의 `equity_root` · `stage_root`. 로컬 사본 대조 · 리허설용 |
 | `--trend-fallback-root PATH` | (매일만) 장 마감 판(`--basis evening`)의 1M 비교 판이 그 루트 evening 이력에 없거나 주 모델 순위를 못 읽으면 PATH(연구 루트 `data/model`)의 아침 확정판 중 같은 규칙 판을 대신 쓴다(T-50, §6). 없으면 대체하지 않는다. 아침 판은 받아도 무시. 장 마감 체인 ⑤ 가 `data/model` 을 넘긴다 |
 
 | rc | 뜻 |
@@ -107,9 +108,9 @@ data/factor_inputs/_runs/<YYYYMMDD>_<basis>.json      fi 판 manifest(equity 판
 
 ## 4. 매일 엑셀 — 시트별 열
 
-확정 양식(샘플 22 — DECISIONS §7 #6·#7, 구현 `excel_daily.py` · `qpack.write_confirmed`). 시트 순서
-**Score · Sector · Earnings · Compare · Raw · Meta · trend(숨김)**. 지표(표시용) 시트는 10-11 사용자 결정으로
-뺐다. 행은 모두 **주 모델 모집단**(점수 표 전 행): 순위 종목(순위순) 뒤에 제외 종목(코드순). 그룹(6행)에 있는
+확정 양식(샘플 22 · 28 · 30 — DECISIONS §7 #6·#7·#10·#11, 구현 `excel_daily.py` · `qpack.write_confirmed` ·
+`sheets_extra.py`). 시트 순서 **Score · Sector · Earnings · Analyst · Events · Market · ETF · Flow · Short ·
+Compare · Raw · Meta · trend(숨김)**. 지표(표시용) 시트는 10-11 사용자 결정으로 뺐다. 행은 모두 **주 모델 모집단**(점수 표 전 행): 순위 종목(순위순) 뒤에 제외 종목(코드순). 그룹(6행)에 있는
 말은 열 머리(7행)에서 되풀이하지 않는다(Meta 열 사전 이름은 '그룹 · 열').
 
 | 시트 | 열(그룹 · 열) |
@@ -119,7 +120,31 @@ data/factor_inputs/_runs/<YYYYMMDD>_<basis>.json      fi 판 manifest(equity 판
 | Earnings | 종목 / 매출 · 영업이익 · 순이익(억원 · YoY %) × (Y−1 · YE · (Y+1)E) × (값 · YoY) / 분기 영업이익(최근 달력 분기 5칸 `YY.nQ` · YoY(최근 분기)). YoY 머리 = 비교하는 두 해(`YoY (2024-2025)` …, Y = 데이터 날짜의 연도라 해가 바뀌면 넘어간다). YoY 색 = 가운데 0, 양 끝 = 음수 · 양수 \|값\| 90% 분위(유효숫자 2자리, 날마다). 흑자전환 · 흑전 파랑 · 적자 쪽 빨강 글자. 세로선 3단(블록 경계 medium 595959 · 연도 묶음 사이 · 분기 YoY 앞 A6A6A6 · 묶음 안 D9D9D9). Y−1 확정치가 없으면 추정치를 회색 'E'(옆 YoY 도 회색, N-25 Q10). 순액 매출 대 총액 비교 YoY 는 비우고 Score 비고 `매출 순액`(4-2b #1). 비12월 결산은 결산기가 끝나는 연도 칸(N-19) |
 | Compare | 종목 / 순위(주 모델 먼저 — 핵심 색, 순위 색 반전, `v4_rank@*` 는 뺀다) / 상위 30 포함(●) / 차이(최대 차이). A4 세로 인쇄 |
 | Raw | 종목(코드 · 이름 · 대분류) / 버킷마다 role=score 지표 × (원값 · 엔진 백분위 · 표식) — 주 모델 엔진이 v3_zscore(scope·v3)면 대신 점수 표 원값 27열 + 표식 6열(모멘텀 · 수익률(비율) · 리비전 영업이익 · 순이익 추정 변화(비율) — 두 블록 · 수급 · 순매수/시총 · 퀄리티 · 밸류, 엔진 값 그대로 · 비율은 0.0000, 점수 표에 없는 열은 그 칸만 빈칸 + 경고 로그 한 줄 — E-10) / 데이터 기준(연간 기준기 · 재무 접수일 · 분기 기준 · 추정 관측일 · 애널리스트 수 · 수급 최신일). 열 정의 = 7행 머리 칸 메모. 표식 흑자 파랑 · 적자 빨강. 인쇄 2쪽 너비 · A:C 반복 |
-| Meta | 위: 기준일 · basis · 데이터 성격(장 마감 데이터 evening 만 — `common.BASIS_NOTES`, PR-6) · 주/비교 모델 · 비교에서 뺀 모델(N-27) · model 데이터 id · model 생성 시각 · 전일 비교 데이터 · 1M 비교 데이터(아침 확정 데이터로 메운 장 마감 데이터는 값 뒤에 `(아침 확정 데이터 — 장 마감 데이터 비교 데이터 없음, T-50)`) · 순위 흐름 날짜 · fi · equity 데이터 id · 엑셀 생성 시각 · 코드 rev(E-08) · 유니버스 규칙 · 종목 수 · 제외 사유별 · 축별 결측 수 · Raw 단위(scope·v3) · 데이터 기준일 · 모델 버전 · 가중치 · 제외 게이트 · 후보 규칙(커트라인 · 9종목이 찬 대분류) · spec 별 데이터 검사 · 각주 5. 아래: **열 사전**(Score · Raw · Earnings · Sector · Compare 순, 끝에 Score 후보 · 변화 두 줄). 끼워 넣는 줄은 키 이름 뒤에 둔다(E-09) |
+| Meta | 위: 기준일 · basis · 데이터 성격(장 마감 데이터 evening 만 — `common.BASIS_NOTES`, PR-6) · 주/비교 모델 · 비교에서 뺀 모델(N-27) · model 데이터 id · model 생성 시각 · 전일 비교 데이터 · 1M 비교 데이터(아침 확정 데이터로 메운 장 마감 데이터는 값 뒤에 `(아침 확정 데이터 — 장 마감 데이터 비교 데이터 없음, T-50)`) · 순위 흐름 날짜 · fi · equity 데이터 id · 엑셀 생성 시각 · 코드 rev(E-08) · 새 시트 데이터 id(§4-1) · 유니버스 규칙 · 종목 수 · 제외 사유별 · 축별 결측 수 · Raw 단위(scope·v3) · 데이터 기준일 · 모델 버전 · 가중치 · 제외 게이트 · 후보 규칙(커트라인 · 9종목이 찬 대분류) · spec 별 데이터 검사 · 각주 5. 아래: **열 사전**(Score · Raw · Earnings · Sector · Compare 순, 끝에 Score 후보 · 변화 두 줄, 그 뒤 새 시트 — ETF · Analyst · Events · Market · Flow · Short). 끼워 넣는 줄은 키 이름 뒤에 둔다(E-09) |
+
+### 4-1. 새 시트 여섯(Analyst · Events · Market · ETF · Flow · Short)
+
+원천은 equity · stage 층(`sources.py` — fi 판 JSON 의 `equity_builds` 에 있는 표는 그 판, 없으면 그날
+current_build, stage 는 current_build. 읽은 판 id 는 Meta '새 시트 데이터 id'). 시트마다 기준일 = 그
+시트 원천의 최신 날짜(≤ D — 사용자 결정 Q-E2, 장 마감 엑셀은 대개 D−1)이고 4행에 적는다(D 와 다르면
+`기준일: <원천 날짜>(원천 최신 · 엑셀 MM-DD)`). 창 = KRX 지수 거래일로 1 · 5 · 20 · 60거래일 전 · 전년 마지막
+거래일. 원천이 없거나 비면 그 시트만 `데이터 없음: 사유` 한 줄(경고 로그) — 엑셀은 그대로 나간다. 종목 표의
+유니버스 = Score 행(종합 순위 · 대분류 · 시총 · Raw 모멘텀 1M).
+
+| 시트 | 원천 · 내용 |
+|---|---|
+| Analyst | equity `opinion_broker_daily`(같은 날 같은 증권사 1건, 나중 수집이 이긴다) · `opinion_daily` · `price_daily`. 대분류별 1W · 1M 상향 · 하향 · 신규 · 상향 비율, 그래프 4개(일별 건수 · 5일 상향 비율 — 기준일 전날까지 · 대분류 1M 상향 비율 · 여력 중앙값), 1W 상향 · 하향 상위 20, 여력 상위 20(증권사 3곳 이상), 의견 변경(1M) · 신규 커버(1W) |
+| Events | stage `stg_disclosure`(제목 NFKC 'ᆞ' → 원문 'ㆍ') · `stg_corp_map` · `stg_event_*`, equity `holder_daily`. 유형별 공시 건수(제목 낱말 규칙, 같은 날 같은 공시의 정정 · 첨부는 1건), 1W 주요 공시, 임원 보유 순변동(10% 주요주주 보고 뺌), 5% 대량보유(지분 변화 있는 것 큰 순 30), 자사주 · 증자 · 사채 결정(금액 · 날짜는 DART 원문 모양) |
+| Market | equity `index_daily` · `price_daily` · `universe_daily` · `flow_daily`(키움, 보통주) · 수정종가(`equity.views` 의 `v_adj_price` 템플릿을 판 고정 원천에 올린다). 대표 · 업종 지수 수익률, 그래프 4개(코스피 · 코스닥 · 외국인 누적 순매수 · 거래대금 20일), 투자자별 순매수(국가 행 뺌), 시장 폭(상승 · 하락 · 보합 · 52주 신고 · 신저 — 250거래일 · 이력 200거래일 이상) |
+| ETF | stage `stg_etf_price_daily`(KRX ETF 일별 2010-01~) · equity `index_daily`(거래대금 비중 분모). 유형 = `etf_classify.py` 이름 · 기초지수 규칙(시험). 자금 유입 = 좌수 변화 × NAV(분할 · 병합 보정, 시계열은 신규 상장 유입 · 폐지 유출), 요약(12주 셀 안 막대) · 그래프 4개 · 주간 26주 · 월별 12개월 · 연도별 · 운용사 · 1M 유입 · 유출 상위 15 · 전체 목록. 계산 `etf_data.py`(DuckDB, 합은 코드 · 날짜 순 왼쪽부터 — 그래프 값 사본이 비트 단위로 같게) |
+| Flow | equity `flow_daily`(키움). 대분류별 투자자 순매수 1W · 1M, 외국인 · 기관계 · 연기금 · 개인 1M 상위 · 하위 15, 외국인 지분율 1M 변화 |
+| Short | equity `short_daily`(키움 공매도 · 대차) · `price_daily` · `credit_daily`(KIS, 원천이 2거래일쯤 늦다 — 5행에 그 날짜). 시장 추이 26주 · 그래프 4개, 공매도 비중 · 대차 ÷ 시총 · 신용잔고율 상위 20 |
+
+표시: 1~5행 띠 · 6·7행 머리 · 본문 서식은 Sector 시트 칸에서 옮긴다(`qpack.XSheet`), 머리 색은 표마다 마지막
+데이터 열까지, 코드 없는 표는 A · B 합침, 색은 백분위 5 · 0 · 백분위 95 그라데이션, 틀 고정 C6 · 인쇄 반복 2~5행.
+그래프는 Q.Pack 문법(`qpack.date_frame` · `cat_frame`) — 원자료는 숨긴 열이라 '숨긴 데이터 표시'를 켜고, 저장 뒤
+`qpack.finish_charts` 가 값 사본(cache) · 날짜 축 `auto` · 제목 자동 생성 끔을 넣는다. ETF 12주 막대는
+`qpack.add_column_sparklines`(displayHidden).
 
 Score 시트 축 칸은 **엔진 단위를 따른다**(10-08 사용자 결정 '둘 다 z'). 판정은 `DayView.z_engine`
 (주 모델 엔진 = `v3_zscore`) 한 곳이다.

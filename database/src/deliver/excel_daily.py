@@ -92,7 +92,8 @@ Row = dict[str, object]
 Dictionary = list[tuple[str, str, str, str]]
 log = logging.getLogger(__name__)
 
-MODEL_LABELS = {"scope@1.0": "scope_v1.0", "v4_rank@0.1": "v4 기본", "v4_rank@0.2": "v4 동일가중",
+MODEL_LABELS = {"scope@2.0": "scope_v2.0", "scope@1.0": "scope_v1.0", "v4_rank@0.1": "v4 기본",
+                "v4_rank@0.2": "v4 동일가중",
                 "v3_zscore": "v3 원본", "v2_percentrank": "v2 원본"}
 FOOTNOTES = (
     "① 유니버스 컷: 주 모델 모집단은 Meta 시트 '유니버스 규칙' 줄을 따른다. 탈락 종목은 점수 없이 "
@@ -275,7 +276,7 @@ def title_for(view: DayView, sheet: str, note: str = "") -> Title:
 
 
 def model_id_of(spec_id: str) -> str:
-    """'scope@1.0' → 'scope'."""
+    """'scope@2.0' → 'scope'."""
     return spec_id.split("@")[0]
 
 

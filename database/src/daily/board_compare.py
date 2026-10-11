@@ -91,7 +91,10 @@ SCHEMA = 3                     # compare/<T>.json 모양 판본 — X-2 가 읽�
 # 사본(`COMPARE_SPEARMAN_MIN_BY_SPEC`)을 함께 고친다.
 SPEARMAN_MIN_BY_SPEC: dict[str, float] = {
     "scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
-    "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
+    "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94,
+    # scope_v2.0(N-47) = scope_v1.0 + 추정치 유예 5거래일 — 자기 재생 분포가 없어 scope@1.0 값을
+    # 그대로 쓴다(유예 종목은 하루 약 10종목). 컷오버 뒤 실운영 값으로 다시 본다
+    "scope@2.0": 0.92}
 # 표에 없는 spec 의 하한 — 옛 임시값(T-36) 그대로(보수). 새 spec 은 자기 재생 분포를 등록할 때까지 이 값이다
 SPEARMAN_MIN_DEFAULT = 0.975
 # 수급 정의 상한(T-36, 임시 굵은 상한) — 주체별 T 행 판 통계가 넘으면 그 주체 차이 전부 미설명.

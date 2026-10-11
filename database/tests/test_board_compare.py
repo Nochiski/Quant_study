@@ -54,7 +54,7 @@ P_PRE_T = "100020"                      # 범주 밖 — T 전 행 종가
 EV_FROM = dt.date(2026, 9, 21)          # P_EV 의 (D', T] 공개 기업행위 적용일
 # spec 별 Spearman 하한 — 정본 cutover-track §2 T-47 등록값(바꾸면 정본·`bc.SPEARMAN_MIN_BY_SPEC` 과 함께)
 T47_FLOORS = {"scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
-              "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
+              "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94, "scope@2.0": 0.92}
 
 
 def _tables(fi: FactorInputs) -> dict[str, list[dict[str, object]]]:
@@ -377,7 +377,8 @@ def test_spearman_floor_is_a_gate(planted_pair, tmp_path) -> None:
 @pytest.mark.parametrize(("rho", "extra", "low"), [
     (0.93, (), {"v2_percentrank@1.0", "v4_rank@0.2"}),                    # scope 0.93 은 통과
     (0.93, ("--spearman-min", "0.975"), set(T47_FLOORS)),                 # 옛 전 spec 0.975 면 scope 도 미달
-    (0.919, (), {"scope@1.0", "v2_percentrank@1.0", "v4_rank@0.1", "v4_rank@0.2"}),  # v3_zscore 0.91 만 통과
+    (0.919, (), {"scope@1.0", "scope@2.0", "v2_percentrank@1.0", "v4_rank@0.1",
+                 "v4_rank@0.2"}),                                         # v3_zscore 0.91 만 통과
     (0.5, ("--spearman-min", "0"), set()),                                # 기록형 — 전 spec 통과
 ])
 def test_spearman_floor_is_per_spec(same_pair, tmp_path, monkeypatch, rho: float,
@@ -1273,8 +1274,8 @@ def test_real_builders_same_inputs_have_nothing_unexplained(real_pair, tmp_path)
     assert tick[tf.DD] == tick[tf.F] == tick[tf.L] == [bc.CUTOFF]
     assert {k for k, v in rep["categories"].items() if v["count"]} == {bc.T6, bc.CUTOFF, bc.FILING}
     only = {e["ticker"]: e["categories"] for e in rep["model"][V2]["research_only"]}
-    # C 는 연구 판 T 에서도 grace(나이 5)라 v2(유예 0)가 두 판 모두에서 뺀다(N-47 — 엔진이 spec 유예로
-    # 다시 자른다). 그래서 점수 행이 한 판에만 있는 종목이 아니다
+    # C 는 연구 판 T 에서도 grace(나이 5)라 v2(유예 0)가 두 판 모두에서 뺀다(N-47 — 엔진이 spec
+    # 유예로 다시 자른다). 그래서 점수 행이 한 판에만 있는 종목이 아니다
     assert only == {tf.H: [bc.T6, bc.FILING], tf.P: [bc.T6], tf.X2: [bc.T6]}
     ev_run = json.loads((real_pair[0] / "factor_inputs" / "_runs" / f"{tf.T_S}_evening.json")
                         .read_text(encoding="utf-8"))

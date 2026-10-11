@@ -43,7 +43,8 @@ D = "2026-09-28"
 D_S = "20260928"
 FI_BID = "m_20260929T000500_000000Z"
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "model_golden" / "2026-09-28"
-ALL_SPECS = ("scope@1.0", "v2_percentrank@1.0", "v3_zscore@1.0", "v4_rank@0.1", "v4_rank@0.2")
+ALL_SPECS = ("scope@1.0", "scope@2.0", "v2_percentrank@1.0", "v3_zscore@1.0", "v4_rank@0.1",
+             "v4_rank@0.2")
 V3, V2, V4 = "v3_zscore@1.0", "v2_percentrank@1.0", "v4_rank@0.1"
 N_BOARD = 40
 # 보드 트리는 40종목이라 서버 하한(D 가격 2,000 · v4 순위 100)을 그대로 두면 MG4·MG1 이 FAIL 한다
@@ -209,7 +210,7 @@ def test_run_manifest_and_latest_pointer(built) -> None:
     assert tuple(run["specs"]) == ALL_SPECS
     for spec_id, s in run["specs"].items():
         # scope 만 엔진 메타(T-9 · H1-4 창 안 제한폭 초과 미해결 칸 수)를 싣는다
-        meta = {"adj_jump_masked"} if spec_id == "scope@1.0" else set()
+        meta = {"adj_jump_masked"} if spec_id.startswith("scope@") else set()
         assert set(s) == {"n_scores", "n_ranked", "n_excluded", "gates"} | meta
         assert tuple(s["gates"]) == mgates.GATE_ORDER
         assert {g["status"] for g in s["gates"].values()} <= {"pass", "skip"}, spec_id

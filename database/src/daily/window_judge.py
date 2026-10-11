@@ -85,7 +85,8 @@ COMPARE_TOOL = "daily.board_compare"
 COMPARE_SCHEMA = 3
 COMPARE_SPEARMAN_MIN_BY_SPEC: dict[str, float] = {
     "scope@1.0": 0.92, "v3_zscore@1.0": 0.91, "v2_percentrank@1.0": 0.96,
-    "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94}
+    "v4_rank@0.1": 0.93, "v4_rank@0.2": 0.94,
+    "scope@2.0": 0.92}      # N-47 — scope@1.0 값 그대로(근거는 board_compare 주석)
 COMPARE_SPEARMAN_MIN_DEFAULT = 0.975
 _COMPARE_RC = {"pass": 0, "fail": 1, "error": 2}
 

@@ -39,6 +39,7 @@ import compat_to_fi  # noqa: E402
 
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "model_golden" / "2026-09-28"
 SCOPE, V3 = "scope@1.0", "v3_zscore@1.0"
+SCOPE_V2 = "scope@2.0"
 ENGINE = ENGINES["v3_zscore"]
 SAME_FACTORS = ("momentum_score", "revision_score", "flow_score", "quality_score")
 
@@ -70,6 +71,18 @@ def test_scope_spec_is_v3_without_ev_ebitda() -> None:
     v3_val = dict(v3.params["valuation"]["sub_weights"])       # type: ignore[index]
     v3_val.pop("ev_ebitda")
     assert list(scope.params["valuation"]["sub_weights"].items()) == list(v3_val.items())  # type: ignore[index]
+
+
+def test_scope_v2_differs_from_v1_only_in_the_estimate_grace() -> None:
+    """scope_v2.0(N-47) = scope_v1.0 + 추정치 소멸 유예 5거래일. 그 밖의 정의는 글자 그대로 같고
+    scope@1.0 도 레지스트리에 남는다(비교·이력용)."""
+    v2, v1 = registry.get(SCOPE_V2), registry.get(SCOPE)
+    assert v2.validate() == [] and v1 in registry.all_specs() and v2 in registry.all_specs()
+    assert (v2.model_id, v2.version, v2.engine) == ("scope", "2.0", "v3_zscore")
+    assert (v1.universe.coverage_grace_days, v2.universe.coverage_grace_days) == (0, 5)
+    assert replace(v2, version="1.0", universe=v1.universe) == v1
+    assert list(v2.params["valuation"]["sub_weights"]) == \
+        list(v1.params["valuation"]["sub_weights"])          # type: ignore[index]
 
 
 # ── (b) 골든 입력에서 v3_zscore@1.0 과의 차이 ────────────────────────────────────

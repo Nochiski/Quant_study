@@ -721,8 +721,8 @@ def built_default(roots, tmp_path_factory):
 
 
 def test_default_grace_window_is_five_so_grace_stocks_stay_eligible(built_default) -> None:
-    """기본 유예 창 5거래일(N-47, 옛 기본 0 — N-14) — 나이 1·5 인 B·C 는 grace 로 eligible, 나이 6 인
-    Dd 만 lapsed 로 빠진다. spec 기본 유예(UniverseRule)는 0 그대로다(엔진이 다시 자른다)."""
+    """기본 유예 창 5거래일(N-47, 옛 기본 0 — N-14) — 나이 1·5 인 B·C 는 grace 로 eligible, 나이
+    6 인 Dd 만 lapsed 로 빠진다. spec 기본 유예(UniverseRule)는 0 그대로다(엔진이 다시 자른다)."""
     assert FI_COVERAGE_GRACE_MAX == 5 and UniverseRule().coverage_grace_days == 0
     out, res = built_default
     assert res.ok
@@ -736,6 +736,38 @@ def test_default_grace_window_is_five_so_grace_stocks_stay_eligible(built_defaul
     assert res.coverage["counts"] == {"fresh": 10, "grace": 2, "lapsed": 1, "none": 2}
     run = json.loads(res.run_manifest.read_text(encoding="utf-8"))
     assert run["universe_rule"]["coverage_grace_days"] == FI_COVERAGE_GRACE_MAX
+
+
+def test_scope_v2_keeps_grace_stocks_with_last_fresh_revisions(built_default) -> None:
+    """N-47 — 기본 fi 판(유예 창 5)을 그대로 엔진에 넣으면 scope@2.0(유예 5)은 grace B(나이 1)·
+    C(나이 5)를 점수에 넣고 scope@1.0(유예 0)은 뺀다(나머지 종목은 같다). B 의 리비전 원값은 마지막
+    신선일(09-23) 판 컨센서스로 계산한다 — stage 에는 D 판 B 행도 있지만 op 가 빈 판이라 fi 가 싣지
+    않는다.
+    합성 트리 시총이 1,000억 하한보다 작아 두 spec 모두 시총 하한만 끈다."""
+    from dataclasses import replace
+
+    from model import registry
+    from model.engines import ENGINES
+    from model.engines.v3_zscore import _change
+
+    out, res = built_default
+    fi, _ = load_inputs(out, res.build_id, D.isoformat(), "morning")
+
+    def run(spec_id: str) -> dict[str, dict]:
+        spec = registry.get(spec_id)
+        spec = replace(spec, universe=replace(spec.universe, min_market_cap=None))
+        return {str(r["stock_code"]): r for r in ENGINES["v3_zscore"].run(spec, fi).scores}
+
+    v2, v1 = run("scope@2.0"), run("scope@1.0")
+    assert set(v2) - set(v1) == {B, C} and set(v1) <= set(v2) and DD not in v2
+    last_fresh = dt.date(2026, 9, 23)
+    for h in ("1w", "1m", "3m"):
+        for col, acc in (("op", "121500"), ("ni", "122710")):
+            want = _change(mval(B, last_fresh, "202612", acc, "current"),
+                           mval(B, last_fresh, "202612", acc, h))[0]
+            at_d = _change(mval(B, D, "202612", acc, "current"), mval(B, D, "202612", acc, h))[0]
+            assert v2[B][f"{col}_change_{h}"] == want != at_d, (col, h)
+    assert v2[B]["revision_score"] is not None and v2[C]["revision_score"] is not None
 
 
 def _coverage_states(fresh: dict[str, list[dt.date]], fetched: list[dt.date],

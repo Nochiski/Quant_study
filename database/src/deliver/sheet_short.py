@@ -1,7 +1,8 @@
 """Short 시트 — 공매도 · 대차 · 신용(DECISIONS §7 #11, 확정 샘플 30).
 
 원천: equity `short_daily`(키움 공매도 · 대차잔고) · `price_daily`(거래대금 · 시총) · `credit_daily`
-(KIS 신용잔고 — 원천이 2거래일쯤 늦다). 기준일 = 키움 공매도와 KRX 거래대금이 둘 다 있는 최신일.
+(KIS 신용잔고 — 원천이 2거래일쯤 늦다). 기준일 = 키움 공매도 · 대차의 최신 완전한 날과 KRX 거래대금
+최신일 중 이른 날. 일부만 수집된 날(공매도 · 신용)은 빼고 그렇다고 적는다.
 """
 from __future__ import annotations
 
@@ -19,22 +20,27 @@ from .extra_common import (
     F_PP,
     F_WON,
     G1,
+    HIST_DAYS,
     HR,
+    PARTIAL_DAY_RATIO,
     Calendar,
+    Latest,
     Universe,
     base_text,
+    common_markets,
     krx_calendar,
     latest,
+    latest_complete,
     md,
 )
 from .qpack import CHART_BLUE, XRefs, XSheet, date_frame, line_series, x_note
-from .sheet_market import HIST_DAYS, common_markets
 from .sources import SourceMissing, Sources, day_of, lit, num, num0, text
 
 NAME = "Short"
 WIDTHS = {"A": 7.5, "B": 18, "C": 14} | dict.fromkeys("DEFGHIJKL", 8)
 WEEKS = 26
 CREDIT_1M = 20              # 신용 1M 전 = 신용 날짜 20개 전
+STOCK_DAYS = 25             # 종목 표가 읽는 최근 거래일 — 공매도 비중 20일 · 대차 1M(20거래일) 비교 + 여유
 
 
 @dataclass
@@ -68,17 +74,20 @@ class ShortData:
     cal: Calendar
     mkt_short: list[MarketDay]                  # 날짜순
     tk_short: dict[str, dict[date, StockDay]]
+    latest: Latest                              # 공매도 · 대차 기준일(일부 수집일 뺌)
     credit_dates: tuple[date, date]             # 최신 · 1M 전
+    credit_partial: date | None                 # 일부만 수집돼 뺀 신용 날짜
     mkt_credit: dict[date, float]               # 날짜 → 신용융자 잔고 합(원)
     tk_credit: dict[str, dict[date, Credit]]
 
 
 def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe) -> ShortData:
     sh, pv = src.equity("short_daily"), src.equity("price_daily")
-    day = min(latest(con, sh, "date", upto, "short_value_kiwoom_krw IS NOT NULL", "키움 공매도"),
-              latest(con, pv, "date", upto, "value_krw IS NOT NULL", "KRX 종목 일별 거래대금"))
-    cal = krx_calendar(con, src, day)
-    d250, d25 = cal.back(HIST_DAYS), cal.back(25)
+    lt = latest_complete(con, sh, "date", upto, "short_value_kiwoom_krw IS NOT NULL "
+                         "OR lending_balance_kiwoom_krw IS NOT NULL", "키움 공매도 · 대차")
+    day = min(lt.day, latest(con, pv, "date", upto, "value_krw IS NOT NULL", "KRX 종목 일별 거래대금"))
+    cal = krx_calendar(con, src, day, upto)
+    d250, d25 = cal.back(HIST_DAYS), cal.back(STOCK_DAYS)
     common_markets(con, src, day)
     con.execute("CREATE OR REPLACE TEMP TABLE uc (ticker VARCHAR)")
     con.executemany("INSERT INTO uc VALUES (?)", [(c,) for c in uni])
@@ -97,16 +106,20 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
             WHERE s.date > {lit(d25)} AND s.date <= {lit(day)}""").fetchall():
         tk[text(t)][day_of(dd)] = StockDay(num(sv), num(lb), num(tv), num(mc))
     cr = src.equity("credit_daily")
-    cdays = [day_of(r[0]) for r in con.execute(
-        f"SELECT DISTINCT date FROM {cr} WHERE date > {lit(d250)} AND date <= {lit(day)} "
-        f"AND whol_loan_rmnd_amt IS NOT NULL ORDER BY 1").fetchall()]
+    counts = [(day_of(r[0]), int(r[1])) for r in con.execute(
+        f"SELECT date, count(*) FROM {cr} WHERE date > {lit(d250)} AND date <= {lit(day)} "
+        f"AND whol_loan_rmnd_amt IS NOT NULL GROUP BY 1 ORDER BY 1").fetchall()]
+    partial = None
+    if len(counts) >= 2 and counts[-1][1] < PARTIAL_DAY_RATIO * counts[-2][1]:
+        partial = counts.pop()[0]           # 마지막 신용 날짜가 일부만 수집된 날 — 뺀다
+    cdays = [x for x, _ in counts]
     if len(cdays) <= CREDIT_1M:
         raise SourceMissing(f"KIS 신용잔고 날짜가 {len(cdays)}개뿐이다(1M 비교 {CREDIT_1M + 1}개 필요)")
     cd, cd1 = cdays[-1], cdays[-1 - CREDIT_1M]
     # 금액 단위 만원 → 원(Σ잔고주식수 × 종가 ÷ Σ금액 ≈ 1.09만)
     mkt_cr = {day_of(dd): num0(amt) * 1e4 for dd, amt in con.execute(
         f"SELECT c.date, sum(c.whol_loan_rmnd_amt) FROM {cr} c JOIN mk USING (ticker) "
-        f"WHERE c.date > {lit(d250)} AND c.date <= {lit(day)} "
+        f"WHERE c.date > {lit(d250)} AND c.date <= {lit(cd)} "
         f"AND c.whol_loan_rmnd_amt IS NOT NULL GROUP BY 1").fetchall()}
     tk_cr: dict[str, dict[date, Credit]] = defaultdict(dict)
     for t, dd, amt, rate in con.execute(
@@ -114,7 +127,7 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
             f"FROM {cr} c JOIN uc USING (ticker) WHERE c.date IN ({lit(cd)}, {lit(cd1)}) "
             f"AND c.whol_loan_rmnd_amt IS NOT NULL").fetchall():
         tk_cr[text(t)][day_of(dd)] = Credit(num0(amt) * 1e4, num(rate))
-    return ShortData(cal, mkt, tk, (cd, cd1), mkt_cr, tk_cr)
+    return ShortData(cal, mkt, tk, lt, (cd, cd1), partial, mkt_cr, tk_cr)
 
 
 def write(wb: Workbook, s: ShortData, uni: Universe, refs: XRefs, d: date,
@@ -126,9 +139,11 @@ def write(wb: Workbook, s: ShortData, uni: Universe, refs: XRefs, d: date,
     ws = xs.ws
     xs.texts({"A1": "정렬: 블록마다(주 최근 순 · 비율 높은 순)", "A2": "Short: 공매도 · 대차 · 신용",
               "A3": f"자료: 키움 공매도 · 대차잔고 · KIS 신용잔고(보통주) · 모델 유니버스 {len(uni)}종목",
-              "A4": base_text(day, d), "F4": "출처: quant-ledger 원장 · 시험 양식",
+              "A4": base_text(day, d) + s.latest.note(), "F4": "출처: quant-ledger 원장 · 시험 양식",
               "A5": (f"신용잔고는 원천이 {lag}거래일 늦어 최신 {md(cd)} · 1M 전 {md(cd1)}" if lag
-                     else f"신용잔고 최신 {md(cd)} · 1M 전 {md(cd1)}")})
+                     else f"신용잔고 최신 {md(cd)} · 1M 전 {md(cd1)}")
+                    + ("" if s.credit_partial is None
+                       else f" · {md(s.credit_partial)} 은 일부만 수집돼 뺌")})
     put, header, close, cs = xs.put, xs.header, xs.close, xs.cs
     ms, mc = s.mkt_short, s.mkt_credit
 

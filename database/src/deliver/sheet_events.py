@@ -162,7 +162,7 @@ def _decisions(con: duckdb.DuckDBPyConnection, src: Sources, cmap: dict[str, str
 def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe) -> EventsData:
     ds = src.stage("stg_disclosure")
     day = latest(con, ds, "rcept_dt", upto, "true", "DART 공시 목록")
-    cal = krx_calendar(con, src, day)
+    cal = krx_calendar(con, src, day, upto)
     d1m = cal.win["1M"]
     con.execute("CREATE OR REPLACE TEMP TABLE uc (ticker VARCHAR)")
     con.executemany("INSERT INTO uc VALUES (?)", [(c,) for c in uni])

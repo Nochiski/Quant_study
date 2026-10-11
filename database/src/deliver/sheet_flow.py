@@ -1,6 +1,7 @@
 """Flow 시트 — 모델 유니버스 투자자별 순매수 · 외국인 지분율(DECISIONS §7 #11, 확정 샘플 30).
 
-원천: equity `flow_daily`(키움 — kis 는 08-14 정지). 기준일 = 키움 수급 최신일.
+원천: equity `flow_daily`(키움 — kis 는 08-14 정지). 기준일 = 키움 수급 최신 완전한 날(그날 종목 수가
+직전 날보다 크게 적으면 일부만 수집된 날로 보고 직전 날을 쓰며 4행에 적는다).
 """
 from __future__ import annotations
 
@@ -17,16 +18,17 @@ from .extra_common import (
     F_PCT,
     F_PP,
     F_WON,
+    INV,
     Calendar,
+    Latest,
     Universe,
     base_text,
     krx_calendar,
-    latest,
+    latest_complete,
     md,
     span,
 )
 from .qpack import XRefs, XSheet
-from .sheet_market import INV
 from .sources import Sources, lit, num, num0, text
 
 NAME = "Flow"
@@ -39,15 +41,17 @@ WIDTHS = {"A": 7.5, "B": 18, "C": 14} | dict.fromkeys("DEFGHIJKLMNOPQ", 8)
 @dataclass
 class FlowData:
     cal: Calendar
+    latest: Latest
     tk_flow: dict[str, dict[str, dict[str, float]]]     # 코드 → 창 → 열 → 합(원)
     fw: dict[str, dict[str, float | None]]              # 코드 → now · m1 외국인 지분율(%)
 
 
 def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe) -> FlowData:
     fl = src.equity("flow_daily")
-    day = latest(con, fl, "date", upto, "src = 'kiwoom' AND frgnr_invsr_krw IS NOT NULL",
-                 "키움 투자자별 매매")
-    cal = krx_calendar(con, src, day)
+    lt = latest_complete(con, fl, "date", upto, "src = 'kiwoom' AND frgnr_invsr_krw IS NOT NULL",
+                         "키움 투자자별 매매")
+    day = lt.day
+    cal = krx_calendar(con, src, day, upto)
     win = cal.win
     con.execute("CREATE OR REPLACE TEMP TABLE uc (ticker VARCHAR)")
     con.executemany("INSERT INTO uc VALUES (?)", [(c,) for c in uni])
@@ -66,7 +70,7 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
             WHERE f.src = 'kiwoom' AND f.date IN ({lit(day)}, {lit(win['1M'])})
               AND f.foreign_wght_pct IS NOT NULL""").fetchall():
         fw.setdefault(text(t), {"now": None, "m1": None})["now" if dd == day else "m1"] = num(pct)
-    return FlowData(cal, tk, fw)
+    return FlowData(cal, lt, tk, fw)
 
 
 def write(wb: Workbook, f: FlowData, uni: Universe, refs: XRefs, d: date,
@@ -77,7 +81,7 @@ def write(wb: Workbook, f: FlowData, uni: Universe, refs: XRefs, d: date,
     xs.texts({"A1": "정렬: 블록마다(대분류 순 · 1M 순매수 금액 순)",
               "A2": "Flow: 투자자별 순매수 · 외국인 지분율",
               "A3": f"자료: 키움 투자자별 매매 · 외국인 보유 · 모델 유니버스 {len(uni)}종목",
-              "A4": base_text(day, d), "F4": "출처: quant-ledger 원장 · 시험 양식",
+              "A4": base_text(day, d) + f.latest.note(), "F4": "출처: quant-ledger 원장 · 시험 양식",
               "A5": f"1W: {span(win['1W'], day)} · 1M: {span(win['1M'], day)} · 금액 억원"})
     put, header, close, cs = xs.put, xs.header, xs.close, xs.cs
 

@@ -115,7 +115,7 @@ def _opt(x: object) -> str | None:
 def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe) -> AnalystData:
     ob = src.equity("opinion_broker_daily")
     day = latest(con, ob, "fetched_date", upto, "true", "WISE 증권사별 투자의견")
-    cal = krx_calendar(con, src, day)
+    cal = krx_calendar(con, src, day, upto)
     d1m = cal.win["1M"]
     got = con.execute(f"SELECT min(fetched_date) FROM {ob}").fetchone()
     first = day_of(got[0]) if got and got[0] else day

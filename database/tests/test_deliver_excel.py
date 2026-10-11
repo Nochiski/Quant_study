@@ -1465,8 +1465,9 @@ def test_meta_records_excel_time_and_deployed_rev(world: dict[str, Path], tmp_pa
 
 
 def _write_rank_run(model_root: Path, day: str, spec: str, ranks: dict[str, int],
-                    basis: str = "morning") -> None:
-    """순위만 있는 최소 model 판(순위 흐름 재료). 판 id 접두어는 basis 를 따른다(m_ · e_)."""
+                    basis: str = "morning", fi: str = "x") -> None:
+    """순위만 있는 최소 model 판(순위 흐름 재료). 판 id 접두어는 basis 를 따른다(m_ · e_).
+    `fi` = 판 manifest 의 factor_inputs 판 id(없는 판이면 그날 fi 를 읽는 곳은 건너뛴다)."""
     bid = f"{'e' if basis == 'evening' else 'm'}_{day.replace('-', '')}T000000Z"
     _write(model_root / spec / f"v={bid}" / "scores.parquet",
            pa.schema([("ticker", pa.string()), ("rank", pa.int64())]),
@@ -1474,7 +1475,7 @@ def _write_rank_run(model_root: Path, day: str, spec: str, ranks: dict[str, int]
     runs = model_root / "_runs"
     runs.mkdir(parents=True, exist_ok=True)
     meta = {"layer": "model", "status": "ok", "build_id": bid, "date": day, "basis": basis,
-            "fi_build_id": "x", "generated_at": f"{day}T00:00:00Z", "specs": {spec: {}},
+            "fi_build_id": fi, "generated_at": f"{day}T00:00:00Z", "specs": {spec: {}},
             "primary_spec": spec}
     (runs / f"{day.replace('-', '')}_{basis}.json").write_text(json.dumps(meta), encoding="utf-8")
 
@@ -2689,3 +2690,102 @@ def test_no_previous_day_leaves_change_blank(world: dict[str, Path], tmp_path: P
         out_root=tmp_path / "c").path)
     assert set(chg) - {None} and str(meta["전일 비교 데이터"]).startswith(THU)
     assert "전일 데이터 없음" not in memo
+
+
+# ── E2(N-47 · Q-E1) — 주 모델 scope_v2.0 · 앞 주 모델 이력 잇기 · 추정치 유예 표시 ──────────────
+GRACE = "100008"           # 추정치가 사라진 지 2거래일 — scope_v2.0 은 남기고 scope_v1.0 은 뺀다
+T_A, T_B = "100000", "100001"
+
+
+def _grace_stock(b) -> None:
+    for r in b.tables["fi_universe"]:
+        if r["ticker"] == GRACE:
+            r.update(coverage_state="grace", coverage_age_days=2)
+
+
+@pytest.fixture(scope="module")
+def grace_board(tmp_path_factory: pytest.TempPathFactory):
+    """scope 실물 모양 판(09-28, 주 모델 scope@2.0) + GRACE 종목 하나가 추정치 유예 2일째."""
+    return _scope_board(tmp_path_factory.mktemp("grace"), edit=_grace_stock)
+
+
+def _history(board, tmp_path: Path, days: dict[str, tuple[str, str]]) -> Path:
+    """grace_board 의 model 루트 사본 + 순위만 있는 과거 판(날짜 → (spec, fi 판 id)) — 순위는 날짜
+    차례로 T_A 30 · 20 · 10 · 5 …, T_B 2 · 3 · 4 · 6 …."""
+    _res, _wb, _scores, root = board
+    model = tmp_path / "model"
+    shutil.copytree(root / "model", model)
+    for k, (day, (spec, fi)) in enumerate(sorted(days.items())):
+        _write_rank_run(model, day, spec, {T_A: (30, 20, 10, 5)[k], T_B: (2, 3, 4, 6)[k]}, fi=fi)
+    return model
+
+
+def _score_view(path: Path) -> tuple[dict[str, object], object, dict[str, int], dict[str, int]]:
+    wb = load_workbook(path)
+    ws = wb["Score"]
+    return dict(_meta_pairs(wb)), ws, header(ws), rows_by_code(ws)
+
+
+def test_history_continues_from_the_predecessor_model(grace_board, tmp_path: Path) -> None:
+    """Q-E1 — 주 모델을 scope_v2.0 으로 바꾼 뒤 약 4주는 scope@2.0 이 없는 옛 판의 scope@1.0 순위로
+    전일 순위 · Δ순위 1M · 1M 흐름을 잇고, 이은 날을 Meta 줄과 1M 흐름 머리 메모에 적는다."""
+    day0, bid = "2026-09-28", grace_board[0].build_id
+    model = _history(grace_board, tmp_path, {
+        "2026-08-28": ("scope@1.0", "x"), "2026-09-15": ("scope@1.0", "x"),
+        "2026-09-24": ("scope@1.0", "x"), "2026-09-25": ("scope@2.0", "x")})
+    res = build_daily(day0, "morning", model_root=model, fi_root=grace_board[3] / "fi",
+                      out_root=tmp_path / "a")
+    meta, ws, h, rows = _score_view(res.path)
+    assert meta["1M 비교 데이터"] == "2026-08-28 · scope_v1.0 순위"
+    assert meta["순위 흐름 날짜"] == "2026-08-28 ~ 2026-09-28 · 5개 · 09-24까지 scope_v1.0"
+    assert meta["전일 비교 데이터"] == "2026-09-25 m_20260925T000000Z"   # 그날은 scope@2.0
+    assert meta["주 모델"] == "scope@2.0(scope_v2.0)"
+    now_a = ws.cell(rows[T_A], h["순위"]).value
+    assert ws.cell(rows[T_A], h["전일 순위"]).value == 5
+    assert ws.cell(rows[T_A], h["Δ순위 1M"]).value == 30 - int(cast(int, now_a))
+    memo = ws.cell(7, h["1M 흐름"]).comment
+    assert memo is not None and "09-25 이전은 scope_v1.0 순위" in memo.text.replace("\xa0", " ")
+    tr = load_workbook(res.path)["trend"]
+    assert [tr.cell(7, c).value for c in range(2, tr.max_column + 1)] == [
+        "08-28", "09-15", "09-24", "09-25", "09-28"]
+    assert tr.cell(rows_by_code(tr)[T_A], 2).value == -30
+    assert str(ws["A3"].value).startswith("주 모델: scope_v2.0 · 비교: ")
+    assert bid in str(meta["model 데이터 id"])
+    # 전일 판도 scope@1.0 뿐이면 — 전일 순위 · 변화를 scope@1.0 으로 매기고 Meta 에 적는다
+    (model / "_runs" / "20260925_morning.json").unlink()
+    res = build_daily(day0, "morning", model_root=model, fi_root=grace_board[3] / "fi",
+                      out_root=tmp_path / "b")
+    meta, ws, h, rows = _score_view(res.path)
+    assert meta["전일 비교 데이터"] == "2026-09-24 m_20260924T000000Z · scope_v1.0 순위"
+    assert ws.cell(rows[T_A], h["전일 순위"]).value == 10
+    assert {ws.cell(r, h["변화"]).value for r in rows.values()} - {None}   # 변화를 매긴다
+    memo = ws.cell(7, h["1M 흐름"]).comment
+    assert memo is not None and "09-28 이전은 scope_v1.0 순위" in memo.text.replace("\xa0", " ")
+    # 앞 주 모델도 없는 판은 빠진다(그날 다른 모델만) — 표시도 없다
+    model2 = _history(grace_board, tmp_path / "c", {"2026-09-24": ("v3_zscore@1.0", "x")})
+    res = build_daily(day0, "morning", model_root=model2, fi_root=grace_board[3] / "fi",
+                      out_root=tmp_path / "c" / "out")
+    meta, ws, h, _rows = _score_view(res.path)
+    assert meta["전일 비교 데이터"] == (
+        "2026-09-24 m_20260924T000000Z — 순위를 쓸 수 없어 전일 데이터 없음")
+    assert meta["순위 흐름 날짜"] == "2026-09-28 ~ 2026-09-28 · 1개"
+    assert "이전은" not in str(getattr(ws.cell(7, h["1M 흐름"]).comment, "text", ""))
+
+
+def test_weekly_marks_use_the_predecessor_model_on_older_days(grace_board,
+                                                              tmp_path: Path) -> None:
+    """주간 엑셀 요일 표시 · 지난주 순위도 주 모델이 없는 날은 앞 주 모델 순위로 잇고 Meta 에
+    적는다."""
+    fi = grace_board[3] / "fi"
+    model = _history(grace_board, tmp_path, {
+        "2026-09-24": ("scope@1.0", SCOPE_FI_BID), "2026-09-25": ("scope@2.0", SCOPE_FI_BID)})
+    w = build_weekly("2026-W40", model_root=model, fi_root=fi, out_root=tmp_path / "out")
+    wb = load_workbook(w.path)
+    meta = {wb["메타"].cell(r, 1).value: wb["메타"].cell(r, 2).value
+            for r in range(8, wb["메타"].max_row + 1)}
+    assert meta["앞 주 모델로 이은 날"] == "09-24 scope_v1.0 순위(그날 판에 scope_v2.0 없음 — N-47)"
+    from deliver.excel_weekly import load_week
+    last = load_week(model, "2026-W39", "scope@2.0", fi_root=fi)
+    assert {d: v.spec_id for d, v in last.views.items()} == {
+        "2026-09-24": "scope@1.0", "2026-09-25": "scope@2.0"}
+    assert last.views["2026-09-24"].rank(T_A) == 30         # 그날 scope@1.0 순위

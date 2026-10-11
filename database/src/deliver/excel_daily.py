@@ -76,6 +76,7 @@ from .reader import (
     DeliverError,
     deployed_rev,
     fi_run_meta,
+    history_spec,
     iso,
     load_run,
     previous_run,
@@ -458,6 +459,24 @@ def bucket_missing_reason(view: DayView, t: str, b: str) -> str:
     return "원천없음"
 
 
+# ── 앞 주 모델 이력(N-47 · Q-E1) ───────────────────────────────────────────────
+def older_mark(trend: Trend) -> tuple[str, str] | None:
+    """(앞 주 모델 라벨, 마지막으로 앞 주 모델 순위를 쓴 날 MM-DD) — 1M 흐름 · 비교 데이터를 앞 주
+    모델로 이은 날이 없으면 None."""
+    if not trend.older:
+        return None
+    last = max(trend.older)
+    return model_label(trend.older[last]), last[5:]
+
+
+def switch_day(trend: Trend) -> str | None:
+    """1M 흐름에서 주 모델 순위를 처음 쓴 날 MM-DD(그 앞은 앞 주 모델) — 앞 주 모델을 안 썼으면
+    None."""
+    if not trend.older:
+        return None
+    return next((d[5:] for d in trend.dates if d not in trend.older), None)
+
+
 # ── 후보 30 과 변화(확정 샘플 Score AM · AN) ─────────────────────────────────
 ENTRY, EXIT = "진입", "이탈"
 NO_PREV = "전일 데이터 없음"
@@ -723,6 +742,15 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
     legend = ["비고 표지 뜻", "", *(f"■ {a}: {b}" for a, b in NOTE_LEGEND), "",
               "표지가 없으면 빈칸, 여러 개면 ' · ' 로 이어 붙임."]
     ws.cell(7, sh.cols["note"]).comment = note("\n".join(legend), "비고", wrap=False)
+    # 1M 흐름 머리 메모 — 앞 주 모델로 이은 날(있을 때만)
+    flow = []
+    if (sw := switch_day(trend)) is not None and (mark := older_mark(trend)) is not None:
+        flow.append(f"{sw} 이전은 {mark[0]} 순위(주 모델이 {model_label(view.spec_id)} 로 "
+                    "바뀌기 전 — N-47)")
+    if flow:
+        ws.cell(7, sh.cols["t1m"]).comment = note(
+            "\n".join(["1M 흐름: 1M 동안 날짜별 순위 꺾은선(위 = 상승, 선 색 = Δ순위 1M 부호)",
+                       *flow]))
     ws.cell(7, c_cand).comment = note(
         f"후보: 상위 {top_n} · 대분류(L1)당 최대 {k}(Meta 후보 규칙). 순위순으로 내려가며 "
         f"{k} 가 찬 대분류는 건너뜀. 오늘 커트라인: 순위 "
@@ -1483,10 +1511,16 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     fi = load_fi(fi_root, view)
     prev = previous_run(model_root, run.date, basis)
     prev_rank: dict[str, int | None] = {}
-    if prev is not None:
-        sid = view.spec_id if view.spec_id in prev.specs else prev.primary_spec
+    # 전일 순위 spec — 직전 판에 주 모델이 없으면 앞 주 모델(N-47 · Q-E1), 둘 다 없으면
+    # 전일 데이터 없음
+    prev_spec = None if prev is None else history_spec(prev, view.spec_id)
+    if prev is not None and prev_spec is None:
+        log.warning("직전 데이터 %s %s 에 주 모델 %s 도 앞 주 모델도 없다", prev.date,
+                    prev.build_id, view.spec_id)
+    elif prev is not None and prev_spec is not None:
         try:
-            prev_rank = {ticker_of(r): rank_of(r) for r in read_scores(model_root, prev, sid)}
+            prev_rank = {ticker_of(r): rank_of(r)
+                         for r in read_scores(model_root, prev, prev_spec)}
         except DeliverError as e:
             log.warning("전일 순위를 읽지 못했다(%s %s): %s", prev.date, prev.build_id, e)
             prev_rank = {}
@@ -1515,12 +1549,24 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     prev_text = NO_PREV if prev is None else f"{prev.date} {prev.build_id}"
     if prev is not None and cands.no_prev:
         prev_text += f" — 순위를 쓸 수 없어 {NO_PREV}"
+    elif prev_spec is not None and prev_spec != view.spec_id:
+        prev_text += f" · {model_label(prev_spec)} 순위"          # 앞 주 모델로 이은 날(N-47)
+    base_text: dict[str, str] = {}
+    for w in WINDOWS:
+        b = trend.base[w]
+        text = (f"{b} {FALLBACK_NOTE}" if w in trend.fallback
+                else b or "없음(그 전 데이터가 없다)")
+        if b is not None and b in trend.older:
+            text += f" · {model_label(trend.older[b])} 순위"
+        base_text[w] = text
+    flow_text = (f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"
+                 if trend.dates else "없음")
+    if (mark := older_mark(trend)) is not None:
+        flow_text += f" · {mark[1]}까지 {mark[0]}"
     insert_after(pairs, "model 생성 시각", [
         ("전일 비교 데이터", prev_text),
-        *((f"{w} 비교 데이터", f"{trend.base[w]} {FALLBACK_NOTE}" if w in trend.fallback
-           else trend.base[w] or "없음(그 전 데이터가 없다)") for w in WINDOWS),
-        ("순위 흐름 날짜", f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"
-                       if trend.dates else "없음")])
+        *((f"{w} 비교 데이터", base_text[w]) for w in WINDOWS),
+        ("순위 흐름 날짜", flow_text)])
     # 같은 model 데이터로 코드만 바뀐 정정판을 파일로 구별한다(E-08)
     insert_after(pairs, "equity 데이터 id", [
         ("엑셀 생성 시각", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),

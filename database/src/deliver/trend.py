@@ -13,7 +13,9 @@
             같은 말을 한다.
             10-07 까지는 백분위 100·(N−순위)/(N−1)였다 — 유니버스가 커지는 날 순위가 밀려도 백분위가
             올라 '선은 오르는데 빨강'이 생겼다(E-06, N-25 Q8 '원순위 선').
-  판 파일이 지워졌거나(keep) 그 판에 주 모델이 없으면 그날은 흐름에서 빠진다.
+  판 파일이 지워졌거나(keep) 그 판에 주 모델이 없으면 그날은 흐름에서 빠진다. 단 주 모델이 없고
+            앞 주 모델(`contracts.PRIMARY_PREDECESSOR` — scope@2.0 의 앞은 scope@1.0)이 있으면
+            그 순위로 잇고(N-47 · Q-E1, 바뀐 날부터 약 4주) `Trend.older` 에 날짜를 남긴다.
   T-50(PR-6b) 장 마감 판(evening)의 1M 비교 판이 evening 이력에 없거나 주 모델 순위를
             못 읽으면, 대체 루트(연구 루트 data/model)가 주어졌을 때만 그 루트 아침
             확정판(morning)의 같은 규칙 비교 판을 쓴다. 흐름 첫 점도 그 판이라 위 '처음 → 끝 = Δ'
@@ -24,7 +26,7 @@ from __future__ import annotations
 import calendar
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -34,7 +36,14 @@ from openpyxl.utils import get_column_letter
 from openpyxl.workbook import Workbook
 
 from . import qpack
-from .reader import DeliverError, ModelRun, previous_run, read_scores, runs_between
+from .reader import (
+    DeliverError,
+    ModelRun,
+    history_spec,
+    previous_run,
+    read_scores,
+    runs_between,
+)
 from .view import rank_of, ticker_of
 
 log = logging.getLogger(__name__)
@@ -66,6 +75,10 @@ class Trend:
     base: Mapping[str, str | None]                # '1W'·'1M' → 비교 판 날짜(없으면 None)
     base_rank: Mapping[str, Mapping[str, int | None]]   # '1W'·'1M' → 비교 판 순위
     fallback: frozenset[str] = frozenset()        # 비교 판을 대체 루트 아침판에서 쓴 창(T-50)
+    # 날짜 → 그날 순위를 읽은 앞 주 모델 spec(주 모델이 그 판에 없어 앞 주 모델로 이은 날만, N-47)
+    older: Mapping[str, str] = field(default_factory=dict)
+    # 날짜 → 흐름 · 비교 판으로 쓴 model 판(그날 fi 판을 다시 읽는 곳 — 1M 유예 일수)
+    runs: Mapping[str, ModelRun] = field(default_factory=dict)
 
     def delta(self, which: str, ticker: str, rank_now: int | None) -> int | None:
         then = self.base_rank[which].get(ticker)
@@ -79,11 +92,15 @@ class Trend:
         return next((i for i, x in enumerate(self.dates) if x >= start), len(self.dates))
 
 
-def _ranks(model_root: Path, run: ModelRun, spec_id: str) -> dict[str, int | None] | None:
-    if spec_id not in run.specs:
+def _ranks(model_root: Path, run: ModelRun,
+           spec_id: str) -> tuple[str, dict[str, int | None]] | None:
+    """(읽은 spec, 종목 → 순위) — 그 판에 주 모델이 없으면 앞 주 모델(`history_spec`). 둘 다
+    없거나 점수 표를 못 읽으면 None."""
+    sid = history_spec(run, spec_id)
+    if sid is None:
         return None
     try:
-        return {ticker_of(r): rank_of(r) for r in read_scores(model_root, run, spec_id)}
+        return sid, {ticker_of(r): rank_of(r) for r in read_scores(model_root, run, sid)}
     except DeliverError:
         return None
 
@@ -95,16 +112,29 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
     b1m = bases["1M"]
     start = b1m.date if b1m is not None else (month_back(d) + timedelta(days=1)).isoformat()
     by_date: dict[str, dict[str, int | None]] = {}
+    older: dict[str, str] = {}
+    runs: dict[str, ModelRun] = {}
+
+    def take(r: ModelRun, got: tuple[str, dict[str, int | None]]) -> dict[str, int | None]:
+        sid, ranks = got
+        by_date[r.date], runs[r.date] = ranks, r
+        if sid != spec_id:
+            older[r.date] = sid
+        return ranks
     for r in runs_between(model_root, start, run.date, basis):
         got = _ranks(model_root, r, spec_id)
         if got is not None:
-            by_date[r.date] = got
+            take(r, got)
     base: dict[str, str | None] = {}
     base_rank: dict[str, Mapping[str, int | None]] = {}
     for w, b in bases.items():
-        got = None if b is None else by_date.get(b.date) or _ranks(model_root, b, spec_id)
-        base[w] = None if got is None or b is None else b.date
-        base_rank[w] = got or {}
+        ranks = None
+        if b is not None:
+            ranks = by_date.get(b.date)
+            if ranks is None and (got := _ranks(model_root, b, spec_id)) is not None:
+                ranks = take(b, got)
+        base[w] = None if ranks is None or b is None else b.date
+        base_rank[w] = ranks or {}
     fallback: frozenset[str] = frozenset()
     if basis == "evening" and fallback_root is not None and base["1M"] is None:
         # T-50 — 대체 루트 아침 확정판의 같은 규칙 판(D−1개월 이하 마지막 성공 판). 그 날짜는
@@ -117,14 +147,14 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
             # 보조 입력이라 연구 루트가 깨져도 장 마감 판 엑셀은 멈추지 않는다 — 대체 없이 빈칸(P1)
             fb, got, why = None, None, f"읽기 실패({type(e).__name__}: {e})"
         if fb is not None and got is not None:
-            by_date[fb.date] = got
-            base["1M"], base_rank["1M"], fallback = fb.date, got, frozenset({"1M"})
+            base["1M"], base_rank["1M"], fallback = fb.date, take(fb, got), frozenset({"1M"})
         else:
             # 대체를 시도했는데 못 쓴 경우 — evening 1M 판이 없는 이행 기간에만 오는 자리다
             if not why:
                 why = ("판 없음" if fb is None
                        else f"주 모델 없음({fb.date} 판 specs 에 {spec_id} 없음)"
-                       if spec_id not in fb.specs else f"점수 표 없음({fb.date} 판 {spec_id})")
+                       if history_spec(fb, spec_id) is None
+                       else f"점수 표 없음({fb.date} 판 {history_spec(fb, spec_id)})")
             log.warning("T-50 1M 비교 판 대체 안 씀(Δ순위 1M 빈칸) — 대체 루트 %s · 기준일 %s"
                         "(D−1개월) 이하 · 사유 %s", fallback_root, cut, why)
     dates = tuple(sorted(by_date))
@@ -133,7 +163,8 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
         for t, rk in by_date[day].items():
             row = line.setdefault(t, [None] * len(dates))
             row[i] = None if rk is None else -rk
-    return Trend(dates, {t: tuple(v) for t, v in line.items()}, base, base_rank, fallback)
+    return Trend(dates, {t: tuple(v) for t, v in line.items()}, base, base_rank, fallback,
+                 older, runs)
 
 
 def sheet_ref(name: str) -> str:

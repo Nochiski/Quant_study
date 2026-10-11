@@ -7,7 +7,8 @@
   data/factor_inputs/<fi_표>/v=<fi_build_id>/*.parquet 입력 8표(hive_partitioning=false)
   data/factor_inputs/_runs/<YYYYMMDD>_<basis>.json     fi 판 manifest(equity 판 id 등)
 
-`src/model/build.py` 를 import 하지 않는다 — 파일 규약만 공유한다.
+`src/model/build.py` 를 import 하지 않는다 — 파일 규약만 공유한다. 앞 주 모델(이력 잇기)은
+계약 모듈의 `PRIMARY_PREDECESSOR` 를 읽는다.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import duckdb
+from model.contracts import PRIMARY_PREDECESSOR
 
 
 class DeliverError(RuntimeError):
@@ -157,6 +159,16 @@ def runs_between(model_root: Path, start: str | date, end: str | date,
                   if p.name[:8].isdigit() and lo <= p.name[:8] <= hi)
     return [run for run in (find_run(model_root, day, basis) for day in days)
             if run is not None]
+
+
+def history_spec(run: ModelRun, spec_id: str) -> str | None:
+    """과거 판에서 주 모델 순위를 읽을 spec — 그 판에 주 모델이 있으면 그것, 없고 앞 주 모델
+    (`PRIMARY_PREDECESSOR`, N-47 · Q-E1)이 있으면 그것, 둘 다 없으면 None. 주 모델을 바꾼 날 앞
+    약 4주의 전일 순위 · Δ순위 · 1M 흐름 · 주간 요일 표시를 앞 주 모델로 잇는다."""
+    if spec_id in run.specs:
+        return spec_id
+    older = PRIMARY_PREDECESSOR.get(spec_id)
+    return older if older is not None and older in run.specs else None
 
 
 def _query(sql: str) -> list[dict[str, object]]:

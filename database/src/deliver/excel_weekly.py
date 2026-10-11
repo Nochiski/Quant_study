@@ -32,7 +32,7 @@ from .excel_daily import (
     universe_text,
 )
 from .qpack import C_NEW, Col, Group, Title, write_meta, write_table
-from .reader import DeliverError, find_run, iso, read_fi
+from .reader import DeliverError, find_run, history_spec, iso, read_fi
 from .view import DayView, composite_of, load_day
 
 Row = dict[str, object]
@@ -101,6 +101,8 @@ class Week:
 def load_week(model_root: Path, week: str, spec_id: str | None, *,
               config_dir: Path | None = None, fi_root: Path | None = None) -> Week:
     """판이 있는 날만 점수 표를 읽는다. spec_id 가 None 이면 마지막 판의 primary_spec.
+    그날 판에 주 모델이 없고 앞 주 모델(`contracts.PRIMARY_PREDECESSOR`)이 있으면 그 순위로 잇는다
+    (N-47 · Q-E1 — 그날 view 의 spec_id 가 앞 주 모델이다).
     fi_root 는 업종 열이 없는 엔진(v3·v2)의 업종 상한 후보에 쓴다(`view.load_day`)."""
     days = week_days(week)
     runs = {d: r for d in days if (r := find_run(model_root, d, BASIS)) is not None}
@@ -108,10 +110,11 @@ def load_week(model_root: Path, week: str, spec_id: str | None, *,
         spec_id = runs[max(runs)].primary_spec
     views: dict[str, DayView] = {}
     for d, run in runs.items():
-        if spec_id not in run.specs:
-            continue                      # 그날 판에 주 모델이 없으면 ✕ 로 둔다
+        sid = None if spec_id is None else history_spec(run, spec_id)
+        if sid is None:
+            continue                      # 그날 판에 주 모델도 앞 주 모델도 없으면 ✕ 로 둔다
         views[d] = load_day(model_root, fi_root, run, config_dir=config_dir, with_fi=False,
-                            others=False, spec_id=spec_id)
+                            others=False, spec_id=sid)
     return Week(week, days, views)
 
 
@@ -502,6 +505,13 @@ def _meta_pairs(base: DayView, week: Week, last: Week | None,
                       f"모집단 {len(v.rows)}"))
     lb = None if last is None else last.base
     pairs.append(("지난주 기준일", "없음" if lb is None else f"{lb.date} · {lb.run.build_id}"))
+    # 주 모델이 없어 앞 주 모델 순위로 이은 날(N-47 · Q-E1) — 있을 때만
+    older = sorted((d, v.spec_id) for w in (week, last) if w is not None
+                   for d, v in w.views.items() if v.spec_id != base.spec_id)
+    if older:
+        pairs.append(("앞 주 모델로 이은 날", " · ".join(f"{d[5:]} {model_label(sid)}"
+                                                    for d, sid in older)
+                      + f" 순위(그날 판에 {model_label(base.spec_id)} 없음 — N-47)"))
     pairs += [("유니버스 규칙", universe_text(base)),
               ("후보 규칙", f"상위 {base.output.top_n} · {base.output.sector_level} 업종당 최대 "
                         f"{base.output.max_per_sector} · 기준일 순위순")]

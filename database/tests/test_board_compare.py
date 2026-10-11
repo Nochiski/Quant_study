@@ -404,6 +404,48 @@ def test_spec_outside_the_table_keeps_the_old_floor(same_pair, tmp_path, monkeyp
     assert rep["reasons"] == ["scope@1.0 Spearman 0.970000 < 하한 0.975"]
 
 
+# ── 추정치 유예 뒤집힘(N-47) ─────────────────────────────────────────────────
+P_LAP, P_BACK = "100025", "100026"      # T 에 추정치 소멸(신선 → 유예 1) · T 에 복귀(유예 1 → 신선)
+GRACE0_SPECS = ("scope@1.0", "v2_percentrank@1.0", "v3_zscore@1.0")     # spec 유예 0
+GRACE5_SPECS = ("scope@2.0", "v4_rank@0.1", "v4_rank@0.2")             # spec 유예 5
+
+
+def _cover(tables: dict[str, list[dict[str, object]]], ticker: str, state: str, age: int) -> None:
+    for r in _rows(tables, "fi_universe", ticker):
+        r.update(coverage_state=state, coverage_age_days=age)
+
+
+@pytest.fixture(scope="module")
+def grace_flip_pair(tmp_path_factory, research_tables) -> tuple[Path, Path]:
+    """fi 유예 창 5 라 두 판 모두 eligible 인데 신선도만 T 에 바뀐 두 종목 — P_LAP 은 D'(장 마감 판·연구
+    D') 신선 → 연구 T 유예 1, P_BACK 은 D' 유예 1 → 연구 T 신선(복귀). 3자 대조로 정보 시점이다."""
+    base = _baseline(research_tables)
+    _cover(base, P_BACK, "grace", 1)
+    rs, ev, rd = copy.deepcopy(base), _evening_copy(base), _dprime_of(base)
+    _cover(rs, P_LAP, "grace", 1)
+    _cover(rs, P_BACK, "fresh", 0)
+    return _pair(tmp_path_factory.mktemp("grace_flip"), rs, ev, rd)
+
+
+def test_grace_flip_rows_are_explained_by_the_spec_grace(grace_flip_pair, tmp_path) -> None:
+    """N-47 회귀 — 유예 0 spec 은 연구 판에서 P_LAP 을, 장 마감 판에서 P_BACK 을 뺀다(엔진이 spec 유예로
+    다시 자른다). fi 에는 eligible 차이가 없고 신선도만 다르다 — 그 한 판에만 있는 점수 행은 spec 유예로
+    다시 잰 소멸 판정이 두 판에서 갈린 적격성 차이로 설명된다(미설명 0, rc 0). 유예 5 spec 은 두 종목을
+    두 판 모두에 두고 그대로 대조한다(한 판에만 있는 행 없음)."""
+    assert run_cli(grace_flip_pair, tmp_path, "--spearman-min", "0") == 0
+    rep = report(tmp_path)
+    assert rep["n_unexplained"] == 0 and rep["unexplained"] == [], rep["unexplained"]
+    assert set(rep["ticker_categories"][P_LAP]) == set(rep["ticker_categories"][P_BACK]) == {bc.INFO}
+    for sid in GRACE0_SPECS:
+        m = rep["model"][sid]
+        assert [e["ticker"] for e in m["evening_only"]] == [P_LAP], sid
+        assert [e["ticker"] for e in m["research_only"]] == [P_BACK], sid
+    for sid in GRACE5_SPECS:
+        m = rep["model"][sid]
+        assert m["evening_only"] == [] and m["research_only"] == [], sid
+        assert m["n_common"] == N_STOCKS + 1, sid
+
+
 def test_window_judge_reads_the_real_reports(same_pair, unexplained_pair, tmp_path) -> None:
     """X-2(`daily.window_judge.read_compare`)가 이 도구의 실제 `compare/<T>.json` 을 읽는다 — 키
     (schema·tool·date·verdict·rc·n_unexplained·reasons·replay·thresholds.spearman_min spec 별) 계약.
@@ -604,6 +646,17 @@ def test_model_row_only_in_one_board_without_eligibility_is_unexplained(same_pai
     assert run_cli((ev, rs), tmp_path) == 1
     notes = _notes(report(tmp_path))
     assert any("적격성 차이" in n for n in notes) and any("fi 8표가 같은데" in n for n in notes)
+
+
+def test_coverage_change_without_a_spec_lapse_flip_explains_nothing(grace_flip_pair,
+                                                                    tmp_path) -> None:
+    """N-47 정밀도 — P_LAP 은 신선도가 바뀌었지만(신선 → 유예 1) 유예 5 spec(scope@2.0)에서는 두 판 모두
+    소멸이 아니다. 그 spec 의 점수 행이 한 판에만 있으면 신선도 차이로 설명하지 않는다(미설명)."""
+    ev, rs = _copy_pair(grace_flip_pair, tmp_path)
+    _rewrite(_scores(ev, "scope@2.0"), f"SELECT * FROM {{src}} WHERE stock_code <> '{P_LAP}'")
+    assert run_cli((ev, rs), tmp_path, "--spearman-min", "0") == 1
+    got = [(u["table"], u["ticker"], u["kind"]) for u in report(tmp_path)["unexplained"]]
+    assert got == [("model:scope@2.0", P_LAP, "research_only")]
 
 
 def test_composite_null_on_one_side_without_own_fi_difference_is_unexplained(

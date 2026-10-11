@@ -152,6 +152,10 @@ python -m daily.board_compare --date <T> --evening-root data/model_db --research
   종가 = 정규장 종가라 미설명). 거래량·수급(주체별 판 통계 상한)·16:00 컷오프(stage)·수집 대상 밖·
   T-6(연구 판 흔적)·신용 T 실입수는 각자 증거를 본다. 맞는 범주가 없으면 미설명이다.
 - 모델은 spec 마다 종합점수 Spearman · 엑셀 후보 겹침 · 점수 열 |Δ| 상위 종목과 그 종목의 fi 범주.
+  한 판에만 있는 점수 행은 적격성 차이(종목 집합·eligible·시총·T 가격)나, spec 유예로 다시 잰 추정치 소멸
+  판정(엔진과 같은 `estimates_lapsed`)이 두 판에서 갈린 경우로만 설명한다(N-47 — fi 유예 창 5 안이라 두 판
+  모두 eligible 이고 신선도만 다른 종목: T 에 추정치가 사라진 종목은 유예 0 spec 이 연구 판에서만, 복귀한
+  종목은 장 마감 판에서만 뺀다). 신선도 차이만 있고 그 spec 의 소멸 판정이 같으면 설명하지 않는다.
 - Spearman 하한은 spec 별 표(T-47, `SPEARMAN_MIN_BY_SPEC`): scope@1.0 0.92 · v3_zscore@1.0 0.91 ·
   v2_percentrank@1.0 0.96 · v4_rank@0.1 0.93 · v4_rank@0.2 0.94 · scope@2.0 0.92(N-47 — 재생 분포가 없어 scope@1.0
   값 그대로), 표에 없는 spec 은 0.975(보수 — 자기 재생 분포를

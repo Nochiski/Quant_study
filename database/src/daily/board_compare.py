@@ -33,7 +33,8 @@
     기록형)에서 드러나면 그때 정한다.
 모델 층: spec 마다 종합점수 Spearman · 엑셀 후보(`deliver.view.load_day`) 겹침 · 점수 열 |Δ| 상위 종목과 그
 종목의 fi 범주(그 spec 엔진이 읽는 표만). 한 판에만 있는 점수 행은 적격성 범주(종목 집합·eligible·시총·
-T 가격)로만, 한쪽만 종합점수가 빈 행은 자기 fi 차이로만 설명한다. fi 8표가 같은데 점수가 다르거나 spec 이
+T 가격)나, spec 유예로 다시 잰 추정치 소멸 판정(`estimates_lapsed`)이 두 판에서 갈린 경우(N-47 — fi 유예 창
+안의 신선도 차이)로만, 한쪽만 종합점수가 빈 행은 자기 fi 차이로만 설명한다. fi 8표가 같은데 점수가 다르거나 spec 이
 한 판에만 있으면 미설명이다.
 
 Spearman 하한은 spec 별 표(`SPEARMAN_MIN_BY_SPEC`, T-47 — 표 밖 spec 은 `SPEARMAN_MIN_DEFAULT` 0.975)이고
@@ -71,7 +72,8 @@ from factor_inputs import queries as fiq
 from factor_inputs.build import DUCKDB_MEMORY_LIMIT, DUCKDB_THREADS, _content_hash, _write_json
 from model import gates as mgates
 from model.build import ModelBuildError, _resolve_fi
-from model.contracts import FI_TABLES
+from model.contracts import FI_TABLES, ModelSpec
+from model.engines._common import estimates_lapsed
 from stage import manifest
 
 from daily import calendar as daily_calendar
@@ -338,7 +340,12 @@ class Tally:
 
 
 def _affects_eligibility(f: Finding) -> bool:
-    """점수 대상 판정에 닿는 차이 — 유니버스의 종목 집합·eligible·시총과 T 가격 행."""
+    """점수 대상 판정에 닿는 차이 — 유니버스의 종목 집합·eligible·시총과 T 가격 행.
+
+    신선도 열(coverage_state·coverage_age_days)은 여기 넣지 않는다(N-47). 유예 종목은 나이가 판마다 하루씩
+    달라(장 마감 판 asof D' · 연구 판 asof T) 넣으면 그런 종목의 한 판에만 있는 점수 행이 spec 과 무관하게
+    전부 설명된다. 신선도 차이가 점수 대상을 바꾸는지는 spec 마다 `compare_model` 이 엔진과 같은 판정
+    (`_lapse_flips` — spec 유예로 다시 잰 소멸)으로 본다."""
     if f.table == "fi_universe":
         return f.kind != "value" or bool(set(f.columns) & UNI_ELIG)
     return f.table == "fi_prices" and f.key.get("is_t") == "1"
@@ -737,6 +744,9 @@ class FiResult:
     tables: dict[str, dict[str, object]]
     flow_stats: dict[str, dict[str, object]]
     targeted: int
+    # 종목 → fi_universe 행(장 마감 판 · 연구 판 T) — 모델 층이 spec 유예로 소멸을 다시 잰다(N-47)
+    universe_e: dict[str, dict[str, object]] = field(default_factory=dict)
+    universe_r: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
 def _part(b: FiBoard, table: str) -> str:
@@ -939,7 +949,7 @@ def compare_fi(e: FiBoard, r: FiBoard, d: FiBoard, t: date, dprime: date, ev: Ev
             info["n_rows_diff"] = n_rows
     finally:
         con.close()
-    return FiResult(tally, tables, flow_stats, len(ev.targeted))
+    return FiResult(tally, tables, flow_stats, len(ev.targeted), ctx.uni_e, ctx.uni_r)
 
 
 # ── 판 ───────────────────────────────────────────────────────────────────────
@@ -1241,11 +1251,28 @@ def spearman_floor(spec_id: str, override: float | None = None) -> float:
     return SPEARMAN_MIN_BY_SPEC.get(spec_id, SPEARMAN_MIN_DEFAULT)
 
 
+def _lapse_flips(spec: ModelSpec | None, uni_e: Mapping[str, Mapping[str, object]],
+                 uni_r: Mapping[str, Mapping[str, object]], ticker: str) -> bool:
+    """spec 유예로 다시 잰 추정치 소멸 판정이 두 판에서 갈렸다(N-47) — fi 는 유예 창(5) 안의 grace 종목을
+    두 판 모두 eligible 로 싣고 엔진이 spec 유예로 다시 자르므로, 신선도(coverage_state·coverage_age_days)
+    만 다른 종목도 한 판에서만 빠질 수 있다(예: T 에 추정치가 사라진 종목 — 장 마감 판 신선, 연구 판 유예
+    1 → 유예 0 spec 은 연구 판에서만 뺀다. 복귀는 반대). 엔진과 같은 판정(`estimates_lapsed`)을 쓴다."""
+    if spec is None:
+        return False
+    lapsed_e = estimates_lapsed(spec.universe, uni_e.get(ticker) or {}) is not None
+    lapsed_r = estimates_lapsed(spec.universe, uni_r.get(ticker) or {}) is not None
+    return lapsed_e != lapsed_r
+
+
 def compare_model(ev: Side, rt: Side, tally: Tally, spearman_min: float | None,
-                  list_n: int) -> dict[str, dict[str, object]]:
+                  list_n: int, universe: tuple[Mapping[str, Mapping[str, object]],
+                                               Mapping[str, Mapping[str, object]]] = ({}, {}),
+                  ) -> dict[str, dict[str, object]]:
     """spec 마다 Spearman(하한은 `spearman_floor` — `spearman_min` 은 전 spec 덮어쓰기, None 이면 spec 별 표) ·
     엑셀 후보 겹침 · 한 판에만 있는 점수 행 · 점수 열 |Δ| 상위. 미설명은 `tally` 에 더한다. 종목에 붙이는 fi
-    범주는 그 spec 엔진이 읽는 표의 것만이다."""
+    범주는 그 spec 엔진이 읽는 표의 것만이다. `universe` = (장 마감 판, 연구 판 T) fi_universe 행 — 한 판에만
+    있는 점수 행을 spec 유예로 다시 잰 소멸 판정으로 설명할 때 쓴다(`_lapse_flips`, N-47)."""
+    uni_e, uni_r = universe
     fi_same = tally.n_findings == 0
     e_specs, r_specs = set(ev.model_run.specs), set(rt.model_run.specs)
     for sid in sorted(e_specs ^ r_specs):
@@ -1280,13 +1307,15 @@ def compare_model(ev: Side, rt: Side, tally: Tally, spearman_min: float | None,
                            "entered": [_tick(t, cats) for t in cand_e if t not in set(cand_r)],
                            "dropped": [_tick(t, cats) for t in cand_r if t not in set(cand_e)]},
             "composite": composite, "factors": factors}
-        # 점수 행이 한 판에만 — 종목 집합·eligible·시총·T 가격 범주로만 설명한다
+        # 점수 행이 한 판에만 — 종목 집합·eligible·시총·T 가격 범주, 또는 spec 유예로 다시 잰 추정치 소멸
+        # 판정이 두 판에서 갈린 경우(N-47 — 그 신선도 차이는 fi_universe 대조가 이미 범주로 나눴다)로만
+        # 설명한다
         for kind, tickers in (("evening_only", e_only), ("research_only", r_only)):
             for t in tickers:
-                if not tally.eligibility.get(t):
+                if not tally.eligibility.get(t) and not _lapse_flips(ve.spec, uni_e, uni_r, t):
                     tally.add(Finding(f"model:{sid}", t, {}, kind, UNEXPLAINED, (), {}, {},
                                       "점수 행이 한 판에만 있는데 적격성 차이(종목 집합·eligible·"
-                                      "시총·T 가격)가 없다"))
+                                      "시총·T 가격·spec 유예 소멸)가 없다"))
         # 한쪽만 종합점수가 비었다(적격성 뒤집힘) — 자기 fi 차이로만 설명한다
         for t in common:
             if (t in comp_e) != (t in comp_r) and not cats.get(t):
@@ -1391,7 +1420,8 @@ def compare(t: date, evening_root: Path, research_root: Path, *, calendar_dir: P
                              {"equity_builds": ev.fi_run.get("equity_builds")},
                              {"equity_builds": rd.get("equity_builds")},
                              "장 마감 판이 고정한 equity 판 ≠ 연구 판 D' 의 equity 판"))
-    model = compare_model(ev, rt, fi.tally, spearman_min, list_n)
+    model = compare_model(ev, rt, fi.tally, spearman_min, list_n,
+                          universe=(fi.universe_e, fi.universe_r))
     return Result(t, dprime, replay, ev, rt, rd, fi, model, spearman_min)
 
 

@@ -1439,6 +1439,8 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None,
     pairs: list[tuple[str, object]] = [("기준일", view.date), ("basis", run.basis)]
     if run.basis in BASIS_NOTES:     # 장 마감(evening) · 주말 보강(supplement)만 — 아침은 줄 없음(PR-6)
         pairs.append(("데이터 성격", BASIS_NOTES[run.basis]))
+    if run.basis == "supplement":    # 휴일 아침 WISE 재수집일 W = fi 판 JSON wise_asof(N-45)
+        pairs.append(("WISE 재수집일", fi_meta.get("wise_asof") or "알 수 없음(fi 기록에 없음)"))
     pairs += [
         ("주 모델", f"{view.spec_id}({model_label(view.spec_id)})"),
         ("비교 모델", ", ".join(f"{s}({model_label(s)})" for s in compared_specs(view))),

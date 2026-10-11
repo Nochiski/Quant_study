@@ -2874,6 +2874,8 @@ def test_supplement_board_compares_like_the_morning_board(world: dict[str, Path]
     assert ms["전일 비교 데이터"] == f"{THU} m_20260924T000000Z"
     assert ms["basis"] == "supplement" and ms["데이터 성격"] == SUPP_NOTE
     assert "데이터 성격" not in mm and "판" not in SUPP_NOTE
+    # WISE 재수집일 줄은 보강판만 — 이 합성 세계엔 보강 fi 판 JSON 이 없어 '알 수 없음'
+    assert ms["WISE 재수집일"] == "알 수 없음(fi 기록에 없음)" and "WISE 재수집일" not in mm
     # 전일 순위 · 변화 · Δ순위 1M · 후보와 흐름 원자료가 아침판과 같다(같은 점수 파일이라)
     for name in ("Score", "trend"):
         assert _rows_from(wsu[name], 7) == _rows_from(wm[name], 7), name

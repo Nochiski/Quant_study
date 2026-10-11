@@ -157,6 +157,8 @@ def build_equity(root: Path, last: date = D, *, flow_last: date | None = None,
         (tick(25), d1, "E증권", d1, 800.0, None, None, "BUY", "buy", "hold")]
     if saturday_fetch:
         ops.append((tick(0), SATURDAY, "F증권", last, 1300.0, 1200.0, 8.33, "BUY", "buy", "buy"))
+        # 휴일 날짜 보고서 — 주말 보강판(WISE 기준일 D)은 세지 않는다
+        ops.append((tick(1), SATURDAY, "G증권", SATURDAY, 950.0, 900.0, 5.56, "HOLD", "hold", "hold"))
     write_table(root, "opinion_broker_daily", {
         "ticker": (S, [o[0] for o in ops]), "fetched_date": (DT, [o[1] for o in ops]),
         "broker": (S, [o[2] for o in ops]), "opinion_date": (DT, [o[3] for o in ops]),
@@ -509,7 +511,7 @@ def test_analyst_saturday_fetch_counts_windows_from_friday(tmp_path: Path, con) 
     ("evening", DAYS[-2], D, DAYS[-3], "기준일: 2026-09-24(원천 최신 · 엑셀 09-25)",
      "기준일 보고서는 WISE 가 다음 날 올려 전날까지"),
     # 주말 보강: wise_asof = 휴일 수집일(토) — 그 수집이 D 보고서를 담아 그래프가 D 까지
-    ("supplement", D, SATURDAY, D, "기준일: 2026-09-26(원천 최신 · 엑셀 09-25)",
+    ("supplement", D, SATURDAY, D, "기준일: 2026-09-25(WISE 휴일 아침 재수집 09-26)",
      "휴일 수집이 기준일 보고서까지 담아 기준일까지"),
 ])
 def test_analyst_daily_chart_ends_at_the_last_report_day_wise_can_hold(
@@ -518,7 +520,9 @@ def test_analyst_daily_chart_ends_at_the_last_report_day_wise_can_hold(
     """N-45 · E5 — Analyst 일별 그래프 끝 = WISE 자료가 담을 수 있는 마지막 보고서 날짜 = 최신 수집일
     앞 마지막 거래일. WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto` — 정규
     판은 엑셀 D). 아침 · 장 마감은 지금 그대로, 주말 보강판은 토요일 수집(D 보고서, F증권 상향)이
-    들어와 D 까지 그린다. 같은 원천에 wise_asof 만 다른 아침판에는 토요일 수집이 없다."""
+    들어와 D 까지 그린다. 같은 원천에 wise_asof 만 다른 아침판에는 토요일 수집이 없다. 보강판 글의
+    날짜는 WISE 기준일 D — 4행 '기준일: D(WISE 휴일 아침 재수집 W)', 5행 보고서 날짜 창 끝 D, 'D 보고서는
+    WISE 가 다음 날 올림' 대신 휴일 재수집으로 포함됐다는 말. 휴일(W) 날짜 보고서는 세지 않는다."""
     eq = tmp_path / "equity"
     build_equity(eq, last=fetch_last, saturday_fetch=fetch_last == D)
     wb, refs = book_with_refs()
@@ -531,10 +535,16 @@ def test_analyst_daily_chart_ends_at_the_last_report_day_wise_can_hold(
     assert any(isinstance(v, str) and v.startswith(f"일별 목표가 상향 · 하향 건수: 최근 1M({end:%m-%d}까지)")
                for v in values(ws))
     assert clause in next(text for _s, name, text in defs if name == "그래프 4개")
-    sat = (tick(0), "F증권") in {(x.code, x.broker) for x in a.acts}
-    assert sat == (case == "supplement")
+    brokers = {(x.code, x.broker) for x in a.acts}
+    assert ((tick(0), "F증권") in brokers) == (case == "supplement")
+    assert (tick(1), "G증권") not in brokers          # 휴일 날짜 보고서는 어느 판도 세지 않는다
+    h5 = str(ws["H5"].value)
     if case == "supplement":                       # D 줄 = 토요일 수집의 D 보고서 상향 1건
         assert [ws.cell(rows[-1], c).value for c in (31, 32)] == [1, 0]
+        assert h5.endswith("09-25 보고서는 휴일 아침 WISE 재수집(09-26)으로 포함")
+        assert "다음 날 올림" not in h5 and str(ws["A5"].value).endswith("다음 날~09-25")
+    else:
+        assert h5.endswith(f"{a.cal.anchor:%m-%d} 보고서는 WISE 가 다음 날 올림")
 
 
 def test_analyst_bar_chart_without_values_is_skipped(src: Sources, con) -> None:
@@ -636,7 +646,8 @@ def test_daily_excel_has_new_sheets_in_order_with_meta(fi_world: dict[str, Path]
 def test_supplement_board_analyst_reads_the_holiday_fetch(fi_world: dict[str, Path],
                                                           tmp_path: Path) -> None:
     """N-45 · E5 — 주말 보강판 엑셀은 fi 판 JSON(supplement)의 wise_asof(토요일 수집일)까지 WISE
-    원천을 읽는다: Analyst 일별 그래프가 D 까지 가고 4행이 휴일 수집일을 적는다. 같은 원천 · 같은
+    원천을 읽는다: Analyst 일별 그래프가 D 까지 가고 4행은 WISE 기준일 D 와 재수집일, Meta 에
+    'WISE 재수집일' 줄(보강판만). 같은 원천 · 같은
     점수의 아침판 엑셀(wise_asof = D)은 D 전날까지. WISE 밖 새 시트는 두 엑셀이 같다."""
     eq = tmp_path / "equity"
     build_equity(eq, saturday_fetch=True)
@@ -659,7 +670,11 @@ def test_supplement_board_analyst_reads_the_holiday_fetch(fi_world: dict[str, Pa
         return max(ws.cell(r, 30).value for r in range(8, 60) if ws.cell(r, 30).value).date()
     assert chart_end(books["morning"]) == DAYS[-2]
     assert chart_end(books["supplement"]) == D
-    assert books["supplement"]["Analyst"]["A4"].value == "기준일: 2026-09-26(원천 최신 · 엑셀 09-25)"
+    assert books["supplement"]["Analyst"]["A4"].value == "기준일: 2026-09-25(WISE 휴일 아침 재수집 09-26)"
+    metas = {b: {wb["Meta"].cell(r, 1).value: wb["Meta"].cell(r, 2).value
+                 for r in range(8, 40)} for b, wb in books.items()}
+    assert metas["supplement"]["WISE 재수집일"] == "2026-09-26"     # 보강판만
+    assert "WISE 재수집일" not in metas["morning"]
     for name in ("Events", "Market", "ETF", "Flow", "Short"):
         a, b = books["morning"][name], books["supplement"][name]
         assert [[c.value for c in r] for r in a.iter_rows()] == [

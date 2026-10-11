@@ -6,7 +6,8 @@
 같은 날 같은 증권사 보고서는 한 건(나중 수집이 이긴다). 일별 그래프는 기준일(최신 수집일) 앞
 마지막 거래일까지 — WISE 가 그날 보고서를 다음 날 올려 수집일은 늘 비어 보인다.
 WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto`) — 정규 판은 엑셀 D,
-주말 보강판은 휴일 수집일 W 라 D 분 보고서가 들어오고 일별 그래프가 D 까지 간다(N-45).
+주말 보강판은 휴일 수집일 W 라 D 분 보고서가 들어오고 일별 그래프가 D 까지 간다(N-45). 그때 글의
+날짜는 WISE 기준일 D 다 — 4행 '기준일: D(WISE 휴일 아침 재수집 W)', 보고서 날짜 · 컨센서스 날짜도 D.
 """
 from __future__ import annotations
 
@@ -132,11 +133,12 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
     d1m = cal.win["1M"]
     got = con.execute(f"SELECT min(fetched_date) FROM {ob}").fetchone()
     first = day_of(got[0]) if got and got[0] else day
+    # 보고서 날짜는 엑셀 D 까지 — 주말 보강판도 WISE 기준일 D 의 보고서까지만 센다(휴일 수집일 W 날짜 보고서 X)
     op = con.execute(f"""
         SELECT ticker, fetched_date, broker, opinion_date, target_price_krw,
                prev_target_price_krw, change_pct, opinion, opinion_class, prev_opinion,
                prev_opinion_class
-        FROM {ob} WHERE opinion_date > {lit(d1m)} AND opinion_date <= {lit(day)}
+        FROM {ob} WHERE opinion_date > {lit(d1m)} AND opinion_date <= {lit(min(day, upto))}
           AND fetched_date <= {lit(day)}""").fetchall()
     # 나중 수집이 이긴다(파이썬 정렬은 안정 — 같은 수집일은 원장 행 순서)
     seen: dict[tuple[str, str, date], Act] = {}
@@ -165,7 +167,11 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
           *, index: int | None = None) -> list[tuple[str, str, str]]:
     cal, day = a.cal, a.cal.anchor       # day = 의견 최신 수집일(거래일이 아닐 수 있다)
     win = cal.win
-    cday = md(a.cons_day) if a.cons_day else md(day)
+    # 주말 보강판 — WISE 를 엑셀 D 뒤 휴일 아침에 다시 받았다(N-45). 글의 날짜는 WISE 기준일 D 이고
+    # 수집일(W)은 4행 괄호 · 5행 안내에만 적는다
+    holiday = day > d
+    base = d if holiday else day
+    cday = md(min(a.cons_day, d)) if a.cons_day else md(base)
     pday = md(a.close_day)
     xs = XSheet(wb, NAME, WIDTHS, refs, index=index)
     ws = xs.ws
@@ -173,10 +179,13 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
               "A2": "Analyst: 증권사 목표가 · 투자의견 변화",
               "A3": f"자료: WISE 증권사별 투자의견({md(a.first)}부터 매일 수집) · 컨센서스 목표가 · "
                     f"모델 유니버스 {len(uni)}종목",
-              "A4": base_text(day, d), "F4": "출처: quant-ledger 원장 · 시험 양식",
-              "A5": f"1W: 보고서 날짜 {span(win['1W'], day)} · 1M: {span(win['1M'], day)}",
-              "H5": f"상향 · 하향: 직전 목표가 대비, 신규: 직전 의견 · 목표가 없음 · {md(day)} 보고서는 "
-                    "WISE 가 다음 날 올림"})
+              "A4": (f"기준일: {d.isoformat()}(WISE 휴일 아침 재수집 {md(day)})" if holiday
+                     else base_text(day, d)),
+              "F4": "출처: quant-ledger 원장 · 시험 양식",
+              "A5": f"1W: 보고서 날짜 {span(win['1W'], base)} · 1M: {span(win['1M'], base)}",
+              "H5": "상향 · 하향: 직전 목표가 대비, 신규: 직전 의견 · 목표가 없음 · " + (
+                  f"{md(d)} 보고서는 휴일 아침 WISE 재수집({md(day)})으로 포함" if holiday
+                  else f"{md(day)} 보고서는 WISE 가 다음 날 올림")})
     put, header, close, cs = xs.put, xs.header, xs.close, xs.cs
 
     oa = [x for x in a.acts if x.code in uni]

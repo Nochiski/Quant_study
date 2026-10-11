@@ -7,8 +7,8 @@
 #         (daily.calendar supplement_target) · 오늘 06:00 체인의 보강 WISE 수집 ok(런 로그 source=supplement_wise · date=W).
 #         고정 시각 크론이 아니라 앞 체인의 끝에 잇는다(P9 — 대기 한도·재시도 시각 없음). 손으로 다시 돌릴 때도 같은 명령이다
 #         (체인과 같은 환경 — 아래 cd·export).
-#   순서: 스위치 → 이미 완료 검사 → 고정 판 확인(data/deliver/history/<D>_morning.json 이 D·health ok — 아침 fi 와 같은
-#         stage·equity 판이고, 그 stage 는 휴일 아침 WISE 수집 뒤에 지어져 휴일 수집분이 들어 있다) → [빌드 락]
+#   순서: 스위치 → [빌드 락] 이미 완료 검사 → 고정 판 확인(data/deliver/history/<D>_morning.json 이 D·health ok — 아침 fi 와 같은
+#         stage·equity 판이고, 그 stage 는 휴일 아침 WISE 수집 뒤에 지어져 휴일 수집분이 들어 있다) →
 #         ① fi    python -m factor_inputs build --date D --basis supplement --wise-asof W --builds-from <그 이력>
 #                 (WISE 컨센서스 입력만 W 까지, 가격·수급·DART·속성은 D — factor_inputs/build.py '주말 보강판')
 #         ② 모델  python -m model build --date D --basis supplement
@@ -60,8 +60,34 @@ if ! supplement_on; then
   exit 0
 fi
 
+# ── 빌드 락(model_daily.sh 와 같은 모양 — fd 9. daily_build 에서 물려받은 원장 락 fd 9 는 이 셸에서만 닫힌다) ──────
+# 완료 판정보다 먼저 잡는다 — 체인과 손 실행이 함께 '아직'을 보고 둘 다 짓는(보내는) 일을 막는다(판정과 짓기가 한 락 안)
+LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"
+if [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
+  exec 9>"$LOCK" || {
+    echo "주말 보강판 실패: 빌드 락 열기(rc=3) — $LOCK 을 열 수 없다, 아무 단계도 돌지 않았다 D=$D"
+    scripts/notify.sh crit "주말 보강판 실패: 빌드 락 열기(rc=3)" "D=$D W=$W | $LOCK 을 열 수 없다 — 아무 단계도 돌지 않았다(엑셀 발송 0)"
+    exit 3
+  }
+  if ! flock -n 9; then
+    W0=$(date +%s); W0_KST=$(kst)
+    echo "[$W0_KST] 주말 보강판 빌드 락 대기 시작 — 다른 빌드가 $LOCK 을 쥐고 있다(끝나면 이어서 돈다) D=$D"
+    scripts/notify.sh info "주말 보강판 빌드 락 대기" \
+      "D=$D 시작 $W0_KST — 다른 빌드(stage·equity·모델)가 $LOCK 을 쥐고 있다. 끝나면 이어서 돈다"
+    if ! flock 9; then
+      echo "주말 보강판 실패: 빌드 락 대기(rc=3) — $LOCK 을 기다리다 flock 이 실패했다 D=$D"
+      scripts/notify.sh crit "주말 보강판 실패: 빌드 락 대기(rc=3)" \
+        "D=$D W=$W | $LOCK 을 기다리다 flock 이 실패했다 — 아무 단계도 돌지 않았다(엑셀 발송 0)"
+      exit 3
+    fi
+    echo "[$(kst)] 주말 보강판 빌드 락 대기 끝 — $(( $(date +%s) - W0 ))초 ($W0_KST ~ $(kst))"
+  fi
+  export QL_BUILD_LOCK_HELD=1
+fi
+
 # ── 한 번만 — 런 로그 supplement_board(date = D) ok 가 있으면 건너뛴다 ───────────────────
-# rc 0 완료(마지막 줄 = 그 런 detail) · 1 아직 · 2 런 로그를 못 읽음
+# rc 0 완료(마지막 줄 = 그 런 detail) · 3 아직 · 2 런 로그를 못 읽음 · 그 밖(1 — 파이썬이 import 등에서 죽음)도
+# 판정 불가다('아직'으로 읽으면 이미 보낸 D 를 다시 짓는다)
 DONE_WHY=$($PY -c '# 주말 보강판(supplement_board) 완료 판정
 import sys
 from daily import runlog
@@ -75,13 +101,13 @@ if rows:
     detail = rows[0].detail or "-"
     print(f"run_id={rows[0].run_id} {detail}")
     sys.exit(0)
-sys.exit(1)' "$RUN_DB" "$D" 2>&1); DONE_RC=$?
+sys.exit(3)' "$RUN_DB" "$D" 2>&1); DONE_RC=$?
 DONE_WHY=$(printf '%s\n' "$DONE_WHY" | tail -1)
 if [ "$DONE_RC" -eq 0 ] && [ -z "$FORCE" ]; then
   echo "주말 보강판 이미 완료 D=$D — $DONE_WHY (다시 하려면 --force)"
   scripts/notify.sh info "주말 보강판 이미 완료 — 건너뜀" "D=$D W=$W | 런 로그 supplement_board $DONE_WHY — 다시 하려면 --force"
   exit 0
-elif [ "$DONE_RC" -ne 0 ] && [ "$DONE_RC" -ne 1 ]; then
+elif [ "$DONE_RC" -ne 0 ] && [ "$DONE_RC" -ne 3 ]; then
   echo "주말 보강판 실패: 완료 판정 불가 — $DONE_WHY D=$D"
   scripts/notify.sh crit "주말 보강판 실패: 완료 판정 불가" \
     "D=$D W=$W | $DONE_WHY — 보냈는지 몰라 짓지 않는다. 런 로그를 고친 뒤 scripts/weekend_supplement.sh --date $D --wise-asof $W"
@@ -127,32 +153,6 @@ if [ "$BOARD_RC" -ne 0 ]; then
   exit 1
 fi
 echo "  $BOARD_WHY"
-
-# ── 빌드 락(model_daily.sh 와 같은 모양 — fd 9. daily_build 에서 물려받은 원장 락 fd 9 는 이 셸에서만 닫힌다) ──────
-LOCK="${QL_BUILD_LOCK_FILE:-/tmp/quant_ledger_build.lock}"
-if [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
-  exec 9>"$LOCK" || {
-    echo "주말 보강판 실패: 빌드 락 열기(rc=3) — $LOCK 을 열 수 없다, 아무 단계도 돌지 않았다 D=$D"
-    finish_run failed "W=$W 빌드 락 열기 실패"
-    scripts/notify.sh crit "주말 보강판 실패: 빌드 락 열기(rc=3)" "D=$D W=$W | $LOCK 을 열 수 없다 — 아무 단계도 돌지 않았다(엑셀 발송 0)"
-    exit 3
-  }
-  if ! flock -n 9; then
-    W0=$(date +%s); W0_KST=$(kst)
-    echo "[$W0_KST] 주말 보강판 빌드 락 대기 시작 — 다른 빌드가 $LOCK 을 쥐고 있다(끝나면 이어서 돈다) D=$D"
-    scripts/notify.sh info "주말 보강판 빌드 락 대기" \
-      "D=$D 시작 $W0_KST — 다른 빌드(stage·equity·모델)가 $LOCK 을 쥐고 있다. 끝나면 이어서 돈다"
-    if ! flock 9; then
-      echo "주말 보강판 실패: 빌드 락 대기(rc=3) — $LOCK 을 기다리다 flock 이 실패했다 D=$D"
-      finish_run failed "W=$W 빌드 락 대기 실패"
-      scripts/notify.sh crit "주말 보강판 실패: 빌드 락 대기(rc=3)" \
-        "D=$D W=$W | $LOCK 을 기다리다 flock 이 실패했다 — 아무 단계도 돌지 않았다(엑셀 발송 0)"
-      exit 3
-    fi
-    echo "[$(kst)] 주말 보강판 빌드 락 대기 끝 — $(( $(date +%s) - W0 ))초 ($W0_KST ~ $(kst))"
-  fi
-  export QL_BUILD_LOCK_HELD=1
-fi
 
 # ── 세 단계 ─────────────────────────────────────────────────────────────────────
 FAILED=""

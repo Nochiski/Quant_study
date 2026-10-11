@@ -397,3 +397,28 @@ def test_daily_build_failure_summary_is_not_pushed_out_by_the_supplement(tmp_pat
     body = crit[0].split("|", 2)[2]
     assert body.startswith("──── 주말 보강판 종료 rc=0") and "──── krx 종료 rc=0" in body
     assert "factor_inputs 종료" not in body and "deliver 종료" not in body
+
+
+def test_supplement_done_check_runs_under_the_build_lock(tmp_path: Path) -> None:
+    """완료 판정은 빌드 락을 잡은 뒤에 한다 — 체인과 손 실행이 함께 '아직'을 보고 둘 다 짓는(보내는) 일을 막는다.
+    앞 실행이 끝나 락이 풀리면 뒤 실행은 '이미 완료'로 끝난다."""
+    _home(tmp_path)
+    first = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W)
+    assert first.rc == 0, first.out
+    (tmp_path / "flock.txt").unlink(missing_ok=True)
+    (tmp_path / "quant-ledger" / "notify.txt").unlink()
+    r = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W, held=False,
+             FLOCK_N_RC=1)
+    assert r.rc == 0, r.out
+    assert r.flock == ["-n 9", "9"]
+    assert r.titles() == ["주말 보강판 빌드 락 대기", "주말 보강판 이미 완료 — 건너뜀"]
+    assert r.calls == SUPP_STEPS
+
+
+def test_supplement_done_check_crash_is_not_read_as_not_yet(tmp_path: Path) -> None:
+    """완료 판정 파이썬이 죽으면(import 실패 등 — rc 1) '아직'으로 읽지 않는다 — 짓지 않고 crit · rc 1."""
+    _home(tmp_path)
+    r = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W,
+             REAL_SRC=str(tmp_path / "no_src"))
+    assert r.rc == 1, r.out
+    assert r.calls == [] and r.titles("crit") == ["주말 보강판 실패: 완료 판정 불가"]

@@ -22,9 +22,10 @@ from equity import inputs
 
 log = logging.getLogger(__name__)
 
-# 새 시트 계산 연결의 자원 상한 — 서버 예산(새 시트 전체 60초 · 1.5GB)에 맞춘다
+# 새 시트 계산의 자원 상한 — 여섯 시트가 연결 하나를 같이 쓴다(메모리 상한도 하나). 서버 예산(새 시트
+# 전체 60초 · 1.5GB) 안에서 엑셀 쪽 파이썬 메모리 몫을 남긴다
 DUCKDB_THREADS = 2
-DUCKDB_MEMORY_LIMIT = "1GB"
+DUCKDB_MEMORY_LIMIT = "1200MB"
 
 
 class SourceMissing(Exception):
@@ -85,10 +86,13 @@ def open_sources(fi_meta: Mapping[str, object], equity_root: Path | None = None,
                    {str(k): str(v) for k, v in pins.items()} if isinstance(pins, Mapping) else {})
 
 
-def connect() -> duckdb.DuckDBPyConnection:
+def connect(temp_dir: Path | None = None) -> duckdb.DuckDBPyConnection:
+    """자원을 묶은 DuckDB 연결. temp_dir = 메모리를 넘길 때 쓸 임시 폴더(호출부가 만들고 지운다)."""
     con = duckdb.connect()
     con.execute(f"SET threads = {DUCKDB_THREADS}")
     con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
+    if temp_dir is not None:
+        con.execute(f"SET temp_directory = '{str(temp_dir).replace(chr(39), chr(39) * 2)}'")
     return con
 
 

@@ -22,9 +22,9 @@ import duckdb
 import pyarrow as pa
 
 from .etf_classify import classify, classify2
-from .sources import SourceMissing, Sources, connect, day_of, lit, num, num0, text
+from .extra_common import WINDOWS
+from .sources import SourceMissing, Sources, day_of, lit, num, num0, text
 
-WINDOWS = (("1D", 1), ("1W", 5), ("1M", 20), ("3M", 60))
 WEEKS_SPARK, WEEKS_TABLE, MONTHS_TABLE = 12, 26, 12      # 요약 셀 안 막대 · 주간 표 · 월별 표
 HIST_CHUNKS = 4                                           # 시계열 행 계산을 종목 묶음 몇 개로 나누나
 # 왼쪽부터 0.0 에 차례로 더한다(파이썬 `x = 0.0; x += …` 와 같은 순서 · 같은 값)
@@ -105,13 +105,18 @@ class EtfData:
     weekly_sub: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
-def load(src: Sources, upto: date) -> EtfData:
-    con = connect()
-    con.execute("SET preserve_insertion_order = false")    # 순서는 모든 질의가 ORDER BY 로 정한다
+def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date) -> EtfData:
+    """새 시트 공용 연결로 계산한다. 이 계산 동안만 행 순서 보존을 끈다(메모리 — 모든 질의가
+    ORDER BY 로 순서를 정한다) · 끝나면 다시 켜고 임시 표를 지운다(다른 시트는 원장 행 순서를 쓴다)."""
+    con.execute("SET preserve_insertion_order = false")
     try:
         return _load(con, src, upto)
     finally:
-        con.close()
+        con.execute("SET preserve_insertion_order = true")
+        for t in ("e", "hr", "nxt", "mend", "w"):
+            con.execute(f"DROP TABLE IF EXISTS {t}")
+        con.execute("DROP VIEW IF EXISTS raw")
+        con.unregister("cls")
 
 
 def _load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date) -> EtfData:

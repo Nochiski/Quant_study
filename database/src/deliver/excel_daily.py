@@ -1491,7 +1491,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
     src = open_sources(fi_meta, equity_root, stage_root)
     extra = sheets_extra.build(wb, src, XRefs.of(wb["Sector"]), date.fromisoformat(run.date),
-                               extra_universe(view), index=len(wb.worksheets))
+                               extra_universe(view), index=len(wb.worksheets),
+                               tmp_root=Path(out_root) / "tmp")
     compare_dict = sheet_models(wb, view)
     raw_dict = sheet_raw(wb, view, fi)
     dictionary: Dictionary = [*score_dict, *raw_dict, *earnings_dict, *sector_dict, *compare_dict]

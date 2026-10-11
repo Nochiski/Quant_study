@@ -6,11 +6,15 @@
 """
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 
 import duckdb
 from openpyxl import Workbook
@@ -45,7 +49,7 @@ class Extra:
 
 def _etf(wb: Workbook, src: Sources, refs: XRefs, d: date, uni: Universe, ex: Extra,
          con: duckdb.DuckDBPyConnection, index: int) -> Defs:
-    w = sheet_etf.write(wb, etf_data.load(src, d), refs, d, index=index)
+    w = sheet_etf.write(wb, etf_data.load(con, src, d), refs, d, index=index)
     ex.sparks[sheet_etf.NAME] = w.sparks
     return w.defs
 
@@ -93,11 +97,15 @@ def missing_sheet(wb: Workbook, name: str, reason: str, refs: XRefs, d: date,
 
 
 def build(wb: Workbook, src: Sources, refs: XRefs, d: date, uni: Universe,
-          *, index: int) -> Extra:
-    """`index` 자리부터 ORDER 순서로 시트를 넣는다. 반환 = Meta 열 사전 · 셀 안 막대 · 실패 사유."""
+          *, index: int, tmp_root: Path) -> Extra:
+    """`index` 자리부터 ORDER 순서로 시트를 넣는다. 반환 = Meta 열 사전 · 셀 안 막대 · 실패 사유.
+    여섯 시트가 DuckDB 연결 하나(메모리 상한 하나)를 같이 쓰고, 메모리를 넘길 때의 임시 파일은
+    `tmp_root/duckdb_<pid>` 에 두었다가 끝나면 지운다."""
     ex = Extra()
     defs: dict[str, Defs] = {}
-    con = connect()
+    tmp = Path(tmp_root) / f"duckdb_{os.getpid()}"
+    tmp.mkdir(parents=True, exist_ok=True)
+    con = connect(tmp)
     try:
         for k, name in enumerate(ORDER):
             t = time.monotonic()
@@ -116,6 +124,9 @@ def build(wb: Workbook, src: Sources, refs: XRefs, d: date, uni: Universe,
                 missing_sheet(wb, name, reason, refs, d, index + k)
     finally:
         con.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+        with contextlib.suppress(OSError):      # 비었을 때만 지워진다(다른 실행이 쓰는 중이면 남긴다)
+            tmp.parent.rmdir()
     ex.defs = [row for name in DEFS_ORDER for row in defs.get(name, [])]
     return ex
 

@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
 import sqlite3
 import statistics
 from collections import Counter
@@ -72,7 +73,10 @@ from .mappings import (
     REBASE_SQL,
     STAGE,
     TableMapping,
+    score_spec_candidates,
 )
+
+log = logging.getLogger(__name__)
 
 SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "v3_schema.sql"
 
@@ -115,6 +119,9 @@ _BASIS_ANY = "manual"
 _BASIS_ALSO: dict[str, tuple[str, ...]] = {"evening": ("morning",)}
 # 원천 관계식을 판 목록과 같은 dict 에 실을 때 쓰는 접두 — build_id 키와 섞이지 않게.
 _EXPR = "__expr__"
+# 점수 표 선언 spec 대신 앞 주 모델 spec 을 썼을 때(N-47 · Q-E1) 그 실제 spec 을 실는 접두 —
+# `_USED`+선언 spec → 실제 spec. build_id 키와 섞이지 않게 `_build_ids` 가 뺀다.
+_USED = "__used__"
 # 모델 판의 점수 표 파일 이름 — `model/build.py` SCORES_FILE · `deliver/reader.py` 파일 규약과 같다.
 SCORES_FILE = "scores.parquet"
 
@@ -228,8 +235,11 @@ class ExportResult:
     tables: dict[str, TableResult] = field(default_factory=dict)
     equity_builds: dict[str, str] = field(default_factory=dict)
     stage_builds: dict[str, str] = field(default_factory=dict)
-    # QL-C — 점수 표 원천 모델 판 {spec_id: build_id}
+    # QL-C — 점수 표 원천 모델 판 {spec_id: build_id}. 키는 실제로 읽은 spec 이다
     model_builds: dict[str, str] = field(default_factory=dict)
+    # 앞 주 모델로 대신한 점수 표 원천 {선언 spec: 실제 spec}(N-47 · Q-E1 — 요약 줄
+    # `score_fallback=`). `_compat_meta` 에는 따로 싣지 않는다 — `model_builds` 키가 실제 spec 이다
+    score_fallback: dict[str, str] = field(default_factory=dict)
 
     def summary(self) -> str:
         """stdout 한 줄 요약 — 표별 행수(괄호는 못 넣은 행)."""
@@ -244,6 +254,9 @@ class ExportResult:
                          f"{self.n_universe_with_estimates}")
         if self.builds_fallback:
             parts.append("fallback=" + ",".join(self.builds_fallback))
+        if self.score_fallback:
+            parts.append("score_fallback=" + ",".join(
+                f"{k}->{v}" for k, v in sorted(self.score_fallback.items())))
         for t, r in self.tables.items():
             rb_tickers = (r.rebase or {}).get("tickers")
             if isinstance(rb_tickers, list) and rb_tickers and r.rebase is not None:
@@ -401,10 +414,12 @@ def _render(mapping: TableMapping, params: dict[str, str],
     kind = mapping.source_kind
     assert kind is not None
     if kind == MODEL:
-        # 점수 표 자리는 `{scores}` 하나다 — spec_id('scope@1.0')는 format 자리 이름이 될 수 없다
+        # 점수 표 자리는 `{scores}` 하나다 — spec_id('scope@1.0')는 format 자리 이름이 될 수 없다.
+        # 원천 기록은 실제로 읽은 spec(앞 주 모델로 대신했으면 그 spec — N-47 · Q-E1)이다
         spec = mapping.sources[0]
+        used = builds[MODEL].get(_USED + spec, spec)
         return (mapping.sql.format(scores=builds[MODEL][_EXPR + spec], **params),
-                {spec: builds[MODEL][spec]})
+                {used: builds[MODEL][used]})
     pairs = [(kind, t) for t in mapping.sources] + list(mapping.cross_sources)
     sources = {t: builds[k][_EXPR + t] for k, t in pairs}
     used = {t: builds[k][t] for k, t in pairs}
@@ -855,6 +870,12 @@ def _resolve_model(selected: list[TableMapping], model_root: Path | None, d_iso:
     D 인 `latest_<basis>.json`. 그날 성공 판이 없거나, spec 이 그 판에서 빠졌거나(N-11 격리), 점수
     파일이 없으면 다른 날 판으로 대체하지 않고 멈춘다 — 쓰기 전이라 대상의 D 행은 그대로 남는다.
     돌려주는 값은 `_resolve_sources` 와 같은 모양(spec_id → build_id, `_EXPR`+spec_id → 관계식).
+
+    앞 주 모델 대신(N-47 · Q-E1): 선언 spec(`SCORE_SPEC` = scope@2.0)이 그 판에 아예 없으면
+    (바꾸기 전에 지은 날 — 빠진 spec 목록 `excluded_specs` 에도 없다) `SCORE_SPEC_FALLBACK`
+    (scope@1.0) 점수로 대신하고 warn 한 줄을 남긴다. 판 id 는 실제 spec 키로 싣고
+    (`_compat_meta.model_builds`·표 원천 기록), `_USED`+선언 spec → 실제 spec 을 함께 싣는다.
+    이번 판에서 빠진 spec(N-11)은 대신하지 않고 멈춘다.
     """
     picked = [m for m in selected if m.source_kind == MODEL]
     out: dict[str, str] = {}
@@ -869,18 +890,31 @@ def _resolve_model(selected: list[TableMapping], model_root: Path | None, d_iso:
     except DeliverError as e:
         raise CompatError(f"점수 표 원천 모델 판을 고정하지 못했다 — 다른 날 판으로 대체하지 "
                           f"않는다(P1): {e}") from e
+    excluded = run.meta.get("excluded_specs")
+    excluded = excluded if isinstance(excluded, dict) else {}
     for spec in sorted({m.sources[0] for m in picked}):
+        used = spec
         if spec not in run.specs:
-            excluded = run.meta.get("excluded_specs")
-            why = excluded.get(spec) if isinstance(excluded, dict) else None
-            raise CompatError(
-                f"모델 판 {run.build_id}({run.date} {basis})에 {spec} 가 없다"
-                + (f" — 이번 판에서 빠졌다(N-11): {why}" if why else "")
-                + " — 그 점수 표는 쓰지 않는다")
-        path = root / spec / f"v={run.build_id}" / SCORES_FILE
+            why = excluded.get(spec)
+            fallback = None if spec in excluded else next(
+                (s for s in score_spec_candidates(spec)[1:] if s in run.specs), None)
+            if fallback is None:
+                rest = score_spec_candidates(spec)[1:]
+                raise CompatError(
+                    f"모델 판 {run.build_id}({run.date} {basis})에 {spec} 가 없다"
+                    + (f" — 이번 판에서 빠졌다(N-11): {why}" if spec in excluded else "")
+                    + (f" — 앞 주 모델 {', '.join(rest)} 도 없다" if rest and spec not in excluded
+                       else "")
+                    + " — 그 점수 표는 쓰지 않는다")
+            used = fallback
+            log.warning("compat warn: 모델 판 %s(%s %s)에 %s 가 없다 — 앞 주 모델 %s 점수로 "
+                        "대신한다(N-47 · Q-E1, 바꾸기 전에 지은 날)", run.build_id, run.date,
+                        basis, spec, used)
+            out[_USED + spec] = used
+        path = root / used / f"v={run.build_id}" / SCORES_FILE
         if not path.exists():
-            raise CompatError(f"모델 판 점수 표가 없다: spec={spec} build={run.build_id} {path}")
-        out[spec] = run.build_id
+            raise CompatError(f"모델 판 점수 표가 없다: spec={used} build={run.build_id} {path}")
+        out[used] = run.build_id
         out[_EXPR + spec] = f"read_parquet('{path.resolve()}', hive_partitioning=false)"
     return out
 
@@ -928,7 +962,12 @@ def _guard_evening_order(con: sqlite3.Connection, d_iso: str) -> None:
 
 
 def _build_ids(builds: dict[str, str]) -> dict[str, str]:
-    return {k: v for k, v in builds.items() if not k.startswith(_EXPR)}
+    return {k: v for k, v in builds.items() if not k.startswith((_EXPR, _USED))}
+
+
+def _score_fallback(model: dict[str, str]) -> dict[str, str]:
+    """앞 주 모델로 대신한 점수 표 원천 {선언 spec: 실제 spec}(N-47 · Q-E1). 없으면 빈 dict."""
+    return {k[len(_USED):]: v for k, v in model.items() if k.startswith(_USED)}
 
 
 def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: Path,
@@ -1018,6 +1057,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     builds[MODEL] = _resolve_model(selected, model_root, params["date"], basis)
     equity_builds, stage_builds = _build_ids(builds[EQUITY]), _build_ids(builds[STAGE])
     model_builds = _build_ids(builds[MODEL])
+    score_fallback = _score_fallback(builds[MODEL])
     _check_basis(equity_builds, basis)
     # 장 마감 판 이음매(MINOR-2) — T 행을 만들 때, 그리고 D' 아침 판(`m_`)을 받았을 때는 표 선택과
     # 무관하게 본다
@@ -1147,7 +1187,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                 n_universe_with_estimates=n_with_est, builds_fallback=builds_fallback,
                 tables=results,
                 equity_builds=equity_builds, stage_builds=stage_builds,
-                model_builds=model_builds))
+                model_builds=model_builds, score_fallback=score_fallback))
             raise
         result = ExportResult(
             date=params["date"], basis=basis, target=str(target),
@@ -1157,7 +1197,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
             model_universe=model_universe, n_universe_with_estimates=n_with_est,
             builds_fallback=builds_fallback,
             tables=results, equity_builds=equity_builds, stage_builds=stage_builds,
-            model_builds=model_builds)
+            model_builds=model_builds, score_fallback=score_fallback)
         _write_meta(con, result)
         return result
     finally:

@@ -288,6 +288,34 @@ def test_rebase_null_rows_are_one_warn_line(env, tmp_path) -> None:
     assert [n.split("|")[1] for n in _levels(r, "info")] == [f"v3_post {D} morning 반영 완료"]
 
 
+def test_pre_e2_model_run_fills_scores_from_the_previous_main_model(env, tmp_path) -> None:
+    """N-47 · Q-E1 — 그날 모델 판에 scope@2.0 이 없으면(주 모델을 바꾸기 전에 지은 날) compat 이
+    앞 주 모델 scope@1.0 점수로 채우고 warn 한 줄을 남긴다(정지 아님, rc 0). 같은 D·basis 를 바꾼 뒤
+    판으로 다시 돌리면 그 실행은 warn 이 없다 — 로그는 이어 쓰지만 이번 실행 줄만 본다."""
+    _, main = env
+    pre, post = tmp_path / "pre", tmp_path / "post"
+    for base, spec in ((pre, "scope@1.0"), (post, tce.SCOPE)):
+        tce._write_model_run(base / "model", D_ISO, tce.MB_D23,
+                             {spec: tce._scope_rows(D_ISO), tce.V2: tce._v2_rows(D_ISO)})
+    eq_st = tce._make_roots(tmp_path / "src")
+    r = _run(tmp_path, (*eq_st, pre / "model"), *_base(main))
+    assert r.rc == 0, r.out
+    assert "score_fallback=scope@2.0->scope@1.0" in r.out
+    assert "compat warn: 모델 판" in r.out and "앞 주 모델 scope@1.0 점수로 대신한다" in r.out
+    warns = _levels(r, "warn")
+    assert len(warns) == 1 and f"v3_post {D} morning 점수 앞 주 모델로 대신" in warns[0]
+    assert "scope@2.0->scope@1.0" in warns[0]
+    meta = _q(main, "SELECT model_builds FROM _compat_meta WHERE status = 'ok'")
+    assert json.loads(meta[-1][0]) == {"scope@1.0": tce.MB_D23, tce.V2: tce.MB_D23}
+    again = _run(tmp_path, (*eq_st, post / "model"), *_base(main))
+    assert again.rc == 0, again.out
+    assert _levels(again, "warn") == warns                  # 새 warn 없음(notify 는 이어 쓴다)
+    assert len(_levels(again, "info")) == 2
+    meta = _q(main, "SELECT model_builds FROM _compat_meta WHERE status = 'ok' "
+                    "ORDER BY exported_at")
+    assert json.loads(meta[-1][0]) == {tce.SCOPE: tce.MB_D23, tce.V2: tce.MB_D23}
+
+
 def test_daily_post_runs_after_reflection_when_today_is_d(env, evening_sources, tmp_path) -> None:
     home, main = env
     marker = tmp_path / "post.txt"

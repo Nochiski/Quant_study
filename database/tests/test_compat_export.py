@@ -1430,6 +1430,80 @@ def test_score_excluded_spec_refuses(roots, tmp_path: Path) -> None:
     assert _rows(target, "SELECT * FROM score_history_v2") == old
 
 
+# ── 앞 주 모델 대신(N-47 · Q-E1) ───────────────────────────────────────────────
+PREV_SCOPE = "scope@1.0"        # 주 모델을 scope@2.0 으로 바꾸기 전의 주 모델
+
+
+def _fallback_warns(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records
+            if r.name == "compat.quant_db" and r.levelname == "WARNING"]
+
+
+def test_score_pre_e2_day_falls_back_to_the_previous_main_model(
+        roots, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """바꾸기 전에 지은 날(그날 판에 scope@2.0 이 없다)은 앞 주 모델 scope@1.0 점수로
+    score_history 를 채우고 warn 한 줄을 남긴다. 실제로 쓴 spec 은 `model_builds`·표 원천 키·요약
+    줄에 남는다."""
+    from compat.mappings import SCORE_SPEC, SCORE_SPEC_FALLBACK
+    from model.contracts import V3_SCORE_COLUMNS
+    assert (SCORE_SPEC, SCORE_SPEC_FALLBACK) == (SCOPE, (PREV_SCOPE,))
+    root = tmp_path / "model"
+    _write_model_run(root, D23_ISO, MB_D23, {PREV_SCOPE: _scope_rows(D23_ISO),
+                                             V2: _v2_rows(D23_ISO)})
+    target = tmp_path / "quant.db"
+    with caplog.at_level("WARNING", logger="compat.quant_db"):
+        res = _run(roots, target, tables=["score_history", "score_history_v2"], model_root=root)
+    assert res.model_builds == {PREV_SCOPE: MB_D23, V2: MB_D23}
+    assert res.score_fallback == {SCOPE: PREV_SCOPE}
+    assert "score_fallback=scope@2.0->scope@1.0" in res.summary()
+    assert res.tables["score_history"].sources == {PREV_SCOPE: MB_D23}
+    meta = _rows(target, "SELECT model_builds, tables FROM _compat_meta")[0]
+    assert json.loads(meta[0]) == {PREV_SCOPE: MB_D23, V2: MB_D23}
+    assert json.loads(meta[1])["score_history"]["sources"] == {PREV_SCOPE: MB_D23}
+    got = sorted(_rows(target, f"SELECT {', '.join(V3_SCORE_COLUMNS)} FROM score_history"))
+    assert got == _v3_tuples(_scope_rows(D23_ISO), V3_SCORE_COLUMNS, SCOPE_NULL_COLS)
+    warns = _fallback_warns(caplog)
+    assert len(warns) == 1 and all(x in warns[0] for x in (SCOPE, PREV_SCOPE, MB_D23, "N-47"))
+
+
+def test_score_post_e2_day_uses_the_main_model_without_warn(
+        roots, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """바꾼 뒤의 판(둘 다 있다)은 scope@2.0 을 쓴다 — 앞 주 모델 점수(+500)는 읽지 않고 warn 도
+    없다."""
+    root = tmp_path / "model"
+    _write_model_run(root, D23_ISO, MB_D23, {PREV_SCOPE: _scope_rows(D23_ISO, 500.0),
+                                             SCOPE: _scope_rows(D23_ISO)})
+    target = tmp_path / "quant.db"
+    with caplog.at_level("WARNING", logger="compat.quant_db"):
+        res = _run(roots, target, tables=["score_history"], model_root=root)
+    assert res.model_builds == {SCOPE: MB_D23} and res.score_fallback == {}
+    assert "score_fallback" not in res.summary()
+    assert _rows(target, "SELECT max(composite_score) FROM score_history") == [(9.0,)]
+    assert _fallback_warns(caplog) == []
+
+
+@pytest.mark.parametrize("case", ["neither", "main_excluded"])
+def test_score_without_main_or_previous_model_still_refuses(roots, tmp_path: Path,
+                                                            case: str) -> None:
+    """scope@2.0 도 scope@1.0 도 없는 판, 또는 scope@2.0 이 그날 판에서 빠진 판(N-11 — 실패를
+    앞 주 모델로 덮지 않는다)은 쓰기 전에 멈춘다 — 대상의 D 행은 그대로다."""
+    root = tmp_path / "model"
+    if case == "neither":
+        _write_model_run(root, D23_ISO, MB_D23, {V2: _v2_rows(D23_ISO)})
+        match = "앞 주 모델 scope@1.0 도 없다"
+    else:
+        _write_model_run(root, D23_ISO, MB_D23, {SCOPE: _scope_rows(D23_ISO),
+                                                 PREV_SCOPE: _scope_rows(D23_ISO)},
+                         excluded=(SCOPE,))
+        match = "이번 판에서 빠졌다"
+    target = tmp_path / "quant.db"
+    old = _old_v3_rows(D23_ISO, ("005930",), 48, 1.0)
+    _seed(target, "score_history", old)
+    with pytest.raises(CompatError, match=match):
+        _run(roots, target, tables=["score_history"], model_root=root)
+    assert _rows(target, "SELECT * FROM score_history") == old
+
+
 def test_score_rows_of_other_date_refuse(roots, tmp_path: Path) -> None:
     """판 날짜(D)와 다른 score_date 행이 있으면 D 를 지우기 전에 멈춘다."""
     root = tmp_path / "model"

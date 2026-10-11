@@ -684,6 +684,23 @@ WHERE a.period_kind = 'E' AND a.period = '{asof_fy}'
 # 쓰기는 날짜 단위 교체다(그 score_date 행 전부 삭제 → 삽입, 한 트랜잭션 — `quant_db`).
 SCORE_SPEC = "scope@2.0"
 SCORE_V2_SPEC = "v2_percentrank@1.0"
+# 앞 주 모델(N-47 · Q-E1) — 주 모델을 scope@1.0 → scope@2.0 으로 바꾸기 전에 지은 날의 모델 판에는
+# scope@2.0 이 없다(spec 이 그때 없었다). 그런 날을 다시 내보내면(v3_post 재반영 · v3_replay ·
+# --allow-older) score_history 를 앞 주 모델 점수로 채우고 warn 을 남긴다. 실제로 쓴 spec 은
+# `_compat_meta.model_builds` 의 키다. 앞에서부터 그 판에 먼저 있는 것을 쓴다.
+SCORE_SPEC_FALLBACK: tuple[str, ...] = ("scope@1.0",)
+
+
+def score_spec_candidates(spec: str) -> tuple[str, ...]:
+    """점수 표 원천 spec 과 대신 쓸 앞 주 모델(있으면) — 앞에서부터 그 판에 있는 것을 쓴다."""
+    return (spec, *SCORE_SPEC_FALLBACK) if spec == SCORE_SPEC else (spec,)
+
+
+def score_spec_used(spec: str, model_builds: object) -> str:
+    """compat 기록의 `model_builds`({spec: 판 id})에서 그 표를 실제로 채운 spec — 후보 중 먼저 있는
+    키. 없으면 선언 spec 그대로(판 id 없음은 읽는 쪽이 판정한다)."""
+    keys = model_builds if isinstance(model_builds, dict) else {}
+    return next((s for s in score_spec_candidates(spec) if s in keys), spec)
 _SCORE_NULL = ("growth_score", "sentiment_score", "volatility_score", "size_score",
                "foreign_score", "shareholder_score", "val_ev_ebitda")
 

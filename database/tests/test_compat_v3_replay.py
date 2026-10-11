@@ -346,6 +346,28 @@ def test_score_tables_universe_common_ev_null_and_spearman(pair, equity_root) ->
     assert rep["tables"]["score_history_v2"]["n_diff"] == 0
 
 
+def test_score_spec_is_the_one_compat_actually_used(pair, equity_root, tmp_path: Path) -> None:
+    """N-47 · Q-E1 — 그날 compat 반영 기록이 앞 주 모델(scope@1.0)로 score_history 를 채웠으면(바꾸기 전에
+    지은 날) 보고의 spec 도 그것이다(`_compat_meta.model_builds` 키). 기록이 없으면 선언 spec(scope@2.0)."""
+    compat = tmp_path / "compat.db"
+    shutil.copy(pair[0], compat)
+    con = sqlite3.connect(str(compat), isolation_level=None)
+    try:
+        _write_meta(con, ExportResult(
+            date=D_ISO, basis="morning", target=str(compat),
+            exported_at="2026-10-09T00:20:00.000000+00:00",
+            window={"days": 14, "full": False, "from_date": "2026-09-24", "to_date": D_ISO},
+            consensus_asof=D_ISO,
+            tables={"daily_prices": TableResult(1, 0, {}, {}, None, REBASE),
+                    "score_history": TableResult(2, 0, {"scope@1.0": "m_prev"}, {})},
+            equity_builds=BUILDS, model_builds={"scope@1.0": "m_prev"}))
+    finally:
+        con.close()
+    rep = rp.compare(compat, pair[1], D, equity_root)
+    assert rep["scores"]["score_history"]["spec"] == "scope@1.0"
+    assert rep["scores"]["score_history_v2"]["spec"] == "v2_percentrank@1.0"
+
+
 def test_rc_and_totals(pair, equity_root) -> None:
     rep = rp.compare(pair[0], pair[1], D, equity_root)
     assert rep["n_other"] == 14 and rep["rc"] == 1 and rep["status"] == "other"

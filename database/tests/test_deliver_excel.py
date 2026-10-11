@@ -566,7 +566,7 @@ def test_daily_earnings_headers_roll_over_with_the_board_year(tmp_path: Path) ->
     assert labels[3:9] == ["2026", "YoY (2025-2026)", "2027E", "YoY (2026-2027E)", "2028E",
                            "YoY (2027E-2028E)"]
     assert labels[-6:] == ["25.3Q", "25.4Q", "26.1Q", "26.2Q", "26.3Q", "YoY (최근 분기)"]
-    a5 = [ws.cell(5, c).value for c in range(1, ws.max_column + 1) if ws.cell(5, c).value]
+    a5 = [str(ws.cell(5, c).value) for c in range(1, ws.max_column + 1) if ws.cell(5, c).value]
     assert a5[1].startswith("2026: 확정치") and "2027E·2028E: 컨센서스" in a5[1]
     assert "2025" not in labels
     rows = rows_by_code(ws)
@@ -2378,7 +2378,7 @@ def test_candidates_and_change_follow_the_sector_cap_against_yesterday() -> None
 def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
     """Score 끝 '후보(대분류당 최대 9)' 블록 — 후보 = view 후보(30), 변화 열, 전일 순위 칸 노랑 =
     변화 '진입'(조건부 서식이라 정렬해도 따라간다), 커버리지 '신선' 은 옅은 회색."""
-    res, wb = daily
+    _, wb = daily
     ws = wb["Score"]
     h, rows = header(ws), rows_by_code(ws)
     cand = [t for t, r in rows.items() if ws.cell(r, h["후보"]).value == "후보"]
@@ -2414,7 +2414,7 @@ def test_sector_week_and_quarter_returns_are_cap_weighted(scope_board) -> None:
     from model.engines import v3_zscore
     assert ed._period_return is v3_zscore._period_return
     assert ed._price_histories is v3_zscore._price_histories
-    res, wb, scores, root = scope_board
+    _, wb, scores, root = scope_board
     fi = root / "fi"
     prices = duckdb_rows(fi / "fi_prices" / f"v={SCOPE_FI_BID}" / "part0.parquet")
     adj = {(str(r["ticker"]), str(r["date"])[:10]): r["adj_close"] for r in duckdb_rows(
@@ -2424,14 +2424,16 @@ def test_sector_week_and_quarter_returns_are_cap_weighted(scope_board) -> None:
         t, d = str(r["ticker"]), str(r["date"])[:10]
         if "2025-03-27" <= d <= "2026-09-28":                         # D−550일 ~ D
             a = adj.get((t, d))
-            hist.setdefault(t, []).append((d, a if a is not None else r["close"]))
+            hist.setdefault(t, []).append((d, float(cast(float, a if a is not None
+                                                          else r["close"]))))
     week = {}
     for t, h in hist.items():
         px = [p for _, p in sorted(h)]
         if len(px) > 5 and px[-6]:
             week[t] = px[-1] / px[-6] - 1
     uni = duckdb_rows(fi / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
-    caps = {str(r["ticker"]): r["market_cap"] for r in uni}
+    caps = {str(r["ticker"]): float(cast(float, r["market_cap"])) for r in uni
+            if r["market_cap"] is not None}
     l1 = {str(r["ticker"]): r["sector_l1"] for r in uni}
     ws = wb["Sector"]
     h = header(ws)
@@ -2463,7 +2465,9 @@ def test_scale_zero_anchor_uses_each_sign_90th_magnitude_two_digits() -> None:
     from deliver.qpack import scale_zero_anchor
 
     def bounds(values: list[object]) -> list[float]:
-        return [float(v.val) for v in scale_zero_anchor(values).colorScale.cfvo]
+        cs = scale_zero_anchor(values).colorScale
+        assert cs is not None
+        return [float(v.val) for v in cs.cfvo]
     pos = [float(x) for x in range(1, 101)]                   # 90% 분위 = 정렬 89번째 = 90
     neg = [-x * 1.234 for x in range(1, 11)]                  # |값| 90% = 정렬 8번째 = 11.106
     assert bounds([*pos, *neg, "흑자전환", None, 0.0]) == [-11.0, 0.0, 90.0]
@@ -2471,7 +2475,7 @@ def test_scale_zero_anchor_uses_each_sign_90th_magnitude_two_digits() -> None:
     assert bounds([-0.0123, -5.0]) == [-0.012, 0.0, 0.012]   # 양수 없으면 음수 값으로
     assert bounds(["적자지속", None]) == [-1.0, 0.0, 1.0]
     cs = scale_zero_anchor([1.0, -1.0]).colorScale
-    assert [c.rgb[-6:] for c in cs.color] == ["F8696B", "FFEB84", "63BE7B"]
+    assert cs is not None and [c.rgb[-6:] for c in cs.color] == ["F8696B", "FFEB84", "63BE7B"]
 
 
 def test_daily_earnings_yoy_colour_is_zero_anchored(daily) -> None:
@@ -2532,7 +2536,9 @@ def test_note_box_wraps_at_300px_and_keeps_symbols_glued(tmp_path: Path) -> None
     assert (cm.width, cm.height) == (note_px("■ 둘째 줄") + 30, 21 * 3 + 30)
     from openpyxl import Workbook
     wb = Workbook()
-    wb.active["A1"].comment = cm
+    sheet = wb.active
+    assert sheet is not None
+    sheet["A1"].comment = cm
     wb.save(tmp_path / "n.xlsx")
     with zipfile.ZipFile(tmp_path / "n.xlsx") as z:
         vml = next(z.read(n).decode() for n in z.namelist() if n.endswith(".vml"))

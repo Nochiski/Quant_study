@@ -470,7 +470,8 @@ _THIN_SECTOR = Side(style="thin", color="1F3864")   # Sector 머리 — 옛 medi
 SIGN_COLORS = {"흑자전환": C_POS_TXT, "흑전": C_POS_TXT, "적자전환": C_NEG_TXT,
                "적자지속": C_NEG_TXT, "적전": C_NEG_TXT, "적확": C_NEG_TXT, "적축": C_NEG_TXT,
                "적자": C_NEG_TXT}
-PRINT_MARGINS = dict(left=0.25, right=0.25, top=0.35, bottom=0.45, header=0.15, footer=0.2)
+PRINT_MARGINS = {"left": 0.25, "right": 0.25, "top": 0.35, "bottom": 0.45, "header": 0.15,
+                 "footer": 0.2}
 
 
 def text_width(s: str) -> float:
@@ -740,8 +741,10 @@ def page_setup(ws: Worksheet, page: Page, area: str) -> None:
     ws.page_margins = PageMargins(**PRINT_MARGINS)
     ws.print_area = area
     ws.print_title_rows = "2:7"
-    ws.oddFooter.left.text, ws.oddFooter.left.size = "&A", 8
-    ws.oddFooter.center.text, ws.oddFooter.center.size = "&P / &N", 8
+    odd = ws.oddFooter
+    if odd is not None:                 # openpyxl 형식상 Optional — 새 시트에는 늘 있다
+        odd.left.text, odd.left.size = "&A", 8
+        odd.center.text, odd.center.size = "&P / &N", 8
 
 
 def write_confirmed(wb: Workbook, sheet: str, band: Band, groups: Sequence[Group],

@@ -64,6 +64,7 @@ from .qpack import (
     font,
     new_workbook,
     note,
+    put,
     scale_fixed_zero,
     scale_high_good,
     scale_zero_anchor,
@@ -693,8 +694,8 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         (None, "순위: 1 = 가장 좋음 · 색: 초록 좋음, 빨강 나쁨 · 노랑: 오늘 후보 진입")]
     if first_axis:
         notes_5.append((first_axis, axis_note))
-    notes_5.append(("cand", f"후보: 순위순, 대분류당 최대 {k}종목 · {k}종목 초과: 순위 {top_n} "
-                            f"안인데 그 대분류가 이미 {k}종목 · 진입·이탈: 전일 후보 대비"))
+    notes_5.append(("cand", (f"후보: 순위순, 대분류당 최대 {k}종목 · {k}종목 초과: 순위 {top_n} "
+                             f"안인데 그 대분류가 이미 {k}종목 · 진입·이탈: 전일 후보 대비")))
     sh = write_confirmed(wb, "Score", band(view, "Score: 종목별 종합 점수와 순위",
                                            "정렬: 순위 오름차순 ▲", notes_5),
                          groups, [rows], sort_key="rank")
@@ -1212,7 +1213,7 @@ def sheet_sectors(wb: Workbook, view: DayView, week: Mapping[str, float]) -> Dic
         cell = ws.cell(r, 1, text)
         cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=False)
     m = sh.cols["n_cand"]
-    ws.cell(h6a + 1, m).value = f"후보 수\n(최대 {k})"
+    put(ws, h6a + 1, m, f"후보 수\n(최대 {k})")
     for r in range(r0a, r1a + 1):
         ws.cell(r, m).number_format = f'0"/{k}"'
     # 색 — 아래 표 5종목 미만 업종 축 평균은 회색(먼저 · 멈춤), 축 평균 대분류 ±0.5 · 업종 ±1
@@ -1275,8 +1276,8 @@ def sheet_models(wb: Workbook, view: DayView) -> Dictionary:
         (f"t:{view.spec_id}", f"●: 그 모델 상위 {top_n}")]
     left_out = sorted({model_id_of(s).split("_")[0] for s in left_out_specs(view)})
     if left_out:
-        notes_5.append(("max_diff", f"{'·'.join(left_out)}: 결함 수정 전까지 뺌"
-                                    "(Meta '비교에서 뺀 모델')"))
+        notes_5.append(("max_diff", (f"{'·'.join(left_out)}: 결함 수정 전까지 뺌"
+                                     "(Meta '비교에서 뺀 모델')")))
     sh = write_confirmed(wb, "Compare", band(view, "Compare: 모델별 순위 비교",
                                              f"정렬: {model_id_of(view.spec_id)} 순위 오름차순 ▲",
                                              notes_5),

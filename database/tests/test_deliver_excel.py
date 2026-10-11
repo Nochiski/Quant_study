@@ -1644,6 +1644,34 @@ def test_t50_evening_without_fallback_root_keeps_the_blank(
     assert set(_d1m(wb, tuple(tick(i) for i in range(N))).values()) == {None}
 
 
+@pytest.mark.parametrize("broken", ["manifest", "scores_parquet"])
+def test_t50_broken_fallback_root_leaves_the_blank_and_does_not_stop_the_excel(
+        world: dict[str, Path], tmp_path: Path, broken: str,
+        caplog: pytest.LogCaptureFixture) -> None:
+    """T-50 컨트롤러 결정 — 대체 루트는 표시 열 하나를 채우는 보조 입력이다. 그 루트의 08-24 아침판
+    manifest(`_runs`)나 점수 parquet 이 깨져 있어도 장 마감 판 엑셀은 rc 0 으로 나가고, 대체 없이
+    PR-6 그대로 빈칸이다(P1 — 모호하면 결측). 경고 로그 한 줄만 남긴다. 옛 처리는 그 예외가 그대로
+    올라가 rc 2(manifest) · rc 3(parquet)으로 15:41 발송이 연구 루트 상태에 묶였다."""
+    ev, fb = _t50_roots(world, tmp_path)
+    target = (fb / "_runs" / "20260824_morning.json" if broken == "manifest"
+              else fb / PRIMARY / "v=m_20260824T000000Z" / "scores.parquet")
+    target.write_text("{깨진", encoding="utf-8")
+    out = tmp_path / "deliver"
+    with caplog.at_level("WARNING", logger="deliver.trend"):
+        rc = cli.main(["model-daily", "--date", "20260925", "--basis", "evening",
+                       "--model-root", str(ev), "--fi-root", str(world["fi"]),
+                       "--out-root", str(out), "--trend-fallback-root", str(fb)])
+    assert rc == 0
+    wb = load_workbook(out / "daily" / "model_scores_20260925_evening.xlsx")
+    meta = dict(_meta_pairs(wb))
+    assert meta["1M 비교 판"] == "없음(그 전 판이 없다)"
+    assert meta["순위 흐름 판"] == "2026-09-24 ~ 2026-09-25 · 2개"
+    assert set(_d1m(wb, tuple(tick(i) for i in range(N))).values()) == {None}
+    warns = [r.getMessage() for r in caplog.records
+             if r.name == "deliver.trend" and r.levelname == "WARNING"]
+    assert len(warns) == 1 and "T-50" in warns[0] and str(fb) in warns[0]
+
+
 def test_t50_morning_excel_ignores_the_fallback_root(world: dict[str, Path], daily,
                                                      tmp_path: Path) -> None:
     """회귀 — 아침 판(morning) 엑셀은 대체 루트를 줘도 그대로다. world 아침 루트에도 1M 비교

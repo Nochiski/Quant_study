@@ -22,11 +22,13 @@
 from __future__ import annotations
 
 import calendar
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
+import duckdb
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook import Workbook
@@ -35,6 +37,7 @@ from . import qpack
 from .reader import DeliverError, ModelRun, previous_run, read_scores, runs_between
 from .view import rank_of, ticker_of
 
+log = logging.getLogger(__name__)
 SHEET = "순위 흐름"          # 그래프 원자료(숨김 시트). 행 번호를 점수 시트와 맞춘다
 WINDOWS = ("1M",)             # 엑셀에 싣는 창(1W 는 10-06 사용자 결정으로 뺐다)
 LINE_UP, LINE_DOWN, LINE_FLAT = "1E8C45", "D0312D", "8C8C8C"   # 상승 초록 · 하락 빨강 · 같음 회색
@@ -105,8 +108,14 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
     if basis == "evening" and fallback_root is not None and base["1M"] is None:
         # T-50 — 대체 루트 아침 확정판의 같은 규칙 판(D−1개월 이하 마지막 성공 판). 그 날짜는
         # evening 흐름 판들(D−1개월 다음 날부터)보다 앞이라 흐름 첫 점이 된다
-        fb = _on_or_before(fallback_root, month_back(d), "morning")
-        got = None if fb is None else _ranks(fallback_root, fb, spec_id)
+        try:
+            fb = _on_or_before(fallback_root, month_back(d), "morning")
+            got = None if fb is None else _ranks(fallback_root, fb, spec_id)
+        except (DeliverError, OSError, ValueError, duckdb.Error) as e:
+            # 보조 입력이라 연구 루트가 깨져도 장 마감 판 엑셀은 멈추지 않는다 — 대체 없이 빈칸(P1)
+            log.warning("T-50 1M 비교 판 대체를 쓰지 않는다(Δ순위 1M 빈칸) — "
+                        "대체 루트 %s 읽기 실패: %s: %s", fallback_root, type(e).__name__, e)
+            fb = got = None
         if fb is not None and got is not None:
             by_date[fb.date] = got
             base["1M"], base_rank["1M"], fallback = fb.date, got, frozenset({"1M"})

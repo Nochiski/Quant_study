@@ -1293,7 +1293,7 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
     # N-30 ①(10-08): scope 는 의견 0 종목도 남긴다 — 메타 유니버스 규칙 줄에서 추정기관수 조건이 빠진다
     # scope_v2.0 은 추정치 유예 5거래일(N-47)
     assert "추정기관수" not in rule
-    assert "추정치 유예 5 거래일" in rule
+    assert "추정치 유예 5거래일" in rule
     # scope(v3 엔진) 점수 행엔 업종 열이 없다 — fi_universe 업종으로 채워 업종 시트가 3 대분류로 선다
     sector_rows = [wb["Sector"].cell(r, 1).value for r in range(8, wb["Sector"].max_row + 1)]
     assert len(sector_rows) >= 3, sector_rows
@@ -2789,3 +2789,39 @@ def test_weekly_marks_use_the_predecessor_model_on_older_days(grace_board,
     assert {d: v.spec_id for d, v in last.views.items()} == {
         "2026-09-24": "scope@1.0", "2026-09-25": "scope@2.0"}
     assert last.views["2026-09-24"].rank(T_A) == 30         # 그날 scope@1.0 순위
+
+
+def test_grace_stock_remarks_and_flow_memo(grace_board, tmp_path: Path) -> None:
+    """N-47 — scope_v2.0 은 추정치가 사라진 종목을 5거래일 남긴다. 비고 '유예 n일째'(n = 마지막
+    신선일부터 거래일) · '1M 유예 n일'(1M 흐름 날짜 중 그날 fi_universe 가 유예였던 날, 못 읽는
+    판은 건너뛴다), 비고 범례 · 1M 흐름 머리 메모 · Meta 유니버스 규칙 '추정치 유예 5거래일'."""
+    _res, _wb, scores, _root = grace_board
+    assert scores[GRACE]["rank"] is not None                        # scope_v2.0 은 남긴다
+    model = _history(grace_board, tmp_path, {
+        "2026-09-24": ("scope@1.0", SCOPE_FI_BID), "2026-09-25": ("scope@2.0", "x")})
+    res = build_daily("2026-09-28", "morning", model_root=model, fi_root=grace_board[3] / "fi",
+                      out_root=tmp_path / "out")
+    meta, ws, h, rows = _score_view(res.path)
+    # 09-24(같은 fi 판 — 유예) · 09-28 = 2일, 09-25 는 fi 판이 없어 건너뛴다
+    assert ws.cell(rows[GRACE], h["비고"]).value.startswith("유예 2일째 · 1M 유예 2일")
+    assert ws.cell(rows[GRACE], h["커버리지"]).value == "유예 D+2"
+    others = [ws.cell(r, h["비고"]).value for t, r in rows.items() if t != GRACE]
+    assert not any("유예" in str(n) for n in others)
+    legend = ws.cell(7, h["비고"]).comment.text
+    assert "■ 유예 n일째: 추정치가 사라진 지 n거래일(최대 5일 남김)" in legend
+    assert "■ 1M 유예 n일: 1M 흐름 기간 중 추정치 유예였던 날 수" in legend
+    memo = ws.cell(7, h["1M 흐름"]).comment.text.replace("\n", " ").replace("\xa0", " ")
+    assert "유예: 추정치가 사라진 종목도 5거래일 동안 유니버스에 남는다" in memo
+    assert "마지막 신선일 추정치로 매긴 값" in memo
+    assert "추정치 유예 5거래일" in str(meta["유니버스 규칙"])
+    assert ws.column_dimensions[ws.cell(7, h["비고"]).column_letter].width == 17   # 폭은 그대로
+
+
+def test_grace_remark_rules() -> None:
+    """유예 표지 규칙 — 유예 0 주 모델(Grace() 기본값)은 표지가 없고, 나이 0(휴장 수집)은
+    '유예 n일째'를 달지 않는다."""
+    from deliver.excel_daily import Grace, grace_notes
+    assert grace_notes(Grace(), "x", "grace", 3) == ()
+    assert grace_notes(Grace(5, {"x": 4}), "x", "grace", 3) == ("유예 3일째", "1M 유예 4일")
+    assert grace_notes(Grace(5, {}), "x", "grace", 0) == (None, None)    # 나이 0(휴장 수집)
+    assert grace_notes(Grace(5, {}), "x", "fresh", None) == (None, None)

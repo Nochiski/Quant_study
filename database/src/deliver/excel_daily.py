@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import duckdb
 from model.contracts import FactorInputs
 from model.engines._common import crosses_step
 from model.engines.v3_zscore import (
@@ -459,7 +460,54 @@ def bucket_missing_reason(view: DayView, t: str, b: str) -> str:
     return "원천없음"
 
 
-# ── 앞 주 모델 이력(N-47 · Q-E1) ───────────────────────────────────────────────
+# ── 추정치 유예 · 앞 주 모델 이력(N-47 · Q-E1) ───────────────────────────────────
+@dataclass(frozen=True)
+class Grace:
+    """주 모델 추정치 유예 표시(N-47) — spec 유예 거래일(0 이면 표시 없음)과 종목별 1M 흐름 날짜
+    중 유예였던 날 수."""
+
+    days: int = 0
+    month: Mapping[str, int] = field(default_factory=dict)
+
+
+def grace_of(view: DayView, fi_root: Path, trend: Trend) -> Grace:
+    """주 모델 유예가 있으면 1M 흐름 날짜(`trend.dates` — 1M 흐름과 같은 창)마다 그날 fi 판
+    fi_universe 에서 coverage_state 가 grace(나이 ≥ 1)인 종목을 센다. 그날 판을 못 읽으면(지운 fi
+    판 · 다른 루트의 T-50 아침 판 · 열이 없는 옛 판) 그날은 세지 않는다."""
+    days = 0 if view.spec is None else view.spec.universe.coverage_grace_days
+    if not days:
+        return Grace()
+    month: dict[str, int] = {}
+    for day in trend.dates:
+        r = trend.runs.get(day)
+        if r is None:
+            continue
+        try:
+            rows = read_fi(fi_root, "fi_universe", r.fi_build_id,
+                           columns=("ticker", "coverage_age_days"),
+                           where="coverage_state = 'grace'")
+        except (DeliverError, duckdb.Error) as e:
+            log.info("1M 유예 일수 — %s fi 판 %s 를 읽지 못해 그날은 세지 않는다: %s",
+                     day, r.fi_build_id, e)
+            continue
+        for x in rows:
+            age = x.get("coverage_age_days")
+            if isinstance(age, int) and age >= 1:
+                t = str(x["ticker"])
+                month[t] = month.get(t, 0) + 1
+    return Grace(days, month)
+
+
+def grace_notes(grace: Grace, t: str, state: object, age: object) -> tuple[str | None, ...]:
+    """Score 비고 유예 표지 — 지금 유예 중이면 '유예 n일째'(n = 마지막 신선일부터 거래일),
+    1M 흐름 날짜 중 유예였던 날이 있으면 '1M 유예 n일'."""
+    if not grace.days:
+        return ()
+    now = f"유예 {age}일째" if state == "grace" and isinstance(age, int) and age >= 1 else None
+    n = grace.month.get(t)
+    return now, (f"1M 유예 {n}일" if n else None)
+
+
 def older_mark(trend: Trend) -> tuple[str, str] | None:
     """(앞 주 모델 라벨, 마지막으로 앞 주 모델 순위를 쓴 날 MM-DD) — 1M 흐름 · 비교 데이터를 앞 주
     모델로 이은 날이 없으면 None."""
@@ -580,8 +628,10 @@ NOTE_LEGEND = (
 
 # ── 시트: Score ──────────────────────────────────────────────────────────────
 def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str, int | None],
-                 trend: Trend, cands: Candidates) -> tuple[Dictionary, Dictionary]:
-    """반환 = (열 사전, 사전 끝에 붙일 후보 · 변화 두 줄)."""
+                 trend: Trend, cands: Candidates,
+                 grace: Grace | None = None) -> tuple[Dictionary, Dictionary]:
+    """반환 = (열 사전, 사전 끝에 붙일 후보 · 변화 두 줄). `grace` = 추정치 유예 표시(N-47)."""
+    grace = grace or Grace()
     others = compared_specs(view)
     year = int(view.date[:4])
     k, top_n = cands.k, cands.top_n
@@ -660,15 +710,17 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         r = rank_of(row)
         pr = prev_rank.get(t)
         mm = fi.fy_month(t)
-        notes = (analyst_note(u.get("n_analysts")), None if mm == "12" else f"{int(mm)}월 결산",
+        state = row.get("coverage_state", u.get("coverage_state"))
+        notes = (analyst_note(u.get("n_analysts")),
+                 *grace_notes(grace, t, state, u.get("coverage_age_days")),
+                 None if mm == "12" else f"{int(mm)}월 결산",
                  QUALITY_VOL_ONLY_NOTE if quality_vol_only(view, t) else None,
                  NET_REVENUE_NOTE if revenue_basis_mixed(fi, t, year) else None)
         out: Row = {**id_values(view, t, fi), "rank": r, "composite": composite_of(row),
                     "prev_rank": pr, "d1m": trend.delta("1M", t, r),
                     "excl": exclude_label(row.get("exclude_reason")),
                     # v3·v2 점수 행엔 신선도 열이 없다 → 그 판 fi_universe 값(v4 는 같은 값을 행에 싣는다)
-                    "cov": coverage_label(row.get("coverage_state", u.get("coverage_state")),
-                                          u.get("coverage_age_days")),
+                    "cov": coverage_label(state, u.get("coverage_age_days")),
                     "note": " · ".join(n for n in notes if n) or None,
                     "cand": "후보" if t in cands.picked else None,
                     "chg": cands.change.get(t)}
@@ -739,11 +791,19 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         b = cell.border
         cell.border = Border(left=SIDE_HDR, right=b.right, top=b.top, bottom=b.bottom)
     # 머리 칸 메모 — 비고 표지 범례 · 후보 규칙 · 변화 뜻
-    legend = ["비고 표지 뜻", "", *(f"■ {a}: {b}" for a, b in NOTE_LEGEND), "",
+    legend_items = list(NOTE_LEGEND)
+    if grace.days:                      # 유예 표지는 유예가 있는 주 모델만(N-47)
+        legend_items[3:3] = [
+            ("유예 n일째", f"추정치가 사라진 지 n거래일(최대 {grace.days}일 남김)"),
+            ("1M 유예 n일", "1M 흐름 기간 중 추정치 유예였던 날 수")]
+    legend = ["비고 표지 뜻", "", *(f"■ {a}: {b}" for a, b in legend_items), "",
               "표지가 없으면 빈칸, 여러 개면 ' · ' 로 이어 붙임."]
     ws.cell(7, sh.cols["note"]).comment = note("\n".join(legend), "비고", wrap=False)
-    # 1M 흐름 머리 메모 — 앞 주 모델로 이은 날(있을 때만)
+    # 1M 흐름 머리 메모 — 유예 중 순위의 뜻 · 앞 주 모델로 이은 날(있을 때만)
     flow = []
+    if grace.days:
+        flow.append(f"유예: 추정치가 사라진 종목도 {grace.days}거래일 동안 유니버스에 남는다. 그동안 "
+                    "순위는 마지막 신선일 추정치로 매긴 값(비고 '유예 n일째' · '1M 유예 n일')")
     if (sw := switch_day(trend)) is not None and (mark := older_mark(trend)) is not None:
         flow.append(f"{sw} 이전은 {mark[0]} 순위(주 모델이 {model_label(view.spec_id)} 로 "
                     "바뀌기 전 — N-47)")
@@ -1343,7 +1403,7 @@ def universe_text(view: DayView) -> str:
     g = u.coverage_grace_days
     parts = ["추정치 보유" if u.require_estimates else "추정치 무관",
              "/".join(u.sec_types), "/".join(u.markets),
-             f"추정치 유예 {g} 거래일" if g else "추정치 유예 없음"]
+             f"추정치 유예 {g}거래일" if g else "추정치 유예 없음"]
     if u.min_analysts is not None:
         parts.append(f"추정기관수 ≥ {u.min_analysts}")
     if u.min_market_cap is not None:
@@ -1533,7 +1593,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     # 새 시트(ETF · Analyst · Events · Market · Flow · Short)
     wb = new_workbook()
     wb.remove(wb.worksheets[0])
-    score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands)
+    score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands,
+                                          grace_of(view, fi_root, trend))
     sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
     earnings_dict = sheet_earnings(wb, view, fi)
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)

@@ -1,7 +1,8 @@
 """Analyst 시트 — 증권사 목표가 · 투자의견 변화(DECISIONS §7 #11, 확정 샘플 30).
 
 원천: equity `opinion_broker_daily`(WISE 종목 화면 '제공처별 투자의견'을 매일 수집, 09-01~) ·
-`opinion_daily`(WISE 컨센서스) · `price_daily`(종가). 기준일 = 증권사 의견 최신 수집일.
+`opinion_daily`(WISE 컨센서스, src 'wise' — 09-01 까지는 v3 판과 겹친다) · `price_daily`(종가).
+기준일 = 증권사 의견 최신 수집일(토요일 수집이면 창은 그 앞 마지막 거래일에서 센다).
 같은 날 같은 증권사 보고서는 한 건(나중 수집이 이긴다). 일별 그래프는 기준일 전날까지 —
 WISE 가 그날 보고서를 다음 날 올려 기준일은 늘 비어 보인다.
 """
@@ -64,7 +65,7 @@ class Act:
     broker: str
     day: date                                   # 보고서 날짜
     tp: float | None                            # 목표가
-    ptp: float | None                           # 직전 목표가(없으면 신규)
+    ptp: float | None                           # 직전 목표가
     chg: float | None                           # 목표가 변화율(%)
     op: str | None                              # 투자의견 · 등급(sell · hold · buy)
     oc: str | None
@@ -73,11 +74,19 @@ class Act:
 
     @property
     def kind(self) -> str:
-        """신규(직전 목표가 없음) · 상향 · 하향 · 유지(목표가 그대로)."""
+        """목표가 변화 — 상향 · 하향 · 유지(직전 목표가 대비), 신규(직전 의견 · 목표가가 모두 없고
+        지금 목표가가 있다 = 새 커버), 비교 없음(직전 목표가가 없는 그 밖 보고서 — 직전 의견만 있는
+        등급 변경 등. 세지 않는다)."""
         if self.ptp is None:
-            return "신규"
+            new = not self.poc and not (self.pop or "").strip() and self.tp is not None
+            return "신규" if new else "비교 없음"
         c = self.chg or 0
         return "상향" if c > 0 else "하향" if c < 0 else "유지"
+
+    @property
+    def grade_change(self) -> bool:
+        """직전 등급이 있고 지금 등급과 다르다(의견 상향 · 하향)."""
+        return bool(self.poc and self.oc and self.poc != self.oc)
 
 
 @dataclass
@@ -133,12 +142,13 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
                                     _opt(opn), _opt(oc), _opt(pop), _opt(poc))
     od_ = src.equity("opinion_daily")
     # 컨센서스 · 종가는 그 원천의 최신 날짜(≤ 엑셀 D) — 의견 수집일과 따로 늦을 수 있다
-    got = con.execute(f"SELECT max(obs_date) FROM {od_} WHERE obs_date <= {lit(upto)}").fetchone()
+    got = con.execute(f"SELECT max(obs_date) FROM {od_} WHERE src = 'wise' "
+                      f"AND obs_date <= {lit(upto)}").fetchone()
     cons_day = day_of(got[0]) if got and got[0] else None
     cons: dict[str, Consensus] = {}
     if cons_day is not None:
         for t, tp, n in con.execute(f"SELECT ticker, target_price_krw, analyst_count FROM {od_} "
-                                    f"WHERE obs_date = {lit(cons_day)}").fetchall():
+                                    f"WHERE src = 'wise' AND obs_date = {lit(cons_day)}").fetchall():
             if t in uni:
                 cnt = num(n)
                 cons[text(t)] = Consensus(num(tp), None if cnt is None else int(cnt))
@@ -149,7 +159,7 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
 
 def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
           *, index: int | None = None) -> list[tuple[str, str, str]]:
-    cal, day = a.cal, a.cal.day
+    cal, day = a.cal, a.cal.anchor       # day = 의견 최신 수집일(거래일이 아닐 수 있다)
     win = cal.win
     cday = md(a.cons_day) if a.cons_day else md(day)
     pday = md(a.close_day)
@@ -161,8 +171,8 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
                     f"모델 유니버스 {len(uni)}종목",
               "A4": base_text(day, d), "F4": "출처: quant-ledger 원장 · 시험 양식",
               "A5": f"1W: 보고서 날짜 {span(win['1W'], day)} · 1M: {span(win['1M'], day)}",
-              "H5": f"상향 · 하향: 직전 목표가 대비, 신규: 직전 목표가 없음 · {md(day)} 보고서는 WISE 가 "
-                    "다음 날 올림"})
+              "H5": f"상향 · 하향: 직전 목표가 대비, 신규: 직전 의견 · 목표가 없음 · {md(day)} 보고서는 "
+                    "WISE 가 다음 날 올림"})
     put, header, close, cs = xs.put, xs.header, xs.close, xs.cs
 
     oa = [x for x in a.acts if x.code in uni]
@@ -210,7 +220,7 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
             s.nw += 1
         if k in ("상향", "하향") and x.chg is not None:
             s.chg.append(x.chg)
-        if k != "유지":
+        if k in ("상향", "하향", "신규"):
             s.who.append(f"{x.broker} " + ("신규" if k == "신규" else format(x.chg, "+.1f") + "%"))
 
     def upside(code: str) -> float | None:
@@ -273,6 +283,9 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
             ws.cell(head + 1 + j, G1 + 4).value = big
             ws.cell(head + 1 + j, G1 + 5).value = v
         end = head + len(vals)
+        if not vals:                    # 그릴 막대가 없으면 빈 범위로 가짜 막대가 서지 않게 그래프를 뺀다
+            xs.title(cell, f"{ttl}: 데이터 없음")
+            return end
         xs.title(cell, ttl)
         ch = BarChart()
         ch.type = "bar"
@@ -285,27 +298,33 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
         return end
     cs0 = a_end + 2
     t1, t2 = cs0, cs0 + 16
-    xs.title(f"A{t1}", "일별 목표가 상향 · 하향 건수: 최근 1M"
-                       f"({md(td[-1]) if td else md(day)}까지), 상향 파랑 · 하향 검정")
-    ch = LineChart()
-    ch.add_data(Reference(ws, min_col=G1 + 1, max_col=G1 + 2, min_row=HR, max_row=gend),
-                titles_from_data=True)
-    ch.set_categories(Reference(ws, min_col=G1, min_row=HR + 1, max_row=gend))
-    line_series(ch.series[0], CHART_BLUE)
-    line_series(ch.series[1], CHART_BLACK)
-    date_frame(ch, "#,##0", "mm/dd", "days", 7, "days")
-    if ch.legend is not None:
-        ch.legend.position = "t"
-        ch.legend.txPr = chart_text()
-    ws.add_chart(ch, f"A{t1 + 1}")
-    xs.title(f"H{t1}", "목표가 상향 비율(%): 최근 5거래일 이동, 상향 ÷ (상향 + 하향)")
-    ch = LineChart()
-    ch.add_data(Reference(ws, min_col=G1 + 3, min_row=HR, max_row=gend), titles_from_data=True)
-    ch.set_categories(Reference(ws, min_col=G1, min_row=HR + 1, max_row=gend))
-    ch.legend = None
-    line_series(ch.series[0], CHART_BLUE)
-    date_frame(ch, "0", "mm/dd", "days", 7, "days")
-    ws.add_chart(ch, f"H{t1 + 1}")
+    ttl1 = (f"일별 목표가 상향 · 하향 건수: 최근 1M({md(td[-1]) if td else md(day)}까지), "
+            "상향 파랑 · 하향 검정")
+    ttl2 = "목표가 상향 비율(%): 최근 5거래일 이동, 상향 ÷ (상향 + 하향)"
+    if not td:                          # 1M 안 거래일이 없으면 빈 범위 그래프를 만들지 않는다
+        xs.title(f"A{t1}", f"{ttl1}: 데이터 없음")
+        xs.title(f"H{t1}", f"{ttl2}: 데이터 없음")
+    else:
+        xs.title(f"A{t1}", ttl1)
+        ch = LineChart()
+        ch.add_data(Reference(ws, min_col=G1 + 1, max_col=G1 + 2, min_row=HR, max_row=gend),
+                    titles_from_data=True)
+        ch.set_categories(Reference(ws, min_col=G1, min_row=HR + 1, max_row=gend))
+        line_series(ch.series[0], CHART_BLUE)
+        line_series(ch.series[1], CHART_BLACK)
+        date_frame(ch, "#,##0", "mm/dd", "days", 7, "days")
+        if ch.legend is not None:
+            ch.legend.position = "t"
+            ch.legend.txPr = chart_text()
+        ws.add_chart(ch, f"A{t1 + 1}")
+        xs.title(f"H{t1}", ttl2)
+        ch = LineChart()
+        ch.add_data(Reference(ws, min_col=G1 + 3, min_row=HR, max_row=gend), titles_from_data=True)
+        ch.set_categories(Reference(ws, min_col=G1, min_row=HR + 1, max_row=gend))
+        ch.legend = None
+        line_series(ch.series[0], CHART_BLUE)
+        date_frame(ch, "0", "mm/dd", "days", 7, "days")
+        ws.add_chart(ch, f"H{t1 + 1}")
     # 대분류 막대 2개: 1M 상향 비율 · 여력 중앙값(각자 정렬해 따로 적는다)
     e1 = bar_chart(gend + 3, 1, "1M 상향 비율", f"A{t2}", "대분류별 1M 목표가 상향 비율(%)",
                    f"A{t2 + 1}")
@@ -342,13 +361,14 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
                 ("I", "목표가(원)")],
            ["코드", "이름", "대분류", "종합\n순위", "날짜", "증권사", "이전", "현재", "이전", "현재", "변화\n(%)",
             "구분"])
-    chg = ([x for x in oa if x.poc and x.oc and x.poc != x.oc]
-           + [x for x in oa if x.kind == "신규" and in_1w(x)])
-    chg = (sorted([x for x in chg if x.kind != "신규"], key=lambda x: x.day, reverse=True)
-           + sorted([x for x in chg if x.kind == "신규"], key=lambda x: x.day, reverse=True))
+    # 등급 변경(1M, 직전 등급이 있고 다르다)을 먼저 가르고, 신규 커버(1W)는 직전 의견 · 목표가가 모두
+    # 없는 보고서만 — 둘은 겹치지 않아 한 보고서는 한 번만 나온다
+    grade = sorted([x for x in oa if x.grade_change], key=lambda x: x.day, reverse=True)
+    news = sorted([x for x in oa if x.kind == "신규" and in_1w(x)], key=lambda x: x.day,
+                  reverse=True)
     r = t0 + 2
-    for x in chg:
-        kd = ("신규 커버" if x.kind == "신규" else
+    for x in [*grade, *news]:
+        kd = ("신규 커버" if not x.grade_change else
               ("의견 상향" if ORD.get(str(x.oc), 1) > ORD.get(str(x.poc), 1) else "의견 하향"))
         u = uni[x.code]
         xs.stock(r, x.code, u.name, u.big, u.rank, [
@@ -360,11 +380,11 @@ def write(wb: Workbook, a: AnalystData, uni: Universe, refs: XRefs, d: date,
     close(ch_end, 12)
     ws[f"L{t0 + 1}"].comment = x_note(
         "구분: 의견 상향 · 하향은 1M 안 투자의견 등급(매도 < 중립 < 매수)이 바뀐 보고서, 신규 커버는 "
-        "1W 안 직전 목표가가 없는 보고서")
+        "1W 안 직전 의견 · 목표가가 모두 없는 보고서")
     xs.page(f"A1:L{ch_end}")
     return [("Analyst", "대분류별 요약 · 상향 / 하향 / 신규",
              "WISE 증권사별 투자의견(종목 화면 '제공처별 투자의견')을 매일 받아 보고서 날짜 기준으로 셈. "
-             "상향 · 하향 = 직전 목표가 대비, 신규 = 직전 목표가 없음, 같은 날 같은 증권사는 1건"),
+             "상향 · 하향 = 직전 목표가 대비, 신규 = 직전 의견 · 목표가 없음, 같은 날 같은 증권사는 1건"),
             ("Analyst", "컨센서스 목표가 · 여력 · 증권사(3개월)",
              f"{cday} WISE 컨센서스(최근 3개월 의견) 목표가 · 그 목표가 ÷ {pday} 종가 − 1 · 의견 낸 "
              "증권사 수"),

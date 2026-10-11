@@ -105,7 +105,17 @@ def _day(res: wj.Result, d: str) -> wj.Day:
     return next(x for x in res.days if x.key == d)
 
 
-# ── 3일 창 ──────────────────────────────────────────────────────────────────
+# ── 판정 창 ──────────────────────────────────────────────────────────────────
+def test_기본_판정은_하루_통과면_통과_rc0(tmp_path: Path) -> None:
+    """N-46(10-11) — 시험 운영 판정은 1거래일. 첫날 통과면 rc 0, 그 뒤 날은 관측(실패하면 다시 센다)."""
+    assert wj.REQUIRED_DAYS == 1
+    home = _home(tmp_path)
+    _good(home, "20261014")
+    res = _judge(home, "20261014", "20261014")
+    assert res.streak == ["20261014"]
+    assert (res.verdict, res.rc) == ("pass", 0)
+
+
 def test_3거래일_연속_통과면_창_통과_rc0(tmp_path: Path) -> None:
     home = _home(tmp_path)
     _good(home, "20261012", "20261013", "20261014")
@@ -115,7 +125,8 @@ def test_3거래일_연속_통과면_창_통과_rc0(tmp_path: Path) -> None:
     assert (res.verdict, res.rc) == ("pass", 0)
 
 
-def test_중간_실패면_다음_거래일부터_다시_센다(tmp_path: Path) -> None:
+def test_중간_실패면_다음_거래일부터_다시_센다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wj, "REQUIRED_DAYS", 3)   # 연속 세기 로직은 창 길이 3 으로 본다(기본값은 1 — N-46)
     home = _home(tmp_path)
     _good(home, "20261012", "20261014", "20261015")
     _chain(home, "20261013", {"postclose_fi": "failed", "postclose_model": None,
@@ -254,7 +265,8 @@ def test_대조_미설명이면_실패하고_사유를_그대로_싣는다(tmp_p
     assert any("rc 1" in r and "미설명 3건" in r for r in d.fails)
 
 
-def test_대조_rc2_면_실패로_세고_사유를_그대로_싣는다(tmp_path: Path) -> None:
+def test_대조_rc2_면_실패로_세고_사유를_그대로_싣는다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wj, "REQUIRED_DAYS", 3)   # 연속 세기 로직은 창 길이 3 으로 본다(기본값은 1 — N-46)
     home = _home(tmp_path)
     _good(home, "20261012")
     _chain(home, "20261013")
@@ -269,7 +281,8 @@ def test_대조_rc2_면_실패로_세고_사유를_그대로_싣는다(tmp_path:
     assert res.rc == 1                    # 대조 rc 2 는 창 실패(재시작)이지 판정 도구의 입력 오류가 아니다
 
 
-def test_대조_결과가_아직_없으면_미판정이고_연속은_거기서_멈춘다(tmp_path: Path) -> None:
+def test_대조_결과가_아직_없으면_미판정이고_연속은_거기서_멈춘다(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wj, "REQUIRED_DAYS", 3)   # 연속 세기 로직은 창 길이 3 으로 본다(기본값은 1 — N-46)
     home = _home(tmp_path)
     _good(home, "20261012", "20261013")
     _chain(home, "20261014")              # 체인은 끝났고 대조는 다음 날 아침
@@ -823,7 +836,8 @@ def test_notify_log_첫_줄이_범위_시작_뒤면_판정_불가(tmp_path: Path
     assert _judge(home, "20261012", "20261014").rc == 0
 
 
-def test_대조_런을_재실행해_회복해도_실패(tmp_path: Path) -> None:
+def test_대조_런을_재실행해_회복해도_실패(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wj, "REQUIRED_DAYS", 3)   # 연속 세기 로직은 창 길이 3 으로 본다(기본값은 1 — N-46)
     """M-4 — 그날 대조 런에 ok 가 아닌 런이 하나라도 있으면 실패(재실행 회복 불인정)."""
     home = _home(tmp_path)
     _good(home, "20261012", "20261013", "20261014")

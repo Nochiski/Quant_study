@@ -1,4 +1,4 @@
-"""연속 창 판정 집계 — 그림자·실운영 3거래일 창과 되돌리기 5거래일 창(컷오버 트랙 X-2).
+"""연속 창 판정 집계 — 시험 운영 판정 창(REQUIRED_DAYS 거래일)과 되돌리기 5거래일 창(컷오버 트랙 X-2).
 
 정본 `docs/plans/2026-10-10-cutover-track.md` §3 X-2 · §4(N-42 Q1) · T-39 · 로드맵 `2026-10-05-roadmap.md` §8 공통 3.
 새 기준을 만들지 않는다 — 아래 규칙은 정본 문구를 옮긴 것이다. 모호하면 통과가 아닌 쪽(P1)이다.
@@ -33,8 +33,9 @@
 주말 기록이 금요일에 들어간다. 판정 범위 바로 앞의 건너뛴 날(직전 거래일이 범위 밖) 기록은 버리지 않고
 '판정 밖 기록'으로 보인다.
 
-3일 창: --start 부터 거래일 순서로 센다. 실패 1건이면 그 다음 거래일부터 다시 센다(공통 3). 마지막 실패 뒤 연속
-통과가 3거래일 이상이면 통과. 미판정·판정 불가인 날에서 연속은 멈춘다 — 그날을 건너 이어 세지 않는다.
+판정 창: --start 부터 거래일 순서로 센다. 실패 1건이면 그 다음 거래일부터 다시 센다(공통 3). 마지막 실패 뒤
+연속 통과가 REQUIRED_DAYS(1 — 10-11 N-46, 3 에서 줄임) 거래일 이상이면 통과. 미판정·판정 불가인 날에서
+연속은 멈춘다 — 그날을 건너 이어 세지 않는다.
 되돌리기 창: --cutover 부터 5거래일(세션 예외일도 거래일로 센다 — v3 가 최근 5행을 다시 받는 단위가 거래일이다).
 경과 = 기준일(--as-of)이 다섯째 날 뒤. 그 사이 날마다 같은 하루 판정과 실패 목록을 낸다.
 
@@ -70,7 +71,7 @@ from daily.runlog import POSTCLOSE_COMPARE, POSTCLOSE_STEPS, Run
 
 TOOL = "daily.window_judge"
 SCHEMA = 1                      # window.json 모양 판본 — 읽는 쪽(세션 시작 보고·아티팩트)이 본다. 키를 바꾸면 올린다
-REQUIRED_DAYS = 3               # 정본 §4 '실운영 3거래일'
+REQUIRED_DAYS = 1               # 시험 운영 판정 1거래일(10-11 N-46 — 3 에서 줄임, 뒤 날은 관측·사람 판단)
 ROLLBACK_DAYS = 5               # 정본 §4 '되돌리기 창 5거래일'
 # 장 마감 체인 단계 런 로그 source, 체인 순서 — ① 수집기(`daily.postclose.SOURCE`) → ②~⑥ PR-8
 # `scripts/postclose_chain.sh close` 가 남기는 단계(이름의 정본은 `daily.runlog.POSTCLOSE_STEPS`)
@@ -408,7 +409,7 @@ class _Cal:
         return f"세션 예외({reason})" if reason else None
 
     def counted(self, d: dt.date) -> bool:
-        """3일 창에 넣는 날 = 거래일이고 세션 예외일이 아님."""
+        """판정 창에 넣는 날 = 거래일이고 세션 예외일이 아님."""
         return self.trading(d) and _key(d) not in self.sessions
 
     def next_counted(self, d: dt.date) -> dt.date:
@@ -770,7 +771,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog=TOOL, description="연속 창 판정 집계(컷오버 X-2)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     j = sub.add_parser("judge", help="창 판정 — 요약 출력 + data/cutover/window.json")
-    j.add_argument("--start", required=True, help="3일 창 시작일 YYYYMMDD(그림자 첫날 · 컷오버일)")
+    j.add_argument("--start", required=True, help="판정 창 시작일 YYYYMMDD(시험 운영 첫날 · 컷오버일)")
     j.add_argument("--cutover", default=None, help="되돌리기 창 시작 = 컷오버일 YYYYMMDD")
     j.add_argument("--as-of", default=None, help="기준일 YYYYMMDD(기본 오늘 KST)")
     j.add_argument("--dry-run", action="store_true", help="window.json 을 쓰지 않는다(요약만)")

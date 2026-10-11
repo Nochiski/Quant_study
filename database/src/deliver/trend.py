@@ -14,6 +14,10 @@
             10-07 까지는 백분위 100·(N−순위)/(N−1)였다 — 유니버스가 커지는 날 순위가 밀려도 백분위가
             올라 '선은 오르는데 빨강'이 생겼다(E-06, N-25 Q8 '원순위 선').
   판 파일이 지워졌거나(keep) 그 판에 주 모델이 없으면 그날은 흐름에서 빠진다.
+  T-50(PR-6b) 장 마감 판(evening)의 1M 비교 판이 evening 이력에 없거나 주 모델 순위를
+            못 읽으면, 대체 루트(연구 루트 data/model)가 주어졌을 때만 그 루트 아침
+            확정판(morning)의 같은 규칙 비교 판을 쓴다. 흐름 첫 점도 그 판이라 위 '처음 → 끝 = Δ'
+            가 그대로다. evening 이력이 D−1개월까지 닿으면 저절로 evening 판만 쓴다.
 """
 from __future__ import annotations
 
@@ -34,6 +38,7 @@ from .view import rank_of, ticker_of
 SHEET = "순위 흐름"          # 그래프 원자료(숨김 시트). 행 번호를 점수 시트와 맞춘다
 WINDOWS = ("1M",)             # 엑셀에 싣는 창(1W 는 10-06 사용자 결정으로 뺐다)
 LINE_UP, LINE_DOWN, LINE_FLAT = "1E8C45", "D0312D", "8C8C8C"   # 상승 초록 · 하락 빨강 · 같음 회색
+FALLBACK_NOTE = "(아침 확정판 — 장 마감 판 이력 없음, T-50)"   # 메타 '1M 비교 판' 값 뒤에 붙인다
 
 
 def month_back(d: date) -> date:
@@ -56,6 +61,7 @@ class Trend:
     line: Mapping[str, tuple[int | None, ...]]    # 종목 → dates 순 −순위(위 = 상승)
     base: Mapping[str, str | None]                # '1W'·'1M' → 비교 판 날짜(없으면 None)
     base_rank: Mapping[str, Mapping[str, int | None]]   # '1W'·'1M' → 비교 판 순위
+    fallback: frozenset[str] = frozenset()        # 비교 판을 대체 루트 아침판에서 쓴 창(T-50)
 
     def delta(self, which: str, ticker: str, rank_now: int | None) -> int | None:
         then = self.base_rank[which].get(ticker)
@@ -78,7 +84,8 @@ def _ranks(model_root: Path, run: ModelRun, spec_id: str) -> dict[str, int | Non
         return None
 
 
-def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str) -> Trend:
+def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
+               fallback_root: Path | None = None) -> Trend:
     d = date.fromisoformat(run.date)
     bases = {w: _on_or_before(model_root, window_start(d, w), basis) for w in WINDOWS}
     b1m = bases["1M"]
@@ -88,19 +95,28 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str) -> Tre
         got = _ranks(model_root, r, spec_id)
         if got is not None:
             by_date[r.date] = got
-    dates = tuple(sorted(by_date))
     base: dict[str, str | None] = {}
     base_rank: dict[str, Mapping[str, int | None]] = {}
     for w, b in bases.items():
         got = None if b is None else by_date.get(b.date) or _ranks(model_root, b, spec_id)
         base[w] = None if got is None or b is None else b.date
         base_rank[w] = got or {}
+    fallback: frozenset[str] = frozenset()
+    if basis == "evening" and fallback_root is not None and base["1M"] is None:
+        # T-50 — 대체 루트 아침 확정판의 같은 규칙 판(D−1개월 이하 마지막 성공 판). 그 날짜는
+        # evening 흐름 판들(D−1개월 다음 날부터)보다 앞이라 흐름 첫 점이 된다
+        fb = _on_or_before(fallback_root, month_back(d), "morning")
+        got = None if fb is None else _ranks(fallback_root, fb, spec_id)
+        if fb is not None and got is not None:
+            by_date[fb.date] = got
+            base["1M"], base_rank["1M"], fallback = fb.date, got, frozenset({"1M"})
+    dates = tuple(sorted(by_date))
     line: dict[str, list[int | None]] = {}
     for i, day in enumerate(dates):
         for t, rk in by_date[day].items():
             row = line.setdefault(t, [None] * len(dates))
             row[i] = None if rk is None else -rk
-    return Trend(dates, {t: tuple(v) for t, v in line.items()}, base, base_rank)
+    return Trend(dates, {t: tuple(v) for t, v in line.items()}, base, base_rank, fallback)
 
 
 def line_color(delta: int | None) -> str:
@@ -149,5 +165,5 @@ def spark_groups(tickers: Sequence[str], trend: Trend, d: date,
     return out
 
 
-__all__ = ["SHEET", "Trend", "line_color", "load_trend", "month_back", "spark_groups",
-           "window_start", "write_sheet"]
+__all__ = ["FALLBACK_NOTE", "SHEET", "Trend", "line_color", "load_trend", "month_back",
+           "spark_groups", "window_start", "write_sheet"]

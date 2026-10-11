@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import statistics
 import zipfile
 from collections.abc import Callable
@@ -1533,6 +1534,131 @@ def test_postclose_run_in_model_db_leaves_operating_roots_alone(
     assert meta["전일 비교 판"] == "없음"
     assert meta["순위 흐름 판"] == "2026-09-28 ~ 2026-09-28 · 1개"
     assert json.loads((mdb / "model" / "latest_evening.json").read_text())["basis"] == "evening"
+
+
+# ── T-50(PR-6b) — 장 마감 판 1M 비교 판이 evening 이력에 없으면 아침 확정판으로 ─────────────
+T50_NOTE = "(아침 확정판 — 장 마감 판 이력 없음, T-50)"
+
+
+def _evening_copy(src: Path, dst: Path, day: str) -> None:
+    """합성 아침판(world) 하루를 다른 루트에 장 마감 판(basis evening)으로 옮겨 쓴다
+    — 점수·지표 파일은 그대로."""
+    meta = json.loads((src / "_runs" / f"{day.replace('-', '')}_morning.json").read_text(
+        encoding="utf-8"))
+    for sid in meta["specs"]:
+        part = Path(sid) / f"v={meta['build_id']}"
+        shutil.copytree(src / part, dst / part)
+    (dst / "_runs").mkdir(parents=True, exist_ok=True)
+    (dst / "_runs" / f"{day.replace('-', '')}_evening.json").write_text(
+        json.dumps({**meta, "basis": "evening"}, ensure_ascii=False), encoding="utf-8")
+
+
+def _t50_roots(world: dict[str, Path], tmp_path: Path) -> tuple[Path, Path]:
+    """장 마감 루트(09-24·09-25 evening 판뿐 — 1M 비교 판 없음)와 대체 루트(아침 확정판
+    08-24·08-26). D = 09-25 의 D−1개월 = 08-25 라 같은 규칙 비교 판은 08-24 다(08-26 은 그 뒤라
+    음성 대조)."""
+    ev, fb = tmp_path / "model_db" / "model", tmp_path / "model"
+    for day in (THU, FRI):
+        _evening_copy(world["model"], ev, day)
+    _write_rank_run(fb, "2026-08-24", PRIMARY, {tick(0): 30, tick(1): 1})
+    _write_rank_run(fb, "2026-08-26", PRIMARY, {tick(0): 40, tick(1): 40})
+    return ev, fb
+
+
+def _d1m(wb, tickers: tuple[str, ...]) -> dict[str, object]:
+    sc = wb["점수"]
+    h, rows = header(sc), rows_by_code(sc)
+    return {t: sc.cell(rows[t], h["Δ순위 1M"]).value for t in tickers}
+
+
+def test_t50_evening_1m_base_falls_back_to_the_morning_board(
+        world: dict[str, Path], tmp_path: Path) -> None:
+    """T-50 — 장 마감 판(evening)의 1M 비교 판(D−1개월 이하 마지막 evening 판)이 evening
+    이력에 없으면 `--trend-fallback-root`(연구 루트) 아침 확정판의 같은 규칙 판(08-24) 순위로
+    Δ순위 1M 을 채운다. 흐름 선 첫 점도 그 판이라 선 처음 → 끝 = Δ(선 색 = Δ 부호)가 그대로다.
+    메타 '1M 비교 판'에 표시. 전일 순위는 evening 판(09-24) 그대로. 옛 동작(PR-6)은 컷오버 뒤
+    약 4주 Δ순위 1M 이 전부 빈칸이었다."""
+    ev, fb = _t50_roots(world, tmp_path)
+    out = tmp_path / "deliver"
+    assert cli.main(["model-daily", "--date", "20260925", "--basis", "evening",
+                     "--model-root", str(ev), "--fi-root", str(world["fi"]),
+                     "--out-root", str(out), "--trend-fallback-root", str(fb)]) == 0
+    path = out / "daily" / "model_scores_20260925_evening.xlsx"
+    wb = load_workbook(path)
+    meta = dict(_meta_pairs(wb))
+    assert meta["1M 비교 판"] == f"2026-08-24 {T50_NOTE}"
+    assert meta["순위 흐름 판"] == "2026-08-24 ~ 2026-09-25 · 3개"
+    assert str(meta["전일 비교 판"]).startswith(THU)
+    d1m = _d1m(wb, (tick(0), tick(1), tick(2)))
+    assert d1m == {tick(0): 29, tick(1): -1, tick(2): None}     # 30 → 1 · 1 → 2 · 아침 판에 없음
+    sc, tr = wb["점수"], wb["순위 흐름"]
+    assert sc.cell(rows_by_code(sc)[tick(0)], header(sc)["전일 순위"]).value == 2   # 09-24 evening
+    assert [tr.cell(7, c).value for c in range(1, tr.max_column + 1)] == [
+        "코드", "08-24", "09-24", "09-25"]
+    r0, r1 = rows_by_code(tr)[tick(0)], rows_by_code(tr)[tick(1)]
+    line0 = [tr.cell(r0, c).value for c in (2, 3, 4)]
+    assert line0 == [-30, -2, -1] and line0[-1] - line0[0] == d1m[tick(0)]
+    with zipfile.ZipFile(path) as z:
+        xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    c1m = sc.cell(7, header(sc)["1M 흐름"]).column_letter
+    # 스파크라인은 첫 점(아침 판 열 B)부터 D 까지 — 선 색 = Δ 부호
+    assert f"<xm:f>'순위 흐름'!B{r0}:D{r0}</xm:f><xm:sqref>{c1m}{r0}</xm:sqref>" in xml
+    groups = xml.split("<x14:sparklineGroup ")[1:]
+
+    def color_of(cell: str) -> str:
+        g = next(g for g in groups if f"<xm:sqref>{cell}</xm:sqref>" in g)
+        return g.split('colorSeries rgb="FF')[1][:6]
+    assert color_of(f"{c1m}{r0}") == "1E8C45" and color_of(f"{c1m}{r1}") == "D0312D"
+
+
+@pytest.mark.parametrize(("spec", "base", "d0"), [
+    (PRIMARY, "2026-08-21", 9),
+    ("v3_zscore@1.0", f"2026-08-24 {T50_NOTE}", 29),
+], ids=["evening_board_readable", "evening_board_without_primary"])
+def test_t50_evening_history_wins_and_unreadable_board_falls_back(
+        world: dict[str, Path], tmp_path: Path, spec: str, base: str, d0: int) -> None:
+    """T-50 — evening 이력이 D−1개월까지 닿으면(08-21 evening 판) 대체 루트를 줘도 그 evening
+    판을 쓴다(아침 08-24 가 더 가까워도 — 표시 없음). 그 판에 주 모델 순위가 없으면(다른 spec
+    만) 못 읽은 것이라 아침 판으로 메운다."""
+    ev, fb = _t50_roots(world, tmp_path)
+    _write_rank_run(ev, "2026-08-21", spec, {tick(0): 10, tick(1): 1}, basis="evening")
+    res = build_daily(FRI, "evening", model_root=ev, fi_root=world["fi"], out_root=tmp_path / "o",
+                      trend_fallback_root=fb)
+    wb = load_workbook(res.path)
+    meta = dict(_meta_pairs(wb))
+    assert meta["1M 비교 판"] == base
+    assert meta["순위 흐름 판"] == f"{base[:10]} ~ 2026-09-25 · 3개"
+    assert _d1m(wb, (tick(0),)) == {tick(0): d0}
+
+
+def test_t50_evening_without_fallback_root_keeps_the_blank(
+        world: dict[str, Path], tmp_path: Path) -> None:
+    """회귀 — 대체 인자가 없으면 PR-6 그대로: evening 1M 비교 판이 없어 Δ순위 1M 은 빈칸,
+    흐름은 evening 판뿐."""
+    ev, _ = _t50_roots(world, tmp_path)
+    res = build_daily(FRI, "evening", model_root=ev, fi_root=world["fi"], out_root=tmp_path / "o")
+    wb = load_workbook(res.path)
+    meta = dict(_meta_pairs(wb))
+    assert meta["1M 비교 판"] == "없음(그 전 판이 없다)"
+    assert meta["순위 흐름 판"] == "2026-09-24 ~ 2026-09-25 · 2개"
+    assert set(_d1m(wb, tuple(tick(i) for i in range(N))).values()) == {None}
+
+
+def test_t50_morning_excel_ignores_the_fallback_root(world: dict[str, Path], daily,
+                                                     tmp_path: Path) -> None:
+    """회귀 — 아침 판(morning) 엑셀은 대체 루트를 줘도 그대로다. world 아침 루트에도 1M 비교
+    판이 없어 basis 가드가 없으면 08-24 로 메워지는 조건이다. 모든 시트 값이 대체 인자 없는
+    판(daily)과 같다(메타 '엑셀 생성 시각' 만 다르다)."""
+    _, fb = _t50_roots(world, tmp_path)
+    res = build_daily(FRI, "morning", model_root=world["model"], fi_root=world["fi"],
+                      out_root=tmp_path / "o", trend_fallback_root=fb)
+    got, (_, want) = load_workbook(res.path), daily
+
+    def values(wb) -> dict[str, list[list[object]]]:
+        return {ws.title: [[c.value for c in row] for row in ws.iter_rows()
+                           if row[0].value != "엑셀 생성 시각"] for ws in wb.worksheets}
+    assert values(got) == values(want)
+    assert dict(_meta_pairs(got))["1M 비교 판"] == "없음(그 전 판이 없다)"
 
 
 def test_rank_delta_cell_color_is_centered_on_zero(daily) -> None:

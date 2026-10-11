@@ -12,26 +12,31 @@ import json
 import logging
 import re
 import zipfile
+from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from deliver import (
     etf_data,
+    excel_daily,
+    qpack,
     sheet_analyst,
     sheet_etf,
     sheet_events,
     sheet_flow,
     sheet_market,
     sheet_short,
+    sheets_extra,
 )
 from deliver.excel_daily import build_daily
-from deliver.extra_common import Stock, base_text, span
+from deliver.extra_common import Stock, base_text, krx_calendar, latest_complete, span
 from deliver.qpack import XRefs, new_workbook
 from deliver.sources import Sources, connect
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from stage import manifest
 from test_deliver_excel import FRI, HOLIDAY, W38, W39, tick, write_fi_day, write_model_day
 
@@ -43,6 +48,8 @@ OTHER = "900001"
 MARKET = {tick(0): "KOSPI", tick(1): "KOSPI", tick(2): "KOSDAQ", tick(15): "KOSDAQ",
           tick(25): "KOSPI", OTHER: "KOSDAQ"}
 PRE_SPLIT = 1000.0
+SATURDAY = date(2026, 9, 26)
+MONDAY = date(2026, 9, 28)
 
 
 def close_of(t: str, i: int) -> float:
@@ -74,10 +81,14 @@ def cols_of(rows: list[dict[str, object]], types: dict[str, pa.DataType]
     return {k: (t, [r.get(k) for r in rows]) for k, t in types.items()}
 
 
-S, F, I64, DT, B = pa.string(), pa.float64(), pa.int64(), pa.date32(), pa.bool_()
+S, F, DT, B = pa.string(), pa.float64(), pa.date32(), pa.bool_()
 
 
-def build_equity(root: Path, last: date = D) -> None:
+def build_equity(root: Path, last: date = D, *, flow_last: date | None = None,
+                 flow_partial: bool = False, holder_last: date | None = None,
+                 saturday_fetch: bool = False) -> None:
+    """합성 equity. flow_last = 키움 수급 마지막 날(지수보다 늦게 끝나게), flow_partial = 마지막 날
+    수급이 한 종목뿐(일부 수집), holder_last = 지분 보고 마지막 날, saturday_fetch = 토요일 의견 수집."""
     days = [x for x in DAYS if x <= last]
     idx_rows, price, uni, flow, short, credit = [], [], [], [], [], []
     for i, dd in enumerate(days):
@@ -92,12 +103,15 @@ def build_equity(root: Path, last: date = D) -> None:
                           "volume_shr": 1000.0, "price_kind": "krx", "basis": "krx",
                           "corp_action_pending": False, "value_krw": 1e9, "mktcap_krw": 1e12})
             uni.append({"date": dd, "ticker": t, "sec_type": "common", "market": mkt})
-            flow.append({"date": dd, "ticker": t, "src": "kiwoom", "frgnr_invsr_krw": 1e9,
-                         "natfor_krw": 1e8, "orgn_krw": -5e8, "fnnc_invt_krw": -3e8,
-                         "penfnd_etc_krw": -2e8, "ind_invsr_krw": -6e8, "etc_corp_krw": 0.0,
-                         "insrnc_krw": 0.0, "invtrt_krw": 0.0, "etc_fnnc_krw": 0.0,
-                         "bank_krw": 0.0, "samo_fund_krw": 0.0, "natn_krw": 0.0,
-                         "foreign_wght_pct": 10.0 + i / 100})
+            keep = ((flow_last is None or dd <= flow_last)
+                    and not (flow_partial and dd == days[-1] and t != tick(0)))
+            if keep:
+                flow.append({"date": dd, "ticker": t, "src": "kiwoom", "frgnr_invsr_krw": 1e9,
+                             "natfor_krw": 1e8, "orgn_krw": -5e8, "fnnc_invt_krw": -3e8,
+                             "penfnd_etc_krw": -2e8, "ind_invsr_krw": -6e8, "etc_corp_krw": 0.0,
+                             "insrnc_krw": 0.0, "invtrt_krw": 0.0, "etc_fnnc_krw": 0.0,
+                             "bank_krw": 0.0, "samo_fund_krw": 0.0, "natn_krw": 0.0,
+                             "foreign_wght_pct": 10.0 + i / 100})
             short.append({"date": dd, "ticker": t, "short_value_kiwoom_krw": 1e8,
                           "lending_balance_kiwoom_krw": 1e10 + i * 1e6})
             if i < len(days) - 2:            # 신용은 원천이 2거래일 늦다
@@ -136,33 +150,43 @@ def build_equity(root: Path, last: date = D) -> None:
         (tick(0), d2, "A증권", d2, 1100.0, 1000.0, 10.0, "BUY", "buy", "buy"),
         (tick(0), d1, "A증권", d2, 1200.0, 1000.0, 20.0, "BUY", "buy", "buy"),   # 나중 수집이 이긴다
         (tick(1), d1, "B증권", d3, 900.0, 1000.0, -10.0, "HOLD", "hold", "buy"),
-        (tick(2), d1, "C증권", d1, 500.0, None, None, "BUY", "buy", None),
-        (tick(15), last, "D증권", d2, 1000.0, 1000.0, 0.0, "BUY", "buy", "buy")]  # 유지(세지 않음)
+        (tick(2), d1, "C증권", d1, 500.0, None, None, "BUY", "buy", None),       # 새 커버
+        (tick(15), last, "D증권", d2, 1000.0, 1000.0, 0.0, "BUY", "buy", "buy"),  # 유지(세지 않음)
+        # 직전 목표가 없이 등급만 오름 — 신규 커버가 아니라 의견 상향(10-08 006800 한국투자 같은 경우)
+        (tick(25), d1, "E증권", d1, 800.0, None, None, "BUY", "buy", "hold")]
+    if saturday_fetch:
+        ops.append((tick(0), SATURDAY, "F증권", last, 1300.0, 1200.0, 8.33, "BUY", "buy", "buy"))
     write_table(root, "opinion_broker_daily", {
         "ticker": (S, [o[0] for o in ops]), "fetched_date": (DT, [o[1] for o in ops]),
         "broker": (S, [o[2] for o in ops]), "opinion_date": (DT, [o[3] for o in ops]),
         "target_price_krw": (F, [o[4] for o in ops]),
         "prev_target_price_krw": (F, [o[5] for o in ops]), "change_pct": (F, [o[6] for o in ops]),
         "opinion": (S, [o[7] for o in ops]), "opinion_class": (S, [o[8] for o in ops]),
-        "prev_opinion": (S, [o[7] if o[9] == o[8] else "BUY" for o in ops]),
+        "prev_opinion": (S, [None if o[9] is None else ("BUY" if o[9] == "buy" else "HOLD")
+                             for o in ops]),
         "prev_opinion_class": (S, [o[9] for o in ops]),
         "prev_opinion_date": (DT, [None for _ in ops])})
-    cons = [(tick(0), 2 * close_of(tick(0), len(days) - 1), 5), (tick(1), 800.0, 2),
-            (tick(2), 600.0, 3)]
+    cons = [(tick(0), 2 * close_of(tick(0), len(days) - 1), 5, "wise"), (tick(1), 800.0, 2, "wise"),
+            (tick(2), 600.0, 3, "wise"), (tick(2), 9999.0, 9, "v3")]   # v3 판 겹침 — 쓰지 않는다
     write_table(root, "opinion_daily", {
         "ticker": (S, [c[0] for c in cons]), "obs_date": (DT, [last] * len(cons)),
-        "target_price_krw": (F, [c[1] for c in cons]), "analyst_count": (F, [c[2] for c in cons])})
-    hold = [  # (보고번호, src, 보고자, corp, 접수일, 직위, 사유, 주식 수 변동, 지분, 지분 변화)
-        ("H1", "elestock", "홍길동", "C2", d1, "이사", None, 1000.0, 0.1, 0.0),
-        ("H2", "elestock", "큰손", "C2", d1, "-", None, 99999.0, 12.0, 1.0),     # 10% 주주(뺌)
-        ("H3", "majorstock", "가나자산", "C1", d1, None, "단순  투자", None, 6.0, 1.5),
-        ("H4", "majorstock", "다라자산", "C1", d1, None, "담보 변경", None, 5.5, 0.0)]  # 변화 0(뺌)
+        "src": (S, [c[3] for c in cons]), "target_price_krw": (F, [c[1] for c in cons]),
+        "analyst_count": (F, [c[2] for c in cons])})
+    hl = holder_last or d1
+    hold = [  # (보고번호, src, 보고자, corp, 접수일, 직위, 등기, 사유, 주식 수 변동, 지분, 지분 변화)
+        ("H1", "elestock", "홍길동", "C2", hl, "이사", "등기임원", None, 1000.0, 0.1, 0.0),
+        ("H2", "elestock", "큰손", "C2", hl, "-", "-", None, 99999.0, 12.0, 1.0),       # 임원 아님
+        ("H5", "elestock", "최대주주씨", "C2", hl, "최대주주", "-", None, 5000.0, 30.0, 0.0),  # 임원 아님
+        ("H6", "elestock", "의장님", "C0", hl, "이사회 의장", "등기임원", None, -2000.0, 15.0, 0.0),
+        ("H3", "majorstock", "가나자산", "C1", hl, None, None, "단순  투자", None, 6.0, 1.5),
+        ("H4", "majorstock", "다라자산", "C1", hl, None, None, "담보 변경", None, 5.5, 0.0)]  # 변화 0
     write_table(root, "holder_daily", {
         "rcept_no": (S, [h[0] for h in hold]), "src": (S, [h[1] for h in hold]),
         "repror": (S, [h[2] for h in hold]), "corp_code": (S, [h[3] for h in hold]),
         "rcept_dt": (DT, [h[4] for h in hold]), "ofcps": (S, [h[5] for h in hold]),
-        "report_resn": (S, [h[6] for h in hold]), "qty_change_shr": (F, [h[7] for h in hold]),
-        "rate_pct": (F, [h[8] for h in hold]), "rate_change_pct": (F, [h[9] for h in hold])})
+        "exec_rgist": (S, [h[6] for h in hold]), "report_resn": (S, [h[7] for h in hold]),
+        "qty_change_shr": (F, [h[8] for h in hold]), "rate_pct": (F, [h[9] for h in hold]),
+        "rate_change_pct": (F, [h[10] for h in hold])})
 
 
 ETFS = {"A00001": ("KODEX 200", "코스피 200"), "A00002": ("TIGER 미국S&P500", "S&P 500"),
@@ -190,27 +214,34 @@ def build_stage(root: Path, last: date = D) -> None:
         "list_shrs": F, "value_krw": F, "netasset_krw": F}))
     d1 = days[-2]
     no = f"{d1:%Y%m%d}"
-    disc = [(f"{no}000001", d1, tick(0), "단일판매ᆞ공급계약체결"),          # stage NFKC 'ᆞ'
-            (f"{no}000002", d1, tick(0), "[기재정정]단일판매ᆞ공급계약체결"),  # 같은 날 정정본 — 한 건
-            (f"{no}000003", d1, tick(1), "주식등의대량보유상황보고서"),
-            (f"{no}000004", d1, tick(2), "기업설명회(IR)개최"),
-            (f"{no}000005", d1, tick(15), "[기재정정]주요사항보고서(자기주식취득결정)")]
+    disc = [  # (접수번호, 접수일, 종목, 제목, 정정본?, 뒤에 정정됨?)
+        (f"{no}000001", d1, tick(0), "단일판매ᆞ공급계약체결", False, False),         # stage NFKC 'ᆞ'
+        (f"{no}000002", d1, tick(0), "[기재정정]단일판매ᆞ공급계약체결", True, False),  # 같은 날 — 한 건
+        (f"{no}000003", d1, tick(1), "주식등의대량보유상황보고서", False, False),
+        (f"{no}000004", d1, tick(2), "기업설명회(IR)개최", False, False),
+        (f"{no}000005", d1, tick(15), "[기재정정]주요사항보고서(자기주식취득결정)", True, False),
+        (f"{no}000010", d1, tick(0), "주요사항보고서(자기주식취득결정)", False, True),   # 정정됨 — 뺀다
+        (f"{no}000013", d1, tick(0), "[기재정정]주요사항보고서(자기주식취득결정)", True, False)]
     write_table(root, "stg_disclosure", {
         "rcept_no": (S, [x[0] for x in disc]), "rcept_dt": (DT, [x[1] for x in disc]),
-        "ticker": (S, [x[2] for x in disc]), "report_nm": (S, [x[3] for x in disc])})
+        "ticker": (S, [x[2] for x in disc]), "report_nm": (S, [x[3] for x in disc]),
+        "is_correction": (B, [x[4] for x in disc]),
+        "rm_corrected_later": (B, [x[5] for x in disc])})
     write_table(root, "stg_corp_map", {"corp_code": (S, ["C0", "C1", "C2"]),
                                        "ticker": (S, [tick(0), tick(1), tick(2)])})
     write_table(root, "stg_event_tsstk_aq", {
-        "rcept_no": (S, [f"{no}000010"]), "corp_code": (S, ["C0"]), "aq_mth": (S, ["장내매수"]),
-        "aq_pp": (S, ["주주가치\n제고"]), "aqpln_prc_ostk": (F, [1e10]),
-        "aqexpd_bgd": (DT, [D]), "aqexpd_edd": (DT, [None])})
+        "rcept_no": (S, [f"{no}000010", f"{no}000013"]), "corp_code": (S, ["C0", "C0"]),
+        "aq_mth": (S, ["장내매수", "장내매수"]), "aq_pp": (S, ["주주가치\n제고", "주주가치\n제고"]),
+        "aqpln_prc_ostk": (F, [5e9, 1e10]), "aqexpd_bgd": (DT, [D, D]),
+        "aqexpd_edd": (DT, [None, None])})
     write_table(root, "stg_event_tsstk_dp", {
         "rcept_no": (S, []), "corp_code": (S, []), "dp_pp": (S, []), "dppln_prc_ostk": (F, []),
         "dpprpd_bgd": (DT, []), "dpprpd_edd": (DT, [])})
+    # 같은 날 같은 금액의 유상증자 결정 두 건(접수번호가 다르면 다른 결정 — 10-06 알테오젠 같은 경우)
     write_table(root, "stg_event_piic", {
-        "rcept_no": (S, [f"{no}000011"]), "corp_code": (S, ["C1"]), "ic_mthn": (S, ["제3자배정"]),
-        "nstk_ostk_cnt": (F, [1234567.0]),
-        **{k: (F, [5e9 if k == "fdpp_op" else None]) for k in sheet_events.FUNDS}})
+        "rcept_no": (S, [f"{no}000011", f"{no}000014"]), "corp_code": (S, ["C1", "C1"]),
+        "ic_mthn": (S, ["제3자배정", "제3자배정"]), "nstk_ostk_cnt": (F, [1234567.0, None]),
+        **{k: (F, [5e9 if k == "fdpp_op" else None] * 2) for k in sheet_events.FUNDS}})
     write_table(root, "stg_event_cvbd_is", {
         "rcept_no": (S, [f"{no}000012"]), "corp_code": (S, ["C2"]), "bd_knd": (S, ["전환사채"]),
         "bd_fta": (F, [3e8]), "cv_prc": (F, [None])})
@@ -236,7 +267,14 @@ def src(roots: tuple[Path, Path]) -> Sources:
     return Sources(roots[0], roots[1], {})
 
 
-def book_with_refs() -> tuple[object, XRefs]:
+@pytest.fixture
+def con() -> Iterator[duckdb.DuckDBPyConnection]:
+    c = connect()
+    yield c
+    c.close()
+
+
+def book_with_refs() -> tuple[Workbook, XRefs]:
     wb = new_workbook()
     return wb, XRefs.of(wb.worksheets[0])
 
@@ -249,6 +287,10 @@ def row_of(ws, text: str, col: int = 1) -> int:
     return next(r for r in range(1, ws.max_row + 1) if ws.cell(r, col).value == text)
 
 
+def col_values(ws, r0: int, col: int, n: int) -> list[object]:
+    return [ws.cell(r0 + k, col).value for k in range(n)]
+
+
 # ── 공용 ──────────────────────────────────────────────────────────────────────
 def test_base_text_and_window_text() -> None:
     assert base_text(D, D) == "기준일: 2026-09-25"
@@ -258,9 +300,26 @@ def test_base_text_and_window_text() -> None:
     assert sheet_etf.week_span([date(2026, 9, 29), date(2026, 10, 2)]) == "09-29~10-02"
 
 
+def test_non_trading_source_day_maps_to_last_trading_day(src: Sources, con) -> None:
+    """원천 날짜가 거래일이 아니면(토요일 수집 · 12-31 공시) 창은 그 앞 마지막 거래일에서 센다 —
+    엑셀 D(월요일)는 지수에 아직 없어도 거래일이다."""
+    cal = krx_calendar(con, src, SATURDAY, MONDAY)
+    assert (cal.anchor, cal.day, cal.win["1W"]) == (SATURDAY, D, DAYS[-6])
+    assert krx_calendar(con, src, MONDAY, MONDAY).day == MONDAY
+
+
+def test_latest_complete_drops_a_partial_collection_day(tmp_path: Path, con) -> None:
+    eq = tmp_path / "equity"
+    build_equity(eq, flow_partial=True)
+    fl = Sources(eq, None, {}).equity("flow_daily")
+    lt = latest_complete(con, fl, "date", D, "src = 'kiwoom'", "수급")
+    assert (lt.day, lt.partial) == (DAYS[-2], D)
+    assert lt.note() == " · 09-25 은 일부만 수집돼 뺌"
+
+
 # ── ETF ──────────────────────────────────────────────────────────────────────
-def test_etf_flows_split_delist_and_windows(src: Sources) -> None:
-    e = etf_data.load(src, D)
+def test_etf_flows_split_delist_and_windows(src: Sources, con) -> None:
+    e = etf_data.load(con, src, D)
     assert e.day == D and e.first_day == DAYS[0]
     assert e.win["1D"] == DAYS[-2] and e.win["1W"] == DAYS[-6] and e.win["YTD"] == date(2025, 12, 31)
     rec = {r.code: r for r in e.recs}
@@ -280,11 +339,14 @@ def test_etf_flows_split_delist_and_windows(src: Sources) -> None:
     assert e.weekly[w]["국내주식"] == pytest.approx(-(10000.0 + i_last) * 1_000_000 / 1e8)
     assert e.brand["KODEX"].n == 2 and e.brand["ARIRANG"].n == 0
     assert e.netasset_empty
+    # 공용 연결은 행 순서 보존을 되돌려 놓고 임시 표를 남기지 않는다
+    assert con.execute("SELECT current_setting('preserve_insertion_order')").fetchone()[0] is True
+    assert con.execute("SELECT count(*) FROM duckdb_tables() WHERE temporary").fetchone()[0] == 0
 
 
-def test_etf_sheet_texts_charts_and_sparklines(src: Sources, tmp_path: Path) -> None:
+def test_etf_sheet_texts_charts_and_sparklines(src: Sources, con) -> None:
     wb, refs = book_with_refs()
-    w = sheet_etf.write(wb, etf_data.load(src, D), refs, D)
+    w = sheet_etf.write(wb, etf_data.load(con, src, D), refs, D)
     ws = wb["ETF"]
     assert ws["A3"].value == ("자료: KRX ETF 일별 2025-01~2026-09-25(종가 · NAV · 상장좌수 · 거래대금) · "
                               "지금 3종목")
@@ -301,20 +363,20 @@ def test_etf_sheet_texts_charts_and_sparklines(src: Sources, tmp_path: Path) -> 
                                           "유형별 요약 · 12주 유입(주간)"]
 
 
-def test_etf_uses_latest_source_day_before_d(tmp_path: Path, roots: tuple[Path, Path]) -> None:
+def test_etf_uses_latest_source_day_before_d(tmp_path: Path, roots: tuple[Path, Path],
+                                              con) -> None:
     """장 마감 엑셀(사용자 결정 Q-E2): 원천이 D 전날까지면 그날로 만들고 4행에 적는다."""
     st = tmp_path / "stage"
     build_stage(st, last=DAYS[-2])
     wb, refs = book_with_refs()
-    e = etf_data.load(Sources(roots[0], st, {}), D)
+    e = etf_data.load(con, Sources(roots[0], st, {}), D)
     sheet_etf.write(wb, e, refs, D)
     assert e.day == DAYS[-2]
     assert wb["ETF"]["A4"].value == "기준일: 2026-09-24(원천 최신 · 엑셀 09-25)"
 
 
 # ── Market ───────────────────────────────────────────────────────────────────
-def test_market_index_breadth_and_investors(src: Sources) -> None:
-    con = connect()
+def test_market_index_breadth_and_investors(src: Sources, con) -> None:
     m = sheet_market.load(con, src, D)
     ix = {(i.cls, i.name): i for i in m.index}
     n = len(DAYS) - 1
@@ -325,14 +387,15 @@ def test_market_index_breadth_and_investors(src: Sources) -> None:
     # 52주 신고가 = 오른 넷 + 보합(최고 = 최저), 신저가 = 내림 + 보합
     assert (b.kospi, b.kosdaq, b.hi, b.lo) == ((2, 1, 0), (2, 0, 1), 5, 2)
     f = m.mkt_flow[("KOSPI", "1W")]
-    assert (f["frgnr_invsr_krw"] + f["natfor_krw"]) / 1e8 == pytest.approx(3 * 5 * 11)
+    assert (f["frgnr_invsr_krw"] or 0) + (f["natfor_krw"] or 0) == pytest.approx(3 * 5 * 11e8)
 
 
-def test_market_sheet_layout(src: Sources) -> None:
+def test_market_sheet_layout(src: Sources, con) -> None:
     wb, refs = book_with_refs()
-    con = connect()
     defs = sheet_market.write(wb, sheet_market.load(con, src, D), refs, D)
     ws = wb["Market"]
+    assert ws["A3"].value.endswith("(보통주) 2025~")              # 지수 자료 첫해
+    assert ws["A4"].value == "기준일: 2026-09-25"
     assert ws["A5"].value.endswith("YTD = 2025-12-31 대비")
     r = row_of(ws, "외국인")
     assert ws.cell(r, 4).value == pytest.approx(3 * 5 * 11)        # 코스피 1W(억원)
@@ -342,10 +405,29 @@ def test_market_sheet_layout(src: Sources) -> None:
     assert len(ws._charts) == 4 and [d[1] for d in defs][0] == "대표 지수 · 업종 지수"
 
 
-# ── Flow ─────────────────────────────────────────────────────────────────────
-def test_flow_sector_sums_and_lists(src: Sources) -> None:
+def test_market_flow_lagging_index_gets_its_own_date_and_blanks(tmp_path: Path, con) -> None:
+    """키움 수급이 지수보다 하루 늦으면 수급 표는 수급 날짜로 세고(1D = 그 전날 하루) 4행 · 표 제목에
+    날짜를 적으며, 수급이 없는 지수 날의 누적 점은 0 이 아니라 빈칸이다."""
+    eq = tmp_path / "equity"
+    build_equity(eq, flow_last=DAYS[-2])
     wb, refs = book_with_refs()
-    con = connect()
+    m = sheet_market.load(con, Sources(eq, None, {}), D)
+    sheet_market.write(wb, m, refs, D)
+    ws = wb["Market"]
+    assert (m.cal.day, m.flow.day) == (D, DAYS[-2])
+    assert ws["A4"].value == "기준일: 2026-09-25 · 수급 09-24"
+    r = row_of(ws, "시장 투자자별 순매수(억원): 보통주, 09-24까지") + 2
+    assert ws.cell(r, 1).value == "개인"
+    r = row_of(ws, "외국인")
+    assert ws.cell(r, 3).value == pytest.approx(3 * 11)            # 1D 코스피 = 09-24 하루(0 아님)
+    last = max(rr for rr in range(8, 400) if ws.cell(rr, 30).value is not None)
+    assert ws.cell(last, 30).value == D                             # 그래프 원자료 끝 = 지수 날
+    assert ws.cell(last, 33).value is None and ws.cell(last - 1, 33).value is not None
+
+
+# ── Flow ─────────────────────────────────────────────────────────────────────
+def test_flow_sector_sums_and_lists(src: Sources, con) -> None:
+    wb, refs = book_with_refs()
     f = sheet_flow.load(con, src, D, UNI)
     sheet_flow.write(wb, f, UNI, refs, D)
     ws = wb["Flow"]
@@ -356,10 +438,20 @@ def test_flow_sector_sums_and_lists(src: Sources) -> None:
     assert ws.cell(r + 2, 11).value == pytest.approx(0.20)          # 20거래일 × 0.01%p
 
 
-# ── Short ────────────────────────────────────────────────────────────────────
-def test_short_credit_lag_and_weeks(src: Sources) -> None:
+def test_flow_skips_a_partial_latest_day(tmp_path: Path, con) -> None:
+    eq = tmp_path / "equity"
+    build_equity(eq, flow_partial=True)
     wb, refs = book_with_refs()
-    con = connect()
+    f = sheet_flow.load(con, Sources(eq, None, {}), D, UNI)
+    sheet_flow.write(wb, f, UNI, refs, D)
+    assert f.cal.day == DAYS[-2]
+    assert wb["Flow"]["A4"].value == ("기준일: 2026-09-24(원천 최신 · 엑셀 09-25) · 09-25 은 일부만 "
+                                      "수집돼 뺌")
+
+
+# ── Short ────────────────────────────────────────────────────────────────────
+def test_short_credit_lag_and_weeks(src: Sources, con) -> None:
+    wb, refs = book_with_refs()
     s = sheet_short.load(con, src, D, UNI)
     sheet_short.write(wb, s, UNI, refs, D)
     ws = wb["Short"]
@@ -371,53 +463,101 @@ def test_short_credit_lag_and_weeks(src: Sources) -> None:
 
 
 # ── Analyst ──────────────────────────────────────────────────────────────────
-def test_analyst_counts_dedupe_and_upside(src: Sources) -> None:
+def test_analyst_counts_dedupe_and_upside(src: Sources, con) -> None:
     wb, refs = book_with_refs()
-    con = connect()
     a = sheet_analyst.load(con, src, D, UNI)
     acts = {(x.code, x.broker): x for x in a.acts}
     assert acts[(tick(0), "A증권")].chg == 20.0                    # 같은 날 같은 증권사 — 나중 수집
     assert a.cal.day == D and a.cons_day == D
+    assert a.cons[tick(2)].tp == 600.0                             # src 'wise' 만(v3 판 9999 아님)
     sheet_analyst.write(wb, a, UNI, refs, D)
     ws = wb["Analyst"]
     r = row_of(ws, "IT")
     # 1W 상향 1 · 하향 1 · 신규 1 · 상향 비율 50%
     assert [ws.cell(r, c).value for c in range(3, 8)] == [3, 1, 1, 1, 50.0]
+    r = row_of(ws, "산업재")                                      # 등급만 오른 보고서는 신규가 아니다
+    assert [ws.cell(r, c).value for c in range(4, 7)] == [0, 0, 0]
     r = row_of(ws, "목표가 여력 상위 20: 증권사 3곳 이상")
-    assert [ws.cell(r + 2 + k, 1).value for k in range(2)] == [tick(0), tick(2)]
+    assert col_values(ws, r + 2, 1, 2) == [tick(0), tick(2)]
     assert ws.cell(r + 2, 10).value == pytest.approx(100.0)          # 목표가 = 종가 × 2
+    # 등급 변경(1M)이 먼저, 신규 커버(1W)는 직전 의견 · 목표가가 모두 없는 보고서만 — 한 번씩
     r = row_of(ws, "투자의견 변경 · 신규 커버: 1M")
-    assert [ws.cell(r + 2 + k, 12).value for k in range(2)] == ["의견 하향", "신규 커버"]
+    rows = [(ws.cell(rr, 1).value, ws.cell(rr, 12).value) for rr in range(r + 2, r + 6)]
+    assert rows == [(tick(25), "의견 상향"), (tick(1), "의견 하향"), (tick(2), "신규 커버"),
+                    (None, None)]
     # 일별 그래프 원자료(AD 열)는 기준일 전날까지 — WISE 가 그날 보고서를 다음 날 올린다
     days = [ws.cell(rr, 30).value for rr in range(8, 40) if ws.cell(rr, 30).value]
     assert max(days) == DAYS[-2] and len(days) == 19
 
 
-# ── Events ───────────────────────────────────────────────────────────────────
-def test_events_types_titles_holders_and_decisions(src: Sources) -> None:
+def test_analyst_saturday_fetch_counts_windows_from_friday(tmp_path: Path, con) -> None:
+    eq = tmp_path / "equity"
+    build_equity(eq, saturday_fetch=True)
     wb, refs = book_with_refs()
-    con = connect()
+    a = sheet_analyst.load(con, Sources(eq, None, {}), MONDAY, UNI)
+    sheet_analyst.write(wb, a, UNI, refs, MONDAY)
+    assert (a.cal.anchor, a.cal.day, a.cal.win["1W"]) == (SATURDAY, D, DAYS[-6])
+    assert wb["Analyst"]["A4"].value == "기준일: 2026-09-26(원천 최신 · 엑셀 09-28)"
+    assert (tick(0), "F증권") in {(x.code, x.broker) for x in a.acts}
+
+
+def test_analyst_bar_chart_without_values_is_skipped(src: Sources, con) -> None:
+    """그릴 막대가 없으면 빈 범위 그래프(가짜 막대) 대신 제목 칸에 '데이터 없음'."""
+    wb, refs = book_with_refs()
+    a = sheet_analyst.load(con, src, D, UNI)
+    a.cons, a.acts = {}, []
+    sheet_analyst.write(wb, a, UNI, refs, D)
+    ws = wb["Analyst"]
+    titles = [c.value for row in ws.iter_rows(min_col=1, max_col=8) for c in row
+              if isinstance(c.value, str) and c.value.endswith("데이터 없음")]
+    assert titles == ["대분류별 1M 목표가 상향 비율(%): 데이터 없음",
+                      "대분류별 목표가 여력 중앙값(%): 09-25 컨센서스 목표가 ÷ 종가 − 1: 데이터 없음"]
+    assert len(ws._charts) == 2
+
+
+# ── Events ───────────────────────────────────────────────────────────────────
+def test_events_types_titles_holders_and_decisions(src: Sources, con) -> None:
+    wb, refs = book_with_refs()
     sheet_events.write(wb, sheet_events.load(con, src, D, UNI), UNI, refs, D)
     ws = wb["Events"]
     r = row_of(ws, "공급계약")
     assert [ws.cell(r, c).value for c in range(3, 7)] == [1, 1, 1, 1]   # 정정본은 한 건
     r = row_of(ws, "주요 공시: 1W, 5% · 임원 소유 보고와 그 밖 유형 뺌")
-    assert [ws.cell(r + 2 + k, 7).value for k in range(3)] == [   # 유형 순 · 원문 'ㆍ' 로 되돌림
-        "[정정] 주요사항보고서(자기주식취득결정)", "단일판매ㆍ공급계약체결", None]
+    assert col_values(ws, r + 2, 7, 4) == [   # 유형 순 · 같은 유형은 종합 순위 순 · 원문 'ㆍ'
+        "주요사항보고서(자기주식취득결정)", "[정정] 주요사항보고서(자기주식취득결정)",
+        "단일판매ㆍ공급계약체결", None]
     r = row_of(ws, "임원 보유 순변동: 1M 순증 상위 15 · 순감 상위 15")
-    assert ws.cell(r + 2, 1).value == tick(2) and ws.cell(r + 3, 1).value != tick(2)
-    assert ws.cell(r + 2, 7).value == "홍길동(이사) +1,000주 · 1건"      # 10% 주요주주 보고는 뺐다
+    # 임원(등기 · 비등기)만 — 최대주주 · 10% 주주 보고는 빼고, 임원을 겸한 주요주주(의장)는 남는다
+    assert col_values(ws, r + 2, 1, 3) == [tick(2), tick(0), None]
+    assert ws.cell(r + 2, 7).value == "홍길동(이사) +1,000주 · 1건"
+    assert ws.cell(r + 3, 7).value == "의장님(이사회 의장) -2,000주 · 1건"
     r = row_of(ws, "5% 대량보유 보고: 1W, 지분 변화 큰 순 30")
     assert ws.cell(r + 2, 7).value == "가나자산 · 단순 투자 · 지분 6.00%"
     assert ws.cell(r + 3, 1).value != tick(1)                          # 변화 0 보고는 뺐다
     r = row_of(ws, "자사주 · 증자 · 사채 결정: 1M")
-    texts = [ws.cell(r + 2 + k, 7).value for k in range(3)]
-    assert texts == ["전환사채 · 전환가 -원", "유상증자 · 제3자배정 · 새 주식 1,234,567주",
-                     "자사주 취득 · 장내매수 · 주주가치 제고 · 2026년 09월 25일~-"]
-    assert ws.cell(r + 4, 6).value == pytest.approx(100.0)            # 1e10 원 = 100 억원
+    # 뒤에 정정된 판본(…010)은 빼고 정정본(…013)은 [정정], 같은 금액의 다른 결정 두 건은 둘 다
+    assert col_values(ws, r + 2, 7, 5) == [
+        "유상증자 · 제3자배정", "[정정] 자사주 취득 · 장내매수 · 주주가치 제고 · 2026년 09월 25일~-",
+        "전환사채 · 전환가 -원", "유상증자 · 제3자배정 · 새 주식 1,234,567주", None]
+    assert ws.cell(r + 3, 6).value == pytest.approx(100.0)            # 1e10 원 = 100 억원
 
 
-# ── 매일 엑셀에 붙이기 · '데이터 없음' ──────────────────────────────────────────
+def test_events_holder_source_lag_is_stated_in_titles(tmp_path: Path, roots: tuple[Path, Path],
+                                                       con) -> None:
+    eq = tmp_path / "equity"
+    build_equity(eq, holder_last=DAYS[-3])
+    wb, refs = book_with_refs()
+    e = sheet_events.load(con, Sources(eq, roots[1], {}), D, UNI)
+    sheet_events.write(wb, e, UNI, refs, D)
+    ws = wb["Events"]
+    assert (e.cal.anchor, e.hcal.anchor) == (DAYS[-2], DAYS[-3])
+    assert ws["A4"].value == "기준일: 2026-09-24(원천 최신 · 엑셀 09-25)"
+    row_of(ws, "임원 보유 순변동: 1M 순증 상위 15 · 순감 상위 15, 09-22까지")
+    row_of(ws, "5% 대량보유 보고: 1W, 지분 변화 큰 순 30, 09-22까지")
+    row_of(ws, "자사주 · 증자 · 사채 결정: 1M")                      # 결정 원천은 공시와 같은 날
+
+
+# ── 매일 엑셀에 붙이기 · '데이터 없음' · 저장 뒤 손질 ─────────────────────────────
 @pytest.fixture(scope="module")
 def fi_world(tmp_path_factory: pytest.TempPathFactory, roots: tuple[Path, Path]
              ) -> dict[str, Path]:
@@ -446,6 +586,7 @@ def test_daily_excel_has_new_sheets_in_order_with_meta(fi_world: dict[str, Path]
     assert "price_daily=b_test_0001" in used and "stg_etf_price_daily=b_test_0001" in used
     sheets = [meta.cell(r, 1).value for r in range(8, meta.max_row + 1)]
     assert sheets[-1] == "Short" and sheets.index("ETF") < sheets.index("Analyst")
+    assert not (fi_world["out"] / "tmp").exists()                     # DuckDB 임시 폴더는 지웠다
     with zipfile.ZipFile(res.path) as z:
         charts = [n for n in z.namelist() if n.startswith("xl/charts/chart")]
         assert len(charts) == 16
@@ -462,8 +603,7 @@ def test_missing_source_gives_one_line_sheet_and_warning(fi_world: dict[str, Pat
     """원천 하나가 없으면 그 시트만 '데이터 없음: 사유'(warn), 나머지 시트 · 엑셀은 그대로."""
     st = tmp_path / "stage"
     build_stage(st)
-    for t in ("stg_etf_price_daily",):
-        (st / t / "MANIFEST.json").unlink()
+    (st / "stg_etf_price_daily" / "MANIFEST.json").unlink()
     eq = Path(json.loads((fi_world["fi"] / "_runs" / "20260925_morning.json").read_text(
         encoding="utf-8"))["equity_root"])
     with caplog.at_level(logging.WARNING, logger="deliver"):
@@ -479,25 +619,45 @@ def test_missing_source_gives_one_line_sheet_and_warning(fi_world: dict[str, Pat
     assert "ETF" not in [meta.cell(r, 1).value for r in range(8, meta.max_row + 1)]
 
 
-def test_sheets_anchor_on_each_source_latest_day(tmp_path: Path) -> None:
-    """장 마감 엑셀처럼 equity 원천이 D 전날까지면 시트마다 그날을 기준일로 쓰고 4행에 적는다 —
-    창(1W)도 그날에서 센다."""
-    eq = tmp_path / "equity"
-    build_equity(eq, last=DAYS[-2])
-    src = Sources(eq, None, {})
-    con = connect()
-    want = "기준일: 2026-09-24(원천 최신 · 엑셀 09-25)"
-    for name, write in (
-            ("Market", lambda wb, refs: sheet_market.write(
-                wb, sheet_market.load(con, src, D), refs, D)),
-            ("Flow", lambda wb, refs: sheet_flow.write(
-                wb, sheet_flow.load(con, src, D, UNI), UNI, refs, D)),
-            ("Short", lambda wb, refs: sheet_short.write(
-                wb, sheet_short.load(con, src, D, UNI), UNI, refs, D)),
-            ("Analyst", lambda wb, refs: sheet_analyst.write(
-                wb, sheet_analyst.load(con, src, D, UNI), UNI, refs, D))):
-        wb, refs = book_with_refs()
-        write(wb, refs)
-        assert wb[name]["A4"].value == want, name
-    f = sheet_flow.load(con, src, D, UNI)
-    assert f.cal.day == DAYS[-2] and f.cal.win["1W"] == DAYS[-7]
+def test_unexpected_error_in_one_sheet_is_logged_with_traceback(
+        fi_world: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture) -> None:
+    def boom(*_args: object) -> list[tuple[str, str, str]]:
+        raise RuntimeError("계산 중 터짐")
+    monkeypatch.setitem(sheets_extra.BUILDERS, "Flow", boom)
+    with caplog.at_level(logging.WARNING, logger="deliver"):
+        res = build_daily(FRI, "morning", model_root=fi_world["model"], fi_root=fi_world["fi"],
+                          out_root=tmp_path / "out")
+    wb = load_workbook(res.path)
+    assert wb["Flow"]["A6"].value == "데이터 없음: 계산 오류(RuntimeError) — 로그 참고"
+    assert wb["Short"]["A2"].value == "Short: 공매도 · 대차 · 신용"
+    rec = next(r for r in caplog.records if "Flow" in r.getMessage())
+    assert rec.exc_info is not None and "계산 중 터짐" in str(rec.exc_info[1])
+
+
+def test_post_save_failure_keeps_the_saved_workbook(fi_world: dict[str, Path], tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch,
+                                                    caplog: pytest.LogCaptureFixture) -> None:
+    """저장 뒤 손질(그래프 값 사본)이 실패해도 손질 전 엑셀을 내고 경고만 — 임시 파일은 남지 않는다."""
+    def broken(path: Path, wb: Workbook) -> int:
+        raise ValueError("그래프 XML 모양이 예상과 다르다")
+    monkeypatch.setattr(excel_daily, "finish_charts", broken)
+    out = tmp_path / "out"
+    with caplog.at_level(logging.WARNING, logger="deliver"):
+        res = build_daily(FRI, "morning", model_root=fi_world["model"], fi_root=fi_world["fi"],
+                          out_root=out)
+    assert load_workbook(res.path).sheetnames[3] == "Analyst"
+    assert any("저장 뒤 손질" in r.getMessage() for r in caplog.records)
+    assert not [p for p in res.path.parent.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_finish_charts_failure_removes_its_temp_file(fi_world: dict[str, Path],
+                                                     tmp_path: Path) -> None:
+    """이미 손질한 파일을 다시 손질하면 모양 검사에서 멈춘다 — 원본은 그대로, 임시 파일은 없다."""
+    res = build_daily(FRI, "morning", model_root=fi_world["model"], fi_root=fi_world["fi"],
+                      out_root=tmp_path / "out")
+    before = res.path.read_bytes()
+    with pytest.raises(ValueError, match="그래프 XML 모양"):
+        qpack.finish_charts(res.path, load_workbook(res.path))
+    assert res.path.read_bytes() == before
+    assert not [p for p in res.path.parent.iterdir() if p.name.endswith(".tmp")]

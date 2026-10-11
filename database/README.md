@@ -248,8 +248,8 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 추정치를 D 밤사이에 올리는데 정규 판은 수집일 ≤ D 로만 고른다. **새 크론 줄은 없다** — 두 체인의 끝에 잇는다(P9).
 
 - 스위치 `config/supplement.env` 의 `SUPPLEMENT_ENABLED=1`(정확히 1 만 켜짐, 판정 `scripts/postclose_conf.sh` `supplement_on`).
-  저장소 값은 꺼짐 — E5 배포 뒤 재생 대조(D=10-08 → 10-09 수집분으로 지어 N-45 수동 1회 결과와 견줌)를 통과하면 켠다.
-  되돌리기는 0 으로.
+  저장소 값은 꺼짐 — **엑셀 쪽(E5b — `deliver model-daily --basis supplement`)이 배포된 뒤에만** 켠다(그 전엔 ② 의 엑셀 단계가
+  매 휴일 crit). 그리고 E5 배포 뒤 재생 대조(D=10-08 → 10-09 수집분으로 지어 N-45 수동 1회 결과와 견줌)를 통과하면. 되돌리기는 0 으로.
 - 대상일: 오늘(KST)이 휴장 연속의 **첫 휴일**이고 그 직전 달력일이 거래일 D 일 때만(`daily.calendar` `supplement_target`) —
   보통 주말은 토요일(D = 금), 평일 공휴일은 그날, 연휴는 첫날 한 번.
 - ① 06:00 `daily_ledger.sh` — DART 단계와 나란한 갈래(원장 락 안, 다른 원장 `wisereport.db` — 저녁 체인의 WISE 갈래와 같은 모양)로
@@ -259,19 +259,28 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
   않는다(D 저녁 런이 끊긴 날 D+1 폴백이 보강 런을 읽지 않게). 결과는 런 로그 `source=supplement_wise`
   · date = 오늘(ok = 수집기 rc 0 + 이번 런의 `ws_run_log` 1행, 일부 콜 실패는 ok + warn). 실패·완주 기록 없음·달력 판정 불가는
   warn 한 줄이고 체인 rc·FAILED·`ledger_chain` 런 로그에는 넣지 않는다. 같은 날 손 재실행은 이미 ok 면 다시 받지 않는다.
-- ② 08:10 `daily_build.sh` 맨 끝: 이 체인의 D 가 대상 D 이고 ① 이 ok 면 `weekend_supplement.sh --date D --wise-asof 오늘`
-  (① 이 ok 가 아니면 warn 한 줄 '주말 보강판 안 지음'). 스크립트는 D 아침 확정판 인계 이력(`data/deliver/history/<D>_morning.json`,
+- ② 08:10 `daily_build.sh` 맨 끝: 이 체인의 D 가 대상 D 이고 ① 이 ok 면 원장 락을 먼저 놓고(보강판은 원장을 쓰지 않는다 —
+  토요일 10:00 `wics_weekly --retry` 가 막히지 않게. 부모가 물려준 락은 그대로) `weekend_supplement.sh --date D --wise-asof 오늘`
+  (① 이 ok 가 아니면 warn 한 줄 '주말 보강판 안 지음'). 스크립트는 W 가 D 다음 첫 휴일인지(`supplement_target(W) = D` — 아니면
+  rc 2) 보고, D 아침 확정판 인계 이력(`data/deliver/history/<D>_morning.json`,
   D·health ok — 아니면 warn·rc 1)으로 판을 고정하고 빌드 락 안에서 fi(`--basis supplement --wise-asof 오늘 --builds-from …` —
   WISE 컨센서스 입력만 오늘까지, 가격·수급·DART 는 D — `docs/FACTOR_INPUTS.md` §2-4) → 모델(`--basis supplement`) → 엑셀
   (`deliver model-daily --basis supplement --send`)을 돈다. 판 기록은 `_runs/<D>_supplement.json`·`latest_supplement.json` 으로
   정규 판과 갈리고, 이 체인이 지은 D 아침판은 휴일 수집분을 담은 stage 위에서도 수집일 ≤ D 로 잘라 바뀌지 않는다.
+  장 마감 체인의 v3 반영(⑥ · refill)도 컨센서스를 D' 까지만 읽는다(`--consensus-asof D'` — 같은 판의 fi·점수와 같은 시점).
+- 판 보관: 보강판은 연구 루트(`data/factor_inputs`·`data/model`)를 같이 쓰므로 한 연휴에 keep 한 칸을 쓴다 — keep 60 이
+  거래일 판 약 50개(약 2.5개월)를 담는다(정규 판만이면 60). 또 표·spec MANIFEST 의 `current_build` 는 다음 아침 확정판까지
+  보강판(`s_`)을 가리킨다 — 소비자는 MANIFEST 포인터가 아니라 basis 별 `_runs/<D>_<basis>.json`·`latest_<basis>.json` 의 판 id 로
+  연다(정규 판 기록·포인터는 그대로).
 - D 당 한 번: 런 로그 `source=supplement_board` · date = D 에 ok 가 있으면 건너뛴다(info). 08:10 체인은 `QL_FORCE` 를 넘기지
   않는다. 단계 실패는 crit '주말 보강판 실패: <단계>(rc=N)'(연속 창 판정 밖 — `daily.window_judge` 제외 목록)이고 정규 체인 rc·판은
   그대로다. 첫 휴일에 못 지었으면 다음 휴일 체인은 다시 부르지 않는다 — 손으로 돌린다.
-- 손 재실행: `bash scripts/weekend_supplement.sh --date D --wise-asof W [--force]`(W = 그 휴일 수집일, 체인과 같은 환경).
-  `--force`(또는 `QL_FORCE=1`)는 이미 완료한 D 를 다시 짓는다 — 엑셀을 다시 보낼지는 deliver 발송 장부가 정한다.
+- 손 재실행: `bash scripts/weekend_supplement.sh --date D --wise-asof W [--force]`(W = D 다음 첫 휴일 = 그 휴일 수집일, 체인과 같은
+  환경). `--force`(또는 `QL_FORCE=1`)는 이미 완료한 D 를 다시 짓고 W 검사도 건너뛴다(손 복구) — 엑셀을 다시 보낼지는 deliver 발송
+  장부가 정한다.
 - 알림(`notify.sh` — 기록만): 수집 실패·일부 실패·대상일 판정 불가 warn · 보강판 완료 info · 단계 실패 crit · D 확정판 없음 warn ·
-  이미 완료·꺼짐 info · fi 게이트 경고 warn · 스크립트가 0·1 밖 rc 로 죽으면 `daily_build` 가 warn.
+  빌드 락 실패 crit · 이미 완료·꺼짐 info · fi 게이트 경고 warn · 스크립트가 0·1·3 밖 rc(인자·홈 이동 오류 — 스스로 알림을
+  못 남김)로 끝나면 `daily_build` 가 warn(한 사건에 한 줄).
 
 ### 원장 락 — `scripts/raw_lock.sh` (배포 묶음 5-3 · TECH_DEBT B-52 해결)
 

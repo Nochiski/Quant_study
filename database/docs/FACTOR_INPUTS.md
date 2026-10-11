@@ -192,7 +192,9 @@ python -m factor_inputs build --date <D> --basis supplement --wise-asof <W> \
   wise_asof 까지 재고, **D\* ≠ W 이면 FAIL**(`supplement_wise_not_on_wise_asof` — 휴일 수집분이 판에 없다. W 는 거래일이
   아니라 거래일 수로 재는 수집 지연은 이 경우도 0 이다). FAIL 이면 정규 판과 같은 판을 '보강판'으로 올리지 않는다.
 - 판: 빌드 id `s_`(stage·equity 의 `--basis` 선택지에는 없다) · `_runs/<D>_supplement.json` · `latest_supplement.json`
-  — 정규 판 기록·포인터와 이름이 갈린다. 연구 루트를 같이 쓴다(한 연휴에 한 판이라 keep 60 을 거의 쓰지 않는다).
+  — 정규 판 기록·포인터와 이름이 갈린다. 연구 루트를 같이 쓴다 — 한 연휴에 keep 한 칸을 써서 keep 60 이 거래일 판 약 50개를
+  담고, 표 MANIFEST `current_build` 는 다음 아침 확정판까지 `s_` 판을 가리킨다(소비자는 basis 별 `latest_<basis>.json`·`_runs`
+  의 판 id 로 연다 — §3).
 - 정규 판(아침·장 마감)은 `--wise-asof` 를 생략하면 asof 와 같고 SQL 글자가 그대로다. asof 와 다른 값을 주면 rc 2
   (정규 판의 추정치를 D 뒤 수집분으로 넓히지 않는다). D 아침판은 휴일 수집분을 담은 stage 위에서도 수집일 ≤ D 로
   잘라 바뀌지 않는다 — 휴일 WISE 행이 없는 원천으로 지은 아침판과 8표 content_hash 가 같다

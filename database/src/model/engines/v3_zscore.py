@@ -33,6 +33,9 @@ spec 파라미터로만 켜는 원본 밖 규칙(v3_zscore@1.0 은 끈 채로 �
     결측 뒤는 원본 규칙 그대로다: 모멘텀은 남은 지표로 비례 재정규화하고 다 비면 원점수 0.0, 퀄리티는
     std_20d 없이 재정규화. `EngineResult.meta['adj_jump_masked']` = 그렇게 비운 칸 수(지표별)와 종목 수
     (규칙이 없었으면 값이 섰던 칸만 센다 — GH1-c).
+  - `universe.coverage_grace_days`(scope_v2.0 = 5, N-47): 추정치가 사라진 grace 종목을 나이가 이
+    값 이하인 동안 유니버스에 남긴다. 리비전은 fi 가 실은 마지막 신선일 판 컨센서스로 계산한다.
+    기본 0 은 원본(추정치 유예 없음)과 같다.
 """
 from __future__ import annotations
 
@@ -49,7 +52,12 @@ from model.contracts import (
     ModelSpec,
     UniverseRule,
 )
-from model.engines._common import crosses_step, weighted_available, z_score_winsorized
+from model.engines._common import (
+    crosses_step,
+    estimates_lapsed,
+    weighted_available,
+    z_score_winsorized,
+)
 
 Row = Mapping[str, Any]     # fi_* 행 — 값 타입은 계약(contracts.FI_TABLES)이 정한다
 
@@ -88,6 +96,9 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> tuple[list[str],
     """v3 `engine.py:66-78` + `_load_market_caps`(245-255).
 
     D 에 가격 행이 있고 `fi_universe.eligible` 인 종목 중 시총 ≥ `universe.min_market_cap`.
+    fi 유예 창(5) 안의 grace 종목은 spec 유예(`universe.coverage_grace_days`)로 다시 자른다 — 넘으면
+    fi eligible 이 거짓인 종목처럼 뺀다(`_common.estimates_lapsed`, N-47). 유예 0 spec 은 옛 fi
+    유예 0 과 같은 종목이다.
     `universe.min_analysts` 가 있으면 추정기관수(n_analysts)가 그보다 작은 종목도 뺀다 —
     NULL(모름)은 빼지 않는다(원본 v3 에는 없는 규칙, 2026-10-05 scope 에 넣었다가 10-08 뺐다 —
     지금 이 값을 쓰는 등록 spec 은 없다. 지원은 남긴다: v3_zscore@1.0 동등성과 무관).
@@ -101,7 +112,7 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> tuple[list[str],
     caps: dict[str, float] = {}
     for t in sorted(on_d):
         u = uni.get(t)
-        if u is None or not u["eligible"]:
+        if u is None or not u["eligible"] or estimates_lapsed(spec.universe, u):
             continue
         cap = u["market_cap"]
         if cap is not None and cap > 0:
@@ -457,11 +468,13 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> None:
     if tuple(spec.buckets) != FACTORS:
         raise ValueError(f"{spec.spec_id}: buckets 는 {FACTORS} 순서여야 한다 — "
                          f"{tuple(spec.buckets)}")
-    # 시총 하한·추정기관수 하한 밖의 유니버스 조건은 fi_universe.eligible(기본 규칙 판정)을 그대로
-    # 믿는다. 기본과 다른 규칙이면 이 엔진은 재판정하지 않으므로 거절한다(조용히 무시하지 않는다).
-    if replace(spec.universe, min_market_cap=None, min_analysts=None) != UniverseRule():
+    # 시총 하한·추정기관수 하한·추정치 유예 밖의 유니버스 조건은 fi_universe.eligible(기본 규칙
+    # 판정)을 그대로 믿는다. 기본과 다른 규칙이면 이 엔진은 재판정하지 않으므로 거절한다(조용히
+    # 무시하지 않는다). 유예는 `_universe` 가 coverage 열로 다시 자른다(N-47).
+    if replace(spec.universe, min_market_cap=None, min_analysts=None,
+               coverage_grace_days=0) != UniverseRule():
         raise ValueError(f"{spec.spec_id}: v3_zscore 는 기본 유니버스 규칙"
-                         "(+min_market_cap·min_analysts)만 지원")
+                         "(+min_market_cap·min_analysts·coverage_grace_days)만 지원")
     extra = sorted(set(spec.params) - PARAM_KEYS)
     if extra:
         raise ValueError(f"{spec.spec_id}: params 모르는 키 {extra} — 허용 {sorted(PARAM_KEYS)}")

@@ -43,6 +43,7 @@ from __future__ import annotations
 import bisect
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -53,6 +54,7 @@ from model.contracts import (
     ModelSpec,
     UniverseRule,
 )
+from model.engines._common import estimates_lapsed
 
 Row = Mapping[str, Any]     # fi_* 행 — 값 타입은 계약(contracts.FI_TABLES)이 정한다
 NAN = float("nan")
@@ -126,16 +128,19 @@ def _factor_scores(raw: Mapping[str, Mapping[str, float]], sub_weights: Mapping[
 
 
 # ── 유니버스 · 가격 ──────────────────────────────────────────────────────────
-def _universe(inputs: FactorInputs) -> dict[str, float]:
+def _universe(rule: UniverseRule, inputs: FactorInputs) -> dict[str, float]:
     """v2 `load_market_caps`(`v2_data_loader.py:88-95`) — {종목: 시총(억원)}, 시총 > 0.
 
     compat 는 추정치 없는 종목의 market_cap 을 NULL 로 내보내 v2 유니버스에서 뺀다
     (`compat/quant_db.py:79-81`) — fi 에서는 `eligible` ∧ market_cap > 0 이 같은 뜻이다.
+    fi 유예 창(5) 안의 grace 종목은 spec 유예(`rule.coverage_grace_days`, 기본 0 = 원본)로 다시
+    자른다(`_common.estimates_lapsed`, N-47).
     """
     caps: dict[str, float] = {}
     for r in _rows(inputs, "fi_universe"):
         cap = r["market_cap"]
-        if r["eligible"] and cap is not None and cap > 0:
+        if (r["eligible"] and not estimates_lapsed(rule, r)
+                and cap is not None and cap > 0):
             caps[r["ticker"]] = cap
     return caps
 
@@ -298,9 +303,9 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> None:
     if tuple(spec.buckets) != FACTORS:
         raise ValueError(f"{spec.spec_id}: buckets 는 {FACTORS} 순서여야 한다 — "
                          f"{tuple(spec.buckets)}")
-    # v2 유니버스 = 적격 ∧ 시총 > 0 뿐이다. 다른 규칙(시총 하한 등)은 이 엔진이 판정하지 않으므로
-    # 거절한다(조용히 무시하지 않는다).
-    if spec.universe != UniverseRule():
+    # v2 유니버스 = 적격 ∧ 시총 > 0 뿐이다(+ spec 추정치 유예 — `_universe`). 다른 규칙(시총 하한
+    # 등)은 이 엔진이 판정하지 않으므로 거절한다(조용히 무시하지 않는다).
+    if replace(spec.universe, coverage_grace_days=0) != UniverseRule():
         raise ValueError(f"{spec.spec_id}: v2_percentrank 는 기본 유니버스 규칙만 지원"
                          f"(min_market_cap 등 없음) — {spec.universe}")
     p: Mapping[str, Any] = spec.params
@@ -338,7 +343,7 @@ class V2PercentRankEngine:
         p: Mapping[str, Any] = spec.params      # 구조는 config/models/v2_percentrank.toml
         mp, fp = p["momentum"], p["flow"]
         d = inputs.date
-        caps = _universe(inputs)
+        caps = _universe(spec.universe, inputs)
         codes = sorted(caps)
 
         # 모멘텀(`v2_engine.py:55-60`) — 창 안에 가격 행이 있는 종목만 원값을 갖는다

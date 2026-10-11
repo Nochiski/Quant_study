@@ -1273,7 +1273,9 @@ def test_real_builders_same_inputs_have_nothing_unexplained(real_pair, tmp_path)
     assert tick[tf.DD] == tick[tf.F] == tick[tf.L] == [bc.CUTOFF]
     assert {k for k, v in rep["categories"].items() if v["count"]} == {bc.T6, bc.CUTOFF, bc.FILING}
     only = {e["ticker"]: e["categories"] for e in rep["model"][V2]["research_only"]}
-    assert only == {tf.C: [bc.T6], tf.H: [bc.T6, bc.FILING], tf.P: [bc.T6], tf.X2: [bc.T6]}
+    # C 는 연구 판 T 에서도 grace(나이 5)라 v2(유예 0)가 두 판 모두에서 뺀다(N-47 — 엔진이 spec 유예로
+    # 다시 자른다). 그래서 점수 행이 한 판에만 있는 종목이 아니다
+    assert only == {tf.H: [bc.T6, bc.FILING], tf.P: [bc.T6], tf.X2: [bc.T6]}
     ev_run = json.loads((real_pair[0] / "factor_inputs" / "_runs" / f"{tf.T_S}_evening.json")
                         .read_text(encoding="utf-8"))
     assert ev_run["postclose_stage_root"] and set(ev_run["postclose_builds"]) == {bc.T_SOURCE_TABLE}

@@ -9,6 +9,33 @@ from __future__ import annotations
 
 import statistics
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:     # 주석 전용 — 실행 때는 표준 라이브러리만 쓴다
+    from model.contracts import UniverseRule
+
+# 추정치 소멸 사유 — fi `factor_inputs.queries.EXCLUDE_REASONS` 의 'estimates_lapsed' 와 같은 코드
+ESTIMATES_LAPSED = "estimates_lapsed"
+
+
+def estimates_lapsed(rule: UniverseRule, row: Mapping[str, object]) -> str | None:
+    """spec 유예로 다시 자른 추정치 소멸 — 빼야 하면 `ESTIMATES_LAPSED`, 아니면 None(N-47).
+
+    fi 는 유예 창 `FI_COVERAGE_GRACE_MAX`(5)로 신선도를 판정해 나이 ≤ 5 인 grace 종목까지
+    eligible 로 둔다. 엔진은 그중 `coverage_state = 'grace'` 이고 나이(`coverage_age_days`)가
+    spec 의 `coverage_grace_days` 를 넘는 종목을 뺀다 — 유예 0 spec(원본 미러·scope_v1.0)은
+    fi 유예 0 이던 때와 같은 종목을 본다. 나이 0 인 grace(WISE 를 휴장일에 수집해 마지막
+    신선일과 D* 사이에 거래일이 없는 경우)는 유예 0 spec 에도 남는다(옛 fi 유예 0 판정과
+    같다). 나이를 모르는 grace 는 뺀다(FG-fresh 가 막는 모양). 신선도 열이 비어 있는 행
+    (compat 어댑터 골든 입력)과 `require_estimates = false` spec 은 보지 않는다. 시총 하한 등
+    다른 규칙보다 먼저 부른다 — fi eligible 이 거짓인 종목과 같게 다룬다.
+    """
+    if not rule.require_estimates or row.get("coverage_state") != "grace":
+        return None
+    age = row.get("coverage_age_days")
+    if isinstance(age, int) and age <= rule.coverage_grace_days:
+        return None
+    return ESTIMATES_LAPSED
 
 
 def z_score_winsorized(values: Sequence[float], sigma: float = 3.0) -> list[float]:

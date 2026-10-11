@@ -44,7 +44,7 @@ from model.contracts import (
     UniverseRule,
     score_columns,
 )
-from model.engines._common import crosses_step, weighted_available
+from model.engines._common import crosses_step, estimates_lapsed, weighted_available
 
 Row = Mapping[str, object]   # fi_* 행 — 값 타입은 계약(contracts.FI_TABLES)이 정한다
 
@@ -565,11 +565,11 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> dict[str, _Membe
         cap = _num(r["market_cap"])
         if u.min_market_cap is not None and (cap is None or cap < u.min_market_cap):
             continue
-        state, age = r["coverage_state"], r["coverage_age_days"]
-        if u.require_estimates and not (
-                state == "fresh"
-                or (state in LIVE_COVERAGE and isinstance(age, int)
-                    and age <= u.coverage_grace_days)):
+        # 추정치 — fi 가 이미 뺀 소멸·없음(방어) + 유예 종목은 spec 유예로 다시 자른다(엔진 공용
+        # `_common.estimates_lapsed`, N-47)
+        if u.require_estimates and r["coverage_state"] not in LIVE_COVERAGE:
+            continue
+        if estimates_lapsed(u, r):
             continue
         out[t] = _member(u, r)
     return out

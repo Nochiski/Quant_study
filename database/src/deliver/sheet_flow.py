@@ -57,7 +57,8 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
     tk: dict[str, dict[str, dict[str, float]]] = {}
     for r in con.execute(f"""
             SELECT f.ticker, w.k, {sums} FROM {fl} f JOIN uc USING (ticker) JOIN w ON f.date > w.d0
-            WHERE f.src = 'kiwoom' AND f.date <= {lit(day)} GROUP BY 1, 2""").fetchall():
+            WHERE f.src = 'kiwoom' AND f.date <= {lit(day)} AND f.date > {lit(win['1M'])}
+            GROUP BY 1, 2""").fetchall():
         tk.setdefault(text(r[0]), {})[text(r[1])] = dict(zip(INV, map(num0, r[2:]), strict=True))
     fw: dict[str, dict[str, float | None]] = {}
     for t, dd, pct in con.execute(f"""

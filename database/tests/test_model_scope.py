@@ -9,7 +9,8 @@
     min_analysts 지원은 남아 있어, spec 이 그 값을 주면 0 은 빠지고 모름(NULL)·1 이상은 남는다.
 (e) MG1 이 spec 과 같은 규칙으로 유니버스를 센다(안 그러면 빠진 종목이 '점수 누락'으로 잡혀 판이
     막힌다).
-(f) 인계(엑셀)의 기본 주 모델은 scope@1.0 이다.
+(f) 인계(엑셀)의 기본 주 모델은 scope@2.0 이다(10-12 scope@1.0 에서 바꿈 — 추정치 유예 5거래일,
+    N-47). scope_v2.0 은 scope_v1.0 과 유예만 다르다.
 (g) 짧은 첫 사업연도(G-28, N-25 Q5): scope 만 12개월 미만 연간 행을 퀄리티 손익 지표(gpa·roa·
     fcf_assets·gpa_change)에서 뺀다. v3_zscore@1.0 은 그대로(회귀 가드).
 (h) 창 안 제한폭 초과 미해결 수정주가(T-9 · H1-4): scope 만 모멘텀(r1m~r12m)·20일 변동성 창이
@@ -360,5 +361,5 @@ def test_adj_jump_param_is_validated(bad: dict[str, object]) -> None:
 
 
 # ── (f) 주 모델 ────────────────────────────────────────────────────────────────
-def test_scope_is_the_default_primary_model() -> None:
-    assert PRIMARY_DEFAULT == SCOPE
+def test_scope_v2_is_the_default_primary_model() -> None:
+    assert PRIMARY_DEFAULT == SCOPE_V2

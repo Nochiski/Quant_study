@@ -165,7 +165,7 @@ NORMAL_CRON = "\n".join(("# 평일 20:05 KST — insight·위키(V3-A). daily_al
 # 컷오버 전 — 지금 v3 crontab
 PRECUTOVER_CRON = "\n".join((CRON_DAILY_ALL, CRON_YEAR, CRON_MONTHLY, *CRON_OTHERS)) + "\n"
 
-MODEL_BUILDS = {"scope@1.0": "m_20261019_0741_ab12", "v2_percentrank@1.0": "m_20261019_0741_cd34"}
+MODEL_BUILDS = {"scope@2.0": "m_20261019_0741_ab12", "v2_percentrank@1.0": "m_20261019_0741_cd34"}
 
 
 # ── 픽스처 조립 ────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ def test_정상_허용_job_만이면_rc0_이고_알림이_없다(tmp_path: Path,
     assert marks == {("ka20006", "allowed")}
     assert out["collect"]["warnings"] == []
     sh = out["scores"]["tables"]["score_history"]
-    assert (sh["rows"], sh["record"]["n_rows"], sh["record"]["build_id"]) == (5, 5, MODEL_BUILDS["scope@1.0"])
+    assert (sh["rows"], sh["record"]["n_rows"], sh["record"]["build_id"]) == (5, 5, MODEL_BUILDS["scope@2.0"])
     assert out["cron"]["daily_post_runs"] == 1
     assert _crits(home) == []
     screen = capsys.readouterr().out
@@ -404,7 +404,7 @@ def test_compat_기록_없이_점수_행이_있으면_위반(tmp_path: Path, mon
 
 def test_compat_기록에_판_id_가_없으면_위반(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = _home(tmp_path, monkeypatch)
-    assert _run(home, _inputs(tmp_path, model_builds={"scope@1.0": "m_x"})) == 1
+    assert _run(home, _inputs(tmp_path, model_builds={"scope@2.0": "m_x"})) == 1
     v2 = _out(home)["scores"]["violations"]
     assert len(v2) == 1 and "v2_percentrank@1.0" in v2[0]
 

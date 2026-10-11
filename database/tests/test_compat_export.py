@@ -1197,12 +1197,12 @@ def test_cli_exports_score_tables(roots, model_root, tmp_path: Path, capsys) -> 
 #   `gates.score_dtypes`)로 쓴다 — 열 구성·순서·dtype 이 서버 판과 같다.
 # 합성 판 두 개: 09-23 판(MB_D23)과 다음 날 09-24 판(MB_D24, `latest_morning.json` 이 가리킨다).
 #   값은 열마다 다르게 두고 09-24 판은 +100 을 더해, 어느 판을 읽었는지 값으로 가린다.
-SCOPE, V2 = "scope@1.0", "v2_percentrank@1.0"
+SCOPE, V2 = "scope@2.0", "v2_percentrank@1.0"      # 메인 모델 — 10-12 scope@1.0 → scope@2.0(N-47)
 MB_D23 = "m_20260924T040000_000000Z"
 MB_D24 = "m_20260925T040000_000000Z"
 D23_ISO, D24_ISO = "2026-09-23", "2026-09-24"
 SCORE_CODES = ("005930", "000660", "123450")
-# scope@1.0 에서 v3 `score_history` 로 옮기지 않는 열 — 리터럴로 고정한다(명세).
+# scope 에서 v3 `score_history` 로 옮기지 않는 열 — 리터럴로 고정한다(명세).
 #   6열: v3 에서도 항상 NULL(플랜 §8-1, 엔진 MG3 가 NULL 을 강제)
 #   val_ev_ebitda: scope 는 EV/EBITDA 를 밸류에 쓰지 않는다(원본 v3 에서 비어 있던 계산과 같게
 #                  만든 spec) — 값이 있어도 v3 열 의미('밸류 입력')와 달라 NULL 로 둔다
@@ -1333,7 +1333,7 @@ def test_score_mappings_match_v3_schema_and_model_contract() -> None:
 
 
 def test_score_history_from_scope_run(roots, model_root, tmp_path: Path) -> None:
-    """scope@1.0 → score_history 48열. 열 이름 그대로, 값 그대로, NULL 열 7개만 비운다."""
+    """scope@2.0 → score_history 48열. 열 이름 그대로, 값 그대로, NULL 열 7개만 비운다."""
     from model.contracts import V3_SCORE_COLUMNS
     target = tmp_path / "quant.db"
     res = _run(roots, target, tables=["score_history"], model_root=model_root)

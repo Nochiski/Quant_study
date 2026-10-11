@@ -666,7 +666,8 @@ WHERE a.period_kind = 'E' AND a.period = '{asof_fy}'
 # 원천은 모델 판 점수 표 `<model_root>/<spec_id>/v=<build_id>/scores.parquet` 다. 판은
 # `--date D --basis` 의 모델 성공 판 하나로 고정한다(`quant_db._resolve_model`).
 # 최신 판으로 대체하지 않는다(P1).
-#   score_history    ← scope@1.0(메인 모델 scope_v1.0, 엔진 v3_zscore)
+#   score_history    ← scope@2.0(메인 모델 scope_v2.0, 엔진 v3_zscore — 2026-10-12 scope@1.0 에서
+#                      바꿈, N-47: scope_v1.0 + 추정치 유예 5거래일이라 유예 종목만큼 종목이 는다)
 #   score_history_v2 ← v2_percentrank@1.0
 # 모델 점수 열 계약(`model.contracts.V3_SCORE_COLUMNS`·`V2_SCORE_COLUMNS`)은 v3 DDL 과 이름·순서가
 # 같다(엔진이 v3 원본 이식 — G-M3). 그래서 열은 **같은 이름끼리** 옮기고, 타입만 v3 DDL 에 맞춰 명시
@@ -674,13 +675,14 @@ WHERE a.period_kind = 'E' AND a.period = '{asof_fy}'
 # `null_columns` 는 원천 열이 있어도 옮기지 않고 NULL 로 둔다(임의로 채우지 않는다):
 #   · score_history 6열(growth·sentiment·volatility·size·foreign·shareholder_score) — v3 에서도 항상
 #     NULL(플랜 §8-1). 엔진도 NULL 이지만(MG3) 여기서 한 번 더 못 박는다.
-#   · score_history.val_ev_ebitda — scope@1.0 은 EV/EBITDA 를 밸류에서 뺐다. 원본 v3 에서 데이터가
-#     3/1,321 종목뿐이라 비어 있던 계산과 같게 만든 spec 이다(`config/models/scope_v1_0.toml`).
+#   · score_history.val_ev_ebitda — scope 는 EV/EBITDA 를 밸류에서 뺐다. 원본 v3 에서 데이터가
+#     3/1,321 종목뿐이라 비어 있던 계산과 같게 만든 spec 이다(`config/models/scope_v1_0.toml` ·
+#     `scope_v2_0.toml`).
 #     엔진은 원값을 싣지만 v3 열 의미('밸류 입력')와 달라 비운다. v3 실물도 비어 있다
 #     (로컬 사본 08-07 0/1,283).
 # 종목 수는 v3 보다 적다(scope 593 · v2 625 vs v3 1,329 · 2,526) — 10-05 유니버스 결정, T-17 수용.
 # 쓰기는 날짜 단위 교체다(그 score_date 행 전부 삭제 → 삽입, 한 트랜잭션 — `quant_db`).
-SCORE_SPEC = "scope@1.0"
+SCORE_SPEC = "scope@2.0"
 SCORE_V2_SPEC = "v2_percentrank@1.0"
 _SCORE_NULL = ("growth_score", "sentiment_score", "volatility_score", "size_score",
                "foreign_score", "shareholder_score", "val_ev_ebitda")
@@ -804,7 +806,7 @@ MAPPINGS: tuple[TableMapping, ...] = (
         retire_when="브리핑 상위 8·export·api health·unitelegram get_signal_insights 가 "
                     "model 판 직독으로 옮겨진 뒤",
         null_columns=_SCORE_NULL,
-        note="scope@1.0 점수 표 → 같은 이름 열(T-16). score_date 단위 교체. "
+        note="scope@2.0 점수 표 → 같은 이름 열(T-16 · N-47). score_date 단위 교체. "
              "val_ev_ebitda 는 scope 가 밸류에 안 써 NULL",
     ),
     TableMapping(

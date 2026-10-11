@@ -48,7 +48,7 @@ from model.engines import ENGINES
 
 log = logging.getLogger(__name__)
 
-RULES_VERSION = "mb1.6.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
+RULES_VERSION = "mb1.7.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에 min_analysts
                             # 1.2.0(2026-10-05): 비교 모델 실패 격리(N-11)
                             # 1.3.0(2026-10-06): 비교 모델 엔진 예외도 그 spec 만 뺌(D-01)
                             #   · FAIL 재실행이 같은 날 ok `_runs` 기록을 덮지 않음(D-09)
@@ -60,10 +60,14 @@ RULES_VERSION = "mb1.6.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에
                             # 1.6.0(2026-10-10): scope 모멘텀·20일 변동성 — 창 안 제한폭 초과
                             #   미해결 수정주가면 결측(컷오버 H1-4 · T-9, fi1.6.0 adj_jump_ok)
                             #   · 판 manifest spec 요약에 엔진 메타(scope adj_jump_masked)
+                            # 1.7.0(2026-10-12, N-47): 엔진·MG1 이 fi grace 종목을 spec 유예로
+                            #   다시 자른다(fi1.9.0 유예 창 5) · scope@2.0 등록 · 기본 주 모델
+                            #   scope@1.0 → scope@2.0
 LAYER = "model"
 BASES = ("evening", "morning")
-PRIMARY_DEFAULT = "scope@1.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
-                                     # (2026-10-05 v4_rank@0.1 → scope@1.0, 사용자 결정 10-01)
+PRIMARY_DEFAULT = "scope@2.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
+                                     # (2026-10-05 v4_rank@0.1 → scope@1.0, 사용자 결정 10-01 ·
+                                     #  2026-10-12 scope@1.0 → scope@2.0, 추정치 유예 5거래일 N-47)
 # spec 별 MANIFEST 에 남길 판 수. 엑셀의 Δ순위 1W·1M·순위 흐름이 한 달 전 판까지 열어야
 # 한다 — 3 이면 같은 날 재빌드 세 번에 전날 판이 지워졌다(10-05 Δ순위 빈칸).
 # 60 ≈ 거래일 석 달(판 하나 약 140KB).

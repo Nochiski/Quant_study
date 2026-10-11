@@ -339,7 +339,7 @@ def test_score_tables_universe_common_ev_null_and_spearman(pair, equity_root) ->
     assert _keys(rep, "score_history", "score_val_ev_ebitda_null") == {"005930"}   # 값 있는 val_ev 차이는 공통 값
     s = rep["scores"]["score_history"]
     assert (s["spec"], s["total_column"], s["n_common"], s["n_v3_only"], s["n_compat_only"]) == \
-        ("scope@1.0", "composite_score", 2, 1, 0)
+        ("scope@2.0", "composite_score", 2, 1, 0)
     assert (s["v3_only"], s["compat_only"]) == (["035720"], [])
     assert s["spearman"] == pytest.approx(1.0)
     assert (s["judged"], s["ok"]) == (False, True)                   # 기본 0 = 기록형

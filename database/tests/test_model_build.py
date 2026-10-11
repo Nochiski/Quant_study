@@ -206,7 +206,7 @@ def test_run_manifest_and_latest_pointer(built) -> None:
     assert run["layer"] == "model" and run["status"] == "ok" and run["excluded_specs"] == {}
     assert (run["build_id"], run["date"], run["basis"], run["fi_build_id"]) == (
         res.build_id, D, "morning", FI_BID)
-    assert run["primary_spec"] == "scope@1.0"          # 기본 주 모델(10-05 v4_rank@0.1 → scope@1.0)
+    assert run["primary_spec"] == "scope@2.0"          # 기본 주 모델(10-12 scope@2.0, N-47)
     assert tuple(run["specs"]) == ALL_SPECS
     for spec_id, s in run["specs"].items():
         # scope 만 엔진 메타(T-9 · H1-4 창 안 제한폭 초과 미해결 칸 수)를 싣는다
@@ -746,7 +746,7 @@ def test_cli_return_codes(board_tree, golden_tree, tmp_path, capsys) -> None:
     assert fail == 1
     assert "MG4" in capsys.readouterr().err
     bad = cli_main([*common, str(board_tree), "--root", str(tmp_path / "c"),
-                    "--specs", V3])                     # primary 기본 scope@1.0 이 선택 밖
+                    "--specs", V3])                     # primary 기본 scope@2.0 이 선택 밖
     assert bad == 2
 
 

@@ -86,7 +86,14 @@ from .reader import (
     ymd,
 )
 from .sources import open_sources
-from .trend import FALLBACK_NOTE, WINDOWS, Trend, load_trend, spark_groups
+from .trend import (
+    FALLBACK_NOTE,
+    WINDOWS,
+    Trend,
+    history_basis,
+    load_trend,
+    spark_groups,
+)
 from .trend import write_sheet as write_trend_sheet
 from .view import DayView, composite_of, load_day, rank_of, ticker_of
 
@@ -111,8 +118,10 @@ FOOTNOTES = (
     "위로 갈수록 순위 상승. 선 색 = 그 기간 Δ순위(초록 상승 · 빨강 하락 · 회색 같음·모름) — "
     "선의 처음 → 끝 방향과 같다. 1일·1W Δ순위는 싣지 않는다.",
 )
-# 4행 기준일 뒤에 붙는 말 — 읽는 사람이 '판'을 모른다(10-11 사용자 '전일 데이터 이런 식으로')
-BASIS_WORDS = {"morning": "아침 확정 데이터", "evening": "장 마감 데이터"}
+# 4행 기준일 뒤에 붙는 말 — 읽는 사람이 '판'을 모른다(10-11 사용자 '전일 데이터 이런 식으로').
+# 주말 보강판은 확정 샘플(10-11 보강판 발송본 = 샘플 22 양식) 그대로 '주말 보강 데이터'(N-45)
+BASIS_WORDS = {"morning": "아침 확정 데이터", "evening": "장 마감 데이터",
+               "supplement": "주말 보강 데이터"}
 SOURCE_TEXT = "출처: quant-ledger"
 
 
@@ -1428,7 +1437,7 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None,
     scored = [t for t in view.by_ticker if view.scored(t)]
     miss = {b: sum(1 for t in scored if view.bucket_score(t, b) is None) for b in view.buckets}
     pairs: list[tuple[str, object]] = [("기준일", view.date), ("basis", run.basis)]
-    if run.basis in BASIS_NOTES:     # 장 마감 직후 데이터(evening)만 — 아침은 줄 없음(PR-6)
+    if run.basis in BASIS_NOTES:     # 장 마감(evening) · 주말 보강(supplement)만 — 아침은 줄 없음(PR-6)
         pairs.append(("데이터 성격", BASIS_NOTES[run.basis]))
     pairs += [
         ("주 모델", f"{view.spec_id}({model_label(view.spec_id)})"),
@@ -1569,7 +1578,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     run = load_run(model_root, d, basis)
     view = load_day(model_root, fi_root, run, config_dir=config_dir)
     fi = load_fi(fi_root, view)
-    prev = previous_run(model_root, run.date, basis)
+    # 전일 비교 판 — 같은 basis 직전 판. 주말 보강판은 직전 거래일 아침 확정판(N-45, `HISTORY_BASIS`)
+    prev = previous_run(model_root, run.date, history_basis(basis))
     prev_rank: dict[str, int | None] = {}
     # 전일 순위 spec — 직전 판에 주 모델이 없으면 앞 주 모델(N-47 · Q-E1), 둘 다 없으면
     # 전일 데이터 없음

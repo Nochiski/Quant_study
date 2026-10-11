@@ -27,6 +27,9 @@ DEFAULT_CHAT_KEY = "CHAT_ID_AIPLAYGROUND"
 CAPTION_MAX = 1024          # 텔레그램 문서 caption 한도
 TIMEOUT_S = 60
 REDACTED = "***"
+# 캡션 첫 줄 basis 자리에 쓰는 말 — 없으면 basis 이름 그대로(morning · evening). 주말 보강판은
+# '주말 보강'(N-45 · DECISIONS §7 #8)
+CAPTION_BASIS = {"supplement": "주말 보강"}
 
 # (url, 폼 필드, 파일 이름, 파일 바이트) → 텔레그램 응답 JSON
 Transport = Callable[[str, Mapping[str, str], str, bytes], Mapping[str, object]]
@@ -155,11 +158,12 @@ def caption_daily(date: str, basis: str, spec_id: str, top: Sequence[tuple[int, 
 
     정정 발송(`correction` ≥ 1 — 같은 D·basis 를 `--resend` 로 다시 보냄)이면 끝에
     '정정 n · 데이터 <model 데이터 id> · 생성 <model 생성 시각>' 줄을 단다(N-25 Q9). 첫 발송은
-    그대로다. 장 마감 직후 데이터(evening)는 둘째 줄에 데이터 성격(`common.BASIS_NOTES`)을 단다
-    (PR-6). 읽는 사람이 '판'을 몰라 '데이터'라고 쓴다(10-11 사용자, DECISIONS §7 #6).
+    그대로다. 장 마감 직후 데이터(evening) · 주말 보강(supplement)은 둘째 줄에 데이터
+    성격(`common.BASIS_NOTES`)을 단다(PR-6 · N-45). 주말 보강은 첫 줄 basis 자리도 '주말 보강'
+    (`CAPTION_BASIS`). 읽는 사람이 '판'을 몰라 '데이터'라고 쓴다(10-11 사용자, DECISIONS §7 #6).
     """
     note = BASIS_NOTES.get(basis)
-    text = (f"[모델 점수] {date} {basis} · {spec_id}\n"
+    text = (f"[모델 점수] {date} {CAPTION_BASIS.get(basis, basis)} · {spec_id}\n"
             + (f"{note}\n" if note else "")
             + f"상위5: {_names(top)}\n"
             + f"순위 {n_ranked} · 제외 {n_rows - n_ranked} · 모집단 {n_rows}")

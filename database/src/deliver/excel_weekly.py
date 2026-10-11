@@ -37,7 +37,7 @@ from .view import DayView, composite_of, load_day
 
 Row = dict[str, object]
 Dictionary = list[tuple[str, str, str, str]]
-BASIS = "morning"
+BASIS = "morning"       # 장 마감 판 · 주말 보강판(supplement, N-45)은 읽지 않는다
 DOW = ("월", "화", "수", "목", "금")
 MARK_TOP, MARK_RANKED, MARK_OUT = "●", "○", "✕"
 

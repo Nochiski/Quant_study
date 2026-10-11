@@ -20,6 +20,9 @@
             못 읽으면, 대체 루트(연구 루트 data/model)가 주어졌을 때만 그 루트 아침
             확정판(morning)의 같은 규칙 비교 판을 쓴다. 흐름 첫 점도 그 판이라 위 '처음 → 끝 = Δ'
             가 그대로다. evening 이력이 D−1개월까지 닿으면 저절로 evening 판만 쓴다.
+  비교 이력 basis  주말 보강판(supplement)은 휴장 앞 마지막 거래일에만 서는 드문 판이라(N-45) 비교 판 ·
+            흐름은 아침 확정판(morning) 이력에서 읽고 흐름 끝 점(D)만 보강판 자신이다
+            (`HISTORY_BASIS` — 전일 순위도 같은 이력, `excel_daily.build_daily`).
 """
 from __future__ import annotations
 
@@ -52,6 +55,15 @@ WINDOWS = ("1M",)             # 엑셀에 싣는 창(1W 는 10-06 사용자 결�
 LINE_UP, LINE_DOWN, LINE_FLAT = "1E8C45", "D0312D", "8C8C8C"   # 상승 초록 · 하락 빨강 · 같음 회색
 # Meta '1M 비교 데이터' 값 뒤에 붙인다
 FALLBACK_NOTE = "(아침 확정 데이터 — 장 마감 데이터 비교 데이터 없음, T-50)"
+# 비교 이력을 다른 basis 에서 읽는 판 — 주말 보강판(N-45)은 D 아침 확정판과 같은 이력으로 견준다:
+# 전일 순위 = 직전 거래일 아침판, Δ순위 · 1M 흐름 = 아침판 이력(보강판은 연휴마다 하나뿐이다).
+# 표에 없는 basis(morning · evening)는 자기 이력이다 — evening 의 1M 비교 판 대체는 아래 T-50 이 따로 한다
+HISTORY_BASIS: dict[str, str] = {"supplement": "morning"}
+
+
+def history_basis(basis: str) -> str:
+    """전일 순위 · 비교 판 · 흐름을 읽을 basis(`HISTORY_BASIS`)."""
+    return HISTORY_BASIS.get(basis, basis)
 
 
 def month_back(d: date) -> date:
@@ -108,7 +120,8 @@ def _ranks(model_root: Path, run: ModelRun,
 def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
                fallback_root: Path | None = None) -> Trend:
     d = date.fromisoformat(run.date)
-    bases = {w: _on_or_before(model_root, window_start(d, w), basis) for w in WINDOWS}
+    hist = history_basis(basis)
+    bases = {w: _on_or_before(model_root, window_start(d, w), hist) for w in WINDOWS}
     b1m = bases["1M"]
     start = b1m.date if b1m is not None else (month_back(d) + timedelta(days=1)).isoformat()
     by_date: dict[str, dict[str, int | None]] = {}
@@ -121,7 +134,9 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
         if sid != spec_id:
             older[r.date] = sid
         return ranks
-    for r in runs_between(model_root, start, run.date, basis):
+    # 흐름 끝 점(D)은 이 판 자신 — 보강판이면 이력(아침판)의 D 판 대신이다(N-45)
+    for r in [*(x for x in runs_between(model_root, start, run.date, hist) if x.date != run.date),
+              run]:
         got = _ranks(model_root, r, spec_id)
         if got is not None:
             take(r, got)
@@ -218,5 +233,5 @@ def spark_groups(tickers: Sequence[str], trend: Trend, d: date,
     return out
 
 
-__all__ = ["FALLBACK_NOTE", "SHEET", "Trend", "line_color", "load_trend", "month_back",
-           "spark_groups", "window_start", "write_sheet"]
+__all__ = ["FALLBACK_NOTE", "HISTORY_BASIS", "SHEET", "Trend", "history_basis", "line_color",
+           "load_trend", "month_back", "spark_groups", "window_start", "write_sheet"]

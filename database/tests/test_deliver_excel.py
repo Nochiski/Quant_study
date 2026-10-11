@@ -1466,9 +1466,10 @@ def test_meta_records_excel_time_and_deployed_rev(world: dict[str, Path], tmp_pa
 
 def _write_rank_run(model_root: Path, day: str, spec: str, ranks: dict[str, int],
                     basis: str = "morning", fi: str = "x") -> None:
-    """순위만 있는 최소 model 판(순위 흐름 재료). 판 id 접두어는 basis 를 따른다(m_ · e_).
+    """순위만 있는 최소 model 판(순위 흐름 재료). 판 id 접두어는 basis 를 따른다(m_ · e_ · s_).
     `fi` = 판 manifest 의 factor_inputs 판 id(없는 판이면 그날 fi 를 읽는 곳은 건너뛴다)."""
-    bid = f"{'e' if basis == 'evening' else 'm'}_{day.replace('-', '')}T000000Z"
+    prefix = {"evening": "e", "supplement": "s"}.get(basis, "m")
+    bid = f"{prefix}_{day.replace('-', '')}T000000Z"
     _write(model_root / spec / f"v={bid}" / "scores.parquet",
            pa.schema([("ticker", pa.string()), ("rank", pa.int64())]),
            [{"ticker": t, "rank": r} for t, r in ranks.items()])
@@ -2515,7 +2516,8 @@ def test_plain_wording_has_no_board_or_cap_words(daily, scope_board) -> None:
 
 def test_basis_words_in_the_band_follow_basis() -> None:
     from deliver.excel_daily import BASIS_WORDS
-    assert BASIS_WORDS == {"morning": "아침 확정 데이터", "evening": "장 마감 데이터"}
+    assert BASIS_WORDS == {"morning": "아침 확정 데이터", "evening": "장 마감 데이터",
+                           "supplement": "주말 보강 데이터"}
 
 
 def test_note_box_wraps_at_300px_and_keeps_symbols_glued(tmp_path: Path) -> None:
@@ -2825,3 +2827,114 @@ def test_grace_remark_rules() -> None:
     assert grace_notes(Grace(5, {"x": 4}), "x", "grace", 3) == ("유예 3일째", "1M 유예 4일")
     assert grace_notes(Grace(5, {}), "x", "grace", 0) == (None, None)    # 나이 0(휴장 수집)
     assert grace_notes(Grace(5, {}), "x", "fresh", None) == (None, None)
+
+
+# ── E5(N-45) — 주말 보강판(basis supplement) ─────────────────────────────────────────────
+SUPP_NOTE = ("휴일 아침에 WISE 를 다시 받아 기준일 추정치까지 넣은 데이터 · "
+             "컨센서스 기준일 = 기준일 당일")
+MODEL_SHEETS = ("Score", "Sector", "Earnings", "Compare", "Raw", "Meta")
+
+
+def _supplement_root(world: dict[str, Path], tmp_path: Path) -> Path:
+    """world model 루트 사본 + D = 09-25 주말 보강판(아침판과 같은 점수 파일을 가리키는 basis
+    supplement 판). 음성 대조 둘 — 09-18 보강판 · 09-24 장 마감 판(둘 다 순위만, 거꾸로): 보강판이
+    자기 basis(드문 보강판)나 장 마감 이력을 읽으면 전일 순위 · 흐름이 아침판과 달라진다."""
+    model = tmp_path / "model"
+    shutil.copytree(world["model"], model)
+    meta = json.loads((model / "_runs" / "20260925_morning.json").read_text(encoding="utf-8"))
+    (model / "_runs" / "20260925_supplement.json").write_text(
+        json.dumps({**meta, "basis": "supplement"}, ensure_ascii=False), encoding="utf-8")
+    rev = {tick(i): N - i for i in range(N)}
+    _write_rank_run(model, "2026-09-18", PRIMARY, rev, basis="supplement")
+    _write_rank_run(model, THU, PRIMARY, rev, basis="evening")
+    return model
+
+
+def _rows_from(ws, first: int) -> list[list[object]]:
+    return [[c.value for c in row] for row in ws.iter_rows(min_row=first)]
+
+
+def test_supplement_board_compares_like_the_morning_board(world: dict[str, Path],
+                                                          tmp_path: Path) -> None:
+    """N-45 · E5 — 주말 보강판(D = 09-25)은 D 아침판처럼 견준다: 전일 순위 = 직전 거래일(09-24)
+    아침판, Δ순위 1M · 1M 흐름 = 아침판 이력, 흐름 끝 점(D)만 보강판 자신(`trend.HISTORY_BASIS`).
+    09-18 보강판 · 09-24 장 마감 판(순위 거꾸로)은 끼지 않는다. 확정 양식 시트 4행은 '주말 보강
+    데이터', Meta 에 데이터 성격 줄. 새 시트 4행은 원천 날짜 규칙(Q-E2) 그대로."""
+    from deliver.reader import load_run
+    from deliver.trend import load_trend
+    model = _supplement_root(world, tmp_path)
+    mo = build_daily(FRI, "morning", model_root=model, fi_root=world["fi"], out_root=tmp_path / "m")
+    su = build_daily(FRI, "supplement", model_root=model, fi_root=world["fi"],
+                     out_root=tmp_path / "s")
+    assert su.path.name == "model_scores_20260925_supplement.xlsx" and su.basis == "supplement"
+    wm, wsu = load_workbook(mo.path), load_workbook(su.path)
+    mm, ms = dict(_meta_pairs(wm)), dict(_meta_pairs(wsu))
+    for k in ("전일 비교 데이터", "1M 비교 데이터", "순위 흐름 날짜"):
+        assert ms[k] == mm[k], k
+    assert ms["전일 비교 데이터"] == f"{THU} m_20260924T000000Z"
+    assert ms["basis"] == "supplement" and ms["데이터 성격"] == SUPP_NOTE
+    assert "데이터 성격" not in mm and "판" not in SUPP_NOTE
+    # 전일 순위 · 변화 · Δ순위 1M · 후보와 흐름 원자료가 아침판과 같다(같은 점수 파일이라)
+    for name in ("Score", "trend"):
+        assert _rows_from(wsu[name], 7) == _rows_from(wm[name], 7), name
+    for name in MODEL_SHEETS:
+        a4 = str(wsu[name]["A4"].value)
+        assert a4 == f"기준일: {FRI} 주말 보강 데이터" or a4.startswith(
+            f"기준일: {FRI} 주말 보강 데이터 · "), (name, a4)
+    for name in wsu.sheetnames:
+        if name not in (*MODEL_SHEETS, "trend"):
+            assert wsu[name]["A4"].value == wm[name]["A4"].value, name
+    # 흐름 끝 점은 보강판, 나머지는 아침판
+    trend = load_trend(model, load_run(model, FRI, "supplement"), PRIMARY, "supplement")
+    assert trend.runs[FRI].basis == "supplement"
+    assert {r.basis for d, r in trend.runs.items() if d != FRI} == {"morning"}
+
+
+def test_cli_supplement_send_has_its_own_ledger_key(world: dict[str, Path], tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    """N-45 · E5 — `--basis supplement` 는 아침판과 같은 발송 장부 파일에 (D, supplement) 키로 따로
+    남는다: 아침을 보낸 D 도 보강판은 보내고, 두 번째 자동 발송은 건너뛰고, `--resend` 는 정정 1.
+    아침 줄은 그대로라 아침 재실행은 건너뛴다. 캡션 첫 줄 basis 자리 = '주말 보강' + 데이터 성격 줄."""
+    model = _supplement_root(world, tmp_path)
+    out = tmp_path / "out"
+    calls = _fake_send(monkeypatch)
+
+    def args(basis: str, *extra: str) -> list[str]:
+        return ["model-daily", "--date", "20260925", "--basis", basis, "--send",
+                "--env-file", str(_env(tmp_path)), "--model-root", str(model),
+                "--fi-root", str(world["fi"]), "--out-root", str(out), *extra]
+    assert cli.main(args("morning")) == 0
+    assert cli.main(args("supplement")) == 0
+    capsys.readouterr()
+    assert cli.main(args("supplement")) == 0                       # 같은 D · supplement — 건너뜀
+    assert "건너뜀" in capsys.readouterr().out
+    assert cli.main(args("supplement", "--resend")) == 0
+    assert cli.main(args("morning")) == 0                          # 아침 줄 그대로 — 건너뜀
+    assert len(calls) == 3
+    assert [(e["basis"], e["correction"]) for e in _ledger(out)] == [
+        ("morning", 0), ("supplement", 0), ("supplement", 1)]
+    cap = calls[1]["caption"]
+    assert cap.splitlines()[:2] == [f"[모델 점수] {FRI} 주말 보강 · {PRIMARY}", SUPP_NOTE]
+    assert len(cap) <= 1024 and "정정 1" in calls[2]["caption"]
+    assert (out / "daily" / "model_scores_20260925_supplement.xlsx").exists()
+    assert (out / "daily" / "model_scores_20260925_morning.xlsx").exists()
+
+
+def test_weekly_ignores_supplement_runs(world: dict[str, Path], tmp_path: Path) -> None:
+    """N-45 — 주간 엑셀은 아침 확정판만 읽는다. 금요일 보강판(순위 거꾸로)이 있어도 그 주 요일 표시 ·
+    기준일 순위는 아침판 그대로."""
+    from deliver.excel_weekly import load_week
+    model = tmp_path / "model"
+    shutil.copytree(world["model"], model)
+    _write_rank_run(model, FRI, PRIMARY, {tick(i): N - i for i in range(N)}, basis="supplement")
+    week = load_week(model, "2026-W39", None, fi_root=world["fi"])
+    assert {v.run.basis for v in week.views.values()} == {"morning"}
+    assert week.views[FRI].run.build_id == FRI_BUILD
+    a = build_weekly("2026-W39", model_root=world["model"], fi_root=world["fi"],
+                     out_root=tmp_path / "a")
+    b = build_weekly("2026-W39", model_root=model, fi_root=world["fi"], out_root=tmp_path / "b")
+    wa, wb_ = load_workbook(a.path), load_workbook(b.path)
+    for name in wa.sheetnames:
+        if name != "메타":
+            assert _rows_from(wb_[name], 1) == _rows_from(wa[name], 1), name

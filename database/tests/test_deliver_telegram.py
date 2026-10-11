@@ -182,6 +182,20 @@ def test_caption_daily_evening_says_postclose_basis() -> None:
     assert "장 마감" not in morning and "컨센서스" not in morning
 
 
+def test_caption_daily_supplement_says_weekend_supplement() -> None:
+    """N-45 · E5 — 주말 보강판(basis supplement)은 첫 줄 basis 자리가 '주말 보강'이고 둘째 줄에
+    데이터 성격(휴일 아침 WISE 재수집 · 컨센서스 기준일 = 기준일 당일)을 단다. '판' 없이, 1024자 안."""
+    top = [(1, "005930", "삼성전자")]
+    morning = tg.caption_daily("2026-10-08", "morning", "scope@2.0", top, 593, 600)
+    c = tg.caption_daily("2026-10-08", "supplement", "scope@2.0", top, 593, 600)
+    lines = c.splitlines()
+    assert lines[0] == "[모델 점수] 2026-10-08 주말 보강 · scope@2.0"
+    assert lines[1] == ("휴일 아침에 WISE 를 다시 받아 기준일 추정치까지 넣은 데이터 · "
+                        "컨센서스 기준일 = 기준일 당일")
+    assert lines[2:] == morning.splitlines()[1:]
+    assert "판" not in c and "supplement" not in c and len(c) <= tg.CAPTION_MAX
+
+
 def test_caption_daily_correction_line() -> None:
     """Q9 — 정정 발송(n ≥ 1)만 끝에 '정정 n · 데이터 id · 생성 시각' 줄을 단다.
     첫 발송(n = 0)은 그대로."""

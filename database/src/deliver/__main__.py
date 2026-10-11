@@ -1,6 +1,7 @@
 """CLI — 모델 엑셀 만들기와 발송.
 
   python -m deliver model-daily  --date YYYYMMDD --basis morning [--send [--resend]] [--dry-run]
+                                 (basis = morning · evening · supplement(주말 보강판 N-45))
                                  [--trend-fallback-root data/model]   (장 마감 판만 — T-50)
                                  [--equity-root PATH] [--stage-root PATH] (새 시트 원천 — 기본 fi 판 JSON)
   python -m deliver model-weekly --week YYYY-Www                 [--send] [--dry-run]
@@ -17,6 +18,8 @@
 `--send` 는 엑셀도 다시 만들지 않고 건너뛴다(rc 0, 표준출력 한 줄 — 보낸 파일이 장부 sha256 과
 같게 남는다). 같은 날 다시 보내려면 `--resend` 를 명시하고, 그때 캡션에 '정정 n · 판 id · 생성
 시각' 이 붙는다. 장부 줄을 읽지 못하면 보냈는지 모르므로 보내지 않는다(rc 2).
+주말 보강판(supplement)은 아침판과 같은 장부 파일(기본 out-root)에 basis=supplement 줄로 따로
+남는다 — 같은 D 의 아침 발송을 막지도, 아침 발송 때문에 건너뛰지도 않는다(N-45).
 
 rc: 0 성공(이미 보내 건너뜀 포함) · 1 발송 실패(dry-run 은 비밀 키 없음) · 2 입력·인자 오류(판 없음·
     발송 장부 손상·읽기 실패·비밀 파일 미설정·없음 등) · 3 그 밖 예상 밖 예외(엑셀 생성 실패 등 —
@@ -90,7 +93,8 @@ def _parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("model-daily", help="매일 엑셀")
     d.add_argument("--date", required=True, help="YYYYMMDD")
-    d.add_argument("--basis", required=True, choices=("morning", "evening"))
+    # supplement = 주말 보강판(N-45) — 발송 장부 키도 (D, supplement) 라 같은 D 아침 발송과 갈린다
+    d.add_argument("--basis", required=True, choices=("morning", "evening", "supplement"))
     d.add_argument("--resend", action="store_true",
                    help="이미 보낸 D·basis 를 정정으로 다시 보낸다(--send 와 함께, "
                         "캡션에 '정정 n')")

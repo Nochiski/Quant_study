@@ -2,9 +2,11 @@
 
 원천: stage `stg_disclosure`(DART 공시 목록) · `stg_corp_map`(고유번호 → 종목코드) · `stg_event_*`
 (주요사항: 자사주 취득 · 처분 결정 · 유상증자 · 전환사채 등) · equity `holder_daily`(임원 · 주요주주 ·
-5% 대량보유 보고) · `price_daily`(종가). 기준일 = 공시 최신 접수일.
-같은 날 같은 공시의 정정 · 첨부 판본은 한 건, 임원 보유 순변동은 임원만(10% 주요주주 보고는 여러 달
-변동을 한꺼번에 내거나 주식 병합 전 수량이 섞여 뺀다), 5% 대량보유는 지분 변화가 있는 보고만.
+5% 대량보유 보고) · `price_daily`(종가). 기준일 = 공시 최신 접수일(4행), 지분 보고 · 주요사항 결정은
+그 원천의 최신 날짜로 따로 세고 다르면 표 제목에 적는다.
+같은 날 같은 공시의 정정 · 첨부 판본은 한 건, 임원 보유 순변동은 임원(등기 · 비등기)만(임원이 아닌
+주요주주 보고는 여러 달 변동을 한꺼번에 내거나 주식 병합 전 수량이 섞여 뺀다), 5% 대량보유는 지분 변화가
+있는 보고만. 주요사항 결정은 뒤에 정정 공시가 나온 판본(DART 비고 '정')을 빼고 정정본에 '[정정]'.
 """
 from __future__ import annotations
 
@@ -32,9 +34,10 @@ from .extra_common import (
     md,
     span,
     tail_cap,
+    until,
 )
 from .qpack import XRefs, XSheet, x_note
-from .sources import Sources, day_of, lit, num, text
+from .sources import SourceMissing, Sources, day_of, lit, num, text
 
 NAME = "Events"
 WIDTHS = {"A": 7.5, "B": 18, "C": 14, "D": 7, "E": 8, "F": 21, "G": 90}
@@ -69,6 +72,7 @@ class Holder:
     repror: str
     rcept_dt: date
     ofcps: str | None                           # 직위('-' · 빈칸 = 주요주주)
+    officer: bool                               # 임원(등기 · 비등기) 보고인가 — exec_rgist
     report_resn: str | None
     qty_change: float | None                    # 주식 수 변동
     rate: float | None                          # 보고 뒤 지분(%)
@@ -83,7 +87,7 @@ class Decision:
     rcept_no: str
     code: str
     amt: float | None                           # 금액(억원)
-    desc: str                                   # '종류 · 방법 · …'(첫 낱말 = 종류)
+    desc: str                                   # '[정정] 종류 · 방법 · …'(정정본만 '[정정] ')
 
 
 @dataclass
@@ -99,7 +103,9 @@ class Insider:
 
 @dataclass
 class EventsData:
-    cal: Calendar
+    cal: Calendar                               # 공시 목록 기준(4행)
+    hcal: Calendar                              # 지분 보고 기준
+    dcal: Calendar                              # 주요사항 결정 기준
     disclosure: list[Disclosure]
     holder: list[Holder]
     decisions: list[Decision]                   # 표 순서(취득 · 처분 · 증자 · 사채) · 원장 순
@@ -131,31 +137,60 @@ def _one_line(x: object) -> str:
     return re.sub("\n", " ", "" if x is None else str(x))
 
 
+DECISION_TABLES = ("stg_event_tsstk_aq", "stg_event_tsstk_dp", "stg_event_piic",
+                   "stg_event_cvbd_is")
+OFFICERS = ("등기임원", "비등기임원")              # holder_daily exec_rgist — 그 밖('-')은 임원 아닌 주요주주
+
+
+def _decision_day(con: duckdb.DuckDBPyConnection, src: Sources, upto: date) -> date:
+    """주요사항 결정 원천의 최신 접수일(≤ upto) — 접수번호 앞 8자리, 네 표 중 가장 늦은 날."""
+    rels = " UNION ALL ".join(f"SELECT rcept_no FROM {src.stage(t)}" for t in DECISION_TABLES)
+    got = con.execute(f"SELECT max(substr(rcept_no, 1, 8)) FROM ({rels}) "
+                      f"WHERE substr(rcept_no, 1, 8) <= '{upto:%Y%m%d}'").fetchone()
+    if got is None or got[0] is None:
+        raise SourceMissing(f"주요사항 결정에 {upto} 이하 자료가 없다")
+    return date(int(got[0][:4]), int(got[0][4:6]), int(got[0][6:8]))
+
+
 def _decisions(con: duckdb.DuckDBPyConnection, src: Sources, cmap: dict[str, str], d1m: date,
                day: date) -> list[Decision]:
-    """주요사항 결정(접수번호 앞 8자리 = 접수일이 1M 창 안) — 금액 · 글은 DART 원문 모양으로."""
+    """주요사항 결정(접수번호 앞 8자리 = 접수일이 1M 창 안) — 금액 · 글은 DART 원문 모양으로.
+    공시 목록과 접수번호로 이어, 뒤에 정정 공시가 나온 판본(비고 '정' = rm_corrected_later)은 빼고
+    정정본(is_correction)은 '[정정] ' 을 붙인다(공시 목록에 없는 접수번호는 그대로 둔다). 같은
+    접수번호가 한 표에 두 줄이면 원장 순 마지막 줄."""
+    ds = src.stage("stg_disclosure")
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE dver AS
+        SELECT rcept_no, bool_or(coalesce(is_correction, false)) AS corr,
+               bool_or(coalesce(rm_corrected_later, false)) AS later
+        FROM {ds} WHERE rcept_dt > {lit(d1m)} GROUP BY rcept_no""")
     out: list[Decision] = []
 
     def fetch(table: str, cols: str) -> list[tuple[str, str, list[object]]]:
-        return [(text(r[0]), cmap[text(r[1])], list(r[2:])) for r in con.execute(
-            f"SELECT rcept_no, corp_code, {cols} FROM {src.stage(table)} "
-            f"WHERE substr(rcept_no, 1, 8) > '{d1m:%Y%m%d}' "
-            f"AND substr(rcept_no, 1, 8) <= '{day:%Y%m%d}'").fetchall() if text(r[1]) in cmap]
-    for rn, c, (mth, pp, prc, bgd, edd) in fetch(
+        rows_: dict[str, tuple[str, str, list[object]]] = {}
+        for r in con.execute(
+                f"SELECT e.rcept_no, e.corp_code, coalesce(v.corr, false), {cols} "
+                f"FROM {src.stage(table)} e LEFT JOIN dver v USING (rcept_no) "
+                f"WHERE substr(e.rcept_no, 1, 8) > '{d1m:%Y%m%d}' "
+                f"AND substr(e.rcept_no, 1, 8) <= '{day:%Y%m%d}' "
+                f"AND NOT coalesce(v.later, false)").fetchall():
+            if text(r[1]) in cmap:
+                rows_[text(r[0])] = ("[정정] " if r[2] else "", cmap[text(r[1])], list(r[3:]))
+        return [(rn, c, [tag, *vals]) for rn, (tag, c, vals) in rows_.items()]
+    for rn, c, (tag, mth, pp, prc, bgd, edd) in fetch(
             "stg_event_tsstk_aq", "aq_mth, aq_pp, aqpln_prc_ostk, aqexpd_bgd, aqexpd_edd"):
-        out.append(Decision(rn, c, _won(prc), f"자사주 취득 · {mth} · {_one_line(pp)} · "
+        out.append(Decision(rn, c, _won(prc), f"{tag}자사주 취득 · {mth} · {_one_line(pp)} · "
                                               f"{_dart_day(bgd)}~{_dart_day(edd)}"))
-    for rn, c, (pp, prc, bgd, edd) in fetch(
+    for rn, c, (tag, pp, prc, bgd, edd) in fetch(
             "stg_event_tsstk_dp", "dp_pp, dppln_prc_ostk, dpprpd_bgd, dpprpd_edd"):
-        out.append(Decision(rn, c, _won(prc), f"자사주 처분 · {_one_line(pp)} · "
+        out.append(Decision(rn, c, _won(prc), f"{tag}자사주 처분 · {_one_line(pp)} · "
                                               f"{_dart_day(bgd)}~{_dart_day(edd)}"))
-    for rn, c, (mth, cnt, *funds) in fetch(
+    for rn, c, (tag, mth, cnt, *funds) in fetch(
             "stg_event_piic", "ic_mthn, nstk_ostk_cnt, " + ", ".join(FUNDS)):
         amt = sum(x for x in map(_won, funds) if x)
-        out.append(Decision(rn, c, amt or None, f"유상증자 · {mth}" + (
+        out.append(Decision(rn, c, amt or None, f"{tag}유상증자 · {mth}" + (
             f" · 새 주식 {_count(cnt)}주" if cnt is not None else "")))
-    for rn, c, (knd, fta, prc) in fetch("stg_event_cvbd_is", "bd_knd, bd_fta, cv_prc"):
-        out.append(Decision(rn, c, _won(fta), f"{knd} · 전환가 {_count(prc)}원"))
+    for rn, c, (tag, knd, fta, prc) in fetch("stg_event_cvbd_is", "bd_knd, bd_fta, cv_prc"):
+        out.append(Decision(rn, c, _won(fta), f"{tag}{knd} · 전환가 {_count(prc)}원"))
     return out
 
 
@@ -164,6 +199,9 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
     day = latest(con, ds, "rcept_dt", upto, "true", "DART 공시 목록")
     cal = krx_calendar(con, src, day, upto)
     d1m = cal.win["1M"]
+    hd = src.equity("holder_daily")
+    hcal = krx_calendar(con, src, latest(con, hd, "rcept_dt", upto, "true", "지분 보고"), upto)
+    dcal = krx_calendar(con, src, _decision_day(con, src, upto), upto)
     con.execute("CREATE OR REPLACE TEMP TABLE uc (ticker VARCHAR)")
     con.executemany("INSERT INTO uc VALUES (?)", [(c,) for c in uni])
     # stage 는 공시 제목을 NFKC 로 정규화해 DART 원문의 'ㆍ'(U+318D)가 'ᆞ'(U+119E, 조합용 아래아 —
@@ -177,17 +215,19 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe
         f"SELECT m.corp_code, m.ticker FROM {src.stage('stg_corp_map')} m JOIN uc USING (ticker)"
     ).fetchall()}
     hseen: dict[tuple[str, str], Holder] = {}
-    for rn, sr, rep, cc, dt, ofc, resn, qch, rate, rch in con.execute(f"""
-            SELECT rcept_no, src, repror, corp_code, rcept_dt, ofcps, report_resn,
+    for rn, sr, rep, cc, dt, ofc, reg, resn, qch, rate, rch in con.execute(f"""
+            SELECT rcept_no, src, repror, corp_code, rcept_dt, ofcps, exec_rgist, report_resn,
                    qty_change_shr, rate_pct, rate_change_pct
-            FROM {src.equity('holder_daily')}
-            WHERE rcept_dt > {lit(d1m)} AND rcept_dt <= {lit(day)}""").fetchall():
+            FROM {hd}
+            WHERE rcept_dt > {lit(hcal.win['1M'])} AND rcept_dt <= {lit(hcal.anchor)}""").fetchall():
         if cc in cmap:                  # 같은 보고 · 보고자는 마지막 행(원장 순)
             hseen[(text(rn), text(rep))] = Holder(
                 text(sr), text(rep), day_of(dt), None if ofc is None else text(ofc),
-                None if resn is None else text(resn), num(qch), num(rate), num(rch), cmap[cc])
+                reg in OFFICERS, None if resn is None else text(resn), num(qch), num(rate),
+                num(rch), cmap[cc])
     cd = close_day(con, src, upto)
-    return EventsData(cal, disc, list(hseen.values()), _decisions(con, src, cmap, d1m, day), cd,
+    return EventsData(cal, hcal, dcal, disc, list(hseen.values()),
+                      _decisions(con, src, cmap, dcal.win["1M"], dcal.anchor), cd,
                       closes(con, src, cd, list(uni)))
 
 
@@ -200,8 +240,9 @@ def ev_kind(nm: str) -> str | None:
 
 def write(wb: Workbook, e: EventsData, uni: Universe, refs: XRefs, d: date,
           *, index: int | None = None) -> list[tuple[str, str, str]]:
-    cal, day = e.cal, e.cal.day
+    cal, day = e.cal, e.cal.anchor       # day = 공시 최신 접수일(거래일이 아닐 수 있다)
     win = cal.win
+    hday, dday = e.hcal.anchor, e.dcal.anchor
     cday = md(e.close_day)
     xs = XSheet(wb, NAME, WIDTHS, refs, index=index)
     ws = xs.ws
@@ -265,11 +306,11 @@ def write(wb: Workbook, e: EventsData, uni: Universe, refs: XRefs, d: date,
             (tail_cap(nm, 110), None, True)])
         r += 1
     close(r - 1, 7)
-    # 임원 보유 순변동(1M) — 임원만
+    # 임원 보유 순변동(1M) — 임원(등기 · 비등기)만. 임원을 겸한 주요주주(이사회 의장 등)는 남는다
     ho = [h for h in e.holder if h.code in uni]
     ins: dict[str, Insider] = defaultdict(Insider)
     for h in ho:
-        if h.src != "elestock" or h.qty_change is None or h.ofcps in (None, "-"):
+        if h.src != "elestock" or h.qty_change is None or not h.officer:
             continue
         s = ins[h.code]
         s.q += h.qty_change
@@ -280,7 +321,8 @@ def write(wb: Workbook, e: EventsData, uni: Universe, refs: XRefs, d: date,
         s.amt = s.q * p / 1e8 if p else None
         s.pct = s.amt / mcap * 100 if s.amt is not None and mcap else None
     t0 = r + 1
-    header(t0, [("A", "임원 보유 순변동: 1M 순증 상위 15 · 순감 상위 15"), ("C", "분류"), ("E", "순변동")],
+    header(t0, [("A", f"임원 보유 순변동: 1M 순증 상위 15 · 순감 상위 15{until(hday, day)}"),
+                ("C", "분류"), ("E", "순변동")],
            ["코드", "이름", "대분류", "종합\n순위", "금액\n(억원)", "시총 대비\n(%)",
             "임원(직위) 주식 수 변동 · 보고 건수"])
     r = t0 + 2
@@ -294,7 +336,7 @@ def write(wb: Workbook, e: EventsData, uni: Universe, refs: XRefs, d: date,
             desc = (" · ".join(f"{k} {v:+,.0f}주" for k, v in who[:4])
                     + (f" 외 {len(who) - 4}명" if len(who) > 4 else "") + f" · {s.n}건")
             u = uni[c]
-            xs.stock(r, c, u.name, u.big, u.rank, [
+            xs.stock(r, c, u.name, u.big, u.rank, [               # 10억원 미만만 소수 1자리
                 (amt, F_PCT if abs(amt) < 10 else F_FL, False), (s.pct, "0.00;-0.00", False),
                 (tail_cap(desc, 140), None, True)])
             r += 1
@@ -304,14 +346,15 @@ def write(wb: Workbook, e: EventsData, uni: Universe, refs: XRefs, d: date,
     close(e3_end, 7)
     cs(f"E{t0 + 2}:E{e3_end}")
     ws[f"E{t0 + 1}"].comment = x_note(
-        f"금액(억원): 1M 안 임원 소유상황 보고의 주식 수 변동 합 × {cday} 종가. 장내 매매 · 장외 · 증여 · "
-        "보상 주식을 모두 포함. 10% 이상 주요주주(국민연금 · 모회사 등) 보고는 여러 달 변동을 한꺼번에 내거나 "
-        "주식 병합 전 수량이 섞여 뺐다")
+        f"금액(억원): 1M 안 임원(등기 · 비등기) 소유상황 보고의 주식 수 변동 합 × {cday} 종가. 장내 매매 · "
+        "장외 · 증여 · 보상 주식을 모두 포함. 임원이 아닌 주요주주(최대주주 · 10% 이상 주주 · 특수관계인 등) "
+        "보고는 여러 달 변동을 한꺼번에 내거나 주식 병합 전 수량이 섞여 뺐다")
     # 5% 대량보유(1W) — 지분 변화 0(담보 계약 변경 등) 뺌
     t0 = r + 1
-    header(t0, [("A", "5% 대량보유 보고: 1W, 지분 변화 큰 순 30"), ("C", "분류"), ("E", "보고")],
+    header(t0, [("A", f"5% 대량보유 보고: 1W, 지분 변화 큰 순 30{until(hday, day)}"), ("C", "분류"),
+                ("E", "보고")],
            ["코드", "이름", "대분류", "종합\n순위", "날짜", "지분 변화\n(%p)", "보고자 · 사유 · 보고 뒤 지분"])
-    chs = [(h, ch) for h in ho if h.src == "majorstock" and h.rcept_dt > win["1W"]
+    chs = [(h, ch) for h in ho if h.src == "majorstock" and h.rcept_dt > e.hcal.win["1W"]
            and (ch := h.rate_change)]
     r = t0 + 2
     for h, ch in sorted(chs, key=lambda x: -abs(x[1]))[:30]:
@@ -325,16 +368,16 @@ def write(wb: Workbook, e: EventsData, uni: Universe, refs: XRefs, d: date,
     close(r - 1, 7)
     # 자사주 · 증자 · 사채 결정(1M)
     t0 = r + 1
-    header(t0, [("A", "자사주 · 증자 · 사채 결정: 1M"), ("C", "분류"), ("E", "결정")],
+    header(t0, [("A", f"자사주 · 증자 · 사채 결정: 1M{until(dday, day)}"), ("C", "분류"),
+                ("E", "결정")],
            ["코드", "이름", "대분류", "종합\n순위", "날짜", "금액\n(억원)", "내용"])
     r = t0 + 2
-    # 정정 판본은 마지막 것 하나(같은 종목 · 종류 · 금액)
-    last = {(x.code, x.desc.split(" · ")[0], x.amt): x
-            for x in sorted(e.decisions, key=lambda x: x.rcept_no)}
-    for x in sorted(last.values(), key=lambda x: x.rcept_no, reverse=True):
+    # 정정된 판본은 원천에서 이미 뺐다(같은 종목 · 금액이라도 접수번호가 다르면 다른 결정)
+    for x in sorted(e.decisions, key=lambda x: x.rcept_no, reverse=True):
         u, rn, amt = uni[x.code], x.rcept_no, x.amt
         xs.stock(r, x.code, u.name, u.big, u.rank, [
-            (f"{rn[4:6]}-{rn[6:8]}", None, True), (amt, F_FL if amt and amt >= 10 else F_PCT, False),
+            (f"{rn[4:6]}-{rn[6:8]}", None, True),               # 10억원 미만만 소수 1자리
+            (amt, F_FL if amt and amt >= 10 else F_PCT, False),
             (tail_cap(x.desc, 140), None, True)])
         r += 1
     e5_end = r - 1
@@ -344,11 +387,11 @@ def write(wb: Workbook, e: EventsData, uni: Universe, refs: XRefs, d: date,
              "DART 공시 목록(유니버스 종목, 접수일 기준)을 제목 낱말로 나눔(시험) — 잠정실적 · 자사주 · 증자 · "
              "사채 · 합병 · 공급계약 · 최대주주 · 지분 보고 등"),
             ("Events", "임원 보유 순변동",
-             f"임원 소유상황 보고의 주식 수 변동 합 × {cday} 종가(장내 · 장외 · 증여 · 보상 모두). 10% 이상 "
-             "주요주주 보고는 뺌"),
+             f"임원(등기 · 비등기) 소유상황 보고의 주식 수 변동 합 × {cday} 종가(장내 · 장외 · 증여 · 보상 "
+             "모두). 임원이 아닌 주요주주 보고는 뺌"),
             ("Events", "5% 대량보유 · 자사주 · 증자 · 사채",
              "대량보유 보고의 지분 변화(%p) · 사유, 주요사항 보고(자사주 취득 · 처분 결정 · 유상증자 · "
-             "전환사채 등)의 금액 · 방법")]
+             "전환사채 등)의 금액 · 방법. 결정은 뒤에 정정된 판본을 빼고 정정본에 [정정]")]
 
 
 __all__ = ["EV", "NAME", "Decision", "Disclosure", "EventsData", "Holder", "Insider", "ev_kind",

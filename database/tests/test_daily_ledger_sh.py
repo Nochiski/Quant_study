@@ -18,6 +18,10 @@ v3 휴장 사본 동기화 대역(`scripts/sync_calendar.sh`)은 부를 때마�
 (`scripts/postclose_conf.sh`)은 진짜를 복사한다. 휴장 파일 내보내기(`-m daily.calendar_export`, T-48)는 calls.txt 에
 적히고 받은 인자는 export_args.txt 에 남으며 rc 는 `RC_daily_calendar_export` 다. `REAL_EXPORT` 가 있으면 진짜
 python·진짜 모듈로 가서 `QL_V3_HOLIDAY_FILE`(테스트가 늘 임시 경로로 준다)에 실제로 쓴다.
+주말 보강 WISE(N-45)의 `-c`(대상일 판정 `supplement_*` · WISE 런 로그 `ws_run_log`)는 진짜 python·진짜 `daily.calendar`·
+`daily.runlog` 로 넘긴다 — 달력은 임시 루트 `data/calendar/kis_holidays_2026.json`, 오늘은 `QL_TODAY`. 대역 수집기
+(`src/backfill_wise.py`)는 `WISE_RUNLOG` 가 있으면 완주 증거(ws_run_log 1행 — n_req `WISE_N_REQ` · n_ok `WISE_N_OK`)를
+임시 루트 `data/raw/wisereport.db` 에 남긴다.
 """
 from __future__ import annotations
 
@@ -42,7 +46,8 @@ SCRIPT = DB_ROOT / "scripts" / "daily_ledger.sh"
 _PY = """#!/usr/bin/env bash
 if [ "$1" = "-c" ]; then
   case "$2" in
-    *dart_universe*|*prev_trading_day*) PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
+    *dart_universe*|*prev_trading_day*|*supplement*|*ws_run_log*)
+      PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
     *runlog.start*) echo 7 ;;
     *runlog.recent*) exit "${RC_recent:-1}" ;;
     *runlog.finish*) echo "$4|$5" >> "$QL_HOME/runlog.txt" ;;
@@ -51,6 +56,9 @@ if [ "$1" = "-c" ]; then
 fi
 if [ "$1" != "-m" ]; then
   echo "$1" >> "$QL_HOME/calls.txt"
+  if [ "$1" = "src/backfill_wise.py" ] && [ -n "${WISE_RUNLOG:-}" ]; then
+    "$REAL_PY" -c "$WISE_RUNLOG_PY" "${WISE_N_REQ:-10}" "${WISE_N_OK:-10}"
+  fi
   var="RC_$(basename "$1" .py)"
   exit "${!var:-0}"
 fi
@@ -807,3 +815,150 @@ def test_rehearsal_source_also_empty_is_crit(tmp_path: Path) -> None:
     assert notify.startswith("crit|daily_ledger 실패: kiwoom evening cover(rc=2)")
     assert "보강 뒤에도 미달 ka10060,ka10014" in (root / "notify_body.txt").read_text(encoding="utf-8")
     assert [r.status for r in runlog.recent(_run_db(root), source="kiwoom_cover")] == ["coverage_failed"]
+
+
+# ── 주말 보강 WISE(N-45 · DECISIONS §7 #8) — 06:00 체인 끝, 휴장 연속 첫 휴일에만 1회 ────────────
+# 2026 휴장 일부(추석·한글날 등). 10-17(토) 은 보통 주말 첫 휴일 → D = 10-16(금)
+_SUPP_HOLIDAYS = ["20260924", "20260925", "20261005", "20261009", "20261225", "20261231"]
+_SAT, _SAT_D = "20261017", "20261016"
+_WISE = "src/backfill_wise.py"
+# 대역 수집기가 남기는 완주 증거 — backfill_wise.py 의 ws_run_log 와 같은 열·run_at 형식(UTC 초)
+_WISE_RUNLOG_PY = """import datetime as dt, os, sqlite3, sys
+os.makedirs("data/raw", exist_ok=True)
+con = sqlite3.connect("data/raw/wisereport.db")
+con.execute("CREATE TABLE IF NOT EXISTS ws_run_log (run_at TEXT NOT NULL, mode TEXT, n_stocks INTEGER, "
+            "n_req INTEGER, n_ok INTEGER, n_bad INTEGER, bad_summary TEXT)")
+con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
+            (dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S"), "full", 1,
+             int(sys.argv[1]), int(sys.argv[2]), 0, "{}"))
+con.commit()
+"""
+
+
+class Supp(NamedTuple):
+    rc: int
+    calls: list[str]
+    notify: list[str]          # "등급|제목"
+    body: str                  # notify 본문(셋째 인자) 전부
+    runs: list[tuple[str, str, str | None]]   # 런 로그 supplement_wise (date, status, detail) — 오래된 것부터
+    log: str
+
+
+def _run_supp(tmp_path: Path, *args: str, conf: str | None = "SUPPLEMENT_ENABLED=1\n",
+              today: str = _SAT, calendar: bool = True, wise_log: bool = True,
+              n_req: int = 10, n_ok: int = 10, seed: list[tuple[str, str]] = (),
+              **rcs: int) -> Supp:
+    """주말 보강 WISE 를 보는 실행. conf = config/supplement.env 내용(None 이면 파일 없음), today = QL_TODAY,
+    calendar = 판정 연도 파일을 둘지, wise_log = 대역 수집기가 완주 증거를 남길지, seed = 미리 심을
+    supplement_wise 런 (date, status)."""
+    root = _root(tmp_path)
+    _seed_universe_ok(root, 1)
+    if conf is not None:
+        (root / "config").mkdir()
+        (root / "config" / "supplement.env").write_text(conf, encoding="utf-8")
+    if calendar:
+        (root / "data" / "calendar").mkdir(parents=True)
+        (root / "data" / "calendar" / "kis_holidays_2026.json").write_text(
+            json.dumps({"year": 2026, "holidays": _SUPP_HOLIDAYS}), encoding="utf-8")
+    for date, status in seed:
+        runlog.finish(_run_db(root), runlog.start(_run_db(root), date=date, source="supplement_wise"),
+                      status=status, detail="seed")
+    extra = {"QL_TODAY": today, "WISE_RUNLOG_PY": _WISE_RUNLOG_PY,
+             "WISE_N_REQ": str(n_req), "WISE_N_OK": str(n_ok)}
+    if wise_log:
+        extra["WISE_RUNLOG"] = "1"
+    env = _env(root, QL_WEEKDAY="3", **extra, **{f"RC_{k}": str(v) for k, v in rcs.items()})
+    p = subprocess.run(["bash", str(root / "scripts" / "daily_ledger.sh"), "--date", "20260929",
+                        *args], env=env, capture_output=True, text=True, timeout=60, check=False)
+
+    def read(name: str) -> str:
+        f = root / name
+        return f.read_text(encoding="utf-8") if f.exists() else ""
+    runs = [(r.date, r.status, r.detail) for r in reversed(runlog.recent(_run_db(root),
+                                                                         source="supplement_wise"))]
+    return Supp(p.returncode, read("calls.txt").split(), read("notify.txt").splitlines(),
+                read("notify_body.txt"), runs, _chain_log(root) + p.stdout + p.stderr)
+
+
+def test_supplement_wise_runs_once_at_the_chain_end_on_the_first_holiday(tmp_path: Path) -> None:
+    """스위치 켜짐 · 오늘(토) = 휴장 연속 첫 휴일 → 정규 단계가 다 끝난 뒤 WISE 스냅샷 full 1회. 런 로그
+    supplement_wise(date = 오늘) ok 가 08:10 보강판의 근거다. 정규 체인 rc·완료 info 는 그대로이고 수집 요약에
+    보강 WISE 줄이 실린다."""
+    r = _run_supp(tmp_path)
+    assert r.rc == 0, r.log
+    assert r.calls == [*_ALL, _WISE]
+    assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]
+    assert r.notify == ["info|daily_ledger 완료"], r.notify
+    assert "──── 주말 보강 WISE 종료 rc=0" in r.body and f"주말 보강 WISE D={_SAT_D}" in r.body
+    assert f"──── 주말 보강 WISE 시작 (D={_SAT_D} · 오늘 {_SAT})" in r.log
+
+
+@pytest.mark.parametrize("conf", [None, "SUPPLEMENT_ENABLED=0\n", "SUPPLEMENT_ENABLED=yes\n",
+                                  "# SUPPLEMENT_ENABLED=1\n"])
+def test_supplement_wise_is_off_unless_the_switch_is_exactly_one(tmp_path: Path,
+                                                                 conf: str | None) -> None:
+    """저장소 값(0)·파일 없음·그 밖의 값·주석이면 꺼짐 — 휴장 첫 휴일이어도 아무것도 하지 않는다."""
+    r = _run_supp(tmp_path, conf=conf)
+    assert r.rc == 0 and r.calls == _ALL and r.runs == [], r.log
+    assert r.notify == ["info|daily_ledger 완료"] and "주말 보강" not in r.log
+
+
+@pytest.mark.parametrize("today", ["20261018",    # 일요일 — 연휴 둘째 날
+                                   "20261016",    # 금요일 거래일
+                                   "20261010",    # 한글날(금) 다음 토요일
+                                   "20261005"])   # 개천절 대체공휴일(월) — 연휴 셋째 날
+def test_supplement_wise_only_on_the_first_holiday_of_a_streak(tmp_path: Path, today: str) -> None:
+    r = _run_supp(tmp_path, today=today)
+    assert r.rc == 0 and r.calls == _ALL and r.runs == [], r.log
+    assert f"주말 보강 WISE 없음 — 오늘 {today}" in r.log
+    assert "주말 보강 WISE 없음" not in r.body          # 평일 수집 요약을 밀어내지 않는다
+
+
+def test_supplement_wise_on_a_weekday_holiday_targets_the_day_before(tmp_path: Path) -> None:
+    """금요일 한글날(10-09)은 그날이 첫 휴일 — D = 10-08(목)."""
+    r = _run_supp(tmp_path, today="20261009")
+    assert r.calls == [*_ALL, _WISE]
+    assert r.runs == [("20261009", "ok", "D=20261008 wise_rc=0 fail_calls=0")]
+
+
+@pytest.mark.parametrize(("rcs", "wise_log", "n_ok", "status", "warn"), [
+    ({"backfill_wise": 1}, True, 10, "failed", "주말 보강 WISE 수집 실패(rc=1)"),
+    ({}, False, 10, "failed", "주말 보강 WISE 완주 기록 없음"),
+    ({}, True, 8, "ok", "주말 보강 WISE 일부 실패 2콜"),
+])
+def test_supplement_wise_failure_is_a_warn_and_never_a_ledger_failure(
+        tmp_path: Path, rcs: dict[str, int], wise_log: bool, n_ok: int, status: str,
+        warn: str) -> None:
+    """수집기 rc≠0 · 완주 증거(ws_run_log) 없음은 런 로그 failed(08:10 이 보강판을 짓지 않는다), 일부 콜 실패는
+    ok(빠진 종목은 D 판 추정치·유예). 셋 다 warn 한 줄이고 정규 체인 rc·완료 info·ledger_chain 런 로그는
+    그대로다(crit 없음)."""
+    r = _run_supp(tmp_path, wise_log=wise_log, n_ok=n_ok, **rcs)
+    assert r.rc == 0, r.log
+    assert r.calls == [*_ALL, _WISE]
+    assert [x[:2] for x in r.runs] == [(_SAT, status)]
+    assert r.notify == [f"warn|{warn}", "info|daily_ledger 완료"], r.notify
+    assert not any(n.startswith("crit|") for n in r.notify)
+
+
+def test_supplement_wise_already_ok_today_is_not_fetched_again(tmp_path: Path) -> None:
+    """같은 휴일에 체인을 손으로 다시 돌리면 이미 받은 보강 WISE 는 다시 받지 않는다. 앞 런이 실패였으면 다시 받는다."""
+    r = _run_supp(tmp_path, seed=[(_SAT, "ok")])
+    assert r.calls == _ALL and [x[1] for x in r.runs] == ["ok"], r.log
+    assert "주말 보강 WISE 이미 받음" in r.log
+    r2 = _run_supp(tmp_path / "retry", seed=[(_SAT, "failed")])
+    assert r2.calls == [*_ALL, _WISE] and [x[1] for x in r2.runs] == ["failed", "ok"]
+
+
+def test_supplement_wise_without_a_calendar_is_a_warn(tmp_path: Path) -> None:
+    """판정 달력을 못 읽으면 보강 없음으로 위장하지 않고 warn 한 줄 — 정규 체인은 그대로(--date 실행)."""
+    r = _run_supp(tmp_path, calendar=False)
+    assert r.rc == 0 and r.calls == _ALL and r.runs == [], r.log
+    assert r.notify == ["warn|주말 보강 WISE 대상일 판정 불가", "info|daily_ledger 완료"]
+    assert "CalendarUnavailable" in r.log
+
+
+def test_supplement_wise_dry_run_prints_the_plan_only(tmp_path: Path) -> None:
+    r = _run_supp(tmp_path, "--dry-run")
+    assert r.rc == 0 and _WISE not in r.calls and r.runs == [], r.log
+    assert f"주말 보강 WISE 계획(dry-run — 받지 않음): D={_SAT_D}" in r.log
+    assert r.notify == []

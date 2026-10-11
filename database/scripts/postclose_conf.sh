@@ -1,7 +1,8 @@
 # 장 마감 체인 설정 읽기 — config/postclose_chain.env 를 읽어 스위치를 정하는 공용 조각(컷오버 PR-8 · PR-9).
 #   쓰는 곳: postclose_chain.sh(세 모드) · model_daily.sh(아침 발송 — 전환 뒤 짓기만·대체 발송 · fi 게이트 경고) ·
 #            watchdog.sh morning_build(B-57 발송 장부 — 전환 뒤 두 장부) · daily_ledger.sh·daily_evening.sh(휴장 파일
-#            내보내기 스위치 calendar_export_v3_on 만 — T-48). 설정 판정은 이 파일 한 곳이다 —
+#            내보내기 스위치 calendar_export_v3_on 만 — T-48) · daily_ledger.sh·daily_build.sh·weekend_supplement.sh(주말
+#            보강판 supplement_* — N-45). 설정 판정은 이 파일 한 곳이다 —
 #            설정 파일이 셸 대입이라 셸이 읽은 결과를 쓰고, 워치독 파이썬에는 결과(CUTOVER)를 인자로 넘긴다.
 #   사용(quant-ledger 홈으로 cd 한 뒤, set -u 셸에서): . scripts/postclose_conf.sh; postclose_conf_load
 #   규칙 — 켜는 쪽만 정확한 값을 요구한다(P1). 그 밖의 값·빈 값·파일 없음은 꺼짐·그림자다. 읽기는 set +u 안에서 한다
@@ -69,6 +70,56 @@ calendar_export_v3_on() {
              gsub(/^[ \t\r]+|[ \t\r]+$/, "", val); gsub(/^["\047]+|["\047]+$/, "", val); v = val }
            END { printf "%s", v }' config/calendar_export.env 2>/dev/null) || return 1
   [ "$v" = 1 ]
+}
+# 주말 보강판 스위치(N-45 · DECISIONS §7 #8) — config/supplement.env 의 SUPPLEMENT_ENABLED 가 정확히 1 일 때만 rc 0(켜짐).
+# 그 밖의 값·빈 값·파일 없음·읽기 실패는 rc 1(꺼짐 — 저장소 값). 쓰는 곳: daily_ledger.sh(06:00 끝 — 휴일 아침 WISE 1회) ·
+# daily_build.sh(08:10 끝 — weekend_supplement.sh 호출) · weekend_supplement.sh. 읽기 규칙은 위 두 스위치와 같다(주석·빈 줄
+# 건너뜀, 첫 '=' 로 가름, 앞뒤 공백·값 따옴표를 벗김, 마지막 대입이 이김). source 하지 않는다
+supplement_on() {
+  local v
+  [ -f config/supplement.env ] || return 1
+  v=$(awk '{ line = $0; gsub(/^[ \t\r]+|[ \t\r]+$/, "", line)
+             if (line == "" || substr(line, 1, 1) == "#") next
+             i = index(line, "="); if (i == 0) next
+             name = substr(line, 1, i - 1); val = substr(line, i + 1)
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", name); if (name != "SUPPLEMENT_ENABLED") next
+             gsub(/^[ \t\r]+|[ \t\r]+$/, "", val); gsub(/^["\047]+|["\047]+$/, "", val); v = val }
+           END { printf "%s", v }' config/supplement.env 2>/dev/null) || return 1
+  [ "$v" = 1 ]
+}
+# 주말 보강판 대상 거래일 — `supplement_target_day <오늘 YYYYMMDD>`. 오늘이 휴장 연속의 첫 휴일이면 직전 거래일 D 를 찍고
+# (아니면 빈 출력) rc 0. 판정 달력을 못 읽으면(연도 파일 부재·형식 오류) 사유를 찍고 rc 2 — 보강판 없음으로 위장하지 않는다.
+# 판정은 daily.calendar.Calendar.supplement_target 한 곳($PY = 체인의 python, QL_HOME 의 data/calendar 연도 파일)
+supplement_target_day() {
+  $PY -c 'import datetime as dt, sys
+from daily import calendar as c
+t = sys.argv[1]
+try:
+    d = c.load().supplement_target(dt.date(int(t[:4]), int(t[4:6]), int(t[6:8])))
+except Exception as e:  # noqa: BLE001  # reason: 어떤 예외든 "판정 불가" 로 올린다 — 보강판 없음으로 위장하지 않는다
+    print(f"supplement_target 판정 불가: today={t} {type(e).__name__}: {e}")
+    sys.exit(2)
+print(d.strftime("%Y%m%d") if d else "")' "$1"
+}
+# 오늘의 주말 보강 WISE 수집 결과 — `supplement_wise_ok <오늘 YYYYMMDD>`. 런 로그(data/raw/daily_run.db) source=supplement_wise ·
+# date=오늘의 마지막 런이 ok 면 rc 0, 아니면(실패·running·기록 없음·런 로그를 못 읽음) rc 1. 한 줄 사유(상태·detail)를 찍는다.
+# 쓰는 곳: daily_build.sh(08:10 끝 — 보강판을 부를지)
+supplement_wise_ok() {
+  $PY -c 'import sys
+from daily import runlog
+try:
+    rows = [r for r in runlog.recent("data/raw/daily_run.db", source="supplement_wise", limit=50)
+            if r.date == sys.argv[1]]
+except Exception as e:  # noqa: BLE001  # reason: 런 로그를 못 읽으면 수집 ok 를 확인하지 못한 것이다
+    print(f"런 로그를 못 읽음: {type(e).__name__}: {e}")
+    sys.exit(1)
+if not rows:
+    print(f"supplement_wise 기록 없음(date={sys.argv[1]}) — 06:00 체인 끝 수집이 돌지 않았다")
+    sys.exit(1)
+r = rows[0]
+detail = r.detail or ""
+print(f"supplement_wise {r.status} {detail}".strip())
+sys.exit(0 if r.status == "ok" else 1)' "$1"
 }
 # fi 게이트 경고 읽기 — 판정은 통과지만 사람이 봐야 하는 게이트 경고(metrics.warn 이 참 — FG5 후보 중 T-6 보류 T-37 ·
 # FG-fresh 유예 종목 몰림 N-47)를 fi 판 manifest(`_runs/<D>_<basis>.json`)에서 읽는다(fi 코드는 그대로). 두 체인이 같은

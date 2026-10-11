@@ -4,7 +4,8 @@ HOME 을 임시 폴더로 바꿔 `~/quant-ledger` 에 진짜 스크립트(daily_
 postclose_conf)와 대역 `.venv/bin/python`·`scripts/notify.sh`·`scripts/build_morning.sh`·`scripts/postclose_chain.sh`
 를 두고 돌린다(test_model_daily_sh 와 같은 방식). 대역 python 은 `-m` 모듈과 인자를 calls.txt 에 적고 rc 를 환경변수로
 돌려준다 — 보강판 단계(인자에 ' supplement ')는 SFI_RC·SMODEL_RC·SDELIVER_RC, 아침판은 FI_RC. 실제 factor_inputs·
-model·deliver(아직 basis supplement 가 없다 — 엑셀 쪽 E5 는 따로)·텔레그램은 돌지 않는다. `-c` 중 주말 보강판 판정
+model·텔레그램은 돌지 않는다. deliver 는 REAL_DELIVER(가짜 전송 sitecustomize 폴더)를 준 테스트만 진짜 CLI 로 돈다
+(`test_supplement_deliver_step_is_the_real_cli`). `-c` 중 주말 보강판 판정
 (`supplement` 가 든 것 — 대상일·수집 ok·완료·런 로그·고정 판)과 heredoc(`python -`, fi 게이트 경고)은 진짜 python·진짜
 `src/` 로 넘겨 임시 루트의 달력(`data/calendar`)·런 로그(`data/raw/daily_run.db`)·인계 이력·fi 판 manifest 를 읽고 쓴다.
 KRX 단계의 sqlite3 와 빌드 락 flock 은 PATH 대역이다(test_model_daily_sh 의 대역 그대로). 원장 락은 QL_RAW_LOCK_HELD=1.
@@ -61,7 +62,13 @@ if [ "$1" = "-m" ]; then
   case "$mod" in
     factor_inputs) if [ -n "$supp" ]; then exit "${SFI_RC:-0}"; fi; exit "${FI_RC:-0}" ;;
     model) if [ -n "$supp" ]; then exit "${SMODEL_RC:-0}"; fi; exit 0 ;;
-    deliver) if [ -n "$supp" ]; then exit "${SDELIVER_RC:-0}"; fi; exit 0 ;;
+    deliver) if [ -n "$supp" ]; then
+               # REAL_DELIVER = sitecustomize(텔레그램 가짜 전송) 폴더 — 주면 진짜 deliver CLI 를 돈다
+               if [ -n "${REAL_DELIVER:-}" ]; then
+                 PYTHONPATH="$REAL_SRC:$REAL_DELIVER" exec "$REAL_PY" -m deliver "$@"
+               fi
+               exit "${SDELIVER_RC:-0}"
+             fi; exit 0 ;;
   esac
 fi
 exit 0
@@ -170,6 +177,53 @@ def test_supplement_runs_fi_model_deliver_once_on_the_pinned_board(tmp_path: Pat
     assert r.board == [(D, "ok", f"W={W}")]
     assert r.notify == [f"info|주말 보강판 완료|D={D} W={W} basis=supplement | fi → 모델 → 엑셀 발송"]
     assert f"주말 보강판 완료 D={D} W={W}" in r.out
+
+
+# 가짜 텔레그램 — deliver 의 urllib 전송을 가로채 캡션을 FAKE_TG_LOG 에 적고 ok 를 돌려준다(네트워크 없음)
+_SITE = '''import io, json, os, re, urllib.request
+
+
+def _fake(req, timeout=None):
+    cap = re.search(rb'name="caption"\\r\\n\\r\\n(.*?)\\r\\n--', req.data, re.S)
+    with open(os.environ["FAKE_TG_LOG"], "a", encoding="utf-8") as f:
+        f.write(json.dumps({"caption": cap.group(1).decode("utf-8") if cap else None},
+                           ensure_ascii=False) + "\\n")
+    return io.BytesIO(b'{"ok": true}')
+
+
+urllib.request.urlopen = _fake
+'''
+
+
+def test_supplement_deliver_step_is_the_real_cli(tmp_path: Path) -> None:
+    """E5b — deliver 단계를 대역 대신 진짜 `python -m deliver model-daily --basis supplement --send` 로 돈다(텔레그램만
+    가짜 — sitecustomize 가 urlopen 을 가로챈다). 합성 모델 판 D(10-08 아침 + 같은 점수의 보강판) · 직전 거래일 10-07
+    아침판. 보강판 엑셀 · 캡션 '주말 보강' · 발송 장부 (D, supplement) 줄이 생기고, 같은 장부의 D 아침 줄이 있어도
+    막히지 않는다."""
+    from test_deliver_excel import write_fi_day, write_model_day
+    root = _home(tmp_path)
+    model, fi = root / "data/model", root / "data/factor_inputs"
+    for day in ("2026-10-07", "2026-10-08"):
+        write_model_day(model, day, write_fi_day(fi, day))
+    meta = json.loads((model / f"_runs/{D}_morning.json").read_text(encoding="utf-8"))
+    _write(model / f"_runs/{D}_supplement.json", json.dumps({**meta, "basis": "supplement"}))
+    ledger = root / "data/deliver/sent_model_daily.jsonl"
+    _write(ledger, json.dumps({"date": "2026-10-08", "basis": "morning", "correction": 0}) + "\n")
+    _write(root / ".env", "BOT_TOKEN=fake-token\nCHAT_ID_AIPLAYGROUND=-100\n")
+    _write(tmp_path / "site/sitecustomize.py", _SITE)
+    tg = tmp_path / "tg.jsonl"
+    r = _run(tmp_path, "weekend_supplement.sh", "--date", D, "--wise-asof", W,
+             REAL_DELIVER=str(tmp_path / "site"), FAKE_TG_LOG=str(tg))
+    assert r.rc == 0, r.out
+    assert r.calls == SUPP_STEPS and r.board == [(D, "ok", f"W={W}")]
+    sent = [json.loads(x) for x in tg.read_text(encoding="utf-8").splitlines()]
+    assert len(sent) == 1
+    assert sent[0]["caption"].splitlines()[0].startswith("[모델 점수] 2026-10-08 주말 보강 · ")
+    assert (root / "data/deliver/daily/model_scores_20261008_supplement.xlsx").exists()
+    entries = [json.loads(x) for x in ledger.read_text(encoding="utf-8").splitlines()]
+    assert [(e["date"], e["basis"]) for e in entries] == [("2026-10-08", "morning"),
+                                                        ("2026-10-08", "supplement")]
+    assert "fake-token" not in r.out
 
 
 def test_supplement_is_once_per_d_unless_forced(tmp_path: Path) -> None:

@@ -74,6 +74,7 @@ BASES = ("evening", "morning")
 PRIMARY_DEFAULT = "scope@2.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
                                      # (2026-10-05 v4_rank@0.1 → scope@1.0, 사용자 결정 10-01 ·
                                      #  2026-10-12 scope@1.0 → scope@2.0, 추정치 유예 5거래일 N-47)
+                                     # 앞 주 모델(이력 잇기)은 contracts.PRIMARY_PREDECESSOR
 # spec 별 MANIFEST 에 남길 판 수. 엑셀의 Δ순위 1W·1M·순위 흐름이 한 달 전 판까지 열어야
 # 한다 — 3 이면 같은 날 재빌드 세 번에 전날 판이 지워졌다(10-05 Δ순위 빈칸).
 # 60 ≈ 거래일 석 달(판 하나 약 140KB).

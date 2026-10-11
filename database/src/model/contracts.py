@@ -255,6 +255,12 @@ class Gate:
 # 이 창보다 길 수 없다(엔진은 fi 가 이미 뺀 종목을 되살리지 못한다 — `ModelSpec.validate`).
 FI_COVERAGE_GRACE_MAX = 5
 
+# 주 모델 → 그 앞 주 모델(N-47 · Q-E1 확정). 주 모델을 바꾼 날 앞의 판에는 새 주 모델 점수가 없다
+# (spec 이 그때 없었다). 그런 날의 이력이 필요한 곳 — 엑셀 전일 순위 · 후보 변화 · Δ순위 · 1M 흐름 ·
+# 주간 요일 표시(deliver), compat score_history 재반영 — 은 앞 주 모델 순위로 잇고 바뀐 날을 표시한다
+# (바뀐 날부터 약 4주). 한 곳에서만 정한다.
+PRIMARY_PREDECESSOR: dict[str, str] = {"scope@2.0": "scope@1.0"}
+
 
 @dataclass(frozen=True)
 class UniverseRule:
@@ -473,7 +479,8 @@ __all__ = [
     "FI_CONSENSUS", "FI_CONSENSUS_ANNUAL", "FI_COVERAGE_GRACE_MAX",
     "FI_CREDIT", "FI_FIN_SUMMARY",
     "FI_FLOWS", "FI_PRICES", "FI_TABLES", "FI_UNIVERSE", "FLOW_SUBJECTS", "GATE_RULES",
-    "INDICATOR_COLUMNS", "ROLES", "SCORE_BASE_COLUMNS", "SECTOR_LEVELS", "UNITS",
+    "INDICATOR_COLUMNS", "PRIMARY_PREDECESSOR", "ROLES", "SCORE_BASE_COLUMNS", "SECTOR_LEVELS",
+    "UNITS",
     "V2_SCORE_COLUMNS", "V3_SCORE_COLUMNS", "Col", "Engine", "EngineResult", "FactorInputs",
     "Gate", "Indicator", "ModelSpec", "OutputRule", "TableContract", "UniverseRule",
     "score_columns",

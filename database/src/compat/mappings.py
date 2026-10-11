@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from model.contracts import V2_SCORE_COLUMNS, V3_SCORE_COLUMNS
+from model.contracts import PRIMARY_PREDECESSOR, V2_SCORE_COLUMNS, V3_SCORE_COLUMNS
 
 from . import units
 from .units import KRW_PER_EOK, KRW_PER_MN
@@ -687,8 +687,9 @@ SCORE_V2_SPEC = "v2_percentrank@1.0"
 # 앞 주 모델(N-47 · Q-E1) — 주 모델을 scope@1.0 → scope@2.0 으로 바꾸기 전에 지은 날의 모델 판에는
 # scope@2.0 이 없다(spec 이 그때 없었다). 그런 날을 다시 내보내면(v3_post 재반영 · v3_replay ·
 # --allow-older) score_history 를 앞 주 모델 점수로 채우고 warn 을 남긴다. 실제로 쓴 spec 은
-# `_compat_meta.model_builds` 의 키다. 앞에서부터 그 판에 먼저 있는 것을 쓴다.
-SCORE_SPEC_FALLBACK: tuple[str, ...] = ("scope@1.0",)
+# `_compat_meta.model_builds` 의 키다. 앞에서부터 그 판에 먼저 있는 것을 쓴다. 앞 주 모델은
+# `model.contracts.PRIMARY_PREDECESSOR` 한 곳에서 정한다(deliver 와 같은 값).
+SCORE_SPEC_FALLBACK: tuple[str, ...] = (PRIMARY_PREDECESSOR[SCORE_SPEC],)
 
 
 def score_spec_candidates(spec: str) -> tuple[str, ...]:

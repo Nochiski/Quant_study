@@ -154,8 +154,9 @@ def caption_daily(date: str, basis: str, spec_id: str, top: Sequence[tuple[int, 
     """[모델 점수] 날짜 basis · spec / 상위 5 / 순위·제외·모집단.
 
     정정 발송(`correction` ≥ 1 — 같은 D·basis 를 `--resend` 로 다시 보냄)이면 끝에
-    '정정 n · 판 <model 판 id> · 생성 <model 생성 시각>' 줄을 단다(N-25 Q9). 첫 발송은 그대로다.
-    장 마감 직후 판(evening)은 둘째 줄에 판 성격(`common.BASIS_NOTES`)을 단다(PR-6).
+    '정정 n · 데이터 <model 데이터 id> · 생성 <model 생성 시각>' 줄을 단다(N-25 Q9). 첫 발송은
+    그대로다. 장 마감 직후 데이터(evening)는 둘째 줄에 데이터 성격(`common.BASIS_NOTES`)을 단다
+    (PR-6). 읽는 사람이 '판'을 몰라 '데이터'라고 쓴다(10-11 사용자, DECISIONS §7 #6).
     """
     note = BASIS_NOTES.get(basis)
     text = (f"[모델 점수] {date} {basis} · {spec_id}\n"
@@ -163,7 +164,7 @@ def caption_daily(date: str, basis: str, spec_id: str, top: Sequence[tuple[int, 
             + f"상위5: {_names(top)}\n"
             + f"순위 {n_ranked} · 제외 {n_rows - n_ranked} · 모집단 {n_rows}")
     if correction >= 1:
-        text += f"\n정정 {correction} · 판 {build_id} · 생성 {generated_at}"
+        text += f"\n정정 {correction} · 데이터 {build_id} · 생성 {generated_at}"
     return text[:CAPTION_MAX]
 
 
@@ -172,7 +173,7 @@ def caption_weekly(week: str, base_date: str, spec_id: str, top: Sequence[tuple[
     """[주간 후보] 주 (기준일) · spec / 상위 5 / 후보·신규·이탈·거래일."""
     text = (f"[주간 후보] {week} (기준 {base_date}) · {spec_id}\n"
             f"상위5: {_names(top)}\n"
-            f"후보 {n_candidates} · 신규 {n_new} · 이탈 {n_out} · 거래일 판 {n_days}/5")
+            f"후보 {n_candidates} · 신규 {n_new} · 이탈 {n_out} · 거래일 데이터 {n_days}/5")
     return text[:CAPTION_MAX]
 
 

@@ -56,6 +56,15 @@ asof 로 자르지만 세션 축은 자르지 않는다 — 현판으로는 MD-S
 universe_daily corp_action_window 45세션 · equity 규칙 변경)이 낳는 T 전 행 차이와 정규장 대 21:05 원장
 수급 차이는 재생 대조에서 구조적으로 0 이다 — 재생은 이 차이를 볼 수 없다(그림자 3거래일 + 컷오버 뒤
 기록형 몫, `docs/FACTOR_INPUTS.md` §2).
+
+주말 보강판(`--basis supplement`, N-45 · DECISIONS §7 #8): 휴장 앞 마지막 거래일 D 의 판을 휴일 아침에
+받은 WISE 컨센서스로 다시 짓는다. --date 는 D, 원천은 D 아침 확정판 인계 이력(`--builds-from`
+`<D>_morning.json` — 아침 fi 와 같은 stage·equity 판, 그 stage 에 휴일 수집분이 이미 들어 있다)으로
+고정한 것뿐이다(고정 없으면 rc 2). `wise_asof`(--wise-asof, 휴일 수집일 W > D)는 WISE 컨센서스에서
+나온 입력만 자른다 — 가격·수급·DART·universe_daily·WICS·기업행위는 asof = D 그대로(`queries`
+모듈 docstring 'WISE 시점'). 판은 basis 로 갈린다(`_runs/<D>_supplement.json`·`latest_supplement.json`,
+빌드 id `s_`) — 정규 판 기록을 덮지 않는다. 휴일 수집분이 판에 없으면(D* ≠ W) FG-fresh FAIL.
+아침·장 마감 판은 wise_asof = asof(--wise-asof 를 주면 asof 와 같아야 한다 — rc 2)라 SQL 이 그대로다.
 """
 from __future__ import annotations
 
@@ -74,7 +83,7 @@ from equity.rules_s10 import FIELDS as CREDIT_FIELDS
 from model.contracts import FI_COVERAGE_GRACE_MAX, FI_TABLES, UniverseRule
 from stage import manifest, skip_allow
 from stage.gates import GateResult, GateStatus
-from stage.model import basis_of_build_id, build_id_time, make_build_id
+from stage.model import BASIS_SUPPLEMENT, basis_of_build_id, build_id_time, make_build_id
 
 from . import gates, queries
 
@@ -107,9 +116,11 @@ from . import gates, queries
 # — 나이 1~5 grace 종목이 eligible 이고 컨센서스·WISE 재무·추정기관 수를 마지막 신선일 판으로
 # 싣는다. 유예가 더 짧은 spec(원본 미러·scope_v1.0 = 0)은 엔진이 coverage 열로 다시 자른다
 # (창은 `--grace-days` 로 덮을 수 있다) · FG-fresh grace 종목 수 경고(기록형 `GRACE_WARN_MAX`)
+# (1.9.0 에 더함, 2026-10-12 N-45 · 엑셀 확정분 E5): basis supplement · wise_asof(판 manifest 에 기록) —
+# 아침·장 마감 판의 SQL·게이트 판정은 글자 그대로라 판본을 올리지 않는다(올리면 배포 다음 두 판 대조가 하루 rc 2)
 RULES_VERSION = "fi1.9.0"
 LAYER = "factor_inputs"
-BASES_KNOWN = ("evening", "morning")
+BASES_KNOWN = ("evening", "morning", BASIS_SUPPLEMENT)
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
 EQUITY_BASES_READ = ("manual", "morning")
 # eligible 하한 — 09-23 실측 580 · 09-28 619 의 절반. 빈 유니버스를 성공으로 쓰지 않는다
@@ -403,7 +414,8 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
           golden_path: Path | None = GOLDEN_PATH, keep: int = KEEP_DEFAULT,
           build_id: str | None = None, builds_from: Path | None = None,
           calendar_dir: Path | None = None, postclose_stage_root: Path | None = None,
-          candidates_root: Path | None = None, replay: bool = False) -> BuildResult:
+          candidates_root: Path | None = None, replay: bool = False,
+          wise_asof: str | None = None) -> BuildResult:
     """판 기준일 D(YYYYMMDD)의 factor_inputs 8표를 굽는다. 게이트 FAIL 은 결과 status 로,
     입력·인자 오류는 `FactorInputsError` 로 낸다. `builds_from`(인계 이력 JSON)을 주면 원천 판을
     current 가 아니라 그 이력의 판으로 고정한다(모듈 docstring '날짜로 고정'). `calendar_dir` 는
@@ -411,23 +423,44 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     장 마감 판만 읽는 것: `postclose_stage_root`(T 행 stage 루트, 없으면
     `default_postclose_stage_root()`) · `candidates_root`(직전 판 모델 후보를 읽을 연구 fi 루트,
     없으면 `research_root()`). `replay` 는 재생 전용 — 세션 축 뷰를 asof 에서 자른다(모듈 docstring
-    '재생')."""
+    '재생'). `wise_asof`(YYYYMMDD)는 WISE 컨센서스 입력의 시점 — 보강판은 필수(D 보다 뒤), 그 밖은
+    비우거나 asof 와 같아야 한다(모듈 docstring '주말 보강판')."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
         raise FactorInputsError(f"--basis 는 {BASES_KNOWN} 중 하나: {basis!r}")
     evening = basis == "evening"
+    supplement = basis == BASIS_SUPPLEMENT
     if evening and builds_from is None:
         raise FactorInputsError(
             "--basis evening 은 --builds-from(직전 거래일 아침 확정판 인계 이력)으로 판을 "
             "고정해야만 짓는다(T-2) — 고정 없이 current 판을 읽으면 낡은 판을 조용히 쓰게 "
             "된다(P1)")
+    if supplement and builds_from is None:
+        raise FactorInputsError(
+            "--basis supplement 는 --builds-from(D 아침 확정판 인계 이력 <D>_morning.json)으로 "
+            "판을 고정해야만 짓는다 — current 판은 그 뒤 손 재빌드로 바뀌었을 수 있다(P1)")
+    try:
+        wise_d = None if wise_asof is None else datetime.strptime(wise_asof, "%Y%m%d").date()
+    except ValueError as e:
+        raise FactorInputsError(f"--wise-asof 는 YYYYMMDD 여야 한다: {wise_asof!r}") from e
+    if supplement and (wise_d is None or wise_d <= d):
+        raise FactorInputsError(
+            f"--basis supplement 는 --wise-asof(휴일 WISE 수집일 W — D 보다 뒤)가 필요하다: "
+            f"--date={date_s} --wise-asof={wise_asof}")
     if evening and Path(root).resolve() == research_root().resolve():
         raise FactorInputsError(
             f"장 마감 판을 연구 fi 루트({research_root()})에 짓지 않는다 — 같은 루트를 쓰면 "
             "keep 이 하루 2판씩 소모돼 모델 판이 가리키는 fi 판이 GC 된다. --root data/model_db/"
             "factor_inputs 로 분리한다(T-3)")
     dprime = _evening_dprime(d, calendar_dir) if evening else None
+    asof_d = d if dprime is None else dprime
+    if not supplement and wise_d is not None and wise_d != asof_d:
+        raise FactorInputsError(
+            f"--wise-asof 를 asof 와 다르게 줄 수 있는 것은 보강판(--basis supplement)뿐이다: "
+            f"--basis={basis} asof={asof_d.isoformat()} --wise-asof={wise_asof} — 정규 판의 "
+            "추정치를 D 뒤 수집분으로 넓히지 않는다")
+    wise_iso = (wise_d or asof_d).isoformat()
     # 유예 창 기본 = FI_COVERAGE_GRACE_MAX(5, N-47) — spec 마다 다른 유예는 엔진이 다시 자른다
     rule = UniverseRule(
         coverage_grace_days=FI_COVERAGE_GRACE_MAX if grace_days is None else grace_days)
@@ -466,8 +499,11 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
         con.execute("SET enable_progress_bar = false")
         for name, expr in {**eq_exprs, **st_exprs}.items():
-            # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다
-            cut = (f" WHERE date <= DATE '{asof}'"
+            # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다.
+            # coverage_daily 는 날짜가 WISE 수집일이라 wise_asof 에서 자른다(정규 판은 asof 와 같다 —
+            # 보강판 재생만 다르다. asof 에서 자르면 휴일 수집분의 추정기관 수가 빠진다)
+            cut_at = wise_iso if name == "coverage_daily" else asof
+            cut = (f" WHERE date <= DATE '{cut_at}'"
                    if replay and name in REPLAY_SESSION_TABLES else "")
             con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}{cut}')
         _check_columns(con, equity_builds)
@@ -493,15 +529,16 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             d=d_iso, fy=f"{d.year}12",
             price_from=(d - timedelta(days=queries.PRICE_WINDOW_DAYS)).isoformat(),
             flow_from=str(flow_from), grace_days=rule.coverage_grace_days,
-            credit_lag=_credit_lag_sessions(), basis=basis, asof=asof)
+            credit_lag=_credit_lag_sessions(), basis=basis, asof=asof, wise_asof=wise_iso)
         for sql in queries.coverage_sqls(p):
             con.execute(sql)
         dstar = _one(con, "SELECT dstar FROM _dstar")
-        # N-12 수집 지연 = (D*, 예상 수집일] 거래일 수. 예상 수집일 = asof — 장 마감 판은 D'(T 저녁
-        # 수집은 아직 없다). T 로 재면 정상 상태가 lag 1 이 되어 하루만 빠져도 FAIL 이다.
+        # N-12 수집 지연 = (D*, 예상 수집일] 거래일 수. 예상 수집일 = wise_asof(= asof — 장 마감 판은
+        # D'(T 저녁 수집은 아직 없다), 보강판은 휴일 수집일). T 로 재면 정상 상태가 lag 1 이 되어 하루만
+        # 빠져도 FAIL 이다. 보강판의 휴일은 거래일 축에 없어 FG-fresh 가 D* = wise_asof 를 따로 본다.
         lag = None if dstar is None else int(str(_one(
             con, f"SELECT count(*) FROM _calx WHERE date > DATE '{dstar}' "
-                 f"AND date <= DATE '{asof}'")))
+                 f"AND date <= DATE '{wise_iso}'")))
         for _, sql in queries.table_sqls(p, rule):
             con.execute(sql)
 
@@ -526,7 +563,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             collection_lag_sessions=lag, golden=gates.load_golden(golden_path), asof=asof,
             t_candidates=t_cands, t_candidates_from=t_from,
             t_source_build=post_builds.get(queries.T_SOURCE_TABLE, ""),
-            t_source_max_date=t_src_max)
+            t_source_max_date=t_src_max, wise_asof=wise_iso)
         results = gates.run_all(ctx)
     except BaseException:
         shutil.rmtree(tmp_root, ignore_errors=True)
@@ -551,6 +588,8 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     payload: dict[str, object] = {
         "layer": LAYER, "status": status, "build_id": bid, "date": d_iso, "basis": basis,
         "asof": asof,
+        # WISE 컨센서스 입력 시점 — 정규 판은 asof 와 같고 보강판은 휴일 수집일(N-45)
+        "wise_asof": wise_iso,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rules_version": RULES_VERSION,
         "equity_root": str(Path(equity_root).resolve()),
@@ -576,6 +615,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         # 재생 표시(재생 판에만) — 현판을 이 날에서 자른 판이다(운영 판과 구분)
         payload["replay"] = {"session_cut": asof, "tables": list(REPLAY_SESSION_TABLES),
                              "note": "재생(PR-8b) — 현판 equity 의 세션 축을 asof 에서 자른 판"}
+        if wise_iso != asof:
+            # 보강판 재생 — coverage_daily 는 wise_asof 에서 잘랐다(정규 판 재생 표시는 그대로)
+            payload["replay"]["wise_cut"] = wise_iso
 
     if failed:
         report = root / "_failed" / f"{bid}.json"

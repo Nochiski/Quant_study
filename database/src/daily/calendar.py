@@ -80,6 +80,19 @@ class Calendar:
                 cur -= dt.timedelta(days=1)
         return cur
 
+    def supplement_target(self, today: dt.date) -> dt.date | None:
+        """주말 보강판(N-45) 대상 거래일 D — `today` 가 휴장(주말·공휴일)이고 바로 전 달력일이 거래일이면 그날, 아니면 None.
+
+        휴장 연속의 **첫 휴일**에만 값이 있다 — 보통 주말은 토요일(→ 금요일), 월요일 공휴일이 붙은 연휴도 토요일 한 번,
+        평일 공휴일(금요일 한글날)은 그날(→ 목요일). 연휴 둘째 날부터는 None 이라 한 연휴에 한 번만 짓는다. WISE 는 D 분
+        컨센서스를 D 밤사이(D 18:11 ~ D+1 06:00)에 올리므로 첫 휴일 아침이면 D 기준 값을 받는다.
+        달력이 그 해(연초면 전 해도)를 덮지 않으면 `KeyError`(`is_trading_day` 와 같다) — 영업일을 가정하지 않는다.
+        """
+        if self.is_trading_day(today):
+            return None
+        prev = today - dt.timedelta(days=1)
+        return prev if self.is_trading_day(prev) else None
+
 
 def read_year_files(directory: str | os.PathLike[str]) -> dict[str, frozenset[str]]:
     """디렉터리의 `kis_holidays_<YYYY>.json` 을 연도별 휴장 집합으로 읽는다(형식만 검사).

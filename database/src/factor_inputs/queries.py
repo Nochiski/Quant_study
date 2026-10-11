@@ -26,6 +26,13 @@ fetched/available ≤ asof 로 자른다(compat `--consensus-asof` 와 같은 �
 같다). 그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
 날짜 축이 없는 마스터(`security` 이름·상장일, `corp` 업종 코드)는 고정 판 그대로다. 세션 창(가격
 550 달력일·수급·신용 60 세션)·당해 12월기 `fy`·연간 컨센서스 연도 창은 T 기준이다.
+
+WISE 시점 `Params.wise_asof`(주말 보강판 basis supplement, N-45): WISE 컨센서스에서 나온 입력 — 신선도
+(`_dstar`·`_cov`)·매트릭스(`_cov` 를 따른다)·연간 컨센서스·추정기관 수(`coverage_daily`)·WISE 연간·분기
+재무 — 만 fetched_date ≤ wise_asof 로 자른다. 아침·장 마감 판은 wise_asof = asof 라 SQL 글자가 그대로다.
+보강판은 asof = D(가격·수급·DART·universe_daily·WICS·기업행위)이고 wise_asof = 휴일 아침 수집일 W(> D,
+WISE 기준일 = D)다. 그 휴일 수집은 다음 세션 저녁 수집과 같은 내용이라(N-45 실측) 신선도 나이는 W 를 D 다음
+세션으로 센다(`coverage_sqls`).
 """
 from __future__ import annotations
 
@@ -38,6 +45,7 @@ from daily.kw_daily import (
 )
 from equity.rules_s06 import PRICE_UNRESOLVED
 from model.contracts import FI_TABLES, TableContract, UniverseRule
+from stage.model import BASIS_SUPPLEMENT
 
 # ── 창·상수 ──────────────────────────────────────────────────────────────────
 PRICE_WINDOW_DAYS = 550          # fi_prices·fi_adj_prices — D 까지 550 달력일(v3 가격 이력 창)
@@ -118,12 +126,15 @@ class Params:
     flow_from: str          # D 까지 60 세션의 첫 세션
     grace_days: int         # 유예 창 — build 기본 FI_COVERAGE_GRACE_MAX(5, N-47) · --grace-days
     credit_lag: int         # 신용잔고 실입수 랙(세션, equity FieldProfile)
-    basis: str = "morning"  # morning | evening(장 마감 판 — 컷오버 T-2)
+    basis: str = "morning"  # morning | evening(장 마감 판 — 컷오버 T-2) | supplement(주말 보강판 N-45)
     asof: str = ""          # 정보 시점(YYYY-MM-DD) — 비우면 d. 장 마감 판은 D'(모듈 docstring)
+    wise_asof: str = ""     # WISE 컨센서스 입력의 시점 — 비우면 asof. 보강판만 asof 뒤(모듈 docstring)
 
     def __post_init__(self) -> None:
         if not self.asof:
             object.__setattr__(self, "asof", self.d)
+        if not self.wise_asof:
+            object.__setattr__(self, "wise_asof", self.asof)
 
 
 def _lit_list(values: tuple[str, ...]) -> str:
@@ -158,8 +169,8 @@ def calendar_sql(t_session: str | None = None) -> str:
 def coverage_sqls(p: Params) -> list[str]:
     """종목별 신선도 `_cov`(T2.11 · 유예 규칙 = layer-fixes §3-2).
 
-    D* = `stg_consensus_annual` 에서 fetched_date ≤ asof 인 **마지막 수집일**(전 종목 공통 —
-    아침판 asof = D, 장 마감 판 asof = D').
+    D* = `stg_consensus_annual` 에서 fetched_date ≤ wise_asof 인 **마지막 수집일**(전 종목 공통 —
+    아침판 D, 장 마감 판 D', 보강판 휴일 수집일 W).
     종목의 마지막 신선일 = 당해 12월기 추정(period_kind 'E', period = fy)의 op·ni 가 **둘 다** 있는
     fetched_date 의 최댓값(compat `ESTIMATE_TICKERS_SQL` 과 같은 판정).
       fresh  = 마지막 신선일 = D*               (나이 0)
@@ -167,15 +178,22 @@ def coverage_sqls(p: Params) -> list[str]:
       lapsed = 나이 > G
       none   = 신선일이 한 번도 없다 → `_cov` 에 행이 없고 유니버스에서 'none' 으로 채운다
     복귀(fresh 재진입)는 마지막 신선일이 D* 로 갱신되는 것이라 카운터가 저절로 0 이 된다.
+    보강판은 D* 가 D 뒤 휴일 W 라 거래일 축(`_calx` — D 에서 끝난다)에 없다. W 수집은 D 다음 세션의 저녁
+    수집과 같은 내용이므로(N-45) W 까지 신선하지 않은 종목은 그 세션 하나를 더 센다 — 평일 판에서 같은 종목이
+    받을 나이와 같다(빼면 나이 0 인 grace 가 생겨 유예 0 spec 이 낡은 추정치 종목을 그대로 채점한다).
     """
     dstar = ("CREATE OR REPLACE TEMP TABLE _dstar AS\n"
              "SELECT max(fetched_date) AS dstar FROM stg_consensus_annual\n"
-             f"WHERE fetched_date <= DATE '{p.asof}'")
+             f"WHERE fetched_date <= DATE '{p.wise_asof}'")
+    # 아침·장 마감 판은 D* ≤ asof ≤ d 라 붙이지 않는다(SQL 글자 그대로)
+    next_session = ("" if p.basis != BASIS_SUPPLEMENT else
+                    "\n             + CASE WHEN f.last_fresh < s.dstar "
+                    f"AND s.dstar > DATE '{p.d}' THEN 1 ELSE 0 END")
     cov = f"""CREATE OR REPLACE TEMP TABLE _cov AS
 WITH fresh AS (
     SELECT ticker, max(fetched_date) AS last_fresh
     FROM stg_consensus_annual
-    WHERE fetched_date <= DATE '{p.asof}'
+    WHERE fetched_date <= DATE '{p.wise_asof}'
       AND period_kind = 'E' AND period = '{p.fy}'
       AND op IS NOT NULL AND ni IS NOT NULL
     GROUP BY ticker
@@ -183,7 +201,7 @@ WITH fresh AS (
 aged AS (
     SELECT f.ticker, f.last_fresh, s.dstar,
            (SELECT count(*) FROM _calx c
-            WHERE c.date > f.last_fresh AND c.date <= s.dstar) AS age
+            WHERE c.date > f.last_fresh AND c.date <= s.dstar){next_session} AS age
     FROM fresh f CROSS JOIN _dstar s
 )
 SELECT ticker, last_fresh,
@@ -323,14 +341,14 @@ base AS (
            coalesce(v.coverage_state, 'none')            AS coverage_state,
            v.coverage_age_days,
            CASE WHEN v.coverage_state IN ('fresh', 'grace') THEN v.last_fresh
-                ELSE DATE '{p.asof}' END                    AS analyst_asof
+                ELSE DATE '{p.wise_asof}' END                    AS analyst_asof
     FROM u
     LEFT JOIN security s USING (ticker)
     LEFT JOIN px USING (ticker)
     LEFT JOIN _cov v USING (ticker)
 ),
 na AS (
-    SELECT ticker, date, analyst_count FROM coverage_daily WHERE date <= DATE '{p.asof}'
+    SELECT ticker, date, analyst_count FROM coverage_daily WHERE date <= DATE '{p.wise_asof}'
 ),
 judged AS (
     SELECT b.*, n.analyst_count,
@@ -614,7 +632,7 @@ def consensus_annual_sql(p: Params) -> str:
     inner = f"""WITH latest AS (
     SELECT ticker, max(fetched_date) AS fetched_date
     FROM stg_consensus_annual
-    WHERE fetched_date <= DATE '{p.asof}' AND {_IN_UNIVERSE}
+    WHERE fetched_date <= DATE '{p.wise_asof}' AND {_IN_UNIVERSE}
     GROUP BY ticker
 ),
 typed AS (
@@ -723,7 +741,7 @@ def fin_summary_sql(p: Params) -> str:
     -- (종목, ep) 단위 D 이전 최신 판(배포 묶음 7 D7-4) — 두 ep 의 판 날짜가 다를 수 있다
     SELECT w.ticker, w.ep, max(w.fetched_date) AS fetched_date
     FROM stg_fin_wise w
-    WHERE w.fetched_date <= DATE '{p.asof}'
+    WHERE w.fetched_date <= DATE '{p.wise_asof}'
       AND w.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
       AND w.{_IN_UNIVERSE}
     GROUP BY w.ticker, w.ep
@@ -769,7 +787,7 @@ wqsnap AS (
     -- 종목별 D 이전 최신 WISE 분기 손익 스냅샷(신선·유예 종목만 — 연간 wsnap 과 같은 규약)
     SELECT q.ticker, max(q.fetched_date) AS fetched_date
     FROM stg_fin_wise_q q
-    WHERE q.pkey = 'Q:IS' AND q.fetched_date <= DATE '{p.asof}'
+    WHERE q.pkey = 'Q:IS' AND q.fetched_date <= DATE '{p.wise_asof}'
       AND q.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
       AND q.{_IN_UNIVERSE}
     GROUP BY q.ticker

@@ -69,8 +69,12 @@ RULES_VERSION = "mb1.7.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에
                             # 1.7.0(2026-10-12, N-47): 엔진·MG1 이 fi grace 종목을 spec 유예로
                             #   다시 자른다(fi1.9.0 유예 창 5) · scope@2.0 등록 · 기본 주 모델
                             #   scope@1.0 → scope@2.0
+                            # (1.7.0 에 더함, 2026-10-12 N-45 · E5): basis supplement(주말 보강판)
+                            #   — 어휘만 늘었고 점수·게이트는 그대로라 판본을 올리지 않는다
 LAYER = "model"
-BASES = ("evening", "morning")
+# supplement = 주말 보강판(N-45) — fi 보강판(`latest_supplement.json`)을 읽어 `_runs/<D>_supplement.json` 에
+# 기록한다. 정규 판(아침·장 마감)과 판 manifest 이름·MG5 전판(같은 basis 만 본다)이 갈린다
+BASES = ("evening", "morning", "supplement")
 PRIMARY_DEFAULT = "scope@2.0"        # 레지스트리와 무관한 설정 — 인계(deliver)의 대표 모델
                                      # (2026-10-05 v4_rank@0.1 → scope@1.0, 사용자 결정 10-01 ·
                                      #  2026-10-12 scope@1.0 → scope@2.0, 추정치 유예 5거래일 N-47)

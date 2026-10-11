@@ -3,6 +3,8 @@
 #   판을 휴일 아침에 받은 WISE 컨센서스(WISE 기준일 = D)로 한 번 더 지어 보낸다. 정규 판(아침·장 마감)과 섞지 않는 별도
 #   판이다(basis supplement — fi·모델 `_runs/<D>_supplement.json`·`latest_supplement.json`, 판 id `s_`).
 #   사용: scripts/weekend_supplement.sh --date D --wise-asof W [--force]
+#         W 는 D 다음 첫 휴일이어야 한다(daily.calendar supplement_target(W) = D — 아니면 rc 2). --force 는 손 복구용으로 이
+#         검사와 '이미 완료' 검사를 건너뛴다
 #   호출: daily_build.sh 끝(08:10 체인) — 스위치 켜짐(config/supplement.env SUPPLEMENT_ENABLED=1) · 오늘 W 가 D 다음 첫 휴일
 #         (daily.calendar supplement_target) · 오늘 06:00 체인의 보강 WISE 수집 ok(런 로그 source=supplement_wise · date=W).
 #         고정 시각 크론이 아니라 앞 체인의 끝에 잇는다(P9 — 대기 한도·재시도 시각 없음). 손으로 다시 돌릴 때도 같은 명령이다
@@ -24,7 +26,8 @@
 #   빌드 락: model_daily.sh 와 같다(/tmp/quant_ledger_build.lock — 쥐여 있으면 끝날 때까지 기다린다, 한도 없음 — P9).
 #         QL_BUILD_LOCK_HELD=1 이면 부모가 쥔 것으로 본다. QL_BUILD_LOCK_FILE 은 테스트 전용(락 파일 경로 덮어쓰기).
 #   rc: 0 완료·건너뜀(꺼짐·이미 완료) · 1 짓지 못함(단계 실패·고정 판 없음·완료 판정 불가 — 알림은 여기서 남긴다) ·
-#       2 인자 오류 · 3 빌드 락 열기·대기 실패 · 4 홈 이동 실패
+#       2 인자 오류(W 가 D 다음 첫 휴일이 아님 포함 — 알림 없음) · 3 빌드 락 열기·대기 실패(crit 은 여기서) · 4 홈 이동 실패.
+#       daily_build.sh 는 0·1·3 밖의 rc 에만 warn 을 더한다(한 사건에 알림 한 줄)
 set -uo pipefail
 cd "$HOME/quant-ledger" || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 돌지 않는다" >&2; exit 4; }
 export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
@@ -53,7 +56,18 @@ if [[ ! "$W" > "$D" ]] || [[ "$W" > "$TODAY_KST" ]]; then
 fi
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 # shellcheck source=scripts/postclose_conf.sh
-. scripts/postclose_conf.sh   # supplement_on · fi_gate_warns — 스위치·경고 판정 한 곳
+. scripts/postclose_conf.sh   # supplement_on · supplement_target_day · fi_gate_warns — 스위치·대상일·경고 판정 한 곳
+# W 는 D 다음 첫 휴일이어야 한다(판정 달력 supplement_target(W) = D) — 다른 날 받은 WISE 로 D 판을 '보강'하지 않는다
+# (예: 연휴 둘째 날 W 는 수집이 없어 fi 가 FAIL 하고, 다른 D 의 첫 휴일 W 는 기준일이 D 가 아니다). 체인(08:10)은 늘 맞는
+# 쌍을 넘긴다. --force(손 복구)는 이 검사를 건너뛴다 — 판단은 사람이 한 것이다. 달력을 못 읽어도 rc 2(짐작하지 않는다)
+if [ -z "$FORCE" ]; then
+  W_TARGET=$(supplement_target_day "$W"); W_RC=$?
+  if [ "$W_RC" -ne 0 ] || [ "$W_TARGET" != "$D" ]; then
+    echo "--wise-asof W=$W 는 D=$D 다음 첫 휴일이 아니다(판정 달력 supplement_target(W)='${W_TARGET}', rc=$W_RC) —" \
+         "아무 단계도 돌지 않았다. 손 복구로 이 쌍을 꼭 써야 하면 --force" >&2
+    exit 2
+  fi
+fi
 if ! supplement_on; then
   echo "주말 보강판 꺼짐(config/supplement.env SUPPLEMENT_ENABLED≠1) — 아무것도 하지 않음 D=$D W=$W"
   scripts/notify.sh info "주말 보강판 꺼짐 — 건너뜀" "D=$D W=$W | config/supplement.env SUPPLEMENT_ENABLED≠1"

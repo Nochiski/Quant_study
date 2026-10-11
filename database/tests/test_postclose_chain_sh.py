@@ -245,7 +245,8 @@ def test_close_runs_every_step_in_order_and_logs_each_step(tmp_path: Path) -> No
         "--fi-root data/model_db/factor_inputs --out-root data/model_db/deliver")
     assert r.call("v3_post.sh") == (
         f"v3_post.sh --date {T} --basis evening --v3-db {tmp_path / 'v3_quant.db'} "
-        f"--model-root data/model_db/model --builds-from {H_PREV} --shadow | QL_V3_POST_CMD=unset")
+        f"--model-root data/model_db/model --builds-from {H_PREV} --consensus-asof {D_PREV} "
+        "--shadow | QL_V3_POST_CMD=unset")
     assert r.runs == [(s, "ok") for s in runlog.POSTCLOSE_STEPS]
     assert r.titles("info")[-1].startswith("장 마감 판 준비 ")
     assert r.titles("crit") == [] and r.titles("warn") == []
@@ -502,7 +503,7 @@ def test_live_switch_sends_and_reflects_in_place_with_daily_post(tmp_path: Path)
     assert r.call("deliver").endswith("--out-root data/model_db/deliver --send")
     v3 = r.call("v3_post.sh")
     assert "--shadow" not in v3
-    assert f"--builds-from {H_PREV} --v3-post-cmd echo post |" in v3
+    assert f"--builds-from {H_PREV} --consensus-asof {D_PREV} --v3-post-cmd echo post |" in v3
 
 
 @pytest.mark.parametrize("mode", ["close", "refill", "morning"])
@@ -591,7 +592,7 @@ def test_refill_always_reflects_seven_tables_without_scores(tmp_path: Path, seed
     assert [c for c in r.calls if c.startswith("flock")] == ["flock -n 7"]
     assert r.call("v3_post.sh") == (
         f"v3_post.sh --date {T} --basis evening --v3-db {tmp_path / 'v3_quant.db'} --no-scores "
-        f"--builds-from {H_PREV} --shadow | QL_V3_POST_CMD=unset")
+        f"--builds-from {H_PREV} --consensus-asof {D_PREV} --shadow | QL_V3_POST_CMD=unset")
     assert r.runs == [("postclose_v3_refill", "ok")]
     assert r.titles("info") == ["장 마감 재반영 완료"]
 
@@ -791,6 +792,8 @@ def test_real_v3_post_accepts_all_three_call_shapes(tmp_path: Path, conf: str) -
     (export,) = _compat(close, "export")
     assert f"--builds-from {H_PREV}" in export and "--model-root data/model_db/model" in export
     assert "score_history" in export
+    # 장 마감 판의 컨센서스 정보 시점은 D' — 같은 판의 fi·점수와 같다(N-45 리뷰 I-2, compat 기본은 T)
+    assert f"--consensus-asof {D_PREV}" in export
     (root / "calls.txt").unlink()
     refill = _chain(tmp_path, "refill", "--date", T, **env)
     assert refill.rc == 0, refill.out + refill.log
@@ -801,6 +804,7 @@ def test_real_v3_post_accepts_all_three_call_shapes(tmp_path: Path, conf: str) -
     assert tables.endswith("--no-scores")
     (export,) = _compat(refill, "export")
     assert f"--builds-from {H_PREV}" in export and "score_history" not in export
+    assert f"--consensus-asof {D_PREV}" in export
     (apply,) = _compat(refill, "apply")
     assert apply.endswith("--no-scores")
     (root / "calls.txt").unlink()
@@ -809,6 +813,7 @@ def test_real_v3_post_accepts_all_three_call_shapes(tmp_path: Path, conf: str) -
     assert morning.runs[0] == ("postclose_v3_morning", "ok")
     (export,) = _compat(morning, "export")
     assert f"--builds-from {H_T}" in export and "--basis morning" in export
+    assert "--consensus-asof" not in export          # 아침은 D 판 = D — compat 기본(as_of = D) 그대로
     assert "--no-scores" not in " ".join(_compat(morning, "v3-tables"))
     post = [n for n in morning.notify if "daily_post" in n]     # notify.txt 는 세 실행에 걸쳐 쌓인다
     if conf == LIVE_CONF:      # 제자리 — ⑥ 만 daily_post('echo post')를 불렀다

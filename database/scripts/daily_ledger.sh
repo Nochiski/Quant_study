@@ -5,9 +5,9 @@
 #         키움 마스터(daily_wise.sh, 매일) →
 #         [월요일 KST · 마지막 성공 7일 초과] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01) →
 #         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → 저녁 키움 보강 판정(T-13) → DART 스윕·상세·문서 →
-#         신규 corp 회사정보 공백 메우기 →
-#         [스위치 켜짐 · 오늘이 휴장 연속의 첫 휴일] 주말 보강 WISE 스냅샷 1회(N-45 — 실패는 warn, 체인 rc 불변) →
-#         수집 요약 알림
+#         신규 corp 회사정보 공백 메우기 → 수집 요약 알림
+#         [스위치 켜짐 · 오늘이 휴장 연속의 첫 휴일] 주말 보강 WISE 스냅샷 1회(N-45) — DART 와 나란한 갈래(별도 로그),
+#         요약 전에 끝나기를 기다린다. 실패는 warn, 체인 rc 불변
 #   소스별 단계는 서로 막지 않는다 — 한 단계가 rc≠0 이어도 다음 소스는 받고, 실패한 단계를 모두 모아 crit
 #   (플랜 2026-09-30 T-K3: 신용잔고 판정 실패가 DART 를 막던 결함). `dart company gap` 만 `dart` 성공에 묶는다.
 #   KIS 는 07:00(v3 토큰 재발급) 전에 끝나야 해서 순서는 키움 → KIS → DART 그대로다.
@@ -55,29 +55,46 @@ step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 덧
   if [ "$rc" -ne 0 ]; then FAILED="${FAILED:+$FAILED, }$name(rc=$rc)"; return 1; fi
   return 0
 }
-supplement_wise() {  # supplement_wise <D> <오늘 KST> — 주말 보강판 WISE 스냅샷 1회(체인 끝 훅, 아래 주석). FAILED 와 무관
+# 주말 보강판 WISE 수집(N-45 · DECISIONS §7 #8) — 스위치(config/supplement.env SUPPLEMENT_ENABLED=1, 판정
+#   scripts/postclose_conf.sh supplement_on)가 켜져 있고 오늘(KST)이 휴장 연속의 첫 휴일(직전 달력일 = 거래일 D —
+#   daily.calendar supplement_target)일 때만 WISE 스냅샷 full 을 한 번 받는다. WISE 는 D 분 컨센서스를 D 밤사이
+#   (D 18:11 ~ D+1 06:00)에 올리고 18:05 저녁 수집은 거래일에만 돌아서, 이것이 휴일에 D 기준 값을 받는 수집이다.
+#   - DART 와 나란한 갈래(daily_evening.sh 의 WISE 갈래와 같은 모양 — 다른 원장 wisereport.db 만 쓴다): DART 단계 직전에
+#     띄우고(D 를 이미 받은 날은 그 자리에서) 체인 끝에서 끝나기를 기다린다 — 완료 감지, 시간 한도 없음(P9). 평소 휴일엔
+#     DART 시간 안에 끝나 08:10 확정 빌드(원장 락 대기)를 늦추지 않는다. 원장 락은 체인이 쥔 채다.
+#   - 수집기 출력은 갈래 로그 logs/supplement_wise_<오늘>.log 로만 간다(진행 줄이 체인 요약 tail 창을 밀어내지 않게) —
+#     체인 로그·요약에는 시작·종료 줄과 결과 한 줄만 남는다.
+#   - 런 로그 mode 표식 supplement(`--run-tag`) — 원장 건전성 wise.run 이 이 런을 D 의 정규 수집으로 세지 않는다.
+#   - 결과는 런 로그 source=supplement_wise · date=오늘(ok = 수집기 rc 0 + 이번 런의 ws_run_log 1행, 일부 콜 실패는 ok +
+#     warn). 08:10 daily_build.sh 끝이 그것을 보고 보강판(weekend_supplement.sh)을 부른다. 오늘 이미 ok 면 다시 받지 않는다.
+#   - 실패·완주 기록 없음·대상일 판정 불가는 warn 한 줄(logs/notify.log)이고 체인 rc·FAILED·ledger_chain 런 로그에는 넣지
+#     않는다. dry-run 은 계획 한 줄만. QL_TODAY(YYYYMMDD)는 테스트 전용 — 오늘(KST)을 덮어쓴다. 운영에선 비워 둔다.
+SUPP_PID=""; SUPP_D=""; SUPP_LOG=""; SUPP_TODAY=""
+supp_wise_branch() {  # supp_wise_branch <D> <오늘> — 백그라운드 갈래 본체(출력은 갈래 로그). 마지막 두 칸 줄이 결과다
   local d="$1" today="$2" rid from rc got status warn_title=""
   rid=$($PY -c 'import sys; from daily import runlog
 print(runlog.start("data/raw/daily_run.db", date=sys.argv[1], source="supplement_wise"))' "$today") || rid=""
   [ -n "$rid" ] || echo "  ! 런 로그 시작 기록 실패 — source=supplement_wise(08:10 체인이 '기록 없음'으로 본다)"
   from=$(date -u +%Y-%m-%dT%H:%M:%S)   # 이번 런의 하한 — ws_run_log.run_at 과 같은 UTC 형식
-  echo "──── 주말 보강 WISE 시작 (D=$d · 오늘 $today) $(kst) ────"
-  $PY src/backfill_wise.py --mode full 2>&1 | grep -vE "Deprecation|datetime\.datetime"
+  echo "──── 주말 보강 WISE 수집 시작 (D=$d · 오늘 $today) $(kst) ────"
+  $PY src/backfill_wise.py --mode full --run-tag supplement 2>&1 | grep -vE "Deprecation|datetime\.datetime"
   rc=${PIPESTATUS[0]}
-  echo "──── 주말 보강 WISE 종료 rc=$rc $(kst) ────"
-  # 완주 증거 = 이번 런의 WISE 런 로그(ws_run_log, run_at ≥ 시작) — --limit 없는 런은 대상 0 이어도 1행을 남긴다
-  # (backfill_wise.py). 실패 콜 수 = Σ(n_req − n_ok) — 저녁 체인 WISE 부분 실패 판정과 같은 양(daily_evening.sh)
+  echo "DONE_AT=$(TZ=Asia/Seoul date '+%Y-%m-%dT%H:%M:%S+09:00')"
+  echo "──── 주말 보강 WISE 수집 종료 rc=$rc $(kst) ────"
+  # 완주 증거 = 이번 런의 WISE 런 로그(ws_run_log, run_at ≥ 시작 · mode supplement) — --limit 없는 런은 대상 0 이어도
+  # 1행을 남긴다(backfill_wise.py). 실패 콜 수 = Σ(n_req − n_ok) — 저녁 체인 WISE 부분 실패 판정과 같은 양
   got=$($PY -c 'import sqlite3, sys
 try:
     con = sqlite3.connect("file:data/raw/wisereport.db?mode=ro", uri=True)
-    rows = con.execute("SELECT n_req, n_ok FROM ws_run_log WHERE run_at >= ?", (sys.argv[1],)).fetchall()
+    rows = con.execute("SELECT n_req, n_ok FROM ws_run_log WHERE run_at >= ? AND mode = ?",
+                       (sys.argv[1], sys.argv[2])).fetchall()
 except Exception as e:  # noqa: BLE001  # reason: 읽기 실패는 완주를 확인하지 못한 것 — 사유를 남긴다
     print(f"WISE 런 로그(ws_run_log)를 못 읽음: {type(e).__name__}: {e}")
     sys.exit(1)
 if not rows:
-    print(f"WISE 런 로그(ws_run_log) 없음 run_at>={sys.argv[1]} — 수집기가 완주하지 않았다")
+    print(f"WISE 런 로그(ws_run_log) 없음 run_at>={sys.argv[1]} mode={sys.argv[2]} — 수집기가 완주하지 않았다")
     sys.exit(1)
-print(sum(int(a or 0) - int(b or 0) for a, b in rows))' "$from") || got="? ($got)"
+print(sum(int(a or 0) - int(b or 0) for a, b in rows))' "$from" supplement) || got="? ($got)"
   status=ok
   if [ "$rc" -ne 0 ]; then
     status=failed; warn_title="주말 보강 WISE 수집 실패(rc=$rc)"
@@ -93,12 +110,51 @@ runlog.finish("data/raw/daily_run.db", int(sys.argv[1]), status=sys.argv[2], det
       "$rid" "$status" "D=$d wise_rc=$rc fail_calls=$got" \
       || echo "  ! 런 로그 종료 기록 실패 — source=supplement_wise run_id=$rid"
   fi
-  echo "  주말 보강 WISE D=$d 오늘 $today rc=$rc 실패 콜 $got → $status"
   if [ -n "$warn_title" ]; then
     scripts/notify.sh warn "$warn_title" \
-      "D=$d · 오늘 $today | 실패 콜 $got · 런 로그 supplement_wise $status — $([ "$status" = ok ] && echo '보강판은 그대로 짓는다(빠진 종목은 D 판 추정치 · 유예)' || echo '08:10 체인이 보강판을 짓지 않는다. 정규 체인 rc·판은 그대로') | 로그 $LOG"
+      "D=$d · 오늘 $today | 실패 콜 $got · 런 로그 supplement_wise $status — $([ "$status" = ok ] && echo '보강판은 그대로 짓는다(빠진 종목은 D 판 추정치 · 유예)' || echo '08:10 체인이 보강판을 짓지 않는다. 정규 체인 rc·판은 그대로') | 로그 $SUPP_LOG"
+  fi
+  echo "  주말 보강 WISE D=$d 오늘 $today rc=$rc 실패 콜 $got → $status"
+  return 0
+}
+supp_wise_start() {  # 대상일이면 갈래를 띄운다(SUPP_PID). 아니면 사유 한 줄만
+  supplement_on || return 0
+  SUPP_TODAY="${QL_TODAY:-$(TZ=Asia/Seoul date +%Y%m%d)}"
+  # 표준 출력만 받는다(경고 줄은 로그로) — 사유는 판정 코드가 표준 출력에 찍는다. 8자리 날짜·빈 값이 아니면 판정 불가
+  SUPP_D=$(supplement_target_day "$SUPP_TODAY"); local t=$? why
+  if [ "$t" -ne 0 ] || [[ ! "$SUPP_D" =~ ^([0-9]{8})?$ ]]; then
+    echo "  ! 주말 보강 WISE 대상일 판정 불가 — $SUPP_D"
+    [ -z "$DRY" ] && scripts/notify.sh warn "주말 보강 WISE 대상일 판정 불가" \
+      "오늘 $SUPP_TODAY | $SUPP_D — 보강 WISE 를 받지 않았다(정규 체인 rc·판은 그대로) | 로그 $LOG"
+  elif [ -z "$SUPP_D" ]; then
+    echo "주말 보강 WISE 없음 — 오늘 $SUPP_TODAY 은 휴장 연속의 첫 휴일이 아니다"
+  elif [ -n "$DRY" ]; then
+    echo "  주말 보강 WISE 계획(dry-run — 받지 않음): D=$SUPP_D 오늘 $SUPP_TODAY · $PY src/backfill_wise.py --mode full --run-tag supplement(DART 와 나란히)"
+  elif why=$(supplement_wise_ok "$SUPP_TODAY"); then
+    echo "  주말 보강 WISE 이미 받음(오늘 $SUPP_TODAY) — $why"
+  else
+    SUPP_LOG="logs/supplement_wise_${SUPP_TODAY}.log"
+    echo "──── 주말 보강 WISE 시작 (D=$SUPP_D · 오늘 $SUPP_TODAY · DART 와 나란히 — 로그 $SUPP_LOG) $(kst) ────"
+    supp_wise_branch "$SUPP_D" "$SUPP_TODAY" >> "$SUPP_LOG" 2>&1 &
+    SUPP_PID=$!
   fi
   return 0
+}
+supp_wise_wait() {  # 띄운 갈래가 끝나기를 기다린다(시간 한도 없음 — P9). 결과 한 줄을 체인 로그로 옮긴다
+  [ -n "$SUPP_PID" ] || return 0
+  local rc line
+  wait "$SUPP_PID"; rc=$?
+  echo "──── 주말 보강 WISE 종료 rc=$rc $(kst) ────"
+  line=$(grep -E "^  주말 보강 WISE D=" "$SUPP_LOG" | tail -1)
+  if [ -n "$line" ]; then
+    echo "$line"
+  else
+    # 갈래가 결과를 못 남기고 죽었다(kill·OOM) — 런 로그는 running 이라 08:10 이 보강판을 짓지 않는다. 사람에게 닿게
+    echo "  주말 보강 WISE D=$SUPP_D 오늘 $SUPP_TODAY 결과 줄 없음(rc=$rc) — 갈래 로그 $SUPP_LOG"
+    scripts/notify.sh warn "주말 보강 WISE 결과 미기록" \
+      "D=$SUPP_D · 오늘 $SUPP_TODAY | 갈래가 rc $rc 로 결과 없이 끝났다 — 보강판은 짓지 않는다 | 로그 $SUPP_LOG"
+  fi
+  SUPP_PID=""
 }
 {
 echo "════ [$(kst)] daily_ledger 시작 dry=${DRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
@@ -202,6 +258,7 @@ rows=[r for r in runlog.recent("data/raw/daily_run.db", source="ledger_chain", l
 sys.exit(0 if rows else 1)' "$D"; then
   echo "  D=$D 는 이미 수집 완료 — 종료"
   SKIPPED="건너뜀(D=$D 이미 수집 완료)"
+  supp_wise_start   # 주말 보강 WISE(N-45) — 겹칠 단계가 없어 띄우고 바로 아래 끝에서 기다린다
   echo "════ 종료 $(kst) ════"
 else
   RID=""
@@ -225,6 +282,7 @@ else
   if [ -z "${QL_SKIP_KW:-}" ]; then
     step "kiwoom evening cover" $PY -m daily.kw_daily --cover --date "$D" --tr ka10060,ka10014 $DRY $LIMIT || true
   fi
+  supp_wise_start   # 주말 보강 WISE(N-45) — DART 와 나란한 갈래(다른 원장), 체인 끝에서 기다린다
   step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT \
     && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
   RC=0; [ -n "$FAILED" ] && RC=1
@@ -235,32 +293,8 @@ else
   fi
   echo "════ 종료 rc=$RC $(kst) ════"
 fi
-# 주말 보강판 WISE 수집(N-45 · DECISIONS §7 #8) — 체인 맨 끝(원장 락을 쥔 채, 완료 감지로 잇는다 — P9). 스위치
-#   (config/supplement.env SUPPLEMENT_ENABLED=1, 판정 scripts/postclose_conf.sh supplement_on)가 켜져 있고 오늘(KST)이 휴장
-#   연속의 첫 휴일(직전 달력일 = 거래일 D — daily.calendar supplement_target)일 때만 WISE 스냅샷 full 을 한 번 받는다. WISE 는
-#   D 분 컨센서스를 D 밤사이(D 18:11 ~ D+1 06:00)에 올리고 18:05 저녁 수집은 거래일에만 돌아서, 이것이 휴일에 D 기준 값을
-#   받는 수집이다. 결과는 런 로그 source=supplement_wise · date=오늘이고, 08:10 daily_build.sh 끝이 그것을 보고 보강판
-#   (weekend_supplement.sh)을 부른다. 오늘 이미 ok 면 다시 받지 않는다(손 재실행). 실패·완주 기록 없음·일부 콜 실패는 warn 한
-#   줄(logs/notify.log)이고 체인 rc·FAILED·ledger_chain 런 로그에는 넣지 않는다 — 정규 수집 판정과 무관하다. dry-run 은 계획
-#   한 줄만. QL_TODAY(YYYYMMDD)는 테스트 전용 — 오늘(KST) 날짜를 덮어쓴다. 운영 크론·대화형 셸에 남기지 않는다.
-if supplement_on; then
-  TODAY_KST="${QL_TODAY:-$(TZ=Asia/Seoul date +%Y%m%d)}"
-  # 표준 출력만 받는다(경고 줄은 로그로) — 사유는 판정 코드가 표준 출력에 찍는다. 8자리 날짜·빈 값이 아니면 판정 불가
-  SUPP_D=$(supplement_target_day "$TODAY_KST"); SUPP_T=$?
-  if [ "$SUPP_T" -ne 0 ] || [[ ! "$SUPP_D" =~ ^([0-9]{8})?$ ]]; then
-    echo "  ! 주말 보강 WISE 대상일 판정 불가 — $SUPP_D"
-    [ -z "$DRY" ] && scripts/notify.sh warn "주말 보강 WISE 대상일 판정 불가" \
-      "오늘 $TODAY_KST | $SUPP_D — 보강 WISE 를 받지 않았다(정규 체인 rc·판은 그대로) | 로그 $LOG"
-  elif [ -z "$SUPP_D" ]; then
-    echo "주말 보강 WISE 없음 — 오늘 $TODAY_KST 은 휴장 연속의 첫 휴일이 아니다"
-  elif [ -n "$DRY" ]; then
-    echo "  주말 보강 WISE 계획(dry-run — 받지 않음): D=$SUPP_D 오늘 $TODAY_KST · $PY src/backfill_wise.py --mode full"
-  elif SUPP_WHY=$(supplement_wise_ok "$TODAY_KST"); then
-    echo "  주말 보강 WISE 이미 받음(오늘 $TODAY_KST) — $SUPP_WHY"
-  else
-    supplement_wise "$SUPP_D" "$TODAY_KST"
-  fi
-fi
+# 주말 보강 WISE 갈래(위 supp_wise_* 주석)가 떠 있으면 끝나기를 기다린다 — 요약·알림은 그 뒤다
+supp_wise_wait
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
 # 저녁 키움 보강 판정 줄(T-13)은 맨 앞 — 뒤 단계(DART) 출력이 tail 창에서 밀어내지 않게 따로 집는다

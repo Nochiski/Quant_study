@@ -27,7 +27,7 @@ python -m model build --date 20260928 --basis morning \
 |---|---|
 | 0 | 판 커밋 · `latest_<basis>.json` 갱신(MG5 warn 이 있어도 0 · 비교 모델이 FAIL·예외로 빠져도 0 — `excluded_specs`) |
 | 1 | 주 모델 게이트 FAIL — 아무 spec 도 올리지 않는다(`_failed/<build_id>.json`, MANIFEST·latest 는 직전 성공 판 유지) |
-| 2 | 입력·인자 오류(factor_inputs 판 없음 · 판의 date·basis 가 요청과 다름 · 모르는 spec · `--primary` 가 선택 밖 · 날짜 형식) 또는 주 모델·입력 단계 예외 |
+| 2 | 입력·인자 오류(factor_inputs 판 없음 · 판의 date·basis 가 요청과 다름 · 모르는 spec · `--primary` 가 선택 밖 · 날짜 형식 · 주 모델 추정치 유예 > fi 판 유예 창) 또는 주 모델·입력 단계 예외 |
 
 - 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
 - `--date` 는 factor_inputs 판의 기준일 D 다. `--fi-build latest`(기본)는
@@ -38,6 +38,11 @@ python -m model build --date 20260928 --basis morning \
   `v4_rank@0.1` · `v4_rank@0.2`). `--primary`(기본 `scope@2.0` — 10-05 v4_rank@0.1 → scope@1.0, 10-12 scope@1.0 → scope@2.0
   추정치 유예 5거래일 N-47)는 레지스트리와 무관한 인계 설정이고, 선택한 spec 안에
   있어야 한다.
+- **추정치 유예 가드(N-47, mb1.7.0)**: fi 판의 유예 창(판 manifest `universe_rule.coverage_grace_days` — 그 판이
+  아니면 `fi_universe/v=<id>/_meta.json` 게이트 FG-fresh `grace_days`)보다 spec 유예(`universe.coverage_grace_days`)가
+  길면 엔진이 넓힐 수 없어 그 spec 이 조용히 짧은 유예로 채점된다. 그래서 주 모델이면 rc 2(판 없음), 비교 모델이면
+  엔진을 돌리지 않고 `excluded_specs` 에 `{error: "추정치 유예 부족 — …"}` 로 뺀다. 창을 알 수 없는 판(손으로 만든 판)은
+  로그 warn 만 남기고 대조를 건너뛴다.
 - 일부 spec 만 돌려도 latest 가 그 판으로 바뀐다(판 manifest 의 `specs` 에 그 spec 만 있다). 운영 루트는
   `--specs all` 로만 돌리고, 과거 날짜·실험은 **별도 `--root`** 로 돌린다(factor_inputs 와 같은 규약).
 - **언제 돌리나**: 아침 체인에서 factor_inputs 바로 뒤(M3 에서 `build_chain.sh` 에 잇는다 —
@@ -110,7 +115,7 @@ data/model/
 | `fi_build_id` | 읽은 factor_inputs 판 id |
 | `generated_at` | UTC(`…Z`) |
 | `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(실행 예외 — 엔진 실행·재실행·직전 판 읽기·게이트 평가 — 를 낸 비교 모델은 `{error}` 하나). 엔진 메타(`EngineResult.meta`)는 같은 자리에 얹는다 — scope 의 `adj_jump_masked: {n_tickers, r1m, r3m, r6m, r9m, r12m, std_20d}` = 창 안 제한폭 초과 미해결 수정주가로 비운 종목 수·지표별 칸 수(규칙이 없었으면 값이 섰던 칸만, 0 도 싣는다 — T-9 · H1-4, mb1.6.0). GH1-c 의 '매 모델 빌드 반사실 대조 [차단]'(같은 fi 로 규칙 있음·없음을 돌려 판 공개를 막는 게이트)은 이 PR 범위 밖 — 후속이다 |
-| `excluded_specs` | 게이트 FAIL·실행 예외(엔진 실행·재실행·직전 판 읽기·게이트 평가)로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`. 사유는 첫 줄만, model 루트 기준 상대 경로로 바꾼 뒤 500자에서 자른다(D-01, traceback 은 로컬 로그 경고에만). 없으면 `{}`(gate_failed 판도 `{}`) |
+| `excluded_specs` | 게이트 FAIL·실행 예외(엔진 실행·재실행·직전 판 읽기·게이트 평가)·추정치 유예 부족(N-47)으로 이번 판에서 뺀 비교 모델 — 게이트로 뺀 것은 `specs` 와 같은 모양, 예외로 뺀 것은 `{error: "<예외 클래스>: <메시지>"}`. 사유는 첫 줄만, model 루트 기준 상대 경로로 바꾼 뒤 500자에서 자른다(D-01, traceback 은 로컬 로그 경고에만). 없으면 `{}`(gate_failed 판도 `{}`) |
 | `primary_spec` | 인계 대표 모델(`--primary`) |
 | `elapsed_s` | 적재·엔진·게이트 소요(초) |
 

@@ -14,6 +14,12 @@
             그 spec 만 빼고(`excluded_specs`) 나머지를 올린다(2026-10-05 사용자 결정 N-11 '격리').
             비교 모델의 엔진 예외도 그 spec 만 뺀다(주 모델 예외는 전체 실패, D-01).
 
+추정치 유예 가드(N-47): fi 는 유예 창(판 manifest `universe_rule.coverage_grace_days`) 안의 grace
+종목만 eligible 로 싣고 엔진은 그 안에서 spec 유예로 다시 자를 뿐 넓히지 못한다. spec 유예가 그 판의
+창보다 길면 그 spec 은 조용히 짧은 유예로 채점된다 — 주 모델이면 판을 짓지 않고(`ModelBuildError`,
+rc 2), 비교 모델이면 엔진을 돌리지 않고 `excluded_specs` 로 뺀다(사유 기록). 창을 알 수 없는
+판(손으로 만든 판)은 warn 만 남긴다.
+
 판 id 하나(`m_<UTC>`)를 선택한 spec 이 공유한다. spec 마다 포인터를 따로 바꾸므로 전환 순간에는
 spec 끼리 판이 섞여 보일 수 있다 — 소비자(deliver)는 `latest_<basis>.json` 의 `build_id` 로 읽는다.
 
@@ -252,6 +258,51 @@ def _previous(root: Path, spec: ModelSpec, basis: str) -> gates.Previous | None:
         rank={str(t): int(k) for t, _, k, _ in got if k is not None})
 
 
+def _fi_grace_window(fi_root: Path, fi_bid: str, d_iso: str, basis: str) -> int | None:
+    """그 factor_inputs 판의 추정치 유예 창(거래일) — 판 manifest(`_runs/<D>_<basis>.json`, 같은
+    내용의 `latest_<basis>.json`)가 그 판이면 `universe_rule.coverage_grace_days`, 아니면(같은 날 뒤
+    판이 덮었다) 그 판 `fi_universe/_meta.json` 게이트 FG-fresh 의 `grace_days`. 둘 다 없으면
+    None(모른다)."""
+    ymd = d_iso.replace("-", "")
+    for path in (fi_root / "_runs" / f"{ymd}_{basis}.json", fi_root / f"latest_{basis}.json"):
+        try:
+            run = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            continue
+        if not isinstance(run, dict) or run.get("build_id") != fi_bid:
+            continue
+        rule = run.get("universe_rule")
+        if isinstance(rule, dict) and isinstance(rule.get("coverage_grace_days"), int):
+            return int(rule["coverage_grace_days"])
+    try:
+        meta = json.loads((fi_root / "fi_universe" / f"v={fi_bid}" / "_meta.json")
+                          .read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return None
+    gate_list = meta.get("gates") if isinstance(meta, dict) else None
+    for g in gate_list if isinstance(gate_list, list) else ():
+        if isinstance(g, dict) and g.get("name") == "FG-fresh":
+            grace = (g.get("metrics") or {}).get("grace_days")
+            if isinstance(grace, int):
+                return grace
+    return None
+
+
+def _grace_short(selected: Sequence[ModelSpec], window: int | None,
+                 fi_bid: str) -> dict[str, str]:
+    """fi 유예 창보다 긴 유예를 요구하는 spec → 사유(N-47). 창을 모르면 빈 dict."""
+    if window is None:
+        return {}
+    out: dict[str, str] = {}
+    for s in selected:
+        need = s.universe.coverage_grace_days
+        if need > window:
+            out[s.spec_id] = (f"추정치 유예 부족 — {s.spec_id} 는 유예 {need}거래일이 필요한데 "
+                              f"factor_inputs 판 {fi_bid} 의 유예 창은 {window}거래일이다. fi 를 "
+                              f"--grace-days {need} 이상으로 다시 지어야 한다(N-47)")
+    return out
+
+
 # ── 빌드 ─────────────────────────────────────────────────────────────────────
 def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str = "latest",
           specs: str | Sequence[str] = "all", primary: str = PRIMARY_DEFAULT,
@@ -274,12 +325,25 @@ def build(date_s: str, basis: str, root: Path, fi_root: Path, *, fi_build: str =
         raise ModelBuildError(f"build_id 접두어가 --basis 와 다르다: {bid} vs {basis}")
     root, fi_root = Path(root), Path(fi_root)
     fi_bid = _resolve_fi(fi_root, fi_build, d_iso, basis)
+    window = _fi_grace_window(fi_root, fi_bid, d_iso, basis)
+    if window is None:
+        log.warning("factor_inputs 판 %s 의 추정치 유예 창을 알 수 없다 — spec 유예 대조를 건너뛴다"
+                    "(N-47)", fi_bid)
+    short = _grace_short(selected, window, fi_bid)
+    if primary in short:
+        raise ModelBuildError(f"주 모델 {short[primary]}")
     inputs, n_on_d = load_inputs(fi_root, fi_bid, d_iso, basis)
 
     results = {}
     gate_results: dict[str, list[GateResult]] = {}
-    errors: dict[str, str] = {}                  # 엔진 예외로 뺀 비교 모델 → 사유
+    # 엔진 예외로 뺀 비교 모델 → 사유. 유예 창이 모자란 비교 모델(N-47)은 엔진을 돌리지 않고
+    # 먼저 싣는다
+    errors: dict[str, str] = dict(short)
+    for sid in short:
+        log.warning("비교 모델 %s 를 이번 판에서 뺀다 — %s", sid, short[sid])
     for spec in selected:
+        if spec.spec_id in errors:
+            continue
         engine = ENGINES[spec.engine]
         try:
             first = engine.run(spec, inputs)

@@ -53,9 +53,12 @@ SMALL: dict[str, Any] = {"min_prices_on_d": 10, "min_ranked": 10}
 
 # ── 합성 factor_inputs 트리 ──────────────────────────────────────────────────
 def write_fi_tree(root: Path, fi: FactorInputs, build_id: str = FI_BID, *, basis: str = "morning",
-                  date: str = D, latest: bool = True) -> Path:
+                  date: str = D, latest: bool = True,
+                  grace: int | None = None) -> Path:
     """FactorInputs → factor_inputs 판 규약(`<표>/v=<id>/part0.parquet` + `_meta.json` +
-    `latest_<basis>.json`). 표마다 계약 dtype 으로 쓴다."""
+    `latest_<basis>.json`). 표마다 계약 dtype 으로 쓴다. `grace` 를 주면 포인터(판 manifest 와 같은
+    내용)에 유예 창 `universe_rule.coverage_grace_days` 를 싣는다 — 없으면 창을 모르는 판(N-47
+    가드를 건너뛴다)."""
     for name, t in FI_TABLES.items():
         out = root / name / f"v={build_id}" / "part0.parquet"
         mbuild.write_parquet(list(fi.tables.get(name, ())),
@@ -63,9 +66,11 @@ def write_fi_tree(root: Path, fi: FactorInputs, build_id: str = FI_BID, *, basis
         (out.parent / "_meta.json").write_text(json.dumps(
             {"table": name, "build_id": build_id, "basis": basis, "date": date}))
     if latest:
-        (root / f"latest_{basis}.json").write_text(json.dumps(
-            {"layer": "factor_inputs", "status": "ok", "build_id": build_id, "date": date,
-             "basis": basis}))
+        pointer = {"layer": "factor_inputs", "status": "ok", "build_id": build_id, "date": date,
+                   "basis": basis}
+        if grace is not None:
+            pointer["universe_rule"] = {"coverage_grace_days": grace}
+        (root / f"latest_{basis}.json").write_text(json.dumps(pointer))
     return root
 
 
@@ -81,7 +86,8 @@ def board_fi(n: int = N_BOARD) -> FactorInputs:
 
 @pytest.fixture(scope="module")
 def board_tree(tmp_path_factory) -> Path:
-    return write_fi_tree(tmp_path_factory.mktemp("fi_board") / "factor_inputs", board_fi())
+    # 유예 창 5 — 실제 fi 판 manifest 처럼 창을 싣는다(N-47 가드가 대조한다)
+    return write_fi_tree(tmp_path_factory.mktemp("fi_board") / "factor_inputs", board_fi(), grace=5)
 
 
 @pytest.fixture(scope="module")
@@ -256,6 +262,70 @@ def test_real_factor_inputs_build_feeds_the_model(tmp_path) -> None:
     n_grace = fi.coverage["counts_eligible"]["grace"]
     assert n_grace == 2
     assert res.specs[V2]["n_scores"] == fi.coverage["n_eligible"] - n_grace
+    # 실제 fi 판 manifest 의 유예 창(N-47 가드가 읽는 값)
+    assert mbuild._fi_grace_window(tmp_path / "fi", fi.build_id, D, "morning") == 5
+
+
+# ── 추정치 유예 가드(N-47) ─────────────────────────────────────────────────────
+NEEDS_GRACE = ("scope@2.0", "v4_rank@0.1", "v4_rank@0.2")      # spec 유예 5거래일
+
+
+def test_primary_needing_more_grace_than_the_fi_window_fails_the_build(tmp_path) -> None:
+    """fi 판 유예 창(0)이 주 모델 scope@2.0 의 유예(5)보다 짧으면 판을 짓지 않는다 — 조용히 유예
+    0 으로 채점하지 않는다(rc 2 와 같은 `ModelBuildError`)."""
+    fi = write_fi_tree(tmp_path / "fi", board_fi(), grace=0)
+    root = tmp_path / "model"
+    with pytest.raises(ModelBuildError, match=r"주 모델 추정치 유예 부족 — scope@2\.0 는 유예 "
+                                              r"5거래일이 필요한데 factor_inputs 판 .* 유예 창은 "
+                                              r"0거래일이다"):
+        build(D_S, "morning", root, fi, **SMALL)
+    assert not (root / "latest_morning.json").exists() and not (root / "scope@2.0").exists()
+
+
+def test_comparison_specs_needing_more_grace_are_excluded_with_the_reason(tmp_path) -> None:
+    """주 모델이 유예 0 이면 판은 서고, 유예 5 비교 모델(scope@2.0·v4 둘)은 엔진을 돌리지 않고
+    `excluded_specs` 로 빠진다(사유 기록 — N-11 격리와 같은 자리)."""
+    fi = write_fi_tree(tmp_path / "fi", board_fi(), grace=0)
+    root = tmp_path / "model"
+    res = build(D_S, "morning", root, fi, primary="scope@1.0", **SMALL)
+    assert res.ok and set(res.excluded) == set(NEEDS_GRACE)
+    run = json.loads((root / "_runs" / f"{D_S}_morning.json").read_text())
+    assert set(run["specs"]) == {"scope@1.0", "v2_percentrank@1.0", "v3_zscore@1.0"}
+    for sid in NEEDS_GRACE:
+        why = run["excluded_specs"][sid]["error"]
+        assert why.startswith(f"추정치 유예 부족 — {sid} 는 유예 5거래일")
+        assert "유예 창은 0거래일" in why
+        assert not (root / sid).exists()
+
+
+@pytest.mark.parametrize("grace", [5, None])
+def test_fi_window_that_covers_every_spec_or_is_unknown_excludes_nothing(tmp_path,
+                                                                         grace) -> None:
+    """창 5 는 모든 spec 을 덮는다. 창을 모르는 판(손으로 만든 판 — 포인터에 universe_rule 이
+    없다)은 대조를 건너뛴다(warn 만)."""
+    fi = write_fi_tree(tmp_path / "fi", board_fi(), grace=grace)
+    res = build(D_S, "morning", tmp_path / "model", fi, **SMALL)
+    assert res.ok and res.excluded == () and res.primary_spec == "scope@2.0"
+
+
+def test_fi_window_of_an_older_build_comes_from_its_own_meta(tmp_path) -> None:
+    """`--fi-build` 로 같은 날 앞 판을 고르면 판 manifest(`_runs`·latest)는 뒤 판 것이다 — 그 판
+    자신의 `fi_universe/_meta.json` 게이트 FG-fresh `grace_days` 로 창을 읽는다. 둘 다 없으면
+    None."""
+    old, new = "m_20260929T000100_000000Z", FI_BID
+    root = write_fi_tree(tmp_path / "fi", board_fi(), old, latest=False)
+    write_fi_tree(root, board_fi(), new, grace=5)
+    assert mbuild._fi_grace_window(root, new, D, "morning") == 5
+    assert mbuild._fi_grace_window(root, old, D, "morning") is None
+    meta_path = root / "fi_universe" / f"v={old}" / "_meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["gates"] = [{"name": "FG1", "status": "pass", "detail": "", "metrics": {}},
+                     {"name": "FG-fresh", "status": "pass", "detail": "",
+                      "metrics": {"grace_days": 0}}]
+    meta_path.write_text(json.dumps(meta))
+    assert mbuild._fi_grace_window(root, old, D, "morning") == 0
+    with pytest.raises(ModelBuildError, match="유예 창은 0거래일"):
+        build(D_S, "morning", tmp_path / "model", root, fi_build=old, **SMALL)
 
 
 # ── 게이트 FAIL · 판 유지 ────────────────────────────────────────────────────

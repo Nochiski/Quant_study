@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from model.engines._common import z_score_winsorized
 from model.engines.v4_rank import pct_rank_avg
 
-from .stats import quantile
-
 # ── 라벨 ─────────────────────────────────────────────────────────────────────
 BUCKET_LABELS: dict[str, str] = {
     "low_risk": "저위험", "value": "밸류", "quality": "퀄리티", "pull": "고점근접+반전",
@@ -35,12 +33,11 @@ BASIS_NOTES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class IndMeta:
-    """지표 표시 규칙 — 라벨 · 배율(비율 → %) · 숫자 서식 · 변화 열 여부(색 스케일 대상)."""
+    """지표 표시 규칙 — 라벨 · 배율(비율 → %) · 숫자 서식."""
 
     label: str
     scale: float = 1.0
     fmt: str = "#,##0.00"
-    change: bool = False
 
 
 IND_META: dict[str, IndMeta] = {
@@ -50,17 +47,17 @@ IND_META: dict[str, IndMeta] = {
     "OPM_TTM": IndMeta("영업이익률 TTM(%)", 100, "#,##0.0"),
     "FCF_A": IndMeta("FCF/자산(%)", 100, "#,##0.0"),
     "M_PULL_C": IndMeta("고점근접+반전(0~100)", 100, "#,##0.0"),
-    "REV_OP_1M": IndMeta("영업이익 추정 1M(%)", 100, "#,##0.0", True),
-    "REV_OP_3M": IndMeta("영업이익 추정 3M(%)", 100, "#,##0.0", True),
-    "REV_NI_1M": IndMeta("순이익 추정 1M(%)", 100, "#,##0.0", True),
-    "REV_NI_3M": IndMeta("순이익 추정 3M(%)", 100, "#,##0.0", True),
-    "CRDT_CHG": IndMeta("신용잔고 20일 변화(%)", 100, "#,##0.0", True),
+    "REV_OP_1M": IndMeta("영업이익 추정 1M(%)", 100, "#,##0.0"),
+    "REV_OP_3M": IndMeta("영업이익 추정 3M(%)", 100, "#,##0.0"),
+    "REV_NI_1M": IndMeta("순이익 추정 1M(%)", 100, "#,##0.0"),
+    "REV_NI_3M": IndMeta("순이익 추정 3M(%)", 100, "#,##0.0"),
+    "CRDT_CHG": IndMeta("신용잔고 20일 변화(%)", 100, "#,##0.0"),
     "FRGN60": IndMeta("외국인 60일 순매수/시총(%)", 100, "#,##0.00"),
-    "R1M": IndMeta("1M 수익률(%)", 100, "#,##0.0", True),
+    "R1M": IndMeta("1M 수익률(%)", 100, "#,##0.0"),
     "M_52WH": IndMeta("52주 고점 근접(%)", 100, "#,##0.0"),
-    "R3M": IndMeta("3M 수익률(%)", 100, "#,##0.0", True),
-    "R6M": IndMeta("6M 수익률(%)", 100, "#,##0.0", True),
-    "R12_1": IndMeta("12-1 수익률(%)", 100, "#,##0.0", True),
+    "R3M": IndMeta("3M 수익률(%)", 100, "#,##0.0"),
+    "R6M": IndMeta("6M 수익률(%)", 100, "#,##0.0"),
+    "R12_1": IndMeta("12-1 수익률(%)", 100, "#,##0.0"),
     "EP_FWD": IndMeta("선행 E/P(%)", 100, "#,##0.00"),
 }
 REVISION_KEYS = frozenset({"REV_OP_1M", "REV_OP_3M", "REV_NI_1M", "REV_NI_3M"})
@@ -157,36 +154,7 @@ def yoy(cur: float | None, prev: float | None) -> tuple[float | None, str | None
     return None, None
 
 
-def change_pct(cur: float | None, prev: float | None) -> tuple[float | None, str | None]:
-    """추정 변화율(%) — v3 규약(리비전과 같다): 흑전 · 적전 · 적확 · 적축.
-    이전값 ≤ 0 이면 변화율 대신 표식(E), 적전은 변화율과 표식을 함께 둔다."""
-    if cur is None or prev is None or prev == 0:
-        return None, None
-    flag = None
-    if prev < 0 < cur:
-        flag = "흑전"
-    elif cur < 0 < prev:
-        flag = "적전"
-    elif prev < 0 and cur < 0:
-        flag = "적확" if abs(cur) > abs(prev) else "적축"
-    if flag in PREV_NEGATIVE_FLAGS:
-        return None, flag
-    return (cur - prev) / abs(prev) * 100.0, flag
-
-
 # ── 통계 ─────────────────────────────────────────────────────────────────────
-def winsorize(values: Sequence[object], lo: float = 0.01, hi: float = 0.99) -> list[object]:
-    """숫자만 [1%, 99%] 분위수로 자른다(표시 전용 — 순위·점수에는 쓰지 않는다).
-    문자·None 은 그대로."""
-    nums = sorted(float(v) for v in values
-                  if isinstance(v, int | float) and not isinstance(v, bool))
-    if len(nums) < 3:
-        return list(values)
-    a, b = quantile(nums, lo), quantile(nums, hi)
-    return [min(max(float(v), a), b) if isinstance(v, int | float) and not isinstance(v, bool)
-            else v for v in values]
-
-
 def group_pct(values: Mapping[str, float], group_of: Mapping[str, str | None],
               min_size: int) -> dict[str, float]:
     """그룹(업종) 안 백분위 0~100(엔진 공식). 표본 < min_size 이거나 그룹이 없으면
@@ -244,7 +212,7 @@ def cap_candidates(ranked: Sequence[Mapping[str, object]], top_n: int, max_per: 
 
 __all__ = [
     "BUCKET_LABELS", "EXCLUDE_LABELS", "IND_META", "PREV_NEGATIVE_FLAGS", "REVISION_KEYS",
-    "SIGN_FLAGS", "IndMeta", "bucket_label", "cap_candidates", "change_pct", "coverage_label",
+    "SIGN_FLAGS", "IndMeta", "bucket_label", "cap_candidates", "coverage_label",
     "exclude_label", "group_pct", "group_z", "ind_meta", "market_label", "missing", "pct_rank_avg",
-    "quantile", "split_flags", "winsorize", "yoy",
+    "split_flags", "yoy",
 ]

@@ -213,7 +213,7 @@ class Col:
 class Group:
     name: str
     cols: tuple[Col, ...]
-    core: bool = False          # 종합·순위 그룹(금색)
+    core: bool = False          # 종합·순위 그룹(금색 — Q.Pack 문법 write_table 만)
     gap: bool = True            # 앞 그룹과 사이에 빈 구분 열을 둔다(False = 바로 붙인 하위 블록)
 
 
@@ -647,8 +647,7 @@ def _header_rows(ws: Worksheet, groups: Sequence[Group], layout: Sequence[tuple[
         seen.add(id(g))
         h6 = put(ws, r6, c, g.name if first else None)
         h6.fill = fill(C_CORE if col.core else C_GROUP)
-        dark = g.core and not col.key_col and style != "sector"     # 옛 금색 그룹 칸은 검정 글자
-        h6.font = font(bold=True, color="000000" if dark else C_WHITE)
+        h6.font = font(bold=True, color=C_WHITE)
         h6.alignment = Alignment(horizontal=align[id(g)], vertical="top", wrap_text=False)
         h7 = put(ws, r6 + 1, c, col.label)
         h7.fill = fill(C_CORE if col.core else C_COLHDR)
@@ -660,8 +659,6 @@ def _header_rows(ws: Worksheet, groups: Sequence[Group], layout: Sequence[tuple[
 def _body_rows(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | None]],
                rows: Sequence[Mapping[str, object]], r0: int, sign_colors: bool) -> None:
     for ri, row in enumerate(rows, start=r0):
-        fills = row.get("_fills") or {}
-        assert isinstance(fills, Mapping)
         for c, _g, col in layout:
             if col is None:
                 continue
@@ -677,8 +674,6 @@ def _body_rows(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | No
                 cell.number_format = col.fmt_all
             elif col.fmt and col.kind not in ("id", "txt") and isinstance(cell.value, int | float):
                 cell.number_format = col.fmt
-            if col.key in fills:
-                cell.fill = fill(str(fills[col.key]))
 
 
 def _color_rules(ws: Worksheet, layout: Sequence[tuple[int, Group | None, Col | None]],

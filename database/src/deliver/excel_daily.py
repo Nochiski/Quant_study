@@ -580,7 +580,7 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
             Col("t1m", "1M\n흐름", "spark", None, 11.0, core=True, definition=(
                 "1M 동안 날짜별 순위 꺾은선(원순위, 위 = 상승). 선 색 = Δ순위 1M 부호 = 선의 "
                 "처음 → 끝 방향")),
-        ), core=True),
+        )),
         Group("상태", (
             # 너비 상한 26 — 가장 긴 v4 라벨 '고점근접+반전 게이트(pull_gate)'가 qpack fit 25.05
             # (N-26 4.5 — 상한 16 이면 v4 라벨 8개 중 6개가 잘렸다)
@@ -1122,7 +1122,7 @@ def sheet_sectors(wb: Workbook, view: DayView, week: Mapping[str, float]) -> Dic
                 f"표시({k}/{k} = {k}종목이 찬 대분류)")))),
         Group("종합", (Col("comp_med", "점수\n중앙값", "num", "#,##0.00",
                            fit_label="종합 점수\n중앙값", core=True,
-                           definition="순위 종목 종합 점수 중앙값"),), core=True),
+                           definition="순위 종목 종합 점수 중앙값"),)),
         Group("축별 평균(Z)" if view.z_engine else "축별 평균 백분위", axis_cols),
         Group("업종 지표", metric_cols),
         Group("상위 종목", (Col("top", "상위 3(순위)", "txt", None, fixed=58.0,
@@ -1250,7 +1250,7 @@ def sheet_models(wb: Workbook, view: DayView) -> Dictionary:
         Group("순위", tuple(Col(f"r:{s}", model_label(s), "rank", "#,##0",
                               key_col=s == view.spec_id, core=s == view.spec_id,
                               definition=f"{s} 순위(1 = 최고)")
-                          for s in specs), core=True),
+                          for s in specs)),
         Group(f"상위 {top_n} 포함(●)", tuple(Col(f"t:{s}", model_label(s), "txt", None, 8.0,
                                                 definition=f"{s} 순위 ≤ {top_n} 이면 ●")
                                             for s in specs)),

@@ -23,11 +23,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from deliver import __main__ as cli
-from deliver.common import cap_candidates, change_pct, quantile, winsorize, yoy
+from deliver.common import cap_candidates, yoy
 from deliver.excel_daily import build_daily, model_label
 from deliver.excel_weekly import build_weekly, prev_week, week_days
 from deliver.qpack import Col, fit_width
 from deliver.reader import DeliverError, find_run
+from deliver.stats import quantile
 from deliver.view import load_day
 from model import registry
 from model.contracts import FI_TABLES, score_columns
@@ -366,25 +367,6 @@ def test_yoy_sign_flags_replace_growth() -> None:
     assert yoy(-5.0, 0.0) == (None, "적자전환")
     assert yoy(110.0, 100.0) == (pytest.approx(10.0), None)  # 흑자지속은 숫자
     assert yoy(None, 1.0) == (None, None)
-
-
-def test_change_pct_follows_v3_revision_convention() -> None:
-    assert change_pct(10.0, -5.0) == (None, "흑전")          # 이전값<0 → 표식만
-    assert change_pct(-20.0, -10.0) == (None, "적확")
-    assert change_pct(-5.0, -10.0) == (None, "적축")
-    v, f = change_pct(-5.0, 10.0)                            # 적전 = 변화율 + 표식
-    assert f == "적전" and v == pytest.approx(-150.0)
-    assert change_pct(12.0, 10.0) == (pytest.approx(20.0), None)
-
-
-def test_winsorize_clips_to_1_99_and_keeps_text() -> None:
-    vals: list[object] = [float(x) for x in range(100)] + [10_000.0, "결측(x)", None]
-    out = winsorize(vals)
-    nums = sorted(float(v) for v in vals if isinstance(v, float))
-    hi = quantile(nums, 0.99)
-    assert max(v for v in out if isinstance(v, float)) == pytest.approx(hi)
-    assert min(v for v in out if isinstance(v, float)) == pytest.approx(quantile(nums, 0.01))
-    assert out[-2:] == ["결측(x)", None]
 
 
 def test_cap_candidates_limits_per_sector() -> None:

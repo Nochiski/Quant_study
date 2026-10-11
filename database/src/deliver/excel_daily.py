@@ -457,6 +457,7 @@ def bucket_missing_reason(view: DayView, t: str, b: str) -> str:
 
 # ── 후보 30 과 변화(확정 샘플 Score AM · AN) ─────────────────────────────────
 ENTRY, EXIT = "진입", "이탈"
+NO_PREV = "전일 데이터 없음"
 
 
 @dataclass(frozen=True)
@@ -466,7 +467,8 @@ class Candidates:
     전일 후보 = 전일 순위에 같은 규칙(전일 대분류 = 오늘 값 — 전일 업종 스냅샷은 읽지 않는다).
     변화: 진입(오늘 후보인데 전일 후보 아님) · 이탈(전일 후보인데 오늘 아님 — 오늘 순위가
     top_n 안이면 'k종목 초과' 로 밀린 이탈) · k종목 초과(순위 top_n 안인데 대분류가 이미
-    k종목, 전일도 후보 아님)."""
+    k종목, 전일도 후보 아님). 전일 순위가 하나도 없으면(첫 날 · 같은 basis 직전 성공 데이터 없음 ·
+    읽기 실패) 변화는 모두 비운다 — 30종목 전부 '진입'으로 보이면 틀린 말이다(코드 리뷰 I-2)."""
 
     picked: frozenset[str]
     change: Mapping[str, str]
@@ -474,6 +476,7 @@ class Candidates:
     full: tuple[str, ...]           # k종목이 찬 대분류 이름(Sector 코드순)
     top_n: int
     k: int
+    no_prev: bool = False           # 전일 순위가 없어 변화를 비웠다
 
     @property
     def full_text(self) -> str:
@@ -489,13 +492,17 @@ def candidates(view: DayView, prev_rank: Mapping[str, int | None]) -> Candidates
         return view.by_ticker.get(t, {}).get(level)
 
     picked = list(view.candidates)
+    no_prev = not any(r is not None for r in prev_rank.values())
+    if no_prev:
+        log.warning("전일 데이터 없음(주 모델 %s · %s %s) — Score 변화 열을 비운다",
+                    view.spec_id, view.date, view.run.basis)
     order = sorted((t for t in (ticker_of(r) for r in view.rows) if prev_rank.get(t) is not None),
                    key=lambda t: prev_rank[t] or 0)
     before = {str(r["t"]) for r in cap_candidates([{"t": t} for t in order], top_n, k,
                                                   lambda r: sector_of(str(r["t"])))}
     now = set(picked)
     change: dict[str, str] = {}
-    for r in view.rows:
+    for r in () if no_prev else view.rows:          # 전일 순위가 없으면 변화를 매기지 않는다
         t, rk = ticker_of(r), rank_of(r)
         inside = rk is not None and rk <= top_n
         if t in now and t not in before:
@@ -513,7 +520,7 @@ def candidates(view: DayView, prev_rank: Mapping[str, int | None]) -> Candidates
         names.setdefault(sector_of(t), str(view.uni.get(t, {}).get(name_key) or sector_of(t)))
     full = tuple(names[s] for s in sorted(counts, key=str) if counts[s] >= k)
     cut = max((view.rank(t) or 0 for t in picked), default=None)
-    return Candidates(frozenset(picked), change, cut, full, top_n, k)
+    return Candidates(frozenset(picked), change, cut, full, top_n, k, no_prev)
 
 
 def candidate_rule_text(c: Candidates) -> str:
@@ -723,7 +730,8 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         "■ 이탈: 전일 후보였는데 오늘 후보 아님\n"
         f"■ 이탈({k}종목 초과): 순위는 {top_n} 안인데 대분류가 이미 {k}종목이라 밀려 이탈\n"
         f"■ {k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과(전일도 후보 아님)\n"
-        "전일 후보 = 전일 순위에 같은 규칙 적용(전일 대분류 = 오늘 값 가정)")
+        "전일 후보 = 전일 순위에 같은 규칙 적용(전일 대분류 = 오늘 값 가정)"
+        + (f"\n{NO_PREV}: 오늘은 변화 열을 비움" if cands.no_prev else ""))
     # 후보 · 변화 두 줄은 Meta 열 사전 끝에(그룹 이름 '후보')
     tail = [("Score", "후보", label, d) for _s, g, label, d in sh.dictionary
             if g.startswith("후보(")]
@@ -1463,7 +1471,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
         sid = view.spec_id if view.spec_id in prev.specs else prev.primary_spec
         try:
             prev_rank = {ticker_of(r): rank_of(r) for r in read_scores(model_root, prev, sid)}
-        except DeliverError:
+        except DeliverError as e:
+            log.warning("전일 순위를 읽지 못했다(%s %s): %s", prev.date, prev.build_id, e)
             prev_rank = {}
 
     trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root)
@@ -1485,8 +1494,12 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     raw_dict = sheet_raw(wb, view, fi)
     dictionary: Dictionary = [*score_dict, *raw_dict, *earnings_dict, *sector_dict, *compare_dict]
     pairs = meta_pairs(view, fi_meta, fi, cands)
+    # 전일 비교 데이터 — 직전 데이터가 있어도 순위를 쓸 수 없으면 그 말을 붙인다(변화 열을 비운 날)
+    prev_text = NO_PREV if prev is None else f"{prev.date} {prev.build_id}"
+    if prev is not None and cands.no_prev:
+        prev_text += f" — 순위를 쓸 수 없어 {NO_PREV}"
     insert_after(pairs, "model 생성 시각", [
-        ("전일 비교 데이터", "없음" if prev is None else f"{prev.date} {prev.build_id}"),
+        ("전일 비교 데이터", prev_text),
         *((f"{w} 비교 데이터", f"{trend.base[w]} {FALLBACK_NOTE}" if w in trend.fallback
            else trend.base[w] or "없음(그 전 데이터가 없다)") for w in WINDOWS),
         ("순위 흐름 날짜", f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"

@@ -1563,7 +1563,8 @@ def test_postclose_run_in_model_db_leaves_operating_roots_alone(
     """PR-6(T-3·T-7) — 장 마감 판은 `data/model_db/{factor_inputs,model,deliver}` 를 루트 인자로만
     받아 model CLI·deliver CLI 를 돈다. 같은 D 의 아침판이 운영 루트(CLI 기본 `data/…`)에 있어도
     읽지도 쓰지도 않는다. 그림자 기간처럼 `--send` 없이 돌리면 엑셀만 짓는다 — 전송·발송 장부 0.
-    엑셀 메타에는 판 성격 줄이 붙고, 같은 루트에 직전 evening 판이 없으니 전일 비교 판은 '없음'."""
+    엑셀 메타에는 데이터 성격 줄이 붙고, 같은 루트에 직전 evening 판이 없으니 전일 비교 데이터는
+    '전일 데이터 없음'."""
     from model.__main__ import main as model_cli
     from test_model_build import board_fi, write_fi_tree
 
@@ -1599,9 +1600,11 @@ def test_postclose_run_in_model_db_leaves_operating_roots_alone(
     assert calls == [] and not (mdb / "deliver" / LEDGER).exists()
     assert POSTCLOSE_NOTE in out                                  # 표준출력 캡션
     xlsx = mdb / "deliver" / "daily" / "model_scores_20260928_evening.xlsx"
-    meta = dict(_meta_pairs(load_workbook(xlsx)))
+    book = load_workbook(xlsx)
+    meta = dict(_meta_pairs(book))
     assert meta["basis"] == "evening" and meta["데이터 성격"] == POSTCLOSE_NOTE
-    assert meta["전일 비교 데이터"] == "없음"
+    assert meta["전일 비교 데이터"] == "전일 데이터 없음"           # 변화 열도 비운다(I-2)
+    assert str(book["Score"]["A4"].value).startswith("기준일: 2026-09-28 장 마감 데이터")
     assert meta["순위 흐름 날짜"] == "2026-09-28 ~ 2026-09-28 · 1개"
     assert json.loads((mdb / "model" / "latest_evening.json").read_text())["basis"] == "evening"
 
@@ -2340,8 +2343,11 @@ class _CandView:
     """`excel_daily.candidates` 가 읽는 DayView 부분만(순위순 → 제외 행 순서, 대분류 L1)."""
 
     def __init__(self, ranks: dict[str, int | None], sectors: dict[str, str], top_n: int, k: int):
+        from types import SimpleNamespace
+
         from model.contracts import OutputRule
         self.output = OutputRule(top_n=top_n, sector_level="L1", max_per_sector=k)
+        self.spec_id, self.date, self.run = "s@1", "2026-10-08", SimpleNamespace(basis="morning")
         ranked = sorted((t for t in ranks if ranks[t] is not None), key=lambda t: ranks[t] or 0)
         rest = sorted(t for t in ranks if ranks[t] is None)
         self.rows = [{"ticker": t, "rank": ranks[t], "sector_l1": sectors[t]}
@@ -2375,8 +2381,11 @@ def test_candidates_and_change_follow_the_sector_cap_against_yesterday() -> None
     assert candidate_rule_text(c) == (
         "상위 5 · 대분류(L1)당 최대 2: 순위순으로 내려가며 2 가 찬 대분류는 건너뛰고 아래 순위로 "
         "채움 · 오늘 커트라인: 순위 7 · 2종목이 찬 대분류: A업종·B업종")
-    none = candidates(_CandView({"x": 1}, {"x": "A"}, 5, 2), {})     # type: ignore[arg-type]
-    assert none.change == {"x": "진입"} and none.full_text == "없음"
+    # 전일 순위가 없으면(첫 날 · 읽기 실패) 변화는 비운다 — 후보 전부 '진입'은 틀린 말(I-2)
+    for prev_none in ({}, {"x": None}):
+        none = candidates(_CandView({"x": 1}, {"x": "A"}, 5, 2), prev_none)  # type: ignore[arg-type]
+        assert none.change == {} and none.no_prev and none.picked == {"x"}
+    assert not c.no_prev and none.full_text == "없음"
 
 
 def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
@@ -2639,3 +2648,49 @@ def test_sector_week_warns_when_adjusted_prices_are_missing(
         got = week_returns(tmp_path, view)
     assert got == {"A": pytest.approx(128 / 123 - 1)}
     assert any("fi_adj_prices" in rec.getMessage() for rec in caplog.records)
+
+
+def test_no_previous_day_leaves_change_blank(world: dict[str, Path], tmp_path: Path,
+                                            caplog: pytest.LogCaptureFixture) -> None:
+    """I-2 — 전일 순위가 없으면(첫 날 · 같은 basis 직전 데이터 없음 · 읽기 실패) Score 변화 열을
+    모두 비운다(후보 30 전부 '진입'은 틀린 말). 변화 머리 메모 · Meta '전일 비교 데이터'에 '전일
+    데이터 없음', 경고 로그 한 줄."""
+    def change_and_meta(path: Path) -> tuple[list[object], int, dict[object, object], str]:
+        wb = load_workbook(path)
+        ws = wb["Score"]
+        h, rows = header(ws), rows_by_code(ws)
+        chg: list[object] = [ws.cell(r, h["변화"]).value for r in rows.values()]
+        n_cand = sum(1 for r in rows.values() if ws.cell(r, h["후보"]).value == "후보")
+        memo = ws.cell(7, h["변화"]).comment
+        assert memo is not None
+        return chg, n_cand, dict(_meta_pairs(wb)), memo.text
+
+    first = W38[0]                                        # world 의 첫 날 — 그 전 데이터가 없다
+    with caplog.at_level("WARNING"):
+        res = build_daily(first, "morning", model_root=world["model"], fi_root=world["fi"],
+                          out_root=tmp_path / "a")
+    chg, n_cand, meta, memo = change_and_meta(res.path)
+    assert set(chg) == {None} and n_cand == 30
+    assert meta["전일 비교 데이터"] == "전일 데이터 없음"
+    assert "전일 데이터 없음: 오늘은 변화 열을 비움" in memo.replace("\n", " ").replace("\xa0", " ")
+    assert any("전일 데이터 없음" in rec.getMessage() for rec in caplog.records)
+    # 직전 데이터는 있는데 순위를 읽지 못하는 날 — 같은 처리 + 읽기 실패 경고
+    model = tmp_path / "model"
+    shutil.copytree(world["model"], model)
+    prev = find_run(model, THU, "morning")
+    assert prev is not None
+    (model / PRIMARY / f"v={prev.build_id}" / "scores.parquet").unlink()
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        res = build_daily(FRI, "morning", model_root=model, fi_root=world["fi"],
+                          out_root=tmp_path / "b")
+    chg, n_cand, meta, _memo = change_and_meta(res.path)
+    assert set(chg) == {None} and n_cand == 30
+    assert meta["전일 비교 데이터"] == f"{THU} {prev.build_id} — 순위를 쓸 수 없어 전일 데이터 없음"
+    assert any("전일 순위를 읽지 못했다" in rec.getMessage() for rec in caplog.records)
+    # 보통 날(전일 순위 있음)은 변화를 매긴다 — 회귀 가드
+    chg, _n, meta, memo = change_and_meta(build_daily(
+        FRI, "morning", model_root=world["model"], fi_root=world["fi"],
+        out_root=tmp_path / "c").path)
+    assert set(chg) - {None} and str(meta["전일 비교 데이터"]).startswith(THU)
+    assert "전일 데이터 없음" not in memo

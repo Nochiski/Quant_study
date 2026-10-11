@@ -65,6 +65,10 @@ REQ_COVERED = 18     # 커버 종목의 일일 요청 수: 목록 1 + cF5001·cF
 FIN_EXT_SINCE = "2026-10-01"
 REQ_COVERED_BEFORE_FIN_EXT = 15
 REQ_NONE    = 4      # 무커버 종목: 목록 1 + cF5001 ×3 — 3개년을 다 본 뒤에만 none (검수 D H1)
+# 주말 보강판 수집 런(N-45 — 06:00 체인 끝, 휴장 연속 첫 휴일)의 런 로그 mode 표식. 수집 동작은 full 과 같고 런
+# 로그 한 줄만 이 값으로 남는다 — 건전성 wise.run 의 D+1 폴백(전환기 아침 스냅샷)이 휴일 보강 런을 D 의 정규
+# 수집으로 읽지 않게 가른다(ledger_health.check_wise)
+SUPPLEMENT_RUN_MODE = "supplement"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS ws_raw (
@@ -294,11 +298,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--limit", type=int, default=0,
                     help="종목 수 상한. 시험용 — 런 로그를 남기지 않는다"
                          "(건전성 판정의 완료 증거가 아니다)")
+    ap.add_argument("--run-tag", default=None, choices=(SUPPLEMENT_RUN_MODE,),
+                    help="런 로그 mode 열에 --mode 대신 남길 표식. supplement = 주말 보강판 수집(N-45) — "
+                         "수집 동작은 full 그대로이고, 건전성 wise.run 이 정규 수집으로 세지 않는다")
     return ap.parse_args(argv)
 
 
 def main() -> None:
     a = _parse_args()
+    run_mode = a.run_tag or a.mode      # 런 로그 mode 열 — 보강판 수집은 표식(SUPPLEMENT_RUN_MODE)
 
     con = sqlite3.connect(DB, timeout=60)
     con.execute("PRAGMA busy_timeout=60000")
@@ -323,7 +331,7 @@ def main() -> None:
         # 불변식: 런 로그 1행 = --limit 없는 런 완주 = 그때 유니버스 전부가 done 이거나 이번에 받음
         if not a.limit:
             con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
-                        (now_utc(), a.mode, 0, 0, 0, 0, json.dumps({})))
+                        (now_utc(), run_mode, 0, 0, 0, 0, json.dumps({})))
             con.commit()
         con.close()
         return
@@ -427,7 +435,7 @@ def main() -> None:
           f"· 요청 {n_req:,} · {el/60:.1f}분 · {n_req/max(el,1):.1f}req/s", flush=True)
     if not a.limit:          # 위 불변식 — --limit 런(시험용)은 런 로그를 남기지 않는다
         con.execute("INSERT INTO ws_run_log VALUES (?,?,?,?,?,?,?)",
-                    (now_utc(), a.mode, n_cov + n_none, n_req, n_ok, n_bad,
+                    (now_utc(), run_mode, n_cov + n_none, n_req, n_ok, n_bad,
                      json.dumps(badkinds, ensure_ascii=False)))
     if n_bad:
         print(f"  ⚠⚠ 본문 검증 실패 {n_bad}건 — {badkinds}", flush=True)

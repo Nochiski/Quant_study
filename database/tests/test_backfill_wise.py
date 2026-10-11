@@ -201,18 +201,19 @@ def _fake_fetch(fail):
     return fetch
 
 
-def _collect(monkeypatch, db, ts, fail=None, limit=0, tickers=None):
+def _collect(monkeypatch, db, ts, fail=None, limit=0, tickers=None, day=DAY, extra=()):
     """`backfill_wise.main()` 한 번 = 런 1회. 기록 시각은 전부 ts(UTC) — 런 안의 순서는 rowid.
-    limit 은 `--limit`(저녁 체인 dry-run 은 3), tickers 는 유니버스(기본 TICKERS)."""
+    limit 은 `--limit`(저녁 체인 dry-run 은 3), tickers 는 유니버스(기본 TICKERS), day 는 스냅샷 KST 날짜,
+    extra 는 덧붙일 인자(예: `--run-tag supplement`)."""
     universe = list(TICKERS if tickers is None else tickers)
     monkeypatch.setattr(bw, "DB", str(db))
     monkeypatch.setattr(bw, "universe", lambda con: list(universe))
     monkeypatch.setattr(bw, "encparam", lambda refresh=False: "tok")
     monkeypatch.setattr(bw, "fetch", _fake_fetch(fail))
-    monkeypatch.setattr(bw, "kst_today", lambda: DAY)
+    monkeypatch.setattr(bw, "kst_today", lambda: day)
     monkeypatch.setattr(bw, "now_utc", lambda: ts)
     monkeypatch.setattr(sys, "argv", ["backfill_wise.py", "--mode", "full"]
-                        + (["--limit", str(limit)] if limit else []))
+                        + (["--limit", str(limit)] if limit else []) + list(extra))
     bw.main()
 
 
@@ -342,3 +343,31 @@ def test_empty_universe_day_is_not_a_completed_run(tmp_path, monkeypatch):
     _collect(monkeypatch, db, "2026-10-06T09:05:00", tickers=[])
     assert _runs(db) == [(0, 0, 0, 0)]
     assert _health(db)["wise.run"].status is lh.Status.FAIL
+
+
+# ── 주말 보강판 수집 런(N-45)은 D+1 폴백에 들지 않는다 ─────────────────────────────────────────
+def test_run_tag_supplement_is_logged_and_fetch_is_full():
+    """`--run-tag supplement` 는 런 로그 mode 표식만 바꾼다(수집 동작은 full) — 표식 밖 값은 받지 않는다."""
+    assert bw._parse_args(["--run-tag", "supplement"]).run_tag == bw.SUPPLEMENT_RUN_MODE
+    assert bw._parse_args([]).run_tag is None
+    with pytest.raises(SystemExit):
+        bw._parse_args(["--run-tag", "daily"])
+
+
+@pytest.mark.parametrize(("tag", "passes"), [(None, True), ("supplement", False)])
+def test_supplement_run_is_not_read_as_d_by_the_next_morning_fallback(tmp_path, monkeypatch,
+                                                                      tag, passes):
+    """N-45 · 리뷰 I-1 — D 저녁 런이 끊겨(런 로그 없음, D 수집은 일부만) 다음 날(휴장 첫 휴일) 아침에 주말 보강 수집이
+    돌면, 그 런은 D 의 정규 수집이 아니다 — wise.run FAIL 이라 정규 판이 부분 수집된 D 추정치로 지어지지 않는다.
+    종전엔 D+1 폴백(전환기 06:00 아침 스냅샷)이 보강 런을 읽어 통과했다. 표식 없는 아침 런(옛 방식)은 지금처럼
+    폴백한다."""
+    db = tmp_path / "wisereport.db"
+    with pytest.raises(RuntimeError, match="런 중단 재현"):
+        _collect(monkeypatch, db, "2026-10-06T09:05:00", fail=_crash_at(1000))
+    _collect(monkeypatch, db, "2026-10-06T21:30:00", day=NEXT_DAY,       # KST 10-07 06:30
+             extra=["--run-tag", tag] if tag else [])
+    with closing(sqlite3.connect(db)) as con:
+        assert con.execute("SELECT mode FROM ws_run_log").fetchall() == [(tag or "full",)]
+    checks = _health(db)
+    assert (checks["wise.run"].status is lh.Status.PASS) is passes, checks["wise.run"]
+    assert checks["wise.snapshot_day"].value == ("next_morning" if passes else None)

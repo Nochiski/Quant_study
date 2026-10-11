@@ -2323,3 +2323,224 @@ def test_net_revenue_note_only_when_a_yoy_cell_was_blanked(tmp_path: Path) -> No
     srows = rows_by_code(sc)
     assert sc.cell(srows[tick(12)], header(sc)["비고"]).value is None
     assert sc.cell(srows[tick(13)], header(sc)["비고"]).value == NET_NOTE  # 실제로 비운 칸 있음
+
+
+# ── 확정 양식(샘플 22 — DECISIONS §7 #6·#7) 새 계산 ────────────────────────────────
+class _CandView:
+    """`excel_daily.candidates` 가 읽는 DayView 부분만(순위순 → 제외 행 순서, 대분류 L1)."""
+
+    def __init__(self, ranks: dict[str, int | None], sectors: dict[str, str], top_n: int, k: int):
+        from model.contracts import OutputRule
+        self.output = OutputRule(top_n=top_n, sector_level="L1", max_per_sector=k)
+        ranked = sorted((t for t in ranks if ranks[t] is not None), key=lambda t: ranks[t] or 0)
+        rest = sorted(t for t in ranks if ranks[t] is None)
+        self.rows = [{"ticker": t, "rank": ranks[t], "sector_l1": sectors[t]}
+                     for t in [*ranked, *rest]]
+        self.by_ticker = {str(r["ticker"]): r for r in self.rows}
+        self.uni = {t: {"sector_l1_name": f"{s}업종"} for t, s in sectors.items()}
+        self.candidates = [str(r["ticker"]) for r in cap_candidates(
+            self.rows[:len(ranked)], top_n, k, lambda r: r["sector_l1"])]
+
+    def rank(self, t: str) -> int | None:
+        return self.by_ticker[t]["rank"]           # type: ignore[return-value]
+
+
+def test_candidates_and_change_follow_the_sector_cap_against_yesterday() -> None:
+    """Score 후보 · 변화(make_pm 규칙 · 쉬운 말): 후보 = 순위순으로 대분류마다 최대 k 까지 top_n,
+    전일 후보 = 전일 순위에 같은 규칙(전일 대분류 = 오늘 값). 변화 = 진입 · 이탈 · 이탈(k종목 초과)
+    (오늘 순위가 top_n 안인데 밀림) · k종목 초과(top_n 안인데 대분류가 이미 k, 전일도 후보 아님)."""
+    from deliver.excel_daily import candidate_rule_text, candidates
+    sectors = {"t1": "A", "t2": "A", "t3": "A", "t7": "A", "t4": "B", "t6": "B",
+               "t5": "C", "t9": "C"}
+    today = {"t1": 1, "t2": 2, "t3": 3, "t7": 4, "t4": 5, "t5": 6, "t6": 7, "t9": None}
+    prev = {"t9": 0, "t3": 1, "t1": 2, "t4": 3, "t5": 4, "t2": 5, "t6": 6, "t7": 7}
+    c = candidates(_CandView(today, sectors, top_n=5, k=2), prev)      # type: ignore[arg-type]
+    assert c.picked == {"t1", "t2", "t4", "t5", "t6"}       # A 는 t1 · t2, B 는 t4 · t6 에서 찬다
+    assert dict(c.change) == {
+        "t2": "진입", "t6": "진입",                 # 전일 후보(t9 · t3 · t1 · t4 · t5) 밖
+        "t3": "이탈(2종목 초과)",                    # 오늘 3위(5 안)인데 A 가 이미 2종목
+        "t9": "이탈",                               # 오늘 순위 없음(제외)
+        "t7": "2종목 초과"}                          # 4위인데 A 가득 · 전일도 후보 아님
+    assert (c.cut, c.full, c.full_text) == (7, ("A업종", "B업종"), "A업종·B업종")
+    assert candidate_rule_text(c) == (
+        "상위 5 · 대분류(L1)당 최대 2: 순위순으로 내려가며 2 가 찬 대분류는 건너뛰고 아래 순위로 "
+        "채움 · 오늘 커트라인: 순위 7 · 2종목이 찬 대분류: A업종·B업종")
+    none = candidates(_CandView({"x": 1}, {"x": "A"}, 5, 2), {})     # type: ignore[arg-type]
+    assert none.change == {"x": "진입"} and none.full_text == "없음"
+
+
+def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
+    """Score 끝 '후보(대분류당 최대 9)' 블록 — 후보 = view 후보(30), 변화 열, 전일 순위 칸 노랑 =
+    변화 '진입'(조건부 서식이라 정렬해도 따라간다), 커버리지 '신선' 은 옅은 회색."""
+    res, wb = daily
+    ws = wb["Score"]
+    h, rows = header(ws), rows_by_code(ws)
+    cand = [t for t, r in rows.items() if ws.cell(r, h["후보"]).value == "후보"]
+    assert len(cand) == 30
+    sec = wb["Sector"]
+    hs = header(sec)
+    l1_counts = [sec.cell(r, hs["후보 수 (최대 9)"]).value for r in range(8, sec.max_row + 1)
+                 if sec.cell(r, 1).value == "대분류"]
+    assert sum(l1_counts) == 30 and max(l1_counts) <= 9                # Sector 후보 수와 일치
+    chg = {ws.cell(r, h["변화"]).value for r in rows.values()} - {None}
+    assert chg <= {"진입", "이탈", "이탈(9종목 초과)", "9종목 초과"}
+    prev, chg_l = ws.cell(7, h["전일 순위"]).column_letter, ws.cell(7, h["변화"]).column_letter
+    cov = ws.cell(7, h["커버리지"]).column_letter
+    rules = {str(rng.sqref): r for rng in ws.conditional_formatting for r in rng.rules
+             if r.type == "expression"}
+    assert rules[f"{prev}8:{prev}{7 + N}"].formula == [f'${chg_l}8="진입"']
+    assert rules[f"{prev}8:{prev}{7 + N}"].dxf.fill.fgColor.rgb == "FFFFFF00"
+    assert rules[f"{cov}8:{cov}{7 + N}"].formula == [f'${cov}8="신선"']
+    notes = {k: ws.cell(7, h[k]).comment for k in ("비고", "후보", "변화")}
+    assert all(notes.values())
+    assert "오늘 커트라인: 순위" in notes["후보"].text.replace("\n", " ")
+    meta = wb["Meta"]
+    tail = [(meta.cell(r, 1).value, meta.cell(r, 2).value) for r in (meta.max_row - 1,
+                                                                     meta.max_row)]
+    assert tail == [("Score", "후보 · 후보"), ("Score", "후보 · 변화")]
+
+
+def test_sector_week_and_quarter_returns_are_cap_weighted(scope_board) -> None:
+    """Sector 1W = 종목 5세션 전 대비 수익률(엔진 v3_zscore `_price_histories` · `_period_return`
+    그대로 — fi_prices [D−550일, D], 수정종가 있으면 그것)을 fi_universe 시총으로 가중, 3M = 점수 표
+    r3m 시총가중(× 100). 표마다 백분위 색. 계산을 복사하지 않고 엔진 함수를 부른다."""
+    import deliver.excel_daily as ed
+    from model.engines import v3_zscore
+    assert ed._period_return is v3_zscore._period_return
+    assert ed._price_histories is v3_zscore._price_histories
+    res, wb, scores, root = scope_board
+    fi = root / "fi"
+    prices = duckdb_rows(fi / "fi_prices" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+    adj = {(str(r["ticker"]), str(r["date"])[:10]): r["adj_close"] for r in duckdb_rows(
+        fi / "fi_adj_prices" / f"v={SCOPE_FI_BID}" / "part0.parquet")}
+    hist: dict[str, list[tuple[str, float]]] = {}
+    for r in prices:
+        t, d = str(r["ticker"]), str(r["date"])[:10]
+        if "2025-03-27" <= d <= "2026-09-28":                         # D−550일 ~ D
+            a = adj.get((t, d))
+            hist.setdefault(t, []).append((d, a if a is not None else r["close"]))
+    week = {}
+    for t, h in hist.items():
+        px = [p for _, p in sorted(h)]
+        if len(px) > 5 and px[-6]:
+            week[t] = px[-1] / px[-6] - 1
+    uni = duckdb_rows(fi / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+    caps = {str(r["ticker"]): r["market_cap"] for r in uni}
+    l1 = {str(r["ticker"]): r["sector_l1"] for r in uni}
+    ws = wb["Sector"]
+    h = header(ws)
+    first = {ws.cell(r, h["코드"]).value: r for r in range(8, ws.max_row + 1)
+             if ws.cell(r, h["구분"]).value == "대분류"}
+
+    def cap_avg(vals: dict[str, float]) -> float:
+        w = sum(caps[t] for t in vals if caps.get(t))
+        return sum(v * caps[t] for t, v in vals.items() if caps.get(t)) / w * 100
+    for code, r in first.items():
+        members = [t for t in scores if l1[t] == code]
+        assert ws.cell(r, h["1W 수익률 (%)"]).value == pytest.approx(
+            cap_avg({t: week[t] for t in members if t in week}))
+        assert ws.cell(r, h["3M 수익률 (%)"]).value == pytest.approx(
+            cap_avg({t: scores[t]["r3m"] for t in members if scores[t]["r3m"] is not None}))
+    # 색 — 수익률 1W · 1M · 3M 은 표마다 백분위 10/50/90, 축 평균은 대분류 ±0.5 · 업종 ±1
+    y = ws.cell(7, h["1W 수익률 (%)"]).column_letter
+    q = ws.cell(7, h["모멘텀"]).column_letter
+    by_ref = {str(rng.sqref): r for rng in ws.conditional_formatting for r in rng.rules}
+    top = max(first.values())
+    assert [v.type for v in by_ref[f"{y}8:{y}{top}"].colorScale.cfvo] == ["percentile"] * 3
+    assert [float(v.val) for v in by_ref[f"{q}8:{q}{top}"].colorScale.cfvo] == [-0.5, 0.0, 0.5]
+
+
+def test_scale_zero_anchor_uses_each_sign_90th_magnitude_two_digits() -> None:
+    """Earnings YoY 색 경계 — 가운데 0, 음수 끝 −lo · 양수 끝 +hi(각 부호 |값| 90% 분위 = 정렬한
+    값의 int(0.9·(n−1)) 번째, 유효숫자 2자리). 글자 칸(흑자전환 등) · 빈칸은 뺀다. 날마다 그날
+    값으로 다시 잰다."""
+    from deliver.qpack import scale_zero_anchor
+
+    def bounds(values: list[object]) -> list[float]:
+        return [float(v.val) for v in scale_zero_anchor(values).colorScale.cfvo]
+    pos = [float(x) for x in range(1, 101)]                   # 90% 분위 = 정렬 89번째 = 90
+    neg = [-x * 1.234 for x in range(1, 11)]                  # |값| 90% = 정렬 8번째 = 11.106
+    assert bounds([*pos, *neg, "흑자전환", None, 0.0]) == [-11.0, 0.0, 90.0]
+    assert bounds([3.0, 47.0, 123.0]) == [-47.0, 0.0, 47.0]  # 음수 없으면 양수 값으로
+    assert bounds([-0.0123, -5.0]) == [-0.012, 0.0, 0.012]   # 양수 없으면 음수 값으로
+    assert bounds(["적자지속", None]) == [-1.0, 0.0, 1.0]
+    cs = scale_zero_anchor([1.0, -1.0]).colorScale
+    assert [c.rgb[-6:] for c in cs.color] == ["F8696B", "FFEB84", "63BE7B"]
+
+
+def test_daily_earnings_yoy_colour_is_zero_anchored(daily) -> None:
+    _, wb = daily
+    ws = wb["Earnings"]
+    yoy_cols = [c.column_letter for c in ws[7] if str(c.value or "").startswith("YoY")]
+    assert len(yoy_cols) == 10
+    scales = {str(rng.sqref).split(":")[0].rstrip("0123456789"): r.colorScale
+              for rng in ws.conditional_formatting for r in rng.rules}
+    assert set(scales) == set(yoy_cols)                      # 값 열 · 분기 값 열은 무색
+    for letter in yoy_cols:
+        cfvo = scales[letter].cfvo
+        assert [v.type for v in cfvo] == ["num"] * 3 and float(cfvo[1].val) == 0.0
+        assert float(cfvo[0].val) < 0 < float(cfvo[2].val)
+
+
+def test_plain_wording_has_no_board_or_cap_words(daily, scope_board) -> None:
+    """쉬운 말(10-11 사용자): 읽는 사람이 '판'을 모른다 → 데이터 · 날짜 · 신규 편입, '상한' →
+    '대분류당 최대 9종목'(엔진 z 의 '±3 상한'은 그대로). 시트 칸 · 메모 어디에도 남지 않는다
+    (숨김 trend 시트 제외). 4행 기준일 말은 basis 를 따른다."""
+    left = re.compile(r"판(?!단|매|정|별|결|례|독)")
+    for wb in (daily[1], scope_board[1]):
+        for ws in wb.worksheets:
+            if ws.title == "trend":
+                continue
+            for row in ws.iter_rows():
+                for c in row:
+                    for t in (c.value, c.comment.text if c.comment else None):
+                        if isinstance(t, str):
+                            assert not left.search(t), (ws.title, c.coordinate, t[:80])
+                            assert "상한" not in t.replace("±3 상한", ""), (ws.title, c.coordinate)
+        assert "아침 확정 데이터" in str(wb["Score"]["A4"].value)
+
+
+def test_basis_words_in_the_band_follow_basis() -> None:
+    from deliver.excel_daily import BASIS_WORDS
+    assert BASIS_WORDS == {"morning": "아침 확정 데이터", "evening": "장 마감 데이터"}
+
+
+def test_note_box_wraps_at_300px_and_keeps_symbols_glued(tmp_path: Path) -> None:
+    """머리 칸 메모 — 줄은 300px(한글 14 · 그 밖 8)에서 끊고 기호(= ≤ − …)는 앞뒤 낱말과, '·' 는
+    앞 낱말과 붙여(NBSP) 줄 머리 · 끝에 홀로 두지 않는다. 상자 = 가장 긴 줄 + 30 · 줄 수 × 21 + 30
+    (엑셀 메모 상자는 글에 맞춰 자라지 않는다). vml 에 그 크기가 그대로 들어간다."""
+    from deliver.qpack import NBSP, note, note_lines, note_px
+    assert note_px("가a·") == 14 + 8 + 8
+    text = ("순위 ≤ 30 인데 대분류 9 초과 · 전일 후보 = 전일 순위에 같은 규칙 적용"
+            "(전일 대분류 = 오늘 값)")
+    lines = note_lines(text)
+    assert all(note_px(ln) <= 300 for ln in lines) and len(lines) >= 2
+    for ln in lines:
+        first, last = ln.split(" ")[0], ln.split(" ")[-1]
+        assert first not in {"=", "≤", "·"} and last not in {"=", "≤"}, lines
+    assert f"순위{NBSP}≤{NBSP}30" in lines[0] and f"초과{NBSP}·" in "".join(lines)
+    plain = note_lines("1 = 시총의 1%. " * 12, glue=False)      # Raw 정의 메모는 붙이지 않는다
+    assert NBSP not in "".join(plain) and all(note_px(ln) <= 300 for ln in plain)
+    cm = note("한줄\n\n■ 둘째 줄", wrap=False)
+    assert cm.text == "한줄\n\n■ 둘째 줄"
+    assert (cm.width, cm.height) == (note_px("■ 둘째 줄") + 30, 21 * 3 + 30)
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.active["A1"].comment = cm
+    wb.save(tmp_path / "n.xlsx")
+    with zipfile.ZipFile(tmp_path / "n.xlsx") as z:
+        vml = next(z.read(n).decode() for n in z.namelist() if n.endswith(".vml"))
+    assert f"width:{cm.width}px;height:{cm.height}px" in vml
+
+
+def test_daily_raw_definitions_are_header_notes(daily) -> None:
+    """Raw 5행 열 정의는 7행 머리 칸 메모로(빨간 삼각형) — 5행은 A5 · 블록 설명만, 메모 상자는 글
+    크기에 맞춘다(144×79 기본 상자 아님)."""
+    res, wb = daily
+    ws = wb["Raw"]
+    assert [c for c in ws[7] if c.comment is not None]
+    assert [c.value for c in ws[5] if c.value] == [
+        "결측: 결측(사유)", "열 뜻: 머리 칸 메모(빨간 삼각형) · 색 없음"]
+    with zipfile.ZipFile(res.path) as z:
+        vml = "".join(z.read(n).decode() for n in z.namelist() if n.endswith(".vml"))
+    assert "width:144px;height:79px" not in vml

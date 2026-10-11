@@ -56,6 +56,20 @@ cd ~/quant-ledger && QL_HOME=~/quant-ledger PYTHONPATH=~/quant-ledger/src \
     .venv/bin/python -m model build --date 20260928 --basis morning
 ```
 
+### E2 배포 직후(추정치 유예 5거래일 · scope_v2.0 — N-47) 알고 있을 것
+
+- **v4 비교 모델 점수가 바뀐다**: `v4_rank@0.1`·`@0.2` TOML 의 유예 5거래일이 처음으로 실제로 걸린다.
+  전에는 fi 가 유예 0 으로 먼저 걸러 TOML 값이 죽은 설정이었다(10-06 감사 D-03 — 이것으로 해소). 그날부터
+  v4 유니버스에 유예 1~5 종목이 들어와 점수·순위가 움직인다(정상 — 결함 아님).
+- **두 판 대조(`daily.board_compare`) 첫날 rc 2(알려진 일)**: 배포 뒤 첫 장 마감 판 T 의 대조는 연구 판 D'
+  가 배포 전 판(fi1.8.0 · mb1.6.0)이고 장 마감 판 T·연구 판 T 가 새 판(fi1.9.0 · mb1.7.0)이라 '규칙 판본이
+  다르다'(rules_version)로 rc 2(`verdict: error`)다. 다음 T 부터 세 판이 같은 판본이라 정상이다. 그날은
+  알려진 일로 기록하고 되돌리기 판단(`daily.window_judge` 의 대조 항목)의 근거로 쓰지 않는다.
+- **배포 전에 지은 날의 모델 판 다시 짓기**: 그날 fi 판이 옛 판(유예 창 0)이면 주 모델 scope@2.0(유예 5)이
+  유예 가드에 걸려 rc 2 다. fi 를 새 코드로 다시 지은 뒤(창 5) 모델을 짓거나, 그날 판으로 꼭 다시 지어야 하면
+  `--primary scope@1.0` 으로 짓는다(scope@2.0 · v4 는 `excluded_specs` 로 빠진다). compat 이 그런 날을 다시
+  내보내면 앞 주 모델 scope@1.0 점수로 채운다(`docs/COMPAT_LAYER.md` — warn 한 줄).
+
 ## 3. 판 규약
 
 ```

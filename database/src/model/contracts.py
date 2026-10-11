@@ -341,6 +341,8 @@ class ModelSpec:
             errs.append("output.top_n·max_per_sector 는 양수")
         if self.universe.coverage_grace_days < 0:
             errs.append("universe.coverage_grace_days 는 0 이상")
+        # spec 유예 상한은 fi 유예 창 FI_COVERAGE_GRACE_MAX 에 묶여 있다 — 유예를 더 길게 하려면 그
+        # 상수(fi 판정 창)와 spec 을 함께 올린다(엔진은 fi 가 뺀 종목을 되살리지 못한다, N-47)
         if self.universe.coverage_grace_days > FI_COVERAGE_GRACE_MAX:
             errs.append(f"universe.coverage_grace_days {self.universe.coverage_grace_days} > "
                         f"fi 유예 창 {FI_COVERAGE_GRACE_MAX} — fi 가 먼저 빼므로 엔진이 "

@@ -18,7 +18,13 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from model.contracts import FactorInputs
-from model.engines.v3_zscore import HISTORY_DAYS, _period_return, _price_histories
+from model.engines._common import crosses_step
+from model.engines.v3_zscore import (
+    ADJ_JUMP_PARAM,
+    HISTORY_DAYS,
+    _period_return,
+    _price_histories,
+)
 from openpyxl import Workbook
 from openpyxl.formatting.rule import FormulaRule, Rule
 from openpyxl.styles import Alignment, Border, Font, PatternFill
@@ -993,9 +999,17 @@ def _median(xs: Sequence[float]) -> float | None:
     return statistics.median(xs) if xs else None
 
 
+def jump_rule(view: DayView) -> bool:
+    """주 모델이 미해결 수정주가 점프 결측 규칙(scope `adj_jump_missing`, T-9)을 켰나."""
+    return view.spec is not None and view.spec.params.get(ADJ_JUMP_PARAM) is True
+
+
 def week_returns(fi_root: Path, view: DayView) -> dict[str, float]:
     """종목별 1W(5세션 전 대비) 수익률 — 엔진(v3_zscore) 가격 이력 규칙을 그대로 부른다:
-    fi_prices [D−550일, D] 행, 값 = fi_adj_prices.adj_close(없으면 close), 날짜 오름차순."""
+    fi_prices [D−550일, D] 행, 값 = fi_adj_prices.adj_close(없으면 close), 날짜 오름차순.
+    주 모델이 점프 결측 규칙(`jump_rule`)을 켰으면 엔진 r1m 처럼 창(최근 6행) 안에서
+    `adj_jump_ok` 계단이 바뀌는 종목은 뺀다 — 미해결 분할 · 병합이 낀 수익률이 업종 1W 를 끌지
+    않게(코드 리뷰 I-1)."""
     d = date.fromisoformat(view.date).isoformat()          # SQL 에 넣기 전 형식 검증
     start = (date.fromisoformat(d) - timedelta(days=HISTORY_DAYS)).isoformat()
     codes = [ticker_of(r) for r in view.rows]
@@ -1008,14 +1022,21 @@ def week_returns(fi_root: Path, view: DayView) -> dict[str, float]:
     prices = read_fi(fi_root, "fi_prices", bid, columns=("ticker", "date", "close"), where=where)
     try:
         adj = read_fi(fi_root, "fi_adj_prices", bid, where=where)
-    except DeliverError:
-        adj = []                                           # 수정종가 표가 없으면 종가만
+    except DeliverError as e:
+        # 수정종가 표가 없으면 종가만 — 분할 · 병합이 낀 종목 수익률이 틀릴 수 있어 남긴다
+        log.warning("Sector 1W — fi_adj_prices 를 읽지 못해 종가로 계산한다(데이터 %s): %s", bid, e)
+        adj = []
     adj = [{"ticker": r["ticker"], "date": r["date"], "adj_close": r.get("adj_close"),
             "adj_jump_ok": r.get("adj_jump_ok")} for r in adj]
     inputs = FactorInputs(d, view.run.basis, bid, {"fi_prices": prices, "fi_adj_prices": adj})
-    histories, _steps = _price_histories(inputs, safe, d)
+    histories, steps = _price_histories(inputs, safe, d)
+    masked = sorted(t for t in histories
+                    if jump_rule(view) and crosses_step(steps[t][-(WEEK_SESSIONS + 1):]))
+    if masked:
+        log.info("Sector 1W — 창 안 미해결 수정주가 점프로 뺀 종목 %d: %s", len(masked),
+                 ", ".join(masked))
     return {t: r for t, h in histories.items()
-            if (r := _period_return(h, WEEK_SESSIONS)) is not None}
+            if t not in masked and (r := _period_return(h, WEEK_SESSIONS)) is not None}
 
 
 def sheet_sectors(wb: Workbook, view: DayView, week: Mapping[str, float]) -> Dictionary:
@@ -1027,9 +1048,13 @@ def sheet_sectors(wb: Workbook, view: DayView, week: Mapping[str, float]) -> Dic
     # 업종 지표 재료 — v4 는 지표 긴 표(EP·REV_OP_1M·R1M·R3M), scope·v3 는 점수 표 원값
     # (val_per·op_change_1m·r1m·r3m — 지표 긴 표가 0행이라 옛 코드는 세 열이 빈칸, E-10)
     v3 = bool(score_raw_columns(view))
-    week_col = Col("r1w", "1W 수익률\n(%)", "num", "#,##0.0", definition=(
-        "1W 수익률(5세션 전 대비 — 엔진 r1m 과 같은 규칙: fi_prices 행, 수정종가 우선) 시총가중 "
-        "평균"))
+    # 1W 정의 — '엔진 r1m 과 같은 규칙'은 v3 계열만, 점프 결측 규칙을 켠 주 모델(scope)은 그 말까지
+    week_rule = "fi_prices 행, 수정종가 우선"
+    if v3:
+        week_rule = "엔진 r1m 과 같은 규칙: " + week_rule + (
+            ", 창 안에 미해결 수정주가 점프가 낀 종목은 뺀다" if jump_rule(view) else "")
+    week_col = Col("r1w", "1W 수익률\n(%)", "num", "#,##0.0",
+                   definition=f"1W 수익률(5세션 전 대비 — {week_rule}) 시총가중 평균")
     if v3:
         has = set(view.rows[0]) if view.rows else set()
         lvl_key, rev_key, ret_key, r3_key = "val_per", "op_change_1m", "r1m", "r3m"

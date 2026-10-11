@@ -17,6 +17,7 @@ import zipfile
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -1882,13 +1883,12 @@ def _write_fi_tree(b, fi_root: Path, fi_bid: str, day: str) -> None:
          "basis": "morning"}))
 
 
-@pytest.fixture(scope="module")
-def scope_board(tmp_path_factory: pytest.TempPathFactory):
+def _scope_board(root: Path, edit: Callable[[object], None] | None = None):
     """실제 `model.build` 판(40종목, 다섯 spec) — 주 모델 scope@1.0 은 원값을 점수 표 열로 싣고
-    지표 긴 표는 0행이다(서버 10-02 판과 같은 모양). NO_VAL 만 밸류 재료가 없다."""
+    지표 긴 표는 0행이다(서버 10-02 판과 같은 모양). NO_VAL 만 밸류 재료가 없다.
+    `edit(board)` = fi 를 쓰기 직전에 합성 판을 고친다."""
     from model import build as mbuild
     from test_model_v4_rank import Board, _full
-    root = tmp_path_factory.mktemp("scope")
     b = Board()
     for i in range(40):
         _full(b, f"{100000 + i:06d}", i, sector=("G10", "G20", "G30")[i % 3])
@@ -1902,6 +1902,8 @@ def scope_board(tmp_path_factory: pytest.TempPathFactory):
                      debt_ratio=60.0 + 5 * k, gross_profit=100.0 + 3 * k)
         if r["period_type"] == "annual" and r["ticker"] == VOL_ONLY:
             r.update(roa=None, debt_ratio=None, gross_profit=None, fcf=None, total_assets=None)
+    if edit is not None:
+        edit(b)
     fi_root = root / "fi"
     _write_fi_tree(b, fi_root, SCOPE_FI_BID, "2026-09-28")
     res = mbuild.build("20260928", "morning", root / "model", fi_root,
@@ -1912,6 +1914,11 @@ def scope_board(tmp_path_factory: pytest.TempPathFactory):
     scores = {str(r["stock_code"]): r for r in duckdb_rows(
         root / "model" / "scope@1.0" / f"v={res.build_id}" / "scores.parquet")}
     return res, load_workbook(d.path), scores, root
+
+
+@pytest.fixture(scope="module")
+def scope_board(tmp_path_factory: pytest.TempPathFactory):
+    return _scope_board(tmp_path_factory.mktemp("scope"))
 
 
 def duckdb_rows(path: Path) -> list[dict[str, object]]:
@@ -2547,3 +2554,88 @@ def test_daily_raw_definitions_are_header_notes(daily) -> None:
     with zipfile.ZipFile(res.path) as z:
         vml = "".join(z.read(n).decode() for n in z.namelist() if n.endswith(".vml"))
     assert "width:144px;height:79px" not in vml
+
+
+# ── 코드 리뷰 후속(I-1 · I-2) ─────────────────────────────────────────────────────────
+BIG = "100003"            # G10 대형주 — 최근 3세션에 미해결 분할(수정종가 반토막 · 점프 계단)
+
+
+def _unresolved_split(b) -> None:
+    """BIG 의 시총을 크게, 최근 3세션 종가 · 수정종가를 반으로(분할이 수정되지 않음), 그 3행의
+    `adj_jump_ok` 를 False(앞은 True)로 — 1W 창(최근 6행) 안에서 계단이 바뀐다."""
+    for r in b.tables["fi_universe"]:
+        if r["ticker"] == BIG:
+            r["market_cap"] = 1_000_000.0
+    for table in ("fi_prices", "fi_adj_prices"):
+        mine = sorted((r for r in b.tables[table] if r["ticker"] == BIG), key=lambda r: r["date"])
+        for i, r in enumerate(mine):
+            late = i >= len(mine) - 3
+            if table == "fi_prices":
+                r["close"] = round(float(r["close"]) * (0.5 if late else 1.0))
+            else:
+                r["adj_close"] = float(r["adj_close"]) * (0.5 if late else 1.0)
+                r["adj_jump_ok"] = not late
+
+
+def test_sector_week_leaves_out_an_unresolved_split_like_engine_r1m(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """I-1 — 주 모델(scope)이 `adj_jump_missing` 을 켰으면 Sector 1W 도 엔진 r1m 처럼 창(최근 6행)
+    안에서 `adj_jump_ok` 계단이 바뀌는 종목을 뺀다. 미해결 분할이 낀 대형주(−50%)가 업종 1W 를 끌지
+    않는다(옛 코드는 `_price_histories` 의 계단 표식을 버렸다)."""
+    with caplog.at_level("INFO", logger="deliver.excel_daily"):
+        _, wb, scores, root = _scope_board(tmp_path, edit=_unresolved_split)
+    assert scores[BIG]["r1m"] is None                       # 엔진도 r1m 을 비웠다(같은 규칙)
+    fi = root / "fi"
+    prices = duckdb_rows(fi / "fi_prices" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+    adj = {(str(r["ticker"]), str(r["date"])[:10]): r["adj_close"] for r in duckdb_rows(
+        fi / "fi_adj_prices" / f"v={SCOPE_FI_BID}" / "part0.parquet")}
+    hist: dict[str, list[tuple[str, float]]] = {}
+    for r in prices:
+        t, d = str(r["ticker"]), str(r["date"])[:10]
+        a = adj.get((t, d))
+        hist.setdefault(t, []).append((d, float(cast(float, a if a is not None else r["close"]))))
+    week = {t: px[-1] / px[-6] - 1 for t, h in hist.items()
+            if len(px := [p for _, p in sorted(h)]) > 5 and px[-6]}
+    assert week[BIG] < -0.45                                 # 분할 반토막이 그대로 낀 수익률
+    uni = duckdb_rows(fi / "fi_universe" / f"v={SCOPE_FI_BID}" / "part0.parquet")
+    caps = {str(r["ticker"]): float(cast(float, r["market_cap"])) for r in uni}
+    g10 = [str(r["ticker"]) for r in uni if r["sector_l1"] == "G10" and str(r["ticker"]) in scores]
+
+    def cap_avg(members: list[str]) -> float:
+        w = sum(caps[t] for t in members)
+        return sum(week[t] * caps[t] for t in members) / w * 100
+    ws = wb["Sector"]
+    h = header(ws)
+    r = next(r for r in range(8, ws.max_row + 1)
+             if ws.cell(r, h["구분"]).value == "대분류" and ws.cell(r, h["코드"]).value == "G10")
+    got = float(cast(float, ws.cell(r, h["1W 수익률 (%)"]).value))
+    assert got == pytest.approx(cap_avg([t for t in g10 if t != BIG]))
+    assert cap_avg(g10) < -40 < got                           # 넣었으면 업종 1W 가 −40% 아래
+    assert any(BIG in rec.getMessage() and "Sector 1W" in rec.getMessage()
+               for rec in caplog.records)
+    meta = wb["Meta"]
+    week_def = next(meta.cell(r, 3).value for r in range(8, meta.max_row + 1)
+                    if meta.cell(r, 1).value == "Sector"
+                    and str(meta.cell(r, 2).value).endswith("1W 수익률 (%)"))
+    assert "미해결 수정주가 점프가 낀 종목은 뺀다" in str(week_def)
+
+
+def test_sector_week_warns_when_adjusted_prices_are_missing(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """수정종가 표(fi_adj_prices)를 읽지 못하면 종가로 계산하고 경고 한 줄을 남긴다(분할이 낀 종목
+    수익률이 틀릴 수 있다)."""
+    from types import SimpleNamespace
+
+    from deliver.excel_daily import week_returns
+    from deliver.view import DayView
+    bid, day = "m_x", "2026-09-28"
+    write_fi(tmp_path, "fi_prices", bid, [
+        {"ticker": "A", "date": f"2026-09-{d:02d}", "close": 100 + d, "price_source": "krx"}
+        for d in range(20, 29)])
+    view = cast(DayView, SimpleNamespace(
+        date=day, rows=[{"ticker": "A"}], spec=None,
+        run=SimpleNamespace(fi_build_id=bid, basis="morning")))
+    with caplog.at_level("WARNING"):
+        got = week_returns(tmp_path, view)
+    assert got == {"A": pytest.approx(128 / 123 - 1)}
+    assert any("fi_adj_prices" in rec.getMessage() for rec in caplog.records)

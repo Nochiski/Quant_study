@@ -1,8 +1,10 @@
 """매일 엑셀 `data/deliver/daily/model_scores_<YYYYMMDD>_<basis>.xlsx` (MODEL_EXCEL_SPEC A).
 
-시트: 점수 → 점수 원자료 → 지표(표시용) → 실적 → 업종 → 모델 비교 → 메타. 값만(수식 없음).
+확정 양식(샘플 22 — DECISIONS §7 #6·#7)을 직접 만든다. 시트: Score → Sector → Earnings → Compare →
+Raw → Meta → trend(숨김, 1M 흐름 원자료). 값만(수식 없음).
 행 = 주 모델(run.primary_spec) 모집단 — 순위 종목(순위순) 뒤에 제외 종목(코드순).
-지표 열은 레지스트리 `role` 이 가른다: score → 점수 원자료, display → 지표(표시용).
+Raw 지표 열은 레지스트리 `role` 이 가른다(score). 표시용(display) 지표 시트는 10-11 사용자
+결정으로 뺐다.
 """
 from __future__ import annotations
 
@@ -11,10 +13,15 @@ import os
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from model.contracts import FactorInputs
+from model.engines.v3_zscore import HISTORY_DAYS, _period_return, _price_histories
 from openpyxl import Workbook
+from openpyxl.formatting.rule import FormulaRule, Rule
+from openpyxl.styles import Alignment, Border, Font, PatternFill
+from openpyxl.styles.differential import DifferentialStyle
 
 from .common import (
     BASIS_NOTES,
@@ -22,27 +29,35 @@ from .common import (
     REVISION_KEYS,
     analyst_note,
     bucket_label,
-    change_pct,
+    cap_candidates,
     coverage_label,
     exclude_label,
     ind_meta,
     market_label,
     missing,
     split_flags,
-    winsorize,
     yoy,
 )
 from .qpack import (
     C_HDR,
-    FIRST_DATA_ROW,
+    SIDE_HDR,
+    SIDE_PAIR,
+    SIGN_COLORS,
+    Band,
     Col,
     Group,
+    Page,
     Title,
     add_sparklines,
     font,
     new_workbook,
-    write_meta,
-    write_table,
+    note,
+    scale_fixed_zero,
+    scale_high_good,
+    scale_zero_anchor,
+    text_width,
+    write_confirmed,
+    write_meta_confirmed,
 )
 from .reader import (
     DeliverError,
@@ -66,21 +81,26 @@ log = logging.getLogger(__name__)
 MODEL_LABELS = {"scope@1.0": "scope_v1.0", "v4_rank@0.1": "v4 기본", "v4_rank@0.2": "v4 동일가중",
                 "v3_zscore": "v3 원본", "v2_percentrank": "v2 원본"}
 FOOTNOTES = (
-    "① 유니버스 컷: 주 모델 모집단은 메타 시트 '유니버스 규칙' 줄을 따른다. 탈락 종목은 점수 없이 "
+    "① 유니버스 컷: 주 모델 모집단은 Meta 시트 '유니버스 규칙' 줄을 따른다. 탈락 종목은 점수 없이 "
     "제외 사유만 적는다.",
     "② 창: 가격 지표는 수정종가 세션 수, 재무는 D 이전 공시(PIT), 추정치는 당해 결산기 컨센서스.",
-    "③ 색: 3색 백분위 10/50/90 — 빨강(낮음)·노랑·초록(높음), 초록 = 좋음. "
+    "③ 색: 3색 백분위 10/50/90, 빨강(낮음)·노랑(가운데)·초록(높음), 초록 = 좋음. "
     "순위 열은 반전(1위 = 초록). Δ순위 1M 은 가운데 = 0(하락 빨강 · 상승 초록). "
     "z 엔진(scope·v3) 주 모델의 축 z 칸은 고정 3색 −3·0·+3. "
-    "레벨 값은 무색. 형광 노랑 = 신규 진입.",
-    "④ 정렬 키: 점수·원자료·지표·실적·모델 비교 = 주 모델 순위 오름차순, 제외 종목은 뒤에 코드순.",
-    "⑤ 흐름: 셀 안 꺾은선(엑셀 스파크라인) = 1M 동안 판마다의 순위(원순위), "
+    "레벨 값은 무색. 형광 노랑 = 오늘 후보 진입(Score 전일 순위 칸).",
+    "④ 정렬 키: Score·Raw·Earnings·Compare = 주 모델 순위 오름차순, 제외 종목은 뒤에 코드순.",
+    "⑤ 흐름: 셀 안 꺾은선(엑셀 스파크라인) = 1M 동안 날짜별 순위(원순위), "
     "위로 갈수록 순위 상승. 선 색 = 그 기간 Δ순위(초록 상승 · 빨강 하락 · 회색 같음·모름) — "
     "선의 처음 → 끝 방향과 같다. 1일·1W Δ순위는 싣지 않는다.",
 )
+# 4행 기준일 뒤에 붙는 말 — 읽는 사람이 '판'을 모른다(10-11 사용자 '전일 데이터 이런 식으로')
+BASIS_WORDS = {"morning": "아침 확정 데이터", "evening": "장 마감 데이터"}
+SOURCE_TEXT = "출처: quant-ledger"
 
 
 Z_SPAN = 3.0       # z 칸 색 끝점 ±3 — 엔진 z 상한(z_score_winsorized ±3σ)과 같다
+Z_WIDTH_U, Z_WIDTH_S = 6.9, 5.35   # z 칸 폭 상한(유니버스 · 업종) — 결측 글이 길어도 넓히지 않는다
+SMALL_SECTOR = 5   # Sector 축 평균을 회색으로 두는 종목 수 미만(평균이 종목 몇 개의 값일 뿐)
 
 # 비교 열에서 빼는 모델(model_id) — v4 는 결함 수정 전까지 뺀다(N-27 §8-17). 판 계산·저장은 그대로
 HIDDEN_COMPARE_MODELS = frozenset({"v4_rank"})
@@ -203,15 +223,19 @@ def id_cols(full: bool = False) -> tuple[Col, ...]:
     l1 = Col("l1", "대분류", "id", None, 10.0, definition="WICS 대분류(fi_universe 기준 스냅샷)")
     if not full:
         return (*base, l1)
+    # 시총 · 거래대금 · 주가는 매일 엑셀 Score 만 쓴다(주간 엑셀은 앞 다섯 열만). 폭은 옛 머리 글
+    # 기준(확정 샘플 그대로), 거래대금은 10억 미만만 소수 1자리
     return (*base,
             Col("market", "시장", "id", None, 5.0, definition="KS = KOSPI · KQ = KOSDAQ"),
             l1,
             Col("l2", "중분류", "id", None, 14.0, definition="WICS 중분류"),
-            Col("mcap", "시총(억)", "num", "#,##0", 9.0,
+            Col("mcap", "시총\n(억원)", "num", "#,##0", 9.0, fit_label="시총(억)",
                 definition="D 시가총액, 억원(fi_universe)"),
-            Col("adv20", "거래대금\n20일(억)", "num", "#,##0", 9.0,
+            Col("adv20", "거래대금\n20일(억원)", "num", "#,##0", 9.0,
+                fit_label="거래대금\n20일(억)", fmt_all="[<10]#,##0.0;#,##0",
                 definition="최근 20세션 평균 거래대금, 억원(D-13 적격성 재료)"),
-            Col("price", "주가", "num", "#,##0", 9.0, definition="D 종가, 원(fi_prices)"))
+            Col("price", "주가\n(원)", "num", "#,##0", 9.0, fit_label="주가",
+                definition="D 종가, 원(fi_prices)"))
 
 
 def id_values(view: DayView, t: str, fi: FiData | None = None) -> Row:
@@ -235,6 +259,23 @@ def title_for(view: DayView, sheet: str, note: str = "") -> Title:
     return Title(sheet, model_line, source, note)
 
 
+def model_id_of(spec_id: str) -> str:
+    """'scope@1.0' → 'scope'."""
+    return spec_id.split("@")[0]
+
+
+def band(view: DayView, title: str, sort_label: str | None,
+         notes: Sequence[tuple[str | None, str]] = (), *, meta: bool = False) -> Band:
+    """확정 양식 1~5행 — 표지와 값은 ':' 로, 사람이 읽는 이름만(모델 id · 데이터 id 는 Meta)."""
+    others = compared_specs(view)
+    when = f"{view.date} {BASIS_WORDS.get(view.run.basis, view.run.basis)}"
+    where = "아래 표" if meta else "Meta 시트"
+    return Band(sort_label, title,
+                (f"주 모델: {model_label(view.spec_id)}",
+                 "비교: " + (", ".join(model_label(s) for s in others) or "없음")),
+                (f"기준일: {when}", f"{SOURCE_TEXT} · 데이터 id: {where}"), tuple(notes))
+
+
 def bucket_weight_label(view: DayView, b: str) -> str:
     if view.spec is None:
         return bucket_label(b)
@@ -244,10 +285,6 @@ def bucket_weight_label(view: DayView, b: str) -> str:
 def score_indicators(view: DayView) -> list[tuple[str, str, str]]:
     """(key, bucket, definition) — role=score, 레지스트리 순서. spec 이 없으면 데이터에서."""
     return _indicators(view, "score")
-
-
-def display_indicators(view: DayView) -> list[tuple[str, str, str]]:
-    return _indicators(view, "display")
 
 
 def _indicators(view: DayView, role: str) -> list[tuple[str, str, str]]:
@@ -270,59 +307,86 @@ UNIT_TEXT = {RATIO: "비율(0.05 = 5%)", PCT: "%", TIMES: "배",
 
 @dataclass(frozen=True)
 class RawCol:
-    """점수 표의 원값·표식 열 하나. unit 이 빈 문자열이면 표식(글자) 열."""
+    """점수 표의 원값·표식 열 하나. unit 이 빈 문자열이면 표식(글자) 열.
+
+    label = 단위를 뺀 옛 머리 글(열 폭 기준) · head = 7행 머리 글 · group = 6행 그룹 이름 —
+    그룹에 있는 말(수익률 · 영업이익 추정 · 단위)은 머리에서 되풀이하지 않는다(확정 샘플)."""
 
     key: str
     bucket: str
     label: str
     unit: str
     definition: str
+    head: str = ""
+    group: str = ""
+
+    @property
+    def fit_label(self) -> str:
+        return f"{self.label}\n({self.unit})" if self.unit else self.label
+
+    @property
+    def shown(self) -> str:
+        return self.head or self.fit_label
+
+
+RAW_GROUPS = {"momentum": "모멘텀 · 수익률(비율)", "flow": "수급 · 순매수/시총(%)",
+              "quality": "퀄리티", "valuation": "밸류"}
 
 
 def _rev_cols(metric: str, name: str) -> tuple[RawCol, ...]:
+    group = f"리비전 · {name} 추정 변화(비율)"
     out: list[RawCol] = []
     for p, ago in (("1w", "1주 전"), ("1m", "1개월 전"), ("3m", "3개월 전")):
         out += [RawCol(f"{metric}_change_{p}", "revision", f"{name} 추정 {p.upper()}", RATIO,
                        f"당해 결산기 {name} 컨센서스 (cur − {ago}) ÷ |{ago}|. 현재값·비교값이 "
-                       "없거나 비교값이 0이면 0(v3 규약), 컨센서스 쌍이 없으면 빈칸"),
+                       "없거나 비교값이 0이면 0(v3 규약), 컨센서스 쌍이 없으면 빈칸",
+                       p.upper(), group),
                 RawCol(f"{metric}_{p}_flag", "revision", f"{name} {p.upper()}\n표식", "",
                        f"{name} {p.upper()} 부호 전환 — 흑전 · 적전 · 적확 · 적축(v3 규약, 변화율 "
-                       "칸은 그대로)")]
+                       "칸은 그대로)", f"{p.upper()}\n표식", group)]
     return tuple(out)
 
 
 def _flow_cols(prefix: str, name: str, subject: str) -> tuple[RawCol, ...]:
     return tuple(RawCol(f"flow_{prefix}_{n}d", "flow", f"{name} {n}일", FLOW,
                         f"{subject} 순매수 — D 이하 최근 수급 행 {n}개 합(백만원) ÷ 시총(억원). "
-                        "1 = 시총의 1%")
+                        "1 = 시총의 1%", f"{name}\n{n}일", RAW_GROUPS["flow"])
                  for n in (5, 20))
+
+
+def _plain_cols(bucket: str, *cols: tuple[str, str, str, str]) -> tuple[RawCol, ...]:
+    return tuple(RawCol(k, bucket, label, unit, d, "", RAW_GROUPS[bucket])
+                 for k, label, unit, d in cols)
 
 
 # scope·v3_zscore 점수 표(contracts.V3_SCORE_COLUMNS) 원값 27열 + 표식 6열 — 엔진 값을 배율 없이
 # 그대로 싣는다. 순서 = 버킷 순서(momentum·revision·flow·quality·valuation) · 버킷 안 엔진 순서
 V3_RAW: tuple[RawCol, ...] = (
     *(RawCol(f"r{m}", "momentum", f"{m.upper()} 수익률", RATIO,
-             f"{n}세션 전 대비 수익률(수정종가, 없으면 종가). 가격 행이 {n}개 이하면 빈칸")
+             f"{n}세션 전 대비 수익률(수정종가, 없으면 종가). 가격 행이 {n}개 이하면 빈칸",
+             m.upper(), RAW_GROUPS["momentum"])
       for m, n in (("1m", 20), ("3m", 60), ("6m", 120), ("9m", 180), ("12m", 240))),
     *_rev_cols("op", "영업이익"), *_rev_cols("ni", "순이익"),
     *_flow_cols("inst", "기관", "기관 합계"), *_flow_cols("for", "외국인", "외국인"),
     *_flow_cols("pe", "사모", "사모펀드"),
-    RawCol("qual_gpa", "quality", "GP/A", RATIO, "매출총이익 ÷ 자산총계(최근 연간 확정)"),
-    RawCol("qual_roa", "quality", "ROA", PCT, "최근 연간 확정 ROA(DART 순이익 ÷ 자산총계 × 100)"),
-    RawCol("qual_fcf_assets", "quality", "FCF/자산", RATIO,
-           "FCF(영업현금흐름 − |capex|) ÷ 자산총계(최근 연간 확정)"),
-    RawCol("qual_debt_ratio", "quality", "부채비율", PCT,
-           "부채총계 ÷ 자본총계 × 100(최근 연간 확정, 낮을수록 좋다)"),
-    RawCol("qual_gpa_change", "quality", "GP/A 변화", RATIO,
-           "(GP/A − 전기 GP/A) ÷ |전기 GP/A|(연간 2기)"),
-    RawCol("qual_std_20d", "quality", "20일 변동성", RATIO,
-           "최근 21행 일간 수익률 표본 표준편차(낮을수록 좋다)"),
-    RawCol("val_per", "valuation", "PER", TIMES, "최근 연간 확정 PER(WISE, 양수만 — 적자는 빈칸)"),
-    RawCol("val_pbr", "valuation", "PBR", TIMES, "최근 연간 확정 PBR(WISE, 양수만)"),
-    RawCol("val_ev_ebitda", "valuation", "EV/EBITDA", TIMES,
-           "최근 연간 EV/EBITDA(WISE, 양수만). scope 는 가중에서 뺐다(점수에 안 씀, 10-02 결정)"),
-    RawCol("val_dividend_yield", "valuation", "배당수익률", PCT,
-           "최근 연간 배당수익률(WISE 투자지표)"),
+    *_plain_cols(
+        "quality",
+        ("qual_gpa", "GP/A", RATIO, "매출총이익 ÷ 자산총계(최근 연간 확정)"),
+        ("qual_roa", "ROA", PCT, "최근 연간 확정 ROA(DART 순이익 ÷ 자산총계 × 100)"),
+        ("qual_fcf_assets", "FCF/자산", RATIO,
+         "FCF(영업현금흐름 − |capex|) ÷ 자산총계(최근 연간 확정)"),
+        ("qual_debt_ratio", "부채비율", PCT,
+         "부채총계 ÷ 자본총계 × 100(최근 연간 확정, 낮을수록 좋다)"),
+        ("qual_gpa_change", "GP/A 변화", RATIO, "(GP/A − 전기 GP/A) ÷ |전기 GP/A|(연간 2기)"),
+        ("qual_std_20d", "20일 변동성", RATIO,
+         "최근 21행 일간 수익률 표본 표준편차(낮을수록 좋다)")),
+    *_plain_cols(
+        "valuation",
+        ("val_per", "PER", TIMES, "최근 연간 확정 PER(WISE, 양수만 — 적자는 빈칸)"),
+        ("val_pbr", "PBR", TIMES, "최근 연간 확정 PBR(WISE, 양수만)"),
+        ("val_ev_ebitda", "EV/EBITDA", TIMES,
+         "최근 연간 EV/EBITDA(WISE, 양수만). scope 는 가중에서 뺐다(점수에 안 씀, 10-02 결정)"),
+        ("val_dividend_yield", "배당수익률", PCT, "최근 연간 배당수익률(WISE 투자지표)")),
 )
 
 
@@ -336,8 +400,9 @@ def score_raw_columns(view: DayView) -> tuple[RawCol, ...]:
 # 퀄리티 손익 지표(엔진 원값 열) — 다 비고 변동성만 남으면 비고에 적는다
 # (G-27 표시, 원인은 적지 않는다)
 QUALITY_PL_KEYS = tuple(c.key for c in V3_RAW if c.bucket == "quality" and c.key != "qual_std_20d")
-QUALITY_VOL_ONLY_NOTE = "퀄리티 = 변동성만(손익 지표 없음)"
-NET_REVENUE_NOTE = "매출 = 순영업이익(순액) — 총액 추정치와 y-y 비교 안 함"
+# Score 비고 표지 — 짧게(확정 샘플 · 뜻은 Q7 머리 메모 범례)
+QUALITY_VOL_ONLY_NOTE = "퀄리티 변동성만"
+NET_REVENUE_NOTE = "매출 순액"
 
 
 def quality_vol_only(view: DayView, t: str) -> bool:
@@ -377,26 +442,125 @@ def bucket_missing_reason(view: DayView, t: str, b: str) -> str:
     return "원천없음"
 
 
-# ── 시트: 점수 ───────────────────────────────────────────────────────────────
-def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
-                 prev_rank: Mapping[str, int | None], trend: Trend) -> Dictionary:
+# ── 후보 30 과 변화(확정 샘플 Score AM · AN) ─────────────────────────────────
+ENTRY, EXIT = "진입", "이탈"
+
+
+@dataclass(frozen=True)
+class Candidates:
+    """오늘 후보(순위순, 대분류마다 최대 k 까지 top_n 종목)와 전일 후보 대비 변화.
+
+    전일 후보 = 전일 순위에 같은 규칙(전일 대분류 = 오늘 값 — 전일 업종 스냅샷은 읽지 않는다).
+    변화: 진입(오늘 후보인데 전일 후보 아님) · 이탈(전일 후보인데 오늘 아님 — 오늘 순위가
+    top_n 안이면 'k종목 초과' 로 밀린 이탈) · k종목 초과(순위 top_n 안인데 대분류가 이미
+    k종목, 전일도 후보 아님)."""
+
+    picked: frozenset[str]
+    change: Mapping[str, str]
+    cut: int | None                 # 오늘 후보 중 가장 낮은 순위(커트라인)
+    full: tuple[str, ...]           # k종목이 찬 대분류 이름(Sector 코드순)
+    top_n: int
+    k: int
+
+    @property
+    def full_text(self) -> str:
+        return "·".join(self.full) or "없음"
+
+
+def candidates(view: DayView, prev_rank: Mapping[str, int | None]) -> Candidates:
+    out = view.output
+    top_n, k = out.top_n, out.max_per_sector
+    level = "sector_l2" if out.sector_level == "L2" else "sector_l1"
+
+    def sector_of(t: str) -> object:
+        return view.by_ticker.get(t, {}).get(level)
+
+    picked = list(view.candidates)
+    order = sorted((t for t in (ticker_of(r) for r in view.rows) if prev_rank.get(t) is not None),
+                   key=lambda t: prev_rank[t] or 0)
+    before = {str(r["t"]) for r in cap_candidates([{"t": t} for t in order], top_n, k,
+                                                  lambda r: sector_of(str(r["t"])))}
+    now = set(picked)
+    change: dict[str, str] = {}
+    for r in view.rows:
+        t, rk = ticker_of(r), rank_of(r)
+        inside = rk is not None and rk <= top_n
+        if t in now and t not in before:
+            change[t] = ENTRY
+        elif t in before and t not in now:
+            change[t] = f"{EXIT}({k}종목 초과)" if inside else EXIT
+        elif inside and t not in now:
+            change[t] = f"{k}종목 초과"
+    counts: dict[object, int] = {}
+    for t in picked:
+        counts[sector_of(t)] = counts.get(sector_of(t), 0) + 1
+    name_key = "sector_l2_name" if level == "sector_l2" else "sector_l1_name"
+    names: dict[object, str] = {}
+    for t in picked:
+        names.setdefault(sector_of(t), str(view.uni.get(t, {}).get(name_key) or sector_of(t)))
+    full = tuple(names[s] for s in sorted(counts, key=str) if counts[s] >= k)
+    cut = max((view.rank(t) or 0 for t in picked), default=None)
+    return Candidates(frozenset(picked), change, cut, full, top_n, k)
+
+
+def candidate_rule_text(c: Candidates) -> str:
+    """Meta '후보 규칙' 값."""
+    return (f"상위 {c.top_n} · 대분류(L1)당 최대 {c.k}: 순위순으로 내려가며 {c.k} 가 찬 대분류는 "
+            f"건너뛰고 아래 순위로 채움 · 오늘 커트라인: 순위 {c.cut if c.cut is not None else '-'}"
+            f" · {c.k}종목이 찬 대분류: {c.full_text}")
+
+
+def composite_definition(view: DayView) -> str:
+    """Score 점수 열 정의 — z 엔진은 축 가중합 식과 그날 범위를 적는다."""
+    if not view.z_engine or view.spec is None:
+        return "있는 버킷 점수의 가중평균(0~100, 엔진 값). 제외 종목도 점수는 남는다"
+    # 가중치 글은 Meta '가중치' 줄(소수 1자리 %)을 다시 읽은 값과 같게 — 30.0% → 30
+    weights = " · ".join(f"{bucket_label(b)} {float(f'{w * 100:.1f}'):g}"
+                         for b, w in view.spec.buckets.items()) + "%"
+    comps = [c for r in view.rows if (c := composite_of(r)) is not None]
+    span = ""
+    if comps:
+        lo = f"{min(comps):.2f}"
+        span = f"({view.date[5:10]} 데이터 {lo.replace('-', '−', 1)}~{max(comps):+.2f})"
+    return (f"{len(view.buckets)}축 유니버스(Z)의 가중합({weights}). 결측 축은 남은 가중치로 다시 "
+            f"나눔. 0 = 유니버스 평균 근처, 높을수록 좋음{span}. 제외 종목도 점수는 남는다")
+
+
+NOTE_LEGEND = (
+    ("애널 ≤3", "의견 낸 애널리스트가 3명 이하 (추정치가 흔들리기 쉬움)"),
+    ("의견 0(3M)", "최근 3개월 동안 의견 낸 애널리스트 없음"),
+    ("애널 미상", "애널리스트 수를 모름"),
+    ("N월 결산", "12월 결산이 아닌 회사"),
+    (NET_REVENUE_NOTE, "매출을 순액으로 적는 회사(증권·카드 등), 매출 YoY 비움"),
+    (QUALITY_VOL_ONLY_NOTE, "퀄리티를 주가 변동성 하나로만 계산"),
+)
+
+
+# ── 시트: Score ──────────────────────────────────────────────────────────────
+def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str, int | None],
+                 trend: Trend, cands: Candidates) -> tuple[Dictionary, Dictionary]:
+    """반환 = (열 사전, 사전 끝에 붙일 후보 · 변화 두 줄)."""
     others = compared_specs(view)
     year = int(view.date[:4])
+    k, top_n = cands.k, cands.top_n
     groups = [
         Group("종목", id_cols(full=True)),
         Group("종합", (
-            Col("rank", "순위", "rank", "#,##0", 7.0, key_col=True, color=False,
+            Col("rank", "순위", "rank", "#,##0", 7.0, key_col=True, color=False, core=True,
                 definition="주 모델 순위(1 = 최고). 제외 종목은 빈칸"),
-            Col("composite", "종합\n점수", "num", "#,##0.00", definition=(
-                "있는 버킷 점수의 가중평균(0~100, 엔진 값). 제외 종목도 점수는 남는다")),
-            Col("prev_rank", "전일\n순위", "num", "#,##0", color=False,
-                definition="직전 성공 판(같은 basis)의 주 모델 순위"),
-            Col("d1m", "Δ순위\n1M", "chg", "#,##0", zero_mid=True, definition=(
-                "1M 비교 판(D−1개월 이하 마지막 판) 순위 − 오늘 순위(양수 = 상승). "
+            Col("composite", "점수", "num", "#,##0.00", fit_label="종합\n점수", core=True,
+                definition=composite_definition(view)),
+            Col("prev_rank", "전일\n순위", "num", "#,##0", color=False, core=True,
+                definition=("직전 날짜 데이터(아침은 아침끼리, 장 마감은 장 마감끼리)의 "
+                            "주 모델 순위")),
+            Col("d1m", "Δ순위\n1M", "chg", "#,##0", zero_mid=True, core=True, definition=(
+                "1M 비교 데이터(D−1개월 이하 마지막 날짜) 순위 − 오늘 순위(양수 = 상승). "
                 "색 가운데 = 0 — 상승 초록 · 하락 빨강")),
-            Col("t1m", "1M\n흐름", "spark", None, 11.0, definition=(
-                "1M 동안 판마다의 순위 꺾은선(원순위, 위 = 상승). 선 색 = Δ순위 1M 부호 = 선의 "
+            Col("t1m", "1M\n흐름", "spark", None, 11.0, core=True, definition=(
+                "1M 동안 날짜별 순위 꺾은선(원순위, 위 = 상승). 선 색 = Δ순위 1M 부호 = 선의 "
                 "처음 → 끝 방향")),
+        ), core=True),
+        Group("상태", (
             # 너비 상한 26 — 가장 긴 v4 라벨 '고점근접+반전 게이트(pull_gate)'가 qpack fit 25.05
             # (N-26 4.5 — 상한 16 이면 v4 라벨 8개 중 6개가 잘렸다)
             Col("excl", "제외 사유", "txt", None, 26.0, definition=(
@@ -404,41 +568,45 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
                 "버킷 게이트(고점근접+반전 하위 30%)")),
             Col("cov", "커버리지", "txt", None, 8.0, definition=(
                 "추정치 신선도(T2.11): 신선 · 유예 D+n(마지막 신선일부터 거래일 n) · 소멸")),
-            # 너비 = 값에 맞춘 폭, 상한 64 — 비고가 짧은 판은 그대로 좁고, 순액 매출 비고가 붙으면
-            # '애널리스트 3명 이하 · 매출 = 순영업이익(순액) — …'(qpack fit 60.15)까지 잘리지 않는다
-            Col("note", "비고", "txt", None, 64.0, definition=(
+            # 표지는 짧게(애널 ≤3 등), 폭 17 고정 — 뜻은 머리 칸 메모 범례
+            Col("note", "비고", "txt", None, fixed=17.0, definition=(
                 "추정기관수(WISE 최근 3개월 투자의견을 낸 증권사 수): 0 = 최근 3개월 의견 없음 · "
                 "1~3 = 애널리스트 3명 이하 · 모름 = 애널리스트 수 미상 · 4 이상은 빈칸. "
-                "결산월이 12월이 아니면 'N월 결산'(실적 시트 연간 칸 = 결산기가 끝나는 연도) · "
-                f"scope 퀄리티 손익 지표가 다 비면 '{QUALITY_VOL_ONLY_NOTE}' · 확정 매출이 "
-                f"순액이라 매출 y-y 를 비우면 '{NET_REVENUE_NOTE}' 을 ' · ' 로 덧붙인다")),
-        ), core=True),
+                "결산월이 12월이 아니면 'N월 결산'(Earnings 시트 연간 칸 = 결산기가 끝나는 연도) · "
+                "scope 퀄리티 손익 지표가 다 비면 '퀄리티 = 변동성만(손익 지표 없음)' · "
+                "확정 매출이 순액이라 매출 y-y 를 비우면 '매출 = 순영업이익(순액) — "
+                "총액 추정치와 y-y 비교 안 함' 을 ' · ' 로 덧붙인다")),
+        ), gap=False),
     ]
     for b in view.buckets:
         name = bucket_label(b)
         if view.z_engine:         # z 엔진 — 버킷 점수가 z 라 z 그대로(10-08 '둘 다 z')
             cols = (
-                Col(f"{b}_u", f"{name}\n유니버스 z", "num", "#,##0.00", color=True, span=Z_SPAN,
+                Col(f"{b}_u", "유니버스\n(Z)", "num", "#,##0.00", Z_WIDTH_U, color=True,
+                    span=Z_SPAN, fit_label=f"{name}\n유니버스 z", fmt_all="0.0",
+                    dict_label="유니버스(Z)",
                     definition=(f"{name} 버킷 점수(엔진 z — 종합 점수에 들어간 값 그대로, "
                                 "±3 상한). 0 = 유니버스 평균, 높을수록 좋다")),
-                Col(f"{b}_s", f"{name}\n업종 z", "num", "#,##0.00", color=True, span=Z_SPAN,
+                Col(f"{b}_s", "업종\n(Z)", "num", "#,##0.00", Z_WIDTH_S, color=True, span=Z_SPAN,
+                    fit_label=f"{name}\n업종 z", fmt_all="0.0", dict_label="업종(Z)",
                     definition=(f"{name} 버킷 z 를 WICS 대분류 안에서 다시 z(대분류 평균·표본 "
                                 "표준편차, ±3σ 로 자른 뒤 표준화 — 엔진 z 와 같은 식, ±3 안). "
                                 "값 있는 종목 < 5 이거나 표준편차 0 이면 유니버스 z. 순위·점수에 "
                                 "쓰지 않는 참고값")))
         else:
             cols = (
-                Col(f"{b}_u", f"{name}\n유니버스", "pct", "#,##0.0", definition=(
-                    f"{name} 버킷 점수(엔진)의 유니버스 백분위 0~100 — 높을수록 좋다")),
-                Col(f"{b}_s", f"{name}\n업종", "pct", "#,##0.0", definition=(
-                    f"{name} 버킷 점수의 WICS 대분류 안 백분위(표본 < 5 면 유니버스)")))
+                Col(f"{b}_u", "유니버스", "pct", "#,##0.0", fit_label=f"{name}\n유니버스",
+                    definition=f"{name} 버킷 점수(엔진)의 유니버스 백분위 0~100 — 높을수록 좋다"),
+                Col(f"{b}_s", "업종", "pct", "#,##0.0", fit_label=f"{name}\n업종",
+                    definition=f"{name} 버킷 점수의 WICS 대분류 안 백분위(표본 < 5 면 유니버스)"))
         groups.append(Group(bucket_weight_label(view, b), cols))
-    groups.append(Group("결측", (Col("miss", "결측 축", "txt", None, 14.0, definition=(
-        "버킷 점수가 빈 축(점수 대상 종목만). 사유는 축 칸의 '결측(사유)'")),)))
+    groups.append(Group("결측", (Col("miss", "축", "txt", None, 14.0, fit_label="결측 축",
+                                   definition=("버킷 점수가 빈 축(점수 대상 종목만). 사유는 축 "
+                                               "칸의 '결측(사유)'")),)))
     if others:
-        groups.append(Group("다른 모델 순위", (
+        groups.append(Group("비교 순위", (
             *(Col(f"r:{s}", model_label(s), "num", "#,##0", color=False,
-                  definition=f"{s} 순위(같은 판)") for s in others),
+                  definition=f"{s} 순위(같은 날짜)") for s in others),
             Col("max_diff", "최대 차이", "num", "#,##0",
                 definition="주 모델 포함 모델 순위의 최댓값 − 최솟값(순위 둘 이상일 때)"),
         )))
@@ -459,7 +627,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
                     # v3·v2 점수 행엔 신선도 열이 없다 → 그 판 fi_universe 값(v4 는 같은 값을 행에 싣는다)
                     "cov": coverage_label(row.get("coverage_state", u.get("coverage_state")),
                                           u.get("coverage_age_days")),
-                    "note": " · ".join(n for n in notes if n) or None}
+                    "note": " · ".join(n for n in notes if n) or None,
+                    "cand": "후보" if t in cands.picked else None,
+                    "chg": cands.change.get(t)}
         scored = view.scored(t)
         miss = []
         for b in view.buckets:
@@ -479,16 +649,76 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData,
             out[f"r:{s}"] = view.other_ranks[s].get(t)
         out["max_diff"] = max(ranks) - min(ranks) if len(ranks) >= 2 else None
         rows.append(out)
-    note = ("축 = 버킷 점수의 백분위(높을수록 좋다, 초록 = 상위). 제외 종목은 점수만 남고 순위가 "
-            "없다. 결측은 '결측(사유)'.")
-    if view.z_engine:
-        note = ("축 = 엔진 버킷 z(유니버스 z = 종합 점수에 들어간 값 그대로 · 업종 z = 대분류 "
-                "안에서 다시 매긴 참고값), 높을수록 좋다 — 색 −3 빨강 · 0 노랑 · +3 초록. "
-                "결측은 '결측(사유)'.")
-    return write_table(wb, title_for(view, "점수", note), groups, rows, sort_key="rank")
+    # 후보 · 변화 — 변화 열 폭은 가장 긴 표지에 맞춘다
+    chg_width = max(4.4, max((text_width(str(r["chg"])) + 1 for r in rows if r.get("chg")),
+                             default=0.0))
+    groups.append(Group(f"후보(대분류당 최대 {k})", (
+        Col("cand", "후보", "txt", None, fixed=6.9, definition=(
+            f"상위 {top_n} · 대분류(L1)당 최대 {k} 규칙으로 뽑힌 {top_n}종목(Meta 후보 규칙). "
+            f"순위순으로 내려가며 {k} 가 찬 대분류는 건너뜀. 빈칸: 후보 아님")),
+        Col("chg", "변화", "txt", None, fixed=chg_width, definition=(
+            f"진입: 전일 후보 {top_n} 에 없던 오늘 후보 · 이탈: 전일 후보였는데 오늘 후보 아님 · "
+            f"이탈({k}종목 초과): 순위는 {top_n} 안인데 대분류가 이미 {k}종목이라 밀려 이탈 · "
+            f"{k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과. 전일 후보 = 전일 순위에 같은 규칙 "
+            "적용(전일 대분류 = 오늘 값 가정). 노랑(전일 순위 칸) = 진입")),
+    ), gap=False))
+
+    first_axis = f"{view.buckets[0]}_u" if view.buckets else None
+    axis_note = ("유니버스(Z): 종합 점수에 들어간 값 · 업종(Z): 같은 대분류 안에서 다시 잰 "
+                 "참고값 · 값 없음: 결측(사유)" if view.z_engine else
+                 "유니버스: 버킷 점수의 유니버스 백분위 · 업종: 같은 대분류 안 백분위 · "
+                 "값 없음: 결측(사유)")
+    notes_5: list[tuple[str | None, str]] = [
+        (None, "순위: 1 = 가장 좋음 · 색: 초록 좋음, 빨강 나쁨 · 노랑: 오늘 후보 진입")]
+    if first_axis:
+        notes_5.append((first_axis, axis_note))
+    notes_5.append(("cand", f"후보: 순위순, 대분류당 최대 {k}종목 · {k}종목 초과: 순위 {top_n} "
+                            f"안인데 그 대분류가 이미 {k}종목 · 진입·이탈: 전일 후보 대비"))
+    sh = write_confirmed(wb, "Score", band(view, "Score: 종목별 종합 점수와 순위",
+                                           "정렬: 순위 오름차순 ▲", notes_5),
+                         groups, [rows], sort_key="rank")
+    ws = sh.ws
+    _h6, r0, r1 = sh.blocks[0]
+    if rows:
+        # 상태 '신선' 은 옅은 회색 글자(이상 값만 눈에 띄게) · 전일 순위 칸 노랑 = 오늘 후보 진입
+        cov, prev, chg = sh.letter("cov"), sh.letter("prev_rank"), sh.letter("chg")
+        ws.conditional_formatting.add(f"{cov}{r0}:{cov}{r1}", FormulaRule(
+            formula=[f'${cov}{r0}="신선"'], font=Font(color="FFA6A6A6")))
+        ws.conditional_formatting.add(f"{prev}{r0}:{prev}{r1}", FormulaRule(
+            formula=[f'${chg}{r0}="{ENTRY}"'],
+            fill=PatternFill("solid", fgColor="FFFFFF00", bgColor="FFFFFF00")))
+    # 후보 블록 머리 — 앞 블록과 사이 선은 머리 행만 가는 회색(확정 샘플)
+    c_cand, c_chg = sh.cols["cand"], sh.cols["chg"]
+    for r in (6, 7):
+        left = ws.cell(r, c_cand - 1)
+        b = left.border
+        left.border = Border(left=b.left, right=SIDE_HDR, top=b.top, bottom=b.bottom)
+        cell = ws.cell(r, c_chg)
+        b = cell.border
+        cell.border = Border(left=SIDE_HDR, right=b.right, top=b.top, bottom=b.bottom)
+    # 머리 칸 메모 — 비고 표지 범례 · 후보 규칙 · 변화 뜻
+    legend = ["비고 표지 뜻", "", *(f"■ {a}: {b}" for a, b in NOTE_LEGEND), "",
+              "표지가 없으면 빈칸, 여러 개면 ' · ' 로 이어 붙임."]
+    ws.cell(7, sh.cols["note"]).comment = note("\n".join(legend), "비고", wrap=False)
+    ws.cell(7, c_cand).comment = note(
+        f"후보: 상위 {top_n} · 대분류(L1)당 최대 {k}(Meta 후보 규칙). 순위순으로 내려가며 "
+        f"{k} 가 찬 대분류는 건너뜀. 오늘 커트라인: 순위 "
+        f"{cands.cut if cands.cut is not None else '-'} · "
+        f"{k}종목이 찬 대분류: {cands.full_text}.")
+    ws.cell(7, c_chg).comment = note(
+        f"변화\n■ 진입: 전일 후보 {top_n} 에 없던 오늘 후보(노랑 = 전일 순위 칸)\n"
+        "■ 이탈: 전일 후보였는데 오늘 후보 아님\n"
+        f"■ 이탈({k}종목 초과): 순위는 {top_n} 안인데 대분류가 이미 {k}종목이라 밀려 이탈\n"
+        f"■ {k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과(전일도 후보 아님)\n"
+        "전일 후보 = 전일 순위에 같은 규칙 적용(전일 대분류 = 오늘 값 가정)")
+    # 후보 · 변화 두 줄은 Meta 열 사전 끝에(그룹 이름 '후보')
+    tail = [("Score", "후보", label, d) for _s, g, label, d in sh.dictionary
+            if g.startswith("후보(")]
+    main = [e for e in sh.dictionary if not e[1].startswith("후보(")]
+    return main, tail
 
 
-# ── 시트: 점수 원자료 ─────────────────────────────────────────────────────────
+# ── 시트: Raw ────────────────────────────────────────────────────────────
 def ind_cells(view: DayView, t: str, key: str) -> tuple[object, object, str]:
     """(표시값, 엔진 백분위, 표식) — 결측은 '결측(사유)', 리비전 이전값<0 은 표식만(E)."""
     r = view.ind.get(t, {}).get(key)
@@ -528,19 +758,25 @@ def sheet_raw(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
                     "버킷결측(NN%) · 적격미확인(표식)")),
             ]
         groups.append(Group(bucket_label(b), tuple(cols)))
-    # scope·v3 는 지표 긴 표가 0행이고 원값이 점수 표 열에 있다 — 그 열을 그대로 싣는다(E-10)
+    # scope·v3 는 지표 긴 표가 0행이고 원값이 점수 표 열에 있다 — 그 열을 그대로 싣는다(E-10).
+    # 그룹 = 버킷(리비전은 영업이익 · 순이익 두 블록을 구분 열 없이 붙인다)
     raw_cols = score_raw_columns(view)
     gone = [c.key for c in raw_cols if view.rows and c.key not in view.rows[0]]
     if gone:
-        log.warning("점수 원자료 — 주 모델 %s 판 %s 점수 표에 원값 열 %d개가 없어 그 열만 빈칸: %s",
+        log.warning("Raw — 주 모델 %s 판 %s 점수 표에 원값 열 %d개가 없어 그 열만 빈칸: %s",
                     view.spec_id, view.run.build_id, len(gone), ", ".join(gone))
-    for b in dict.fromkeys(c.bucket for c in raw_cols):
-        groups.append(Group(bucket_label(b), tuple(
-            Col(f"s:{c.key}", f"{c.label}\n({c.unit})", "num", UNIT_FMT[c.unit], color=False,
+    prev_bucket = None
+    for name in dict.fromkeys(c.group for c in raw_cols):
+        members = [c for c in raw_cols if c.group == name]
+        groups.append(Group(name, tuple(
+            Col(f"s:{c.key}", c.shown, "num", UNIT_FMT[c.unit], color=False, fit_label=c.fit_label,
+                fmt_all=UNIT_FMT[c.unit] if c.unit == RATIO else None,
                 definition=f"{c.key}: {c.definition}. 단위 {UNIT_TEXT[c.unit]}") if c.unit
-            else Col(f"s:{c.key}", c.label, "txt", None, 9.0, definition=f"{c.key}: {c.definition}")
-            for c in raw_cols if c.bucket == b)))
-    groups.append(Group("기준", (
+            else Col(f"s:{c.key}", c.shown, "txt", None, 9.0, fit_label=c.fit_label,
+                     definition=f"{c.key}: {c.definition}")
+            for c in members), gap=members[0].bucket != prev_bucket))
+        prev_bucket = members[0].bucket
+    groups.append(Group("데이터 기준", (
         Col("fy", "연간\n기준기", "txt", None, 8.0,
             definition="순이익이 있는 최근 연간 확정 결산기(E/P·배당의 후보 기, 730일 창은 엔진)"),
         Col("fy_avail", "재무\n접수일", "txt", None, 10.0,
@@ -571,80 +807,21 @@ def sheet_raw(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
                    fq=max(qs, default=None), obs=None if cur is None else iso(cur.get("obs_date")),
                    n_an=view.uni.get(t, {}).get("n_analysts"), flow_d=fi.flow_last.get(t))
         rows.append(out)
-    note = "점수에 들어간 하위 지표 원값 · 엔진 백분위 · 표식. 5행 = 정의(전문은 메타). 색 없음."
-    if raw_cols:
-        note = ("주 모델 점수 표(scores.parquet) 원값 그대로(배율 없음 · 빈칸 = 엔진 값 없음, "
-                "v3 는 사유를 남기지 않는다). 단위는 머리글 괄호 — 비율(0.05 = 5%) · % · 배 · "
-                "순매수/시총(1 = 시총의 1%), 전체는 메타 '점수 원자료 단위'. "
-                "5행 = 정의(전문은 메타). 색 없음.")
-    return write_table(wb, title_for(view, "점수 원자료", note), groups, rows, defs_row=True)
+    # 5행 — A5 + 둘째 · 셋째 블록 첫 열 위
+    firsts = [g.cols[0].key for g in groups[1:3]]
+    texts = (["단위: 머리글 괄호(비율 0.05 = 5%)", "열 뜻: 머리 칸 메모(빨간 삼각형) · 색 없음"]
+             if raw_cols else ["열 뜻: 머리 칸 메모(빨간 삼각형) · 색 없음"])
+    notes_5 = [(None, "빈칸: 엔진 값 없음" if raw_cols else "결측: 결측(사유)"),
+               *zip(firsts, texts, strict=False)]
+    sh = write_confirmed(wb, "Raw", band(view, "Raw: 점수 계산에 쓴 원값", "정렬: Score 순위 순",
+                                         notes_5),
+                         groups, [rows], defs_notes=True, sign_colors=True,
+                         page=Page(fit_width=2, over_then_down=True, title_cols="A:C"))
+    return sh.dictionary
 
 
-# ── 시트: 지표(표시용) ────────────────────────────────────────────────────────
-def sheet_display(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
-    inds = display_indicators(view)
-    groups = [Group("종목", id_cols())]
-    for b in dict.fromkeys(bk for _, bk, _ in inds):
-        cols: list[Col] = []
-        for key, bk, definition in inds:
-            if bk != b:
-                continue
-            m = ind_meta(key)
-            cols += [Col(f"v:{key}", m.label, "chg" if m.change else "num", m.fmt,
-                         definition=f"{key}: {definition} · 표시 = 1/99 윈저라이즈"),
-                     Col(f"f:{key}", f"{key}\n표식", "txt", None, 9.0,
-                         definition="엔진 flag(결측 사유는 값 칸의 '결측(사유)')")]
-        groups.append(Group(f"{bucket_label(b)}(표시)", tuple(cols)))
-    groups.append(Group("재무(최근 연간)", (
-        Col("roe", "ROE(%)", definition=(
-            "최근 연간 확정 ROE(DART 사업보고서 — 순이익 ÷ 자본총계 × 100) · 1/99 윈저라이즈")),
-        Col("roa", "ROA(%)", definition=(
-            "최근 연간 확정 ROA(DART 사업보고서 — 순이익 ÷ 자산총계 × 100) · 1/99 윈저라이즈")),
-        Col("debt", "부채비율(%)", definition=(
-            "최근 연간 확정 부채비율(DART 사업보고서 — 부채총계 ÷ 자본총계 × 100) · "
-            "1/99 윈저라이즈")),
-    )))
-    groups.append(Group("컨센서스(당해 결산기)", (
-        Col("per", "선행 PER(배)", definition=(
-            "당해 결산기 컨센서스 PER(cur). 컨센서스 순이익 < 0 이면 '적자' · 1/99 윈저라이즈")),
-        Col("pbr", "선행 PBR(배)", fmt="#,##0.00",
-            definition="당해 결산기 컨센서스 PBR(cur) · 1/99 윈저라이즈"),
-        Col("eps1m", "선행 EPS\n1M 변화(%)", "chg", definition=(
-            "(EPS cur − EPS 1개월 전) ÷ |1개월 전| × 100. 이전값 < 0 은 표식만(E) · 윈저라이즈")),
-        Col("eps1m_f", "EPS 1M\n표식", "txt", None, 8.0, definition="흑전·적전·적확·적축(v3 규약)"),
-    )))
-    rows: list[Row] = []
-    for row in view.rows:
-        t = ticker_of(row)
-        out: Row = id_values(view, t)
-        for key, _, _ in inds:
-            v, _p, f = ind_cells(view, t, key)
-            out[f"v:{key}"], out[f"f:{key}"] = v, f
-        a = fi.annual(t, ("roe", "roa", "debt_ratio"))
-        if a is not None:
-            out.update(roe=_num(a.get("roe")), roa=_num(a.get("roa")),
-                       debt=_num(a.get("debt_ratio")))
-        fy0 = fi.fy0(t, view.date)
-        cur = None if fy0 is None else fi.cons_at(t, fy0)
-        prev = None if fy0 is None else fi.cons_at(t, fy0, "1m")
-        if cur is not None:
-            ni = _num(cur.get("ni"))
-            out["per"] = "적자" if ni is not None and ni < 0 else _num(cur.get("per"))
-            out["pbr"] = _num(cur.get("pbr"))
-            out["eps1m"], out["eps1m_f"] = change_pct(
-                _num(cur.get("eps")), None if prev is None else _num(prev.get("eps")))
-        rows.append(out)
-    numeric = [f"v:{k}" for k, _, _ in inds] + ["roe", "roa", "debt", "per", "pbr", "eps1m"]
-    for key in numeric:
-        vals = winsorize([r.get(key) for r in rows])
-        for r, v in zip(rows, vals, strict=True):
-            r[key] = v
-    note = ("점수에 넣지 않는 참고 지표(레지스트리 role=display) + 원자료. "
-            "숫자는 1/99 윈저라이즈한 표시값. 색은 변화 열만.")
-    return write_table(wb, title_for(view, "지표(표시용)", note), groups, rows, defs_row=True)
 
-
-# ── 시트: 실적 ───────────────────────────────────────────────────────────────
+# ── 시트: Earnings ────────────────────────────────────────────────────────────
 METRICS = (("revenue", "매출"), ("op", "영업이익"), ("ni", "순이익"))
 N_QUARTERS = 5          # fi_fin_summary 는 분기 5기만 싣는다(계약 창)
 
@@ -691,12 +868,20 @@ def revenue_basis_mixed(fi: FiData, t: str, year: int) -> list[str]:
     return out
 
 
+def yoy_label(prev_head: str, head: str) -> str:
+    """YoY 머리 — 비교하는 두 해가 보이게(10-11 사용자: 2025 옆 YoY 를 2026 대비로 읽음)."""
+    return f"YoY\n({prev_head}-{head})"
+
+
 def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
     year = int(view.date[:4])
     years = annual_years(year)
     groups = [Group("종목", id_cols())]
+    # 블록 안 세로선 — 연도 묶음(값 + 그 YoY) 사이 · 분기 YoY 앞은 A6A6A6, 묶음 안은 D9D9D9
+    sides = {}
     for key, label in METRICS:
         cols: list[Col] = []
+        prev_head = f"{year - 2}"
         for slot, yr, head in years:
             what = (f"{yr}년에 끝나는 결산기(12월 결산 = {yr}/12, 9월 결산이면 {yr}/09) "
                     "확정치(사업보고서). 확정치가 없으면 같은 결산기 추정치(컨센서스 cur)를 회색 'E' "
@@ -704,12 +889,17 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
                     else f"{yr}년에 끝나는 결산기 추정치(컨센서스 cur)")
             cols += [
                 Col(f"{key}_{slot}", head, "num", "#,##0", definition=f"{label}(억원) {what}"),
-                Col(f"{key}_{slot}_y", f"{head}\ny-y(%)", "chg", "#,##0.0", definition=(
-                    f"{label} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 추정)와 "
-                    "비교. 부호가 바뀌면 숫자 대신 흑자전환(−→+) · 적자전환(+→−) · 적자지속(−→−)"
-                    + (". 옆 칸이 추정치(회색 'E')면 이 칸도 회색" if slot == "a" else ""))),
+                Col(f"{key}_{slot}_y", yoy_label(prev_head, head), "chg", "#,##0.0", color=False,
+                    fit_lines=True, definition=(
+                        f"{label} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 "
+                        "추정)와 비교. 부호가 바뀌면 숫자 대신 흑자전환(−→+) · 적자전환(+→−) · "
+                        "적자지속(−→−)"
+                        + (". 옆 칸이 추정치(회색 'E')면 이 칸도 회색" if slot == "a" else ""))),
             ]
-        groups.append(Group(f"{label}(억원)", tuple(cols)))
+            if slot != "a":
+                sides[f"{key}_{slot}"] = SIDE_PAIR
+            prev_head = head
+        groups.append(Group(f"{label}(억원 · YoY %)", tuple(cols)))
     # 분기 창 = 판 전 종목 중 영업이익이 있는 가장 최근 달력 분기를 끝으로 5칸(오래된 → 최근).
     # 머리글 'YY.nQ' — 'YYYY/MM' 의 03→1Q · 06→2Q · 09→3Q · 12→4Q. 기말이 분기말이 아닌 결산월
     # (예 11월 결산의 2026/08)은 창 끝을 정하지 않고 칸에도 들어가지 않는다(최근 분기 y-y 는 그대로)
@@ -721,17 +911,19 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
     qcols = [Col(f"q:{p}", f"{p[2:4]}.{int(p[5:7]) // 3}Q", "num", "#,##0",
                  definition=f"{p} 분기 영업이익(3개월 값), 억원 — 그 분기 행이 없으면 빈칸")
              for p in q_periods]
-    qcols.append(Col("q_y", "최근 분기\ny-y(%)", "chg", "#,##0.0", definition=(
-        "종목마다 영업이익이 있는 최근 분기의 전년 동기 대비(%). 부호가 바뀌면 숫자 대신 "
-        "흑자전환·적자전환·적자지속")))
-    groups.append(Group("분기 영업이익(억원)", tuple(qcols)))
+    qcols.append(Col("q_y", "YoY\n(최근 분기)", "chg", "#,##0.0",
+                     color=False, fit_lines=True, definition=(
+                         "종목마다 영업이익이 있는 최근 분기의 전년 동기 대비(%). 부호가 바뀌면 "
+                         "숫자 대신 흑자전환·적자전환·적자지속")))
+    sides["q_y"] = SIDE_PAIR
+    groups.append(Group("분기 영업이익(억원 · YoY %)", tuple(qcols)))
 
     rows: list[Row] = []
     est: list[tuple[int, str]] = []         # Y−1 칸에 추정치를 넣은 (행 순번, 지표)
     for i, row in enumerate(view.rows):
         t = ticker_of(row)
         out: Row = id_values(view, t)
-        mm = fi.fy_month(t)                 # 결산월 — 비12월이면 점수 시트 비고에 'N월 결산'
+        mm = fi.fy_month(t)                 # 결산월 — 비12월이면 Score 비고에 'N월 결산'
         mixed = revenue_basis_mixed(fi, t, year)     # 순액 대 총액 매출 y-y — 비우고 비고
         for key, _ in METRICS:
             for slot, yr, _head in years:
@@ -754,94 +946,145 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
             y, f = yoy(_num(qs[q0].get("op")), None if prev is None else _num(prev.get("op")))
             out["q_y"] = f or y
         rows.append(out)
-    note = ("연간: Y−1 = 확정치(사업보고서) — 확정치가 없으면 Y−1 추정치를 회색 'E' 로"
-            "(옆 y-y 도 회색) · "
-            f"YE·(Y+1)E = 컨센서스 추정. 머리글 연도는 판 날짜 기준(Y = {year})이라 해가 바뀌면 "
-            f"자동으로 넘어간다. 연간 칸 = 결산기가 끝나는 연도(9월 결산이면 {year}E = {year}/09 "
-            "결산기, 비12월 결산은 점수 시트 비고에 'N월 결산'). "
-            "분기 = 판 전 종목의 최근 달력 분기(기말 03·06·09·12월)까지 5분기 "
-            "영업이익 — 기말이 다른 결산월의 분기는 칸이 비고 최근 분기 y-y 만 있다. 부호가 바뀌면 "
-            "y-y 칸에 숫자 대신 흑자전환·적자전환·적자지속. 확정 매출이 순액(순영업이익)이고 비교 "
-            "상대가 총액이면 매출 y-y 는 비운다(점수 시트 비고). "
-            "어닝시즌(예정일·잠정치·서프라이즈)은 원천이 없어 비운다.")
-    dictionary = write_table(wb, title_for(view, "실적", note), groups, rows)
-    # qpack 은 서식을 열 단위로 건다 — Y−1 칸 중 추정치를 넣은 칸만 'E' 서식·회색 글자로 고친다.
-    # 바로 옆 y-y 칸(같은 그룹의 다음 열)도 추정치 기준 증가율이라 회색 글자(N-25 Q10)
-    ws = wb["실적"]
-
-    def by_header(head: str) -> dict[str, int]:
-        """지표(매출·영업이익·순이익 순) → 그 머리글 열."""
-        return dict(zip((k for k, _ in METRICS),
-                        (c for c in range(1, ws.max_column + 1) if ws.cell(7, c).value == head),
-                        strict=True))
-    y1_cols, y1y_cols = by_header(f"{year - 1}"), by_header(f"{year - 1}\ny-y(%)")
+    starts = [g.cols[0].key for g in groups[1:]]
+    notes_5 = [(None, "YoY 글자: 흑자 파랑 · 적자 빨강"),
+               *zip(starts, (
+                   f"{year - 1}: 확정치(없으면 추정치를 회색 E 로) · {year}E·{year + 1}E: 컨센서스",
+                   f"연도: 결산기가 끝나는 해(9월 결산 {year}E = {year}/09)",
+                   "매출 순액 회사: 매출 YoY 비움 · 어닝시즌: 원천 없음",
+                   f"분기: 최근 {N_QUARTERS}분기(분기말이 다른 결산월은 칸이 비고 YoY 만)"),
+                   strict=True)]
+    sh = write_confirmed(wb, "Earnings",
+                         band(view, "Earnings: 연간·분기 실적과 YoY", "정렬: Score 순위 순",
+                              notes_5),
+                         groups, [rows], inner_sides=sides, sign_colors=True)
+    ws = sh.ws
+    _h6, r0, r1 = sh.blocks[0]
+    # YoY 색 — 가운데 0, 양 끝 = 음수 · 양수 |값| 90% 분위(날마다 다시 잰다)
+    if rows:
+        for key in [f"{k}_{slot}_y" for k, _ in METRICS for slot, _yr, _h in years] + ["q_y"]:
+            letter = sh.letter(key)
+            ws.conditional_formatting.add(f"{letter}{r0}:{letter}{r1}",
+                                          scale_zero_anchor([r.get(key) for r in rows]))
+    # Y−1 칸 중 추정치를 넣은 칸만 'E' 서식·회색 글자로 고친다. 바로 옆 YoY 칸도 추정치 기준
+    # 증가율이라 회색 글자(N-25 Q10) — 흑자 · 적자 글자는 그 색 그대로
     for i, key in est:
-        cell = ws.cell(FIRST_DATA_ROW + i, y1_cols[key])
+        cell = ws.cell(r0 + i, sh.cols[f"{key}_a"])
         cell.number_format, cell.font = '#,##0"E"', font(color=C_HDR)
-        ws.cell(FIRST_DATA_ROW + i, y1y_cols[key]).font = font(color=C_HDR)
-    return dictionary
+        yy = ws.cell(r0 + i, sh.cols[f"{key}_a_y"])
+        if yy.value not in SIGN_COLORS:
+            yy.font = font(color=C_HDR)
+    return sh.dictionary
 
 
-# ── 시트: 업종 ───────────────────────────────────────────────────────────────
+
+# ── 시트: Sector ─────────────────────────────────────────────────────────────
+WEEK_SESSIONS = 5       # Sector 1W 수익률 = 5세션 전 대비
+
+
 def _median(xs: Sequence[float]) -> float | None:
     return statistics.median(xs) if xs else None
 
 
-def sheet_sectors(wb: Workbook, view: DayView) -> Dictionary:
+def week_returns(fi_root: Path, view: DayView) -> dict[str, float]:
+    """종목별 1W(5세션 전 대비) 수익률 — 엔진(v3_zscore) 가격 이력 규칙을 그대로 부른다:
+    fi_prices [D−550일, D] 행, 값 = fi_adj_prices.adj_close(없으면 close), 날짜 오름차순."""
+    d = date.fromisoformat(view.date).isoformat()          # SQL 에 넣기 전 형식 검증
+    start = (date.fromisoformat(d) - timedelta(days=HISTORY_DAYS)).isoformat()
+    codes = [ticker_of(r) for r in view.rows]
+    safe = [t for t in codes if t.isalnum()]               # 코드는 영숫자만 SQL 에 넣는다
+    if not safe:
+        return {}
+    where = (f"date BETWEEN DATE '{start}' AND DATE '{d}' AND ticker IN ("
+             + ", ".join(f"'{t}'" for t in safe) + ")")
+    bid = view.run.fi_build_id
+    prices = read_fi(fi_root, "fi_prices", bid, columns=("ticker", "date", "close"), where=where)
+    try:
+        adj = read_fi(fi_root, "fi_adj_prices", bid, where=where)
+    except DeliverError:
+        adj = []                                           # 수정종가 표가 없으면 종가만
+    adj = [{"ticker": r["ticker"], "date": r["date"], "adj_close": r.get("adj_close"),
+            "adj_jump_ok": r.get("adj_jump_ok")} for r in adj]
+    inputs = FactorInputs(d, view.run.basis, bid, {"fi_prices": prices, "fi_adj_prices": adj})
+    histories, _steps = _price_histories(inputs, safe, d)
+    return {t: r for t, h in histories.items()
+            if (r := _period_return(h, WEEK_SESSIONS)) is not None}
+
+
+def sheet_sectors(wb: Workbook, view: DayView, week: Mapping[str, float]) -> Dictionary:
+    """위 표 = 대분류, 빈 줄, 아래 표 = 업종(중분류). 축 평균 색은 대분류 ±0.5 · 업종 ±1, 5종목 미만
+    업종은 회색, 수익률은 표마다 백분위. `week` = 종목별 1W 수익률(`week_returns`)."""
     n_ranked = len(view.ranked)
-    top_n = view.output.top_n
+    top_n, k = view.output.top_n, view.output.max_per_sector
     cands = set(view.candidates)
-    # 업종 지표 재료 — v4 는 지표 긴 표(EP·REV_OP_1M·R1M), scope·v3 는 점수 표 원값
-    # (val_per·op_change_1m·r1m — 지표 긴 표가 0행이라 옛 코드는 세 열이 빈칸, E-10)
+    # 업종 지표 재료 — v4 는 지표 긴 표(EP·REV_OP_1M·R1M·R3M), scope·v3 는 점수 표 원값
+    # (val_per·op_change_1m·r1m·r3m — 지표 긴 표가 0행이라 옛 코드는 세 열이 빈칸, E-10)
     v3 = bool(score_raw_columns(view))
+    week_col = Col("r1w", "1W 수익률\n(%)", "num", "#,##0.0", definition=(
+        "1W 수익률(5세션 전 대비 — 엔진 r1m 과 같은 규칙: fi_prices 행, 수정종가 우선) 시총가중 "
+        "평균"))
     if v3:
         has = set(view.rows[0]) if view.rows else set()
-        lvl_key, rev_key, ret_key = "val_per", "op_change_1m", "r1m"
+        lvl_key, rev_key, ret_key, r3_key = "val_per", "op_change_1m", "r1m", "r3m"
         metric_cols = (
             Col("per_med", "PER 중앙값\n(배)", "num", "#,##0.00",
                 definition="최근 연간 확정 PER(엔진 val_per, 양수만) 중앙값"),
             Col("rev_up", "리비전 상향\n비율(%)", "num", "#,##0.0", definition=(
                 "영업이익 추정 1M 변화(엔진 op_change_1m) > 0 종목 비율(값 있는 종목 중 — 현재값·"
                 "비교값이 없거나 비교값이 0이면 엔진 값이 0 이라 상향이 아니다, v3 규약)")),
-            Col("r1m", "1M 수익률\n(%)", "chg", "#,##0.0",
-                definition="1M 수익률(엔진 r1m × 100) 시총가중 평균"))
+            week_col,
+            Col("r1m", "1M 수익률\n(%)", "num", "#,##0.0",
+                definition="1M 수익률(엔진 r1m × 100) 시총가중 평균"),
+            Col("r3m", "3M 수익률\n(%)", "num", "#,##0.0",
+                definition=("3M 수익률(엔진 r3m — 60세션 전 대비, 수정종가 우선 × 100) "
+                            "시총가중 평균")))
     else:
         has = {k for per in view.ind.values() for k in per}
-        lvl_key, rev_key, ret_key = "EP", "REV_OP_1M", "R1M"
+        lvl_key, rev_key, ret_key, r3_key = "EP", "REV_OP_1M", "R1M", "R3M"
         metric_cols = (
             Col("ep_med", "E/P 중앙값\n(%)", "num", "#,##0.00", definition="후행 E/P(EP) 중앙값"),
             Col("rev_up", "리비전 상향\n비율(%)", "num", "#,##0.0",
                 definition="영업이익 추정 1M 변화(REV_OP_1M) > 0 종목 비율(값 있는 종목 중)"),
-            Col("r1m", "1M 수익률\n(%)", "chg", "#,##0.0",
-                definition="1M 수익률(R1M) 시총가중 평균"))
+            week_col,
+            Col("r1m", "1M 수익률\n(%)", "num", "#,##0.0",
+                definition="1M 수익률(R1M) 시총가중 평균"),
+            Col("r3m", "3M 수익률\n(%)", "num", "#,##0.0",
+                definition="3M 수익률(R3M) 시총가중 평균"))
+    axis_cols = tuple(
+        Col(f"{b}_u", bucket_label(b), "num", "#,##0.00", color=False,
+            definition=f"{bucket_label(b)} 유니버스 z(엔진 버킷 점수)의 업종 평균")
+        if view.z_engine else
+        Col(f"{b}_u", bucket_label(b), "num", "#,##0.0", color=False,
+            definition=f"{bucket_label(b)} 유니버스 백분위의 업종 평균")
+        for b in view.buckets)
     groups = [
         Group("업종", (
             Col("level", "구분", "txt", None, 6.0, definition="대분류 · 중분류(WICS)"),
-            Col("code", "코드", "id", None, 7.0, definition="WICS 코드"),
+            Col("code", "코드", "id", None, fixed=6.2, definition="WICS 코드"),
             Col("sname", "업종명", "id", None, 16.0, item=True, definition="WICS 업종명"),
             Col("parent", "대분류", "id", None, 12.0, definition="중분류의 상위 대분류"))),
         Group("규모", (
             Col("n", "종목 수", "num", "#,##0", definition="주 모델 모집단 종목 수(제외 포함)"),
             Col("n_ranked", "순위\n종목 수", "num", "#,##0", definition="순위가 있는 종목 수"),
-            Col("mcap", "시총 합(억)", "num", "#,##0", definition="모집단 시가총액 합, 억원"),
-            Col("w", "시총 비중(%)", "num", "#,##0.0", definition="모집단 시총 합 대비 비중"))),
-        Group("쏠림(%)", (
-            Col("t30", f"상위 {top_n}\n비중", "num", "#,##0.0",
-                definition=f"순위 ≤ {top_n} 종목 중 이 업종 비중(업종 상한 적용 전)"),
-            Col("t100", "상위 100\n비중", "num", "#,##0.0", definition="순위 ≤ 100 종목 중 비중"),
-            Col("n_cand", "후보 수", "num", "#,##0",
-                definition=f"업종 상한({view.output.max_per_sector}) 적용 후보 {top_n} 중 수"))),
-        Group("종합", (Col("comp_med", "종합 점수\n중앙값", "num", "#,##0.00",
+            Col("mcap", "시총 합\n(억원)", "num", "#,##0", fit_label="시총 합(억)",
+                definition="모집단 시가총액 합, 억원"),
+            Col("w", "시총 비중\n(%)", "num", "#,##0.0", fit_label="시총 비중(%)",
+                definition="모집단 시총 합 대비 비중"))),
+        Group("쏠림", (
+            Col("t30", f"상위 {top_n}\n비중(%)", "num", "#,##0.0", fixed=6.2,
+                definition=f"순위 ≤ {top_n} 종목 중 이 업종 비중(대분류당 {k}종목 규칙 적용 전)"),
+            Col("t100", "상위 100\n비중(%)", "num", "#,##0.0", fixed=6.2,
+                definition="순위 ≤ 100 종목 중 비중"),
+            # 머리 글 = 아래(업종) 표 · Meta 사전. 위(대분류) 표 머리는 '(최대 k)' 를 붙이고 n/k 로
+            Col("n_cand", "후보 수", "num", "#,##0", fixed=6.2, definition=(
+                f"대분류당 최대 {k}종목 규칙을 적용한 후보 {top_n} 중 수 · 대분류 표는 n/{k} 로 "
+                f"표시({k}/{k} = {k}종목이 찬 대분류)")))),
+        Group("종합", (Col("comp_med", "점수\n중앙값", "num", "#,##0.00",
+                           fit_label="종합 점수\n중앙값", core=True,
                            definition="순위 종목 종합 점수 중앙값"),), core=True),
-        Group("축별 평균 z", tuple(
-            Col(f"{b}_u", bucket_label(b), "num", "#,##0.00", color=True, span=Z_SPAN,
-                definition=f"{bucket_label(b)} 유니버스 z(엔진 버킷 점수)의 업종 평균")
-            for b in view.buckets)) if view.z_engine else Group("축별 평균 백분위", tuple(
-            Col(f"{b}_u", bucket_label(b), "pct", "#,##0.0",
-                definition=f"{bucket_label(b)} 유니버스 백분위의 업종 평균")
-            for b in view.buckets)),
+        Group("축별 평균(Z)" if view.z_engine else "축별 평균 백분위", axis_cols),
         Group("업종 지표", metric_cols),
-        Group("상위 종목", (Col("top", "상위 3(순위)", "txt", None, 34.0,
+        Group("상위 종목", (Col("top", "상위 3(순위)", "txt", None, fixed=58.0,
                               definition="업종 안 순위 상위 3 종목 '이름(순위)'"),)),
     ]
     total_cap = sum(_num(view.uni.get(ticker_of(r), {}).get("market_cap")) or 0.0
@@ -880,6 +1123,12 @@ def sheet_sectors(wb: Workbook, view: DayView) -> Dictionary:
                         if (v := _num(view.by_ticker[t].get(key))) is not None}
             return {t: v for t in members
                     if (v := _num(view.ind.get(t, {}).get(key, {}).get("raw"))) is not None}
+
+        def cap_weighted(vals: Mapping[str, float]) -> float | None:
+            """시총가중 평균 × 100(%) — 시총이 없거나 0 인 종목은 뺀다."""
+            got = {t: v for t, v in vals.items() if caps.get(t)}
+            w = sum(caps[t] or 0.0 for t in got)
+            return sum(v * (caps[t] or 0.0) for t, v in got.items()) / w * 100 if w else None
         if lvl_key in has:
             lv = raws(lvl_key)
             med = statistics.median(lv.values()) if lv else None
@@ -890,26 +1139,67 @@ def sheet_sectors(wb: Workbook, view: DayView) -> Dictionary:
         if rev_key in has:
             rv = raws(rev_key)
             out["rev_up"] = sum(1 for v in rv.values() if v > 0) / len(rv) * 100 if rv else None
+        out["r1w"] = cap_weighted({t: week[t] for t in members if t in week})
         if ret_key in has:
-            r1 = {t: v for t, v in raws(ret_key).items() if caps.get(t)}
-            w = sum(caps[t] or 0.0 for t in r1)
-            out["r1m"] = sum(v * (caps[t] or 0.0) for t, v in r1.items()) / w * 100 if w else None
+            out["r1m"] = cap_weighted(raws(ret_key))
+        if r3_key in has:
+            out["r3m"] = cap_weighted(raws(r3_key))
         return out
 
-    rows: list[Row] = []
+    blocks: list[list[Row]] = []
     for level, col in (("대분류", "sector_l1"), ("중분류", "sector_l2")):
         by: dict[str, list[str]] = {}
         for r in view.rows:
             code = r.get(col)
             if code is not None:
                 by.setdefault(str(code), []).append(ticker_of(r))
-        rows += [aggregate(level, code, by[code]) for code in sorted(by)]
-    note = ("주 모델 모집단의 WICS 대분류·중분류 집계. 축 평균은 유니버스 "
-            + ("z(엔진 버킷 점수)" if view.z_engine else "백분위") + " 평균, 1M 수익률은 시총가중.")
-    return write_table(wb, title_for(view, "업종", note), groups, rows, style="sector")
+        blocks.append([aggregate(level, code, by[code]) for code in sorted(by)])
+    first_axis = axis_cols[0].key if axis_cols else None
+    notes_5: list[tuple[str | None, str]] = [(None, "위: 대분류 표 · 아래: 업종(중분류) 표"),
+                                             ("n", f"회색: {SMALL_SECTOR}종목 미만 업종")]
+    if first_axis:
+        notes_5.append((first_axis, "축 평균: 유니버스(Z) 평균" if view.z_engine
+                        else "축 평균: 유니버스 백분위 평균"))
+    notes_5.append(("per_med" if v3 else "ep_med",
+                    f"수익률: 시총가중, {WEEK_SESSIONS}·20·60거래일 전 대비"))
+    sh = write_confirmed(wb, "Sector", band(view, "Sector: 업종별 점수·수익률 집계",
+                                            "정렬: 업종 코드 순", notes_5),
+                         groups, blocks, style="sector", page=Page(fit_height=1))
+    ws = sh.ws
+    (h6a, r0a, r1a), (h6b, r0b, r1b) = sh.blocks
+    for r, text in ((h6a, "대분류(WICS 10)"), (h6b, "업종(WICS 중분류)")):
+        cell = ws.cell(r, 1, text)
+        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=False)
+    m = sh.cols["n_cand"]
+    ws.cell(h6a + 1, m).value = f"후보 수\n(최대 {k})"
+    for r in range(r0a, r1a + 1):
+        ws.cell(r, m).number_format = f'0"/{k}"'
+    # 색 — 아래 표 5종목 미만 업종 축 평균은 회색(먼저 · 멈춤), 축 평균 대분류 ±0.5 · 업종 ±1
+    # (평균은 종목 z 보다 폭이 좁다), 수익률은 표마다 백분위
+    cf = ws.conditional_formatting
+    a0 = sh.letter(axis_cols[0].key) if axis_cols else None
+    a1 = sh.letter(axis_cols[-1].key) if axis_cols else None
+    n_col = sh.letter("n")
+    if a0 and r1b >= r0b:
+        cf.add(f"{a0}{r0b}:{a1}{r1b}", Rule(
+            type="expression", stopIfTrue=True,
+            formula=[f"AND(ISNUMBER(${n_col}{r0b}),${n_col}{r0b}<{SMALL_SECTOR})"],
+            dxf=DifferentialStyle(font=Font(color="FF8C8C8C"),
+                                  fill=PatternFill(bgColor="FFF2F2F2", fill_type="solid"))))
+    for (r0, r1), lim in (((r0a, r1a), 0.5), ((r0b, r1b), 1.0)):
+        if r1 < r0:
+            continue
+        for c in axis_cols:
+            letter = sh.letter(c.key)
+            cf.add(f"{letter}{r0}:{letter}{r1}",
+                   scale_fixed_zero(lim) if view.z_engine else scale_high_good())
+        for key in ("r1w", "r1m", "r3m"):
+            letter = sh.letter(key)
+            cf.add(f"{letter}{r0}:{letter}{r1}", scale_high_good())
+    return sh.dictionary
 
 
-# ── 시트: 모델 비교 ──────────────────────────────────────────────────────────
+# ── 시트: Compare ────────────────────────────────────────────────────────────
 def sheet_models(wb: Workbook, view: DayView) -> Dictionary:
     specs = [view.spec_id, *compared_specs(view)]
     ranks = {view.spec_id: {ticker_of(r): rank_of(r) for r in view.rows}, **view.other_ranks}
@@ -917,11 +1207,12 @@ def sheet_models(wb: Workbook, view: DayView) -> Dictionary:
     groups = [
         Group("종목", id_cols()),
         Group("순위", tuple(Col(f"r:{s}", model_label(s), "rank", "#,##0",
-                              key_col=s == view.spec_id, definition=f"{s} 순위(1 = 최고)")
+                              key_col=s == view.spec_id, core=s == view.spec_id,
+                              definition=f"{s} 순위(1 = 최고)")
                           for s in specs), core=True),
-        Group(f"상위 {top_n}", tuple(Col(f"t:{s}", model_label(s), "txt", None, 8.0,
-                                         definition=f"{s} 순위 ≤ {top_n} 이면 ●")
-                                     for s in specs)),
+        Group(f"상위 {top_n} 포함(●)", tuple(Col(f"t:{s}", model_label(s), "txt", None, 8.0,
+                                                definition=f"{s} 순위 ≤ {top_n} 이면 ●")
+                                            for s in specs)),
         Group("차이", (Col("max_diff", "최대 차이", "num", "#,##0",
                          definition="모델 순위 최댓값 − 최솟값(순위 둘 이상)"),)),
     ]
@@ -938,16 +1229,24 @@ def sheet_models(wb: Workbook, view: DayView) -> Dictionary:
                 got.append(r)
         out["max_diff"] = max(got) - min(got) if len(got) >= 2 else None
         rows.append(out)
-    note = "주 모델 모집단 종목의 모델별 순위(같은 판). 모델마다 유니버스가 달라 빈칸이 있다."
-    if left_out_specs(view):
-        note += f" {hidden_compare_reason()} — 메타 '비교에서 뺀 모델'."
-    return write_table(wb, title_for(view, "모델 비교", note), groups, rows,
-                       sort_key=f"r:{view.spec_id}")
+    notes_5: list[tuple[str | None, str]] = [
+        (None, "빈칸: 그 모델 유니버스 밖"), (f"r:{view.spec_id}", "같은 날 데이터 순위"),
+        (f"t:{view.spec_id}", f"●: 그 모델 상위 {top_n}")]
+    left_out = sorted({model_id_of(s).split("_")[0] for s in left_out_specs(view)})
+    if left_out:
+        notes_5.append(("max_diff", f"{'·'.join(left_out)}: 결함 수정 전까지 뺌"
+                                    "(Meta '비교에서 뺀 모델')"))
+    sh = write_confirmed(wb, "Compare", band(view, "Compare: 모델별 순위 비교",
+                                             f"정렬: {model_id_of(view.spec_id)} 순위 오름차순 ▲",
+                                             notes_5),
+                         groups, [rows], sort_key=f"r:{view.spec_id}", page=Page(portrait=True))
+    return sh.dictionary
 
 
-# ── 시트: 메타 ───────────────────────────────────────────────────────────────
+
+# ── 시트: Meta ───────────────────────────────────────────────────────────────
 def gates_text(g: object) -> str:
-    """판 manifest 의 게이트 요약(dict · list 모두)."""
+    """model 데이터 manifest 의 게이트 요약(dict · list 모두)."""
     if isinstance(g, Mapping):
         items = [(str(k), v) for k, v in g.items()]
     elif isinstance(g, list):
@@ -985,8 +1284,10 @@ def universe_text(view: DayView) -> str:
     return " · ".join(parts)
 
 
-def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) -> list[
-        tuple[str, object]]:
+def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None,
+               cands: Candidates | None = None) -> list[tuple[str, object]]:
+    """Meta 위 표 — 줄 이름 · 값의 '판' 은 '데이터' · '날짜' 로(10-11 사용자: 읽는 사람이
+    판을 모름)."""
     run = view.run
     counts: dict[str, int] = {}
     for r in view.rows:
@@ -996,8 +1297,8 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
     scored = [t for t in view.by_ticker if view.scored(t)]
     miss = {b: sum(1 for t in scored if view.bucket_score(t, b) is None) for b in view.buckets}
     pairs: list[tuple[str, object]] = [("기준일", view.date), ("basis", run.basis)]
-    if run.basis in BASIS_NOTES:                 # 장 마감 직후 판(evening)만 — 아침판은 줄 없음(PR-6)
-        pairs.append(("판 성격", BASIS_NOTES[run.basis]))
+    if run.basis in BASIS_NOTES:     # 장 마감 직후 데이터(evening)만 — 아침은 줄 없음(PR-6)
+        pairs.append(("데이터 성격", BASIS_NOTES[run.basis]))
     pairs += [
         ("주 모델", f"{view.spec_id}({model_label(view.spec_id)})"),
         ("비교 모델", ", ".join(f"{s}({model_label(s)})" for s in compared_specs(view))),
@@ -1006,11 +1307,12 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
     if left_out:
         pairs.append(("비교에서 뺀 모델",
                       ", ".join(f"{s}({model_label(s)})" for s in left_out)
-                      + f" — {hidden_compare_reason()}. 판 계산·저장은 그대로(아래 판 게이트 줄)"))
+                      + f" — {hidden_compare_reason()}. 데이터 계산·저장은 그대로"
+                      "(아래 데이터 검사 줄)"))
     pairs += [
-        ("model 판 id", run.build_id), ("model 생성 시각", run.generated_at),
-        ("factor_inputs 판 id", run.fi_build_id),
-        ("equity 판 id", _builds_text(fi_meta.get("equity_builds")) or "(fi manifest 없음)"),
+        ("model 데이터 id", run.build_id), ("model 생성 시각", run.generated_at),
+        ("factor_inputs 데이터 id", run.fi_build_id),
+        ("equity 데이터 id", _builds_text(fi_meta.get("equity_builds")) or "(fi manifest 없음)"),
         ("유니버스 규칙", universe_text(view)),
         ("종목 수", f"모집단 {len(view.rows)} · 순위 {len(view.ranked)} · "
                    f"제외 {len(view.rows) - len(view.ranked)}"),
@@ -1019,7 +1321,7 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
     ]
     raw_cols = score_raw_columns(view)
     if raw_cols:
-        pairs.append(("점수 원자료 단위", raw_units_text(raw_cols)))
+        pairs.append(("Raw 단위", raw_units_text(raw_cols)))
     if fi is not None:
         fin = [a for rows in fi.fins.values() for r in rows if (a := iso(r.get("available_date")))]
         obs = [o for rows in fi.cons.values() for r in rows
@@ -1036,12 +1338,13 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
                                for b, w in view.spec.buckets.items())),
             ("제외 게이트", " · ".join(f"{g.key} {g.rule} {g.value}" for g in view.spec.gates)
              or "없음"),
-            ("후보 규칙", f"상위 {view.output.top_n} · {view.output.sector_level} 업종당 최대 "
-                      f"{view.output.max_per_sector}"),
+            ("후보 규칙", candidate_rule_text(cands) if cands is not None else
+             f"상위 {view.output.top_n} · {view.output.sector_level} 업종당 최대 "
+             f"{view.output.max_per_sector}"),
         ]
     for sid in sorted(run.specs):
         s = run.specs[sid]
-        pairs.append((f"판 게이트 {sid}",
+        pairs.append((f"데이터 검사 {sid}",
                       f"점수 {s.get('n_scores')} · 순위 {s.get('n_ranked')} · "
                       f"제외 {s.get('n_excluded')} · {gates_text(s.get('gates'))}"))
     excluded = run.meta.get("excluded_specs")
@@ -1049,11 +1352,11 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None) 
         for sid, s in sorted(excluded.items()):
             if isinstance(s, Mapping) and "error" in s:      # 실행 예외로 뺀 비교 모델(D-01)
                 pairs.append((f"제외된 비교 모델 {sid}",
-                              f"실행 오류로 이번 판에서 뺐다 · {s['error']}"))
+                              f"실행 오류로 이번 데이터에서 뺐다 · {s['error']}"))
                 continue
             gates_of = s.get("gates") if isinstance(s, Mapping) else None
             pairs.append((f"제외된 비교 모델 {sid}",
-                          f"게이트 실패로 이번 판에서 뺐다 · {gates_text(gates_of)}"))
+                          f"게이트 실패로 이번 데이터에서 뺐다 · {gates_text(gates_of)}"))
     pairs += [(f"각주 {i}", text) for i, text in enumerate(FOOTNOTES, start=1)]
     return pairs
 
@@ -1084,8 +1387,8 @@ class DailyResult:
     n_rows: int
     n_ranked: int
     sheets: list[str]
-    build_id: str                       # model 판 id — 발송 장부·정정 캡션용(N-25 Q9)
-    generated_at: str                   # model 판 생성 시각(판 JSON generated_at)
+    build_id: str                       # model 데이터 id — 발송 장부·정정 캡션용(N-25 Q9)
+    generated_at: str                   # model 생성 시각(JSON generated_at)
 
 
 def daily_path(out_root: Path, d: str, basis: str) -> Path:
@@ -1117,40 +1420,45 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
             prev_rank = {}
 
     trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root)
+    cands = candidates(view, prev_rank)
 
+    # 시트 순서 = 확정 양식(Score · Sector · Earnings · Compare · Raw · Meta · trend).
+    # Meta 열 사전은 옛 순서(Score · Raw · Earnings · Sector · Compare) 뒤에 Score 후보 두 줄
     wb = new_workbook()
     wb.remove(wb.worksheets[0])
-    dictionary: Dictionary = []
-    dictionary += sheet_scores(wb, view, fi, prev_rank, trend)
-    dictionary += sheet_raw(wb, view, fi)
-    dictionary += sheet_display(wb, view, fi)
-    dictionary += sheet_earnings(wb, view, fi)
-    dictionary += sheet_sectors(wb, view)
-    dictionary += sheet_models(wb, view)
-    pairs = meta_pairs(view, fi_run_meta(fi_root, run.date, basis, run.fi_build_id), fi)
+    score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands)
+    sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
+    earnings_dict = sheet_earnings(wb, view, fi)
+    compare_dict = sheet_models(wb, view)
+    raw_dict = sheet_raw(wb, view, fi)
+    dictionary: Dictionary = [*score_dict, *raw_dict, *earnings_dict, *sector_dict, *compare_dict]
+    pairs = meta_pairs(view, fi_run_meta(fi_root, run.date, basis, run.fi_build_id), fi, cands)
     insert_after(pairs, "model 생성 시각", [
-        ("전일 비교 판", "없음" if prev is None else f"{prev.date} {prev.build_id}"),
-        *((f"{w} 비교 판", f"{trend.base[w]} {FALLBACK_NOTE}" if w in trend.fallback
-           else trend.base[w] or "없음(그 전 판이 없다)") for w in WINDOWS),
-        ("순위 흐름 판", f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"
-                     if trend.dates else "없음")])
-    # 같은 model 판으로 코드만 바뀐 정정판을 파일로 구별한다(E-08)
-    insert_after(pairs, "equity 판 id", [
+        ("전일 비교 데이터", "없음" if prev is None else f"{prev.date} {prev.build_id}"),
+        *((f"{w} 비교 데이터", f"{trend.base[w]} {FALLBACK_NOTE}" if w in trend.fallback
+           else trend.base[w] or "없음(그 전 데이터가 없다)") for w in WINDOWS),
+        ("순위 흐름 날짜", f"{trend.dates[0]} ~ {trend.dates[-1]} · {len(trend.dates)}개"
+                       if trend.dates else "없음")])
+    # 같은 model 데이터로 코드만 바뀐 정정판을 파일로 구별한다(E-08)
+    insert_after(pairs, "equity 데이터 id", [
         ("엑셀 생성 시각", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
         ("코드 rev", deployed_rev())])
-    write_meta(wb, title_for(view, "메타"), pairs, dictionary)
+    write_meta_confirmed(wb, band(view, "Meta: 데이터 정보와 열 사전", None,
+                                  [(None, "위: 데이터 정보 · 아래({hdr}행~): 시트별 열 사전")],
+                                  meta=True),
+                         pairs, dictionary, score_tail)
     tickers = [ticker_of(r) for r in view.rows]
     write_trend_sheet(wb, tickers, trend)
     path = daily_path(out_root, run.date, basis)
     save_atomic(wb, path)
-    score_ws = wb["점수"]
+    score_ws = wb["Score"]
     heads = {str(score_ws.cell(7, c).value): score_ws.cell(7, c).column_letter
              for c in range(1, score_ws.max_column + 1)}
     cols = {w: heads[f"{w}\n흐름"] for w in WINDOWS if f"{w}\n흐름" in heads}
     deltas = {w: {ticker_of(r): trend.delta(w, ticker_of(r), rank_of(r)) for r in view.rows}
               for w in WINDOWS}
-    add_sparklines(path, "점수", spark_groups(tickers, trend, date.fromisoformat(run.date),
-                                              cols, deltas))
+    add_sparklines(path, "Score", spark_groups(tickers, trend, date.fromisoformat(run.date),
+                                               cols, deltas))
     top = [(rank_of(r) or 0, ticker_of(r), view.name(ticker_of(r))) for r in view.ranked[:5]]
     return DailyResult(path, run.date, basis, view.spec_id, top, len(view.rows),
                        len(view.ranked),

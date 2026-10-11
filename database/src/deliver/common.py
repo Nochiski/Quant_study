@@ -29,7 +29,8 @@ def bucket_label(b: str) -> str:
 # (컷오버 트랙 T-1). 시각 근거 N-35(가격 15:35 회차부터 공식 종가 일치 · 정규장 수급 15:40 확정),
 # 컨센서스는 WISE DT = T−1(N-13 근거). 문구가 없는 basis(아침판 morning)는 기존 그대로 둔다.
 BASIS_NOTES: dict[str, str] = {
-    "evening": "장 마감 직후 판(가격 15:35·수급 15:40 정규장 기준) · 컨센서스 기준일 = 직전 거래일"}
+    "evening": ("장 마감 직후 데이터(가격 15:35·수급 15:40 정규장 기준) · "
+                "컨센서스 기준일 = 직전 거래일")}
 
 
 @dataclass(frozen=True)
@@ -102,12 +103,14 @@ def analyst_note(n: object) -> str | None:
     """비고 — 추정기관수(WISE 최근 3개월 투자의견을 낸 증권사 수) 0 · 1~3 · 모름을 표시, 4 이상은 빈칸.
 
     0 은 원천이 밝힌 '최근 3개월 의견 없음'(stage v2.5.0), NULL 은 모름(수집 실패 등) — 둘을 섞지 않는다.
+    표지는 짧게 — 애널 미상 · 의견 0(3M) · 애널 ≤3(확정 샘플 · DECISIONS §7 #6 ⑪, 뜻은 Score 비고
+    머리 메모 범례).
     """
     if n is None:
-        return "애널리스트 수 미상"
+        return "애널 미상"
     if not isinstance(n, int | float) or n > 3:
         return None
-    return "최근 3개월 의견 없음" if n == 0 else "애널리스트 3명 이하"
+    return "의견 0(3M)" if n == 0 else "애널 ≤3"
 
 
 def market_label(m: object) -> str:

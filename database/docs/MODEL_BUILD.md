@@ -125,7 +125,7 @@ data/model/
 | `layer` | `"model"` |
 | `status` | `"ok"` · `"gate_failed"`(latest 에는 ok 만 온다) |
 | `build_id` | 모델 판 id(`m_…`) |
-| `date` · `basis` | 판 기준일 D(ISO) · `morning` |
+| `date` · `basis` | 판 기준일 D(ISO) · `morning`(장 마감 판 `evening` · 주말 보강판 `supplement` — N-45, 판 id `s_`, fi `latest_supplement.json` 을 읽고 MG5 는 보강판끼리만 견준다) |
 | `fi_build_id` | 읽은 factor_inputs 판 id |
 | `generated_at` | UTC(`…Z`) |
 | `specs` | `{spec_id: {n_scores, n_ranked, n_excluded, gates: {MG0…MG5: {status, detail, metrics}}}}` — spec_id 순. ok 판에는 올린 spec 만, gate_failed 판에는 고른 spec 전부(실행 예외 — 엔진 실행·재실행·직전 판 읽기·게이트 평가 — 를 낸 비교 모델은 `{error}` 하나). 엔진 메타(`EngineResult.meta`)는 같은 자리에 얹는다 — scope 의 `adj_jump_masked: {n_tickers, r1m, r3m, r6m, r9m, r12m, std_20d}` = 창 안 제한폭 초과 미해결 수정주가로 비운 종목 수·지표별 칸 수(규칙이 없었으면 값이 섰던 칸만, 0 도 싣는다 — T-9 · H1-4, mb1.6.0). GH1-c 의 '매 모델 빌드 반사실 대조 [차단]'(같은 fi 로 규칙 있음·없음을 돌려 판 공개를 막는 게이트)은 이 PR 범위 밖 — 후속이다 |

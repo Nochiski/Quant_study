@@ -13,6 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
@@ -30,7 +31,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunSummary,
     BacktestStartResponse,
     RunKind,
-    RunStatus,
     TrialLedger,
     TrialLineageAlreadyMergedError,
     TrialPreview,
@@ -256,12 +256,12 @@ async def _backtest_event_stream(
     sequence = after_sequence
     last_frame_at = time.monotonic()
     while True:
-        settled = backtest_runs.state(run_id).status in (
-            RunStatus.COMPLETED,
-            RunStatus.CANCELLED,
-            RunStatus.FAILED,
-        )
-        for event in backtest_runs.events(run_id, after_sequence=sequence):
+        # 두 조회는 SQLite 쓰기와 공유하는 서비스 잠금을 기다릴 수 있다.
+        # 순서를 보존하되 이벤트 루프가 아니라 동기 작업 스레드에서 기다린다.
+        state = await run_in_threadpool(backtest_runs.state, run_id)
+        settled = state.status.is_terminal
+        events = await run_in_threadpool(backtest_runs.events, run_id, after_sequence=sequence)
+        for event in events:
             sequence = event.sequence
             yield sse_frame(sequence=event.sequence, event="progress", data=event)
             last_frame_at = time.monotonic()

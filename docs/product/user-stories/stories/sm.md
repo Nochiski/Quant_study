@@ -369,13 +369,20 @@
 
 - Given 새 실험 화면, Then 탐색할 파라미터·범위·간격·조합 수·검증 방식·창 목록·백테스트 실행 수가 표로 보이고,
   시작 전에 시도 수가 얼마로 바뀌는지 보인다.
-- Given 끝난 실험, When "같은 설정으로 새 실험"을 누르면, Then 같은 탐색 공간과 분할로 새 실험 화면이 채워진다.
+- Given 새 실험 화면, When 탐색 값을 직접 적거나 탐색 파라미터 사이의 조합 제약(예: fast < slow)을 걸면,
+  Then 조건을 만족하는 조합만 남아 조합 수가 줄고, 값을 지우거나 제약을 빼면 정의의 격자로 돌아간다. 탐색을
+  끈 파라미터를 가리키는 제약은 함께 빠진다.
+- Given 끝난 실험, When "같은 설정으로 새 실험"을 누르면, Then 같은 탐색 공간·조합 제약과 분할로 새 실험
+  화면이 채워진다.
 - Given 저장하지 않은 초안, Then 실험을 시작할 수 없고 먼저 저장하라는 안내가 보인다.
 - 비고: V5-01 1/2 가 새 실험 화면(백테스트 결과의 "이 실행으로 실험 만들기", 실험 목록의 "같은 설정으로 새 실험")을
   붙였다. 조합·창·실행 수와 시도 수 변화는 backend 미리 계산 응답이고, 저장하지 않은 기반은 backend 거절
   `experiment.base.unsaved` 를 번역해 보인다(frontend `src/app/__tests__/experiments.test.tsx` — 저장하지 않은
   기반은 백테스트 결과 화면에서 만들 수 없어 셋째 기준은 브라우저 e2e 로 재현하지 않는다). 스토리 e2e 는 V5-01
-  2/2 가 US-SM-15 와 함께 붙였다.
+  2/2 가 US-SM-15 와 함께 붙였다. 값 직접 입력과 조합 제약은 로드맵 M6 Builder 가 붙였다(허용 판정·남는
+  조합이 없는 제약 거절은 backend 미리 계산 `experiment.search.invalid_constraint`·`no_feasible_point`).
+  e2e 전략은 파라미터가 하나라, 원 실험의 제약·선택지 값 프리필은 frontend `experiments.test.tsx` 가,
+  파라미터끼리 비교하는 제약(fast < slow)은 backend `tests/domain/test_experiment_constraints.py` 가 확인한다.
 
 ### US-SM-15 여러 실험을 대기열에 넣고 창을 닫아도 계속 돈다
 

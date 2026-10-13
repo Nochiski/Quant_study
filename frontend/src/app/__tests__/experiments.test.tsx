@@ -487,6 +487,43 @@ describe("experiments", () => {
     expect(created).toEqual(previews.at(-1));
   });
 
+  it("sends explicit search values and a combination constraint", async () => {
+    usePreview();
+    const user = userEvent.setup();
+    mount("/research/experiments/new?run=run-1");
+
+    await screen.findByRole("status", { name: "시작 전 확인" });
+    await user.click(screen.getByRole("checkbox", { name: "탐색: top_n" }));
+    await user.type(screen.getByLabelText("값 직접 입력: top_n"), "10, 20, 30");
+    await user.click(screen.getByRole("button", { name: "제약 추가" }));
+    // 탐색 파라미터가 하나뿐이라 오른쪽은 상수 값으로 시작한다.
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "조합 제약 1: 비교" }),
+      "ge",
+    );
+    await user.type(screen.getByLabelText("조합 제약 1: 값"), "20");
+
+    // 허용 판정은 backend 미리 계산이 하고, 화면은 입력을 그대로 싣는다.
+    await waitFor(() =>
+      expect(previews.at(-1)).toMatchObject({
+        search: { top_n: [10, 20, 30] },
+        constraints: [
+          {
+            left: "top_n",
+            operator: "ge",
+            right_parameter: null,
+            right_value: 20,
+          },
+        ],
+      }),
+    );
+
+    // 탐색을 끄면 그 파라미터를 가리키는 제약도 함께 빠진다.
+    await user.click(screen.getByRole("checkbox", { name: "탐색: top_n" }));
+    await waitFor(() => expect(previews.at(-1)).toMatchObject({ search: {} }));
+    expect(previews.at(-1)).not.toHaveProperty("constraints");
+  });
+
   it("refuses an unsaved base with the translated reason", async () => {
     usePreview(true);
     mount("/research/experiments/new?run=run-inline");
@@ -706,6 +743,69 @@ describe("experiments", () => {
     );
     expect(screen.queryByText("실험 e-late 완료")).not.toBeInTheDocument();
   }, 10_000);
+
+  it("fills a new experiment with the constraints and exact choice values of a finished one", async () => {
+    usePreview();
+    const constraint = {
+      left: "top_n",
+      operator: "ge",
+      right_parameter: null,
+      right_value: 20,
+    };
+    const done = experiment("e-done", "completed");
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () =>
+          HttpResponse.json({
+            ...document,
+            spec: {
+              ...document.spec,
+              parameters: [
+                ...document.spec.parameters,
+                {
+                  parameter_id: "horizon",
+                  kind: "choice",
+                  default: "20d",
+                  choices: ["1d, 5d", "20d"],
+                },
+              ],
+            },
+          }),
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId`, () =>
+        HttpResponse.json({
+          ...done,
+          record: {
+            ...done.record,
+            design: {
+              ...done.record.design,
+              search: {
+                axes: [
+                  { parameter_id: "top_n", values: [10, 20] },
+                  { parameter_id: "horizon", values: ["1d, 5d"] },
+                ],
+                constraints: [constraint],
+              },
+            },
+          },
+        }),
+      ),
+    );
+    mount("/research/experiments/new?from=e-done");
+
+    // 쉼표가 든 선택지도 글자로 쪼개지지 않고 받은 그대로 다시 실린다.
+    await waitFor(() =>
+      expect(previews.at(-1)).toMatchObject({
+        search: { top_n: [10, 20], horizon: ["1d, 5d"] },
+        constraints: [constraint],
+      }),
+    );
+    expect(screen.getByLabelText("조합 제약 1: 값")).toHaveValue("20");
+    expect(
+      screen.getByRole("listbox", { name: "값 직접 입력: horizon" }),
+    ).toHaveValue(["0"]);
+  });
 
   it("fills a new experiment with the search space and split of a finished one", async () => {
     usePreview();

@@ -1,10 +1,11 @@
 import {
+  runEnvironmentApplies,
   runEnvironmentDisplayValue,
   runEnvironmentWireNumber,
   runEnvironmentWireText,
   type RunEnvironmentField,
 } from "../../../entities/backtest";
-import { projectApplicability, type RunEnvironment } from "../../../shared/api";
+import { type RunEnvironment } from "../../../shared/api";
 
 /**
  * 실행 설정(`RunEnvironment`) 패널의 입력 값과 검증(P3-02, spec D6).
@@ -113,17 +114,6 @@ export const runEnvironmentWireRecord = (
  */
 export const DATE_INPUT_MINIMUM = "1900-01-01";
 export const DATE_INPUT_MAXIMUM = "9999-12-31";
-
-/**
- * 칸이 지금 값에서 읽히는가(스키마 `x-applicable-when`, #352). 조건이 없는 칸은 늘 읽힌다. 읽히지 않는 칸은
- * 패널이 끄고 검사하지도 요청에 싣지도 않는다 — 조건 칸 값이 없어 판정할 수 없으면 읽히는 쪽으로 둔다.
- */
-export const runEnvironmentApplies = (
-  field: RunEnvironmentField,
-  values: RunEnvironmentValues,
-): boolean =>
-  field.applicableWhen === null ||
-  projectApplicability(field.applicableWhen, values).applicable !== false;
 
 /** 덜 친 날짜 칸이 없다. */
 const NO_INCOMPLETE: ReadonlySet<string> = new Set();

@@ -1,3 +1,5 @@
+import { RUN_STATUS } from "../../../entities/backtest";
+
 import { useId, useMemo, useRef, useState } from "react";
 
 import {
@@ -18,14 +20,7 @@ import { Link, useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import "./backtest-run-page.css";
 
-const TONE = {
-  queued: "info",
-  running: "info",
-  cancel_requested: "warn",
-  cancelled: "warn",
-  failed: "error",
-  completed: "ok",
-} as const;
+
 
 /**
  * 결과 화면 우측 AI 패널의 열림 상태(결과 설명 spec R1). 페이지의 local UI state다.
@@ -110,7 +105,7 @@ export const BacktestRunPage = () => {
           <h1>{t("page.backtest.title")}</h1>
           <code>{state.run_id}</code>
           <span role="status" aria-label={t("page.backtest.status")}>
-            <Badge tone={TONE[state.status]}>{state.status}</Badge>
+            <Badge tone={RUN_STATUS[state.status].tone}>{state.status}</Badge>
           </span>
           <BacktestRunActions
             runId={runId}

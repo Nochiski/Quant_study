@@ -261,7 +261,8 @@ const ko = {
   "backtest.result.column.quantity": "Qty",
   "backtest.result.column.pnl": "P&L",
   "backtest.result.column.fees": "비용(수수료·세금)",
-  "backtest.result.column.slippage": "Slippage",
+  "backtest.result.environment.notApplied": "미적용",
+  "backtest.result.column.slippage": "슬리피지·충격 비용",
   "backtest.result.manifest": "Manifest · 데이터 경고 · 재현성 정보",
   "backtest.result.manifest.schema": "Schema",
   "backtest.result.manifest.engine": "Engine",
@@ -388,10 +389,10 @@ const ko = {
     "거래하며 낸 수수료 합계입니다.",
   "backtest.metric.total_taxes": "매도 거래세",
   "backtest.metric.total_taxes.description":
-    "주식을 팔 때 낸 증권거래세·농어촌특별세 합계입니다.",
-  "backtest.metric.total_slippage_cost": "슬리피지 비용",
+    "선택한 매도 거래세 방식과 세율로 계산한 세금 합계입니다.",
+  "backtest.metric.total_slippage_cost": "슬리피지·충격 비용",
   "backtest.metric.total_slippage_cost.description":
-    "원하던 가격과 실제 체결 가격의 차이로 잃은 금액입니다.",
+    "선택한 가격 충격 모델에 따라 발생한 고정 슬리피지 또는 변동성·거래 규모 기반 충격 비용입니다.",
   "backtest.metric.total_carry_cost": "대차·신용 비용",
   "backtest.metric.total_carry_cost.description":
     "공매도 대차료와 신용 이자로 낸 금액입니다.",
@@ -1327,7 +1328,7 @@ const ko = {
   "run_environment.field.slippage_bps.description":
     "가격 충격 모델이 고정 bp일 때 체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
   "run_environment.field.impact_coefficient.description":
-    "√ 가격 충격 = 계수 × 20일 변동성 × √(체결 수량 ÷ 20일 평균 거래량)의 계수입니다.",
+    "변동성과 평균 거래 규모를 반영하는 가격 충격의 크기를 조절하는 계수입니다.",
   "run_environment.field.sell_tax_bps.description":
     "매도 거래세를 직접 입력할 때 매도 금액에 붙일 bp입니다.",
   "strategy.operator.unary.negate": "부호 뒤집기",
@@ -2445,6 +2446,7 @@ export const messages = {
     "backtest.result.column.quantity": "Qty",
     "backtest.result.column.pnl": "P&L",
     "backtest.result.column.fees": "Costs (fees + taxes)",
+    "backtest.result.environment.notApplied": "Not applied",
     "backtest.result.column.slippage": "Slippage",
     "backtest.result.manifest": "Manifest · data warnings · reproducibility",
     "backtest.result.manifest.schema": "Schema",
@@ -2568,10 +2570,10 @@ export const messages = {
       "All commissions paid for trading.",
     "backtest.metric.total_taxes": "Sell taxes",
     "backtest.metric.total_taxes.description":
-      "Securities transaction and rural development taxes paid on sales.",
-    "backtest.metric.total_slippage_cost": "Slippage cost",
+      "Taxes calculated using the selected sell-tax mode and rate.",
+    "backtest.metric.total_slippage_cost": "Slippage and impact cost",
     "backtest.metric.total_slippage_cost.description":
-      "Money lost to the gap between the intended and the filled price.",
+      "Fixed slippage or volatility- and trade-size-based impact cost from the selected price impact model.",
     "backtest.metric.total_carry_cost": "Borrow and margin cost",
     "backtest.metric.total_carry_cost.description":
       "Fees paid for borrowing shares and margin interest.",
@@ -3533,7 +3535,7 @@ export const messages = {
     "run_environment.field.slippage_bps.description":
       "Basis points the fill price is assumed to move against the order when the impact model is fixed bp.",
     "run_environment.field.impact_coefficient.description":
-      "Coefficient k of square-root impact = k × 20-day volatility × √(filled shares ÷ 20-day average volume).",
+      "Controls price impact reflecting volatility and average trading size.",
     "run_environment.field.sell_tax_bps.description":
       "Basis points charged on sale proceeds when the sell tax is a custom rate.",
     "strategy.operator.unary.negate": "Negate",

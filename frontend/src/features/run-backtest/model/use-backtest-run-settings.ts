@@ -162,19 +162,27 @@ export type RunSettingsPanelState = {
  */
 export const useBacktestRunSettings = (storageKey: string) => {
   const schema = useRunEnvironmentSchema();
-  const [fields, setFields] = useState<BacktestRunSettingsFields>(
-    DEFAULT_BACKTEST_RUN_SETTINGS,
-  );
+  const [options, setOptions] = useState({
+    key: storageKey,
+    fields: DEFAULT_BACKTEST_RUN_SETTINGS,
+    panel: { open: false, focus: null } as RunSettingsPanelState,
+  });
+  // 화면 전환 시 commit 전에 owner 상태를 초기화한다. 실행 요청과 패널이 다른 전략의 옵션을 읽지 않는다.
+  if (options.key !== storageKey) {
+    setOptions({
+      key: storageKey,
+      fields: DEFAULT_BACKTEST_RUN_SETTINGS,
+      panel: { open: false, focus: null },
+    });
+  }
+  const { fields, panel } = options;
   const [edited, setEdited] = useState<ScopedValues | null>(null);
   // 덜 친 날짜 칸(브라우저 `validity.badInput`). 값은 빈 문자열이라 값 state 로는 표현할 수 없다. 칸 값과
   // 같이 전략별로 묶는다 — 다른 전략으로 옮기면 비운다.
   const [incompleteDates, setIncompleteDates] = useState<ScopedDates | null>(
     null,
   );
-  const [panel, setPanel] = useState<RunSettingsPanelState>({
-    open: false,
-    focus: null,
-  });
+
   const environmentFields = useMemo(
     () =>
       schema.data === undefined
@@ -225,7 +233,11 @@ export const useBacktestRunSettings = (storageKey: string) => {
     <Key extends keyof BacktestRunSettingsFields>(
       field: Key,
       value: BacktestRunSettingsFields[Key],
-    ): void => setFields((current) => ({ ...current, [field]: value })),
+    ): void =>
+      setOptions((current) => ({
+        ...current,
+        fields: { ...current.fields, [field]: value },
+      })),
     [],
   );
   const edit = useCallback(
@@ -281,8 +293,10 @@ export const useBacktestRunSettings = (storageKey: string) => {
   );
   const setPanelOpen = useCallback(
     (open: boolean): void =>
-      setPanel((current) =>
-        current.open === open ? current : { ...current, open },
+      setOptions((current) =>
+        current.panel.open === open
+          ? current
+          : { ...current, panel: { ...current.panel, open } },
       ),
     [],
   );
@@ -294,12 +308,15 @@ export const useBacktestRunSettings = (storageKey: string) => {
   /** 패널을 열고 아직 맞지 않은 첫 칸(없으면 첫 칸)에 초점을 옮긴다. */
   const openPanelAtFirstProblem = useCallback((): void => {
     const target = problems[0]?.target ?? environmentFields[0]?.name;
-    setPanel((current) => ({
-      open: true,
-      focus:
-        target === undefined
-          ? current.focus
-          : { field: target, nonce: (current.focus?.nonce ?? 0) + 1 },
+    setOptions((current) => ({
+      ...current,
+      panel: {
+        open: true,
+        focus:
+          target === undefined
+            ? current.panel.focus
+            : { field: target, nonce: (current.panel.focus?.nonce ?? 0) + 1 },
+      },
     }));
   }, [environmentFields, problems]);
   const blockedReason = result.valid

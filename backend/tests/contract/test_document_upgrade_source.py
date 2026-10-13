@@ -2,7 +2,7 @@
 
 YAML은 ruamel round-trip으로 주석·따옴표·순서를 보존하고, JSON은 원문 들여쓰기로 다시 직렬화한다.
 어느 쪽이든 결과 텍스트를 safe codec으로 다시 읽으면 domain dict 변환과 같은 tree여야 한다.
-체인 끝(현재 버전)이 기본이고, `until` 로 중간 단계에서 멈춘 결과도 golden 으로 고정한다.
+운영 API가 제공하는 체인 끝(현재 버전)의 출력과 주석 보존을 검증한다.
 """
 
 from __future__ import annotations
@@ -39,13 +39,13 @@ def _canonical(document: object) -> str:
     return json.dumps(document, ensure_ascii=False, sort_keys=True)
 
 
-def _expected(source: str, *, until: str | None = None) -> object:
+def _expected(source: str) -> object:
     """dict 경로의 기대 tree. JSON 왕복으로 plain 값만 남긴다."""
-    return json.loads(json.dumps(upgrade_document(load_authoring_yaml(source), until=until).tree))
+    return json.loads(json.dumps(upgrade_document(load_authoring_yaml(source)).tree))
 
 
-def _upgrade(source: str, *, until: str | None = None) -> str:
-    return RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML, until=until)
+def _upgrade(source: str) -> str:
+    return RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
 
 
 def test_commented_yaml_upgrade_matches_the_final_golden_byte_for_byte() -> None:
@@ -65,25 +65,6 @@ def test_commented_yaml_upgrade_matches_the_final_golden_byte_for_byte() -> None
     assert f"  max_name_weight: 0.05{LF}# parameters 위 독립 주석" in upgraded
     assert "# 수수료 bp" not in upgraded and "# 수수료 설명" not in upgraded  # 섹션 안 주석은 함께
     assert CR not in upgraded
-
-
-def test_the_1_0_stage_alone_matches_the_intermediate_golden_byte_for_byte() -> None:
-    """체인 중간 검증: 1.0 → 1.1 단계만 태운 원문은 기존 1.1 golden 그대로다(spec D7 역할 고정)."""
-    upgraded = _upgrade(_read("quality_momentum.v1_0.commented.yaml"), until=V1_1)
-
-    assert upgraded == _read("quality_momentum.v1_1.commented.yaml")
-    assert "# 팩터 목록 (바깥 독립 주석)" in upgraded  # 독립 주석 보존
-    assert "# 수수료 bp" in upgraded and "# 종가" in upgraded  # 남은 줄의 줄끝 주석 보존
-    assert "# 삭제 키" not in upgraded  # 삭제된 줄의 줄끝 주석은 함께 사라진다
-    assert "method 위 독립 주석" not in upgraded  # 삭제 키 위의 독립 주석도 사라진다
-    assert "entry 위 독립 주석" not in upgraded and "주문 방식 설명" not in upgraded
-    # 삭제 키 아래, 남는 키를 설명하는 주석은 자리를 지킨다
-    assert "# score 위 독립 주석" in upgraded
-    assert "# 수수료 설명" in upgraded
-    assert "# 신호 섹션 줄끝 주석" in upgraded  # 섹션 키의 줄끝 주석은 섹션이 남는 한 유지된다
-    assert "# parameters 위 독립 주석" in upgraded  # 최상위 다음 키를 설명하는 주석
-    assert f'schema_version: "{V1_1}"' in upgraded  # 따옴표 보존
-    assert CR not in upgraded  # 줄바꿈은 LF로 통일된다
 
 
 def test_climbing_from_the_intermediate_text_equals_climbing_at_once() -> None:
@@ -160,8 +141,7 @@ def test_a_refilled_section_keeps_its_eol_comment_and_the_next_keys_comment() ->
 def test_emptied_section_keeps_its_eol_comment_and_untouched_sections_keep_theirs() -> None:
     """P1-04 리뷰 P2-002: 이번 변환으로 비어 버린 섹션만 손보고, 섹션 줄끝 주석은 남긴다.
 
-    체인 끝에서는 1.2 단계가 `signal` 을 `normalization` 으로 다시 채우므로, 섹션이 비는 모양은
-    1.0 단계에서 멈춘 중간 결과로 고정한다(이하 비는 섹션 테스트 셋 모두 같다).
+    체인 끝에서 `signal`이 다시 채워져도 기존 주석과 이웃 키 주석은 유지된다.
     """
     source = _read("quality_momentum.v1_0.yaml").replace(
         f"signal:{LF}  method: weighted_sum{LF}",
@@ -170,13 +150,19 @@ def test_emptied_section_keeps_its_eol_comment_and_untouched_sections_keep_their
     source = source.replace(f"parameters: []{LF}", f"parameters: []   # 비어 있음{LF}")
     assert "signal:   # 신호 섹션" in source and "parameters: []   # 비어 있음" in source
 
-    upgraded = _upgrade(source, until=V1_1)
+    upgraded = _upgrade(source)
 
-    assert f"signal: {{}} # 신호 섹션{LF}" in upgraded  # 빈 flow mapping 뒤 원본 토큰 그대로
+    assert (
+        f"signal:   # 신호 섹션{LF}  normalization: none{LF}" in upgraded
+    )  # 다시 채운 블록 앞 원본 토큰 그대로
     assert "# method 위" not in upgraded
     assert "parameters: []   # 비어 있음" in upgraded  # 원래부터 빈 값은 건드리지 않는다
     reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
-    assert reparsed.ok and reparsed.tree is not None and reparsed.tree["signal"] == {}
+    assert (
+        reparsed.ok
+        and reparsed.tree is not None
+        and reparsed.tree["signal"] == {"normalization": "none"}
+    )
 
 
 @pytest.mark.parametrize("eol", ["#", "##", "#####", "# ", "## 이중 해시 # 안쪽", "#-"])
@@ -187,11 +173,15 @@ def test_emptied_section_eol_comment_is_kept_verbatim(eol: str) -> None:
         f"signal:{LF}  method: weighted_sum{LF}", f"signal:  {eol}{LF}  method: weighted_sum{LF}"
     )
 
-    upgraded = _upgrade(source, until=V1_1)
+    upgraded = _upgrade(source)
 
-    assert f"signal: {{}} {eol}{LF}" in upgraded
+    assert f"signal:  {eol}{LF}  normalization: none{LF}" in upgraded
     reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
-    assert reparsed.ok and reparsed.tree is not None and reparsed.tree["signal"] == {}
+    assert (
+        reparsed.ok
+        and reparsed.tree is not None
+        and reparsed.tree["signal"] == {"normalization": "none"}
+    )
 
 
 def test_emptied_section_moves_the_comment_describing_the_next_key() -> None:
@@ -203,12 +193,20 @@ def test_emptied_section_moves_the_comment_describing_the_next_key() -> None:
     )
     assert "# portfolio 설명 (열 0)" in source
 
-    upgraded = _upgrade(source, until=V1_1)
+    upgraded = _upgrade(source)
 
-    assert f"signal: {{}} # 신호 섹션{LF}# portfolio 설명 (열 0){LF}portfolio:{LF}" in upgraded
+    assert (
+        f"signal:   # 신호 섹션{LF}  normalization: none{LF}"
+        f"# portfolio 설명 (열 0){LF}portfolio:{LF}"
+        in upgraded
+    )
     assert "# method 위" not in upgraded
     reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
-    assert reparsed.ok and reparsed.tree is not None and reparsed.tree["signal"] == {}
+    assert (
+        reparsed.ok
+        and reparsed.tree is not None
+        and reparsed.tree["signal"] == {"normalization": "none"}
+    )
 
 
 def test_periods_removed_from_an_alias_node_keeps_the_comment_below_it() -> None:
@@ -324,11 +322,10 @@ def test_json_upgrade_keeps_indent_width_and_trailing_newline(indent: int, trail
 
 
 @pytest.mark.parametrize("first", ["signal", "execution"])
-def test_adjacent_emptied_sections_keep_the_comment_between_them_deterministically(
+def test_adjacent_removed_and_refilled_sections_keep_surviving_comments(
     first: str,
 ) -> None:
-    """P1-04 3차 검토 P1-004: 인접한 두 섹션이 함께 비어도 처리 순서와 무관하게 사이 주석이
-    남는다."""
+    """인접한 섹션의 삭제와 재채움은 살아남는 다음 키의 주석을 덮어쓰지 않는다."""
     second = "execution" if first == "signal" else "signal"
     first_block = (
         f"{first}:{LF}  method: weighted_sum{LF}"
@@ -350,15 +347,16 @@ def test_adjacent_emptied_sections_keep_the_comment_between_them_deterministical
     )
     assert f"# {second} 설명" in source
 
-    outputs = {_upgrade(source, until=V1_1) for _ in range(3)}
+    outputs = {_upgrade(source) for _ in range(3)}
 
     assert len(outputs) == 1
     upgraded = outputs.pop()
-    assert (
-        f"{first}: {{}}{LF}# {second} 설명 — 살아남는 키를 설명한다{LF}{second}: {{}}{LF}"
-        in upgraded
-    )
+    assert "execution:" not in upgraded
+    assert "normalization: none" in upgraded
+    if second == "signal":
+        assert "# signal 설명" in upgraded
     assert f"# parameters 설명{LF}parameters: []{LF}" in upgraded
     reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
     assert reparsed.ok and reparsed.tree is not None
-    assert reparsed.tree[first] == {} and reparsed.tree[second] == {}
+    assert reparsed.tree["signal"] == {"normalization": "none"}
+    assert "execution" not in reparsed.tree

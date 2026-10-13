@@ -9,7 +9,6 @@ from strategy_workbench.domain.strategy._hydrate import (
 )
 from strategy_workbench.domain.strategy._promotion import (
     PROMOTION_NODE_PREFIX,
-    promotion_node_ids,
 )
 from strategy_workbench.domain.strategy._source import (
     SourceFormat,
@@ -55,7 +54,6 @@ __all__ = [
     "hydrate_strategy_document",
     "is_frozen_schema_version",
     "legacy_shape_hints",
-    "promotion_node_ids",
     "source_hash_of",
     "json_pointer_token",
     "upgrade_document",

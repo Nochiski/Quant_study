@@ -605,4 +605,28 @@ describe("ContractInspector UI", () => {
     expect(valueOf("값 타입")).toBe("가격");
     expect(valueOf("셀 상태")).toBe("관측값, 결측");
   });
+  it("keeps ledger percent metadata distinct from fractional ratios", () => {
+    const tree = structuredClone(TREE);
+    tree.factors[0].graph.nodes[0].field_id = "flow.foreign_ownership";
+    const field = {
+      ...EQUITY_CATALOG.fields[0],
+      field_id: "flow.foreign_ownership",
+      label: "외국인 보유비중",
+      unit: "pct",
+      value_type: "ratio" as const,
+      description: "52.79는 52.79%이며 비율로 쓰려면 100으로 나눕니다.",
+      recommended_lag_sessions: 1,
+    };
+    render(
+      <ContractInspector
+        source={source({ equityCatalog: { ...EQUITY_CATALOG, fields: [field] } })}
+        selectedPointer="/factors/0/graph/nodes/0/field_id"
+        tree={tree}
+        stale={false}
+      />,
+    );
+    expect(screen.getByText("단위", { selector: "dt" }).nextElementSibling?.textContent).toBe("pct");
+    expect(screen.getByText(field.description)).toBeInTheDocument();
+  });
+
 });

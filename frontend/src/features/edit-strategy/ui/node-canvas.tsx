@@ -12,14 +12,18 @@ import {
   CANVAS_WIDTH,
   CanvasLayout,
   canvasHeight,
+  fallbackPoint,
   type Point,
 } from "../model/canvas-layout";
 import type { CanvasProjection } from "../model/canvas-projection";
 import type { DocumentDiagnostic } from "../model/document-state";
+import type { CanvasMetadata } from "../model/canvas-metadata";
+import { CanvasNodeInfo } from "./canvas-node-info";
 import "./node-canvas.css";
 
 type Props = {
   graph: CanvasProjection;
+  metadata?: ReadonlyMap<string, CanvasMetadata>;
   documentKey: unknown;
   sourceVersion: number;
   factorIndex: number;
@@ -33,6 +37,7 @@ type Props = {
   onInspect: (pointer: string) => void;
   onRemove: (pointer: string, label: string) => void;
   onCopy: (pointer: string) => void;
+  onOpenSource?: (pointer: string) => void;
   onConnect: (from: string, to: string, input: string) => void;
 };
 
@@ -152,10 +157,7 @@ export const NodeCanvas = (props: Props) => {
       });
   };
   const position = (key: string, index: number) =>
-    snapshot.positions.get(key) ?? {
-      x: 24 + (index % 3) * 300,
-      y: 24 + Math.floor(index / 3) * 240,
-    };
+    snapshot.positions.get(key) ?? fallbackPoint(graph, index);
   const width = Math.max(
     320,
     ...graph.nodes.map(
@@ -278,9 +280,16 @@ export const NodeCanvas = (props: Props) => {
                 diagnostic.pointer === node.pointer ||
                 diagnostic.pointer.startsWith(node.pointer + "/"),
             );
+            const metadata = props.metadata?.get(node.key);
+            const extraIssues =
+              metadata?.node.issues.filter(
+                (issue) => !notes.some((note) => note.code === issue.code),
+              ) ?? [];
+            const issueCount = notes.length + extraIssues.length;
             return (
               <div
                 key={node.key}
+                data-node-id={node.nodeId ?? undefined}
                 className="node-canvas__node"
                 style={{
                   left: point.x,
@@ -436,7 +445,29 @@ export const NodeCanvas = (props: Props) => {
                     {t("graph.canvas.output")}
                   </button>
                 </div>
+                {props.metadata?.get(node.key) ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 100 + Math.max(1, node.inputs.length) * 28,
+                      left: 8,
+                      right: 8,
+                      maxHeight: 80,
+                      overflow: "auto",
+                    }}
+                  >
+                    <CanvasNodeInfo metadata={props.metadata.get(node.key)!} />
+                  </div>
+                ) : null}
                 <div className="node-canvas__actions">
+                  {props.onOpenSource ? (
+                    <Button
+                      size="small"
+                      onClick={() => props.onOpenSource?.(node.pointer)}
+                    >
+                      {t("graph.openSource")}
+                    </Button>
+                  ) : null}
                   <Button
                     size="small"
                     disabled={busy || !node.connectable}
@@ -455,7 +486,7 @@ export const NodeCanvas = (props: Props) => {
                     {t("graph.removeNode")}
                   </Button>
                 </div>
-                {notes.length > 0 ? (
+                {issueCount > 0 ? (
                   <button
                     type="button"
                     className="node-canvas__issues"
@@ -463,7 +494,7 @@ export const NodeCanvas = (props: Props) => {
                   >
                     {t("graph.canvas.issues").replace(
                       "{count}",
-                      String(notes.length),
+                      String(issueCount),
                     )}
                   </button>
                 ) : null}

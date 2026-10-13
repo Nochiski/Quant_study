@@ -88,16 +88,6 @@
   font-size: var(--text-size-small);
 }
 
-.factor-graph__canvas {
-  min-width: 0;
-  padding: var(--space-4);
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-large);
-  background: color-mix(in srgb, var(--surface-canvas) 88%, transparent);
-}
-
-.factor-graph__canvas:focus-visible,
 .factor-graph button:focus-visible,
 .factor-graph select:focus-visible,
 .factor-graph__state button:focus-visible {
@@ -105,132 +95,6 @@
   outline-offset: 2px;
 }
 
-.factor-graph__canvas > ol {
-  display: grid;
-  grid-auto-columns: minmax(250px, 1fr);
-  grid-auto-flow: column;
-  gap: var(--space-4);
-  min-width: max-content;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.factor-graph__unplanned {
-  display: grid;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  overflow-x: auto;
-  border: 1px solid var(--status-warn);
-  border-radius: var(--radius-large);
-  background: color-mix(
-    in srgb,
-    var(--status-warn-soft) 55%,
-    var(--surface-canvas)
-  );
-}
-
-.factor-graph__unplanned > header {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.factor-graph__unplanned > header span {
-  max-width: 78ch;
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-}
-
-.factor-graph__unplanned > ol {
-  display: grid;
-  grid-auto-columns: minmax(250px, 1fr);
-  grid-auto-flow: column;
-  gap: var(--space-4);
-  min-width: max-content;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.factor-graph__node[data-planned="false"] {
-  border-color: var(--status-warn);
-  box-shadow: none;
-}
-
-.factor-graph__node {
-  position: relative;
-  display: grid;
-  grid-template-rows: auto auto 1fr auto auto;
-  gap: var(--space-3);
-  width: 250px;
-  min-height: 270px;
-  padding: var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-large);
-  background: var(--surface-panel);
-  box-shadow: var(--shadow-panel);
-}
-
-.factor-graph__node[data-selected="true"] {
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 2px var(--accent-soft),
-    var(--shadow-panel);
-}
-
-.factor-graph__node--conditional {
-  border-style: double;
-  border-width: 3px;
-}
-
-.factor-graph__node > header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  align-items: start;
-}
-
-.factor-graph__sequence {
-  color: var(--text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--text-size-small);
-}
-
-.factor-graph__node-select {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.factor-graph__node-select strong,
-.factor-graph__node-select code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.factor-graph__node-select code {
-  color: var(--accent);
-  font-size: var(--text-size-small);
-}
-
-.factor-graph__inputs > span,
-.factor-graph__root {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.factor-graph__inputs ul,
-.factor-graph__node-issues,
 .factor-graph__diagnostics {
   display: grid;
   gap: var(--space-2);
@@ -239,82 +103,12 @@
   list-style: none;
 }
 
-.factor-graph__inputs li {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  align-items: center;
-}
-
-.factor-graph__edge {
-  color: var(--accent);
-}
-
-.factor-graph__inputs button {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-  padding: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface-raised);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.factor-graph__inputs button:disabled {
-  cursor: not-allowed;
-}
-
-.factor-graph__inputs button > span,
-.factor-graph__inputs small {
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-}
-
-.factor-graph__details {
-  display: grid;
-  gap: var(--space-1);
-  align-content: start;
-  margin: 0;
-}
-
-.factor-graph__details div {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.factor-graph__details dt {
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-}
-
-.factor-graph__details dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: var(--text-size-small);
-  text-align: right;
-}
-
-.factor-graph__node > footer {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--border);
-}
-
 .factor-graph__contract {
   display: grid;
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
 
-.factor-graph__node > footer button,
 .factor-graph__state button,
 .factor-graph__diagnostics button {
   padding: var(--space-1) var(--space-2);
@@ -327,7 +121,6 @@
   cursor: pointer;
 }
 
-.factor-graph__node-issues li,
 .factor-graph__diagnostics li {
   display: flex;
   flex-wrap: wrap;
@@ -335,11 +128,6 @@
   align-items: center;
   color: var(--text-muted);
   font-size: var(--text-size-small);
-}
-
-.factor-graph__node-issues {
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--status-error);
 }
 
 .factor-graph__diagnostics {
@@ -420,71 +208,22 @@
   word-break: break-all;
 }
 
-/*
-  카드 **사이** 간격(12px)은 카드 **안** 줄 간격(4px)보다 넓다. 진단 본문은 자기 카드의 둘째
-  줄이므로 근접성이 곧 소유권을 말한다 — 두 간격이 뒤집혀 있으면(예전: 카드 안 8px, 카드 사이
-  4px) 마지막이 아닌 노드의 오류 문장이 **아래** 노드 것으로 읽혔다. 진단 문장에는 node_id가
-  없어서(`window는 1 이상이고 …`) 문장만으로는 주인을 알 수 없다(P1-04 3차 리뷰 차단).
-  계약은 e2e가 boundingBox 거리 비교로 고정한다(되돌리면 9.5 > 4로 실패하는 것을 확인했다).
-*/
-.factor-graph__editor-nodes {
-  display: grid;
-  gap: var(--space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.factor-graph__editor-nodes li {
-  display: flex;
-  flex-wrap: wrap;
-  /* 행 간격은 좁게(자기 카드 안), 열 간격은 버튼 사이라 그대로. */
-  gap: var(--space-1) var(--space-2);
-  align-items: center;
-}
-
-/*
-  노드 카드의 진단 본문은 이름 버튼·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다.
-  `flex-wrap` 없이 두면 긴 한글 오류 문장이 버튼 옆 남은 폭으로 밀려 들어가 여러 줄로 접히고 행
-  높이가 튀며 이름 버튼이 눌렸다(P1-04 2차 리뷰 차단). 계약은 e2e가 boundingBox로 고정한다.
-*/
-.factor-graph__editor-nodes li > .strategy-form__diagnostics {
-  flex-basis: 100%;
-  /* 노드 이름과 같은 들여쓰기로 둬서 어느 카드의 문장인지 읽힌다. */
-  padding-left: var(--space-2);
-}
-
-.factor-graph__editor-nodes li[aria-current="true"] .factor-graph__editor-node {
-  border-color: var(--accent);
-}
-
-.factor-graph__editor-node {
-  display: flex;
-  flex: 1;
-  gap: var(--space-2);
-  align-items: baseline;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface-panel);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-/* 노드 종류는 이름이 주고 `kind` 키는 보조 `<code>`다(P1-03). */
-.factor-graph__node-kind {
-  color: var(--text-muted);
-}
-
-.factor-graph__editor-node code {
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-}
-
 .factor-graph__editor-state {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-size-small);
+}
+
+.factor-graph__plan-table {
+  overflow: auto;
+}
+.factor-graph__plan-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.factor-graph__plan-table td,
+.factor-graph__plan-table th {
+  padding: var(--space-2);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
 }

@@ -33,6 +33,8 @@ import { FormFieldsEditor, type FormCatalogs } from "./strategy-form-panel";
 import { OperatorPalette } from "./operator-palette";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import { canvasProjection, copyCanvasNode } from "../model/canvas-projection";
+import { canvasMetadata } from "../model/canvas-metadata";
+import type { GraphFactorProjection } from "../model/factor-graph-projection";
 import { NodeCanvas } from "./node-canvas";
 
 /** 삭제 거부 안내의 참조 pointer가 이 팩터의 몇 번째 노드를 가리키는가. 그래프 출력이면 매치가 없다. */
@@ -40,6 +42,7 @@ const NODE_INDEX = /\/graph\/nodes\/(\d+)(?:\/|$)/u;
 
 type FactorGraphEditorProps = {
   tree: unknown;
+  backendFactor?: GraphFactorProjection;
   documentKey?: unknown;
   sourceVersion?: number;
   active?: boolean;
@@ -71,6 +74,7 @@ type FactorGraphEditorProps = {
  */
 export const FactorGraphEditor = ({
   tree,
+  backendFactor,
   documentKey,
   sourceVersion = 0,
   active = false,
@@ -190,6 +194,23 @@ export const FactorGraphEditor = ({
     return labelOf(Number(index)) ?? pointer;
   };
   const nodePointer = selectedNodePointer(selectedPointer, factorPointer);
+  const selectedCanvasNode = canvas.nodes.find(
+    (node) => node.pointer === nodePointer,
+  );
+  const selectedMetadata =
+    selectedCanvasNode === undefined
+      ? undefined
+      : canvasMetadata(canvas, backendFactor).get(selectedCanvasNode.key);
+  const extraIssues =
+    selectedMetadata?.node.issues.filter(
+      (issue) =>
+        !diagnostics.some(
+          (note) =>
+            note.code === issue.code &&
+            (note.pointer === nodePointer ||
+              note.pointer.startsWith(`${nodePointer}/`)),
+        ),
+    ) ?? [];
   const selectedItem =
     nodePointer === null
       ? undefined
@@ -365,6 +386,7 @@ export const FactorGraphEditor = ({
         ) : (
           <NodeCanvas
             graph={canvas}
+            metadata={canvasMetadata(canvas, backendFactor)}
             documentKey={documentKey}
             sourceVersion={sourceVersion}
             factorIndex={factorIndex}
@@ -375,6 +397,7 @@ export const FactorGraphEditor = ({
             selectedPointer={nodePointer}
             diagnostics={diagnostics}
             onSelect={onSelectPointer}
+            onOpenSource={onOpenSource}
             onInspect={(pointer) => {
               onSelectPointer(pointer);
               setInspectRequest((request) => request + 1);
@@ -488,6 +511,13 @@ export const FactorGraphEditor = ({
             />
           </>
         )}
+        {extraIssues.length > 0 ? (
+          <ul className="strategy-form__diagnostics">
+            {extraIssues.map((issue, index) => (
+              <li key={`${issue.code}:${index}`}>{issue.message}</li>
+            ))}
+          </ul>
+        ) : null}
         {selectedItem !== undefined ? (
           <>
             <Button

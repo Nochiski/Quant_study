@@ -7,14 +7,12 @@ import {
   projectFactorGraphs,
   type FactorGraphProjection,
   type GraphFactorProjection,
-  type GraphNodeProjection,
 } from "../model/factor-graph-projection";
 import type { OperatorCatalogState } from "../model/operator-palette";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   factorGraphPointer,
   factorIndexAtPointer,
-  pointerSelectsNode,
   type ExecutionPlansState,
 } from "../model/use-execution-plans";
 import { useRevealSelection } from "../model/use-reveal-selection";
@@ -22,6 +20,7 @@ import type { SourceTransactions } from "../model/use-source-transactions";
 import { authoredFactors } from "../model/graph-transactions";
 import { FactorGraphEditor } from "./factor-graph-editor";
 import type { FormCatalogs } from "./strategy-form-panel";
+import { GraphPlanTable } from "./graph-plan-table";
 import "./factor-graph-panel.css";
 
 /** 편집 입력(P5-02). 없으면 읽기 전용 투영만 그린다(테스트·backend plan 뷰어). */
@@ -176,143 +175,6 @@ const FactorSummary = ({
   </dl>
 );
 
-const GraphNode = ({
-  node,
-  selectedPointer,
-  onSelectPointer,
-  onOpenSource,
-}: {
-  node: GraphNodeProjection;
-  selectedPointer?: string;
-  onSelectPointer: (pointer: string) => void;
-  onOpenSource: (pointer: string) => void;
-}) => {
-  // compile 이 붙인 출력 노드는 사용자가 이름을 지은 적이 없어 사람 말로 부른다(BACKLOG-014).
-  const booleanScore = node.origin === "boolean-score";
-  // 붙인 출력의 pointer 는 원래 출력 줄이라 선택 강조는 원래 출력 카드 하나가 받는다(리뷰 #232).
-  const selected =
-    !booleanScore &&
-    node.pointer !== null &&
-    pointerSelectsNode(selectedPointer, node.pointer);
-  const name = booleanScore ? t("plan.node.booleanScore") : node.nodeId;
-  return (
-    <li
-      className={`factor-graph__node factor-graph__node--${node.kind}`}
-      aria-current={selected ? "true" : undefined}
-      data-selected={selected || undefined}
-      data-node-id={node.nodeId}
-      data-planned={node.planned}
-    >
-      <header>
-        <span className="factor-graph__sequence">
-          {node.sequence === null
-            ? "—"
-            : String(node.sequence).padStart(2, "0")}
-        </span>
-        <button
-          type="button"
-          className="factor-graph__node-select"
-          disabled={node.pointer === null}
-          onClick={() => node.pointer !== null && onSelectPointer(node.pointer)}
-          aria-label={t("graph.selectNode").replace("{node}", name)}
-        >
-          <strong>{name}</strong>
-          {booleanScore ? (
-            <span>{t("plan.node.booleanScore.description")}</span>
-          ) : (
-            <code>{node.operation}</code>
-          )}
-        </button>
-        {node.isOutput ? (
-          <Badge tone="accent">{t("graph.outputReference")}</Badge>
-        ) : null}
-        {!node.planned ? (
-          <Badge tone="warn">{t("graph.notExecuted")}</Badge>
-        ) : null}
-      </header>
-
-      {node.inputs.length > 0 ? (
-        <div className="factor-graph__inputs">
-          <span>{t("graph.incoming")}</span>
-          <ul>
-            {node.inputs.map((input, index) => (
-              <li key={`${input.role}:${input.nodeId}:${index}`}>
-                <span className="factor-graph__edge" aria-hidden="true">
-                  →
-                </span>
-                <button
-                  type="button"
-                  disabled={input.pointer === null}
-                  onClick={() =>
-                    input.pointer !== null && onSelectPointer(input.pointer)
-                  }
-                  aria-label={t("graph.selectInput")
-                    .replace("{role}", input.role)
-                    .replace("{node}", input.nodeId)}
-                >
-                  <span>{input.role}</span>
-                  <code>{input.nodeId}</code>
-                  <small>
-                    {input.outputType ?? "—"} · {input.outputUnit ?? "—"}
-                  </small>
-                </button>
-                {input.pointer === null ? (
-                  <Badge tone="error">{t("graph.missingInput")}</Badge>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <p className="factor-graph__root">{t("graph.sourceNode")}</p>
-      )}
-
-      {node.details.length > 0 ? (
-        <dl className="factor-graph__details">
-          {node.details.map((detail) => (
-            <div key={detail.label}>
-              <dt>{detail.label}</dt>
-              <dd>
-                <code>{detail.value}</code>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-
-      <footer>
-        <div className="factor-graph__contract">
-          <code>{node.outputType ?? "—"}</code>
-          <span>{node.outputUnit ?? "—"}</span>
-          <span>
-            H {node.minimumHistorySessions ?? "—"} {t("plan.sessions")}
-          </span>
-        </div>
-        <button
-          type="button"
-          disabled={node.pointer === null}
-          onClick={() => node.pointer !== null && onOpenSource(node.pointer)}
-        >
-          {t("graph.openSource")}
-        </button>
-      </footer>
-
-      {node.issues.length > 0 ? (
-        <ul className="factor-graph__node-issues">
-          {node.issues.map((issue, index) => (
-            <li key={`${issue.code}:${issue.path}:${index}`}>
-              <Badge tone={issue.severity === "warning" ? "warn" : "error"}>
-                {issue.code}
-              </Badge>
-              <span>{issue.message}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  );
-};
-
 export const FactorGraphPanel = ({
   state,
   schema,
@@ -354,6 +216,7 @@ export const FactorGraphPanel = ({
     held !== null;
   const projection = recomputing ? held.projection : projected;
   const routeFactor = factorIndexAtPointer(selectedPointer);
+  const authored = editing === undefined ? [] : authoredFactors(editing.tree);
   // 편집 표면은 backend plan이 없어도(빈 그래프·compile error·대기) 문서의 팩터로 그린다(Phase 4 감사 R4).
   const editor = (factorCount: number, factorSelect: boolean) => {
     if (editing === undefined || schema === null) return null;
@@ -366,6 +229,18 @@ export const FactorGraphPanel = ({
     return (
       <FactorGraphEditor
         tree={editing.tree}
+        backendFactor={
+          projected.status === "ready" &&
+          !recomputing &&
+          authored.filter((item) => item.factorId === authored[index]?.factorId)
+            .length === 1
+            ? projected.factors.find(
+                (item) =>
+                  item.factorIndex === index &&
+                  item.factorId === authored[index]?.factorId,
+              )
+            : undefined
+        }
         documentKey={editing.documentKey}
         sourceVersion={editing.sourceVersion}
         active={editing.active}
@@ -384,7 +259,6 @@ export const FactorGraphPanel = ({
     );
   };
   if (projection.status !== "ready" || projection.factors.length === 0) {
-    const authored = editing === undefined ? [] : authoredFactors(editing.tree);
     return (
       <>
         <GraphState
@@ -399,18 +273,24 @@ export const FactorGraphPanel = ({
     );
   }
 
+  const factorCount =
+    editing === undefined ? projection.factors.length : authored.length;
   const activeIndex =
-    routeFactor !== null && routeFactor < projection.factors.length
+    routeFactor !== null && routeFactor < factorCount
       ? routeFactor
-      : chosenFactor < projection.factors.length
+      : chosenFactor < factorCount
         ? chosenFactor
         : 0;
-  const factor = projection.factors[activeIndex];
+  const factor =
+    editing === undefined
+      ? projection.factors[activeIndex]
+      : projection.factors.find(
+          (item) => item.factorId === authored[activeIndex]?.factorId,
+        );
+  if (factor === undefined) return <>{editor(authored.length, true)}</>;
   const graphLevelIssues = factor.issues.filter(
     (issue) => issue.node_id === null,
   );
-  const plannedNodes = factor.nodes.filter((node) => node.planned);
-  const unplannedNodes = factor.nodes.filter((node) => !node.planned);
 
   return (
     <section
@@ -440,11 +320,15 @@ export const FactorGraphPanel = ({
               onSelectPointer(factorGraphPointer(next));
             }}
           >
-            {projection.factors.map((item, index) => (
-              <option value={index} key={`${item.factorId}:${index}`}>
-                {item.label} · {item.factorId}
-              </option>
-            ))}
+            {(editing === undefined ? projection.factors : authored).map(
+              (item, index) => (
+                <option value={index} key={`${item.factorId}:${index}`}>
+                  {item.label
+                    ? `${item.label} · ${item.factorId}`
+                    : item.factorId}
+                </option>
+              ),
+            )}
           </select>
         </label>
       </header>
@@ -468,46 +352,16 @@ export const FactorGraphPanel = ({
         </ul>
       ) : null}
 
-      {plannedNodes.length > 0 ? (
-        <div className="factor-graph__canvas" tabIndex={0}>
-          <ol aria-label={t("graph.dag")}>
-            {plannedNodes.map((node) => (
-              <GraphNode
-                key={`${node.sequence}:${node.nodeId}`}
-                node={node}
-                selectedPointer={selectedPointer}
-                onSelectPointer={onSelectPointer}
-                onOpenSource={onOpenSource}
-              />
-            ))}
-          </ol>
-        </div>
+      {editing === undefined ? (
+        <GraphPlanTable
+          factor={factor}
+          selectedPointer={selectedPointer}
+          onSelectPointer={onSelectPointer}
+          onOpenSource={onOpenSource}
+        />
       ) : null}
 
-      {unplannedNodes.length > 0 ? (
-        <section
-          className="factor-graph__unplanned"
-          aria-label={t("graph.unplannedTitle")}
-        >
-          <header>
-            <strong>{t("graph.unplannedTitle")}</strong>
-            <span>{t("graph.unplannedDescription")}</span>
-          </header>
-          <ol aria-label={t("graph.unplannedTitle")}>
-            {unplannedNodes.map((node) => (
-              <GraphNode
-                key={`unplanned:${node.nodeId}`}
-                node={node}
-                selectedPointer={selectedPointer}
-                onSelectPointer={onSelectPointer}
-                onOpenSource={onOpenSource}
-              />
-            ))}
-          </ol>
-        </section>
-      ) : null}
-
-      {editor(projection.factors.length, false)}
+      {editor(authored.length, false)}
     </section>
   );
 };

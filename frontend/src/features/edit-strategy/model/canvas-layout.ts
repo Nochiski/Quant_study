@@ -3,8 +3,22 @@ import type { ElkNode } from "elkjs/lib/elk-api";
 import type { CanvasProjection } from "./canvas-projection";
 
 export const CANVAS_WIDTH = 240;
-export const canvasHeight = (inputs: number) => 112 + Math.max(1, inputs) * 28;
+export const canvasHeight = (inputs: number) => 268 + Math.max(1, inputs) * 28;
 export type Point = { x: number; y: number };
+export const fallbackPoint = (
+  graph: CanvasProjection,
+  index: number,
+): Point => ({
+  x: 24 + (index % 3) * 300,
+  y:
+    24 +
+    Math.floor(index / 3) *
+      (Math.max(
+        240,
+        ...graph.nodes.map((node) => canvasHeight(node.inputs.length)),
+      ) +
+        36),
+});
 export type LayoutSnapshot = {
   positions: ReadonlyMap<string, Point>;
   status: "idle" | "loading" | "ready" | "error";
@@ -111,10 +125,7 @@ export class CanvasLayout {
         node.key,
         (node.connectable
           ? this.snapshot.positions.get(node.key)
-          : undefined) ?? {
-          x: 24 + (i % 3) * 300,
-          y: 24 + Math.floor(i / 3) * 240,
-        },
+          : undefined) ?? fallbackPoint(graph, i),
       ]),
     );
     const needsLayout =

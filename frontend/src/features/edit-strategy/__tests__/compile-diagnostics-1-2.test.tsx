@@ -23,7 +23,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import type { SourceDiagnostic } from "../../../shared/api";
 import { useCompileDocument } from "../model/use-compile-document";
-import { useDiagnosticNavigation } from "../model/use-diagnostic-navigation";
+import { useDiagnosticNavigation } from "./editor-harness";
 import { useStrategyDocument } from "../model/use-strategy-document";
 import { DiagnosticsPanel } from "../ui/diagnostics-panel";
 import { SourceEditor } from "../ui/source-editor";

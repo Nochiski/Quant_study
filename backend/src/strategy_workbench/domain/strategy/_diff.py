@@ -21,6 +21,7 @@ from typing import Any
 from ._canonical import canonical_strategy_json
 from ._models import StrategySpec
 from ._promotion import demote_boolean_factor_outputs
+from ._source import json_pointer_token
 
 
 class DiffKind(StrEnum):
@@ -55,7 +56,7 @@ def diff_strategy_specs(base: StrategySpec, target: StrategySpec) -> tuple[DiffE
 def _walk(before: Any, after: Any, pointer: str, entries: list[DiffEntry]) -> None:
     if isinstance(before, dict) and isinstance(after, dict):
         for key in sorted(set(before) | set(after)):
-            child = f"{pointer}/{_escape(key)}"
+            child = f"{pointer}/{json_pointer_token(key)}"
             if key not in before:
                 entries.append(DiffEntry(child, DiffKind.ADDED, None, after[key]))
             elif key not in after:
@@ -75,7 +76,3 @@ def _walk(before: Any, after: Any, pointer: str, entries: list[DiffEntry]) -> No
         return
     if before != after or type(before) is not type(after):
         entries.append(DiffEntry(pointer, DiffKind.CHANGED, before, after))
-
-
-def _escape(key: str) -> str:
-    return key.replace("~", "~0").replace("/", "~1")

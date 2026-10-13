@@ -58,14 +58,6 @@ const isRecord = (value: unknown): value is DraftRecord => {
   return record.key === draftKey(strategyId, baseRevision);
 };
 
-export const defaultDraftStorage = (): DraftStorage | null => {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
-};
-
 export const readDraft = (
   storage: DraftStorage | null,
   key: string,

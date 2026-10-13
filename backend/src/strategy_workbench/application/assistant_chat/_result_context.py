@@ -101,8 +101,8 @@ def summarize_backtest_result(
         },
         "environment": _plain(asdict(manifest.environment)),
         "capital": {
-            "initial_cash": manifest.initial_cash,
-            "annualization_days": manifest.annualization_days,
+            "initial_cash": manifest.run_spec.initial_cash,
+            "annualization_days": manifest.run_spec.annualization_days,
             "benchmark_security_id": manifest.run_spec.benchmark_security_id,
         },
         "strategy": strategy,

@@ -1,6 +1,4 @@
 from strategy_workbench.domain.strategy._schema import (
-    DOCUMENT_TITLE,
-    SCHEMA_DIALECT,
     FieldContract,
     dataclass_json_schema,
     strategy_document_schema,
@@ -9,8 +7,6 @@ from strategy_workbench.domain.strategy._schema import (
 )
 
 __all__ = [
-    "DOCUMENT_TITLE",
-    "SCHEMA_DIALECT",
     "FieldContract",
     "dataclass_json_schema",
     "strategy_document_schema",

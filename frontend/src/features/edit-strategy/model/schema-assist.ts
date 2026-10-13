@@ -1,3 +1,5 @@
+import { currentParse } from "./document-state";
+import { metadataCoherence } from "./metadata-coherence";
 /**
  * Completion and hover for the source editor, driven by the backend runtime schema and
  * contract (WORKFLOW P3-03, editor ADR D2). Keys and enumerated values come from the schema;
@@ -28,7 +30,6 @@ import type {
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import {
-  isSchemaContractCompatible,
   projectContractField,
 } from "./contract-inspector";
 import { describeApplicabilityConditions } from "./field-applicability";
@@ -58,23 +59,11 @@ export type AssistDeps = {
   getState: () => DocumentState;
 };
 
-export type AssistMetadata = Omit<AssistDeps, "getState">;
-
-export type FactorCatalogCoherence = "ready" | "unavailable" | "incompatible";
-
-/** One compatibility decision shared by factor completion and canonical factor snippets. */
-export const factorCatalogCoherence = (
-  schema: StrategyDocumentSchema | null,
-  contract: StrategyDocumentContractResponse | null,
-  factorCatalog: FactorCatalog | null,
-): FactorCatalogCoherence => {
-  if (schema === null || contract === null || factorCatalog === null)
-    return "unavailable";
-  if (!isSchemaContractCompatible(schema, contract)) return "incompatible";
-  return factorCatalog.registry_version ===
-    contract.contract.factor_registry_version
-    ? "ready"
-    : "incompatible";
+export type AssistMetadata = Omit<AssistDeps, "getState"> & {
+  fieldPickerCatalogs: {
+    equityFields: readonly DatasetFieldProfile[] | null;
+    equityIncompatible: boolean;
+  };
 };
 
 /**
@@ -88,24 +77,22 @@ export const projectAssistMetadata = (
   equityCatalog: ResearchCatalog | null,
   factorCatalog: FactorCatalog | null,
 ): AssistMetadata => {
-  const coherentContract =
-    contract !== null && isSchemaContractCompatible(schema, contract)
-      ? contract.contract
-      : null;
-  const coherentFactors =
-    factorCatalogCoherence(schema, contract, factorCatalog) === "ready";
+  const coherence = metadataCoherence({ schema, contract, equityCatalog, factorCatalog });
+  const coherentContract = coherence.schemaContract === "ready" ? contract?.contract : null;
   return {
+    fieldPickerCatalogs: {
+      equityFields: coherence.dataset === "ready" ? equityCatalog?.fields ?? null : null,
+      equityIncompatible: coherence.dataset === "incompatible",
+    },
     schema: (schema?.schema as JsonSchema | undefined) ?? null,
     contract: coherentContract?.fields ?? [],
     catalogs: {
       equityFields:
-        coherentContract !== null &&
-        equityCatalog?.snapshot?.snapshot_id ===
-          coherentContract.dataset_snapshot_id
+        coherence.dataset === "ready" && equityCatalog !== null
           ? equityCatalog.fields
           : [],
       factors:
-        coherentFactors && factorCatalog !== null ? factorCatalog.factors : [],
+        coherence.factorRegistry === "ready" && factorCatalog !== null ? factorCatalog.factors : [],
     },
   };
 };
@@ -123,8 +110,6 @@ const catalogLabel = (catalog: string): string => {
   switch (catalog) {
     case "equity-field":
       return t("assist.catalog.equityField");
-    case "universe":
-      return t("assist.catalog.universe");
     default:
       return catalog;
   }
@@ -160,7 +145,7 @@ const identifierOptions = (
         type: "value",
       }));
     }
-    return []; // universe: 전략 문서에 없는 카탈로그(실행 설정), 목록을 지어내지 않는다
+    return []; // 모르는 카탈로그의 후보를 지어내지 않는다
   }
   const reference = schemaFacts(resolved.node).reference;
   if (typeof reference === "string") {
@@ -302,11 +287,8 @@ export const buildHoverSource =
   (deps: AssistDeps): EditorHoverSource =>
   (offset): EditorHover | null => {
     const state = deps.getState();
-    if (
-      state.parse?.status !== "ok" ||
-      state.parsedVersion !== state.sourceVersion
-    )
-      return null;
+    const parsed = currentParse(state);
+    if (parsed === null) return null;
     let best: { pointer: string; from: number; to: number } | null = null;
     const consider = (
       pointer: string,
@@ -318,13 +300,13 @@ export const buildHoverSource =
         best = { pointer, from: range.start.offset, to: range.end.offset };
       }
     };
-    for (const [pointer, range] of state.parse.keyRanges)
+    for (const [pointer, range] of parsed.keyRanges)
       consider(pointer, range);
-    for (const [pointer, range] of state.parse.valueRanges) {
+    for (const [pointer, range] of parsed.valueRanges) {
       if (pointer !== "") consider(pointer, range);
     }
     if (best === null) return null;
     const hit: { pointer: string; from: number; to: number } = best;
-    const lines = describePointer(deps, hit.pointer, state.parse.tree);
+    const lines = describePointer(deps, hit.pointer, parsed.tree);
     return lines ? { from: hit.from, to: hit.to, lines } : null;
   };

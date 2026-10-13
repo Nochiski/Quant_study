@@ -59,6 +59,7 @@ const explanation = (
   },
   plan: {
     missing_policy: "drop",
+    evaluation_version: "factor-evaluation-v1",
     graph_hash: suffix.repeat(64),
     plan_hash: suffix.toUpperCase().repeat(64),
     registry_version: "factor-registry-v1",

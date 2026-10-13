@@ -17,6 +17,7 @@ from ._models import (
     RUN_ENVIRONMENT_APPLICABILITY,
     RUN_ENVIRONMENT_CONSTRAINTS,
     RUN_ENVIRONMENT_KEY_NAMESPACE,
+    BacktestRunOptions,
     RunEnvironment,
 )
 
@@ -42,3 +43,12 @@ def run_environment_schema() -> dict[str, Any]:
 def run_environment_schema_hash(schema: dict[str, Any]) -> str:
     """canonical 스키마 JSON 의 sha256. HTTP ETag 로 그대로 쓴다."""
     return canonical_json_hash(schema)
+
+
+def backtest_run_options_schema() -> dict[str, Any]:
+    """실행 요청의 옵션 기본값·enum을 같은 dataclass에서 유도한다."""
+    return dataclass_json_schema(
+        BacktestRunOptions,
+        schema_id="urn:strategy-workbench:backtest-run-options:1",
+        property_namespace="backtest.run.option",
+    )

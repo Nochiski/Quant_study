@@ -66,6 +66,8 @@ export {
   type CompiledDocument,
   type DatasetFieldProfile,
   type DiffEntry,
+  type DraftDiff,
+  type DraftDiffRequest,
   type Experiment,
   type ExperimentPage,
   type ExperimentTrialState,

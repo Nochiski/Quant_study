@@ -16,7 +16,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { useCompileDocument } from "../model/use-compile-document";
 import { useStrategyDocument } from "../model/use-strategy-document";
-import { useUpgradeDocument } from "../model/use-upgrade-document";
+import { useUpgradeDocument } from "./editor-harness";
 import { SourceEditor } from "../ui/source-editor";
 import { UpgradeBanner } from "../ui/upgrade-banner";
 
@@ -332,6 +332,30 @@ describe("retired schema upgrade banner", () => {
     expect(
       screen.queryByRole("button", { name: "실행 설정에 채우기" }),
     ).toBeNull();
+  });
+
+  it.each(["revision", "saved"] as const)("같은 원문을 가진 다른 %s에 이전 업그레이드 응답을 적용하지 않는다", async (transition) => {
+    let release = () => {};
+    upgradeGate = new Promise<void>((resolve) => { release = resolve; });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const props = (revision: number) => <QueryClientProvider client={client}><Harness stored={{ revision, generated: false, requires_upgrade: true }} /></QueryClientProvider>;
+    const { rerender } = render(props(1));
+    await screen.findByRole("textbox", { name: "편집기" });
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    const view = EditorView.findFromDOM(document.querySelector(".cm-content") as HTMLElement)!;
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(upgradeRequests).toHaveLength(1));
+    if (transition === "revision") rerender(props(2));
+    else fireEvent.click(screen.getByRole("button", { name: "Commit revision" }));
+    expect(EditorView.findFromDOM(document.querySelector(".cm-content") as HTMLElement)).toBe(view);
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    release();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    expect(screen.getByTestId("dirty")).toHaveTextContent("false");
+    expect(screen.queryByRole("button", { name: "실행 설정에 채우기" })).not.toBeInTheDocument();
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
   });
 
   it("lets the user upgrade again after a response for edited text is dropped and the edit undone", async () => {

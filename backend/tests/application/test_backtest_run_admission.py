@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import date
 from pathlib import Path
 from threading import Thread
@@ -47,7 +47,13 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
-from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
+from strategy_workbench.domain.backtest.facade.runs import (
+    ExecutionCore,
+    MetricWindow,
+    ResolvedBacktestRunSpec,
+    backtest_run_fingerprint,
+    run_input_key,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     FloatParameter,
     RebalanceFrequency,
@@ -634,3 +640,36 @@ def test_withdrawing_a_shared_owner_releases_only_its_lane_settings(gated_runs: 
     port.release.set()
     assert wait_for_terminal_run(runs, "shared-lane").status is RunStatus.COMPLETED
     assert not runs._waiting._weights
+
+
+def test_admission_separates_execution_inputs_and_preserves_wire_and_fingerprints(
+    gated_runs: _GatedRuns,
+) -> None:
+    runs, _port, _entries = gated_runs("unused")
+    request = replace(
+        _request(),
+        strategy=None,
+        strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
+        lineage_strategy_id=_LINEAGE,
+    )
+    admission = runs.admit(request)
+    resolved = admission.resolved
+    wire = admission.spec
+    assert isinstance(resolved, ResolvedBacktestRunSpec)
+    assert not {"strategy_source", "lineage_strategy_id"}.intersection(
+        item.name for item in fields(resolved)
+    )
+    assert resolved.strategy == _spec()
+    assert resolved.environment == _ENVIRONMENT
+    assert wire == replace(request, strategy=_spec())
+    assert run_input_key(resolved) == run_input_key(wire)
+    fingerprint_inputs = dict(
+        data_snapshot_id="snapshot",
+        target_tape_hash="tape",
+        engine_version="engine",
+        metric_registry_version="metrics",
+    )
+    assert backtest_run_fingerprint(resolved, **fingerprint_inputs) == backtest_run_fingerprint(
+        wire, **fingerprint_inputs
+    )
+    assert runs.list_runs(PageRequest(offset=0, limit=50)).items == ()

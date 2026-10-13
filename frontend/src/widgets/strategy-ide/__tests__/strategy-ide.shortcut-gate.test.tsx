@@ -35,6 +35,10 @@ const GateOpensLater = ({
   return (
     <ThemePreferenceProvider>
       <StrategyIde
+        outline={null}
+        snippets={null}
+        inspector={null}
+        debugger={null}
         title="새 전략"
         versionLabel="v1"
         editor={<textarea aria-label="source" />}

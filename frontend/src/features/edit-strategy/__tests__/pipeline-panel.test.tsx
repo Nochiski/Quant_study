@@ -67,7 +67,7 @@ const transactionsStub = (settling = false): SourceTransactions => ({
   run: vi.fn(() => true),
   feedback: { status: "idle" },
   feedbackFor: () => ({ status: "idle" }),
-  onEditorReady: vi.fn(),
+
   enabled: true,
   disabled: null,
   settling,

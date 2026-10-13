@@ -1,137 +1,36 @@
-export {
-  canValidateDocument,
-  currentDiagnostics,
-  currentCompile,
-  currentSpec,
-  documentReducer,
-  initialDocumentState,
-  isSpecStale,
-  isCompleteCompileOutcome,
-  shouldCompile,
-  shouldParse,
-  type CompileOutcome,
-  type CompleteCompileOutcome,
-  type DocumentAction,
-  type DocumentDiagnostic,
-  type DocumentPhase,
-  type DocumentState,
-} from "./model/document-state";
-export {
-  PROJECTION_VIEWS,
-  migrateStrategyView,
-  STRATEGY_VIEWS,
-  type StrategyView,
-} from "./model/strategy-views";
-export {
-  projectStrategySpec,
-  type StrategyProjection,
-} from "./model/strategy-projection";
+export { canValidateDocument, currentDiagnostics, currentCompile, currentCompileOutcome, initialDocumentState, type DocumentState } from "./model/document-state";
+export { STRATEGY_VIEWS, migrateStrategyView, type StrategyView } from "./model/strategy-views";
+
 export { useStrategyDocument } from "./model/use-strategy-document";
-export {
-  documentSourceKey,
-  loadAction,
-  type DocumentSource,
-} from "./model/document-source";
-export {
-  canSaveDocument,
-  useSaveDocument,
-  type SaveStatus,
-} from "./model/use-save-document";
+export { type DocumentSource } from "./model/document-source";
+export { useSaveDocument } from "./model/use-save-document";
 export { saveStatusText, saveStatusTone } from "./model/save-status";
-export { useSchemaAssist, type SchemaAssist } from "./model/use-schema-assist";
-export {
-  toDocumentDiagnostics,
-  useCompileDocument,
-} from "./model/use-compile-document";
+export { useSchemaAssist } from "./model/use-schema-assist";
+export { useCompileDocument } from "./model/use-compile-document";
 export { DiagnosticsPanel } from "./ui/diagnostics-panel";
 export { DocumentStatus } from "./ui/document-status";
-export {
-  formCoversPointer,
-  graphCoversPointer,
-  resolveDiagnosticDestination,
-  type DiagnosticDestination,
-} from "./model/diagnostic-navigation";
-export {
-  useDiagnosticNavigation,
-  type DiagnosticNavigation,
-} from "./model/use-diagnostic-navigation";
-export {
-  useDocumentHistory,
-  type DocumentHistory,
-} from "./model/use-document-history";
+
+export { useDiagnosticNavigation } from "./model/use-diagnostic-navigation";
+export { useDocumentHistory } from "./model/use-document-history";
 export { DocumentHistoryActions } from "./ui/document-history";
-export {
-  decideBacktestSource,
-  gateBacktestSourceWithFactorPlans,
-  isBacktestSettling,
-  type BacktestSourceDecision,
-} from "./model/backtest-source";
-export {
-  useRunBacktest,
-  type BacktestRunOptions,
-  type RunBacktestStatus,
-} from "./model/use-run-backtest";
+export { decideBacktestSource, gateBacktestSourceWithFactorPlans } from "./model/backtest-source";
+export { useRunBacktest } from "./model/use-run-backtest";
 export { DocumentToolbar } from "./ui/document-toolbar";
-export {
-  useAutosave,
-  type Autosave,
-  type Recovery,
-} from "./model/use-autosave";
-export {
-  clearDraft,
-  draftKey,
-  readDraft,
-  writeDraft,
-  type DraftRecord,
-  type DraftStorage,
-} from "./model/draft-store";
+export { useAutosave } from "./model/use-autosave";
+
 export { RecoveryBanner } from "./ui/recovery-banner";
 export { ServerDraftBanner } from "./ui/server-draft-banner";
-export {
-  createNewDraftId,
-  isNewDraftId,
-  matchesServerDraftBase,
-  revisionDraftId,
-  type ServerDraftBase,
-} from "./model/server-draft";
-export { useServerDraft, type ServerDraftSync } from "./model/use-server-draft";
+export { createNewDraftId, isNewDraftId, revisionDraftId } from "./model/server-draft";
+export { useServerDraft } from "./model/use-server-draft";
 export { ConflictBanner } from "./ui/conflict-banner";
 export { UpgradeBanner } from "./ui/upgrade-banner";
-export {
-  decideDocumentUpgrade,
-  type StoredRevisionMeta,
-  type UpgradeAvailability,
-} from "./model/document-upgrade";
-export {
-  useUpgradeDocument,
-  type DocumentUpgrade,
-  type UpgradeStatus,
-} from "./model/use-upgrade-document";
-export {
-  assistantDocumentRef,
-  assistantTurnContext,
-} from "./model/assistant-turn-context";
-export { useAssistantTurnContext } from "./model/use-assistant-turn-context";
-export {
-  useStrategyAssistant,
-  type AssistantProposalHandlers,
-  type StrategyAssistant,
-  type StrategyAssistantOptions,
-} from "./model/use-strategy-assistant";
-export {
-  assistantProposalOf,
-  useApplyAssistantProposal,
-  type AssistantProposal,
-  type AssistantProposalApply,
-  type ProposalApplyBlock,
-  type ProposalApplyFailure,
-  type ProposalApplyStatus,
-} from "./model/use-apply-assistant-proposal";
-export {
-  useApplyProposalThenBacktest,
-  type BacktestTrigger,
-  type ProposalBacktestChain,
-} from "./model/use-apply-then-backtest";
+
+export { useUpgradeDocument } from "./model/use-upgrade-document";
+
+
+export { useStrategyAssistant } from "./model/use-strategy-assistant";
+export { useApplyAssistantProposal } from "./model/use-apply-assistant-proposal";
+
 export {
   ProposalApplyDialog,
   ProposalApplyFeedback,
@@ -144,127 +43,32 @@ export { FactorGraphPanel } from "./ui/factor-graph-panel";
 export { PipelinePanel } from "./ui/pipeline-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
 export { StrategyDiffPanel } from "./ui/strategy-diff-panel";
-export {
-  diffCanonicalJson,
-  projectDraftDiff,
-  type DraftDiffProjection,
-  type DraftSemanticDiff,
-} from "./model/diff-projection";
-export { describeApplicabilityConditions } from "./model/field-applicability";
-export {
-  projectContractField,
-  projectContractInspector,
-  type ContractFieldProjection,
-  type ContractInspectorProjection,
-  type ContractInspectorSource,
-} from "./model/contract-inspector";
-export {
-  useOutlineNavigation,
-  type StrategyOutlineNavigation,
-} from "./model/use-outline-navigation";
+
+
+
+export { useOutlineNavigation } from "./model/use-outline-navigation";
 export type { StrategyOutlineSymbol } from "./model/strategy-outline";
-export {
-  useSnippetInsertion,
-  type SnippetFailure,
-  type SnippetFeedback,
-  type SnippetInsertion,
-} from "./model/use-snippet-insertion";
-export {
-  projectForm,
-  type FormControl,
-  type FormField,
-  type FormListItem,
-  type FormProjection,
-  type FormSection,
-} from "./model/form-projection";
-export {
-  useSourceTransactions,
-  type SourcePlanner,
-  type SourceTransactions,
-  type TransactionDisabledReason,
-  type TransactionFailure,
-  type TransactionFeedback,
-} from "./model/use-source-transactions";
-export type { SourceOperation } from "./model/source-transactions";
-export {
-  useFormProjection,
-  type FormProjectionState,
-} from "./model/use-form-projection";
-export {
-  addItemOperation,
-  addPresetItemOperation,
-  draftOf,
-  fieldOperation,
-  itemKinds,
-  itemSection,
-  parseDraft,
-  removalBlockers,
-  removeItemOperation,
-  resetOperation,
-  unsetOperation,
-  type DraftParse,
-  type ListSection,
-  type ObjectSection,
-} from "./model/form-transactions";
-export {
-  findReferences,
-  type DocumentReference,
-  type FindReferencesOptions,
-} from "./model/document-references";
-export {
-  addNode,
-  authoredFactors,
-  GRAPH_OWNER,
-  graphNodeIds,
-  nodeKinds,
-  nodePointerOf,
-  nodeReferenceKeys,
-  removeNodeAt,
-  renameNode,
-  selectedNodePointer,
-  setNodeField,
-  suggestNodeId,
-  type ChosenOperator,
-} from "./model/graph-transactions";
+export { useSnippetInsertion } from "./model/use-snippet-insertion";
+
+export { useSourceTransactions } from "./model/use-source-transactions";
+
+export { useFormProjection } from "./model/use-form-projection";
+
+
+
 // 팔레트 투영·항목 타입은 slice 안에서만 쓴다(pages는 `FactorGraphEditing.operators`로 타입이
 // 흘러 들어가 직접 import하지 않는다). 공개 API는 실제 소비자가 있는 것만 둔다 — 넓히면 slice
 // 내부 리팩터가 밖으로 샌다(리뷰 P3, `frontend-fsd.md`).
-export type { OperatorCatalogState } from "./model/operator-palette";
-export { type FormCatalogs } from "./ui/strategy-form-panel";
-export { FactorGraphEditor } from "./ui/factor-graph-editor";
-export {
-  buildCanonicalSnippetCatalog,
-  planSnippetEdit,
-  SNIPPET_CATEGORIES,
-  type CanonicalSnippet,
-  type SnippetCatalogSource,
-  type SnippetCategory,
-  type SnippetEditFailure,
-  type SnippetEditResult,
-} from "./model/canonical-snippets";
-export {
-  compiledNodeOrigin,
-  documentOutputNodeId,
-  factorIndexAtPointer,
-  factorGraphPointer,
-  factorNodePointer,
-  nodePointerById,
-  pointerSelectsNode,
-  prepareExecutionPlans,
-  useExecutionPlans,
-  type CompiledNodeOrigin,
-  type ExecutionPlansState,
-  type FactorPlanRequest,
-  type PlannedFactor,
-} from "./model/use-execution-plans";
-export {
-  projectFactorGraphs,
-  type FactorGraphProjection,
-  type GraphFactorProjection,
-  type GraphInputProjection,
-  type GraphNodeDetail,
-  type GraphNodeProjection,
-} from "./model/factor-graph-projection";
+
+
+
+
+export { compiledNodeOrigin, documentOutputNodeId, factorIndexAtPointer, factorGraphPointer, nodePointerById, useExecutionPlans, type ExecutionPlansState } from "./model/use-execution-plans";
+
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";
 
 export { RecipePanel } from "./ui/recipe-panel";
+
+export { useWholeDocumentReplacement } from "./model/replace-whole-document";
+
+export { useEditorHandle } from "./model/use-editor-handle";

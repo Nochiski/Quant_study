@@ -9,11 +9,11 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useReducer } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 
 import {
-  ApiRequestError,
-  strategyWorkbenchApi,
   type SaveStrategyDraftRequest,
   type StrategyDraft,
 } from "../../../shared/api";
@@ -21,6 +21,31 @@ import { t } from "../../../shared/config";
 import { documentReducer, initialDocumentState } from "../model/document-state";
 import { useServerDraft } from "../model/use-server-draft";
 import { ServerDraftBanner } from "../ui/server-draft-banner";
+
+type DraftReply = StrategyDraft | Response;
+// SDK 함수는 그대로 실행하고 아래 관찰 함수에는 실제 HTTP 경로·본문만 넘긴다.
+const readDraftRequest = vi.fn<(draftId: string) => Promise<DraftReply>>();
+const writeDraftRequest = vi.fn<(draftId: string, body: SaveStrategyDraftRequest) => Promise<DraftReply>>();
+const deleteDraftRequest = vi.fn<(draftId: string, version: number) => Promise<void | Response>>();
+const endpoint = "http://localhost:8000/api/v1/strategy-drafts/:draftId";
+const server = setupServer(
+  http.get(endpoint, async ({ params }) => {
+    const reply = await readDraftRequest(String(params.draftId));
+    return reply instanceof Response ? reply.clone() : HttpResponse.json(reply);
+  }),
+  http.put(endpoint, async ({ params, request }) => {
+    const reply = await writeDraftRequest(String(params.draftId), await request.json() as SaveStrategyDraftRequest);
+    return reply instanceof Response ? reply.clone() : HttpResponse.json(reply);
+  }),
+  http.delete(endpoint, async ({ params, request }) => {
+    const reply = await deleteDraftRequest(String(params.draftId), Number(new URL(request.url).searchParams.get("expected_version")));
+    return reply instanceof Response ? reply.clone() : new HttpResponse(null, { status: 204 });
+  }),
+);
+const draftFailure = (status: number, code: string, message = "missing draft", current?: StrategyDraft) =>
+  HttpResponse.json({ detail: { code, message, ...(current === undefined ? {} : { current }) } }, { status });
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterAll(() => server.close());
 
 const DRAFT_ID = "draft-0123456789abcdef0123456789abcdef";
 const NEXT_DRAFT_ID = `revision:s1:2:${"c".repeat(64)}`;
@@ -58,11 +83,18 @@ const Harness = ({
   const [state, dispatch] = useReducer(documentReducer, initial);
   const draftId =
     rotateDraftOnSave && state.baseRevision === 2 ? NEXT_DRAFT_ID : DRAFT_ID;
-  const sync = useServerDraft(state, dispatch, {
-    draftId,
-    schemaVersion: "1.1",
-    delayMs: 5,
-  });
+  const sync = useServerDraft(
+    state,
+    (source) => {
+      dispatch({ type: "edit", source });
+      return true;
+    },
+    {
+      draftId,
+      schemaVersion: "1.1",
+      delayMs: 5,
+    },
+  );
   return (
     <>
       <label htmlFor="source">Source</label>
@@ -114,16 +146,15 @@ const mount = (rotateDraftOnSave = false) => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  vi.resetAllMocks();
 });
 
 describe("server draft CAS", () => {
   it("persists exact invalid source without waiting for compilation", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+    const save = writeDraftRequest
       .mockImplementation(async (_id, request) => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return remoteDraft(request.source, request.expected_version + 1);
@@ -146,16 +177,15 @@ describe("server draft CAS", () => {
   });
 
   it("serializes this tab's writes and advances expected_version", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
     let resolveFirst: ((draft: StrategyDraft) => void) | undefined;
     const first = new Promise<StrategyDraft>((resolve) => {
       resolveFirst = resolve;
     });
     const requests: SaveStrategyDraftRequest[] = [];
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+    const save = writeDraftRequest
       .mockImplementation(async (_id, request) => {
         requests.push(request);
         if (requests.length === 1) return first;
@@ -178,18 +208,14 @@ describe("server draft CAS", () => {
 
   it("never overwrites a competing client until the user keeps local explicitly", async () => {
     const competing = remoteDraft("title: remote\n", 3);
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
-      .mockRejectedValueOnce(
-        new ApiRequestError(
-          "save",
-          409,
+    const save = writeDraftRequest
+      .mockResolvedValueOnce(
+        draftFailure(409,
           "strategy.draft.conflict",
           "conflict",
-          null,
           competing,
         ),
       )
@@ -223,7 +249,7 @@ describe("server draft CAS", () => {
   });
 
   it("offers a compatible remote recovery and blocks an incompatible base", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockResolvedValue(
+    readDraftRequest.mockResolvedValue(
       remoteDraft("title: recovered\n", 2),
     );
     mount();
@@ -234,8 +260,8 @@ describe("server draft CAS", () => {
     expect(screen.getByLabelText("Source")).toHaveValue("title: recovered\n");
 
     cleanup();
-    vi.restoreAllMocks();
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockResolvedValue({
+    vi.resetAllMocks();
+    readDraftRequest.mockResolvedValue({
       ...remoteDraft("title: wrong base\n", 2),
       base_revision: 9,
     });
@@ -256,11 +282,10 @@ describe("server draft CAS", () => {
   });
 
   it("deletes a recovered register when a clean local base is kept", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockResolvedValue(
+    readDraftRequest.mockResolvedValue(
       remoteDraft("title: abandoned recovery\n", 4),
     );
-    const remove = vi
-      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
+    const remove = deleteDraftRequest
       .mockResolvedValue();
     mount();
     await screen.findByRole("region", { name: "복구할 서버 초안" });
@@ -273,16 +298,14 @@ describe("server draft CAS", () => {
   });
 
   it("CAS-deletes this base's draft after an immutable revision save", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+    const save = writeDraftRequest
       .mockImplementation(async (_id, request) =>
         remoteDraft(request.source, request.expected_version + 1),
       );
-    const remove = vi
-      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
+    const remove = deleteDraftRequest
       .mockResolvedValue();
     mount();
     await screen.findByText("서버 초안 동기화됨");
@@ -299,18 +322,16 @@ describe("server draft CAS", () => {
   });
 
   it("retires an old draft when its PUT finishes after an immutable revision save", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
     let resolveWrite: ((draft: StrategyDraft) => void) | undefined;
     const inFlight = new Promise<StrategyDraft>((resolve) => {
       resolveWrite = resolve;
     });
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+    const save = writeDraftRequest
       .mockReturnValue(inFlight);
-    const remove = vi
-      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
+    const remove = deleteDraftRequest
       .mockResolvedValue();
     mount(true);
     await screen.findByText(t("draft.server.synced"));
@@ -323,7 +344,7 @@ describe("server draft CAS", () => {
       screen.getByRole("button", { name: "Commit immutable revision" }),
     );
     await waitFor(() =>
-      expect(strategyWorkbenchApi.getStrategyDraft).toHaveBeenCalledWith(
+      expect(readDraftRequest).toHaveBeenCalledWith(
         NEXT_DRAFT_ID,
       ),
     );
@@ -336,17 +357,15 @@ describe("server draft CAS", () => {
   });
 
   it("CAS-deletes a persisted edit when the document returns to its immutable base", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+    const save = writeDraftRequest
       .mockImplementation(async (_id, request) => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return remoteDraft(request.source, request.expected_version + 1);
       });
-    const remove = vi
-      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
+    const remove = deleteDraftRequest
       .mockResolvedValue();
     mount();
     await screen.findByText(t("draft.server.synced"));
@@ -370,25 +389,20 @@ describe("server draft CAS", () => {
   });
 
   it("preserves a newer writer when reverting the local document races with CAS delete", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+    const save = writeDraftRequest
       .mockImplementation(async (_id, request) => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return remoteDraft(request.source, request.expected_version + 1);
       });
     const newer = remoteDraft("title: newer writer\n", 2);
-    const remove = vi
-      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
-      .mockRejectedValue(
-        new ApiRequestError(
-          "delete",
-          409,
+    const remove = deleteDraftRequest
+      .mockResolvedValue(
+        draftFailure(409,
           "strategy.draft.conflict",
           "newer version exists",
-          null,
           newer,
         ),
       );
@@ -418,15 +432,12 @@ describe("server draft CAS", () => {
   });
 
   it("shows a typed server rejection instead of misreporting it as offline", async () => {
-    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
-      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    readDraftRequest.mockResolvedValue(
+      draftFailure(404, "strategy.draft.not_found"),
     );
-    const save = vi
-      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
-      .mockRejectedValue(
-        new ApiRequestError(
-          "save",
-          422,
+    const save = writeDraftRequest
+      .mockResolvedValue(
+        draftFailure(422,
           "strategy.draft.invalid",
           "source is not valid UTF-8",
         ),

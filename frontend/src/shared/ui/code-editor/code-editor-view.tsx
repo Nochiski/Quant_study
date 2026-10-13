@@ -50,6 +50,7 @@ import {
 import { tags } from "@lezer/highlight";
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -63,6 +64,7 @@ import type {
   EditorCompletionSource,
   EditorDiagnostic,
   EditorHoverSource,
+  EditorHistoryDepth,
 } from "./handle";
 import "./code-editor.css";
 
@@ -199,6 +201,16 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
     // 핸들(`useImperativeHandle`, 아래)보다 먼저 view 를 만든다. 부모는 핸들을 받자마자 선택·포커스를
     // 옮기는데(outline reveal 등), passive effect 에서 만들면 핸들이 view 없이 먼저 나가 그 명령이
     // 조용히 사라졌다. #324 부하 flake와 별개로 이 준비 순서는 회귀 테스트로 고정한다.
+    const historySnapshot = useRef<EditorHistoryDepth>({ undo: 0, redo: 0 });
+    const historyListeners = useRef(new Set<() => void>());
+    const publishHistory = useCallback((state: EditorState) => {
+      const next = { undo: undoDepth(state), redo: redoDepth(state) };
+      const previous = historySnapshot.current;
+      if (previous.undo === next.undo && previous.redo === next.redo) return;
+      historySnapshot.current = next;
+      for (const listener of historyListeners.current) listener();
+    }, []);
+
     useLayoutEffect(() => {
       const parent = host.current;
       if (!parent) return;
@@ -254,6 +266,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           },
         }),
         EditorView.updateListener.of((update) => {
+          publishHistory(update.state);
           if (update.docChanged) {
             callbacks.current.onChange(
               update.state.doc.toString(),
@@ -281,6 +294,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
               HISTORY_FIELDS,
             )
           : EditorState.create({ doc: value, extensions });
+      publishHistory(state);
       const created = new EditorView({ state, parent });
       view.current = created;
       return () => {
@@ -445,10 +459,10 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           const current = view.current;
           return current === null ? false : redo(current);
         },
-        historyDepth: () => {
-          const state = view.current?.state;
-          if (state === undefined) return { undo: 0, redo: 0 };
-          return { undo: undoDepth(state), redo: redoDepth(state) };
+        historyDepth: () => historySnapshot.current,
+        subscribeHistory: (listener) => {
+          historyListeners.current.add(listener);
+          return () => { historyListeners.current.delete(listener); };
         },
         getHistoryState: () =>
           view.current?.state.toJSON(HISTORY_FIELDS) ?? null,

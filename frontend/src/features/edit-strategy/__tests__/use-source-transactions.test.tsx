@@ -7,7 +7,7 @@ import {
   initialDocumentState,
   type DocumentState,
 } from "../model/document-state";
-import { useSourceTransactions } from "../model/use-source-transactions";
+import { useSourceTransactions } from "./editor-harness";
 
 const SOURCE = 'schema_version: "1.1"\nrisk:\n  max_name_weight: 0.05\n';
 
@@ -28,7 +28,8 @@ const editorOf = (initial: string) => {
     loadText: vi.fn(),
     undo: vi.fn(() => false),
     redo: vi.fn(() => false),
-    historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
+    subscribeHistory: () => () => {},
+  historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
     getHistoryState: vi.fn(() => null),
     restoreHistoryState: vi.fn(),
   };

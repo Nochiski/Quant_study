@@ -1950,6 +1950,8 @@ const ko = {
   "experiments.progress": "진행",
   "experiments.priority": "우선순위",
   "experiments.counts": "완료 {completed} / {total} · 실행 중 {running} · 실패 {failed}",
+  "experiments.detail.remaining": "남은 시간 최대 약 {total} (남은 실행을 차례로 처음부터 돈다고 본 값입니다)",
+  "experiments.detail.remainingUnknown": "남은 시간은 이 전략 계열에 시간을 잰 완료 실행이 생기면 보입니다.",
   "experiments.pause": "일시정지",
   "experiments.resume": "재개",
   "experiments.raisePriority": "우선순위 올리기",
@@ -4241,6 +4243,10 @@ export const messages = {
     "experiments.progress": "Progress",
     "experiments.priority": "Priority",
     "experiments.counts": "Completed {completed} / {total} · running {running} · failed {failed}",
+    "experiments.detail.remaining":
+      "Up to about {total} left (assuming the remaining runs go one after another from the start)",
+    "experiments.detail.remainingUnknown":
+      "The remaining time appears once this strategy lineage has a timed completed run.",
     "experiments.pause": "Pause",
     "experiments.resume": "Resume",
     "experiments.raisePriority": "Raise priority",

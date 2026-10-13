@@ -36,6 +36,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentError,
     ExperimentNotFoundError,
     ExperimentStateError,
+    TimeEstimate,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
@@ -270,6 +271,16 @@ def register_experiment_routes(
         """창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택
         (`selections`)과 다르다."""
         return experiments.walk_forward(experiment_id)
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/remaining-time",
+        operation_id="getExperimentRemainingTime",
+        responses=rejected,
+    )
+    def get_experiment_remaining_time(experiment_id: str) -> TimeEstimate | None:
+        """남은 실행의 시간 어림(로드맵 M6 ETA). 실험 조회·진행 스트림과 따로 둔다 — 계열 원장을
+        읽어 목록·스트림 폴링마다 치르지 않게 한다. 근거가 없으면 null."""
+        return experiments.remaining_time(experiment_id)
 
     @app.get(
         "/api/v1/experiments/{experiment_id}/parameter-map",

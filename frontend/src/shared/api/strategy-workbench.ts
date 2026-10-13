@@ -12,6 +12,7 @@ import {
   explainFactorGraph,
   getEquityCatalog,
   getExperiment,
+  getExperimentRemainingTime,
   getExperimentWalkForward,
   getFactorCatalog,
   getBacktestRequest,
@@ -101,6 +102,7 @@ import type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TimeEstimate,
   TrialLedger,
   TrialPreview,
   UpgradedDocument,
@@ -507,6 +509,16 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "retryExperimentTrial");
   },
 
+  /** 남은 실행의 시간 어림(로드맵 M6 ETA). 계열에 시간을 잰 완료 실행이 없으면 null. */
+  async getExperimentRemainingTime(
+    experimentId: string,
+  ): Promise<TimeEstimate | null> {
+    const response = await getExperimentRemainingTime({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentRemainingTime");
+  },
+
   /** 워크포워드 결과(창별 자동 선택·검증 실행·유지율, 검증 랩 V3-05). */
   async getExperimentWalkForward(
     experimentId: string,
@@ -834,6 +846,7 @@ export type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TimeEstimate,
   TrialLedger,
   TrialPreview,
   UpgradedDocument,

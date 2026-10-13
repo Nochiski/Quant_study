@@ -83,6 +83,9 @@ import type {
   GetExperimentParameterMapData,
   GetExperimentParameterMapErrors,
   GetExperimentParameterMapResponses,
+  GetExperimentRemainingTimeData,
+  GetExperimentRemainingTimeErrors,
+  GetExperimentRemainingTimeResponses,
   GetExperimentResponses,
   GetExperimentWalkForwardData,
   GetExperimentWalkForwardErrors,
@@ -815,6 +818,23 @@ export const getExperimentParameterMap = <ThrowOnError extends boolean = false>(
     GetExperimentParameterMapErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/parameter-map", ...options });
+
+/**
+ * Get Experiment Remaining Time
+ *
+ * 남은 실행의 시간 어림(로드맵 M6 ETA). 실험 조회·진행 스트림과 따로 둔다 — 계열 원장을
+ * 읽어 목록·스트림 폴링마다 치르지 않게 한다. 근거가 없으면 null.
+ */
+export const getExperimentRemainingTime = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetExperimentRemainingTimeData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentRemainingTimeResponses,
+    GetExperimentRemainingTimeErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/remaining-time", ...options });
 
 /**
  * Select Experiment Trial

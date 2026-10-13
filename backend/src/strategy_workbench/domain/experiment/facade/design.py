@@ -16,6 +16,7 @@ from strategy_workbench.domain.experiment._estimate import (
     TimeEstimate,
     estimate_time,
     planned_spans,
+    run_spans,
 )
 from strategy_workbench.domain.experiment._plateau import (
     PEAK_NEIGHBOR_RATIO,
@@ -92,6 +93,7 @@ __all__ = [
     "pick_window_cell",
     "planned_spans",
     "plateau_map",
+    "run_spans",
     "stitch_out_of_sample",
     "walk_forward_gap",
     "walk_forward_retention",

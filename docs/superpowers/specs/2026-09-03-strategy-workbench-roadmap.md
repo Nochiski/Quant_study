@@ -505,7 +505,7 @@ Python/Rust 결과가 같다.
 - [ ] failed/pruned/cancelled trial과 error reason 보존(failed·cancelled는 검증 랩 V3-03·V3-04, pruned 개념 없음).
 - [x] experiment create/status/trials/results/cancel/retry API 추가(검증 랩 V3-03·V3-04).
 - [ ] Builder 파라미터 범위/constraint/budget 화면 추가(값 직접 입력·조합 제약 편집은 #518, budget 미착수).
-- [ ] Experiment Monitor 진행률·ETA·상태별 count·실패 상세 추가(V5-01 #402·#407에 ETA 없음).
+- [x] Experiment Monitor 진행률·ETA·상태별 count·실패 상세 추가(V5-01 #402·#407, ETA 는 #520 — 미리 계산과 같은 `estimate_time` 으로 남은 실행만 어림).
 - [x] cancel/restart/idempotency 통합 테스트 추가(검증 랩 V3-04).
 
 완료 게이트: 사용자는 실행 전 비용을 알고 탐색을 시작·중단·재개할 수 있고, 모든 trial이

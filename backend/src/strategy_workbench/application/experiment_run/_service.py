@@ -45,6 +45,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     pick_window_cell,
     planned_spans,
     plateau_map,
+    run_spans,
     stitch_out_of_sample,
     walk_forward_gap,
     walk_forward_retention,
@@ -635,6 +636,29 @@ class ExperimentRunService:
         oos = out_of_sample_sharpe(curve, self._registry, record.run.annualization_days)
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
         return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
+
+    def remaining_time(self, experiment_id: str) -> TimeEstimate | None:
+        """남은 실행을 차례로 돈다고 본 시간 어림(로드맵 M6 Experiment Monitor ETA, 규칙은
+        `estimate_time`). 남은 실행은 끝나지 않은 trial 과, 워크포워드면 검증이 끝나지 않은 창
+        (`WalkForwardGap.PENDING` — 아직 고르지 않았거나 검증 실행이 돌거나 복구를 기다린다)이다.
+        도는 실행도 처음부터 도는 것처럼 센다 — 진행률이 시간에 비례하지 않아 길게 잡는다. 취소한
+        실험은 남은 실행이 없다. 계열에 시간을 잰 완료 실행이 없으면 None."""
+        record = self._repository.get(experiment_id)
+        trials: list[ExperimentTrial] = []
+        windows: list[WalkForwardWindow] = []
+        if record.cancelled_at is None:
+            trials = [state.trial for state in self._trial_states(record) if not state.settled]
+            if record.design.walks_forward:
+                picks = _latest_by_window(self._repository.picks(experiment_id))
+                runs = self._runs.states({p.run_id for p in picks.values() if p.run_id})
+                windows = [
+                    window
+                    for index, window in enumerate(record.design.windows)
+                    if (pick := picks.get(index)) is None
+                    or _window_result(pick, runs).gap is WalkForwardGap.PENDING
+                ]
+        spans = run_spans(trials, windows, *_base_range(record.run))
+        return estimate_time(self._runs.trial_ledger(record.run), spans)
 
     def parameter_map(self, experiment_id: str) -> ParameterMap:
         """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03, 규칙은

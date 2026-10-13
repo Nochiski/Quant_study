@@ -9,6 +9,7 @@ import {
   experimentQuery,
   experimentStatusLabel,
   experimentStatusTone,
+  experimentRemainingTimeQuery,
   experimentTrialsQuery,
   experimentWalkForwardQuery,
   trialStatusLabel,
@@ -19,7 +20,7 @@ import {
   type ExperimentTrialState,
 } from "../../../entities/experiment";
 import { failureReason } from "../../../shared/api";
-import { t, tFill } from "../../../shared/config";
+import { t, tDuration, tFill } from "../../../shared/config";
 import { Link, useParams } from "../../../shared/lib/router";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
@@ -154,6 +155,14 @@ export const ExperimentPage = () => {
     ...experimentTrialsQuery(experimentId),
     refetchInterval,
   });
+  // 남은 시간 어림은 끝나지 않고 도는 동안만 읽는다(로드맵 M6 ETA) — 취소한 실험이 실행을 정리하는
+  // 동안에는 남은 실행이 없다. 계산은 backend 가 하고 화면은 보이기만 한다.
+  const counting = running && experiment.data?.finished === false;
+  const remaining = useQuery({
+    ...experimentRemainingTimeQuery(experimentId),
+    enabled: counting,
+    refetchInterval,
+  });
   const retry = useRetryExperimentTrial(experimentId);
   useExperimentProgress(experimentId, running);
   if (experiment.isPending || trials.isPending)
@@ -187,6 +196,15 @@ export const ExperimentPage = () => {
               failed: counts.failed ?? 0,
             })}
           </p>
+          {counting && remaining.isSuccess ? (
+            <p>
+              {remaining.data
+                ? tFill("experiments.detail.remaining", {
+                    total: tDuration(remaining.data.total_seconds),
+                  })
+                : t("experiments.detail.remainingUnknown")}
+            </p>
+          ) : null}
         </div>
         <span className="data-list-page__actions">
           <Link

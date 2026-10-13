@@ -225,6 +225,9 @@ test(
     page = await context.newPage();
     await page.goto("/research/experiments");
     await expect(experimentStatus(page, first)).toContainText("실행 중");
+    // 도는 실험의 모니터는 남은 시간 어림을 보인다(계열에 끝난 기반·단일 실행이 근거다).
+    await page.goto(`/research/experiments/${first}`);
+    await expect(page.getByText(/^남은 시간 최대 약 /u)).toBeVisible();
     await page.goto("/research/backtests");
     const notice = page
       .getByRole("status")

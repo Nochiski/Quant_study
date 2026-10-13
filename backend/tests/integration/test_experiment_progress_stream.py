@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from threading import Event
 from typing import cast
+
+import pytest
 
 from strategy_workbench.adapters.inbound.http_api._experiment_routes import (
     _ExperimentStreamHub,
@@ -187,5 +190,46 @@ def test_a_new_subscriber_after_completion_does_not_reuse_a_slow_clients_old_res
         assert hub._streams["retried"] is new_shared
         await fresh.aclose()
         assert not hub._streams
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("during_read", [False, True])
+def test_shutdown_wakes_subscribers_even_before_the_producer_starts(during_read: bool) -> None:
+    entered, release = Event(), Event()
+
+    class BlockingExperiments:
+        def get(self, experiment_id: str) -> _Snapshot:
+            entered.set()
+            release.wait()
+            return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, BlockingExperiments()))
+
+    async def exercise() -> None:
+        stream = hub.stream("shutting-down")
+        first = asyncio.create_task(anext(stream))
+        # 구독이 생산자를 등록했지만 생산자가 아직 실행되지 않은 정확한 경계다.
+        await asyncio.sleep(0)
+        shared = hub._streams["shutting-down"]
+        try:
+            if during_read:
+                assert await asyncio.to_thread(entered.wait, 1)
+            else:
+                assert not entered.is_set()
+            await hub.close()
+            assert shared.producer is not None and shared.producer.done()
+            assert shared.done
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(first, timeout=1)
+            assert shared.subscribers == 0
+            assert not hub._streams
+        finally:
+            release.set()
+            if not first.done():
+                first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+            await stream.aclose()
+            await hub.close()
 
     asyncio.run(exercise())

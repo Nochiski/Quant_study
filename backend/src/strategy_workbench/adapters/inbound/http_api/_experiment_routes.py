@@ -436,7 +436,15 @@ class _ExperimentStreamHub:
         tasks = [shared.producer for shared in entries if shared.producer is not None]
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            # 시작 전에 취소된 task는 _produce의 finally를 실행하지 않는다. 종료 owner가
+            # 직접 종결을 알리므로 첫 프레임을 기다리는 구독도 반드시 깨어난다.
+            for shared in entries:
+                async with shared.condition:
+                    shared.done = True
+                    shared.condition.notify_all()
 
     async def _produce(self, experiment_id: str, shared: _SharedProgress) -> None:
         try:

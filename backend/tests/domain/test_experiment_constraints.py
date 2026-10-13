@@ -68,6 +68,13 @@ def test_constraint_against_a_constant_and_a_choice() -> None:
         ParameterConstraint("fast", ConstraintOperator.LT, right_parameter="fast", right_value=1),
         # 크기 비교는 숫자끼리만 한다.
         ParameterConstraint("mode", ConstraintOperator.LT, right_value="b"),
+        # 무한대·NaN 상수는 비교가 늘 참/거짓이고 저장도 못 한다(#517 리뷰).
+        ParameterConstraint("fast", ConstraintOperator.LT, right_value=float("inf")),
+        ParameterConstraint("fast", ConstraintOperator.NE, right_value=float("nan")),
+        # 종류가 다르면 같음 비교가 늘 참/거짓이다.
+        ParameterConstraint("fast", ConstraintOperator.NE, right_value="20"),
+        ParameterConstraint("fast", ConstraintOperator.EQ, right_value=True),
+        ParameterConstraint("mode", ConstraintOperator.EQ, right_parameter="fast"),
     ],
 )
 def test_invalid_constraints_are_rejected(constraint: ParameterConstraint) -> None:

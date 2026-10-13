@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -64,8 +65,8 @@ _ORDERING = frozenset(
 class ParameterConstraint:
     """탐색 축 값과 다른 탐색 축 값(`right_parameter`) 또는 상수(`right_value`)의 관계.
 
-    둘 중 정확히 하나를 쓴다. 순서 비교(`lt`·`le`·`gt`·`ge`)는 숫자끼리만, 선택지는 `eq`·`ne`만
-    받는다.
+    둘 중 정확히 하나를 쓴다. 비교하는 두 쪽은 같은 종류(유한한 숫자끼리, 또는 같은 타입의 선택지
+    값끼리)여야 하고, 크기 비교(`lt`·`le`·`gt`·`ge`)는 숫자 값끼리만 한다.
     """
 
     left: str
@@ -199,6 +200,11 @@ def _is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _kind(value: object) -> str:
+    """비교할 수 있는 값의 종류. 숫자는 정수·실수를 한 종류로 보고 bool 은 숫자가 아니다."""
+    return "number" if _is_number(value) else type(value).__name__
+
+
 def _check_constraint(
     constraint: ParameterConstraint, axes: Mapping[str, tuple[ParameterValue, ...]]
 ) -> None:
@@ -223,15 +229,20 @@ def _check_constraint(
     outside = [parameter_id for parameter_id in referenced if parameter_id not in axes]
     if outside:
         raise invalid(f"제약은 탐색하는 파라미터끼리만 걸 수 있습니다(탐색 축이 아님: {outside})")
-    if constraint.operator in _ORDERING:
-        operands = [*axes[constraint.left]]
-        operands += (
-            axes[constraint.right_parameter]
-            if constraint.right_parameter is not None
-            else [constraint.right_value]
-        )
-        if not all(_is_number(value) for value in operands):
-            raise invalid("크기 비교는 숫자 파라미터끼리만 할 수 있습니다")
+    right = (
+        axes[constraint.right_parameter]
+        if constraint.right_parameter is not None
+        else (constraint.right_value,)
+    )
+    operands = (*axes[constraint.left], *right)
+    # 무한대·NaN 상수는 비교가 늘 참이거나 늘 거짓이고 저장(JSON)도 못 한다.
+    if any(isinstance(value, float) and not math.isfinite(value) for value in operands):
+        raise invalid("제약 값은 유한한 숫자여야 합니다")
+    # 종류가 다르면 같음 비교가 늘 참/거짓이 된다(정수 축과 "20", 정수 1 과 true 등).
+    if len({_kind(value) for value in operands}) != 1:
+        raise invalid("제약의 두 쪽은 같은 종류의 값이어야 합니다")
+    if constraint.operator in _ORDERING and not all(_is_number(value) for value in operands):
+        raise invalid("크기 비교는 숫자 값끼리만 할 수 있습니다")
 
 
 def grid_neighbors(shape: tuple[int, ...], index: GridIndex) -> tuple[GridIndex, ...]:

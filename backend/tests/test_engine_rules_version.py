@@ -18,8 +18,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     ImpactModel,
     ParticipationBasis,
     RunEnvironment,
-    impact_scales,
-    participation_volumes,
+    cost_inputs,
     settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
@@ -59,8 +58,8 @@ def _rules_digest() -> str:
         impact_model=ImpactModel.SQRT,
         participation_basis=ParticipationBasis.ADV20,
     )
-    scales = impact_scales(environment, bars, settled) or {}
-    volumes = participation_volumes(environment, bars, settled) or {}
+    scales = cost_inputs(environment, bars, settled).impact_scales or {}
+    volumes = cost_inputs(environment, bars, settled).participation_volumes or {}
     rules = (
         STATUTORY_SELL_TAX_BPS,
         MAX_IMPACT_FRACTION,

@@ -3,9 +3,13 @@ from strategy_workbench.domain.backtest._canonical import (
     run_environment_canonical_json,
 )
 from strategy_workbench.domain.backtest._cost_history import cost_history_sessions
+from strategy_workbench.domain.backtest._cost_inputs import (
+    CostInputs,
+    cost_inputs,
+    impact_input_warnings,
+)
 from strategy_workbench.domain.backtest._impact import (
     MAX_IMPACT_FRACTION,
-    impact_scales,
 )
 from strategy_workbench.domain.backtest._krx_tax import (
     STATUTORY_SELL_TAX_BPS,
@@ -25,7 +29,6 @@ from strategy_workbench.domain.backtest._models import (
 )
 from strategy_workbench.domain.backtest._participation import (
     PRICE_ADJUSTING_ACTIONS,
-    participation_volumes,
     settlement_multipliers,
 )
 from strategy_workbench.domain.backtest._requirement import (
@@ -49,6 +52,9 @@ from strategy_workbench.domain.backtest._schema import (
 )
 
 __all__ = [
+    "CostInputs",
+    "cost_inputs",
+    "impact_input_warnings",
     "CATALOG_UNIVERSE",
     "PRICE_ADJUSTING_ACTIONS",
     "MAX_IMPACT_FRACTION",
@@ -71,8 +77,6 @@ __all__ = [
     "cost_history_sessions",
     "environment_from_retired_settings",
     "environment_hash",
-    "impact_scales",
-    "participation_volumes",
     "settlement_multipliers",
     "require_environment",
     "require_research_window",

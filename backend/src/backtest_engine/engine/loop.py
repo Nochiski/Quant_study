@@ -355,7 +355,7 @@ class BacktestEngine:
                     run.store.append(fill.ts, RecordKind.FILL, fill)
                     # 매도 거래세는 그 체결 바로 뒤에 청구·기록한다. 매수 여력은 체결을 계획할 때
                     # 이미 같은 금액을 뺐다(`_apply_quote`).
-                    tax = sell_tax(fill, run.config)
+                    tax = sell_tax(fill)
                     if tax is not None:
                         self._ledger(run).charge(tax)
                         run.store.append(tax.ts, RecordKind.COST, tax)
@@ -816,7 +816,7 @@ class BacktestEngine:
             run.rust_slippage,
             run.config.sell_tax_rate(snapshot.ts.date()),
         )
-        for kind, order_id, quantity, price, slip, fee, payload in ops:
+        for kind, order_id, quantity, price, slip, fee, payload, fill_tax in ops:
             match kind:
                 case "fill":
                     entry = order_manager.get(order_id)
@@ -835,6 +835,7 @@ class BacktestEngine:
                         fee=fee,
                         slippage_per_share=slip,
                         cap_volume=snapshot.bar(entry.order.instrument).cap_volume,
+                        sell_tax=fill_tax,
                     )
                     queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                     if run.wants(EventKind.FILL):
@@ -884,12 +885,10 @@ class BacktestEngine:
             snapshot.bar(order.instrument),
             order_manager.next_fill_id(),
             quantity,
-        )
-        tax = sell_tax_amount(
-            fill.side, fill.quantity, fill.price, run.config.sell_tax_rate(fill.ts.date())
+            sell_tax_rate=run.config.sell_tax_rate(snapshot.ts.date()),
         )
         power.consume_quantity(
-            fill.instrument, fill.side, fill.quantity, fill.price, fill.fee + tax
+            fill.instrument, fill.side, fill.quantity, fill.price, fill.fee + fill.sell_tax
         )
         queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
         if run.wants(EventKind.FILL):

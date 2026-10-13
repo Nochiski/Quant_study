@@ -125,6 +125,8 @@ pub(crate) struct FillWire {
     pub(crate) slippage_per_share: f64,
     /// 체결 세션 bar 의 유동성 캡 기준 거래량(Python `FillEvent.cap_volume`).
     pub(crate) cap_volume: i64,
+    /// 최종 체결 계획에서 확정한 거래세. 소비자는 다시 계산하지 않는다.
+    pub(crate) sell_tax: f64,
 }
 
 impl FillWire {
@@ -141,6 +143,7 @@ impl FillWire {
                 self.fee,
                 self.slippage_per_share,
                 self.cap_volume,
+                self.sell_tax,
             ),
         )
     }
@@ -361,6 +364,7 @@ pub(crate) struct ResultTableRows<'a> {
         f64,
         f64,
         i64,
+        f64,
     )>,
     pub(crate) costs: Vec<(usize, &'a str, Option<u32>, f64)>,
     pub(crate) roundings: Vec<(usize, u32, f64, f64)>,
@@ -603,6 +607,7 @@ impl RecordStore {
                         fill.fee,
                         fill.slippage_per_share,
                         fill.cap_volume,
+                        fill.sell_tax,
                     ));
                     traded_notional += fill.quantity as f64 * fill.price;
                     total_fees += fill.fee;
@@ -674,6 +679,7 @@ mod tests {
             fee: 0.0,
             slippage_per_share: 0.0,
             cap_volume: 100,
+            sell_tax: 0.0,
         }))
     }
 
@@ -902,7 +908,7 @@ mod tests {
         );
         assert_eq!(
             tables.fills,
-            vec![("F-000001", "O-000001", 1, 0, "buy", 3, 10.0, 0.0, 0.0, 100)]
+            vec![("F-000001", "O-000001", 1, 0, "buy", 3, 10.0, 0.0, 0.0, 100, 0.0)]
         );
         assert_eq!(tables.costs, vec![(1, "margin_interest", None, 1.5)]);
         assert_eq!(tables.fill_totals, (30.0, 0.0, 0.0));

@@ -142,10 +142,10 @@ fn py_list(items: &[String]) -> String {
 }
 
 /// 계획 항목. Python 루프가 순서대로 적용한다.
-/// `("fill", order_id, quantity, price, slip, fee, "")`
-/// `("update", order_id, 0, 0, 0, 0, "status|detail")`
+/// `("fill", order_id, quantity, price, slip, fee, "", sell_tax)`
+/// `("update", order_id, 0, 0, 0, 0, "status|detail", 0)`
 /// `("trigger", order_id, ...)`, `("remove", order_id, ...)`, `("drop_group", group_id, ...)`
-pub(crate) type Op = (String, String, i64, f64, f64, f64, String);
+pub(crate) type Op = (String, String, i64, f64, f64, f64, String, f64);
 
 /// 매도 체결 금액 × 거래세율. 매수는 0이다. 연산 순서는 Python `costs.sell_tax_amount`와 같다.
 pub(crate) fn sell_tax(side: &str, quantity: i64, price: f64, rate: f64) -> f64 {
@@ -293,6 +293,7 @@ impl<'a> Session<'a> {
             0.0,
             0.0,
             format!("{status}|{}", detail.unwrap_or_default()),
+            0.0,
         ));
     }
 
@@ -302,8 +303,7 @@ impl<'a> Session<'a> {
         let detail_before = self.detail(q, e);
         let notional = quantity as f64 * q.price;
         let fee = notional * self.fee_rate;
-        // 매도 거래세는 체결 기록이 아니라 비용 기록이지만, 같은 세션 뒤 매수가 그 돈을 쓰지 않도록
-        // 여력에서는 수수료와 함께 뺀다.
+        // 최종 체결의 세금을 한 번 확정해 여력과 체결 기록에 함께 전달한다.
         let tax = sell_tax(&e.side, quantity, q.price, self.sell_tax_rate);
         self.power
             .consume(&e.key, &e.side, quantity, q.price, fee + tax)?;
@@ -315,6 +315,7 @@ impl<'a> Session<'a> {
             q.slip,
             fee,
             String::new(),
+            tax,
         ));
         e.remaining -= quantity;
         if e.remaining == 0 {
@@ -330,6 +331,7 @@ impl<'a> Session<'a> {
                     0.0,
                     0.0,
                     String::new(),
+                    0.0,
                 ));
             }
             self.update(&e.order_id.clone(), "partially_filled", detail_before);
@@ -346,6 +348,7 @@ impl<'a> Session<'a> {
             0.0,
             0.0,
             String::new(),
+            0.0,
         ));
     }
 
@@ -364,6 +367,7 @@ impl<'a> Session<'a> {
                 0.0,
                 0.0,
                 String::new(),
+                0.0,
             ));
             let d = format!(
                 "stop triggered, limit not met — instrument={} stop={} limit={} ts={}",

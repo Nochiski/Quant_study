@@ -9,7 +9,7 @@ use crate::persistent_router::{
 use crate::portfolio::Portfolio;
 use crate::quote::parse_decimal_ratio;
 use crate::records::{RecordIndexWire, RecordStore};
-use crate::session::{self, sell_tax, BarTuple, EntryTuple, Op};
+use crate::session::{self, BarTuple, EntryTuple, Op};
 use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
@@ -291,7 +291,7 @@ impl PersistentEngine {
             .any(|order_id| self.order_index(order_id).is_some())
     }
 
-    fn apply_market_ops(&mut self, ops: &mut [Op], sell_tax_rate: f64) -> PyResult<()> {
+    fn apply_market_ops(&mut self, ops: &mut [Op]) -> PyResult<()> {
         for op in ops {
             match op.0.as_str() {
                 "fill" => {
@@ -300,7 +300,7 @@ impl PersistentEngine {
                     let side = self.orders[index].side.clone();
                     self.portfolio.apply(&key, &side, op.2, op.3, op.5)?;
                     // 매도 거래세 청구. 비용 레코드는 FILL 레코드 바로 뒤에 드라이버가 남긴다.
-                    let tax = sell_tax(&side, op.2, op.3, sell_tax_rate);
+                    let tax = op.7;
                     if tax > 0.0 {
                         self.portfolio.charge(tax)?;
                     }
@@ -438,7 +438,7 @@ impl PersistentEngine {
                 sell_tax_rate,
             )?
         };
-        self.apply_market_ops(&mut ops, sell_tax_rate)?;
+        self.apply_market_ops(&mut ops)?;
         Ok(ops)
     }
 
@@ -930,12 +930,14 @@ mod tests {
                 0.0,
             )
             .unwrap();
-        runtime.apply_market_ops(&mut ops, 0.0).unwrap();
+        // 계획된 세금은 적용 단계에서 재계산하지 않는다.
+        ops[0].7 = 7.25;
+        runtime.apply_market_ops(&mut ops).unwrap();
 
         assert!(runtime.orders.is_empty());
         assert_eq!(ops[0].0, "fill");
         assert_eq!(ops[0].6, "F-000001");
         assert_eq!(runtime.portfolio.held_qty("X:ONE:equity:KRW"), 10);
-        assert_eq!(runtime.portfolio.cash(), 9_000.0);
+        assert_eq!(runtime.portfolio.cash(), 8_992.75);
     }
 }

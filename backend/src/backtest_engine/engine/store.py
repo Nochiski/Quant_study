@@ -427,6 +427,7 @@ class EventStore:
                         payload.fee,
                         payload.slippage_per_share,
                         payload.cap_volume,
+                        payload.sell_tax,
                     )
                 )
                 traded_notional += quantity * payload.price
@@ -709,6 +710,7 @@ class PersistentEventStore(EventStore):
             fee,
             slippage_per_share,
             cap_volume,
+            fill_tax,
         ) = wire
         try:
             side_value = _SIDE_BY_WIRE[side]
@@ -728,6 +730,7 @@ class PersistentEventStore(EventStore):
             fee=fee,
             slippage_per_share=slippage_per_share,
             cap_volume=cap_volume,
+            sell_tax=fill_tax,
         )
 
     def order_update_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> OrderUpdateEvent:

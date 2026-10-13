@@ -14,8 +14,6 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
-    FactorObservationQuery,
-    FactorObservationSet,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RawFieldValue,
@@ -38,10 +36,6 @@ from strategy_workbench.domain.equity.facade.research_data import (
     UniverseHistoryResult,
     UniversePoint,
     field_contract_snapshot_id,
-)
-from strategy_workbench.domain.factor.facade.evaluation import (
-    FactorFieldValue,
-    FactorObservation,
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
@@ -233,34 +227,6 @@ class MockEquityDataAdapter:
             detail=None if cells else f"no mock panel cells — query={query}",
         )
 
-    def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
-        """Generate a deterministic PIT-shaped factor panel behind the replaceable port."""
-        sessions = _factor_sessions(query)
-        security_ids = tuple(membership.security.security_id for membership in self._memberships)
-        observations = tuple(
-            FactorObservation(
-                as_of=session,
-                security_id=security_id,
-                fields=tuple(
-                    FactorFieldValue(
-                        field_id=field_id,
-                        value=_factor_field_value(
-                            field_id,
-                            security_index=security_index,
-                            session_index=session_index,
-                            session=session,
-                        ),
-                    )
-                    for field_id in query.required_field_ids
-                ),
-                forward_return=(security_index - 1) * 0.003 + ((session_index % 5) - 2) * 0.0002,
-            )
-            for session_index, session in enumerate(sessions)
-            for security_index, security_id in enumerate(security_ids)
-        )
-        return FactorObservationSet(
-            data_snapshot_id=self._snapshot.snapshot_id, observations=observations
-        )
 
     def load_raw_observations(
         self,
@@ -515,15 +481,6 @@ class MockEquityDataAdapter:
         )
 
 
-def _factor_sessions(query: FactorObservationQuery) -> tuple[date, ...]:
-    requested = list(_business_sessions(query.start, query.end))
-    history: list[date] = []
-    cursor = query.start - timedelta(days=1)
-    while len(history) < max(query.minimum_history_sessions - 1, 0):
-        if cursor.weekday() < 5:
-            history.append(cursor)
-        cursor -= timedelta(days=1)
-    return tuple((*reversed(history), *requested))
 
 
 def _sessions_with_history(

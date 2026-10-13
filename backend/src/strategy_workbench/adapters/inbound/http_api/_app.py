@@ -57,11 +57,7 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorExplanation,
     FactorGraphRequest,
     FactorGraphValidation,
-    FactorPreview,
-    FactorPreviewRequest,
     FactorResearchService,
-    FactorSnapshotMismatchError,
-    InvalidFactorRequestError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
     IncompatiblePortfolioRequestError,
@@ -784,31 +780,6 @@ def create_app(
     def explain_factor_graph(request: FactorGraphRequest) -> FactorExplanation:
         return factor_research.explain(request)
 
-    @app.post(
-        "/api/v1/factors/preview",
-        operation_id="previewFactorGraph",
-    )
-    def preview_factor_graph(request: FactorPreviewRequest) -> FactorPreview:
-        try:
-            return factor_research.preview(request)
-        except FactorSnapshotMismatchError as error:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "factor.snapshot_mismatch",
-                    "expected_data_snapshot_id": error.expected,
-                    "actual_data_snapshot_id": error.actual,
-                    "message": str(error),
-                },
-            ) from error
-        except InvalidFactorRequestError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "factor.graph.invalid",
-                    "validation": jsonable_encoder(asdict(error.validation)),
-                },
-            ) from error
 
     @app.get(
         "/api/v1/strategy-drafts/{draft_id}",

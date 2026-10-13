@@ -941,3 +941,69 @@ def test_a_run_environment_field_rule_is_coded_on_preview_and_trace_like_a_backt
         )
     TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
     TypeAdapter(Trace422Response).validate_python(responses[1].json())
+
+
+def test_factor_preview_uses_all_evaluated_values_not_selected_targets() -> None:
+    """선정 수를 하나로 줄여도 팩터 유효수와 상위값은 전체 모집단을 보여준다."""
+    client = TestClient(build_http_app())
+    spec, request = _inline_request(client)
+    spec["portfolio"]["selection_count"] = 1
+    request.update(security_ids=[], node_ids=[], include_raw=False)
+    response = client.post("/api/v1/strategies/debug/trace", json=request)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    preview = payload["factor_preview"]
+    assert preview["valid_count"] == 3
+    assert preview["missing_count"] == 0
+    assert len(preview["top"]) == 3
+    assert len(payload["summary"]["targets"]) == 1
+    ids = [row["security_id"] for row in preview["top"]]
+    detailed = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            **request,
+            "security_ids": ids,
+            "node_ids": [spec["factors"][0]["graph"]["output_node_id"]],
+        },
+    ).json()
+    values = {row["security_id"]: row["value"] for row in detailed["trace"]["rows"]}
+    assert [row["value"] for row in preview["top"]] == sorted(values.values(), reverse=True)
+    assert all(row["security"]["name"] for row in preview["top"])
+    assert detailed["factor_preview"] == preview
+
+
+@pytest.mark.parametrize("missing,valid,absent", [("drop", 1, 1), ("zero", 2, 0)])
+def test_factor_preview_uses_run_missing_policy_before_portfolio_filters(
+    missing: str, valid: int, absent: int
+) -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["portfolio"].update(rebalance="every_n_sessions", rebalance_every_n_sessions=1)
+    spec["eligibility"]["rules"] = [{"field_id": "price.close", "operator": "lt", "value": 0}]
+    factor = spec["factors"][0]
+    factor["direction"] = "low"
+    factor["graph"] = {
+        "nodes": [{"node_id": "flow", "field_id": "flow.foreign_net_buy", "kind": "field"}],
+        "output_node_id": "flow",
+    }
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "environment": _environment(start="2024-01-03", end="2024-01-09", missing=missing),
+            "as_of": "2024-01-03",
+            "factor_id": factor["factor_id"],
+            "security_ids": [],
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    preview = payload["factor_preview"]
+    assert (preview["valid_count"], preview["missing_count"], preview["missing"]) == (
+        valid,
+        absent,
+        missing,
+    )
+    assert len(preview["top"]) == valid
+    assert all(row["value"] == 0 for row in preview["top"])
+    assert payload["summary"]["targets"] == []

@@ -157,11 +157,12 @@ export const prepareStrategyTrace = (
     securityIds.length > 100
   )
     return { kind: "blocked", reason: "security" };
-  const factor = selection.summaryOnly
-    ? context.factors[0]
-    : context.factors.find(
-        (candidate) => candidate.factorId === selection.factorId,
-      );
+  const factor =
+    selection.summaryOnly && selection.factorId === ""
+      ? context.factors[0]
+      : context.factors.find(
+          (candidate) => candidate.factorId === selection.factorId,
+        );
   if (factor === undefined) return { kind: "blocked", reason: "factor" };
   if (
     !selection.summaryOnly &&

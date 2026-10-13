@@ -2086,44 +2086,6 @@ export type ExperimentTrialState = {
 };
 
 /**
- * FactorAnalytics
- */
-export type FactorAnalytics = {
-  /**
-   * Coverage
-   */
-  coverage: number;
-  /**
-   * Decay
-   */
-  decay: number | null;
-  /**
-   * Information Coefficient
-   */
-  information_coefficient: number | null;
-  /**
-   * Observation Count
-   */
-  observation_count: number;
-  /**
-   * Quantile Spread
-   */
-  quantile_spread: number | null;
-  /**
-   * Rank Information Coefficient
-   */
-  rank_information_coefficient: number | null;
-  /**
-   * Turnover
-   */
-  turnover: number | null;
-  /**
-   * Valid Count
-   */
-  valid_count: number;
-};
-
-/**
  * FactorAvailability
  */
 export type FactorAvailability = "implemented" | "catalog_only" | "unavailable";
@@ -2265,20 +2227,6 @@ export type FactorDefinition = {
  * FactorDirection
  */
 export type FactorDirection = "high" | "low";
-
-/**
- * FactorEvaluation
- */
-export type FactorEvaluation = {
-  /**
-   * Output Node Id
-   */
-  output_node_id: string;
-  /**
-   * Values
-   */
-  values: Array<FactorValue>;
-};
 
 /**
  * FactorExecutionPlan
@@ -2444,87 +2392,9 @@ export type FactorGraphValidation = {
 };
 
 /**
- * FactorMatrixCacheKey
- */
-export type FactorMatrixCacheKey = {
-  /**
-   * As Of End
-   */
-  as_of_end: string;
-  /**
-   * As Of Start
-   */
-  as_of_start: string;
-  /**
-   * Data Snapshot Id
-   */
-  data_snapshot_id: string;
-  /**
-   * Fingerprint
-   */
-  fingerprint: string;
-  /**
-   * Parameters
-   */
-  parameters: Array<ResolvedFactorParameter>;
-  /**
-   * Plan Hash
-   */
-  plan_hash: string;
-  /**
-   * Registry Version
-   */
-  registry_version: string;
-};
-
-/**
  * FactorPreference
  */
 export type FactorPreference = "high" | "low";
-
-/**
- * FactorPreview
- */
-export type FactorPreview = {
-  analytics: FactorAnalytics;
-  cache_key: FactorMatrixCacheKey;
-  /**
-   * Data Snapshot Id
-   */
-  data_snapshot_id: string;
-  evaluation: FactorEvaluation;
-  plan: FactorExecutionPlan;
-};
-
-/**
- * FactorPreviewRequest
- *
- * Preview request. The data snapshot is owned by the adapter (P1.5-01).
- *
- * `expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it
- * differs from the adapter's actual snapshot the preview fails closed instead of silently
- * computing against different data.
- */
-export type FactorPreviewRequest = {
-  /**
-   * As Of End
-   */
-  as_of_end: string;
-  /**
-   * As Of Start
-   */
-  as_of_start: string;
-  /**
-   * Expected Data Snapshot Id
-   */
-  expected_data_snapshot_id?: string | null;
-  graph: FactorGraph;
-  missing?: MissingPolicy | null;
-  /**
-   * Parameters
-   */
-  parameters?: Array<ResolvedFactorParameter>;
-};
 
 /**
  * FactorSignal
@@ -2573,24 +2443,6 @@ export type FactorValidationIssue = {
  * FactorValidationSeverity
  */
 export type FactorValidationSeverity = "error" | "warning";
-
-/**
- * FactorValue
- */
-export type FactorValue = {
-  /**
-   * As Of
-   */
-  as_of: string;
-  /**
-   * Security Id
-   */
-  security_id: string;
-  /**
-   * Value
-   */
-  value: number | null;
-};
 
 /**
  * FailureCode
@@ -4320,20 +4172,6 @@ export type ResearchPreview = {
 export type ResearchWarningSeverity = "info" | "warning";
 
 /**
- * ResolvedFactorParameter
- */
-export type ResolvedFactorParameter = {
-  /**
-   * Parameter Id
-   */
-  parameter_id: string;
-  /**
-   * Value
-   */
-  value: number | number | string | boolean;
-};
-
-/**
  * ReviseDocumentRequest
  */
 export type ReviseDocumentRequest = {
@@ -5461,6 +5299,40 @@ export type StrategyExplanationStep = {
 };
 
 /**
+ * StrategyFactorPreview
+ */
+export type StrategyFactorPreview = {
+  missing: MissingPolicy;
+  /**
+   * Missing Count
+   */
+  missing_count: number;
+  /**
+   * Top
+   */
+  top: Array<StrategyFactorPreviewRow>;
+  /**
+   * Valid Count
+   */
+  valid_count: number;
+};
+
+/**
+ * StrategyFactorPreviewRow
+ */
+export type StrategyFactorPreviewRow = {
+  security: SecurityRef | null;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Value
+   */
+  value: number;
+};
+
+/**
  * StrategyIdentity
  */
 export type StrategyIdentity = {
@@ -5801,6 +5673,7 @@ export type StrategyTraceResponse = {
    * Factor Id
    */
   factor_id: string;
+  factor_preview: StrategyFactorPreview;
   /**
    * Plan Hash
    */
@@ -8624,33 +8497,6 @@ export type ExplainFactorGraphResponses = {
 
 export type ExplainFactorGraphResponse =
   ExplainFactorGraphResponses[keyof ExplainFactorGraphResponses];
-
-export type PreviewFactorGraphData = {
-  body: FactorPreviewRequest;
-  path?: never;
-  query?: never;
-  url: "/api/v1/factors/preview";
-};
-
-export type PreviewFactorGraphErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError;
-};
-
-export type PreviewFactorGraphError =
-  PreviewFactorGraphErrors[keyof PreviewFactorGraphErrors];
-
-export type PreviewFactorGraphResponses = {
-  /**
-   * Successful Response
-   */
-  200: FactorPreview;
-};
-
-export type PreviewFactorGraphResponse =
-  PreviewFactorGraphResponses[keyof PreviewFactorGraphResponses];
 
 export type ValidateFactorGraphData = {
   body: FactorGraphRequest;

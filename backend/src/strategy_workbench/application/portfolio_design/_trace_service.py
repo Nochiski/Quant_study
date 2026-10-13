@@ -24,6 +24,7 @@ from strategy_workbench.domain.strategy.facade.provenance import (
     StrategySourceKind,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
+    FactorDirection,
     StrategySpec,
 )
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
@@ -38,6 +39,8 @@ from ._service import (
 )
 from ._trace_models import (
     RawStrategyTraceRow,
+    StrategyFactorPreview,
+    StrategyFactorPreviewRow,
     StrategyTargetTrace,
     StrategyTraceInput,
     StrategyTracePage,
@@ -213,17 +216,54 @@ class StrategyTraceService:
             cancelled=cancelled,
         )
         _raise_if_cancelled(cancelled)
+        securities = self._securities.universe_securities(
+            environment.market.value, environment.universe_id, resolved_as_of
+        )
+        _raise_if_cancelled(cancelled)
         target, summary = _target_projection(
             pipeline.preview.tape.frames,
             resolved_as_of,
             set(request.security_ids),
             pipeline.construction_trace,
-            lambda: self._securities.universe_securities(
-                environment.market.value, environment.universe_id, resolved_as_of
-            ),
+            lambda: securities,
             cancelled=cancelled,
         )
+        # 모집단은 PIT 관측의 유니버스 구성이다. 선정 targets나 요청한 추적 종목으로 좁히지 않는다.
+        members: set[str] = set()
+        for index, observation in enumerate(pipeline.raw_observations):
+            if index % 128 == 0:
+                _raise_if_cancelled(cancelled)
+            if observation.as_of == resolved_as_of and observation.universe_member:
+                members.add(observation.security_id)
+        values: dict[str, float] = {}
+        for index, value in enumerate(record.values):
+            if index % 128 == 0:
+                _raise_if_cancelled(cancelled)
+            if (
+                value.as_of == resolved_as_of
+                and value.security_id in members
+                and value.value is not None
+            ):
+                values[value.security_id] = value.value
+        factor = next(item for item in spec.factors if item.factor_id == request.factor_id)
+        direction = -1 if factor.direction is FactorDirection.HIGH else 1
+        names = {ref.security_id: ref for ref in securities}
+        top = sorted(
+            values, key=lambda security_id: (direction * values[security_id], security_id)
+        )[:5]
+        _raise_if_cancelled(cancelled)
         return StrategyTraceResponse(
+            factor_preview=StrategyFactorPreview(
+                valid_count=len(values),
+                missing_count=len(members) - len(values),
+                missing=environment.missing,
+                top=tuple(
+                    StrategyFactorPreviewRow(
+                        security_id=key, value=values[key], security=names.get(key)
+                    )
+                    for key in top
+                ),
+            ),
             spec_hash=provenance.spec_hash,
             snapshot_id=pipeline.data_snapshot_id,
             registry_version=record.plan.registry_version,

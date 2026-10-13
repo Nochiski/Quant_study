@@ -58,10 +58,9 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataUnavailableError,
     CorporateActionRecord,
 )
-from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
 from strategy_workbench.application.factor_research.facade.research import (
     FactorCatalogQuery,
-    FactorPreviewRequest,
+    FactorGraphRequest,
     FactorResearchService,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
@@ -86,6 +85,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
+from strategy_workbench.domain.factor.facade.planning import build_factor_matrix_cache_key
 from strategy_workbench.domain.factor.facade.registry import (
     FactorAvailability,
     build_default_factor_registry,
@@ -237,20 +237,34 @@ def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
     assert older.snapshot().snapshot_id.startswith(ledger)
     assert older.snapshot().snapshot_id != current.snapshot().snapshot_id
 
-    request = FactorPreviewRequest(
-        FactorGraph(nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"),
-        START,
-        END,
-    )
     registry = build_default_factor_registry()
-    keys = [
-        FactorResearchService(registry, adapter, adapter).preview(request).cache_key
+    plans = [
+        FactorResearchService(registry, adapter).explain(
+            FactorGraphRequest(
+                FactorGraph(
+                    nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"
+                )
+            )
+        )
         for adapter in (current, older)
     ]
-    assert [key.data_snapshot_id for key in keys] == [
+    assert [plan.data_snapshot_id for plan in plans] == [
         current.snapshot().snapshot_id,
         older.snapshot().snapshot_id,
     ]
+    keys = []
+    for explanation in plans:
+        assert explanation.plan is not None
+        keys.append(
+            build_factor_matrix_cache_key(
+                data_snapshot_id=explanation.data_snapshot_id,
+                plan_hash=explanation.plan.plan_hash,
+                registry_version=explanation.registry_version,
+                parameters=(),
+                as_of_start=START,
+                as_of_end=END,
+            )
+        )
     assert keys[0].fingerprint != keys[1].fingerprint
 
 
@@ -1034,7 +1048,7 @@ def test_universe_securities_reads_names_through_the_observation_market(
     assert adapter.universe_securities("KRX", "krx.unknown", START) == ()
 
 
-# ── FactorMetadataPort · FactorObservationPort ────────────────────────────────
+# ── FactorMetadataPort · RawObservationPort ────────────────────────────────
 
 
 def test_factor_metadata_and_observations_come_from_the_same_panel(
@@ -1043,30 +1057,27 @@ def test_factor_metadata_and_observations_come_from_the_same_panel(
     metadata = adapter.resolve_factor_fields(("price.adj_close", "short.short_balance_ratio"))
     assert [f.field_id for f in metadata.fields] == ["price.adj_close"]
     assert metadata.data_snapshot_id == adapter.snapshot().snapshot_id
-    observations = adapter.load_factor_observations(
-        FactorObservationQuery(("price.adj_close",), START, END, minimum_history_sessions=2)
+    observations = adapter.load_raw_observations(
+        RawObservationQuery("KRX", "krx.common-stock", START, END, ("price.adj_close",), 1)
     )
     assert observations.data_snapshot_id == metadata.data_snapshot_id
     dates = {o.as_of for o in observations.observations}
     assert min(dates) == date(2024, 1, 5) and max(dates) == END
-    assert all(o.forward_return is None for o in observations.observations)
     assert any(not o.universe_member for o in observations.observations)  # 000660 정지일
 
 
 def test_factor_observations_mark_cells_the_ledger_masked(adapter: EquityDuckdbAdapter) -> None:
-    """팩터 연구 경로도 원장이 가린 셀을 `masked` 로 싣는다 — 결측 정책이 채우지 않게(#298)."""
-    observations = adapter.load_factor_observations(
-        FactorObservationQuery(("credit.margin_balance",), START, END, minimum_history_sessions=1)
+    """원시 관측 경로는 원장이 가린 셀을 `MASKED` 로 싣는다 — 결측 정책이 채우지 않게(#298)."""
+    observations = adapter.load_raw_observations(
+        RawObservationQuery("KRX", "krx.common-stock", START, END, ("credit.margin_balance",), 0)
     ).observations
     cells = {
-        (item.as_of, item.security_id): field
-        for item in observations
-        for field in item.fields
+        (item.as_of, item.security_id): field for item in observations for field in item.fields
     }
     # 권리락일(01-04) 행은 신용 랙 3세션 뒤(01-09)에 보인다 — 가린 셀이다
     masked = cells[(date(2024, 1, 9), "000660:1")]
-    assert (masked.value, masked.masked) == (None, True)
-    assert not cells[(date(2024, 1, 9), "005930:1")].masked
+    assert (masked.value, masked.kind) == (None, CellKind.MASKED)
+    assert cells[(date(2024, 1, 9), "005930:1")].kind is not CellKind.MASKED
 
 
 def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
@@ -1097,7 +1108,7 @@ def test_factor_catalog_does_not_offer_a_factor_whose_field_the_ledger_lacks(
     (`resolve_factor_fields`)로 판정하고, compile 목록(`factor_field_catalog`)도 같은 메서드를
     부른다.
     """
-    service = FactorResearchService(build_default_factor_registry(), adapter, adapter)
+    service = FactorResearchService(build_default_factor_registry(), adapter)
 
     def catalog(availability: FactorAvailability) -> set[str]:
         query = FactorCatalogQuery(availability=(availability,), page_size=100)
@@ -1336,7 +1347,9 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
     뺐다(#292 리뷰 P2-2).
     """
     macro_fields = {
-        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance",
+        "financial.book_equity",
+        "consensus.forward_eps",
+        "credit.margin_balance",
         "price.adj_close",
     }
     root = build_workbench_root(tmp_path / "equity", catalog=False)
@@ -1581,7 +1594,10 @@ def test_corrupt_catalog_file_or_meta_at_boot_drops_every_macro_source(
     served = {p.field_id for p in broken.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
     assert not served & {
-        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance", "price.adj_close"
+        "financial.book_equity",
+        "consensus.forward_eps",
+        "credit.margin_balance",
+        "price.adj_close",
     }
     denied = _raw(broken, fields=("consensus.forward_eps",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
@@ -1880,15 +1896,15 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
     assert momentum("price.close") == pytest.approx(52_000 / 103_000 - 1)
 
 
-def test_source_omitted_zero_enters_factor_windows_on_both_paths(
+def test_source_omitted_zero_enters_factor_windows_on_the_pipeline(
     adapter: EquityDuckdbAdapter,
 ) -> None:
-    """키움 공매도의 원천 생략 0 은 팩터 연구·실행 두 경로에서 값으로 창에 든다(#371 리뷰 P3-2).
+    """키움 공매도의 원천 생략 0 은 공용 실행 경로에서 값으로 창에 든다(#371 리뷰 P3-2).
 
     005930 공매도 대금은 01-08 measured 70,000,000 · 01-09 src_omitted 이고 랙 1 이라 01-09·01-10
     에 보인다. 01-10 의 2세션 평균은 기본 결측 정책(drop)에서 (70,000,000 + 0) / 2 다 — 0 을
-    모르는 결측으로 접으면 창이 서지 않는다. 연구 경로는 `load_factor_observations`, 실행 경로는
-    원시 관측을 팩터 관측으로 옮기는 파이프라인을 지난다.
+    모르는 결측으로 접으면 창이 서지 않는다. 원시 관측을 팩터 관측으로 옮기는 공용
+    파이프라인을 지난다.
     """
     graph = FactorGraph(
         nodes=(
@@ -1898,9 +1914,6 @@ def test_source_omitted_zero_enters_factor_windows_on_both_paths(
         output_node_id="avg",
     )
     registry = build_default_factor_registry()
-    research = FactorResearchService(registry, adapter, adapter).preview(
-        FactorPreviewRequest(graph, START, END)
-    )
     spec = _momentum_spec("short.short_sale_value")
     spec = replace(spec, factors=(replace(spec.factors[0], graph=graph),))
     pipeline = PortfolioDesignService(
@@ -1910,11 +1923,8 @@ def test_source_omitted_zero_enters_factor_windows_on_both_paths(
         factor_registry_version=registry.version,
     ).run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     key = (date(2024, 1, 10), "005930:1")
-    values = [
-        {(v.as_of, v.security_id): v.value for v in evaluated}
-        for evaluated in (research.evaluation.values, pipeline.factor_evaluations[0].values)
-    ]
-    assert [found[key] for found in values] == [pytest.approx(35_000_000)] * 2
+    values = {(v.as_of, v.security_id): v.value for v in pipeline.factor_evaluations[0].values}
+    assert values[key] == pytest.approx(35_000_000)
 
 
 def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdbAdapter) -> None:

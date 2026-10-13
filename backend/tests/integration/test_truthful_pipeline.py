@@ -213,7 +213,7 @@ def test_explain_and_portfolio_compile_identical_plans_from_one_metadata_contrac
     adapter = MockEquityDataAdapter.demo()
     registry = build_default_factor_registry()
     spec = _spec()
-    research = FactorResearchService(registry, adapter, adapter)
+    research = FactorResearchService(registry, adapter)
     result = _service(adapter, metadata=adapter, registry_version=registry.version).run_pipeline(
         PortfolioPreviewRequest(spec, environment=_environment())
     )

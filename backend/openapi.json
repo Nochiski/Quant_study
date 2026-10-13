@@ -3337,89 +3337,6 @@
         "title": "ExperimentTrialState",
         "type": "object"
       },
-      "FactorAnalytics": {
-        "properties": {
-          "coverage": {
-            "title": "Coverage",
-            "type": "number"
-          },
-          "decay": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Decay"
-          },
-          "information_coefficient": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Information Coefficient"
-          },
-          "observation_count": {
-            "title": "Observation Count",
-            "type": "integer"
-          },
-          "quantile_spread": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quantile Spread"
-          },
-          "rank_information_coefficient": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rank Information Coefficient"
-          },
-          "turnover": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turnover"
-          },
-          "valid_count": {
-            "title": "Valid Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "information_coefficient",
-          "rank_information_coefficient",
-          "quantile_spread",
-          "coverage",
-          "turnover",
-          "decay",
-          "observation_count",
-          "valid_count"
-        ],
-        "title": "FactorAnalytics",
-        "type": "object"
-      },
       "FactorAvailability": {
         "enum": [
           "implemented",
@@ -3681,27 +3598,6 @@
         ],
         "title": "FactorDirection",
         "type": "string"
-      },
-      "FactorEvaluation": {
-        "properties": {
-          "output_node_id": {
-            "title": "Output Node Id",
-            "type": "string"
-          },
-          "values": {
-            "items": {
-              "$ref": "#/components/schemas/FactorValue"
-            },
-            "title": "Values",
-            "type": "array"
-          }
-        },
-        "required": [
-          "output_node_id",
-          "values"
-        ],
-        "title": "FactorEvaluation",
-        "type": "object"
       },
       "FactorExecutionPlan": {
         "properties": {
@@ -3981,54 +3877,6 @@
         "title": "FactorGraphValidation",
         "type": "object"
       },
-      "FactorMatrixCacheKey": {
-        "properties": {
-          "as_of_end": {
-            "format": "date",
-            "title": "As Of End",
-            "type": "string"
-          },
-          "as_of_start": {
-            "format": "date",
-            "title": "As Of Start",
-            "type": "string"
-          },
-          "data_snapshot_id": {
-            "title": "Data Snapshot Id",
-            "type": "string"
-          },
-          "fingerprint": {
-            "title": "Fingerprint",
-            "type": "string"
-          },
-          "parameters": {
-            "items": {
-              "$ref": "#/components/schemas/ResolvedFactorParameter"
-            },
-            "title": "Parameters",
-            "type": "array"
-          },
-          "plan_hash": {
-            "title": "Plan Hash",
-            "type": "string"
-          },
-          "registry_version": {
-            "title": "Registry Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "fingerprint",
-          "data_snapshot_id",
-          "plan_hash",
-          "registry_version",
-          "parameters",
-          "as_of_start",
-          "as_of_end"
-        ],
-        "title": "FactorMatrixCacheKey",
-        "type": "object"
-      },
       "FactorPreference": {
         "enum": [
           "high",
@@ -4036,89 +3884,6 @@
         ],
         "title": "FactorPreference",
         "type": "string"
-      },
-      "FactorPreview": {
-        "properties": {
-          "analytics": {
-            "$ref": "#/components/schemas/FactorAnalytics"
-          },
-          "cache_key": {
-            "$ref": "#/components/schemas/FactorMatrixCacheKey"
-          },
-          "data_snapshot_id": {
-            "title": "Data Snapshot Id",
-            "type": "string"
-          },
-          "evaluation": {
-            "$ref": "#/components/schemas/FactorEvaluation"
-          },
-          "plan": {
-            "$ref": "#/components/schemas/FactorExecutionPlan"
-          }
-        },
-        "required": [
-          "data_snapshot_id",
-          "plan",
-          "cache_key",
-          "evaluation",
-          "analytics"
-        ],
-        "title": "FactorPreview",
-        "type": "object"
-      },
-      "FactorPreviewRequest": {
-        "description": "Preview request. The data snapshot is owned by the adapter (P1.5-01).\n\n`expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it\ndiffers from the adapter's actual snapshot the preview fails closed instead of silently\ncomputing against different data.",
-        "properties": {
-          "as_of_end": {
-            "format": "date",
-            "title": "As Of End",
-            "type": "string"
-          },
-          "as_of_start": {
-            "format": "date",
-            "title": "As Of Start",
-            "type": "string"
-          },
-          "expected_data_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected Data Snapshot Id"
-          },
-          "graph": {
-            "$ref": "#/components/schemas/FactorGraph"
-          },
-          "missing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MissingPolicy"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "parameters": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ResolvedFactorParameter"
-            },
-            "title": "Parameters",
-            "type": "array"
-          }
-        },
-        "required": [
-          "graph",
-          "as_of_start",
-          "as_of_end"
-        ],
-        "title": "FactorPreviewRequest",
-        "type": "object"
       },
       "FactorSignal": {
         "properties": {
@@ -4197,37 +3962,6 @@
         ],
         "title": "FactorValidationSeverity",
         "type": "string"
-      },
-      "FactorValue": {
-        "properties": {
-          "as_of": {
-            "format": "date",
-            "title": "As Of",
-            "type": "string"
-          },
-          "security_id": {
-            "title": "Security Id",
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          }
-        },
-        "required": [
-          "as_of",
-          "security_id",
-          "value"
-        ],
-        "title": "FactorValue",
-        "type": "object"
       },
       "FailureCode": {
         "description": "턴이 정상 종료하지 못한 사유.\n\n`Failure.message`는 이 코드별 고정 문장에 진단 컨텍스트만 붙인다. SDK 예외 문자열·응답 본문을\n그대로 넣지 않는다(spec D2: 비밀 스크럽). 예외는 코드로만 매핑한다.",
@@ -6909,37 +6643,6 @@
         "title": "ResearchWarningSeverity",
         "type": "string"
       },
-      "ResolvedFactorParameter": {
-        "properties": {
-          "parameter_id": {
-            "title": "Parameter Id",
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "boolean"
-              }
-            ],
-            "title": "Value"
-          }
-        },
-        "required": [
-          "parameter_id",
-          "value"
-        ],
-        "title": "ResolvedFactorParameter",
-        "type": "object"
-      },
       "ReviseDocumentRequest": {
         "properties": {
           "expected_revision": {
@@ -8603,6 +8306,65 @@
         "title": "StrategyExplanationStep",
         "type": "object"
       },
+      "StrategyFactorPreview": {
+        "properties": {
+          "missing": {
+            "$ref": "#/components/schemas/MissingPolicy"
+          },
+          "missing_count": {
+            "title": "Missing Count",
+            "type": "integer"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyFactorPreviewRow"
+            },
+            "title": "Top",
+            "type": "array"
+          },
+          "valid_count": {
+            "title": "Valid Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "valid_count",
+          "missing_count",
+          "missing",
+          "top"
+        ],
+        "title": "StrategyFactorPreview",
+        "type": "object"
+      },
+      "StrategyFactorPreviewRow": {
+        "properties": {
+          "security": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "value",
+          "security"
+        ],
+        "title": "StrategyFactorPreviewRow",
+        "type": "object"
+      },
       "StrategyIdentity": {
         "properties": {
           "revision": {
@@ -9190,6 +8952,9 @@
             "title": "Factor Id",
             "type": "string"
           },
+          "factor_preview": {
+            "$ref": "#/components/schemas/StrategyFactorPreview"
+          },
           "plan_hash": {
             "title": "Plan Hash",
             "type": "string"
@@ -9263,7 +9028,8 @@
           "trace",
           "raw",
           "raw_truncated",
-          "target"
+          "target",
+          "factor_preview"
         ],
         "title": "StrategyTraceResponse",
         "type": "object"
@@ -13690,44 +13456,6 @@
           }
         },
         "summary": "Explain Factor Graph"
-      }
-    },
-    "/api/v1/factors/preview": {
-      "post": {
-        "operationId": "previewFactorGraph",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FactorPreviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FactorPreview"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview Factor Graph"
       }
     },
     "/api/v1/factors/validate": {

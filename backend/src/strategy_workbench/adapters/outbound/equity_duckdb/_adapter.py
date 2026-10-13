@@ -5,7 +5,7 @@
 밖이며 질의하면 `INVALID_QUERY`(detail 에 `unavailable` + 사유)다 — mock 값으로 대신하지 않는다.
 `RawObservationPort` 가 본체이고, 같은 패널 코어 위에
 `EquityDataPort`(`snapshot`·`list_fields`·`load_universe`·`load_panel`), `FactorMetadataPort`,
-`FactorObservationPort`, `BacktestDataPort` 를 올렸다 — 컨테이너(`build_container`)와 백테스트
+`BacktestDataPort` 를 올렸다 — 컨테이너(`build_container`)와 백테스트
 파이프라인이 다섯을 다 요구한다.
 
 **필드별 분기가 없다.** (원천, 컬럼식, 축 변환, 랙, 결측 규칙)은 전부 `_specs.SOURCE_SPECS` ·
@@ -47,7 +47,7 @@ date) 의 값, `LATEST` 는 (security, cutoff) 의 값이라 질의 창을 바�
 는 시점축 없는 현재 스냅샷이다.
 
 `load_universe` 는 정책 미적용(`krx.all`) — 그날 `universe_daily` 에 있는 전 종목(ETF·우선주 포함,
-생존편향 방지). `load_factor_observations` 는 유니버스 인자가 없어 `RESEARCH_UNIVERSE_ID` 로 답한다.
+생존편향 방지). 팩터 계산은 RawObservationPort를 읽는 공용 파이프라인이 소유한다.
 `load_backtest_dataset` 은 원주가 bar(`price_kind='reference'` 행·GAP-14 행·저녁 잠정 행 미방출,
 경고로 **각각** 건수 기록) + `security_span` 구간 + `adj_factor` factor_ok 행(S07 과 같은 유형
 매핑) + 원장이 접지 못한 층 이동(카탈로그 뷰 `v_unfolded_event` 의 `factor_ok` 거짓 행 — 적용일
@@ -92,8 +92,6 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
-    FactorObservationQuery,
-    FactorObservationSet,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RawFieldValue,
@@ -117,10 +115,6 @@ from strategy_workbench.domain.equity.facade.research_data import (
     UniverseHistoryResult,
     UniversePoint,
     field_contract_snapshot_id,
-)
-from strategy_workbench.domain.factor.facade.evaluation import (
-    FactorFieldValue,
-    FactorObservation,
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
@@ -188,7 +182,6 @@ _GRID_FETCHED = 0.3  # 격자 안: 질의·fetchall 완료
 _LOAD_PANEL_END = 0.52  # 격자·LATEST 원천 완료
 _LOAD_ROWS_END = 0.905  # 관측 조립 완료
 _LOAD_SORTED = 0.91  # 정렬 완료, 이후 생성 시 계약 검증
-RESEARCH_UNIVERSE_ID = "krx.common-stock"  # FactorObservationQuery 에 유니버스가 없다 — 계약 기본값
 REFERENCE_KIND = "reference"
 # `price_daily.basis`(규칙 e1.15.0) — 'krx' 확정 / 'evening' 저녁 잠정(키움 종가·거래량만, OHL
 # NULL). 옛 판 루트(e1.5.0 등)에는 컬럼 자체가 없고 그때는 전 행이 확정이다.
@@ -1112,7 +1105,7 @@ class EquityDuckdbAdapter:
             detail=None if cells else f"no panel cells — query={query}",
         )
 
-    # ── FactorMetadataPort · FactorObservationPort ────────────────────────────
+    # ── FactorMetadataPort ────────────────────────────
 
     def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
         """제공 필드만 계약을 돌려준다 — 없는 필드는 그래프 컴파일이 막는다."""
@@ -1154,41 +1147,6 @@ class EquityDuckdbAdapter:
         }
         return reasons | dict.fromkeys(UNSUPPORTED_FIELDS, FIELD_NOT_IN_LEDGER)
 
-    def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
-        """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
-        unknown = self._unknown_fields(query.required_field_ids)
-        if unknown:
-            raise ValueError(unknown)
-        window = self._window(query.start, query.end, max(query.minimum_history_sessions - 1, 0))
-        if isinstance(window, str):
-            raise ValueError(window)
-        lags = self._lags(query.required_field_ids, ())
-        panel = self._panel(
-            window,
-            lags,
-            tickers=None,
-            predicate=self._predicate(RESEARCH_UNIVERSE_ID),
-            field_ids=query.required_field_ids,
-        )
-        observations: list[FactorObservation] = []
-        for row in self._rows_in(panel, window.sessions):
-            fields = []
-            for field_id in query.required_field_ids:
-                found = self._cell(panel, row, field_id, lags[field_id])
-                if found is not None:
-                    masked = found.kind is CellKind.MASKED
-                    fields.append(FactorFieldValue(field_id, found.value, masked=masked))
-            observations.append(
-                FactorObservation(
-                    as_of=row.session,
-                    security_id=row.security_id,
-                    fields=tuple(fields),
-                    forward_return=None,  # equity 소유 아님(FIELD_MAP §1)
-                    universe_member=row.member,
-                )
-            )
-        observations.sort(key=lambda item: (item.as_of, item.security_id))
-        return FactorObservationSet(self._snapshot_id, tuple(observations))
 
     # ── RawObservationPort ────────────────────────────────────────────────────
 

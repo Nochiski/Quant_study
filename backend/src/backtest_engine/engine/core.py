@@ -279,6 +279,11 @@ class BuyingPowerTracker(Protocol):
     @property
     def available(self) -> float: ...
 
+    @property
+    def leverage(self) -> float: ...
+
+    def mark_of(self, instrument: InstrumentId) -> float | None: ...
+
     def quantity_of(self, instrument: InstrumentId) -> Decimal: ...
 
     def consume_quantity(
@@ -304,6 +309,13 @@ class PythonBuyingPower:
     @property
     def available(self) -> float:
         return self._leverage * self._equity - self._gross
+
+    @property
+    def leverage(self) -> float:
+        return self._leverage
+
+    def mark_of(self, instrument: InstrumentId) -> float | None:
+        return self._marks.get(instrument)
 
     def quantity_of(self, instrument: InstrumentId) -> Decimal:
         return self._quantities.get(instrument, Decimal(0))
@@ -349,6 +361,13 @@ class RustBuyingPower:
     def available(self) -> float:
         return self._inner.available
 
+    @property
+    def leverage(self) -> float:
+        return self._inner.leverage
+
+    def mark_of(self, instrument: InstrumentId) -> float | None:
+        return self._inner.mark_of(instrument_key(instrument))
+
     def quantity_of(self, instrument: InstrumentId) -> Decimal:
         return Decimal(self._inner.quantity_of(instrument_key(instrument)))
 
@@ -388,6 +407,8 @@ class RustQuoteCore:
         fee_rate: float,
         fok: bool,
         sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
     ) -> QuoteNumbers:
         price, quantity, applied, status = self._core.quote_numbers(
             side.value,
@@ -402,6 +423,8 @@ class RustQuoteCore:
             fee_rate,
             fok,
             sell_tax_rate,
+            leverage,
+            held_mark,
         )
         return QuoteNumbers(price, Decimal(quantity), applied, ExecutionStatus(status))
 

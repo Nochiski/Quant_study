@@ -480,6 +480,7 @@ ENGINE_SCENARIOS = {
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
         DataFeed(GOLDEN_BARS),
     ),
+    "leveraged_short_tax_budget": lambda core: _leveraged_tax_scenario(core),
     "short_tax_budget": lambda core: _engine_scenario(
         core,
         RunConfig(
@@ -2085,3 +2086,139 @@ def test_short_tax_budget_reaches_every_engine_path(core: str) -> None:
     """1000원 여력·100원 시가·10% 세금이면 10주가 아닌 9주만 열 수 있다."""
     _engine, result = ENGINE_SCENARIOS["short_tax_budget"](core)
     assert [fill.quantity for fill in result.fills] == [Decimal(9)]
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+@pytest.mark.parametrize("held", [-5, 0, 5])
+@pytest.mark.parametrize("leverage", [1.0, 2.0, 3.0])
+@pytest.mark.parametrize("mark", [80.0, 100.0, 120.0])
+@pytest.mark.parametrize("fee_rate", [0.0, 0.05])
+def test_quote_budget_matches_actual_equity_and_exposure_after_costs(
+    core: str, side: Side, held: int, leverage: float, mark: float, fee_rate: float
+) -> None:
+    from backtest_engine.engine.broker import PythonQuoteCore
+    from backtest_engine.engine.core import RustQuoteCore, make_buying_power
+    from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+
+    instrument = make_instrument()
+    snapshot = PortfolioSnapshot(
+        day(1),
+        1000.0 - held * mark,
+        (Position(instrument, Decimal(held), mark, mark, held * mark, 0.0),),
+        1000.0,
+        abs(held * mark) / 1000,
+    )
+    power = make_buying_power(core, snapshot, leverage)
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    rate = fee_rate + (0.1 if side is Side.SELL else 0.0)
+    sign = 1 if side is Side.BUY else -1
+
+    # 견적 공식을 재구현하지 않고 현금+보유 평가와 총노출로 모든 정수 후보를 판정한다.
+    def remaining_power(quantity: int) -> float:
+        cash = snapshot.cash - sign * quantity * 100 - quantity * 100 * rate
+        position = held + sign * quantity
+        return leverage * (cash + position * 100) - abs(position * 100)
+
+    expected = max(q for q in range(101) if remaining_power(q) >= 0)
+    quote = quote_core.quote_numbers(
+        side,
+        100,
+        Decimal(100),
+        10000,
+        None,
+        0,
+        None,
+        power.available,
+        Decimal(held),
+        fee_rate,
+        False,
+        0.1,
+        power.leverage,
+        power.mark_of(instrument),
+    )
+    assert quote.quantity == Decimal(expected)
+    power.consume_quantity(instrument, side, quote.quantity, quote.price, expected * 100 * rate)
+    assert power.available >= 0
+    assert remaining_power(expected + 1) < 0
+
+
+class _LeveragedShortStrategy(test_short_selling.ShortStrategy):
+    def requirements(self) -> StrategyRequirements:
+        return replace(
+            super().requirements(),
+            features=frozenset(
+                {EngineFeature.SHORT_SELLING, EngineFeature.MARGIN, EngineFeature.PARTIAL_FILL}
+            ),
+        )
+
+
+class _LeveragedBasketStrategy(test_basket.BasketStrategy):
+    def requirements(self) -> StrategyRequirements:
+        return replace(
+            super().requirements(),
+            features=super().requirements().features
+            | {EngineFeature.SHORT_SELLING, EngineFeature.MARGIN},
+        )
+
+
+def _leveraged_tax_scenario(core: str) -> tuple[BacktestEngine, BacktestResult]:
+    instrument = make_instrument()
+    return _engine_scenario(
+        core,
+        RunConfig(
+            run_id="leveraged-tax",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            max_gross_leverage=2.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        _LeveragedShortStrategy((test_short_selling.target(-100), test_short_selling.target(100))),
+        DataFeed(tuple(make_bar(day(i), instrument, 100.0, 100.0) for i in (1, 2, 3))),
+    )
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_leveraged_short_and_cover_use_actual_budget_in_every_engine(core: str) -> None:
+    _, result = _leveraged_tax_scenario(core)
+    assert [(f.side, f.quantity) for f in result.fills] == [
+        (Side.SELL, Decimal(16)),
+        (Side.BUY, Decimal(32)),
+    ]
+    assert all(s.gross_exposure <= 2 for s in result.snapshots)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_basket_quotes_consume_leveraged_cost_budget_in_order(core: str) -> None:
+    from backtest_engine.types.actions import BasketAction, GroupPolicy
+
+    _, result = _engine_scenario(
+        core,
+        RunConfig(
+            run_id="leveraged-basket",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            max_gross_leverage=2.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        _LeveragedBasketStrategy(
+            (
+                BasketAction(
+                    legs=(
+                        test_basket.market_leg(test_basket.A, Side.SELL, 8),
+                        test_basket.market_leg(test_basket.B, Side.SELL, 100),
+                    ),
+                    group_policy=GroupPolicy.BEST_EFFORT,
+                ),
+            )
+        ),
+        DataFeed(
+            tuple(
+                make_bar(day(i), instrument, 100.0, 100.0)
+                for i in (1, 2)
+                for instrument in (test_basket.A, test_basket.B)
+            )
+        ),
+    )
+    assert [f.quantity for f in result.fills] == [Decimal(8), Decimal(8)]
+    assert all(s.gross_exposure <= 2 for s in result.snapshots)

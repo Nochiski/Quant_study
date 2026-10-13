@@ -23,7 +23,7 @@ validation-lab 신규 기능, M8 확장은 범위 밖이다. 이슈 상태·외�
 | CS-05 | 다른 단위·다른 가중치의 두 팩터; none/rank/zscore 선택; 독립 계산 oracle과 trace 기여도·합 비교; 새 문서 rank, 1.1 업그레이드 none; none 단위 경고, 그래프 내부 정규화에는 경고 없음 | 기본 3종목 fixture를 쓰는 실제 HTTP 신규 story E2E. 독립 계산 oracle 리뷰 완료; 최종 HEAD 전체 CI에서 재검증 |
 | CS-06 | top_percent=0.2 후보100→eligibility20/rank_cut80와 거절 UI 사유; risk 전후 alpha 기여도·분모·점수·순위 동일; raw 위험 역수 비중(동일 cap 회피); no-alpha compile 오류 | 신규 story E2E로 HTTP 20/80 및 대표 탈락 종목 UI 사유, alpha-only 대조 검증 |
 | #328 | 별도 repository 인스턴스·동일 인스턴스의 저장/조회 동시성; source 검증과 읽기 snapshot 경계; 기존 competing create/append·동시 init·손상·foreign-file·rollback 보존 | 수정 전6실패→수정후100통과, 결정적 동시성120회통과; 독립79통과. 과거 Windows 실패 잠금 소유자는 미확정 |
-| #324 | 이전 WIP 비교; 문서 응답/lazy editor/첫 parser update 제어; 준비 전 reveal·같은 pointer 반복·pending 중 이동; exact 선택 텍스트·focus·unhandled MSW·cleanup; 원래 suite 부하 반복 | 별도 handle 준비순서 red→green. Linux 병렬 focused30/30 및 전체 suite2회 통과; 과거 Windows 원부하 미검증 |
+| #324 | 이전 WIP 비교; 문서 응답/lazy editor/첫 parser update 제어; 준비 전 reveal·같은 pointer 반복·pending 중 이동; exact 선택 텍스트·focus·unhandled MSW·cleanup; 원래 suite 부하 반복 | handle 준비순서 및 첫 plan 응답의 DOM 교체 클릭 소실 각각 red→green. Linux 병렬 focused 각각30/30 및 전체 suite2회 통과; 과거 Windows 원부하 미검증 |
 | #419 | A→B→C, 같은 strategy 다른 revision의 render/commit 시퀀스에서 새 제목+옛 값 혼합 없음; back/forward·빠른 전환·저장 URL 반영 시 편집/undo 보존 | 실제 Graph commit 관측 red→green. 전체 route92통과, 저장 URL/undo·다른revision·visible YAML 검증 |
 | #420 | 첫 invalid에서 loading 종료·구문 안내·가짜 기본값 없음; 원문 보존·덮어쓰기 차단; 수정 후 실제 0.05; 같은 문서 valid→invalid는 명시적 stale 유지 | 첫 invalid 기본값 red→green. loading 종료·저장 차단·원문 보존·수정후0.05·같은 문서 STALE 검증 |
 | #373 | 일반 field 설명 축약; 개별 의미·한계는 backend 계약 한 곳; declaration↔field_map 역방향 coverage와 정확한 unsupported reason; inspector/autocomplete/AI 소비 확인 | 기존 WIP 대조 반영, backend205/FE46/독립85통과. #421 배선 제외 |
@@ -93,3 +93,11 @@ P5의 recipe/graph는 SourceOperation을 만들고 공통 source transaction과 
 전달한다. P6 좌표는 UI 상태이며 배선도 같은 원문 transaction을 쓴다. 정규화·eligibility·risk는
 backend compiler 계산이며 linked trace는 응답 ID를 결합한다. 이 감사는 실제 음성 및 역사적
 Windows 부하 재현을 포함하지 않는다.
+
+### CI에서 발견한 클릭 소실 후속
+
+#442의 frontend CI에서 소스 열기 뒤 Graph 탭이 유지되는 실패가 나왔다. 첫 plan 응답이
+mousedown/mouseup 사이에 도착할 때 Fragment→section 교체로 클릭 대상 DOM이 사라짐을
+결정적으로 재현했다. 같은 section과 editor key를 유지하는 #441 후속 `655262b5`는
+콜백0→정확한 pointer1회·focus 보존으로 바뀌었다. 관련 unit20·route92 및 원실패30회 통과,
+독립13개 통과 및 차단0이다. 기존 timeout·선택문자열·focus 단언을 약화하지 않았다.

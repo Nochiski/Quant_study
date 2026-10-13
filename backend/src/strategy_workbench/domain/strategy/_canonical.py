@@ -11,7 +11,7 @@ from strategy_workbench.domain.canonical.facade.encoding import (
 from strategy_workbench.domain.factor.facade.expression import ExpressionNode, FactorGraph
 from strategy_workbench.domain.factor.facade.validation import node_dependencies
 
-from ._models import StrategySpec
+from ._models import REFERENCE_FACTOR, StrategySpec
 
 
 def canonical_strategy_payload(spec: StrategySpec) -> dict[str, Any]:
@@ -119,7 +119,7 @@ def _factor_references(value: Any, numbers: Mapping[str, str]) -> Any:
             current = getattr(value, item.name)
             changes[item.name] = (
                 (None if current is None else numbers.get(current, current))
-                if item.metadata.get("reference") == "factor"
+                if item.metadata.get("reference") == REFERENCE_FACTOR["reference"]
                 else _factor_references(current, numbers)
             )
         return replace(value, **changes)

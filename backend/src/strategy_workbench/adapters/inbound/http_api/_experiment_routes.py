@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Annotated, Any
 
@@ -438,8 +437,14 @@ class _ExperimentStreamHub:
                     self._streams.pop(experiment_id, None)
                 if shared.producer is not None:
                     shared.producer.cancel()
-                    with suppress(asyncio.CancelledError):
+                    try:
                         await shared.producer
+                    except asyncio.CancelledError:
+                        # 생산자 자신의 취소는 정상 회수다. 이 구독 작업이 취소되는 중이면 그
+                        # 취소를 삼키지 않고 전파한다(끊긴 연결이 정상 종료로 보이지 않게).
+                        task = asyncio.current_task()
+                        if task is not None and task.cancelling():
+                            raise
 
     async def close(self) -> None:
         """종료 요청자가 취소돼도 실제 조회 회수를 마친 뒤 취소를 돌려준다."""

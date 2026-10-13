@@ -100,6 +100,11 @@ def trial_status(
     return _RUN_TRIAL_STATUSES[latest_run]
 
 
+def settled(status: TrialStatus | RunStatus, *, recovering: bool) -> bool:
+    """끝났고 재시작 복구를 기다리지 않는다. trial과 검증 실행의 종결 판정이 같은 규칙을 쓴다."""
+    return status.is_terminal and not recovering
+
+
 def awaiting_recovery(latest_run: BacktestRunState | None) -> bool:
     """최신 실행이 재시작으로 중단됐다 — 복구가 새 attempt 를 넘길 때까지 실험은 끝나지
     않는다(spec D6).

@@ -142,6 +142,10 @@ class ExperimentRepositoryPort(Protocol):
         """없으면 `ExperimentNotFoundError`(`experiment.not_found`)."""
         ...
 
+    def controls(self, experiment_id: str) -> ExperimentControls:
+        """저장된 레인 조작만 읽는다(설계 디코드 없음). 없으면 `ExperimentNotFoundError`."""
+        ...
+
     def open_ids(self) -> tuple[str, ...]:
         """취소하지 않은 실험 id(만든 순). 기록을 디코드하지 않는다(재시작 복구가 하나씩 읽는다)."""
         ...

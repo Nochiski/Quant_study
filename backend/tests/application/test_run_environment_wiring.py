@@ -69,6 +69,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    PRICE_ADJUSTING_ACTIONS,
     ImpactModel,
     MissingRunEnvironmentError,
     ParticipationBasis,
@@ -511,6 +512,7 @@ def _adv_caps(
     volumes = participation_volumes(
         environment,
         ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
+        {},
     )
     assert volumes is not None
     return {key: math.floor(volume * rate) for key, volume in volumes.items()}
@@ -580,7 +582,6 @@ def _impact(
     actions: tuple[CorporateActionRecord, ...] = (),
 ) -> dict[tuple[date, str], float]:
     rows = [(bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars]
-    confirmed = ("split", "reverse_split")
     scales = impact_scales(
         environment,
         rows,
@@ -590,7 +591,7 @@ def _impact(
                 (
                     action.session,
                     action.security_id,
-                    float(action.ratio) if action.action_type in confirmed else 1.0,
+                    float(action.ratio) if action.action_type in PRICE_ADJUSTING_ACTIONS else 1.0,
                 )
                 for action in actions
             ),

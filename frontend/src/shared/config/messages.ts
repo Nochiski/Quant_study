@@ -1327,7 +1327,7 @@ const ko = {
   "run_environment.field.slippage_bps.description":
     "가격 충격 모델이 고정 bp일 때 체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
   "run_environment.field.impact_coefficient.description":
-    "√ 가격 충격 = 계수 × 20일 변동성 × √(체결 수량 ÷ 20일 평균 거래량)의 계수입니다.",
+    "변동성과 평균 거래 규모를 반영하는 가격 충격의 크기를 조절하는 계수입니다.",
   "run_environment.field.sell_tax_bps.description":
     "매도 거래세를 직접 입력할 때 매도 금액에 붙일 bp입니다.",
   "strategy.operator.unary.negate": "부호 뒤집기",
@@ -3533,7 +3533,7 @@ export const messages = {
     "run_environment.field.slippage_bps.description":
       "Basis points the fill price is assumed to move against the order when the impact model is fixed bp.",
     "run_environment.field.impact_coefficient.description":
-      "Coefficient k of square-root impact = k × 20-day volatility × √(filled shares ÷ 20-day average volume).",
+      "Controls price impact reflecting volatility and average trading size.",
     "run_environment.field.sell_tax_bps.description":
       "Basis points charged on sale proceeds when the sell tax is a custom rate.",
     "strategy.operator.unary.negate": "Negate",

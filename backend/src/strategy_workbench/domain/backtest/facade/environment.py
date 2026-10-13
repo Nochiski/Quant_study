@@ -2,9 +2,9 @@ from strategy_workbench.domain.backtest._canonical import (
     environment_hash,
     run_environment_canonical_json,
 )
+from strategy_workbench.domain.backtest._cost_history import cost_history_sessions
 from strategy_workbench.domain.backtest._impact import (
     MAX_IMPACT_FRACTION,
-    cost_history_sessions,
     impact_scales,
 )
 from strategy_workbench.domain.backtest._krx_tax import (
@@ -24,6 +24,7 @@ from strategy_workbench.domain.backtest._models import (
     SellTax,
 )
 from strategy_workbench.domain.backtest._participation import (
+    PRICE_ADJUSTING_ACTIONS,
     participation_volumes,
     settlement_multipliers,
 )
@@ -49,6 +50,7 @@ from strategy_workbench.domain.backtest._schema import (
 
 __all__ = [
     "CATALOG_UNIVERSE",
+    "PRICE_ADJUSTING_ACTIONS",
     "MAX_IMPACT_FRACTION",
     "DEFAULT_MISSING_POLICY",
     "RESEARCH_START",

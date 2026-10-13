@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import asdict, dataclass
 from datetime import date
 from enum import Enum
 from typing import TypeAlias
+
+from strategy_workbench.domain.canonical.facade.encoding import (
+    canonical_json_hash,
+    canonical_json_spec_hash,
+    canonical_payload_json,
+)
 
 from ._nodes import (
     FILLING_MISSING_POLICIES,
@@ -68,18 +72,11 @@ class InvalidFactorGraphError(ValueError):
 
 
 def canonical_factor_graph_json(graph: FactorGraph) -> str:
-    return json.dumps(
-        asdict(graph),
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=_json_default,
-    )
+    return canonical_payload_json(asdict(graph), default=_json_default)
 
 
 def factor_graph_hash(graph: FactorGraph) -> str:
-    return hashlib.sha256(canonical_factor_graph_json(graph).encode("utf-8")).hexdigest()
+    return canonical_json_spec_hash(canonical_factor_graph_json(graph))
 
 
 def compile_factor_plan(
@@ -129,9 +126,7 @@ def compile_factor_plan(
         **({"missing_fill": "cross_section"} if missing in FILLING_MISSING_POLICIES else {}),
         "as_of_policy": "available_date_lte_as_of",
     }
-    plan_hash = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    plan_hash = canonical_json_hash(payload, ensure_ascii=True)
     return FactorExecutionPlan(
         graph_hash=graph_fingerprint,
         plan_hash=plan_hash,
@@ -162,9 +157,7 @@ def build_factor_matrix_cache_key(
         "as_of_start": as_of_start.isoformat(),
         "as_of_end": as_of_end.isoformat(),
     }
-    fingerprint = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    fingerprint = canonical_json_hash(payload, ensure_ascii=True)
     return FactorMatrixCacheKey(
         fingerprint=fingerprint,
         data_snapshot_id=data_snapshot_id,

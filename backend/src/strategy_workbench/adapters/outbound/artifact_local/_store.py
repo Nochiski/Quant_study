@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import math
 import shutil
@@ -20,6 +19,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestArtifactUnreadableError,
 )
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +52,7 @@ class LocalArtifactStore:
             raise ValueError("staging path escapes artifact root")
         staging.mkdir()
         try:
-            payload = json.dumps(
-                _json_value(result),
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
+            payload = canonical_payload_json(_json_value(result)).encode("utf-8")
             result_path = staging / "result.json"
             with result_path.open("xb") as stream:
                 stream.write(payload)

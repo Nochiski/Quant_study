@@ -24,13 +24,13 @@ from typing import Any
 
 import pytest
 
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 from strategy_workbench.domain.strategy.facade.document import (
     hydrate_strategy_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
-    canonical_payload_json,
     canonical_strategy_payload,
     strategy_spec_hash,
 )

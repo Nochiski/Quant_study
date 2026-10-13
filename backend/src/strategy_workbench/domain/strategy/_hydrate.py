@@ -33,6 +33,7 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 from ._canonical import canonical_payload_json, canonical_strategy_payload
 from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
 from ._promotion import demote_boolean_factor_outputs, promote_boolean_factor_outputs
+from ._source import json_pointer_token
 from ._upgrade import (
     FROZEN_SCHEMA_VERSIONS,
     UpgradeUnsupportedNodeError,
@@ -223,13 +224,8 @@ def _version_issues(
     ]
 
 
-def _escape(key: str) -> str:
-    """RFC 6901 token escaping so `a/b` and `~x` keys stay unambiguous in pointers."""
-    return key.replace("~", "~0").replace("/", "~1")
-
-
 def _child(pointer: str, key: object) -> str:
-    return f"{pointer}/{_escape(str(key))}"
+    return f"{pointer}/{json_pointer_token(str(key))}"
 
 
 def _issue(issues: list[StructuralIssue], code: str, pointer: str, message: str) -> Any:

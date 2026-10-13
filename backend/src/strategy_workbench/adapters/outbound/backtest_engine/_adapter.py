@@ -412,7 +412,7 @@ class BacktestEngineExecutorAdapter:
             raise RunCancelledError("run cancelled")
 
 
-# 엔진이 보유 수량에 적용하는 확인된 사건(`_apply_corporate_action`)과 같은 집합이다. 알림 전용
+# 가격 배수를 적용할 사건 집합은 domain `PRICE_ADJUSTING_ACTIONS`가 소유한다. 알림 전용
 # 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
 def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[date, float]:
     """벤치마크 종목을 첫 세션에 `initial_cash`어치 사서 들고 있는 곡선.

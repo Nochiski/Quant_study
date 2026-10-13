@@ -1837,8 +1837,8 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
         ).toHaveAttribute("data-settled", "true");
       });
     /**
-     * `settled` 에 더해 그 원문으로 compile 요청이 나갔다. 마지막 요청일 필요는 없다 — 저장본 기준 compile
-     * (`savedCanonicalJson`)은 parse 를 기다리지 않고 저장 원문으로 따로 나간다.
+     * `settled` 에 더해 그 원문으로 compile 요청이 나갔다. 뒤이어 다른 원문의 요청이 나갈 수 있어
+     * 마지막 요청인지는 보지 않는다.
      */
     const compiled = async (view: EditorView, text: string, before: number) => {
       await settled(view, text);

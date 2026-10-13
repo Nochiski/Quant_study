@@ -95,12 +95,11 @@ def momentum_spec(price_field: str, top: int):
         InMemoryStrategyRepository,
     )
     from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+    from strategy_workbench.domain.factor.facade.expression import FactorGraph, FieldNode
     from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
     from strategy_workbench.domain.strategy.facade.specification import (
         FactorDirection,
-        FactorGraph,
         FactorSignal,
-        FieldNode,
         PortfolioSide,
         RebalanceFrequency,
         SelectionMethod,

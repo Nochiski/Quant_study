@@ -66,13 +66,18 @@ def test_the_ledger_counts_a_run_once_and_the_preview_agrees() -> None:
     counted = ledger["trials"][0]["runs"][0]
     # 실행마다 자기 세션 샤프를 싣고, 대표 실행의 값이 시도의 대표 샤프다.
     assert counted["session_sharpe"] == ledger["trials"][0]["representative_sharpe"]
-    assert counted | {"created_at": None, "session_sharpe": None} == {
+    # 완료 실행은 접수 대기를 뺀 계산 시간을 싣는다(로드맵 M6 시간 어림의 근거).
+    assert counted["seconds"] >= 0
+    assert counted | {"created_at": None, "session_sharpe": None, "seconds": None} == {
         "run_id": run["run_id"],
         "status": "completed",
         "created_at": None,
         "role": "counted",
         "session_sharpe": None,
+        "seconds": None,
+        "span_days": counted["span_days"],
     }
+    assert counted["span_days"] > 0
 
 
 def test_a_sealed_run_is_blocked_with_the_start_contract_and_the_preview_leaves_no_record() -> None:

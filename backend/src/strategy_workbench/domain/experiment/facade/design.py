@@ -15,6 +15,7 @@ from strategy_workbench.domain.experiment._estimate import (
     RECENT_RUNS,
     TimeEstimate,
     estimate_time,
+    planned_spans,
 )
 from strategy_workbench.domain.experiment._plateau import (
     PEAK_NEIGHBOR_RATIO,
@@ -53,12 +54,10 @@ from strategy_workbench.domain.experiment._walk_forward import (
 )
 
 __all__ = [
-    "RECENT_RUNS",
-    "TimeEstimate",
-    "estimate_time",
     "EXPERIMENT_CODES",
     "MAX_GRID_POINTS",
     "PEAK_NEIGHBOR_RATIO",
+    "RECENT_RUNS",
     "SENSITIVITY_STEP",
     "CellOutcomes",
     "CellPlateau",
@@ -77,18 +76,21 @@ __all__ = [
     "SearchSpec",
     "SplitMode",
     "SplitSpec",
+    "TimeEstimate",
     "WalkForwardGap",
     "WalkForwardWindow",
     "WindowSelectionRule",
     "bankrupt_score",
     "build_search_spec",
     "cell_outcomes",
+    "estimate_time",
     "experiment_trial_key",
     "grid_neighbors",
     "neighbor_mean",
     "out_of_sample_sharpe",
     "parameter_grid_values",
     "pick_window_cell",
+    "planned_spans",
     "plateau_map",
     "stitch_out_of_sample",
     "walk_forward_gap",

@@ -268,7 +268,7 @@ const usePreview = (rejected = false) =>
         trial_count_after: explored ? 7 : 5,
         // 탐색하지 않으면 계열에 잰 실행이 없는 경우를 흉내 낸다.
         time_estimate: explored
-          ? { total_seconds: 250, run_seconds: 61.2, sample_count: 5, slots: 2 }
+          ? { total_seconds: 250.2, sample_count: 5 }
           : null,
       });
     }),
@@ -477,7 +477,7 @@ describe("experiments", () => {
     // backend 어림을 근거와 함께 보이고, 초는 위로 올린다.
     expect(
       screen.getByText(
-        /^예상 소요 약 4분 10초 · 최근 완료 실행 5개 중 가장 긴 1분 2초 기준 · 실험 슬롯 2개/u,
+        /^예상 소요 최대 약 4분 11초 · 이 계열의 최근 완료 실행 5개를/u,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("10, 20, 30 (3)")).toBeInTheDocument();

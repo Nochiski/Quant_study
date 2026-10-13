@@ -306,3 +306,23 @@ def test_a_finished_run_whose_final_state_was_not_saved_keeps_its_copy(
 
     assert runs.state("run-1").status is RunStatus.FAILED
     assert runs.events("run-1")[-1].status is RunStatus.FAILED
+
+
+def test_the_start_time_is_set_once_and_kept_in_memory_and_storage(
+    tmp_path: Path, barriers: list[RawLoadBarrier]
+) -> None:
+    """로드맵 M6 시간 어림(#519 리뷰 N3): 처음 `running` 이 된 시각을 뒤 전이가 바꾸지 않는다."""
+    path = tmp_path / "research.sqlite3"
+    held = _open_barrier(barriers)
+    runs = _service(tmp_path, SQLiteBacktestRunRepository(path), held, "run-1")
+    runs.start(_request())
+    assert held.entered.wait(timeout=10)
+    started = runs.state("run-1").started_at
+
+    held.release.set()
+    finished = wait_for_terminal_run(runs, "run-1")
+
+    assert started is not None
+    assert finished.status is RunStatus.COMPLETED
+    assert finished.started_at == started < finished.updated_at
+    assert _stored(path, "run-1").started_at == started

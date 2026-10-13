@@ -42,16 +42,16 @@ _SUMMARY_COLUMNS = """
     run_id, created_at, status, progress, stage, message, updated_at, error, error_code,
     artifact_sha256, strategy_kind, spec_hash, schema_version, strategy_id, revision, source_hash
 """
-# 실행 종류와 쓰는 실험(검증 랩 V5-03, #382)은 저장하지 않고 같은 파일에서 읽는다. 실험 attempt 가
-# 가리키면 실험 trial, 워크포워드 창 선택이 가리키면 검증 창 실행이다(둘 다면 attempt 가 먼저).
-# 역조회는 비상관 집계라 문장당 한 번 만들어진다(run_id 에 인덱스가 없어 상관 서브쿼리면 run 수 ×
-# attempt 수로 커진다, #386 리뷰 P2-1). 거절된 attempt·고를 칸 없는 창은 run_id 가 NULL 이라 뺀다.
 # run 행과 시작 시각(곁 표 `backtest_run_starts`). 읽기는 모두 이 관계를 쓴다.
 _RUN_ROWS = """(
     SELECT backtest_runs.*, backtest_run_starts.started_at
     FROM backtest_runs LEFT JOIN backtest_run_starts USING (accepted_order)
 )"""
 _STATE_COLUMNS = f"{_SUMMARY_COLUMNS}, started_at"
+# 실행 종류와 쓰는 실험(검증 랩 V5-03, #382)은 저장하지 않고 같은 파일에서 읽는다. 실험 attempt 가
+# 가리키면 실험 trial, 워크포워드 창 선택이 가리키면 검증 창 실행이다(둘 다면 attempt 가 먼저).
+# 역조회는 비상관 집계라 문장당 한 번 만들어진다(run_id 에 인덱스가 없어 상관 서브쿼리면 run 수 ×
+# attempt 수로 커진다, #386 리뷰 P2-1). 거절된 attempt·고를 칸 없는 창은 run_id 가 NULL 이라 뺀다.
 _RUNS = f"""(
     SELECT backtest_runs.*,
         CASE
@@ -232,7 +232,9 @@ class SQLiteBacktestRunRepository:
             entries = connection.execute(
                 f"""
                 SELECT run_id, trial_key, status, created_at, updated_at, session_sharpe,
-                    metric_registry_version, error_code, started_at
+                    metric_registry_version, error_code, started_at,
+                    json_extract(request_json, '$.run_spec.environment.start') AS run_start,
+                    json_extract(request_json, '$.run_spec.environment.end') AS run_end
                 FROM trial_ledger JOIN {_RUN_ROWS} USING (accepted_order)
                 WHERE {where} ORDER BY accepted_order
                 """,
@@ -260,6 +262,8 @@ class SQLiteBacktestRunRepository:
                         metric_registry_version=row["metric_registry_version"],
                         error_code=row["error_code"],
                         started_at=_optional_time(row["started_at"]),
+                        start=_optional_date(row["run_start"]),
+                        end=_optional_date(row["run_end"]),
                     )
                     for row in entries
                 ),
@@ -394,6 +398,10 @@ def _merges(connection: sqlite3.Connection) -> dict[str, str]:
 
 def _optional_time(text: str | None) -> datetime | None:
     return None if text is None else datetime.fromisoformat(text)
+
+
+def _optional_date(text: str | None) -> date | None:
+    return None if text is None else date.fromisoformat(text)
 
 
 def _time_text(value: datetime, field: str, run_id: str) -> str:

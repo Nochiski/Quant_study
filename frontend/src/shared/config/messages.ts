@@ -1986,7 +1986,7 @@ const ko = {
   "experiments.new.failed": "이 설정으로는 실험을 만들 수 없습니다.",
   "experiments.new.summary": "시작 전 확인",
   "experiments.new.counts": "조합 {combinations}개 · 창 {windows}개 · 백테스트 실행 {runs}회 · 계열 시도 수 {before}회 → {after}회",
-  "experiments.new.estimate": "예상 소요 약 {total} · 최근 완료 실행 {samples}개 중 가장 긴 {run} 기준 · 실험 슬롯 {slots}개 (다른 실행과 슬롯을 나눠 쓰면 더 걸립니다)",
+  "experiments.new.estimate": "예상 소요 최대 약 {total} · 이 계열의 최근 완료 실행 {samples}개를 구간 길이에 맞춰 늘리고 실행을 차례로 돈다고 본 값입니다 (동시 실행이면 더 빨리 끝날 수 있고, 다른 실행을 기다리는 시간은 빠져 있습니다)",
   "experiments.new.estimateUnknown": "예상 소요는 이 전략 계열에 시간을 잰 완료 실행이 생기면 보입니다.",
   "duration.seconds": "{seconds}초",
   "duration.minutes": "{minutes}분 {seconds}초",
@@ -4278,7 +4278,7 @@ export const messages = {
     "experiments.new.summary": "Before you start",
     "experiments.new.counts": "{combinations} combinations · {windows} windows · {runs} backtest runs · lineage trial count {before} → {after}",
     "experiments.new.estimate":
-      "About {total} · based on the longest of the last {samples} completed runs ({run}) · {slots} experiment slots (longer when other runs share the slots)",
+      "Up to about {total} · the last {samples} completed runs of this lineage scaled to each run's period, assuming runs go one after another (parallel slots may finish sooner; waiting for other runs is not included)",
     "experiments.new.estimateUnknown":
       "The time estimate appears once this strategy lineage has a timed completed run.",
     "duration.seconds": "{seconds}s",

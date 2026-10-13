@@ -378,8 +378,6 @@ const Form = ({
               ? tFill("experiments.new.estimate", {
                   total: tDuration(preview.data.time_estimate.total_seconds),
                   samples: preview.data.time_estimate.sample_count,
-                  run: tDuration(preview.data.time_estimate.run_seconds),
-                  slots: preview.data.time_estimate.slots,
                 })
               : t("experiments.new.estimateUnknown")}
           </p>

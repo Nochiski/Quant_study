@@ -16,6 +16,7 @@ from strategy_workbench.domain.backtest._trial_ledger import (
     preview_trial,
     representative_sharpe,
     resolve_lineage,
+    span_days,
     summarize_trial_ledger,
 )
 
@@ -34,6 +35,7 @@ __all__ = [
     "bankrupt",
     "preview_trial",
     "representative_sharpe",
+    "span_days",
     "summarize_trial_ledger",
     "trial_key",
 ]

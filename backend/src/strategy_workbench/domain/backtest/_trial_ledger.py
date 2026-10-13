@@ -47,6 +47,9 @@ class TrialLedgerEntry:
     error_code: RunFailureCode | None = None
     # 처음 `running` 이 된 시각(`BacktestRunState.started_at`).
     started_at: datetime | None = None
+    # 실행 구간(요청의 실행 설정 시작·끝, 양끝 포함). 실행 설정이 없는 옛 요청이면 없다.
+    start: date | None = None
+    end: date | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,8 @@ class TrialRun:
     session_sharpe: float | None = None
     # 완료된 실행의 계산 시간(초) — 접수 대기를 뺀 시작~완료. 시작 시각이 없으면 없다.
     seconds: float | None = None
+    # 실행 구간의 달력 일수(양끝 포함). 시간 어림이 구간 길이로 늘려 쓴다.
+    span_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -178,11 +183,17 @@ def bankrupt(status: RunStatus, error_code: str | None) -> bool:
     return status is RunStatus.FAILED and error_code == "backtest.run.equity_wiped_out"
 
 
+def span_days(start: date, end: date) -> int:
+    """구간의 달력 일수(양끝 포함)."""
+    return (end - start).days + 1
+
+
 def _seconds(entry: TrialLedgerEntry) -> float | None:
-    """완료된 실행의 계산 시간. 완료 저장이 마지막 상태 전이라 `updated_at` 이 끝난 시각이다."""
+    """완료된 실행의 계산 시간. 완료 저장이 마지막 상태 전이라 `updated_at` 이 끝난 시각이다.
+    벽시계가 뒤로 돌아 음수가 되면 0 으로 둔다."""
     if entry.status is not RunStatus.COMPLETED or entry.started_at is None:
         return None
-    return (entry.updated_at - entry.started_at).total_seconds()
+    return max(0.0, (entry.updated_at - entry.started_at).total_seconds())
 
 
 def _has_result(entry: TrialLedgerEntry) -> bool:
@@ -213,6 +224,9 @@ def _group(trial_key: str, entries: list[TrialLedgerEntry]) -> TrialGroup:
                 _role(entry, first),
                 _score(entry),
                 _seconds(entry),
+                None
+                if entry.start is None or entry.end is None
+                else span_days(entry.start, entry.end),
             )
             for entry in entries
         ),

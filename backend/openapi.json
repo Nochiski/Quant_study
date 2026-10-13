@@ -7412,10 +7412,6 @@
       "RunSlotUsage": {
         "description": "동시 실행 슬롯 사용량(spec D6). 실험 목록 화면이 trial 수로 추정하지 않게 싣는다.",
         "properties": {
-          "experiments": {
-            "title": "Experiments",
-            "type": "integer"
-          },
           "running": {
             "title": "Running",
             "type": "integer"
@@ -7427,8 +7423,7 @@
         },
         "required": [
           "total",
-          "running",
-          "experiments"
+          "running"
         ],
         "title": "RunSlotUsage",
         "type": "object"
@@ -9685,16 +9680,8 @@
       },
       "TimeEstimate": {
         "properties": {
-          "run_seconds": {
-            "title": "Run Seconds",
-            "type": "number"
-          },
           "sample_count": {
             "title": "Sample Count",
-            "type": "integer"
-          },
-          "slots": {
-            "title": "Slots",
             "type": "integer"
           },
           "total_seconds": {
@@ -9704,9 +9691,7 @@
         },
         "required": [
           "total_seconds",
-          "run_seconds",
-          "sample_count",
-          "slots"
+          "sample_count"
         ],
         "title": "TimeEstimate",
         "type": "object"
@@ -10409,6 +10394,17 @@
               }
             ],
             "title": "Session Sharpe"
+          },
+          "span_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Span Days"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"

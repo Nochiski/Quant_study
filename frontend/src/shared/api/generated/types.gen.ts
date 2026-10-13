@@ -4653,10 +4653,6 @@ export type RunManifest = {
  */
 export type RunSlotUsage = {
   /**
-   * Experiments
-   */
-  experiments: number;
-  /**
    * Running
    */
   running: number;
@@ -6095,17 +6091,9 @@ export type ThinkingSummaryView = {
  */
 export type TimeEstimate = {
   /**
-   * Run Seconds
-   */
-  run_seconds: number;
-  /**
    * Sample Count
    */
   sample_count: number;
-  /**
-   * Slots
-   */
-  slots: number;
   /**
    * Total Seconds
    */
@@ -6591,6 +6579,10 @@ export type TrialRun = {
    * Session Sharpe
    */
   session_sharpe?: number | null;
+  /**
+   * Span Days
+   */
+  span_days?: number | null;
   status: RunStatus;
 };
 

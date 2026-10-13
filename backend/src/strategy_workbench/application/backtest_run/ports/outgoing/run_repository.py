@@ -86,7 +86,11 @@ class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
         ...
 
     def update(self, state: BacktestRunState) -> None:
-        """이미 있는 run 의 상태를 바꾼다. 없으면 `BacktestRunNotFoundError`."""
+        """이미 있는 run 의 상태를 바꾼다. 없으면 `BacktestRunNotFoundError`.
+
+        `started_at` 은 처음 실린 값만 남는다 — 처음 `running` 이 된 시각을 정하는 쪽은 실행
+        서비스이고(`_emit`), 저장 실패로 놓친 시각은 뒤 전이가 같은 값을 다시 실어 채운다.
+        """
         ...
 
     def get(self, run_id: str) -> BacktestRunSummary: ...

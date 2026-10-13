@@ -494,7 +494,7 @@ Python/Rust 결과가 같다.
 - [ ] `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가(SearchSpec·파라미터 축은 검증 랩 V3-01 #306, 탐색 파라미터끼리·상수와 비교하는 조합 Constraint는 #517, 다른 파라미터 값에 따라 켜지는 조건부 파라미터는 미착수).
 - [ ] path 기반 parameter binding과 ResolvedStrategySpec 생성 구현(의도적 보류: 검증 랩 spec D4·§4).
 - [x] invalid combination을 실행 전 제거하는 constraint evaluator 구현(#517 — 격자 좌표계는 두고 어긴 칸만 실행·N 에서 뺀다).
-- [ ] trial count/time/memory estimate 구현(조합 수 미리 계산은 V3-03, 시간 어림은 M6 시간 어림 PR — 계열 최근 완료 실행 시간 기준. 메모리는 의도적 보류: run 이 한 프로세스의 스레드로 돌아 run 하나의 메모리를 잴 수 없다, process worker 보류와 함께 다시 본다).
+- [ ] trial count/time/memory estimate 구현(조합 수 미리 계산은 V3-03, 시간 어림은 #519 — 계열 최근 완료 실행 시간을 구간 길이로 늘려 차례로 더한다. 메모리는 의도적 보류: run 이 한 프로세스의 스레드로 돌아 run 하나의 메모리를 잴 수 없다, process worker 보류와 함께 다시 본다).
 - [x] deterministic grid sampler 구현(검증 랩 V3-01·V3-03).
 - [ ] seeded random과 Latin hypercube sampler 구현(의도적 보류: 검증 랩 spec §4, 이 문서 13절).
 - [ ] sampler plugin port를 두고 TPE/CMA-ES는 후속 adapter로 격리(의도적 보류: 검증 랩 spec §4).

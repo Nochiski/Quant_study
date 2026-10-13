@@ -219,7 +219,7 @@ class _FakeRuns:
         }
 
     def slot_usage(self) -> RunSlotUsage:
-        return RunSlotUsage(total=3, running=2, experiments=2)
+        return RunSlotUsage(total=3, running=2)
 
     def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
         self.schedules.append((owner, paused, priority))
@@ -630,7 +630,7 @@ def test_experiments_are_listed_newest_first_a_page_at_a_time() -> None:
     assert [item.record.experiment_id for item in second.items] == created[:1]
     assert service.list(after="missing", limit=2).items == ()
     # 대기열 화면의 슬롯 사용량과 우선순위 상한은 목록 응답이 싣는다(V5-01).
-    assert (first.slots, first.max_priority) == (RunSlotUsage(total=3, running=2, experiments=2), 5)
+    assert (first.slots, first.max_priority) == (RunSlotUsage(total=3, running=2), 5)
 
 
 def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(

@@ -1,6 +1,17 @@
 use crate::buying_power::project_valuation;
 use crate::power_projection::{project_execution, ExecutionState};
 
+// IEEE 이진 배정밀도 반올림 단위 u와 최소 subnormal(언더플로 절대 오차 상한 η 이상).
+const UNIT: f64 = 1.0 / 9_007_199_254_740_992.0;
+const TINY: f64 = 5e-324;
+// 현금 원장은 연산 5회다. 끝점 원장값과 실수 모형의 양방향 차이(2·5u)를 덮는 배수.
+const CASH_ERROR: f64 = 16.0;
+// 위험 평가의 포지션 합산 외 연산 수(대금·비용·현금·평가액·레버리지·총노출) 상한.
+const RISK_OPERATIONS: usize = 12;
+// 탐색 반복 예산(Python `SEARCH_BUDGET`과 같다). 증명으로 지울 수 없는 후보는 매도 비용률 합이
+// 100%를 반올림 오차만큼 넘는 상쇄 입력에서만 남는다.
+pub(crate) const SEARCH_BUDGET: usize = 4096;
+
 /// 실제 순차 부동소수 원장으로 수량을 판정한다. 단조성을 전제하지 않는다.
 pub(crate) struct Capacity<'a> {
     pub buy: bool,
@@ -44,13 +55,25 @@ impl Capacity<'_> {
         )
     }
 
+    fn ledger(&self, state: &ExecutionState, quantity: i64) -> (f64, f64, f64) {
+        let (fee, tax) = self.fees(quantity);
+        project_execution(
+            state,
+            self.buy,
+            quantity,
+            self.price,
+            fee,
+            tax,
+            self.new_quantity(quantity),
+            self.price,
+        )
+    }
+
     fn feasible(&self, quantity: i64) -> bool {
         let (fee, tax) = self.fees(quantity);
         let new = self.new_quantity(quantity);
         let (equity, gross) = if let Some(state) = self.state {
-            let (cash, equity, gross) = project_execution(
-                state, self.buy, quantity, self.price, fee, tax, new, self.price,
-            );
+            let (cash, equity, gross) = self.ledger(state, quantity);
             if !state.3 && (cash.is_nan() || cash < 0.0) {
                 return false;
             }
@@ -69,9 +92,64 @@ impl Capacity<'_> {
         quantity <= self.closing() || self.leverage * equity - gross >= 0.0
     }
 
-    /// 각 실제 IEEE 연산은 피연산자별 단조다. 큰 양수항/작은 차감항을 원래 순서로
-    /// 결합하면 구간 상한이다. 이는 실수 산술 근사가 아니며 허용 오차를 더하지 않는다.
+    /// 같은 대금 n에서 나온 대금·비용의 상관을 쓰는 구간 불가능 증명(Python `_Budget`과 같은 연산 순서).
+    /// 실수 모형의 현금 c±n−f·n−t·n은 n에 1차, 위험 L·평가액−총노출은 q에 오목이라 구간 최댓값은
+    /// 끝점(위험은 보유 0 꺾임점 포함)에서 나온다. 실제 원장값과 실수 모형의 차이는 연산마다
+    /// u·|결과|+η 이하라, 끝점 원장값에 그 합의 두 배를 더해도 음수이면 구간 전체가 불가능하다.
+    fn correlated_impossible(&self, state: &ExecutionState, low: i64, high: i64) -> bool {
+        let cash = state.0;
+        let notional_high = high as f64 * self.price;
+        if !notional_high.is_finite() || !cash.is_finite() {
+            return false;
+        }
+        let lows = self.ledger(state, low);
+        let highs = self.ledger(state, high);
+        if !(lows.0.is_finite() && highs.0.is_finite()) {
+            return false;
+        }
+        let costs = 1.0 + self.fee_rate + if self.buy { 0.0 } else { self.sell_tax_rate };
+        if !state.3 {
+            let scale = cash.abs() + notional_high * costs;
+            let bound = lows.0.max(highs.0) + (CASH_ERROR * UNIT * scale + CASH_ERROR * TINY);
+            if bound < 0.0 {
+                return true;
+            }
+        }
+        if low <= self.closing() || self.leverage < 0.0 {
+            return false;
+        }
+        let kink = if self.buy { -self.held } else { self.held };
+        let mut risk = f64::NEG_INFINITY;
+        for (_, equity, gross) in [lows, highs]
+            .into_iter()
+            .chain((low < kink && kink < high).then(|| self.ledger(state, kink)))
+        {
+            let value = self.leverage * equity - gross;
+            if !value.is_finite() {
+                return false;
+            }
+            risk = risk.max(value);
+        }
+        let held_value = (self.new_quantity(low) as f64)
+            .abs()
+            .max((self.new_quantity(high) as f64).abs());
+        let previous: f64 = state.1.iter().map(|value| value.abs()).sum();
+        let scale = (self.leverage + 1.0)
+            * (cash.abs() + 2.0 * notional_high * costs + previous + 2.0 * held_value * self.price);
+        if !scale.is_finite() {
+            return false;
+        }
+        let terms = (2 * (state.1.len() + RISK_OPERATIONS)) as f64;
+        risk + (terms * UNIT * scale + terms * (self.leverage + 1.0) * TINY) < 0.0
+    }
+
+    /// 구간 안의 어떤 수량도 실제 원장을 통과할 수 없음이 증명될 때만 구간을 버린다.
     fn impossible(&self, low: i64, high: i64) -> bool {
+        if let Some(state) = self.state {
+            if self.correlated_impossible(state, low, high) {
+                return true;
+            }
+        }
         let notional_low = low as f64 * self.price;
         let notional_high = high as f64 * self.price;
         let (fee_low, tax_low) = self.fees(low);
@@ -152,11 +230,16 @@ impl Capacity<'_> {
         low > self.closing() && self.leverage * equity_upper - gross_lower < 0.0
     }
 
-    /// 큰 수량부터 검사하고 불가능함이 증명된 구간만 제거한다. 상쇄가 극심한 입력은
-    /// 최악에 전수 검사가 필요하지만 상한/오차를 임의로 추가하지 않는다.
+    /// 큰 수량부터 검사하고 불가능함이 증명된 구간만 제거한다. 처음 허용된 수량이 정답이며,
+    /// 반복이 `SEARCH_BUDGET`을 넘으면 그때까지 허용된 수량이 없으므로 0(체결 없음)이다.
     pub(crate) fn maximum(&self, quantity: i64) -> i64 {
         let mut pending = vec![(1, quantity)];
+        let mut steps = 0;
         while let Some((low, high)) = pending.pop() {
+            steps += 1;
+            if steps > SEARCH_BUDGET {
+                return 0;
+            }
             if low > high {
                 continue;
             }
@@ -252,6 +335,41 @@ mod tests {
         };
         assert!(!capacity.impossible(1, 1));
         assert_eq!(capacity.maximum(2), 1);
+    }
+
+    fn cancelling_sell(quantity: i64, sell_tax_rate: f64, state: &ExecutionState) -> Capacity<'_> {
+        Capacity {
+            buy: false,
+            price: 1.0,
+            held: quantity,
+            fee_rate: 0.25,
+            sell_tax_rate,
+            leverage: 1.0,
+            equity: 0.0,
+            gross: 0.0,
+            mark: 1.0,
+            state: Some(state),
+        }
+    }
+
+    #[test]
+    fn correlated_bound_prunes_cost_above_notional() {
+        let quantity = 1_000_000_000_000_i64;
+        let state = (-1e-18, vec![quantity as f64], 0, false);
+        for excess in [1e-12, 1e-9, 1e-6, 1e-3] {
+            let capacity = cancelling_sell(quantity, 0.75 + excess, &state);
+            assert_eq!(capacity.maximum(quantity), 0);
+        }
+    }
+
+    #[test]
+    fn rounding_level_cancellation_stops_within_search_budget() {
+        let quantity = 1_i64 << 62;
+        let state = (-1e-18, vec![quantity as f64], 0, false);
+        let capacity = cancelling_sell(quantity, f64::from_bits(0.75_f64.to_bits() + 1), &state);
+        // 반올림이 유리한 수량은 실제 원장을 통과한다. 예산 안에서 찾은 값은 원장이 허용한다.
+        let found = capacity.maximum(quantity);
+        assert!(found == 0 || capacity.feasible(found));
     }
 
     #[test]

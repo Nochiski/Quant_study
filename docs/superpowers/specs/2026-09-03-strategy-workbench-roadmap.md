@@ -5,7 +5,7 @@
 > 상태(2026-10-14): M0~M5 완료, M6·M7은 검증 랩(28 PR 중 21 머지)이 진행 중, M8·M9는 일부 항목만 완료,
 > M10 미착수. 이 로드맵의 하위 initiative 다섯 개 중 넷이 끝났고 검증 랩이 진행 중이다.
 >
-> 체크리스트: 151개 중 95개 완료, 56개 남음
+> 체크리스트: 151개 중 93개 완료, 58개 남음
 >
 > 다음 체크: 검증 랩 V4-05(팩터 회귀)·V5-02(결과 검증 카드)·V6-01(개봉 backend) — 착수 가능
 >
@@ -491,7 +491,7 @@ Python/Rust 결과가 같다.
 
 ### M6 — Parameter Search + 실험 진행 UX
 
-- [x] `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가(검증 랩 V3-01 #306 — 값 허용 술어까지, 조합 제약은 아래 evaluator).
+- [ ] `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가(SearchSpec·파라미터 축은 검증 랩 V3-01 #306, 조건부 Constraint 미착수).
 - [ ] path 기반 parameter binding과 ResolvedStrategySpec 생성 구현(의도적 보류: 검증 랩 spec D4·§4).
 - [ ] invalid combination을 실행 전 제거하는 constraint evaluator 구현.
 - [ ] trial count/time/memory estimate 구현(조합 수 미리 계산만 V3-03에 있음, 시간·메모리 미착수).
@@ -499,10 +499,10 @@ Python/Rust 결과가 같다.
 - [ ] seeded random과 Latin hypercube sampler 구현(의도적 보류: 검증 랩 spec §4, 이 문서 13절).
 - [ ] sampler plugin port를 두고 TPE/CMA-ES는 후속 adapter로 격리(의도적 보류: 검증 랩 spec §4).
 - [ ] fingerprint duplicate/cache-hit 판정 구현(의도적 보류: 끝난 결과 재사용 안 함, 2026-09-30 리드 결정·검증 랩 spec D6 — 진행 중 같은 입력 잇기만 V3-04).
-- [x] SQLite experiment repository와 migration 추가(검증 랩 V3-03 #321·#334).
-- [x] experiment/trial/attempt 상태 전이·audit event 구현(검증 랩 V3-03).
+- [x] SQLite experiment repository와 migration 추가(검증 랩 V3-03 #334).
+- [ ] experiment/trial/attempt 상태 전이·audit event 구현(상태 전이는 검증 랩 V3-03, audit event 로그는 미구현).
 - [ ] bounded process worker, parallelism, cancellation, crash recovery 구현(취소·재시작 복구·슬롯 병렬은 V3-04 #346·#348, process worker는 의도적 보류: 검증 랩 spec §4·D6).
-- [ ] failed/pruned/cancelled trial과 error reason 보존.
+- [ ] failed/pruned/cancelled trial과 error reason 보존(failed·cancelled는 검증 랩 V3-03·V3-04, pruned 개념 없음).
 - [x] experiment create/status/trials/results/cancel/retry API 추가(검증 랩 V3-03·V3-04).
 - [ ] Builder 파라미터 범위/constraint/budget 화면 추가.
 - [ ] Experiment Monitor 진행률·ETA·상태별 count·실패 상세 추가(V5-01 #402·#407에 ETA 없음).
@@ -521,7 +521,7 @@ Python/Rust 결과가 같다.
 - [ ] fee/slippage/borrow/execution-delay stress grid 구현.
 - [ ] return/trade bootstrap 또는 Monte Carlo adapter 구현.
 - [x] probabilistic Sharpe와 deflated Sharpe 구현(검증 랩 V4-01 #363·V4-02 #385).
-- [x] trial count와 selection bias metadata를 결과에 포함(검증 랩 V1-05 시도 원장·V4-02 DSR·선택 기록).
+- [x] trial count와 selection bias metadata를 결과에 포함(검증 랩 V1-05 시도 원장·V4-02 DSR·선택 기록, 단일 실행 결과 화면은 V5-02).
 - [ ] single-objective ranking과 Pareto frontier view 구현.
 - [ ] robustness report API 추가.
 - [ ] Candidate Explorer heatmap/scatter/parallel coordinate 추가.

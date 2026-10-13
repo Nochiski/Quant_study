@@ -1447,3 +1447,49 @@ def test_a_capacity_sweep_survives_reopening_the_research_database(tmp_path: Pat
 
     assert reopened.get(created.record.experiment_id).record == created.record
     assert [t.initial_cash for t in created.record.design.trials()] == [1e8, 2e8, 3e8]
+
+
+@pytest.mark.parametrize("reason", ["", " ", "\t\n"])
+def test_internal_selection_rejects_blank_reason_before_reading_the_trial(reason: str) -> None:
+    service = _service(_FakeRuns())
+    with pytest.raises(ValueError, match="non-whitespace"):
+        service.select("not-loaded", 0, reason)
+
+
+def test_cancelled_experiment_does_not_settle_before_validation_runs_stop() -> None:
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(runs, {f"run-{index}": _result(0.1) for index in range(4)})
+    service.advance(experiment_id)
+    runs.run_statuses["run-4"] = RunStatus.CANCEL_REQUESTED
+    runs.run_statuses["run-5"] = RunStatus.CANCEL_REQUESTED
+    cancelled = service.cancel(experiment_id)
+    assert cancelled.finished is True
+    assert cancelled.settled is False
+    runs.run_statuses["run-4"] = RunStatus.CANCELLED
+    assert service.get(experiment_id).settled is False
+    runs.run_statuses["run-5"] = RunStatus.CANCELLED
+    assert service.get(experiment_id).settled is True
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_experiment_base_request_uses_the_run_codec_and_reads_old_rows(
+    tmp_path: Path, legacy: bool
+) -> None:
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteExperimentRepository(path)
+    service = _service(runs, repository=repository, spawn=lambda _work: None)
+    before = service.create(_request()).record
+    if legacy:
+        with sqlite3.connect(path) as connection:
+            row = connection.execute("SELECT design_json FROM experiments").fetchone()
+            design = json.loads(row[0])
+            # 구판 저장 형식은 run_spec 봉투 없이 요청 dataclass JSON을 직접 넣었다.
+            design["run"] = design["run"]["run_spec"]
+            connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(design),))
+    repository.close()
+    reopened = SQLiteExperimentRepository(path)
+    assert reopened.get(before.experiment_id) == before
+    reopened.close()

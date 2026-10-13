@@ -25,6 +25,7 @@ from strategy_workbench.domain.experiment.facade.trial import (
 )
 
 from ._errors import ResearchStorageError
+from ._request_codec import decode_request, encode_request
 from ._schema import migrate_schema
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class SQLiteExperimentRepository:
                 (
                     record.experiment_id,
                     _time_text(record.created_at, "created_at", record.experiment_id),
-                    _RECORD.dump_json(record, exclude=_COLUMNS | {"controls"}).decode(),
+                    _encode_record(record),
                 ),
             )
 
@@ -238,6 +239,12 @@ class SQLiteExperimentRepository:
         )
 
 
+def _encode_record(record: ExperimentRecord) -> str:
+    value = _RECORD.dump_python(record, mode="json", exclude=_COLUMNS | {"controls", "run"})
+    value["run"] = json.loads(encode_request(record.run))
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
+
+
 def _record(row: sqlite3.Row) -> ExperimentRecord:
     # 조작 행이 없는 실험(판본 4 이전 파일 포함)은 처음 값으로 읽는다.
     controls = (
@@ -247,12 +254,18 @@ def _record(row: sqlite3.Row) -> ExperimentRecord:
     )
     try:
         design = json.loads(row["design_json"])
+        request = design["run"]
+        design["run"] = decode_request(
+            json.dumps(request),
+            run_id=f"experiment:{row['experiment_id']}",
+            legacy_spec="run_spec" not in request,
+        )
         value = {
             **design,
             **{key: row[key] for key in _COLUMNS},
             "controls": controls,
         }
-    except (TypeError, ValueError) as error:
+    except (KeyError, TypeError, ValueError) as error:
         raise ResearchStorageError(
             f"stored experiment design is unreadable — experiment_id={row['experiment_id']}: "
             f"{error}"

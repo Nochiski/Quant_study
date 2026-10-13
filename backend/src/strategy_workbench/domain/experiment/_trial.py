@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -131,3 +132,25 @@ def experiment_status(
     if all(status is TrialStatus.QUEUED for status in trials):
         return ExperimentStatus.QUEUED
     return ExperimentStatus.RUNNING
+
+
+# HTTP의 입력 스키마도 같은 규칙을 표시한다. 문장 내용은 저장할 때 바꾸지 않는다.
+SELECTION_REASON_PATTERN = r"\S"
+
+
+def validate_selection_reason(reason: str) -> None:
+    if re.search(SELECTION_REASON_PATTERN, reason) is None:
+        raise ValueError("selection reason must contain a non-whitespace character")
+
+
+def experiment_settled(
+    status: ExperimentStatus,
+    trials: Sequence[TrialStatus],
+    validation_runs: Sequence[RunStatus],
+) -> bool:
+    """진행을 더 볼 실행이 없다. 취소한 실험도 도는 학습·검증 실행을 기다린다."""
+    return (
+        status.is_terminal
+        and all(trial.is_terminal for trial in trials)
+        and all(run.is_terminal for run in validation_runs)
+    )

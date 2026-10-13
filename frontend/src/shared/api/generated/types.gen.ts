@@ -1706,6 +1706,10 @@ export type Experiment = {
    * Selections
    */
   selections: Array<ExperimentSelection>;
+  /**
+   * Settled
+   */
+  settled: boolean;
   status: ExperimentStatus;
   /**
    * Trial Counts

@@ -60,8 +60,10 @@ from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentStatus,
     TrialStatus,
     awaiting_recovery,
+    experiment_settled,
     experiment_status,
     trial_status,
+    validate_selection_reason,
 )
 from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
 
@@ -143,6 +145,11 @@ class ExperimentTrialState:
     # 최신 실행이 파산으로 끝났다(`bankrupt`) — 비전략 실패와 달리 전략의 결과다.
     bankrupt: bool = False
 
+    @property
+    def settled(self) -> bool:
+        """trial이 끝났고 재시작 복구를 기다리지 않는다."""
+        return self.status.is_terminal and not self.awaiting_recovery
+
 
 @dataclass(frozen=True)
 class Experiment:
@@ -154,6 +161,8 @@ class Experiment:
     # 끝났다(완료·취소, `ExperimentStatus.is_terminal`). 화면이 조작 노출·다시 묻기를 이 값으로
     # 가른다.
     finished: bool
+    # 학습·검증 실행까지 모두 멈췄다. 진행 스트림의 종료 여부이며 조작 가능 여부와 다르다.
+    settled: bool
 
 
 @dataclass(frozen=True)
@@ -395,6 +404,7 @@ class ExperimentRunService:
         끝나기 전(대기·도는 trial 이 있다)에는 거절한다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이
         굳지 않게 한다. 취소한 실험은 끝났다(돌지 않은 조합은 시도가 아니다).
         """
+        validate_selection_reason(reason)
         record = self._repository.get(experiment_id)
         _require_kind(record, ExperimentKind.PARAMETER_SEARCH)
         state = self._trial_state(record, trial_index)
@@ -405,7 +415,7 @@ class ExperimentRunService:
                 f"experiment_id={experiment_id} trial_index={trial_index} status={state.status}",
             )
         if not state.selectable:
-            unfinished = sum(not _finished(other) for other in self._trial_states(record))
+            unfinished = sum(not other.settled for other in self._trial_states(record))
             raise ExperimentStateError(
                 "experiment.selection.not_finished",
                 "실험의 trial 이 모두 끝난 뒤에 후보를 고를 수 있습니다: "
@@ -584,7 +594,7 @@ class ExperimentRunService:
                 for index, pick, choice in chosen:
                     if latest.get(index) == pick:  # 다른 제출이 그사이 고르지 않았다
                         self._pick(record, base, index, choice, pick)
-        return all(_finished(state) for state in states)
+        return all(state.settled for state in states)
 
     def walk_forward(self, experiment_id: str) -> WalkForwardReport:
         """창별 선택·검증 실행 결과와, 모든 창의 검증 실행이 완료됐으면 이어 붙인 곡선·표본 밖
@@ -687,7 +697,7 @@ class ExperimentRunService:
         waiting = False
         for index in range(count):
             window_states = list(states[index::count])
-            if not all(_finished(s) for s in window_states):
+            if not all(s.settled for s in window_states):
                 continue
             pick = picks.get(index)
             run = runs.get(pick.run_id) if pick is not None and pick.run_id else None
@@ -817,12 +827,18 @@ class ExperimentRunService:
             pending=any(state.awaiting_recovery for state in states)
             or self._walk_forward_pending(record, states),
         )
+        validation_runs = self._runs.states(
+            {pick.run_id for pick in self._repository.picks(record.experiment_id) if pick.run_id}
+        )
         return Experiment(
             record=record,
             status=status,
             trial_counts=dict(Counter(statuses)),
             selections=self._repository.selections(record.experiment_id),
             finished=status.is_terminal,
+            settled=experiment_settled(
+                status, statuses, [run.status for run in validation_runs.values()]
+            ),
         )
 
     def _walk_forward_pending(
@@ -849,7 +865,7 @@ class ExperimentRunService:
             _state(trial, tuple(attempts.get(trial.index, ())), cancelled, runs)
             for trial in record.design.trials()
         )
-        if cancelled or all(_finished(state) for state in states):
+        if cancelled or all(state.settled for state in states):
             return states
         # 실험이 끝나기 전에는 고르지 않는다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이 굳는다.
         return tuple(replace(state, selectable=False) for state in states)
@@ -864,11 +880,6 @@ class ExperimentRunService:
                 f"trials={len(states)}",
             )
         return states[trial_index]
-
-
-def _finished(state: ExperimentTrialState) -> bool:
-    """trial 이 끝났다(복구를 기다리지 않는다)."""
-    return state.status.is_terminal and not state.awaiting_recovery
 
 
 def _state(

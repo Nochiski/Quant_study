@@ -85,6 +85,7 @@ const experiment = (
   trial_counts: { completed: 3, running: 1, failed: 1, queued: 3 },
   selections: [],
   finished: status === "completed" || status === "cancelled",
+  settled: status === "completed" || status === "cancelled",
 });
 
 const document = {

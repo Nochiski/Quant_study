@@ -21,6 +21,7 @@ import {
 } from "vitest";
 
 import { App } from "../app";
+import type { ResearchCatalog } from "../../shared/api";
 
 const API = "http://localhost:8000";
 
@@ -353,8 +354,12 @@ const server = setupServer(
       page_size: 1,
       page_count: 0,
       fields: [],
-      facets: {},
-    }),
+      facets: { dataset_ids: [], frequencies: [], units: [] },
+      snapshot: {
+        snapshot_id: "snap", schema_version: "1", source: "test",
+        built_at: "2026-09-05T00:00:00Z", dataset_revisions: [], point_in_time: true,
+      },
+    } satisfies ResearchCatalog),
   ),
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec(0, "새 팩터 전략")),

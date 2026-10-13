@@ -1,3 +1,4 @@
+import { metadataCoherence } from "./metadata-coherence";
 /**
  * Completion and hover for the source editor, driven by the backend runtime schema and
  * contract (WORKFLOW P3-03, editor ADR D2). Keys and enumerated values come from the schema;
@@ -28,7 +29,6 @@ import type {
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import {
-  isSchemaContractCompatible,
   projectContractField,
 } from "./contract-inspector";
 import { describeApplicabilityConditions } from "./field-applicability";
@@ -60,23 +60,6 @@ export type AssistDeps = {
 
 export type AssistMetadata = Omit<AssistDeps, "getState">;
 
-export type FactorCatalogCoherence = "ready" | "unavailable" | "incompatible";
-
-/** One compatibility decision shared by factor completion and canonical factor snippets. */
-export const factorCatalogCoherence = (
-  schema: StrategyDocumentSchema | null,
-  contract: StrategyDocumentContractResponse | null,
-  factorCatalog: FactorCatalog | null,
-): FactorCatalogCoherence => {
-  if (schema === null || contract === null || factorCatalog === null)
-    return "unavailable";
-  if (!isSchemaContractCompatible(schema, contract)) return "incompatible";
-  return factorCatalog.registry_version ===
-    contract.contract.factor_registry_version
-    ? "ready"
-    : "incompatible";
-};
-
 /**
  * Projects query responses into editor assistance without flattening their wire contracts.
  * A mismatched schema/contract pair degrades to schema-only keys/enums; contract metadata and
@@ -88,24 +71,18 @@ export const projectAssistMetadata = (
   equityCatalog: ResearchCatalog | null,
   factorCatalog: FactorCatalog | null,
 ): AssistMetadata => {
-  const coherentContract =
-    contract !== null && isSchemaContractCompatible(schema, contract)
-      ? contract.contract
-      : null;
-  const coherentFactors =
-    factorCatalogCoherence(schema, contract, factorCatalog) === "ready";
+  const coherence = metadataCoherence({ schema, contract, equityCatalog, factorCatalog });
+  const coherentContract = coherence.schemaContract === "ready" ? contract?.contract : null;
   return {
     schema: (schema?.schema as JsonSchema | undefined) ?? null,
     contract: coherentContract?.fields ?? [],
     catalogs: {
       equityFields:
-        coherentContract !== null &&
-        equityCatalog?.snapshot?.snapshot_id ===
-          coherentContract.dataset_snapshot_id
+        coherence.dataset === "ready" && equityCatalog !== null
           ? equityCatalog.fields
           : [],
       factors:
-        coherentFactors && factorCatalog !== null ? factorCatalog.factors : [],
+        coherence.factorRegistry === "ready" && factorCatalog !== null ? factorCatalog.factors : [],
     },
   };
 };

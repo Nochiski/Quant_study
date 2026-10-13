@@ -586,3 +586,65 @@ def test_historical_v1_result_decodes_without_inventing_later_fields(tmp_path: P
     assert result.artifacts.fills[0].price == 30.0
     assert result.series.rolling_sharpe_window_sessions is None
     assert result.metrics[2].value == 0.125
+
+
+# 요청 codec도 현재 writer를 호출하지 않는 고정 입력을 사용한다.
+_HISTORICAL_REQUEST = (
+    '{"inline_draft": null, "run_spec": {"annualization'
+    '_days": 252, "benchmark_security_id": "KRX:069500"'
+    ', "core": "rust", "environment": {"end": "2026-08-'
+    '31", "fee_bps": 15.0, "frequency": "daily", "impac'
+    't_coefficient": 1.0, "impact_model": "fixed_bps", '
+    '"market": "KRX", "missing": "drop", "participation'
+    '_basis": "adv20", "participation_rate": 0.1, "sell'
+    '_tax": "krx_statutory", "sell_tax_bps": null, "sli'
+    'ppage_bps": 10.0, "start": "2021-01-01", "timing":'
+    ' "next_open", "universe_id": "krx.common-stock"}, '
+    '"initial_cash": 100000000.0, "lineage_strategy_id"'
+    ': null, "metric_windows": [{"end": "2022-12-29", "'
+    'label": "2022", "scope": "window", "start": "2022-'
+    '01-03"}], "parameter_values": {"count": 25, "mode"'
+    ': true, "weight": 1.0}, "strategy": null, "strateg'
+    'y_source": null}, "strategy": {"canonical": "{\\"de'
+    'scription\\":\\"\\",\\"eligibility\\":{\\"rules\\":[]},\\"'
+    'factors\\":[{\\"direction\\":\\"high\\",\\"factor_id\\":\\'
+    '"price.close\\",\\"graph\\":{\\"nodes\\":[{\\"field_id\\"'
+    ':\\"price.close\\",\\"kind\\":\\"field\\",\\"node_id\\":\\"'
+    'close\\"}],\\"output_node_id\\":\\"close\\"},\\"label\\":'
+    '\\"종가\\",\\"weight\\":1.0}],\\"parameters\\":[{\\"default'
+    '\\":0.5,\\"kind\\":\\"float\\",\\"maximum\\":1.0,\\"minimu'
+    'm\\":0.0,\\"parameter_id\\":\\"weight\\",\\"step\\":0.1},'
+    '{\\"default\\":20,\\"kind\\":\\"integer\\",\\"maximum\\":4'
+    '0,\\"minimum\\":5,\\"parameter_id\\":\\"count\\",\\"step\\'
+    '":5},{\\"choices\\":[\\"fast\\",2,true],\\"default\\":\\"'
+    'fast\\",\\"kind\\":\\"choice\\",\\"parameter_id\\":\\"mode'
+    '\\"}],\\"portfolio\\":{\\"liquidity_field_id\\":null,\\"'
+    'minimum_liquidity\\":null,\\"minimum_trade_weight\\":'
+    '0.0,\\"rebalance\\":\\"monthly\\",\\"rebalance_every_n_'
+    'sessions\\":21,\\"selection_count\\":20,\\"selection_m'
+    'ethod\\":\\"top_n\\",\\"selection_percentile\\":0.1,\\"s'
+    'hort_selection_count\\":20,\\"side\\":\\"long_only\\",\\'
+    '"turnover_buffer_count\\":0,\\"weighting\\":\\"equal\\"'
+    '},\\"risk\\":{\\"gross_exposure\\":1.0,\\"max_name_weig'
+    'ht\\":0.1,\\"max_sector_weight\\":0.3,\\"net_exposure\\'
+    '":1.0,\\"risk_factor_id\\":null,\\"risk_field_id\\":nu'
+    'll,\\"sector_neutral\\":false},\\"schema_version\\":\\"'
+    '1.2\\",\\"signal\\":{\\"normalization\\":\\"rank\\",\\"reg'
+    'ime_field_id\\":null,\\"regime_minimum\\":null,\\"scor'
+    'e_threshold\\":null},\\"title\\":\\"새 팩터 전략\\"}", "revi'
+    'sion": 0, "strategy_id": "draft"}}'
+)
+
+
+def test_fixed_stored_request_preserves_strategy_identity_and_parameters() -> None:
+    from strategy_workbench.adapters.outbound.research_sqlite._request_codec import decode_request
+
+    request = decode_request(_HISTORICAL_REQUEST, run_id="historical-request")
+    assert request.strategy is not None
+    assert (request.strategy.identity.strategy_id, request.strategy.identity.revision) == (
+        "draft",
+        0,
+    )
+    assert request.parameter_values == {"weight": 1.0, "count": 25, "mode": True}
+    assert request.environment is not None
+    assert request.environment.start.isoformat() == "2021-01-01"

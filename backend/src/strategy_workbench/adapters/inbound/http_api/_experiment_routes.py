@@ -397,6 +397,7 @@ class _ExperimentStreamHub:
         # 생산자 취소는 실행 중인 스레드를 중단하지 않는다. 실제 조회의 수명은 연결과 분리한다.
         self._reads: dict[str, asyncio.Task[Experiment]] = {}
         self._closing = False
+        self._shutdown: asyncio.Task[None] | None = None
 
     async def stream(self, experiment_id: str) -> AsyncGenerator[str, None]:
         if self._closing:
@@ -441,13 +442,33 @@ class _ExperimentStreamHub:
                         await shared.producer
 
     async def close(self) -> None:
-        """ASGI 종료는 생산자와 실제 조회 스레드를 모두 회수한 뒤 끝난다."""
-        self._closing = True
-        entries = list(self._streams.values())
-        self._streams.clear()
-        tasks = [shared.producer for shared in entries if shared.producer is not None]
-        for task in tasks:
-            task.cancel()
+        """종료 요청자가 취소돼도 실제 조회 회수를 마친 뒤 취소를 돌려준다."""
+        if self._shutdown is None:
+            self._closing = True
+            entries = list(self._streams.values())
+            self._streams.clear()
+            tasks = [shared.producer for shared in entries if shared.producer is not None]
+            for task in tasks:
+                task.cancel()
+            self._shutdown = asyncio.create_task(self._drain(entries, tasks))
+        shutdown = self._shutdown
+        cancelled = False
+        while not shutdown.done():
+            try:
+                await asyncio.shield(shutdown)
+            except asyncio.CancelledError:
+                # 여러 close 호출은 같은 회수를 기다린다. 한 호출의 취소가 공유 작업이나
+                # 조회 task를 취소해 실제 스레드의 추적을 지워서는 안 된다.
+                cancelled = True
+        shutdown.result()
+        if self._shutdown is shutdown:
+            self._shutdown = None
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _drain(
+        self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]
+    ) -> None:
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
             # 저장소가 닫히기 전에 실제 스레드가 조회를 마칠 때까지 기다린다.

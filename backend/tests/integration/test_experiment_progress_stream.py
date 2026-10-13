@@ -305,3 +305,65 @@ def test_disconnect_reconnect_shares_the_worker_and_shutdown_drains_it(reconnect
             await hub.close()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("concurrent_close", [False, True])
+def test_cancelled_shutdown_still_owns_and_drains_the_worker(concurrent_close: bool) -> None:
+    entered, release = Event(), Event()
+
+    class BlockingExperiments:
+        calls = 0
+        active = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            self.active += 1
+            entered.set()
+            try:
+                release.wait()
+                return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+            finally:
+                self.active -= 1
+
+    source = BlockingExperiments()
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def exercise() -> None:
+        stream = hub.stream("same")
+        first = asyncio.create_task(anext(stream))
+        closers: list[asyncio.Task[None]] = []
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            closers.append(asyncio.create_task(hub.close()))
+            if concurrent_close:
+                closers.append(asyncio.create_task(hub.close()))
+            await asyncio.sleep(0.02)
+            closers[0].cancel()
+            await asyncio.sleep(0.02)
+            # 종료 요청자 취소도 저장소 수명을 앞당기지 못한다. 재접속은 종료 중 거절한다.
+            assert not closers[0].done()
+            assert hub._closing
+            assert len(hub._reads) == 1
+            assert source.active == 1
+            assert [frame async for frame in hub.stream("same")] == []
+            assert source.calls == 1
+            release.set()
+            outcomes = await asyncio.wait_for(
+                asyncio.gather(*closers, return_exceptions=True), 1
+            )
+            assert isinstance(outcomes[0], asyncio.CancelledError)
+            if concurrent_close:
+                assert outcomes[1] is None
+            assert source.active == 0
+            assert not hub._reads and not hub._streams and not hub._closing
+            with pytest.raises(StopAsyncIteration):
+                await first
+        finally:
+            release.set()
+            await asyncio.gather(*closers, return_exceptions=True)
+            first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+            await stream.aclose()
+            await hub.close()
+
+    asyncio.run(exercise())

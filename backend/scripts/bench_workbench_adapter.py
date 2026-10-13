@@ -84,9 +84,9 @@ from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
-    BacktestRunSpec,
     ExecutionCore,
     MetricWindow,
+    ResolvedBacktestRunSpec,
     StrategyProvenance,
     StrategySourceKind,
 )
@@ -327,7 +327,7 @@ def execution_request(
     spec_hash = strategy_spec_hash(spec)
     return BacktestExecutionRequest(
         run_id=f"bench-workbench-{core.value}",
-        spec=BacktestRunSpec(
+        spec=ResolvedBacktestRunSpec(
             strategy=spec,
             core=core,
             environment=environment,

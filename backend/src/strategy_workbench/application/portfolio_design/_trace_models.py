@@ -182,3 +182,4 @@ class StrategyTraceResponse:
     # `target` 처럼 기준일이 리밸런스 신호일일 때만 있다.
     summary: StrategyTraceSummary | None = None
     warnings: tuple[str, ...] = ()
+    factor_evaluation_version: str | None = None

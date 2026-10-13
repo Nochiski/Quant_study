@@ -68,6 +68,7 @@ const plans = (): ExecutionPlansState => ({
         },
         plan: {
           missing_policy: "drop",
+          evaluation_version: "factor-evaluation-v1",
           graph_hash: "graph-hash",
           plan_hash: "plan-hash",
           registry_version: "registry-v1",

@@ -391,3 +391,15 @@ def test_mock_resolves_every_field_of_implemented_default_graphs() -> None:
             definition.default_graph, fields=metadata.fields, require_field_metadata=True
         )
         assert validation.valid, (definition.factor_id, validation)
+
+
+def test_mock_백테스트_경고는_equity_코드_어휘를_쓴다() -> None:
+    from strategy_workbench.application.backtest_run.facade.ports import BacktestDataQuery
+
+    dataset = MockEquityDataAdapter(build_demo_fixture()).load_backtest_dataset(
+        BacktestDataQuery(date(2024, 1, 2), date(2024, 1, 5), ("sec-005930-1",), None)
+    )
+    assert [warning.code for warning in dataset.warnings] == [
+        "equity.mock_data",
+        "equity.corporate_action_feed_empty",
+    ]

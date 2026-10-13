@@ -127,6 +127,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
     UniverseHistoryQuery,
 )
+from strategy_workbench.domain.paging.facade.page import MAX_PAGE_SIZE
 from strategy_workbench.domain.strategy.facade.explanation import StrategyExplanation
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
@@ -707,7 +708,7 @@ def create_app(
         unit: Annotated[list[str] | None, Query()] = None,
         frequency: Annotated[list[str] | None, Query()] = None,
         page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
+        page_size: int = Query(default=20, ge=1, le=MAX_PAGE_SIZE),
     ) -> ResearchCatalog:
         return equity_workspace.catalog(
             FieldCatalogQuery(
@@ -756,7 +757,7 @@ def create_app(
         category: Annotated[list[FactorCategory] | None, Query()] = None,
         availability: Annotated[list[FactorAvailability] | None, Query()] = None,
         page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
+        page_size: int = Query(default=20, ge=1, le=MAX_PAGE_SIZE),
     ) -> FactorCatalog:
         return factor_research.catalog(
             FactorCatalogQuery(

@@ -5,4 +5,10 @@
 # 적지 않게 한다.
 # domain.strategy: 실행 계획 설명이 compile 이 붙인 승격 노드를 표식으로 내보낸다(P3-01, Phase 2
 # 감사 #13). 승격 노드 이름 규칙의 owner 는 `domain/strategy/_promotion.py` 하나다.
-DEPENDS_ON: tuple[str, ...] = ("domain.backtest", "domain.factor", "domain.strategy")
+# domain.paging: 카탈로그 페이지 요청 검증·창 계산의 정본(#375 DR-A-14).
+DEPENDS_ON: tuple[str, ...] = (
+    "domain.backtest",
+    "domain.factor",
+    "domain.paging",
+    "domain.strategy",
+)

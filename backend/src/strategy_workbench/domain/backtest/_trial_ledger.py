@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
@@ -214,3 +214,30 @@ def _role(entry: TrialLedgerEntry, first: TrialLedgerEntry | None) -> TrialRunRo
     if entry.status in (RunStatus.CANCELLED, RunStatus.FAILED):
         return TrialRunRole.NO_RESULT
     return TrialRunRole.PENDING
+
+
+@dataclass(frozen=True)
+class ResolvedLineage:
+    """합치기 간선에서 해소한 생존 계열과 합쳐진 구성원."""
+
+    root: str
+    merged: tuple[str, ...]
+
+
+def lineage_root(merges: Mapping[str, str], lineage_id: str) -> str:
+    """합치기 사슬의 생존 계열. 순환 데이터는 무한 대기 대신 거절한다."""
+    visited: set[str] = set()
+    while lineage_id in merges:
+        if lineage_id in visited:
+            raise ValueError(f"lineage merge cycle — lineage_id={lineage_id}")
+        visited.add(lineage_id)
+        lineage_id = merges[lineage_id]
+    return lineage_id
+
+
+def resolve_lineage(merges: Mapping[str, str], lineage_id: str) -> ResolvedLineage:
+    """조회·다시 합치기는 같은 생존 계열을 따른다. 저장소는 간선만 제공한다(#332)."""
+    root = lineage_root(merges, lineage_id)
+    return ResolvedLineage(
+        root, tuple(source for source in merges if lineage_root(merges, source) == root)
+    )

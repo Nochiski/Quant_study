@@ -26,6 +26,7 @@ import math
 from bisect import bisect_left
 from collections import deque
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import date
 
 from ._models import ParticipationBasis, RunEnvironment
@@ -35,21 +36,22 @@ ADV_SESSIONS = 20
 PRICE_ADJUSTING_ACTIONS = frozenset({"split", "reverse_split"})
 
 
+@dataclass(frozen=True)
+class AdvObservation:
+    shares: float
+    available_rows: int
+
+
 def participation_volumes(
     environment: RunEnvironment,
-    bars: Iterable[tuple[date, str, float, float | None]],
-    settled: Mapping[tuple[date, str], float],
+    observations: Mapping[tuple[date, str], AdvObservation],
 ) -> dict[tuple[date, str], int] | None:
-    """`(세션, 종목, 종가, 거래대금)` 행마다 유동성 캡의 기준 거래량(주).
-
-    `session_volume` 이면 `None` 이다 — 엔진이 체결 세션 거래량을 그대로 쓴다. 워밍업 행을 함께
-    넘겨야 첫 세션들의 평균이 20행을 채운다. `settled` 는 `settlement_multipliers` 다.
-    """
+    """참여 한도는 거래대금이 있는 앞선 행이 ADV 창을 채웠을 때만 연다."""
     if environment.participation_basis is ParticipationBasis.SESSION_VOLUME:
         return None
     return {
-        key: math.floor(shares)
-        for key, shares in adv_shares(bars, settled, minimum_rows=ADV_SESSIONS).items()
+        key: math.floor(item.shares) if item.available_rows >= ADV_SESSIONS else 0
+        for key, item in observations.items()
     }
 
 
@@ -78,35 +80,29 @@ def settlement_multipliers(
     return settled
 
 
-def adv_shares(
+def adv_observations(
     bars: Iterable[tuple[date, str, float, float | None]],
     settled: Mapping[tuple[date, str], float],
-    *,
-    minimum_rows: int,
-) -> dict[tuple[date, str], float]:
-    """`(세션, 종목, 종가, 거래대금)` 행마다 판단일까지 20행 평균 거래대금 ÷ 판단일 종가(주).
+) -> dict[tuple[date, str], AdvObservation]:
+    """정렬된 행을 한 번 읽어 판단일까지 ADV와 관측 개수를 함께 낸다.
 
-    참여 기준 `adv20` 과 √ 충격(`_impact.py`)이 같은 ADV 를 쓴다. 내림하지 않는다 — 참여 한도는
-    `participation_volumes` 가 내림하고, √ 안의 분모는 1주 미만도 그대로 쓴다. 거래대금이 있는
-    앞선 행이 `minimum_rows` 개보다 적으면 0주다. 참여 한도는 20행이 다 차야 한도를 주고(보수
-    쪽), √ 충격은 있는 행만으로 잰다(1) — 0주면 충격이 0 이 되어 오히려 낙관 쪽이라서다. 두
-    규칙이 결과를 가르는 것은 `session_volume` 참여 + `sqrt` 충격 조합뿐이다(`adv20` 이면 20행
-    전에는 체결이 없다). 자본변동 정산 행(`settled`)에서는 판단일 종가를 가격 배수로 나눠 정산 뒤
-    주식 단위로 센다 — 그 행의 주문·체결·거래량이 정산 뒤 단위다.
+    두 소비자는 같은 ADV를 읽되 참여한도는 완전창, 충격은 최소 한 행을 요구한다.
+    합산은 기존 좌→우 순서를 유지하여 부동소수 반올림 의미를 바꾸지 않는다.
     """
-    volumes: dict[tuple[date, str], float] = {}
+    observations: dict[tuple[date, str], AdvObservation] = {}
     values: dict[str, deque[float]] = {}
     last_close: dict[str, float] = {}
-    for session, security_id, close, trading_value in sorted(bars, key=lambda row: row[0]):
+    for session, security_id, close, trading_value in bars:
         key = (session, security_id)
         window = values.setdefault(security_id, deque(maxlen=ADV_SESSIONS))
         previous_close = last_close.get(security_id)
-        volumes[key] = (
+        observations[key] = AdvObservation(
             sum(window) / len(window) / (previous_close / settled.get(key, 1.0))
-            if len(window) >= minimum_rows and previous_close
-            else 0.0
+            if window and previous_close
+            else 0.0,
+            len(window),
         )
         if trading_value is not None:
             window.append(trading_value)
         last_close[security_id] = close
-    return volumes
+    return observations

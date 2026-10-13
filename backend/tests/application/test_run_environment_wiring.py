@@ -76,9 +76,8 @@ from strategy_workbench.domain.backtest.facade.environment import (
     ResearchWindowViolationError,
     RunEnvironment,
     SellTax,
+    cost_inputs,
     environment_hash,
-    impact_scales,
-    participation_volumes,
     settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
@@ -509,11 +508,11 @@ class _ShrunkWarmupValue:
 def _adv_caps(
     environment: RunEnvironment, bars: tuple[MarketBarRecord, ...], rate: float
 ) -> dict[tuple[date, str], int]:
-    volumes = participation_volumes(
+    volumes = cost_inputs(
         environment,
         ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
         {},
-    )
+    ).participation_volumes
     assert volumes is not None
     return {key: math.floor(volume * rate) for key, volume in volumes.items()}
 
@@ -582,7 +581,7 @@ def _impact(
     actions: tuple[CorporateActionRecord, ...] = (),
 ) -> dict[tuple[date, str], float]:
     rows = [(bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars]
-    scales = impact_scales(
+    scales = cost_inputs(
         environment,
         rows,
         settlement_multipliers(
@@ -596,7 +595,7 @@ def _impact(
                 for action in actions
             ),
         ),
-    )
+    ).impact_scales
     assert scales is not None
     return scales
 
@@ -642,3 +641,35 @@ def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
     first = (fills[0].session, fills[0].security_id)
     assert warmed[first] != cold[first]
     assert warmed[first] != unsplit[first]
+
+
+class _NoWarmup(_ShrunkWarmupValue):
+    def _shape(self, dataset: BacktestDataset) -> BacktestDataset:
+        return replace(dataset, history_bars=())
+
+
+def test_missing_impact_inputs_warn_only_when_the_run_actually_fills(tmp_path: Path) -> None:
+    environment = replace(
+        _environment(),
+        impact_model=ImpactModel.SQRT,
+        participation_basis=ParticipationBasis.SESSION_VOLUME,
+    )
+    data = _NoWarmup()
+    runs = BacktestRunService(
+        _portfolio(),
+        InMemoryStrategyRepository(),
+        data,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
+        new_id=lambda: "cold-impact",
+    )
+    runs.start(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=environment)
+    )
+    assert wait_for_terminal_run(runs, "cold-impact").status.value == "completed"
+    result = runs.result("cold-impact")
+    assert result.artifacts.fills
+    (warning,) = (w for w in result.manifest.warnings if w.code == "cost.impact_scale_unavailable")
+    first = result.artifacts.fills[0]
+    assert f"{first.session.isoformat()}:{first.security_id}:return_history" in warning.message

@@ -12,7 +12,7 @@ import pytest
 
 from backtest_engine.types.instruments import AssetClass, InstrumentId
 from backtest_engine.types.result_tables import FillTotals, ResultTables
-from strategy_workbench.adapters.outbound.backtest_engine._adapter import _closed_trades
+from strategy_workbench.adapters.outbound.backtest_engine._adapter import _artifacts
 
 _SAMSUNG = InstrumentId(venue="KRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="KRW")
 
@@ -36,9 +36,8 @@ def _tables(
 
 
 def _quantities(tables: ResultTables) -> list[str]:
-    session_dates = tuple(ts.date() for ts in tables.sessions)
-    security_ids = tuple(instrument.symbol for instrument in tables.instruments)
-    return [trade.quantity for trade in _closed_trades(tables, session_dates, security_ids)]
+    artifacts, _ = _artifacts(tables)
+    return [trade.quantity for trade in artifacts.trades]
 
 
 def test_closed_trade_quantity_is_a_plain_integer_string_like_fills() -> None:
@@ -73,8 +72,8 @@ def test_closed_trade_costs_include_the_sell_tax_recorded_after_each_sell() -> N
         ("f3", "o3", 1, 0, "sell", 60, 120.0, 1.0, 0.0, 10_000),
         costs=((1, "sell_tax", 0, 8.8), (1, "sell_tax", 0, 14.4), (2, "short_borrow", 0, 5.0)),
     )
-    session_dates = tuple(ts.date() for ts in tables.sessions)
-    trades = _closed_trades(tables, session_dates, ("005930",))
+    artifacts, _ = _artifacts(tables)
+    trades = artifacts.trades
 
     assert [(trade.fees, trade.pnl) for trade in trades] == [
         (pytest.approx(9.8), pytest.approx(400.0 - 9.8)),

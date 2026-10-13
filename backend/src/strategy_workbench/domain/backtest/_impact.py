@@ -23,10 +23,12 @@ import math
 import operator
 from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date
+from enum import StrEnum
 
-from ._models import ImpactModel, RunEnvironment
-from ._participation import adv_shares
+from ._models import RunEnvironment
+from ._participation import AdvObservation
 
 VOLATILITY_SESSIONS = 20
 # 체결 한 건의 충격 상한(체결가 대비 비율). √ 법칙은 Q/ADV 가 작은 영역의 경험칙이다. 조용하던
@@ -36,38 +38,45 @@ VOLATILITY_SESSIONS = 20
 MAX_IMPACT_FRACTION = 0.99
 
 
-def impact_scales(
+class ImpactUnavailableReason(StrEnum):
+    RETURN_HISTORY = "return_history"
+    ADV = "adv"
+
+
+@dataclass(frozen=True)
+class ImpactInputs:
+    scales: dict[tuple[date, str], float]
+    unavailable: dict[tuple[date, str], ImpactUnavailableReason]
+
+
+def impact_inputs(
     environment: RunEnvironment,
     bars: Iterable[tuple[date, str, float, float | None]],
     settled: Mapping[tuple[date, str], float],
-) -> dict[tuple[date, str], float] | None:
-    """`(세션, 종목, 종가, 거래대금)` 행마다 √ 충격 척도 k × σ일 / √ADV.
-
-    `fixed_bps` 면 `None` 이다 — 엔진이 고정 bp 슬리피지를 쓴다. `settled` 는 자본변동 정산 행과
-    가격 배수(`settlement_multipliers`)다. 워밍업 행과 워밍업 구간 자본변동을 함께 넘겨야 첫
-    세션들의 창이 찬다.
-    """
-    if environment.impact_model is not ImpactModel.SQRT:
-        return None
-    rows = sorted(bars, key=lambda row: row[0])
-    # √ 충격은 있는 행만으로 잰다(참여 한도의 20행 조건과 다르다 — `adv_shares` 참고).
-    adv = adv_shares(rows, settled, minimum_rows=1)
+    adv: Mapping[tuple[date, str], AdvObservation],
+) -> ImpactInputs:
+    """정렬된 비용 입력에서 척도와 부족 사유를 함께 낸다. 정상 0과 부족을 구분한다."""
     scales: dict[tuple[date, str], float] = {}
+    unavailable: dict[tuple[date, str], ImpactUnavailableReason] = {}
     returns: dict[str, deque[float]] = {}
     last_close: dict[str, float] = {}
-    for session, security_id, close, _value in rows:
+    for session, security_id, close, _value in bars:
         key = (session, security_id)
         window = returns.setdefault(security_id, deque(maxlen=VOLATILITY_SESSIONS))
+        if len(window) < 2:
+            unavailable[key] = ImpactUnavailableReason.RETURN_HISTORY
+        elif adv[key].shares <= 0:
+            unavailable[key] = ImpactUnavailableReason.ADV
         scales[key] = (
-            environment.impact_coefficient * _sample_stdev(window) / math.sqrt(adv[key])
-            if len(window) >= 2 and adv[key] > 0
-            else 0.0
+            0.0
+            if key in unavailable
+            else environment.impact_coefficient * _sample_stdev(window) / math.sqrt(adv[key].shares)
         )
         previous_close = last_close.get(security_id)
         if previous_close and key not in settled:
             window.append(close / previous_close - 1)
         last_close[security_id] = close
-    return scales
+    return ImpactInputs(scales, unavailable)
 
 
 def _sample_stdev(values: Sequence[float]) -> float:

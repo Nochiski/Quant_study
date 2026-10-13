@@ -721,6 +721,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             fee=fee,
             slippage_per_share=slippage_per_share,
             cap_volume=cap_volume,
+            sell_tax=fill_tax,
         )
         for (
             fill_id,
@@ -733,6 +734,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             fee,
             slippage_per_share,
             cap_volume,
+            fill_tax,
         ) in tables.fills
     )
     raw_costs = tuple(

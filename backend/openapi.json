@@ -5974,6 +5974,17 @@
             "title": "Security Id",
             "type": "string"
           },
+          "sell_tax": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Tax"
+          },
           "session": {
             "format": "date",
             "title": "Session",

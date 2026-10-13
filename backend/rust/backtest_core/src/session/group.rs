@@ -29,6 +29,7 @@ impl<'a> Session<'a> {
             0.0,
             0.0,
             String::new(),
+            0.0,
         ));
     }
 
@@ -134,6 +135,7 @@ impl<'a> Session<'a> {
                         0.0,
                         0.0,
                         String::new(),
+                        0.0,
                     ));
                 }
             }
@@ -162,6 +164,7 @@ impl<'a> Session<'a> {
                     0.0,
                     0.0,
                     String::new(),
+                    0.0,
                 ));
             }
             _ => {
@@ -220,6 +223,7 @@ impl<'a> Session<'a> {
                     0.0,
                     0.0,
                     String::new(),
+                    0.0,
                 ));
             }
         }

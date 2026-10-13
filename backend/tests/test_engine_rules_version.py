@@ -31,7 +31,7 @@ from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 # leveraged_short_tax_budget은 L2 숏16주→환매/롱32주 경로로 해당 규칙을 고정한다.
 _PINNED = (
     "backtest-engine-v5",
-    "52451938faee46cf673bd1c977a096afc26a038dfe03d32b1d365cd4252f86a0",
+    "3ad3ba45b3d2842800cc9db07ff22223422a81e8557bc19eda77ec8f2632fe55",
 )
 
 

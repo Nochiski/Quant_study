@@ -488,6 +488,8 @@ class RawFill:
     # 체결 세션의 유동성 캡 기준 거래량 — 엔진이 참여 한도를 곱한 값이다(V4-04 2/2). 그 전에 쓴
     # `result.json`(`backtest-artifacts-v1`)에는 없어 None 으로 읽힌다.
     cap_volume: int | None = None
+    # 구판 산출물은 체결별 세금을 싣지 않았으므로 None으로 구별한다.
+    sell_tax: float | None = None
 
 
 @dataclass(frozen=True)

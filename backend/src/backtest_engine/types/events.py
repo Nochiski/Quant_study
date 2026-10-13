@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from math import isfinite
 
 from backtest_engine.types.actions import StrategyAction
 from backtest_engine.types.instruments import InstrumentId
@@ -183,8 +184,15 @@ class FillEvent:
     # 체결 세션 bar 의 유동성 캡 기준 거래량(`Bar.cap_volume`) — 브로커가 참여 한도를 곱한 그
     # 값이다. 참여율(체결 수량 ÷ 기준 거래량)을 결과만으로 다시 잴 수 있게 남긴다(검증 랩 V4-04).
     cap_volume: int
+    # 최종 체결 수량·가격으로 계획할 때 확정한 거래세. 청구·기록·거래 분석이 이 값을 읽는다.
+    sell_tax: float = 0.0
 
     def __post_init__(self) -> None:
+        if not isfinite(self.sell_tax) or self.sell_tax < 0:
+            raise ValueError(
+                f"fill sell_tax must be finite and >= 0 — "
+                f"fill_id={self.fill_id} sell_tax={self.sell_tax}"
+            )
         if self.cap_volume < 0:
             raise ValueError(
                 f"fill cap_volume must be >= 0 — fill_id={self.fill_id} "

@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine import broker
+from backtest_engine.engine.store import PersistentEventStore
 from backtest_engine.types.actions import (
     ExecutionPolicy,
     SetPortfolioTarget,
@@ -52,11 +55,14 @@ def test_only_the_sell_fill_is_taxed_at_the_rate_of_its_session(
 ) -> None:
     engine = _run(core, schedule)
     store = engine.event_store
+    tables = store.result_tables()
 
     assert [(fill.side, int(fill.quantity), fill.price) for fill in store.fills()] == [
         (Side.BUY, 700, 110.0),
         (Side.SELL, 700, 90.0),
     ]
+    assert [fill.sell_tax for fill in store.fills()] == [0.0, expected_tax]
+    assert [row[-1] for row in tables.fills] == [0.0, expected_tax]
     taxes = store.costs()
     assert [(cost.kind, cost.ts.date(), cost.amount) for cost in taxes] == [
         (CostKind.SELL_TAX, date(2026, 8, 4), expected_tax)
@@ -136,3 +142,32 @@ def test_same_session_switch_buys_only_what_is_left_after_the_sell_tax(core: str
     ]
     assert [(cost.kind, cost.amount) for cost in store.costs()] == [(CostKind.SELL_TAX, 200.0)]
     assert [snapshot.cash for snapshot in store.snapshots()][-1] == 0.0
+
+
+def test_actual_fill_tax_is_computed_once_and_consumed_without_recalculation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Side, Decimal, float, float]] = []
+
+    def planned_tax(side: Side, quantity: Decimal, price: float, rate: float) -> float:
+        calls.append((side, quantity, price, rate))
+        return 7.25 if side is Side.SELL else 0.0
+
+    monkeypatch.setattr(broker, "sell_tax_amount", planned_tax)
+    store = _run("python", ((date(2026, 8, 1), 20.0),)).event_store
+    assert len(calls) == len(store.fills()) == 2
+    assert [fill.sell_tax for fill in store.fills()] == [0.0, 7.25]
+    assert [row[-1] for row in store.result_tables().fills] == [0.0, 7.25]
+    assert [cost.amount for cost in store.costs()] == [7.25]
+    assert store.snapshots()[-1].cash == 86_000.0 - 7.25
+
+
+def test_persistent_fill_wire_keeps_the_actual_tax() -> None:
+    store = PersistentEventStore(object())
+    store.bind_feed(DataFeed(GOLDEN_BARS), (_A,))
+    fill = store.fill_from_wire(
+        day(4), ("F-1", "O-1", 0, 700, "sell", 90.0, 0.0, 0.0, 1_000, 7.25)
+    )
+    assert fill.sell_tax == 7.25
+    assert fill.cap_volume == 1_000
+    assert fill.quantity == Decimal(700)

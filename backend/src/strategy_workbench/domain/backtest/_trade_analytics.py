@@ -31,8 +31,8 @@ def closed_trades(fills: Sequence[RawFill], costs: Sequence[RawCost]) -> tuple[R
     """체결의 입력 순서가 원장 순서다. fill_id 문자열로 다시 정렬하지 않는다."""
     states: dict[str, _OpenTrade] = {}
     trades: list[RawTrade] = []
-    # 거래 단위 비용(`fees`)은 매도 거래세를 포함한다. 엔진은 매도 체결마다 거래세 기록을 그 체결
-    # 바로 뒤에 하나씩 남기므로, 같은 세션·종목의 기록을 체결 순서대로 짝짓는다.
+    # 새 체결의 확정 거래세를 소비한다. 세금 칸이 없던 역사 입력만 같은 세션·종목의
+    # 비용 기록 순서로 복원한다. 명시적 0과 구판의 None을 구분한다.
     taxes: dict[tuple[date, str], deque[float]] = {}
     for cost in costs:
         if cost.kind == SELL_TAX and cost.security_id is not None:
@@ -42,7 +42,12 @@ def closed_trades(fills: Sequence[RawFill], costs: Sequence[RawCost]) -> tuple[R
         side, quantity, price = fill.side, float(fill.quantity), fill.price
         fee, slippage_per_share = fill.fee, fill.slippage_per_share
         pending_taxes = taxes.get((session, security_id))
-        if side == "sell" and pending_taxes:
+        if fill.sell_tax is not None:
+            fee += fill.sell_tax
+            # 혼합 구판 입력에서도 뒤의 legacy 체결이 앞선 세금을 다시 가져오지 않는다.
+            if side == "sell" and fill.sell_tax > 0 and pending_taxes:
+                pending_taxes.popleft()
+        elif side == "sell" and pending_taxes:
             fee += pending_taxes.popleft()
         delta = float(quantity) * (1 if side == "buy" else -1)
         slip = float(quantity) * abs(slippage_per_share)

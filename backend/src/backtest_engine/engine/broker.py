@@ -23,6 +23,7 @@ from decimal import ROUND_FLOOR, Decimal
 from enum import Enum
 from typing import Protocol
 
+from backtest_engine.engine.costs import sell_tax_amount
 from backtest_engine.engine.orders import OpenOrder
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import NoSlippage
@@ -365,6 +366,8 @@ class BrokerSim:
         bar: Bar,
         fill_id: str,
         quantity: Decimal | None = None,
+        *,
+        sell_tax_rate: float = 0.0,
     ) -> FillEvent:
         """견적을 체결 기록으로 만든다. quantity로 견적보다 적게(바스켓 비례 축소) 체결 가능."""
         order = open_order.order
@@ -386,4 +389,5 @@ class BrokerSim:
             fee=self.fee_for(notional),
             slippage_per_share=quote.slippage_per_share,
             cap_volume=bar.cap_volume,
+            sell_tax=sell_tax_amount(order.side, filled, quote.price, sell_tax_rate),
         )

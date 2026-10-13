@@ -353,9 +353,8 @@ impl PersistentEngine {
                 Queued::Market => self.on_market(session)?,
                 Queued::Fill(fill) => {
                     // 매도 거래세 레코드는 그 FILL 바로 뒤다 — Python 루프의 FILL 처리 순서와 같다.
-                    // 금액은 MARKET 적용(`apply_market_ops`)이 청구한 것과 같은 식이다.
-                    let rate = self.settings()?.sell_tax_rate(session);
-                    let tax = crate::session::sell_tax(&fill.side, fill.quantity, fill.price, rate);
+                    // MARKET에서 확정하여 청구한 금액을 그대로 기록한다.
+                    let tax = fill.sell_tax;
                     let instrument_id = fill.instrument_id;
                     self.record(session, RecordPayload::Fill(fill))?;
                     if tax > 0.0 {
@@ -444,7 +443,7 @@ impl PersistentEngine {
             &settings.slippage,
             settings.sell_tax_rate(session),
         )?;
-        for (kind, order_id, quantity, price, slip, fee, payload) in ops {
+        for (kind, order_id, quantity, price, slip, fee, payload, sell_tax) in ops {
             match kind.as_str() {
                 "fill" => {
                     let (instrument_id, side) =
@@ -471,6 +470,7 @@ impl PersistentEngine {
                         fee,
                         slippage_per_share: slip,
                         cap_volume,
+                        sell_tax,
                     };
                     let fill = Box::new(fill);
                     self.push(session, PRIORITY_FILL, Queued::Fill(fill.clone()))?;

@@ -334,6 +334,30 @@ describe("retired schema upgrade banner", () => {
     ).toBeNull();
   });
 
+  it.each(["revision", "saved"] as const)("같은 원문을 가진 다른 %s에 이전 업그레이드 응답을 적용하지 않는다", async (transition) => {
+    let release = () => {};
+    upgradeGate = new Promise<void>((resolve) => { release = resolve; });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const props = (revision: number) => <QueryClientProvider client={client}><Harness stored={{ revision, generated: false, requires_upgrade: true }} /></QueryClientProvider>;
+    const { rerender } = render(props(1));
+    await screen.findByRole("textbox", { name: "편집기" });
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    const view = EditorView.findFromDOM(document.querySelector(".cm-content") as HTMLElement)!;
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(upgradeRequests).toHaveLength(1));
+    if (transition === "revision") rerender(props(2));
+    else fireEvent.click(screen.getByRole("button", { name: "Commit revision" }));
+    expect(EditorView.findFromDOM(document.querySelector(".cm-content") as HTMLElement)).toBe(view);
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    release();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    expect(screen.getByTestId("dirty")).toHaveTextContent("false");
+    expect(screen.queryByRole("button", { name: "실행 설정에 채우기" })).not.toBeInTheDocument();
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
+  });
+
   it("lets the user upgrade again after a response for edited text is dropped and the edit undone", async () => {
     // #297 리뷰 P2-1: 버린 응답이 요청한 글의 대기 상태를 남기면, 실행 취소로 그 글에 돌아왔을 때
     // "업그레이드 중…"이 되살아나 버튼이 멈췄다.

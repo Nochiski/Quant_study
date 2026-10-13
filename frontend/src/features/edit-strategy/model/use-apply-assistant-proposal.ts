@@ -1,6 +1,6 @@
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { EditorHandleOwner } from "./use-editor-handle";
-import { replaceWholeDocument } from "./replace-whole-document";
+import { sameReplacementDocument, useGuardedDocumentReplacement } from "./replace-whole-document";
 import { useCallback, useMemo, useState } from "react";
 
 import type { DocumentState } from "./document-state";
@@ -96,13 +96,13 @@ export const useApplyAssistantProposal = (
   state: DocumentState,
 ): AssistantProposalApply => {
   const readEditor = owner.read;
+  const replace = useGuardedDocumentReplacement(owner, state);
   const [scoped, setScoped] = useState<{
-    epoch: number;
+    document: DocumentState;
     /** 이 상태가 묶인 텍스트 버전. null이면 버전과 무관하다(확인 창). */
     version: number | null;
     value: ProposalApplyStatus;
   } | null>(null);
-  const documentEpoch = state.documentEpoch;
   const composing = state.composing;
   const format = state.format;
   const sourceVersion = state.sourceVersion;
@@ -122,15 +122,15 @@ export const useApplyAssistantProposal = (
     (
       value: ProposalApplyStatus,
       version: number | null = sourceVersion,
-    ): void => setScoped({ epoch: documentEpoch, version, value }),
-    [documentEpoch, sourceVersion],
+    ): void => setScoped({ document: state, version, value }),
+    [state, sourceVersion],
   );
 
   /** 전체 범위 교체 한 번. 호출 전에 조합·편집기·기준 검사를 마친 상태여야 한다. */
   const overwrite = useCallback(
     (handle: CodeEditorHandle, source: string): void => {
       const before = handle.getText();
-      replaceWholeDocument(handle, source);
+      if (!replace(state, handle, before, source)) return;
       handle.scrollTo(0);
       handle.focus();
       // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다. 단 제안이
@@ -142,7 +142,7 @@ export const useApplyAssistantProposal = (
         sourceVersion + (changed ? 1 : 0),
       );
     },
-    [setStatus, sourceVersion],
+    [setStatus, sourceVersion, replace, state],
   );
 
   /** 적용·미리보기가 함께 지키는 전제. 통과하면 지금 편집기 텍스트를 돌려준다. */
@@ -201,11 +201,11 @@ export const useApplyAssistantProposal = (
   const status = useMemo<ProposalApplyStatus>(
     () =>
       scoped !== null &&
-      scoped.epoch === documentEpoch &&
+      sameReplacementDocument(scoped.document, state) &&
       (scoped.version === null || scoped.version === sourceVersion)
         ? scoped.value
         : IDLE,
-    [documentEpoch, scoped, sourceVersion],
+    [state, scoped, sourceVersion],
   );
 
   const confirm = useCallback((): void => {

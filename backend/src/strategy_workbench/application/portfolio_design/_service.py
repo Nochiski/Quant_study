@@ -547,7 +547,29 @@ class PortfolioDesignService:
         ):
             raise TraceObservationCapabilityError(type(self._observation_source).__name__)
 
-        metadata = self._factor_metadata.resolve_factor_fields(
+        metadata = self._strategy_metadata(spec)
+        plans = self._plans(spec, metadata, resolved.missing)
+        _reject_non_numeric_factor_outputs(spec, plans)
+        _validate_trace_selection(pipeline_options, plans)
+        checkpoint()
+        return _PreparedPipeline(
+            engine=engine, metadata=metadata, plans=plans, environment=resolved
+        )
+
+    def validate_trial_strategy(self, spec: StrategySpec, *, missing: MissingPolicy) -> None:
+        """봉인 거절을 기록하기 전에 입력 전략만 검증한다. 구간 관측이나 실행은 하지 않는다.
+
+        실행 preflight와 같은 validator·metadata·plan owner를 소비하되 연구 구간을 바꾸거나
+        우회하지 않는다. 봉인 오류 응답 우선순위를 유지하면서 무효 전략의 감사 기록을 막는다.
+        """
+        validation = validate_strategy(spec)
+        if not validation.valid:
+            raise InvalidPortfolioRequestError(validation)
+        plans = self._plans(spec, self._strategy_metadata(spec), missing)
+        _reject_non_numeric_factor_outputs(spec, plans)
+
+    def _strategy_metadata(self, spec: StrategySpec) -> FactorMetadataSnapshot:
+        return self._factor_metadata.resolve_factor_fields(
             tuple(
                 sorted(
                     {
@@ -557,13 +579,6 @@ class PortfolioDesignService:
                     }
                 )
             )
-        )
-        plans = self._plans(spec, metadata, resolved.missing)
-        _reject_non_numeric_factor_outputs(spec, plans)
-        _validate_trace_selection(pipeline_options, plans)
-        checkpoint()
-        return _PreparedPipeline(
-            engine=engine, metadata=metadata, plans=plans, environment=resolved
         )
 
     def _plans(

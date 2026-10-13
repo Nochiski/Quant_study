@@ -158,3 +158,22 @@ def test_a_wiped_out_run_is_a_result_that_counts_without_a_sharpe() -> None:
         (TrialRunRole.RECHECK, 0.07),
     ]
     assert [run.role for run in second.runs] == [TrialRunRole.NO_RESULT]
+
+
+def test_lineage_resolution_owns_chain_and_member_rules() -> None:
+    from strategy_workbench.domain.backtest.facade.trials import resolve_lineage
+
+    edges = {"a": "b", "b": "c", "other": "separate"}
+    for lineage in ("a", "b", "c"):
+        resolved = resolve_lineage(edges, lineage)
+        assert (resolved.root, resolved.merged) == ("c", ("a", "b"))
+    assert resolve_lineage(edges, "new").merged == ()
+
+
+def test_lineage_cycles_are_rejected_instead_of_hanging() -> None:
+    import pytest
+
+    from strategy_workbench.domain.backtest.facade.trials import resolve_lineage
+
+    with pytest.raises(ValueError, match="lineage merge cycle"):
+        resolve_lineage({"a": "b", "b": "a"}, "a")

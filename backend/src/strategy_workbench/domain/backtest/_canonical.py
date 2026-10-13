@@ -4,7 +4,6 @@ from dataclasses import asdict, replace
 
 from strategy_workbench.domain.canonical.facade.encoding import (
     canonical_json_hash,
-    canonical_payload_json,
 )
 
 from ._models import BacktestRunSpec, ResolvedBacktestRunSpec, RunEnvironment
@@ -15,7 +14,7 @@ from ._models import BacktestRunSpec, ResolvedBacktestRunSpec, RunEnvironment
 # 지문으로 옛 규칙의 결과를 공유한다.
 # v4(#342 DOMAIN-V2-02): 참여 한도의 ADV 는 거래대금이 있는 앞선 행 20개가 다 차야 주고, 워밍업은
 # 40세션을 읽는다.
-ENGINE_RULES_VERSION = "backtest-engine-v4"
+ENGINE_RULES_VERSION = "backtest-engine-v5"
 
 
 def backtest_run_fingerprint(
@@ -71,11 +70,6 @@ def run_input_key(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> str:
     엔진 규칙·지표 레지스트리 판본)을 뺀 것이다. JSON 표기라 `1` 과 `True` 가 갈린다.
     """
     return canonical_json_hash(asdict(fingerprint_run_spec(spec)))
-
-
-def run_environment_canonical_json(environment: RunEnvironment) -> str:
-    """실행 설정의 canonical 표기(키 정렬·최소 separator·NaN 금지)."""
-    return canonical_payload_json(asdict(environment))
 
 
 def environment_hash(environment: RunEnvironment) -> str:

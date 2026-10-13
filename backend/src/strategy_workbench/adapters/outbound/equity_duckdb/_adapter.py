@@ -118,7 +118,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
-    NodeValueType,
+    field_metadata,
 )
 
 from ._source import (
@@ -220,7 +220,9 @@ _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
 # `_cell_kind` 가 SOURCE_OMITTED_ZERO 로 낸다(#371). 원장은 그 칸을 NULL 로 두고(DESIGN §9 결정 8)
 # 도메인은 그 종류에 값을 요구하므로(`RawFieldValue.__post_init__`) 값 0 은 어댑터가 싣는다.
 _FILL_KIND_TO_CELL: dict[str, CellKind] = {
-    "measured": CellKind.OBSERVED,
+    # 행을 관측했어도 개별 필드는 NULL일 수 있다(키움 전용 연기금 열의 KIS 행 등).
+    # 값이 있는 셀은 아래에서 먼저 OBSERVED로 판정하므로 여기는 결측인 필드만 온다.
+    "measured": CellKind.MISSING,
     "src_omitted": CellKind.MISSING,
     "empty_response": CellKind.MISSING,
     "not_collected": CellKind.NOT_COLLECTED,
@@ -1117,12 +1119,7 @@ class EquityDuckdbAdapter:
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot_id,
             fields=tuple(
-                FieldMetadata(
-                    field_id=field_id,
-                    unit=self._fields[field_id].unit,
-                    value_type=NodeValueType.NUMERIC_SERIES,
-                    adjusted_field_id=self._fields[field_id].adjusted_field_id,
-                )
+                field_metadata(self._fields[field_id], self._fields[field_id].adjusted_field_id)
                 for field_id in field_ids
                 if field_id in self._fields
             ),
@@ -1155,7 +1152,6 @@ class EquityDuckdbAdapter:
             field_id: FIELD_NOT_PROVIDED if field_id in self._profile else FIELD_NOT_IN_LEDGER
             for field_id in UNSUPPORTED_FIELDS
         }
-
 
     # ── RawObservationPort ────────────────────────────────────────────────────
 
@@ -1540,16 +1536,18 @@ class EquityDuckdbAdapter:
             for security_id, key in parsed.items()
             if spans[key].first_date <= query.end and spans[key].last_date >= query.start
         )
-        warnings = [
-            DataWarning(
-                code="equity.reference_rows_dropped",
-                message=(
-                    "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
-                    f"dropped={n_reference}"
-                ),
-                severity=WarningSeverity.INFO,
+        warnings: list[DataWarning] = []
+        if n_reference:
+            warnings.append(
+                DataWarning(
+                    code="equity.reference_rows_dropped",
+                    message=(
+                        "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
+                        f"dropped={n_reference}"
+                    ),
+                    severity=WarningSeverity.INFO,
+                )
             )
-        ]
         if n_provisional:
             warnings.append(
                 DataWarning(

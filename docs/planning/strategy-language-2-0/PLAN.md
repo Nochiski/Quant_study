@@ -1,17 +1,17 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: IN_PROGRESS
-current_phase: P4
-current_pr: P4-03
-active_prs: [P4-03]
+project_status: COMPLETE
+current_phase: complete
+current_pr: none
+active_prs: []
 parallel_window: []
-last_updated: 2026-09-30T17:30:15+09:00
+last_updated: 2026-10-13T13:48:59+09:00
 planned_prs: 30
-merged_prs: 22
+merged_prs: 30
 integrated_prs: 0
-approved_prs: 22
-progress_percent: 73
+approved_prs: 30
+progress_percent: 100
 ---
 
 # schema 1.2 · 그래프 표현 실시간 진행 계획
@@ -24,13 +24,13 @@ progress_percent: 73
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
-| Current phase | `P4` |
-| Current/next PR | `P4-03` |
-| Active PR | `P4-03` |
-| Progress | `22 / 30 done (73%), main 22, integration 0` |
-| Approved | `22 / 30` |
-| Aggregated at | `2026-09-30 17:30 KST` |
+| Project status | `COMPLETE` |
+| Current phase | `complete` |
+| Current/next PR | `none` |
+| Active PR | none |
+| Progress | `30 / 30 done (100%), main 30, integration 0` |
+| Approved | `30 / 30` |
+| Aggregated at | `2026-10-13 13:48 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -126,10 +126,10 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
 | P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 10 | 0 | `MERGED` |
 | P3 | Frontend 1.2 adaptation | 3 | 3 | 0 | `MERGED` |
-| P4 | Graph level 1: pipeline | 4 | 2 | 0 | `IN_PROGRESS` |
-| P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
-| P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
-| **Total** |  | **30** | **22** | **0** | **73%** |
+| P4 | Graph level 1: pipeline | 4 | 4 | 0 | `MERGED` |
+| P5 | Graph level 2: recipe | 3 | 3 | 0 | `MERGED` |
+| P6 | Graph level 3: node canvas | 3 | 3 | 0 | `MERGED` |
+| **Total** |  | **30** | **30** | **0** | **100%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -1126,7 +1126,7 @@ Phase exit:
 
 - [x] 드래그 배선 → YAML 반영 → 되돌리기 e2e. `stories/node-canvas.spec.ts`의 배선·키보드·취소·배치·undo 시나리오, main `4289429b` CI38332263277 성공. 실제 음성 낭독 완료를 뜻하지 않는다.
 - [x] SoT·책임분리 점검 blocking 0. 2026-10-13 현재 경계 독립 재감사: [범위와 근거](CLOSEOUT.md#p3p6-현재-책임-경계-재감사-2026-10-13).
-- [ ] 완료 정의 6항 전부 기록. 실제 스크린리더 음성 수용은 아직 미검증이며 CLOSEOUT에서 분리 추적한다.
+- [ ] 완료 정의 6항 전부 기록. 아래 항목별 근거와 현재 SoT 재감사는 기록됐으며, 마감 PR #443의 최종 전체 CI·화면 검증을 기다린다. 실제 음성 수용은 CLOSEOUT에서 별도 추적한다.
 
 ## Review 기록
 

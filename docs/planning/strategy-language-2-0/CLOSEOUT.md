@@ -48,8 +48,8 @@ validation-lab 신규 기능, M8 확장은 범위 밖이다. 이슈 상태·외�
 
 - 기존 frontend 의존성이 lockfile과 달라 이 worktree에서 `npm ci`로 재구성한다.
 - backend 공유 venv의 editable 경로와 혼동하지 않도록 `PYTHONPATH`를 작업 트리의 `backend/src`로 지정한다.
-- PowerShell 실행 파일 부재를 확인했다. 생성 집계는 손으로 바꾸지 않으며 공식 생성기 실행 방법을
-  확보한 후 생성/-Check 증거를 추가한다.
+- 로컬 PowerShell은 없으므로 CI38348085882의 기존 pwsh로 공식 생성기와 `-Check`를 실행했다.
+  stale 거절 뒤 생성 및 재검사 성공, 로그의 공식 diff를 그대로 적용했다. 최종 HEAD의 독립 `-Check`로 다시 검증한다.
 - 실제 음성용 스크린리더·음성 서비스·오디오 장치가 없어 자동 접근성 통과를 실제 음성 완료로 세지 않는다.
 
 최종 PR·테스트 수치·시각 캡처·독립 리뷰와 미검증 항목은 결과가 나온 뒤 이 문서에 연결한다.

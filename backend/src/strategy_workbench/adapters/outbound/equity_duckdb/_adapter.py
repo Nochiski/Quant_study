@@ -569,6 +569,7 @@ class EquityDuckdbAdapter:
             "macro_signatures": sorted(self._catalog.macros) if self._catalog.usable else [],
             "macros": dict(self._catalog.bodies),
             "cell_kinds": _FILL_KIND_TO_CELL,
+            "grid_lag_scope": "security_span",
             "event_types": EVENT_TYPE_MAP,
             "ratio_directed_event_types": RATIO_DIRECTED_EVENT_TYPES,
         }
@@ -1997,7 +1998,10 @@ class EquityDuckdbAdapter:
         source = SOURCE_BY_NAME[self._fields[field_id].source]
         if source.mode is SourceMode.GRID:
             found = panel.rows.get((row.ticker, cutoff))
-            return None if found is None else found.cells.get(field_id)
+            # 랙이 상장 공백을 건너도 이전 상장 구간의 값을 새 종목 신원에 싣지 않는다.
+            if found is None or found.span_seq != row.span_seq:
+                return None
+            return found.cells.get(field_id)
         key = (
             row.ticker if source.axis is SourceAxis.TICKER else panel.corp_by_ticker.get(row.ticker)
         )

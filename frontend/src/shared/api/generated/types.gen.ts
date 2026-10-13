@@ -612,7 +612,7 @@ export type BacktestRunResult = {
  *
  * A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
  *
- * `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+ * `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
  * so a run can name a saved revision (P1-09). The run service rejects a request carrying both
  * or neither (one coded 422, `backtest.run.invalid`).
  * After resolution the run spec stored in the manifest carries both: `strategy` is the exact
@@ -1534,6 +1534,53 @@ export type DoneView = {
 };
 
 /**
+ * DraftDiff
+ *
+ * 저장 리비전과 현재 원문의 의미 차이. 저장 상태를 바꾸지 않는다.
+ */
+export type DraftDiff = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash: string;
+  /**
+   * Changes
+   */
+  changes: Array<DiffEntry>;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Target Spec Hash
+   */
+  target_spec_hash: string;
+};
+
+/**
+ * DraftDiffRequest
+ */
+export type DraftDiffRequest = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
  * DrawdownPoint
  */
 export type DrawdownPoint = {
@@ -2236,6 +2283,10 @@ export type FactorExecutionPlan = {
    * As Of Policy
    */
   as_of_policy?: string;
+  /**
+   * Evaluation Version
+   */
+  evaluation_version: string;
   /**
    * Graph Hash
    */
@@ -3660,6 +3711,10 @@ export type RawArtifactBundle = {
    */
   fills: Array<RawFill>;
   /**
+   * Order Updates
+   */
+  order_updates?: Array<RawOrderUpdate> | null;
+  /**
    * Orders
    */
   orders: Array<RawOrder>;
@@ -3740,6 +3795,10 @@ export type RawFill = {
    */
   security_id: string;
   /**
+   * Sell Tax
+   */
+  sell_tax?: number | null;
+  /**
    * Session
    */
   session: string;
@@ -3789,6 +3848,38 @@ export type RawOrder = {
    * Time In Force
    */
   time_in_force: string;
+};
+
+/**
+ * RawOrderUpdate
+ *
+ * 엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다.
+ */
+export type RawOrderUpdate = {
+  /**
+   * Cap Volume
+   */
+  cap_volume?: number | null;
+  /**
+   * Detail
+   */
+  detail?: string | null;
+  /**
+   * Order Id
+   */
+  order_id: string;
+  /**
+   * Reason Code
+   */
+  reason_code?: string | null;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Status
+   */
+  status: string;
 };
 
 /**
@@ -4393,6 +4484,12 @@ export type RunEnvironment = {
  */
 export type RunEnvironmentSchema = {
   /**
+   * Options Schema
+   */
+  options_schema: {
+    [key: string]: unknown;
+  };
+  /**
    * Schema
    */
   schema: {
@@ -4421,10 +4518,6 @@ export type RunKind = "single" | "experiment_trial" | "walk_forward_validation";
  */
 export type RunManifest = {
   /**
-   * Annualization Days
-   */
-  annualization_days: number;
-  /**
    * Completed At
    */
   completed_at: string;
@@ -4436,7 +4529,6 @@ export type RunManifest = {
    * Data Snapshot Id
    */
   data_snapshot_id: string;
-  engine_core: ExecutionCore;
   /**
    * Engine Version
    */
@@ -4447,21 +4539,13 @@ export type RunManifest = {
    */
   environment_hash: string;
   /**
-   * Fee Bps
+   * Factor Evaluation Version
    */
-  fee_bps: number;
-  /**
-   * Initial Cash
-   */
-  initial_cash: number;
+  factor_evaluation_version?: string | null;
   /**
    * Metric Registry Version
    */
   metric_registry_version: string;
-  /**
-   * Participation Rate
-   */
-  participation_rate: number;
   /**
    * Run Fingerprint
    */
@@ -4475,10 +4559,6 @@ export type RunManifest = {
    * Schema Version
    */
   schema_version?: string;
-  /**
-   * Slippage Bps
-   */
-  slippage_bps: number;
   /**
    * Strategy Hash
    */
@@ -5675,6 +5755,10 @@ export type StrategyTraceResponse = {
    */
   as_of: string;
   /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
    * Factor Id
    */
   factor_id: string;
@@ -5876,6 +5960,10 @@ export type TargetTape = {
    * Execution Timing
    */
   execution_timing?: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
   /**
    * Frames
    */
@@ -6439,7 +6527,7 @@ export type TurnAcceptedView = {
 /**
  * TurnContextPayload
  *
- * 한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7).
+ * 한 턴이 보는 편집기 상태. 저장 문서와 별개로 아직 저장하지 않은 원문·진단을 요청에 싣는다.
  */
 export type TurnContextPayload = {
   /**
@@ -6782,7 +6870,7 @@ export type ValidationIssue = {
 /**
  * ValidationKind
  */
-export type ValidationKind = "syntax" | "semantic" | "capability";
+export type ValidationKind = "semantic" | "capability";
 
 /**
  * ValidationSeverity
@@ -8858,6 +8946,40 @@ export type DiffStrategyRevisionsResponses = {
 
 export type DiffStrategyRevisionsResponse =
   DiffStrategyRevisionsResponses[keyof DiffStrategyRevisionsResponses];
+
+export type DiffStrategyDraftData = {
+  body: DraftDiffRequest;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/draft-diff";
+};
+
+export type DiffStrategyDraftErrors = {
+  /**
+   * Response 422 Diffstrategydraft
+   *
+   * Unprocessable Entity
+   */
+  422: StrategyDocumentInvalidResponse | RequestValidationResponse;
+};
+
+export type DiffStrategyDraftError =
+  DiffStrategyDraftErrors[keyof DiffStrategyDraftErrors];
+
+export type DiffStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  200: DraftDiff;
+};
+
+export type DiffStrategyDraftResponse =
+  DiffStrategyDraftResponses[keyof DiffStrategyDraftResponses];
 
 export type ListStrategyRevisionsData = {
   body?: never;

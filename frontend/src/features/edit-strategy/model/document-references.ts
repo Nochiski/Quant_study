@@ -1,3 +1,4 @@
+import { valueAtPointer } from "../../../shared/lib/yaml12";
 /**
  * 문서 안 id 참조 탐색(WORKFLOW P4-03·D7 삭제 가드). 순수 함수이며 스키마를 모른다: 참조 키는
  * `<namespace>_id` 또는 `*_<namespace>_id`(`input_node_id`, `output_node_id`)이고, 값이 `id`와 같은
@@ -67,17 +68,6 @@ export const findReferences = (
     }
   };
   const within = options.within ?? "";
-  visit(valueAtPointer(tree, within), within);
+  visit(valueAtPointer(tree, within).value, within);
   return found;
-};
-
-const valueAtPointer = (tree: unknown, pointer: string): unknown => {
-  let current: unknown = tree;
-  for (const segment of pointer.split("/").slice(1)) {
-    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
-    if (Array.isArray(current)) current = current[Number(key)];
-    else if (isRecord(current)) current = current[key];
-    else return undefined;
-  }
-  return current;
 };

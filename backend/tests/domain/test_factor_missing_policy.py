@@ -1,7 +1,7 @@
 """P2-02: 결측 정책이 팩터 그래프가 아니라 실행 설정에서 plan·평가로 들어온다.
 
 세 가지를 고정한다. (1) `missing` 은 `compile_factor_plan` 인자이고 `plan_hash` 에 남는다.
-(2) 기본값 경로(`MissingPolicy.DROP`)의 `plan_hash` 는 P2-02 이전과 같다. (3) 평가의 결측
+(2) 현재 평가 판본을 넣은 `plan_hash`와 역사 payload의 표지를 고정한다. (3) 평가의 결측
 채우기는 그래프의 `missing_policy` 가 아니라 넘겨준 `missing` 을 따른다.
 
 #312: 채우는 정책(`zero`·`cross_sectional_median`)은 잎이 아니라 값이 횡단면으로 넘어가는 자리
@@ -35,16 +35,11 @@ from strategy_workbench.domain.factor.facade.planning import compile_factor_plan
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.factor.facade.trace import evaluate_factor_graph_with_trace
 
-# 같은 그래프·같은 기본 결측 정책의 plan hash 골든. P2-02 는 정책을 인자로 옮기면서도 이 값을
-# 유지했지만(`6aa3a445…`), P2-03 이 `FactorGraph.missing_policy` 필드 자체를 지우면서 `graph_hash`
-# 가 바뀌어 값이 한 번 갈렸다. 팩터 행렬 캐시는 코드베이스에 아직 없어 잘못된 히트는 불가능하고,
-# 영향은 이 골든 하나다(1.1 문서는 P2-09 업그레이더를 거쳐 들어온다).
-PLAN_HASH_1_2 = "e8bdd889366602ffa16c40e3c1d4de04c7f040f637252ec7217cf50679d13f4e"
-# 같은 그래프의 `zero`·`cross_sectional_median` plan hash. #312 가 채움 자리를 옮기며 채우는 정책의
-# payload 에만 표지(`missing_fill`)를 실어 값이 달라진 판을 갈랐다 — 평가 규칙 판본의 첫 사례
-# (#375 DR-A-10)다.
-PLAN_HASH_ZERO = "788aa0abc41bbe39f46ee622ac93b07f8aa3b54b4883aa04ca20c3a403fc4107"
-PLAN_HASH_MEDIAN = "0157de5f544bfa6370bbf2bfbee691302ff9b0c98fb09362baff4b19cd2187be"
+# #375 DR-A-10: 평가 판본을 명시하여 새 plan을 가른다. 아래 별도 회귀가 기존 payload의
+# missing_fill 표지와 판본 필드를 뺀 역사 hash를 고정한다.
+PLAN_HASH_1_2 = "d72beca375967569e851a3c3f7c7730be613446122db5551bb6d17c1b87d1424"
+PLAN_HASH_ZERO = "3b6df34e14891b8dd44a10e4c66da7a469bd5dba0cb92bbcba319cfa19a845af"
+PLAN_HASH_MEDIAN = "369954ea6af836ea6ccb2b5d58572c433a955df30912cf50d35074c4ac2415b2"
 
 
 def _graph() -> FactorGraph:
@@ -409,7 +404,7 @@ def test_a_day_without_any_value_is_not_filled() -> None:
 
 
 def test_only_filling_policies_carry_the_fill_stage_in_the_plan() -> None:
-    """채우는 정책만 plan payload 에 채움 자리 표지를 싣는다 — drop 골든은 그대로다."""
+    """채우는 정책의 plan hash는 채움 자리와 평가 판본을 함께 구분한다."""
     for policy, golden in (
         (MissingPolicy.ZERO, PLAN_HASH_ZERO),
         (MissingPolicy.CROSS_SECTIONAL_MEDIAN, PLAN_HASH_MEDIAN),
@@ -427,3 +422,33 @@ def test_trace_evaluation_reads_the_same_argument() -> None:
 
     assert [value.value for value in evaluation.values] == [100.0, 0.0]
     assert trace.output_node_id == "close"
+
+
+@pytest.mark.parametrize(
+    "policy, legacy_hash",
+    [
+        (MissingPolicy.DROP, "e8bdd889366602ffa16c40e3c1d4de04c7f040f637252ec7217cf50679d13f4e"),
+        (MissingPolicy.ZERO, "788aa0abc41bbe39f46ee622ac93b07f8aa3b54b4883aa04ca20c3a403fc4107"),
+        (
+            MissingPolicy.CROSS_SECTIONAL_MEDIAN,
+            "0157de5f544bfa6370bbf2bfbee691302ff9b0c98fb09362baff4b19cd2187be",
+        ),
+    ],
+)
+def test_versioned_plan_preserves_the_legacy_fill_marker(monkeypatch, policy, legacy_hash) -> None:
+    from strategy_workbench.domain.canonical.facade.encoding import canonical_json_hash
+    from strategy_workbench.domain.factor import _planning
+
+    captured = {}
+
+    def capture(payload, **kwargs):
+        captured.update(payload)
+        return canonical_json_hash(payload, **kwargs)
+
+    monkeypatch.setattr(_planning, "canonical_json_hash", capture)
+    plan = compile_factor_plan(_graph(), registry_version="test-registry", missing=policy)
+    assert captured.pop("evaluation_version") == plan.evaluation_version
+    assert captured.get("missing_fill") == (
+        None if policy is MissingPolicy.DROP else "cross_section"
+    )
+    assert canonical_json_hash(captured, ensure_ascii=True) == legacy_hash

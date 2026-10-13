@@ -140,15 +140,11 @@ export type FormProjection = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/**
- * Form이 후보 select를 아는 `x-catalog` 카탈로그. `universe`는 schema 1.2에서 전략 문서를 떠나
- * 실행 설정 스키마로 옮겨갔지만(P2-03), 실행 설정 패널이 같은 컨트롤을 쓰므로 남겨 둔다
- * (P3-02).
- */
-export const CATALOGS = ["equity-field", "universe"] as const;
+/** 전략 문서의 runtime schema가 발행하는 선택 카탈로그. */
+export const CATALOGS = ["equity-field"] as const;
 /**
  * `x-catalog` 카탈로그 → 화면이 받은 항목 목록(이름 포함). 목록을 아직 못 받았거나 목록이 없는 카탈로그
- * (universe)는 null. Form select 옵션과 파이프라인 요약의 필드 이름이 같은 목록을 읽는다.
+ * 는 null. Form select 옵션과 파이프라인 요약의 필드 이름이 같은 목록을 읽는다.
  */
 export const catalogProfiles = (
   catalogs: { equityFields: readonly DatasetFieldProfile[] | null },

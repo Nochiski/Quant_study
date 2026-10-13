@@ -1,3 +1,4 @@
+import { DocumentStatus } from "../ui/document-status";
 import { EditorView } from "@codemirror/view";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -8,7 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { SourceDiagnostic } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { toDocumentDiagnostics } from "../model/use-compile-document";
-import { useDiagnosticNavigation } from "../model/use-diagnostic-navigation";
+import { useDiagnosticNavigation } from "./editor-harness";
 import { useStrategyDocument } from "../model/use-strategy-document";
 import { useCompileDocument } from "../model/use-compile-document";
 import { DiagnosticsPanel } from "../ui/diagnostics-panel";
@@ -112,10 +113,7 @@ const Harness = ({ initial }: { initial: string }) => {
   });
   return (
     <>
-      <output data-testid="phase">{state.phase}</output>
-      <output data-testid="version">
-        {state.sourceVersion}/{state.compiledVersion}
-      </output>
+      <DocumentStatus state={state} />
       <SourceEditor
         state={state}
         dispatch={dispatch}
@@ -153,26 +151,21 @@ describe("useCompileDocument", () => {
   it("compiles a parsed text once and records the semantic verdict for that version", async () => {
     await mount('schema_version: "1.1"\ntitle: ok\n');
     await waitFor(() =>
-      expect(screen.getByTestId("phase")).toHaveTextContent(
-        "semantically-valid",
+      expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent(
+        "검증 통과",
       ),
     );
     expect(requests.map((r) => r.source)).toEqual([
       'schema_version: "1.1"\ntitle: ok\n',
     ]);
-    {
-      const [source, compiled] = screen
-        .getByTestId("version")
-        .textContent!.split("/");
-      expect(compiled).toBe(source);
-    }
+    expect(screen.getByRole("status", { name: "문서 상태" })).toHaveAttribute("data-settled", "true");
   });
 
   it("fails closed when the wire response is missing a canonical payload", async () => {
     await mount('schema_version: "1.1"\ntitle: incomplete\n');
     await waitFor(() =>
-      expect(screen.getByTestId("phase")).toHaveTextContent(
-        "structure-invalid",
+      expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent(
+        "구조 오류",
       ),
     );
   });
@@ -182,8 +175,8 @@ describe("useCompileDocument", () => {
     await waitFor(() => expect(requests).toHaveLength(1));
     type(view, "title: bad\n");
     await waitFor(() =>
-      expect(screen.getByTestId("phase")).toHaveTextContent(
-        "structure-invalid",
+      expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent(
+        "구조 오류",
       ),
     );
     expect(requests[0]).toMatchObject({
@@ -192,20 +185,15 @@ describe("useCompileDocument", () => {
     });
     // The slow reply (would be "semantically-valid") can no longer overwrite the verdict.
     await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(screen.getByTestId("phase")).toHaveTextContent("structure-invalid");
-    {
-      const [source, compiled] = screen
-        .getByTestId("version")
-        .textContent!.split("/");
-      expect(compiled).toBe(source);
-    }
+    expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent("구조 오류");
+    expect(screen.getByRole("status", { name: "문서 상태" })).toHaveAttribute("data-settled", "true");
   });
 
   it("sends nothing for unparsable text or during IME composition", async () => {
     const view = await mount("title: [unterminated\n");
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests).toHaveLength(0);
-    expect(screen.getByTestId("phase")).toHaveTextContent("syntax-invalid");
+    expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent("구문 오류");
     act(() => {
       view.contentDOM.dispatchEvent(
         new Event("compositionstart", { bubbles: true }),
@@ -241,8 +229,8 @@ describe("useCompileDocument", () => {
   it("keeps warnings separate from errors and marks a stale result while typing", async () => {
     const view = await mount("risk:\n  max_name_weight: warn\n");
     await waitFor(() =>
-      expect(screen.getByTestId("phase")).toHaveTextContent(
-        "semantically-valid",
+      expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent(
+        "검증 통과",
       ),
     );
     expect(screen.getByRole("region", { name: "문제" })).toHaveTextContent(
@@ -251,7 +239,7 @@ describe("useCompileDocument", () => {
     expect(screen.getByRole("button", { name: /over 50%/ })).toBeEnabled();
     type(view, "risk:\n  max_name_weight: [broken\n");
     await waitFor(() =>
-      expect(screen.getByTestId("phase")).toHaveTextContent("syntax-invalid"),
+      expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent("구문 오류"),
     );
     // The syntax marker replaces the old list; the old semantic warning is not shown as current.
     expect(screen.getByRole("region", { name: "문제" })).toHaveTextContent(
@@ -269,7 +257,7 @@ describe("useCompileDocument", () => {
       name: /title must not be empty/,
     });
     expect(stale).toBeDisabled();
-    expect(stale.closest(".problems")).toHaveClass("problems--stale");
+    expect(screen.getByRole("region", { name: "문제" })).toHaveTextContent("이전 결과(현재 텍스트와 다름)");
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: /title must not be empty/ }),
@@ -280,7 +268,7 @@ describe("useCompileDocument", () => {
   it("reports a transport failure as a server problem without pretending validity", async () => {
     await mount("title: boom\n");
     await waitFor(() =>
-      expect(screen.getByTestId("phase")).toHaveTextContent("semantic-invalid"),
+      expect(screen.getByRole("status", { name: "문서 상태" })).toHaveTextContent("검증 오류"),
     );
     expect(screen.getByRole("region", { name: "문제" })).toHaveTextContent(
       "서버",

@@ -11,10 +11,7 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md
 - 구문이 깨진 source는 StrategySpec이 되지 않는다 (fail-closed).
 - unknown key는 structural fail-closed다 (P1-01 domain hydrate).
 
-YAML loader는 P1-02 codec이 생기기 전까지의 임시 수단으로 `yaml.safe_load`(dev group의 pyyaml)를
-쓴다.
-fixture는 YAML 1.1 implicit typing에 걸리지 않도록 모든 날짜·버전을 quoted string으로 적는다.
-P0-03 cross-runtime fixture와 P1-02 codec이 이 loader를 대체한다.
+YAML fixture도 운영 YAML 1.2 codec으로 읽는다.
 """
 
 from __future__ import annotations
@@ -26,24 +23,23 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 from strategy_workbench.domain.strategy.facade.document import (
-    hydrate_saved_strategy,
     hydrate_strategy_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
-    canonical_payload_json,
     canonical_strategy_payload,
     strategy_spec_hash,
 )
+from tests.authoring_yaml import load_authoring_yaml
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
 # 같은 의미의 YAML/JSON/legacy JSON fixture가 공유하는 canonical hash.
-# 재생성: strategy_spec_hash(hydrate_authoring_document(yaml.safe_load(quality_momentum.yaml)))
+# 재생성: strategy_spec_hash(hydrate_authoring_document(load_authoring_yaml(quality_momentum.yaml)))
 QUALITY_MOMENTUM_SPEC_HASH = "69064ce14c47ac2c94ad8a1620da4d4326313f1da4aa42b54d15643e5111ca44"
 # hash 알고리즘 golden. 모델 모양과 무관하게 canonical 직렬화 규칙(sort_keys·최소 separator·
 # allow_nan=False·sha256)만 고정한다. payload는 2026-09-04 schema 1.0 fixture의 canonical payload를
@@ -59,7 +55,7 @@ def _read(name: str) -> str:
 
 
 def _load_yaml(name: str) -> dict[str, Any]:
-    loaded = yaml.safe_load(_read(name))
+    loaded = load_authoring_yaml(_read(name))
     assert isinstance(loaded, dict)
     return loaded
 
@@ -107,10 +103,10 @@ def test_same_meaning_sources_share_one_spec_hash(name: str) -> None:
     if name.endswith(".yaml"):
         spec = hydrate_authoring_document(_load_yaml(name))
     elif name.endswith(".legacy.json"):
-        # legacy JSON은 identity를 문서 안에 가진 현행 API payload다.
-        legacy = hydrate_saved_strategy(_load_json(name))
-        assert legacy.ok and legacy.spec is not None
-        spec = legacy.spec
+        document = _load_json(name)
+        identity = StrategyIdentity(**document.pop("identity"))
+        document["schema_version"] = identity.schema_version
+        spec = hydrate_authoring_document(document, identity)
         assert spec.identity == StrategyIdentity("strategy-legacy", 3)
     else:
         spec = hydrate_authoring_document(_load_json(name))
@@ -202,12 +198,14 @@ def test_nested_factors_shape_is_reported_as_1_0_syntax() -> None:
 
 
 def test_syntax_invalid_yaml_never_becomes_a_spec() -> None:
-    """fixture sanity check.
+    from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
+    from strategy_workbench.domain.strategy.facade.document import SourceFormat
 
-    P1-02 codec이 syntax diagnostic으로 대체할 때까지 loader 실패만 확인한다.
-    """
-    with pytest.raises(yaml.YAMLError):
-        _load_yaml("quality_momentum.invalid.yaml")
+    parsed = RuamelDocumentCodec().parse(
+        _read("quality_momentum.invalid.yaml"), format=SourceFormat.YAML
+    )
+    assert not parsed.ok
+    assert parsed.diagnostics
 
 
 def test_structurally_invalid_document_fails_closed() -> None:

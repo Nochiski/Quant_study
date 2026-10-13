@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import asdict, replace
-from datetime import date, datetime
-from enum import Enum
 
-from ._models import BacktestRunSpec, RunEnvironment
+from strategy_workbench.domain.canonical.facade.encoding import (
+    canonical_json_hash,
+)
+
+from ._models import BacktestRunSpec, ResolvedBacktestRunSpec, RunEnvironment
 
 # 엔진 체결·자본·비용 규칙의 판본. 매니페스트 `engine_version` 과 실행 지문에 실린다. 두 코어의
 # 체결 결과나 비용 규칙(법정 세율표·ADV·σ 창·충격 상한·척도 공식)을 바꾸는 PR 은 이 값을 올린다 —
@@ -14,16 +14,17 @@ from ._models import BacktestRunSpec, RunEnvironment
 # 지문으로 옛 규칙의 결과를 공유한다.
 # v4(#342 DOMAIN-V2-02): 참여 한도의 ADV 는 거래대금이 있는 앞선 행 20개가 다 차야 주고, 워밍업은
 # 40세션을 읽는다.
-ENGINE_RULES_VERSION = "backtest-engine-v4"
+ENGINE_RULES_VERSION = "backtest-engine-v5"
 
 
 def backtest_run_fingerprint(
-    spec: BacktestRunSpec,
+    spec: BacktestRunSpec | ResolvedBacktestRunSpec,
     *,
     data_snapshot_id: str,
     target_tape_hash: str,
     engine_version: str,
     metric_registry_version: str,
+    factor_evaluation_version: str | None = None,
 ) -> str:
     """Identify every semantic input needed to reproduce one engine result."""
     # How the strategy was referenced (saved revision id/hash, client source hash) is
@@ -40,24 +41,29 @@ def backtest_run_fingerprint(
         "engine_version": engine_version,
         "metric_registry_version": metric_registry_version,
     }
+    # 역사 지문은 키 자체가 없었다. 미상 판본에는 null도 추가하지 않는다.
+    if factor_evaluation_version is not None:
+        payload["factor_evaluation_version"] = factor_evaluation_version
     return canonical_json_hash(payload)
 
 
-def fingerprint_run_spec(spec: BacktestRunSpec) -> BacktestRunSpec:
+def fingerprint_run_spec(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> BacktestRunSpec:
     """실행 결과를 가르는 요청 칸만 남긴 spec — 실행 지문과 같은 입력 잇기가 이것을 비교한다.
 
     전략 출처·계열은 출처 정보이고, 지표 창의 표시 이름(`label`)은 화면이 지은 문자열이라
     뺀다(#335).
     """
+    # 기존 지문의 null 출처 키를 보존한다. 새 내부 DTO를 직접 asdict하면 과거 지문이 바뀐다.
+    wire = spec.to_wire() if isinstance(spec, ResolvedBacktestRunSpec) else spec
     return replace(
-        spec,
+        wire,
         strategy_source=None,
         lineage_strategy_id=None,
         metric_windows=tuple(replace(window, label=None) for window in spec.metric_windows),
     )
 
 
-def run_input_key(spec: BacktestRunSpec) -> str:
+def run_input_key(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> str:
     """접수 때 아는 실행 입력의 해시 — 같은 입력 잇기(중복 실행 제거)의 기준.
 
     실행 지문에서 실행 뒤에야 아는 칸(target tape 해시)과 프로세스 안에서 고정인 칸(데이터 스냅샷·
@@ -66,35 +72,6 @@ def run_input_key(spec: BacktestRunSpec) -> str:
     return canonical_json_hash(asdict(fingerprint_run_spec(spec)))
 
 
-def run_environment_canonical_json(environment: RunEnvironment) -> str:
-    """실행 설정의 canonical 표기(키 정렬·최소 separator·NaN 금지)."""
-    return _canonical_json(asdict(environment))
-
-
 def environment_hash(environment: RunEnvironment) -> str:
     """실행 설정의 sha256. run manifest 가 `spec_hash` 와 나란히 기록하는 두 번째 축이다."""
     return canonical_json_hash(asdict(environment))
-
-
-def canonical_json_hash(payload: object) -> str:
-    """canonical JSON 의 sha256. 실행 지문·실행 설정 스키마 ETag 가 같은 표기를 쓴다."""
-    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
-
-
-def _canonical_json(payload: object) -> str:
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=_json_default,
-    )
-
-
-def _json_default(value: object) -> str:
-    if isinstance(value, (date, datetime)):
-        return value.isoformat()
-    if isinstance(value, Enum):
-        return str(value.value)
-    raise TypeError(f"unsupported canonical backtest value: {type(value).__name__}")

@@ -1,6 +1,6 @@
+import { currentParse, currentParseOutcome } from "./document-state";
 import { useMemo } from "react";
 
-import type { ParsedSource } from "../../../shared/lib/yaml12";
 import type { DocumentState } from "./document-state";
 import type { JsonSchema } from "./schema-navigator";
 import {
@@ -19,13 +19,6 @@ export type StrategyOutlineSnapshot = {
   staleReason: "updating" | "syntax-error" | null;
 };
 
-const validCurrentParse = (
-  state: DocumentState,
-): Extract<ParsedSource, { status: "ok" }> | null =>
-  state.parsedVersion === state.sourceVersion && state.parse?.status === "ok"
-    ? state.parse
-    : null;
-
 /**
  * Keeps exactly one projection fallback, scoped to a document epoch. Parse failures cannot erase
  * a useful tree, and route changes cannot leak the previous document's structure.
@@ -34,7 +27,8 @@ export const useStrategyOutline = (
   state: DocumentState,
   schema: JsonSchema | null,
 ): StrategyOutlineSnapshot | null => {
-  const current = validCurrentParse(state);
+  const current = currentParse(state);
+  const syntaxFailed = currentParseOutcome(state)?.status === "rejected";
   const parsed = current ?? state.lastValidParse?.result ?? null;
   const parsedVersion = current
     ? state.sourceVersion
@@ -51,8 +45,7 @@ export const useStrategyOutline = (
             staleReason:
               current !== null
                 ? null
-                : state.parsedVersion === state.sourceVersion &&
-                    state.parse?.status === "rejected"
+                : syntaxFailed
                   ? "syntax-error"
                   : "updating",
           }
@@ -63,9 +56,7 @@ export const useStrategyOutline = (
       parsedVersion,
       schema,
       state.documentEpoch,
-      state.parse,
-      state.parsedVersion,
-      state.sourceVersion,
+      syntaxFailed,
     ],
   );
 };

@@ -9,14 +9,13 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.factor.facade.expression import FactorGraph, ParameterNode
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
-    FactorGraph,
     FactorSignal,
     FloatParameter,
     IntegerParameter,
     InvalidParameterValueError,
-    ParameterNode,
     SignalNormalization,
     StrategyIdentity,
     normalized_parameter_value,

@@ -1,6 +1,6 @@
 import type { StrategyDocument, UpgradedDocument } from "../../../shared/api";
 import { t, type MessageKey } from "../../../shared/config";
-import type { DocumentState } from "./document-state";
+import { currentCompileOutcome, type DocumentState } from "./document-state";
 
 /** 업그레이드 응답 warning 코드(OpenAPI enum, P2-09). 생성 타입에서 파생한다(복제 아님). */
 export type UpgradeWarningCode = UpgradedDocument["warnings"][number]["code"];
@@ -59,11 +59,9 @@ export type UpgradeAvailability =
   { kind: "none" } | { kind: "upgradeable" } | { kind: "frozen-generated" };
 
 const compileSuggestsUpgrade = (state: DocumentState): boolean =>
-  state.compiled !== null &&
-  state.compiledVersion === state.sourceVersion &&
-  state.compiled.diagnostics.some((diagnostic) =>
+  currentCompileOutcome(state)?.diagnostics.some((diagnostic) =>
     UPGRADE_SUGGESTING_CODES.has(diagnostic.code),
-  );
+  ) ?? false;
 
 /**
  * 판정은 backend 진단 코드로만 한다(지원 버전·은퇴 버전·1.0 문법·업그레이드 가능 여부 판정 모두

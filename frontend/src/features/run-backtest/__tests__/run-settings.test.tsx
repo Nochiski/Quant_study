@@ -1,3 +1,4 @@
+import { runEnvironmentFields, runEnvironmentApplies } from "../../../entities/backtest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -24,17 +25,16 @@ import {
   vi,
 } from "vitest";
 
-import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
+import { ApiRequestError, type BacktestRunSpec, type RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   initialRunEnvironmentValues,
-  runEnvironmentFields,
   validateRunEnvironment,
   type RunEnvironmentValidation,
 } from "../model/run-environment";
 import {
   buildBacktestRunOptions,
-  DEFAULT_BACKTEST_RUN_SETTINGS,
+  initialBacktestRunSettings,
 } from "../model/run-settings";
 import { runFieldLabel } from "../model/run-settings-problems";
 import {
@@ -122,29 +122,28 @@ const renderWithQuery = (ui: ReactElement) => {
 };
 
 /** backend 가 만든 실행 설정 스키마 사본(`tools/export_runtime_schema.py`). */
+const RUN_OPTIONS_SCHEMA = JSON.parse(readBackendFixture("strategy_documents/run-options-schema.json")) as Record<string, unknown>;
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
+
+const DEFAULT_BACKTEST_RUN_SETTINGS = initialBacktestRunSettings(RUN_OPTIONS_SCHEMA);
 
 /**
  * 기본값에 기간·유니버스를 채운 패널이 싣는 실행 설정. 가격 충격 계수·직접 입력 세율은 고정 bp·법정 세율에서
  * 읽히지 않아(스키마 `x-applicable-when`, #352) 싣지 않는다.
  */
-const ENVIRONMENT: RunEnvironment = {
-  market: "KRX",
-  frequency: "daily",
+const defaultFields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+const environmentProperties = RUN_ENVIRONMENT_SCHEMA.properties as Record<string, { default?: unknown }>;
+const defaultEnvironment = Object.fromEntries(Object.entries(environmentProperties).map(([name, node]) => [name, node.default]));
+const ENVIRONMENT = {
+  ...Object.fromEntries(defaultFields
+    .filter((field) => defaultEnvironment[field.name] != null && runEnvironmentApplies(field, defaultEnvironment))
+    .map((field) => [field.name, defaultEnvironment[field.name]])),
   start: "2021-01-01",
   end: "2026-08-31",
   universe_id: "krx.common-stock",
-  timing: "next_open",
-  participation_rate: 0.1,
-  participation_basis: "adv20",
-  fee_bps: 15,
-  slippage_bps: 10,
-  impact_model: "fixed_bps",
-  sell_tax: "krx_statutory",
-  missing: "drop",
-};
+} as RunEnvironment;
 
 const VALID: RunEnvironmentValidation = {
   valid: true,
@@ -161,7 +160,7 @@ const INCOMPLETE: RunEnvironmentValidation = {
 
 let servedSchema: Record<string, unknown> = RUN_ENVIRONMENT_SCHEMA;
 const schemaHandler = http.get(`${API}/api/v1/run-environments/schema`, () =>
-  HttpResponse.json({ schema_hash: "h", schema: servedSchema }),
+  HttpResponse.json({ schema_hash: "h", schema: servedSchema, options_schema: RUN_OPTIONS_SCHEMA }),
 );
 
 const Harness = ({
@@ -525,6 +524,8 @@ describe("run environment panel", () => {
       screen.queryByRole("button", { name: "실행 설정 채우기" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("blocked")).toBeEmptyDOMElement();
+    expect(band).toHaveTextContent("15bp");
+    expect(band).toHaveTextContent("10%");
   });
 
   // DEFECT-242-01: 기간·유니버스를 정한 뒤 다른 칸의 값이 틀리면, 차단 문장이 그 칸 이름과 이유를 말하고
@@ -687,7 +688,7 @@ describe("run environment panel", () => {
         await gate;
         return HttpResponse.json({
           schema_hash: "h",
-          schema: RUN_ENVIRONMENT_SCHEMA,
+          options_schema: RUN_OPTIONS_SCHEMA, schema: RUN_ENVIRONMENT_SCHEMA,
         });
       }),
     );
@@ -1174,24 +1175,14 @@ describe("run environment panel", () => {
         </QueryClientProvider>
       ),
     });
+    const rejection = (code: string, values: Record<string, string>) =>
+      new ApiRequestError("startBacktest", 422, code, "rejected", null, null, undefined, undefined, values);
     const researchStart = { research_start: "2020-01-02" };
-
-    expect(
-      result.current.rejectionFix(
-        "backtest.run.research_window_violation",
-        researchStart,
-      )?.label,
-    ).toBe("시작일을 2020-01-02로");
-    expect(
-      result.current.rejectionFix(
-        "backtest.strategy.requires_upgrade",
-        researchStart,
-      ),
-    ).toBeNull();
-    expect(
-      result.current.rejectionFix("backtest.run.research_window_violation", {}),
-    ).toBeNull();
-    expect(result.current.rejectionFix(null, researchStart)).toBeNull();
+    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", researchStart))?.label)
+      .toBe("시작일을 2020-01-02로");
+    expect(result.current.rejectionFix(rejection("backtest.strategy.requires_upgrade", researchStart))).toBeNull();
+    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", {}))).toBeNull();
+    expect(result.current.rejectionFix(new Error("network"))).toBeNull();
   });
 
   // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
@@ -1219,6 +1210,47 @@ describe("run environment panel", () => {
 
     await waitFor(() => expect(asked).toBe(1));
     expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
+  });
+
+  it("실행 옵션 기본값과 코어 목록은 서버 스키마 변경을 그대로 따른다", async () => {
+    const options = structuredClone(RUN_OPTIONS_SCHEMA);
+    const properties = options.properties as Record<string, Record<string, unknown>>;
+    properties.core.default = "python";
+    properties.core.enum = ["python"];
+    properties.initial_cash.default = 7654321;
+    properties.annualization_days.default = 260;
+    server.use(http.get(`${API}/api/v1/run-environments/schema`, () => HttpResponse.json({ schema_hash: "changed-options", schema: RUN_ENVIRONMENT_SCHEMA, options_schema: options })));
+    renderWithQuery(<Harness />);
+    await openSettings();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toHaveValue("python");
+    expect(within(screen.getByRole("combobox", { name: "실행 core" })).getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" })).toHaveValue(7654321);
+    expect(screen.getByRole("spinbutton", { name: "연환산 거래일" })).toHaveValue(260);
+  });
+
+  it("전략 전환 시 실행 옵션과 열린 패널을 새 전략 기본값으로 초기화한다", async () => {
+    const view = renderWithQuery(<Harness storageKey="strategy-a" />);
+    const user = await openSettings();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "실행 core" }),
+      "python",
+    );
+    await user.clear(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+      "1234",
+    );
+    view.rerender(<Harness storageKey="strategy-b" />);
+    expect(screen.queryByRole("combobox", { name: "실행 core" })).not.toBeInTheDocument();
+    await openSettings();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toHaveValue(
+      DEFAULT_BACKTEST_RUN_SETTINGS.core,
+    );
+    expect(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    ).toHaveValue(Number(DEFAULT_BACKTEST_RUN_SETTINGS.initialCashKrw));
   });
 
   it("exposes every run option through accessible controls and reports invalid input", async () => {
@@ -1320,6 +1352,16 @@ describe("backtest run actions", () => {
     ).toBeInTheDocument();
   });
 
+  it.each(["cancel", "replay"])("%s 실패는 다른 실행 화면에 남지 않는다", async (action) => {
+    server.use(http.post(action === "cancel" ? `${API}/api/v1/backtests/:runId/cancel` : `${API}/api/v1/backtests`, () => HttpResponse.json({ detail: { code: "backtest.run.not_found", message: "missing run" } }, { status: 404 })));
+    const props = { status: action === "cancel" ? "running" as const : "completed" as const, request: acceptedRequest, onReplayed: vi.fn() };
+    const view = renderWithQuery(<BacktestRunActions {...props} runId="old" />);
+    await userEvent.setup().click(screen.getByRole("button", { name: action === "cancel" ? "실행 취소" : "동일 설정 재실행" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    view.rerender(<BacktestRunActions {...props} runId="new" />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {
     server.use(
       http.post(`${API}/api/v1/backtests/:runId/cancel`, () =>
@@ -1419,7 +1461,8 @@ describe("backtest run actions", () => {
           {
             detail: {
               code: "backtest.run.research_window_violation",
-              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
+              message:
+                "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
               sealed_start: "2016-01-01",
               sealed_end: "2019-12-31",
               research_start: "2020-01-02",

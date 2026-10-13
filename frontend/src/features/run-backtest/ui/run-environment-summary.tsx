@@ -2,7 +2,7 @@ import { t } from "../../../shared/config";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import {
   runEnvironmentLabel,
-  runEnvironmentOptionLabel,
+  runEnvironmentValueLabel,
 } from "../../../entities/backtest";
 import "./run-environment-summary.css";
 
@@ -20,7 +20,6 @@ export const RunEnvironmentSummary = ({
   const {
     environment,
     environmentFields,
-    environmentValues,
     schemaStatus,
     blockedReason,
     problemKind,
@@ -43,14 +42,12 @@ export const RunEnvironmentSummary = ({
           {environmentFields.map((field) => {
             // 요청에 실리는 칸만 보인다 — 지금 모드에서 읽히지 않아 꺼진 칸(#352)은 싣지 않는다.
             if (!(field.name in environment)) return null;
-            const value = environmentValues[field.name] ?? "";
+            const value = (environment as unknown as Record<string, unknown>)[field.name];
             return (
               <div key={field.name}>
                 <dt>{runEnvironmentLabel(field)}</dt>
                 <dd>
-                  {field.control === "select"
-                    ? runEnvironmentOptionLabel(field, value)
-                    : value}
+                  {runEnvironmentValueLabel(field, value)}
                 </dd>
               </div>
             );

@@ -1,6 +1,6 @@
+import type { EditorHandleOwner } from "./use-editor-handle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import { resolveDiagnosticDestination } from "./diagnostic-navigation";
 import {
   currentDiagnostics,
@@ -41,7 +41,6 @@ export type DiagnosticNavigation = {
    * (2차 리뷰 R2-2).
    */
   revealSignal: number;
-  onEditorReady: (editor: CodeEditorHandle | null) => void;
   selectDiagnostic: (diagnostic: DocumentDiagnostic) => void;
 };
 
@@ -55,7 +54,7 @@ export type DiagnosticNavigation = {
  * 3번의 이동은 탭이 `hidden`을 벗은 commit 이후라야 편집기가 스크롤·focus를 받을 수 있어
  * `view`가 원문 탭이 되는 렌더의 effect에서 실행한다.
  */
-export const useDiagnosticNavigation = ({
+export const useDiagnosticNavigation = (owner: EditorHandleOwner, {
   state,
   view,
   sourceView,
@@ -65,12 +64,12 @@ export const useDiagnosticNavigation = ({
   onSelectPointer,
   onOpenSource,
 }: DiagnosticNavigationOptions): DiagnosticNavigation => {
-  const editor = useRef<CodeEditorHandle | null>(null);
+  const readEditor = owner.read;
   const [revealSignal, setRevealSignal] = useState(0);
   // 탭 전환을 기다리는 진단 범위. 원문 탭이 보이는 첫 effect에서 소비한다.
   const pending = useRef<DocumentDiagnostic["range"]>(null);
   const pendingOwner = useRef<string | null>(null);
-  const owner = `${state.documentEpoch}:${state.sourceVersion}`;
+  const documentOwner = `${state.documentEpoch}:${state.sourceVersion}`;
 
   const documentDiagnostics = useMemo(
     () => deduplicateDiagnostics(currentDiagnostics(state)),
@@ -87,7 +86,7 @@ export const useDiagnosticNavigation = ({
 
   // 오래된 offset이 짧아진 현재 텍스트를 넘지 않도록 방어적으로 자른다.
   const reveal = useCallback((range: DocumentDiagnostic["range"]): boolean => {
-    const handle = editor.current;
+    const handle = readEditor();
     if (handle === null || range === null) return false;
     const length = handle.getText().length;
     const from = Math.min(range.start.offset, length);
@@ -96,27 +95,27 @@ export const useDiagnosticNavigation = ({
     handle.scrollTo(from);
     handle.focus();
     return true;
-  }, []);
+  }, [readEditor]);
 
-  const onEditorReady = useCallback(
-    (next: CodeEditorHandle | null): void => {
-      editor.current = next;
+  useEffect(
+    () => {
+      const next = owner.mounted;
       // 탭 전환보다 늦게 준비된 CodeMirror에도 같은 미소비 요청을 전달한다.
       if (
         next !== null &&
         view === sourceView &&
-        pendingOwner.current === owner &&
+        pendingOwner.current === documentOwner &&
         reveal(pending.current)
       )
         pending.current = null;
     },
-    [owner, reveal, sourceView, view],
+    [owner.mounted, documentOwner, reveal, sourceView, view],
   );
 
   const selectDiagnostic = useCallback(
     (diagnostic: DocumentDiagnostic): void => {
       if (diagnostic.range === null) return;
-      pendingOwner.current = owner;
+      pendingOwner.current = documentOwner;
       const destination = resolveDiagnosticDestination({
         view,
         sourceView,
@@ -140,7 +139,7 @@ export const useDiagnosticNavigation = ({
     },
     [
       form,
-      owner,
+      documentOwner,
       onOpenSource,
       onSelectPointer,
       reveal,
@@ -151,12 +150,6 @@ export const useDiagnosticNavigation = ({
     ],
   );
 
-  useEffect(() => {
-    if (view !== sourceView || pendingOwner.current !== owner) return;
-    const range = pending.current;
-    if (range === null) return;
-    if (reveal(range)) pending.current = null;
-  }, [owner, reveal, sourceView, view]);
 
-  return { diagnostics, stale, revealSignal, onEditorReady, selectDiagnostic };
+  return { diagnostics, stale, revealSignal, selectDiagnostic };
 };

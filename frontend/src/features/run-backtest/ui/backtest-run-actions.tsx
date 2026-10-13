@@ -1,15 +1,16 @@
-import { useMemo } from "react";
+import { useState } from "react";
 
 import {
   backtestStartRejectionMessage,
-  runEnvironmentFields,
+  RUN_STATUS,
   useCancelBacktest,
   useRunEnvironmentSchema,
   useStartBacktest,
   type BacktestRunSpec,
   type BacktestRunState,
 } from "../../../entities/backtest";
-import { ApiRequestError, failureReason } from "../../../shared/api";
+import { failureReason } from "../../../shared/api";
+import { useCommittedRef } from "../../../shared/lib/react";
 import { t } from "../../../shared/config";
 import { Button, FailureNotice } from "../../../shared/ui";
 import { runFieldLabel } from "../model/run-settings-problems";
@@ -23,12 +24,6 @@ type BacktestRunActionsProps = {
   onReplayed: (runId: string) => void;
 };
 
-const ACTIVE = new Set<BacktestRunState["status"]>([
-  "queued",
-  "running",
-  "cancel_requested",
-]);
-
 /** Cancel an active run or submit the server-owned accepted request as an exact new run. */
 export const BacktestRunActions = ({
   runId,
@@ -39,34 +34,31 @@ export const BacktestRunActions = ({
 }: BacktestRunActionsProps) => {
   const cancel = useCancelBacktest();
   const replay = useStartBacktest();
-  const active = ACTIVE.has(status);
+  const active = RUN_STATUS[status].active;
+  const currentRun = useCommittedRef(runId);
+  const [replayOwner, setReplayOwner] = useState<string | null>(null);
+  const cancelError = cancel.variables === runId ? cancel.error : null;
+  const replayError = replayOwner === runId ? replay.error : null;
+  const cancelPending = cancel.variables === runId && cancel.isPending;
+  const replayPending = replayOwner === runId && replay.isPending;
 
   const rerun = (): void => {
     if (request === undefined) return;
+    setReplayOwner(runId);
     replay.mutate(request, {
-      onSuccess: (accepted) => onReplayed(accepted.run.run_id),
+      onSuccess: (accepted) => {
+        if (currentRun.current === runId) onReplayed(accepted.run.run_id);
+      },
     });
   };
-  const schema = useRunEnvironmentSchema();
-  const environmentFields = useMemo(
-    () =>
-      schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
-    [schema.data],
-  );
-  const actionErrorDetail = failureReason(cancel.error ?? replay.error);
+  const { environmentFields } = useRunEnvironmentSchema();
+  const actionErrorDetail = failureReason(cancelError ?? replayError);
   // 재실행 거절은 시작 거절이다 — 편집기 툴바와 같은 문장 규칙(`backtestStartRejectionMessage`)을 쓴다.
   const replayRejection =
-    replay.error === null
+    replayError === null
       ? null
-      : backtestStartRejectionMessage(
-          replay.error instanceof ApiRequestError
-            ? (replay.error.code ?? null)
-            : null,
-          replay.error instanceof ApiRequestError &&
-            replay.error.field !== undefined
-            ? runFieldLabel(environmentFields, replay.error.field)
-            : null,
-          replay.error instanceof ApiRequestError ? replay.error.values : {},
+      : backtestStartRejectionMessage(replayError, (field) =>
+          runFieldLabel(environmentFields, field),
         );
 
   return (
@@ -87,7 +79,7 @@ export const BacktestRunActions = ({
         <Button
           size="small"
           tone="danger"
-          disabled={cancel.isPending || status === "cancel_requested"}
+          disabled={cancelPending || status === "cancel_requested"}
           onClick={() => cancel.mutate(runId)}
         >
           {status === "cancel_requested"
@@ -98,21 +90,21 @@ export const BacktestRunActions = ({
         <Button
           size="small"
           tone="primary"
-          disabled={request === undefined || requestFailed || replay.isPending}
+          disabled={request === undefined || requestFailed || replayPending}
           onClick={rerun}
         >
-          {replay.isPending
+          {replayPending
             ? t("backtest.actions.replaying")
             : t("backtest.actions.rerun")}
         </Button>
       )}
-      {replayRejection !== null && cancel.error === null ? (
+      {replayRejection !== null && cancelError === null ? (
         <FailureNotice
           title={t("backtest.actions.rerunFailed")}
           message={replayRejection}
           reason={actionErrorDetail}
         />
-      ) : cancel.isError || replay.isError || requestFailed ? (
+      ) : cancelError !== null || replayError !== null || requestFailed ? (
         <FailureNotice
           message={t("backtest.actions.error")}
           reason={actionErrorDetail}

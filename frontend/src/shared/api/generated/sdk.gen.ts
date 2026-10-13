@@ -45,6 +45,9 @@ import type {
   DeleteStrategyDraftData,
   DeleteStrategyDraftErrors,
   DeleteStrategyDraftResponses,
+  DiffStrategyDraftData,
+  DiffStrategyDraftErrors,
+  DiffStrategyDraftResponses,
   DiffStrategyRevisionsData,
   DiffStrategyRevisionsErrors,
   DiffStrategyRevisionsResponses,
@@ -1104,6 +1107,27 @@ export const diffStrategyRevisions = <ThrowOnError extends boolean = false>(
     DiffStrategyRevisionsErrors,
     ThrowOnError
   >({ url: "/api/v1/strategies/{strategy_id}/diff", ...options });
+
+/**
+ * Diff Strategy Draft
+ *
+ * 저장 리비전과 편집 중 원문을 같은 도메인 의미 diff로 비교한다.
+ */
+export const diffStrategyDraft = <ThrowOnError extends boolean = false>(
+  options: Options<DiffStrategyDraftData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    DiffStrategyDraftResponses,
+    DiffStrategyDraftErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategies/{strategy_id}/draft-diff",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * List Strategy Revisions

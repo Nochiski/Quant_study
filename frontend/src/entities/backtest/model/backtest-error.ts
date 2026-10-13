@@ -50,9 +50,13 @@ export const requestRejectionMessage = (
  * 없으면 일반 문구다.
  */
 export const backtestStartRejectionMessage = (
-  code: string | null,
-  fieldLabel: string | null,
-  values: Readonly<Record<string, string>>,
+  error: unknown,
+  fieldLabel?: (field: string) => string | null,
 ): string =>
-  backtestErrorSentence(code, fieldLabel, values) ??
-  t("backtest.start.failedGeneric");
+  (error instanceof ApiRequestError
+    ? backtestErrorSentence(
+        error.code ?? null,
+        error.field === undefined ? null : fieldLabel?.(error.field) ?? null,
+        error.values,
+      )
+    : null) ?? t("backtest.start.failedGeneric");

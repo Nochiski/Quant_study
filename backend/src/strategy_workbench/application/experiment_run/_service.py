@@ -337,7 +337,7 @@ class ExperimentRunService:
 
         이미 완료한 실험은 `experiment.cancel.completed` 로 거절한다 — 목록이 아직 도는 것으로 보인
         틈에 누른 취소가 결과가 다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은
-        `experiment_status` 다. 취소한 실험을 다시 취소하면 그대로 돌려준다.
+        `experiment_status` 다. 재요청은 취소 시각을 보존하고 남은 실행 정리만 다시 시도한다.
         """
         run_ids: dict[str, None] = {}
         with self._lock:
@@ -352,14 +352,15 @@ class ExperimentRunService:
                 )
             if record.cancelled_at is None:
                 self._repository.cancel(experiment_id, cancelled_at=self._now())
-                self._cancelled.add(experiment_id)
-                for run in (
-                    *self._repository.attempts(experiment_id),
-                    *self._repository.picks(experiment_id),
-                ):
-                    if run.run_id is not None:
-                        run_ids[run.run_id] = None
-        # 취소 표식과 제출 목록은 락 안에서 확정한다. 이후 제출·재시도는 거절되므로 느린 실행
+            self._cancelled.add(experiment_id)
+            for run in (
+                *self._repository.attempts(experiment_id),
+                *self._repository.picks(experiment_id),
+            ):
+                if run.run_id is not None:
+                    run_ids[run.run_id] = None
+        # 취소 표식은 한 번만 기록하고 실행 정리는 매 요청 재시도한다. 표식 뒤 상태 조회나 일부
+        # 취소가 실패해도 남은 run을 잃지 않는다. 이후 제출·재시도는 거절되므로 느린 실행
         # 취소는 다른 실험을 막지 않게 락 밖에서 한다. 끝난 실행은 일괄 상태로 걸러 낸다.
         states = self._runs.states(run_ids) if run_ids else {}
         for run_id in run_ids:

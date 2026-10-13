@@ -6,7 +6,6 @@ import {
   addNode,
   graphNodeIds,
   nodeKinds,
-  nodePointerOf,
   nodeReferenceKeys,
   removeNodeAt,
   renameNode,
@@ -58,8 +57,6 @@ describe("graph transactions (P5-01)", () => {
   it("reads node ids, pointers and the union kinds from the schema", () => {
     const tree = treeOf(VERBOSE);
     expect(graphNodeIds(tree, F0)).toEqual(["close", "mom_252"]);
-    expect(nodePointerOf(tree, F0, "mom_252")).toBe("/factors/0/graph/nodes/1");
-    expect(nodePointerOf(tree, F0, "nope")).toBeNull();
     const kinds = nodeKinds(SCHEMA, tree, F0).map(([kind]) => kind);
     expect(kinds).toContain("field");
     expect(kinds).toContain("time_series");
@@ -317,7 +314,6 @@ describe("graph transactions (P5-01)", () => {
       ),
     );
     // id 기반이면 첫 일치 노드(nodes/2)가 지워졌을 자리 — pointer 기반은 누른 노드를 지운다.
-    expect(nodePointerOf(duplicated, F0, "spare")).toBe("/factors/0/graph/nodes/2");
     expect(removeNodeAt(duplicated, F0, "/factors/0/graph/nodes/3")).toEqual({
       kind: "remove",
       pointer: "/factors/0/graph/nodes/3",
@@ -340,13 +336,12 @@ describe("graph transactions (P5-01)", () => {
   it("refuses to remove a referenced node, scoped to its own graph, and removes an unreferenced one with its leading comment", () => {
     const tree = treeOf(TWO_FACTORS);
     // `close`는 같은 그래프의 `mom_252`가 입력으로 참조한다. 다른 팩터의 같은 id는 참조가 아니다(감사 DEFECT-P4X-002).
-    expect(removeNodeAt(tree, F0, nodePointerOf(tree, F0, "close")!)).toEqual({
+    expect(removeNodeAt(tree, F0, "/factors/0/graph/nodes/0")).toEqual({
       error: "referenced",
       by: ["/factors/0/graph/nodes/1/input_node_id"],
     });
-    expect(nodePointerOf(tree, F0, "ghost")).toBeNull();
     // 출력 노드는 `output_node_id`가 참조한다.
-    expect(removeNodeAt(tree, F0, nodePointerOf(tree, F0, "mom_252")!)).toEqual({
+    expect(removeNodeAt(tree, F0, "/factors/0/graph/nodes/1")).toEqual({
       error: "referenced",
       by: ["/factors/0/graph/output_node_id"],
     });

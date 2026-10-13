@@ -122,8 +122,10 @@ class StrategyDraftService:
     def _validate_base(self, request: SaveStrategyDraftRequest) -> None:
         if request.strategy_id is None:
             return
-        assert request.base_revision is not None
-        assert request.base_spec_hash is not None
+        if request.base_revision is None or request.base_spec_hash is None:
+            raise InvalidStrategyDraftError(
+                f"draft base revision and hash are required: strategy_id={request.strategy_id}"
+            )
         try:
             base = self._strategy_repository.get(request.strategy_id, request.base_revision)
         except StrategyNotFoundError as error:

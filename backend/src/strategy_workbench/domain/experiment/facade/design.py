@@ -23,7 +23,9 @@ from strategy_workbench.domain.experiment._plateau import (
 )
 from strategy_workbench.domain.experiment._search import (
     MAX_GRID_POINTS,
+    ConstraintOperator,
     GridIndex,
+    ParameterConstraint,
     SearchAxis,
     SearchSpec,
     build_search_spec,
@@ -61,6 +63,8 @@ __all__ = [
     "ExperimentTrial",
     "GridIndex",
     "InvalidExperimentSpecError",
+    "ConstraintOperator",
+    "ParameterConstraint",
     "SearchAxis",
     "SearchSpec",
     "SplitMode",

@@ -1281,6 +1281,11 @@ export type ConstantNode = {
 };
 
 /**
+ * ConstraintOperator
+ */
+export type ConstraintOperator = "lt" | "le" | "gt" | "ge" | "eq" | "ne";
+
+/**
  * CreateProviderProfileRequest
  *
  * 프로파일 생성 요청. `secret`은 이 방향으로만 흐른다.
@@ -1902,7 +1907,9 @@ export type ExperimentErrorDetail = {
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
     | "experiment.not_found"
+    | "experiment.search.invalid_constraint"
     | "experiment.search.invalid_values"
+    | "experiment.search.no_feasible_point"
     | "experiment.search.too_many_points"
     | "experiment.search.unknown_parameter"
     | "experiment.selection.not_completed"
@@ -2014,6 +2021,12 @@ export type ExperimentRecord = {
  * 실험 만들기·미리 계산 요청.
  */
 export type ExperimentRequest = {
+  /**
+   * Constraints
+   *
+   * 탐색 축 사이의 조합 제약(예: fast < slow). 모두 만족하는 칸만 실행하고, 걸러진 칸은 실행되지 않아 시도 수에도 들지 않는다. 비우면 곱집합 전체다.
+   */
+  constraints?: Array<ParameterConstraint>;
   run: BacktestRunSpec;
   /**
    * Search
@@ -3243,6 +3256,30 @@ export type PanelPreviewCostEstimate = {
    * Session Count
    */
   session_count: number;
+};
+
+/**
+ * ParameterConstraint
+ *
+ * 탐색 축 값과 다른 탐색 축 값(`right_parameter`) 또는 상수(`right_value`)의 관계.
+ *
+ * 둘 중 정확히 하나를 쓴다. 순서 비교(`lt`·`le`·`gt`·`ge`)는 숫자끼리만, 선택지는 `eq`·`ne`만
+ * 받는다.
+ */
+export type ParameterConstraint = {
+  /**
+   * Left
+   */
+  left: string;
+  operator: ConstraintOperator;
+  /**
+   * Right Parameter
+   */
+  right_parameter?: string | null;
+  /**
+   * Right Value
+   */
+  right_value?: number | number | string | boolean | null;
 };
 
 /**
@@ -4767,13 +4804,17 @@ export type SearchBudgetExhaustedView = {
  *
  * 탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.
  *
- * 축이 없으면 문서 기본값 한 칸(좌표 `()`)이다.
+ * 축이 없으면 문서 기본값 한 칸(좌표 `()`)이다. 제약(`constraints`)을 모두 만족하는 칸만 실행한다.
  */
 export type SearchSpec = {
   /**
    * Axes
    */
   axes: Array<SearchAxis>;
+  /**
+   * Constraints
+   */
+  constraints?: Array<ParameterConstraint>;
 };
 
 /**

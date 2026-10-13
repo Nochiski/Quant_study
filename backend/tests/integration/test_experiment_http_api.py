@@ -445,3 +445,44 @@ def test_a_held_experiment_can_be_paused_streamed_and_cancelled() -> None:
     assert set(final["trial_counts"]) == {"cancelled"}
     assert prioritised.json()["record"]["controls"] == {"paused": False, "priority": 2}
     assert (missing.status_code, missing.json()["detail"]["code"]) == (404, "experiment.not_found")
+
+
+def test_constraints_shrink_the_grid_and_survive_storage(tmp_path: Path) -> None:
+    # 로드맵 M6: 제약을 어긴 칸은 실행하지 않고(미리 계산의 조합·실행·새 시도 수가 함께 준다),
+    # 저장한 설계를 다시 읽어도 제약이 남는다.
+    client = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
+    request = _experiment(client) | {
+        "constraints": [{"left": "scale", "operator": "gt", "right_value": -1.0}]
+    }
+
+    preview = client.post("/api/v1/experiments/preview", json=request)
+    assert preview.status_code == 200, preview.text
+    assert {
+        key: preview.json()[key] for key in ("combination_count", "run_count", "trial_count_after")
+    } == {"combination_count": 2, "run_count": 4, "trial_count_after": 2}
+
+    created = client.post("/api/v1/experiments", json=request)
+    assert created.status_code == 202, created.text
+    experiment_id = created.json()["record"]["experiment_id"]
+    trials = client.get(f"/api/v1/experiments/{experiment_id}/trials").json()
+    assert sorted({trial["trial"]["parameter_values"]["scale"] for trial in trials}) == [0.0, 1.0]
+    assert len(trials) == 4
+    # 첫 앱의 실험 스레드가 끝난 뒤 같은 파일을 새 앱으로 다시 연다.
+    # 도는 중에 열면 두 앱이 경합한다.
+    _wait_until_finished(client, experiment_id)
+    reread = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
+    stored = reread.get(f"/api/v1/experiments/{experiment_id}").json()
+    assert stored["record"]["design"]["search"]["constraints"] == [
+        {"left": "scale", "operator": "gt", "right_parameter": None, "right_value": -1.0}
+    ]
+
+
+def test_a_constraint_on_an_unsearched_parameter_is_rejected(tmp_path: Path) -> None:
+    client = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
+    request = _experiment(client) | {
+        "search": {},
+        "constraints": [{"left": "scale", "operator": "gt", "right_value": 0.0}],
+    }
+    response = client.post("/api/v1/experiments/preview", json=request)
+    assert response.status_code == 422, response.text
+    assert "experiment.search.invalid_constraint" in response.text

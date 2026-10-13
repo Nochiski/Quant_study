@@ -1,3 +1,4 @@
+import { metadataCoherence } from "./metadata-coherence";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
@@ -23,7 +24,6 @@ import type {
 import {
   buildCompletionSource,
   buildHoverSource,
-  factorCatalogCoherence,
   projectAssistMetadata,
   type AssistDeps,
 } from "./schema-assist";
@@ -106,11 +106,11 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     factors.isPending;
   const schemaVersion = schema.data?.schema_version ?? null;
   const runtimeSchema = (schemaData as JsonSchema | undefined) ?? null;
-  const snippetCoherence = factorCatalogCoherence(
-    schema.data ?? null,
-    contract.data ?? null,
-    factors.data ?? null,
-  );
+  const snippetCoherence = metadataCoherence({
+    schema: schema.data ?? null,
+    contract: contract.data ?? null,
+    factorCatalog: factors.data ?? null,
+  }).factorRegistry;
   const snippetSource = useMemo<SnippetCatalogSource>(
     () => ({
       schema: assistMetadata.schema,

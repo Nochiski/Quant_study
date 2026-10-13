@@ -1,3 +1,4 @@
+import { metadataCoherence } from "./metadata-coherence";
 import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 
@@ -10,7 +11,6 @@ import {
 } from "../../../shared/api";
 import { valueAtPointer } from "../../../shared/lib/yaml12";
 import {
-  isSchemaContractCompatible,
   type ContractInspectorSource,
 } from "./contract-inspector";
 import { currentSpec, isSpecStale, type DocumentState } from "./document-state";
@@ -106,7 +106,8 @@ export const prepareExecutionPlans = (
       ? { status: "metadata-loading" }
       : { status: "metadata-unavailable" };
   }
-  if (!isSchemaContractCompatible(source.schema, source.contract)) {
+  const coherence = metadataCoherence(source);
+  if (coherence.schemaContract !== "ready") {
     return {
       status: "incompatible",
       resource: "schema-contract",
@@ -135,7 +136,7 @@ export const prepareExecutionPlans = (
   }
   const contract = source.contract.contract;
   const datasetVersion = source.equityCatalog.snapshot.snapshot_id;
-  if (datasetVersion !== contract.dataset_snapshot_id) {
+  if (coherence.dataset !== "ready") {
     return {
       status: "incompatible",
       resource: "dataset",
@@ -144,7 +145,7 @@ export const prepareExecutionPlans = (
     };
   }
   const registryVersion = source.factorCatalog.registry_version;
-  if (registryVersion !== contract.factor_registry_version) {
+  if (coherence.factorRegistry !== "ready") {
     return {
       status: "incompatible",
       resource: "factor-registry",

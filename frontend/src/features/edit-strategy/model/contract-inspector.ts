@@ -1,3 +1,4 @@
+import { metadataCoherence } from "./metadata-coherence";
 /**
  * Read-only Contract Inspector projection.
  *
@@ -146,18 +147,6 @@ export type ContractInspectorProjection =
         contractHash: string;
       };
     };
-
-/** One compatibility decision shared by every schema + contract consumer. */
-export const isSchemaContractCompatible = (
-  schema: StrategyDocumentSchema | null | undefined,
-  contract: StrategyDocumentContractResponse | null | undefined,
-): boolean =>
-  schema !== null &&
-  schema !== undefined &&
-  contract !== null &&
-  contract !== undefined &&
-  schema.schema_hash === contract.contract.schema_hash &&
-  schema.schema_version === contract.contract.schema_version;
 
 export const valueAt = valueAtPointer;
 
@@ -369,7 +358,7 @@ const catalogProjection = (
         expectedVersion,
         actualVersion,
       };
-    if (actualVersion !== expectedVersion)
+    if (metadataCoherence(source).dataset !== "ready")
       return {
         kind: "equity-field",
         status: "mismatch",
@@ -402,7 +391,7 @@ const catalogProjection = (
           status: "ready",
           id,
           expectedVersion,
-          actualVersion,
+          actualVersion: source.equityCatalog.snapshot.snapshot_id,
           field: match,
           snapshot: source.equityCatalog!.snapshot,
         }
@@ -434,7 +423,7 @@ export const projectContractInspector = (
       ? { status: "loading" }
       : { status: "unavailable" };
   }
-  if (!isSchemaContractCompatible(source.schema, source.contract)) {
+  if (metadataCoherence(source).schemaContract !== "ready") {
     return {
       status: "incompatible",
       schemaHash: source.schema.schema_hash,

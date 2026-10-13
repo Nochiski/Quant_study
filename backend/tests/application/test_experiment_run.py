@@ -62,6 +62,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
     TrialLedger,
     TrialLedgerEntry,
     representative_sharpe,
+    span_days,
     summarize_trial_ledger,
     trial_key,
 )
@@ -1551,3 +1552,77 @@ def test_cancel_retries_unfinished_cleanup_after_a_port_failure(failure: str) ->
     assert clock_reads == 1
     assert all(state is RunStatus.CANCELLED for state in runs.run_statuses.values())
     assert runs.cancelled == [(f"run-{index}", experiment_id) for index in range(4)]
+
+
+def test_the_remaining_time_counts_unfinished_trials_and_unvalidated_windows() -> None:
+    """로드맵 M6 ETA: 끝나지 않은 trial 의 학습 구간과 검증이 끝나지 않은 창의 검증 구간을, 계열의
+    근거 실행(하루 구간에 10초)으로 늘려 더한다. 취소하면 남은 실행이 없다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    assert service.remaining_time(service.create(_request()).record.experiment_id) is None
+
+    runs.ledger_entries.append(
+        TrialLedgerEntry(
+            "timed",
+            "f" * 64,
+            RunStatus.COMPLETED,
+            _AT,
+            _AT + timedelta(seconds=10),
+            started_at=_AT,
+            start=date(2021, 1, 4),
+            end=date(2021, 1, 4),
+        )
+    )
+    record = service.create(_request()).record
+    trials = record.design.trials()
+    windows = record.design.windows
+
+    def seconds(spans: list[int]) -> float:
+        return sum(10.0 * span for span in spans)
+
+    train = [span_days(t.window.train_start, t.window.train_end) for t in trials if t.window]
+    tests = [span_days(w.test_start, w.test_end) for w in windows]
+    first = service.remaining_time(record.experiment_id)
+    assert first is not None and first.sample_count == 1
+    assert first.total_seconds == pytest.approx(seconds(train + tests))
+
+    # 앞 실험의 trial 이 run-0..3 이라 이 실험의 첫 trial 은 run-4 다.
+    runs.run_statuses["run-4"] = RunStatus.COMPLETED
+    after = service.remaining_time(record.experiment_id)
+    assert after is not None
+    assert after.total_seconds == pytest.approx(seconds(train[1:] + tests))
+
+    service.cancel(record.experiment_id)
+    cancelled = service.remaining_time(record.experiment_id)
+    assert cancelled is not None and cancelled.total_seconds == 0
+
+
+def test_a_window_stops_counting_once_its_validation_run_finishes() -> None:
+    """학습이 끝나 고른 창도 검증 실행이 끝나기 전에는 남은 시간에 든다."""
+    runs = _FakeRuns()
+    runs.ledger_entries.append(
+        TrialLedgerEntry(
+            "timed",
+            "f" * 64,
+            RunStatus.COMPLETED,
+            _AT,
+            _AT + timedelta(seconds=10),
+            started_at=_AT,
+            start=date(2021, 1, 4),
+            end=date(2021, 1, 4),
+        )
+    )
+    service = _service(runs)
+    record = service.create(_request()).record
+    windows = record.design.windows
+    _finish(runs, {f"run-{index}": _result(1.0) for index in range(4)})
+    service.advance(record.experiment_id)
+
+    # 학습 trial 은 모두 끝났고, 창마다 검증 실행(run-4·run-5)이 돈다.
+    tests = [span_days(w.test_start, w.test_end) for w in windows]
+    both = service.remaining_time(record.experiment_id)
+    assert both is not None and both.total_seconds == pytest.approx(10.0 * sum(tests))
+
+    runs.run_statuses["run-4"] = RunStatus.COMPLETED
+    one = service.remaining_time(record.experiment_id)
+    assert one is not None and one.total_seconds == pytest.approx(10.0 * tests[1])

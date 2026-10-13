@@ -21,7 +21,12 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RunStatus,
     SavedRevisionReference,
 )
-from strategy_workbench.domain.backtest.facade.trials import bankrupt, preview_trial, trial_key
+from strategy_workbench.domain.backtest.facade.trials import (
+    bankrupt,
+    preview_trial,
+    span_days,
+    trial_key,
+)
 from strategy_workbench.domain.experiment.facade.design import (
     CellPlateau,
     ExperimentDesign,
@@ -635,6 +640,41 @@ class ExperimentRunService:
         oos = out_of_sample_sharpe(curve, self._registry, record.run.annualization_days)
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
         return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
+
+    def remaining_time(self, experiment_id: str) -> TimeEstimate | None:
+        """남은 실행을 차례로 돈다고 본 시간 어림(로드맵 M6 Experiment Monitor ETA, 규칙은
+        `estimate_time`). 도는 실행도 처음부터 도는 것처럼 센다 — 진행률이 시간에 비례하지 않아 길게
+        잡는다. 취소한 실험은 남은 실행이 없다. 계열에 시간을 잰 완료 실행이 없으면 None."""
+        record = self._repository.get(experiment_id)
+        spans: list[int] = []
+        if record.cancelled_at is None:
+            states = self._trial_states(record)
+            spans += [
+                span_days(*_train_range(record.run, state.trial))
+                for state in states
+                if not state.settled
+            ]
+            if record.design.walks_forward:
+                spans += [
+                    span_days(window.test_start, window.test_end)
+                    for window in self._unvalidated_windows(record)
+                ]
+        return estimate_time(self._runs.trial_ledger(record.run), spans)
+
+    def _unvalidated_windows(self, record: ExperimentRecord) -> list[WalkForwardWindow]:
+        """검증 실행이 아직 끝나지 않은 창 — 고르지 않았거나, 고른 칸의 검증 실행이 돌거나 복구를
+        기다린다. 고를 칸이 없었거나 거절된 창은 끝났다."""
+        picks = _latest_by_window(self._repository.picks(record.experiment_id))
+        runs = self._runs.states({pick.run_id for pick in picks.values() if pick.run_id})
+        pending: list[WalkForwardWindow] = []
+        for index, window in enumerate(record.design.windows):
+            pick = picks.get(index)
+            run = runs.get(pick.run_id) if pick is not None and pick.run_id else None
+            if pick is None or (
+                run is not None and (not run.status.is_terminal or awaiting_recovery(run))
+            ):
+                pending.append(window)
+        return pending
 
     def parameter_map(self, experiment_id: str) -> ParameterMap:
         """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03, 규칙은

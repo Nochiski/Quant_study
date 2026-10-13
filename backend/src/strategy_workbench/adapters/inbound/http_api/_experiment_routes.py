@@ -36,6 +36,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentError,
     ExperimentNotFoundError,
     ExperimentStateError,
+    TimeEstimate,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
@@ -272,6 +273,16 @@ def register_experiment_routes(
         return experiments.walk_forward(experiment_id)
 
     @app.get(
+        "/api/v1/experiments/{experiment_id}/remaining-time",
+        operation_id="getExperimentRemainingTime",
+        responses=rejected,
+    )
+    def get_experiment_remaining_time(experiment_id: str) -> TimeEstimate | None:
+        """남은 실행의 시간 어림(로드맵 M6 ETA). 실험 조회·진행 스트림과 따로 둔다 — 계열 원장을
+        읽어 목록·스트림 폴링마다 치르지 않게 한다. 근거가 없으면 null."""
+        return experiments.remaining_time(experiment_id)
+
+    @app.get(
         "/api/v1/experiments/{experiment_id}/parameter-map",
         operation_id="getExperimentParameterMap",
         responses=rejected,
@@ -471,9 +482,7 @@ class _ExperimentStreamHub:
         if cancelled:
             raise asyncio.CancelledError
 
-    async def _drain(
-        self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]
-    ) -> None:
+    async def _drain(self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]) -> None:
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
             # 저장소가 닫히기 전에 실제 스레드가 조회를 마칠 때까지 기다린다.

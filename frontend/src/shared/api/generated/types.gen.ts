@@ -8452,6 +8452,48 @@ export type GetExperimentParameterMapResponses = {
 export type GetExperimentParameterMapResponse =
   GetExperimentParameterMapResponses[keyof GetExperimentParameterMapResponses];
 
+export type GetExperimentRemainingTimeData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/remaining-time";
+};
+
+export type GetExperimentRemainingTimeErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentRemainingTimeError =
+  GetExperimentRemainingTimeErrors[keyof GetExperimentRemainingTimeErrors];
+
+export type GetExperimentRemainingTimeResponses = {
+  /**
+   * Response Getexperimentremainingtime
+   *
+   * Successful Response
+   */
+  200: TimeEstimate | null;
+};
+
+export type GetExperimentRemainingTimeResponse =
+  GetExperimentRemainingTimeResponses[keyof GetExperimentRemainingTimeResponses];
+
 export type SelectExperimentTrialData = {
   body: ExperimentSelectionRequest;
   path: {

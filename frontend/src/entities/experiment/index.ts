@@ -1,6 +1,7 @@
 export {
   EXPERIMENT_POLL_MS,
   experimentQuery,
+  experimentRemainingTimeQuery,
   experimentTrialsQuery,
   experimentWalkForwardQuery,
   experimentsKey,

@@ -137,6 +137,10 @@ const server = setupServer(
   http.get(`${API}/api/v1/experiments/:experimentId`, ({ params }) =>
     HttpResponse.json(experiment(String(params.experimentId), "completed")),
   ),
+  // 남은 시간 어림의 근거가 없는 계열(로드맵 M6 ETA). 모니터 테스트가 값을 덮어쓴다.
+  http.get(`${API}/api/v1/experiments/:experimentId/remaining-time`, () =>
+    HttpResponse.json(null),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/request`, ({ params }) =>
     HttpResponse.json(
       params.runId === "run-inline"
@@ -550,6 +554,43 @@ describe("experiments", () => {
       screen.getByRole("button", { name: "대기열에 넣기" }),
     ).toBeDisabled();
   });
+
+  // 초·분은 위로 올린다(어림이라 짧게 보이지 않게). 근거가 없으면 null 이고 안내를 보인다.
+  it.each([
+    [{ total_seconds: 3661, sample_count: 5 }, /^남은 시간 최대 약 1시간 2분/u],
+    [null, /^남은 시간은 이 전략 계열에 시간을 잰 완료 실행이 생기면/u],
+  ])(
+    "shows the backend remaining-time estimate %j while running",
+    async (estimate, text) => {
+      server.use(
+        http.get(`${API}/api/v1/experiments/:experimentId`, () =>
+          HttpResponse.json(experiment("e-run", "running")),
+        ),
+        http.get(`${API}/api/v1/experiments/:experimentId/trials`, () =>
+          HttpResponse.json([trialState(0, "running", null)]),
+        ),
+        http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
+          HttpResponse.json({
+            windows: [],
+            curve: [],
+            out_of_sample_sharpe: null,
+            retention: null,
+            gap: "pending",
+          }),
+        ),
+        http.get(
+          `${API}/api/v1/experiments/:experimentId/events`,
+          progressStream,
+        ),
+        http.get(`${API}/api/v1/experiments/:experimentId/remaining-time`, () =>
+          HttpResponse.json(estimate),
+        ),
+      );
+      mount("/research/experiments/e-run");
+
+      expect(await screen.findByText(text)).toBeInTheDocument();
+    },
+  );
 
   it("monitors trials, retries a failed one and reads again when the progress stream moves", async () => {
     let reads = 0;

@@ -141,6 +141,12 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     )
     assert estimate["sample_count"] == 5
     assert estimate["total_seconds"] >= longest > 0
+    # 끝난 실험은 남은 실행이 없다(로드맵 M6 ETA). 근거는 미리 계산과 같은 계열 원장이다.
+    remaining = client.get(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/remaining-time"
+    )
+    assert remaining.json() == {"total_seconds": 0.0, "sample_count": 5}
+    assert client.get("/api/v1/experiments/missing/remaining-time").status_code == 404
     listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
     assert [item["record"]["experiment_id"] for item in listed["items"]] == [
         experiment["record"]["experiment_id"]

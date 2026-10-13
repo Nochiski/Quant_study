@@ -1,4 +1,6 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCommittedRef } from "../../../shared/lib/react";
+import type { BacktestRequestOptions as BacktestRunOptions } from "../../../entities/backtest";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import {
   useStartBacktest,
@@ -33,10 +35,7 @@ export type RunBacktestStatus =
       values: Readonly<Record<string, string>>;
     };
 
-export type BacktestRunOptions = Omit<
-  BacktestRunSpec,
-  "strategy" | "strategy_source"
->;
+
 
 type DocumentIdentity = Pick<DocumentState, "documentEpoch" | "sourceVersion">;
 type RunOwner = DocumentIdentity & { optionsKey: string };
@@ -60,7 +59,7 @@ const sameOwner = (left: RunOwner, right: RunOwner): boolean =>
 export const useRunBacktest = (
   state: DocumentState,
   executionPlans: ExecutionPlansState,
-  options: BacktestRunOptions | null = {},
+  options: BacktestRunOptions | null,
 ) => {
   const navigate = useNavigate();
   const router = useRouter();
@@ -75,15 +74,8 @@ export const useRunBacktest = (
     }),
     [optionsKey, state.documentEpoch, state.sourceVersion],
   );
-  const latestOwner = useRef<RunOwner>(currentOwner);
+  const latestOwner = useCommittedRef(currentOwner);
   const activeRequest = useRef<symbol | null>(null);
-  useLayoutEffect(() => {
-    latestOwner.current = {
-      documentEpoch: state.documentEpoch,
-      sourceVersion: state.sourceVersion,
-      optionsKey,
-    };
-  }, [optionsKey, state.documentEpoch, state.sourceVersion]);
   const decision = useMemo(
     () =>
       gateBacktestSourceWithFactorPlans(
@@ -188,6 +180,7 @@ export const useRunBacktest = (
     isPending,
     mutateAsync,
     navigate,
+    latestOwner,
     optionsKey,
     request,
     router,

@@ -88,9 +88,9 @@ export type StrategyIdeProps = {
    */
   runEnvironment?: ReactNode;
   /** Strategy document outline projection (P4-01). */
-  outline?: ReactNode;
+  outline: ReactNode;
   /** P4-10 catalog UI; the P4-05 feature model owns schema projection and insertion. */
-  snippets?: ReactNode;
+  snippets: ReactNode;
   /** Editor toolbar actions (format / validate) rendered in the editor header. */
   editorActions?: ReactNode;
   /**
@@ -112,10 +112,10 @@ export type StrategyIdeProps = {
   onViewChange?: (view: SourceView) => void;
   /** Views the caller can render; the rest are shown disabled. */
   availableViews?: readonly SourceView[];
-  /** Contract Inspector slot (P4); placeholder until then. */
-  inspector?: ReactNode;
-  /** Intermediate Debugger slot (P5); placeholder until then. */
-  debugger?: ReactNode;
+  /** 계약 검사 슬롯. */
+  inspector: ReactNode;
+  /** 실제 중간 결과 슬롯. */
+  debugger: ReactNode;
   /**
    * 우측 AI 어시스턴트 사이드바 슬롯(B-04). 넘기지 않으면 패널도 토글도 만들지 않는다 — 어시스턴트를
    * 붙이지 않은 화면의 배치는 그대로다. 내용은 페이지가 주입한다(widget은 채팅을 알지 않는다).
@@ -619,9 +619,7 @@ export const StrategyIde = ({
           {t("ide.collapseInspector")}
         </Button>
       </header>
-      {inspector ?? (
-        <p className="ide__outline-placeholder">{t("ide.placeholder")}</p>
-      )}
+      {inspector}
     </aside>
   );
 
@@ -647,7 +645,7 @@ export const StrategyIde = ({
           {t("ide.collapseDebugger")}
         </Button>
       </header>
-      {debuggerPanel ?? <DebuggerPlaceholder />}
+      {debuggerPanel}
     </section>
   );
 
@@ -883,29 +881,11 @@ export const StrategyIde = ({
                 {t("ide.collapseOutline")}
               </Button>
             </header>
-            {outline ?? (
-              <p className="ide__outline-placeholder">{t("ide.placeholder")}</p>
-            )}
+            {outline}
           </nav>
           <section className="ide__snippets" aria-label={t("ide.snippets")}>
             <h2 className="ide__snippets-title">{t("ide.snippets")}</h2>
-            {snippets ?? (
-              <ul className="ide__snippet-list">
-                {(["field", "transform", "risk"] as const).map((snippet) => (
-                  <li key={snippet}>
-                    <button type="button" className="ide__snippet" disabled>
-                      <span aria-hidden="true">
-                        {snippet === "transform" ? "ƒx" : "▢"}
-                      </span>
-                      <span>{t(`ide.snippet.${snippet}`)}</span>
-                      <span className="ide__snippet-plus" aria-hidden="true">
-                        +
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            {snippets}
           </section>
         </div>
         {layout.outlineOpen ? (
@@ -1062,134 +1042,6 @@ export const StrategyIde = ({
         commands={commands}
         onClose={() => setPaletteOpen(false)}
       />
-    </div>
-  );
-};
-
-
-const RESULT_TABS = [
-  { id: "preview", label: t("ide.debugger.tab.preview") },
-  { id: "exposure", label: t("ide.debugger.tab.exposure") },
-  { id: "orders", label: t("ide.debugger.tab.orders") },
-  { id: "exclusions", label: t("ide.debugger.tab.exclusions") },
-  { id: "plan", label: t("ide.debugger.tab.plan") },
-] as const;
-
-type ResultTab = (typeof RESULT_TABS)[number]["id"];
-
-const SAMPLE_ROWS = [
-  ["삼성전자", "7.4%", "5.0%", "-2.4%", "Clipped", "warn"],
-  ["SK하이닉스", "4.2%", "4.2%", "0.0%", "OK", "ok"],
-  ["LG에너지솔루션", "3.1%", "3.1%", "0.0%", "OK", "ok"],
-  ["현대차", "2.8%", "2.8%", "0.0%", "OK", "ok"],
-  ["POSCO홀딩스", "2.6%", "2.6%", "0.0%", "OK", "ok"],
-] as const;
-
-/** Shape of the concept's intermediate-results panel; real values arrive with P5. */
-const DebuggerPlaceholder = () => {
-  const idBase = useId();
-  const [tab, setTab] = useState<ResultTab>("preview");
-  return (
-    <div className="ide__results">
-      <div className="ide__results-summary">
-        <button type="button" className="ide__selector" disabled>
-          <span aria-hidden="true">▤</span> <code>/risk/max_name_weight</code> ·
-          2026-08-31
-          <span aria-hidden="true"> ▾</span>
-        </button>
-        <p className="ide__before-after">
-          <span>
-            {t("ide.debugger.before")}{" "}
-            <strong className="ide__value--warn">7.4%</strong>
-          </span>
-          <span aria-hidden="true">⟶</span>
-          <span>
-            {t("ide.debugger.after")}{" "}
-            <strong className="ide__value--ok">5.0%</strong>
-          </span>
-        </p>
-        <div className="ide__card">
-          <span>{t("ide.placeholder")}</span>
-        </div>
-        <p className="text-small ide__sample-note">{t("ide.placeholder")}</p>
-      </div>
-      <div className="ide__results-table">
-        <Tabs
-          label={t("ide.debugger")}
-          items={RESULT_TABS}
-          value={tab}
-          onChange={setTab}
-          idBase={idBase}
-        />
-        {RESULT_TABS.map((item) => (
-          <div
-            key={item.id}
-            id={panelId(idBase, item.id)}
-            role="tabpanel"
-            aria-labelledby={tabId(idBase, item.id)}
-            hidden={item.id !== tab}
-          >
-            {item.id === "preview" ? (
-              <table className="ide__table">
-                <caption className="ide__sample-note">
-                  {t("ide.placeholder")}
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">{t("ide.debugger.security")}</th>
-                    <th scope="col">{t("ide.debugger.computedWeight")}</th>
-                    <th scope="col">{t("ide.debugger.afterCap")}</th>
-                    <th scope="col">{t("ide.debugger.difference")}</th>
-                    <th scope="col">{t("ide.debugger.status")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {SAMPLE_ROWS.map(
-                    ([name, computed, after, diff, status, tone]) => (
-                      <tr
-                        key={name}
-                        className={
-                          tone === "warn" ? "ide__row--warn" : undefined
-                        }
-                      >
-                        <td>{name}</td>
-                        <td
-                          className={
-                            tone === "warn" ? "ide__value--warn" : undefined
-                          }
-                        >
-                          {computed}
-                        </td>
-                        <td
-                          className={
-                            tone === "warn" ? "ide__value--warn" : undefined
-                          }
-                        >
-                          {after}
-                        </td>
-                        <td
-                          className={
-                            tone === "warn" ? "ide__value--warn" : undefined
-                          }
-                        >
-                          {diff}
-                        </td>
-                        <td>
-                          <Badge tone={tone === "warn" ? "warn" : "ok"}>
-                            {status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ),
-                  )}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-small">{t("ide.placeholder")}</p>
-            )}
-          </div>
-        ))}
-      </div>
     </div>
   );
 };

@@ -41,6 +41,15 @@ impl BuyingPower {
         self.leverage * self.equity - self.gross
     }
 
+    #[getter]
+    pub(crate) fn leverage(&self) -> f64 {
+        self.leverage
+    }
+
+    pub(crate) fn mark_of(&self, key: &str) -> Option<f64> {
+        self.marks.get(key).copied()
+    }
+
     pub(crate) fn quantity_of(&self, key: &str) -> i64 {
         *self.quantities.get(key).unwrap_or(&0)
     }

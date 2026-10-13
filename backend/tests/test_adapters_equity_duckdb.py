@@ -152,8 +152,12 @@ ALL_FIELDS = (
     "consensus.recommendation",
     "consensus.analyst_count",
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",
@@ -492,6 +496,18 @@ def test_declarations_their_query_does_not_read_are_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("source_name", ["adj", "credit"])
+@pytest.mark.parametrize("field_count", [0, 2])
+def test_가림_표시_원천은_필드_하나만_선언한다(source_name: str, field_count: int) -> None:
+    original = next(spec for spec in FIELD_SPECS if spec.source == source_name)
+    fields = tuple(spec for spec in FIELD_SPECS if spec.source != source_name)
+    fields += tuple(
+        replace(original, field_id=f"test.masked_{index}") for index in range(field_count)
+    )
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{source_name}']")):
+        _reject_unread_declarations(SOURCE_SPECS, fields)
+
+
 # ── RawObservationPort ────────────────────────────────────────────────────────
 
 
@@ -599,20 +615,20 @@ def test_a_field_the_ledger_carries_but_this_adapter_does_not_serve_says_so(
 ) -> None:
     """원장 `dataset_profile` 에 있는데 내주지 않는 필드를 "원장이 싣지 않는다"고 하지 않는다(#373).
 
-    실원장은 `flow.foreign_ownership`·`classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
+    실원장은 `classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
     읽은 `dataset_profile` 이다.
     """
-    rows = [*WB_PROFILE_ROWS, ("flow.foreign_ownership", lag, "원장 날짜")]
+    rows = [*WB_PROFILE_ROWS, ("classification.sector", lag, "원장 날짜")]
     adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity", profile_rows=rows))
 
     reasons = adapter.unavailable_factor_fields()
 
-    assert reasons["flow.foreign_ownership"] == FIELD_NOT_PROVIDED
+    assert reasons["classification.sector"] == FIELD_NOT_PROVIDED
     assert reasons["credit.loan_value"] == FIELD_NOT_IN_LEDGER
-    result = _raw(adapter, fields=("flow.foreign_ownership",))
+    result = _raw(adapter, fields=("classification.sector",))
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert result.detail is not None and FIELD_NOT_PROVIDED in result.detail
-    assert "flow.foreign_ownership" not in {p.field_id for p in adapter.list_fields()}
+    assert "classification.sector" not in {p.field_id for p in adapter.list_fields()}
 
 
 def test_queries_outside_calendar_coverage_are_no_data(
@@ -1357,7 +1373,7 @@ def test_backtest_dataset_reads_roots_without_the_basis_column(
         BacktestDataQuery(date(2024, 1, 11), date(2024, 1, 12), ("005930:1",), None)
     )
     assert [b.session for b in dataset.bars] == [date(2024, 1, 11), date(2024, 1, 12)]
-    assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
+    assert dataset.warnings == ()
 
 
 def test_backtest_dataset_refuses_unknown_and_index_ids(

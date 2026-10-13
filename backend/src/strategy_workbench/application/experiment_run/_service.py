@@ -85,7 +85,6 @@ logger = logging.getLogger(__name__)
 # 제출 스레드가 워크포워드를 밀어 주는 간격(초). 창의 학습이 끝나면 늦어도 이만큼 뒤 검증 실행이
 # 뜬다.
 _POLL_SECONDS = 2.0
-_SETTLED_RUNS = (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
 
 
 @dataclass(frozen=True)
@@ -338,8 +337,9 @@ class ExperimentRunService:
 
         이미 완료한 실험은 `experiment.cancel.completed` 로 거절한다 — 목록이 아직 도는 것으로 보인
         틈에 누른 취소가 결과가 다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은
-        `experiment_status` 다. 취소한 실험을 다시 취소하면 그대로 돌려준다.
+        `experiment_status` 다. 재요청은 취소 시각을 보존하고 남은 실행 정리만 다시 시도한다.
         """
+        run_ids: dict[str, None] = {}
         with self._lock:
             record = self._repository.get(experiment_id)
             if (
@@ -352,13 +352,21 @@ class ExperimentRunService:
                 )
             if record.cancelled_at is None:
                 self._repository.cancel(experiment_id, cancelled_at=self._now())
-                self._cancelled.add(experiment_id)
-                for run in (
-                    *self._repository.attempts(experiment_id),
-                    *self._repository.picks(experiment_id),
-                ):
-                    if run.run_id is not None:
-                        self._runs.cancel(run.run_id, owner=experiment_id)
+            self._cancelled.add(experiment_id)
+            for run in (
+                *self._repository.attempts(experiment_id),
+                *self._repository.picks(experiment_id),
+            ):
+                if run.run_id is not None:
+                    run_ids[run.run_id] = None
+        # 취소 표식은 한 번만 기록하고 실행 정리는 매 요청 재시도한다. 표식 뒤 상태 조회나 일부
+        # 취소가 실패해도 남은 run을 잃지 않는다. 이후 제출·재시도는 거절되므로 느린 실행
+        # 취소는 다른 실험을 막지 않게 락 밖에서 한다. 끝난 실행은 일괄 상태로 걸러 낸다.
+        states = self._runs.states(run_ids) if run_ids else {}
+        for run_id in run_ids:
+            state = states.get(run_id)
+            if state is not None and not state.status.is_terminal:
+                self._runs.cancel(run_id, owner=experiment_id)
         return self.get(experiment_id)
 
     def retry(self, experiment_id: str, trial_index: int) -> ExperimentTrialState:
@@ -686,7 +694,7 @@ class ExperimentRunService:
             run = runs.get(pick.run_id) if pick is not None and pick.run_id else None
             if pick is None or awaiting_recovery(run):
                 open_windows.append((index, window_states, pick))
-            elif run is not None and run.status not in _SETTLED_RUNS:
+            elif run is not None and not run.status.is_terminal:
                 waiting = True
         return open_windows, waiting
 

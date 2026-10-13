@@ -333,3 +333,42 @@ def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
 
     assert orphan.exists()
     assert "orphan run artifact staging not removed — name=.run-locked.0123abcd.tmp" in caplog.text
+
+
+def test_order_diagnostic_records_survive_artifact_codec_and_distinguish_empty_history(
+    tmp_path: Path,
+) -> None:
+    from strategy_workbench.domain.backtest.facade.runs import RawOrderUpdate
+
+    original = _result()
+    update = RawOrderUpdate(
+        date(2026, 1, 5), "o-1", "open", "source detail", "liquidity_cap_zero", 0
+    )
+    result = replace(original, artifacts=replace(original.artifacts, order_updates=(update,)))
+    store = LocalArtifactStore(tmp_path)
+    committed = store.commit(result)
+    decoded = store.load(result.manifest.run_id, sha256=committed.sha256)
+    assert decoded.artifacts.order_updates is not None
+    assert decoded.artifacts.order_updates == (update,)
+    assert decoded.artifacts.order_updates[0].cap_volume == 0
+
+    empty = replace(
+        result,
+        manifest=replace(result.manifest, run_id="empty-updates"),
+        artifacts=replace(result.artifacts, order_updates=()),
+    )
+    committed_empty = store.commit(empty)
+    assert store.load("empty-updates", sha256=committed_empty.sha256).artifacts.order_updates == ()
+
+
+@pytest.mark.parametrize("sell_tax", [2.75, 0.0, None])
+def test_fill_tax_survives_artifact_store_without_collapsing_legacy_absence(
+    tmp_path: Path, sell_tax: float | None
+) -> None:
+    result = _result()
+    fill = replace(result.artifacts.fills[0], side="sell", sell_tax=sell_tax)
+    result = replace(result, artifacts=replace(result.artifacts, fills=(fill,)))
+    store = LocalArtifactStore(tmp_path)
+    committed = store.commit(result)
+    decoded = store.load(result.manifest.run_id, sha256=committed.sha256)
+    assert decoded.artifacts.fills[0].sell_tax == sell_tax

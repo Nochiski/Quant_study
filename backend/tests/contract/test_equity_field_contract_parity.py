@@ -12,6 +12,7 @@ field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 g
 
 from __future__ import annotations
 
+import re
 from dataclasses import fields
 from pathlib import Path
 from typing import Any
@@ -58,7 +59,7 @@ EXPECTED_SHARED = frozenset(
 
 # 필드 계약 판에 닿는 dataclass 와 그 판에서 빠지는 문장 칸.
 _PROSE_BY_TYPE: dict[type, set[str]] = {
-    FieldSpec: {"label", "verdict", "description", "disclosure_basis", "evidence", "lag_basis"},
+    FieldSpec: {"label", "description", "disclosure_basis", "evidence", "lag_basis"},
     SourceSpec: {"lag_basis"},
     DatasetFieldProfile: {
         "label",
@@ -105,6 +106,48 @@ def test_공통_필드_집합이_비어_있지_않다() -> None:
         f"mock·duckdb 공통 필드가 기대 집합보다 작다 — missing={sorted(EXPECTED_SHARED - shared)} "
         f"shared={sorted(shared)}"
     )
+
+
+def test_원장_field_map_필드는_선언표나_미지원표_정확히_한쪽에_있다() -> None:
+    """원장이 field_map 으로 선언한 필드마다 어댑터가 내주거나, 내주지 않는 사유를 적는다(#373).
+
+    선언표 → 원장 방향만 보면 원장에 있는데 배선도 사유도 없는 필드가 조용히 남는다(도메인 리뷰 A
+    DR-A-07 의 세 필드).
+    """
+    ledger = {
+        profile.field_id for profile in _ledger_profiles().values() if profile.scope == "field_map"
+    }
+    declared, unsupported = set(FIELD_BY_ID), set(UNSUPPORTED_FIELDS)
+
+    assert sorted(ledger - declared - unsupported) == []
+    assert sorted(declared & unsupported) == []
+    assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
+
+
+# 사용자 설명에 새면 안 되는 개발 참조 — 이슈·문서 절·단계·결함 id, 백틱, 클래스 이름, 필드 id 가
+# 아닌 밑줄 식별자(표·열·상수 이름). 다른 필드 id(예: price.adj_close)는 사용자가 고르는 이름이다.
+_DEVELOPER_REFERENCE = re.compile(
+    r"#\d|§|\bS\d{2}\b|GAP-|DEFECT-|DESIGN|내부 스코프|`|\b[A-Z][a-z]+[A-Z]|(?<![.\w])[A-Za-z]+_\w"
+)
+# 설명은 뜻과 한계 몇 문장이다. 개발 근거는 `evidence` 나 선언 옆 주석에 둔다.
+_DESCRIPTION_MAX_CHARS = 240
+
+
+def test_필드_설명은_개발_참조_없는_짧은_사용자_문장이다() -> None:
+    """#373 DR-A-07: 계약 인스펙터·편집기 완성·AI `list_equity_fields` 가 설명을 그대로 보인다."""
+    descriptions = {
+        **{f"duckdb {spec.field_id}": spec.description for spec in FIELD_BY_ID.values()},
+        **{f"mock {field_id}": p.description for field_id, p in _mock_profiles().items()},
+    }
+    leaked = {
+        key: found
+        for key, text in descriptions.items()
+        if (found := _DEVELOPER_REFERENCE.findall(text))
+    }
+    too_long = {
+        key: len(text) for key, text in descriptions.items() if len(text) > _DESCRIPTION_MAX_CHARS
+    }
+    assert (leaked, too_long) == ({}, {})
 
 
 def test_mock_필드는_원장이_아는_id_만_쓴다() -> None:

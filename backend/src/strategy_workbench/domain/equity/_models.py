@@ -107,7 +107,6 @@ CONTRACT_PROSE_FIELDS = frozenset(
         "description",
         "evidence",
         "disclosure_basis",
-        "verdict",
         "lag_basis",
         "available_date_basis",
     }

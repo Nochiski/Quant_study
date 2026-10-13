@@ -275,6 +275,10 @@ def test_list_equity_fields_returns_the_port_catalog() -> None:
     returned = {str(row["id"]) for row in fields if isinstance(row, dict)}
     expected = {profile.field_id for profile in MockEquityDataAdapter.demo().list_fields()}
     assert returned == expected
+    assert {str(row["id"]): row["description"] for row in fields if isinstance(row, dict)} == {
+        profile.field_id: profile.description
+        for profile in MockEquityDataAdapter.demo().list_fields()
+    }
     summaries = [event for event in events if isinstance(event, ToolResultSummary)]
     assert [(item.call_id, item.name, item.ok) for item in summaries] == [
         ("call-1", LIST_EQUITY_FIELDS, True)

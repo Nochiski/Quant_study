@@ -578,6 +578,9 @@ describe("ContractInspector UI", () => {
     );
     expect(screen.getByText("데이터 필드 · PIT")).toBeInTheDocument();
     expect(screen.getByText("KRX daily close")).toBeInTheDocument();
+    expect(
+      screen.getByText(EQUITY_CATALOG.fields[0].description),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("dataset-snapshot-v1").length).toBeGreaterThan(
       0,
     );

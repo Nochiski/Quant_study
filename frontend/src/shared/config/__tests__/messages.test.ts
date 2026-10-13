@@ -39,6 +39,17 @@ describe("message catalog contract", () => {
     ).toBe(true);
   });
 
+  it("leaves per-field meaning to the backend field description", () => {
+    // 필드마다의 뜻·한계는 어댑터 필드 설명 한 곳이 싣는다. 사전 문장이 field_id 를 들어 원장·평가
+    // 규칙을 옮기면 규칙이 바뀔 때 이 사본만 옛 약속을 한다(#373 DR-A-05).
+    const fieldId =
+      /\b(?:price|financial|consensus|flow|short|credit|event|classification|benchmark)\.[a-z_]+/u;
+    const leaked = (Object.keys(messages.ko) as MessageKey[]).filter(
+      (key) => fieldId.test(messages.ko[key]) || fieldId.test(messages.en[key]),
+    );
+    expect(leaked).toEqual([]);
+  });
+
   it("does not ship obsolete phase placeholder copy", () => {
     const allCopy = [
       ...Object.values(messages.ko),

@@ -559,7 +559,7 @@ class BacktestRunService:
                 # 이 프로세스가 돌리지 않은 run 은 재시작 때 이미 종결됐다.
                 return _cancel_result(self.state(run_id), kept_by_owners=False)
             record.owners.discard(owner)
-            if record.state.status in _SETTLED:
+            if record.state.status.is_terminal:
                 return _cancel_result(record.state, kept_by_owners=False)
             if record.owners:
                 self._relane(record)
@@ -1085,7 +1085,7 @@ class BacktestRunService:
             saved = self._persist(record.state)
         # 종결이 저장된 run 만 사본을 버린다 — 저장하지 못한 run 의 사본을 버리면 저장소의 옛
         # 상태(`queued`·`running`)로 되돌아가 끝난 run 이 다시 도는 것처럼 보인다.
-        if status in _SETTLED and saved:
+        if status.is_terminal and saved:
             self._retire(record)
 
     def _retire(self, record: _RunRecord) -> None:
@@ -1119,9 +1119,8 @@ class BacktestRunService:
             raise RunCancelledError("run cancelled")
 
 
-# 끝난 run 상태 집합과, 메모리에 사본을 남기는 최근 끝난 run 수. 이보다 오래 끝난 run 은
+# 메모리에 사본을 남기는 최근 끝난 run 수. 이보다 오래 끝난 run 은
 # 저장소에서 읽고 진행 이벤트는 비어 있다.
-_SETTLED = (RunStatus.COMPLETED, RunStatus.CANCELLED, RunStatus.FAILED)
 _FINISHED_RECORDS_KEPT = 256
 
 

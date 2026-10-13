@@ -17,6 +17,7 @@ mod feed;
 mod persistent;
 mod persistent_router;
 mod portfolio;
+mod power_projection;
 mod quote;
 mod records;
 mod session;

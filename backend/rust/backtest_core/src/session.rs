@@ -261,6 +261,7 @@ impl<'a> Session<'a> {
             self.power.leverage(),
             self.power.mark_of(&e.key),
             Some(self.power.valuation()),
+            Some(self.power.execution_state(&e.key)),
         )?;
         Ok(QuoteOut {
             price: p,
@@ -289,6 +290,7 @@ impl<'a> Session<'a> {
             self.power.leverage(),
             self.power.mark_of(&e.key),
             Some(self.power.valuation()),
+            Some(self.power.execution_state(&e.key)),
         )?;
         let mut result = quote.clone();
         if fitted < quantity {
@@ -360,7 +362,7 @@ impl<'a> Session<'a> {
         // 최종 체결의 세금을 한 번 확정해 여력과 체결 기록에 함께 전달한다.
         let tax = sell_tax(&e.side, quantity, q.price, self.sell_tax_rate);
         self.power
-            .consume(&e.key, &e.side, quantity, q.price, fee + tax)?;
+            .consume(&e.key, &e.side, quantity, q.price, fee, tax)?;
         self.ops.push((
             "fill".into(),
             e.order_id.clone(),

@@ -1,4 +1,5 @@
 use crate::buying_power::project_valuation;
+use crate::power_projection::{project_execution, ExecutionState};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -63,7 +64,7 @@ pub(crate) fn liquidity_cap(volume: i64, participation: &str) -> PyResult<i64> {
 /// `filled | liquidity_limited | cash_limited | rejected_no_cash | not_filled | fok_rejected`.
 /// 흐름은 Python과 같다: 유동성 캡 → 슬리피지·지정가 clip → 여력 캡(숏 진입분 포함) → FOK.
 #[pyfunction]
-#[pyo3(signature = (side, base_price, remaining, volume, participation, slip, limit_price, buying_power, held, fee_rate, fok, sell_tax_rate=0.0, leverage=1.0, held_mark=None, valuation=None))]
+#[pyo3(signature = (side, base_price, remaining, volume, participation, slip, limit_price, buying_power, held, fee_rate, fok, sell_tax_rate=0.0, leverage=1.0, held_mark=None, valuation=None, execution_state=None))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn quote_numbers(
     side: &str,
@@ -81,6 +82,7 @@ pub(crate) fn quote_numbers(
     leverage: f64,
     held_mark: Option<f64>,
     valuation: Option<(f64, f64)>,
+    execution_state: Option<ExecutionState>,
 ) -> PyResult<(f64, i64, f64, String)> {
     let buy = match side {
         "buy" => true,
@@ -129,22 +131,38 @@ pub(crate) fn quote_numbers(
     }
 
     let closing = if buy { (-held).max(0) } else { held.max(0) };
-    if quantity > closing {
+    if quantity > closing || execution_state.is_some() {
         let (equity, gross) = valuation.unwrap_or((buying_power / leverage, 0.0));
         let mark = held_mark.unwrap_or(price);
-        let (mut low, mut high) = (closing, quantity);
+        let (mut low, mut high) = (
+            if execution_state.is_some() {
+                0
+            } else {
+                closing
+            },
+            quantity,
+        );
         while low < high {
             let candidate = low + (high - low) / 2 + (high - low) % 2;
             let notional = candidate as f64 * price;
-            let cost = notional * fee_rate + if buy { 0.0 } else { notional * sell_tax_rate };
+            let fee = notional * fee_rate;
+            let tax = if buy { 0.0 } else { notional * sell_tax_rate };
             let new = if buy {
                 held + candidate
             } else {
                 held - candidate
             };
-            let (after_equity, after_gross) =
-                project_valuation(equity, gross, held, new, mark, price, cost);
-            if leverage * after_equity - after_gross >= 0.0 {
+            let feasible = if let Some(state) = &execution_state {
+                let (cash, after_equity, after_gross) =
+                    project_execution(state, buy, candidate, price, fee, tax, new, price);
+                (state.3 || cash >= 0.0)
+                    && (candidate <= closing || leverage * after_equity - after_gross >= 0.0)
+            } else {
+                let (after_equity, after_gross) =
+                    project_valuation(equity, gross, held, new, mark, price, fee + tax);
+                leverage * after_equity - after_gross >= 0.0
+            };
+            if feasible {
                 low = candidate;
             } else {
                 high = candidate - 1;
@@ -175,6 +193,55 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn execution_cash_boundary_matches_ledger_without_tolerance() {
+        for (cash, expected) in [(300.03, 2), (f64::from_bits(300.03_f64.to_bits() + 1), 3)] {
+            let result = quote_numbers(
+                "buy",
+                100.0,
+                3,
+                100,
+                None,
+                0.0,
+                None,
+                cash,
+                0,
+                0.0001,
+                false,
+                0.0,
+                1.0,
+                None,
+                Some((cash, 0.0)),
+                Some((cash, vec![], 0, false)),
+            )
+            .unwrap();
+            assert_eq!(result.1, expected);
+        }
+        // MARGIN 기능과 L=1은 별개다. 기존 노출 감소 청산의 음수 현금 허용을 보존한다.
+        for (allow_margin, expected) in [(false, 0), (true, 1)] {
+            let result = quote_numbers(
+                "buy",
+                100.0,
+                1,
+                100,
+                None,
+                0.0,
+                None,
+                -199.0,
+                -1,
+                0.0,
+                false,
+                0.0,
+                1.0,
+                Some(100.0),
+                Some((-99.0, 100.0)),
+                Some((1.0, vec![-100.0], 0, allow_margin)),
+            )
+            .unwrap();
+            assert_eq!(result.1, expected);
+        }
+    }
 
     #[test]
     fn decimal_ratio_and_cap_are_exact_and_checked() {

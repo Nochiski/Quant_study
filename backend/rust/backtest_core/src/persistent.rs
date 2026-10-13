@@ -345,12 +345,18 @@ impl PersistentEngine {
         slippage: &(String, f64, f64),
         sell_tax_rate: f64,
     ) -> PyResult<Vec<Op>> {
-        let (_, positions, equity, _) = self.portfolio.snapshot()?;
+        let (cash, positions, equity, _) = self.portfolio.snapshot()?;
         let power_positions = positions
             .into_iter()
             .map(|row| (row.0, row.1, row.3, row.4))
             .collect();
-        let mut power = BuyingPower::new(equity, self.leverage, power_positions);
+        let mut power = BuyingPower::new(
+            equity,
+            self.leverage,
+            power_positions,
+            Some(cash),
+            self.portfolio.allow_margin,
+        );
         let entries = self.orders.iter().map(StoredOrder::as_tuple).collect();
         let groups = self
             .groups

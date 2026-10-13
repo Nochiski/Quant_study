@@ -95,8 +95,8 @@ impl<'a> Session<'a> {
                     &e.side,
                     q.quantity,
                     q.price,
-                    notional * self.fee_rate
-                        + sell_tax(&e.side, q.quantity, q.price, self.sell_tax_rate),
+                    notional * self.fee_rate,
+                    sell_tax(&e.side, q.quantity, q.price, self.sell_tax_rate),
                 )?;
             }
             quotes.push(q);

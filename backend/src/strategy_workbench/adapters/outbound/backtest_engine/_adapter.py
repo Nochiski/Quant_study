@@ -15,6 +15,7 @@ from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
+    OrderUpdateEvent,
     StrategyEvent,
 )
 from backtest_engine.types.instruments import AssetClass, InstrumentId
@@ -66,6 +67,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawCost,
     RawFill,
     RawOrder,
+    RawOrderUpdate,
     RawPosition,
     RawRounding,
     RawSnapshot,
@@ -322,10 +324,10 @@ class BacktestEngineExecutorAdapter:
             raise EquityWipedOutError(str(error)) from error
         self._check_cancelled(cancelled)
         progress(0.78, "Calculating professional metrics")
-        # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw
-        # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
+        # 대량 시세·체결은 columnar 테이블로 받고 주문 상태는 원본 이벤트 조회로 보존한다.
+        # 상태 사유는 adapter에서 문구를 해석하거나 다시 판정하지 않는다.
         tables = engine.event_store.result_tables()
-        artifacts, outcomes = _artifacts(tables)
+        artifacts, outcomes = _artifacts(tables, engine.event_store.order_updates())
         run_sessions = tuple(item.session for item in artifacts.snapshots)
         benchmark, carried = _benchmark_series(
             request.dataset, request.spec.initial_cash, run_sessions
@@ -649,7 +651,10 @@ def _base_rate_warnings(carried: Sequence[date]) -> tuple[DataWarning, ...]:
     )
 
 
-def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
+def _artifacts(
+    tables: ResultTables,
+    updates: Sequence[OrderUpdateEvent] | None = None,
+) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
     """엔진 결과 테이블을 워크벤치 raw artifact로 옮긴다.
 
     세션 날짜와 종목 코드는 행마다 다시 만들지 않는다 — position 행이 세션 × 보유 종목 수라
@@ -767,6 +772,27 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
         for item in trades
     )
     return (
-        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades, roundings),
+        RawArtifactBundle(
+            snapshots,
+            positions,
+            orders,
+            fills,
+            raw_costs,
+            trades,
+            roundings,
+            order_updates=None
+            if updates is None
+            else tuple(
+                RawOrderUpdate(
+                    item.ts.date(),
+                    item.order_id,
+                    item.status.value,
+                    item.detail,
+                    item.reason_code,
+                    item.cap_volume,
+                )
+                for item in updates
+            ),
+        ),
         outcomes,
     )

@@ -673,3 +673,31 @@ def test_missing_impact_inputs_warn_only_when_the_run_actually_fills(tmp_path: P
     (warning,) = (w for w in result.manifest.warnings if w.code == "cost.impact_scale_unavailable")
     first = result.artifacts.fills[0]
     assert f"{first.session.isoformat()}:{first.security_id}:return_history" in warning.message
+
+
+def test_zero_adv_cap_is_explained_by_original_order_updates(tmp_path: Path) -> None:
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+    runs = BacktestRunService(
+        _portfolio(),
+        InMemoryStrategyRepository(),
+        _NoWarmup(),
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
+        new_id=lambda: "zero-adv-cap",
+    )
+    runs.start(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=environment)
+    )
+    assert wait_for_terminal_run(runs, "zero-adv-cap").status.value == "completed"
+    result = runs.result("zero-adv-cap")
+    assert not result.artifacts.fills
+    assert result.artifacts.order_updates is not None
+    diagnosed = [
+        item for item in result.artifacts.order_updates if item.reason_code == "liquidity_cap_zero"
+    ]
+    assert diagnosed
+    assert all(item.cap_volume == 0 for item in diagnosed)
+    assert {item.order_id for item in diagnosed} <= {
+        item.order_id for item in result.artifacts.orders
+    }

@@ -163,6 +163,8 @@ pub(crate) struct OrderUpdateWire {
     pub(crate) order_id: String,
     pub(crate) status: String,
     pub(crate) detail: Option<String>,
+    pub(crate) reason_code: Option<String>,
+    pub(crate) cap_volume: Option<i64>,
 }
 
 impl OrderUpdateWire {
@@ -173,6 +175,8 @@ impl OrderUpdateWire {
                 self.order_id.as_str(),
                 self.status.as_str(),
                 self.detail.as_deref(),
+                self.reason_code.as_deref(),
+                self.cap_volume,
             ),
         )
     }

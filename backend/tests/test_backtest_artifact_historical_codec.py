@@ -649,3 +649,47 @@ def test_fixed_stored_request_preserves_strategy_identity_and_parameters() -> No
     assert request.parameter_values == {"weight": 1.0, "count": 25, "mode": True}
     assert request.environment is not None
     assert request.environment.start.isoformat() == "2021-01-01"
+
+
+def test_historical_taxed_sell_decodes_and_reconstructs_without_current_writer(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from strategy_workbench.domain.backtest.facade.trade_analytics import closed_trades
+
+    # 기존 고정 envelope에 구판 형태의 매도·세금 기록을 추가한다. 현재 writer는 호출하지 않는다.
+    document = json.loads(_V1_RESULT)
+    document["artifacts"]["fills"][0]["fee"] = 0.125
+    document["artifacts"]["fills"].append(
+        {
+            "fee": 0.25,
+            "fill_id": "f-2",
+            "order_id": "o-2",
+            "price": 40.0,
+            "quantity": "3",
+            "security_id": "KRX:005930",
+            "session": "2026-01-06",
+            "side": "sell",
+            "slippage_per_share": 0.0,
+        }
+    )
+    document["artifacts"]["costs"].append(
+        {
+            "amount": 2.0,
+            "kind": "sell_tax",
+            "security_id": "KRX:005930",
+            "session": "2026-01-06",
+        }
+    )
+    payload = json.dumps(document).encode()
+    directory = tmp_path / "run-safe-001"
+    directory.mkdir()
+    (directory / "result.json").write_bytes(payload)
+    result = LocalArtifactStore(tmp_path).load(
+        "run-safe-001", sha256=hashlib.sha256(payload).hexdigest()
+    )
+    assert [fill.sell_tax for fill in result.artifacts.fills] == [None, None]
+    (trade,) = closed_trades(result.artifacts.fills, result.artifacts.costs)
+    assert trade.fees == 2.375
+    assert trade.pnl == 27.625

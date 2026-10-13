@@ -333,3 +333,16 @@ def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
 
     assert orphan.exists()
     assert "orphan run artifact staging not removed — name=.run-locked.0123abcd.tmp" in caplog.text
+
+
+@pytest.mark.parametrize("sell_tax", [2.75, 0.0, None])
+def test_fill_tax_survives_artifact_store_without_collapsing_legacy_absence(
+    tmp_path: Path, sell_tax: float | None
+) -> None:
+    result = _result()
+    fill = replace(result.artifacts.fills[0], side="sell", sell_tax=sell_tax)
+    result = replace(result, artifacts=replace(result.artifacts, fills=(fill,)))
+    store = LocalArtifactStore(tmp_path)
+    committed = store.commit(result)
+    decoded = store.load(result.manifest.run_id, sha256=committed.sha256)
+    assert decoded.artifacts.fills[0].sell_tax == sell_tax

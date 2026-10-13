@@ -22,6 +22,22 @@ from strategy_workbench.domain.backtest.facade.runs import (
 from .trial_ledger import TrialLedgerPort
 
 
+class RetiredRunRequestError(RuntimeError):
+    """저장한 요청의 전략 schema 판을 이 서버가 더 읽지 않는다(#313).
+
+    옛 요청을 현재 판으로 올려 읽지 않는다 — 기록과 다른 전략이 다시 실행되지 않게 한다. 손상된
+    저장(무결성 실패)과 구별되는 영구 상태다.
+    """
+
+    def __init__(self, run_id: str, schema_version: object) -> None:
+        self.run_id = run_id
+        self.schema_version = schema_version
+        super().__init__(
+            "stored backtest request names a strategy schema this server no longer reads — "
+            f"run_id={run_id} schema_version={schema_version!r}"
+        )
+
+
 class BacktestRunNotFoundError(KeyError):
     pass
 

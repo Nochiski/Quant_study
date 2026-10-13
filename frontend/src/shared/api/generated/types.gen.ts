@@ -459,6 +459,27 @@ export type BacktestParameterInvalidDetail = {
 };
 
 /**
+ * BacktestRequestRetiredDetail
+ */
+export type BacktestRequestRetiredDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.request_retired";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestRequestRetiredResponse
+ */
+export type BacktestRequestRetiredResponse = {
+  detail: BacktestRequestRetiredDetail;
+};
+
+/**
  * BacktestResearchWindowViolationDetail
  *
  * 측정 시작일이 연구 구간 밖이다(spec D1).
@@ -7718,6 +7739,10 @@ export type GetBacktestRequestErrors = {
    * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
+  /**
+   * The stored request names a retired strategy schema
+   */
+  410: BacktestRequestRetiredResponse;
   /**
    * Validation Error
    */

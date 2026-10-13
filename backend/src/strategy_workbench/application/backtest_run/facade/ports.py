@@ -26,6 +26,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.run_repository i
     BacktestRunNotFoundError,
     BacktestRunRepositoryPort,
     BacktestRunSummary,
+    RetiredRunRequestError,
     RunKind,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
@@ -45,6 +46,7 @@ __all__ = [
     "BacktestExecutorPort",
     "BacktestArtifactUnreadableError",
     "BacktestRunNotFoundError",
+    "RetiredRunRequestError",
     "BacktestRunRepositoryPort",
     "BacktestRunSummary",
     "CancellationCheck",

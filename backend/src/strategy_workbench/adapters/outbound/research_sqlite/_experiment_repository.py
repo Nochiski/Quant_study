@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 
 from strategy_workbench.adapters.outbound.sqlite_store.facade.database import SqliteDatabase
 from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
+from strategy_workbench.application.backtest_run.facade.ports import RetiredRunRequestError
 from strategy_workbench.application.experiment_run.facade.ports import (
     ExperimentRecord,
     ExperimentSelection,
@@ -279,7 +280,7 @@ def _record(row: sqlite3.Row) -> ExperimentRecord:
             **{key: row[key] for key in _COLUMNS},
             "controls": controls,
         }
-    except (KeyError, TypeError, ValueError) as error:
+    except (KeyError, TypeError, ValueError, RetiredRunRequestError) as error:
         raise ResearchStorageError(
             f"stored experiment design is unreadable — experiment_id={row['experiment_id']}: "
             f"{error}"

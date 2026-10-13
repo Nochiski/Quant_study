@@ -30,6 +30,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunState,
     BacktestRunSummary,
     BacktestStartResponse,
+    RetiredRunRequestError,
     RunKind,
     TrialLedger,
     TrialLineageAlreadyMergedError,
@@ -135,6 +136,7 @@ from strategy_workbench.domain.strategy.facade.validation import StrategyValidat
 from ._assistant_routes import register_assistant_routes
 from ._backtest_contract import (
     Backtest422Response,
+    BacktestRequestRetiredResponse,
     BacktestResultNotReadyResponse,
     BacktestResultUnreadableResponse,
     BacktestRunNotFoundResponse,
@@ -535,7 +537,13 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}/request",
         operation_id="getBacktestRequest",
-        responses=_backtest_run_not_found_responses(),
+        responses={
+            **_backtest_run_not_found_responses(),
+            410: {
+                "model": BacktestRequestRetiredResponse,
+                "description": "The stored request names a retired strategy schema",
+            },
+        },
     )
     def get_backtest_request(run_id: str) -> BacktestRunSpec:
         """Expose the server-owned accepted assumptions for audit and exact reruns."""
@@ -544,6 +552,13 @@ def create_app(
             return backtest_runs.request(run_id)
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
+        except RetiredRunRequestError as error:
+            # 옛 판 요청을 현재 판으로 올려 내주지 않는다(#313).
+            # 기록과 다른 전략이 재실행되지 않게 한다.
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.run.request_retired", "message": str(error)},
+            ) from error
 
     @app.post(
         "/api/v1/backtests/{run_id}/cancel",

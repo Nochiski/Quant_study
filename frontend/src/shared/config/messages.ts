@@ -1670,6 +1670,8 @@ const ko = {
   "backtest.result.failedGeneric": "백테스트 결과를 불러올 수 없습니다.",
   "backtest.error.backtest.run.not_found":
     "이 실행을 찾을 수 없습니다. 백테스트 이력에서 다시 여세요.",
+  "backtest.error.backtest.run.request_retired":
+    "이 실행은 지금 서버가 읽지 않는 옛 전략 형식으로 저장돼 같은 설정으로 다시 실행할 수 없습니다. 전략을 업그레이드해 새로 실행하세요.",
   "backtest.error.backtest.result.not_ready":
     "이 실행은 아직 결과가 없습니다. 실행이 끝난 뒤 다시 여세요.",
   "backtest.error.backtest.result.unreadable":
@@ -3940,6 +3942,8 @@ export const messages = {
     "backtest.result.failedGeneric": "The backtest result could not be loaded.",
     "backtest.error.backtest.run.not_found":
       "This run was not found. Open it again from the backtest history.",
+    "backtest.error.backtest.run.request_retired":
+      "This run was saved in an older strategy format the server no longer reads, so it cannot be rerun with the same settings. Upgrade the strategy and run it again.",
     "backtest.error.backtest.result.not_ready":
       "This run has no result yet. Open it again after the run finishes.",
     "backtest.error.backtest.result.unreadable":

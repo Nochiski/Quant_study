@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import {
   backtestStartRejectionMessage,
   RUN_STATUS,
-  runEnvironmentFields,
   useCancelBacktest,
   useRunEnvironmentSchema,
   useStartBacktest,
@@ -52,12 +51,7 @@ export const BacktestRunActions = ({
       },
     });
   };
-  const schema = useRunEnvironmentSchema();
-  const environmentFields = useMemo(
-    () =>
-      schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
-    [schema.data],
-  );
+  const { environmentFields } = useRunEnvironmentSchema();
   const actionErrorDetail = failureReason(cancelError ?? replayError);
   // 재실행 거절은 시작 거절이다 — 편집기 툴바와 같은 문장 규칙(`backtestStartRejectionMessage`)을 쓴다.
   const replayRejection =

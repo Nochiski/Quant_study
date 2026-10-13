@@ -1,12 +1,11 @@
 import { RUN_STATUS, runStageLabel, runStatusLabel } from "../../../entities/backtest";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import {
   BacktestResultFailure,
   BacktestRunDetail,
   BacktestRunFailure,
-  runEnvironmentFields,
   useBacktestRequest,
   useBacktestSummary,
   useBacktestResult,
@@ -42,13 +41,7 @@ export const BacktestRunPage = () => {
   const result = useBacktestResult(runId, completed);
   // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
   const runEnvironmentSchema = useRunEnvironmentSchema();
-  const environmentFields = useMemo(
-    () =>
-      runEnvironmentSchema.data === undefined
-        ? null
-        : runEnvironmentFields(runEnvironmentSchema.data.schema),
-    [runEnvironmentSchema.data],
-  );
+  const environmentFields = runEnvironmentSchema.data === undefined ? null : runEnvironmentSchema.environmentFields;
   const assistantId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
   const [panel, setPanel] = useState<AssistantPanel>({

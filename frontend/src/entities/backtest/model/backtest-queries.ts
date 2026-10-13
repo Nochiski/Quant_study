@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   queryOptions,
   skipToken,
@@ -13,6 +14,7 @@ import {
   type RunKind,
 } from "../../../shared/api";
 
+import { runEnvironmentFields } from "./run-environment-fields";
 import { RUN_STATUS } from "./run-status";
 
 // 실행 상태 폴링 간격(#161). 짧은 run 은 곧 끝나므로 처음 몇 번은 빠르게, 그 뒤로는 1초마다 묻는다.
@@ -64,8 +66,14 @@ export const runEnvironmentSchemaQuery = () =>
     staleTime: 5 * 60_000,
   });
 
-export const useRunEnvironmentSchema = () =>
-  useQuery(runEnvironmentSchemaQuery());
+export const useRunEnvironmentSchema = () => {
+  const schema = useQuery(runEnvironmentSchemaQuery());
+  const environmentFields = useMemo(
+    () => schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
+    [schema.data],
+  );
+  return { ...schema, environmentFields };
+};
 
 const trialPreviewKey = () => ["backtest", "trial-preview"] as const;
 const trialLedgerKey = () => ["backtest", "trial-ledger"] as const;

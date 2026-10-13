@@ -348,6 +348,7 @@ def test_order_diagnostic_records_survive_artifact_codec_and_distinguish_empty_h
     store = LocalArtifactStore(tmp_path)
     committed = store.commit(result)
     decoded = store.load(result.manifest.run_id, sha256=committed.sha256)
+    assert decoded.artifacts.order_updates is not None
     assert decoded.artifacts.order_updates == (update,)
     assert decoded.artifacts.order_updates[0].cap_volume == 0
 

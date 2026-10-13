@@ -324,8 +324,8 @@ class BacktestEngineExecutorAdapter:
             raise EquityWipedOutError(str(error)) from error
         self._check_cancelled(cancelled)
         progress(0.78, "Calculating professional metrics")
-        # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw
-        # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
+        # 대량 시세·체결은 columnar 테이블로 받고 주문 상태는 원본 이벤트 조회로 보존한다.
+        # 상태 사유는 adapter에서 문구를 해석하거나 다시 판정하지 않는다.
         tables = engine.event_store.result_tables()
         artifacts, outcomes = _artifacts(tables, engine.event_store.order_updates())
         run_sessions = tuple(item.session for item in artifacts.snapshots)

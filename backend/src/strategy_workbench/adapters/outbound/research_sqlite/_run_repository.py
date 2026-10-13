@@ -36,7 +36,7 @@ from ._errors import ResearchStorageError
 from ._request_codec import decode_request, encode_request
 from ._schema import SCHEMA_VERSION, migrate_schema
 
-_TERMINAL = (RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value)
+_TERMINAL = tuple(status.value for status in RunStatus if status.is_terminal)
 # 앞 둘(run_id·created_at)은 접수 때만 쓰는 식별 칸이다. 상태 전이(`update`)는 그 뒤만 바꾼다.
 _SUMMARY_COLUMNS = """
     run_id, created_at, status, progress, stage, message, updated_at, error, error_code,
@@ -286,7 +286,7 @@ class SQLiteBacktestRunRepository:
             rows = connection.execute(
                 f"""
                 SELECT {_SUMMARY_COLUMNS} FROM backtest_runs
-                WHERE status NOT IN (?, ?, ?) ORDER BY accepted_order
+                WHERE status NOT IN ({", ".join("?" for _ in _TERMINAL)}) ORDER BY accepted_order
                 """,
                 _TERMINAL,
             ).fetchall()

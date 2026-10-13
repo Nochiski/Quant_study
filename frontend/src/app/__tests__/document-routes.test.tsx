@@ -2269,6 +2269,34 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     15_000,
   );
 
+  it.each([
+    ["/research/strategies/new", "snap", true],
+    ["/research/strategies/new", "old-snapshot", false],
+    ["/research/strategies/s1/revisions/2", "snap", true],
+    ["/research/strategies/s1/revisions/2", "old-snapshot", false],
+  ] as const)("%s의 필드 선택기는 계약 판본 %s 정합성을 따른다", async (route, snapshotId, available) => {
+    server.use(
+      http.get(`${API}/api/v1/equity/catalog`, () => HttpResponse.json({
+        snapshot: { snapshot_id: snapshotId, schema_version: "1", source: "test", built_at: "2026-10-13T00:00:00Z", point_in_time: true, dataset_revisions: [] },
+        page: 1, page_size: 100, page_count: 1, total: 1,
+        facets: { dataset_ids: ["prices"], frequencies: ["daily"], units: ["KRW"] },
+        fields: [{ field_id: "price.close", label: "판본별 종가", description: "test", dataset_id: "prices", unit: "KRW", frequency: "daily", value_type: "price", available_date_basis: "session", disclosure_basis: "session", evidence: "fixture", recommended_lag_sessions: 0, coverage: { starts_on: "2020-01-01", ends_on: "2026-10-12", estimated_coverage_pct: 100, point_in_time: true, supported_cell_kinds: [], venues: ["KRX"] } }],
+      } satisfies ResearchCatalog)),
+      ...graphHandlers(), revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    mount(`${route}?view=graph&path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F0`);
+    if (route.endsWith("/new")) {
+      await user.click(await screen.findByRole("tab", { name: "YAML" }));
+      replaceText(await editor(), GRAPH_SOURCE);
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
+    }
+    const graph = await screen.findByRole("region", { name: "노드 캔버스" });
+    await user.click(within(graph).getByRole("button", { name: /^노드 편집: 1\./ }));
+    if (available) expect((await screen.findAllByRole("option", { name: /판본별 종가/ })).length).toBeGreaterThan(0);
+    else await waitFor(() => expect(screen.queryAllByRole("option", { name: /판본별 종가/ })).toHaveLength(0));
+  }, 15_000);
+
   // #357 C-P3-16: 유니버스가 비어 실행 설정 전체가 무효여도 실행 계획 설명은 고른 결측 정책을 싣는다.
   it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
     "sends the chosen missing policy to the plan explanation on %s before the settings are complete",

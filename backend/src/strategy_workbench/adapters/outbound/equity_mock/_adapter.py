@@ -426,7 +426,7 @@ class MockEquityDataAdapter:
             benchmark_security_id=query.benchmark_security_id,
             warnings=(
                 DataWarning(
-                    code="mock_equity_data",
+                    code="equity.mock_data",
                     message=(
                         "결정적으로 생성한 mock OHLCV로 실행했다. 실제 연구에는 실데이터 "
                         "어댑터로 바꿔야 한다."
@@ -434,7 +434,7 @@ class MockEquityDataAdapter:
                     severity=WarningSeverity.INFO,
                 ),
                 DataWarning(
-                    code="corporate_action_feed_empty",
+                    code="equity.corporate_action_feed_empty",
                     message="mock 실행은 기업 행동 피드를 비워 둔다(분할·병합 없음).",
                 ),
             ),

@@ -1369,7 +1369,7 @@ def test_backtest_dataset_reads_roots_without_the_basis_column(
         BacktestDataQuery(date(2024, 1, 11), date(2024, 1, 12), ("005930:1",), None)
     )
     assert [b.session for b in dataset.bars] == [date(2024, 1, 11), date(2024, 1, 12)]
-    assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
+    assert dataset.warnings == ()
 
 
 def test_backtest_dataset_refuses_unknown_and_index_ids(

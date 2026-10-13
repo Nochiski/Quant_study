@@ -2,14 +2,14 @@ import { browserStorage } from "../../../shared/lib/browser-storage";
 import { useCallback, useMemo, useState } from "react";
 
 import {
+  runEnvironmentFields,
   runEnvironmentWireText,
   useRunEnvironmentSchema,
 } from "../../../entities/backtest";
-import type { RunEnvironment } from "../../../shared/api";
+import { ApiRequestError, type RunEnvironment } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
   initialRunEnvironmentValues,
-  runEnvironmentFields,
   runEnvironmentStoredValues,
   runEnvironmentWireRecord,
   validateRunEnvironment,
@@ -324,13 +324,11 @@ export const useBacktestRunSettings = (storageKey: string) => {
    * backend 라 화면에 적지 않는다(spec D1). 고칠 수 있는 거절이 아니면 null.
    */
   const rejectionFix = useCallback(
-    (
-      code: string | null,
-      values: Readonly<Record<string, string>>,
-    ): RunRejectionFix | null => {
-      const researchStart = values.research_start;
+    (error: unknown): RunRejectionFix | null => {
+      if (!(error instanceof ApiRequestError)) return null;
+      const researchStart = error.values.research_start;
       if (
-        code !== "backtest.run.research_window_violation" ||
+        error.code !== "backtest.run.research_window_violation" ||
         researchStart === undefined
       )
         return null;

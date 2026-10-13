@@ -1,6 +1,6 @@
 export { backtestHistoryQuery, trialLedgerQuery, useBacktestRequest, useBacktestResult, useBacktestStatus, useBacktestSummary, useBacktestTrialPreview, useCancelBacktest, useMergeTrialLineage, useRunEnvironmentSchema, useStartBacktest } from "./model/backtest-queries";
 export { RUN_KINDS, isRunKind, runKindLabel } from "./model/run-kind";
-export { runEnvironmentApplies, runEnvironmentDisplayValue, runEnvironmentFields, runEnvironmentLabel, runEnvironmentName, runEnvironmentOptionLabel, runEnvironmentWireNumber, runEnvironmentWireText, type RunEnvironmentField } from "./model/run-environment-fields";
+export { runEnvironmentApplies, runEnvironmentDisplayValue, runEnvironmentFields, runEnvironmentLabel, runEnvironmentName, runEnvironmentOptionLabel, runEnvironmentValueLabel, runEnvironmentWireNumber, runEnvironmentWireText, type RunEnvironmentField } from "./model/run-environment-fields";
 export {
   backtestErrorSentence,
   backtestStartRejectionMessage,

@@ -15,11 +15,6 @@ import { type RunEnvironment } from "../../../shared/api";
  * 바꾼다. 이 모듈의 검증은 빠른 피드백이고 최종 판정은 backend 가 한다.
  */
 
-export {
-  runEnvironmentFields,
-  type RunEnvironmentField,
-} from "../../../entities/backtest";
-
 /** 입력 칸의 문자열 값. 필드 이름 → 값. */
 export type RunEnvironmentValues = Readonly<Record<string, string>>;
 

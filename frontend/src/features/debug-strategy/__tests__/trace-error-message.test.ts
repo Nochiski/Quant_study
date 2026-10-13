@@ -134,7 +134,7 @@ describe("trace rejection code vocabulary (#351)", () => {
     );
 
     expect(traceErrorMessage(rejection)).toBe(
-      backtestStartRejectionMessage(values.code, null, values),
+      backtestStartRejectionMessage(rejection),
     );
     expect(traceErrorMessage(rejection)).toContain(
       "2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고",

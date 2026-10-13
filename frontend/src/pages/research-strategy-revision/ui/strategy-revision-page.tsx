@@ -1,3 +1,4 @@
+import { ApiRequestError } from "../../../shared/api";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
@@ -140,7 +141,8 @@ export const StrategyRevisionPage = () => {
   // 저장된 1.0 revision 참조로 보낸 실행을 backend가 거부한 경우: 같은 배너로 안내하고 실행을 막는다.
   const backtestRejectedForUpgrade =
     backtest.status.kind === "failed" &&
-    backtest.status.code === "backtest.strategy.requires_upgrade";
+    backtest.status.error instanceof ApiRequestError &&
+    backtest.status.error.code === "backtest.strategy.requires_upgrade";
   const canRun = backtest.canRun && !backtestRejectedForUpgrade;
   const storedMeta = useMemo(
     () => ({

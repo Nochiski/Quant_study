@@ -6,7 +6,6 @@ import {
   useStartBacktest,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
-import { ApiRequestError, failureReason } from "../../../shared/api";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
@@ -21,19 +20,8 @@ export type RunBacktestStatus =
   | { kind: "idle" }
   | { kind: "starting" }
   | { kind: "accepted"; runId: string }
-  /**
-   * `code`는 backend 거절 detail의 코드(예: `backtest.strategy.requires_upgrade`), 없으면 null.
-   * `detail`은 접힌 진단 상세에 둘 서버 사유다. 화면 본문은 `code`의 번역이 맡는다(이슈 #260).
-   */
-  | {
-      kind: "failed";
-      detail: string | null;
-      code: string | null;
-      /** 거절이 가리킨 요청 본문의 칸(점 경로). 없으면 null. */
-      field: string | null;
-      /** 거절 문장의 자리표시자를 채울 detail 값(`ApiRequestError.values`). */
-      values: Readonly<Record<string, string>>;
-    };
+  /** 거절 원문 객체를 보존하고 표시·교정 소비자가 해당 책임의 공용 함수를 쓴다. */
+  | { kind: "failed"; error: unknown };
 
 
 
@@ -145,12 +133,7 @@ export const useRunBacktest = (
           ...snapshot,
           status: {
             kind: "failed",
-            detail: failureReason(error),
-            code:
-              error instanceof ApiRequestError ? (error.code ?? null) : null,
-            field:
-              error instanceof ApiRequestError ? (error.field ?? null) : null,
-            values: error instanceof ApiRequestError ? error.values : {},
+            error,
           },
         });
       }

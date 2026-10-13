@@ -9,7 +9,7 @@ import {
   type BacktestRunSpec,
   type BacktestRunState,
 } from "../../../entities/backtest";
-import { ApiRequestError, failureReason } from "../../../shared/api";
+import { failureReason } from "../../../shared/api";
 import { useCommittedRef } from "../../../shared/lib/react";
 import { t } from "../../../shared/config";
 import { Button, FailureNotice } from "../../../shared/ui";
@@ -57,15 +57,8 @@ export const BacktestRunActions = ({
   const replayRejection =
     replayError === null
       ? null
-      : backtestStartRejectionMessage(
-          replayError instanceof ApiRequestError
-            ? (replayError.code ?? null)
-            : null,
-          replayError instanceof ApiRequestError &&
-            replayError.field !== undefined
-            ? runFieldLabel(environmentFields, replayError.field)
-            : null,
-          replayError instanceof ApiRequestError ? replayError.values : {},
+      : backtestStartRejectionMessage(replayError, (field) =>
+          runFieldLabel(environmentFields, field),
         );
 
   return (

@@ -6,6 +6,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
+from sys import float_info
 
 from backtest_engine.engine.power_projection import (
     ExecutionState,
@@ -64,6 +65,36 @@ class _Budget:
         gross_min = 0.0 if value_low <= 0 <= value_high else min(abs(value_low), abs(value_high))
         if self.state is not None:
             cash, previous, index, margin = self.state
+            if (
+                not margin
+                and not self.buy
+                and cash <= 0
+                and notional_low >= float_info.min
+                and (
+                    (self.fee_rate > 1 and self.tax_rate >= 0)
+                    or (self.tax_rate > 1 and self.fee_rate >= 0)
+                )
+            ):
+                # 유한 normal n은 r>1이면 fl(n*r)>n이다. 최소 r-1=2^-52가
+                # n의 위쪽 ULP 이상이므로 반올림으로 n에 머물 수 없다.
+                # fl(cash+n)<=n에서 개별 비용 하나가 n을 넘으면 현금은 엄격히 음수다.
+                # n이 +inf로 넘친 경우에도 실제 현금은 inf-inf/0*inf로 NaN이라 불허다.
+                # subnormal은 fl(n*r)==n일 수 있으므로 이 증명에서 제외한다.
+                return True
+            if (
+                not margin
+                and not self.buy
+                and cash <= 0
+                and notional_low >= 2 * float_info.min
+                and (
+                    (self.fee_rate >= 0.5 and self.tax_rate > 0.5)
+                    or (self.fee_rate > 0.5 and self.tax_rate >= 0.5)
+                )
+            ):
+                # h=n/2가 정확한 normal이면 각 비용을 h와 비교할 수 있다.
+                # fee>=h,tax>h는 남은 대금<=h 뒤 엄격 음수다. 반대 방향도
+                # fee<=n에서 Sterbenz에 의해 n-fee<h가 정확하고 tax>=h다.
+                return True
             cash_upper = cash - notional_low if self.buy else cash + notional_high
             cash_upper -= fee_low
             if tax_low > 0:

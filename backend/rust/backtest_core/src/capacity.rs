@@ -89,6 +89,30 @@ impl Capacity<'_> {
             value_low.abs().min(value_high.abs())
         };
         let (equity_upper, gross_lower) = if let Some(state) = self.state {
+            if !state.3
+                && !self.buy
+                && state.0 <= 0.0
+                && notional_low >= f64::MIN_POSITIVE
+                && ((self.fee_rate > 1.0 && self.sell_tax_rate >= 0.0)
+                    || (self.sell_tax_rate > 1.0 && self.fee_rate >= 0.0))
+            {
+                // 유한 normal n은 최소 r-1=2^-52의 증가가 위쪽 ULP 이상이므로
+                // r>1에서 fl(n*r)>n이다. fl(cash+n)<=n이어서 개별 비용만으로 음수다.
+                // +inf 대금은 실제 순차 계산의 inf-inf/0*inf가 NaN을 만들어 불허다.
+                // subnormal은 곱이 n에 남을 수 있어 이 증명에서 제외한다.
+                return true;
+            }
+            if !state.3
+                && !self.buy
+                && state.0 <= 0.0
+                && notional_low >= 2.0 * f64::MIN_POSITIVE
+                && ((self.fee_rate >= 0.5 && self.sell_tax_rate > 0.5)
+                    || (self.fee_rate > 0.5 && self.sell_tax_rate >= 0.5))
+            {
+                // h=n/2는 정확한 normal이다. fee>=h/tax>h는 잔액<=h 뒤 음수다.
+                // fee>h/tax>=h도 fee<=n에서 Sterbenz로 n-fee<h가 정확하다.
+                return true;
+            }
             let after_notional = if self.buy {
                 state.0 - notional_low
             } else {
@@ -156,6 +180,79 @@ impl Capacity<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dominated_cost_prunes_a_trillion_share_interval() {
+        let rate = f64::from_bits(1.0_f64.to_bits() + 1);
+        let quantity = 1_000_000_000_000_i64;
+        for cash in [-1e-18, 0.0] {
+            for price in [f64::MIN_POSITIVE, 1.0, 1e308] {
+                for (fee_rate, sell_tax_rate) in [
+                    (rate, 0.0),
+                    (0.0, rate),
+                    (0.5, f64::from_bits(0.5_f64.to_bits() + 1)),
+                    (f64::from_bits(0.5_f64.to_bits() + 1), 0.5),
+                ] {
+                    if price < 2.0 * f64::MIN_POSITIVE && fee_rate < 1.0 && sell_tax_rate < 1.0 {
+                        continue;
+                    }
+                    let state = (cash, vec![quantity as f64 * price], 0, false);
+                    let capacity = Capacity {
+                        buy: false,
+                        price,
+                        held: quantity,
+                        fee_rate,
+                        sell_tax_rate,
+                        leverage: 1.0,
+                        equity: 0.0,
+                        gross: 0.0,
+                        mark: price,
+                        state: Some(&state),
+                    };
+                    assert!(capacity.impossible(1, quantity - 1));
+                    assert_eq!(capacity.maximum(quantity), 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn strict_product_proof_excludes_subnormal_rounding() {
+        let rate = f64::from_bits(1.0_f64.to_bits() + 1);
+        for exponent in 1_u64..=2046 {
+            let power = exponent << 52;
+            for bits in [power - 1, power, power + 1] {
+                let n = f64::from_bits(bits);
+                if n >= f64::MIN_POSITIVE {
+                    assert!(n * rate > n);
+                }
+                if n >= 2.0 * f64::MIN_POSITIVE {
+                    let half = n * 0.5;
+                    let higher_half = n * f64::from_bits(0.5_f64.to_bits() + 1);
+                    assert!(higher_half > half);
+                    assert!(n - higher_half < half);
+                }
+            }
+        }
+        assert_eq!(f64::MAX * rate, f64::INFINITY);
+        let price = f64::MIN_POSITIVE / 2.0;
+        assert_eq!(price * rate, price);
+        let state = (0.0, vec![2.0 * price], 0, false);
+        let capacity = Capacity {
+            buy: false,
+            price,
+            held: 2,
+            fee_rate: rate,
+            sell_tax_rate: 0.0,
+            leverage: 1.0,
+            equity: 0.0,
+            gross: 0.0,
+            mark: price,
+            state: Some(&state),
+        };
+        assert!(!capacity.impossible(1, 1));
+        assert_eq!(capacity.maximum(2), 1);
+    }
 
     #[test]
     fn interval_pruning_preserves_exhaustive_float_oracle() {

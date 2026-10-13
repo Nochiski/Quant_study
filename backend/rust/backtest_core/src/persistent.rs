@@ -9,7 +9,7 @@ use crate::persistent_router::{
 use crate::portfolio::Portfolio;
 use crate::quote::parse_decimal_ratio;
 use crate::records::{RecordIndexWire, RecordStore};
-use crate::session::{self, BarTuple, EntryTuple, Op};
+use crate::session::{self, EntryTuple, ExecutionBar, Op};
 use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
@@ -339,7 +339,7 @@ impl PersistentEngine {
     fn plan_market_ops(
         &self,
         ts: &str,
-        bars: &HashMap<&str, BarTuple>,
+        bars: &HashMap<&str, ExecutionBar>,
         fee_rate: f64,
         default_participation: Option<&str>,
         slippage: &(String, f64, f64),
@@ -918,7 +918,10 @@ mod tests {
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
         runtime.orders.push(market_order("O-000001"));
-        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000, 1_000, 0.0))]);
+        let bars = HashMap::from([(
+            "X:ONE:equity:KRW",
+            ExecutionBar::from((100.0, 110.0, 90.0, 1_000, 1_000, 0.0)),
+        )]);
 
         let mut ops = runtime
             .plan_market_ops(

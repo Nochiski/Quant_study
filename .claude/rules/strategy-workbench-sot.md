@@ -196,3 +196,5 @@ support 노드는 backend 출처 표식에 따라 숨긴다. 원문 없는 조�
 현금 체결의 순차 연산 정본은 Python `power_projection.project_cash/project_cost`와 대응 Rust 함수다. 실제 Portfolio, 견적 후보, BuyingPower 소비가 대금→수수료→거래세 순서를 공유한다. 여력은 snapshot.cash를 직접 받고, 종목 평가액의 원래 순서(전량 청산 시 제거, 재진입 시 끝에 추가)를 보존해 cash+sum(values)와 sum(abs(values))를 재계산한다. 현금 음수 허용 여부는 레버리지 수치가 아닌 MARGIN feature가 정한다. 저수준 quote의 optional execution_state 미제공은 구호출 호환이며 실제 엔진은 네 코어 모두 이를 제공한다. 바스켓 checkpoint는 현금과 평가액 순서까지 복원한다.
 
 이 공유 산술은 평가 시점 정책을 통합하지 않는다. BuyingPower는 기존의 체결가 기준 위험 평가를 유지하고 실제 Portfolio는 기존 보유 평가가 유지 및 세션 mark 시점을 유지한다. 원장 mark를 견적에 맞춰 바꾸지 않는다.
+
+최대 체결 수량 탐색은 현금·위험 잔여값의 float 단조성을 가정하지 않는다. 비용으로 음수 현금이 된 뒤 매도로 회복되는 구간, 대금·비용 상쇄 및 다종목 평가 합산의 반올림으로 허용 구간이 끊길 수 있다. Python capacity 및 Rust 대응 owner는 높은 후보를 실제 원장식으로 먼저 판정하고, 각 연산의 구간 상한이 음수임이 증명될 때만 구간을 제외한다. 허용 오차·비용 상한으로 조건을 완화하지 않는다. 일반적인 큰 수량은 구간 제외로 줄지만 100% 근처 비용 상쇄 등 증명이 느슨한 극단 입력에서는 최악 전수 탐색이 가능하다.

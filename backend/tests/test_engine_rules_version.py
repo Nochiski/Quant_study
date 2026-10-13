@@ -25,6 +25,7 @@ from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
 from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 from tests.test_executable_capacity import proportional_integer_scenario
 from tests.test_execution_cash_projection import actual_cash_scenario
+from tests.test_negative_cash_recovery import recovery_scenario
 
 # 기록만 더한 변경(V4-04 2/2: 체결 행의 `cap_volume`, 목표 금액 → 수량 변환의 ROUNDING 레코드)은
 # trace 가 바뀌어 digest 가 달라지지만 체결·비용 규칙은 그대로라 판본을 올리지 않고 digest 만
@@ -34,9 +35,10 @@ from tests.test_execution_cash_projection import actual_cash_scenario
 # v6는 실제 장부의 정수 경계와 비례 축소 후 최종 수량의 여력을 다시 판정한다.
 # 같은 미병합 v6 수정에서 대금→수수료→세금의 실제 현금 순서를 포함한다. 기존 28개
 # scenario trace/decision은 그대로이며 actual_cash_fee_application은 새 경계를 고정한다.
+# borrow_cost_negative_cash_recovery는 비용 후 음수 현금에서 매도/환매로 회복하는 경로다.
 _PINNED = (
     "backtest-engine-v6",
-    "6450f74ce1d0844d5b6bcf38c4d909406176bf9020ca7cfe14326dd0f55b21f5",
+    "5ee9b4fb0371434a1726e407578f37e58be2afdbf96237db5c3e35735629f840",
 )
 
 
@@ -55,6 +57,10 @@ def _rules_digest() -> str:
     digest.update(engine.event_store.decision_tape_bytes())
     engine, _result = actual_cash_scenario("python")
     digest.update(b"actual_cash_fee_application")
+    digest.update(engine.event_store.trace_bytes())
+    digest.update(engine.event_store.decision_tape_bytes())
+    engine, _result = recovery_scenario("python")
+    digest.update(b"borrow_cost_negative_cash_recovery")
     digest.update(engine.event_store.trace_bytes())
     digest.update(engine.event_store.decision_tape_bytes())
     # ADV(20행)·σ(수익률 20개) 창이 차도록 25세션. 거래대금이 세션마다 달라 창 길이가 결과를 가른다.

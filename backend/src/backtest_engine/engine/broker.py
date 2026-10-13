@@ -23,13 +23,10 @@ from decimal import ROUND_FLOOR, Decimal
 from enum import Enum
 from typing import Protocol
 
+from backtest_engine.engine.capacity import maximum_quantity
 from backtest_engine.engine.costs import sell_tax_amount
 from backtest_engine.engine.orders import OpenOrder
-from backtest_engine.engine.power_projection import (
-    ExecutionState,
-    project_execution,
-    project_valuation,
-)
+from backtest_engine.engine.power_projection import ExecutionState
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.ports.execution import SlippageModel
@@ -187,33 +184,22 @@ class PythonQuoteCore:
 
         closing = max(-held if buy else held, Decimal(0))
         if quantity > closing or execution_state is not None:
-            # 분모 역산의 floor는 정확한 경계에서 한 주를 잃는다. 실제 장부식으로 후보를 판정한다.
             equity, gross = valuation or (buying_power / leverage, 0.0)
-            mark = price if held_mark is None else held_mark
-            low, high = (0 if execution_state is not None else int(closing)), int(quantity)
-            while low < high:
-                candidate = (low + high + 1) // 2
-                notional = candidate * price
-                fee = notional * fee_rate
-                tax = 0.0 if buy else notional * sell_tax_rate
-                new = held + (Decimal(candidate) if buy else -Decimal(candidate))
-                if execution_state is not None:
-                    cash, after_equity, after_gross = project_execution(
-                        execution_state, buy, Decimal(candidate), new, price, fee, tax
-                    )
-                    cash_valid = execution_state[3] or cash >= 0
-                else:
-                    after_equity, after_gross = project_valuation(
-                        equity, gross, held, new, mark, price, fee + tax
-                    )
-                    cash_valid = True
-                if cash_valid and (
-                    candidate <= closing or leverage * after_equity - after_gross >= 0
-                ):
-                    low = candidate
-                else:
-                    high = candidate - 1
-            affordable = Decimal(low)
+            affordable = Decimal(
+                maximum_quantity(
+                    int(quantity),
+                    buy=buy,
+                    price=price,
+                    held=held,
+                    fee_rate=fee_rate,
+                    tax_rate=sell_tax_rate,
+                    leverage=leverage,
+                    equity=equity,
+                    gross=gross,
+                    mark=price if held_mark is None else held_mark,
+                    state=execution_state,
+                )
+            )
             if affordable <= 0:
                 return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
             if affordable < quantity:

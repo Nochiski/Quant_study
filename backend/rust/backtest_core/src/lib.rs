@@ -10,6 +10,7 @@
 
 mod buying_power;
 mod callback;
+mod capacity;
 mod driver;
 mod event_queue;
 mod execution;

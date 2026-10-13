@@ -1,5 +1,5 @@
-use crate::buying_power::project_valuation;
-use crate::power_projection::{project_cash, project_execution, ExecutionState};
+use crate::capacity::Capacity;
+use crate::power_projection::ExecutionState;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -134,66 +134,19 @@ pub(crate) fn quote_numbers(
     if quantity > closing || execution_state.is_some() {
         let (equity, gross) = valuation.unwrap_or((buying_power / leverage, 0.0));
         let mark = held_mark.unwrap_or(price);
-        // 위험 한도는 청산 이후 신규 노출 구간의 상한이다. 현금 회복 하한과 섞지 않는다.
-        let (mut low, mut high) = (closing.min(quantity), quantity);
-        while low < high {
-            let candidate = low + (high - low) / 2 + (high - low) % 2;
-            let notional = candidate as f64 * price;
-            let fee = notional * fee_rate;
-            let tax = if buy { 0.0 } else { notional * sell_tax_rate };
-            let new = if buy {
-                held + candidate
-            } else {
-                held - candidate
-            };
-            let feasible = if let Some(state) = &execution_state {
-                let (_, after_equity, after_gross) =
-                    project_execution(state, buy, candidate, price, fee, tax, new, price);
-                leverage * after_equity - after_gross >= 0.0
-            } else {
-                let (after_equity, after_gross) =
-                    project_valuation(equity, gross, held, new, mark, price, fee + tax);
-                leverage * after_equity - after_gross >= 0.0
-            };
-            if feasible {
-                low = candidate;
-            } else {
-                high = candidate - 1;
-            }
+        let affordable = Capacity {
+            buy,
+            price,
+            held,
+            fee_rate,
+            sell_tax_rate,
+            leverage,
+            equity,
+            gross,
+            mark,
+            state: execution_state.as_ref(),
         }
-        let mut affordable = low;
-        if let Some(state) = &execution_state {
-            let cash_after = |candidate: i64| {
-                let notional = candidate as f64 * price;
-                project_cash(
-                    state.0,
-                    buy,
-                    notional,
-                    notional * fee_rate,
-                    if buy { 0.0 } else { notional * sell_tax_rate },
-                )
-            };
-            if !state.3 && cash_after(affordable) < 0.0 {
-                if state.0 < 0.0 {
-                    // 현금이 음수여도 매도량 증가로 회복할 수 있다. 최대 위험 허용량도
-                    // 회복하지 못한 경우에만 거절한다.
-                    affordable = 0;
-                } else {
-                    // 시작 현금은 유효하고 끝이 음수인 감소 구간만 prefix 탐색한다.
-                    let (mut cash_low, mut cash_high) = (0, affordable);
-                    while cash_low < cash_high {
-                        let candidate =
-                            cash_low + (cash_high - cash_low) / 2 + (cash_high - cash_low) % 2;
-                        if cash_after(candidate) >= 0.0 {
-                            cash_low = candidate;
-                        } else {
-                            cash_high = candidate - 1;
-                        }
-                    }
-                    affordable = cash_low;
-                }
-            }
-        }
+        .maximum(quantity);
         if affordable <= 0 {
             return Ok((price, 0, applied, "rejected_no_cash".to_string()));
         }
@@ -218,6 +171,31 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nonmonotone_cash_uses_the_largest_actual_feasible_quantity() {
+        let tax = f64::from_bits(0.9_f64.to_bits() + 1);
+        let result = quote_numbers(
+            "sell",
+            1.0,
+            20,
+            100,
+            None,
+            0.0,
+            None,
+            -1.0,
+            30,
+            0.1,
+            false,
+            tax,
+            1.0,
+            Some(1.0),
+            Some((29.0, 31.0)),
+            Some((-1e-18, vec![30.0, -1.0], 0, false)),
+        )
+        .unwrap();
+        assert_eq!(result.1, 19);
+    }
 
     #[test]
     fn cash_recovery_lower_bound_does_not_cut_off_feasible_sales() {

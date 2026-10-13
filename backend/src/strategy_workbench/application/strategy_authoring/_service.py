@@ -17,7 +17,6 @@ excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real stra
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
@@ -30,12 +29,14 @@ from strategy_workbench.domain.backtest.facade.environment import (
     run_environment_schema,
     run_environment_schema_hash,
 )
+from strategy_workbench.domain.canonical.facade.encoding import canonical_json_hash
 from strategy_workbench.domain.factor.facade.expression import FieldMetadata
 from strategy_workbench.domain.factor.facade.operators import (
     OperatorDefinition,
     operator_definitions,
 )
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
     ENVIRONMENT_UNAVAILABLE_CODE,
     LEGACY_SHAPE_CODE,
     NotUpgradeableDocumentError,
@@ -43,6 +44,7 @@ from strategy_workbench.domain.strategy.facade.document import (
     UpgradeUnsupportedNodeError,
     UpgradeWarning,
     hydrate_strategy_document,
+    json_pointer_token,
     upgrade_document,
 )
 from strategy_workbench.domain.strategy.facade.schema import (
@@ -212,13 +214,7 @@ class StrategyOperatorCatalog:
 
 def operator_catalog_hash(operators: tuple[OperatorDefinition, ...]) -> str:
     """정의 전부의 canonical JSON sha256. 정의가 하나라도 바뀌면 ETag가 바뀐다."""
-    material = json.dumps(
-        [asdict(definition) for definition in operators],
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return canonical_json_hash([asdict(definition) for definition in operators])
 
 
 def contract_hash(schema_hash: str, factor_registry_version: str, dataset_snapshot_id: str) -> str:
@@ -252,9 +248,8 @@ class StrategyAuthoringService:
     @cached_property
     def _schema(self) -> StrategyDocumentSchema:
         schema = strategy_document_schema()
-        version = schema["properties"]["schema_version"]
         return StrategyDocumentSchema(
-            schema_version=version.get("const") or max(version["enum"]),
+            schema_version=CURRENT_SCHEMA_VERSION,
             schema_hash=strategy_document_schema_hash(schema),
             schema=schema,
         )
@@ -469,7 +464,7 @@ def _first_mismatch(expected: object, actual: object, pointer: str) -> tuple[str
     """Deepest JSON Pointer where two parsed trees differ, or None when they are equal."""
     if isinstance(expected, Mapping) and isinstance(actual, Mapping):
         for key in sorted(set(expected) | set(actual)):
-            child = f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
+            child = f"{pointer}/{json_pointer_token(str(key))}"
             if key not in expected or key not in actual:
                 side = "dict-path only" if key in expected else "rewritten text only"
                 return child, f"key present in {side}"
@@ -497,6 +492,4 @@ def _pointer_from_path(path: str) -> str:
 def _semantic_kind(kind: ValidationKind) -> DiagnosticKind:
     if kind is ValidationKind.CAPABILITY:
         return DiagnosticKind.CAPABILITY
-    if kind is ValidationKind.SYNTAX:  # pragma: no cover - validator never emits syntax today
-        return DiagnosticKind.STRUCTURAL
     return DiagnosticKind.SEMANTIC

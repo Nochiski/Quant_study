@@ -86,6 +86,13 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
+from strategy_workbench.domain.factor.facade.expression import (
+    FactorGraph,
+    FieldNode,
+    NodeValueType,
+    TimeSeriesNode,
+    TimeSeriesOperator,
+)
 from strategy_workbench.domain.factor.facade.planning import build_factor_matrix_cache_key
 from strategy_workbench.domain.factor.facade.registry import (
     FactorAvailability,
@@ -93,14 +100,9 @@ from strategy_workbench.domain.factor.facade.registry import (
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
-    FactorGraph,
     FactorSignal,
-    FieldNode,
-    NodeValueType,
     RebalanceFrequency,
     StrategySpec,
-    TimeSeriesNode,
-    TimeSeriesOperator,
 )
 from tests.equity_fixture import (
     WB_BONUS_EX,
@@ -389,9 +391,10 @@ def test_relisting_lag_fix_invalidates_the_previous_field_contract(
     previous = EquityDuckdbAdapter(root).snapshot().snapshot_id
     # 원장 빌드는 같아도 잘못 연결했던 관측·팩터 캐시를 재사용하면 안 된다.
     assert current != previous
-    assert current.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] == previous.partition(
-        SNAPSHOT_CONTRACT_SEPARATOR
-    )[0]
+    assert (
+        current.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+        == previous.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+    )
 
 
 _HIVE_OFF = "(hive_partitioning = CAST('f' AS BOOLEAN))"
@@ -611,7 +614,8 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
 
 @pytest.mark.parametrize("lag", [1, None])
 def test_a_field_the_ledger_carries_but_this_adapter_does_not_serve_says_so(
-    tmp_path: Path, lag: int | None,
+    tmp_path: Path,
+    lag: int | None,
 ) -> None:
     """원장 `dataset_profile` 에 있는데 내주지 않는 필드를 "원장이 싣지 않는다"고 하지 않는다(#373).
 
@@ -1067,8 +1071,7 @@ def test_grid_lag_cannot_cross_a_relisting_span(tmp_path: Path, field_id: str) -
     root = build_workbench_root(
         tmp_path / "equity",
         profile_rows=[
-            (name, 5 if name == field_id else lag, basis)
-            for name, lag, basis in WB_PROFILE_ROWS
+            (name, 5 if name == field_id else lag, basis) for name, lag, basis in WB_PROFILE_ROWS
         ],
     )
     adapter = EquityDuckdbAdapter(root)

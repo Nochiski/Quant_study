@@ -496,3 +496,29 @@ def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
         [0.96 * share for share in (1 / 21, 6 / 21, 11 / 21, 16 / 21, 1.0)]
     )
     assert reported[-1] == 1.0
+
+
+def test_factor_cache_key_preserves_existing_unicode_fingerprint() -> None:
+    key = build_factor_matrix_cache_key(
+        data_snapshot_id="스냅샷",
+        plan_hash="계획",
+        registry_version="판",
+        parameters=(ResolvedFactorParameter("값", 3.5),),
+        as_of_start=date(2024, 1, 1),
+        as_of_end=date(2024, 1, 2),
+    )
+    # main 5d655219에서 계산한 기존 ASCII escape 바이트의 지문을 보존한다.
+    assert key.fingerprint == "c20efaa99862242e69a38d1803a10245f4134b64c1957c4dd1a5094f79a71758"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_factor_cache_key_rejects_nonfinite_parameters(value: float) -> None:
+    with pytest.raises(ValueError, match="Out of range float"):
+        build_factor_matrix_cache_key(
+            data_snapshot_id="s",
+            plan_hash="p",
+            registry_version="r",
+            parameters=(ResolvedFactorParameter("value", value),),
+            as_of_start=date(2024, 1, 1),
+            as_of_end=date(2024, 1, 2),
+        )

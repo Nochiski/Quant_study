@@ -10809,7 +10809,6 @@
       },
       "ValidationKind": {
         "enum": [
-          "syntax",
           "semantic",
           "capability"
         ],

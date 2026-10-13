@@ -31,7 +31,6 @@ Shape (JSON Schema 2020-12):
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 import re
 import types
@@ -41,6 +40,7 @@ from datetime import date
 from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
+from strategy_workbench.domain.canonical.facade.encoding import canonical_json_hash
 from strategy_workbench.domain.factor.facade.expression import EXPRESSION_NODE_KINDS
 from strategy_workbench.domain.factor.facade.operators import operator_description_keys
 
@@ -50,7 +50,7 @@ from ._constraints import (
     field_applicability_index,
     scalar_constraint_index,
 )
-from ._hydrate import SUPPORTED_SCHEMA_VERSIONS, _kind_of
+from ._hydrate import CURRENT_SCHEMA_VERSION, _kind_of
 from ._models import ParameterDefinition, StrategySpec
 
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
@@ -133,19 +133,15 @@ def strategy_document_schema() -> dict[str, Any]:
     """JSON Schema for the identity-free authoring document, derived from the model."""
     builder = _SchemaBuilder(scalar_constraint_index())
     root = _root_schema(builder)
-    versions = sorted(SUPPORTED_SCHEMA_VERSIONS)
     version_schema: dict[str, Any] = {
-        **(
-            {"type": "string", "const": versions[0]}
-            if len(versions) == 1
-            else {"type": "string", "enum": versions}
-        ),
+        "type": "string",
+        "const": CURRENT_SCHEMA_VERSION,
         "x-description-key": f"{ROOT_PROPERTY_NAMESPACE}.schema_version",
     }
     properties = {"schema_version": version_schema, **root["properties"]}
     return {
         "$schema": SCHEMA_DIALECT,
-        "$id": f"urn:strategy-workbench:strategy-document:{versions[-1]}",
+        "$id": f"urn:strategy-workbench:strategy-document:{CURRENT_SCHEMA_VERSION}",
         "title": DOCUMENT_TITLE,
         "x-description-key": ROOT_DESCRIPTION_KEY,
         "type": "object",
@@ -190,21 +186,19 @@ def dataclass_json_schema(
 
 def strategy_document_schema_hash(schema: dict[str, Any]) -> str:
     """sha256 of the canonical (sorted, compact) schema JSON; doubles as the HTTP ETag."""
-    encoded = json.dumps(schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return canonical_json_hash(schema)
 
 
 def strategy_field_contracts() -> tuple[FieldContract, ...]:
     """Every scalar authoring path (pointer template order = document order)."""
     builder = _SchemaBuilder(scalar_constraint_index())
     _root_schema(builder)
-    versions = sorted(SUPPORTED_SCHEMA_VERSIONS)
     version = FieldContract(
         pointer="/schema_version",
         type="string",
         required=True,
-        const=versions[0] if len(versions) == 1 else None,
-        enum=None if len(versions) == 1 else tuple(versions),
+        const=CURRENT_SCHEMA_VERSION,
+        enum=None,
         description_key=f"{ROOT_PROPERTY_NAMESPACE}.schema_version",
     )
     return (version, *builder.contracts)

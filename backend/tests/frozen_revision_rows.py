@@ -23,8 +23,8 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
     StrategyAuthoringService,
 )
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 from strategy_workbench.domain.strategy.facade.document import SourceFormat
-from strategy_workbench.domain.strategy.facade.specification import canonical_payload_json
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "strategy_documents"
 FROZEN_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"

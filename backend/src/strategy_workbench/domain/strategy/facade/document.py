@@ -4,8 +4,6 @@ from strategy_workbench.domain.strategy._hydrate import (
     STRUCTURE_CODES,
     SUPPORTED_SCHEMA_VERSIONS,
     HydrationStatus,
-    StrategyHydration,
-    StructuralIssue,
     authoring_document,
     hydrate_strategy_document,
 )
@@ -13,19 +11,19 @@ from strategy_workbench.domain.strategy._promotion import (
     PROMOTION_NODE_PREFIX,
     promotion_node_ids,
 )
-from strategy_workbench.domain.strategy._source import SourceFormat, source_hash_of
+from strategy_workbench.domain.strategy._source import (
+    SourceFormat,
+    json_pointer_token,
+    source_hash_of,
+)
 from strategy_workbench.domain.strategy._upgrade import (
     ENVIRONMENT_UNAVAILABLE_CODE,
     FROZEN_SCHEMA_VERSIONS,
-    REMOVED_FIELDS,
-    RETIRED_EXECUTION_SECTIONS,
-    RETIRED_NODE_KINDS,
     UPGRADE_CHAIN,
     UPGRADE_STEPS,
     UPGRADE_WARNING_CODES,
     NotUpgradeableDocumentError,
     RetiredExecutionSettings,
-    UpgradeOutcome,
     UpgradeUnsupportedNodeError,
     UpgradeWarning,
     apply_upgrade_steps,
@@ -39,9 +37,6 @@ __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "ENVIRONMENT_UNAVAILABLE_CODE",
     "FROZEN_SCHEMA_VERSIONS",
-    "REMOVED_FIELDS",
-    "RETIRED_EXECUTION_SECTIONS",
-    "RETIRED_NODE_KINDS",
     "SUPPORTED_SCHEMA_VERSIONS",
     "UPGRADE_CHAIN",
     "UPGRADE_STEPS",
@@ -53,9 +48,6 @@ __all__ = [
     "LEGACY_SHAPE_CODE",
     "STRUCTURE_CODES",
     "SourceFormat",
-    "StrategyHydration",
-    "StructuralIssue",
-    "UpgradeOutcome",
     "UpgradeUnsupportedNodeError",
     "UpgradeWarning",
     "apply_upgrade_steps",
@@ -65,6 +57,7 @@ __all__ = [
     "legacy_shape_hints",
     "promotion_node_ids",
     "source_hash_of",
+    "json_pointer_token",
     "upgrade_document",
     "upgrade_refusal",
 ]

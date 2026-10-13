@@ -6869,7 +6869,7 @@ export type ValidationIssue = {
 /**
  * ValidationKind
  */
-export type ValidationKind = "syntax" | "semantic" | "capability";
+export type ValidationKind = "semantic" | "capability";
 
 /**
  * ValidationSeverity

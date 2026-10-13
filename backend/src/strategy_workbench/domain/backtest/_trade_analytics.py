@@ -12,10 +12,14 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     TradeOutcome,
 )
 
-from ._models import RawArtifactBundle, RawCost, RawFill, RawTrade
-
-SELL_TAX = "sell_tax"
-CARRY_COSTS = frozenset({"short_borrow", "margin_interest"})
+from ._models import (
+    CARRY_COST_KINDS,
+    RawArtifactBundle,
+    RawCost,
+    RawFill,
+    RawTrade,
+    RunCostKind,
+)
 
 
 @dataclass
@@ -35,7 +39,7 @@ def closed_trades(fills: Sequence[RawFill], costs: Sequence[RawCost]) -> tuple[R
     # 비용 기록 순서로 복원한다. 명시적 0과 구판의 None을 구분한다.
     taxes: dict[tuple[date, str], deque[float]] = {}
     for cost in costs:
-        if cost.kind == SELL_TAX and cost.security_id is not None:
+        if cost.kind == RunCostKind.SELL_TAX and cost.security_id is not None:
             taxes.setdefault((cost.session, cost.security_id), deque()).append(cost.amount)
     for fill in fills:
         security_id, session = fill.security_id, fill.session
@@ -132,11 +136,11 @@ def analytics_input(
         traded_notional=sum(float(item.quantity) * item.price for item in fills),
         trades=tuple(trades),
         total_fees=sum(item.fee for item in fills),
-        total_taxes=sum(item.amount for item in costs if item.kind == SELL_TAX),
+        total_taxes=sum(item.amount for item in costs if item.kind == RunCostKind.SELL_TAX),
         total_slippage_cost=sum(
             float(item.quantity) * abs(item.slippage_per_share) for item in fills
         ),
-        total_carry_cost=sum(item.amount for item in costs if item.kind in CARRY_COSTS),
+        total_carry_cost=sum(item.amount for item in costs if item.kind in CARRY_COST_KINDS),
         base=base,
     )
 

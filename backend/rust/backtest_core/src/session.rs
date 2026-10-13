@@ -69,6 +69,9 @@ impl EntryIn {
     }
 }
 
+/// 유동성 한도 0주 미체결 사유 코드(Python `backtest_engine.types.events.LIQUIDITY_CAP_ZERO`와 같다, #411).
+pub(crate) const LIQUIDITY_CAP_ZERO: &str = "liquidity_cap_zero";
+
 /// bar: `(open, high, low, volume, liquidity_volume, impact_scale)`. `liquidity_volume`은 유동성
 /// 캡의 기준 거래량이다 — 참여 기준이 따로 없으면 `volume`과 같다 (Python `Bar.liquidity_volume`).
 /// `impact_scale`은 √ 충격 척도이고 없으면 0이다 (Python `Bar.impact_scale`).
@@ -285,7 +288,7 @@ impl<'a> Session<'a> {
             slip: applied,
             status,
             // 기존 참여 한도 계산의 0주 결정만 표식으로 남긴다. 문구를 해석하지 않는다.
-            reason_code: cap_zero.then(|| "liquidity_cap_zero".to_string()),
+            reason_code: cap_zero.then(|| LIQUIDITY_CAP_ZERO.to_string()),
             cap_volume: cap_zero.then_some(bar.liquidity_volume),
             no_price: false,
         })

@@ -58,6 +58,17 @@ class CorporateActionType(Enum):
     SHARE_COUNT_CHANGE = "share_count_change"  # 주식 수 변화만 확인 (가격 미확인) — 알림 전용
 
 
+# 유동성 한도가 0주라 체결되지 않은 주문 상태 이벤트의 사유 코드(#411). Rust 세션도 같은 값을
+# 내며 두 코어 결과는 `tests/test_order_diagnostics.py`가 대조한다.
+LIQUIDITY_CAP_ZERO = "liquidity_cap_zero"
+
+# 가격 반비례가 확인되어 엔진이 보유 수량·대기 주문에 적용하는 사건(알림 전용 제외)의 정본.
+# workbench domain의 `PRICE_ADJUSTING_ACTIONS`(문자열)는 어댑터 테스트가 이 집합과 대조한다.
+PRICE_ADJUSTING_ACTION_TYPES = frozenset(
+    {CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT}
+)
+
+
 @dataclass(frozen=True)
 class CorporateActionEvent:
     """상장주식수 변동 사건 통지 (D1).

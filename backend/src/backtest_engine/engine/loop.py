@@ -91,8 +91,8 @@ from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.ports.universe import UniverseResult
 from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import (
+    PRICE_ADJUSTING_ACTION_TYPES,
     CorporateActionEvent,
-    CorporateActionType,
     FillEvent,
     OrderStatus,
     OrderUpdateEvent,
@@ -484,8 +484,7 @@ class BacktestEngine:
                     action.action_type.value,
                     str(action.ratio),
                     str(action.ts),
-                    action.action_type
-                    in (CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT),
+                    action.action_type in PRICE_ADJUSTING_ACTION_TYPES,
                 )
             )
         store.bind_corporate_actions(corporate_actions)
@@ -1104,10 +1103,7 @@ class BacktestEngine:
     ) -> None:
         # _settlement_session이 bar 존재를 보장한다. 기록·적용 시각은 정산 세션이다.
         run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION, action)
-        confirmed = action.action_type in (
-            CorporateActionType.SPLIT,
-            CorporateActionType.REVERSE_SPLIT,
-        )
+        confirmed = action.action_type in PRICE_ADJUSTING_ACTION_TYPES
         order_manager = self._orders(run)
         remaining_by_id = {
             entry.order_id: entry.remaining for entry in order_manager.open_entries()

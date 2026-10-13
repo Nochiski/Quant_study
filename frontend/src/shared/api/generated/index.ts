@@ -533,6 +533,7 @@ export type {
   RawCost,
   RawFill,
   RawOrder,
+  RawOrderUpdate,
   RawPosition,
   RawRounding,
   RawSnapshot,

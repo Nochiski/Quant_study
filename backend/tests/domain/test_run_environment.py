@@ -26,9 +26,8 @@ from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     SellTax,
     cost_history_sessions,
+    cost_inputs,
     environment_hash,
-    impact_scales,
-    participation_volumes,
     require_environment,
     run_environment_schema,
     run_environment_schema_hash,
@@ -381,7 +380,12 @@ def test_session_volume_basis_leaves_the_engine_on_session_volume() -> None:
     environment = replace(_environment(), participation_basis=ParticipationBasis.SESSION_VOLUME)
 
     assert cost_history_sessions(environment) == 0
-    assert participation_volumes(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)]) is None
+    assert (
+        cost_inputs(
+            environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], {}
+        ).participation_volumes
+        is None
+    )
 
 
 def test_adv20_gives_no_room_until_twenty_prior_rows_have_a_traded_value() -> None:
@@ -397,9 +401,9 @@ def test_adv20_gives_no_room_until_twenty_prior_rows_have_a_traded_value() -> No
         (date(2024, 1, 5), "A", 40.0, 8_000.0),
     ]
 
-    volumes = participation_volumes(
-        replace(_environment(), participation_basis=ParticipationBasis.ADV20), reversed(rows)
-    )
+    volumes = cost_inputs(
+        replace(_environment(), participation_basis=ParticipationBasis.ADV20), reversed(rows), {}
+    ).participation_volumes
 
     assert volumes == {key: 0 for key in ((row[0], row[1]) for row in rows)}
 
@@ -421,7 +425,7 @@ def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
         (session, "A", 10.0, None if k == 6 else 100.0 * k) for k, session in enumerate(sessions, 1)
     ] + [(session, "B", 5.0, 1_000.0) for session in sessions[:21]]
 
-    volumes = participation_volumes(environment, reversed(rows))
+    volumes = cost_inputs(environment, reversed(rows), {}).participation_volumes
 
     assert volumes is not None
     assert [volumes[(sessions[index], "A")] for index in (20, 21, 22)] == [0, 112, 123]
@@ -449,7 +453,7 @@ def test_adv20_warmup_reads_past_suspended_days_so_the_start_date_does_not_zero_
 
     def limit(first_read: int) -> int | None:
         read = [row for row in rows if row[0] >= sessions[first_read - 1]]
-        volumes = participation_volumes(environment, read)
+        volumes = cost_inputs(environment, read, {}).participation_volumes
         return None if volumes is None else volumes[(sessions[-1], "A")]
 
     assert history == 40
@@ -465,7 +469,10 @@ def test_fixed_bps_impact_leaves_the_engine_on_fixed_slippage() -> None:
 
     assert environment.impact_model is ImpactModel.FIXED_BPS
     assert cost_history_sessions(environment) == 40
-    assert impact_scales(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], {}) is None
+    assert (
+        cost_inputs(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], {}).impact_scales
+        is None
+    )
 
 
 def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
@@ -489,7 +496,7 @@ def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
     ]
     environment = replace(_environment(), impact_model=ImpactModel.SQRT, impact_coefficient=0.5)
 
-    scales = impact_scales(environment, reversed(rows), {})
+    scales = cost_inputs(environment, reversed(rows), {}).impact_scales
 
     assert scales is not None
     assert {key: scale for key, scale in scales.items() if key[0] < date(2024, 1, 5)} == {
@@ -515,7 +522,7 @@ def test_sqrt_adv_below_one_share_still_prices_impact() -> None:
     ]
     environment = replace(_environment(), impact_model=ImpactModel.SQRT)
 
-    scales = impact_scales(environment, rows, {})
+    scales = cost_inputs(environment, rows, {}).impact_scales
 
     assert scales is not None
     assert scales[(date(2024, 1, 5), "A")] == pytest.approx(math.sqrt(0.02) / math.sqrt(50 / 99))
@@ -538,9 +545,9 @@ def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action
     ]
     environment = replace(_environment(), impact_model=ImpactModel.SQRT)
 
-    plain = impact_scales(environment, rows, {})
+    plain = cost_inputs(environment, rows, {}).impact_scales
     # 100 → 200 은 2주를 1주로 합친 병합(구주 1주당 신주 0.5주)이다.
-    adjusted = impact_scales(environment, rows, {(sessions[1], "A"): 0.5})
+    adjusted = cost_inputs(environment, rows, {(sessions[1], "A"): 0.5}).impact_scales
 
     # σ 창(종가 21개)이 참여 기준 `adv20`(20행)보다 길어 21 × 여유 2 를 읽는다.
     assert cost_history_sessions(environment) == 42
@@ -605,7 +612,7 @@ def test_a_split_on_a_halted_session_stays_out_of_the_sqrt_volatility() -> None:
     environment = replace(_environment(), impact_model=ImpactModel.SQRT)
 
     settled = settlement_multipliers(rows, [(date(2024, 1, 5), "A", 2.0)])
-    scales = impact_scales(environment, rows, settled)
+    scales = cost_inputs(environment, rows, settled).impact_scales
 
     assert settled == {(date(2024, 1, 8), "A"): 2.0}
     assert scales is not None
@@ -630,9 +637,9 @@ def test_the_adv_on_a_settlement_row_is_counted_in_post_action_shares() -> None:
     ]
     environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
 
-    volumes = participation_volumes(
+    volumes = cost_inputs(
         environment, rows, settlement_multipliers(rows, [(sessions[20], "A", 0.1)])
-    )
+    ).participation_volumes
 
     assert volumes is not None
     assert (volumes[(sessions[20], "A")], volumes[(sessions[21], "A")]) == (10, 10)

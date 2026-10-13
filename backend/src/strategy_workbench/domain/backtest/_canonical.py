@@ -14,7 +14,7 @@ from ._models import BacktestRunSpec, RunEnvironment
 # 지문으로 옛 규칙의 결과를 공유한다.
 # v4(#342 DOMAIN-V2-02): 참여 한도의 ADV 는 거래대금이 있는 앞선 행 20개가 다 차야 주고, 워밍업은
 # 40세션을 읽는다.
-ENGINE_RULES_VERSION = "backtest-engine-v4"
+ENGINE_RULES_VERSION = "backtest-engine-v5"
 
 
 def backtest_run_fingerprint(

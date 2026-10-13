@@ -31,7 +31,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunSummary,
     BacktestStartResponse,
     RunKind,
-    RunStatus,
     TrialLedger,
     TrialLineageAlreadyMergedError,
     TrialPreview,
@@ -260,11 +259,7 @@ async def _backtest_event_stream(
         # 두 조회는 SQLite 쓰기와 공유하는 서비스 잠금을 기다릴 수 있다.
         # 순서를 보존하되 이벤트 루프가 아니라 동기 작업 스레드에서 기다린다.
         state = await run_in_threadpool(backtest_runs.state, run_id)
-        settled = state.status in (
-            RunStatus.COMPLETED,
-            RunStatus.CANCELLED,
-            RunStatus.FAILED,
-        )
+        settled = state.status.is_terminal
         events = await run_in_threadpool(backtest_runs.events, run_id, after_sequence=sequence)
         for event in events:
             sequence = event.sequence

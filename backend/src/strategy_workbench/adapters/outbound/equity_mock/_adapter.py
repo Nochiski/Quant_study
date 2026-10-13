@@ -27,7 +27,6 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
     DataSnapshot,
-    FieldValueType,
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
@@ -39,7 +38,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
-    NodeValueType,
+    field_metadata,
 )
 
 from ._fixture import (
@@ -106,16 +105,7 @@ class MockEquityDataAdapter:
             profile = profile_by_id.get(field_id)
             if profile is not None:
                 fields.append(
-                    FieldMetadata(
-                        field_id=field_id,
-                        unit=profile.unit,
-                        value_type=(
-                            NodeValueType.GROUP_SERIES
-                            if profile.value_type is FieldValueType.CATEGORY
-                            else NodeValueType.NUMERIC_SERIES
-                        ),
-                        adjusted_field_id=ADJUSTED_FIELD_BY_RAW.get(field_id),
-                    )
+                    field_metadata(profile, ADJUSTED_FIELD_BY_RAW.get(field_id))
                 )
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot.snapshot_id,

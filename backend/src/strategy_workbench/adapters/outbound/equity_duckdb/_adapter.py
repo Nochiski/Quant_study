@@ -118,7 +118,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
-    NodeValueType,
+    field_metadata,
 )
 
 from ._source import (
@@ -1117,12 +1117,7 @@ class EquityDuckdbAdapter:
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot_id,
             fields=tuple(
-                FieldMetadata(
-                    field_id=field_id,
-                    unit=self._fields[field_id].unit,
-                    value_type=NodeValueType.NUMERIC_SERIES,
-                    adjusted_field_id=self._fields[field_id].adjusted_field_id,
-                )
+                field_metadata(self._fields[field_id], self._fields[field_id].adjusted_field_id)
                 for field_id in field_ids
                 if field_id in self._fields
             ),
@@ -1155,7 +1150,6 @@ class EquityDuckdbAdapter:
             field_id: FIELD_NOT_PROVIDED if field_id in self._profile else FIELD_NOT_IN_LEDGER
             for field_id in UNSUPPORTED_FIELDS
         }
-
 
     # ── RawObservationPort ────────────────────────────────────────────────────
 

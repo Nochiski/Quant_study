@@ -3263,8 +3263,8 @@ export type PanelPreviewCostEstimate = {
  *
  * 탐색 축 값과 다른 탐색 축 값(`right_parameter`) 또는 상수(`right_value`)의 관계.
  *
- * 둘 중 정확히 하나를 쓴다. 순서 비교(`lt`·`le`·`gt`·`ge`)는 숫자끼리만, 선택지는 `eq`·`ne`만
- * 받는다.
+ * 둘 중 정확히 하나를 쓴다. 비교하는 두 쪽은 같은 종류(유한한 숫자끼리, 또는 같은 타입의 선택지
+ * 값끼리)여야 하고, 크기 비교(`lt`·`le`·`gt`·`ge`)는 숫자 값끼리만 한다.
  */
 export type ParameterConstraint = {
   /**

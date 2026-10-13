@@ -688,7 +688,7 @@ test.describe("professional YAML workflow", () => {
     await initialCash.fill("0");
     await expect(backtest(workflow)).toBeDisabled();
     await expect(
-      workflow.getByRole("region", { name: "실행 설정 요약" }),
+      runSettingsInputs(workflow).summary,
     ).toContainText(
       "실행 설정의 초기 자본 칸을 고치세요: 0보다 큰 숫자를 입력하세요.",
     );

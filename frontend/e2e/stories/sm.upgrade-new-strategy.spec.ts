@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { getStrategyDocument } from "../../src/shared/api/generated";
 import {
+  runSettingsInputs,
   apiClient,
   backtest,
   currentSource,
@@ -49,7 +50,7 @@ test(
   async ({ page }) => {
     test.setTimeout(300_000);
     const banner = upgradeBanner(page);
-    const summary = page.getByRole("region", { name: "실행 설정 요약" });
+    const summary = runSettingsInputs(page).summary;
 
     // 새 화면에 1.1 원문을 붙여 넣는다. 저장도 실행도 막히고 배너만 길을 연다.
     await openEditor(page, "/research/strategies/new");

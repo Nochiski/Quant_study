@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import asdict, fields, replace
+from dataclasses import asdict, fields, is_dataclass, replace
 from datetime import date
 from enum import Enum
 from typing import Any
@@ -138,27 +138,35 @@ def _structural(spec: StrategySpec) -> StrategySpec:
     부동소수를 더해(`domain/portfolio/_compiler.py`) 순서가 결과 끝자리에 닿을 수 있다.
     """
     numbers = {factor.factor_id: str(index) for index, factor in enumerate(spec.factors)}
-    risk_factor_id = spec.risk.risk_factor_id
-    tie_factor_id = spec.portfolio.tie_breaker_factor_id
-    return replace(
+    renamed = replace(
         spec,
         factors=tuple(
             replace(factor, factor_id=str(index), graph=_structural_graph(factor.graph))
             for index, factor in enumerate(spec.factors)
         ),
-        portfolio=replace(
-            spec.portfolio,
-            tie_breaker_factor_id=None
-            if tie_factor_id is None
-            else numbers.get(tie_factor_id, tie_factor_id),
-        ),
-        risk=replace(
-            spec.risk,
-            risk_factor_id=None
-            if risk_factor_id is None
-            else numbers.get(risk_factor_id, risk_factor_id),
-        ),
     )
+    return _factor_references(renamed, numbers)
+
+
+def _factor_references(value: Any, numbers: Mapping[str, str]) -> Any:
+    """팩터 참조 메타데이터를 읽는다. 새 참조 필드도 이름이 아닌 선언 위치로 해시한다."""
+    if is_dataclass(value) and not isinstance(value, type):
+        changes = {}
+        for item in fields(value):
+            current = getattr(value, item.name)
+            changes[item.name] = (
+                (None if current is None else numbers.get(current, current))
+                if item.metadata.get("reference") == "factor"
+                else _factor_references(current, numbers)
+            )
+        return replace(value, **changes)
+    if isinstance(value, tuple):
+        return tuple(_factor_references(item, numbers) for item in value)
+    if isinstance(value, list):
+        return [_factor_references(item, numbers) for item in value]
+    if isinstance(value, dict):
+        return {key: _factor_references(item, numbers) for key, item in value.items()}
+    return value
 
 
 def _structural_graph(graph: FactorGraph) -> FactorGraph:

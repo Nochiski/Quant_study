@@ -1,10 +1,8 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import { messages } from "../../../shared/config";
 import { parseSource } from "../../../shared/lib/yaml12";
-import { backendFixturePath } from "../../../shared/testing/backend-fixtures";
+import { readOpenApi } from "../../../shared/testing/openapi-codes";
 import {
   documentReducer,
   initialDocumentState,
@@ -183,16 +181,7 @@ describe("upgradeWarningTitle (P3-01)", () => {
   it("covers the OpenAPI warning code enum in both locales", () => {
     // 실행 시 계약 파일(backend `openapi.json`)과 대조한다: 생성 SDK 를 다시 만들지 않은 채 enum 이
     // 늘어도 여기서 드러난다.
-    const openapi = JSON.parse(
-      readFileSync(backendFixturePath("../../openapi.json"), "utf8"),
-    ) as {
-      components: {
-        schemas: {
-          UpgradeWarning: { properties: { code: { enum: UpgradeWarningCode[] } } };
-        };
-      };
-    };
-    const codes = openapi.components.schemas.UpgradeWarning.properties.code.enum;
+    const codes = readOpenApi().components.schemas.UpgradeWarning.properties?.code.enum ?? [];
 
     expect(codes.length).toBeGreaterThan(0);
     const missing = codes.flatMap((code) => {

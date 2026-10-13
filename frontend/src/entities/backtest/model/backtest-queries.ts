@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   queryOptions,
   skipToken,
@@ -13,7 +14,8 @@ import {
   type RunKind,
 } from "../../../shared/api";
 
-const terminal = new Set(["completed", "cancelled", "failed"]);
+import { runEnvironmentFields } from "./run-environment-fields";
+import { RUN_STATUS } from "./run-status";
 
 // 실행 상태 폴링 간격(#161). 짧은 run 은 곧 끝나므로 처음 몇 번은 빠르게, 그 뒤로는 1초마다 묻는다.
 // 실데이터 tape 는 수십 초라 250ms 고정이면 run 한 건에 수백 번 GET 이 나간다.
@@ -48,7 +50,7 @@ export const backtestHistoryQuery = (
     ],
     queryFn: () => strategyWorkbenchApi.listBacktests(page),
     refetchInterval: (query) =>
-      query.state.data?.items.some((item) => !terminal.has(item.run.status))
+      query.state.data?.items.some((item) => RUN_STATUS[item.run.status].active)
         ? 1_000
         : false,
   });
@@ -64,8 +66,14 @@ export const runEnvironmentSchemaQuery = () =>
     staleTime: 5 * 60_000,
   });
 
-export const useRunEnvironmentSchema = () =>
-  useQuery(runEnvironmentSchemaQuery());
+export const useRunEnvironmentSchema = () => {
+  const schema = useQuery(runEnvironmentSchemaQuery());
+  const environmentFields = useMemo(
+    () => schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
+    [schema.data],
+  );
+  return { ...schema, environmentFields };
+};
 
 const trialPreviewKey = () => ["backtest", "trial-preview"] as const;
 const trialLedgerKey = () => ["backtest", "trial-ledger"] as const;
@@ -131,7 +139,8 @@ export const useBacktestStatus = (runId: string | null) =>
     queryFn: () => strategyWorkbenchApi.getBacktestStatus(runId ?? ""),
     enabled: runId !== null,
     refetchInterval: (query) =>
-      query.state.data !== undefined && terminal.has(query.state.data.status)
+      query.state.status === "error" ||
+      (query.state.data !== undefined && !RUN_STATUS[query.state.data.status].active)
         ? false
         : query.state.dataUpdateCount < STATUS_POLL_FAST_READS
           ? STATUS_POLL_FAST_MS

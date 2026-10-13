@@ -328,14 +328,6 @@
   font-size: 15px;
 }
 
-/* outline shell; the document projection is owned by edit-strategy (P4-01). */
-.ide__outline-placeholder {
-  margin: 0;
-  padding: 0 var(--space-3) var(--space-3);
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-}
-
 /* snippets */
 .ide__snippets {
   padding: var(--space-3);
@@ -346,153 +338,6 @@
   font-size: var(--text-size-body);
 }
 
-.ide__snippet-list {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ide__snippet {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-medium);
-  background: var(--surface-panel);
-  color: var(--text);
-  font-size: var(--text-size-small);
-  text-align: left;
-}
-
-.ide__snippet:disabled {
-  color: var(--text-muted);
-  cursor: not-allowed;
-}
-
-.ide__snippet-plus {
-  margin-left: auto;
-  color: var(--text-subtle);
-}
-
-.ide__card {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-medium);
-  background: var(--surface-raised);
-}
-
-.ide__card--ok {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.ide__card-detail {
-  flex-basis: 100%;
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
-}
-
-.ide__sample-note {
-  margin: 0;
-  color: var(--text-subtle);
-}
-
-/* intermediate results */
-.ide__results {
-  display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  gap: var(--space-4);
-  flex: 1;
-  min-height: 0;
-  padding: 0 var(--space-4) var(--space-4);
-  overflow: auto;
-}
-
-.ide__results-summary {
-  display: grid;
-  gap: var(--space-3);
-  align-content: start;
-}
-
-.ide__selector {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-medium);
-  background: var(--surface-panel);
-  color: var(--text);
-  font-size: var(--text-size-small);
-  text-align: left;
-}
-
-.ide__selector:disabled {
-  cursor: not-allowed;
-}
-
-.ide__before-after {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: 0;
-  font-size: 15px;
-}
-
-.ide__before-after strong {
-  font-size: 22px;
-}
-
-.ide__value--warn {
-  color: var(--status-warn);
-}
-
-.ide__value--ok {
-  color: var(--accent);
-}
-
-.ide__results-table {
-  min-width: 0;
-  overflow-x: auto;
-}
-
-.ide__table {
-  width: 100%;
-  margin-top: var(--space-2);
-  border-collapse: collapse;
-  font-size: var(--text-size-small);
-}
-
-.ide__table th,
-.ide__table td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-
-.ide__table th {
-  color: var(--text-muted);
-  font-weight: 600;
-  background: var(--surface-raised);
-}
-
-.ide__table td:nth-child(n + 2):nth-child(-n + 4) {
-  text-align: right;
-}
-
-.ide__row--warn {
-  background: var(--status-warn-soft);
-}
 
 /*
  * 오른쪽 서랍 — 1280px 미만, 또는 편집기 최소 폭 때문에 오른쪽 패널이 붙지 못할 때 뜬다. 본문
@@ -545,11 +390,6 @@
   bottom: var(--ide-gutter);
 }
 
-@media (max-width: 1279px) {
-  .ide__results {
-    grid-template-columns: 1fr;
-  }
-}
 
 .ide__revision-diff {
   padding: var(--space-3) var(--space-4);

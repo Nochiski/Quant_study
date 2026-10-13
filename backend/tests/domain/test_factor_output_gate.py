@@ -24,7 +24,14 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     FactorObservation,
     evaluate_factor_graph,
 )
-from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.expression import (
+    ConditionalNode,
+    ConstantNode,
+    FactorGraph,
+    FieldMetadata,
+    MissingPolicy,
+    NodeValueType,
+)
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
@@ -37,11 +44,6 @@ from strategy_workbench.domain.strategy.facade.promotion import (
     synthesized_factor_nodes,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
-    ConditionalNode,
-    ConstantNode,
-    FactorGraph,
-    FieldMetadata,
-    NodeValueType,
     StrategyIdentity,
     StrategySpec,
     canonical_strategy_json,

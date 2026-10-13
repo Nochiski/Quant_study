@@ -16,15 +16,12 @@ from typing import Any
 
 import pytest
 
+from strategy_workbench.domain.factor.facade.expression import FieldMetadata
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     hydrate_strategy_document,
 )
-from strategy_workbench.domain.strategy.facade.specification import (
-    FieldMetadata,
-    StrategyIdentity,
-    StrategySpec,
-)
+from strategy_workbench.domain.strategy.facade.specification import StrategyIdentity, StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     ValidationIssue,
     ValidationSeverity,

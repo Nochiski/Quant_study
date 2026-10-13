@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 // 편집기 입력·문서 검증 대기는 e2e 와 같은 helper 를 쓴다. TS 파일이라 `npm run docs:capture`가 node 에
 // `--experimental-strip-types`를 준다.
-import { editor, expectPhase, replaceSource } from "../e2e/editor-helpers.ts";
+import { editor, expectPhase, replaceSource, RUN_ENVIRONMENT, runSettingsInputs } from "../e2e/editor-helpers.ts";
 import { backendPort, previewOrigin } from "../e2e/ports.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -42,12 +42,6 @@ const headed = process.env.WORKBENCH_MANUAL_HEADED === "1";
 // 이 파일에 직접 심는다(`frontend-testing.md`의 은퇴 row seeding 규칙).
 const databasePath = process.env.WORKBENCH_MANUAL_DB_PATH;
 
-/** e2e `workbench-helpers.ts`의 `RUN_ENVIRONMENT`와 같은 값. 그 파일은 생성 SDK 를 확장자 없이 import 해 node 가 바로 부르지 못한다. */
-const RUN_ENVIRONMENT = {
-  start: "2021-01-01",
-  end: "2026-08-31",
-  universe_id: "krx.common-stock",
-};
 /** 결과 설명(19)의 AI 공급자. backend 대본 공급자(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`)는 키를 검사하지 않는다. */
 const PROVIDER_LABEL = "Claude";
 const PROVIDER_KEY = "sk-manual-capture-key-0000";
@@ -255,7 +249,7 @@ const backtestButton = page.getByRole("button", {
   exact: true,
 });
 const settingsToggle = page.getByLabel("실행 설정 열기");
-const summaryBand = page.getByRole("region", { name: "실행 설정 요약" });
+const summaryBand = runSettingsInputs(page).summary;
 // 실행 설정 팝오버는 이름이 없다. 첫 묶음(fieldset "실행 환경")의 부모가 팝오버 전체다.
 const settingsPopover = page
   .getByRole("group", { name: "실행 환경", exact: true })

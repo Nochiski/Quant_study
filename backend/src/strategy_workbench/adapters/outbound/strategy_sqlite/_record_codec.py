@@ -14,6 +14,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     RevisionSource,
     StrategyRevisionRecord,
 )
+from strategy_workbench.domain.canonical.facade.encoding import canonical_json_spec_hash
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     SourceFormat,
@@ -24,7 +25,6 @@ from strategy_workbench.domain.strategy.facade.document import (
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
-    canonical_json_spec_hash,
     canonical_strategy_json,
 )
 

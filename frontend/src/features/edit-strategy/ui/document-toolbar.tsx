@@ -1,10 +1,11 @@
+import { failureReason } from "../../../shared/api";
 import type { ReactNode } from "react";
 
 import { backtestStartRejectionMessage } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
 import { Badge, Button, FailureNotice, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
-import type { DocumentState } from "../model/document-state";
+import { currentCompileOutcome, type DocumentState } from "../model/document-state";
 import type { RunBacktestStatus } from "../model/use-run-backtest";
 import "./document-toolbar.css";
 
@@ -24,8 +25,7 @@ type DocumentToolbarProps = {
   runFieldLabel?: (field: string) => string | null;
   /** 시작 거절을 한 번에 고치는 교정(예: 연구 구간 거절의 시작일 옮기기). 없으면 null. */
   runRejectionFix?: (
-    code: string | null,
-    values: Readonly<Record<string, string>>,
+    error: unknown,
   ) => { label: string; apply: () => void } | null;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
@@ -72,12 +72,9 @@ export const DocumentToolbar = ({
 }: DocumentToolbarProps) => {
   const fix =
     runStatus.kind === "failed" && runRejectionFix !== undefined
-      ? runRejectionFix(runStatus.code, runStatus.values)
+      ? runRejectionFix(runStatus.error)
       : null;
-  const current =
-    state.compiled !== null && state.compiledVersion === state.sourceVersion
-      ? state.compiled
-      : null;
+  const current = currentCompileOutcome(state);
   return (
     <div className="doc-toolbar">
       <dl className="doc-toolbar__identity">
@@ -155,14 +152,8 @@ export const DocumentToolbar = ({
         <FailureNotice
           className="doc-toolbar__error"
           title={t("toolbar.run.failed")}
-          message={backtestStartRejectionMessage(
-            runStatus.code,
-            runStatus.field === null || runFieldLabel === undefined
-              ? null
-              : runFieldLabel(runStatus.field),
-            runStatus.values,
-          )}
-          reason={runStatus.detail}
+          message={backtestStartRejectionMessage(runStatus.error, runFieldLabel)}
+          reason={failureReason(runStatus.error)}
         >
           {fix === null ? undefined : (
             <Button size="small" tone="primary" onClick={fix.apply}>

@@ -21,6 +21,7 @@ import {
 } from "vitest";
 
 import { App } from "../app";
+import type { ResearchCatalog } from "../../shared/api";
 
 const API = "http://localhost:8000";
 
@@ -353,8 +354,12 @@ const server = setupServer(
       page_size: 1,
       page_count: 0,
       fields: [],
-      facets: {},
-    }),
+      facets: { dataset_ids: [], frequencies: [], units: [] },
+      snapshot: {
+        snapshot_id: "snap", schema_version: "1", source: "test",
+        built_at: "2026-09-05T00:00:00Z", dataset_revisions: [], point_in_time: true,
+      },
+    } satisfies ResearchCatalog),
   ),
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec(0, "새 팩터 전략")),
@@ -1124,11 +1129,11 @@ describe("App Shell routes", () => {
       }),
     );
     mount("/research/backtests");
-    expect(await screen.findByText("running")).toBeInTheDocument();
+    expect(await screen.findByText("실행 중")).toBeInTheDocument();
     await waitFor(() => expect(requests).toBeGreaterThanOrEqual(2), {
       timeout: 2_500,
     });
-    expect((await screen.findAllByText("completed")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("완료")).length).toBeGreaterThan(0);
     const terminalRequestCount = requests;
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     expect(requests).toBe(terminalRequestCount);
@@ -1178,7 +1183,7 @@ describe("App Shell routes", () => {
     mount("/research/backtests/run-trial");
     expect(
       await screen.findByRole("status", { name: "실행 상태" }),
-    ).toHaveTextContent("completed");
+    ).toHaveTextContent("완료");
     expect(
       screen.queryByRole("link", { name: "이 실행으로 실험 만들기" }),
     ).toBeNull();
@@ -1206,7 +1211,7 @@ describe("App Shell routes", () => {
       await screen.findByRole("alert", { name: "실행 오류" }),
     ).toHaveTextContent("malformed security_id");
     expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
-      "failed",
+      "실패",
     );
   });
 
@@ -1238,7 +1243,7 @@ describe("App Shell routes", () => {
       alert.textContent?.indexOf("universe_id=") ?? -1,
     );
     expect(screen.getByRole("status", { name: "실행 진행" })).toHaveTextContent(
-      "tape · 2%",
+      "전략 목표 계산 · 2%",
     );
   });
 
@@ -1267,7 +1272,7 @@ describe("App Shell routes", () => {
     expect(alert).toHaveTextContent("유니버스 ID 와 데이터 기간을 확인하세요");
     expect(screen.queryByRole("alert", { name: "실행 오류" })).toBeNull();
     expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
-      "cancelled",
+      "취소됨",
     );
   });
 

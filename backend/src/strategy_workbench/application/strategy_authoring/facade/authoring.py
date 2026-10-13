@@ -1,4 +1,6 @@
 from strategy_workbench.application.strategy_authoring._documents import (
+    DraftDiff,
+    DraftDiffRequest,
     InvalidStrategyDocumentError,
     ReviseDocumentRequest,
     RevisionDiff,
@@ -15,7 +17,6 @@ from strategy_workbench.application.strategy_authoring._drafts import (
     StrategyDraftService,
 )
 from strategy_workbench.application.strategy_authoring._service import (
-    DRAFT_IDENTITY,
     CompiledDocument,
     CompileRequest,
     DocumentNotUpgradeableError,
@@ -32,7 +33,8 @@ from strategy_workbench.application.strategy_authoring._service import (
 )
 
 __all__ = [
-    "DRAFT_IDENTITY",
+    "DraftDiff",
+    "DraftDiffRequest",
     "CompileRequest",
     "CompiledDocument",
     "DocumentNotUpgradeableError",

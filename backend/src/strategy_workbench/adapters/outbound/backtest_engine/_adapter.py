@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
@@ -17,7 +15,7 @@ from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
-    CostKind,
+    OrderUpdateEvent,
     StrategyEvent,
 )
 from backtest_engine.types.instruments import AssetClass, InstrumentId
@@ -40,7 +38,6 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 from strategy_workbench.domain.analytics.facade.metrics import (
     BASE_RATE_CONFIRMED_ON,
     AnalysisPoint,
-    AnalyticsInput,
     MetricRegistry,
     MetricUnavailableReason,
     TradeOutcome,
@@ -50,12 +47,14 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     MAX_IMPACT_FRACTION,
+    PRICE_ADJUSTING_ACTIONS,
     ImpactModel,
     ParticipationBasis,
     RunEnvironment,
+    cost_history_sessions,
+    cost_inputs,
     environment_hash,
-    impact_scales,
-    participation_volumes,
+    impact_input_warnings,
     sell_tax_schedule,
     settlement_multipliers,
 )
@@ -68,12 +67,17 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawCost,
     RawFill,
     RawOrder,
+    RawOrderUpdate,
     RawPosition,
     RawRounding,
     RawSnapshot,
-    RawTrade,
     RunManifest,
     backtest_run_fingerprint,
+)
+from strategy_workbench.domain.backtest.facade.trade_analytics import (
+    analytics_input,
+    closed_trades,
+    slice_analytics,
 )
 from strategy_workbench.domain.portfolio.facade.construction import TargetTape
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
@@ -215,19 +219,7 @@ class BacktestEngineExecutorAdapter:
         if request.dataset.data_snapshot_id != request.target_tape.data_snapshot_id:
             raise ValueError("dataset snapshot does not match the compiled target tape")
         strategy = request.spec.strategy
-        if strategy is None:
-            raise ValueError(
-                "execution request must carry a resolved strategy — "
-                f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
-            )
-        # 비용·체결 파라미터는 실행 설정이 소유한다(P2-01). 요청자가 명시한 값이 엔진에 닿지
-        # 않으면 매니페스트에 적힌 수수료와 실제로 돌린 수수료가 달라진다.
         environment = request.spec.environment
-        if environment is None:
-            raise ValueError(
-                "execution request must carry a resolved run environment — "
-                f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
-            )
         self._check_cancelled(cancelled)
         started_at = datetime.now(UTC)
         # 진행 값은 이 실행기 작업 안의 완료 비율(0~1)이다(`ProgressCallback` 계약). 준비 0.35,
@@ -256,10 +248,14 @@ class BacktestEngineExecutorAdapter:
             for item in request.dataset.corporate_actions
         )
         # 비용 계산(참여 기준 ADV·충격 σ)은 워밍업 행까지 판단일 순서로 읽는다.
-        cost_rows = [
-            (item.session, item.security_id, item.close, item.trading_value)
-            for item in (*request.dataset.history_bars, *request.dataset.bars)
-        ]
+        cost_rows = (
+            [
+                (item.session, item.security_id, item.close, item.trading_value)
+                for item in (*request.dataset.history_bars, *request.dataset.bars)
+            ]
+            if cost_history_sessions(environment)
+            else []
+        )
         # 자본변동은 엔진처럼 사건 세션 이후 그 종목의 첫 행에서 정산된다(#339). 가격이 반비례로
         # 확인된 사건만 판단일 종가를 정산 뒤 주식 단위로 바꾼다.
         settled = settlement_multipliers(
@@ -268,13 +264,16 @@ class BacktestEngineExecutorAdapter:
                 (
                     item.session,
                     item.security_id,
-                    float(item.ratio) if item.action_type in _PRICE_ADJUSTING_ACTIONS else 1.0,
+                    float(item.ratio) if item.action_type in PRICE_ADJUSTING_ACTIONS else 1.0,
                 )
                 for item in (
                     *request.dataset.history_corporate_actions,
                     *request.dataset.corporate_actions,
                 )
             ),
+        )
+        costs = cost_inputs(
+            environment, cost_rows, settled, checkpoint=lambda: self._check_cancelled(cancelled)
         )
         engine = BacktestEngine(
             RunConfig(
@@ -290,7 +289,6 @@ class BacktestEngineExecutorAdapter:
                 if environment.impact_model is ImpactModel.SQRT
                 else FixedBpsSlippage(environment.slippage_bps)
             ),
-            max_participation=environment.participation_rate,
             core=request.spec.core.value,
         )
         try:
@@ -303,8 +301,8 @@ class BacktestEngineExecutorAdapter:
                 ),
                 _columnar_feed(
                     request.dataset.bars,
-                    participation_volumes(environment, cost_rows, settled),
-                    impact_scales(environment, cost_rows, settled),
+                    costs.participation_volumes,
+                    costs.impact_scales,
                 ),
                 corporate_actions=corporate_actions,
                 universe=universe,
@@ -314,10 +312,10 @@ class BacktestEngineExecutorAdapter:
             raise EquityWipedOutError(str(error)) from error
         self._check_cancelled(cancelled)
         progress(0.78, "Calculating professional metrics")
-        # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw
-        # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
+        # 대량 시세·체결은 columnar 테이블로 받고 주문 상태는 원본 이벤트 조회로 보존한다.
+        # 상태 사유는 adapter에서 문구를 해석하거나 다시 판정하지 않는다.
         tables = engine.event_store.result_tables()
-        artifacts, outcomes = _artifacts(tables)
+        artifacts, outcomes = _artifacts(tables, engine.event_store.order_updates())
         run_sessions = tuple(item.session for item in artifacts.snapshots)
         benchmark, carried = _benchmark_series(
             request.dataset, request.spec.initial_cash, run_sessions
@@ -333,17 +331,7 @@ class BacktestEngineExecutorAdapter:
             )
             for item in artifacts.snapshots
         )
-        full_input = AnalyticsInput(
-            points=points,
-            traded_notional=tables.fill_totals.traded_notional,
-            trades=outcomes,
-            total_fees=tables.fill_totals.total_fees,
-            total_taxes=sum(item.amount for item in artifacts.costs if item.kind == _SELL_TAX),
-            total_slippage_cost=tables.fill_totals.total_slippage_cost,
-            total_carry_cost=sum(
-                item.amount for item in artifacts.costs if item.kind in _CARRY_COSTS
-            ),
-        )
+        full_input = analytics_input(points, artifacts.fills, artifacts.costs, outcomes)
         full = compute_analytics(
             full_input,
             self._registry,
@@ -351,7 +339,7 @@ class BacktestEngineExecutorAdapter:
         )
         metrics = list(full.metrics)
         for window in request.spec.metric_windows:
-            window_input = _slice_analytics(full_input, artifacts, window.start, window.end)
+            window_input = slice_analytics(full_input, artifacts, window.start, window.end)
             if window_input.points:
                 metrics.extend(
                     compute_analytics(
@@ -377,7 +365,6 @@ class BacktestEngineExecutorAdapter:
                 run_id=request.run_id,
                 created_at=started_at,
                 completed_at=datetime.now(UTC),
-                engine_core=request.spec.core,
                 engine_version=ENGINE_RULES_VERSION,
                 run_fingerprint=backtest_run_fingerprint(
                     request.spec,
@@ -385,17 +372,17 @@ class BacktestEngineExecutorAdapter:
                     target_tape_hash=request.target_tape.tape_hash,
                     engine_version=ENGINE_RULES_VERSION,
                     metric_registry_version=self._registry.version,
+                    factor_evaluation_version=request.target_tape.factor_evaluation_version,
                 ),
-                run_spec=request.spec,
+                run_spec=request.spec.to_wire(
+                    strategy_source=request.strategy_source,
+                    lineage_strategy_id=request.lineage_strategy_id,
+                ),
                 strategy_hash=request.target_tape.strategy_hash,
                 data_snapshot_id=request.dataset.data_snapshot_id,
                 target_tape_hash=request.target_tape.tape_hash,
                 metric_registry_version=self._registry.version,
-                initial_cash=request.spec.initial_cash,
-                annualization_days=request.spec.annualization_days,
-                fee_bps=environment.fee_bps,
-                slippage_bps=environment.slippage_bps,
-                participation_rate=environment.participation_rate,
+                factor_evaluation_version=request.target_tape.factor_evaluation_version,
                 environment=environment,
                 environment_hash=environment_hash(environment),
                 strategy_provenance=request.strategy_provenance,
@@ -404,6 +391,7 @@ class BacktestEngineExecutorAdapter:
                     *_benchmark_warnings(request.dataset, run_sessions, benchmark, carried),
                     *_base_rate_warnings(full.base_rate_carried_sessions),
                     *_participation_warnings(environment),
+                    *impact_input_warnings(costs, artifacts.fills),
                 ),
             ),
             metric_definitions=self._registry.definitions(),
@@ -424,18 +412,8 @@ class BacktestEngineExecutorAdapter:
             raise RunCancelledError("run cancelled")
 
 
-# 비용 기록의 kind 를 지표로 나눈다. 매도 거래세는 `total_taxes`, 대차 비용·신용 이자는
-# `total_carry_cost` 다.
-_SELL_TAX = CostKind.SELL_TAX.value
-_CARRY_COSTS = frozenset({CostKind.SHORT_BORROW.value, CostKind.MARGIN_INTEREST.value})
-
 # 엔진이 보유 수량에 적용하는 확인된 사건(`_apply_corporate_action`)과 같은 집합이다. 알림 전용
 # 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
-_PRICE_ADJUSTING_ACTIONS = frozenset(
-    {CorporateActionType.SPLIT.value, CorporateActionType.REVERSE_SPLIT.value}
-)
-
-
 def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[date, float]:
     """벤치마크 종목을 첫 세션에 `initial_cash`어치 사서 들고 있는 곡선.
 
@@ -453,22 +431,19 @@ def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[dat
     )
     if not bars:
         return {}
-    actions = sorted(
+    settled = settlement_multipliers(
+        ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
         (
-            (item.session, float(item.ratio))
+            (item.session, item.security_id, float(item.ratio))
             for item in dataset.corporate_actions
-            if item.security_id == benchmark_id and item.action_type in _PRICE_ADJUSTING_ACTIONS
+            if item.security_id == benchmark_id and item.action_type in PRICE_ADJUSTING_ACTIONS
         ),
-        key=lambda item: item[0],
     )
     values: dict[date, float] = {}
     cumulative = 1.0
-    applied = 0
     base: float | None = None
     for bar in bars:
-        while applied < len(actions) and actions[applied][0] <= bar.session:
-            cumulative *= actions[applied][1]
-            applied += 1
+        cumulative *= settled.get((bar.session, benchmark_id), 1.0)
         adjusted = bar.close * cumulative
         if base is None:
             base = adjusted
@@ -663,7 +638,10 @@ def _base_rate_warnings(carried: Sequence[date]) -> tuple[DataWarning, ...]:
     )
 
 
-def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
+def _artifacts(
+    tables: ResultTables,
+    updates: Sequence[OrderUpdateEvent] | None = None,
+) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
     """엔진 결과 테이블을 워크벤치 raw artifact로 옮긴다.
 
     세션 날짜와 종목 코드는 행마다 다시 만들지 않는다 — position 행이 세션 × 보유 종목 수라
@@ -735,6 +713,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             fee=fee,
             slippage_per_share=slippage_per_share,
             cap_volume=cap_volume,
+            sell_tax=fill_tax,
         )
         for (
             fill_id,
@@ -747,6 +726,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             fee,
             slippage_per_share,
             cap_volume,
+            fill_tax,
         ) in tables.fills
     )
     raw_costs = tuple(
@@ -767,7 +747,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
         )
         for session_index, instrument_index, target_notional, rounded_notional in tables.roundings
     )
-    trades = _closed_trades(tables, session_dates, security_ids)
+    trades = closed_trades(fills, raw_costs)
     outcomes = tuple(
         TradeOutcome(
             security_id=item.security_id,
@@ -779,141 +759,27 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
         for item in trades
     )
     return (
-        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades, roundings),
-        outcomes,
-    )
-
-
-@dataclass
-class _OpenTrade:
-    quantity: float
-    average_price: float
-    opened_on: date
-    opening_fees: float
-    opening_slippage: float
-
-
-def _closed_trades(
-    tables: ResultTables,
-    session_dates: tuple[date, ...],
-    security_ids: tuple[str, ...],
-) -> tuple[RawTrade, ...]:
-    sessions = tables.sessions
-    states: dict[str, _OpenTrade] = {}
-    trades: list[RawTrade] = []
-    # 거래 단위 비용(`fees`)은 매도 거래세를 포함한다. 엔진은 매도 체결마다 거래세 기록을 그 체결
-    # 바로 뒤에 하나씩 남기므로, 같은 세션·종목의 기록을 체결 순서대로 짝짓는다.
-    taxes: dict[tuple[int, int], deque[float]] = {}
-    for session_index, kind, instrument_index, amount in tables.costs:
-        if kind == _SELL_TAX and instrument_index is not None:
-            taxes.setdefault((session_index, instrument_index), deque()).append(amount)
-    # `(세션 ts, fill_id)` 순서 — 세션 index는 feed 정렬 순서라 ts 정렬과 결과가 같다.
-    for row in sorted(tables.fills, key=lambda item: (sessions[item[2]], item[0])):
-        (
-            _fill_id,
-            _order_id,
-            session_index,
-            instrument_index,
-            side,
-            quantity,
-            price,
-            fee,
-            slippage_per_share,
-            _cap_volume,
-        ) = row
-        security_id = security_ids[instrument_index]
-        session = session_dates[session_index]
-        pending_taxes = taxes.get((session_index, instrument_index))
-        if side == "sell" and pending_taxes:
-            fee += pending_taxes.popleft()
-        delta = float(quantity) * (1 if side == "buy" else -1)
-        slip = float(quantity) * abs(slippage_per_share)
-        state = states.get(security_id)
-        if state is None or state.quantity == 0 or state.quantity * delta > 0:
-            current_quantity = abs(state.quantity) if state is not None else 0.0
-            added = abs(delta)
-            total = current_quantity + added
-            states[security_id] = _OpenTrade(
-                quantity=(1 if delta > 0 else -1) * total,
-                average_price=(
-                    ((state.average_price * current_quantity) if state is not None else 0.0)
-                    + price * added
+        RawArtifactBundle(
+            snapshots,
+            positions,
+            orders,
+            fills,
+            raw_costs,
+            trades,
+            roundings,
+            order_updates=None
+            if updates is None
+            else tuple(
+                RawOrderUpdate(
+                    item.ts.date(),
+                    item.order_id,
+                    item.status.value,
+                    item.detail,
+                    item.reason_code,
+                    item.cap_volume,
                 )
-                / total,
-                opened_on=state.opened_on if state is not None else session,
-                opening_fees=(state.opening_fees if state is not None else 0.0) + fee,
-                opening_slippage=(state.opening_slippage if state is not None else 0.0) + slip,
-            )
-            continue
-        open_quantity = abs(state.quantity)
-        fill_quantity = abs(delta)
-        closed_quantity = min(open_quantity, fill_quantity)
-        open_fraction = closed_quantity / open_quantity
-        exit_fraction = closed_quantity / fill_quantity
-        fees = state.opening_fees * open_fraction + fee * exit_fraction
-        slippage_cost = state.opening_slippage * open_fraction + slip * exit_fraction
-        gross_pnl = (
-            (price - state.average_price) * closed_quantity * (1 if state.quantity > 0 else -1)
-        )
-        trades.append(
-            RawTrade(
-                security_id=security_id,
-                opened_on=state.opened_on,
-                closed_on=session,
-                side="long" if state.quantity > 0 else "short",
-                # 지수 표기 금지(#135): `Decimal("700.0").normalize()`는 `7E+2`라 `str()`이
-                # "7E+2"를 냈다. `format(…, "f")`는 같은 값을 "700"으로 — fills·positions의
-                # 정수 문자열과 표현이 맞는다.
-                quantity=format(Decimal(str(closed_quantity)).normalize(), "f"),
-                entry_price=state.average_price,
-                exit_price=price,
-                pnl=gross_pnl - fees,
-                fees=fees,
-                slippage_cost=slippage_cost,
-            )
-        )
-        remaining_open = open_quantity - closed_quantity
-        remaining_fill = fill_quantity - closed_quantity
-        if remaining_open > 0:
-            states[security_id] = _OpenTrade(
-                quantity=(1 if state.quantity > 0 else -1) * remaining_open,
-                average_price=state.average_price,
-                opened_on=state.opened_on,
-                opening_fees=state.opening_fees * (1 - open_fraction),
-                opening_slippage=state.opening_slippage * (1 - open_fraction),
-            )
-        elif remaining_fill > 0:
-            states[security_id] = _OpenTrade(
-                quantity=(1 if delta > 0 else -1) * remaining_fill,
-                average_price=price,
-                opened_on=session,
-                opening_fees=fee * (1 - exit_fraction),
-                opening_slippage=slip * (1 - exit_fraction),
-            )
-        else:
-            states.pop(security_id, None)
-    return tuple(trades)
-
-
-def _slice_analytics(
-    data: AnalyticsInput,
-    artifacts: RawArtifactBundle,
-    start: date,
-    end: date,
-) -> AnalyticsInput:
-    fills = tuple(item for item in artifacts.fills if start <= item.session <= end)
-    trades = tuple(item for item in data.trades if start <= item.closed_on <= end)
-    costs = tuple(item for item in artifacts.costs if start <= item.session <= end)
-    return AnalyticsInput(
-        points=tuple(item for item in data.points if start <= item.session <= end),
-        traded_notional=sum(float(item.quantity) * item.price for item in fills),
-        trades=trades,
-        total_fees=sum(item.fee for item in fills),
-        total_taxes=sum(item.amount for item in costs if item.kind == _SELL_TAX),
-        total_slippage_cost=sum(
-            float(item.quantity) * abs(item.slippage_per_share) for item in fills
+                for item in updates
+            ),
         ),
-        total_carry_cost=sum(item.amount for item in costs if item.kind in _CARRY_COSTS),
-        # 구간 첫날 수익률이 빠지지 않게 직전 세션을 기준으로 넘긴다. 실행 첫날부터면 없다.
-        base=next((item for item in reversed(data.points) if item.session < start), None),
+        outcomes,
     )

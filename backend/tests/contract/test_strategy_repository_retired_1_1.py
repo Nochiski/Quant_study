@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
@@ -27,14 +26,15 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyDocumentService,
 )
 from strategy_workbench.application.strategy_design.facade.ports import PageRequest
+from strategy_workbench.domain.strategy._promotion import promotion_node_ids
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     PROMOTION_NODE_PREFIX,
     SourceFormat,
-    promotion_node_ids,
 )
 from strategy_workbench.domain.strategy.facade.specification import SignalNormalization
 from tests import frozen_revision_rows
+from tests.authoring_yaml import load_authoring_yaml
 from tests.frozen_revision_rows import (
     E2E_SCHEMA_ENV,
     E2E_SUFFIX_ENV,
@@ -94,7 +94,9 @@ def test_a_retired_row_with_a_saved_reference_node_fails_closed(tmp_path: Path) 
     1.1 에서도 실행이 거부되던 노드라 실행 결과를 잃지는 않는다. 조용히 지운 spec 을 보이면
     사용자가 저장한 적 없는 그래프가 그 revision 의 사실로 화면에 뜬다.
     """
-    document = yaml.safe_load((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
+    document = load_authoring_yaml(
+        (FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8")
+    )
     document["factors"][0]["graph"]["nodes"].append({"kind": "saved_factor", "node_id": "ref"})
     path = tmp_path / "saved-node.sqlite3"
     row = seed_retired_1_1_row(path, strategy_id="saved-node", document=document)
@@ -134,7 +136,9 @@ def test_generated_source_of_a_boolean_output_row_is_the_authored_graph(tmp_path
     한다 — 붙여 내면 그 원문을 다시 compile 할 때 예약 node_id 로 거절돼, 그 revision 을 현재
     버전으로 새로 저장하는 유일한 길이 막힌다.
     """
-    document = yaml.safe_load((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
+    document = load_authoring_yaml(
+        (FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8")
+    )
     graph = document["factors"][0]["graph"]
     graph["nodes"] += [
         {"kind": "constant", "node_id": "zero", "value": 0.0},

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import cached_property
 from typing import Any
@@ -35,6 +35,7 @@ from strategy_workbench.domain.factor.facade.operators import (
     OperatorDefinition,
     operator_definitions,
 )
+from strategy_workbench.domain.strategy.facade.diff import DiffKind, tree_differences
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     ENVIRONMENT_UNAVAILABLE_CODE,
@@ -44,7 +45,6 @@ from strategy_workbench.domain.strategy.facade.document import (
     UpgradeUnsupportedNodeError,
     UpgradeWarning,
     hydrate_strategy_document,
-    json_pointer_token,
     upgrade_document,
 )
 from strategy_workbench.domain.strategy.facade.schema import (
@@ -342,7 +342,7 @@ class StrategyAuthoringService:
         if not reparsed.ok or reparsed.tree is None:
             detail = ", ".join(f"{d.code}@{d.pointer}" for d in reparsed.diagnostics[:3])
             raise DocumentUpgradeDriftError("", f"rewritten text does not parse: {detail}")
-        mismatch = _first_mismatch(expected, reparsed.tree, "")
+        mismatch = _first_mismatch(expected, reparsed.tree)
         if mismatch is not None:
             raise DocumentUpgradeDriftError(*mismatch)
         compiled = self._compile_parsed(reparsed)
@@ -466,29 +466,16 @@ def _environment_of(
     return result.environment, warnings
 
 
-def _first_mismatch(expected: object, actual: object, pointer: str) -> tuple[str, str] | None:
+def _first_mismatch(expected: object, actual: object) -> tuple[str, str] | None:
     """Deepest JSON Pointer where two parsed trees differ, or None when they are equal."""
-    if isinstance(expected, Mapping) and isinstance(actual, Mapping):
-        for key in sorted(set(expected) | set(actual)):
-            child = f"{pointer}/{json_pointer_token(str(key))}"
-            if key not in expected or key not in actual:
-                side = "dict-path only" if key in expected else "rewritten text only"
-                return child, f"key present in {side}"
-            found = _first_mismatch(expected[key], actual[key], child)
-            if found is not None:
-                return found
+    entry = next(tree_differences(expected, actual), None)
+    if entry is None:
         return None
-    if isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
-        if len(expected) != len(actual):
-            return pointer, f"length dict-path={len(expected)} rewritten={len(actual)}"
-        for index, (left, right) in enumerate(zip(expected, actual, strict=True)):
-            found = _first_mismatch(left, right, f"{pointer}/{index}")
-            if found is not None:
-                return found
-        return None
-    if expected != actual or type(expected) is not type(actual):
-        return pointer, f"dict-path={expected!r} rewritten={actual!r}"
-    return None
+    if entry.kind is DiffKind.ADDED:
+        return entry.pointer, "present in rewritten text only"
+    if entry.kind is DiffKind.REMOVED:
+        return entry.pointer, "present in dict-path only"
+    return entry.pointer, f"dict-path={entry.before!r} rewritten={entry.after!r}"
 
 
 def _pointer_from_path(path: str) -> str:

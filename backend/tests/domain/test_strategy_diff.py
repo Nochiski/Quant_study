@@ -14,7 +14,12 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyAuthoringService,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
-from strategy_workbench.domain.strategy.facade.diff import DiffEntry, DiffKind, diff_strategy_specs
+from strategy_workbench.domain.strategy.facade.diff import (
+    DiffEntry,
+    DiffKind,
+    diff_strategy_specs,
+    tree_differences,
+)
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     SourceFormat,
@@ -155,11 +160,22 @@ def test_parameter_kind_change_reports_added_and_removed_keys() -> None:
 
 
 def test_pointer_tokens_are_rfc6901_escaped() -> None:
-    from strategy_workbench.domain.strategy import _diff
-
-    entries: list[DiffEntry] = []
-    _diff._walk({"a/b": 1, "c~d": 2}, {"a/b": 2, "c~d": 2}, "", entries)  # pyright: ignore[reportPrivateUsage]  # reason: unit
+    entries = list(tree_differences({"a/b": 1, "c~d": 2}, {"a/b": 2, "c~d": 2}))
     assert [e.pointer for e in entries] == ["/a~1b"]
+
+
+def test_tree_differences_reports_length_change_as_positional_add_remove() -> None:
+    # 업그레이드 원문 대조(첫 불일치)와 의미 diff가 같은 걷기를 쓴다: 길이 차이는 남는 위치의
+    # 추가·삭제로 나오고, tuple·list는 같은 배열로 본다.
+    assert list(tree_differences({"x": (1, 2)}, {"x": [1, 2, 3]})) == [
+        DiffEntry("/x/2", DiffKind.ADDED, None, 3)
+    ]
+    assert list(tree_differences({"x": [1, 2]}, {"x": [1]})) == [
+        DiffEntry("/x/1", DiffKind.REMOVED, 2, None)
+    ]
+    assert list(tree_differences({"x": 1}, {"x": 1.0})) == [
+        DiffEntry("/x", DiffKind.CHANGED, 1, 1.0)
+    ]
 
 
 def test_normalization_change_is_one_leaf_entry() -> None:

@@ -14,6 +14,7 @@ positions, never as a rename).
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -48,31 +49,34 @@ class DiffEntry:
 def diff_strategy_specs(base: StrategySpec, target: StrategySpec) -> tuple[DiffEntry, ...]:
     before = json.loads(canonical_strategy_json(demote_boolean_factor_outputs(base)))
     after = json.loads(canonical_strategy_json(demote_boolean_factor_outputs(target)))
-    entries: list[DiffEntry] = []
-    _walk(before, after, "", entries)
-    return tuple(entries)
+    return tuple(tree_differences(before, after))
 
 
-def _walk(before: Any, after: Any, pointer: str, entries: list[DiffEntry]) -> None:
-    if isinstance(before, dict) and isinstance(after, dict):
+def tree_differences(before: Any, after: Any, pointer: str = "") -> Iterator[DiffEntry]:
+    """두 JSON 형 트리의 차이를 포인터 순서(키 정렬·배열 위치)로 낸다.
+
+    의미 diff와 업그레이드 원문 대조(`strategy_authoring`의 첫 불일치)가 같은 걷기를 쓴다.
+    배열은 위치별로 비교하고 길이 차이는 남는 위치의 추가·삭제로 나온다.
+    """
+    if isinstance(before, Mapping) and isinstance(after, Mapping):
         for key in sorted(set(before) | set(after)):
-            child = f"{pointer}/{json_pointer_token(key)}"
+            child = f"{pointer}/{json_pointer_token(str(key))}"
             if key not in before:
-                entries.append(DiffEntry(child, DiffKind.ADDED, None, after[key]))
+                yield DiffEntry(child, DiffKind.ADDED, None, after[key])
             elif key not in after:
-                entries.append(DiffEntry(child, DiffKind.REMOVED, before[key], None))
+                yield DiffEntry(child, DiffKind.REMOVED, before[key], None)
             else:
-                _walk(before[key], after[key], child, entries)
+                yield from tree_differences(before[key], after[key], child)
         return
-    if isinstance(before, list) and isinstance(after, list):
+    if isinstance(before, (list, tuple)) and isinstance(after, (list, tuple)):
         for index in range(max(len(before), len(after))):
             child = f"{pointer}/{index}"
             if index >= len(before):
-                entries.append(DiffEntry(child, DiffKind.ADDED, None, after[index]))
+                yield DiffEntry(child, DiffKind.ADDED, None, after[index])
             elif index >= len(after):
-                entries.append(DiffEntry(child, DiffKind.REMOVED, before[index], None))
+                yield DiffEntry(child, DiffKind.REMOVED, before[index], None)
             else:
-                _walk(before[index], after[index], child, entries)
+                yield from tree_differences(before[index], after[index], child)
         return
     if before != after or type(before) is not type(after):
-        entries.append(DiffEntry(pointer, DiffKind.CHANGED, before, after))
+        yield DiffEntry(pointer, DiffKind.CHANGED, before, after)

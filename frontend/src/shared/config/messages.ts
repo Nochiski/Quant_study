@@ -1500,8 +1500,6 @@ const ko = {
   "strategy.operator.comparison.eq.formula": "left = right",
 
 
-  "ide.debugger.pitPassed": "PIT 검증 통과",
-  "ide.debugger.pitDetail": "분포, 결측, 극단값 검증을 통과했습니다.",
   "save.action": "저장",
   "save.saving": "저장 중…",
   "save.unsaved": "저장되지 않은 변경",
@@ -1560,7 +1558,6 @@ const ko = {
   "assist.source": "값 출처",
   "assist.branch": "종류",
   "assist.catalog.equityField": "데이터 필드 카탈로그",
-  "assist.catalog.universe": "유니버스",
   "assist.reference.node": "같은 그래프의 노드",
   "assist.reference.parameter": "문서의 parameters",
   "assist.reference.factor": "문서의 팩터",
@@ -3777,9 +3774,6 @@ export const messages = {
     "strategy.operator.comparison.eq.formula": "left = right",
 
 
-    "ide.debugger.pitPassed": "PIT check passed",
-    "ide.debugger.pitDetail":
-      "Distribution, missing values and outliers checked.",
     "save.action": "Save",
     "save.saving": "Saving…",
     "save.unsaved": "Unsaved changes",
@@ -3838,7 +3832,6 @@ export const messages = {
     "assist.source": "Values from",
     "assist.branch": "kind",
     "assist.catalog.equityField": "dataset field catalog",
-    "assist.catalog.universe": "universe",
     "assist.reference.node": "nodes of the same graph",
     "assist.reference.parameter": "the document's parameters",
     "assist.reference.factor": "the document's factors",

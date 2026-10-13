@@ -28,9 +28,12 @@ from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 # 기록만 더한 변경(V4-04 2/2: 체결 행의 `cap_volume`, 목표 금액 → 수량 변환의 ROUNDING 레코드)은
 # trace 가 바뀌어 digest 가 달라지지만 체결·비용 규칙은 그대로라 판본을 올리지 않고 digest 만
 # 고쳤다(리드 결정). 지문은 결과 공유 캐시 키가 아니라 옛 결과가 새 기록 없이 재사용되지 않는다.
+# #341 결합 비용·바스켓 충격 시나리오 두 개를 추가해 검사 입력 집합만 확장했다.
+# 새 두 이름을 제외한 digest는 위 변경 전 값 0abfca4d…ac0f와 bit 동일함을 확인했다.
+# 기존 시나리오와 domain 비용 입력 결과가 불변이므로 엔진 판본은 유지한다.
 _PINNED = (
     "backtest-engine-v4",
-    "0abfca4d023ddc55162f0ede02bc7654cd8becd375369e9f8fd6adc0de27ac0f",
+    "09450fb7fa07766a95dab5df0cba351d936f079cbcbfea4b2ceea44b657d9c97",
 )
 
 

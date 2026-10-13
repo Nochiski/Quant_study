@@ -1,6 +1,5 @@
 from strategy_workbench.domain.backtest._canonical import (
     environment_hash,
-    run_environment_canonical_json,
 )
 from strategy_workbench.domain.backtest._impact import (
     MAX_IMPACT_FRACTION,
@@ -69,7 +68,6 @@ __all__ = [
     "settlement_multipliers",
     "require_environment",
     "require_research_window",
-    "run_environment_canonical_json",
     "run_environment_schema",
     "backtest_run_options_schema",
     "run_environment_schema_hash",

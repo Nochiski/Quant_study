@@ -4,7 +4,6 @@ from dataclasses import asdict, replace
 
 from strategy_workbench.domain.canonical.facade.encoding import (
     canonical_json_hash,
-    canonical_payload_json,
 )
 
 from ._models import BacktestRunSpec, RunEnvironment
@@ -65,11 +64,6 @@ def run_input_key(spec: BacktestRunSpec) -> str:
     엔진 규칙·지표 레지스트리 판본)을 뺀 것이다. JSON 표기라 `1` 과 `True` 가 갈린다.
     """
     return canonical_json_hash(asdict(fingerprint_run_spec(spec)))
-
-
-def run_environment_canonical_json(environment: RunEnvironment) -> str:
-    """실행 설정의 canonical 표기(키 정렬·최소 separator·NaN 금지)."""
-    return canonical_payload_json(asdict(environment))
 
 
 def environment_hash(environment: RunEnvironment) -> str:

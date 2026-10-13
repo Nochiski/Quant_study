@@ -1,3 +1,4 @@
+import { currentParseOutcome } from "./document-state";
 import type { EditorHandleOwner } from "./use-editor-handle";
 import { useCallback, useRef, useState } from "react";
 
@@ -130,10 +131,8 @@ export const useSourceTransactions = (
   // "구문 오류"는 같은 버전의 parse가 실패했을 때만이다. parse 디바운스 대기 구간은 잠그지 않는다 — 계획은
   // 편집기 live 텍스트를 다시 parse해 세우므로(preflight) 대기 중에도 안전하고, 잠그면 연속 확정(노드 추가 →
   // 속성 → 출력)마다 150ms씩 컨트롤이 죽는다(P5-02 리뷰 DEFECT-132-03, P4-04 리뷰 base 관찰).
-  const parseFailed =
-    state.parse !== null &&
-    state.parse.status !== "ok" &&
-    state.parsedVersion === state.sourceVersion;
+  const parsed = currentParseOutcome(state);
+  const parseFailed = parsed !== null && parsed.status !== "ok";
   const disabled: TransactionDisabledReason | null =
     state.format !== "yaml"
       ? "json"

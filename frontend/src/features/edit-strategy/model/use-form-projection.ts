@@ -1,3 +1,4 @@
+import { currentParseOutcome } from "./document-state";
 import { useMemo } from "react";
 
 import {
@@ -33,10 +34,7 @@ export const useFormProjection = (
   schema: JsonSchema | null,
 ): FormProjectionState =>
   useMemo(() => {
-    const parsedCurrent =
-      state.parse !== null && state.parsedVersion === state.sourceVersion
-        ? state.parse
-        : null;
+    const parsedCurrent = currentParseOutcome(state);
     const current =
       parsedCurrent !== null && parsedCurrent.status === "ok"
         ? parsedCurrent

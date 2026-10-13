@@ -290,6 +290,16 @@ export const documentReducer = (
   }
 };
 
+/** 현재 원문 버전의 구문 결과만 읽는다. 마지막 유효 구조를 보여 주는 정책은 각 투영이 소유한다. */
+export const currentParseOutcome = (state: DocumentState): ParsedSource | null =>
+  state.parsedVersion === state.sourceVersion ? state.parse : null;
+
+/** 현재 원문과 일치하는 성공한 구문 결과다. 조합 중 실행 여부는 호출자가 따로 판정한다. */
+export const currentParse = (state: DocumentState): Extract<ParsedSource, { status: "ok" }> | null => {
+  const outcome = currentParseOutcome(state);
+  return outcome?.status === "ok" ? outcome : null;
+};
+
 /** The parser may run only when the text is not mid-IME-composition and the version is new. */
 export const shouldParse = (state: DocumentState): boolean =>
   !state.composing && state.parsedVersion !== state.sourceVersion;
@@ -297,15 +307,13 @@ export const shouldParse = (state: DocumentState): boolean =>
 /** The compile call goes out only for a parsed, syntactically valid, not-yet-compiled version. */
 export const shouldCompile = (state: DocumentState): boolean =>
   !state.composing &&
-  state.parsedVersion === state.sourceVersion &&
-  state.parse?.status === "ok" &&
+  currentParse(state) !== null &&
   state.compiledVersion !== state.sourceVersion;
 
 /** Shared toolbar/keyboard gate for forcing a compile of this exact parsed text. */
 export const canValidateDocument = (state: DocumentState): boolean =>
   !state.composing &&
-  state.parsedVersion === state.sourceVersion &&
-  state.parse?.status === "ok";
+  currentParse(state) !== null;
 
 /**
  * 이 문서의 첫 parse 가 아직 오지 않았다(문서를 연 직후 parse 디바운스 구간, `load` 가 parse 를 비운다).
@@ -349,10 +357,10 @@ export const currentSpec = (state: DocumentState): StrategySpec | null =>
 export const currentDiagnostics = (
   state: DocumentState,
 ): DocumentDiagnostic[] => {
-  if (state.parsedVersion !== state.sourceVersion || state.parse === null)
-    return [];
-  if (state.parse.status === "rejected") {
-    return state.parse.diagnostics.map((d) => ({
+  const parsed = currentParseOutcome(state);
+  if (parsed === null) return [];
+  if (parsed.status === "rejected") {
+    return parsed.diagnostics.map((d) => ({
       code: d.code,
       kind: "syntax",
       severity: "error",

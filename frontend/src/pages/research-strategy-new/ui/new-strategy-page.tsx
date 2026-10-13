@@ -176,9 +176,7 @@ export const NewStrategyPage = () => {
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
-  const catalogs = {
-    equityFields: assist.inspectorSource.equityCatalog?.fields ?? null,
-  };
+  const catalogs = assist.fieldPickerCatalogs;
   const openGraph = useCallback(
     (pointer: string): void => {
       void navigate({

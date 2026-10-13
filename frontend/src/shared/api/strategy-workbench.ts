@@ -685,7 +685,7 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "compileStrategyDocument");
   },
 
-  /** 1.0 텍스트를 1.1로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
+  /** 은퇴한 버전의 텍스트를 현재 지원 버전으로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
   async upgradeStrategyDocument(
     request: CompileRequest,
     signal?: AbortSignal,

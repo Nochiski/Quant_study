@@ -1,3 +1,5 @@
+import { useCommittedRef } from "../../../shared/lib/react";
+import type { DocumentState } from "./document-state";
 import type { EditorHandleOwner } from "./use-editor-handle";
 import { useCallback } from "react";
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
@@ -21,4 +23,27 @@ export const useWholeDocumentReplacement = (owner: EditorHandleOwner) => {
     return true;
   }, [readEditor]);
   return { replace };
+};
+
+export type ReplacementDocument = Pick<DocumentState, "documentEpoch" | "savedVersion" | "strategyId" | "baseRevision" | "baseSpecHash" | "format">;
+
+/** 같은 원문이어도 저장·기준 revision·형식이 바뀌면 외부 응답의 적용 권한은 끝난다. */
+export const sameReplacementDocument = (requested: ReplacementDocument, current: ReplacementDocument): boolean =>
+  requested.documentEpoch === current.documentEpoch &&
+  requested.savedVersion === current.savedVersion &&
+  requested.strategyId === current.strategyId &&
+  requested.baseRevision === current.baseRevision &&
+  requested.baseSpecHash === current.baseSpecHash &&
+  requested.format === current.format;
+
+/** 표시 상태와 별개로, 실제 편집 명령 직전에 commit된 문서 신원과 live 원문을 확인한다. */
+export const useGuardedDocumentReplacement = (owner: EditorHandleOwner, state: DocumentState) => {
+  const latest = useCommittedRef(state);
+  const read = owner.read;
+  return (requested: DocumentState, editor: CodeEditorHandle, expectedSource: string, source: string): boolean => {
+    if (!sameReplacementDocument(requested, latest.current) || latest.current.composing ||
+        read() !== editor || editor.getText() !== expectedSource) return false;
+    replaceWholeDocument(editor, source);
+    return true;
+  };
 };

@@ -1,4 +1,4 @@
-import { runEnvironmentFields } from "../../../entities/backtest";
+import { runEnvironmentFields, runEnvironmentApplies } from "../../../entities/backtest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -133,21 +133,17 @@ const DEFAULT_BACKTEST_RUN_SETTINGS = initialBacktestRunSettings(RUN_OPTIONS_SCH
  * 기본값에 기간·유니버스를 채운 패널이 싣는 실행 설정. 가격 충격 계수·직접 입력 세율은 고정 bp·법정 세율에서
  * 읽히지 않아(스키마 `x-applicable-when`, #352) 싣지 않는다.
  */
-const ENVIRONMENT: RunEnvironment = {
-  market: "KRX",
-  frequency: "daily",
+const defaultFields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+const environmentProperties = RUN_ENVIRONMENT_SCHEMA.properties as Record<string, { default?: unknown }>;
+const defaultEnvironment = Object.fromEntries(Object.entries(environmentProperties).map(([name, node]) => [name, node.default]));
+const ENVIRONMENT = {
+  ...Object.fromEntries(defaultFields
+    .filter((field) => defaultEnvironment[field.name] != null && runEnvironmentApplies(field, defaultEnvironment))
+    .map((field) => [field.name, defaultEnvironment[field.name]])),
   start: "2021-01-01",
   end: "2026-08-31",
   universe_id: "krx.common-stock",
-  timing: "next_open",
-  participation_rate: 0.1,
-  participation_basis: "adv20",
-  fee_bps: 15,
-  slippage_bps: 10,
-  impact_model: "fixed_bps",
-  sell_tax: "krx_statutory",
-  missing: "drop",
-};
+} as RunEnvironment;
 
 const VALID: RunEnvironmentValidation = {
   valid: true,

@@ -249,7 +249,7 @@ export const RecipePanel = ({
           </label>
         )}
         {catalogs.equityFields === null ? (
-          <p role="status">{t("contract.catalog.loading")}</p>
+          <p role="status">{t(catalogs.equityIncompatible ? "contract.catalog.mismatch" : "contract.catalog.loading")}</p>
         ) : null}
         {draft.fields.map((value, index) => (
           <label key={index}>

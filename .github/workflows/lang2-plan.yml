@@ -18,13 +18,13 @@ jobs:
         run: ./docs/planning/strategy-language-2-0/tools/update-plan-progress.ps1 -Check
       # 실패는 유지하면서 공식 생성기의 수정본만 검토용으로 제공한다.
       - name: 오래된 집계의 공식 수정본 생성
-        if: steps.check.outcome == 'failure'
+        if: failure() && steps.check.outcome == 'failure'
         shell: pwsh
         run: |
           ./docs/planning/strategy-language-2-0/tools/update-plan-progress.ps1
           ./docs/planning/strategy-language-2-0/tools/update-plan-progress.ps1 -Check
       - name: 검토용 수정본 보존
-        if: steps.check.outcome == 'failure'
+        if: failure() && steps.check.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: lang2-plan-generated

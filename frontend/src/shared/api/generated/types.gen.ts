@@ -4440,6 +4440,12 @@ export type RunEnvironment = {
  */
 export type RunEnvironmentSchema = {
   /**
+   * Options Schema
+   */
+  options_schema: {
+    [key: string]: unknown;
+  };
+  /**
    * Schema
    */
   schema: {

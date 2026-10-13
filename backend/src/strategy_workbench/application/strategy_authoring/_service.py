@@ -25,9 +25,9 @@ from typing import Any
 
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
+    backtest_run_options_schema,
     environment_from_retired_settings,
     run_environment_schema,
-    run_environment_schema_hash,
 )
 from strategy_workbench.domain.canonical.facade.encoding import canonical_json_hash
 from strategy_workbench.domain.factor.facade.expression import FieldMetadata
@@ -181,6 +181,7 @@ class RunEnvironmentSchema:
 
     schema_hash: str
     schema: dict[str, Any]  # reason: JSON Schema 는 DTO 가 아니라 열린 문서다
+    options_schema: dict[str, Any]  # reason: 실행 옵션 JSON Schema도 같은 응답 판에 포함한다
 
 
 @dataclass(frozen=True)
@@ -261,7 +262,12 @@ class StrategyAuthoringService:
     @cached_property
     def _run_environment_schema(self) -> RunEnvironmentSchema:
         schema = run_environment_schema()
-        return RunEnvironmentSchema(schema_hash=run_environment_schema_hash(schema), schema=schema)
+        options = backtest_run_options_schema()
+        return RunEnvironmentSchema(
+            schema_hash=canonical_json_hash({"schema": schema, "options_schema": options}),
+            schema=schema,
+            options_schema=options,
+        )
 
     def run_environment_schema(self) -> RunEnvironmentSchema:
         """실행 설정의 런타임 스키마(`domain/backtest` 소유 모델에서 유도, 순수·캐시)."""

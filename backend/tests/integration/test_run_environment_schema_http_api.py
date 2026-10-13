@@ -20,7 +20,10 @@ def test_endpoint_serves_the_run_environment_schema_with_its_hash_as_etag() -> N
     assert response.status_code == 200, response.text
     body = response.json()
     canonical = json.dumps(
-        body["schema"], sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        {key: body[key] for key in ("schema", "options_schema")},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
     )
     assert body["schema_hash"] == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     assert response.headers["ETag"] == f'"{body["schema_hash"]}"'
@@ -68,3 +71,18 @@ def test_endpoint_returns_304_for_a_matching_etag() -> None:
     assert cached.status_code == 304 and cached.headers["ETag"] == etag
     assert weak.status_code == 304
     assert stale.status_code == 200
+
+
+def test_run_options_defaults_and_enum_come_from_the_request_owner() -> None:
+    from dataclasses import fields
+
+    from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
+
+    body = TestClient(build_http_app()).get(PATH).json()
+    options = body["options_schema"]["properties"]
+    request_defaults = {item.name: item.default for item in fields(BacktestRunSpec)}
+    assert set(options) == {"core", "initial_cash", "benchmark_security_id", "annualization_days"}
+    for name, schema in options.items():
+        assert schema["default"] == request_defaults[name]
+    assert options["core"]["enum"] == ["rust", "python"]
+    assert body["options_schema"]["additionalProperties"] is False

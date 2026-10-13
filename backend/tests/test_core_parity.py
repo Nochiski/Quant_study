@@ -2018,12 +2018,12 @@ def test_combined_cost_scenarios_exercise_tax_impact_and_explicit_volume(
 ) -> None:
     """세금·충격·참여 기준과 바스켓이 실제 체결 경로에서 함께 켜진다(#341)."""
     engine, result = ENGINE_SCENARIOS[scenario](core)
+    # Rust 지연 체결 배열은 첫 접근에 payload를 인계한다. 비파괴 조회표를 먼저 얻는다.
+    tables = engine.event_store.result_tables()
     assert any(fill.slippage_per_share != 0 for fill in result.fills)
     assert any(fill.side is Side.SELL for fill in result.fills)
     assert all(fill.cap_volume in (60, 1000, 3_000) for fill in result.fills)
-    assert any(
-        row[1] == "sell_tax" and row[3] > 0 for row in engine.event_store.result_tables().costs
-    )
+    assert any(row[1] == "sell_tax" and row[3] > 0 for row in tables.costs)
 
 
 @pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])

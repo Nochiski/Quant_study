@@ -1,4 +1,4 @@
-"""Fill 밖의 비용 계산: 세션 종료 숏 차입 비용·신용 이자(5단계)와 매도 거래세. 순수 함수."""
+"""확정 거래세의 비용 기록과 세션 종료 숏 차입 비용·신용 이자 계산. 순수 함수."""
 
 from __future__ import annotations
 
@@ -19,10 +19,9 @@ def sell_tax_amount(side: Side, quantity: Decimal, price: float, rate: float) ->
     return float(quantity) * price * rate if side is Side.SELL else 0.0
 
 
-def sell_tax(fill: FillEvent, config: RunConfig) -> CostAccrued | None:
+def sell_tax(fill: FillEvent) -> CostAccrued | None:
     """매도 체결 하나의 거래세 기록. 세금이 0이면 기록하지 않는다."""
-    rate = config.sell_tax_rate(fill.ts.date())
-    amount = sell_tax_amount(fill.side, fill.quantity, fill.price, rate)
+    amount = fill.sell_tax
     if amount <= 0:
         return None
     return CostAccrued(

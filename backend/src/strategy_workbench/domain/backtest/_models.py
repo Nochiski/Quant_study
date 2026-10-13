@@ -111,7 +111,8 @@ class ImpactModel(StrEnum):
     """체결가에 얹는 시장충격 모델(spec D7).
 
     `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
-    √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+    √(Q / ADV)(`_impact.py`, Q = 참여 한도 적용 후·여력 제한 전 주문 수량)를 뜻한다.
+    `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
     """
 
     FIXED_BPS = "fixed_bps"
@@ -519,9 +520,24 @@ class RawFill:
     sell_tax: float | None = None
 
 
+class RunCostKind(StrEnum):
+    """실행 결과 비용 기록의 어휘. 실행 어댑터가 엔진 비용 종류를 이 어휘로 옮기고 모르는 종류는
+    실패시켜, 새 비용이 거래 분석 합계에서 조용히 0으로 사라지지 않게 한다."""
+
+    SHORT_BORROW = "short_borrow"
+    MARGIN_INTEREST = "margin_interest"
+    SELL_TAX = "sell_tax"
+
+
+# 포지션을 들고 있는 동안 쌓이는 비용(거래 분석의 `total_carry_cost`).
+CARRY_COST_KINDS = frozenset({RunCostKind.SHORT_BORROW, RunCostKind.MARGIN_INTEREST})
+
+
 @dataclass(frozen=True)
 class RawCost:
     session: date
+    # 저장 결과 읽기 계약은 문자열 그대로다(옛 결과 호환).
+    # 새 결과는 어댑터가 `RunCostKind`로 만든다.
     kind: str
     security_id: str | None
     amount: float

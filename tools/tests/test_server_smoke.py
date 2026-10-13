@@ -49,6 +49,14 @@ class RootServerSmokeTest(unittest.TestCase):
         environment["STRATEGY_WORKBENCH_RESEARCH_DB_PATH"] = str(
             Path(runtime_directory.name) / "research.sqlite3"
         )
+        # 서버는 부팅 때 산출물 루트의 고아 staging을 지우고 어시스턴트 DB를 연다. 개발 서버의
+        # 기본 `.local` 상태를 건드리지 않도록 이 실행의 임시 폴더로 격리한다(#495).
+        environment["STRATEGY_WORKBENCH_ARTIFACT_ROOT"] = str(
+            Path(runtime_directory.name) / "backtest-runs"
+        )
+        environment["STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"] = str(
+            Path(runtime_directory.name) / "assistant.sqlite3"
+        )
         process = subprocess.Popen(
             [
                 "uv",

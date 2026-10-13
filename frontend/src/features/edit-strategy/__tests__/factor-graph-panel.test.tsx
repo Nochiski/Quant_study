@@ -474,6 +474,33 @@ describe("FactorGraphPanel", () => {
     }
   });
 
+  it("첫 실행 계획 응답이 클릭 사이에 와도 원문 열기와 포커스를 보존한다 (#324)", async () => {
+    const onOpenSource = vi.fn();
+    const transactions: SourceTransactions = {
+      apply: vi.fn(() => true), run: vi.fn(() => true), feedback: { status: "idle" },
+      feedbackFor: () => ({ status: "idle" }), onEditorReady: vi.fn(),
+      enabled: true, disabled: null, settling: false,
+    };
+    const editing = {
+      tree: { factors: [{ factor_id: "conditional-value", direction: "high", graph }] },
+      transactions, catalogs: { equityFields: null }, onOpenSource, documentKey: 1,
+    };
+    const view = (state: ExecutionPlansState) => <FactorGraphPanel state={state} schema={SCHEMA}
+      diagnostics={[]} onSelectPointer={vi.fn()} onOpenSource={onOpenSource} editing={editing} />;
+    const { rerender } = render(view({ status: "loading" }));
+    const user = userEvent.setup();
+    const button = screen.getAllByRole("button", { name: "소스에서 열기" })[1]!;
+    await user.pointer({ target: button, keys: "[MouseLeft>]" });
+    expect(button).toHaveFocus();
+    // 실제 HTTP 응답이 mousedown과 mouseup 사이에 도착하는 순서를 결정적으로 만든다.
+    rerender(view(readyState()));
+    const currentButton = screen.getAllByRole("button", { name: "소스에서 열기" })[1]!;
+    await user.pointer({ target: currentButton, keys: "[/MouseLeft]" });
+    expect(onOpenSource).toHaveBeenCalledOnce();
+    expect(onOpenSource).toHaveBeenCalledWith("/factors/0/graph/nodes/1");
+    expect(currentButton).toHaveFocus();
+  });
+
   it("keeps the last plan projection with a recomputing badge while the plan reloads (OBS-132-05)", () => {
     const transactions: SourceTransactions = {
       apply: vi.fn(() => true),

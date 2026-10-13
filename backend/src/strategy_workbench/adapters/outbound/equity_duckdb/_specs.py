@@ -1108,6 +1108,16 @@ def _reject_unread_declarations(
     ]
     if unread:
         raise ValueError(f"masked_expr needs a GRID source — sources={unread}")
+    # 가림 표시는 원천 행 단위지만 평가기의 값 구간은 필드 단위다. 같은 원천에 두 필드를
+    # 두면 서로 다른 시점의 가림 경계를 건너뛸 수 있으므로 선언 단계에서 막는다(#375 DR-A-08).
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.masked_expr is not None
+        and sum(field.source == spec.name for field in field_specs) != 1
+    ]
+    if unread:
+        raise ValueError(f"masked_expr needs exactly one field — sources={unread}")
     unread = [spec.name for spec in source_specs if spec.omitted_is_zero and spec.kind_expr is None]
     if unread:
         raise ValueError(f"omitted_is_zero needs a kind_expr — sources={unread}")

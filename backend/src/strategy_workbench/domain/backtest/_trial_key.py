@@ -41,7 +41,7 @@ TRIAL_KEY_DEFAULTS_VERSION = "trial-key-defaults-v2"
 class TrialKeyRole(StrEnum):
     """실행 설정 칸 하나가 시도 키에 드는 방식."""
 
-    # 바뀌면 새 시도다. 비용 모델 종류(거래세 방식·참여 기준)도 여기다.
+    # 바뀌면 새 시도다. 비용 모델 종류(거래세 방식·참여 기준·시장충격 모델)도 여기다.
     KEY = "key"
     # 기본값보다 낮을 때만 값이 키에 든다. 기본값이거나 높으면(불리) "기본 이하"로 묶인다.
     LOWER_IS_FAVORABLE = "lower_is_favorable"

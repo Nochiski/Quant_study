@@ -21,7 +21,6 @@ from strategy_workbench.adapters.outbound.equity_mock._fixture import (
     build_demo_fixture,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
-from strategy_workbench.bootstrap import _container
 from strategy_workbench.bootstrap.facade.http import (
     build_http_app,
     build_runtime_http_app,
@@ -72,13 +71,11 @@ def build_e2e_http_app() -> FastAPI:
         secrets_path=own / "assistant-secrets.json",
     )
     # 조립 중에만 주입한다. 요청 처리 중 전역 patch나 adapter 교환은 없다.
-    with (
-        patch.object(MockEquityDataAdapter, "demo", return_value=ideas_adapter()),
-        patch.object(_container, "DEFAULT_RUN_ARTIFACT_ROOT", own / "backtest-runs"),
-    ):
+    with patch.object(MockEquityDataAdapter, "demo", return_value=ideas_adapter()):
         ideas = build_http_app(
             strategy_repository_path=own / "strategy.sqlite3",
             research_db_path=own / "research.sqlite3",
+            artifact_root=own / "backtest-runs",
             assistant=assistant,
             allowed_origins=runtime_allowed_origins(),
         )

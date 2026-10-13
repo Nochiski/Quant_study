@@ -217,7 +217,14 @@ def test_shutdown_wakes_subscribers_even_before_the_producer_starts(during_read:
                 assert await asyncio.to_thread(entered.wait, 1)
             else:
                 assert not entered.is_set()
-            await hub.close()
+            if during_read:
+                closing = asyncio.create_task(hub.close())
+                await asyncio.sleep(0)
+                assert not closing.done()
+                release.set()
+                await closing
+            else:
+                await hub.close()
             assert shared.producer is not None and shared.producer.done()
             assert shared.done
             with pytest.raises(StopAsyncIteration):
@@ -230,6 +237,71 @@ def test_shutdown_wakes_subscribers_even_before_the_producer_starts(during_read:
                 first.cancel()
             await asyncio.gather(first, return_exceptions=True)
             await stream.aclose()
+            await hub.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_disconnect_reconnect_shares_the_worker_and_shutdown_drains_it(reconnect: bool) -> None:
+    entered, release = Event(), Event()
+
+    class BlockingExperiments:
+        calls = 0
+        active = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            self.active += 1
+            entered.set()
+            try:
+                release.wait()
+                return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+            finally:
+                self.active -= 1
+
+    source = BlockingExperiments()
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def exercise() -> None:
+        old = hub.stream("same")
+        first = asyncio.create_task(anext(old))
+        fresh = hub.stream("same")
+        second: asyncio.Task[str] | None = None
+        closing: asyncio.Task[None] | None = None
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+            assert source.active == 1
+            if reconnect:
+                second = asyncio.create_task(anext(fresh))
+            # 재접속 생산자가 실행될 기회를 준 뒤에도 실제 조회는 하나여야 한다.
+            for _ in range(20):
+                await asyncio.sleep(0.001)
+            assert source.calls == 1
+            assert source.active == 1
+            closing = asyncio.create_task(hub.close())
+            await asyncio.sleep(0.02)
+            assert not closing.done()
+            release.set()
+            await asyncio.wait_for(closing, 1)
+            assert source.active == 0
+            assert not hub._streams
+            assert not hub._reads
+            if second is not None:
+                with pytest.raises(StopAsyncIteration):
+                    await asyncio.wait_for(second, 1)
+        finally:
+            release.set()
+            for pending in (first, second):
+                if pending is not None:
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+            if closing is not None:
+                await closing
+            await old.aclose()
+            await fresh.aclose()
             await hub.close()
 
     asyncio.run(exercise())

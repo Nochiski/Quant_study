@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Annotated, Any
@@ -341,6 +341,7 @@ async def _progress_stream(
     *,
     poll_seconds: float = _EXPERIMENT_POLL_SECONDS,
     keepalive_seconds: float = SSE_KEEPALIVE_SECONDS,
+    read: Callable[[str], Awaitable[Experiment]] | None = None,
 ) -> AsyncIterator[str]:
     """창을 닫아도 실험은 서버에서 돈다 — 스트림은 진행을 보이기만 한다(spec D6).
 
@@ -350,7 +351,11 @@ async def _progress_stream(
     last: ExperimentProgress | None = None
     last_frame_at = time.monotonic()
     while True:
-        experiment = await asyncio.to_thread(experiments.get, experiment_id)
+        experiment = (
+            await asyncio.to_thread(experiments.get, experiment_id)
+            if read is None
+            else await read(experiment_id)
+        )
         progress = ExperimentProgress(experiment.status, experiment.trial_counts)
         if progress != last:
             yield sse_frame(sequence=sequence, event="progress", data=progress)
@@ -376,10 +381,11 @@ class _SharedProgress:
 
 
 class _ExperimentStreamHub:
-    """같은 실험의 구독은 상태 계산 하나를 공유한다. 마지막 연결이 닫히면 계산도 멈춘다.
+    """같은 실험의 구독은 상태 조회 하나를 공유한다. 마지막 연결이 닫히면 반복 조회를 멈춘다.
 
     저장된 실험 상태를 캐시하지 않는다. 구독 중인 실험마다 최신 SSE 프레임 하나만 보관하며
     느린 연결에 중간 프레임을 쌓지 않는다. 새 연결도 마지막 상태를 즉시 받는다.
+    진행 중인 스레드 조회는 완료까지 따로 소유하여 재접속이 중복 조회를 만들지 않는다.
     """
 
     def __init__(
@@ -388,8 +394,13 @@ class _ExperimentStreamHub:
         self._experiments = experiments
         self._poll_seconds = poll_seconds
         self._streams: dict[str, _SharedProgress] = {}
+        # 생산자 취소는 실행 중인 스레드를 중단하지 않는다. 실제 조회의 수명은 연결과 분리한다.
+        self._reads: dict[str, asyncio.Task[Experiment]] = {}
+        self._closing = False
 
     async def stream(self, experiment_id: str) -> AsyncGenerator[str, None]:
+        if self._closing:
+            return
         shared = self._streams.get(experiment_id)
         if shared is None or shared.done:
             shared = _SharedProgress()
@@ -430,7 +441,8 @@ class _ExperimentStreamHub:
                         await shared.producer
 
     async def close(self) -> None:
-        """ASGI 종료에서도 남은 생산자를 회수한다. 다음 lifespan은 빈 상태로 시작한다."""
+        """ASGI 종료는 생산자와 실제 조회 스레드를 모두 회수한 뒤 끝난다."""
+        self._closing = True
         entries = list(self._streams.values())
         self._streams.clear()
         tasks = [shared.producer for shared in entries if shared.producer is not None]
@@ -438,6 +450,8 @@ class _ExperimentStreamHub:
             task.cancel()
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
+            # 저장소가 닫히기 전에 실제 스레드가 조회를 마칠 때까지 기다린다.
+            await asyncio.gather(*self._reads.values(), return_exceptions=True)
         finally:
             # 시작 전에 취소된 task는 _produce의 finally를 실행하지 않는다. 종료 owner가
             # 직접 종결을 알리므로 첫 프레임을 기다리는 구독도 반드시 깨어난다.
@@ -445,11 +459,29 @@ class _ExperimentStreamHub:
                 async with shared.condition:
                     shared.done = True
                     shared.condition.notify_all()
+            self._closing = False
+
+    async def _read(self, experiment_id: str) -> Experiment:
+        task = self._reads.get(experiment_id)
+        if task is None:
+            task = asyncio.create_task(asyncio.to_thread(self._experiments.get, experiment_id))
+            self._reads[experiment_id] = task
+
+            def finished(done: asyncio.Task[Experiment]) -> None:
+                if self._reads.get(experiment_id) is done:
+                    self._reads.pop(experiment_id, None)
+                # 마지막 구독이 떠난 뒤 실패해도 회수한다.
+                # 연결된 생산자는 await로 같은 오류를 받는다.
+                if not done.cancelled():
+                    done.exception()
+
+            task.add_done_callback(finished)
+        return await asyncio.shield(task)
 
     async def _produce(self, experiment_id: str, shared: _SharedProgress) -> None:
         try:
             async for frame in _progress_stream(
-                self._experiments, experiment_id, poll_seconds=self._poll_seconds
+                self._experiments, experiment_id, poll_seconds=self._poll_seconds, read=self._read
             ):
                 if frame.startswith(":"):
                     continue

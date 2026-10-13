@@ -51,6 +51,7 @@ from backtest_engine.types.actions import (
     GroupPolicy,
     LiquidatePosition,
     LiquidationPersistence,
+    NotionalDelta,
     QuantityDelta,
     QuantityTarget,
     ReplaceOrder,
@@ -73,7 +74,7 @@ from backtest_engine.types.events import (
     StrategyEvent,
     TargetRounding,
 )
-from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
 from backtest_engine.types.orders import (
     LimitOrderRequest,
@@ -516,6 +517,36 @@ ENGINE_SCENARIOS = {
         RunConfig(run_id="si", initial_cash=100_000.0, fee_bps=10.0),
         ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
         DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
+    ),
+    "combined_costs": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="combined",
+            initial_cash=100_000.0,
+            fee_bps=10.0,
+            sell_tax_schedule=_SELL_TAX_SCHEDULE,
+        ),
+        ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
+        DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
+    ),
+    "basket_sqrt": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="basket-sqrt", initial_cash=100_000.0, sell_tax_schedule=_SELL_TAX_SCHEDULE
+        ),
+        test_basket.BasketStrategy(
+            (test_basket.hold_b(10), test_basket.pair(test_basket.GroupPolicy.PROPORTIONAL))
+        ),
+        DataFeed(
+            tuple(
+                replace(bar, impact_scale=0.002, liquidity_volume=bar.volume)
+                for bar in test_basket.BARS
+            )
+        ),
         max_participation=0.1,
         slippage=SqrtImpactSlippage(0.99),
     ),
@@ -1938,3 +1969,74 @@ def test_result_tables_match_across_cores_on_a_partial_trace(rust_core: str) -> 
     assert tables.sessions == (day(1), day(2))
     assert tables.instruments == (_PARTIAL_A,)
     assert _result_tables(python_engine) == _result_tables(rust_engine)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("notional", ["450", "-450", "99", "-99"])
+def test_notional_adjustments_floor_absolute_shares_before_applying_direction(
+    core: str, notional: str
+) -> None:
+    """금액 조정도 목표 수량과 같은 내림 규칙을 쓴다. 음수는 floor(-4.5)가 아닌 -4주다(#417)."""
+    instrument = make_instrument()
+    actions: tuple[StrategyAction | None, ...] = (
+        SetPositionTarget(
+            QuantityTarget(instrument, Decimal(10)), ExecutionPolicy.market_next_open()
+        ),
+        AdjustPosition(
+            instrument,
+            NotionalDelta(Money(Decimal(notional), "KRW")),
+            ExecutionPolicy.market_next_open(),
+        ),
+    )
+    _engine, result = _engine_scenario(
+        core,
+        RunConfig(run_id="adjust-floor", initial_cash=10_000, fee_bps=0),
+        ScriptedStrategy(
+            actions,
+            declared_actions=frozenset(
+                {
+                    ActionKind.NO_ACTION,
+                    ActionKind.SET_POSITION_TARGET,
+                    ActionKind.ADJUST_POSITION,
+                }
+            ),
+        ),
+        DataFeed(tuple(make_bar(day(i), instrument, 100, 100) for i in (1, 2, 3))),
+    )
+    expected = 4 if abs(Decimal(notional)) >= 100 else 0
+    assert [fill.quantity for fill in result.fills] == (
+        [Decimal(10), Decimal(expected)] if expected else [Decimal(10)]
+    )
+    if expected:
+        assert result.fills[-1].side is (Side.BUY if Decimal(notional) > 0 else Side.SELL)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("scenario", ["combined_costs", "basket_sqrt"])
+def test_combined_cost_scenarios_exercise_tax_impact_and_explicit_volume(
+    core: str, scenario: str
+) -> None:
+    """세금·충격·참여 기준과 바스켓이 실제 체결 경로에서 함께 켜진다(#341)."""
+    engine, result = ENGINE_SCENARIOS[scenario](core)
+    # Rust 지연 체결 배열은 첫 접근에 payload를 인계한다. 비파괴 조회표를 먼저 얻는다.
+    tables = engine.event_store.result_tables()
+    assert any(fill.slippage_per_share != 0 for fill in result.fills)
+    assert any(fill.side is Side.SELL for fill in result.fills)
+    assert all(fill.cap_volume in (60, 1000, 3_000) for fill in result.fills)
+    assert any(row[1] == "sell_tax" and row[3] > 0 for row in tables.costs)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_basket_rescaling_preserves_the_quoted_impact_quantity(core: str) -> None:
+    """B의 캡6주가 A도6주로 줄이지만 A충격의 Q는 캡후견적10주다(#341)."""
+    import math
+
+    _engine, result = ENGINE_SCENARIOS["basket_sqrt"](core)
+    fills = [fill for fill in result.fills if fill.ts == day(3)]
+    assert [(fill.instrument.symbol, fill.quantity) for fill in fills] == [
+        ("000660", Decimal(6)),
+        ("005930", Decimal(6)),
+    ]
+    assert fills[0].slippage_per_share == pytest.approx(60 * 0.002 * math.sqrt(6))
+    assert fills[1].slippage_per_share == pytest.approx(100 * 0.002 * math.sqrt(10))
+    assert fills[1].slippage_per_share != pytest.approx(100 * 0.002 * math.sqrt(6))

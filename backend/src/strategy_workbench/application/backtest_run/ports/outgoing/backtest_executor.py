@@ -27,8 +27,9 @@ class BacktestExecutionRequest:
     target_tape: TargetTape
     dataset: BacktestDataset
     strategy_provenance: StrategyProvenance
-    strategy_source: StrategySource | None = None
-    lineage_strategy_id: str | None = None
+    # 기본값을 두지 않는다 — 빠뜨린 호출자가 manifest 출처를 조용히 비우지 않게(#497).
+    strategy_source: StrategySource | None
+    lineage_strategy_id: str | None
 
 
 class RunCancelledError(RuntimeError):

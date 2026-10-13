@@ -4,6 +4,7 @@
  * `planSourceOperation`의 몫이고 여기서는 fragment를 조립하지 않는다.
  */
 import { t } from "../../../shared/config";
+import { decodePointerSegment } from "../../../shared/lib/yaml12";
 import { findReferences, type DocumentReference } from "./document-references";
 import {
   identityKeyOf,
@@ -137,9 +138,6 @@ export const itemSection = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const decodeSegment = (segment: string): string =>
-  segment.replaceAll("~1", "/").replaceAll("~0", "~");
-
 /** `itemSchemaPointer`가 가리키는 노드(`$ref` 해소 전). */
 const itemSchemaRaw = (
   schema: JsonSchema,
@@ -148,7 +146,7 @@ const itemSchemaRaw = (
   let node: unknown = schema;
   for (const segment of section.itemSchemaPointer.slice(1).split("/")) {
     if (!isRecord(node)) return null;
-    node = node[decodeSegment(segment)];
+    node = node[decodePointerSegment(segment)];
   }
   return isRecord(node) ? resolveRef(schema, node) : null;
 };
@@ -265,7 +263,7 @@ const appendOperation = (
   return {
     kind: "insert-key",
     parentPointer: "",
-    key: decodeSegment(section.parentPointer.slice(1)),
+    key: decodePointerSegment(section.parentPointer.slice(1)),
     value: { [section.key]: [value] },
   };
 };

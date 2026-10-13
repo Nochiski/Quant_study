@@ -824,7 +824,7 @@
         "type": "object"
       },
       "BacktestRunSpec": {
-        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
+        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
         "properties": {
           "annualization_days": {
             "default": 252,

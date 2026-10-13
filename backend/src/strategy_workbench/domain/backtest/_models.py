@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal, get_args
@@ -338,7 +338,7 @@ class BacktestRunOptions:
 class BacktestRunSpec(BacktestRunOptions):
     """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
 
-    `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+    `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
     so a run can name a saved revision (P1-09). The run service rejects a request carrying both
     or neither (one coded 422, `backtest.run.invalid`).
     After resolution the run spec stored in the manifest carries both: `strategy` is the exact
@@ -361,6 +361,43 @@ class BacktestRunSpec(BacktestRunOptions):
     # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
     # 넣지 않는다.
     lineage_strategy_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedBacktestRunSpec(BacktestRunOptions):
+    """접수 후 실행 입력. 전략·환경은 필수이며 요청 출처는 실행 값과 분리한다."""
+
+    strategy: StrategySpec
+    environment: RunEnvironment
+    metric_windows: tuple[MetricWindow, ...] = ()
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+
+    @classmethod
+    def from_request(
+        cls,
+        request: BacktestRunSpec,
+        *,
+        strategy: StrategySpec,
+        environment: RunEnvironment,
+        parameter_values: dict[str, ParameterValue],
+    ) -> ResolvedBacktestRunSpec:
+        # 실행 칸의 owner는 이 타입이다. 새 요청 전용 칸이 실행에 자동 유입되지 않는다.
+        values = {item.name: getattr(request, item.name) for item in fields(cls)}
+        values.update(strategy=strategy, environment=environment, parameter_values=parameter_values)
+        return cls(**values)
+
+    def to_wire(
+        self,
+        *,
+        strategy_source: StrategySource | None = None,
+        lineage_strategy_id: str | None = None,
+    ) -> BacktestRunSpec:
+        """기존 manifest·연구 저장 계약 투영. 실행 중에는 이 요청 타입을 사용하지 않는다."""
+        return BacktestRunSpec(
+            **{item.name: getattr(self, item.name) for item in fields(self)},
+            strategy_source=strategy_source,
+            lineage_strategy_id=lineage_strategy_id,
+        )
 
 
 @dataclass(frozen=True)

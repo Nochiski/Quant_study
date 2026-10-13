@@ -7,7 +7,7 @@ from strategy_workbench.domain.canonical.facade.encoding import (
     canonical_payload_json,
 )
 
-from ._models import BacktestRunSpec, RunEnvironment
+from ._models import BacktestRunSpec, ResolvedBacktestRunSpec, RunEnvironment
 
 # 엔진 체결·자본·비용 규칙의 판본. 매니페스트 `engine_version` 과 실행 지문에 실린다. 두 코어의
 # 체결 결과나 비용 규칙(법정 세율표·ADV·σ 창·충격 상한·척도 공식)을 바꾸는 PR 은 이 값을 올린다 —
@@ -19,7 +19,7 @@ ENGINE_RULES_VERSION = "backtest-engine-v4"
 
 
 def backtest_run_fingerprint(
-    spec: BacktestRunSpec,
+    spec: BacktestRunSpec | ResolvedBacktestRunSpec,
     *,
     data_snapshot_id: str,
     target_tape_hash: str,
@@ -44,21 +44,23 @@ def backtest_run_fingerprint(
     return canonical_json_hash(payload)
 
 
-def fingerprint_run_spec(spec: BacktestRunSpec) -> BacktestRunSpec:
+def fingerprint_run_spec(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> BacktestRunSpec:
     """실행 결과를 가르는 요청 칸만 남긴 spec — 실행 지문과 같은 입력 잇기가 이것을 비교한다.
 
     전략 출처·계열은 출처 정보이고, 지표 창의 표시 이름(`label`)은 화면이 지은 문자열이라
     뺀다(#335).
     """
+    # 기존 지문의 null 출처 키를 보존한다. 새 내부 DTO를 직접 asdict하면 과거 지문이 바뀐다.
+    wire = spec.to_wire() if isinstance(spec, ResolvedBacktestRunSpec) else spec
     return replace(
-        spec,
+        wire,
         strategy_source=None,
         lineage_strategy_id=None,
         metric_windows=tuple(replace(window, label=None) for window in spec.metric_windows),
     )
 
 
-def run_input_key(spec: BacktestRunSpec) -> str:
+def run_input_key(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> str:
     """접수 때 아는 실행 입력의 해시 — 같은 입력 잇기(중복 실행 제거)의 기준.
 
     실행 지문에서 실행 뒤에야 아는 칸(target tape 해시)과 프로세스 안에서 고정인 칸(데이터 스냅샷·

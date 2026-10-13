@@ -612,7 +612,7 @@ export type BacktestRunResult = {
  *
  * A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
  *
- * `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+ * `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
  * so a run can name a saved revision (P1-09). The run service rejects a request carrying both
  * or neither (one coded 422, `backtest.run.invalid`).
  * After resolution the run spec stored in the manifest carries both: `strategy` is the exact

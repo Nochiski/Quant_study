@@ -195,6 +195,7 @@ const explanation = (body: FactorGraphRequest): FactorExplanation => {
       ),
     },
     plan: {
+      evaluation_version: "factor-evaluation-v1",
       graph_hash: "a".repeat(64),
       plan_hash: "b".repeat(64),
       registry_version: "registry-v1",

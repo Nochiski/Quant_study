@@ -19,8 +19,9 @@ import {
   SourceEditor,
   StrategyOutline,
   UpgradeBanner,
-  PROJECTION_VIEWS,
+  STRATEGY_VIEWS,
   canValidateDocument,
+  currentCompileOutcome,
   currentDiagnostics,
   createNewDraftId,
   revisionDraftId,
@@ -29,6 +30,8 @@ import {
   useApplyAssistantProposal,
   useStrategyAssistant,
   useAutosave,
+  useWholeDocumentReplacement,
+  useEditorHandle,
   useCompileDocument,
   useDiagnosticNavigation,
   useDocumentHistory,
@@ -54,7 +57,7 @@ import {
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
-import { Badge, type CodeEditorHandle } from "../../../shared/ui";
+import { Badge } from "../../../shared/ui";
 import {
   StrategyDebuggerPanel,
   StrategyPreviewPanel,
@@ -99,7 +102,9 @@ export const NewStrategyPage = () => {
           document.baseSpecHash,
         )
       : (search.draft ?? entryDraftId);
-  const serverDraft = useServerDraft(document, dispatch, {
+  const editorOwner = useEditorHandle();
+  const replacement = useWholeDocumentReplacement(editorOwner);
+  const serverDraft = useServerDraft(document, replacement.replace, {
     draftId: serverDraftId,
     schemaVersion: assist.schemaVersion,
     schemaPending: assist.loading,
@@ -107,11 +112,11 @@ export const NewStrategyPage = () => {
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   // 붙여 넣은 은퇴 버전 문서도 revision 화면과 같은 경로로 올린다(#257). 저장본이 없으므로 판정은
   // 현재 텍스트의 compile 진단만 읽는다.
-  const documentUpgrade = useUpgradeDocument(document, null);
+  const documentUpgrade = useUpgradeDocument(editorOwner, document, null);
   // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
-  const proposalApply = useApplyAssistantProposal(document);
+  const proposalApply = useApplyAssistantProposal(editorOwner, document);
   const canValidate = !validating && canValidateDocument(document);
-  const autosave = useAutosave(document, dispatch, {
+  const autosave = useAutosave(document, replacement.replace, {
     schemaVersion: assist.schemaVersion,
   });
   // 실행 설정은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2, P3-02). 새 전략은 전략 id 가 없어 한
@@ -130,12 +135,8 @@ export const NewStrategyPage = () => {
     runSettings.requestOptions,
   );
   const startBacktest = backtest.run;
-  const current =
-    document.compiled !== null &&
-    document.compiledVersion === document.sourceVersion
-      ? document.compiled
-      : null;
-  const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
+  const current = currentCompileOutcome(document);
+  const availableViews: readonly StrategyView[] = STRATEGY_VIEWS;
   const view: StrategyView = search.view === "yaml" ? "yaml" : "graph";
   // The page/router owns URL generations. The debugger treats this as an opaque publication
   // lease, so an older async trace cannot replay a callback that captured an older search object.
@@ -159,7 +160,7 @@ export const NewStrategyPage = () => {
     },
     [navigate, search],
   );
-  const outline = useOutlineNavigation({
+  const outline = useOutlineNavigation(editorOwner, {
     state: document,
     schema: assist.schema,
     revealSelectedPointer: view === "yaml",
@@ -168,17 +169,14 @@ export const NewStrategyPage = () => {
   });
   // source 트랜잭션 인스턴스는 page가 하나 만들어 Form·스니펫이 공유한다(WORKFLOW P4-04). hidden 편집기가
   // 살아 있으므로 editorActive는 참이고, 스니펫만 source view 게이트를 따로 지킨다.
-  const transactions = useSourceTransactions(document, true);
+  const transactions = useSourceTransactions(editorOwner, document, true);
   const snippets = useSnippetInsertion(
-    document,
     assist.snippetSource,
     view === "yaml",
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
-  const catalogs = {
-    equityFields: assist.inspectorSource.equityCatalog?.fields ?? null,
-  };
+  const catalogs = assist.fieldPickerCatalogs;
   const openGraph = useCallback(
     (pointer: string): void => {
       void navigate({
@@ -199,7 +197,7 @@ export const NewStrategyPage = () => {
   );
   // outline 다음에 부른다 — 탭 전환 뒤 진단 범위로 가는 effect가 outline의 pointer reveal 뒤에 서야
   // 더 정확한 범위가 남는다(WORKFLOW P1-01).
-  const problems = useDiagnosticNavigation({
+  const problems = useDiagnosticNavigation(editorOwner, {
     state: document,
     view,
     sourceView: "yaml",
@@ -211,34 +209,7 @@ export const NewStrategyPage = () => {
   });
   // 되돌리기·다시 실행은 편집기 이력 하나가 owner다(WORKFLOW P1-02). 탭 목록 줄의 버튼(탭 패널 밖)과
   // IDE 전역 단축키가 같은 명령을 부른다.
-  const history = useDocumentHistory(document);
-  const onOutlineEditorReady = outline.onEditorReady;
-  const onSnippetEditorReady = snippets.onEditorReady;
-  const onTransactionsEditorReady = transactions.onEditorReady;
-  const onUpgradeEditorReady = documentUpgrade.onEditorReady;
-  const onProblemsEditorReady = problems.onEditorReady;
-  const onHistoryEditorReady = history.onEditorReady;
-  const onProposalEditorReady = proposalApply.onEditorReady;
-  const onEditorReady = useCallback(
-    (editor: CodeEditorHandle | null): void => {
-      onOutlineEditorReady(editor);
-      onSnippetEditorReady(editor);
-      onTransactionsEditorReady(editor);
-      onUpgradeEditorReady(editor);
-      onProblemsEditorReady(editor);
-      onHistoryEditorReady(editor);
-      onProposalEditorReady(editor);
-    },
-    [
-      onOutlineEditorReady,
-      onProposalEditorReady,
-      onSnippetEditorReady,
-      onTransactionsEditorReady,
-      onUpgradeEditorReady,
-      onProblemsEditorReady,
-      onHistoryEditorReady,
-    ],
-  );
+  const history = useDocumentHistory(editorOwner);
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   // 어시스턴트 사이드바 배선(문서 참조·턴 컨텍스트·"적용 후 백테스트"·제안 카드 동작). 두 전략 화면이
   // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
@@ -506,7 +477,7 @@ export const NewStrategyPage = () => {
               state={document}
               dispatch={dispatch}
               assist={assist}
-              onEditorReady={onEditorReady}
+              onEditorReady={editorOwner.onEditorReady}
               onSelectionChange={outline.onEditorSelectionChange}
             />
           </>

@@ -66,6 +66,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     diagnostic_code,
     source_hash_of,
 )
+from strategy_workbench.domain.strategy.facade.document import json_pointer_token
 
 from ._upgrade_source import upgrade_json_source, upgrade_yaml_source
 
@@ -103,19 +104,14 @@ class _Counter:
     nodes: int = 0
 
 
-def _escape(key: str) -> str:
-    return key.replace("~", "~0").replace("/", "~1")
-
-
 class RuamelDocumentCodec:
     def __init__(self, limits: CodecLimits | None = None) -> None:
         self._limits = limits or CodecLimits()
 
-    def upgrade_source(self, source: str, *, format: SourceFormat, until: str | None = None) -> str:
-        # `until` 은 port 계약 밖의 선택 인자다: 체인 중간 단계 golden 을 고정하는 테스트만 쓴다.
+    def upgrade_source(self, source: str, *, format: SourceFormat) -> str:
         if format is SourceFormat.JSON:
-            return upgrade_json_source(source, until=until)
-        return upgrade_yaml_source(source, until=until)
+            return upgrade_json_source(source)
+        return upgrade_yaml_source(source)
 
     def parse(self, source: str, *, format: SourceFormat) -> ParsedDocument:
         try:
@@ -395,7 +391,7 @@ class RuamelDocumentCodec:
                         pointer,
                         _range_of(key_node),
                     )
-                child = f"{pointer}/{_escape(key)}"
+                child = f"{pointer}/{json_pointer_token(key)}"
                 if key in result:
                     raise _Rejected(
                         "duplicate_key",

@@ -1,3 +1,5 @@
+import { useWholeDocumentReplacement } from "../model/replace-whole-document";
+import { useEditorHandle } from "../model/use-editor-handle";
 import { EditorView } from "@codemirror/view";
 import {
   act,
@@ -9,11 +11,9 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useCallback } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
-import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentSource } from "../model/document-source";
 import type { JsonSchema } from "../model/schema-navigator";
 import { useDocumentHistory } from "../model/use-document-history";
@@ -42,18 +42,11 @@ const Harness = () => {
     format: "yaml",
     source: VERBOSE,
   });
-  const transactions = useSourceTransactions(doc, true);
-  const history = useDocumentHistory(doc);
+  const owner = useEditorHandle();
+  const transactions = useSourceTransactions(owner, doc, true);
+  const history = useDocumentHistory(owner);
   const form = useFormProjection(doc, SCHEMA);
-  const onTransactionsEditorReady = transactions.onEditorReady;
-  const onHistoryEditorReady = history.onEditorReady;
-  const onEditorReady = useCallback(
-    (editor: CodeEditorHandle | null): void => {
-      onTransactionsEditorReady(editor);
-      onHistoryEditorReady(editor);
-    },
-    [onHistoryEditorReady, onTransactionsEditorReady],
-  );
+  const onEditorReady = owner.onEditorReady;
   return (
     <>
       <DocumentHistoryActions history={history} />
@@ -107,21 +100,24 @@ const RevisionHarness = ({
   source: DocumentSource;
 }) => {
   const [doc, dispatch] = useStrategyDocument(documentSource);
-  const history = useDocumentHistory(doc);
+  const owner = useEditorHandle();
+  const history = useDocumentHistory(owner);
+  const replacement = useWholeDocumentReplacement(owner);
+  const onEditorReady = owner.onEditorReady;
   return (
     <>
       <DocumentHistoryActions history={history} />
-      {/* 복구 배너·서버 초안 배너가 보내는 것과 같은 액션이다(`use-autosave.ts`, `use-server-draft.ts`). */}
+      {/* 복구 배너·서버 초안 배너가 부르는 같은 편집기 명령이다. */}
       <button
         type="button"
-        onClick={() => dispatch({ type: "edit", source: RECOVERED })}
+        onClick={() => replacement.replace(RECOVERED)}
       >
         복구본 불러오기
       </button>
       <SourceEditor
         state={doc}
         dispatch={dispatch}
-        onEditorReady={history.onEditorReady}
+        onEditorReady={onEditorReady}
       />
       <button type="button" onClick={() => dispatch({
         type: "saved", strategyId: "s1", revision: 2, specHash: "2".repeat(64),
@@ -172,7 +168,7 @@ describe("문서 되돌리기·다시 실행 (P1-02)", () => {
     await waitFor(() =>
       expect(source()).toContain("\n          node_id: field\n"),
     );
-    // 깊이 표시는 편집 직후 갱신된다(폴링 없이 sourceVersion 변화로).
+    // 깊이 표시는 편집 직후 갱신된다(폴링 없이 CodeMirror 이력 구독으로).
     await waitFor(() => expect(undoButton).not.toHaveAttribute("aria-disabled"));
     expect(redoButton).toHaveAccessibleDescription("다시 실행할 편집이 없습니다");
 

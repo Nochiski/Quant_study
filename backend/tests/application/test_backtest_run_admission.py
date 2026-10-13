@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import date
 from pathlib import Path
 from threading import Thread
@@ -35,6 +35,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     InlineDraft,
+    RunLaneControls,
     RunStatus,
 )
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
@@ -46,7 +47,13 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
-from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
+from strategy_workbench.domain.backtest.facade.runs import (
+    ExecutionCore,
+    MetricWindow,
+    ResolvedBacktestRunSpec,
+    backtest_run_fingerprint,
+    run_input_key,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     FloatParameter,
     RebalanceFrequency,
@@ -596,3 +603,73 @@ def test_a_paused_experiment_keeps_its_queued_runs_until_resumed(gated_runs: _Ga
 
     assert held is RunStatus.QUEUED
     assert [end.day for end, _running in entries] == [12, 10, 11]
+
+
+def test_lane_settings_follow_live_runs_and_next_admission_restores_saved_controls(
+    gated_runs: _GatedRuns,
+) -> None:
+    """#384: 빈 레인의 설정을 누적하지 않고 재시도·다음 창은 저장 조작으로 접수한다."""
+    runs, port, _entries = gated_runs("lane-first", "lane-next")
+    first = runs.start(_request(), owner="experiment", lane_controls=RunLaneControls(True, 3))
+    assert first.run.status is RunStatus.QUEUED
+    assert not port.entered.is_set()
+    runs.schedule("experiment", paused=False, weight=3)
+    assert port.entered.wait(timeout=30)
+    port.release.set()
+    assert wait_for_terminal_run(runs, "lane-first").status is RunStatus.COMPLETED
+    assert not runs._waiting._paused and not runs._waiting._weights and not runs._waiting._served
+
+    # 끝난 실험의 조작은 저장소가 보관한다. 실행 서비스에 레인 사본을 만들지 않는다.
+    runs.schedule("experiment", paused=True, weight=5)
+    assert not runs._waiting._paused and not runs._waiting._weights
+    second = runs.start(_request(), owner="experiment", lane_controls=RunLaneControls(True, 2))
+    assert second.run.status is RunStatus.QUEUED
+    assert runs._waiting.is_paused("experiment")
+    assert runs.cancel("lane-next", owner="experiment").status is RunStatus.CANCELLED
+    assert not runs._waiting._paused and not runs._waiting._weights and not runs._waiting._served
+
+
+def test_withdrawing_a_shared_owner_releases_only_its_lane_settings(gated_runs: _GatedRuns) -> None:
+    runs, port, _entries = gated_runs("shared-lane")
+    runs.start(_request(), owner="a", lane_controls=RunLaneControls(True, 3))
+    runs.start(_request(), owner="b", lane_controls=RunLaneControls(False, 2))
+    assert port.entered.wait(timeout=30)
+    assert runs.cancel("shared-lane", owner="a").kept_by_owners
+    assert "a" not in runs._waiting._paused and "a" not in runs._waiting._weights
+    assert runs._waiting._weights["b"] == 2
+    port.release.set()
+    assert wait_for_terminal_run(runs, "shared-lane").status is RunStatus.COMPLETED
+    assert not runs._waiting._weights
+
+
+def test_admission_separates_execution_inputs_and_preserves_wire_and_fingerprints(
+    gated_runs: _GatedRuns,
+) -> None:
+    runs, _port, _entries = gated_runs("unused")
+    request = replace(
+        _request(),
+        strategy=None,
+        strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
+        lineage_strategy_id=_LINEAGE,
+    )
+    admission = runs.admit(request)
+    resolved = admission.resolved
+    wire = admission.spec
+    assert isinstance(resolved, ResolvedBacktestRunSpec)
+    assert not {"strategy_source", "lineage_strategy_id"}.intersection(
+        item.name for item in fields(resolved)
+    )
+    assert resolved.strategy == _spec()
+    assert resolved.environment == _ENVIRONMENT
+    assert wire == replace(request, strategy=_spec())
+    assert run_input_key(resolved) == run_input_key(wire)
+    fingerprint_inputs = dict(
+        data_snapshot_id="snapshot",
+        target_tape_hash="tape",
+        engine_version="engine",
+        metric_registry_version="metrics",
+    )
+    assert backtest_run_fingerprint(resolved, **fingerprint_inputs) == backtest_run_fingerprint(
+        wire, **fingerprint_inputs
+    )
+    assert runs.list_runs(PageRequest(offset=0, limit=50)).items == ()

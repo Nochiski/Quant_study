@@ -14,12 +14,10 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
-    SellTax,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
-    ExecutionCore,
     InlineDraft,
     MetricWindow,
     RunManifest,
@@ -118,19 +116,13 @@ def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
         run_id="run-001",
         created_at=created,
         completed_at=created,
-        engine_core=ExecutionCore.PYTHON,
         engine_version="test",
         run_fingerprint="fingerprint",
-        run_spec=BacktestRunSpec(strategy, environment=environment),
+        run_spec=BacktestRunSpec(strategy, environment=environment, initial_cash=100.0),
         strategy_hash=strategy_hash,
         data_snapshot_id="snap",
         target_tape_hash="tape",
         metric_registry_version="metrics",
-        initial_cash=100.0,
-        annualization_days=252,
-        fee_bps=environment.fee_bps,
-        slippage_bps=environment.slippage_bps,
-        participation_rate=environment.participation_rate,
         environment=environment,
         environment_hash=environment_hash(environment),
         strategy_provenance=StrategyProvenance(
@@ -149,33 +141,6 @@ def test_manifest_records_one_strategy_hash_under_two_names() -> None:
         _manifest("a" * 64, "c" * 64)
 
 
-def test_manifest_rejects_a_cost_model_that_diverges_from_its_environment() -> None:
-    """비용 축이 두 곳에 기록되므로(`environment` 와 평면 필드) 어긋나면 리포트가 읽는 축에 따라
-    같은 run 의 수수료가 달라진다. 평면 필드 제거는 P2-03 이고, 그때까지는 대조가 막는다."""
-    base = _manifest("a" * 64, "a" * 64)
-
-    with pytest.raises(ValueError, match="manifest records two execution cost models"):
-        replace(base, fee_bps=base.environment.fee_bps + 1.0)
-
-    with pytest.raises(ValueError) as error:
-        replace(base, participation_rate=0.5)
-    message = str(error.value)
-    assert "run_id=run-001" in message
-    assert "participation_rate: manifest=0.5" in message
-    assert f"environment={base.environment.participation_rate!r}" in message
-
-
-def test_manifest_flat_cost_check_ignores_environment_only_cost_fields() -> None:
-    """매니페스트 평면 필드는 수수료·슬리피지·참여율 셋뿐이다. 실행 설정에만 있는 거래세 칸이
-    대조 집합에 들어가면 `AttributeError` 가 난다(spec D7)."""
-    manifest = _manifest("a" * 64, "a" * 64)
-    taxed = replace(manifest.environment, sell_tax=SellTax.CUSTOM, sell_tax_bps=20.0)
-
-    rebuilt = replace(manifest, environment=taxed, environment_hash=environment_hash(taxed))
-
-    assert rebuilt.environment.sell_tax_bps == 20.0
-
-
 def test_the_mismatch_message_names_both_producers_and_the_revision() -> None:
     with pytest.raises(ValueError) as error:
         _manifest("a" * 64, "c" * 64)
@@ -187,3 +152,25 @@ def test_the_mismatch_message_names_both_producers_and_the_revision() -> None:
     assert "provenance.kind=saved_revision" in message
     assert "strategy_id=s1" in message
     assert "revision=3" in message
+
+
+def test_evaluation_version_separates_new_runs_without_rewriting_historical_identity() -> None:
+    strategy = StrategyDesignService(
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
+    ).template()
+    spec = BacktestRunSpec(strategy=strategy)
+    assert _fingerprint(spec) == "d5192042941c2873d64c76279bddb0d459d604a71acca6ec43ad65f7e79892cf"
+    versions = [None, "factor-evaluation-v1", "factor-evaluation-v2"]
+    identities = [
+        backtest_run_fingerprint(
+            spec,
+            data_snapshot_id="snap",
+            target_tape_hash="tape",
+            engine_version="engine",
+            metric_registry_version="metrics",
+            factor_evaluation_version=v,
+        )
+        for v in versions
+    ]
+    assert identities[0] == _fingerprint(spec)
+    assert len(set(identities)) == 3

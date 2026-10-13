@@ -15,7 +15,7 @@ const BASE = 'schema_version: "1.1"\ntitle: "old"\n';
 
 const fakeApply = (): AssistantProposalApply => ({
   status: { kind: "idle" },
-  onEditorReady: vi.fn(),
+
   readSource: () => BASE,
   apply: vi.fn(),
   preview: vi.fn(),

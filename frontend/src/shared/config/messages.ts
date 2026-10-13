@@ -249,19 +249,72 @@ const ko = {
   "backtest.result.column.category": "Category",
   "backtest.result.column.value": "Value",
   "backtest.result.column.samples": "Samples",
+  "backtest.orderEvents.title": "주문 상태 기록",
+  "backtest.orderEvents.unrecorded": "이 결과에는 주문 상태 기록이 없습니다. 이전 형식 결과에서는 미체결 사유를 확인할 수 없습니다.",
+  "backtest.orderEvents.empty": "기록된 주문 상태 이벤트가 없습니다 (0건).",
+  "backtest.orderEvents.count": "주문 상태 이벤트 {count}건",
+  "backtest.orderEvents.zeroCapCount": "유동성 한도 0주 기록 {count}건 (이벤트 기준)",
+  "backtest.orderEvents.records": "주문 상태 원본 보기",
+  "backtest.orderEvents.session": "거래일",
+  "backtest.orderEvents.order": "주문 ID",
+  "backtest.orderEvents.status": "상태",
+  "backtest.orderEvents.reason": "사유",
+  "backtest.orderEvents.capVolume": "기준 거래량 (주)",
+  "backtest.orderEvents.detail": "엔진 원본 메시지",
+  "backtest.orderEvents.reason.liquidity_cap_zero": "유동성 한도 0주",
+  "backtest.orderEvents.status.new": "신규",
+  "backtest.orderEvents.status.triggered": "조건 발동",
+  "backtest.orderEvents.status.open": "대기",
+  "backtest.orderEvents.status.partially_filled": "부분 체결",
+  "backtest.orderEvents.status.filled": "체결 완료",
+  "backtest.orderEvents.status.cancelled": "취소",
+  "backtest.orderEvents.status.rejected": "거절",
+  "backtest.orderEvents.status.replaced": "정정",
   "backtest.result.trades": "Closed trades",
   "backtest.result.orders": "orders",
   "backtest.result.fills": "fills",
   "backtest.result.positions": "positions",
   "backtest.result.trades.empty": "이 실행에는 청산 완료된 거래가 없습니다.",
   "backtest.result.column.security": "Security",
-  "backtest.result.column.side": "Side",
+  "backtest.status.queued": "대기",
+  "backtest.status.running": "실행 중",
+  "backtest.status.cancel_requested": "취소 요청",
+  "backtest.status.cancelled": "취소됨",
+  "backtest.status.failed": "실패",
+  "backtest.status.completed": "완료",
+  "backtest.stage.queued": "실행 대기",
+  "backtest.stage.tape": "전략 목표 계산",
+  "backtest.stage.data": "데이터 준비",
+  "backtest.stage.engine": "백테스트 계산",
+  "backtest.stage.artifact": "결과 저장",
+  "backtest.stage.cancellation": "취소 처리",
+  "backtest.stage.completed": "완료",
+  "backtest.stage.cancelled": "취소됨",
+  "backtest.stage.failed": "실패",
+  "backtest.result.unavailable": "계산 불가",
+  "backtest.result.registry": "지표 사전",
+  "backtest.scope.full": "전체 구간",
+  "backtest.scope.in_sample": "학습 구간",
+  "backtest.scope.validation": "검증 구간",
+  "backtest.scope.out_of_sample": "표본 외 구간",
+  "backtest.scope.window": "지정 구간",
+  "backtest.category.return": "수익",
+  "backtest.category.risk": "위험",
+  "backtest.category.risk_adjusted": "위험 조정",
+  "backtest.category.benchmark": "벤치마크",
+  "backtest.category.trade": "거래",
+  "backtest.category.exposure": "노출",
+  "backtest.category.cost": "비용",
+  "backtest.side.long": "매수 포지션",
+  "backtest.side.short": "매도 포지션",
+  "backtest.result.column.side": "방향",
   "backtest.result.column.opened": "Opened",
   "backtest.result.column.closed": "Closed",
   "backtest.result.column.quantity": "Qty",
   "backtest.result.column.pnl": "P&L",
   "backtest.result.column.fees": "비용(수수료·세금)",
-  "backtest.result.column.slippage": "Slippage",
+  "backtest.result.environment.notApplied": "미적용",
+  "backtest.result.column.slippage": "슬리피지·충격 비용",
   "backtest.result.manifest": "Manifest · 데이터 경고 · 재현성 정보",
   "backtest.result.manifest.schema": "Schema",
   "backtest.result.manifest.engine": "Engine",
@@ -282,6 +335,25 @@ const ko = {
   "backtest.result.manifest.completed": "Completed",
   "backtest.result.warnings": "Data warnings",
   "backtest.result.warnings.empty": "경고 없음",
+  "backtest.warning.equity.reference_rows_dropped":
+    "거래정지 기준가 행은 가격 경로에서 제외했습니다",
+  "backtest.warning.equity.provisional_rows_dropped":
+    "아직 확정되지 않은 가격 행을 제외했습니다",
+  "backtest.warning.equity.invalid_ohlc_rows_dropped":
+    "가격 조건을 충족하지 않는 행을 제외했습니다",
+  "backtest.warning.equity.corporate_action_without_bar_dropped":
+    "이후 가격이 없는 기업 행동을 제외했습니다",
+  "backtest.warning.equity.unfolded_level_shift":
+    "원장 미접힘 층 이동을 기준가 비로 수량에 반영했습니다",
+  "backtest.warning.equity.mock_data":
+    "실데이터가 아닌 예제 데이터로 실행했습니다",
+  "backtest.warning.equity.corporate_action_feed_empty":
+    "예제 데이터에는 기업 행동이 없습니다",
+  "backtest.warning.mock_equity_data":
+    "실데이터가 아닌 예제 데이터로 실행했습니다",
+  "backtest.warning.corporate_action_feed_empty":
+    "예제 데이터에는 기업 행동이 없습니다",
+
   "backtest.warning.portfolio.sector_unknown_excluded":
     "섹터를 모르는 종목은 섹터 제약에서 뺐습니다",
   "backtest.warning.benchmark.no_bar_at_start":
@@ -388,10 +460,10 @@ const ko = {
     "거래하며 낸 수수료 합계입니다.",
   "backtest.metric.total_taxes": "매도 거래세",
   "backtest.metric.total_taxes.description":
-    "주식을 팔 때 낸 증권거래세·농어촌특별세 합계입니다.",
-  "backtest.metric.total_slippage_cost": "슬리피지 비용",
+    "선택한 매도 거래세 방식과 세율로 계산한 세금 합계입니다.",
+  "backtest.metric.total_slippage_cost": "슬리피지·충격 비용",
   "backtest.metric.total_slippage_cost.description":
-    "원하던 가격과 실제 체결 가격의 차이로 잃은 금액입니다.",
+    "선택한 가격 충격 모델에 따라 발생한 고정 슬리피지 또는 변동성·거래 규모 기반 충격 비용입니다.",
   "backtest.metric.total_carry_cost": "대차·신용 비용",
   "backtest.metric.total_carry_cost.description":
     "공매도 대차료와 신용 이자로 낸 금액입니다.",
@@ -446,17 +518,16 @@ const ko = {
   "ide.resizeInspector": "계약 크기 조절",
   "ide.resizeDebugger": "중간 결과 크기 조절",
   "ide.section.pending": "대기",
-  "ide.placeholder": "이 패널에 표시할 결과가 없습니다.",
+
   "ide.inspector.schema": "스키마",
   "ide.inspector.errors": "오류",
   "ide.inspector.plan": "실행 계획",
   "ide.inspector.path": "Path",
   "ide.inspector.unit": "단위",
   "ide.inspector.stage": "적용 시점",
-  "ide.debugger.security": "종목",
-  "ide.debugger.before": "제한 전",
-  "ide.debugger.after": "제한 후",
-  "ide.debugger.status": "상태",
+
+
+
   "debugger.controls": "전략 추적 범위",
   "debugger.date": "기준일",
   "debugger.date.note":
@@ -645,9 +716,9 @@ const ko = {
   "ide.outline.arrayIndex": "배열 인덱스",
   "ide.section.identity": "기본 정보",
   "ide.snippets": "스니펫",
-  "ide.snippet.field": "필드 노드 추가",
-  "ide.snippet.transform": "변환 노드 추가",
-  "ide.snippet.risk": "리스크 제한",
+
+
+
   "snippet.help":
     "빈 키 위치에서 추가합니다. 삽입 전 YAML 1.2 문법을 검사합니다.",
   "snippet.loading": "서버 스키마와 팩터 카탈로그를 불러오는 중입니다.",
@@ -1427,14 +1498,8 @@ const ko = {
   "strategy.operator.comparison.eq": "같음",
   "strategy.operator.comparison.eq.description": "두 값이 같으면 참입니다.",
   "strategy.operator.comparison.eq.formula": "left = right",
-  "ide.debugger.tab.preview": "값 미리보기",
-  "ide.debugger.tab.exposure": "노출",
-  "ide.debugger.tab.orders": "주문 예상",
-  "ide.debugger.tab.exclusions": "제외 사유",
-  "ide.debugger.tab.plan": "실행 계획",
-  "ide.debugger.computedWeight": "계산 비중",
-  "ide.debugger.afterCap": "제한 후",
-  "ide.debugger.difference": "차이",
+
+
   "ide.debugger.pitPassed": "PIT 검증 통과",
   "ide.debugger.pitDetail": "분포, 결측, 극단값 검증을 통과했습니다.",
   "save.action": "저장",
@@ -1713,14 +1778,15 @@ const ko = {
   "diff.column.before": "이전",
   "diff.column.after": "이후",
   "diff.semantic.backendOwned":
-    "두 backend canonical payload만 비교하며 UI에서 StrategySpec 의미를 재해석하지 않습니다.",
+    "서버가 저장 revision과 현재 원문을 같은 의미 비교 정책으로 비교합니다.",
   "diff.semantic.empty": "의미 변경이 없습니다 (같은 spec hash).",
   "diff.semantic.no-base": "저장된 의미 기준이 없는 새 draft입니다.",
-  "diff.semantic.base-pending": "저장본 canonical 기준을 검증 중입니다.",
+  "diff.semantic.base-pending": "서버에서 저장본과 현재 원문의 의미 변경을 비교 중입니다.",
   "diff.semantic.current-unavailable":
     "현재 원문이 유효하게 compile되지 않아 원문 Diff만 제공합니다.",
+  "diff.semantic.unavailable": "서버 의미 비교를 불러올 수 없습니다. 원문을 수정하거나 비교 화면을 다시 열어 시도하세요.",
   "diff.semantic.incoherent":
-    "backend spec hash와 canonical payload가 일치하지 않아 의미 Diff를 표시하지 않습니다.",
+    "서버 비교 결과가 현재 원문·저장 revision과 일치하지 않아 의미 Diff를 표시하지 않습니다.",
   "diff.semantic.baseHash": "기준 spec hash",
   "diff.semantic.currentHash": "대상 spec hash",
   "diff.revision.title": "저장 revision 비교",
@@ -2433,18 +2499,71 @@ export const messages = {
     "backtest.result.column.category": "Category",
     "backtest.result.column.value": "Value",
     "backtest.result.column.samples": "Samples",
+    "backtest.orderEvents.title": "Order status records",
+    "backtest.orderEvents.unrecorded": "Order status records are unavailable for this result. Unfilled reasons cannot be determined for older result formats.",
+    "backtest.orderEvents.empty": "No order status events were recorded (0 events).",
+    "backtest.orderEvents.count": "{count} order status events",
+    "backtest.orderEvents.zeroCapCount": "{count} zero liquidity cap events (event count)",
+    "backtest.orderEvents.records": "View original order status records",
+    "backtest.orderEvents.session": "Session",
+    "backtest.orderEvents.order": "Order ID",
+    "backtest.orderEvents.status": "Status",
+    "backtest.orderEvents.reason": "Reason",
+    "backtest.orderEvents.capVolume": "Reference volume (shares)",
+    "backtest.orderEvents.detail": "Original engine message",
+    "backtest.orderEvents.reason.liquidity_cap_zero": "Zero liquidity cap",
+    "backtest.orderEvents.status.new": "New",
+    "backtest.orderEvents.status.triggered": "Triggered",
+    "backtest.orderEvents.status.open": "Open",
+    "backtest.orderEvents.status.partially_filled": "Partially filled",
+    "backtest.orderEvents.status.filled": "Filled",
+    "backtest.orderEvents.status.cancelled": "Cancelled",
+    "backtest.orderEvents.status.rejected": "Rejected",
+    "backtest.orderEvents.status.replaced": "Replaced",
     "backtest.result.trades": "Closed trades",
     "backtest.result.orders": "orders",
     "backtest.result.fills": "fills",
     "backtest.result.positions": "positions",
     "backtest.result.trades.empty": "This run has no closed trades.",
     "backtest.result.column.security": "Security",
+    "backtest.status.queued": "Queued",
+    "backtest.status.running": "Running",
+    "backtest.status.cancel_requested": "Cancel requested",
+    "backtest.status.cancelled": "Cancelled",
+    "backtest.status.failed": "Failed",
+    "backtest.status.completed": "Completed",
+    "backtest.stage.queued": "Queued",
+    "backtest.stage.tape": "Tape",
+    "backtest.stage.data": "Data",
+    "backtest.stage.engine": "Engine",
+    "backtest.stage.artifact": "Artifact",
+    "backtest.stage.cancellation": "Cancellation",
+    "backtest.stage.completed": "Completed",
+    "backtest.stage.cancelled": "Cancelled",
+    "backtest.stage.failed": "Failed",
+    "backtest.result.unavailable": "Unavailable",
+    "backtest.result.registry": "Metric registry",
+    "backtest.scope.full": "Full",
+    "backtest.scope.in_sample": "In sample",
+    "backtest.scope.validation": "Validation",
+    "backtest.scope.out_of_sample": "Out of sample",
+    "backtest.scope.window": "Window",
+    "backtest.category.return": "Return",
+    "backtest.category.risk": "Risk",
+    "backtest.category.risk_adjusted": "Risk adjusted",
+    "backtest.category.benchmark": "Benchmark",
+    "backtest.category.trade": "Trade",
+    "backtest.category.exposure": "Exposure",
+    "backtest.category.cost": "Cost",
+    "backtest.side.long": "Long",
+    "backtest.side.short": "Short",
     "backtest.result.column.side": "Side",
     "backtest.result.column.opened": "Opened",
     "backtest.result.column.closed": "Closed",
     "backtest.result.column.quantity": "Qty",
     "backtest.result.column.pnl": "P&L",
     "backtest.result.column.fees": "Costs (fees + taxes)",
+    "backtest.result.environment.notApplied": "Not applied",
     "backtest.result.column.slippage": "Slippage",
     "backtest.result.manifest": "Manifest · data warnings · reproducibility",
     "backtest.result.manifest.schema": "Schema",
@@ -2466,6 +2585,25 @@ export const messages = {
     "backtest.result.manifest.completed": "Completed",
     "backtest.result.warnings": "Data warnings",
     "backtest.result.warnings.empty": "No warnings",
+    "backtest.warning.equity.reference_rows_dropped":
+      "Suspended reference-price rows were excluded from the price path",
+    "backtest.warning.equity.provisional_rows_dropped":
+      "Provisional price rows were excluded",
+    "backtest.warning.equity.invalid_ohlc_rows_dropped":
+      "Invalid OHLC price rows were excluded",
+    "backtest.warning.equity.corporate_action_without_bar_dropped":
+      "Corporate actions without a following price were excluded",
+    "backtest.warning.equity.unfolded_level_shift":
+      "An unfolded ledger price shift adjusted holdings using the base-price ratio",
+    "backtest.warning.equity.mock_data":
+      "This run used example data instead of real data",
+    "backtest.warning.equity.corporate_action_feed_empty":
+      "Example data has no corporate action feed",
+    "backtest.warning.mock_equity_data":
+      "This run used example data instead of real data",
+    "backtest.warning.corporate_action_feed_empty":
+      "Example data has no corporate action feed",
+
     "backtest.warning.portfolio.sector_unknown_excluded":
       "Securities without a sector were left out of sector constraints",
     "backtest.warning.benchmark.no_bar_at_start":
@@ -2568,10 +2706,10 @@ export const messages = {
       "All commissions paid for trading.",
     "backtest.metric.total_taxes": "Sell taxes",
     "backtest.metric.total_taxes.description":
-      "Securities transaction and rural development taxes paid on sales.",
-    "backtest.metric.total_slippage_cost": "Slippage cost",
+      "Taxes calculated using the selected sell-tax mode and rate.",
+    "backtest.metric.total_slippage_cost": "Slippage and impact cost",
     "backtest.metric.total_slippage_cost.description":
-      "Money lost to the gap between the intended and the filled price.",
+      "Fixed slippage or volatility- and trade-size-based impact cost from the selected price impact model.",
     "backtest.metric.total_carry_cost": "Borrow and margin cost",
     "backtest.metric.total_carry_cost.description":
       "Fees paid for borrowing shares and margin interest.",
@@ -2627,17 +2765,16 @@ export const messages = {
     "ide.resizeInspector": "Resize contract panel",
     "ide.resizeDebugger": "Resize intermediate results",
     "ide.section.pending": "Pending",
-    "ide.placeholder": "There is no result to show in this panel.",
+
     "ide.inspector.schema": "Schema",
     "ide.inspector.errors": "Errors",
     "ide.inspector.plan": "Execution plan",
     "ide.inspector.path": "Path",
     "ide.inspector.unit": "Unit",
     "ide.inspector.stage": "Applied at",
-    "ide.debugger.security": "Security",
-    "ide.debugger.before": "Before cap",
-    "ide.debugger.after": "After cap",
-    "ide.debugger.status": "Status",
+
+
+
     "debugger.controls": "Strategy trace scope",
     "debugger.date": "As-of date",
     "debugger.date.note":
@@ -2829,9 +2966,9 @@ export const messages = {
     "ide.outline.arrayIndex": "Array index",
     "ide.section.identity": "Basics",
     "ide.snippets": "Snippets",
-    "ide.snippet.field": "Add field node",
-    "ide.snippet.transform": "Add transform node",
-    "ide.snippet.risk": "Risk limit",
+
+
+
     "snippet.help":
       "Insert at an empty key position. YAML 1.2 syntax is checked before editing.",
     "snippet.loading": "Loading the server schema and factor catalog.",
@@ -3638,14 +3775,8 @@ export const messages = {
     "strategy.operator.comparison.eq.description":
       "True where the two inputs are equal.",
     "strategy.operator.comparison.eq.formula": "left = right",
-    "ide.debugger.tab.preview": "Value preview",
-    "ide.debugger.tab.exposure": "Exposure",
-    "ide.debugger.tab.orders": "Expected orders",
-    "ide.debugger.tab.exclusions": "Exclusions",
-    "ide.debugger.tab.plan": "Execution plan",
-    "ide.debugger.computedWeight": "Computed weight",
-    "ide.debugger.afterCap": "After cap",
-    "ide.debugger.difference": "Difference",
+
+
     "ide.debugger.pitPassed": "PIT check passed",
     "ide.debugger.pitDetail":
       "Distribution, missing values and outliers checked.",
@@ -3916,14 +4047,15 @@ export const messages = {
     "diff.column.before": "Before",
     "diff.column.after": "After",
     "diff.semantic.backendOwned":
-      "Compares only two backend canonical payloads; the UI does not reinterpret StrategySpec semantics.",
+      "The server compares the saved revision and current source using the same semantic diff policy.",
     "diff.semantic.empty": "No semantic changes (same spec hash).",
     "diff.semantic.no-base": "This new draft has no saved semantic base.",
-    "diff.semantic.base-pending": "Validating the saved canonical baseline.",
+    "diff.semantic.base-pending": "Comparing the saved revision and current source on the server.",
     "diff.semantic.current-unavailable":
       "The current source has not compiled successfully, so only the source diff is available.",
+    "diff.semantic.unavailable": "The server comparison could not be loaded. Edit the source or reopen comparison to retry.",
     "diff.semantic.incoherent":
-      "The backend spec hash and canonical payload disagree, so semantic diff is hidden.",
+      "The server comparison does not match the current source and saved revision, so semantic diff is hidden.",
     "diff.semantic.baseHash": "Base spec hash",
     "diff.semantic.currentHash": "Target spec hash",
     "diff.revision.title": "Saved revision comparison",

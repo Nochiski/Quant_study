@@ -1,6 +1,4 @@
 from strategy_workbench.application.strategy_authoring.ports.outgoing.document_codec import (
-    DOCUMENT_POLICY_REASONS,
-    SYNTAX_REASON,
     YAML_GRAMMAR_REASONS,
     CodecLimits,
     DiagnosticAnchor,
@@ -27,8 +25,6 @@ from strategy_workbench.application.strategy_authoring.ports.outgoing.field_cata
 )
 
 __all__ = [
-    "DOCUMENT_POLICY_REASONS",
-    "SYNTAX_REASON",
     "YAML_GRAMMAR_REASONS",
     "CodecLimits",
     "DiagnosticAnchor",

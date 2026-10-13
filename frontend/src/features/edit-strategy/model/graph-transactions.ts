@@ -1,3 +1,4 @@
+import { valueAtPointer } from "../../../shared/lib/yaml12";
 /**
  * 팩터 그래프 편집 → source 연산 번역(WORKFLOW P5-01, spec D7). 순수 모듈이다: tree(parse 결과)와 runtime
  * schema만 읽고 `SourceOperation` 하나를 돌려준다. 텍스트는 만들지 않는다(정본은 `planSourceOperation`).
@@ -57,24 +58,13 @@ export const selectedNodePointer = (
     : null;
 };
 
-const valueAt = (tree: unknown, pointer: string): unknown => {
-  let current: unknown = tree;
-  for (const segment of pointer.split("/").slice(1)) {
-    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
-    if (Array.isArray(current)) current = current[Number(key)];
-    else if (isRecord(current)) current = current[key];
-    else return undefined;
-  }
-  return current;
-};
-
 const graphPointer = (factorPointer: string): string => `${factorPointer}/graph`;
 const nodesPointer = (factorPointer: string): string =>
   `${graphPointer(factorPointer)}/nodes`;
 
 /** 그래프의 노드 배열(없으면 빈 배열). */
 const nodesOf = (tree: unknown, factorPointer: string): unknown[] => {
-  const nodes = valueAt(tree, nodesPointer(factorPointer));
+  const nodes = valueAtPointer(tree, nodesPointer(factorPointer)).value;
   return Array.isArray(nodes) ? nodes : [];
 };
 
@@ -84,18 +74,6 @@ export const graphNodeIds = (tree: unknown, factorPointer: string): string[] =>
     isRecord(node) && typeof node.node_id === "string" ? [node.node_id] : [],
   );
 
-/** `nodeId`를 가진 노드의 pointer(`/factors/N/graph/nodes/M`). 없으면 null. */
-export const nodePointerOf = (
-  tree: unknown,
-  factorPointer: string,
-  nodeId: string,
-): string | null => {
-  const index = nodesOf(tree, factorPointer).findIndex(
-    (node) => isRecord(node) && node.node_id === nodeId,
-  );
-  return index < 0 ? null : `${nodesPointer(factorPointer)}/${index}`;
-};
-
 /** 스칼라 필드 확정: 키가 있으면 `replace-scalar`, 없으면 그 mapping에 `insert-key`. */
 const setScalar = (
   tree: unknown,
@@ -104,7 +82,7 @@ const setScalar = (
   value: Scalar,
 ): SourceOperation => {
   const pointer = `${parentPointer}/${escapePointerSegment(key)}`;
-  const parent = valueAt(tree, parentPointer);
+  const parent = valueAtPointer(tree, parentPointer).value;
   return isRecord(parent) && key in parent
     ? { kind: "replace-scalar", pointer, value }
     : { kind: "insert-key", parentPointer, key, value };
@@ -300,8 +278,8 @@ export const addNode = (
   }
   const references = nodeReferenceKeys(schema, branch);
   if (references.length === 1 && last !== "") value[references[0]!] = last;
-  const graph = valueAt(tree, graphPointer(factorPointer));
-  const nodes = valueAt(tree, nodesPointer(factorPointer));
+  const graph = valueAtPointer(tree, graphPointer(factorPointer)).value;
+  const nodes = valueAtPointer(tree, nodesPointer(factorPointer)).value;
   if (Array.isArray(nodes)) {
     const ops: SourceOperation[] = [
       { kind: "insert-item", parentPointer: nodesPointer(factorPointer), value },
@@ -364,7 +342,7 @@ export const removeNodeAt = (
   factorPointer: string,
   nodePointer: string,
 ): SourceOperation | { error: "referenced"; by: string[] } | { error: "not-found" } => {
-  const node = valueAt(tree, nodePointer);
+  const node = valueAtPointer(tree, nodePointer).value;
   if (!isRecord(node)) return { error: "not-found" };
   const nodeId = typeof node.node_id === "string" ? node.node_id : "";
   const by =
@@ -390,7 +368,7 @@ export const renameNode = (
   nodePointer: string,
   nextId: string,
 ): SourceOperation[] | { error: "duplicate" | "empty" | "not-found" } => {
-  const node = valueAt(tree, nodePointer);
+  const node = valueAtPointer(tree, nodePointer).value;
   if (!isRecord(node)) return { error: "not-found" };
   if (nextId === "") return { error: "empty" };
   const taken = nodesOf(tree, factorPointer).some(

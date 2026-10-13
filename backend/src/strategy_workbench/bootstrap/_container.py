@@ -47,6 +47,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
+    RunLaneControls,
     TrialLedger,
     rejection_code,
 )
@@ -78,6 +79,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import Sourc
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 
 from ._assistant import (
@@ -286,9 +288,16 @@ class _RunServiceTrialRuns:
             )
         return AdmittedRun(admission.spec, self._runs.trial_ledger(admission.lineage_id))
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
+    def start(
+        self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
+    ) -> str:
         try:
-            run_id = self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
+            run_id = self._runs.start(
+                request,
+                owner=owner,
+                trial_key_override=trial_key,
+                lane_controls=RunLaneControls(controls.paused, controls.priority),
+            ).run.run_id
         except Exception as error:
             rejected = _rejected(error)
             if rejected is None:

@@ -6,8 +6,9 @@ from typing import Protocol
 
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
-    BacktestRunSpec,
+    ResolvedBacktestRunSpec,
     StrategyProvenance,
+    StrategySource,
 )
 from strategy_workbench.domain.portfolio.facade.construction import TargetTape
 
@@ -22,10 +23,12 @@ CancellationCheck = Callable[[], bool]
 @dataclass(frozen=True)
 class BacktestExecutionRequest:
     run_id: str
-    spec: BacktestRunSpec  # resolved: `strategy` is always set here
+    spec: ResolvedBacktestRunSpec
     target_tape: TargetTape
     dataset: BacktestDataset
     strategy_provenance: StrategyProvenance
+    strategy_source: StrategySource | None = None
+    lineage_strategy_id: str | None = None
 
 
 class RunCancelledError(RuntimeError):

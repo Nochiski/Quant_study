@@ -14,10 +14,12 @@ from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    ResearchStorageError,
     SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
@@ -142,6 +144,7 @@ class _FakeRuns:
         self.cancelled: list[tuple[str, str]] = []
         self.owners: set[str] = set()
         self.schedules: list[tuple[str, bool, int]] = []
+        self.submitted_controls: list[ExperimentControls] = []
         self.error_codes: dict[str, RunFailureCode] = {}
         # 다음 `admit` 앞에서 한 번 부른다(복구 제출과 겹치는 조작을 재현한다).
         self.before_admit: Callable[[], None] | None = None
@@ -169,8 +172,11 @@ class _FakeRuns:
             self.on_ledger()
         return summarize_trial_ledger("s-1", (), self.ledger_entries, ())
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
+    def start(
+        self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
+    ) -> str:
         self.owners.add(owner)
+        self.submitted_controls.append(controls)
         if self.reject:
             raise TrialRunRejectedError(
                 "backtest.run.invalid", "strategy exceeds engine capabilities — core=rust"
@@ -421,6 +427,8 @@ def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
     experiment_id = service.create(_request()).record.experiment_id
 
     first = service.cancel(experiment_id)
+    # 실행 서비스가 취소를 마친 뒤에는 재요청이 그 run들을 다시 건드리지 않는다.
+    runs.run_statuses.update({run_id: RunStatus.CANCELLED for run_id in runs.run_statuses})
     second = service.cancel(experiment_id)
 
     # 실행 서비스에 이 실험이 빠진다고 알린다 — 다른 소유자가 남은 run 은 멈추지 않는다.
@@ -429,6 +437,36 @@ def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
     assert first.record.cancelled_at == second.record.cancelled_at == _AT
     with pytest.raises(ExperimentStateError):
         service.retry(experiment_id, 0)
+
+
+def test_cancel_only_contacts_unfinished_runs_outside_the_experiment_lock() -> None:
+    """#384: 끝난 run별 조회를 없애고 느린 취소가 다른 실험의 조작을 막지 않는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    runs.run_statuses.update({"run-0": RunStatus.COMPLETED, "run-1": RunStatus.FAILED})
+    contacted: list[str] = []
+    cancel = runs.cancel
+
+    def observed_cancel(run_id: str, *, owner: str) -> None:
+        acquired: list[bool] = []
+
+        def acquire_from_another_thread() -> None:
+            held = service._lock.acquire(blocking=False)
+            acquired.append(held)
+            if held:
+                service._lock.release()
+
+        worker = Thread(target=acquire_from_another_thread)
+        worker.start()
+        worker.join(timeout=2)
+        assert acquired == [True]
+        contacted.append(run_id)
+        cancel(run_id, owner=owner)
+
+    runs.cancel = observed_cancel
+    service.cancel(experiment_id)
+    assert contacted == ["run-2", "run-3"]
 
 
 def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
@@ -605,6 +643,9 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
 
     service.control(experiment_id, priority=3)
     paused = service.control(experiment_id, paused=True)  # 보내지 않은 우선순위는 그대로다
+    for run_id in runs.run_statuses:
+        runs.run_statuses[run_id] = RunStatus.FAILED
+        runs.error_codes[run_id] = "backtest.run.interrupted"
     _service(runs, repository=SQLiteExperimentRepository(path)).recover()
 
     assert (paused.status, paused.trial_counts) == (
@@ -612,12 +653,9 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
         {TrialStatus.QUEUED: 4},
     )
     assert paused.record.controls == ExperimentControls(paused=True, priority=3)
-    # 대기열에 알리고, 재시작하면 저장된 조작을 다시 알린다.
-    assert runs.schedules == [
-        (experiment_id, False, 3),
-        (experiment_id, True, 3),
-        (experiment_id, True, 3),
-    ]
+    # 현재 대기열 조작은 바로 알리고, 복구 접수는 저장된 조작을 원자적으로 적용한다.
+    assert runs.schedules == [(experiment_id, False, 3), (experiment_id, True, 3)]
+    assert runs.submitted_controls[-4:] == [ExperimentControls(paused=True, priority=3)] * 4
 
 
 def test_recover_resubmits_unsubmitted_and_interrupted_trials_only(tmp_path: Path) -> None:
@@ -677,7 +715,7 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     _finish(runs, {"run-4": _result(), "run-5": _result()})
     # 제출 스레드가 돌기 전에 재시작한 두 실험. 하나는 저장된 설계를 지금 모델로 읽을 수 없다.
     broken = service.create(_request()).record.experiment_id
-    waiting = service.create(_request()).record.experiment_id
+    service.create(_request())
     with sqlite3.connect(path) as connection:
         connection.execute(
             "UPDATE experiments SET design_json = '{}' WHERE experiment_id = ?", (broken,)
@@ -687,9 +725,36 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append).recover()
 
     assert service.get(finished).status is ExperimentStatus.COMPLETED
-    # 끝난 실험도 조작은 되살린다(#390 리뷰 P3-3) — 제출 스레드만 없다.
-    assert [owner for owner, _paused, _priority in runs.schedules] == [finished, waiting]
+    # 저장 조작은 각 실행 접수에서 복원하므로 끝난 실험의 레인 설정을 다시 쌓지 않는다.
+    assert runs.schedules == []
     assert len(pending) == 1
+
+
+@pytest.mark.parametrize("damaged_design", ["{}", "[]", "null"])
+def test_list_skips_unreadable_records_without_truncating_later_pages(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, damaged_design: str
+) -> None:
+    """#381: 손상 행이 페이지를 막거나 다음 정상 기록을 숨기지 않는다."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    service = _service(runs, repository=SQLiteExperimentRepository(path), spawn=lambda _work: None)
+    ids = [service.create(_request()).record.experiment_id for _ in range(6)]
+    with sqlite3.connect(path) as connection:
+        for experiment_id in (ids[0], ids[2], ids[4], ids[5]):
+            connection.execute(
+                "UPDATE experiments SET design_json = ? WHERE experiment_id = ?",
+                (damaged_design, experiment_id),
+            )
+    first = service.list(after=None, limit=1)
+    second = service.list(after=first.next_after, limit=1)
+    assert [item.record.experiment_id for item in first.items] == [ids[3]]
+    assert first.next_after == ids[3]
+    assert [item.record.experiment_id for item in second.items] == [ids[1]]
+    assert second.next_after is None
+    assert all(experiment_id in caplog.text for experiment_id in (ids[0], ids[2], ids[4], ids[5]))
+    # 원장 행을 지우거나 고치지는 않는다. 개별 조회는 명시적 저장 오류를 유지한다.
+    with pytest.raises(ResearchStorageError):
+        service.get(ids[4])
 
 
 def _interrupted_restart(tmp_path: Path) -> tuple[_FakeRuns, Path, str]:
@@ -1388,3 +1453,99 @@ def test_a_capacity_sweep_survives_reopening_the_research_database(tmp_path: Pat
 
     assert reopened.get(created.record.experiment_id).record == created.record
     assert [t.initial_cash for t in created.record.design.trials()] == [1e8, 2e8, 3e8]
+
+
+@pytest.mark.parametrize("reason", ["", " ", "\t\n"])
+def test_internal_selection_rejects_blank_reason_before_reading_the_trial(reason: str) -> None:
+    service = _service(_FakeRuns())
+    with pytest.raises(ValueError, match="non-whitespace"):
+        service.select("not-loaded", 0, reason)
+
+
+def test_cancelled_experiment_does_not_settle_before_validation_runs_stop() -> None:
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(runs, {f"run-{index}": _result(0.1) for index in range(4)})
+    service.advance(experiment_id)
+    runs.run_statuses["run-4"] = RunStatus.CANCEL_REQUESTED
+    runs.run_statuses["run-5"] = RunStatus.CANCEL_REQUESTED
+    cancelled = service.cancel(experiment_id)
+    assert cancelled.finished is True
+    assert cancelled.settled is False
+    runs.run_statuses["run-4"] = RunStatus.CANCELLED
+    assert service.get(experiment_id).settled is False
+    runs.run_statuses["run-5"] = RunStatus.CANCELLED
+    assert service.get(experiment_id).settled is True
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_experiment_base_request_uses_the_run_codec_and_reads_old_rows(
+    tmp_path: Path, legacy: bool
+) -> None:
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteExperimentRepository(path)
+    service = _service(runs, repository=repository, spawn=lambda _work: None)
+    before = service.create(_request()).record
+    if legacy:
+        with sqlite3.connect(path) as connection:
+            row = connection.execute("SELECT design_json FROM experiments").fetchone()
+            design = json.loads(row[0])
+            # 구판 저장 형식은 run_spec 봉투 없이 요청 dataclass JSON을 직접 넣었다.
+            design["run"] = design["run"]["run_spec"]
+            connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(design),))
+    repository.close()
+    reopened = SQLiteExperimentRepository(path)
+    assert reopened.get(before.experiment_id) == before
+    reopened.close()
+
+
+@pytest.mark.parametrize("failure", ["states", "second_cancel"])
+def test_cancel_retries_unfinished_cleanup_after_a_port_failure(failure: str) -> None:
+    """취소 표식 저장 뒤 조회·일부 취소 실패가 나도 다음 요청은 남은 실행을 정리한다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    states = runs.states
+    cancel = runs.cancel
+    failed = False
+    clock_reads = 0
+
+    def advancing_now() -> datetime:
+        nonlocal clock_reads
+        clock_reads += 1
+        return _AT + timedelta(days=clock_reads)
+
+    service._now = advancing_now
+
+    def failing_states(run_ids: Collection[str]) -> dict[str, BacktestRunState]:
+        nonlocal failed
+        if (
+            failure == "states"
+            and not failed
+            and service._repository.get(experiment_id).cancelled_at is not None
+        ):
+            failed = True
+            raise ResearchStorageError("bulk states unavailable once")
+        return states(run_ids)
+
+    def failing_cancel(run_id: str, *, owner: str) -> None:
+        nonlocal failed
+        if failure == "second_cancel" and run_id == "run-1" and not failed:
+            failed = True
+            raise ResearchStorageError("cancel unavailable once")
+        cancel(run_id, owner=owner)
+        runs.run_statuses[run_id] = RunStatus.CANCELLED
+
+    runs.states = failing_states
+    runs.cancel = failing_cancel
+    with pytest.raises(ResearchStorageError, match="unavailable once"):
+        service.cancel(experiment_id)
+    original_timestamp = service._repository.get(experiment_id).cancelled_at
+    assert original_timestamp is not None
+    after = service.cancel(experiment_id)
+    assert after.record.cancelled_at == original_timestamp == _AT + timedelta(days=1)
+    assert clock_reads == 1
+    assert all(state is RunStatus.CANCELLED for state in runs.run_statuses.values())
+    assert runs.cancelled == [(f"run-{index}", experiment_id) for index in range(4)]

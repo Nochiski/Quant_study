@@ -86,21 +86,22 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
-from strategy_workbench.domain.factor.facade.planning import build_factor_matrix_cache_key
+from strategy_workbench.domain.factor.facade.expression import (
+    FactorGraph,
+    FieldNode,
+    NodeValueType,
+    TimeSeriesNode,
+    TimeSeriesOperator,
+)
 from strategy_workbench.domain.factor.facade.registry import (
     FactorAvailability,
     build_default_factor_registry,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
-    FactorGraph,
     FactorSignal,
-    FieldNode,
-    NodeValueType,
     RebalanceFrequency,
     StrategySpec,
-    TimeSeriesNode,
-    TimeSeriesOperator,
 )
 from tests.equity_fixture import (
     WB_BONUS_EX,
@@ -152,8 +153,12 @@ ALL_FIELDS = (
     "consensus.recommendation",
     "consensus.analyst_count",
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",
@@ -253,20 +258,6 @@ def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
         current.snapshot().snapshot_id,
         older.snapshot().snapshot_id,
     ]
-    keys = []
-    for explanation in plans:
-        assert explanation.plan is not None
-        keys.append(
-            build_factor_matrix_cache_key(
-                data_snapshot_id=explanation.data_snapshot_id,
-                plan_hash=explanation.plan.plan_hash,
-                registry_version=explanation.registry_version,
-                parameters=(),
-                as_of_start=START,
-                as_of_end=END,
-            )
-        )
-    assert keys[0].fingerprint != keys[1].fingerprint
 
 
 _ADAPTER = "strategy_workbench.adapters.outbound.equity_duckdb._adapter"
@@ -385,9 +376,10 @@ def test_relisting_lag_fix_invalidates_the_previous_field_contract(
     previous = EquityDuckdbAdapter(root).snapshot().snapshot_id
     # 원장 빌드는 같아도 잘못 연결했던 관측·팩터 캐시를 재사용하면 안 된다.
     assert current != previous
-    assert current.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] == previous.partition(
-        SNAPSHOT_CONTRACT_SEPARATOR
-    )[0]
+    assert (
+        current.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+        == previous.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+    )
 
 
 _HIVE_OFF = "(hive_partitioning = CAST('f' AS BOOLEAN))"
@@ -490,6 +482,18 @@ def test_declarations_their_query_does_not_read_are_rejected() -> None:
         _reject_unread_declarations(
             (*SOURCE_SPECS, replace(plain, omitted_is_zero=True)), FIELD_SPECS
         )
+
+
+@pytest.mark.parametrize("source_name", ["adj", "credit"])
+@pytest.mark.parametrize("field_count", [0, 2])
+def test_가림_표시_원천은_필드_하나만_선언한다(source_name: str, field_count: int) -> None:
+    original = next(spec for spec in FIELD_SPECS if spec.source == source_name)
+    fields = tuple(spec for spec in FIELD_SPECS if spec.source != source_name)
+    fields += tuple(
+        replace(original, field_id=f"test.masked_{index}") for index in range(field_count)
+    )
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{source_name}']")):
+        _reject_unread_declarations(SOURCE_SPECS, fields)
 
 
 # ── RawObservationPort ────────────────────────────────────────────────────────
@@ -595,24 +599,25 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
 
 @pytest.mark.parametrize("lag", [1, None])
 def test_a_field_the_ledger_carries_but_this_adapter_does_not_serve_says_so(
-    tmp_path: Path, lag: int | None,
+    tmp_path: Path,
+    lag: int | None,
 ) -> None:
     """원장 `dataset_profile` 에 있는데 내주지 않는 필드를 "원장이 싣지 않는다"고 하지 않는다(#373).
 
-    실원장은 `flow.foreign_ownership`·`classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
+    실원장은 `classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
     읽은 `dataset_profile` 이다.
     """
-    rows = [*WB_PROFILE_ROWS, ("flow.foreign_ownership", lag, "원장 날짜")]
+    rows = [*WB_PROFILE_ROWS, ("classification.sector", lag, "원장 날짜")]
     adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity", profile_rows=rows))
 
     reasons = adapter.unavailable_factor_fields()
 
-    assert reasons["flow.foreign_ownership"] == FIELD_NOT_PROVIDED
+    assert reasons["classification.sector"] == FIELD_NOT_PROVIDED
     assert reasons["credit.loan_value"] == FIELD_NOT_IN_LEDGER
-    result = _raw(adapter, fields=("flow.foreign_ownership",))
+    result = _raw(adapter, fields=("classification.sector",))
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert result.detail is not None and FIELD_NOT_PROVIDED in result.detail
-    assert "flow.foreign_ownership" not in {p.field_id for p in adapter.list_fields()}
+    assert "classification.sector" not in {p.field_id for p in adapter.list_fields()}
 
 
 def test_queries_outside_calendar_coverage_are_no_data(
@@ -1051,8 +1056,7 @@ def test_grid_lag_cannot_cross_a_relisting_span(tmp_path: Path, field_id: str) -
     root = build_workbench_root(
         tmp_path / "equity",
         profile_rows=[
-            (name, 5 if name == field_id else lag, basis)
-            for name, lag, basis in WB_PROFILE_ROWS
+            (name, 5 if name == field_id else lag, basis) for name, lag, basis in WB_PROFILE_ROWS
         ],
     )
     adapter = EquityDuckdbAdapter(root)
@@ -1357,7 +1361,7 @@ def test_backtest_dataset_reads_roots_without_the_basis_column(
         BacktestDataQuery(date(2024, 1, 11), date(2024, 1, 12), ("005930:1",), None)
     )
     assert [b.session for b in dataset.bars] == [date(2024, 1, 11), date(2024, 1, 12)]
-    assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
+    assert dataset.warnings == ()
 
 
 def test_backtest_dataset_refuses_unknown_and_index_ids(

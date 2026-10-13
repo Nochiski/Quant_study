@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal, get_args
@@ -42,6 +42,11 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
+
+    @property
+    def is_terminal(self) -> bool:
+        """종결 여부의 정본. 취소 요청은 실행이 멈춘 상태가 아니다."""
+        return self in (RunStatus.CANCELLED, RunStatus.COMPLETED, RunStatus.FAILED)
 
 
 class WarningSeverity(StrEnum):
@@ -201,14 +206,6 @@ RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
 # 집합이므로 이름을 다시 적지 않는다.
 NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
 
-# `RunManifest` 가 평면 필드로도 싣는 비용·참여율. 제약 행이 늘어도 매니페스트 평면 필드는 늘지
-# 않으므로 제약 행과 따로 고정한다 — 제약 행을 그대로 읽으면 새 행마다 `AttributeError` 가 난다.
-MANIFEST_FLAT_ENVIRONMENT_FIELDS: tuple[str, ...] = (
-    "participation_rate",
-    "fee_bps",
-    "slippage_bps",
-)
-
 
 class InvalidRunFieldError(ValueError):
     """실행 요청의 칸 하나가 규칙을 어겼다. `field` 는 그 칸의 이름이다(이슈 #260).
@@ -316,37 +313,14 @@ class MetricWindow:
             raise ValueError("metric window start must be before or equal to end")
 
 
-@dataclass(frozen=True)
-class BacktestRunSpec:
-    """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+@dataclass(frozen=True, kw_only=True)
+class BacktestRunOptions:
+    """실행 옵션의 기본값·타입·검증. 요청과 편집기 계약이 같은 정의를 읽는다."""
 
-    `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
-    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
-    or neither (one coded 422, `backtest.run.invalid`).
-    After resolution the run spec stored in the manifest carries both: `strategy` is the exact
-    spec that was executed and `strategy_source` says where it came from.
-    """
-
-    strategy: StrategySpec | None = None
-    strategy_source: StrategySource | None = None
-    # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
-    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest.run.environment_required`)으로
-    # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
-    environment: RunEnvironment | None = None
     core: ExecutionCore = ExecutionCore.RUST
     initial_cash: float = 100_000_000.0
     benchmark_security_id: str | None = None
     annualization_days: int = 252
-    metric_windows: tuple[MetricWindow, ...] = ()
-    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
-    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
-    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
-    # 그대로다.
-    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
-    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
-    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
-    # 넣지 않는다.
-    lineage_strategy_id: str | None = None
 
     def __post_init__(self) -> None:
         # NaN 은 `<= 0` 비교를 빠져나가고 inf 는 양수라, 유한성을 따로 보지 않으면 접수된 뒤
@@ -363,6 +337,72 @@ class BacktestRunSpec:
                 "annualization_days must be positive — "
                 f"annualization_days={self.annualization_days!r}",
             )
+
+
+@dataclass(frozen=True)
+class BacktestRunSpec(BacktestRunOptions):
+    """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+
+    `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
+    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
+    or neither (one coded 422, `backtest.run.invalid`).
+    After resolution the run spec stored in the manifest carries both: `strategy` is the exact
+    spec that was executed and `strategy_source` says where it came from.
+    """
+
+    strategy: StrategySpec | None = None
+    strategy_source: StrategySource | None = None
+    # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
+    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest.run.environment_required`)으로
+    # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
+    environment: RunEnvironment | None = None
+    metric_windows: tuple[MetricWindow, ...] = ()
+    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
+    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
+    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
+    # 그대로다.
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
+    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
+    # 넣지 않는다.
+    lineage_strategy_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedBacktestRunSpec(BacktestRunOptions):
+    """접수 후 실행 입력. 전략·환경은 필수이며 요청 출처는 실행 값과 분리한다."""
+
+    strategy: StrategySpec
+    environment: RunEnvironment
+    metric_windows: tuple[MetricWindow, ...] = ()
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+
+    @classmethod
+    def from_request(
+        cls,
+        request: BacktestRunSpec,
+        *,
+        strategy: StrategySpec,
+        environment: RunEnvironment,
+        parameter_values: dict[str, ParameterValue],
+    ) -> ResolvedBacktestRunSpec:
+        # 실행 칸의 owner는 이 타입이다. 새 요청 전용 칸이 실행에 자동 유입되지 않는다.
+        values = {item.name: getattr(request, item.name) for item in fields(cls)}
+        values.update(strategy=strategy, environment=environment, parameter_values=parameter_values)
+        return cls(**values)
+
+    def to_wire(
+        self,
+        *,
+        strategy_source: StrategySource | None = None,
+        lineage_strategy_id: str | None = None,
+    ) -> BacktestRunSpec:
+        """기존 manifest·연구 저장 계약 투영. 실행 중에는 이 요청 타입을 사용하지 않는다."""
+        return BacktestRunSpec(
+            **{item.name: getattr(self, item.name) for item in fields(self)},
+            strategy_source=strategy_source,
+            lineage_strategy_id=lineage_strategy_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -383,7 +423,6 @@ class RunManifest:
     run_id: str
     created_at: datetime
     completed_at: datetime
-    engine_core: ExecutionCore
     engine_version: str
     run_fingerprint: str
     run_spec: BacktestRunSpec
@@ -391,18 +430,16 @@ class RunManifest:
     data_snapshot_id: str
     target_tape_hash: str
     metric_registry_version: str
-    initial_cash: float
-    annualization_days: int
-    fee_bps: float
-    slippage_bps: float
-    participation_rate: float
     # 이 run 이 실제로 쓴 실행 설정과 그 hash. `strategy_hash` 와 별개 축이라, 같은 전략을
     # 다른 기간·비용으로 돌린 두 run 을 매니페스트만 보고 구분할 수 있다.
     environment: RunEnvironment
     environment_hash: str
     strategy_provenance: StrategyProvenance
     warnings: tuple[DataWarning, ...] = ()
-    schema_version: str = "backtest-run-v2"
+    # v3는 평면 실행 값 사본 6개를 제거한 표현 판본이다. 실행 지문에는 넣지 않는다.
+    schema_version: str = "backtest-run-v3"
+    # 기록되지 않은 과거 실행은 미상(None)이다. 현재 판본을 소급 채우지 않는다.
+    factor_evaluation_version: str | None = None
 
     def __post_init__(self) -> None:
         # The two fields have different producers — `strategy_hash` is the compiler's, carried on
@@ -417,23 +454,6 @@ class RunManifest:
                 f"provenance.kind={self.strategy_provenance.kind.value} "
                 f"strategy_id={self.strategy_provenance.strategy_id} "
                 f"revision={self.strategy_provenance.revision}"
-            )
-        # 비용·참여율은 `environment` 가 owner 다. 평면 필드는 매니페스트 소비자 호환으로
-        # 남아 있을 뿐이라 두 축이 갈리면 리포트가 읽는 축에 따라 같은 run 의 수수료가
-        # 달라진다. 평면 필드 제거는 소비자(프론트 실행 결과 화면) 정리와 같이 간다.
-        divergent = {
-            name: (getattr(self, name), getattr(self.environment, name))
-            for name in MANIFEST_FLAT_ENVIRONMENT_FIELDS
-            if getattr(self, name) != getattr(self.environment, name)
-        }
-        if divergent:
-            raise ValueError(
-                "manifest records two execution cost models for one run — "
-                f"run_id={self.run_id} environment_hash={self.environment_hash} "
-                + " ".join(
-                    f"{name}: manifest={flat!r} environment={owned!r}"
-                    for name, (flat, owned) in sorted(divergent.items())
-                )
             )
 
 

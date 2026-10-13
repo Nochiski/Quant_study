@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import math
 import shutil
@@ -10,22 +9,52 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BeforeValidator, TypeAdapter, ValidationError
 
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestArtifactUnreadableError,
 )
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 
 logger = logging.getLogger(__name__)
 
 # `_json_value` 가 쓴 `result.json` 을 되읽는 디코더. HTTP 가 요청 본문을 읽을 때와 같은 dataclass
 # 검증(pydantic)이라 `__post_init__` 불변식을 다시 탄다.
-_RESULT = TypeAdapter(BacktestRunResult)
+# v2에만 있던 비용 사본은 읽기 경계에서 기존 불일치 검사를 유지한다. 새 모델·저장본·소비자는
+# 이 목록을 사용하지 않는다. 체크섬은 이 검증에 앞서 원래 파일 바이트 그대로 확인한다.
+_LEGACY_FLAT_COST_FIELDS = ("fee_bps", "slippage_bps", "participation_rate")
+
+
+def _validate_legacy_manifest_costs(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    manifest = value.get("manifest")
+    if not isinstance(manifest, dict):
+        return value
+    environment = manifest.get("environment")
+    if not isinstance(environment, dict):
+        return value
+    divergent = {
+        name: (manifest[name], environment[name])
+        for name in _LEGACY_FLAT_COST_FIELDS
+        if name in manifest and name in environment and manifest[name] != environment[name]
+    }
+    if divergent:
+        raise ValueError(
+            "manifest records two execution cost models for one run — "
+            f"run_id={manifest.get('run_id')} divergent={divergent}"
+        )
+    return value
+
+
+_RESULT = TypeAdapter(
+    Annotated[BacktestRunResult, BeforeValidator(_validate_legacy_manifest_costs)]
+)
 
 
 class LocalArtifactStore:
@@ -52,13 +81,7 @@ class LocalArtifactStore:
             raise ValueError("staging path escapes artifact root")
         staging.mkdir()
         try:
-            payload = json.dumps(
-                _json_value(result),
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
+            payload = canonical_payload_json(_json_value(result)).encode("utf-8")
             result_path = staging / "result.json"
             with result_path.open("xb") as stream:
                 stream.write(payload)

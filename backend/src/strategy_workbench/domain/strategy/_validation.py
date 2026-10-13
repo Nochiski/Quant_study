@@ -57,7 +57,6 @@ from ._promotion import PROMOTION_NODE_PREFIX, is_reserved_node_id, promotion_no
 
 
 class ValidationKind(StrEnum):
-    SYNTAX = "syntax"
     SEMANTIC = "semantic"
     CAPABILITY = "capability"
 

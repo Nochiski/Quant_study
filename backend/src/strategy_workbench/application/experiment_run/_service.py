@@ -60,8 +60,10 @@ from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentStatus,
     TrialStatus,
     awaiting_recovery,
+    experiment_settled,
     experiment_status,
     trial_status,
+    validate_selection_reason,
 )
 from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
 
@@ -85,7 +87,6 @@ logger = logging.getLogger(__name__)
 # 제출 스레드가 워크포워드를 밀어 주는 간격(초). 창의 학습이 끝나면 늦어도 이만큼 뒤 검증 실행이
 # 뜬다.
 _POLL_SECONDS = 2.0
-_SETTLED_RUNS = (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,11 @@ class ExperimentTrialState:
     # 최신 실행이 파산으로 끝났다(`bankrupt`) — 비전략 실패와 달리 전략의 결과다.
     bankrupt: bool = False
 
+    @property
+    def settled(self) -> bool:
+        """trial이 끝났고 재시작 복구를 기다리지 않는다."""
+        return self.status.is_terminal and not self.awaiting_recovery
+
 
 @dataclass(frozen=True)
 class Experiment:
@@ -155,6 +161,8 @@ class Experiment:
     # 끝났다(완료·취소, `ExperimentStatus.is_terminal`). 화면이 조작 노출·다시 묻기를 이 값으로
     # 가른다.
     finished: bool
+    # 학습·검증 실행까지 모두 멈췄다. 진행 스트림의 종료 여부이며 조작 가능 여부와 다르다.
+    settled: bool
 
 
 @dataclass(frozen=True)
@@ -338,8 +346,9 @@ class ExperimentRunService:
 
         이미 완료한 실험은 `experiment.cancel.completed` 로 거절한다 — 목록이 아직 도는 것으로 보인
         틈에 누른 취소가 결과가 다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은
-        `experiment_status` 다. 취소한 실험을 다시 취소하면 그대로 돌려준다.
+        `experiment_status` 다. 재요청은 취소 시각을 보존하고 남은 실행 정리만 다시 시도한다.
         """
+        run_ids: dict[str, None] = {}
         with self._lock:
             record = self._repository.get(experiment_id)
             if (
@@ -352,13 +361,21 @@ class ExperimentRunService:
                 )
             if record.cancelled_at is None:
                 self._repository.cancel(experiment_id, cancelled_at=self._now())
-                self._cancelled.add(experiment_id)
-                for run in (
-                    *self._repository.attempts(experiment_id),
-                    *self._repository.picks(experiment_id),
-                ):
-                    if run.run_id is not None:
-                        self._runs.cancel(run.run_id, owner=experiment_id)
+            self._cancelled.add(experiment_id)
+            for run in (
+                *self._repository.attempts(experiment_id),
+                *self._repository.picks(experiment_id),
+            ):
+                if run.run_id is not None:
+                    run_ids[run.run_id] = None
+        # 취소 표식은 한 번만 기록하고 실행 정리는 매 요청 재시도한다. 표식 뒤 상태 조회나 일부
+        # 취소가 실패해도 남은 run을 잃지 않는다. 이후 제출·재시도는 거절되므로 느린 실행
+        # 취소는 다른 실험을 막지 않게 락 밖에서 한다. 끝난 실행은 일괄 상태로 걸러 낸다.
+        states = self._runs.states(run_ids) if run_ids else {}
+        for run_id in run_ids:
+            state = states.get(run_id)
+            if state is not None and not state.status.is_terminal:
+                self._runs.cancel(run_id, owner=experiment_id)
         return self.get(experiment_id)
 
     def retry(self, experiment_id: str, trial_index: int) -> ExperimentTrialState:
@@ -388,6 +405,7 @@ class ExperimentRunService:
         끝나기 전(대기·도는 trial 이 있다)에는 거절한다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이
         굳지 않게 한다. 취소한 실험은 끝났다(돌지 않은 조합은 시도가 아니다).
         """
+        validate_selection_reason(reason)
         record = self._repository.get(experiment_id)
         _require_kind(record, ExperimentKind.PARAMETER_SEARCH)
         state = self._trial_state(record, trial_index)
@@ -398,7 +416,7 @@ class ExperimentRunService:
                 f"experiment_id={experiment_id} trial_index={trial_index} status={state.status}",
             )
         if not state.selectable:
-            unfinished = sum(not _finished(other) for other in self._trial_states(record))
+            unfinished = sum(not other.settled for other in self._trial_states(record))
             raise ExperimentStateError(
                 "experiment.selection.not_finished",
                 "실험의 trial 이 모두 끝난 뒤에 후보를 고를 수 있습니다: "
@@ -499,17 +517,14 @@ class ExperimentRunService:
         """재시작 뒤 취소하지 않은 실험의 대기열 조작을 되살리고 남은 trial 을 다시 넘긴다(spec D6).
 
         남은 trial 은 넘기지 못한 trial(제출이 예상 밖 오류로 멈춘 경우 포함)과 재시작으로 중단된
-        trial 이다. 끝난 실험은 조작만 되살리고(뒤의 재시도가 따른다) 제출 스레드는 띄우지 않는다.
+        trial 이다. 끝난 실험에는 제출 스레드나 레인 설정을 두지 않는다. 조작은 각 접수에서 저장
+        정본으로 복원한다.
         저장된 실험 하나를 읽지 못하면(지금 모델로 디코드되지 않는다) 그 실험만 로그로 건너뛰고
         부팅은 이어 간다.
         """
         for experiment_id in self._repository.open_ids():
             try:
                 record = self._repository.get(experiment_id)
-                controls = record.controls
-                self._runs.schedule(
-                    experiment_id, paused=controls.paused, priority=controls.priority
-                )
                 if self._experiment(record).status is ExperimentStatus.COMPLETED:
                     continue
             except Exception:
@@ -577,7 +592,7 @@ class ExperimentRunService:
                 for index, pick, choice in chosen:
                     if latest.get(index) == pick:  # 다른 제출이 그사이 고르지 않았다
                         self._pick(record, base, index, choice, pick)
-        return all(_finished(state) for state in states)
+        return all(state.settled for state in states)
 
     def walk_forward(self, experiment_id: str) -> WalkForwardReport:
         """창별 선택·검증 실행 결과와, 모든 창의 검증 실행이 완료됐으면 이어 붙인 곡선·표본 밖
@@ -680,13 +695,13 @@ class ExperimentRunService:
         waiting = False
         for index in range(count):
             window_states = list(states[index::count])
-            if not all(_finished(s) for s in window_states):
+            if not all(s.settled for s in window_states):
                 continue
             pick = picks.get(index)
             run = runs.get(pick.run_id) if pick is not None and pick.run_id else None
             if pick is None or awaiting_recovery(run):
                 open_windows.append((index, window_states, pick))
-            elif run is not None and run.status not in _SETTLED_RUNS:
+            elif run is not None and not run.status.is_terminal:
                 waiting = True
         return open_windows, waiting
 
@@ -795,6 +810,7 @@ class ExperimentRunService:
                 _run_request(record.run, trial, start, end),
                 trial_key=experiment_trial_key(base, trial),
                 owner=record.experiment_id,
+                controls=self._repository.get(record.experiment_id).controls,
             )
         except TrialRunRejectedError as rejected:
             return None, rejected.code, str(rejected)
@@ -810,12 +826,18 @@ class ExperimentRunService:
             pending=any(state.awaiting_recovery for state in states)
             or self._walk_forward_pending(record, states),
         )
+        validation_runs = self._runs.states(
+            {pick.run_id for pick in self._repository.picks(record.experiment_id) if pick.run_id}
+        )
         return Experiment(
             record=record,
             status=status,
             trial_counts=dict(Counter(statuses)),
             selections=self._repository.selections(record.experiment_id),
             finished=status.is_terminal,
+            settled=experiment_settled(
+                status, statuses, [run.status for run in validation_runs.values()]
+            ),
         )
 
     def _walk_forward_pending(
@@ -842,7 +864,7 @@ class ExperimentRunService:
             _state(trial, tuple(attempts.get(trial.index, ())), cancelled, runs)
             for trial in record.design.trials()
         )
-        if cancelled or all(_finished(state) for state in states):
+        if cancelled or all(state.settled for state in states):
             return states
         # 실험이 끝나기 전에는 고르지 않는다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이 굳는다.
         return tuple(replace(state, selectable=False) for state in states)
@@ -857,11 +879,6 @@ class ExperimentRunService:
                 f"trials={len(states)}",
             )
         return states[trial_index]
-
-
-def _finished(state: ExperimentTrialState) -> bool:
-    """trial 이 끝났다(복구를 기다리지 않는다)."""
-    return state.status.is_terminal and not state.awaiting_recovery
 
 
 def _state(

@@ -1,3 +1,4 @@
+import { metadataCoherence } from "../model/metadata-coherence";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -20,7 +21,6 @@ import {
   buildCompletionSource,
   buildHoverSource,
   describePointer,
-  factorCatalogCoherence,
   projectAssistMetadata,
   type AssistDeps,
 } from "../model/schema-assist";
@@ -206,13 +206,14 @@ describe("schema-driven completion", () => {
     );
     expect(coherent.contract).toBe(CONTRACT);
     expect(coherent.catalogs.equityFields).toBe(FIELDS);
+    expect(coherent.fieldPickerCatalogs).toEqual({ equityFields: FIELDS, equityIncompatible: false });
+    expect(projectAssistMetadata(schemaEnvelope("v1"), contractEnvelope("v1"), null, FACTOR_CATALOG).fieldPickerCatalogs)
+      .toEqual({ equityFields: null, equityIncompatible: false });
+    expect(projectAssistMetadata(schemaEnvelope("v1"), contractEnvelope("v1"), { ...EQUITY_CATALOG, fields: [] }, FACTOR_CATALOG).fieldPickerCatalogs)
+      .toEqual({ equityFields: [], equityIncompatible: false });
     expect(coherent.catalogs.factors).toBe(FACTORS);
     expect(
-      factorCatalogCoherence(
-        schemaEnvelope("v1"),
-        contractEnvelope("v1"),
-        FACTOR_CATALOG,
-      ),
+      metadataCoherence({ schema: schemaEnvelope("v1"), contract: contractEnvelope("v1"), factorCatalog: FACTOR_CATALOG }).factorRegistry,
     ).toBe("ready");
 
     const races = [
@@ -229,24 +230,21 @@ describe("schema-driven completion", () => {
       expect(mismatched.schema).toBe(SCHEMA);
       expect(mismatched.contract).toEqual([]);
       expect(mismatched.catalogs.equityFields).toEqual([]);
+      expect(mismatched.fieldPickerCatalogs).toEqual({ equityFields: null, equityIncompatible: true });
       expect(mismatched.catalogs.factors).toEqual([]);
-      expect(factorCatalogCoherence(schema, contract, FACTOR_CATALOG)).toBe(
+      expect(metadataCoherence({ schema, contract, factorCatalog: FACTOR_CATALOG }).factorRegistry).toBe(
         "incompatible",
       );
     }
 
     expect(
-      factorCatalogCoherence(schemaEnvelope("v1"), contractEnvelope("v1"), {
+      metadataCoherence({ schema: schemaEnvelope("v1"), contract: contractEnvelope("v1"), factorCatalog: {
         ...FACTOR_CATALOG,
         registry_version: "factors-v2",
-      }),
+      } }).factorRegistry,
     ).toBe("incompatible");
     expect(
-      factorCatalogCoherence(
-        schemaEnvelope("v1"),
-        contractEnvelope("v1"),
-        null,
-      ),
+      metadataCoherence({ schema: schemaEnvelope("v1"), contract: contractEnvelope("v1"), factorCatalog: null }).factorRegistry,
     ).toBe("unavailable");
   });
 

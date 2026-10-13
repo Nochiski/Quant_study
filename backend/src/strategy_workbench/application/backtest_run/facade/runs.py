@@ -1,10 +1,10 @@
+from strategy_workbench.application.backtest_run._scheduler import RunLaneControls
 from strategy_workbench.application.backtest_run._service import (
     DEFAULT_RUN_SLOTS,
     BacktestParameterValueError,
     BacktestResultNotReadyError,
     BacktestRunService,
     InvalidBacktestRunError,
-    RunAdmission,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
     StrategyRevisionRequiresUpgradeError,
@@ -39,6 +39,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger, TrialPreview
 
 __all__ = [
+    "RunLaneControls",
     "DEFAULT_RUN_SLOTS",
     "BacktestParameterValueError",
     "BacktestResultNotReadyError",
@@ -54,7 +55,6 @@ __all__ = [
     "InlineDraft",
     "InvalidBacktestRunError",
     "InvalidRunFieldError",
-    "RunAdmission",
     "RunProgressEvent",
     "RunKind",
     "RunStatus",

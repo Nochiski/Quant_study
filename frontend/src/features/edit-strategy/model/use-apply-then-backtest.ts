@@ -1,3 +1,4 @@
+import { currentParseOutcome } from "./document-state";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DocumentState } from "./document-state";
@@ -62,10 +63,8 @@ const chainPhase = (
     return settling ? "waiting" : "blocked";
   }
   // 구문 오류면 compile 자체가 시작되지 않는다 — 그대로 두면 영원히 기다린다.
-  const parseFailed =
-    state.parsedVersion === state.sourceVersion &&
-    state.parse !== null &&
-    state.parse.status !== "ok";
+  const parsed = currentParseOutcome(state);
+  const parseFailed = parsed !== null && parsed.status !== "ok";
   return parseFailed ? "blocked" : "waiting";
 };
 

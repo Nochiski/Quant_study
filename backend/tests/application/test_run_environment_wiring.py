@@ -330,6 +330,9 @@ def test_manifest_records_the_environment_it_ran_with(tmp_path: Path) -> None:
     assert manifest.environment == environment
     assert manifest.environment_hash == environment_hash(environment)
     assert manifest.run_spec.environment == environment
+    from strategy_workbench.domain.factor.facade.planning import FACTOR_EVALUATION_VERSION
+
+    assert manifest.factor_evaluation_version == FACTOR_EVALUATION_VERSION
 
 
 def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path) -> None:
@@ -347,7 +350,10 @@ def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path)
     cheap_manifest = cheap.result("cheap-run").manifest
     dear_manifest = expensive.result("dear-run").manifest
     assert dear_manifest.environment_hash == environment_hash(dearer)
-    assert (dear_manifest.fee_bps, dear_manifest.slippage_bps) == (250.0, 250.0)
+    assert (dear_manifest.environment.fee_bps, dear_manifest.environment.slippage_bps) == (
+        250.0,
+        250.0,
+    )
     assert dear_manifest.run_fingerprint != cheap_manifest.run_fingerprint
     # 같은 전략을 다른 실행 설정으로 돌렸다: 전략 hash 는 그대로, 실행 설정 hash 만 갈린다.
     assert dear_manifest.strategy_hash == cheap_manifest.strategy_hash
@@ -463,6 +469,8 @@ def test_environment_missing_reaches_the_factor_execution_plan() -> None:
     # 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유하면 두 번째가 첫 결과를 재사용한다.
     assert default_plan.plan_hash != explicit_plan.plan_hash
     assert default_plan.graph_hash == explicit_plan.graph_hash
+    assert default.preview.tape.factor_evaluation_version == default_plan.evaluation_version
+    assert explicit.preview.tape.factor_evaluation_version == explicit_plan.evaluation_version
 
 
 @pytest.mark.parametrize("rate", [0.1, 1.0])
@@ -641,6 +649,50 @@ def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
     first = (fills[0].session, fills[0].security_id)
     assert warmed[first] != cold[first]
     assert warmed[first] != unsplit[first]
+
+
+def test_manifest_projection_preserves_execution_values(tmp_path: Path) -> None:
+    run = _runs(_portfolio(), tmp_path, "projection-run")
+    request = BacktestRunSpec(
+        strategy=_spec(),
+        core=ExecutionCore.PYTHON,
+        initial_cash=12_345_678.0,
+        annualization_days=250,
+        environment=_environment(),
+    )
+    run.start(request)
+    state = wait_for_terminal_run(run, "projection-run")
+    assert state.status.value == "completed", state
+    result = run.result("projection-run")
+    # main 5d655219의 같은 Python 코어·원문·요청으로 얻은 최종 평가액(센트 단위).
+    assert round(result.series.equity[-1].equity, 2) == 12_302_704.95
+    assert result.manifest.run_spec.initial_cash == request.initial_cash
+    assert result.manifest.run_spec.annualization_days == request.annualization_days
+    assert result.manifest.run_spec.core is ExecutionCore.PYTHON
+
+
+def test_evaluation_version_changes_identity_but_not_values_or_tape(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from strategy_workbench.domain.factor import _planning
+
+    request = BacktestRunSpec(
+        strategy=_spec(), core=ExecutionCore.PYTHON, environment=_environment()
+    )
+    results = []
+    for version in ("factor-evaluation-test-a", "factor-evaluation-test-b"):
+        monkeypatch.setattr(_planning, "FACTOR_EVALUATION_VERSION", version)
+        runs = _runs(_portfolio(), tmp_path, version)
+        runs.start(request)
+        assert wait_for_terminal_run(runs, version).status.value == "completed"
+        result = runs.result(version)
+        assert result.manifest.factor_evaluation_version == version
+        results.append(result)
+    first, second = results
+    assert first.manifest.target_tape_hash == second.manifest.target_tape_hash
+    assert first.manifest.run_fingerprint != second.manifest.run_fingerprint
+    assert first.artifacts == second.artifacts
+    assert first.metrics == second.metrics
 
 
 class _NoWarmup(_ShrunkWarmupValue):

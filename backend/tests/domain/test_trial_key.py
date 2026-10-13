@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass, fields, replace
+from dataclasses import MISSING, dataclass, field, fields, replace
 from datetime import date
 from typing import Any
 
@@ -389,3 +389,25 @@ def test_adding_a_field_at_its_default_keeps_every_existing_key(
     assert trial_key(
         replace(_BASE, environment=replace(widened, future_cost_bps=0.5))
     ) != trial_key(_BASE)
+
+
+@dataclass(frozen=True)
+class _StrategyWithAnotherFactorReference(StrategySpec):
+    another_factor: str | None = field(default=None, metadata={"reference": "factor"})
+
+
+def test_new_metadata_factor_references_follow_renaming_without_hash_code_changes() -> None:
+    def extended(spec: StrategySpec, target: str) -> StrategySpec:
+        return _StrategyWithAnotherFactorReference(
+            **{item.name: getattr(spec, item.name) for item in fields(spec)},
+            another_factor=target,
+        )
+
+    first = _risk_weighted()
+    renamed = _risk_weighted("alpha", "inverse_risk")
+    assert strategy_semantic_hash(extended(first, first.factors[0].factor_id)) == (
+        strategy_semantic_hash(extended(renamed, renamed.factors[0].factor_id))
+    )
+    assert strategy_semantic_hash(extended(first, first.factors[0].factor_id)) != (
+        strategy_semantic_hash(extended(first, first.factors[1].factor_id))
+    )

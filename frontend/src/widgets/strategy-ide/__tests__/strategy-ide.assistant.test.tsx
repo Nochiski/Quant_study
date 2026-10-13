@@ -127,6 +127,10 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
   render(
     <ThemePreferenceProvider>
       <StrategyIde
+        outline={null}
+        snippets={null}
+        inspector={null}
+        debugger={null}
         title="새 전략"
         versionLabel="초안"
         editor={<textarea aria-label="source" />}
@@ -147,6 +151,10 @@ const StatefulIde = () => {
   return (
     <ThemePreferenceProvider>
       <StrategyIde
+        outline={null}
+        snippets={null}
+        inspector={null}
+        debugger={null}
         title="새 전략"
         versionLabel="초안"
         editor={<textarea aria-label="source" />}

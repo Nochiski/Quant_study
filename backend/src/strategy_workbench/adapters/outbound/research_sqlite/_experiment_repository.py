@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import asdict
 from datetime import datetime
@@ -24,7 +25,10 @@ from strategy_workbench.domain.experiment.facade.trial import (
 )
 
 from ._errors import ResearchStorageError
+from ._request_codec import decode_request, encode_request
 from ._schema import migrate_schema
+
+logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 # 설계 JSON 은 기록에서 바뀌는 칸(취소 시각·대기열 조작)과 식별·만든 시각을 뺀 것이다.
@@ -59,7 +63,7 @@ class SQLiteExperimentRepository:
                 (
                     record.experiment_id,
                     _time_text(record.created_at, "created_at", record.experiment_id),
-                    _RECORD.dump_json(record, exclude=_COLUMNS | {"controls"}).decode(),
+                    _encode_record(record),
                 ),
             )
 
@@ -81,18 +85,31 @@ class SQLiteExperimentRepository:
         return tuple(row["experiment_id"] for row in rows)
 
     def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:
-        with self._database.transaction(write=False) as connection:
-            rows = connection.execute(
-                f"""
-                SELECT {_SELECT} FROM {_FROM}
-                WHERE ? IS NULL OR experiment_order < (
-                    SELECT experiment_order FROM experiments WHERE experiment_id = ?
-                )
-                ORDER BY experiment_order DESC LIMIT ?
-                """,
-                (after, after, limit),
-            ).fetchall()
-        return tuple(_record(row) for row in rows)
+        records: list[ExperimentRecord] = []
+        cursor = after
+        while len(records) < limit:
+            remaining = limit - len(records)
+            with self._database.transaction(write=False) as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT {_SELECT} FROM {_FROM}
+                    WHERE ? IS NULL OR experiment_order < (
+                        SELECT experiment_order FROM experiments WHERE experiment_id = ?
+                    )
+                    ORDER BY experiment_order DESC LIMIT ?
+                    """,
+                    (cursor, cursor, remaining),
+                ).fetchall()
+            # 디코드는 DB 락 밖에서 한다. 손상 행만 건너뛰고 다음 정상 행으로 페이지를 채운다.
+            for row in rows:
+                cursor = row["experiment_id"]
+                try:
+                    records.append(_record(row))
+                except ResearchStorageError:
+                    logger.exception("experiment skipped on listing — experiment_id=%s", cursor)
+            if len(rows) < remaining:
+                break
+        return tuple(records)
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None:
         with self._database.transaction(write=True) as connection:
@@ -222,6 +239,12 @@ class SQLiteExperimentRepository:
         )
 
 
+def _encode_record(record: ExperimentRecord) -> str:
+    value = _RECORD.dump_python(record, mode="json", exclude=_COLUMNS | {"controls", "run"})
+    value["run"] = json.loads(encode_request(record.run))
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
+
+
 def _record(row: sqlite3.Row) -> ExperimentRecord:
     # 조작 행이 없는 실험(판본 4 이전 파일 포함)은 처음 값으로 읽는다.
     controls = (
@@ -229,15 +252,25 @@ def _record(row: sqlite3.Row) -> ExperimentRecord:
         if row["paused"] is None
         else {"paused": row["paused"], "priority": row["priority"]}
     )
-    return _decode(
-        _RECORD,
-        row["experiment_id"],
-        {
-            **json.loads(row["design_json"]),
+    try:
+        design = json.loads(row["design_json"])
+        request = design["run"]
+        design["run"] = decode_request(
+            json.dumps(request),
+            run_id=f"experiment:{row['experiment_id']}",
+            legacy_spec="run_spec" not in request,
+        )
+        value = {
+            **design,
             **{key: row[key] for key in _COLUMNS},
             "controls": controls,
-        },
-    )
+        }
+    except (KeyError, TypeError, ValueError) as error:
+        raise ResearchStorageError(
+            f"stored experiment design is unreadable — experiment_id={row['experiment_id']}: "
+            f"{error}"
+        ) from error
+    return _decode(_RECORD, row["experiment_id"], value)
 
 
 def _decode(adapter: TypeAdapter[_T], experiment_id: str, value: dict[str, Any]) -> _T:

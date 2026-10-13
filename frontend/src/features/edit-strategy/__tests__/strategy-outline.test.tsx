@@ -24,7 +24,7 @@ import {
   projectStrategyOutlineSymbols,
 } from "../model/strategy-outline";
 import { useStrategyOutline } from "../model/use-strategy-outline";
-import { useOutlineNavigation } from "../model/use-outline-navigation";
+import { useOutlineNavigation } from "./editor-harness";
 import { StrategyOutline } from "../ui/strategy-outline";
 
 afterEach(cleanup);
@@ -264,7 +264,8 @@ describe("Strategy Outline projection", () => {
       loadText: vi.fn(),
       undo: () => false,
       redo: () => false,
-      historyDepth: () => ({ undo: 0, redo: 0 }),
+      subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }),
       getHistoryState: () => null,
       restoreHistoryState: vi.fn(),
     };
@@ -325,7 +326,8 @@ describe("Strategy Outline projection", () => {
         setSelection: (from, to = from) => { selected.push(SOURCE.slice(from, to)); },
         offsetToPosition: () => ({ line: 0, column: 0 }), positionToOffset: () => 0,
         scrollTo: vi.fn(), focus, loadText: vi.fn(), undo: () => false, redo: () => false,
-        historyDepth: () => ({ undo: 0, redo: 0 }), getHistoryState: () => null, restoreHistoryState: vi.fn(),
+        subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }), getHistoryState: () => null, restoreHistoryState: vi.fn(),
       };
       if (order === "parse-first") {
         rerender({ state: parsed });
@@ -385,7 +387,8 @@ describe("Strategy Outline projection", () => {
       loadText: vi.fn(),
       undo: () => false,
       redo: () => false,
-      historyDepth: () => ({ undo: 0, redo: 0 }),
+      subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }),
       getHistoryState: () => null,
       restoreHistoryState: vi.fn(),
     };
@@ -465,7 +468,8 @@ describe("Strategy Outline projection", () => {
           loadText: vi.fn(),
           undo: () => false,
           redo: () => false,
-          historyDepth: () => ({ undo: 0, redo: 0 }),
+          subscribeHistory: () => () => {},
+  historyDepth: () => ({ undo: 0, redo: 0 }),
           getHistoryState: () => null,
           restoreHistoryState: vi.fn(),
         }),

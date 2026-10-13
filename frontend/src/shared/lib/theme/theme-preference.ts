@@ -1,3 +1,4 @@
+import { browserStorage } from "../browser-storage";
 export type ThemePreference = "system" | "light" | "dark";
 
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
@@ -5,16 +6,8 @@ type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 export const THEME_PREFERENCE_KEY = "quant-workbench.theme.v1";
 const DEFAULT_PREFERENCE: ThemePreference = "system";
 
-export const browserThemeStorage = (): PreferenceStorage | null => {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-};
-
 export const readThemePreference = (
-  storage: PreferenceStorage | null = browserThemeStorage(),
+  storage: PreferenceStorage | null = browserStorage(),
 ): ThemePreference => {
   if (storage === null) return DEFAULT_PREFERENCE;
   try {

@@ -147,7 +147,7 @@ export const ExperimentPage = () => {
     from: "/research/experiments/$experimentId",
   });
   const experiment = useQuery(experimentQuery(experimentId));
-  const running = experiment.data?.finished === false;
+  const running = experiment.data?.settled === false;
   // 스트림이 끝나기 전에 끊겨도 trial·워크포워드가 맞춰지게 실험 조회와 같은 주기로 보조로 다시 읽는다.
   const refetchInterval = running ? EXPERIMENT_POLL_MS : false;
   const trials = useQuery({

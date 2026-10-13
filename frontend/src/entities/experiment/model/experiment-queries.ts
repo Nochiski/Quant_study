@@ -21,7 +21,7 @@ export const EXPERIMENT_POLL_MS = 2_000;
 
 /**
  * 실험 목록(최근에 만든 순, 응답의 `next_after` 로 다음 쪽을 더 읽는다)과 대기열 표면(슬롯 사용량·우선순위
- * 상한). 상태·진행 수·끝났는지(`finished`)는 backend 가 파생해 싣는다(spec D6). 읽은 쪽 어디에든 끝나지 않은
+ * 상한). 상태·진행 수·실행까지 멈췄는지(`settled`)는 backend 가 파생해 싣는다(spec D6). 읽은 쪽 어디에든 끝나지 않은
  * 실험이 있으면 2초마다 읽은 쪽을 모두 다시 읽는다 — 뒤쪽의 일시정지한 실험도 재개·취소할 수 있다(#402
  * 리뷰 P2-1).
  */
@@ -33,7 +33,7 @@ export const experimentsQuery = () =>
     getNextPageParam: (page) => page.next_after ?? undefined,
     refetchInterval: (query) =>
       query.state.data?.pages.some((page) =>
-        page.items.some((item) => !item.finished),
+        page.items.some((item) => !item.settled),
       )
         ? EXPERIMENT_POLL_MS
         : false,
@@ -48,7 +48,7 @@ export const experimentQuery = (experimentId: string) =>
     queryKey: [...experimentsKey(), experimentId],
     queryFn: () => strategyWorkbenchApi.getExperiment(experimentId),
     refetchInterval: (query) =>
-      query.state.data?.finished === false ? EXPERIMENT_POLL_MS : false,
+      query.state.data?.settled === false ? EXPERIMENT_POLL_MS : false,
   });
 
 /**

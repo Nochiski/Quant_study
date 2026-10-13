@@ -219,19 +219,7 @@ class BacktestEngineExecutorAdapter:
         if request.dataset.data_snapshot_id != request.target_tape.data_snapshot_id:
             raise ValueError("dataset snapshot does not match the compiled target tape")
         strategy = request.spec.strategy
-        if strategy is None:
-            raise ValueError(
-                "execution request must carry a resolved strategy — "
-                f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
-            )
-        # 비용·체결 파라미터는 실행 설정이 소유한다(P2-01). 요청자가 명시한 값이 엔진에 닿지
-        # 않으면 매니페스트에 적힌 수수료와 실제로 돌린 수수료가 달라진다.
         environment = request.spec.environment
-        if environment is None:
-            raise ValueError(
-                "execution request must carry a resolved run environment — "
-                f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
-            )
         self._check_cancelled(cancelled)
         started_at = datetime.now(UTC)
         # 진행 값은 이 실행기 작업 안의 완료 비율(0~1)이다(`ProgressCallback` 계약). 준비 0.35,
@@ -377,7 +365,6 @@ class BacktestEngineExecutorAdapter:
                 run_id=request.run_id,
                 created_at=started_at,
                 completed_at=datetime.now(UTC),
-                engine_core=request.spec.core,
                 engine_version=ENGINE_RULES_VERSION,
                 run_fingerprint=backtest_run_fingerprint(
                     request.spec,
@@ -385,17 +372,17 @@ class BacktestEngineExecutorAdapter:
                     target_tape_hash=request.target_tape.tape_hash,
                     engine_version=ENGINE_RULES_VERSION,
                     metric_registry_version=self._registry.version,
+                    factor_evaluation_version=request.target_tape.factor_evaluation_version,
                 ),
-                run_spec=request.spec,
+                run_spec=request.spec.to_wire(
+                    strategy_source=request.strategy_source,
+                    lineage_strategy_id=request.lineage_strategy_id,
+                ),
                 strategy_hash=request.target_tape.strategy_hash,
                 data_snapshot_id=request.dataset.data_snapshot_id,
                 target_tape_hash=request.target_tape.tape_hash,
                 metric_registry_version=self._registry.version,
-                initial_cash=request.spec.initial_cash,
-                annualization_days=request.spec.annualization_days,
-                fee_bps=environment.fee_bps,
-                slippage_bps=environment.slippage_bps,
-                participation_rate=environment.participation_rate,
+                factor_evaluation_version=request.target_tape.factor_evaluation_version,
                 environment=environment,
                 environment_hash=environment_hash(environment),
                 strategy_provenance=request.strategy_provenance,

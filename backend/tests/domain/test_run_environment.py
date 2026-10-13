@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import math
 import statistics
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -29,12 +29,12 @@ from strategy_workbench.domain.backtest.facade.environment import (
     cost_inputs,
     environment_hash,
     require_environment,
-    run_environment_canonical_json,
     run_environment_schema,
     run_environment_schema_hash,
     sell_tax_schedule,
     settlement_multipliers,
 )
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
@@ -65,7 +65,7 @@ def test_defaults_match_the_design_contract() -> None:
 
 
 def test_canonical_json_is_sorted_and_compact() -> None:
-    encoded = run_environment_canonical_json(_environment())
+    encoded = canonical_payload_json(asdict(_environment()))
 
     assert encoded.startswith('{"end":"2020-12-31","fee_bps":15.0,')
     assert ", " not in encoded and '": ' not in encoded

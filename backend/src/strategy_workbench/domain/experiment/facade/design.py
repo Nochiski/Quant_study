@@ -6,7 +6,6 @@ from strategy_workbench.domain.experiment._design import (
 )
 from strategy_workbench.domain.experiment._errors import (
     EXPERIMENT_CODES,
-    EXPERIMENT_SPEC_CODES,
     ExperimentError,
     ExperimentNotFoundError,
     ExperimentStateError,
@@ -48,7 +47,6 @@ from strategy_workbench.domain.experiment._walk_forward import (
 
 __all__ = [
     "EXPERIMENT_CODES",
-    "EXPERIMENT_SPEC_CODES",
     "MAX_GRID_POINTS",
     "PEAK_NEIGHBOR_RATIO",
     "SENSITIVITY_STEP",

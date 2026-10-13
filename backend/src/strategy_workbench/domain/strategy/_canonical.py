@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping
-from dataclasses import asdict, fields, replace
-from datetime import date
-from enum import Enum
+from dataclasses import asdict, fields, is_dataclass, replace
 from typing import Any
 
+from strategy_workbench.domain.canonical.facade.encoding import (
+    canonical_json_spec_hash,
+    canonical_payload_json,
+)
 from strategy_workbench.domain.factor.facade.expression import ExpressionNode, FactorGraph
 from strategy_workbench.domain.factor.facade.validation import node_dependencies
 
@@ -59,46 +59,9 @@ def _normalize_numbers(value: Any) -> Any:
     return value
 
 
-def canonical_payload_json(payload: Mapping[str, Any], *, indent: int | None = None) -> str:
-    """The one canonical JSON encoding of an already-canonical payload (ADR D3 hash algorithm).
-
-    Compact for hashing, `indent` for a human-readable document; both carry the same payload and
-    key order, so `indent` never changes meaning. `strategy_spec_hash` is the sha256 of the
-    compact form. Tests pin this encoder against a literal payload so a model change and an
-    algorithm change stay distinguishable.
-    """
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":") if indent is None else (",", ": "),
-        indent=indent,
-        default=_json_default,
-    )
-
-
 def canonical_strategy_json(spec: StrategySpec, *, indent: int | None = None) -> str:
     """Canonical JSON text of a spec: `canonical_strategy_payload` through the payload encoder."""
     return canonical_payload_json(canonical_strategy_payload(spec), indent=indent)
-
-
-def _json_default(value: object) -> str:
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, Enum):
-        return str(value.value)
-    raise TypeError(f"unsupported canonical value — type={type(value).__name__}")
-
-
-def canonical_json_spec_hash(canonical_json: str) -> str:
-    """ADR D3 hash of already-canonical JSON text: sha256 of its UTF-8 bytes.
-
-    The only place the algorithm lives. `strategy_spec_hash` feeds it the current model's
-    canonical text; a stored row from a retired schema version feeds it the exact bytes it
-    stored, since that version's model no longer exists to re-canonicalise.
-    """
-    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
 def strategy_spec_hash(spec: StrategySpec) -> str:
@@ -138,27 +101,35 @@ def _structural(spec: StrategySpec) -> StrategySpec:
     부동소수를 더해(`domain/portfolio/_compiler.py`) 순서가 결과 끝자리에 닿을 수 있다.
     """
     numbers = {factor.factor_id: str(index) for index, factor in enumerate(spec.factors)}
-    risk_factor_id = spec.risk.risk_factor_id
-    tie_factor_id = spec.portfolio.tie_breaker_factor_id
-    return replace(
+    renamed = replace(
         spec,
         factors=tuple(
             replace(factor, factor_id=str(index), graph=_structural_graph(factor.graph))
             for index, factor in enumerate(spec.factors)
         ),
-        portfolio=replace(
-            spec.portfolio,
-            tie_breaker_factor_id=None
-            if tie_factor_id is None
-            else numbers.get(tie_factor_id, tie_factor_id),
-        ),
-        risk=replace(
-            spec.risk,
-            risk_factor_id=None
-            if risk_factor_id is None
-            else numbers.get(risk_factor_id, risk_factor_id),
-        ),
     )
+    return _factor_references(renamed, numbers)
+
+
+def _factor_references(value: Any, numbers: Mapping[str, str]) -> Any:
+    """팩터 참조 메타데이터를 읽는다. 새 참조 필드도 이름이 아닌 선언 위치로 해시한다."""
+    if is_dataclass(value) and not isinstance(value, type):
+        changes = {}
+        for item in fields(value):
+            current = getattr(value, item.name)
+            changes[item.name] = (
+                (None if current is None else numbers.get(current, current))
+                if item.metadata.get("reference") == "factor"
+                else _factor_references(current, numbers)
+            )
+        return replace(value, **changes)
+    if isinstance(value, tuple):
+        return tuple(_factor_references(item, numbers) for item in value)
+    if isinstance(value, list):
+        return [_factor_references(item, numbers) for item in value]
+    if isinstance(value, dict):
+        return {key: _factor_references(item, numbers) for key, item in value.items()}
+    return value
 
 
 def _structural_graph(graph: FactorGraph) -> FactorGraph:

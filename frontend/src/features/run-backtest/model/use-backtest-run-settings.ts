@@ -1,18 +1,18 @@
+import { browserStorage } from "../../../shared/lib/browser-storage";
 import { useCallback, useMemo, useState } from "react";
 
 import {
+  runEnvironmentFields,
   runEnvironmentWireText,
   useRunEnvironmentSchema,
 } from "../../../entities/backtest";
-import type { RunEnvironment } from "../../../shared/api";
+import { ApiRequestError, type RunEnvironment } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
   initialRunEnvironmentValues,
-  runEnvironmentFields,
   runEnvironmentStoredValues,
   runEnvironmentWireRecord,
   validateRunEnvironment,
-  type RunEnvironmentField,
   type RunEnvironmentValidation,
   type RunEnvironmentValues,
 } from "./run-environment";
@@ -23,7 +23,8 @@ import {
 } from "./run-settings-problems";
 import {
   buildBacktestRunOptions,
-  DEFAULT_BACKTEST_RUN_SETTINGS,
+  initialBacktestRunSettings,
+  isExecutionCore,
   OOS_START_FIELD,
   type BacktestRunSettingsFields,
 } from "./run-settings";
@@ -47,17 +48,9 @@ const LEGACY_DEFAULTS: Readonly<Record<string, string>> = {
   participation_basis: "session_volume",
 };
 
-const storage = (): Storage | null => {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-};
-
 const readRecord = (storageKey: string): RunEnvironmentValues | null => {
   try {
-    const text = storage()?.getItem(storageKey);
+    const text = browserStorage()?.getItem(storageKey);
     if (text === null || text === undefined) return null;
     const parsed: unknown = JSON.parse(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
@@ -88,14 +81,13 @@ const readStored = (key: string): RunEnvironmentValues | null => {
 const writeStored = (key: string, values: RunEnvironmentValues): void => {
   try {
     const text = JSON.stringify(values);
-    storage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`, text);
-    storage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${LAST_USED}`, text);
+    browserStorage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`, text);
+    browserStorage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${LAST_USED}`, text);
   } catch {
     // 저장 실패는 이번 화면의 값에 영향이 없다 — 다음 방문에서 스키마 기본값으로 시작할 뿐이다.
   }
 };
 
-const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
 /** 연구 구간 거절이 고치라는 칸(요청 본문의 `environment.start`). */
 const START_FIELD: keyof RunEnvironment = "start";
@@ -162,26 +154,30 @@ export type RunSettingsPanelState = {
  */
 export const useBacktestRunSettings = (storageKey: string) => {
   const schema = useRunEnvironmentSchema();
-  const [fields, setFields] = useState<BacktestRunSettingsFields>(
-    DEFAULT_BACKTEST_RUN_SETTINGS,
-  );
+  const [options, setOptions] = useState({
+    key: storageKey,
+    fields: {} as Partial<BacktestRunSettingsFields>,
+    panel: { open: false, focus: null } as RunSettingsPanelState,
+  });
+  // 화면 전환 시 commit 전에 owner 상태를 초기화한다. 실행 요청과 패널이 다른 전략의 옵션을 읽지 않는다.
+  if (options.key !== storageKey) {
+    setOptions({
+      key: storageKey,
+      fields: {} as Partial<BacktestRunSettingsFields>,
+      panel: { open: false, focus: null },
+    });
+  }
+  const { panel } = options;
+  const fields = useMemo(() => ({ ...initialBacktestRunSettings(schema.data?.options_schema ?? null), ...options.fields }), [options.fields, schema.data]);
+  const coreOptions = useMemo(() => schema.data === undefined ? [] : (runEnvironmentFields(schema.data.options_schema).find((field) => field.name === "core")?.options ?? []).filter(isExecutionCore), [schema.data]);
   const [edited, setEdited] = useState<ScopedValues | null>(null);
   // 덜 친 날짜 칸(브라우저 `validity.badInput`). 값은 빈 문자열이라 값 state 로는 표현할 수 없다. 칸 값과
   // 같이 전략별로 묶는다 — 다른 전략으로 옮기면 비운다.
   const [incompleteDates, setIncompleteDates] = useState<ScopedDates | null>(
     null,
   );
-  const [panel, setPanel] = useState<RunSettingsPanelState>({
-    open: false,
-    focus: null,
-  });
-  const environmentFields = useMemo(
-    () =>
-      schema.data === undefined
-        ? NO_FIELDS
-        : runEnvironmentFields(schema.data.schema),
-    [schema.data],
-  );
+
+  const { environmentFields } = schema;
   const stored = useMemo(
     () => readStored(storageKey) ?? readStored(LAST_USED),
     [storageKey],
@@ -225,7 +221,11 @@ export const useBacktestRunSettings = (storageKey: string) => {
     <Key extends keyof BacktestRunSettingsFields>(
       field: Key,
       value: BacktestRunSettingsFields[Key],
-    ): void => setFields((current) => ({ ...current, [field]: value })),
+    ): void =>
+      setOptions((current) => ({
+        ...current,
+        fields: { ...current.fields, [field]: value },
+      })),
     [],
   );
   const edit = useCallback(
@@ -281,8 +281,10 @@ export const useBacktestRunSettings = (storageKey: string) => {
   );
   const setPanelOpen = useCallback(
     (open: boolean): void =>
-      setPanel((current) =>
-        current.open === open ? current : { ...current, open },
+      setOptions((current) =>
+        current.panel.open === open
+          ? current
+          : { ...current, panel: { ...current.panel, open } },
       ),
     [],
   );
@@ -294,12 +296,15 @@ export const useBacktestRunSettings = (storageKey: string) => {
   /** 패널을 열고 아직 맞지 않은 첫 칸(없으면 첫 칸)에 초점을 옮긴다. */
   const openPanelAtFirstProblem = useCallback((): void => {
     const target = problems[0]?.target ?? environmentFields[0]?.name;
-    setPanel((current) => ({
-      open: true,
-      focus:
-        target === undefined
-          ? current.focus
-          : { field: target, nonce: (current.focus?.nonce ?? 0) + 1 },
+    setOptions((current) => ({
+      ...current,
+      panel: {
+        open: true,
+        focus:
+          target === undefined
+            ? current.panel.focus
+            : { field: target, nonce: (current.panel.focus?.nonce ?? 0) + 1 },
+      },
     }));
   }, [environmentFields, problems]);
   const blockedReason = result.valid
@@ -319,13 +324,11 @@ export const useBacktestRunSettings = (storageKey: string) => {
    * backend 라 화면에 적지 않는다(spec D1). 고칠 수 있는 거절이 아니면 null.
    */
   const rejectionFix = useCallback(
-    (
-      code: string | null,
-      values: Readonly<Record<string, string>>,
-    ): RunRejectionFix | null => {
-      const researchStart = values.research_start;
+    (error: unknown): RunRejectionFix | null => {
+      if (!(error instanceof ApiRequestError)) return null;
+      const researchStart = error.values.research_start;
       if (
-        code !== "backtest.run.research_window_violation" ||
+        error.code !== "backtest.run.research_window_violation" ||
         researchStart === undefined
       )
         return null;
@@ -350,6 +353,7 @@ export const useBacktestRunSettings = (storageKey: string) => {
 
   return {
     fields,
+    coreOptions,
     setField,
     result,
     // 치는 중인 덜 친 날짜는 표시하지 않지만 실행은 막는다 — 칸을 떠나지 않고 누른 단축키가 덜 친 OOS 를

@@ -224,14 +224,14 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
     assert state["status"] == "completed", state
     assert len(state["artifact_sha256"]) == 64
     result = client.get(f"/api/v1/backtests/{run_id}/result").json()
-    assert result["manifest"]["engine_core"] == "rust"
+    assert result["manifest"]["run_spec"]["core"] == "rust"
     assert len(result["manifest"]["run_fingerprint"]) == 64
     assert result["manifest"]["run_spec"]["strategy"] == _run_body(client)["strategy"]
     assert result["manifest"]["run_spec"]["benchmark_security_id"] == "sec-005930-1"
     assert result["manifest"]["metric_registry_version"] == "metric-registry-v5"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
-        "corporate_action_feed_empty",
-        "mock_equity_data",
+        "equity.corporate_action_feed_empty",
+        "equity.mock_data",
     }
     # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
     assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])
@@ -913,8 +913,8 @@ def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -
     assert rust["metrics"] == python["metrics"]
     assert rust["series"] == python["series"]
     assert rust["artifacts"] == python["artifacts"]
-    assert rust["manifest"]["engine_core"] == "rust"
-    assert python["manifest"]["engine_core"] == "python"
+    assert rust["manifest"]["run_spec"]["core"] == "rust"
+    assert python["manifest"]["run_spec"]["core"] == "python"
 
 
 def test_adjacent_metric_windows_chain_to_the_full_run_total_return() -> None:

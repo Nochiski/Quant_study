@@ -5,7 +5,6 @@ import { Badge } from "../../../shared/ui";
 import {
   DATE_INPUT_MAXIMUM,
   DATE_INPUT_MINIMUM,
-  type RunEnvironmentField,
   type RunEnvironmentFieldError,
 } from "../model/run-environment";
 import {
@@ -20,6 +19,7 @@ import {
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
 import {
+  type RunEnvironmentField,
   runEnvironmentApplies,
   runEnvironmentLabel,
   runEnvironmentOptionLabel,

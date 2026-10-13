@@ -1,3 +1,4 @@
+import { runEnvironmentFields } from "../../../entities/backtest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -24,11 +25,10 @@ import {
   vi,
 } from "vitest";
 
-import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
+import { ApiRequestError, type BacktestRunSpec, type RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   initialRunEnvironmentValues,
-  runEnvironmentFields,
   validateRunEnvironment,
   type RunEnvironmentValidation,
 } from "../model/run-environment";
@@ -528,6 +528,8 @@ describe("run environment panel", () => {
       screen.queryByRole("button", { name: "실행 설정 채우기" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("blocked")).toBeEmptyDOMElement();
+    expect(band).toHaveTextContent("15bp");
+    expect(band).toHaveTextContent("10%");
   });
 
   // DEFECT-242-01: 기간·유니버스를 정한 뒤 다른 칸의 값이 틀리면, 차단 문장이 그 칸 이름과 이유를 말하고
@@ -1177,24 +1179,14 @@ describe("run environment panel", () => {
         </QueryClientProvider>
       ),
     });
+    const rejection = (code: string, values: Record<string, string>) =>
+      new ApiRequestError("startBacktest", 422, code, "rejected", null, null, undefined, undefined, values);
     const researchStart = { research_start: "2020-01-02" };
-
-    expect(
-      result.current.rejectionFix(
-        "backtest.run.research_window_violation",
-        researchStart,
-      )?.label,
-    ).toBe("시작일을 2020-01-02로");
-    expect(
-      result.current.rejectionFix(
-        "backtest.strategy.requires_upgrade",
-        researchStart,
-      ),
-    ).toBeNull();
-    expect(
-      result.current.rejectionFix("backtest.run.research_window_violation", {}),
-    ).toBeNull();
-    expect(result.current.rejectionFix(null, researchStart)).toBeNull();
+    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", researchStart))?.label)
+      .toBe("시작일을 2020-01-02로");
+    expect(result.current.rejectionFix(rejection("backtest.strategy.requires_upgrade", researchStart))).toBeNull();
+    expect(result.current.rejectionFix(rejection("backtest.run.research_window_violation", {}))).toBeNull();
+    expect(result.current.rejectionFix(new Error("network"))).toBeNull();
   });
 
   // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.

@@ -2257,9 +2257,11 @@ def test_price_mask_body_change_invalidates_contract_without_rebuilding_sources(
     ).kind is CellKind.OBSERVED
     # 구판처럼 수량 미해결 사건까지 가격을 가린다. 표와 meta/시그니처는 손대지 않는다.
     with duckdb.connect(str(root / "equity.duckdb")) as con:
-        [body] = con.execute(
+        row = con.execute(
             "SELECT macro_definition FROM duckdb_functions() WHERE function_name = 'v_adj_close'"
         ).fetchone()
+        assert row is not None
+        [body] = row
         con.execute(
             "CREATE OR REPLACE MACRO v_adj_close(as_of) AS TABLE "
             "SELECT c.* REPLACE (CASE WHEN e.ticker IS NULL THEN c.adj_close END AS adj_close, "

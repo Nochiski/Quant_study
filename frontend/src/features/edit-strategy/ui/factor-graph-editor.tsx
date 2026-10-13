@@ -488,6 +488,20 @@ export const FactorGraphEditor = ({
             </span>
           ) : null}
         </legend>
+        {selectedItem !== undefined ? (
+          <Button
+            size="small"
+            onClick={() => {
+              const node = container.current?.querySelector<HTMLElement>(
+                '.node-canvas__node[aria-current="true"] [data-canvas-node]',
+              );
+              node?.focus({ preventScroll: true });
+              node?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+            }}
+          >
+            {t("graph.canvas.returnToNode")}
+          </Button>
+        ) : null}
         {nodeSection === null ? (
           selectedItem === undefined ? (
             <p>{t("graph.noSelection")}</p>

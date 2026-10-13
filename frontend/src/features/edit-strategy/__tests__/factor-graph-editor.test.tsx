@@ -136,6 +136,19 @@ const renderEditor = (
 const editor = () => within(screen.getByRole("region", { name: "그래프 편집" }));
 
 describe("FactorGraphEditor (P5-02)", () => {
+  it("인스펙터에서 현재 노드로 키보드 초점을 되돌린다", async () => {
+    renderEditor(VERBOSE, stub(), "/factors/0/graph/nodes/1");
+    const user = userEvent.setup();
+    const back = editor().getByRole("button", {
+      name: "선택한 노드로 돌아가기",
+    });
+    back.focus();
+    await user.keyboard("{Enter}");
+    expect(
+      editor().getByRole("button", { name: /^노드 편집: 2\./ }),
+    ).toHaveFocus();
+  });
+
   it("draws the authored nodes without a backend plan and adds a node through addNode (audit R4)", async () => {
     const user = userEvent.setup();
     const transactions = stub();

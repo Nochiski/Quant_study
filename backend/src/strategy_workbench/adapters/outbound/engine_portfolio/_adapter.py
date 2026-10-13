@@ -35,20 +35,12 @@ class BacktestEnginePortfolioAdapter:
     """Translate strategy SoT into engine requirements and executable target actions."""
 
     def requirements(self, spec: StrategySpec, environment: RunEnvironment) -> StrategyRequirements:
-        """실행에 필요한 엔진 능력. 참여율은 전략 문서가 아니라 실행 설정이 소유한다(1.2).
-
-        틀리는 방향이 한쪽으로 치우쳐 있어서 인자를 받는다: 문서
-        `execution.participation_rate = 1.0` 에 명시 `environment.participation_rate = 0.1` 이면
-        실제 실행은 부분 체결을 쓰는데 요구 집합에 `PARTIAL_FILL` 이 빠져 능력 게이트가 조용히
-        약해진다(반대 조합은 과다 선언이라 무해하다).
-        """
-        features: set[EngineFeature] = set()
+        """참여율이 1이어도 주문이 기준 거래량을 넘으면 부분 체결 능력이 필요하다."""
+        features: set[EngineFeature] = {EngineFeature.PARTIAL_FILL}
         if spec.portfolio.side is PortfolioSide.LONG_SHORT:
             features.add(EngineFeature.SHORT_SELLING)
         if spec.risk.gross_exposure > 1.0:
             features.add(EngineFeature.MARGIN)
-        if environment.participation_rate < 1.0:
-            features.add(EngineFeature.PARTIAL_FILL)
         return StrategyRequirements(
             histories=(),
             schedule=EverySession(),

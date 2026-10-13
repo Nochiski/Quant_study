@@ -6,15 +6,11 @@ are the ones the truthful pipeline (P1.5-04) relies on: adapter-owned snapshot i
 explicit warm-up history, deterministic ordering, window-invariant facts, failures as values, and
 raw facts only (no factor values).
 
-`ADAPTERS` names the cases; the `adapter` fixture builds them. Each case answers the subset of
-`FIELDS` its `list_fields()` declares, and must reject the rest as a failure value rather than
-synthesise it. `FIELDS` is the union of what any adapter can serve: the mock declares nine of them
-and ignores the rest, while the equity adapter (S21-3) serves the 29 EQUITY_FIELD_MAP ids whose
-source tables are built plus the internal `price.adj_close`. That union is deliberate — the
-window-invariance, PIT and cell-kind clauses below then run over every equity field, including the
-as-of ones (financials, consensus, filings) whose `available_date` is a filing date far behind
-`as_of` and the daily grids (flow, short, credit) whose empty cells carry a missing reason rather
-than a zero.
+`ADAPTERS`의 각 어댑터는 `FIELDS` 가운데 자기 카탈로그가 선언한 부분집합만 답하며 나머지는
+실패 값으로 거절한다. mock은 결정론적인 부분집합, 원장은 픽스처가 원천을 갖춘 필드를 답한다.
+이 합집합에 새 필드도 넣어 창 불변성·PIT·셀 종류를 함께 검사한다. 재무·공시는 과거 공개일을
+유지하고, 수급·공매도·신용의 빈 칸은 원천별 결측 사유를 보존한다.
+
 """
 
 from __future__ import annotations
@@ -83,8 +79,12 @@ FIELDS = (
     "event.insider_net_buy",
     # daily grids carrying an explicit missing-reason axis (flow_daily, short_daily, credit_daily)
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",

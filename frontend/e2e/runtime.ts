@@ -50,3 +50,7 @@ export const runtimeAssistantSecretsPath = (): string =>
  */
 export const runtimeResearchDatabasePath = (): string =>
   join(runtimeDirectory(), "research.sqlite3");
+
+/** 백테스트 산출물도 연구 DB와 같은 수명의 격리 런타임에 둔다. */
+export const runtimeArtifactRoot = (): string =>
+  join(runtimeDirectory(), "backtest-runs");

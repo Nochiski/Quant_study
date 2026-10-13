@@ -27,7 +27,6 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
     DataSnapshot,
-    FieldValueType,
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
@@ -39,7 +38,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
-    NodeValueType,
+    field_metadata,
 )
 
 from ._fixture import (
@@ -106,16 +105,7 @@ class MockEquityDataAdapter:
             profile = profile_by_id.get(field_id)
             if profile is not None:
                 fields.append(
-                    FieldMetadata(
-                        field_id=field_id,
-                        unit=profile.unit,
-                        value_type=(
-                            NodeValueType.GROUP_SERIES
-                            if profile.value_type is FieldValueType.CATEGORY
-                            else NodeValueType.NUMERIC_SERIES
-                        ),
-                        adjusted_field_id=ADJUSTED_FIELD_BY_RAW.get(field_id),
-                    )
+                    field_metadata(profile, ADJUSTED_FIELD_BY_RAW.get(field_id))
                 )
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot.snapshot_id,
@@ -436,7 +426,7 @@ class MockEquityDataAdapter:
             benchmark_security_id=query.benchmark_security_id,
             warnings=(
                 DataWarning(
-                    code="mock_equity_data",
+                    code="equity.mock_data",
                     message=(
                         "결정적으로 생성한 mock OHLCV로 실행했다. 실제 연구에는 실데이터 "
                         "어댑터로 바꿔야 한다."
@@ -444,7 +434,7 @@ class MockEquityDataAdapter:
                     severity=WarningSeverity.INFO,
                 ),
                 DataWarning(
-                    code="corporate_action_feed_empty",
+                    code="equity.corporate_action_feed_empty",
                     message="mock 실행은 기업 행동 피드를 비워 둔다(분할·병합 없음).",
                 ),
             ),
@@ -554,7 +544,12 @@ def _factor_field_value(
         return -income if impaired else income
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2
-    if field_id == "flow.foreign_net_buy":
+    if field_id in ("flow.foreign_ownership", "flow.foreign_limit_exhaustion"):
+        # 원장과 같은 퍼센트 척도다. 날짜에 대한 결정론을 유지하며 0~100 안에 둔다.
+        return 52.79 + (security_index % 3) + (session_index % 7) * 0.1
+    if field_id == "short.short_sale_volume":
+        return float(1_000 + abs(trend))
+    if field_id in ("flow.foreign_net_buy", "flow.pension_net_buy"):
         return (security_index - 1) * 100_000_000.0 + trend * 10_000
     if field_id == "short.short_balance_ratio":
         return 0.01 + security_index * 0.015 + (session_index % 7) * 0.0001

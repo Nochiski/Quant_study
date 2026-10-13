@@ -99,32 +99,6 @@ class FactorTrace:
     truncated: bool
 
 
-def trace_factor_graph(
-    graph: FactorGraph,
-    *,
-    observations: tuple[FactorObservation, ...],
-    missing: MissingPolicy,
-    parameters: tuple[ResolvedFactorParameter, ...] = (),
-    selection: TraceSelection | None = None,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> FactorTrace:
-    """Project the evaluator node cache into a bounded, explained, deterministically ordered trace.
-
-    Values come from the same cache `evaluate_factor_graph` reads, so they never diverge.
-    """
-    bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
-    evaluator = _compute_nodes(
-        graph,
-        observations=observations,
-        missing=missing,
-        parameters=parameters,
-        checkpoint=checkpoint,
-    )
-    return _project_trace(
-        graph, observations, bounds, nodes, order, evaluator, checkpoint=checkpoint
-    )
-
-
 def evaluate_factor_graph_with_trace(
     graph: FactorGraph,
     *,
@@ -137,9 +111,7 @@ def evaluate_factor_graph_with_trace(
 ) -> tuple[FactorEvaluation, FactorTrace]:
     """Evaluate once and derive both the executable output and bounded debug projection.
 
-    This is the truthful pipeline entry point for P5: the portfolio score and trace rows share
-    the exact in-memory node cache. Callers do not run `evaluate_factor_graph` and
-    `trace_factor_graph` independently.
+    포트폴리오 점수와 trace는 같은 메모리 캐시를 읽는다. 테스트도 운영과 같은 진입점을 쓴다.
     """
     bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
     evaluator = _compute_nodes(

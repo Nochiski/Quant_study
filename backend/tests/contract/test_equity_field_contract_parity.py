@@ -312,3 +312,28 @@ def test_duckdb_선언표의_값_타입이_원장_선언과_같다(field_id: str
         f"FIELD_SPECS 값 타입이 원장 dataset_profile 과 다르다 — field_id={field_id} "
         f"expected={ledger.value_type} got={got}"
     )
+
+
+def test_필드_프로파일과_선언표는_같은_팩터_값타입_변환을_쓴다() -> None:
+    from dataclasses import replace
+
+    from strategy_workbench.domain.equity.facade.research_data import FieldValueType
+    from strategy_workbench.domain.factor.facade.expression import NodeValueType, field_metadata
+
+    profile = _mock_profiles()["price.close"]
+    spec = FIELD_BY_ID["price.close"]
+    for value_type in FieldValueType:
+        expected = (
+            NodeValueType.GROUP_SERIES
+            if value_type is FieldValueType.CATEGORY
+            else NodeValueType.NUMERIC_SERIES
+        )
+        for declaration in (
+            replace(profile, value_type=value_type),
+            replace(spec, value_type=value_type),
+        ):
+            metadata = field_metadata(declaration, "price.adj_close")
+            assert metadata.field_id == "price.close"
+            assert metadata.unit == spec.unit
+            assert metadata.value_type is expected
+            assert metadata.adjusted_field_id == "price.adj_close"

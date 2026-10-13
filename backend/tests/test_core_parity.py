@@ -51,6 +51,7 @@ from backtest_engine.types.actions import (
     GroupPolicy,
     LiquidatePosition,
     LiquidationPersistence,
+    NotionalDelta,
     QuantityDelta,
     QuantityTarget,
     ReplaceOrder,
@@ -73,7 +74,7 @@ from backtest_engine.types.events import (
     StrategyEvent,
     TargetRounding,
 )
-from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
 from backtest_engine.types.orders import (
     LimitOrderRequest,
@@ -479,6 +480,18 @@ ENGINE_SCENARIOS = {
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
         DataFeed(GOLDEN_BARS),
     ),
+    "leveraged_short_tax_budget": lambda core: _leveraged_tax_scenario(core),
+    "short_tax_budget": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="tax-budget",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        test_short_selling.ShortStrategy((test_short_selling.target(-100),)),
+        DataFeed(test_short_selling.BARS),
+    ),
     "short_sell_tax": lambda core: _engine_scenario(
         core,
         RunConfig(
@@ -516,6 +529,36 @@ ENGINE_SCENARIOS = {
         RunConfig(run_id="si", initial_cash=100_000.0, fee_bps=10.0),
         ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
         DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
+    ),
+    "combined_costs": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="combined",
+            initial_cash=100_000.0,
+            fee_bps=10.0,
+            sell_tax_schedule=_SELL_TAX_SCHEDULE,
+        ),
+        ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
+        DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
+    ),
+    "basket_sqrt": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="basket-sqrt", initial_cash=100_000.0, sell_tax_schedule=_SELL_TAX_SCHEDULE
+        ),
+        test_basket.BasketStrategy(
+            (test_basket.hold_b(10), test_basket.pair(test_basket.GroupPolicy.PROPORTIONAL))
+        ),
+        DataFeed(
+            tuple(
+                replace(bar, impact_scale=0.002, liquidity_volume=bar.volume)
+                for bar in test_basket.BARS
+            )
+        ),
         max_participation=0.1,
         slippage=SqrtImpactSlippage(0.99),
     ),
@@ -1938,3 +1981,244 @@ def test_result_tables_match_across_cores_on_a_partial_trace(rust_core: str) -> 
     assert tables.sessions == (day(1), day(2))
     assert tables.instruments == (_PARTIAL_A,)
     assert _result_tables(python_engine) == _result_tables(rust_engine)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("notional", ["450", "-450", "99", "-99"])
+def test_notional_adjustments_floor_absolute_shares_before_applying_direction(
+    core: str, notional: str
+) -> None:
+    """금액 조정도 목표 수량과 같은 내림 규칙을 쓴다. 음수는 floor(-4.5)가 아닌 -4주다(#417)."""
+    instrument = make_instrument()
+    actions: tuple[StrategyAction | None, ...] = (
+        SetPositionTarget(
+            QuantityTarget(instrument, Decimal(10)), ExecutionPolicy.market_next_open()
+        ),
+        AdjustPosition(
+            instrument,
+            NotionalDelta(Money(Decimal(notional), "KRW")),
+            ExecutionPolicy.market_next_open(),
+        ),
+    )
+    _engine, result = _engine_scenario(
+        core,
+        RunConfig(run_id="adjust-floor", initial_cash=10_000, fee_bps=0),
+        ScriptedStrategy(
+            actions,
+            declared_actions=frozenset(
+                {
+                    ActionKind.NO_ACTION,
+                    ActionKind.SET_POSITION_TARGET,
+                    ActionKind.ADJUST_POSITION,
+                }
+            ),
+        ),
+        DataFeed(tuple(make_bar(day(i), instrument, 100, 100) for i in (1, 2, 3))),
+    )
+    expected = 4 if abs(Decimal(notional)) >= 100 else 0
+    assert [fill.quantity for fill in result.fills] == (
+        [Decimal(10), Decimal(expected)] if expected else [Decimal(10)]
+    )
+    if expected:
+        assert result.fills[-1].side is (Side.BUY if Decimal(notional) > 0 else Side.SELL)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("scenario", ["combined_costs", "basket_sqrt"])
+def test_combined_cost_scenarios_exercise_tax_impact_and_explicit_volume(
+    core: str, scenario: str
+) -> None:
+    """세금·충격·참여 기준과 바스켓이 실제 체결 경로에서 함께 켜진다(#341)."""
+    engine, result = ENGINE_SCENARIOS[scenario](core)
+    # Rust 지연 체결 배열은 첫 접근에 payload를 인계한다. 비파괴 조회표를 먼저 얻는다.
+    tables = engine.event_store.result_tables()
+    assert any(fill.slippage_per_share != 0 for fill in result.fills)
+    assert any(fill.side is Side.SELL for fill in result.fills)
+    assert all(fill.cap_volume in (60, 1000, 3_000) for fill in result.fills)
+    assert any(row[1] == "sell_tax" and row[3] > 0 for row in tables.costs)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_basket_rescaling_preserves_the_quoted_impact_quantity(core: str) -> None:
+    """B의 캡6주가 A도6주로 줄이지만 A충격의 Q는 캡후견적10주다(#341)."""
+    import math
+
+    _engine, result = ENGINE_SCENARIOS["basket_sqrt"](core)
+    fills = [fill for fill in result.fills if fill.ts == day(3)]
+    assert [(fill.instrument.symbol, fill.quantity) for fill in fills] == [
+        ("000660", Decimal(6)),
+        ("005930", Decimal(6)),
+    ]
+    assert fills[0].slippage_per_share == pytest.approx(60 * 0.002 * math.sqrt(6))
+    assert fills[1].slippage_per_share == pytest.approx(100 * 0.002 * math.sqrt(10))
+    assert fills[1].slippage_per_share != pytest.approx(100 * 0.002 * math.sqrt(6))
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("held, expected", [(0, 9), (5, 18)])
+def test_short_entry_affordability_includes_tax_and_closing_costs(
+    core: str, held: int, expected: int
+) -> None:
+    """가격100·여력1000·세율10%: 신규숏9주, 보유5청산후여력1450에서신규숏13주다."""
+    from backtest_engine.engine.broker import PythonQuoteCore
+    from backtest_engine.engine.core import RustQuoteCore
+
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    quote = quote_core.quote_numbers(
+        Side.SELL,
+        100.0,
+        Decimal(100),
+        10000,
+        None,
+        0.0,
+        None,
+        1000.0,
+        Decimal(held),
+        0.0,
+        False,
+        0.1,
+    )
+    assert quote.quantity == Decimal(expected)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_short_tax_budget_reaches_every_engine_path(core: str) -> None:
+    """1000원 여력·100원 시가·10% 세금이면 10주가 아닌 9주만 열 수 있다."""
+    _engine, result = ENGINE_SCENARIOS["short_tax_budget"](core)
+    assert [fill.quantity for fill in result.fills] == [Decimal(9)]
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+@pytest.mark.parametrize("held", [-5, 0, 5])
+@pytest.mark.parametrize("leverage", [1.0, 2.0, 3.0])
+@pytest.mark.parametrize("mark", [80.0, 100.0, 120.0])
+@pytest.mark.parametrize("fee_rate", [0.0, 0.05])
+def test_quote_budget_matches_actual_equity_and_exposure_after_costs(
+    core: str, side: Side, held: int, leverage: float, mark: float, fee_rate: float
+) -> None:
+    from backtest_engine.engine.broker import PythonQuoteCore
+    from backtest_engine.engine.core import RustQuoteCore, make_buying_power
+    from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+
+    instrument = make_instrument()
+    snapshot = PortfolioSnapshot(
+        day(1),
+        1000.0 - held * mark,
+        (Position(instrument, Decimal(held), mark, mark, held * mark, 0.0),),
+        1000.0,
+        abs(held * mark) / 1000,
+    )
+    power = make_buying_power(core, snapshot, leverage)
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    rate = fee_rate + (0.1 if side is Side.SELL else 0.0)
+    sign = 1 if side is Side.BUY else -1
+
+    # 견적 공식을 재구현하지 않고 현금+보유 평가와 총노출로 모든 정수 후보를 판정한다.
+    def remaining_power(quantity: int) -> float:
+        cash = snapshot.cash - sign * quantity * 100 - quantity * 100 * rate
+        position = held + sign * quantity
+        return leverage * (cash + position * 100) - abs(position * 100)
+
+    expected = max(q for q in range(101) if remaining_power(q) >= 0)
+    quote = quote_core.quote_numbers(
+        side,
+        100,
+        Decimal(100),
+        10000,
+        None,
+        0,
+        None,
+        power.available,
+        Decimal(held),
+        fee_rate,
+        False,
+        0.1,
+        power.leverage,
+        power.mark_of(instrument),
+    )
+    assert quote.quantity == Decimal(expected)
+    power.consume_quantity(instrument, side, quote.quantity, quote.price, expected * 100 * rate)
+    assert power.available >= 0
+    assert remaining_power(expected + 1) < 0
+
+
+class _LeveragedShortStrategy(test_short_selling.ShortStrategy):
+    def requirements(self) -> StrategyRequirements:
+        return replace(
+            super().requirements(),
+            features=frozenset(
+                {EngineFeature.SHORT_SELLING, EngineFeature.MARGIN, EngineFeature.PARTIAL_FILL}
+            ),
+        )
+
+
+class _LeveragedBasketStrategy(test_basket.BasketStrategy):
+    def requirements(self) -> StrategyRequirements:
+        return replace(
+            super().requirements(),
+            features=super().requirements().features
+            | {EngineFeature.SHORT_SELLING, EngineFeature.MARGIN},
+        )
+
+
+def _leveraged_tax_scenario(core: str) -> tuple[BacktestEngine, BacktestResult]:
+    instrument = make_instrument()
+    return _engine_scenario(
+        core,
+        RunConfig(
+            run_id="leveraged-tax",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            max_gross_leverage=2.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        _LeveragedShortStrategy((test_short_selling.target(-100), test_short_selling.target(100))),
+        DataFeed(tuple(make_bar(day(i), instrument, 100.0, 100.0) for i in (1, 2, 3))),
+    )
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_leveraged_short_and_cover_use_actual_budget_in_every_engine(core: str) -> None:
+    _, result = _leveraged_tax_scenario(core)
+    assert [(f.side, f.quantity) for f in result.fills] == [
+        (Side.SELL, Decimal(16)),
+        (Side.BUY, Decimal(32)),
+    ]
+    assert all(s.gross_exposure <= 2 for s in result.snapshots)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_basket_quotes_consume_leveraged_cost_budget_in_order(core: str) -> None:
+    from backtest_engine.types.actions import BasketAction, GroupPolicy
+
+    _, result = _engine_scenario(
+        core,
+        RunConfig(
+            run_id="leveraged-basket",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            max_gross_leverage=2.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        _LeveragedBasketStrategy(
+            (
+                BasketAction(
+                    legs=(
+                        test_basket.market_leg(test_basket.A, Side.SELL, 8),
+                        test_basket.market_leg(test_basket.B, Side.SELL, 100),
+                    ),
+                    group_policy=GroupPolicy.BEST_EFFORT,
+                ),
+            )
+        ),
+        DataFeed(
+            tuple(
+                make_bar(day(i), instrument, 100.0, 100.0)
+                for i in (1, 2)
+                for instrument in (test_basket.A, test_basket.B)
+            )
+        ),
+    )
+    assert [f.quantity for f in result.fills] == [Decimal(8), Decimal(8)]
+    assert all(s.gross_exposure <= 2 for s in result.snapshots)

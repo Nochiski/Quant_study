@@ -117,7 +117,7 @@ class RetiredExecutionSettings:
 
     data_section: Mapping[str, object]
     execution_section: Mapping[str, object]
-    # 첫 팩터의 `graph.missing_policy` 값과 그 자리. 어느 팩터에도 없으면 둘 다 None 이다.
+    # 첫 팩터의 결측 정책과 그 자리. 생략한 정책은 1.1 기본값 drop, 팩터가 없으면 None이다.
     missing_policy: object | None
     missing_policy_pointer: str | None
 
@@ -128,7 +128,7 @@ class UpgradeOutcome:
 
     `tree` 는 `upgrade_document` 면 새 dict, `apply_upgrade_steps` 면 받은 그 객체다.
 
-    `environment` 는 1.1 → 1.2 단계를 지났을 때만 있다(`until` 로 그 앞에서 멈추면 None).
+    `environment` 는 실행 설정을 떼어 내는 1.1 → 1.2 단계가 채운다.
     """
 
     tree: MutableMapping[str, object]
@@ -312,7 +312,7 @@ def _version_text(value: object) -> str | None:
     return None if value is None else str(value)
 
 
-def _chain_start(document: Mapping[str, object], target: str = CURRENT_SCHEMA_VERSION) -> str:
+def _chain_start(document: Mapping[str, object]) -> str:
     """체인을 시작할 버전 — 업그레이드 가능 판정의 유일한 owner.
 
     **문서가 스스로 선언한 버전을 믿는다**(Phase 2 감사 NB-1). 체인은 선언된 은퇴 버전에서 시작하고
@@ -328,7 +328,7 @@ def _chain_start(document: Mapping[str, object], target: str = CURRENT_SCHEMA_VE
       읽으면 그 버전이 지우거나 뜻을 바꾼 키가 현재 모델로 조용히 해석된다(버전 상한, P1-05 2차
       리뷰 P3-7·BACKLOG-010). 저장 row 읽기가 이 거절에 기대 fail-closed 다.
 
-    - `target` 까지 가는 길에 `saved_*` 노드를 버리는 단계가 있으면 그 노드를 원문 자리로 짚어
+    - 현재 판까지 가는 길에 `saved_*` 노드를 버리는 단계가 있으면 그 노드를 원문 자리로 짚어
       거절한다(#357 C-P3-10). 조용히 지우면 팩터 그래프의 뜻이 바뀐다.
 
     Raises:
@@ -350,7 +350,9 @@ def _chain_start(document: Mapping[str, object], target: str = CURRENT_SCHEMA_VE
                 )
         if (
             _RETIRED_NODES_STAGE
-            in UPGRADE_CHAIN[UPGRADE_CHAIN.index(version) : UPGRADE_CHAIN.index(target)]
+            in UPGRADE_CHAIN[
+                UPGRADE_CHAIN.index(version) : UPGRADE_CHAIN.index(CURRENT_SCHEMA_VERSION)
+            ]
         ):
             _reject_retired_nodes(document)
         return version
@@ -571,10 +573,8 @@ def _retired_settings(
     return settings, warnings
 
 
-def apply_upgrade_steps(
-    document: MutableMapping[str, object], *, until: str | None = None
-) -> UpgradeOutcome:
-    """문서(plain 또는 ruamel 컨테이너)를 제자리에서 `until`(기본은 현재 버전)까지 올린다.
+def apply_upgrade_steps(document: MutableMapping[str, object]) -> UpgradeOutcome:
+    """문서(plain 또는 ruamel 컨테이너)를 제자리에서 현재 버전까지 올린다.
 
     단계마다 목표 버전을 찍고 그 단계의 옛 모양이 남지 않았는지 검증한다. 받아 주는 조건의
     owner 는 `_chain_start` 하나다.
@@ -582,18 +582,12 @@ def apply_upgrade_steps(
     Raises:
         NotUpgradeableDocumentError: 체인이 없는 문서거나, 단계 뒤에 옛 모양이 남았을 때.
         UpgradeUnsupportedNodeError: 1.2 에 없는 `saved_*` 노드가 있을 때.
-        ValueError: `until` 이 체인의 버전이 아닐 때(호출자 오류).
     """
-    target = CURRENT_SCHEMA_VERSION if until is None else until
-    if target not in UPGRADE_CHAIN:
-        raise ValueError(
-            f"upgrade target is not in the chain — until={until!r} chain={UPGRADE_CHAIN}"
-        )
     original = document.get("schema_version")
-    start = _chain_start(document, target)
+    start = _chain_start(document)
     environment: RetiredExecutionSettings | None = None
     warnings: list[UpgradeWarning] = []
-    for index in range(UPGRADE_CHAIN.index(start), UPGRADE_CHAIN.index(target)):
+    for index in range(UPGRADE_CHAIN.index(start), UPGRADE_CHAIN.index(CURRENT_SCHEMA_VERSION)):
         version, next_version = UPGRADE_CHAIN[index], UPGRADE_CHAIN[index + 1]
         if version == _EXECUTION_SETTINGS_STAGE:
             environment, found = _retired_settings(document)
@@ -612,9 +606,9 @@ def apply_upgrade_steps(
     )
 
 
-def upgrade_document(tree: Mapping[str, object], *, until: str | None = None) -> UpgradeOutcome:
+def upgrade_document(tree: Mapping[str, object]) -> UpgradeOutcome:
     """은퇴 버전 문서를 새 tree 로 올린다(입력은 바꾸지 않는다).
 
     규칙은 `apply_upgrade_steps` 그대로다.
     """
-    return apply_upgrade_steps(copy.deepcopy(dict(tree)), until=until)
+    return apply_upgrade_steps(copy.deepcopy(dict(tree)))

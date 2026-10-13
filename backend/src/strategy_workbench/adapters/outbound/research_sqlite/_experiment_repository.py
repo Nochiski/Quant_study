@@ -76,6 +76,16 @@ class SQLiteExperimentRepository:
             raise _not_found(experiment_id)
         return _record(row)
 
+    def controls(self, experiment_id: str) -> ExperimentControls:
+        # 실험 설계를 디코드하지 않고 조작 행만 읽는다(접수가 trial마다 최신 설정을 본다).
+        with self._database.transaction(write=False) as connection:
+            row = connection.execute(
+                f"SELECT paused, priority FROM {_FROM} WHERE experiment_id = ?", (experiment_id,)
+            ).fetchone()
+        if row is None:
+            raise _not_found(experiment_id)
+        return ExperimentControls(**_controls(row))
+
     def open_ids(self) -> tuple[str, ...]:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
@@ -245,13 +255,17 @@ def _encode_record(record: ExperimentRecord) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
 
 
-def _record(row: sqlite3.Row) -> ExperimentRecord:
+def _controls(row: sqlite3.Row) -> dict[str, Any]:
     # 조작 행이 없는 실험(판본 4 이전 파일 포함)은 처음 값으로 읽는다.
-    controls = (
+    return (
         asdict(DEFAULT_EXPERIMENT_CONTROLS)
         if row["paused"] is None
-        else {"paused": row["paused"], "priority": row["priority"]}
+        else {"paused": bool(row["paused"]), "priority": row["priority"]}
     )
+
+
+def _record(row: sqlite3.Row) -> ExperimentRecord:
+    controls = _controls(row)
     try:
         design = json.loads(row["design_json"])
         request = design["run"]

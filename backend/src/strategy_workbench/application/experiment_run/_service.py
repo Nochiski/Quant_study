@@ -62,6 +62,7 @@ from strategy_workbench.domain.experiment.facade.trial import (
     awaiting_recovery,
     experiment_settled,
     experiment_status,
+    settled,
     trial_status,
     validate_selection_reason,
 )
@@ -148,7 +149,7 @@ class ExperimentTrialState:
     @property
     def settled(self) -> bool:
         """trial이 끝났고 재시작 복구를 기다리지 않는다."""
-        return self.status.is_terminal and not self.awaiting_recovery
+        return settled(self.status, recovering=self.awaiting_recovery)
 
 
 @dataclass(frozen=True)
@@ -810,7 +811,7 @@ class ExperimentRunService:
                 _run_request(record.run, trial, start, end),
                 trial_key=experiment_trial_key(base, trial),
                 owner=record.experiment_id,
-                controls=self._repository.get(record.experiment_id).controls,
+                controls=self._repository.controls(record.experiment_id),
             )
         except TrialRunRejectedError as rejected:
             return None, rejected.code, str(rejected)

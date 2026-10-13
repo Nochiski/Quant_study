@@ -27,7 +27,7 @@ from strategy_workbench.domain.backtest.facade.runs import BacktestRunState, Run
 
 from ._errors import InvalidExperimentSpecError
 from ._search import GridIndex, neighbor_rank
-from ._trial import awaiting_recovery
+from ._trial import awaiting_recovery, settled
 
 
 class SplitMode(StrEnum):
@@ -258,7 +258,7 @@ def window_gap(has_cell: bool, test_run: BacktestRunState | None) -> WalkForward
         return WalkForwardGap.TEST_FAILED
     if test_run.status is RunStatus.COMPLETED:
         return None
-    if test_run.status.is_terminal and not awaiting_recovery(test_run):
+    if settled(test_run.status, recovering=awaiting_recovery(test_run)):
         return WalkForwardGap.TEST_FAILED
     return WalkForwardGap.PENDING
 

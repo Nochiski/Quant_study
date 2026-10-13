@@ -88,7 +88,7 @@ test(
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     const runId = new URL(page.url()).pathname.split("/").at(-1)!;
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-      "completed",
+      "완료",
       { timeout: 120_000 },
     );
     const result = page.getByRole("article", { name: "백테스트 결과" });
@@ -124,6 +124,6 @@ test(
     ).toBeVisible();
     await expect(
       page.getByRole("row").filter({ hasText: runId }),
-    ).toContainText("completed");
+    ).toContainText("완료");
   },
 );

@@ -132,6 +132,10 @@ RUN_ENVIRONMENT_KEY_NAMESPACE = "run_environment.field"
 #
 # 범위 위반은 `__post_init__` 이 칸 이름을 실은 `InvalidRunFieldError` 로 거절한다(요청 검증 422
 # `backtest.run.field_invalid`). 진단 코드(`code`)는 전략 문서 validator 의 것이라 행에 없다.
+# bp 비용 칸 하나가 대금 전체(100%)를 넘으면 경제적으로 성립하지 않는다 — 참여율 상한 1.0과 같은
+# 자연 단위 경계다. 더 좁은 임의 상한은 두지 않는다(#342 V2-04).
+BPS_OF_NOTIONAL = 10_000.0
+
 RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
     "participation_rate": ScalarConstraint(
         pointer="/participation_rate",
@@ -150,8 +154,9 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
+        maximum=BPS_OF_NOTIONAL,
         example=15.0,
-        message="수수료는 0 이상의 숫자여야 합니다.",
+        message="수수료는 0 이상 10000 이하(대금의 100% 이하)여야 합니다.",
     ),
     "slippage_bps": ScalarConstraint(
         pointer="/slippage_bps",
@@ -159,8 +164,9 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
+        maximum=BPS_OF_NOTIONAL,
         example=10.0,
-        message="슬리피지는 0 이상의 숫자여야 합니다.",
+        message="슬리피지는 0 이상 10000 이하(대금의 100% 이하)여야 합니다.",
     ),
     # √ 충격의 계수 k(무차원). 기본값은 아래 필드 선언이 소유한다(`_impact.py` 머리말).
     # 상한은 문헌의 "1 안팎"을 넉넉히 덮고 오타 입력(100·1000)을 막는다.
@@ -180,8 +186,9 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
+        maximum=BPS_OF_NOTIONAL,
         example=20.0,
-        message="매도 거래세는 0 이상의 숫자여야 합니다.",
+        message="매도 거래세는 0 이상 10000 이하(대금의 100% 이하)여야 합니다.",
     ),
 }
 

@@ -16,7 +16,7 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import Field
+from pydantic import AfterValidator, Field
 from pydantic.config import JsonDict
 
 from strategy_workbench.application.experiment_run.facade.experiments import (
@@ -40,9 +40,9 @@ from strategy_workbench.domain.experiment.facade.design import (
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
-    SELECTION_REASON_PATTERN,
     ExperimentStatus,
     TrialStatus,
+    validate_selection_reason,
 )
 
 from ._backtest_contract import (
@@ -105,7 +105,7 @@ class ExperimentProgress:
 class ExperimentSelectionRequest:
     trial_index: Annotated[int, Field(ge=0)]
     # 공백만 있는 이유는 기록이 아니다.
-    reason: Annotated[str, Field(pattern=SELECTION_REASON_PATTERN)]
+    reason: Annotated[str, AfterValidator(validate_selection_reason)]
 
 
 class _ExperimentBodyRoute(CodedBodyValidationRoute):

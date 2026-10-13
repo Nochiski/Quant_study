@@ -1,7 +1,6 @@
 from strategy_workbench.domain.experiment._trial import (
     DEFAULT_EXPERIMENT_CONTROLS,
     MAX_EXPERIMENT_PRIORITY,
-    SELECTION_REASON_PATTERN,
     ExperimentControls,
     ExperimentStatus,
     TrialStatus,
@@ -15,7 +14,6 @@ from strategy_workbench.domain.experiment._trial import (
 __all__ = [
     "DEFAULT_EXPERIMENT_CONTROLS",
     "MAX_EXPERIMENT_PRIORITY",
-    "SELECTION_REASON_PATTERN",
     "ExperimentControls",
     "ExperimentStatus",
     "TrialStatus",

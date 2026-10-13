@@ -26,7 +26,7 @@ import {
   buildHoverSource,
   projectAssistMetadata,
   type AssistDeps,
-  type AssistCatalogs,
+  type AssistMetadata,
 } from "./schema-assist";
 import type { JsonSchema } from "./schema-navigator";
 
@@ -42,7 +42,7 @@ export type SchemaAssist = {
   /** Same query-owned metadata, exposed intact for the read-only Contract Inspector. */
   inspectorSource: ContractInspectorSource;
   /** 정합 확인을 통과한 카탈로그만 편집 필드 선택기에 전달한다. */
-  catalogs: AssistCatalogs;
+  fieldPickerCatalogs: AssistMetadata["fieldPickerCatalogs"];
   /**
    * 연산자 카탈로그(P1-03, spec D8). Graph 팔레트가 읽는다. `loading`은 편집기 assist의 `loading`과
    * 분리한다 — 카탈로그가 늦어도 편집기 완성·hover는 기다릴 이유가 없다.
@@ -191,7 +191,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       schemaVersion,
       schema: runtimeSchema,
       inspectorSource,
-      catalogs: assistMetadata.catalogs,
+      fieldPickerCatalogs: assistMetadata.fieldPickerCatalogs,
       operators,
       snippetSource,
     }),
@@ -199,7 +199,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       completionSource,
       hoverSource,
       inspectorSource,
-      assistMetadata.catalogs,
+      assistMetadata.fieldPickerCatalogs,
       loading,
       operators,
       schemaVersion,

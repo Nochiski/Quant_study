@@ -55,6 +55,8 @@ import "./strategy-form-panel.css";
 
 export type FormCatalogs = {
   equityFields: readonly DatasetFieldProfile[] | null;
+  /** 정합성 owner가 판본 불일치를 확인한 경우 로딩과 구별한다. */
+  equityIncompatible?: boolean;
 };
 
 type StrategyFormPanelProps = {

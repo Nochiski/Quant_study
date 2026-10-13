@@ -59,7 +59,12 @@ export type AssistDeps = {
   getState: () => DocumentState;
 };
 
-export type AssistMetadata = Omit<AssistDeps, "getState">;
+export type AssistMetadata = Omit<AssistDeps, "getState"> & {
+  fieldPickerCatalogs: {
+    equityFields: readonly DatasetFieldProfile[] | null;
+    equityIncompatible: boolean;
+  };
+};
 
 /**
  * Projects query responses into editor assistance without flattening their wire contracts.
@@ -75,6 +80,10 @@ export const projectAssistMetadata = (
   const coherence = metadataCoherence({ schema, contract, equityCatalog, factorCatalog });
   const coherentContract = coherence.schemaContract === "ready" ? contract?.contract : null;
   return {
+    fieldPickerCatalogs: {
+      equityFields: coherence.dataset === "ready" ? equityCatalog?.fields ?? null : null,
+      equityIncompatible: coherence.dataset === "incompatible",
+    },
     schema: (schema?.schema as JsonSchema | undefined) ?? null,
     contract: coherentContract?.fields ?? [],
     catalogs: {

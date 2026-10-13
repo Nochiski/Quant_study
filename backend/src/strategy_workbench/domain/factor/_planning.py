@@ -53,17 +53,6 @@ class FactorExecutionPlan:
     as_of_policy: str = "available_date_lte_as_of"
 
 
-@dataclass(frozen=True)
-class FactorMatrixCacheKey:
-    fingerprint: str
-    data_snapshot_id: str
-    plan_hash: str
-    registry_version: str
-    parameters: tuple[ResolvedFactorParameter, ...]
-    as_of_start: date
-    as_of_end: date
-
-
 class InvalidFactorGraphError(ValueError):
     def __init__(self, validation: FactorGraphValidation) -> None:
         codes = tuple(issue.code for issue in validation.issues)
@@ -118,7 +107,7 @@ def compile_factor_plan(
         "output_node_id": graph.output_node_id,
         "steps": [asdict(step) for step in steps],
         # 결측 정책은 실행 설정으로 옮겼지만 plan 의 일부로 남는다: 이 값이 `plan_hash` 에서
-        # 빠지면 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유한다(spec D6).
+        # 빠지면 결측 처리만 다른 두 평가가 trace provenance에서 같은 계획으로 표시된다(spec D6).
         "missing_policy": missing.value,
         # 평가 규칙 판본의 첫 사례(#312 · #375 DR-A-10): 채우는 정책은 채움 자리를 잎에서 횡단면
         # 진입으로 옮겨 같은 이름으로 전과 다른 값을 낸다. 그 정책의 판만 가른다 — drop·keep 은
@@ -136,36 +125,6 @@ def compile_factor_plan(
         required_field_ids=validation.required_field_ids,
         minimum_history_sessions=validation.minimum_history_sessions,
         missing_policy=missing.value,
-    )
-
-
-def build_factor_matrix_cache_key(
-    *,
-    data_snapshot_id: str,
-    plan_hash: str,
-    registry_version: str,
-    parameters: tuple[ResolvedFactorParameter, ...],
-    as_of_start: date,
-    as_of_end: date,
-) -> FactorMatrixCacheKey:
-    ordered_parameters = tuple(sorted(parameters, key=lambda item: item.parameter_id))
-    payload = {
-        "data_snapshot_id": data_snapshot_id,
-        "plan_hash": plan_hash,
-        "registry_version": registry_version,
-        "parameters": [asdict(parameter) for parameter in ordered_parameters],
-        "as_of_start": as_of_start.isoformat(),
-        "as_of_end": as_of_end.isoformat(),
-    }
-    fingerprint = canonical_json_hash(payload, ensure_ascii=True)
-    return FactorMatrixCacheKey(
-        fingerprint=fingerprint,
-        data_snapshot_id=data_snapshot_id,
-        plan_hash=plan_hash,
-        registry_version=registry_version,
-        parameters=ordered_parameters,
-        as_of_start=as_of_start,
-        as_of_end=as_of_end,
     )
 
 

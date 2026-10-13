@@ -93,7 +93,6 @@ from strategy_workbench.domain.factor.facade.expression import (
     TimeSeriesNode,
     TimeSeriesOperator,
 )
-from strategy_workbench.domain.factor.facade.planning import build_factor_matrix_cache_key
 from strategy_workbench.domain.factor.facade.registry import (
     FactorAvailability,
     build_default_factor_registry,
@@ -255,20 +254,6 @@ def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
         current.snapshot().snapshot_id,
         older.snapshot().snapshot_id,
     ]
-    keys = []
-    for explanation in plans:
-        assert explanation.plan is not None
-        keys.append(
-            build_factor_matrix_cache_key(
-                data_snapshot_id=explanation.data_snapshot_id,
-                plan_hash=explanation.plan.plan_hash,
-                registry_version=explanation.registry_version,
-                parameters=(),
-                as_of_start=START,
-                as_of_end=END,
-            )
-        )
-    assert keys[0].fingerprint != keys[1].fingerprint
 
 
 _ADAPTER = "strategy_workbench.adapters.outbound.equity_duckdb._adapter"

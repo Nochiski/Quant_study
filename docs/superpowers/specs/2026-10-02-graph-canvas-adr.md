@@ -1,6 +1,6 @@
 # 고급 노드 캔버스와 ELK 자동 배치 ADR
 
-- 상태: P6-01 결정. 제품 적용과 접근성 완료 판정은 P6-02·03 검증 후 갱신한다.
+- 상태: 채택·제품 적용 완료. #434 `fb46b7aa`·#435 `6ac126fd`·#436 `f5e41d98`가 main에 병합됐다. 키보드/DOM 자동 검증과 실제 스크린리더 낭독 완료는 구분하며, 후자는 [마감 계획](../../planning/strategy-language-2-0/CLOSEOUT.md)에서 추적한다.
 - 선행: PR433 `b009e394a406087e04ae3e86970e6bc769b876df`, 전체 CI36957762428 성공.
 - 계약: [WORKFLOW §9](../../planning/strategy-language-2-0/WORKFLOW.md#9-phase-6--그래프-3수준-고급-노드-캔버스).
 

@@ -134,13 +134,15 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 
 ## 현재 작업 Packet
 
-현재 작업은 P5-03이며 main `e8400fba0d7f64bacdbcd320e4ca1cfdf7931edd`에서
-`feat/lang2-p5-03-factor-preview`로 분리했다(2026-10-02). 기존 PR422~430 병합 상태는 사용자 인계 기준이다.
-단계: trace 평가결과 투영/이전 API 폐기 → 전략 보조 팩터 동점 해소 → 아이디어 5개 E2E/매뉴얼 → 전체 검증/독립 리뷰/draft PR.
-확정: 보조 팩터와 방향은 전략 설정, 주 점수 동점에만 사용, alpha 합성 제외, 특정 지표 고정 금지.
-확정(2026-10-02 사용자 답변): 실행 결측 정책 후에도 보조값이 없으면 같은 주 점수 그룹의 유효값 뒤, 최종 동점은 기존 security_id 순서. P6 자동 레이아웃은 ELK다.
-검증: 최초 main CI 저장 2건의 SQLite BEGIN IMMEDIATE 잠금은 재실행 성공만 확인됐으며 근본 해결은 미확인이다.
-이 작업은 저장 구현·테스트 기준을 변경하지 않는다. P5 전체 출구와 P6는 아직 완료하지 않았다.
+현재 작업은 병합된 LANG2의 수용 기준 마감이다. 구현·테스트 계획과 남은 검증은
+[CLOSEOUT.md](CLOSEOUT.md)가 소유한다. 기준 main은 `4289429b`이며 기존 P4~P6 PR은 모두 병합됐다.
+P5-03은 #431·432·433, P6는 #434·435·436으로 반영됐고, 기준 main 전체 CI
+[38332263277](https://github.com/Nochiski/Quant_study/actions/runs/38332263277)가 성공했다.
+
+tracker의 `MERGED`·생성 집계는 코드 병합률이다. CS-05·06 수용 검증, #324 부하 재현,
+#328 동시성, 문서 전환과 실제 스크린리더 검증까지 모두 끝났다는 뜻이 아니다.
+마감 변경의 exact HEAD CI·독립 리뷰·환경상 미검증 항목은 CLOSEOUT에 별도로 기록한다.
+아래 이전 Packet과 날짜별 기록은 당시의 사실이며 현재 상태를 덮어쓰지 않는다.
 
 ### 이전 P4-03 Packet (보존)
 
@@ -1091,38 +1093,38 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P4-01` | `pipeline-projection.ts` (4단계 모델, `x-stage`, 팩터 요약 문장) | P3-03 | `MERGED` | 두 PR(리드 결정 2026-09-30): P4-01a [#347](https://github.com/Nochiski/Quant_study/pull/347)(`3b16345f` refactor·`50830b7e` `x-stage`·`398a14e2` 인프라 기준선) · `review_pr347` r1 APPROVE(`8af5f1b7`, P3 4 → P4-01b) · main 머지 `92bf38ee`(#347, 2026-09-30) → P4-01b [#367](https://github.com/Nochiski/Quant_study/pull/367)(`feat/lang2-p4-01b-pipeline-projection`, [#359](https://github.com/Nochiski/Quant_study/pull/359) 위 스택 → #359 머지 `7e7b2da9` 뒤 base main) · `review_pr367` r1 APPROVE(P2 2·P3 4 반영, 리드 결정 둘) · main 머지 `09aaf755`([#367](https://github.com/Nochiski/Quant_study/pull/367), 2026-09-30) |
 | [x] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `MERGED` | 두 PR(리드 결정 6 — a 끝 비테스트 src 13파일 +1136/−213): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(`feat/lang2-p4-02-stage-cards`, main `09aaf755` 위) · `review_pr392` r1 APPROVE(P2 1·P3 4, 리드 지시로 머지 전 반영, 코드 tip `20153652`, main 병합 `b9e4b915`·CI R2 타이밍 수정 `e2f9e47a`) · main 머지 `bc8b0dd1`(#392, 2026-09-30) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(`feat/lang2-p4-02b-stage-cards`, `review_pr395` r1 APPROVE(P3 5, 옛 `ca3c18fa` 기준 — 테스트·문서 반영), main `bc8b0dd1` 병합 `eebd4905`) · main 머지 `29296bda`([#395](https://github.com/Nochiski/Quant_study/pull/395), 2026-09-30) |
-| [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `IN_PROGRESS` | 세 PR 스택(리드 결정 8): P4-03a [#424](https://github.com/Nochiski/Quant_study/pull/424)(`feat/lang2-p4-03a-backend`, main `2b27fa06` 위, 리드 결정 5 수정 반영 — masked 제외·이름 포함) 리뷰 대기 → P4-03b → P4-03c |
-| [ ] | `P4-04` | 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `WAITING` | — |
+| [x] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `MERGED` | [#424](https://github.com/Nochiski/Quant_study/pull/424) `279b4460` → [#426](https://github.com/Nochiski/Quant_study/pull/426) `f64d6c9f` → [#427](https://github.com/Nochiski/Quant_study/pull/427) `8430c5d5` main 병합 |
+| [x] | `P4-04` | 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `MERGED` | [#428](https://github.com/Nochiski/Quant_study/pull/428) main 병합 `8fd06776` |
 
 Phase exit:
 
-- [ ] 빈 화면 e2e green, 식별자 0개 단언 green.
+- [x] 빈 화면 e2e green, 식별자 0개 단언 green. `workbench.workflow.spec.ts` 빈 그래프 시나리오·main `4289429b` CI38332263277 browser-e2e 성공.
 - [ ] SoT·책임분리 점검 blocking 0.
 
 ## P5 — 그래프 2수준: 레시피
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | `recipe-projection.ts`(체인 판정)·`recipe-transactions.ts`(추가·삭제·이동·파라미터·재배선), property test | P4-04 | `WAITING` | — |
-| [ ] | `P5-02` | 팔레트(연산자 카탈로그), 단계 카드 UI, 설명, 인라인 진단, 식별자 접힘 영역 | P5-01 | `WAITING` | — |
-| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `IN_PROGRESS` | draft #431·432·433 최종 전체 CI·동일 SHA 화면 검증 완료, 미병합 |
+| [x] | `P5-01` | `recipe-projection.ts`(체인 판정)·`recipe-transactions.ts`(추가·삭제·이동·파라미터·재배선), property test | P4-04 | `MERGED` | [#429](https://github.com/Nochiski/Quant_study/pull/429) main 병합 `c2e5b406` |
+| [x] | `P5-02` | 팔레트(연산자 카탈로그), 단계 카드 UI, 설명, 인라인 진단, 식별자 접힘 영역 | P5-01 | `MERGED` | [#430](https://github.com/Nochiski/Quant_study/pull/430) main 병합 `e8400fba` |
+| [x] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `MERGED` | [#431](https://github.com/Nochiski/Quant_study/pull/431) `3ab80dcb` → [#432](https://github.com/Nochiski/Quant_study/pull/432) `6c268503` → [#433](https://github.com/Nochiski/Quant_study/pull/433) `b2783830` main 병합. CS-05·06 수용 검증은 [마감 계획](CLOSEOUT.md)에서 추적 |
 
 Phase exit:
 
-- [ ] 아이디어 5개 e2e green (완료 정의 1·2).
+- [x] 아이디어 5개 e2e green (완료 정의 1·2). `stories/graph-ideas.spec.ts`의 5개 @US-DM-07·main `4289429b` CI38332263277 성공. CS-05·06 수용 기준을 대신하지 않는다.
 - [ ] SoT·책임분리 점검 blocking 0.
 
 ## P6 — 그래프 3수준: 고급 노드 캔버스
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `IN_PROGRESS` | draft #434 f7f12203, CI36959554980 전체 성공·동일 SHA 1440/640/360 확인 |
-| [ ] | `P6-02` | 노드 캔버스: 드래그 배선, 좌표 local state, 자동 정렬, 키보드 | P6-01 | `IN_PROGRESS` | 원문 캔버스·ELK worker·배선/키보드/undo 구현, 최종 CI 검증 예정 |
-| [ ] | `P6-03` | 노드 위 진단, 옛 목록형 편집기 제거, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `IN_REVIEW` | 현재 캔버스에 backend 메타데이터·진단 투영, 옛 DAG 제거·문서·최종 검증 |
+| [x] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `MERGED` | [#434](https://github.com/Nochiski/Quant_study/pull/434) main 병합 `fb46b7aa` |
+| [x] | `P6-02` | 노드 캔버스: 드래그 배선, 좌표 local state, 자동 정렬, 키보드 | P6-01 | `MERGED` | [#435](https://github.com/Nochiski/Quant_study/pull/435) main 병합 `6ac126fd` |
+| [x] | `P6-03` | 노드 위 진단, 옛 목록형 편집기 제거, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `MERGED` | [#436](https://github.com/Nochiski/Quant_study/pull/436) main 병합 `f5e41d98`. 실제 스크린리더 수용 검증은 [마감 계획](CLOSEOUT.md)에서 별도 추적 |
 
 Phase exit:
 
-- [ ] 드래그 배선 → YAML 반영 → 되돌리기 e2e.
+- [x] 드래그 배선 → YAML 반영 → 되돌리기 e2e. `stories/node-canvas.spec.ts`의 배선·키보드·취소·배치·undo 시나리오, main `4289429b` CI38332263277 성공. 실제 음성 낭독 완료를 뜻하지 않는다.
 - [ ] SoT·책임분리 점검 blocking 0. 완료 정의 6항 전부 기록.
 
 ## Review 기록
@@ -1824,6 +1826,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **담당**: `P4-04`(탭을 그래프·YAML 둘로 다시 짜는 PR). 지원 하한을 정하고 그 폭에서 탭이 보이는
   단언을 둔다.
 
+
+- **처리 근거(2026-10-13)**: #428 `8fd06776`에서 Graph/YAML 두 탭과 360px 하한을 반영했다. `frontend/e2e/workbench.workflow.spec.ts`의 360·640px 탭 폭/클릭 회귀가 기준 main CI38332263277에서 통과했다.
+
 ### BACKLOG-006: 진단 reveal 순서가 훅 호출 순서와 "마지막 매치"에 기대고 있다 (감사 N10)
 
 - **상황**: P1-01 1차 리뷰 P3가 "reveal 순서가 훅 호출 순서에만 고정 — 다음 PR이 같은 page에 훅을
@@ -1837,6 +1842,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   함께 지워지면 아무 게이트도 잡지 않는다.
 - **담당**: `P4-04`(Form 탭 은퇴로 훅 하나가 사라지는 첫 PR). 이후 `P6-03`(목록형 편집기 제거)도
   같은 테스트를 새 캔버스 기준으로 유지한다.
+
+
+- **처리 근거(2026-10-13)**: #436 `f5e41d98`에서 옛 DAG를 제거하고 현재 캔버스에 reveal을 연결했다. `document-routes.test.tsx`의 `reveals the editable canvas node again after removing the old DAG strip`와 `node-canvas.test.tsx`가 편집 가능한 노드와 반복 reveal을 검증한다. 훅 호출 순서에 기대는 옛 UI는 은퇴했으며 마감 접근성 검증은 CLOSEOUT에서 계속한다.
 
 ### BACKLOG-007: `document-routes.test.tsx`의 P6-03 키보드 테스트가 부하 중 간헐 실패한다
 
@@ -1853,6 +1861,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   e2e에서도 나왔다. e2e `currentSource`가 전체 선택·복사를 두 번 연속 같은 값이 나올 때까지 되풀이하게 해
   막았다(`9a3e1fd0`). PR #323(리뷰 P2-1)이 `currentSource`를 선택 없이 편집기가 그린 줄에서 읽게 바꿔 이
   우회를 걷었다(`frontend/e2e/editor-helpers.ts`). 남은 route 테스트 flake는 #324가 추적한다.
+
+
+- **마감 상태(2026-10-13)**: #324의 이전 WIP와 최신 route lifecycle을 대조하는 마감 작업 중이다. 단독 통과나 재시도로 종결하지 않으며 원래 부하 조건의 반복 결과를 [CLOSEOUT.md](CLOSEOUT.md)에 기록한 뒤 판정한다.
 
 ### BACKLOG-008: 충돌 표식 게이트가 일부 추적 텍스트를 건너뛰고, 주석이 검출 범위를 과장한다
 
@@ -2024,6 +2035,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **해결 후보**: (a) 보조 팩터로 동점을 해소한다(예: 이평 괴리율 같은 연속 점수를 2순위 키로). (b) 동점
   종목 전원을 균등 비중으로 담는다(`selection_count` 를 넘으면 규칙 필요).
 - **담당**: `P5-03`(아이디어 e2e 를 확정할 때 해결 방식을 정한다). WORKFLOW P5-03 에 예약했다.
+
+
+- **확정·처리(2026-10-13)**: 후보 (a)를 채택했고 #432 `6c268503`에 병합했다. 전략이 보조 팩터와 방향을 선언하며 주 점수 동점 안에서만 사용하고 alpha 합성에서는 제외한다. 잔여 결측은 유효값 뒤, 최종 동점은 security_id 순이다. `frontend/e2e/stories/strategy-tie-breaker.spec.ts`와 backend 동점 계약 회귀가 근거이며 #433의 이평 돌파 아이디어에도 반영됐다.
 
 ### BACKLOG-017: 가격 변화 아이디어 fixture 가 원주가 `price.close` 를 쓴다 (Phase 2 감사 DEFECT-P2X-002, 이슈 #214)
 
@@ -2297,3 +2311,9 @@ PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 
 남은 절차 제한: PowerShell 자동 집계 도구는 이 클라우드에서 미실행이다(생성 합계 수동 수정 안 함).
 실제 스크린리더 음성 출력은 미검증이다. 과거 SQLite BEGIN IMMEDIATE 저장 잠금의 근본 원인도
 미확인이다. draft PR 병합·배포·force-push·권한 변경은 수행하지 않는다.
+
+## LANG2 병합 후 범위 대조 (2026-10-13)
+
+- #374: #431 `3ab80dcb`가 `/factors/preview`를 제거하고 전략 trace 결과로 미리보기를 통합했다. `/factors/validate`와 equity API는 의도적으로 유지하며 제거 대상으로 세지 않는다. `test_factor_http_api.py`와 `test_strategy_trace_http_api.py`가 회귀 근거다.
+- #366: 문제로 지목한 `factor-graph-panel.tsx`의 옛 실행 계획 DAG 카드는 #436 `f5e41d98`에서 은퇴했다. 현재 `node-canvas.tsx`는 `canvas-projection.ts`의 카탈로그 기반 노드 이름을 소비한다. 폐기 카드에 별도 한글 이름 표를 추가하지 않는다. 현재 캔버스 접근성과 메타데이터 투영은 CLOSEOUT의 검증 대상이다.
+- 생성 frontmatter·요약·phase 집계는 tracker를 정본으로 공식 `tools/update-plan-progress.ps1` 실행과 `-Check`로 갱신한다. 병합 상태와 수용 기준 마감 상태를 혼동하지 않는다.

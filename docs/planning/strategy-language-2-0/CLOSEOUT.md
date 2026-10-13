@@ -20,15 +20,15 @@ validation-lab 신규 기능, M8 확장은 범위 밖이다. 이슈 상태·외�
 
 | ID | 구현·검증 기준 | 판정 근거/상태 |
 |---|---|---|
-| CS-05 | 다른 단위·다른 가중치의 두 팩터; none/rank/zscore 선택; 독립 계산 oracle과 trace 기여도·합 비교; 새 문서 rank, 1.1 업그레이드 none; none 단위 경고, 그래프 내부 정규화에는 경고 없음 | 실제 100종목 HTTP fixture를 재사용한 story E2E 작성 중 |
-| CS-06 | top_percent=0.2 후보100→eligibility20/rank_cut80와 거절 UI 사유; risk 전후 alpha 기여도·분모·점수·순위 동일; raw 위험 역수 비중(동일 cap 회피); no-alpha compile 오류 | story E2E 작성 중 |
-| #328 | 별도 repository 인스턴스·동일 인스턴스의 저장/조회 동시성; source 검증과 읽기 snapshot 경계; 기존 competing create/append·동시 init·손상·foreign-file·rollback 보존 | 결정적 재현 및 수정 후 회귀 검증 중; 역사적 Windows 원인 단정 금지 |
-| #324 | 이전 WIP 비교; 문서 응답/lazy editor/첫 parser update 제어; 준비 전 reveal·같은 pointer 반복·pending 중 이동; exact 선택 텍스트·focus·unhandled MSW·cleanup; 원래 suite 부하 반복 | #240/#323과 별개; editor-ready 수정만으로 완료 판정 금지 |
-| #419 | A→B→C, 같은 strategy 다른 revision의 render/commit 시퀀스에서 새 제목+옛 값 혼합 없음; back/forward·빠른 전환·저장 URL 반영 시 편집/undo 보존 | route 회귀 작성 중 |
-| #420 | 첫 invalid에서 loading 종료·구문 안내·가짜 기본값 없음; 원문 보존·덮어쓰기 차단; 수정 후 실제 0.05; 같은 문서 valid→invalid는 명시적 stale 유지 | route 회귀 작성 중 |
-| #373 | 일반 field 설명 축약; 개별 의미·한계는 backend 계약 한 곳; declaration↔field_map 역방향 coverage와 정확한 unsupported reason; inspector/autocomplete/AI 소비 확인 | 기존 WIP 필요한 부분만 대조 적용; #421 배선 제외 |
-| A11Y | node/port/connection의 이름·상태·live 안내, inspector 진입/복귀, 반복 오류 reveal, 연결 취소; 좁은 화면·시각 캡처 | 자동 검증과 실제 음성 검증 분리. 실제 스크린리더/음성 장치 없는 환경은 미검증으로 명시 |
-| 기록 | tracker 머지 SHA→공식 PowerShell 생성/-Check; Packet/Phase exit/ADR·CS01/03·BACKLOG005/006/016/007; #374/#366 현재 적용 범위 매핑 | 머지100%를 수용100%로 표기하지 않음 |
+| CS-05 | 다른 단위·다른 가중치의 두 팩터; none/rank/zscore 선택; 독립 계산 oracle과 trace 기여도·합 비교; 새 문서 rank, 1.1 업그레이드 none; none 단위 경고, 그래프 내부 정규화에는 경고 없음 | 실제 100종목 HTTP fixture의 신규 story E2E. 독립 계산 oracle 리뷰 완료; 최종 HEAD 전체 CI에서 재검증 |
+| CS-06 | top_percent=0.2 후보100→eligibility20/rank_cut80와 거절 UI 사유; risk 전후 alpha 기여도·분모·점수·순위 동일; raw 위험 역수 비중(동일 cap 회피); no-alpha compile 오류 | 신규 story E2E로 HTTP 20/80 및 대표 탈락 종목 UI 사유, alpha-only 대조 검증 |
+| #328 | 별도 repository 인스턴스·동일 인스턴스의 저장/조회 동시성; source 검증과 읽기 snapshot 경계; 기존 competing create/append·동시 init·손상·foreign-file·rollback 보존 | 수정 전6실패→수정후100통과, 결정적 동시성120회통과; 독립79통과. 과거 Windows 실패 잠금 소유자는 미확정 |
+| #324 | 이전 WIP 비교; 문서 응답/lazy editor/첫 parser update 제어; 준비 전 reveal·같은 pointer 반복·pending 중 이동; exact 선택 텍스트·focus·unhandled MSW·cleanup; 원래 suite 부하 반복 | 별도 handle 준비순서 red→green. Linux 병렬 focused30/30 및 전체 suite2회 통과; 과거 Windows 원부하 미검증 |
+| #419 | A→B→C, 같은 strategy 다른 revision의 render/commit 시퀀스에서 새 제목+옛 값 혼합 없음; back/forward·빠른 전환·저장 URL 반영 시 편집/undo 보존 | 실제 Graph commit 관측 red→green. 전체 route92통과, 저장 URL/undo·다른revision·visible YAML 검증 |
+| #420 | 첫 invalid에서 loading 종료·구문 안내·가짜 기본값 없음; 원문 보존·덮어쓰기 차단; 수정 후 실제 0.05; 같은 문서 valid→invalid는 명시적 stale 유지 | 실제 Graph commit 관측 red→green. 전체 route92통과, 저장 URL/undo·다른revision·visible YAML 검증 |
+| #373 | 일반 field 설명 축약; 개별 의미·한계는 backend 계약 한 곳; declaration↔field_map 역방향 coverage와 정확한 unsupported reason; inspector/autocomplete/AI 소비 확인 | 기존 WIP 대조 반영, backend205/FE46/독립85통과. #421 배선 제외 |
+| A11Y | node/port/connection의 이름·상태·live 안내, inspector 진입/복귀, 반복 오류 reveal, 연결 취소; 좁은 화면·시각 캡처 | unit25·브라우저2·1440/640/360 캡처 및 독립 리뷰 통과. 실제 음성은 미검증; [수동 절차](../../manual/lang2-accessibility-validation.md) |
+| 기록 | tracker 머지 SHA→공식 PowerShell 생성/-Check; Packet/Phase exit/ADR·CS01/03·BACKLOG005/006/016/007; #374/#366 현재 적용 범위 매핑 | tracker 실제 머지SHA 갱신. 공식 CI PowerShell 생성/-Check 후 집계 적용. 머지100%와 수용 완료를 구분 |
 
 ## 테스트 계획
 
@@ -53,3 +53,34 @@ validation-lab 신규 기능, M8 확장은 범위 밖이다. 이슈 상태·외�
 - 실제 음성용 스크린리더·음성 서비스·오디오 장치가 없어 자동 접근성 통과를 실제 음성 완료로 세지 않는다.
 
 최종 PR·테스트 수치·시각 캡처·독립 리뷰와 미검증 항목은 결과가 나온 뒤 이 문서에 연결한다.
+
+
+## 구현 결과와 PR 의존 관계
+
+| PR | base | 책임 |
+|---|---|---|
+| [#439](https://github.com/Nochiski/Quant_study/pull/439) | main 4289429b | SQLite 읽기 snapshot 밖 원문 검증; timeout·WAL·재시도 무변경 |
+| [#440](https://github.com/Nochiski/Quant_study/pull/440) | #439 | 필드 설명 계약과 정확한 unsupported 사유; 조회 배선 무변경 |
+| [#441](https://github.com/Nochiski/Quant_study/pull/441) | #440 | 문서 identity/첫 parse/CodeMirror 준비 순서; source·undo 보존 |
+| [#442](https://github.com/Nochiski/Quant_study/pull/442) | #441 | 연결 live status·인스펙터 복귀·자동 접근성 및 수동 음성 절차 |
+| 마감 PR | #442 | CS-05/06 E2E·기록 정합·공식 PLAN 집계 검사 |
+
+### 독립 리뷰
+
+변경 owner와 다른 검토자가 SQLite snapshot/source 검증, 필드 계약·미지원 배선 경계, 문서 reducer·
+parse/compile epoch·저장 URL/undo, 접근성 상태의 기존 owner 재사용을 검토했다. 차단 사항 없음.
+CS-05는 서버 응답 가중치를 기대값에 재사용하는 oracle 공백을 발견해 입력 고정 가중치0.25/0.75의
+독립 계산과 별도 전달 단언으로 보강한 뒤 재검토했다. CS-06의80개 탈락 사유는 실제 응답에서 모두,
+대표 탈락 종목의 한국어 사유는 UI에서 확인한다. 전체80행을 화면에서 각각 검증했다는 뜻이 아니다.
+
+### 로컬 전체 게이트와 한계
+
+- frontend 전체 default suite2회: 각각100파일·1,287개 통과. 기존 exact 선택 텍스트·focus·timeout 유지.
+- frontend lint/type/build, backend Ruff/Pyright(오류0) 통과. 로컬 Rust 확장 source 경고는 공식 CI의
+  Rust 빌드와 전체 suite로 검증한다.
+- 실제 스크린리더 음성(Orca/NVDA/VoiceOver 등)은 이 환경에서 실행하지 않았다. 자동 검사는 이를 대체하지 않는다.
+- #324 역사적 Windows CPU94~100% 환경은 재현하지 않았다. 확인된 handle 결함과 Linux 부하 결과를
+  제공하며 원래 flake의 모든 원인 종결로 표기하지 않는다.
+- 공급자 호출·운영 데이터·배포·발송·merge 없음. main과 별도 운영 PR #438은 보존한다.
+- 공식 CI 최종 exact HEAD 링크와 숫자는 마감 PR 본문에 기록한다. 생성 집계는 GitHub의 기존 pwsh로
+  공식 스크립트를 실행해 받은 결과만 적용하며, `lang2-plan` workflow가 매번 `-Check`로 드리프트를 막는다.

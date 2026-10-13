@@ -29,7 +29,7 @@ describe("주문 상태 원본 기록", () => {
     const user = userEvent.setup();
     render(<BacktestOrderEvents artifacts={artifacts([
       { session: "2026-10-12", order_id: "order-1", status: "open", reason_code: "liquidity_cap_zero", cap_volume: 0, detail: "backend verbatim" },
-      { session: "2026-10-13", order_id: "order-1", status: "open", reason_code: "liquidity_cap_zero", cap_volume: 0 },
+      { session: "2026-10-13", order_id: "order-1", status: "open", reason_code: "liquidity_cap_zero", cap_volume: 1 },
       { session: "2026-10-13", order_id: "order-1", status: "filled", detail: "liquidity_cap_zero cap_volume=0" },
       { session: "2026-10-13", order_id: "orphan", status: "future_state", reason_code: "future_reason", cap_volume: 17, detail: "future detail" },
     ])} />);
@@ -38,6 +38,10 @@ describe("주문 상태 원본 기록", () => {
     await user.click(screen.getByText("주문 상태 원본 보기"));
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(4);
+    expect(screen.getByRole("columnheader", { name: "기준 거래량 (주)" })).toBeVisible();
+    // 참여율 적용 뒤 정수 수량이 0이어도 견적의 원본 기준 거래량은 1일 수 있다. UI는 재계산하지 않는다.
+    expect(within(rows[1]!).getAllByRole("cell")[5]).toHaveTextContent("1");
+    expect(rows[1]).toHaveTextContent("유동성 한도 0주");
     expect(rows[0]).toHaveTextContent("KRX:005930");
     expect(rows[0]).toHaveTextContent("대기");
     expect(rows[0]).toHaveTextContent("backend verbatim");

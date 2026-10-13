@@ -257,7 +257,7 @@ def policy_table(rows: list[PolicyRow]) -> pa.Table:
     )
 
 
-def profile_table(rows: list[tuple[str, int, str]]) -> pa.Table:
+def profile_table(rows: Sequence[tuple[str, int | None, str]]) -> pa.Table:
     """`dataset_profile` 중 어댑터가 읽는 세 컬럼 (field_id, 랙 세션, 근거)."""
     return pa.table(
         {
@@ -1207,7 +1207,7 @@ def build_workbench_root(
     evening_session: date | None = None,
     invalid_ohlc: tuple[str, date] | None = None,
     inconsistent_ohlc: tuple[str, date] | None = None,
-    profile_rows: list[tuple[str, int, str]] | None = None,
+    profile_rows: Sequence[tuple[str, int | None, str]] | None = None,
     extra_policy_rows: list[PolicyRow] | None = None,
 ) -> Path:
     """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.

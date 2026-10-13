@@ -39,6 +39,7 @@ from strategy_workbench.adapters.outbound.equity_duckdb._source import (
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_NOT_IN_LEDGER,
+    FIELD_NOT_PROVIDED,
     FIELD_SPECS,
     SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
@@ -126,8 +127,8 @@ pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync -
 
 START, END = date(2024, 1, 8), date(2024, 1, 12)
 PRICE_FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 +
-# equity 내부 스코프 `price.adj_close`. 나머지 13 의 사유는 `_specs.UNSUPPORTED_FIELDS` 다.
+# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id.
+# 원장 선언과 지원·미지원의 전체 대조는 필드 계약 테스트가 소유한다.
 ALL_FIELDS = (
     "price.close",
     "price.open",
@@ -338,7 +339,6 @@ def _reverse_declarations(monkeypatch: pytest.MonkeyPatch) -> None:
                 label="종가 ",
                 description="문장만",
                 evidence="-",
-                verdict="-",
                 disclosure_basis="-",
                 lag_basis="-",
             ),
@@ -460,18 +460,10 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
     # LATEST 원천의 커버 시작은 첫 공개일이고, 그 전 세션에는 셀이 없다
     assert profiles["financial.book_equity"].coverage.starts_on == WB_SESSIONS[0]
     assert profiles["event.buyback_amount"].coverage.starts_on == date(2023, 12, 27)
-    # 판정(지원/부분)은 프로필 설명 앞에 붙어 소비자에게 그대로 보인다
-    assert profiles["financial.revenue"].description.startswith("[부분]")
-    assert profiles["financial.net_income"].description.startswith("[지원]")
-
-
-def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
-    """FIELD_MAP §2 의 42 = 어댑터가 내는 29 + 사유가 적힌 13. 겹치거나 빠지면 안 된다."""
-    declared = {spec.field_id for spec in FIELD_SPECS} - {"price.adj_close"}
-    assert declared & set(UNSUPPORTED_FIELDS) == set()
-    assert len(declared) == 29 and len(UNSUPPORTED_FIELDS) == 13
-    assert len(declared | set(UNSUPPORTED_FIELDS)) == 42
-    assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
+    # 설명은 선언표 문장 그대로 소비자에게 간다 — 판정 접두를 붙이지 않는다(#373).
+    assert {f: p.description for f, p in profiles.items()} == {
+        spec.field_id: spec.description for spec in FIELD_SPECS
+    }
 
 
 def test_declarations_their_query_does_not_read_are_rejected() -> None:
@@ -599,6 +591,28 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     # 읽는다(#316 리뷰 P3-1)
     assert FIELD_NOT_IN_LEDGER in result.detail
     assert UNSUPPORTED_FIELDS["classification.sector"] not in result.detail
+
+
+@pytest.mark.parametrize("lag", [1, None])
+def test_a_field_the_ledger_carries_but_this_adapter_does_not_serve_says_so(
+    tmp_path: Path, lag: int | None,
+) -> None:
+    """원장 `dataset_profile` 에 있는데 내주지 않는 필드를 "원장이 싣지 않는다"고 하지 않는다(#373).
+
+    실원장은 `flow.foreign_ownership`·`classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
+    읽은 `dataset_profile` 이다.
+    """
+    rows = [*WB_PROFILE_ROWS, ("flow.foreign_ownership", lag, "원장 날짜")]
+    adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity", profile_rows=rows))
+
+    reasons = adapter.unavailable_factor_fields()
+
+    assert reasons["flow.foreign_ownership"] == FIELD_NOT_PROVIDED
+    assert reasons["credit.loan_value"] == FIELD_NOT_IN_LEDGER
+    result = _raw(adapter, fields=("flow.foreign_ownership",))
+    assert result.status is DataLoadStatus.INVALID_QUERY
+    assert result.detail is not None and FIELD_NOT_PROVIDED in result.detail
+    assert "flow.foreign_ownership" not in {p.field_id for p in adapter.list_fields()}
 
 
 def test_queries_outside_calendar_coverage_are_no_data(
@@ -978,7 +992,6 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         100 * 3 / 68
     )
     assert profiles["short.short_sale_value"].dataset_id == "short_daily"
-    assert profiles["flow.institution_net_buy"].description.startswith("[부분]")
 
 
 def test_latest_fields_never_show_a_filing_before_its_available_date(

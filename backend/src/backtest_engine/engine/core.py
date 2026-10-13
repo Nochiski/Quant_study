@@ -387,6 +387,7 @@ class RustQuoteCore:
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
     ) -> QuoteNumbers:
         price, quantity, applied, status = self._core.quote_numbers(
             side.value,
@@ -400,6 +401,7 @@ class RustQuoteCore:
             int(held),
             fee_rate,
             fok,
+            sell_tax_rate,
         )
         return QuoteNumbers(price, Decimal(quantity), applied, ExecutionStatus(status))
 

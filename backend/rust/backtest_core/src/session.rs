@@ -227,6 +227,7 @@ impl<'a> Session<'a> {
             held,
             self.fee_rate,
             e.tif == "fok",
+            self.sell_tax_rate,
         )?;
         Ok(QuoteOut {
             price: p,

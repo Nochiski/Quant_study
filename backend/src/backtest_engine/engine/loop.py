@@ -702,6 +702,7 @@ class BacktestEngine:
                 snapshot.bar(order.instrument),
                 power.available,
                 held=power.quantity_of(order.instrument),
+                sell_tax_rate=run.config.sell_tax_rate(snapshot.ts.date()),
             )
             if quote.quantity > 0:
                 self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
@@ -952,6 +953,7 @@ class BacktestEngine:
                 snapshot.bar(entry.order.instrument),
                 power.available,
                 held=power.quantity_of(entry.order.instrument),
+                sell_tax_rate=tax_rate,
             )
             quotes.append((entry, quote))
             if quote.quantity > 0:

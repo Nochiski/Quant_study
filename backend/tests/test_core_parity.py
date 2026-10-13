@@ -480,6 +480,17 @@ ENGINE_SCENARIOS = {
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
         DataFeed(GOLDEN_BARS),
     ),
+    "short_tax_budget": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="tax-budget",
+            initial_cash=1000.0,
+            fee_bps=0.0,
+            sell_tax_schedule=((date(2026, 8, 1), 1000.0),),
+        ),
+        test_short_selling.ShortStrategy((test_short_selling.target(-100),)),
+        DataFeed(test_short_selling.BARS),
+    ),
     "short_sell_tax": lambda core: _engine_scenario(
         core,
         RunConfig(
@@ -2040,3 +2051,37 @@ def test_basket_rescaling_preserves_the_quoted_impact_quantity(core: str) -> Non
     assert fills[0].slippage_per_share == pytest.approx(60 * 0.002 * math.sqrt(6))
     assert fills[1].slippage_per_share == pytest.approx(100 * 0.002 * math.sqrt(10))
     assert fills[1].slippage_per_share != pytest.approx(100 * 0.002 * math.sqrt(6))
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+@pytest.mark.parametrize("held, expected", [(0, 9), (5, 18)])
+def test_short_entry_affordability_includes_tax_and_closing_costs(
+    core: str, held: int, expected: int
+) -> None:
+    """가격100·여력1000·세율10%: 신규숏9주, 보유5청산후여력1450에서신규숏13주다."""
+    from backtest_engine.engine.broker import PythonQuoteCore
+    from backtest_engine.engine.core import RustQuoteCore
+
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    quote = quote_core.quote_numbers(
+        Side.SELL,
+        100.0,
+        Decimal(100),
+        10000,
+        None,
+        0.0,
+        None,
+        1000.0,
+        Decimal(held),
+        0.0,
+        False,
+        0.1,
+    )
+    assert quote.quantity == Decimal(expected)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_short_tax_budget_reaches_every_engine_path(core: str) -> None:
+    """1000원 여력·100원 시가·10% 세금이면 10주가 아닌 9주만 열 수 있다."""
+    _engine, result = ENGINE_SCENARIOS["short_tax_budget"](core)
+    assert [fill.quantity for fill in result.fills] == [Decimal(9)]

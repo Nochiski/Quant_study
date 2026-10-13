@@ -70,7 +70,7 @@ fn affordable_quantity(buying_power: f64, price: f64, fee_rate: f64) -> i64 {
 /// `filled | liquidity_limited | cash_limited | rejected_no_cash | not_filled | fok_rejected`.
 /// 흐름은 Python과 같다: 유동성 캡 → 슬리피지·지정가 clip → 여력 캡(숏 진입분 포함) → FOK.
 #[pyfunction]
-#[pyo3(signature = (side, base_price, remaining, volume, participation, slip, limit_price, buying_power, held, fee_rate, fok))]
+#[pyo3(signature = (side, base_price, remaining, volume, participation, slip, limit_price, buying_power, held, fee_rate, fok, sell_tax_rate=0.0))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn quote_numbers(
     side: &str,
@@ -84,6 +84,7 @@ pub(crate) fn quote_numbers(
     held: i64,
     fee_rate: f64,
     fok: bool,
+    sell_tax_rate: f64,
 ) -> PyResult<(f64, i64, f64, String)> {
     let buy = match side {
         "buy" => true,
@@ -133,8 +134,9 @@ pub(crate) fn quote_numbers(
             affordable_quantity(buying_power, price, fee_rate)
         } else {
             let closing = held.max(0);
-            let freed_power = buying_power + closing as f64 * price;
-            affordable_quantity(freed_power, price, fee_rate) + closing
+            let sell_cost_rate = fee_rate + sell_tax_rate;
+            let freed_power = buying_power + closing as f64 * price * (1.0 - sell_cost_rate);
+            affordable_quantity(freed_power, price, sell_cost_rate) + closing
         };
         if affordable <= 0 {
             return Ok((price, 0, applied, "rejected_no_cash".to_string()));

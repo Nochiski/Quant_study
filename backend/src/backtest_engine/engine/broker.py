@@ -126,6 +126,7 @@ class QuoteCore(Protocol):
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
     ) -> QuoteNumbers: ...
 
 
@@ -143,6 +144,7 @@ class PythonQuoteCore:
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
     ) -> QuoteNumbers:
         if slip < 0:
             raise ValueError(f"slippage must be >= 0 — slip={slip}")
@@ -174,8 +176,9 @@ class PythonQuoteCore:
                 # 보유분 매도는 무제한이고 그만큼 노출이 줄어 여력이 늘어난다. 숏 진입분만
                 # (청산 후 여력)으로 자른다.
                 closing = max(held, Decimal(0))
-                freed_power = buying_power + float(closing) * price
-                affordable = _affordable_quantity(freed_power, price, fee_rate) + closing
+                sell_cost_rate = fee_rate + sell_tax_rate
+                freed_power = buying_power + float(closing) * price * (1.0 - sell_cost_rate)
+                affordable = _affordable_quantity(freed_power, price, sell_cost_rate) + closing
             if affordable <= 0:
                 return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
             if affordable < quantity:
@@ -246,6 +249,7 @@ class BrokerSim:
         bar: Bar,
         buying_power: float,
         held: Decimal = Decimal(0),
+        sell_tax_rate: float = 0.0,
     ) -> Quote:
         """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음.
 
@@ -294,6 +298,7 @@ class BrokerSim:
             held,
             self._fee_rate,
             order.time_in_force is TimeInForce.FOK,
+            sell_tax_rate,
         )
         detail = self._detail(numbers, order, bar, volume, open_order.remaining, buying_power)
         return Quote(

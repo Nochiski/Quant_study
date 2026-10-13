@@ -157,3 +157,11 @@ paths:
 runtime schema의 factor 참조·적용 조건 투영을 사용한다. frontend가 점수 공식을 복제하지 않는다.
 비활성 기본 보조 설정은 canonical payload에 넣지 않아 기존 저장 문서의 `spec_hash`를 보존한다.
 활성 참조·방향은 해시에 포함하고 semantic hash의 참조 정규화도 같은 팩터 번호로 바꾼다.
+
+
+### P6-02 캔버스 편집과 좌표
+
+원문 노드/edge는 `canvas-projection`, 포트는 runtime schema, 변경은 기존 `SourceTransactions`가 소유한다.
+`CanvasLayout`의 ELK worker·수동 좌표는 UI 전용이며 YAML·서버 cache에 직렬화하지 않는다.
+문서/sourceVersion/팩터 신원이 바뀌면 진행 중 배선·배치를 폐기한다. ELK 성공 뒤 선택 reveal을 다시
+수행하되 수동 이동에서는 스크롤하지 않는다. backend 실행 계획·진단·타입·history의 소유권은 유지한다.

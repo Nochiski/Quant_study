@@ -1,0 +1,118 @@
+.node-canvas {
+  min-width: 0;
+}
+.node-canvas__toolbar,
+.node-canvas__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.node-canvas__help {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+.node-canvas__viewport {
+  max-height: 32rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  overscroll-behavior: contain;
+}
+.node-canvas__surface {
+  position: relative;
+}
+.node-canvas__edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.node-canvas__edges path {
+  stroke: var(--text-muted);
+  fill: none;
+  stroke-width: 2;
+}
+.node-canvas__node {
+  position: absolute;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  padding: var(--space-2);
+  box-sizing: border-box;
+}
+.node-canvas__node[aria-current="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.node-canvas__select {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: none;
+  border: 0;
+  padding: var(--space-1);
+}
+.node-canvas__move {
+  position: absolute;
+  top: 40px;
+  right: 8px;
+  touch-action: none;
+  cursor: grab;
+}
+.node-canvas__ports {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: var(--space-2);
+  min-height: 28px;
+  position: absolute;
+  top: 66px;
+  left: 0;
+  right: 0;
+}
+.node-canvas__input,
+.node-canvas__output,
+.node-canvas__move {
+  font: inherit;
+  font-size: var(--text-size-small);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--surface-subtle);
+  height: 28px;
+}
+.node-canvas__input {
+  display: block;
+  max-width: 150px;
+}
+.node-canvas__output[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+}
+.node-canvas button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.node-canvas__issues {
+  position: absolute;
+  top: 42px;
+  left: 8px;
+  font: inherit;
+  font-size: var(--text-size-small);
+  color: var(--status-error);
+  background: var(--surface-panel);
+  border: 0;
+}
+.node-canvas__actions {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+}
+.node-canvas__select {
+  height: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

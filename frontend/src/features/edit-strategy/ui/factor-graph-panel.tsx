@@ -35,6 +35,8 @@ export type FactorGraphEditing = {
   onOpenSource?: (pointer: string) => void;
   /** 문서 경계(`documentEpoch`). 바뀌면 "재계산 중"에 쓰는 직전 투영을 버린다(3차 P1). */
   documentKey?: unknown;
+  sourceVersion?: number;
+  active?: boolean;
 };
 
 type FactorGraphPanelProps = {
@@ -364,6 +366,9 @@ export const FactorGraphPanel = ({
     return (
       <FactorGraphEditor
         tree={editing.tree}
+        documentKey={editing.documentKey}
+        sourceVersion={editing.sourceVersion}
+        active={editing.active}
         schema={schema}
         transactions={editing.transactions}
         catalogs={editing.catalogs}

@@ -196,6 +196,8 @@ jobs:
             frontend/test-results/**/test-failed-*.png
             frontend/test-results/**/attachments/*.json
             frontend/test-results/**/attachments/*.png
+            frontend/playwright-report/data/*.png
+            frontend/playwright-report/index.html
             frontend/test-results/**/graph-selected.png
             frontend/test-results/**/recipe-*.png
             frontend/test-results/**/error-context.md

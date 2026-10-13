@@ -3732,20 +3732,19 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     // URL은 wire일 뿐이다 — 그래프 노드가 실제로 선택 표시를 받고 화면으로 끌려오는지도 본다.
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
+        screen.getByRole("button", { name: /^노드 편집: 2\./ }).closest(".node-canvas__node"),
       ).toHaveAttribute("aria-current", "true"),
     );
     // 노드 pointer 진단이므로 가장 구체적인 선택은 노드 행이고 스크롤도 거기로 간다.
     const editorRow = screen
-      .getByRole("button", { name: "노드 편집: mom_252" })
-      .closest("li");
+      .getByRole("button", { name: /^노드 편집: 2\./ })
+      .closest(".node-canvas__node");
     expect(lastVisibleScroll()).toBe(editorRow);
-    // 원인 문장이 그 노드 카드 안에 본문으로 붙는다(리뷰 차단 2). 선택한 노드 패널은 같은
-    // 문장을 다시 그리지 않는다(2차 리뷰 P3).
-    expect(editorRow).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    // 캔버스 badge가 해당 노드를 가리키며, 인스펙터가 진단 본문을 한 번 소유한다.
+    expect(editorRow).toHaveTextContent("문제 1개");
     expect(
       screen.getByRole("group", { name: /선택한 노드/ }),
-    ).not.toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    ).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
     expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -3875,15 +3874,16 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       .getByRole("button", { name: "그래프 노드 선택: mom_252" })
       .closest("li");
     const editorRow = screen
-      .getByRole("button", { name: "노드 편집: mom_252" })
-      .closest("li");
+      .getByRole("button", { name: /^노드 편집: 2\./ })
+      .closest(".node-canvas__node");
     await waitFor(() =>
       expect(editorRow).toHaveAttribute("aria-current", "true"),
     );
     expect(planNode).toHaveAttribute("aria-current", "true");
     expect(lastVisibleScroll()).toBe(editorRow);
     // 경고도 같은 자리에 본문으로 붙는다(alert이 아니라 본문이다 — 리뷰 P3).
-    expect(editorRow).toHaveTextContent("window가 깁니다");
+    expect(editorRow).toHaveTextContent("문제 1개");
+    expect(screen.getByRole("group", { name: /선택한 노드/ })).toHaveTextContent("window가 깁니다");
   }, 15_000);
 
   it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {

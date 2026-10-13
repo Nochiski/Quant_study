@@ -1116,8 +1116,8 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `IN_PROGRESS` | PR433 b009e394 위 별도 브랜치, ELK0.12.0·HTML/SVG ADR와 스파이크 검증 중 |
-| [ ] | `P6-02` | 노드 캔버스: 드래그 배선, 좌표 local state, 자동 정렬, 키보드 | P6-01 | `WAITING` | — |
+| [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `IN_PROGRESS` | draft #434 f7f12203, CI36959554980 전체 성공·동일 SHA 1440/640/360 확인 |
+| [ ] | `P6-02` | 노드 캔버스: 드래그 배선, 좌표 local state, 자동 정렬, 키보드 | P6-01 | `IN_PROGRESS` | 원문 캔버스·ELK worker·배선/키보드/undo 구현, 최종 CI 검증 예정 |
 | [ ] | `P6-03` | 노드 위 진단, 옛 목록형 편집기 제거, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `WAITING` | — |
 
 Phase exit:
@@ -2239,3 +2239,19 @@ PowerShell이 이 환경에 없어 PLAN 자동 집계 생성기는 실행하지 
   실행·Task4 완료 기록을 확인했다. 참조 sdd-workspace도 정상 실행됐고 권한 변경/보안 우회는 없다.
 - PowerShell 집계 도구 미실행·과거 자동 집계 보존 원칙은 유지한다. SQLite 저장 잠금 근본 원인은
   미확인이며 이번 의존성/스파이크 작업으로 해결했다고 주장하지 않는다.
+
+
+#### P6-02 노드 캔버스 Packet (2026-10-02)
+
+- 선행 draft #434 `f7f122035e65fe6a7e49a9b727b553ba043022dc`의 CI36959554980은 5개 job 모두 성공했다.
+  backend3485/1skip·Equity1411·frontend1254·browser64·Rust38이며 같은 SHA 캡처1440/640/360을 확인했다.
+- 원문 parse tree→canvas-projection, runtime schema→입력 포트, 기존 source transaction→배선/복제/삭제,
+  CodeMirror→undo, CanvasLayout→로컬 좌표/worker 수명으로 책임을 나눴다. source·trace cache는 그대로다.
+- sourceVersion/documentKey/factorKey/request generation으로 늦은 배치·배선을 폐기한다. 고유 팩터 ID가
+  없거나 겹치면 pointer+sourceVersion으로 좌표를 격리한다. ELK 성공 완료 때 선택 노드를 다시 드러내고
+  수동 이동은 스크롤하지 않는다. 숨긴 Graph·레시피·YAML에서는 worker를 시작하지 않는다.
+- 이번 PR은 캔버스·입력 경로·worker 수명·라우트 전달·E2E가 함께 움직여 권장 PR 크기를 넘는다.
+  backend DAG strip 제거·메타데이터 overlay·미연결 표시·마감 문서는 P6-03으로 분리했다.
+- 독립 검토의 지연 배치 reveal Important1·팩터 좌표 신원 Minor1을 수정하고 재검토에서 해소 확인했다.
+  최종 전체 CI·실제 브라우저 수치·캡처는 draft PR 본문에 기록한다. 아직 P6 완료로 보지 않는다.
+- SQLite BEGIN IMMEDIATE 저장 잠금의 근본 원인은 여전히 미확인이다. 저장 회귀·기존 테스트 기준을 유지한다.

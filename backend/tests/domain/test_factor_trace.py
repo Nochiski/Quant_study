@@ -407,3 +407,60 @@ def test_unreachable_node_selection_is_an_error_not_an_empty_trace() -> None:
             missing=MissingPolicy.DROP,
             selection=TraceSelection(node_ids=("orphan",)),
         )
+
+
+def test_중첩_시간창의_최소이력과_출력만_선택한_trace_워밍업이_같다() -> None:
+    from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
+
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            UnaryNode("lagged", UnaryOperator.LAG, "close", "unary", periods=2),
+            TimeSeriesNode("mean", TimeSeriesOperator.MEAN, "lagged", 3, "time_series", lag=1),
+            BinaryNode("ratio", BinaryOperator.DIVIDE, "close", "mean", "binary"),
+        ),
+        output_node_id="ratio",
+    )
+    days = tuple(DAYS[0] + timedelta(days=index) for index in range(7))
+    panel = tuple(_observation(day, "a", float(index + 1)) for index, day in enumerate(days))
+    evaluation, trace = evaluate_factor_graph_with_trace(
+        graph,
+        observations=panel,
+        missing=MissingPolicy.DROP,
+        selection=TraceSelection(node_ids=("ratio",)),
+    )
+    assert validate_factor_graph(graph).minimum_history_sessions == 6
+    assert [row.status for row in trace.nodes[0].values] == [
+        *([TraceValueStatus.WARM_UP] * 5),
+        TraceValueStatus.OK,
+        TraceValueStatus.OK,
+    ]
+    assert [value.value for value in evaluation.values] == [None] * 5 + [3.0, 7 / 3]
+
+
+def test_이항_trace는_워밍업과_이력_충족_후_진짜_결측을_구별한다() -> None:
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            UnaryNode("lagged", UnaryOperator.LAG, "close", "unary", periods=1),
+            ConstantNode("one", 1.0, "constant"),
+            BinaryNode("ratio", BinaryOperator.DIVIDE, "one", "lagged", "binary"),
+        ),
+        output_node_id="ratio",
+    )
+    panel = tuple(
+        _observation(day, "a", value)
+        for day, value in zip(DAYS, (None, 0.0, 2.0, 4.0), strict=True)
+    )
+    _, trace = evaluate_factor_graph_with_trace(
+        graph,
+        observations=panel,
+        missing=MissingPolicy.DROP,
+        selection=TraceSelection(node_ids=("ratio",)),
+    )
+    assert [row.status for row in trace.nodes[0].values] == [
+        TraceValueStatus.WARM_UP,
+        TraceValueStatus.MISSING_INPUT,
+        TraceValueStatus.DIVIDE_BY_ZERO,
+        TraceValueStatus.OK,
+    ]

@@ -18,6 +18,7 @@ DEFAULT_STRATEGY_REPOSITORY_PATH = (
 DEFAULT_ASSISTANT_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "assistant.sqlite3"
 DEFAULT_RESEARCH_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "research.sqlite3"
 STRATEGY_REPOSITORY_PATH_ENV = "STRATEGY_WORKBENCH_DB_PATH"
+ARTIFACT_ROOT_ENV = "STRATEGY_WORKBENCH_ARTIFACT_ROOT"
 RESEARCH_DB_PATH_ENV = "STRATEGY_WORKBENCH_RESEARCH_DB_PATH"
 EQUITY_ADAPTER_ENV = "STRATEGY_WORKBENCH_EQUITY_ADAPTER"
 EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
@@ -40,6 +41,12 @@ def runtime_research_db_path() -> Path:
     """실행 기록 DB(검증 랩 spec D3). 전략 DB 의 불변 트리거와 섞지 않으려고 파일을 나눈다."""
     configured = os.environ.get(RESEARCH_DB_PATH_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_RESEARCH_DB_PATH
+
+
+def runtime_artifact_root() -> Path | None:
+    """프로세스가 소유할 산출물 루트. 미설정 기본값은 컨테이너가 소유한다."""
+    configured = os.environ.get(ARTIFACT_ROOT_ENV)
+    return Path(configured).expanduser() if configured else None
 
 
 def runtime_run_slots() -> int:
@@ -136,6 +143,7 @@ def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
+    artifact_root: Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
     equity_adapter: str = "mock",
@@ -146,6 +154,7 @@ def build_http_app(
     container = build_container(
         strategy_repository_path=strategy_repository_path,
         research_db_path=research_db_path,
+        artifact_root=artifact_root,
         run_slots=run_slots,
         trial_hold_seconds=trial_hold_seconds,
         equity_adapter=equity_adapter,
@@ -176,6 +185,7 @@ def build_runtime_http_app():
     return build_http_app(
         strategy_repository_path=runtime_strategy_repository_path(),
         research_db_path=runtime_research_db_path(),
+        artifact_root=runtime_artifact_root(),
         run_slots=runtime_run_slots(),
         trial_hold_seconds=runtime_trial_hold_seconds(),
         equity_adapter=adapter,

@@ -388,3 +388,20 @@ def test_new_v3_result_writes_only_owned_execution_values(tmp_path: Path) -> Non
     assert manifest["run_spec"]["initial_cash"] == result.manifest.run_spec.initial_cash
     assert manifest["environment"]["fee_bps"] == result.manifest.environment.fee_bps
     assert store.load("run-safe-001", sha256=commit.sha256) == result
+
+
+def test_unversioned_factor_manifest_remains_unknown_and_keeps_its_stored_identity(
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+    original = _result()
+    store.commit(original)
+    path = tmp_path / original.manifest.run_id / "result.json"
+    before = path.read_bytes()
+    legacy = before.replace(b',"factor_evaluation_version":null', b"")
+    assert legacy != before
+    path.write_bytes(legacy)
+    loaded = store.load(original.manifest.run_id, sha256=hashlib.sha256(legacy).hexdigest())
+    assert loaded.manifest.factor_evaluation_version is None
+    assert loaded.manifest.run_fingerprint == original.manifest.run_fingerprint
+    assert path.read_bytes() == legacy

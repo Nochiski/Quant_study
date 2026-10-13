@@ -492,6 +492,10 @@ class PortfolioDesignService:
                 construction_trace = compiled.trace
         except NonFinitePortfolioCalculationError as error:
             raise _non_finite_rejection("portfolio", error) from error
+        # 검증된 전략은 팩터를 하나 이상 갖는다. 현재 프로세스에서 실제 평가한 계획의 판본이다.
+        tape = replace(
+            tape, factor_evaluation_version=evaluation_records[0].plan.evaluation_version
+        )
         preview = PortfolioPreview(
             tape=tape,
             engine=engine,

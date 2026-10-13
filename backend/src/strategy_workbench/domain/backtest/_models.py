@@ -433,6 +433,8 @@ class RunManifest:
     warnings: tuple[DataWarning, ...] = ()
     # v3는 평면 실행 값 사본 6개를 제거한 표현 판본이다. 실행 지문에는 넣지 않는다.
     schema_version: str = "backtest-run-v3"
+    # 기록되지 않은 과거 실행은 미상(None)이다. 현재 판본을 소급 채우지 않는다.
+    factor_evaluation_version: str | None = None
 
     def __post_init__(self) -> None:
         # The two fields have different producers — `strategy_hash` is the compiler's, carried on

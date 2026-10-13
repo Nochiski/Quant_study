@@ -25,6 +25,7 @@ def backtest_run_fingerprint(
     target_tape_hash: str,
     engine_version: str,
     metric_registry_version: str,
+    factor_evaluation_version: str | None = None,
 ) -> str:
     """Identify every semantic input needed to reproduce one engine result."""
     # How the strategy was referenced (saved revision id/hash, client source hash) is
@@ -41,6 +42,9 @@ def backtest_run_fingerprint(
         "engine_version": engine_version,
         "metric_registry_version": metric_registry_version,
     }
+    # 역사 지문은 키 자체가 없었다. 미상 판본에는 null도 추가하지 않는다.
+    if factor_evaluation_version is not None:
+        payload["factor_evaluation_version"] = factor_evaluation_version
     return canonical_json_hash(payload)
 
 

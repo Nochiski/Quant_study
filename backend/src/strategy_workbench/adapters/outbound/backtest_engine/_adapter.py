@@ -372,6 +372,7 @@ class BacktestEngineExecutorAdapter:
                     target_tape_hash=request.target_tape.tape_hash,
                     engine_version=ENGINE_RULES_VERSION,
                     metric_registry_version=self._registry.version,
+                    factor_evaluation_version=request.target_tape.factor_evaluation_version,
                 ),
                 run_spec=request.spec.to_wire(
                     strategy_source=request.strategy_source,
@@ -381,6 +382,7 @@ class BacktestEngineExecutorAdapter:
                 data_snapshot_id=request.dataset.data_snapshot_id,
                 target_tape_hash=request.target_tape.tape_hash,
                 metric_registry_version=self._registry.version,
+                factor_evaluation_version=request.target_tape.factor_evaluation_version,
                 environment=environment,
                 environment_hash=environment_hash(environment),
                 strategy_provenance=request.strategy_provenance,

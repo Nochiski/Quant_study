@@ -124,6 +124,8 @@ class TargetTape:
     tape_hash: str
     frames: tuple[TargetFrame, ...]
     execution_timing: str = "next_open"
+    # 실제 평가 계획의 출처 판본. 프레임 값의 해시는 그대로 두고 실행 지문에서 소비한다.
+    factor_evaluation_version: str | None = None
     # 해시 밖의 파생 사실이다. `tape_hash` 는 frames 로 계산하고, 경고는 같은 입력에서 결정적으로
     # 다시 나오므로 해시에 넣지 않는다(construction trace 와 같은 out-of-band 원칙).
     warnings: tuple[PortfolioWarning, ...] = ()

@@ -330,6 +330,9 @@ def test_manifest_records_the_environment_it_ran_with(tmp_path: Path) -> None:
     assert manifest.environment == environment
     assert manifest.environment_hash == environment_hash(environment)
     assert manifest.run_spec.environment == environment
+    from strategy_workbench.domain.factor.facade.planning import FACTOR_EVALUATION_VERSION
+
+    assert manifest.factor_evaluation_version == FACTOR_EVALUATION_VERSION
 
 
 def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path) -> None:
@@ -466,6 +469,8 @@ def test_environment_missing_reaches_the_factor_execution_plan() -> None:
     # 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유하면 두 번째가 첫 결과를 재사용한다.
     assert default_plan.plan_hash != explicit_plan.plan_hash
     assert default_plan.graph_hash == explicit_plan.graph_hash
+    assert default.preview.tape.factor_evaluation_version == default_plan.evaluation_version
+    assert explicit.preview.tape.factor_evaluation_version == explicit_plan.evaluation_version
 
 
 def test_partial_fill_is_declared_from_the_environment_not_the_document() -> None:
@@ -668,3 +673,27 @@ def test_manifest_projection_preserves_execution_values(tmp_path: Path) -> None:
     assert result.manifest.run_spec.initial_cash == request.initial_cash
     assert result.manifest.run_spec.annualization_days == request.annualization_days
     assert result.manifest.run_spec.core is ExecutionCore.PYTHON
+
+
+def test_evaluation_version_changes_identity_but_not_values_or_tape(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from strategy_workbench.domain.factor import _planning
+
+    request = BacktestRunSpec(
+        strategy=_spec(), core=ExecutionCore.PYTHON, environment=_environment()
+    )
+    results = []
+    for version in ("factor-evaluation-test-a", "factor-evaluation-test-b"):
+        monkeypatch.setattr(_planning, "FACTOR_EVALUATION_VERSION", version)
+        runs = _runs(_portfolio(), tmp_path, version)
+        runs.start(request)
+        assert wait_for_terminal_run(runs, version).status.value == "completed"
+        result = runs.result(version)
+        assert result.manifest.factor_evaluation_version == version
+        results.append(result)
+    first, second = results
+    assert first.manifest.target_tape_hash == second.manifest.target_tape_hash
+    assert first.manifest.run_fingerprint != second.manifest.run_fingerprint
+    assert first.artifacts == second.artifacts
+    assert first.metrics == second.metrics

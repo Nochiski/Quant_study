@@ -20,6 +20,9 @@ from ._nodes import (
 )
 from ._validation import FactorGraphValidation, node_dependencies, validate_factor_graph
 
+# 평가 수치 규칙의 정본. 결과 digest 회귀와 함께 올리고 계획·실행 신원에 전달한다.
+FACTOR_EVALUATION_VERSION = "factor-evaluation-v1"
+
 FactorParameterValue: TypeAlias = float | int | str | bool
 
 
@@ -50,6 +53,7 @@ class FactorExecutionPlan:
     required_field_ids: tuple[str, ...]
     minimum_history_sessions: int
     missing_policy: str
+    evaluation_version: str
     as_of_policy: str = "available_date_lte_as_of"
 
 
@@ -109,9 +113,9 @@ def compile_factor_plan(
         # 결측 정책은 실행 설정으로 옮겼지만 plan 의 일부로 남는다: 이 값이 `plan_hash` 에서
         # 빠지면 결측 처리만 다른 두 평가가 trace provenance에서 같은 계획으로 표시된다(spec D6).
         "missing_policy": missing.value,
+        "evaluation_version": FACTOR_EVALUATION_VERSION,
         # 평가 규칙 판본의 첫 사례(#312 · #375 DR-A-10): 채우는 정책은 채움 자리를 잎에서 횡단면
-        # 진입으로 옮겨 같은 이름으로 전과 다른 값을 낸다. 그 정책의 판만 가른다 — drop·keep 은
-        # 채우지 않아 판(골든 `PLAN_HASH_1_2`)이 그대로다
+        # 진입으로 옮겼던 역사 표지다. 새 evaluation_version과 별개로 보존한다.
         **({"missing_fill": "cross_section"} if missing in FILLING_MISSING_POLICIES else {}),
         "as_of_policy": "available_date_lte_as_of",
     }
@@ -125,6 +129,7 @@ def compile_factor_plan(
         required_field_ids=validation.required_field_ids,
         minimum_history_sessions=validation.minimum_history_sessions,
         missing_policy=missing.value,
+        evaluation_version=FACTOR_EVALUATION_VERSION,
     )
 
 

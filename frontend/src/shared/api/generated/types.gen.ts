@@ -2284,6 +2284,10 @@ export type FactorExecutionPlan = {
    */
   as_of_policy?: string;
   /**
+   * Evaluation Version
+   */
+  evaluation_version: string;
+  /**
    * Graph Hash
    */
   graph_hash: string;
@@ -4495,6 +4499,10 @@ export type RunManifest = {
    */
   environment_hash: string;
   /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
    * Metric Registry Version
    */
   metric_registry_version: string;
@@ -5707,6 +5715,10 @@ export type StrategyTraceResponse = {
    */
   as_of: string;
   /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
    * Factor Id
    */
   factor_id: string;
@@ -5908,6 +5920,10 @@ export type TargetTape = {
    * Execution Timing
    */
   execution_timing?: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
   /**
    * Frames
    */

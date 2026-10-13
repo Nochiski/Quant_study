@@ -152,3 +152,25 @@ def test_the_mismatch_message_names_both_producers_and_the_revision() -> None:
     assert "provenance.kind=saved_revision" in message
     assert "strategy_id=s1" in message
     assert "revision=3" in message
+
+
+def test_evaluation_version_separates_new_runs_without_rewriting_historical_identity() -> None:
+    strategy = StrategyDesignService(
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
+    ).template()
+    spec = BacktestRunSpec(strategy=strategy)
+    assert _fingerprint(spec) == "d5192042941c2873d64c76279bddb0d459d604a71acca6ec43ad65f7e79892cf"
+    versions = [None, "factor-evaluation-v1", "factor-evaluation-v2"]
+    identities = [
+        backtest_run_fingerprint(
+            spec,
+            data_snapshot_id="snap",
+            target_tape_hash="tape",
+            engine_version="engine",
+            metric_registry_version="metrics",
+            factor_evaluation_version=v,
+        )
+        for v in versions
+    ]
+    assert identities[0] == _fingerprint(spec)
+    assert len(set(identities)) == 3

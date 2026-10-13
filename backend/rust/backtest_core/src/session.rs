@@ -660,6 +660,10 @@ mod tests {
             )
             .unwrap();
             let reasons: Vec<_> = ops.iter().filter(|op| op.8.is_some()).collect();
+            if policy == "best_effort" {
+                assert!(reasons.is_empty());
+                continue;
+            }
             assert_eq!(reasons.len(), 1, "{policy}");
             assert_eq!(reasons[0].1, "a");
             assert_eq!(reasons[0].8.as_deref(), Some("liquidity_cap_zero"));

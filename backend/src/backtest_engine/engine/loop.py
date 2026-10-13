@@ -1020,14 +1020,6 @@ class BacktestEngine:
             for entry, quote in quotes:
                 if quote.quantity > 0:
                     self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
-                elif quote.reason_code is not None:
-                    update(
-                        entry.order_id,
-                        OrderStatus.OPEN,
-                        quote.detail,
-                        quote.reason_code,
-                        quote.cap_volume,
-                    )
             # 잔량이 남은 leg(GTC)는 다음 세션에도 그룹 경로로 재시도한다 — 그룹을 버리면
             # due()에서도 open_groups()에서도 보이지 않아 영영 체결되지 않는다.
             if not order_manager.group_entries(group.group_id):

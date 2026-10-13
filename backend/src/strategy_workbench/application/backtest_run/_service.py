@@ -784,7 +784,7 @@ class BacktestRunService:
             )
 
     def _record_trial_result(self, run_id: str, result: BacktestRunResult) -> None:
-        # 실패해도 run 은 끝까지 간다. 대표 샤프가 빈 시도로 보이고 원인은 로그에 남는다.
+        """완료와 같은 내구 경로다. 실패하면 원인을 남기고 올려 완료를 막는다(#381)."""
         try:
             self._repository.record_trial_result(
                 run_id,
@@ -793,6 +793,7 @@ class BacktestRunService:
             )
         except Exception:
             logger.exception("trial result could not be recorded — run_id=%s", run_id)
+            raise
 
     def _dispatch(self) -> None:
         """자리가 비는 만큼 대기열 앞의 run 을 스레드로 띄운다. `self._lock` 안에서 부른다.
@@ -963,7 +964,13 @@ class BacktestRunService:
                 record, RunStatus.RUNNING, _ARTIFACT_PROGRESS, "artifact", "Committing artifacts"
             )
             commit = self._artifact_store.commit(result)
-            self._record_trial_result(run_id, result)
+            try:
+                self._record_trial_result(run_id, result)
+            except Exception:
+                # 대표 샤프를 기록하지 못한 완료도 보이지 않는다 — 보이면 원장이 그 시도를 샤프 없는
+                # 시도로 세 사용자가 본 결과와 갈린다(#381). 실행은 아래 실패 분기로 끝난다.
+                self._artifact_store.discard(run_id)
+                raise
             cancelled_after_commit = False
             with self._lock:
                 # Completion and cancel acceptance linearize on the same lock. If cancel acquired

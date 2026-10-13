@@ -43,6 +43,11 @@ class RunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+    @property
+    def is_terminal(self) -> bool:
+        """종결 여부의 정본. 취소 요청은 실행이 멈춘 상태가 아니다."""
+        return self in (RunStatus.CANCELLED, RunStatus.COMPLETED, RunStatus.FAILED)
+
 
 class WarningSeverity(StrEnum):
     INFO = "info"
@@ -156,8 +161,8 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         example=10.0,
         message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
-    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
-    # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
+    # √ 충격의 계수 k(무차원). 기본값은 아래 필드 선언이 소유한다(`_impact.py` 머리말).
+    # 상한은 문헌의 "1 안팎"을 넉넉히 덮고 오타 입력(100·1000)을 막는다.
     "impact_coefficient": ScalarConstraint(
         pointer="/impact_coefficient",
         stage=AppliedStage.EXECUTION,
@@ -446,6 +451,18 @@ class RawOrder:
 
 
 @dataclass(frozen=True)
+class RawOrderUpdate:
+    """엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다."""
+
+    session: date
+    order_id: str
+    status: str
+    detail: str | None = None
+    reason_code: str | None = None
+    cap_volume: int | None = None
+
+
+@dataclass(frozen=True)
 class RawFill:
     fill_id: str
     order_id: str
@@ -459,6 +476,8 @@ class RawFill:
     # 체결 세션의 유동성 캡 기준 거래량 — 엔진이 참여 한도를 곱한 값이다(V4-04 2/2). 그 전에 쓴
     # `result.json`(`backtest-artifacts-v1`)에는 없어 None 으로 읽힌다.
     cap_volume: int | None = None
+    # 구판 산출물은 체결별 세금을 싣지 않았으므로 None으로 구별한다.
+    sell_tax: float | None = None
 
 
 @dataclass(frozen=True)
@@ -508,6 +527,8 @@ class RawArtifactBundle:
     # v2: 체결에 `cap_volume` 을, 번들에 `roundings` 를 싣는다. v1 파일도 같은 모델로 읽는다(빈 칸은
     # None·빈 튜플).
     schema_version: str = "backtest-artifacts-v2"
+    # None은 과거 결과에 상태 기록 자체가 없음을 뜻한다. 새 결과의 빈 기록은 ()다.
+    order_updates: tuple[RawOrderUpdate, ...] | None = None
 
 
 @dataclass(frozen=True)

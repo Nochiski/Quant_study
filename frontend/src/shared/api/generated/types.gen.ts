@@ -3707,6 +3707,10 @@ export type RawArtifactBundle = {
    */
   fills: Array<RawFill>;
   /**
+   * Order Updates
+   */
+  order_updates?: Array<RawOrderUpdate> | null;
+  /**
    * Orders
    */
   orders: Array<RawOrder>;
@@ -3787,6 +3791,10 @@ export type RawFill = {
    */
   security_id: string;
   /**
+   * Sell Tax
+   */
+  sell_tax?: number | null;
+  /**
    * Session
    */
   session: string;
@@ -3836,6 +3844,38 @@ export type RawOrder = {
    * Time In Force
    */
   time_in_force: string;
+};
+
+/**
+ * RawOrderUpdate
+ *
+ * 엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다.
+ */
+export type RawOrderUpdate = {
+  /**
+   * Cap Volume
+   */
+  cap_volume?: number | null;
+  /**
+   * Detail
+   */
+  detail?: string | null;
+  /**
+   * Order Id
+   */
+  order_id: string;
+  /**
+   * Reason Code
+   */
+  reason_code?: string | null;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Status
+   */
+  status: string;
 };
 
 /**

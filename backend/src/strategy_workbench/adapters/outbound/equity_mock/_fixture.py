@@ -275,6 +275,59 @@ def build_demo_fixture() -> MockEquityFixture:
     profiles = (
         *profiles,
         _factor_field_profile(
+            field_id="flow.foreign_ownership",
+            dataset_id="flow_daily",
+            label="외국인 보유비중",
+            unit="pct",
+            value_type=FieldValueType.RATIO,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED),
+            ),
+        ),
+        _factor_field_profile(
+            field_id="flow.foreign_limit_exhaustion",
+            dataset_id="flow_daily",
+            label="외국인 한도소진율",
+            unit="pct",
+            value_type=FieldValueType.RATIO,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED),
+            ),
+        ),
+        _factor_field_profile(
+            field_id="flow.pension_net_buy",
+            dataset_id="flow_daily",
+            label="연기금등 순매수(대금, 키움)",
+            unit="KRW",
+            value_type=FieldValueType.AMOUNT,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED),
+            ),
+        ),
+        _factor_field_profile(
+            field_id="short.short_sale_volume",
+            dataset_id="short_daily",
+            label="공매도 거래량(키움)",
+            unit="shares",
+            value_type=FieldValueType.COUNT,
+            recommended_lag_sessions=1,
+            coverage=replace(
+                full_coverage,
+                supported_cell_kinds=(
+                    CellKind.OBSERVED,
+                    CellKind.MISSING,
+                    CellKind.NOT_COLLECTED,
+                    CellKind.SOURCE_OMITTED_ZERO,
+                ),
+            ),
+        ),
+        _factor_field_profile(
             field_id="classification.sector",
             dataset_id="classification_pit",
             label="Sector classification",
@@ -504,6 +557,20 @@ def build_demo_fixture() -> MockEquityFixture:
             ),
         )
     )
+    # 새 원장 필드의 손 관측도 같은 PIT 포트를 거친다. 비중은 퍼센트 원값이다.
+    for security in securities:
+        for session in sessions:
+            for field_id, value in (
+                ("flow.foreign_ownership", 52.79),
+                ("flow.foreign_limit_exhaustion", 62.79),
+                ("flow.pension_net_buy", -123_000_000.0),
+                ("short.short_sale_volume", 1_000.0),
+            ):
+                observations.append(
+                    Observation(
+                        security.security_id, field_id, session, session, value, CellKind.OBSERVED
+                    )
+                )
     observed = tuple(observations)
     return MockEquityFixture(
         snapshot=DataSnapshot(

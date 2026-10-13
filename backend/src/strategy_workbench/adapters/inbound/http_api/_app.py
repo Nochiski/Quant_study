@@ -86,6 +86,8 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     DocumentUpgradeDriftError,
     DocumentUpgradeSyntaxError,
     DocumentUpgradeUnsupportedNodeError,
+    DraftDiff,
+    DraftDiffRequest,
     InvalidStrategyDocumentError,
     InvalidStrategyDraftError,
     ReviseDocumentRequest,
@@ -996,6 +998,20 @@ def create_app(
             return strategy_documents.history(strategy_id, PageRequest(offset, limit))
         except StrategyNotFoundError as error:
             raise _strategy_not_found(error) from error
+
+    @app.post(
+        "/api/v1/strategies/{strategy_id}/draft-diff",
+        operation_id="diffStrategyDraft",
+        responses={422: {"model": StrategyDocumentSave422Response}},
+    )
+    def diff_strategy_draft(strategy_id: str, request: DraftDiffRequest) -> DraftDiff:
+        """저장 리비전과 편집 중 원문을 같은 도메인 의미 diff로 비교한다."""
+        try:
+            return strategy_documents.diff_draft(strategy_id, request)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+        except InvalidStrategyDocumentError as error:
+            raise _invalid_document(error) from error
 
     @app.get(
         "/api/v1/strategies/{strategy_id}/diff",

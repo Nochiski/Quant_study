@@ -423,6 +423,8 @@ def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
     experiment_id = service.create(_request()).record.experiment_id
 
     first = service.cancel(experiment_id)
+    # 실행 서비스가 취소를 마친 뒤에는 재요청이 그 run들을 다시 건드리지 않는다.
+    runs.run_statuses.update({run_id: RunStatus.CANCELLED for run_id in runs.run_statuses})
     second = service.cancel(experiment_id)
 
     # 실행 서비스에 이 실험이 빠진다고 알린다 — 다른 소유자가 남은 run 은 멈추지 않는다.
@@ -1447,3 +1449,44 @@ def test_a_capacity_sweep_survives_reopening_the_research_database(tmp_path: Pat
 
     assert reopened.get(created.record.experiment_id).record == created.record
     assert [t.initial_cash for t in created.record.design.trials()] == [1e8, 2e8, 3e8]
+
+
+@pytest.mark.parametrize("failure", ["states", "second_cancel"])
+def test_cancel_retries_unfinished_cleanup_after_a_port_failure(failure: str) -> None:
+    """취소 표식 저장 뒤 조회·일부 취소 실패가 나도 다음 요청은 남은 실행을 정리한다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    states = runs.states
+    cancel = runs.cancel
+    failed = False
+
+    def failing_states(run_ids: Collection[str]) -> dict[str, BacktestRunState]:
+        nonlocal failed
+        if (
+            failure == "states"
+            and not failed
+            and service._repository.get(experiment_id).cancelled_at is not None
+        ):
+            failed = True
+            raise ResearchStorageError("bulk states unavailable once")
+        return states(run_ids)
+
+    def failing_cancel(run_id: str, *, owner: str) -> None:
+        nonlocal failed
+        if failure == "second_cancel" and run_id == "run-1" and not failed:
+            failed = True
+            raise ResearchStorageError("cancel unavailable once")
+        cancel(run_id, owner=owner)
+        runs.run_statuses[run_id] = RunStatus.CANCELLED
+
+    runs.states = failing_states
+    runs.cancel = failing_cancel
+    with pytest.raises(ResearchStorageError, match="unavailable once"):
+        service.cancel(experiment_id)
+    original_timestamp = service._repository.get(experiment_id).cancelled_at
+    assert original_timestamp is not None
+    after = service.cancel(experiment_id)
+    assert after.record.cancelled_at == original_timestamp
+    assert all(state is RunStatus.CANCELLED for state in runs.run_statuses.values())
+    assert runs.cancelled == [(f"run-{index}", experiment_id) for index in range(4)]

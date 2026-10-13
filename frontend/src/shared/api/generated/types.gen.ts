@@ -2815,7 +2815,8 @@ export type HttpValidationError = {
  * 체결가에 얹는 시장충격 모델(spec D7).
  *
  * `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
- * √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+ * √(Q / ADV)(`_impact.py`, Q = 참여 한도 적용 후·여력 제한 전 주문 수량)를 뜻한다.
+ * `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
  */
 export type ImpactModel = "fixed_bps" | "sqrt";
 

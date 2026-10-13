@@ -1,8 +1,8 @@
+import { browserStorage } from "../../../shared/lib/browser-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   clearDraft,
-  defaultDraftStorage,
   draftKey,
   readDraft,
   writeDraft,
@@ -51,7 +51,7 @@ export const useAutosave = (
 ): Autosave => {
   const storage = useMemo(
     () =>
-      options.storage === undefined ? defaultDraftStorage() : options.storage,
+      options.storage === undefined ? browserStorage() : options.storage,
     [options.storage],
   );
   const now = options.now ?? (() => new Date().toISOString());

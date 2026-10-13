@@ -1,3 +1,4 @@
+import { browserStorage } from "../../../shared/lib/browser-storage";
 import { useCallback, useMemo, useState } from "react";
 
 import {
@@ -48,17 +49,9 @@ const LEGACY_DEFAULTS: Readonly<Record<string, string>> = {
   participation_basis: "session_volume",
 };
 
-const storage = (): Storage | null => {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-};
-
 const readRecord = (storageKey: string): RunEnvironmentValues | null => {
   try {
-    const text = storage()?.getItem(storageKey);
+    const text = browserStorage()?.getItem(storageKey);
     if (text === null || text === undefined) return null;
     const parsed: unknown = JSON.parse(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
@@ -89,8 +82,8 @@ const readStored = (key: string): RunEnvironmentValues | null => {
 const writeStored = (key: string, values: RunEnvironmentValues): void => {
   try {
     const text = JSON.stringify(values);
-    storage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`, text);
-    storage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${LAST_USED}`, text);
+    browserStorage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`, text);
+    browserStorage()?.setItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${LAST_USED}`, text);
   } catch {
     // 저장 실패는 이번 화면의 값에 영향이 없다 — 다음 방문에서 스키마 기본값으로 시작할 뿐이다.
   }

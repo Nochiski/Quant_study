@@ -1,3 +1,4 @@
+import { browserStorage } from "../browser-storage";
 import {
   useCallback,
   useEffect,
@@ -9,7 +10,6 @@ import {
 
 import { ThemePreferenceContext } from "./theme-context";
 import {
-  browserThemeStorage,
   readThemePreference,
   writeThemePreference,
   type ThemePreference,
@@ -40,7 +40,7 @@ export const ThemePreferenceProvider = ({
   }, [resolved]);
 
   const setPreference = useCallback((next: ThemePreference): void => {
-    writeThemePreference(browserThemeStorage(), next);
+    writeThemePreference(browserStorage(), next);
     setStoredPreference(next);
   }, []);
   const value = useMemo(

@@ -740,9 +740,10 @@ class BacktestRunService:
     ) -> None:
         # 기록이 실패해도 거절은 그대로 돌려준다 — 막는 것이 먼저다.
         try:
+            self._portfolio_design.validate_trial_strategy(strategy, missing=environment.missing)
             key = trial_key(spec)
-        except InvalidParameterValueError:
-            # 파라미터 값을 해소할 수 없는 요청은 전략이 확정되기 전의 거절이라 남기지 않는다.
+        except (InvalidPortfolioRequestError, InvalidParameterValueError):
+            # 전략·팩터 플랜·파라미터가 확정되지 않은 요청은 봉인 감사 기록에 남기지 않는다.
             return
         try:
             self._repository.record_blocked_attempt(

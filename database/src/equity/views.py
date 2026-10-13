@@ -3,7 +3,7 @@
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
 조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus` + S21 본판 1개:
 `v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고) + #220·#369 2개:
-`v_unfolded_event`(원장이 접지 못한 사건) · `v_adj_close`(그 적용일을 가린 수정주가). 본문은 하나의
+`v_unfolded_event`(보유 수량 축 미해결 사건) · `v_adj_close`(가격 축 공백을 가린 수정주가). 본문은 하나의
 템플릿이고 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -118,13 +118,12 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
     "v_credit_balance": ("credit_daily", "corp_event", "trading_calendar"),
     "v_unfolded_event": ("adj_factor",),
-    "v_adj_close": ("price_adj_daily",),
+    "v_adj_close": ("price_adj_daily", "adj_factor"),
     "v_sector": ("sector_snapshot",),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
-    "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",),
-    "v_adj_close": ("v_unfolded_event",)}
+    "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
 # 뷰가 값이 틀려 일부러 가린 행의 표시 열 — 참이면 그 행 값이 NULL 이다. 워크벤치 어댑터는 이 열을
 # 셀 종류 MASKED 로 읽고(`SourceSpec.masked_expr`), 실행 결측 정책은 그 셀을 채우지 않는다(#298).
 # 무엇을 가리나는 뷰 본문이 정하고, 이 선언과 어댑터 배선이 같은지는 backend 계약 테스트가 본다.
@@ -611,10 +610,10 @@ SELECT ticker, date,
        bonus_window, available_date, available_basis
 FROM bal
 """,
-    # 원장이 접지 못한 사건(#220·#369) — 원장 표(`price_adj_daily`)가 그날 층 이동을 접지 못한
-    # (ticker, 적용일)이다. "접지 못함" 술어의 정본이고, 소비자는 처리만 고른다: `v_adj_close` 는
-    # 적용일 행을 가리고(팩터 경로), 백테스트 데이터 포트(backend `equity_duckdb`)는 `factor_ok`
-    # 가 거짓인 행만 적용일 KRX 기준가 비로 보유 수량을 조정한다(손익 경로).
+    # 보유 수량 축에서 원장이 접지 못한 사건(#220·#369). 백테스트 데이터 포트는
+    # factor_ok 가 거짓인 행만 적용일 KRX 기준가 비로 보유 수량을 조정한다.
+    # 가격 전용 보정(⑤)은 factor_ok 를 바꾸지 않으므로 이 사건 집합도 바꾸지 않는다.
+    # 가격 축 가림은 v_adj_close 가 price_resolution 으로 별도로 판정한다.
     #   ① KRX 기준가로 적용일을 정한(`apply_basis = 'krx_base_price'`) ok 계수가 늦게 공개된
     #      사건(`available_date > apply_date`) — fold_date 가 적용일 다음 세션이라 적용일 하루에
     #      스파이크가 선다(실원장 2020-03-19 이후 57건, 최대 38배). 다음 행부터는 접혀 있다.
@@ -622,7 +621,8 @@ FROM bal
     #      낸 사건. 적용일에 층이 영구히 바뀐다(295건, 적용일 점프 중앙값 약 2.9배).
     #   `factor_ok` 는 그 (ticker, 적용일)에 ok 계수가 하나라도 있는가다. 참이면 층 이동은 그 계수가
     #   설명한다 — ① 이거나, 기준가가 반증해 ② 로 내려간 사건과 같은 날 그 기준가로 선 ok 계수다
-    #   (`sql/adj_factor.sql` 의 conflict·bp_new). 거짓이면 어떤 계수도 그날 층 이동을 접지 않는다.
+    #   (`sql/adj_factor.sql` 의 conflict·bp_new). 거짓이면 주식수 계수가 그날 층 이동을
+    #   설명하지 않는다(가격 전용 보정과 별개).
     #   `unknown_price_only`(유상 권리락 등 MVP 밖 기준가 변화, 적용일 점프 중앙값 약 6%)와 명목일
     #   사건(no_price_match·ratio_null 등 — 적용일에 점프가 거의 없다)은 싣지 않는다. 명목일·가격
     #   매칭으로 적용일을 정한 늦은 ok 계수도 싣지 않는다 — 그날 기준가 재설정이 없어 아래 PIT 근거가
@@ -640,20 +640,30 @@ HAVING bool_or((factor_ok AND available_date > apply_date AND apply_basis = 'krx
                OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent'))
 """,
     # 수정주가의 조정 공백(#220). S23 표 `price_adj_daily` 의 adj_close 를 그대로 내되, 원장이
-    # 그날 사건을 접지 못한 **적용일 행**(`v_unfolded_event`)만 결측으로 낸다 — 그 행의 원주가는
+    # 가격 축 사건을 접지 못한 **적용일 행**만 결측으로 낸다 — 그 행의 원주가는
     # 이미 사건 뒤 척도인데 누적 계수는 사건 전이라 값이 틀린다. 표는 parquet 소비자와 조정 규칙의
     # 저장본이라 그대로 두고, 가림은 이 뷰(작은 사건 집합과의 조인)가 한다. 창 연산은 창 안에
     # 결측이 하나라도 있으면 결측이라, 가린 행을 품는 창이 모두 결측이 된다(틀린 값 대신 결측).
     # 가림은 값을 바꾸지 않고 결측만 만들어 그날 모르는 정보를 새지 않는다. 공개 전 계수를 접는 것은
     # 아니다(fold 규칙은 S23 그대로). as_of 는 행 절단으로만 작용한다. 사건 술어의 PIT 예외가 닿는
     # 셀은 적용일 as_of 에 랙 0 으로 그 행을 읽는 셀뿐이다(기본 12-1 모멘텀은 랙 21 이라 무관).
+    # ⑤로 가격이 해결된 not-ok 사건은 가리지 않는다. 늦은 ok 계수의 PIT 가림은 유지한다.
+    # 같은 날 여러 사건이 있어도 미해결 사건 하나면 가리며, 가격 행을 중복시키지 않는다.
     "v_adj_close": """
 SELECT a.ticker, a.date,
        CASE WHEN g.ticker IS NULL THEN a.adj_close END AS adj_close,
        g.ticker IS NOT NULL                             AS adj_gap,
        a.available_date
 FROM {price_adj_daily} a
-LEFT JOIN v_unfolded_event(as_of) g ON g.ticker = a.ticker AND g.apply_date = a.date
+LEFT JOIN (
+    SELECT ticker, apply_date
+    FROM {adj_factor}
+    WHERE apply_date <= as_of
+    GROUP BY ticker, apply_date
+    HAVING bool_or((factor_ok AND available_date > apply_date AND apply_basis = 'krx_base_price')
+                   OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent'
+                       AND price_resolution = 'unresolved'))
+) g ON g.ticker = a.ticker AND g.apply_date = a.date
 WHERE a.date <= as_of
 """,
 }

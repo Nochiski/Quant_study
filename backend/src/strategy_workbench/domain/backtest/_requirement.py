@@ -29,7 +29,7 @@ class MissingRunEnvironmentError(ValueError):
             "실행 설정이 없어 실행할 수 없다 — "
             f"code={self.code} requested_by={requested_by} "
             "expected=요청 본문의 environment(시장·기간·유니버스·체결·비용·결측) got=None "
-            "— schema 1.2 문서는 실행 설정을 담지 않는다. 실행 설정을 지정하라"
+            "— 전략 문서는 실행 설정을 담지 않는다. 실행 설정을 지정하라"
         )
         self.requested_by = requested_by
 

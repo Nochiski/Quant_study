@@ -782,7 +782,6 @@ def create_app(
     def explain_factor_graph(request: FactorGraphRequest) -> FactorExplanation:
         return factor_research.explain(request)
 
-
     @app.get(
         "/api/v1/strategy-drafts/{draft_id}",
         operation_id="getStrategyDraft",
@@ -1050,11 +1049,7 @@ def create_app(
     ) -> StrategyDocumentSchema | Response:
         """Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match)."""
         schema = strategy_authoring.schema()
-        etag = _etag(schema.schema_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return schema
+        return _etag_response(schema.schema_hash, if_none_match, response, schema)
 
     @app.get(
         "/api/v1/run-environments/schema",
@@ -1067,11 +1062,7 @@ def create_app(
     ) -> RunEnvironmentSchema | Response:
         """실행 설정의 런타임 JSON Schema. ETag = 스키마 해시(일치하면 304)."""
         schema = strategy_authoring.run_environment_schema()
-        etag = _etag(schema.schema_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return schema
+        return _etag_response(schema.schema_hash, if_none_match, response, schema)
 
     @app.get(
         "/api/v1/strategy-documents/operators",
@@ -1090,11 +1081,7 @@ def create_app(
         않는다. ETag는 카탈로그 해시이며 If-None-Match가 맞으면 304로 답한다.
         """
         catalog = strategy_authoring.operators()
-        etag = _etag(catalog.catalog_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return catalog
+        return _etag_response(catalog.catalog_hash, if_none_match, response, catalog)
 
     @app.get(
         "/api/v1/strategy-documents/contract",
@@ -1109,14 +1096,15 @@ def create_app(
         with the factor/dataset registry versions and catalog links it pairs with.
         """
         contract = strategy_authoring.contract()
-        etag = _etag(contract.contract_hash)
-        if if_none_match is not None and _matches(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
-        response.headers["ETag"] = etag
-        return StrategyDocumentContractResponse(
-            contract=contract,
-            factor_catalog_url=FACTOR_CATALOG_PATH,
-            equity_catalog_url=EQUITY_CATALOG_PATH,
+        return _etag_response(
+            contract.contract_hash,
+            if_none_match,
+            response,
+            StrategyDocumentContractResponse(
+                contract=contract,
+                factor_catalog_url=FACTOR_CATALOG_PATH,
+                equity_catalog_url=EQUITY_CATALOG_PATH,
+            ),
         )
 
     @app.get(
@@ -1242,6 +1230,17 @@ class StrategyDocumentContractResponse:
     contract: StrategyDocumentContract
     factor_catalog_url: str
     equity_catalog_url: str
+
+
+def _etag_response(
+    content_hash: str, if_none_match: str | None, response: Response, body: _T
+) -> _T | Response:
+    """메타데이터 응답 네 경로가 같은 ETag·304 계약을 따른다."""
+    etag = _etag(content_hash)
+    if if_none_match is not None and _matches(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    return body
 
 
 def _etag(schema_hash: str) -> str:

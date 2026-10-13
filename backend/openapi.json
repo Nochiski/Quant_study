@@ -3205,7 +3205,6 @@
       "ExperimentSelectionRequest": {
         "properties": {
           "reason": {
-            "pattern": "\\S",
             "title": "Reason",
             "type": "string"
           },

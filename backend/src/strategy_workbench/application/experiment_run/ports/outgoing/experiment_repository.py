@@ -123,7 +123,11 @@ class ExperimentRepositoryPort(Protocol):
         ...
 
     def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:
-        """최근에 만든 순으로 `after` 실험 다음부터 `limit` 개. 모르는 `after` 면 빈 목록이다."""
+        """최근에 만든 순으로 `after` 다음의 읽을 수 있는 기록을 `limit` 개까지 돌려준다.
+
+        디코드 실패 행은 adapter가 식별자를 로그에 남기고 건너뛴다. 원장은 변경하지 않는다.
+        모르는 `after` 면 빈 목록이고, 저장소 전체 읽기 실패는 전파한다.
+        """
         ...
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None: ...

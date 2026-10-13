@@ -7,7 +7,7 @@ from datetime import date
 from statistics import mean, median, pstdev
 from typing import TypeAlias, TypeGuard, TypeVar
 
-from ._history import node_read_window
+from ._history import SessionReadWindow, node_read_window
 from ._nodes import (
     FILLING_MISSING_POLICIES,
     BinaryNode,
@@ -415,7 +415,7 @@ class _NodeEvaluator:
             ]
         elif isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
             values = _lag(
-                inputs[0], self._securities(), node.periods or 0, checkpoint=self._checkpoint
+                inputs[0], self._securities(), node_read_window(node), checkpoint=self._checkpoint
             )
         elif isinstance(node, UnaryNode):
             values = _unary(node, inputs[0], checkpoint=self._checkpoint)
@@ -701,15 +701,17 @@ def _group_transform(
 def _lag(
     values: list[FactorComputedValue],
     by_security: dict[str, list[int]],
-    periods: int,
+    window: SessionReadWindow,
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
+    """세션 창 정본(`node_read_window`)이 정한 한 칸을 옮긴다. 음수 시작은 이력 부족이다."""
     result: list[FactorComputedValue] = [None] * len(values)
     for indices in _checkpointed(by_security.values(), checkpoint):
         for position, index in _checkpointed(enumerate(indices), checkpoint):
-            if position >= periods:
-                result[index] = values[indices[position - periods]]
+            start = window.bounds(position).start
+            if start >= 0:
+                result[index] = values[indices[start]]
     return result
 
 

@@ -153,7 +153,8 @@ def _trace_context(
 
 @dataclass(eq=False)
 class _TraceStatuses:
-    """선택 바깥 입력도 실제 읽은 칸의 원인을 메모한다. 재귀 클로저 없이 패널 수명을 보존한다."""
+    """선택 바깥 입력도 실제 읽은 칸의 원인을 메모한다. 중첩 클로저 대신 메서드 재귀(깊이는 그래프
+    깊이)로 원인을 따라가며 패널 수명을 보존한다."""
 
     nodes: dict[str, ExpressionNode]
     evaluator: _NodeEvaluator
@@ -185,7 +186,8 @@ class _TraceStatuses:
                 else (input_ids[0],)
             )
         input_warming = False
-        if self.evaluator.computed[node_id][index] is None and window.start >= 0:
+        # 값이 있는 칸은 위에서 OK로 끝났다. 여기서는 창이 이력 안에 있는지만 본다.
+        if window.start >= 0:
             input_warming = any(
                 self.evaluator.computed[dependency][source_index] is None
                 and self.status_for(dependency, source_index) is TraceValueStatus.WARM_UP

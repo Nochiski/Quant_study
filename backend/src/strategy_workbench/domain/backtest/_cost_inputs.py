@@ -9,7 +9,6 @@ from ._impact import ImpactUnavailableReason, impact_inputs
 from ._models import DataWarning, ImpactModel, ParticipationBasis, RawFill, RunEnvironment
 from ._participation import adv_observations, participation_volumes
 
-
 _T = TypeVar("_T")
 
 

@@ -268,6 +268,7 @@ class StrategyTraceService:
             snapshot_id=pipeline.data_snapshot_id,
             registry_version=record.plan.registry_version,
             plan_hash=record.plan.plan_hash,
+            factor_evaluation_version=record.plan.evaluation_version,
             provenance=provenance,
             factor_id=request.factor_id,
             as_of=resolved_as_of,

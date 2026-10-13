@@ -92,9 +92,10 @@ def write_manifest(
     return path
 
 
-def _decimal(values: Sequence[float | int | None], scale_type: pa.DataType) -> pa.Array:
+def _decimal(values: Sequence[float | int | None], scale_type: pa.Decimal128Type) -> pa.Array:
     return pa.array(
-        [None if v is None else Decimal(str(int(v))) for v in values], type=scale_type
+        [None if v is None else Decimal(str(v if scale_type.scale else int(v))) for v in values],
+        type=scale_type,
     )
 
 
@@ -154,6 +155,7 @@ def price_table(
         )
     if basis is not None:
         columns["basis"] = pa.array(basis, type=pa.string())
+        columns["corp_action_pending"] = pa.array([value == "evening" for value in basis])
     if base_prices is not None:
         previous: dict[str, float | None] = {}
         bases: list[float | None] = []
@@ -458,7 +460,13 @@ FlowRow = tuple[str, date, str | None, float | None, float | None, float | None,
 """ticker, date, src, ind_invsr_krw, frgnr_invsr_krw, orgn_krw, (fill_kind.kind, .evidence)."""
 
 
-def flow_table(rows: list[FlowRow]) -> pa.Table:
+def flow_table(
+    rows: list[FlowRow],
+    *,
+    ownership: Sequence[float | None] | None = None,
+    exhaustion: Sequence[float | None] | None = None,
+    pension: Sequence[float | None] | None = None,
+) -> pa.Table:
     """`flow_daily` 중 어댑터가 읽는 컬럼. grain 은 (date, ticker, **src**) 다 — 같은 셀에 두
     원천이 다 있으면 2행이고 어댑터가 `pick_order` 로 하나를 고른다."""
     money = pa.decimal128(15, 0)
@@ -470,6 +478,15 @@ def flow_table(rows: list[FlowRow]) -> pa.Table:
             "ind_invsr_krw": _decimal([r[3] for r in rows], money),
             "frgnr_invsr_krw": _decimal([r[4] for r in rows], money),
             "orgn_krw": _decimal([r[5] for r in rows], money),
+            "foreign_wght_pct": _decimal(
+                ownership if ownership is not None else [None] * len(rows), pa.decimal128(7, 2)
+            ),
+            "foreign_limit_exh_pct": _decimal(
+                exhaustion if exhaustion is not None else [None] * len(rows), pa.decimal128(7, 2)
+            ),
+            "pension_net_buy_kiwoom_krw": _decimal(
+                pension if pension is not None else [None] * len(rows), money
+            ),
             "fill_kind": _fill_kind([r[6] for r in rows]),
             "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
             "available_basis": pa.array(["default"] * len(rows), type=pa.string()),
@@ -526,9 +543,8 @@ def credit_table(rows: list[CreditRow]) -> pa.Table:
 # `equity.catalog`·`equity.views`(database/src/equity) 의 테스트 대역. backend 런타임은 그 패키지를
 # import 하지 않지만, 이 대역은 `import_ledger_module` 로 원장 모듈을 불러 쓸 수 있다(경로는 import
 # 하는 동안만 올린다, #230). 매크로는 원장 템플릿을 렌더할 수 있으면 렌더한다(`LEDGER_MACROS`,
-# #249·#220·#300) — 손 픽스처 표가 그 템플릿이 읽는 열을 다 가질 때다. 표가 좁아 렌더할 수 없는 4개
-# (`_CATALOG_BODIES`)만 본문을 여기 옮겨 적고, 원장 본문이 바뀌면 같이 바꾼다. snapshot_id 는 원장
-# 정본을 불러(`snapshot_id`) 워크벤치 사본과 대조되게 한다(#372).
+# #249·#220·#300) — 손 픽스처 표가 그 템플릿이 읽는 열을 다 가질 때다.
+# snapshot_id도 원장 정본을 불러 워크벤치 사본과 대조되게 한다(#372).
 
 _EQUITY_SRC = Path(__file__).resolve().parents[2] / "database" / "src"
 
@@ -551,229 +567,12 @@ def import_ledger_module(name: str) -> ModuleType:
             sys.path.remove(str(_EQUITY_SRC))
 
 
-_CUM_ADJ_SQL = """
-WITH cut AS (
-    SELECT k.date AS cutoff
-    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
-          FROM {trading_calendar} WHERE date <= as_of) k
-    WHERE k.n = coalesce(lag_override, 0)
-),
-fac AS (
-    SELECT ticker, apply_date, product(price_factor) AS pf, product(share_factor) AS sf
-    FROM {adj_factor}
-    WHERE factor_ok AND apply_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
-    GROUP BY ticker, apply_date
-),
-suf AS (
-    SELECT ticker, apply_date,
-           product(pf) OVER w AS cum_price_factor,
-           product(sf) OVER w AS cum_share_factor
-    FROM fac
-    WINDOW w AS (PARTITION BY ticker ORDER BY apply_date
-                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
-)
-SELECT p.ticker, p.date,
-       coalesce(s.cum_price_factor, 1) AS cum_price_factor,
-       coalesce(s.cum_share_factor, 1) AS cum_share_factor
-FROM (SELECT ticker, date FROM {price_daily} WHERE date <= as_of) p
-ASOF LEFT JOIN suf s ON s.ticker = p.ticker AND p.date < s.apply_date
-"""
-_ADJ_PRICE_SQL = """
-SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
-       c.cum_price_factor, c.cum_share_factor,
-       p.open  * c.cum_price_factor AS adj_open,
-       p.high  * c.cum_price_factor AS adj_high,
-       p.low   * c.cum_price_factor AS adj_low,
-       p.close * c.cum_price_factor AS adj_close
-FROM {price_daily} p
-JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND c.date = p.date
-"""
-# 전방 조정(S21 후속 · S23 구간 제한) — `equity.views._FWD_CTE` + `v_adj_price_fwd` 본문 사본.
-# 계수는 fold_date = greatest(apply_date, available_date) 부터 앞으로 누적해 곱하고(공개 전 계수는
-# 접지 않는다), 누적은 `security_span` 구간 안에서만 한다(재상장 종목의 이전 구간 계수 누출 방지).
-# 계수 쪽 구간 부여만 **엄격 부등호**라 구간 첫날에 접히는 계수는 어떤 행에도 곱해지지 않는다.
-_ADJ_PRICE_FWD_SQL = """
-WITH cut AS (
-    SELECT k.date AS cutoff
-    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
-          FROM {trading_calendar} WHERE date <= as_of) k
-    WHERE k.n = coalesce(lag_override, 0)
-),
-vis AS (
-    SELECT ticker, greatest(apply_date, available_date) AS fold_date,
-           price_factor, share_factor, available_date
-    FROM {adj_factor}
-    WHERE factor_ok AND apply_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
-),
-spn AS (
-    SELECT f.ticker, coalesce(s.span_seq, -1) AS span_seq, f.fold_date,
-           f.price_factor, f.share_factor, f.available_date
-    FROM vis f
-    ASOF LEFT JOIN {security_span} s ON s.ticker = f.ticker AND f.fold_date > s.first_date
-),
-fac AS (
-    SELECT ticker, span_seq, fold_date,
-           product(price_factor) AS pf, product(share_factor) AS sf,
-           max(available_date) AS available_date
-    FROM spn
-    GROUP BY ticker, span_seq, fold_date
-),
-pre AS (
-    SELECT ticker, span_seq, fold_date,
-           product(pf) OVER w AS cum_price_factor,
-           product(sf) OVER w AS cum_share_factor,
-           max(available_date) OVER w AS available_date
-    FROM fac
-    WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
-                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-),
-px AS (
-    SELECT p.*, coalesce(s.span_seq, 0) AS span_seq
-    FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
-    ASOF LEFT JOIN {security_span} s ON s.ticker = p.ticker AND p.date >= s.first_date
-),
-fwd AS (
-    SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
-           coalesce(c.cum_price_factor, 1) AS cum_price_factor,
-           coalesce(c.cum_share_factor, 1) AS cum_share_factor,
-           greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
-    FROM px p
-    ASOF LEFT JOIN pre c
-      ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
-)
-SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
-       cum_price_factor, cum_share_factor, available_date,
-       open  * cum_share_factor AS adj_open,
-       high  * cum_share_factor AS adj_high,
-       low   * cum_share_factor AS adj_low,
-       close * cum_share_factor AS adj_close
-FROM fwd
-"""
-
-# `price_adj_daily`(S23) 산출 사본 — `database/src/equity/sql/price_adj_daily.sql` 과 같은 식이다.
-# 매크로가 아니라 **표**다. 워크벤치 `price.adj_close` 는 이 표를 원장 뷰 `v_adj_close`
-# (`LEDGER_MACROS`)로 읽는다(#220).
-_PRICE_ADJ_DAILY_SQL = """
-WITH px AS (
-    SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr,
-           coalesce(s.span_seq, 0) AS span_seq
-    FROM {price_daily} p
-    ASOF LEFT JOIN {security_span} s ON s.ticker = p.ticker AND p.date >= s.first_date
-),
-okf AS (
-    SELECT f.ticker, greatest(f.apply_date, f.available_date) AS fold_date,
-           f.price_factor, f.share_factor, f.available_date
-    FROM {adj_factor} f WHERE f.factor_ok
-),
-oks AS (
-    SELECT o.ticker, coalesce(s.span_seq, -1) AS span_seq, o.fold_date,
-           o.price_factor, o.share_factor, o.available_date
-    FROM okf o
-    ASOF LEFT JOIN {security_span} s ON s.ticker = o.ticker AND o.fold_date > s.first_date
-),
-fac AS (
-    SELECT ticker, span_seq, fold_date,
-           product(price_factor) AS pf, product(share_factor) AS sf,
-           count(*) AS n_fac, max(available_date) AS avail
-    FROM oks GROUP BY ticker, span_seq, fold_date
-),
-cum AS (
-    SELECT ticker, span_seq, fold_date,
-           product(pf) OVER w AS cum_price_factor,
-           product(sf) OVER w AS cum_share_factor,
-           sum(n_fac)  OVER w AS n_factors_applied,
-           max(avail)  OVER w AS factor_available_date
-    FROM fac
-    WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
-                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-),
-badf AS (SELECT e.ticker, e.apply_date FROM {adj_factor} e WHERE NOT e.factor_ok),
-bads AS (
-    SELECT b.ticker, coalesce(s.span_seq, -1) AS span_seq, b.apply_date
-    FROM badf b
-    ASOF LEFT JOIN {security_span} s ON s.ticker = b.ticker AND b.apply_date >= s.first_date
-),
-bad AS (
-    SELECT ticker, span_seq, apply_date, count(*) AS n_bad FROM bads
-    GROUP BY ticker, span_seq, apply_date
-),
-badcum AS (
-    SELECT ticker, span_seq, apply_date,
-           sum(n_bad) OVER (PARTITION BY ticker, span_seq ORDER BY apply_date
-                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-             AS n_unadjusted_events
-    FROM bad
-),
-joined AS (
-    SELECT p.ticker, p.date, p.span_seq, p.open, p.high, p.low, p.close, p.volume_shr,
-           coalesce(c.cum_price_factor, 1)  AS cum_price_factor,
-           coalesce(c.cum_share_factor, 1)  AS cum_share_factor,
-           coalesce(c.n_factors_applied, 0) AS n_factors_applied,
-           c.factor_available_date
-    FROM px p
-    ASOF LEFT JOIN cum c
-      ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
-),
-unadj AS (
-    SELECT j.*, coalesce(b.n_unadjusted_events, 0) AS n_unadjusted_events
-    FROM joined j
-    ASOF LEFT JOIN badcum b
-      ON b.ticker = j.ticker AND b.span_seq = j.span_seq AND j.date >= b.apply_date
-)
-SELECT u.ticker, u.date,
-       u.open       * u.cum_share_factor  AS adj_open,
-       u.high       * u.cum_share_factor  AS adj_high,
-       u.low        * u.cum_share_factor  AS adj_low,
-       u.close      * u.cum_share_factor  AS adj_close,
-       u.volume_shr * u.cum_price_factor  AS adj_volume_shr,
-       u.cum_price_factor, u.cum_share_factor,
-       CAST(u.n_factors_applied AS BIGINT)   AS n_factors_applied,
-       CAST(u.n_unadjusted_events AS BIGINT) AS n_unadjusted_events,
-       greatest(u.date, coalesce(u.factor_available_date, u.date)) AS available_date,
-       'derived' AS available_basis
-FROM unadj u
-ORDER BY u.ticker, u.date
-"""
-# 컨센서스 뷰(S17) — `equity.views.TEMPLATES['v_consensus']` 본문 사본. `available_date` 로만
-# 자르고 겹치는 달의 wise·v3 2행을 먼저 알 수 있던 한 행으로 접는다(obs_month 로 자르지 않는다).
-_CONSENSUS_SQL = """
-WITH cut AS (
-    SELECT k.date AS cutoff
-    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
-          FROM {trading_calendar} WHERE date <= as_of) k
-    WHERE k.n = coalesce(lag_override, 0)
-),
-vis AS (
-    SELECT c.*, row_number() OVER (
-               PARTITION BY c.ticker, c.obs_month, c.target_period, c.metric
-               ORDER BY c.available_date, c.src) AS rn
-    FROM {consensus_daily} c
-    WHERE c.available_date <= (SELECT cutoff FROM cut)
-)
-SELECT ticker, obs_month, target_period, metric, src, obs_date,
-       est_mean, est_min, est_max, unit, coverage_degraded,
-       available_date, available_basis
-FROM vis
-WHERE rn = 1
-"""
-
-# 시그니처 → (본문, 읽는 테이블). `equity.views.SIGNATURES`·`MACRO_INPUTS` 의 사본이다.
-_PRICE_INPUTS = ("price_daily", "adj_factor", "trading_calendar")
-_FWD_INPUTS = ("price_daily", "adj_factor", "trading_calendar", "security_span")
-_CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("v_cum_adj(as_of, lag_override := NULL)", _CUM_ADJ_SQL, _PRICE_INPUTS),
-    ("v_adj_price(as_of, lag_override := NULL)", _ADJ_PRICE_SQL, _PRICE_INPUTS),
-    ("v_adj_price_fwd(as_of, lag_override := NULL)", _ADJ_PRICE_FWD_SQL, _FWD_INPUTS),
-    (
-        "v_consensus(as_of, lag_override := NULL)",
-        _CONSENSUS_SQL,
-        ("consensus_daily", "trading_calendar"),
-    ),
-)
 # 원장 템플릿(`equity.views`)을 그대로 렌더하는 매크로 — 본문을 여기 옮겨 적지 않는다(#249).
 # 손 픽스처 표가 그 매크로가 읽는 열을 다 가질 때만 이렇게 쓸 수 있다(duckdb 는 매크로를 만들 때
 # 바인딩한다). 다른 매크로를 부르는 매크로는 그 뒤에 둔다(`v_adj_close` → `v_unfolded_event`).
-LEDGER_MACROS = ("v_fin_latest", "v_credit_balance", "v_unfolded_event", "v_adj_close")
+LEDGER_MACROS = (
+    "v_fin_latest", "v_credit_balance", "v_unfolded_event", "v_adj_close", "v_consensus"
+)
 
 
 def table_builds(root: Path) -> dict[str, str]:
@@ -808,8 +607,8 @@ def _partition_source(root: Path, table: str, build_id: str) -> str:
 def price_adj_table(root: Path) -> pa.Table:
     """`price_adj_daily`(S23) — 이미 쓴 `price_daily`·`adj_factor`·`security_span` 위에서 굽는다.
 
-    `price.adj_close` 의 산출처다. 손으로 값을 적지 않고 실물과 같은 식(`_PRICE_ADJ_DAILY_SQL`)을
-    돌린다 — 그래야 분할·재상장 구간의 기대값이 어댑터 테스트의 손계산과 갈리지 않는다.
+    `price.adj_close` 의 산출처다. 원장의 S23 선언이 가리키는 SQL을 그대로 실행한다.
+    옛 판 price_daily의 입력 모양만 현재 빌더 스키마로 맞추고 산출 규칙은 복제하지 않는다.
     """
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
@@ -822,7 +621,18 @@ def price_adj_table(root: Path) -> pa.Table:
     sources = {name: _partition_source(root, name, builds[name]) for name in tables}
     con = duckdb.connect()
     try:
-        return con.execute(_PRICE_ADJ_DAILY_SQL.format(**sources)).to_arrow_table()
+        for name, source in sources.items():
+            projection = "*"
+            if name == "price_daily":
+                columns = con.sql(f"SELECT * FROM {source} LIMIT 0").columns
+                # basis 없는 옛 판은 확정 KRX 값이다. 원본 parquet은 그대로 두므로 어댑터의
+                # 구판 호환 테스트도 유지한다. 이는 입력 스키마 보충이지 조정 산출의 사본이 아니다.
+                if "basis" not in columns:
+                    projection += ", 'krx' AS basis, FALSE AS corp_action_pending"
+            con.execute(f"CREATE VIEW {name} AS SELECT {projection} FROM {source}")
+        rule = import_ledger_module("equity.rules_s23").PRICE_ADJ_DAILY
+        sql = rule.sql_path.read_text(encoding="utf-8").strip().rstrip(";")
+        return con.execute(f"{sql} ORDER BY ticker, date").to_arrow_table()
     finally:
         con.close()
 
@@ -844,13 +654,8 @@ def write_catalog(
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
     views = import_ledger_module("equity.views")
-    # (이름, 시그니처, 읽는 테이블, 읽는 자리 → 본문) — 사본은 `str.format_map`, 원장 매크로는
-    # 원장의 `render_body` 가 본문을 채운다.
+    # 본문·시그니처·입력 목록은 모두 원장 views에서 읽는다.
     renders: list[tuple[str, str, tuple[str, ...], Callable[[dict[str, str]], str]]] = [
-        (signature.split("(", 1)[0], signature, inputs, body.format_map)
-        for signature, body, inputs in _CATALOG_BODIES
-    ]
-    renders += [
         (name, views.SIGNATURES[name], views.MACRO_INPUTS[name], partial(views.render_body, name))
         for name in LEDGER_MACROS
     ]
@@ -1179,8 +984,12 @@ WB_PROFILE_FIELDS = (
     "consensus.recommendation",
     "consensus.analyst_count",
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",
@@ -1362,7 +1171,16 @@ def build_workbench_root(
         root, "corp_event", corp_event_table(WB_EVENT_ROWS), year_column="announce_date"
     )
     write_equity_table(root, "holder_daily", holder_table(WB_HOLDER_ROWS))
-    write_equity_table(root, "flow_daily", flow_table(WB_FLOW_ROWS), year_column="date")
+    write_equity_table(
+        root, "flow_daily",
+        flow_table(
+            WB_FLOW_ROWS,
+            ownership=[52.79, 99.99, None, None, 0.0, 12.34, None],
+            exhaustion=[62.79, 99.99, None, None, 0.0, 22.34, None],
+            pension=[-123_000_000, None, None, None, 0.0, None, None],
+        ),
+        year_column="date",
+    )
     write_equity_table(root, "short_daily", short_table(WB_SHORT_ROWS), year_column="date")
     write_equity_table(root, "credit_daily", credit_table(WB_CREDIT_ROWS), year_column="date")
     if profile:

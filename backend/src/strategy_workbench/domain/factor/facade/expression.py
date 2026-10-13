@@ -1,3 +1,4 @@
+from strategy_workbench.domain.factor._metadata import field_metadata
 from strategy_workbench.domain.factor._nodes import (
     EXPRESSION_NODE_KINDS,
     BinaryNode,
@@ -25,6 +26,7 @@ from strategy_workbench.domain.factor._nodes import (
 )
 
 __all__ = [
+    "field_metadata",
     "EXPRESSION_NODE_KINDS",
     "BinaryNode",
     "BinaryOperator",

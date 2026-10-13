@@ -157,9 +157,13 @@ def test_order_and_fill_round_trip() -> None:
         fee=100.0,
         slippage_per_share=0.0,
         cap_volume=1_000,
+        sell_tax=7.25,
     )
     assert order_event_from_dict(order_event_to_dict(order)) == order
     assert fill_event_from_dict(fill_event_to_dict(fill)) == fill
+    legacy = fill_event_to_dict(fill)
+    del legacy["sell_tax"]
+    assert fill_event_from_dict(legacy).sell_tax == 0.0
 
 
 def test_order_event_round_trip_keeps_order_type_and_prices() -> None:

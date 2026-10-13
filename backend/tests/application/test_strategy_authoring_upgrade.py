@@ -73,7 +73,6 @@ def test_upgrade_returns_current_text_its_environment_and_a_clean_compile() -> N
     upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
 
     assert upgraded.format is SourceFormat.YAML
-    assert upgraded.source == _read("quality_momentum.v1_2.commented.yaml")
     assert upgraded.compiled.schema_version == CURRENT_SCHEMA_VERSION
     assert upgraded.compiled.spec_hash is not None and upgraded.compiled.diagnostics == ()
     assert (

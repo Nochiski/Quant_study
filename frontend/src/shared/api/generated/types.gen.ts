@@ -612,7 +612,7 @@ export type BacktestRunResult = {
  *
  * A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
  *
- * `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+ * `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
  * so a run can name a saved revision (P1-09). The run service rejects a request carrying both
  * or neither (one coded 422, `backtest.run.invalid`).
  * After resolution the run spec stored in the manifest carries both: `strategy` is the exact
@@ -2284,6 +2284,10 @@ export type FactorExecutionPlan = {
    */
   as_of_policy?: string;
   /**
+   * Evaluation Version
+   */
+  evaluation_version: string;
+  /**
    * Graph Hash
    */
   graph_hash: string;
@@ -3707,6 +3711,10 @@ export type RawArtifactBundle = {
    */
   fills: Array<RawFill>;
   /**
+   * Order Updates
+   */
+  order_updates?: Array<RawOrderUpdate> | null;
+  /**
    * Orders
    */
   orders: Array<RawOrder>;
@@ -3787,6 +3795,10 @@ export type RawFill = {
    */
   security_id: string;
   /**
+   * Sell Tax
+   */
+  sell_tax?: number | null;
+  /**
    * Session
    */
   session: string;
@@ -3836,6 +3848,38 @@ export type RawOrder = {
    * Time In Force
    */
   time_in_force: string;
+};
+
+/**
+ * RawOrderUpdate
+ *
+ * 엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다.
+ */
+export type RawOrderUpdate = {
+  /**
+   * Cap Volume
+   */
+  cap_volume?: number | null;
+  /**
+   * Detail
+   */
+  detail?: string | null;
+  /**
+   * Order Id
+   */
+  order_id: string;
+  /**
+   * Reason Code
+   */
+  reason_code?: string | null;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Status
+   */
+  status: string;
 };
 
 /**
@@ -4494,6 +4538,10 @@ export type RunManifest = {
    * Environment Hash
    */
   environment_hash: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
   /**
    * Metric Registry Version
    */
@@ -5707,6 +5755,10 @@ export type StrategyTraceResponse = {
    */
   as_of: string;
   /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
    * Factor Id
    */
   factor_id: string;
@@ -5908,6 +5960,10 @@ export type TargetTape = {
    * Execution Timing
    */
   execution_timing?: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
   /**
    * Frames
    */
@@ -6471,7 +6527,7 @@ export type TurnAcceptedView = {
 /**
  * TurnContextPayload
  *
- * 한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7).
+ * 한 턴이 보는 편집기 상태. 저장 문서와 별개로 아직 저장하지 않은 원문·진단을 요청에 싣는다.
  */
 export type TurnContextPayload = {
   /**

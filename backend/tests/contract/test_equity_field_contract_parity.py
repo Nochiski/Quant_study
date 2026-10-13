@@ -4,7 +4,8 @@
 계약(`resolve_factor_fields`·`list_fields`)으로 단위 경고·field_missing·타입 검사를 하므로, 같은
 field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 green 인 문서가 실데이터에서만 다르게
 동작한다. 정본은 원장이다. mock 은 원장 스키마를 옮긴 duckdb 선언표(`FIELD_SPECS`)에 단위·값
-타입을 맞추고, 선언표의 값 타입과 mock 의 랙은 원장 `dataset_profile` 선언에 맞춘다(아래 #230 절).
+타입을 맞추고, 선언표의 단위·빈도·값 타입과 mock 의 랙은 원장 `dataset_profile` 선언에 맞춘다.
+단위·빈도의 어휘 차이는 아래 계약 대응표가 소유한다(#375 DR-A-13).
 
 대조는 선언표를 직접 읽는다 — 손 픽스처 루트의 `list_fields()` 는 그 루트에 원천 테이블이 있는
 필드만 내므로, 새 `FieldSpec` 이 픽스처보다 먼저 들어오면 대조를 빠져나갈 수 있다.
@@ -231,13 +232,49 @@ def test_duckdb_선언표의_원주가_표시는_같은_단위의_실재하는_�
 # (`SourceSpec.frequency`)로 맞춘다. mock 이 대신 서는 것은 그 어댑터이기 때문이다.
 
 
-def _ledger_profiles() -> dict[str, Any]:
-    """원장 빌드가 `dataset_profile` 로 내는 필드 선언(field_id → `FieldProfile`)."""
+def _ledger_fields() -> dict[str, tuple[str, Any]]:
+    """원장 빌드 선언의 원천과 프로필. report 주기 해석에는 원천 맥락도 필요하다."""
     pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
     from tests.equity_fixture import import_ledger_module
 
     rules_s19: Any = import_ledger_module("equity.rules_s19")
-    return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
+    return {profile.field_id: (table, profile) for table, profile in rules_s19.owned_fields()}
+
+
+def _ledger_profiles() -> dict[str, Any]:
+    return {field_id: profile for field_id, (_, profile) in _ledger_fields().items()}
+
+
+# 원장 → 워크벤치 계약의 어휘 대응이다. 값의 배율을 바꾸지 않는다. 새 단위·주기는 자동 통과하지
+# 않는다. 특히 빈 단위가 항상 score인 것도, report가 항상 분기 보고인 것도 아니다.
+_LEDGER_UNITS = {"KRW": "KRW", "억원": "억원", "원": "KRW", "주": "shares", "명": "count"}
+_CONTEXT_UNITS = {("consensus.recommendation", ""): "score"}
+_LEDGER_FREQUENCIES = {"session": "daily", "monthly": "monthly", "event": "event"}
+_CONTEXT_FREQUENCIES = {("fin_std", "report"): "quarterly", ("dividend_event", "report"): "annual"}
+
+
+@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+def test_지원_필드의_단위가_원장_척도와_같다(field_id: str) -> None:
+    _, ledger = _ledger_fields()[field_id]
+    expected = _LEDGER_UNITS.get(ledger.unit, _CONTEXT_UNITS.get((field_id, ledger.unit)))
+    actual = FIELD_BY_ID[field_id].unit
+    assert expected is not None and actual == expected, (
+        f"원장 단위와 어댑터 계약이 다르다 — field_id={field_id} "
+        f"ledger_unit={ledger.unit!r} expected={expected!r} actual={actual!r}"
+    )
+
+
+@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+def test_지원_필드의_빈도가_원장_원천의_주기와_같다(field_id: str) -> None:
+    table, ledger = _ledger_fields()[field_id]
+    expected = _LEDGER_FREQUENCIES.get(
+        ledger.frequency, _CONTEXT_FREQUENCIES.get((table, ledger.frequency))
+    )
+    actual = SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].frequency.value
+    assert expected is not None and actual == expected, (
+        f"원장 주기와 어댑터 계약이 다르다 — field_id={field_id} table={table} "
+        f"ledger_frequency={ledger.frequency!r} expected={expected!r} actual={actual!r}"
+    )
 
 
 @pytest.mark.parametrize("field_id", _shared_field_ids())

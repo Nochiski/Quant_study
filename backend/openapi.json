@@ -7086,10 +7086,6 @@
       "RunManifest": {
         "description": "What a finished run was made of.\n\n`strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run\nexecuted one strategy.",
         "properties": {
-          "annualization_days": {
-            "title": "Annualization Days",
-            "type": "integer"
-          },
           "completed_at": {
             "format": "date-time",
             "title": "Completed At",
@@ -7104,9 +7100,6 @@
             "title": "Data Snapshot Id",
             "type": "string"
           },
-          "engine_core": {
-            "$ref": "#/components/schemas/ExecutionCore"
-          },
           "engine_version": {
             "title": "Engine Version",
             "type": "string"
@@ -7118,21 +7111,9 @@
             "title": "Environment Hash",
             "type": "string"
           },
-          "fee_bps": {
-            "title": "Fee Bps",
-            "type": "number"
-          },
-          "initial_cash": {
-            "title": "Initial Cash",
-            "type": "number"
-          },
           "metric_registry_version": {
             "title": "Metric Registry Version",
             "type": "string"
-          },
-          "participation_rate": {
-            "title": "Participation Rate",
-            "type": "number"
           },
           "run_fingerprint": {
             "title": "Run Fingerprint",
@@ -7146,13 +7127,9 @@
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
           "schema_version": {
-            "default": "backtest-run-v2",
+            "default": "backtest-run-v3",
             "title": "Schema Version",
             "type": "string"
-          },
-          "slippage_bps": {
-            "title": "Slippage Bps",
-            "type": "number"
           },
           "strategy_hash": {
             "title": "Strategy Hash",
@@ -7178,7 +7155,6 @@
           "run_id",
           "created_at",
           "completed_at",
-          "engine_core",
           "engine_version",
           "run_fingerprint",
           "run_spec",
@@ -7186,11 +7162,6 @@
           "data_snapshot_id",
           "target_tape_hash",
           "metric_registry_version",
-          "initial_cash",
-          "annualization_days",
-          "fee_bps",
-          "slippage_bps",
-          "participation_rate",
           "environment",
           "environment_hash",
           "strategy_provenance"

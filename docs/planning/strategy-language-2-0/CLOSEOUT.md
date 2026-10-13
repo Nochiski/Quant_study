@@ -75,7 +75,8 @@ CS-05는 서버 응답 가중치를 기대값에 재사용하는 oracle 공백�
 
 ### 로컬 전체 게이트와 한계
 
-- frontend 전체 default suite2회: 각각100파일·1,287개 통과. 기존 exact 선택 텍스트·focus·timeout 유지.
+- frontend 전체 default suite2회: 각각100파일·1,287개 통과. CI 클릭 소실 후속 포함 `a427169d`에서
+  추가 전체1회100파일·1,288개 통과. 기존 exact 선택 텍스트·focus·timeout 유지.
 - frontend lint/type/build, backend Ruff/Pyright(오류0) 통과. 로컬 Rust 확장 source 경고는 공식 CI의
   Rust 빌드와 전체 suite로 검증한다.
 - 실제 스크린리더 음성(Orca/NVDA/VoiceOver 등)은 이 환경에서 실행하지 않았다. 자동 검사는 이를 대체하지 않는다.
@@ -101,3 +102,7 @@ mousedown/mouseup 사이에 도착할 때 Fragment→section 교체로 클릭 �
 결정적으로 재현했다. 같은 section과 editor key를 유지하는 #441 후속 `655262b5`는
 콜백0→정확한 pointer1회·focus 보존으로 바뀌었다. 관련 unit20·route92 및 원실패30회 통과,
 독립13개 통과 및 차단0이다. 기존 timeout·선택문자열·focus 단언을 약화하지 않았다.
+
+Windows CI38348256834에서 CS-05/06 신규4개가 통과했다. 노드 진단 화면은 의도한 설명 축약과
+복귀 버튼을 반영한572×500 실제 캡처를 검토해 #442 기준선을 갱신했다. 오류 영역을 제외한
+기존 입력·식·도움말의 가독성을 확인했다. 임시 이미지 로그 전달 단계는 제거했다.

@@ -140,3 +140,20 @@ paths:
 종목 이름은 기존 SecurityDirectoryPort가 소유한다. frontend `StrategyPreview`는 생성 SDK 응답을 표시만 한다.
 팩터 선택은 기존 `prepareStrategyTrace`의 요청 신원에 포함되고, useStrategyTrace의 cache·취소·stale 가드를 공유한다.
 `/factors/preview`·FactorResearchService.preview·FactorObservationPort는 제거했다. validate/explain과 equity API는 유지한다.
+
+
+### P5-03 보조 순위 (2026-10-02 확정)
+
+`PortfolioStep.tie_breaker_factor_id`와 `tie_breaker_direction`이 보조 팩터와 방향을 선언한다.
+`composite_factors`가 역가중·보조 팩터를 alpha 정규화·가중합·분모에서 제외한다.
+`domain/portfolio/_compiler.py`의 `_rank_candidates`가 주 점수 → 보조값 유효 여부 → 지정 방향의
+원시 보조값 → 기존 종목 ID 순서를 소유한다. 평가기의 실행 결측 정책 뒤에 남은 결측은
+같은 주 점수 그룹의 유효값 뒤로 보낸다. 공개 전 값도 사용할 수 없는 보조값이며 종목 자체를
+탈락시키지 않는다. 롱·숏은 기존 주 점수 순서를 각각 유지하고 보조 방향은 동일하게 적용한다.
+최종 ID 순서는 종전처럼 롱 오름차순·숏 내림차순이다. 보조 팩터의 `weight`·자체 `direction`은
+이 순위에 쓰지 않는다. 비중·버퍼도 같은 순서를 읽는다.
+
+참조 검증과 alpha 0개 차단은 strategy validator, 설명은 `_explanation.py`, 그래프 컨트롤은
+runtime schema의 factor 참조·적용 조건 투영을 사용한다. frontend가 점수 공식을 복제하지 않는다.
+비활성 기본 보조 설정은 canonical payload에 넣지 않아 기존 저장 문서의 `spec_hash`를 보존한다.
+활성 참조·방향은 해시에 포함하고 semantic hash의 참조 정규화도 같은 팩터 번호로 바꾼다.

@@ -360,8 +360,9 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
         "#/$defs/RiskStep/risk_field_id": "equity-field",
     }
     assert set(references.values()) == {"node", "parameter", "factor"}
-    # 문서 안 팩터를 가리키는 참조는 리스크 역가중 팩터 하나뿐이다(P2-06, spec D3 S6).
+    # 역가중과 동점 해소는 같은 문서 팩터 참조 네임스페이스를 쓴다.
     assert [path for path, namespace in references.items() if namespace == "factor"] == [
+        "#/$defs/PortfolioStep/tie_breaker_factor_id",
         "#/$defs/RiskStep/risk_factor_id"
     ]
     defines = _properties_with(schema, "x-defines")

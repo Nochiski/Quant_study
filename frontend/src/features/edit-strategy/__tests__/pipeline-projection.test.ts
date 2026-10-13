@@ -112,6 +112,7 @@ describe("projectPipeline", () => {
           ],
           ["/portfolio/turnover_buffer_count"],
           ["/portfolio/minimum_trade_weight"],
+          ["/portfolio/tie_breaker_factor_id", "/portfolio/tie_breaker_direction"],
         ],
       },
       {

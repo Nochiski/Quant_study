@@ -22,6 +22,11 @@ def canonical_strategy_payload(spec: StrategySpec) -> dict[str, Any]:
     `1.0` and a JSON `1` in a choice parameter canonicalise identically.
     """
     payload = asdict(spec)
+    # 비활성 기본 설정은 기존 저장 문서의 spec_hash를 바꾸지 않는다.
+    if spec.portfolio.tie_breaker_factor_id is None:
+        payload["portfolio"].pop("tie_breaker_factor_id")
+        if spec.portfolio.tie_breaker_direction.value == "high":
+            payload["portfolio"].pop("tie_breaker_direction")
     identity = payload.pop("identity")
     payload["schema_version"] = identity["schema_version"]
     payload["parameters"] = [_normalize_parameter(item) for item in payload["parameters"]]
@@ -134,11 +139,18 @@ def _structural(spec: StrategySpec) -> StrategySpec:
     """
     numbers = {factor.factor_id: str(index) for index, factor in enumerate(spec.factors)}
     risk_factor_id = spec.risk.risk_factor_id
+    tie_factor_id = spec.portfolio.tie_breaker_factor_id
     return replace(
         spec,
         factors=tuple(
             replace(factor, factor_id=str(index), graph=_structural_graph(factor.graph))
             for index, factor in enumerate(spec.factors)
+        ),
+        portfolio=replace(
+            spec.portfolio,
+            tie_breaker_factor_id=None
+            if tie_factor_id is None
+            else numbers.get(tie_factor_id, tie_factor_id),
         ),
         risk=replace(
             spec.risk,

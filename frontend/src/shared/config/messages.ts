@@ -1,4 +1,13 @@
 const ko = {
+  "strategy.field.portfolio_step.tie_breaker_factor_id.card": "주 점수가 같으면 {tie_breaker_factor_id}을(를) {tie_breaker_direction}으로 비교한다",
+  "strategy.contract.applicable.tie_breaker_direction": "동점 해소 팩터를 지정했을 때",
+  "strategy.field.portfolio_step.tie_breaker_factor_id": "동점 해소 팩터",
+  "strategy.field.portfolio_step.tie_breaker_factor_id.description": "주 점수가 같은 종목끼리만 비교할 팩터입니다. 이 팩터는 합성 점수에서 빠집니다.",
+  "strategy.field.portfolio_step.tie_breaker_direction": "동점 해소 방향",
+  "strategy.field.portfolio_step.tie_breaker_direction.description": "보조값까지 같으면 기존 종목 ID 순서를 유지합니다. 결측 정책 적용 후에도 값이 없으면 유효값 뒤에 둡니다.",
+  "strategy.field.portfolio_step.tie_breaker_direction.value.high": "큰 값 우선",
+  "strategy.field.portfolio_step.tie_breaker_direction.value.low": "작은 값 우선",
+
   "recipe.title": "팩터 레시피",
   "recipe.edit": "레시피 편집",
   "recipe.back": "파이프라인으로",
@@ -2155,6 +2164,15 @@ export type MessageKey = keyof typeof ko;
 export const messages = {
   ko,
   en: {
+    "strategy.field.portfolio_step.tie_breaker_factor_id.card": "When primary scores tie, compare {tie_breaker_factor_id} with {tie_breaker_direction}",
+    "strategy.contract.applicable.tie_breaker_direction": "When a tie-breaker factor is set",
+    "strategy.field.portfolio_step.tie_breaker_factor_id": "Tie-breaker factor",
+    "strategy.field.portfolio_step.tie_breaker_factor_id.description": "Compare this factor only when primary scores tie. It is excluded from the composite score.",
+    "strategy.field.portfolio_step.tie_breaker_direction": "Tie-breaker direction",
+    "strategy.field.portfolio_step.tie_breaker_direction.description": "Remaining missing values follow valid values. Equal auxiliary values preserve the existing security ID order.",
+    "strategy.field.portfolio_step.tie_breaker_direction.value.high": "Higher first",
+    "strategy.field.portfolio_step.tie_breaker_direction.value.low": "Lower first",
+
     "recipe.title": "Factor recipe",
     "recipe.edit": "Edit recipe",
     "recipe.back": "Back to pipeline",

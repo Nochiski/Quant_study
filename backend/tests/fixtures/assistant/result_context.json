@@ -53,7 +53,9 @@
       "turnover_buffer_count": 0,
       "minimum_trade_weight": 0.0,
       "liquidity_field_id": null,
-      "minimum_liquidity": null
+      "minimum_liquidity": null,
+      "tie_breaker_factor_id": null,
+      "tie_breaker_direction": "high"
     }
   },
   "metrics": [

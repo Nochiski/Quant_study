@@ -62,7 +62,9 @@
         "turnover_buffer_count": 0,
         "minimum_trade_weight": 0.0,
         "liquidity_field_id": null,
-        "minimum_liquidity": null
+        "minimum_liquidity": null,
+        "tie_breaker_factor_id": null,
+        "tie_breaker_direction": "high"
       },
       "x-description-key": "strategy.section.portfolio",
       "x-stage": "portfolio"
@@ -953,6 +955,39 @@
             ],
             "description_key": "strategy.contract.applicable.minimum_liquidity",
             "owned_by_error": "strategy.portfolio.liquidity_field"
+          }
+        },
+        "tie_breaker_factor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-description-key": "strategy.field.portfolio_step.tie_breaker_factor_id",
+          "x-reference": "factor"
+        },
+        "tie_breaker_direction": {
+          "type": "string",
+          "enum": [
+            "high",
+            "low"
+          ],
+          "default": "high",
+          "x-description-key": "strategy.field.portfolio_step.tie_breaker_direction",
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/tie_breaker_factor_id",
+                "equals": null,
+                "not_null": true
+              }
+            ],
+            "description_key": "strategy.contract.applicable.tie_breaker_direction",
+            "owned_by_error": null
           }
         }
       },

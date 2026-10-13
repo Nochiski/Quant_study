@@ -311,7 +311,10 @@ export const fieldFragment = (
 };
 
 /** 합성 점수에서 빠진 팩터(역가중 원천, P2-06)를 알리는 backend 진단. 제외 규칙을 여기서 다시 판정하지 않는다. */
-const EXCLUDED_FACTOR = "strategy.risk.risk_factor_excluded";
+const EXCLUDED_FACTORS = new Set([
+  "strategy.risk.risk_factor_excluded",
+  "strategy.portfolio.tie_breaker_factor_excluded",
+]);
 
 const identity = (item: FormListItem): unknown =>
   item.fields.find((field) => field.key === item.identityKey)?.value;
@@ -380,7 +383,7 @@ export const strategySummary = (
       .flatMap((stage) => stage.cards.flatMap((card) => card.rows))
       .filter(({ field }) =>
         field.diagnostics.some(
-          (diagnostic) => diagnostic.code === EXCLUDED_FACTOR,
+          (diagnostic) => EXCLUDED_FACTORS.has(diagnostic.code),
         ),
       )
       .map(({ field }) => field.value),

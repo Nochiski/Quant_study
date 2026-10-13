@@ -74,7 +74,7 @@
 - CrossSectionalNode.operator 값: rank | zscore | winsorize | demean
 - GroupNode.operator 값: neutralize | rank
 - ComparisonNode.operator 값: gt | gte | lt | lte | eq
-- FactorSignal.direction 값: high | low
+- FactorSignal.direction, PortfolioStep.tie_breaker_direction 값: high | low
 - SignalStep.normalization 값: none | rank | zscore
 - PortfolioStep.side 값: long_only | long_short
 - PortfolioStep.weighting 값: equal | factor_score | rank | risk

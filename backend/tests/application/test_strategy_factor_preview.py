@@ -92,3 +92,85 @@ def test_factor_preview_direction_cutoff_and_pit_membership(
     assert preview.valid_count == 6
     assert preview.missing_count == 0
     assert [row.security_id for row in preview.top] == [f"sec-test-{index}" for index in indices]
+
+
+@pytest.mark.parametrize(
+    "missing,first",
+    [("drop", "sec-test-2"), ("zero", "sec-test-1"), ("cross_sectional_median", "sec-test-2")],
+)
+def test_tie_breaker_uses_evaluated_missing_policy_in_trace(missing: str, first: str) -> None:
+    from strategy_workbench.domain.equity.facade.research_data import CellKind
+    from strategy_workbench.domain.factor.facade.expression import (
+        BinaryNode,
+        BinaryOperator,
+        MissingPolicy,
+    )
+
+    class MissingSource(_RankingSource):
+        def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+            raw = super().load_raw_observations(query)
+            return replace(
+                raw,
+                observations=tuple(
+                    replace(
+                        row,
+                        fields=tuple(
+                            replace(field, value=None, kind=CellKind.MISSING)
+                            if row.security_id == "sec-test-1" and field.field_id == "price.close"
+                            else field
+                            for field in row.fields
+                        ),
+                    )
+                    for row in raw.observations
+                ),
+            )
+
+    primary = FactorSignal(
+        factor_id="primary",
+        label="주 점수",
+        direction=FactorDirection.HIGH,
+        graph=FactorGraph(
+            nodes=(
+                FieldNode("volume", "price.adj_close", "field"),
+                BinaryNode("fixed", BinaryOperator.DIVIDE, "volume", "volume", "binary"),
+            ),
+            output_node_id="fixed",
+        ),
+    )
+    auxiliary = FactorSignal(
+        factor_id="aux",
+        label="보조",
+        direction=FactorDirection.HIGH,
+        graph=FactorGraph(
+            nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"
+        ),
+    )
+    spec = _spec(primary, auxiliary)
+    spec = replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio,
+            tie_breaker_factor_id="aux",
+            tie_breaker_direction=FactorDirection.LOW,
+            selection_count=2,
+        ),
+    )
+    from strategy_workbench.domain.strategy.facade.validation import validate_strategy
+
+    assert validate_strategy(spec).valid, validate_strategy(spec).issues
+    response = StrategyTraceService(
+        _service(MissingSource()), InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    ).trace(
+        StrategyTraceRequest(
+            strategy_source=InlineDraft(spec, "inline_draft", "missing-tie"),
+            environment=replace(_environment(), missing=MissingPolicy(missing)),
+            as_of=_environment().start,
+            security_ids=tuple(f"sec-test-{i}" for i in range(6)),
+            factor_id="aux",
+        )
+    )
+    assert response.summary is not None
+    assert response.summary.targets[0].position.security_id == first
+    assert response.factor_preview.missing_count == (1 if missing == "drop" else 0)
+    assert response.target is not None
+    assert all(candidate.eligible for candidate in response.target.candidates)

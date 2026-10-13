@@ -172,6 +172,9 @@ class PortfolioStep:
         default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.ELIGIBILITY}
     )
     minimum_liquidity: float | None = None
+    # 보조 팩터는 합성에서 제외하고 주 점수 동점 안에서만 원시 출력으로 정렬한다.
+    tie_breaker_factor_id: str | None = field(default=None, metadata=REFERENCE_FACTOR)
+    tie_breaker_direction: FactorDirection = FactorDirection.HIGH
 
 
 @dataclass(frozen=True)
@@ -358,5 +361,5 @@ def composite_factors(spec: StrategySpec) -> tuple[FactorSignal, ...]:
 
     역가중 팩터는 `weight` 와 분모 `Σ|weight|` 양쪽에서 빠진다.
     """
-    excluded = inverse_risk_factor_id(spec)
-    return tuple(factor for factor in spec.factors if factor.factor_id != excluded)
+    excluded = {inverse_risk_factor_id(spec), spec.portfolio.tie_breaker_factor_id}
+    return tuple(factor for factor in spec.factors if factor.factor_id not in excluded)

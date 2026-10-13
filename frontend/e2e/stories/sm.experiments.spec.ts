@@ -147,6 +147,20 @@ test(
         /조합 2개 · 창 1개 · 백테스트 실행 \d+회 · 계열 시도 수 \d+회 → \d+회/u,
       ),
     ).toBeVisible();
+    // US-SM-14: 탐색 값을 직접 적거나 조합 제약을 걸면 조합 수가 줄고, 지우면 정의의 격자로 돌아간다.
+    const values = page.getByLabel("값 직접 입력: scale");
+    await values.fill("1");
+    await expect(page.getByText(/조합 1개 · 창 1개/u)).toBeVisible();
+    await values.fill("");
+    await expect(page.getByText(/조합 2개 · 창 1개/u)).toBeVisible();
+    await page.getByRole("button", { name: "제약 추가" }).click();
+    await page
+      .getByRole("combobox", { name: "조합 제약 1: 비교" })
+      .selectOption("ge");
+    await page.getByLabel("조합 제약 1: 값").fill("1");
+    await expect(page.getByText(/조합 1개 · 창 1개/u)).toBeVisible();
+    await page.getByRole("button", { name: "제약 삭제" }).click();
+    await expect(page.getByText(/조합 2개 · 창 1개/u)).toBeVisible();
     await page.getByRole("button", { name: "대기열에 넣기" }).click();
     const [first = ""] = await experimentIds(saved, 1);
     await expect(

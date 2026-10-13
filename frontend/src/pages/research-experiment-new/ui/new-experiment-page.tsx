@@ -18,10 +18,17 @@ import { t, tFill, type MessageKey } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import { Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import { ConstraintEditor, type Constraint } from "./constraint-editor";
 
 // 화면의 분할은 고르는 기준까지 늘 값이 있다. 기준이 빠진 기록은 처음 값(`INITIAL_SPLIT`)의 기준으로 채운다.
 type Split = Required<ExperimentRequest["split"]>;
 type Search = ExperimentRequest["search"];
+type SearchValue = NonNullable<Search[string]>[number];
+type Parameter = {
+  parameter_id: string;
+  kind: string;
+  choices?: SearchValue[];
+};
 type Rule = Split["selection_rule"];
 
 const RULES: Record<Rule, MessageKey> = {
@@ -40,6 +47,37 @@ const INITIAL_SPLIT: Split = {
   test_years: 1,
   embargo_sessions: 5,
   selection_rule: "neighbor_mean_sharpe_max",
+};
+
+/**
+ * 값 입력 글자 하나를 요청 값으로 옮긴다. 숫자 파라미터는 숫자로, 선택지는 같은 글자의 선택지 값으로 읽고,
+ * 읽지 못한 글자는 그대로 보내 허용 판정(`experiment.search.invalid_values`·`invalid_constraint`)을
+ * backend 에 맡긴다. 탐색 값과 제약 상수가 같은 규칙으로 읽힌다.
+ */
+const parseValue = (
+  token: string,
+  parameter: Parameter | undefined,
+): SearchValue => {
+  if (parameter?.kind === "choice")
+    return (
+      parameter.choices?.find((choice) => String(choice) === token) ?? token
+    );
+  const number = Number(token);
+  return token !== "" && Number.isFinite(number) ? number : token;
+};
+
+/** 탐색 값 입력 원문(쉼표 구분)을 요청 값으로 옮긴다. 비우면 null — backend 가 정의의 격자 값 전체를 편다. */
+const parseValues = (
+  text: string,
+  parameter: Parameter | undefined,
+): SearchValue[] | null => {
+  const tokens = text
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token !== "");
+  return tokens.length === 0
+    ? null
+    : tokens.map((token) => parseValue(token, parameter));
 };
 
 /** 미리 계산·만들기 거절 문장. 코드 번역은 백테스트 거절과 같은 `backtest.error.<code>` 체계다. */
@@ -73,13 +111,25 @@ const Form = ({
   base,
   initialSearch,
   initialSplit,
+  initialConstraints = [],
 }: {
   base: BacktestRunSpec;
   initialSearch: Search;
   initialSplit: Split;
+  initialConstraints?: Constraint[];
 }) => {
   const navigate = useNavigate();
-  const [search, setSearch] = useState(initialSearch);
+  // 탐색하는 파라미터 → 값 입력 원문. 빈 원문은 정의의 격자 값 전체다.
+  const [texts, setTexts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      Object.entries(initialSearch).map(([id, values]) => [
+        id,
+        values?.join(", ") ?? "",
+      ]),
+    ),
+  );
+  const [constraints, setConstraints] =
+    useState<Constraint[]>(initialConstraints);
   const [split, setSplit] = useState(initialSplit);
   const source = base.strategy_source;
   const document = useQuery({
@@ -89,11 +139,56 @@ const Form = ({
     ),
     enabled: source?.kind === "saved_revision",
   });
+  const parameters = document.data?.spec.parameters ?? [];
+  const definitions = new Map<string, Parameter>(
+    parameters.map((parameter) => [
+      parameter.parameter_id,
+      parameter as Parameter,
+    ]),
+  );
+  const search: Search = Object.fromEntries(
+    Object.entries(texts).map(([id, text]) => [
+      id,
+      parseValues(text, definitions.get(id)),
+    ]),
+  );
+  const explore = (id: string, on: boolean) => {
+    const next = { ...texts };
+    if (on) next[id] = "";
+    else {
+      delete next[id];
+      // 탐색을 끈 파라미터를 가리키는 제약은 함께 뺀다(남기면 backend 가 거절한다).
+      setConstraints(
+        constraints.filter(
+          (constraint) =>
+            constraint.left !== id && constraint.right_parameter !== id,
+        ),
+      );
+    }
+    setTexts(next);
+  };
   // 실험의 측정 창은 분할이 정하므로 기반 요청의 지표 창은 싣지 않는다(backend `experiment.base.invalid`).
+  // 제약은 있을 때만 싣는다 — 비어 있으면 곱집합 전체라 요청 모양을 바꾸지 않는다.
   const request: ExperimentRequest = {
     run: { ...base, metric_windows: [] },
     search,
     split,
+    ...(constraints.length > 0
+      ? {
+          // 상수는 입력 원문으로 들고 있다가(소수점 입력 중 "1." 이 1 로 접히지 않게) 왼쪽 파라미터 규칙으로 읽는다.
+          constraints: constraints.map((constraint) =>
+            constraint.right_parameter == null
+              ? {
+                  ...constraint,
+                  right_value: parseValue(
+                    String(constraint.right_value ?? "").trim(),
+                    definitions.get(constraint.left),
+                  ),
+                }
+              : constraint,
+          ),
+        }
+      : {}),
   };
   const preview = useExperimentPreview(request);
   const create = useCreateExperiment();
@@ -103,7 +198,6 @@ const Form = ({
       axis.values,
     ]),
   );
-  const parameters = document.data?.spec.parameters ?? [];
   return (
     <div className="data-list-page__panel">
       {/* 기반이 무엇인지 한 줄로 보인다 — 어떤 전략·리비전·연구 기간을 나눠 도는지(#402 리뷰 P2-2). */}
@@ -125,6 +219,7 @@ const Form = ({
               <th scope="col">{t("experiments.new.explore")}</th>
               <th scope="col">{t("experiments.new.parameter")}</th>
               <th scope="col">{t("experiments.new.values")}</th>
+              <th scope="col">{t("experiments.new.valuesInput")}</th>
             </tr>
           </thead>
           <tbody>
@@ -137,14 +232,8 @@ const Form = ({
                     <input
                       type="checkbox"
                       aria-label={`${t("experiments.new.explore")}: ${id}`}
-                      checked={id in search}
-                      onChange={(event) => {
-                        const next = { ...search };
-                        // 값을 정하지 않으면(null) backend 가 정의의 격자 값 전체를 편다.
-                        if (event.target.checked) next[id] = null;
-                        else delete next[id];
-                        setSearch(next);
-                      }}
+                      checked={id in texts}
+                      onChange={(event) => explore(id, event.target.checked)}
                     />
                   </td>
                   <td>
@@ -155,12 +244,29 @@ const Form = ({
                       ? "—"
                       : `${values.join(", ")} (${values.length})`}
                   </td>
+                  <td>
+                    {id in texts ? (
+                      <input
+                        aria-label={`${t("experiments.new.valuesInput")}: ${id}`}
+                        placeholder={t("experiments.new.valuesPlaceholder")}
+                        value={texts[id]}
+                        onChange={(event) =>
+                          setTexts({ ...texts, [id]: event.target.value })
+                        }
+                      />
+                    ) : null}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      <ConstraintEditor
+        explored={Object.keys(texts)}
+        constraints={constraints}
+        onChange={setConstraints}
+      />
       <fieldset className="data-list-page__filter">
         <legend>{t("experiments.new.split")}</legend>
         <select
@@ -327,6 +433,9 @@ export const NewExperimentPage = () => {
             ]),
           )}
           initialSplit={{ ...INITIAL_SPLIT, ...origin.data.record.split }}
+          initialConstraints={
+            origin.data.record.design.search.constraints ?? []
+          }
         />
       ) : request.data !== undefined ? (
         <Form

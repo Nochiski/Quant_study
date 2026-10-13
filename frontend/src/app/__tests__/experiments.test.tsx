@@ -487,6 +487,43 @@ describe("experiments", () => {
     expect(created).toEqual(previews.at(-1));
   });
 
+  it("sends explicit search values and a combination constraint", async () => {
+    usePreview();
+    const user = userEvent.setup();
+    mount("/research/experiments/new?run=run-1");
+
+    await screen.findByRole("status", { name: "시작 전 확인" });
+    await user.click(screen.getByRole("checkbox", { name: "탐색: top_n" }));
+    await user.type(screen.getByLabelText("값 직접 입력: top_n"), "10, 20, 30");
+    await user.click(screen.getByRole("button", { name: "제약 추가" }));
+    // 탐색 파라미터가 하나뿐이라 오른쪽은 상수 값으로 시작한다.
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "조합 제약 1: 비교" }),
+      "ge",
+    );
+    await user.type(screen.getByLabelText("조합 제약 1: 값"), "20");
+
+    // 허용 판정은 backend 미리 계산이 하고, 화면은 입력을 그대로 싣는다.
+    await waitFor(() =>
+      expect(previews.at(-1)).toMatchObject({
+        search: { top_n: [10, 20, 30] },
+        constraints: [
+          {
+            left: "top_n",
+            operator: "ge",
+            right_parameter: null,
+            right_value: 20,
+          },
+        ],
+      }),
+    );
+
+    // 탐색을 끄면 그 파라미터를 가리키는 제약도 함께 빠진다.
+    await user.click(screen.getByRole("checkbox", { name: "탐색: top_n" }));
+    await waitFor(() => expect(previews.at(-1)).toMatchObject({ search: {} }));
+    expect(previews.at(-1)).not.toHaveProperty("constraints");
+  });
+
   it("refuses an unsaved base with the translated reason", async () => {
     usePreview(true);
     mount("/research/experiments/new?run=run-inline");

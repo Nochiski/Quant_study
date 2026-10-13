@@ -17,10 +17,10 @@ from __future__ import annotations
 import importlib
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 from backtest_engine.capability import (
     EngineCapabilities,
@@ -121,6 +121,17 @@ def _instrument_text(instrument: InstrumentId) -> str:
         f"(venue={instrument.venue!r}, symbol={instrument.symbol!r}, "
         f"asset_class={instrument.asset_class.value!r}, currency={instrument.currency!r})"
     )
+
+
+class _UpdateRecorder(Protocol):
+    def __call__(
+        self,
+        order_id: str,
+        status: OrderStatus,
+        detail: str | None,
+        reason_code: str | None = None,
+        cap_volume: int | None = None,
+    ) -> None: ...
 
 
 class _Run:
@@ -667,10 +678,23 @@ class BacktestEngine:
         queue = self._queue(run)
         portfolio = self._ledger(run)
 
-        def update(order_id: str, status: OrderStatus, detail: str | None) -> None:
+        def update(
+            order_id: str,
+            status: OrderStatus,
+            detail: str | None,
+            reason_code: str | None = None,
+            cap_volume: int | None = None,
+        ) -> None:
             self._record_update(
                 run,
-                OrderUpdateEvent(ts=snapshot.ts, order_id=order_id, status=status, detail=detail),
+                OrderUpdateEvent(
+                    ts=snapshot.ts,
+                    order_id=order_id,
+                    status=status,
+                    detail=detail,
+                    reason_code=reason_code,
+                    cap_volume=cap_volume,
+                ),
                 snapshot,
             )
 
@@ -725,7 +749,13 @@ class BacktestEngine:
                 and quote.detail is not None
             ):
                 # 여력 0·유동성 0은 이 세션의 사정일 뿐이다 — 주문은 TIF대로 대기하고 사유만 남긴다.
-                update(order.order_id, OrderStatus.OPEN, quote.detail)
+                update(
+                    order.order_id,
+                    OrderStatus.OPEN,
+                    quote.detail,
+                    quote.reason_code,
+                    quote.cap_volume,
+                )
             elif quote.status is ExecutionStatus.FOK_REJECTED:
                 order_manager.remove(order.order_id)
                 update(order.order_id, OrderStatus.CANCELLED, quote.detail)
@@ -755,7 +785,7 @@ class BacktestEngine:
         self,
         run: _Run,
         snapshot: MarketSnapshot,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         """세션 MARKET 처리를 Rust `process_market`에 맡기고 계획(ops)을 순서대로 적용한다."""
         core = importlib.import_module("backtest_core")
@@ -816,7 +846,9 @@ class BacktestEngine:
             run.rust_slippage,
             run.config.sell_tax_rate(snapshot.ts.date()),
         )
-        for kind, order_id, quantity, price, slip, fee, payload, fill_tax in ops:
+        for op in ops:
+            kind, order_id, quantity, price, slip, fee, payload, fill_tax = op[:8]
+            reason_code, cap_volume = op[8:] if len(op) > 8 else (None, None)
             match kind:
                 case "fill":
                     entry = order_manager.get(order_id)
@@ -843,7 +875,9 @@ class BacktestEngine:
                     order_manager.settle(order_id, fill.quantity)
                 case "update":
                     status_text, _, detail = payload.partition("|")
-                    update(order_id, OrderStatus(status_text), detail or None)
+                    update(
+                        order_id, OrderStatus(status_text), detail or None, reason_code, cap_volume
+                    )
                 case "trigger":
                     order_manager.mark_triggered(order_id)
                 case "remove":
@@ -873,7 +907,7 @@ class BacktestEngine:
         quantity: Decimal,
         snapshot: MarketSnapshot,
         power: BuyingPowerTracker,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         """견적을 실제 체결로 확정한다: Fill 큐 적재, 잔량 갱신, 상태 기록, 여력 소모."""
         order = entry.order
@@ -910,11 +944,12 @@ class BacktestEngine:
         group: BasketGroup,
         snapshot: MarketSnapshot,
         power: BuyingPowerTracker,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         order_manager = self._orders(run)
         entries = order_manager.group_entries(group.group_id)
         policy = group.policy
+        diagnostics: dict[str, Quote] = {}
 
         def cancel_all(reason: str) -> None:
             for entry in entries:
@@ -924,6 +959,12 @@ class BacktestEngine:
                     OrderStatus.CANCELLED,
                     f"basket {policy.value} — {reason} group_id={group.group_id} "
                     f"remaining={entry.remaining} ts={snapshot.ts}",
+                    diagnostics[entry.order_id].reason_code
+                    if entry.order_id in diagnostics
+                    else None,
+                    diagnostics[entry.order_id].cap_volume
+                    if entry.order_id in diagnostics
+                    else None,
                 )
             order_manager.drop_group(group.group_id)
 
@@ -959,6 +1000,8 @@ class BacktestEngine:
                 sell_tax_rate=tax_rate,
             )
             quotes.append((entry, quote))
+            if quote.reason_code is not None:
+                diagnostics[entry.order_id] = quote
             if quote.quantity > 0:
                 order = entry.order
                 notional = float(quote.quantity) * quote.price
@@ -977,6 +1020,14 @@ class BacktestEngine:
             for entry, quote in quotes:
                 if quote.quantity > 0:
                     self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
+                elif quote.reason_code is not None:
+                    update(
+                        entry.order_id,
+                        OrderStatus.OPEN,
+                        quote.detail,
+                        quote.reason_code,
+                        quote.cap_volume,
+                    )
             # 잔량이 남은 leg(GTC)는 다음 세션에도 그룹 경로로 재시도한다 — 그룹을 버리면
             # due()에서도 open_groups()에서도 보이지 않아 영영 체결되지 않는다.
             if not order_manager.group_entries(group.group_id):
@@ -1031,7 +1082,7 @@ class BacktestEngine:
         run: _Run,
         action: CorporateActionEvent,
         snapshot: MarketSnapshot,
-        update: Callable[[str, OrderStatus, str | None], None],
+        update: _UpdateRecorder,
     ) -> None:
         # _settlement_session이 bar 존재를 보장한다. 기록·적용 시각은 정산 세션이다.
         run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION, action)

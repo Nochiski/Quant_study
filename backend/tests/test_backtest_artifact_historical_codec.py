@@ -580,6 +580,7 @@ def test_historical_v1_result_decodes_without_inventing_later_fields(tmp_path: P
     assert type(result.manifest.run_spec.parameter_values["count"]) is int
     assert type(result.manifest.run_spec.parameter_values["mode"]) is bool
     assert result.artifacts.schema_version == "backtest-artifacts-v1"
+    assert result.artifacts.order_updates is None
     assert result.artifacts.roundings == ()
     assert result.artifacts.fills[0].sell_tax is None
     assert result.artifacts.fills[0].cap_volume is None

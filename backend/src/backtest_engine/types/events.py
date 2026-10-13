@@ -47,6 +47,9 @@ class OrderUpdateEvent:
     order_id: str
     status: OrderStatus
     detail: str | None = None
+    # 자유 문구와 별개인 견적 owner의 판정. 옛 기록에는 없으므로 None이다.
+    reason_code: str | None = None
+    cap_volume: int | None = None
 
 
 class CorporateActionType(Enum):

@@ -734,7 +734,8 @@ class PersistentEventStore(EventStore):
         )
 
     def order_update_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> OrderUpdateEvent:
-        order_id, status, detail = wire
+        order_id, status, detail = wire[:3]
+        reason_code, cap_volume = wire[3:] if len(wire) > 3 else (None, None)
         try:
             status_value = _ORDER_STATUS_BY_WIRE[status]
         except KeyError as unknown:
@@ -742,7 +743,14 @@ class PersistentEventStore(EventStore):
                 f"unknown order status wire value — order_id={order_id} status={status!r} "
                 f"expected={sorted(_ORDER_STATUS_BY_WIRE)}"
             ) from unknown
-        return OrderUpdateEvent(ts=ts, order_id=order_id, status=status_value, detail=detail)
+        return OrderUpdateEvent(
+            ts=ts,
+            order_id=order_id,
+            status=status_value,
+            detail=detail,
+            reason_code=reason_code,
+            cap_volume=cap_volume,
+        )
 
     def open_orders_from_wire(
         self, ts: datetime, rows: list[tuple[tuple[Any, ...], int]]

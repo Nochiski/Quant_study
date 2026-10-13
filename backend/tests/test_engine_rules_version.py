@@ -29,9 +29,11 @@ from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 # 고쳤다(리드 결정). 지문은 결과 공유 캐시 키가 아니라 옛 결과가 새 기록 없이 재사용되지 않는다.
 # v5는 비용의 레버리지 배수·체결가 재평가·양방향 청산 노출 해제를 견적에 반영한다.
 # leveraged_short_tax_budget은 L2 숏16주→환매/롱32주 경로로 해당 규칙을 고정한다.
+# #411: OrderUpdate의 진단 두 칸만 추가했다. 두 칸을 제외한 27개 trace와
+# decision tape는 변경 전과 bit 동일하다. 체결 규칙 v5는 유지한다.
 _PINNED = (
     "backtest-engine-v5",
-    "3ad3ba45b3d2842800cc9db07ff22223422a81e8557bc19eda77ec8f2632fe55",
+    "e38b3bd906caed40e670a11d2834d8c20343d156103ff79d449df15bdbf2b2e9",
 )
 
 

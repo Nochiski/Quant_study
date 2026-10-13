@@ -605,6 +605,37 @@
         "title": "BacktestParameterInvalidDetail",
         "type": "object"
       },
+      "BacktestRequestRetiredDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.run.request_retired",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestRequestRetiredDetail",
+        "type": "object"
+      },
+      "BacktestRequestRetiredResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestRequestRetiredDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestRequestRetiredResponse",
+        "type": "object"
+      },
       "BacktestResearchWindowViolationDetail": {
         "description": "측정 시작일이 연구 구간 밖이다(spec D1).\n\n화면 문장은 frontend 가 `code` 로 번역하되 날짜는 자리표시자로 두고 이 detail 의 값으로 채운다 —\n날짜 owner 는 `domain/backtest/_research_window.py` 하나다.",
         "properties": {
@@ -12209,6 +12240,16 @@
               }
             },
             "description": "The backtest run does not exist"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRequestRetiredResponse"
+                }
+              }
+            },
+            "description": "The stored request names a retired strategy schema"
           },
           "422": {
             "content": {

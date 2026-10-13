@@ -15,8 +15,12 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from strategy_workbench.application.backtest_run.facade.ports import RetiredRunRequestError
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec, InlineDraft
-from strategy_workbench.domain.strategy.facade.document import hydrate_strategy_document
+from strategy_workbench.domain.strategy.facade.document import (
+    SUPPORTED_SCHEMA_VERSIONS,
+    hydrate_strategy_document,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
@@ -56,13 +60,15 @@ def decode_request(text: str, *, run_id: str, legacy_spec: bool = False) -> Back
             request = replace(
                 request,
                 strategy_source=InlineDraft(
-                    spec=_decode_spec(draft["spec"]),
+                    spec=_decode_spec(draft["spec"], run_id),
                     kind="inline_draft",
                     source_hash=draft["source_hash"],
                 ),
             )
         strategy = payload["strategy"]
-        return replace(request, strategy=None if strategy is None else _decode_spec(strategy))
+        return replace(
+            request, strategy=None if strategy is None else _decode_spec(strategy, run_id)
+        )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
         # pydantic `ValidationError` 도 `ValueError` 다.
         raise ResearchStorageError(
@@ -80,10 +86,15 @@ def _encode_spec(spec: StrategySpec | None) -> dict[str, Any] | None:
     }
 
 
-def _decode_spec(item: dict[str, Any]) -> StrategySpec:
+def _decode_spec(item: dict[str, Any], run_id: str) -> StrategySpec:
     canonical = item["canonical"]
+    document = json.loads(canonical)
+    version = document.get("schema_version") if isinstance(document, dict) else None
+    if version not in SUPPORTED_SCHEMA_VERSIONS:
+        # 손상이 아니라 은퇴한 판이다. 현재 판으로 올려 읽지 않는다(#313).
+        raise RetiredRunRequestError(run_id, version)
     hydration = hydrate_strategy_document(
-        json.loads(canonical),
+        document,
         identity=StrategyIdentity(item["strategy_id"], item["revision"]),
     )
     if not hydration.ok or hydration.spec is None:

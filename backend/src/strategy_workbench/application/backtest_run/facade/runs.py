@@ -16,6 +16,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.artifact_store i
 from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    RetiredRunRequestError,
     RunKind,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
@@ -45,6 +46,7 @@ __all__ = [
     "BacktestResultNotReadyError",
     "BacktestArtifactUnreadableError",
     "BacktestRunNotFoundError",
+    "RetiredRunRequestError",
     "BacktestRunResult",
     "BacktestRunService",
     "BacktestRunSpec",

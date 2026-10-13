@@ -3,6 +3,8 @@
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
 
 # 합성 기록을 고정한 역사 입력이다. 현재 모델/registry 직렬화로 재생성하지 않는다.
@@ -650,6 +652,20 @@ def test_fixed_stored_request_preserves_strategy_identity_and_parameters() -> No
     assert request.parameter_values == {"weight": 1.0, "count": 25, "mode": True}
     assert request.environment is not None
     assert request.environment.start.isoformat() == "2021-01-01"
+
+
+def test_retired_schema_request_is_reported_as_retired_not_corrupt() -> None:
+    # 은퇴한 판의 저장 요청은 손상(ResearchStorageError)이 아니라 은퇴로 구별되고, 현재 판으로
+    # 올려 읽지 않는다(#313). HTTP는 이것을 410 `backtest.run.request_retired`로 낸다.
+    from strategy_workbench.adapters.outbound.research_sqlite._request_codec import decode_request
+    from strategy_workbench.application.backtest_run.facade.ports import RetiredRunRequestError
+
+    current = '\\"schema_version\\":\\"1.2\\"'
+    retired = _HISTORICAL_REQUEST.replace(current, current.replace("1.2", "1.0"))
+    assert retired != _HISTORICAL_REQUEST
+    with pytest.raises(RetiredRunRequestError) as error:
+        decode_request(retired, run_id="retired-request")
+    assert (error.value.run_id, error.value.schema_version) == ("retired-request", "1.0")
 
 
 def test_historical_taxed_sell_decodes_and_reconstructs_without_current_writer(

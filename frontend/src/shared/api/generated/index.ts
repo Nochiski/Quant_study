@@ -98,6 +98,8 @@ export type {
   BacktestCancelResult,
   BacktestEnvironmentRequiredDetail,
   BacktestParameterInvalidDetail,
+  BacktestRequestRetiredDetail,
+  BacktestRequestRetiredResponse,
   BacktestResearchWindowViolationDetail,
   BacktestResultNotReadyDetail,
   BacktestResultNotReadyResponse,

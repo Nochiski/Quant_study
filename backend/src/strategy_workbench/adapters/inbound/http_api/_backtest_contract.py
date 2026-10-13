@@ -166,6 +166,17 @@ class BacktestRunNotFoundResponse:
 
 
 @dataclass(frozen=True)
+class BacktestRequestRetiredDetail:
+    code: Literal["backtest.run.request_retired"]
+    message: str
+
+
+@dataclass(frozen=True)
+class BacktestRequestRetiredResponse:
+    detail: BacktestRequestRetiredDetail
+
+
+@dataclass(frozen=True)
 class BacktestResultNotReadyDetail:
     code: Literal["backtest.result.not_ready"]
     message: str

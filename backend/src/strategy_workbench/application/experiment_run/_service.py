@@ -31,6 +31,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentTrial,
     GridIndex,
     InvalidExperimentSpecError,
+    ParameterConstraint,
     SearchSpec,
     SplitSpec,
     WalkForwardGap,
@@ -104,6 +105,13 @@ class ExperimentRequest:
         }
     )
     split: SplitSpec
+    constraints: list[ParameterConstraint] = field(
+        default_factory=list,
+        metadata={
+            "description": "탐색 축 사이의 조합 제약(예: fast < slow). 모두 만족하는 칸만 "
+            "실행하고, 걸러진 칸은 실행되지 않아 시도 수에도 들지 않는다. 비우면 곱집합 전체다."
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -453,7 +461,7 @@ class ExperimentRunService:
             )
         admitted, strategy, environment = self._base(run)
         return admitted, ExperimentDesign(
-            search=build_search_spec(strategy.parameters, request.search),
+            search=build_search_spec(strategy.parameters, request.search, request.constraints),
             parameter_values=admitted.run.parameter_values,
             windows=request.split.measured_windows(
                 environment.start,

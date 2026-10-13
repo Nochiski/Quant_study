@@ -1699,6 +1699,10 @@ const ko = {
     "탐색 값을 쓸 수 없습니다. 값이 파라미터의 범위·선택지 안에 있고 겹치지 않는지 확인하세요.",
   "backtest.error.experiment.search.too_many_points":
     "탐색 조합이 너무 많습니다. 값 수를 줄이거나 간격을 넓히세요.",
+  "backtest.error.experiment.search.invalid_constraint":
+    "조합 제약을 쓸 수 없습니다. 탐색하는 파라미터끼리만, 크기 비교는 숫자 파라미터끼리만 걸 수 있습니다.",
+  "backtest.error.experiment.search.no_feasible_point":
+    "조합 제약을 모두 만족하는 탐색 조합이 없습니다. 제약이나 탐색 값을 넓히세요.",
   "backtest.error.experiment.split.invalid":
     "분할 설정이 허용 범위를 벗어났습니다. 학습·검증 연수는 1 이상, 엠바고는 0 이상으로 두세요.",
   "backtest.error.experiment.split.no_window":
@@ -3967,6 +3971,10 @@ export const messages = {
       "The search values cannot be used. Check that every value is within the parameter's range or choices and appears once.",
     "backtest.error.experiment.search.too_many_points":
       "The search has too many combinations. Use fewer values or a wider step.",
+    "backtest.error.experiment.search.invalid_constraint":
+      "The combination constraint cannot be used. Constrain searched parameters only, and compare sizes between numeric parameters only.",
+    "backtest.error.experiment.search.no_feasible_point":
+      "No search combination satisfies every constraint. Loosen the constraints or widen the search values.",
     "backtest.error.experiment.split.invalid":
       "The split settings are out of range. Use at least 1 training year and 1 test year and a non-negative embargo.",
     "backtest.error.experiment.split.no_window":

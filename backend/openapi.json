@@ -2040,6 +2040,18 @@
         "title": "ConstantNode",
         "type": "object"
       },
+      "ConstraintOperator": {
+        "enum": [
+          "lt",
+          "le",
+          "gt",
+          "ge",
+          "eq",
+          "ne"
+        ],
+        "title": "ConstraintOperator",
+        "type": "string"
+      },
       "CreateProviderProfileRequest": {
         "description": "프로파일 생성 요청. `secret`은 이 방향으로만 흐른다.",
         "properties": {
@@ -2970,7 +2982,9 @@
               "experiment.capacity.invalid_amounts",
               "experiment.kind.mismatch",
               "experiment.not_found",
+              "experiment.search.invalid_constraint",
               "experiment.search.invalid_values",
+              "experiment.search.no_feasible_point",
               "experiment.search.too_many_points",
               "experiment.search.unknown_parameter",
               "experiment.selection.not_completed",
@@ -3154,6 +3168,14 @@
       "ExperimentRequest": {
         "description": "실험 만들기·미리 계산 요청.",
         "properties": {
+          "constraints": {
+            "description": "탐색 축 사이의 조합 제약(예: fast < slow). 모두 만족하는 칸만 실행하고, 걸러진 칸은 실행되지 않아 시도 수에도 들지 않는다. 비우면 곱집합 전체다.",
+            "items": {
+              "$ref": "#/components/schemas/ParameterConstraint"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
           "run": {
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
@@ -5155,6 +5177,55 @@
           "returned_cells"
         ],
         "title": "PanelPreviewCostEstimate",
+        "type": "object"
+      },
+      "ParameterConstraint": {
+        "description": "탐색 축 값과 다른 탐색 축 값(`right_parameter`) 또는 상수(`right_value`)의 관계.\n\n둘 중 정확히 하나를 쓴다. 비교하는 두 쪽은 같은 종류(유한한 숫자끼리, 또는 같은 타입의 선택지\n값끼리)여야 하고, 크기 비교(`lt`·`le`·`gt`·`ge`)는 숫자 값끼리만 한다.",
+        "properties": {
+          "left": {
+            "title": "Left",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/ConstraintOperator"
+          },
+          "right_parameter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Right Parameter"
+          },
+          "right_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Right Value"
+          }
+        },
+        "required": [
+          "left",
+          "operator"
+        ],
+        "title": "ParameterConstraint",
         "type": "object"
       },
       "ParameterMap": {
@@ -7542,13 +7613,21 @@
         "type": "object"
       },
       "SearchSpec": {
-        "description": "탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.\n\n축이 없으면 문서 기본값 한 칸(좌표 `()`)이다.",
+        "description": "탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.\n\n축이 없으면 문서 기본값 한 칸(좌표 `()`)이다. 제약(`constraints`)을 모두 만족하는 칸만 실행한다.",
         "properties": {
           "axes": {
             "items": {
               "$ref": "#/components/schemas/SearchAxis"
             },
             "title": "Axes",
+            "type": "array"
+          },
+          "constraints": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ParameterConstraint"
+            },
+            "title": "Constraints",
             "type": "array"
           }
         },

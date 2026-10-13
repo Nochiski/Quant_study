@@ -17,6 +17,8 @@ EXPERIMENT_SPEC_CODES: frozenset[str] = frozenset(
         "experiment.search.unknown_parameter",
         "experiment.search.invalid_values",
         "experiment.search.too_many_points",
+        "experiment.search.invalid_constraint",
+        "experiment.search.no_feasible_point",
         "experiment.split.invalid",
         "experiment.split.no_window",
         "experiment.capacity.invalid_amounts",

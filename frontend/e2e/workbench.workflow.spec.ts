@@ -821,7 +821,7 @@ test.describe("professional YAML workflow", () => {
     expect(result.manifest.run_fingerprint).toHaveLength(64);
     expect(result.manifest.target_tape_hash).toHaveLength(64);
     expect(result.manifest.data_snapshot_id).toMatch(MOCK_SNAPSHOT_ID);
-    await expect(workflow.getByText(/RUST core · registry/u)).toBeVisible();
+    await expect(workflow.getByText(/RUST · 지표 사전/u)).toBeVisible();
     await expect(
       workflow.getByRole("button", { name: "동일 설정 재실행" }),
     ).toBeEnabled();
@@ -837,7 +837,7 @@ test.describe("professional YAML workflow", () => {
     await expect(manifest).toContainText("sec-005930-1");
     await expect(manifest).toContainText("260");
     await expect(manifest).toContainText(
-      "out_of_sample: 2025-01-02 → 2026-08-31",
+      "표본 외 구간: 2025-01-02 → 2026-08-31",
     );
     await expect(manifest).toContainText(`${strategyId} r4`);
     await expect(manifest).toContainText(result.manifest.data_snapshot_id);

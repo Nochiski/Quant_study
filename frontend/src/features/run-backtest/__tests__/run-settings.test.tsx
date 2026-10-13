@@ -34,7 +34,7 @@ import {
 } from "../model/run-environment";
 import {
   buildBacktestRunOptions,
-  DEFAULT_BACKTEST_RUN_SETTINGS,
+  initialBacktestRunSettings,
 } from "../model/run-settings";
 import { runFieldLabel } from "../model/run-settings-problems";
 import {
@@ -122,9 +122,12 @@ const renderWithQuery = (ui: ReactElement) => {
 };
 
 /** backend 가 만든 실행 설정 스키마 사본(`tools/export_runtime_schema.py`). */
+const RUN_OPTIONS_SCHEMA = JSON.parse(readBackendFixture("strategy_documents/run-options-schema.json")) as Record<string, unknown>;
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
+
+const DEFAULT_BACKTEST_RUN_SETTINGS = initialBacktestRunSettings(RUN_OPTIONS_SCHEMA);
 
 /**
  * 기본값에 기간·유니버스를 채운 패널이 싣는 실행 설정. 가격 충격 계수·직접 입력 세율은 고정 bp·법정 세율에서
@@ -161,7 +164,7 @@ const INCOMPLETE: RunEnvironmentValidation = {
 
 let servedSchema: Record<string, unknown> = RUN_ENVIRONMENT_SCHEMA;
 const schemaHandler = http.get(`${API}/api/v1/run-environments/schema`, () =>
-  HttpResponse.json({ schema_hash: "h", schema: servedSchema }),
+  HttpResponse.json({ schema_hash: "h", schema: servedSchema, options_schema: RUN_OPTIONS_SCHEMA }),
 );
 
 const Harness = ({
@@ -687,7 +690,7 @@ describe("run environment panel", () => {
         await gate;
         return HttpResponse.json({
           schema_hash: "h",
-          schema: RUN_ENVIRONMENT_SCHEMA,
+          options_schema: RUN_OPTIONS_SCHEMA, schema: RUN_ENVIRONMENT_SCHEMA,
         });
       }),
     );
@@ -1219,6 +1222,22 @@ describe("run environment panel", () => {
 
     await waitFor(() => expect(asked).toBe(1));
     expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
+  });
+
+  it("실행 옵션 기본값과 코어 목록은 서버 스키마 변경을 그대로 따른다", async () => {
+    const options = structuredClone(RUN_OPTIONS_SCHEMA);
+    const properties = options.properties as Record<string, Record<string, unknown>>;
+    properties.core.default = "python";
+    properties.core.enum = ["python"];
+    properties.initial_cash.default = 7654321;
+    properties.annualization_days.default = 260;
+    server.use(http.get(`${API}/api/v1/run-environments/schema`, () => HttpResponse.json({ schema_hash: "changed-options", schema: RUN_ENVIRONMENT_SCHEMA, options_schema: options })));
+    renderWithQuery(<Harness />);
+    await openSettings();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toHaveValue("python");
+    expect(within(screen.getByRole("combobox", { name: "실행 core" })).getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" })).toHaveValue(7654321);
+    expect(screen.getByRole("spinbutton", { name: "연환산 거래일" })).toHaveValue(260);
   });
 
   it("전략 전환 시 실행 옵션과 열린 패널을 새 전략 기본값으로 초기화한다", async () => {

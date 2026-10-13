@@ -1,10 +1,10 @@
-import type { BacktestRequestOptions as BacktestRunOptions } from "../../../entities/backtest";
+import { runEnvironmentFields, type BacktestRequestOptions as BacktestRunOptions } from "../../../entities/backtest";
 import type { BacktestRunSpec } from "../../../shared/api";
 import type { MessageKey } from "../../../shared/config";
 import type { RunEnvironmentValidation } from "./run-environment";
 
 export type BacktestRunSettingsFields = {
-  core: NonNullable<BacktestRunSpec["core"]>;
+  core: NonNullable<BacktestRunSpec["core"]> | "";
   initialCashKrw: string;
   benchmarkSecurityId: string;
   annualizationDays: string;
@@ -13,7 +13,7 @@ export type BacktestRunSettingsFields = {
 
 /** 코어 선택지. 요청 계약에 코어가 늘거나 줄면 typecheck 가 잡는다(#357 C-P3-14, 대체는 #336). */
 export const EXECUTION_CORE_LABELS: Record<
-  BacktestRunSettingsFields["core"],
+  NonNullable<BacktestRunSpec["core"]>,
   MessageKey
 > = {
   rust: "backtest.settings.core.rust",
@@ -46,16 +46,19 @@ export type BacktestRunSettingsResult =
       errors: BacktestRunSettingsError[];
     };
 
-export const DEFAULT_BACKTEST_RUN_SETTINGS: BacktestRunSettingsFields = {
-  core: "rust",
-  initialCashKrw: "100000000",
-  // 종목 ID 어휘는 연결된 equity 어댑터가 정한다(mock `sec-005930-1`, 실데이터 `005930:1`). frontend 가
-  // 특정 어휘를 기본값으로 굽으면 다른 어댑터에서 백테스트가 시작조차 못 하므로(이슈 #154) 비워 둔다 —
-  // 비우면 벤치마크 없이 실행한다.
-  benchmarkSecurityId: "",
-  annualizationDays: "252",
-  oosStart: "",
+/** 서버 실행 옵션 스키마의 기본값만 표시 문자열로 변환한다. 읽기 전에는 빈칸으로 둔다. */
+export const initialBacktestRunSettings = (schema: Record<string, unknown> | null): BacktestRunSettingsFields => {
+  const defaults = Object.fromEntries(schema === null ? [] : runEnvironmentFields(schema).map((field) => [field.name, field.defaultValue ?? ""]));
+  const core = defaults.core ?? "";
+  return {
+    core: isExecutionCore(core) ? core : "",
+    initialCashKrw: defaults.initial_cash ?? "",
+    benchmarkSecurityId: defaults.benchmark_security_id ?? "",
+    annualizationDays: defaults.annualization_days ?? "",
+    oosStart: "",
+  };
 };
+export const isExecutionCore = (value: string): value is NonNullable<BacktestRunSpec["core"]> => Object.hasOwn(EXECUTION_CORE_LABELS, value);
 
 /**
  * Parse UI representation only. The backend remains the owner of accepted execution semantics,
@@ -90,7 +93,7 @@ export const buildBacktestRunOptions = (
     annualizationDays <= 0
   )
     errors.push("annualization_days");
-  if (!environment.valid) errors.push("environment");
+  if (!environment.valid || fields.core === "") errors.push("environment");
 
   const oosStart = fields.oosStart.trim();
   if (oosStart === "" && oosIncomplete) errors.push("oos_incomplete");
@@ -102,7 +105,7 @@ export const buildBacktestRunOptions = (
   )
     errors.push("oos_out_of_range");
 
-  if (errors.length > 0 || range === null)
+  if (errors.length > 0 || range === null || fields.core === "")
     return { valid: false, options: null, errors };
 
   return {

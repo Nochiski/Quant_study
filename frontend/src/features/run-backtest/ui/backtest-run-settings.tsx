@@ -278,9 +278,9 @@ export const BacktestRunSettings = ({
                 setField("core", event.target.value as typeof fields.core)
               }
             >
-              {Object.entries(EXECUTION_CORE_LABELS).map(([core, key]) => (
+              {controller.coreOptions.map((core) => (
                 <option key={core} value={core}>
-                  {t(key)}
+                  {t(EXECUTION_CORE_LABELS[core])}
                 </option>
               ))}
             </select>

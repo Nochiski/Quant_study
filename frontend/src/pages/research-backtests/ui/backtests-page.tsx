@@ -1,4 +1,4 @@
-import { RUN_STATUS } from "../../../entities/backtest";
+import { RUN_STATUS, runStageLabel, runStatusLabel } from "../../../entities/backtest";
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, type FormEvent } from "react";
@@ -279,7 +279,7 @@ export const BacktestsPage = () => {
                         <code>{item.run.run_id}</code>
                         <br />
                         <span className="data-list-page__hash">
-                          {item.run.stage}
+                          {runStageLabel(item.run.stage)}
                         </span>
                       </td>
                       <td>
@@ -310,7 +310,7 @@ export const BacktestsPage = () => {
                       </td>
                       <td>
                         <Badge tone={RUN_STATUS[item.run.status].tone}>
-                          {item.run.status}
+                          {runStatusLabel(item.run.status)}
                         </Badge>
                         <br />
                         {Math.round(item.run.progress * 100)}%

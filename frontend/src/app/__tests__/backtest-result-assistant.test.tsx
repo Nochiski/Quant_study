@@ -359,7 +359,7 @@ describe("백테스트 결과 화면의 AI 패널", () => {
 
     expect(
       await screen.findByRole("status", { name: "실행 상태" }),
-    ).toHaveTextContent("running");
+    ).toHaveTextContent("실행 중");
     expect(
       screen.queryByRole("button", { name: "AI에게 결과 묻기" }),
     ).toBeNull();

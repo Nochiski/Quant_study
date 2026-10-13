@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_DOWN, ROUND_HALF_EVEN, Decimal
 
+from backtest_engine.engine.power_projection import project_cash, project_cost, value_portfolio
 from backtest_engine.errors import NegativeCashError, NegativePositionError
 from backtest_engine.types.events import (
     CorporateActionApplied,
@@ -84,10 +85,7 @@ class Portfolio:
                 f"instrument={fill.instrument.symbol} sell={fill.quantity} held={old_quantity} "
                 f"(SHORT_SELLING not declared)"
             )
-        if fill.side is Side.BUY:
-            new_cash = self._cash - notional - fill.fee
-        else:
-            new_cash = self._cash + notional - fill.fee
+        new_cash = project_cash(self._cash, fill.side is Side.BUY, notional, fill.fee)
         if new_cash < 0 and not self._allow_margin:
             raise NegativeCashError(
                 f"buy fill would make cash negative — fill_id={fill.fill_id} "
@@ -122,7 +120,7 @@ class Portfolio:
                 f"cost amount must be > 0 — kind={cost.kind.value} ts={cost.ts} "
                 f"amount={cost.amount}"
             )
-        self._cash -= cost.amount
+        self._cash = project_cost(self._cash, cost.amount)
         self._snapshot_cache = None
 
     def apply_corporate_action(
@@ -212,8 +210,9 @@ class Portfolio:
                     unrealized_pnl=(mark_price - ledger.average_price) * float(ledger.quantity),
                 )
             )
-        equity = self._cash + sum(position.market_value for position in positions)
-        gross = sum(abs(position.market_value) for position in positions)
+        equity, gross = value_portfolio(
+            self._cash, tuple(position.market_value for position in positions)
+        )
         return PortfolioSnapshot(
             ts=ts,
             cash=self._cash,

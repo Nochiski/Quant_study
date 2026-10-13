@@ -714,7 +714,10 @@ class BacktestEngine:
             key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
         )
         power = make_buying_power(
-            run.core, portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+            run.core,
+            portfolio.snapshot(snapshot.ts),
+            run.config.max_gross_leverage,
+            run.wants_feature(EngineFeature.MARGIN),
         )
         # 바스켓 그룹은 leg를 함께 견적해 정책을 판정한 뒤 체결한다 (단일 주문보다 먼저).
         for group in order_manager.open_groups():
@@ -728,6 +731,8 @@ class BacktestEngine:
                 held=power.quantity_of(order.instrument),
                 leverage=power.leverage,
                 held_mark=power.mark_of(order.instrument),
+                valuation=power.valuation,
+                execution_state=power.execution_state(order.instrument),
                 sell_tax_rate=run.config.sell_tax_rate(snapshot.ts.date()),
             )
             if quote.quantity > 0:
@@ -792,7 +797,10 @@ class BacktestEngine:
         order_manager = self._orders(run)
         queue = self._queue(run)
         power = make_buying_power(
-            run.core, self._ledger(run).snapshot(snapshot.ts), run.config.max_gross_leverage
+            run.core,
+            self._ledger(run).snapshot(snapshot.ts),
+            run.config.max_gross_leverage,
+            run.wants_feature(EngineFeature.MARGIN),
         )
         if not isinstance(power, RustBuyingPower):  # 코어가 rust면 항상 Rust 누산기다
             raise CoreUnavailable("rust session core requires the rust buying-power tracker")
@@ -922,7 +930,7 @@ class BacktestEngine:
             sell_tax_rate=run.config.sell_tax_rate(snapshot.ts.date()),
         )
         power.consume_quantity(
-            fill.instrument, fill.side, fill.quantity, fill.price, fill.fee + fill.sell_tax
+            fill.instrument, fill.side, fill.quantity, fill.price, fill.fee, fill.sell_tax
         )
         queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
         if run.wants(EventKind.FILL):
@@ -997,6 +1005,8 @@ class BacktestEngine:
                 held=power.quantity_of(entry.order.instrument),
                 leverage=power.leverage,
                 held_mark=power.mark_of(entry.order.instrument),
+                valuation=power.valuation,
+                execution_state=power.execution_state(entry.order.instrument),
                 sell_tax_rate=tax_rate,
             )
             quotes.append((entry, quote))
@@ -1010,8 +1020,8 @@ class BacktestEngine:
                     order.side,
                     quote.quantity,
                     quote.price,
-                    run.broker.fee_for(notional)
-                    + sell_tax_amount(order.side, quote.quantity, quote.price, tax_rate),
+                    run.broker.fee_for(notional),
+                    sell_tax_amount(order.side, quote.quantity, quote.price, tax_rate),
                 )
         power.restore(checkpoint)
 
@@ -1056,9 +1066,25 @@ class BacktestEngine:
             (entry, quote, (entry.remaining * tight_quote.quantity) // tight_remaining)
             for entry, quote in quotes
         ]
-        for entry, quote, quantity in planned:
+        for entry, _quote, quantity in planned:
             if quantity > 0:
-                self._apply_quote(run, entry, quote, quantity, snapshot, power, update)
+                # 정수 축소는 매도 대금·숏 청산 여력을 비례 보존하지 않는다.
+                # 현재 장부로 최종 수량을 다시 견적한다.
+                quote = run.broker.constrain_quote(
+                    entry,
+                    _quote,
+                    quantity,
+                    snapshot.bar(entry.order.instrument),
+                    power.available,
+                    held=power.quantity_of(entry.order.instrument),
+                    leverage=power.leverage,
+                    held_mark=power.mark_of(entry.order.instrument),
+                    valuation=power.valuation,
+                    execution_state=power.execution_state(entry.order.instrument),
+                    sell_tax_rate=tax_rate,
+                )
+                if quote.quantity > 0:
+                    self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
         for entry in order_manager.group_entries(group.group_id):
             order_manager.remove(entry.order_id)
             update(

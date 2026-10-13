@@ -210,10 +210,24 @@ HTTP·CLI 요청, research 요청 codec, 결과 `RunManifest.run_spec`은 기존
 
 청산 거래 재구성과 전체·창 지표 합계는 `domain/backtest/_trade_analytics.py`가 소유한다. 체결 원장의 입력 순서를 보존하고 식별자 문자열로 정렬하지 않는다. 실행 어댑터는 원장 행을 domain 값으로 변환만 한다(#362 DR06).
 
-엔진 여력의 정본은 Python `PythonBuyingPower`·Rust `BuyingPower`의 `L×equity−gross` 상태다. 견적은 같은 상태의 레버리지·보유 수량·평가가를 읽어 체결가 재평가, 양방향 청산의 노출 해제, 비용의 L배 여력 소모를 역산한다. 매수·숏·바스켓이 별도 비용 배수를 정의하지 않는다. 비용 한도를 넘기는 신규 진입은 줄이고 기존의 노출 감소 청산 허용은 유지한다(#342 V2-05).
+엔진 여력의 정본은 Python `PythonBuyingPower`·Rust `BuyingPower`의 `L×equity−gross` 상태다. 견적은 같은 상태의 자본·총노출·레버리지·보유 수량·평가가를 읽고, 확정 소비와 공유한 장부 투영(`power_projection.project_valuation`, Rust `buying_power::project_valuation`)으로 최대 실행 가능 정수 수량을 찾는다. 분모 역산이나 epsilon으로 경계를 보정하지 않는다. 매수·숏·바스켓이 별도 비용 배수를 정의하지 않는다. 비용 한도를 넘기는 신규 진입은 줄이고 기존의 노출 감소 청산 허용은 유지한다(#342 V2-05).
+
+
+비례 바스켓의 최종 정수 축소는 매도 대금과 숏 청산 여력을 비례 보존하지 않는다. 따라서
+최초 견적의 체결가·슬리피지 Q는 보존하고(#341), 실행 순서대로 현재 장부에 최종 수량의 예산을
+같은 QuoteCore로 다시 판정한다. 가능한 수량만 체결하고 잔량 취소는 기존 비례 정책을 따른다.
+이 실행 결과 변경은 `backtest-engine-v6`로 구분한다.
+
+현금 체결의 순차 연산 정본은 Python `power_projection.project_cash/project_cost`와 대응 Rust 함수다. 실제 Portfolio, 견적 후보, BuyingPower 소비가 대금→수수료→거래세 순서를 공유한다. 여력은 snapshot.cash를 직접 받고, 종목 평가액의 원래 순서(전량 청산 시 제거, 재진입 시 끝에 추가)를 보존해 cash+sum(values)와 sum(abs(values))를 재계산한다. 현금 음수 허용 여부는 레버리지 수치가 아닌 MARGIN feature가 정한다. 저수준 quote의 optional execution_state 미제공은 구호출 호환이며 실제 엔진은 네 코어 모두 이를 제공한다. 바스켓 checkpoint는 현금과 평가액 순서까지 복원한다.
+
+이 공유 산술은 평가 시점 정책을 통합하지 않는다. BuyingPower는 기존의 체결가 기준 위험 평가를 유지하고 실제 Portfolio는 기존 보유 평가가 유지 및 세션 mark 시점을 유지한다. 원장 mark를 견적에 맞춰 바꾸지 않는다.
 
 0주 유동성 한도 진단(`#411`)은 엔진 quote의 기존 수치 판정이 `reason_code=liquidity_cap_zero`와 그 견적의 `cap_volume`을 소유한다. 주문 상태 이벤트에 자유 문구와 별개 필드로 싣고 Python/Rust single·basket 경로가 해당 leg의 판정만 전달한다. 가격 조건 미충족·다른 leg의 사유를 추론하지 않는다. 실행 adapter는 `EventStore.order_updates()`를 `RawOrderUpdate`로 그대로 옮기며 화면은 원본 상태·사유를 표시한다. `RawArtifactBundle.order_updates=None`은 구판에 기록이 없었다는 뜻이고 새 결과의 `()`는 기록이 0건이라는 뜻이다. detail 문자열 파싱으로 사유를 재판정하지 않는다.
 
 주문 상태 화면(`#411`)은 `BacktestOrderEvents`가 `RawArtifactBundle.order_updates`의 원본 순서를 보존해 표시한다. 종목만 `orders.order_id`로 연결하고, 유동성 0주 요약은 `reason_code`의 이벤트 건수다(주문 수·최종 미체결 판정이 아니다). 알려지지 않은 상태·사유 코드는 원문을 남긴다. null/필드 없음과 빈 목록을 서로 바꾸지 않는다.
 
 BEST_EFFORT의 0주 leg는 기존 주문 상태 이벤트가 없으므로 진단을 위해 OPEN을 합성하지 않는다. ORDER_UPDATE 구독 전략의 callback·결정 횟수 보존이 우선이다. 이 경로는 원본에 없던 사유를 결과에서도 만들지 않는다.
+
+최대 체결 수량 탐색은 현금·위험 잔여값의 float 단조성을 가정하지 않는다. 비용으로 음수 현금이 된 뒤 매도로 회복되는 구간, 대금·비용 상쇄 및 다종목 평가 합산의 반올림으로 허용 구간이 끊길 수 있다. Python capacity 및 Rust 대응 owner는 높은 후보를 실제 원장식으로 먼저 판정하고, 각 연산의 구간 상한이 음수임이 증명될 때만 구간을 제외한다. 허용 오차·비용 상한으로 조건을 완화하지 않는다. 구간 제외는 같은 대금 n에서 나온 대금·비용의 상관을 쓴다: 실수 모형의 현금은 n에 1차, 위험(L·평가액−총노출)은 수량에 오목이라 구간 최댓값이 끝점(위험은 보유 0 꺾임점 포함)에서 나오고, 끝점 원장값에 연산별 IEEE 반올림 오차 상한(u·|결과|+η의 합)의 두 배를 더해도 음수일 때만 구간을 버린다(`_correlated_impossible`·`correlated_impossible`). 이 증명으로 지울 수 없는 후보는 매도 비용률 합이 100%를 반올림 오차 수준으로만 넘는 상쇄 입력에서만 남는다. 두 코어는 같은 반복 순서와 예산 `SEARCH_BUDGET`(4096)을 쓰며, 예산 안에서 처음 허용된 수량이 정확한 최대이고 예산을 넘으면 허용 수량이 없으므로 0(체결 없음)이다. 이 경우만 정확한 최대 대신 장부 안전한 하한이 된다(사용자 결정 2026-10-13).
+
+현금이 비양수인 비증거금 매도에서 개별 수수료율 또는 거래세율이 1보다 크고 다른 비용이 비음수이면, normal 대금 n에 대해 fl(n*r)>n인 IEEE 간격 증명으로 전체 구간을 제외할 수 있다. 대금 overflow는 실제 순차 현금이 NaN이라 불허임을 인증한다. subnormal 대금에는 이 엄격 부등식이 성립하지 않을 수 있으므로 기존 정확 탐색을 사용한다. 대금이 2*MIN_NORMAL 이상이면 정확한 절반 대금을 이용해 한 비용률>=0.5 및 다른 비용률>0.5인 경우도 각각의 연산 부등식으로 인증한다. 그 외 두 비용이 각각 1 미만이나 합이 1을 넘는 상쇄는 위의 상관 구간 증명이 맡는다.

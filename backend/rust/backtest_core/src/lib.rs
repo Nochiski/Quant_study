@@ -10,6 +10,7 @@
 
 mod buying_power;
 mod callback;
+mod capacity;
 mod driver;
 mod event_queue;
 mod execution;
@@ -17,6 +18,7 @@ mod feed;
 mod persistent;
 mod persistent_router;
 mod portfolio;
+mod power_projection;
 mod quote;
 mod records;
 mod session;

@@ -64,22 +64,46 @@ def quote_numbers(
     sell_tax_rate: float = 0.0,
     leverage: float = 1.0,
     held_mark: float | None = None,
+    valuation: tuple[float, float] | None = None,
+    execution_state: tuple[float, list[float], int, bool] | None = None,
 ) -> tuple[float, int, float, str]: ...
 
 class BuyingPower:
     def __init__(
-        self, equity: float, leverage: float, positions: list[tuple[str, int, float, float]]
+        self,
+        equity: float,
+        leverage: float,
+        positions: list[tuple[str, int, float, float]],
+        cash: float | None = None,
+        allow_margin: bool = False,
     ) -> None: ...
     @property
     def available(self) -> float: ...
     @property
     def leverage(self) -> float: ...
+    @property
+    def valuation(self) -> tuple[float, float]: ...
     def mark_of(self, key: str) -> float | None: ...
     def quantity_of(self, key: str) -> int: ...
-    def consume(self, key: str, side: str, quantity: int, price: float, fee: float) -> None: ...
-    def checkpoint(self) -> tuple[float, float, list[tuple[str, int]], list[tuple[str, float]]]: ...
+    def execution_state(self, key: str) -> tuple[float, list[float], int, bool]: ...
+    def consume(
+        self, key: str, side: str, quantity: int, price: float, fee: float, tax: float = 0.0
+    ) -> None: ...
+    def checkpoint(
+        self,
+    ) -> tuple[
+        float, float, list[tuple[str, int]], list[tuple[str, float]], float, list[tuple[str, float]]
+    ]: ...
     def restore(
-        self, state: tuple[float, float, list[tuple[str, int]], list[tuple[str, float]]]
+        self,
+        state: tuple[
+            float,
+            float,
+            list[tuple[str, int]],
+            list[tuple[str, float]],
+            float,
+            list[tuple[str, float]],
+        ],
     ) -> None: ...
 
 def process_market(

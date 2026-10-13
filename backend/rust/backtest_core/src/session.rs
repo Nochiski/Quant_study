@@ -275,6 +275,8 @@ impl<'a> Session<'a> {
             self.sell_tax_rate,
             self.power.leverage(),
             self.power.mark_of(&e.key),
+            Some(self.power.valuation()),
+            Some(self.power.execution_state(&e.key)),
         )?;
         let cap_zero = status == "not_filled";
         Ok(QuoteOut {
@@ -287,6 +289,34 @@ impl<'a> Session<'a> {
             cap_volume: cap_zero.then_some(bar.liquidity_volume),
             no_price: false,
         })
+    }
+
+    fn constrain_quote(&self, e: &EntryIn, quote: &QuoteOut, quantity: i64) -> PyResult<QuoteOut> {
+        // 최초 견적의 가격·충격은 고정하고 현재 장부로 수량만 판정한다(#341).
+        let (_, fitted, _, status) = quote_numbers(
+            &e.side,
+            quote.price,
+            quantity,
+            0,
+            None,
+            0.0,
+            None,
+            self.power.available(),
+            self.power.quantity_of(&e.key),
+            self.fee_rate,
+            false,
+            self.sell_tax_rate,
+            self.power.leverage(),
+            self.power.mark_of(&e.key),
+            Some(self.power.valuation()),
+            Some(self.power.execution_state(&e.key)),
+        )?;
+        let mut result = quote.clone();
+        if fitted < quantity {
+            result.status = status;
+        }
+        result.quantity = fitted;
+        Ok(result)
     }
 
     fn detail(&self, q: &QuoteOut, e: &EntryIn) -> Option<String> {
@@ -363,7 +393,7 @@ impl<'a> Session<'a> {
         // 최종 체결의 세금을 한 번 확정해 여력과 체결 기록에 함께 전달한다.
         let tax = sell_tax(&e.side, quantity, q.price, self.sell_tax_rate);
         self.power
-            .consume(&e.key, &e.side, quantity, q.price, fee + tax)?;
+            .consume(&e.key, &e.side, quantity, q.price, fee, tax)?;
         self.ops.push((
             "fill".into(),
             e.order_id.clone(),
@@ -616,7 +646,7 @@ mod tests {
                 entry.4 = "limit".into();
                 entry.5 .0 = Some(price);
             }
-            let mut power = BuyingPower::new(equity, 1.0, vec![]);
+            let mut power = BuyingPower::new(equity, 1.0, vec![], Some(equity), false);
             let ops = process_market_impl(
                 "2024-01-02",
                 vec![entry],
@@ -643,7 +673,7 @@ mod tests {
     #[test]
     fn basket_zero_cap_diagnostic_belongs_only_to_the_blocked_leg() {
         for policy in ["all_or_none", "proportional", "best_effort"] {
-            let mut power = BuyingPower::new(10000.0, 1.0, vec![]);
+            let mut power = BuyingPower::new(10000.0, 1.0, vec![], Some(10000.0), false);
             let ops = process_market_impl(
                 "2024-01-02",
                 vec![

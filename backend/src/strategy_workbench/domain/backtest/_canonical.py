@@ -14,7 +14,8 @@ from ._models import BacktestRunSpec, ResolvedBacktestRunSpec, RunEnvironment
 # 지문으로 옛 규칙의 결과를 공유한다.
 # v4(#342 DOMAIN-V2-02): 참여 한도의 ADV 는 거래대금이 있는 앞선 행 20개가 다 차야 주고, 워밍업은
 # 40세션을 읽는다.
-ENGINE_RULES_VERSION = "backtest-engine-v5"
+# v6: 정수 후보의 실제 장부 여력 검증과 비례 바스켓 최종 정수 예산 재판정.
+ENGINE_RULES_VERSION = "backtest-engine-v6"
 
 
 def backtest_run_fingerprint(

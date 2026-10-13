@@ -192,3 +192,7 @@ support 노드는 backend 출처 표식에 따라 숨긴다. 원문 없는 조�
 최초 견적의 체결가·슬리피지 Q는 보존하고(#341), 실행 순서대로 현재 장부에 최종 수량의 예산을
 같은 QuoteCore로 다시 판정한다. 가능한 수량만 체결하고 잔량 취소는 기존 비례 정책을 따른다.
 이 실행 결과 변경은 `backtest-engine-v6`로 구분한다.
+
+현금 체결의 순차 연산 정본은 Python `power_projection.project_cash/project_cost`와 대응 Rust 함수다. 실제 Portfolio, 견적 후보, BuyingPower 소비가 대금→수수료→거래세 순서를 공유한다. 여력은 snapshot.cash를 직접 받고, 종목 평가액의 원래 순서(전량 청산 시 제거, 재진입 시 끝에 추가)를 보존해 cash+sum(values)와 sum(abs(values))를 재계산한다. 현금 음수 허용 여부는 레버리지 수치가 아닌 MARGIN feature가 정한다. 저수준 quote의 optional execution_state 미제공은 구호출 호환이며 실제 엔진은 네 코어 모두 이를 제공한다. 바스켓 checkpoint는 현금과 평가액 순서까지 복원한다.
+
+이 공유 산술은 평가 시점 정책을 통합하지 않는다. BuyingPower는 기존의 체결가 기준 위험 평가를 유지하고 실제 Portfolio는 기존 보유 평가가 유지 및 세션 mark 시점을 유지한다. 원장 mark를 견적에 맞춰 바꾸지 않는다.

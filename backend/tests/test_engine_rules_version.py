@@ -24,6 +24,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
 from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
 from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 from tests.test_executable_capacity import proportional_integer_scenario
+from tests.test_execution_cash_projection import actual_cash_scenario
 
 # 기록만 더한 변경(V4-04 2/2: 체결 행의 `cap_volume`, 목표 금액 → 수량 변환의 ROUNDING 레코드)은
 # trace 가 바뀌어 digest 가 달라지지만 체결·비용 규칙은 그대로라 판본을 올리지 않고 digest 만
@@ -31,9 +32,11 @@ from tests.test_executable_capacity import proportional_integer_scenario
 # v5는 비용의 레버리지 배수·체결가 재평가·양방향 청산 노출 해제를 견적에 반영한다.
 # leveraged_short_tax_budget은 L2 숏16주→환매/롱32주 경로로 해당 규칙을 고정한다.
 # v6는 실제 장부의 정수 경계와 비례 축소 후 최종 수량의 여력을 다시 판정한다.
+# 같은 미병합 v6 수정에서 대금→수수료→세금의 실제 현금 순서를 포함한다. 기존 28개
+# scenario trace/decision은 그대로이며 actual_cash_fee_application은 새 경계를 고정한다.
 _PINNED = (
     "backtest-engine-v6",
-    "88a656bc6eee0d3fe68a8a13bbee450832dfb4de750a359b8decca007066c53c",
+    "6450f74ce1d0844d5b6bcf38c4d909406176bf9020ca7cfe14326dd0f55b21f5",
 )
 
 
@@ -48,6 +51,10 @@ def _rules_digest() -> str:
         digest.update(engine.event_store.decision_tape_bytes())
     engine, _result = proportional_integer_scenario("python", 75.0)
     digest.update(b"proportional_integer_budget")
+    digest.update(engine.event_store.trace_bytes())
+    digest.update(engine.event_store.decision_tape_bytes())
+    engine, _result = actual_cash_scenario("python")
+    digest.update(b"actual_cash_fee_application")
     digest.update(engine.event_store.trace_bytes())
     digest.update(engine.event_store.decision_tape_bytes())
     # ADV(20행)·σ(수익률 20개) 창이 차도록 25세션. 거래대금이 세션마다 달라 창 길이가 결과를 가른다.

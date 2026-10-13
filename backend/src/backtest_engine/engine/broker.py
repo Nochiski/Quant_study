@@ -25,7 +25,11 @@ from typing import Protocol
 
 from backtest_engine.engine.costs import sell_tax_amount
 from backtest_engine.engine.orders import OpenOrder
-from backtest_engine.engine.power_projection import project_valuation
+from backtest_engine.engine.power_projection import (
+    ExecutionState,
+    project_execution,
+    project_valuation,
+)
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.ports.execution import SlippageModel
@@ -132,6 +136,7 @@ class QuoteCore(Protocol):
         leverage: float = 1.0,
         held_mark: float | None = None,
         valuation: tuple[float, float] | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> QuoteNumbers: ...
 
 
@@ -153,6 +158,7 @@ class PythonQuoteCore:
         leverage: float = 1.0,
         held_mark: float | None = None,
         valuation: tuple[float, float] | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> QuoteNumbers:
         if slip < 0:
             raise ValueError(f"slippage must be >= 0 — slip={slip}")
@@ -180,20 +186,30 @@ class PythonQuoteCore:
             return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
 
         closing = max(-held if buy else held, Decimal(0))
-        if quantity > closing:
+        if quantity > closing or execution_state is not None:
             # 분모 역산의 floor는 정확한 경계에서 한 주를 잃는다. 실제 장부식으로 후보를 판정한다.
             equity, gross = valuation or (buying_power / leverage, 0.0)
             mark = price if held_mark is None else held_mark
-            low, high = int(closing), int(quantity)
+            low, high = (0 if execution_state is not None else int(closing)), int(quantity)
             while low < high:
                 candidate = (low + high + 1) // 2
                 notional = candidate * price
-                cost = notional * fee_rate + (0.0 if buy else notional * sell_tax_rate)
+                fee = notional * fee_rate
+                tax = 0.0 if buy else notional * sell_tax_rate
                 new = held + (Decimal(candidate) if buy else -Decimal(candidate))
-                after_equity, after_gross = project_valuation(
-                    equity, gross, held, new, mark, price, cost
-                )
-                if leverage * after_equity - after_gross >= 0:
+                if execution_state is not None:
+                    cash, after_equity, after_gross = project_execution(
+                        execution_state, buy, Decimal(candidate), new, price, fee, tax
+                    )
+                    cash_valid = execution_state[3] or cash >= 0
+                else:
+                    after_equity, after_gross = project_valuation(
+                        equity, gross, held, new, mark, price, fee + tax
+                    )
+                    cash_valid = True
+                if cash_valid and (
+                    candidate <= closing or leverage * after_equity - after_gross >= 0
+                ):
                     low = candidate
                 else:
                     high = candidate - 1
@@ -264,6 +280,7 @@ class BrokerSim:
         leverage: float = 1.0,
         held_mark: float | None = None,
         valuation: tuple[float, float] | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> Quote:
         """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음.
 
@@ -316,6 +333,7 @@ class BrokerSim:
             leverage,
             held_mark,
             valuation,
+            execution_state,
         )
         detail = self._detail(numbers, order, bar, volume, open_order.remaining, buying_power)
         return Quote(
@@ -338,6 +356,7 @@ class BrokerSim:
         leverage: float,
         held_mark: float | None,
         valuation: tuple[float, float],
+        execution_state: ExecutionState,
         sell_tax_rate: float,
     ) -> Quote:
         """비례 축소 후 예산만 재판정한다. 최초 견적의 가격·충격 Q 계약은 유지한다."""
@@ -357,6 +376,7 @@ class BrokerSim:
             leverage,
             held_mark,
             valuation,
+            execution_state,
         )
         if numbers.quantity == quantity:
             return replace(quote, quantity=quantity)

@@ -62,7 +62,9 @@ def market_buy(quantity: int) -> OpenOrder:
 class TestBrokerBuyingPower:
     def test_buying_power_caps_fill_and_names_leverage(self) -> None:
         # 여력 20,000 → 200주까지
-        outcome = BrokerSim(fee_bps=0.0).execute(market_buy(250), BAR, 20_000.0, "F-1")
+        outcome = BrokerSim(fee_bps=0.0).execute(
+            market_buy(250), BAR, 20_000.0, "F-1", sell_tax_rate=0.0
+        )
         assert outcome.status is ExecutionStatus.CASH_LIMITED
         assert outcome.fill is not None
         assert outcome.fill.quantity == Decimal(200)

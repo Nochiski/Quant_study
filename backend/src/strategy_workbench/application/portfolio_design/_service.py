@@ -531,9 +531,7 @@ class PortfolioDesignService:
         올린다 — 백테스트 시작과 같은 접수 거절 코드로 나간다(#351).
         """
 
-        validation = validate_strategy(spec)
-        if not validation.valid:
-            raise InvalidPortfolioRequestError(validation)
+        _require_valid_strategy(spec)
         checkpoint()
         resolved = require_environment(
             environment, requested_by=f"portfolio.preview({spec.title!r})"
@@ -551,9 +549,7 @@ class PortfolioDesignService:
         ):
             raise TraceObservationCapabilityError(type(self._observation_source).__name__)
 
-        metadata = self._strategy_metadata(spec)
-        plans = self._plans(spec, metadata, resolved.missing)
-        _reject_non_numeric_factor_outputs(spec, plans)
+        metadata, plans = self._numeric_factor_plans(spec, resolved.missing)
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
         return _PreparedPipeline(
@@ -566,11 +562,18 @@ class PortfolioDesignService:
         실행 preflight와 같은 validator·metadata·plan owner를 소비하되 연구 구간을 바꾸거나
         우회하지 않는다. 봉인 오류 응답 우선순위를 유지하면서 무효 전략의 감사 기록을 막는다.
         """
-        validation = validate_strategy(spec)
-        if not validation.valid:
-            raise InvalidPortfolioRequestError(validation)
-        plans = self._plans(spec, self._strategy_metadata(spec), missing)
+        _require_valid_strategy(spec)
+        self._numeric_factor_plans(spec, missing)
+
+    def _numeric_factor_plans(
+        self, spec: StrategySpec, missing: MissingPolicy
+    ) -> tuple[FactorMetadataSnapshot, dict[str, FactorExecutionPlan]]:
+        """팩터 계획을 컴파일하고 숫자가 아닌 출력을 거절한다. 실행 preflight와 봉인 기록 전
+        검증이 같은 단계를 같은 순서로 쓴다."""
+        metadata = self._strategy_metadata(spec)
+        plans = self._plans(spec, metadata, missing)
         _reject_non_numeric_factor_outputs(spec, plans)
+        return metadata, plans
 
     def _strategy_metadata(self, spec: StrategySpec) -> FactorMetadataSnapshot:
         return self._factor_metadata.resolve_factor_fields(
@@ -814,6 +817,12 @@ def _reported(
 def _between(start: float, end: float, fraction: float) -> float:
     """구간 [start, end] 안의 위치. 부동소수 오차로 end 를 넘지 않게 자른다."""
     return min(start + (end - start) * fraction, end)
+
+
+def _require_valid_strategy(spec: StrategySpec) -> None:
+    validation = validate_strategy(spec)
+    if not validation.valid:
+        raise InvalidPortfolioRequestError(validation)
 
 
 def _reject_non_numeric_factor_outputs(

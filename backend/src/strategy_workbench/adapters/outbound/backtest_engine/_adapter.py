@@ -71,6 +71,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawPosition,
     RawRounding,
     RawSnapshot,
+    RunCostKind,
     RunManifest,
     backtest_run_fingerprint,
 )
@@ -732,7 +733,8 @@ def _artifacts(
     raw_costs = tuple(
         RawCost(
             session=session_dates[session_index],
-            kind=kind,
+            # 엔진 비용 어휘를 결과 어휘로 옮긴다. 모르는 종류는 ValueError로 실패한다.
+            kind=RunCostKind(kind),
             security_id=None if instrument_index is None else security_ids[instrument_index],
             amount=amount,
         )

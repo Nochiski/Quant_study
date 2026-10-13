@@ -36,7 +36,7 @@ from backtest_engine.types.actions import (
     SetPortfolioTarget,
     SetPositionTarget,
 )
-from backtest_engine.types.events import FillEvent, OrderEvent
+from backtest_engine.types.events import LIQUIDITY_CAP_ZERO, FillEvent, OrderEvent
 from backtest_engine.types.market import Bar
 from backtest_engine.types.orders import Side, TimeInForce
 
@@ -245,6 +245,8 @@ class BrokerSim:
         bar: Bar,
         buying_power: float,
         fill_id: str,
+        *,
+        sell_tax_rate: float,
     ) -> ExecutionOutcome:
         """대기 주문 하나를 해당 세션 bar로 체결 시도한다 (quote → fill).
 
@@ -255,7 +257,7 @@ class BrokerSim:
         quote = self.quote(open_order, bar, buying_power)
         if quote.quantity <= 0:
             return ExecutionOutcome(fill=None, status=quote.status, detail=quote.detail)
-        fill = self.fill(quote, open_order, bar, fill_id)
+        fill = self.fill(quote, open_order, bar, fill_id, sell_tax_rate=sell_tax_rate)
         return ExecutionOutcome(fill=fill, status=quote.status, detail=quote.detail)
 
     def quote(
@@ -331,7 +333,7 @@ class BrokerSim:
             numbers.slippage_per_share,
             numbers.status,
             detail,
-            "liquidity_cap_zero" if numbers.status is ExecutionStatus.NOT_FILLED else None,
+            LIQUIDITY_CAP_ZERO if numbers.status is ExecutionStatus.NOT_FILLED else None,
             volume if numbers.status is ExecutionStatus.NOT_FILLED else None,
         )
 
@@ -428,7 +430,7 @@ class BrokerSim:
         fill_id: str,
         quantity: Decimal | None = None,
         *,
-        sell_tax_rate: float = 0.0,
+        sell_tax_rate: float,
     ) -> FillEvent:
         """견적을 체결 기록으로 만든다. quantity로 견적보다 적게(바스켓 비례 축소) 체결 가능."""
         order = open_order.order

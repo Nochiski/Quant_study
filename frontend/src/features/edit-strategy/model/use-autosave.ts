@@ -9,7 +9,7 @@ import {
   type DraftRecord,
   type DraftStorage,
 } from "./draft-store";
-import type { DocumentAction, DocumentState } from "./document-state";
+import type { DocumentState } from "./document-state";
 
 const AUTOSAVE_DELAY_MS = 800;
 
@@ -46,7 +46,7 @@ type AutosaveOptions = {
  */
 export const useAutosave = (
   state: DocumentState,
-  dispatch: (action: DocumentAction) => void,
+  replaceSource: (source: string) => boolean,
   options: AutosaveOptions,
 ): Autosave => {
   const storage = useMemo(
@@ -121,9 +121,7 @@ export const useAutosave = (
       // pre-save base key even if later edits keep the document dirty. A document load changes
       // the epoch and must keep its recovery record.
       clearDraft(storage, before.key);
-      setLastWrite((current) =>
-        current?.key === before.key ? null : current,
-      );
+      setLastWrite((current) => (current?.key === before.key ? null : current));
     }
     if (!state.dirty || state.composing) return;
     const timer = setTimeout(() => {
@@ -162,11 +160,11 @@ export const useAutosave = (
 
   const restore = useCallback(() => {
     if (!candidate || compatibility !== "compatible") return;
-    dispatch({ type: "edit", source: candidate.source });
+    if (!replaceSource(candidate.source)) return;
     setJudged((current) =>
       current.key === key ? { ...current, dismissed: true } : current,
     );
-  }, [candidate, compatibility, dispatch, key]);
+  }, [candidate, compatibility, replaceSource, key]);
   const discard = useCallback(() => {
     if (!candidate) return;
     clearDraft(storage, key);

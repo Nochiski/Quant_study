@@ -145,7 +145,6 @@ export { PipelinePanel } from "./ui/pipeline-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
 export { StrategyDiffPanel } from "./ui/strategy-diff-panel";
 export {
-  diffCanonicalJson,
   projectDraftDiff,
   type DraftDiffProjection,
   type DraftSemanticDiff,
@@ -268,3 +267,5 @@ export {
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";
 
 export { RecipePanel } from "./ui/recipe-panel";
+
+export { useWholeDocumentReplacement } from "./model/replace-whole-document";

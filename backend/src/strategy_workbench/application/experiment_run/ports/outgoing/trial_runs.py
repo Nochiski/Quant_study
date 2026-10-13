@@ -19,6 +19,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunState,
 )
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger
+from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
 
 
 class TrialRunRejectedError(RuntimeError):
@@ -64,9 +65,13 @@ class TrialRunPort(Protocol):
         """
         ...
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
+    def start(
+        self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
+    ) -> str:
         """실행을 접수하고 run_id 를 돌려준다. `trial_key` 로 계열 원장에 적는다.
 
+        `controls`는 저장된 현재 조작이며 접수와 함께 원자적으로 적용한다. 빈 레인의 메모리
+        설정을 오래 보존하지 않아도 이후 학습·검증·재시도가 같은 조작을 따른다.
         `owner` 는 실험 id 다. 실행 서비스가 대기 순서를 실험끼리 번갈아 정하고, 같은 입력을 이은
         run 은 소유자가 모두 취소해야 멈춘다.
 

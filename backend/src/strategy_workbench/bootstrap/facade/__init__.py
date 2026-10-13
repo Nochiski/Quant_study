@@ -24,6 +24,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "adapters.outbound.secrets_local",
     "adapters.outbound.strategy_sqlite",
     "domain.assistant",
+    "domain.experiment",
     "domain.factor",
     "domain.analytics",
 )

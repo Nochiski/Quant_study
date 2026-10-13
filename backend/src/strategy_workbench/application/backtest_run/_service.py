@@ -68,7 +68,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 from ._gc_policy import full_collections_suspended
-from ._scheduler import RunQueue, experiment_slots
+from ._scheduler import RunLaneControls, RunQueue, experiment_slots
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
 from .ports.outgoing.backtest_data import (
     BacktestDataNotReadyError,
@@ -282,6 +282,7 @@ class BacktestRunService:
         *,
         owner: str | None = None,
         trial_key_override: str | None = None,
+        lane_controls: RunLaneControls | None = None,
     ) -> BacktestStartResponse:
         """실행 요청을 받아 즉시 `QUEUED` 로 접수한다.
 
@@ -315,6 +316,7 @@ class BacktestRunService:
                     and existing.join_key == join_key
                     and existing.provenance == provenance
                 ):
+                    self._apply_lane_controls(owner, lane_controls)
                     existing.owners.add(owner)
                     # 사용자가 이었으면 단일 실행 레인, 아니면 멈추지 않은 실험 레인으로 옮긴다.
                     self._relane(existing)
@@ -356,6 +358,7 @@ class BacktestRunService:
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
             # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
             accepted = record.state
+            self._apply_lane_controls(owner, lane_controls)
             self._waiting.push(record, self._lane(record))
             self._dispatch()
         return BacktestStartResponse(accepted)
@@ -473,6 +476,9 @@ class BacktestRunService:
         도는 run 은 끝까지 돈다. `RunStatus` 는 바뀌지 않고 멈춘 run 은 `queued` 로 남는다(spec D6).
         """
         with self._lock:
+            if not self._owner_active(owner):
+                self._waiting.forget(owner)
+                return
             self._waiting.configure(owner, paused=paused, weight=weight)
             for record in self._records.values():
                 if owner in record.owners and len(record.owners) > 1:
@@ -564,6 +570,7 @@ class BacktestRunService:
             if record.owners:
                 self._relane(record)
                 self._dispatch()
+                self._release_idle_owner(owner)
                 return _cancel_result(record.state, kept_by_owners=True)
             record.cancellation.set()
             if record in self._waiting:
@@ -581,6 +588,7 @@ class BacktestRunService:
                     "cancellation",
                     "Cancellation requested",
                 )
+            self._release_idle_owner(owner)
             return _cancel_result(record.state, kept_by_owners=False)
 
     def _lane(self, record: _RunRecord) -> str | None:
@@ -1084,8 +1092,25 @@ class BacktestRunService:
             saved = self._persist(record.state)
         # 종결이 저장된 run 만 사본을 버린다 — 저장하지 못한 run 의 사본을 버리면 저장소의 옛
         # 상태(`queued`·`running`)로 되돌아가 끝난 run 이 다시 도는 것처럼 보인다.
-        if status.is_terminal and saved:
-            self._retire(record)
+        if status.is_terminal:
+            for owner in record.owners:
+                self._release_idle_owner(owner)
+            if saved:
+                self._retire(record)
+
+    def _apply_lane_controls(self, owner: str | None, controls: RunLaneControls | None) -> None:
+        if owner is not None and controls is not None:
+            self._waiting.configure(owner, paused=controls.paused, weight=controls.weight)
+
+    def _owner_active(self, owner: str) -> bool:
+        return any(
+            owner in record.owners and not record.state.status.is_terminal
+            for record in self._records.values()
+        )
+
+    def _release_idle_owner(self, owner: str | None) -> None:
+        if owner is not None and not self._owner_active(owner):
+            self._waiting.forget(owner)
 
     def _retire(self, record: _RunRecord) -> None:
         """끝난 run 을 최근 목록에 넣고, 넘친 오래된 끝난 run 의 메모리 사본을 버린다(#332)."""

@@ -1,3 +1,4 @@
+from strategy_workbench.application.backtest_run._scheduler import RunLaneControls
 from strategy_workbench.application.backtest_run._service import (
     DEFAULT_RUN_SLOTS,
     BacktestParameterValueError,
@@ -38,6 +39,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger, TrialPreview
 
 __all__ = [
+    "RunLaneControls",
     "DEFAULT_RUN_SLOTS",
     "BacktestParameterValueError",
     "BacktestResultNotReadyError",

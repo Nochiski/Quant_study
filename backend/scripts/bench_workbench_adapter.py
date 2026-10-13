@@ -341,6 +341,9 @@ def execution_request(
             spec_hash=spec_hash,
             schema_version=spec.identity.schema_version,
         ),
+        # 측정용 실행은 원문·계열 출처가 없다. 빠뜨린 것이 아니라 없음을 명시한다.
+        strategy_source=None,
+        lineage_strategy_id=None,
     )
 
 

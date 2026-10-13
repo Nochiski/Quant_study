@@ -40,9 +40,12 @@ def run_environment_schema() -> dict[str, Any]:
     )
 
 
-def run_environment_schema_hash(schema: dict[str, Any]) -> str:
-    """canonical 스키마 JSON 의 sha256. HTTP ETag 로 그대로 쓴다."""
-    return canonical_json_hash(schema)
+def run_environment_schema_hash(schema: dict[str, Any], options_schema: dict[str, Any]) -> str:
+    """실행 설정 스키마 응답 판(환경 스키마 + 실행 옵션 스키마)의 canonical sha256.
+
+    HTTP ETag로 그대로 쓴다. 두 스키마 중 하나만 바뀌어도 판이 바뀐다.
+    """
+    return canonical_json_hash({"schema": schema, "options_schema": options_schema})
 
 
 def backtest_run_options_schema() -> dict[str, Any]:

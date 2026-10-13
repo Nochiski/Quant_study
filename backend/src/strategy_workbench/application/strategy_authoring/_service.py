@@ -28,6 +28,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     backtest_run_options_schema,
     environment_from_retired_settings,
     run_environment_schema,
+    run_environment_schema_hash,
 )
 from strategy_workbench.domain.canonical.facade.encoding import canonical_json_hash
 from strategy_workbench.domain.factor.facade.expression import FieldMetadata
@@ -264,7 +265,7 @@ class StrategyAuthoringService:
         schema = run_environment_schema()
         options = backtest_run_options_schema()
         return RunEnvironmentSchema(
-            schema_hash=canonical_json_hash({"schema": schema, "options_schema": options}),
+            schema_hash=run_environment_schema_hash(schema, options),
             schema=schema,
             options_schema=options,
         )

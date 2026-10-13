@@ -25,6 +25,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     ResearchWindowViolationError,
     RunEnvironment,
     SellTax,
+    backtest_run_options_schema,
     cost_history_sessions,
     cost_inputs,
     environment_hash,
@@ -294,13 +295,16 @@ def test_schema_publishes_the_mode_that_reads_each_mode_dependent_field() -> Non
 
 
 def test_schema_hash_is_stable_and_splits_on_content() -> None:
-    schema = run_environment_schema()
+    schema, options = run_environment_schema(), backtest_run_options_schema()
 
-    assert run_environment_schema_hash(schema) == run_environment_schema_hash(
-        run_environment_schema()
+    assert run_environment_schema_hash(schema, options) == run_environment_schema_hash(
+        run_environment_schema(), backtest_run_options_schema()
     )
-    assert run_environment_schema_hash({**schema, "title": "Other"}) != (
-        run_environment_schema_hash(schema)
+    assert run_environment_schema_hash({**schema, "title": "Other"}, options) != (
+        run_environment_schema_hash(schema, options)
+    )
+    assert run_environment_schema_hash(schema, {**options, "title": "Other"}) != (
+        run_environment_schema_hash(schema, options)
     )
 
 

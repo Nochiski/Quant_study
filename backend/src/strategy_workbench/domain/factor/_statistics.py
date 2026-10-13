@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from math import sqrt
 from statistics import mean, pstdev
 
 
@@ -61,18 +60,3 @@ def quantile(ordered: list[float], probability: float) -> float:
     weight = position - lower_index
     return ordered[lower_index] * (1 - weight) + ordered[upper_index] * weight
 
-
-def pearson(left: list[float], right: list[float]) -> float | None:
-    if len(left) < 2 or len(left) != len(right):
-        return None
-    left_center = mean(left)
-    right_center = mean(right)
-    numerator = sum(
-        (left_value - left_center) * (right_value - right_center)
-        for left_value, right_value in zip(left, right, strict=True)
-    )
-    left_scale = sqrt(sum((value - left_center) ** 2 for value in left))
-    right_scale = sqrt(sum((value - right_center) ** 2 for value in right))
-    if left_scale == 0 or right_scale == 0:
-        return None
-    return numerator / (left_scale * right_scale)

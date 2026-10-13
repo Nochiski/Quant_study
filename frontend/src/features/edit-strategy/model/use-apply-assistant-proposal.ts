@@ -126,17 +126,23 @@ export const useApplyAssistantProposal = (
     [state, sourceVersion],
   );
 
-  /** 전체 범위 교체 한 번. 호출 전에 조합·편집기·기준 검사를 마친 상태여야 한다. */
+  /**
+   * 전체 범위 교체 한 번. `expectedSource`는 적용을 결정한 근거 원문(즉시 적용은 방금 읽은 원문,
+   * 확인 창은 사용자가 본 원문)이다. 그 사이 문서 신원이나 원문이 바뀌었으면 덮어쓰지 않고 `stale`로
+   * 알린다 — 조용히 무시하면 사용자는 적용된 줄 안다.
+   */
   const overwrite = useCallback(
-    (handle: CodeEditorHandle, source: string): void => {
-      const before = handle.getText();
-      if (!replace(state, handle, before, source)) return;
+    (handle: CodeEditorHandle, expectedSource: string, source: string): void => {
+      if (!replace(state, handle, expectedSource, source)) {
+        setStatus({ kind: "failed", reason: "stale" });
+        return;
+      }
       handle.scrollTo(0);
       handle.focus();
       // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다. 단 제안이
       // 지금 문서와 똑같으면 reducer가 상태를 그대로 돌려줘 버전이 오르지 않는다 — 그때 +1을 쓰면
       // 결과가 영원히 어긋난 소유자에 묶여 알림도, 이어지는 백테스트도 사라진다(3차 리뷰 P2-1).
-      const changed = source !== before;
+      const changed = source !== expectedSource;
       setStatus(
         { kind: "applied", changed },
         sourceVersion + (changed ? 1 : 0),
@@ -182,7 +188,7 @@ export const useApplyAssistantProposal = (
       const handle = readEditor();
       if (handle === null) return;
       if (proposal.baseSource === currentSource) {
-        overwrite(handle, proposal.source);
+        overwrite(handle, currentSource, proposal.source);
         return;
       }
       setStatus(
@@ -219,7 +225,7 @@ export const useApplyAssistantProposal = (
       setStatus({ kind: "failed", reason: "stale" });
       return;
     }
-    overwrite(handle, status.proposal.source);
+    overwrite(handle, status.currentSource, status.proposal.source);
   }, [readEditor, overwrite, readCurrent, setStatus, status]);
 
   const cancel = useCallback((): void => setStatus(IDLE), [setStatus]);

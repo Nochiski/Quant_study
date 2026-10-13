@@ -40,6 +40,7 @@ export const sameReplacementDocument = (requested: ReplacementDocument, current:
 export const useGuardedDocumentReplacement = (owner: EditorHandleOwner, state: DocumentState) => {
   const latest = useCommittedRef(state);
   const read = owner.read;
+  // 함수 정체성은 React Compiler 메모이제이션이 맡는다(수동 useCallback은 ref 읽기로 최적화를 막는다).
   return (requested: DocumentState, editor: CodeEditorHandle, expectedSource: string, source: string): boolean => {
     if (!sameReplacementDocument(requested, latest.current) || latest.current.composing ||
         read() !== editor || editor.getText() !== expectedSource) return false;

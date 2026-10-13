@@ -11,6 +11,7 @@ from strategy_workbench.domain.portfolio._construction_trace import (
     PortfolioCandidateTrace,
     PortfolioConstraintEffect,
     PortfolioConstructionTrace,
+    PortfolioFrameSummary,
     PortfolioTraceSelection,
     TargetTapeTraceResult,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "PortfolioConstructionTrace",
     "PortfolioFactorValue",
     "PortfolioFieldValue",
+    "PortfolioFrameSummary",
     "PortfolioInputValue",
     "PortfolioObservation",
     "PortfolioRebalanceSchedule",

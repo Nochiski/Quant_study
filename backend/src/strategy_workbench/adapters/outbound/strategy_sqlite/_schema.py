@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 
+from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
+    SchemaContract,
+    SchemaUpgrade,
+    ensure_schema,
+)
+
 from ._errors import StrategyRepositoryStorageError
 
 SCHEMA_VERSION = 2
@@ -118,140 +124,20 @@ _V2_ADDED_SCHEMA_OBJECTS = (
 
 def migrate_schema(connection: sqlite3.Connection) -> None:
     """Create our schema atomically, while refusing to claim or weaken any foreign file."""
-    try:
-        connection.execute("BEGIN IMMEDIATE")
-        application_id = _pragma_int(connection, "application_id")
-        version = _pragma_int(connection, "user_version")
-        footprint = _schema_footprint(connection)
-
-        if application_id == 0:
-            if version != 0 or footprint:
-                raise StrategyRepositoryStorageError(
-                    "refusing to claim a non-empty SQLite database without this "
-                    f"application id -- user_version={version} objects={footprint}"
-                )
-            for _object_type, _name, statement in (
-                *_V1_SCHEMA_OBJECTS,
-                *_V2_ADDED_SCHEMA_OBJECTS,
-            ):
-                connection.execute(statement)
-            connection.execute(f"PRAGMA application_id = {_APPLICATION_ID}")
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            version = SCHEMA_VERSION
-        elif application_id != _APPLICATION_ID:
-            raise StrategyRepositoryStorageError(
-                "SQLite file belongs to another application -- "
-                f"application_id={application_id} expected={_APPLICATION_ID}"
-            )
-
-        if version > SCHEMA_VERSION:
-            raise StrategyRepositoryStorageError(
-                "SQLite strategy schema is newer than this server -- "
-                f"stored={version} supported={SCHEMA_VERSION}"
-            )
-        if version == 1:
-            _validate_manifest(connection, _V1_SCHEMA_OBJECTS, version=1)
-            for _object_type, _name, statement in _V2_ADDED_SCHEMA_OBJECTS:
-                connection.execute(statement)
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            version = SCHEMA_VERSION
-        if version != SCHEMA_VERSION:  # pragma: no cover - next migration adds a branch above
-            raise StrategyRepositoryStorageError(
-                f"no migration path -- stored={version} supported={SCHEMA_VERSION}"
-            )
-        _validate_manifest(
-            connection,
-            (*_V1_SCHEMA_OBJECTS, *_V2_ADDED_SCHEMA_OBJECTS),
+    # 선언을 호출 시점에 읽는다 — 테스트가 모듈의 선언을 바꿔 실패하는 claim 을 재현한다.
+    ensure_schema(
+        connection,
+        SchemaContract(
+            label="strategy",
+            application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-        )
-        connection.commit()
-    except Exception:
-        if connection.in_transaction:
-            connection.rollback()
-        raise
-
-
-def _pragma_int(connection: sqlite3.Connection, name: str) -> int:
-    row = connection.execute(f"PRAGMA {name}").fetchone()
-    if row is None or not isinstance(row[0], int):  # pragma: no cover - SQLite invariant
-        raise StrategyRepositoryStorageError(f"SQLite PRAGMA {name} returned an invalid value")
-    return row[0]
-
-
-def _schema_footprint(connection: sqlite3.Connection) -> tuple[tuple[str, str], ...]:
-    """Return every persisted schema object, including SQLite-managed objects.
-
-    An unowned database is claimable only when this footprint is empty. SQLite can leave
-    ``sqlite_sequence`` behind after an AUTOINCREMENT table is dropped, so internal names must
-    not be treated as evidence of an empty file.
-    """
-    rows = connection.execute(
-        """
-        SELECT type, name
-        FROM sqlite_schema
-        ORDER BY type COLLATE BINARY, name COLLATE BINARY
-        """
-    ).fetchall()
-    footprint: list[tuple[str, str]] = []
-    for object_type, name in rows:
-        if not isinstance(object_type, str) or not isinstance(name, str):
-            raise StrategyRepositoryStorageError(
-                "SQLite strategy schema contains an invalid object identity"
-            )
-        footprint.append((object_type, name))
-    return tuple(footprint)
-
-
-def _schema_objects(
-    connection: sqlite3.Connection,
-) -> dict[tuple[str, str], str | None]:
-    rows = connection.execute(
-        """
-        SELECT type, name, sql
-        FROM sqlite_schema
-        ORDER BY type COLLATE BINARY, name COLLATE BINARY
-        """
-    ).fetchall()
-    objects: dict[tuple[str, str], str | None] = {}
-    for object_type, name, sql in rows:
-        if not isinstance(object_type, str) or not isinstance(name, str):
-            raise StrategyRepositoryStorageError(
-                "SQLite strategy schema contains an invalid object identity"
-            )
-        if sql is not None and not isinstance(sql, str):  # pragma: no cover - SQLite invariant
-            raise StrategyRepositoryStorageError(
-                "SQLite strategy schema contains an object with invalid SQL"
-            )
-        objects[(object_type, name)] = None if sql is None else _normalise_sql(sql)
-    return objects
-
-
-def _validate_manifest(
-    connection: sqlite3.Connection,
-    manifest: tuple[tuple[str, str, str], ...],
-    *,
-    version: int,
-) -> None:
-    expected = {
-        (object_type, name): _normalise_sql(statement) for object_type, name, statement in manifest
-    }
-    actual = _schema_objects(connection)
-    if actual == expected:
-        return
-
-    missing = sorted(expected.keys() - actual.keys())
-    unexpected = sorted(actual.keys() - expected.keys())
-    incompatible = sorted(
-        key for key in actual.keys() & expected.keys() if actual[key] != expected[key]
-    )
-    raise StrategyRepositoryStorageError(
-        f"SQLite strategy schema does not match version {version} -- "
-        f"missing={missing} unexpected={unexpected} incompatible={incompatible}"
+            objects=(*_V1_SCHEMA_OBJECTS, *_V2_ADDED_SCHEMA_OBJECTS),
+            error=StrategyRepositoryStorageError,
+            upgrades=(SchemaUpgrade(1, _V1_SCHEMA_OBJECTS, _upgrade_v1_to_v2),),
+        ),
     )
 
 
-def _normalise_sql(statement: str) -> str:
-    # sqlite_schema preserves the submitted DDL after trimming its outer whitespace. Compare
-    # that representation exactly: case and whitespace inside quoted literals are data, not
-    # formatting, and may change a CHECK constraint or trigger's behaviour.
-    return statement.strip()
+def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
+    for _object_type, _name, statement in _V2_ADDED_SCHEMA_OBJECTS:
+        connection.execute(statement)

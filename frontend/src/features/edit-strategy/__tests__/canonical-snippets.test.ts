@@ -118,9 +118,11 @@ describe("canonical StrategySpec snippets", () => {
     expect(catalog().some((snippet) => snippet.kind === "factor")).toBe(true);
   });
 
-  it("fails closed for catalog-only, missing graph and incomplete authoring metadata", () => {
+  it("fails closed for catalog-only, adapter-unavailable, missing graph and incomplete authoring metadata", () => {
     const unavailable = [
       { ...FACTOR, availability: "catalog_only" as const },
+      // 연결된 어댑터가 기본 graph 의 필드를 주지 않는 구현 팩터(#370) — 넣자마자 compile 이 막는다.
+      { ...FACTOR, availability: "unavailable" as const },
       { ...FACTOR, factor_id: "missing-graph", default_graph: null },
     ];
     expect(

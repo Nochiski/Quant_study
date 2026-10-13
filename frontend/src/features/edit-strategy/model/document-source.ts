@@ -29,7 +29,8 @@ export const loadAction = (source: DocumentSource): DocumentAction =>
       }
     : {
         type: "load",
-        format: source.document.format,
+        // JSON 원문도 YAML 1.2로 읽는다. 재직렬화 없이 저장된 바이트와 revision 신원을 보존한다.
+        format: "yaml",
         source: source.document.source,
         strategyId: source.document.strategy_id,
         baseRevision: source.document.revision,

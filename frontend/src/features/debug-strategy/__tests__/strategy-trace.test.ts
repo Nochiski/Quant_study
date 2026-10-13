@@ -32,8 +32,6 @@ const context = (): StrategyDebuggerContext => ({
     end: "2026-09-01",
     universe_id: "krx.common-stock",
   },
-  start: "2021-01-01",
-  end: "2026-09-01",
   factors: [
     {
       factorId: "momentum",
@@ -53,6 +51,12 @@ const context = (): StrategyDebuggerContext => ({
 });
 
 const response = (): StrategyTraceResponse => ({
+  factor_preview: {
+    valid_count: 0,
+    missing_count: 0,
+    missing: "drop",
+    top: [],
+  },
   spec_hash: "spec-hash",
   snapshot_id: "snapshot-v1",
   registry_version: "registry-v1",
@@ -290,6 +294,37 @@ describe("strategy trace request contract", () => {
     expect(saved.ownerKey).not.toBe(inline.ownerKey);
   });
 
+  // #351: 키가 실행 설정을 빼면 설정만 바꾼 추적이 옛 캐시 칸을 읽어 옛 결과가 새 설정의 성공으로 보인다.
+  it.each([
+    ["universe", { universe_id: "krx.kospi200" }],
+    ["period", { end: "2026-08-31" }],
+    ["cost", { fee_bps: 25 }],
+    ["execution", { participation_rate: 0.05 }],
+  ] as const)(
+    "gives a request whose run settings differ only in %s its own owner",
+    (_setting, change) => {
+      const selection = {
+        asOf: "2026-08-31",
+        security: "sec-a",
+        factorId: "momentum",
+        nodeId: "ranked",
+      };
+      const changedContext = context();
+      changedContext.environment = { ...changedContext.environment, ...change };
+      const before = prepareStrategyTrace(context(), selection);
+      const after = prepareStrategyTrace(changedContext, selection);
+
+      expect(before.kind).toBe("ready");
+      expect(after.kind).toBe("ready");
+      if (before.kind !== "ready" || after.kind !== "ready") return;
+      expect(after.request.environment).toEqual(changedContext.environment);
+      expect(after.ownerKey).not.toBe(before.ownerKey);
+      expect(prepareStrategyTrace(context(), selection)).toMatchObject({
+        ownerKey: before.ownerKey,
+      });
+    },
+  );
+
   it.each([
     [
       "date",
@@ -470,4 +505,32 @@ describe("strategy trace request contract", () => {
       },
     ]);
   });
+});
+
+it("summary requests keep the selected factor in request and cache identity", () => {
+  const current = context();
+  current.factors.push({
+    ...current.factors[0]!,
+    factorId: "other",
+    expectedPlanHash: "other-plan",
+  });
+  const selection = {
+    summaryOnly: true,
+    asOf: "",
+    security: "",
+    nodeId: "",
+    factorId: "other",
+  };
+  const selected = prepareStrategyTrace(current, selection);
+  expect(selected.kind).toBe("ready");
+  if (selected.kind !== "ready") return;
+  expect(selected.request.factor_id).toBe("other");
+  const first = prepareStrategyTrace(current, {
+    ...selection,
+    factorId: "momentum",
+  });
+  expect(first.kind === "ready" && first.ownerKey).not.toBe(selected.ownerKey);
+  expect(
+    prepareStrategyTrace(current, { ...selection, factorId: "removed" }),
+  ).toEqual({ kind: "blocked", reason: "factor" });
 });

@@ -15,7 +15,7 @@
     "test:e2e": "npm run typecheck:e2e && node e2e/run-playwright.mjs",
     "test:e2e:update": "npm run typecheck:e2e && node e2e/run-playwright.mjs --update-snapshots=changed",
     "test:e2e:report": "playwright show-report",
-    "docs:capture": "node scripts/capture-manual-screenshots.mjs",
+    "docs:capture": "node --experimental-strip-types scripts/capture-manual-screenshots.mjs",
     "api:schema": "cd ../backend && uv run python scripts/export_openapi.py openapi.json",
     "api:generate": "npm run api:schema && openapi-ts"
   },
@@ -35,6 +35,7 @@
     "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-router": "1.170.32",
     "codemirror": "6.0.2",
+    "elkjs": "0.12.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "yaml": "2.9.0"

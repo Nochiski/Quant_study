@@ -24,6 +24,7 @@ from strategy_workbench.domain.factor.facade.validation import (
     FactorGraphValidation,
     FactorValidationSeverity,
     node_dependencies,
+    unavailable_field_message,
     validate_factor_graph,
 )
 
@@ -50,6 +51,7 @@ from ._models import (
     WeightingMethod,
     composite_factors,
     inverse_risk_factor_id,
+    parameter_value_allowed,
 )
 from ._promotion import PROMOTION_NODE_PREFIX, is_reserved_node_id, promotion_node_ids
 
@@ -245,10 +247,10 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         "strategy.risk.risk_factor_excluded",
         "risk.risk_factor_id",
         "리스크 팩터는 역가중에만 쓰이고 합성 점수에서는 빠집니다(가중치 무시): "
-        f"risk_factor_id={excluded!r}",
+        f"팩터={next(factor.label for factor in spec.factors if factor.factor_id == excluded)!r}",
         severity=ValidationSeverity.WARNING,
     )
-    if not composite_factors(spec):
+    if not composite_factors(spec) and spec.portfolio.tie_breaker_factor_id is None:
         # 막지 않으면 모든 후보의 합성 점수가 `None` 이 되어 정렬이 `security_id` 사전순으로
         # 떨어진다 — 예외도 진단도 없이 엉뚱한 종목이 선정되는 silent wrong result 다.
         yield semantic_issue(
@@ -256,6 +258,36 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
             "factors",
             "리스크 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
             f"추가하세요: risk_factor_id={excluded!r} factors={factor_ids!r}",
+        )
+
+
+def _tie_breaker_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
+    factor_id = spec.portfolio.tie_breaker_factor_id
+    if factor_id is None:
+        return
+    factor_ids = [factor.factor_id for factor in spec.factors]
+    if factor_id not in factor_ids:
+        yield semantic_issue(
+            "strategy.portfolio.tie_breaker_factor_missing",
+            "portfolio.tie_breaker_factor_id",
+            "동점 해소 팩터가 이 문서의 팩터 목록에 없습니다: "
+            f"factor_id={factor_id!r} factors={factor_ids!r}",
+        )
+        return
+    yield semantic_issue(
+        "strategy.portfolio.tie_breaker_factor_excluded",
+        "portfolio.tie_breaker_factor_id",
+        "동점 해소 팩터는 주 점수가 같은 종목의 순위에만 쓰이고 "
+        "합성 점수에서는 빠집니다(가중치 무시): "
+        f"팩터={next(factor.label for factor in spec.factors if factor.factor_id == factor_id)!r}",
+        severity=ValidationSeverity.WARNING,
+    )
+    if not composite_factors(spec):
+        yield semantic_issue(
+            "strategy.signal.no_alpha_factor",
+            "factors",
+            "보조·역가중 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
+            f"추가하세요: tie_breaker_factor_id={factor_id!r} factors={factor_ids!r}",
         )
 
 
@@ -384,7 +416,7 @@ def _equity_field_references(value: object, path: str = "") -> Iterator[tuple[st
 
 
 def _field_reference_issues(
-    spec: StrategySpec, fields: tuple[FieldMetadata, ...]
+    spec: StrategySpec, fields: tuple[FieldMetadata, ...], unavailable: Mapping[str, str]
 ) -> list[ValidationIssue]:
     """그래프 밖 필드 참조를 연결된 어댑터의 계약에서 찾는다(P2-07 리뷰 P1, spec D5).
 
@@ -398,13 +430,14 @@ def _field_reference_issues(
     for path, field_id in _equity_field_references(spec):
         metadata = by_id.get(field_id)
         if metadata is None:
+            reason = unavailable.get(field_id)
+            message = (
+                f"연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: field_id={field_id!r}"
+                if reason is None
+                else unavailable_field_message(field_id, reason)
+            )
             issues.append(
-                semantic_issue(
-                    "strategy.field.missing",
-                    path,
-                    "연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: "
-                    f"field_id={field_id!r} path={path!r}",
-                )
+                semantic_issue("strategy.field.missing", path, f"{message} path={path!r}")
             )
         elif metadata.value_type is not NodeValueType.NUMERIC_SERIES:
             issues.append(
@@ -519,6 +552,7 @@ def validate_strategy(
     *,
     written_pointers: Collection[str] | None = None,
     fields: Collection[FieldMetadata] | None = None,
+    unavailable_fields: Mapping[str, str] | None = None,
 ) -> StrategyValidation:
     """Semantic validation of a typed spec.
 
@@ -533,7 +567,9 @@ def validate_strategy(
     `fields` 는 연결된 equity 어댑터가 제공하는 필드 계약 전부다(P2-07, spec D5). 주어지면 그래프
     검증이 계약을 요구해 없는 `field_id` 가 `strategy.expression.field_missing` 으로 저장 전에
     나고, 단위·그룹 타입도 실제 계약으로 추론한다. 어댑터가 없는 컨텍스트(CLI·테스트)는 None 을
-    넘기고 지금과 같이 계약 없이 검증한다.
+    넘기고 지금과 같이 계약 없이 검증한다. `unavailable_fields` 는 어댑터가 선언했지만 주지 않는
+    필드 → 사유다 — 없는 필드가 그 안에 있으면 진단이 "필드 id 를 확인하세요" 대신 그 사유(카탈로그
+    재생성 같은 조치)를 싣는다(#316).
     """
     field_contracts = None if fields is None else tuple(fields)
     fields_by_id = {field.field_id: field for field in field_contracts or ()}
@@ -567,8 +603,8 @@ def validate_strategy(
         semantic_issue(
             "strategy.number.non_finite",
             path,
-            "StrategySpec numeric values must be finite before execution or hashing: "
-            f"path={path!r} value={value!r}",
+            "숫자 값은 NaN·무한대가 아닌 유한한 수여야 합니다. 이 값으로는 실행하거나 "
+            f"해시를 만들 수 없습니다 — path={path!r} value={value!r}",
         )
         for path, value in _numeric_leaves(spec)
         if path not in bounded_paths and not math.isfinite(value)
@@ -595,7 +631,7 @@ def validate_strategy(
         )
     issues.extend(_eligibility_rule_issues(spec))
     if field_contracts is not None:
-        issues.extend(_field_reference_issues(spec, field_contracts))
+        issues.extend(_field_reference_issues(spec, field_contracts, unavailable_fields or {}))
     # Scalar bounds are owned by the constraint catalog (P1-04); the schema API reads the same rows.
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         value = resolve_scalar(spec, constraint.pointer)
@@ -636,6 +672,7 @@ def validate_strategy(
             )
         )
     issues.extend(_risk_source_issues(spec))
+    issues.extend(_tie_breaker_issues(spec))
     if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_ONLY:
         issues.append(
             semantic_issue(
@@ -669,7 +706,7 @@ def validate_strategy(
                         "strategy.parameter.bounds", path, "최솟값은 최댓값 이하여야 합니다."
                     )
                 )
-            if not parameter.minimum <= parameter.default <= parameter.maximum:
+            if not parameter_value_allowed(parameter, parameter.default):
                 issues.append(
                     semantic_issue(
                         "strategy.parameter.default", path, "기본값은 탐색 범위 안에 있어야 합니다."
@@ -682,7 +719,7 @@ def validate_strategy(
                     )
                 )
         elif isinstance(parameter, ChoiceParameter):
-            if not parameter.choices or parameter.default not in parameter.choices:
+            if not parameter_value_allowed(parameter, parameter.default):
                 issues.append(
                     semantic_issue(
                         "strategy.parameter.choice",
@@ -725,6 +762,7 @@ def validate_strategy(
             parameter_ids=tuple(parameter_ids),
             fields=field_contracts or (),
             require_field_metadata=field_contracts is not None,
+            unavailable_fields=unavailable_fields,
         )
         unsupported = (
             []

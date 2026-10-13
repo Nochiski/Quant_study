@@ -105,6 +105,14 @@
   font-size: var(--text-size-small);
 }
 
+.backtest-settings__trial {
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
 .backtest-settings__field-error {
   color: var(--status-error);
   font-size: var(--text-size-small);

@@ -10,9 +10,10 @@ import {
   type RouterHistory,
 } from "@tanstack/react-router";
 
+import { isRunKind, type RunKind } from "../../entities/backtest";
 import { strategyDocumentQuery } from "../../entities/strategy";
 import {
-  STRATEGY_VIEWS,
+  migrateStrategyView,
   isNewDraftId,
   type StrategyView,
 } from "../../features/edit-strategy";
@@ -27,6 +28,7 @@ import {
 import { t } from "../../shared/config";
 import { isJsonPointer } from "../../shared/lib/yaml12";
 import { AppShell } from "../../widgets/app-shell";
+import { ExperimentCompletionNotice } from "../../widgets/experiment-notice";
 
 /** Everything routes can read without importing the app: query cache and feature flags. */
 export type RouterContext = {
@@ -34,18 +36,20 @@ export type RouterContext = {
   operationsEnabled: boolean;
 };
 
-const isView = (value: unknown): value is StrategyView =>
-  typeof value === "string" &&
-  (STRATEGY_VIEWS as readonly string[]).includes(value);
-
 type StrategyDocumentSearch = {
   view?: StrategyView;
+  compare?: boolean;
+  recipe?: boolean;
   path?: string;
   asOf?: string;
   security?: string;
   draft?: string;
 };
-type BacktestHistorySearch = { offset?: number; strategy?: string };
+type BacktestHistorySearch = {
+  offset?: number;
+  strategy?: string;
+  kind?: RunKind;
+};
 
 /** Selection/projection state for every StrategySpec authoring route. */
 const strategyDocumentSearch = (
@@ -53,7 +57,12 @@ const strategyDocumentSearch = (
 ): StrategyDocumentSearch => {
   const path = typeof search.path === "string" ? search.path : undefined;
   return {
-    view: isView(search.view) ? search.view : undefined,
+    view: migrateStrategyView(search.view),
+    recipe: search.recipe === true || search.recipe === "true" ? true : undefined,
+    compare:
+      search.compare === true || search.compare === "true" || search.view === "diff"
+        ? true
+        : undefined,
     path:
       path !== undefined && path !== "" && isJsonPointer(path)
         ? path
@@ -81,6 +90,18 @@ const StrategiesPage = lazyRouteComponent(
 const BacktestsPage = lazyRouteComponent(
   () => import("../../pages/research-backtests"),
   "BacktestsPage",
+);
+const ExperimentsPage = lazyRouteComponent(
+  () => import("../../pages/research-experiments"),
+  "ExperimentsPage",
+);
+const ExperimentPage = lazyRouteComponent(
+  () => import("../../pages/research-experiment"),
+  "ExperimentPage",
+);
+const NewExperimentPage = lazyRouteComponent(
+  () => import("../../pages/research-experiment-new"),
+  "NewExperimentPage",
 );
 const SettingsPage = lazyRouteComponent(
   () => import("../../pages/settings"),
@@ -112,6 +133,18 @@ const backtestHistorySearch = (
     typeof search.strategy === "string" && search.strategy.trim() !== ""
       ? search.strategy.trim()
       : undefined,
+  kind: isRunKind(search.kind) ? search.kind : undefined,
+});
+
+const textOf = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+
+/** 새 실험의 기반: 백테스트 실행(`run`) 또는 같은 설정으로 다시 만들 실험(`from`). */
+const newExperimentSearch = (
+  search: Record<string, unknown>,
+): { run?: string; from?: string } => ({
+  run: textOf(search.run),
+  from: textOf(search.from),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -120,6 +153,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
     return (
       <AppShell operationsEnabled={operationsEnabled}>
         <Outlet />
+        <ExperimentCompletionNotice />
       </AppShell>
     );
   },
@@ -206,6 +240,25 @@ const backtestRunRoute = createRoute({
   component: BacktestRunPage,
 });
 
+const experimentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/experiments",
+  component: ExperimentsPage,
+});
+
+const newExperimentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/experiments/new",
+  validateSearch: newExperimentSearch,
+  component: NewExperimentPage,
+});
+
+const experimentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/experiments/$experimentId",
+  component: ExperimentPage,
+});
+
 const operationsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/operations",
@@ -249,6 +302,9 @@ const routeTree = rootRoute.addChildren([
   strategyRevisionRoute,
   backtestsRoute,
   backtestRunRoute,
+  experimentsRoute,
+  newExperimentRoute,
+  experimentRoute,
   settingsRoute,
   operationsRoute.addChildren([
     deploymentsRoute,

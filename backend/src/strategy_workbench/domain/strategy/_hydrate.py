@@ -30,9 +30,15 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
+from ._canonical import canonical_payload_json, canonical_strategy_payload
 from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
-from ._promotion import promote_boolean_factor_outputs
-from ._upgrade import legacy_shape_hints
+from ._promotion import demote_boolean_factor_outputs, promote_boolean_factor_outputs
+from ._upgrade import (
+    FROZEN_SCHEMA_VERSIONS,
+    UpgradeUnsupportedNodeError,
+    legacy_shape_hints,
+    upgrade_refusal,
+)
 
 # 새 문서로 받는 버전 집합. 현재 버전 상수의 owner는 `_models.py`다(모델 기본값과 같은 값).
 SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (CURRENT_SCHEMA_VERSION,)
@@ -40,6 +46,9 @@ SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (CURRENT_SCHEMA_VERSION,)
 # 본문만 1.0 문법인 문서에 다는 힌트 코드. `structure.*`의 owner는 이 모듈이다
 # (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행).
 LEGACY_SHAPE_CODE = "structure.legacy_shape"
+# 버전 줄이 현재 판이 아니지만 업그레이더가 거절할 문서에 다는 코드. 업그레이드 배너는
+# `structure.unsupported_schema_version` 에만 뜬다(frontend `decideDocumentUpgrade`, #267 DEFECT-2).
+NOT_UPGRADEABLE_CODE = "structure.not_upgradeable_schema_version"
 
 # 이 모듈이 낼 수 있는 구조 진단 코드 전부. codec 코드에 `diagnostic_code()` 게이트가 있듯,
 # 구조 코드에도 게이트를 둬서 목록에 없는 코드가 조용히 생기지 않게 한다. 코드마다 문장 golden이
@@ -54,6 +63,7 @@ STRUCTURE_CODES: frozenset[str] = frozenset(
         "structure.invalid_enum",
         LEGACY_SHAPE_CODE,
         "structure.missing_field",
+        NOT_UPGRADEABLE_CODE,
         "structure.type_mismatch",
         "structure.unknown_key",
         "structure.unknown_kind",
@@ -115,14 +125,7 @@ def hydrate_strategy_document(
             )
         )
     elif schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        issues.append(
-            StructuralIssue(
-                "structure.unsupported_schema_version",
-                "/schema_version",
-                "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 "
-                f"줍니다 — got={schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS}",
-            )
-        )
+        issues.extend(_version_issues(document, schema_version))
     if "identity" in document:
         issues.append(
             StructuralIssue(
@@ -152,6 +155,19 @@ def hydrate_strategy_document(
     return StrategyHydration(HydrationStatus.OK, promote_boolean_factor_outputs(spec), ())
 
 
+def authoring_document(spec: StrategySpec) -> str:
+    """compile 결과(`StrategySpec`)를 사용자가 쓰는 현재 판 JSON 문서로 —
+    `hydrate_strategy_document` 의 역이다. 원문 없는 legacy revision 의 생성 원문이 이것이다(#353).
+
+    hydrate 가 붙인 boolean 출력 승격 노드를 걷는다(`demote_boolean_factor_outputs`) — 문서에 두면
+    그 원문을 다시 compile 할 때 예약 node_id(`strategy.factor.reserved_node_id`)로 거절된다. 은퇴
+    판 row 라도 잃을 주석이 없으므로 판 표시만 현재 판으로 바꾼다(spec D2).
+    """
+    payload = canonical_strategy_payload(demote_boolean_factor_outputs(spec))
+    document = {**payload, "schema_version": CURRENT_SCHEMA_VERSION}
+    return canonical_payload_json(document, indent=2) + "\n"
+
+
 def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:
     """Hydrate a legacy payload that carries `identity` inside the document (current JSON API)."""
     issues: list[StructuralIssue] = []
@@ -177,6 +193,61 @@ def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:
             ),
         )
     return StrategyHydration(HydrationStatus.OK, spec, ())
+
+
+def _version_issues(
+    document: Mapping[str, object], schema_version: object
+) -> list[StructuralIssue]:
+    """현재 판이 아닌 버전 줄의 진단. 업그레이드 가능 여부는 `upgrade_refusal` 이 정한다.
+
+    받아 주는 문서만 `structure.unsupported_schema_version`(업그레이드 배너)을 받는다. 거절할
+    문서에 "업그레이드하면 바꿔 준다"고 말하면 누를 때마다 실패하는 버튼이 된다(#267
+    DEFECT-2). 선언한 버전보다 옛 문법이 섞여 거절했으면 그 자리의 1.0 문법 힌트도 함께 달아
+    고칠 곳을 보인다.
+    """
+    refusal = upgrade_refusal(document)
+    if refusal is None:
+        return [
+            StructuralIssue(
+                "structure.unsupported_schema_version",
+                "/schema_version",
+                "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 "
+                f"줍니다 — got={schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS}",
+            )
+        ]
+    if isinstance(refusal, UpgradeUnsupportedNodeError):
+        # 은퇴 노드는 지우거나 옮겨 적은 뒤에야 업그레이드된다. 문장은 업그레이더의 거절 문장이다.
+        return [StructuralIssue(NOT_UPGRADEABLE_CODE, "/schema_version", str(refusal))]
+    if refusal.older_shapes:
+        return [
+            StructuralIssue(
+                NOT_UPGRADEABLE_CODE,
+                "/schema_version",
+                "선언한 schema_version보다 옛 문법이 본문에 섞여 있어 업그레이드할 수 없습니다. 옛 "
+                "문법 자리를 선언한 버전의 문법으로 고치거나, 문서 전체가 "
+                f"{refusal.stage} 문법이면 버전 줄을 그 버전"
+                f'(schema_version: "{refusal.stage}")으로 고쳐 주세요 — '
+                f"got={schema_version!r} stage={refusal.stage!r} "
+                f"pointers={list(refusal.older_shapes)}",
+            ),
+            *(
+                StructuralIssue(LEGACY_SHAPE_CODE, pointer, hint)
+                for pointer, hint in legacy_shape_hints(document).items()
+            ),
+        ]
+    retired = sorted(FROZEN_SCHEMA_VERSIONS)
+    quoted_retired = "·".join(f'"{version}"' for version in retired)
+    return [
+        StructuralIssue(
+            NOT_UPGRADEABLE_CODE,
+            "/schema_version",
+            "지금 버전도 지원이 끝난 버전도 아닌 schema_version이라 업그레이드할 수 없습니다. "
+            "버전 줄에는 본문을 쓴 버전을 따옴표로 감싸 적어 주세요. 지금 문법이면 "
+            f'schema_version: "{CURRENT_SCHEMA_VERSION}"입니다. 지원이 끝난 옛 문법'
+            f"({quoted_retired})이면 그 버전을 적은 뒤 업그레이드하세요 — "
+            f"got={schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS} retired={retired}",
+        )
+    ]
 
 
 def _escape(key: str) -> str:

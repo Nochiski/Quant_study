@@ -1,8 +1,6 @@
-import { useState } from "react";
-
 import type { UpgradedDocument } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
-import { Badge, Button } from "../../../shared/ui";
+import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import { upgradeWarningTitle } from "../model/document-upgrade";
 import type {
   DocumentUpgrade,
@@ -26,11 +24,10 @@ type UpgradeBannerProps = {
 const failureText = (status: Extract<UpgradeStatus, { kind: "failed" }>) => {
   if (status.reason === "editor-unavailable") return t("upgrade.error.editor");
   if (status.reason === "composing") return t("upgrade.error.composing");
-  const known =
-    status.code === null
-      ? undefined
-      : tOptional(`upgrade.error.${status.code}`);
-  return known ?? t("upgrade.error.request").replace("{detail}", status.detail);
+  return (
+    (status.code === null ? null : tOptional(`upgrade.error.${status.code}`)) ??
+    t("upgrade.error.request")
+  );
 };
 
 /** 옛 문서 실행 설정의 한 줄 요약. 무엇을 채울지 누르기 전에 보이려는 것이라 기간·유니버스만 적는다. */
@@ -40,13 +37,13 @@ const environmentSummary = (environment: UpgradeEnvironment): string =>
 const AppliedUpgrade = ({
   status,
   onApplyEnvironment,
+  onEnvironmentFilled,
 }: {
   status: Extract<UpgradeStatus, { kind: "applied" }>;
   onApplyEnvironment?: (environment: UpgradeEnvironment) => void;
+  onEnvironmentFilled: () => void;
 }) => {
-  // 적용 결과 하나마다 한 번 채운다: 같은 응답 객체를 채웠는지 기억한다(다음 업그레이드는 새 객체다).
-  const [filled, setFilled] = useState<UpgradeEnvironment | null>(null);
-  const { environment, warnings } = status;
+  const { environment, warnings, environmentFilled } = status;
   return (
     <>
       {warnings.length > 0 ? (
@@ -64,29 +61,33 @@ const AppliedUpgrade = ({
       ) : null}
       {onApplyEnvironment === undefined ? null : environment === null ? (
         <p className="upgrade__note">{t("upgrade.environment.unavailable")}</p>
-      ) : filled === environment ? (
+      ) : environmentFilled ? (
         <p className="upgrade__note" role="status">
           {t("upgrade.environment.applied")}
         </p>
       ) : (
-        <div className="upgrade__actions">
-          <span>
-            {t("upgrade.environment.found").replace(
-              "{summary}",
-              environmentSummary(environment),
-            )}
-          </span>
-          <Button
-            size="small"
-            tone="primary"
-            onClick={() => {
-              onApplyEnvironment(environment);
-              setFilled(environment);
-            }}
-          >
-            {t("upgrade.environment.apply")}
-          </Button>
-        </div>
+        <>
+          <div className="upgrade__actions">
+            <span>
+              {t("upgrade.environment.found").replace(
+                "{summary}",
+                environmentSummary(environment),
+              )}
+            </span>
+            <Button
+              size="small"
+              tone="primary"
+              onClick={() => {
+                onApplyEnvironment(environment);
+                onEnvironmentFilled();
+              }}
+            >
+              {t("upgrade.environment.apply")}
+            </Button>
+          </div>
+          {/* 저장은 막지 않는다. 저장하면 이 안내가 닫혀 옛 값을 되찾을 길이 없으므로 미리 알린다(#267 DEFECT-3). */}
+          <p className="upgrade__note">{t("upgrade.environment.unfilled")}</p>
+        </>
       )}
     </>
   );
@@ -138,9 +139,10 @@ export const UpgradeBanner = ({
               : t("upgrade.action")}
           </Button>
           {status.kind === "failed" ? (
-            <span className="upgrade__error" role="alert">
-              {failureText(status)}
-            </span>
+            <FailureNotice
+              message={failureText(status)}
+              reason={status.reason === "request" ? status.detail : null}
+            />
           ) : null}
         </div>
       ) : null}
@@ -148,6 +150,7 @@ export const UpgradeBanner = ({
         <AppliedUpgrade
           status={status}
           onApplyEnvironment={onApplyEnvironment}
+          onEnvironmentFilled={upgrade.markEnvironmentFilled}
         />
       ) : null}
     </section>

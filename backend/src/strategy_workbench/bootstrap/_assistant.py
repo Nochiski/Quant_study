@@ -56,6 +56,7 @@ from strategy_workbench.application.assistant_chat.facade.ports import LlmProvid
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestArtifactUnreadableError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
     BacktestRunResult,
@@ -409,8 +410,8 @@ class _RunServiceBacktestResults:
     """`BacktestResultPort` 구현: 실행 레지스트리의 완료 결과를 그대로 넘긴다(결과 설명 spec R2).
 
     `_AuthoringStrategyCompiler`와 같은 모양이다. 어시스턴트가 `backtest_run` 유스케이스를
-    import하지 않도록 bootstrap이 감싼다. "없음"과 "아직 안 끝남"을 None 하나로 접는 것만
-    한다 — 어시스턴트 쪽 대응이 같다(설명할 결과가 없다).
+    import하지 않도록 bootstrap이 감싼다. "없음"·"아직 안 끝남"·"결과 파일을 못 읽음"을 None 하나로
+    접는 것만 한다 — 어시스턴트 쪽 대응이 같다(설명할 결과가 없다).
     """
 
     def __init__(self, runs: BacktestRunService) -> None:
@@ -419,7 +420,11 @@ class _RunServiceBacktestResults:
     def completed_result(self, run_id: str) -> BacktestRunResult | None:
         try:
             return self._runs.result(run_id)
-        except (BacktestRunNotFoundError, BacktestResultNotReadyError):
+        except (
+            BacktestRunNotFoundError,
+            BacktestResultNotReadyError,
+            BacktestArtifactUnreadableError,
+        ):
             return None
 
 

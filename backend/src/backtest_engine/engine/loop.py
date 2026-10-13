@@ -51,8 +51,7 @@ from backtest_engine.engine.core import (
     route_error_exception,
     slippage_config,
 )
-from backtest_engine.engine.costs import session_costs
-from backtest_engine.engine.metrics import compute_metrics, compute_metrics_from_values
+from backtest_engine.engine.costs import sell_tax, sell_tax_amount, session_costs
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.queue import (
     EventPriority,
@@ -222,7 +221,8 @@ class BacktestEngine:
             config: 재현에 필요한 실행 설정 (초기 현금, 수수료 등).
             capabilities: 엔진 구현 상태 표. 기본은 reference 엔진.
             slippage: 체결가 슬리피지 모델. 기본 NoSlippage.
-            max_participation: 세션 거래량 대비 체결 상한 (0, 1]. None이면 무제한.
+            max_participation: 기준 거래량(`Bar.liquidity_volume`, 없으면 세션 거래량) 대비 체결
+                상한 (0, 1]. None이면 무제한.
                 Action의 ExecutionPolicy.max_participation이 있으면 그 값이 우선한다.
             core: "python"(기본) 또는 persistent 엔진인 "rust". 전환 호환 alias는
                 "rust_persistent", 구 세션 코어는 deprecated "rust_legacy"다.
@@ -353,6 +353,12 @@ class BacktestEngine:
                 case FillOccurred(fill=fill, snapshot=snapshot):
                     self._ledger(run).apply(fill)
                     run.store.append(fill.ts, RecordKind.FILL, fill)
+                    # 매도 거래세는 그 체결 바로 뒤에 청구·기록한다. 매수 여력은 체결을 계획할 때
+                    # 이미 같은 금액을 뺐다(`_apply_quote`).
+                    tax = sell_tax(fill, run.config)
+                    if tax is not None:
+                        self._ledger(run).charge(tax)
+                        run.store.append(tax.ts, RecordKind.COST, tax)
                 case StrategyNotify(event=strategy_event, snapshot=snapshot):
                     self._dispatch(run, strategy_event, snapshot)
                 case SessionClose(snapshot=snapshot):
@@ -387,13 +393,11 @@ class BacktestEngine:
                 ),
             )
 
-        snapshots = run.store.snapshots()
         return BacktestResult(
             run_id=self._config.run_id,
-            snapshots=snapshots,
+            snapshots=run.store.snapshots(),
             orders=run.store.orders(),
             fills=run.store.fills(),
-            metrics=compute_metrics(snapshots, run.store.fills(), self._config.annualization_days),
         )
 
     @staticmethod
@@ -444,7 +448,7 @@ class BacktestEngine:
         route_error_type = route_error_exception()
         instruments = self._load_persistent_feed(run, feed)
         store.bind_feed(feed, instruments)
-        self._configure_persistent_run(run)
+        self._configure_persistent_run(run, feed)
 
         # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
         # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
@@ -518,11 +522,6 @@ class BacktestEngine:
             snapshots=store.snapshots,
             orders=store.orders,
             fills=store.fills,
-            metrics=compute_metrics_from_values(
-                store.equity_values(),
-                store.traded_notional(),
-                self._config.annualization_days,
-            ),
         )
 
     @staticmethod
@@ -584,7 +583,7 @@ class BacktestEngine:
                 raise NegativeCashError(message.removeprefix("negative_cash: ")) from error
             raise
 
-    def _configure_persistent_run(self, run: _Run) -> None:
+    def _configure_persistent_run(self, run: _Run, feed: DataFeed) -> None:
         runtime = run.persistent_runtime
         if runtime is None:
             raise CoreUnavailable("persistent Rust path requires its runtime")
@@ -607,6 +606,8 @@ class BacktestEngine:
             run.wants(EventKind.FILL),
             run.wants(EventKind.ORDER_UPDATE),
             run.wants(EventKind.CORPORATE_ACTION),
+            # 세션마다의 매도 거래세율. 날짜 → 세율 조회는 `RunConfig` 하나가 한다.
+            [self._config.sell_tax_rate(ts.date()) for ts in feed.sessions],
         )
 
     # --- 세션 처리 -----------------------------------------------------------
@@ -654,6 +655,8 @@ class BacktestEngine:
             columns.lows,
             columns.closes,
             columns.volumes,
+            columns.liquidity_volumes,
+            columns.impact_scales,
         )
         return instruments
 
@@ -788,7 +791,14 @@ class BacktestEngine:
             (g.group_id, g.policy.value, list(g.order_ids)) for g in order_manager.open_groups()
         ]
         bars = {
-            instrument_key(bar.instrument): (bar.open, bar.high, bar.low, bar.volume)
+            instrument_key(bar.instrument): (
+                bar.open,
+                bar.high,
+                bar.low,
+                bar.volume,
+                bar.cap_volume,
+                bar.impact_scale or 0.0,
+            )
             for bar in snapshot.bars
         }
         default = None if run.max_participation is None else str(run.max_participation)
@@ -801,6 +811,7 @@ class BacktestEngine:
             run.broker.fee_rate,
             default,
             run.rust_slippage,
+            run.config.sell_tax_rate(snapshot.ts.date()),
         )
         for kind, order_id, quantity, price, slip, fee, payload in ops:
             match kind:
@@ -820,6 +831,7 @@ class BacktestEngine:
                         price=price,
                         fee=fee,
                         slippage_per_share=slip,
+                        cap_volume=snapshot.bar(entry.order.instrument).cap_volume,
                     )
                     queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                     if run.wants(EventKind.FILL):
@@ -870,7 +882,12 @@ class BacktestEngine:
             order_manager.next_fill_id(),
             quantity,
         )
-        power.consume(fill)
+        tax = sell_tax_amount(
+            fill.side, fill.quantity, fill.price, run.config.sell_tax_rate(fill.ts.date())
+        )
+        power.consume_quantity(
+            fill.instrument, fill.side, fill.quantity, fill.price, fill.fee + tax
+        )
         queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
         if run.wants(EventKind.FILL):
             # FILL 알림은 그 체결이 만든 ORDER_UPDATE 알림보다 먼저 큐에 실린다 (인과 순서).
@@ -927,6 +944,7 @@ class BacktestEngine:
             key=lambda e: (e.order.side is not Side.SELL, e.order_id),
         )
         checkpoint = power.checkpoint()
+        tax_rate = run.config.sell_tax_rate(snapshot.ts.date())
         quotes: list[tuple[OpenOrder, Quote]] = []
         for entry in legs:
             quote = run.broker.quote(
@@ -944,7 +962,8 @@ class BacktestEngine:
                     order.side,
                     quote.quantity,
                     quote.price,
-                    run.broker.fee_for(notional),
+                    run.broker.fee_for(notional)
+                    + sell_tax_amount(order.side, quote.quantity, quote.price, tax_rate),
                 )
         power.restore(checkpoint)
 
@@ -1052,9 +1071,10 @@ class BacktestEngine:
         should_dispatch = calendar.matches(run.requirements.schedule, snapshot.ts)
         for cost in costs:
             run.store.append(cost.ts, RecordKind.COST, cost)
-        if marked.equity < 0:
+        # 자산 0도 파산이다. 0에서 이어지면 다음 세션 수익률이 0으로 나누기가 된다(#274).
+        if marked.equity <= 0:
             raise EquityWipedOut(
-                f"equity fell below zero at session close — ts={snapshot.ts} "
+                f"equity fell to zero or below at session close — ts={snapshot.ts} "
                 f"equity={marked.equity} cash={marked.cash} "
                 f"positions={[(p.instrument.symbol, str(p.quantity)) for p in marked.positions]}"
             )
@@ -1097,6 +1117,8 @@ class BacktestEngine:
         if run.router is None:
             raise RuntimeError("python session loop requires the Python DecisionRouter")
         routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
+        for rounding in routing.roundings:
+            run.store.append(rounding.ts, RecordKind.ROUNDING, rounding)
         for update in routing.updates:
             self._record_update(run, update, market)
         for group in routing.groups:

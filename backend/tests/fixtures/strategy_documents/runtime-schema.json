@@ -24,7 +24,8 @@
       "default": {
         "rules": []
       },
-      "x-description-key": "strategy.section.eligibility"
+      "x-description-key": "strategy.section.eligibility",
+      "x-stage": "eligibility"
     },
     "factors": {
       "type": "array",
@@ -33,7 +34,8 @@
       },
       "default": [],
       "x-description-key": "strategy.section.factors",
-      "x-defines": "factor"
+      "x-defines": "factor",
+      "x-stage": "signal"
     },
     "signal": {
       "$ref": "#/$defs/SignalStep",
@@ -43,7 +45,8 @@
         "regime_field_id": null,
         "regime_minimum": null
       },
-      "x-description-key": "strategy.section.signal"
+      "x-description-key": "strategy.section.signal",
+      "x-stage": "signal"
     },
     "portfolio": {
       "$ref": "#/$defs/PortfolioStep",
@@ -59,9 +62,12 @@
         "turnover_buffer_count": 0,
         "minimum_trade_weight": 0.0,
         "liquidity_field_id": null,
-        "minimum_liquidity": null
+        "minimum_liquidity": null,
+        "tie_breaker_factor_id": null,
+        "tie_breaker_direction": "high"
       },
-      "x-description-key": "strategy.section.portfolio"
+      "x-description-key": "strategy.section.portfolio",
+      "x-stage": "portfolio"
     },
     "risk": {
       "$ref": "#/$defs/RiskStep",
@@ -74,7 +80,8 @@
         "risk_field_id": null,
         "risk_factor_id": null
       },
-      "x-description-key": "strategy.section.risk"
+      "x-description-key": "strategy.section.risk",
+      "x-stage": "risk"
     },
     "parameters": {
       "type": "array",
@@ -921,7 +928,8 @@
           ],
           "default": null,
           "x-description-key": "strategy.field.portfolio_step.liquidity_field_id",
-          "x-catalog": "equity-field"
+          "x-catalog": "equity-field",
+          "x-stage": "eligibility"
         },
         "minimum_liquidity": {
           "anyOf": [
@@ -947,6 +955,39 @@
             ],
             "description_key": "strategy.contract.applicable.minimum_liquidity",
             "owned_by_error": "strategy.portfolio.liquidity_field"
+          }
+        },
+        "tie_breaker_factor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-description-key": "strategy.field.portfolio_step.tie_breaker_factor_id",
+          "x-reference": "factor"
+        },
+        "tie_breaker_direction": {
+          "type": "string",
+          "enum": [
+            "high",
+            "low"
+          ],
+          "default": "high",
+          "x-description-key": "strategy.field.portfolio_step.tie_breaker_direction",
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/tie_breaker_factor_id",
+                "equals": null,
+                "not_null": true
+              }
+            ],
+            "description_key": "strategy.contract.applicable.tie_breaker_direction",
+            "owned_by_error": null
           }
         }
       },
@@ -1038,7 +1079,8 @@
             "description_key": "strategy.contract.applicable.risk_field_id",
             "owned_by_error": null
           },
-          "x-catalog": "equity-field"
+          "x-catalog": "equity-field",
+          "x-stage": "portfolio"
         },
         "risk_factor_id": {
           "anyOf": [
@@ -1062,7 +1104,8 @@
             "description_key": "strategy.contract.applicable.risk_factor_id",
             "owned_by_error": null
           },
-          "x-reference": "factor"
+          "x-reference": "factor",
+          "x-stage": "portfolio"
         }
       },
       "required": [],

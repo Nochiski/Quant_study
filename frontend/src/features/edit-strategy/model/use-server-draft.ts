@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiRequestError,
+  failureReason,
   strategyWorkbenchApi,
   type SaveStrategyDraftRequest,
   type StrategyDraft,
@@ -30,7 +31,8 @@ type Session = {
   updatedAt: string | null;
   remote: StrategyDraft | null;
   incompatible: boolean;
-  errorMessage: string | null;
+  /** 거부의 서버 사유(`failureReason`). 배너가 접힌 상세로 보인다. */
+  errorReason: string | null;
 };
 
 export type ServerDraftSync = {
@@ -38,7 +40,7 @@ export type ServerDraftSync = {
   updatedAt: string | null;
   remote: StrategyDraft | null;
   incompatible: boolean;
-  errorMessage: string | null;
+  errorReason: string | null;
   applyRemote: () => void;
   keepLocal: () => void;
   retry: () => void;
@@ -64,7 +66,7 @@ const initialSession = (
   updatedAt: null,
   remote: null,
   incompatible: false,
-  errorMessage: null,
+  errorReason: null,
 });
 
 const failedSession = (current: Session, error: unknown): Session => {
@@ -72,9 +74,7 @@ const failedSession = (current: Session, error: unknown): Session => {
   return {
     ...current,
     phase: rejected ? "rejected" : "offline",
-    errorMessage: rejected
-      ? (error.detail ?? error.code ?? "Draft request was rejected.")
-      : null,
+    errorReason: rejected ? failureReason(error) : null,
   };
 };
 
@@ -196,7 +196,7 @@ export const useServerDraft = (
       updatedAt: remote.updated_at,
       remote: needsChoice ? remote : null,
       incompatible: !compatible,
-      errorMessage: null,
+      errorReason: null,
     } satisfies Session;
     knownVersions.current.set(draftId, remote.version);
     sessionRef.current = next;
@@ -259,7 +259,7 @@ export const useServerDraft = (
           updatedAt: saved.updated_at,
           remote: null,
           incompatible: false,
-          errorMessage: null,
+          errorReason: null,
         } satisfies Session;
         sessionRef.current = next;
         setSession(next);
@@ -287,7 +287,7 @@ export const useServerDraft = (
             updatedAt: remote?.updated_at ?? null,
             remote,
             incompatible: remote !== null && !compatible,
-            errorMessage: null,
+            errorReason: null,
           } satisfies Session;
           if (remote !== null)
             knownVersions.current.set(requestedId, remote.version);
@@ -374,7 +374,7 @@ export const useServerDraft = (
           updatedAt: null,
           remote: null,
           incompatible: false,
-          errorMessage: null,
+          errorReason: null,
         } satisfies Session;
         knownVersions.current.delete(draftId);
         sessionRef.current = next;
@@ -390,7 +390,7 @@ export const useServerDraft = (
             updatedAt: null,
             remote: null,
             incompatible: false,
-            errorMessage: null,
+            errorReason: null,
           } satisfies Session;
           knownVersions.current.delete(draftId);
           sessionRef.current = next;
@@ -413,7 +413,7 @@ export const useServerDraft = (
             updatedAt: remote.updated_at,
             remote,
             incompatible: !compatible,
-            errorMessage: null,
+            errorReason: null,
           } satisfies Session;
           knownVersions.current.set(draftId, remote.version);
           sessionRef.current = next;
@@ -468,7 +468,7 @@ export const useServerDraft = (
       persistedSource: current.remote.source,
       remote: null,
       incompatible: false,
-      errorMessage: null,
+      errorReason: null,
     } satisfies Session;
     sessionRef.current = next;
     setSession(next);
@@ -505,7 +505,7 @@ export const useServerDraft = (
             updatedAt: null,
             remote: null,
             incompatible: false,
-            errorMessage: null,
+            errorReason: null,
           } satisfies Session;
           knownVersions.current.delete(requestedId);
           sessionRef.current = next;
@@ -521,7 +521,7 @@ export const useServerDraft = (
               updatedAt: null,
               remote: null,
               incompatible: false,
-              errorMessage: null,
+              errorReason: null,
             } satisfies Session;
             knownVersions.current.delete(requestedId);
             sessionRef.current = next;
@@ -547,7 +547,7 @@ export const useServerDraft = (
               updatedAt: remote.updated_at,
               remote,
               incompatible: !compatible,
-              errorMessage: null,
+              errorReason: null,
             } satisfies Session;
             knownVersions.current.set(requestedId, remote.version);
             sessionRef.current = next;
@@ -567,7 +567,7 @@ export const useServerDraft = (
       persistedSource: current.remote?.source ?? null,
       remote: null,
       incompatible: false,
-      errorMessage: null,
+      errorReason: null,
     } satisfies Session;
     sessionRef.current = next;
     setSession(next);
@@ -595,7 +595,7 @@ export const useServerDraft = (
       updatedAt: session.updatedAt,
       remote: session.remote,
       incompatible: session.incompatible,
-      errorMessage: session.errorMessage,
+      errorReason: session.errorReason,
       applyRemote,
       keepLocal,
       retry,

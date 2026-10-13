@@ -114,6 +114,7 @@ def test_portfolio_snapshot_is_reused_until_state_changes(core_name: str) -> Non
             price=10.0,
             fee=0.0,
             slippage_per_share=0.0,
+            cap_volume=1_000,
         )
     )
     changed = portfolio.snapshot(TS)
@@ -191,6 +192,7 @@ def test_portfolio_snapshot_memo_is_cleared_by_every_mutator(core_name: str) -> 
             price=10.0,
             fee=0.0,
             slippage_per_share=0.0,
+            cap_volume=1_000,
         )
     )
     before_charge = portfolio.snapshot(TS)

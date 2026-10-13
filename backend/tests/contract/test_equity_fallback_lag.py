@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-import importlib
-import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -21,7 +19,12 @@ import pytest
 
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import FIELD_BY_ID
 from strategy_workbench.domain.equity.facade.research_data import ResearchPanelQuery
-from tests.equity_fixture import WB_PROFILE_ROWS, WB_SESSIONS, build_workbench_root
+from tests.equity_fixture import (
+    WB_PROFILE_ROWS,
+    WB_SESSIONS,
+    build_workbench_root,
+    import_ledger_module,
+)
 
 pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync --extra equity)")
 
@@ -29,25 +32,14 @@ from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
     EquityDuckdbAdapter,
 )
 
-_EQUITY_SRC = Path(__file__).resolve().parents[3] / "database" / "src"
-
 
 def _ledger_lags() -> dict[str, int]:
     """원장 빌드가 `dataset_profile` 로 내는 필드별 권장 랙(세션)."""
-    if not _EQUITY_SRC.is_dir():
-        pytest.fail(f"원장 선언 경로가 없다 — path={_EQUITY_SRC}")
-    added = str(_EQUITY_SRC) not in sys.path
-    if added:
-        sys.path.insert(0, str(_EQUITY_SRC))
-    try:
-        rules_s19: Any = importlib.import_module("equity.rules_s19")
-        return {
-            profile.field_id: profile.recommended_lag_sessions
-            for _, profile in rules_s19.owned_fields()
-        }
-    finally:
-        if added:
-            sys.path.remove(str(_EQUITY_SRC))
+    rules_s19: Any = import_ledger_module("equity.rules_s19")
+    return {
+        profile.field_id: profile.recommended_lag_sessions
+        for _, profile in rules_s19.owned_fields()
+    }
 
 
 def test_폴백_랙이_원장_선언과_같다(tmp_path: Path) -> None:

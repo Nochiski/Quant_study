@@ -26,9 +26,8 @@
 -- fill_kind(DESIGN §3·§4-3 어휘, 판정 순서):
 --   measured                    원장 행이 있다. evidence 는 'none' — 로그 축 판정이 아니라
 --                               원장 자신이 근거다.
---   src_omitted / shard_done    ka10060 샤드 status='done' ∧ 요청창 안. 엔진 CellKind =
---                               SOURCE_OMITTED_ZERO(FIELD_MAP §1) — 값은 여전히 NULL 이고
---                               '0 으로 읽어도 되는 결측' 이라는 라벨만 준다.
+--   src_omitted / shard_done    ka10060 샤드 status='done' ∧ 요청창 안. 값은 NULL 이고 셀 종류는
+--                               FIELD_MAP §1 「결측 어휘」가 원천별로 정한다(수급은 MISSING).
 --   empty_response / shard_empty  샤드 status='empty' ∧ 요청창 안
 --   src_omitted / unit_ok       KIS flow 유닛 status='ok' ∧ [window_from, window_to]
 --   empty_response / unit_empty KIS flow 유닛 status='empty' ∧ 창

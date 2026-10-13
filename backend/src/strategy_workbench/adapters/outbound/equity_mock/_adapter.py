@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import date, timedelta
 
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
+    BacktestDataUnavailableError,
     MarketBarRecord,
     UniverseMembershipRecord,
 )
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
-    FactorObservationQuery,
-    FactorObservationSet,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RawFieldValue,
@@ -31,13 +31,11 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
+    SecurityRef,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
-)
-from strategy_workbench.domain.factor.facade.evaluation import (
-    FactorFieldValue,
-    FactorObservation,
+    field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.expression import (
     FieldMetadata,
@@ -48,6 +46,7 @@ from ._fixture import (
     ADJUSTED_FIELD_BY_RAW,
     MOCK_SPLIT,
     Membership,
+    MockEquityFixture,
     Observation,
     adjusted_close,
     build_demo_fixture,
@@ -66,31 +65,32 @@ _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKR
 class MockEquityDataAdapter:
     """Small but adversarial Equity v0.2 fixture with vintages, lags, and gaps."""
 
-    def __init__(
-        self,
-        *,
-        snapshot: DataSnapshot,
-        sessions: tuple[date, ...],
-        profiles: tuple[DatasetFieldProfile, ...],
-        memberships: tuple[Membership, ...],
-        observations: tuple[Observation, ...],
-    ) -> None:
-        self._snapshot = snapshot
-        self._sessions = sessions
-        self._profiles = profiles
-        self._memberships = memberships
-        self._observations = observations
+    def __init__(self, fixture: MockEquityFixture) -> None:
+        # fixture 의 원천 판 뒤에 필드 선언표의 판을 붙인다 — 선언(단위·랙·값 타입·조정 짝)이
+        # 바뀌면 같은 fixture 라도 다른 데이터 스냅샷이다(#235). 원천 판은 fixture 가 정하므로 이미
+        # 합친 id 를 다시 받을 길이 없다.
+        self._snapshot = replace(
+            fixture.snapshot,
+            snapshot_id=field_contract_snapshot_id(
+                fixture.snapshot.snapshot_id,
+                {
+                    "profiles": {profile.field_id: profile for profile in fixture.profiles},
+                    "adjusted_field_by_raw": ADJUSTED_FIELD_BY_RAW,
+                },
+            ),
+        )
+        self._sessions = fixture.sessions
+        self._profiles = fixture.profiles
+        self._memberships = fixture.memberships
+        self._observations = fixture.observations
 
     @classmethod
     def demo(cls) -> MockEquityDataAdapter:
-        fixture = build_demo_fixture()
-        return cls(
-            snapshot=fixture.snapshot,
-            sessions=fixture.sessions,
-            profiles=fixture.profiles,
-            memberships=fixture.memberships,
-            observations=fixture.observations,
-        )
+        """결정적 데모 fixture 로 만든다."""
+        return cls(build_demo_fixture())
+
+    def trading_sessions(self, start: date, end: date) -> tuple[date, ...]:
+        return _business_sessions(start, end)
 
     def snapshot(self) -> DataSnapshot:
         return self._snapshot
@@ -127,6 +127,10 @@ class MockEquityDataAdapter:
         field_ids = tuple(profile.field_id for profile in self._profiles)
         return self.resolve_factor_fields(field_ids).fields
 
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """mock 은 선언한 필드를 모두 준다 — 뺀 필드가 없다(#316)."""
+        return {}
+
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult:
         sessions = tuple(
             session for session in self._sessions if query.start <= session <= query.end
@@ -150,6 +154,16 @@ class MockEquityDataAdapter:
             snapshot_id=self._snapshot.snapshot_id,
             detail=None if points else f"no mock universe sessions — query={query}",
         )
+
+    def universe_securities(
+        self, market: str, universe_id: str, as_of: date
+    ) -> tuple[SecurityRef, ...]:
+        """관측 질의와 같은 시장·유니버스로 종목의 이름·티커를 준다(lang2 P4-03 기준일 요약).
+
+        mock 의 이름은 날짜로 바뀌지 않고, 관측은 fixture 달력 밖도 합성하므로 날짜로 거르지 않는다.
+        """
+        venue = _MOCK_UNIVERSES.get((market, universe_id))
+        return tuple(item.security for item in self._memberships if item.security.venue == venue)
 
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         profile_by_id = {profile.field_id: profile for profile in self._profiles}
@@ -213,34 +227,6 @@ class MockEquityDataAdapter:
             detail=None if cells else f"no mock panel cells — query={query}",
         )
 
-    def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
-        """Generate a deterministic PIT-shaped factor panel behind the replaceable port."""
-        sessions = _factor_sessions(query)
-        security_ids = tuple(membership.security.security_id for membership in self._memberships)
-        observations = tuple(
-            FactorObservation(
-                as_of=session,
-                security_id=security_id,
-                fields=tuple(
-                    FactorFieldValue(
-                        field_id=field_id,
-                        value=_factor_field_value(
-                            field_id,
-                            security_index=security_index,
-                            session_index=session_index,
-                            session=session,
-                        ),
-                    )
-                    for field_id in query.required_field_ids
-                ),
-                forward_return=(security_index - 1) * 0.003 + ((session_index % 5) - 2) * 0.0002,
-            )
-            for session_index, session in enumerate(sessions)
-            for security_index, security_id in enumerate(security_ids)
-        )
-        return FactorObservationSet(
-            data_snapshot_id=self._snapshot.snapshot_id, observations=observations
-        )
 
     def load_raw_observations(
         self,
@@ -388,26 +374,38 @@ class MockEquityDataAdapter:
         return _business_day_index(session) - _business_day_index(session.replace(day=1)) >= 2
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
-        """Generate deterministic OHLCV until the real Equity DB adapter is selected."""
-        sessions = _business_sessions(query.start, query.end)
-        if not sessions:
-            raise ValueError("mock backtest dataset requires at least one business session")
-        requested_ids = list(query.security_ids)
-        benchmark_id = query.benchmark_security_id or requested_ids[0]
-        if benchmark_id not in requested_ids:
-            requested_ids.append(benchmark_id)
-        security_ids = tuple(dict.fromkeys(requested_ids))
+        """Generate deterministic OHLCV until the real Equity DB adapter is selected.
+
+        요청한 종목과 벤치마크만 답한다. fixture 밖 id 는 duckdb 어댑터처럼
+        `BacktestDataUnavailableError` 로 거절하고, 요청하지 않은 벤치마크를 지어내지 않는다(#361).
+        세션이 없는 창도 duckdb 처럼 bar 없이 답한다 — 판단은 tape 단계 몫이다.
+        """
+        history, sessions = _sessions_with_history(
+            query.start, query.end, query.history_sessions_before_start
+        )
+        benchmark = () if query.benchmark_security_id is None else (query.benchmark_security_id,)
+        security_ids = tuple(dict.fromkeys((*query.security_ids, *benchmark)))
+        known = {membership.security.security_id for membership in self._memberships}
+        unknown = sorted(set(security_ids) - known)
+        if unknown:
+            raise BacktestDataUnavailableError(
+                f"unknown mock security_id — got={unknown} known={sorted(known)}"
+            )
         bars: list[MarketBarRecord] = []
+        history_bars: list[MarketBarRecord] = []
         for security_index, security_id in enumerate(security_ids):
             stable = int.from_bytes(hashlib.sha256(security_id.encode("utf-8")).digest()[:2], "big")
             base = 40_000.0 + security_index * 25_000.0 + stable % 5_000
             previous_close = base
-            for session_index, session in enumerate(sessions):
+            # 워밍업 세션은 음수 번호다. 가격 사슬은 start 에서 시작하므로 워밍업을 요청해도 측정
+            # 구간 bar 는 그대로다.
+            for session_index, session in enumerate((*history, *sessions), -len(history)):
                 cycle = ((session_index + stable) % 17 - 8) * 0.0008
                 trend = (security_index - 0.5) * 0.00015
                 open_price = previous_close * (1 + cycle * 0.35)
                 close_price = open_price * (1 + cycle + trend)
-                bars.append(
+                volume = 1_000_000 + security_index * 250_000 + session_index * 100
+                (history_bars if session_index < 0 else bars).append(
                     MarketBarRecord(
                         session=session,
                         security_id=security_id,
@@ -415,13 +413,16 @@ class MockEquityDataAdapter:
                         high=max(open_price, close_price) * 1.004,
                         low=min(open_price, close_price) * 0.996,
                         close=close_price,
-                        volume=1_000_000 + security_index * 250_000 + session_index * 100,
+                        volume=volume,
+                        trading_value=close_price * volume,
                     )
                 )
-                previous_close = close_price
+                if session_index >= 0:
+                    previous_close = close_price
         return BacktestDataset(
             data_snapshot_id=self._snapshot.snapshot_id,
             bars=tuple(bars),
+            history_bars=tuple(history_bars),
             memberships=tuple(
                 UniverseMembershipRecord(
                     security_id=security_id,
@@ -429,9 +430,10 @@ class MockEquityDataAdapter:
                     last_session=sessions[-1],
                 )
                 for security_id in security_ids
+                if sessions
             ),
             corporate_actions=(),
-            benchmark_security_id=benchmark_id,
+            benchmark_security_id=query.benchmark_security_id,
             warnings=(
                 DataWarning(
                     code="mock_equity_data",
@@ -479,15 +481,6 @@ class MockEquityDataAdapter:
         )
 
 
-def _factor_sessions(query: FactorObservationQuery) -> tuple[date, ...]:
-    requested = list(_business_sessions(query.start, query.end))
-    history: list[date] = []
-    cursor = query.start - timedelta(days=1)
-    while len(history) < max(query.minimum_history_sessions - 1, 0):
-        if cursor.weekday() < 5:
-            history.append(cursor)
-        cursor -= timedelta(days=1)
-    return tuple((*reversed(history), *requested))
 
 
 def _sessions_with_history(

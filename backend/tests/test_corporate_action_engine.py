@@ -335,6 +335,7 @@ class TestReviewRegressions:
                 price=1_000.0,
                 fee=0.0,
                 slippage_per_share=0.0,
+                cap_volume=1_000,
             )
         )
         ratio = Decimal(100_000_000) / Decimal(300_000_000)

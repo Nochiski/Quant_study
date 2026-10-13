@@ -34,7 +34,11 @@ export type SaveStatus =
     }
   /** The backend refused the text as a document (HTTP 422); the draft stays as typed. */
   | { kind: "invalid"; detail: string; documentEpoch: number }
-  | { kind: "failed"; detail: string; documentEpoch: number };
+  /**
+   * 409·422 밖의 실패. 상단 바는 번역 문구만 보이므로 사유를 들지 않는다 — `Error.message`(`API request
+   * failed: …`)는 개발자 진단이라 화면 상태에 싣지 않는다(#270).
+   */
+  | { kind: "failed"; documentEpoch: number };
 
 type SaveSnapshot = {
   source: string;
@@ -133,11 +137,7 @@ export const useSaveDocument = (
           documentEpoch: snapshot.documentEpoch,
         });
       } else {
-        setStatus({
-          kind: "failed",
-          detail: error instanceof Error ? error.message : String(error),
-          documentEpoch: snapshot.documentEpoch,
-        });
+        setStatus({ kind: "failed", documentEpoch: snapshot.documentEpoch });
       }
     },
   });

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 
 import pytest
@@ -36,9 +37,11 @@ _BALANCE = "credit.margin_balance"
 _START = date(2024, 1, 1)
 
 
-def _observations(
-    series: dict[str, tuple[list[float], list[float]]],
-) -> tuple[FactorObservation, ...]:
+# 잔고 None 은 원장이 가린 결측이다(#249).
+_Series = Mapping[str, tuple[Sequence[float | None], Sequence[float]]]
+
+
+def _observations(series: _Series) -> tuple[FactorObservation, ...]:
     """종목 → (세션별 잔고, 세션별 상장주식수). 값은 어댑터가 랙을 적용해 **건넨** 값이다."""
     return tuple(
         FactorObservation(
@@ -51,7 +54,7 @@ def _observations(
     )
 
 
-def _change_at(series: dict[str, tuple[list[float], list[float]]], day: int) -> dict[str, float]:
+def _change_at(series: _Series, day: int) -> dict[str, float]:
     definition = build_default_factor_registry().get("credit.margin_balance_change_20d")
     assert definition.default_graph is not None
     evaluation = evaluate_factor_graph(
@@ -87,13 +90,31 @@ def test_분할은_신용_증가로_읽히지_않는다() -> None:
     어댑터가 건네는 두 값이 같은 세션에 5배가 되는 경우다. 액면 분할·병합·감자에서 신용잔고
     원천은 거래정지 첫날부터 새 주식수 단위로 바뀌어 주식수 급변일보다 대개 0~2세션 앞서고, 공개
     랙(신용잔고 3 · 주식수 1)을 거치면 둘이 대개 같은 세션에 들어온다. 그러면 잔고율은 그대로라
-    변화는 0 이다. 무상증자는 원천 잔고가 새 단위로 바뀌지 않아 이 불변성이 서지 않는다(#249).
+    변화는 0 이다. 무상증자는 원천 잔고가 새 단위로 일부만 바뀌어 이 불변성이 서지 않으므로 원장이
+    그 창의 잔고를 가린다(#249, 아래 테스트).
     """
     n, split = 40, 20
     shares = [10_000.0 if day < split else 50_000.0 for day in range(n)]
     balance = [1_000.0 if day < split else 5_000.0 for day in range(n)]
     for day in range(19, n):
         assert _change_at({"S": (balance, shares)}, day) == {"S": pytest.approx(0.0)}, day
+
+
+def test_원장이_가린_잔고가_20세션_창에_걸리면_변화도_결측이다() -> None:
+    """#249 — 무상증자 척도 창은 원장 뷰 `v_credit_balance` 가 잔고를 결측으로 가리고 팩터는 따른다.
+
+    팩터 graph 는 사건을 읽지 못하므로 스스로 창을 알 수 없다. 대신 20세션 창 안에 결측 잔고가
+    하나라도 있으면 변화가 결측이라, 가린 잔고 행에 닿는 모든 창이 결측이 된다. 가린 구간 가운데서
+    상장주식수가 2배가 되고 잔고가 새 척도로 바뀌어도, 창 밖 변화는 같은 척도끼리 견준 0 이다.
+    """
+    n, first, last, listing = 70, 20, 44, 30
+    shares = [10_000.0 if day < listing else 20_000.0 for day in range(n)]
+    balance = [
+        None if first <= day <= last else 1_000.0 if day < first else 2_000.0 for day in range(n)
+    ]
+    for day in range(19, n):
+        expected = {} if first <= day <= last + 19 else {"S": pytest.approx(0.0)}
+        assert _change_at({"S": (balance, shares)}, day) == expected, day
 
 
 def test_작은_첫_값과_0_에서_시작한_잔고도_유한한_변화를_낸다() -> None:

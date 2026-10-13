@@ -4,6 +4,7 @@ import type {
   DocumentRefView,
   TurnContextPayload,
 } from "../../../entities/assistant";
+import type { RunEnvironment } from "../../../shared/api";
 import { assistantDocumentRef } from "./assistant-turn-context";
 import type { DocumentState } from "./document-state";
 import {
@@ -41,7 +42,7 @@ export type StrategyAssistantOptions = {
   /** 초안 화면의 서버 초안 id. 저장된 revision이면 무시된다(`assistantDocumentRef`). */
   draftId: string | null;
   /** 턴에 실어 보낼 실행 설정. 무효이면 null이다. */
-  environment: Record<string, unknown> | null;
+  environment: RunEnvironment | null;
   backtest: BacktestTrigger;
 };
 

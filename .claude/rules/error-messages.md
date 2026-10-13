@@ -58,6 +58,9 @@ logger.warning(
   개수 등)는 문장 안에 `key=value` 원문으로 남긴다. 소비자(frontend·AI 결과 설명)는 문장을 다시
   조립·번역하지 않는다. 정본은 `.claude/rules/strategy-workbench-sot.md`의 "authoring 진단 코드"·
   "결과·데이터 경고 문장" 행이다.
+- 정상 설정 안내인 `strategy.risk.risk_factor_excluded`·`strategy.portfolio.tie_breaker_factor_excluded`는
+  그래프의 식별자 비노출 계약에 따라 `팩터=<label>`을 문장에 넣는다. 정확한 위치는 기존 진단 pointer가
+  소유하며, 오류 진단의 재현 컨텍스트나 소비자의 문장 재조립 규칙은 바꾸지 않는다.
 - 진단 코드의 네임스페이스(`strategy.*`·`structure.*`·codec 코드, 팩터 그래프 `factor.graph.*`를
   `strategy.expression.*`로 옮기는 규칙)도 같은 SoT의 "authoring 진단 코드" 행이 소유한다. 레지스트리에
   없는 코드를 호출 지점에서 새로 만들지 않는다.
@@ -70,6 +73,12 @@ logger.warning(
 
 - API key·토큰·계좌번호 등 비밀값은 절대 메시지/로그에 안 적음 — 브로커·데이터 벤더 클라이언트에서 특히 주의
 - 외부로 내보내는 메시지(리포트, 알림 봇 등)의 절대 경로는 **상대 경로**로 변환
+- API 응답으로 나가는 문장도 외부 메시지다. 우리가 쓰는 문장(포트 결과 `detail`, 원천을 뺀 사유, 스냅샷
+  `source`, 질의 중 예외)은 처음부터 서버 경로 없이 쓰고, 경로는 부팅 예외와 로그에만 싣는다. 가리기
+  (`_mask_paths`)는 서버 경로를 담을 수 있는 서드파티 원문(파일·DB 입출력 예외)이 응답으로 나가는 곳에만
+  둔다. 지금 그곳은 run `error` 하나다(`application/backtest_run/_service.py`의 `_describe_failure`).
+  요청 본문만 파싱하는 문서 codec 의 오류 원문은 경로를 담을 수 없어 가리지 않는다. 쓰는 쪽이 경로를
+  싣고 받는 쪽이 지우는 두 단계를 만들지 않는다(#163)
 - 로컬 로그(`logger.*`) 는 절대 경로/상세 stack 노출해도 OK — 단 PII/secret 은 제외
 
 ## 점진적 적용

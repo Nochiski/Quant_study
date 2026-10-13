@@ -23,3 +23,5 @@ export {
   type StrategyTraceState,
 } from "./model/use-strategy-trace";
 export { StrategyDebugger } from "./ui/strategy-debugger";
+
+export { StrategyPreview } from "./ui/strategy-preview";

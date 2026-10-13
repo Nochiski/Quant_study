@@ -4,7 +4,7 @@
 체인 **26테이블 + `dataset_profile`**(S19 테스트와 같은 순서 — 워크벤치가 읽는 20테이블에
 `index_daily`·`ownership_snapshot`·`audit_opinion`·`shares_outstanding`·`treasury_stock`·
 `opinion_broker_daily` 를 더한 것은 S19 `dataset_profile` 이 전 원천의 커버율을 재기 때문이다) +
-`catalog.publish`(매크로 8)를 스크래치에 짓고, 같은 모노레포의
+`catalog.publish`(매크로 10)를 스크래치에 짓고, 같은 모노레포의
 `backend/src`(`contract.default_engine_src()`) 에서 워크벤치 어댑터를 import 한다 —
 numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --with numpy`;
 컨테이너·백테스트 2건은 ruamel.yaml 까지 — `uv run --project backend pytest …`).
@@ -163,10 +163,14 @@ def _value(result, as_of: date, security_id: str, field_id: str) -> object:
 
 # ── 어댑터 ────────────────────────────────────────────────────────────────────
 
-def test_snapshot_id_는_카탈로그_meta_와_같다(adapter, built: Path) -> None:
+def test_snapshot_id_앞부분은_카탈로그_meta_와_같다(adapter, built: Path) -> None:
     import json
+
+    from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
     meta = json.loads((built / catalog.META_NAME).read_text(encoding="utf-8"))
-    assert adapter.snapshot().snapshot_id == meta["snapshot_id"]
+    # 워크벤치 id 는 "원장 판:필드 계약 판"이다(#235) — 앞부분이 meta·ledger_sync 의 원장 판이다
+    ledger, separator, _ = adapter.snapshot().snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert (ledger, separator) == (meta["snapshot_id"], SNAPSHOT_CONTRACT_SEPARATOR)
     assert {p.field_id for p in adapter.list_fields()} == set(ALL_FIELDS)
     # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246)
     assert not [p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis]
@@ -245,17 +249,13 @@ def test_krx_liquid_은_정책표대로_같은날_상위_비율만_남긴다(ada
 
 def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -> None:
     from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
-    r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("classification.sector",))
-    assert r.status is DataLoadStatus.INVALID_QUERY and "unavailable" in str(r.detail)
-    assert "현재값 라벨" in str(r.detail)
-    # 격자 3테이블이 다 서도 남는 미지원 — 컬럼 부재(S08-2)와 원천 축 부재(S10 판정)를 구분한다
-    ownership = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31),
-                     fields=("flow.foreign_ownership",))
-    assert ownership.status is DataLoadStatus.INVALID_QUERY
-    assert "S08-2" in str(ownership.detail)
-    net_buy = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("credit.net_buy",))
-    assert net_buy.status is DataLoadStatus.INVALID_QUERY
-    assert "순매수 축이 없다" in str(net_buy.detail)
+    reasons = adapter.unavailable_factor_fields()  # compile 진단과 같은 사유 표(#316)
+    # 격자 3테이블이 다 서도 남는 미지원 — 사유는 한 문장이고, 컬럼 부재(S08-2)·원천 축 부재(S10
+    # 판정) 같은 구분은 어댑터 `_specs.UNSUPPORTED_FIELDS` 의 메모에만 남는다(#316 리뷰 P3-1)
+    for field_id in ("classification.sector", "flow.foreign_ownership", "credit.net_buy"):
+        r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=(field_id,))
+        assert r.status is DataLoadStatus.INVALID_QUERY and "unavailable" in str(r.detail)
+        assert reasons[field_id] in str(r.detail) and "S08-2" not in str(r.detail)
 
 
 # ── S21 본판: 필드별 1셀 손검산 ───────────────────────────────────────────────
@@ -389,6 +389,30 @@ def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) 
     assert omitted.available_date == BACKFILL_END
 
 
+def test_247540_무상증자_척도_창의_신용잔고는_원장이_가린_셀이다(adapter) -> None:
+    """#249 — 어댑터는 원장 뷰 `v_credit_balance` 를 읽고, 뷰는 권리락일부터 척도 창의 잔고를
+    가린다. 가린 셀은 값이 없는 MASKED 라 실행 결측 정책이 채우지 않는다(#298).
+
+    절단본 원장: 247540 유무상증자(무상 1주당 3주) 공시 2022-06-14(`stg_event_pifric`), 신주배정
+    기준일 06-28 → 권리락일 06-27. `stg_credit_daily` 융자잔고는 06-24 350,914주 → 06-27 451,638주
+    (권리락가로 새로 낸 융자가 새 단위로 더해졌다)이고 신주 상장(07-15) 뒤에도 옛 단위가 섞여 있다.
+    창은 권리락일부터 `views.BONUS_SCALE_WINDOW_SESSIONS`(25) 세션 = 06-27 ~ 07-29 행이고 08-01 행
+    (814,512주)부터 값이 다시 선다. 신용 랙 3이라 각 행은 세 세션 뒤에 보인다.
+    """
+    from strategy_workbench.domain.equity.facade.research_data import CellKind
+    r = _raw(adapter, date(2022, 6, 20), date(2022, 8, 10), fields=("credit.margin_balance",))
+    assert r.ok, r.detail
+    seen = {  # 보이는 세션 → (값, 원장 행 날짜 = 공개일, 셀 종류)
+        date(2022, 6, 29): (350_914.0, date(2022, 6, 24), CellKind.OBSERVED),
+        date(2022, 6, 30): (None, date(2022, 6, 27), CellKind.MASKED),
+        date(2022, 8, 3): (None, date(2022, 7, 29), CellKind.MASKED),
+        date(2022, 8, 4): (814_512.0, date(2022, 8, 1), CellKind.OBSERVED),
+    }
+    for as_of, expected in seen.items():
+        cell = _cell(r, as_of, "247540:1", "credit.margin_balance")
+        assert (cell.value, cell.available_date, cell.kind) == expected, as_of
+
+
 def test_모든_셀이_공개일_이후에만_보인다(adapter) -> None:
     """PIT 전수 — 30필드 × 절단본 두 창에서 available_date ≤ as_of 위반 0."""
     for start, end in ((date(2018, 4, 2), date(2018, 5, 31)),
@@ -417,16 +441,21 @@ def test_컨테이너가_duckdb_어댑터로_뜬다(built: Path, workbench, tmp_
 
 
 def test_MVP_B_모멘텀_월간_백테스트가_절단본에서_완주한다(built: Path, tmp_path: Path) -> None:
-    """`scripts/run_mvp_backtest.py` 를 in-process 로 — 2018 한 해(분할 포함), adj_close 축."""
+    """`scripts/run_mvp_backtest.py` 를 in-process 로 — 2020 한 해, adj_close 축.
+
+    워크벤치가 봉인 구간(2016~2019) 측정을 거절하므로(검증 랩 spec D1) 연구 구간 첫 해를 돈다. 분할
+    연속성은 위 어댑터 테스트가 2018-05-04 사건으로 본다."""
     pytest.importorskip("ruamel.yaml", reason=BACKEND_DEP_REASON)
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     mvp = importlib.import_module("run_mvp_backtest")
     mvp.load_backend(contract.default_engine_src())
-    s = mvp.run(built, date(2018, 1, 2), date(2018, 12, 28), "krx.common-stock",
+    s = mvp.run(built, date(2020, 1, 2), date(2020, 12, 30), "krx.common-stock",
                 artifact_root=tmp_path / "runs")
     assert s.ok, s.error
     assert s.n_rebalances == 11 and s.n_rebalances_with_positions >= 1
     assert s.n_securities >= 5 and s.total_return is not None
-    assert s.data_snapshot_id == catalog.snapshot_id(catalog.table_builds(built))
-    assert s.artifact_uri is not None
+    from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
+    ledger = catalog.snapshot_id(catalog.table_builds(built))
+    assert s.data_snapshot_id.startswith(ledger + SNAPSHOT_CONTRACT_SEPARATOR)
+    assert s.artifact_sha256 is not None

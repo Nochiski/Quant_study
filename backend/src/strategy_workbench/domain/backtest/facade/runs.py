@@ -1,6 +1,12 @@
-from strategy_workbench.domain.backtest._canonical import backtest_run_fingerprint
+from strategy_workbench.domain.backtest._canonical import (
+    ENGINE_RULES_VERSION,
+    backtest_run_fingerprint,
+    run_input_key,
+)
 from strategy_workbench.domain.backtest._models import (
     RUN_FAILURE_CODES,
+    AdmissionRejectionCode,
+    BacktestCancelResult,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -15,11 +21,13 @@ from strategy_workbench.domain.backtest._models import (
     RawFill,
     RawOrder,
     RawPosition,
+    RawRounding,
     RawSnapshot,
     RawTrade,
     RunFailureCode,
     RunManifest,
     RunProgressEvent,
+    RunStage,
     RunStatus,
     WarningSeverity,
 )
@@ -32,11 +40,14 @@ from strategy_workbench.domain.strategy.facade.provenance import (
 )
 
 __all__ = [
+    "ENGINE_RULES_VERSION",
     "BacktestRunResult",
     "BacktestRunSpec",
     "RUN_FAILURE_CODES",
+    "BacktestCancelResult",
     "BacktestRunState",
     "RunFailureCode",
+    "AdmissionRejectionCode",
     "BacktestSeries",
     "BacktestStartResponse",
     "DataWarning",
@@ -48,6 +59,7 @@ __all__ = [
     "RawFill",
     "RawOrder",
     "RawPosition",
+    "RawRounding",
     "RawSnapshot",
     "RawTrade",
     "InlineDraft",
@@ -57,7 +69,9 @@ __all__ = [
     "StrategySource",
     "StrategySourceKind",
     "RunProgressEvent",
+    "RunStage",
     "RunStatus",
     "WarningSeverity",
     "backtest_run_fingerprint",
+    "run_input_key",
 ]

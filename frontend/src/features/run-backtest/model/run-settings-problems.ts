@@ -2,15 +2,17 @@ import {
   runEnvironmentName,
   type RunEnvironmentField,
 } from "../../../entities/backtest";
+import type { BacktestRunSpec } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
   DATE_INPUT_MAXIMUM,
   DATE_INPUT_MINIMUM,
   type RunEnvironmentFieldError,
 } from "./run-environment";
-import type {
-  BacktestRunSettingsError,
-  BacktestRunSettingsResult,
+import {
+  OOS_START_FIELD,
+  type BacktestRunSettingsError,
+  type BacktestRunSettingsResult,
 } from "./run-settings";
 
 /**
@@ -44,8 +46,8 @@ const OPTION_FIELD: Record<
 > = {
   initial_cash: "initial_cash",
   annualization_days: "annualization_days",
-  oos_out_of_range: "oos_start",
-  oos_incomplete: "oos_start",
+  oos_out_of_range: OOS_START_FIELD,
+  oos_incomplete: OOS_START_FIELD,
 };
 
 /** 칸 옆 오류 문장. 범위에는 스키마의 표시 단위를 붙인다(예: "0bp 이상이어야 합니다."). */
@@ -83,10 +85,13 @@ export const runFieldLabel = (
     const field = fields.find((candidate) => candidate.name === next);
     return field === undefined ? null : runEnvironmentName(field);
   }
-  switch (head) {
+  // 칸 이름을 요청 계약 타입으로 좁혀, 계약의 칸 이름이 바뀌면 typecheck 가 case 를 잡게 한다
+  // (#357 C-P3-14). 계약 밖 이름은 그대로 default 로 간다.
+  const option = head as keyof BacktestRunSpec;
+  switch (option) {
     case "initial_cash":
     case "annualization_days":
-      return runOptionErrorName(head);
+      return runOptionErrorName(option);
     case "metric_windows":
       return runOptionErrorName("oos_out_of_range");
     case "core":

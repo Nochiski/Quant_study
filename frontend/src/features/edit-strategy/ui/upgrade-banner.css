@@ -28,10 +28,6 @@
   font-size: var(--text-size-small);
 }
 
-.upgrade__error {
-  color: var(--status-error);
-}
-
 .upgrade__warnings {
   display: grid;
   gap: var(--space-1);

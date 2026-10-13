@@ -90,6 +90,7 @@ def test_runtime_defaults_point_under_the_per_test_tmp_directory(
 
     assert _http.runtime_strategy_repository_path().parent == root
     assert Path(_http.runtime_assistant_settings().db_path or "").parent == root
+    assert _http.runtime_research_db_path().parent == root
     assert _container.DEFAULT_RUN_ARTIFACT_ROOT.parent == root
     assert _assistant.default_secrets_path().parent == root
     for name in RUNTIME_SETTING_ENVS:
@@ -107,6 +108,7 @@ def test_isolation_clears_every_runtime_setting_the_composition_root_reads() -> 
         _http.EQUITY_ROOT_ENV,
         _http.ALLOWED_ORIGINS_ENV,
         _http.ASSISTANT_DB_PATH_ENV,
+        _http.RESEARCH_DB_PATH_ENV,
         _http.ASSISTANT_SECRETS_PATH_ENV,
         _http.ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV,
         _http.ASSISTANT_FAKE_PROVIDER_ENV,

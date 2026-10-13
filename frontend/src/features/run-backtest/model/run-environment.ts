@@ -4,7 +4,7 @@ import {
   runEnvironmentWireText,
   type RunEnvironmentField,
 } from "../../../entities/backtest";
-import type { RunEnvironment } from "../../../shared/api";
+import { projectApplicability, type RunEnvironment } from "../../../shared/api";
 
 /**
  * 실행 설정(`RunEnvironment`) 패널의 입력 값과 검증(P3-02, spec D6).
@@ -34,15 +34,23 @@ export type RunEnvironmentFieldError =
   | "dateRange"
   | "order";
 
+/**
+ * `accepted` 는 칸마다 자기 규칙을 통과한 값이다(칸 사이 규칙인 기간 순서는 보지 않는다). 전체가 무효여도
+ * 실행 계획 설명이 결측 정책 칸 값만 따로 싣는다(#357 C-P3-16).
+ */
 export type RunEnvironmentValidation =
-  | { valid: true; environment: RunEnvironment; errors: Record<string, never> }
+  | {
+      valid: true;
+      environment: RunEnvironment;
+      accepted: Partial<RunEnvironment>;
+      errors: Record<string, never>;
+    }
   | {
       valid: false;
       environment: null;
+      accepted: Partial<RunEnvironment>;
       errors: Readonly<Record<string, RunEnvironmentFieldError>>;
     };
-
-type Json = Record<string, unknown>;
 
 /**
  * 패널의 첫 값. 저장된 마지막 사용값이 있으면 그 필드는 그 값, 없으면 스키마 기본값, 기본값도 없으면 빈 칸.
@@ -65,35 +73,37 @@ export const initialRunEnvironmentValues = (
     }),
   );
 
-/** 표시 단위 칸 값 → 요청 단위 문자열(마지막 사용값 저장용). */
-export const runEnvironmentWireValues = (
+/**
+ * 저장할 칸(요청 단위): 스키마 기본값과 다른 칸만 남긴다. 기본값이 바뀌면 사용자가 손대지 않은 칸은 새
+ * 기본값을 따른다(#396 리뷰 P2-1). 칸 목록을 아직 모르면(스키마를 읽기 전) 가리지 않는다.
+ */
+export const runEnvironmentStoredValues = (
   fields: readonly RunEnvironmentField[],
-  values: RunEnvironmentValues,
+  wire: RunEnvironmentValues,
 ): RunEnvironmentValues =>
   Object.fromEntries(
-    fields.map((field) => [
-      field.name,
-      runEnvironmentWireText(field, values[field.name] ?? ""),
-    ]),
+    Object.entries(wire).filter(([name, value]) => {
+      const field = fields.find((candidate) => candidate.name === name);
+      return (
+        field?.defaultValue === null ||
+        field?.defaultValue === undefined ||
+        value !== runEnvironmentWireText(field, field.defaultValue)
+      );
+    }),
   );
 
 /**
- * 업그레이드 응답처럼 완성된 `RunEnvironment` 를 패널 값으로 옮긴다. 스키마에 없는 키는 버린다.
+ * 업그레이드 응답처럼 완성된 `RunEnvironment` 를 요청 단위 기록(저장값과 같은 모양)으로 옮긴다. 값이 없는
+ * (null) 칸은 뺀다. 스키마가 필요 없어 스키마를 읽기 전에도 값을 잃지 않는다(#352 C-P2-4).
  */
-export const runEnvironmentValuesOf = (
-  fields: readonly RunEnvironmentField[],
+export const runEnvironmentWireRecord = (
   environment: RunEnvironment,
-): RunEnvironmentValues => {
-  const record = environment as unknown as Json;
-  return Object.fromEntries(
-    fields.map((field) => {
-      return [
-        field.name,
-        runEnvironmentDisplayValue(field, record[field.name]),
-      ];
-    }),
+): RunEnvironmentValues =>
+  Object.fromEntries(
+    Object.entries(environment).flatMap(([name, value]: [string, unknown]) =>
+      value === null || value === undefined ? [] : [[name, String(value)]],
+    ),
   );
-};
 
 /**
  * 날짜 칸이 받는 범위(#264). 범위를 주지 않으면 Chromium 이 `<input type="date">` 의 연도를 6자리(275760년)까지
@@ -103,6 +113,17 @@ export const runEnvironmentValuesOf = (
  */
 export const DATE_INPUT_MINIMUM = "1900-01-01";
 export const DATE_INPUT_MAXIMUM = "9999-12-31";
+
+/**
+ * 칸이 지금 값에서 읽히는가(스키마 `x-applicable-when`, #352). 조건이 없는 칸은 늘 읽힌다. 읽히지 않는 칸은
+ * 패널이 끄고 검사하지도 요청에 싣지도 않는다 — 조건 칸 값이 없어 판정할 수 없으면 읽히는 쪽으로 둔다.
+ */
+export const runEnvironmentApplies = (
+  field: RunEnvironmentField,
+  values: RunEnvironmentValues,
+): boolean =>
+  field.applicableWhen === null ||
+  projectApplicability(field.applicableWhen, values).applicable !== false;
 
 /** 덜 친 날짜 칸이 없다. */
 const NO_INCOMPLETE: ReadonlySet<string> = new Set();
@@ -134,7 +155,8 @@ const numberError = (
 /**
  * `incomplete` 는 브라우저가 덜 친 날짜라고 알려 준 칸 이름이다(`validity.badInput`, 값은 빈 문자열).
  *
- * 칸마다 스키마 규칙(필수·숫자·범위·날짜·enum)을 보고, 전부 맞으면 요청에 실을 `RunEnvironment` 를 만든다.
+ * 칸마다 스키마 규칙(필수·숫자·범위·날짜·enum·적용 조건)을 보고, 전부 맞으면 요청에 실을 `RunEnvironment` 를
+ * 만든다. 적용 조건이 서지 않는 칸은 건너뛰고, 서는 칸은 비울 수 없다(직접 입력 세율은 `custom` 에서만 필수).
  *
  * 기간 순서(`start <= end`)는 스키마가 말하지 않는 `RunEnvironment.__post_init__` 규칙이다. 생성 타입의
  * 두 필드 이름으로 빠른 피드백만 하고, 어긋나면 서버가 다시 거절한다.
@@ -147,13 +169,18 @@ export const validateRunEnvironment = (
   const errors: Record<string, RunEnvironmentFieldError> = {};
   const environment: Record<string, string | number> = {};
   for (const field of fields) {
+    if (!runEnvironmentApplies(field, values)) continue;
     const text = (values[field.name] ?? "").trim();
     if (text === "") {
       // 덜 친 날짜 칸도 값은 빈 문자열이다. 칸이 알려 준 덜 친 상태면 "비었다"가 아니라 날짜 오류로 본다 —
       // 칸 아래 문장과 요약 띠·차단 문장이 같은 원인을 말하게 한다(#266 리뷰 P3-1).
       if (field.control === "date" && incomplete.has(field.name))
         errors[field.name] = "date";
-      else if (field.required || field.defaultValue !== null)
+      else if (
+        field.required ||
+        field.defaultValue !== null ||
+        field.applicableWhen !== null
+      )
         errors[field.name] = "required";
       continue;
     }
@@ -188,19 +215,20 @@ export const validateRunEnvironment = (
     }
     environment[field.name] = text;
   }
-  const typed = environment as unknown as Partial<RunEnvironment>;
+  const accepted = environment as unknown as Partial<RunEnvironment>;
   if (
-    typeof typed.start === "string" &&
-    typeof typed.end === "string" &&
+    typeof accepted.start === "string" &&
+    typeof accepted.end === "string" &&
     errors.end === undefined &&
-    typed.start > typed.end
+    accepted.start > accepted.end
   )
     errors.end = "order";
   if (Object.keys(errors).length > 0)
-    return { valid: false, environment: null, errors };
+    return { valid: false, environment: null, accepted, errors };
   return {
     valid: true,
     environment: environment as unknown as RunEnvironment,
+    accepted,
     errors: {},
   };
 };

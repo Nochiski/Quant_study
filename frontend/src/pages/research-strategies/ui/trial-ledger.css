@@ -1,0 +1,30 @@
+.trial-ledger__dialog {
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+}
+
+.trial-ledger__dialog h3,
+.trial-ledger__dialog p {
+  margin: 0;
+}
+
+.trial-ledger__warning {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--status-error-border);
+  border-radius: var(--radius-small);
+  background: var(--status-error-soft);
+  color: var(--status-error);
+}
+
+.trial-ledger__runs {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

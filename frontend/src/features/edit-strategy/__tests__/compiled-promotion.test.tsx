@@ -29,10 +29,15 @@ import {
   type FactorPlanRequest,
   type PlannedFactor,
 } from "../model/use-execution-plans";
+import type { JsonSchema } from "../model/schema-navigator";
 import { ExecutionPlanPanel } from "../ui/execution-plan-panel";
 import { FactorGraphPanel } from "../ui/factor-graph-panel";
 
 afterEach(cleanup);
+
+const SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/runtime-schema.json"),
+) as JsonSchema;
 
 const SOURCE = readBackendFixture(
   "strategy_documents/ideas/ma20_breakout.yaml",
@@ -291,20 +296,21 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     render(
       <FactorGraphPanel
         state={readyState()}
+        schema={SCHEMA}
         diagnostics={[]}
         onSelectPointer={vi.fn()}
         onOpenSource={onOpenSource}
       />,
     );
 
-    const list = screen.getAllByRole("listitem");
+    const list = screen.getAllByRole("row");
     expect(list.map((item) => item.textContent ?? "").join("\n")).not.toMatch(
       /__promote_/,
     );
     const card = screen
       .getByRole("button", { name: "그래프 노드 선택: 참/거짓을 1/0으로" })
-      .closest("li") as HTMLElement;
-    expect(within(card).getByText("OUTPUT")).toBeInTheDocument();
+      .closest("tr") as HTMLElement;
+    expect(within(card).getByText("그래프 출력")).toBeInTheDocument();
     await user.click(
       within(card).getByRole("button", { name: "소스에서 열기" }),
     );
@@ -319,6 +325,7 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
       <>
         <FactorGraphPanel
           state={readyState()}
+          schema={SCHEMA}
           diagnostics={[]}
           selectedPointer={selectedPointer}
           onSelectPointer={vi.fn()}
@@ -333,16 +340,32 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     );
 
     const current = screen
-      .getAllByRole("listitem")
+      .getAllByRole("row")
       .filter((item) => item.getAttribute("aria-current") === "true");
     expect(current).toHaveLength(1);
     expect(
       within(current[0]!).getByRole("button", { name: "그래프 노드 선택: gt" }),
     ).toBeInTheDocument();
-    const selectedRows = within(screen.getByRole("table"))
+    const selectedRows = within(screen.getAllByRole("table")[1]!)
       .getAllByRole("row")
       .filter((row) => row.getAttribute("aria-selected") === "true");
     expect(selectedRows).toHaveLength(1);
     expect(selectedRows[0]!.textContent).not.toContain("참/거짓을 1/0으로");
   });
+});
+
+
+it("canvas keeps authored boolean output editable and attaches only a read-only score marker", async () => {
+  const onSelectPointer = vi.fn(), apply = vi.fn(() => true);
+  render(<FactorGraphPanel state={readyState()} schema={SCHEMA} diagnostics={[]} onSelectPointer={onSelectPointer} onOpenSource={vi.fn()} editing={{ tree: PARSED.status === "ok" ? PARSED.tree : null, catalogs: { equityFields: null }, transactions: { apply, run: vi.fn(() => true), feedback: { status: "idle" }, feedbackFor: () => ({ status: "idle" }), onEditorReady: vi.fn(), enabled: true, disabled: null, settling: false } }} />);
+  const canvas = screen.getByRole("region", { name: "노드 캔버스" });
+  expect(within(canvas).getAllByRole("button", { name: /^노드 편집:/ })).toHaveLength(AUTHORED.nodes.length);
+  expect(canvas).not.toHaveTextContent("__promote_");
+  const output = canvas.querySelector('[data-node-id="gt"]') as HTMLElement;
+  expect(output).toHaveTextContent("종목별 참·거짓");
+  expect(output).toHaveTextContent("참/거짓을 1/0으로 · 읽기 전용");
+  expect(within(output).getAllByRole("button", { name: / · 출력$/ })).toHaveLength(1);
+  await userEvent.setup().click(within(output).getByRole("button", { name: /^노드 편집:/ }));
+  expect(onSelectPointer).toHaveBeenLastCalledWith("/factors/0/graph/nodes/3");
+  expect(apply).not.toHaveBeenCalled();
 });

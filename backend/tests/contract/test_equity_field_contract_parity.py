@@ -12,8 +12,7 @@ field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 g
 
 from __future__ import annotations
 
-import importlib
-import sys
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +22,24 @@ from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_BY_ID,
     SOURCE_BY_NAME,
     UNSUPPORTED_FIELDS,
+    FieldSpec,
+    SourceSpec,
+)
+from strategy_workbench.adapters.outbound.equity_mock._fixture import (
+    Membership,
+    MockSplit,
+    Observation,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
-from strategy_workbench.domain.equity.facade.research_data import DatasetFieldProfile
+from strategy_workbench.domain.equity._models import CONTRACT_PROSE_FIELDS
+from strategy_workbench.domain.equity.facade.research_data import (
+    CellKind,
+    DatasetFieldProfile,
+    FieldCoverageCapability,
+    SecurityRef,
+)
 
 # 두 어댑터가 함께 내는 필드 — 대조가 빈 교집합으로 공허하게 통과하지 않게 최소 집합을 못박는다.
 EXPECTED_SHARED = frozenset(
@@ -42,6 +54,41 @@ EXPECTED_SHARED = frozenset(
         "credit.margin_balance",
     }
 )
+
+
+# 필드 계약 판에 닿는 dataclass 와 그 판에서 빠지는 문장 칸.
+_PROSE_BY_TYPE: dict[type, set[str]] = {
+    FieldSpec: {"label", "verdict", "description", "disclosure_basis", "evidence", "lag_basis"},
+    SourceSpec: {"lag_basis"},
+    DatasetFieldProfile: {
+        "label",
+        "available_date_basis",
+        "description",
+        "disclosure_basis",
+        "evidence",
+    },
+    **{
+        data: set()
+        for data in (FieldCoverageCapability, SecurityRef, Membership, Observation, MockSplit)
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("declaration", "prose"),
+    list(_PROSE_BY_TYPE.items()),
+    ids=[declaration.__name__ for declaration in _PROSE_BY_TYPE],
+)
+def test_only_prose_is_left_out_of_the_field_contract_revision(
+    declaration: type, prose: set[str]
+) -> None:
+    """#291 리뷰 r2 P3-1: 판에서 빠지는 칸은 타입마다 이 문장 칸뿐이다.
+
+    `CONTRACT_PROSE_FIELDS` 는 이름으로 거르므로 판에 닿는 dataclass(선언표·프로필·mock fixture
+    데이터) 모두에 적용된다. 뜻 칸 이름이 목록에 들거나, 데이터 타입에 목록과 같은 이름의 뜻 칸이
+    생기면 그 변화가 스냅샷 id·재현 지문·캐시 키에서 조용히 빠진다(#235 재발).
+    """
+    assert {item.name for item in fields(declaration)} & CONTRACT_PROSE_FIELDS == prose
 
 
 def _mock_profiles() -> dict[str, DatasetFieldProfile]:
@@ -139,25 +186,15 @@ def test_duckdb_선언표의_원주가_표시는_같은_단위의_실재하는_�
 # 에서 돈다.
 # 빈도는 원장 어휘(session·report)가 아니라 duckdb 어댑터가 `list_fields()` 로 내는 어휘
 # (`SourceSpec.frequency`)로 맞춘다. mock 이 대신 서는 것은 그 어댑터이기 때문이다.
-_EQUITY_SRC = Path(__file__).resolve().parents[3] / "database" / "src"
 
 
 def _ledger_profiles() -> dict[str, Any]:
     """원장 빌드가 `dataset_profile` 로 내는 필드 선언(field_id → `FieldProfile`)."""
     pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
-    if not _EQUITY_SRC.is_dir():
-        pytest.fail(f"원장 선언 경로가 없다 — path={_EQUITY_SRC}")
-    # 경로는 import 하는 동안만 올린다. `database/src` 최상위의 일반 이름 모듈(api·stage 등)이
-    # 이후 테스트의 import 를 가리지 않게 한다(저장소 관례, test_core_parity.py).
-    added = str(_EQUITY_SRC) not in sys.path
-    if added:
-        sys.path.insert(0, str(_EQUITY_SRC))
-    try:
-        rules_s19 = importlib.import_module("equity.rules_s19")
-        return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
-    finally:
-        if added:
-            sys.path.remove(str(_EQUITY_SRC))
+    from tests.equity_fixture import import_ledger_module
+
+    rules_s19: Any = import_ledger_module("equity.rules_s19")
+    return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
 
 
 @pytest.mark.parametrize("field_id", _shared_field_ids())
@@ -178,6 +215,47 @@ def test_공통_필드의_빈도가_duckdb_어댑터와_같다(field_id: str) ->
     assert mock.frequency == expected, (
         f"mock 빈도가 duckdb 어댑터와 다르다 — field_id={field_id} "
         f"expected={expected} got={mock.frequency}"
+    )
+
+
+@pytest.mark.parametrize("field_id", _shared_field_ids())
+def test_공통_필드는_가린_셀과_원천_생략_0_을_같게_선언한다(field_id: str) -> None:
+    """원장 뷰가 가리는 원천(`SourceSpec.masked_expr`)의 필드는 mock 도 MASKED 를 선언한다(#298).
+    원천이 행을 뺀 칸이 그날 0 인 원천(`SourceSpec.omitted_is_zero`)의 SOURCE_OMITTED_ZERO 도 같다
+    (#371).
+
+    MASKED 셀은 실행 결측 정책이 채우지 않는다. 한쪽만 선언하면 같은 문서·같은 결측 정책이 mock
+    과 실데이터에서 다른 셀을 채운다. 원천 생략 0 을 한쪽만 내면 같은 창 연산의 커버가 갈린다.
+    """
+    kinds = _mock_profiles()[field_id].coverage.supported_cell_kinds
+    source = SOURCE_BY_NAME[FIELD_BY_ID[field_id].source]
+    mock = (CellKind.MASKED in kinds, CellKind.SOURCE_OMITTED_ZERO in kinds)
+    duckdb = (source.masked_expr is not None, source.omitted_is_zero)
+    assert mock == duckdb, (
+        f"(MASKED, SOURCE_OMITTED_ZERO) 선언이 두 어댑터에서 다르다 — field_id={field_id} "
+        f"duckdb={duckdb} mock={mock}"
+    )
+
+
+def test_원장_뷰의_가림_표시_열을_그_뷰를_읽는_원천이_읽는다() -> None:
+    """원장이 선언한 가림 표시 열(`views.MASK_COLUMNS`)과 duckdb 원천의 `masked_expr` 가 같다
+    (#311 리뷰 P2-1).
+
+    한쪽만 있으면 가린 셀이 MISSING 으로 나가 실행 결측 정책이 다시 채운다 — 수정주가 가림을
+    배선하지 않으면 `zero` 에서 가린 행이 끝점인 12-1 모멘텀이 −100% 가 된다(#301 실측 324셀).
+    위 테스트가 mock 선언을 이 배선에 맞추므로 원장 뷰 → duckdb → mock 이 한 줄로 묶인다.
+    """
+    from tests.equity_fixture import import_ledger_module
+
+    views: Any = import_ledger_module("equity.views")
+    wired = {
+        spec.relation: spec.masked_expr
+        for spec in SOURCE_BY_NAME.values()
+        if spec.masked_expr is not None
+    }
+    assert wired == views.MASK_COLUMNS, (
+        f"원장 뷰의 가림 표시 열과 어댑터 배선이 다르다 — ledger={views.MASK_COLUMNS} "
+        f"duckdb={wired}"
     )
 
 

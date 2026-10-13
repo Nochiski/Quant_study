@@ -57,6 +57,10 @@ pub(crate) struct PersistentFeed {
     lows: Vec<f64>,
     closes: Vec<f64>,
     volumes: Vec<i64>,
+    /// 행별 유동성 캡 기준 거래량 (Python `FeedColumns.liquidity_volumes`). 없으면 세션 거래량이다.
+    liquidity_volumes: Option<Vec<i64>>,
+    /// 행별 √ 충격 척도 (Python `FeedColumns.impact_scales`). 없으면 0이다.
+    impact_scales: Option<Vec<f64>>,
     current_session: Option<usize>,
     /// key → instrument id. 세션 루프가 주문·포지션 key를 wire의 정수 id로 바꿀 때 쓴다.
     key_index: HashMap<String, u32>,
@@ -202,11 +206,50 @@ impl PersistentFeed {
             lows,
             closes,
             volumes,
+            liquidity_volumes: None,
+            impact_scales: None,
             current_session: None,
             key_index,
             symbol_by_key,
             row_index,
         })
+    }
+
+    /// 유동성 캡 기준 거래량 열을 붙인다. 행마다 하나씩, 0 이상이어야 한다.
+    pub(crate) fn with_liquidity_volumes(
+        mut self,
+        liquidity_volumes: Option<Vec<i64>>,
+    ) -> PyResult<Self> {
+        if let Some(values) = &liquidity_volumes {
+            if values.len() != self.volumes.len() || values.iter().any(|value| *value < 0) {
+                return Err(PyValueError::new_err(format!(
+                    "feed liquidity volumes must be one non-negative value per row — rows={} liquidity_volumes={}",
+                    self.volumes.len(),
+                    values.len()
+                )));
+            }
+        }
+        self.liquidity_volumes = liquidity_volumes;
+        Ok(self)
+    }
+
+    /// √ 충격 척도 열을 붙인다. 행마다 하나씩, 유한한 0 이상이어야 한다.
+    pub(crate) fn with_impact_scales(mut self, impact_scales: Option<Vec<f64>>) -> PyResult<Self> {
+        if let Some(values) = &impact_scales {
+            if values.len() != self.volumes.len()
+                || !values
+                    .iter()
+                    .all(|value| (0.0..f64::INFINITY).contains(value))
+            {
+                return Err(PyValueError::new_err(format!(
+                    "feed impact scales must be one finite non-negative value per row — rows={} impact_scales={}",
+                    self.volumes.len(),
+                    values.len()
+                )));
+            }
+        }
+        self.impact_scales = impact_scales;
+        Ok(self)
     }
 
     pub(crate) fn session_len(&self) -> usize {
@@ -274,6 +317,21 @@ impl PersistentFeed {
         self.offsets[index]..self.offsets[index + 1]
     }
 
+    /// 행의 유동성 캡 기준 거래량 — 참여 기준 거래량이 있으면 그 값, 없으면 세션 거래량
+    /// (Python `Bar.cap_volume`).
+    fn cap_volume_at(&self, row: usize) -> i64 {
+        self.liquidity_volumes
+            .as_ref()
+            .map_or(self.volumes[row], |values| values[row])
+    }
+
+    /// 세션의 한 종목 유동성 캡 기준 거래량. 그 세션에 종목 bar 가 없으면 None.
+    pub(crate) fn cap_volume(&self, index: usize, instrument_id: u32) -> Option<i64> {
+        self.row_range(index)
+            .find(|&row| self.instrument_ids[row] == instrument_id)
+            .map(|row| self.cap_volume_at(row))
+    }
+
     /// 세션 타임스탬프와 그날 bar 표. key는 등록부 문자열을 빌려준다 — MARKET 처리는
     /// key를 읽기만 하므로 세션마다 종목 수만큼 `String`을 새로 만들 이유가 없다.
     pub(crate) fn session_market(&self, index: usize) -> (&str, HashMap<&str, BarTuple>) {
@@ -288,6 +346,10 @@ impl PersistentFeed {
                         self.highs[row],
                         self.lows[row],
                         self.volumes[row],
+                        self.cap_volume_at(row),
+                        self.impact_scales
+                            .as_ref()
+                            .map_or(0.0, |values| values[row]),
                     ),
                 )
             })
@@ -487,6 +549,48 @@ mod tests {
         assert_eq!(feed.open_at(1, "B"), Some(21.0));
         assert_eq!(feed.symbol_of(0), "AAA");
         assert_eq!(feed.session_len(), 2);
+        // 기준 거래량 열이 없으면 bar의 다섯째 값은 세션 거래량이다.
+        assert_eq!(feed.session_market(0).1["B"].4, 200);
+    }
+
+    #[test]
+    fn liquidity_and_impact_columns_replace_their_own_bar_value() {
+        let build = || {
+            PersistentFeed::new(
+                vec!["A".into()],
+                vec!["AAA".into()],
+                vec!["D1".into(), "D2".into()],
+                vec![0, 1, 2],
+                vec![0, 0],
+                vec![10.0, 20.0],
+                vec![11.0, 21.0],
+                vec![9.0, 19.0],
+                vec![10.5, 20.5],
+                vec![100, 200],
+            )
+            .unwrap()
+        };
+        let feed = build().with_liquidity_volumes(Some(vec![7, 0])).unwrap();
+        assert_eq!(
+            feed.session_market(0).1["A"],
+            (10.0, 11.0, 9.0, 100, 7, 0.0)
+        );
+        assert_eq!(feed.session_market(1).1["A"].4, 0);
+        for bad in [vec![7], vec![7, -1]] {
+            let error = build().with_liquidity_volumes(Some(bad)).err().unwrap();
+            assert!(error.to_string().contains("liquidity volumes"));
+        }
+        // √ 충격 척도 열은 bar의 여섯째 값만 바꾼다. 없으면 0이다.
+        let feed = build().with_impact_scales(Some(vec![0.25, 0.0])).unwrap();
+        assert_eq!(
+            feed.session_market(0).1["A"],
+            (10.0, 11.0, 9.0, 100, 100, 0.25)
+        );
+        assert_eq!(feed.session_market(1).1["A"].5, 0.0);
+        for bad in [vec![0.25], vec![0.25, -0.1], vec![0.25, f64::NAN]] {
+            let error = build().with_impact_scales(Some(bad)).err().unwrap();
+            assert!(error.to_string().contains("impact scales"));
+        }
     }
 
     /// bar가 빠진 세션이 섞인 피드에서 `row_index`가 "그날 행 없음"을 정확히 표시하는지.

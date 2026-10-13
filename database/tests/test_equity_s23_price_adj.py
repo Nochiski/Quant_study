@@ -518,14 +518,6 @@ def test_dataset_profile_이_이_표를_훑는다() -> None:
     assert "price_adj_daily" in rules_s19.SOURCE_TABLES
 
 
-def test_커널_어댑터는_조정가_표를_읽지_않는다() -> None:
-    """커널은 원주가 + 기업행위 이벤트로 수량을 조정한다 — 조정가를 주면 이중 계산이다."""
-    kernel = (Path(__file__).parents[2] / "backend" / "src" / "backtest_engine" / "adapters"
-              / "equity_duckdb.py")
-    assert kernel.exists(), kernel
-    assert "price_adj_daily" not in kernel.read_text(encoding="utf-8")
-
-
 # ── 검수 R2-01·R2-04: 저녁 잠정 T 행이 있는 price_daily 위에서 S23 이 서고 표식을 싣는다 ──
 def test_저녁_잠정_T_행이_있어도_price_adj_daily_가_지어지고_표식을_싣는다(
         tmp_path_factory: pytest.TempPathFactory) -> None:

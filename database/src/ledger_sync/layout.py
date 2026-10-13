@@ -215,8 +215,8 @@ def is_table_name(name: str) -> bool:
 
 
 def snapshot_id(builds: dict[str, str]) -> str:
-    """전 테이블 `table=build` 정렬 해시 16자리 — `equity.catalog.snapshot_id`·workbench 와 같은
-    규칙."""
+    """전 테이블 `table=build` 정렬 해시 16자리 — `equity.catalog.snapshot_id`·workbench 원장 판
+    (데이터 스냅샷 id 앞부분)과 같은 규칙."""
     payload = "\n".join(f"{table}={build}" for table, build in sorted(builds.items()))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 

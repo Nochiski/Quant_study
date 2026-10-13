@@ -183,7 +183,8 @@ def _macro_mismatch(ctx: EquityGateContext) -> tuple[int, dict[str, object]]:
         basis += "+factor_tickers"
     made = views.install_temp_macros(ctx.con, {
         "price_daily": "price_daily", "adj_factor": "adj_factor",
-        "trading_calendar": "trading_calendar", "security_span": "security_span"})
+        "trading_calendar": "trading_calendar", "security_span": "security_span"},
+        names=tuple(v for v, _ in MACRO_VIEWS))
     absent = [v for v, _ in MACRO_VIEWS if v not in made]
     if absent:
         raise RuntimeError(f"forward-adjust macros could not be installed: missing={absent} "

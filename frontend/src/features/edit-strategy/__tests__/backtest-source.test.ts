@@ -223,7 +223,7 @@ describe("isBacktestSettling", () => {
   it("계획 조회가 끝난 판정이면 검증 중이 아니다", () => {
     // 오류·호환 불가·메타데이터 없음은 문서를 고치지 않는 한 열리지 않는 닫힘이다(C-02 리뷰 P1-1 결정).
     const finished: ExecutionPlansState[] = [
-      { status: "error", message: "explain failed" },
+      { status: "error", reason: "explain failed" },
       {
         status: "incompatible",
         resource: "factor-registry",

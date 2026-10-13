@@ -822,6 +822,24 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
 
 ### P4-01 — `pipeline-projection.ts`
 
+**설계 결정·분할(리드 결정 2026-09-30, PLAN 변경 기록 먼저)**: 아래 acceptance 가 비워 둔 선택지의 답이다.
+
+- 두 PR 로 나눈다. **P4-01a**: backend `x-stage` marker + 테스트(스키마·OpenAPI 영향 확인). **P4-01b**(P4-01a
+  머지 뒤 main 에서): `pipeline-projection.ts`·`recipe-projection.ts` + 테스트 + i18n.
+- 단계 = 적용되는 곳이다. 유동성 필터(후보를 거를 때 읽힘)는 1단계 유니버스, 리스크 역가중 원천(비중을
+  정할 때 읽힘)은 3단계 포트폴리오 구성이고, 아래 "YAML 섹션과 1:1" 은 이 두 예외를 뺀 규칙이다.
+  `x-stage` 의 선언 위치(값은 `AppliedStage`)와 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현 투영"
+  행이 소유한다(P4-01a).
+- 카드 = Form 행·목록 항목. 같은 단계 안에서 `x-applicable-when` 조건이 가리키는 필드가 있으면 그 필드의
+  카드에 붙는다(조건이 둘 이상이면 같은 단계 안의 첫 조건). 묶음의 정본은 backend 적용 조건표다.
+- 요약 문장은 백분율을 쓰지 않는다(아래 예시의 "60%·40%" 포함 — 합성 분모와 역가중 제외 규칙의 복제다). 필드별
+  i18n 조각(`<x-description-key>.summary`, enum 은 `<stem>.value.<값>.summary`)을 단계 틀로 잇고, 팩터는
+  선호 방향을 붙인 이름("낮은 PBR·높은 ROE", 가중치가 서로 다를 때만 원값)으로 보인다(방향은 #367 리뷰
+  P2-1 로 넓힘). 역가중 제외 팩터는 compile 진단
+  `strategy.risk.risk_factor_excluded` 로 안다. 비율 표시는 `contract-inspector.ts` 의 `displayValue` 를
+  공용으로 옮겨 쓴다.
+- 단계가 없는 섹션(`title`·`description`·`parameters`)은 투영이 따로 내고, 배치는 P4-02·P4-04 가 정한다.
+
 **Acceptance**
 
 - runtime schema × parse tree × compile 진단 → 표준 단계 모델(1 유니버스 `eligibility`, 2 알파 팩터
@@ -841,6 +859,24 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
 
 ### P4-02 — 단계 카드 UI(유니버스·포트폴리오 구성·리스크 제약)와 실행 설정 띠
 
+**설계 결정(리드 결정 2026-09-30, PLAN 변경 기록 먼저)**: 아래 acceptance 가 비워 둔 선택지의 답이다.
+
+- 캔버스는 `pipeline-projection.ts` 의 카드 모델만 소비한다. 입력은 Form 투영 하나다(`projectPipeline` 이
+  `FormProjection` 을 받는다 — stale·진단 규칙은 `useFormProjection` 한 벌). 카드 컨트롤은 Form 필드 행에서 뗀
+  한 경로(컨트롤·확정·무효 안내, 기본값으로·설정 안 함)를 쓰고, 연산은 `form-transactions.ts` 그대로다.
+- 카드 문장 틀은 i18n `<키>.card` 다: 앵커가 enum 이면 고른 값의 이름 키, 아니면 설명 키, 목록 항목은 항목
+  enum 값의 이름 키 → 목록 설명 키. `{<필드 키>}` 자리에 같은 카드 필드의 컨트롤이 들어가고, 틀이 없는 행은
+  이름 라벨 행으로 그린다. 비율 칸은 입력 단위를 바꾸지 않고 틀 문구가 비개발자 말로 단위를 말한다(예 "상위
+  {selection_percentile}(0.1이 10%)를") — 연산자마다 단위가 달라 % 입출력은 한 경로로 못 푼다.
+- 단계 없는 섹션(전략 이름·설명·파라미터)은 캔버스 밖(Form·YAML)에 두고 자리는 P4-04 가 정한다. 알파 열은
+  팩터 이름과 "그래프에서 열기"만 두고 카드는 P4-03 이 만든다. 영문 소제목은 `strategy.stage.<v>.term` 이다.
+- 실행 설정 띠는 이미 모든 탭 위(IDE `runEnvironment` 슬롯)라 옮기지 않는다. "5 실행" 은 띠를 가리키는 안내
+  카드다.
+- 스토리는 US-DM-07 비고만 갱신하고 e2e 는 P4-04 가 맡는다. 대신 route 테스트 둘을 고정한다: 카드 문장 안의
+  컨트롤로 값을 바꾸면 YAML 그 줄만 바뀌고 compile 되며, Form 행과 같은 SourceOperation 이 나간다.
+- 한 PR 로 가고 커밋은 a(입력·컨트롤 추출·틀 분해·캔버스·필드 카드·요약 띠·Graph 탭 배선) → b(규칙 목록·5 실행
+  안내·문제 행 이동·스토리) 순서다. 비테스트 src 가 600줄이나 10파일을 넘으면 a/b 경계에서 두 PR 로 나눈다.
+
 **Acceptance**
 
 - 문구 규칙(spec D9): 단계 이름은 표준 용어(한글 + 영문 소제목) + 한 줄 쉬운 설명, 컨트롤은 한국어 문장 안에("거래대금이 [10]억 원 [이상인]
@@ -856,10 +892,35 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
 
 ### P4-03 — 알파 팩터 단계(팩터 카드·점수 합치기), 빈 팩터 추가, 기준일 미리보기 패널
 
+**설계 결정(리드 결정 2026-09-30, PLAN 변경 기록 먼저)**: 아래 acceptance 가 비워 둔 선택지의 답이다.
+
+- 카드 이름은 `label` 을 편집한다. `factor_id` 는 "+ 팩터 추가"가 넣는 씨앗(`factor_<n>`)이고 캔버스에 보이지
+  않는다. rename 은 Form·YAML 경로에서 `renameFactor` planner(정의 자리와 문서 전역 참조를 한 트랜잭션으로)로
+  하고, Form `factor_id` 행이 참조를 끊던 잠복 결함도 이 planner 로 고친다.
+- 비중 슬라이더 하한은 스키마 최솟값을 읽는다(손으로 적지 않는다). 상한 3·단계 0.1 은 표시 전용 상수이고 숫자
+  칸을 함께 둔다. 값 검증은 스키마·backend 몫이고 확정은 blur·pointerup 에 한 번이다.
+- 삭제 거부는 훅이 참조 목록만 돌려주고, 화면이 스키마 사실로 참조 자리의 이름을 만든다.
+- 빈 그래프는 backend 새 코드 `factor.graph.empty`("첫 단계를 추가하세요.", `FACTOR_GRAPH_CODES`)다. 문장은
+  backend 가 완성한다.
+- 미리보기는 trace 응답의 `summary` 블록을 읽는다. `security_ids` 없이도 부를 수 있다. N 은 전략 자신의 선정
+  결과(그 기준일의 targets)이고 종목마다 이름을 backend 가 붙인다. 기준일 기본값은 실행 설정의 종료일이다 —
+  기준일을 비워 보내면 backend 가 그 구간의 마지막 리밸런스 신호 프레임을 고르고 응답 `as_of` 로 알린다(연구
+  구간·홀드아웃은 trace 가 이미 거는 실행 설정 관문 그대로). 수는 유니버스·규칙 탈락·순위 탈락·결측 제외·순위에
+  든 수이고 모두 backend 가 센다 — 프론트는 다시 계산하지 않는다. 결측 중 원장이 가린 몫(#350)은 비용 대비
+  효용이 낮아 따로 세지 않는다(리드 결정 수정, 종목별 가림은 디버거가 보인다).
+- 미리보기 패널은 캔버스 아래에 두고 버튼으로 갱신한다(compile ok 일 때만 켜짐). stale 배지를 두고 자동 갱신은
+  하지 않는다(실데이터 trace 가 무겁다).
+- 팩터 카드 위 진단은 수 배지만 둔다. 본문은 고급 편집기가 노드에 붙인다.
+- 세 PR 스택: P4-03a backend(빈 그래프 코드·`summary` 계약·OpenAPI·SDK) → P4-03b 팩터 카드·추가 →
+  P4-03c 미리보기 패널.
+
 **Acceptance**
 
-- 팩터 카드: 이름(`factor_id` 편집 = 참조 갱신 rename), 방향, 비중 슬라이더(blur 커밋), 요약 문장,
+- 팩터 카드: 이름(`label` 편집 — `factor_id` 는 씨앗이고 rename 은 Form·YAML 의 `renameFactor`, 리드 결정
+  2026-09-30), 방향, 비중 슬라이더(blur 커밋), 요약 문장,
   "레시피 열기"(P5 전까지 기존 Graph 편집기로), 카드 위 진단.
+- 팩터 카드의 삭제 거부 문장은 참조 자리를 pointer 대신 이름으로 말한다(spec D9 "카드는 YAML 식별자를
+  보이지 않는다", P4-04 식별자 0개 단언 — Graph 노드 삭제 거부 P1-04 처럼, #395 리뷰 P3-4).
 - "+ 팩터 추가"가 `{ factor_id: factor_<n>, direction: high, graph: { nodes: [], output_node_id: "" } }`를
   `insertItem`. 빈 그래프는 semantic error "첫 단계를 추가하세요"로 카드에 표시(backend 메시지).
 - 미리보기 패널: 기준일 입력, 기존 trace API로 유니버스·필터 통과·결측 제외 수와 상위 N 종목·
@@ -942,12 +1003,12 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
   0개 단언. fixture와 빌더 산출물이 같은 형태라는 근거는 spec D2의 "다중 입력 연산자의 부가 입력은
   항상 새 소스 잎 노드다"이며, 아이디어 3은 양쪽 모두 노드 4개(잎 2개) 형태다.
 - 매뉴얼에 그래프 화면 절과 예시 5개(튜토리얼).
-- BACKLOG-004: 미리보기가 `POST /api/v1/factors/preview`를 쓰면 그 422(`factor.graph.invalid`와
-  `factor.graph.*` 이슈 코드)를 `strategy.expression.*` 네임스페이스로 정리한다. 이 endpoint를 쓰지
-  않으면 이 PR에서 BACKLOG-004의 담당을 다시 정한다.
-- BACKLOG-016: 0/1 이진 팩터(아이디어 3)의 선정이 동점 해소 순서(`security_id`)로 정해진다. 아이디어 e2e 를
-  확정할 때 해결 방식을 정한다 — (a) 보조 팩터로 동점 해소, (b) 동점 전원 균등 비중. 정한 방식을 spec 5절·
-  아이디어 3 fixture 에 반영하고 재현 테스트를 둔다.
+- BACKLOG-004: 사용자 확정으로 기존 `/factors/preview`는 폐기하고 strategy trace의 기존 평가값을
+  투영한다(PR431). `/factors/validate` 등 다른 API는 유지한다.
+- BACKLOG-016: 확정된 선언형 보조 팩터·방향으로 주 점수 동점만 해소한다(PR432). 잔여 결측은
+  유효 보조값 뒤, 최종 동점은 기존 ID 순서다. spec 5절·아이디어3 fixture와 재현 테스트를 함께 유지한다.
+- 문서 제목·설명은 단계 없는 문서 속성, 정본 재현용 팩터 ID는 접힌 식별자 영역에서 기존 source
+  transaction으로 편집한다. 참조 지정 후 rename과 한 번의 undo, 접힌 ID 오류 재선택 reveal도 검증한다.
 
 **Phase 5 exit**
 

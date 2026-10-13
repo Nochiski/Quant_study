@@ -2,8 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, type FormEvent } from "react";
 
 import {
+  BacktestRunFailure,
   backtestHistoryQuery,
+  RUN_KINDS,
+  runKindLabel,
   type BacktestRunSummary,
+  type RunKind,
 } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
@@ -82,6 +86,36 @@ const StrategyFilter = ({
   );
 };
 
+/** 실행 종류 필터(검증 랩 V5-03). 종류 판정은 backend 가 하고 화면은 고른 값을 목록 질의에 싣는다. */
+const KindFilter = ({
+  value,
+  onChange,
+}: {
+  value: RunKind | undefined;
+  onChange: (kind: RunKind | undefined) => void;
+}) => (
+  <div
+    className="data-list-page__filter"
+    role="group"
+    aria-label={t("history.backtests.kind")}
+  >
+    <span>{t("history.backtests.kind")}</span>
+    {[undefined, ...RUN_KINDS].map((kind) => (
+      <Button
+        key={kind ?? "all"}
+        size="small"
+        tone={kind === value ? "secondary" : "ghost"}
+        aria-pressed={kind === value}
+        onClick={() => onChange(kind)}
+      >
+        {kind === undefined
+          ? t("history.backtests.kindAll")
+          : runKindLabel(kind)}
+      </Button>
+    ))}
+  </div>
+);
+
 const StrategySource = ({ summary }: { summary: BacktestRunSummary }) => {
   const provenance = summary.strategy_provenance;
   return (
@@ -145,6 +179,7 @@ export const BacktestsPage = () => {
       offset,
       limit: PAGE_SIZE,
       strategyId: search.strategy,
+      kind: search.kind,
     }),
   );
   const correctedOffset =
@@ -158,23 +193,25 @@ export const BacktestsPage = () => {
       to: ROUTE,
       search: {
         strategy: search.strategy,
+        kind: search.kind,
         offset: correctedOffset === 0 ? undefined : correctedOffset,
       },
       replace: true,
     });
-  }, [correctedOffset, navigate, offset, search.strategy]);
+  }, [correctedOffset, navigate, offset, search.strategy, search.kind]);
 
   const move = (next: number) =>
     void navigate({
       to: ROUTE,
       search: {
         strategy: search.strategy,
+        kind: search.kind,
         offset: next === 0 ? undefined : next,
       },
     });
 
   return (
-    <section className="data-list-page" aria-labelledby="backtests-title">
+    <section className="page data-list-page" aria-labelledby="backtests-title">
       <header className="data-list-page__header">
         <div>
           <h1 id="backtests-title">{t("history.backtests.title")}</h1>
@@ -187,7 +224,16 @@ export const BacktestsPage = () => {
           onApply={(strategy) =>
             void navigate({
               to: ROUTE,
-              search: { strategy, offset: undefined },
+              search: { strategy, kind: search.kind, offset: undefined },
+            })
+          }
+        />
+        <KindFilter
+          value={search.kind}
+          onChange={(kind) =>
+            void navigate({
+              to: ROUTE,
+              search: { strategy: search.strategy, kind, offset: undefined },
             })
           }
         />
@@ -208,7 +254,9 @@ export const BacktestsPage = () => {
             description={
               search.strategy
                 ? t("history.backtests.filteredEmpty")
-                : t("history.backtests.empty")
+                : search.kind
+                  ? t("history.backtests.kindEmpty")
+                  : t("history.backtests.empty")
             }
           />
         ) : (
@@ -221,6 +269,7 @@ export const BacktestsPage = () => {
                 <thead>
                   <tr>
                     <th scope="col">{t("history.backtests.run")}</th>
+                    <th scope="col">{t("history.backtests.kind")}</th>
                     <th scope="col">{t("history.backtests.status")}</th>
                     <th scope="col">{t("history.backtests.strategy")}</th>
                     <th scope="col">{t("history.backtests.provenance")}</th>
@@ -239,16 +288,42 @@ export const BacktestsPage = () => {
                         </span>
                       </td>
                       <td>
+                        <Badge tone="neutral">{runKindLabel(item.kind)}</Badge>
+                        {item.experiment_id === null ? null : (
+                          <>
+                            <br />
+                            <Link
+                              className="data-list-page__hash"
+                              to="/research/experiments/$experimentId"
+                              params={{ experimentId: item.experiment_id }}
+                            >
+                              {t("history.backtests.experiment").replace(
+                                "{experiment}",
+                                item.experiment_id,
+                              )}
+                            </Link>
+                          </>
+                        )}
+                        {item.experiment_paused ? (
+                          <>
+                            <br />
+                            <Badge tone="warn">
+                              {t("history.backtests.experimentPaused")}
+                            </Badge>
+                          </>
+                        ) : null}
+                      </td>
+                      <td>
                         <Badge tone={TONE[item.run.status]}>
                           {item.run.status}
                         </Badge>
                         <br />
                         {Math.round(item.run.progress * 100)}%
-                        {item.run.error ? (
-                          <span className="data-list-page__error">
-                            {item.run.error}
-                          </span>
-                        ) : null}
+                        <BacktestRunFailure
+                          run={item.run}
+                          className="data-list-page__error"
+                          announce={false}
+                        />
                       </td>
                       <td>
                         <StrategySource summary={item} />

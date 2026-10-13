@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -30,6 +31,10 @@ class FeedColumns:
     lows: Sequence[float]
     closes: Sequence[float]
     volumes: Sequence[int]
+    # 행별 유동성 캡 기준 거래량(`Bar.liquidity_volume`). None 이면 모든 행이 세션 거래량을 쓴다.
+    liquidity_volumes: Sequence[int] | None = None
+    # 행별 √ 충격 척도(`Bar.impact_scale`). None 이면 모든 행이 0 이다.
+    impact_scales: Sequence[float] | None = None
 
 
 class DataFeed:
@@ -78,6 +83,8 @@ class DataFeed:
         lows: Sequence[float],
         closes: Sequence[float],
         volumes: Sequence[int],
+        liquidity_volumes: Sequence[int] | None = None,
+        impact_scales: Sequence[float] | None = None,
     ) -> DataFeed:
         """이미 세션순으로 묶인 열에서 feed를 만든다 (`Bar` 객체 생성 없음).
 
@@ -91,6 +98,8 @@ class DataFeed:
             offsets: 세션별 행 구간 경계. 길이는 `len(sessions) + 1`, 첫 값은 0.
             instrument_ids: 행별 `instruments` 인덱스.
             opens/highs/lows/closes/volumes: 행별 시가·고가·저가·종가·거래량.
+            liquidity_volumes: 행별 유동성 캡 기준 거래량(0 이상). None 이면 세션 거래량을 쓴다.
+            impact_scales: 행별 √ 충격 척도(유한한 0 이상). None 이면 충격 0 이다.
 
         Returns:
             열을 그대로 보관하고 스냅샷을 요청 시 만드는 DataFeed.
@@ -107,6 +116,20 @@ class DataFeed:
                 "feed column lengths must match — "
                 f"instrument_ids={rows} opens={lengths[0]} highs={lengths[1]} "
                 f"lows={lengths[2]} closes={lengths[3]} volumes={lengths[4]}"
+            )
+        if liquidity_volumes is not None and (
+            len(liquidity_volumes) != rows or min(liquidity_volumes, default=0) < 0
+        ):
+            raise ValueError(
+                "feed liquidity volumes must be one non-negative value per row — "
+                f"rows={rows} liquidity_volumes={len(liquidity_volumes)}"
+            )
+        if impact_scales is not None and (
+            len(impact_scales) != rows or not all(0 <= scale < math.inf for scale in impact_scales)
+        ):
+            raise ValueError(
+                "feed impact scales must be one finite non-negative value per row — "
+                f"rows={rows} impact_scales={len(impact_scales)}"
             )
         if len(offsets) != len(sessions) + 1:
             raise ValueError(
@@ -184,6 +207,8 @@ class DataFeed:
             lows=lows,
             closes=closes,
             volumes=volumes,
+            liquidity_volumes=liquidity_volumes,
+            impact_scales=impact_scales,
         )
         feed._snapshots = [None] * len(sessions)
         return feed
@@ -247,6 +272,8 @@ class DataFeed:
         lows = columns.lows
         closes = columns.closes
         volumes = columns.volumes
+        liquidity_volumes = columns.liquidity_volumes
+        impact_scales = columns.impact_scales
         return MarketSnapshot(
             ts=ts,
             bars=tuple(
@@ -258,6 +285,8 @@ class DataFeed:
                     low=lows[row],
                     close=closes[row],
                     volume=volumes[row],
+                    liquidity_volume=None if liquidity_volumes is None else liquidity_volumes[row],
+                    impact_scale=None if impact_scales is None else impact_scales[row],
                 )
                 for row in range(columns.offsets[index], columns.offsets[index + 1])
             ),
@@ -273,6 +302,13 @@ class DataFeed:
         lows: list[float] = []
         closes: list[float] = []
         volumes: list[int] = []
+        # 기준 거래량이 있는 bar 가 하나라도 있을 때만 열을 싣고, 없는 bar 는 세션 거래량으로 채운다
+        # (`Bar.cap_volume`). 하나도 없으면 열은 None 이다 — "None = 세션 거래량" 한 뜻으로 둔다.
+        liquidity_volumes: list[int] = []
+        has_liquidity = False
+        # 충격 척도도 같은 규칙이다 — 없는 bar 는 0 으로 채우고, 하나도 없으면 열은 None 이다.
+        impact_scales: list[float] = []
+        has_impact = False
         for index in range(len(self._sessions)):
             for bar in self.snapshot_at(index).bars:
                 instrument_id = registry.get(bar.instrument)
@@ -285,6 +321,10 @@ class DataFeed:
                 lows.append(bar.low)
                 closes.append(bar.close)
                 volumes.append(bar.volume)
+                liquidity_volumes.append(bar.cap_volume)
+                has_liquidity = has_liquidity or bar.liquidity_volume is not None
+                impact_scales.append(bar.impact_scale or 0.0)
+                has_impact = has_impact or bar.impact_scale is not None
             offsets.append(len(instrument_ids))
         return FeedColumns(
             instruments=tuple(registry),
@@ -295,4 +335,6 @@ class DataFeed:
             lows=lows,
             closes=closes,
             volumes=volumes,
+            liquidity_volumes=liquidity_volumes if has_liquidity else None,
+            impact_scales=impact_scales if has_impact else None,
         )

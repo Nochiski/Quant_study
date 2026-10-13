@@ -27,6 +27,7 @@ from typing import Protocol
 
 import pytest
 
+from strategy_workbench.adapters.outbound.equity_mock._fixture import build_demo_fixture
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
@@ -303,7 +304,26 @@ def test_raw_port_and_research_panel_agree_cell_by_cell(adapter: ContractAdapter
         assert field.kind is cells[key].kind, key
 
 
-def test_raw_port_preserves_every_equity_cell_kind_without_collapsing_zero_and_missing() -> None:
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+def test_cells_the_ledger_masked_are_masked_and_carry_no_value(adapter: ContractAdapter) -> None:
+    """원장이 값이 틀려 가린 셀(무상증자 척도 창의 신용잔고, #249)은 어느 어댑터에서나 값 없는
+    MASKED 다. 모르는 값(MISSING)과 종류가 달라야 실행 결측 정책이 채우지 않는다(#298).
+    """
+    field_id = "credit.margin_balance"
+    profile = next(p for p in adapter.list_fields() if p.field_id == field_id)
+    assert CellKind.MASKED in profile.coverage.supported_cell_kinds
+    raw = adapter.load_raw_observations(_query(adapter, fields=(field_id,)))
+    masked = [
+        (item.security_id, field)
+        for item in raw.observations
+        for field in item.fields
+        if field.kind is CellKind.MASKED
+    ]
+    assert masked, "창 안에 원장이 가린 셀이 하나는 있어야 한다(두 픽스처 모두 000660)"
+    assert all("000660" in security_id and field.value is None for security_id, field in masked)
+
+
+def test_raw_port_keeps_zero_missing_collection_and_coverage_kinds_apart() -> None:
     adapter = MockEquityDataAdapter.demo()
     raw = adapter.load_raw_observations(
         _query(
@@ -319,14 +339,9 @@ def test_raw_port_preserves_every_equity_cell_kind_without_collapsing_zero_and_m
 
     actual_zero = cells[(date(2024, 1, 3), "sec-005930-1")]
     missing = cells[(date(2024, 1, 3), "sec-000660-1")]
-    omitted_zero = cells[(date(2024, 1, 4), "sec-005930-1")]
     not_collected = cells[(date(2024, 1, 4), "sec-000660-1")]
     coverage_gap = cells[(date(2024, 1, 8), "sec-035420-1")]
     assert (actual_zero.value, actual_zero.kind) == (0.0, CellKind.OBSERVED)
-    assert (omitted_zero.value, omitted_zero.kind) == (
-        0.0,
-        CellKind.SOURCE_OMITTED_ZERO,
-    )
     assert (missing.value, missing.kind) == (None, CellKind.MISSING)
     assert (not_collected.value, not_collected.kind) == (None, CellKind.NOT_COLLECTED)
     assert (coverage_gap.value, coverage_gap.kind) == (None, CellKind.COVERAGE_GAP)
@@ -393,13 +408,7 @@ def test_mock_lag_shifts_availability_by_whole_sessions() -> None:
         else profile
         for profile in demo.list_fields()
     )
-    lagged = MockEquityDataAdapter(
-        snapshot=demo.snapshot(),
-        sessions=demo._sessions,  # pyright: ignore[reportPrivateUsage]  # reason: test fixture wiring
-        profiles=profiles,
-        memberships=demo._memberships,  # pyright: ignore[reportPrivateUsage]  # reason: test fixture wiring
-        observations=demo._observations,  # pyright: ignore[reportPrivateUsage]  # reason: test fixture wiring
-    )
+    lagged = MockEquityDataAdapter(replace(build_demo_fixture(), profiles=profiles))
     query = _query(demo, fields=("price.close",), history=1)
 
     plain = _index(demo.load_raw_observations(query))

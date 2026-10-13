@@ -79,7 +79,7 @@ const catalogField = (
   fieldId: string,
   datasetId: string,
   label: string,
-  frequency: string,
+  frequency: DatasetFieldProfile["frequency"],
 ): DatasetFieldProfile => ({
   field_id: fieldId,
   dataset_id: datasetId,

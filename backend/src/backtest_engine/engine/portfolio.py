@@ -48,7 +48,7 @@ class Portfolio:
         initial_cash: 시작 현금.
         allow_short: True면 음수 수량(공매도)을 허용한다 (SHORT_SELLING 선언 전략).
         allow_margin: True면 음수 현금을 허용한다 (MARGIN 선언 전략). 여력 상한은 브로커가
-            먼저 자르고, equity < 0 검사는 세션 종료에 엔진(EquityWipedOut)이 한다.
+            먼저 자르고, equity <= 0 검사는 세션 종료에 엔진(EquityWipedOut)이 한다.
     """
 
     def __init__(

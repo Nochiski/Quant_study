@@ -5,7 +5,7 @@
 한쪽 트리거가 다른 쪽을 막는다.
 
 `application_id`를 따로 두어 남의 SQLite 파일을 이 스키마로 덮어쓰지 않는다. 빈 파일만 claim하고,
-다른 application id를 만나면 거부한다(`strategy_sqlite/_schema.py`와 같은 방어).
+다른 application id를 만나면 거부한다. claim·판본 대조 규칙은 공용 `sqlite_store`가 소유한다.
 
 ## 버전
 
@@ -28,7 +28,7 @@ v3은 `chat_sessions`의 CHECK를 바꾼다. SQLite에는 CHECK를 바꾸는 `AL
 
 - 외래 키를 끈 채로 돈다. 켜 두면 옛 표를 지울 때 자식 행 때문에 RESTRICT가 막는다.
   `PRAGMA foreign_keys`는 트랜잭션 안에서 바뀌지 않으므로 `migrate_schema`가 BEGIN 전에 끄고 끝나면
-  되돌린다. 커밋 전에 `foreign_key_check`로 고아 행이 없는지 본다.
+  되돌린다. 커밋 전에 `foreign_key_check`로 고아 행이 없는지 본다(`_verify_no_orphans`).
 - 옛 표 이름을 바꿀 때 `legacy_alter_table`을 켠다. 켜지 않으면 SQLite 3.26+가 자식 표의
   `REFERENCES chat_sessions`까지 새 이름으로 고쳐 써서 자식 DDL이 선언과 글자 단위로 달라진다.
 """
@@ -36,6 +36,12 @@ v3은 `chat_sessions`의 CHECK를 바꾼다. SQLite에는 CHECK를 바꾸는 `AL
 from __future__ import annotations
 
 import sqlite3
+
+from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
+    SchemaContract,
+    SchemaUpgrade,
+    ensure_schema,
+)
 
 from ._errors import AssistantStorageError
 from ._upgrade_v2 import copy_messages_with_turn_ids, rewrite_v1_search_budget_notices
@@ -262,65 +268,38 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
     외래 키를 끈 채로 돈다(모듈 docstring v3). in-memory DB는 이 연결을 계속 쓰므로 어떤 경로로
     끝나든 원래 값으로 되돌린다.
     """
-    foreign_keys = _pragma_int(connection, "foreign_keys")
+    row = connection.execute("PRAGMA foreign_keys").fetchone()
+    foreign_keys = bool(row[0]) if row is not None else False
     connection.execute("PRAGMA foreign_keys = OFF")
     try:
-        _migrate(connection)
+        ensure_schema(
+            connection,
+            SchemaContract(
+                label="assistant",
+                application_id=_APPLICATION_ID,
+                version=SCHEMA_VERSION,
+                objects=_CURRENT_SCHEMA_OBJECTS,
+                error=AssistantStorageError,
+                upgrades=(
+                    SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _upgrade_v1_to_v2),
+                    SchemaUpgrade(2, V2_SCHEMA_OBJECTS, _upgrade_v2_to_v3),
+                ),
+                verify=_verify_no_orphans,
+            ),
+        )
     finally:
         connection.execute(f"PRAGMA foreign_keys = {'ON' if foreign_keys else 'OFF'}")
 
 
-def _migrate(connection: sqlite3.Connection) -> None:
-    try:
-        connection.execute("BEGIN IMMEDIATE")
-        application_id = _pragma_int(connection, "application_id")
-        version = _pragma_int(connection, "user_version")
-        footprint = _schema_footprint(connection)
-
-        if application_id == 0:
-            if version != 0 or footprint:
-                raise AssistantStorageError(
-                    "refusing to claim a non-empty SQLite database without this "
-                    f"application id — user_version={version} objects={footprint}"
-                )
-            for _object_type, _name, statement in _CURRENT_SCHEMA_OBJECTS:
-                connection.execute(statement)
-            connection.execute(f"PRAGMA application_id = {_APPLICATION_ID}")
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            version = SCHEMA_VERSION
-        elif application_id != _APPLICATION_ID:
-            raise AssistantStorageError(
-                "SQLite file belongs to another application — "
-                f"application_id={application_id} expected={_APPLICATION_ID}"
-            )
-
-        if version == 1:
-            _validate_manifest(connection, V1_SCHEMA_OBJECTS, version=1)
-            _upgrade_v1_to_v2(connection)
-            version = 2
-        if version == 2:
-            _validate_manifest(connection, V2_SCHEMA_OBJECTS, version=2)
-            _upgrade_v2_to_v3(connection)
-            version = 3
-        if version != SCHEMA_VERSION:
-            raise AssistantStorageError(
-                "SQLite assistant schema version is not supported — "
-                f"stored={version} supported={SCHEMA_VERSION}"
-            )
-        _validate_manifest(connection, _CURRENT_SCHEMA_OBJECTS, version=SCHEMA_VERSION)
-        orphans = connection.execute("PRAGMA foreign_key_check").fetchall()
-        if orphans:
-            raise AssistantStorageError(
-                "SQLite assistant schema has rows whose parent is missing — "
-                f"total={len(orphans)} {_describe_orphans(connection, orphans)}; the file was left "
-                "unchanged. Back it up, then delete those child rows (or move the file aside to "
-                "start with an empty assistant history) and restart"
-            )
-        connection.commit()
-    except Exception:
-        if connection.in_transaction:
-            connection.rollback()
-        raise
+def _verify_no_orphans(connection: sqlite3.Connection) -> None:
+    orphans = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if orphans:
+        raise AssistantStorageError(
+            "SQLite assistant schema has rows whose parent is missing — "
+            f"total={len(orphans)} {_describe_orphans(connection, orphans)}; the file was left "
+            "unchanged. Back it up, then delete those child rows (or move the file aside to "
+            "start with an empty assistant history) and restart"
+        )
 
 
 def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
@@ -336,7 +315,6 @@ def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
     copy_messages_with_turn_ids(connection, source_table="chat_messages_v1")
     connection.execute("DROP TABLE chat_messages_v1")
     rewrite_v1_search_budget_notices(connection)
-    connection.execute("PRAGMA user_version = 2")
 
 
 def _upgrade_v2_to_v3(connection: sqlite3.Connection) -> None:
@@ -367,7 +345,6 @@ def _upgrade_v2_to_v3(connection: sqlite3.Connection) -> None:
     for object_type, name, statement in V3_SCHEMA_OBJECTS:
         if (object_type, name) == ("index", "chat_sessions_order"):
             connection.execute(statement)
-    connection.execute("PRAGMA user_version = 3")
 
 
 # 고아 행을 표마다 몇 개까지 적을지. 전부 적으면 메시지가 수천 줄이 될 수 있다.
@@ -410,63 +387,3 @@ def _describe_orphans(connection: sqlite3.Connection, violations: list[sqlite3.R
         columns = ", ".join(f"{frm}->{parent}.{to}" for frm, to in links)
         parts.append(f"table={table} foreign_key=({columns}) orphan_keys={described}")
     return " | ".join(parts)
-
-
-def _pragma_int(connection: sqlite3.Connection, name: str) -> int:
-    row = connection.execute(f"PRAGMA {name}").fetchone()
-    if row is None or not isinstance(row[0], int):  # pragma: no cover - SQLite 불변식
-        raise AssistantStorageError(f"SQLite PRAGMA {name} returned an invalid value")
-    return row[0]
-
-
-def _schema_footprint(connection: sqlite3.Connection) -> tuple[tuple[str, str], ...]:
-    """파일에 남아 있는 모든 스키마 객체. 이게 비어 있을 때만 claim한다."""
-    return tuple((object_type, name) for (object_type, name), _sql in _objects(connection).items())
-
-
-def _objects(connection: sqlite3.Connection) -> dict[tuple[str, str], str | None]:
-    rows = connection.execute(
-        """
-        SELECT type, name, sql
-        FROM sqlite_schema
-        ORDER BY type COLLATE BINARY, name COLLATE BINARY
-        """
-    ).fetchall()
-    objects: dict[tuple[str, str], str | None] = {}
-    for object_type, name, sql in rows:
-        if not isinstance(object_type, str) or not isinstance(name, str):
-            raise AssistantStorageError(
-                "SQLite assistant schema contains an invalid object identity"
-            )
-        if sql is not None and not isinstance(sql, str):  # pragma: no cover - SQLite 불변식
-            raise AssistantStorageError(
-                "SQLite assistant schema contains an object with invalid SQL"
-            )
-        objects[(object_type, name)] = None if sql is None else sql.strip()
-    return objects
-
-
-def _validate_manifest(
-    connection: sqlite3.Connection,
-    manifest: tuple[tuple[str, str, str], ...],
-    *,
-    version: int,
-) -> None:
-    """저장된 DDL이 이 버전의 선언과 글자 단위로 같은지 본다.
-
-    CHECK 제약과 부분 유니크 인덱스가 이 어댑터의 불변식(활성 하나, sequence 단조)을 집행하므로,
-    누가 손으로 완화한 파일을 그대로 열면 불변식이 조용히 사라진다.
-    """
-    expected = {(object_type, name): statement.strip() for object_type, name, statement in manifest}
-    actual = _objects(connection)
-    if actual == expected:
-        return
-    missing = sorted(expected.keys() - actual.keys())
-    unexpected = sorted(actual.keys() - expected.keys())
-    incompatible = sorted(
-        key for key in actual.keys() & expected.keys() if actual[key] != expected[key]
-    )
-    raise AssistantStorageError(
-        f"SQLite assistant schema does not match version {version} — "
-        f"missing={missing} unexpected={unexpected} incompatible={incompatible}"
-    )

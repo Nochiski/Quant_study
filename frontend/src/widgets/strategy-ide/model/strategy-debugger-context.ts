@@ -111,8 +111,6 @@ export const buildStrategyDebuggerAvailability = (
       expectedSnapshotId: plans.expectedDataSnapshotId,
       expectedRegistryVersion: plans.expectedRegistryVersion,
       environment,
-      start: environment.start,
-      end: environment.end,
       factors,
     },
   };

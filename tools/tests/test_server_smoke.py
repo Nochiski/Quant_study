@@ -46,6 +46,9 @@ class RootServerSmokeTest(unittest.TestCase):
         environment["STRATEGY_WORKBENCH_DB_PATH"] = str(
             Path(runtime_directory.name) / "strategy-revisions.sqlite3"
         )
+        environment["STRATEGY_WORKBENCH_RESEARCH_DB_PATH"] = str(
+            Path(runtime_directory.name) / "research.sqlite3"
+        )
         process = subprocess.Popen(
             [
                 "uv",

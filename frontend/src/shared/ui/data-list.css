@@ -3,7 +3,6 @@
   gap: var(--space-4);
   width: min(1180px, 100%);
   margin: 0 auto;
-  padding: var(--space-5);
 }
 
 .data-list-page__header {
@@ -124,13 +123,10 @@
   margin: 0;
 }
 
+/* 목록 줄 안의 실패 한 줄(`FailureNotice`). 색·글자 크기·줄바꿈은 `.ui-failure`가 준다. */
 .data-list-page__error {
-  display: block;
   max-width: 24rem;
   margin-block-start: var(--space-1);
-  color: var(--status-error);
-  font-size: var(--text-size-small);
-  overflow-wrap: anywhere;
 }
 
 .data-list-page__nested {
@@ -144,10 +140,6 @@
 }
 
 @media (max-width: 720px) {
-  .data-list-page {
-    padding: var(--space-3);
-  }
-
   .data-list-page__header {
     align-items: stretch;
     flex-direction: column;

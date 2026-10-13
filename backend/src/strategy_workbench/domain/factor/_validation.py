@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -80,6 +81,7 @@ FACTOR_GRAPH_CODES: frozenset[str] = frozenset(
         "factor.graph.branch_unit",
         "factor.graph.cycle",
         "factor.graph.duplicate_node",
+        "factor.graph.empty",
         "factor.graph.field_missing",
         "factor.graph.group_field_missing",
         "factor.graph.group_field_type",
@@ -105,6 +107,16 @@ def _issue(code: str, node_id: str | None, path: str, message: str) -> FactorVal
             f"strategy alias table: code={code!r} path={path!r} node_id={node_id!r}"
         )
     return FactorValidationIssue(code=code, node_id=node_id, path=path, message=message)
+
+
+def unavailable_field_message(field_id: str, reason: str) -> str:
+    """연결된 어댑터가 선언했지만 주지 않는 필드의 진단 문장(#316).
+
+    그래프 안(`factor.graph.field_missing`)과 밖(`strategy.field.missing`)이 같은 문장을 쓴다.
+    사유(원천을 뺀 `catalog_*` 사유와 조치 `CATALOG_REBUILD`, 원장에 없는 필드의 사유)는 어댑터가
+    완성한 문장을 그대로 싣고, 조치를 여기서 다시 적지 않는다.
+    """
+    return f"연결된 데이터가 이 필드를 주지 않습니다 — {reason}: field_id={field_id!r}"
 
 
 def node_dependencies(node: ExpressionNode) -> tuple[str, ...]:
@@ -134,7 +146,10 @@ def validate_factor_graph(
     fields: tuple[FieldMetadata, ...] = (),
     parameter_ids: tuple[str, ...] = (),
     require_field_metadata: bool = False,
+    unavailable_fields: Mapping[str, str] | None = None,
 ) -> FactorGraphValidation:
+    """`unavailable_fields` 는 어댑터가 선언했지만 주지 않는 필드 → 사유다. 없는 필드가 그 안에
+    있으면 진단이 "계약을 찾을 수 없다" 대신 그 사유(조치 포함)를 싣는다(#316)."""
     issues: list[FactorValidationIssue] = []
     nodes = {node.node_id: node for node in graph.nodes}
     # 중복 id를 쓴 자리마다(첫 자리는 빼고) 진단을 단다: 그래프 카드가 어느 노드를 고쳐야 하는지
@@ -153,7 +168,12 @@ def validate_factor_graph(
                 )
             )
         seen_node_ids.add(node.node_id)
-    if graph.output_node_id not in nodes:
+    if not graph.nodes:
+        # 노드가 없는 그래프("+ 팩터 추가"가 넣는 빈 레시피)는 출력을 잘못 가리킨 것이 아니라
+        # 아직 단계가 없는 것이다. 코드가 다르면 캔버스가 첫 단계 추가 안내를 코드로 고른다
+        # (P4-03 결정 4).
+        issues.append(_issue("factor.graph.empty", None, "nodes", "첫 단계를 추가하세요."))
+    elif graph.output_node_id not in nodes:
         issues.append(
             _issue(
                 "factor.graph.output_missing",
@@ -183,12 +203,15 @@ def validate_factor_graph(
             and (fields or require_field_metadata)
             and node.field_id not in field_by_id
         ):
+            reason = (unavailable_fields or {}).get(node.field_id)
             issues.append(
                 _issue(
                     "factor.graph.field_missing",
                     node.node_id,
                     path,
-                    f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}",
+                    f"필드 계약을 찾을 수 없습니다: field_id={node.field_id!r}"
+                    if reason is None
+                    else unavailable_field_message(node.field_id, reason),
                 )
             )
         elif isinstance(node, ParameterNode) and node.parameter_id not in known_parameters:

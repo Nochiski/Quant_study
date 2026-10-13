@@ -45,8 +45,8 @@
 --   2018-03-28 은 전 종목 credit 행이 없고(그 전후 거래일은 전부 있다) 2026-08-19·20 도 마찬가지다
 --   (P16: credit 백필 08-18 종료, 캘린더는 08-20). 유닛 창은 '요청 구간' 이라 그 날짜가 응답에
 --   들었는지까지는 말해 주지 않으므로, `src_omitted` 는 값을 단정할 근거가 못 된다.
---   0 의 의미는 `fill_kind.kind='src_omitted'` 가 나르고, 엔진 `CellKind.SOURCE_OMITTED_ZERO`
---   대응(FIELD_MAP §1)이 소비 시점에 0 으로 읽는다 — 값 축과 지식 축을 섞지 않는다.
+--   칸의 사유는 `fill_kind.kind='src_omitted'` 가 나르고, 소비층의 셀 종류는 FIELD_MAP §1
+--   「결측 어휘」가 원천별로 정한다(신용은 0 이 아니라 MISSING) — 값 축과 지식 축을 섞지 않는다.
 --   원장 일괄 결측 의심일(격자에 종목이 있는데 measured 가 0 인 날)은 EG3_credit_daily 기록형.
 --
 -- **판본 선택 = 최초 관측판**(결정 6-2, 검수 종합 H3). `stg_credit_daily` 는 append_only ·

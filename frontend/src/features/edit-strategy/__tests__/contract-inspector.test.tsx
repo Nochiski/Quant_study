@@ -583,4 +583,23 @@ describe("ContractInspector UI", () => {
     );
     expect(screen.getAllByText("field").length).toBeGreaterThanOrEqual(2);
   });
+
+  // #350(도메인 리뷰 A DR-A-11): 필드 계약 어휘는 backend 원문 대신 문구로 보인다.
+  it("names the field's frequency, value type and cell states in words", () => {
+    render(
+      <ContractInspector
+        source={source()}
+        selectedPointer="/factors/0/graph/nodes/0/field_id"
+        tree={TREE}
+        stale={false}
+      />,
+    );
+    const valueOf = (label: string) =>
+      screen.getByText(label, { selector: "dt" }).nextElementSibling
+        ?.textContent;
+
+    expect(valueOf("빈도")).toBe("일별");
+    expect(valueOf("값 타입")).toBe("가격");
+    expect(valueOf("셀 상태")).toBe("관측값, 결측");
+  });
 });

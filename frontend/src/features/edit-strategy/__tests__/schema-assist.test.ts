@@ -348,6 +348,8 @@ describe("schema-driven completion", () => {
     });
     expect(field!.options.map((o) => o.label)).toEqual(["close", "volume"]);
     expect(field!.options[0].detail).toBe("종가");
+    // 빈도는 backend 어휘 원문이 아니라 문구다(#350).
+    expect(field!.options[0].info).toBe("수정 종가 (KRW, 일별)");
     const node = await source({
       text: YAML,
       offset: offsetOf(YAML, "          input_node_id: "),

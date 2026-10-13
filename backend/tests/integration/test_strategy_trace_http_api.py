@@ -10,6 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._execution_error_contract import (
+    Portfolio422Response,
+)
 from strategy_workbench.adapters.inbound.http_api._trace_contract import (
     Trace422Response,
     TraceStrategyNotFoundResponse,
@@ -144,6 +147,42 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
         ) == pytest.approx(row["composite_score"])
         assert row["previous_weight"] is None
         assert row["estimated_order_delta"] is None
+
+
+def test_a_summary_only_trace_returns_the_frame_counts_and_its_targets_by_rank() -> None:
+    """기준일 미리보기(lang2 P4-03)는 종목 없이 trace 를 불러 그날의 수와 선정 종목을 받는다.
+
+    요약은 종목을 골랐을 때와 같고, 선정 종목은 tape 의 그 프레임 targets 전부를 순위 순으로 싣는다.
+    """
+    client = TestClient(build_http_app())
+    spec, request = _inline_request(client)
+    full = client.post("/api/v1/strategies/debug/trace", json=request).json()
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={**request, "security_ids": [], "node_ids": [], "include_raw": False},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["summary"] == full["summary"]
+    assert (payload["trace"]["rows"], payload["raw"]) == ([], [])
+    assert (payload["target"]["targets"], payload["target"]["candidates"]) == ([], [])
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment()}
+    ).json()["tape"]
+    frame = next(item for item in preview["frames"] if item["signal_as_of"] == request["as_of"])
+    assert payload["summary"]["signal_as_of"] == frame["signal_as_of"]
+    rows = payload["summary"]["targets"]
+    assert [row["position"] for row in rows] == sorted(
+        frame["targets"], key=lambda item: (item["rank"], item["security_id"])
+    )
+    # 이름은 실행 설정의 유니버스에서 backend 가 붙인다(mock fixture 의 종목 셋).
+    names = {"sec-005930-1": "삼성전자", "sec-000660-1": "SK하이닉스", "sec-035420-1": "NAVER"}
+    assert [row["security"]["name"] for row in rows] == [
+        names[row["position"]["security_id"]] for row in rows
+    ]
+    assert payload["summary"]["counts"]["universe"] == len(frame["candidates"])
 
 
 @pytest.mark.parametrize("end", ["2026-09-04", "2026-09-05"])
@@ -356,10 +395,6 @@ def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() ->
         raw_by_key[("2024-01-03", "sec-000660-1")]["kind"],
     ) == (None, "missing")
     assert (
-        raw_by_key[("2024-01-04", "sec-005930-1")]["value"],
-        raw_by_key[("2024-01-04", "sec-005930-1")]["kind"],
-    ) == (0.0, "source_omitted_zero")
-    assert (
         raw_by_key[("2024-01-04", "sec-000660-1")]["value"],
         raw_by_key[("2024-01-04", "sec-000660-1")]["kind"],
     ) == (None, "not_collected")
@@ -367,6 +402,58 @@ def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() ->
         raw_by_key[("2024-01-08", "sec-035420-1")]["value"],
         raw_by_key[("2024-01-08", "sec-035420-1")]["kind"],
     ) == (None, "coverage_gap")
+
+
+def test_trace_reports_cells_across_a_ledger_masked_cell_as_masked() -> None:
+    """#350: mock 의 000660 01-08 신용잔고는 원장이 가린 셀이다(`MOCK_MASKED_CREDIT`). 신용 랙이
+    3세션이라 01-11 에 보이고, 그 셀을 품는 2세션 차이 창(01-11·01-12)도 가린 칸을 건넌다. 추적은
+    이 칸들을 입력 결측이 아니라 `masked` 로 싣는다 — 판정은 평가기가 한다."""
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
+    factor = spec["factors"][0]
+    factor["graph"] = {
+        "nodes": [
+            {"node_id": "balance", "field_id": "credit.margin_balance", "kind": "field"},
+            {
+                "node_id": "change",
+                "operator": "delta",
+                "input_node_id": "balance",
+                "window": 2,
+                "kind": "time_series",
+            },
+        ],
+        "output_node_id": "change",
+    }
+    base = {
+        "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "environment": _environment(start="2024-01-03", end="2024-01-12"),
+        "factor_id": factor["factor_id"],
+        "security_ids": ["sec-000660-1"],
+        "node_ids": ["balance", "change"],
+        "include_raw": True,
+    }
+    statuses: dict[tuple[str, str], str] = {}
+    raw_kinds: dict[str, str] = {}
+    for as_of in ("2024-01-10", "2024-01-11", "2024-01-12"):
+        response = client.post("/api/v1/strategies/debug/trace", json={**base, "as_of": as_of})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        for row in body["trace"]["rows"]:
+            statuses[(row["node_id"], as_of)] = row["status"]
+        raw_kinds[as_of] = next(
+            row["kind"] for row in body["raw"] if row["field_id"] == "credit.margin_balance"
+        )
+
+    assert statuses == {
+        ("balance", "2024-01-10"): "ok",
+        ("change", "2024-01-10"): "ok",
+        ("balance", "2024-01-11"): "masked",
+        ("change", "2024-01-11"): "masked",
+        ("balance", "2024-01-12"): "ok",
+        ("change", "2024-01-12"): "masked",
+    }
+    assert raw_kinds == {"2024-01-10": "observed", "2024-01-11": "masked", "2024-01-12": "observed"}
 
 
 def test_saved_revision_trace_is_hash_guarded_and_errors_are_structured() -> None:
@@ -740,7 +827,7 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert {
         key: properties["security_ids"][key] for key in ("minItems", "maxItems", "uniqueItems")
     } == {
-        "minItems": 1,
+        "minItems": 0,
         "maxItems": 100,
         "uniqueItems": True,
     }
@@ -767,6 +854,15 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert detail["discriminator"]["propertyName"] == "code"
     assert "trace.capability.unsupported" in detail["discriminator"]["mapping"]
     assert "portfolio.raw_observation.invalid" in detail["discriminator"]["mapping"]
+    # 실행 설정 거절·본문 검증 실패는 백테스트 시작과 같은 코드다(#351). 배열 422 는 없다.
+    assert {
+        "backtest.run.field_invalid",
+        "backtest.run.environment_required",
+        "backtest.run.research_window_violation",
+    } <= set(detail["discriminator"]["mapping"])
+    assert responses["422"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "TraceUnprocessableResponse"
+    )
     TypeAdapter(Trace422Response).validate_python(
         {
             "detail": {
@@ -778,24 +874,136 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     )
 
 
-def test_a_missing_environment_is_coded_on_trace_like_preview() -> None:
-    """P2-02 2차 리뷰 P3: trace 도 preview 와 같은 코드·details 구조로 거절한다.
+def _run_requests(client: TestClient, environment: dict[str, Any] | None) -> tuple[Any, Any, Any]:
+    """같은 실행 설정의 미리보기·추적·백테스트 시작 응답. `None` 이면 실행 설정을 싣지 않는다."""
+    spec, request = _inline_request(client)
+    request.pop("environment")
+    body = {} if environment is None else {"environment": environment}
+    return (
+        client.post("/api/v1/portfolio/preview", json={"spec": spec, **body}),
+        client.post("/api/v1/strategies/debug/trace", json={**request, **body}),
+        client.post("/api/v1/backtests", json={"strategy": spec, "core": "python", **body}),
+    )
 
-    trace 만 사유를 메시지 문자열로 납작하게 만들면 프론트가 코드로 분기하려고 본문을 파싱해야
-    한다. 1.2 에서 그 사유는 "실행 설정이 없다"다(P2-03).
+
+def test_a_missing_environment_is_coded_on_preview_and_trace_like_a_backtest_start() -> None:
+    """#351: 실행 설정이 없는 미리보기·추적은 백테스트 시작과 같은 코드·detail 로 거절한다.
+
+    추적만 `portfolio.strategy.invalid` 안에 실으면 화면이 그 거절을 "잠시 뒤 다시 추적하세요"로
+    보이고 서버 사유도 잃는다(도메인 리뷰 C C-P2-3). 1.2 에서 그 사유는 "실행 설정이 없다"다(P2-03).
     """
+    responses = _run_requests(TestClient(build_http_app()), None)
+
+    for response in responses:
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "backtest.run.environment_required"
+        assert "run_environment.required" in detail["message"]
+    TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
+    TypeAdapter(Trace422Response).validate_python(responses[1].json())
+
+
+def test_measuring_the_sealed_window_is_coded_on_preview_and_trace_like_a_backtest_start() -> None:
+    """spec D1·#351: 연구 하한 전날(2020-01-01)부터 측정하면 세 실행 경로가 같은 detail 로 거절한다.
+
+    화면 문장의 날짜 자리표시자를 채울 봉인 구간·연구 하한을 detail 이 싣는다 — 추적 화면도 백테스트
+    시작과 같은 번역을 쓴다.
+    """
+    responses = _run_requests(TestClient(build_http_app()), _environment(start="2020-01-01"))
+
+    for response in responses:
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert {
+            key: detail[key] for key in ("code", "sealed_start", "sealed_end", "research_start")
+        } == {
+            "code": "backtest.run.research_window_violation",
+            "sealed_start": "2016-01-01",
+            "sealed_end": "2019-12-31",
+            "research_start": "2020-01-02",
+        }
+        assert "expected=start>=2020-01-02 got=start=2020-01-01" in detail["message"]
+    TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
+    TypeAdapter(Trace422Response).validate_python(responses[1].json())
+
+
+def test_a_run_environment_field_rule_is_coded_on_preview_and_trace_like_a_backtest_start() -> None:
+    """#351: 실행 설정 칸 규칙 위반(세율 방식 `custom` 인데 세율 없음)도 세 실행 경로가 같은
+    `backtest.run.field_invalid` 로 거절하고 칸 경로를 싣는다 — FastAPI 기본 배열 422 가 아니다."""
+    responses = _run_requests(TestClient(build_http_app()), _environment(sell_tax="custom"))
+
+    for response in responses:
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert (detail["code"], detail["field"]) == (
+            "backtest.run.field_invalid",
+            "environment.sell_tax_bps",
+        )
+    TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
+    TypeAdapter(Trace422Response).validate_python(responses[1].json())
+
+
+def test_factor_preview_uses_all_evaluated_values_not_selected_targets() -> None:
+    """선정 수를 하나로 줄여도 팩터 유효수와 상위값은 전체 모집단을 보여준다."""
     client = TestClient(build_http_app())
     spec, request = _inline_request(client)
-    request = {key: value for key, value in request.items() if key != "environment"}
+    spec["portfolio"]["selection_count"] = 1
+    request.update(security_ids=[], node_ids=[], include_raw=False)
+    response = client.post("/api/v1/strategies/debug/trace", json=request)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    preview = payload["factor_preview"]
+    assert preview["valid_count"] == 3
+    assert preview["missing_count"] == 0
+    assert len(preview["top"]) == 3
+    assert len(payload["summary"]["targets"]) == 1
+    ids = [row["security_id"] for row in preview["top"]]
+    detailed = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            **request,
+            "security_ids": ids,
+            "node_ids": [spec["factors"][0]["graph"]["output_node_id"]],
+        },
+    ).json()
+    values = {row["security_id"]: row["value"] for row in detailed["trace"]["rows"]}
+    assert [row["value"] for row in preview["top"]] == sorted(values.values(), reverse=True)
+    assert all(row["security"]["name"] for row in preview["top"])
+    assert detailed["factor_preview"] == preview
 
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
-    trace = client.post("/api/v1/strategies/debug/trace", json=request)
 
-    assert (preview.status_code, trace.status_code) == (422, 422), (preview.text, trace.text)
-    codes = [response.json()["detail"]["code"] for response in (preview, trace)]
-    assert codes == ["portfolio.strategy.invalid", "portfolio.strategy.invalid"]
-    issue_codes = [
-        [issue["code"] for issue in response.json()["detail"]["validation"]["issues"]]
-        for response in (preview, trace)
-    ]
-    assert issue_codes == [["run_environment.required"]] * 2
+@pytest.mark.parametrize("missing,valid,absent", [("drop", 1, 1), ("zero", 2, 0)])
+def test_factor_preview_uses_run_missing_policy_before_portfolio_filters(
+    missing: str, valid: int, absent: int
+) -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["portfolio"].update(rebalance="every_n_sessions", rebalance_every_n_sessions=1)
+    spec["eligibility"]["rules"] = [{"field_id": "price.close", "operator": "lt", "value": 0}]
+    factor = spec["factors"][0]
+    factor["direction"] = "low"
+    factor["graph"] = {
+        "nodes": [{"node_id": "flow", "field_id": "flow.foreign_net_buy", "kind": "field"}],
+        "output_node_id": "flow",
+    }
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "environment": _environment(start="2024-01-03", end="2024-01-09", missing=missing),
+            "as_of": "2024-01-03",
+            "factor_id": factor["factor_id"],
+            "security_ids": [],
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    preview = payload["factor_preview"]
+    assert (preview["valid_count"], preview["missing_count"], preview["missing"]) == (
+        valid,
+        absent,
+        missing,
+    )
+    assert len(preview["top"]) == valid
+    assert all(row["value"] == 0 for row in preview["top"])
+    assert payload["summary"]["targets"] == []

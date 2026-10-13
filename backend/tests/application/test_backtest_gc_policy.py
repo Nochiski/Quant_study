@@ -8,7 +8,6 @@ GC 임계값은 프로세스 전역이라 HTTP 요청과 공유된다. 그래서
 from __future__ import annotations
 
 import gc
-import threading
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date
@@ -25,11 +24,16 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.backtest_run._gc_policy import (
+    FULL_COLLECTION_INTERVAL_SECONDS,
     SUSPENDED_FULL_COLLECTION_THRESHOLD,
+    _FullCollectionSuspension,
     full_collections_suspended,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -59,7 +63,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     RebalanceFrequency,
     StrategySpec,
 )
-from tests.backtest_run_wait import wait_for_terminal_run
+from tests.backtest_run_wait import join_run_thread, wait_for_terminal_run
 
 # 기본값(700, 10, 10)과 다른 값으로 시작해, 복원이 "기본값으로 되돌리기"가 아니라 "들어가기 전
 # 값으로 되돌리기"임을 구분한다.
@@ -79,6 +83,26 @@ def _known_threshold() -> Iterator[None]:
 
 def _suspended() -> tuple[int, int, int]:
     return (ORIGINAL_THRESHOLD[0], ORIGINAL_THRESHOLD[1], SUSPENDED_FULL_COLLECTION_THRESHOLD)
+
+
+def test_runs_that_always_overlap_still_collect_fully_once_per_interval() -> None:
+    """V3-04: 대기열이 늘 차 있어 구간이 끝나지 않아도 간격마다 전체 수집을 한 번 돈다."""
+    now = [0.0]
+    collected: list[float] = []
+    suspension = _FullCollectionSuspension(
+        clock=lambda: now[0], collect=lambda: collected.append(now[0])
+    )
+
+    suspension.enter()
+    suspension.enter()
+    suspension.exit()  # 겹친 채 끝났지만 간격 전이다
+    now[0] = FULL_COLLECTION_INTERVAL_SECONDS
+    suspension.enter()
+    suspension.exit()  # 간격이 지나 한 번 돈다
+    suspension.exit()  # 마지막 run 은 임계값을 되돌린다
+
+    assert collected == [FULL_COLLECTION_INTERVAL_SECONDS]
+    assert gc.get_threshold() == ORIGINAL_THRESHOLD
 
 
 def test_scope_defers_only_full_collections_and_restores_the_previous_threshold() -> None:
@@ -203,6 +227,7 @@ def _runs(executor: _RecordingExecutor, tmp_path: Path, run_id: str) -> Backtest
         MockEquityDataAdapter.demo(),
         executor,
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
 
@@ -215,10 +240,7 @@ def _finish(runs: BacktestRunService, run_id: str) -> str:
     """
 
     state = wait_for_terminal_run(runs, run_id)
-    for thread in threading.enumerate():
-        if thread.name == f"backtest-{run_id}":
-            thread.join(timeout=10)
-            assert not thread.is_alive(), f"run thread did not exit — run_id={run_id}"
+    join_run_thread(run_id)
     return state.status.value
 
 

@@ -2,6 +2,7 @@ import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import {
+  failureReason,
   strategyWorkbenchApi,
   type FactorExplanation,
   type FactorGraphRequest,
@@ -45,7 +46,8 @@ export type ExecutionPlansState =
       actual: string | null;
     }
   | { status: "loading" }
-  | { status: "error"; message: string }
+  /** `reason` 은 접힌 서버 사유에 둘 원문(`failureReason`)이다. 본문은 화면이 번역한다. */
+  | { status: "error"; reason: string | null }
   | {
       status: "ready";
       expectedRegistryVersion: string;
@@ -315,13 +317,7 @@ export const useExecutionPlans = (
     if (prepared.status !== "prepared") return prepared;
     const failed = queries.find((query) => query.isError);
     if (failed !== undefined) {
-      return {
-        status: "error",
-        message:
-          failed.error instanceof Error
-            ? failed.error.message
-            : "factor explain request failed",
-      };
+      return { status: "error", reason: failureReason(failed.error) };
     }
     if (queries.some((query) => query.isPending)) return { status: "loading" };
     if (queries.some((query) => query.data === undefined))

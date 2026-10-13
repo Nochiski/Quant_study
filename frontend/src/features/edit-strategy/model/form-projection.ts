@@ -13,11 +13,12 @@ import {
   valueAtPointer,
   type ParsedSource,
 } from "../../../shared/lib/yaml12";
+import type { DatasetFieldProfile } from "../../../shared/api";
 import type { DocumentDiagnostic } from "./document-state";
 import {
   projectApplicability,
   type DefaultResolver,
-} from "./field-applicability";
+} from "../../../shared/api";
 import {
   resolveRef,
   schemaAt,
@@ -145,6 +146,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * (P3-02).
  */
 export const CATALOGS = ["equity-field", "universe"] as const;
+/**
+ * `x-catalog` 카탈로그 → 화면이 받은 항목 목록(이름 포함). 목록을 아직 못 받았거나 목록이 없는 카탈로그
+ * (universe)는 null. Form select 옵션과 파이프라인 요약의 필드 이름이 같은 목록을 읽는다.
+ */
+export const catalogProfiles = (
+  catalogs: { equityFields: readonly DatasetFieldProfile[] | null },
+  catalog: string,
+): readonly DatasetFieldProfile[] | null =>
+  catalog === "equity-field" ? catalogs.equityFields : null;
+
 /** Form이 후보 select를 아는 `x-reference` 네임스페이스. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
 export const NAMESPACES = ["node", "parameter", "factor"] as const;
 
@@ -318,7 +329,10 @@ const projectFields = (
 };
 
 /** 항목 스키마에서 `x-authoring-identity: true`인 속성 키(`$ref` 해소). 없으면 null. */
-const identityKeyOf = (root: JsonSchema, itemNode: JsonSchema): string | null => {
+export const identityKeyOf = (
+  root: JsonSchema,
+  itemNode: JsonSchema,
+): string | null => {
   const properties = isRecord(itemNode.properties) ? itemNode.properties : {};
   for (const [key, property] of Object.entries(properties)) {
     const node = isRecord(property) ? resolveRef(root, property) : null;

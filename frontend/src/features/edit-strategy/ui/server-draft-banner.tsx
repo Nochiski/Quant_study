@@ -1,5 +1,5 @@
 import { t } from "../../../shared/config";
-import { Button } from "../../../shared/ui";
+import { Button, FailureNotice } from "../../../shared/ui";
 import type { ServerDraftSync } from "../model/use-server-draft";
 import "./server-draft-banner.css";
 
@@ -35,11 +35,11 @@ export const ServerDraftBanner = ({ sync }: { sync: ServerDraftSync }) => {
   }
   if (sync.phase === "rejected") {
     return (
-      <section className="server-draft server-draft--conflict" role="alert">
-        <span>
-          {t("draft.server.rejected")}
-          {sync.errorMessage ? ` ${sync.errorMessage}` : ""}
-        </span>
+      <section className="server-draft server-draft--conflict">
+        <FailureNotice
+          message={t("draft.server.rejected")}
+          reason={sync.errorReason}
+        />
         <Button size="small" tone="ghost" onClick={sync.retry}>
           {t("draft.server.retry")}
         </Button>

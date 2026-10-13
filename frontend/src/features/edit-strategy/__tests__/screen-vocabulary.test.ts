@@ -36,7 +36,7 @@ const CATALOG = JSON.parse(
   }[];
 };
 
-/** 실행 설정 스키마(다른 산출물, P3-02). `strategy.field.run_environment.*` 키는 여기서 발행된다. */
+/** 실행 설정 스키마(다른 산출물, P3-02). `run_environment.field.*` 키는 여기서 발행된다. */
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Json;
@@ -194,17 +194,22 @@ describe("화면 어휘 커버리지", () => {
   it("스키마가 더는 발행하지 않는 화면 어휘 키가 사전에 남지 않는다", () => {
     // schema 1.2 에서 사라진 `data`·`execution`·`graph.missing_policy`와 `saved_*` 노드(P2-03·
     // P2-06)의 문장이 사전에 남아 있었다(BACKLOG-012). 스키마·카탈로그가 발행하는 키만 둔다.
-    // `strategy.field.run_environment.*` 는 실행 설정 스키마(다른 산출물)가 발행한다 — 그 스키마도 순회한다.
+    // `run_environment.field.*` 는 실행 설정 스키마(다른 산출물)가 발행한다 — 그 스키마도 순회한다(#357 C-P3-8).
     const published = new Set<string>();
     for (const schema of [SCHEMA, RUN_ENVIRONMENT_SCHEMA]) {
       for (const stem of descriptionStems(schema, new Set())) {
         published.add(stem);
         published.add(`${stem}.description`);
+        // 한 문장 요약 조각(P4-01)과 카드 문장 틀(P4-02)도 선택 항목이다 — 쓰는 필드만 가진다.
+        published.add(`${stem}.summary`);
+        published.add(`${stem}.card`);
       }
       // 값 설명(`.value.<값>.description`)은 뜻이 이름만으로 드러나지 않는 값에만 있는 선택 항목이다.
       for (const key of enumValueKeys(schema, [])) {
         published.add(key);
         published.add(`${key}.description`);
+        published.add(`${key}.summary`);
+        published.add(`${key}.card`);
       }
     }
     for (const definition of CATALOG.operators) {
@@ -212,7 +217,7 @@ describe("화면 어휘 커버리지", () => {
       published.add(`${definition.description_key}.description`);
       published.add(definition.formula_key);
     }
-    const owned = /^strategy\.(section|field|node|operator|type)\./;
+    const owned = /^(strategy\.(section|field|node|operator|type)|run_environment\.field)\./;
     const orphans = Object.keys(messages.ko).filter(
       (key) => owned.test(key) && !published.has(key),
     );

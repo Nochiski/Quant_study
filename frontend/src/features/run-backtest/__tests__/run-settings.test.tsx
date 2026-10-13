@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
+  fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -24,6 +27,7 @@ import {
 import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
+  initialRunEnvironmentValues,
   runEnvironmentFields,
   validateRunEnvironment,
   type RunEnvironmentValidation,
@@ -122,6 +126,10 @@ const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
 
+/**
+ * 기본값에 기간·유니버스를 채운 패널이 싣는 실행 설정. 가격 충격 계수·직접 입력 세율은 고정 bp·법정 세율에서
+ * 읽히지 않아(스키마 `x-applicable-when`, #352) 싣지 않는다.
+ */
 const ENVIRONMENT: RunEnvironment = {
   market: "KRX",
   frequency: "daily",
@@ -130,19 +138,24 @@ const ENVIRONMENT: RunEnvironment = {
   universe_id: "krx.common-stock",
   timing: "next_open",
   participation_rate: 0.1,
+  participation_basis: "adv20",
   fee_bps: 15,
   slippage_bps: 10,
+  impact_model: "fixed_bps",
+  sell_tax: "krx_statutory",
   missing: "drop",
 };
 
 const VALID: RunEnvironmentValidation = {
   valid: true,
   environment: ENVIRONMENT,
+  accepted: ENVIRONMENT,
   errors: {},
 };
 const INCOMPLETE: RunEnvironmentValidation = {
   valid: false,
   environment: null,
+  accepted: {},
   errors: { start: "required" },
 };
 
@@ -151,11 +164,17 @@ const schemaHandler = http.get(`${API}/api/v1/run-environments/schema`, () =>
   HttpResponse.json({ schema_hash: "h", schema: servedSchema }),
 );
 
-const Harness = ({ storageKey = "strategy-1" }: { storageKey?: string }) => {
+const Harness = ({
+  storageKey = "strategy-1",
+  request = null,
+}: {
+  storageKey?: string;
+  request?: BacktestRunSpec | null;
+}) => {
   const controller = useBacktestRunSettings(storageKey);
   return (
     <>
-      <BacktestRunSettings controller={controller} />
+      <BacktestRunSettings controller={controller} request={request} />
       <RunEnvironmentSummary controller={controller} />
       <output data-testid="request">
         {JSON.stringify(controller.requestOptions)}
@@ -278,10 +297,7 @@ describe("backtest run settings", () => {
   // 실행돼 사용자가 원한 표본 밖 측정이 아무 표시 없이 사라진다. 비운 칸은 그대로 통과한다(선택 칸).
   it("blocks a half-typed OOS start instead of silently running without the OOS window", () => {
     expect(
-      buildBacktestRunOptions(
-        { ...DEFAULT_BACKTEST_RUN_SETTINGS, oosStartIncomplete: true },
-        VALID,
-      ),
+      buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID, true),
     ).toEqual({ valid: false, options: null, errors: ["oos_incomplete"] });
     expect(
       buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID).options
@@ -377,6 +393,43 @@ describe("run environment panel", () => {
     ).toMatchObject({ start: "date", end: "required" });
   });
 
+  // #352 C-P2-2(#343 V2-07): 모드에 따라 읽히는 칸은 스키마 `x-applicable-when` 에서 읽는다. 읽히는 칸을
+  // 비우면 세 조건 모두 "준비됨"이 아니라 그 칸 오류이고, 읽히지 않는 칸은 값이 남아도 막지도 싣지도 않는다.
+  it("requires a mode-dependent field only in the mode that reads it and leaves it out otherwise", () => {
+    const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+    const filled = initialRunEnvironmentValues(fields, {
+      start: "2021-01-01",
+      end: "2026-08-31",
+      universe_id: "krx.common-stock",
+    });
+    const check = (values: Record<string, string>) =>
+      validateRunEnvironment(fields, { ...filled, ...values });
+
+    expect(check({ sell_tax: "custom", sell_tax_bps: "" }).errors).toEqual({
+      sell_tax_bps: "required",
+    });
+    expect(
+      check({ impact_model: "sqrt", impact_coefficient: "" }).errors,
+    ).toEqual({ impact_coefficient: "required" });
+    expect(
+      check({ impact_model: "fixed_bps", slippage_bps: "" }).errors,
+    ).toEqual({ slippage_bps: "required" });
+
+    // 법정 세율에 남은 세율 값(마지막 사용값 등)은 읽히지 않아 싣지 않는다 — 서버도 그대로 받는다.
+    const statutory = check({ sell_tax: "krx_statutory", sell_tax_bps: "12" });
+    expect(statutory.valid).toBe(true);
+    expect(statutory.environment).not.toHaveProperty("sell_tax_bps");
+    expect(
+      check({ sell_tax: "custom", sell_tax_bps: "12" }).environment,
+    ).toMatchObject({ sell_tax: "custom", sell_tax_bps: 12 });
+    const sqrt = check({ impact_model: "sqrt", slippage_bps: "" });
+    expect(sqrt.environment).toMatchObject({
+      impact_model: "sqrt",
+      impact_coefficient: 1,
+    });
+    expect(sqrt.environment).not.toHaveProperty("slippage_bps");
+  });
+
   it("draws every field from the run environment schema in schema order", () => {
     const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
     const properties = RUN_ENVIRONMENT_SCHEMA.properties as Record<
@@ -388,12 +441,17 @@ describe("run environment panel", () => {
     expect(
       fields.filter((field) => field.required).map((field) => field.name),
     ).toEqual(RUN_ENVIRONMENT_SCHEMA.required);
-    // 기간·유니버스는 스키마에 기본값이 없다 — 패널도 지어내지 않는다(P3-02 결정 1).
+    // 기간·유니버스는 스키마에 기본값이 없다 — 패널도 지어내지 않는다(P3-02 결정 1). 스키마 기본값이
+    // null 인 선택 칸(직접 입력 거래세율)도 빈 칸으로 시작한다.
     expect(
       fields
         .filter((field) => field.defaultValue === null)
         .map((field) => field.name),
-    ).toEqual(RUN_ENVIRONMENT_SCHEMA.required);
+    ).toEqual(
+      Object.entries(properties)
+        .filter(([, node]) => (node as Record<string, unknown>).default == null)
+        .map(([name]) => name),
+    );
   });
 
   it("starts from schema defaults, leaves period and universe empty and blocks the run", async () => {
@@ -416,6 +474,24 @@ describe("run environment panel", () => {
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
+  });
+
+  // #357 C-P3-16: 실행 계획 설명은 결측 정책 칸만 따로 싣는다. 기간·유니버스가 비었다고 기본 정책의
+  // 계획을 보이면 고른 정책과 다른 `plan_hash` 가 된다.
+  it("hands out the missing policy while the period and universe are still empty", async () => {
+    const { result } = renderHook(() => useBacktestRunSettings("strategy-1"), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={new QueryClient()}>
+          {children}
+        </QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(result.current.missing).toBe("drop"));
+
+    act(() => result.current.setEnvironmentValue("missing", "zero"));
+
+    expect(result.current.missing).toBe("zero");
+    expect(result.current.environment).toBeNull();
   });
 
   it("opens the panel at the first empty field from the summary band", async () => {
@@ -539,6 +615,111 @@ describe("run environment panel", () => {
     ).toHaveFocus();
   });
 
+  // #352 C-P2-2: 패널은 지금 모드에서 읽히지 않는 칸을 끄고, 읽히는 칸이 비면 그 칸 이름으로 막는다.
+  it("turns the sell tax rate on only for a custom rate and requires it there", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const rate = screen.getByRole("spinbutton", { name: "매도 거래세율 (bp)" });
+    const method = screen.getByRole("combobox", { name: "매도 거래세" });
+    expect(rate).toBeDisabled();
+    expect(requestBody()?.environment).toEqual(ENVIRONMENT);
+
+    await user.selectOptions(method, "custom");
+    expect(rate).toBeEnabled();
+    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "실행 설정에서 매도 거래세율 칸을 채우세요.",
+    );
+    expect(requestBody()).toBeNull();
+    await user.type(rate, "12");
+    expect(requestBody()?.environment).toEqual({
+      ...ENVIRONMENT,
+      sell_tax: "custom",
+      sell_tax_bps: 12,
+    });
+
+    // 방식만 되돌리면 세율 칸이 꺼지고 남은 12 는 싣지 않는다 — "준비됨"이면 서버도 받는다(#343 V2-07 경우 3).
+    await user.selectOptions(method, "krx_statutory");
+    expect(rate).toBeDisabled();
+    expect(rate).toHaveValue(12);
+    expect(screen.getByText("준비됨")).toBeInTheDocument();
+    expect(requestBody()?.environment).toEqual(ENVIRONMENT);
+  });
+
+  it("reads the slippage only for fixed bp impact and the coefficient only for square-root impact", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const slippage = screen.getByRole("spinbutton", { name: "슬리피지 (bp)" });
+    const coefficient = screen.getByRole("spinbutton", {
+      name: "가격 충격 계수",
+    });
+    expect(slippage).toBeEnabled();
+    expect(coefficient).toBeDisabled();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "가격 충격 모델" }),
+      "sqrt",
+    );
+    expect(coefficient).toBeEnabled();
+    expect(slippage).toBeDisabled();
+    expect(requestBody()?.environment).toMatchObject({
+      impact_model: "sqrt",
+      impact_coefficient: 1,
+    });
+    expect(requestBody()?.environment).not.toHaveProperty("slippage_bps");
+    // 요약 띠도 요청에 실리는 칸만 보인다.
+    const band = screen.getByRole("region", { name: "실행 설정 요약" });
+    expect(within(band).getByText("가격 충격 계수")).toBeInTheDocument();
+    expect(within(band).queryByText("슬리피지 (bp)")).toBeNull();
+  });
+
+  // #352 C-P2-4: 스키마를 읽기 전에 업그레이드 응답의 실행 설정을 채워도 요청 단위 기록으로 남아, 스키마가
+  // 오면 그 값으로 칸이 선다. 칸 목록이 없다고 전략별 저장값·마지막 사용값을 빈 값으로 덮지 않는다.
+  it("keeps an environment applied before the schema arrives and stores it, not an empty one", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/run-environments/schema`, async () => {
+        await gate;
+        return HttpResponse.json({
+          schema_hash: "h",
+          schema: RUN_ENVIRONMENT_SCHEMA,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithQuery(<Harness />);
+    await user.click(
+      screen.getByRole("button", { name: "apply upgraded environment" }),
+    );
+    const stored = (key: string): unknown =>
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`) ??
+          "null",
+      );
+    expect(stored("strategy-1")).toMatchObject({
+      start: "2021-01-01",
+      universe_id: "krx.common-stock",
+      fee_bps: "5",
+    });
+    expect(stored("last")).toEqual(stored("strategy-1"));
+    expect(requestBody()).toBeNull();
+
+    release();
+    await waitFor(() =>
+      expect(requestBody()?.environment).toEqual({
+        ...ENVIRONMENT,
+        fee_bps: 5,
+      }),
+    );
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(5);
+  });
+
   // DEFECT-242-04 (a): 단위는 스키마(`x-unit`·`x-display-unit`)에서 읽는다. 참여율은 %로 보이고 비율로 보낸다.
   it("shows the participation rate in the schema display unit and sends the ratio", async () => {
     renderWithQuery(<Harness />);
@@ -563,6 +744,12 @@ describe("run environment panel", () => {
         "{}",
     ) as Record<string, string>;
     expect(stored.participation_rate).toBe("0.25");
+    // 친 문자열은 그대로 보인다 — 요청 단위(0.125)로 바꿨다 되돌려 "12.5" 로 다시 쓰지 않는다(#352 C-P2-4).
+    fireEvent.change(participation, { target: { value: "12.50" } });
+    expect((participation as HTMLInputElement).value).toBe("12.50");
+    expect(requestBody()?.environment).toMatchObject({
+      participation_rate: 0.125,
+    });
     await user.clear(participation);
     await user.type(participation, "150");
     expect(screen.getByText("100% 이하여야 합니다.")).toBeInTheDocument();
@@ -677,6 +864,88 @@ describe("run environment panel", () => {
     expect(requestBody()).toBeNull();
   });
 
+  // #270 P3-R2: 치는 도중(키를 뗄 때)의 덜 친 날짜는 실행만 막고, 칸 아래·요약 띠·오류 목록은 칸을 떠날 때 보인다.
+  it("blocks the run while an OOS date is half typed but shows the error only once the field is left", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    expect(requestBody()).not.toBeNull();
+    const oos = screen.getByLabelText(/^OOS 시작일/);
+    // jsdom 은 날짜 칸을 자리별로 채우지 않는다. 브라우저가 연도만 친 칸에 세우는 `badInput` 을 흉내 낸다.
+    Object.defineProperty(oos, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    const incomplete = "연·월·일까지 모두 올바르게 입력하세요.";
+
+    fireEvent.keyUp(oos);
+    expect(requestBody()).toBeNull();
+    expect(oos).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText(incomplete, { exact: false })).toBeNull();
+
+    fireEvent.blur(oos);
+    expect(requestBody()).toBeNull();
+    expect(oos).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getAllByText(incomplete, { exact: false })).not.toHaveLength(
+      0,
+    );
+  });
+
+  // #297 리뷰 P3-1: 다 친 날짜를 고쳐 치면 값이 빈 문자열로 바뀌며 change 가 난다. 그것도 칸 안에서 난 일이라
+  // 실행만 막고, 오류는 칸을 떠날 때 선다.
+  it("keeps the error hidden while a whole OOS date is being retyped", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const oos = screen.getByLabelText(/^OOS 시작일/);
+    await user.type(oos, "2024-01-02");
+    expect(requestBody()).not.toBeNull();
+    // Backspace 한 번으로 한 자리가 빈 날짜 칸: 값은 빈 문자열, `badInput` 은 참이다.
+    Object.defineProperty(oos, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    fireEvent.change(oos, { target: { value: "" } });
+    expect(requestBody()).toBeNull();
+    expect(oos).not.toHaveAttribute("aria-invalid");
+    expect(
+      screen.queryByText("연·월·일까지 모두 올바르게 입력하세요.", {
+        exact: false,
+      }),
+    ).toBeNull();
+
+    fireEvent.blur(oos);
+    expect(oos).toHaveAttribute("aria-invalid", "true");
+  });
+
+  // #297 재리뷰 P2-1: 실행 설정 날짜 칸은 필수라 빈 값 자체가 오류다. 칸 안에서 고쳐 치는 도중에도 "값을
+  // 정하세요."가 아니라 날짜 문장이 서고, 요약 띠도 같은 원인을 말한다.
+  it("names the date problem, not an empty field, while a start date is retyped in place", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const start = screen.getByLabelText(/^시작일/);
+    // Backspace 한 번으로 한 자리가 빈 날짜 칸: 값은 빈 문자열, `badInput` 은 참이다.
+    Object.defineProperty(start, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    const date = "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01";
+    const blocked = `실행 설정의 시작일 칸을 고치세요: ${date}`;
+
+    fireEvent.change(start, { target: { value: "" } });
+    fireEvent.keyUp(start);
+    expect(requestBody()).toBeNull();
+    expect(start).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(date)).toBeInTheDocument();
+    expect(screen.queryByText("값을 정하세요.")).toBeNull();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(blocked);
+
+    fireEvent.blur(start);
+    expect(screen.getByText(date)).toBeInTheDocument();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(blocked);
+  });
+
   it("says the date is incomplete when a remembered value is not a whole date", async () => {
     localStorage.setItem(
       `${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`,
@@ -709,6 +978,119 @@ describe("run environment panel", () => {
     expect(screen.getByLabelText(/^시작일/)).toHaveValue("2021-01-01");
   });
 
+  // #387 리뷰 P3-2: 아직 고치지 않은 패널의 첫 편집은 저장값 위에서 한다. 한 칸만 고쳐도 나머지 저장값이
+  // 칸·요청·저장(전략별·마지막 사용값)에 남는다 — 빈 기록에서 시작하면 한 칸짜리 기록이 저장값을 덮는다.
+  it("edits one field on top of the remembered environment and keeps the rest", async () => {
+    const remembered = {
+      start: "2021-01-01",
+      end: "2026-08-31",
+      universe_id: "krx.common-stock",
+      participation_rate: "0.2",
+    };
+    localStorage.setItem(
+      `${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`,
+      JSON.stringify(remembered),
+    );
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "7");
+
+    expect(requestBody()?.environment).toEqual({
+      ...ENVIRONMENT,
+      participation_rate: 0.2,
+      fee_bps: 7,
+    });
+    const stored = (key: string): unknown =>
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`) ??
+          "null",
+      );
+    expect(stored("strategy-1")).toEqual({ ...remembered, fee_bps: "7" });
+    expect(stored("last")).toEqual({ ...remembered, fee_bps: "7" });
+  });
+
+  // #396 리뷰 P2-1: v1 저장값은 건드리지 않은 옛 기본값(`session_volume`)까지 담았다. 새 기본값 `adv20` 이
+  // 그 값에 덮이지 않고, 나머지 저장값은 이어진다. 새로 쓰는 값은 v2 에 간다.
+  // #396 리뷰 P2-1: 기본값과 다른 칸만 저장한다. backend 가 기본값을 바꾸면 손대지 않은 칸은 새 기본값을 따른다.
+  it("stores only fields that differ from the schema default so a changed default reaches untouched fields", async () => {
+    const first = renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "7");
+    expect(
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`) ??
+          "{}",
+      ),
+    ).toEqual({
+      start: "2021-01-01",
+      end: "2026-08-31",
+      universe_id: "krx.common-stock",
+      fee_bps: "7",
+    });
+    first.unmount();
+
+    const properties = RUN_ENVIRONMENT_SCHEMA.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    servedSchema = {
+      ...RUN_ENVIRONMENT_SCHEMA,
+      properties: {
+        ...properties,
+        participation_basis: {
+          ...properties.participation_basis,
+          default: "session_volume",
+        },
+      },
+    };
+    renderWithQuery(<Harness />);
+    await openSettings();
+    await waitFor(() =>
+      expect(requestBody()?.environment).toEqual({
+        ...ENVIRONMENT,
+        participation_basis: "session_volume",
+        fee_bps: 7,
+      }),
+    );
+  });
+
+  it("drops the participation basis remembered before the adv20 default and keeps the rest", async () => {
+    localStorage.setItem(
+      "quant-workbench.run-environment.v1:strategy-1",
+      JSON.stringify({
+        start: "2021-01-01",
+        end: "2026-08-31",
+        universe_id: "krx.common-stock",
+        participation_basis: "session_volume",
+        fee_bps: "7",
+      }),
+    );
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+
+    await waitFor(() =>
+      expect(requestBody()?.environment).toEqual({
+        ...ENVIRONMENT,
+        fee_bps: 7,
+      }),
+    );
+    const slippage = screen.getByRole("spinbutton", { name: /슬리피지/ });
+    await user.clear(slippage);
+    await user.type(slippage, "12");
+    expect(
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`) ??
+          "{}",
+      ),
+    ).not.toHaveProperty("participation_basis");
+  });
+
   it("replaces every field when an upgraded document's environment is applied", async () => {
     renderWithQuery(<Harness />);
     const user = await openSettings();
@@ -728,6 +1110,115 @@ describe("run environment panel", () => {
     expect(
       screen.getByText("비우면 벤치마크 없이 실행합니다.", { exact: false }),
     ).toBeInTheDocument();
+  });
+
+  // 검증 랩 V5-05: 새 시도인지는 backend 미리 계산이 판정하고, 패널은 실행 버튼이 보낼 요청 그대로 묻고 답만 옮긴다.
+  it.each([
+    [
+      "new_trial",
+      3,
+      4,
+      "결과가 나오면 새 시도로 셉니다. 계열 시도 수 3회 → 4회.",
+    ],
+    [
+      "recheck",
+      4,
+      4,
+      "이미 센 시도의 재확인이라 시도 수가 늘지 않습니다. 계열 시도 수 4회 그대로.",
+    ],
+    [
+      "no_lineage",
+      0,
+      0,
+      "저장한 적 없는 전략이라 이 실행은 시도 수에 들지 않습니다. 리비전을 저장한 뒤 실행하면 셉니다.",
+    ],
+  ] as const)(
+    "shows the backend trial verdict %s for the exact run request once the panel opens",
+    async (reason, count, after, sentence) => {
+      const asked: unknown[] = [];
+      server.use(
+        http.post(
+          `${API}/api/v1/backtests/trial-preview`,
+          async ({ request }) => {
+            asked.push(await request.json());
+            return HttpResponse.json({
+              lineage_id: reason === "no_lineage" ? null : "strategy-1",
+              trial_key: "k",
+              trial_count: count,
+              new_trial: reason === "new_trial",
+              trial_count_after: after,
+              reason,
+            });
+          },
+        ),
+      );
+      renderWithQuery(<Harness request={acceptedRequest} />);
+      // 패널을 열기 전에는 묻지 않는다 — 스키마 응답이 그려질 때까지 기다린 뒤에도 0건이다.
+      await screen.findByRole("button", { name: "실행 설정 채우기" });
+      expect(asked).toHaveLength(0);
+      await openSettings();
+
+      expect(
+        await screen.findByRole("status", { name: "시도 영향" }),
+      ).toHaveTextContent(sentence);
+      expect(asked).toEqual([acceptedRequest]);
+    },
+  );
+
+  // 교정은 연구 구간 거절이 연구 하한을 실었을 때만 있다 — 다른 거절이나 날짜 없는 detail 에 버튼을 만들지 않는다.
+  it("offers the start date fix only for a research window rejection that carries the research start", async () => {
+    const { result } = renderHook(() => useBacktestRunSettings("strategy-1"), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={new QueryClient()}>
+          {children}
+        </QueryClientProvider>
+      ),
+    });
+    const researchStart = { research_start: "2020-01-02" };
+
+    expect(
+      result.current.rejectionFix(
+        "backtest.run.research_window_violation",
+        researchStart,
+      )?.label,
+    ).toBe("시작일을 2020-01-02로");
+    expect(
+      result.current.rejectionFix(
+        "backtest.strategy.requires_upgrade",
+        researchStart,
+      ),
+    ).toBeNull();
+    expect(
+      result.current.rejectionFix("backtest.run.research_window_violation", {}),
+    ).toBeNull();
+    expect(result.current.rejectionFix(null, researchStart)).toBeNull();
+  });
+
+  // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
+  it("draws no trial line when the preview is rejected", async () => {
+    let asked = 0;
+    server.use(
+      http.post(`${API}/api/v1/backtests/trial-preview`, () => {
+        asked += 1;
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.research_window_violation",
+              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다",
+              sealed_start: "2016-01-01",
+              sealed_end: "2019-12-31",
+              research_start: "2020-01-02",
+            },
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    renderWithQuery(<Harness request={acceptedRequest} />);
+    await openSettings();
+
+    await waitFor(() => expect(asked).toBe(1));
+    expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
   });
 
   it("exposes every run option through accessible controls and reports invalid input", async () => {
@@ -778,6 +1269,55 @@ describe("backtest run actions", () => {
       expect(onReplayed).toHaveBeenCalledWith("run-replayed"),
     );
     expect(replayedRequest).toEqual(acceptedRequest);
+  });
+
+  it("says an experiment keeps a shared run instead of offering cancel again", async () => {
+    // #382: 내 몫은 빠졌지만 실험이 같은 실행을 써서 계속 돌면 응답의 `kept_by_owners` 로 알린다.
+    server.use(
+      http.post(`${API}/api/v1/backtests/:runId/cancel`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "running",
+          progress: 0.4,
+          stage: "engine",
+          message: "Running engine",
+          created_at: "2026-09-30T00:00:00Z",
+          updated_at: "2026-09-30T00:00:01Z",
+          kept_by_owners: true,
+        }),
+      ),
+    );
+    const view = renderWithQuery(
+      <BacktestRunActions
+        runId="run-shared"
+        status="running"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "실행 취소" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "실험이 이 실행을 함께 쓰고 있어 계속 돕니다. 멈추려면 실험 화면에서 실험을 취소하세요.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "실행 취소" }),
+    ).not.toBeInTheDocument();
+
+    // #407 리뷰 P2-1: 같은 화면이 다시 실행한 새 run 으로 넘어가면 앞 run 의 안내를 쓰지 않는다.
+    view.rerender(
+      <BacktestRunActions
+        runId="run-next"
+        status="running"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "실행 취소" }),
+    ).toBeInTheDocument();
   });
 
   it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {
@@ -860,11 +1400,93 @@ describe("backtest run actions", () => {
         "동일 설정으로 다시 실행하지 못했습니다: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
       ),
     );
+    // 결과 화면에는 실행 설정 패널이 없다 — 문장이 고칠 곳을 말한다(#270 P3-R3).
+    expect(alert).toHaveTextContent(
+      "전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 실행하세요.",
+    );
     expect(alert).not.toHaveTextContent("API request failed");
     const reason = within(alert).getByRole("group");
     expect(reason).toHaveTextContent("서버 사유");
     expect(reason).toHaveTextContent("field=environment.fee_bps");
     expect(reason).not.toHaveAttribute("open");
+  });
+
+  // 검증 랩 V1-01: 연구 구간 거절 문장의 날짜는 번역에 적지 않고 detail 값으로 채운다(날짜 owner 는 backend).
+  it("fills the research window dates from the rejection detail", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.research_window_violation",
+              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
+              sealed_start: "2016-01-01",
+              sealed_end: "2019-12-31",
+              research_start: "2020-01-02",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="old-run"
+        status="completed"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
+      ),
+    );
+    expect(alert).not.toHaveTextContent("{");
+  });
+
+  // #304: 결과 화면에는 실행 설정 패널이 없다 — 칸을 짚지 않은 거절도 고칠 곳(전략 편집기)을 말한다.
+  it("tells where to fix a rerun refused as an invalid request", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.invalid",
+              message:
+                "oos start must fall inside the run window — got=2017-01-02",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="old-run"
+        status="completed"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "동일 설정으로 다시 실행하지 못했습니다: 이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
+      ),
+    );
+    expect(within(alert).getByRole("group")).toHaveTextContent(
+      "oos start must fall inside the run window",
+    );
   });
 
   it("keeps navigation unchanged when a rerun fails with a server error", async () => {

@@ -34,6 +34,7 @@ from backtest_engine.types.events import (
     OrderStatus,
     OrderUpdateEvent,
     StrategyEvent,
+    TargetRounding,
 )
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
@@ -46,6 +47,7 @@ from backtest_engine.types.result_tables import (
     OrderRow,
     PositionRow,
     ResultTables,
+    RoundingRow,
     SnapshotRow,
 )
 from backtest_engine.types.tape import TapeFrame
@@ -85,7 +87,8 @@ class RecordKind(Enum):
     SNAPSHOT = ("snapshot", 5)
     CORPORATE_ACTION = ("corporate_action", 6)  # 사건 도착 (적용 여부와 무관)
     CORPORATE_ACTION_APPLIED = ("corporate_action_applied", 7)  # 포지션에 실제 적용된 기록
-    COST = ("cost", 8)  # 차입·이자 등 Fill 없는 현금 차감
+    COST = ("cost", 8)  # 차입·이자·매도 거래세 등 Fill 밖의 현금 차감
+    ROUNDING = ("rounding", 9)  # 목표 금액 → 1주 단위 수량 변환(반올림 오차, V4-04)
 
 
 _RECORD_KIND_BY_CODE: dict[int, RecordKind] = {kind.code: kind for kind in RecordKind}
@@ -124,6 +127,7 @@ RecordPayload = (
     | CorporateActionEvent
     | CorporateActionApplied
     | CostAccrued
+    | TargetRounding
 )
 
 
@@ -355,6 +359,7 @@ class EventStore:
         orders: list[OrderRow] = []
         fills: list[FillRow] = []
         costs: list[CostRow] = []
+        roundings: list[RoundingRow] = []
         traded_notional = 0.0
         total_fees = 0.0
         total_slippage_cost = 0.0
@@ -421,6 +426,7 @@ class EventStore:
                         payload.price,
                         payload.fee,
                         payload.slippage_per_share,
+                        payload.cap_volume,
                     )
                 )
                 traded_notional += quantity * payload.price
@@ -437,6 +443,15 @@ class EventStore:
                         payload.amount,
                     )
                 )
+            elif record.kind is RecordKind.ROUNDING and isinstance(payload, TargetRounding):
+                roundings.append(
+                    (
+                        session_of(payload.ts, "rounding"),
+                        instrument_of(payload.instrument, "rounding"),
+                        payload.target_notional,
+                        payload.rounded_notional,
+                    )
+                )
         return ResultTables(
             sessions=tuple(sessions),
             instruments=tuple(instruments),
@@ -445,6 +460,7 @@ class EventStore:
             orders=tuple(orders),
             fills=tuple(fills),
             costs=tuple(costs),
+            roundings=tuple(roundings),
             fill_totals=FillTotals(
                 traded_notional=traded_notional,
                 total_fees=total_fees,
@@ -465,9 +481,7 @@ class PersistentEventStore(EventStore):
 
     조회는 kind 단위다. 종료된 실행이면 `drain_payloads(kind, limit)`로 그 kind의 payload를 seq
     순서로 청크씩 넘겨받고 Rust는 넘긴 자리를 바로 해제한다. 종료 전 partial trace는 해제하지
-    않는 `record_payloads(kind)`로 읽는다. 넘긴 payload는 다시 읽을 수 없으므로
-    `equity_values()`/`traded_notional()`처럼 Rust 레코드를 직접 누산하는 조회는 결과 조회보다
-    **먼저** 불러야 한다 (`loop.py`가 `finish()` 직후 metrics를 계산한다).
+    않는 `record_payloads(kind)`로 읽는다. 넘긴 payload는 다시 읽을 수 없다.
     """
 
     # `Any`: backtest_core는 pyo3 확장 모듈이라 stub이 없다 (typings/backtest_core는 레거시
@@ -685,7 +699,17 @@ class PersistentEventStore(EventStore):
         )
 
     def fill_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> FillEvent:
-        fill_id, order_id, instrument_id, quantity, side, price, fee, slippage_per_share = wire
+        (
+            fill_id,
+            order_id,
+            instrument_id,
+            quantity,
+            side,
+            price,
+            fee,
+            slippage_per_share,
+            cap_volume,
+        ) = wire
         try:
             side_value = _SIDE_BY_WIRE[side]
         except KeyError as unknown:
@@ -703,6 +727,7 @@ class PersistentEventStore(EventStore):
             price=price,
             fee=fee,
             slippage_per_share=slippage_per_share,
+            cap_volume=cap_volume,
         )
 
     def order_update_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> OrderUpdateEvent:
@@ -844,6 +869,8 @@ class PersistentEventStore(EventStore):
             return self._corporate_action_applied_from_wire
         if kind is RecordKind.COST:
             return self._cost_from_wire
+        if kind is RecordKind.ROUNDING:
+            return self._rounding_from_wire
         raise TypeError(f"unsupported persistent record kind — kind={kind!r}")
 
     def _corporate_action_applied_from_wire(
@@ -879,6 +906,15 @@ class PersistentEventStore(EventStore):
             amount=amount,
         )
 
+    def _rounding_from_wire(self, session_index: int, payload: Any) -> TargetRounding:
+        instrument_id, target_notional, rounded_notional = payload
+        return TargetRounding(
+            ts=self._sessions[session_index],
+            instrument=self._instruments[instrument_id],
+            target_notional=target_notional,
+            rounded_notional=rounded_notional,
+        )
+
     @property
     def records(self) -> tuple[Record, ...]:
         if self._records_cache is None:
@@ -910,14 +946,6 @@ class PersistentEventStore(EventStore):
             (seq, session_index, _RECORD_KIND_BY_CODE[kind_code].value)
             for seq, session_index, kind_code in self._batch()
         )
-
-    def equity_values(self) -> tuple[float, ...]:
-        """SNAPSHOT 레코드 순서의 equity — Event 객체 없이 metrics를 계산한다."""
-        return tuple(self._runtime.equity_series())
-
-    def traded_notional(self) -> float:
-        """FILL 레코드 순서로 누산한 체결 금액 (Rust가 같은 결합 순서로 계산)."""
-        return float(self._runtime.traded_notional())
 
     def result_tables(self) -> ResultTables:
         """Rust `result_tables()` 한 번으로 받는 결과 테이블.
@@ -952,6 +980,7 @@ class PersistentEventStore(EventStore):
             order_rows,
             fill_rows,
             cost_rows,
+            rounding_rows,
             (traded_notional, total_fees, total_slippage_cost),
         ) = self._runtime.result_tables()
         return ResultTables(
@@ -962,6 +991,7 @@ class PersistentEventStore(EventStore):
             orders=tuple(order_rows),
             fills=tuple(fill_rows),
             costs=tuple(cost_rows),
+            roundings=tuple(rounding_rows),
             fill_totals=FillTotals(
                 traded_notional=traded_notional,
                 total_fees=total_fees,

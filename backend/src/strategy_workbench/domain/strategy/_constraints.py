@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import get_type_hints
 
-from ._models import StrategySpec
+from ._models import AppliedStage, StrategySpec
 
 
 class ContractUnit(StrEnum):
@@ -31,30 +31,21 @@ class ContractUnit(StrEnum):
     FIELD = "field"
 
 
-class AppliedStage(StrEnum):
-    # `DATA`·`EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계다.
-    # 전략 문서에는 1.2 부터 해당 행이 없다.
-    DATA = "data"
-    ELIGIBILITY = "eligibility"
-    SIGNAL = "signal"
-    PORTFOLIO = "portfolio"
-    RISK = "risk"
-    EXECUTION = "execution"
-
-
 @dataclass(frozen=True)
 class ScalarConstraint:
     """Bounds and contract metadata for one numeric authoring field.
 
     `pointer` is the JSON Pointer inside the authoring document (identity-free canonical shape).
-    `code` is the validation issue code the validator emits when the bound is violated.
+    `code` is the validation issue code the validator emits when the bound is violated. 전략
+    문서 행만 갖는다 — 실행 설정 행(`RUN_ENVIRONMENT_CONSTRAINTS`)은 `RunEnvironment` 가 칸
+    이름을 실은 예외로 거절하고 진단 코드를 내지 않는다(#357 C-P3-8).
     """
 
     pointer: str
-    code: str
     stage: AppliedStage
     unit: ContractUnit
     message: str
+    code: str = ""
     minimum: float | None = None
     maximum: float | None = None
     exclusive_minimum: bool = False
@@ -117,8 +108,8 @@ class ApplicabilityCondition:
     def describe(self) -> str:
         return f"{self.path} = {self.equals}" if self.equals is not None else f"{self.path} 설정"
 
-    def holds_for(self, spec: StrategySpec) -> bool:
-        value = resolve_scalar(spec, self.pointer)
+    def holds_for(self, document: object) -> bool:
+        value = resolve_scalar(document, self.pointer)
         if self.not_null:
             return value is not None
         return value is not None and str(getattr(value, "value", value)) == self.equals
@@ -149,11 +140,16 @@ class FieldApplicability:
         if not self.conditions:
             raise ValueError(f"field applicability needs a condition — pointer={self.pointer!r}")
 
-    def applies_to(self, spec: StrategySpec) -> bool:
-        return all(condition.holds_for(spec) for condition in self.conditions)
+    def applies_to(self, document: object) -> bool:
+        return all(condition.holds_for(document) for condition in self.conditions)
 
 
 FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
+    FieldApplicability(
+        "/portfolio/tie_breaker_direction",
+        (ApplicabilityCondition("/portfolio/tie_breaker_factor_id", not_null=True),),
+        "strategy.contract.applicable.tie_breaker_direction",
+    ),
     # `_compiler.py::_selection_counts`: top_n이면 selection_count(+long_short이면
     # short_selection_count),
     # percentile이면 selection_percentile로 양쪽 count를 계산한다.
@@ -358,6 +354,8 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.risk.long_only_exposure",
         "strategy.risk.risk_field",
         "strategy.risk.risk_source_conflict",
+        "strategy.portfolio.tie_breaker_factor_missing",
+        "strategy.portfolio.tie_breaker_factor_excluded",
         "strategy.risk.risk_factor_missing",
         "strategy.risk.risk_factor_excluded",
         "strategy.risk.sector_neutral_side",
@@ -387,6 +385,7 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.branch_unit",
         "strategy.expression.cycle",
         "strategy.expression.duplicate_node",
+        "strategy.expression.empty",
         "strategy.expression.field_missing",
         "strategy.expression.group_field_missing",
         "strategy.expression.group_field_type",
@@ -452,9 +451,10 @@ def field_default(pointer: str) -> object:
     raise KeyError(f"unknown authoring pointer — pointer={pointer!r}")
 
 
-def resolve_scalar(spec: StrategySpec, pointer: str) -> object:
-    """Read the value at a scalar constraint pointer from a typed spec."""
-    current: object = spec
+def resolve_scalar(document: object, pointer: str) -> object:
+    """포인터를 속성으로 따라가 값을 읽는다. 전략 문서(`StrategySpec`)와 실행 설정
+    (`RunEnvironment`)처럼 포인터 모양의 dataclass 값이면 문서 종류를 가리지 않는다(#352)."""
+    current: object = document
     for segment in pointer.strip("/").split("/"):
         current = getattr(current, segment)
     return current

@@ -330,7 +330,7 @@ equity 층은 이 시차를 정하는 **정본 대장**을 따로 만들어 뒀�
 
 ---
 
-## 5. "원천이 안 준 것(=0으로 읽어도 되는 것)" 과 "그냥 모르는 것" 을 소비자가 구분하지 못한다
+## 5. "원천이 안 준 것(=0으로 읽어도 되는 것)" 과 "그냥 모르는 것" 을 소비자가 구분하지 못한다 (**공매도 축 해소**: 워크벤치 #371 — 키움 공매도는 값 0 의 `SOURCE_OMITTED_ZERO`, 신용·수급·대차는 MISSING)
 
 ### 무엇이 문제인가
 
@@ -754,7 +754,7 @@ DuckDB 가 공통 부분식을 항상 재사용해 주지는 않는다.
 > 아래 「왜 그냥 사건을 버리면 된다가 답이 아닌가」의 대가(수량이 사건 전 그대로 남는다)는 경고로 드러낸
 > 채 받아들였다. 커널 쪽 (가)·(나)는 없다 — `engine/loop.py` 의 `_settlement_session` 은 여전히
 > `CorporateActionWithoutBar` 를 던지고, 커널 어댑터 `backtest_engine.adapters.equity_duckdb` 에는 같은
-> 거르기가 없다. 아래 본문은 2026-09-06 당시 서술이다.
+> 거르기가 없었다(그 어댑터는 2026-09-30 #372 로 걷었다). 아래 본문은 2026-09-06 당시 서술이다.
 
 ### 무엇이 문제인가
 
@@ -865,7 +865,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 | 10 | 정지 후 재개 없는 종목의 기업행위가 전 종목 백테스트 run 전체를 죽인다 | **상** | 1.5일 | **예 — 전 종목 백테스트 불능** | **1** |
 | 2 | 절단본 스크립트·데이터가 저장소에 없다 (테스트 660개가 이 기계에만) | **상** | 10분(gitignore) / +1.5일(스크립트) | 잠재 — 한 번의 실수로 회복 불가 | ~~2~~ **완료(54776b6)** |
 | 4 | 어댑터 공개시차 상수가 대장과 어긋남 (25/30 필드가 한 세션 이르다) | **상** | 2~3일 | **예 — 확정 look-ahead 1건** | **3** |
-| 5 | `src_omitted` 라벨 손실 (공매도 격자의 39.2%가 "모름" 으로 전달) | **중**(공매도만 보면 상) | 2~3일 | 예 — 공매도 팩터가 사실상 불능 | **4** |
+| 5 | `src_omitted` 라벨 손실 (공매도 격자의 39.2%가 "모름" 으로 전달) | **중**(공매도만 보면 상) | 2~3일 | 예 — 공매도 팩터가 사실상 불능 | ~~4~~ **공매도 해소(#371)** |
 | 9 | 거래소 정지 목록 미수집 (공시 축 적중률 약 50%) | **중** | 반나절(조사) + 1일 | 예 — 보통주 4,253셀 | **5** |
 | 1 | 카탈로그 스냅샷 지문이 내용 해시가 아니다 | **중** | 반나절 | 예 — 오진 1건 발생함 | **6** |
 | 7 | 기준가와 어긋난 기업행위 719건 | **중** | 2~3일(재분류) | 아니오 — 라벨 문제 | **7** |
@@ -1104,7 +1104,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **위험성**: 드리프트 조사 출발점이 거짓이 된다. 조치: rc 를 모아 `"partial": true` 로 기록 후 non-zero 종료.
 
 ### B-38: E01 은 선언 축(recommended_lag_sessions=3)만 고쳤다 — `available_date ≤ T−1` 만 거는 소비자는 여전히 2세션 앞선다
-- **종결(2026-09-28, 어댑터 쪽)**: 워크벤치 duckdb 어댑터는 `dataset_profile` 의 랙을 읽어 `credit.margin_balance` 에 3세션을 적용하고, 표가 없는 루트의 폴백 상수도 3세션이다(#255, `backend/tests/contract/test_equity_fallback_lag.py` 가 원장 선언과 대조). 커널 어댑터(`backtest_engine.adapters.equity_duckdb`)는 신용 필드를 읽지 않는다. `credit_daily` parquet 를 직접 읽으며 `available_date` 만 거는 소비자에게는 아래 서술이 그대로 남는다.
+- **종결(2026-09-28, 어댑터 쪽)**: 워크벤치 duckdb 어댑터는 `dataset_profile` 의 랙을 읽어 `credit.margin_balance` 에 3세션을 적용하고, 표가 없는 루트의 폴백 상수도 3세션이다(#255, `backend/tests/contract/test_equity_fallback_lag.py` 가 원장 선언과 대조). 커널 어댑터(`backtest_engine.adapters.equity_duckdb`)는 신용 필드를 읽지 않았고 2026-09-30 #372 로 걷었다. `credit_daily` parquet 를 직접 읽으며 `available_date` 만 거는 소비자에게는 아래 서술이 그대로 남는다.
 - **상황**: `credit_daily.available_date = deal_date` 유지(플랜 §2 결정 1 — 백필 구간 PIT 보존).
 - **인풋**: 워크벤치·엔진이 `dataset_profile.recommended_lag_sessions` 를 실제로 적용하는지 미확인.
 - **에러 위치**: `src/equity/rules_s10.py`(선언) vs 소비 측 어댑터의 lag 적용 코드.

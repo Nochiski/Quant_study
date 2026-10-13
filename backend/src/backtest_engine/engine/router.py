@@ -61,7 +61,12 @@ from backtest_engine.types.actions import (
     kind_of,
 )
 from backtest_engine.types.decision import SCHEMA_VERSION, StrategyDecision
-from backtest_engine.types.events import OrderEvent, OrderStatus, OrderUpdateEvent
+from backtest_engine.types.events import (
+    OrderEvent,
+    OrderStatus,
+    OrderUpdateEvent,
+    TargetRounding,
+)
 from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import (
@@ -98,6 +103,7 @@ class RoutingResult:
     orders: tuple[OrderEvent, ...]
     updates: tuple[OrderUpdateEvent, ...]  # 취소·정정으로 즉시 바뀐 기존 주문 상태
     groups: tuple[BasketGroup, ...] = ()  # BasketAction에서 만들어진 leg 그룹
+    roundings: tuple[TargetRounding, ...] = ()  # 목표 금액 → 수량 변환마다 하나(V4-04)
 
 
 class DecisionRouter:
@@ -112,6 +118,8 @@ class DecisionRouter:
         self._order_manager = order_manager
         # 같은 Decision 안에서 이미 라우팅된 매도 수량 (종목별). route()마다 초기화.
         self._routed_sells: dict[InstrumentId, Decimal] = defaultdict(Decimal)
+        # 같은 Decision 안의 목표 금액 → 수량 변환 기록. route()마다 초기화.
+        self._roundings: list[TargetRounding] = []
         self._short_allowed = EngineFeature.SHORT_SELLING in declared_features
 
     def route(
@@ -130,6 +138,7 @@ class DecisionRouter:
         orders: list[OrderEvent] = []
         updates: list[OrderUpdateEvent] = []
         self._routed_sells = defaultdict(Decimal)
+        self._roundings = []
         groups: list[BasketGroup] = []
         for action in decision.actions:
             kind = kind_of(action)
@@ -145,7 +154,12 @@ class DecisionRouter:
                 orders.extend(legs)
             else:
                 orders.extend(self._route_action(action, decision_id, portfolio, market, updates))
-        return RoutingResult(orders=tuple(orders), updates=tuple(updates), groups=tuple(groups))
+        return RoutingResult(
+            orders=tuple(orders),
+            updates=tuple(updates),
+            groups=tuple(groups),
+            roundings=tuple(self._roundings),
+        )
 
     def _basket(
         self,
@@ -395,8 +409,13 @@ class DecisionRouter:
         current_position = portfolio.position(instrument)
         current_notional = current_position.market_value if current_position else 0.0
         delta_notional = target_notional - current_notional
-        shares = floor_delta_shares(delta_notional, market.bar(instrument).close)
-        return shares if delta_notional >= 0 else -shares
+        close = market.bar(instrument).close
+        shares = floor_delta_shares(delta_notional, close)
+        delta = shares if delta_notional >= 0 else -shares
+        self._roundings.append(
+            TargetRounding(market.ts, instrument, delta_notional, float(delta) * close)
+        )
+        return delta
 
     def _delta_orders(
         self,

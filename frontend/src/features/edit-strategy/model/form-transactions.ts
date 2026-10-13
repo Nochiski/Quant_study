@@ -3,12 +3,14 @@
  * `SourceOperation` 하나로 바꾸고, 입력 텍스트를 스키마 컨트롤 규칙으로 읽는다. 텍스트 편집과 preflight는
  * `planSourceOperation`의 몫이고 여기서는 fragment를 조립하지 않는다.
  */
+import { t } from "../../../shared/config";
 import { findReferences, type DocumentReference } from "./document-references";
-import type {
-  FormControl,
-  FormField,
-  FormListItem,
-  FormSection,
+import {
+  identityKeyOf,
+  type FormControl,
+  type FormField,
+  type FormListItem,
+  type FormSection,
 } from "./form-projection";
 import {
   materializeSchemaValue,
@@ -25,6 +27,9 @@ export type ListSection = Extract<FormSection, { kind: "list" }>;
 export type DraftParse =
   | { status: "ok"; value: Scalar }
   | { status: "invalid"; reason: "number" | "integer" | "range" | "date" };
+
+/** 입력 텍스트가 컨트롤 규칙에 맞지 않는 사유(`form.invalid.<사유>`). */
+export type InvalidDraft = Extract<DraftParse, { status: "invalid" }>["reason"];
 
 /** 입력 텍스트를 컨트롤 규칙(스키마 type·범위·format)으로 읽는다. 빈 텍스트는 빈 문자열/무효다. */
 export const parseDraft = (control: FormControl, draft: string): DraftParse => {
@@ -199,12 +204,38 @@ export const addItemOperation = (
   }
   if (node === null) return null;
   try {
-    return appendOperation(section, materializeSchemaValue(schema, node));
+    return appendOperation(
+      section,
+      seedIdentity(schema, node, section, materializeSchemaValue(schema, node)),
+    );
   } catch (error) {
     if (error instanceof UnsupportedSchemaShape) return null;
     throw error;
   }
 };
+
+/**
+ * 새 항목의 identity 씨앗(WORKFLOW P4-03): 스키마 `x-authoring-identity` 필드가 비었으면 `<네임스페이스>_<n>`
+ * (목록에 없는 가장 작은 n, `factor_1`)을 넣는다. 네임스페이스는 identity 키에서 온다(`factor_id` → `factor`,
+ * 삭제 가드와 같은 규칙). 빈 id 는 compile 이 곧바로 거절해 새 항목 하나가 문서 전체를 막았다.
+ */
+const seedIdentity = (
+  schema: JsonSchema,
+  node: JsonSchema,
+  section: ListSection,
+  value: unknown,
+): unknown => {
+  const key = identityKeyOf(schema, node);
+  if (key === null || !isRecord(value) || value[key] !== "") return value;
+  const namespace = key.slice(0, -"_id".length);
+  const taken = new Set(section.items.map((item) => identityOf(item, key)));
+  let n = 1;
+  while (taken.has(`${namespace}_${n}`)) n += 1;
+  return { ...value, [key]: `${namespace}_${n}` };
+};
+
+const identityOf = (item: FormListItem, key: string | null): unknown =>
+  item.fields.find((field) => field.key === key)?.value;
 
 /** 미리 만든 값(팩터 카탈로그 preset 등)을 항목으로 추가. */
 export const addPresetItemOperation = (
@@ -274,18 +305,115 @@ export const removalBlockers = (
         writtenString(field),
     );
   if (identity === undefined) return [];
-  const namespace = identity.key.slice(0, -"_id".length);
+  return identityReferences(tree, item, identity.key, identity.value as string);
+};
+
+/** `key`(`<namespace>_id`) 값 `id` 를 항목 밖에서 참조하는 자리. 스코프 규칙(`REFERENCE_SCOPES`)을 탄다. */
+const identityReferences = (
+  tree: unknown,
+  item: FormListItem,
+  key: string,
+  id: string,
+): DocumentReference[] => {
+  const namespace = key.slice(0, -"_id".length);
   const within = REFERENCE_SCOPES[namespace]?.(item.pointer) ?? null;
   return findReferences(
     tree,
     namespace,
-    identity.value as string,
+    id,
     item.pointer,
     within === null ? {} : { within },
   );
+};
+
+/**
+ * 목록 항목 identity(`factor_id`·`parameter_id`) 변경(WORKFLOW P4-03 결정 1, Graph `renameNode` 와 같은 모양).
+ * 빈 값이나 같은 목록 다른 항목의 id 면 거부하고, 아니면 정의 자리와 문서의 참조를 함께 바꾸는 연산 목록이다 —
+ * 훅이 한 트랜잭션(undo 1회)으로 합친다. 예전 Form identity 행은 정의만 바꿔 참조(`risk_factor_id` 등)가 끊겼다.
+ */
+export const renameIdentity = (
+  tree: unknown,
+  section: ListSection,
+  item: FormListItem,
+  nextId: string,
+): SourceOperation[] | { invalid: "emptyIdentity" | "duplicateIdentity" } => {
+  const field = item.fields.find(({ key }) => key === item.identityKey);
+  if (field === undefined) return [];
+  if (nextId === "") return { invalid: "emptyIdentity" };
+  if (
+    section.items.some(
+      (other) =>
+        other.pointer !== item.pointer &&
+        identityOf(other, field.key) === nextId,
+    )
+  )
+    return { invalid: "duplicateIdentity" };
+  const definition = fieldOperation(itemSection(section, item), field, nextId);
+  const current = typeof field.value === "string" ? field.value : "";
+  if (!field.written || current === "" || current === nextId)
+    return [definition];
+  return [
+    definition,
+    ...identityReferences(tree, item, field.key, current).map(
+      (reference): SourceOperation => ({
+        kind: "replace-scalar",
+        pointer: reference.pointer,
+        value: nextId,
+      }),
+    ),
+  ];
 };
 
 export const removeItemOperation = (item: FormListItem): SourceOperation => ({
   kind: "remove",
   pointer: item.pointer,
 });
+
+/**
+ * `x-default-from` 형제 필드 값(P4-01 DEFECT-121-06): 생략하면 backend 가 이 값으로 채운다. 없으면 undefined.
+ * Form placeholder 와 파이프라인 요약(`valueOf`)이 같은 조회를 쓴다.
+ */
+export const defaultFromValueOf = (
+  siblings: readonly FormField[],
+  field: FormField,
+): unknown =>
+  field.defaultFrom === null
+    ? undefined
+    : siblings.find((sibling) => sibling.key === field.defaultFrom)?.value;
+
+/** 컨트롤 placeholder: 작성된 필드는 없음, 아니면 스키마 기본값, 없으면 `x-default-from` 형제 값. */
+export const placeholderOf = (
+  section: ObjectSection,
+  field: FormField,
+): unknown =>
+  field.written
+    ? undefined
+    : field.hasDefault
+      ? field.defaultValue
+      : defaultFromValueOf(section.fields, field);
+
+/**
+ * 목록 항목 추가 연산과 막힌 사유. 추가·preset·삭제(위치 pointer 연산)만 직전 편집의 parse 가 따라올 때까지
+ * 잠근다(P5-03 리뷰 DEFECT-133-01; 항목 필드·Graph 열기는 열어 둔다 — 3차 P2). 구조 변경 직후의 스칼라 확정은
+ * 훅이 pending 으로 보류한다. Form 목록과 파이프라인 카드 목록이 같이 쓴다.
+ */
+export const listAddition = (
+  schema: JsonSchema | null,
+  section: ListSection,
+  kind: string | null,
+  settling: boolean,
+): { operation: SourceOperation | null; blocked: string | null } => {
+  const operation =
+    schema === null ? null : addItemOperation(schema, section, kind);
+  return {
+    operation,
+    blocked:
+      schema === null
+        ? t("form.list.addNoSchema")
+        : operation === null
+          ? t("form.list.addBlocked")
+          : settling
+            ? t("form.list.addSettling")
+            : null,
+  };
+};

@@ -347,6 +347,26 @@ def test_a_document_ref_naming_both_a_strategy_and_a_draft_is_rejected(tmp_path:
     assert response.json()["detail"]["code"] == "assistant.document_ref_invalid"
 
 
+def test_a_turn_context_carries_the_run_environment_not_the_run_options(tmp_path: Path) -> None:
+    """턴 문맥의 `environment`는 실행 설정(`RunEnvironment`)이다. 실행 옵션 전체를 실으면
+    모델이 `environment.environment`를 읽게 되므로 요청 검증에서 거절한다(이슈 #355)."""
+    client = _client(tmp_path, _GatedProvider())
+    _create_profile(client)
+    session_id = _start_session(client)
+    environment = {"start": "2026-01-02", "end": "2026-02-20", "universe_id": "krx.common-stock"}
+    run_options = {"core": "rust", "initial_cash": 100_000_000, "environment": environment}
+
+    response = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "기간을 설명해 줘", "context": {**_CONTEXT, "environment": run_options}},
+    )
+
+    assert response.status_code == 422, response.text
+    assert {tuple(issue["loc"][:3]) for issue in response.json()["detail"]} == {
+        ("body", "context", "environment")
+    }
+
+
 def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path) -> None:
     gate = threading.Event()
     provider = _GatedProvider(

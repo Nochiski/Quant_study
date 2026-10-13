@@ -21,6 +21,12 @@ type SplitHandleProps = {
 };
 
 /**
+ * 손잡이 두께(px). 배치 판정이 패널 사이에 남는 폭을 셀 때도 이 값을 쓰므로 CSS에 따로 적지 않는다
+ * (strategy-ide의 편집기 최소 폭 판정, #290 리뷰 P3-3).
+ */
+export const SPLIT_HANDLE_SIZE = 6;
+
+/**
  * WAI-ARIA window splitter: `role="separator"` with `aria-valuenow`, arrow keys resize by
  * `step`, Home/End jump to the bounds, pointer drag resizes continuously. State (the size) is
  * owned by the caller so it can live in a widget or URL search param.
@@ -89,6 +95,11 @@ export const SplitHandle = ({
       aria-controls={controls}
       data-dragging={dragging}
       className={`ui-split-handle ui-split-handle--${orientation}`}
+      style={
+        orientation === "vertical"
+          ? { width: SPLIT_HANDLE_SIZE }
+          : { height: SPLIT_HANDLE_SIZE }
+      }
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

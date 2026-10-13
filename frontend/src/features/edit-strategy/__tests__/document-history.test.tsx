@@ -59,13 +59,13 @@ const Harness = () => {
       <DocumentHistoryActions history={history} />
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
+        schema={SCHEMA}
         diagnostics={[]}
         selectedPointer="/factors/0/graph"
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
         editing={{
           tree: form.tree,
-          schema: SCHEMA,
           transactions,
           catalogs: { equityFields: null },
         }}

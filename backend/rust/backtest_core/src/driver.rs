@@ -10,7 +10,7 @@ use crate::persistent::{Lifecycle, PersistentEngine, StoredGroup, StoredOrder};
 use crate::persistent_router::{self, DecisionWire, RouteError};
 use crate::records::{
     to_object, CorporateActionAppliedWire, FillWire, NativeDecision, OrderUpdateWire, OrderWire,
-    RecordPayload, SnapshotWire,
+    RecordPayload, RoundingWire, SnapshotWire,
 };
 use crate::session::py_float;
 use pyo3::exceptions::PyValueError;
@@ -49,6 +49,14 @@ pub(crate) struct RunSettings {
     pub(crate) notify_fill: bool,
     pub(crate) notify_order_update: bool,
     pub(crate) notify_corporate_action: bool,
+    /// 세션 index마다의 매도 거래세율. 비었으면 세금이 없다.
+    pub(crate) sell_tax_rates: Vec<f64>,
+}
+
+impl RunSettings {
+    fn sell_tax_rate(&self, session: usize) -> f64 {
+        self.sell_tax_rates.get(session).copied().unwrap_or(0.0)
+    }
 }
 
 /// 정산 세션이 확정된 자본변동 사건. index는 Python side table의 위치다.
@@ -344,7 +352,22 @@ impl PersistentEngine {
             match event {
                 Queued::Market => self.on_market(session)?,
                 Queued::Fill(fill) => {
+                    // 매도 거래세 레코드는 그 FILL 바로 뒤다 — Python 루프의 FILL 처리 순서와 같다.
+                    // 금액은 MARKET 적용(`apply_market_ops`)이 청구한 것과 같은 식이다.
+                    let rate = self.settings()?.sell_tax_rate(session);
+                    let tax = crate::session::sell_tax(&fill.side, fill.quantity, fill.price, rate);
+                    let instrument_id = fill.instrument_id;
                     self.record(session, RecordPayload::Fill(fill))?;
+                    if tax > 0.0 {
+                        self.record(
+                            session,
+                            RecordPayload::Cost {
+                                kind: "sell_tax".to_string(),
+                                instrument_id: Some(instrument_id),
+                                amount: tax,
+                            },
+                        )?;
+                    }
                 }
                 Queued::Notify(payload) => {
                     // 큐 엔트리의 세션이 곧 피드 커서(`current_session_count()` − 1)다.
@@ -419,6 +442,7 @@ impl PersistentEngine {
             settings.fee_rate,
             settings.default_participation.as_deref(),
             &settings.slippage,
+            settings.sell_tax_rate(session),
         )?;
         for (kind, order_id, quantity, price, slip, fee, payload) in ops {
             match kind.as_str() {
@@ -427,6 +451,14 @@ impl PersistentEngine {
                         order_meta.get(&order_id).cloned().ok_or_else(|| {
                             PyValueError::new_err(format!(
                                 "rust core filled an order that is not open — order_id={order_id}"
+                            ))
+                        })?;
+                    let cap_volume = self
+                        .feed_ref()?
+                        .cap_volume(session, instrument_id)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "rust core filled an order without a bar — order_id={order_id} instrument_id={instrument_id}"
                             ))
                         })?;
                     let fill = FillWire {
@@ -438,6 +470,7 @@ impl PersistentEngine {
                         price,
                         fee,
                         slippage_per_share: slip,
+                        cap_volume,
                     };
                     let fill = Box::new(fill);
                     self.push(session, PRIORITY_FILL, Queued::Fill(fill.clone()))?;
@@ -566,7 +599,8 @@ impl PersistentEngine {
         }
         // 자본 잠식 검사는 python과 같이 COST append 뒤다 — 잠식으로 멈춘 run의 partial trace에도
         // 그 세션 비용은 남는다.
-        if snapshot.equity < 0.0 {
+        // 자산 0도 파산이다. 0에서 이어지면 다음 세션 수익률이 0으로 나누기가 된다(#274).
+        if snapshot.equity <= 0.0 {
             let feed = self.feed_ref()?;
             let positions: Vec<String> = snapshot
                 .rows
@@ -574,7 +608,7 @@ impl PersistentEngine {
                 .map(|row| format!("('{}', '{}')", feed.symbol_of(row.0), row.1))
                 .collect();
             return Err(PyValueError::new_err(format!(
-                "equity_wiped_out: equity fell below zero at session close — ts={} equity={} \
+                "equity_wiped_out: equity fell to zero or below at session close — ts={} equity={} \
                  cash={} positions=[{}]",
                 feed.session_at(session)?,
                 py_float(snapshot.equity),
@@ -632,7 +666,8 @@ impl PersistentEngine {
                 native: native.map(Box::new),
             },
         )?;
-        let (orders, updates, error) = match self.route_with_id(&decision_id, &decision) {
+        let (orders, updates, roundings, error) = match self.route_with_id(&decision_id, &decision)
+        {
             Ok(routed) => routed,
             Err(error) => {
                 self.lifecycle = Lifecycle::Failed;
@@ -644,6 +679,10 @@ impl PersistentEngine {
             self.lifecycle = Lifecycle::Failed;
             self.failure_message = Some(error.1.clone());
             return Ok((decision_id, Some(error)));
+        }
+        // Python `_dispatch` 처럼 라우팅 직후, 주문 상태 변경보다 먼저 남긴다.
+        for rounding in roundings {
+            self.record(session, RecordPayload::Rounding(Box::new(rounding)))?;
         }
         for (order_id, status, detail) in updates {
             self.record_update(session, order_id, status, Some(detail))?;
@@ -664,6 +703,7 @@ impl PersistentEngine {
     ) -> PyResult<(
         Vec<OrderWire>,
         Vec<(String, String, String)>,
+        Vec<RoundingWire>,
         Option<RouteError>,
     )> {
         // `feed_ref()`(=`&self`) 대신 필드를 직접 빌린다 — 종가 표가 피드를 빌린 채
@@ -673,7 +713,7 @@ impl PersistentEngine {
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
         let bars = feed.current_closes()?;
-        let (orders, updates, groups, error) = persistent_router::route_basic_decision(
+        let (orders, updates, groups, roundings, error) = persistent_router::route_basic_decision(
             &self.portfolio,
             &mut self.orders,
             &self.router_config,
@@ -685,8 +725,22 @@ impl PersistentEngine {
             bars,
         )?;
         if error.is_some() {
-            return Ok((Vec::new(), updates, error));
+            return Ok((Vec::new(), updates, Vec::new(), error));
         }
+        let roundings = roundings
+            .into_iter()
+            .map(|(key, target_notional, rounded_notional)| {
+                Ok(RoundingWire {
+                    instrument_id: feed.instrument_id(&key).ok_or_else(|| {
+                        PyValueError::new_err(format!(
+                            "rounded instrument is not in the loaded feed registry — key={key}"
+                        ))
+                    })?,
+                    target_notional,
+                    rounded_notional,
+                })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
         // 심볼 폴백은 그날 바가 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
         // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
         // 등록부 표는 적재 시 한 번 만들어 두므로 결정마다 재조립하지 않는다.
@@ -716,7 +770,7 @@ impl PersistentEngine {
             .collect();
         self.pending_orders.extend(staged_orders);
         self.pending_groups.extend(staged_groups);
-        Ok((wires, updates, None))
+        Ok((wires, updates, roundings, None))
     }
 
     /// `loop._execute` 종료부: 잔여 주문을 취소 레코드로 남기고 스토어를 닫는다.
@@ -781,7 +835,8 @@ mod tests {
     use super::*;
     use crate::persistent_router::{ExecutionWire, TargetWire};
     use crate::records::{
-        KIND_DECISION, KIND_FILL, KIND_MARKET, KIND_ORDER, KIND_ORDER_UPDATE, KIND_SNAPSHOT,
+        KIND_DECISION, KIND_FILL, KIND_MARKET, KIND_ORDER, KIND_ORDER_UPDATE, KIND_ROUNDING,
+        KIND_SNAPSHOT,
     };
 
     const KEY: &str = "XKRX:005930:equity:KRW";
@@ -799,6 +854,7 @@ mod tests {
             notify_fill: false,
             notify_order_update: false,
             notify_corporate_action: false,
+            sell_tax_rates: Vec::new(),
         }
     }
 
@@ -822,6 +878,8 @@ mod tests {
                 vec![100.0, 110.0],
                 vec![100.0, 120.0],
                 vec![1_000, 1_000],
+                None,
+                None,
             )
             .unwrap();
         runtime.configure_router(
@@ -858,6 +916,8 @@ mod tests {
                 closes.clone(),
                 closes,
                 vec![1_000_000; sessions],
+                None,
+                None,
             )
             .unwrap();
         runtime.configure_router(
@@ -1063,6 +1123,7 @@ mod tests {
                 KIND_MARKET,
                 KIND_SNAPSHOT,
                 KIND_DECISION,
+                KIND_ROUNDING,
                 KIND_ORDER,
                 KIND_MARKET,
                 KIND_ORDER_UPDATE,
@@ -1071,7 +1132,15 @@ mod tests {
                 KIND_DECISION,
             ]
         );
-        assert_eq!(runtime.records.traded_notional().unwrap(), 500.0 * 110.0);
+        // 비중 0.5 × 자본 100,000 = 목표 Δ 50,000 → 종가 100 에 500주라 내린 금액도 50,000 이다.
+        assert_eq!(
+            runtime.records.result_table_rows().unwrap().roundings,
+            vec![(0, 0, 50_000.0, 50_000.0)]
+        );
+        assert_eq!(
+            runtime.records.result_table_rows().unwrap().fill_totals.0,
+            500.0 * 110.0
+        );
         assert_eq!(runtime.portfolio.held_qty(KEY), 500);
     }
 
@@ -1148,6 +1217,8 @@ mod tests {
                 vec![100.0, 110.0, 120.0],
                 vec![100.0, 110.0, 120.0],
                 vec![1_000, 1_000, 1_000],
+                None,
+                None,
             )
             .unwrap();
         runtime.configure_router(vec!["no_action".into()], vec![]);

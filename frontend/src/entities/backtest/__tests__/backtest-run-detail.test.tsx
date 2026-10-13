@@ -47,8 +47,13 @@ const result = (): BacktestRunResult => ({
       universe_id: "krx.common-stock",
       timing: "next_open",
       participation_rate: 0.2,
+      participation_basis: "adv20",
       fee_bps: 7,
       slippage_bps: 3,
+      impact_model: "sqrt",
+      impact_coefficient: 0.8,
+      sell_tax: "krx_statutory",
+      sell_tax_bps: null,
       missing: "zero",
     },
     environment_hash: "e".repeat(64),
@@ -61,7 +66,13 @@ const result = (): BacktestRunResult => ({
   },
   metric_definitions: [],
   metrics: [],
-  series: { equity: [], drawdown: [], monthly_returns: [], rolling_sharpe: [] },
+  series: {
+    equity: [],
+    drawdown: [],
+    monthly_returns: [],
+    rolling_sharpe: [],
+    rolling_sharpe_window_sessions: 126,
+  },
   artifacts: {
     snapshots: [],
     positions: [],
@@ -100,8 +111,13 @@ describe("run 상세의 실행 설정", () => {
       "유니버스",
       "체결 시점",
       "참여율 (%)",
+      "참여 기준",
       "수수료 (bp)",
       "슬리피지 (bp)",
+      "가격 충격 모델",
+      "가격 충격 계수",
+      "매도 거래세",
+      "매도 거래세율 (bp)",
       "결측 처리",
       "실행 설정 hash",
     ]);
@@ -112,7 +128,12 @@ describe("run 상세의 실행 설정", () => {
     expect(row("체결 시점")).toHaveTextContent("다음 거래일 시가");
     // 평면 비용 필드(15bp)가 아니라 실행 설정이 실제로 쓴 값을 보인다(P3-02 결정 4).
     expect(row("참여율 (%)")).toHaveTextContent("20%");
+    expect(row("참여 기준")).toHaveTextContent("20일 평균 거래대금");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");
+    expect(row("가격 충격 모델")).toHaveTextContent("√ 가격 충격(변동성·거래량 비례)");
+    expect(row("가격 충격 계수")).toHaveTextContent("0.8");
+    expect(row("매도 거래세")).toHaveTextContent("법정 세율(날짜별)");
+    expect(row("매도 거래세율 (bp)")).toHaveTextContent("—");
     expect(row("결측 처리")).toHaveTextContent("0으로 채우기");
     expect(row("실행 설정 hash")).toHaveTextContent(`${"e".repeat(16)}…`);
   });
@@ -131,6 +152,42 @@ describe("run 상세의 실행 설정", () => {
       .closest("div")!;
     expect(row).toHaveTextContent("zero");
   });
+
+  it("지금 스키마에 없는 기록 키도 스키마 칸 뒤에 원문으로 보인다(#251)", async () => {
+    // 스키마가 칸을 빼거나 이름을 바꾼 뒤 연 옛 run. run 기록은 실행 설정의 유일한 사본이라 숨기면 값을 잃는다.
+    const base = result();
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          manifest: {
+            ...base.manifest,
+            environment: {
+              ...base.manifest.environment,
+              borrow_bps: 40,
+            } as typeof base.manifest.environment,
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+    const user = userEvent.setup();
+    const drawer = screen.getByRole("group", {
+      name: "Manifest · 데이터 경고 · 재현성 정보",
+    });
+    await user.click(
+      within(drawer).getByText("Manifest · 데이터 경고 · 재현성 정보"),
+    );
+    const group = within(drawer).getByRole("group", { name: "실행 설정" });
+    const labels = within(group)
+      .getAllByRole("term")
+      .map((term) => term.textContent);
+    // 스키마 칸이 먼저, 기록에만 있는 키는 그 뒤, 해시가 맨 끝이다.
+    expect(labels.slice(-2)).toEqual(["borrow_bps", "실행 설정 hash"]);
+    expect(
+      within(group).getByText("borrow_bps", { exact: true }).closest("div"),
+    ).toHaveTextContent("40");
+  });
 });
 
 describe("run 상세의 데이터 경고", () => {
@@ -141,6 +198,7 @@ describe("run 상세의 데이터 경고", () => {
     "benchmark.delisted_sessions_frozen",
     "benchmark.invalid_bar_sessions_carried",
     "portfolio.sector_unknown_excluded",
+    "analytics.base_rate_carried_forward",
   ])("%s 에 제목이 있다", async (code) => {
     const base = result();
     render(
@@ -288,5 +346,98 @@ describe("사용 불가 지표의 이유", () => {
       .querySelector("tbody tr") as HTMLElement;
     expect(row).toHaveTextContent("벤치마크 값이 비어 계산할 수 없습니다");
     expect(within(row).queryByRole("link")).toBeNull();
+  });
+});
+
+describe("청산 거래 표", () => {
+  it("거래 비용 열은 수수료와 매도 거래세를 함께 담는다고 이름에 밝힌다", () => {
+    const base = result();
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          artifacts: {
+            ...base.artifacts,
+            trades: [
+              {
+                security_id: "005930",
+                side: "long",
+                opened_on: "2026-01-05",
+                closed_on: "2026-01-06",
+                quantity: "10",
+                entry_price: 100,
+                exit_price: 110,
+                // 수수료 1 + 매도 거래세 2.2(backend `_closed_trades` 가 합친다).
+                fees: 3.2,
+                pnl: 96.8,
+                slippage_cost: 0,
+              },
+            ],
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+
+    expect(
+      screen.getByRole("columnheader", { name: "비용(수수료·세금)" }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("롤링 샤프 차트", () => {
+  // 세 세션 곡선의 롤링 값이 모두 빈 결과. 창 길이는 backend 가 정한다(#303).
+  const emptyRolling = (windowSessions: number | null) => {
+    const base = result();
+    const sessions = ["2026-01-05", "2026-01-06", "2026-01-07"];
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          series: {
+            ...base.series,
+            equity: sessions.map((session, index) => ({
+              session,
+              equity: 100 + index,
+              benchmark_equity: null,
+            })),
+            rolling_sharpe: sessions.map((session) => ({
+              session,
+              value: null,
+            })),
+            rolling_sharpe_window_sessions: windowSessions,
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+    const heading = screen.getByRole("heading", { name: "Rolling Sharpe" });
+    return within(heading.closest("section") as HTMLElement);
+  };
+
+  it("실행이 창보다 짧으면 결과가 알려 준 창 길이로 이유를 말한다", () => {
+    // 점 3개·창 3은 경계다: 수익률 2개라 창이 한 번도 차지 않는다.
+    expect(
+      emptyRolling(3).getByText(
+        "실행이 롤링 창(3세션)보다 짧아 롤링 샤프 값이 없습니다.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("창보다 긴데 값이 비면 창 탓으로 말하지 않고 일반 문구를 보인다", () => {
+    // 수익률 2개로 창(2)은 찼지만 흔들림 0 같은 다른 이유로 값이 없는 경우다.
+    const chart = emptyRolling(2);
+    expect(
+      chart.getByText("이 구간에서 산출 가능한 값이 없습니다."),
+    ).toBeInTheDocument();
+    expect(chart.queryByText(/롤링 창/u)).not.toBeInTheDocument();
+  });
+
+  it("창 길이를 싣지 않은 옛 결과면 일반 문구를 보인다", () => {
+    const chart = emptyRolling(null);
+    expect(
+      chart.getByText("이 구간에서 산출 가능한 값이 없습니다."),
+    ).toBeInTheDocument();
+    expect(chart.queryByText(/롤링 창/u)).not.toBeInTheDocument();
   });
 });

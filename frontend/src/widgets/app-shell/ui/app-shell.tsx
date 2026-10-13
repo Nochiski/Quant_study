@@ -25,7 +25,12 @@ const RESEARCH = [
     icon: "▤",
     to: "/research/backtests",
   },
-  { key: "experiments", label: "nav.experiments", icon: "▦", to: null },
+  {
+    key: "experiments",
+    label: "nav.experiments",
+    icon: "▦",
+    to: "/research/experiments",
+  },
 ] as const;
 
 const OPERATIONS = [

@@ -8,13 +8,23 @@
  */
 import { expect, test } from "@playwright/test";
 
+import type {
+  BacktestRunSpec,
+  BacktestRunState,
+  PageBacktestRunSummary,
+} from "../../src/shared/api/generated";
 import {
+  backtest,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
   replaceSource,
+  RUN_ENVIRONMENT,
+  runSettingsInputs,
   saveAndWaitForRevision,
+  strategyIdentity,
 } from "../workbench-helpers";
 
 test(
@@ -27,15 +37,24 @@ test(
       mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-06 한글 화면"),
     );
     await expectPhase(page, "검증 통과");
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
 
-    // 노드 종류: 카드에 한글 이름이 먼저 보이고, 영어 kind는 보조 코드 표기로만 남는다.
-    const momentumNode = editor.getByRole("button", {
-      name: "노드 편집: mom_252",
+    // 같은 편집 노드에 backend 출력 표식과 스키마 입력 포트가 붙는다.
+    const momentumCard = editor.locator(".node-canvas__node").filter({
+      has: page.getByRole("button", { name: /^노드 편집: 2\./ }),
     });
-    await expect(momentumNode).toContainText("기간 집계");
-    await expect(momentumNode.getByRole("code")).toHaveText("time_series");
+    await expect(momentumCard).toContainText("그래프 출력");
+    await expect(momentumCard).toContainText("입력 노드");
+    await expect(momentumCard).not.toContainText("OUTPUT");
+    await expect(momentumCard).not.toContainText("window");
+
+    // 노드에는 한글 연산 이름을 표시하고 영어 kind는 인스펙터의 접힌 식별자 영역에 둔다.
+    const momentumNode = editor.getByRole("button", {
+      name: /^노드 편집: 2\./,
+    });
+    await expect(momentumNode).toContainText("기간 수익률");
+    await expect(momentumNode).not.toContainText("time_series");
 
     // 연산자: 팔레트가 한글 이름과 한 줄 설명·계산식을 보인다.
     const palette = editor.getByRole("group", { name: "연산자 팔레트" });
@@ -47,11 +66,11 @@ test(
     });
     await expect(movingAverage).toContainText("이동평균이 이것입니다");
 
-    // 필드: 노드를 고르면 설정 칸이 한글 라벨(보조로 키)과 한 줄 설명을 보인다.
+    // 필드: 노드를 고르면 설정 칸이 한글 라벨과 한 줄 설명을 보인다.
     await momentumNode.click();
     const selected = editor.getByRole("group", { name: /선택한 노드/u });
     await expect(
-      selected.getByRole("spinbutton", { name: "집계 기간 window" }),
+      selected.getByRole("spinbutton", { name: "집계 기간", exact: true }),
     ).toHaveValue("252");
     await expect(selected).toContainText("집계에 쓸 세션 수입니다");
     // 노드 종류의 한 줄 설명은 계약 패널이 한글로 보인다.
@@ -64,10 +83,10 @@ test(
     );
 
     // 삭제 거부: 참조하는 노드를 JSON Pointer가 아니라 노드 이름으로 말한다.
-    await editor.getByRole("button", { name: "close · 삭제" }).click();
+    await editor.getByRole("button", { name: /^1\..* · 삭제$/ }).click();
     const refusal = editor.getByRole("alert");
     await expect(refusal).toHaveText(
-      "close을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: mom_252",
+      /1\..*을\(를\) 다른 곳이 참조하고 있어 삭제하지 않았습니다: 2\. 기간 수익률/,
     );
     await expect(refusal).not.toContainText("/factors/");
     // 거부된 삭제는 문서를 건드리지 않는다.
@@ -114,5 +133,239 @@ test(
     await expect(
       page.getByRole("region", { name: "이전 schema 문서" }),
     ).toHaveCount(0);
+  },
+);
+
+/**
+ * 연구 구간 규칙이 생기기 전 기간으로 돌다 자본 잠식으로 멈춘 옛 실행. 아래 두 테스트는 옛 실행의 이력·상태·결과·
+ * 재실행을 브라우저에서 대신 응답한다 — 그런 실행을 실제로 만들면 e2e 이력 DB에 남아 다른 스토리의 이력 단언을
+ * 흔든다. 문장은 frontend 번역(run 실패 코드·백테스트 API 코드)이 소유한다.
+ */
+const WIPED_OUT: BacktestRunState = {
+  run_id: "run-dm06-wiped-out",
+  status: "failed",
+  progress: 0.6,
+  stage: "engine",
+  message: "Run failed",
+  error:
+    "EquityWipedOutError: session-end equity fell to or below zero — session=2018-03-02 equity=-1204.5",
+  error_code: "backtest.run.equity_wiped_out",
+  created_at: "2026-09-01T00:00:00Z",
+  updated_at: "2026-09-01T00:00:05Z",
+};
+
+/** 연구 구간 규칙이 생기기 전 기간으로 기록된 옛 실행의 요청. 재실행은 이것을 그대로 다시 보낸다. */
+const OLD_RUN_REQUEST: BacktestRunSpec = {
+  environment: {
+    start: "2018-01-02",
+    end: "2019-12-30",
+    universe_id: "krx.common-stock",
+  },
+  strategy_source: {
+    kind: "saved_revision",
+    strategy_id: "strategy-dm06",
+    revision: 3,
+    expected_spec_hash: "d".repeat(64),
+  },
+};
+
+test(
+  "US-DM-06 실패한 옛 실행은 백테스트 이력과 결과 화면에서 같은 한글 문장으로 보이고 재실행 거절은 고칠 곳을 말한다",
+  { tag: ["@story", "@US-DM-06"] },
+  async ({ page }) => {
+    const history: PageBacktestRunSummary = {
+      items: [
+        {
+          run: WIPED_OUT,
+          kind: "single",
+          experiment_id: null,
+          experiment_paused: false,
+          strategy_provenance: {
+            kind: "saved_revision",
+            strategy_id: "strategy-dm06",
+            revision: 3,
+            schema_version: "1.2",
+            spec_hash: "d".repeat(64),
+            source_hash: "e".repeat(64),
+          },
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 25,
+    };
+    await page.route(
+      (url) => url.pathname === "/api/v1/backtests",
+      (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ json: history })
+          : route.fulfill({
+              status: 422,
+              json: {
+                detail: {
+                  code: "backtest.run.research_window_violation",
+                  message:
+                    "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
+                  sealed_start: "2016-01-01",
+                  sealed_end: "2019-12-31",
+                  research_start: "2020-01-02",
+                },
+              },
+            }),
+    );
+    await page.route(`**/api/v1/backtests/${WIPED_OUT.run_id}`, (route) =>
+      route.fulfill({ json: WIPED_OUT }),
+    );
+    await page.route(
+      `**/api/v1/backtests/${WIPED_OUT.run_id}/request`,
+      (route) => route.fulfill({ json: OLD_RUN_REQUEST }),
+    );
+    const sentence =
+      "세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).";
+
+    // 이력 줄은 서버 원문 대신 결과 화면과 같은 한글 문장을 보이고, 원문은 접힌 "서버 사유"에만 둔다.
+    const response = await page.goto("/research/backtests");
+    expect(response?.ok()).toBe(true);
+    const row = page.getByRole("row").filter({ hasText: WIPED_OUT.run_id });
+    await expect(row.getByText(`실행 오류: ${sentence}`)).toBeVisible();
+    await expect(row.getByRole("group")).toContainText("EquityWipedOutError");
+    await expect(row).not.toContainText("EquityWipedOutError", {
+      useInnerText: true,
+    });
+    // 지난 실행이라 줄마다 경고(alert)로 읽히지 않는다.
+    await expect(row.getByRole("alert")).toHaveCount(0);
+
+    // 결과 화면도 같은 문장이다.
+    await row.getByRole("link", { name: "실행 열기" }).click();
+    await expect(page).toHaveURL(`/research/backtests/${WIPED_OUT.run_id}`);
+    await expect(page.getByRole("alert", { name: "실행 오류" })).toContainText(
+      sentence,
+    );
+
+    // 결과 화면에는 실행 설정 패널이 없다 — 재실행 거절이 어디서 무엇을 고칠지 말한다.
+    await page.getByRole("button", { name: "동일 설정 재실행" }).click();
+    const rejection = page.getByRole("alert", {
+      name: "동일 설정으로 다시 실행하지 못했습니다",
+    });
+    await expect(rejection).toContainText(
+      "전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
+    );
+    await expect(rejection.getByRole("group")).toContainText(
+      "got=start=2018-01-02",
+    );
+    await expect(rejection).not.toContainText("got=start", {
+      useInnerText: true,
+    });
+  },
+);
+
+// 실제 backend 로 두 실패를 만든다. 이력 단언은 다른 스토리가 run id 로 거르므로 이 실행들이 흔들지 않는다.
+test(
+  "US-DM-06 한 번도 사지 않은 실행과 데이터가 모르는 벤치마크는 실패 문장이 고칠 곳을 말한다",
+  { tag: ["@story", "@US-DM-06"] },
+  async ({ page }) => {
+    test.setTimeout(240_000);
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(
+      page,
+      mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-06 실패 문장"),
+    );
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 1);
+    const { strategyId } = strategyIdentity(page);
+    const failure = page.getByRole("alert", { name: "실행 오류" });
+
+    // 월별 리밸런싱은 달의 마지막 거래일에 정해 다음 거래일에 산다. 1월 둘째 주만 돌리면 판단일(01-12)이
+    // 기간의 끝이라 살 날이 없다 — "실행 설정과 엔진 능력"이 아니라 기간·리밸런싱을 고치라고 말한다(#360).
+    await fillRunEnvironment(
+      page,
+      {},
+      { ...RUN_ENVIRONMENT, start: "2024-01-08", end: "2024-01-12" },
+    );
+    await expect(backtest(page)).toBeEnabled();
+    await backtest(page).click();
+    await expect(failure).toContainText(
+      "기간 안에 리밸런싱일이 없거나 조건을 통과한 종목이 없어 한 번도 사지 않았습니다.",
+      { timeout: 120_000 },
+    );
+    await expect(failure).not.toContainText("엔진 능력");
+
+    // 데이터가 모르는 벤치마크 ID 는 tape 계산 전에 실패하고 벤치마크 칸을 고치라고 말한다(#361).
+    await openEditor(page, `/research/strategies/${strategyId}/revisions/1`);
+    const { toggle, start, end } = runSettingsInputs(page);
+    await toggle.click();
+    await start.fill(RUN_ENVIRONMENT.start);
+    await end.fill(RUN_ENVIRONMENT.end);
+    await page
+      .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
+      .fill("KOSPI");
+    await toggle.click();
+    await expect(backtest(page)).toBeEnabled();
+    await backtest(page).click();
+    await expect(failure).toContainText(
+      "데이터 소스에 없는 벤치마크 종목 ID입니다.",
+      { timeout: 60_000 },
+    );
+    await expect(failure.getByRole("group")).toContainText("got=['KOSPI']");
+  },
+);
+
+test(
+  "US-DM-06 결과 파일을 읽을 수 없는 완료 실행은 결과 화면이 다시 실행하라고 말하고 결과를 다시 묻지 않는다",
+  { tag: ["@story", "@US-DM-06"] },
+  async ({ page }) => {
+    const unreadable: BacktestRunState = {
+      run_id: "run-dm06-unreadable",
+      status: "completed",
+      progress: 1,
+      stage: "completed",
+      message: "Run completed",
+      artifact_sha256: "f".repeat(64),
+      created_at: "2026-09-02T00:00:00Z",
+      updated_at: "2026-09-02T00:00:07Z",
+    };
+    let resultReads = 0;
+    await page.route(`**/api/v1/backtests/${unreadable.run_id}`, (route) =>
+      route.fulfill({ json: unreadable }),
+    );
+    await page.route(
+      `**/api/v1/backtests/${unreadable.run_id}/request`,
+      (route) => route.fulfill({ json: OLD_RUN_REQUEST }),
+    );
+    await page.route(
+      `**/api/v1/backtests/${unreadable.run_id}/result`,
+      (route) => {
+        resultReads += 1;
+        return route.fulfill({
+          status: 410,
+          json: {
+            detail: {
+              code: "backtest.result.unreadable",
+              message: `run result file is missing — run_id=${unreadable.run_id}`,
+            },
+          },
+        });
+      },
+    );
+
+    const response = await page.goto(
+      `/research/backtests/${unreadable.run_id}`,
+    );
+    expect(response?.ok()).toBe(true);
+    // 일반 문구 대신 다시 불러와도 소용없고 같은 설정으로 다시 실행하라고 말한다. 서버 사유는 접힌 상세에만 있다.
+    const failure = page
+      .getByRole("alert")
+      .filter({ hasText: "이 실행의 결과 파일을 읽을 수 없습니다." });
+    await expect(failure).toContainText(
+      "다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
+    );
+    await expect(failure.getByRole("group")).toContainText(
+      "run result file is missing",
+    );
+    await expect(failure).not.toContainText("run result file", {
+      useInnerText: true,
+    });
+    // 410은 다시 물어도 같아 한 번만 묻는다. 다시 묻는다면 경고는 1초 뒤 두 번째 실패 다음에야 뜬다.
+    expect(resultReads).toBe(1);
   },
 );

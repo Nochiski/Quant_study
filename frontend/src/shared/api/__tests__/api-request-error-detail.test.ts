@@ -33,9 +33,9 @@ const rejection = async (call: Promise<unknown>): Promise<ApiRequestError> => {
   throw new Error("expected the request to be rejected");
 };
 
-// #268 리뷰 P3-4: `detail` 은 저장 배너(`저장 불가: {detail}`)·업그레이드 배너·추적 오류가 본문으로 쓴다. FastAPI
-// 기본 배열 422의 진단 요약이 여기에 들어가면 영문 경로(`source: Field required`)가 본문으로 샌다. 요약은 접힌
-// 진단 상세용 `diagnostic` 에만 싣는다.
+// #268 리뷰 P3-4: `detail` 은 저장 상태 줄(409·422)이 본문으로 쓴다. FastAPI 기본 배열 422의 진단 요약이 여기에
+// 들어가면 영문 경로(`source: Field required`)가 본문으로 샌다. 요약은 접힌 진단 상세용 `diagnostic` 에만
+// 싣는다(업그레이드·추적 실패는 둘 다 접힌 서버 사유로만 보인다, #270).
 describe("ApiRequestError detail vs diagnostic", () => {
   it.each([
     [

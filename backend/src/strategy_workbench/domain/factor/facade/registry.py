@@ -5,6 +5,7 @@ from strategy_workbench.domain.factor._registry import (
     FactorPreference,
     FactorRegistry,
     build_default_factor_registry,
+    factor_availability,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "FactorPreference",
     "FactorRegistry",
     "build_default_factor_registry",
+    "factor_availability",
 ]

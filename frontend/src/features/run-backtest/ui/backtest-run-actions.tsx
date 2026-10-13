@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import {
-  BacktestRejection,
   backtestStartRejectionMessage,
   runEnvironmentFields,
   useCancelBacktest,
@@ -10,9 +9,9 @@ import {
   type BacktestRunSpec,
   type BacktestRunState,
 } from "../../../entities/backtest";
-import { ApiRequestError } from "../../../shared/api";
+import { ApiRequestError, failureReason } from "../../../shared/api";
 import { t } from "../../../shared/config";
-import { Button } from "../../../shared/ui";
+import { Button, FailureNotice } from "../../../shared/ui";
 import { runFieldLabel } from "../model/run-settings-problems";
 import "./backtest-run-actions.css";
 
@@ -54,15 +53,7 @@ export const BacktestRunActions = ({
       schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
     [schema.data],
   );
-  const actionError = cancel.error ?? replay.error;
-  // 서버 원문은 접힌 "서버 사유"로만 간다. `ApiRequestError.message`(`API request failed …`)는 개발자
-  // 진단이라 쓰지 않는다(#268 리뷰 P3-3).
-  const actionErrorDetail =
-    actionError instanceof ApiRequestError
-      ? (actionError.detail ?? actionError.diagnostic ?? null)
-      : actionError instanceof Error
-        ? actionError.message
-        : null;
+  const actionErrorDetail = failureReason(cancel.error ?? replay.error);
   // 재실행 거절은 시작 거절이다 — 편집기 툴바와 같은 문장 규칙(`backtestStartRejectionMessage`)을 쓴다.
   const replayRejection =
     replay.error === null
@@ -75,6 +66,7 @@ export const BacktestRunActions = ({
             replay.error.field !== undefined
             ? runFieldLabel(environmentFields, replay.error.field)
             : null,
+          replay.error instanceof ApiRequestError ? replay.error.values : {},
         );
 
   return (
@@ -83,7 +75,15 @@ export const BacktestRunActions = ({
       role="group"
       aria-label={t("backtest.actions.title")}
     >
-      {active ? (
+      {active &&
+      cancel.data?.run_id === runId &&
+      cancel.data.kept_by_owners === true ? (
+        // 내 몫은 빠졌지만 실험이 이 실행을 쓰고 있어 계속 돈다(#382). 멈추려면 실험을 취소한다. 같은
+        // 화면이 다른 run 으로 넘어가면 앞 run 의 취소 응답은 쓰지 않는다(#407 리뷰 P2-1).
+        <p className="backtest-run-actions__kept" role="status">
+          {t("backtest.actions.keptByExperiment")}
+        </p>
+      ) : active ? (
         <Button
           size="small"
           tone="danger"
@@ -107,15 +107,15 @@ export const BacktestRunActions = ({
         </Button>
       )}
       {replayRejection !== null && cancel.error === null ? (
-        <BacktestRejection
+        <FailureNotice
           title={t("backtest.actions.rerunFailed")}
           message={replayRejection}
-          detail={actionErrorDetail}
+          reason={actionErrorDetail}
         />
       ) : cancel.isError || replay.isError || requestFailed ? (
-        <BacktestRejection
+        <FailureNotice
           message={t("backtest.actions.error")}
-          detail={actionErrorDetail}
+          reason={actionErrorDetail}
         />
       ) : null}
     </div>

@@ -53,7 +53,7 @@
 
 `data/stage/` 의 원장 parquet 을 읽어 **29개 equity 표**(팩트·차원 25 + 선언표 3 —
 `declaration_table=True` 는 `universe_policy`·`dataset_profile`·`factor_readiness`)를 짓고,
-`equity.duckdb` 카탈로그(매크로 8)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
+`equity.duckdb` 카탈로그(매크로 11)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
 백테스트 파이프라인에 point-in-time 관측을 공급한다.
 
 - 코드: `database/src/equity/`
@@ -186,7 +186,7 @@ ssh kael-server "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
 표별 게이트 `metrics` 를 통째로 뽑아 baseline 근거로 쓰려면
 `database/scripts/equity_gate_metrics.py`(서버에서 `data/equity` 를 읽어 JSON 한 덩이).
 
-### 3-4. 카탈로그(뷰 매크로 8) · 소비자 계약(EG-C 6항)
+### 3-4. 카탈로그(뷰 매크로 11) · 소비자 계약(EG-C 6항)
 
 ```bash
 export QL_HOME=$HOME/quant-ledger PYTHONPATH=$HOME/quant-ledger/src
@@ -196,7 +196,7 @@ cd ~/quant-ledger
 .venv/bin/python -m equity --root data/equity --stage-root data/stage \
   --baseline data/equity/baseline.json catalog
 
-# 소비자 계약 EGC-01·02·03·04·05·10 — 커널 어댑터(pyarrow)로 duckdb 를 교차 검증
+# 소비자 계약 EGC-01·02·03·04·05·10 — 제품이 쓰는 워크벤치 어댑터를 duckdb 독립 읽기와 교차 검증(#372)
 .venv/bin/python -m equity --root data/equity --stage-root data/stage \
   --baseline data/equity/baseline.json contract --engine-src $HOME/quant-ledger/_engine
 ```
@@ -205,8 +205,9 @@ cd ~/quant-ledger
   `data/equity/_failed/catalog_<snapshot>.json` 을 읽어라.
 - `_asof/<view>/<snapshot_id>/` 는 EG5c 의 표본이다. 표본을 새 기준으로 갈아야 할 때만
   `catalog --rebase-asof` 를 쓰고, 그 사실을 DESIGN §10 에 기록하라(승인 축).
-- `contract` 의 `--engine-src` 는 서버에 rsync 해 둔 엔진 소스(`~/quant-ledger/_engine`)다.
-  서버 venv 에 `numpy`·`pyarrow` 가 있어야 한다.
+- `contract` 의 `--engine-src` 는 서버에 rsync 해 둔 backend 소스(`~/quant-ledger/_engine`, `deploy.sh` 가 `strategy_workbench/` 를 민다)다.
+  facade 는 제3자 패키지 없이 import 되고 어댑터는 duckdb 만 쓴다(#372 전 커널 어댑터는
+  `numpy`·`pyarrow` 를 요구했다). 사건이 카탈로그 뷰를 함께 읽어 `catalog` 뒤에 돌린다.
 
 ### 3-5. 로컬 테스트
 
@@ -217,7 +218,7 @@ ruff check --line-length 100 --select E,F,I,UP,B database/src/equity
 
 # 워크벤치 어댑터(ruamel.yaml 등 backend 의존성이 필요해 --project backend 로 돈다)
 cd backend && uv run --extra parquet --extra equity pytest \
-  tests/contract tests/test_adapters_equity_duckdb.py tests/test_adapters_equity.py -q
+  tests/contract tests/test_adapters_equity_duckdb.py -q
 ```
 
 `pytest ... | tail` 은 실패를 가린다 — **FAILED 도 grep 하라**.
@@ -615,7 +616,9 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
   아직 안 된다**. 워크벤치 어댑터가 `idx:코스피` 형태 주소를 알아보아야 한다. 예약 접두는
   FIELD_MAP §1 에 어휘로 있고 `BacktestDataQuery.benchmark_security_id` 그릇도 이미 있다.
   엔진 계약 변경이라 커널 쪽과 함께 정한다.
-- **`src_omitted` → `CellKind` 라벨 손실**(DESIGN §11 ⑪) — 워크벤치 도메인이 값 없는
+- ~~`src_omitted` → `CellKind` 라벨 손실~~ — **해소(워크벤치 #371, 2026-09-30)**: 키움 공매도는 어댑터가
+  값 0 의 `SOURCE_OMITTED_ZERO` 로 내고 수급·대차·신용은 MISSING 그대로다(정본 FIELD_MAP §1).
+  옛 서술: (DESIGN §11 ⑪) — 워크벤치 도메인이 값 없는
   `SOURCE_OMITTED_ZERO` 를 거부해 S21-3 이 MISSING 으로 접었다. 소비층이 "0 으로 읽어도 되는 결측"과
   "그냥 결측"을 구분하지 못한다. 해소는 (a) `dataset_profile` 이 값 축·지식 축을 분리하거나
   (b) 워크벤치 도메인 계약 변경.
@@ -632,7 +635,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
   판단이 없고 `dataset_profile` 에도 행 단위 품질 축이 없다(`requires_confirmation` 은 필드 단위).
   서버 27.44% 행이 걸리는데 절반 이상이 `unknown_price_only`(MVP 4유형 밖 기준가 변화)라
   일률적으로 거르면 유니버스가 반으로 준다. 팩터층·소비자와 함께 정할 것.
-- **`financial.*`·`consensus.*` 도 표로 내릴지** — 카탈로그가 낡으면 여전히 이 9필드가 죽는다.
+- **`financial.*`·`consensus.*` 도 표로 내릴지** — 카탈로그가 낡으면 여전히 이 9필드가 죽는다(카탈로그에
+  기대는 필드 전체는 FIELD_MAP §3 「부팅 검사」 — 신용잔고·수정주가는 가림 뷰라 일부러 기댄다, #249·#220).
   다만 두 뷰는 `as_of` 로 접는 축이 있어 (키, 날짜) 의 순수 함수가 아니다 — 조정가처럼 그냥
   옮길 수 없고, 무엇을 grain 으로 굳힐지부터 정해야 한다.
 - **조정 OHLC·거래량의 field_id** — 표에는 컬럼으로 있으나 어댑터는 내지 않는다(FIELD_MAP §2
@@ -665,7 +669,7 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 | 산출 SQL | `database/src/equity/sql/<table>.sql` |
 | 프레임(빌드·게이트·입력 고정·baseline·CLI) | `build.py`·`gates.py`·`inputs.py`·`baseline.py`·`__main__.py` |
 | 전방 조정가 표 | `rules_s23.py` · `sql/price_adj_daily.sql` — 소비 규약은 아래 「조정가 읽는 법」 |
-| 뷰 매크로 8 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`) |
+| 뷰 매크로 11 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`·`v_unfolded_event`·`v_adj_close`) |
 | 카탈로그 publish + EG11·EG5c | `catalog.py` |
 | 소비자 계약 EG-C | `contract.py` |
 | 골든 픽스처 | `database/src/equity/fixtures/<table>.json` |
@@ -683,16 +687,18 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 질의 창·as_of 에 무관하고 `available_date` 는 언제나 `date` 다.
 
 **누가 읽는가**
-- 워크벤치 `price.adj_close` — 어댑터가 이 표를 직접 읽는다(매크로가 아니다). 카탈로그가 낡거나
-  없어도 산다.
+- 워크벤치 `price.adj_close` — 어댑터가 이 표를 카탈로그 뷰 `v_adj_close` 로 읽는다(#220). 원장이
+  그날 사건을 접지 못한 적용일 행(KRX 기준가 적용일에 늦게 공개된 ok 계수 ·
+  `krx_base_inconsistent`)은 결측이고, 카탈로그가 없거나 낡으면 조정가 원천이 빠진다(DESIGN §5).
 - parquet 을 직접 읽는 분석 — `data/equity/price_adj_daily/v=<build>/year=*/…`.
 - 카탈로그 매크로 `v_adj_price_fwd`·`v_adj_volume_fwd` — 같은 값을 내는 읽기 경로다. 표에 없는
   것(원주가 컬럼 동반·`lag_override` 로 계수 컷오프를 미는 축)이 필요할 때만 쓴다.
 
 **읽지 않는 곳 — 엔진 커널**. 커널(`backtest_engine`)은 **원주가 bar + `CorporateActionEvent`** 로
 포지션 수량을 스스로 조정한다. 조정가를 bar 로 주면 같은 사건이 두 번 반영된다(가격은 이미
-조정됐는데 수량까지 다시 조정된다). `backtest_engine/adapters/equity_duckdb.py` 가 이 표를 읽지
-않는다는 것을 `test_equity_s23_price_adj.py::test_커널_어댑터는_조정가_표를_읽지_않는다` 가 지킨다.
+조정됐는데 수량까지 다시 조정된다). 워크벤치 `load_backtest_dataset` 은 원주가 bar 만 커널에 넘기고,
+EG-C ①(bar = stage 원주가)과 `test_equity_s07_contract.py::test_contract_meta_와_워크벤치_facade_직접_호출`
+이 지킨다(#372 전에는 커널 어댑터 파일의 문자열 검사였다).
 
 **`n_unadjusted_events` 를 반드시 보라** — 같은 구간에서 `factor_ok=false` 이고
 `apply_date ≤ d` 인 사건 수다. **0 이 아니면 그 구간의 조정 시계열은 불완전하다**: 기업행위가
@@ -716,7 +722,7 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 > `load_backtest_dataset` 이 창 안에서 사건 세션이나 그 뒤에 거래된 bar 가 없는 기업 행동을 빼고
 > `equity.corporate_action_without_bar_dropped` 경고로 남긴다(`7f9c7e15`, 포지션은 마지막 체결가에
 > 동결된다). 커널 어댑터 `backtest_engine.adapters.equity_duckdb` 에는 같은 거르기가 없어, 커널을 그
-> 어댑터로 직접 돌리는 경로는 확인하지 않았다. 아래는 당시 서술이다.
+> 어댑터로 직접 돌리는 경로는 확인하지 않았다(2026-09-30 #372 로 그 어댑터를 걷어 이제 그 경로가 없다). 아래는 당시 서술이다.
 
 정지된 뒤 데이터 끝까지 재개하지 않은 종목에 감자·병합이 걸리면 커널이
 `CorporateActionWithoutBar` 를 던지고 **run 전체가 중단된다**(부분 결과도 없다).
@@ -781,8 +787,8 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 - **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
   rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
 - 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를
-  굽기 때문에(§10 P1c) 경로가 바뀌면 `financial.*`·`consensus.*` 가
-  `unavailable` 이 된다(`price.adj_close` 는 S23 부터 표를 읽으므로 무관하다) — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
+  굽기 때문에(§10 P1c) 경로가 바뀌면 카탈로그에 기대는 필드(FIELD_MAP §3 「부팅 검사」)가
+  `unavailable` 이 된다 — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
 
 **워크벤치를 duckdb 어댑터로 기동**
 ```
@@ -795,11 +801,6 @@ cd backend && uv run --extra parquet --extra equity server
 `backend/src/strategy_workbench/bootstrap/_http.py` 의 `runtime_equity_selection()`,
 회귀 테스트는 `backend/tests/test_http_equity_env.py`.
 
-**기동 뒤 부팅 로그 경고** — duckdb 어댑터는 아래 경우에 뜨기는 하되 로그에 경고를 남긴다. 코드는 경고
-문장 안 괄호에 있다.
-- `catalog_columns_missing` — 옛 카탈로그라 매크로에 원천이 읽는 열이 없다(#233). 그 원천의 필드를
-  뺀다. 카탈로그를 다시 만든다(`ledger_sync catalog` 또는 `python -m equity … catalog`).
-- `catalog_macro_unreadable` — 매크로가 가리키는 parquet 가 빠졌거나 손상됐다(#245). 그 원천의 필드를
-  뺀다. `ledger_sync verify` 로 파일을 확인하고 카탈로그를 다시 만든다.
-- `profile_lag_fallback` — `dataset_profile` 에 랙 행이 없는 필드를 폴백 랙으로 읽는다(#255). 필드는
-  빠지지 않는다. `dataset_profile` 을 받는다(`ledger_sync`).
+**기동 뒤 부팅 로그 경고** — duckdb 어댑터는 못 읽는 원천의 필드를 빼고 뜨며 로그에 경고를 남긴다. 코드는
+경고 문장 안 괄호에 있다. 코드별 조치는 `LEDGER_SYNC.md` §5, 코드별 뜻과 카탈로그에 기대는 필드는
+`EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.

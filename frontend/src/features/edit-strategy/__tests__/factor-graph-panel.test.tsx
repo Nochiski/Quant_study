@@ -18,6 +18,10 @@ import { FactorGraphPanel } from "../ui/factor-graph-panel";
 
 afterEach(cleanup);
 
+const SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/runtime-schema.json"),
+) as JsonSchema;
+
 const graph: FactorGraphRequest["graph"] = {
   // Authored order intentionally differs from backend execution order.
   nodes: [
@@ -150,6 +154,33 @@ const plannedFactor = (
   explanation: graphExplanation,
 });
 
+/** 값 없는 선택 칸(`periods: null`)을 가진 노드. compile 응답 spec 은 dataclass 전 필드를 싣는다. */
+const NEGATE = {
+  node_id: "neg",
+  kind: "unary",
+  operator: "negate",
+  input_node_id: "close",
+  periods: null,
+} as const;
+
+/** compile 응답이 dataclass 기본값을 실은 노드들: 순위 노드의 절단 분위, 모멘텀의 `lag: 0`. */
+const RANKED = {
+  node_id: "ranked",
+  kind: "cross_sectional",
+  operator: "rank",
+  input_node_id: "close",
+  lower_quantile: 0.01,
+  upper_quantile: 0.99,
+} as const;
+const MOMENTUM = {
+  node_id: "mom",
+  kind: "time_series",
+  operator: "momentum",
+  input_node_id: "close",
+  window: 60,
+  lag: 0,
+} as const;
+
 const readyState = (): ExecutionPlansState => ({
   status: "ready",
   expectedRegistryVersion: "factor-registry-v7",
@@ -182,7 +213,7 @@ const disconnectedReadyState = (): ExecutionPlansState => {
 
 describe("FactorGraph projection", () => {
   it("keeps backend plan order, contracts and branch roles while mapping authored pointers", () => {
-    const projection = projectFactorGraphs(readyState());
+    const projection = projectFactorGraphs(readyState(), SCHEMA);
     if (projection.status !== "ready") throw new Error("fixture must be ready");
 
     const factor = projection.factors[0];
@@ -201,18 +232,18 @@ describe("FactorGraph projection", () => {
       minimumHistorySessions: 1,
     });
     expect(factor.nodes[4].inputs).toMatchObject([
-      { nodeId: "positive", role: "predicate" },
-      { nodeId: "neutralized_value", role: "true" },
-      { nodeId: "neutralized_value", role: "false" },
+      { nodeId: "positive", role: "조건 노드" },
+      { nodeId: "neutralized_value", role: "참일 때 값" },
+      { nodeId: "neutralized_value", role: "거짓일 때 값" },
     ]);
     expect(factor.nodes[3].details).toEqual([
-      { label: "group_field_id", value: "classification.sector" },
+      { label: "그룹 필드", value: "classification.sector" },
     ]);
     expect(factor.nodes[4].isOutput).toBe(true);
   });
 
   it("keeps disconnected authored nodes visible outside the backend execution plan", () => {
-    const projection = projectFactorGraphs(disconnectedReadyState());
+    const projection = projectFactorGraphs(disconnectedReadyState(), SCHEMA);
     if (projection.status !== "ready") throw new Error("fixture must be ready");
 
     const factor = projection.factors[0];
@@ -254,7 +285,7 @@ describe("FactorGraph projection", () => {
       expectedDataSnapshotId: "krx-pit-2026-09-01",
       factors: [plannedFactor(graph, invalidExplanation)],
     };
-    const projection = projectFactorGraphs(state);
+    const projection = projectFactorGraphs(state, SCHEMA);
     if (projection.status !== "ready") throw new Error("fixture must be ready");
 
     expect(projection.factors[0].source).toBe("validation-only");
@@ -268,6 +299,105 @@ describe("FactorGraph projection", () => {
     expect(projection.factors[0].nodes[0].issues[0].code).toBe(
       "factor.graph.cycle",
     );
+  });
+
+  it("reads input and setting slots from the runtime schema, so a slot the backend adds shows up without a kind table (#354)", () => {
+    // 입력 칸은 `x-reference: node`, 설정 칸은 종류·이름·연산·입력을 뺀 나머지이고, 이름은 설명 키다.
+    const schema = structuredClone(SCHEMA) as {
+      $defs: Record<string, { properties: Record<string, unknown> }>;
+    };
+    Object.assign(schema.$defs.GroupNode.properties, {
+      weight_node_id: {
+        type: "string",
+        "x-description-key": "strategy.field.node.left_node_id",
+        "x-reference": "node",
+      },
+      bucket_count: {
+        type: "integer",
+        "x-description-key": "strategy.field.node.window",
+      },
+    });
+    const extended = {
+      ...graph,
+      nodes: [
+        ...graph.nodes.map((node) =>
+          node.node_id === "neutralized_value"
+            ? { ...node, weight_node_id: "zero", bucket_count: 5 }
+            : node,
+        ),
+        NEGATE,
+        RANKED,
+        MOMENTUM,
+      ],
+    } as FactorGraphRequest["graph"];
+    const planless = explanation();
+    planless.plan = null;
+    const projection = projectFactorGraphs(
+      {
+        status: "ready",
+        expectedRegistryVersion: "factor-registry-v7",
+        expectedDataSnapshotId: "krx-pit-2026-09-01",
+        factors: [plannedFactor(extended, planless)],
+      },
+      schema as unknown as JsonSchema,
+    );
+    if (projection.status !== "ready") throw new Error("fixture must be ready");
+
+    const node = projection.factors[0].nodes.find(
+      (item) => item.nodeId === "neutralized_value",
+    );
+    expect(node?.inputs).toMatchObject([
+      { nodeId: "close", role: "입력 노드" },
+      { nodeId: "zero", role: "왼쪽 노드" },
+    ]);
+    expect(node?.details).toEqual([
+      { label: "그룹 필드", value: "classification.sector" },
+      { label: "집계 기간", value: "5" },
+    ]);
+    // 값이 없는 선택 칸(`null`)은 숨고, 0 은 값이라 보인다(#359 리뷰 P2-1).
+    const detailsOf = (nodeId: string) =>
+      projection.factors[0].nodes.find((item) => item.nodeId === nodeId)
+        ?.details;
+    expect(detailsOf("neg")).toEqual([]);
+    expect(detailsOf("zero")).toEqual([{ label: "값", value: "0" }]);
+    // 스키마 기본값과 같은 설정 값은 보이지 않는다 — 레시피 요약과 같은 규칙(리드 결정, #359 리뷰 P3-3).
+    expect(detailsOf("ranked")).toEqual([]);
+    expect(detailsOf("mom")).toEqual([{ label: "집계 기간", value: "60" }]);
+  });
+
+  it("names a plan input by its position when the authored slot cannot be told apart (#359 리뷰 P3-1)", () => {
+    // 같은 노드가 참·거짓 두 칸에 있고 계획의 입력 순서가 문서 칸과 다르면 칸 이름을 고를 수 없다.
+    const reordered = explanation();
+    const step = reordered.plan!.steps.find(
+      (item) => item.node_id === "signal",
+    )!;
+    step.input_node_ids = [
+      "neutralized_value",
+      "positive",
+      "neutralized_value",
+    ];
+    const projection = projectFactorGraphs(
+      {
+        status: "ready",
+        expectedRegistryVersion: "factor-registry-v7",
+        expectedDataSnapshotId: "krx-pit-2026-09-01",
+        factors: [plannedFactor(graph, reordered)],
+      },
+      SCHEMA,
+    );
+    if (projection.status !== "ready") throw new Error("fixture must be ready");
+
+    expect(
+      projection.factors[0].nodes
+        .find((node) => node.nodeId === "signal")
+        ?.inputs.map((input) => input.role),
+    ).toEqual(["1번째 입력", "조건 노드", "거짓일 때 값"]);
+  });
+
+  it("waits for the runtime schema before projecting a ready plan", () => {
+    expect(projectFactorGraphs(readyState(), null)).toEqual({
+      status: "metadata-loading",
+    });
   });
 });
 
@@ -306,7 +436,7 @@ describe("FactorGraphPanel", () => {
   it("puts a cycle diagnostic on every node card in the loop, not in the graph-level list", () => {
     // P1-05: `node_id`가 없던 시절에는 "순환 참조가 있습니다" 한 줄이 그래프 머리에만 떠서,
     // 어느 노드를 고쳐야 하는지 사용자가 목록을 눈으로 훑어야 했다.
-    const projection = projectFactorGraphs(cyclicReadyState());
+    const projection = projectFactorGraphs(cyclicReadyState(), SCHEMA);
     if (projection.status !== "ready") throw new Error("fixture must be ready");
 
     const byNodeId = new Map(
@@ -326,6 +456,7 @@ describe("FactorGraphPanel", () => {
     render(
       <FactorGraphPanel
         state={cyclicReadyState()}
+        schema={SCHEMA}
         diagnostics={[]}
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
@@ -336,7 +467,7 @@ describe("FactorGraphPanel", () => {
     const badges = screen.getAllByText("factor.graph.cycle");
     expect(badges).toHaveLength(2);
     for (const badge of badges) {
-      const row = badge.closest("li");
+      const row = badge.closest("tr");
       expect(
         within(row as HTMLElement).getByText(/cycle=close → positive → close/),
       ).toBeInTheDocument();
@@ -344,9 +475,6 @@ describe("FactorGraphPanel", () => {
   });
 
   it("keeps the last plan projection with a recomputing badge while the plan reloads (OBS-132-05)", () => {
-    const schema = JSON.parse(
-      readBackendFixture("strategy_documents/runtime-schema.json"),
-    ) as JsonSchema;
     const transactions: SourceTransactions = {
       apply: vi.fn(() => true),
       run: vi.fn(() => true),
@@ -358,14 +486,16 @@ describe("FactorGraphPanel", () => {
       settling: false,
     };
     const editing = {
-      tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
-      schema,
+      tree: {
+        factors: [{ factor_id: "conditional-value", direction: "high", graph }],
+      },
       transactions,
       catalogs: { equityFields: null },
     };
     const view = (state: ExecutionPlansState, documentKey = 1) => (
       <FactorGraphPanel
         state={state}
+        schema={SCHEMA}
         diagnostics={[]}
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
@@ -374,9 +504,11 @@ describe("FactorGraphPanel", () => {
     );
     const { rerender } = render(view(readyState()));
     expect(screen.queryByText("재계산 중")).toBeNull();
+    expect(document.querySelectorAll(".node-canvas__metadata").length).toBe(5);
     // 편집 확정 뒤 실제 경로: 이전 compile의 spec이 남아 blocked(stale) → blocked(pending) → loading → ready.
     // 그동안 직전 투영이 남는다(reducer 실측: stale 판정이 pending보다 먼저다 — 4차 리뷰).
     rerender(view({ status: "blocked", reason: "stale" }));
+    expect(document.querySelectorAll(".node-canvas__metadata").length).toBe(0);
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
     rerender(view({ status: "blocked", reason: "pending" }));
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
@@ -389,7 +521,8 @@ describe("FactorGraphPanel", () => {
     // 다른 문서로 가면(문서 키 변경) 직전 투영을 쓰지 않는다.
     rerender(view({ status: "loading" }, 2));
     expect(screen.queryByText("재계산 중")).toBeNull();
-    expect(document.querySelector('[data-node-id="signal"]')).toBeNull();
+    expect(document.querySelector(".node-canvas__metadata")).toBeNull();
+    expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
   });
 
   it("renders conditional branches, group details, provenance and exact selection actions", async () => {
@@ -399,6 +532,7 @@ describe("FactorGraphPanel", () => {
     render(
       <FactorGraphPanel
         state={readyState()}
+        schema={SCHEMA}
         diagnostics={[]}
         selectedPointer="/factors/0/graph/nodes/0/true_node_id"
         onSelectPointer={onSelectPointer}
@@ -413,14 +547,16 @@ describe("FactorGraphPanel", () => {
     const signal = document.querySelector('[data-node-id="signal"]');
     expect(signal).toHaveAttribute("aria-current", "true");
     expect(
-      within(signal as HTMLElement).getByText("OUTPUT"),
+      within(signal as HTMLElement).getByText("그래프 출력"),
     ).toBeInTheDocument();
     expect(
-      within(signal as HTMLElement).getByText("predicate"),
+      within(signal as HTMLElement).getByText("조건 노드"),
     ).toBeInTheDocument();
-    expect(within(signal as HTMLElement).getByText("true")).toBeInTheDocument();
     expect(
-      within(signal as HTMLElement).getByText("false"),
+      within(signal as HTMLElement).getByText("참일 때 값"),
+    ).toBeInTheDocument();
+    expect(
+      within(signal as HTMLElement).getByText("거짓일 때 값"),
     ).toBeInTheDocument();
     expect(screen.getByText("classification.sector")).toBeInTheDocument();
     expect(
@@ -435,7 +571,7 @@ describe("FactorGraphPanel", () => {
     );
     await user.click(
       screen.getByRole("button", {
-        name: "true 입력 노드 선택: neutralized_value",
+        name: "참일 때 값 선택: neutralized_value",
       }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
@@ -445,12 +581,43 @@ describe("FactorGraphPanel", () => {
     expect(onOpenSource).toHaveBeenLastCalledWith("/factors/0/graph/nodes/0");
   });
 
+  it("shows a dash, not an English placeholder, for a node without a backend contract (#359 리뷰 P3-1)", () => {
+    const planless = explanation();
+    planless.plan = null;
+    render(
+      <FactorGraphPanel
+        state={{
+          status: "ready",
+          expectedRegistryVersion: "factor-registry-v7",
+          expectedDataSnapshotId: "krx-pit-2026-09-01",
+          factors: [
+            plannedFactor(
+              { ...graph, nodes: [...graph.nodes, NEGATE] },
+              planless,
+            ),
+          ],
+        }}
+        schema={SCHEMA}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+      />,
+    );
+
+    const contract = document.querySelector(
+      '[data-node-id="neg"] .factor-graph__contract',
+    ) as HTMLElement;
+    expect(contract.querySelector("code")).toHaveTextContent("—");
+    expect(contract).not.toHaveTextContent("unknown");
+  });
+
   it("hides stale graph data and exposes current backend graph diagnostics", async () => {
     const user = userEvent.setup();
     const onOpenSource = vi.fn();
     render(
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
+        schema={SCHEMA}
         diagnostics={[
           {
             code: "factor.graph.missing_input",
@@ -485,16 +652,17 @@ describe("FactorGraphPanel", () => {
     render(
       <FactorGraphPanel
         state={disconnectedReadyState()}
+        schema={SCHEMA}
         diagnostics={[]}
         onSelectPointer={onSelectPointer}
         onOpenSource={onOpenSource}
       />,
     );
 
-    const unplanned = screen.getByRole("region", {
-      name: "실행 계획에 포함되지 않은 정의",
-    });
-    const orphan = within(unplanned).getByRole("listitem");
+    const orphan = document.querySelector(
+      '[data-node-id="orphan"]',
+    ) as HTMLElement;
+    expect(orphan.tagName).toBe("TR");
     expect(orphan).toHaveAttribute("data-node-id", "orphan");
     expect(within(orphan).getByText("미실행")).toBeInTheDocument();
     expect(within(orphan).getByText("price.open")).toBeInTheDocument();

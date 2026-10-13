@@ -12,13 +12,12 @@ from backtest_engine.capability import (
     validate_requirements,
 )
 from backtest_engine.engine.loop import BacktestEngine
-from backtest_engine.types.results import BacktestResult, PerformanceMetrics, RunConfig
+from backtest_engine.types.results import BacktestResult, RunConfig
 
 __all__ = [
     "BacktestEngine",
     "BacktestResult",
     "EngineCapabilities",
-    "PerformanceMetrics",
     "RunConfig",
     "SupportLevel",
     "prepare_strategy",

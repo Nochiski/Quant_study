@@ -76,7 +76,7 @@ def test_metrics_carry_the_registry_meaning_next_to_the_value() -> None:
     }
     unrecovered = _metric(payload, "max_drawdown_recovery_sessions")
     assert unrecovered["value"] is None
-    assert unrecovered["unavailable_reason"] == "drawdown_not_recovered"
+    assert unrecovered["unavailable_reason"] == "maximum_drawdown_not_recovered"
     assert _metric(payload, "sharpe", "out_of_sample")["scope_label"] == "OOS 2026-03-02"
 
 
@@ -218,11 +218,13 @@ def test_an_oversized_description_is_cut_before_it_reaches_the_model() -> None:
 
 
 # 이슈 #241 P3-5: 요약이 상한을 넘을 때 경고를 덜어 내는 순서. 결과 숫자를 해석하는 경고
-# (`benchmark.*`, `portfolio.sector_unknown_excluded`)는 full 지표 옆에서 사용 불가 이유·초과수익
-# 해석을 알려 주므로 가장 늦게 덜고, 나머지 중에서는 info 를 warning 보다 먼저 던다.
+# (`benchmark.*`, `portfolio.sector_unknown_excluded`, `analytics.base_rate_carried_forward`)는
+# full 지표 옆에서 사용 불가 이유·초과수익·샤프 해석을 알려 주므로 가장 늦게 덜고, 나머지
+# 중에서는 info 를 warning 보다 먼저 던다.
 _EXPLAINING = (
     DataWarning("benchmark.no_bar_at_start", "벤치마크 첫 bar 전 세션 " * 10),
     DataWarning("portfolio.sector_unknown_excluded", "섹터 제약 제외 " * 10),
+    DataWarning("analytics.base_rate_carried_forward", "기준금리 이어 쓰기 " * 10),
 )
 
 
@@ -232,14 +234,22 @@ def _without_months(result: BacktestRunResult) -> BacktestRunResult:
 
 def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_factors() -> None:
     base = _without_months(sample_backtest_result())
+    strategy = base.manifest.run_spec.strategy
+    assert strategy is not None
+    # 팩터가 많아 요약이 팩터까지 덜어야 상한에 닿는다(표본은 팩터 1개라 그 전에 맞는다).
+    factors = tuple(
+        replace(strategy.factors[0], factor_id=f"factor.{index}", label="팩터 설명 " * 12)
+        for index in range(12)
+    )
     noisy = replace(
         base,
         manifest=replace(
             base.manifest,
+            run_spec=replace(base.manifest.run_spec, strategy=replace(strategy, factors=factors)),
             warnings=(
                 _EXPLAINING[0],
                 *(DataWarning(f"data.warning.{index}", "경고 문장 " * 20) for index in range(30)),
-                _EXPLAINING[1],
+                *_EXPLAINING[1:],
             ),
         ),
         metrics=base.metrics
@@ -248,7 +258,7 @@ def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_fa
             for index in range(40)
         ),
     )
-    cap = 4_500
+    cap = 5_000
 
     text = summarize_backtest_result(noisy, max_chars=cap)
     payload = json.loads(text)
@@ -257,9 +267,12 @@ def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_fa
     assert [item["code"] for item in payload["warnings"]] == [
         "benchmark.no_bar_at_start",
         "portfolio.sector_unknown_excluded",
+        "analytics.base_rate_carried_forward",
     ]
-    assert payload["omitted"]["warnings"] == 30
-    assert payload["omitted"]["window_metrics"] > 0
+    omitted = payload["omitted"]
+    assert omitted["warnings"] == 30
+    assert omitted["window_metrics"] == sum(m.scope is not MetricScope.FULL for m in noisy.metrics)
+    assert omitted["factors"] > 0
 
 
 def test_info_warnings_are_dropped_before_warning_severity_ones() -> None:
@@ -282,9 +295,10 @@ def test_info_warnings_are_dropped_before_warning_severity_ones() -> None:
 
     payload = json.loads(summarize_backtest_result(noisy, max_chars=cap))
 
-    kept = [item["code"] for item in payload["warnings"]]
-    assert payload["omitted"]["warnings"] >= 3
-    assert len([code for code in kept if code.startswith("data.info.")]) <= 2
-    assert [code for code in kept if code.startswith("data.warning.")] == [
-        f"data.warning.{index}" for index in range(5)
+    # info 는 뒤에서부터 빠지므로 남은 info 는 앞쪽이고, warning 등급은 모두 남는다.
+    dropped = payload["omitted"]["warnings"]
+    assert 3 <= dropped < len(info)
+    assert [item["code"] for item in payload["warnings"]] == [
+        *(f"data.info.{index}" for index in range(len(info) - dropped)),
+        *(f"data.warning.{index}" for index in range(5)),
     ]

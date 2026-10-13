@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
-from contextlib import closing, contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
-from threading import RLock
 
+from strategy_workbench.adapters.outbound.sqlite_store.facade.database import SqliteDatabase
+from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
 from strategy_workbench.application.strategy_authoring.facade.authoring import StrategyDraft
 from strategy_workbench.application.strategy_authoring.facade.ports import (
     SourceFormat,
@@ -16,7 +15,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
 
 from ._errors import StrategyRepositoryStorageError
 from ._schema import migrate_schema
-from ._values import datetime_text, optional_text, required_int, required_text
+from ._values import optional_text, required_int, required_text
 
 
 class SQLiteStrategyDraftRepository:
@@ -32,33 +31,20 @@ class SQLiteStrategyDraftRepository:
         *,
         busy_timeout_seconds: float = 5.0,
     ) -> None:
-        if busy_timeout_seconds <= 0:
-            raise ValueError("busy_timeout_seconds must be positive")
-        self._busy_timeout_seconds = busy_timeout_seconds
-        self._busy_timeout_ms = max(1, round(busy_timeout_seconds * 1000))
-        self._lock = RLock()
-        self._closed = False
-        self._memory_connection: sqlite3.Connection | None = None
-        self._path: Path | None
-        if path is None:
-            self._path = None
-            self._memory_connection = self._new_connection(":memory:")
-            self._prepare_database(self._memory_connection)
-        else:
-            candidate = Path(path).expanduser()
-            if candidate.exists() and candidate.is_dir():
-                raise ValueError(f"strategy draft repository path is a directory -- {candidate}")
-            candidate.parent.mkdir(parents=True, exist_ok=True)
-            self._path = candidate.resolve()
-            with closing(self._new_connection(str(self._path))) as connection:
-                self._prepare_database(connection)
+        self._database = SqliteDatabase(
+            path,
+            label="strategy draft repository",
+            error=StrategyRepositoryStorageError,
+            prepare=migrate_schema,
+            busy_timeout_seconds=busy_timeout_seconds,
+        )
 
     @property
     def database_path(self) -> Path | None:
-        return self._path
+        return self._database.database_path
 
     def get(self, draft_id: str) -> StrategyDraft:
-        with self._transaction(write=False) as connection:
+        with self._database.transaction(write=False) as connection:
             draft = self._get_optional(connection, draft_id)
             if draft is None:
                 raise StrategyDraftNotFoundError(f"strategy draft not found -- draft_id={draft_id}")
@@ -71,7 +57,7 @@ class SQLiteStrategyDraftRepository:
                 f"draft_id={draft.draft_id} expected={expected_version} "
                 f"candidate={draft.version}"
             )
-        with self._transaction(write=True) as connection:
+        with self._database.transaction(write=True) as connection:
             if expected_version == 0:
                 try:
                     connection.execute(
@@ -111,7 +97,7 @@ class SQLiteStrategyDraftRepository:
                     draft.strategy_id,
                     draft.base_revision,
                     draft.base_spec_hash,
-                    datetime_text(draft.updated_at),
+                    datetime_text(draft.updated_at, field="draft updated_at"),
                     draft.draft_id,
                     expected_version,
                 ),
@@ -127,7 +113,7 @@ class SQLiteStrategyDraftRepository:
             return draft
 
     def delete(self, draft_id: str, *, expected_version: int) -> None:
-        with self._transaction(write=True) as connection:
+        with self._database.transaction(write=True) as connection:
             deleted = connection.execute(
                 "DELETE FROM strategy_drafts WHERE draft_id = ? AND version = ?",
                 (draft_id, expected_version),
@@ -144,70 +130,7 @@ class SQLiteStrategyDraftRepository:
             )
 
     def close(self) -> None:
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            if self._memory_connection is not None:
-                self._memory_connection.close()
-                self._memory_connection = None
-
-    def _prepare_database(self, connection: sqlite3.Connection) -> None:
-        try:
-            migrate_schema(connection)
-        except StrategyRepositoryStorageError:
-            raise
-        except sqlite3.DatabaseError as error:
-            raise StrategyRepositoryStorageError(
-                f"could not initialise SQLite strategy draft repository -- {error}"
-            ) from error
-
-    def _new_connection(self, database: str) -> sqlite3.Connection:
-        connection = sqlite3.connect(
-            database,
-            timeout=self._busy_timeout_seconds,
-            isolation_level=None,
-            check_same_thread=False,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
-
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            self._ensure_open()
-            if self._memory_connection is not None:
-                yield self._memory_connection
-                return
-            assert self._path is not None
-            with closing(self._new_connection(str(self._path))) as connection:
-                yield connection
-
-    @contextmanager
-    def _transaction(self, *, write: bool) -> Iterator[sqlite3.Connection]:
-        try:
-            with self._connection() as connection:
-                connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-                try:
-                    yield connection
-                except Exception:
-                    if connection.in_transaction:
-                        connection.rollback()
-                    raise
-                else:
-                    connection.commit()
-        except (
-            StrategyDraftConflictError,
-            StrategyDraftNotFoundError,
-            StrategyRepositoryStorageError,
-        ):
-            raise
-        except sqlite3.DatabaseError as error:
-            raise StrategyRepositoryStorageError(
-                f"SQLite strategy draft repository operation failed -- {error}"
-            ) from error
+        self._database.close()
 
     @staticmethod
     def _values(draft: StrategyDraft) -> tuple[object, ...]:
@@ -221,7 +144,7 @@ class SQLiteStrategyDraftRepository:
             draft.strategy_id,
             draft.base_revision,
             draft.base_spec_hash,
-            datetime_text(draft.updated_at),
+            datetime_text(draft.updated_at, field="draft updated_at"),
         )
 
     @staticmethod
@@ -234,7 +157,7 @@ class SQLiteStrategyDraftRepository:
         try:
             updated_at_text = required_text(row, "updated_at")
             updated_at = datetime.fromisoformat(updated_at_text)
-            if datetime_text(updated_at) != updated_at_text:
+            if datetime_text(updated_at, field="draft updated_at") != updated_at_text:
                 raise ValueError("updated_at is not canonical timezone-aware UTC text")
             return StrategyDraft(
                 draft_id=required_text(row, "draft_id"),
@@ -254,11 +177,3 @@ class SQLiteStrategyDraftRepository:
             raise StrategyRepositoryStorageError(
                 f"stored strategy draft failed integrity validation -- draft_id={draft_id}: {error}"
             ) from error
-
-    def _ensure_open(self) -> None:
-        if self._closed:
-            raise StrategyRepositoryStorageError("SQLite strategy draft repository is closed")
-
-    def __del__(self) -> None:  # pragma: no cover - defensive interpreter cleanup
-        with suppress(Exception):
-            self.close()

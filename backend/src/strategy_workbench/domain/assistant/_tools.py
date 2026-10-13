@@ -62,8 +62,10 @@ ASSISTANT_TOOLS: tuple[ToolSpec, ...] = (
         name=LIST_FACTOR_CATALOG,
         description=(
             "팩터 카탈로그를 돌려준다. 각 항목은 식별자, 표시 이름, 선호 방향(값이 큰 쪽과 "
-            "작은 쪽 중 어느 쪽을 좋게 보는지), 구현 여부, 필요한 데이터 필드 식별자를 "
-            "담는다. 구현되지 않은 팩터는 백테스트가 불가능하므로 제안에 넣지 않는다."
+            "작은 쪽 중 어느 쪽을 좋게 보는지), 가용성, 필요한 데이터 필드 식별자를 담는다. "
+            "가용성이 implemented 인 팩터만 지금 연결된 데이터로 백테스트할 수 있다. "
+            "catalog_only 는 아직 구현되지 않았고, unavailable 은 구현됐지만 연결된 데이터에 "
+            "필요한 필드가 없다는 뜻이다. implemented 가 아닌 팩터는 제안에 넣지 않는다."
         ),
         input_schema=_no_input(),
     ),

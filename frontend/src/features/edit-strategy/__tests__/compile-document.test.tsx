@@ -53,6 +53,7 @@ const server = setupServer(
             code: "strategy.risk.max_name_weight.high",
             kind: "semantic",
             severity: "warning",
+            anchor: "value",
             pointer: "/risk/max_name_weight",
             message: "over 50%",
           },
@@ -66,6 +67,7 @@ const server = setupServer(
             code: "strategy.title.empty",
             kind: "structural",
             severity: "error",
+            anchor: "value",
             pointer: "/title",
             message: "title must not be empty",
           },
@@ -104,7 +106,7 @@ const Harness = ({ initial }: { initial: string }) => {
     sourceView: "yaml",
     form: null,
     tree: null,
-    schemaLoaded: false,
+    schema: null,
     onSelectPointer: () => undefined,
     onOpenSource: () => undefined,
   });
@@ -296,6 +298,7 @@ describe("toDocumentDiagnostics", () => {
           code: "a",
           kind: "semantic",
           severity: "error",
+          anchor: "value",
           pointer: "/risk/max_name_weight",
           message: "m",
           range: null,
@@ -304,6 +307,7 @@ describe("toDocumentDiagnostics", () => {
           code: "b",
           kind: "structural",
           severity: "error",
+          anchor: "value",
           pointer: "/nope",
           message: "m",
           range: {
@@ -323,13 +327,14 @@ describe("toDocumentDiagnostics", () => {
     });
   });
 
-  it("points an unknown-key diagnostic at the misspelled key, not its value", () => {
+  it("points a key-anchored diagnostic at the misspelled key, not its value", () => {
     const text = "risk:\n  max_name_wieght: 0.05\n";
     const parse = parseSource(text, "yaml");
     const [diagnostic] = toDocumentDiagnostics(
       [
         {
           code: "structure.unknown_key",
+          anchor: "key",
           kind: "structural",
           severity: "error",
           pointer: "/risk/max_name_wieght",
@@ -357,6 +362,7 @@ describe("toDocumentDiagnostics", () => {
           code: "required",
           kind: "structural",
           severity: "error",
+          anchor: "value",
           pointer: "",
           message: "data is required",
           range: null,

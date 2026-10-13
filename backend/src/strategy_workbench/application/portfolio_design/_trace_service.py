@@ -9,6 +9,8 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.backtest.facade.environment import require_environment
+from strategy_workbench.domain.equity.facade.research_data import SecurityRef
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioConstructionTrace,
@@ -22,6 +24,7 @@ from strategy_workbench.domain.strategy.facade.provenance import (
     StrategySourceKind,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
+    FactorDirection,
     StrategySpec,
 )
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
@@ -33,18 +36,22 @@ from ._service import (
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     TraceObservationCapabilityError,
-    _require_environment_or_reject,
 )
 from ._trace_models import (
     RawStrategyTraceRow,
+    StrategyFactorPreview,
+    StrategyFactorPreviewRow,
     StrategyTargetTrace,
     StrategyTraceInput,
     StrategyTracePage,
     StrategyTraceRequest,
     StrategyTraceResponse,
     StrategyTraceRow,
+    StrategyTraceSummary,
+    StrategyTraceSummaryTarget,
 )
 from .ports.outgoing.raw_observations import RawObservation
+from .ports.outgoing.security_directory import SecurityDirectoryPort
 
 MAX_RAW_ROWS = 2_000
 
@@ -84,9 +91,11 @@ class StrategyTraceService:
         self,
         portfolio_design: PortfolioDesignService,
         strategy_repository: StrategyRepositoryPort,
+        securities: SecurityDirectoryPort,
     ) -> None:
         self._portfolio_design = portfolio_design
         self._strategy_repository = strategy_repository
+        self._securities = securities
 
     def trace(
         self,
@@ -102,9 +111,11 @@ class StrategyTraceService:
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
-        # preview·run 과 같은 헬퍼를 쓴다 — 세 경로가 같은 `portfolio.strategy.invalid` +
-        # `validation.issues` 구조로 거절해야 프론트가 코드 하나만 번역한다(P2-02 2차 리뷰 P3).
-        environment = _require_environment_or_reject(spec, request.environment)
+        # preview·run 과 같은 관문이다 — 없거나 연구 구간 밖이면 domain 오류를 그대로 올려, 세
+        # 경로가 같은 접수 거절 코드·detail 로 거절한다(#351).
+        environment = require_environment(
+            request.environment, requested_by=f"strategy.trace({spec.title!r})"
+        )
         if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
                 "trace as_of is outside the run range — "
@@ -205,14 +216,54 @@ class StrategyTraceService:
             cancelled=cancelled,
         )
         _raise_if_cancelled(cancelled)
-        target = _target_projection(
+        securities = self._securities.universe_securities(
+            environment.market.value, environment.universe_id, resolved_as_of
+        )
+        _raise_if_cancelled(cancelled)
+        target, summary = _target_projection(
             pipeline.preview.tape.frames,
             resolved_as_of,
             set(request.security_ids),
             pipeline.construction_trace,
+            lambda: securities,
             cancelled=cancelled,
         )
+        # 모집단은 PIT 관측의 유니버스 구성이다. 선정 targets나 요청한 추적 종목으로 좁히지 않는다.
+        members: set[str] = set()
+        for index, observation in enumerate(pipeline.raw_observations):
+            if index % 128 == 0:
+                _raise_if_cancelled(cancelled)
+            if observation.as_of == resolved_as_of and observation.universe_member:
+                members.add(observation.security_id)
+        values: dict[str, float] = {}
+        for index, value in enumerate(record.values):
+            if index % 128 == 0:
+                _raise_if_cancelled(cancelled)
+            if (
+                value.as_of == resolved_as_of
+                and value.security_id in members
+                and value.value is not None
+            ):
+                values[value.security_id] = value.value
+        factor = next(item for item in spec.factors if item.factor_id == request.factor_id)
+        direction = -1 if factor.direction is FactorDirection.HIGH else 1
+        names = {ref.security_id: ref for ref in securities}
+        top = sorted(
+            values, key=lambda security_id: (direction * values[security_id], security_id)
+        )[:5]
+        _raise_if_cancelled(cancelled)
         return StrategyTraceResponse(
+            factor_preview=StrategyFactorPreview(
+                valid_count=len(values),
+                missing_count=len(members) - len(values),
+                missing=environment.missing,
+                top=tuple(
+                    StrategyFactorPreviewRow(
+                        security_id=key, value=values[key], security=names.get(key)
+                    )
+                    for key in top
+                ),
+            ),
             spec_hash=provenance.spec_hash,
             snapshot_id=pipeline.data_snapshot_id,
             registry_version=record.plan.registry_version,
@@ -230,6 +281,7 @@ class StrategyTraceService:
             raw=raw,
             raw_truncated=raw_truncated,
             target=target,
+            summary=summary,
             # 원시 관측 경고 뒤에 tape 컴파일 경고(섹터 제약 제외 등, 이슈 #203)를 붙인다.
             warnings=(
                 *pipeline.preview.warnings,
@@ -320,13 +372,15 @@ def _target_projection(
     as_of: date,
     security_ids: set[str],
     construction_trace: PortfolioConstructionTrace | None,
+    securities: Callable[[], tuple[SecurityRef, ...]],
     *,
     cancelled: Callable[[], bool] = lambda: False,
-) -> StrategyTargetTrace | None:
+) -> tuple[StrategyTargetTrace | None, StrategyTraceSummary | None]:
+    """요청 종목의 대상 추적과 프레임 요약. 이름은 선정 종목이 있을 때만 `securities` 로 찾는다."""
     _raise_if_cancelled(cancelled)
     frame = next((item for item in frames if item.signal_as_of == as_of), None)
     if frame is None:
-        return None
+        return None, None
     if construction_trace is None or construction_trace.signal_as_of != as_of:
         raise RuntimeError(
             f"portfolio compiler omitted the requested construction trace — as_of={as_of}"
@@ -343,6 +397,7 @@ def _target_projection(
             _raise_if_cancelled(cancelled)
         if item.security_id in security_ids:
             candidates.append(item)
+    names = {ref.security_id: ref for ref in securities()} if frame.targets else {}
     return StrategyTargetTrace(
         signal_as_of=frame.signal_as_of,
         execution_on=frame.execution_on,
@@ -350,6 +405,14 @@ def _target_projection(
         candidates=tuple(candidates),
         construction=tuple(
             item for item in construction_trace.candidates if item.security_id in security_ids
+        ),
+    ), StrategyTraceSummary(
+        signal_as_of=frame.signal_as_of,
+        execution_on=frame.execution_on,
+        counts=construction_trace.summary,
+        targets=tuple(
+            StrategyTraceSummaryTarget(position=item, security=names.get(item.security_id))
+            for item in sorted(frame.targets, key=lambda item: (item.rank, item.security_id))
         ),
     )
 

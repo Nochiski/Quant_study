@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Collection
+from dataclasses import dataclass, replace
 
 from strategy_workbench.domain.factor.facade.registry import (
     FactorAvailability,
     FactorCategory,
     FactorDefinition,
     FactorRegistry,
+    factor_availability,
 )
 
 
@@ -37,8 +39,14 @@ class FactorCatalog:
     facets: FactorCatalogFacets
 
 
-def build_factor_catalog(registry: FactorRegistry, query: FactorCatalogQuery) -> FactorCatalog:
-    definitions = registry.all()
+def build_factor_catalog(
+    registry: FactorRegistry, query: FactorCatalogQuery, provided_field_ids: Collection[str]
+) -> FactorCatalog:
+    """레지스트리 정의의 가용성을 연결된 어댑터가 주는 필드로 다시 판정해 거르고 나눈다(#370)."""
+    definitions = tuple(
+        replace(definition, availability=factor_availability(definition, provided_field_ids))
+        for definition in registry.all()
+    )
     needle = query.search.strip().casefold() if query.search else None
     filtered = tuple(
         definition

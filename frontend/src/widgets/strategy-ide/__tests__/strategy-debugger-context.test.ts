@@ -120,8 +120,6 @@ describe("Strategy IDE debugger composition", () => {
           expectedSnapshotId: "snapshot-v1",
           expectedRegistryVersion: "registry-v1",
           environment: ENVIRONMENT,
-          start: "2021-01-01",
-          end: "2026-08-31",
           factors: [
             {
               factorId: "momentum",

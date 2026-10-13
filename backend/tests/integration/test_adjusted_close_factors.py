@@ -1,6 +1,6 @@
 """이슈 #214: 가격 변화를 재는 팩터는 수정주가 `price.adj_close`를 읽는다.
 
-원주가 `price.close`는 분할·증자·병합 날 끊긴다. mock 어댑터의 `sec-005930-1`은 2018-05-04에
+원주가 `price.close`는 분할·증자·병합 날 끊긴다. mock 어댑터의 `sec-005930-1`은 2020-05-08에
 50:1 액면분할을 겪는 종목이라(실제 삼성전자 사건을 본떴다) 원주가 수익률은 그날 약 −98%를 찍고,
 전방 조정 수정주가는 이어진다. 이 파일은 그 차이를 mock 계약으로 고정하고, 레지스트리의 가격 계열
 팩터가 그 사건에 오염되지 않는지 파이프라인으로 확인한다.
@@ -44,10 +44,10 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 SPLIT_SECURITY = "sec-005930-1"
-SPLIT_DATE = date(2018, 5, 4)
+SPLIT_DATE = date(2020, 5, 8)
 SPLIT_RATIO = 50.0
 # 사건 뒤 두 달 — 12-1 모멘텀(252 + 21 세션)과 60일 변동성 창이 모두 분할일을 품는다
-WINDOW = (date(2018, 7, 2), date(2018, 7, 6))
+WINDOW = (date(2020, 7, 6), date(2020, 7, 10))
 AS_OF = WINDOW[1]
 # schema 1.2 문서는 기간·유니버스를 담지 않는다(lang2 P2-03). 실행 설정은 요청이 싣는다.
 ENVIRONMENT = RunEnvironment(start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock")
@@ -94,7 +94,7 @@ def _raw(field_ids: tuple[str, ...], start: date, end: date) -> dict[tuple[date,
 
 
 def test_mock_split_breaks_raw_close_but_adjusted_close_stays_continuous() -> None:
-    before, on = date(2018, 5, 3), SPLIT_DATE
+    before, on = date(2020, 5, 7), SPLIT_DATE
     values = _raw(("price.close", "price.adj_close"), before, on)
 
     raw_return = values[(on, "price.close")] / values[(before, "price.close")] - 1
@@ -112,8 +112,8 @@ def test_mock_adjusted_close_equals_raw_close_for_names_without_events() -> None
         RawObservationQuery(
             market="KRX",
             universe_id="krx.common-stock",
-            start=date(2018, 5, 3),
-            end=date(2018, 5, 4),
+            start=date(2020, 5, 7),
+            end=SPLIT_DATE,
             field_ids=("price.close", "price.adj_close"),
         )
     )

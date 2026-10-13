@@ -54,6 +54,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     TurnStatus,
     Usage,
 )
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 
 from ._execution_error_contract import RequestValidationResponse
 
@@ -237,9 +238,7 @@ class TurnContextPayload:
 
     source_text: str
     source_format: str = "yaml"
-    # reason: 실행 설정(시장·기간·유니버스·수수료)은 schema 1.2에서 타입이 정해진다. 그때까지
-    # 어시스턴트는 이 값을 읽어 프롬프트에 싣기만 하고 해석하지 않는다.
-    environment: dict[str, Any] | None = None
+    environment: RunEnvironment | None = None
     diagnostics: tuple[str, ...] = ()
 
 

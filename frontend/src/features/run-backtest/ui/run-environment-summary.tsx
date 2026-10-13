@@ -41,6 +41,8 @@ export const RunEnvironmentSummary = ({
       ) : environment === null ? null : (
         <dl>
           {environmentFields.map((field) => {
+            // 요청에 실리는 칸만 보인다 — 지금 모드에서 읽히지 않아 꺼진 칸(#352)은 싣지 않는다.
+            if (!(field.name in environment)) return null;
             const value = environmentValues[field.name] ?? "";
             return (
               <div key={field.name}>

@@ -3,7 +3,8 @@
 체결 가격 규칙은 `engine/pricing.py`(Python) 또는 Rust 코어가 제공한다 (`pricing` 인자).
 
 수량 규칙:
-- 유동성 캡 = floor(bar.volume × participation). participation은 주문을 만든
+- 유동성 캡 = floor(bar.cap_volume × participation). cap_volume은 데이터 쪽이 정한 참여 기준
+  거래량(bar.liquidity_volume), 없으면 세션 거래량이다. participation은 주문을 만든
   Action의 ExecutionPolicy.max_participation이 있으면 그 값, 없으면 브로커 기본값
   (None = 무제한).
 - 매수는 매수 여력(수수료 포함)에도 걸린다. 여력은 호출 측이 준다: MARGIN 없음 = 현금,
@@ -265,11 +266,12 @@ class BrokerSim:
         participation = participation_of(order)
         if participation is None:
             participation = self._max_participation
+        volume = bar.cap_volume
         # 슬리피지는 유동성 캡 이후 수량에 의존하지만 모델 인터페이스가 수량을 받으므로 캡을
         # 먼저 한 번 계산해 넘긴다 (Python·Rust 코어 모두 같은 값을 다시 계산한다).
         capped = open_order.remaining
         if participation is not None:
-            cap = (Decimal(bar.volume) * Decimal(str(participation))).quantize(
+            cap = (Decimal(volume) * Decimal(str(participation))).quantize(
                 Decimal(1), rounding=ROUND_FLOOR
             )
             capped = min(capped, max(cap, Decimal(0)))
@@ -284,7 +286,7 @@ class BrokerSim:
             order.side,
             base_price,
             open_order.remaining,
-            bar.volume,
+            volume,
             participation,
             slip,
             order.limit_price,
@@ -293,7 +295,7 @@ class BrokerSim:
             self._fee_rate,
             order.time_in_force is TimeInForce.FOK,
         )
-        detail = self._detail(numbers, order, bar, open_order.remaining, buying_power)
+        detail = self._detail(numbers, order, bar, volume, open_order.remaining, buying_power)
         return Quote(
             order.order_id,
             numbers.price,
@@ -305,20 +307,25 @@ class BrokerSim:
 
     @staticmethod
     def _detail(
-        numbers: QuoteNumbers, order: OrderEvent, bar: Bar, remaining: Decimal, buying_power: float
+        numbers: QuoteNumbers,
+        order: OrderEvent,
+        bar: Bar,
+        volume: int,
+        remaining: Decimal,
+        buying_power: float,
     ) -> str | None:
         symbol = order.instrument.symbol
         match numbers.status:
             case ExecutionStatus.NOT_FILLED:
                 return (
                     f"no liquidity in session — order_id={order.order_id} instrument={symbol} "
-                    f"volume={bar.volume} ts={bar.ts}"
+                    f"volume={volume} ts={bar.ts}"
                 )
             case ExecutionStatus.LIQUIDITY_LIMITED:
                 return (
                     f"fill capped by volume participation — order_id={order.order_id} "
                     f"instrument={symbol} remaining={remaining} cap={numbers.quantity} "
-                    f"volume={bar.volume}"
+                    f"volume={volume}"
                 )
             case ExecutionStatus.REJECTED_NO_CASH:
                 return (
@@ -366,4 +373,5 @@ class BrokerSim:
             price=quote.price,
             fee=self.fee_for(notional),
             slippage_per_share=quote.slippage_per_share,
+            cap_volume=bar.cap_volume,
         )

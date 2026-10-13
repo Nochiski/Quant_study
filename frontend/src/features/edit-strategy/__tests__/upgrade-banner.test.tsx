@@ -1,4 +1,4 @@
-import { undo } from "@codemirror/commands";
+import { redo, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -24,7 +25,8 @@ const LEGACY =
   'schema_version: "1.0"\ntitle: 옛 문서\nfactors:\n  factors: []\n';
 const UPGRADED = 'schema_version: "1.1"\ntitle: 옛 문서\nfactors: []\n';
 const upgradeRequests: { source: string; format: string }[] = [];
-let upgradeMode: "ok" | "drift" | "network" | "no-environment" = "ok";
+let upgradeMode: "ok" | "drift" | "network" | "array-422" | "no-environment" =
+  "ok";
 /** 업그레이드 응답의 옛 문서 실행 설정(P2-09 `environment`). */
 const OLD_ENVIRONMENT = {
   market: "KRX",
@@ -45,6 +47,8 @@ const WARNING = {
     "점수 비례 비중은 이제 기준점 위의 몫으로 나눕니다: weighting='factor_score'",
 } as const;
 const appliedEnvironments: unknown[] = [];
+/** 있으면 업그레이드 응답을 이것이 풀릴 때까지 붙잡는다(대기 중 편집을 흉내 낸다). */
+let upgradeGate: Promise<void> | null = null;
 
 const compiledResponse = (source: string) => {
   const legacy = source.includes('schema_version: "1.0"');
@@ -80,7 +84,19 @@ const server = setupServer(
   http.post(`${API}/api/v1/strategy-documents/upgrade`, async ({ request }) => {
     const body = (await request.json()) as { source: string; format: string };
     upgradeRequests.push(body);
+    if (upgradeGate !== null) await upgradeGate;
     if (upgradeMode === "network") return HttpResponse.error();
+    if (upgradeMode === "array-422") {
+      // 코드 없는 FastAPI 기본 422(배열 detail).
+      return HttpResponse.json(
+        {
+          detail: [
+            { type: "missing", loc: ["body", "format"], msg: "Field required" },
+          ],
+        },
+        { status: 422 },
+      );
+    }
     if (upgradeMode === "drift") {
       return HttpResponse.json(
         {
@@ -119,6 +135,7 @@ afterEach(() => {
   upgradeRequests.length = 0;
   appliedEnvironments.length = 0;
   upgradeMode = "ok";
+  upgradeGate = null;
 });
 afterAll(() => server.close());
 
@@ -263,6 +280,90 @@ describe("retired schema upgrade banner", () => {
     expect(view.state.doc.toString()).toBe(LEGACY);
   });
 
+  it("brings the run-settings fill back when an undone upgrade is redone", async () => {
+    // #267 DEFECT-1: 상태가 버전 번호에 묶이면 다시 실행한 글이 새 버전이라 채우기가 사라졌다.
+    const view = await mount();
+    const fill = () =>
+      screen.queryByRole("button", { name: "실행 설정에 채우기" });
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
+    await waitFor(() => expect(fill()).not.toBeNull());
+
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    await waitFor(() => expect(fill()).toBeNull());
+    // 되돌린 옛 글에는 업그레이드 제안이 다시 뜬다.
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+
+    act(() => {
+      redo(view);
+    });
+    expect(view.state.doc.toString()).toBe(UPGRADED);
+    await waitFor(() => expect(fill()).not.toBeNull());
+    expect(upgradeRequests).toHaveLength(1);
+  });
+
+  it("remembers the filled run settings through undo and redo", async () => {
+    // #297 리뷰 P3-3: 채웠는지를 배너 지역 state 로 두면 다시 실행 뒤 채우기 버튼과 "채우지 않고 저장하면"
+    // 안내가 다시 떠, 채운 뒤에 고친 값을 옛 값으로 덮게 이끈다.
+    const view = await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    fireEvent.click(
+      await screen.findByRole("button", { name: "실행 설정에 채우기" }),
+    );
+    expect(appliedEnvironments).toEqual([OLD_ENVIRONMENT]);
+
+    act(() => {
+      undo(view);
+    });
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    act(() => {
+      redo(view);
+    });
+    expect(
+      await screen.findByText("옛 문서의 실행 설정을 채웠습니다.", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "실행 설정에 채우기" }),
+    ).toBeNull();
+  });
+
+  it("lets the user upgrade again after a response for edited text is dropped and the edit undone", async () => {
+    // #297 리뷰 P2-1: 버린 응답이 요청한 글의 대기 상태를 남기면, 실행 취소로 그 글에 돌아왔을 때
+    // "업그레이드 중…"이 되살아나 버튼이 멈췄다.
+    let release = () => {};
+    upgradeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const view = await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(upgradeRequests).toHaveLength(1));
+    act(() => {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: "# z" },
+        userEvent: "input.type",
+      });
+    });
+    release();
+    // 응답은 편집된 글에 적용되지 않는다.
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    expect(view.state.doc.toString()).toBe(`${LEGACY}# z`);
+
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    expect(upgradeButton()).toHaveTextContent("현재 버전으로 업그레이드");
+  });
+
   it("drops the applied notice once the text is saved as a new revision", async () => {
     // P2-02 리뷰 P2-003: 상태는 savedVersion에도 묶인다.
     const view = await mount();
@@ -308,8 +409,27 @@ describe("retired schema upgrade banner", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("업그레이드 요청이 실패했습니다");
+    expect(alert).not.toHaveTextContent("API request failed");
     expect(view.state.doc.toString()).toBe(LEGACY);
     expect(upgradeRequests).toHaveLength(1);
+  });
+
+  it("keeps a code-less refusal out of the body and folds the server reason away (#270)", async () => {
+    upgradeMode = "array-422";
+    await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+
+    fireEvent.click(upgradeButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "업그레이드 요청이 실패했습니다. 원문은 그대로입니다.",
+    );
+    expect(alert).not.toHaveTextContent("API request failed");
+    // 서버 원문은 접힌 "서버 사유" 안에만 있다.
+    const reason = within(alert).getByText("서버 사유").closest("details");
+    expect(reason).not.toBeNull();
+    expect(reason).toHaveTextContent("format: Field required");
   });
 
   it("only suggests saving a new revision for a generated frozen row", async () => {
@@ -341,12 +461,17 @@ describe("retired schema upgrade banner", () => {
     expect(banner).toHaveTextContent(
       "옛 문서에 있던 실행 설정: 2021-01-01 → 2026-08-31 · krx.common-stock",
     );
+    // 채우기 전에 저장하면 옛 값을 되찾을 길이 없다는 것을 미리 알린다(#267 DEFECT-3).
+    const unfilled =
+      "채우지 않고 저장하거나 이 화면을 떠나면 이 실행 설정은 다시 볼 수 없습니다.";
+    expect(banner).toHaveTextContent(unfilled);
     expect(appliedEnvironments).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "실행 설정에 채우기" }));
 
     expect(appliedEnvironments).toEqual([OLD_ENVIRONMENT]);
     expect(banner).toHaveTextContent("옛 문서의 실행 설정을 채웠습니다.");
+    expect(banner).not.toHaveTextContent(unfilled);
     expect(
       screen.queryByRole("button", { name: "실행 설정에 채우기" }),
     ).toBeNull();

@@ -11,8 +11,13 @@
     "universe_id": "krx.common-stock",
     "timing": "next_open",
     "participation_rate": 0.1,
+    "participation_basis": "adv20",
     "fee_bps": 15.0,
     "slippage_bps": 10.0,
+    "impact_model": "fixed_bps",
+    "impact_coefficient": 1.0,
+    "sell_tax": "krx_statutory",
+    "sell_tax_bps": null,
     "missing": "drop"
   },
   "capital": {
@@ -48,7 +53,9 @@
       "turnover_buffer_count": 0,
       "minimum_trade_weight": 0.0,
       "liquidity_field_id": null,
-      "minimum_liquidity": null
+      "minimum_liquidity": null,
+      "tie_breaker_factor_id": null,
+      "tie_breaker_direction": "high"
     }
   },
   "metrics": [
@@ -151,7 +158,7 @@
       "scope": "full",
       "value": null,
       "sample_count": 820,
-      "unavailable_reason": "drawdown_not_recovered"
+      "unavailable_reason": "maximum_drawdown_not_recovered"
     },
     {
       "metric_id": "benchmark_return",

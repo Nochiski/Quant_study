@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from ._models import RunEnvironment
+from ._research_window import require_research_window
 
 
 class MissingRunEnvironmentError(ValueError):
@@ -34,7 +35,7 @@ class MissingRunEnvironmentError(ValueError):
 
 
 def require_environment(environment: RunEnvironment | None, *, requested_by: str) -> RunEnvironment:
-    """요청이 실은 실행 설정을 확정한다. 없으면 코드화된 진단으로 거절한다.
+    """요청이 실은 실행 설정을 확정한다. 없거나 연구 구간 밖이면 코드화된 진단으로 거절한다.
 
     Args:
         environment: 요청 본문의 실행 설정.
@@ -42,7 +43,9 @@ def require_environment(environment: RunEnvironment | None, *, requested_by: str
 
     Raises:
         MissingRunEnvironmentError: `environment` 가 `None` 일 때.
+        ResearchWindowViolationError: 측정 시작일이 연구 하한보다 앞일 때(spec D1).
     """
     if environment is None:
         raise MissingRunEnvironmentError(requested_by=requested_by)
+    require_research_window(environment.start, requested_by=requested_by)
     return environment

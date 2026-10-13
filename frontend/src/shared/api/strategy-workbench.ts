@@ -1,14 +1,20 @@
 import { client } from "./generated/client.gen";
 import {
   cancelBacktest,
+  cancelExperiment,
   compileStrategyDocument,
+  controlExperiment,
+  createExperiment,
   createStrategyDocument,
   deleteStrategyDraft,
   diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
+  getExperiment,
+  getExperimentWalkForward,
   getFactorCatalog,
   getBacktestRequest,
+  getBacktestSummary,
   getBacktestResult,
   getStrategyDraft,
   getStrategyDocument,
@@ -17,12 +23,20 @@ import {
   getStrategyOperatorCatalog,
   getBacktestStatus,
   getRunEnvironmentSchema,
+  getTrialLedger,
   listBacktests,
+  listExperimentTrials,
+  listExperiments,
   listStrategies,
   listStrategyRevisions,
+  mergeTrialLineage,
+  previewBacktestTrial,
+  previewExperiment,
+  retryExperimentTrial,
   reviseStrategyDocument,
   saveStrategyDraft,
   startBacktest,
+  streamExperimentEvents,
   traceStrategy as postStrategyTrace,
   upgradeStrategyDocument,
 } from "./generated/sdk.gen";
@@ -30,6 +44,7 @@ import type {
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
+  BacktestCancelResult,
   BacktestRunState,
   BacktestRunSummary,
   BacktestStartResponse,
@@ -37,6 +52,12 @@ import type {
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  Experiment,
+  ExperimentControlsRequest,
+  ExperimentPage,
+  ExperimentTrialState,
+  ExperimentPreview,
+  ExperimentRequest,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -60,6 +81,7 @@ import type {
   RevisionSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  RunKind,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,
   SavedRevisionReference,
@@ -76,7 +98,10 @@ import type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TrialLedger,
+  TrialPreview,
   UpgradedDocument,
+  WalkForwardReport,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -101,9 +126,11 @@ export class ApiRequestError extends Error {
   readonly field: string | undefined;
   /**
    * 코드가 없는 FastAPI 기본 422(배열 `detail`)의 진단 요약. `detail` 과 달리 화면 본문에 쓰지 않고 접힌 진단
-   * 상세에만 쓴다 — 저장·업그레이드 배너와 추적 오류는 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
+   * 상세에만 쓴다 — 저장 상태 줄(409·422)은 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
    */
   readonly diagnostic: string | undefined;
+  /** detail 의 문자열 칸(`message` 제외). 거절 문장의 `{이름}` 자리표시자를 채운다(예: 연구 구간 날짜). */
+  readonly values: Readonly<Record<string, string>>;
 
   constructor(
     context: string,
@@ -114,6 +141,7 @@ export class ApiRequestError extends Error {
     currentDraft: StrategyDraft | null = null,
     field?: string,
     diagnostic?: string,
+    values: Readonly<Record<string, string>> = {},
   ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -126,8 +154,22 @@ export class ApiRequestError extends Error {
     this.currentDraft = currentDraft;
     this.field = field;
     this.diagnostic = diagnostic;
+    this.values = values;
   }
 }
+
+/**
+ * 실패한 요청의 서버 사유 — 화면이 접힌 진단 상세("서버 사유")에 두는 원문의 유일한 출처다. backend가 보낸
+ * 문장(`detail`)이나 코드 없는 422 요약(`diagnostic`)만 싣고, `ApiRequestError.message`(`API request
+ * failed: …`)는 개발자 진단이라 싣지 않는다. 응답 없이 난 오류(네트워크 등)는 그 오류 문장을 남긴다. 화면
+ * 본문은 코드 번역이 맡는다(`.claude/rules/frontend-api-state.md`, #270).
+ */
+export const failureReason = (error: unknown): string | null =>
+  error instanceof ApiRequestError
+    ? (error.detail ?? error.diagnostic ?? null)
+    : error instanceof Error
+      ? error.message
+      : null;
 
 const requireData = <T>(data: T | undefined, context: string): T => {
   if (data === undefined) {
@@ -162,14 +204,31 @@ const detailFieldPath = (error: unknown): string | undefined => {
   return typeof value === "string" ? value : undefined;
 };
 
+const detailValues = (error: unknown): Record<string, string> => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return {};
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null) return {};
+  return Object.fromEntries(
+    // 서버 원문 `message` 는 번역 문장에 새지 않게 뺀다 — 접힌 진단 상세로만 간다.
+    Object.entries(detail).filter(
+      (entry): entry is [string, string] =>
+        entry[0] !== "message" && typeof entry[1] === "string",
+    ),
+  );
+};
+
 /**
  * 저장·revise·upgrade의 `strategy_document.invalid` detail에는 `message`가 없다 — 첫 error 진단(pointer + 문구)을
  * detail 문구로 쓴다(Phase 5 감사 backlog 16: 저장 실패 사유가 화면에 비어 있었다).
  */
 export const invalidDocumentSummary = (error: unknown): string | undefined => {
   if (errorCode(error) !== "strategy_document.invalid") return undefined;
-  const detail = (error as { detail: Partial<StrategyDocumentInvalidDetail> }).detail;
-  const diagnostics = Array.isArray(detail.diagnostics) ? detail.diagnostics : [];
+  const detail = (error as { detail: Partial<StrategyDocumentInvalidDetail> })
+    .detail;
+  const diagnostics = Array.isArray(detail.diagnostics)
+    ? detail.diagnostics
+    : [];
   const first =
     diagnostics.find((item) => item.severity === "error") ?? diagnostics[0];
   if (first === undefined) return undefined;
@@ -310,6 +369,7 @@ const requestError = (
     draftConflict?.current ?? null,
     detailFieldPath(response.error),
     requestValidationSummary(response.error),
+    detailValues(response.error),
   );
 };
 
@@ -347,16 +407,130 @@ const unwrap = <T>(
 
 export const strategyWorkbenchApi = {
   async listBacktests(
-    page: { offset?: number; limit?: number; strategyId?: string } = {},
+    page: {
+      offset?: number;
+      limit?: number;
+      strategyId?: string;
+      kind?: RunKind;
+    } = {},
   ): Promise<PageBacktestRunSummary> {
     const response = await listBacktests({
       query: {
         offset: page.offset,
         limit: page.limit,
         strategy_id: page.strategyId,
+        kind: page.kind,
       },
     });
     return unwrap(response, "listBacktests");
+  },
+
+  /** 계열 시도 원장 — 시도 묶음·실행 역할·N(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다. */
+  async getTrialLedger(strategyId: string): Promise<TrialLedger> {
+    const response = await getTrialLedger({
+      path: { strategy_id: strategyId },
+    });
+    return unwrap(response, "getTrialLedger");
+  },
+
+  /** `sourceStrategyId` 계열을 `strategyId` 계열에 합친다. 되돌릴 수 없다. */
+  async mergeTrialLineage(
+    strategyId: string,
+    sourceStrategyId: string,
+  ): Promise<TrialLedger> {
+    const response = await mergeTrialLineage({
+      path: { strategy_id: strategyId },
+      body: { source_strategy_id: sourceStrategyId },
+    });
+    return unwrap(response, "mergeTrialLineage");
+  },
+
+  /** 실험 목록(최근에 만든 순)과 대기열 표면(슬롯 사용량·우선순위 상한, 검증 랩 spec D6). */
+  /** 최근에 만든 순 한 쪽. `after` 는 앞 쪽 응답의 `next_after` 다. */
+  async listExperiments(after?: string): Promise<ExperimentPage> {
+    const response = await listExperiments({ query: { after } });
+    return unwrap(response, "listExperiments");
+  },
+
+  async getExperiment(experimentId: string): Promise<Experiment> {
+    const response = await getExperiment({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperiment");
+  },
+
+  /** 시작 전 미리 계산 — 조합·실행 수와 계열 시도 수 변화(spec D2). */
+  async previewExperiment(
+    request: ExperimentRequest,
+  ): Promise<ExperimentPreview> {
+    const response = await previewExperiment({ body: request });
+    return unwrap(response, "previewExperiment");
+  },
+
+  async createExperiment(request: ExperimentRequest): Promise<Experiment> {
+    const response = await createExperiment({ body: request });
+    return unwrap(response, "createExperiment");
+  },
+
+  /** 일시정지·재개·우선순위. 보내지 않은 칸은 그대로다. */
+  async controlExperiment(
+    experimentId: string,
+    controls: ExperimentControlsRequest,
+  ): Promise<Experiment> {
+    const response = await controlExperiment({
+      path: { experiment_id: experimentId },
+      body: controls,
+    });
+    return unwrap(response, "controlExperiment");
+  },
+
+  /** trial 전개 순 상태. 재시도·선택 가능 여부는 backend 가 싣는다. */
+  async listExperimentTrials(
+    experimentId: string,
+  ): Promise<ExperimentTrialState[]> {
+    const response = await listExperimentTrials({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "listExperimentTrials");
+  },
+
+  async retryExperimentTrial(
+    experimentId: string,
+    trialIndex: number,
+  ): Promise<ExperimentTrialState> {
+    const response = await retryExperimentTrial({
+      path: { experiment_id: experimentId, trial_index: trialIndex },
+    });
+    return unwrap(response, "retryExperimentTrial");
+  },
+
+  /** 워크포워드 결과(창별 자동 선택·검증 실행·유지율, 검증 랩 V3-05). */
+  async getExperimentWalkForward(
+    experimentId: string,
+  ): Promise<WalkForwardReport> {
+    const response = await getExperimentWalkForward({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentWalkForward");
+  },
+
+  /**
+   * 실험 진행 스트림(SSE, spec D6). 프레임은 진행이 바뀌었다는 신호로만 쓰고, 서버는 실험이 끝나면 마지막 수를
+   * 보낸 뒤 닫는다. 생성 SSE 클라이언트를 그대로 쓰는 typed wrapper 다.
+   */
+  openExperimentProgress(experimentId: string, signal: AbortSignal) {
+    return streamExperimentEvents({
+      path: { experiment_id: experimentId },
+      signal,
+      sseMaxRetryAttempts: 3,
+    });
+  },
+
+  async cancelExperiment(experimentId: string): Promise<Experiment> {
+    const response = await cancelExperiment({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "cancelExperiment");
   },
 
   async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
@@ -364,9 +538,21 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "startBacktest");
   },
 
+  /** 실행 전 미리 계산 — 같은 요청이 결과를 내면 계열 시도 수가 어떻게 되는가(검증 랩 spec D2). */
+  async previewBacktestTrial(spec: BacktestRunSpec): Promise<TrialPreview> {
+    const response = await previewBacktestTrial({ body: spec });
+    return unwrap(response, "previewBacktestTrial");
+  },
+
   async getBacktestStatus(runId: string): Promise<BacktestRunState> {
     const response = await getBacktestStatus({ path: { run_id: runId } });
     return unwrap(response, "getBacktestStatus");
+  },
+
+  /** 이력 한 행 — 실행 종류(단일·실험 trial·워크포워드 검증)는 서버 판정이다. */
+  async getBacktestSummary(runId: string): Promise<BacktestRunSummary> {
+    const response = await getBacktestSummary({ path: { run_id: runId } });
+    return unwrap(response, "getBacktestSummary");
   },
 
   async getBacktestRequest(runId: string): Promise<BacktestRunSpec> {
@@ -379,7 +565,8 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestResult");
   },
 
-  async cancelBacktest(runId: string): Promise<BacktestRunState> {
+  /** 취소 요청. 다른 소유자(실험)가 써서 계속 돌면 `kept_by_owners` 가 참이다(#382). */
+  async cancelBacktest(runId: string): Promise<BacktestCancelResult> {
     const response = await cancelBacktest({ path: { run_id: runId } });
     return unwrap(response, "cancelBacktest");
   },
@@ -397,14 +584,14 @@ export const strategyWorkbenchApi = {
     query: EquityCatalogQuery = {},
   ): Promise<ResearchCatalog> {
     const response = await getEquityCatalog({ query });
-    return requireData(response.data, "getEquityCatalog");
+    return unwrap(response, "getEquityCatalog");
   },
 
   async getFactorCatalog(
     query: FactorCatalogQuery = {},
   ): Promise<FactorCatalog> {
     const response = await getFactorCatalog({ query });
-    return requireData(response.data, "getFactorCatalog");
+    return unwrap(response, "getFactorCatalog");
   },
 
   async explainFactorGraph(
@@ -412,7 +599,7 @@ export const strategyWorkbenchApi = {
     signal?: AbortSignal,
   ): Promise<FactorExplanation> {
     const response = await explainFactorGraph({ body: request, signal });
-    return requireData(response.data, "explainFactorGraph");
+    return unwrap(response, "explainFactorGraph");
   },
 
   async listStrategies(
@@ -579,6 +766,7 @@ export type {
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
+  BacktestCancelResult,
   BacktestRunState,
   BacktestRunSummary,
   BacktestStartResponse,
@@ -586,6 +774,12 @@ export type {
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  Experiment,
+  ExperimentControlsRequest,
+  ExperimentPage,
+  ExperimentTrialState,
+  ExperimentPreview,
+  ExperimentRequest,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -607,6 +801,7 @@ export type {
   RevisionSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  RunKind,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,
   SavedRevisionReference,
@@ -620,5 +815,8 @@ export type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TrialLedger,
+  TrialPreview,
   UpgradedDocument,
+  WalkForwardReport,
 };

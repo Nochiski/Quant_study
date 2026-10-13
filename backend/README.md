@@ -41,8 +41,11 @@
 
 ## M5 Single backtest + analytics
 
-`domain.analytics`의 `metric-registry-v1`이 기존 8개 성과 지표와 MDD 기간/회복,
-benchmark/excess return, 거래·노출·비용을 합친 21개 정의와 공식을 소유한다.
+`domain.analytics`의 `metric-registry-v5`가 수익률·위험·회전율 8개 성과 지표와 샤프 표준오차·PSR, MDD 기간/회복,
+benchmark/excess return, 거래·노출·비용을 합친 24개 정의와 공식을 소유한다. CAGR의 연수는 기준일부터
+마지막 세션까지의 달력 일수 / 365이고, 1년 미만인 실행은 CAGR·칼마를 비우고 사유를 붙인다. `metric_windows` 구간 지표는 구간 직전 세션의 자산을 기준값으로 쓴다.
+샤프·소르티노·롤링 샤프는 한국은행 기준금리 이력(`domain/analytics/_base_rate.py`)으로 만든 초과수익으로 잰다(#274).
+샤프 표준오차는 왜도·첨도를 넣은 Mertens(2002)·Bailey·López de Prado(2012) 식(분모 n−1)이고, 수익률이 날마다 독립이라고 본 근사라 자기상관이 있으면 실제 오차와 다를 수 있다(양의 자기상관이면 더 크다). PSR(`probabilistic_sharpe`)은 Φ(샤프 / 표준오차), 곧 진짜 샤프가 0보다 클 확률이다. 계열 DSR은 같은 `probabilistic_sharpe` 함수에 기준 샤프만 바꿔 넣는다. 롤링 샤프 창은 126세션(6개월)이고 `compute_analytics`의 `rolling_window` 기본값이 정한다.
 `application.backtest_run`은 immutable `BacktestRunSpec`을 TargetTape로 컴파일하고 교체 가능한
 data/executor/artifact port만 호출한다. 기본 조립은 Equity mock → `TargetTapeStrategy` →
 Persistent Rust Engine → atomic local JSON artifact이며 Python reference core도 같은 계약으로 남긴다.
@@ -55,18 +58,27 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   spec_hash 대조) 또는 inline draft를 지정하고(옛 schema revision이면 422
   `backtest.strategy.requires_upgrade`) manifest의 `strategy_provenance`에 출처를 기록 (기존 `strategy` inline도 유지). 실제
   `backtest.run.invalid`·`portfolio.*` 422와 saved-reference 404/409는 OpenAPI/generated SDK의
-  discriminated error 계약으로 함께 제공한다.
+  discriminated error 계약으로 함께 제공한다. 동시 실행 슬롯 수는 환경 변수
+  `STRATEGY_WORKBENCH_RUN_SLOTS`(기본 2)가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free
+  run slot`)로 기다린다. 배정 순서(단일 실행 전용 슬롯·실험 라운드로빈)와 같은 입력 잇기·공유 run 취소
+  규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다.
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다
 - `GET /api/v1/backtests/{run_id}/events`: SSE progress stream. 진행률은 `tape` 2~80%(원시 로딩·팩터
-  평가·TargetTape 컴파일), `data` 82%, `engine` 84~92%, `artifact` 93% 구간이다. `tape` 안에서는 선택
+  평가·TargetTape 컴파일), `data` 82%, `engine` 84~92%, `artifact` 93% 구간이다. 단계(`stage`) 어휘는
+  `domain/backtest` 의 `RunStage` 하나다 — 실행기는 engine 구간 안의 비율과 설명만 보고하고 단계는
+  `engine` 그대로다(#362 DR-B-03). `tape` 안에서는 선택
   능력 `ProgressReportingRawObservationPort`(duckdb 구현)의 로딩 진행, 계약 검증·팩터 입력 변환·
   포트폴리오 관측 변환 루프, 팩터 평가기(노드 종류별 가중치, 시계열은 관측 단위), TargetTape 컴파일
   진행이 1% 이상 오를 때마다 이벤트가 된다. 구간 폭은 실데이터 4년 구간 실측 시간 비율을 따른다
-  (이슈 #162).
+  (이슈 #162). 스트림은 비동기라 스레드풀 워커를 잡지 않고, 조용한 구간에는 keepalive 주석을
+  보낸다(간격은 어시스턴트 스트림과 같은 `http_api/_sse.py`, 이슈 #161).
 - `GET /api/v1/backtests/{run_id}/result`: versioned metrics, 차트 series, raw artifact, manifest 조회
-- `POST /api/v1/backtests/{run_id}/cancel`: 협력적 취소 요청
+- `POST /api/v1/backtests/{run_id}/cancel`: 협력적 취소 요청. 자리를 기다리는(`queued`) run은 바로
+  `cancelled`다. duckdb 어댑터는 tape 단계의 격자·법인 대응·LATEST 질의를 `interrupt()`로 끊는다(이슈
+  #160, 실원장 6개월 구간 실측에서 tape 단계 도중 취소는 0.2초 안에 `cancelled`가 됐다). data 단계
+  질의(`load_backtest_dataset`)는 포트에 취소가 없어 끊지 않는다
 
 실데이터는 `BacktestDataPort` 구현만 바꿔 붙인다(`equity_duckdb`, 아래 의존성 방향 절). domain/application과 engine executor는
 OHLCV·universe membership·corporate action의 중립 계약을 유지한다. 로컬 실행 artifact는
@@ -104,7 +116,7 @@ use case를 제공한다. outgoing port는 기본 `equity_mock`이, 실데이터
 - `GET /api/v1/factors/catalog`: 50개 versioned 정의 검색·카테고리·구현 상태 필터
 - `POST /api/v1/factors/validate`: cycle/type/unit/min-history/reference/missing-policy 검증
 - `POST /api/v1/factors/explain`: topological PIT plan과 재현성 hash 설명
-- `POST /api/v1/factors/preview`: IC, Rank IC, quantile spread, coverage, turnover, decay
+- 팩터 결과는 `POST /api/v1/strategies/debug/trace`의 `factor_preview`로 조회한다. 기준일 유니버스의 평가값 유효수·결측수·실행 결측 정책·팩터 방향 기준 상위 5개를 제공한다. `/factors/preview`는 폐기했다.
 
 사람이 검토하는 전체 ID/Equity field mapping은 [FACTORS.md](./FACTORS.md)에 있다. 실행 의미의
 SoT는 항상 registry 코드이며 문서 정합성은 테스트로 고정한다.
@@ -138,7 +150,8 @@ bootstrap ─> application + adapters
 `equity`(`uv sync --extra equity`, duckdb). 답하는 field_id의 정본은 선언표
 `adapters/outbound/equity_duckdb/_specs.py`(`FIELD_SPECS`)이고 지금 30개다(price 7·financial 8·consensus 6·
 flow 3·short 2·credit 1·event 3). 새 필드는 이 표에 한 행을 더한다. 표에 없는 field_id는 `list_fields()`
-밖이고 질의하면 `INVALID_QUERY`이며, 사유는 `UNSUPPORTED_FIELDS`가 적는다. 필드별 공개 랙의 정본은 원장
+밖이고 질의하면 `INVALID_QUERY`이며, 사유는 `FIELD_NOT_IN_LEDGER` 한 문장이다(필드별 메모는
+`UNSUPPORTED_FIELDS`, #316). 필드별 공개 랙의 정본은 원장
 `dataset_profile`의 `recommended_lag_sessions`이고 adapter가 부팅할 때 읽는다. 표가 없거나 행이 빠진
 필드는 `_specs.py`의 폴백 랙(`SourceSpec.lag_sessions`·`FieldSpec.lag_sessions`)으로 읽는데, 이 값은
 원장 선언의 사본이고 `tests/contract/test_equity_fallback_lag.py`가 원장 선언과 대조한다. 폴백을 쓰면
@@ -166,6 +179,7 @@ backend/
    ├─ domain/analytics/                    # 21개 versioned metric 정의·공식
    ├─ domain/backtest/                     # RunEnvironment, run/manifest/raw artifact 계약
    ├─ domain/assistant/                    # 어시스턴트 순수 값 타입(메시지·이벤트·도구·제안 검증 결과)
+   ├─ domain/experiment/                   # 탐색 그리드·워크포워드 창·trial 상태 전이(검증 랩)
    ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py
@@ -228,6 +242,7 @@ extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따�
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
 | `STRATEGY_WORKBENCH_DB_PATH` | `.local/strategy-revisions.sqlite3` | 전략 revision·초안 저장소 |
+| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청). 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
 | `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `http://localhost:5173` | CORS 허용 origin(쉼표로 구분) |
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |

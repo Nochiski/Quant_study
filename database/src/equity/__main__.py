@@ -8,9 +8,10 @@
   catalog               equity.duckdb 재생성 (빌드·GC 뒤에는 반드시) + 뷰 게이트 EG11·EG5c·EG3-P05
                         + `_asof/<view>/<snapshot_id>/` 표본. 게이트 실패면 카탈로그를 교체하지
                         않는다
-  contract              EG-C 소비자 계약 ①②③④⑤⑩ — 커널 어댑터(backend/src, pyarrow)를 이 루트 위에서
-                        돌려 duckdb 독립 읽기와 대조 → `_contract_meta.json`. 엔진 소스는
-                        `--engine-src`(기본 `<repo>/backend/src` 또는 `$QL_ENGINE_SRC`)
+  contract              EG-C 소비자 계약 ①②③④⑤⑩ — 제품이 쓰는 워크벤치 어댑터(backend/src)를 이 루트
+                        위에서 돌려 duckdb 독립 읽기와 대조 → `_contract_meta.json`. catalog 뒤에
+                        돈다. 엔진 소스는 `--engine-src`(기본 `<repo>/backend/src` 또는
+                        `$QL_ENGINE_SRC`)
   rollback              `--pass <PASS>` 의 `summary.tsv` 에서 rc 0 인 표만 직전 판으로 되돌린다
                         (포인터만 — `v=` 는 남는다). 전량 빌드가 중간에 실패해 표마다 다른 날의
                         판이 섞인 상태를 푼다(DEFECT-C03)
@@ -214,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
                             "_asof/_approvals/<utc>.json 에 영구 기록된다")
     p_cat.set_defaults(fn=_cmd_catalog)
 
-    p_con = sub.add_parser("contract", help="EG-C 소비자 계약 ①②③④⑤⑩ (커널 어댑터 실행 → "
+    p_con = sub.add_parser("contract", help="EG-C 소비자 계약 ①②③④⑤⑩ (워크벤치 어댑터 실행 → "
                                             "_contract_meta.json)")
     p_con.add_argument("--engine-src", type=Path, default=None,
                        help="backend/src 경로 (기본 <repo>/backend/src 또는 $QL_ENGINE_SRC)")

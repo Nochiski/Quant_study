@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 
 from strategy_workbench.domain.equity.facade.research_data import (
@@ -9,15 +9,18 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DatasetRevision,
     DataSnapshot,
     FieldCoverageCapability,
+    FieldFrequency,
     FieldValueType,
     SecurityRef,
+    canonical_revision,
 )
 
 
 # 분할 사건 하나. `security_index` 종목은 `effective` 세션부터 원주가가 `1 / ratio`로 떨어지고,
 # 전방 조정 수정주가(첫 관측 수준 고정)는 사건 뒤 원주가 × `ratio`로 이어진다. 실제 삼성전자
-# 2018-05-04 50:1 액면분할을 본떴다. fixture 달력(2024-01)은 사건 뒤라 그 안의 수정주가는 원주가
-# × `ratio`다. 가격 변화 팩터가 원주가를 읽으면 이 사건에 오염된다(이슈 #214).
+# 2018-05-04 50:1 액면분할을 본떴고, 날짜는 파이프라인이 측정할 수 있는 연구 구간(2020-01-02 이후,
+# spec D1) 안으로 옮겼다. fixture 달력(2024-01)은 사건 뒤라 그 안의 수정주가는 원주가 × `ratio`다.
+# 가격 변화 팩터가 원주가를 읽으면 이 사건에 오염된다(이슈 #214).
 @dataclass(frozen=True)
 class MockSplit:
     security_index: int
@@ -25,7 +28,13 @@ class MockSplit:
     ratio: float
 
 
-MOCK_SPLIT = MockSplit(security_index=0, effective=date(2018, 5, 4), ratio=50.0)
+MOCK_SPLIT = MockSplit(security_index=0, effective=date(2020, 5, 8), ratio=50.0)
+
+# 원장 뷰가 값이 틀려 가린 신용잔고 셀 하나(무상증자 척도 창의 흉내, #249) — (종목 index, 원장 행
+# 날짜). 값이 없고 셀 종류가 MASKED 라 실행 결측 정책이 채우지 않는다(#298). 원장은 신용잔고와
+# 수정주가를 가리므로 mock 도 두 필드에 MASKED 를 선언한다(수정주가는 mock 에 공백 사건이 없어
+# 선언만 한다).
+MOCK_MASKED_CREDIT = (1, date(2024, 1, 8))
 
 
 # 원주가 필드 → 시점 간 변화를 잴 때 쓸 조정 짝(필드 계약 `FieldMetadata.adjusted_field_id`,
@@ -81,6 +90,9 @@ def build_demo_fixture() -> MockEquityFixture:
         supported_cell_kinds=(CellKind.OBSERVED,),
         point_in_time=True,
     )
+    masked_coverage = replace(
+        full_coverage, supported_cell_kinds=(CellKind.OBSERVED, CellKind.MASKED)
+    )
     profiles = (
         DatasetFieldProfile(
             field_id="price.close",
@@ -88,7 +100,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="종가",
             unit="KRW",
             value_type=FieldValueType.PRICE,
-            frequency="daily",
+            frequency=FieldFrequency.DAILY,
             available_date_basis="session close",
             recommended_lag_sessions=0,
             description=(
@@ -105,18 +117,19 @@ def build_demo_fixture() -> MockEquityFixture:
             label="수정 종가(전방 조정)",
             unit="KRW",
             value_type=FieldValueType.PRICE,
-            frequency="daily",
+            frequency=FieldFrequency.DAILY,
             available_date_basis="session close",
             recommended_lag_sessions=0,
             description=(
                 "원주가 × 그날까지 적용된 분할·증자·병합 계수의 누적곱. 첫 관측 수준을 고정하고 "
-                "사건 뒤 가격을 올리므로 과거 값이 바뀌지 않는다(PIT). 실데이터에서는 확인 안 된 "
-                "사건이 조정되지 않고 남을 수 있다. 수익률·모멘텀·이평·변동성 "
-                "계산에 쓴다. mock 분할: sec-005930-1 2018-05-04 50:1."
+                "사건 뒤 가격을 올리므로 과거 값이 바뀌지 않는다(PIT). 실데이터에서는 원장이 그날 "
+                "사건을 접지 못한 적용일이 원장이 가린 셀(MASKED)이고(#220), 원장이 조정하지 않는 "
+                "사건(유상증자 권리락 등)은 조정 없이 남는다. 수익률·모멘텀·이평·변동성 계산에 "
+                "쓴다. mock 분할: sec-005930-1 2020-05-08 50:1."
             ),
             disclosure_basis="원주가 세션 확정 + 사건 계수 공개",
             evidence="KRX 일별매매정보 종가 × mock 분할 사건 계수",
-            coverage=full_coverage,
+            coverage=masked_coverage,
         ),
         DatasetFieldProfile(
             field_id="price.market_cap",
@@ -124,7 +137,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="시가총액",
             unit="KRW",
             value_type=FieldValueType.AMOUNT,
-            frequency="daily",
+            frequency=FieldFrequency.DAILY,
             available_date_basis="next session knowledge",
             recommended_lag_sessions=1,
             description="당일 값이지만 기본 연구 랙은 1 session이다.",
@@ -140,7 +153,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="거래대금",
             unit="KRW",
             value_type=FieldValueType.AMOUNT,
-            frequency="daily",
+            frequency=FieldFrequency.DAILY,
             available_date_basis="session close",
             recommended_lag_sessions=0,
             description="정규장 거래대금.",
@@ -154,7 +167,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="자본총계",
             unit="KRW",
             value_type=FieldValueType.AMOUNT,
-            frequency="quarterly",
+            frequency=FieldFrequency.QUARTERLY,
             available_date_basis="filing available_date",
             # 랙은 원장 dataset_profile 과 같아야 한다(#230). 접수일 다음 세션부터 쓴다.
             recommended_lag_sessions=1,
@@ -182,7 +195,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="당기순이익(TTM)",
             unit="KRW",
             value_type=FieldValueType.AMOUNT,
-            frequency="quarterly",
+            frequency=FieldFrequency.QUARTERLY,
             available_date_basis="filing available_date",
             recommended_lag_sessions=1,
             # 원장(duckdb)과 같은 의미다(#212): 공시일 기준 최근 4분기 합이고, 4분기를 채울 수
@@ -212,7 +225,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="선행 EPS(FY1 컨센서스 평균)",
             unit="KRW",
             value_type=FieldValueType.AMOUNT,
-            frequency="monthly",
+            frequency=FieldFrequency.MONTHLY,
             available_date_basis="first_seen_fetched_date",
             recommended_lag_sessions=1,
             description="관측점의 최초 수집 판본과 이후 revision을 보존한다.",
@@ -238,10 +251,10 @@ def build_demo_fixture() -> MockEquityFixture:
             label="외국인 순매수",
             unit="KRW",
             value_type=FieldValueType.AMOUNT,
-            frequency="daily",
+            frequency=FieldFrequency.DAILY,
             available_date_basis="session",
             recommended_lag_sessions=1,
-            description="실제 0, 원천 생략 0, 미수집을 CellKind로 구분한다.",
+            description="실제 0, 결측, 미수집을 CellKind로 구분한다.",
             disclosure_basis="거래일별 투자자 매매 집계",
             evidence="KRX 투자자별 거래실적",
             coverage=FieldCoverageCapability(
@@ -249,7 +262,13 @@ def build_demo_fixture() -> MockEquityFixture:
                 ends_on=sessions[-1],
                 venues=("XKRX",),
                 estimated_coverage_pct=91.0,
-                supported_cell_kinds=tuple(CellKind),
+                # 원장이 가리는 셀(MASKED)은 수급 축에 없다 — 원장 뷰가 가리는 필드만 선언한다(#298)
+                # 원천 생략 0(SOURCE_OMITTED_ZERO)도 없다 — 수급의 원천 생략은 MISSING 이다(#371)
+                supported_cell_kinds=tuple(
+                    kind
+                    for kind in CellKind
+                    if kind not in (CellKind.MASKED, CellKind.SOURCE_OMITTED_ZERO)
+                ),
                 point_in_time=True,
                 requires_confirmation=True,
             ),
@@ -280,7 +299,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="Margin balance (shares)",
             unit="shares",
             value_type=FieldValueType.COUNT,
-            coverage=full_coverage,
+            coverage=masked_coverage,
             # 원장은 실입수 기준 3세션 뒤에 공개한다(EQUITY_FIELD_MAP DEFECT-E01 정정, #230).
             recommended_lag_sessions=3,
         ),
@@ -314,6 +333,7 @@ def build_demo_fixture() -> MockEquityFixture:
         for security_index, security in enumerate(securities):
             if security_index == 2 and session < sessions[2]:
                 continue
+            credit_masked = (security_index, session) == MOCK_MASKED_CREDIT
             observations.extend(
                 (
                     Observation(
@@ -367,8 +387,10 @@ def build_demo_fixture() -> MockEquityFixture:
                         "credit.margin_balance",
                         session,
                         session,
-                        8_000_000.0 + security_index * 1_000_000.0 + index * 10_000,
-                        CellKind.OBSERVED,
+                        None
+                        if credit_masked
+                        else 8_000_000.0 + security_index * 1_000_000.0 + index * 10_000,
+                        CellKind.MASKED if credit_masked else CellKind.OBSERVED,
                     ),
                     Observation(
                         security.security_id,
@@ -467,14 +489,6 @@ def build_demo_fixture() -> MockEquityFixture:
                 CellKind.MISSING,
             ),
             Observation(
-                securities[0].security_id,
-                "flow.foreign_net_buy",
-                sessions[1],
-                sessions[1],
-                0.0,
-                CellKind.SOURCE_OMITTED_ZERO,
-            ),
-            Observation(
                 securities[1].security_id,
                 "flow.foreign_net_buy",
                 sessions[1],
@@ -492,9 +506,14 @@ def build_demo_fixture() -> MockEquityFixture:
             ),
         )
     )
+    observed = tuple(observations)
     return MockEquityFixture(
         snapshot=DataSnapshot(
-            snapshot_id="mock-equity-v0.2-20260903",
+            # 원천 판은 fixture 데이터(세션·구성·관측·분할 사건)에서 계산한다. 데이터가 바뀌면 손
+            # 상수를 올리지 않아도 id 가 바뀐다(#291 리뷰 P3-6). 가격을 만드는 식은 어댑터 코드라
+            # 판 밖이다.
+            snapshot_id="mock-equity-v0.2-"
+            + canonical_revision((sessions, memberships, observed, MOCK_SPLIT)),
             schema_version="equity-v0.2-mock",
             built_at=datetime(2026, 9, 3, tzinfo=UTC),
             source="deterministic-memory-fixture",
@@ -514,7 +533,7 @@ def build_demo_fixture() -> MockEquityFixture:
         sessions=sessions,
         profiles=profiles,
         memberships=memberships,
-        observations=tuple(observations),
+        observations=observed,
     )
 
 
@@ -534,7 +553,7 @@ def _factor_field_profile(
         label=label,
         unit=unit,
         value_type=value_type,
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
         available_date_basis="point-in-time session fixture",
         recommended_lag_sessions=recommended_lag_sessions,
         description="Deterministic mock subset for the replaceable Equity DB adapter.",

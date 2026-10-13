@@ -50,8 +50,13 @@ def test_upgrade_returns_current_source_its_environment_and_a_savable_compile() 
         "universe_id": "krx.common-stock",
         "timing": "next_open",
         "participation_rate": 0.1,
+        "participation_basis": "adv20",
         "fee_bps": 15.0,
         "slippage_bps": 10.0,
+        "impact_model": "fixed_bps",
+        "impact_coefficient": 1.0,
+        "sell_tax": "krx_statutory",
+        "sell_tax_bps": None,
         "missing": "drop",
     }
     assert body["warnings"] == []
@@ -136,6 +141,8 @@ def test_a_current_document_with_1_0_syntax_is_a_fix_in_place_error_not_an_upgra
     assert compiled.status_code == 200, compiled.text
     legacy = [d for d in compiled.json()["diagnostics"] if d["code"] == "structure.legacy_shape"]
     assert legacy and all("업그레이드" not in d["message"] for d in legacy)
+    # 1.0 문법 힌트도 고칠 곳이 키다. 편집기는 이 표식으로 키를 짚는다(#418 리뷰 P3-1).
+    assert all(d["anchor"] == "key" for d in legacy)
 
     upgraded = client.post(
         "/api/v1/strategy-documents/upgrade", json={"source": source, "format": "yaml"}

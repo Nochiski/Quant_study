@@ -20,6 +20,7 @@ RUNTIME_PATH_GUARD = RuntimePathGuard(
     (
         _http.DEFAULT_STRATEGY_REPOSITORY_PATH.parent,
         _http.DEFAULT_ASSISTANT_DB_PATH.parent,
+        _http.DEFAULT_RESEARCH_DB_PATH.parent,
         _container.DEFAULT_RUN_ARTIFACT_ROOT,
         default_secrets_path().parent,
     )
@@ -51,6 +52,7 @@ def _redirect_runtime_defaults(monkeypatch: pytest.MonkeyPatch, root: Path) -> N
         _http, "DEFAULT_STRATEGY_REPOSITORY_PATH", root / "strategy-revisions.sqlite3"
     )
     monkeypatch.setattr(_http, "DEFAULT_ASSISTANT_DB_PATH", root / "assistant.sqlite3")
+    monkeypatch.setattr(_http, "DEFAULT_RESEARCH_DB_PATH", root / "research.sqlite3")
     monkeypatch.setattr(_container, "DEFAULT_RUN_ARTIFACT_ROOT", root / "backtest-runs")
     monkeypatch.setattr(_assistant, "default_secrets_path", lambda: root / "secrets.json")
 
@@ -88,8 +90,8 @@ def isolate_runtime_state_paths(
 ) -> Path:
     """런타임 앱이 기본값으로 여는 경로를 테스트마다 새 tmp 디렉터리로 옮긴다(#211).
 
-    `build_runtime_http_app`은 환경 변수가 없으면 `backend/.local/`의 strategy·assistant DB를
-    연다. 기본 `build_container`는 `.local/backtest-runs`를 만든다. 비밀 경로가 없는 어시스턴트
+    `build_runtime_http_app`은 환경 변수가 없으면 `backend/.local/`의 strategy·assistant·research
+    DB를 연다. 기본 `build_container`는 `.local/backtest-runs`를 만든다. 비밀 경로가 없는 어시스턴트
     설정은 OS 사용자 설정 디렉터리의 비밀 파일을 연다. 테스트가 이것을 열면 개발자의 실제 대화 이력
     DB가 업그레이드되어, 브랜치를 바꾼 뒤 옛 코드의 테스트가 깨진다. 기본값 자체를 tmp로 바꾸므로
     기본값을 단언하는 테스트는 그대로 통과하고, 값을 명시한 테스트는 영향을 받지 않는다. 경로가

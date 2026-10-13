@@ -89,10 +89,10 @@ const StatefulViewIde = () => {
         versionLabel="초안"
         editor={<textarea aria-label="source" />}
         sourceView="yaml"
-        projections={{ json: <div>JSON projection</div> }}
+        projections={{ graph: <div>Graph projection</div> }}
         view={view}
         onViewChange={setView}
-        availableViews={["yaml", "json"]}
+        availableViews={["graph", "yaml"]}
       />
     </ThemePreferenceProvider>
   );
@@ -164,6 +164,32 @@ describe("StrategyIde", () => {
       fireEvent.pointerMove(debuggerHandle, { pointerId: 1, clientY });
     }
     expect(debuggerHandle).toHaveAttribute("aria-valuenow", "190"); // 220 - 30, linear
+  });
+
+  it("lets the debugger grow with the window height and keeps the chosen height through a shorter window", async () => {
+    // 상한이 창 높이를 따른다 — 고정 480px이면 큰 창에서도 연결 추적 아래쪽이 가려졌다(#262).
+    matchMedia(false);
+    vi.stubGlobal("innerHeight", 900);
+    const user = userEvent.setup();
+    mount();
+    const handle = screen.getByRole("separator", {
+      name: "중간 결과 크기 조절",
+    });
+    handle.focus();
+    await user.keyboard("{End}");
+    expect(handle).toHaveAttribute("aria-valuemax", "630");
+    expect(handle).toHaveAttribute("aria-valuenow", "630");
+
+    const resizeWindow = (height: number) =>
+      act(() => {
+        vi.stubGlobal("innerHeight", height);
+        window.dispatchEvent(new Event("resize"));
+      });
+    // 창이 줄면 그 창의 상한으로 그리고, 다시 늘면 고른 높이로 돌아온다.
+    resizeWindow(700);
+    expect(handle).toHaveAttribute("aria-valuenow", "490");
+    resizeWindow(900);
+    expect(handle).toHaveAttribute("aria-valuenow", "630");
   });
 
   it("collapses and restores panels with resolvable controls and distinct names", async () => {
@@ -301,12 +327,12 @@ describe("StrategyIde", () => {
       screen.getByRole("navigation", { name: "전략 구조" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "스니펫" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
-      "aria-disabled",
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
+      "aria-selected",
       "true",
     );
   });
@@ -322,14 +348,14 @@ describe("StrategyIde", () => {
   it("keeps a document notice visible outside every representation panel", () => {
     matchMedia(false);
     mount({
-      view: "diff",
-      availableViews: ["yaml", "diff"],
-      projections: { diff: <div>diff projection</div> },
+      view: "graph",
+      availableViews: ["graph", "yaml"],
+      revisionDiff: () => <div>diff projection</div>,
       notice: <div role="alert">document recovery</div>,
     });
 
     expect(screen.getByRole("alert")).toHaveTextContent("document recovery");
-    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -337,7 +363,7 @@ describe("StrategyIde", () => {
 
   it("connects every tab to a labelled panel", () => {
     matchMedia(false);
-    mount({ availableViews: ["yaml", "json"] });
+    mount({ availableViews: ["graph", "yaml"] });
 
     for (const tab of screen.getAllByRole("tab")) {
       const panel = document.getElementById(
@@ -363,13 +389,13 @@ describe("StrategyIde", () => {
       onRunBacktest,
       runDisabled: false,
       onViewChange,
-      availableViews: ["yaml", "diff"],
+      availableViews: ["graph", "yaml"],
     });
 
     fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     fireEvent.keyDown(window, { key: "Enter", ctrlKey: true, shiftKey: true });
-    fireEvent.keyDown(window, { key: "5", altKey: true });
+    fireEvent.keyDown(window, { key: "1", altKey: true });
     fireEvent.keyDown(window, {
       key: "s",
       ctrlKey: true,
@@ -380,7 +406,7 @@ describe("StrategyIde", () => {
     expect(onValidate).toHaveBeenCalledTimes(1);
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onRunBacktest).toHaveBeenCalledTimes(1);
-    expect(onViewChange).toHaveBeenCalledWith("diff");
+    expect(onViewChange).toHaveBeenCalledWith("graph");
   });
 
   it("keeps disabled document shortcuts fail-closed", () => {
@@ -414,10 +440,10 @@ describe("StrategyIde", () => {
     mount({
       onUndo,
       onRedo,
-      view: "diff",
+      view: "graph",
       sourceView: "yaml",
-      availableViews: ["yaml", "diff"],
-      projections: { diff: <div>diff</div> },
+      availableViews: ["graph", "yaml"],
+      projections: { graph: <div>그래프</div> },
     });
 
     fireEvent.keyDown(window, { key: "z", ctrlKey: true });
@@ -531,19 +557,19 @@ describe("StrategyIde", () => {
     const source = screen.getByRole("textbox", { name: "source" });
     source.focus();
 
-    fireEvent.keyDown(window, { key: "2", altKey: true });
+    fireEvent.keyDown(window, { key: "1", altKey: true });
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "JSON" })).toHaveFocus(),
+      expect(screen.getByRole("tab", { name: "그래프" })).toHaveFocus(),
     );
 
     await user.click(screen.getByRole("tab", { name: "YAML" }));
     source.focus();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    await user.type(screen.getByRole("combobox"), "표현 열기 JSON");
+    await user.type(screen.getByRole("combobox"), "표현 열기 GRAPH");
     await user.keyboard("{Enter}");
 
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: "JSON" })).toHaveFocus(),
+      expect(screen.getByRole("tab", { name: "그래프" })).toHaveFocus(),
     );
     expect(source.closest('[role="tabpanel"]')).toHaveAttribute("hidden");
   });
@@ -614,16 +640,13 @@ describe("StrategyIde", () => {
   // Graph·Form에서 편집 결과를 보려고 YAML 탭으로 돌아가야 했다(WORKFLOW P1-01).
   it("keeps the document status and the problem list outside the tab panels", () => {
     matchMedia(false);
-    for (const view of ["yaml", "json", "form", "graph", "diff"] as const) {
+    for (const view of ["graph", "yaml"] as const) {
       mount({
         view,
         sourceView: "yaml",
-        availableViews: ["yaml", "json", "form", "graph", "diff"],
+        availableViews: ["graph", "yaml"],
         projections: {
-          json: <div>JSON projection</div>,
-          form: <div>Form projection</div>,
           graph: <div>Graph projection</div>,
-          diff: <div>Diff projection</div>,
         },
         documentStatus: (
           <p role="status" aria-label="문서 상태">

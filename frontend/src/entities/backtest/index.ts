@@ -2,13 +2,18 @@ export {
   backtestHistoryKey,
   backtestHistoryQuery,
   runEnvironmentSchemaQuery,
+  trialLedgerQuery,
   useBacktestRequest,
   useBacktestResult,
   useBacktestStatus,
+  useBacktestSummary,
+  useBacktestTrialPreview,
   useCancelBacktest,
+  useMergeTrialLineage,
   useRunEnvironmentSchema,
   useStartBacktest,
 } from "./model/backtest-queries";
+export { RUN_KINDS, isRunKind, runKindLabel } from "./model/run-kind";
 export {
   runEnvironmentDisplayValue,
   runEnvironmentFields,
@@ -21,9 +26,16 @@ export {
   type RunEnvironmentControl,
   type RunEnvironmentField,
 } from "./model/run-environment-fields";
-export { backtestStartRejectionMessage } from "./model/start-rejection";
-export { BacktestRejection } from "./ui/backtest-rejection";
+export {
+  backtestErrorSentence,
+  backtestStartRejectionMessage,
+  requestRejectionMessage,
+} from "./model/backtest-error";
 export { BacktestRunDetail } from "./ui/backtest-run-detail";
+export {
+  BacktestResultFailure,
+  BacktestRunFailure,
+} from "./ui/backtest-run-failure";
 export type {
   BacktestRunResult,
   BacktestRunSpec,
@@ -32,4 +44,6 @@ export type {
   PageBacktestRunSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  RunKind,
+  TrialLedger,
 } from "../../shared/api";

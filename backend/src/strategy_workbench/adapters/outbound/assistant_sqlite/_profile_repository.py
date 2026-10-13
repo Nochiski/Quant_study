@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
 from strategy_workbench.application.assistant_chat.facade.ports import (
     ProviderProfileNotFoundError,
 )
@@ -18,7 +19,6 @@ from strategy_workbench.domain.assistant.facade.models import ProviderKind, Prov
 
 from ._database import (
     AssistantDatabase,
-    datetime_text,
     datetime_value,
     int_value,
     optional_text_value,

@@ -69,19 +69,25 @@ impl EntryIn {
     }
 }
 
-/// bar: `(open, high, low, volume)`.
-pub(crate) type BarTuple = (f64, f64, f64, i64);
+/// bar: `(open, high, low, volume, liquidity_volume, impact_scale)`. `liquidity_volume`은 유동성
+/// 캡의 기준 거래량이다 — 참여 기준이 따로 없으면 `volume`과 같다 (Python `Bar.liquidity_volume`).
+/// `impact_scale`은 √ 충격 척도이고 없으면 0이다 (Python `Bar.impact_scale`).
+pub(crate) type BarTuple = (f64, f64, f64, i64, i64, f64);
 
-/// 슬리피지 설정: `("none", 0, 0)` | `("fixed_bps", bps, 0)` | `("volume_share", volume_limit, price_impact)`.
+/// 슬리피지 설정: `("none", 0, 0)` | `("fixed_bps", bps, 0)` | `("volume_share", volume_limit, price_impact)`
+/// | `("sqrt", max_fraction, 0)`. `sqrt`는 체결가 × min(bar 척도 × √수량, max_fraction)이다
+/// (Python `SqrtImpactSlippage`).
 fn slippage_per_share(
     model: &(String, f64, f64),
     base_price: f64,
     quantity: i64,
     volume: i64,
+    impact_scale: f64,
 ) -> PyResult<f64> {
     match model.0.as_str() {
         "none" => Ok(0.0),
         "fixed_bps" => Ok(base_price * model.1 / 10_000.0),
+        "sqrt" => Ok(base_price * (impact_scale * (quantity as f64).sqrt()).min(model.1)),
         "volume_share" => {
             let share = if volume <= 0 {
                 model.1
@@ -141,11 +147,21 @@ fn py_list(items: &[String]) -> String {
 /// `("trigger", order_id, ...)`, `("remove", order_id, ...)`, `("drop_group", group_id, ...)`
 pub(crate) type Op = (String, String, i64, f64, f64, f64, String);
 
+/// 매도 체결 금액 × 거래세율. 매수는 0이다. 연산 순서는 Python `costs.sell_tax_amount`와 같다.
+pub(crate) fn sell_tax(side: &str, quantity: i64, price: f64, rate: f64) -> f64 {
+    if side == "sell" {
+        quantity as f64 * price * rate
+    } else {
+        0.0
+    }
+}
+
 struct Session<'a> {
     ts: &'a str,
     bars: &'a HashMap<&'a str, BarTuple>,
     power: &'a mut BuyingPower,
     fee_rate: f64,
+    sell_tax_rate: f64,
     default_participation: Option<&'a str>,
     slippage: &'a (String, f64, f64),
     ops: Vec<Op>,
@@ -195,15 +211,15 @@ impl<'a> Session<'a> {
         let participation = e.participation.as_deref().or(self.default_participation);
         let mut capped = e.remaining;
         if let Some(text) = participation {
-            capped = capped.min(liquidity_cap(bar.3, text)?.max(0));
+            capped = capped.min(liquidity_cap(bar.4, text)?.max(0));
         }
-        let slip = slippage_per_share(self.slippage, base_price, capped, bar.3)?;
+        let slip = slippage_per_share(self.slippage, base_price, capped, bar.3, bar.5)?;
         let held = self.power.quantity_of(&e.key);
         let (p, q, applied, status) = quote_numbers(
             &e.side,
             base_price,
             e.remaining,
-            bar.3,
+            bar.4,
             participation,
             slip,
             e.limit_price,
@@ -226,16 +242,16 @@ impl<'a> Session<'a> {
             .bars
             .get(e.key.as_str())
             .copied()
-            .unwrap_or((0.0, 0.0, 0.0, 0));
+            .unwrap_or((0.0, 0.0, 0.0, 0, 0, 0.0));
         let power = self.power.available();
         match q.status.as_str() {
             "not_filled" => Some(format!(
                 "no liquidity in session — order_id={} instrument={} volume={} ts={}",
-                e.order_id, e.symbol, bar.3, self.ts
+                e.order_id, e.symbol, bar.4, self.ts
             )),
             "liquidity_limited" => Some(format!(
                 "fill capped by volume participation — order_id={} instrument={} remaining={} cap={} volume={}",
-                e.order_id, e.symbol, e.remaining, q.quantity, bar.3
+                e.order_id, e.symbol, e.remaining, q.quantity, bar.4
             )),
             "rejected_no_cash" => Some(format!(
                 "cannot afford a single share — order_id={} instrument={} price={} buying_power={}",
@@ -283,8 +299,11 @@ impl<'a> Session<'a> {
         let detail_before = self.detail(q, e);
         let notional = quantity as f64 * q.price;
         let fee = notional * self.fee_rate;
+        // 매도 거래세는 체결 기록이 아니라 비용 기록이지만, 같은 세션 뒤 매수가 그 돈을 쓰지 않도록
+        // 여력에서는 수수료와 함께 뺀다.
+        let tax = sell_tax(&e.side, quantity, q.price, self.sell_tax_rate);
         self.power
-            .consume(&e.key, &e.side, quantity, q.price, fee)?;
+            .consume(&e.key, &e.side, quantity, q.price, fee + tax)?;
         self.ops.push((
             "fill".into(),
             e.order_id.clone(),
@@ -375,6 +394,7 @@ pub(crate) fn process_market_impl(
     fee_rate: f64,
     default_participation: Option<&str>,
     slippage: &(String, f64, f64),
+    sell_tax_rate: f64,
 ) -> PyResult<Vec<Op>> {
     let mut entries: Vec<EntryIn> = entries.into_iter().map(EntryIn::from_tuple).collect();
     let mut session = Session {
@@ -382,6 +402,7 @@ pub(crate) fn process_market_impl(
         bars,
         power,
         fee_rate,
+        sell_tax_rate,
         default_participation,
         slippage,
         ops: Vec::new(),
@@ -435,7 +456,7 @@ pub(crate) fn process_market_impl(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ts, entries, groups, bars, power, fee_rate, default_participation, slippage))]
+#[pyo3(signature = (ts, entries, groups, bars, power, fee_rate, default_participation, slippage, sell_tax_rate=0.0))]
 #[allow(clippy::too_many_arguments)]
 fn process_market(
     py: Python<'_>,
@@ -447,6 +468,7 @@ fn process_market(
     fee_rate: f64,
     default_participation: Option<&str>,
     slippage: (String, f64, f64),
+    sell_tax_rate: f64,
 ) -> PyResult<Vec<Op>> {
     PyErr::warn(
         py,
@@ -466,6 +488,7 @@ fn process_market(
         fee_rate,
         default_participation,
         &slippage,
+        sell_tax_rate,
     )
 }
 

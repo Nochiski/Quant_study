@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 
+import { trialLedgerQuery } from "../../../entities/backtest";
 import {
   strategiesQuery,
   strategyRevisionsQuery,
@@ -8,8 +9,17 @@ import {
 } from "../../../entities/strategy";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
-import { Badge, Button, EmptyState } from "../../../shared/ui";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  panelId,
+  tabId,
+  Tabs,
+} from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import { TrialLedgerPanel } from "./trial-ledger";
+import "./trial-ledger.css";
 
 const ROUTE = "/research/strategies";
 const PAGE_SIZE = 20;
@@ -138,7 +148,7 @@ const RevisionRows = ({
                         strategyId,
                         revision: String(revision.revision),
                       }}
-                      search={{ view: "diff" }}
+                      search={{ view: "graph", compare: true }}
                     >
                       Diff
                     </Link>
@@ -181,13 +191,63 @@ const RevisionRows = ({
   );
 };
 
+type HistoryTab = "revisions" | "trials";
+
+/** 펼친 전략 행: 리비전과 계열 시도 원장(검증 랩 V5-03)을 탭으로 오간다. */
+const StrategyHistory = ({
+  strategyId,
+  strategyLabel,
+}: {
+  strategyId: string;
+  strategyLabel: string;
+}) => {
+  const [tab, setTab] = useState<HistoryTab>("revisions");
+  const tabsId = useId();
+  const ledger = useQuery(trialLedgerQuery(strategyId));
+  const trials = t("history.trials.tab");
+  return (
+    <>
+      <Tabs
+        items={[
+          { id: "revisions", label: t("history.revisions.tab") },
+          {
+            id: "trials",
+            label: ledger.isSuccess
+              ? `${trials} ${ledger.data.trial_count}`
+              : trials,
+          },
+        ]}
+        value={tab}
+        onChange={setTab}
+        label={`${t("history.strategies.history")}: ${strategyLabel}`}
+        idBase={tabsId}
+      />
+      <div
+        role="tabpanel"
+        id={panelId(tabsId, tab)}
+        aria-labelledby={tabId(tabsId, tab)}
+      >
+        {tab === "revisions" ? (
+          <RevisionRows strategyId={strategyId} strategyLabel={strategyLabel} />
+        ) : (
+          <TrialLedgerPanel
+            strategyId={strategyId}
+            strategyLabel={strategyLabel}
+            ledger={ledger}
+          />
+        )}
+      </div>
+    </>
+  );
+};
+
 const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
   const [expanded, setExpanded] = useState(false);
   const historyId = useId();
   const strategyLabel = strategy.title
     ? `${strategy.title} (${strategy.strategy_id})`
     : strategy.strategy_id;
-  const historyLabel = `${t("history.revisions.caption")}: ${strategyLabel}`;
+  const historyLabel = `${t("history.strategies.history")}: ${strategyLabel}`;
   return (
     <>
       <tr>
@@ -248,7 +308,7 @@ const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
         <tr>
           <td colSpan={5} className="data-list-page__nested">
             <div id={historyId} role="region" aria-label={historyLabel}>
-              <RevisionRows
+              <StrategyHistory
                 strategyId={strategy.strategy_id}
                 strategyLabel={strategyLabel}
               />
@@ -288,7 +348,7 @@ export const StrategiesPage = () => {
     });
 
   return (
-    <section className="data-list-page" aria-labelledby="strategies-title">
+    <section className="page data-list-page" aria-labelledby="strategies-title">
       <header className="data-list-page__header">
         <div>
           <h1 id="strategies-title">{t("history.strategies.title")}</h1>

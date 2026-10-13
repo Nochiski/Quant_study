@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
-from contextlib import closing, contextmanager, suppress
 from pathlib import Path
-from threading import RLock
 from typing import ClassVar
 
+from strategy_workbench.adapters.outbound.sqlite_store.facade.database import SqliteDatabase
 from strategy_workbench.application.strategy_design.facade.ports import (
     Page,
     PageRequest,
@@ -50,43 +48,23 @@ class SQLiteStrategyRepository:
         source_spec_hash: SourceSpecHashResolver,
         busy_timeout_seconds: float = 5.0,
     ) -> None:
-        if busy_timeout_seconds <= 0:
-            raise ValueError("busy_timeout_seconds must be positive")
         self._source_spec_hash = source_spec_hash
-        self._busy_timeout_seconds = busy_timeout_seconds
-        self._busy_timeout_ms = max(1, round(busy_timeout_seconds * 1000))
-        self._lock = RLock()
-        self._closed = False
-        self._memory_connection: sqlite3.Connection | None = None
-        self._path: Path | None
-        if path is None:
-            self._path = None
-            self._memory_connection = self._new_connection(":memory:")
-            self._prepare_database(self._memory_connection)
-        else:
-            candidate = Path(path).expanduser()
-            if candidate.exists() and candidate.is_dir():
-                raise ValueError(f"strategy repository path is a directory -- path={candidate}")
-            candidate.parent.mkdir(parents=True, exist_ok=True)
-            self._path = candidate.resolve()
-            with closing(self._new_connection(str(self._path))) as connection:
-                self._prepare_database(connection)
+        self._database = SqliteDatabase(
+            path,
+            label="strategy repository",
+            error=StrategyRepositoryStorageError,
+            prepare=self._prepare_database,
+            busy_timeout_seconds=busy_timeout_seconds,
+        )
 
     @property
     def database_path(self) -> Path | None:
-        return self._path
+        return self._database.database_path
 
     def close(self) -> None:
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            if self._memory_connection is not None:
-                self._memory_connection.close()
-                self._memory_connection = None
+        self._database.close()
 
     def __enter__(self) -> SQLiteStrategyRepository:
-        self._ensure_open()
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -94,7 +72,7 @@ class SQLiteStrategyRepository:
 
     def add(self, record: StrategyRevisionRecord) -> None:
         values = encode_record(record, source_spec_hash=self._source_spec_hash)
-        with self._transaction(write=True) as connection:
+        with self._database.transaction(write=True) as connection:
             latest_revision = self._validated_latest_revision(connection, record.strategy_id)
             if latest_revision is not None:
                 raise StrategyRevisionConflictError(
@@ -113,7 +91,7 @@ class SQLiteStrategyRepository:
 
     def append(self, record: StrategyRevisionRecord, *, expected_revision: int) -> None:
         values = encode_record(record, source_spec_hash=self._source_spec_hash)
-        with self._transaction(write=True) as connection:
+        with self._database.transaction(write=True) as connection:
             actual_revision = self._validated_latest_revision(connection, record.strategy_id)
             if actual_revision is None:
                 raise StrategyNotFoundError(
@@ -148,7 +126,7 @@ class SQLiteStrategyRepository:
                 )
 
     def get(self, strategy_id: str, revision: int | None = None) -> StrategyRevisionRecord:
-        with self._transaction(write=False) as connection:
+        with self._database.transaction(write=False) as connection:
             latest_revision = self._validated_latest_revision(connection, strategy_id)
             if latest_revision is None:
                 raise StrategyNotFoundError(f"strategy not found -- strategy_id={strategy_id}")
@@ -168,7 +146,7 @@ class SQLiteStrategyRepository:
             return self._decode(row)
 
     def list_strategies(self, page: PageRequest) -> Page[StrategySummary]:
-        with self._transaction(write=False) as connection:
+        with self._database.transaction(write=False) as connection:
             self._audit_all_revision_chains(connection)
             total_row = connection.execute("SELECT COUNT(*) FROM strategy_heads").fetchone()
             total = self._count_from_row(total_row)
@@ -192,7 +170,7 @@ class SQLiteStrategyRepository:
         )
 
     def history(self, strategy_id: str, page: PageRequest) -> Page[RevisionSummary]:
-        with self._transaction(write=False) as connection:
+        with self._database.transaction(write=False) as connection:
             latest_revision = self._validated_latest_revision(connection, strategy_id)
             if latest_revision is None:
                 raise StrategyNotFoundError(f"strategy not found -- strategy_id={strategy_id}")
@@ -227,69 +205,15 @@ class SQLiteStrategyRepository:
         )
 
     def _prepare_database(self, connection: sqlite3.Connection) -> None:
+        migrate_schema(connection)
+        connection.execute("BEGIN")
         try:
-            migrate_schema(connection)
-            connection.execute("BEGIN")
-            try:
-                self._audit_all_revision_chains(connection)
-            except Exception:
-                connection.rollback()
-                raise
-            else:
-                connection.commit()
-        except StrategyRepositoryStorageError:
+            self._audit_all_revision_chains(connection)
+        except Exception:
+            connection.rollback()
             raise
-        except sqlite3.DatabaseError as error:
-            raise StrategyRepositoryStorageError(
-                f"could not initialise SQLite strategy repository -- {error}"
-            ) from error
-
-    def _new_connection(self, database: str) -> sqlite3.Connection:
-        connection = sqlite3.connect(
-            database,
-            timeout=self._busy_timeout_seconds,
-            isolation_level=None,
-            check_same_thread=False,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
-
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            self._ensure_open()
-            if self._memory_connection is not None:
-                yield self._memory_connection
-                return
-            assert self._path is not None
-            with closing(self._new_connection(str(self._path))) as connection:
-                yield connection
-
-    @contextmanager
-    def _transaction(self, *, write: bool) -> Iterator[sqlite3.Connection]:
-        try:
-            with self._connection() as connection:
-                connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-                try:
-                    yield connection
-                except Exception:
-                    if connection.in_transaction:
-                        connection.rollback()
-                    raise
-                else:
-                    connection.commit()
-        except (
-            StrategyNotFoundError,
-            StrategyRevisionConflictError,
-            StrategyRepositoryStorageError,
-        ):
-            raise
-        except sqlite3.DatabaseError as error:
-            raise StrategyRepositoryStorageError(
-                f"SQLite strategy repository operation failed -- {error}"
-            ) from error
+        else:
+            connection.commit()
 
     @staticmethod
     def _insert(connection: sqlite3.Connection, values: tuple[object, ...]) -> None:
@@ -388,11 +312,3 @@ class SQLiteStrategyRepository:
         if row is None or not isinstance(row[0], int):  # pragma: no cover - COUNT invariant
             raise StrategyRepositoryStorageError("SQLite count query returned an invalid value")
         return row[0]
-
-    def _ensure_open(self) -> None:
-        if self._closed:
-            raise StrategyRepositoryStorageError("SQLite strategy repository is closed")
-
-    def __del__(self) -> None:  # pragma: no cover - defensive interpreter cleanup
-        with suppress(Exception):
-            self.close()

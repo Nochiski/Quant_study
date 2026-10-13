@@ -8,6 +8,7 @@ from enum import Enum
 from typing import TypeAlias
 
 from ._nodes import (
+    FILLING_MISSING_POLICIES,
     ExpressionNode,
     FactorGraph,
     FieldMetadata,
@@ -122,6 +123,10 @@ def compile_factor_plan(
         # 결측 정책은 실행 설정으로 옮겼지만 plan 의 일부로 남는다: 이 값이 `plan_hash` 에서
         # 빠지면 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유한다(spec D6).
         "missing_policy": missing.value,
+        # 평가 규칙 판본의 첫 사례(#312 · #375 DR-A-10): 채우는 정책은 채움 자리를 잎에서 횡단면
+        # 진입으로 옮겨 같은 이름으로 전과 다른 값을 낸다. 그 정책의 판만 가른다 — drop·keep 은
+        # 채우지 않아 판(골든 `PLAN_HASH_1_2`)이 그대로다
+        **({"missing_fill": "cross_section"} if missing in FILLING_MISSING_POLICIES else {}),
         "as_of_policy": "available_date_lte_as_of",
     }
     plan_hash = hashlib.sha256(

@@ -8,6 +8,7 @@ import {
   type DocumentState,
 } from "./document-state";
 import type { FormProjection } from "./form-projection";
+import type { JsonSchema } from "./schema-navigator";
 import { deduplicateDiagnostics } from "./problem-list";
 import type { StrategyView } from "./strategy-views";
 
@@ -21,8 +22,8 @@ export type DiagnosticNavigationOptions = {
   form: FormProjection | null;
   /** Form·Graph가 함께 읽는 parse tree. */
   tree: unknown;
-  /** runtime schema가 도착했는가(Form·Graph 편집 표면의 렌더 조건). */
-  schemaLoaded: boolean;
+  /** runtime schema(Form·Graph 편집 표면의 렌더 조건, 파이프라인 캔버스의 단계). 아직 없으면 null. */
+  schema: JsonSchema | null;
   /** 지금 탭을 지킨 채 pointer를 선택한다. */
   onSelectPointer: (pointer: string) => void;
   /** 원문 탭으로 전환한다. pointer가 문서 전체면 undefined가 온다. */
@@ -60,17 +61,16 @@ export const useDiagnosticNavigation = ({
   sourceView,
   form,
   tree,
-  schemaLoaded,
+  schema,
   onSelectPointer,
   onOpenSource,
 }: DiagnosticNavigationOptions): DiagnosticNavigation => {
   const editor = useRef<CodeEditorHandle | null>(null);
   const [revealSignal, setRevealSignal] = useState(0);
-  const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
-    editor.current = next;
-  }, []);
   // 탭 전환을 기다리는 진단 범위. 원문 탭이 보이는 첫 effect에서 소비한다.
   const pending = useRef<DocumentDiagnostic["range"]>(null);
+  const pendingOwner = useRef<string | null>(null);
+  const owner = `${state.documentEpoch}:${state.sourceVersion}`;
 
   const documentDiagnostics = useMemo(
     () => deduplicateDiagnostics(currentDiagnostics(state)),
@@ -86,27 +86,44 @@ export const useDiagnosticNavigation = ({
     state.compiledVersion !== state.sourceVersion;
 
   // 오래된 offset이 짧아진 현재 텍스트를 넘지 않도록 방어적으로 자른다.
-  const reveal = useCallback((range: DocumentDiagnostic["range"]): void => {
+  const reveal = useCallback((range: DocumentDiagnostic["range"]): boolean => {
     const handle = editor.current;
-    if (handle === null || range === null) return;
+    if (handle === null || range === null) return false;
     const length = handle.getText().length;
     const from = Math.min(range.start.offset, length);
     const to = Math.min(Math.max(range.end.offset, from), length);
     handle.setSelection(from, to);
     handle.scrollTo(from);
     handle.focus();
+    return true;
   }, []);
+
+  const onEditorReady = useCallback(
+    (next: CodeEditorHandle | null): void => {
+      editor.current = next;
+      // 탭 전환보다 늦게 준비된 CodeMirror에도 같은 미소비 요청을 전달한다.
+      if (
+        next !== null &&
+        view === sourceView &&
+        pendingOwner.current === owner &&
+        reveal(pending.current)
+      )
+        pending.current = null;
+    },
+    [owner, reveal, sourceView, view],
+  );
 
   const selectDiagnostic = useCallback(
     (diagnostic: DocumentDiagnostic): void => {
       if (diagnostic.range === null) return;
+      pendingOwner.current = owner;
       const destination = resolveDiagnosticDestination({
         view,
         sourceView,
         pointer: diagnostic.pointer,
         form,
         tree,
-        schemaLoaded,
+        schema,
       });
       if (destination === "current-view") {
         pending.current = null;
@@ -115,8 +132,7 @@ export const useDiagnosticNavigation = ({
         return;
       }
       if (view === sourceView) {
-        pending.current = null;
-        reveal(diagnostic.range);
+        pending.current = reveal(diagnostic.range) ? null : diagnostic.range;
         return;
       }
       pending.current = diagnostic.range;
@@ -124,10 +140,11 @@ export const useDiagnosticNavigation = ({
     },
     [
       form,
+      owner,
       onOpenSource,
       onSelectPointer,
       reveal,
-      schemaLoaded,
+      schema,
       sourceView,
       tree,
       view,
@@ -135,12 +152,11 @@ export const useDiagnosticNavigation = ({
   );
 
   useEffect(() => {
-    if (view !== sourceView) return;
+    if (view !== sourceView || pendingOwner.current !== owner) return;
     const range = pending.current;
     if (range === null) return;
-    pending.current = null;
-    reveal(range);
-  }, [reveal, sourceView, view]);
+    if (reveal(range)) pending.current = null;
+  }, [owner, reveal, sourceView, view]);
 
   return { diagnostics, stale, revealSignal, onEditorReady, selectDiagnostic };
 };

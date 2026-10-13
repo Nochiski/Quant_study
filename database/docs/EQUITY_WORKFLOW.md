@@ -68,7 +68,7 @@ v1.1 은 "엔진에 재무·컨센서스 포트가 없다" 고 결론지었으�
 
 - **산출** `~/quant-ledger/data/equity/<table>/`(stage 골격) · `baseline.json` · `fixtures/` · `_pinned/<stg_x>/{v=<build>/, MANIFEST.json}`(하드링크 + BuildRecord 복사) · `_asof/<view>/<build>/`(as-of 표본 결과) · `equity.duckdb`(뷰 카탈로그, 임시 파일 → `os.replace`).
 - **코드** `workspace/dongmin/src/equity/`(`model`·`rules_*`·`inputs`·`build`·`gates`·`catalog`·`baseline`·`__main__`, `.sql` 파일 빌드) — 재사용은 `stage/manifest.py`·`stage/baseline.write`·`GateStatus/GateResult` 만, `build`·`gates` 는 복제 후 수정(원장 ATTACH·fanout 전제 제거). 상세는 `reviews/2026-09-05-equity-code-proposal.md`.
-- **어댑터** 커널 3포트 `backend/src/backtest_engine/adapters/equity_duckdb.py`(pyarrow, 새 의존성 없음) · 워크벤치 5포트 `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/`(duckdb 필요 → **결정 7**).
+- **어댑터** 워크벤치 5포트 `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/`(duckdb 필요 → **결정 7**). S07 의 커널 3포트 `backtest_engine/adapters/equity_duckdb.py` 는 제품이 쓰지 않아 걷었다(2026-09-30, #372) — 제품 백테스트는 워크벤치 `load_backtest_dataset` 으로 bar·사건을 받는다.
 - **판본** `BuildRecord.inputs`(09-03 반영) · stage 문서층 4테이블도 `_pinned/` 고정 · `content_hash` 는 tmp 경로에서(`v=` 하이브 컬럼 함정).
 - **금지** 원장 SQLite 직접 읽기 · 상수 본문·코드 하드코딩 · 미수집→0 · `_current` 로 과거 필터 · `obs_month`·`bsns_year` 날짜 축 · latest 판본 · 게이트 술어를 산출식으로 재계산(항진명제) · `_pinned/` 에 `manifest.commit()` 호출(GC).
 
@@ -106,7 +106,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S06-2** | 조정계수 v3(KRX 기준가) | `price_daily` +`change_krw`·`base_price_krw` · `adj_factor` 원천 `krx_base_price`(사건 교체·신규 `unknown_krx`·재발견 제외·`unknown_price_only` 기록, ETF·구간 첫날 제외) · 어댑터 `unknown_krx` 방향 매핑 · 규칙 판본 e1.3.0 · EG8 재측정 | S04·S06 + stage `change_krw` + equity `security`·`security_span` | ∥ S03C | S06 (설계 확정 09-05, **구현 09-05** — DESIGN §10 P27 · GATES §9 S06-2, 서버 실측 대기) |
 | **S03B** | 유니버스(시장 파생) | `universe_daily` v2(`mktcap_krw`·`adv20_krw`·`listing_age_days`·`no_trade_run`·`suspended` 완성) | S04·S03 | ∥ S06 | S04 |
 | **S03C** | 유니버스(무거래 이유) | `universe_daily` v4(`no_trade_reason`, status 규칙 = 신호 없는 무거래에만 k) · `universe_policy` liquid 술어 +1(13행, s03c-v4) | S03B·S06 + equity `adj_factor` | ∥ S06-2 | S03B·S06 (**구현 완료 09-05** — 로컬 실측 DESIGN §10 P28, 서버 미실행) |
-| **S07** | **엔진 어댑터 v0** | `backtest_engine/adapters/equity_duckdb.py`(3포트, pyarrow) + `backend/tests/test_bar_source_contract.py::BUILDERS` 등록(런타임 어댑터 레지스트리는 없다 — 호출자가 직접 생성) · `equity contract`(`src/equity/contract.py`, EG-C ①②③④⑤⑩ → `_contract_meta.json`) · `baseline_seed_s07.json` | S03B·S06 | — | S06·S03B |
+| **S07** | **엔진 어댑터 v0** | `backtest_engine/adapters/equity_duckdb.py`(3포트, pyarrow) + `backend/tests/test_bar_source_contract.py::BUILDERS` 등록(런타임 어댑터 레지스트리는 없다 — 호출자가 직접 생성) · `equity contract`(`src/equity/contract.py`, EG-C ①②③④⑤⑩ → `_contract_meta.json`) · `baseline_seed_s07.json` *(2026-09-30 #372: 커널 어댑터·`BUILDERS` 등록은 걷고 `equity contract` 는 워크벤치 facade 를 부른다)* | S03B·S06 | — | S06·S03B |
 | **S08** | 수급 격자 | `flow_daily`(13주체 + KIS 대응표) | S03B + 키움·KIS flow·foreign·로그 | ∥ | S03B |
 | **S09** | 공매도·대차 격자 | `short_daily` | S03B + short kiwoom/kis·lending·loan_kis | ∥ | S03B |
 | **S10** | 신용 격자 | `credit_daily` | S03B + `stg_credit_daily` | ∥ | S03B |
@@ -165,7 +165,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 | S00 | `check_field_map.py` 집합 차 0 ∧ GAP 21건 전부 슬라이스 배정 ∧ 결정 5·6·7 확정 표기 |
 | 1단계 S01~S03 | EG1 7식 ∧ 폐지 전부 `delist_date`(EG3-P10) ∧ KR7 isin8 그룹당 보통주 1 ∧ span 비중첩·Σ n_days 등식 ∧ 캘린더 = 4,094 ∧ `induty_code` 공란 0 ∧ `halt_state` 열린 구간 0 ∧ `asof_sample` 등재 |
 | 2단계 S04~S06·S03B | `price_daily` = 10,890,251 ∧ 시총 불변 `price×share=1` 위반 0 ∧ `v_firm_mktcap` 독립 재계산 일치 ∧ 분할일 가격·거래량 점프 ≤ baseline ∧ EG20 원주가 불변 ∧ EG11 뷰 결정성 |
-| S07 | `test_bar_source_contract.py::BUILDERS['equity_duckdb']` 등록 후 그 파일 전량 green ∧ `test_adapters_equity.py` green ∧ `equity contract` EGC-01·02·03·04·05·10 pass(절단본 체인 → 서버) ∧ 폐지 표본(`security.delist_sample_n`) BarQuery OK·반환 = 요청 |
+| S07 | `equity contract` EGC-01·02·03·04·05·10 pass(절단본 체인 → 서버, 대상은 워크벤치 `load_backtest_dataset`·`load_universe` — #372 전에는 커널 어댑터와 `BUILDERS['equity_duckdb']`·`test_adapters_equity.py` 였다) ∧ 폐지 표본(`security.delist_sample_n`) 전 구간 질의 예외 없음·반환 = 요청 |
 | 3단계 S08~S10 | 격자 등식 ∧ 미수집→0 행 0(로그 축 독립 재판정) ∧ evidence_rate ≥ baseline ∧ 커버율↔시장수익률 상관 ≤ baseline ∧ 12주체 합 항등(kiwoom) ∧ 겹침 0 ∧ pre_calendar 격리 건수 = 실측 |
 | 4A S11·S12 | 사다리 5단 baseline 등재 ∧ E-G6a ≥ 임계·E-G6b 기록·E-G7 ≥ 임계 ∧ `period_end` 문서 정본 커버 ≥ baseline ∧ `available ≥ period_end` 위반 0 ∧ 참조표 미스 0 ∧ 파생 `<col>_available_date` 위반 0 ∧ PIT 결측률 3축 교차표 baseline 등재 |
 | S14(대기) | `vintage_kind` 3종 적재 ∧ D9(정정 없는 보고서 API=원본 100%) 재현 ∧ EG5c 재기준(`_asof/` 갱신 승인) |
@@ -205,7 +205,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 | # | 결정 | 상태 |
 |---|---|---|
 | 1~4 | 산출 형식 · 판본·게이트 · 팩터 ID 54 · 유니버스 정책표 | 확정(09-05 "작업 진행") |
-| 5 | **엔진 커널 3포트 + 워크벤치 5포트, 단일 어댑터 `equity_duckdb`**(v1.1 의 "팩터층 주입" 폐기) | 확정(재기술) |
+| 5 | **엔진 커널 3포트 + 워크벤치 5포트, 단일 어댑터 `equity_duckdb`**(v1.1 의 "팩터층 주입" 폐기) | 확정(재기술) · 커널 3포트는 제품이 쓰지 않아 걷음(2026-09-30, #372) |
 | **6** | `price.close` = 원주가 · `price.adj_close` = 조정가(전방 조정 `v_adj_price_fwd`, S21 후속 09-05) 두 필드 제공. 레지스트리의 수익률·모멘텀·변동성 팩터가 `adj_close` 를 쓰도록 워크벤치 이슈 발행 | **확정(09-05)** |
 | **7** | 워크벤치 어댑터는 duckdb 필요 → `backend` optional-dependency `equity = ["duckdb>=1.5"]` 추가(코드 규칙 "새 라이브러리 금지" 예외, S21 에서 반영). 커널 어댑터(S07)는 pyarrow 로 새 의존성 0 | **확정(09-05) · 반영(S21 축소 — `backend/pyproject.toml`·`uv.lock` duckdb 1.5.5·CI `uv sync --extra parquet --extra equity`)** |
 
@@ -265,5 +265,5 @@ catalog` 를 한 번 더 돌려 매크로를 현재 포인터에 맞춘다(체�
 편입 규약(구현은 갈래 4 — `build_chain.sh`·`deploy.sh`):
 
 - `build_chain.sh` 의 catalog 단계 **뒤**에 `contract_step() { $PY -m equity contract --engine-src "$QL_HOME/_engine"; }` 를 두고, 실패는 **기록형 warn**(`FAILED_SOFT`)으로 남긴다 — 계약 검사는 소비 경계 회귀 신호이지 그날 산출의 폐기 사유가 아니다.
-- `deploy.sh` 가 `backend/src/backtest_engine/` → 서버 `_engine/backtest_engine/` 를 동기화한다. 이것이 없으면 계약이 옛 엔진을 대조한다.
+- `deploy.sh` 가 `backend/src/strategy_workbench/` → 서버 `_engine/strategy_workbench/` 를 동기화한다(#372 전에는 커널 `_engine/backtest_engine/`). 이것이 없으면 계약이 옛 어댑터를 부른다.
 - 확인축: `_contract_meta.json.builds` 의 값 접두가 `m_`/`e_`(체인 판)여야 한다. `b_`(수동 판)이면 체인에서 안 돌고 있다는 뜻이다.

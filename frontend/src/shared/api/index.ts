@@ -44,12 +44,21 @@ export type {
   UsageView,
 } from "./generated/types.gen";
 export {
+  isApplicableWhen,
+  projectApplicability,
+  type ApplicabilityCondition,
+  type DefaultResolver,
+  type FieldApplicability,
+} from "./field-applicability";
+export {
   ApiRequestError,
   configureStrategyWorkbenchApi,
+  failureReason,
   strategyWorkbenchApi,
   type ApplicableWhen,
   type BacktestRunResult,
   type BacktestRunSpec,
+  type BacktestCancelResult,
   type BacktestRunState,
   type BacktestRunSummary,
   type BacktestStartResponse,
@@ -57,6 +66,11 @@ export {
   type CompiledDocument,
   type DatasetFieldProfile,
   type DiffEntry,
+  type Experiment,
+  type ExperimentPage,
+  type ExperimentTrialState,
+  type ExperimentPreview,
+  type ExperimentRequest,
   type EquityCatalogQuery,
   type FactorCatalog,
   type FactorCatalogQuery,
@@ -80,6 +94,7 @@ export {
   type RevisionSummary,
   type RunEnvironment,
   type RunEnvironmentSchema,
+  type RunKind,
   type SaveDocumentRequest,
   type SaveStrategyDraftRequest,
   type SavedRevisionReference,
@@ -93,5 +108,10 @@ export {
   type StrategySummary,
   type StrategyTraceRequest,
   type StrategyTraceResponse,
+  type TrialLedger,
+  type TrialPreview,
   type UpgradedDocument,
+  type WalkForwardReport,
 } from "./strategy-workbench";
+
+export type { NodeValueType } from "./generated";

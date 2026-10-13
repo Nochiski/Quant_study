@@ -33,6 +33,10 @@ Contract:
   the application negotiates that capability before metadata or raw calculation starts. Those
   adapters pass the same callback as ``validation_checkpoint`` when constructing the result, and
   the application passes it again when revalidating at the consumer boundary.
+- 취소 능력(``CancellableRawObservationPort``)과 진행 보고 능력
+  (``ProgressReportingRawObservationPort``)의 ``checkpoint`` 는 어댑터가 나눌 수 없는 호출(DB
+  질의)이 도는 동안 감시 스레드에서도 부를 수 있다(#160). 그래서 콜백은 취소 상태를 읽기만 하는
+  스레드 안전한 판정이어야 한다.
 """
 
 from __future__ import annotations

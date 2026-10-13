@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import re
+
 from fastapi.testclient import TestClient
 
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import DEFAULT_MISSING_POLICY
+
+
+def _snapshot_id(client: TestClient) -> str:
+    """어댑터가 정한 데이터 스냅샷 id — "fixture 데이터의 판:필드 계약 판"(#235)."""
+    snapshot_id = client.get("/api/v1/equity/catalog").json()["snapshot"]["snapshot_id"]
+    assert re.fullmatch(r"mock-equity-v0\.2-[0-9a-f]{16}:[0-9a-f]{16}", snapshot_id)
+    return snapshot_id
 
 
 def test_factor_catalog_validate_and_explain_contract() -> None:
@@ -27,7 +36,7 @@ def test_factor_catalog_validate_and_explain_contract() -> None:
     assert validation.json()["valid"] is True
     assert explanation.status_code == 200
     assert explanation.json()["registry_version"] == catalog["registry_version"]
-    assert explanation.json()["data_snapshot_id"] == "mock-equity-v0.2-20260903"
+    assert explanation.json()["data_snapshot_id"] == _snapshot_id(client)
     assert explanation.json()["plan"]["as_of_policy"] == "available_date_lte_as_of"
     assert len(explanation.json()["plan"]["plan_hash"]) == 64
     # 팩터 연구에서 쓴 그래프에는 compile 이 붙인 노드가 없다.
@@ -130,88 +139,6 @@ def test_explain_resolves_numeric_and_group_metadata_inside_the_backend() -> Non
     }
 
 
-def test_factor_preview_is_deterministic_and_returns_research_diagnostics() -> None:
-    client = TestClient(build_http_app())
-    catalog = client.get(
-        "/api/v1/factors/catalog",
-        params={"search": "short.short_balance_ratio"},
-    ).json()
-    graph = catalog["factors"][0]["default_graph"]
-    body = {
-        "graph": graph,
-        "as_of_start": "2024-01-02",
-        "as_of_end": "2024-01-10",
-    }
-
-    first = client.post("/api/v1/factors/preview", json=body)
-    second = client.post("/api/v1/factors/preview", json=body)
-
-    assert first.status_code == 200
-    assert first.json() == second.json()
-    payload = first.json()
-    # The adapter, not the client, names the snapshot; the cache key carries the same id.
-    assert payload["data_snapshot_id"] == "mock-equity-v0.2-20260903"
-    assert payload["cache_key"]["data_snapshot_id"] == payload["data_snapshot_id"]
-    assert payload["analytics"]["coverage"] == 1.0
-    assert payload["analytics"]["information_coefficient"] is not None
-    assert len(payload["cache_key"]["fingerprint"]) == 64
-    assert payload["evaluation"]["values"]
-
-
-def test_invalid_factor_preview_returns_structured_validation() -> None:
-    client = TestClient(build_http_app())
-    response = client.post(
-        "/api/v1/factors/preview",
-        json={
-            "graph": {
-                "nodes": [
-                    {
-                        "node_id": "cycle",
-                        "operator": "negate",
-                        "input_node_id": "cycle",
-                        "kind": "unary",
-                    }
-                ],
-                "output_node_id": "cycle",
-            },
-            "as_of_start": "2024-01-02",
-            "as_of_end": "2024-01-03",
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "factor.graph.invalid"
-    assert response.json()["detail"]["validation"]["issues"][0]["code"] == "factor.graph.cycle"
-
-
-def test_factor_preview_fails_closed_when_the_expected_snapshot_differs() -> None:
-    client = TestClient(build_http_app())
-    catalog = client.get(
-        "/api/v1/factors/catalog",
-        params={"search": "short.short_balance_ratio"},
-    ).json()
-    body = {
-        "graph": catalog["factors"][0]["default_graph"],
-        "expected_data_snapshot_id": "stale-snapshot-from-an-old-catalog",
-        "as_of_start": "2024-01-02",
-        "as_of_end": "2024-01-10",
-    }
-
-    response = client.post("/api/v1/factors/preview", json=body)
-
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["code"] == "factor.snapshot_mismatch"
-    assert detail["expected_data_snapshot_id"] == "stale-snapshot-from-an-old-catalog"
-    assert detail["actual_data_snapshot_id"] == "mock-equity-v0.2-20260903"
-
-    matching = client.post(
-        "/api/v1/factors/preview",
-        json=body | {"expected_data_snapshot_id": "mock-equity-v0.2-20260903"},
-    )
-    assert matching.status_code == 200
-
-
 def _momentum_graph() -> dict[str, object]:
     graph: dict[str, object] = {
         "nodes": [
@@ -263,3 +190,12 @@ def test_explain_without_a_missing_policy_uses_the_run_default() -> None:
 
     assert omitted.json()["plan"]["missing_policy"] == DEFAULT_MISSING_POLICY.value
     assert omitted.json()["plan"]["plan_hash"] == explicit.json()["plan"]["plan_hash"]
+
+
+def test_retired_factor_preview_does_not_offer_a_second_calculation_path() -> None:
+    client = TestClient(build_http_app())
+    assert client.post("/api/v1/factors/preview", json={}).status_code == 404
+    assert (
+        client.post("/api/v1/factors/validate", json={"graph": _momentum_graph()}).status_code
+        == 200
+    )

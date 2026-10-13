@@ -7,6 +7,7 @@ import { t, tOptional } from "../../../shared/config";
 import { useId, useRef } from "react";
 import {
   EXPLAINING_WARNING_CODES,
+  HIGHLIGHTED_METRIC_IDS,
   metricPlainCopy,
   metricUnavailableCopy,
 } from "../model/metric-copy";
@@ -46,9 +47,11 @@ const chartPath = (
 const LineChart = ({
   title,
   series,
+  emptyText = t("backtest.result.chartEmpty"),
 }: {
   title: string;
   series: ChartSeries[];
+  emptyText?: string;
 }) => {
   const finite = series.flatMap((item) =>
     item.values.filter((value): value is number => value !== null),
@@ -59,7 +62,7 @@ const LineChart = ({
         <header>
           <h4>{title}</h4>
         </header>
-        <p className="inline-state">{t("backtest.result.chartEmpty")}</p>
+        <p className="inline-state">{emptyText}</p>
       </section>
     );
   }
@@ -162,24 +165,29 @@ const MetricCell = ({
 
 /**
  * 실행된 실행 설정의 행. 칸 목록·순서·이름·단위·enum 값 이름은 실행 설정 스키마에서 읽는다
- * (DEFECT-242-04). 스키마를 아직 못 읽었으면 기록된 키와 값을 그대로 보인다.
+ * (DEFECT-242-04). 스키마에 없는 기록 키(스키마를 아직 못 읽었거나, 그 뒤 스키마가 칸을 빼거나 이름을
+ * 바꿨다)는 그 뒤에 키와 값을 그대로 붙인다 — run 기록은 실행 설정의 유일한 사본이다(#251).
  */
 const environmentRows = (
   environment: BacktestRunResult["manifest"]["environment"],
   fields: readonly RunEnvironmentField[] | null,
 ): { key: string; label: string; value: string }[] => {
   const record = environment as unknown as Record<string, unknown>;
-  if (fields === null)
-    return Object.entries(record).map(([key, value]) => ({
-      key,
-      label: key,
-      value: value === null || value === undefined ? "—" : String(value),
-    }));
-  return fields.map((field) => ({
-    key: field.name,
-    label: runEnvironmentLabel(field),
-    value: runEnvironmentValueLabel(field, record[field.name]),
-  }));
+  const known = new Set(fields?.map((field) => field.name));
+  return [
+    ...(fields ?? []).map((field) => ({
+      key: field.name,
+      label: runEnvironmentLabel(field),
+      value: runEnvironmentValueLabel(field, record[field.name]),
+    })),
+    ...Object.entries(record)
+      .filter(([key]) => !known.has(key))
+      .map(([key, value]) => ({
+        key,
+        label: key,
+        value: value === null || value === undefined ? "—" : String(value),
+      })),
+  ];
 };
 
 export const BacktestRunDetail = ({
@@ -215,15 +223,6 @@ export const BacktestRunDetail = ({
       .filter((item) => item.scope === "full")
       .map((item) => [item.metric_id, item]),
   );
-  const highlights = [
-    "total_return",
-    "sharpe",
-    "max_drawdown",
-    "calmar",
-    "turnover",
-    "trade_count",
-  ];
-
   return (
     <article className="run-detail" aria-labelledby={titleId}>
       <header className="run-detail__header">
@@ -242,7 +241,7 @@ export const BacktestRunDetail = ({
         className="metric-highlights"
         aria-label={t("backtest.result.highlights")}
       >
-        {highlights.map((metricId) => {
+        {HIGHLIGHTED_METRIC_IDS.map((metricId) => {
           const metric = fullMetrics.get(metricId);
           const definition = definitions.get(metricId);
           if (metric === undefined || definition === undefined) return null;
@@ -301,6 +300,17 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.rollingSharpe")}
+          // 창보다 짧은 실행만 창 길이로 이유를 말한다. 흔들림 0 등 다른 이유면 일반 문구다(#303).
+          emptyText={
+            result.series.rolling_sharpe_window_sessions != null &&
+            result.series.rolling_sharpe.length <=
+              result.series.rolling_sharpe_window_sessions
+              ? t("backtest.result.chartEmpty.rollingSharpe").replace(
+                  "{sessions}",
+                  String(result.series.rolling_sharpe_window_sessions),
+                )
+              : undefined
+          }
         />
         <LineChart
           series={[

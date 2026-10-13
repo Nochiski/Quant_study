@@ -69,9 +69,13 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
   을 붙인다. 접미사 규칙은 `suggestNodeId`와 같다. 바탕 이름은 단계 노드가 연산자(`mean`·`gt`), 잎
   노드가 필드 id의 끝 조각(`price.adj_close` → `adj_close`)이다. 잎 바탕 이름은 지금 `addNode`(바탕 `field`)와
   달라 P5-01이 새로 구현한다. node_id·노드 순서·입력 슬롯이 모두 `spec_hash`에 들어가므로
-  `ideas/*.yaml` fixture도 이 규칙으로 적는다. 부가 잎을 넣는 위치와 체인 꼬리가 들어갈 입력 슬롯의
-  규칙은 P5-01이 정하고 fixture와의 일치를 테스트로 고정한다. 고급 화면의 접힌 "식별자" 영역에서만
-  보인다.
+  `ideas/*.yaml` fixture도 이 규칙으로 적는다. 부가 잎은 입력 슬롯의 스키마 순서대로 소비 단계 바로
+  앞에 넣고 이동·삭제할 때도 그 단계와 함께 다룬다(P5-01). 입력 하나인 단계는 자동으로 직전 단계를
+  읽는다. 다중 입력은 호출자가 직전 단계의 슬롯(`previousInput`)을 명시하고 나머지를 새 잎으로 채운다:
+  나눗셈 아이디어는 `left_node_id`, 종가 > 이평 아이디어는 `right_node_id`다. 프론트가 연산자 이름으로
+  계산 의미를 추론하지 않는다. 5개 fixture의 노드 순서·이름·입력·출력이 빌더와 같은지 테스트한다.
+  첫 소스 단계의 삭제·이동으로 체인이 깨지는 연산은 거부한다(마지막 소스 하나의 삭제는 빈 그래프).
+  고급 화면의 접힌 "식별자" 영역에서만 배관을 보인다.
 - **다중 입력 연산자의 부가 입력은 항상 새 소스 잎 노드다**(정본). 레시피 빌더는 `binary`·
   `comparison`처럼 입력이 둘인 연산자를 추가할 때 부가 입력을 데이터 필드 picker로 물어 `field`·
   `constant`·`parameter` 잎 노드를 **새로 만든다**. 체인 머리를 다시 참조하는 형태(`left: close`,
@@ -81,7 +85,9 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
 - 체인 판정 규칙(정본): 소스 노드 하나로 시작해 각 노드가 직전 노드만 참조하고 `output_node_id`가
   마지막 노드이면 체인이다. 다중 입력 노드는 **한 입력이 체인 꼬리이고 나머지 입력이 전부 체인
   밖 잎일 때만** 체인으로 본다. 잎은 입력이 없는 소스 노드(`field`·`constant`·`parameter`)이고
-  체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다.
+  체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다. 순서는 `graph.nodes`의
+  문서 순서다: 머리는 첫 노드이고, 잎이 아닌 노드가 문서 순서대로 단계다(backend fixture 검사와 같은 해석,
+  리드 결정 2026-09-30).
 - 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 노드 4개(그중 잎 2개: `adj_close`·`adj_close_2`)다:
   `adj_close`(field `price.adj_close`) →
   `mean`(time_series mean, window 20, input `adj_close`) → 잎 `adj_close_2`(field `price.adj_close`) →
@@ -261,9 +267,9 @@ class RunEnvironment:
 - P2-03이 `data`·`execution`을 모델에서 지우면서 `environment_from_legacy_spec`를 삭제하고
   `_bridge.py`를 `_requirement.py`로 개명했다. 남은 규칙 하나를 그 파일의 `require_environment`가 소유한다:
   **실행 설정은 요청이 싣는다.** 요청 모델의 타입은 `RunEnvironment | None`으로 두고, 비어 있으면
-  기본값을 지어내지 않고 `run_environment.required`(`MissingRunEnvironmentError`)로 거절한다. run 경로의
-  HTTP 422 코드는 `backtest.run.environment_required`, portfolio preview는 `portfolio.strategy.invalid`
-  진단 안의 `run_environment.required`다. 타입을 필수로 바꾸지 않은 까닭은 pydantic의 영문 "Field
+  기본값을 지어내지 않고 `run_environment.required`(`MissingRunEnvironmentError`)로 거절한다. #351부터 세
+  실행 경로(백테스트 실행·portfolio preview·추적) 모두 HTTP 422 코드는 `backtest.run.environment_required`다.
+  타입을 필수로 바꾸지 않은 까닭은 pydantic의 영문 "Field
   required" 대신 프론트가 번역할 코드를 주기 위해서다(PLAN P2-03 결정 5·7).
 - 은퇴 문서(1.0·1.1)의 옛 실행 설정은 업그레이드로만 들어온다. 업그레이더가 문서에서 떼어 낸 원문
   값(`RetiredExecutionSettings`)을 `domain/backtest/_retired.py`의
@@ -368,7 +374,7 @@ schema(`x-description-key`, `x-operator`)로 내려준다. **레지스트리 키
 
 | 수준 | 투영 입력 | 편집 |
 |---|---|---|
-| 파이프라인(전략 전체) | runtime schema × parse tree × compile 진단 → 통상 퀀트 프레임워크의 단계 모델(`pipeline-projection.ts`): 1 유니버스(Universe) `eligibility`, 2 알파 팩터(Alpha) `factors`+`signal`, 3 포트폴리오 구성(Portfolio) `portfolio`, 4 리스크 제약(Risk) `risk`, 5 실행(Execution) = 실행 설정 띠(문서 밖). YAML 섹션과 1:1이다. 문서 전체를 한국어 한 문장으로 요약한 문장(`strategy-summary`)도 같은 투영이 만든다 | 카드 컨트롤은 Form 필드 컨트롤 재사용(`replaceScalar`·`insertKey`·`remove`). 팩터 추가는 빈 그래프 팩터 `insertItem` |
+| 파이프라인(전략 전체) | runtime schema × parse tree × compile 진단 → 통상 퀀트 프레임워크의 단계 모델(`pipeline-projection.ts`): 1 유니버스(Universe) `eligibility`, 2 알파 팩터(Alpha) `factors`+`signal`, 3 포트폴리오 구성(Portfolio) `portfolio`, 4 리스크 제약(Risk) `risk`, 5 실행(Execution) = 실행 설정 띠(문서 밖). YAML 섹션과 1:1이되, 단계는 적용되는 곳이라 유동성 필터는 1 유니버스, 리스크 역가중 원천은 3 포트폴리오 구성에 보인다(P4-01 리드 결정 2026-09-30). 단계의 선언(`x-stage`)과 읽는 규칙은 정본 대장 "그래프 표현 투영" 행이 소유한다. 문서 전체를 한국어 한 문장으로 요약한 문장(`strategy-summary`)도 같은 투영이 만든다 | 카드 컨트롤은 Form 필드 컨트롤 재사용(`replaceScalar`·`insertKey`·`remove`). 팩터 추가는 빈 그래프 팩터 `insertItem` |
 | 레시피(팩터 하나) | `graph.nodes`가 D2의 체인 판정 규칙을 만족하면 순서 목록(`recipe-projection.ts`). 다중 입력 노드는 부가 입력이 전부 체인 밖 잎일 때만 체인이고, 체인 머리 재참조는 비체인이다. 아니면 "고급에서 편집" 안내 | `recipe-transactions.ts`: 단계 추가 = `addNode`(kind·id·입력·출력 자동, 다중 입력 연산자는 부가 입력 잎을 새로 만든다) + 다음 노드 재배선, 삭제 = `remove` + 재배선, 이동 = `*_node_id` 재배선, 파라미터 = `replaceScalar`. 여러 연산은 `planSourceOperations`로 한 undo 단계 |
 | 고급(임의 DAG) | `graph.nodes` + backend plan | 1.1 `graph-transactions.ts` 유지. 드래그 배선은 `*_node_id` `replaceScalar`. 좌표는 local UI state |
 | 실행 설정 띠 | 실행 설정 스키마 `GET /api/v1/run-environments/schema`(전략 authoring runtime schema와 별개) | 문서 밖. `run-settings.ts` 필드 |
@@ -454,6 +460,16 @@ Phase 1은 규칙 변경 없이 1.1 위에서 끝나며 1.2 뒤에도 그대로 
    1.1 결과와 같다(`normalization: none` 보존 검증).
 5. 같은 전략을 다른 실행 설정으로 돌려도 `spec_hash`가 같다(e2e).
 6. Phase 종료마다 SoT·책임분리 감사 서브에이전트가 blocking 0.
+
+아이디어 3의 이진 주 점수 동점은 전략에 선언한 보조 팩터·방향으로 해소한다(2026-10-02 사용자 확정).
+예제 `ma20_breakout.yaml`은 60일 모멘텀을 보조 팩터로 선언하고 높은 값을 우선한다. 이는 예제의
+선택이며 공통 엔진이 투자 지표를 고정하지 않는다. 주 점수는 이진 팩터 하나이며 보조값은 alpha
+합성에서 빠진다. 실행 결측 정책 후 잔여 결측은 같은 주 점수의 유효 보조값 뒤, 최종 동점은 기존
+종목 ID 순서다. 주 이진 팩터의 4개 노드 형태는 유지하고 보조 팩터는 별도 레시피다.
+
+정본 ID가 필요한 재현 작업은 그래프의 접힌 **식별자(YAML)**에서 팩터 ID를 바꿀 수 있다.
+일반 제작은 이 영역을 열지 않아도 검증·실행할 수 있다. 영역을 닫으면 기본 파이프라인·레시피에
+식별자가 노출되지 않으며, 정본 hash 검사는 ID를 포함한 `spec_hash`를 그대로 비교한다.
 
 ## 6. 테스트
 

@@ -27,7 +27,7 @@ const destination = (view: StrategyView, pointer: string) =>
     pointer,
     form: FORM,
     tree: TREE,
-    schemaLoaded: true,
+    schema: SCHEMA,
   });
 
 describe("formCoversPointer", () => {
@@ -71,21 +71,20 @@ describe("resolveDiagnosticDestination", () => {
     expect(destination("yaml", "")).toBe("source");
   });
 
-  it("keeps the Graph tab only when that graph is on screen", () => {
+  it("keeps the Graph tab when the pipeline canvas or the factor graph draws the pointer", () => {
     expect(destination("graph", "/factors/0/graph/nodes/1")).toBe(
       "current-view",
     );
-    expect(destination("graph", "/risk/max_name_weight")).toBe("source");
-  });
-
-  it("keeps the Form tab only when that card is on screen", () => {
-    expect(destination("form", "/risk/max_name_weight")).toBe("current-view");
-    expect(destination("form", "/nope")).toBe("source");
-  });
-
-  it("sends the read-only projection tabs back to the source tab", () => {
-    expect(destination("json", "/risk/max_name_weight")).toBe("source");
-    expect(destination("diff", "/risk/max_name_weight")).toBe("source");
+    // 단계 카드 행·목록·항목은 Graph 탭 맨 위 캔버스가 그린다(P4-02).
+    expect(destination("graph", "/risk/max_name_weight")).toBe("current-view");
+    expect(destination("graph", "/eligibility/rules")).toBe("current-view");
+    expect(destination("graph", "/factors/0/weight")).toBe("current-view");
+    // 문서 속성은 단계 없이도 그래프에 있고, 파라미터·버전 스탬프는 원문에서 편집한다.
+    expect(destination("graph", "/title")).toBe("current-view");
+    expect(destination("graph", "/description")).toBe("current-view");
+    expect(destination("graph", "/schema_version")).toBe("source");
+    expect(destination("graph", "/parameters")).toBe("source");
+    expect(destination("graph", "/nope")).toBe("source");
   });
 
   it("sends the Graph tab to the source before the runtime schema arrives", () => {
@@ -98,13 +97,13 @@ describe("resolveDiagnosticDestination", () => {
         pointer: "/factors/0/graph/nodes/1",
         form: FORM,
         tree: TREE,
-        schemaLoaded: false,
+        schema: null,
       }),
     ).toBe("source");
   });
 
   it("sends a whole-document diagnostic back to the source tab", () => {
     expect(destination("graph", "")).toBe("source");
-    expect(destination("form", "")).toBe("source");
+    expect(destination("yaml", "")).toBe("source");
   });
 });

@@ -6,6 +6,7 @@
 """
 
 DEPENDS_ON: tuple[str, ...] = (
+    "adapters.outbound.sqlite_store",
     "application.assistant_chat",
     "domain.assistant",
 )

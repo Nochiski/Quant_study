@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+
+import { useViewportHeight } from "../../../shared/lib/media";
 
 /**
  * Panel sizes and collapse flags of the Strategy IDE. Widget-local by design (WORKFLOW 2.6:
@@ -23,9 +25,17 @@ export type PanelLayout = {
 export const PANEL_BOUNDS = {
   outlineWidth: { min: 180, max: 420 },
   inspectorWidth: { min: 240, max: 520 },
-  debuggerHeight: { min: 120, max: 480 },
+  // 중간 결과 높이의 상한은 고정값이 아니라 창 높이를 따른다(`DEBUGGER_MAX_VIEWPORT_SHARE`). 저장값은
+  // 하한만 보고 받고, 그리는 높이를 그때 창의 상한으로 자른다.
+  debuggerHeight: { min: 120, max: Number.POSITIVE_INFINITY },
   assistantWidth: { min: 280, max: 560 },
 } as const;
+
+/**
+ * 중간 결과 패널이 차지할 수 있는 창 높이의 몫. 상한이 480px으로 고정이었을 때는 최대로 키워도 추적 본문이
+ * 패널보다 길어(1440×900에서 99px, 1920×1080에서 24px) 연결 추적 아래쪽이 패널 안 스크롤로 가려졌다(#262).
+ */
+const DEBUGGER_MAX_VIEWPORT_SHARE = 0.7;
 
 export const DEFAULT_LAYOUT: PanelLayout = {
   outlineWidth: 240,
@@ -189,8 +199,23 @@ export const usePanelLayout = (initial: PanelLayout = DEFAULT_LAYOUT) => {
   useEffect(() => {
     writePanelSizes(storage, layout);
   }, [layout, storage]);
+  const viewportHeight = useViewportHeight();
+  const debuggerMaxHeight = Math.max(
+    PANEL_BOUNDS.debuggerHeight.min,
+    Math.round(viewportHeight * DEBUGGER_MAX_VIEWPORT_SHARE),
+  );
+  // 그리는 높이만 지금 창의 상한으로 자르고 저장하는 높이(사용자가 고른 값)는 두어, 창을 잠깐 줄였다고
+  // 고른 높이를 잃지 않는다.
+  const drawn = useMemo(
+    () =>
+      layout.debuggerHeight <= debuggerMaxHeight
+        ? layout
+        : { ...layout, debuggerHeight: debuggerMaxHeight },
+    [debuggerMaxHeight, layout],
+  );
   return {
-    layout,
+    layout: drawn,
+    debuggerMaxHeight,
     resize: useCallback(
       (panel: SizePanel, value: number) =>
         dispatch({ type: "resize", panel, value }),

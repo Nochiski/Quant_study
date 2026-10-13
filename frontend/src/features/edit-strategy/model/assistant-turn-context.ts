@@ -1,8 +1,10 @@
-// 어시스턴트 어휘의 단일 입구는 `entities/assistant`다 — 생성 SDK 타입을 여기서 직접 들여오지 않는다.
+// 어시스턴트 어휘(생성 SDK 의 어시스턴트 타입)는 `entities/assistant`로만 들여온다. 실행 설정
+// `RunEnvironment`는 어시스턴트 어휘가 아니므로 `shared/api`에서 읽는다.
 import type {
   DocumentRefView,
   TurnContextPayload,
 } from "../../../entities/assistant";
+import type { RunEnvironment } from "../../../shared/api";
 import type { SourceFormat } from "../../../shared/lib/yaml12";
 import { currentDiagnostics, type DocumentState } from "./document-state";
 
@@ -27,7 +29,8 @@ export const assistantDocumentRef = (
  *
  * 진단은 backend가 완성한 문장을 그대로 줄로 옮긴다(frontend가 다시 조립·번역하지 않는다, SoT 규칙).
  * 텍스트와 같은 버전의 진단만 담는다 — `currentDiagnostics`가 뒤처진 parse의 결과를 버린다.
- * `environment`는 실행 설정(기간·수수료 등)이다. 전략 언어 밖의 값이라 문서 텍스트와 따로 싣는다.
+ * `environment`는 실행 설정 패널이 검증한 실행 설정이다(무효이면 null). 전략 언어 밖의 값이라 문서
+ * 텍스트와 따로 싣는다.
  *
  * 텍스트와 포맷은 **같은 출처**에서 온다. `live`를 주면 그 쌍이 정본이다 — 포맷 전환은 reducer를 먼저
  * 갱신하고 편집기 텍스트는 뒤따르는 effect가 밀어 넣으므로, 텍스트만 편집기에서 읽고 포맷은 reducer에서
@@ -35,7 +38,7 @@ export const assistantDocumentRef = (
  */
 export const assistantTurnContext = (
   state: DocumentState,
-  environment: Record<string, unknown> | null = null,
+  environment: RunEnvironment | null = null,
   live: { source: string; format: SourceFormat } | null = null,
 ): TurnContextPayload => {
   const source = live?.source ?? state.source;

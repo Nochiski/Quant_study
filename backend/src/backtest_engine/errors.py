@@ -47,7 +47,7 @@ class CorporateActionsNotProvided(EngineError):
 
 
 class EquityWipedOut(EngineError):
-    """세션 종료 평가에서 equity가 0 미만 (신용·공매도 손실이 자본을 초과). 계속 진행 불가."""
+    """세션 종료 평가에서 equity가 0 이하 (전액 손실, 신용·공매도 손실의 자본 초과). 진행 불가."""
 
 
 class CoreUnavailable(EngineError):

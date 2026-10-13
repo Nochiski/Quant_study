@@ -143,14 +143,26 @@ class NotUpgradeableDocumentError(ValueError):
     저장 row 읽기(`adapters/outbound/strategy_sqlite/_record_codec.py`)가 이 예외에 기대 fail-closed
     다: 모르는 버전을 현재 모델로 해석하면 사용자가 저장한 적 없는 값이 그 revision 의 사실로
     화면에 뜬다.
+
+    `stage`·`older_shapes` 는 선언된 은퇴 버전보다 앞선 모양이 본문에 섞여 거절했을 때만 찬다(그
+    모양의 버전과 자리). compile 진단이 이 값으로 고칠 곳을 말한다(`upgrade_refusal`).
     """
 
-    def __init__(self, schema_version: object, reason: str) -> None:
+    def __init__(
+        self,
+        schema_version: object,
+        reason: str,
+        *,
+        stage: str | None = None,
+        older_shapes: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(
             f"document cannot be upgraded — {reason} — got={schema_version!r} "
             f"current={CURRENT_SCHEMA_VERSION!r} retired={sorted(FROZEN_SCHEMA_VERSIONS)}"
         )
         self.schema_version = schema_version
+        self.stage = stage
+        self.older_shapes = older_shapes
 
 
 class UpgradeUnsupportedNodeError(ValueError):
@@ -179,7 +191,7 @@ def is_frozen_schema_version(schema_version: str) -> bool:
     port의 `StrategyRevisionRecord.requires_upgrade`와 SQLite codec의 동결 읽기 분기가 같은 술어를
     쓴다(Phase 1 감사 DEFECT-P1X-003: `== "1.0"`과 `!= CURRENT`가 갈리면 1.2 도입 때 1.1 row가
     hydrate 실패로 500이 된다). 열린 집합이라 "읽어도 되는 버전"은 이 술어가 아니라
-    `is_upgradeable_document` 가 판정한다.
+    `upgrade_refusal` 이 판정한다.
     """
     return schema_version != CURRENT_SCHEMA_VERSION
 
@@ -212,11 +224,20 @@ def _step_unary_aliases(document: MutableMapping[str, object]) -> None:
         node.pop("periods", None)
 
 
-def _step_reject_saved_nodes(document: MutableMapping[str, object]) -> None:
-    for pointer, node in _graph_nodes(document):
+def _reject_retired_nodes(document: Mapping[str, object]) -> None:
+    """1.2 에 없는 `saved_*` 노드를 원문 자리로 짚어 거절한다.
+
+    1.0 의 두 겹 factors 도 원문 pointer 로 짚는다 — 평탄화 뒤에 짚으면 1.0 작성자는 문서에 없는
+    자리를 찾게 된다(#418 리뷰 P3-4).
+    """
+    factors = document.get("factors")
+    shaped, prefix = document, ""
+    if isinstance(factors, Mapping) and "factors" in factors:
+        shaped, prefix = factors, "/factors"
+    for pointer, node in _graph_nodes(shaped):
         kind = node.get("kind")
         if kind in RETIRED_NODE_KINDS:
-            raise UpgradeUnsupportedNodeError(f"{pointer}/kind", kind)
+            raise UpgradeUnsupportedNodeError(f"{prefix}{pointer}/kind", kind)
 
 
 def _step_strip_execution_settings(document: MutableMapping[str, object]) -> None:
@@ -240,8 +261,9 @@ def _step_explicit_normalization(document: MutableMapping[str, object]) -> None:
 
 
 # from-version → 그 버전을 다음 버전으로 올리는 step. 키 순서가 체인 순서이고, 단계 안의 순서도
-# 의미를 가진다(평탄화 뒤에 노드를 훑는다, 거절은 무엇을 지우기 전에 한다). 목표 버전은 체인에서
-# 다음 키(마지막이면 현재 버전)이며 단계 뒤에 디스패처가 찍는다.
+# 의미를 가진다(평탄화 뒤에 노드를 훑는다). 은퇴 노드 거절은 step 이 아니라 체인 시작 판정
+# (`_chain_start`)이 무엇을 바꾸기 전에 원문 자리로 한다. 목표 버전은 체인에서 다음 키(마지막이면
+# 현재 버전)이며 단계 뒤에 디스패처가 찍는다.
 UPGRADE_STEPS: Mapping[str, tuple[tuple[str, UpgradeStep], ...]] = MappingProxyType(
     {
         "1.0": (
@@ -250,7 +272,6 @@ UPGRADE_STEPS: Mapping[str, tuple[tuple[str, UpgradeStep], ...]] = MappingProxyT
             ("unary_aliases", _step_unary_aliases),
         ),
         "1.1": (
-            ("reject_saved_nodes", _step_reject_saved_nodes),
             ("strip_execution_settings", _step_strip_execution_settings),
             ("explicit_normalization", _step_explicit_normalization),
         ),
@@ -262,6 +283,8 @@ FROZEN_SCHEMA_VERSIONS: frozenset[str] = frozenset(UPGRADE_STEPS)
 UPGRADE_CHAIN: tuple[str, ...] = (*UPGRADE_STEPS, CURRENT_SCHEMA_VERSION)
 # 실행 설정을 문서에 갖고 있던 마지막 버전. 이 단계에 들어가기 직전에 값을 읽어 둔다.
 _EXECUTION_SETTINGS_STAGE = "1.1"
+# `saved_*` 노드를 받아 주던 마지막 버전. 이 단계를 지나는 업그레이드만 그 노드를 거절한다.
+_RETIRED_NODES_STAGE = "1.1"
 
 
 def _retired_setting_pointers(document: Mapping[str, object]) -> tuple[str, ...]:
@@ -289,7 +312,7 @@ def _version_text(value: object) -> str | None:
     return None if value is None else str(value)
 
 
-def _chain_start(document: Mapping[str, object]) -> str:
+def _chain_start(document: Mapping[str, object], target: str = CURRENT_SCHEMA_VERSION) -> str:
     """체인을 시작할 버전 — 업그레이드 가능 판정의 유일한 owner.
 
     **문서가 스스로 선언한 버전을 믿는다**(Phase 2 감사 NB-1). 체인은 선언된 은퇴 버전에서 시작하고
@@ -305,8 +328,12 @@ def _chain_start(document: Mapping[str, object]) -> str:
       읽으면 그 버전이 지우거나 뜻을 바꾼 키가 현재 모델로 조용히 해석된다(버전 상한, P1-05 2차
       리뷰 P3-7·BACKLOG-010). 저장 row 읽기가 이 거절에 기대 fail-closed 다.
 
+    - `target` 까지 가는 길에 `saved_*` 노드를 버리는 단계가 있으면 그 노드를 원문 자리로 짚어
+      거절한다(#357 C-P3-10). 조용히 지우면 팩터 그래프의 뜻이 바뀐다.
+
     Raises:
         NotUpgradeableDocumentError: 위 거절 사유 중 하나일 때.
+        UpgradeUnsupportedNodeError: 1.2 에 없는 `saved_*` 노드가 있을 때.
     """
     raw = document.get("schema_version")
     version = _version_text(raw)
@@ -318,7 +345,14 @@ def _chain_start(document: Mapping[str, object]) -> str:
                     raw,
                     "the body carries shapes older than the declared version — "
                     f"stage={stage} pointers={list(older)}",
+                    stage=stage,
+                    older_shapes=older,
                 )
+        if (
+            _RETIRED_NODES_STAGE
+            in UPGRADE_CHAIN[UPGRADE_CHAIN.index(version) : UPGRADE_CHAIN.index(target)]
+        ):
+            _reject_retired_nodes(document)
         return version
     if version == CURRENT_SCHEMA_VERSION:
         shapes = list(legacy_shape_hints(document))
@@ -338,17 +372,24 @@ def _chain_start(document: Mapping[str, object]) -> str:
     )
 
 
-def is_upgradeable_document(document: Mapping[str, object]) -> bool:
-    """이 문서를 업그레이드 체인에 태울 수 있는가 — `_chain_start` 와 같은 판정.
+def upgrade_refusal(
+    document: Mapping[str, object],
+) -> NotUpgradeableDocumentError | UpgradeUnsupportedNodeError | None:
+    """이 문서를 업그레이드 체인에 태울 수 없는 사유. 태울 수 있으면 None.
 
-    버전 줄이 은퇴 버전이고 본문에 그보다 앞선 모양이 없을 때만 참이다. 현재 판 문서의 1.0 키는
-    `structure.legacy_shape` 진단이 제자리에서 고치라고 안내한다(업그레이드를 시키지 않는다).
+    업그레이드 가능 판정의 공개 입구다. compile 진단(hydrate)이 이 사유로 업그레이드 배너를 띄울
+    코드와 고칠 곳을 알리는 코드를 가른다. 업그레이더가 거절할 문서에 배너를 띄우면 누를 때마다
+    실패하는 버튼이 된다(#267 DEFECT-2).
+
+    업그레이드 API 와 같은 판정(`_chain_start` — 은퇴 노드 `saved_*` 거절 포함, #357 C-P3-10)이다.
+    단계 뒤 검증에서 거절되는 드문 문서(세 겹 factors)는 배너가 뜬 뒤 422가 된다(알려진 한계,
+    #322 리뷰 P3-3).
     """
     try:
         _chain_start(document)
-    except NotUpgradeableDocumentError:
-        return False
-    return True
+    except (NotUpgradeableDocumentError, UpgradeUnsupportedNodeError) as refusal:
+        return refusal
+    return None
 
 
 # 1.0에서만 쓰던 문법이 놓이는 JSON Pointer → 사용자가 읽을 한글 힌트(P1-05).
@@ -549,7 +590,7 @@ def apply_upgrade_steps(
             f"upgrade target is not in the chain — until={until!r} chain={UPGRADE_CHAIN}"
         )
     original = document.get("schema_version")
-    start = _chain_start(document)
+    start = _chain_start(document, target)
     environment: RetiredExecutionSettings | None = None
     warnings: list[UpgradeWarning] = []
     for index in range(UPGRADE_CHAIN.index(start), UPGRADE_CHAIN.index(target)):

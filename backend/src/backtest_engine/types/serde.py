@@ -551,6 +551,7 @@ def fill_event_to_dict(fill: FillEvent) -> Json:
         "price": fill.price,
         "fee": fill.fee,
         "slippage_per_share": fill.slippage_per_share,
+        "cap_volume": fill.cap_volume,
     }
 
 
@@ -568,4 +569,5 @@ def fill_event_from_dict(data: object) -> FillEvent:
         slippage_per_share=_expect_float(
             obj["slippage_per_share"], "fill_event.slippage_per_share"
         ),
+        cap_volume=_expect_int(obj["cap_volume"], "fill_event.cap_volume"),
     )

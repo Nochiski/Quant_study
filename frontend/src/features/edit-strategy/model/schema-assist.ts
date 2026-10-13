@@ -1,3 +1,4 @@
+import { currentParse } from "./document-state";
 import { metadataCoherence } from "./metadata-coherence";
 /**
  * Completion and hover for the source editor, driven by the backend runtime schema and
@@ -277,11 +278,8 @@ export const buildHoverSource =
   (deps: AssistDeps): EditorHoverSource =>
   (offset): EditorHover | null => {
     const state = deps.getState();
-    if (
-      state.parse?.status !== "ok" ||
-      state.parsedVersion !== state.sourceVersion
-    )
-      return null;
+    const parsed = currentParse(state);
+    if (parsed === null) return null;
     let best: { pointer: string; from: number; to: number } | null = null;
     const consider = (
       pointer: string,
@@ -293,13 +291,13 @@ export const buildHoverSource =
         best = { pointer, from: range.start.offset, to: range.end.offset };
       }
     };
-    for (const [pointer, range] of state.parse.keyRanges)
+    for (const [pointer, range] of parsed.keyRanges)
       consider(pointer, range);
-    for (const [pointer, range] of state.parse.valueRanges) {
+    for (const [pointer, range] of parsed.valueRanges) {
       if (pointer !== "") consider(pointer, range);
     }
     if (best === null) return null;
     const hit: { pointer: string; from: number; to: number } = best;
-    const lines = describePointer(deps, hit.pointer, state.parse.tree);
+    const lines = describePointer(deps, hit.pointer, parsed.tree);
     return lines ? { from: hit.from, to: hit.to, lines } : null;
   };

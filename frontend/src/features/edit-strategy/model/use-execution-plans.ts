@@ -1,3 +1,4 @@
+import { currentParse } from "./document-state";
 import { metadataCoherence } from "./metadata-coherence";
 import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -163,9 +164,7 @@ export const prepareExecutionPlans = (
 
 /** 컴파일된 spec 과 같은 버전의 parse tree. 다른 버전이면 문서 노드 index 를 쓰지 않는다(null). */
 const documentTree = (state: DocumentState): unknown =>
-  state.parse?.status === "ok" && state.parsedVersion === state.sourceVersion
-    ? state.parse.tree
-    : null;
+  currentParse(state)?.tree ?? null;
 
 const documentGraph = (
   tree: unknown,

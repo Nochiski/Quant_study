@@ -158,9 +158,7 @@ export const useCompileDocument = (
   }, [state, dispatch, forcedNow, canForce, forced?.nonce]);
 
   const validating =
-    !state.composing &&
-    state.parse?.status === "ok" &&
-    state.parsedVersion === state.sourceVersion &&
+    canValidateDocument(state) &&
     (state.compiledVersion !== state.sourceVersion || forcedNow);
   return { validateNow, validating };
 };

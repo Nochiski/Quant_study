@@ -4,6 +4,8 @@ import { parseSource } from "../../../shared/lib/yaml12";
 import {
   canValidateDocument,
   currentDiagnostics,
+  currentParse,
+  currentParseOutcome,
   currentCompile,
   currentSpec,
   documentReducer,
@@ -52,6 +54,22 @@ const run = (
 ) => actions.reduce(documentReducer, state);
 
 describe("document state machine", () => {
+  it("현재 구문 결과만 선택하고 오래된 성공 결과는 투영용 fallback에 남긴다", () => {
+    let state = initialDocumentState("yaml", "title: first\n");
+    const first = parseSource(state.source, "yaml");
+    state = run(state, { type: "parsed", version: state.sourceVersion, result: first });
+    expect(currentParse(state)).toBe(first);
+    expect(currentParseOutcome(state)).toBe(first);
+    state = run(state, { type: "edit", source: "title: [broken\n" });
+    expect(currentParseOutcome(state)).toBeNull();
+    expect(currentParse(state)).toBeNull();
+    expect(state.lastValidParse?.result).toBe(first);
+    const rejected = parseSource(state.source, "yaml");
+    state = run(state, { type: "parsed", version: state.sourceVersion, result: rejected });
+    expect(currentParseOutcome(state)).toBe(rejected);
+    expect(currentParse(state)).toBeNull();
+  });
+
   it("walks editing → parsing → structurally-valid → semantically-valid", () => {
     let state = initialDocumentState("yaml", "");
     state = run(state, { type: "edit", source: "title: a\n" });

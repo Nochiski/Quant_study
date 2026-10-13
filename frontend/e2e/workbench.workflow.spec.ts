@@ -9,6 +9,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { messages } from "../src/shared/config/messages";
 
 import {
   compileStrategyDocument,
@@ -1004,11 +1005,11 @@ test.describe("professional YAML workflow", () => {
     const navigation = await page.goto("/research/backtests/run-cancellable");
     expect(navigation?.ok()).toBe(true);
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-      "running",
+      messages.ko["backtest.status.running"],
     );
     await page.getByRole("button", { name: "실행 취소" }).click();
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-      "cancelled",
+      messages.ko["backtest.status.cancelled"],
     );
     const rerun = page.getByRole("button", { name: "동일 설정 재실행" });
     await expect(rerun).toBeEnabled();

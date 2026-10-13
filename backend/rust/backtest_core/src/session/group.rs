@@ -125,13 +125,6 @@ impl<'a> Session<'a> {
                     if q.quantity > 0 {
                         let qty = q.quantity;
                         self.apply(&mut legs[i], q, qty)?;
-                    } else if q.reason_code.is_some() {
-                        self.update_diagnostic(
-                            &legs[i].order_id,
-                            "open",
-                            self.detail(q, &legs[i]),
-                            Some(q),
-                        );
                     }
                 }
                 sync_back(entries, &legs);

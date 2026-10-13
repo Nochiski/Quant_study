@@ -8,9 +8,12 @@ import pytest
 from backtest_engine import RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.broker import BrokerSim
-from backtest_engine.types.actions import BasketAction, GroupPolicy
-from backtest_engine.types.events import OrderStatus
+from backtest_engine.types.actions import BasketAction, GroupPolicy, StrategyAction
+from backtest_engine.types.decision import StrategyDecision
+from backtest_engine.types.events import OrderStatus, StrategyEvent
 from backtest_engine.types.orders import Side
+from backtest_engine.types.requirements import StrategyRequirements
+from backtest_engine.types.strategy import StrategyContext
 from tests import test_basket, test_margin
 from tests.conftest import day, make_bar
 from tests.test_core_parity import RUST_ENGINE_CORES, _engine_scenario
@@ -68,6 +71,9 @@ def test_basket_zero_cap_diagnoses_only_the_affected_leg(core: str, policy: Grou
     diagnosed = [
         item for item in engine.event_store.order_updates() if item.reason_code is not None
     ]
+    if policy is GroupPolicy.BEST_EFFORT:
+        assert diagnosed == []
+        return
     assert len(diagnosed) == 1
     assert orders[diagnosed[0].order_id].instrument == test_basket.A
     assert diagnosed[0].reason_code == "liquidity_cap_zero"
@@ -97,3 +103,54 @@ def test_order_update_decoder_preserves_legacy_absence_and_new_zero() -> None:
     )
     assert (old.reason_code, old.cap_volume) == (None, None)
     assert (new.reason_code, new.cap_volume) == ("liquidity_cap_zero", 0)
+
+
+class _OrderSubscriber(test_basket.BasketStrategy):
+    def __init__(self, script: tuple[StrategyAction | None, ...]) -> None:
+        super().__init__(script)
+        self.updates: list[OrderStatus] = []
+
+    def requirements(self) -> StrategyRequirements:
+        from backtest_engine.types.requirements import EventKind
+
+        return replace(
+            super().requirements(), events=frozenset({EventKind.MARKET, EventKind.ORDER_UPDATE})
+        )
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        from backtest_engine.types.decision import StrategyDecision
+        from backtest_engine.types.events import OrderUpdateEvent
+
+        if isinstance(event, OrderUpdateEvent):
+            self.updates.append(event.status)
+            return StrategyDecision.no_action(ctx.now)
+        return super().on_event(ctx, event)
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_best_effort_diagnostics_do_not_add_strategy_callbacks(core: str) -> None:
+    bars = tuple(
+        replace(
+            make_bar(day(i), instrument, 100.0, 100.0),
+            liquidity_volume=0 if instrument == test_basket.A else 1000,
+        )
+        for i in (1, 2)
+        for instrument in (test_basket.A, test_basket.B)
+    )
+    action = BasketAction(
+        legs=(
+            test_basket.market_leg(test_basket.A, Side.BUY, 5),
+            test_basket.market_leg(test_basket.B, Side.BUY, 5),
+        ),
+        group_policy=GroupPolicy.BEST_EFFORT,
+    )
+    strategy = _OrderSubscriber((action,))
+    _engine_scenario(
+        core,
+        RunConfig(run_id="original-callbacks", initial_cash=10000.0),
+        strategy,
+        DataFeed(bars),
+        max_participation=0.1,
+    )
+    # 0주 leg는 기존에 OPEN을 알리지 않았다. 신규 진단 때문에 전략 결정 횟수가 바뀌면 안 된다.
+    assert strategy.updates == [OrderStatus.FILLED, OrderStatus.CANCELLED]

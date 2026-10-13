@@ -1,5 +1,5 @@
-export { canValidateDocument, currentDiagnostics, currentCompile, initialDocumentState, type DocumentState } from "./model/document-state";
-export { PROJECTION_VIEWS, migrateStrategyView, type StrategyView } from "./model/strategy-views";
+export { canValidateDocument, currentDiagnostics, currentCompile, currentCompileOutcome, initialDocumentState, type DocumentState } from "./model/document-state";
+export { STRATEGY_VIEWS, migrateStrategyView, type StrategyView } from "./model/strategy-views";
 
 export { useStrategyDocument } from "./model/use-strategy-document";
 export { type DocumentSource } from "./model/document-source";

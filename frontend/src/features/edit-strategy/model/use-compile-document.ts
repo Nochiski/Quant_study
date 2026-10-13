@@ -8,6 +8,7 @@ import { t } from "../../../shared/config";
 import { locateRange, type ParsedSource } from "../../../shared/lib/yaml12";
 import {
   shouldCompile,
+  canValidateDocument,
   type CompileOutcome,
   type DocumentAction,
   type DocumentDiagnostic,
@@ -97,10 +98,7 @@ export const useCompileDocument = (
     }));
   }, [state.sourceVersion]);
   const forcedNow = forced !== null && forced.version === state.sourceVersion;
-  const canForce =
-    !state.composing &&
-    state.parsedVersion === state.sourceVersion &&
-    state.parse?.status === "ok";
+  const canForce = canValidateDocument(state);
 
   useEffect(() => {
     if (!shouldCompile(state) && !(forcedNow && canForce)) return;

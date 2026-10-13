@@ -13,7 +13,6 @@ import {
   runEnvironmentStoredValues,
   runEnvironmentWireRecord,
   validateRunEnvironment,
-  type RunEnvironmentField,
   type RunEnvironmentValidation,
   type RunEnvironmentValues,
 } from "./run-environment";
@@ -89,7 +88,6 @@ const writeStored = (key: string, values: RunEnvironmentValues): void => {
   }
 };
 
-const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
 /** 연구 구간 거절이 고치라는 칸(요청 본문의 `environment.start`). */
 const START_FIELD: keyof RunEnvironment = "start";
@@ -179,13 +177,7 @@ export const useBacktestRunSettings = (storageKey: string) => {
     null,
   );
 
-  const environmentFields = useMemo(
-    () =>
-      schema.data === undefined
-        ? NO_FIELDS
-        : runEnvironmentFields(schema.data.schema),
-    [schema.data],
-  );
+  const { environmentFields } = schema;
   const stored = useMemo(
     () => readStored(storageKey) ?? readStored(LAST_USED),
     [storageKey],

@@ -17,7 +17,7 @@ import {
   type StrategyDocument,
 } from "../../../entities/strategy";
 import { failureReason } from "../../../shared/api";
-import { t, tFill, type MessageKey } from "../../../shared/config";
+import { t, tDuration, tFill, type MessageKey } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import { Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
@@ -371,6 +371,15 @@ const Form = ({
               before: preview.data.trial_count,
               after: preview.data.trial_count_after,
             })}
+          </p>
+          {/* 어림은 backend 가 계열의 최근 완료 실행으로 낸다(로드맵 M6). 화면은 근거와 함께 그대로 보인다. */}
+          <p>
+            {preview.data.time_estimate
+              ? tFill("experiments.new.estimate", {
+                  total: tDuration(preview.data.time_estimate.total_seconds),
+                  samples: preview.data.time_estimate.sample_count,
+                })
+              : t("experiments.new.estimateUnknown")}
           </p>
           <div className="data-list-page__scroll">
             <table className="data-list-page__table">

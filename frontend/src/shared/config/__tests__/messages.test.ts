@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { messages, type MessageKey } from "../messages";
+import { messages, tDuration, type MessageKey } from "../messages";
 
 const placeholders = (message: string): string[] =>
   [...message.matchAll(/\{([A-Za-z0-9_.-]+)\}/g)]
@@ -58,5 +58,15 @@ describe("message catalog contract", () => {
     expect(allCopy).not.toMatch(
       /Phase\s+\d|later phases?|이후 단계|추후 단계/i,
     );
+  });
+});
+
+describe("tDuration", () => {
+  it("rounds up and switches units at a minute and an hour", () => {
+    expect(tDuration(0.2)).toBe("1초");
+    expect(tDuration(59.1)).toBe("1분 0초");
+    expect(tDuration(61.2)).toBe("1분 2초");
+    expect(tDuration(3599.5)).toBe("1시간 0분");
+    expect(tDuration(3661)).toBe("1시간 2분");
   });
 });

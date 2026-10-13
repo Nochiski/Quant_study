@@ -34,13 +34,16 @@ from strategy_workbench.domain.experiment.facade.design import (
     ParameterConstraint,
     SearchSpec,
     SplitSpec,
+    TimeEstimate,
     WalkForwardGap,
     WalkForwardWindow,
     build_search_spec,
     cell_outcomes,
+    estimate_time,
     experiment_trial_key,
     out_of_sample_sharpe,
     pick_window_cell,
+    planned_spans,
     plateau_map,
     stitch_out_of_sample,
     walk_forward_gap,
@@ -136,6 +139,9 @@ class ExperimentPreview:
     # (`experiment_trial_key`).
     new_trial_count: int
     trial_count_after: int
+    # 실험 실행을 차례로 돌린다고 본 시간 어림(`estimate_time`). 계열에 시간을 잰 완료 실행이 없으면
+    # None.
+    time_estimate: TimeEstimate | None
 
 
 @dataclass(frozen=True)
@@ -308,6 +314,7 @@ class ExperimentRunService:
             trial_count=ledger.trial_count,
             new_trial_count=new_trials,
             trial_count_after=ledger.trial_count + new_trials,
+            time_estimate=estimate_time(ledger, planned_spans(design, *_base_range(admitted.run))),
         )
 
     def create(self, request: ExperimentRequest) -> Experiment:
@@ -951,8 +958,12 @@ def _train_range(base: BacktestRunSpec, trial: ExperimentTrial) -> tuple[date, d
     """trial 이 도는 구간 — 창의 학습 구간(엠바고를 뺀 측정 끝까지), 용량 스윕은 기반 실행 구간."""
     if trial.window is not None:
         return trial.window.train_start, trial.window.train_end
+    return _base_range(base)
+
+
+def _base_range(base: BacktestRunSpec) -> tuple[date, date]:
     if base.environment is None:  # pragma: no cover - `_base` 가 검사한 요청만 저장한다
-        raise RuntimeError(f"experiment base run has no run environment — trial={trial.index}")
+        raise RuntimeError("experiment base run has no run environment")
     return base.environment.start, base.environment.end
 
 

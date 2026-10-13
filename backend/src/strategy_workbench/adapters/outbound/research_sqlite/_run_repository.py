@@ -33,7 +33,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
 )
 
 from ._errors import ResearchStorageError
-from ._request_codec import decode_request, encode_request
+from ._request_codec import RUN_END_PATH, RUN_START_PATH, decode_request, encode_request
 from ._schema import SCHEMA_VERSION, migrate_schema
 
 _TERMINAL = tuple(status.value for status in RunStatus if status.is_terminal)
@@ -42,6 +42,12 @@ _SUMMARY_COLUMNS = """
     run_id, created_at, status, progress, stage, message, updated_at, error, error_code,
     artifact_sha256, strategy_kind, spec_hash, schema_version, strategy_id, revision, source_hash
 """
+# run 행과 시작 시각(곁 표 `backtest_run_starts`). 읽기는 모두 이 관계를 쓴다.
+_RUN_ROWS = """(
+    SELECT backtest_runs.*, backtest_run_starts.started_at
+    FROM backtest_runs LEFT JOIN backtest_run_starts USING (accepted_order)
+)"""
+_STATE_COLUMNS = f"{_SUMMARY_COLUMNS}, started_at"
 # 실행 종류와 쓰는 실험(검증 랩 V5-03, #382)은 저장하지 않고 같은 파일에서 읽는다. 실험 attempt 가
 # 가리키면 실험 trial, 워크포워드 창 선택이 가리키면 검증 창 실행이다(둘 다면 attempt 가 먼저).
 # 역조회는 비상관 집계라 문장당 한 번 만들어진다(run_id 에 인덱스가 없어 상관 서브쿼리면 run 수 ×
@@ -55,7 +61,7 @@ _RUNS = f"""(
         END AS kind,
         experiments.experiment_id AS experiment_id,
         COALESCE(experiment_controls.paused, 0) AS experiment_paused
-    FROM backtest_runs
+    FROM {_RUN_ROWS} AS backtest_runs
     LEFT JOIN (
         SELECT run_id, MIN(experiment_order) AS owner FROM experiment_attempts
         WHERE run_id IS NOT NULL GROUP BY run_id
@@ -69,7 +75,7 @@ _RUNS = f"""(
     LEFT JOIN experiment_controls
         ON experiment_controls.experiment_order = experiments.experiment_order
 )"""
-_READ_COLUMNS = f"{_SUMMARY_COLUMNS}, kind, experiment_id, experiment_paused"
+_READ_COLUMNS = f"{_STATE_COLUMNS}, kind, experiment_id, experiment_paused"
 
 
 class SQLiteBacktestRunRepository:
@@ -135,6 +141,15 @@ class SQLiteBacktestRunRepository:
             )
             if updated.rowcount != 1:
                 raise BacktestRunNotFoundError(state.run_id)
+            # 시작 시각은 한 번만 적는다 — 처음 `running` 이 된 전이가 정본이다.
+            if state.started_at is not None:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO backtest_run_starts (accepted_order, started_at)
+                    SELECT accepted_order, ? FROM backtest_runs WHERE run_id = ?
+                    """,
+                    (_time_text(state.started_at, "started_at", state.run_id), state.run_id),
+                )
 
     def get(self, run_id: str) -> BacktestRunSummary:
         with self._database.transaction(write=False) as connection:
@@ -217,11 +232,13 @@ class SQLiteBacktestRunRepository:
             entries = connection.execute(
                 f"""
                 SELECT run_id, trial_key, status, created_at, updated_at, session_sharpe,
-                    metric_registry_version, error_code
-                FROM trial_ledger JOIN backtest_runs USING (accepted_order)
+                    metric_registry_version, error_code, started_at,
+                    json_extract(request_json, ?) AS run_start,
+                    json_extract(request_json, ?) AS run_end
+                FROM trial_ledger JOIN {_RUN_ROWS} USING (accepted_order)
                 WHERE {where} ORDER BY accepted_order
                 """,
-                members,
+                (RUN_START_PATH, RUN_END_PATH, *members),
             ).fetchall()
             blocked = connection.execute(
                 f"""
@@ -244,6 +261,9 @@ class SQLiteBacktestRunRepository:
                         session_sharpe=row["session_sharpe"],
                         metric_registry_version=row["metric_registry_version"],
                         error_code=row["error_code"],
+                        started_at=_optional_time(row["started_at"]),
+                        start=_optional_date(row["run_start"]),
+                        end=_optional_date(row["run_end"]),
                     )
                     for row in entries
                 ),
@@ -285,7 +305,7 @@ class SQLiteBacktestRunRepository:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
                 f"""
-                SELECT {_SUMMARY_COLUMNS} FROM backtest_runs
+                SELECT {_STATE_COLUMNS} FROM {_RUN_ROWS}
                 WHERE status NOT IN ({", ".join("?" for _ in _TERMINAL)}) ORDER BY accepted_order
                 """,
                 _TERMINAL,
@@ -298,7 +318,7 @@ class SQLiteBacktestRunRepository:
             return {}
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
-                f"SELECT {_SUMMARY_COLUMNS} FROM backtest_runs "
+                f"SELECT {_STATE_COLUMNS} FROM {_RUN_ROWS} "
                 f"WHERE run_id IN ({', '.join('?' * len(ids))})",
                 ids,
             ).fetchall()
@@ -337,6 +357,7 @@ def _state(row: sqlite3.Row) -> BacktestRunState:
             error=row["error"],
             error_code=cast(RunFailureCode | None, error_code),
             artifact_sha256=row["artifact_sha256"],
+            started_at=_optional_time(row["started_at"]),
         )
     except (TypeError, ValueError) as error:
         raise ResearchStorageError(
@@ -373,6 +394,14 @@ def _merges(connection: sqlite3.Connection) -> dict[str, str]:
         "SELECT source_id, target_id FROM lineage_merges ORDER BY merge_order"
     ).fetchall()
     return {row["source_id"]: row["target_id"] for row in rows}
+
+
+def _optional_time(text: str | None) -> datetime | None:
+    return None if text is None else datetime.fromisoformat(text)
+
+
+def _optional_date(text: str | None) -> date | None:
+    return None if text is None else date.fromisoformat(text)
 
 
 def _time_text(value: datetime, field: str, run_id: str) -> str:

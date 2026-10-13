@@ -266,6 +266,10 @@ const usePreview = (rejected = false) =>
         trial_count: 4,
         new_trial_count: explored ? 3 : 1,
         trial_count_after: explored ? 7 : 5,
+        // 탐색하지 않으면 계열에 잰 실행이 없는 경우를 흉내 낸다.
+        time_estimate: explored
+          ? { total_seconds: 250.2, sample_count: 5 }
+          : null,
       });
     }),
   );
@@ -459,12 +463,23 @@ describe("experiments", () => {
     expect(
       screen.getByText("기반 s1 · v2 · 연구 기간 2021-01-04 ~ 2025-12-30"),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "예상 소요는 이 전략 계열에 시간을 잰 완료 실행이 생기면 보입니다.",
+      ),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "탐색: top_n" }));
     await waitFor(() =>
       expect(summary).toHaveTextContent(
         "조합 3개 · 창 2개 · 백테스트 실행 6회 · 계열 시도 수 4회 → 7회",
       ),
     );
+    // backend 어림을 근거와 함께 보이고, 초는 위로 올린다.
+    expect(
+      screen.getByText(
+        /^예상 소요 최대 약 4분 11초 · 이 계열의 최근 완료 실행 5개를/u,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("10, 20, 30 (3)")).toBeInTheDocument();
     expect(screen.getByText("2024-01-02 ~ 2024-12-30")).toBeInTheDocument();
     // 기반 요청의 지표 창은 싣지 않고, 탐색 값을 정하지 않으면 null 로 정의의 격자를 편다.

@@ -307,7 +307,7 @@ def test_an_empty_file_is_claimed_once(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA application_id").fetchone() == (0x53575253,)
-        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
 
 
 @pytest.mark.parametrize(
@@ -331,10 +331,11 @@ def test_a_file_owned_by_someone_else_is_refused(prepare: str, match: str, tmp_p
 @pytest.mark.parametrize(
     ("tamper", "match"),
     [
-        ("PRAGMA user_version = 6", "newer than this server"),
-        ("CREATE TABLE stray (x)", "does not match version 5"),
-        ("DROP TABLE experiment_controls", "does not match version 5"),
-        ("DROP TABLE experiment_window_picks", "does not match version 5"),
+        ("PRAGMA user_version = 7", "newer than this server"),
+        ("CREATE TABLE stray (x)", "does not match version 6"),
+        ("DROP TABLE experiment_controls", "does not match version 6"),
+        ("DROP TABLE experiment_window_picks", "does not match version 6"),
+        ("DROP TABLE backtest_run_starts", "does not match version 6"),
     ],
 )
 def test_a_future_or_edited_schema_is_refused(tamper: str, match: str, tmp_path: Path) -> None:
@@ -345,3 +346,35 @@ def test_a_future_or_edited_schema_is_refused(tamper: str, match: str, tmp_path:
 
     with pytest.raises(ResearchStorageError, match=match):
         SQLiteBacktestRunRepository(path)
+
+
+def test_the_first_start_time_is_kept_and_read_everywhere(tmp_path: Path) -> None:
+    """로드맵 M6 시간 추정: 시작 시각은 처음 `running` 이 된 전이 하나만 남고 모든 읽기에 실린다."""
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    _add(repository, _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE)
+    started = datetime(2026, 9, 29, 9, 1, tzinfo=UTC)
+    running = replace(
+        _summary("run-1").run,
+        status=RunStatus.RUNNING,
+        stage="data",
+        updated_at=started,
+        started_at=started,
+    )
+    repository.update(running)
+    # 같은 run 의 뒤 전이가 다른 시각을 실어 와도 처음 시각이 정본이다.
+    completed = replace(
+        running,
+        status=RunStatus.COMPLETED,
+        progress=1.0,
+        stage="completed",
+        updated_at=datetime(2026, 9, 29, 9, 5, tzinfo=UTC),
+    )
+    repository.update(replace(completed, started_at=datetime(2026, 9, 29, 9, 4, tzinfo=UTC)))
+
+    reopened = SQLiteBacktestRunRepository(path)
+    assert reopened.get("run-1").run == completed
+    assert reopened.states(["run-1"])["run-1"] == completed
+    # 시작 전 run 은 시작 시각이 없다.
+    _add(reopened, _summary("run-2"), _REQUESTS["saved_revision"], **_NO_LINEAGE)
+    assert reopened.unfinished()[0].started_at is None

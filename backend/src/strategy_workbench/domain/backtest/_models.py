@@ -697,6 +697,9 @@ class BacktestRunState:
     # 산출물의 위치(서버 경로)는 싣지 않는다 — run 상태는 그대로 API 응답이고, 산출물은 저장소가
     # run_id 로 찾는다(#277).
     artifact_sha256: str | None = None
+    # 처음 `running` 이 된 시각. 접수 대기를 뺀 계산 시간(끝난 시각 − 시작)의 기준이다(로드맵
+    # M6 시간 추정). 시작 전에 끝났거나 이 칸이 생기기 전(연구 DB v6 이전)에 돈 run 은 없다.
+    started_at: datetime | None = None
 
 
 @dataclass(frozen=True)

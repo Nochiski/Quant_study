@@ -1094,6 +1094,8 @@ class BacktestRunService:
             stage=stage,
             message=message,
             updated_at=occurred_at,
+            started_at=record.state.started_at
+            or (occurred_at if status is RunStatus.RUNNING else None),
         )
         if durable:
             self._repository.update(state)

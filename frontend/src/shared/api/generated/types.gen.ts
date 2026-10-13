@@ -412,6 +412,10 @@ export type BacktestCancelResult = {
     | "completed"
     | "cancelled"
     | "failed";
+  /**
+   * Started At
+   */
+  started_at?: string | null;
   status: RunStatus;
   /**
    * Updated At
@@ -731,6 +735,10 @@ export type BacktestRunState = {
     | "completed"
     | "cancelled"
     | "failed";
+  /**
+   * Started At
+   */
+  started_at?: string | null;
   status: RunStatus;
   /**
    * Updated At
@@ -1981,6 +1989,7 @@ export type ExperimentPreview = {
    * Run Count
    */
   run_count: number;
+  time_estimate: TimeEstimate | null;
   /**
    * Trial Count
    */
@@ -6078,6 +6087,20 @@ export type ThinkingSummaryView = {
 };
 
 /**
+ * TimeEstimate
+ */
+export type TimeEstimate = {
+  /**
+   * Sample Count
+   */
+  sample_count: number;
+  /**
+   * Total Seconds
+   */
+  total_seconds: number;
+};
+
+/**
  * TimeSeriesNode
  */
 export type TimeSeriesNode = {
@@ -6549,9 +6572,17 @@ export type TrialRun = {
    */
   run_id: string;
   /**
+   * Seconds
+   */
+  seconds?: number | null;
+  /**
    * Session Sharpe
    */
   session_sharpe?: number | null;
+  /**
+   * Span Days
+   */
+  span_days?: number | null;
   status: RunStatus;
 };
 

@@ -147,6 +147,10 @@ test(
         /조합 2개 · 창 1개 · 백테스트 실행 \d+회 · 계열 시도 수 \d+회 → \d+회/u,
       ),
     ).toBeVisible();
+    // US-SM-14: 새 계열이라 근거는 끝난 기반 실행 하나다.
+    await expect(
+      page.getByText(/^예상 소요 최대 약 .+ · 이 계열의 최근 완료 실행 1개를/u),
+    ).toBeVisible();
     // US-SM-14: 탐색 값을 직접 적거나 조합 제약을 걸면 조합 수가 줄고, 지우면 정의의 격자로 돌아간다.
     const values = page.getByLabel("값 직접 입력: scale");
     await values.fill("1");

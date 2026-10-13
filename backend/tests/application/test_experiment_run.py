@@ -864,6 +864,7 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
         .record.experiment_id
     )
     with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")
         connection.execute("DROP TABLE experiment_controls")
         connection.execute("PRAGMA user_version = 3")
@@ -1216,6 +1217,7 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
         document = json.loads(stored)
         del document["design"]["measured"]
         connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(document),))
+        connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")
         connection.execute("PRAGMA user_version = 4")
     runs.complete_all()

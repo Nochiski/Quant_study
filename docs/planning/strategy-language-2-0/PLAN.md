@@ -1085,7 +1085,7 @@ Phase exit:
 
 - [x] CI 전체 green. (P3-03 #320 tip `9c863e55` push·pull_request run 전 job success, main 머지 `f8f5ac16`)
 - [x] 같은 전략·다른 기간 → 같은 spec_hash e2e. (P3-02 결정 8, `stories/dm.run-environment.spec.ts` US-DM-05 — 같은 strategy hash·다른 environment hash)
-- [ ] SoT·책임분리 점검 blocking 0.
+- [x] SoT·책임분리 점검 blocking 0. 2026-10-13 현재 경계 독립 재감사: [범위와 근거](CLOSEOUT.md#p3p6-현재-책임-경계-재감사-2026-10-13).
 
 ## P4 — 그래프 1수준: 파이프라인
 
@@ -1099,7 +1099,7 @@ Phase exit:
 Phase exit:
 
 - [x] 빈 화면 e2e green, 식별자 0개 단언 green. `workbench.workflow.spec.ts` 빈 그래프 시나리오·main `4289429b` CI38332263277 browser-e2e 성공.
-- [ ] SoT·책임분리 점검 blocking 0.
+- [x] SoT·책임분리 점검 blocking 0. 2026-10-13 현재 경계 독립 재감사: [범위와 근거](CLOSEOUT.md#p3p6-현재-책임-경계-재감사-2026-10-13).
 
 ## P5 — 그래프 2수준: 레시피
 
@@ -1112,7 +1112,7 @@ Phase exit:
 Phase exit:
 
 - [x] 아이디어 5개 e2e green (완료 정의 1·2). `stories/graph-ideas.spec.ts`의 5개 @US-DM-07·main `4289429b` CI38332263277 성공. CS-05·06 수용 기준을 대신하지 않는다.
-- [ ] SoT·책임분리 점검 blocking 0.
+- [x] SoT·책임분리 점검 blocking 0. 2026-10-13 현재 경계 독립 재감사: [범위와 근거](CLOSEOUT.md#p3p6-현재-책임-경계-재감사-2026-10-13).
 
 ## P6 — 그래프 3수준: 고급 노드 캔버스
 
@@ -1125,7 +1125,8 @@ Phase exit:
 Phase exit:
 
 - [x] 드래그 배선 → YAML 반영 → 되돌리기 e2e. `stories/node-canvas.spec.ts`의 배선·키보드·취소·배치·undo 시나리오, main `4289429b` CI38332263277 성공. 실제 음성 낭독 완료를 뜻하지 않는다.
-- [ ] SoT·책임분리 점검 blocking 0. 완료 정의 6항 전부 기록.
+- [x] SoT·책임분리 점검 blocking 0. 2026-10-13 현재 경계 독립 재감사: [범위와 근거](CLOSEOUT.md#p3p6-현재-책임-경계-재감사-2026-10-13).
+- [ ] 완료 정의 6항 전부 기록. 실제 스크린리더 음성 수용은 아직 미검증이며 CLOSEOUT에서 분리 추적한다.
 
 ## Review 기록
 

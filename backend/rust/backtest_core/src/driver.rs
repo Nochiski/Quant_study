@@ -90,7 +90,7 @@ impl NotifyPayload {
     pub(crate) fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
         match self {
             NotifyPayload::Fill(fill) => fill.to_py(py),
-            // `(order_id, status, detail)` wire 모양의 정본은 `OrderUpdateWire`다 —
+            // `(order_id, status, detail, reason_code, cap_volume)` wire 모양의 정본은 `OrderUpdateWire`다 —
             // ORDER_UPDATE 레코드와 NOTIFY 알림이 같은 변환을 쓴다.
             NotifyPayload::OrderUpdate(update) => update.to_py(py),
             NotifyPayload::CorporateAction(index) => to_object(py, *index),
@@ -201,12 +201,16 @@ impl PersistentEngine {
         order_id: String,
         status: String,
         detail: Option<String>,
+        reason_code: Option<String>,
+        cap_volume: Option<i64>,
     ) -> PyResult<()> {
         let notify = self.settings()?.notify_order_update;
         let update = Box::new(OrderUpdateWire {
             order_id,
             status,
             detail,
+            reason_code,
+            cap_volume,
         });
         // 알림 사본은 선언했을 때만 만든다. 레코드가 먼저 들어가야 trace 순서가 python과 같다.
         let notify_payload = notify.then(|| Box::new(NotifyPayload::OrderUpdate(update.clone())));
@@ -443,7 +447,19 @@ impl PersistentEngine {
             &settings.slippage,
             settings.sell_tax_rate(session),
         )?;
-        for (kind, order_id, quantity, price, slip, fee, payload, sell_tax) in ops {
+        for (
+            kind,
+            order_id,
+            quantity,
+            price,
+            slip,
+            fee,
+            payload,
+            sell_tax,
+            reason_code,
+            cap_volume,
+        ) in ops
+        {
             match kind.as_str() {
                 "fill" => {
                     let (instrument_id, side) =
@@ -492,7 +508,7 @@ impl PersistentEngine {
                     } else {
                         Some(detail)
                     };
-                    self.record_update(session, order_id, status, detail)?;
+                    self.record_update(session, order_id, status, detail, reason_code, cap_volume)?;
                 }
                 // mutable 상태는 process_market 안에서 이미 적용됐다.
                 "trigger" | "remove" | "drop_group" => {}
@@ -530,7 +546,14 @@ impl PersistentEngine {
                     session_ts,
                     remaining
                 );
-                self.record_update(session, order_id, "cancelled".to_string(), Some(detail))?;
+                self.record_update(
+                    session,
+                    order_id,
+                    "cancelled".to_string(),
+                    Some(detail),
+                    None,
+                    None,
+                )?;
             }
             let settlement_price =
                 self.feed_ref()?
@@ -685,7 +708,7 @@ impl PersistentEngine {
             self.record(session, RecordPayload::Rounding(Box::new(rounding)))?;
         }
         for (order_id, status, detail) in updates {
-            self.record_update(session, order_id, status, Some(detail))?;
+            self.record_update(session, order_id, status, Some(detail), None, None)?;
         }
         for order in orders {
             self.push(session, PRIORITY_ORDER, Queued::Order(Box::new(order)))?;
@@ -817,6 +840,8 @@ impl PersistentEngine {
                     RecordPayload::OrderUpdate(Box::new(OrderUpdateWire {
                         order_id: order.order_id,
                         status: "cancelled".to_string(),
+                        reason_code: None,
+                        cap_volume: None,
                         detail: Some(format!(
                             "{reason}instrument={} remaining={}",
                             order.symbol, order.remaining

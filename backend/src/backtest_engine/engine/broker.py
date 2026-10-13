@@ -75,6 +75,8 @@ class Quote:
     slippage_per_share: float
     status: ExecutionStatus
     detail: str | None
+    reason_code: str | None = None
+    cap_volume: int | None = None
 
 
 def participation_of(order: OrderEvent) -> float | None:
@@ -343,6 +345,8 @@ class BrokerSim:
             numbers.slippage_per_share,
             numbers.status,
             detail,
+            "liquidity_cap_zero" if numbers.status is ExecutionStatus.NOT_FILLED else None,
+            volume if numbers.status is ExecutionStatus.NOT_FILLED else None,
         )
 
     def constrain_quote(

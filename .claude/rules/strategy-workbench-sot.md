@@ -196,3 +196,7 @@ support 노드는 backend 출처 표식에 따라 숨긴다. 원문 없는 조�
 현금 체결의 순차 연산 정본은 Python `power_projection.project_cash/project_cost`와 대응 Rust 함수다. 실제 Portfolio, 견적 후보, BuyingPower 소비가 대금→수수료→거래세 순서를 공유한다. 여력은 snapshot.cash를 직접 받고, 종목 평가액의 원래 순서(전량 청산 시 제거, 재진입 시 끝에 추가)를 보존해 cash+sum(values)와 sum(abs(values))를 재계산한다. 현금 음수 허용 여부는 레버리지 수치가 아닌 MARGIN feature가 정한다. 저수준 quote의 optional execution_state 미제공은 구호출 호환이며 실제 엔진은 네 코어 모두 이를 제공한다. 바스켓 checkpoint는 현금과 평가액 순서까지 복원한다.
 
 이 공유 산술은 평가 시점 정책을 통합하지 않는다. BuyingPower는 기존의 체결가 기준 위험 평가를 유지하고 실제 Portfolio는 기존 보유 평가가 유지 및 세션 mark 시점을 유지한다. 원장 mark를 견적에 맞춰 바꾸지 않는다.
+
+0주 유동성 한도 진단(`#411`)은 엔진 quote의 기존 수치 판정이 `reason_code=liquidity_cap_zero`와 그 견적의 `cap_volume`을 소유한다. 주문 상태 이벤트에 자유 문구와 별개 필드로 싣고 Python/Rust single·basket 경로가 해당 leg의 판정만 전달한다. 가격 조건 미충족·다른 leg의 사유를 추론하지 않는다. 실행 adapter는 `EventStore.order_updates()`를 `RawOrderUpdate`로 그대로 옮기며 화면은 원본 상태·사유를 표시한다. `RawArtifactBundle.order_updates=None`은 구판에 기록이 없었다는 뜻이고 새 결과의 `()`는 기록이 0건이라는 뜻이다. detail 문자열 파싱으로 사유를 재판정하지 않는다.
+
+BEST_EFFORT의 0주 leg는 기존 주문 상태 이벤트가 없으므로 진단을 위해 OPEN을 합성하지 않는다. ORDER_UPDATE 구독 전략의 callback·결정 횟수 보존이 우선이다. 이 경로는 원본에 없던 사유를 결과에서도 만들지 않는다.

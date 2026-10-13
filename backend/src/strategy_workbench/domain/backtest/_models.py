@@ -470,6 +470,18 @@ class RawOrder:
 
 
 @dataclass(frozen=True)
+class RawOrderUpdate:
+    """엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다."""
+
+    session: date
+    order_id: str
+    status: str
+    detail: str | None = None
+    reason_code: str | None = None
+    cap_volume: int | None = None
+
+
+@dataclass(frozen=True)
 class RawFill:
     fill_id: str
     order_id: str
@@ -534,6 +546,8 @@ class RawArtifactBundle:
     # v2: 체결에 `cap_volume` 을, 번들에 `roundings` 를 싣는다. v1 파일도 같은 모델로 읽는다(빈 칸은
     # None·빈 튜플).
     schema_version: str = "backtest-artifacts-v2"
+    # None은 과거 결과에 상태 기록 자체가 없음을 뜻한다. 새 결과의 빈 기록은 ()다.
+    order_updates: tuple[RawOrderUpdate, ...] | None = None
 
 
 @dataclass(frozen=True)

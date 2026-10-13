@@ -169,7 +169,18 @@ fn py_list(items: &[String]) -> String {
 /// `("fill", order_id, quantity, price, slip, fee, "", sell_tax)`
 /// `("update", order_id, 0, 0, 0, 0, "status|detail", 0)`
 /// `("trigger", order_id, ...)`, `("remove", order_id, ...)`, `("drop_group", group_id, ...)`
-pub(crate) type Op = (String, String, i64, f64, f64, f64, String, f64);
+pub(crate) type Op = (
+    String,
+    String,
+    i64,
+    f64,
+    f64,
+    f64,
+    String,
+    f64,
+    Option<String>,
+    Option<i64>,
+);
 
 /// 매도 체결 금액 × 거래세율. 매수는 0이다. 연산 순서는 Python `costs.sell_tax_amount`와 같다.
 pub(crate) fn sell_tax(side: &str, quantity: i64, price: f64, rate: f64) -> f64 {
@@ -197,6 +208,8 @@ struct QuoteOut {
     quantity: i64,
     slip: f64,
     status: String,
+    reason_code: Option<String>,
+    cap_volume: Option<i64>,
     no_price: bool, // 가격 규칙 미충족(지정가·스톱) — 진단 없이 대기
 }
 
@@ -229,6 +242,8 @@ impl<'a> Session<'a> {
                     "not_filled"
                 }
                 .to_string(),
+                reason_code: None,
+                cap_volume: None,
                 no_price: true,
             });
         };
@@ -263,11 +278,15 @@ impl<'a> Session<'a> {
             Some(self.power.valuation()),
             Some(self.power.execution_state(&e.key)),
         )?;
+        let cap_zero = status == "not_filled";
         Ok(QuoteOut {
             price: p,
             quantity: q,
             slip: applied,
             status,
+            // 기존 참여 한도 계산의 0주 결정만 표식으로 남긴다. 문구를 해석하지 않는다.
+            reason_code: cap_zero.then(|| "liquidity_cap_zero".to_string()),
+            cap_volume: cap_zero.then_some(bar.liquidity_volume),
             no_price: false,
         })
     }
@@ -341,6 +360,16 @@ impl<'a> Session<'a> {
     }
 
     fn update(&mut self, order_id: &str, status: &str, detail: Option<String>) {
+        self.update_diagnostic(order_id, status, detail, None);
+    }
+
+    fn update_diagnostic(
+        &mut self,
+        order_id: &str,
+        status: &str,
+        detail: Option<String>,
+        quote: Option<&QuoteOut>,
+    ) {
         self.ops.push((
             "update".into(),
             order_id.into(),
@@ -350,6 +379,8 @@ impl<'a> Session<'a> {
             0.0,
             format!("{status}|{}", detail.unwrap_or_default()),
             0.0,
+            quote.and_then(|q| q.reason_code.clone()),
+            quote.and_then(|q| q.cap_volume),
         ));
     }
 
@@ -372,6 +403,8 @@ impl<'a> Session<'a> {
             fee,
             String::new(),
             tax,
+            None,
+            None,
         ));
         e.remaining -= quantity;
         if e.remaining == 0 {
@@ -388,6 +421,8 @@ impl<'a> Session<'a> {
                     0.0,
                     String::new(),
                     0.0,
+                    None,
+                    None,
                 ));
             }
             self.update(&e.order_id.clone(), "partially_filled", detail_before);
@@ -405,6 +440,8 @@ impl<'a> Session<'a> {
             0.0,
             String::new(),
             0.0,
+            None,
+            None,
         ));
     }
 
@@ -424,6 +461,8 @@ impl<'a> Session<'a> {
                 0.0,
                 String::new(),
                 0.0,
+                None,
+                None,
             ));
             let d = format!(
                 "stop triggered, limit not met — instrument={} stop={} limit={} ts={}",
@@ -435,7 +474,7 @@ impl<'a> Session<'a> {
             self.update(&e.order_id.clone(), "triggered", Some(d));
         } else if (q.status == "rejected_no_cash" || q.status == "not_filled") && !q.no_price {
             if let Some(d) = self.detail(&q, e) {
-                self.update(&e.order_id.clone(), "open", Some(d));
+                self.update_diagnostic(&e.order_id, "open", Some(d), Some(&q));
             }
         } else if q.status == "fok_rejected" {
             let d = self.detail(&q, e);
@@ -565,6 +604,102 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn diagnostic_entry(id: &str, group: Option<&str>) -> EntryTuple {
+        (
+            id.into(),
+            id.into(),
+            id.into(),
+            "buy".into(),
+            "market".into(),
+            (None, None, None, None),
+            "day".into(),
+            10,
+            false,
+            group.map(str::to_string),
+            None,
+        )
+    }
+
+    fn diagnostic_bar(volume: i64) -> ExecutionBar {
+        ExecutionBar {
+            open: 100.0,
+            high: 100.0,
+            low: 100.0,
+            volume: 1000,
+            liquidity_volume: volume,
+            impact_scale: 0.0,
+        }
+    }
+
+    #[test]
+    fn zero_cap_records_quote_reason_but_other_unfilled_causes_do_not() {
+        for (volume, equity, limit, expected) in [
+            (0, 10000.0, None, true),
+            (9, 10000.0, None, true), // 양수 거래량도 참여 한도를 내리면 0주가 된다.
+            (1000, 0.0, None, false),
+            (0, 10000.0, Some(50.0), false), // 가격 조건 실패는 참여 한도 판정 전이다.
+            (20, 10000.0, None, false),      // 일부 체결은 0주 원인이 아니다.
+        ] {
+            let mut entry = diagnostic_entry("a", None);
+            if let Some(price) = limit {
+                entry.4 = "limit".into();
+                entry.5 .0 = Some(price);
+            }
+            let mut power = BuyingPower::new(equity, 1.0, vec![], Some(equity), false);
+            let ops = process_market_impl(
+                "2024-01-02",
+                vec![entry],
+                vec![],
+                &HashMap::from([("a", diagnostic_bar(volume))]),
+                &mut power,
+                0.0,
+                Some("0.1"),
+                &("none".into(), 0.0, 0.0),
+                0.0,
+            )
+            .unwrap();
+            let reasons: Vec<_> = ops.iter().filter(|op| op.8.is_some()).collect();
+            assert_eq!(reasons.len(), usize::from(expected));
+            if expected {
+                assert_eq!(reasons[0].8.as_deref(), Some("liquidity_cap_zero"));
+                assert_eq!(reasons[0].9, Some(volume));
+                assert!(ops.iter().all(|op| op.0 != "fill"));
+                assert_eq!(power.available(), equity);
+            }
+        }
+    }
+
+    #[test]
+    fn basket_zero_cap_diagnostic_belongs_only_to_the_blocked_leg() {
+        for policy in ["all_or_none", "proportional", "best_effort"] {
+            let mut power = BuyingPower::new(10000.0, 1.0, vec![], Some(10000.0), false);
+            let ops = process_market_impl(
+                "2024-01-02",
+                vec![
+                    diagnostic_entry("a", Some("g")),
+                    diagnostic_entry("b", Some("g")),
+                ],
+                vec![("g".into(), policy.into(), vec!["a".into(), "b".into()])],
+                &HashMap::from([("a", diagnostic_bar(0)), ("b", diagnostic_bar(1000))]),
+                &mut power,
+                0.0,
+                Some("0.1"),
+                &("none".into(), 0.0, 0.0),
+                0.0,
+            )
+            .unwrap();
+            let reasons: Vec<_> = ops.iter().filter(|op| op.8.is_some()).collect();
+            if policy == "best_effort" {
+                assert!(reasons.is_empty());
+                continue;
+            }
+            assert_eq!(reasons.len(), 1, "{policy}");
+            assert_eq!(reasons[0].1, "a");
+            assert_eq!(reasons[0].8.as_deref(), Some("liquidity_cap_zero"));
+            assert_eq!(reasons[0].9, Some(0));
+        }
+    }
 
     #[test]
     fn py_float_matches_python_repr() {

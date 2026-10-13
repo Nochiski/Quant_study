@@ -9,6 +9,7 @@ impl<'a> Session<'a> {
         policy: &str,
         group_id: &str,
         reason: &str,
+        quotes: &[QuoteOut],
     ) {
         // Python은 group.order_ids(라우팅 순)로 취소한다 — 매도 우선 정렬과 다르다.
         let mut ordered: Vec<&EntryIn> = entries.iter().collect();
@@ -19,7 +20,11 @@ impl<'a> Session<'a> {
                 "basket {policy} — {reason} group_id={group_id} remaining={} ts={}",
                 e.remaining, self.ts
             );
-            self.update(&e.order_id, "cancelled", Some(d));
+            let quote = entries
+                .iter()
+                .position(|leg| leg.order_id == e.order_id)
+                .and_then(|index| quotes.get(index));
+            self.update_diagnostic(&e.order_id, "cancelled", Some(d), quote);
         }
         self.ops.push((
             "drop_group".into(),
@@ -30,6 +35,8 @@ impl<'a> Session<'a> {
             0.0,
             String::new(),
             0.0,
+            None,
+            None,
         ));
     }
 
@@ -61,7 +68,7 @@ impl<'a> Session<'a> {
                 "leg without bar in session instruments={}",
                 py_list(&missing)
             );
-            self.cancel_all(&legs, order_ids, policy, group_id, &reason);
+            self.cancel_all(&legs, order_ids, policy, group_id, &reason, &[]);
             return Ok(());
         }
         if policy != "best_effort" && legs.len() < order_ids.len() {
@@ -76,7 +83,7 @@ impl<'a> Session<'a> {
                 "leg(s) no longer open before group execution missing={}",
                 py_list(&gone)
             );
-            self.cancel_all(&legs, order_ids, policy, group_id, &reason);
+            self.cancel_all(&legs, order_ids, policy, group_id, &reason, &[]);
             return Ok(());
         }
         // 견적 패스: 매도 먼저, 임시 소모 후 복원.
@@ -136,6 +143,8 @@ impl<'a> Session<'a> {
                         0.0,
                         String::new(),
                         0.0,
+                        None,
+                        None,
                     ));
                 }
             }
@@ -148,7 +157,7 @@ impl<'a> Session<'a> {
                     .collect();
                 if !short.is_empty() {
                     let reason = format!("not fillable in full legs={}", py_list(&short));
-                    self.cancel_all(&legs, order_ids, policy, group_id, &reason);
+                    self.cancel_all(&legs, order_ids, policy, group_id, &reason, &quotes);
                     return Ok(());
                 }
                 for (i, q) in quotes.iter().enumerate() {
@@ -165,6 +174,8 @@ impl<'a> Session<'a> {
                     0.0,
                     String::new(),
                     0.0,
+                    None,
+                    None,
                 ));
             }
             _ => {
@@ -182,7 +193,14 @@ impl<'a> Session<'a> {
                 let tight_q = quotes[j].quantity;
                 let tight_rem = legs[j].remaining;
                 if tight_q <= 0 {
-                    self.cancel_all(&legs, order_ids, policy, group_id, "no leg fillable");
+                    self.cancel_all(
+                        &legs,
+                        order_ids,
+                        policy,
+                        group_id,
+                        "no leg fillable",
+                        &quotes,
+                    );
                     return Ok(());
                 }
                 let scale = tight_q as f64 / tight_rem as f64;
@@ -228,6 +246,8 @@ impl<'a> Session<'a> {
                     0.0,
                     String::new(),
                     0.0,
+                    None,
+                    None,
                 ));
             }
         }

@@ -31,12 +31,13 @@ from tests.test_execution_cash_projection import actual_cash_scenario
 # 고쳤다(리드 결정). 지문은 결과 공유 캐시 키가 아니라 옛 결과가 새 기록 없이 재사용되지 않는다.
 # v5는 비용의 레버리지 배수·체결가 재평가·양방향 청산 노출 해제를 견적에 반영한다.
 # leveraged_short_tax_budget은 L2 숏16주→환매/롱32주 경로로 해당 규칙을 고정한다.
+# #411은 주문 상태의 진단 필드를 추가하고 기존 callback·결정 순서를 보존한다.
 # v6는 실제 장부의 정수 경계와 비례 축소 후 최종 수량의 여력을 다시 판정한다.
 # 같은 미병합 v6 수정에서 대금→수수료→세금의 실제 현금 순서를 포함한다. 기존 28개
 # scenario trace/decision은 그대로이며 actual_cash_fee_application은 새 경계를 고정한다.
 _PINNED = (
     "backtest-engine-v6",
-    "6450f74ce1d0844d5b6bcf38c4d909406176bf9020ca7cfe14326dd0f55b21f5",
+    "54980fa2aa95d3abb11bdb5b678c168a84c7f908aa31fa25412846fd66584cfa",
 )
 
 

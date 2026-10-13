@@ -26,11 +26,11 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyDocumentService,
 )
 from strategy_workbench.application.strategy_design.facade.ports import PageRequest
+from strategy_workbench.domain.strategy._promotion import promotion_node_ids
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     PROMOTION_NODE_PREFIX,
     SourceFormat,
-    promotion_node_ids,
 )
 from strategy_workbench.domain.strategy.facade.specification import SignalNormalization
 from tests import frozen_revision_rows

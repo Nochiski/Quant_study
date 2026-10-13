@@ -25,13 +25,18 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
     StrategySourceKind,
 )
-from strategy_workbench.domain.backtest.facade.trials import BlockedTrialAttempt, TrialLedgerEntry
+from strategy_workbench.domain.backtest.facade.trials import (
+    BlockedTrialAttempt,
+    TrialLedgerEntry,
+    lineage_root,
+    resolve_lineage,
+)
 
 from ._errors import ResearchStorageError
 from ._request_codec import decode_request, encode_request
 from ._schema import SCHEMA_VERSION, migrate_schema
 
-_TERMINAL = (RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value)
+_TERMINAL = tuple(status.value for status in RunStatus if status.is_terminal)
 # 앞 둘(run_id·created_at)은 접수 때만 쓰는 식별 칸이다. 상태 전이(`update`)는 그 뒤만 바꾼다.
 _SUMMARY_COLUMNS = """
     run_id, created_at, status, progress, stage, message, updated_at, error, error_code,
@@ -205,8 +210,8 @@ class SQLiteBacktestRunRepository:
     def trial_ledger(self, lineage_id: str) -> TrialLedgerRecords:
         with self._database.transaction(write=False) as connection:
             merges = _merges(connection)
-            root = _root(merges, lineage_id)
-            merged = tuple(source for source in merges if _root(merges, source) == root)
+            resolved = resolve_lineage(merges, lineage_id)
+            root, merged = resolved.root, resolved.merged
             members = (root, *merged)
             where = f"lineage_id IN ({', '.join('?' * len(members))})"
             entries = connection.execute(
@@ -261,7 +266,10 @@ class SQLiteBacktestRunRepository:
     def merge_lineages(self, source_id: str, target_id: str, *, merged_at: datetime) -> None:
         with self._database.transaction(write=True) as connection:
             merges = _merges(connection)
-            source_root, target_root = _root(merges, source_id), _root(merges, target_id)
+            source_root, target_root = (
+                lineage_root(merges, source_id),
+                lineage_root(merges, target_id),
+            )
             if source_root == target_root:
                 raise TrialLineageAlreadyMergedError(
                     "lineages are already one — "
@@ -278,7 +286,7 @@ class SQLiteBacktestRunRepository:
             rows = connection.execute(
                 f"""
                 SELECT {_SUMMARY_COLUMNS} FROM backtest_runs
-                WHERE status NOT IN (?, ?, ?) ORDER BY accepted_order
+                WHERE status NOT IN ({", ".join("?" for _ in _TERMINAL)}) ORDER BY accepted_order
                 """,
                 _TERMINAL,
             ).fetchall()
@@ -365,13 +373,6 @@ def _merges(connection: sqlite3.Connection) -> dict[str, str]:
         "SELECT source_id, target_id FROM lineage_merges ORDER BY merge_order"
     ).fetchall()
     return {row["source_id"]: row["target_id"] for row in rows}
-
-
-def _root(merges: dict[str, str], lineage_id: str) -> str:
-    """합치기를 따라가 남은 계열. 합칠 때마다 남은 계열끼리 잇으므로 고리가 없다."""
-    while lineage_id in merges:
-        lineage_id = merges[lineage_id]
-    return lineage_id
 
 
 def _time_text(value: datetime, field: str, run_id: str) -> str:

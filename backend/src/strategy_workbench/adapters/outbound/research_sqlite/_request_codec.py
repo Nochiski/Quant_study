@@ -44,9 +44,12 @@ def encode_request(request: BacktestRunSpec) -> str:
     return json.dumps(payload, ensure_ascii=False, allow_nan=False, sort_keys=True)
 
 
-def decode_request(text: str, *, run_id: str) -> BacktestRunSpec:
+def decode_request(text: str, *, run_id: str, legacy_spec: bool = False) -> BacktestRunSpec:
     try:
         payload = json.loads(text)
+        # 실험의 구판 설계는 저장 리비전 기반 spec 자체를 담았다. 호환 읽기도 요청 codec이 맡는다.
+        if legacy_spec:
+            return _RUN_SPEC.validate_python(payload)
         request = _RUN_SPEC.validate_python(payload["run_spec"])
         draft = payload["inline_draft"]
         if draft is not None:

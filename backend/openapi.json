@@ -2735,6 +2735,10 @@
             "title": "Selections",
             "type": "array"
           },
+          "settled": {
+            "title": "Settled",
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/components/schemas/ExperimentStatus"
           },
@@ -2754,7 +2758,8 @@
           "status",
           "trial_counts",
           "selections",
-          "finished"
+          "finished",
+          "settled"
         ],
         "title": "Experiment",
         "type": "object"
@@ -3264,7 +3269,6 @@
       "ExperimentSelectionRequest": {
         "properties": {
           "reason": {
-            "pattern": "\\S",
             "title": "Reason",
             "type": "string"
           },

@@ -15,7 +15,7 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import Field
+from pydantic import AfterValidator, Field
 from pydantic.config import JsonDict
 
 from strategy_workbench.application.experiment_run.facade.experiments import (
@@ -41,6 +41,7 @@ from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
     ExperimentStatus,
     TrialStatus,
+    validate_selection_reason,
 )
 
 from ._backtest_contract import (
@@ -103,7 +104,7 @@ class ExperimentProgress:
 class ExperimentSelectionRequest:
     trial_index: Annotated[int, Field(ge=0)]
     # 공백만 있는 이유는 기록이 아니다.
-    reason: Annotated[str, Field(pattern=r"\S")]
+    reason: Annotated[str, AfterValidator(validate_selection_reason)]
 
 
 class _ExperimentBodyRoute(CodedBodyValidationRoute):
@@ -351,9 +352,7 @@ async def _progress_stream(
             yield sse_frame(sequence=sequence, event="progress", data=progress)
             sequence, last, last_frame_at = sequence + 1, progress, time.monotonic()
         # 취소한 실험도 도는 trial 이 끝날 때까지는 닫지 않아 마지막 프레임이 최종 수다.
-        if experiment.status.is_terminal and not (
-            progress.trial_counts.keys() & {TrialStatus.RUNNING, TrialStatus.QUEUED}
-        ):
+        if experiment.settled:
             return
         if time.monotonic() - last_frame_at >= keepalive_seconds:
             yield SSE_KEEPALIVE_FRAME

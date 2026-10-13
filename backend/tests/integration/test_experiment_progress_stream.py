@@ -15,6 +15,7 @@ from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, 
 class _Snapshot:
     status: ExperimentStatus
     trial_counts: dict[TrialStatus, int]
+    settled: bool = False
 
 
 class _Experiments:
@@ -30,7 +31,7 @@ class _Experiments:
 def test_the_stream_sends_changes_keeps_alive_and_closes_after_the_final_counts() -> None:
     running = _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1, TrialStatus.QUEUED: 1})
     cancelled_running = _Snapshot(ExperimentStatus.CANCELLED, {TrialStatus.RUNNING: 1})
-    cancelled = _Snapshot(ExperimentStatus.CANCELLED, {TrialStatus.CANCELLED: 2})
+    cancelled = _Snapshot(ExperimentStatus.CANCELLED, {TrialStatus.CANCELLED: 2}, settled=True)
     experiments = cast(
         ExperimentRunService, _Experiments(running, running, cancelled_running, cancelled)
     )
@@ -52,3 +53,26 @@ def test_the_stream_sends_changes_keeps_alive_and_closes_after_the_final_counts(
         "keepalive",
         'data: {"status":"cancelled","trial_counts":{"cancelled":2}}',
     ]
+
+
+def test_cancelled_stream_waits_for_validation_runs_even_if_trial_counts_are_final() -> None:
+    trials = {TrialStatus.COMPLETED: 2}
+    experiments = cast(
+        ExperimentRunService,
+        _Experiments(
+            _Snapshot(ExperimentStatus.CANCELLED, trials, settled=False),
+            _Snapshot(ExperimentStatus.CANCELLED, trials, settled=True),
+        ),
+    )
+
+    async def collect() -> list[str]:
+        return [
+            frame
+            async for frame in _progress_stream(
+                experiments, "e", poll_seconds=0, keepalive_seconds=0
+            )
+        ]
+
+    frames = asyncio.run(collect())
+    assert len(frames) == 2
+    assert frames[-1].startswith(":")

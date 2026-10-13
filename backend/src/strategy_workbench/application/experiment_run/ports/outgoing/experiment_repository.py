@@ -47,14 +47,13 @@ class TrialAttempt:
     error: str | None = None
 
     def __post_init__(self) -> None:
-        if (self.run_id is None) == (self.error_code is None) or (self.error_code is None) != (
-            self.error is None
-        ):
-            raise ValueError(
-                "attempt carries a run_id or a rejection (code and message), not both — "
-                f"experiment_id={self.experiment_id} trial_index={self.trial_index} "
-                f"attempt={self.attempt} run_id={self.run_id!r} error_code={self.error_code!r}"
-            )
+        _validate_submission(
+            self.run_id,
+            self.error_code,
+            self.error,
+            context=f"experiment_id={self.experiment_id} trial_index={self.trial_index} "
+            f"attempt={self.attempt}",
+        )
 
 
 @dataclass(frozen=True)
@@ -76,6 +75,31 @@ class WindowPick:
     run_id: str | None = None
     error_code: AdmissionRejectionCode | None = None
     error: str | None = None
+
+    def __post_init__(self) -> None:
+        context = f"experiment_id={self.experiment_id} window_index={self.window_index}"
+        if (self.trial_index is None) != (self.train_sharpe is None):
+            raise ValueError(f"window pick carries a trial and training score together — {context}")
+        if self.trial_index is None:
+            if any(value is not None for value in (self.run_id, self.error_code, self.error)):
+                raise ValueError(f"a window without a chosen trial has no submission — {context}")
+        else:
+            _validate_submission(self.run_id, self.error_code, self.error, context=context)
+
+
+def _validate_submission(
+    run_id: str | None,
+    error_code: AdmissionRejectionCode | None,
+    error: str | None,
+    *,
+    context: str,
+) -> None:
+    """학습·검증 제출은 실행 ID 또는 거절 코드와 문장 가운데 하나를 기록한다."""
+    if (run_id is None) == (error_code is None) or (error_code is None) != (error is None):
+        raise ValueError(
+            "submission carries a run_id or a rejection (code and message), not both — "
+            f"{context} run_id={run_id!r} error_code={error_code!r}"
+        )
 
 
 @dataclass(frozen=True)

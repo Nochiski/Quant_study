@@ -1328,15 +1328,19 @@ test.describe("professional YAML workflow", () => {
     await expect(inspector).toContainText(
       "window는 1 이상이고 lag는 0 이상이어야 합니다",
     );
-    const body = inspector.locator(".strategy-form__diagnostics").first();
-    const bodyBox = await body.boundingBox(),
-      inspectorBox = await inspector.boundingBox();
-    expect(bodyBox).not.toBeNull();
-    expect(inspectorBox).not.toBeNull();
-    if (bodyBox === null || inspectorBox === null)
-      throw new Error("diagnostic inspector missing");
-    expect(bodyBox.width).toBeGreaterThan(inspectorBox.width * 0.8);
-    expect(bodyBox.y).toBeGreaterThan(inspectorBox.y);
+    // 두 boundingBox를 따로 읽으면 그 사이 스크롤·레이아웃 이동으로 서로 다른 프레임의 좌표가 섞여
+    // 순서가 뒤집힐 수 있었다(간헐 실패). 한 프레임에서 함께 재고 스크롤과 무관한 상대 좌표로 본다.
+    const layout = await inspector.evaluate((element) => {
+      const body = element.querySelector(".strategy-form__diagnostics");
+      if (body === null) return null;
+      const outer = element.getBoundingClientRect();
+      const inner = body.getBoundingClientRect();
+      return { width: inner.width, offset: inner.top - outer.top, outerWidth: outer.width };
+    });
+    expect(layout).not.toBeNull();
+    if (layout === null) throw new Error("diagnostic inspector missing");
+    expect(layout.width).toBeGreaterThan(layout.outerWidth * 0.8);
+    expect(layout.offset).toBeGreaterThan(0);
     await expect(ownNode).not.toContainText(
       "window는 1 이상이고 lag는 0 이상이어야 합니다",
     );

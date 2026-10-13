@@ -23,6 +23,7 @@ from decimal import ROUND_FLOOR, Decimal
 from enum import Enum
 from typing import Protocol
 
+from backtest_engine.engine.costs import sell_tax_amount
 from backtest_engine.engine.orders import OpenOrder
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import NoSlippage
@@ -69,6 +70,8 @@ class Quote:
     slippage_per_share: float
     status: ExecutionStatus
     detail: str | None
+    reason_code: str | None = None
+    cap_volume: int | None = None
 
 
 def participation_of(order: OrderEvent) -> float | None:
@@ -126,6 +129,9 @@ class QuoteCore(Protocol):
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
     ) -> QuoteNumbers: ...
 
 
@@ -143,6 +149,9 @@ class PythonQuoteCore:
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
     ) -> QuoteNumbers:
         if slip < 0:
             raise ValueError(f"slippage must be >= 0 — slip={slip}")
@@ -166,16 +175,16 @@ class PythonQuoteCore:
             price = min(price, limit) if buy else max(price, limit)
         applied = abs(price - base_price)
 
-        short_entry = Decimal(0) if buy else quantity - max(held, Decimal(0))
-        if buy or short_entry > 0:
-            if buy:
-                affordable = _affordable_quantity(buying_power, price, fee_rate)
-            else:
-                # 보유분 매도는 무제한이고 그만큼 노출이 줄어 여력이 늘어난다. 숏 진입분만
-                # (청산 후 여력)으로 자른다.
-                closing = max(held, Decimal(0))
-                freed_power = buying_power + float(closing) * price
-                affordable = _affordable_quantity(freed_power, price, fee_rate) + closing
+        # consume가 쓰는 L×equity−gross를 체결가로 재평가한 뒤 역산한다.
+        # 수수료/세금은 equity를 줄이므로 여력에서는 L배다. 숏 환매도 노출 해제를 인정한다.
+        held_value = float(held)
+        mark = price if held_mark is None else held_mark
+        repriced_power = buying_power + (leverage * held_value - abs(held_value)) * (price - mark)
+        closing = max(-held if buy else held, Decimal(0))
+        cost_rate = fee_rate + (0.0 if buy else sell_tax_rate)
+        if quantity > closing:
+            freed_power = repriced_power + float(closing) * price * (1.0 - leverage * cost_rate)
+            affordable = closing + _affordable_quantity(freed_power, price, leverage * cost_rate)
             if affordable <= 0:
                 return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
             if affordable < quantity:
@@ -246,6 +255,9 @@ class BrokerSim:
         bar: Bar,
         buying_power: float,
         held: Decimal = Decimal(0),
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
     ) -> Quote:
         """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음.
 
@@ -294,6 +306,9 @@ class BrokerSim:
             held,
             self._fee_rate,
             order.time_in_force is TimeInForce.FOK,
+            sell_tax_rate,
+            leverage,
+            held_mark,
         )
         detail = self._detail(numbers, order, bar, volume, open_order.remaining, buying_power)
         return Quote(
@@ -303,6 +318,8 @@ class BrokerSim:
             numbers.slippage_per_share,
             numbers.status,
             detail,
+            "liquidity_cap_zero" if numbers.status is ExecutionStatus.NOT_FILLED else None,
+            volume if numbers.status is ExecutionStatus.NOT_FILLED else None,
         )
 
     @staticmethod
@@ -353,6 +370,8 @@ class BrokerSim:
         bar: Bar,
         fill_id: str,
         quantity: Decimal | None = None,
+        *,
+        sell_tax_rate: float = 0.0,
     ) -> FillEvent:
         """견적을 체결 기록으로 만든다. quantity로 견적보다 적게(바스켓 비례 축소) 체결 가능."""
         order = open_order.order
@@ -374,4 +393,5 @@ class BrokerSim:
             fee=self.fee_for(notional),
             slippage_per_share=quote.slippage_per_share,
             cap_volume=bar.cap_volume,
+            sell_tax=sell_tax_amount(order.side, filled, quote.price, sell_tax_rate),
         )

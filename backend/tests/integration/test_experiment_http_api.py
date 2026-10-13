@@ -159,7 +159,10 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
         "run_started": 8,
         "run_finished": 8,
     }
-    assert [event["occurred_at"] for event in audit] == sorted(e["occurred_at"] for e in audit)
+    times = [datetime.fromisoformat(event["occurred_at"]) for event in audit]
+    assert times == sorted(times)
+    # 창 검증 실행의 사건은 창에 귀속된다.
+    assert sum(event["window_index"] is not None for event in audit) == 2 + 2 + 2
     listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
     assert [item["record"]["experiment_id"] for item in listed["items"]] == [
         experiment["record"]["experiment_id"]

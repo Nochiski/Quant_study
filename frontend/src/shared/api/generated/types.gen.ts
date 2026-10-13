@@ -1887,6 +1887,8 @@ export type ExperimentAuditKind =
   | "trial_submitted"
   | "trial_rejected"
   | "window_picked"
+  | "window_no_cell"
+  | "window_rejected"
   | "run_started"
   | "run_finished"
   | "candidate_selected"

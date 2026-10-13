@@ -29,9 +29,14 @@ class ExperimentAuditKind(StrEnum):
     # trial attempt 가 실행을 받았다 / 접수가 거절됐다.
     TRIAL_SUBMITTED = "trial_submitted"
     TRIAL_REJECTED = "trial_rejected"
-    # 창마다 학습 점수로 칸을 골랐다(고를 칸이 없거나 검증 실행 접수가 거절된 경우 포함).
+    # 창마다 학습 점수로 칸을 골라 검증 실행을 넘겼다 / 고를 칸이 없었다 / 검증 실행 접수가
+    # 거절됐다.
     WINDOW_PICKED = "window_picked"
-    # attempt·창 선택이 받은 실행이 시작했다 / 끝났다(끝난 상태·실패 코드).
+    WINDOW_NO_CELL = "window_no_cell"
+    WINDOW_REJECTED = "window_rejected"
+    # attempt·창 선택이 받은 실행이 시작했다 / 끝났다(끝난 상태·실패 코드). 같은 입력으로 이미
+    # 돌던 실행을 이어 받았으면 시작은 넘긴 시각으로 보인다(이 실험 몫으로 돌기 시작한 때).
+    # 재시작으로 닫힌 실행의 끝은 서버가 다시 뜬 시각이다.
     RUN_STARTED = "run_started"
     RUN_FINISHED = "run_finished"
     CANDIDATE_SELECTED = "candidate_selected"
@@ -65,8 +70,8 @@ def audit_trail(
     changes: Iterable[ControlChange],
     runs: Mapping[str, BacktestRunState],
 ) -> tuple[ExperimentAuditEvent, ...]:
-    """시각 순 감사 기록. 같은 시각이면 기록 종류 순(생성 → 조작 → attempt → 창 → 후보 →
-    취소)이다."""
+    """시각 순 감사 기록. 같은 시각이면 기록 종류 순(생성 → 조작 → attempt 와 그 실행 → 창과 그
+    실행 → 후보 → 취소)이다."""
     events = [ExperimentAuditEvent(record.created_at, ExperimentAuditKind.CREATED)]
     events += (
         ExperimentAuditEvent(
@@ -93,12 +98,14 @@ def audit_trail(
                 code=attempt.error_code,
             )
         )
-        events += _run_events(runs, attempt.run_id, trial_index=attempt.trial_index)
+        events += _run_events(
+            runs, attempt.run_id, attempt.created_at, trial_index=attempt.trial_index
+        )
     for pick in picks:
         events.append(
             ExperimentAuditEvent(
                 pick.created_at,
-                ExperimentAuditKind.WINDOW_PICKED,
+                _pick_kind(pick),
                 trial_index=pick.trial_index,
                 window_index=pick.window_index,
                 attempt=pick.attempt,
@@ -106,7 +113,7 @@ def audit_trail(
                 code=pick.error_code,
             )
         )
-        events += _run_events(runs, pick.run_id, window_index=pick.window_index)
+        events += _run_events(runs, pick.run_id, pick.created_at, window_index=pick.window_index)
     events += (
         ExperimentAuditEvent(
             selection.selected_at,
@@ -122,14 +129,25 @@ def audit_trail(
     return tuple(sorted(events, key=lambda event: event.occurred_at))
 
 
+def _pick_kind(pick: WindowPick) -> ExperimentAuditKind:
+    if pick.trial_index is None:
+        return ExperimentAuditKind.WINDOW_NO_CELL
+    if pick.run_id is None:
+        return ExperimentAuditKind.WINDOW_REJECTED
+    return ExperimentAuditKind.WINDOW_PICKED
+
+
 def _run_events(
     runs: Mapping[str, BacktestRunState],
     run_id: str | None,
+    submitted_at: datetime,
     *,
     trial_index: int | None = None,
     window_index: int | None = None,
 ) -> list[ExperimentAuditEvent]:
-    """실행의 시작·끝. 시작 시각은 연구 DB v6 이후 실행에만 있다."""
+    """실행의 시작·끝. 시작 시각은 연구 DB v6 이후 실행에만 있고, 넘긴 시각보다 앞서면(이어 받은
+    실행·넘김 기록보다 먼저 배정된 실행) 넘긴 시각으로 올린다 — 기록이 인과 순서를 거꾸로 보이지
+    않게 한다."""
     run = runs.get(run_id) if run_id is not None else None
     if run is None:
         return []
@@ -137,7 +155,7 @@ def _run_events(
     if run.started_at is not None:
         events.append(
             ExperimentAuditEvent(
-                run.started_at,
+                max(run.started_at, submitted_at),
                 ExperimentAuditKind.RUN_STARTED,
                 trial_index=trial_index,
                 window_index=window_index,

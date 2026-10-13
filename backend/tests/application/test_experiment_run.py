@@ -147,6 +147,8 @@ class _FakeRuns:
         self.schedules: list[tuple[str, bool, int]] = []
         self.submitted_controls: list[ExperimentControls] = []
         self.error_codes: dict[str, RunFailureCode] = {}
+        # 실행이 처음 `running` 이 된 시각(감사 기록 테스트가 정한다).
+        self.started_ats: dict[str, datetime] = {}
         # 다음 `admit` 앞에서 한 번 부른다(복구 제출과 겹치는 조작을 재현한다).
         self.before_admit: Callable[[], None] | None = None
         self.ledger_entries: list[TrialLedgerEntry] = []
@@ -215,6 +217,7 @@ class _FakeRuns:
                 created_at=_AT,
                 updated_at=_AT,
                 error_code=self.error_codes.get(run_id),
+                started_at=self.started_ats.get(run_id),
             )
             for run_id in run_ids
         }
@@ -1705,3 +1708,26 @@ def test_the_audit_trail_is_in_time_order() -> None:
 
     assert [event.kind.value for event in trail][-1] == "controls_changed"
     assert [event.occurred_at for event in trail] == sorted(e.occurred_at for e in trail)
+
+
+def test_the_audit_trail_keeps_causal_order_and_tells_window_outcomes_apart() -> None:
+    """#521 리뷰: 이어 받은 실행의 시작은 넘긴 시각보다 앞서 보이지 않는다. 창 검증 실행의 사건은
+    창에 귀속되고, 바뀌지 않은 조작은 이력이 없다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, paused=False, priority=1)  # 기본값 그대로
+    runs.started_ats["run-0"] = _AT - timedelta(hours=1)  # 다른 실험이 먼저 돌리던 실행
+    _finish(runs, {f"run-{index}": _result(1.0) for index in range(4)})
+    service.advance(experiment_id)
+    runs.run_statuses["run-4"] = RunStatus.COMPLETED
+
+    trail = service.audit(experiment_id)
+
+    assert all(event.kind.value != "controls_changed" for event in trail)
+    started = next(e for e in trail if e.kind.value == "run_started")
+    assert (started.run_id, started.occurred_at) == ("run-0", _AT)
+    picked = [e for e in trail if e.kind.value == "window_picked"]
+    assert [(e.window_index, e.run_id) for e in picked] == [(0, "run-4"), (1, "run-5")]
+    validation = next(e for e in trail if e.kind.value == "run_finished" and e.run_id == "run-4")
+    assert (validation.window_index, validation.trial_index) == (0, None)

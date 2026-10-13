@@ -527,7 +527,9 @@ class ExperimentRunService:
                 paused=current.paused if paused is None else paused,
                 priority=current.priority if priority is None else priority,
             )
-            self._repository.set_controls(experiment_id, controls, changed_at=self._now())
+            # 바뀐 것이 없으면 이력을 남기지 않는다(감사 기록은 바뀐 조작만 싣는다).
+            if controls != current:
+                self._repository.set_controls(experiment_id, controls, changed_at=self._now())
             self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
         return self.get(experiment_id)
 

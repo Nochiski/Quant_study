@@ -134,13 +134,14 @@ def experiment_status(
     return ExperimentStatus.RUNNING
 
 
-# HTTP의 입력 스키마도 같은 규칙을 표시한다. 문장 내용은 저장할 때 바꾸지 않는다.
-SELECTION_REASON_PATTERN = r"\S"
+# HTTP도 이 검증 함수를 호출한다. 정규식 엔진마다 다른 공백 의미를 복제하지 않는다.
+_SELECTION_REASON_PATTERN = r"\S"
 
 
-def validate_selection_reason(reason: str) -> None:
-    if re.search(SELECTION_REASON_PATTERN, reason) is None:
+def validate_selection_reason(reason: str) -> str:
+    if re.search(_SELECTION_REASON_PATTERN, reason) is None:
         raise ValueError("selection reason must contain a non-whitespace character")
+    return reason
 
 
 def experiment_settled(

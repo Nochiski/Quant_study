@@ -6,7 +6,10 @@ import asyncio
 from dataclasses import dataclass
 from typing import cast
 
-from strategy_workbench.adapters.inbound.http_api._experiment_routes import _progress_stream
+from strategy_workbench.adapters.inbound.http_api._experiment_routes import (
+    _ExperimentStreamHub,
+    _progress_stream,
+)
 from strategy_workbench.application.experiment_run.facade.experiments import ExperimentRunService
 from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, TrialStatus
 
@@ -76,3 +79,113 @@ def test_cancelled_stream_waits_for_validation_runs_even_if_trial_counts_are_fin
     frames = asyncio.run(collect())
     assert len(frames) == 2
     assert frames[-1].startswith(":")
+
+
+def test_simultaneous_subscribers_share_one_computation_and_release_the_producer() -> None:
+    class CountingExperiments(_Experiments):
+        calls = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            return super().get(experiment_id)
+
+    source = CountingExperiments(
+        _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1}),
+        _Snapshot(ExperimentStatus.COMPLETED, {TrialStatus.COMPLETED: 1}, settled=True),
+    )
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source), poll_seconds=0)
+
+    async def collect() -> list[list[str]]:
+        async def subscriber() -> list[str]:
+            return [frame async for frame in hub.stream("same-experiment")]
+
+        return list(await asyncio.gather(subscriber(), subscriber()))
+
+    first, second = asyncio.run(collect())
+    assert first == second
+    assert '"completed"' in first[-1]
+    assert source.calls == 2
+    assert hub._streams == {}
+
+
+def test_disconnect_keeps_other_subscribers_and_last_disconnect_stops_computing() -> None:
+    class RunningExperiments:
+        def get(self, experiment_id: str) -> _Snapshot:
+            return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, RunningExperiments()))
+
+    async def exercise() -> None:
+        first, second = hub.stream("same"), hub.stream("same")
+        assert await anext(first) == await anext(second)
+        shared = hub._streams["same"]
+        await first.aclose()
+        assert shared.subscribers == 1 and not shared.done
+        await second.aclose()
+        assert shared.producer is not None and shared.producer.done()
+        assert not hub._streams
+
+    asyncio.run(exercise())
+
+
+def test_producer_failure_reaches_every_subscriber_and_does_not_leave_cached_state() -> None:
+    class BrokenExperiments:
+        calls = 0
+
+        def get(self, experiment_id: str) -> _Snapshot:
+            self.calls += 1
+            raise RuntimeError("research read failed")
+
+    source = BrokenExperiments()
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def collect() -> list[object]:
+        async def subscriber() -> list[str]:
+            return [frame async for frame in hub.stream("same")]
+
+        return list(await asyncio.gather(subscriber(), subscriber(), return_exceptions=True))
+
+    failures = asyncio.run(collect())
+    assert len(failures) == 2 and all(isinstance(error, RuntimeError) for error in failures)
+    assert source.calls == 1
+    assert not hub._streams
+
+
+def test_shutdown_releases_tasks_and_the_same_hub_can_serve_a_new_event_loop() -> None:
+    class RunningExperiments:
+        def get(self, experiment_id: str) -> _Snapshot:
+            return _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1})
+
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, RunningExperiments()))
+
+    async def lifecycle() -> None:
+        stream = hub.stream("same")
+        assert '"running"' in await anext(stream)
+        producer = hub._streams["same"].producer
+        await hub.close()
+        assert not hub._streams and producer is not None and producer.done()
+        assert [frame async for frame in stream] == []
+
+    asyncio.run(lifecycle())
+    asyncio.run(lifecycle())
+
+
+def test_a_new_subscriber_after_completion_does_not_reuse_a_slow_clients_old_result() -> None:
+    source = _Experiments(
+        _Snapshot(ExperimentStatus.COMPLETED, {TrialStatus.COMPLETED: 1}, settled=True),
+        _Snapshot(ExperimentStatus.RUNNING, {TrialStatus.RUNNING: 1}),
+    )
+    hub = _ExperimentStreamHub(cast(ExperimentRunService, source))
+
+    async def exercise() -> None:
+        old = hub.stream("retried")
+        assert '"completed"' in await anext(old)
+        fresh = hub.stream("retried")
+        assert '"running"' in await anext(fresh)
+        new_shared = hub._streams["retried"]
+        await old.aclose()
+        assert hub._streams["retried"] is new_shared
+        await fresh.aclose()
+        assert not hub._streams
+
+    asyncio.run(exercise())

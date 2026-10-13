@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
+from contextlib import suppress
+from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Query, Request, status
@@ -133,6 +134,9 @@ def register_experiment_routes(
     *,
     admitted: Callable[[Callable[[], Any]], Any],
 ) -> None:
+    streams = _ExperimentStreamHub(experiments)
+    app.router.add_event_handler("shutdown", streams.close)
+
     async def experiment_error(_: Request, error: Exception) -> JSONResponse:
         assert isinstance(error, ExperimentError)
         return JSONResponse(
@@ -244,7 +248,7 @@ def register_experiment_routes(
         없으면 마지막 수를 보낸 뒤 닫는다."""
         experiments.get(experiment_id)
         return StreamingResponse(
-            _progress_stream(experiments, experiment_id),
+            streams.stream(experiment_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -358,3 +362,96 @@ async def _progress_stream(
             yield SSE_KEEPALIVE_FRAME
             last_frame_at = time.monotonic()
         await asyncio.sleep(poll_seconds)
+
+
+@dataclass
+class _SharedProgress:
+    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
+    subscribers: int = 0
+    version: int = 0
+    latest: str | None = None
+    done: bool = False
+    error: Exception | None = None
+    producer: asyncio.Task[None] | None = None
+
+
+class _ExperimentStreamHub:
+    """같은 실험의 구독은 상태 계산 하나를 공유한다. 마지막 연결이 닫히면 계산도 멈춘다.
+
+    저장된 실험 상태를 캐시하지 않는다. 구독 중인 실험마다 최신 SSE 프레임 하나만 보관하며
+    느린 연결에 중간 프레임을 쌓지 않는다. 새 연결도 마지막 상태를 즉시 받는다.
+    """
+
+    def __init__(
+        self, experiments: ExperimentRunService, *, poll_seconds: float = _EXPERIMENT_POLL_SECONDS
+    ) -> None:
+        self._experiments = experiments
+        self._poll_seconds = poll_seconds
+        self._streams: dict[str, _SharedProgress] = {}
+
+    async def stream(self, experiment_id: str) -> AsyncGenerator[str, None]:
+        shared = self._streams.get(experiment_id)
+        if shared is None or shared.done:
+            shared = _SharedProgress()
+            self._streams[experiment_id] = shared
+            shared.producer = asyncio.create_task(self._produce(experiment_id, shared))
+        shared.subscribers += 1
+        seen = 0
+        try:
+            while True:
+                frame: str | None = None
+                async with shared.condition:
+                    if shared.version == seen and not shared.done:
+                        try:
+                            await asyncio.wait_for(
+                                shared.condition.wait_for(
+                                    lambda observed=seen: shared.version != observed or shared.done
+                                ),
+                                timeout=SSE_KEEPALIVE_SECONDS,
+                            )
+                        except TimeoutError:
+                            frame = SSE_KEEPALIVE_FRAME
+                    if shared.version != seen:
+                        seen, frame = shared.version, shared.latest
+                    elif shared.done:
+                        if shared.error is not None:
+                            raise shared.error
+                        return
+                if frame is not None:
+                    yield frame
+        finally:
+            shared.subscribers -= 1
+            if shared.subscribers == 0:
+                if self._streams.get(experiment_id) is shared:
+                    self._streams.pop(experiment_id, None)
+                if shared.producer is not None:
+                    shared.producer.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await shared.producer
+
+    async def close(self) -> None:
+        """ASGI 종료에서도 남은 생산자를 회수한다. 다음 lifespan은 빈 상태로 시작한다."""
+        entries = list(self._streams.values())
+        self._streams.clear()
+        tasks = [shared.producer for shared in entries if shared.producer is not None]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _produce(self, experiment_id: str, shared: _SharedProgress) -> None:
+        try:
+            async for frame in _progress_stream(
+                self._experiments, experiment_id, poll_seconds=self._poll_seconds
+            ):
+                if frame.startswith(":"):
+                    continue
+                async with shared.condition:
+                    shared.version += 1
+                    shared.latest = frame
+                    shared.condition.notify_all()
+        except Exception as error:
+            shared.error = error
+        finally:
+            async with shared.condition:
+                shared.done = True
+                shared.condition.notify_all()

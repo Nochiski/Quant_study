@@ -610,52 +610,69 @@ describe("experiments", () => {
   });
 
   // #407 리뷰 P2-2: 실험이 끝나기 전에 스트림이 프레임 없이 끊겨도(서버 재시작 등) 보조 폴링이 화면을 맞춘다.
-  it("keeps reading a running experiment after its progress stream drops", async () => {
-    let reads = 0;
-    let trialReads = 0;
-    server.use(
-      http.get(`${API}/api/v1/experiments/:experimentId`, () => {
-        reads += 1;
-        return HttpResponse.json(
-          experiment("e-run", reads < 3 ? "running" : "completed"),
-        );
-      }),
-      http.get(`${API}/api/v1/experiments/:experimentId/trials`, () => {
-        trialReads += 1;
-        return HttpResponse.json([trialState(0, "running", null)]);
-      }),
-      http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
-        HttpResponse.json({
-          windows: [],
-          curve: [],
-          out_of_sample_sharpe: null,
-          retention: null,
-          gap: "pending",
+  it.each(["running", "cancelled"] as const)(
+    "keeps reading an unsettled %s experiment after its progress stream drops",
+    async (initialStatus) => {
+      let reads = 0;
+      let trialReads = 0;
+      server.use(
+        http.get(`${API}/api/v1/experiments/:experimentId`, () => {
+          reads += 1;
+          return HttpResponse.json({
+            ...experiment(
+              "e-run",
+              initialStatus === "cancelled"
+                ? "cancelled"
+                : reads < 3
+                  ? "running"
+                  : "completed",
+            ),
+            settled: reads >= 3,
+          });
         }),
-      ),
-      // 프레임 없이 바로 닫힌다 — 실험은 아직 돈다.
-      http.get(
-        `${API}/api/v1/experiments/:experimentId/events`,
-        () =>
-          new HttpResponse(
-            new ReadableStream({
-              start(controller) {
-                controller.close();
-              },
-            }),
-            { headers: { "Content-Type": "text/event-stream" } },
-          ),
-      ),
-    );
-    mount("/research/experiments/e-run");
+        http.get(`${API}/api/v1/experiments/:experimentId/trials`, () => {
+          trialReads += 1;
+          return HttpResponse.json([trialState(0, "running", null)]);
+        }),
+        http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
+          HttpResponse.json({
+            windows: [],
+            curve: [],
+            out_of_sample_sharpe: null,
+            retention: null,
+            gap: "pending",
+          }),
+        ),
+        // 프레임 없이 바로 닫힌다 — 실험은 아직 돈다.
+        http.get(
+          `${API}/api/v1/experiments/:experimentId/events`,
+          () =>
+            new HttpResponse(
+              new ReadableStream({
+                start(controller) {
+                  controller.close();
+                },
+              }),
+              { headers: { "Content-Type": "text/event-stream" } },
+            ),
+        ),
+      );
+      mount("/research/experiments/e-run");
 
-    await waitFor(
-      () => expect(statusBadge("e-run")).toHaveTextContent(/완료$/u),
-      { timeout: 8_000 },
-    );
-    expect(reads).toBeGreaterThanOrEqual(3);
-    expect(trialReads).toBeGreaterThanOrEqual(2);
-  }, 12_000);
+      await waitFor(
+        () => {
+          expect(reads).toBeGreaterThanOrEqual(3);
+          expect(statusBadge("e-run")).toHaveTextContent(
+            initialStatus === "cancelled" ? /취소됨$/u : /완료$/u,
+          );
+        },
+        { timeout: 8_000 },
+      );
+      expect(reads).toBeGreaterThanOrEqual(3);
+      expect(trialReads).toBeGreaterThanOrEqual(2);
+    },
+    12_000,
+  );
 
   it("announces an experiment that finishes while the app is open, but not one done before", async () => {
     let listed = 0;

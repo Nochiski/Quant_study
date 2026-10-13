@@ -49,6 +49,29 @@ class ReviseDocumentRequest:
 
 
 @dataclass(frozen=True)
+class DraftDiffRequest:
+    source: str
+    format: SourceFormat
+    base_revision: int
+
+    def __post_init__(self) -> None:
+        if type(self.base_revision) is not int or self.base_revision < 1:
+            raise ValueError(f"base_revision must be a positive integer: {self.base_revision!r}")
+
+
+@dataclass(frozen=True)
+class DraftDiff:
+    """저장 리비전과 현재 원문의 의미 차이. 저장 상태를 바꾸지 않는다."""
+
+    strategy_id: str
+    base_revision: int
+    base_spec_hash: str
+    target_spec_hash: str
+    source_hash: str
+    changes: tuple[DiffEntry, ...]
+
+
+@dataclass(frozen=True)
 class StrategyDocument:
     """A stored revision as an editor sees it: exact source plus what it compiles to.
 
@@ -147,6 +170,20 @@ class StrategyDocumentService:
             base_spec_hash=base.spec_hash,
             target_spec_hash=target.spec_hash,
             changes=diff_strategy_specs(base.spec, target.spec),
+        )
+
+    def diff_draft(self, strategy_id: str, request: DraftDiffRequest) -> DraftDiff:
+        base = self._repository.get(strategy_id, request.base_revision)
+        compiled = self._authoring.compile(CompileRequest(request.source, request.format))
+        if not compiled.ok or compiled.spec is None or compiled.spec_hash is None:
+            raise InvalidStrategyDocumentError(compiled)
+        return DraftDiff(
+            strategy_id=strategy_id,
+            base_revision=base.revision,
+            base_spec_hash=base.spec_hash,
+            target_spec_hash=compiled.spec_hash,
+            source_hash=compiled.source_hash,
+            changes=diff_strategy_specs(base.spec, compiled.spec),
         )
 
     def _record(

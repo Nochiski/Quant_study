@@ -6,8 +6,8 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md (D1, D
 - Unknown keys at any depth, missing required fields, type mismatches, unknown `kind`
   discriminators, bad enum literals and unsupported schema versions are structural
   issues with a JSON Pointer. Only what the model declares as a default is filled in — a
-  dataclass default (schema 1.1 makes the boilerplate sections, `data.market`, factor `weight`
-  optional this way) or a `default-from` sibling field (`label` ← `factor_id`); a missing
+  dataclass default (boilerplate sections and factor `weight` are optional this way) or a
+  `default-from` sibling field (`label` ← `factor_id`); a missing
   required field is never guessed.
 - Typed scalar fields normalise `1`/`1.0` and enum strings; the
   `ParameterValue` union keeps bool/str as-is and folds integral floats to int.
@@ -33,6 +33,7 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 from ._canonical import canonical_payload_json, canonical_strategy_payload
 from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
 from ._promotion import demote_boolean_factor_outputs, promote_boolean_factor_outputs
+from ._source import json_pointer_token
 from ._upgrade import (
     FROZEN_SCHEMA_VERSIONS,
     UpgradeUnsupportedNodeError,
@@ -168,33 +169,6 @@ def authoring_document(spec: StrategySpec) -> str:
     return canonical_payload_json(document, indent=2) + "\n"
 
 
-def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:
-    """Hydrate a legacy payload that carries `identity` inside the document (current JSON API)."""
-    issues: list[StructuralIssue] = []
-    spec = _hydrate(StrategySpec, document, "", issues)
-    if issues or spec is _MISSING:
-        return StrategyHydration(
-            HydrationStatus.STRUCTURAL_ERROR, None, _with_legacy_hints(document, issues)
-        )
-    if not isinstance(spec, StrategySpec):  # pragma: no cover - defensive
-        raise TypeError(f"hydrate produced {type(spec).__name__}, expected StrategySpec")
-    if spec.identity.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        return StrategyHydration(
-            HydrationStatus.STRUCTURAL_ERROR,
-            None,
-            (
-                StructuralIssue(
-                    "structure.unsupported_schema_version",
-                    "/identity/schema_version",
-                    "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 "
-                    f"바꿔 줍니다 — got={spec.identity.schema_version!r} "
-                    f"supported={SUPPORTED_SCHEMA_VERSIONS}",
-                ),
-            ),
-        )
-    return StrategyHydration(HydrationStatus.OK, spec, ())
-
-
 def _version_issues(
     document: Mapping[str, object], schema_version: object
 ) -> list[StructuralIssue]:
@@ -250,13 +224,8 @@ def _version_issues(
     ]
 
 
-def _escape(key: str) -> str:
-    """RFC 6901 token escaping so `a/b` and `~x` keys stay unambiguous in pointers."""
-    return key.replace("~", "~0").replace("/", "~1")
-
-
 def _child(pointer: str, key: object) -> str:
-    return f"{pointer}/{_escape(str(key))}"
+    return f"{pointer}/{json_pointer_token(str(key))}"
 
 
 def _issue(issues: list[StructuralIssue], code: str, pointer: str, message: str) -> Any:
@@ -397,7 +366,7 @@ def _hydrate_union(
         if int in scalar_members:
             return value
         if float in scalar_members:
-            return float(value)
+            return _hydrate_scalar(float, value, pointer, issues)
     elif isinstance(value, float):
         if int in scalar_members and value.is_integer():
             return int(value)

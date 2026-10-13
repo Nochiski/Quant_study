@@ -1,5 +1,5 @@
 use crate::persistent_router::CloseWire;
-use crate::session::BarTuple;
+use crate::session::ExecutionBar;
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -334,23 +334,24 @@ impl PersistentFeed {
 
     /// 세션 타임스탬프와 그날 bar 표. key는 등록부 문자열을 빌려준다 — MARKET 처리는
     /// key를 읽기만 하므로 세션마다 종목 수만큼 `String`을 새로 만들 이유가 없다.
-    pub(crate) fn session_market(&self, index: usize) -> (&str, HashMap<&str, BarTuple>) {
+    pub(crate) fn session_market(&self, index: usize) -> (&str, HashMap<&str, ExecutionBar>) {
         let bars = self
             .row_range(index)
             .map(|row| {
                 let instrument = self.instrument_ids[row] as usize;
                 (
                     self.keys[instrument].as_str(),
-                    (
-                        self.opens[row],
-                        self.highs[row],
-                        self.lows[row],
-                        self.volumes[row],
-                        self.cap_volume_at(row),
-                        self.impact_scales
+                    ExecutionBar {
+                        open: self.opens[row],
+                        high: self.highs[row],
+                        low: self.lows[row],
+                        volume: self.volumes[row],
+                        liquidity_volume: self.cap_volume_at(row),
+                        impact_scale: self
+                            .impact_scales
                             .as_ref()
                             .map_or(0.0, |values| values[row]),
-                    ),
+                    },
                 )
             })
             .collect();
@@ -550,7 +551,7 @@ mod tests {
         assert_eq!(feed.symbol_of(0), "AAA");
         assert_eq!(feed.session_len(), 2);
         // 기준 거래량 열이 없으면 bar의 다섯째 값은 세션 거래량이다.
-        assert_eq!(feed.session_market(0).1["B"].4, 200);
+        assert_eq!(feed.session_market(0).1["B"].liquidity_volume, 200);
     }
 
     #[test]
@@ -573,9 +574,16 @@ mod tests {
         let feed = build().with_liquidity_volumes(Some(vec![7, 0])).unwrap();
         assert_eq!(
             feed.session_market(0).1["A"],
-            (10.0, 11.0, 9.0, 100, 7, 0.0)
+            ExecutionBar {
+                open: 10.0,
+                high: 11.0,
+                low: 9.0,
+                volume: 100,
+                liquidity_volume: 7,
+                impact_scale: 0.0
+            }
         );
-        assert_eq!(feed.session_market(1).1["A"].4, 0);
+        assert_eq!(feed.session_market(1).1["A"].liquidity_volume, 0);
         for bad in [vec![7], vec![7, -1]] {
             let error = build().with_liquidity_volumes(Some(bad)).err().unwrap();
             assert!(error.to_string().contains("liquidity volumes"));
@@ -584,9 +592,16 @@ mod tests {
         let feed = build().with_impact_scales(Some(vec![0.25, 0.0])).unwrap();
         assert_eq!(
             feed.session_market(0).1["A"],
-            (10.0, 11.0, 9.0, 100, 100, 0.25)
+            ExecutionBar {
+                open: 10.0,
+                high: 11.0,
+                low: 9.0,
+                volume: 100,
+                liquidity_volume: 100,
+                impact_scale: 0.25
+            }
         );
-        assert_eq!(feed.session_market(1).1["A"].5, 0.0);
+        assert_eq!(feed.session_market(1).1["A"].impact_scale, 0.0);
         for bad in [vec![0.25], vec![0.25, -0.1], vec![0.25, f64::NAN]] {
             let error = build().with_impact_scales(Some(bad)).err().unwrap();
             assert!(error.to_string().contains("impact scales"));

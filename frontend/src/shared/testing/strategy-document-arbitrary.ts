@@ -1,5 +1,9 @@
 import fc from "fast-check";
 import { stringify } from "yaml";
+import { readBackendFixture } from "./backend-fixtures";
+
+const runtimeSchema = JSON.parse(readBackendFixture("strategy_documents/runtime-schema.json"));
+const schemaVersion: string = runtimeSchema.properties.schema_version.const;
 
 /**
  * property test용 임의 YAML 문서 생성기(WORKFLOW P3-01). 실제 계약의 필드 목록을 복제하지 않는다:
@@ -53,7 +57,7 @@ export const strategyDocumentArbitrary = (): fc.Arbitrary<ArbitraryTree> =>
       fc.dictionary(identifier, scalar, { minKeys: 1, maxKeys: 4 }),
       fc.dictionary(identifier, node.value, { minKeys: 0, maxKeys: 4 }),
     )
-    .map(([leaf, rest]) => ({ schema_version: "1.1", ...leaf, ...rest }));
+    .map(([leaf, rest]) => ({ schema_version: schemaVersion, ...leaf, ...rest }));
 
 /**
  * 줄 인덱스 목록: 각 줄 앞에 그 줄의 들여쓰기로 `# c<n>` 주석 줄을 넣을지 결정한다. 문서가 대개 10줄

@@ -1,5 +1,7 @@
+import type { EditorHandleOwner } from "./use-editor-handle";
+import { sameReplacementDocument, useGuardedDocumentReplacement, type ReplacementDocument } from "./replace-whole-document";
 import { useMutation } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   ApiRequestError,
@@ -7,7 +9,6 @@ import {
   strategyWorkbenchApi,
   type UpgradedDocument,
 } from "../../../shared/api";
-import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import {
   decideDocumentUpgrade,
@@ -45,7 +46,6 @@ export type DocumentUpgrade = {
   availability: UpgradeAvailability;
   status: UpgradeStatus;
   canUpgrade: boolean;
-  onEditorReady: (editor: CodeEditorHandle | null) => void;
   upgrade: () => void;
   /** 적용 결과의 옛 실행 설정을 실행 설정 패널에 채웠다고 적는다(배너의 "실행 설정에 채우기"). */
   markEnvironmentFilled: () => void;
@@ -57,18 +57,14 @@ export type DocumentUpgrade = {
  * DEFECT-1). 같은 문서(`documentEpoch`)의 같은 저장(`savedVersion`) 안에서만 보인다 — 새 revision으로
  * 저장하면 "저장하세요" 안내가 끝난다.
  */
-type StatusOwner = Pick<
-  DocumentState,
-  "documentEpoch" | "savedVersion" | "source"
->;
+type StatusOwner = ReplacementDocument & Pick<DocumentState, "source">;
 
 type OwnedStatus = { owner: StatusOwner; value: UpgradeStatus };
 
 const IDLE: UpgradeStatus = { kind: "idle" };
 
 const owns = (owner: StatusOwner, state: StatusOwner): boolean =>
-  owner.documentEpoch === state.documentEpoch &&
-  owner.savedVersion === state.savedVersion &&
+  sameReplacementDocument(owner, state) &&
   owner.source === state.source;
 
 /**
@@ -79,19 +75,18 @@ const owns = (owner: StatusOwner, state: StatusOwner): boolean =>
  * 대기·실패는 요청을 보낸 글에, 적용 결과는 바꾼 뒤의 글에 묶인다(`StatusOwner`).
  */
 export const useUpgradeDocument = (
+  owner: EditorHandleOwner,
   state: DocumentState,
   stored: StoredRevisionMeta | null,
 ): DocumentUpgrade => {
-  const editor = useRef<CodeEditorHandle | null>(null);
+  const readEditor = owner.read;
+  const replace = useGuardedDocumentReplacement(owner, state);
   const [owned, setOwned] = useState<OwnedStatus | null>(null);
-  const { composing, documentEpoch, format, savedVersion, source } = state;
+  const { composing, format, source } = state;
   const availability = useMemo(
     () => decideDocumentUpgrade(state, stored),
     [state, stored],
   );
-  const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
-    editor.current = next;
-  }, []);
   const mutation = useMutation({
     mutationFn: (request: {
       source: string;
@@ -102,13 +97,13 @@ export const useUpgradeDocument = (
 
   const upgrade = useCallback((): void => {
     if (availability.kind !== "upgradeable" || isPending) return;
-    const owner: StatusOwner = { documentEpoch, savedVersion, source };
+    const owner: StatusOwner = state;
     if (composing) {
       // 방어 분기: `canUpgrade`가 이미 composing 중에는 버튼을 비활성화하므로 UI에서는 도달하지 않는다.
       setOwned({ owner, value: { kind: "failed", reason: "composing" } });
       return;
     }
-    const current = editor.current;
+    const current = readEditor();
     if (current === null) {
       setOwned({
         owner,
@@ -122,13 +117,12 @@ export const useUpgradeDocument = (
         // 응답이 도착하기 전에 편집됐으면 그 텍스트를 덮어쓰지 않고 대기 상태도 지운다. 대기는 요청한 글에
         // 묶여 있어, 남겨 두면 실행 취소로 그 글에 돌아왔을 때 "업그레이드 중…"이 되살아나 버튼이 멈춘다
         // (#297 리뷰 P2-1). 대기 중에는 `isPending` 이 다른 요청을 막으므로 지우는 것은 이 요청의 대기뿐이다.
-        if (editor.current !== current || current.getText() !== source) {
+        if (!replace(state, current, source, upgraded.source)) {
           setOwned(null);
           return;
         }
         // `replaceRange`는 history를 앞뒤로 격리한다(`isolateHistory`) — 직후에 친 글자와 업그레이드가
         // 한 undo로 묶이지 않는다. 같은 문서 안의 전체 교체는 모두 이 경로다.
-        current.replaceRange(0, current.getText().length, upgraded.source);
         current.scrollTo(0);
         current.focus();
         // 편집기가 줄 끝을 정규화하므로 응답 원문이 아니라 편집기에 들어간 글에 묶는다.
@@ -155,16 +149,7 @@ export const useUpgradeDocument = (
         });
       },
     );
-  }, [
-    availability.kind,
-    composing,
-    documentEpoch,
-    format,
-    isPending,
-    mutateAsync,
-    savedVersion,
-    source,
-  ]);
+  }, [availability.kind, composing, readEditor, format, isPending, mutateAsync, source, replace, state]);
 
   const markEnvironmentFilled = useCallback((): void => {
     setOwned((current) =>
@@ -185,7 +170,6 @@ export const useUpgradeDocument = (
       !isPending &&
       status.kind !== "pending" &&
       !composing,
-    onEditorReady,
     upgrade,
     markEnvironmentFilled,
   };

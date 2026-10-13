@@ -1,3 +1,4 @@
+import type { ResearchCatalog } from "../../shared/api";
 import { EditorView } from "@codemirror/view";
 import { undo } from "@codemirror/commands";
 import { Transaction } from "@codemirror/state";
@@ -229,15 +230,21 @@ const RUN_ENVIRONMENT = {
   sell_tax: "krx_statutory",
   missing: "drop",
 } as const;
+const RUN_OPTIONS_SCHEMA = JSON.parse(readBackendFixture("strategy_documents/run-options-schema.json")) as Record<string, unknown>;
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
 
 const server = setupServer(
+  http.post(`${API}/api/v1/strategies/:strategyId/draft-diff`, async ({ request, params }) => {
+    const body = await request.json() as { base_revision: number };
+    return HttpResponse.json({ strategy_id: params.strategyId, base_revision: body.base_revision, base_spec_hash: "2".repeat(64), target_spec_hash: "2".repeat(64), source_hash: "b".repeat(64), changes: [] });
+  }),
+
   http.get(`${API}/api/v1/experiments`, () => HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })),
   http.get(`${API}/api/v1/strategy-documents/operators`, () => HttpResponse.json(JSON.parse(readBackendFixture("strategy_documents/operator-catalog.json")))),
   http.get(`${API}/api/v1/run-environments/schema`, () =>
-    HttpResponse.json({ schema_hash: "run-env", schema: RUN_ENVIRONMENT_SCHEMA }),
+    HttpResponse.json({ schema_hash: "run-env", options_schema: RUN_OPTIONS_SCHEMA, schema: RUN_ENVIRONMENT_SCHEMA }),
   ),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json(
@@ -432,8 +439,12 @@ const server = setupServer(
       page_size: 1,
       page_count: 0,
       fields: [],
-      facets: {},
-    }),
+      facets: { dataset_ids: [], frequencies: [], units: [] },
+      snapshot: {
+        snapshot_id: "snap", schema_version: "1", source: "test",
+        built_at: "2026-09-05T00:00:00Z", dataset_revisions: [], point_in_time: true,
+      },
+    } satisfies ResearchCatalog),
   ),
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec("", 0, "새 팩터 전략")),
@@ -2258,6 +2269,103 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     15_000,
   );
 
+  it.each([
+    ["/research/strategies/new", "snap", true],
+    ["/research/strategies/new", "old-snapshot", false],
+    ["/research/strategies/new", "pending", false],
+    ["/research/strategies/new", "failure", false],
+    ["/research/strategies/s1/revisions/2", "snap", true],
+    ["/research/strategies/s1/revisions/2", "old-snapshot", false],
+    ["/research/strategies/s1/revisions/2", "pending", false],
+    ["/research/strategies/s1/revisions/2", "failure", false],
+  ] as const)("%s의 필드 선택기는 계약 판본 %s 정합성을 따른다", async (route, snapshotId, available) => {
+    let recovered = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    server.use(
+      http.get(`${API}/api/v1/equity/catalog`, async () => {
+        if (snapshotId === "pending" && !recovered) await gate;
+        if (snapshotId === "failure" && !recovered) return HttpResponse.json({ detail: "fixture failure" }, { status: 503 });
+        return HttpResponse.json({
+        snapshot: { snapshot_id: recovered ? "snap" : snapshotId, schema_version: "1", source: "test", built_at: "2026-10-13T00:00:00Z", point_in_time: true, dataset_revisions: [] },
+        page: 1, page_size: 100, page_count: 1, total: 1,
+        facets: { dataset_ids: ["prices"], frequencies: ["daily"], units: ["KRW"] },
+        fields: [{ field_id: "price.close", label: "판본별 종가", description: "test", dataset_id: "prices", unit: "KRW", frequency: "daily", value_type: "price", available_date_basis: "session", disclosure_basis: "session", evidence: "fixture", recommended_lag_sessions: 0, coverage: { starts_on: "2020-01-01", ends_on: "2026-10-12", estimated_coverage_pct: 100, point_in_time: true, supported_cell_kinds: [], venues: ["KRX"] } }],
+      } satisfies ResearchCatalog);
+      }),
+      ...graphHandlers(), revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const { queryClient } = mountWithClient(`${route}?view=graph&path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F0`);
+    if (route.endsWith("/new")) {
+      await user.click(await screen.findByRole("tab", { name: "YAML" }));
+      replaceText(await editor(), GRAPH_SOURCE);
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
+    }
+    const graph = await screen.findByRole("region", { name: "노드 캔버스" });
+    await user.click(within(graph).getByRole("button", { name: /^노드 편집: 1\./ }));
+    if (available) expect((await screen.findAllByRole("option", { name: /판본별 종가/ })).length).toBeGreaterThan(0);
+    else {
+      await waitFor(() => expect(screen.queryAllByRole("option", { name: /판본별 종가/ })).toHaveLength(0));
+      const field = await waitFor(() => {
+        const input = screen.getAllByRole("textbox").find((node) => (node as HTMLInputElement).value === "price.close");
+        expect(input).toBeDefined();
+        return input!;
+      });
+      await user.clear(field);
+      await user.type(field, "price.manual");
+      await user.tab();
+      await user.click(screen.getByRole("tab", { name: "YAML" }));
+      const currentEditor = await editor();
+      await waitFor(() => expect(currentEditor.state.doc.toString()).toContain("price.manual"));
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
+      recovered = true;
+      release();
+      await act(async () => { await queryClient.invalidateQueries(); });
+      expect((await screen.findAllByRole("option", { name: /판본별 종가/ })).length).toBeGreaterThan(0);
+      expect(currentEditor.state.doc.toString()).toContain("price.manual");
+    }
+    release();
+  }, 15_000);
+
+  it.each([
+    ["/research/strategies/new", "pending"],
+    ["/research/strategies/new", "mismatch"],
+    ["/research/strategies/s1/revisions/2", "pending"],
+    ["/research/strategies/s1/revisions/2", "mismatch"],
+  ] as const)("%s 레시피가 카탈로그 %s 안내를 보존한다", async (route, state) => {
+    const source = GRAPH_SOURCE.slice(0, GRAPH_SOURCE.indexOf("      nodes:")) + '      nodes: []\n      output_node_id: ""\n';
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    server.use(
+      http.get(`${API}/api/v1/equity/catalog`, async () => {
+        if (state === "pending") await gate;
+        return HttpResponse.json({
+          snapshot: { snapshot_id: "old-snapshot", schema_version: "1", source: "test", built_at: "2026-10-13T00:00:00Z", point_in_time: true, dataset_revisions: [] },
+          page: 1, page_size: 100, page_count: 1, total: 0,
+          facets: { dataset_ids: [], frequencies: [], units: [] }, fields: [],
+        } satisfies ResearchCatalog);
+      }),
+      ...graphHandlers(), revisionDocumentHandler(source),
+    );
+    const user = userEvent.setup();
+    try {
+      mount(`${route}?view=graph&recipe=true&path=%2Ffactors%2F0%2Fgraph`);
+      if (route.endsWith("/new")) {
+        await user.click(await screen.findByRole("tab", { name: "YAML" }));
+        replaceText(await editor(), source);
+        await user.click(screen.getByRole("tab", { name: "그래프" }));
+      }
+      await waitFor(() => expect(screen.getByRole("status", { name: "문서 상태" })).toHaveAttribute("data-settled", "true"));
+      await user.click(await screen.findByRole("button", { name: "데이터 필드 노드 추가" }));
+      const message = state === "pending"
+        ? "카탈로그를 불러오는 중입니다."
+        : "계약과 카탈로그 버전이 달라 상세 정보를 연결하지 않았습니다.";
+      expect(await screen.findByText(message)).toBeVisible();
+      expect(screen.getByRole("combobox", { name: "데이터 필드 1" })).toHaveValue("");
+    } finally { release(); }
+  }, 15_000);
+
   // #357 C-P3-16: 유니버스가 비어 실행 설정 전체가 무효여도 실행 계획 설명은 고른 결측 정책을 싣는다.
   it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
     "sends the chosen missing policy to the plan explanation on %s before the settings are complete",
@@ -2796,7 +2904,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     expect(within(panel).getByText("+1 / −0 변경 항목")).toBeInTheDocument();
     expect(within(panel).getByText("# research note")).toBeInTheDocument();
     expect(
-      within(panel).getByText("의미 변경이 없습니다 (같은 spec hash)."),
+      await within(panel).findByText("의미 변경이 없습니다 (같은 spec hash)."),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "YAML" }));
@@ -2872,7 +2980,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     expect(within(panel).getByText('"서버에서 수정"')).toBeInTheDocument();
   });
 
-  it("recompiles a saved source when Save returns a different spec hash", async () => {
+  it("저장 중 추가 편집은 새 저장 revision을 backend 의미 diff 기준으로 사용한다", async () => {
     const savedSource = `${STORED}description: saved\n`;
     const currentSource = `${STORED}description: after\n`;
     const preSaveHash = "a".repeat(64);
@@ -2881,6 +2989,12 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     const compileSources: string[] = [];
     let saveCompleted = false;
     server.use(
+      http.post(`${API}/api/v1/strategies/:strategyId/draft-diff`, async ({ request }) => {
+        const body = await request.json() as { base_revision: number; source: string };
+        expect(body).toMatchObject({ base_revision: 3, source: currentSource });
+        return HttpResponse.json({ strategy_id: "s1", base_revision: 3, base_spec_hash: savedHash, target_spec_hash: currentHash, source_hash: "b".repeat(64), changes: [{ pointer: "/description", kind: "changed", before: "saved", after: "after" }] });
+      }),
+
       http.post(
         `${API}/api/v1/strategy-documents/compile`,
         async ({ request }) => {
@@ -2956,73 +3070,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     expect(within(panel).queryByText("/deployment")).not.toBeInTheDocument();
     expect(
       compileSources.filter((source) => source === savedSource),
-    ).toHaveLength(2);
-  }, 10_000);
-
-  it("retries a transient saved-baseline failure on the next edit", async () => {
-    let allowBaselineSuccess = false;
-    let baselineAttempts = 0;
-    server.use(
-      http.post(
-        `${API}/api/v1/strategy-documents/compile`,
-        async ({ request }) => {
-          const body = (await request.json()) as { source: string };
-          if (body.source === STORED) {
-            baselineAttempts += 1;
-            if (!allowBaselineSuccess) {
-              return HttpResponse.json(
-                { detail: "temporary baseline outage" },
-                { status: 503 },
-              );
-            }
-          }
-          const title = /title: ([^\n]*)/.exec(body.source)?.[1] ?? "";
-          const compiledSpec = spec("draft", 0, title);
-          return HttpResponse.json({
-            format: "yaml",
-            source_hash: "b".repeat(64),
-            schema_version: "1.2",
-            spec: compiledSpec,
-            canonical_json: '{"schema_version":"1.2","title":"same"}',
-            spec_hash: "2".repeat(64),
-            diagnostics: [],
-          });
-        },
-      ),
-    );
-
-    const user = userEvent.setup();
-    mount("/research/strategies/s1/revisions/2");
-    const view = await editor();
-    replaceText(view, `${STORED}# first edit\n`);
-    await waitFor(() => expect(saveButton()).toBeEnabled());
-    await openComparison();
-    const panel = await screen.findByLabelText("StrategySpec Diff");
-    expect(
-      await within(panel).findByText("저장본 canonical 기준을 검증 중입니다."),
-    ).toBeInTheDocument();
-    const failedAttempts = baselineAttempts;
-    expect(failedAttempts).toBeGreaterThan(0);
-
-    await user.click(screen.getByRole("button", { name: "검증" }));
-    await waitFor(() =>
-      expect(baselineAttempts).toBeGreaterThan(failedAttempts),
-    );
-    const explicitRetryAttempts = baselineAttempts;
-
-    allowBaselineSuccess = true;
-    await user.click(screen.getByRole("tab", { name: "YAML" }));
-    const currentView = await editor();
-    replaceText(currentView, `${STORED}# second edit\n`);
-    await waitFor(() => expect(saveButton()).toBeEnabled());
-    await openComparison();
-    const retriedPanel = await screen.findByLabelText("StrategySpec Diff");
-    expect(
-      await within(retriedPanel).findByText(
-        "의미 변경이 없습니다 (같은 spec hash).",
-      ),
-    ).toBeInTheDocument();
-    expect(baselineAttempts).toBeGreaterThan(explicitRetryAttempts);
+    ).toHaveLength(1);
   }, 10_000);
 
   it("loads the bounded history page that contains a route beyond revision 50", async () => {
@@ -4431,7 +4479,7 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
         await gate;
         return HttpResponse.json({
           schema_hash: "run-env",
-          schema: RUN_ENVIRONMENT_SCHEMA,
+          options_schema: RUN_OPTIONS_SCHEMA, schema: RUN_ENVIRONMENT_SCHEMA,
         });
       }),
     );

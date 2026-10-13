@@ -18,8 +18,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     ImpactModel,
     ParticipationBasis,
     RunEnvironment,
-    impact_scales,
-    participation_volumes,
+    cost_inputs,
     settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
@@ -28,9 +27,13 @@ from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 # 기록만 더한 변경(V4-04 2/2: 체결 행의 `cap_volume`, 목표 금액 → 수량 변환의 ROUNDING 레코드)은
 # trace 가 바뀌어 digest 가 달라지지만 체결·비용 규칙은 그대로라 판본을 올리지 않고 digest 만
 # 고쳤다(리드 결정). 지문은 결과 공유 캐시 키가 아니라 옛 결과가 새 기록 없이 재사용되지 않는다.
+# v5는 비용의 레버리지 배수·체결가 재평가·양방향 청산 노출 해제를 견적에 반영한다.
+# leveraged_short_tax_budget은 L2 숏16주→환매/롱32주 경로로 해당 규칙을 고정한다.
+# #411: OrderUpdate의 진단 두 칸만 추가했다. 두 칸을 제외한 27개 trace와
+# decision tape는 변경 전과 bit 동일하다. 체결 규칙 v5는 유지한다.
 _PINNED = (
-    "backtest-engine-v4",
-    "0abfca4d023ddc55162f0ede02bc7654cd8becd375369e9f8fd6adc0de27ac0f",
+    "backtest-engine-v5",
+    "e38b3bd906caed40e670a11d2834d8c20343d156103ff79d449df15bdbf2b2e9",
 )
 
 
@@ -57,8 +60,8 @@ def _rules_digest() -> str:
         impact_model=ImpactModel.SQRT,
         participation_basis=ParticipationBasis.ADV20,
     )
-    scales = impact_scales(environment, bars, settled) or {}
-    volumes = participation_volumes(environment, bars, settled) or {}
+    scales = cost_inputs(environment, bars, settled).impact_scales or {}
+    volumes = cost_inputs(environment, bars, settled).participation_volumes or {}
     rules = (
         STATUTORY_SELL_TAX_BPS,
         MAX_IMPACT_FRACTION,

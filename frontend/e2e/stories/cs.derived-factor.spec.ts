@@ -211,7 +211,7 @@ test(
     await backtest(page).click();
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-      "completed",
+      "완료",
       { timeout: 120_000 },
     );
     await expect(

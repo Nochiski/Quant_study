@@ -7,6 +7,7 @@ import {
   createExperiment,
   createStrategyDocument,
   deleteStrategyDraft,
+  diffStrategyDraft,
   diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
@@ -52,6 +53,8 @@ import type {
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  DraftDiff,
+  DraftDiffRequest,
   Experiment,
   ExperimentControlsRequest,
   ExperimentPage,
@@ -682,7 +685,7 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "compileStrategyDocument");
   },
 
-  /** 1.0 텍스트를 1.1로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
+  /** 은퇴한 버전의 텍스트를 현재 지원 버전으로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
   async upgradeStrategyDocument(
     request: CompileRequest,
     signal?: AbortSignal,
@@ -734,6 +737,20 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "reviseStrategyDocument");
   },
 
+  /** 저장 전 의미 비교도 backend revision diff와 같은 정책으로 계산한다. */
+  async diffStrategyDraft(
+    strategyId: string,
+    request: DraftDiffRequest,
+    signal?: AbortSignal,
+  ): Promise<DraftDiff> {
+    const response = await diffStrategyDraft({
+      path: { strategy_id: strategyId },
+      body: request,
+      signal,
+    });
+    return unwrap(response, "diffStrategyDraft");
+  },
+
   /** Semantic diff between two stored revisions (identity, comments, formatting invisible). */
   async diffStrategyRevisions(
     strategyId: string,
@@ -774,6 +791,8 @@ export type {
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  DraftDiff,
+  DraftDiffRequest,
   Experiment,
   ExperimentControlsRequest,
   ExperimentPage,

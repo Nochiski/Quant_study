@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { messages, tDescription, tName } from "../../../shared/config";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
-import { runEnvironmentFields } from "../model/run-environment";
+import { runEnvironmentFields } from "../../../entities/backtest";
 
 const SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),

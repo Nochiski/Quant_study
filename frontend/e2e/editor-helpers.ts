@@ -64,3 +64,26 @@ export const expectPhase = async (page: Page, phase: string) => {
   const status = await waitForSettledDocument(page);
   await expect(status).toContainText(phase);
 };
+
+/**
+ * e2e 가 실행 설정 패널에 넣는 기간·유니버스(P3-02). schema 1.2 부터 이 값은 전략 문서 밖에 있고, 실행
+ * 설정 스키마가 기본값을 주지 않아 사용자가 정해야 백테스트·추적이 열린다. mock 어댑터는 fixture 달력 밖
+ * 세션을 (종목, 날짜)의 함수로 합성하므로 은퇴한 1.1 골든(`quality_momentum.v1_1.yaml`)의 `data` 기간·
+ * 유니버스를 그대로 쓴다.
+ */
+export const RUN_ENVIRONMENT = {
+  start: "2021-01-01",
+  end: "2026-08-31",
+  universe_id: "krx.common-stock",
+} as const;
+
+/** 실행 설정 패널을 여닫는 툴바 토글과 e2e 가 값을 넣고 읽는 패널 칸. */
+export const runSettingsInputs = (page: Page) => ({
+  summary: page.getByRole("region", { name: "실행 설정 요약" }),
+  toggle: page.getByLabel("실행 설정 열기"),
+  start: page.getByLabel("시작일", { exact: true }),
+  end: page.getByLabel("종료일", { exact: true }),
+  universe: page.getByRole("textbox", { name: "유니버스", exact: true }),
+  fee: page.getByRole("spinbutton", { name: "수수료 (bp)" }),
+});
+

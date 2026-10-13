@@ -42,7 +42,7 @@ const runAndReadPeriod = async (page: Page): Promise<string> => {
   await backtest(page).click();
   await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-    "completed",
+    "완료",
     { timeout: 120_000 },
   );
   const drawer = page.getByRole("group", {
@@ -64,7 +64,7 @@ test(
       mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-05 날짜 입력"),
     );
     await expectPhase(page, "검증 통과");
-    const summary = page.getByRole("region", { name: "실행 설정 요약" });
+    const summary = runSettingsInputs(page).summary;
     await summary.getByRole("button", { name: "실행 설정 채우기" }).click();
     const { start, end, universe } = runSettingsInputs(page);
     // OOS 칸의 라벨은 칸 아래 안내 문장까지 감싸, 접근 가능한 이름이 안내로 이어진다.
@@ -175,7 +175,7 @@ test(
     const strategyUrl = `/research/strategies/${strategyId}/revisions/1`;
 
     // 요약 띠: 지금 값과 "전략 문서 밖"이라는 문장. 기간·유니버스는 서버가 기본값을 주지 않는다.
-    const summary = page.getByRole("region", { name: "실행 설정 요약" });
+    const summary = runSettingsInputs(page).summary;
     await expect(summary).toContainText("전략 문서 밖의 값입니다");
     await expect(summary).toContainText(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",

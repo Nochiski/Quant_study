@@ -92,8 +92,6 @@ export type DocumentState = {
   baseRevision: number | null;
   baseSpecHash: string | null;
   savedSource: string | null;
-  /** Exact backend canonical bytes for `savedSource`; never serialized by the client. */
-  savedCanonicalJson: string | null;
   savedVersion: number;
   strategyId: string | null;
   dirty: boolean;
@@ -113,13 +111,6 @@ export type DocumentAction =
   | { type: "composing"; composing: boolean }
   | { type: "parsed"; version: number; result: ParsedSource }
   | { type: "compiled"; version: number; outcome: CompileOutcome }
-  | {
-      type: "base-compiled";
-      documentEpoch: number;
-      source: string;
-      specHash: string;
-      canonicalJson: string;
-    }
   | {
       type: "saved";
       strategyId: string;
@@ -149,7 +140,6 @@ export const initialDocumentState = (
   baseRevision: null,
   baseSpecHash: null,
   savedSource: null,
-  savedCanonicalJson: null,
   savedVersion: -1,
   strategyId: null,
   dirty: false,
@@ -187,7 +177,6 @@ export const documentReducer = (
         baseRevision: action.baseRevision,
         baseSpecHash: action.baseSpecHash,
         savedSource: action.baseRevision === null ? null : action.source,
-        savedCanonicalJson: null,
         savedVersion:
           action.baseRevision === null ? -1 : state.sourceVersion + 1,
         dirty: false,
@@ -251,13 +240,6 @@ export const documentReducer = (
       const complete = isCompleteCompileOutcome(action.outcome)
         ? action.outcome
         : null;
-      const savedCanonicalJson =
-        current &&
-        !state.dirty &&
-        state.baseSpecHash !== null &&
-        complete?.specHash === state.baseSpecHash
-          ? complete.canonicalJson
-          : state.savedCanonicalJson;
       return {
         ...state,
         compiled: action.outcome,
@@ -265,24 +247,9 @@ export const documentReducer = (
         lastValidCompiled: complete
           ? { version: action.version, outcome: complete }
           : state.lastValidCompiled,
-        savedCanonicalJson,
         phase: current ? phaseFromCompile(action.outcome, saved) : state.phase,
       };
     }
-    case "base-compiled":
-      // This reply belongs only to the exact stored source and revision hash that requested it.
-      // It must never change the current draft verdict: it supplies the backend-owned Diff base.
-      if (
-        action.documentEpoch !== state.documentEpoch ||
-        action.source !== state.savedSource ||
-        action.specHash !== state.baseSpecHash
-      ) {
-        return state;
-      }
-      return {
-        ...state,
-        savedCanonicalJson: action.canonicalJson,
-      };
     case "saved":
       // A save response is valid only for the document instance that issued it. Within that
       // document, a response for an older source may establish the base while later edits remain
@@ -298,8 +265,7 @@ export const documentReducer = (
       // authorize Save, those earlier bytes are no longer evidence for the newly stored base.
       // When that saved source is still current, invalidate the current compile as well so
       // Save/Run/Diff fail closed until the normal compile effect proves the server response.
-      // A newer in-editor source keeps its own compile while the separate baseline request
-      // recovers canonical bytes for the exact source the server stored.
+      // 더 새 원문의 compile은 유지한다. 저장본 의미 비교는 backend draft diff가 조회한다.
       const invalidateCurrentCompile =
         action.canonicalJson === null && action.source === state.source;
       return {
@@ -308,7 +274,6 @@ export const documentReducer = (
         baseRevision: action.revision,
         baseSpecHash: action.specHash,
         savedSource: action.source,
-        savedCanonicalJson: action.canonicalJson,
         savedVersion: action.sourceVersion,
         compiled: invalidateCurrentCompile ? null : state.compiled,
         // Keep the version watermark monotonic so a delayed compile from older text still drops.
@@ -325,6 +290,16 @@ export const documentReducer = (
   }
 };
 
+/** 현재 원문 버전의 구문 결과만 읽는다. 마지막 유효 구조를 보여 주는 정책은 각 투영이 소유한다. */
+export const currentParseOutcome = (state: DocumentState): ParsedSource | null =>
+  state.parsedVersion === state.sourceVersion ? state.parse : null;
+
+/** 현재 원문과 일치하는 성공한 구문 결과다. 조합 중 실행 여부는 호출자가 따로 판정한다. */
+export const currentParse = (state: DocumentState): Extract<ParsedSource, { status: "ok" }> | null => {
+  const outcome = currentParseOutcome(state);
+  return outcome?.status === "ok" ? outcome : null;
+};
+
 /** The parser may run only when the text is not mid-IME-composition and the version is new. */
 export const shouldParse = (state: DocumentState): boolean =>
   !state.composing && state.parsedVersion !== state.sourceVersion;
@@ -332,15 +307,13 @@ export const shouldParse = (state: DocumentState): boolean =>
 /** The compile call goes out only for a parsed, syntactically valid, not-yet-compiled version. */
 export const shouldCompile = (state: DocumentState): boolean =>
   !state.composing &&
-  state.parsedVersion === state.sourceVersion &&
-  state.parse?.status === "ok" &&
+  currentParse(state) !== null &&
   state.compiledVersion !== state.sourceVersion;
 
 /** Shared toolbar/keyboard gate for forcing a compile of this exact parsed text. */
 export const canValidateDocument = (state: DocumentState): boolean =>
   !state.composing &&
-  state.parsedVersion === state.sourceVersion &&
-  state.parse?.status === "ok";
+  currentParse(state) !== null;
 
 /**
  * 이 문서의 첫 parse 가 아직 오지 않았다(문서를 연 직후 parse 디바운스 구간, `load` 가 parse 를 비운다).
@@ -365,15 +338,17 @@ export const isDocumentSettled = (state: DocumentState): boolean =>
 export const isSpecStale = (state: DocumentState): boolean =>
   state.compiled?.spec != null && state.compiledVersion !== state.sourceVersion;
 
+/** 성공·실패를 포함해 현재 원문 버전에 속한 검증 응답만 읽는다. */
+export const currentCompileOutcome = (state: DocumentState): CompileOutcome | null =>
+  state.compiledVersion === state.sourceVersion ? state.compiled : null;
+
 /** A spec safe to execute: current, compiled without errors. */
 export const currentCompile = (
   state: DocumentState,
-): CompleteCompileOutcome | null =>
-  state.compiled !== null &&
-  state.compiledVersion === state.sourceVersion &&
-  isCompleteCompileOutcome(state.compiled)
-    ? state.compiled
-    : null;
+): CompleteCompileOutcome | null => {
+  const outcome = currentCompileOutcome(state);
+  return outcome !== null && isCompleteCompileOutcome(outcome) ? outcome : null;
+};
 
 export const currentSpec = (state: DocumentState): StrategySpec | null =>
   currentCompile(state)?.spec ?? null;
@@ -382,10 +357,10 @@ export const currentSpec = (state: DocumentState): StrategySpec | null =>
 export const currentDiagnostics = (
   state: DocumentState,
 ): DocumentDiagnostic[] => {
-  if (state.parsedVersion !== state.sourceVersion || state.parse === null)
-    return [];
-  if (state.parse.status === "rejected") {
-    return state.parse.diagnostics.map((d) => ({
+  const parsed = currentParseOutcome(state);
+  if (parsed === null) return [];
+  if (parsed.status === "rejected") {
+    return parsed.diagnostics.map((d) => ({
       code: d.code,
       kind: "syntax",
       severity: "error",
@@ -394,8 +369,5 @@ export const currentDiagnostics = (
       range: d.range,
     }));
   }
-  return state.compiledVersion === state.sourceVersion &&
-    state.compiled !== null
-    ? state.compiled.diagnostics
-    : [];
+  return currentCompileOutcome(state)?.diagnostics ?? [];
 };

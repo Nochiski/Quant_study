@@ -42,7 +42,7 @@ import {
   initialDocumentState,
   type DocumentState,
 } from "../model/document-state";
-import { useApplyAssistantProposal } from "../model/use-apply-assistant-proposal";
+import { useApplyAssistantProposal } from "./editor-harness";
 import { useApplyProposalThenBacktest } from "../model/use-apply-then-backtest";
 import { useExecutionPlans } from "../model/use-execution-plans";
 
@@ -193,6 +193,7 @@ const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
       ),
     },
     plan: {
+      evaluation_version: "factor-evaluation-v1",
       graph_hash: "a".repeat(64),
       plan_hash: "b".repeat(64),
       registry_version: "registry-v1",
@@ -275,7 +276,8 @@ const editorOf = (initial: string) => {
     focus: vi.fn(),
     undo: vi.fn(() => false),
     redo: vi.fn(() => false),
-    historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
+    subscribeHistory: () => () => {},
+  historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
     getHistoryState: vi.fn(() => null),
     restoreHistoryState: vi.fn(),
   };

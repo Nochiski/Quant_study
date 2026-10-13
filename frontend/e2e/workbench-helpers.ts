@@ -15,10 +15,12 @@ import type {
   UpgradedDocument,
 } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
-import { editor, expectPhase, waitForSettledDocument } from "./editor-helpers";
+import { editor, expectPhase, waitForSettledDocument, RUN_ENVIRONMENT, runSettingsInputs } from "./editor-helpers";
 import { backendOrigin } from "./ports.mjs";
 
 export {
+  RUN_ENVIRONMENT,
+  runSettingsInputs,
   currentSource,
   editor,
   expectPhase,
@@ -152,18 +154,6 @@ export const mustReplace = (text: string, from: string, to: string): string => {
   return next;
 };
 
-/**
- * e2e 가 실행 설정 패널에 넣는 기간·유니버스(P3-02). schema 1.2 부터 이 값은 전략 문서 밖에 있고, 실행
- * 설정 스키마가 기본값을 주지 않아 사용자가 정해야 백테스트·추적이 열린다. mock 어댑터는 fixture 달력 밖
- * 세션을 (종목, 날짜)의 함수로 합성하므로 은퇴한 1.1 골든(`quality_momentum.v1_1.yaml`)의 `data` 기간·
- * 유니버스를 그대로 쓴다.
- */
-export const RUN_ENVIRONMENT = {
-  start: "2021-01-01",
-  end: "2026-08-31",
-  universe_id: "krx.common-stock",
-} as const;
-
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readFileSync(
     resolve(
@@ -218,15 +208,6 @@ export const REQUESTED_ENVIRONMENT = requestedEnvironment({
   ...RUN_ENVIRONMENT,
 }) as unknown as RunEnvironment;
 
-/** 실행 설정 패널을 여닫는 툴바 토글과 e2e 가 값을 넣고 읽는 패널 칸. */
-export const runSettingsInputs = (page: Page) => ({
-  toggle: page.getByLabel("실행 설정 열기"),
-  start: page.getByLabel("시작일", { exact: true }),
-  end: page.getByLabel("종료일", { exact: true }),
-  universe: page.getByRole("textbox", { name: "유니버스", exact: true }),
-  fee: page.getByRole("spinbutton", { name: "수수료 (bp)" }),
-});
-
 /**
  * 실행 설정 패널을 열어 기간·유니버스를 채우고 닫는다. `keyboard` 면 패널을 여닫을 때도 포인터 없이 초점과
  * Enter 만 쓴다(US-SM-04 키보드 스토리). `via: "band"` 는 사용자가 막혔을 때 밟는 길이다 — 요약 띠가
@@ -249,7 +230,7 @@ export const fillRunEnvironment = async (
   // `fill` 의 DOM 선택을 CodeMirror 갱신이 되쓴 것이었다(`replaceSource`).
   await waitForSettledDocument(page);
   const { toggle, start, end, universe } = runSettingsInputs(page);
-  const band = page.getByRole("region", { name: "실행 설정 요약" });
+  const band = runSettingsInputs(page).summary;
   const fields = [
     [start, environment.start],
     [end, environment.end],

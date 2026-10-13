@@ -66,19 +66,13 @@ const resultFixture = (): BacktestRunResult => ({
     run_id: RUN_ID,
     created_at: "2026-09-27T00:00:00Z",
     completed_at: "2026-09-27T00:00:05Z",
-    engine_core: "rust",
     engine_version: "test",
     run_fingerprint: "f".repeat(32),
-    run_spec: { benchmark_security_id: "005930", metric_windows: [] },
+    run_spec: { core: "rust", initial_cash: 100_000_000, annualization_days: 252, benchmark_security_id: "005930", metric_windows: [] },
     strategy_hash: "a".repeat(64),
     data_snapshot_id: "snapshot",
     target_tape_hash: "b".repeat(64),
     metric_registry_version: "metric-registry-v1",
-    initial_cash: 100_000_000,
-    annualization_days: 252,
-    fee_bps: 15,
-    slippage_bps: 10,
-    participation_rate: 0.1,
     environment: {
       start: "2023-01-02",
       end: "2026-04-30",
@@ -359,7 +353,7 @@ describe("백테스트 결과 화면의 AI 패널", () => {
 
     expect(
       await screen.findByRole("status", { name: "실행 상태" }),
-    ).toHaveTextContent("running");
+    ).toHaveTextContent("실행 중");
     expect(
       screen.queryByRole("button", { name: "AI에게 결과 묻기" }),
     ).toBeNull();

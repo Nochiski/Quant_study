@@ -191,6 +191,36 @@ describe("CodeEditor", () => {
     act(() => expect(ref.current?.redo()).toBe(false));
   });
 
+  it("이력 변경을 구독하고 변하지 않은 깊이의 snapshot을 재사용한다", async () => {
+    const { ref } = await mount();
+    const editor = ref.current!;
+    const listener = vi.fn();
+    const unsubscribe = editor.subscribeHistory(listener);
+    const initial = editor.historyDepth();
+    act(() => editor.setSelection(0, 0));
+    expect(editor.historyDepth()).toBe(initial);
+    expect(listener).not.toHaveBeenCalled();
+
+    act(() => editor.replaceRange(0, editor.getText().length, "changed\n"));
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(editor.historyDepth()).toEqual({ undo: 1, redo: 0 });
+    const saved = editor.getHistoryState();
+    act(() => editor.undo());
+    expect(editor.historyDepth()).toEqual({ undo: 0, redo: 1 });
+    act(() => editor.loadText("another document\n"));
+    expect(editor.historyDepth()).toEqual({ undo: 0, redo: 0 });
+    act(() => editor.restoreHistoryState(saved));
+    expect(editor.historyDepth()).toEqual({ undo: 1, redo: 0 });
+    expect(listener).toHaveBeenCalledTimes(4);
+
+    unsubscribe();
+    act(() => editor.redo());
+    expect(listener).toHaveBeenCalledTimes(4);
+    act(() => editor.undo());
+    expect(editor.historyDepth()).toEqual({ undo: 0, redo: 1 });
+    expect(listener).toHaveBeenCalledTimes(4);
+  });
+
   it("round-trips undo history through the opaque state", async () => {
     const { ref } = await mount();
     act(() =>

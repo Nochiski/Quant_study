@@ -1,8 +1,5 @@
-export { StrategyIde, type StrategyIdeProps } from "./ui/strategy-ide";
+export { StrategyIde } from "./ui/strategy-ide";
 export { StrategyDebuggerPanel } from "./ui/strategy-debugger-panel";
-export {
-  buildStrategyDebuggerAvailability,
-  type StrategyDebuggerAvailability,
-} from "./model/strategy-debugger-context";
+
 
 export { StrategyPreviewPanel } from "./ui/strategy-preview-panel";

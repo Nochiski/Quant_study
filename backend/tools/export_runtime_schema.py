@@ -7,6 +7,8 @@
 - `run-environment-schema.json`: `GET /api/v1/run-environments/schema` 의 `schema`. frontend
   실행 설정 패널 테스트와 설명 키 커버리지 테스트가 이 파일을 읽는다(P3-02, BACKLOG-013). 전략
   문서 스키마와 다른 산출물이다 — 실행 설정은 전략 문서 밖에 있다(spec D6).
+- `run-options-schema.json`: 같은 실행 설정 응답의 `options_schema`. 실행 요청의 기본값·enum을
+  frontend 테스트가 복사하지 않고 읽는다(#336).
 - `parameter-seeds.json`: `default: null`인 property마다 "화면이 새 노드를 만들 때 넣을 값"(씨앗).
   규칙이 TypeScript와 Python 양쪽에 한 벌씩 있어(`schema-navigator.ts`의 `nullDefaultSeed`,
   아래 `_seed_of`) 한쪽만 바뀌면 조용히 어긋난다 — 이 golden이 둘을 묶는다. 두 런타임의 테스트가
@@ -27,7 +29,10 @@ from typing import Any
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     operator_catalog_hash,
 )
-from strategy_workbench.domain.backtest.facade.environment import run_environment_schema
+from strategy_workbench.domain.backtest.facade.environment import (
+    backtest_run_options_schema,
+    run_environment_schema,
+)
 from strategy_workbench.domain.factor.facade.operators import operator_definitions
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
@@ -85,6 +90,7 @@ def main() -> None:
     _write("runtime-schema.json", schema)
     _write("parameter-seeds.json", {"seeds": parameter_seeds(schema)})
     _write("run-environment-schema.json", run_environment_schema())
+    _write("run-options-schema.json", backtest_run_options_schema())
     operators = operator_definitions()
     _write(
         "operator-catalog.json",

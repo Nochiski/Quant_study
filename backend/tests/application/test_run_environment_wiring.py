@@ -69,15 +69,15 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    PRICE_ADJUSTING_ACTIONS,
     ImpactModel,
     MissingRunEnvironmentError,
     ParticipationBasis,
     ResearchWindowViolationError,
     RunEnvironment,
     SellTax,
+    cost_inputs,
     environment_hash,
-    impact_scales,
-    participation_volumes,
     settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
@@ -330,6 +330,9 @@ def test_manifest_records_the_environment_it_ran_with(tmp_path: Path) -> None:
     assert manifest.environment == environment
     assert manifest.environment_hash == environment_hash(environment)
     assert manifest.run_spec.environment == environment
+    from strategy_workbench.domain.factor.facade.planning import FACTOR_EVALUATION_VERSION
+
+    assert manifest.factor_evaluation_version == FACTOR_EVALUATION_VERSION
 
 
 def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path) -> None:
@@ -347,7 +350,10 @@ def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path)
     cheap_manifest = cheap.result("cheap-run").manifest
     dear_manifest = expensive.result("dear-run").manifest
     assert dear_manifest.environment_hash == environment_hash(dearer)
-    assert (dear_manifest.fee_bps, dear_manifest.slippage_bps) == (250.0, 250.0)
+    assert (dear_manifest.environment.fee_bps, dear_manifest.environment.slippage_bps) == (
+        250.0,
+        250.0,
+    )
     assert dear_manifest.run_fingerprint != cheap_manifest.run_fingerprint
     # 같은 전략을 다른 실행 설정으로 돌렸다: 전략 hash 는 그대로, 실행 설정 hash 만 갈린다.
     assert dear_manifest.strategy_hash == cheap_manifest.strategy_hash
@@ -463,21 +469,19 @@ def test_environment_missing_reaches_the_factor_execution_plan() -> None:
     # 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유하면 두 번째가 첫 결과를 재사용한다.
     assert default_plan.plan_hash != explicit_plan.plan_hash
     assert default_plan.graph_hash == explicit_plan.graph_hash
+    assert default.preview.tape.factor_evaluation_version == default_plan.evaluation_version
+    assert explicit.preview.tape.factor_evaluation_version == explicit_plan.evaluation_version
 
 
-def test_partial_fill_is_declared_from_the_environment_not_the_document() -> None:
-    """P2-03 잔여 이관: 참여율의 owner 가 실행 설정이다.
-
-    틀리는 방향이 과소 선언이라 그쪽으로 고정한다 — 참여율 1.0 짜리 요구 집합을 쓰면서 실제로는
-    0.1 로 체결하면 능력 게이트가 조용히 약해진다.
-    """
-    spec = _spec()
-    full = replace(_environment(), participation_rate=1.0)
-    partial = replace(_environment(), participation_rate=0.1)
-    bridge = BacktestEnginePortfolioAdapter()
-
-    assert "partial_fill" not in {item.value for item in bridge.requirements(spec, full).features}
-    assert "partial_fill" in {item.value for item in bridge.requirements(spec, partial).features}
+@pytest.mark.parametrize("rate", [0.1, 1.0])
+@pytest.mark.parametrize("basis", list(ParticipationBasis))
+def test_partial_fill_is_required_for_every_participation_limit(
+    rate: float, basis: ParticipationBasis
+) -> None:
+    """참여율 1도 유한 거래량을 넘는 주문은 부분 체결된다(#302)."""
+    environment = replace(_environment(), participation_rate=rate, participation_basis=basis)
+    requirements = BacktestEnginePortfolioAdapter().requirements(_spec(), environment)
+    assert "partial_fill" in {item.value for item in requirements.features}
 
 
 class _ShrunkWarmupValue:
@@ -512,10 +516,11 @@ class _ShrunkWarmupValue:
 def _adv_caps(
     environment: RunEnvironment, bars: tuple[MarketBarRecord, ...], rate: float
 ) -> dict[tuple[date, str], int]:
-    volumes = participation_volumes(
+    volumes = cost_inputs(
         environment,
         ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
-    )
+        {},
+    ).participation_volumes
     assert volumes is not None
     return {key: math.floor(volume * rate) for key, volume in volumes.items()}
 
@@ -584,8 +589,7 @@ def _impact(
     actions: tuple[CorporateActionRecord, ...] = (),
 ) -> dict[tuple[date, str], float]:
     rows = [(bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars]
-    confirmed = ("split", "reverse_split")
-    scales = impact_scales(
+    scales = cost_inputs(
         environment,
         rows,
         settlement_multipliers(
@@ -594,12 +598,12 @@ def _impact(
                 (
                     action.session,
                     action.security_id,
-                    float(action.ratio) if action.action_type in confirmed else 1.0,
+                    float(action.ratio) if action.action_type in PRICE_ADJUSTING_ACTIONS else 1.0,
                 )
                 for action in actions
             ),
         ),
-    )
+    ).impact_scales
     assert scales is not None
     return scales
 
@@ -645,3 +649,107 @@ def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
     first = (fills[0].session, fills[0].security_id)
     assert warmed[first] != cold[first]
     assert warmed[first] != unsplit[first]
+
+
+def test_manifest_projection_preserves_execution_values(tmp_path: Path) -> None:
+    run = _runs(_portfolio(), tmp_path, "projection-run")
+    request = BacktestRunSpec(
+        strategy=_spec(),
+        core=ExecutionCore.PYTHON,
+        initial_cash=12_345_678.0,
+        annualization_days=250,
+        environment=_environment(),
+    )
+    run.start(request)
+    state = wait_for_terminal_run(run, "projection-run")
+    assert state.status.value == "completed", state
+    result = run.result("projection-run")
+    # main 5d655219의 같은 Python 코어·원문·요청으로 얻은 최종 평가액(센트 단위).
+    assert round(result.series.equity[-1].equity, 2) == 12_302_704.95
+    assert result.manifest.run_spec.initial_cash == request.initial_cash
+    assert result.manifest.run_spec.annualization_days == request.annualization_days
+    assert result.manifest.run_spec.core is ExecutionCore.PYTHON
+
+
+def test_evaluation_version_changes_identity_but_not_values_or_tape(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from strategy_workbench.domain.factor import _planning
+
+    request = BacktestRunSpec(
+        strategy=_spec(), core=ExecutionCore.PYTHON, environment=_environment()
+    )
+    results = []
+    for version in ("factor-evaluation-test-a", "factor-evaluation-test-b"):
+        monkeypatch.setattr(_planning, "FACTOR_EVALUATION_VERSION", version)
+        runs = _runs(_portfolio(), tmp_path, version)
+        runs.start(request)
+        assert wait_for_terminal_run(runs, version).status.value == "completed"
+        result = runs.result(version)
+        assert result.manifest.factor_evaluation_version == version
+        results.append(result)
+    first, second = results
+    assert first.manifest.target_tape_hash == second.manifest.target_tape_hash
+    assert first.manifest.run_fingerprint != second.manifest.run_fingerprint
+    assert first.artifacts == second.artifacts
+    assert first.metrics == second.metrics
+
+
+class _NoWarmup(_ShrunkWarmupValue):
+    def _shape(self, dataset: BacktestDataset) -> BacktestDataset:
+        return replace(dataset, history_bars=())
+
+
+def test_missing_impact_inputs_warn_only_when_the_run_actually_fills(tmp_path: Path) -> None:
+    environment = replace(
+        _environment(),
+        impact_model=ImpactModel.SQRT,
+        participation_basis=ParticipationBasis.SESSION_VOLUME,
+    )
+    data = _NoWarmup()
+    runs = BacktestRunService(
+        _portfolio(),
+        InMemoryStrategyRepository(),
+        data,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
+        new_id=lambda: "cold-impact",
+    )
+    runs.start(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=environment)
+    )
+    assert wait_for_terminal_run(runs, "cold-impact").status.value == "completed"
+    result = runs.result("cold-impact")
+    assert result.artifacts.fills
+    (warning,) = (w for w in result.manifest.warnings if w.code == "cost.impact_scale_unavailable")
+    first = result.artifacts.fills[0]
+    assert f"{first.session.isoformat()}:{first.security_id}:return_history" in warning.message
+
+
+def test_zero_adv_cap_is_explained_by_original_order_updates(tmp_path: Path) -> None:
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+    runs = BacktestRunService(
+        _portfolio(),
+        InMemoryStrategyRepository(),
+        _NoWarmup(),
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
+        new_id=lambda: "zero-adv-cap",
+    )
+    runs.start(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=environment)
+    )
+    assert wait_for_terminal_run(runs, "zero-adv-cap").status.value == "completed"
+    result = runs.result("zero-adv-cap")
+    assert not result.artifacts.fills
+    assert result.artifacts.order_updates is not None
+    diagnosed = [
+        item for item in result.artifacts.order_updates if item.reason_code == "liquidity_cap_zero"
+    ]
+    assert diagnosed
+    assert all(item.cap_volume == 0 for item in diagnosed)
+    assert {item.order_id for item in diagnosed} <= {
+        item.order_id for item in result.artifacts.orders
+    }

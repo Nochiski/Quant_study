@@ -1,5 +1,5 @@
 import { t } from "../../../shared/config";
-import type { DocumentState } from "./document-state";
+import { currentCompileOutcome, type DocumentState } from "./document-state";
 import type { SaveStatus } from "./use-save-document";
 
 /**
@@ -28,9 +28,7 @@ export const saveStatusText = (
     return t("save.blocked.syntax");
   if (
     state.dirty &&
-    state.compiled !== null &&
-    state.compiledVersion === state.sourceVersion &&
-    state.compiled.diagnostics.some(
+    currentCompileOutcome(state)?.diagnostics.some(
       (diagnostic) => diagnostic.severity === "error",
     )
   )
@@ -56,9 +54,7 @@ export const saveStatusTone = (
   if (state.dirty && state.parse?.status === "rejected") return "error";
   if (
     state.dirty &&
-    state.compiled !== null &&
-    state.compiledVersion === state.sourceVersion &&
-    state.compiled.diagnostics.some(
+    currentCompileOutcome(state)?.diagnostics.some(
       (diagnostic) => diagnostic.severity === "error",
     )
   )

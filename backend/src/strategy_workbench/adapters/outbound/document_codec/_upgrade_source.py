@@ -22,8 +22,6 @@
 
 전제: 호출자가 safe codec으로 parse에 성공했고 domain 이 업그레이드 가능하다고 판정했다. 결과
 텍스트가 dict 경로와 같은 tree를 내는지는 application이 다시 parse해 검사한다(drift fail-closed).
-`until` 은 체인 중간 버전에서 멈춘다 — 중간 단계 golden(`quality_momentum.v1_1.commented.yaml`)을
-고정하는 데 쓴다.
 """
 
 from __future__ import annotations
@@ -87,7 +85,7 @@ def _set_tail(owner: CommentedMap, key: str, tail: str) -> None:
     if not head and not tail:
         if token is not None:
             # 줄끝 슬롯만 비운다. 슬롯을 통째로 pop 하면 앞 주석 슬롯([1])에 옮겨 둔 주석까지
-            # 사라진다(`_finish_emptied_sections` 와 같은 이유).
+            # 사라진다(빈 매핑 뒤의 주석은 다음 키 앞에 놓아야 한다).
             owner.ca.items[key][_EOL_SLOT] = None
         return
     value = f"{head}\n{tail}"
@@ -155,7 +153,7 @@ def _snapshot_mappings(
     return found
 
 
-def _relocate_comments_of_removed_keys(snapshots: list[_MappingSnapshot]) -> None:
+def _relocate_comments_of_removed_keys(snapshot: _MappingSnapshot) -> None:
     """지워진 키 위의 독립 주석은 버리고, 아래의 독립 주석은 다음 키 앞에 남긴다.
 
     ruamel은 "어떤 키 줄부터 다음 키 직전까지"의 주석을 그 키의 슬롯에 담고, 키를 지워도 그 슬롯은
@@ -166,31 +164,30 @@ def _relocate_comments_of_removed_keys(snapshots: list[_MappingSnapshot]) -> Non
     시퀀스 항목 mapping의 첫 키가 지워지면 부모 키가 없으므로 아래 주석을 다음 남는 키의 앞 주석
     슬롯에 넣는다(P1-06 리뷰 P2-001).
     """
-    for snapshot in snapshots:
-        block = snapshot.block
-        keys = snapshot.keys
-        index = 0
-        while index < len(keys):
-            if keys[index] in block:
-                index += 1
-                continue
-            start = index
-            while index < len(keys) and keys[index] not in block:
-                index += 1
-            removed = keys[index - 1]
-            owner, owner_key = _tail_owner(block, removed, snapshot.values[removed])
-            _head, below = _split_token(_eol_token(owner, owner_key))
-            if start > 0:
-                previous = keys[start - 1]
-                _set_tail(*_tail_owner(block, previous, block[previous]), below)
-            elif snapshot.parent is not None and snapshot.parent_key is not None:
-                _set_tail(snapshot.parent, snapshot.parent_key, below)
-            elif below and index < len(keys):
-                _prepend_before_key(block, keys[index], below)
-            # 남는 키가 하나도 없는 시퀀스 항목: 옮길 곳이 없어 아래 주석은 사라진다.
+    block = snapshot.block
+    keys = snapshot.keys
+    index = 0
+    while index < len(keys):
+        if keys[index] in block:
+            index += 1
+            continue
+        start = index
+        while index < len(keys) and keys[index] not in block:
+            index += 1
+        removed = keys[index - 1]
+        owner, owner_key = _tail_owner(block, removed, snapshot.values[removed])
+        _head, below = _split_token(_eol_token(owner, owner_key))
+        if start > 0:
+            previous = keys[start - 1]
+            _set_tail(*_tail_owner(block, previous, block[previous]), below)
+        elif snapshot.parent is not None and snapshot.parent_key is not None:
+            _set_tail(snapshot.parent, snapshot.parent_key, below)
+        elif below and index < len(keys):
+            _prepend_before_key(block, keys[index], below)
+        # 남는 키가 하나도 없는 시퀀스 항목: 옮길 곳이 없어 아래 주석은 사라진다.
 
 
-def _carry_comments_past_inserted_keys(snapshots: list[_MappingSnapshot]) -> None:
+def _carry_comments_past_inserted_keys(snapshot: _MappingSnapshot) -> None:
     """step 이 넣은 새 키 뒤로, 새 키 앞 키의 꼬리 주석(다음 원래 키 설명)을 옮긴다.
 
     새 키 run 앞에 원래 키가 있으면 그 키 값이 끝나는 줄의 꼬리를, run 이 mapping 맨 앞이면 부모
@@ -198,34 +195,33 @@ def _carry_comments_past_inserted_keys(snapshots: list[_MappingSnapshot]) -> Non
     스타일로 찍히고 주석을 달 수 있게 `CommentedMap` 으로 바꾼다. 시퀀스 항목·문서 루트 맨 앞의
     run 은 옮길 꼬리가 없다(루트 맨 앞 주석은 문서 머리 주석이라 제자리에 둔다).
     """
-    for snapshot in snapshots:
-        block = snapshot.block
-        original = set(snapshot.keys)
-        current = [str(key) for key in block.keys()]
-        for position, key in enumerate(current):
-            if key in original:
-                continue
-            value = block[key]
-            if isinstance(value, dict) and not isinstance(value, CommentedMap):
-                value = CommentedMap(value)
-                block[key] = value
-            if position + 1 < len(current) and current[position + 1] not in original:
-                continue  # run 의 마지막 새 키만 꼬리를 받는다
-            run_start = position
-            while run_start > 0 and current[run_start - 1] not in original:
-                run_start -= 1
-            if run_start > 0:
-                previous = current[run_start - 1]
-                source = _tail_owner(block, previous, block[previous])
-            elif snapshot.parent is not None and snapshot.parent_key is not None:
-                source = (snapshot.parent, snapshot.parent_key)
-            else:
-                continue
-            _head, tail = _split_token(_eol_token(*source))
-            if not tail:
-                continue
-            _set_tail(*source, "")
-            _set_tail(*_tail_owner(block, key, value), tail)
+    block = snapshot.block
+    original = set(snapshot.keys)
+    current = [str(key) for key in block.keys()]
+    for position, key in enumerate(current):
+        if key in original:
+            continue
+        value = block[key]
+        if isinstance(value, dict) and not isinstance(value, CommentedMap):
+            value = CommentedMap(value)
+            block[key] = value
+        if position + 1 < len(current) and current[position + 1] not in original:
+            continue  # run 의 마지막 새 키만 꼬리를 받는다
+        run_start = position
+        while run_start > 0 and current[run_start - 1] not in original:
+            run_start -= 1
+        if run_start > 0:
+            previous = current[run_start - 1]
+            source = _tail_owner(block, previous, block[previous])
+        elif snapshot.parent is not None and snapshot.parent_key is not None:
+            source = (snapshot.parent, snapshot.parent_key)
+        else:
+            continue
+        _head, tail = _split_token(_eol_token(*source))
+        if not tail:
+            continue
+        _set_tail(*source, "")
+        _set_tail(*_tail_owner(block, key, value), tail)
 
 
 def _prepend_before_key(owner: CommentedMap, key: str, lines: str) -> None:
@@ -244,69 +240,29 @@ def _prepend_before_key(owner: CommentedMap, key: str, lines: str) -> None:
     slot[1] = [moved, *existing]
 
 
-def _finish_emptied_sections(
-    document: CommentedMap, keys_before: dict[str, tuple[str, ...]]
-) -> None:
-    """이번 변환으로 비어 버린 섹션만 손본다.
-
-    삭제 키만 있던 섹션은 빈 `CommentedMap`이 되는데, ruamel은 섹션 키 슬롯 꼬리의 독립 주석을 빈
-    mapping 앞에 찍어 `{}`가 열 0에 오고 그 텍스트는 다시 parse되지 않는다. 그 꼬리는
-    `_relocate_comments_of_removed_keys`가 남겨 둔 "다음 키를 설명하는 주석"이므로 다음 최상위 키의
-    앞 주석으로 옮기고, 섹션 키의 줄끝 주석 토큰은 텍스트를 바꾸지 않고 그대로 둔다. 섹션이 문서의
-    마지막 키면 옮길 곳이 없어 그 꼬리는 사라진다. 원래부터 비어 있던 섹션은 건드리지 않는다.
-    """
-    for section, before in keys_before.items():
-        block = document.get(section)
-        if not before or not isinstance(block, CommentedMap) or len(block) > 0:
-            continue
-        token = _eol_token(document, section)
-        head, tail = _split_token(token)
-        document[section] = CommentedMap()
-        if token is not None:
-            if head:
-                token.value = (
-                    f"{head}\n"  # 원본 토큰을 그대로 두면 `#`·`##` 같은 주석도 변형되지 않는다
-                )
-            else:
-                # 줄끝 슬롯만 비운다. 슬롯을 통째로 pop하면 직전에 처리된 앞 섹션이 이 키의 앞 주석
-                # 슬롯([1])으로 옮겨 둔 "다음 키 설명" 주석까지 사라진다.
-                document.ca.items[section][_EOL_SLOT] = None
-        if not tail:
-            continue
-        keys = [str(key) for key in document.keys()]
-        following = keys[keys.index(section) + 1 :]
-        if not following:
-            continue
-        _prepend_before_key(document, following[0], tail)
-
-
-def upgrade_yaml_source(source: str, *, until: str | None = None) -> str:
+def upgrade_yaml_source(source: str) -> str:
     loader = _round_trip_loader()
     # ruamel은 주석 토큰 안의 CR을 그대로 두므로 CRLF 원문은 먼저 LF로 통일한다(출력은 항상 LF).
     document = loader.load(source.replace("\r\n", "\n"))
     if not isinstance(document, CommentedMap):
         raise ValueError(f"YAML source root must be a mapping — got={type(document).__name__}")
-    # 문서 순서로 순회한다: set 순서(hash randomization)에 기대면 출력이 프로세스마다 달라진다.
-    keys_before = {
-        str(section): tuple(str(key) for key in block.keys())
-        for section in document.keys()
-        if isinstance(block := document.get(section), CommentedMap)
-    }
     snapshots = _snapshot_mappings(document, None, None)
-    apply_upgrade_steps(document, until=until)
-    _relocate_comments_of_removed_keys(snapshots)
-    _carry_comments_past_inserted_keys(snapshots)
-    _finish_emptied_sections(document, keys_before)
+    apply_upgrade_steps(document)
+    # 자식의 삭제·삽입을 모두 복원한 뒤 부모가 그 꼬리를 옮겨야 한다. 부모 삭제 이후에
+    # 자식 삽입을 처리하면 사라진 섹션의 설명이 살아남는 다음 키의 설명을 덮어쓴다.
+    for snapshot in reversed(snapshots):
+        _relocate_comments_of_removed_keys(snapshot)
+        _carry_comments_past_inserted_keys(snapshot)
     buffer = StringIO()
     loader.dump(document, buffer)
     return buffer.getvalue()
 
 
-def upgrade_json_source(source: str, *, until: str | None = None) -> str:
+def upgrade_json_source(source: str) -> str:
     tree = json.loads(source)
     if not isinstance(tree, dict):
         raise ValueError(f"JSON source root must be an object — got={type(tree).__name__}")
     match = _JSON_INDENT_PATTERN.search(source)
     indent = len(match.group(1)) if match and len(match.group(1)) in (2, 4) else 2
-    text = json.dumps(upgrade_document(tree, until=until).tree, ensure_ascii=False, indent=indent)
+    text = json.dumps(upgrade_document(tree).tree, ensure_ascii=False, indent=indent)
     return text + ("\n" if source.endswith("\n") else "")

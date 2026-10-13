@@ -70,6 +70,10 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
   return render(
     <ThemePreferenceProvider>
       <StrategyIde
+        outline={null}
+        snippets={null}
+        inspector={null}
+        debugger={null}
         title="새 전략"
         versionLabel={versionLabel}
         editor={<textarea aria-label="source" />}
@@ -85,6 +89,10 @@ const StatefulViewIde = () => {
   return (
     <ThemePreferenceProvider>
       <StrategyIde
+        outline={null}
+        snippets={null}
+        inspector={null}
+        debugger={null}
         title="새 전략"
         versionLabel="초안"
         editor={<textarea aria-label="source" />}
@@ -119,7 +127,7 @@ describe("StrategyIde", () => {
       new Set(
         screen.getAllByRole("tablist").map((l) => l.getAttribute("aria-label")),
       ),
-    ).toEqual(new Set(["표현 전환", "중간 결과"]));
+    ).toEqual(new Set(["표현 전환"]));
     expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
     expect(
       screen.getByRole("complementary", { name: "계약" }),

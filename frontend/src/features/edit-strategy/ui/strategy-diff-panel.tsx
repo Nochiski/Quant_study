@@ -6,6 +6,7 @@ import {
   strategyDocumentQuery,
   strategyRevisionsQuery,
 } from "../../../entities/strategy";
+import { useDraftSemanticDiff } from "../model/use-draft-semantic-diff";
 import { t } from "../../../shared/config";
 import { lineDiff, type TextDiff } from "../../../shared/lib/text-diff";
 import { Badge } from "../../../shared/ui";
@@ -300,6 +301,7 @@ export const StrategyDiffPanel = ({
   active,
   revision,
 }: StrategyDiffPanelProps) => {
+  const semantic = useDraftSemanticDiff(state, active);
   if (!active) return null;
   const draft = projectDraftDiff(state);
   return (
@@ -339,7 +341,7 @@ export const StrategyDiffPanel = ({
         <p className="strategy-diff__caption">
           {t("diff.semantic.backendOwned")}
         </p>
-        <SemanticState semantic={draft.semantic} />
+        <SemanticState semantic={semantic} />
       </section>
 
       {revision ? (

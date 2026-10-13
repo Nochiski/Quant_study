@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime
 from enum import Enum, StrEnum
+
+from strategy_workbench.domain.canonical.facade.encoding import (
+    canonical_json_spec_hash,
+    canonical_payload_json,
+)
 
 
 class DataLoadStatus(Enum):
@@ -120,15 +123,8 @@ def canonical_revision(material: object) -> str:
     들어가므로 선언은 id 를 키로 한 dict 로 넘긴다 — 그래야 선언 순서만 바꾼 변경이 판을 흔들지
     않는다.
     """
-    text = json.dumps(
-        material,
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=_contract_json_default,
-    )
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    text = canonical_payload_json(material, default=_contract_json_default)
+    return canonical_json_spec_hash(text)[:16]
 
 
 def field_contract_snapshot_id(source_snapshot_id: str, field_contract: object) -> str:

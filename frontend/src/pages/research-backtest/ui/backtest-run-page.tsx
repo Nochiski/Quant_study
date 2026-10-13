@@ -1,10 +1,11 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { RUN_STATUS, runStageLabel, runStatusLabel } from "../../../entities/backtest";
+
+import { useId, useRef, useState } from "react";
 
 import {
   BacktestResultFailure,
   BacktestRunDetail,
   BacktestRunFailure,
-  runEnvironmentFields,
   useBacktestRequest,
   useBacktestSummary,
   useBacktestResult,
@@ -18,14 +19,7 @@ import { Link, useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import "./backtest-run-page.css";
 
-const TONE = {
-  queued: "info",
-  running: "info",
-  cancel_requested: "warn",
-  cancelled: "warn",
-  failed: "error",
-  completed: "ok",
-} as const;
+
 
 /**
  * 결과 화면 우측 AI 패널의 열림 상태(결과 설명 spec R1). 페이지의 local UI state다.
@@ -47,13 +41,7 @@ export const BacktestRunPage = () => {
   const result = useBacktestResult(runId, completed);
   // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
   const runEnvironmentSchema = useRunEnvironmentSchema();
-  const environmentFields = useMemo(
-    () =>
-      runEnvironmentSchema.data === undefined
-        ? null
-        : runEnvironmentFields(runEnvironmentSchema.data.schema),
-    [runEnvironmentSchema.data],
-  );
+  const environmentFields = runEnvironmentSchema.data === undefined ? null : runEnvironmentSchema.environmentFields;
   const assistantId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
   const [panel, setPanel] = useState<AssistantPanel>({
@@ -87,9 +75,7 @@ export const BacktestRunPage = () => {
   if (status.isError || !status.data) {
     return (
       <div className="page">
-        <p className="page-state page-state--error" role="alert">
-          {t("page.backtest.loadError")}
-        </p>
+        <BacktestResultFailure error={status.error} className="page-state page-state--error" />
       </div>
     );
   }
@@ -110,7 +96,7 @@ export const BacktestRunPage = () => {
           <h1>{t("page.backtest.title")}</h1>
           <code>{state.run_id}</code>
           <span role="status" aria-label={t("page.backtest.status")}>
-            <Badge tone={TONE[state.status]}>{state.status}</Badge>
+            <Badge tone={RUN_STATUS[state.status].tone}>{runStatusLabel(state.status)}</Badge>
           </span>
           <BacktestRunActions
             runId={runId}
@@ -153,8 +139,9 @@ export const BacktestRunPage = () => {
           role="status"
           aria-label={t("page.backtest.progress")}
         >
-          {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
+          {runStageLabel(state.stage)} · {Math.round(state.progress * 100)}%
         </p>
+        {state.message ? <details><summary>{t("ui.failure.serverReason")}</summary><p>{state.message}</p></details> : null}
         <BacktestRunFailure
           run={state}
           className="page-state page-state--error"

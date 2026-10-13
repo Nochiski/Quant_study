@@ -81,6 +81,7 @@ const explanation = (): FactorExplanation => ({
   plan: {
     missing_policy: "drop",
     registry_version: "factor-registry-v7",
+    evaluation_version: "factor-evaluation-v1",
     graph_hash: "g".repeat(64),
     plan_hash: "p".repeat(64),
     output_node_id: "signal",
@@ -478,7 +479,7 @@ describe("FactorGraphPanel", () => {
     const onOpenSource = vi.fn();
     const transactions: SourceTransactions = {
       apply: vi.fn(() => true), run: vi.fn(() => true), feedback: { status: "idle" },
-      feedbackFor: () => ({ status: "idle" }), onEditorReady: vi.fn(),
+      feedbackFor: () => ({ status: "idle" }),
       enabled: true, disabled: null, settling: false,
     };
     const editing = {
@@ -507,7 +508,7 @@ describe("FactorGraphPanel", () => {
       run: vi.fn(() => true),
       feedback: { status: "idle" },
       feedbackFor: () => ({ status: "idle" }),
-      onEditorReady: vi.fn(),
+
       enabled: true,
       disabled: null,
       settling: false,

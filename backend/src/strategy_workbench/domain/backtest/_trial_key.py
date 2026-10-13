@@ -31,7 +31,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 
 from ._canonical import canonical_json_hash
 from ._krx_tax import STATUTORY_SELL_TAX_BPS
-from ._models import BacktestRunSpec, RunEnvironment
+from ._models import BacktestRunSpec, ResolvedBacktestRunSpec, RunEnvironment
 
 # 키 표기의 기준인 스키마 기본값의 판본. v2(#342 DOMAIN-V2-02): 참여 기준 기본값 `session_volume` →
 # `adv20`.
@@ -41,7 +41,7 @@ TRIAL_KEY_DEFAULTS_VERSION = "trial-key-defaults-v2"
 class TrialKeyRole(StrEnum):
     """실행 설정 칸 하나가 시도 키에 드는 방식."""
 
-    # 바뀌면 새 시도다. 비용 모델 종류(거래세 방식·참여 기준)도 여기다.
+    # 바뀌면 새 시도다. 비용 모델 종류(거래세 방식·참여 기준·시장충격 모델)도 여기다.
     KEY = "key"
     # 기본값보다 낮을 때만 값이 키에 든다. 기본값이거나 높으면(불리) "기본 이하"로 묶인다.
     LOWER_IS_FAVORABLE = "lower_is_favorable"
@@ -76,7 +76,7 @@ TRIAL_KEY_ROLES: dict[str, TrialKeyRole] = {
 }
 
 
-def trial_key(spec: BacktestRunSpec) -> str:
+def trial_key(spec: BacktestRunSpec | ResolvedBacktestRunSpec) -> str:
     """전략·실행 설정이 채워진 실행 spec 의 시도 키.
 
     파라미터 값은 해소한 값(spec D4)으로 싣는다. 해소는 멱등이라 봉인 기록·미리 계산(해소 전 요청)과

@@ -143,7 +143,9 @@ export const PipelinePanel = ({
             ? t(
                 form.firstParsePending
                   ? "form.panel.firstParsePending"
-                  : "form.panel.loading",
+                  : form.noValidParse
+                    ? "form.panel.noValidParse"
+                    : "form.panel.loading",
               )
             : strategySummary(pipeline, catalogName)}
         </p>

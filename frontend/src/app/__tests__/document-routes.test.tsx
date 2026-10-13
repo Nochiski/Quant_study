@@ -1834,6 +1834,109 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       expect(compiledSources.slice(before)).toContain(text);
     };
 
+    it("같은 라우트의 문서·뒤로·앞으로 전환은 새 제목 아래 이전 Graph 값을 커밋하지 않는다 (#419)", async () => {
+      const sources: Record<string, { text: string; title: string; weight: number }> = {
+        s1: { text: COMMENTED, title: "문서 하나", weight: 0.05 },
+        s2: { text: COMMENTED.replace("0.05", "0.2"), title: "문서 둘", weight: 0.2 },
+        s3v3: { text: COMMENTED.replace("0.05", "0.4"), title: "문서 셋 개정", weight: 0.4 },
+        s3: { text: COMMENTED.replace("0.05", "0.3"), title: "문서 셋", weight: 0.3 },
+      };
+      server.use(http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        ({ params }) => {
+          const item = sources[params.revision === "3" ? "s3v3" : String(params.strategyId)]!;
+          return HttpResponse.json(document(String(params.strategyId), Number(params.revision), item.text, item.title));
+        },
+      ));
+      const history = mount("/research/strategies/s1/revisions/2?view=graph");
+      await waitFor(() => expect(screen.getByRole("spinbutton", { name: WEIGHT })).toHaveValue(0.05));
+      const commits: { title: string; weight: string | null }[] = [];
+      // passive effect 뒤 최종 DOM만 보면 한 커밋짜리 잘못된 투영이 사라져 결함을 놓친다.
+      const observer = new MutationObserver(() => {
+        const title = screen.queryByRole("heading", { level: 1 })?.textContent;
+        if (title) commits.push({ title, weight: (screen.queryByRole("spinbutton", { name: WEIGHT }) as HTMLInputElement | null)?.value ?? null });
+      });
+      observer.observe(globalThis.document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      const arrived = async (id: string) => {
+        const item = sources[id]!;
+        await waitFor(() => {
+          expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(item.title);
+          expect(screen.getByRole("spinbutton", { name: WEIGHT })).toHaveValue(item.weight);
+        });
+      };
+      try {
+        history.push("/research/strategies/s2/revisions/2?view=graph");
+        await arrived("s2");
+        history.back();
+        await arrived("s1");
+        history.forward();
+        await arrived("s2");
+        // 같은 틱에서 두 요청이 와도 마지막 문서가 원문 owner다.
+        history.push("/research/strategies/s1/revisions/2?view=graph");
+        history.push("/research/strategies/s3/revisions/2?view=graph");
+        await arrived("s3");
+        history.push("/research/strategies/s3/revisions/3?view=graph");
+        await arrived("s3v3");
+        history.back();
+        await arrived("s3");
+        await userEvent.setup().click(screen.getByRole("tab", { name: "YAML" }));
+        expect((await editor()).state.doc.toString()).toBe(sources.s3!.text);
+        expect(posted).toHaveLength(0);
+        for (const item of Object.values(sources)) {
+          const visible = commits.filter((commit) => commit.title === item.title && commit.weight !== null);
+          expect(visible.length).toBeGreaterThan(0);
+          expect(visible.every((commit) => Number(commit.weight) === item.weight)).toBe(true);
+        }
+      } finally {
+        observer.disconnect();
+      }
+    });
+
+    it("YAML 문서 전환도 새 제목 아래 이전 원문을 커밋하지 않는다 (#419)", async () => {
+      const second = COMMENTED.replace("0.05", "0.2");
+      server.use(http.get(`${API}/api/v1/strategies/:strategyId/revisions/:revision/document`, ({ params }) =>
+        HttpResponse.json(document(String(params.strategyId), 2, params.strategyId === "s1" ? COMMENTED : second,
+          params.strategyId === "s1" ? "문서 하나" : "문서 둘"))));
+      const history = mount("/research/strategies/s1/revisions/2?view=yaml");
+      await settled(await editor(), COMMENTED);
+      const visibleSources: string[] = [];
+      const observer = new MutationObserver(() => {
+        if (screen.queryByRole("heading", { name: "문서 둘" }) === null) return;
+        const content = screen.queryByRole("textbox", { name: t("ide.editor") });
+        if (content) visibleSources.push(EditorView.findFromDOM(content)!.state.doc.toString());
+      });
+      observer.observe(globalThis.document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      try {
+        history.push("/research/strategies/s2/revisions/2?view=yaml");
+        await screen.findByRole("heading", { name: "문서 둘" });
+        await settled(await editor(), second);
+        expect(visibleSources.length).toBeGreaterThan(0);
+        expect(visibleSources.every((source) => source === second)).toBe(true);
+      } finally { observer.disconnect(); }
+    });
+
+    it("첫 구문 오류에는 Graph 기본값을 만들지 않고 원문을 보존한다 (#420)", async () => {
+      const broken = COMMENTED.replace("title: 퀄리티 모멘텀", "title: [broken");
+      server.use(http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () => HttpResponse.json(document("s1", 2, broken)),
+      ));
+      mount("/research/strategies/s1/revisions/2?view=graph");
+      await waitFor(() => expect(screen.getByRole("status", { name: "문서 상태" }))
+        .toHaveAttribute("data-settled", "true"));
+      const pipeline = await canvas();
+      expect(within(pipeline).queryByRole("spinbutton", { name: WEIGHT })).toBeNull();
+      expect(pipeline).toHaveTextContent(t("form.panel.noValidParse"));
+      expect(saveButton()).toBeDisabled();
+      await userEvent.setup().click(screen.getByRole("tab", { name: "YAML" }));
+      const view = await editor();
+      expect(view.state.doc.toString()).toBe(broken);
+      replaceText(view, COMMENTED);
+      await settled(view, COMMENTED);
+      await userEvent.setup().click(screen.getByRole("tab", { name: "그래프" }));
+      expect(within(await canvas()).getByRole("spinbutton", { name: WEIGHT })).toHaveValue(0.05);
+    });
+
     it("첫 parse 전에만 Form·캔버스·그래프 편집기가 컨트롤 없이 기다리고, 그 뒤 편집 직후에는 직전 parse 로 그린다 (#413)", async () => {
       // 스키마를 query cache 에 먼저 넣는다: 문서가 오는 순간 Form·캔버스를 막는 것은 첫 parse 하나뿐이라
       // "첫 parse 전"(150ms)이 스키마 대기(로딩)와 섞이지 않는다.

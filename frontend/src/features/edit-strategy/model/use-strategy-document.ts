@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 
 import { parseSource } from "../../../shared/lib/yaml12";
 import {
@@ -30,16 +30,17 @@ export const useStrategyDocument = (source: DocumentSource) => {
   );
 
   const key = documentSourceKey(source);
-  const loadedKey = useRef(key);
-  useEffect(() => {
-    if (loadedKey.current === key) return;
-    loadedKey.current = key;
+  const [loadedKey, setLoadedKey] = useState(key);
+  // 같은 route의 다른 문서는 새 제목과 이전 투영이 함께 commit되기 전에 reducer에서 교체한다.
+  // 저장 응답 뒤 URL만 현재 base를 따라잡는 경우는 편집·undo를 보존한다(#419).
+  if (loadedKey !== key) {
+    setLoadedKey(key);
     const alreadyBase =
       source.kind === "revision" &&
       state.strategyId === source.document.strategy_id &&
       state.baseRevision === source.document.revision;
     if (!alreadyBase) dispatch(loadAction(source));
-  }, [key, source, state.strategyId, state.baseRevision]);
+  }
 
   useEffect(() => {
     if (!shouldParse(state)) return;

@@ -85,7 +85,7 @@ const UNSET = "__unset__";
  * 목록 섹션(factors·rules·parameters)의 편집은 P4-03이 더한다.
  */
 export const StrategyFormPanel = ({
-  form: { projection, stale, firstParsePending, tree },
+  form: { projection, stale, firstParsePending, noValidParse, tree },
   transactions,
   catalogs,
   schema = null,
@@ -139,7 +139,9 @@ export const StrategyFormPanel = ({
           {t(
             firstParsePending
               ? "form.panel.firstParsePending"
-              : "form.panel.loading",
+              : noValidParse
+                ? "form.panel.noValidParse"
+                : "form.panel.loading",
           )}
         </p>
       ) : (

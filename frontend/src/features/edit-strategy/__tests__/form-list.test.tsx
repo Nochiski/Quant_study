@@ -69,6 +69,7 @@ const parsedState = (source: string): DocumentState => {
 const formOf = (state: DocumentState): FormProjectionState => ({
   projection: projectForm(SCHEMA, state.parse, []),
   firstParsePending: false,
+  noValidParse: false,
   stale: false,
   tree:
     state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {},

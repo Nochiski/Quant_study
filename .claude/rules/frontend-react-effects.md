@@ -20,6 +20,5 @@ paths:
 - 이 계열의 회귀 테스트는 act 밖의 갱신(promise)으로 상태를 바꾸고, `MutationObserver`가 DOM 변화를
   본 microtask에서 콜백을 불러 새 값을 읽는지 단언한다(`use-committed-ref.test.tsx`,
   `dirty-leave-guard.test.tsx`, `strategy-ide.shortcut-gate.test.tsx`).
-- 기존 예외: `shared/ui/code-editor/code-editor-view.tsx`는 편집기 콜백용 ref를 **렌더 중에** 대입한다.
-  틈은 없지만(선행) 버려진 concurrent 렌더의 값이 남을 수 있어 이 규칙과 다르다 — 그 파일을 고칠 때
-  `useCommittedRef`로 옮긴다(별도 backlog). 새 코드에서 그 패턴을 따라 하지 않는다.
+- 편집기(CodeMirror)는 view를 layout effect에서 만든 뒤 imperative handle을 공개한다. 핸들 준비 알림을
+  받은 부모가 즉시 실행하는 선택·포커스 명령이 빈 view에서 사라지지 않아야 한다.

@@ -52,6 +52,7 @@ const formOf = (
   return {
     projection: projectForm(SCHEMA, parse, diagnostics),
     firstParsePending: false,
+  noValidParse: false,
     stale: false,
     tree: parse.status === "ok" ? parse.tree : {},
   };

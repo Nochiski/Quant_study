@@ -1,3 +1,4 @@
+import { BacktestOrderEvents } from "./backtest-order-events";
 import type {
   BacktestRunResult,
   MetricDefinition,
@@ -456,6 +457,8 @@ export const BacktestRunDetail = ({
           </div>
         )}
       </section>
+
+      <BacktestOrderEvents artifacts={result.artifacts} />
 
       <details
         className="manifest-drawer"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal, get_args
@@ -42,6 +42,11 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
+
+    @property
+    def is_terminal(self) -> bool:
+        """종결 여부의 정본. 취소 요청은 실행이 멈춘 상태가 아니다."""
+        return self in (RunStatus.CANCELLED, RunStatus.COMPLETED, RunStatus.FAILED)
 
 
 class WarningSeverity(StrEnum):
@@ -156,8 +161,8 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         example=10.0,
         message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
-    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
-    # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
+    # √ 충격의 계수 k(무차원). 기본값은 아래 필드 선언이 소유한다(`_impact.py` 머리말).
+    # 상한은 문헌의 "1 안팎"을 넉넉히 덮고 오타 입력(100·1000)을 막는다.
     "impact_coefficient": ScalarConstraint(
         pointer="/impact_coefficient",
         stage=AppliedStage.EXECUTION,
@@ -338,7 +343,7 @@ class BacktestRunOptions:
 class BacktestRunSpec(BacktestRunOptions):
     """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
 
-    `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+    `strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`
     so a run can name a saved revision (P1-09). The run service rejects a request carrying both
     or neither (one coded 422, `backtest.run.invalid`).
     After resolution the run spec stored in the manifest carries both: `strategy` is the exact
@@ -361,6 +366,43 @@ class BacktestRunSpec(BacktestRunOptions):
     # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
     # 넣지 않는다.
     lineage_strategy_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedBacktestRunSpec(BacktestRunOptions):
+    """접수 후 실행 입력. 전략·환경은 필수이며 요청 출처는 실행 값과 분리한다."""
+
+    strategy: StrategySpec
+    environment: RunEnvironment
+    metric_windows: tuple[MetricWindow, ...] = ()
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+
+    @classmethod
+    def from_request(
+        cls,
+        request: BacktestRunSpec,
+        *,
+        strategy: StrategySpec,
+        environment: RunEnvironment,
+        parameter_values: dict[str, ParameterValue],
+    ) -> ResolvedBacktestRunSpec:
+        # 실행 칸의 owner는 이 타입이다. 새 요청 전용 칸이 실행에 자동 유입되지 않는다.
+        values = {item.name: getattr(request, item.name) for item in fields(cls)}
+        values.update(strategy=strategy, environment=environment, parameter_values=parameter_values)
+        return cls(**values)
+
+    def to_wire(
+        self,
+        *,
+        strategy_source: StrategySource | None = None,
+        lineage_strategy_id: str | None = None,
+    ) -> BacktestRunSpec:
+        """기존 manifest·연구 저장 계약 투영. 실행 중에는 이 요청 타입을 사용하지 않는다."""
+        return BacktestRunSpec(
+            **{item.name: getattr(self, item.name) for item in fields(self)},
+            strategy_source=strategy_source,
+            lineage_strategy_id=lineage_strategy_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -396,6 +438,8 @@ class RunManifest:
     warnings: tuple[DataWarning, ...] = ()
     # v3는 평면 실행 값 사본 6개를 제거한 표현 판본이다. 실행 지문에는 넣지 않는다.
     schema_version: str = "backtest-run-v3"
+    # 기록되지 않은 과거 실행은 미상(None)이다. 현재 판본을 소급 채우지 않는다.
+    factor_evaluation_version: str | None = None
 
     def __post_init__(self) -> None:
         # The two fields have different producers — `strategy_hash` is the compiler's, carried on
@@ -446,6 +490,18 @@ class RawOrder:
 
 
 @dataclass(frozen=True)
+class RawOrderUpdate:
+    """엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다."""
+
+    session: date
+    order_id: str
+    status: str
+    detail: str | None = None
+    reason_code: str | None = None
+    cap_volume: int | None = None
+
+
+@dataclass(frozen=True)
 class RawFill:
     fill_id: str
     order_id: str
@@ -459,6 +515,8 @@ class RawFill:
     # 체결 세션의 유동성 캡 기준 거래량 — 엔진이 참여 한도를 곱한 값이다(V4-04 2/2). 그 전에 쓴
     # `result.json`(`backtest-artifacts-v1`)에는 없어 None 으로 읽힌다.
     cap_volume: int | None = None
+    # 구판 산출물은 체결별 세금을 싣지 않았으므로 None으로 구별한다.
+    sell_tax: float | None = None
 
 
 @dataclass(frozen=True)
@@ -508,6 +566,8 @@ class RawArtifactBundle:
     # v2: 체결에 `cap_volume` 을, 번들에 `roundings` 를 싣는다. v1 파일도 같은 모델로 읽는다(빈 칸은
     # None·빈 튜플).
     schema_version: str = "backtest-artifacts-v2"
+    # None은 과거 결과에 상태 기록 자체가 없음을 뜻한다. 새 결과의 빈 기록은 ()다.
+    order_updates: tuple[RawOrderUpdate, ...] | None = None
 
 
 @dataclass(frozen=True)

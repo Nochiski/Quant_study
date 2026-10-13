@@ -215,6 +215,31 @@ def test_a_completion_that_cannot_be_saved_is_not_shown(
     assert "backtest run state could not be persisted — run_id=run-1" in caplog.text
 
 
+class _RefusingTrialResult(SQLiteBacktestRunRepository):
+    def record_trial_result(
+        self, run_id: str, *, session_sharpe: float | None, metric_registry_version: str
+    ) -> None:
+        raise ResearchStorageError(f"disk full — run_id={run_id}")
+
+
+def test_a_completion_whose_trial_result_cannot_be_saved_is_not_shown(
+    tmp_path: Path, barriers: list[RawLoadBarrier], caplog: pytest.LogCaptureFixture
+) -> None:
+    """#381: 대표 샤프 기록이 실패한 완료도 보이지 않는다 — 보이면 원장은 그 시도를 샤프 없는
+    시도로 세고 사용자는 결과를 본다."""
+    free = _open_barrier(barriers)
+    free.release.set()
+    runs = _service(tmp_path, _RefusingTrialResult(), free, "run-1")
+
+    runs.start(_request())
+
+    ended = wait_for_terminal_run(runs, "run-1")
+    assert (ended.status, ended.artifact_sha256) == (RunStatus.FAILED, None)
+    with pytest.raises(BacktestResultNotReadyError):
+        runs.result("run-1")
+    assert "trial result could not be recorded — run_id=run-1" in caplog.text
+
+
 def test_only_recent_finished_runs_keep_an_in_memory_copy(
     tmp_path: Path, barriers: list[RawLoadBarrier], monkeypatch: pytest.MonkeyPatch
 ) -> None:

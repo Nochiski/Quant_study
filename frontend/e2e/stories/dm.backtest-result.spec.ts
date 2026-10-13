@@ -94,6 +94,17 @@ test(
     const result = page.getByRole("article", { name: "백테스트 결과" });
     await expect(result).toBeVisible({ timeout: 120_000 });
 
+    // 새 결과는 원본 주문 이벤트를 기록한다. 옛 형식의 미기록 안내로 대체되면 안 된다(#411).
+    const orderEvents = result.getByRole("region", { name: "주문 상태 기록" });
+    await expect(orderEvents).toBeVisible();
+    await expect(orderEvents).toContainText(/주문 상태 이벤트.*(?:건|0건)/u);
+    await expect(orderEvents).not.toContainText("이전 형식 결과");
+    const records = orderEvents.getByText("주문 상태 원본 보기", { exact: true });
+    if (await records.count()) {
+      await records.click();
+      await expect(orderEvents.getByRole("table")).toBeVisible();
+    }
+
     const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
     // 지표마다 이름 바로 뒤에 서버가 계산한 값이 숫자로 붙는다. 값이 없으면 "N/A"라 여기서 걸린다.
     for (const label of HIGHLIGHT_LABELS)

@@ -97,7 +97,6 @@ class FactorObservation:
     as_of: date
     security_id: str
     fields: tuple[FactorFieldValue, ...]
-    forward_return: float | None = None
     universe_member: bool = True
 
 

@@ -282,7 +282,9 @@ class BacktestEngineExecutorAdapter:
                 )
             ),
         )
-        costs = cost_inputs(environment, cost_rows, settled)
+        costs = cost_inputs(
+            environment, cost_rows, settled, checkpoint=lambda: self._check_cancelled(cancelled)
+        )
         engine = BacktestEngine(
             RunConfig(
                 run_id=request.run_id,
@@ -297,7 +299,6 @@ class BacktestEngineExecutorAdapter:
                 if environment.impact_model is ImpactModel.SQRT
                 else FixedBpsSlippage(environment.slippage_bps)
             ),
-            max_participation=environment.participation_rate,
             core=request.spec.core.value,
         )
         try:

@@ -1,6 +1,8 @@
 from dataclasses import replace
 from datetime import date, timedelta
 
+import pytest
+
 from strategy_workbench.domain.backtest.facade.environment import (
     ImpactModel,
     ParticipationBasis,
@@ -45,9 +47,7 @@ def test_zero_adv_has_its_own_reason_after_return_history_is_sufficient() -> Non
     assert ":adv" in warning.message
 
 
-def test_shared_adv_preserves_distinct_minimum_history() -> (
-    None
-):
+def test_shared_adv_preserves_distinct_minimum_history() -> None:
     rows = [(date(2024, 1, 1) + timedelta(days=i), "A", 100.0 + i, 1000.0) for i in range(21)]
     inputs = cost_inputs(_environment(), reversed(rows), {})
     assert inputs.participation_volumes is not None
@@ -70,3 +70,28 @@ def test_fixed_session_volume_does_not_consume_cost_rows() -> None:
     inputs = cost_inputs(environment, rows(), {})
     assert inputs.participation_volumes is None
     assert inputs.impact_scales is None
+
+
+def test_cost_preprocessing_checks_cancellation_during_each_linear_pass() -> None:
+    class StopRequested(Exception):
+        pass
+
+    checks = 0
+
+    def checkpoint() -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 5:
+            raise StopRequested
+
+    environment = RunEnvironment(
+        start=date(2024, 1, 1),
+        end=date(2024, 1, 31),
+        universe_id="u",
+        impact_model=ImpactModel.SQRT,
+    )
+    # 입력 수집 3회(0·256·끝) 뒤 ADV 계산 중인 두 번째 확인에서 멈춘다.
+    rows = [(date(2024, 1, 1), str(index), 100.0, 1000.0) for index in range(300)]
+    with pytest.raises(StopRequested):
+        cost_inputs(environment, rows, {}, checkpoint=checkpoint)
+    assert checks == 5

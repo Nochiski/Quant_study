@@ -11,6 +11,7 @@ HTTP 왕복은 `tests/integration/test_backtest_http_api.py`가 본다. 여기�
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import UTC, datetime
 from typing import cast
 
@@ -102,3 +103,21 @@ def test_a_quiet_stream_sends_a_keepalive_comment() -> None:
 
     assert frames[0] == ": keepalive\n\n"
     assert frames[1].startswith("id: 0\nevent: progress\ndata: ")
+
+
+def test_stream_does_not_wait_for_service_lock_on_the_event_loop() -> None:
+    """상태·이벤트 조회 양쪽의 동기 잠금 대기가 다른 async 요청을 막으면 안 된다(#362)."""
+    loop_thread = threading.get_ident()
+
+    class CheckedRuns(_ScriptedRuns):
+        def state(self, run_id: str) -> BacktestRunState:
+            assert threading.get_ident() != loop_thread
+            return super().state(run_id)
+
+        def events(self, run_id: str, *, after_sequence: int = -1) -> tuple[RunProgressEvent, ...]:
+            assert threading.get_ident() != loop_thread
+            return super().events(run_id, after_sequence=after_sequence)
+
+    frames = _run(CheckedRuns([(RunStatus.COMPLETED, [_event(0, RunStatus.COMPLETED)])]))
+    assert len(frames) == 1
+    assert '"status":"completed"' in frames[0]

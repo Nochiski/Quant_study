@@ -125,10 +125,10 @@ progress_percent: 61
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04 | `SELF_CHECK` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
+| [ ] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `SELF_CHECK` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
 | [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
-| [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V4-03 | `PLANNED` | — |
+| [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `MERGED` | [#345](https://github.com/Nochiski/Quant_study/pull/345) · main 머지 `ebf2a6ea`(2026-09-30) |
 | [ ] | `V5-06` | 용량 스윕·팩터 회귀 화면 | V5-02, V4-04, V4-05 | `PLANNED` | — |
 | [ ] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `PLANNED` | — |

@@ -492,10 +492,14 @@ class PortfolioDesignService:
                 construction_trace = compiled.trace
         except NonFinitePortfolioCalculationError as error:
             raise _non_finite_rejection("portfolio", error) from error
-        # 검증된 전략은 팩터를 하나 이상 갖는다. 현재 프로세스에서 실제 평가한 계획의 판본이다.
-        tape = replace(
-            tape, factor_evaluation_version=evaluation_records[0].plan.evaluation_version
-        )
+        # 현재 프로세스에서 실제 평가한 계획들의 판본이다. 평가 규칙 판본은 한 프로세스에 하나라
+        # 모든 계획이 같아야 한다 — 다르거나 평가한 팩터가 없으면 출처를 지어내지 않고 실패한다.
+        versions = {record.plan.evaluation_version for record in evaluation_records}
+        if len(versions) != 1:
+            raise RuntimeError(
+                f"factor evaluation version must be unique per run — versions={sorted(versions)}"
+            )
+        tape = replace(tape, factor_evaluation_version=versions.pop())
         preview = PortfolioPreview(
             tape=tape,
             engine=engine,

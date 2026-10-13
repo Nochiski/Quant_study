@@ -155,6 +155,7 @@ def price_table(
         )
     if basis is not None:
         columns["basis"] = pa.array(basis, type=pa.string())
+        # 픽스처 단순화: 원장은 수익률 30% 초과 저녁 행만 TRUE 다. backend 는 이 열을 읽지 않는다.
         columns["corp_action_pending"] = pa.array([value == "evening" for value in basis])
     if base_prices is not None:
         previous: dict[str, float | None] = {}
@@ -210,7 +211,7 @@ def factor_table(
 ) -> pa.Table:
     """`adj_factor` 관심 컬럼. `apply_dates` 를 주면 `apply_date`, `available_dates` 를 주면
     `available_date`, `factor_sources` 를 주면 `factor_source`, `apply_bases` 를 주면 `apply_basis`
-    컬럼을 붙인다(S06 — 뷰 `v_cum_adj` 는 앞의 둘을, `v_adj_close` 는 넷 다 읽는다)."""
+    컬럼을 붙인다(S06 — `v_adj_close` 가 넷 다 읽는다)."""
     columns: dict[str, pa.Array] = {
         "ticker": pa.array([r[0] for r in rows], type=pa.string()),
         "effective_date": pa.array([r[1] for r in rows], type=pa.date32()),

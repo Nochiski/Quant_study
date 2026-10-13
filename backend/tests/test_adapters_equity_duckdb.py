@@ -492,6 +492,18 @@ def test_declarations_their_query_does_not_read_are_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("source_name", ["adj", "credit"])
+@pytest.mark.parametrize("field_count", [0, 2])
+def test_가림_표시_원천은_필드_하나만_선언한다(source_name: str, field_count: int) -> None:
+    original = next(spec for spec in FIELD_SPECS if spec.source == source_name)
+    fields = tuple(spec for spec in FIELD_SPECS if spec.source != source_name)
+    fields += tuple(
+        replace(original, field_id=f"test.masked_{index}") for index in range(field_count)
+    )
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{source_name}']")):
+        _reject_unread_declarations(SOURCE_SPECS, fields)
+
+
 # ── RawObservationPort ────────────────────────────────────────────────────────
 
 

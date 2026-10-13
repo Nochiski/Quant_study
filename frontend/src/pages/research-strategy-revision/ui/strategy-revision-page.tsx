@@ -32,6 +32,7 @@ import {
   useApplyAssistantProposal,
   useStrategyAssistant,
   useAutosave,
+  useWholeDocumentReplacement,
   useCompileDocument,
   useDiagnosticNavigation,
   useDocumentHistory,
@@ -108,14 +109,15 @@ export const StrategyRevisionPage = () => {
           document.baseSpecHash,
         )
       : null;
-  const serverDraft = useServerDraft(document, dispatch, {
+  const replacement = useWholeDocumentReplacement();
+  const serverDraft = useServerDraft(document, replacement.replace, {
     draftId: serverDraftId,
     schemaVersion: assist.schemaVersion ?? stored.schema_version,
     schemaPending: assist.loading,
   });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const canValidate = !validating && canValidateDocument(document);
-  const autosave = useAutosave(document, dispatch, {
+  const autosave = useAutosave(document, replacement.replace, {
     schemaVersion: assist.schemaVersion,
   });
   // 실행 설정(시장·기간·유니버스·체결·비용·결측)은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2,
@@ -240,6 +242,7 @@ export const StrategyRevisionPage = () => {
   const history = useDocumentHistory(document);
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
+  const onReplacementEditorReady = replacement.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
   const onUpgradeEditorReady = documentUpgrade.onEditorReady;
   const onProblemsEditorReady = problems.onEditorReady;
@@ -250,6 +253,7 @@ export const StrategyRevisionPage = () => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
+      onReplacementEditorReady(editor);
       onUpgradeEditorReady(editor);
       onProblemsEditorReady(editor);
       onHistoryEditorReady(editor);
@@ -260,6 +264,7 @@ export const StrategyRevisionPage = () => {
       onProposalEditorReady,
       onSnippetEditorReady,
       onTransactionsEditorReady,
+      onReplacementEditorReady,
       onUpgradeEditorReady,
       onProblemsEditorReady,
       onHistoryEditorReady,

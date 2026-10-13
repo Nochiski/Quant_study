@@ -1,3 +1,4 @@
+import { replaceWholeDocument } from "./replace-whole-document";
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 
@@ -128,7 +129,7 @@ export const useUpgradeDocument = (
         }
         // `replaceRange`는 history를 앞뒤로 격리한다(`isolateHistory`) — 직후에 친 글자와 업그레이드가
         // 한 undo로 묶이지 않는다. 같은 문서 안의 전체 교체는 모두 이 경로다.
-        current.replaceRange(0, current.getText().length, upgraded.source);
+        replaceWholeDocument(current, upgraded.source);
         current.scrollTo(0);
         current.focus();
         // 편집기가 줄 끝을 정규화하므로 응답 원문이 아니라 편집기에 들어간 글에 묶는다.

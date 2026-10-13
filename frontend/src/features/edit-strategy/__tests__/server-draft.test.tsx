@@ -58,11 +58,18 @@ const Harness = ({
   const [state, dispatch] = useReducer(documentReducer, initial);
   const draftId =
     rotateDraftOnSave && state.baseRevision === 2 ? NEXT_DRAFT_ID : DRAFT_ID;
-  const sync = useServerDraft(state, dispatch, {
-    draftId,
-    schemaVersion: "1.1",
-    delayMs: 5,
-  });
+  const sync = useServerDraft(
+    state,
+    (source) => {
+      dispatch({ type: "edit", source });
+      return true;
+    },
+    {
+      draftId,
+      schemaVersion: "1.1",
+      delayMs: 5,
+    },
+  );
   return (
     <>
       <label htmlFor="source">Source</label>

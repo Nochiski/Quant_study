@@ -29,6 +29,7 @@ import {
   useApplyAssistantProposal,
   useStrategyAssistant,
   useAutosave,
+  useWholeDocumentReplacement,
   useCompileDocument,
   useDiagnosticNavigation,
   useDocumentHistory,
@@ -99,7 +100,8 @@ export const NewStrategyPage = () => {
           document.baseSpecHash,
         )
       : (search.draft ?? entryDraftId);
-  const serverDraft = useServerDraft(document, dispatch, {
+  const replacement = useWholeDocumentReplacement();
+  const serverDraft = useServerDraft(document, replacement.replace, {
     draftId: serverDraftId,
     schemaVersion: assist.schemaVersion,
     schemaPending: assist.loading,
@@ -111,7 +113,7 @@ export const NewStrategyPage = () => {
   // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
   const proposalApply = useApplyAssistantProposal(document);
   const canValidate = !validating && canValidateDocument(document);
-  const autosave = useAutosave(document, dispatch, {
+  const autosave = useAutosave(document, replacement.replace, {
     schemaVersion: assist.schemaVersion,
   });
   // 실행 설정은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2, P3-02). 새 전략은 전략 id 가 없어 한
@@ -214,6 +216,7 @@ export const NewStrategyPage = () => {
   const history = useDocumentHistory(document);
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
+  const onReplacementEditorReady = replacement.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
   const onUpgradeEditorReady = documentUpgrade.onEditorReady;
   const onProblemsEditorReady = problems.onEditorReady;
@@ -224,6 +227,7 @@ export const NewStrategyPage = () => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
+      onReplacementEditorReady(editor);
       onUpgradeEditorReady(editor);
       onProblemsEditorReady(editor);
       onHistoryEditorReady(editor);
@@ -234,6 +238,7 @@ export const NewStrategyPage = () => {
       onProposalEditorReady,
       onSnippetEditorReady,
       onTransactionsEditorReady,
+      onReplacementEditorReady,
       onUpgradeEditorReady,
       onProblemsEditorReady,
       onHistoryEditorReady,

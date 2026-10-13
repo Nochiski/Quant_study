@@ -1,3 +1,4 @@
+import { replaceWholeDocument } from "./replace-whole-document";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
@@ -131,14 +132,17 @@ export const useApplyAssistantProposal = (
   const overwrite = useCallback(
     (handle: CodeEditorHandle, source: string): void => {
       const before = handle.getText();
-      handle.replaceRange(0, before.length, source);
+      replaceWholeDocument(handle, source);
       handle.scrollTo(0);
       handle.focus();
       // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다. 단 제안이
       // 지금 문서와 똑같으면 reducer가 상태를 그대로 돌려줘 버전이 오르지 않는다 — 그때 +1을 쓰면
       // 결과가 영원히 어긋난 소유자에 묶여 알림도, 이어지는 백테스트도 사라진다(3차 리뷰 P2-1).
       const changed = source !== before;
-      setStatus({ kind: "applied", changed }, sourceVersion + (changed ? 1 : 0));
+      setStatus(
+        { kind: "applied", changed },
+        sourceVersion + (changed ? 1 : 0),
+      );
     },
     [setStatus, sourceVersion],
   );

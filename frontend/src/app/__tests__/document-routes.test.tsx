@@ -234,6 +234,11 @@ const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
 ) as Record<string, unknown>;
 
 const server = setupServer(
+  http.post(`${API}/api/v1/strategies/:strategyId/draft-diff`, async ({ request, params }) => {
+    const body = await request.json() as { base_revision: number };
+    return HttpResponse.json({ strategy_id: params.strategyId, base_revision: body.base_revision, base_spec_hash: "2".repeat(64), target_spec_hash: "2".repeat(64), source_hash: "b".repeat(64), changes: [] });
+  }),
+
   http.get(`${API}/api/v1/experiments`, () => HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })),
   http.get(`${API}/api/v1/strategy-documents/operators`, () => HttpResponse.json(JSON.parse(readBackendFixture("strategy_documents/operator-catalog.json")))),
   http.get(`${API}/api/v1/run-environments/schema`, () =>
@@ -2796,7 +2801,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     expect(within(panel).getByText("+1 / −0 변경 항목")).toBeInTheDocument();
     expect(within(panel).getByText("# research note")).toBeInTheDocument();
     expect(
-      within(panel).getByText("의미 변경이 없습니다 (같은 spec hash)."),
+      await within(panel).findByText("의미 변경이 없습니다 (같은 spec hash)."),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "YAML" }));
@@ -2872,7 +2877,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     expect(within(panel).getByText('"서버에서 수정"')).toBeInTheDocument();
   });
 
-  it("recompiles a saved source when Save returns a different spec hash", async () => {
+  it("저장 중 추가 편집은 새 저장 revision을 backend 의미 diff 기준으로 사용한다", async () => {
     const savedSource = `${STORED}description: saved\n`;
     const currentSource = `${STORED}description: after\n`;
     const preSaveHash = "a".repeat(64);
@@ -2881,6 +2886,12 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     const compileSources: string[] = [];
     let saveCompleted = false;
     server.use(
+      http.post(`${API}/api/v1/strategies/:strategyId/draft-diff`, async ({ request }) => {
+        const body = await request.json() as { base_revision: number; source: string };
+        expect(body).toMatchObject({ base_revision: 3, source: currentSource });
+        return HttpResponse.json({ strategy_id: "s1", base_revision: 3, base_spec_hash: savedHash, target_spec_hash: currentHash, source_hash: "b".repeat(64), changes: [{ pointer: "/description", kind: "changed", before: "saved", after: "after" }] });
+      }),
+
       http.post(
         `${API}/api/v1/strategy-documents/compile`,
         async ({ request }) => {
@@ -2956,73 +2967,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
     expect(within(panel).queryByText("/deployment")).not.toBeInTheDocument();
     expect(
       compileSources.filter((source) => source === savedSource),
-    ).toHaveLength(2);
-  }, 10_000);
-
-  it("retries a transient saved-baseline failure on the next edit", async () => {
-    let allowBaselineSuccess = false;
-    let baselineAttempts = 0;
-    server.use(
-      http.post(
-        `${API}/api/v1/strategy-documents/compile`,
-        async ({ request }) => {
-          const body = (await request.json()) as { source: string };
-          if (body.source === STORED) {
-            baselineAttempts += 1;
-            if (!allowBaselineSuccess) {
-              return HttpResponse.json(
-                { detail: "temporary baseline outage" },
-                { status: 503 },
-              );
-            }
-          }
-          const title = /title: ([^\n]*)/.exec(body.source)?.[1] ?? "";
-          const compiledSpec = spec("draft", 0, title);
-          return HttpResponse.json({
-            format: "yaml",
-            source_hash: "b".repeat(64),
-            schema_version: "1.2",
-            spec: compiledSpec,
-            canonical_json: '{"schema_version":"1.2","title":"same"}',
-            spec_hash: "2".repeat(64),
-            diagnostics: [],
-          });
-        },
-      ),
-    );
-
-    const user = userEvent.setup();
-    mount("/research/strategies/s1/revisions/2");
-    const view = await editor();
-    replaceText(view, `${STORED}# first edit\n`);
-    await waitFor(() => expect(saveButton()).toBeEnabled());
-    await openComparison();
-    const panel = await screen.findByLabelText("StrategySpec Diff");
-    expect(
-      await within(panel).findByText("저장본 canonical 기준을 검증 중입니다."),
-    ).toBeInTheDocument();
-    const failedAttempts = baselineAttempts;
-    expect(failedAttempts).toBeGreaterThan(0);
-
-    await user.click(screen.getByRole("button", { name: "검증" }));
-    await waitFor(() =>
-      expect(baselineAttempts).toBeGreaterThan(failedAttempts),
-    );
-    const explicitRetryAttempts = baselineAttempts;
-
-    allowBaselineSuccess = true;
-    await user.click(screen.getByRole("tab", { name: "YAML" }));
-    const currentView = await editor();
-    replaceText(currentView, `${STORED}# second edit\n`);
-    await waitFor(() => expect(saveButton()).toBeEnabled());
-    await openComparison();
-    const retriedPanel = await screen.findByLabelText("StrategySpec Diff");
-    expect(
-      await within(retriedPanel).findByText(
-        "의미 변경이 없습니다 (같은 spec hash).",
-      ),
-    ).toBeInTheDocument();
-    expect(baselineAttempts).toBeGreaterThan(explicitRetryAttempts);
+    ).toHaveLength(1);
   }, 10_000);
 
   it("loads the bounded history page that contains a route beyond revision 50", async () => {

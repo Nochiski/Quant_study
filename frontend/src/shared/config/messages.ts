@@ -1754,14 +1754,15 @@ const ko = {
   "diff.column.before": "이전",
   "diff.column.after": "이후",
   "diff.semantic.backendOwned":
-    "두 backend canonical payload만 비교하며 UI에서 StrategySpec 의미를 재해석하지 않습니다.",
+    "서버가 저장 revision과 현재 원문을 같은 의미 비교 정책으로 비교합니다.",
   "diff.semantic.empty": "의미 변경이 없습니다 (같은 spec hash).",
   "diff.semantic.no-base": "저장된 의미 기준이 없는 새 draft입니다.",
-  "diff.semantic.base-pending": "저장본 canonical 기준을 검증 중입니다.",
+  "diff.semantic.base-pending": "서버에서 저장본과 현재 원문의 의미 변경을 비교 중입니다.",
   "diff.semantic.current-unavailable":
     "현재 원문이 유효하게 compile되지 않아 원문 Diff만 제공합니다.",
+  "diff.semantic.unavailable": "서버 의미 비교를 불러올 수 없습니다. 원문을 수정하거나 비교 화면을 다시 열어 시도하세요.",
   "diff.semantic.incoherent":
-    "backend spec hash와 canonical payload가 일치하지 않아 의미 Diff를 표시하지 않습니다.",
+    "서버 비교 결과가 현재 원문·저장 revision과 일치하지 않아 의미 Diff를 표시하지 않습니다.",
   "diff.semantic.baseHash": "기준 spec hash",
   "diff.semantic.currentHash": "대상 spec hash",
   "diff.revision.title": "저장 revision 비교",
@@ -3998,14 +3999,15 @@ export const messages = {
     "diff.column.before": "Before",
     "diff.column.after": "After",
     "diff.semantic.backendOwned":
-      "Compares only two backend canonical payloads; the UI does not reinterpret StrategySpec semantics.",
+      "The server compares the saved revision and current source using the same semantic diff policy.",
     "diff.semantic.empty": "No semantic changes (same spec hash).",
     "diff.semantic.no-base": "This new draft has no saved semantic base.",
-    "diff.semantic.base-pending": "Validating the saved canonical baseline.",
+    "diff.semantic.base-pending": "Comparing the saved revision and current source on the server.",
     "diff.semantic.current-unavailable":
       "The current source has not compiled successfully, so only the source diff is available.",
+    "diff.semantic.unavailable": "The server comparison could not be loaded. Edit the source or reopen comparison to retry.",
     "diff.semantic.incoherent":
-      "The backend spec hash and canonical payload disagree, so semantic diff is hidden.",
+      "The server comparison does not match the current source and saved revision, so semantic diff is hidden.",
     "diff.semantic.baseHash": "Base spec hash",
     "diff.semantic.currentHash": "Target spec hash",
     "diff.revision.title": "Saved revision comparison",

@@ -1,8 +1,6 @@
 from strategy_workbench.domain.factor._evaluation import (
-    FactorComputedValue,
     FactorEvaluation,
     FactorFieldValue,
-    FactorInputValue,
     FactorObservation,
     FactorValue,
     NonFiniteFactorCalculationError,
@@ -10,10 +8,8 @@ from strategy_workbench.domain.factor._evaluation import (
 )
 
 __all__ = [
-    "FactorComputedValue",
     "FactorEvaluation",
     "FactorFieldValue",
-    "FactorInputValue",
     "FactorObservation",
     "FactorValue",
     "NonFiniteFactorCalculationError",

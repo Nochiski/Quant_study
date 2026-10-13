@@ -13,6 +13,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "domain.backtest",
     "domain.equity",
     "domain.experiment",
+    "domain.paging",
     "domain.portfolio",
     "domain.strategy",
 )

@@ -14,10 +14,12 @@ from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    ResearchStorageError,
     SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
@@ -431,6 +433,36 @@ def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
         service.retry(experiment_id, 0)
 
 
+def test_cancel_only_contacts_unfinished_runs_outside_the_experiment_lock() -> None:
+    """#384: 끝난 run별 조회를 없애고 느린 취소가 다른 실험의 조작을 막지 않는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    runs.run_statuses.update({"run-0": RunStatus.COMPLETED, "run-1": RunStatus.FAILED})
+    contacted: list[str] = []
+    cancel = runs.cancel
+
+    def observed_cancel(run_id: str, *, owner: str) -> None:
+        acquired: list[bool] = []
+
+        def acquire_from_another_thread() -> None:
+            held = service._lock.acquire(blocking=False)
+            acquired.append(held)
+            if held:
+                service._lock.release()
+
+        worker = Thread(target=acquire_from_another_thread)
+        worker.start()
+        worker.join(timeout=2)
+        assert acquired == [True]
+        contacted.append(run_id)
+        cancel(run_id, owner=owner)
+
+    runs.cancel = observed_cancel
+    service.cancel(experiment_id)
+    assert contacted == ["run-2", "run-3"]
+
+
 def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
     runs = _FakeRuns()
     service = _service(runs)
@@ -690,6 +722,33 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     # 끝난 실험도 조작은 되살린다(#390 리뷰 P3-3) — 제출 스레드만 없다.
     assert [owner for owner, _paused, _priority in runs.schedules] == [finished, waiting]
     assert len(pending) == 1
+
+
+@pytest.mark.parametrize("damaged_design", ["{}", "[]", "null"])
+def test_list_skips_unreadable_records_without_truncating_later_pages(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, damaged_design: str
+) -> None:
+    """#381: 손상 행이 페이지를 막거나 다음 정상 기록을 숨기지 않는다."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    service = _service(runs, repository=SQLiteExperimentRepository(path), spawn=lambda _work: None)
+    ids = [service.create(_request()).record.experiment_id for _ in range(6)]
+    with sqlite3.connect(path) as connection:
+        for experiment_id in (ids[0], ids[2], ids[4], ids[5]):
+            connection.execute(
+                "UPDATE experiments SET design_json = ? WHERE experiment_id = ?",
+                (damaged_design, experiment_id),
+            )
+    first = service.list(after=None, limit=1)
+    second = service.list(after=first.next_after, limit=1)
+    assert [item.record.experiment_id for item in first.items] == [ids[3]]
+    assert first.next_after == ids[3]
+    assert [item.record.experiment_id for item in second.items] == [ids[1]]
+    assert second.next_after is None
+    assert all(experiment_id in caplog.text for experiment_id in (ids[0], ids[2], ids[4], ids[5]))
+    # 원장 행을 지우거나 고치지는 않는다. 개별 조회는 명시적 저장 오류를 유지한다.
+    with pytest.raises(ResearchStorageError):
+        service.get(ids[4])
 
 
 def _interrupted_restart(tmp_path: Path) -> tuple[_FakeRuns, Path, str]:

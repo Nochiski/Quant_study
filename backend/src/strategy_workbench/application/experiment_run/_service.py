@@ -340,6 +340,7 @@ class ExperimentRunService:
         틈에 누른 취소가 결과가 다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은
         `experiment_status` 다. 취소한 실험을 다시 취소하면 그대로 돌려준다.
         """
+        run_ids: dict[str, None] = {}
         with self._lock:
             record = self._repository.get(experiment_id)
             if (
@@ -358,7 +359,14 @@ class ExperimentRunService:
                     *self._repository.picks(experiment_id),
                 ):
                     if run.run_id is not None:
-                        self._runs.cancel(run.run_id, owner=experiment_id)
+                        run_ids[run.run_id] = None
+        # 취소 표식과 제출 목록은 락 안에서 확정한다. 이후 제출·재시도는 거절되므로 느린 실행
+        # 취소는 다른 실험을 막지 않게 락 밖에서 한다. 끝난 실행은 일괄 상태로 걸러 낸다.
+        states = self._runs.states(run_ids) if run_ids else {}
+        for run_id in run_ids:
+            state = states.get(run_id)
+            if state is not None and state.status not in _SETTLED_RUNS:
+                self._runs.cancel(run_id, owner=experiment_id)
         return self.get(experiment_id)
 
     def retry(self, experiment_id: str, trial_index: int) -> ExperimentTrialState:

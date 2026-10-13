@@ -381,7 +381,7 @@ def test_session_volume_basis_leaves_the_engine_on_session_volume() -> None:
     environment = replace(_environment(), participation_basis=ParticipationBasis.SESSION_VOLUME)
 
     assert cost_history_sessions(environment) == 0
-    assert participation_volumes(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)]) is None
+    assert participation_volumes(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], {}) is None
 
 
 def test_adv20_gives_no_room_until_twenty_prior_rows_have_a_traded_value() -> None:
@@ -398,7 +398,7 @@ def test_adv20_gives_no_room_until_twenty_prior_rows_have_a_traded_value() -> No
     ]
 
     volumes = participation_volumes(
-        replace(_environment(), participation_basis=ParticipationBasis.ADV20), reversed(rows)
+        replace(_environment(), participation_basis=ParticipationBasis.ADV20), reversed(rows), {}
     )
 
     assert volumes == {key: 0 for key in ((row[0], row[1]) for row in rows)}
@@ -421,7 +421,7 @@ def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
         (session, "A", 10.0, None if k == 6 else 100.0 * k) for k, session in enumerate(sessions, 1)
     ] + [(session, "B", 5.0, 1_000.0) for session in sessions[:21]]
 
-    volumes = participation_volumes(environment, reversed(rows))
+    volumes = participation_volumes(environment, reversed(rows), {})
 
     assert volumes is not None
     assert [volumes[(sessions[index], "A")] for index in (20, 21, 22)] == [0, 112, 123]
@@ -449,7 +449,7 @@ def test_adv20_warmup_reads_past_suspended_days_so_the_start_date_does_not_zero_
 
     def limit(first_read: int) -> int | None:
         read = [row for row in rows if row[0] >= sessions[first_read - 1]]
-        volumes = participation_volumes(environment, read)
+        volumes = participation_volumes(environment, read, {})
         return None if volumes is None else volumes[(sessions[-1], "A")]
 
     assert history == 40

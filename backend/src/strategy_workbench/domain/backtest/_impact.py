@@ -1,10 +1,11 @@
 """√ 시장충격 → 엔진 bar 의 충격 척도(spec D7, 검증 랩 V2-03).
 
-계수·변동성 창·기준 거래량 규칙의 owner 는 이 파일 하나다. 엔진은 받은 척도에 체결가와 √체결 수량을
-곱할 뿐(`체결가 × 척도 × √Q`) σ·ADV 를 모른다.
+변동성 창·척도 공식의 owner 는 이 파일 하나다. 엔진은 받은 척도에 체결가와
+√(참여 한도 적용 후·여력 제한 전 주문 수량)을 곱할 뿐(`체결가 × 척도 × √Q`) σ·ADV 를 모른다.
 
 체결가 대비 충격 = k × σ일 × √(Q / ADV)(Tóth 외 2011 식 (1)의 Y σ √(Q/V)). 척도는 k × σ일 / √ADV 다.
-- k 는 `impact_coefficient`. 기본 1.0 은 Tóth 외 2011 의 "Y 는 1 안팎"과 도쿄증권거래소 전 종목 평균
+- k 의 기본값은 `RunEnvironment.impact_coefficient`가 소유한다.
+  Tóth 외 2011 의 "Y 는 1 안팎"과 도쿄증권거래소 전 종목 평균
   0.84(Sato·Kanazawa 2024)를 보수적으로 올린 값이다.
 - σ일은 판단일(그 종목의 t 직전 행)까지 최근 20개 종가 대 종가 수익률의 표본 표준편차다. 가격이
   원주가라 자본변동 정산 행(엔진처럼 사건 세션 이후 그 종목의 첫 행, `settlement_multipliers`)에서
@@ -25,7 +26,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 
 from ._models import ImpactModel, RunEnvironment
-from ._participation import ADV_SESSIONS, adv_shares, participation_history_sessions
+from ._participation import adv_shares
 
 VOLATILITY_SESSIONS = 20
 # 체결 한 건의 충격 상한(체결가 대비 비율). √ 법칙은 Q/ADV 가 작은 영역의 경험칙이다. 조용하던
@@ -33,23 +34,6 @@ VOLATILITY_SESSIONS = 20
 # 체결가를 넘어 매도 체결가가 0 이하가 된다(run 이 죽는다). 상한은 1 미만이어야 매도가가 양수로
 # 남는다. 충격을 깎는 쪽은 낙관 편향이므로 매도가가 양수로 남는 선까지만 자르도록 크게 잡는다.
 MAX_IMPACT_FRACTION = 0.99
-# 워밍업 여유 배수. 창이 요구하는 세션 수의 이 배를 읽어, 워밍업 안 거래정지로 행이 빈 날을 더 앞
-# 행이 메운다 — 같은 세션·종목의 참여 한도·σ 가 측정 시작일에 따라 갈리지 않게 한다(#396 리뷰
-# P2-2). 정지가 여유보다 길면 첫 세션들의 창이 차지 않는다(알려진 한계).
-WARMUP_MARGIN_FACTOR = 2
-
-
-def cost_history_sessions(environment: RunEnvironment) -> int:
-    """비용 계산(참여 기준 ADV·√ 충격 σ)을 위해 읽을 측정 구간 앞 워밍업 세션 수. 워밍업 여유의
-    정본이다.
-
-    창이 요구하는 행 수는 참여 기준 `adv20` 이 20행(`participation_history_sessions`), `sqrt` 가
-    ADV(20행)와 σ(수익률 20개 = 종가 21개)다. 그 최대의 `WARMUP_MARGIN_FACTOR` 배를 읽는다.
-    """
-    needed = participation_history_sessions(environment)
-    if environment.impact_model is ImpactModel.SQRT:
-        needed = max(needed, ADV_SESSIONS, VOLATILITY_SESSIONS + 1)
-    return WARMUP_MARGIN_FACTOR * needed
 
 
 def impact_scales(

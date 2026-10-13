@@ -50,6 +50,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     MAX_IMPACT_FRACTION,
+    PRICE_ADJUSTING_ACTIONS,
     ImpactModel,
     ParticipationBasis,
     RunEnvironment,
@@ -268,7 +269,7 @@ class BacktestEngineExecutorAdapter:
                 (
                     item.session,
                     item.security_id,
-                    float(item.ratio) if item.action_type in _PRICE_ADJUSTING_ACTIONS else 1.0,
+                    float(item.ratio) if item.action_type in PRICE_ADJUSTING_ACTIONS else 1.0,
                 )
                 for item in (
                     *request.dataset.history_corporate_actions,
@@ -429,13 +430,9 @@ class BacktestEngineExecutorAdapter:
 _SELL_TAX = CostKind.SELL_TAX.value
 _CARRY_COSTS = frozenset({CostKind.SHORT_BORROW.value, CostKind.MARGIN_INTEREST.value})
 
+
 # 엔진이 보유 수량에 적용하는 확인된 사건(`_apply_corporate_action`)과 같은 집합이다. 알림 전용
 # 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
-_PRICE_ADJUSTING_ACTIONS = frozenset(
-    {CorporateActionType.SPLIT.value, CorporateActionType.REVERSE_SPLIT.value}
-)
-
-
 def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[date, float]:
     """벤치마크 종목을 첫 세션에 `initial_cash`어치 사서 들고 있는 곡선.
 
@@ -453,22 +450,19 @@ def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[dat
     )
     if not bars:
         return {}
-    actions = sorted(
+    settled = settlement_multipliers(
+        ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
         (
-            (item.session, float(item.ratio))
+            (item.session, item.security_id, float(item.ratio))
             for item in dataset.corporate_actions
-            if item.security_id == benchmark_id and item.action_type in _PRICE_ADJUSTING_ACTIONS
+            if item.security_id == benchmark_id and item.action_type in PRICE_ADJUSTING_ACTIONS
         ),
-        key=lambda item: item[0],
     )
     values: dict[date, float] = {}
     cumulative = 1.0
-    applied = 0
     base: float | None = None
     for bar in bars:
-        while applied < len(actions) and actions[applied][0] <= bar.session:
-            cumulative *= actions[applied][1]
-            applied += 1
+        cumulative *= settled.get((bar.session, benchmark_id), 1.0)
         adjusted = bar.close * cumulative
         if base is None:
             base = adjusted

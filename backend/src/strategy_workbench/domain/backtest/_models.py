@@ -161,8 +161,8 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         example=10.0,
         message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
-    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
-    # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
+    # √ 충격의 계수 k(무차원). 기본값은 아래 필드 선언이 소유한다(`_impact.py` 머리말).
+    # 상한은 문헌의 "1 안팎"을 넉넉히 덮고 오타 입력(100·1000)을 막는다.
     "impact_coefficient": ScalarConstraint(
         pointer="/impact_coefficient",
         stage=AppliedStage.EXECUTION,

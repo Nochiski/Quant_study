@@ -8,8 +8,8 @@ ADV 계산과 원화 → 주식 수 환산 규칙의 owner 는 이 파일 하나
 않으므로 체결 시점에 모르는 정보가 들어가지 않는다. 거래대금이 있는 앞선 행이 20개가 안 되면(측정
 구간 안 신규 상장 등) 0주라 그 세션은 체결하지 않고 잔량을 넘긴다 — 상장 초기 며칠의 큰 거래대금으로
 한도를 부풀리지 않는 보수 쪽이다(#342). 첫 세션들의 20행은 측정 구간 앞 워밍업 bar 가
-채운다(`participation_history_sessions` 이 필요한 행 수, 읽을 세션 수는 여유를 더한
-`_impact.py` 의 `cost_history_sessions`). 워밍업은 측정이 아니라 연구 구간 판정을 받지 않는다.
+채운다(`ADV_SESSIONS` 가 필요한 행 수, 읽을 세션 수는 여유를 더한
+`_cost_history.py` 의 `cost_history_sessions`). 워밍업은 측정이 아니라 연구 구간 판정을 받지 않는다.
 
 한도는 floor(floor(ADV / 종가) × 참여율)로 두 번 내림한다. 한 번만 내림한 floor(ADV × 참여율 / 종가)
 보다 많아야 1주 적고, 대신 두 엔진 코어가 세션 거래량과 같은 정수 산술을 그대로 쓴다.
@@ -31,18 +31,14 @@ from datetime import date
 from ._models import ParticipationBasis, RunEnvironment
 
 ADV_SESSIONS = 20
-
-
-def participation_history_sessions(environment: RunEnvironment) -> int:
-    """참여 기준 계산에 필요한 측정 구간 앞 행 수. 읽을 세션 수(여유 포함)는
-    `cost_history_sessions` 가 정한다."""
-    return ADV_SESSIONS if environment.participation_basis is ParticipationBasis.ADV20 else 0
+# 가격이 주식 수에 반비례해 바뀌는 사건만 판단일 종가와 벤치마크 단위를 보정한다.
+PRICE_ADJUSTING_ACTIONS = frozenset({"split", "reverse_split"})
 
 
 def participation_volumes(
     environment: RunEnvironment,
     bars: Iterable[tuple[date, str, float, float | None]],
-    settled: Mapping[tuple[date, str], float] | None = None,
+    settled: Mapping[tuple[date, str], float],
 ) -> dict[tuple[date, str], int] | None:
     """`(세션, 종목, 종가, 거래대금)` 행마다 유동성 캡의 기준 거래량(주).
 
@@ -84,7 +80,7 @@ def settlement_multipliers(
 
 def adv_shares(
     bars: Iterable[tuple[date, str, float, float | None]],
-    settled: Mapping[tuple[date, str], float] | None = None,
+    settled: Mapping[tuple[date, str], float],
     *,
     minimum_rows: int,
 ) -> dict[tuple[date, str], float]:
@@ -98,7 +94,6 @@ def adv_shares(
     전에는 체결이 없다). 자본변동 정산 행(`settled`)에서는 판단일 종가를 가격 배수로 나눠 정산 뒤
     주식 단위로 센다 — 그 행의 주문·체결·거래량이 정산 뒤 단위다.
     """
-    multipliers = settled or {}
     volumes: dict[tuple[date, str], float] = {}
     values: dict[str, deque[float]] = {}
     last_close: dict[str, float] = {}
@@ -107,7 +102,7 @@ def adv_shares(
         window = values.setdefault(security_id, deque(maxlen=ADV_SESSIONS))
         previous_close = last_close.get(security_id)
         volumes[key] = (
-            sum(window) / len(window) / (previous_close / multipliers.get(key, 1.0))
+            sum(window) / len(window) / (previous_close / settled.get(key, 1.0))
             if len(window) >= minimum_rows and previous_close
             else 0.0
         )

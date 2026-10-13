@@ -123,6 +123,11 @@ const RevisionHarness = ({
         dispatch={dispatch}
         onEditorReady={history.onEditorReady}
       />
+      <button type="button" onClick={() => dispatch({
+        type: "saved", strategyId: "s1", revision: 2, specHash: "2".repeat(64),
+        canonicalJson: "{}", source: doc.source,
+        documentEpoch: doc.documentEpoch, sourceVersion: doc.sourceVersion,
+      })}>저장 응답 반영</button>
       <pre aria-label="원문">{doc.source}</pre>
     </>
   );
@@ -209,6 +214,21 @@ describe("문서 되돌리기·다시 실행 (P1-02)", () => {
     fireEvent.click(undoButton);
     expect(view.state.doc.toString()).toBe(RECOVERED);
     await waitFor(() => expect(source()).toBe(RECOVERED));
+  });
+
+  it("저장 응답 뒤 URL만 같은 revision으로 따라오면 후속 편집과 undo를 보존한다 (#419)", async () => {
+    const { rerender } = render(<RevisionHarness source={revision(1, A)} />);
+    const view = await editorView();
+    fireEvent.click(screen.getByRole("button", { name: "복구본 불러오기" }));
+    await waitFor(() => expect(view.state.doc.toString()).toBe(RECOVERED));
+    fireEvent.click(screen.getByRole("button", { name: "저장 응답 반영" }));
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "# 저장 뒤 편집\n" } }));
+    const edited = view.state.doc.toString();
+    rerender(<RevisionHarness source={revision(2, RECOVERED)} />);
+    expect(source()).toBe(edited);
+    expect(view.state.doc.toString()).toBe(edited);
+    fireEvent.click(screen.getByRole("button", { name: /실행 취소/ }));
+    await waitFor(() => expect(view.state.doc.toString()).toBe(RECOVERED));
   });
 
   it("drops the history when another revision is loaded", async () => {

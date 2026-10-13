@@ -9,10 +9,12 @@ import { projectForm, type FormProjection } from "./form-projection";
 import type { JsonSchema } from "./schema-navigator";
 
 export type FormProjectionState = {
-  /** runtime schema가 없거나 첫 parse 전(`firstParsePending`)이면 null. */
+  /** runtime schema 또는 이 문서의 유효 parse가 없으면 null. */
   projection: FormProjection | null;
   /** 이 문서의 첫 parse 가 아직 오지 않아 투영을 그리지 않는다(`isFirstParsePending`, #413). */
   firstParsePending: boolean;
+  /** 첫 parse가 거절되어 이 문서에서 그릴 유효한 원문이 없다. */
+  noValidParse: boolean;
   /**
    * 현재 텍스트의 parse가 **실패**해 같은 문서의 마지막 유효 parse로 그렸다(컨트롤은 잠긴다). parse가 아직
    * 끝나지 않은 디바운스 구간은 stale이 아니다 — 마지막 유효 parse를 조용히 그린다(리뷰 DEFECT-P404-001).
@@ -43,12 +45,14 @@ export const useFormProjection = (
     const failed = parsedCurrent !== null && current === null;
     const parse = current ?? state.lastValidParse?.result ?? null;
     const stale = failed && parse !== null;
-    const tree = parse !== null ? parse.tree : {};
+    const tree = parse !== null ? parse.tree : null;
     const firstParsePending = isFirstParsePending(state);
-    if (schema === null || firstParsePending)
-      return { projection: null, firstParsePending, stale, tree };
+    const noValidParse = !firstParsePending && parse === null;
+    if (schema === null || parse === null)
+      return { projection: null, firstParsePending, noValidParse, stale, tree };
     return {
       firstParsePending,
+      noValidParse,
       projection: projectForm(
         schema,
         parse,

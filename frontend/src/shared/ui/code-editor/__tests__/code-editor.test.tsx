@@ -38,6 +38,32 @@ describe("CodeEditor", () => {
     ).toBeInTheDocument();
   });
 
+  it("hands out its handle only once the editor view exists", async () => {
+    // 부모는 핸들을 받자마자 선택·포커스를 옮긴다(outline reveal). view 보다 핸들이 먼저 나가면 그
+    // 명령이 조용히 사라졌다. #324 조사에서 분리해 재현한 이 준비 순서 결함을 고정한다.
+    const announced: string[] = [];
+    const bind = (handle: CodeEditorHandle | null) => {
+      if (handle !== null) {
+        announced.push(handle.getText());
+        handle.setSelection(8, 9);
+      }
+    };
+    render(
+      <CodeEditor
+        ref={bind}
+        value={'title: "a"\n'}
+        language="yaml"
+        ariaLabel="편집기"
+        onChange={vi.fn()}
+      />,
+    );
+    await screen.findByRole("textbox", { name: "편집기" });
+    expect(announced[0]).toBe('title: "a"\n');
+    const content = screen.getByRole("textbox", { name: "편집기" });
+    const view = EditorView.findFromDOM(content)!;
+    expect(view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to)).toBe("a");
+  });
+
   it("reports text changes made through the handle and maps offsets to positions", async () => {
     const onSelectionChange = vi.fn();
     const { ref, onChange } = await mount({ onSelectionChange });

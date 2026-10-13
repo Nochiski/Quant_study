@@ -68,6 +68,7 @@ const settledForm = (
 ): FormProjectionState => ({
   projection,
   firstParsePending: false,
+  noValidParse: false,
   stale: false,
   tree,
 });

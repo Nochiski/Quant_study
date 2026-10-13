@@ -228,6 +228,8 @@ export const FactorGraphPanel = ({
           : 0;
     return (
       <FactorGraphEditor
+        // 첫 plan 응답 전후에도 같은 편집 표면이다. 형제 설명이 늘어도 진행 중 클릭·포커스를 보존한다(#324).
+        key="document-editor"
         tree={editing.tree}
         backendFactor={
           projected.status === "ready" &&
@@ -260,7 +262,7 @@ export const FactorGraphPanel = ({
   };
   if (projection.status !== "ready" || projection.factors.length === 0) {
     return (
-      <>
+      <section ref={container} className="factor-graph__pending">
         <GraphState
           state={
             projection.status !== "ready" ? projection : { status: "empty" }
@@ -269,7 +271,7 @@ export const FactorGraphPanel = ({
           onOpenSource={onOpenSource}
         />
         {editor(authored.length, true)}
-      </>
+      </section>
     );
   }
 
@@ -287,7 +289,11 @@ export const FactorGraphPanel = ({
       : projection.factors.find(
           (item) => item.factorId === authored[activeIndex]?.factorId,
         );
-  if (factor === undefined) return <>{editor(authored.length, true)}</>;
+  if (factor === undefined) return (
+    <section ref={container} className="factor-graph__pending">
+      {editor(authored.length, true)}
+    </section>
+  );
   const graphLevelIssues = factor.issues.filter(
     (issue) => issue.node_id === null,
   );

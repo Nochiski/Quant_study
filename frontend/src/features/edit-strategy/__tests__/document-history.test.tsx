@@ -1,3 +1,4 @@
+import { useWholeDocumentReplacement } from "../model/replace-whole-document";
 import { EditorView } from "@codemirror/view";
 import {
   act,
@@ -108,20 +109,24 @@ const RevisionHarness = ({
 }) => {
   const [doc, dispatch] = useStrategyDocument(documentSource);
   const history = useDocumentHistory(doc);
+  const replacement = useWholeDocumentReplacement();
+  const bindHistory = history.onEditorReady;
+  const bindReplacement = replacement.onEditorReady;
+  const onEditorReady = useCallback((editor: Parameters<typeof bindHistory>[0]) => { bindHistory(editor); bindReplacement(editor); }, [bindHistory, bindReplacement]);
   return (
     <>
       <DocumentHistoryActions history={history} />
-      {/* 복구 배너·서버 초안 배너가 보내는 것과 같은 액션이다(`use-autosave.ts`, `use-server-draft.ts`). */}
+      {/* 복구 배너·서버 초안 배너가 부르는 같은 편집기 명령이다. */}
       <button
         type="button"
-        onClick={() => dispatch({ type: "edit", source: RECOVERED })}
+        onClick={() => replacement.replace(RECOVERED)}
       >
         복구본 불러오기
       </button>
       <SourceEditor
         state={doc}
         dispatch={dispatch}
-        onEditorReady={history.onEditorReady}
+        onEditorReady={onEditorReady}
       />
       <button type="button" onClick={() => dispatch({
         type: "saved", strategyId: "s1", revision: 2, specHash: "2".repeat(64),

@@ -62,6 +62,8 @@ const mount = (document: DocumentState) => {
   });
 };
 it("backend 변경 행을 그대로 표시하고 늦은 옛 원문 응답은 현재 문서를 덮지 않는다", async () => {
+  let started!: () => void;
+  const firstStarted = new Promise<void>((resolve) => { started = resolve; });
   server.use(
     http.post(
       "http://localhost:8000/api/v1/strategies/s1/draft-diff",
@@ -73,12 +75,13 @@ it("backend 변경 행을 그대로 표시하고 늦은 옛 원문 응답은 현
         };
         expect(body.base_revision).toBe(2);
         expect(body.format).toBe("yaml");
-        if (body.source === "old request") await delay(80);
+        if (body.source === "old request") { started(); await delay(80); }
         return HttpResponse.json(response(body.source));
       },
     ),
   );
   const view = mount(state("old request"));
+  await firstStarted;
   view.rerender(<View document={state("new request", 2)} />);
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -124,4 +127,31 @@ it("일시 실패는 다음 편집의 새 요청으로 회복한다", async () =
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent('"after":"edited"'),
   );
+});
+
+it("같은 원문 재검증의 새 compile hash는 새 서버 비교를 요청한다", async () => {
+  let calls = 0;
+  server.use(http.post("http://localhost:8000/api/v1/strategies/s1/draft-diff", () => {
+    calls += 1;
+    return HttpResponse.json({ ...response("title: new"), target_spec_hash: calls === 1 ? "title: new" : "new-compile" });
+  }));
+  const before = state();
+  const view = mount(before);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent('"pointer"'));
+  view.rerender(<View document={{ ...before, compiled: { ...before.compiled!, specHash: "new-compile" } }} />);
+  await waitFor(() => expect(calls).toBe(2));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent('"pointer"'));
+});
+it("같은 원문이라도 새 문서 epoch·저장 기준으로 전환하면 새 기준을 조회한다", async () => {
+  const bases: number[] = [];
+  server.use(http.post("http://localhost:8000/api/v1/strategies/s1/draft-diff", async ({ request }) => {
+    const body = await request.json() as { base_revision: number };
+    bases.push(body.base_revision);
+    return HttpResponse.json({ ...response("title: new"), base_revision: body.base_revision, base_spec_hash: body.base_revision === 2 ? "base" : "new-base" });
+  }));
+  const view = mount(state());
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent('"pointer"'));
+  view.rerender(<View document={{ ...state(), documentEpoch: 2, baseRevision: 3, baseSpecHash: "new-base" }} />);
+  await waitFor(() => expect(bases).toEqual([2, 3]));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent('"pointer"'));
 });

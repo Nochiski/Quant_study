@@ -744,6 +744,69 @@ describe("experiments", () => {
     expect(screen.queryByText("실험 e-late 완료")).not.toBeInTheDocument();
   }, 10_000);
 
+  it("fills a new experiment with the constraints and exact choice values of a finished one", async () => {
+    usePreview();
+    const constraint = {
+      left: "top_n",
+      operator: "ge",
+      right_parameter: null,
+      right_value: 20,
+    };
+    const done = experiment("e-done", "completed");
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () =>
+          HttpResponse.json({
+            ...document,
+            spec: {
+              ...document.spec,
+              parameters: [
+                ...document.spec.parameters,
+                {
+                  parameter_id: "horizon",
+                  kind: "choice",
+                  default: "20d",
+                  choices: ["1d, 5d", "20d"],
+                },
+              ],
+            },
+          }),
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId`, () =>
+        HttpResponse.json({
+          ...done,
+          record: {
+            ...done.record,
+            design: {
+              ...done.record.design,
+              search: {
+                axes: [
+                  { parameter_id: "top_n", values: [10, 20] },
+                  { parameter_id: "horizon", values: ["1d, 5d"] },
+                ],
+                constraints: [constraint],
+              },
+            },
+          },
+        }),
+      ),
+    );
+    mount("/research/experiments/new?from=e-done");
+
+    // 쉼표가 든 선택지도 글자로 쪼개지지 않고 받은 그대로 다시 실린다.
+    await waitFor(() =>
+      expect(previews.at(-1)).toMatchObject({
+        search: { top_n: [10, 20], horizon: ["1d, 5d"] },
+        constraints: [constraint],
+      }),
+    );
+    expect(screen.getByLabelText("조합 제약 1: 값")).toHaveValue("20");
+    expect(
+      screen.getByRole("listbox", { name: "값 직접 입력: horizon" }),
+    ).toHaveValue(["0"]);
+  });
+
   it("fills a new experiment with the search space and split of a finished one", async () => {
     usePreview();
     mount("/research/experiments/new?from=e-done");

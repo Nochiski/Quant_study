@@ -12,7 +12,10 @@ import {
   useExperimentPreview,
   type ExperimentRequest,
 } from "../../../entities/experiment";
-import { strategyDocumentQuery } from "../../../entities/strategy";
+import {
+  strategyDocumentQuery,
+  type StrategyDocument,
+} from "../../../entities/strategy";
 import { failureReason } from "../../../shared/api";
 import { t, tFill, type MessageKey } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
@@ -24,11 +27,10 @@ import { ConstraintEditor, type Constraint } from "./constraint-editor";
 type Split = Required<ExperimentRequest["split"]>;
 type Search = ExperimentRequest["search"];
 type SearchValue = NonNullable<Search[string]>[number];
-type Parameter = {
-  parameter_id: string;
-  kind: string;
-  choices?: SearchValue[];
-};
+type Parameter = NonNullable<StrategyDocument["spec"]["parameters"]>[number];
+// 탐색하는 파라미터의 값 입력. 숫자 파라미터를 고쳐 적는 중이면 입력 원문, 선택지에서 고른 값·원 실험에서 받은
+// 값은 값 배열이다 — 받은 값을 글자로 왕복하지 않아 쉼표가 든 선택지도 그대로 다시 실린다(#518 리뷰 N1).
+type Entry = string | SearchValue[];
 type Rule = Split["selection_rule"];
 
 const RULES: Record<Rule, MessageKey> = {
@@ -66,18 +68,67 @@ const parseValue = (
   return token !== "" && Number.isFinite(number) ? number : token;
 };
 
-/** 탐색 값 입력 원문(쉼표 구분)을 요청 값으로 옮긴다. 비우면 null — backend 가 정의의 격자 값 전체를 편다. */
-const parseValues = (
-  text: string,
-  parameter: Parameter | undefined,
-): SearchValue[] | null => {
-  const tokens = text
-    .split(",")
-    .map((token) => token.trim())
-    .filter((token) => token !== "");
-  return tokens.length === 0
-    ? null
-    : tokens.map((token) => parseValue(token, parameter));
+/**
+ * 값 입력을 요청 값으로 옮긴다. 원문은 쉼표로 나눠 숫자로 읽는다. 비면 null — backend 가 정의의 격자 값
+ * 전체를 편다.
+ */
+const searchValues = (entry: Entry): SearchValue[] | null => {
+  const values =
+    typeof entry === "string"
+      ? entry
+          .split(",")
+          .map((token) => token.trim())
+          .filter((token) => token !== "")
+          .map((token) => parseValue(token, undefined))
+      : entry;
+  return values.length === 0 ? null : values;
+};
+
+/** 탐색 값 입력 칸. 선택지는 목록에서 고르고(글자로 적지 않는다), 숫자는 쉼표로 적는다. */
+const ValuesInput = ({
+  parameter,
+  entry,
+  onChange,
+}: {
+  parameter: Parameter;
+  entry: Entry;
+  onChange: (entry: Entry) => void;
+}) => {
+  const label = `${t("experiments.new.valuesInput")}: ${parameter.parameter_id}`;
+  if (parameter.kind === "choice") {
+    const picked = typeof entry === "string" ? [] : entry;
+    return (
+      <select
+        multiple
+        aria-label={label}
+        value={parameter.choices.flatMap((choice, index) =>
+          picked.includes(choice) ? [String(index)] : [],
+        )}
+        onChange={(event) =>
+          onChange(
+            Array.from(
+              event.target.selectedOptions,
+              (option) => parameter.choices[Number(option.value)]!,
+            ),
+          )
+        }
+      >
+        {parameter.choices.map((choice, index) => (
+          <option key={index} value={index}>
+            {String(choice)}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input
+      aria-label={label}
+      placeholder={t("experiments.new.valuesPlaceholder")}
+      value={typeof entry === "string" ? entry : entry.join(", ")}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
 };
 
 /** 미리 계산·만들기 거절 문장. 코드 번역은 백테스트 거절과 같은 `backtest.error.<code>` 체계다. */
@@ -119,13 +170,10 @@ const Form = ({
   initialConstraints?: Constraint[];
 }) => {
   const navigate = useNavigate();
-  // 탐색하는 파라미터 → 값 입력 원문. 빈 원문은 정의의 격자 값 전체다.
-  const [texts, setTexts] = useState<Record<string, string>>(() =>
+  // 탐색하는 파라미터 → 값 입력. 원 실험의 값은 받은 그대로 둔다.
+  const [entries, setEntries] = useState<Record<string, Entry>>(() =>
     Object.fromEntries(
-      Object.entries(initialSearch).map(([id, values]) => [
-        id,
-        values?.join(", ") ?? "",
-      ]),
+      Object.entries(initialSearch).map(([id, values]) => [id, values ?? []]),
     ),
   );
   const [constraints, setConstraints] =
@@ -141,20 +189,14 @@ const Form = ({
   });
   const parameters = document.data?.spec.parameters ?? [];
   const definitions = new Map<string, Parameter>(
-    parameters.map((parameter) => [
-      parameter.parameter_id,
-      parameter as Parameter,
-    ]),
+    parameters.map((parameter) => [parameter.parameter_id, parameter]),
   );
   const search: Search = Object.fromEntries(
-    Object.entries(texts).map(([id, text]) => [
-      id,
-      parseValues(text, definitions.get(id)),
-    ]),
+    Object.entries(entries).map(([id, entry]) => [id, searchValues(entry)]),
   );
   const explore = (id: string, on: boolean) => {
-    const next = { ...texts };
-    if (on) next[id] = "";
+    const next = { ...entries };
+    if (on) next[id] = [];
     else {
       delete next[id];
       // 탐색을 끈 파라미터를 가리키는 제약은 함께 뺀다(남기면 backend 가 거절한다).
@@ -165,7 +207,7 @@ const Form = ({
         ),
       );
     }
-    setTexts(next);
+    setEntries(next);
   };
   // 실험의 측정 창은 분할이 정하므로 기반 요청의 지표 창은 싣지 않는다(backend `experiment.base.invalid`).
   // 제약은 있을 때만 싣는다 — 비어 있으면 곱집합 전체라 요청 모양을 바꾸지 않는다.
@@ -226,13 +268,14 @@ const Form = ({
             {parameters.map((parameter) => {
               const id = parameter.parameter_id;
               const values = axes.get(id);
+              const entry = id in entries ? entries[id] : undefined;
               return (
                 <tr key={id}>
                   <td>
                     <input
                       type="checkbox"
                       aria-label={`${t("experiments.new.explore")}: ${id}`}
-                      checked={id in texts}
+                      checked={id in entries}
                       onChange={(event) => explore(id, event.target.checked)}
                     />
                   </td>
@@ -245,16 +288,15 @@ const Form = ({
                       : `${values.join(", ")} (${values.length})`}
                   </td>
                   <td>
-                    {id in texts ? (
-                      <input
-                        aria-label={`${t("experiments.new.valuesInput")}: ${id}`}
-                        placeholder={t("experiments.new.valuesPlaceholder")}
-                        value={texts[id]}
-                        onChange={(event) =>
-                          setTexts({ ...texts, [id]: event.target.value })
+                    {entry === undefined ? null : (
+                      <ValuesInput
+                        parameter={parameter}
+                        entry={entry}
+                        onChange={(next) =>
+                          setEntries({ ...entries, [id]: next })
                         }
                       />
-                    ) : null}
+                    )}
                   </td>
                 </tr>
               );
@@ -263,7 +305,7 @@ const Form = ({
         </table>
       </div>
       <ConstraintEditor
-        explored={Object.keys(texts)}
+        explored={Object.keys(entries)}
         constraints={constraints}
         onChange={setConstraints}
       />

@@ -381,6 +381,8 @@
   기반은 백테스트 결과 화면에서 만들 수 없어 셋째 기준은 브라우저 e2e 로 재현하지 않는다). 스토리 e2e 는 V5-01
   2/2 가 US-SM-15 와 함께 붙였다. 값 직접 입력과 조합 제약은 로드맵 M6 Builder 가 붙였다(허용 판정·남는
   조합이 없는 제약 거절은 backend 미리 계산 `experiment.search.invalid_constraint`·`no_feasible_point`).
+  e2e 전략은 파라미터가 하나라, 원 실험의 제약·선택지 값 프리필은 frontend `experiments.test.tsx` 가,
+  파라미터끼리 비교하는 제약(fast < slow)은 backend `tests/domain/test_experiment_constraints.py` 가 확인한다.
 
 ### US-SM-15 여러 실험을 대기열에 넣고 창을 닫아도 계속 돈다
 

@@ -20,10 +20,10 @@ PR은 GitHub 번호(`#123`)로 적는다.
 
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
-| 김철수 | 5 | 2 | 5 | 1 | 13 |
+| 김철수 | 7 | 0 | 5 | 1 | 13 |
 | 정동민 | 9 | 0 | 2 | 0 | 11 |
 | 한상목 | 15 | 0 | 0 | 1 | 16 |
-| 합계 | 29 | 2 | 7 | 2 | 40 |
+| 합계 | 31 | 0 | 7 | 2 | 40 |
 
 ### 스토리별 추적
 
@@ -33,8 +33,8 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-CS-02 | 김철수 | 두 원천 필드를 가공한 파생 팩터를 정의하고 기존 팩터와 결합한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다 |
 | US-CS-03 | 김철수 | 중간값 추적과 실행 계획으로 계산과 공개 시점을 검증한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다<br>`frontend/e2e/stories/cs.masked-trace.spec.ts` :: US-CS-03 원장이 가린 신용잔고 칸을 건넌 노드 값과 그 원시 셀을 원장이 가림으로 본다<br>`frontend/e2e/stories/strategy-tie-breaker.spec.ts` :: 주 점수가 같을 때 선언한 보조 팩터와 방향으로 선정한다<br>`frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests<br>`frontend/e2e/workbench.workflow.spec.ts` :: 레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다 |
 | US-CS-04 | 김철수 | AI에게 팩터 자료 조사와 파라미터 조정안을 맡긴다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 검색 상한에 닿은 턴은 검색 칩 대신 안내 문구를 보이고 새로고침해도 같다<br>`frontend/e2e/assistant.workflow.spec.ts` :: 검색 출처를 링크로 보이고 검증에 실패한 턴은 실패 문구로 끝난다<br>`frontend/e2e/assistant.workflow.spec.ts` :: 팩터 그래프를 바꾸는 제안도 적용 후 백테스트가 팩터 계획 조회를 기다려 실행한다 |
-| US-CS-05 | 김철수 | 단위가 다른 팩터를 결합 전에 정규화한다 | `구현됨-e2e없음` | P5-03 | P5-03 | — |
-| US-CS-06 | 김철수 | 거래대금 상위 20% 같은 횡단면 필터와 변동성 역가중을 쓴다 | `구현됨-e2e없음` | P5-03 | P5-03 | — |
+| US-CS-05 | 김철수 | 단위가 다른 팩터를 결합 전에 정규화한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-05 1.1 업그레이드는 none과 원시 기여도를 보존한다<br>`frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-05 기본 순위와 세 정규화의 기여도·합계 및 단위 경고를 추적한다 |
+| US-CS-06 | 김철수 | 거래대금 상위 20% 같은 횡단면 필터와 변동성 역가중을 쓴다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 100종목 상위 20%의 20개 통과·80개 순위 탈락을 구분한다<br>`frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 변동성은 역가중에만 쓰이고 알파가 없으면 compile을 막는다 |
 | US-CS-07 | 김철수 | 노드 캔버스에서 끌어서 잇고 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/node-canvas.spec.ts` :: 노드 캔버스 배선·키보드·취소·배치·YAML undo가 같은 원문을 지킨다<br>`frontend/e2e/stories/node-canvas.spec.ts` :: 캔버스의 같은 진단을 다시 선택하면 해당 노드와 인스펙터를 드러낸다 |
 | US-CS-08 | 김철수 | 파생 팩터를 저장해 두고 다른 전략에서 다시 쓴다 | `미계획` | — | — | — |
 | US-CS-09 | 김철수 | 워크포워드 실험으로 표본 밖 성과를 본다 | `예정` | V3-01, V3-05, V5-01, V5-02 | V5-02 | — |

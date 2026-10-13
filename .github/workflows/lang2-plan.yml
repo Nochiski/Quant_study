@@ -1,0 +1,34 @@
+name: lang2-plan
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  generated-progress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 공식 생성 집계 검사
+        id: check
+        shell: pwsh
+        run: ./docs/planning/strategy-language-2-0/tools/update-plan-progress.ps1 -Check
+      # 실패는 유지하면서 공식 생성기의 수정본만 검토용으로 제공한다.
+      - name: 오래된 집계의 공식 수정본 생성
+        if: failure() && steps.check.outcome == 'failure'
+        shell: pwsh
+        run: |
+          ./docs/planning/strategy-language-2-0/tools/update-plan-progress.ps1
+          ./docs/planning/strategy-language-2-0/tools/update-plan-progress.ps1 -Check
+          # artifact 다운로드가 막힌 환경에서도 공식 생성 diff를 그대로 적용할 수 있다.
+          $patch = (git diff --binary -- docs/planning/strategy-language-2-0/PLAN.md) -join "`n"
+          Write-Output ("LANG2_PLAN_PATCH=" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($patch + "`n")))
+      - name: 검토용 수정본 보존
+        if: failure() && steps.check.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lang2-plan-generated
+          path: docs/planning/strategy-language-2-0/PLAN.md

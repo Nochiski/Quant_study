@@ -263,8 +263,8 @@ def normalized_parameter_value(
 def parameter_value_allowed(parameter: ParameterDefinition, value: ParameterValue) -> bool:
     """값이 파라미터 정의의 타입·범위·선택지 안인가(`normalized_parameter_value` 가 값을 내는가).
 
-    검증기가 기본값을 판정할 때 쓰는 술어다. 탐색·실행 해소는 같은
-    `normalized_parameter_value`에서 정규화된 값을 직접 받는다.
+    검증기의 기본값 판정이 이 술어를 쓴다. 실험 탐색 값과 실행 요청 해소는 같은 owner인
+    `normalized_parameter_value`를 직접 호출해 정규화된 값도 받는다.
     `step` 은 보지 않는다. 간격은 탐색 격자를 펼치는 폭일 뿐이고, 여기서 간격 정렬을 요구하면
     간격에 맞지 않는 기본값을 가진 저장 리비전이 새로 검증 오류가 된다.
     """

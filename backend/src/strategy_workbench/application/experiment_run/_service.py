@@ -517,17 +517,14 @@ class ExperimentRunService:
         """재시작 뒤 취소하지 않은 실험의 대기열 조작을 되살리고 남은 trial 을 다시 넘긴다(spec D6).
 
         남은 trial 은 넘기지 못한 trial(제출이 예상 밖 오류로 멈춘 경우 포함)과 재시작으로 중단된
-        trial 이다. 끝난 실험은 조작만 되살리고(뒤의 재시도가 따른다) 제출 스레드는 띄우지 않는다.
+        trial 이다. 끝난 실험에는 제출 스레드나 레인 설정을 두지 않는다. 조작은 각 접수에서 저장
+        정본으로 복원한다.
         저장된 실험 하나를 읽지 못하면(지금 모델로 디코드되지 않는다) 그 실험만 로그로 건너뛰고
         부팅은 이어 간다.
         """
         for experiment_id in self._repository.open_ids():
             try:
                 record = self._repository.get(experiment_id)
-                controls = record.controls
-                self._runs.schedule(
-                    experiment_id, paused=controls.paused, priority=controls.priority
-                )
                 if self._experiment(record).status is ExperimentStatus.COMPLETED:
                     continue
             except Exception:
@@ -813,6 +810,7 @@ class ExperimentRunService:
                 _run_request(record.run, trial, start, end),
                 trial_key=experiment_trial_key(base, trial),
                 owner=record.experiment_id,
+                controls=self._repository.get(record.experiment_id).controls,
             )
         except TrialRunRejectedError as rejected:
             return None, rejected.code, str(rejected)

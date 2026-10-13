@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 _T = TypeVar("_T")
@@ -22,6 +23,14 @@ def experiment_slots(run_slots: int) -> int:
     슬롯이 1개면 비우지 않는다 — 비우면 실험이 영영 돌지 못한다.
     """
     return run_slots - 1 if run_slots >= 2 else run_slots
+
+
+@dataclass(frozen=True)
+class RunLaneControls:
+    """실행 접수와 원자적으로 적용할 레인 조작. 저장 정본은 실험 기록이다."""
+
+    paused: bool
+    weight: int
 
 
 class RunQueue(Generic[_T]):
@@ -50,6 +59,12 @@ class RunQueue(Generic[_T]):
             self._weights.pop(lane, None)
         else:
             self._weights[lane] = weight
+
+    def forget(self, lane: str) -> None:
+        """더 쓰는 실행이 없는 실험의 조작과 차례 잔량을 버린다."""
+        self._paused.discard(lane)
+        self._weights.pop(lane, None)
+        self._served.pop(lane, None)
 
     def is_paused(self, lane: str) -> bool:
         return lane in self._paused

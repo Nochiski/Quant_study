@@ -144,6 +144,7 @@ class _FakeRuns:
         self.cancelled: list[tuple[str, str]] = []
         self.owners: set[str] = set()
         self.schedules: list[tuple[str, bool, int]] = []
+        self.submitted_controls: list[ExperimentControls] = []
         self.error_codes: dict[str, RunFailureCode] = {}
         # 다음 `admit` 앞에서 한 번 부른다(복구 제출과 겹치는 조작을 재현한다).
         self.before_admit: Callable[[], None] | None = None
@@ -171,8 +172,11 @@ class _FakeRuns:
             self.on_ledger()
         return summarize_trial_ledger("s-1", (), self.ledger_entries, ())
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
+    def start(
+        self, request: BacktestRunSpec, *, trial_key: str, owner: str, controls: ExperimentControls
+    ) -> str:
         self.owners.add(owner)
+        self.submitted_controls.append(controls)
         if self.reject:
             raise TrialRunRejectedError(
                 "backtest.run.invalid", "strategy exceeds engine capabilities — core=rust"
@@ -639,6 +643,9 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
 
     service.control(experiment_id, priority=3)
     paused = service.control(experiment_id, paused=True)  # 보내지 않은 우선순위는 그대로다
+    for run_id in runs.run_statuses:
+        runs.run_statuses[run_id] = RunStatus.FAILED
+        runs.error_codes[run_id] = "backtest.run.interrupted"
     _service(runs, repository=SQLiteExperimentRepository(path)).recover()
 
     assert (paused.status, paused.trial_counts) == (
@@ -646,12 +653,9 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
         {TrialStatus.QUEUED: 4},
     )
     assert paused.record.controls == ExperimentControls(paused=True, priority=3)
-    # 대기열에 알리고, 재시작하면 저장된 조작을 다시 알린다.
-    assert runs.schedules == [
-        (experiment_id, False, 3),
-        (experiment_id, True, 3),
-        (experiment_id, True, 3),
-    ]
+    # 현재 대기열 조작은 바로 알리고, 복구 접수는 저장된 조작을 원자적으로 적용한다.
+    assert runs.schedules == [(experiment_id, False, 3), (experiment_id, True, 3)]
+    assert runs.submitted_controls[-4:] == [ExperimentControls(paused=True, priority=3)] * 4
 
 
 def test_recover_resubmits_unsubmitted_and_interrupted_trials_only(tmp_path: Path) -> None:
@@ -711,7 +715,7 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     _finish(runs, {"run-4": _result(), "run-5": _result()})
     # 제출 스레드가 돌기 전에 재시작한 두 실험. 하나는 저장된 설계를 지금 모델로 읽을 수 없다.
     broken = service.create(_request()).record.experiment_id
-    waiting = service.create(_request()).record.experiment_id
+    service.create(_request())
     with sqlite3.connect(path) as connection:
         connection.execute(
             "UPDATE experiments SET design_json = '{}' WHERE experiment_id = ?", (broken,)
@@ -721,8 +725,8 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append).recover()
 
     assert service.get(finished).status is ExperimentStatus.COMPLETED
-    # 끝난 실험도 조작은 되살린다(#390 리뷰 P3-3) — 제출 스레드만 없다.
-    assert [owner for owner, _paused, _priority in runs.schedules] == [finished, waiting]
+    # 저장 조작은 각 실행 접수에서 복원하므로 끝난 실험의 레인 설정을 다시 쌓지 않는다.
+    assert runs.schedules == []
     assert len(pending) == 1
 
 

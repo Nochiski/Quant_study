@@ -2,6 +2,22 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
+/// 후보 검증과 확정 소비가 같은 연산 순서로 장부를 갱신한다.
+pub(crate) fn project_valuation(
+    equity: f64,
+    gross: f64,
+    old: i64,
+    new: i64,
+    old_mark: f64,
+    price: f64,
+    cost: f64,
+) -> (f64, f64) {
+    (
+        equity + (old as f64 * (price - old_mark) - cost),
+        gross + (new.abs() as f64 * price - old.abs() as f64 * old_mark),
+    )
+}
+
 /// 세션 안 매수 여력 = leverage × equity − 총노출 (core.PythonBuyingPower와 동일 연산 순서).
 #[pyclass]
 pub(crate) struct BuyingPower {
@@ -46,6 +62,11 @@ impl BuyingPower {
         self.leverage
     }
 
+    #[getter]
+    pub(crate) fn valuation(&self) -> (f64, f64) {
+        (self.equity, self.gross)
+    }
+
     pub(crate) fn mark_of(&self, key: &str) -> Option<f64> {
         self.marks.get(key).copied()
     }
@@ -74,8 +95,8 @@ impl BuyingPower {
         let old = self.quantity_of(key);
         let new = if buy { old + quantity } else { old - quantity };
         let old_mark = *self.marks.get(key).unwrap_or(&price);
-        self.gross += (new.abs() as f64) * price - (old.abs() as f64) * old_mark;
-        self.equity += (old as f64) * (price - old_mark) - fee;
+        (self.equity, self.gross) =
+            project_valuation(self.equity, self.gross, old, new, old_mark, price, fee);
         self.marks.insert(key.to_string(), price);
         self.quantities.insert(key.to_string(), new);
         Ok(())

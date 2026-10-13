@@ -260,6 +260,7 @@ impl<'a> Session<'a> {
             self.sell_tax_rate,
             self.power.leverage(),
             self.power.mark_of(&e.key),
+            Some(self.power.valuation()),
         )?;
         Ok(QuoteOut {
             price: p,
@@ -268,6 +269,33 @@ impl<'a> Session<'a> {
             status,
             no_price: false,
         })
+    }
+
+    fn constrain_quote(&self, e: &EntryIn, quote: &QuoteOut, quantity: i64) -> PyResult<QuoteOut> {
+        // 최초 견적의 가격·충격은 고정하고 현재 장부로 수량만 판정한다(#341).
+        let (_, fitted, _, status) = quote_numbers(
+            &e.side,
+            quote.price,
+            quantity,
+            0,
+            None,
+            0.0,
+            None,
+            self.power.available(),
+            self.power.quantity_of(&e.key),
+            self.fee_rate,
+            false,
+            self.sell_tax_rate,
+            self.power.leverage(),
+            self.power.mark_of(&e.key),
+            Some(self.power.valuation()),
+        )?;
+        let mut result = quote.clone();
+        if fitted < quantity {
+            result.status = status;
+        }
+        result.quantity = fitted;
+        Ok(result)
     }
 
     fn detail(&self, q: &QuoteOut, e: &EntryIn) -> Option<String> {

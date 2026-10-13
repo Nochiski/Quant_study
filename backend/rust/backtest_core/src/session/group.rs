@@ -192,8 +192,12 @@ impl<'a> Session<'a> {
                     .collect();
                 for (i, qty) in planned.iter().enumerate() {
                     if *qty > 0 {
-                        let q = quotes[i].clone();
-                        self.apply(&mut legs[i], &q, *qty)?;
+                        // 축소된 매도 대금·청산 여력으로 최종 정수 주문을 다시 견적한다.
+                        let q = self.constrain_quote(&legs[i], &quotes[i], *qty)?;
+                        if q.quantity > 0 {
+                            let quantity = q.quantity;
+                            self.apply(&mut legs[i], &q, quantity)?;
+                        }
                     }
                 }
                 let mut leftovers: Vec<&EntryIn> =

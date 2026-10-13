@@ -704,6 +704,7 @@ class BacktestEngine:
                 held=power.quantity_of(order.instrument),
                 leverage=power.leverage,
                 held_mark=power.mark_of(order.instrument),
+                valuation=power.valuation,
                 sell_tax_rate=run.config.sell_tax_rate(snapshot.ts.date()),
             )
             if quote.quantity > 0:
@@ -956,6 +957,7 @@ class BacktestEngine:
                 held=power.quantity_of(entry.order.instrument),
                 leverage=power.leverage,
                 held_mark=power.mark_of(entry.order.instrument),
+                valuation=power.valuation,
                 sell_tax_rate=tax_rate,
             )
             quotes.append((entry, quote))
@@ -1013,9 +1015,24 @@ class BacktestEngine:
             (entry, quote, (entry.remaining * tight_quote.quantity) // tight_remaining)
             for entry, quote in quotes
         ]
-        for entry, quote, quantity in planned:
+        for entry, _quote, quantity in planned:
             if quantity > 0:
-                self._apply_quote(run, entry, quote, quantity, snapshot, power, update)
+                # 정수 축소는 매도 대금·숏 청산 여력을 비례 보존하지 않는다.
+                # 현재 장부로 최종 수량을 다시 견적한다.
+                quote = run.broker.constrain_quote(
+                    entry,
+                    _quote,
+                    quantity,
+                    snapshot.bar(entry.order.instrument),
+                    power.available,
+                    held=power.quantity_of(entry.order.instrument),
+                    leverage=power.leverage,
+                    held_mark=power.mark_of(entry.order.instrument),
+                    valuation=power.valuation,
+                    sell_tax_rate=tax_rate,
+                )
+                if quote.quantity > 0:
+                    self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
         for entry in order_manager.group_entries(group.group_id):
             order_manager.remove(entry.order_id)
             update(

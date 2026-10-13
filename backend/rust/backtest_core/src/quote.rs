@@ -1,3 +1,4 @@
+use crate::buying_power::project_valuation;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -56,21 +57,13 @@ pub(crate) fn liquidity_cap(volume: i64, participation: &str) -> PyResult<i64> {
     })
 }
 
-/// 수수료 포함 여력으로 살 수 있는 최대 정수 수량 (Python `_affordable_quantity`와 동일 연산).
-fn affordable_quantity(buying_power: f64, price: f64, fee_rate: f64) -> i64 {
-    if price <= 0.0 || buying_power <= 0.0 {
-        return 0;
-    }
-    (buying_power / (price * (1.0 + fee_rate))).floor() as i64
-}
-
 /// 견적의 수치 부분. 슬리피지(주당, ≥0)는 호출 측이 준다 (플러그인 포트).
 ///
 /// 반환 `(price, quantity, slip_applied, status)`; status는
 /// `filled | liquidity_limited | cash_limited | rejected_no_cash | not_filled | fok_rejected`.
 /// 흐름은 Python과 같다: 유동성 캡 → 슬리피지·지정가 clip → 여력 캡(숏 진입분 포함) → FOK.
 #[pyfunction]
-#[pyo3(signature = (side, base_price, remaining, volume, participation, slip, limit_price, buying_power, held, fee_rate, fok, sell_tax_rate=0.0, leverage=1.0, held_mark=None))]
+#[pyo3(signature = (side, base_price, remaining, volume, participation, slip, limit_price, buying_power, held, fee_rate, fok, sell_tax_rate=0.0, leverage=1.0, held_mark=None, valuation=None))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn quote_numbers(
     side: &str,
@@ -87,6 +80,7 @@ pub(crate) fn quote_numbers(
     sell_tax_rate: f64,
     leverage: f64,
     held_mark: Option<f64>,
+    valuation: Option<(f64, f64)>,
 ) -> PyResult<(f64, i64, f64, String)> {
     let buy = match side {
         "buy" => true,
@@ -130,15 +124,29 @@ pub(crate) fn quote_numbers(
     }
     let applied = (price - base_price).abs();
 
-    // 실제 여력 소모와 같은 체결가 재평가 및 L배 비용을 역산한다.
-    let held_value = held as f64;
-    let mark = held_mark.unwrap_or(price);
-    let repriced_power = buying_power + (leverage * held_value - held_value.abs()) * (price - mark);
     let closing = if buy { (-held).max(0) } else { held.max(0) };
-    let cost_rate = fee_rate + if buy { 0.0 } else { sell_tax_rate };
     if quantity > closing {
-        let freed_power = repriced_power + closing as f64 * price * (1.0 - leverage * cost_rate);
-        let affordable = closing + affordable_quantity(freed_power, price, leverage * cost_rate);
+        let (equity, gross) = valuation.unwrap_or((buying_power / leverage, 0.0));
+        let mark = held_mark.unwrap_or(price);
+        let (mut low, mut high) = (closing, quantity);
+        while low < high {
+            let candidate = low + (high - low) / 2 + (high - low) % 2;
+            let notional = candidate as f64 * price;
+            let cost = notional * fee_rate + if buy { 0.0 } else { notional * sell_tax_rate };
+            let new = if buy {
+                held + candidate
+            } else {
+                held - candidate
+            };
+            let (after_equity, after_gross) =
+                project_valuation(equity, gross, held, new, mark, price, cost);
+            if leverage * after_equity - after_gross >= 0.0 {
+                low = candidate;
+            } else {
+                high = candidate - 1;
+            }
+        }
+        let affordable = low;
         if affordable <= 0 {
             return Ok((price, 0, applied, "rejected_no_cash".to_string()));
         }

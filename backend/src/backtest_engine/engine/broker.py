@@ -18,13 +18,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import ROUND_FLOOR, Decimal
 from enum import Enum
 from typing import Protocol
 
 from backtest_engine.engine.costs import sell_tax_amount
 from backtest_engine.engine.orders import OpenOrder
+from backtest_engine.engine.power_projection import project_valuation
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.ports.execution import SlippageModel
@@ -130,6 +131,7 @@ class QuoteCore(Protocol):
         sell_tax_rate: float = 0.0,
         leverage: float = 1.0,
         held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
     ) -> QuoteNumbers: ...
 
 
@@ -150,6 +152,7 @@ class PythonQuoteCore:
         sell_tax_rate: float = 0.0,
         leverage: float = 1.0,
         held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
     ) -> QuoteNumbers:
         if slip < 0:
             raise ValueError(f"slippage must be >= 0 — slip={slip}")
@@ -173,16 +176,25 @@ class PythonQuoteCore:
             price = min(price, limit) if buy else max(price, limit)
         applied = abs(price - base_price)
 
-        # consume가 쓰는 L×equity−gross를 체결가로 재평가한 뒤 역산한다.
-        # 수수료/세금은 equity를 줄이므로 여력에서는 L배다. 숏 환매도 노출 해제를 인정한다.
-        held_value = float(held)
-        mark = price if held_mark is None else held_mark
-        repriced_power = buying_power + (leverage * held_value - abs(held_value)) * (price - mark)
         closing = max(-held if buy else held, Decimal(0))
-        cost_rate = fee_rate + (0.0 if buy else sell_tax_rate)
         if quantity > closing:
-            freed_power = repriced_power + float(closing) * price * (1.0 - leverage * cost_rate)
-            affordable = closing + _affordable_quantity(freed_power, price, leverage * cost_rate)
+            # 분모 역산의 floor는 정확한 경계에서 한 주를 잃는다. 실제 장부식으로 후보를 판정한다.
+            equity, gross = valuation or (buying_power / leverage, 0.0)
+            mark = price if held_mark is None else held_mark
+            low, high = int(closing), int(quantity)
+            while low < high:
+                candidate = (low + high + 1) // 2
+                notional = candidate * price
+                cost = notional * fee_rate + (0.0 if buy else notional * sell_tax_rate)
+                new = held + (Decimal(candidate) if buy else -Decimal(candidate))
+                after_equity, after_gross = project_valuation(
+                    equity, gross, held, new, mark, price, cost
+                )
+                if leverage * after_equity - after_gross >= 0:
+                    low = candidate
+                else:
+                    high = candidate - 1
+            affordable = Decimal(low)
             if affordable <= 0:
                 return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
             if affordable < quantity:
@@ -192,14 +204,6 @@ class PythonQuoteCore:
         if fok and quantity < remaining:
             return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.FOK_REJECTED)
         return QuoteNumbers(price, quantity, applied, status)
-
-
-def _affordable_quantity(buying_power: float, price: float, fee_rate: float) -> Decimal:
-    """수수료까지 포함해 여력으로 살 수 있는 최대 정수 수량."""
-    if price <= 0 or buying_power <= 0:
-        return Decimal(0)
-    raw = buying_power / (price * (1.0 + fee_rate))
-    return Decimal(raw).quantize(Decimal(1), rounding=ROUND_FLOOR)
 
 
 class BrokerSim:
@@ -256,6 +260,7 @@ class BrokerSim:
         sell_tax_rate: float = 0.0,
         leverage: float = 1.0,
         held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
     ) -> Quote:
         """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음.
 
@@ -307,6 +312,7 @@ class BrokerSim:
             sell_tax_rate,
             leverage,
             held_mark,
+            valuation,
         )
         detail = self._detail(numbers, order, bar, volume, open_order.remaining, buying_power)
         return Quote(
@@ -316,6 +322,48 @@ class BrokerSim:
             numbers.slippage_per_share,
             numbers.status,
             detail,
+        )
+
+    def constrain_quote(
+        self,
+        entry: OpenOrder,
+        quote: Quote,
+        quantity: Decimal,
+        bar: Bar,
+        buying_power: float,
+        held: Decimal,
+        leverage: float,
+        held_mark: float | None,
+        valuation: tuple[float, float],
+        sell_tax_rate: float,
+    ) -> Quote:
+        """비례 축소 후 예산만 재판정한다. 최초 견적의 가격·충격 Q 계약은 유지한다."""
+        numbers = self._quote_core.quote_numbers(
+            entry.order.side,
+            quote.price,
+            quantity,
+            bar.cap_volume,
+            None,
+            0.0,
+            None,
+            buying_power,
+            held,
+            self._fee_rate,
+            False,
+            sell_tax_rate,
+            leverage,
+            held_mark,
+            valuation,
+        )
+        if numbers.quantity == quantity:
+            return replace(quote, quantity=quantity)
+        return replace(
+            quote,
+            quantity=numbers.quantity,
+            status=numbers.status,
+            detail=self._detail(
+                numbers, entry.order, bar, bar.cap_volume, entry.remaining, buying_power
+            ),
         )
 
     @staticmethod

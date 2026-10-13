@@ -23,6 +23,7 @@ from backtest_engine.engine.broker import (
 )
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
+from backtest_engine.engine.power_projection import project_valuation
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import (
     FixedBpsSlippage,
@@ -282,6 +283,9 @@ class BuyingPowerTracker(Protocol):
     @property
     def leverage(self) -> float: ...
 
+    @property
+    def valuation(self) -> tuple[float, float]: ...
+
     def mark_of(self, instrument: InstrumentId) -> float | None: ...
 
     def quantity_of(self, instrument: InstrumentId) -> Decimal: ...
@@ -314,6 +318,10 @@ class PythonBuyingPower:
     def leverage(self) -> float:
         return self._leverage
 
+    @property
+    def valuation(self) -> tuple[float, float]:
+        return self._equity, self._gross
+
     def mark_of(self, instrument: InstrumentId) -> float | None:
         return self._marks.get(instrument)
 
@@ -329,8 +337,9 @@ class PythonBuyingPower:
         # 기존 노출은 세션 시작 평가가, 변화분은 체결가가 기준이다. 체결가로 재평가되면
         # 기존 보유분의 평가 손익만큼 equity도 움직인다 (equity = cash + Σ qty × mark).
         old_mark = self._marks.get(instrument, price)
-        self._gross += float(abs(new)) * price - float(abs(old)) * old_mark
-        self._equity += float(old) * (price - old_mark) - fee
+        self._equity, self._gross = project_valuation(
+            self._equity, self._gross, old, new, old_mark, price, fee
+        )
         self._marks[instrument] = price
         self._quantities[instrument] = new
 
@@ -364,6 +373,10 @@ class RustBuyingPower:
     @property
     def leverage(self) -> float:
         return self._inner.leverage
+
+    @property
+    def valuation(self) -> tuple[float, float]:
+        return self._inner.valuation
 
     def mark_of(self, instrument: InstrumentId) -> float | None:
         return self._inner.mark_of(instrument_key(instrument))
@@ -409,6 +422,7 @@ class RustQuoteCore:
         sell_tax_rate: float = 0.0,
         leverage: float = 1.0,
         held_mark: float | None = None,
+        valuation: tuple[float, float] | None = None,
     ) -> QuoteNumbers:
         price, quantity, applied, status = self._core.quote_numbers(
             side.value,
@@ -425,6 +439,7 @@ class RustQuoteCore:
             sell_tax_rate,
             leverage,
             held_mark,
+            valuation,
         )
         return QuoteNumbers(price, Decimal(quantity), applied, ExecutionStatus(status))
 

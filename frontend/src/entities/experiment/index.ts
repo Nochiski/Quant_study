@@ -1,6 +1,7 @@
 export {
   EXPERIMENT_POLL_MS,
   experimentQuery,
+  experimentAuditQuery,
   experimentRemainingTimeQuery,
   experimentTrialsQuery,
   experimentWalkForwardQuery,
@@ -22,6 +23,7 @@ export {
 } from "./model/experiment-status";
 export type {
   Experiment,
+  ExperimentAuditEvent,
   ExperimentPage,
   ExperimentPreview,
   ExperimentRequest,

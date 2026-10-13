@@ -1835,6 +1835,64 @@ export type ExperimentAdmissionErrorResponse = {
 };
 
 /**
+ * ExperimentAuditEvent
+ */
+export type ExperimentAuditEvent = {
+  /**
+   * Attempt
+   */
+  attempt?: number | null;
+  /**
+   * Code
+   */
+  code?: string | null;
+  kind: ExperimentAuditKind;
+  /**
+   * Occurred At
+   */
+  occurred_at: string;
+  /**
+   * Paused
+   */
+  paused?: boolean | null;
+  /**
+   * Priority
+   */
+  priority?: number | null;
+  /**
+   * Reason
+   */
+  reason?: string | null;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
+  run_status?: RunStatus | null;
+  /**
+   * Trial Index
+   */
+  trial_index?: number | null;
+  /**
+   * Window Index
+   */
+  window_index?: number | null;
+};
+
+/**
+ * ExperimentAuditKind
+ */
+export type ExperimentAuditKind =
+  | "created"
+  | "controls_changed"
+  | "trial_submitted"
+  | "trial_rejected"
+  | "window_picked"
+  | "run_started"
+  | "run_finished"
+  | "candidate_selected"
+  | "cancelled";
+
+/**
  * ExperimentControls
  *
  * 실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
@@ -8262,6 +8320,48 @@ export type GetExperimentResponses = {
 
 export type GetExperimentResponse =
   GetExperimentResponses[keyof GetExperimentResponses];
+
+export type GetExperimentAuditData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/audit";
+};
+
+export type GetExperimentAuditErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentAuditError =
+  GetExperimentAuditErrors[keyof GetExperimentAuditErrors];
+
+export type GetExperimentAuditResponses = {
+  /**
+   * Response Getexperimentaudit
+   *
+   * Successful Response
+   */
+  200: Array<ExperimentAuditEvent>;
+};
+
+export type GetExperimentAuditResponse =
+  GetExperimentAuditResponses[keyof GetExperimentAuditResponses];
 
 export type CancelExperimentData = {
   body?: never;

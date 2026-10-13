@@ -500,7 +500,7 @@ Python/Rust 결과가 같다.
 - [ ] sampler plugin port를 두고 TPE/CMA-ES는 후속 adapter로 격리(의도적 보류: 검증 랩 spec §4).
 - [ ] fingerprint duplicate/cache-hit 판정 구현(의도적 보류: 끝난 결과 재사용 안 함, 2026-09-30 리드 결정·검증 랩 spec D6 — 진행 중 같은 입력 잇기만 V3-04).
 - [x] SQLite experiment repository와 migration 추가(검증 랩 V3-03 #334).
-- [ ] experiment/trial/attempt 상태 전이·audit event 구현(상태 전이는 검증 랩 V3-03, audit event 로그는 미구현).
+- [x] experiment/trial/attempt 상태 전이·audit event 구현(상태 전이는 검증 랩 V3-03, 감사 기록은 M6 감사 기록 PR — 조작 이력만 새로 적고 나머지는 쌓인 기록·실행 상태에서 읽는다).
 - [ ] bounded process worker, parallelism, cancellation, crash recovery 구현(취소·재시작 복구·슬롯 병렬은 V3-04 #346·#348, process worker는 의도적 보류: 검증 랩 spec §4·D6).
 - [ ] failed/pruned/cancelled trial과 error reason 보존(failed·cancelled는 검증 랩 V3-03·V3-04, pruned 개념 없음).
 - [x] experiment create/status/trials/results/cancel/retry API 추가(검증 랩 V3-03·V3-04).

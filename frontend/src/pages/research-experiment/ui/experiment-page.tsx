@@ -24,6 +24,7 @@ import { t, tDuration, tFill } from "../../../shared/config";
 import { Link, useParams } from "../../../shared/lib/router";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import { AuditTrail } from "./audit-trail";
 
 const valuesText = (values: Record<string, unknown>) =>
   Object.entries(values)
@@ -293,6 +294,10 @@ export const ExperimentPage = () => {
             refetchInterval={refetchInterval}
           />
         ) : null}
+        <AuditTrail
+          experimentId={experimentId}
+          refetchInterval={refetchInterval}
+        />
       </div>
     </section>
   );

@@ -1,3 +1,7 @@
+from strategy_workbench.application.experiment_run._audit import (
+    ExperimentAuditEvent,
+    ExperimentAuditKind,
+)
 from strategy_workbench.application.experiment_run._service import (
     CapacityPoint,
     CapacityReport,
@@ -18,6 +22,8 @@ __all__ = [
     "CapacityReport",
     "CapacitySweepRequest",
     "Experiment",
+    "ExperimentAuditEvent",
+    "ExperimentAuditKind",
     "ExperimentPage",
     "ExperimentPreview",
     "ExperimentRequest",

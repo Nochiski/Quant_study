@@ -137,6 +137,26 @@ const server = setupServer(
   http.get(`${API}/api/v1/experiments/:experimentId`, ({ params }) =>
     HttpResponse.json(experiment(String(params.experimentId), "completed")),
   ),
+  // 감사 기록(로드맵 M6): backend 가 시각 순으로 편 사건.
+  http.get(`${API}/api/v1/experiments/:experimentId/audit`, () =>
+    HttpResponse.json([
+      { occurred_at: "2026-09-30T00:00:00Z", kind: "created" },
+      {
+        occurred_at: "2026-09-30T00:00:05Z",
+        kind: "controls_changed",
+        paused: true,
+        priority: 3,
+      },
+      {
+        occurred_at: "2026-09-30T00:01:00Z",
+        kind: "run_finished",
+        trial_index: 1,
+        run_id: "run-trial-0001",
+        run_status: "failed",
+        code: "backtest.run.internal",
+      },
+    ]),
+  ),
   // 남은 시간 어림의 근거가 없는 계열(로드맵 M6 ETA). 모니터 테스트가 값을 덮어쓴다.
   http.get(`${API}/api/v1/experiments/:experimentId/remaining-time`, () =>
     HttpResponse.json(null),
@@ -718,6 +738,16 @@ describe("experiments", () => {
     expect(await trial("#3")).toHaveTextContent(
       "저장된 revision이 그사이 바뀌었습니다.",
     );
+    // 감사 기록은 backend 가 편 순서대로 사건·대상·내용을 보인다.
+    const audit = await screen.findByRole("table", { name: "감사 기록" });
+    const rows = within(audit).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("실험 생성"),
+      expect.stringContaining("조작 변경—일시정지 · 우선순위 3"),
+      expect.stringContaining(
+        "실행 끝trial #2실패 · run-trial-0001 · backtest.run.internal",
+      ),
+    ]);
     // 다시 실행은 backend 가 `retryable` 로 준 trial 에만 있다.
     expect(within(await trial("#1")).queryByRole("button")).toBeNull();
     expect(within(await trial("#4")).queryByRole("button")).toBeNull();

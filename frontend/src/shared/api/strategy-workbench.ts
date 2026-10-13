@@ -12,6 +12,7 @@ import {
   explainFactorGraph,
   getEquityCatalog,
   getExperiment,
+  getExperimentAudit,
   getExperimentRemainingTime,
   getExperimentWalkForward,
   getFactorCatalog,
@@ -57,6 +58,7 @@ import type {
   DraftDiff,
   DraftDiffRequest,
   Experiment,
+  ExperimentAuditEvent,
   ExperimentControlsRequest,
   ExperimentPage,
   ExperimentTrialState,
@@ -509,6 +511,16 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "retryExperimentTrial");
   },
 
+  /** 실험·trial·attempt 에 일어난 일의 시각 순 기록(로드맵 M6 감사 기록). */
+  async getExperimentAudit(
+    experimentId: string,
+  ): Promise<ExperimentAuditEvent[]> {
+    const response = await getExperimentAudit({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentAudit");
+  },
+
   /** 남은 실행의 시간 어림(로드맵 M6 ETA). 계열에 시간을 잰 완료 실행이 없으면 null. */
   async getExperimentRemainingTime(
     experimentId: string,
@@ -806,6 +818,7 @@ export type {
   DraftDiff,
   DraftDiffRequest,
   Experiment,
+  ExperimentAuditEvent,
   ExperimentControlsRequest,
   ExperimentPage,
   ExperimentTrialState,

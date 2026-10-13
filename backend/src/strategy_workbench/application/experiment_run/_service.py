@@ -73,6 +73,7 @@ from strategy_workbench.domain.experiment.facade.trial import (
 )
 from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
 
+from ._audit import ExperimentAuditEvent, audit_trail
 from .ports.outgoing.experiment_repository import (
     ExperimentRecord,
     ExperimentRepositoryPort,
@@ -526,7 +527,7 @@ class ExperimentRunService:
                 paused=current.paused if paused is None else paused,
                 priority=current.priority if priority is None else priority,
             )
-            self._repository.set_controls(experiment_id, controls)
+            self._repository.set_controls(experiment_id, controls, changed_at=self._now())
             self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
         return self.get(experiment_id)
 
@@ -659,6 +660,23 @@ class ExperimentRunService:
                 ]
         spans = run_spans(trials, windows, *_base_range(record.run))
         return estimate_time(self._runs.trial_ledger(record.run), spans)
+
+    def audit(self, experiment_id: str) -> tuple[ExperimentAuditEvent, ...]:
+        """실험·trial·attempt 에 일어난 일의 시각 순 기록(로드맵 M6, 규칙은 `audit_trail`)."""
+        record = self._repository.get(experiment_id)
+        attempts = self._repository.attempts(experiment_id)
+        picks = self._repository.picks(experiment_id)
+        runs = self._runs.states(
+            {item.run_id for item in (*attempts, *picks) if item.run_id is not None}
+        )
+        return audit_trail(
+            record,
+            attempts,
+            picks,
+            self._repository.selections(experiment_id),
+            self._repository.control_changes(experiment_id),
+            runs,
+        )
 
     def parameter_map(self, experiment_id: str) -> ParameterMap:
         """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03, 규칙은

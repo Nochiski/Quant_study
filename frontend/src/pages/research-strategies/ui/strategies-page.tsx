@@ -7,6 +7,7 @@ import {
   strategyRevisionsQuery,
   type StrategySummary,
 } from "../../../entities/strategy";
+import { displayTime } from "../../../shared/lib/display-time";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import {
@@ -24,21 +25,6 @@ import "./trial-ledger.css";
 const ROUTE = "/research/strategies";
 const PAGE_SIZE = 20;
 const REVISION_PAGE_SIZE = 20;
-
-const displayTime = (value: string): string => {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-        timeZoneName: "short",
-      }).format(parsed);
-};
 
 const lastPageOffset = (total: number, pageSize: number): number =>
   total === 0 ? 0 : Math.floor((total - 1) / pageSize) * pageSize;

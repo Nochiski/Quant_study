@@ -865,6 +865,7 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
         .record.experiment_id
     )
     with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE experiment_control_changes")
         connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")
         connection.execute("DROP TABLE experiment_controls")
@@ -1218,6 +1219,7 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
         document = json.loads(stored)
         del document["design"]["measured"]
         connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(document),))
+        connection.execute("DROP TABLE experiment_control_changes")
         connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")
         connection.execute("PRAGMA user_version = 4")
@@ -1635,3 +1637,71 @@ def test_a_window_stops_counting_once_its_validation_run_finishes() -> None:
     runs.error_codes["run-5"] = "backtest.run.internal"
     done = service.remaining_time(record.experiment_id)
     assert done is not None and done.total_seconds == 0
+
+
+def test_the_audit_trail_lists_what_happened_to_the_experiment_and_its_trials(
+    tmp_path: Path,
+) -> None:
+    """로드맵 M6 감사 기록: 조작 이력은 다시 연 저장소에도 남고, 나머지는 쌓인 기록에서 읽는다."""
+    path = tmp_path / "research.sqlite3"
+    runs = _FakeRuns()
+    service = _service(runs, repository=SQLiteExperimentRepository(path))
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, paused=True)
+    service.control(experiment_id, paused=False, priority=3)
+    runs.run_statuses["run-0"] = RunStatus.FAILED
+    runs.error_codes["run-0"] = "backtest.run.internal"
+    service.retry(experiment_id, 0)
+    service.cancel(experiment_id)
+
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+    trail = reopened.audit(experiment_id)
+
+    kinds = [event.kind.value for event in trail]
+    # 모두 같은 시각(`_AT`)이라 기록 종류 순이다. 실패한 실행은 끝, 재시도는 새 attempt 다.
+    assert kinds == [
+        "created",
+        "controls_changed",
+        "controls_changed",
+        "trial_submitted",
+        "run_finished",
+        "trial_submitted",
+        "trial_submitted",
+        "trial_submitted",
+        "trial_submitted",
+        "cancelled",
+    ]
+    changes = [(e.paused, e.priority) for e in trail if e.kind.value == "controls_changed"]
+    assert changes == [(True, 1), (False, 3)]
+    failed = next(e for e in trail if e.kind.value == "run_finished")
+    assert (failed.trial_index, failed.run_id, failed.run_status, failed.code) == (
+        0,
+        "run-0",
+        RunStatus.FAILED,
+        "backtest.run.internal",
+    )
+    retried = [e for e in trail if e.kind.value == "trial_submitted" and e.trial_index == 0]
+    assert [(e.attempt, e.run_id) for e in retried] == [(1, "run-0"), (2, "run-4")]
+
+
+def test_the_audit_trail_is_in_time_order() -> None:
+    """뒤에 바꾼 조작은 먼저 넘긴 attempt 뒤에 온다(기록 종류 순이 아니라 시각 순)."""
+    ticks = iter(_AT + timedelta(seconds=second) for second in range(100))
+    ids = iter(f"exp-{number}" for number in range(10))
+    runs = _FakeRuns()
+    service = ExperimentRunService(
+        SQLiteExperimentRepository(),
+        runs,
+        metric_registry=build_default_metric_registry(),
+        new_id=lambda: next(ids),
+        now=lambda: next(ticks),
+        spawn=lambda work: work(),
+        poll_seconds=None,
+    )
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, priority=2)
+
+    trail = service.audit(experiment_id)
+
+    assert [event.kind.value for event in trail][-1] == "controls_changed"
+    assert [event.occurred_at for event in trail] == sorted(e.occurred_at for e in trail)

@@ -110,6 +110,12 @@ export const experimentTrialsQuery = (experimentId: string) =>
     queryFn: () => strategyWorkbenchApi.listExperimentTrials(experimentId),
   });
 
+export const experimentAuditQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "audit"],
+    queryFn: () => strategyWorkbenchApi.getExperimentAudit(experimentId),
+  });
+
 export const experimentRemainingTimeQuery = (experimentId: string) =>
   queryOptions({
     queryKey: [...experimentsKey(), experimentId, "remaining-time"],

@@ -75,6 +75,9 @@ import type {
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
+  GetExperimentAuditData,
+  GetExperimentAuditErrors,
+  GetExperimentAuditResponses,
   GetExperimentCapacityData,
   GetExperimentCapacityErrors,
   GetExperimentCapacityResponses,
@@ -740,6 +743,21 @@ export const getExperiment = <ThrowOnError extends boolean = false>(
     GetExperimentErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}", ...options });
+
+/**
+ * Get Experiment Audit
+ *
+ * 실험 생성·조작·trial attempt·실행 시작과 끝·창 선택·후보 선택·취소를 시각 순으로
+ * 보인다(로드맵 M6 감사 기록).
+ */
+export const getExperimentAudit = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentAuditData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentAuditResponses,
+    GetExperimentAuditErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/audit", ...options });
 
 /**
  * Cancel Experiment

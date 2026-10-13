@@ -220,7 +220,9 @@ _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
 # `_cell_kind` 가 SOURCE_OMITTED_ZERO 로 낸다(#371). 원장은 그 칸을 NULL 로 두고(DESIGN §9 결정 8)
 # 도메인은 그 종류에 값을 요구하므로(`RawFieldValue.__post_init__`) 값 0 은 어댑터가 싣는다.
 _FILL_KIND_TO_CELL: dict[str, CellKind] = {
-    "measured": CellKind.OBSERVED,
+    # 행을 관측했어도 개별 필드는 NULL일 수 있다(키움 전용 연기금 열의 KIS 행 등).
+    # 값이 있는 셀은 아래에서 먼저 OBSERVED로 판정하므로 여기는 결측인 필드만 온다.
+    "measured": CellKind.MISSING,
     "src_omitted": CellKind.MISSING,
     "empty_response": CellKind.MISSING,
     "not_collected": CellKind.NOT_COLLECTED,

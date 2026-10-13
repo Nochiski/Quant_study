@@ -92,9 +92,10 @@ def write_manifest(
     return path
 
 
-def _decimal(values: Sequence[float | int | None], scale_type: pa.DataType) -> pa.Array:
+def _decimal(values: Sequence[float | int | None], scale_type: pa.Decimal128Type) -> pa.Array:
     return pa.array(
-        [None if v is None else Decimal(str(int(v))) for v in values], type=scale_type
+        [None if v is None else Decimal(str(v if scale_type.scale else int(v))) for v in values],
+        type=scale_type,
     )
 
 
@@ -459,7 +460,13 @@ FlowRow = tuple[str, date, str | None, float | None, float | None, float | None,
 """ticker, date, src, ind_invsr_krw, frgnr_invsr_krw, orgn_krw, (fill_kind.kind, .evidence)."""
 
 
-def flow_table(rows: list[FlowRow]) -> pa.Table:
+def flow_table(
+    rows: list[FlowRow],
+    *,
+    ownership: Sequence[float | None] | None = None,
+    exhaustion: Sequence[float | None] | None = None,
+    pension: Sequence[float | None] | None = None,
+) -> pa.Table:
     """`flow_daily` 중 어댑터가 읽는 컬럼. grain 은 (date, ticker, **src**) 다 — 같은 셀에 두
     원천이 다 있으면 2행이고 어댑터가 `pick_order` 로 하나를 고른다."""
     money = pa.decimal128(15, 0)
@@ -471,6 +478,15 @@ def flow_table(rows: list[FlowRow]) -> pa.Table:
             "ind_invsr_krw": _decimal([r[3] for r in rows], money),
             "frgnr_invsr_krw": _decimal([r[4] for r in rows], money),
             "orgn_krw": _decimal([r[5] for r in rows], money),
+            "foreign_wght_pct": _decimal(
+                ownership if ownership is not None else [None] * len(rows), pa.decimal128(7, 2)
+            ),
+            "foreign_limit_exh_pct": _decimal(
+                exhaustion if exhaustion is not None else [None] * len(rows), pa.decimal128(7, 2)
+            ),
+            "pension_net_buy_kiwoom_krw": _decimal(
+                pension if pension is not None else [None] * len(rows), money
+            ),
             "fill_kind": _fill_kind([r[6] for r in rows]),
             "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
             "available_basis": pa.array(["default"] * len(rows), type=pa.string()),
@@ -968,8 +984,12 @@ WB_PROFILE_FIELDS = (
     "consensus.recommendation",
     "consensus.analyst_count",
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",
@@ -1151,7 +1171,16 @@ def build_workbench_root(
         root, "corp_event", corp_event_table(WB_EVENT_ROWS), year_column="announce_date"
     )
     write_equity_table(root, "holder_daily", holder_table(WB_HOLDER_ROWS))
-    write_equity_table(root, "flow_daily", flow_table(WB_FLOW_ROWS), year_column="date")
+    write_equity_table(
+        root, "flow_daily",
+        flow_table(
+            WB_FLOW_ROWS,
+            ownership=[52.79, 99.99, None, None, 0.0, 12.34, None],
+            exhaustion=[62.79, 99.99, None, None, 0.0, 22.34, None],
+            pension=[-123_000_000, None, None, None, 0.0, None, None],
+        ),
+        year_column="date",
+    )
     write_equity_table(root, "short_daily", short_table(WB_SHORT_ROWS), year_column="date")
     write_equity_table(root, "credit_daily", credit_table(WB_CREDIT_ROWS), year_column="date")
     if profile:

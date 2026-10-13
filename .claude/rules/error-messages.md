@@ -58,6 +58,9 @@ logger.warning(
   개수 등)는 문장 안에 `key=value` 원문으로 남긴다. 소비자(frontend·AI 결과 설명)는 문장을 다시
   조립·번역하지 않는다. 정본은 `.claude/rules/strategy-workbench-sot.md`의 "authoring 진단 코드"·
   "결과·데이터 경고 문장" 행이다.
+- 정상 설정 안내인 `strategy.risk.risk_factor_excluded`·`strategy.portfolio.tie_breaker_factor_excluded`는
+  그래프의 식별자 비노출 계약에 따라 `팩터=<label>`을 문장에 넣는다. 정확한 위치는 기존 진단 pointer가
+  소유하며, 오류 진단의 재현 컨텍스트나 소비자의 문장 재조립 규칙은 바꾸지 않는다.
 - 진단 코드의 네임스페이스(`strategy.*`·`structure.*`·codec 코드, 팩터 그래프 `factor.graph.*`를
   `strategy.expression.*`로 옮기는 규칙)도 같은 SoT의 "authoring 진단 코드" 행이 소유한다. 레지스트리에
   없는 코드를 호출 지점에서 새로 만들지 않는다.

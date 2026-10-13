@@ -79,8 +79,10 @@ describe("resolveDiagnosticDestination", () => {
     expect(destination("graph", "/risk/max_name_weight")).toBe("current-view");
     expect(destination("graph", "/eligibility/rules")).toBe("current-view");
     expect(destination("graph", "/factors/0/weight")).toBe("current-view");
-    // 단계가 없는 섹션(전략 이름·파라미터)은 캔버스 밖이라 원문 탭으로 간다.
-    expect(destination("graph", "/title")).toBe("source");
+    // 문서 속성은 단계 없이도 그래프에 있고, 파라미터·버전 스탬프는 원문에서 편집한다.
+    expect(destination("graph", "/title")).toBe("current-view");
+    expect(destination("graph", "/description")).toBe("current-view");
+    expect(destination("graph", "/schema_version")).toBe("source");
     expect(destination("graph", "/parameters")).toBe("source");
     expect(destination("graph", "/nope")).toBe("source");
   });

@@ -241,3 +241,15 @@ def test_short_buffer_uses_the_same_available_candidates_as_selection():
     )
     weights = {target.security_id: target.weight for target in _frame(spec, observations).targets}
     assert weights["e"] < 0
+
+
+def test_auxiliary_exclusion_notice_names_the_factor_without_yaml_identifiers():
+    spec = _spec()
+    spec = replace(spec, factors=(spec.factors[0], replace(spec.factors[1], label="비교할 모멘텀")))
+    notice = next(
+        issue for issue in validate_strategy(spec).issues
+        if issue.code == "strategy.portfolio.tie_breaker_factor_excluded"
+    )
+    assert "비교할 모멘텀" in notice.message
+    assert "factor_id" not in notice.message
+    assert notice.path == "portfolio.tie_breaker_factor_id"

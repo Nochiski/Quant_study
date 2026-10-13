@@ -27,6 +27,7 @@ import {
   fieldOperation,
   listAddition,
   removeItemOperation,
+  renameIdentity,
   resetOperation,
   unsetOperation,
   type ObjectSection,
@@ -129,6 +130,95 @@ const rulesOf = (source: string): FormListSection =>
   ).lists.find((list) => list.key === "rules")!;
 
 describe("PipelinePanel", () => {
+  it("그래프 문서 속성에서 제목을 확정하고 YAML 식별자는 숨긴다", async () => {
+    const user = userEvent.setup();
+    const { transactions } = renderPanel(EMPTY);
+    const properties = screen.getByRole("group", { name: "문서 속성" });
+    const title = within(properties).getByRole("textbox", {
+      name: "전략 이름",
+    });
+    await user.type(title, "그래프 전략");
+    await user.tab();
+    const section = objectSection(formOf(EMPTY).projection!.sections, "");
+    const field = section.fields.find((item) => item.key === "title")!;
+    expect(transactions.apply).toHaveBeenCalledWith(
+      fieldOperation(section, field, "그래프 전략"),
+      "전략 이름",
+      "pipeline",
+      NO_FOCUS,
+    );
+    expect(properties).not.toHaveTextContent(
+      /schema_version|description|title/,
+    );
+  });
+
+  it("접힌 팩터 식별자를 바꾸면 이미 지정한 역가중 참조도 한 번에 바꾸고 닫으면 숨긴다", async () => {
+    const user = userEvent.setup();
+    const source = idea("inverse_volatility");
+    const { transactions } = renderPanel(source);
+    const factor = within(
+      screen.getByRole("group", { name: "알파 팩터" }),
+    ).getByRole("group", { name: "60일 변동성" });
+    expect(
+      within(factor).queryByRole("textbox", { name: "팩터 이름" }),
+    ).toBeNull();
+    await user.click(
+      within(factor).getByRole("button", { name: "식별자(YAML)" }),
+    );
+    const input = within(factor).getByRole("textbox", { name: "팩터 이름" });
+    await user.clear(input);
+    await user.type(input, "volatility_custom");
+    await user.tab();
+    const list = objectFactors(source);
+    const plan = renameIdentity(
+      formOf(source).tree,
+      list,
+      list.items[1]!,
+      "volatility_custom",
+    );
+    expect(transactions.apply).toHaveBeenCalledWith(
+      plan,
+      "팩터 이름",
+      "pipeline",
+      NO_FOCUS,
+    );
+    await user.click(
+      within(factor).getByRole("button", { name: "식별자(YAML)" }),
+    );
+    expect(
+      within(factor).queryByRole("textbox", { name: "팩터 이름" }),
+    ).toBeNull();
+    expect(factor).not.toHaveTextContent(/factor_id/);
+  });
+
+  it("접힌 팩터 식별자 오류를 선택하거나 재선택하면 해당 편집 입력을 다시 연다", async () => {
+    const user = userEvent.setup();
+    const pointer = "/factors/0/factor_id";
+    const form = formOf(idea("momentum_12_1"), [
+      diagnostic(pointer, "중복된 팩터 이름입니다."),
+    ]);
+    const transactions = transactionsStub();
+    const panel = (selectedPointer?: string, revealSignal?: number) => (
+      <PipelinePanel
+        form={form}
+        schema={SCHEMA}
+        transactions={transactions}
+        catalogs={{ equityFields: null }}
+        selectedPointer={selectedPointer}
+        revealSignal={revealSignal}
+      />
+    );
+    const view = render(panel());
+    expect(screen.queryByRole("textbox", { name: "팩터 이름" })).toBeNull();
+    view.rerender(panel(pointer, 1));
+    expect(screen.getByRole("textbox", { name: "팩터 이름" })).toBeVisible();
+    expect(screen.getAllByText("중복된 팩터 이름입니다.")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "식별자(YAML)" }));
+    expect(screen.queryByRole("textbox", { name: "팩터 이름" })).toBeNull();
+    view.rerender(panel(pointer, 2));
+    expect(screen.getByRole("textbox", { name: "팩터 이름" })).toBeVisible();
+  });
+
   it("단계 이름·영문 소제목·한 줄 설명 아래 카드를 두고, 맨 위에 한 문장 요약을 보인다", () => {
     renderPanel(idea("momentum_12_1"));
 
@@ -488,9 +578,8 @@ describe("PipelinePanel", () => {
     const guide = screen.getByRole("group", { name: "5 실행 Execution" });
     expect(guide).toHaveTextContent("화면 위 실행 설정에서 고릅니다");
     // 단계 없는 섹션(`x-stage` 없음)의 이름이다. 문서 버전 스탬프(const)는 빠진다.
-    expect(guide).toHaveTextContent(
-      "전략 이름·전략 설명·탐색 파라미터: YAML 탭에서 고칩니다.",
-    );
+    expect(guide).not.toHaveTextContent("전략 이름");
+    expect(guide).toHaveTextContent("탐색 파라미터: YAML 탭에서 고칩니다.");
     expect(guide).toHaveTextContent(
       "팩터 계산식: 아래 고급 편집기에서 고칩니다.",
     );

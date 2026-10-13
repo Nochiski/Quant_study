@@ -3624,13 +3624,13 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     screen.findByRole("button", { name: message });
 
   /** 키 범위를 쓰는 진단(backend 가 `anchor: key` 로 알린다) — outline의 값 범위 reveal과 구별된다. */
-  const UNKNOWN_TITLE_KEY = {
+  const UNKNOWN_KEY = {
     code: "structure.unknown_key",
     anchor: "key",
     kind: "structural",
     severity: "error",
-    pointer: "/title",
-    message: "title is not a known field",
+    pointer: "/extra_key",
+    message: "extra_key is not a known field",
   };
 
   // jsdom에는 `scrollIntoView`가 없다. 선택된 카드를 화면으로 끌어오는지 보려고 심는다.
@@ -3827,6 +3827,26 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     expect(lastVisibleScroll()).toBe(list);
   }, 15_000);
 
+  it("제목 오류를 누르면 그래프를 유지하고 문서 속성의 실제 입력을 드러낸다", async () => {
+    server.use(
+      graphCompileWith([{ code: "strategy.title.required", kind: "semantic", severity: "error",
+        pointer: "/title", message: "전략 이름을 입력하세요." }]),
+      ...graphHandlers(),
+      revisionDocumentHandler('schema_version: "1.2"\ntitle: ""\n'),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+    const canvas = await screen.findByRole("region", { name: "전략 파이프라인" });
+    await user.click(await problemRow(/전략 이름을 입력하세요/));
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain("path=%2Ftitle");
+    });
+    const title = within(canvas).getByRole("textbox", { name: "전략 이름" });
+    await waitFor(() => expect(lastVisibleScroll()).toBe(title.closest('[aria-current="true"]')));
+    expect(title).toBeVisible();
+  }, 15_000);
+
   // plan이 ready면 읽기 전용 DAG 노드와 그 아래 편집기 행에 같은 pointer로 `aria-current`가
   // 둘 붙는다. 중첩된 두 reveal 훅이 같은 요소로 수렴해야 한다(2차 리뷰 R2-1).
   it("scrolls to the editor row, not the plan node, when both mark the same pointer", async () => {
@@ -3868,14 +3888,14 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
 
   it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {
     server.use(
-      graphCompileWith([UNKNOWN_TITLE_KEY]),
+      graphCompileWith([UNKNOWN_KEY]),
       ...graphHandlers(),
-      revisionDocumentHandler(GRAPH_SOURCE),
+      revisionDocumentHandler(`${GRAPH_SOURCE}\nextra_key: example\n`),
     );
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=graph");
 
-    await user.click(await problemRow(/title is not a known field/));
+    await user.click(await problemRow(/extra_key is not a known field/));
 
     await waitFor(() =>
       expect(history.location.search).not.toContain("view=graph"),
@@ -3889,21 +3909,21 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
           view.state.selection.main.from,
           view.state.selection.main.to,
         ),
-      ).toBe("title"),
+      ).toBe("extra_key"),
     );
   }, 15_000);
 
   it("falls back to the source tab from the read-only Diff projection too", async () => {
     server.use(
-      graphCompileWith([UNKNOWN_TITLE_KEY]),
+      graphCompileWith([UNKNOWN_KEY]),
       ...graphHandlers(),
-      revisionDocumentHandler(GRAPH_SOURCE),
+      revisionDocumentHandler(`${GRAPH_SOURCE}\nextra_key: example\n`),
     );
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=diff");
     await openComparison();
 
-    await user.click(await problemRow(/title is not a known field/));
+    await user.click(await problemRow(/extra_key is not a known field/));
 
     await waitFor(() =>
       expect(history.location.search).not.toContain("view=diff"),
@@ -3915,7 +3935,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
           view.state.selection.main.from,
           view.state.selection.main.to,
         ),
-      ).toBe("title"),
+      ).toBe("extra_key"),
     );
   }, 15_000);
 

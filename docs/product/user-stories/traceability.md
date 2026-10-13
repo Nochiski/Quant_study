@@ -21,9 +21,9 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
 | 김철수 | 4 | 2 | 6 | 1 | 13 |
-| 정동민 | 8 | 0 | 3 | 0 | 11 |
+| 정동민 | 9 | 0 | 2 | 0 | 11 |
 | 한상목 | 15 | 0 | 0 | 1 | 16 |
-| 합계 | 27 | 2 | 9 | 2 | 40 |
+| 합계 | 28 | 2 | 8 | 2 | 40 |
 
 ### 스토리별 추적
 
@@ -48,7 +48,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-04 | 정동민 | 백테스트 결과에서 핵심 숫자와 자산 곡선을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.backtest-result.spec.ts` :: US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 일곱 개와 자산 곡선이 보인다 |
 | US-DM-05 | 정동민 | 기간·유니버스·수수료·슬리피지를 전략 밖 실행 설정에서 정한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.run-environment.spec.ts` :: US-DM-05 날짜 칸에 숫자를 이어 치거나 대시를 넣어 쳐도 그 날짜가 들어가고, 덜 친 날짜는 칸이 알려 준다<br>`frontend/e2e/stories/dm.run-environment.spec.ts` :: US-DM-05 실행 설정에서 기간만 바꿔 다시 돌려도 전략은 그대로이고 실행 기록에 바꾼 기간이 남는다 |
 | US-DM-06 | 정동민 | 화면의 말과 오류 문장을 쉬운 한글로 읽는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 결과 파일을 읽을 수 없는 완료 실행은 결과 화면이 다시 실행하라고 말하고 결과를 다시 묻지 않는다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 그래프 편집 화면은 노드 종류·연산자·필드를 한글 이름과 설명으로 보이고 삭제 거부를 노드 이름으로 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 실패한 옛 실행은 백테스트 이력과 결과 화면에서 같은 한글 문장으로 보이고 재실행 거절은 고칠 곳을 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 필드 이름을 틀리거나 1.0 문법을 쓰면 문제 목록이 한글로 고칠 방법을 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 한 번도 사지 않은 실행과 데이터가 모르는 벤치마크는 실패 문장이 고칠 곳을 말한다 |
-| US-DM-07 | 정동민 | 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다 | `예정` | P4-04, P5-03 | P4-04, P5-03 | — |
+| US-DM-07 | 정동민 | 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 12-1 모멘텀을 만들어 정본 hash로 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 거래대금 상위 20%와 모멘텀을 만들어 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 변동성 역가중을 만들고 참조 이름을 한 번에 되돌린다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 이평 돌파와 선언형 보조 모멘텀을 만들어 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 저PBR·고ROE와 자본총계 필터를 만들어 백테스트한다 |
 | US-DM-08 | 정동민 | 백테스트 결과를 AI에게 쉬운 말로 풀어 달라고 한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-explain.spec.ts` :: US-DM-08 완료된 백테스트 결과에서 AI에게 좋은 결과인지 물으면 지표 뜻과 벤치마크 비교를 쉬운 말로 답한다 |
 | US-DM-09 | 정동민 | AI 제안을 적용한 뒤 버튼 한 번으로 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다 |
 | US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `예정` | V5-02 | V5-02 | — |

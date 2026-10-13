@@ -247,7 +247,7 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         "strategy.risk.risk_factor_excluded",
         "risk.risk_factor_id",
         "리스크 팩터는 역가중에만 쓰이고 합성 점수에서는 빠집니다(가중치 무시): "
-        f"risk_factor_id={excluded!r}",
+        f"팩터={next(factor.label for factor in spec.factors if factor.factor_id == excluded)!r}",
         severity=ValidationSeverity.WARNING,
     )
     if not composite_factors(spec) and spec.portfolio.tie_breaker_factor_id is None:
@@ -279,7 +279,7 @@ def _tie_breaker_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         "portfolio.tie_breaker_factor_id",
         "동점 해소 팩터는 주 점수가 같은 종목의 순위에만 쓰이고 "
         "합성 점수에서는 빠집니다(가중치 무시): "
-        f"factor_id={factor_id!r}",
+        f"팩터={next(factor.label for factor in spec.factors if factor.factor_id == factor_id)!r}",
         severity=ValidationSeverity.WARNING,
     )
     if not composite_factors(spec):

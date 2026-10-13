@@ -1003,12 +1003,12 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
   0개 단언. fixture와 빌더 산출물이 같은 형태라는 근거는 spec D2의 "다중 입력 연산자의 부가 입력은
   항상 새 소스 잎 노드다"이며, 아이디어 3은 양쪽 모두 노드 4개(잎 2개) 형태다.
 - 매뉴얼에 그래프 화면 절과 예시 5개(튜토리얼).
-- BACKLOG-004: 미리보기가 `POST /api/v1/factors/preview`를 쓰면 그 422(`factor.graph.invalid`와
-  `factor.graph.*` 이슈 코드)를 `strategy.expression.*` 네임스페이스로 정리한다. 이 endpoint를 쓰지
-  않으면 이 PR에서 BACKLOG-004의 담당을 다시 정한다.
-- BACKLOG-016: 0/1 이진 팩터(아이디어 3)의 선정이 동점 해소 순서(`security_id`)로 정해진다. 아이디어 e2e 를
-  확정할 때 해결 방식을 정한다 — (a) 보조 팩터로 동점 해소, (b) 동점 전원 균등 비중. 정한 방식을 spec 5절·
-  아이디어 3 fixture 에 반영하고 재현 테스트를 둔다.
+- BACKLOG-004: 사용자 확정으로 기존 `/factors/preview`는 폐기하고 strategy trace의 기존 평가값을
+  투영한다(PR431). `/factors/validate` 등 다른 API는 유지한다.
+- BACKLOG-016: 확정된 선언형 보조 팩터·방향으로 주 점수 동점만 해소한다(PR432). 잔여 결측은
+  유효 보조값 뒤, 최종 동점은 기존 ID 순서다. spec 5절·아이디어3 fixture와 재현 테스트를 함께 유지한다.
+- 문서 제목·설명은 단계 없는 문서 속성, 정본 재현용 팩터 ID는 접힌 식별자 영역에서 기존 source
+  transaction으로 편집한다. 참조 지정 후 rename과 한 번의 undo, 접힌 ID 오류 재선택 reveal도 검증한다.
 
 **Phase 5 exit**
 

@@ -335,6 +335,7 @@ def test_excluding_the_risk_factor_is_reported_as_a_warning() -> None:
         ("risk.risk_factor_id", ValidationSeverity.WARNING)
     ]
     assert "'vol'" in excluded[0].message
+    assert "factor_id" not in excluded[0].message
 
 
 def test_risk_field_and_risk_factor_together_are_a_conflict_error() -> None:

@@ -14,6 +14,7 @@ import {
   runtimeDatabasePath,
   runtimeResearchDatabasePath,
   TRIAL_HOLD_SECONDS,
+  IDEAS_API_PREFIX,
 } from "./e2e/runtime";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
@@ -129,7 +130,10 @@ export default defineConfig({
       // `.venv` 안 파일 변경 감지가 곧바로 재시작을 일으켜 브라우저 게이트가 한 번도
       // 통과하지 못했다. E2E 는 코드가 바뀌지 않으므로 같은 앱을 reload 없이 띄운다.
       command:
-        "uv run uvicorn strategy_workbench.bootstrap.facade.http:build_runtime_http_app " +
+        "uv run uvicorn " +
+        (realEquity
+          ? "strategy_workbench.bootstrap.facade.http:build_runtime_http_app "
+          : "tests.e2e_ideas_app:build_e2e_http_app ") +
         `--factory --host 127.0.0.1 --port ${backendPort()}`,
       cwd: backendDirectory,
       env: {
@@ -141,6 +145,7 @@ export default defineConfig({
         STRATEGY_WORKBENCH_ALLOWED_ORIGINS: preview,
         STRATEGY_WORKBENCH_EQUITY_ADAPTER: realEquity ? "duckdb" : "mock",
         STRATEGY_WORKBENCH_EQUITY_ROOT: realEquityRoot,
+        STRATEGY_WORKBENCH_E2E_IDEAS_PREFIX: IDEAS_API_PREFIX,
         STRATEGY_WORKBENCH_ASSISTANT_DB_PATH: runtimeAssistantDatabase,
         STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH: runtimeAssistantSecrets,
         // 대본 공급자. 실 SDK·키·네트워크 없이 어시스턴트 시나리오가 돈다(WORKFLOW B-05).

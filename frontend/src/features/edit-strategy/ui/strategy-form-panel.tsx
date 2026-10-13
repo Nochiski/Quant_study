@@ -3,10 +3,8 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type Dispatch,
   type KeyboardEvent,
   type ReactNode,
-  type SetStateAction,
 } from "react";
 
 import type {
@@ -50,7 +48,7 @@ import {
   useItemRemoval,
   type CommitPlanner,
 } from "../model/use-field-editing";
-import { useRevealSelection } from "../model/use-reveal-selection";
+import { useRevealSelection, useRevealedOpen } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./strategy-form-panel.css";
@@ -190,9 +188,9 @@ const FormSectionView = ({
 }) => {
   const notesId = useId();
   const [open, setOpen] = useRevealedOpen(
-    section,
-    selectedPointer,
-    revealSignal,
+    selectedPointer !== undefined && sectionCovers(section, selectedPointer)
+      ? `${selectedPointer}:${revealSignal ?? 0}`
+      : null,
   );
   if (section.kind === "list") {
     return (
@@ -359,9 +357,9 @@ const FormListSectionView = ({
       ),
     );
   const [open, setOpen] = useRevealedOpen(
-    section,
-    selectedPointer,
-    revealSignal,
+    selectedPointer !== undefined && sectionCovers(section, selectedPointer)
+      ? `${selectedPointer}:${revealSignal ?? 0}`
+      : null,
   );
   const settling = transactions.settling;
   const addBlocked = addition.blocked;
@@ -637,29 +635,6 @@ const sectionCovers = (section: FormSection, pointer: string): boolean =>
       section.fields.some((field) => field.pointer === pointer)
     : pointer === section.pointer ||
       pointer.startsWith(`${section.pointer}/`);
-
-/**
- * 접기 상태. 문제 행이 이 섹션 안을 가리키면(같은 행을 다시 눌러도 `revealSignal`이 오른다) 접혀 있던
- * 섹션을 펴서 인라인 본문이 열린 채로 드러나게 한다(WORKFLOW P1-04, P1-01 reveal과 한 쌍).
- * 렌더 중 파생이다 — effect로 열면 스크롤(`useRevealSelection`)이 접힌 높이로 먼저 계산된다.
- */
-const useRevealedOpen = (
-  section: FormSection,
-  selectedPointer: string | undefined,
-  revealSignal: number | undefined,
-): [boolean, Dispatch<SetStateAction<boolean>>] => {
-  const [open, setOpen] = useState(true);
-  const request =
-    selectedPointer !== undefined && sectionCovers(section, selectedPointer)
-      ? `${selectedPointer}:${revealSignal ?? 0}`
-      : null;
-  const [served, setServed] = useState<string | null>(request);
-  if (request !== served) {
-    setServed(request);
-    if (request !== null && !open) setOpen(true);
-  }
-  return [open, setOpen];
-};
 
 /** 편집 컨트롤이 없는 행(링크·const)은 `<label for>` 대신 `aria-labelledby`로 이름을 잇는다(리뷰 DEFECT-P402-004). */
 const isPassiveControl = (control: FormControl): boolean =>

@@ -91,6 +91,10 @@ describe("node canvas keyboard and identity", () => {
     render(<NodeCanvas {...props} />);
     output().focus();
     await user.keyboard("{Enter}");
+    expect(output()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status", { name: "연결 상태" })).toHaveTextContent(
+      "1. 종가 출력 선택됨",
+    );
     input().focus();
     await user.keyboard("{Enter}");
     expect(props.onConnect).toHaveBeenCalledExactlyOnceWith(
@@ -100,6 +104,10 @@ describe("node canvas keyboard and identity", () => {
     );
     await user.click(output());
     await user.keyboard("{Escape}");
+    expect(output()).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("status", { name: "연결 상태" })).toHaveTextContent(
+      "진행 중인 연결 없음",
+    );
     await user.click(input());
     expect(props.onConnect).toHaveBeenCalledTimes(1);
   });
@@ -250,6 +258,10 @@ describe("node canvas keyboard and identity", () => {
         />,
       );
       view.rerender(<NodeCanvas {...props} />);
+      expect(
+        screen.getByRole("status", { name: "연결 상태" }),
+      ).toHaveTextContent("진행 중인 연결 없음");
+      expect(output()).toHaveAttribute("aria-pressed", "false");
       await user.click(input());
       expect(props.onConnect).not.toHaveBeenCalled();
     },

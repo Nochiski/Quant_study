@@ -227,6 +227,19 @@ export const NodeCanvas = (props: Props) => {
         >
           {t(`graph.canvas.${snapshot.status}`)}
         </span>
+        <span
+          role="status"
+          aria-label={t("graph.canvas.wireStatus")}
+          aria-atomic="true"
+        >
+          {currentWire === null
+            ? t("graph.canvas.wireIdle")
+            : t("graph.canvas.wirePending").replace(
+                "{node}",
+                graph.nodes.find((node) => node.nodeId === currentWire.from)
+                  ?.label ?? "",
+              )}
+        </span>
         {currentWire !== null ? (
           <Button size="small" onClick={() => setWire(null)}>
             {t("graph.canvas.cancelWire")}

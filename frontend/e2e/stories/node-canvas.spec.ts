@@ -68,7 +68,15 @@ test(
     // 키보드도 같은 연결 연산을 호출하며 Escape 뒤에는 연결이 남지 않는다.
     await output(page, 3).focus();
     await page.keyboard.press("Enter");
+    await expect(output(page, 3)).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      graph(page).getByRole("status", { name: "연결 상태" }),
+    ).toContainText("출력 선택됨");
     await page.keyboard.press("Escape");
+    await expect(output(page, 3)).toHaveAttribute("aria-pressed", "false");
+    await expect(
+      graph(page).getByRole("status", { name: "연결 상태" }),
+    ).toHaveText("진행 중인 연결 없음");
     await input(page).focus();
     await page.keyboard.press("Enter");
     await expect(
@@ -104,6 +112,17 @@ test(
     await expect(
       graph(page).getByRole("group", { name: /선택한 노드/ }),
     ).toBeInViewport();
+    await graph(page)
+      .getByRole("button", { name: "선택한 노드로 돌아가기" })
+      .focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      canvas(page).getByRole("button", { name: /^노드 편집: 2\./ }),
+    ).toBeFocused();
+    await test.info().attach("canvas-accessibility-tree", {
+      contentType: "text/plain",
+      body: await graph(page).ariaSnapshot(),
+    });
     const move = canvas(page).getByRole("button", { name: /^1\..* · 이동$/ });
     const own = move.locator("..");
     const initialLeft = await own.evaluate(
@@ -195,6 +214,15 @@ test(
     const inspector = graph(page).getByRole("group", { name: /선택한 노드/ });
     await expect(inspector).toBeFocused();
     await expect(inspector).toBeInViewport();
+    await expect(inspector).toContainText("window는 1 이상");
+    await inspector
+      .getByRole("button", { name: "선택한 노드로 돌아가기" })
+      .click();
+    await expect(
+      node.getByRole("button", { name: /^노드 편집:/ }),
+    ).toBeFocused();
+    await node.getByRole("button", { name: /문제 \d+개/ }).click();
+    await expect(inspector).toBeFocused();
     await expect(inspector).toContainText("window는 1 이상");
     await expect(page.locator(".factor-graph__canvas")).toHaveCount(0);
     await test.info().attach("canvas-diagnostic-360", {

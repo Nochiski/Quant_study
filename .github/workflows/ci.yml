@@ -174,14 +174,6 @@ jobs:
           uv run --locked python -m quant_study_dev.user_story_trace --playwright-list "$PLAYWRIGHT_JSON_OUTPUT_NAME"
       - run: npm run test:e2e
         working-directory: frontend
-      # 마감 검토 중 artifact 다운로드 제한에 대비한 특정 fixture 이미지 전달.
-      - name: 검토용 노드 진단 이미지 전달
-        if: failure()
-        shell: pwsh
-        run: |
-          Get-ChildItem frontend/test-results -Recurse -Filter graph-node-diagnostic-actual.png | ForEach-Object {
-            Write-Output ("LANG2_DIAGNOSTIC_PNG=" + [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName)))
-          }
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

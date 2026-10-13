@@ -44,6 +44,7 @@ from strategy_workbench.domain.backtest._retired import (
     environment_from_retired_settings,
 )
 from strategy_workbench.domain.backtest._schema import (
+    backtest_run_options_schema,
     run_environment_schema,
     run_environment_schema_hash,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "require_research_window",
     "run_environment_canonical_json",
     "run_environment_schema",
+    "backtest_run_options_schema",
     "run_environment_schema_hash",
     "sell_tax_schedule",
 ]

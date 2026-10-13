@@ -7133,6 +7133,11 @@
       "RunEnvironmentSchema": {
         "description": "실행 설정(`RunEnvironment`)의 런타임 JSON Schema; `schema_hash` 가 ETag 다.\n\n전략 authoring 문서 스키마(`StrategyDocumentSchema`)와 별개 산출물이다 — 문서에는\n`schema_version` 이 있고 실행 설정에는 없다. 프론트 실행 설정 패널이 기본값·enum 을 손으로\n적지 않게 하는 경로다(spec D6).",
         "properties": {
+          "options_schema": {
+            "additionalProperties": true,
+            "title": "Options Schema",
+            "type": "object"
+          },
           "schema": {
             "additionalProperties": true,
             "title": "Schema",
@@ -7145,7 +7150,8 @@
         },
         "required": [
           "schema_hash",
-          "schema"
+          "schema",
+          "options_schema"
         ],
         "title": "RunEnvironmentSchema",
         "type": "object"

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:strategy-workbench:backtest-run-options:1",
+  "title": "BacktestRunOptions",
+  "type": "object",
+  "properties": {
+    "core": {
+      "type": "string",
+      "enum": [
+        "rust",
+        "python"
+      ],
+      "default": "rust",
+      "x-description-key": "backtest.run.option.core"
+    },
+    "initial_cash": {
+      "type": "number",
+      "default": 100000000.0,
+      "x-description-key": "backtest.run.option.initial_cash"
+    },
+    "benchmark_security_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "x-description-key": "backtest.run.option.benchmark_security_id"
+    },
+    "annualization_days": {
+      "type": "integer",
+      "default": 252,
+      "x-description-key": "backtest.run.option.annualization_days"
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "$defs": {}
+}

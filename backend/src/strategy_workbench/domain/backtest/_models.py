@@ -321,37 +321,14 @@ class MetricWindow:
             raise ValueError("metric window start must be before or equal to end")
 
 
-@dataclass(frozen=True)
-class BacktestRunSpec:
-    """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+@dataclass(frozen=True, kw_only=True)
+class BacktestRunOptions:
+    """실행 옵션의 기본값·타입·검증. 요청과 편집기 계약이 같은 정의를 읽는다."""
 
-    `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
-    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
-    or neither (one coded 422, `backtest.run.invalid`).
-    After resolution the run spec stored in the manifest carries both: `strategy` is the exact
-    spec that was executed and `strategy_source` says where it came from.
-    """
-
-    strategy: StrategySpec | None = None
-    strategy_source: StrategySource | None = None
-    # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
-    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest.run.environment_required`)으로
-    # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
-    environment: RunEnvironment | None = None
     core: ExecutionCore = ExecutionCore.RUST
     initial_cash: float = 100_000_000.0
     benchmark_security_id: str | None = None
     annualization_days: int = 252
-    metric_windows: tuple[MetricWindow, ...] = ()
-    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
-    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
-    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
-    # 그대로다.
-    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
-    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
-    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
-    # 넣지 않는다.
-    lineage_strategy_id: str | None = None
 
     def __post_init__(self) -> None:
         # NaN 은 `<= 0` 비교를 빠져나가고 inf 는 양수라, 유한성을 따로 보지 않으면 접수된 뒤
@@ -368,6 +345,35 @@ class BacktestRunSpec:
                 "annualization_days must be positive — "
                 f"annualization_days={self.annualization_days!r}",
             )
+
+
+@dataclass(frozen=True)
+class BacktestRunSpec(BacktestRunOptions):
+    """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+
+    `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
+    or neither (one coded 422, `backtest.run.invalid`).
+    After resolution the run spec stored in the manifest carries both: `strategy` is the exact
+    spec that was executed and `strategy_source` says where it came from.
+    """
+
+    strategy: StrategySpec | None = None
+    strategy_source: StrategySource | None = None
+    # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
+    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest.run.environment_required`)으로
+    # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
+    environment: RunEnvironment | None = None
+    metric_windows: tuple[MetricWindow, ...] = ()
+    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
+    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
+    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
+    # 그대로다.
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
+    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
+    # 넣지 않는다.
+    lineage_strategy_id: str | None = None
 
 
 @dataclass(frozen=True)

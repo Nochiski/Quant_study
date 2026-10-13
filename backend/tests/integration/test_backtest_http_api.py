@@ -230,8 +230,8 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
     assert result["manifest"]["run_spec"]["benchmark_security_id"] == "sec-005930-1"
     assert result["manifest"]["metric_registry_version"] == "metric-registry-v5"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
-        "corporate_action_feed_empty",
-        "mock_equity_data",
+        "equity.corporate_action_feed_empty",
+        "equity.mock_data",
     }
     # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
     assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])

@@ -27,6 +27,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     source_hash_of,
 )
 from strategy_workbench.bootstrap._container import build_container
+from strategy_workbench.domain.strategy.facade.document import CURRENT_SCHEMA_VERSION
 
 NOW = datetime(2026, 9, 5, 12, 30, tzinfo=UTC)
 
@@ -44,7 +45,7 @@ def _draft(
         source=source,
         format=SourceFormat.YAML,
         source_hash=source_hash_of(source),
-        schema_version="1.1",
+        schema_version=CURRENT_SCHEMA_VERSION,
         updated_at=updated_at,
     )
 
@@ -170,7 +171,7 @@ def test_draft_service_rejects_a_naive_clock(tmp_path: Path) -> None:
     with pytest.raises(InvalidStrategyDraftError, match="timezone-aware"):
         service.save(
             "naive-clock",
-            SaveStrategyDraftRequest(0, "", SourceFormat.YAML, "1.1"),
+            SaveStrategyDraftRequest(0, "", SourceFormat.YAML, CURRENT_SCHEMA_VERSION),
         )
 
 
@@ -187,7 +188,7 @@ def test_draft_service_reuses_authoring_source_size_limit(tmp_path: Path) -> Non
     with pytest.raises(InvalidStrategyDraftError, match="max_bytes=4"):
         service.save(
             "oversized",
-            SaveStrategyDraftRequest(0, "한글", SourceFormat.YAML, "1.1"),
+            SaveStrategyDraftRequest(0, "한글", SourceFormat.YAML, CURRENT_SCHEMA_VERSION),
         )
 
 

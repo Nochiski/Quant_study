@@ -72,7 +72,31 @@ impl EntryIn {
 /// bar: `(open, high, low, volume, liquidity_volume, impact_scale)`. `liquidity_volume`은 유동성
 /// 캡의 기준 거래량이다 — 참여 기준이 따로 없으면 `volume`과 같다 (Python `Bar.liquidity_volume`).
 /// `impact_scale`은 √ 충격 척도이고 없으면 0이다 (Python `Bar.impact_scale`).
-pub(crate) type BarTuple = (f64, f64, f64, i64, i64, f64);
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ExecutionBar {
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub volume: i64,
+    pub liquidity_volume: i64,
+    pub impact_scale: f64,
+}
+
+// 폐기 예정 Python 경계만 위치 튜플을 받고 내부에서는 이름 있는 값으로 변환한다.
+type LegacyBarWire = (f64, f64, f64, i64, i64, f64);
+
+impl From<LegacyBarWire> for ExecutionBar {
+    fn from((open, high, low, volume, liquidity_volume, impact_scale): LegacyBarWire) -> Self {
+        Self {
+            open,
+            high,
+            low,
+            volume,
+            liquidity_volume,
+            impact_scale,
+        }
+    }
+}
 
 /// 슬리피지 설정: `("none", 0, 0)` | `("fixed_bps", bps, 0)` | `("volume_share", volume_limit, price_impact)`
 /// | `("sqrt", max_fraction, 0)`. `sqrt`는 체결가 × min(bar 척도 × √수량, max_fraction)이다
@@ -142,10 +166,21 @@ fn py_list(items: &[String]) -> String {
 }
 
 /// 계획 항목. Python 루프가 순서대로 적용한다.
-/// `("fill", order_id, quantity, price, slip, fee, "")`
-/// `("update", order_id, 0, 0, 0, 0, "status|detail")`
+/// `("fill", order_id, quantity, price, slip, fee, "", sell_tax)`
+/// `("update", order_id, 0, 0, 0, 0, "status|detail", 0)`
 /// `("trigger", order_id, ...)`, `("remove", order_id, ...)`, `("drop_group", group_id, ...)`
-pub(crate) type Op = (String, String, i64, f64, f64, f64, String);
+pub(crate) type Op = (
+    String,
+    String,
+    i64,
+    f64,
+    f64,
+    f64,
+    String,
+    f64,
+    Option<String>,
+    Option<i64>,
+);
 
 /// 매도 체결 금액 × 거래세율. 매수는 0이다. 연산 순서는 Python `costs.sell_tax_amount`와 같다.
 pub(crate) fn sell_tax(side: &str, quantity: i64, price: f64, rate: f64) -> f64 {
@@ -158,7 +193,7 @@ pub(crate) fn sell_tax(side: &str, quantity: i64, price: f64, rate: f64) -> f64 
 
 struct Session<'a> {
     ts: &'a str,
-    bars: &'a HashMap<&'a str, BarTuple>,
+    bars: &'a HashMap<&'a str, ExecutionBar>,
     power: &'a mut BuyingPower,
     fee_rate: f64,
     sell_tax_rate: f64,
@@ -173,6 +208,8 @@ struct QuoteOut {
     quantity: i64,
     slip: f64,
     status: String,
+    reason_code: Option<String>,
+    cap_volume: Option<i64>,
     no_price: bool, // 가격 규칙 미충족(지정가·스톱) — 진단 없이 대기
 }
 
@@ -187,9 +224,9 @@ impl<'a> Session<'a> {
         let (price, triggered) = execution_price(
             &e.order_type,
             &e.side,
-            bar.0,
-            bar.1,
-            bar.2,
+            bar.open,
+            bar.high,
+            bar.low,
             e.limit_price,
             e.stop_price,
             e.triggered,
@@ -205,21 +242,29 @@ impl<'a> Session<'a> {
                     "not_filled"
                 }
                 .to_string(),
+                reason_code: None,
+                cap_volume: None,
                 no_price: true,
             });
         };
         let participation = e.participation.as_deref().or(self.default_participation);
         let mut capped = e.remaining;
         if let Some(text) = participation {
-            capped = capped.min(liquidity_cap(bar.4, text)?.max(0));
+            capped = capped.min(liquidity_cap(bar.liquidity_volume, text)?.max(0));
         }
-        let slip = slippage_per_share(self.slippage, base_price, capped, bar.3, bar.5)?;
+        let slip = slippage_per_share(
+            self.slippage,
+            base_price,
+            capped,
+            bar.volume,
+            bar.impact_scale,
+        )?;
         let held = self.power.quantity_of(&e.key);
         let (p, q, applied, status) = quote_numbers(
             &e.side,
             base_price,
             e.remaining,
-            bar.4,
+            bar.liquidity_volume,
             participation,
             slip,
             e.limit_price,
@@ -227,31 +272,34 @@ impl<'a> Session<'a> {
             held,
             self.fee_rate,
             e.tif == "fok",
+            self.sell_tax_rate,
+            self.power.leverage(),
+            self.power.mark_of(&e.key),
         )?;
+        let cap_zero = status == "not_filled";
         Ok(QuoteOut {
             price: p,
             quantity: q,
             slip: applied,
             status,
+            // 기존 참여 한도 계산의 0주 결정만 표식으로 남긴다. 문구를 해석하지 않는다.
+            reason_code: cap_zero.then(|| "liquidity_cap_zero".to_string()),
+            cap_volume: cap_zero.then_some(bar.liquidity_volume),
             no_price: false,
         })
     }
 
     fn detail(&self, q: &QuoteOut, e: &EntryIn) -> Option<String> {
-        let bar = self
-            .bars
-            .get(e.key.as_str())
-            .copied()
-            .unwrap_or((0.0, 0.0, 0.0, 0, 0, 0.0));
+        let bar = self.bars.get(e.key.as_str()).copied().unwrap_or_default();
         let power = self.power.available();
         match q.status.as_str() {
             "not_filled" => Some(format!(
                 "no liquidity in session — order_id={} instrument={} volume={} ts={}",
-                e.order_id, e.symbol, bar.4, self.ts
+                e.order_id, e.symbol, bar.liquidity_volume, self.ts
             )),
             "liquidity_limited" => Some(format!(
                 "fill capped by volume participation — order_id={} instrument={} remaining={} cap={} volume={}",
-                e.order_id, e.symbol, e.remaining, q.quantity, bar.4
+                e.order_id, e.symbol, e.remaining, q.quantity, bar.liquidity_volume
             )),
             "rejected_no_cash" => Some(format!(
                 "cannot afford a single share — order_id={} instrument={} price={} buying_power={}",
@@ -282,6 +330,16 @@ impl<'a> Session<'a> {
     }
 
     fn update(&mut self, order_id: &str, status: &str, detail: Option<String>) {
+        self.update_diagnostic(order_id, status, detail, None);
+    }
+
+    fn update_diagnostic(
+        &mut self,
+        order_id: &str,
+        status: &str,
+        detail: Option<String>,
+        quote: Option<&QuoteOut>,
+    ) {
         self.ops.push((
             "update".into(),
             order_id.into(),
@@ -290,6 +348,9 @@ impl<'a> Session<'a> {
             0.0,
             0.0,
             format!("{status}|{}", detail.unwrap_or_default()),
+            0.0,
+            quote.and_then(|q| q.reason_code.clone()),
+            quote.and_then(|q| q.cap_volume),
         ));
     }
 
@@ -299,8 +360,7 @@ impl<'a> Session<'a> {
         let detail_before = self.detail(q, e);
         let notional = quantity as f64 * q.price;
         let fee = notional * self.fee_rate;
-        // 매도 거래세는 체결 기록이 아니라 비용 기록이지만, 같은 세션 뒤 매수가 그 돈을 쓰지 않도록
-        // 여력에서는 수수료와 함께 뺀다.
+        // 최종 체결의 세금을 한 번 확정해 여력과 체결 기록에 함께 전달한다.
         let tax = sell_tax(&e.side, quantity, q.price, self.sell_tax_rate);
         self.power
             .consume(&e.key, &e.side, quantity, q.price, fee + tax)?;
@@ -312,6 +372,9 @@ impl<'a> Session<'a> {
             q.slip,
             fee,
             String::new(),
+            tax,
+            None,
+            None,
         ));
         e.remaining -= quantity;
         if e.remaining == 0 {
@@ -327,6 +390,9 @@ impl<'a> Session<'a> {
                     0.0,
                     0.0,
                     String::new(),
+                    0.0,
+                    None,
+                    None,
                 ));
             }
             self.update(&e.order_id.clone(), "partially_filled", detail_before);
@@ -343,6 +409,9 @@ impl<'a> Session<'a> {
             0.0,
             0.0,
             String::new(),
+            0.0,
+            None,
+            None,
         ));
     }
 
@@ -361,6 +430,9 @@ impl<'a> Session<'a> {
                 0.0,
                 0.0,
                 String::new(),
+                0.0,
+                None,
+                None,
             ));
             let d = format!(
                 "stop triggered, limit not met — instrument={} stop={} limit={} ts={}",
@@ -372,7 +444,7 @@ impl<'a> Session<'a> {
             self.update(&e.order_id.clone(), "triggered", Some(d));
         } else if (q.status == "rejected_no_cash" || q.status == "not_filled") && !q.no_price {
             if let Some(d) = self.detail(&q, e) {
-                self.update(&e.order_id.clone(), "open", Some(d));
+                self.update_diagnostic(&e.order_id, "open", Some(d), Some(&q));
             }
         } else if q.status == "fok_rejected" {
             let d = self.detail(&q, e);
@@ -389,7 +461,7 @@ pub(crate) fn process_market_impl(
     ts: &str,
     entries: Vec<EntryTuple>,
     groups: Vec<(String, String, Vec<String>)>,
-    bars: &HashMap<&str, BarTuple>,
+    bars: &HashMap<&str, ExecutionBar>,
     power: &mut BuyingPower,
     fee_rate: f64,
     default_participation: Option<&str>,
@@ -463,7 +535,7 @@ fn process_market(
     ts: &str,
     entries: Vec<EntryTuple>,
     groups: Vec<(String, String, Vec<String>)>,
-    bars: HashMap<String, BarTuple>,
+    bars: HashMap<String, LegacyBarWire>,
     power: &mut BuyingPower,
     fee_rate: f64,
     default_participation: Option<&str>,
@@ -477,8 +549,10 @@ fn process_market(
         2,
     )?;
     // deprecated 경로만 소유한 표를 받는다 — 내부 정본은 등록부 문자열을 빌린다.
-    let borrowed: HashMap<&str, BarTuple> =
-        bars.iter().map(|(key, bar)| (key.as_str(), *bar)).collect();
+    let borrowed: HashMap<&str, ExecutionBar> = bars
+        .iter()
+        .map(|(key, bar)| (key.as_str(), ExecutionBar::from(*bar)))
+        .collect();
     process_market_impl(
         ts,
         entries,
@@ -500,6 +574,102 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn diagnostic_entry(id: &str, group: Option<&str>) -> EntryTuple {
+        (
+            id.into(),
+            id.into(),
+            id.into(),
+            "buy".into(),
+            "market".into(),
+            (None, None, None, None),
+            "day".into(),
+            10,
+            false,
+            group.map(str::to_string),
+            None,
+        )
+    }
+
+    fn diagnostic_bar(volume: i64) -> ExecutionBar {
+        ExecutionBar {
+            open: 100.0,
+            high: 100.0,
+            low: 100.0,
+            volume: 1000,
+            liquidity_volume: volume,
+            impact_scale: 0.0,
+        }
+    }
+
+    #[test]
+    fn zero_cap_records_quote_reason_but_other_unfilled_causes_do_not() {
+        for (volume, equity, limit, expected) in [
+            (0, 10000.0, None, true),
+            (9, 10000.0, None, true), // 양수 거래량도 참여 한도를 내리면 0주가 된다.
+            (1000, 0.0, None, false),
+            (0, 10000.0, Some(50.0), false), // 가격 조건 실패는 참여 한도 판정 전이다.
+            (20, 10000.0, None, false),      // 일부 체결은 0주 원인이 아니다.
+        ] {
+            let mut entry = diagnostic_entry("a", None);
+            if let Some(price) = limit {
+                entry.4 = "limit".into();
+                entry.5 .0 = Some(price);
+            }
+            let mut power = BuyingPower::new(equity, 1.0, vec![]);
+            let ops = process_market_impl(
+                "2024-01-02",
+                vec![entry],
+                vec![],
+                &HashMap::from([("a", diagnostic_bar(volume))]),
+                &mut power,
+                0.0,
+                Some("0.1"),
+                &("none".into(), 0.0, 0.0),
+                0.0,
+            )
+            .unwrap();
+            let reasons: Vec<_> = ops.iter().filter(|op| op.8.is_some()).collect();
+            assert_eq!(reasons.len(), usize::from(expected));
+            if expected {
+                assert_eq!(reasons[0].8.as_deref(), Some("liquidity_cap_zero"));
+                assert_eq!(reasons[0].9, Some(volume));
+                assert!(ops.iter().all(|op| op.0 != "fill"));
+                assert_eq!(power.available(), equity);
+            }
+        }
+    }
+
+    #[test]
+    fn basket_zero_cap_diagnostic_belongs_only_to_the_blocked_leg() {
+        for policy in ["all_or_none", "proportional", "best_effort"] {
+            let mut power = BuyingPower::new(10000.0, 1.0, vec![]);
+            let ops = process_market_impl(
+                "2024-01-02",
+                vec![
+                    diagnostic_entry("a", Some("g")),
+                    diagnostic_entry("b", Some("g")),
+                ],
+                vec![("g".into(), policy.into(), vec!["a".into(), "b".into()])],
+                &HashMap::from([("a", diagnostic_bar(0)), ("b", diagnostic_bar(1000))]),
+                &mut power,
+                0.0,
+                Some("0.1"),
+                &("none".into(), 0.0, 0.0),
+                0.0,
+            )
+            .unwrap();
+            let reasons: Vec<_> = ops.iter().filter(|op| op.8.is_some()).collect();
+            if policy == "best_effort" {
+                assert!(reasons.is_empty());
+                continue;
+            }
+            assert_eq!(reasons.len(), 1, "{policy}");
+            assert_eq!(reasons[0].1, "a");
+            assert_eq!(reasons[0].8.as_deref(), Some("liquidity_cap_zero"));
+            assert_eq!(reasons[0].9, Some(0));
+        }
+    }
 
     #[test]
     fn py_float_matches_python_repr() {

@@ -82,7 +82,8 @@ class Bar:
     volume: int
     # 유동성 캡(floor(기준 거래량 × 참여율))의 기준 거래량. None 이면 세션 거래량(`volume`)이다.
     liquidity_volume: int | None = None
-    # √ 시장충격 척도: 주당 충격 = 체결가 × 척도 × √체결 수량(`SqrtImpactSlippage`). None 이면 0.
+    # √ 시장충격 척도. 수량 Q는 SlippageModel 계약의 참여 한도 후·여력/그룹 축소 전 수량이다.
+    # 주당 충격 = 체결가 × 척도 × √Q(`SqrtImpactSlippage`). None 이면 0.
     impact_scale: float | None = None
 
     def __post_init__(self) -> None:

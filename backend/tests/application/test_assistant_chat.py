@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -60,8 +60,8 @@ from strategy_workbench.domain.assistant.facade.tools import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
-    run_environment_canonical_json,
 )
+from strategy_workbench.domain.canonical.facade.encoding import canonical_payload_json
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
@@ -338,7 +338,7 @@ def test_read_current_strategy_returns_the_turn_context() -> None:
     assert payload["source_text"] == CONTEXT.source_text
     assert payload["source_format"] == "yaml"
     assert payload["diagnostics"] == list(CONTEXT.diagnostics)
-    assert payload["environment"] == json.loads(run_environment_canonical_json(ENVIRONMENT))
+    assert payload["environment"] == json.loads(canonical_payload_json(asdict(ENVIRONMENT)))
 
 
 def test_validate_strategy_yaml_runs_the_compiler_port() -> None:

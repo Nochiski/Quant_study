@@ -258,9 +258,7 @@ def window_gap(has_cell: bool, test_run: BacktestRunState | None) -> WalkForward
         return WalkForwardGap.TEST_FAILED
     if test_run.status is RunStatus.COMPLETED:
         return None
-    if test_run.status in (RunStatus.FAILED, RunStatus.CANCELLED) and not awaiting_recovery(
-        test_run
-    ):
+    if test_run.status.is_terminal and not awaiting_recovery(test_run):
         return WalkForwardGap.TEST_FAILED
     return WalkForwardGap.PENDING
 

@@ -30,7 +30,6 @@ from strategy_workbench.domain.factor.facade.trace import (
     TraceSelection,
     TraceValueStatus,
     evaluate_factor_graph_with_trace,
-    trace_factor_graph,
 )
 
 DAYS = (date(2024, 1, 2), date(2024, 1, 3), date(2024, 1, 4), date(2024, 1, 5))
@@ -84,7 +83,9 @@ def test_trace_values_equal_evaluation_values_for_every_selected_row() -> None:
         for v in evaluate_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP).values
     }
 
-    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    trace = evaluate_factor_graph_with_trace(graph, observations=panel, missing=MissingPolicy.DROP)[
+        1
+    ]
 
     output = _rows(trace, "final")
     assert set(output) == set(evaluation)
@@ -125,7 +126,9 @@ def test_joint_evaluation_and_trace_share_one_compute_cache(monkeypatch) -> None
 
 
 def test_rows_are_ordered_by_as_of_then_security_and_carry_inputs() -> None:
-    trace = trace_factor_graph(_graph(), observations=_panel(), missing=MissingPolicy.DROP)
+    trace = evaluate_factor_graph_with_trace(
+        _graph(), observations=_panel(), missing=MissingPolicy.DROP
+    )[1]
 
     (close,) = [node for node in trace.nodes if node.node_id == "close"]
     assert [(row.as_of, row.security_id) for row in close.values][:4] == [
@@ -140,7 +143,9 @@ def test_rows_are_ordered_by_as_of_then_security_and_carry_inputs() -> None:
 
 
 def test_none_values_are_explained_by_status() -> None:
-    trace = trace_factor_graph(_graph(), observations=_panel(), missing=MissingPolicy.DROP)
+    trace = evaluate_factor_graph_with_trace(
+        _graph(), observations=_panel(), missing=MissingPolicy.DROP
+    )[1]
 
     close = _rows(trace, "close")
     assert close[(DAYS[1], "b")].status is TraceValueStatus.MISSING_INPUT
@@ -177,7 +182,9 @@ def test_division_by_zero_is_distinguished_from_missing_input() -> None:
             DAYS[0], "a", (FactorFieldValue("price.close", 1.0), FactorFieldValue("zero", 0.0))
         ),
     )
-    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    trace = evaluate_factor_graph_with_trace(graph, observations=panel, missing=MissingPolicy.DROP)[
+        1
+    ]
 
     assert _rows(trace, "div")[(DAYS[0], "a")].status is TraceValueStatus.DIVIDE_BY_ZERO
 
@@ -205,7 +212,9 @@ def test_a_division_across_a_masked_cell_is_reported_as_masked() -> None:
         )
         for position, day in enumerate(DAYS[:3])
     )
-    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    trace = evaluate_factor_graph_with_trace(graph, observations=panel, missing=MissingPolicy.DROP)[
+        1
+    ]
     row = _rows(trace, "div")[(DAYS[2], "a")]
 
     assert (row.value, row.inputs) == (None, (12.0, 10.0))
@@ -243,7 +252,9 @@ def test_masked_status_covers_exactly_the_cells_the_evaluator_masked() -> None:
         )
         for position, day in enumerate(days)
     )
-    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    trace = evaluate_factor_graph_with_trace(graph, observations=panel, missing=MissingPolicy.DROP)[
+        1
+    ]
 
     def positions(node_id: str, status: TraceValueStatus) -> list[int]:
         rows = _rows(trace, node_id)
@@ -288,7 +299,9 @@ def test_warm_up_is_reported_before_masked_where_both_apply() -> None:
         )
         for position, day in enumerate(days)
     )
-    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    trace = evaluate_factor_graph_with_trace(graph, observations=panel, missing=MissingPolicy.DROP)[
+        1
+    ]
     rows = _rows(trace, "mean5")
 
     assert [rows[(day, "a")].status for day in days] == [
@@ -331,56 +344,58 @@ def test_finite_operands_that_overflow_fail_at_the_node_boundary(
 def test_selection_bounds_nodes_securities_dates_and_rows() -> None:
     graph, panel = _graph(), _panel()
 
-    bounded = trace_factor_graph(
+    bounded = evaluate_factor_graph_with_trace(
         graph,
         observations=panel,
         missing=MissingPolicy.DROP,
         selection=TraceSelection(
             node_ids=("final", "close"), security_ids=("a",), as_of=(DAYS[3],)
         ),
-    )
+    )[1]
     assert [node.node_id for node in bounded.nodes] == ["close", "final"]
     assert all(len(node.values) == 1 for node in bounded.nodes)
     assert bounded.row_count == 2 and not bounded.truncated
 
-    capped = trace_factor_graph(
+    capped = evaluate_factor_graph_with_trace(
         graph, observations=panel, missing=MissingPolicy.DROP, selection=TraceSelection(max_rows=5)
-    )
+    )[1]
     assert capped.truncated and capped.row_count == 5
     assert [node.node_id for node in capped.nodes] == ["close"]
     assert len(capped.nodes[0].values) == 5
 
     with pytest.raises(ValueError, match="unknown or not reachable"):
-        trace_factor_graph(
+        evaluate_factor_graph_with_trace(
             graph,
             observations=panel,
             missing=MissingPolicy.DROP,
             selection=TraceSelection(node_ids=("nope",)),
-        )
+        )[1]
     with pytest.raises(ValueError, match="max_rows must be positive"):
-        trace_factor_graph(
+        evaluate_factor_graph_with_trace(
             graph,
             observations=panel,
             missing=MissingPolicy.DROP,
             selection=TraceSelection(max_rows=0),
-        )
+        )[1]
 
 
 def test_trace_is_deterministic_across_calls_and_input_order() -> None:
     graph, panel = _graph(), _panel()
-    first = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
-    second = trace_factor_graph(
+    first = evaluate_factor_graph_with_trace(graph, observations=panel, missing=MissingPolicy.DROP)[
+        1
+    ]
+    second = evaluate_factor_graph_with_trace(
         graph, observations=tuple(reversed(panel)), missing=MissingPolicy.DROP
-    )
+    )[1]
 
     assert first == second
 
 
 def test_exact_cap_boundary_does_not_emit_an_empty_trailing_node() -> None:
     graph, panel = _graph(), _panel()
-    capped = trace_factor_graph(
+    capped = evaluate_factor_graph_with_trace(
         graph, observations=panel, missing=MissingPolicy.DROP, selection=TraceSelection(max_rows=8)
-    )
+    )[1]
 
     assert [node.node_id for node in capped.nodes] == ["close"]
     assert capped.truncated and capped.row_count == 8
@@ -391,7 +406,9 @@ def test_duplicate_rows_fail_closed_before_evaluation() -> None:
     duplicated = panel + (_observation(DAYS[1], "a", 99.0),)
 
     with pytest.raises(ValueError, match=r"unique \(as_of, security_id\)"):
-        trace_factor_graph(graph, observations=duplicated, missing=MissingPolicy.DROP)
+        evaluate_factor_graph_with_trace(
+            graph, observations=duplicated, missing=MissingPolicy.DROP
+        )[1]
 
 
 def test_unreachable_node_selection_is_an_error_not_an_empty_trace() -> None:
@@ -401,9 +418,98 @@ def test_unreachable_node_selection_is_an_error_not_an_empty_trace() -> None:
         output_node_id=graph.output_node_id,
     )
     with pytest.raises(ValueError, match="not reachable"):
-        trace_factor_graph(
+        evaluate_factor_graph_with_trace(
             orphaned,
             observations=_panel(),
             missing=MissingPolicy.DROP,
             selection=TraceSelection(node_ids=("orphan",)),
-        )
+        )[1]
+
+
+def test_중첩_시간창의_최소이력과_출력만_선택한_trace_워밍업이_같다() -> None:
+    from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
+
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            UnaryNode("lagged", UnaryOperator.LAG, "close", "unary", periods=2),
+            TimeSeriesNode("mean", TimeSeriesOperator.MEAN, "lagged", 3, "time_series", lag=1),
+            BinaryNode("ratio", BinaryOperator.DIVIDE, "close", "mean", "binary"),
+        ),
+        output_node_id="ratio",
+    )
+    days = tuple(DAYS[0] + timedelta(days=index) for index in range(7))
+    panel = tuple(_observation(day, "a", float(index + 1)) for index, day in enumerate(days))
+    evaluation, trace = evaluate_factor_graph_with_trace(
+        graph,
+        observations=panel,
+        missing=MissingPolicy.DROP,
+        selection=TraceSelection(node_ids=("ratio",)),
+    )
+    assert validate_factor_graph(graph).minimum_history_sessions == 6
+    assert [row.status for row in trace.nodes[0].values] == [
+        *([TraceValueStatus.WARM_UP] * 5),
+        TraceValueStatus.OK,
+        TraceValueStatus.OK,
+    ]
+    assert [value.value for value in evaluation.values] == [None] * 5 + [3.0, 7 / 3]
+
+
+def test_이항_trace는_워밍업과_이력_충족_후_진짜_결측을_구별한다() -> None:
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            UnaryNode("lagged", UnaryOperator.LAG, "close", "unary", periods=1),
+            ConstantNode("one", 1.0, "constant"),
+            BinaryNode("ratio", BinaryOperator.DIVIDE, "one", "lagged", "binary"),
+        ),
+        output_node_id="ratio",
+    )
+    panel = tuple(
+        _observation(day, "a", value)
+        for day, value in zip(DAYS, (None, 0.0, 2.0, 4.0), strict=True)
+    )
+    _, trace = evaluate_factor_graph_with_trace(
+        graph,
+        observations=panel,
+        missing=MissingPolicy.DROP,
+        selection=TraceSelection(node_ids=("ratio",)),
+    )
+    assert [row.status for row in trace.nodes[0].values] == [
+        TraceValueStatus.WARM_UP,
+        TraceValueStatus.MISSING_INPUT,
+        TraceValueStatus.DIVIDE_BY_ZERO,
+        TraceValueStatus.OK,
+    ]
+
+
+@pytest.mark.parametrize("choose_missing", [True, False])
+def test_조건식_trace는_선택한_가지의_워밍업만_전파한다(choose_missing: bool) -> None:
+    from strategy_workbench.domain.factor.facade.expression import (
+        ComparisonNode,
+        ConditionalNode,
+        FactorComparisonOperator,
+    )
+
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            ConstantNode("one", 1.0, "constant"),
+            ConstantNode("other", 1.0 if choose_missing else 2.0, "constant"),
+            ComparisonNode(
+                "predicate", FactorComparisonOperator.EQUAL, "one", "other", "comparison"
+            ),
+            UnaryNode("lagged", UnaryOperator.LAG, "close", "unary", periods=1),
+            ConditionalNode("chosen", "predicate", "close", "lagged", "conditional"),
+        ),
+        output_node_id="chosen",
+    )
+    _, trace = evaluate_factor_graph_with_trace(
+        graph,
+        observations=(_observation(DAYS[0], "a", None),),
+        missing=MissingPolicy.DROP,
+        selection=TraceSelection(node_ids=("chosen",)),
+    )
+    assert trace.nodes[0].values[0].status is (
+        TraceValueStatus.MISSING_INPUT if choose_missing else TraceValueStatus.WARM_UP
+    )

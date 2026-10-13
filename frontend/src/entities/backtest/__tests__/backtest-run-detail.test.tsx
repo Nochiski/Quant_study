@@ -84,6 +84,16 @@ const result = (): BacktestRunResult => ({
 });
 
 describe("run 상세의 실행 설정", () => {
+  it("실행 상세에서 주문 상태 원본과 구조화된 유동성 사유를 보여 준다", async () => {
+    const value = result();
+    value.artifacts.order_updates = [{ session: "2026-10-12", order_id: "order-1", status: "open", reason_code: "liquidity_cap_zero", cap_volume: 0, detail: "original reason" }];
+    render(<BacktestRunDetail result={value} environmentFields={FIELDS} />);
+    const events = within(screen.getByRole("region", { name: "주문 상태 기록" }));
+    expect(events.getByText("유동성 한도 0주 기록 1건 (이벤트 기준)")).toBeVisible();
+    await userEvent.setup().click(events.getByText("주문 상태 원본 보기"));
+    expect(events.getByRole("table")).toHaveTextContent("original reason");
+  });
+
   it("manifest 의 실행 설정을 스키마 칸 순서·이름·단위·값 이름으로 보이고 environment hash 를 보인다", async () => {
     render(<BacktestRunDetail result={result()} environmentFields={FIELDS} />);
     const user = userEvent.setup();
@@ -199,6 +209,15 @@ describe("run 상세의 데이터 경고", () => {
     "benchmark.invalid_bar_sessions_carried",
     "portfolio.sector_unknown_excluded",
     "analytics.base_rate_carried_forward",
+    "equity.reference_rows_dropped",
+    "equity.provisional_rows_dropped",
+    "equity.invalid_ohlc_rows_dropped",
+    "equity.corporate_action_without_bar_dropped",
+    "equity.unfolded_level_shift",
+    "equity.mock_data",
+    "equity.corporate_action_feed_empty",
+    "mock_equity_data",
+    "corporate_action_feed_empty",
   ])("%s 에 제목이 있다", async (code) => {
     const base = result();
     render(

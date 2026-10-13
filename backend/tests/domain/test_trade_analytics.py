@@ -61,3 +61,22 @@ def test_full_and_window_share_totals_and_use_previous_session_as_base() -> None
     assert window.total_fees == 1
     assert window.total_taxes == pytest.approx(0.5)
     assert window.trades == outcomes
+
+
+def test_actual_fill_tax_is_authoritative_even_if_cost_rows_are_reordered() -> None:
+    from dataclasses import replace
+
+    fills = (
+        replace(_fill("1", 1, "buy", "2", 100), sell_tax=0.0),
+        replace(_fill("2", 2, "sell", "1", 110), sell_tax=2.0),
+        replace(_fill("3", 2, "sell", "1", 120), sell_tax=0.0),
+    )
+    costs = (RawCost(date(2024, 1, 2), "sell_tax", "A", 999),)
+    trades = closed_trades(fills, costs)
+    assert [(t.fees, t.pnl) for t in trades] == [(2.0, 8.0), (0.0, 20.0)]
+
+
+def test_legacy_fill_without_tax_field_retains_fifo_cost_compatibility() -> None:
+    fills = (_fill("1", 1, "buy", "2", 100), _fill("2", 2, "sell", "2", 110))
+    (trade,) = closed_trades(fills, (RawCost(date(2024, 1, 2), "sell_tax", "A", 2.0),))
+    assert (trade.fees, trade.pnl) == (2.0, 18.0)

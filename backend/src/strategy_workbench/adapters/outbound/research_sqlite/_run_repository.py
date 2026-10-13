@@ -33,7 +33,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
 )
 
 from ._errors import ResearchStorageError
-from ._request_codec import decode_request, encode_request
+from ._request_codec import RUN_END_PATH, RUN_START_PATH, decode_request, encode_request
 from ._schema import SCHEMA_VERSION, migrate_schema
 
 _TERMINAL = tuple(status.value for status in RunStatus if status.is_terminal)
@@ -233,12 +233,12 @@ class SQLiteBacktestRunRepository:
                 f"""
                 SELECT run_id, trial_key, status, created_at, updated_at, session_sharpe,
                     metric_registry_version, error_code, started_at,
-                    json_extract(request_json, '$.run_spec.environment.start') AS run_start,
-                    json_extract(request_json, '$.run_spec.environment.end') AS run_end
+                    json_extract(request_json, ?) AS run_start,
+                    json_extract(request_json, ?) AS run_end
                 FROM trial_ledger JOIN {_RUN_ROWS} USING (accepted_order)
                 WHERE {where} ORDER BY accepted_order
                 """,
-                members,
+                (RUN_START_PATH, RUN_END_PATH, *members),
             ).fetchall()
             blocked = connection.execute(
                 f"""

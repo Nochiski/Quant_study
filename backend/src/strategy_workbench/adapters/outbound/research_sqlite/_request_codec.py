@@ -30,6 +30,10 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from ._errors import ResearchStorageError
 
 _RUN_SPEC = TypeAdapter(BacktestRunSpec)
+# 저장 JSON 안 실행 구간의 경로. 원장 읽기가 요청을 다 풀지 않고 SQL `json_extract` 로 꺼낸다 —
+# 형식의 정본이 이 codec 이라 경로도 여기 둔다(`encode_request` 의 `run_spec` 칸, #519 재리뷰).
+RUN_START_PATH = "$.run_spec.environment.start"
+RUN_END_PATH = "$.run_spec.environment.end"
 
 
 def encode_request(request: BacktestRunSpec) -> str:

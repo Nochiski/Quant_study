@@ -447,17 +447,16 @@ const ko = {
   "ide.resizeInspector": "계약 크기 조절",
   "ide.resizeDebugger": "중간 결과 크기 조절",
   "ide.section.pending": "대기",
-  "ide.placeholder": "이 패널에 표시할 결과가 없습니다.",
+
   "ide.inspector.schema": "스키마",
   "ide.inspector.errors": "오류",
   "ide.inspector.plan": "실행 계획",
   "ide.inspector.path": "Path",
   "ide.inspector.unit": "단위",
   "ide.inspector.stage": "적용 시점",
-  "ide.debugger.security": "종목",
-  "ide.debugger.before": "제한 전",
-  "ide.debugger.after": "제한 후",
-  "ide.debugger.status": "상태",
+
+
+
   "debugger.controls": "전략 추적 범위",
   "debugger.date": "기준일",
   "debugger.date.note":
@@ -646,9 +645,9 @@ const ko = {
   "ide.outline.arrayIndex": "배열 인덱스",
   "ide.section.identity": "기본 정보",
   "ide.snippets": "스니펫",
-  "ide.snippet.field": "필드 노드 추가",
-  "ide.snippet.transform": "변환 노드 추가",
-  "ide.snippet.risk": "리스크 제한",
+
+
+
   "snippet.help":
     "빈 키 위치에서 추가합니다. 삽입 전 YAML 1.2 문법을 검사합니다.",
   "snippet.loading": "서버 스키마와 팩터 카탈로그를 불러오는 중입니다.",
@@ -1428,14 +1427,8 @@ const ko = {
   "strategy.operator.comparison.eq": "같음",
   "strategy.operator.comparison.eq.description": "두 값이 같으면 참입니다.",
   "strategy.operator.comparison.eq.formula": "left = right",
-  "ide.debugger.tab.preview": "값 미리보기",
-  "ide.debugger.tab.exposure": "노출",
-  "ide.debugger.tab.orders": "주문 예상",
-  "ide.debugger.tab.exclusions": "제외 사유",
-  "ide.debugger.tab.plan": "실행 계획",
-  "ide.debugger.computedWeight": "계산 비중",
-  "ide.debugger.afterCap": "제한 후",
-  "ide.debugger.difference": "차이",
+
+
   "ide.debugger.pitPassed": "PIT 검증 통과",
   "ide.debugger.pitDetail": "분포, 결측, 극단값 검증을 통과했습니다.",
   "save.action": "저장",
@@ -2630,17 +2623,16 @@ export const messages = {
     "ide.resizeInspector": "Resize contract panel",
     "ide.resizeDebugger": "Resize intermediate results",
     "ide.section.pending": "Pending",
-    "ide.placeholder": "There is no result to show in this panel.",
+
     "ide.inspector.schema": "Schema",
     "ide.inspector.errors": "Errors",
     "ide.inspector.plan": "Execution plan",
     "ide.inspector.path": "Path",
     "ide.inspector.unit": "Unit",
     "ide.inspector.stage": "Applied at",
-    "ide.debugger.security": "Security",
-    "ide.debugger.before": "Before cap",
-    "ide.debugger.after": "After cap",
-    "ide.debugger.status": "Status",
+
+
+
     "debugger.controls": "Strategy trace scope",
     "debugger.date": "As-of date",
     "debugger.date.note":
@@ -2832,9 +2824,9 @@ export const messages = {
     "ide.outline.arrayIndex": "Array index",
     "ide.section.identity": "Basics",
     "ide.snippets": "Snippets",
-    "ide.snippet.field": "Add field node",
-    "ide.snippet.transform": "Add transform node",
-    "ide.snippet.risk": "Risk limit",
+
+
+
     "snippet.help":
       "Insert at an empty key position. YAML 1.2 syntax is checked before editing.",
     "snippet.loading": "Loading the server schema and factor catalog.",
@@ -3641,14 +3633,8 @@ export const messages = {
     "strategy.operator.comparison.eq.description":
       "True where the two inputs are equal.",
     "strategy.operator.comparison.eq.formula": "left = right",
-    "ide.debugger.tab.preview": "Value preview",
-    "ide.debugger.tab.exposure": "Exposure",
-    "ide.debugger.tab.orders": "Expected orders",
-    "ide.debugger.tab.exclusions": "Exclusions",
-    "ide.debugger.tab.plan": "Execution plan",
-    "ide.debugger.computedWeight": "Computed weight",
-    "ide.debugger.afterCap": "After cap",
-    "ide.debugger.difference": "Difference",
+
+
     "ide.debugger.pitPassed": "PIT check passed",
     "ide.debugger.pitDetail":
       "Distribution, missing values and outliers checked.",

@@ -54,10 +54,9 @@ const CATALOG_PAGE = { page_size: 100 } as const;
 
 const resourceState = (
   pending: boolean,
-  error: boolean,
   hasData: boolean,
 ): ContractResourceState =>
-  hasData ? "ready" : pending ? "loading" : error ? "error" : "error";
+  hasData ? "ready" : pending ? "loading" : "error";
 
 /**
  * Binds the schema-driven editor assistance to live data: runtime schema and contract (P1-05)
@@ -126,12 +125,12 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     [
       assistMetadata.catalogs.factors,
       assistMetadata.schema,
-      contract.isPending,
       contract.isError,
-      factors.isPending,
       factors.isError,
-      schema.isPending,
       schema.isError,
+      contract.isPending,
+      factors.isPending,
+      schema.isPending,
       snippetCoherence,
     ],
   );
@@ -153,39 +152,31 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       state: {
         schema: resourceState(
           schema.isPending,
-          schema.isError,
           schema.data !== undefined,
         ),
         contract: resourceState(
           contract.isPending,
-          contract.isError,
           contractData !== undefined,
         ),
         equityCatalog: resourceState(
           fields.isPending,
-          fields.isError,
           fields.data !== undefined,
         ),
         factorCatalog: resourceState(
           factors.isPending,
-          factors.isError,
           factors.data !== undefined,
         ),
       },
     }),
     [
-      contract.isError,
       contract.isPending,
       contract.data,
       contractData,
       factors.data,
-      factors.isError,
       factors.isPending,
       fields.data,
-      fields.isError,
       fields.isPending,
       schema.data,
-      schema.isError,
       schema.isPending,
     ],
   );

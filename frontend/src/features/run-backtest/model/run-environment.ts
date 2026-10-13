@@ -17,7 +17,6 @@ import { type RunEnvironment } from "../../../shared/api";
 
 export {
   runEnvironmentFields,
-  type RunEnvironmentControl,
   type RunEnvironmentField,
 } from "../../../entities/backtest";
 

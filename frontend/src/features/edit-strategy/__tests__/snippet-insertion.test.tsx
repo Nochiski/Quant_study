@@ -12,6 +12,7 @@ import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
 import { initialDocumentState } from "../model/document-state";
 import type { JsonSchema } from "../model/schema-navigator";
+import { useSourceTransactions } from "../model/use-source-transactions";
 import { useSnippetInsertion } from "../model/use-snippet-insertion";
 import { SnippetCatalog } from "../ui/snippet-catalog";
 
@@ -59,11 +60,11 @@ describe("snippet insertion coordinator", () => {
   it("does not edit during IME composition", () => {
     const state = { ...initialDocumentState("yaml", ""), composing: true };
     const { result } = renderHook(() =>
-      useSnippetInsertion(state, {
+      useSnippetInsertion({
         schema: SIGNAL_SCHEMA,
         factors: [],
         status: "ready",
-      }),
+      }, true, useSourceTransactions(state)),
     );
 
     act(() => result.current.onEditorReady(editorHandle));
@@ -81,9 +82,9 @@ describe("snippet insertion coordinator", () => {
     const state = initialDocumentState("yaml", "");
     const { result } = renderHook(() =>
       useSnippetInsertion(
-        state,
         { schema: SIGNAL_SCHEMA, factors: [], status: "ready" },
         false,
+        useSourceTransactions(state, false),
       ),
     );
 
@@ -101,8 +102,9 @@ describe("snippet insertion coordinator", () => {
     const { result, rerender } = renderHook(
       ({ documentEpoch, status }) =>
         useSnippetInsertion(
-          { ...state, documentEpoch },
           { schema: SIGNAL_SCHEMA, factors: [], status },
+          true,
+          useSourceTransactions({ ...state, documentEpoch }),
         ),
       {
         initialProps: {

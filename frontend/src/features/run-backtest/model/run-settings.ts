@@ -1,3 +1,4 @@
+import type { BacktestRequestOptions as BacktestRunOptions } from "../../../entities/backtest";
 import type { BacktestRunSpec } from "../../../shared/api";
 import type { MessageKey } from "../../../shared/config";
 import type { RunEnvironmentValidation } from "./run-environment";
@@ -35,10 +36,7 @@ export type BacktestRunSettingsError =
   | "oos_out_of_range"
   | "oos_incomplete";
 
-export type BacktestRunOptions = Omit<
-  BacktestRunSpec,
-  "strategy" | "strategy_source"
->;
+
 
 export type BacktestRunSettingsResult =
   | { valid: true; options: BacktestRunOptions; errors: [] }

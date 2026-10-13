@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { BacktestRunResult } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
-import { runEnvironmentFields } from "../model/run-environment-fields";
+import { runEnvironmentFields, runEnvironmentLabel } from "../model/run-environment-fields";
 import { BacktestRunDetail } from "../ui/backtest-run-detail";
 
 /** backend 가 만든 실행 설정 스키마 사본(`tools/export_runtime_schema.py`). */
@@ -103,24 +103,7 @@ describe("run 상세의 실행 설정", () => {
     )
       .getAllByRole("term")
       .map((term) => term.textContent);
-    expect(labels).toEqual([
-      "시장",
-      "빈도",
-      "시작일",
-      "종료일",
-      "유니버스",
-      "체결 시점",
-      "참여율 (%)",
-      "참여 기준",
-      "수수료 (bp)",
-      "슬리피지 (bp)",
-      "가격 충격 모델",
-      "가격 충격 계수",
-      "매도 거래세",
-      "매도 거래세율 (bp)",
-      "결측 처리",
-      "실행 설정 hash",
-    ]);
+    expect(labels).toEqual([...FIELDS.map(runEnvironmentLabel), "실행 설정 hash"]);
     expect(row("시장")).toHaveTextContent("한국거래소(KRX)");
     expect(row("빈도")).toHaveTextContent("일봉");
     expect(row("시작일")).toHaveTextContent("2023-01-02");

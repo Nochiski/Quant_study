@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
-import type { DocumentState } from "./document-state";
 import {
   buildCanonicalSnippetCatalog,
   planSnippetEdit,
@@ -9,10 +8,7 @@ import {
   type SnippetCatalogSource,
   type SnippetEditFailure,
 } from "./canonical-snippets";
-import {
-  useSourceTransactions,
-  type SourceTransactions,
-} from "./use-source-transactions";
+import type { SourceTransactions } from "./use-source-transactions";
 
 export type SnippetFailure =
   SnippetEditFailure | "editor-unavailable" | "editor-inactive" | "composing";
@@ -55,14 +51,10 @@ export type SnippetInsertion = {
  * 되살아나지 않도록 상태를 scope에 넣는다.
  */
 export const useSnippetInsertion = (
-  state: DocumentState,
   source: SnippetCatalogSource,
-  editorActive = true,
-  shared?: SourceTransactions,
+  editorActive: boolean,
+  transactions: SourceTransactions,
 ): SnippetInsertion => {
-  // page가 만든 인스턴스를 공유하면(P4-04) 그것을 쓰고, 아니면 자기 것을 만든다.
-  const own = useSourceTransactions(state, editorActive);
-  const transactions = shared ?? own;
   const snippets = useMemo(
     () => buildCanonicalSnippetCatalog(source),
     [source],
@@ -80,7 +72,7 @@ export const useSnippetInsertion = (
       setStatusAtInsert(source.status);
       // page 인스턴스를 공유해도 스니펫은 source view가 활성일 때만 커서에 넣는다(hidden 편집기의 커서는
       // 사용자가 보지 못한다). 공유 인스턴스의 editorActive는 "handle이 살아 있는가"라 따로 막는다.
-      if (shared !== undefined && !editorActive) {
+      if (!editorActive) {
         run(
           () => ({ status: "error", reason: "editor-inactive" }),
           snippet.label,
@@ -95,7 +87,7 @@ export const useSnippetInsertion = (
         SNIPPET_OWNER,
       );
     },
-    [editorActive, run, shared, source.status],
+    [editorActive, run, source.status],
   );
 
   // 자기 owner 슬롯만 읽는다(Phase 4 감사 R2). memo 의존성은 슬롯 값이다(리뷰 P2-7: `transactions`는 매 렌더 새 객체).

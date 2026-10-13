@@ -123,8 +123,6 @@ const catalogLabel = (catalog: string): string => {
   switch (catalog) {
     case "equity-field":
       return t("assist.catalog.equityField");
-    case "universe":
-      return t("assist.catalog.universe");
     default:
       return catalog;
   }
@@ -160,7 +158,7 @@ const identifierOptions = (
         type: "value",
       }));
     }
-    return []; // universe: 전략 문서에 없는 카탈로그(실행 설정), 목록을 지어내지 않는다
+    return []; // 모르는 카탈로그의 후보를 지어내지 않는다
   }
   const reference = schemaFacts(resolved.node).reference;
   if (typeof reference === "string") {

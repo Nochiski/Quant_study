@@ -172,7 +172,6 @@ export const NewStrategyPage = () => {
   // 살아 있으므로 editorActive는 참이고, 스니펫만 source view 게이트를 따로 지킨다.
   const transactions = useSourceTransactions(document, true);
   const snippets = useSnippetInsertion(
-    document,
     assist.snippetSource,
     view === "yaml",
     transactions,
@@ -215,7 +214,6 @@ export const NewStrategyPage = () => {
   // IDE 전역 단축키가 같은 명령을 부른다.
   const history = useDocumentHistory(document);
   const onOutlineEditorReady = outline.onEditorReady;
-  const onSnippetEditorReady = snippets.onEditorReady;
   const onReplacementEditorReady = replacement.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
   const onUpgradeEditorReady = documentUpgrade.onEditorReady;
@@ -225,7 +223,6 @@ export const NewStrategyPage = () => {
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
-      onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
       onReplacementEditorReady(editor);
       onUpgradeEditorReady(editor);
@@ -236,7 +233,6 @@ export const NewStrategyPage = () => {
     [
       onOutlineEditorReady,
       onProposalEditorReady,
-      onSnippetEditorReady,
       onTransactionsEditorReady,
       onReplacementEditorReady,
       onUpgradeEditorReady,

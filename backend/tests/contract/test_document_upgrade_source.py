@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.domain.strategy.facade.document import (
@@ -21,6 +20,7 @@ from strategy_workbench.domain.strategy.facade.document import (
     upgrade_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategyIdentity
+from tests.authoring_yaml import load_authoring_yaml
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 DRAFT = StrategyIdentity("draft", 0)
@@ -41,7 +41,7 @@ def _canonical(document: object) -> str:
 
 def _expected(source: str, *, until: str | None = None) -> object:
     """dict 경로의 기대 tree. JSON 왕복으로 plain 값만 남긴다."""
-    return json.loads(json.dumps(upgrade_document(yaml.safe_load(source), until=until).tree))
+    return json.loads(json.dumps(upgrade_document(load_authoring_yaml(source), until=until).tree))
 
 
 def _upgrade(source: str, *, until: str | None = None) -> str:
@@ -117,7 +117,7 @@ def test_a_deleted_section_takes_its_inner_comments_and_keeps_the_next_keys() ->
 
     assert "# 유니버스" not in upgraded and "frequency 설명" not in upgraded
     assert f'description: ""{LF}# eligibility 설명 — 다음 최상위 키{LF}eligibility:' in upgraded
-    assert _canonical(yaml.safe_load(upgraded)) == _canonical(_expected(source))
+    assert _canonical(load_authoring_yaml(upgraded)) == _canonical(_expected(source))
 
 
 def test_an_inserted_signal_section_keeps_the_comment_describing_portfolio_above_it() -> None:
@@ -136,7 +136,7 @@ def test_an_inserted_signal_section_keeps_the_comment_describing_portfolio_above
         f"      output_node_id: mom_252{LF}signal:{LF}  normalization: none{LF}"
         f"# portfolio 설명{LF}portfolio:"
     ) in upgraded
-    assert _canonical(yaml.safe_load(upgraded)) == _canonical(_expected(source))
+    assert _canonical(load_authoring_yaml(upgraded)) == _canonical(_expected(source))
 
 
 def test_a_refilled_section_keeps_its_eol_comment_and_the_next_keys_comment() -> None:
@@ -154,7 +154,7 @@ def test_a_refilled_section_keeps_its_eol_comment_and_the_next_keys_comment() ->
         f"signal:   # 신호 섹션{LF}  normalization: none{LF}# portfolio 설명 (열 0){LF}portfolio:"
     ) in upgraded
     assert "# method 위" not in upgraded
-    assert _canonical(yaml.safe_load(upgraded)) == _canonical(_expected(source))
+    assert _canonical(load_authoring_yaml(upgraded)) == _canonical(_expected(source))
 
 
 def test_emptied_section_keeps_its_eol_comment_and_untouched_sections_keep_theirs() -> None:
@@ -292,7 +292,7 @@ def test_flow_style_factors_are_flattened_too() -> None:
     head, rest = block.split(f"factors:{LF}", 1)
     tail = rest[rest.index(f"signal:{LF}") :]
     # JSON은 YAML flow style이므로 같은 팩터 목록을 한 줄 flow mapping으로 바꿔 넣는다.
-    flow = json.dumps(yaml.safe_load(block)["factors"], ensure_ascii=False)
+    flow = json.dumps(load_authoring_yaml(block)["factors"], ensure_ascii=False)
     source = f"{head}factors: {flow}{LF}{tail}"
     assert 'factors: {"factors": [' in source
     codec = RuamelDocumentCodec()

@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from ruamel.yaml import YAML
 
 from strategy_workbench.domain.strategy import _upgrade as _upgrade_module
@@ -37,6 +36,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     SignalNormalization,
     StrategyIdentity,
 )
+from tests.authoring_yaml import load_authoring_yaml
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 DRAFT = StrategyIdentity("draft", 0)
@@ -44,7 +44,7 @@ V1_0, V1_1 = UPGRADE_CHAIN[0], UPGRADE_CHAIN[1]
 
 
 def _yaml(name: str) -> dict[str, Any]:
-    loaded = yaml.safe_load((FIXTURES / name).read_text(encoding="utf-8"))
+    loaded = load_authoring_yaml((FIXTURES / name).read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
 
@@ -606,7 +606,7 @@ def test_steps_apply_identically_to_ruamel_round_trip_containers() -> None:
     buffer = StringIO()
     loader.dump(document, buffer)
     dumped = buffer.getvalue()
-    assert json.loads(json.dumps(yaml.safe_load(dumped))) == _tree(yaml.safe_load(text))
+    assert json.loads(json.dumps(load_authoring_yaml(dumped))) == _tree(load_authoring_yaml(text))
     assert dumped.startswith("# P0-01 golden authoring fixture")  # 선두 주석 보존
     # 따옴표 보존은 loader 설정(`preserve_quotes`) 몫이라 여기서는 어느 쪽이든 현재 버전이면 된다.
     assert (

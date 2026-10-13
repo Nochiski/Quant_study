@@ -15,8 +15,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteStrategyRepository,
@@ -43,6 +41,16 @@ class FrozenRow:
     source_hash: str | None
 
 
+def _yaml_tree(source: str) -> dict[str, Any]:
+    # CLI로도 실행하는 이 fixture는 테스트 package import 없이 운영 codec을 직접 쓴다.
+    parsed = RuamelDocumentCodec().parse(source, format=SourceFormat.YAML)
+    if not parsed.ok:
+        raise ValueError(f"invalid frozen source: {parsed.diagnostics}")
+    if not isinstance(parsed.tree, dict):
+        raise ValueError("frozen source must be a mapping")
+    return parsed.tree
+
+
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -63,7 +71,7 @@ def retired_1_1_spec_json() -> str:
     모델은 더 이상 없으므로(1.2 가 `data`·`execution` 을 지웠다) 저장 시점에 기록됐을 바이트를
     fixture 에서 직접 만든다.
     """
-    document = yaml.safe_load((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
+    document = _yaml_tree((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
     return canonical_payload_json(document)
 
 
@@ -74,7 +82,7 @@ def retired_spec_json(schema_version: str, document: dict[str, Any] | None = Non
     거절을 시험하려면 둘 다 그 값이어야 한다 — 그래야 검사가 `_decode_frozen_spec` 까지 간다.
     """
     base: dict[str, Any] = (
-        yaml.safe_load((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
+        _yaml_tree((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
         if document is None
         else document
     )
@@ -142,7 +150,7 @@ def seed_retired_1_1_document_row(path: Path, *, strategy_id: str = "retired-1-1
     """
     open_repository(path).close()
     text = retired_1_1_source_text()
-    spec_json = canonical_payload_json(yaml.safe_load(text))
+    spec_json = canonical_payload_json(_yaml_tree(text))
     spec_hash = _sha256(spec_json)
     text_hash = _sha256(text)
     with sqlite3.connect(path) as connection:

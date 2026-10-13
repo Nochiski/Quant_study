@@ -48,8 +48,9 @@ def test_domain_and_application_do_not_import_pydantic() -> None:
 
 def test_nobody_imports_pyyaml() -> None:
     offenders = [
-        str(path.relative_to(SRC_ROOT))
-        for path in SRC_ROOT.rglob("*.py")
+        str(path.relative_to(SRC_ROOT.parent))
+        for root in (SRC_ROOT, SRC_ROOT.parent / "tests")
+        for path in root.rglob("*.py")
         if "yaml" in _imports(path)
     ]
     assert offenders == [], f"PyYAML import found — files={offenders} (use the ruamel codec)"

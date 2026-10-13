@@ -168,33 +168,6 @@ def authoring_document(spec: StrategySpec) -> str:
     return canonical_payload_json(document, indent=2) + "\n"
 
 
-def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:
-    """Hydrate a legacy payload that carries `identity` inside the document (current JSON API)."""
-    issues: list[StructuralIssue] = []
-    spec = _hydrate(StrategySpec, document, "", issues)
-    if issues or spec is _MISSING:
-        return StrategyHydration(
-            HydrationStatus.STRUCTURAL_ERROR, None, _with_legacy_hints(document, issues)
-        )
-    if not isinstance(spec, StrategySpec):  # pragma: no cover - defensive
-        raise TypeError(f"hydrate produced {type(spec).__name__}, expected StrategySpec")
-    if spec.identity.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        return StrategyHydration(
-            HydrationStatus.STRUCTURAL_ERROR,
-            None,
-            (
-                StructuralIssue(
-                    "structure.unsupported_schema_version",
-                    "/identity/schema_version",
-                    "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 "
-                    f"바꿔 줍니다 — got={spec.identity.schema_version!r} "
-                    f"supported={SUPPORTED_SCHEMA_VERSIONS}",
-                ),
-            ),
-        )
-    return StrategyHydration(HydrationStatus.OK, spec, ())
-
-
 def _version_issues(
     document: Mapping[str, object], schema_version: object
 ) -> list[StructuralIssue]:
@@ -397,7 +370,7 @@ def _hydrate_union(
         if int in scalar_members:
             return value
         if float in scalar_members:
-            return float(value)
+            return _hydrate_scalar(float, value, pointer, issues)
     elif isinstance(value, float):
         if int in scalar_members and value.is_integer():
             return int(value)

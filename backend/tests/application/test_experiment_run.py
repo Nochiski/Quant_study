@@ -1460,6 +1460,14 @@ def test_cancel_retries_unfinished_cleanup_after_a_port_failure(failure: str) ->
     states = runs.states
     cancel = runs.cancel
     failed = False
+    clock_reads = 0
+
+    def advancing_now() -> datetime:
+        nonlocal clock_reads
+        clock_reads += 1
+        return _AT + timedelta(days=clock_reads)
+
+    service._now = advancing_now
 
     def failing_states(run_ids: Collection[str]) -> dict[str, BacktestRunState]:
         nonlocal failed
@@ -1487,6 +1495,7 @@ def test_cancel_retries_unfinished_cleanup_after_a_port_failure(failure: str) ->
     original_timestamp = service._repository.get(experiment_id).cancelled_at
     assert original_timestamp is not None
     after = service.cancel(experiment_id)
-    assert after.record.cancelled_at == original_timestamp
+    assert after.record.cancelled_at == original_timestamp == _AT + timedelta(days=1)
+    assert clock_reads == 1
     assert all(state is RunStatus.CANCELLED for state in runs.run_statuses.values())
     assert runs.cancelled == [(f"run-{index}", experiment_id) for index in range(4)]

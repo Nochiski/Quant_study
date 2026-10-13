@@ -234,7 +234,7 @@ class TurnAcceptedView:
 
 @dataclass(frozen=True)
 class TurnContextPayload:
-    """한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7)."""
+    """한 턴이 보는 편집기 상태. 저장 문서와 별개로 아직 저장하지 않은 원문·진단을 요청에 싣는다."""
 
     source_text: str
     source_format: str = "yaml"

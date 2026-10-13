@@ -154,6 +154,7 @@ def price_table(
         )
     if basis is not None:
         columns["basis"] = pa.array(basis, type=pa.string())
+        columns["corp_action_pending"] = pa.array([value == "evening" for value in basis])
     if base_prices is not None:
         previous: dict[str, float | None] = {}
         bases: list[float | None] = []
@@ -550,90 +551,6 @@ def import_ledger_module(name: str) -> ModuleType:
             sys.path.remove(str(_EQUITY_SRC))
 
 
-# `price_adj_daily`(S23) 산출 사본 — `database/src/equity/sql/price_adj_daily.sql` 과 같은 식이다.
-# 매크로가 아니라 **표**다. 워크벤치 `price.adj_close` 는 이 표를 원장 뷰 `v_adj_close`
-# (`LEDGER_MACROS`)로 읽는다(#220).
-_PRICE_ADJ_DAILY_SQL = """
-WITH px AS (
-    SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr,
-           coalesce(s.span_seq, 0) AS span_seq
-    FROM {price_daily} p
-    ASOF LEFT JOIN {security_span} s ON s.ticker = p.ticker AND p.date >= s.first_date
-),
-okf AS (
-    SELECT f.ticker, greatest(f.apply_date, f.available_date) AS fold_date,
-           f.price_factor, f.share_factor, f.available_date
-    FROM {adj_factor} f WHERE f.factor_ok
-),
-oks AS (
-    SELECT o.ticker, coalesce(s.span_seq, -1) AS span_seq, o.fold_date,
-           o.price_factor, o.share_factor, o.available_date
-    FROM okf o
-    ASOF LEFT JOIN {security_span} s ON s.ticker = o.ticker AND o.fold_date > s.first_date
-),
-fac AS (
-    SELECT ticker, span_seq, fold_date,
-           product(price_factor) AS pf, product(share_factor) AS sf,
-           count(*) AS n_fac, max(available_date) AS avail
-    FROM oks GROUP BY ticker, span_seq, fold_date
-),
-cum AS (
-    SELECT ticker, span_seq, fold_date,
-           product(pf) OVER w AS cum_price_factor,
-           product(sf) OVER w AS cum_share_factor,
-           sum(n_fac)  OVER w AS n_factors_applied,
-           max(avail)  OVER w AS factor_available_date
-    FROM fac
-    WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
-                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-),
-badf AS (SELECT e.ticker, e.apply_date FROM {adj_factor} e WHERE NOT e.factor_ok),
-bads AS (
-    SELECT b.ticker, coalesce(s.span_seq, -1) AS span_seq, b.apply_date
-    FROM badf b
-    ASOF LEFT JOIN {security_span} s ON s.ticker = b.ticker AND b.apply_date >= s.first_date
-),
-bad AS (
-    SELECT ticker, span_seq, apply_date, count(*) AS n_bad FROM bads
-    GROUP BY ticker, span_seq, apply_date
-),
-badcum AS (
-    SELECT ticker, span_seq, apply_date,
-           sum(n_bad) OVER (PARTITION BY ticker, span_seq ORDER BY apply_date
-                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-             AS n_unadjusted_events
-    FROM bad
-),
-joined AS (
-    SELECT p.ticker, p.date, p.span_seq, p.open, p.high, p.low, p.close, p.volume_shr,
-           coalesce(c.cum_price_factor, 1)  AS cum_price_factor,
-           coalesce(c.cum_share_factor, 1)  AS cum_share_factor,
-           coalesce(c.n_factors_applied, 0) AS n_factors_applied,
-           c.factor_available_date
-    FROM px p
-    ASOF LEFT JOIN cum c
-      ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
-),
-unadj AS (
-    SELECT j.*, coalesce(b.n_unadjusted_events, 0) AS n_unadjusted_events
-    FROM joined j
-    ASOF LEFT JOIN badcum b
-      ON b.ticker = j.ticker AND b.span_seq = j.span_seq AND j.date >= b.apply_date
-)
-SELECT u.ticker, u.date,
-       u.open       * u.cum_share_factor  AS adj_open,
-       u.high       * u.cum_share_factor  AS adj_high,
-       u.low        * u.cum_share_factor  AS adj_low,
-       u.close      * u.cum_share_factor  AS adj_close,
-       u.volume_shr * u.cum_price_factor  AS adj_volume_shr,
-       u.cum_price_factor, u.cum_share_factor,
-       CAST(u.n_factors_applied AS BIGINT)   AS n_factors_applied,
-       CAST(u.n_unadjusted_events AS BIGINT) AS n_unadjusted_events,
-       greatest(u.date, coalesce(u.factor_available_date, u.date)) AS available_date,
-       'derived' AS available_basis
-FROM unadj u
-ORDER BY u.ticker, u.date
-"""
 # 원장 템플릿(`equity.views`)을 그대로 렌더하는 매크로 — 본문을 여기 옮겨 적지 않는다(#249).
 # 손 픽스처 표가 그 매크로가 읽는 열을 다 가질 때만 이렇게 쓸 수 있다(duckdb 는 매크로를 만들 때
 # 바인딩한다). 다른 매크로를 부르는 매크로는 그 뒤에 둔다(`v_adj_close` → `v_unfolded_event`).
@@ -674,8 +591,8 @@ def _partition_source(root: Path, table: str, build_id: str) -> str:
 def price_adj_table(root: Path) -> pa.Table:
     """`price_adj_daily`(S23) — 이미 쓴 `price_daily`·`adj_factor`·`security_span` 위에서 굽는다.
 
-    `price.adj_close` 의 산출처다. 손으로 값을 적지 않고 실물과 같은 식(`_PRICE_ADJ_DAILY_SQL`)을
-    돌린다 — 그래야 분할·재상장 구간의 기대값이 어댑터 테스트의 손계산과 갈리지 않는다.
+    `price.adj_close` 의 산출처다. 원장의 S23 선언이 가리키는 SQL을 그대로 실행한다.
+    옛 판 price_daily의 입력 모양만 현재 빌더 스키마로 맞추고 산출 규칙은 복제하지 않는다.
     """
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
@@ -688,7 +605,18 @@ def price_adj_table(root: Path) -> pa.Table:
     sources = {name: _partition_source(root, name, builds[name]) for name in tables}
     con = duckdb.connect()
     try:
-        return con.execute(_PRICE_ADJ_DAILY_SQL.format(**sources)).to_arrow_table()
+        for name, source in sources.items():
+            projection = "*"
+            if name == "price_daily":
+                columns = con.sql(f"SELECT * FROM {source} LIMIT 0").columns
+                # basis 없는 옛 판은 확정 KRX 값이다. 원본 parquet은 그대로 두므로 어댑터의
+                # 구판 호환 테스트도 유지한다. 이는 입력 스키마 보충이지 조정 산출의 사본이 아니다.
+                if "basis" not in columns:
+                    projection += ", 'krx' AS basis, FALSE AS corp_action_pending"
+            con.execute(f"CREATE VIEW {name} AS SELECT {projection} FROM {source}")
+        rule = import_ledger_module("equity.rules_s23").PRICE_ADJ_DAILY
+        sql = rule.sql_path.read_text(encoding="utf-8").strip().rstrip(";")
+        return con.execute(f"{sql} ORDER BY ticker, date").to_arrow_table()
     finally:
         con.close()
 

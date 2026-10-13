@@ -181,6 +181,16 @@ runtime schema의 factor 참조·적용 조건 투영을 사용한다. frontend�
 합성 boolean-score는 원문 출력에 붙이는 읽기 전용 표식이다. 원래 boolean 타입을 덮어쓰지 않으며
 support 노드는 backend 출처 표식에 따라 숨긴다. 원문 없는 조회는 같은 투영의 읽기 전용 표를 쓴다.
 
+### 해소된 백테스트 실행 입력 (#362 DR-B-07)
+
+접수의 `_resolve`는 전략을 해소하고 `_admit`가 환경·파라미터·실행 가능성을 검증한다.
+그 뒤 실행 스레드·실행기 포트가 읽는 것은 `ResolvedBacktestRunSpec`이다. 이 타입의 전략·환경은
+필수이고 출처·계열 요청 칸은 없다. 출처 메타데이터는 별도로 전달한다.
+HTTP·CLI 요청, research 요청 codec, 결과 `RunManifest.run_spec`은 기존 `BacktestRunSpec` JSON을
+유지한다. 연구 접수 결과와 manifest 작성 경계에서 `ResolvedBacktestRunSpec.to_wire`로 투영한다.
+실행 지문도 같은 투영의 기존 null 출처 키를 유지하므로 내부 타입 분리만으로 과거 hash가 바뀌지 않는다.
+요청의 맨 `strategy` 지원 은퇴나 저장 JSON 변경은 이 분리의 범위가 아니다.
+
 비용 입력의 자본변동 정산 행은 `domain/backtest/_participation.py`의 `settlement_multipliers`가 소유한다. 벤치마크도 같은 함수를 사용하며 가격 배수 적용 대상은 같은 모듈의 `PRICE_ADJUSTING_ACTIONS`를 읽는다(#401).
 
 계열 합치기 간선의 생존 계열·구성원 해소는 `domain/backtest/_trial_ledger.py`의 `resolve_lineage`가 소유한다. `research_sqlite`는 간선을 읽고 도메인이 해소한 생존 계열 사이의 간선만 저장한다(#332 AUDIT01).

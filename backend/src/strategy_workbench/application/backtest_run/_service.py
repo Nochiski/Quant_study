@@ -41,12 +41,14 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestStartResponse,
     DataWarning,
     InlineDraft,
+    ResolvedBacktestRunSpec,
     RunFailureCode,
     RunProgressEvent,
     RunStage,
     RunStatus,
     SavedRevisionReference,
     StrategyProvenance,
+    StrategySource,
     StrategySourceKind,
     WarningSeverity,
     run_input_key,
@@ -197,11 +199,20 @@ class StrategyRevisionRequiresUpgradeError(RuntimeError):
 
 @dataclass(frozen=True)
 class RunAdmission:
-    """접수 판정을 통과한 요청. `spec` 은 전략·실행 설정·파라미터 값을 해소한 실행 spec 이다."""
+    """접수 판정 결과. `resolved`는 실행 입력이고 `spec`은 연구 저장 경계의 기존 JSON 투영이다."""
 
-    spec: BacktestRunSpec
+    resolved: ResolvedBacktestRunSpec
     provenance: StrategyProvenance
     lineage_id: str | None
+    strategy_source: StrategySource | None
+    lineage_strategy_id: str | None
+
+    @property
+    def spec(self) -> BacktestRunSpec:
+        # 연구 저장 계약은 기존 wire를 유지한다. 실행 경로는 resolved만 읽는다.
+        return self.resolved.to_wire(
+            strategy_source=self.strategy_source, lineage_strategy_id=self.lineage_strategy_id
+        )
 
 
 class BacktestResultNotReadyError(RuntimeError):
@@ -216,7 +227,9 @@ class _RunRecord:
     state: BacktestRunState
     # 실행할 spec — `strategy` 를 해소하고 실행 설정을 박은 것. 다시 제출할 수 있는 원본 요청은
     # 저장소가 가진다.
-    spec: BacktestRunSpec
+    spec: ResolvedBacktestRunSpec
+    strategy_source: StrategySource | None
+    lineage_strategy_id: str | None
     provenance: StrategyProvenance
     events: deque[RunProgressEvent]
     cancellation: Event
@@ -299,7 +312,7 @@ class BacktestRunService:
         `queued` 로 기다리게 한다(이슈 #161).
         """
         admission = self._admit(request, record_blocked=True)
-        spec, provenance = admission.spec, admission.provenance
+        spec, provenance = admission.resolved, admission.provenance
         with self._lock:
             # 같은 입력(실행 지문의 요청 칸 `run_input_key`·provenance)·같은 계열·같은 시도 키로
             # 도는 run 이 있으면 그 run 을 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도·실험
@@ -337,6 +350,8 @@ class BacktestRunService:
                     updated_at=created,
                 ),
                 spec=spec,
+                strategy_source=admission.strategy_source,
+                lineage_strategy_id=admission.lineage_strategy_id,
                 provenance=provenance,
                 events=deque(maxlen=_EVENT_RING_SIZE),
                 cancellation=Event(),
@@ -362,10 +377,8 @@ class BacktestRunService:
 
     def _admit(self, request: BacktestRunSpec, *, record_blocked: bool) -> RunAdmission:
         """요청을 실행할 spec 으로 해소하고 접수 판정을 모두 한다. 데이터는 읽지 않는다."""
-        spec, provenance = self._resolve(request)
-        strategy = spec.strategy
-        if strategy is None:  # pragma: no cover - _resolve always fills it
-            raise InvalidBacktestRunError("resolved run spec has no strategy")
+        strategy, provenance = self._resolve(request)
+        spec = replace(request, strategy=strategy)
         lineage_id = self._lineage(request, provenance)
         # 실행 설정을 **preflight 앞에서** 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·
         # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
@@ -420,7 +433,15 @@ class BacktestRunService:
                 f"strategy_id={provenance.strategy_id!r} revision={provenance.revision!r} "
                 f"stored={provenance.spec_hash!r} executed={executed_hash!r}"
             )
-        return RunAdmission(spec, provenance, lineage_id)
+        return RunAdmission(
+            ResolvedBacktestRunSpec.from_request(
+                spec, strategy=strategy, environment=environment, parameter_values=parameter_values
+            ),
+            provenance,
+            lineage_id,
+            request.strategy_source,
+            request.lineage_strategy_id,
+        )
 
     def preview_trial(self, request: BacktestRunSpec) -> TrialPreview:
         """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).
@@ -428,10 +449,8 @@ class BacktestRunService:
         `start` 와 같은 해소·계열·실행 설정 판정을 타서 같은 시도 키를 낸다. 봉인 겹침은 같은 422 로
         거절하되 실행 요청이 아니므로 봉인 원장에 남기지 않는다. 전략 검증(preflight)은 하지 않는다.
         """
-        spec, provenance = self._resolve(request)
-        strategy = spec.strategy
-        if strategy is None:  # pragma: no cover - _resolve always fills it
-            raise InvalidBacktestRunError("resolved run spec has no strategy")
+        strategy, provenance = self._resolve(request)
+        spec = replace(request, strategy=strategy)
         lineage_id = self._lineage(request, provenance)
         environment = self._pin_environment(spec, strategy, lineage_id, record_blocked=False)
         try:
@@ -634,16 +653,17 @@ class BacktestRunService:
                 state.stage,
             )
 
-    def _resolve(
-        self, request: BacktestRunSpec
-    ) -> tuple[BacktestRunSpec, StrategyProvenance | None]:
-        """Turn the request into a run spec whose `strategy` is the exact spec to execute."""
+    def _resolve(self, request: BacktestRunSpec) -> tuple[StrategySpec, StrategyProvenance | None]:
+        """요청 출처를 실행할 전략과 provenance로 해소한다."""
         source = request.strategy_source
-        if request.strategy is None and source is None:
-            raise InvalidBacktestRunError(
-                "run request must name its strategy — neither strategy nor strategy_source given"
-            )
-        if request.strategy is not None and source is not None:
+        if source is None:
+            if request.strategy is None:
+                raise InvalidBacktestRunError(
+                    "run request must name its strategy — "
+                    "neither strategy nor strategy_source given"
+                )
+            return request.strategy, None
+        if request.strategy is not None:
             raise InvalidBacktestRunError(
                 "run request must name its strategy once — both strategy and strategy_source given"
             )
@@ -676,16 +696,9 @@ class BacktestRunService:
                 revision=record.revision,
                 source_hash=record.source.source_hash if record.source else None,
             )
-            return replace(request, strategy=record.spec), provenance
-        if isinstance(source, InlineDraft):
-            strategy = source.spec
-        else:
-            if request.strategy is None:  # pragma: no cover - dataclass invariant
-                raise InvalidBacktestRunError("run spec has neither strategy nor strategy_source")
-            strategy = request.strategy
-        # inline draft 의 provenance 는 start() 가 strategy_spec_hash(spec) 으로 만든다 —
-        # TargetTape 와 같은 함수라 tape 없이 확정할 수 있고(#158), tape 단계가 다시 대조한다.
-        return replace(request, strategy=strategy), None
+            return record.spec, provenance
+        # 인라인 출처의 provenance는 접수가 동일 strategy_spec_hash로 확정한다.
+        return source.spec, None
 
     def _lineage(
         self, request: BacktestRunSpec, provenance: StrategyProvenance | None
@@ -833,13 +846,7 @@ class BacktestRunService:
         spec = record.spec
         provenance = record.provenance
         strategy = spec.strategy
-        if strategy is None:  # pragma: no cover - resolved before the thread starts
-            raise InvalidBacktestRunError("resolved run spec has no strategy")
         environment = spec.environment
-        if environment is None:  # pragma: no cover - start() pins it before the thread starts
-            raise InvalidBacktestRunError(
-                f"resolved run spec has no run environment — run_id={run_id}"
-            )
         try:
             # tape 단계: 원시 관측 로딩 + 팩터 평가 + TargetTape 컴파일. 실데이터에서 실행 시간의
             # 대부분을 차지하므로 취소 콜백을 파이프라인 checkpoint 에 그대로 건다.
@@ -922,7 +929,15 @@ class BacktestRunService:
                 "Running backtest engine",
             )
             result = self._executor.execute(
-                BacktestExecutionRequest(run_id, spec, tape, dataset, provenance),
+                BacktestExecutionRequest(
+                    run_id,
+                    spec,
+                    tape,
+                    dataset,
+                    provenance,
+                    record.strategy_source,
+                    record.lineage_strategy_id,
+                ),
                 # 실행기는 자기 작업 안의 비율(0~1)과 설명만 보고한다. run 막대의 engine 구간으로
                 # 옮기고 단계는 `engine` 하나로 둔다 — 단계 어휘는 `RunStage` 가 소유한다(DR-B-03).
                 progress=lambda value, message: self._update(

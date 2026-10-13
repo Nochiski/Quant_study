@@ -140,3 +140,36 @@ def test_importing_and_building_test_app_never_opens_the_runtime_database(
     assert child_artifacts.is_dir()
     _http.build_runtime_http_app()
     assert configured.is_file()
+
+
+def test_runtime_artifact_root_does_not_clean_another_servers_staging(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """개발 서버의 staging을 둔 채 E2E 서버를 조립해도 다른 루트는 건드리지 않는다(#333)."""
+    from strategy_workbench.bootstrap import _container
+
+    development = tmp_path / "development"
+    staging = development / ".active-run.tmp"
+    staging.mkdir(parents=True)
+    payload = staging / "partial"
+    payload.write_text("commit in progress", encoding="utf-8")
+    isolated = tmp_path / "e2e" / "backtest-runs"
+    monkeypatch.setattr(_container, "DEFAULT_RUN_ARTIFACT_ROOT", development)
+    monkeypatch.setenv(_http.ARTIFACT_ROOT_ENV, str(isolated))
+
+    _http.build_runtime_http_app()
+
+    assert payload.read_text(encoding="utf-8") == "commit in progress"
+    assert isolated.is_dir()
+
+
+def test_explicit_http_artifact_root_is_forwarded_without_reading_runtime_env(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """라이브러리 조립은 명시 경로만 읽어 두 E2E 앱의 루트를 분리한다."""
+    ignored = tmp_path / "runtime"
+    explicit = tmp_path / "ideas"
+    monkeypatch.setenv(_http.ARTIFACT_ROOT_ENV, str(ignored))
+    _http.build_http_app(artifact_root=explicit)
+    assert explicit.is_dir()
+    assert not ignored.exists()

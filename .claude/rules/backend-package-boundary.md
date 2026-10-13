@@ -39,6 +39,9 @@ bootstrap ─> application + adapters
   도메인 정책을 새로 판단하지 않는다. 도메인 변환 규칙을 어댑터가 다시 구현하지 않는다.
   `document_codec`은 domain의 `UPGRADE_STEPS`를 주석·순서를 보존하는 컨테이너 위에서 실행만
   하며, 결과가 dict 경로와 같은 tree를 내는지는 application이 다시 parse해 검사한다.
+- adapter → adapter 의존은 선언된 공용 책임 재사용에 한정한다: SQLite 저장 어댑터는
+  무의존 `sqlite_store`의 연결·DDL·시간 규칙을, `backtest_engine`은 `engine_portfolio`의
+  엔진 요구사항·목표 변환을 읽는다. 이 두 간선은 도메인 정책을 복제할 근거가 아니다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 커널을 import하는
   노드는 둘이다: `adapters/outbound/backtest_engine`(실행·벤치마크 곡선)과

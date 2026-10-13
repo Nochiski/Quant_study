@@ -227,6 +227,9 @@ impl<'a> Session<'a> {
             held,
             self.fee_rate,
             e.tif == "fok",
+            self.sell_tax_rate,
+            self.power.leverage(),
+            self.power.mark_of(&e.key),
         )?;
         Ok(QuoteOut {
             price: p,

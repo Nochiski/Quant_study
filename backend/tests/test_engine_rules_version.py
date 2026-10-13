@@ -28,14 +28,11 @@ from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 # 기록만 더한 변경(V4-04 2/2: 체결 행의 `cap_volume`, 목표 금액 → 수량 변환의 ROUNDING 레코드)은
 # trace 가 바뀌어 digest 가 달라지지만 체결·비용 규칙은 그대로라 판본을 올리지 않고 digest 만
 # 고쳤다(리드 결정). 지문은 결과 공유 캐시 키가 아니라 옛 결과가 새 기록 없이 재사용되지 않는다.
-# #341 결합 비용·바스켓 충격 시나리오 두 개를 추가해 검사 입력 집합만 확장했다.
-# 새 두 이름을 제외한 digest는 위 변경 전 값 0abfca4d…ac0f와 bit 동일함을 확인했다.
-# basket_sqrt의 거래량을 원본 bar에 맞춰 실제 10→6주 비례 축소를 검증한다.
-# 해당 입력 하나를 제외한 digest는 변경 전후 2175681a…84c로 같다.
-# 나머지 시나리오와 domain 비용 입력 결과가 불변이므로 엔진 판본은 유지한다.
+# v5는 비용의 레버리지 배수·체결가 재평가·양방향 청산 노출 해제를 견적에 반영한다.
+# leveraged_short_tax_budget은 L2 숏16주→환매/롱32주 경로로 해당 규칙을 고정한다.
 _PINNED = (
-    "backtest-engine-v4",
-    "17677bf3b66db4517a2b6d9cb17addd1bfd8525cbd78a07a122a402faaa5aa71",
+    "backtest-engine-v5",
+    "52451938faee46cf673bd1c977a096afc26a038dfe03d32b1d365cd4252f86a0",
 )
 
 

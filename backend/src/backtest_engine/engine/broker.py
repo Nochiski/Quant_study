@@ -126,6 +126,9 @@ class QuoteCore(Protocol):
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
     ) -> QuoteNumbers: ...
 
 
@@ -143,6 +146,9 @@ class PythonQuoteCore:
         held: Decimal,
         fee_rate: float,
         fok: bool,
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
     ) -> QuoteNumbers:
         if slip < 0:
             raise ValueError(f"slippage must be >= 0 — slip={slip}")
@@ -166,16 +172,16 @@ class PythonQuoteCore:
             price = min(price, limit) if buy else max(price, limit)
         applied = abs(price - base_price)
 
-        short_entry = Decimal(0) if buy else quantity - max(held, Decimal(0))
-        if buy or short_entry > 0:
-            if buy:
-                affordable = _affordable_quantity(buying_power, price, fee_rate)
-            else:
-                # 보유분 매도는 무제한이고 그만큼 노출이 줄어 여력이 늘어난다. 숏 진입분만
-                # (청산 후 여력)으로 자른다.
-                closing = max(held, Decimal(0))
-                freed_power = buying_power + float(closing) * price
-                affordable = _affordable_quantity(freed_power, price, fee_rate) + closing
+        # consume가 쓰는 L×equity−gross를 체결가로 재평가한 뒤 역산한다.
+        # 수수료/세금은 equity를 줄이므로 여력에서는 L배다. 숏 환매도 노출 해제를 인정한다.
+        held_value = float(held)
+        mark = price if held_mark is None else held_mark
+        repriced_power = buying_power + (leverage * held_value - abs(held_value)) * (price - mark)
+        closing = max(-held if buy else held, Decimal(0))
+        cost_rate = fee_rate + (0.0 if buy else sell_tax_rate)
+        if quantity > closing:
+            freed_power = repriced_power + float(closing) * price * (1.0 - leverage * cost_rate)
+            affordable = closing + _affordable_quantity(freed_power, price, leverage * cost_rate)
             if affordable <= 0:
                 return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
             if affordable < quantity:
@@ -246,6 +252,9 @@ class BrokerSim:
         bar: Bar,
         buying_power: float,
         held: Decimal = Decimal(0),
+        sell_tax_rate: float = 0.0,
+        leverage: float = 1.0,
+        held_mark: float | None = None,
     ) -> Quote:
         """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음.
 
@@ -294,6 +303,9 @@ class BrokerSim:
             held,
             self._fee_rate,
             order.time_in_force is TimeInForce.FOK,
+            sell_tax_rate,
+            leverage,
+            held_mark,
         )
         detail = self._detail(numbers, order, bar, volume, open_order.remaining, buying_power)
         return Quote(

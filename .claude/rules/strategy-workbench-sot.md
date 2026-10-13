@@ -180,3 +180,5 @@ support 노드는 backend 출처 표식에 따라 숨긴다. 원문 없는 조�
 비용 입력의 자본변동 정산 행은 `domain/backtest/_participation.py`의 `settlement_multipliers`가 소유한다. 벤치마크도 같은 함수를 사용하며 가격 배수 적용 대상은 같은 모듈의 `PRICE_ADJUSTING_ACTIONS`를 읽는다(#401).
 
 계열 합치기 간선의 생존 계열·구성원 해소는 `domain/backtest/_trial_ledger.py`의 `resolve_lineage`가 소유한다. `research_sqlite`는 간선을 읽고 도메인이 해소한 생존 계열 사이의 간선만 저장한다(#332 AUDIT01).
+
+엔진 여력의 정본은 Python `PythonBuyingPower`·Rust `BuyingPower`의 `L×equity−gross` 상태다. 견적은 같은 상태의 레버리지·보유 수량·평가가를 읽어 체결가 재평가, 양방향 청산의 노출 해제, 비용의 L배 여력 소모를 역산한다. 매수·숏·바스켓이 별도 비용 배수를 정의하지 않는다. 비용 한도를 넘기는 신규 진입은 줄이고 기존의 노출 감소 청산 허용은 유지한다(#342 V2-05).

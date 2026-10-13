@@ -23,6 +23,7 @@ class SlippageModel(Protocol):
             order: 체결 대상 주문.
             bar: 체결이 일어나는 세션 bar (거래량 기반 모델용).
             base_price: 슬리피지 적용 전 규칙상 체결 가격.
-            quantity: 이번에 체결되는 수량.
+            quantity: 참여 한도 적용 후, 여력 제한·바스켓 비례 축소 전 주문 수량.
+                체결 수량과 다를 수 있다(비용 입력 계약의 Q).
         """
         ...

@@ -108,11 +108,10 @@ class RuamelDocumentCodec:
     def __init__(self, limits: CodecLimits | None = None) -> None:
         self._limits = limits or CodecLimits()
 
-    def upgrade_source(self, source: str, *, format: SourceFormat, until: str | None = None) -> str:
-        # `until` 은 port 계약 밖의 선택 인자다: 체인 중간 단계 golden 을 고정하는 테스트만 쓴다.
+    def upgrade_source(self, source: str, *, format: SourceFormat) -> str:
         if format is SourceFormat.JSON:
-            return upgrade_json_source(source, until=until)
-        return upgrade_yaml_source(source, until=until)
+            return upgrade_json_source(source)
+        return upgrade_yaml_source(source)
 
     def parse(self, source: str, *, format: SourceFormat) -> ParsedDocument:
         try:

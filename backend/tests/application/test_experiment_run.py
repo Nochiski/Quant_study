@@ -1626,3 +1626,12 @@ def test_a_window_stops_counting_once_its_validation_run_finishes() -> None:
     runs.run_statuses["run-4"] = RunStatus.COMPLETED
     one = service.remaining_time(record.experiment_id)
     assert one is not None and one.total_seconds == pytest.approx(10.0 * tests[1])
+
+    # 재시작으로 중단돼 복구를 기다리는 검증 실행은 아직 남았고, 그냥 실패한 검증 실행은 끝났다.
+    runs.run_statuses["run-5"] = RunStatus.FAILED
+    runs.error_codes["run-5"] = "backtest.run.interrupted"
+    recovering = service.remaining_time(record.experiment_id)
+    assert recovering is not None and recovering.total_seconds == pytest.approx(10.0 * tests[1])
+    runs.error_codes["run-5"] = "backtest.run.internal"
+    done = service.remaining_time(record.experiment_id)
+    assert done is not None and done.total_seconds == 0

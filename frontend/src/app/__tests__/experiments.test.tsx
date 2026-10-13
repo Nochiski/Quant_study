@@ -592,6 +592,43 @@ describe("experiments", () => {
     },
   );
 
+  it("hides the remaining time of a cancelled experiment that is still winding down", async () => {
+    let asked = false;
+    server.use(
+      http.get(`${API}/api/v1/experiments/:experimentId`, () =>
+        HttpResponse.json({
+          ...experiment("e-run", "cancelled"),
+          settled: false,
+        }),
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId/trials`, () =>
+        HttpResponse.json([trialState(0, "running", null)]),
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
+        HttpResponse.json({
+          windows: [],
+          curve: [],
+          out_of_sample_sharpe: null,
+          retention: null,
+          gap: "pending",
+        }),
+      ),
+      http.get(
+        `${API}/api/v1/experiments/:experimentId/events`,
+        progressStream,
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId/remaining-time`, () => {
+        asked = true;
+        return HttpResponse.json({ total_seconds: 0, sample_count: 5 });
+      }),
+    );
+    mount("/research/experiments/e-run");
+
+    expect(await screen.findByText("#1")).toBeInTheDocument();
+    expect(screen.queryByText(/^남은 시간/u)).toBeNull();
+    expect(asked).toBe(false);
+  });
+
   it("monitors trials, retries a failed one and reads again when the progress stream moves", async () => {
     let reads = 0;
     let retried: string | null = null;

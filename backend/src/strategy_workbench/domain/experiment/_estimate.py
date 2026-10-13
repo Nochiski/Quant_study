@@ -13,13 +13,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger, span_days
 
-from ._design import ExperimentDesign
+from ._design import ExperimentDesign, ExperimentTrial
+from ._walk_forward import WalkForwardWindow
 
 # 어림의 근거로 보는 최근 완료 실행 수. 하나면 우연히 짧은 실행에 끌리고, 많으면 오래전 데이터
 # 크기·엔진 속도가 섞인다.
@@ -34,20 +35,26 @@ class TimeEstimate:
 
 
 def planned_spans(design: ExperimentDesign, base_start: date, base_end: date) -> tuple[int, ...]:
-    """실험이 돌릴 실행마다의 구간 일수 — trial(창의 학습 구간, 용량 스윕은 기반 구간)과
-    워크포워드면 창마다 검증 실행 하나."""
-    trials = tuple(
+    """실험이 돌릴 실행마다의 구간 일수 — trial 전부와 워크포워드면 창마다 검증 실행 하나."""
+    windows = design.windows if design.walks_forward else ()
+    return run_spans(design.trials(), windows, base_start, base_end)
+
+
+def run_spans(
+    trials: Iterable[ExperimentTrial],
+    test_windows: Iterable[WalkForwardWindow],
+    base_start: date,
+    base_end: date,
+) -> tuple[int, ...]:
+    """실행마다의 구간 일수 — trial 은 창의 학습 구간(용량 스윕은 기반 구간), 창은 검증 구간. 미리
+    계산(`planned_spans`)과 남은 시간이 같은 규칙을 쓴다."""
+    train = tuple(
         span_days(base_start, base_end)
         if trial.window is None
         else span_days(trial.window.train_start, trial.window.train_end)
-        for trial in design.trials()
+        for trial in trials
     )
-    tests = (
-        tuple(span_days(window.test_start, window.test_end) for window in design.windows)
-        if design.walks_forward
-        else ()
-    )
-    return trials + tests
+    return train + tuple(span_days(w.test_start, w.test_end) for w in test_windows)
 
 
 def estimate_time(ledger: TrialLedger, spans: Sequence[int]) -> TimeEstimate | None:

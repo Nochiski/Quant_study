@@ -482,7 +482,9 @@ class _ExperimentStreamHub:
         if cancelled:
             raise asyncio.CancelledError
 
-    async def _drain(self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]) -> None:
+    async def _drain(
+        self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]
+    ) -> None:
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
             # 저장소가 닫히기 전에 실제 스레드가 조회를 마칠 때까지 기다린다.

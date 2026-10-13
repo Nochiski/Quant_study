@@ -1,3 +1,4 @@
+import { browserStorage } from "../../../shared/lib/browser-storage";
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import { useViewportHeight } from "../../../shared/lib/media";
@@ -63,14 +64,6 @@ export type StoredLayout = PanelSizes &
 type LayoutStorage = Pick<Storage, "getItem" | "setItem">;
 
 export const PANEL_LAYOUT_STORAGE_KEY = "quant-workbench.panel-sizes.v1";
-
-const browserStorage = (): LayoutStorage | null => {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-};
 
 const validSize = (
   key: keyof typeof PANEL_BOUNDS,

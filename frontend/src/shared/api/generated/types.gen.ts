@@ -3740,6 +3740,10 @@ export type RawFill = {
    */
   security_id: string;
   /**
+   * Sell Tax
+   */
+  sell_tax?: number | null;
+  /**
    * Session
    */
   session: string;

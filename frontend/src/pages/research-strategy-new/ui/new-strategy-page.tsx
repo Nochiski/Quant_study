@@ -19,8 +19,9 @@ import {
   SourceEditor,
   StrategyOutline,
   UpgradeBanner,
-  PROJECTION_VIEWS,
+  STRATEGY_VIEWS,
   canValidateDocument,
+  currentCompileOutcome,
   currentDiagnostics,
   createNewDraftId,
   revisionDraftId,
@@ -132,12 +133,8 @@ export const NewStrategyPage = () => {
     runSettings.requestOptions,
   );
   const startBacktest = backtest.run;
-  const current =
-    document.compiled !== null &&
-    document.compiledVersion === document.sourceVersion
-      ? document.compiled
-      : null;
-  const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
+  const current = currentCompileOutcome(document);
+  const availableViews: readonly StrategyView[] = STRATEGY_VIEWS;
   const view: StrategyView = search.view === "yaml" ? "yaml" : "graph";
   // The page/router owns URL generations. The debugger treats this as an opaque publication
   // lease, so an older async trace cannot replay a callback that captured an older search object.

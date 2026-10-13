@@ -23,8 +23,9 @@ import {
   StrategyDiffPanel,
   StrategyOutline,
   UpgradeBanner,
-  PROJECTION_VIEWS,
+  STRATEGY_VIEWS,
   canValidateDocument,
+  currentCompileOutcome,
   currentDiagnostics,
   revisionDraftId,
   saveStatusText,
@@ -152,12 +153,8 @@ export const StrategyRevisionPage = () => {
   const documentUpgrade = useUpgradeDocument(document, storedMeta);
   // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
   const proposalApply = useApplyAssistantProposal(document);
-  const current =
-    document.compiled !== null &&
-    document.compiledVersion === document.sourceVersion
-      ? document.compiled
-      : null;
-  const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
+  const current = currentCompileOutcome(document);
+  const availableViews: readonly StrategyView[] = STRATEGY_VIEWS;
   const view: StrategyView = search.view === "yaml" ? "yaml" : "graph";
   // Include route params as well as the validated search generation; the debug feature only
   // compares this opaque lease and never interprets router state.

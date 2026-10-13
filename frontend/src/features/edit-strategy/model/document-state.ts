@@ -330,15 +330,17 @@ export const isDocumentSettled = (state: DocumentState): boolean =>
 export const isSpecStale = (state: DocumentState): boolean =>
   state.compiled?.spec != null && state.compiledVersion !== state.sourceVersion;
 
+/** 성공·실패를 포함해 현재 원문 버전에 속한 검증 응답만 읽는다. */
+export const currentCompileOutcome = (state: DocumentState): CompileOutcome | null =>
+  state.compiledVersion === state.sourceVersion ? state.compiled : null;
+
 /** A spec safe to execute: current, compiled without errors. */
 export const currentCompile = (
   state: DocumentState,
-): CompleteCompileOutcome | null =>
-  state.compiled !== null &&
-  state.compiledVersion === state.sourceVersion &&
-  isCompleteCompileOutcome(state.compiled)
-    ? state.compiled
-    : null;
+): CompleteCompileOutcome | null => {
+  const outcome = currentCompileOutcome(state);
+  return outcome !== null && isCompleteCompileOutcome(outcome) ? outcome : null;
+};
 
 export const currentSpec = (state: DocumentState): StrategySpec | null =>
   currentCompile(state)?.spec ?? null;
@@ -359,8 +361,5 @@ export const currentDiagnostics = (
       range: d.range,
     }));
   }
-  return state.compiledVersion === state.sourceVersion &&
-    state.compiled !== null
-    ? state.compiled.diagnostics
-    : [];
+  return currentCompileOutcome(state)?.diagnostics ?? [];
 };

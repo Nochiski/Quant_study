@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import {
-  PROJECTION_VIEWS,
+  STRATEGY_VIEWS,
   type StrategyOutlineSymbol,
   type StrategyView,
 } from "../../../features/edit-strategy";
@@ -175,7 +175,7 @@ const EDITOR_MIN_WIDTH = 480;
  * 팔레트)가 이 값 하나로 옮긴다.
  */
 const ASSISTANT_FOCUS: FocusOptions = { preventScroll: true };
-const VIEWS = PROJECTION_VIEWS;
+const VIEWS = STRATEGY_VIEWS;
 
 /**
  * Strategy IDE frame laid out like the concept: top bar (breadcrumb, save status, run), title

@@ -4,7 +4,7 @@ import { backtestStartRejectionMessage } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
 import { Badge, Button, FailureNotice, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
-import type { DocumentState } from "../model/document-state";
+import { currentCompileOutcome, type DocumentState } from "../model/document-state";
 import type { RunBacktestStatus } from "../model/use-run-backtest";
 import "./document-toolbar.css";
 
@@ -74,10 +74,7 @@ export const DocumentToolbar = ({
     runStatus.kind === "failed" && runRejectionFix !== undefined
       ? runRejectionFix(runStatus.code, runStatus.values)
       : null;
-  const current =
-    state.compiled !== null && state.compiledVersion === state.sourceVersion
-      ? state.compiled
-      : null;
+  const current = currentCompileOutcome(state);
   return (
     <div className="doc-toolbar">
       <dl className="doc-toolbar__identity">

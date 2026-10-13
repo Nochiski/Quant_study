@@ -54,8 +54,10 @@ class _Budget:
     def impossible(self, low: int, high: int) -> bool:
         """독립 피연산자의 극값으로 만든 상한이 음수인 경우에만 구간을 버린다."""
         notional_low, notional_high = low * self.price, high * self.price
-        fee_low = notional_low * self.fee_rate
-        tax_low = 0.0 if self.buy else notional_low * self.tax_rate
+        fee_low = min(notional_low * self.fee_rate, notional_high * self.fee_rate)
+        tax_low = (
+            0.0 if self.buy else min(notional_low * self.tax_rate, notional_high * self.tax_rate)
+        )
         new_low, new_high = self.new_quantity(low), self.new_quantity(high)
         value_low = float(min(new_low, new_high)) * self.price
         value_high = float(max(new_low, new_high)) * self.price

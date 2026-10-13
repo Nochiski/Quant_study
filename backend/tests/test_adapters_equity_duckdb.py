@@ -370,6 +370,26 @@ def test_the_field_contract_follows_meaning_not_prose_or_order(
     assert (after != before) is moves
 
 
+def test_relisting_lag_fix_invalidates_the_previous_field_contract(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    contract = EquityDuckdbAdapter._field_contract
+
+    def previous_contract(adapter: EquityDuckdbAdapter) -> dict[str, object]:
+        previous = contract(adapter)
+        previous.pop("grid_lag_scope")
+        return previous
+
+    monkeypatch.setattr(EquityDuckdbAdapter, "_field_contract", previous_contract)
+    previous = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    # 원장 빌드는 같아도 잘못 연결했던 관측·팩터 캐시를 재사용하면 안 된다.
+    assert current != previous
+    assert current.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] == previous.partition(
+        SNAPSHOT_CONTRACT_SEPARATOR
+    )[0]
+
+
 _HIVE_OFF = "(hive_partitioning = CAST('f' AS BOOLEAN))"
 
 
@@ -1009,6 +1029,42 @@ def test_panel_lag_override_shifts_the_row_and_its_available_date(
     # 036220 둘째 구간 첫날은 전 세션 행이 없어 랙 1 값이 나오지 않는다(합성 금지)
     assert (START, "036220:2", "price.close") not in cells
     assert (START, "036220:2", "price.adj_close") in cells
+
+
+@pytest.mark.parametrize("field_id", ["price.close", "price.adj_close"])
+def test_grid_lag_cannot_cross_a_relisting_span(tmp_path: Path, field_id: str) -> None:
+    # 5세션 랙은 재상장 공백을 넘어 2023-12-29의 첫 구간에 닿는다.
+    # 원장 기본 랙과 패널 override 양쪽 모두 같은 종목 신원을 지켜야 한다.
+    root = build_workbench_root(
+        tmp_path / "equity",
+        profile_rows=[
+            (name, 5 if name == field_id else lag, basis)
+            for name, lag, basis in WB_PROFILE_ROWS
+        ],
+    )
+    adapter = EquityDuckdbAdapter(root)
+    for overrides in ((), (FieldLag(field_id, 5),)):
+        panel = adapter.load_panel(
+            ResearchPanelQuery(
+                start=START,
+                end=START,
+                security_ids=("000660:1", "036220:2"),
+                field_ids=(field_id,),
+                lag_overrides=overrides,
+            )
+        )
+        assert panel.ok
+        assert {cell.security_id for cell in panel.cells} == {"000660:1"}
+        assert panel.cells[0].available_date == date(2023, 12, 29)
+
+    raw = _raw(adapter, start=START, end=START, fields=(field_id,))
+    assert raw.ok
+    relisted = next(row for row in raw.observations if row.security_id == "036220:2")
+    assert relisted.fields == ()
+    continuing = next(row for row in raw.observations if row.security_id == "000660:1")
+    assert len(continuing.fields) == 1
+    assert continuing.fields[0].value == panel.cells[0].value
+    assert continuing.fields[0].available_date == panel.cells[0].available_date
 
 
 def test_panel_rejects_unknown_or_malformed_security_ids(

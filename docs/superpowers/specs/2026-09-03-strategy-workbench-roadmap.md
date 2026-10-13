@@ -2,12 +2,12 @@
 
 > 작성: 2026-09-03
 >
-> 상태(2026-09-28): M0~M5 완료, M6·M7·M10 미착수, M8·M9는 일부 항목만 완료. 이 로드맵의
-> 하위 initiative 다섯 개 중 셋이 끝났고 schema 1.2·그래프 표현(P3-03 차례)과 검증 랩이 진행 중이다.
+> 상태(2026-10-14): M0~M5 완료, M6·M7은 검증 랩(28 PR 중 21 머지)이 진행 중, M8·M9는 일부 항목만 완료,
+> M10 미착수. 이 로드맵의 하위 initiative 다섯 개 중 넷이 끝났고 검증 랩이 진행 중이다.
 >
-> 체크리스트: 150개 중 83개 완료, 67개 남음
+> 체크리스트: 151개 중 95개 완료, 56개 남음
 >
-> 다음 체크: M6-1 `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가
+> 다음 체크: 검증 랩 V4-05(팩터 회귀)·V5-02(결과 검증 카드)·V6-01(개봉 backend) — 착수 가능
 >
 > initiative — PR 단위 상태는 각 PLAN.md만 추적한다(16절 참고).
 >
@@ -17,9 +17,9 @@
 >   [strategy-gui-editing/PLAN.md](../../planning/strategy-gui-editing/PLAN.md)
 > - AI 어시스턴트(완료 2026-09-27, 19 PR):
 >   [ai-assistant/PLAN.md](../../planning/ai-assistant/PLAN.md)
-> - schema 1.2·그래프 표현(진행 중, 30 PR 중 19 머지):
+> - schema 1.2·그래프 표현(완료 2026-10-13, 30 PR, 마감 수용 검증은 CLOSEOUT):
 >   [strategy-language-2-0/PLAN.md](../../planning/strategy-language-2-0/PLAN.md)
-> - 검증 랩(M6·M7 구체화, 시작 2026-09-29, 28 PR):
+> - 검증 랩(M6·M7 구체화, 시작 2026-09-29, 28 PR 중 21 머지):
 >   [validation-lab/PLAN.md](../../planning/validation-lab/PLAN.md) · [설계 spec](./2026-09-29-validation-lab-design.md)
 >
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
@@ -491,37 +491,37 @@ Python/Rust 결과가 같다.
 
 ### M6 — Parameter Search + 실험 진행 UX
 
-- [ ] `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가.
-- [ ] path 기반 parameter binding과 ResolvedStrategySpec 생성 구현.
+- [x] `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가(검증 랩 V3-01 #306 — 값 허용 술어까지, 조합 제약은 아래 evaluator).
+- [ ] path 기반 parameter binding과 ResolvedStrategySpec 생성 구현(의도적 보류: 검증 랩 spec D4·§4).
 - [ ] invalid combination을 실행 전 제거하는 constraint evaluator 구현.
-- [ ] trial count/time/memory estimate 구현.
-- [ ] deterministic grid sampler 구현.
-- [ ] seeded random과 Latin hypercube sampler 구현.
-- [ ] sampler plugin port를 두고 TPE/CMA-ES는 후속 adapter로 격리.
-- [ ] fingerprint duplicate/cache-hit 판정 구현.
-- [ ] SQLite experiment repository와 migration 추가.
-- [ ] experiment/trial/attempt 상태 전이·audit event 구현.
-- [ ] bounded process worker, parallelism, cancellation, crash recovery 구현.
+- [ ] trial count/time/memory estimate 구현(조합 수 미리 계산만 V3-03에 있음, 시간·메모리 미착수).
+- [x] deterministic grid sampler 구현(검증 랩 V3-01·V3-03).
+- [ ] seeded random과 Latin hypercube sampler 구현(의도적 보류: 검증 랩 spec §4, 이 문서 13절).
+- [ ] sampler plugin port를 두고 TPE/CMA-ES는 후속 adapter로 격리(의도적 보류: 검증 랩 spec §4).
+- [ ] fingerprint duplicate/cache-hit 판정 구현(의도적 보류: 끝난 결과 재사용 안 함, 2026-09-30 리드 결정·검증 랩 spec D6 — 진행 중 같은 입력 잇기만 V3-04).
+- [x] SQLite experiment repository와 migration 추가(검증 랩 V3-03 #321·#334).
+- [x] experiment/trial/attempt 상태 전이·audit event 구현(검증 랩 V3-03).
+- [ ] bounded process worker, parallelism, cancellation, crash recovery 구현(취소·재시작 복구·슬롯 병렬은 V3-04 #346·#348, process worker는 의도적 보류: 검증 랩 spec §4·D6).
 - [ ] failed/pruned/cancelled trial과 error reason 보존.
-- [ ] experiment create/status/trials/results/cancel/retry API 추가.
+- [x] experiment create/status/trials/results/cancel/retry API 추가(검증 랩 V3-03·V3-04).
 - [ ] Builder 파라미터 범위/constraint/budget 화면 추가.
-- [ ] Experiment Monitor 진행률·ETA·상태별 count·실패 상세 추가.
-- [ ] cancel/restart/idempotency 통합 테스트 추가.
+- [ ] Experiment Monitor 진행률·ETA·상태별 count·실패 상세 추가(V5-01 #402·#407에 ETA 없음).
+- [x] cancel/restart/idempotency 통합 테스트 추가(검증 랩 V3-04).
 
 완료 게이트: 사용자는 실행 전 비용을 알고 탐색을 시작·중단·재개할 수 있고, 모든 trial이
 감사 가능한 denominator에 남는다.
 
 ### M7 — 강건성·OOS·과적합 방지
 
-- [ ] train/validation/locked-OOS SplitSpec 추가.
-- [ ] rolling/anchored walk-forward와 window metrics 구현.
-- [ ] label horizon 기반 purge/embargo 구현.
+- [x] train/validation/locked-OOS SplitSpec 추가(검증 랩 V1-01 봉인·V3-05 SplitSpec).
+- [x] rolling/anchored walk-forward와 window metrics 구현(검증 랩 V3-05 #364·#365).
+- [ ] label horizon 기반 purge/embargo 구현(embargo만 V3-05, label horizon purge 미착수).
 - [ ] OOS 열람 ledger와 재사용 상태 표시 구현.
-- [ ] parameter sensitivity와 plateau/stability score 구현.
+- [x] parameter sensitivity와 plateau/stability score 구현(검증 랩 V4-03 #403, 화면은 V5-04).
 - [ ] fee/slippage/borrow/execution-delay stress grid 구현.
 - [ ] return/trade bootstrap 또는 Monte Carlo adapter 구현.
-- [ ] probabilistic Sharpe와 deflated Sharpe 구현.
-- [ ] trial count와 selection bias metadata를 결과에 포함.
+- [x] probabilistic Sharpe와 deflated Sharpe 구현(검증 랩 V4-01 #363·V4-02 #385).
+- [x] trial count와 selection bias metadata를 결과에 포함(검증 랩 V1-05 시도 원장·V4-02 DSR·선택 기록).
 - [ ] single-objective ranking과 Pareto frontier view 구현.
 - [ ] robustness report API 추가.
 - [ ] Candidate Explorer heatmap/scatter/parallel coordinate 추가.
@@ -533,7 +533,7 @@ Python/Rust 결과가 같다.
 
 ### M8 — 전문가용 표현력과 작업 흐름
 
-- [x] LANG2 파이프라인·팩터 레시피·고급 노드 캔버스의 같은 원문 편집, ELK 배치·배선·undo·진단 이동 구현(P5/P6 draft 스택; 최종 CI·화면 근거는 해당 PR). 실제 스크린리더 음성 출력 감사와 아래 전문가 기능 전체 완료를 뜻하지 않는다.
+- [x] LANG2 파이프라인·팩터 레시피·고급 노드 캔버스의 같은 원문 편집, ELK 배치·배선·undo·진단 이동 구현(P5/P6, #429~#436 머지). 실제 스크린리더 음성 출력 감사와 아래 전문가 기능 전체 완료를 뜻하지 않는다.
 
 - [ ] long/short leg별 서로 다른 factor graph와 universe 지원.
 - [ ] regime switch와 conditional portfolio branch 지원.
@@ -719,6 +719,13 @@ Contract:
   [PLAN](../../planning/strategy-language-2-0/PLAN.md)): 실행 설정이 문서 밖 `RunEnvironment`로
   갔고(7.1), 결합 전 정규화·횡단면 eligibility·`risk_factor_id`·compile 단일 게이트·1.1 → 1.2
   업그레이더와 frontend 실행 설정 패널이 들어갔다. 그래프 표현(P4~P6)과 P3-03이 남았다.
+- 2026-10-13 — schema 1.2·그래프 표현 initiative 완료(30 PR, 마감 #439~#443): 파이프라인(P4)·팩터
+  레시피(P5)·노드 캔버스(P6)가 같은 원문을 편집한다. M8의 LANG2 항목을 체크했다. 실제 스크린리더 음성
+  검증 등 수용 검증은 [CLOSEOUT](../../planning/strategy-language-2-0/CLOSEOUT.md)에 남았다.
+- 2026-10-14 — 검증 랩 진척 반영(21/28, [PLAN](../../planning/validation-lab/PLAN.md)): 탐색 공간·격자,
+  실험 저장·상태·API·취소/재시작(V3-01~V3-05), PSR·DSR·선택 기록·고원/민감도·용량 스윕(V4-01~V4-04),
+  실험 화면(V5-01)이 들어가 M6·M7에서 해당 항목을 체크했다. 의도적 보류(path binding·무작위/베이지안
+  샘플러·결과 재사용·process worker)는 항목 옆에 근거를 적어 미체크로 둔다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.

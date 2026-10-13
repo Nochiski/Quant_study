@@ -1,16 +1,16 @@
 ---
 plan_version: 1
 project: validation-lab
-project_status: SELF_CHECK
-current_phase: V4,V5
-current_pr: V4-02,V4-03,V4-04,V5-01
-active_prs: [V4-02, V4-03, V4-04, V5-01]
-parallel_window: [V4-02, V4-03, V4-04, V5-01]
-last_updated: 2026-09-30T15:46:05+09:00
+project_status: WAITING
+current_phase: V4
+current_pr: V4-05
+active_prs: []
+parallel_window: [V4-05, V5-02, V6-01]
+last_updated: 2026-10-14T03:42:04+09:00
 planned_prs: 28
-merged_prs: 17
-approved_prs: 17
-progress_percent: 61
+merged_prs: 21
+approved_prs: 21
+progress_percent: 75
 ---
 
 # 검증 랩 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 61
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
-| Current phase | `V4,V5` |
-| Current/next PR | `V4-02,V4-03,V4-04,V5-01` |
-| Active PR | `V4-02, V4-03, V4-04, V5-01` |
-| Progress | `17 / 28 merged (61%)` |
-| Approved | `17 / 28` |
-| Aggregated at | `2026-09-30 15:46 KST` |
+| Project status | `WAITING` |
+| Current phase | `V4` |
+| Current/next PR | `V4-05` |
+| Active PR | none |
+| Progress | `21 / 28 merged (75%)` |
+| Approved | `21 / 28` |
+| Aggregated at | `2026-10-14 03:42 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -71,10 +71,10 @@ progress_percent: 61
 | V1 | Research window seal, run persistence, trial ledger | 5 | 5 | `MERGED` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 5 | `MERGED` |
-| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 1 | `SELF_CHECK` |
-| V5 | Screens (after lang2 merge signal) | 7 | 2 | `SELF_CHECK` |
+| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 4 | `WAITING` |
+| V5 | Screens (after lang2 merge signal) | 7 | 3 | `WAITING` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
-| **Total** |  | **28** | **17** | **61%** |
+| **Total** |  | **28** | **21** | **75%** |
 <!-- PLAN:PHASES:END -->
 
 ## V0 — 기획 패키지
@@ -116,16 +116,16 @@ progress_percent: 61
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `MERGED` | [#363](https://github.com/Nochiski/Quant_study/pull/363) · `review_vlab_v4_01` APPROVE(P2-1·P3-1~3 반영) · main 머지 `838fd24d`(2026-09-30) |
-| [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `SELF_CHECK` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
-| [ ] | `V4-03` | 고원·민감도 | V4-02 | `SELF_CHECK` | [#403](https://github.com/Nochiski/Quant_study/pull/403) |
-| [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `SELF_CHECK` | [#410](https://github.com/Nochiski/Quant_study/pull/410) 1/2 · [#422](https://github.com/Nochiski/Quant_study/pull/422) 2/2 |
+| [x] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `MERGED` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
+| [x] | `V4-03` | 고원·민감도 | V4-02 | `MERGED` | [#403](https://github.com/Nochiski/Quant_study/pull/403) |
+| [x] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `MERGED` | [#410](https://github.com/Nochiski/Quant_study/pull/410) 1/2 · [#422](https://github.com/Nochiski/Quant_study/pull/422) 2/2 |
 | [ ] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `PLANNED` | — |
 
 ## V5 — 화면 (각 화면의 backend PR 뒤)
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `SELF_CHECK` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
+| [x] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `MERGED` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
 | [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `PLANNED` | — |

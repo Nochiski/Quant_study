@@ -249,6 +249,27 @@ const ko = {
   "backtest.result.column.category": "Category",
   "backtest.result.column.value": "Value",
   "backtest.result.column.samples": "Samples",
+  "backtest.orderEvents.title": "주문 상태 기록",
+  "backtest.orderEvents.unrecorded": "이 결과에는 주문 상태 기록이 없습니다. 이전 형식 결과에서는 미체결 사유를 확인할 수 없습니다.",
+  "backtest.orderEvents.empty": "기록된 주문 상태 이벤트가 없습니다 (0건).",
+  "backtest.orderEvents.count": "주문 상태 이벤트 {count}건",
+  "backtest.orderEvents.zeroCapCount": "유동성 한도 0주 기록 {count}건 (이벤트 기준)",
+  "backtest.orderEvents.records": "주문 상태 원본 보기",
+  "backtest.orderEvents.session": "거래일",
+  "backtest.orderEvents.order": "주문 ID",
+  "backtest.orderEvents.status": "상태",
+  "backtest.orderEvents.reason": "사유",
+  "backtest.orderEvents.capVolume": "기준 거래량 (주)",
+  "backtest.orderEvents.detail": "엔진 원본 메시지",
+  "backtest.orderEvents.reason.liquidity_cap_zero": "유동성 한도 0주",
+  "backtest.orderEvents.status.new": "신규",
+  "backtest.orderEvents.status.triggered": "조건 발동",
+  "backtest.orderEvents.status.open": "대기",
+  "backtest.orderEvents.status.partially_filled": "부분 체결",
+  "backtest.orderEvents.status.filled": "체결 완료",
+  "backtest.orderEvents.status.cancelled": "취소",
+  "backtest.orderEvents.status.rejected": "거절",
+  "backtest.orderEvents.status.replaced": "정정",
   "backtest.result.trades": "Closed trades",
   "backtest.result.orders": "orders",
   "backtest.result.fills": "fills",
@@ -283,6 +304,25 @@ const ko = {
   "backtest.result.manifest.completed": "Completed",
   "backtest.result.warnings": "Data warnings",
   "backtest.result.warnings.empty": "경고 없음",
+  "backtest.warning.equity.reference_rows_dropped":
+    "거래정지 기준가 행은 가격 경로에서 제외했습니다",
+  "backtest.warning.equity.provisional_rows_dropped":
+    "아직 확정되지 않은 가격 행을 제외했습니다",
+  "backtest.warning.equity.invalid_ohlc_rows_dropped":
+    "가격 조건을 충족하지 않는 행을 제외했습니다",
+  "backtest.warning.equity.corporate_action_without_bar_dropped":
+    "이후 가격이 없는 기업 행동을 제외했습니다",
+  "backtest.warning.equity.unfolded_level_shift":
+    "원장 미접힘 층 이동을 기준가 비로 수량에 반영했습니다",
+  "backtest.warning.equity.mock_data":
+    "실데이터가 아닌 예제 데이터로 실행했습니다",
+  "backtest.warning.equity.corporate_action_feed_empty":
+    "예제 데이터에는 기업 행동이 없습니다",
+  "backtest.warning.mock_equity_data":
+    "실데이터가 아닌 예제 데이터로 실행했습니다",
+  "backtest.warning.corporate_action_feed_empty":
+    "예제 데이터에는 기업 행동이 없습니다",
+
   "backtest.warning.portfolio.sector_unknown_excluded":
     "섹터를 모르는 종목은 섹터 제약에서 뺐습니다",
   "backtest.warning.benchmark.no_bar_at_start":
@@ -2435,6 +2475,27 @@ export const messages = {
     "backtest.result.column.category": "Category",
     "backtest.result.column.value": "Value",
     "backtest.result.column.samples": "Samples",
+    "backtest.orderEvents.title": "Order status records",
+    "backtest.orderEvents.unrecorded": "Order status records are unavailable for this result. Unfilled reasons cannot be determined for older result formats.",
+    "backtest.orderEvents.empty": "No order status events were recorded (0 events).",
+    "backtest.orderEvents.count": "{count} order status events",
+    "backtest.orderEvents.zeroCapCount": "{count} zero liquidity cap events (event count)",
+    "backtest.orderEvents.records": "View original order status records",
+    "backtest.orderEvents.session": "Session",
+    "backtest.orderEvents.order": "Order ID",
+    "backtest.orderEvents.status": "Status",
+    "backtest.orderEvents.reason": "Reason",
+    "backtest.orderEvents.capVolume": "Reference volume (shares)",
+    "backtest.orderEvents.detail": "Original engine message",
+    "backtest.orderEvents.reason.liquidity_cap_zero": "Zero liquidity cap",
+    "backtest.orderEvents.status.new": "New",
+    "backtest.orderEvents.status.triggered": "Triggered",
+    "backtest.orderEvents.status.open": "Open",
+    "backtest.orderEvents.status.partially_filled": "Partially filled",
+    "backtest.orderEvents.status.filled": "Filled",
+    "backtest.orderEvents.status.cancelled": "Cancelled",
+    "backtest.orderEvents.status.rejected": "Rejected",
+    "backtest.orderEvents.status.replaced": "Replaced",
     "backtest.result.trades": "Closed trades",
     "backtest.result.orders": "orders",
     "backtest.result.fills": "fills",
@@ -2469,6 +2530,25 @@ export const messages = {
     "backtest.result.manifest.completed": "Completed",
     "backtest.result.warnings": "Data warnings",
     "backtest.result.warnings.empty": "No warnings",
+    "backtest.warning.equity.reference_rows_dropped":
+      "Suspended reference-price rows were excluded from the price path",
+    "backtest.warning.equity.provisional_rows_dropped":
+      "Provisional price rows were excluded",
+    "backtest.warning.equity.invalid_ohlc_rows_dropped":
+      "Invalid OHLC price rows were excluded",
+    "backtest.warning.equity.corporate_action_without_bar_dropped":
+      "Corporate actions without a following price were excluded",
+    "backtest.warning.equity.unfolded_level_shift":
+      "An unfolded ledger price shift adjusted holdings using the base-price ratio",
+    "backtest.warning.equity.mock_data":
+      "This run used example data instead of real data",
+    "backtest.warning.equity.corporate_action_feed_empty":
+      "Example data has no corporate action feed",
+    "backtest.warning.mock_equity_data":
+      "This run used example data instead of real data",
+    "backtest.warning.corporate_action_feed_empty":
+      "Example data has no corporate action feed",
+
     "backtest.warning.portfolio.sector_unknown_excluded":
       "Securities without a sector were left out of sector constraints",
     "backtest.warning.benchmark.no_bar_at_start":

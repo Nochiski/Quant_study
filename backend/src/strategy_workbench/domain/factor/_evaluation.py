@@ -7,6 +7,7 @@ from datetime import date
 from statistics import mean, median, pstdev
 from typing import TypeAlias, TypeGuard, TypeVar
 
+from ._history import node_read_window
 from ._nodes import (
     FILLING_MISSING_POLICIES,
     BinaryNode,
@@ -606,10 +607,11 @@ def _time_series(
     # 처리한 관측 수로 센다.
     observation_count = max(len(values), 1)
     finished = 0
+    read_window = node_read_window(node)
     for indices in _checkpointed(by_security.values(), checkpoint):
         for position, result_index in _checkpointed(enumerate(indices), checkpoint):
-            end = position - node.lag + 1
-            start = end - node.window
+            bounds = read_window.bounds(position)
+            start, end = bounds.start, bounds.stop
             # 구간에 가린 칸이 드는 칸은 어차피 결측이라 창을 읽지 않는다
             if start < 0 or end <= 0 or result_index in masked:
                 continue
@@ -724,14 +726,10 @@ def _value_spans(node: ExpressionNode, inputs: list[_Spans]) -> _Spans:
     """
     if isinstance(node, FieldNode):
         return {node.field_id: (0, 0)}
-    if isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
-        shift = node.periods or 0
+    if isinstance(node, (UnaryNode, TimeSeriesNode)):
+        window = node_read_window(node)
         return {
-            field_id: (near + shift, far + shift) for field_id, (near, far) in inputs[0].items()
-        }
-    if isinstance(node, TimeSeriesNode):
-        return {
-            field_id: (near + node.lag, far + node.lag + node.window - 1)
+            field_id: (near + window.near, far + window.far)
             for field_id, (near, far) in inputs[0].items()
         }
     hull: _Spans = {}

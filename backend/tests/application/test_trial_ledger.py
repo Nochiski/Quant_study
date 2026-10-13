@@ -366,3 +366,33 @@ def test_a_run_status_that_never_finished_stays_out_of_n_after_restart(lab: _Lab
     finally:
         held.release.set()
         join_run_thread("run-1")
+
+
+def test_invalid_strategy_does_not_pollute_sealed_attempt_ledger(lab: _Lab) -> None:
+    """봉인 오류가 우선이어도 없는 필드를 참조한 초안은 확정된 전략의 시도가 아니다(#332)."""
+    from strategy_workbench.domain.factor.facade.expression import FieldNode
+
+    saved = lab.save(_spec())
+    original = saved.spec
+    factor = original.factors[0]
+    invalid = replace(
+        original,
+        factors=(
+            replace(
+                factor,
+                graph=replace(
+                    factor.graph,
+                    nodes=(FieldNode("missing", "nonexistent.field", "field"),),
+                    output_node_id="missing",
+                ),
+            ),
+        ),
+    )
+    request = BacktestRunSpec(
+        strategy_source=InlineDraft(invalid, "inline_draft", "hash"),
+        lineage_strategy_id=saved.spec.identity.strategy_id,
+        environment=replace(_ENVIRONMENT, start=date(2019, 6, 3)),
+    )
+    with pytest.raises(ResearchWindowViolationError):
+        lab.runs.start(request)
+    assert lab.runs.trial_ledger(saved.spec.identity.strategy_id).blocked == ()

@@ -89,7 +89,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     TimeSeriesOperator,
 )
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
-from strategy_workbench.domain.factor.facade.trace import trace_factor_graph
+from strategy_workbench.domain.factor.facade.trace import evaluate_factor_graph_with_trace
 from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -708,7 +708,9 @@ def test_graph_evaluation_matches_a_direct_evaluation_over_raw_pit_fields() -> N
     ).values
     pipeline = next(r for r in result.factor_evaluations if r.factor_id == "momentum_3").values
     assert direct == pipeline
-    trace = trace_factor_graph(momentum.graph, observations=observations, missing=missing)
+    trace = evaluate_factor_graph_with_trace(
+        momentum.graph, observations=observations, missing=missing
+    )[1]
     traced = {(v.as_of, v.security_id): v.value for v in trace.nodes[-1].values}
     assert all(traced[(v.as_of, v.security_id)] == v.value for v in pipeline)
 

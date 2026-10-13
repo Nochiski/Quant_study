@@ -151,6 +151,7 @@ const EXPLANATION: FactorExplanation = {
   },
   plan: {
     missing_policy: "drop",
+    evaluation_version: "factor-evaluation-v1",
     graph_hash: "g".repeat(64),
     plan_hash: "p".repeat(64),
     registry_version: "registry-v1",

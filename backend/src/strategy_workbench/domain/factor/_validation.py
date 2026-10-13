@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ._history import node_read_window
 from ._nodes import (
     BinaryNode,
     BinaryOperator,
@@ -551,10 +552,7 @@ def _infer_contract(
                     f"변환 입력은 숫자여야 합니다: actual={source.value_type.value}",
                 )
             )
-        if isinstance(node, TimeSeriesNode):
-            history += node.window - 1 + node.lag
-        elif isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
-            history += node.periods or 0
+        history += node_read_window(node).far
         if isinstance(node, (TimeSeriesNode, CrossSectionalNode, GroupNode)) or (
             isinstance(node, UnaryNode) and node.operator is not UnaryOperator.NEGATE
         ):

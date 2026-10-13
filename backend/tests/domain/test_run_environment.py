@@ -120,6 +120,9 @@ def test_environment_hash_ignores_int_versus_float_notation() -> None:
         ("participation_rate", 0.0),
         ("fee_bps", -1.0),
         ("slippage_bps", -0.5),
+        # 비용 한 칸이 대금 전체(10000bp)를 넘으면 성립하지 않는 입력이다(#342 V2-04).
+        ("fee_bps", 10_000.5),
+        ("slippage_bps", 20_000.0),
         ("impact_coefficient", -0.1),
         ("impact_coefficient", 10.5),
         ("universe_id", "   "),
@@ -130,6 +133,11 @@ def test_out_of_range_values_are_rejected_at_construction(field_name: str, value
         replace(_environment(), **{field_name: value})
 
     assert field_name in str(error.value)
+
+
+def test_bp_costs_up_to_the_whole_notional_are_accepted() -> None:
+    environment = replace(_environment(), fee_bps=10_000.0, slippage_bps=10_000.0)
+    assert (environment.fee_bps, environment.slippage_bps) == (10_000.0, 10_000.0)
 
 
 def test_reversed_dates_are_rejected_at_construction() -> None:

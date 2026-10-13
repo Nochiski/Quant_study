@@ -74,6 +74,7 @@
       "x-unit": "bps",
       "x-applied-stage": "execution",
       "minimum": 0.0,
+      "maximum": 10000.0,
       "x-display-unit": "bp",
       "examples": [
         15.0
@@ -86,6 +87,7 @@
       "x-unit": "bps",
       "x-applied-stage": "execution",
       "minimum": 0.0,
+      "maximum": 10000.0,
       "x-display-unit": "bp",
       "examples": [
         10.0
@@ -158,6 +160,7 @@
       "x-unit": "bps",
       "x-applied-stage": "execution",
       "minimum": 0.0,
+      "maximum": 10000.0,
       "x-display-unit": "bp",
       "examples": [
         20.0

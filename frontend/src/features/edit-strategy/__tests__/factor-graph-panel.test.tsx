@@ -479,7 +479,7 @@ describe("FactorGraphPanel", () => {
     const onOpenSource = vi.fn();
     const transactions: SourceTransactions = {
       apply: vi.fn(() => true), run: vi.fn(() => true), feedback: { status: "idle" },
-      feedbackFor: () => ({ status: "idle" }), onEditorReady: vi.fn(),
+      feedbackFor: () => ({ status: "idle" }),
       enabled: true, disabled: null, settling: false,
     };
     const editing = {
@@ -508,7 +508,7 @@ describe("FactorGraphPanel", () => {
       run: vi.fn(() => true),
       feedback: { status: "idle" },
       feedbackFor: () => ({ status: "idle" }),
-      onEditorReady: vi.fn(),
+
       enabled: true,
       disabled: null,
       settling: false,

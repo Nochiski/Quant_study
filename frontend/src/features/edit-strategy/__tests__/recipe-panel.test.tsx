@@ -70,7 +70,7 @@ const setup = (
       run: vi.fn(),
       feedback: { status: "idle" },
       feedbackFor: () => ({ status: "idle" }),
-      onEditorReady: vi.fn(),
+
       enabled: !extra.blocked,
       disabled: extra.blocked ? "syntax" : null,
       settling: false,

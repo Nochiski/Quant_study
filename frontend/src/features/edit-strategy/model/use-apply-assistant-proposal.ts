@@ -1,7 +1,8 @@
-import { replaceWholeDocument } from "./replace-whole-document";
-import { useCallback, useMemo, useRef, useState } from "react";
-
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
+import type { EditorHandleOwner } from "./use-editor-handle";
+import { replaceWholeDocument } from "./replace-whole-document";
+import { useCallback, useMemo, useState } from "react";
+
 import type { DocumentState } from "./document-state";
 
 /**
@@ -58,7 +59,6 @@ export type ProposalApplyStatus =
 
 export type AssistantProposalApply = {
   status: ProposalApplyStatus;
-  onEditorReady: (editor: CodeEditorHandle | null) => void;
   /**
    * 편집기의 지금 텍스트(없으면 null). 턴을 시작하는 쪽이 reducer 상태 대신 이 값을 싣는다 —
    * 세션 생성 왕복 뒤에 불려도 그 순간 사용자가 보는 텍스트여야 하기 때문이다.
@@ -92,9 +92,10 @@ const IDLE: ProposalApplyStatus = { kind: "idle" };
  * 흘러 기존 parse·compile 디바운스를 그대로 타고 배지·Problems가 갱신된다.
  */
 export const useApplyAssistantProposal = (
+  owner: EditorHandleOwner,
   state: DocumentState,
 ): AssistantProposalApply => {
-  const editor = useRef<CodeEditorHandle | null>(null);
+  const readEditor = owner.read;
   const [scoped, setScoped] = useState<{
     epoch: number;
     /** 이 상태가 묶인 텍스트 버전. null이면 버전과 무관하다(확인 창). */
@@ -106,13 +107,10 @@ export const useApplyAssistantProposal = (
   const format = state.format;
   const sourceVersion = state.sourceVersion;
 
-  const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
-    editor.current = next;
-  }, []);
 
   const readSource = useCallback(
-    (): string | null => editor.current?.getText() ?? null,
-    [],
+    (): string | null => readEditor()?.getText() ?? null,
+    [readEditor],
   );
 
   /**
@@ -157,13 +155,13 @@ export const useApplyAssistantProposal = (
       setStatus({ kind: "failed", reason: "composing" });
       return null;
     }
-    const handle = editor.current;
+    const handle = readEditor();
     if (handle === null) {
       setStatus({ kind: "failed", reason: "editor-unavailable" });
       return null;
     }
     return handle.getText();
-  }, [composing, format, setStatus]);
+  }, [composing, readEditor, format, setStatus]);
 
   const preview = useCallback(
     (proposal: AssistantProposal): void => {
@@ -181,7 +179,7 @@ export const useApplyAssistantProposal = (
     (proposal: AssistantProposal): void => {
       const currentSource = readCurrent();
       if (currentSource === null) return;
-      const handle = editor.current;
+      const handle = readEditor();
       if (handle === null) return;
       if (proposal.baseSource === currentSource) {
         overwrite(handle, proposal.source);
@@ -197,7 +195,7 @@ export const useApplyAssistantProposal = (
         null,
       );
     },
-    [overwrite, readCurrent, setStatus],
+    [readEditor, overwrite, readCurrent, setStatus],
   );
 
   const status = useMemo<ProposalApplyStatus>(
@@ -214,7 +212,7 @@ export const useApplyAssistantProposal = (
     if (status.kind !== "confirming") return;
     const currentSource = readCurrent();
     if (currentSource === null) return;
-    const handle = editor.current;
+    const handle = readEditor();
     if (handle === null) return;
     // 사용자가 확인 화면에서 본 텍스트가 아직 그대로일 때만 덮어쓴다.
     if (currentSource !== status.currentSource) {
@@ -222,13 +220,12 @@ export const useApplyAssistantProposal = (
       return;
     }
     overwrite(handle, status.proposal.source);
-  }, [overwrite, readCurrent, setStatus, status]);
+  }, [readEditor, overwrite, readCurrent, setStatus, status]);
 
   const cancel = useCallback((): void => setStatus(IDLE), [setStatus]);
 
   return {
     status,
-    onEditorReady,
     readSource,
     apply,
     preview,

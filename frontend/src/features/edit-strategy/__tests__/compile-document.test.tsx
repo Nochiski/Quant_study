@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { SourceDiagnostic } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { toDocumentDiagnostics } from "../model/use-compile-document";
-import { useDiagnosticNavigation } from "../model/use-diagnostic-navigation";
+import { useDiagnosticNavigation } from "./editor-harness";
 import { useStrategyDocument } from "../model/use-strategy-document";
 import { useCompileDocument } from "../model/use-compile-document";
 import { DiagnosticsPanel } from "../ui/diagnostics-panel";

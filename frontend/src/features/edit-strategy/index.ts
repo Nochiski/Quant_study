@@ -70,3 +70,5 @@ export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";
 export { RecipePanel } from "./ui/recipe-panel";
 
 export { useWholeDocumentReplacement } from "./model/replace-whole-document";
+
+export { useEditorHandle } from "./model/use-editor-handle";

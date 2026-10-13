@@ -17,7 +17,7 @@ import type { JsonSchema } from "../model/schema-navigator";
 import {
   useSourceTransactions,
   type SourceTransactions,
-} from "../model/use-source-transactions";
+} from "./editor-harness";
 import type { FormProjectionState } from "../model/use-form-projection";
 import { StrategyFormPanel } from "../ui/strategy-form-panel";
 
@@ -52,7 +52,7 @@ const stubTransactions = (
       ? feedback
       : { status: "idle" };
   },
-  onEditorReady: vi.fn(),
+
   enabled: true,
   disabled: null,
   settling: false,
@@ -625,7 +625,8 @@ describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
       loadText: vi.fn(),
       undo: vi.fn(() => false),
       redo: vi.fn(() => false),
-      historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
+      subscribeHistory: () => () => {},
+  historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
       getHistoryState: vi.fn(() => null),
       restoreHistoryState: vi.fn(),
     };
@@ -679,7 +680,8 @@ describe("StrategyFormPanel with the real transaction hook", () => {
       loadText: vi.fn(),
       undo: vi.fn(() => false),
       redo: vi.fn(() => false),
-      historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
+      subscribeHistory: () => () => {},
+  historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
       getHistoryState: vi.fn(() => null),
       restoreHistoryState: vi.fn(),
     };

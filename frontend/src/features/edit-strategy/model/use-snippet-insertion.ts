@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
 
-import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import {
   buildCanonicalSnippetCatalog,
   planSnippetEdit,
@@ -40,7 +39,6 @@ export type SnippetInsertion = {
   snippets: readonly CanonicalSnippet[];
   sourceStatus: SnippetCatalogSource["status"];
   feedback: SnippetFeedback;
-  onEditorReady: (editor: CodeEditorHandle | null) => void;
   insert: (snippet: CanonicalSnippet) => void;
 };
 
@@ -112,7 +110,6 @@ export const useSnippetInsertion = (
     snippets,
     sourceStatus: source.status,
     feedback,
-    onEditorReady: transactions.onEditorReady,
     insert,
   };
 };

@@ -397,7 +397,7 @@ def _hydrate_union(
         if int in scalar_members:
             return value
         if float in scalar_members:
-            return float(value)
+            return _hydrate_scalar(float, value, pointer, issues)
     elif isinstance(value, float):
         if int in scalar_members and value.is_integer():
             return int(value)

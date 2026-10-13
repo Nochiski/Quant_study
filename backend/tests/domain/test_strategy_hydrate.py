@@ -276,6 +276,15 @@ def test_datetime_on_a_date_field_and_huge_ints_fail_closed() -> None:
     assert ("structure.type_mismatch", "/risk/max_name_weight") in codes
 
 
+def test_optional_float_uses_the_same_overflow_validation_as_required_float() -> None:
+    document = _document()
+    document.setdefault("signal", {})["score_threshold"] = 10**400
+    document.setdefault("portfolio", {})["minimum_liquidity"] = 10**400
+    codes = _issue_codes(document)
+    assert ("structure.type_mismatch", "/signal/score_threshold") in codes
+    assert ("structure.type_mismatch", "/portfolio/minimum_liquidity") in codes
+
+
 def test_pointers_escape_rfc6901_tokens() -> None:
     document = _document()
     document["a/b"] = 1

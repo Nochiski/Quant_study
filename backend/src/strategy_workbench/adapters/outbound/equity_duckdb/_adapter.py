@@ -1534,16 +1534,18 @@ class EquityDuckdbAdapter:
             for security_id, key in parsed.items()
             if spans[key].first_date <= query.end and spans[key].last_date >= query.start
         )
-        warnings = [
-            DataWarning(
-                code="equity.reference_rows_dropped",
-                message=(
-                    "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
-                    f"dropped={n_reference}"
-                ),
-                severity=WarningSeverity.INFO,
+        warnings: list[DataWarning] = []
+        if n_reference:
+            warnings.append(
+                DataWarning(
+                    code="equity.reference_rows_dropped",
+                    message=(
+                        "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
+                        f"dropped={n_reference}"
+                    ),
+                    severity=WarningSeverity.INFO,
+                )
             )
-        ]
         if n_provisional:
             warnings.append(
                 DataWarning(

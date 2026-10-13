@@ -282,6 +282,25 @@ const ko = {
   "backtest.result.manifest.completed": "Completed",
   "backtest.result.warnings": "Data warnings",
   "backtest.result.warnings.empty": "경고 없음",
+  "backtest.warning.equity.reference_rows_dropped":
+    "거래정지 기준가 행은 가격 경로에서 제외했습니다",
+  "backtest.warning.equity.provisional_rows_dropped":
+    "아직 확정되지 않은 가격 행을 제외했습니다",
+  "backtest.warning.equity.invalid_ohlc_rows_dropped":
+    "가격 조건을 충족하지 않는 행을 제외했습니다",
+  "backtest.warning.equity.corporate_action_without_bar_dropped":
+    "이후 가격이 없는 기업 행동을 제외했습니다",
+  "backtest.warning.equity.unfolded_level_shift":
+    "원장 미접힘 층 이동을 기준가 비로 수량에 반영했습니다",
+  "backtest.warning.equity.mock_data":
+    "실데이터가 아닌 예제 데이터로 실행했습니다",
+  "backtest.warning.equity.corporate_action_feed_empty":
+    "예제 데이터에는 기업 행동이 없습니다",
+  "backtest.warning.mock_equity_data":
+    "실데이터가 아닌 예제 데이터로 실행했습니다",
+  "backtest.warning.corporate_action_feed_empty":
+    "예제 데이터에는 기업 행동이 없습니다",
+
   "backtest.warning.portfolio.sector_unknown_excluded":
     "섹터를 모르는 종목은 섹터 제약에서 뺐습니다",
   "backtest.warning.benchmark.no_bar_at_start":
@@ -2466,6 +2485,25 @@ export const messages = {
     "backtest.result.manifest.completed": "Completed",
     "backtest.result.warnings": "Data warnings",
     "backtest.result.warnings.empty": "No warnings",
+    "backtest.warning.equity.reference_rows_dropped":
+      "Suspended reference-price rows were excluded from the price path",
+    "backtest.warning.equity.provisional_rows_dropped":
+      "Provisional price rows were excluded",
+    "backtest.warning.equity.invalid_ohlc_rows_dropped":
+      "Invalid OHLC price rows were excluded",
+    "backtest.warning.equity.corporate_action_without_bar_dropped":
+      "Corporate actions without a following price were excluded",
+    "backtest.warning.equity.unfolded_level_shift":
+      "An unfolded ledger price shift adjusted holdings using the base-price ratio",
+    "backtest.warning.equity.mock_data":
+      "This run used example data instead of real data",
+    "backtest.warning.equity.corporate_action_feed_empty":
+      "Example data has no corporate action feed",
+    "backtest.warning.mock_equity_data":
+      "This run used example data instead of real data",
+    "backtest.warning.corporate_action_feed_empty":
+      "Example data has no corporate action feed",
+
     "backtest.warning.portfolio.sector_unknown_excluded":
       "Securities without a sector were left out of sector constraints",
     "backtest.warning.benchmark.no_bar_at_start":

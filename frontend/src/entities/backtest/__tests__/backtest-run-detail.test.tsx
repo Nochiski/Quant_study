@@ -199,6 +199,15 @@ describe("run 상세의 데이터 경고", () => {
     "benchmark.invalid_bar_sessions_carried",
     "portfolio.sector_unknown_excluded",
     "analytics.base_rate_carried_forward",
+    "equity.reference_rows_dropped",
+    "equity.provisional_rows_dropped",
+    "equity.invalid_ohlc_rows_dropped",
+    "equity.corporate_action_without_bar_dropped",
+    "equity.unfolded_level_shift",
+    "equity.mock_data",
+    "equity.corporate_action_feed_empty",
+    "mock_equity_data",
+    "corporate_action_feed_empty",
   ])("%s 에 제목이 있다", async (code) => {
     const base = result();
     render(

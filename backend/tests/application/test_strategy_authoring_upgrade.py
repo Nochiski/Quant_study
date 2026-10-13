@@ -10,7 +10,6 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-import yaml
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
@@ -31,6 +30,7 @@ from strategy_workbench.domain.strategy.facade.document import (
     ENVIRONMENT_UNAVAILABLE_CODE,
     upgrade_document,
 )
+from tests.authoring_yaml import load_authoring_yaml
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 LF = chr(10)
@@ -76,7 +76,9 @@ def test_upgrade_returns_current_text_its_environment_and_a_clean_compile() -> N
     assert upgraded.source == _read("quality_momentum.v1_2.commented.yaml")
     assert upgraded.compiled.schema_version == CURRENT_SCHEMA_VERSION
     assert upgraded.compiled.spec_hash is not None and upgraded.compiled.diagnostics == ()
-    assert yaml.safe_load(upgraded.source) == upgrade_document(yaml.safe_load(source)).tree
+    assert (
+        load_authoring_yaml(upgraded.source) == upgrade_document(load_authoring_yaml(source)).tree
+    )
     assert upgraded.source_hash == upgraded.compiled.source_hash
     # 1.0 원문의 `data`·`execution`·`missing_policy` 가 실행 설정으로 돌아온다.
     assert upgraded.environment == GOLDEN_ENVIRONMENT

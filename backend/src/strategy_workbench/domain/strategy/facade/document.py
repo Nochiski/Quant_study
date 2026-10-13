@@ -7,7 +7,6 @@ from strategy_workbench.domain.strategy._hydrate import (
     StrategyHydration,
     StructuralIssue,
     authoring_document,
-    hydrate_saved_strategy,
     hydrate_strategy_document,
 )
 from strategy_workbench.domain.strategy._promotion import (
@@ -59,7 +58,6 @@ __all__ = [
     "UpgradeOutcome",
     "UpgradeUnsupportedNodeError",
     "UpgradeWarning",
-    "hydrate_saved_strategy",
     "apply_upgrade_steps",
     "authoring_document",
     "hydrate_strategy_document",

@@ -13,7 +13,6 @@ import pytest
 from strategy_workbench.domain.strategy.facade.document import (
     SUPPORTED_SCHEMA_VERSIONS,
     HydrationStatus,
-    hydrate_saved_strategy,
     hydrate_strategy_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -330,22 +329,6 @@ def test_canonical_round_trip_through_hydrate_preserves_everything_but_identity(
     assert rehydrated.ok and rehydrated.spec is not None
     assert replace(rehydrated.spec, identity=original.identity) == original
     assert strategy_spec_hash(rehydrated.spec) == strategy_spec_hash(original)
-
-
-def test_saved_strategy_hydrate_reads_identity_from_the_document() -> None:
-    legacy = json.loads((FIXTURES / "quality_momentum.legacy.json").read_text(encoding="utf-8"))
-
-    result = hydrate_saved_strategy(legacy)
-
-    assert result.ok and result.spec is not None
-    assert result.spec.identity == StrategyIdentity("strategy-legacy", 3)
-    assert strategy_spec_hash(result.spec) == strategy_spec_hash(_hydrate_ok(_document()))
-
-    legacy["identity"]["schema_version"] = "9.9"
-    stale = hydrate_saved_strategy(legacy)
-    assert [(i.code, i.pointer) for i in stale.issues] == [
-        ("structure.unsupported_schema_version", "/identity/schema_version")
-    ]
 
 
 def test_sequence_index_pointers_and_non_sequence_values() -> None:

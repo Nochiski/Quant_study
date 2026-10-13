@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 
@@ -847,3 +847,64 @@ def test_bootstrap_uses_sqlite_and_restores_a_strategy_with_an_explicit_path(
     assert isinstance(isolated.strategy_repository, SQLiteStrategyRepository)
     assert isolated.strategy_repository.database_path is None
     isolated.strategy_repository.close()
+
+
+@pytest.mark.parametrize("operation", ("get", "list", "history"))
+@pytest.mark.parametrize("same_instance", (False, True), ids=("separate-store", "same-store"))
+def test_sqlite_source_validation_does_not_hold_transaction_or_store_lock(
+    tmp_path: Path, operation: str, same_instance: bool
+) -> None:
+    """원문 재검증이 늦어도 저장은 완료되고 조회는 처음 읽은 판본을 답한다(#328)."""
+    validating = Event()
+    resume = Event()
+    block_validation = Event()
+
+    def source_spec_hash(source: str, format: SourceFormat) -> str:
+        if block_validation.is_set():
+            validating.set()
+            if not resume.wait(timeout=10):
+                raise ValueError("시험 원문 검증 재개 시간 초과")
+        return _source_spec_hash(source, format)
+
+    path = tmp_path / "read-write.sqlite3"
+    reader = SQLiteStrategyRepository(path, source_spec_hash=source_spec_hash)
+    writer = (
+        reader
+        if same_instance
+        else SQLiteStrategyRepository(
+            path, source_spec_hash=_source_spec_hash, busy_timeout_seconds=0.1
+        )
+    )
+    original = _document(_document_source(SourceFormat.YAML, title="원본"), "race", 1)
+    reader.add(original)
+    successor = _legacy(replace(_template(), title="다음 판본"), "race", 2)
+    block_validation.set()
+
+    def read() -> int:
+        if operation == "get":
+            return reader.get("race").revision
+        if operation == "list":
+            page = reader.list_strategies(PageRequest())
+            assert page.total == 1
+            return page.items[0].latest_revision
+        page = reader.history("race", PageRequest())
+        assert page.total == 1
+        return page.items[0].revision
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            reading = executor.submit(read)
+            try:
+                assert validating.wait(timeout=5)
+                saving = executor.submit(writer.append, successor, expected_revision=1)
+                # 읽기 재검증을 재개하기 전에 쓰기가 끝나야 한다. 재시도로 통과시킬 수 없다.
+                saving.result(timeout=3)
+            finally:
+                resume.set()
+            assert reading.result(timeout=5) == 1
+        assert reader.get("race") == successor
+    finally:
+        resume.set()
+        reader.close()
+        if writer is not reader:
+            writer.close()

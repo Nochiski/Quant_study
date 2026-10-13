@@ -43,6 +43,11 @@ class RunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+    @property
+    def is_terminal(self) -> bool:
+        """종결 여부의 정본. 취소 요청은 실행이 멈춘 상태가 아니다."""
+        return self in (RunStatus.CANCELLED, RunStatus.COMPLETED, RunStatus.FAILED)
+
 
 class WarningSeverity(StrEnum):
     INFO = "info"

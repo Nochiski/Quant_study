@@ -30,7 +30,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunSummary,
     BacktestStartResponse,
     RunKind,
-    RunStatus,
     TrialLedger,
     TrialLineageAlreadyMergedError,
     TrialPreview,
@@ -256,11 +255,7 @@ async def _backtest_event_stream(
     sequence = after_sequence
     last_frame_at = time.monotonic()
     while True:
-        settled = backtest_runs.state(run_id).status in (
-            RunStatus.COMPLETED,
-            RunStatus.CANCELLED,
-            RunStatus.FAILED,
-        )
+        settled = backtest_runs.state(run_id).status.is_terminal
         for event in backtest_runs.events(run_id, after_sequence=sequence):
             sequence = event.sequence
             yield sse_frame(sequence=event.sequence, event="progress", data=event)

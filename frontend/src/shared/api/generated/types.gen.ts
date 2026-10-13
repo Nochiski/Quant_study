@@ -4514,10 +4514,6 @@ export type RunKind = "single" | "experiment_trial" | "walk_forward_validation";
  */
 export type RunManifest = {
   /**
-   * Annualization Days
-   */
-  annualization_days: number;
-  /**
    * Completed At
    */
   completed_at: string;
@@ -4529,7 +4525,6 @@ export type RunManifest = {
    * Data Snapshot Id
    */
   data_snapshot_id: string;
-  engine_core: ExecutionCore;
   /**
    * Engine Version
    */
@@ -4540,21 +4535,9 @@ export type RunManifest = {
    */
   environment_hash: string;
   /**
-   * Fee Bps
-   */
-  fee_bps: number;
-  /**
-   * Initial Cash
-   */
-  initial_cash: number;
-  /**
    * Metric Registry Version
    */
   metric_registry_version: string;
-  /**
-   * Participation Rate
-   */
-  participation_rate: number;
   /**
    * Run Fingerprint
    */
@@ -4568,10 +4551,6 @@ export type RunManifest = {
    * Schema Version
    */
   schema_version?: string;
-  /**
-   * Slippage Bps
-   */
-  slippage_bps: number;
   /**
    * Strategy Hash
    */

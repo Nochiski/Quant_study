@@ -234,7 +234,7 @@ export const BacktestRunDetail = ({
           <span className="section-kicker">{t("backtest.result.kicker")}</span>
           <h3 id={titleId}>{t("backtest.result.title")}</h3>
           <p>
-            {result.manifest.engine_core.toUpperCase()} · {t("backtest.result.registry")}{" "}
+            {(result.manifest.run_spec.core?.toUpperCase() ?? "—")} · {t("backtest.result.registry")}{" "}
             <code>{result.manifest.metric_registry_version}</code>
           </p>
         </div>
@@ -479,11 +479,11 @@ export const BacktestRunDetail = ({
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.core")}</dt>
-                <dd>{result.manifest.engine_core.toUpperCase()}</dd>
+                <dd>{(result.manifest.run_spec.core?.toUpperCase() ?? "—")}</dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.initialCash")}</dt>
-                <dd>{result.manifest.initial_cash.toLocaleString("ko-KR")}</dd>
+                <dd>{(result.manifest.run_spec.initial_cash?.toLocaleString("ko-KR") ?? "—")}</dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.benchmark")}</dt>
@@ -491,7 +491,7 @@ export const BacktestRunDetail = ({
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.annualizationDays")}</dt>
-                <dd>{result.manifest.annualization_days}</dd>
+                <dd>{result.manifest.run_spec.annualization_days ?? "—"}</dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.metricWindows")}</dt>

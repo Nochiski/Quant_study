@@ -37,7 +37,6 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestSeries,
     DataWarning,
-    ExecutionCore,
     MetricWindow,
     RawArtifactBundle,
     RawCost,
@@ -79,6 +78,7 @@ def _result() -> BacktestRunResult:
     )
     run_spec = BacktestRunSpec(
         strategy=strategy,
+        initial_cash=100.0,
         environment=environment,
         benchmark_security_id="KRX:069500",
         metric_windows=(
@@ -92,7 +92,6 @@ def _result() -> BacktestRunResult:
             run_id="run-safe-001",
             created_at=created,
             completed_at=created,
-            engine_core=ExecutionCore.RUST,
             engine_version="test",
             run_fingerprint="fingerprint",
             run_spec=run_spec,
@@ -100,11 +99,6 @@ def _result() -> BacktestRunResult:
             data_snapshot_id="snapshot",
             target_tape_hash="tape",
             metric_registry_version=registry.version,
-            initial_cash=100.0,
-            annualization_days=252,
-            fee_bps=environment.fee_bps,
-            slippage_bps=environment.slippage_bps,
-            participation_rate=environment.participation_rate,
             environment=environment,
             environment_hash=environment_hash(environment),
             strategy_provenance=StrategyProvenance(
@@ -333,6 +327,67 @@ def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
 
     assert orphan.exists()
     assert "orphan run artifact staging not removed — name=.run-locked.0123abcd.tmp" in caplog.text
+
+
+def _write_legacy_flat_manifest(tmp_path: Path) -> tuple[LocalArtifactStore, Path, dict]:
+    store = LocalArtifactStore(tmp_path)
+    store.commit(_result())
+    path = tmp_path / "run-safe-001" / "result.json"
+    payload = json.loads(path.read_bytes())
+    manifest = payload["manifest"]
+    request = manifest["run_spec"]
+    manifest.update(
+        schema_version="backtest-run-v2",
+        engine_core=request["core"],
+        initial_cash=request["initial_cash"],
+        annualization_days=request["annualization_days"],
+        **{
+            name: manifest["environment"][name]
+            for name in ("fee_bps", "slippage_bps", "participation_rate")
+        },
+    )
+    return store, path, payload
+
+
+def test_v2_flat_manifest_loads_without_rewriting_the_archive(tmp_path: Path) -> None:
+    store, path, payload = _write_legacy_flat_manifest(tmp_path)
+    original = json.dumps(payload).encode()
+    path.write_bytes(original)
+    loaded = store.load("run-safe-001", sha256=hashlib.sha256(original).hexdigest())
+    assert loaded == replace(
+        _result(), manifest=replace(_result().manifest, schema_version="backtest-run-v2")
+    )
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("field", ["fee_bps", "slippage_bps", "participation_rate"])
+def test_v2_inconsistent_cost_copy_remains_unreadable(tmp_path: Path, field: str) -> None:
+    store, path, payload = _write_legacy_flat_manifest(tmp_path)
+    payload["manifest"][field] += 1
+    original = json.dumps(payload).encode()
+    path.write_bytes(original)
+    with pytest.raises(BacktestArtifactUnreadableError, match="two execution cost models"):
+        store.load("run-safe-001", sha256=hashlib.sha256(original).hexdigest())
+
+
+def test_new_v3_result_writes_only_owned_execution_values(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path)
+    result = _result()
+    commit = store.commit(result)
+    payload = json.loads((tmp_path / "run-safe-001" / "result.json").read_bytes())
+    manifest = payload["manifest"]
+    assert manifest["schema_version"] == "backtest-run-v3"
+    assert not {
+        "engine_core",
+        "initial_cash",
+        "annualization_days",
+        "fee_bps",
+        "slippage_bps",
+        "participation_rate",
+    }.intersection(manifest)
+    assert manifest["run_spec"]["initial_cash"] == result.manifest.run_spec.initial_cash
+    assert manifest["environment"]["fee_bps"] == result.manifest.environment.fee_bps
+    assert store.load("run-safe-001", sha256=commit.sha256) == result
 
 
 def test_order_diagnostic_records_survive_artifact_codec_and_distinguish_empty_history(

@@ -35,7 +35,6 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestSeries,
     DataWarning,
-    ExecutionCore,
     RawArtifactBundle,
     RawFill,
     RawOrder,
@@ -175,7 +174,6 @@ def sample_backtest_result() -> BacktestRunResult:
             run_id=SAMPLE_RUN_ID,
             created_at=created,
             completed_at=created,
-            engine_core=ExecutionCore.RUST,
             engine_version="test",
             run_fingerprint="fingerprint",
             run_spec=BacktestRunSpec(
@@ -187,11 +185,6 @@ def sample_backtest_result() -> BacktestRunResult:
             data_snapshot_id="snapshot",
             target_tape_hash="tape",
             metric_registry_version=registry.version,
-            initial_cash=100_000_000.0,
-            annualization_days=252,
-            fee_bps=environment.fee_bps,
-            slippage_bps=environment.slippage_bps,
-            participation_rate=environment.participation_rate,
             environment=environment,
             environment_hash=environment_hash(environment),
             strategy_provenance=StrategyProvenance(

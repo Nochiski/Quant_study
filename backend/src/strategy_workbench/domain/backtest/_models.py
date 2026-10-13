@@ -206,14 +206,6 @@ RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
 # 집합이므로 이름을 다시 적지 않는다.
 NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
 
-# `RunManifest` 가 평면 필드로도 싣는 비용·참여율. 제약 행이 늘어도 매니페스트 평면 필드는 늘지
-# 않으므로 제약 행과 따로 고정한다 — 제약 행을 그대로 읽으면 새 행마다 `AttributeError` 가 난다.
-MANIFEST_FLAT_ENVIRONMENT_FIELDS: tuple[str, ...] = (
-    "participation_rate",
-    "fee_bps",
-    "slippage_bps",
-)
-
 
 class InvalidRunFieldError(ValueError):
     """실행 요청의 칸 하나가 규칙을 어겼다. `field` 는 그 칸의 이름이다(이슈 #260).
@@ -394,7 +386,6 @@ class RunManifest:
     run_id: str
     created_at: datetime
     completed_at: datetime
-    engine_core: ExecutionCore
     engine_version: str
     run_fingerprint: str
     run_spec: BacktestRunSpec
@@ -402,18 +393,14 @@ class RunManifest:
     data_snapshot_id: str
     target_tape_hash: str
     metric_registry_version: str
-    initial_cash: float
-    annualization_days: int
-    fee_bps: float
-    slippage_bps: float
-    participation_rate: float
     # 이 run 이 실제로 쓴 실행 설정과 그 hash. `strategy_hash` 와 별개 축이라, 같은 전략을
     # 다른 기간·비용으로 돌린 두 run 을 매니페스트만 보고 구분할 수 있다.
     environment: RunEnvironment
     environment_hash: str
     strategy_provenance: StrategyProvenance
     warnings: tuple[DataWarning, ...] = ()
-    schema_version: str = "backtest-run-v2"
+    # v3는 평면 실행 값 사본 6개를 제거한 표현 판본이다. 실행 지문에는 넣지 않는다.
+    schema_version: str = "backtest-run-v3"
 
     def __post_init__(self) -> None:
         # The two fields have different producers — `strategy_hash` is the compiler's, carried on
@@ -428,23 +415,6 @@ class RunManifest:
                 f"provenance.kind={self.strategy_provenance.kind.value} "
                 f"strategy_id={self.strategy_provenance.strategy_id} "
                 f"revision={self.strategy_provenance.revision}"
-            )
-        # 비용·참여율은 `environment` 가 owner 다. 평면 필드는 매니페스트 소비자 호환으로
-        # 남아 있을 뿐이라 두 축이 갈리면 리포트가 읽는 축에 따라 같은 run 의 수수료가
-        # 달라진다. 평면 필드 제거는 소비자(프론트 실행 결과 화면) 정리와 같이 간다.
-        divergent = {
-            name: (getattr(self, name), getattr(self.environment, name))
-            for name in MANIFEST_FLAT_ENVIRONMENT_FIELDS
-            if getattr(self, name) != getattr(self.environment, name)
-        }
-        if divergent:
-            raise ValueError(
-                "manifest records two execution cost models for one run — "
-                f"run_id={self.run_id} environment_hash={self.environment_hash} "
-                + " ".join(
-                    f"{name}: manifest={flat!r} environment={owned!r}"
-                    for name, (flat, owned) in sorted(divergent.items())
-                )
             )
 
 

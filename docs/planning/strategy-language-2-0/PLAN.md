@@ -215,7 +215,7 @@ tracker의 `MERGED`·생성 집계는 코드 병합률이다. CS-05·06 수용 �
 | Head SHA | 2차 리뷰 대상 `1e0b095` + P3 후속 커밋 1개(이 PLAN 갱신과 같은 커밋) |
 | Diff stat | 커밋 4개 · 31파일(신규 7). `92b304e` 모델·canonical hash·브리지·런타임 스키마(10파일) → `6b451ef` preview·trace·run 배선(16파일) → `a7bf368` 스키마 엔드포인트·OpenAPI(6파일) → `54af48c` 생성 SDK(3파일) |
 | Focused tests | `uv run pytest tests/domain/test_run_environment.py tests/application/test_run_environment_wiring.py tests/architecture tests/integration/test_run_environment_schema_http_api.py -q` |
-| 제약사항 | `run_fingerprint` 표기가 바뀐다 — `run_spec`에 `environment` 키가 늘어 같은 입력의 지문이 P2-01 이전과 다르다(실측 `258b4637…` → `7074f1aa…`). `run_fingerprint`를 읽는 캐시 lookup은 코드베이스에 없어 잘못된 캐시 히트는 불가능하고, 영향은 감사 축이다: P2-01 이전에 저장된 매니페스트의 지문은 재계산 대상이 아니다. 지문에 표기 버전을 넣을지는 캐시 도입 시점(P2-09)에 정한다. 매니페스트의 `fee_bps`·`slippage_bps`·`participation_rate` 평면 필드는 `environment`와 중복이지만 호환을 위해 남긴다(대조로 불일치를 막고, 제거는 P2-03) |
+| 제약사항 | `run_fingerprint` 표기가 바뀐다 — `run_spec`에 `environment` 키가 늘어 같은 입력의 지문이 P2-01 이전과 다르다(실측 `258b4637…` → `7074f1aa…`). `run_fingerprint`를 읽는 캐시 lookup은 코드베이스에 없어 잘못된 캐시 히트는 불가능하고, 영향은 감사 축이다: P2-01 이전에 저장된 매니페스트의 지문은 재계산 대상이 아니다. 지문에 표기 버전을 넣을지는 캐시 도입 시점(P2-09)에 정한다. 당시 유지한 매니페스트 평면 비용 필드는 #356 C-P3-7에서 제거한다. 기존 v2 파일은 읽기 경계에서 호환을 유지한다(아래 결정 4) |
 | Full gate | backend `uv run pytest -q`(1480 passed, 13 skipped) · `ruff check src tests` · `ruff format --check`(변경 30파일) · `pyright`(duckdb 미설치 4건만, 기존) / frontend `npm run typecheck`·`lint`·`test`(639, 57파일)·`build` |
 
 작업 파일(신규 7 + 수정 24):
@@ -935,11 +935,13 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    처음 결정(명시 `environment` 의 422 를 필드 단위 구조로 바꾸지 않는다 — 패널 검증이 같은 SoT 를 읽는
    동안에는 도달 경로가 없다)은 매도 거래세 칸 사이 규칙(V2-01)과 연구 하한(V1-01)이 스키마 밖에 생기며
    전제가 깨져 #260·#352 로 위와 같이 바뀌었다.
-4. **매니페스트 평면 비용 필드는 유지한다(NB-4(a)).** `RunManifest.fee_bps`·`slippage_bps`·
-   `participation_rate` 는 `environment` 와 같은 값이지만, 이미 저장된 run 의 결과와 OpenAPI 가 싣는
-   필드라 지우면 저장소 호환(옛 결과 읽기)과 생성 SDK 가 함께 움직인다. 결과 설명 도구
-   (`_result_context.py`)와 화면(run 상세)은 `environment` 만 읽는다(#357 C-P3-12, 평면 필드 정리는
-   #356 C-P3-7).
+4. **매니페스트 실행 값은 소유 경로에서 읽는다(#356 C-P3-7).** 새 `backtest-run-v3` 결과는
+   평면 `engine_core`·`initial_cash`·`annualization_days`·`fee_bps`·`slippage_bps`·`participation_rate`를
+   싣지 않는다. 실행 옵션은 `run_spec`이, 실행 비용은 `environment`가 소유한다. 화면·AI·시도 원장·
+   실험 평가도 이 경로만 읽는다. v3은 표현 변경을 표시하며 계산·엔진 규칙·실행 지문은 바꾸지 않는다.
+   저장된 v2 결과는 원래 바이트의 체크섬을 먼저 확인한 후 여분 필드를 무시해 읽는다. 기존 비용
+   사본 3개의 불일치 거절은 archive 디코더에만 남긴다. 파일·DB를 재작성하지 않으며 생성 SDK와
+   소비자를 같은 변경에 갱신한다. 옛 프로그램으로 새 v3 파일을 읽는 역방향 호환은 제공하지 않는다.
 5. **업그레이드 응답의 `environment` 는 사용자가 누를 때 패널에 채운다.** 배너가 "실행 설정에 채우기"를
    보이고, 누르면 패널 값이 바뀐다. `environment` 가 `null` 이면 버튼 대신 warning 을 보이고 패널을 건드리지
    않는다. 배너 문구는 버전 중립으로 바꾸고 은퇴 버전 문자열을 frontend 에 두지 않는다(#15 6키 포함).

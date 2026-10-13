@@ -162,7 +162,11 @@ def representative_sharpe(result: BacktestRunResult) -> float | None:
         ),
         None,
     )
-    return None if sharpe is None else session_sharpe(sharpe, result.manifest.annualization_days)
+    return (
+        None
+        if sharpe is None
+        else session_sharpe(sharpe, result.manifest.run_spec.annualization_days)
+    )
 
 
 def bankrupt(status: RunStatus, error_code: str | None) -> bool:

@@ -347,7 +347,10 @@ def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path)
     cheap_manifest = cheap.result("cheap-run").manifest
     dear_manifest = expensive.result("dear-run").manifest
     assert dear_manifest.environment_hash == environment_hash(dearer)
-    assert (dear_manifest.fee_bps, dear_manifest.slippage_bps) == (250.0, 250.0)
+    assert (dear_manifest.environment.fee_bps, dear_manifest.environment.slippage_bps) == (
+        250.0,
+        250.0,
+    )
     assert dear_manifest.run_fingerprint != cheap_manifest.run_fingerprint
     # 같은 전략을 다른 실행 설정으로 돌렸다: 전략 hash 는 그대로, 실행 설정 hash 만 갈린다.
     assert dear_manifest.strategy_hash == cheap_manifest.strategy_hash
@@ -641,6 +644,26 @@ def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
     first = (fills[0].session, fills[0].security_id)
     assert warmed[first] != cold[first]
     assert warmed[first] != unsplit[first]
+
+
+def test_manifest_projection_preserves_execution_values(tmp_path: Path) -> None:
+    run = _runs(_portfolio(), tmp_path, "projection-run")
+    request = BacktestRunSpec(
+        strategy=_spec(),
+        core=ExecutionCore.PYTHON,
+        initial_cash=12_345_678.0,
+        annualization_days=250,
+        environment=_environment(),
+    )
+    run.start(request)
+    state = wait_for_terminal_run(run, "projection-run")
+    assert state.status.value == "completed", state
+    result = run.result("projection-run")
+    # main 5d655219의 같은 Python 코어·원문·요청으로 얻은 최종 평가액(센트 단위).
+    assert round(result.series.equity[-1].equity, 2) == 12_302_704.95
+    assert result.manifest.run_spec.initial_cash == request.initial_cash
+    assert result.manifest.run_spec.annualization_days == request.annualization_days
+    assert result.manifest.run_spec.core is ExecutionCore.PYTHON
 
 
 class _NoWarmup(_ShrunkWarmupValue):

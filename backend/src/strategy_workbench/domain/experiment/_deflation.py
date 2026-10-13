@@ -87,7 +87,7 @@ def run_deflated_sharpe(result: BacktestRunResult, ledger: TrialLedger) -> float
     sharpe, error = metrics.get("sharpe"), metrics.get("sharpe_standard_error")
     if sharpe is None or error is None:
         return None
-    return deflated_sharpe(sharpe, error, result.manifest.annualization_days, ledger)
+    return deflated_sharpe(sharpe, error, result.manifest.run_spec.annualization_days, ledger)
 
 
 def alpha_t_threshold(trial_count: int) -> float:

@@ -26,19 +26,13 @@ const result = (): BacktestRunResult => ({
     run_id: "run-1",
     created_at: "2026-09-27T00:00:00Z",
     completed_at: "2026-09-27T00:00:05Z",
-    engine_core: "rust",
     engine_version: "test",
     run_fingerprint: "f".repeat(32),
-    run_spec: { metric_windows: [] },
+    run_spec: { core: "rust", initial_cash: 100_000_000, annualization_days: 252, metric_windows: [] },
     strategy_hash: "a".repeat(64),
     data_snapshot_id: "snapshot",
     target_tape_hash: "b".repeat(64),
     metric_registry_version: "metric-registry-v1",
-    initial_cash: 100_000_000,
-    annualization_days: 252,
-    fee_bps: 15,
-    slippage_bps: 10,
-    participation_rate: 0.1,
     environment: {
       market: "KRX",
       frequency: "daily",
@@ -95,7 +89,9 @@ describe("run 상세의 실행 설정", () => {
   });
 
   it("manifest 의 실행 설정을 스키마 칸 순서·이름·단위·값 이름으로 보이고 environment hash 를 보인다", async () => {
-    render(<BacktestRunDetail result={result()} environmentFields={FIELDS} />);
+    const recorded = result();
+    recorded.manifest.run_spec = { ...recorded.manifest.run_spec, core: "python", initial_cash: 765_432_100, annualization_days: 260 };
+    render(<BacktestRunDetail result={recorded} environmentFields={FIELDS} />);
     const user = userEvent.setup();
     const drawer = screen.getByRole("group", {
       name: "Manifest · 데이터 경고 · 재현성 정보",
@@ -114,12 +110,15 @@ describe("run 상세의 실행 설정", () => {
       .getAllByRole("term")
       .map((term) => term.textContent);
     expect(labels).toEqual([...FIELDS.map(runEnvironmentLabel), "실행 설정 hash"]);
+    expect(row("Core")).toHaveTextContent("PYTHON");
+    expect(row("초기 자본 (KRW)")).toHaveTextContent("765,432,100");
+    expect(row("연환산 거래일")).toHaveTextContent("260");
     expect(row("시장")).toHaveTextContent("한국거래소(KRX)");
     expect(row("빈도")).toHaveTextContent("일봉");
     expect(row("시작일")).toHaveTextContent("2023-01-02");
     expect(row("유니버스")).toHaveTextContent("krx.common-stock");
     expect(row("체결 시점")).toHaveTextContent("다음 거래일 시가");
-    // 평면 비용 필드(15bp)가 아니라 실행 설정이 실제로 쓴 값을 보인다(P3-02 결정 4).
+    // 비용의 정본인 실행 설정이 실제로 쓴 값을 보인다.
     expect(row("참여율 (%)")).toHaveTextContent("20%");
     expect(row("참여 기준")).toHaveTextContent("20일 평균 거래대금");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");

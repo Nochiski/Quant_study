@@ -805,9 +805,6 @@ test.describe("professional YAML workflow", () => {
     );
     expect(result.manifest).toMatchObject({
       run_id: runId,
-      engine_core: "rust",
-      initial_cash: 123_456_789,
-      annualization_days: 260,
       strategy_hash: savedV4.spec_hash,
       strategy_provenance: {
         kind: "saved_revision",

@@ -98,7 +98,7 @@ const stub = (overrides: Partial<SourceTransactions> = {}): SourceTransactions =
   run: vi.fn(() => true),
   feedback: { status: "idle" },
   feedbackFor: () => ({ status: "idle" }),
-  onEditorReady: vi.fn(),
+
   enabled: true,
   disabled: null,
   settling: false,

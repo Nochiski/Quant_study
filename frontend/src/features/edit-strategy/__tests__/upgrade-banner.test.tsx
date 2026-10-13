@@ -16,7 +16,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { useCompileDocument } from "../model/use-compile-document";
 import { useStrategyDocument } from "../model/use-strategy-document";
-import { useUpgradeDocument } from "../model/use-upgrade-document";
+import { useUpgradeDocument } from "./editor-harness";
 import { SourceEditor } from "../ui/source-editor";
 import { UpgradeBanner } from "../ui/upgrade-banner";
 

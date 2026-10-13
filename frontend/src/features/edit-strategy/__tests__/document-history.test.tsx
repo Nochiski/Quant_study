@@ -1,4 +1,5 @@
 import { useWholeDocumentReplacement } from "../model/replace-whole-document";
+import { useEditorHandle } from "../model/use-editor-handle";
 import { EditorView } from "@codemirror/view";
 import {
   act,
@@ -10,11 +11,9 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useCallback } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
-import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentSource } from "../model/document-source";
 import type { JsonSchema } from "../model/schema-navigator";
 import { useDocumentHistory } from "../model/use-document-history";
@@ -43,18 +42,11 @@ const Harness = () => {
     format: "yaml",
     source: VERBOSE,
   });
-  const transactions = useSourceTransactions(doc, true);
-  const history = useDocumentHistory(doc);
+  const owner = useEditorHandle();
+  const transactions = useSourceTransactions(owner, doc, true);
+  const history = useDocumentHistory(owner);
   const form = useFormProjection(doc, SCHEMA);
-  const onTransactionsEditorReady = transactions.onEditorReady;
-  const onHistoryEditorReady = history.onEditorReady;
-  const onEditorReady = useCallback(
-    (editor: CodeEditorHandle | null): void => {
-      onTransactionsEditorReady(editor);
-      onHistoryEditorReady(editor);
-    },
-    [onHistoryEditorReady, onTransactionsEditorReady],
-  );
+  const onEditorReady = owner.onEditorReady;
   return (
     <>
       <DocumentHistoryActions history={history} />
@@ -108,11 +100,10 @@ const RevisionHarness = ({
   source: DocumentSource;
 }) => {
   const [doc, dispatch] = useStrategyDocument(documentSource);
-  const history = useDocumentHistory(doc);
-  const replacement = useWholeDocumentReplacement();
-  const bindHistory = history.onEditorReady;
-  const bindReplacement = replacement.onEditorReady;
-  const onEditorReady = useCallback((editor: Parameters<typeof bindHistory>[0]) => { bindHistory(editor); bindReplacement(editor); }, [bindHistory, bindReplacement]);
+  const owner = useEditorHandle();
+  const history = useDocumentHistory(owner);
+  const replacement = useWholeDocumentReplacement(owner);
+  const onEditorReady = owner.onEditorReady;
   return (
     <>
       <DocumentHistoryActions history={history} />
@@ -177,7 +168,7 @@ describe("문서 되돌리기·다시 실행 (P1-02)", () => {
     await waitFor(() =>
       expect(source()).toContain("\n          node_id: field\n"),
     );
-    // 깊이 표시는 편집 직후 갱신된다(폴링 없이 sourceVersion 변화로).
+    // 깊이 표시는 편집 직후 갱신된다(폴링 없이 CodeMirror 이력 구독으로).
     await waitFor(() => expect(undoButton).not.toHaveAttribute("aria-disabled"));
     expect(redoButton).toHaveAccessibleDescription("다시 실행할 편집이 없습니다");
 

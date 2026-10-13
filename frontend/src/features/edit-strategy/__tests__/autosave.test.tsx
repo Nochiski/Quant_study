@@ -1,4 +1,4 @@
-import { useWholeDocumentReplacement } from "../model/replace-whole-document";
+import { useWholeDocumentReplacement } from "./editor-harness";
 import { EditorView } from "@codemirror/view";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

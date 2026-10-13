@@ -357,7 +357,7 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
 
 it("canvas keeps authored boolean output editable and attaches only a read-only score marker", async () => {
   const onSelectPointer = vi.fn(), apply = vi.fn(() => true);
-  render(<FactorGraphPanel state={readyState()} schema={SCHEMA} diagnostics={[]} onSelectPointer={onSelectPointer} onOpenSource={vi.fn()} editing={{ tree: PARSED.status === "ok" ? PARSED.tree : null, catalogs: { equityFields: null }, transactions: { apply, run: vi.fn(() => true), feedback: { status: "idle" }, feedbackFor: () => ({ status: "idle" }), onEditorReady: vi.fn(), enabled: true, disabled: null, settling: false } }} />);
+  render(<FactorGraphPanel state={readyState()} schema={SCHEMA} diagnostics={[]} onSelectPointer={onSelectPointer} onOpenSource={vi.fn()} editing={{ tree: PARSED.status === "ok" ? PARSED.tree : null, catalogs: { equityFields: null }, transactions: { apply, run: vi.fn(() => true), feedback: { status: "idle" }, feedbackFor: () => ({ status: "idle" }),  enabled: true, disabled: null, settling: false } }} />);
   const canvas = screen.getByRole("region", { name: "노드 캔버스" });
   expect(within(canvas).getAllByRole("button", { name: /^노드 편집:/ })).toHaveLength(AUTHORED.nodes.length);
   expect(canvas).not.toHaveTextContent("__promote_");

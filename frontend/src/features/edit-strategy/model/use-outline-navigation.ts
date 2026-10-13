@@ -1,9 +1,9 @@
+import type { EditorHandleOwner } from "./use-editor-handle";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useCommittedRef } from "../../../shared/lib/react";
 import { locatePointer, locateRange } from "../../../shared/lib/yaml12";
 import type {
-  CodeEditorHandle,
   EditorSelection,
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
@@ -35,7 +35,6 @@ type OutlineNavigationOptions = {
 export type StrategyOutlineNavigation = {
   snapshot: StrategyOutlineSnapshot | null;
   symbols: readonly StrategyOutlineSymbol[];
-  onEditorReady: (editor: CodeEditorHandle | null) => void;
   onEditorSelectionChange: (selection: EditorSelection) => void;
   onSelectOutlineNode: (node: StrategyOutlineNode) => void;
   onCollapseOutlineNode: (node: StrategyOutlineNode) => void;
@@ -46,7 +45,7 @@ const normalizedPointer = (pointer: string | undefined): string =>
   pointer ?? "";
 
 /** Owns the bidirectional source ↔ outline interaction; the page only persists path in the URL. */
-export const useOutlineNavigation = ({
+export const useOutlineNavigation = (owner: EditorHandleOwner, {
   state,
   schema,
   revealSelectedPointer = true,
@@ -65,7 +64,7 @@ export const useOutlineNavigation = ({
     () => projectStrategyOutlineSymbols(currentSnapshot?.nodes ?? []),
     [currentSnapshot?.nodes],
   );
-  const editor = useRef<CodeEditorHandle | null>(null);
+  const readEditor = owner.read;
   // 편집기 콜백(커서 이동·선택 변경)이 읽는다 — commit과 같은 시점에 비춘다(backlog 21).
   const latestSnapshot = useCommittedRef(snapshot);
   const latestSelected = useCommittedRef(selectedPointer);
@@ -83,7 +82,7 @@ export const useOutlineNavigation = ({
 
   const reveal = useCallback(
     (pointer: string): boolean => {
-      const currentEditor = editor.current;
+      const currentEditor = readEditor();
       // A retained outline is useful context while parsing fails, but its offsets belong to an
       // older source. Navigation must fail closed until this exact document version parses.
       if (!currentEditor || !currentSnapshot) return false;
@@ -105,17 +104,17 @@ export const useOutlineNavigation = ({
       currentEditor.focus();
       return true;
     },
-    [currentSnapshot],
+    [currentSnapshot, readEditor],
   );
 
-  const onEditorReady = useCallback(
-    (next: CodeEditorHandle | null): void => {
-      editor.current = next;
+  useEffect(
+    () => {
+      const next = owner.mounted;
       if (next === null || !revealSelectedPointer) return;
       const pointer = pendingReveal.current;
       if (pointer !== null && reveal(pointer)) pendingReveal.current = null;
     },
-    [reveal, revealSelectedPointer],
+    [owner.mounted, reveal, revealSelectedPointer],
   );
 
   const onEditorSelectionChange = useCallback(
@@ -259,7 +258,6 @@ export const useOutlineNavigation = ({
   return {
     snapshot,
     symbols,
-    onEditorReady,
     onEditorSelectionChange,
     onSelectOutlineNode,
     onCollapseOutlineNode,

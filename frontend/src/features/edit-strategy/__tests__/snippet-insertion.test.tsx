@@ -12,8 +12,8 @@ import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
 import { initialDocumentState } from "../model/document-state";
 import type { JsonSchema } from "../model/schema-navigator";
-import { useSourceTransactions } from "../model/use-source-transactions";
-import { useSnippetInsertion } from "../model/use-snippet-insertion";
+import { useSourceTransactions } from "./editor-harness";
+import { useSnippetInsertion } from "./editor-harness";
 import { SnippetCatalog } from "../ui/snippet-catalog";
 
 afterEach(cleanup);
@@ -51,6 +51,7 @@ const editorHandle: CodeEditorHandle = {
   loadText: vi.fn(),
   undo: vi.fn(() => false),
   redo: vi.fn(() => false),
+  subscribeHistory: () => () => {},
   historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
   getHistoryState: vi.fn(() => null),
   restoreHistoryState: vi.fn(),

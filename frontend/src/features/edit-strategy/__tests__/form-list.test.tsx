@@ -104,7 +104,7 @@ const stub = (): SourceTransactions => ({
   run: vi.fn(),
   feedback: { status: "idle" },
   feedbackFor: () => ({ status: "idle" }),
-  onEditorReady: vi.fn(),
+
   enabled: true,
   disabled: null,
   settling: false,

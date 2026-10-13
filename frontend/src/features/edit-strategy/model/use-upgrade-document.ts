@@ -1,6 +1,7 @@
+import type { EditorHandleOwner } from "./use-editor-handle";
 import { replaceWholeDocument } from "./replace-whole-document";
 import { useMutation } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   ApiRequestError,
@@ -8,7 +9,6 @@ import {
   strategyWorkbenchApi,
   type UpgradedDocument,
 } from "../../../shared/api";
-import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import {
   decideDocumentUpgrade,
@@ -46,7 +46,6 @@ export type DocumentUpgrade = {
   availability: UpgradeAvailability;
   status: UpgradeStatus;
   canUpgrade: boolean;
-  onEditorReady: (editor: CodeEditorHandle | null) => void;
   upgrade: () => void;
   /** 적용 결과의 옛 실행 설정을 실행 설정 패널에 채웠다고 적는다(배너의 "실행 설정에 채우기"). */
   markEnvironmentFilled: () => void;
@@ -80,19 +79,17 @@ const owns = (owner: StatusOwner, state: StatusOwner): boolean =>
  * 대기·실패는 요청을 보낸 글에, 적용 결과는 바꾼 뒤의 글에 묶인다(`StatusOwner`).
  */
 export const useUpgradeDocument = (
+  owner: EditorHandleOwner,
   state: DocumentState,
   stored: StoredRevisionMeta | null,
 ): DocumentUpgrade => {
-  const editor = useRef<CodeEditorHandle | null>(null);
+  const readEditor = owner.read;
   const [owned, setOwned] = useState<OwnedStatus | null>(null);
   const { composing, documentEpoch, format, savedVersion, source } = state;
   const availability = useMemo(
     () => decideDocumentUpgrade(state, stored),
     [state, stored],
   );
-  const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
-    editor.current = next;
-  }, []);
   const mutation = useMutation({
     mutationFn: (request: {
       source: string;
@@ -109,7 +106,7 @@ export const useUpgradeDocument = (
       setOwned({ owner, value: { kind: "failed", reason: "composing" } });
       return;
     }
-    const current = editor.current;
+    const current = readEditor();
     if (current === null) {
       setOwned({
         owner,
@@ -123,7 +120,7 @@ export const useUpgradeDocument = (
         // 응답이 도착하기 전에 편집됐으면 그 텍스트를 덮어쓰지 않고 대기 상태도 지운다. 대기는 요청한 글에
         // 묶여 있어, 남겨 두면 실행 취소로 그 글에 돌아왔을 때 "업그레이드 중…"이 되살아나 버튼이 멈춘다
         // (#297 리뷰 P2-1). 대기 중에는 `isPending` 이 다른 요청을 막으므로 지우는 것은 이 요청의 대기뿐이다.
-        if (editor.current !== current || current.getText() !== source) {
+        if (readEditor() !== current || current.getText() !== source) {
           setOwned(null);
           return;
         }
@@ -156,16 +153,7 @@ export const useUpgradeDocument = (
         });
       },
     );
-  }, [
-    availability.kind,
-    composing,
-    documentEpoch,
-    format,
-    isPending,
-    mutateAsync,
-    savedVersion,
-    source,
-  ]);
+  }, [availability.kind, composing, documentEpoch, readEditor, format, isPending, mutateAsync, savedVersion, source]);
 
   const markEnvironmentFilled = useCallback((): void => {
     setOwned((current) =>
@@ -186,7 +174,6 @@ export const useUpgradeDocument = (
       !isPending &&
       status.kind !== "pending" &&
       !composing,
-    onEditorReady,
     upgrade,
     markEnvironmentFilled,
   };

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it } from "vitest";
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import { documentReducer, initialDocumentState } from "../model/document-state";
-import { useWholeDocumentReplacement } from "../model/replace-whole-document";
+import { useWholeDocumentReplacement } from "./editor-harness";
 import { SourceEditor } from "../ui/source-editor";
 afterEach(cleanup);
 const Harness = () => {

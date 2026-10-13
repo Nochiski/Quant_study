@@ -30,10 +30,12 @@ from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 # 고쳤다(리드 결정). 지문은 결과 공유 캐시 키가 아니라 옛 결과가 새 기록 없이 재사용되지 않는다.
 # #341 결합 비용·바스켓 충격 시나리오 두 개를 추가해 검사 입력 집합만 확장했다.
 # 새 두 이름을 제외한 digest는 위 변경 전 값 0abfca4d…ac0f와 bit 동일함을 확인했다.
-# 기존 시나리오와 domain 비용 입력 결과가 불변이므로 엔진 판본은 유지한다.
+# basket_sqrt의 거래량을 원본 bar에 맞춰 실제 10→6주 비례 축소를 검증한다.
+# 해당 입력 하나를 제외한 digest는 변경 전후 2175681a…84c로 같다.
+# 나머지 시나리오와 domain 비용 입력 결과가 불변이므로 엔진 판본은 유지한다.
 _PINNED = (
     "backtest-engine-v4",
-    "09450fb7fa07766a95dab5df0cba351d936f079cbcbfea4b2ceea44b657d9c97",
+    "17677bf3b66db4517a2b6d9cb17addd1bfd8525cbd78a07a122a402faaa5aa71",
 )
 
 

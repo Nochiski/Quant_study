@@ -543,7 +543,8 @@ ENGINE_SCENARIOS = {
         ),
         DataFeed(
             tuple(
-                replace(bar, impact_scale=0.002, liquidity_volume=100) for bar in test_basket.BARS
+                replace(bar, impact_scale=0.002, liquidity_volume=bar.volume)
+                for bar in test_basket.BARS
             )
         ),
         max_participation=0.1,
@@ -2019,7 +2020,23 @@ def test_combined_cost_scenarios_exercise_tax_impact_and_explicit_volume(
     engine, result = ENGINE_SCENARIOS[scenario](core)
     assert any(fill.slippage_per_share != 0 for fill in result.fills)
     assert any(fill.side is Side.SELL for fill in result.fills)
-    assert all(fill.cap_volume in (100, 3_000) for fill in result.fills)
+    assert all(fill.cap_volume in (60, 1000, 3_000) for fill in result.fills)
     assert any(
         row[1] == "sell_tax" and row[3] > 0 for row in engine.event_store.result_tables().costs
     )
+
+
+@pytest.mark.parametrize("core", [pytest.param("python", id="python"), *RUST_ENGINE_CORES])
+def test_basket_rescaling_preserves_the_quoted_impact_quantity(core: str) -> None:
+    """B의 캡6주가 A도6주로 줄이지만 A충격의 Q는 캡후견적10주다(#341)."""
+    import math
+
+    _engine, result = ENGINE_SCENARIOS["basket_sqrt"](core)
+    fills = [fill for fill in result.fills if fill.ts == day(3)]
+    assert [(fill.instrument.symbol, fill.quantity) for fill in fills] == [
+        ("000660", Decimal(6)),
+        ("005930", Decimal(6)),
+    ]
+    assert fills[0].slippage_per_share == pytest.approx(60 * 0.002 * math.sqrt(6))
+    assert fills[1].slippage_per_share == pytest.approx(100 * 0.002 * math.sqrt(10))
+    assert fills[1].slippage_per_share != pytest.approx(100 * 0.002 * math.sqrt(6))

@@ -1,5 +1,5 @@
-use crate::buying_power::project_valuation;
-use crate::power_projection::{project_execution, ExecutionState};
+use crate::capacity::Capacity;
+use crate::power_projection::ExecutionState;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -134,41 +134,19 @@ pub(crate) fn quote_numbers(
     if quantity > closing || execution_state.is_some() {
         let (equity, gross) = valuation.unwrap_or((buying_power / leverage, 0.0));
         let mark = held_mark.unwrap_or(price);
-        let (mut low, mut high) = (
-            if execution_state.is_some() {
-                0
-            } else {
-                closing
-            },
-            quantity,
-        );
-        while low < high {
-            let candidate = low + (high - low) / 2 + (high - low) % 2;
-            let notional = candidate as f64 * price;
-            let fee = notional * fee_rate;
-            let tax = if buy { 0.0 } else { notional * sell_tax_rate };
-            let new = if buy {
-                held + candidate
-            } else {
-                held - candidate
-            };
-            let feasible = if let Some(state) = &execution_state {
-                let (cash, after_equity, after_gross) =
-                    project_execution(state, buy, candidate, price, fee, tax, new, price);
-                (state.3 || cash >= 0.0)
-                    && (candidate <= closing || leverage * after_equity - after_gross >= 0.0)
-            } else {
-                let (after_equity, after_gross) =
-                    project_valuation(equity, gross, held, new, mark, price, fee + tax);
-                leverage * after_equity - after_gross >= 0.0
-            };
-            if feasible {
-                low = candidate;
-            } else {
-                high = candidate - 1;
-            }
+        let affordable = Capacity {
+            buy,
+            price,
+            held,
+            fee_rate,
+            sell_tax_rate,
+            leverage,
+            equity,
+            gross,
+            mark,
+            state: execution_state.as_ref(),
         }
-        let affordable = low;
+        .maximum(quantity);
         if affordable <= 0 {
             return Ok((price, 0, applied, "rejected_no_cash".to_string()));
         }
@@ -193,6 +171,80 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nonmonotone_cash_uses_the_largest_actual_feasible_quantity() {
+        let tax = f64::from_bits(0.9_f64.to_bits() + 1);
+        let result = quote_numbers(
+            "sell",
+            1.0,
+            20,
+            100,
+            None,
+            0.0,
+            None,
+            -1.0,
+            30,
+            0.1,
+            false,
+            tax,
+            1.0,
+            Some(1.0),
+            Some((29.0, 31.0)),
+            Some((-1e-18, vec![30.0, -1.0], 0, false)),
+        )
+        .unwrap();
+        assert_eq!(result.1, 19);
+    }
+
+    #[test]
+    fn cash_recovery_lower_bound_does_not_cut_off_feasible_sales() {
+        // 비용으로 현금 -4, A10/B-1 보유: 자본5. 매도4주부터 현금이 회복되고,
+        // 청산을 넘는 반전은 총노출5 이하인 14주까지 가능하다.
+        for (remaining, expected) in [(3, 0), (4, 4), (5, 5), (10, 10), (15, 14)] {
+            let result = quote_numbers(
+                "sell",
+                1.0,
+                remaining,
+                100,
+                None,
+                0.0,
+                None,
+                -6.0,
+                10,
+                0.0,
+                false,
+                0.0,
+                1.0,
+                Some(1.0),
+                Some((5.0, 11.0)),
+                Some((-4.0, vec![10.0, -1.0], 0, false)),
+            )
+            .unwrap();
+            assert_eq!(result.1, expected);
+        }
+        // 매도 비용이 대금보다 크면 현금 상한을 따로 탐색한다.
+        let result = quote_numbers(
+            "sell",
+            1.0,
+            5,
+            100,
+            None,
+            0.0,
+            None,
+            1.0,
+            10,
+            2.0,
+            false,
+            0.0,
+            1.0,
+            Some(1.0),
+            Some((11.0, 10.0)),
+            Some((1.0, vec![10.0], 0, false)),
+        )
+        .unwrap();
+        assert_eq!(result.1, 1);
+    }
 
     #[test]
     fn execution_cash_boundary_matches_ledger_without_tolerance() {

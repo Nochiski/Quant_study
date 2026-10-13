@@ -200,3 +200,5 @@ support 노드는 backend 출처 표식에 따라 숨긴다. 원문 없는 조�
 0주 유동성 한도 진단(`#411`)은 엔진 quote의 기존 수치 판정이 `reason_code=liquidity_cap_zero`와 그 견적의 `cap_volume`을 소유한다. 주문 상태 이벤트에 자유 문구와 별개 필드로 싣고 Python/Rust single·basket 경로가 해당 leg의 판정만 전달한다. 가격 조건 미충족·다른 leg의 사유를 추론하지 않는다. 실행 adapter는 `EventStore.order_updates()`를 `RawOrderUpdate`로 그대로 옮기며 화면은 원본 상태·사유를 표시한다. `RawArtifactBundle.order_updates=None`은 구판에 기록이 없었다는 뜻이고 새 결과의 `()`는 기록이 0건이라는 뜻이다. detail 문자열 파싱으로 사유를 재판정하지 않는다.
 
 BEST_EFFORT의 0주 leg는 기존 주문 상태 이벤트가 없으므로 진단을 위해 OPEN을 합성하지 않는다. ORDER_UPDATE 구독 전략의 callback·결정 횟수 보존이 우선이다. 이 경로는 원본에 없던 사유를 결과에서도 만들지 않는다.
+
+최대 체결 수량 탐색은 현금·위험 잔여값의 float 단조성을 가정하지 않는다. 비용으로 음수 현금이 된 뒤 매도로 회복되는 구간, 대금·비용 상쇄 및 다종목 평가 합산의 반올림으로 허용 구간이 끊길 수 있다. Python capacity 및 Rust 대응 owner는 높은 후보를 실제 원장식으로 먼저 판정하고, 각 연산의 구간 상한이 음수임이 증명될 때만 구간을 제외한다. 허용 오차·비용 상한으로 조건을 완화하지 않는다. 일반적인 큰 수량은 구간 제외로 줄지만 100% 근처 비용 상쇄 등 증명이 느슨한 극단 입력에서는 최악 전수 탐색이 가능하다.

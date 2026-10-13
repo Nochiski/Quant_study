@@ -5848,6 +5848,20 @@
             "title": "Fills",
             "type": "array"
           },
+          "order_updates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RawOrderUpdate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Updates"
+          },
           "orders": {
             "items": {
               "$ref": "#/components/schemas/RawOrder"
@@ -5974,6 +5988,17 @@
             "title": "Security Id",
             "type": "string"
           },
+          "sell_tax": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Tax"
+          },
           "session": {
             "format": "date",
             "title": "Session",
@@ -6049,6 +6074,64 @@
           "time_in_force"
         ],
         "title": "RawOrder",
+        "type": "object"
+      },
+      "RawOrderUpdate": {
+        "description": "엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다.",
+        "properties": {
+          "cap_volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Volume"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "order_id",
+          "status"
+        ],
+        "title": "RawOrderUpdate",
         "type": "object"
       },
       "RawPosition": {

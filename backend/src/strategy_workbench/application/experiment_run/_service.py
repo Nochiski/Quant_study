@@ -85,7 +85,6 @@ logger = logging.getLogger(__name__)
 # 제출 스레드가 워크포워드를 밀어 주는 간격(초). 창의 학습이 끝나면 늦어도 이만큼 뒤 검증 실행이
 # 뜬다.
 _POLL_SECONDS = 2.0
-_SETTLED_RUNS = (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
 
 
 @dataclass(frozen=True)
@@ -365,7 +364,7 @@ class ExperimentRunService:
         states = self._runs.states(run_ids) if run_ids else {}
         for run_id in run_ids:
             state = states.get(run_id)
-            if state is not None and state.status not in _SETTLED_RUNS:
+            if state is not None and not state.status.is_terminal:
                 self._runs.cancel(run_id, owner=experiment_id)
         return self.get(experiment_id)
 
@@ -694,7 +693,7 @@ class ExperimentRunService:
             run = runs.get(pick.run_id) if pick is not None and pick.run_id else None
             if pick is None or awaiting_recovery(run):
                 open_windows.append((index, window_states, pick))
-            elif run is not None and run.status not in _SETTLED_RUNS:
+            elif run is not None and not run.status.is_terminal:
                 waiting = True
         return open_windows, waiting
 

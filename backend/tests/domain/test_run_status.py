@@ -4,7 +4,6 @@ import pytest
 
 from strategy_workbench.domain.backtest.facade.runs import RunStatus
 
-
 _TERMINAL_CASES = {
     RunStatus.QUEUED: False,
     RunStatus.RUNNING: False,

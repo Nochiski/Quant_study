@@ -179,7 +179,7 @@ backend/
    ├─ domain/analytics/                    # 21개 versioned metric 정의·공식
    ├─ domain/backtest/                     # RunEnvironment, run/manifest/raw artifact 계약
    ├─ domain/assistant/                    # 어시스턴트 순수 값 타입(메시지·이벤트·도구·제안 검증 결과)
-   ├─ domain/experiment/                   # 탐색 그리드·워크포워드 창·trial 상태 전이(검증 랩)
+   ├─ domain/experiment/                   # 탐색 그리드·워크포워드 창·trial 상태 파생·검증 통계(검증 랩)
    ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py
@@ -189,6 +189,7 @@ backend/
    ├─ application/factor_research/         # 팩터 catalog·validate·explain·preview
    ├─ application/portfolio_design/        # portfolio preview·trace use case와 outgoing ports
    ├─ application/backtest_run/            # compile/run/status/result/cancel orchestration
+   ├─ application/experiment_run/          # 실험 설계·제출·취소·워크포워드·검증 통계 orchestration
    ├─ application/assistant_chat/          # 공급자 프로파일·세션·턴·결과 설명
    ├─ adapters/inbound/http_api/           # FastAPI/OpenAPI wire adapter
    ├─ adapters/outbound/equity_mock/       # 결정적 in-memory Equity v0.2 mock
@@ -197,6 +198,8 @@ backend/
    ├─ adapters/outbound/document_codec/    # YAML/JSON 원문 파싱과 업그레이드 원문 재작성
    ├─ adapters/outbound/strategy_memory/   # contract reference/test adapter
    ├─ adapters/outbound/strategy_sqlite/   # durable immutable strategy revisions
+   ├─ adapters/outbound/research_sqlite/    # 실행·시도 원장·실험 기록(전략 문서 DB와 분리)
+   ├─ adapters/outbound/sqlite_store/       # SQLite 연결·트랜잭션·시각 직렬화 기반
    ├─ adapters/outbound/engine_portfolio/  # capability 협상과 target action 변환
    ├─ adapters/outbound/backtest_engine/   # TargetTape → Rust/Python engine
    ├─ adapters/outbound/artifact_local/    # atomic local result commit
@@ -242,7 +245,8 @@ extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따�
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
 | `STRATEGY_WORKBENCH_DB_PATH` | `.local/strategy-revisions.sqlite3` | 전략 revision·초안 저장소 |
-| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청). 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
+| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청), 시도 원장·계열 합치기·봉인 차단 기록. 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
+| `STRATEGY_WORKBENCH_ARTIFACT_ROOT` | `.local/backtest-runs` | 연구 DB와 짝을 이루는 실행 결과 루트. 프로세스마다 분리하며 E2E는 격리 런타임 아래 경로를 주입한다 |
 | `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `http://localhost:5173` | CORS 허용 origin(쉼표로 구분) |
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |

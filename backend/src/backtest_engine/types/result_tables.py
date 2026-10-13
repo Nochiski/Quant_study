@@ -54,9 +54,10 @@ time_in_force)`.
 쓴다.
 """
 
-FillRow: TypeAlias = tuple[str, str, int, int, str, int, float, float, float, int]
+FillRow: TypeAlias = tuple[str, str, int, int, str, int, float, float, float, int, float]
 """`(fill_id, order_id, session_index, instrument_index, side, quantity, price, fee,
-slippage_per_share, cap_volume)`. `cap_volume` 은 체결 세션 bar 의 유동성 캡 기준 거래량이다."""
+slippage_per_share, cap_volume, sell_tax)`.
+`cap_volume` 은 체결 세션 bar 의 유동성 캡 기준 거래량이다."""
 
 RoundingRow: TypeAlias = tuple[int, int, float, float]
 """`(session_index, instrument_index, target_notional, rounded_notional)`. 라우터가 목표 금액 Δ

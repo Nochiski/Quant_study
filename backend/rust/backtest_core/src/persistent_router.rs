@@ -1,3 +1,4 @@
+use crate::execution::floor_delta_shares;
 use crate::persistent::StoredOrder;
 use crate::portfolio::{Portfolio, PositionRefRow};
 use crate::quote::parse_decimal_ratio;
@@ -259,7 +260,8 @@ impl RouteContext<'_> {
         delta_notional: f64,
     ) -> Result<i64, RouteError> {
         let close = self.close(target)?;
-        let shares = (delta_notional.abs() / close).floor() as i64;
+        let shares = floor_delta_shares(delta_notional, close)
+            .map_err(|error| self.error("value_error", error.to_string()))?;
         let delta = if delta_notional >= 0.0 {
             shares
         } else {
@@ -379,7 +381,8 @@ impl RouteContext<'_> {
                         ),
                     )
                 })?;
-                let shares = (notional.abs() / self.close(target)?).floor() as i64;
+                let shares = floor_delta_shares(notional, self.close(target)?)
+                    .map_err(|error| self.error("value_error", error.to_string()))?;
                 Ok(if notional >= 0.0 { shares } else { -shares })
             }
             other => Err(self.error(

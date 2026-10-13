@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from strategy_workbench.domain.factor.facade.analysis import analyze_factor_values
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
@@ -33,7 +32,6 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 from strategy_workbench.domain.factor.facade.planning import (
     ResolvedFactorParameter,
-    build_factor_matrix_cache_key,
     compile_factor_plan,
 )
 from strategy_workbench.domain.factor.facade.registry import (
@@ -178,7 +176,6 @@ def test_all_quick_transforms_evaluate_deterministically() -> None:
                 FactorFieldValue("value", float(day * security)),
                 FactorFieldValue("sector", "A" if security < 3 else "B"),
             ),
-            forward_return=security * 0.01,
         )
         for day in (2, 3, 4)
         for security in (1, 2, 3)
@@ -227,7 +224,7 @@ def test_saved_reference_nodes_are_not_part_of_the_graph_language() -> None:
     )
 
 
-def test_plan_and_cache_fingerprints_cover_all_reproducibility_inputs() -> None:
+def test_plan_orders_steps_reproducibly() -> None:
     graph = FactorGraph(
         nodes=(
             FieldNode("source", "price.close", "field"),
@@ -239,63 +236,8 @@ def test_plan_and_cache_fingerprints_cover_all_reproducibility_inputs() -> None:
     repeated = compile_factor_plan(
         graph, registry_version="registry-v1", missing=MissingPolicy.DROP
     )
-    key = build_factor_matrix_cache_key(
-        data_snapshot_id="snapshot-a",
-        plan_hash=plan.plan_hash,
-        registry_version="registry-v1",
-        parameters=(ResolvedFactorParameter("window", 5),),
-        as_of_start=date(2024, 1, 1),
-        as_of_end=date(2024, 12, 31),
-    )
-    changed = build_factor_matrix_cache_key(
-        data_snapshot_id="snapshot-b",
-        plan_hash=plan.plan_hash,
-        registry_version="registry-v1",
-        parameters=(ResolvedFactorParameter("window", 5),),
-        as_of_start=date(2024, 1, 1),
-        as_of_end=date(2024, 12, 31),
-    )
-
     assert plan == repeated
     assert tuple(step.node_id for step in plan.steps) == ("source", "mean")
-    assert key.fingerprint != changed.fingerprint
-    # 해소된 파라미터 값도 키에 든다 — 값만 다른 두 평가가 캐시를 나누지 않는다(검증 랩 spec D4).
-    other_value = build_factor_matrix_cache_key(
-        data_snapshot_id="snapshot-a",
-        plan_hash=plan.plan_hash,
-        registry_version="registry-v1",
-        parameters=(ResolvedFactorParameter("window", 6),),
-        as_of_start=date(2024, 1, 1),
-        as_of_end=date(2024, 12, 31),
-    )
-    assert key.fingerprint != other_value.fingerprint
-
-
-def test_factor_analytics_exposes_professional_diagnostics_explicitly() -> None:
-    graph = FactorGraph(
-        nodes=(FieldNode("source", "value", "field"),),
-        output_node_id="source",
-    )
-    observations = tuple(
-        FactorObservation(
-            date(2024, 1, day),
-            f"s{security}",
-            (FactorFieldValue("value", float(security)),),
-            forward_return=security * 0.01,
-        )
-        for day in (2, 3)
-        for security in (1, 2, 3)
-    )
-    evaluation = evaluate_factor_graph(graph, observations=observations, missing=MissingPolicy.DROP)
-
-    analytics = analyze_factor_values(evaluation.values, observations)
-
-    assert analytics.information_coefficient == pytest.approx(1.0)
-    assert analytics.rank_information_coefficient == pytest.approx(1.0)
-    assert analytics.quantile_spread == pytest.approx(0.02)
-    assert analytics.coverage == 1.0
-    assert analytics.turnover == 0.0
-    assert analytics.decay == pytest.approx(1.0)
 
 
 def _member_row(day: int, security: str, value: float, *, member: bool) -> FactorObservation:
@@ -471,7 +413,6 @@ def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
             as_of=date(2024, 1, day),
             security_id=f"s{security}",
             fields=(FactorFieldValue("price.close", float(day + security)),),
-            forward_return=None,
         )
         for day in (2, 3, 4)
         for security in (1, 2, 3, 4)
@@ -496,29 +437,3 @@ def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
         [0.96 * share for share in (1 / 21, 6 / 21, 11 / 21, 16 / 21, 1.0)]
     )
     assert reported[-1] == 1.0
-
-
-def test_factor_cache_key_preserves_existing_unicode_fingerprint() -> None:
-    key = build_factor_matrix_cache_key(
-        data_snapshot_id="스냅샷",
-        plan_hash="계획",
-        registry_version="판",
-        parameters=(ResolvedFactorParameter("값", 3.5),),
-        as_of_start=date(2024, 1, 1),
-        as_of_end=date(2024, 1, 2),
-    )
-    # main 5d655219에서 계산한 기존 ASCII escape 바이트의 지문을 보존한다.
-    assert key.fingerprint == "c20efaa99862242e69a38d1803a10245f4134b64c1957c4dd1a5094f79a71758"
-
-
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_factor_cache_key_rejects_nonfinite_parameters(value: float) -> None:
-    with pytest.raises(ValueError, match="Out of range float"):
-        build_factor_matrix_cache_key(
-            data_snapshot_id="s",
-            plan_hash="p",
-            registry_version="r",
-            parameters=(ResolvedFactorParameter("value", value),),
-            as_of_start=date(2024, 1, 1),
-            as_of_end=date(2024, 1, 2),
-        )

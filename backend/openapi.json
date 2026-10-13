@@ -824,7 +824,7 @@
         "type": "object"
       },
       "BacktestRunSpec": {
-        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
+        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for existing HTTP and CLI callers; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
         "properties": {
           "annualization_days": {
             "default": 252,
@@ -3670,6 +3670,10 @@
             "title": "As Of Policy",
             "type": "string"
           },
+          "evaluation_version": {
+            "title": "Evaluation Version",
+            "type": "string"
+          },
           "graph_hash": {
             "title": "Graph Hash",
             "type": "string"
@@ -3717,7 +3721,8 @@
           "steps",
           "required_field_ids",
           "minimum_history_sessions",
-          "missing_policy"
+          "missing_policy",
+          "evaluation_version"
         ],
         "title": "FactorExecutionPlan",
         "type": "object"
@@ -5912,6 +5917,20 @@
             "title": "Fills",
             "type": "array"
           },
+          "order_updates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RawOrderUpdate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Updates"
+          },
           "orders": {
             "items": {
               "$ref": "#/components/schemas/RawOrder"
@@ -6038,6 +6057,17 @@
             "title": "Security Id",
             "type": "string"
           },
+          "sell_tax": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Tax"
+          },
           "session": {
             "format": "date",
             "title": "Session",
@@ -6113,6 +6143,64 @@
           "time_in_force"
         ],
         "title": "RawOrder",
+        "type": "object"
+      },
+      "RawOrderUpdate": {
+        "description": "엔진 주문 상태 기록을 그대로 투영한다. 사유 코드는 견적 owner만 판정한다.",
+        "properties": {
+          "cap_volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Volume"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "order_id",
+          "status"
+        ],
+        "title": "RawOrderUpdate",
         "type": "object"
       },
       "RawPosition": {
@@ -7110,6 +7198,17 @@
           "environment_hash": {
             "title": "Environment Hash",
             "type": "string"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
           },
           "metric_registry_version": {
             "title": "Metric Registry Version",
@@ -9005,6 +9104,17 @@
             "title": "As Of",
             "type": "string"
           },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
           "factor_id": {
             "title": "Factor Id",
             "type": "string"
@@ -9336,6 +9446,17 @@
             "default": "next_open",
             "title": "Execution Timing",
             "type": "string"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
           },
           "frames": {
             "items": {
@@ -10165,7 +10286,7 @@
         "type": "object"
       },
       "TurnContextPayload": {
-        "description": "한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7).",
+        "description": "한 턴이 보는 편집기 상태. 저장 문서와 별개로 아직 저장하지 않은 원문·진단을 요청에 싣는다.",
         "properties": {
           "diagnostics": {
             "default": [],

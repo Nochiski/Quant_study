@@ -12,6 +12,7 @@ import {
   getStrategyDocumentContract,
 } from "../../src/shared/api/generated";
 import { createClient } from "../../src/shared/api/generated/client";
+import { createCompileObserver } from "../compile-observer";
 import { waitForSettledDocument } from "../editor-helpers";
 import { IDEAS_API_PREFIX } from "../runtime";
 import {
@@ -63,17 +64,13 @@ const commit = async (page: Page, field: Locator, value: string) => {
 
 const start = async (page: Page, title: string) => {
   // 원문을 넣거나 YAML 탭을 열지 않는다. fixture는 마지막 기대 hash 조회에만 사용한다.
-  let latestHash: string | null = null;
-  let latestRequest: Request | null = null;
+  const observer = createCompileObserver<Request>();
   page.on("request", (request) => {
-    if (!isCompile(request.url())) return;
-    latestRequest = request;
-    latestHash = null;
+    if (isCompile(request.url())) observer.requested(request);
   });
-  page.on("response", async (response) => {
+  page.on("response", (response) => {
     if (!isCompile(response.url()) || !response.ok()) return;
-    const result = (await response.json()) as { spec_hash: string | null };
-    if (response.request() === latestRequest) latestHash = result.spec_hash;
+    void observer.received(response.request(), () => response.json());
   });
   await page.goto("/research/strategies/new");
   await expect(
@@ -92,7 +89,7 @@ const start = async (page: Page, title: string) => {
     }),
     "0.05",
   );
-  return () => latestHash;
+  return observer.specHash;
 };
 
 const factor = async (
@@ -300,7 +297,9 @@ const finish = async (
   expect(result.manifest.strategy_provenance.spec_hash).toBe(
     expected.spec_hash,
   );
-  expect(result.manifest.data_snapshot_id).toBe(contract.contract.dataset_snapshot_id);
+  expect(result.manifest.data_snapshot_id).toBe(
+    contract.contract.dataset_snapshot_id,
+  );
   expect(result.manifest.environment).toMatchObject(ideaEnvironment);
   expect(result.artifacts.trades.length).toBeGreaterThan(0);
 };

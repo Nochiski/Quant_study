@@ -229,6 +229,7 @@ const RUN_ENVIRONMENT = {
   sell_tax: "krx_statutory",
   missing: "drop",
 } as const;
+const RUN_OPTIONS_SCHEMA = JSON.parse(readBackendFixture("strategy_documents/run-options-schema.json")) as Record<string, unknown>;
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
@@ -242,7 +243,7 @@ const server = setupServer(
   http.get(`${API}/api/v1/experiments`, () => HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })),
   http.get(`${API}/api/v1/strategy-documents/operators`, () => HttpResponse.json(JSON.parse(readBackendFixture("strategy_documents/operator-catalog.json")))),
   http.get(`${API}/api/v1/run-environments/schema`, () =>
-    HttpResponse.json({ schema_hash: "run-env", schema: RUN_ENVIRONMENT_SCHEMA }),
+    HttpResponse.json({ schema_hash: "run-env", options_schema: RUN_OPTIONS_SCHEMA, schema: RUN_ENVIRONMENT_SCHEMA }),
   ),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json(
@@ -4376,7 +4377,7 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
         await gate;
         return HttpResponse.json({
           schema_hash: "run-env",
-          schema: RUN_ENVIRONMENT_SCHEMA,
+          options_schema: RUN_OPTIONS_SCHEMA, schema: RUN_ENVIRONMENT_SCHEMA,
         });
       }),
     );

@@ -1,4 +1,4 @@
-import { RUN_STATUS } from "../../../entities/backtest";
+import { RUN_STATUS, runStageLabel, runStatusLabel } from "../../../entities/backtest";
 
 import { useId, useMemo, useRef, useState } from "react";
 
@@ -82,9 +82,7 @@ export const BacktestRunPage = () => {
   if (status.isError || !status.data) {
     return (
       <div className="page">
-        <p className="page-state page-state--error" role="alert">
-          {t("page.backtest.loadError")}
-        </p>
+        <BacktestResultFailure error={status.error} className="page-state page-state--error" />
       </div>
     );
   }
@@ -105,7 +103,7 @@ export const BacktestRunPage = () => {
           <h1>{t("page.backtest.title")}</h1>
           <code>{state.run_id}</code>
           <span role="status" aria-label={t("page.backtest.status")}>
-            <Badge tone={RUN_STATUS[state.status].tone}>{state.status}</Badge>
+            <Badge tone={RUN_STATUS[state.status].tone}>{runStatusLabel(state.status)}</Badge>
           </span>
           <BacktestRunActions
             runId={runId}
@@ -148,8 +146,9 @@ export const BacktestRunPage = () => {
           role="status"
           aria-label={t("page.backtest.progress")}
         >
-          {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
+          {runStageLabel(state.stage)} · {Math.round(state.progress * 100)}%
         </p>
+        {state.message ? <details><summary>{t("ui.failure.serverReason")}</summary><p>{state.message}</p></details> : null}
         <BacktestRunFailure
           run={state}
           className="page-state page-state--error"

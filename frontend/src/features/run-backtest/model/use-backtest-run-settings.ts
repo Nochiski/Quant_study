@@ -23,7 +23,8 @@ import {
 } from "./run-settings-problems";
 import {
   buildBacktestRunOptions,
-  DEFAULT_BACKTEST_RUN_SETTINGS,
+  initialBacktestRunSettings,
+  isExecutionCore,
   OOS_START_FIELD,
   type BacktestRunSettingsFields,
 } from "./run-settings";
@@ -164,18 +165,20 @@ export const useBacktestRunSettings = (storageKey: string) => {
   const schema = useRunEnvironmentSchema();
   const [options, setOptions] = useState({
     key: storageKey,
-    fields: DEFAULT_BACKTEST_RUN_SETTINGS,
+    fields: {} as Partial<BacktestRunSettingsFields>,
     panel: { open: false, focus: null } as RunSettingsPanelState,
   });
   // 화면 전환 시 commit 전에 owner 상태를 초기화한다. 실행 요청과 패널이 다른 전략의 옵션을 읽지 않는다.
   if (options.key !== storageKey) {
     setOptions({
       key: storageKey,
-      fields: DEFAULT_BACKTEST_RUN_SETTINGS,
+      fields: {} as Partial<BacktestRunSettingsFields>,
       panel: { open: false, focus: null },
     });
   }
-  const { fields, panel } = options;
+  const { panel } = options;
+  const fields = useMemo(() => ({ ...initialBacktestRunSettings(schema.data?.options_schema ?? null), ...options.fields }), [options.fields, schema.data]);
+  const coreOptions = useMemo(() => schema.data === undefined ? [] : (runEnvironmentFields(schema.data.options_schema).find((field) => field.name === "core")?.options ?? []).filter(isExecutionCore), [schema.data]);
   const [edited, setEdited] = useState<ScopedValues | null>(null);
   // 덜 친 날짜 칸(브라우저 `validity.badInput`). 값은 빈 문자열이라 값 state 로는 표현할 수 없다. 칸 값과
   // 같이 전략별로 묶는다 — 다른 전략으로 옮기면 비운다.
@@ -367,6 +370,7 @@ export const useBacktestRunSettings = (storageKey: string) => {
 
   return {
     fields,
+    coreOptions,
     setField,
     result,
     // 치는 중인 덜 친 날짜는 표시하지 않지만 실행은 막는다 — 칸을 떠나지 않고 누른 단축키가 덜 친 OOS 를

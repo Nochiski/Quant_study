@@ -88,7 +88,7 @@ test(
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     const runId = new URL(page.url()).pathname.split("/").at(-1)!;
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-      "completed",
+      "완료",
       { timeout: 120_000 },
     );
     const result = page.getByRole("article", { name: "백테스트 결과" });
@@ -106,7 +106,7 @@ test(
     }
 
     const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
-    // 지표마다 이름 바로 뒤에 서버가 계산한 값이 숫자로 붙는다. 값이 없으면 "N/A"라 여기서 걸린다.
+    // 지표마다 이름 바로 뒤에 서버가 계산한 값이 숫자로 붙는다. 값이 없으면 "계산 불가"라 여기서 걸린다.
     for (const label of HIGHLIGHT_LABELS)
       await expect(
         highlights.getByText(label, { exact: true }).locator("xpath=.."),
@@ -121,7 +121,7 @@ test(
         .filter({ hasText: `OOS ${SHORT_OOS_START}` })
         .filter({ has: page.getByText(metricId, { exact: true }) });
     for (const metricId of ["cagr", "calmar"]) {
-      await expect(oosRow(metricId)).toContainText("N/A");
+      await expect(oosRow(metricId)).toContainText("계산 불가");
       await expect(oosRow(metricId)).toContainText(
         "기간이 1년보다 짧아 연율로 바꾸지 않습니다",
       );
@@ -135,6 +135,6 @@ test(
     ).toBeVisible();
     await expect(
       page.getByRole("row").filter({ hasText: runId }),
-    ).toContainText("completed");
+    ).toContainText("완료");
   },
 );

@@ -116,7 +116,7 @@ const formatMetric = (
   metric: MetricValue,
   definition: MetricDefinition,
 ): string => {
-  if (metric.value === null) return "N/A";
+  if (metric.value === null) return t("backtest.result.unavailable");
   const precision = definition.precision ?? 4;
   if (definition.unit === "percent") {
     return `${(metric.value * 100).toFixed(Math.min(precision, 2))}%`;
@@ -234,7 +234,7 @@ export const BacktestRunDetail = ({
           <span className="section-kicker">{t("backtest.result.kicker")}</span>
           <h3 id={titleId}>{t("backtest.result.title")}</h3>
           <p>
-            {result.manifest.engine_core.toUpperCase()} core · registry{" "}
+            {result.manifest.engine_core.toUpperCase()} · {t("backtest.result.registry")}{" "}
             <code>{result.manifest.metric_registry_version}</code>
           </p>
         </div>
@@ -385,12 +385,12 @@ export const BacktestRunDetail = ({
                 return (
                   <tr key={`${metric.scope}-${metric.metric_id}-${index}`}>
                     <td>
-                      {metric.scope_label ?? metric.scope.replaceAll("_", " ")}
+                      {metric.scope_label ?? t(`backtest.scope.${metric.scope}`)}
                     </td>
                     <td>
                       <code>{metric.metric_id}</code>
                     </td>
-                    <td>{definition.category.replaceAll("_", " ")}</td>
+                    <td>{t(`backtest.category.${definition.category}`)}</td>
                     <td>
                       <MetricCell
                         definition={definition}
@@ -439,7 +439,7 @@ export const BacktestRunDetail = ({
                     <td>
                       <code>{trade.security_id}</code>
                     </td>
-                    <td>{trade.side}</td>
+                    <td>{tOptional(`backtest.side.${trade.side}`) ?? trade.side}</td>
                     <td>{trade.opened_on}</td>
                     <td>{trade.closed_on}</td>
                     <td>{trade.quantity}</td>
@@ -500,7 +500,7 @@ export const BacktestRunDetail = ({
                     ? result.manifest.run_spec.metric_windows
                         .map(
                           (window) =>
-                            `${window.scope}: ${window.start} → ${window.end}`,
+                            `${t(`backtest.scope.${window.scope}`)}: ${window.start} → ${window.end}`,
                         )
                         .join(" · ")
                     : "—"}

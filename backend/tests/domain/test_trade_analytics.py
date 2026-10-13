@@ -80,3 +80,30 @@ def test_legacy_fill_without_tax_field_retains_fifo_cost_compatibility() -> None
     fills = (_fill("1", 1, "buy", "2", 100), _fill("2", 2, "sell", "2", 110))
     (trade,) = closed_trades(fills, (RawCost(date(2024, 1, 2), "sell_tax", "A", 2.0),))
     assert (trade.fees, trade.pnl) == (2.0, 18.0)
+
+
+@pytest.mark.parametrize("taxes", [(2.0, None), (None, 3.0), (2.0, 3.0)])
+def test_mixed_actual_and_legacy_tax_consumes_each_cost_row_once(
+    taxes: tuple[float | None, float | None],
+) -> None:
+    from dataclasses import replace
+
+    fills = (
+        replace(_fill("1", 1, "buy", "2", 100), sell_tax=0.0),
+        replace(_fill("2", 2, "sell", "1", 110), sell_tax=taxes[0]),
+        replace(_fill("3", 2, "sell", "1", 120), sell_tax=taxes[1]),
+    )
+    costs = tuple(RawCost(date(2024, 1, 2), "sell_tax", "A", tax) for tax in (2.0, 3.0))
+    assert [(t.fees, t.pnl) for t in closed_trades(fills, costs)] == [(2.0, 8.0), (3.0, 17.0)]
+
+
+def test_explicit_zero_tax_does_not_consume_the_next_legacy_sell_cost() -> None:
+    from dataclasses import replace
+
+    fills = (
+        _fill("1", 1, "buy", "2", 100),
+        replace(_fill("2", 2, "sell", "1", 110), sell_tax=0.0),
+        _fill("3", 2, "sell", "1", 120),
+    )
+    costs = (RawCost(date(2024, 1, 2), "sell_tax", "A", 3.0),)
+    assert [(t.fees, t.pnl) for t in closed_trades(fills, costs)] == [(0.0, 10.0), (3.0, 17.0)]

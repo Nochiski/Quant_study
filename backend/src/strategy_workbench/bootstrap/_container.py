@@ -326,8 +326,8 @@ class _RunServiceTrialRuns:
         return self._runs.states(run_ids)
 
     def slot_usage(self) -> RunSlotUsage:
-        total, running = self._runs.slot_usage()
-        return RunSlotUsage(total=total, running=running)
+        total, running, experiments = self._runs.slot_usage()
+        return RunSlotUsage(total=total, running=running, experiments=experiments)
 
     def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
         self._runs.schedule(owner, paused=paused, weight=priority)

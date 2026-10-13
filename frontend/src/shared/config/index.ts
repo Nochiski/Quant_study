@@ -3,6 +3,7 @@ export {
   t,
   tCode,
   tDescription,
+  tDuration,
   tFill,
   tName,
   tOptional,

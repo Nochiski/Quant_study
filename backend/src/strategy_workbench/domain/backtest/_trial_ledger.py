@@ -45,6 +45,8 @@ class TrialLedgerEntry:
     metric_registry_version: str | None = None
     # 실패한 실행의 분류. 파산이면 결과가 나온 실행으로 센다.
     error_code: RunFailureCode | None = None
+    # 처음 `running` 이 된 시각(`BacktestRunState.started_at`).
+    started_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,8 @@ class TrialRun:
     role: TrialRunRole
     # 완료된 실행의 전체 구간 세션 샤프(연율화 전). 워크포워드 창 고르기의 학습 점수다.
     session_sharpe: float | None = None
+    # 완료된 실행의 계산 시간(초) — 접수 대기를 뺀 시작~완료. 시작 시각이 없으면 없다.
+    seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -174,6 +178,13 @@ def bankrupt(status: RunStatus, error_code: str | None) -> bool:
     return status is RunStatus.FAILED and error_code == "backtest.run.equity_wiped_out"
 
 
+def _seconds(entry: TrialLedgerEntry) -> float | None:
+    """완료된 실행의 계산 시간. 완료 저장이 마지막 상태 전이라 `updated_at` 이 끝난 시각이다."""
+    if entry.status is not RunStatus.COMPLETED or entry.started_at is None:
+        return None
+    return (entry.updated_at - entry.started_at).total_seconds()
+
+
 def _has_result(entry: TrialLedgerEntry) -> bool:
     """완료됐거나 파산으로 끝난 실행 — 연구자가 결과를 본 실행이다."""
     return entry.status is RunStatus.COMPLETED or bankrupt(entry.status, entry.error_code)
@@ -201,6 +212,7 @@ def _group(trial_key: str, entries: list[TrialLedgerEntry]) -> TrialGroup:
                 entry.created_at,
                 _role(entry, first),
                 _score(entry),
+                _seconds(entry),
             )
             for entry in entries
         ),

@@ -695,6 +695,7 @@ export type {
   TestAssistantProviderResponses,
   TextDeltaView,
   ThinkingSummaryView,
+  TimeEstimate,
   TimeSeriesNode,
   TimeSeriesOperator,
   TokenTotalsView,

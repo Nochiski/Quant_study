@@ -44,6 +44,8 @@ class RunSlotUsage:
 
     total: int
     running: int
+    # 실험 run 이 동시에 쓸 수 있는 슬롯 수(슬롯이 2개 이상이면 1개는 단일 실행 몫이다).
+    experiments: int
 
 
 @dataclass(frozen=True)

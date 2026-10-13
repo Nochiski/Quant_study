@@ -539,6 +539,18 @@
             "title": "Stage",
             "type": "string"
           },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
           },
@@ -1037,6 +1049,18 @@
             ],
             "title": "Stage",
             "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -3089,6 +3113,16 @@
             "title": "Run Count",
             "type": "integer"
           },
+          "time_estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "trial_count": {
             "title": "Trial Count",
             "type": "integer"
@@ -3105,7 +3139,8 @@
           "lineage_id",
           "trial_count",
           "new_trial_count",
-          "trial_count_after"
+          "trial_count_after",
+          "time_estimate"
         ],
         "title": "ExperimentPreview",
         "type": "object"
@@ -7377,6 +7412,10 @@
       "RunSlotUsage": {
         "description": "동시 실행 슬롯 사용량(spec D6). 실험 목록 화면이 trial 수로 추정하지 않게 싣는다.",
         "properties": {
+          "experiments": {
+            "title": "Experiments",
+            "type": "integer"
+          },
           "running": {
             "title": "Running",
             "type": "integer"
@@ -7388,7 +7427,8 @@
         },
         "required": [
           "total",
-          "running"
+          "running",
+          "experiments"
         ],
         "title": "RunSlotUsage",
         "type": "object"
@@ -9643,6 +9683,34 @@
         "title": "ThinkingSummaryView",
         "type": "object"
       },
+      "TimeEstimate": {
+        "properties": {
+          "run_seconds": {
+            "title": "Run Seconds",
+            "type": "number"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "slots": {
+            "title": "Slots",
+            "type": "integer"
+          },
+          "total_seconds": {
+            "title": "Total Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_seconds",
+          "run_seconds",
+          "sample_count",
+          "slots"
+        ],
+        "title": "TimeEstimate",
+        "type": "object"
+      },
       "TimeSeriesNode": {
         "properties": {
           "input_node_id": {
@@ -10319,6 +10387,17 @@
           "run_id": {
             "title": "Run Id",
             "type": "string"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
           },
           "session_sharpe": {
             "anyOf": [

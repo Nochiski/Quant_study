@@ -12,8 +12,10 @@
 | 3 | 실험(V3-03): `experiments`·`experiment_attempts`·`experiment_selections` |
 | 4 | 실험 대기열 조작(V3-04): `experiment_controls` |
 | 5 | 워크포워드 창별 자동 선택(V3-05): `experiment_window_picks` |
+| 6 | run 시작 시각(로드맵 M6 시간 추정): `backtest_run_starts` |
 
-v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다.
+v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
+파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -274,6 +276,23 @@ _V5_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V5_SCHEMA_OBJECTS = V4_SCHEMA_OBJECTS + _V5_ADDED_OBJECTS
 
+# run 이 처음 `running` 이 된 시각. `backtest_runs` 에 칸을 더하지 않고 곁 표로 둔다 — 칸을 더하면
+# 올린 파일과 새 파일의 표 DDL 이 달라져 manifest 대조가 깨진다. 시작 전에 끝난 run 은 행이 없다.
+_V6_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "backtest_run_starts",
+        """
+        CREATE TABLE backtest_run_starts (
+            accepted_order INTEGER PRIMARY KEY REFERENCES backtest_runs (accepted_order),
+            started_at TEXT NOT NULL
+        )
+        """,
+    ),
+)
+
+V6_SCHEMA_OBJECTS = V5_SCHEMA_OBJECTS + _V6_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -290,13 +309,14 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V5_SCHEMA_OBJECTS,
+            objects=V6_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
                 SchemaUpgrade(2, V2_SCHEMA_OBJECTS, _added(_V3_ADDED_OBJECTS)),
                 SchemaUpgrade(3, V3_SCHEMA_OBJECTS, _added(_V4_ADDED_OBJECTS)),
                 SchemaUpgrade(4, V4_SCHEMA_OBJECTS, _added(_V5_ADDED_OBJECTS)),
+                SchemaUpgrade(5, V5_SCHEMA_OBJECTS, _added(_V6_ADDED_OBJECTS)),
             ),
         ),
     )

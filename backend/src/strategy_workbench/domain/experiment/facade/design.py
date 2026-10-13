@@ -11,6 +11,11 @@ from strategy_workbench.domain.experiment._errors import (
     ExperimentStateError,
     InvalidExperimentSpecError,
 )
+from strategy_workbench.domain.experiment._estimate import (
+    RECENT_RUNS,
+    TimeEstimate,
+    estimate_time,
+)
 from strategy_workbench.domain.experiment._plateau import (
     PEAK_NEIGHBOR_RATIO,
     SENSITIVITY_STEP,
@@ -48,6 +53,9 @@ from strategy_workbench.domain.experiment._walk_forward import (
 )
 
 __all__ = [
+    "RECENT_RUNS",
+    "TimeEstimate",
+    "estimate_time",
     "EXPERIMENT_CODES",
     "MAX_GRID_POINTS",
     "PEAK_NEIGHBOR_RATIO",

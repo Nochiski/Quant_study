@@ -34,10 +34,12 @@ from strategy_workbench.domain.experiment.facade.design import (
     ParameterConstraint,
     SearchSpec,
     SplitSpec,
+    TimeEstimate,
     WalkForwardGap,
     WalkForwardWindow,
     build_search_spec,
     cell_outcomes,
+    estimate_time,
     experiment_trial_key,
     out_of_sample_sharpe,
     pick_window_cell,
@@ -136,6 +138,8 @@ class ExperimentPreview:
     # (`experiment_trial_key`).
     new_trial_count: int
     trial_count_after: int
+    # 이 실험만 돌 때의 시간 어림(`estimate_time`). 계열에 시간을 잰 완료 실행이 없으면 None.
+    time_estimate: TimeEstimate | None
 
 
 @dataclass(frozen=True)
@@ -308,6 +312,7 @@ class ExperimentRunService:
             trial_count=ledger.trial_count,
             new_trial_count=new_trials,
             trial_count_after=ledger.trial_count + new_trials,
+            time_estimate=estimate_time(ledger, design, self._runs.slot_usage().experiments),
         )
 
     def create(self, request: ExperimentRequest) -> Experiment:

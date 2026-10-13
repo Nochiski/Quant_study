@@ -276,10 +276,10 @@ class BacktestRunService:
         self._lock = RLock()
         self._close_interrupted_runs()
 
-    def slot_usage(self) -> tuple[int, int]:
-        """(슬롯 수, 지금 도는 run 수)."""
+    def slot_usage(self) -> tuple[int, int, int]:
+        """(슬롯 수, 지금 도는 run 수, 그중 실험 run 이 쓸 수 있는 슬롯 수)."""
         with self._lock:
-            return self._run_slots, self._running
+            return self._run_slots, self._running, experiment_slots(self._run_slots)
 
     def admit(self, request: BacktestRunSpec) -> RunAdmission:
         """시작과 같은 판정(preflight·엔진 호환성 포함)을 타되 접수하지 않는다.
@@ -1094,6 +1094,8 @@ class BacktestRunService:
             stage=stage,
             message=message,
             updated_at=occurred_at,
+            started_at=record.state.started_at
+            or (occurred_at if status is RunStatus.RUNNING else None),
         )
         if durable:
             self._repository.update(state)

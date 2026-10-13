@@ -132,6 +132,16 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     assert ledger["trial_count"] == preview.json()["trial_count_after"]
     # 칸마다 학습 두 번 + 창마다 고른 칸의 검증 실행 한 번(같은 시도 키라 재확인이다).
     assert sum(len(group["runs"]) for group in ledger["trials"]) == 6 + 2
+    # 로드맵 M6 시간 어림: 처음엔 계열에 잰 실행이 없고, 실험이 끝난 뒤엔 최근 완료 실행 다섯 개 중
+    # 가장 긴 시간 × (학습 6회 + 검증 2회를 실험 슬롯으로 나눈 묶음 수)다.
+    assert preview.json()["time_estimate"] is None
+    estimate = client.post("/api/v1/experiments/preview", json=request).json()["time_estimate"]
+    slots = estimate["slots"]
+    assert estimate["sample_count"] == 5
+    assert estimate["run_seconds"] > 0
+    assert estimate["total_seconds"] == pytest.approx(
+        (-(-6 // slots) + -(-2 // slots)) * estimate["run_seconds"]
+    )
     listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
     assert [item["record"]["experiment_id"] for item in listed["items"]] == [
         experiment["record"]["experiment_id"]

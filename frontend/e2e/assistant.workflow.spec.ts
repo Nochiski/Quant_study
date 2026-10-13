@@ -291,7 +291,7 @@ test.describe("AI 어시스턴트", () => {
       await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
       await expect(
         page.getByRole("status", { name: "실행 상태" }),
-      ).toContainText("completed", { timeout: 180_000 });
+      ).toContainText("완료", { timeout: 180_000 });
       await expect(
         page.getByRole("article", { name: "백테스트 결과" }),
       ).toBeVisible({ timeout: 180_000 });
@@ -341,7 +341,7 @@ test.describe("AI 어시스턴트", () => {
       await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
       await expect(
         page.getByRole("status", { name: "실행 상태" }),
-      ).toContainText("completed", { timeout: 180_000 });
+      ).toContainText("완료", { timeout: 180_000 });
     },
   );
 

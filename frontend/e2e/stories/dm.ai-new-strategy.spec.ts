@@ -185,7 +185,7 @@ test(
 
     const runStatus = page.getByRole("status", { name: "실행 상태" });
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
-    await expect(runStatus).toContainText("completed", { timeout: 120_000 });
+    await expect(runStatus).toContainText("완료", { timeout: 120_000 });
     await expect(
       page.getByRole("article", { name: "백테스트 결과" }),
     ).toBeVisible({ timeout: 120_000 });

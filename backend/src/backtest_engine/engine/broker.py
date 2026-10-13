@@ -175,6 +175,9 @@ class PythonQuoteCore:
             limit = float(limit_price)
             price = min(price, limit) if buy else max(price, limit)
         applied = abs(price - base_price)
+        # 체결 원장이 허용하지 않는 가격은 청산·신규 진입 모두 견적 경계에서 거절한다.
+        if price <= 0:
+            return QuoteNumbers(price, Decimal(0), applied, ExecutionStatus.REJECTED_NO_CASH)
 
         closing = max(-held if buy else held, Decimal(0))
         if quantity > closing:

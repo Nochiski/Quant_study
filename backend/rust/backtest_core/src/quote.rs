@@ -123,6 +123,10 @@ pub(crate) fn quote_numbers(
         };
     }
     let applied = (price - base_price).abs();
+    // 체결 원장의 양수 가격 계약은 예산 탐색과 청산 허용보다 먼저 검증한다.
+    if price <= 0.0 {
+        return Ok((price, 0, applied, "rejected_no_cash".to_string()));
+    }
 
     let closing = if buy { (-held).max(0) } else { held.max(0) };
     if quantity > closing {

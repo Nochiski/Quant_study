@@ -130,3 +130,68 @@ def test_short_integer_budget_is_executable_for_single_and_basket(core: str, gro
     assert final.cash == 1200.0
     assert final.equity == 600.0
     assert final.gross_exposure == 1.0
+
+
+@pytest.mark.parametrize("core", ["python", "rust"])
+@pytest.mark.parametrize("held", [-5, 0, 5, 20])
+@pytest.mark.parametrize("price", [0.0, -1.0])
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+def test_nonpositive_final_price_is_rejected_before_exposure_or_budget(
+    core: str, held: int, price: float, side: Side
+) -> None:
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    # 매도는 상한 없는 고정 슬리피지로 발생한다. 매수는 코어 경계의 비양수 입력도 막는다.
+    base, slip = (100.0, 100.0 - price) if side is Side.SELL else (price, 0.0)
+    quote = quote_core.quote_numbers(
+        side,
+        base,
+        Decimal(10),
+        1000,
+        None,
+        slip,
+        None,
+        1000.0,
+        Decimal(held),
+        0.0,
+        False,
+    )
+    assert quote.price == price
+    assert quote.quantity == 0
+    assert quote.status.value == "rejected_no_cash"
+
+
+@pytest.mark.parametrize("core", ["python", "rust", "rust_legacy", "rust_persistent"])
+@pytest.mark.parametrize("bps", [10000.0, 10100.0])
+def test_large_fixed_slippage_rejects_short_without_invalid_fill(core: str, bps: float) -> None:
+    from backtest_engine.engine.slippage import FixedBpsSlippage
+
+    action = market_leg(A, Side.SELL, 10)
+    bars = tuple(make_ohlc(day(i), A, 100.0, 100.0, 100.0, 100.0) for i in (1, 2))
+    engine = BacktestEngine(
+        RunConfig(run_id="nonpositive-execution-price", initial_cash=1000.0, fee_bps=0.0),
+        core=core,
+        slippage=FixedBpsSlippage(bps),
+    )
+    result = engine.run(_ShortBasket((action,)), DataFeed(bars))
+    assert not result.fills
+    assert result.snapshots[-1].cash == 1000.0
+    assert result.snapshots[-1].equity == 1000.0
+
+
+@pytest.mark.parametrize("core", ["python", "rust"])
+def test_valid_sell_limit_clips_slippage_before_price_validation(core: str) -> None:
+    quote_core = PythonQuoteCore() if core == "python" else RustQuoteCore()
+    quote = quote_core.quote_numbers(
+        Side.SELL,
+        100.0,
+        Decimal(10),
+        1000,
+        None,
+        101.0,
+        Decimal(1),
+        1000.0,
+        Decimal(0),
+        0.0,
+        False,
+    )
+    assert (quote.price, quote.quantity, quote.status.value) == (1.0, Decimal(10), "filled")

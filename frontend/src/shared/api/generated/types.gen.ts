@@ -1534,6 +1534,53 @@ export type DoneView = {
 };
 
 /**
+ * DraftDiff
+ *
+ * 저장 리비전과 현재 원문의 의미 차이. 저장 상태를 바꾸지 않는다.
+ */
+export type DraftDiff = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash: string;
+  /**
+   * Changes
+   */
+  changes: Array<DiffEntry>;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Target Spec Hash
+   */
+  target_spec_hash: string;
+};
+
+/**
+ * DraftDiffRequest
+ */
+export type DraftDiffRequest = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
  * DrawdownPoint
  */
 export type DrawdownPoint = {
@@ -8858,6 +8905,40 @@ export type DiffStrategyRevisionsResponses = {
 
 export type DiffStrategyRevisionsResponse =
   DiffStrategyRevisionsResponses[keyof DiffStrategyRevisionsResponses];
+
+export type DiffStrategyDraftData = {
+  body: DraftDiffRequest;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/draft-diff";
+};
+
+export type DiffStrategyDraftErrors = {
+  /**
+   * Response 422 Diffstrategydraft
+   *
+   * Unprocessable Entity
+   */
+  422: StrategyDocumentInvalidResponse | RequestValidationResponse;
+};
+
+export type DiffStrategyDraftError =
+  DiffStrategyDraftErrors[keyof DiffStrategyDraftErrors];
+
+export type DiffStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  200: DraftDiff;
+};
+
+export type DiffStrategyDraftResponse =
+  DiffStrategyDraftResponses[keyof DiffStrategyDraftResponses];
 
 export type ListStrategyRevisionsData = {
   body?: never;

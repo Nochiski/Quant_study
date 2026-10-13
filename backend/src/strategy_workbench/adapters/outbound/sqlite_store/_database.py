@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager, suppress
 from pathlib import Path
 from threading import RLock
 from typing import Self
+
+logger = logging.getLogger(__name__)
 
 
 class SqliteDatabase:
@@ -56,6 +59,7 @@ class SqliteDatabase:
             self._path = candidate.resolve()
             with closing(self._new_connection(str(self._path))) as connection:
                 self._prepare(connection, prepare)
+                self._enable_write_ahead_log(connection)
 
     @property
     def database_path(self) -> Path | None:
@@ -104,6 +108,26 @@ class SqliteDatabase:
             raise self._error(
                 f"could not initialise the SQLite {self._label} — path={self._path} {error}"
             ) from error
+
+    def _enable_write_ahead_log(self, connection: sqlite3.Connection) -> None:
+        """claim·판본 대조가 끝난 우리 파일에만 WAL을 켠다(#328).
+
+        rollback 저널에서는 쓰기 commit이 읽기를 기다리고 읽기가 commit을 기다려, 동시 요청이
+        몰리면 busy timeout을 넘겨 `database is locked`가 난다. WAL에서는 읽기와 쓰기가 서로
+        막지 않는다. 모드는 파일에 남으므로 남의 파일을 바꾸지 않게 준비 뒤에만 건다.
+        `synchronous`는 기본(FULL)을 유지해 내구성을 낮추지 않는다. WAL을 쓸 수 없는 파일
+        시스템이면 지금처럼 rollback 저널로 둔다.
+        """
+        try:
+            mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        except sqlite3.DatabaseError as error:
+            raise self._error(
+                f"could not configure the SQLite {self._label} journal — path={self._path} {error}"
+            ) from error
+        if str(mode).lower() != "wal":
+            logger.warning(
+                "SQLite %s stays in %s journal mode — path=%s", self._label, mode, self._path
+            )
 
     def _new_connection(self, database: str) -> sqlite3.Connection:
         connection = sqlite3.connect(

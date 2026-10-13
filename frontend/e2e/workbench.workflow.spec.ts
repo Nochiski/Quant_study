@@ -789,7 +789,7 @@ test.describe("professional YAML workflow", () => {
     const runId = new URL(workflow.url()).pathname.split("/").at(-1)!;
     await expect(
       workflow.getByRole("status", { name: "실행 상태" }),
-    ).toContainText("completed", { timeout: 120_000 });
+    ).toContainText("완료", { timeout: 120_000 });
     await expect(
       workflow.getByRole("article", { name: "백테스트 결과" }),
     ).toBeVisible({ timeout: 120_000 });
@@ -856,7 +856,7 @@ test.describe("professional YAML workflow", () => {
       workflow.getByRole("heading", { name: "백테스트 이력" }),
     ).toBeVisible();
     const runRow = workflow.getByRole("row").filter({ hasText: runId });
-    await expect(runRow).toContainText("completed");
+    await expect(runRow).toContainText("완료");
     await expect(runRow).toContainText(`${strategyId} · v4`);
 
     await workflow.getByRole("link", { name: "전략" }).click();
@@ -1456,7 +1456,7 @@ test.describe("professional YAML workflow", () => {
       await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
       await expect(
         page.getByRole("status", { name: "실행 상태" }),
-      ).toContainText("completed", { timeout: 120_000 });
+      ).toContainText("완료", { timeout: 120_000 });
       // 채운 값은 마지막 사용값으로 남아 다음 문서의 칸을 채운 채 시작하게 한다(전략별 local UI state). 지워서
       // 다음 revision 도 첫 revision 처럼 빈 칸에서 시작한다.
       await page.evaluate(() => localStorage.clear());
@@ -1574,7 +1574,7 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   const leaveGuard = page.getByRole("alertdialog", { name: "저장하지 않은 변경이 있습니다" });
   await leaveGuard.getByRole("button", { name: "나가기", exact: true }).click();
   await expect(page).toHaveURL(/\/backtests\//);
-  await expect(page.getByRole("status", { name: "실행 상태" })).toContainText("completed", { timeout: 120_000 });
+  await expect(page.getByRole("status", { name: "실행 상태" })).toContainText("완료", { timeout: 120_000 });
 });
 
 test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다", { tag: ["@story", "@US-CS-03"] }, async ({ page }) => {

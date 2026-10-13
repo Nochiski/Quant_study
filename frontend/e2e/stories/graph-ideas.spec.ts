@@ -280,7 +280,7 @@ const finish = async (
     .click();
   await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/);
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-    "completed",
+    "완료",
     { timeout: 120_000 },
   );
   const runId = new URL(page.url()).pathname.split("/").at(-1)!;

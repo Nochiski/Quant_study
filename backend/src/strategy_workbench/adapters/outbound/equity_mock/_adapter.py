@@ -544,7 +544,12 @@ def _factor_field_value(
         return -income if impaired else income
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2
-    if field_id == "flow.foreign_net_buy":
+    if field_id in ("flow.foreign_ownership", "flow.foreign_limit_exhaustion"):
+        # 원장과 같은 퍼센트 척도다. 날짜에 대한 결정론을 유지하며 0~100 안에 둔다.
+        return 52.79 + (security_index % 3) + (session_index % 7) * 0.1
+    if field_id == "short.short_sale_volume":
+        return float(1_000 + abs(trend))
+    if field_id in ("flow.foreign_net_buy", "flow.pension_net_buy"):
         return (security_index - 1) * 100_000_000.0 + trend * 10_000
     if field_id == "short.short_balance_ratio":
         return 0.01 + security_index * 0.015 + (session_index % 7) * 0.0001

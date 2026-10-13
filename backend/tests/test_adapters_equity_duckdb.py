@@ -152,8 +152,12 @@ ALL_FIELDS = (
     "consensus.recommendation",
     "consensus.analyst_count",
     "flow.foreign_net_buy",
+    "flow.foreign_ownership",
+    "flow.foreign_limit_exhaustion",
+    "flow.pension_net_buy",
     "flow.institution_net_buy",
     "flow.retail_net_buy",
+    "short.short_sale_volume",
     "short.short_sale_value",
     "short.borrowed_quantity",
     "credit.margin_balance",
@@ -611,20 +615,20 @@ def test_a_field_the_ledger_carries_but_this_adapter_does_not_serve_says_so(
 ) -> None:
     """원장 `dataset_profile` 에 있는데 내주지 않는 필드를 "원장이 싣지 않는다"고 하지 않는다(#373).
 
-    실원장은 `flow.foreign_ownership`·`classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
+    실원장은 `classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
     읽은 `dataset_profile` 이다.
     """
-    rows = [*WB_PROFILE_ROWS, ("flow.foreign_ownership", lag, "원장 날짜")]
+    rows = [*WB_PROFILE_ROWS, ("classification.sector", lag, "원장 날짜")]
     adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity", profile_rows=rows))
 
     reasons = adapter.unavailable_factor_fields()
 
-    assert reasons["flow.foreign_ownership"] == FIELD_NOT_PROVIDED
+    assert reasons["classification.sector"] == FIELD_NOT_PROVIDED
     assert reasons["credit.loan_value"] == FIELD_NOT_IN_LEDGER
-    result = _raw(adapter, fields=("flow.foreign_ownership",))
+    result = _raw(adapter, fields=("classification.sector",))
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert result.detail is not None and FIELD_NOT_PROVIDED in result.detail
-    assert "flow.foreign_ownership" not in {p.field_id for p in adapter.list_fields()}
+    assert "classification.sector" not in {p.field_id for p in adapter.list_fields()}
 
 
 def test_queries_outside_calendar_coverage_are_no_data(

@@ -247,7 +247,14 @@ def _ledger_profiles() -> dict[str, Any]:
 
 # 원장 → 워크벤치 계약의 어휘 대응이다. 값의 배율을 바꾸지 않는다. 새 단위·주기는 자동 통과하지
 # 않는다. 특히 빈 단위가 항상 score인 것도, report가 항상 분기 보고인 것도 아니다.
-_LEDGER_UNITS = {"KRW": "KRW", "억원": "억원", "원": "KRW", "주": "shares", "명": "count"}
+_LEDGER_UNITS = {
+    "pct": "pct",
+    "KRW": "KRW",
+    "억원": "억원",
+    "원": "KRW",
+    "주": "shares",
+    "명": "count",
+}
 _CONTEXT_UNITS = {("consensus.recommendation", ""): "score"}
 _LEDGER_FREQUENCIES = {"session": "daily", "monthly": "monthly", "event": "event"}
 _CONTEXT_FREQUENCIES = {("fin_std", "report"): "quarterly", ("dividend_event", "report"): "annual"}

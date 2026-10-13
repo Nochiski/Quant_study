@@ -866,9 +866,64 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence="flow_daily.ind_invsr_krw ← 키움 ind_invsr_krw ∪ KIS prsn_ntby_tr_pbmn_krw",
     ),
+    FieldSpec(
+        field_id="flow.foreign_ownership",
+        source="flow",
+        expr="foreign_wght_pct",
+        label="외국인 보유비중",
+        unit="pct",
+        value_type=FieldValueType.RATIO,
+        description=(
+            "외국인 보유비중(퍼센트)입니다. 52.79는 52.79%이며 비율로 쓰려면 100으로 나눕니다."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="키움 ka10008, 원장 퍼센트 척도 유지",
+    ),
+    FieldSpec(
+        field_id="flow.foreign_limit_exhaustion",
+        source="flow",
+        expr="foreign_limit_exh_pct",
+        label="외국인 한도소진율",
+        unit="pct",
+        value_type=FieldValueType.RATIO,
+        description=(
+            "외국인 취득 한도 소진율(퍼센트)입니다. 52.79는 52.79%입니다. 한도가 있는 업종"
+            "에서는 보유비중과 다를 수 있습니다."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="키움 ka10008, 원장 퍼센트 척도 유지",
+    ),
+    FieldSpec(
+        field_id="flow.pension_net_buy",
+        source="flow",
+        expr="pension_net_buy_kiwoom_krw",
+        label="연기금등 순매수(대금, 키움)",
+        unit="KRW",
+        value_type=FieldValueType.AMOUNT,
+        description=(
+            "연기금등 순매수 대금(원)입니다. 키움 원천만 사용하며 "
+            "다른 원천만 있는 날은 빈 값입니다."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="키움 ka10060 penfnd_etc_krw만 선택한 원장 열; KIS 폴백·재환산 금지",
+    ),
     # ── short_daily (FIELD_MAP §2 short.*) ───────────────────────────────────
     # 원천은 키움(ka10014) 하나로 고정한다 — 표는 두 원천을 나란히 두고, 키움이 커버가
     # 넓다(절단본 18,265 대 KIS 3,891). 폴백 병합은 원천을 섞으므로 하지 않는다(DESIGN §4-3).
+    FieldSpec(
+        field_id="short.short_sale_volume",
+        source="short_kiwoom",
+        expr="short_volume_kiwoom_shr",
+        label="공매도 거래량(키움)",
+        unit="shares",
+        value_type=FieldValueType.COUNT,
+        description=(
+            "공매도 거래량(주)입니다. 키움 원천만 사용합니다. 원천이 뺀 날은 0이고, 수집하지 못한"
+            " 날은 빈 값입니다."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="키움 ka10014; 결측 사유는 fill_kind_short_kiwoom",
+    ),
     FieldSpec(
         field_id="short.short_sale_value",
         source="short_kiwoom",
@@ -988,27 +1043,14 @@ FIELD_NOT_IN_LEDGER = "원장이 이 필드를 싣지 않는다"
 FIELD_NOT_PROVIDED = "원장에는 있지만 이 연결은 이 필드를 내주지 않는다"
 
 # 어댑터가 내지 않는 FIELD_MAP §2 필드 — field_id → 사유 메모. `list_fields()` 밖이고(mock 폴백
-# 금지, DESIGN §7) 메모는 원장 작업 기록이라 사용자에게 싣지 않는다. "미배선"은 원장에는 있는데
-# 선언표에 아직 없는 필드다(#421).
+# 금지, DESIGN §7) 메모는 원장 작업 기록이라 사용자에게 싣지 않는다.
 UNSUPPORTED_FIELDS: dict[str, str] = {
     "benchmark.close": (
         "미지원(현 설계) — index_daily 는 security 축이 아니다. 벤치마크는 예약 접두 `idx:` 로 "
         "받되 S21 은 내지 않는다(GAP-09, FIELD_MAP §2)"
     ),
-    "flow.foreign_ownership": (
-        "미배선 — 원장 flow_daily.foreign_wght_pct(퍼센트, 키움 ka10008)로 있다(#421)"
-    ),
-    "flow.foreign_limit_exhaustion": (
-        "미배선 — 원장 flow_daily.foreign_limit_exh_pct(퍼센트, 키움 ka10008)로 있다(#421)"
-    ),
-    "flow.pension_net_buy": (
-        "미배선 — 원장 flow_daily.pension_net_buy_kiwoom_krw(원, 키움만)로 있다(#421)"
-    ),
     "flow.block_buy": "미지원 — 대량매매 미수집(FACTORS.md §9)",
     "flow.block_sell": "미지원 — 대량매매 미수집(FACTORS.md §9)",
-    "short.short_sale_volume": (
-        "미배선 — 원장 short_daily.short_volume_kiwoom_shr(주, 키움)로 있다(#421)"
-    ),
     "short.short_balance_ratio": (
         "미지원 — 분모가 다른 테이블(price_daily.shares_out)이라 셀 하나로 굽지 않는다. "
         "게다가 short_daily 가 주는 것은 잔고가 아니라 거래량이다(F45 취득 불가, 라벨 정정 필요)"

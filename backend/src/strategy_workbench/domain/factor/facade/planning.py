@@ -1,4 +1,5 @@
 from strategy_workbench.domain.factor._planning import (
+    FACTOR_EVALUATION_VERSION,
     FactorExecutionPlan,
     FactorExecutionStep,
     FactorParameterValue,
@@ -10,6 +11,7 @@ from strategy_workbench.domain.factor._planning import (
 )
 
 __all__ = [
+    "FACTOR_EVALUATION_VERSION",
     "FactorExecutionPlan",
     "FactorExecutionStep",
     "FactorParameterValue",

@@ -119,11 +119,13 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     )
     assert explained.status_code == 200, explained.text
     assert payload["plan_hash"] == explained.json()["plan"]["plan_hash"]
+    assert payload["factor_evaluation_version"] == explained.json()["plan"]["evaluation_version"]
 
     preview = client.post(
         "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment()}
     ).json()["tape"]
     assert payload["snapshot_id"] == preview["data_snapshot_id"]
+    assert payload["factor_evaluation_version"] == preview["factor_evaluation_version"]
     frame = next(item for item in preview["frames"] if item["signal_as_of"] == request["as_of"])
     expected_candidates = [
         item for item in frame["candidates"] if item["security_id"] in request["security_ids"]

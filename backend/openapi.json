@@ -3670,6 +3670,10 @@
             "title": "As Of Policy",
             "type": "string"
           },
+          "evaluation_version": {
+            "title": "Evaluation Version",
+            "type": "string"
+          },
           "graph_hash": {
             "title": "Graph Hash",
             "type": "string"
@@ -3717,7 +3721,8 @@
           "steps",
           "required_field_ids",
           "minimum_history_sessions",
-          "missing_policy"
+          "missing_policy",
+          "evaluation_version"
         ],
         "title": "FactorExecutionPlan",
         "type": "object"
@@ -7194,6 +7199,17 @@
             "title": "Environment Hash",
             "type": "string"
           },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
           "metric_registry_version": {
             "title": "Metric Registry Version",
             "type": "string"
@@ -9088,6 +9104,17 @@
             "title": "As Of",
             "type": "string"
           },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
           "factor_id": {
             "title": "Factor Id",
             "type": "string"
@@ -9419,6 +9446,17 @@
             "default": "next_open",
             "title": "Execution Timing",
             "type": "string"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
           },
           "frames": {
             "items": {

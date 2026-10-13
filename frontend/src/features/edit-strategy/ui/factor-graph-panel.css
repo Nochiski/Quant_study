@@ -227,3 +227,8 @@
   text-align: left;
   border-bottom: 1px solid var(--border);
 }
+
+/* 같은 편집 DOM은 유지하되 계획 대기 표면은 기존 Fragment의 배치를 보존한다. */
+.factor-graph__pending {
+  display: contents;
+}

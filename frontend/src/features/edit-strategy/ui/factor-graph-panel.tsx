@@ -262,7 +262,7 @@ export const FactorGraphPanel = ({
   };
   if (projection.status !== "ready" || projection.factors.length === 0) {
     return (
-      <section ref={container}>
+      <section ref={container} className="factor-graph__pending">
         <GraphState
           state={
             projection.status !== "ready" ? projection : { status: "empty" }
@@ -290,7 +290,7 @@ export const FactorGraphPanel = ({
           (item) => item.factorId === authored[activeIndex]?.factorId,
         );
   if (factor === undefined) return (
-    <section ref={container}>
+    <section ref={container} className="factor-graph__pending">
       {editor(authored.length, true)}
     </section>
   );

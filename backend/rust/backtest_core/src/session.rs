@@ -72,7 +72,31 @@ impl EntryIn {
 /// bar: `(open, high, low, volume, liquidity_volume, impact_scale)`. `liquidity_volume`은 유동성
 /// 캡의 기준 거래량이다 — 참여 기준이 따로 없으면 `volume`과 같다 (Python `Bar.liquidity_volume`).
 /// `impact_scale`은 √ 충격 척도이고 없으면 0이다 (Python `Bar.impact_scale`).
-pub(crate) type BarTuple = (f64, f64, f64, i64, i64, f64);
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ExecutionBar {
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub volume: i64,
+    pub liquidity_volume: i64,
+    pub impact_scale: f64,
+}
+
+// 폐기 예정 Python 경계만 위치 튜플을 받고 내부에서는 이름 있는 값으로 변환한다.
+type LegacyBarWire = (f64, f64, f64, i64, i64, f64);
+
+impl From<LegacyBarWire> for ExecutionBar {
+    fn from((open, high, low, volume, liquidity_volume, impact_scale): LegacyBarWire) -> Self {
+        Self {
+            open,
+            high,
+            low,
+            volume,
+            liquidity_volume,
+            impact_scale,
+        }
+    }
+}
 
 /// 슬리피지 설정: `("none", 0, 0)` | `("fixed_bps", bps, 0)` | `("volume_share", volume_limit, price_impact)`
 /// | `("sqrt", max_fraction, 0)`. `sqrt`는 체결가 × min(bar 척도 × √수량, max_fraction)이다
@@ -158,7 +182,7 @@ pub(crate) fn sell_tax(side: &str, quantity: i64, price: f64, rate: f64) -> f64 
 
 struct Session<'a> {
     ts: &'a str,
-    bars: &'a HashMap<&'a str, BarTuple>,
+    bars: &'a HashMap<&'a str, ExecutionBar>,
     power: &'a mut BuyingPower,
     fee_rate: f64,
     sell_tax_rate: f64,
@@ -187,9 +211,9 @@ impl<'a> Session<'a> {
         let (price, triggered) = execution_price(
             &e.order_type,
             &e.side,
-            bar.0,
-            bar.1,
-            bar.2,
+            bar.open,
+            bar.high,
+            bar.low,
             e.limit_price,
             e.stop_price,
             e.triggered,
@@ -211,15 +235,21 @@ impl<'a> Session<'a> {
         let participation = e.participation.as_deref().or(self.default_participation);
         let mut capped = e.remaining;
         if let Some(text) = participation {
-            capped = capped.min(liquidity_cap(bar.4, text)?.max(0));
+            capped = capped.min(liquidity_cap(bar.liquidity_volume, text)?.max(0));
         }
-        let slip = slippage_per_share(self.slippage, base_price, capped, bar.3, bar.5)?;
+        let slip = slippage_per_share(
+            self.slippage,
+            base_price,
+            capped,
+            bar.volume,
+            bar.impact_scale,
+        )?;
         let held = self.power.quantity_of(&e.key);
         let (p, q, applied, status) = quote_numbers(
             &e.side,
             base_price,
             e.remaining,
-            bar.4,
+            bar.liquidity_volume,
             participation,
             slip,
             e.limit_price,
@@ -241,20 +271,16 @@ impl<'a> Session<'a> {
     }
 
     fn detail(&self, q: &QuoteOut, e: &EntryIn) -> Option<String> {
-        let bar = self
-            .bars
-            .get(e.key.as_str())
-            .copied()
-            .unwrap_or((0.0, 0.0, 0.0, 0, 0, 0.0));
+        let bar = self.bars.get(e.key.as_str()).copied().unwrap_or_default();
         let power = self.power.available();
         match q.status.as_str() {
             "not_filled" => Some(format!(
                 "no liquidity in session — order_id={} instrument={} volume={} ts={}",
-                e.order_id, e.symbol, bar.4, self.ts
+                e.order_id, e.symbol, bar.liquidity_volume, self.ts
             )),
             "liquidity_limited" => Some(format!(
                 "fill capped by volume participation — order_id={} instrument={} remaining={} cap={} volume={}",
-                e.order_id, e.symbol, e.remaining, q.quantity, bar.4
+                e.order_id, e.symbol, e.remaining, q.quantity, bar.liquidity_volume
             )),
             "rejected_no_cash" => Some(format!(
                 "cannot afford a single share — order_id={} instrument={} price={} buying_power={}",
@@ -396,7 +422,7 @@ pub(crate) fn process_market_impl(
     ts: &str,
     entries: Vec<EntryTuple>,
     groups: Vec<(String, String, Vec<String>)>,
-    bars: &HashMap<&str, BarTuple>,
+    bars: &HashMap<&str, ExecutionBar>,
     power: &mut BuyingPower,
     fee_rate: f64,
     default_participation: Option<&str>,
@@ -470,7 +496,7 @@ fn process_market(
     ts: &str,
     entries: Vec<EntryTuple>,
     groups: Vec<(String, String, Vec<String>)>,
-    bars: HashMap<String, BarTuple>,
+    bars: HashMap<String, LegacyBarWire>,
     power: &mut BuyingPower,
     fee_rate: f64,
     default_participation: Option<&str>,
@@ -484,8 +510,10 @@ fn process_market(
         2,
     )?;
     // deprecated 경로만 소유한 표를 받는다 — 내부 정본은 등록부 문자열을 빌린다.
-    let borrowed: HashMap<&str, BarTuple> =
-        bars.iter().map(|(key, bar)| (key.as_str(), *bar)).collect();
+    let borrowed: HashMap<&str, ExecutionBar> = bars
+        .iter()
+        .map(|(key, bar)| (key.as_str(), ExecutionBar::from(*bar)))
+        .collect();
     process_market_impl(
         ts,
         entries,

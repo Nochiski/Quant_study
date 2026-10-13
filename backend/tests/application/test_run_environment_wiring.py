@@ -465,19 +465,15 @@ def test_environment_missing_reaches_the_factor_execution_plan() -> None:
     assert default_plan.graph_hash == explicit_plan.graph_hash
 
 
-def test_partial_fill_is_declared_from_the_environment_not_the_document() -> None:
-    """P2-03 잔여 이관: 참여율의 owner 가 실행 설정이다.
-
-    틀리는 방향이 과소 선언이라 그쪽으로 고정한다 — 참여율 1.0 짜리 요구 집합을 쓰면서 실제로는
-    0.1 로 체결하면 능력 게이트가 조용히 약해진다.
-    """
-    spec = _spec()
-    full = replace(_environment(), participation_rate=1.0)
-    partial = replace(_environment(), participation_rate=0.1)
-    bridge = BacktestEnginePortfolioAdapter()
-
-    assert "partial_fill" not in {item.value for item in bridge.requirements(spec, full).features}
-    assert "partial_fill" in {item.value for item in bridge.requirements(spec, partial).features}
+@pytest.mark.parametrize("rate", [0.1, 1.0])
+@pytest.mark.parametrize("basis", list(ParticipationBasis))
+def test_partial_fill_is_required_for_every_participation_limit(
+    rate: float, basis: ParticipationBasis
+) -> None:
+    """참여율 1도 유한 거래량을 넘는 주문은 부분 체결된다(#302)."""
+    environment = replace(_environment(), participation_rate=rate, participation_basis=basis)
+    requirements = BacktestEnginePortfolioAdapter().requirements(_spec(), environment)
+    assert "partial_fill" in {item.value for item in requirements.features}
 
 
 class _ShrunkWarmupValue:

@@ -13,6 +13,7 @@ import {
   metricUnavailableCopy,
 } from "../model/metric-copy";
 import {
+  runEnvironmentApplies,
   runEnvironmentLabel,
   runEnvironmentValueLabel,
   type RunEnvironmentField,
@@ -179,7 +180,9 @@ const environmentRows = (
     ...(fields ?? []).map((field) => ({
       key: field.name,
       label: runEnvironmentLabel(field),
-      value: runEnvironmentValueLabel(field, record[field.name]),
+      value: runEnvironmentApplies(field, record)
+        ? runEnvironmentValueLabel(field, record[field.name])
+        : t("backtest.result.environment.notApplied"),
     })),
     ...Object.entries(record)
       .filter(([key]) => !known.has(key))

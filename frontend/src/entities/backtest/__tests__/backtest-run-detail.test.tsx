@@ -140,12 +140,31 @@ describe("run 상세의 실행 설정", () => {
     expect(row("참여율 (%)")).toHaveTextContent("20%");
     expect(row("참여 기준")).toHaveTextContent("20일 평균 거래대금");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");
-    expect(row("가격 충격 모델")).toHaveTextContent("√ 가격 충격(변동성·거래량 비례)");
+    expect(row("가격 충격 모델")).toHaveTextContent(
+      "√ 가격 충격(변동성·거래량 비례)",
+    );
     expect(row("가격 충격 계수")).toHaveTextContent("0.8");
     expect(row("매도 거래세")).toHaveTextContent("법정 세율(날짜별)");
-    expect(row("매도 거래세율 (bp)")).toHaveTextContent("—");
+    expect(row("매도 거래세율 (bp)")).toHaveTextContent("미적용");
+    expect(row("슬리피지 (bp)")).toHaveTextContent("미적용");
     expect(row("결측 처리")).toHaveTextContent("0으로 채우기");
     expect(row("실행 설정 hash")).toHaveTextContent(`${"e".repeat(16)}…`);
+  });
+
+  it("고정 충격·직접 세율 기록에서는 실제 적용한 값만 활성 값으로 보인다", () => {
+    const recorded = result();
+    recorded.manifest.environment = {
+      ...recorded.manifest.environment,
+      impact_model: "fixed_bps",
+      sell_tax: "custom",
+      sell_tax_bps: 12,
+    };
+    render(<BacktestRunDetail result={recorded} environmentFields={FIELDS} />);
+    const row = (label: string) =>
+      screen.getByText(label, { exact: true }).closest("div")!;
+    expect(row("슬리피지 (bp)")).toHaveTextContent("3bp");
+    expect(row("가격 충격 계수")).toHaveTextContent("미적용");
+    expect(row("매도 거래세율 (bp)")).toHaveTextContent("12bp");
   });
 
   it("스키마를 아직 못 읽었으면 기록된 키와 값을 그대로 보인다", async () => {

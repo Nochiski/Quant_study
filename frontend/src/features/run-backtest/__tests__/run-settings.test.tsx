@@ -1221,6 +1221,31 @@ describe("run environment panel", () => {
     expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
   });
 
+  it("전략 전환 시 실행 옵션과 열린 패널을 새 전략 기본값으로 초기화한다", async () => {
+    const view = renderWithQuery(<Harness storageKey="strategy-a" />);
+    const user = await openSettings();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "실행 core" }),
+      "python",
+    );
+    await user.clear(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+      "1234",
+    );
+    view.rerender(<Harness storageKey="strategy-b" />);
+    expect(screen.queryByRole("combobox", { name: "실행 core" })).not.toBeInTheDocument();
+    await openSettings();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toHaveValue(
+      DEFAULT_BACKTEST_RUN_SETTINGS.core,
+    );
+    expect(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    ).toHaveValue(Number(DEFAULT_BACKTEST_RUN_SETTINGS.initialCashKrw));
+  });
+
   it("exposes every run option through accessible controls and reports invalid input", async () => {
     renderWithQuery(<Harness />);
     const user = await openSettings();
@@ -1318,6 +1343,16 @@ describe("backtest run actions", () => {
     expect(
       screen.getByRole("button", { name: "실행 취소" }),
     ).toBeInTheDocument();
+  });
+
+  it.each(["cancel", "replay"])("%s 실패는 다른 실행 화면에 남지 않는다", async (action) => {
+    server.use(http.post(action === "cancel" ? `${API}/api/v1/backtests/:runId/cancel` : `${API}/api/v1/backtests`, () => HttpResponse.json({ detail: { code: "backtest.run.not_found", message: "missing run" } }, { status: 404 })));
+    const props = { status: action === "cancel" ? "running" as const : "completed" as const, request: acceptedRequest, onReplayed: vi.fn() };
+    const view = renderWithQuery(<BacktestRunActions {...props} runId="old" />);
+    await userEvent.setup().click(screen.getByRole("button", { name: action === "cancel" ? "실행 취소" : "동일 설정 재실행" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    view.rerender(<BacktestRunActions {...props} runId="new" />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {
@@ -1419,7 +1454,8 @@ describe("backtest run actions", () => {
           {
             detail: {
               code: "backtest.run.research_window_violation",
-              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
+              message:
+                "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
               sealed_start: "2016-01-01",
               sealed_end: "2019-12-31",
               research_start: "2020-01-02",

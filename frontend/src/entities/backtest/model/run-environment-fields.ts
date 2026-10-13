@@ -1,4 +1,8 @@
-import { isApplicableWhen, type ApplicableWhen } from "../../../shared/api";
+import {
+  isApplicableWhen,
+  projectApplicability,
+  type ApplicableWhen,
+} from "../../../shared/api";
 import { tName, tOptional } from "../../../shared/config";
 
 /**
@@ -184,3 +188,11 @@ export const runEnvironmentValueLabel = (
     ? `${text}${field.displayUnit}`
     : text;
 };
+
+/** 스키마 적용 조건을 입력 패널과 실행 기록이 함께 읽는다. 모르는 조건은 숨기지 않는다. */
+export const runEnvironmentApplies = (
+  field: RunEnvironmentField,
+  values: Readonly<Record<string, unknown>>,
+): boolean =>
+  field.applicableWhen === null ||
+  projectApplicability(field.applicableWhen, values).applicable !== false;

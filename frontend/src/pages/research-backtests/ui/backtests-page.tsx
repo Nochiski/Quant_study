@@ -1,3 +1,5 @@
+import { RUN_STATUS } from "../../../entities/backtest";
+
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, type FormEvent } from "react";
 
@@ -16,14 +18,7 @@ import "../../../shared/ui/data-list.css";
 
 const ROUTE = "/research/backtests";
 const PAGE_SIZE = 25;
-const TONE = {
-  queued: "info",
-  running: "info",
-  cancel_requested: "warn",
-  cancelled: "warn",
-  failed: "error",
-  completed: "ok",
-} as const;
+
 
 const displayTime = (value: string): string => {
   const parsed = new Date(value);
@@ -314,7 +309,7 @@ export const BacktestsPage = () => {
                         ) : null}
                       </td>
                       <td>
-                        <Badge tone={TONE[item.run.status]}>
+                        <Badge tone={RUN_STATUS[item.run.status].tone}>
                           {item.run.status}
                         </Badge>
                         <br />

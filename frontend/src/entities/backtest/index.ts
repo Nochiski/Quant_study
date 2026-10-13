@@ -15,6 +15,7 @@ export {
 } from "./model/backtest-queries";
 export { RUN_KINDS, isRunKind, runKindLabel } from "./model/run-kind";
 export {
+  runEnvironmentApplies,
   runEnvironmentDisplayValue,
   runEnvironmentFields,
   runEnvironmentLabel,
@@ -47,3 +48,5 @@ export type {
   RunKind,
   TrialLedger,
 } from "../../shared/api";
+
+export { RUN_STATUS } from "./model/run-status";

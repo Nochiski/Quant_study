@@ -103,6 +103,14 @@ def _validate_submission(
 
 
 @dataclass(frozen=True)
+class ControlChange:
+    """실험 조작을 바꾼 기록 한 줄(로드맵 M6 감사 기록). 바꾼 뒤의 값을 싣는다."""
+
+    changed_at: datetime
+    controls: ExperimentControls
+
+
+@dataclass(frozen=True)
 class ExperimentSelection:
     """사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다."""
 
@@ -160,7 +168,15 @@ class ExperimentRepositoryPort(Protocol):
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None: ...
 
-    def set_controls(self, experiment_id: str, controls: ExperimentControls) -> None: ...
+    def set_controls(
+        self, experiment_id: str, controls: ExperimentControls, *, changed_at: datetime
+    ) -> None:
+        """현재 조작을 바꾸고 같은 트랜잭션에서 이력(`control_changes`)에 한 줄을 더한다."""
+        ...
+
+    def control_changes(self, experiment_id: str) -> tuple[ControlChange, ...]:
+        """조작을 바꾼 순."""
+        ...
 
     def add_attempt(self, attempt: TrialAttempt) -> None: ...
 

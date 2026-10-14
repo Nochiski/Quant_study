@@ -1,4 +1,5 @@
 from strategy_workbench.application.experiment_run.ports.outgoing.experiment_repository import (
+    ControlChange,
     ExperimentRecord,
     ExperimentRepositoryPort,
     ExperimentSelection,
@@ -15,6 +16,7 @@ from strategy_workbench.application.experiment_run.ports.outgoing.trial_runs imp
 
 __all__ = [
     "AdmittedRun",
+    "ControlChange",
     "ExperimentRecord",
     "ExperimentRepositoryPort",
     "ExperimentSelection",

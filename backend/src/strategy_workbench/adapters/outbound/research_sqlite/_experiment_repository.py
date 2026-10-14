@@ -14,6 +14,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.database import Sq
 from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
 from strategy_workbench.application.backtest_run.facade.ports import RetiredRunRequestError
 from strategy_workbench.application.experiment_run.facade.ports import (
+    ControlChange,
     ExperimentRecord,
     ExperimentSelection,
     TrialAttempt,
@@ -131,7 +132,9 @@ class SQLiteExperimentRepository:
             if updated.rowcount != 1:
                 raise _not_found(experiment_id)
 
-    def set_controls(self, experiment_id: str, controls: ExperimentControls) -> None:
+    def set_controls(
+        self, experiment_id: str, controls: ExperimentControls, *, changed_at: datetime
+    ) -> None:
         with self._database.transaction(write=True) as connection:
             written = connection.execute(
                 """
@@ -144,6 +147,45 @@ class SQLiteExperimentRepository:
             )
             if written.rowcount != 1:
                 raise _not_found(experiment_id)
+            connection.execute(
+                """
+                INSERT INTO experiment_control_changes
+                    (experiment_order, changed_at, paused, priority)
+                SELECT experiment_order, ?, ?, ? FROM experiments WHERE experiment_id = ?
+                """,
+                (
+                    _time_text(changed_at, "control changed_at", experiment_id),
+                    int(controls.paused),
+                    controls.priority,
+                    experiment_id,
+                ),
+            )
+
+    def control_changes(self, experiment_id: str) -> tuple[ControlChange, ...]:
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                """
+                SELECT changed_at, paused, priority FROM experiment_control_changes
+                JOIN experiments USING (experiment_order)
+                WHERE experiment_id = ? ORDER BY change_order
+                """,
+                (experiment_id,),
+            ).fetchall()
+        try:
+            return tuple(
+                ControlChange(
+                    changed_at=datetime.fromisoformat(row["changed_at"]),
+                    controls=ExperimentControls(
+                        paused=bool(row["paused"]), priority=row["priority"]
+                    ),
+                )
+                for row in rows
+            )
+        except (TypeError, ValueError) as error:
+            raise ResearchStorageError(
+                f"stored experiment control change failed integrity validation — "
+                f"experiment_id={experiment_id}: {error}"
+            ) from error
 
     def add_attempt(self, attempt: TrialAttempt) -> None:
         with self._database.transaction(write=True) as connection:

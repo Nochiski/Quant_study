@@ -22,6 +22,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
     CapacityReport,
     CapacitySweepRequest,
     Experiment,
+    ExperimentAuditEvent,
     ExperimentPage,
     ExperimentPreview,
     ExperimentRequest,
@@ -281,6 +282,16 @@ def register_experiment_routes(
         """남은 실행의 시간 어림(로드맵 M6 ETA). 실험 조회·진행 스트림과 따로 둔다 — 계열 원장을
         읽어 목록·스트림 폴링마다 치르지 않게 한다. 근거가 없으면 null."""
         return experiments.remaining_time(experiment_id)
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/audit",
+        operation_id="getExperimentAudit",
+        responses=rejected,
+    )
+    def get_experiment_audit(experiment_id: str) -> tuple[ExperimentAuditEvent, ...]:
+        """실험 생성·조작·trial attempt·실행 시작과 끝·창 선택·후보 선택·취소를 시각 순으로
+        보인다(로드맵 M6 감사 기록)."""
+        return experiments.audit(experiment_id)
 
     @app.get(
         "/api/v1/experiments/{experiment_id}/parameter-map",

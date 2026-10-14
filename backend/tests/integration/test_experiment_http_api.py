@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import Counter
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,21 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     )
     assert remaining.json() == {"total_seconds": 0.0, "sample_count": 5}
     assert client.get("/api/v1/experiments/missing/remaining-time").status_code == 404
+    # 감사 기록(로드맵 M6): 학습 6회와 창마다 검증 1회가 넘기고·시작하고·끝난 기록이 시각 순으로
+    # 남는다.
+    audit = client.get(f"/api/v1/experiments/{experiment['record']['experiment_id']}/audit").json()
+    assert audit[0]["kind"] == "created"
+    assert Counter(event["kind"] for event in audit) == {
+        "created": 1,
+        "trial_submitted": 6,
+        "window_picked": 2,
+        "run_started": 8,
+        "run_finished": 8,
+    }
+    times = [datetime.fromisoformat(event["occurred_at"]) for event in audit]
+    assert times == sorted(times)
+    # 창 검증 실행의 사건은 창에 귀속된다.
+    assert sum(event["window_index"] is not None for event in audit) == 2 + 2 + 2
     listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
     assert [item["record"]["experiment_id"] for item in listed["items"]] == [
         experiment["record"]["experiment_id"]

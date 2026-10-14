@@ -147,6 +147,8 @@ class _FakeRuns:
         self.schedules: list[tuple[str, bool, int]] = []
         self.submitted_controls: list[ExperimentControls] = []
         self.error_codes: dict[str, RunFailureCode] = {}
+        # 실행이 처음 `running` 이 된 시각(감사 기록 테스트가 정한다).
+        self.started_ats: dict[str, datetime] = {}
         # 다음 `admit` 앞에서 한 번 부른다(복구 제출과 겹치는 조작을 재현한다).
         self.before_admit: Callable[[], None] | None = None
         self.ledger_entries: list[TrialLedgerEntry] = []
@@ -215,6 +217,7 @@ class _FakeRuns:
                 created_at=_AT,
                 updated_at=_AT,
                 error_code=self.error_codes.get(run_id),
+                started_at=self.started_ats.get(run_id),
             )
             for run_id in run_ids
         }
@@ -865,6 +868,7 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
         .record.experiment_id
     )
     with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE experiment_control_changes")
         connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")
         connection.execute("DROP TABLE experiment_controls")
@@ -1218,6 +1222,7 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
         document = json.loads(stored)
         del document["design"]["measured"]
         connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(document),))
+        connection.execute("DROP TABLE experiment_control_changes")
         connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")
         connection.execute("PRAGMA user_version = 4")
@@ -1635,3 +1640,94 @@ def test_a_window_stops_counting_once_its_validation_run_finishes() -> None:
     runs.error_codes["run-5"] = "backtest.run.internal"
     done = service.remaining_time(record.experiment_id)
     assert done is not None and done.total_seconds == 0
+
+
+def test_the_audit_trail_lists_what_happened_to_the_experiment_and_its_trials(
+    tmp_path: Path,
+) -> None:
+    """로드맵 M6 감사 기록: 조작 이력은 다시 연 저장소에도 남고, 나머지는 쌓인 기록에서 읽는다."""
+    path = tmp_path / "research.sqlite3"
+    runs = _FakeRuns()
+    service = _service(runs, repository=SQLiteExperimentRepository(path))
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, paused=True)
+    service.control(experiment_id, paused=False, priority=3)
+    runs.run_statuses["run-0"] = RunStatus.FAILED
+    runs.error_codes["run-0"] = "backtest.run.internal"
+    service.retry(experiment_id, 0)
+    service.cancel(experiment_id)
+
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+    trail = reopened.audit(experiment_id)
+
+    kinds = [event.kind.value for event in trail]
+    # 모두 같은 시각(`_AT`)이라 기록 종류 순이다. 실패한 실행은 끝, 재시도는 새 attempt 다.
+    assert kinds == [
+        "created",
+        "controls_changed",
+        "controls_changed",
+        "trial_submitted",
+        "run_finished",
+        "trial_submitted",
+        "trial_submitted",
+        "trial_submitted",
+        "trial_submitted",
+        "cancelled",
+    ]
+    changes = [(e.paused, e.priority) for e in trail if e.kind.value == "controls_changed"]
+    assert changes == [(True, 1), (False, 3)]
+    failed = next(e for e in trail if e.kind.value == "run_finished")
+    assert (failed.trial_index, failed.run_id, failed.run_status, failed.code) == (
+        0,
+        "run-0",
+        RunStatus.FAILED,
+        "backtest.run.internal",
+    )
+    retried = [e for e in trail if e.kind.value == "trial_submitted" and e.trial_index == 0]
+    assert [(e.attempt, e.run_id) for e in retried] == [(1, "run-0"), (2, "run-4")]
+
+
+def test_the_audit_trail_is_in_time_order() -> None:
+    """뒤에 바꾼 조작은 먼저 넘긴 attempt 뒤에 온다(기록 종류 순이 아니라 시각 순)."""
+    ticks = iter(_AT + timedelta(seconds=second) for second in range(100))
+    ids = iter(f"exp-{number}" for number in range(10))
+    runs = _FakeRuns()
+    service = ExperimentRunService(
+        SQLiteExperimentRepository(),
+        runs,
+        metric_registry=build_default_metric_registry(),
+        new_id=lambda: next(ids),
+        now=lambda: next(ticks),
+        spawn=lambda work: work(),
+        poll_seconds=None,
+    )
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, priority=2)
+
+    trail = service.audit(experiment_id)
+
+    assert [event.kind.value for event in trail][-1] == "controls_changed"
+    assert [event.occurred_at for event in trail] == sorted(e.occurred_at for e in trail)
+
+
+def test_the_audit_trail_keeps_causal_order_and_tells_window_outcomes_apart() -> None:
+    """#521 리뷰: 이어 받은 실행의 시작은 넘긴 시각보다 앞서 보이지 않는다. 창 검증 실행의 사건은
+    창에 귀속되고, 바뀌지 않은 조작은 이력이 없다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    service.control(experiment_id, paused=False, priority=1)  # 기본값 그대로
+    runs.started_ats["run-0"] = _AT - timedelta(hours=1)  # 다른 실험이 먼저 돌리던 실행
+    _finish(runs, {f"run-{index}": _result(1.0) for index in range(4)})
+    service.advance(experiment_id)
+    runs.run_statuses["run-4"] = RunStatus.COMPLETED
+
+    trail = service.audit(experiment_id)
+
+    assert all(event.kind.value != "controls_changed" for event in trail)
+    started = next(e for e in trail if e.kind.value == "run_started")
+    assert (started.run_id, started.occurred_at) == ("run-0", _AT)
+    picked = [e for e in trail if e.kind.value == "window_picked"]
+    assert [(e.window_index, e.run_id) for e in picked] == [(0, "run-4"), (1, "run-5")]
+    validation = next(e for e in trail if e.kind.value == "run_finished" and e.run_id == "run-4")
+    assert (validation.window_index, validation.trial_index) == (0, None)

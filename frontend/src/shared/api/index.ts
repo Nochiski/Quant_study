@@ -69,6 +69,7 @@ export {
   type DraftDiff,
   type DraftDiffRequest,
   type Experiment,
+  type ExperimentAuditEvent,
   type ExperimentPage,
   type ExperimentTrialState,
   type ExperimentPreview,

@@ -13,6 +13,7 @@
 | 4 | 실험 대기열 조작(V3-04): `experiment_controls` |
 | 5 | 워크포워드 창별 자동 선택(V3-05): `experiment_window_picks` |
 | 6 | run 시작 시각(로드맵 M6 시간 추정): `backtest_run_starts` |
+| 7 | 실험 조작 이력(로드맵 M6 감사 기록): `experiment_control_changes` |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
 파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다.
@@ -31,7 +32,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -293,6 +294,26 @@ _V6_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V6_SCHEMA_OBJECTS = V5_SCHEMA_OBJECTS + _V6_ADDED_OBJECTS
 
+# 실험 조작(일시정지·우선순위)을 바꿀 때마다 한 줄. `experiment_controls` 는 현재 값만 덮어쓰므로
+# 감사 기록은 이 표가 정본이다. v7 이전에 바꾼 조작은 이력이 없다.
+_V7_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "experiment_control_changes",
+        """
+        CREATE TABLE experiment_control_changes (
+            change_order INTEGER PRIMARY KEY,
+            experiment_order INTEGER NOT NULL REFERENCES experiments (experiment_order),
+            changed_at TEXT NOT NULL,
+            paused INTEGER NOT NULL CHECK (paused IN (0, 1)),
+            priority INTEGER NOT NULL CHECK (typeof(priority) = 'integer' AND priority >= 1)
+        )
+        """,
+    ),
+)
+
+V7_SCHEMA_OBJECTS = V6_SCHEMA_OBJECTS + _V7_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -309,7 +330,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V6_SCHEMA_OBJECTS,
+            objects=V7_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
@@ -317,6 +338,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 SchemaUpgrade(3, V3_SCHEMA_OBJECTS, _added(_V4_ADDED_OBJECTS)),
                 SchemaUpgrade(4, V4_SCHEMA_OBJECTS, _added(_V5_ADDED_OBJECTS)),
                 SchemaUpgrade(5, V5_SCHEMA_OBJECTS, _added(_V6_ADDED_OBJECTS)),
+                SchemaUpgrade(6, V6_SCHEMA_OBJECTS, _added(_V7_ADDED_OBJECTS)),
             ),
         ),
     )

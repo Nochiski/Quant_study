@@ -246,6 +246,11 @@ test(
     await expect(
       page.getByRole("heading", { name: "워크포워드 결과" }),
     ).toBeVisible();
+    // 감사 기록: 생성부터 실행 시작·끝까지 시각 순으로 남는다.
+    const audit = page.getByRole("table", { name: "감사 기록" });
+    await expect(audit.getByText("실험 생성")).toBeVisible();
+    await expect(audit.getByText("실행 시작").first()).toBeVisible();
+    await expect(audit.getByText("실행 끝").first()).toBeVisible();
   },
 );
 

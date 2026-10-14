@@ -1,4 +1,8 @@
-import { RUN_STATUS, runStageLabel, runStatusLabel } from "../../../entities/backtest";
+import {
+  RUN_STATUS,
+  runStageLabel,
+  runStatusLabel,
+} from "../../../entities/backtest";
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, type FormEvent } from "react";
@@ -11,6 +15,7 @@ import {
   type BacktestRunSummary,
   type RunKind,
 } from "../../../entities/backtest";
+import { displayTime } from "../../../shared/lib/display-time";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, Button, EmptyState } from "../../../shared/ui";
@@ -18,22 +23,6 @@ import "../../../shared/ui/data-list.css";
 
 const ROUTE = "/research/backtests";
 const PAGE_SIZE = 25;
-
-
-const displayTime = (value: string): string => {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-        timeZoneName: "short",
-      }).format(parsed);
-};
 
 const lastPageOffset = (total: number): number =>
   total === 0 ? 0 : Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE;

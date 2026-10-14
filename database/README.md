@@ -151,13 +151,13 @@ uv run --project backend pytest database/tests -q
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
 | 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:51) → `model_daily.sh`(확정판 rc 0·1 일 때만 fi → 모델 → 일간 엑셀 발송, 발송 장부로 D 당 1건 — N-25 Q0 임시, 실패는 notify.log crit 만·체인 rc 불변. 원천 전환 뒤(PR-9 — `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 그리고 `POSTCLOSE_SEND=1`, 판정 `scripts/postclose_conf.sh`)엔 짓기만 하고, 장 마감 발송 장부 `data/model_db/deliver/sent_model_daily.jsonl` 에 그 D 의 basis=evening 줄이 없을 때만 대체 발송 + warn. 줄이 없는데 런 로그의 그 D 장 마감 엑셀(`postclose_excel`) 런 중 보냈을 수 있는 런(rc 3 — 발송 뒤 장부 기록 실패일 수 있다, B-58 · rc 0 발송 on · rc 를 모름)이 하나라도 있거나 장부·런 로그를 못 읽으면 보내지 않고 crit · rc 5. 상세 `docs/MODEL_DELIVER.md` §2) → `daily_report.py`. 06:00 체인이 아직 원장 락을 쥐고 있으면 끝날 때까지 기다렸다가 이어서 돈다(P9, 시간 한도 없음 — 대기 시작은 notify.log 에 info). 06:00 체인이 일찍 끝나도 08:10 전엔 시작하지 않는다 — KRX 확정 데이터(전날 애프터마켓까지 반영) 공개·T-1 정정(07시 전후)을 기다리는 시각이다. 모델 단계 뒤 장 마감 판 아침 잇기(`postclose_chain.sh morning` — v3 아침 KRX 재반영·두 판 대조, 컷오버 PR-8 ⑧. 확정판 rc 0·1 일 때, 모델 단계 성패와 무관). 그 뒤 체인 맨 끝에 조용한 손실 검사(`python -m daily.silent_loss check`, 컷오버 K1-4a — 모델 폐포 표를 직전 거래일 아침 확정판과 대조, 기록형이라 체인 rc 불변, 아래 '조용한 손실 검사') | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") · 아침 잇기는 PR-8 배포 때 · 아침판 짓기만은 **예정**(원천 전환 10-19, PR-9 설정) |
 | 10:30 | `30 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 확정판이 정상이면 그 D 의 엑셀 발송 장부 줄(`data/deliver/sent_model_daily.jsonl`, basis=morning)까지 보고, 없거나 장부를 못 읽으면 crit(B-57, 배포 묶음 5-1 — 손 발송은 사용자 승인 뒤 `scripts/model_daily.sh --date D`). 원천 전환 뒤(PR-9)엔 장 마감 장부(`data/model_db/deliver/sent_model_daily.jsonl`, basis=evening) 줄 또는 아침 장부 줄(대체 발송)을 발송 기록으로 보고, 둘 다 없으면 crit, 어느 장부든 못 읽으면 crit. 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) → 10:30(F-11, 10-06: 빌드가 거래일마다 약 2분씩 길어져 10-03 종료 09:49). 08:10 체인이 원장 락을 기다리는 날엔 이 crit 은 예상된 것이다 — 아래 'DART 완료 판정 실패 · 놓친 확정판' 2번 | 가동 |
-| 15:41 | `41 6 * * 1-5` | `postclose_chain.sh close` — 장 마감 수집(키움 ka10060 KRX, 15:41~16:00) → stage 단독 빌드 → fi → 모델 → 엑셀(그림자 미발송 — 원천 전환 10-19 부터 발송, D 의 엑셀은 이것이 먼저 간다) → v3 그림자 반영. 아래 "장 마감 체인" | **제안**(컷오버 PR-8, 그림자 시작 10-14 에 등록) |
-| 16:30 | `30 7 * * 1-5` | `watchdog.sh postclose_board` — 오늘 장 마감 체인 런 로그(수집 + 단계 5개)가 없거나 실패·미완이면 crit. 세션 예외일·휴장은 정상 | **제안**(컷오버 PR-8) |
+| 15:41 | `41 6 * * 1-5` | `postclose_chain.sh close` — 장 마감 수집(키움 ka10060 KRX, 15:41~16:00) → stage 단독 빌드 → fi → 모델 → 엑셀(그림자 미발송 — 원천 전환 10-19 부터 발송, D 의 엑셀은 이것이 먼저 간다) → v3 그림자 반영. 아래 "장 마감 체인" | **가동 (10-14 11:0x 등록 — 시험 운영, 발송 0 · v3 그림자)** |
+| 16:30 | `30 7 * * 1-5` | `watchdog.sh postclose_board` — 오늘 장 마감 체인 런 로그(수집 + 단계 5개)가 없거나 실패·미완이면 crit. 세션 예외일·휴장은 정상 | **가동 (10-14 11:0x 등록)** |
 | 18:05 | `5 9 * * 1-5` | `QL_KW_EVENING_HHMM=2105 daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피). 체인 끝(키움 rc 0)에 원장 락을 놓고 장 마감 재반영 훅(`postclose_chain.sh refill` — 점수 없는 7표, 컷오버 PR-8 ⑦ · T-38) | 가동 · 재반영 훅은 PR-8 배포 때 |
-| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, 실측 종료 22:38~22:41), 한도 21:45 | 가동 (09-17) — **중단 예정 10-14**(그림자 시작 때 컨트롤러가 줄 앞에 `#` — N-42 Q4, 장 마감 판이 대신한다) |
+| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, 실측 종료 22:38~22:41), 한도 21:45 | **중단 (10-14 11:0x, 줄 앞 `#`)** — 09-17 가동, 시험 운영 시작 때 컨트롤러가 끔(N-42 Q4, 장 마감 판이 대신한다) |
 | 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
 | 23:30 | `30 14 * * *` | `daily.cutover_watch` — 컷오버 감시(QL-L): 그날 v3 무거운 수집 0 · 점수 쓰기 한 곳 · v3 크론(V3-A·B·D). 위반·판정 불가면 crit. 명령 `cd ~/quant-ledger && crontab -l \| PYTHONPATH=src .venv/bin/python -m daily.cutover_watch --v3-db ~/kael-system-v3/data/quant.db --v3-log ~/logs/kael-v3/pipeline.log --crontab - >> logs/cutover_watch.log 2>&1`(아래 "컷오버 감시") | **예정**(컷오버 날 10-19, V3-A~E 적용 뒤 컨트롤러가 등록 — 되돌리면 주석, `docs/CUTOVER_ROLLBACK.md` 4-3) |
-| 23:55 | `55 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) → 23:55(F-11, 10-06 에 00:00 으로 옮겼다가 10-07 수정 — 자정을 넘기면 날짜 판정이 다음 날이 되어 거짓 crit·금요일 무감시. 10-02 종료 23:02) | 가동 — **중단 예정 10-14**(21:20 잠정 빌드와 함께 — 잠정판이 없어 매일 crit 이 난다) |
+| 23:55 | `55 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) → 23:55(F-11, 10-06 에 00:00 으로 옮겼다가 10-07 수정 — 자정을 넘기면 날짜 판정이 다음 날이 되어 거짓 crit·금요일 무감시. 10-02 종료 23:02) | **중단 (10-14 11:0x, 줄 앞 `#`)** — 21:20 잠정 빌드와 함께(잠정판이 없어 매일 crit 이 난다) |
 | 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
 | 토 03:00 | `0 18 * * 5` | `wics_weekly.sh` — WICS 섹터 구성 주간 스냅샷(dt=금요일, L2 28 + L1 10 = 38콜, 멱등) → `data/raw/wiseindex.db`. 전부 빈 응답이면 rc 4 + warn | 가동 (09-20 10:15 등록) |
 | 토 10:00 | `0 1 * * 6` | `wics_weekly.sh --retry` — 빈 코드만 다시 콜(행>0 판본은 skip). 그래도 비면 crit | 가동 (09-20) |
@@ -165,7 +165,7 @@ uv run --project backend pytest database/tests -q
 | 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 빌드 락을 잡고 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
 | ~~매시~~ | — | ~~키움 확정 시각 프로브~~ (09-16 제거 — 09-14 촘촘 프로브로 20:15 정착 확인, `data/evidence/after_market_20260914.db`) | 제거 |
 
-crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 적었다 — 크론은 /bin/sh 로 돌고 HOME 이 있어 그대로 넣어도 된다(서버의 실제 줄은 펼친 경로라 글자 대조는 다르게 나온다, F-13 10-06). WICS 3줄은 10-06 에 빠진 것을 채웠다. 서버가 초기화되면 이대로 넣는다 — 예전 표는 잠정 빌드를
+crontab 복구용 원문 14줄(10-14 장 마감 2줄 추가 · 잠정 빌드 2줄 `#` — 이 표와 같은 값이다. 경로는 `~/` 로 적었다 — 크론은 /bin/sh 로 돌고 HOME 이 있어 그대로 넣어도 된다(서버의 실제 줄은 펼친 경로라 글자 대조는 다르게 나온다, F-13 10-06). WICS 3줄은 10-06 에 빠진 것을 채웠다. 서버가 초기화되면 이대로 넣는다 — 예전 표는 잠정 빌드를
 18:15 로 적어 두어 그대로 복구하면 매 평일 crit 이 났다). 수집 체인 3개의 `>> logs/cron_*.log` 는
 알림 전송 실패를 사후에 확인하기 위한 것이다(DEFECT-D04, `logs/notify_failed.log` 와 짝):
 
@@ -175,8 +175,10 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 5 9 * * 1-5 QL_KW_EVENING_HHMM=2105 /bin/bash ~/quant-ledger/scripts/daily_evening.sh >> ~/quant-ledger/logs/cron_daily_evening.log 2>&1
 50 12 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh evening_ledger >> logs/watchdog.log 2>&1
 30 1 * * * cd ~/quant-ledger && /bin/bash scripts/watchdog.sh morning_build >> logs/watchdog.log 2>&1
-20 12 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/build_evening.sh >> logs/build_evening.log 2>&1
-55 14 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
+#20 12 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/build_evening.sh >> logs/build_evening.log 2>&1
+#55 14 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
+41 6 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/postclose_chain.sh close >> logs/cron_postclose_chain.log 2>&1
+30 7 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh postclose_board >> logs/watchdog.log 2>&1
 30 18 * * 5 cd ~/quant-ledger && /bin/bash scripts/backup_raw.sh >> logs/backup_raw.log 2>&1
 30 19 * * 6 cd ~/quant-ledger && /bin/bash scripts/gc.sh --apply >> logs/gc.log 2>&1
 0 18 * * 5 cd ~/quant-ledger && /bin/bash scripts/wics_weekly.sh >> logs/cron_wics_weekly.log 2>&1
@@ -184,7 +186,7 @@ crontab 복구용 원문 12줄(이 표와 같은 값이다. 경로는 `~/` 로 �
 30 2 * * 6 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh wics_weekly >> logs/watchdog.log 2>&1
 ```
 
-장 마감 체인 크론 **제안**(컷오버 PR-8 — 아직 등록하지 않았다. 등록·삭제는 컨트롤러가 그림자 시작(10-14) 때 한다. 같은 날 `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 을 배포한다 — 꺼져 있으면 체인은 info 한 줄로 끝나고 16:30 워치독이 crit 을 낸다. 등록하면 위 복구용 원문에 옮긴다):
+장 마감 체인 크론 — **10-14 11:0x 등록·위 복구용 원문에 옮김**(시험 운영 시작, 서버 백업 `~/cutover_tools/crontab.bak-20261014`). 원래 제안 글(컷오버 PR-8 — 등록·삭제는 컨트롤러가 그림자 시작(10-14) 때 한다. 같은 날 `config/postclose_chain.env` 의 `POSTCLOSE_ENABLED=1` 을 배포한다 — 꺼져 있으면 체인은 info 한 줄로 끝나고 16:30 워치독이 crit 을 낸다. 등록하면 위 복구용 원문에 옮긴다):
 
 ```cron
 # 15:41 KST 장 마감 체인 — 수급 확정 15:40(N-35 ②, 외부 공개 시각) 뒤. 수집기도 15:41 전이면 rc 3 으로 받지 않는다

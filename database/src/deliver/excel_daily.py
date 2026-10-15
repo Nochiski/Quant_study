@@ -529,11 +529,17 @@ NO_PREV = "전일 데이터 없음"
 class Candidates:
     """오늘 후보(순위순, 대분류마다 최대 k 까지 top_n 종목)와 전일 후보 대비 변화.
 
-    전일 후보 = 전일 순위에 같은 규칙(전일 대분류 = 오늘 값 — 전일 업종 스냅샷은 읽지 않는다).
+    전일 후보 = 전일 순위 **전체**(오늘 모집단에서 빠진 종목 포함 — 추정치 소멸 등)에 같은 규칙.
+    대분류는 오늘 모집단 종목이면 오늘 값, 빠진 종목이면 전일 판 fi_universe 값(`build_daily` 가
+    읽어 `prev_uni` 로 준다). 그 값을 모르면(전일 판 fi_universe 를 못 읽음 · 그 종목 행 없음) 경고
+    로그를 남기고 대분류 없음(한 묶음)으로 둔다. 오늘 모집단만으로 다시 뽑으면 빠진 종목 자리를 전일
+    후보가 아니던 종목이 채워 거짓 '이탈' · '진입' 누락이 생긴다(결함 3).
     변화: 진입(오늘 후보인데 전일 후보 아님) · 이탈(전일 후보인데 오늘 아님 — 오늘 순위가
     top_n 안이면 'k종목 초과' 로 밀린 이탈) · k종목 초과(순위 top_n 안인데 대분류가 이미
-    k종목, 전일도 후보 아님). 전일 순위가 하나도 없으면(첫 날 · 같은 basis 직전 성공 데이터 없음 ·
-    읽기 실패) 변화는 모두 비운다 — 30종목 전부 '진입'으로 보이면 틀린 말이다(코드 리뷰 I-2)."""
+    k종목, 전일도 후보 아님). 오늘 모집단 밖 전일 후보는 Score 에 행이 없어 `gone` 으로 내고 Meta
+    '전일 후보 중 오늘 모집단 밖' 줄에 적는다. 전일 순위가 하나도 없으면(첫 날 · 같은 basis 직전
+    성공 데이터 없음 · 읽기 실패) 변화는 모두 비운다 — 30종목 전부 '진입'으로 보이면 틀린
+    말이다(코드 리뷰 I-2)."""
 
     picked: frozenset[str]
     change: Mapping[str, str]
@@ -542,29 +548,52 @@ class Candidates:
     top_n: int
     k: int
     no_prev: bool = False           # 전일 순위가 없어 변화를 비웠다
+    gone: tuple[tuple[str, str], ...] = ()   # 오늘 모집단 밖 전일 후보 (코드, 이름) — 전일 순위순
 
     @property
     def full_text(self) -> str:
         return "·".join(self.full) or "없음"
 
+    @property
+    def gone_text(self) -> str:
+        """Meta '전일 후보 중 오늘 모집단 밖' 값 — '이름(코드)' 를 ' · ' 로(이름을 모르면 코드만)."""
+        if self.no_prev:
+            return NO_PREV
+        return " · ".join(f"{n}({c})" if n else c for c, n in self.gone) or "없음"
 
-def candidates(view: DayView, prev_rank: Mapping[str, int | None]) -> Candidates:
+
+def candidates(view: DayView, prev_rank: Mapping[str, int | None],
+               prev_uni: Mapping[str, Mapping[str, object]] | None = None) -> Candidates:
+    """`prev_uni` = 전일 판 fi_universe(종목 → 행) — 오늘 모집단에서 빠진 전일 순위 종목의 대분류 ·
+    이름. 빠진 종목이 없으면 읽지 않아도 된다."""
     out = view.output
     top_n, k = out.top_n, out.max_per_sector
     level = "sector_l2" if out.sector_level == "L2" else "sector_l1"
+    prev_uni = prev_uni or {}
 
     def sector_of(t: str) -> object:
         return view.by_ticker.get(t, {}).get(level)
+
+    def prev_sector_of(t: str) -> object:
+        return sector_of(t) if t in view.by_ticker else prev_uni.get(t, {}).get(level)
 
     picked = list(view.candidates)
     no_prev = not any(r is not None for r in prev_rank.values())
     if no_prev:
         log.warning("전일 데이터 없음(주 모델 %s · %s %s) — Score 변화 열을 비운다",
                     view.spec_id, view.date, view.run.basis)
-    order = sorted((t for t in (ticker_of(r) for r in view.rows) if prev_rank.get(t) is not None),
-                   key=lambda t: prev_rank[t] or 0)
+    # 전일 순위 전체 — 오늘 모집단 종목(행 순서) 뒤에 빠진 종목, 전일 순위순(같은 순위는 그 순서)
+    dropped = [t for t, rk in prev_rank.items() if rk is not None and t not in view.by_ticker]
+    order = sorted((t for t in [*(ticker_of(r) for r in view.rows), *dropped]
+                    if prev_rank.get(t) is not None), key=lambda t: prev_rank[t] or 0)
+    unknown = [t for t in dropped if prev_sector_of(t) is None]
+    if unknown:
+        log.warning("전일 후보 — 오늘 모집단 밖 %d종목의 전일 대분류를 몰라 대분류 없음으로 둔다: %s",
+                    len(unknown), ", ".join(unknown[:10]))
     before = {str(r["t"]) for r in cap_candidates([{"t": t} for t in order], top_n, k,
-                                                  lambda r: sector_of(str(r["t"])))}
+                                                  lambda r: prev_sector_of(str(r["t"])))}
+    gone = tuple((t, str(prev_uni.get(t, {}).get("name") or "")) for t in order
+                 if t in before and t not in view.by_ticker)
     now = set(picked)
     change: dict[str, str] = {}
     for r in () if no_prev else view.rows:          # 전일 순위가 없으면 변화를 매기지 않는다
@@ -585,7 +614,7 @@ def candidates(view: DayView, prev_rank: Mapping[str, int | None]) -> Candidates
         names.setdefault(sector_of(t), str(view.uni.get(t, {}).get(name_key) or sector_of(t)))
     full = tuple(names[s] for s in sorted(counts, key=str) if counts[s] >= k)
     cut = max((view.rank(t) or 0 for t in picked), default=None)
-    return Candidates(frozenset(picked), change, cut, full, top_n, k, no_prev)
+    return Candidates(frozenset(picked), change, cut, full, top_n, k, no_prev, gone)
 
 
 def candidate_rule_text(c: Candidates) -> str:
@@ -1454,6 +1483,8 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None,
              f"상위 {view.output.top_n} · {view.output.sector_level} 업종당 최대 "
              f"{view.output.max_per_sector}"),
         ]
+        if cands is not None:   # Score 에 행이 없어 '이탈'이 안 보이는 전일 후보(결함 3)
+            pairs.append(("전일 후보 중 오늘 모집단 밖", cands.gone_text))
     for sid in sorted(run.specs):
         s = run.specs[sid]
         pairs.append((f"데이터 검사 {sid}",
@@ -1560,8 +1591,20 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
             log.warning("전일 순위를 읽지 못했다(%s %s): %s", prev.date, prev.build_id, e)
             prev_rank = {}
 
+    # 오늘 모집단에서 빠진 전일 순위 종목의 대분류 · 이름 — 전일 판 fi_universe(같은 fi 루트)
+    prev_uni: dict[str, Row] = {}
+    dropped = [t for t, rk in prev_rank.items() if rk is not None and t not in view.by_ticker]
+    if prev is not None and dropped:
+        try:
+            prev_uni = {str(r["ticker"]): r for r in read_fi(
+                fi_root, "fi_universe", prev.fi_build_id,
+                columns=("ticker", "name", "sector_l1", "sector_l2"))}
+        except DeliverError as e:
+            log.warning("전일 후보 — 전일 fi_universe 를 읽지 못했다(%s %s): %s",
+                        prev.date, prev.fi_build_id, e)
+
     trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root)
-    cands = candidates(view, prev_rank)
+    cands = candidates(view, prev_rank, prev_uni)
 
     # 시트 순서 = 확정 양식(Score · Sector · Earnings · 새 시트 여섯 · Compare · Raw · Meta · trend).
     # Meta 열 사전은 옛 순서(Score · Raw · Earnings · Sector · Compare) 뒤에 Score 후보 두 줄, 그 뒤

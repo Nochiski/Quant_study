@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import cast
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 from deliver import __main__ as cli
@@ -2542,6 +2543,65 @@ def test_candidates_and_change_follow_the_sector_cap_against_yesterday() -> None
     assert not c.no_prev and none.full_text == "없음"
 
 
+def test_previous_candidates_include_stocks_that_left_todays_population(
+        caplog: pytest.LogCaptureFixture) -> None:
+    """결함 3 — 전일 후보 = 전일 순위 **전체**(오늘 모집단에서 빠진 종목 포함)에 같은 규칙. 빠진
+    종목(g)의 대분류는 전일 판 fi_universe 값. 옛 코드는 오늘 모집단 종목만으로 다시 뽑아 g 자리를
+    전일 후보가 아니던 종목이 채웠다 — ① t5 거짓 '이탈' ② t2 '진입' 누락. 빠진 전일 후보는 Score 에
+    행이 없어 `gone`(Meta 줄)으로 낸다. 전일 대분류를 모르면 경고하고 대분류 없음으로 둔다."""
+    from deliver.excel_daily import candidates
+    sectors = {"t1": "A", "t2": "A", "t3": "B", "t4": "B", "t5": "C", "t6": "C"}
+    today = {"t1": 1, "t2": 2, "t3": 3, "t4": 4, "t5": 5, "t6": 6}
+    view = _CandView(today, sectors, top_n=4, k=2)
+    prev_uni = {"g": {"sector_l1": "A", "name": "빠진종목"}}
+    # ① 옛 코드: 전일 후보 t1 · t3 · t6 · t5(g 자리) → t5 거짓 '이탈'
+    prev1 = {"g": 1, "t1": 2, "t3": 3, "t6": 4, "t5": 5, "t2": 6, "t4": 7}
+    c = candidates(view, prev1, prev_uni)                         # type: ignore[arg-type]
+    assert dict(c.change) == {"t2": "진입", "t4": "진입", "t6": "이탈"}
+    assert c.gone == (("g", "빠진종목"),) and c.gone_text == "빠진종목(g)"
+    # ② 옛 코드: 전일 후보 t1 · t6 · t3 · t2(g 자리) → t2 '진입' 누락
+    prev2 = {"g": 1, "t1": 2, "t6": 3, "t3": 4, "t2": 5, "t5": 6, "t4": 7}
+    c = candidates(view, prev2, prev_uni)                         # type: ignore[arg-type]
+    assert dict(c.change) == {"t2": "진입", "t4": "진입", "t6": "이탈"}
+    # 전일 대분류를 모르면(전일 판 fi_universe 를 못 읽음) 대분류 없음 한 묶음 — 경고 한 줄
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        c = candidates(view, {"g": 1, "t1": 2, "t3": 3, "t6": 4, "t5": 5},  # type: ignore[arg-type]
+                       {})
+    assert c.gone == (("g", ""),) and c.gone_text == "g"
+    assert any("전일 대분류" in r.getMessage() for r in caplog.records)
+    # 빠진 종목이 없는 날 — 전일 판 fi_universe 를 넘겨도 결과가 같다
+    prev = {"t1": 1, "t3": 2, "t5": 3, "t2": 4, "t4": 5, "t6": 6}
+    same = candidates(view, prev, prev_uni)                       # type: ignore[arg-type]
+    assert same == candidates(view, prev)                          # type: ignore[arg-type]
+    assert same.gone == () and same.gone_text == "없음"
+
+
+def test_daily_previous_candidate_outside_todays_population(world: dict[str, Path],
+                                                            tmp_path: Path) -> None:
+    """결함 3 실판 경로 — 금요일 주 모델 모집단에서 0번(목요일 2위 · 후보)이 빠진 날. 목요일 후보
+    G45 9자리는 1 · 0 · 2~8번이라 9번은 '진입'이다(옛 코드는 0번 자리를 9번으로 채워 진입을 놓쳤다).
+    0번은 Score 에 행이 없어 Meta '전일 후보 중 오늘 모집단 밖' 줄에 이름(코드)으로 적는다. 대분류 ·
+    이름은 목요일 판 fi_universe 에서 읽는다."""
+    model = tmp_path / "model"
+    shutil.copytree(world["model"], model)
+    fri = find_run(model, FRI, "morning")
+    assert fri is not None
+    path = model / PRIMARY / f"v={fri.build_id}" / "scores.parquet"
+    tbl = pq.read_table(path)
+    pq.write_table(tbl.filter(pc.not_equal(tbl["ticker"], tick(0))), path)
+    wb = load_workbook(build_daily(FRI, "morning", model_root=model, fi_root=world["fi"],
+                                   out_root=tmp_path / "out").path)
+    ws = wb["Score"]
+    h, rows = header(ws), rows_by_code(ws)
+    assert tick(0) not in rows
+    chg = {t: ws.cell(r, h["변화"]).value for t, r in rows.items()}
+    assert chg[tick(9)] == "진입"
+    assert not [t for t, v in chg.items() if v is not None and str(v).startswith("이탈")]
+    meta = dict(_meta_pairs(wb))
+    assert meta["전일 후보 중 오늘 모집단 밖"] == f"종목0({tick(0)})"
+
+
 def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
     """Score 끝 '후보(대분류당 최대 9)' 블록 — 후보 = view 후보(30), 변화 열, 전일 순위 칸 노랑 =
     변화 '진입'(조건부 서식이라 정렬해도 따라간다), 커버리지 '신선' 은 옅은 회색."""
@@ -2571,6 +2631,7 @@ def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
     tail = [(meta.cell(r, 1).value, meta.cell(r, 2).value) for r in (meta.max_row - 1,
                                                                      meta.max_row)]
     assert tail == [("Score", "후보 · 후보"), ("Score", "후보 · 변화")]
+    assert dict(_meta_pairs(wb))["전일 후보 중 오늘 모집단 밖"] == "없음"
 
 
 def test_sector_week_and_quarter_returns_are_cap_weighted(scope_board) -> None:

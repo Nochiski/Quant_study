@@ -790,8 +790,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         Col("chg", "변화", "txt", None, fixed=chg_width, definition=(
             f"진입: 전일 후보 {top_n} 에 없던 오늘 후보 · 이탈: 전일 후보였는데 오늘 후보 아님 · "
             f"이탈({k}종목 초과): 순위는 {top_n} 안인데 대분류가 이미 {k}종목이라 밀려 이탈 · "
-            f"{k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과. 전일 후보 = 전일 순위에 같은 규칙 "
-            "적용(전일 대분류 = 오늘 값 가정). 노랑(전일 순위 칸) = 진입")),
+            f"{k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과. 전일 후보 = 전일 순위 전체에 같은 "
+            "규칙(오늘 모집단 밖 포함). 대분류: 모집단 안은 오늘 값, 밖은 전일 값. 모집단 밖 이탈은 "
+            "Meta '전일 후보 중 오늘 모집단 밖' 줄. 노랑(전일 순위 칸) = 진입")),
     ), gap=False))
 
     first_axis = f"{view.buckets[0]}_u" if view.buckets else None
@@ -841,7 +842,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         "■ 이탈: 전일 후보였는데 오늘 후보 아님\n"
         f"■ 이탈({k}종목 초과): 순위는 {top_n} 안인데 대분류가 이미 {k}종목이라 밀려 이탈\n"
         f"■ {k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과(전일도 후보 아님)\n"
-        "전일 후보 = 전일 순위에 같은 규칙 적용(전일 대분류 = 오늘 값 가정)"
+        "전일 후보 = 전일 순위 전체에\n같은 규칙(오늘 모집단 밖 포함)\n"
+        "대분류: 모집단 안은 오늘 값,\n밖은 전일 값\n"
+        "모집단 밖 이탈은 Meta\n'전일 후보 중 오늘 모집단 밖' 줄"
         + (f"\n{NO_PREV}: 오늘은 변화 열을 비움" if cands.no_prev else ""))
     # 후보 · 변화 두 줄은 Meta 열 사전 끝에(그룹 이름 '후보')
     tail = [("Score", "후보", label, d) for _s, g, label, d in sh.dictionary

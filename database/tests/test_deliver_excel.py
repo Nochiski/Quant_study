@@ -2692,9 +2692,18 @@ def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
     assert rules[f"{prev}8:{prev}{7 + N}"].dxf.fill.fgColor.rgb == "FFFFFF00"
     assert rules[f"{cov}8:{cov}{7 + N}"].formula == [f'${cov}8="신선"']
     notes = {k: ws.cell(7, h[k]).comment for k in ("비고", "후보", "변화")}
+    meta = wb["Meta"]
     assert all(notes.values())
     assert "오늘 커트라인: 순위" in notes["후보"].text.replace("\n", " ")
-    meta = wb["Meta"]
+    # 변화 설명(결함 3) — 전일 후보는 전일 순위 전체, 대분류는 모집단 안 · 밖, 밖 이탈은 Meta 줄
+    memo = notes["변화"].text.replace("\n", " ").replace("\xa0", " ")
+    defn = next(str(meta.cell(r, 3).value) for r in range(1, meta.max_row + 1)
+                if meta.cell(r, 2).value == "후보 · 변화")
+    for text in (memo, defn):
+        assert "전일 순위 전체에 같은 규칙(오늘 모집단 밖 포함)" in text, text
+        assert "모집단 안은 오늘 값, 밖은 전일 값" in text, text
+        assert "모집단 밖 이탈은 Meta '전일 후보 중 오늘 모집단 밖' 줄" in text, text
+        assert "오늘 값 가정" not in text
     tail = [(meta.cell(r, 1).value, meta.cell(r, 2).value) for r in (meta.max_row - 1,
                                                                      meta.max_row)]
     assert tail == [("Score", "후보 · 후보"), ("Score", "후보 · 변화")]

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import duckdb
 from model.contracts import FactorInputs
 from model.engines._common import crosses_step
 from model.engines.v3_zscore import (
@@ -83,7 +84,7 @@ from .reader import (
     read_scores,
     ymd,
 )
-from .sources import open_sources
+from .sources import SourceMissing, Sources, connect, num, open_sources
 from .trend import FALLBACK_NOTE, WINDOWS, Trend, load_trend, spark_groups
 from .trend import write_sheet as write_trend_sheet
 from .view import DayView, composite_of, load_day, rank_of, ticker_of
@@ -167,6 +168,10 @@ class FiData:
     fins: dict[str, list[Row]] = field(default_factory=dict)
     cons: dict[str, list[Row]] = field(default_factory=dict)
     flow_last: dict[str, str | None] = field(default_factory=dict)
+    # 확정 지배주주 순이익(억원) — 종목 → 'YYYY/MM'. 같은 fi 판 fi_consensus_annual 확정('A') 행 +
+    # 그 표 창(Y−1~Y+1) 밖 Y−2 는 stage stg_consensus_annual(`load_ni_y2`). Earnings 순이익 칸이
+    # 추정치(fi_consensus — 컨센서스 지배 순이익)와 같은 정의로 견주게 한다(결함 2)
+    ni_actual: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def annual(self, t: str, need: Sequence[str] = ("ni",)) -> Row | None:
         """need 열 중 하나라도 값이 있는 가장 최근 연간 확정 행."""
@@ -227,8 +232,57 @@ def load_fi(fi_root: Path, view: DayView) -> FiData:
         fi_root, "fi_prices", bid, columns=("ticker", "close"), where=f"date = DATE '{d}'")}
     flow_last = {str(r["ticker"]): iso(r["last_date"]) for r in read_fi(
         fi_root, "fi_flows", bid, select="ticker, max(date) AS last_date", tail="GROUP BY ticker")}
+    try:
+        ctrl = read_fi(fi_root, "fi_consensus_annual", bid, columns=("ticker", "period", "ni"),
+                       where="data_type = 'A'")
+    except DeliverError as e:
+        # 표가 없는 옛 fi 판 — 확정 지배 순이익 칸은 추정치(회색 E) · 빈칸이 된다(연결 값으로 대신 안 함)
+        log.warning("Earnings 순이익 — fi_consensus_annual 을 읽지 못해 확정 지배 순이익이 없다"
+                    "(데이터 %s): %s", bid, e)
+        ctrl = []
+    ni_actual: dict[str, dict[str, float]] = {}
+    for r in ctrl:
+        if (v := _num(r["ni"])) is not None:
+            ni_actual.setdefault(str(r["ticker"]), {})[str(r["period"])] = v
     return FiData(close=close, fins=_group(read_fi(fi_root, "fi_fin_summary", bid)),
-                  cons=_group(read_fi(fi_root, "fi_consensus", bid)), flow_last=flow_last)
+                  cons=_group(read_fi(fi_root, "fi_consensus", bid)), flow_last=flow_last,
+                  ni_actual=ni_actual)
+
+
+def load_ni_y2(src: Sources, fi_meta: Mapping[str, object], view: DayView, fi: FiData) -> None:
+    """Y−2 확정 지배주주 순이익을 `fi.ni_actual` 에 더한다(그 기 값이 이미 있으면 그대로) — Earnings
+    순이익 Y−1 YoY 의 비교값. fi_consensus_annual 창(Y−1~Y+1) 밖이라 같은 표 계열 stage
+    `stg_consensus_annual` 을 읽는다. 판 = fi 판 JSON `stage_builds` 고정(`open_sources`), 종목마다
+    fetched_date ≤ fi asof 최신 수집 판 · 확정('E' 아닌 행) · 같은 기가 둘이면 period_label 순 첫 행
+    (fi `consensus_annual_sql` 과 같은 고르기). 못 읽으면 경고만 — 그 YoY 칸이 빈다(연결 순이익으로
+    대신하지 않는다)."""
+    year = int(view.date[:4]) - 2
+    try:
+        asof = date.fromisoformat(str(fi_meta.get("asof") or view.date)).isoformat()
+        rel = src.stage("stg_consensus_annual")
+        con = connect()
+        try:
+            got = con.execute(f"""
+                WITH latest AS (
+                    SELECT ticker, max(fetched_date) AS fetched_date FROM {rel}
+                    WHERE fetched_date <= DATE '{asof}' GROUP BY ticker),
+                picked AS (
+                    SELECT a.ticker, a.period, a.ni, row_number() OVER (
+                             PARTITION BY a.ticker, a.period ORDER BY a.period_label) AS rn
+                    FROM {rel} a JOIN latest l
+                         ON l.ticker = a.ticker AND l.fetched_date = a.fetched_date
+                    WHERE substr(a.period, 1, 4) = '{year}' AND coalesce(a.period_kind, '') <> 'E')
+                SELECT ticker, period, ni FROM picked WHERE rn = 1""").fetchall()
+        finally:
+            con.close()
+    except (SourceMissing, duckdb.Error, ValueError) as e:
+        log.warning("Earnings 순이익 — %d 확정 지배 순이익(stage stg_consensus_annual)을 읽지 못해 "
+                    "%d YoY 칸을 비운다: %s", year, year + 1, e)
+        return
+    for t, period, ni in got:
+        if (v := num(ni)) is not None:
+            p = str(period)
+            fi.ni_actual.setdefault(str(t), {}).setdefault(f"{p[:4]}/{p[4:6]}", v)
 
 
 # ── 공통 열 ──────────────────────────────────────────────────────────────────
@@ -846,10 +900,13 @@ def sheet_raw(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
 
 # ── 시트: Earnings ────────────────────────────────────────────────────────────
 METRICS = (("revenue", "매출"), ("op", "영업이익"), ("ni", "순이익"))
+NI_DEFINITION = "지배주주 순이익(컨센서스 표 기준 — 확정·추정 같은 정의)"
 N_QUARTERS = 5          # fi_fin_summary 는 분기 5기만 싣는다(계약 창)
 
 
 def _actual(fi: FiData, t: str, period: str, key: str) -> float | None:
+    if key == "ni":     # 확정 순이익 = 지배주주 순이익(컨센서스 연간 표) — 추정치와 같은 정의(결함 2)
+        return fi.ni_actual.get(t, {}).get(period)
     row = fi.annual_at(t, period)
     return None if row is None else _num(row.get(key))
 
@@ -905,16 +962,20 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
     for key, label in METRICS:
         cols: list[Col] = []
         prev_head = f"{year - 2}"
+        # 순이익은 확정 · 추정 모두 지배주주 순이익이라고 정의 글에 밝힌다(결함 2)
+        name = NI_DEFINITION if key == "ni" else label
+        unit = f"{name}, 억원." if key == "ni" else f"{label}(억원)"
+        actual_src = "컨센서스 연간 표 확정 행" if key == "ni" else "사업보고서"
         for slot, yr, head in years:
             what = (f"{yr}년에 끝나는 결산기(12월 결산 = {yr}/12, 9월 결산이면 {yr}/09) "
-                    "확정치(사업보고서). 확정치가 없으면 같은 결산기 추정치(컨센서스 cur)를 회색 'E' "
-                    "서식으로, 둘 다 없으면 빈칸" if slot == "a"
+                    f"확정치({actual_src}). 확정치가 없으면 같은 결산기 추정치(컨센서스 cur)를 회색 "
+                    "'E' 서식으로, 둘 다 없으면 빈칸" if slot == "a"
                     else f"{yr}년에 끝나는 결산기 추정치(컨센서스 cur)")
             cols += [
-                Col(f"{key}_{slot}", head, "num", "#,##0", definition=f"{label}(억원) {what}"),
+                Col(f"{key}_{slot}", head, "num", "#,##0", definition=f"{unit} {what}"),
                 Col(f"{key}_{slot}_y", yoy_label(prev_head, head), "chg", "#,##0.0", color=False,
                     fit_lines=True, definition=(
-                        f"{label} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 "
+                        f"{name} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 "
                         "추정)와 비교. 부호가 바뀌면 숫자 대신 흑자전환(−→+) · 적자전환(+→−) · "
                         "적자지속(−→−)"
                         + (". 옆 칸이 추정치(회색 'E')면 이 칸도 회색" if slot == "a" else ""))),
@@ -1500,8 +1561,10 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     wb.remove(wb.worksheets[0])
     score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands)
     sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
-    earnings_dict = sheet_earnings(wb, view, fi)
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
+    # Earnings 순이익 Y−2 확정 지배 순이익 — 새 시트 원천 기록(`src.used`)과 따로 연다
+    load_ni_y2(open_sources(fi_meta, equity_root, stage_root), fi_meta, view, fi)
+    earnings_dict = sheet_earnings(wb, view, fi)
     src = open_sources(fi_meta, equity_root, stage_root)
     extra = sheets_extra.build(wb, src, XRefs.of(wb["Sector"]), date.fromisoformat(run.date),
                                extra_universe(view), index=len(wb.worksheets),

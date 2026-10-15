@@ -34,6 +34,7 @@ from model import registry
 from model.contracts import FI_TABLES, score_columns
 from openpyxl import load_workbook
 from openpyxl.formatting.rule import ColorScale
+from stage import manifest
 
 W39 = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"]
 HOLIDAY = "2026-09-23"
@@ -228,7 +229,7 @@ def write_fi_day(fi_root: Path, day: str,
                  edit: Callable[[str, list[dict[str, object]]], None] | None = None) -> str:
     """합성 fi 판 하나. `edit(표 이름, 행 목록)` 으로 쓰기 직전에 표마다 행을 고칠 수 있다."""
     bid = f"m_{day.replace('-', '')}T010000Z"
-    uni, prices, adj, flows, fins, cons = [], [], [], [], [], []
+    uni, prices, adj, flows, fins, cons, cons_a = [], [], [], [], [], [], []
     for i in range(N + 1):
         t = tick(i)
         uni.append({"ticker": t, "date": day, "name": FORMULA_NAME if i == 7 else f"종목{i}",
@@ -261,6 +262,10 @@ def write_fi_day(fi_root: Path, day: str,
             fins.append({"ticker": t, "period": per, "period_type": "annual", "revenue": rev,
                          "op": op, "ni": ni, "roe": 5.0 + i, "roa": 2.0, "debt_ratio": 80.0,
                          "available_date": "2026-03-15" if per == "2025/12" else "2025-03-15"})
+            # 컨센서스 연간 표 확정 행 — 합성 세계는 지배 순이익 = 연결 순이익(두 정의가 갈리는 경우 ·
+            # 실제 창(Y−1~Y+1) 밖 Y−2 를 stage 에서 읽는 경우는 `_controlling_ni` 테스트)
+            cons_a.append({"ticker": t, "period": per, "data_type": "A", "revenue": rev, "op": op,
+                           "ni": ni, "fetched_date": "2026-09-24"})
         for k, per in enumerate(("2025/06", "2025/09", "2025/12", "2026/03", "2026/06")):
             op = 10.0 + k
             if i == 1:
@@ -279,7 +284,7 @@ def write_fi_day(fi_root: Path, day: str,
                          "fetched_date": "2026-09-24"})
     for table, rows in (("fi_universe", uni), ("fi_prices", prices), ("fi_adj_prices", adj),
                         ("fi_flows", flows), ("fi_fin_summary", fins), ("fi_consensus", cons),
-                        ("fi_credit", []), ("fi_consensus_annual", [])):
+                        ("fi_credit", []), ("fi_consensus_annual", cons_a)):
         if edit is not None:
             edit(table, rows)
         write_fi(fi_root, table, bid, rows)
@@ -539,8 +544,12 @@ def test_daily_earnings_real_years_quarters_and_sign_words(daily) -> None:
 def _roll_to_2027(table: str, rows: list[dict[str, object]]) -> None:
     """2027-01-04 판 합성 — 2026 사업보고서는 0번 종목만 나왔고 나머지는 공시 전이다.
     컨센서스는 2026·2027·2028 결산기다(11번 종목은 2026 추정치도 없다).
-    2026/09 분기는 0번 종목만 있다(분기 5기 창이라 0번의 2025/06 은 빠진다)."""
-    if table == "fi_fin_summary":
+    2026/09 분기는 0번 종목만 있다(분기 5기 창이라 0번의 2025/06 은 빠진다).
+    0번의 2026 확정 지배 순이익(컨센서스 연간 표)도 연결 순이익과 같은 값으로 나왔다."""
+    if table == "fi_consensus_annual":
+        rows.append({"ticker": tick(0), "period": "2026/12", "data_type": "A", "revenue": 1450.0,
+                     "op": 150.0, "ni": 75.0, "fetched_date": "2027-01-03"})
+    elif table == "fi_fin_summary":
         rows[:] = [r for r in rows if not (r["ticker"] == tick(0) and r["period"] == "2025/06")]
         rows += [{"ticker": tick(0), "period": "2026/12", "period_type": "annual",
                   "revenue": 1450.0, "op": 150.0, "ni": 75.0, "available_date": "2027-01-03"},
@@ -1847,6 +1856,138 @@ def test_daily_earnings_estimated_prior_year_yoy_is_grey_too(tmp_path: Path) -> 
     est = {code for code, r in rows.items()
            if '"E"' in ws.cell(r, col_of(ws, "2026")).number_format}
     assert grey == est                                   # y-y 회색 = 'E' 칸 행 그대로
+
+
+# ── Earnings 순이익 = 지배주주 순이익(결함 2) ──────────────────────────────────────
+CTRL, CTRL_EST, CTRL_NONE = tick(20), tick(21), tick(22)
+STAGE_PIN = "b_pin_0001"
+NI_DEF = "지배주주 순이익(컨센서스 표 기준 — 확정·추정 같은 정의)"
+
+
+def _controlling_ni(table: str, rows: list[dict[str, object]]) -> None:
+    """LG에너지솔루션(373220, 10-14 판) 모양 — 연결 순이익(fi_fin_summary 60)은 흑자인데 지배 순이익
+    (컨센서스 연간 표 확정 −10,728.1 · 2026E −2,520.9)은 적자. 컨센서스 연간 표 창은 실제처럼
+    Y−1~Y+1 이라 2024 행이 없다(stage 에서 읽는다). CTRL_EST = 2025 확정 지배 행 없이 2025
+    추정치만, CTRL_NONE = 둘 다 없음(연결 순이익은 둘 다 있다)."""
+    if table == "fi_consensus_annual":
+        rows[:] = [r for r in rows if r["period"] != "2024/12" and not (
+            r["ticker"] in (CTRL_EST, CTRL_NONE) and r["period"] == "2025/12")]
+        for r in rows:
+            if r["ticker"] == CTRL:
+                r["ni"] = -10728.1
+    elif table == "fi_consensus":
+        for r in rows:
+            if r["ticker"] == CTRL and r["horizon"] == "cur" and r["target_period"] == "2026/12":
+                r["ni"] = -2520.9
+        rows.append({"ticker": CTRL_EST, "target_period": "2025/12", "horizon": "cur",
+                     "revenue": 1310.0, "op": 141.0, "ni": 55.0, "eps": 900.0, "per": 12.5,
+                     "pbr": 1.1, "n_analysts": 5, "obs_date": "2026-09-24",
+                     "fetched_date": "2026-09-24"})
+
+
+def write_stage_consensus_annual(root: Path, build_id: str,
+                                 rows: list[tuple[str, str, str, str, float]]) -> None:
+    """stage `stg_consensus_annual` 판 하나 — (종목, 수집일, 기 YYYYMM, 종류, 순이익). 나중에 쓴 판이
+    current."""
+    vdir = root / "stg_consensus_annual" / f"v={build_id}"
+    vdir.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.table({
+        "ticker": pa.array([r[0] for r in rows], pa.string()),
+        "fetched_date": pa.array([date.fromisoformat(r[1]) for r in rows], pa.date32()),
+        "period_label": pa.array([f"{r[2][:4]}.{r[2][4:]}({r[3]})" for r in rows], pa.string()),
+        "period": pa.array([r[2] for r in rows], pa.string()),
+        "period_kind": pa.array([r[3] for r in rows], pa.string()),
+        "ni": pa.array([r[4] for r in rows], pa.float64())}), vdir / "part0.parquet")
+    manifest.commit(root / "stg_consensus_annual", manifest.BuildRecord(
+        build_id=build_id, snapshot_id="", rules_version="v_test",
+        built_at_utc="2026-09-26T00:00:00+00:00", n_rows=len(rows), content_hash="test",
+        partitions=[{"path": f"v={build_id}", "n_rows": len(rows)}]))
+
+
+def _controlling_board(tmp_path: Path, pin: str) -> Path:
+    """`_controlling_ni` 판(FRI 아침) + stage 2024 확정 지배 순이익. fi 판 JSON 은 stage 판을 `pin` 에
+    고정한다 — 고정 판 뒤에 다른 값의 판이 current 로 섰고, 고정 판 안에도 asof(09-25) 뒤 수집 ·
+    추정('E') 행이 섞여 있다. 엑셀 경로를 돌려준다."""
+    model_root, fi_root, st = tmp_path / "model", tmp_path / "fi", tmp_path / "stage"
+    fi_bid = write_fi_day(fi_root, FRI, edit=_controlling_ni)
+    write_model_day(model_root, FRI, fi_bid)
+    write_stage_consensus_annual(st, STAGE_PIN, [
+        (CTRL, "2026-09-24", "202412", "A", -10187.4),
+        (CTRL, "2026-09-24", "202412", "E", 777.0),            # 추정 행 — 쓰지 않는다
+        (CTRL, "2026-09-28", "202412", "A", 999.0),            # asof 뒤 수집 — 쓰지 않는다
+        (CTRL_EST, "2026-09-24", "202412", "A", 50.0),
+        (CTRL_NONE, "2026-09-24", "202412", "A", 50.0),
+        (tick(10), "2026-09-24", "202412", "A", 50.0)])
+    write_stage_consensus_annual(st, "b_new_0002", [(CTRL, "2026-09-24", "202412", "A", 12345.0)])
+    runs = fi_root / "_runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "20260925_morning.json").write_text(json.dumps({
+        "build_id": fi_bid, "asof": FRI, "stage_root": str(st),
+        "stage_builds": {"stg_consensus_annual": pin}}), encoding="utf-8")
+    return build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root,
+                       out_root=tmp_path / "out").path
+
+
+def test_daily_earnings_net_income_is_controlling_in_every_cell(tmp_path: Path) -> None:
+    """결함 2 — 순이익 행 모든 칸(2025 확정 · 2026E · 2027E · 각 YoY)이 지배주주 순이익 하나다.
+    2025 확정 = 같은 fi 판 컨센서스 연간 표 확정 행(연결 60 이 아니다), 2024 = 고정 stage 판
+    stg_consensus_annual 확정 행(asof 이하 최신 수집). 매출 · 영업이익 칸은 그대로(연결 확정치)."""
+    wb = load_workbook(_controlling_board(tmp_path, STAGE_PIN))
+    ws = wb["Earnings"]
+    rows = rows_by_code(ws)
+    r = rows[CTRL]
+    ni = {h: col_of(ws, h, 2) for h in ("2025", "YoY (2024-2025)", "2026E", "YoY (2025-2026E)",
+                                        "2027E", "YoY (2026E-2027E)")}
+    assert ws.cell(r, ni["2025"]).value == -10728.1
+    assert ws.cell(r, ni["2025"]).number_format == "#,##0"               # 확정치 — 'E' 아님
+    assert ws.cell(r, ni["YoY (2024-2025)"]).value == "적자지속"           # −10,187.4 → −10,728.1
+    assert ws.cell(r, ni["2026E"]).value == -2520.9
+    assert ws.cell(r, ni["YoY (2025-2026E)"]).value == "적자지속"          # 연결 기준이면 '적자전환'
+    assert ws.cell(r, ni["2027E"]).value == 80
+    assert ws.cell(r, ni["YoY (2026E-2027E)"]).value == "흑자전환"
+    # 매출 · 영업이익은 연결 확정치 그대로(20번 종목: 2024 → 2025 매출 1,200 → 1,300 · 영업이익 120 → 140)
+    assert ws.cell(r, col_of(ws, "2025", 0)).value == 1300
+    rev_y, op_y = (ws.cell(r, col_of(ws, "YoY (2024-2025)", k)).value for k in (0, 1))
+    assert rev_y == pytest.approx((1300 / 1200 - 1) * 100)
+    assert ws.cell(r, col_of(ws, "2025", 1)).value == 140
+    assert op_y == pytest.approx((140 / 120 - 1) * 100)
+    # 확정 지배 순이익이 없으면 같은 결산기 추정치(회색 'E') — 연결 순이익(60)으로 대신하지 않는다
+    est = ws.cell(rows[CTRL_EST], ni["2025"])
+    assert est.value == 55 and '"E"' in est.number_format and est.font.color.rgb.endswith("7F7F7F")
+    est_y = ws.cell(rows[CTRL_EST], ni["YoY (2024-2025)"])
+    assert est_y.value == pytest.approx((55 / 50 - 1) * 100)
+    assert est_y.font.color.rgb.endswith("7F7F7F")
+    assert ws.cell(rows[CTRL_NONE], ni["2025"]).value is None              # 둘 다 없으면 빈칸
+    assert ws.cell(rows[CTRL_NONE], ni["YoY (2024-2025)"]).value is None
+    assert ws.cell(rows[CTRL_NONE], ni["YoY (2025-2026E)"]).value is None
+    y10 = ws.cell(rows[tick(10)], ni["YoY (2024-2025)"]).value
+    assert y10 == pytest.approx((60 / 50 - 1) * 100)
+    # 정의 글(Meta 열 사전) — 순이익 열만 지배주주 순이익이라고 밝힌다
+    meta = wb["Meta"]
+    defs = {(meta.cell(rr, 1).value, meta.cell(rr, 2).value): str(meta.cell(rr, 3).value)
+            for rr in range(1, meta.max_row + 1)}
+    for head in ni:
+        assert NI_DEF in defs[("Earnings", f"순이익(억원 · YoY %) · {head}")], head
+    assert NI_DEF not in defs[("Earnings", "매출(억원 · YoY %) · 2025")]
+
+
+def test_daily_earnings_unreadable_two_years_ago_blanks_only_that_yoy(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Y−2(2024) 확정 지배 순이익을 못 읽으면(고정 판이 GC 됨) 2025 YoY 칸만 빈다 — 연결 순이익으로
+    대신하지 않는다. 다른 칸은 그대로, 경고 로그 한 줄."""
+    with caplog.at_level("WARNING"):
+        wb = load_workbook(_controlling_board(tmp_path, "b_gone_0000"))
+    ws = wb["Earnings"]
+    rows = rows_by_code(ws)
+    y25 = col_of(ws, "YoY (2024-2025)", 2)
+    assert ws.cell(rows[CTRL], y25).value is None
+    assert ws.cell(rows[tick(10)], y25).value is None
+    assert ws.cell(rows[CTRL], col_of(ws, "2025", 2)).value == -10728.1
+    assert ws.cell(rows[CTRL], col_of(ws, "YoY (2025-2026E)", 2)).value == "적자지속"
+    assert ws.cell(rows[CTRL], col_of(ws, "YoY (2024-2025)", 1)).value == pytest.approx(
+        (140 / 120 - 1) * 100)
+    assert any("stg_consensus_annual" in rec.getMessage() for rec in caplog.records
+               if rec.levelname == "WARNING")
 
 
 # ── scope 실물 모양 판(실제 model.build — 주 모델 scope@1.0) ─────────────────────

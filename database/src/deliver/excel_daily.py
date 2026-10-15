@@ -13,7 +13,7 @@ import logging
 import os
 import statistics
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -254,12 +254,21 @@ def load_ni_y2(src: Sources, fi_meta: Mapping[str, object], view: DayView, fi: F
     순이익 Y−1 YoY 의 비교값. fi_consensus_annual 창(Y−1~Y+1) 밖이라 같은 표 계열 stage
     `stg_consensus_annual` 을 읽는다. 판 = fi 판 JSON `stage_builds` 고정(`open_sources`), 종목마다
     fetched_date ≤ fi asof 최신 수집 판 · 확정('E' 아닌 행) · 같은 기가 둘이면 period_label 순 첫 행
-    (fi `consensus_annual_sql` 과 같은 고르기). 못 읽으면 경고만 — 그 YoY 칸이 빈다(연결 순이익으로
-    대신하지 않는다)."""
+    (fi `consensus_annual_sql` 과 같은 고르기). 고정 판이 지워졌으면(keep=3 — 늦은 재생성) current 판을
+    같은 규칙으로 읽는다(stage 이력은 덧붙기만 해 asof 를 걸면 같은 값) — 경고 한 줄. current 판도 못
+    읽으면 경고만 — 그 YoY 칸이 빈다(연결 순이익으로 대신하지 않는다)."""
     year = int(view.date[:4]) - 2
+    table = "stg_consensus_annual"
     try:
         asof = date.fromisoformat(str(fi_meta.get("asof") or view.date)).isoformat()
-        rel = src.stage("stg_consensus_annual")
+        try:
+            rel = src.stage(table)
+        except SourceMissing as e:
+            if table not in src.stage_pins:
+                raise
+            log.warning("Earnings 순이익 — stage %s 고정 판 없음 — current 판 + asof 필터로 대체"
+                        "(고정 판 %s · asof %s): %s", table, src.stage_pins[table], asof, e)
+            rel = replace(src, stage_pins={}, used={}).stage(table)
         con = connect()
         try:
             got = con.execute(f"""

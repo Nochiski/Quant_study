@@ -172,6 +172,7 @@ class FiData:
     # 그 표 창(Y−1~Y+1) 밖 Y−2 는 stage stg_consensus_annual(`load_ni_y2`). Earnings 순이익 칸이
     # 추정치(fi_consensus — 컨센서스 지배 순이익)와 같은 정의로 견주게 한다(결함 2)
     ni_actual: dict[str, dict[str, float]] = field(default_factory=dict)
+    ni_fetched: dict[str, date] = field(default_factory=dict)   # 종목 → 그 표가 고른 수집일
 
     def annual(self, t: str, need: Sequence[str] = ("ni",)) -> Row | None:
         """need 열 중 하나라도 값이 있는 가장 최근 연간 확정 행."""
@@ -233,8 +234,8 @@ def load_fi(fi_root: Path, view: DayView) -> FiData:
     flow_last = {str(r["ticker"]): iso(r["last_date"]) for r in read_fi(
         fi_root, "fi_flows", bid, select="ticker, max(date) AS last_date", tail="GROUP BY ticker")}
     try:
-        ctrl = read_fi(fi_root, "fi_consensus_annual", bid, columns=("ticker", "period", "ni"),
-                       where="data_type = 'A'")
+        ctrl = read_fi(fi_root, "fi_consensus_annual", bid,
+                       columns=("ticker", "period", "data_type", "ni", "fetched_date"))
     except (DeliverError, duckdb.Error) as e:
         # 표가 없는 옛 fi 판 · 깨진 파일 — 엑셀은 그대로, 확정 지배 순이익 칸만 추정치(회색 E) · 빈칸
         # (연결 값으로 대신 안 함)
@@ -242,57 +243,72 @@ def load_fi(fi_root: Path, view: DayView) -> FiData:
                     "(데이터 %s): %s", bid, e)
         ctrl = []
     ni_actual: dict[str, dict[str, float]] = {}
+    ni_fetched: dict[str, date] = {}
     for r in ctrl:
-        if (v := _num(r["ni"])) is not None:
-            ni_actual.setdefault(str(r["ticker"]), {})[str(r["period"])] = v
+        t, fd = str(r["ticker"]), r["fetched_date"]
+        if isinstance(fd, date):
+            ni_fetched[t] = max(fd, ni_fetched.get(t, fd))
+        if r["data_type"] == "A" and (v := _num(r["ni"])) is not None:
+            ni_actual.setdefault(t, {})[str(r["period"])] = v
     return FiData(close=close, fins=_group(read_fi(fi_root, "fi_fin_summary", bid)),
                   cons=_group(read_fi(fi_root, "fi_consensus", bid)), flow_last=flow_last,
-                  ni_actual=ni_actual)
+                  ni_actual=ni_actual, ni_fetched=ni_fetched)
 
 
-def load_ni_y2(src: Sources, fi_meta: Mapping[str, object], view: DayView, fi: FiData) -> None:
+# Y−2 확정 지배 순이익을 읽은 종목이 모집단의 이 몫보다 적으면 경고(10-14 실측 869종목 중 864 ≈ 99%)
+NI_Y2_MIN_SHARE = 0.8
+
+
+def load_ni_y2(src: Sources, view: DayView, fi: FiData) -> None:
     """Y−2 확정 지배주주 순이익을 `fi.ni_actual` 에 더한다(그 기 값이 이미 있으면 그대로) — Earnings
     순이익 Y−1 YoY 의 비교값. fi_consensus_annual 창(Y−1~Y+1) 밖이라 같은 표 계열 stage
-    `stg_consensus_annual` 을 읽는다. 판 = fi 판 JSON `stage_builds` 고정(`open_sources`), 종목마다
-    fetched_date ≤ fi asof 최신 수집 판 · 확정('E' 아닌 행) · 같은 기가 둘이면 period_label 순 첫 행
-    (fi `consensus_annual_sql` 과 같은 고르기). 고정 판이 지워졌으면(keep=3 — 늦은 재생성) current 판을
-    같은 규칙으로 읽는다(stage 이력은 덧붙기만 해 asof 를 걸면 같은 값) — 경고 한 줄. current 판도 못
-    읽으면 경고만 — 그 YoY 칸이 빈다(연결 순이익으로 대신하지 않는다)."""
+    `stg_consensus_annual` 을 읽는다 — 종목마다 fi_consensus_annual 이 고른 바로 그 수집
+    (`fi.ni_fetched` = fetched_date)의 확정('E' 아닌) 행, 같은 기가 둘이면 period_label 순 첫 행(fi
+    `consensus_annual_sql` 과 같은 고르기). 판 = fi 판 JSON `stage_builds` 고정(`open_sources`). 고정
+    판이 지워졌으면(keep=3 — 늦은 재생성) current 판에서 같은 수집의 행을 읽는다(한 수집의 행은 판이
+    바뀌어도 같다) — 경고 한 줄. current 판도 못 읽으면 경고만 — 그 YoY 칸이 빈다(연결 순이익으로
+    대신하지 않는다). 읽은 종목이 모집단의 `NI_Y2_MIN_SHARE` 보다 적으면 경고, 아니면 건수 info."""
     year = int(view.date[:4]) - 2
     table = "stg_consensus_annual"
     try:
-        asof = date.fromisoformat(str(fi_meta.get("asof") or view.date)).isoformat()
         try:
             rel = src.stage(table)
         except SourceMissing as e:
             if table not in src.stage_pins:
                 raise
-            log.warning("Earnings 순이익 — stage %s 고정 판 없음 — current 판 + asof 필터로 대체"
-                        "(고정 판 %s · asof %s): %s", table, src.stage_pins[table], asof, e)
+            log.warning("Earnings 순이익 — stage %s 고정 판 없음 — current 판의 같은 수집 행으로 "
+                        "대체(고정 판 %s): %s", table, src.stage_pins[table], e)
             rel = replace(src, stage_pins={}, used={}).stage(table)
         con = connect()
         try:
+            con.execute("CREATE TEMP TABLE pick (ticker VARCHAR, fetched_date DATE)")
+            con.executemany("INSERT INTO pick VALUES (?, ?)", list(fi.ni_fetched.items()))
             got = con.execute(f"""
-                WITH latest AS (
-                    SELECT ticker, max(fetched_date) AS fetched_date FROM {rel}
-                    WHERE fetched_date <= DATE '{asof}' GROUP BY ticker),
-                picked AS (
+                SELECT ticker, period, ni FROM (
                     SELECT a.ticker, a.period, a.ni, row_number() OVER (
                              PARTITION BY a.ticker, a.period ORDER BY a.period_label) AS rn
-                    FROM {rel} a JOIN latest l
-                         ON l.ticker = a.ticker AND l.fetched_date = a.fetched_date
+                    FROM {rel} a JOIN pick p
+                         ON p.ticker = a.ticker AND p.fetched_date = a.fetched_date
                     WHERE substr(a.period, 1, 4) = '{year}' AND coalesce(a.period_kind, '') <> 'E')
-                SELECT ticker, period, ni FROM picked WHERE rn = 1""").fetchall()
+                WHERE rn = 1""").fetchall()
         finally:
             con.close()
-    except (SourceMissing, duckdb.Error, ValueError) as e:
+    except (SourceMissing, duckdb.Error) as e:
         log.warning("Earnings 순이익 — %d 확정 지배 순이익(stage stg_consensus_annual)을 읽지 못해 "
                     "%d YoY 칸을 비운다: %s", year, year + 1, e)
         return
+    found: set[str] = set()
     for t, period, ni in got:
         if (v := num(ni)) is not None:
             p = str(period)
             fi.ni_actual.setdefault(str(t), {}).setdefault(f"{p[:4]}/{p[4:6]}", v)
+            found.add(str(t))
+    n, total = len(found & set(view.by_ticker)), len(view.by_ticker)
+    if n == 0 or n < NI_Y2_MIN_SHARE * total:
+        log.warning("Earnings 순이익 — %d 확정 지배 순이익(stage)을 모집단 %d/%d종목만 읽었다 — 나머지 "
+                    "%d YoY 칸은 빈다", year, n, total, year + 1)
+    else:
+        log.info("Earnings 순이익 — %d 확정 지배 순이익(stage) 모집단 %d/%d종목", year, n, total)
 
 
 # ── 공통 열 ──────────────────────────────────────────────────────────────────
@@ -1616,7 +1632,8 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
     # Earnings 순이익 Y−2 확정 지배 순이익 — 새 시트 원천 기록(`src.used`)과 따로 연다
-    load_ni_y2(open_sources(fi_meta, equity_root, stage_root), fi_meta, view, fi)
+    load_ni_y2(replace(open_sources(fi_meta, equity_root, stage_root), label="Earnings 순이익"),
+               view, fi)
     earnings_dict = sheet_earnings(wb, view, fi)
     src = open_sources(fi_meta, equity_root, stage_root)
     extra = sheets_extra.build(wb, src, XRefs.of(wb["Sector"]), date.fromisoformat(run.date),

@@ -267,6 +267,9 @@ def write_fi_day(fi_root: Path, day: str,
             # 실제 창(Y−1~Y+1) 밖 Y−2 를 stage 에서 읽는 경우는 `_controlling_ni` 테스트)
             cons_a.append({"ticker": t, "period": per, "data_type": "A", "revenue": rev, "op": op,
                            "ni": ni, "fetched_date": "2026-09-24"})
+        for per, ni in (("2026/12", -3.0 if i == 2 else 70.0), ("2027/12", 80.0)):
+            cons_a.append({"ticker": t, "period": per, "data_type": "E", "revenue": 1200.0 + 10 * i,
+                           "op": 130.0 + i, "ni": ni, "fetched_date": "2026-09-24"})
         for k, per in enumerate(("2025/06", "2025/09", "2025/12", "2026/03", "2026/06")):
             op = 10.0 + k
             if i == 1:
@@ -1874,7 +1877,7 @@ def _controlling_ni(table: str, rows: list[dict[str, object]]) -> None:
         rows[:] = [r for r in rows if r["period"] != "2024/12" and not (
             r["ticker"] in (CTRL_EST, CTRL_NONE) and r["period"] == "2025/12")]
         for r in rows:
-            if r["ticker"] == CTRL:
+            if r["ticker"] == CTRL and r["period"] == "2025/12":
                 r["ni"] = -10728.1
     elif table == "fi_consensus":
         for r in rows:
@@ -1905,10 +1908,12 @@ def write_stage_consensus_annual(root: Path, build_id: str,
         partitions=[{"path": f"v={build_id}", "n_rows": len(rows)}]))
 
 
-# 고정 판 행 — asof(09-25) 뒤 수집 · 추정('E') 행이 섞여 있다(둘 다 쓰지 않는다)
+# 고정 판 행 — fi 가 고른 수집(09-24, fi_consensus_annual fetched_date)의 확정 행만 쓴다. 다른 수집
+# (asof 이하인 09-25 · 그 뒤 09-28)과 추정('E') 행은 쓰지 않는다
 PINNED_ROWS = [
     (CTRL, "2026-09-24", "202412", "A", -10187.4),
     (CTRL, "2026-09-24", "202412", "E", 777.0),
+    (CTRL, "2026-09-25", "202412", "A", 888.0),
     (CTRL, "2026-09-28", "202412", "A", 999.0),
     (CTRL_EST, "2026-09-24", "202412", "A", 50.0),
     (CTRL_NONE, "2026-09-24", "202412", "A", 50.0),
@@ -1937,11 +1942,16 @@ def _controlling_board(tmp_path: Path, pin: str,
                        out_root=tmp_path / "out").path
 
 
-def test_daily_earnings_net_income_is_controlling_in_every_cell(tmp_path: Path) -> None:
+def test_daily_earnings_net_income_is_controlling_in_every_cell(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """결함 2 — 순이익 행 모든 칸(2025 확정 · 2026E · 2027E · 각 YoY)이 지배주주 순이익 하나다.
     2025 확정 = 같은 fi 판 컨센서스 연간 표 확정 행(연결 60 이 아니다), 2024 = 고정 stage 판
-    stg_consensus_annual 확정 행(asof 이하 최신 수집). 매출 · 영업이익 칸은 그대로(연결 확정치)."""
-    wb = load_workbook(_controlling_board(tmp_path, STAGE_PIN))
+    stg_consensus_annual 에서 fi 가 고른 수집(fetched_date)의 확정 행. 매출 · 영업이익 칸은 그대로
+    (연결 확정치). stage 에서 2024 를 읽은 종목이 모집단보다 크게 적으면 경고 한 줄."""
+    with caplog.at_level("WARNING"):
+        wb = load_workbook(_controlling_board(tmp_path, STAGE_PIN))
+    assert any("2024 확정 지배 순이익" in rec.getMessage() and "4/45" in rec.getMessage()
+               for rec in caplog.records if rec.levelname == "WARNING")
     ws = wb["Earnings"]
     rows = rows_by_code(ws)
     r = rows[CTRL]
@@ -1980,13 +1990,16 @@ def test_daily_earnings_net_income_is_controlling_in_every_cell(tmp_path: Path) 
     assert NI_DEF not in defs[("Earnings", "매출(억원 · YoY %) · 2025")]
 
 
-def test_daily_earnings_gc_pinned_two_years_ago_falls_back_to_current_as_of(
+def test_daily_earnings_gc_pinned_two_years_ago_falls_back_to_current_same_fetch(
         tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """Y−2(2024) 고정 stage 판이 지워졌으면(keep=3 — 늦은 재생성) current 판을 같은 규칙(종목마다
-    fetched_date ≤ fi asof 최신 수집 · 확정 행)으로 읽는다. stage 이력은 덧붙기만 해 current 판에
-    asof 를 걸면 고정 판과 같은 값이다 — 2025 YoY 가 통째로 비지 않는다. 대체했다는 경고 한 줄."""
-    history = [*PINNED_ROWS, (CTRL, "2026-09-29", "202412", "A", 888.0)]   # 그 뒤 수집이 덧붙음
-    with caplog.at_level("WARNING"):
+    """Y−2(2024) 고정 stage 판이 지워졌으면(keep=3 — 늦은 재생성) current 판에서 fi 가 고른 수집
+    (fetched_date)의 확정 행을 읽는다 — 그 수집의 행은 판이 바뀌어도 같아 고정 판과 같은 값이다.
+    2025 YoY 가 통째로 비지 않는다. 대체 경고는 Earnings 원천이라고 적는다(새 시트 원천이 아니다).
+    읽은 종목이 모집단만큼이면 경고 대신 건수 info."""
+    rest = [(t, "2026-09-24", "202412", "A", 50.0) for t in map(tick, range(N + 1))
+            if t not in {r[0] for r in PINNED_ROWS}]
+    history = [*PINNED_ROWS, *rest, (CTRL, "2026-09-29", "202412", "A", 777.0)]   # 그 뒤 수집
+    with caplog.at_level("INFO"):
         wb = load_workbook(_controlling_board(tmp_path, "b_gone_0000", current=history))
     ws = wb["Earnings"]
     rows = rows_by_code(ws)
@@ -1994,8 +2007,14 @@ def test_daily_earnings_gc_pinned_two_years_ago_falls_back_to_current_as_of(
     assert ws.cell(rows[CTRL], y25).value == "적자지속"                   # −10,187.4 → −10,728.1
     assert ws.cell(rows[tick(10)], y25).value == pytest.approx((60 / 50 - 1) * 100)
     assert ws.cell(rows[CTRL_EST], y25).value == pytest.approx((55 / 50 - 1) * 100)
-    assert any("고정 판 없음 — current 판 + asof 필터로 대체" in rec.getMessage()
-               for rec in caplog.records if rec.levelname == "WARNING")
+    msgs = {rec.levelname: [] for rec in caplog.records}
+    for rec in caplog.records:
+        msgs[rec.levelname].append(rec.getMessage())
+    assert any("고정 판 없음 — current 판의 같은 수집 행으로 대체" in m for m in msgs["WARNING"])
+    assert any(m.startswith("Earnings 순이익 원천 stage stg_consensus_annual") for m in msgs["WARNING"])
+    assert not any(m.startswith("새 시트 원천 stage stg_consensus_annual") for m in msgs["WARNING"])
+    assert any("2024 확정 지배 순이익" in m and "45/45" in m for m in msgs.get("INFO", []))
+    assert not any("2024 확정 지배 순이익" in m for m in msgs["WARNING"])
 
 
 def test_daily_earnings_unreadable_two_years_ago_blanks_only_that_yoy(

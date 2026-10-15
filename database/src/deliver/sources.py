@@ -42,6 +42,7 @@ class Sources:
     equity_pins: Mapping[str, str] = field(default_factory=dict)
     stage_pins: Mapping[str, str] = field(default_factory=dict)
     used: dict[str, str] = field(default_factory=dict)      # '층/표' → 판 id
+    label: str = "새 시트"                                   # 로그에 적는 읽는 쪽 이름
 
     def _read(self, layer: str, root: Path | None, table: str, build_id: str | None) -> str:
         # 사유 글은 엑셀 시트에 그대로 실린다 — 서버 경로는 로그에만 남기고, 읽는 사람이 모르는
@@ -51,7 +52,7 @@ class Sources:
         try:
             pb = inputs.resolve(Path(root), table, build_id)
         except (FileNotFoundError, KeyError, ValueError) as e:
-            log.warning("새 시트 원천 %s %s 를 못 읽었다 — %s", layer, table, e)
+            log.warning("%s 원천 %s %s 를 못 읽었다 — %s", self.label, layer, table, e)
             raise SourceMissing(f"{layer} {table} 데이터를 못 찾았다") from e
         files = [str(p) for p in pb.globs]
         if not files:

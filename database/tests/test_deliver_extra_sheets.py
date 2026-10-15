@@ -450,7 +450,11 @@ def sheet_digest(ws) -> tuple[int, str]:
     return len(cells), hashlib.sha256("\n".join(cells).encode("utf-8")).hexdigest()
 
 
-# 78c557d6(결함 1 수정 전) 코드로 잰 지문 — 정상 운영 날짜 정렬에서는 칸이 하나도 바뀌지 않아야 한다
+# (칸 수, sha256) — 78c557d6(결함 1 수정 전) 코드에서 아래 테스트와 같은 합성 원천(build_equity(last=
+# DAYS[-2]))으로 Market · Short 시트를 만들어 `sheet_digest` 로 잰 값. 정상 운영 날짜 정렬에서는 칸이 하나도
+# 바뀌지 않아야 한다. 의도한 표시 변경(문구 · 서식 · 열)을 넣으면 그 커밋에서 다시 잰다 — 이 테스트의 본문
+# 그대로 시트를 만들고 `print(sheet_digest(wb["Market"]), sheet_digest(wb["Short"]))` 값을 옮기고, 바뀐
+# 칸이 의도한 것뿐인지 옛 · 새 시트 칸 비교로 먼저 확인한다
 ALIGNED_MARKET = (1772, "9e0213b75f218f675233351c6e58455d3e2410fba82de61abb9664c95cbcf039")
 ALIGNED_SHORT = (1841, "281a885c9dcb2a92fb00ebbd7ea5d99461a79db0b801e9ac4847621a7b041a7f")
 

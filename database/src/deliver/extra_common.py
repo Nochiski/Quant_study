@@ -130,11 +130,17 @@ def latest_complete(con: duckdb.DuckDBPyConnection, rel: str, col: str, upto: da
     return Latest(day_of(got[0][0]))
 
 
-def common_markets(con: duckdb.DuckDBPyConnection, src: Sources, day: date) -> None:
-    """`mk`(ticker, market) — 그날 보통주 코스피 · 코스닥."""
+def common_markets(con: duckdb.DuckDBPyConnection, src: Sources, day: date) -> date:
+    """`mk`(ticker, market) — `day` 이하 최신 유니버스 날짜의 보통주 코스피 · 코스닥. 그 날짜를
+    돌려준다. 지수(current 판)가 fi 판에 고정된 유니버스보다 하루 앞설 수 있어(D+1 아침 체인 뒤에
+    만든 엑셀) 그날 행만 찾으면 0행이 되고 시장 폭 · 시장 수급이 조용히 빈칸이 된다(결함 1).
+    자료가 없으면 SourceMissing('데이터 없음')."""
+    ud = src.equity("universe_daily")
+    where = "sec_type = 'common' AND market IN ('KOSPI', 'KOSDAQ')"
+    asof = latest(con, ud, "date", day, where, "종목 유니버스(보통주 코스피 · 코스닥)")
     con.execute(f"""CREATE OR REPLACE TEMP TABLE mk AS
-        SELECT ticker, market FROM {src.equity('universe_daily')}
-        WHERE date = {lit(day)} AND sec_type = 'common' AND market IN ('KOSPI', 'KOSDAQ')""")
+        SELECT ticker, market FROM {ud} WHERE date = {lit(asof)} AND {where}""")
+    return asof
 
 
 def closes(con: duckdb.DuckDBPyConnection, src: Sources, day: date,

@@ -8,6 +8,7 @@ tick(25) 오름(2026-06-01 2:1 분할 — 수정종가로만 오름) · 900001(�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -33,9 +34,16 @@ from deliver import (
     sheets_extra,
 )
 from deliver.excel_daily import build_daily
-from deliver.extra_common import Stock, base_text, krx_calendar, latest_complete, span
+from deliver.extra_common import (
+    Stock,
+    base_text,
+    common_markets,
+    krx_calendar,
+    latest_complete,
+    span,
+)
 from deliver.qpack import XRefs, new_workbook
-from deliver.sources import Sources, connect
+from deliver.sources import SourceMissing, Sources, connect
 from openpyxl import Workbook, load_workbook
 from stage import manifest
 from test_deliver_excel import FRI, HOLIDAY, W38, W39, tick, write_fi_day, write_model_day
@@ -86,17 +94,20 @@ S, F, DT, B = pa.string(), pa.float64(), pa.date32(), pa.bool_()
 
 def build_equity(root: Path, last: date = D, *, flow_last: date | None = None,
                  flow_partial: bool = False, holder_last: date | None = None,
-                 saturday_fetch: bool = False) -> None:
+                 saturday_fetch: bool = False, index_last: date | None = None) -> None:
     """합성 equity. flow_last = 키움 수급 마지막 날(지수보다 늦게 끝나게), flow_partial = 마지막 날
-    수급이 한 종목뿐(일부 수집), holder_last = 지분 보고 마지막 날, saturday_fetch = 토요일 의견 수집."""
+    수급이 한 종목뿐(일부 수집), holder_last = 지분 보고 마지막 날, saturday_fetch = 토요일 의견 수집,
+    index_last = KRX 지수만 `last` 보다 늦게 끝나게(D+1 아침 체인 뒤 생성 — 지수는 current 판,
+    나머지는 fi 판에 고정된 하루 늦은 판)."""
     days = [x for x in DAYS if x <= last]
     idx_rows, price, uni, flow, short, credit = [], [], [], [], [], []
-    for i, dd in enumerate(days):
+    for i, dd in enumerate(x for x in DAYS if x <= max(last, index_last or last)):
         for cls, nm, c in (("KOSPI", "코스피", 2000.0 + i), ("KOSDAQ", "코스닥", 800.0 + i / 2),
                            ("KOSPI", "코스피 200", 300.0 + i), ("KOSPI", "전기전자", 100.0 + i),
                            ("KOSDAQ", "제약", 100.0 - i / 10), ("KOSPI", "제조", 50.0)):
             idx_rows.append({"index_class": cls, "index_name": nm, "date": dd, "close_idx": c,
                              "value_krw": 10e12 + i * 1e9, "mktcap_krw": 2000e12})
+    for i, dd in enumerate(days):
         for t, mkt in MARKET.items():
             c = close_of(t, i)
             price.append({"ticker": t, "date": dd, "open": c, "high": c, "low": c, "close": c,
@@ -423,6 +434,79 @@ def test_market_flow_lagging_index_gets_its_own_date_and_blanks(tmp_path: Path, 
     last = max(rr for rr in range(8, 400) if ws.cell(rr, 30).value is not None)
     assert ws.cell(last, 30).value == D                             # 그래프 원자료 끝 = 지수 날
     assert ws.cell(last, 33).value is None and ws.cell(last - 1, 33).value is not None
+
+
+def sheet_digest(ws) -> tuple[int, str]:
+    """시트 전 칸(좌표 · 값 · 숫자 서식 · 메모)의 지문 — 실수는 유효숫자 12자리로 적는다(합계 순서에
+    따른 끝자리 흔들림을 지문에 넣지 않는다)."""
+    cells = []
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value is None and c.comment is None:
+                continue
+            v = f"{c.value:.12g}" if isinstance(c.value, float) else repr(c.value)
+            memo = "" if c.comment is None else c.comment.text
+            cells.append(f"{c.coordinate}|{v}|{c.number_format}|{memo}")
+    return len(cells), hashlib.sha256("\n".join(cells).encode("utf-8")).hexdigest()
+
+
+# 78c557d6(결함 1 수정 전) 코드로 잰 지문 — 정상 운영 날짜 정렬에서는 칸이 하나도 바뀌지 않아야 한다
+ALIGNED_MARKET = (1772, "9e0213b75f218f675233351c6e58455d3e2410fba82de61abb9664c95cbcf039")
+ALIGNED_SHORT = (1841, "281a885c9dcb2a92fb00ebbd7ea5d99461a79db0b801e9ac4847621a7b041a7f")
+
+
+def test_market_and_short_cells_unchanged_when_all_sources_end_on_the_same_day(
+        tmp_path: Path, con) -> None:
+    """정상 운영(D 15:41 생성 — 지수 · 유니버스 · 가격 · 수급 원천이 모두 D−1 에서 끝난다)의 Market ·
+    Short 시트는 결함 1 수정(시장 구분 as-of · 시장 폭 블록 기준일) 전과 칸 단위로 같다."""
+    eq = tmp_path / "equity"
+    build_equity(eq, last=DAYS[-2])
+    src = Sources(eq, None, {})
+    wb, refs = book_with_refs()
+    sheet_market.write(wb, sheet_market.load(con, src, D), refs, D)
+    sheet_short.write(wb, sheet_short.load(con, src, D, UNI), UNI, refs, D)
+    assert sheet_digest(wb["Market"]) == ALIGNED_MARKET
+    assert sheet_digest(wb["Short"]) == ALIGNED_SHORT
+
+
+def test_market_built_after_the_next_morning_chain_uses_the_pinned_day(tmp_path: Path,
+                                                                      con) -> None:
+    """결함 1 — D+1 아침 체인 뒤에 만들면(늦은 재발송 · 수동 재생성) 지수(current 판)는 D 까지,
+    fi 판에 고정된 유니버스 · 가격 · 수급은 D−1 까지다. 시장 구분은 D 이하 최신 유니버스 날짜로 만들어
+    시장 폭 · 시장 투자자별 순매수 · 외국인 누적이 D−1 값으로 차고, 시장 폭 · 거래대금 블록은 가격
+    최신일(D−1)까지만 행을 내며 제목에 그 날짜를 적는다(데이터 없는 D 행을 빈칸으로 내지 않는다)."""
+    eq = tmp_path / "equity"
+    build_equity(eq, last=DAYS[-2], index_last=D)
+    m = sheet_market.load(con, Sources(eq, None, {}), D)
+    assert (m.cal.day, m.flow.day) == (D, DAYS[-2])
+    b = m.breadth[-1]
+    assert b.day == DAYS[-2] and len(m.breadth) == 20
+    assert (b.kospi, b.kosdaq, b.hi, b.lo) == ((2, 1, 0), (2, 0, 1), 5, 2)
+    f = m.mkt_flow[("KOSPI", "1W")]
+    assert (f["frgnr_invsr_krw"] or 0) + (f["natfor_krw"] or 0) == pytest.approx(3 * 5 * 11e8)
+    wb, refs = book_with_refs()
+    sheet_market.write(wb, m, refs, D)
+    ws = wb["Market"]
+    assert ws["A4"].value == "기준일: 2026-09-25 · 수급 09-24"
+    row_of(ws, "시장 투자자별 순매수(억원): 보통주, 09-24까지")
+    r = row_of(ws, "시장 폭: 최근 20거래일, 보통주, 09-24까지") + 2
+    assert [ws.cell(r, c).value for c in (1, 3, 4, 5)] == ["09-24", 2, 1, 0]
+    assert ws.cell(r, 11).value == pytest.approx(3e9 / 1e12)       # 코스피 거래대금(조원)
+    assert "09-25" not in values(ws)                               # 데이터 없는 날 행은 없다
+    r = row_of(ws, "외국인")
+    assert ws.cell(r, 3).value == pytest.approx(3 * 11)            # 1D 코스피(억원)
+    last = max(rr for rr in range(8, 400) if ws.cell(rr, 30).value is not None)
+    assert ws.cell(last, 30).value == D                            # 그래프 원자료 끝 = 지수 날
+    assert ws.cell(last, 33).value is None and ws.cell(last - 1, 33).value is not None
+
+
+def test_common_markets_is_as_of_and_an_empty_universe_is_no_data(src: Sources, con) -> None:
+    """시장 구분(mk)은 기준일 이하 최신 유니버스 날짜의 보통주 코스피 · 코스닥이고 그 날짜를
+    돌려준다. 0행이면 조용한 빈칸 대신 '데이터 없음'(SourceMissing)."""
+    assert common_markets(con, src, SATURDAY) == D
+    assert con.execute("SELECT count(*) FROM mk").fetchone()[0] == len(MARKET)
+    with pytest.raises(SourceMissing, match="유니버스"):
+        common_markets(con, src, DAYS[0] - timedelta(days=1))
 
 
 # ── Flow ─────────────────────────────────────────────────────────────────────

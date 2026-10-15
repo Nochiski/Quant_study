@@ -2017,6 +2017,54 @@ def test_daily_earnings_unreadable_two_years_ago_blanks_only_that_yoy(
                if rec.levelname == "WARNING")
 
 
+@pytest.mark.parametrize("case", ["missing", "broken"])
+def test_daily_earnings_unreadable_consensus_annual_leaves_only_those_cells_blank(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture, case: str) -> None:
+    """fi_consensus_annual 을 못 읽으면(옛 fi 판 — 표 없음 · 깨진 파일) 엑셀은 그대로 나가고 순이익
+    확정 칸만 추정치 · 빈칸이다(연결 순이익으로 대신하지 않는다). 경고 로그."""
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    fi_bid = write_fi_day(fi_root, FRI)
+    write_model_day(model_root, FRI, fi_bid)
+    part = fi_root / "fi_consensus_annual" / f"v={fi_bid}"
+    shutil.rmtree(part)
+    if case == "broken":
+        part.mkdir(parents=True)
+        (part / "part0.parquet").write_bytes(b"not a parquet file")
+    with caplog.at_level("WARNING"):
+        res = build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root,
+                          out_root=tmp_path / "out")
+    ws = load_workbook(res.path)["Earnings"]
+    r = rows_by_code(ws)[tick(10)]
+    assert ws.cell(r, col_of(ws, "2025", 2)).value is None        # 연결 60 이 아니다
+    assert ws.cell(r, col_of(ws, "2026E", 2)).value == 70
+    assert ws.cell(r, col_of(ws, "2025", 0)).value == 1200        # 매출은 그대로
+    assert any("fi_consensus_annual" in rec.getMessage() for rec in caplog.records
+               if rec.levelname == "WARNING")
+
+
+def test_daily_unreadable_previous_universe_keeps_the_excel(
+        world: dict[str, Path], tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """전일 판 fi_universe 를 못 읽으면(깨진 파일) 엑셀은 그대로 나가고 오늘 모집단 밖 전일 종목만
+    대분류 없음 · 이름 없이(코드만) 다룬다. 경고 로그."""
+    model, fi = tmp_path / "model", tmp_path / "fi"
+    shutil.copytree(world["model"], model)
+    shutil.copytree(world["fi"], fi)
+    fri, thu = find_run(model, FRI, "morning"), find_run(model, THU, "morning")
+    assert fri is not None and thu is not None
+    path = model / PRIMARY / f"v={fri.build_id}" / "scores.parquet"
+    tbl = pq.read_table(path)
+    pq.write_table(tbl.filter(pc.not_equal(tbl["ticker"], tick(0))), path)
+    for f in (fi / "fi_universe" / f"v={thu.fi_build_id}").glob("*.parquet"):
+        f.write_bytes(b"not a parquet file")
+    with caplog.at_level("WARNING"):
+        wb = load_workbook(build_daily(FRI, "morning", model_root=model, fi_root=fi,
+                                       out_root=tmp_path / "out").path)
+    assert dict(_meta_pairs(wb))["전일 후보 중 오늘 모집단 밖"] == tick(0)
+    msgs = [rec.getMessage() for rec in caplog.records if rec.levelname == "WARNING"]
+    assert any("전일 fi_universe" in m for m in msgs)
+    assert any("전일 대분류" in m for m in msgs)
+
+
 # ── scope 실물 모양 판(실제 model.build — 주 모델 scope@1.0) ─────────────────────
 # 연간 확정 PER·PBR·배당수익률이 없는 종목 → scope 밸류 버킷 결측(279570 모양)
 NO_VAL = "100007"

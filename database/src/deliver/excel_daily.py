@@ -235,8 +235,9 @@ def load_fi(fi_root: Path, view: DayView) -> FiData:
     try:
         ctrl = read_fi(fi_root, "fi_consensus_annual", bid, columns=("ticker", "period", "ni"),
                        where="data_type = 'A'")
-    except DeliverError as e:
-        # 표가 없는 옛 fi 판 — 확정 지배 순이익 칸은 추정치(회색 E) · 빈칸이 된다(연결 값으로 대신 안 함)
+    except (DeliverError, duckdb.Error) as e:
+        # 표가 없는 옛 fi 판 · 깨진 파일 — 엑셀은 그대로, 확정 지배 순이익 칸만 추정치(회색 E) · 빈칸
+        # (연결 값으로 대신 안 함)
         log.warning("Earnings 순이익 — fi_consensus_annual 을 읽지 못해 확정 지배 순이익이 없다"
                     "(데이터 %s): %s", bid, e)
         ctrl = []
@@ -1599,7 +1600,7 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
             prev_uni = {str(r["ticker"]): r for r in read_fi(
                 fi_root, "fi_universe", prev.fi_build_id,
                 columns=("ticker", "name", "sector_l1", "sector_l2"))}
-        except DeliverError as e:
+        except (DeliverError, duckdb.Error) as e:      # 엑셀은 그대로 — 그 종목만 대분류 없음
             log.warning("전일 후보 — 전일 fi_universe 를 읽지 못했다(%s %s): %s",
                         prev.date, prev.fi_build_id, e)
 

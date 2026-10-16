@@ -232,16 +232,63 @@ uv run --no-sync --project backend pytest backend/tests/integration/test_s04_acc
 해당 없음이다.
 
 
-### 다음 기능의 최소 범위 — 아직 미구현
+### 완료 run의 초기자본 기준 계좌 보고서 — 구현된 최소 범위
 
-의도는 완료된 단일 실행의 비용 후 계좌 결과를 초기자본 기준으로 따로 읽는 것이다. 외부 입출금 없는
-단일 실행만 다루며, API·CLI·저장 출력 경로는 이번에 확정하거나 구현하지 않는다.
-구현 후보 owner는 `domain/backtest`의 새 순수 projection·전용 facade이며 기존
-`BacktestRunService.result`가 읽은 `BacktestRunResult`의 `manifest.run_spec.initial_cash`와
-`artifacts.snapshots`를 사용한다. 새 엔진·재실행·기존 결과 저장 변경은 필요하지 않다.
+의도는 외부 입출금 없는 완료된 단일 실행의 초기자본 대비 비용 후 계좌 평가손익을 따로 읽는 것이다.
+질문은 **첫 snapshot에 진입 비용이 이미 반영되어도 원래 초기조건과 최종 평가액으로 손익을 읽고,
+기존 FULL 지표와 원본 결과를 보존할 수 있는가**다.
+
+`domain/backtest/_account_report.py`의 순수 `project_account_report`와 전용
+`facade/account_report.py`가 금액·상태·해석 문장을 소유한다. 입력은 저장된 `BacktestRunResult`의
+`manifest.run_spec.initial_cash`와 `artifacts.snapshots`다. `BacktestRunService.account_report`는
+기존 `self.result(run_id)`를 한 번 호출해 완료 여부·해시·역직렬화 검증을 재사용한다.
+HTTP `GET /api/v1/backtests/{run_id}/account-report`(`getBacktestAccountReport`)와 생성 SDK·shared
+API gateway가 별도 typed 응답을 제공하며 화면은 금액을 재계산하지 않는다. assistant용 오류→None
+포트는 쓰지 않는다.
+
 필드는 날짜 없는 초기조건인 초기자본, 첫/마지막 snapshot 날짜, 최종 현금/자산, 평가손익
-`최종자산 − 초기자본`, 수익률 `최종자산 / 초기자본 − 1`, 기존 출처·경고다.
-비용은 최종자산에 이미 포함되어 다시 빼지 않는다. 최종 평가는 청산 현금이 아니며 정지·상폐 정산 완료를 뜻하지 않는다.
-빈 snapshot·이상 수치는 명시 상태로 답하고 artifact 손실·해시·역직렬화의 기존 오류는 유지한다.
-assistant용으로 오류를 `None`에 합치는 포트를 새로 재사용하지 않는다. 기존 FULL의 첫 snapshot 분모·
-CAGR·샤프·낙폭 계산, 가짜 기준 날짜 주입, 엔진 v7·trial key 변경은 이 최소 범위에서 제외한다.
+`최종자산 − 초기자본`, 수익률 `최종자산 / 초기자본 − 1`, snapshot 개수, 기존 출처·경고다.
+초기조건에 가짜 날짜나 snapshot을 넣지 않는다. 비용은 최종자산에 이미 포함되어 다시 빼지 않는다.
+최종 평가는 보유 평가를 포함하며 청산 현금이나 정지·상폐 정산 완료를 뜻하지 않는다.
+`available`이면 요약이 있고, `empty_snapshots`·`invalid_input`이면 요약 없이 사유를 답한다.
+알 수 없는 run의 404, 미완료 409, 파일 손실·해시·역직렬화 410과 서버 경로 비노출은 기존 결과
+조회와 같다. 기존 `/result`·저장 `BacktestRunResult`·엔진 v7·FULL 첫 snapshot 분모·CAGR·샤프·
+낙폭·trial key·시도 원장은 바꾸지 않았다.
+
+보고서와 기존 결과를 함께 여는 화면은 각각 한 번씩 원본 결과를 검증해 읽는다. 새 결과 캐시나 실행
+상태 owner를 만들지 않았고 재실행도 하지 않는다. 대용량 결과에서 조회 비용이 문제가 되면 실제 비용을
+측정한 뒤 연합 조회 모델을 검토한다.
+
+2026-10-16 신규 `backend/tests/integration/test_account_report_http_api.py`의 독립 실행은
+**10 passed, 1 warning**이다. 직접 만든 임시 저장소 입력에서 초기 100원·첫 snapshot 99원·최종
+90/100/110원을 비교해 손실·영손익·이익과 기존 FULL 수익률의 차이를 확인했다. 원본 불변·재시작·
+application의 단일 검증 읽기·빈/역순 snapshot 상태·404/409·실제 저장소의 missing/hash/decode
+410과 경로 비노출을 확인했다. backend 전체 `src tests examples scripts tools`의 ruff·pyright는
+오류 0이며 frontend typecheck도 통과했다. 이 결과는 기존 엔진 회계 검산과 별개의 조회 경계 증거이며
+실자료 수익성 증거가 아니다.
+
+**최종 로컬 검증(2026-10-16):**
+
+| 검증 | 결과 | 확인 범위 |
+|---|---|---|
+| backend 전체 | **4,708 passed, 1 skipped, 34 warnings** (173.09초) | 최종 코드의 전체 회귀 |
+| frontend 전체 | **106파일·1,364테스트 통과** (82.30초) | 최종 화면·조회 상태·기존 기능 회귀 |
+| domain·HTTP·S04·architecture 관련 묶음 | **69 passed, 1 warning** (6.32초) | 단일 run 투영·조회 경계·기존 계좌 검산·의존 방향 |
+| backend·root tools ruff·pyright | **오류 0** | 각 전체 검사 범위 |
+| 유저 스토리 하네스 | **40개 스토리·48개 e2e 태그** | 기존 US-DM-04 수용 기준과 태그 연결 |
+| US-DM-04 mock 브라우저 e2e | **1 passed** (7.2초) | 서버 보고서 값·360px 문서 폭·목차 초점·503 복구·410 재시도 금지·원본 결과 보존 |
+
+신규 domain·HTTP 33건과 관련 묶음 69건은 backend 전체 회귀에 포함되어 따로 합산하지 않는다.
+기존 18건 계좌 검산·과거 전체 검증과도 합산하지 않는다. skip 1건은 기존 실공급자 live smoke의
+opt-in 미설정이며 외부 연결 증거가 아니다. 브라우저 검증은 mock 실행이며 실자료 수익성이나
+실브로커 검증을 뜻하지 않는다. 로컬 통과를 전체 GitHub CI 완료로 표현하지 않으며 CI·머지 결과는
+해당 PR의 검증 기록을 따른다.
+
+이번에는 production source와 SoT 계약 원문을 바꾸므로 앞의 합성 검산 당시와 달리 기존 S01 보존본의
+코드·계약 지문과 현재 checkout이 다를 수 있다. 기존 보존본·증거·해시를 덮어쓰지 않는다. 새 실자료
+연구는 결과 전 사양과 별도 보존 절차를 거치고 실행 전 S01 검증을 수행한다. 이번에는 실자료 연구
+재실행·봉인 구간 열람·브로커 연결을 하지 않았다.
+
+다음 결정은 **동결된 창별 선택 일정의 적용 시점·기존 보유 교체·미체결 정책**이다. 이 단일 run 보고서는
+창 사이 현금·보유 수량을 이월하는 연속 워크포워드 실행기를 구현하지 않는다. 실제 자료의 회수금·배당·
+상폐 정산 한계도 남는다. 후보 선택·연속 실행·실자료 수익성 판단은 각각 사양과 증거가 필요한 다음 단계다.

@@ -339,6 +339,9 @@ const server = setupServer(
       updated_at: "2026-09-04T00:00:01Z",
     }),
   ),
+  http.get(`${API}/api/v1/backtests/:runId/account-report`, () =>
+    HttpResponse.json({ detail: { code: "backtest.result.unreadable" } }, { status: 410 }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () => HttpResponse.error()),
   http.get(`${API}/api/v1/strategy-documents/schema`, () =>
     HttpResponse.json({

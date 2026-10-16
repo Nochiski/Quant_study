@@ -19,6 +19,7 @@ import {
   getBacktestRequest,
   getBacktestSummary,
   getBacktestResult,
+  getBacktestAccountReport,
   getStrategyDraft,
   getStrategyDocument,
   getStrategyDocumentContract,
@@ -44,6 +45,10 @@ import {
   upgradeStrategyDocument,
 } from "./generated/sdk.gen";
 import type {
+  AccountReport,
+  AccountReportStatus,
+  AccountReportSummary,
+  AccountReportProvenance,
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
@@ -592,6 +597,13 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestResult");
   },
 
+  async backtestAccountReport(runId: string): Promise<AccountReport> {
+    const response = await getBacktestAccountReport({
+      path: { run_id: runId },
+    });
+    return unwrap(response, "getBacktestAccountReport");
+  },
+
   /** 취소 요청. 다른 소유자(실험)가 써서 계속 돌면 `kept_by_owners` 가 참이다(#382). */
   async cancelBacktest(runId: string): Promise<BacktestCancelResult> {
     const response = await cancelBacktest({ path: { run_id: runId } });
@@ -804,6 +816,10 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  AccountReport,
+  AccountReportStatus,
+  AccountReportSummary,
+  AccountReportProvenance,
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,

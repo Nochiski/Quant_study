@@ -5,6 +5,122 @@ export type ClientOptions = {
 };
 
 /**
+ * AccountReport
+ */
+export type AccountReport = {
+  /**
+   * Detail
+   */
+  detail: string | null;
+  /**
+   * Evaluation Basis
+   */
+  evaluation_basis?: "initial_capital";
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
+  provenance: AccountReportProvenance;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  status: AccountReportStatus;
+  summary: AccountReportSummary | null;
+  /**
+   * Warnings
+   */
+  warnings: Array<DataWarning>;
+};
+
+/**
+ * AccountReportProvenance
+ */
+export type AccountReportProvenance = {
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Engine Version
+   */
+  engine_version: string;
+  /**
+   * Environment Hash
+   */
+  environment_hash: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version: string | null;
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version: string;
+  /**
+   * Run Fingerprint
+   */
+  run_fingerprint: string;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+  strategy_provenance: StrategyProvenance;
+  /**
+   * Target Tape Hash
+   */
+  target_tape_hash: string;
+};
+
+/**
+ * AccountReportStatus
+ */
+export type AccountReportStatus =
+  "available" | "empty_snapshots" | "invalid_input";
+
+/**
+ * AccountReportSummary
+ */
+export type AccountReportSummary = {
+  /**
+   * Final Cash
+   */
+  final_cash: number;
+  /**
+   * Final Equity
+   */
+  final_equity: number;
+  /**
+   * First Snapshot Date
+   */
+  first_snapshot_date: string;
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Last Snapshot Date
+   */
+  last_snapshot_date: string;
+  /**
+   * Pnl
+   */
+  pnl: number;
+  /**
+   * Snapshot Count
+   */
+  snapshot_count: number;
+  /**
+   * Total Return
+   */
+  total_return: number;
+};
+
+/**
  * ApplicableCondition
  */
 export type ApplicableCondition = {
@@ -7791,6 +7907,50 @@ export type GetBacktestStatusResponses = {
 
 export type GetBacktestStatusResponse =
   GetBacktestStatusResponses[keyof GetBacktestStatusResponses];
+
+export type GetBacktestAccountReportData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/account-report";
+};
+
+export type GetBacktestAccountReportErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestAccountReportError =
+  GetBacktestAccountReportErrors[keyof GetBacktestAccountReportErrors];
+
+export type GetBacktestAccountReportResponses = {
+  /**
+   * Successful Response
+   */
+  200: AccountReport;
+};
+
+export type GetBacktestAccountReportResponse =
+  GetBacktestAccountReportResponses[keyof GetBacktestAccountReportResponses];
 
 export type CancelBacktestData = {
   body?: never;

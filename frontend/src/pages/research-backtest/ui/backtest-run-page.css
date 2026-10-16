@@ -14,6 +14,17 @@
   min-width: 0;
 }
 
+/* 실행 식별자와 후속 동작은 좁은 화면에서 줄바꿈해 페이지 폭 안에 둔다. */
+.backtest-run-layout__main > .page-header {
+  flex-wrap: wrap;
+}
+
+.backtest-run-layout__main > .page-header > code {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .backtest-run-layout__assistant {
   position: sticky;
   top: var(--space-4);

@@ -210,6 +210,7 @@
 }
 
 .run-detail .result-table-wrap {
+  position: relative;
   max-height: calc(var(--space-6) * 14);
   margin-top: var(--space-3);
   overflow: auto;

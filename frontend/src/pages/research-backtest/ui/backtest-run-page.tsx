@@ -3,6 +3,8 @@ import { RUN_STATUS, runStageLabel, runStatusLabel } from "../../../entities/bac
 import { useId, useRef, useState } from "react";
 
 import {
+  BacktestAccountReport,
+  useBacktestAccountReport,
   BacktestResultFailure,
   BacktestRunDetail,
   BacktestRunFailure,
@@ -30,7 +32,7 @@ import "./backtest-run-page.css";
  */
 type AssistantPanel = { runId: string; open: boolean; mounted: boolean };
 
-/** Backtest run entry: live status while running, the full result once completed. */
+/** 실행 중에는 진행 상태를, 완료되면 계좌 요약과 원본 결과를 보인다. */
 export const BacktestRunPage = () => {
   const { runId } = useParams({ from: "/research/backtests/$runId" });
   const navigate = useNavigate();
@@ -39,6 +41,7 @@ export const BacktestRunPage = () => {
   const summary = useBacktestSummary(runId);
   const completed = status.data?.status === "completed";
   const result = useBacktestResult(runId, completed);
+  const accountReport = useBacktestAccountReport(runId, completed);
   // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
   const runEnvironmentSchema = useRunEnvironmentSchema();
   const environmentFields = runEnvironmentSchema.data === undefined ? null : runEnvironmentSchema.environmentFields;
@@ -158,6 +161,14 @@ export const BacktestRunPage = () => {
         {result.data ? (
           <BacktestRunDetail
             result={result.data}
+            accountReport={
+              <BacktestAccountReport
+                report={accountReport.data}
+                error={accountReport.error}
+                loading={accountReport.isPending}
+                retry={() => { void accountReport.refetch(); }}
+              />
+            }
             environmentFields={environmentFields}
           />
         ) : null}

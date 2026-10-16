@@ -1,6 +1,192 @@
 {
   "components": {
     "schemas": {
+      "AccountReport": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "evaluation_basis": {
+            "const": "initial_capital",
+            "default": "initial_capital",
+            "title": "Evaluation Basis",
+            "type": "string"
+          },
+          "interpretation": {
+            "default": "외부 입출금 없는 단일 실행의 초기자본 대비 비용 후 계좌 결과입니다. 초기자본에는 기준 날짜를 붙이지 않으며, 수익률은 최종자산 / 초기자본 − 1입니다. 비용은 최종자산에 이미 반영되어 다시 차감하지 않습니다. 기존 전체 구간(FULL) 수익률은 첫 계좌 기록을 기준으로 하므로 이 수익률과 다를 수 있습니다. 최종자산은 보유 평가를 포함하며 청산 현금이나 정지·상폐 정산 완료를 뜻하지 않습니다. ",
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/AccountReportProvenance"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccountReportStatus"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountReportSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/DataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "summary",
+          "detail",
+          "provenance",
+          "warnings"
+        ],
+        "title": "AccountReport",
+        "type": "object"
+      },
+      "AccountReportProvenance": {
+        "properties": {
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "environment_hash": {
+            "title": "Environment Hash",
+            "type": "string"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          },
+          "target_tape_hash": {
+            "title": "Target Tape Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_fingerprint",
+          "engine_version",
+          "strategy_hash",
+          "data_snapshot_id",
+          "target_tape_hash",
+          "metric_registry_version",
+          "environment_hash",
+          "strategy_provenance",
+          "schema_version",
+          "factor_evaluation_version"
+        ],
+        "title": "AccountReportProvenance",
+        "type": "object"
+      },
+      "AccountReportStatus": {
+        "enum": [
+          "available",
+          "empty_snapshots",
+          "invalid_input"
+        ],
+        "title": "AccountReportStatus",
+        "type": "string"
+      },
+      "AccountReportSummary": {
+        "properties": {
+          "final_cash": {
+            "title": "Final Cash",
+            "type": "number"
+          },
+          "final_equity": {
+            "title": "Final Equity",
+            "type": "number"
+          },
+          "first_snapshot_date": {
+            "format": "date",
+            "title": "First Snapshot Date",
+            "type": "string"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "last_snapshot_date": {
+            "format": "date",
+            "title": "Last Snapshot Date",
+            "type": "string"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "number"
+          },
+          "snapshot_count": {
+            "title": "Snapshot Count",
+            "type": "integer"
+          },
+          "total_return": {
+            "title": "Total Return",
+            "type": "number"
+          }
+        },
+        "required": [
+          "initial_cash",
+          "first_snapshot_date",
+          "last_snapshot_date",
+          "final_cash",
+          "final_equity",
+          "pnl",
+          "total_return",
+          "snapshot_count"
+        ],
+        "title": "AccountReportSummary",
+        "type": "object"
+      },
       "ApplicableCondition": {
         "properties": {
           "equals": {
@@ -12401,6 +12587,75 @@
           }
         },
         "summary": "Get Backtest Status"
+      }
+    },
+    "/api/v1/backtests/{run_id}/account-report": {
+      "get": {
+        "operationId": "getBacktestAccountReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Account Report"
       }
     },
     "/api/v1/backtests/{run_id}/cancel": {

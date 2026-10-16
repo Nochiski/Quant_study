@@ -156,7 +156,7 @@ uv run --project backend pytest database/tests -q
 | 18:05 | `5 9 * * 1-5` | `QL_KW_EVENING_HHMM=2105 daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피). 체인 끝(키움 rc 0)에 원장 락을 놓고 장 마감 재반영 훅(`postclose_chain.sh refill` — 점수 없는 7표, 컷오버 PR-8 ⑦ · T-38) | 가동 · 재반영 훅은 PR-8 배포 때 |
 | 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, 실측 종료 22:38~22:41), 한도 21:45 | **중단 (10-14 10:57, 줄 앞 `#`)** — 09-17 가동, 시험 운영 시작 때 컨트롤러가 끔(N-42 Q4, 장 마감 판이 대신한다) |
 | 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
-| 23:30 | `30 14 * * *` | `daily.cutover_watch` — 컷오버 감시(QL-L): 그날 v3 무거운 수집 0 · 점수 쓰기 한 곳 · v3 크론(V3-A·B·D). 위반·판정 불가면 crit. 명령 `cd ~/quant-ledger && crontab -l \| PYTHONPATH=src .venv/bin/python -m daily.cutover_watch --v3-db ~/kael-system-v3/data/quant.db --v3-log ~/logs/kael-v3/pipeline.log --crontab - >> logs/cutover_watch.log 2>&1`(아래 "컷오버 감시") | **예정**(컷오버 날 10-19, V3-A~E 적용 뒤 컨트롤러가 등록 — 되돌리면 주석, `docs/CUTOVER_ROLLBACK.md` 4-3) |
+| 23:30 | `30 14 * * *` | `daily.cutover_watch` — 컷오버 감시(QL-L): 그날 v3 무거운 수집 0 · 점수 쓰기 한 곳 · v3 크론(V3-A·B·D). 위반·판정 불가면 crit. 명령 `cd ~/quant-ledger && crontab -l \| PYTHONPATH=src .venv/bin/python -m daily.cutover_watch --v3-db ~/kael-system-v3/data/quant.db --v3-log ~/logs/kael-v3/pipeline.log --crontab - >> logs/cutover_watch.log 2>&1`(아래 "컷오버 감시") | **가동 (10-16 11:2x)**(컷오버 날 V3-A~E 적용 뒤 등록 — 되돌리면 주석, `docs/CUTOVER_ROLLBACK.md` 4-3) |
 | 23:55 | `55 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) → 23:55(F-11, 10-06 에 00:00 으로 옮겼다가 10-07 수정 — 자정을 넘기면 날짜 판정이 다음 날이 되어 거짓 crit·금요일 무감시. 10-02 종료 23:02) | **중단 (10-14 10:57, 줄 앞 `#`)** — 21:20 잠정 빌드와 함께(잠정판이 없어 매일 crit 이 난다) |
 | 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
 | 토 03:00 | `0 18 * * 5` | `wics_weekly.sh` — WICS 섹터 구성 주간 스냅샷(dt=금요일, L2 28 + L1 10 = 38콜, 멱등) → `data/raw/wiseindex.db`. 전부 빈 응답이면 rc 4 + warn | 가동 (09-20 10:15 등록) |
@@ -452,7 +452,7 @@ crontab -l | PYTHONPATH=src .venv/bin/python -m daily.cutover_watch --baseline -
   --v3-db ~/kael-system-v3/data/quant.db --v3-log ~/logs/kael-v3/pipeline.log --crontab -
 ```
 
-크론 제안(**아직 넣지 않는다** — 컨트롤러가 컷오버 날 V3-A~E 적용 뒤 넣는다. 매일 23:30 KST, D = 그날 KST. `--v3-log` 는
+크론(10-16 컷오버에 V3-A~E 적용 뒤 넣었다. 매일 23:30 KST, D = 그날 KST. `--v3-log` 는
 daily_insight 크론 줄의 리다이렉트 대상과 같게 둔다. 연구 리포트 로그는 넣지 않는다 — 리포트 수집의 KIS 휴장 1콜이
 표지로 잡힌다). 되돌리기(V3-B 줄 복원) 때는 이 줄도 주석으로 돌린다 — 아니면 매일 위반 crit 이다. 23:30 에 그날을
 보므로 23:30~24:00 은 어느 날 실행에도 보이지 않는다 — 지금 그 시간대에 `pipeline_runs` 를 쓰는 v3 job 은 없다(23:30·

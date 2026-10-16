@@ -3,6 +3,7 @@
 from strategy_workbench.domain.signal_evaluation._evaluation import evaluate_signal
 from strategy_workbench.domain.signal_evaluation._models import (
     AdjustedCloseObservation,
+    AdjustmentGapObservation,
     DailyRankIC,
     ExclusionCount,
     ListingInterval,
@@ -17,6 +18,7 @@ from strategy_workbench.domain.signal_evaluation._models import (
 
 __all__ = [
     "AdjustedCloseObservation",
+    "AdjustmentGapObservation",
     "DailyRankIC",
     "ExclusionCount",
     "ListingInterval",

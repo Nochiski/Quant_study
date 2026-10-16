@@ -14,6 +14,7 @@ from strategy_workbench.application.signal_research.facade.ports import (
 from strategy_workbench.domain.equity.facade.research_data import CellKind
 from strategy_workbench.domain.signal_evaluation.facade.evaluation import (
     AdjustedCloseObservation,
+    AdjustmentGapObservation,
     ListingInterval,
 )
 
@@ -59,21 +60,12 @@ class DuckdbSignalLabelAdapter:
             )
         security_ids = set(query.security_ids)
         requested_rows = tuple(row for row in raw.observations if row.security_id in security_ids)
-        masked = [
-            (row.security_id, row.as_of)
+        adjustment_gaps = tuple(
+            AdjustmentGapObservation(row.as_of, row.security_id)
             for row in requested_rows
             for field in row.fields
-            if field.kind is CellKind.MASKED
-        ]
-        if masked:
-            return LabelDataLoad(
-                LabelDataStatus.UNSUPPORTED,
-                detail=(
-                    "label_adjustment_gap: 요청 가격 범위에 조정 공백이 있어 "
-                    "두 끝 가격만으로 비교할 수 없습니다. 가린 구간을 메우지 않았습니다 — "
-                    f"count={len(masked)} first={masked[0]}"
-                ),
-            )
+            if field.field_id == "price.adj_close" and field.kind is CellKind.MASKED
+        )
         # 원주가 bar 포트의 거래 행 판정만 재사용한다. 가격 라벨의 값은 조정종가 원천에서 읽는다.
         executable = equity.load_backtest_dataset(
             BacktestDataQuery(query.start, query.evaluation_as_of, query.security_ids, None)
@@ -153,5 +145,6 @@ class DuckdbSignalLabelAdapter:
                 tuple(listings),
                 evidence,
                 tuple(warnings),
+                adjustment_gaps,
             ),
         )

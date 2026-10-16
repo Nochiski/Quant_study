@@ -53,7 +53,9 @@ bootstrap ─> application + adapters
   이 bridge가 기존 서비스 호출을 담당하며 새 application에서 다른 application 서비스나
   concrete adapter를 import하지 않는다. `equity_duckdb`의 연구 label adapter는 자체 노드의 기존
   가격·달력·bar 조회와 원래 security_span을 재사용하며 연구 port와 `domain/signal_evaluation`에
-  의존한다. 보존 검증·팩터 식·가격/상장 계약을 복제하거나 완화하지 않는다.
+  의존한다. 원장 `CellKind.MASKED` 키를 label port의 `adjustment_gaps`로 전달하며,
+  개별 진입~만기 구간의 `adjustment_gap` 판정은 순수 evaluator가 소유한다.
+  보존 검증·팩터 식·가격/상장 계약과 원장 가림 술어를 복제하거나 완화하지 않는다.
   `adapters/inbound/signal_research_cli`는 요청 해석·JSON 내보내기만 맡고 `bootstrap/signal_research`가
   별도 CLI composition root로 구체 구현을 조립한다. 기존 HTTP bootstrap·API/UI는 변경하지 않는다.
   상세 계약은 `docs/planning/research-to-trading/S03-runner.md`다.

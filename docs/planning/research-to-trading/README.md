@@ -6,12 +6,14 @@
 
 코드 감사 기준은 `1e780ce7`이며, **1차 기반 `8c3c1803` 검증**과 이후 작업의 검증 시점을 구분한다.
 S04 계좌 경계 안내·macOS 공용 PLAN 집계·S03 보존 입력 연구 runner가 후속으로 구현됐다.
-S03 runner는 합성 원장의 호출·내보내기까지 검증했으며 실데이터 연구 완료를 뜻하지 않는다.
+S03 runner는 합성 원장 검증에 이어 고정한 작은 실자료 창의 기술 확인을 1회 수행했다.
+IC·coverage·상태를 계산·내보냈으며 효능·유의성·비용 후 성과 검증은 별도다.
 2026-10-16에는 equity 30표 다운로드와 manifest·파일·해시 검증, adapter metadata 읽기를
 확인한 뒤 별도 S01 사본의 create·verify/open과 adapter 재접속도 확인했다(원장 판
-`2164ba776cbd99f2`). 실데이터 IC·성과 연구는 실행하지 않았다. 입력 수신과 보존 무결성
+`2164ba776cbd99f2`). 당시에는 실자료 IC를 산출하지 않았다. 이후 새 코드·별도 사본의
+[첫 기술 확인 증거](S03-adjustment-gaps.md#첫-실자료-기술-확인-증거)를 기록했다. 입력 수신과 보존 무결성
 확인을 IC·수익성·데이터 품질 전체 검증으로 확대하지 않는다. 후속 읽기 전용 QC도 완료했으며
-[현재 준비 판정과 남은 제약](S01-readiness.md#이번-사전-점검의-현재-판정)을 별도로 기록했다.
+[S01 보존 당시 판정과 남은 제약](S01-readiness.md)을 별도로 기록했다.
 아래 테스트 수는 해당 검증 묶음의 실행 결과이며 서로 겹치는 회귀를 합산하지 않는다.
 S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·database 1,437 passed이며,
 아래에 1차와 구분해 기록한다. 이 로컬 검증을 전체 GitHub CI 통과로 표현하지 않는다.
@@ -87,10 +89,14 @@ S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·datab
 - **증거·아직 못 확인:** runner 신규 **25 passed**, 기존 S03 21건+architecture 18건 포함
   **64 passed, 0 skipped**, DuckDB·S01·기존 pipeline 관련 회귀 **195 passed, 0 skipped**다.
   미보존·변조 root 차단, 쿼리 끝으로 자르지 않은 실제 `security_span`의 상폐·coverage_gap·data_gap
-  구분, 중간 MASKED 조정 공백의 요청 전체 unsupported, 정지 기준가의 거래 가격 제외를 확인했다.
+  구분, 당시 중간 MASKED 조정 공백의 요청 전체 unsupported, 정지 기준가의 거래 가격 제외를 확인했다.
+  후속 개별 공백 구현은 해당 종목의 진입~만기 양끝 포함 구간만 `adjustment_gap`·수익 None으로
+  남기고 다른 라벨·당시 분모·coverage·상태 카운트를 보존한다. 위 과거 통과 수를 이 후속
+  변경의 검증 결과로 재사용하지 않는다. [개별 공백 사양](S03-adjustment-gaps.md)이 계약을 소유한다.
   한글·공백 root의 실제 UTF-8 subprocess 왕복도 확인했다. Windows 실측 증거는 아니다.
-  실원장 수신 후 S01 별도 사본의 생성·검증·재접속은 확인했지만 실데이터 연구·실성과·비용 후
-  포트폴리오 비교·완전 분석·기존 API/UI 노출은 **미완료**다.
+  실원장 수신 후 S01 별도 사본의 생성·검증·재접속을 확인했고, 후속 고정 창의 기술 확인에서
+  IC·coverage·상태를 실제 내보냈다. 실성과·비용 후 포트폴리오 비교·완전 분석·기존 API/UI
+  노출은 **미완료**다.
   가격 라벨은 배당·비용·실제 다음 시가 체결을 반영하지 않으며 봉인 guard를 유지한다.
 - **실행 진입점:** `python -m strategy_workbench.bootstrap.signal_research`에
   `--preserved-equity-root`·`--repo-root`·전략/실행 설정 JSON·팩터·기간 명세를 명시한다.
@@ -101,13 +107,12 @@ S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·datab
   [유스케이스 테스트](../../../backend/tests/application/test_signal_research_service.py)가 근거다.
   기존 `FactorResearchService`의 catalog/validate/explain과 비용 후 `portfolioAnalytics`는
   이 미래 라벨 신호 평가를 대신하지 않는다.
-- **다음 결정:** 사용자가 확보한 원장과 같은 코드·환경의 S01 사본을 준비하고 S02 제한 범위 위에서
-  무튜닝 신호·신호 창·유니버스·평가량·비용·반복 열람 기록을 결과 전에 정한다. 그 뒤 첫 실데이터
-  IC/coverage와 별도 비용 후 성과를 함께 검토할지 결정한다. [결과 전 사양·열람 기록](S01-readiness.md#첫-s03-실행-전에-고정할-기록)을
-  남긴다. 채택·후보 선택을 판단할 때는 필요한 경제효과·위험·통계 판정 기준을 결과 전에 정한다. MASKED 공백·배당 총수익·상폐 회수금이
-  결론에 필수면 원천/계약을 먼저 보완한다. 좋은 horizon을 사후 선택했다면 그 선택도 남긴다.
-  다음 최소 작업은 사전 명세를 고정한 지원 범위 서술 진단과, 필요할 때 MASKED의 개별 라벨
-  정보창 판정을 추가하는 별도 설계·구현으로 구분한다. 후자는 이번에 구현하지 않았다.
+- **다음 결정:** [고정 사양과 1회 기술 확인 증거](S03-adjustment-gaps.md#첫-실자료-기술-확인-증거)의
+  독립 무결성 검산을 마쳤다. 기존 `price.momentum_12_1`·각 신호일 전체 당시
+  `krx.common-stock`·5/21/63 동시 관찰의 15개 단면에서 IC 계산과 coverage·상태 내보내기를
+  확인했으며, 작은 창의 기술 경로 증거로 해석한다. alpha 채택·유의성·계좌 성과는 판단하지 않는다.
+  후속 창·후보·비용 후 비교를 정할 때 [결과 전 사양·열람 기록](S01-readiness.md#첫-s03-실행-전에-고정할-기록)을
+  남긴다. 배당 총수익·상폐 회수금·중첩 라벨 추론은 여전히 남은 범위다.
 
 ## S04 — 계좌 경계 안내와 반증·선택 기록
 
@@ -246,7 +251,8 @@ uv run --locked python -m quant_study_dev.conflict_markers
 **전체 GitHub CI 통과는 주장하지 않는다.** 위 결과는 로컬 전체 회귀와 명시한 HEAD의 단일 job
 증거다. 전체 PR 검사·머지 상태는 각 PR 링크가 소유하며 이 문서에 동적 상태 목록을 추가하지 않는다.
 1차·후속 회귀를 합산하지 않는다.
-실데이터 수익률·IC를 산출하거나 실제 계좌를 연결하거나 봉인 구간을 개봉하지 않았다.
+위 과거 검증 당시에는 실자료 가격 라벨·IC를 산출하지 않았고 실제 계좌 연결·봉인 구간 개봉도
+하지 않았다. 후속 1회 실자료 기술 확인은 [별도 증거](S03-adjustment-gaps.md#첫-실자료-기술-확인-증거)로 구분한다.
 Validation Lab PLAN의 MERGED 표시·PR 수·의존성은 이번 인계에서 바꾸지 않는다.
 
 **리뷰 수정 후 로컬 검증(2026-10-16):** 빈 거래일에도 DAY 만료를 유지하고, 연구 실행 코드의
@@ -256,6 +262,6 @@ database 전체는 **1,437 passed**(160.66초), root tools는 **52건 통과**�
 `src tests examples scripts tools`와 root tools의 ruff·pyright는 오류 0이며, 충돌 표식·
 story harness(40 stories·48 e2e 태그)·필드 대응표 검사도 통과했다. frontend·Rust 코드는
 변경하지 않았고 Python/Rust parity는 backend 전체 검증에 포함된다. skip은 실공급자 live
-smoke의 opt-in 미설정에 따른 것으로 외부 연결 증거가 아니다. GitHub CI는 아직 진행 전이며,
-다음 결정은 별도 보존본의 연구 목적별 품질 근거와 결과 전 사양을 검토한 뒤 첫 실데이터 연구를
-시작할지 정하는 것이다.
+smoke의 opt-in 미설정에 따른 것으로 외부 연결 증거가 아니다. 이 검증 기록 당시 GitHub CI는 진행 전이었다.
+당시 다음 결정은 별도 보존본과 결과 전 사양 준비였으며 후속 실자료 기술 확인과 현재 다음
+결정은 [별도 증거](S03-adjustment-gaps.md#첫-실자료-기술-확인-증거)를 따른다. 이 과거 기록으로 현재 CI 상태를 추론하지 않는다.

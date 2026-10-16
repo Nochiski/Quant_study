@@ -9,6 +9,7 @@ from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.portfolio.facade.construction import PortfolioObservation, TargetTape
 from strategy_workbench.domain.signal_evaluation.facade.evaluation import (
     AdjustedCloseObservation,
+    AdjustmentGapObservation,
     ListingInterval,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
@@ -64,6 +65,7 @@ class SignalLabelData:
     listings: tuple[ListingInterval, ...]
     listing_evidence: tuple[ListingEvidence, ...]
     warnings: tuple[str, ...]
+    adjustment_gaps: tuple[AdjustmentGapObservation, ...] = ()
 
 
 class LabelDataStatus(StrEnum):

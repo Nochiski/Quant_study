@@ -2,10 +2,11 @@
 
 > 작성: 2026-09-03
 >
-> 상태(2026-10-14): M0~M5 완료, M6·M7은 검증 랩(28 PR 중 21 머지)이 진행 중, M8·M9는 일부 항목만 완료,
+> 상태(2026-10-16 보완): M0~M5의 기존 구현 이력은 유지하며 M3 신호 분석 1항목은 부분 구현으로 정정한다.
+> M6·M7은 검증 랩(28 PR 중 21 머지)이 진행 중, M8·M9는 일부 항목만 완료,
 > M10 미착수. 이 로드맵의 하위 initiative 다섯 개 중 넷이 끝났고 검증 랩이 진행 중이다.
 >
-> 체크리스트: 151개 중 93개 완료, 58개 남음
+> 체크리스트: 151개 중 95개 완료, 56개 남음(실제 체크행과 M3 분석 1건 정정 반영)
 >
 > 다음 체크: 검증 랩 V4-05(팩터 회귀)·V5-02(결과 검증 카드)·V6-01(개봉 backend) — 착수 가능
 >
@@ -23,6 +24,34 @@
 >   [validation-lab/PLAN.md](../../planning/validation-lab/PLAN.md) · [설계 spec](./2026-09-29-validation-lab-design.md)
 >
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
+
+## 2026-10-16 작업 트리 보완: 연구 재현과 실행 경계
+
+기준 HEAD `1e780ce7` 이후 추가한 구현과 검증 범위를 연결한다. 아래는 신규 제품 완료율이나
+Validation Lab의 MERGED/PR 집계를 만드는 기록이 아니다.
+[구현 증거 인계](../../planning/research-to-trading/README.md)는 각 단계의 의도·구현·한계·다음
+결정을 연결한다. [HTML 작업 패킷](../../auto-trading-roadmap.html)은 향후 작업 지시 원문이고,
+공식 기능 상태와 initiative 의존성은 이 로드맵과 각 PLAN이 계속 소유한다.
+
+- **S01 / M9·재현성 보완:** current 빌드 입력 복사·출처·무결성 검증·pending 공개 gate와 실제
+  DuckDB adapter 재접속을 합성 원장으로 검증했다. 실제 원장의 품질·용량·연구 재현은 미검증이다.
+  [S01 스펙·CLI](../../planning/research-to-trading/S01-snapshot.md).
+- **S02 / M5·M9 검산:** 실제 선정 compiler와 Python/Rust 실행 adapter를 연결한 합성 손계산으로
+  현금·수량·분할·비용을 확인했다. 배당 총수익이나 상폐 회수금 정산을 해결하지 않았다.
+  [S02 독립 기대값·사용 제한](../../planning/research-to-trading/S02-accounting.md).
+- **S03 / M3 분석 문구 보완:** 별도 미래 가격 라벨·날짜별 Rank IC·커버리지 core를 기존 raw
+  observation/factor pipeline에 합성 연결했다. M3의 관련 체크 한 줄만 부분 구현으로 정정한다.
+  `FactorResearchService`의 catalog/validate/explain과 비용 후 `portfolioAnalytics`는 이 신호
+  평가의 완료 증거가 아니다. 실데이터 첫 연구·추론 통계·제품 노출은 미완료다.
+  [S03 core·분리 계약](../../planning/research-to-trading/S03-signal-evaluation.md).
+- **S05 / 별도 운영 확장:** 주문 전 영속 의도·단일 전송·오프라인 fake broker·재시작 대사 기반을
+  새 실행 노드로 추가했다. 기존 M10의 연구 실행 복구와 책임을 구분한다. 목표 비중 sizing이나
+  외부 모의/실계좌 준비 완료를 뜻하지 않으며 S06 이후는 미착수다.
+  [S05 오프라인 스펙·장애 증거](../../planning/research-to-trading/S05-offline-execution.md).
+
+다음 결정은 실제 보존 입력을 확보한 뒤 S02 한계 안에서 무튜닝 S03 첫 사례를 진행할지 판단하는
+것이다. 합성 검증을 비용 후 수익성으로 해석하지 않으며, 실데이터 결과와 반증 기준이 준비된 뒤
+후속 연구·운영 범위를 정한다. Validation Lab PLAN의 PR 상태·개수·선행 의존성은 변경하지 않는다.
 
 ## 1. 결론
 
@@ -440,7 +469,11 @@ frontend 타입이 backend schema에서 생성된다.
 - [x] parameter reference와 saved subgraph/factor reference 구현.
 - [x] DAG→PIT execution plan compiler와 deterministic plan hash 추가.
 - [x] factor matrix cache key에 data/factor/params/as-of fingerprint 포함.
-- [x] IC/rank IC/quantile spread/coverage/turnover/decay 분석 구현.
+- [ ] IC/rank IC/quantile spread/coverage/turnover/decay 분석 — **부분 구현으로 정정(2026-10-16)**.
+  현재 작업 트리의 `domain/signal_evaluation`은 미래 가격 라벨·날짜별 Rank IC·커버리지를
+  합성 입력으로 검증했다. 첫 실데이터 연구와 나머지 완전 분석, 제품 API·화면 노출은 미완료다.
+  [S03 구현 범위·검증](../../planning/research-to-trading/S03-signal-evaluation.md)을 근거로 하며,
+  기존 2026-09-03 완료 기록을 현재 제품의 전체 분석 완료 증거로 사용하지 않는다.
 - [x] factor catalog API와 validate/explain/preview API 추가.
 - [x] `factor` entity와 factor browser/card UI 추가.
 - [x] Quick transform chain/weight editor 추가.

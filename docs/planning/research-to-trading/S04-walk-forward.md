@@ -230,3 +230,18 @@ uv run --no-sync --project backend pytest backend/tests/integration/test_s04_acc
 범위를 정한다. 이 계획만으로 연속 워크포워드 제품 기능을 구현됨으로 올리거나 봉인 개봉·기존 trial key
 의미 변경을 수행하지 않는다. 사용자 동작이 그대로인 이번 합성 검산의 유저 스토리 하네스 갱신은
 해당 없음이다.
+
+
+### 다음 기능의 최소 범위 — 아직 미구현
+
+의도는 완료된 단일 실행의 비용 후 계좌 결과를 초기자본 기준으로 따로 읽는 것이다. 외부 입출금 없는
+단일 실행만 다루며, API·CLI·저장 출력 경로는 이번에 확정하거나 구현하지 않는다.
+구현 후보 owner는 `domain/backtest`의 새 순수 projection·전용 facade이며 기존
+`BacktestRunService.result`가 읽은 `BacktestRunResult`의 `manifest.run_spec.initial_cash`와
+`artifacts.snapshots`를 사용한다. 새 엔진·재실행·기존 결과 저장 변경은 필요하지 않다.
+필드는 날짜 없는 초기조건인 초기자본, 첫/마지막 snapshot 날짜, 최종 현금/자산, 평가손익
+`최종자산 − 초기자본`, 수익률 `최종자산 / 초기자본 − 1`, 기존 출처·경고다.
+비용은 최종자산에 이미 포함되어 다시 빼지 않는다. 최종 평가는 청산 현금이 아니며 정지·상폐 정산 완료를 뜻하지 않는다.
+빈 snapshot·이상 수치는 명시 상태로 답하고 artifact 손실·해시·역직렬화의 기존 오류는 유지한다.
+assistant용으로 오류를 `None`에 합치는 포트를 새로 재사용하지 않는다. 기존 FULL의 첫 snapshot 분모·
+CAGR·샤프·낙폭 계산, 가짜 기준 날짜 주입, 엔진 v7·trial key 변경은 이 최소 범위에서 제외한다.

@@ -19,7 +19,7 @@
     minmax(110px, 0.65fr) minmax(150px, 1.2fr) minmax(150px, 0.9fr)
     minmax(140px, 0.9fr) minmax(180px, 1.35fr) auto;
   gap: var(--space-2);
-  align-items: end;
+  align-items: start;
   padding: 0 var(--space-4) var(--space-2);
 }
 
@@ -65,6 +65,40 @@
   min-height: 30px;
 }
 
+/* 같은 묶음의 라벨·입력·도움말 행을 공유해 설명 길이와 무관하게 입력을 정렬한다. */
+@supports (grid-template-rows: subgrid) {
+  .strategy-debugger__controls {
+    row-gap: var(--field-gap);
+  }
+
+  .strategy-debugger__controls > label,
+  .strategy-debugger__actions {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    row-gap: var(--field-gap);
+  }
+
+  .strategy-debugger__controls > label > span {
+    grid-row: 1;
+  }
+
+  .strategy-debugger__controls input,
+  .strategy-debugger__controls select,
+  .strategy-debugger__actions > button {
+    grid-row: 2;
+  }
+
+  .strategy-debugger__controls small {
+    grid-row: 3;
+  }
+
+  .strategy-debugger__actions {
+    grid-auto-flow: column;
+    align-items: center;
+  }
+}
+
 .strategy-debugger__identity {
   display: flex;
   min-height: 29px;
@@ -107,7 +141,8 @@
 .strategy-debugger__results {
   display: flex;
   min-height: 0;
-  flex: 1 0 260px;
+  /* 폼·출처 행이 늘어나면 결과 영역이 남은 높이에 맞춰 줄고 내부에서 스크롤한다. */
+  flex: 1 1 260px;
   flex-direction: column;
   overflow: hidden;
 }
@@ -364,6 +399,7 @@
 
   .strategy-debugger__results {
     flex-basis: 260px;
+    flex-shrink: 0;
     overflow: visible;
   }
 }

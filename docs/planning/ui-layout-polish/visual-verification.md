@@ -62,6 +62,19 @@ compact 크기 상속과 좁은 화면 전환 시 초점 손실을 재현하고 
 E2E TypeScript 검사와 변경한 세 E2E 파일의 ESLint, 유저 스토리 하네스(스토리 40개·태그 E2E 49개)가
 통과했다. 전체 frontend 단위 테스트·정적 검사와 Windows 시각 게이트는 별도 최종 검증으로 보고한다.
 
+## 추가 디버거 경계 검사
+
+기존 `workbench.infrastructure.spec.ts`의 1440px 밝은 테마 검사에서 연결 추적 영역이 패널 하단보다
+약 12px 아래로 넘치는 회귀를 기준선 비교 전에 재현했다. 결과 영역이 가용 높이에 맞춰 수축하도록
+허용하고 기존 내부 스크롤을 유지했으며, 폼은 subgrid의 공유 행으로 정렬했다. 변경은 디버거 CSS에
+한정된다. 1440/1920px × 밝은/어두운 네 프로젝트에서 viewport·폼·탭·연결 추적 containment 단언이 모두
+통과했다. 실제 이미지 네 장을 직접 검토해 입력 기준선·버튼 행 정렬·내부 스크롤 경계를 확인했다.
+
+macOS 실행 전체는 네 프로젝트 모두 기존 기준선과의 엄격한 `toHaveScreenshot` 비교에서 실패했다
+(`4 failed`). 그 앞의 동작·경계 단언 통과를 시각 게이트 전체 통과로 기록하지 않는다. 로그는
+외부 증거 폴더의 `mac-debugger-aligned.log`, 실제 이미지와 trace는 `mac-debugger-aligned`에 보존했다.
+Windows 최종 기준선과 릴리스 게이트는 수정 후 head의 CI 산출물로 별도 확인한다.
+
 ## Windows 기준선 갱신 절차
 
 기존 기준선은 Windows Chromium용이며 macOS 사진으로 덮어쓰지 않는다. 영향 대상은

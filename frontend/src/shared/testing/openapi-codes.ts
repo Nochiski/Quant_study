@@ -63,11 +63,25 @@ const reachableCodes = (openapi: OpenApi, root: Schema): Set<string> => {
 };
 
 /** 경로의 모든 연산이 내는 거절(2xx 밖) 응답에서 닿는 `code`. */
-export const rejectionCodes = (openapi: OpenApi, path: string): Set<string> =>
+export const rejectionCodes = (
+  openapi: OpenApi,
+  path: string,
+  owner: { responseSchema?: string; excludeResponseSchema?: string } = {},
+): Set<string> =>
   new Set(
     Object.values(openapi.paths[path]!).flatMap((operation) =>
       Object.entries(operation.responses)
         .filter(([status]) => !status.startsWith("2"))
+        .filter(([, response]) => {
+          const ref = response.content?.["application/json"]?.schema.$ref;
+          const schema = ref?.split("/").at(-1);
+          return (
+            (owner.responseSchema === undefined ||
+              schema === owner.responseSchema) &&
+            (owner.excludeResponseSchema === undefined ||
+              schema !== owner.excludeResponseSchema)
+          );
+        })
         .flatMap(([, response]) => [
           ...reachableCodes(
             openapi,

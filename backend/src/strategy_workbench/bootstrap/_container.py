@@ -9,8 +9,18 @@ from pathlib import Path
 from uuid import uuid4
 
 from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
+from strategy_workbench.adapters.outbound.backtest_engine.facade.continuous import (
+    ContinuousBacktestExecutorAdapter,
+)
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
     BacktestEngineExecutorAdapter,
+)
+from strategy_workbench.adapters.outbound.continuous_account_sqlite.facade.store import (
+    ContinuousAccountSqliteStore,
+)
+from strategy_workbench.adapters.outbound.continuous_pipeline.facade.preparation import (
+    ContinuousExperimentSourceAdapter,
+    ContinuousPortfolioPipelineAdapter,
 )
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
@@ -50,6 +60,9 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     RunLaneControls,
     TrialLedger,
     rejection_code,
+)
+from strategy_workbench.application.continuous_account.facade.evaluation import (
+    ContinuousAccountService,
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.equity_workspace.facade.workspace import (
@@ -106,6 +119,7 @@ class BackendContainer:
     strategy_traces: StrategyTraceService
     backtest_runs: BacktestRunService
     experiments: ExperimentRunService
+    continuous_accounts: ContinuousAccountService
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
@@ -124,6 +138,7 @@ def build_container(
     equity_root: Path | None = None,
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
+    continuous_db_path: str | Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
@@ -134,7 +149,9 @@ def build_container(
     `equity` optional extra (duckdb) and fails loudly when the root or the extra is missing.
     `strategy_repository_path=None` selects isolated in-memory SQLite for tests; the HTTP
     runtime supplies a durable file path explicitly so both exercise the same adapter contract.
-    `research_db_path`(실행 기록)도 같은 규칙이다. 파일이면 현재 사용자 전용으로 잠근다 — 요청에
+    `research_db_path`(실행 기록)와 `continuous_db_path`(별도 연속 평가)도 같은 규칙이다.
+    직접 호출에서 None은 메모리 DB이며 HTTP 런타임만 명시한 파일을 연다.
+    파일이면 현재 사용자 전용으로 잠근다 — 요청에
     인라인 초안 전략 원문이 그대로 담긴다(`_file_guard`).
     `assistant`는 어시스턴트 DB에 같은 규칙을 적용하고, 공급자 adapter 레지스트리를 같이
     나른다. 레지스트리는 A-05·A-06이 자기 항목을 등록할 때까지 비어 있고, 팩토리는 시작할 때가
@@ -214,8 +231,9 @@ def build_container(
         strategy_authoring=strategy_authoring,
         backtest_runs=backtest_runs,
     )
+    experiment_repository = SQLiteExperimentRepository(research_db_path)
     experiments = ExperimentRunService(
-        SQLiteExperimentRepository(research_db_path),
+        experiment_repository,
         _RunServiceTrialRuns(
             backtest_runs, equity_data, held_run_ids=None if hold is None else hold.run_ids
         ),
@@ -225,6 +243,21 @@ def build_container(
     # 지난 프로세스가 끝내지 못한 실험의 남은 trial 을 다시 넘긴다(검증 랩 spec D6). 실행
     # 레지스트리가 중단된 run 을 먼저 닫은 뒤라야 한다.
     experiments.recover()
+    continuous_store = ContinuousAccountSqliteStore(continuous_db_path)
+    if continuous_store.database_path is not None:
+        restrict_to_current_user(continuous_store.database_path)
+    continuous_accounts = ContinuousAccountService(
+        ContinuousExperimentSourceAdapter(
+            experiment_repository, experiments, backtest_runs, strategy_repository
+        ),
+        ContinuousPortfolioPipelineAdapter(portfolio_design, engine_portfolio),
+        equity_data,
+        ContinuousBacktestExecutorAdapter(),
+        continuous_store,
+        data_mode=equity_adapter,
+    )
+    # 단일 서버 프로세스 시작의 복구다. 실제 진행률을 보존하고 미완료 평가를 재발주하지 않는다.
+    continuous_accounts.recover()
     return BackendContainer(
         equity_data=equity_data,
         equity_workspace=EquityWorkspaceService(equity_data),
@@ -249,6 +282,7 @@ def build_container(
         strategy_traces=strategy_traces,
         backtest_runs=backtest_runs,
         experiments=experiments,
+        continuous_accounts=continuous_accounts,
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,

@@ -17,9 +17,13 @@ DEFAULT_STRATEGY_REPOSITORY_PATH = (
 )
 DEFAULT_ASSISTANT_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "assistant.sqlite3"
 DEFAULT_RESEARCH_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "research.sqlite3"
+DEFAULT_CONTINUOUS_DB_PATH = (
+    Path(__file__).resolve().parents[3] / ".local" / "continuous-accounts.sqlite3"
+)
 STRATEGY_REPOSITORY_PATH_ENV = "STRATEGY_WORKBENCH_DB_PATH"
 ARTIFACT_ROOT_ENV = "STRATEGY_WORKBENCH_ARTIFACT_ROOT"
 RESEARCH_DB_PATH_ENV = "STRATEGY_WORKBENCH_RESEARCH_DB_PATH"
+CONTINUOUS_DB_PATH_ENV = "STRATEGY_WORKBENCH_CONTINUOUS_DB_PATH"
 EQUITY_ADAPTER_ENV = "STRATEGY_WORKBENCH_EQUITY_ADAPTER"
 EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
 ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
@@ -41,6 +45,12 @@ def runtime_research_db_path() -> Path:
     """실행 기록 DB(검증 랩 spec D3). 전략 DB 의 불변 트리거와 섞지 않으려고 파일을 나눈다."""
     configured = os.environ.get(RESEARCH_DB_PATH_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_RESEARCH_DB_PATH
+
+
+def runtime_continuous_db_path() -> Path:
+    """일반 실험·전략 기록과 분리한 연속 평가 DB 경로."""
+    configured = os.environ.get(CONTINUOUS_DB_PATH_ENV)
+    return Path(configured).expanduser() if configured else DEFAULT_CONTINUOUS_DB_PATH
 
 
 def runtime_artifact_root() -> Path | None:
@@ -143,6 +153,7 @@ def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
+    continuous_db_path: str | Path | None = None,
     artifact_root: Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
@@ -154,6 +165,7 @@ def build_http_app(
     container = build_container(
         strategy_repository_path=strategy_repository_path,
         research_db_path=research_db_path,
+        continuous_db_path=continuous_db_path,
         artifact_root=artifact_root,
         run_slots=run_slots,
         trial_hold_seconds=trial_hold_seconds,
@@ -172,6 +184,7 @@ def build_http_app(
         strategy_traces=container.strategy_traces,
         backtest_runs=container.backtest_runs,
         experiments=container.experiments,
+        continuous_accounts=container.continuous_accounts,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
@@ -185,6 +198,7 @@ def build_runtime_http_app():
     return build_http_app(
         strategy_repository_path=runtime_strategy_repository_path(),
         research_db_path=runtime_research_db_path(),
+        continuous_db_path=runtime_continuous_db_path(),
         artifact_root=runtime_artifact_root(),
         run_slots=runtime_run_slots(),
         trial_hold_seconds=runtime_trial_hold_seconds(),

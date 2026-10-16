@@ -1,4 +1,7 @@
 export {
+  continuousAccountQuery,
+  continuousLatestQuery,
+  useRunContinuousAccount,
   EXPERIMENT_POLL_MS,
   experimentQuery,
   experimentAuditQuery,
@@ -30,3 +33,5 @@ export type {
   ExperimentTrialState,
   WalkForwardReport,
 } from "../../shared/api";
+
+export { continuousAccountErrorKey } from "./model/continuous-account-copy";

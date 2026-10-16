@@ -51,6 +51,10 @@ export const runtimeAssistantSecretsPath = (): string =>
 export const runtimeResearchDatabasePath = (): string =>
   join(runtimeDirectory(), "research.sqlite3");
 
+/** 연속 계좌 평가도 개발자의 기본 DB 대신 이 실행의 격리 경로만 사용한다. */
+export const runtimeContinuousDatabasePath = (): string =>
+  join(runtimeDirectory(), "continuous-accounts.sqlite3");
+
 /** 백테스트 산출물도 연구 DB와 같은 수명의 격리 런타임에 둔다. */
 export const runtimeArtifactRoot = (): string =>
   join(runtimeDirectory(), "backtest-runs");

@@ -75,6 +75,9 @@ import type {
   GetBacktestSummaryData,
   GetBacktestSummaryErrors,
   GetBacktestSummaryResponses,
+  GetContinuousAccountData,
+  GetContinuousAccountErrors,
+  GetContinuousAccountResponses,
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
@@ -84,6 +87,9 @@ import type {
   GetExperimentCapacityData,
   GetExperimentCapacityErrors,
   GetExperimentCapacityResponses,
+  GetExperimentContinuousAccountData,
+  GetExperimentContinuousAccountErrors,
+  GetExperimentContinuousAccountResponses,
   GetExperimentData,
   GetExperimentErrors,
   GetExperimentParameterMapData,
@@ -180,6 +186,9 @@ import type {
   ReviseStrategyDocumentResponses,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
+  RunExperimentContinuousAccountData,
+  RunExperimentContinuousAccountErrors,
+  RunExperimentContinuousAccountResponses,
   SaveStrategyDraftData,
   SaveStrategyDraftErrors,
   SaveStrategyDraftResponses,
@@ -581,6 +590,18 @@ export const getBacktestSummary = <ThrowOnError extends boolean = false>(
   >({ url: "/api/v1/backtests/{run_id}/summary", ...options });
 
 /**
+ * Get
+ */
+export const getContinuousAccount = <ThrowOnError extends boolean = false>(
+  options: Options<GetContinuousAccountData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetContinuousAccountResponses,
+    GetContinuousAccountErrors,
+    ThrowOnError
+  >({ url: "/api/v1/continuous-accounts/{evaluation_id}", ...options });
+
+/**
  * Equity Catalog
  */
 export const getEquityCatalog = <ThrowOnError extends boolean = false>(
@@ -800,6 +821,44 @@ export const getExperimentCapacity = <ThrowOnError extends boolean = false>(
     GetExperimentCapacityErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/capacity", ...options });
+
+/**
+ * Latest
+ */
+export const getExperimentContinuousAccount = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetExperimentContinuousAccountData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentContinuousAccountResponses,
+    GetExperimentContinuousAccountErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/continuous-account",
+    ...options,
+  });
+
+/**
+ * Run
+ */
+export const runExperimentContinuousAccount = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<RunExperimentContinuousAccountData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    RunExperimentContinuousAccountResponses,
+    RunExperimentContinuousAccountErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/continuous-account",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * Control Experiment

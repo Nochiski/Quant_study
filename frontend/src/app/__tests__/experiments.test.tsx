@@ -134,6 +134,15 @@ const server = setupServer(
       max_priority: 5,
     }),
   ),
+  http.get(`${API}/api/v1/experiments/:experimentId/continuous-account`, () =>
+    HttpResponse.json({
+      readiness: { ready: false, code: "continuous.unfinished", detail: "" },
+      evaluation: null,
+      status: "not_started",
+      data_mode: "mock",
+      interpretation: "학습 종료일 종가에 선택 가능하다고 가정한 평가입니다.",
+    }),
+  ),
   http.get(`${API}/api/v1/experiments/:experimentId`, ({ params }) =>
     HttpResponse.json(experiment(String(params.experimentId), "completed")),
   ),

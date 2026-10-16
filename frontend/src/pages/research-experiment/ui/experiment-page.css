@@ -67,3 +67,42 @@
   margin: 0;
   padding: var(--space-4);
 }
+
+/* 연속 계좌 결과는 창별 비교와 구분하고 작은 화면에서는 금액을 세로로 읽는다. */
+.experiment-continuous__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.experiment-continuous__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-4);
+}
+
+.experiment-continuous__summary div {
+  min-width: 0;
+}
+
+.experiment-continuous__summary dt {
+  color: var(--text-muted);
+}
+
+.experiment-continuous__summary dd {
+  margin: var(--space-1) 0 0;
+  font-weight: var(--font-weight-strong);
+  overflow-wrap: anywhere;
+}
+
+.experiment-continuous__identity,
+.experiment-continuous__details {
+  overflow-wrap: anywhere;
+}
+
+.experiment-continuous__details summary {
+  min-height: 44px;
+  padding-block: var(--space-3);
+  cursor: pointer;
+}

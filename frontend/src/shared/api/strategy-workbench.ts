@@ -15,6 +15,9 @@ import {
   getExperimentAudit,
   getExperimentRemainingTime,
   getExperimentWalkForward,
+  getExperimentContinuousAccount,
+  runExperimentContinuousAccount,
+  getContinuousAccount,
   getFactorCatalog,
   getBacktestRequest,
   getBacktestSummary,
@@ -45,6 +48,8 @@ import {
   upgradeStrategyDocument,
 } from "./generated/sdk.gen";
 import type {
+  ContinuousAccountLatest,
+  ContinuousAccountState,
   AccountReport,
   AccountReportStatus,
   AccountReportSummary,
@@ -546,6 +551,39 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getExperimentWalkForward");
   },
 
+  async getExperimentContinuousAccount(
+    experimentId: string,
+  ): Promise<ContinuousAccountLatest> {
+    return unwrap(
+      await getExperimentContinuousAccount({
+        path: { experiment_id: experimentId },
+      }),
+      "getExperimentContinuousAccount",
+    );
+  },
+
+  async runExperimentContinuousAccount(
+    experimentId: string,
+    clientRequestId: string,
+  ): Promise<ContinuousAccountState> {
+    return unwrap(
+      await runExperimentContinuousAccount({
+        path: { experiment_id: experimentId },
+        body: { client_request_id: clientRequestId },
+      }),
+      "runExperimentContinuousAccount",
+    );
+  },
+
+  async getContinuousAccount(
+    evaluationId: string,
+  ): Promise<ContinuousAccountState> {
+    return unwrap(
+      await getContinuousAccount({ path: { evaluation_id: evaluationId } }),
+      "getContinuousAccount",
+    );
+  },
+
   /**
    * 실험 진행 스트림(SSE, spec D6). 프레임은 진행이 바뀌었다는 신호로만 쓰고, 서버는 실험이 끝나면 마지막 수를
    * 보낸 뒤 닫는다. 생성 SSE 클라이언트를 그대로 쓰는 typed wrapper 다.
@@ -816,6 +854,8 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  ContinuousAccountLatest,
+  ContinuousAccountState,
   AccountReport,
   AccountReportStatus,
   AccountReportSummary,

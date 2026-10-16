@@ -7,7 +7,8 @@
 단순히 건너뛰지 않고, 실제 집계 입력→출력을 macOS에서도 실행하도록 바꿨다.
 
 `tools/quant_study_dev/plan_progress.py`가 순수 Python 집계·검증·생성의 단일 owner다. 새 의존성은
-없으며 기존 루트 uv 프로젝트로 실행한다. 다섯 initiative의 phase 이름·ID 형식과 lang2의
+없으며 Python 3.11 이상으로 script를 직접 실행할 수 있다. 기존 루트 uv 명령도 유지한다.
+다섯 initiative의 phase 이름·ID 형식과 lang2의
 `INTEGRATED` 지원 차이는 `PROFILES`에 선언한다. 각 initiative의 `tools/update-plan-progress.ps1`은
 기존 Windows의 `-PlanPath`·`-Check` 호출을 같은 Python 도구로 전달하는 호환 진입점이다.
 
@@ -39,11 +40,14 @@ PR tracker는 사람이 소유한다. 이 도구는 tracker 상태·체크·Depe
 
 ## 실행
 
-저장소 루트에서 검증만 한다.
+저장소 루트에서 설치 없이 검증한다. PATH의 `python`은 Python 3.11 이상이어야 한다.
 
 ```sh
-uv run --locked python -m quant_study_dev.plan_progress --profile validation-lab --check
+python -X utf8 tools/quant_study_dev/plan_progress.py --profile validation-lab --check
 ```
+
+기존 루트 개발 환경의 `uv run --locked python -m quant_study_dev.plan_progress`도 같은 계산을
+호출하지만, 직접 script 실행에는 uv나 editable package 설치가 필요 없다.
 
 tracker를 변경한 뒤 생성 집계를 갱신하고 재검증한다. 기본 입력은 해당 profile의
 `docs/planning/<profile>/PLAN.md`다. 임시/다른 경로를 검증할 때는 `--plan-path`를 명시한다.
@@ -59,13 +63,27 @@ uv run --locked python -m quant_study_dev.plan_progress \
 `strategy-language-2-0`, `validation-lab`이다. 각 profile은 기존 PS1의 phase 목표·PR ID 패턴을 유지한다.
 
 Windows 기존 호출도 유지한다. 실행하는 디렉터리와 무관하게 wrapper가 자기 위치에서 저장소 root와
-기본 PLAN 경로를 계산하며, 명시 `-PlanPath`의 상대경로 기준은 호출자의 작업 디렉터리다. uv와 Python은
-기존 저장소 개발 환경을 사용한다. 자식 Python 종료 코드를 그대로 반환한다.
+기본 PLAN 경로를 계산하며, 명시 `-PlanPath`의 상대경로 기준은 호출자의 작업 디렉터리다. wrapper는
+PATH의 `python` 하나만 사용하고 먼저 3.11 이상인지 검사한다. 구버전이면 오류와 종료 코드 1을
+반환하며, Python이 없으면 명령 탐색 오류로 실패한다. 별도 설치·실행기 탐색·폴백은 하지 않는다.
+공용 script 절대경로를 `-X utf8`로 직접 실행해 locale에 따른 출력 인코딩 차이를 줄이고 자식 Python
+종료 코드를 그대로 반환한다. 파일 입력/출력의 UTF-8·BOM 규약은 위 계산 기준을 따른다.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File docs/planning/validation-lab/tools/update-plan-progress.ps1 -Check
 powershell -NoProfile -ExecutionPolicy Bypass -File docs/planning/validation-lab/tools/update-plan-progress.ps1 -PlanPath "C:\work path\PLAN.md"
 ```
+
+## CI의 실행 환경
+
+`.github/workflows/lang2-plan.yml`의 `generated-progress`는 checkout 뒤 기존 PowerShell wrapper를
+호출한다. wrapper는 runner PATH에 이미 있는 Python 3.11 이상으로 stdlib script를 직접 실행한다.
+uv·루트 package 설치나 workflow 변경은 필요 없다. 버전 검사가 실패하면 집계도 실행하지 않는다.
+
+첫 통합 실행에서는 wrapper가 uv를 요구해 집계 전에 실패했다. 이를 직접 Python script 호출로
+해결하며 별도 토큰 권한이나 workflow 수정 없이 기존 job을 유지한다. stale 검사·공식 수정본
+artifact 생성과 Python 종료코드 전달도 유지한다. 로컬 fixture 성공만으로 PowerShell을 거치는
+CI 성공까지 주장하지 않고 수정 후 해당 job을 확인한다.
 
 ## fixture 명세와 검증
 
@@ -94,11 +112,14 @@ uv run --project backend ruff check tools
 uv run --project backend pyright tools
 ```
 
-macOS에서 집계 fixture·CLI **10건**, 전체 루트 unittest **52건**이 모두 통과했다. tools 전체 ruff와
+macOS에서 package 설치가 필요 없는 직접 script 집계 fixture·CLI **10건**, 전체 루트 unittest **52건**이 모두 통과했다. tools 전체 ruff와
 pyright는 오류 0이다. 기존 다섯 PLAN을 읽기 전용 validator로 집계한 결과는 모두 VALID였으며
 생성 문자열이 원문과 같았다(`changed=False`: YAML 52/52, GUI 19/19, AI 19/19, lang2 30/30,
 validation-lab 21/28). 이 확인은 일회성 읽기 전용 호환성 증거이며 실제 문서의 현재 숫자를
-unittest에 고정하지 않았다. 실제 Windows PowerShell wrapper는
+unittest에 고정하지 않았다. 추가로 저장소 밖 임시 작업 디렉터리에서 `python -I -S -X utf8`와
+공용 script 절대경로를 사용해 다섯 profile의 기본 root `--check`를 모두 통과했다. site package와
+editable 설치에 기대지 않는 직접 실행 경로를 확인한 것이며, 검증한 로컬 Python은 3.14.3이다.
+실제 Windows PowerShell wrapper는
 이 환경에서 실행하지 못했으며 Windows에서 기존 인자/경로/종료코드를 한 번 확인하는 일이 남았다.
 다음 결정은 tracker 정책을 바꾸는 것이 아니라, 같은 Python 계산을 CI와 Windows 진입점에서도
 계속 사용할지 검토하는 것이다. 생성 집계를 갱신해야 할 때만 명시적으로 write 명령을 실행한다.

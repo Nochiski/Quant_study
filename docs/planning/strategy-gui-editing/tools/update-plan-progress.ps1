@@ -11,10 +11,16 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../../../..")).
 if ([string]::IsNullOrWhiteSpace($PlanPath)) {
     $PlanPath = Join-Path (Split-Path $PSScriptRoot -Parent) "PLAN.md"
 }
-$arguments = @("run", "--locked", "--project", $repoRoot, "python", "-m", "quant_study_dev.plan_progress",
+# PATH의 Python 하나만 사용한다. 패키지 설치나 다른 실행기로 폴백하지 않는다.
+& python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 'Python 3.11+ is required; got ' + sys.version.split()[0])"
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+$scriptPath = Join-Path $repoRoot "tools/quant_study_dev/plan_progress.py"
+$arguments = @("-X", "utf8", $scriptPath,
     "--profile", "strategy-gui-editing", "--plan-path", $PlanPath)
 if ($Check) {
     $arguments += "--check"
 }
-& uv @arguments
+& python @arguments
 exit $LASTEXITCODE

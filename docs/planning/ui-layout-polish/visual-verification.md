@@ -127,8 +127,19 @@ DOM 요소로 이탈 여부를 평가하도록 바로잡고, native summary를 �
 
 최종 frontend 단위 검사는 109개 파일·1,378개 테스트가 80.80초에 통과했다
 (`frontend-unit-release.log`). lint·typecheck·build·E2E typecheck도 종료 코드 0으로 완료했다.
-수정 소스를 push한 새 head의 Windows 실행에서 실제 이미지 9장을 다시 모아 검토하고, 동작
-게이트와 엄격한 기준선 비교를 별도로 확인해야 한다. Windows 최종 결과는 아직 대기 중이다.
+최종 소스 head `ce11ebe867fcecc8e2152a80f4e8206eba02a7fc`의 Windows run `38942206761`은
+11.3분에 `65 passed`, 시각 차이 `9 failed`, serial 1개 미실행으로 끝났다. 실패 9개는 모두 엄격한
+`toHaveScreenshot` 차이이며 별도 동작 실패는 없었다. 원본·재시도 실제 이미지 9쌍의 SHA256은
+모두 같았다. 외부 증거 폴더 `windows-ce11`의 `mapping.json`·`REVIEW.md`·`browser.log`에
+head·run·해시와 실제/기준선/차이 이미지의 대응 관계를 보존했다.
+
+루트 검토자가 실제 이미지 9장과 기존 기준선·차이 이미지 18장을 직접 열어 팔레트·타입·여백·입력
+정렬 변경을 확인했다. 1440px 연결 추적의 내부 스크롤과 그래프 이미지의 기존 마젠타 mask도
+확인한 뒤 정확한 Windows actual 9개의 복사를 승인했다. 해당 9개 기준선만 갱신했으며 픽셀
+허용치·테스트·CI 설정은 변경하지 않았다. 이 갱신 자체를 전체 릴리스 통과로 주장하지 않는다.
+
+최종 전체 통과 여부의 정본은 [PR #534](https://github.com/Nochiski/Quant_study/pull/534)의
+최신 head CI다. 기준선 갱신 후 실행 결과는 그 CI에서 확인한다.
 
 ## Windows 기준선 갱신 절차
 

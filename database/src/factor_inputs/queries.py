@@ -20,10 +20,13 @@ stage T 행)·`_t_prices`(T 가격 행)·`_t_adj_src`(T 행을 넣은 수정주�
 
 두 날짜(컷오버 PR-4 · T-2): `Params.d` 는 판 기준일(세션·창의 끝), `Params.asof` 는 정보 시점이다.
 아침판은 둘 다 D 다. 장 마감 판(basis evening)은 d = 오늘 T, asof = D'(직전 거래일 = 고정한 연구
-판의 마지막 세션)이다. 날짜 축이 있는 정보 입력 — WISE(컨센서스·재무)·DART(재무·배당·감사·
-공시)·`universe_daily`(D' 행)·WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor`) — 는
-fetched/available ≤ asof 로 자른다(compat `--consensus-asof` 와 같은 개념 — 기본값이 D 인 것도
-같다). 그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
+판의 마지막 세션)이다. 날짜 축이 있는 정보 입력 — DART(재무·배당·감사·공시)·`universe_daily`(D' 행)·
+WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor`) — 는 fetched/available ≤ asof 로 자른다.
+그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
+WISE(컨센서스·재무 — `stg_consensus_annual`·`stg_consensus_matrix`·`stg_fin_wise`·`stg_fin_wise_q`)만
+`Params.wise_asof` 로 자른다(N-53): 아침판 D, 장 마감 판도 T 다. WISE 는 그날 06:00 에 받고(기준일 =
+전 거래일 — 하루 중 언제 받아도 같다) 장 마감 판이 고정한 D' 확정판(T 아침 08:10 빌드)의 stage 판에
+그 수집분이 실려 있다. compat `--consensus-asof`(기본 = 판 날짜)와 같은 시점이다.
 날짜 축이 없는 마스터(`security` 이름·상장일, `corp` 업종 코드)는 고정 판 그대로다. 세션 창(가격
 550 달력일·수급·신용 60 세션)·당해 12월기 `fy`·연간 컨센서스 연도 창은 T 기준이다.
 """
@@ -120,10 +123,13 @@ class Params:
     credit_lag: int         # 신용잔고 실입수 랙(세션, equity FieldProfile)
     basis: str = "morning"  # morning | evening(장 마감 판 — 컷오버 T-2)
     asof: str = ""          # 정보 시점(YYYY-MM-DD) — 비우면 d. 장 마감 판은 D'(모듈 docstring)
+    wise_asof: str = ""     # WISE 정보 시점 — 비우면 d. 장 마감 판도 T(그날 06:00 수집, N-53)
 
     def __post_init__(self) -> None:
         if not self.asof:
             object.__setattr__(self, "asof", self.d)
+        if not self.wise_asof:
+            object.__setattr__(self, "wise_asof", self.d)
 
 
 def _lit_list(values: tuple[str, ...]) -> str:
@@ -158,8 +164,8 @@ def calendar_sql(t_session: str | None = None) -> str:
 def coverage_sqls(p: Params) -> list[str]:
     """종목별 신선도 `_cov`(T2.11 · 유예 규칙 = layer-fixes §3-2).
 
-    D* = `stg_consensus_annual` 에서 fetched_date ≤ asof 인 **마지막 수집일**(전 종목 공통 —
-    아침판 asof = D, 장 마감 판 asof = D').
+    D* = `stg_consensus_annual` 에서 fetched_date ≤ wise_asof 인 **마지막 수집일**(전 종목 공통 —
+    아침판 D, 장 마감 판도 T — 그날 06:00 수집, N-53).
     종목의 마지막 신선일 = 당해 12월기 추정(period_kind 'E', period = fy)의 op·ni 가 **둘 다** 있는
     fetched_date 의 최댓값(compat `ESTIMATE_TICKERS_SQL` 과 같은 판정).
       fresh  = 마지막 신선일 = D*               (나이 0)
@@ -170,12 +176,12 @@ def coverage_sqls(p: Params) -> list[str]:
     """
     dstar = ("CREATE OR REPLACE TEMP TABLE _dstar AS\n"
              "SELECT max(fetched_date) AS dstar FROM stg_consensus_annual\n"
-             f"WHERE fetched_date <= DATE '{p.asof}'")
+             f"WHERE fetched_date <= DATE '{p.wise_asof}'")
     cov = f"""CREATE OR REPLACE TEMP TABLE _cov AS
 WITH fresh AS (
     SELECT ticker, max(fetched_date) AS last_fresh
     FROM stg_consensus_annual
-    WHERE fetched_date <= DATE '{p.asof}'
+    WHERE fetched_date <= DATE '{p.wise_asof}'
       AND period_kind = 'E' AND period = '{p.fy}'
       AND op IS NOT NULL AND ni IS NOT NULL
     GROUP BY ticker
@@ -614,7 +620,7 @@ def consensus_annual_sql(p: Params) -> str:
     inner = f"""WITH latest AS (
     SELECT ticker, max(fetched_date) AS fetched_date
     FROM stg_consensus_annual
-    WHERE fetched_date <= DATE '{p.asof}' AND {_IN_UNIVERSE}
+    WHERE fetched_date <= DATE '{p.wise_asof}' AND {_IN_UNIVERSE}
     GROUP BY ticker
 ),
 typed AS (
@@ -723,7 +729,7 @@ def fin_summary_sql(p: Params) -> str:
     -- (종목, ep) 단위 D 이전 최신 판(배포 묶음 7 D7-4) — 두 ep 의 판 날짜가 다를 수 있다
     SELECT w.ticker, w.ep, max(w.fetched_date) AS fetched_date
     FROM stg_fin_wise w
-    WHERE w.fetched_date <= DATE '{p.asof}'
+    WHERE w.fetched_date <= DATE '{p.wise_asof}'
       AND w.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
       AND w.{_IN_UNIVERSE}
     GROUP BY w.ticker, w.ep
@@ -769,7 +775,7 @@ wqsnap AS (
     -- 종목별 D 이전 최신 WISE 분기 손익 스냅샷(신선·유예 종목만 — 연간 wsnap 과 같은 규약)
     SELECT q.ticker, max(q.fetched_date) AS fetched_date
     FROM stg_fin_wise_q q
-    WHERE q.pkey = 'Q:IS' AND q.fetched_date <= DATE '{p.asof}'
+    WHERE q.pkey = 'Q:IS' AND q.fetched_date <= DATE '{p.wise_asof}'
       AND q.ticker IN (SELECT ticker FROM _cov WHERE coverage_state IN ('fresh', 'grace'))
       AND q.{_IN_UNIVERSE}
     GROUP BY q.ticker

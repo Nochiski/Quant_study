@@ -474,12 +474,11 @@ def _run_export(tmp_path: Path, *args: str, conf: str | None, real: bool = False
     return Exported(p, root, target)
 
 
-@pytest.mark.parametrize("conf", [None, "shipped", "CALENDAR_EXPORT_V3=yes\n", "CALENDAR_EXPORT_V3=\n",
+@pytest.mark.parametrize("conf", [None, "CALENDAR_EXPORT_V3=yes\n", "CALENDAR_EXPORT_V3=\n",
                                   "CALENDAR_EXPORT_V3=0\n"])
 def test_export_switch_off_is_todays_chain(tmp_path: Path, conf: str | None) -> None:
-    """꺼짐(파일 없음·저장소 값·다른 값·빈 값) — 내보내기를 부르지 않고 v3 사본 동기화를 부른다. 로그 줄도 늘지 않는다."""
-    text = _SHIPPED_CONF.read_text(encoding="utf-8") if conf == "shipped" else conf
-    r = _run_export(tmp_path, conf=text)
+    """꺼짐(파일 없음·다른 값·빈 값) — 내보내기를 부르지 않고 v3 사본 동기화를 부른다. 로그 줄도 늘지 않는다."""
+    r = _run_export(tmp_path, conf=conf)
     assert r.p.returncode == 0, r.p.stdout + r.p.stderr
     assert r.calls == _ALL
     assert r.read("sync.txt") == "sync\n"
@@ -492,7 +491,7 @@ def test_export_switch_off_is_todays_chain(tmp_path: Path, conf: str | None) -> 
 def test_export_switch_off_log_is_the_same_with_or_without_the_file(tmp_path: Path) -> None:
     """꺼짐이면 설정 파일 유무와 무관하게 체인 로그가 시각만 빼고 같다(스위치가 출력에 흔적을 남기지 않는다)."""
     logs = [re.sub(_KST_TS, "T", _run_export(tmp_path / str(i), conf=c).log)
-            for i, c in enumerate((None, _SHIPPED_CONF.read_text(encoding="utf-8"), "CALENDAR_EXPORT_V3=yes\n"))]
+            for i, c in enumerate((None, "CALENDAR_EXPORT_V3=0\n", "CALENDAR_EXPORT_V3=yes\n"))]
     assert logs[0] and logs[0] == logs[1] == logs[2]
 
 
@@ -612,11 +611,11 @@ def test_calendar_export_switch_requires_exactly_one(tmp_path: Path, text: str |
     assert _switch_on(tmp_path, text) is on
 
 
-def test_shipped_calendar_export_conf_is_off(tmp_path: Path) -> None:
-    """저장소 값은 꺼짐 — 머지·배포만으로는 v3 휴장 파일을 쓰지 않는다(컷오버 날 V3-D 와 같은 배포로 켠다, T-48)."""
+def test_shipped_calendar_export_conf_is_on(tmp_path: Path) -> None:
+    """저장소 값은 켜짐 — 10-16 컷오버에 V3-D(v3 휴장 크론 2줄 끄기)와 같은 배포로 켰다(T-48). 되돌리기는 0."""
     text = _SHIPPED_CONF.read_text(encoding="utf-8")
-    assert "CALENDAR_EXPORT_V3=0" in text.splitlines()
-    assert _switch_on(tmp_path, text) is False
+    assert "CALENDAR_EXPORT_V3=1" in text.splitlines()
+    assert _switch_on(tmp_path, text) is True
 
 
 # ── T-13(H1-5) 저녁 키움 보강 — KIS 뒤·DART 앞, 소스 단계 규약(실패 = FAILED → crit · rc 2) ─────────────

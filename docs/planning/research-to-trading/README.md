@@ -4,8 +4,16 @@
 연결한다. 입력 재현, 회계 정확성, 신호 예측력, 비용 후 성과, 외부 주문 안전은 각각 확인해야 한다.
 현재 증거만으로 실데이터 수익성, 배당·상폐 회계 해결, 실브로커 연결 준비 완료를 주장하지 않는다.
 
-기준 HEAD는 `1e780ce7`이다. 아래는 이 기준 이후 추가한 구현과 검증 범위를 연결한다.
-테스트 수는 해당 검증 묶음의 실행 결과이며 서로 겹치는 회귀를 합산하지 않는다.
+코드 감사 기준은 `1e780ce7`이며, **1차 기반 `8c3c1803` 검증**과 이후 작업의 검증 시점을 구분한다.
+S04 계좌 경계 안내·macOS 공용 PLAN 집계·S03 보존 입력 연구 runner가 후속으로 구현됐다.
+S03 runner는 합성 원장의 호출·내보내기까지 검증했으며 실데이터 연구 완료를 뜻하지 않는다.
+아래 테스트 수는 해당 검증 묶음의 실행 결과이며 서로 겹치는 회귀를 합산하지 않는다.
+S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·database 1,437 passed이며,
+아래에 1차와 구분해 기록한다. 이 로컬 검증을 전체 GitHub CI 통과로 표현하지 않는다.
+[PR #522](https://github.com/Nochiski/Quant_study/pull/522)·
+[PR #523](https://github.com/Nochiski/Quant_study/pull/523)·
+[PR #524](https://github.com/Nochiski/Quant_study/pull/524)는 검토 근거 링크이며 동적 PR 상태는 링크에서
+확인한다. 이 문서에 별도의 PR 상태 원장을 만들지 않는다.
 
 [실행 로드맵 HTML](../../auto-trading-roadmap.html)의 S01–S08 패킷은 향후 작업 지시를 담은 제안
 원문이다. 이 README와 각 단계 스펙은 현재 구현·증거·남은 결정을 인계한다. 공식 제품 기능 상태와
@@ -47,38 +55,56 @@
 - **다음 결정:** 분할을 반영한 비용 후 가격 기준 연구로 제한할 수 있으면 S03을 진행한다. 배당
   총수익이나 상폐 영향의 크기가 결론에 필수라면 원천·정산 계약을 먼저 보완한다.
 
-## S03 — 신호 평가의 최소 기반
+## S03 — 신호 평가와 보존 입력 연구 runner
 
-- **의도:** 종목 순위를 맞히는 능력과 실제 매매의 비용 후 효과를 별도로 측정한다.
-- **현재 구현:** `domain/signal_evaluation`의 순수 평가 함수가 기존 선정 전 관측을 소비하고 별도
-  미래 분할조정 종가→종가 가격 라벨과 날짜별 Rank IC·커버리지·제외 사유를 만든다. 공통 거래 달력, 진입 지연,
-  만기, 상장 구간·결측·동점·상수 단면을 명시하며 실제 raw observation → 기존 factor pipeline의
-  출력을 합성 통합 테스트로 연결했다. 미래 라벨은 선정/목표 비중 입력에 넣지 않는다.
-- **증거·아직 못 확인:** 신규 **21 passed, 0 skipped**(domain 20·통합 1), S03+S02+architecture
-  묶음 **43 passed, 0 skipped**, 기존 pipeline을 포함한 관련 회귀 **182 passed, 0 skipped**.
-  [S03 스펙](S03-signal-evaluation.md)에 라벨·분모·시점·검증 계약이 있다. 실데이터 첫 연구, 비용 후
-  포트폴리오 비교, ICIR·quantile spread·turnover·decay의 완전 분석, 기존 제품 API/UI 노출은
-  완료되지 않았다. 이 가격 라벨은 배당·비용·실제 다음 시가 체결을 반영하지 않는다.
-  함수는 기존 봉인 guard를 사용하며 2020-01-02 이전 신호/평가 결과를 차단한다.
-- **실행 진입점:** `strategy_workbench.domain.signal_evaluation.facade.evaluation.evaluate_signal`.
-  [도메인 테스트](../../../backend/tests/domain/test_signal_evaluation.py)와
-  [raw pipeline 통합 테스트](../../../backend/tests/integration/test_signal_evaluation_pipeline.py)는
-  합성 입력으로 진입점을 검증한다. 기존 `FactorResearchService`의 catalog/validate/explain과
-  `portfolioAnalytics`는 미래 라벨 기반 신호 평가를 대신하지 않는다.
-- **다음 결정:** S01로 보존한 실제 입력과 S02 제한 범위 위에서 무튜닝 신호·유니버스·주 평가량·비용을
-  결과 전에 동결하고 첫 연구를 수행할지 결정한다. 신호 예측력과 비용 후 성과가 모두 준비된 뒤
-  진행·보류·기각을 기록한다. 좋은 horizon을 사후 선택했다면 그 선택도 남긴다.
+- **의도:** 종목 순위를 맞히는 능력과 실제 매매의 비용 후 효과를 별도로 측정하고 같은 입력으로
+  연구 증거를 다시 만들 수 있게 한다.
+- **현재 구현:** 기존 `domain/signal_evaluation`의 별도 미래 분할조정 가격 라벨·날짜별 Rank IC·
+  커버리지 core에 `application/signal_research` 유스케이스와 CLI를 연결했다. S01 보존 검증 → 실제
+  DuckDB adapter → 기존 raw/factor pipeline → 별도 label 조회 → 원시 근거·일별 IC/coverage
+  JSON 내보내기를 합성 원장으로 검증했다. 미래 라벨은 선정/목표 비중 입력에 넣지 않는다.
+  유스케이스 자체 `SnapshotGuardPort`·`SignalPipelinePort`·`SignalLabelDataPort`를 구현하는
+  adapter를 `bootstrap/signal_research`가 별도로 조립한다. 기존 평가·조회·봉인 계약을 복제하지 않는다.
+- **증거·아직 못 확인:** runner 신규 **25 passed**, 기존 S03 21건+architecture 18건 포함
+  **64 passed, 0 skipped**, DuckDB·S01·기존 pipeline 관련 회귀 **195 passed, 0 skipped**다.
+  미보존·변조 root 차단, 쿼리 끝으로 자르지 않은 실제 `security_span`의 상폐·coverage_gap·data_gap
+  구분, 중간 MASKED 조정 공백의 요청 전체 unsupported, 정지 기준가의 거래 가격 제외를 확인했다.
+  한글·공백 root의 실제 UTF-8 subprocess 왕복도 확인했다. Windows 실측 증거는 아니다.
+  실원장·실성과·비용 후 포트폴리오 비교·완전 분석·기존 API/UI 노출은 **미완료**다.
+  가격 라벨은 배당·비용·실제 다음 시가 체결을 반영하지 않으며 봉인 guard를 유지한다.
+- **실행 진입점:** `python -m strategy_workbench.bootstrap.signal_research`에
+  `--preserved-equity-root`·`--repo-root`·전략/실행 설정 JSON·팩터·기간 명세를 명시한다.
+  검증은 adapter 열기 전·pipeline 실행 전·평가 후에 수행하며, 미지원 원천을 mock이나 원주가로
+  대체하지 않는다. `--output-json`은 새 파일만 허용하고 `-`는 표준 출력이다.
+  [runner 스펙·CLI·검증](S03-runner.md), [순수 평가 계약](S03-signal-evaluation.md),
+  [runner 통합 테스트](../../../backend/tests/integration/test_signal_research_runner.py),
+  [유스케이스 테스트](../../../backend/tests/application/test_signal_research_service.py)가 근거다.
+  기존 `FactorResearchService`의 catalog/validate/explain과 비용 후 `portfolioAnalytics`는
+  이 미래 라벨 신호 평가를 대신하지 않는다.
+- **다음 결정:** 사용자가 확보한 원장과 같은 코드·환경의 S01 사본을 준비하고 S02 제한 범위 위에서
+  무튜닝 신호·신호 창·유니버스·평가량·비용·반복 열람 기록을 결과 전에 정한다. 그 뒤 첫 실데이터
+  IC/coverage와 별도 비용 후 성과를 함께 검토할지 결정한다. MASKED 공백·배당 총수익·상폐 회수금이
+  결론에 필수면 원천/계약을 먼저 보완한다. 좋은 horizon을 사후 선택했다면 그 선택도 남긴다.
 
-## S04 — 반증·스트레스·선택 기록
+## S04 — 계좌 경계 안내와 반증·선택 기록
 
-- **의도:** 낙관적 체결이나 반복 선택에 기대는 결과를 걸러내고 근거보다 강한 확신을 막는다.
-- **현재 구현:** 이번 작업 트리에서는 새 S04 기능에 착수하지 않았다. 기존 Validation Lab의
-  trial·실험·워크포워드 기능은 각 PLAN/스펙의 기존 상태를 따른다.
-- **아직 못 확인:** 첫 실제 후보의 비용·진입 지연·미체결 스트레스, 일반 평가 열람 이력, 계좌
-  연속성의 추가 요구와 선택 기준은 미확정이다. 기존 기능 전체를 미완료로 돌리는 의미는 아니다.
-- **실행 진입점:** 현재 새 실행 진입점은 없다. [HTML S04 패킷](../../auto-trading-roadmap.html#session-s04)과
-  [Validation Lab PLAN](../validation-lab/PLAN.md)의 선행 조건을 확인한다.
-- **다음 결정:** S03 실제 후보와 결과가 준비되면 소수 반증 시험·선택 기록의 범위를 먼저 동결한다.
+- **의도:** 기간별 비교 결과를 하나의 실제 계좌 성과로 오해하거나 근거보다 강한 확신을 갖지 않게 한다.
+- **현재 구현:** 기존 워크포워드 계산 owner의 `window_restart_returns`와 한글 안내를 실제 API
+  `GET /api/v1/experiments/{id}/walk-forward`와 실험 상세 화면에 연결했다. 창마다 같은 초기자본으로
+  재시작하고 첫 기록 이전 진입비용·손익을 제외하며 현금·보유 수량을 이월하지 않는다고 명시한다.
+  옛 서버가 안내를 주지 않으면 계좌 연결 방식을 확인할 수 없다고 표시한다. 곡선·샤프·유지율·
+  trial key·설계 판본·선택 규칙은 유지했다.
+- **증거·아직 못 확인:** 독립 합성 장부에서 비용 0원일 때 두 평가가 1.21배로 일치하고, 주문당 10원
+  비용이면 현 연결은 약 1.190083배, 연속 계좌는 1.16배임을 확인했다. 관련 backend **214 passed**,
+  architecture **18 passed**, frontend 전체 **105파일·1,346테스트 통과**, typecheck·lint·build와
+  기존 US-SM-14·15 mock 브라우저 e2e **1 passed**다. 실제 연속 계좌 실행기는 **미구현**이며,
+  비용·지연·미체결 스트레스와 일반 평가 열람 이력도 남아 있다. 합성 비교는 실데이터 수익성 증거가 아니다.
+- **실행 진입점:** 기존 실험 결과 API와 실험 상세 화면을 사용한다. 별도 연속 실행기나 export 형식은
+  추가하지 않았다. [S04 스펙·후속 계좌 계약](S04-walk-forward.md),
+  [독립 장부 fixture](../../../backend/tests/domain/test_walk_forward_account_boundary.py),
+  [API 통합 테스트](../../../backend/tests/integration/test_experiment_http_api.py)가 근거다.
+- **다음 결정:** S03 후보와 입력이 준비되면 소수 반증 시험과 선택 기록을 먼저 정한다. 연속 계좌가
+  필요하면 초기 상태·경계 보유·주문/체결·비용·정수 수량·결과 식별 계약을 동결한 뒤 별도 구현한다.
   봉인 개봉이나 기존 trial key 의미 변경을 자동으로 수행하지 않는다.
 
 ## S05 — 영속 의도·가짜 브로커·대사
@@ -126,24 +152,23 @@
 
 ## 검증 범위의 해석
 
-2026-10-16 현재 작업 트리에서 확인한 결과다. Rust 확장을 준비한 backend 환경을 사용했다.
-아래 묶음은 서로 겹치므로 pass 수를 합산하지 않는다. 특히 Rust parity는 backend 전체 검증에
-포함된 별도 재실행이며 신규 테스트 수가 아니다.
+첫 표는 **1차 기반 `8c3c1803` 검증**이며 이후 S03 runner·S04를 포함한 전체 회귀는 다음 표에
+별도 시점의 증거로 적는다. Rust 확장을 준비한 backend 환경에서 확인했다. 시점과 묶음이 겹치므로
+pass 수를 합산하지 않는다.
 
-| 검증 | 결과 | 범위 |
+| 1차 기반 검증 | 결과 | 범위 |
 |---|---|---|
-| backend 전체 | **4,583 passed, 1 skipped, 34 warnings** (163.41초) | 기존 기능과 새 합성 검증의 전체 회귀 |
-| database 전체 | **1,437 passed** (162.62초) | 실제 원장 품질 인증이 아닌 코드·합성 fixture 동작 |
-| Rust parity 별도 묶음 | **838 passed** | backend 전체와 중복되는 재실행 |
-| backend 전체 ruff·pyright | **오류 0** | `src tests examples scripts tools` 범위 |
-| root `tools` ruff·pyright | **오류 0** | 루트 도구 정적 검사 |
-| 필드 대응표 검사 | **fields=40, map=46, missing=0** | 팩터 레지스트리 요구 필드의 대응표 coverage |
-| root `tools` unittest | **43건 중 42 통과, 1 실패** | 기존 `test_plan_progress`의 PowerShell 설치 환경 assertion |
-| 병합 충돌 표식 검사 | **통과** | `quant_study_dev.conflict_markers` |
+| backend 전체 | **4,583 passed, 1 skipped, 34 warnings** (163.41초) | 1차 기반 시점의 전체 회귀 |
+| database 전체 | **1,437 passed** (162.62초) | 실제 원장 품질 인증이 아닌 1차 코드·합성 동작 |
+| Rust parity 별도 묶음 | **838 passed** | 1차 backend 전체와 중복되는 재실행 |
+| backend 전체 ruff·pyright | **오류 0** | 1차 `src tests examples scripts tools` 범위 |
+| root `tools` ruff·pyright | **오류 0** | 1차 루트 도구 정적 검사 |
+| 필드 대응표 검사 | **fields=40, map=46, missing=0** | 1차 팩터 요구 필드 대응표 coverage |
+| root `tools` unittest | **43건 중 42 통과, 1 실패** | 1차 당시 PowerShell 설치 환경 assertion 실패 |
+| 병합 충돌 표식 검사 | **통과** | 1차 `quant_study_dev.conflict_markers` |
 
-
-backend 전체의 skip 1건은 외부 공급자 live smoke의 opt-in 실행 조건을 켜지 않아 발생했다.
-외부 연결이 통과한 것으로 세지 않는다. 위 테스트의 정확한 실행 명령은 저장소 루트 기준이다.
+1차 backend skip 1건은 외부 공급자 live smoke의 opt-in 조건을 켜지 않아 발생했다. 외부 연결이
+통과한 것으로 세지 않는다. 당시 전체 회귀 명령은 다음과 같다.
 
 ```sh
 uv run --no-sync --project backend pytest backend/tests -q
@@ -151,15 +176,50 @@ uv run --no-sync --project backend pytest database/tests -q
 uv run --no-sync --project backend pytest backend/tests/test_core_parity.py -q
 ```
 
-루트 도구의 unittest는 PowerShell이 없는 이 환경에서 기존 `test_plan_progress` 1건이 실패했다.
-해당 파일만 아래 명령으로 격리 재실행해 같은 환경 실패를 확인했고, 그 파일은 수정하지 않았다.
-이는 통과나 skip으로 바꾸어 세지 않으며 **전체 CI 통과를 주장하지 않는다**.
+**후속 전체 검증(2026-10-16, S03 runner·S04 포함):**
+
+| 검증 | 결과 | 범위·시점 |
+|---|---|---|
+| backend 전체 | **4,610 passed, 1 skipped, 34 warnings** (169.50초) | S03 runner·S04 포함 현재 전체 회귀 |
+| database 전체 | **1,437 passed** (162.26초) | 같은 후속 시점의 코드·합성 fixture 전체 회귀 |
+| backend 전체 ruff·pyright | **오류 0** | 현재 `src tests examples scripts tools` 전체 |
+| frontend 전체 | **105파일·1,346테스트 통과** | 앞선 S04 검증 시점, typecheck·lint·build·editor bundle 통과 |
+| mock 브라우저 e2e | **1 passed** | 앞선 S04의 기존 US-SM-14·15 흐름, 실제 backend 안내 표시 |
+
+전체 backend·database 명령은 저장소 root에서 각각
+`uv run --no-sync --project backend pytest backend/tests -q`와
+`uv run --no-sync --project backend pytest database/tests -q`다. 테스트 skip·합성 입력의 통과를
+실제 공급자 연결이나 실데이터 수익성 증거로 세지 않는다. S03 runner의 25/64/195건 묶음과 S04의
+관련 검증은 각 절에 별도로 적었으며 위 전체 회귀에 더해 합산하지 않는다.
+로컬 Node 25의 실험 WebStorage가 jsdom 저장소와 충돌해 최초 frontend 실행이 실패했으며,
+`NODE_OPTIONS=--no-experimental-webstorage`로 실행 환경을 맞춘 전체 재실행은 통과했다.
+CI는 Node 22를 사용한다. 제품 코드나 테스트 설정을 우회하도록 바꾸지 않았다.
+
+macOS PLAN 집계는 기존 PowerShell 환경 실패를 넘어 순수 Python 공용 owner로 계산·검증하도록
+수정했다. 공용 Python core에 대한 후속 root unittest는 **52건 모두 통과**, tools ruff·pyright
+오류 0이며 기존 다섯 PLAN을 읽기 전용으로 검증해 모두 VALID·`changed=False`를 확인했다.
+실제 tracker·체크행·PR 상태나 의존성은 바꾸지 않았다.
+
+CI의 uv 미설치 환경 실패에 대응한 최종 PS1 다섯 개는 workflow 변경 없이 PATH의 `python`이
+3.11 이상인지 먼저 검사하고, `python -X utf8`로 절대경로의 공용 script를 직접 호출한다.
+패키지·editable 설치가 없는 `-I -S` 격리 Python에서도 직접 script로 다섯 PLAN을 검증했고,
+이 수정 후 부모의 root 전체 52건과 tools ruff·pyright 오류 0을 확인했다.
+원격 HEAD `79b9c86d`의
+[generated-progress 단일 CI job 성공](https://github.com/Nochiski/Quant_study/actions/runs/38862921708)은
+이 호출 경로의 추가 검증 근거다. [공용 PLAN 집계 계약·사용법](../../../tools/PLAN_PROGRESS.md)과
+[fixture 테스트](../../../tools/tests/test_plan_progress.py)에 상세 근거가 있다. 실제 Windows
+PowerShell 현지 실측은 여전히 남아 있다.
+
+로컬 실행 진입점은 아래와 같으며 과거 PowerShell 1건 실패를 현재 실패로 그대로 적용하지 않는다.
 
 ```sh
 uv run --locked python -m unittest discover -s tools/tests -p 'test_*.py'
-uv run --locked python -m unittest discover -s tools/tests -p 'test_plan_progress.py'
+uv run --locked python -m quant_study_dev.plan_progress --profile validation-lab --check
 uv run --locked python -m quant_study_dev.conflict_markers
 ```
 
+**전체 GitHub CI 통과는 주장하지 않는다.** 위 결과는 로컬 전체 회귀와 명시한 HEAD의 단일 job
+증거다. 전체 PR 검사·머지 상태는 각 PR 링크가 소유하며 이 문서에 동적 상태 목록을 추가하지 않는다.
+1차·후속 회귀를 합산하지 않는다.
 실데이터 수익률·IC를 산출하거나 실제 계좌를 연결하거나 봉인 구간을 개봉하지 않았다.
 Validation Lab PLAN의 MERGED 표시·PR 수·의존성은 이번 인계에서 바꾸지 않는다.

@@ -42,6 +42,17 @@ bootstrap ─> application + adapters
 - adapter → adapter 의존은 선언된 공용 책임 재사용에 한정한다: SQLite 저장 어댑터는
   무의존 `sqlite_store`의 연결·DDL·시간 규칙을, `backtest_engine`은 `engine_portfolio`의
   엔진 요구사항·목표 변환을 읽는다. 이 두 간선은 도메인 정책을 복제할 근거가 아니다.
+- S03 연구 실행은 `application/signal_research`가 자체 outgoing `SnapshotGuardPort`·
+  `SignalPipelinePort`·`SignalLabelDataPort`를 소유한다. `adapters/outbound/research_snapshot`은
+  기존 S01 검증 CLI를 UTF-8 subprocess로 연결하고, `adapters/outbound/signal_pipeline`은
+  `application/portfolio_design` facade를 재사용해 기존 raw/factor pipeline 결과를 변환한다.
+  이 bridge가 기존 서비스 호출을 담당하며 새 application에서 다른 application 서비스나
+  concrete adapter를 import하지 않는다. `equity_duckdb`의 연구 label adapter는 자체 노드의 기존
+  가격·달력·bar 조회와 원래 security_span을 재사용하며 연구 port와 `domain/signal_evaluation`에
+  의존한다. 보존 검증·팩터 식·가격/상장 계약을 복제하거나 완화하지 않는다.
+  `adapters/inbound/signal_research_cli`는 요청 해석·JSON 내보내기만 맡고 `bootstrap/signal_research`가
+  별도 CLI composition root로 구체 구현을 조립한다. 기존 HTTP bootstrap·API/UI는 변경하지 않는다.
+  상세 계약은 `docs/planning/research-to-trading/S03-runner.md`다.
 - S05 오프라인 실행은 `domain/order_execution`(정수 수량·KRW 값/누적 사실 전이·대사),
   `application/offline_execution`(자체 `BrokerPort`·`LedgerPort`, 전송·복구 제어),
   `adapters/outbound/execution_sqlite`(전용 의도 원장)·`adapters/outbound/fake_broker`(네트워크 없는

@@ -14,6 +14,7 @@ import {
   runtimeAssistantSecretsPath,
   runtimeDatabasePath,
   runtimeResearchDatabasePath,
+  runtimeContinuousDatabasePath,
   TRIAL_HOLD_SECONDS,
   IDEAS_API_PREFIX,
 } from "./e2e/runtime";
@@ -27,6 +28,7 @@ const runtimeDatabase = runtimeDatabasePath();
 const runtimeAssistantDatabase = runtimeAssistantDatabasePath();
 const runtimeAssistantSecrets = runtimeAssistantSecretsPath();
 const runtimeResearchDatabase = runtimeResearchDatabasePath();
+const runtimeContinuousDatabase = runtimeContinuousDatabasePath();
 const runtimeArtifacts = runtimeArtifactRoot();
 const ci = process.env.CI !== undefined;
 // 실데이터 opt-in: `E2E_REAL_EQUITY_ROOT`(로컬 equity 루트, `ledger_sync sync` 산출)가 있으면 backend 를
@@ -142,6 +144,7 @@ export default defineConfig({
         ...process.env,
         STRATEGY_WORKBENCH_DB_PATH: runtimeDatabase,
         STRATEGY_WORKBENCH_RESEARCH_DB_PATH: runtimeResearchDatabase,
+        STRATEGY_WORKBENCH_CONTINUOUS_DB_PATH: runtimeContinuousDatabase,
         STRATEGY_WORKBENCH_ARTIFACT_ROOT: runtimeArtifacts,
         // 포트를 옮기면 preview origin 도 바뀐다. 허용 목록에 넣지 않으면 브라우저 요청이
         // CORS 로 막혀 서버는 멀쩡한데 화면만 빈다.

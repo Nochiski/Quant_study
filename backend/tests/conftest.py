@@ -21,6 +21,7 @@ RUNTIME_PATH_GUARD = RuntimePathGuard(
         _http.DEFAULT_STRATEGY_REPOSITORY_PATH.parent,
         _http.DEFAULT_ASSISTANT_DB_PATH.parent,
         _http.DEFAULT_RESEARCH_DB_PATH.parent,
+        _http.DEFAULT_CONTINUOUS_DB_PATH.parent,
         _container.DEFAULT_RUN_ARTIFACT_ROOT,
         default_secrets_path().parent,
     )
@@ -53,6 +54,7 @@ def _redirect_runtime_defaults(monkeypatch: pytest.MonkeyPatch, root: Path) -> N
     )
     monkeypatch.setattr(_http, "DEFAULT_ASSISTANT_DB_PATH", root / "assistant.sqlite3")
     monkeypatch.setattr(_http, "DEFAULT_RESEARCH_DB_PATH", root / "research.sqlite3")
+    monkeypatch.setattr(_http, "DEFAULT_CONTINUOUS_DB_PATH", root / "continuous-accounts.sqlite3")
     monkeypatch.setattr(_container, "DEFAULT_RUN_ARTIFACT_ROOT", root / "backtest-runs")
     monkeypatch.setattr(_assistant, "default_secrets_path", lambda: root / "secrets.json")
 

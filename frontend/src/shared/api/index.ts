@@ -55,6 +55,8 @@ export {
   configureStrategyWorkbenchApi,
   failureReason,
   strategyWorkbenchApi,
+  type ContinuousAccountLatest,
+  type ContinuousAccountState,
   type AccountReport,
   type AccountReportStatus,
   type AccountReportSummary,

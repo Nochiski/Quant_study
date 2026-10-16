@@ -1,7 +1,7 @@
+import { BacktestMetricTable, MetricCell, type MetricExplanation } from "./backtest-metrics";
 import { BacktestOrderEvents } from "./backtest-order-events";
 import type {
   BacktestRunResult,
-  MetricDefinition,
   MetricValue,
 } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
@@ -10,7 +10,6 @@ import {
   EXPLAINING_WARNING_CODES,
   HIGHLIGHTED_METRIC_IDS,
   metricPlainCopy,
-  metricUnavailableCopy,
 } from "../model/metric-copy";
 import {
   runEnvironmentApplies,
@@ -111,59 +110,6 @@ const LineChart = ({
     </section>
   );
 };
-
-const formatMetric = (
-  metric: MetricValue,
-  definition: MetricDefinition,
-): string => {
-  if (metric.value === null) return t("backtest.result.unavailable");
-  const precision = definition.precision ?? 4;
-  if (definition.unit === "percent") {
-    return `${(metric.value * 100).toFixed(Math.min(precision, 2))}%`;
-  }
-  if (definition.unit === "currency") {
-    return `₩${metric.value.toLocaleString("ko-KR", {
-      maximumFractionDigits: precision,
-    })}`;
-  }
-  if (definition.unit === "count" || definition.unit === "sessions") {
-    return metric.value.toFixed(0);
-  }
-  return metric.value.toFixed(precision);
-};
-
-/** 사용 불가 지표 칸에서 이유를 적은 데이터 경고로 가는 연결. */
-type MetricExplanation = { href: string; open: () => void };
-
-const MetricCell = ({
-  metric,
-  definition,
-  explanation = null,
-}: {
-  metric: MetricValue;
-  definition: MetricDefinition;
-  explanation?: MetricExplanation | null;
-}) => (
-  <>
-    <strong className={metric.value === null ? "is-unavailable" : ""}>
-      {formatMetric(metric, definition)}
-    </strong>
-    {metric.value === null && metric.unavailable_reason && (
-      <small>
-        {metricUnavailableCopy(metric.unavailable_reason)}
-        {explanation === null ? null : (
-          <>
-            {" "}
-            {/* 접힌 manifest 를 먼저 펼친 뒤 기본 이동으로 그 경고까지 스크롤한다. */}
-            <a href={explanation.href} onClick={explanation.open}>
-              {t("backtest.result.metricUnavailable.explain")}
-            </a>
-          </>
-        )}
-      </small>
-    )}
-  </>
-);
 
 /**
  * 실행된 실행 설정의 행. 칸 목록·순서·이름·단위·enum 값 이름은 실행 설정 스키마에서 읽는다
@@ -398,65 +344,12 @@ export const BacktestRunDetail = ({
         </div>
       </section>
 
-      <section className="raw-metric-panel">
-        <header>
-          <div>
-            <h4>{t("backtest.result.metrics")}</h4>
-            <p>{t("backtest.result.metrics.description")}</p>
-          </div>
-          <span>
-            {result.metrics.length} {t("backtest.result.values")}
-          </span>
-        </header>
-        <div
-          className="result-table-wrap"
-          id={`${titleId}-metrics`}
-          role="region"
-          tabIndex={0}
-          aria-label={t("backtest.result.metrics")}
-        >
-          <table className="result-table">
-            <caption className="sr-only">
-              {t("backtest.result.metrics")}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">{t("backtest.result.column.scope")}</th>
-                <th scope="col">{t("backtest.result.column.metric")}</th>
-                <th scope="col">{t("backtest.result.column.category")}</th>
-                <th scope="col">{t("backtest.result.column.value")}</th>
-                <th scope="col">{t("backtest.result.column.samples")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.metrics.map((metric, index) => {
-                const definition = definitions.get(metric.metric_id);
-                if (definition === undefined) return null;
-                return (
-                  <tr key={`${metric.scope}-${metric.metric_id}-${index}`}>
-                    <td>
-                      {metric.scope_label ??
-                        t(`backtest.scope.${metric.scope}`)}
-                    </td>
-                    <td>
-                      <code>{metric.metric_id}</code>
-                    </td>
-                    <td>{t(`backtest.category.${definition.category}`)}</td>
-                    <td>
-                      <MetricCell
-                        definition={definition}
-                        explanation={explanationFor(metric)}
-                        metric={metric}
-                      />
-                    </td>
-                    <td>{metric.sample_count}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <BacktestMetricTable
+        definitions={result.metric_definitions}
+        metrics={result.metrics}
+        id={`${titleId}-metrics`}
+        explanationFor={explanationFor}
+      />
 
       <section className="trade-panel" id={`${titleId}-trades`} tabIndex={-1}>
         <header>

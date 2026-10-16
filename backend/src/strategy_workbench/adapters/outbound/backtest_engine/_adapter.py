@@ -48,6 +48,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 from strategy_workbench.domain.backtest.facade.environment import (
     MAX_IMPACT_FRACTION,
     PRICE_ADJUSTING_ACTIONS,
+    CostInputs,
     ImpactModel,
     ParticipationBasis,
     RunEnvironment,
@@ -238,91 +239,20 @@ class BacktestEngineExecutorAdapter:
         # 엔진 루프가 끝난 뒤 지표 계산 0.78, 산출물 고정 0.88 이다. run 진행 막대의 engine 구간
         # 배치(84~92%)는 유스케이스가 정한다(이슈 #162).
         progress(0.35, "Preparing market feed and strategy")
-        universe = UniverseResult(
-            memberships=tuple(
-                Membership(
-                    _instrument(item.security_id),
-                    item.first_session,
-                    item.last_session,
-                )
-                for item in request.dataset.memberships
-            ),
-            status=LoadStatus.OK,
-        )
-        corporate_actions = tuple(
-            CorporateActionEvent(
-                ts=datetime.combine(item.session, time(15, 30)),
-                instrument=_instrument(item.security_id),
-                action_type=CorporateActionType(item.action_type),
-                ratio=Decimal(item.ratio),
-                detail=item.detail,
-            )
-            for item in request.dataset.corporate_actions
-        )
-        # 비용 계산(참여 기준 ADV·충격 σ)은 워밍업 행까지 판단일 순서로 읽는다.
-        cost_rows = (
-            [
-                (item.session, item.security_id, item.close, item.trading_value)
-                for item in (*request.dataset.history_bars, *request.dataset.bars)
-            ]
-            if cost_history_sessions(environment)
-            else []
-        )
-        # 자본변동은 엔진처럼 사건 세션 이후 그 종목의 첫 행에서 정산된다(#339). 가격이 반비례로
-        # 확인된 사건만 판단일 종가를 정산 뒤 주식 단위로 바꾼다.
-        settled = settlement_multipliers(
-            cost_rows,
-            (
-                (
-                    item.session,
-                    item.security_id,
-                    float(item.ratio) if item.action_type in PRICE_ADJUSTING_ACTIONS else 1.0,
-                )
-                for item in (
-                    *request.dataset.history_corporate_actions,
-                    *request.dataset.corporate_actions,
-                )
-            ),
-        )
-        costs = cost_inputs(
-            environment, cost_rows, settled, checkpoint=lambda: self._check_cancelled(cancelled)
-        )
-        engine = BacktestEngine(
-            RunConfig(
-                run_id=request.run_id,
-                initial_cash=request.spec.initial_cash,
-                fee_bps=environment.fee_bps,
-                annualization_days=request.spec.annualization_days,
-                max_gross_leverage=max(1.0, strategy.risk.gross_exposure),
-                sell_tax_schedule=sell_tax_schedule(environment),
-            ),
-            slippage=(
-                SqrtImpactSlippage(MAX_IMPACT_FRACTION)
-                if environment.impact_model is ImpactModel.SQRT
-                else FixedBpsSlippage(environment.slippage_bps)
-            ),
+        kernel = _run_kernel(
+            dataset=request.dataset,
+            environment=environment,
+            run_id=request.run_id,
+            initial_cash=request.spec.initial_cash,
+            annualization_days=request.spec.annualization_days,
+            gross_exposure=strategy.risk.gross_exposure,
             core=request.spec.core.value,
+            tape_strategy=TargetTapeStrategy(
+                strategy, request.target_tape, self._portfolio_bridge, environment=environment
+            ),
+            cancelled=cancelled,
         )
-        try:
-            engine.run(
-                TargetTapeStrategy(
-                    strategy,
-                    request.target_tape,
-                    self._portfolio_bridge,
-                    environment=environment,
-                ),
-                _columnar_feed(
-                    request.dataset.bars,
-                    costs.participation_volumes,
-                    costs.impact_scales,
-                    session_calendar=request.dataset.sessions,
-                ),
-                corporate_actions=corporate_actions,
-                universe=universe,
-            )
-        except EquityWipedOut as error:
-            # 커널 예외를 포트 어휘로 옮긴다 — application 은 커널을 import 하지 않는다(#285).
-            raise EquityWipedOutError(str(error)) from error
+        engine, costs = kernel
         self._check_cancelled(cancelled)
         progress(0.78, "Calculating professional metrics")
         # 대량 시세·체결은 columnar 테이블로 받고 주문 상태는 원본 이벤트 조회로 보존한다.
@@ -427,6 +357,109 @@ class BacktestEngineExecutorAdapter:
 
 # 가격 배수를 적용할 사건 집합은 domain `PRICE_ADJUSTING_ACTIONS`가 소유한다. 알림 전용
 # 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
+
+
+def _check_kernel_cancelled(cancelled: CancellationCheck) -> None:
+    if cancelled():
+        raise RunCancelledError("run cancelled")
+
+
+def _run_kernel(
+    *,
+    dataset: BacktestDataset,
+    environment: RunEnvironment,
+    run_id: str,
+    initial_cash: float,
+    annualization_days: int,
+    gross_exposure: float,
+    core: str,
+    tape_strategy: DeclarativeTapeStrategy,
+    cancelled: CancellationCheck,
+) -> tuple[BacktestEngine, CostInputs]:
+    """두 실행 신원이 동일한 피드·비용·기업행동·커널 배관을 재사용한다."""
+    universe = UniverseResult(
+        memberships=tuple(
+            Membership(
+                _instrument(item.security_id),
+                item.first_session,
+                item.last_session,
+            )
+            for item in dataset.memberships
+        ),
+        status=LoadStatus.OK,
+    )
+    corporate_actions = tuple(
+        CorporateActionEvent(
+            ts=datetime.combine(item.session, time(15, 30)),
+            instrument=_instrument(item.security_id),
+            action_type=CorporateActionType(item.action_type),
+            ratio=Decimal(item.ratio),
+            detail=item.detail,
+        )
+        for item in dataset.corporate_actions
+    )
+    # 비용 계산(참여 기준 ADV·충격 σ)은 워밍업 행까지 판단일 순서로 읽는다.
+    cost_rows = (
+        [
+            (item.session, item.security_id, item.close, item.trading_value)
+            for item in (*dataset.history_bars, *dataset.bars)
+        ]
+        if cost_history_sessions(environment)
+        else []
+    )
+    # 자본변동은 엔진처럼 사건 세션 이후 그 종목의 첫 행에서 정산된다(#339). 가격이 반비례로
+    # 확인된 사건만 판단일 종가를 정산 뒤 주식 단위로 바꾼다.
+    settled = settlement_multipliers(
+        cost_rows,
+        (
+            (
+                item.session,
+                item.security_id,
+                float(item.ratio) if item.action_type in PRICE_ADJUSTING_ACTIONS else 1.0,
+            )
+            for item in (
+                *dataset.history_corporate_actions,
+                *dataset.corporate_actions,
+            )
+        ),
+    )
+    costs = cost_inputs(
+        environment, cost_rows, settled, checkpoint=lambda: _check_kernel_cancelled(cancelled)
+    )
+    engine = BacktestEngine(
+        RunConfig(
+            run_id=run_id,
+            initial_cash=initial_cash,
+            fee_bps=environment.fee_bps,
+            annualization_days=annualization_days,
+            max_gross_leverage=max(1.0, gross_exposure),
+            sell_tax_schedule=sell_tax_schedule(environment),
+        ),
+        slippage=(
+            SqrtImpactSlippage(MAX_IMPACT_FRACTION)
+            if environment.impact_model is ImpactModel.SQRT
+            else FixedBpsSlippage(environment.slippage_bps)
+        ),
+        core=core,
+    )
+    try:
+        engine.run(
+            tape_strategy,
+            _columnar_feed(
+                dataset.bars,
+                costs.participation_volumes,
+                costs.impact_scales,
+                session_calendar=dataset.sessions,
+            ),
+            corporate_actions=corporate_actions,
+            universe=universe,
+        )
+    except EquityWipedOut as error:
+        # 커널 예외를 포트 어휘로 옮긴다 — application 은 커널을 import 하지 않는다(#285).
+        raise EquityWipedOutError(str(error)) from error
+    return engine, costs
+
+
 def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[date, float]:
     """벤치마크 종목을 첫 세션에 `initial_cash`어치 사서 들고 있는 곡선.
 

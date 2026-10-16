@@ -173,3 +173,51 @@ export const useExperimentProgress = (experimentId: string, open: boolean) => {
     return () => controller.abort();
   }, [experimentId, open, queryClient]);
 };
+
+export const continuousLatestQuery = (experimentId: string, poll = true) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "continuous-account"],
+    queryFn: () =>
+      strategyWorkbenchApi.getExperimentContinuousAccount(experimentId),
+    retry: false,
+    refetchOnReconnect: false,
+    refetchInterval: (query) =>
+      poll &&
+      !query.state.error &&
+      query.state.data?.status === "running"
+        ? 1_000
+        : false,
+  });
+
+export const continuousAccountKey = (evaluationId: string | null) =>
+  ["continuous-account", evaluationId] as const;
+
+export const continuousAccountQuery = (evaluationId: string | null) =>
+  queryOptions({
+    queryKey: continuousAccountKey(evaluationId),
+    queryFn:
+      evaluationId === null
+        ? skipToken
+        : () => strategyWorkbenchApi.getContinuousAccount(evaluationId),
+    retry: false,
+    refetchOnReconnect: false,
+  });
+
+/** 같은 요청 ID를 재사용하여 응답 유실 뒤에도 새 실행을 만들지 않는다. */
+export const useRunContinuousAccount = (experimentId: string) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (requestId: string) =>
+      strategyWorkbenchApi.runExperimentContinuousAccount(
+        experimentId,
+        requestId,
+      ),
+    retry: 0,
+    onSuccess: (state) => {
+      client.setQueryData(continuousAccountKey(state.evaluation_id), state);
+      void client.invalidateQueries({
+        queryKey: [...experimentsKey(), experimentId, "continuous-account"],
+      });
+    },
+  });
+};

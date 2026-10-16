@@ -1410,6 +1410,391 @@ export type ConstantNode = {
 export type ConstraintOperator = "lt" | "le" | "gt" | "ge" | "eq" | "ne";
 
 /**
+ * ContinuousAccountErrorDetail
+ */
+export type ContinuousAccountErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "continuous.mock_only"
+    | "continuous.unfinished"
+    | "continuous.unsupported"
+    | "continuous.no_cell"
+    | "continuous.source_invalid"
+    | "continuous.prepare_failed"
+    | "continuous.request_invalid"
+    | "continuous.request_conflict"
+    | "continuous.busy"
+    | "continuous.execution_failed"
+    | "continuous.interrupted"
+    | "continuous.not_found"
+    | "continuous.result_unreadable";
+  /**
+   * Field
+   */
+  field?: string | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * ContinuousAccountErrorResponse
+ */
+export type ContinuousAccountErrorResponse = {
+  detail: ContinuousAccountErrorDetail;
+};
+
+/**
+ * ContinuousAccountLatest
+ */
+export type ContinuousAccountLatest = {
+  /**
+   * Data Mode
+   */
+  data_mode: string;
+  evaluation: ContinuousAccountState | null;
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
+  readiness: ContinuousReadiness;
+  /**
+   * Status
+   */
+  status: "not_started" | "running" | "completed" | "failed" | "interrupted";
+};
+
+/**
+ * ContinuousAccountManifest
+ */
+export type ContinuousAccountManifest = {
+  /**
+   * Annualization Days
+   */
+  annualization_days: number;
+  /**
+   * Candidates
+   */
+  candidates: Array<ContinuousCandidateProvenance>;
+  /**
+   * Choices
+   */
+  choices: Array<FrozenWindowChoice>;
+  core: ExecutionCore;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Data Mode
+   */
+  data_mode?: "mock";
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Engine Version
+   */
+  engine_version: string;
+  environment: RunEnvironment;
+  /**
+   * Environment Hash
+   */
+  environment_hash: string;
+  /**
+   * Evaluation Basis
+   */
+  evaluation_basis?: "continuous_account";
+  /**
+   * Evaluation Fingerprint
+   */
+  evaluation_fingerprint?: string;
+  /**
+   * Evaluation Id
+   */
+  evaluation_id: string;
+  /**
+   * Evaluator Version
+   */
+  evaluator_version?: "continuous-account-v1";
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version: string;
+  /**
+   * Frame Sources
+   */
+  frame_sources: Array<ScheduledFrameSource>;
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version: string;
+  /**
+   * Revision
+   */
+  revision: number;
+  schedule: ContinuousScheduleProvenance;
+  /**
+   * Scheduled Tape Hash
+   */
+  scheduled_tape_hash: string;
+  /**
+   * Schema Version
+   */
+  schema_version?: "continuous-account-result-v1";
+  /**
+   * Selection Time Policy
+   */
+  selection_time_policy?: "assumed_train_end_close";
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+};
+
+/**
+ * ContinuousAccountResult
+ */
+export type ContinuousAccountResult = {
+  artifacts: RawArtifactBundle;
+  /**
+   * Curve
+   */
+  curve: Array<ContinuousCurvePoint>;
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
+  manifest: ContinuousAccountManifest;
+  /**
+   * Metric Definitions
+   */
+  metric_definitions: Array<MetricDefinition>;
+  /**
+   * Metrics
+   */
+  metrics: Array<MetricValue>;
+  summary: AccountReportSummary;
+  /**
+   * Total Fees
+   */
+  total_fees: number;
+  /**
+   * Total Sell Tax
+   */
+  total_sell_tax: number;
+  /**
+   * Warnings
+   */
+  warnings: Array<DataWarning>;
+};
+
+/**
+ * ContinuousAccountStartRequest
+ */
+export type ContinuousAccountStartRequest = {
+  /**
+   * Client Request Id
+   */
+  client_request_id: string;
+};
+
+/**
+ * ContinuousAccountState
+ */
+export type ContinuousAccountState = {
+  /**
+   * Completed At
+   */
+  completed_at?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error Code
+   */
+  error_code?:
+    | "continuous.mock_only"
+    | "continuous.unfinished"
+    | "continuous.unsupported"
+    | "continuous.no_cell"
+    | "continuous.source_invalid"
+    | "continuous.prepare_failed"
+    | "continuous.request_invalid"
+    | "continuous.request_conflict"
+    | "continuous.busy"
+    | "continuous.execution_failed"
+    | "continuous.interrupted"
+    | "continuous.not_found"
+    | "continuous.result_unreadable"
+    | null;
+  /**
+   * Error Detail
+   */
+  error_detail?: string | null;
+  /**
+   * Evaluation Id
+   */
+  evaluation_id: string;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Progress
+   */
+  progress: number;
+  result?: ContinuousAccountResult | null;
+  /**
+   * Stage
+   */
+  stage:
+    | "preparing"
+    | "pipeline"
+    | "compiling"
+    | "engine"
+    | "completed"
+    | "failed"
+    | "interrupted";
+  status: ContinuousAccountStatus;
+};
+
+/**
+ * ContinuousAccountStatus
+ */
+export type ContinuousAccountStatus =
+  "running" | "completed" | "failed" | "interrupted";
+
+/**
+ * ContinuousCandidateProvenance
+ */
+export type ContinuousCandidateProvenance = {
+  /**
+   * Candidate Id
+   */
+  candidate_id: string;
+  /**
+   * Factor Plan Hashes
+   */
+  factor_plan_hashes: Array<[string, string]>;
+  /**
+   * Parameter Values
+   */
+  parameter_values: Array<[string, number | number | string | boolean]>;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+};
+
+/**
+ * ContinuousCurvePoint
+ */
+export type ContinuousCurvePoint = {
+  /**
+   * Equity
+   */
+  equity: number;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * ContinuousReadiness
+ */
+export type ContinuousReadiness = {
+  /**
+   * Code
+   */
+  code:
+    | "continuous.mock_only"
+    | "continuous.unfinished"
+    | "continuous.unsupported"
+    | "continuous.no_cell"
+    | "continuous.source_invalid"
+    | "continuous.prepare_failed"
+    | "continuous.request_invalid"
+    | "continuous.request_conflict"
+    | "continuous.busy"
+    | "continuous.execution_failed"
+    | "continuous.interrupted"
+    | "continuous.not_found"
+    | "continuous.result_unreadable"
+    | null;
+  /**
+   * Detail
+   */
+  detail: string;
+  /**
+   * Ready
+   */
+  ready: boolean;
+};
+
+/**
+ * ContinuousScheduleProvenance
+ *
+ * 도메인이 확정한 파생 사실을 HTTP·저장 경계에서 빠뜨리지 않는 명시 투영.
+ */
+export type ContinuousScheduleProvenance = {
+  /**
+   * Execution Timing
+   */
+  execution_timing: string;
+  /**
+   * Policy Version
+   */
+  policy_version: string;
+  /**
+   * Schedule Hash
+   */
+  schedule_hash: string;
+  /**
+   * Selections
+   */
+  selections: Array<WindowSelection>;
+  /**
+   * Sessions
+   */
+  sessions: Array<string>;
+  /**
+   * Target Scope
+   */
+  target_scope: string;
+  /**
+   * Time In Force
+   */
+  time_in_force: string;
+  /**
+   * Transitions
+   */
+  transitions: Array<SelectionTransition>;
+};
+
+/**
  * CreateProviderProfileRequest
  *
  * 프로파일 생성 요청. `secret`은 이 방향으로만 흐른다.
@@ -2988,6 +3373,41 @@ export type FloatParameter = {
    * Step
    */
   step?: number | null;
+};
+
+/**
+ * FrozenWindowChoice
+ */
+export type FrozenWindowChoice = {
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id?: string | null;
+  /**
+   * Factor Evaluation Version
+   */
+  factor_evaluation_version?: string | null;
+  /**
+   * Parameter Values
+   */
+  parameter_values: Array<[string, number | number | string | boolean]>;
+  /**
+   * Training Run Id
+   */
+  training_run_id: string;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+  /**
+   * Validation Run Id
+   */
+  validation_run_id: string;
+  window: WalkForwardWindow;
+  /**
+   * Window Index
+   */
+  window_index: number;
 };
 
 /**
@@ -4936,6 +5356,42 @@ export type SavedStrategy = {
 };
 
 /**
+ * ScheduledFrameSource
+ *
+ * 선택 근거 창과 체결일 소속 창을 구분한다. 창이 바뀌어도 근거를 소급 교체하지 않는다.
+ */
+export type ScheduledFrameSource = {
+  /**
+   * Candidate Id
+   */
+  candidate_id: string;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Execution Window Index
+   */
+  execution_window_index: number;
+  /**
+   * Selection Window Index
+   */
+  selection_window_index: number;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+};
+
+/**
  * SearchActivityView
  */
 export type SearchActivityView = {
@@ -5028,6 +5484,32 @@ export type SecurityRef = {
  * SelectionMethod
  */
 export type SelectionMethod = "top_n" | "percentile";
+
+/**
+ * SelectionTransition
+ */
+export type SelectionTransition = {
+  /**
+   * Candidate Changed
+   */
+  candidate_changed: boolean;
+  /**
+   * Candidate Id
+   */
+  candidate_id: string;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Window Index
+   */
+  window_index: number;
+};
 
 /**
  * SellTax
@@ -7324,6 +7806,30 @@ export type WindowPick = {
 };
 
 /**
+ * WindowSelection
+ *
+ * 학습만으로 동결한 후보. known_as_of는 해당 날짜 종가 이후를 뜻한다.
+ *
+ * candidate_id는 외부에서 동결한 불변 신원이다. 이 타입은 후보 내용이나 학습 출처를
+ * 증명하지 않는다. WindowPick.created_at은 실행 당시 시각이므로 이를 대신할 수 없다.
+ */
+export type WindowSelection = {
+  /**
+   * Candidate Id
+   */
+  candidate_id: string | null;
+  /**
+   * Known As Of
+   */
+  known_as_of: string;
+  window: WalkForwardWindow;
+  /**
+   * Window Index
+   */
+  window_index: number;
+};
+
+/**
  * WindowSelectionRule
  *
  * 창마다 학습 구간 성과로 파라미터 칸 하나를 고르는 기준.
@@ -8146,6 +8652,50 @@ export type GetBacktestSummaryResponses = {
 export type GetBacktestSummaryResponse =
   GetBacktestSummaryResponses[keyof GetBacktestSummaryResponses];
 
+export type GetContinuousAccountData = {
+  body?: never;
+  path: {
+    /**
+     * Evaluation Id
+     */
+    evaluation_id: string;
+  };
+  query?: never;
+  url: "/api/v1/continuous-accounts/{evaluation_id}";
+};
+
+export type GetContinuousAccountErrors = {
+  /**
+   * Not Found
+   */
+  404: ContinuousAccountErrorResponse;
+  /**
+   * Conflict
+   */
+  409: ContinuousAccountErrorResponse;
+  /**
+   * Gone
+   */
+  410: ContinuousAccountErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ContinuousAccountErrorResponse;
+};
+
+export type GetContinuousAccountError =
+  GetContinuousAccountErrors[keyof GetContinuousAccountErrors];
+
+export type GetContinuousAccountResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContinuousAccountState;
+};
+
+export type GetContinuousAccountResponse =
+  GetContinuousAccountResponses[keyof GetContinuousAccountResponses];
+
 export type GetEquityCatalogData = {
   body?: never;
   path?: never;
@@ -8616,6 +9166,94 @@ export type GetExperimentCapacityResponses = {
 
 export type GetExperimentCapacityResponse =
   GetExperimentCapacityResponses[keyof GetExperimentCapacityResponses];
+
+export type GetExperimentContinuousAccountData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/continuous-account";
+};
+
+export type GetExperimentContinuousAccountErrors = {
+  /**
+   * Not Found
+   */
+  404: ContinuousAccountErrorResponse;
+  /**
+   * Conflict
+   */
+  409: ContinuousAccountErrorResponse;
+  /**
+   * Gone
+   */
+  410: ContinuousAccountErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ContinuousAccountErrorResponse;
+};
+
+export type GetExperimentContinuousAccountError =
+  GetExperimentContinuousAccountErrors[keyof GetExperimentContinuousAccountErrors];
+
+export type GetExperimentContinuousAccountResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContinuousAccountLatest;
+};
+
+export type GetExperimentContinuousAccountResponse =
+  GetExperimentContinuousAccountResponses[keyof GetExperimentContinuousAccountResponses];
+
+export type RunExperimentContinuousAccountData = {
+  body: ContinuousAccountStartRequest;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/continuous-account";
+};
+
+export type RunExperimentContinuousAccountErrors = {
+  /**
+   * Not Found
+   */
+  404: ContinuousAccountErrorResponse;
+  /**
+   * Conflict
+   */
+  409: ContinuousAccountErrorResponse;
+  /**
+   * Gone
+   */
+  410: ContinuousAccountErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: ContinuousAccountErrorResponse;
+};
+
+export type RunExperimentContinuousAccountError =
+  RunExperimentContinuousAccountErrors[keyof RunExperimentContinuousAccountErrors];
+
+export type RunExperimentContinuousAccountResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContinuousAccountState;
+};
+
+export type RunExperimentContinuousAccountResponse =
+  RunExperimentContinuousAccountResponses[keyof RunExperimentContinuousAccountResponses];
 
 export type ControlExperimentData = {
   body: ExperimentControlsRequest;

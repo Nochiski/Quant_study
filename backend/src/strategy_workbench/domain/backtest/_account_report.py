@@ -8,7 +8,7 @@ from typing import Literal
 
 from strategy_workbench.domain.strategy.facade.provenance import StrategyProvenance
 
-from ._models import BacktestRunResult, DataWarning
+from ._models import BacktestRunResult, DataWarning, RawSnapshot
 
 
 class AccountReportStatus(StrEnum):
@@ -127,14 +127,54 @@ def project_account_report(result: BacktestRunResult) -> AccountReport:
             warnings=manifest.warnings,
         )
 
-    initial_cash = manifest.run_spec.initial_cash
+    projection = project_account_summary(
+        initial_cash=manifest.run_spec.initial_cash, snapshots=result.artifacts.snapshots
+    )
+    if projection.summary is None:
+        if projection.detail is None:
+            raise RuntimeError("unavailable account summary is missing its detail")
+        return unavailable(projection.status, projection.detail)
+    return AccountReport(
+        run_id=manifest.run_id,
+        status=projection.status,
+        summary=projection.summary,
+        detail=None,
+        provenance=provenance,
+        warnings=manifest.warnings,
+    )
+
+
+@dataclass(frozen=True)
+class AccountSummaryProjection:
+    status: AccountReportStatus
+    summary: AccountReportSummary | None
+    detail: str | None
+
+    def __post_init__(self) -> None:
+        available = self.status is AccountReportStatus.AVAILABLE
+        if (
+            not isinstance(self.status, AccountReportStatus)
+            or available != (self.summary is not None)
+            or (available and self.detail is not None)
+            or (not available and not self.detail)
+        ):
+            raise ValueError("계좌 요약 투영의 상태·요약·사유 계약을 위반했습니다.")
+
+
+def project_account_summary(
+    *, initial_cash: float, snapshots: tuple[RawSnapshot, ...]
+) -> AccountSummaryProjection:
+    """실행 신원과 무관하게 기존 초기자본 요약 산술·검증을 한 번 적용한다."""
+
+    def unavailable(status: AccountReportStatus, detail: str) -> AccountSummaryProjection:
+        return AccountSummaryProjection(status=status, summary=None, detail=detail)
+
     if not isfinite(initial_cash) or initial_cash <= 0:
         return unavailable(
             AccountReportStatus.INVALID_INPUT,
             "초기자본은 유한한 양수여야 합니다: "
             f"initial_cash={initial_cash!r} expected=finite_positive",
         )
-    snapshots = result.artifacts.snapshots
     if not snapshots:
         return unavailable(
             AccountReportStatus.EMPTY_SNAPSHOTS,
@@ -167,8 +207,7 @@ def project_account_report(result: BacktestRunResult) -> AccountReport:
             f"initial_cash={initial_cash!r} final_equity={final.equity!r} "
             f"pnl={pnl!r} total_return={total_return!r} expected=finite",
         )
-    return AccountReport(
-        run_id=manifest.run_id,
+    return AccountSummaryProjection(
         status=AccountReportStatus.AVAILABLE,
         summary=AccountReportSummary(
             initial_cash=initial_cash,
@@ -181,6 +220,4 @@ def project_account_report(result: BacktestRunResult) -> AccountReport:
             snapshot_count=len(snapshots),
         ),
         detail=None,
-        provenance=provenance,
-        warnings=manifest.warnings,
     )

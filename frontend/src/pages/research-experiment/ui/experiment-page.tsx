@@ -26,6 +26,7 @@ import { Link, useParams } from "../../../shared/lib/router";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 import { AuditTrail } from "./audit-trail";
+import { ContinuousAccount } from "./continuous-account";
 import "./experiment-page.css";
 
 const valuesText = (values: Record<string, unknown>) =>
@@ -342,6 +343,9 @@ export const ExperimentPage = () => {
             trials={trials.data}
             refetchInterval={refetchInterval}
           />
+        ) : null}
+        {record.design.measured ? (
+          <ContinuousAccount experimentId={experimentId} />
         ) : null}
         <section className="data-list-page__panel experiment-audit">
           <AuditTrail

@@ -4,6 +4,7 @@ from strategy_workbench.domain.factor._planning import (
     InvalidFactorGraphError,
     ResolvedFactorParameter,
     compile_factor_plan,
+    factor_graph_hash,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "InvalidFactorGraphError",
     "ResolvedFactorParameter",
     "compile_factor_plan",
+    "factor_graph_hash",
 ]

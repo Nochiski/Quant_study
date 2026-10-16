@@ -19,3 +19,5 @@ export { RUN_STATUS, runStatusLabel, runStageLabel } from "./model/run-status";
 export type BacktestRequestOptions = Omit<import("../../shared/api").BacktestRunSpec, "strategy" | "strategy_source">;
 
 export { BacktestAccountReport } from "./ui/backtest-account-report";
+
+export { BacktestMetricTable } from "./ui/backtest-metrics";

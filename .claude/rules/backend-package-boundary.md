@@ -76,6 +76,16 @@ bootstrap ─> application + adapters
   adapter·frontend는 금액을 다시 계산하지 않으며 assistant용 오류→None 포트를 재사용하지 않는다.
   기존 결과 저장·엔진·일반 analytics·시도 원장은 이 조회 책임에 포함하지 않는다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
+- 연속 계좌 평가는 `application/continuous_account`가 자체 실험 출처·파이프라인·실행·이력
+  포트를 소유하고, 기존 `application/backtest_run`의 outgoing 데이터 포트만 재사용한다.
+  `continuous_pipeline` outbound bridge가 기존 실험·저장 리비전·선정 파이프라인 facade를
+  연결하며 application끼리 서비스를 import하지 않는다. 이 bridge가 `engine_portfolio`의
+  요구사항 판정을 재사용하는 adapter 간선과 `continuous_account_sqlite → sqlite_store`의
+  공용 연결 간선을 허용한다. 새로운 선정·회계 정책을 복제하는 근거는 아니다.
+  별도 `backtest_engine/_continuous.py`는 같은 노드의 `_run_kernel`·`_artifacts`와 기존
+  analytics owner를 재사용한다. 혼합 후보를 단일 전략 `BacktestRunResult`로 위장하지 않는다.
+  별도 SQLite 이력의 단일 running claim·요청 UUID 멱등성·시작 시 interrupted 처리는
+  단일 서버 프로세스 배포 계약이며 기존 실험 worker·trial key·계열 원장을 변경하지 않는다.
 - `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 커널을 import하는
   노드는 둘이다: `adapters/outbound/backtest_engine`(실행·벤치마크 곡선)과
   `adapters/outbound/engine_portfolio`(엔진 요구사항·능력 판정, 목표 행동 변환). 그 밖의 노드에서

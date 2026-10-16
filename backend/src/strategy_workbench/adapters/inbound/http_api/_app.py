@@ -38,6 +38,9 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     TrialPreview,
     rejection_code,
 )
+from strategy_workbench.application.continuous_account.facade.evaluation import (
+    ContinuousAccountService,
+)
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
     FieldCatalogQuery,
@@ -148,6 +151,7 @@ from ._backtest_contract import (
     TrialLineageAlreadyMergedResponse,
     TrialLineageMergeRequest,
 )
+from ._continuous_account_routes import register_continuous_account_routes
 from ._execution_error_contract import (
     Portfolio422Response,
     PortfolioRawObservationInvalidDetail,
@@ -338,6 +342,7 @@ def create_app(
     strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
     experiments: ExperimentRunService | None = None,
+    continuous_accounts: ContinuousAccountService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
@@ -454,6 +459,8 @@ def create_app(
     # 실험 라우트도 어시스턴트처럼 서비스가 올 때만 생긴다. 기반 실행 요청은 시작과 같은 판정이다.
     if experiments is not None:
         register_experiment_routes(app, experiments, admitted=admitted)
+    if continuous_accounts is not None:
+        register_continuous_account_routes(app, continuous_accounts)
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}

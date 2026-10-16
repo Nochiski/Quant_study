@@ -2262,6 +2262,649 @@
         "title": "ConstraintOperator",
         "type": "string"
       },
+      "ContinuousAccountErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "continuous.mock_only",
+              "continuous.unfinished",
+              "continuous.unsupported",
+              "continuous.no_cell",
+              "continuous.source_invalid",
+              "continuous.prepare_failed",
+              "continuous.request_invalid",
+              "continuous.request_conflict",
+              "continuous.busy",
+              "continuous.execution_failed",
+              "continuous.interrupted",
+              "continuous.not_found",
+              "continuous.result_unreadable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ContinuousAccountErrorDetail",
+        "type": "object"
+      },
+      "ContinuousAccountErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/ContinuousAccountErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ContinuousAccountErrorResponse",
+        "type": "object"
+      },
+      "ContinuousAccountLatest": {
+        "properties": {
+          "data_mode": {
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContinuousAccountState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interpretation": {
+            "default": "동결된 창별 학습 선택을 하나의 초기자본과 실제 보유 수량으로 이어 실행한 비용 후 계좌 평가입니다. 각 선택은 학습 종료일 종가에 선택 가능했다고 가정한 재현 정책이며 과거 실제 선택 시각의 증명이 아닙니다. 현재 mock 자료만 실행하며 실자료 수익성이나 실거래 준비를 뜻하지 않습니다. 수익률은 최종자산 / 초기자본 − 1이고 비용은 이미 반영되어 다시 차감하지 않습니다. 최종자산은 보유 평가를 포함하며 청산 현금이나 정지·상폐 정산 완료를 뜻하지 않습니다.",
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/ContinuousReadiness"
+          },
+          "status": {
+            "enum": [
+              "not_started",
+              "running",
+              "completed",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "readiness",
+          "evaluation",
+          "status",
+          "data_mode"
+        ],
+        "title": "ContinuousAccountLatest",
+        "type": "object"
+      },
+      "ContinuousAccountManifest": {
+        "properties": {
+          "annualization_days": {
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ContinuousCandidateProvenance"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/FrozenWindowChoice"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "core": {
+            "$ref": "#/components/schemas/ExecutionCore"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data_mode": {
+            "const": "mock",
+            "default": "mock",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/RunEnvironment"
+          },
+          "environment_hash": {
+            "title": "Environment Hash",
+            "type": "string"
+          },
+          "evaluation_basis": {
+            "const": "continuous_account",
+            "default": "continuous_account",
+            "title": "Evaluation Basis",
+            "type": "string"
+          },
+          "evaluation_fingerprint": {
+            "default": "",
+            "title": "Evaluation Fingerprint",
+            "type": "string"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "evaluator_version": {
+            "const": "continuous-account-v1",
+            "default": "continuous-account-v1",
+            "title": "Evaluator Version",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "factor_evaluation_version": {
+            "title": "Factor Evaluation Version",
+            "type": "string"
+          },
+          "frame_sources": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledFrameSource"
+            },
+            "title": "Frame Sources",
+            "type": "array"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/ContinuousScheduleProvenance"
+          },
+          "scheduled_tape_hash": {
+            "title": "Scheduled Tape Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "continuous-account-result-v1",
+            "default": "continuous-account-result-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "selection_time_policy": {
+            "const": "assumed_train_end_close",
+            "default": "assumed_train_end_close",
+            "title": "Selection Time Policy",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "experiment_id",
+          "created_at",
+          "engine_version",
+          "data_snapshot_id",
+          "factor_evaluation_version",
+          "environment",
+          "environment_hash",
+          "schedule",
+          "scheduled_tape_hash",
+          "strategy_id",
+          "revision",
+          "source",
+          "choices",
+          "candidates",
+          "initial_cash",
+          "core",
+          "annualization_days",
+          "frame_sources",
+          "metric_registry_version"
+        ],
+        "title": "ContinuousAccountManifest",
+        "type": "object"
+      },
+      "ContinuousAccountResult": {
+        "properties": {
+          "artifacts": {
+            "$ref": "#/components/schemas/RawArtifactBundle"
+          },
+          "curve": {
+            "items": {
+              "$ref": "#/components/schemas/ContinuousCurvePoint"
+            },
+            "title": "Curve",
+            "type": "array"
+          },
+          "interpretation": {
+            "default": "동결된 창별 학습 선택을 하나의 초기자본과 실제 보유 수량으로 이어 실행한 비용 후 계좌 평가입니다. 각 선택은 학습 종료일 종가에 선택 가능했다고 가정한 재현 정책이며 과거 실제 선택 시각의 증명이 아닙니다. 현재 mock 자료만 실행하며 실자료 수익성이나 실거래 준비를 뜻하지 않습니다. 수익률은 최종자산 / 초기자본 − 1이고 비용은 이미 반영되어 다시 차감하지 않습니다. 최종자산은 보유 평가를 포함하며 청산 현금이나 정지·상폐 정산 완료를 뜻하지 않습니다.",
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/ContinuousAccountManifest"
+          },
+          "metric_definitions": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            },
+            "title": "Metric Definitions",
+            "type": "array"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AccountReportSummary"
+          },
+          "total_fees": {
+            "title": "Total Fees",
+            "type": "number"
+          },
+          "total_sell_tax": {
+            "title": "Total Sell Tax",
+            "type": "number"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/DataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "manifest",
+          "summary",
+          "curve",
+          "artifacts",
+          "total_fees",
+          "total_sell_tax",
+          "warnings",
+          "metric_definitions",
+          "metrics"
+        ],
+        "title": "ContinuousAccountResult",
+        "type": "object"
+      },
+      "ContinuousAccountStartRequest": {
+        "properties": {
+          "client_request_id": {
+            "format": "uuid",
+            "title": "Client Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_request_id"
+        ],
+        "title": "ContinuousAccountStartRequest",
+        "type": "object"
+      },
+      "ContinuousAccountState": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "continuous.mock_only",
+                  "continuous.unfinished",
+                  "continuous.unsupported",
+                  "continuous.no_cell",
+                  "continuous.source_invalid",
+                  "continuous.prepare_failed",
+                  "continuous.request_invalid",
+                  "continuous.request_conflict",
+                  "continuous.busy",
+                  "continuous.execution_failed",
+                  "continuous.interrupted",
+                  "continuous.not_found",
+                  "continuous.result_unreadable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContinuousAccountResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stage": {
+            "enum": [
+              "preparing",
+              "pipeline",
+              "compiling",
+              "engine",
+              "completed",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContinuousAccountStatus"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "experiment_id",
+          "status",
+          "progress",
+          "stage",
+          "created_at"
+        ],
+        "title": "ContinuousAccountState",
+        "type": "object"
+      },
+      "ContinuousAccountStatus": {
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "interrupted"
+        ],
+        "title": "ContinuousAccountStatus",
+        "type": "string"
+      },
+      "ContinuousCandidateProvenance": {
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "factor_plan_hashes": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Factor Plan Hashes",
+            "type": "array"
+          },
+          "parameter_values": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Parameter Values",
+            "type": "array"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "strategy_hash",
+          "source_hash",
+          "parameter_values",
+          "factor_plan_hashes"
+        ],
+        "title": "ContinuousCandidateProvenance",
+        "type": "object"
+      },
+      "ContinuousCurvePoint": {
+        "properties": {
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "equity"
+        ],
+        "title": "ContinuousCurvePoint",
+        "type": "object"
+      },
+      "ContinuousReadiness": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "continuous.mock_only",
+                  "continuous.unfinished",
+                  "continuous.unsupported",
+                  "continuous.no_cell",
+                  "continuous.source_invalid",
+                  "continuous.prepare_failed",
+                  "continuous.request_invalid",
+                  "continuous.request_conflict",
+                  "continuous.busy",
+                  "continuous.execution_failed",
+                  "continuous.interrupted",
+                  "continuous.not_found",
+                  "continuous.result_unreadable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "code",
+          "detail"
+        ],
+        "title": "ContinuousReadiness",
+        "type": "object"
+      },
+      "ContinuousScheduleProvenance": {
+        "description": "도메인이 확정한 파생 사실을 HTTP·저장 경계에서 빠뜨리지 않는 명시 투영.",
+        "properties": {
+          "execution_timing": {
+            "title": "Execution Timing",
+            "type": "string"
+          },
+          "policy_version": {
+            "title": "Policy Version",
+            "type": "string"
+          },
+          "schedule_hash": {
+            "title": "Schedule Hash",
+            "type": "string"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/WindowSelection"
+            },
+            "title": "Selections",
+            "type": "array"
+          },
+          "sessions": {
+            "items": {
+              "format": "date",
+              "type": "string"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "target_scope": {
+            "title": "Target Scope",
+            "type": "string"
+          },
+          "time_in_force": {
+            "title": "Time In Force",
+            "type": "string"
+          },
+          "transitions": {
+            "items": {
+              "$ref": "#/components/schemas/SelectionTransition"
+            },
+            "title": "Transitions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schedule_hash",
+          "policy_version",
+          "execution_timing",
+          "time_in_force",
+          "target_scope",
+          "sessions",
+          "selections",
+          "transitions"
+        ],
+        "title": "ContinuousScheduleProvenance",
+        "type": "object"
+      },
       "CreateProviderProfileRequest": {
         "description": "프로파일 생성 요청. `secret`은 이 방향으로만 흐른다.",
         "properties": {
@@ -4882,6 +5525,91 @@
           "kind"
         ],
         "title": "FloatParameter",
+        "type": "object"
+      },
+      "FrozenWindowChoice": {
+        "properties": {
+          "data_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Snapshot Id"
+          },
+          "factor_evaluation_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Factor Evaluation Version"
+          },
+          "parameter_values": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Parameter Values",
+            "type": "array"
+          },
+          "training_run_id": {
+            "title": "Training Run Id",
+            "type": "string"
+          },
+          "trial_index": {
+            "title": "Trial Index",
+            "type": "integer"
+          },
+          "validation_run_id": {
+            "title": "Validation Run Id",
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/WalkForwardWindow"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_index",
+          "window",
+          "trial_index",
+          "training_run_id",
+          "validation_run_id",
+          "parameter_values"
+        ],
+        "title": "FrozenWindowChoice",
         "type": "object"
       },
       "GroupNode": {
@@ -7889,6 +8617,52 @@
         "title": "SavedStrategy",
         "type": "object"
       },
+      "ScheduledFrameSource": {
+        "description": "선택 근거 창과 체결일 소속 창을 구분한다. 창이 바뀌어도 근거를 소급 교체하지 않는다.",
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "execution_window_index": {
+            "title": "Execution Window Index",
+            "type": "integer"
+          },
+          "selection_window_index": {
+            "title": "Selection Window Index",
+            "type": "integer"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selection_window_index",
+          "execution_window_index",
+          "candidate_id",
+          "strategy_hash",
+          "source_hash",
+          "signal_as_of",
+          "execution_on"
+        ],
+        "title": "ScheduledFrameSource",
+        "type": "object"
+      },
       "SearchActivityView": {
         "properties": {
           "query": {
@@ -8026,6 +8800,41 @@
         ],
         "title": "SelectionMethod",
         "type": "string"
+      },
+      "SelectionTransition": {
+        "properties": {
+          "candidate_changed": {
+            "title": "Candidate Changed",
+            "type": "boolean"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_index",
+          "candidate_id",
+          "signal_as_of",
+          "execution_on",
+          "candidate_changed"
+        ],
+        "title": "SelectionTransition",
+        "type": "object"
       },
       "SellTax": {
         "description": "매도 체결에 붙는 거래세 방식(spec D7).\n\n`krx_statutory` 는 시장·날짜별 법정 세율표(`_krx_tax.py`)를, `custom` 은 `sell_tax_bps` 하나를,\n`none` 은 세금 없음을 뜻한다.",
@@ -11643,6 +12452,42 @@
         "title": "WindowPick",
         "type": "object"
       },
+      "WindowSelection": {
+        "description": "학습만으로 동결한 후보. known_as_of는 해당 날짜 종가 이후를 뜻한다.\n\ncandidate_id는 외부에서 동결한 불변 신원이다. 이 타입은 후보 내용이나 학습 출처를\n증명하지 않는다. WindowPick.created_at은 실행 당시 시각이므로 이를 대신할 수 없다.",
+        "properties": {
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
+          },
+          "known_as_of": {
+            "format": "date",
+            "title": "Known As Of",
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/WalkForwardWindow"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_index",
+          "window",
+          "candidate_id",
+          "known_as_of"
+        ],
+        "title": "WindowSelection",
+        "type": "object"
+      },
       "WindowSelectionRule": {
         "description": "창마다 학습 구간 성과로 파라미터 칸 하나를 고르는 기준.",
         "enum": [
@@ -12943,6 +13788,75 @@
         "summary": "Get Backtest Summary"
       }
     },
+    "/api/v1/continuous-accounts/{evaluation_id}": {
+      "get": {
+        "operationId": "getContinuousAccount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get"
+      }
+    },
     "/api/v1/equity/catalog": {
       "get": {
         "operationId": "getEquityCatalog",
@@ -13720,6 +14634,152 @@
           }
         },
         "summary": "Get Experiment Capacity"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/continuous-account": {
+      "get": {
+        "operationId": "getExperimentContinuousAccount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountLatest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Latest"
+      },
+      "post": {
+        "operationId": "runExperimentContinuousAccount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinuousAccountStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContinuousAccountErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Run"
       }
     },
     "/api/v1/experiments/{experiment_id}/controls": {

@@ -5,4 +5,12 @@
 # domain.factor: `signal.normalization` 의 횡단면 순위·표준화 공식은 팩터 그래프의 횡단면
 # 연산자와 같은 정의여야 하고, 그 정의는 `domain.factor` 가 소유한다(P2-04). `domain.factor` 의
 # 의존은 정규 직렬화 leaf뿐이라 이 노드와 순환하지 않는다.
-DEPENDS_ON: tuple[str, ...] = ("domain.backtest", "domain.factor", "domain.strategy")
+# domain.experiment: 동결된 선택 일정의 신호 시점과 적용 후보를 재사용한다.
+# domain.canonical: 혼합 후보의 별도 실행 신원을 정규 해시한다.
+DEPENDS_ON: tuple[str, ...] = (
+    "domain.backtest",
+    "domain.canonical",
+    "domain.experiment",
+    "domain.factor",
+    "domain.strategy",
+)

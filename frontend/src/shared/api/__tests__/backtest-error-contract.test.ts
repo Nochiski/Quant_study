@@ -128,7 +128,12 @@ describe("backtest API rejection code translations", () => {
     const openapi = readOpenApi();
     const codes = Object.keys(openapi.paths)
       .filter((path) => path.startsWith("/api/v1/experiments"))
-      .flatMap((path) => [...rejectionCodes(openapi, path)]);
+      .flatMap((path) => [
+        // 같은 URL 아래의 연속 계좌 응답은 전용 owner가 schema 전체를 따로 검증한다.
+        ...rejectionCodes(openapi, path, {
+          excludeResponseSchema: "ContinuousAccountErrorResponse",
+        }),
+      ]);
 
     expect(codes).toContain("experiment.base.unsaved");
     expect(codes).toContain("experiment.trial.not_retryable");

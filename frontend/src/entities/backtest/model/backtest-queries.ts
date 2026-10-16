@@ -176,6 +176,7 @@ export const useBacktestAccountReport = (runId: string | null, enabled: boolean)
   useQuery({
     queryKey: ["backtest", runId, "account-report"],
     retry: false,
+    refetchOnReconnect: false,
     queryFn: () => strategyWorkbenchApi.backtestAccountReport(runId ?? ""),
     enabled: runId !== null && enabled,
     staleTime: Number.POSITIVE_INFINITY,

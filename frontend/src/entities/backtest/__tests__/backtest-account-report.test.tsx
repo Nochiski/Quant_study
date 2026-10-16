@@ -1,5 +1,6 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -59,6 +60,7 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
+  onlineManager.setOnline(true);
   server.resetHandlers();
 });
 afterAll(() => server.close());
@@ -258,6 +260,14 @@ describe("초기자본 기준 계좌 요약의 통신과 표시", () => {
         screen.queryByRole("button", { name: "계좌 요약 다시 불러오기" }),
       ).toBeNull();
       expect(requests).toBe(1);
+      // 재접속 알림의 비동기 작업까지 넘긴 뒤에도 영구 오류를 다시 요청하지 않는다.
+      await act(async () => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(requests).toBe(1);
+      expect(alert).toHaveTextContent(message);
     },
   );
 

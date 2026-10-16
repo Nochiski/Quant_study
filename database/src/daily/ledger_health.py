@@ -473,10 +473,12 @@ def check_dart(con: sqlite3.Connection, d: str, trading_day: bool, kst_day_start
 
 # ── WISE (B §7-4) ──────────────────────────────────────────────────────────
 def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check]:
-    """WISE 스냅샷은 대상일 D 저녁 18:05 에 찍힌다(결정 V2-3) — 판정은 실행일이 아니라 D 의 KST 날짜로 한다.
+    """WISE 스냅샷은 대상일 D 의 06:00 체인에서 찍힌다(N-53 — V2-3 의 D 18:05 에서 되돌림. 기준일은 둘 다
+    전 거래일) — 판정은 실행일이 아니라 D 의 KST 날짜로 한다. D 의 확정판·그날 장 마감 판이 읽은 스냅샷이다.
 
-    전환기에는 옛 방식(D+1 아침 06:00) 스냅샷만 있을 수 있어, D 행이 없으면 next_iso(D+1) 로 폴백하고
-    어느 쪽을 읽었는지 `wise.snapshot_day` 에 남긴다. 둘 다 없으면 종전대로 FAIL.
+    D 행이 없으면 next_iso(D+1 아침 06:00) 로 폴백해 수집이 살아 있는지를 판정하되, `wise.snapshot_day` 를
+    FAIL(warn 등급)로 남긴다 — D 의 판들은 전날 수집분을 읽었다(N-12 허용 1거래일). 06:00 체인에선 D+1 아침 런이
+    판정 때 늘 있어, 폴백을 PASS 로 두면 D 수집 결손이 조용히 묻힌다. 둘 다 없으면 종전대로 FAIL.
 
     요청 항등식(covered·none)의 입력은 `ws_call_log`(append-only)다 — `ws_coverage` 는 종목당 1행
     덮어쓰기라 이력이 없다(DQ-9, 2026-09-26 실측). 어느 표에서 셌는지는 검사 값의 `source` 에 남는다.
@@ -494,9 +496,11 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
     day, runs = d_iso, con.execute(sql, (d_iso,)).fetchall()
     if not runs:
         day, runs = next_iso, con.execute(sql, (next_iso,)).fetchall()
-    out.append(Check("wise.snapshot_day", Level.WARN, Status.PASS if runs else Status.SKIP,
+    status = Status.SKIP if not runs else (Status.PASS if day == d_iso else Status.FAIL)
+    out.append(Check("wise.snapshot_day", Level.WARN, status,
                      ("target_day" if day == d_iso else "next_morning") if runs else None,
-                     f"D({d_iso}) 저녁 스냅샷 — 없으면 D+1({next_iso}) 아침 스냅샷으로 폴백(전환기)"))
+                     f"D({d_iso}) 06:00 스냅샷 — 없으면 D+1({next_iso}) 아침 스냅샷으로 폴백(warn — D 의 판들은 "
+                     "전날 수집분을 읽었다)"))
     if not runs:
         out.append(Check("wise.run", Level.REQUIRED, Status.FAIL, None,
                          f"{d_iso}(또는 폴백 {next_iso}) 실행 1건 (full, n_bad 0)"))

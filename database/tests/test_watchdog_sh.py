@@ -261,3 +261,31 @@ def test_after_cutover_unreadable_either_ledger_is_crit(tmp_path: Path, ledger: 
     level, title, body = r.notify[0].split("|", 2)
     assert (level, title) == ("crit", TITLE_UNKNOWN)
     assert bad in body and "발송 여부 판정 불가" in body
+
+
+# ── evening_ledger(21:50) — 저녁 원장 인계 파일. WISE 는 06:00 체인 몫이라 판정에 없다(N-53) ─────────────
+def _run_mode(home: Path, mode: str) -> Run:
+    root = home / "quant-ledger"
+    env = dict(os.environ, HOME=str(home), WD_PREV=D_ISO)
+    p = subprocess.run(["bash", str(root / "scripts" / "watchdog.sh"), mode],
+                       env=env, capture_output=True, text=True, timeout=60, check=False)
+    note = root / "notify.txt"
+    lines = note.read_text(encoding="utf-8").splitlines() if note.exists() else []
+    return Run(p.returncode, p.stdout + p.stderr, lines)
+
+
+@pytest.mark.parametrize(("kiwoom_rc", "level"), [(0, "info"), (1, "crit")])
+def test_evening_ledger_judges_kiwoom_only(tmp_path: Path, kiwoom_rc: int, level: str) -> None:
+    """저녁 인계 파일에는 WISE 키가 없다(daily_evening.sh — N-53). 옛 판정(kiwoom_rc·wise_rc 둘 다 0)은 키가
+    없으면 '실패/미완 wise_rc' crit 이었다 — 이제 키움만 본다(DART 는 종전대로 판정 제외)."""
+    root = _root(tmp_path, ledger=None)
+    today = dt.datetime.now(KST).strftime("%Y%m%d")
+    (root / "data/deliver/ledger_evening.json").write_text(json.dumps(
+        {"date": today, "finished_at": "2026-10-07T12:20:00Z", "kiwoom_rc": kiwoom_rc,
+         "dart_rc": None, "dart_done": False, "kiwoom_done_at": "2026-10-07T21:19:58+09:00"}),
+        encoding="utf-8")
+    r = _run_mode(tmp_path, "evening_ledger")
+    assert [n.split("|", 1)[0] for n in r.notify] == [level], (r.notify, r.out)
+    assert "wise" not in r.notify[0]
+    if level == "crit":
+        assert "실패/미완 단계 kiwoom_rc" in r.notify[0]

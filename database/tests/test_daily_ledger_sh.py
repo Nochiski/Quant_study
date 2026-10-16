@@ -18,6 +18,9 @@ v3 휴장 사본 동기화 대역(`scripts/sync_calendar.sh`)은 부를 때마�
 (`scripts/postclose_conf.sh`)은 진짜를 복사한다. 휴장 파일 내보내기(`-m daily.calendar_export`, T-48)는 calls.txt 에
 적히고 받은 인자는 export_args.txt 에 남으며 rc 는 `RC_daily_calendar_export` 다. `REAL_EXPORT` 가 있으면 진짜
 python·진짜 모듈로 가서 `QL_V3_HOLIDAY_FILE`(테스트가 늘 임시 경로로 준다)에 실제로 쓴다.
+WISE 스냅샷(N-53 — 배경 갈래 `src/backfill_wise.py`)은 순서가 정해지지 않으므로 calls.txt 가 아니라 wise.txt 에
+적히고 rc 는 `RC_backfill_wise` 다. 그 런의 실패 콜 수 `-c`(ws_run_log)는 `WISE_FAIL_OUT`(기본 "0 {}" = 실패 없음)을
+찍는다. 실물 수집기로 보는 WISE 경보는 `test_daily_ledger_wise_sh.py`.
 """
 from __future__ import annotations
 
@@ -46,8 +49,13 @@ if [ "$1" = "-c" ]; then
     *runlog.start*) echo 7 ;;
     *runlog.recent*) exit "${RC_recent:-1}" ;;
     *runlog.finish*) echo "$4|$5" >> "$QL_HOME/runlog.txt" ;;
+    *ws_run_log*) echo "$WISE_FAIL_OUT" ;;
   esac
   exit 0
+fi
+if [ "$1" = "src/backfill_wise.py" ]; then
+  echo "$*" >> "$QL_HOME/wise.txt"
+  exit "${RC_backfill_wise:-0}"
 fi
 if [ "$1" != "-m" ]; then
   echo "$1" >> "$QL_HOME/calls.txt"
@@ -126,7 +134,7 @@ def _universe_runs(root: Path) -> list[tuple[str, str]]:
 
 def _env(root: Path, **extra: str) -> dict[str, str]:
     env = dict(os.environ, QL_LEDGER_ROOT=str(root), QL_RAW_LOCK_HELD="1",
-               REAL_PY=sys.executable, REAL_SRC=str(DB_ROOT / "src"), **extra)
+               REAL_PY=sys.executable, REAL_SRC=str(DB_ROOT / "src"), WISE_FAIL_OUT="0 {}", **extra)
     for k in ("QL_SKIP_KW", "QL_HOME", "PYTHONPATH", "QL_RAW_LOCK_FILE"):
         env.pop(k, None)
     return env
@@ -153,6 +161,65 @@ def test_all_steps_ok(tmp_path: Path) -> None:
     assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily",
                      "gap"]
     assert notify.startswith("info|") and runlog.startswith("ok|")
+
+
+# ── WISE 스냅샷(N-53 — 18:05 저녁 체인에서 옮김) — 키움 마스터 뒤 배경 갈래, 월~토, D 건너뜀과 무관 ──────────
+def _wise_calls(tmp_path: Path) -> str:
+    f = tmp_path / "ql" / "wise.txt"
+    return f.read_text(encoding="utf-8") if f.exists() else ""
+
+
+
+
+@pytest.mark.parametrize("weekday", [1, 3, 6])
+def test_wise_snapshot_runs_monday_to_saturday(tmp_path: Path, weekday: int) -> None:
+    """월~토 06:00 — 그날 장 마감 판(15:41)이 읽을 스냅샷을 받는다(기준일 = 전 거래일). 다른 단계 순서는 그대로."""
+    rc, calls, notify, runlog_txt = _run(tmp_path, weekday=weekday)
+    assert rc == 0
+    assert _wise_calls(tmp_path) == "src/backfill_wise.py --mode full\n"
+    assert [c for c in calls if c != "src/dart_universe.py"] == _ALL
+    assert notify.startswith("info|") and runlog_txt.startswith("ok|")
+    assert "──── WISE 스냅샷 종료 rc=0" in _chain_log(tmp_path / "ql")
+
+
+def test_wise_snapshot_skips_sunday(tmp_path: Path) -> None:
+    """일요일은 받지 않는다 — 토요일 06:00 수집과 기준일(금요일)이 같다."""
+    rc, _, notify, _ = _run(tmp_path, weekday=7)
+    assert rc == 0 and notify.startswith("info|")
+    assert _wise_calls(tmp_path) == ""
+    assert "WISE 스냅샷 건너뜀 — 일요일" in _chain_log(tmp_path / "ql")
+
+
+def test_wise_snapshot_dry_run_only_plans(tmp_path: Path) -> None:
+    """dry-run 은 원장 쓰기라 받지 않고 계획 한 줄만(backfill_wise.py 에 --dry-run 이 없다)."""
+    rc, _, _, _ = _run(tmp_path, "--dry-run")
+    assert rc == 0
+    assert _wise_calls(tmp_path) == ""
+    assert "WISE 스냅샷 계획(dry-run — 받지 않음)" in _chain_log(tmp_path / "ql")
+
+
+def test_wise_failure_is_a_chain_failure(tmp_path: Path) -> None:
+    """수집기 rc≠0 은 다른 단계처럼 FAILED — crit 1건, 런 로그도 failed(DEFECT-A10: 둘이 같은 판정). 다른
+    단계는 막지 않는다(배경 갈래)."""
+    rc, calls, notify, runlog_txt = _run(tmp_path, backfill_wise=1)
+    assert rc == 2
+    assert calls == _ALL
+    assert notify.startswith("crit|daily_ledger 실패: wise(rc=1)")
+    assert runlog_txt == "failed|wise(rc=1)\n"
+
+
+def test_wise_snapshot_runs_when_d_was_already_collected(tmp_path: Path) -> None:
+    """월요일·연휴 다음 날 — D(직전 거래일)는 이미 받아 수집 단계는 건너뛰어도 WISE 는 그날 스냅샷을 받는다
+    (그날 장 마감 판이 읽는다). 건너뜀 길에서도 끝나기 전에 기다린다 — 실패면 crit."""
+    rc, calls, notify, runlog_txt = _run(tmp_path, weekday=1, recent=0)
+    assert rc == 0, notify
+    assert _wise_calls(tmp_path) == "src/backfill_wise.py --mode full\n"
+    assert "daily.dart_daily" not in calls and runlog_txt == ""
+    assert notify.startswith("info|daily_ledger 건너뜀(D=20260929 이미 수집 완료)")
+    sub = tmp_path / "fail"
+    sub.mkdir()
+    rc, _, notify, _ = _run(sub, weekday=1, recent=0, backfill_wise=1)
+    assert rc == 2 and notify.startswith("crit|daily_ledger 실패: wise(rc=1)")
 
 
 def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:

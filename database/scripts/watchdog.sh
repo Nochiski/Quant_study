@@ -82,13 +82,14 @@ if check == "evening_ledger":
         out("", f"{path} 를 읽을 수 없다 ({type(e).__name__}: {e})", 1)
     fin = str(rep.get("finished_at") or "")
     summary = (f"date={rep.get('date') or '결측'} finished_at={fin or '결측'} "
-               f"kiwoom_rc={rc_txt(rep.get('kiwoom_rc'))} wise_rc={rc_txt(rep.get('wise_rc'))} "
+               f"kiwoom_rc={rc_txt(rep.get('kiwoom_rc'))} "
                f"dart_rc={rc_txt(rep.get('dart_rc'))}(판정 제외) "
-               f"kiwoom_done_at={rep.get('kiwoom_done_at') or '결측'} wise_done_at={rep.get('wise_done_at') or '결측'}")
+               f"kiwoom_done_at={rep.get('kiwoom_done_at') or '결측'}")
     if str(rep.get("date") or "") != today:
         out("", f"보고 파일이 오늘({today}) 것이 아니다 — {summary}", 1)
     # DART 는 30~45분짜리라 판정 시각에 아직 돌고 있을 수 있다 — rc 는 적기만 하고 판정에서는 뺀다.
-    bad = [k for k in ("kiwoom_rc", "wise_rc") if rep.get(k) != 0]
+    # WISE 는 저녁 체인에 없다(N-53 — 06:00 체인 몫, 그 실패는 06:00 crit·08:10 건전성이 본다).
+    bad = [k for k in ("kiwoom_rc",) if rep.get(k) != 0]
     if bad:
         out("", f"실패/미완 단계 {', '.join(bad)} — {summary}", 1)
     # finished_at 은 UTC 다(daily_evening.sh 가 dt.datetime.now(dt.UTC) 로 쓴다) — 제목 시각은 KST 로 바꾼다.

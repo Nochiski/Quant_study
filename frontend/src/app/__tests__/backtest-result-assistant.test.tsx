@@ -130,6 +130,9 @@ const server = setupServer(
   http.get(`${API}/api/v1/backtests/:runId/request`, () =>
     HttpResponse.json({ core: "rust", metric_windows: [] }),
   ),
+  http.get(`${API}/api/v1/backtests/:runId/account-report`, () =>
+    HttpResponse.json({ detail: { code: "backtest.result.unreadable" } }, { status: 410 }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () =>
     HttpResponse.json(resultFixture()),
   ),
@@ -269,12 +272,13 @@ const ask = async (
 };
 
 describe("백테스트 결과 화면의 AI 패널", () => {
-  it("핵심 지표마다 영어 이름 옆에 쉬운 이름과 한 줄 뜻을 보인다", async () => {
+  it("계좌 보고서를 읽지 못해도 원본 핵심 지표와 쉬운 뜻을 유지한다", async () => {
     mount();
 
     const highlights = await screen.findByRole("region", {
       name: "핵심 성과 지표",
     });
+    expect(await screen.findByText("계좌 요약을 불러오지 못했습니다. 기존 성과 결과는 아래에서 볼 수 있습니다.")).toBeVisible();
     const sharpe = within(highlights)
       .getByText("Sharpe ratio", { exact: true })
       .closest("div");

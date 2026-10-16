@@ -19,6 +19,7 @@ from strategy_workbench.application.assistant_chat.facade.chat import AssistantC
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
+    AccountReport,
     BacktestArtifactUnreadableError,
     BacktestCancelResult,
     BacktestParameterValueError,
@@ -238,6 +239,21 @@ def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
             "model": BacktestRunNotFoundResponse,
             "description": "The backtest run does not exist",
         }
+    }
+
+
+def _backtest_result_responses() -> dict[int | str, dict[str, Any]]:
+    """결과와 계좌 보고서 조회가 공유하는 완료·무결성 오류 계약."""
+    return {
+        **_backtest_run_not_found_responses(),
+        409: {
+            "model": BacktestResultNotReadyResponse,
+            "description": "The run has not completed with a result",
+        },
+        410: {
+            "model": BacktestResultUnreadableResponse,
+            "description": "The completed run's result file is missing, altered or unreadable",
+        },
     }
 
 
@@ -492,21 +508,32 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}/result",
         operation_id="getBacktestResult",
-        responses={
-            **_backtest_run_not_found_responses(),
-            409: {
-                "model": BacktestResultNotReadyResponse,
-                "description": "The run has not completed with a result",
-            },
-            410: {
-                "model": BacktestResultUnreadableResponse,
-                "description": "The completed run's result file is missing, altered or unreadable",
-            },
-        },
+        responses=_backtest_result_responses(),
     )
     def get_backtest_result(run_id: str) -> BacktestRunResult:
         try:
             return backtest_runs.result(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+        except BacktestResultNotReadyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/account-report",
+        operation_id="getBacktestAccountReport",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_account_report(run_id: str) -> AccountReport:
+        try:
+            return backtest_runs.account_report(run_id)
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
         except BacktestResultNotReadyError as error:

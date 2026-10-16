@@ -60,6 +60,9 @@ import type {
   GetAssistantSessionData,
   GetAssistantSessionErrors,
   GetAssistantSessionResponses,
+  GetBacktestAccountReportData,
+  GetBacktestAccountReportErrors,
+  GetBacktestAccountReportResponses,
   GetBacktestRequestData,
   GetBacktestRequestErrors,
   GetBacktestRequestResponses,
@@ -497,6 +500,18 @@ export const getBacktestStatus = <ThrowOnError extends boolean = false>(
     GetBacktestStatusErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}", ...options });
+
+/**
+ * Get Backtest Account Report
+ */
+export const getBacktestAccountReport = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestAccountReportData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestAccountReportResponses,
+    GetBacktestAccountReportErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/account-report", ...options });
 
 /**
  * Cancel Backtest

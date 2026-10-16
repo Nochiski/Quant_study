@@ -5,7 +5,7 @@ import type {
   MetricValue,
 } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
-import { useId, useRef } from "react";
+import { type ReactNode, useId, useRef } from "react";
 import {
   EXPLAINING_WARNING_CODES,
   HIGHLIGHTED_METRIC_IDS,
@@ -197,8 +197,10 @@ const environmentRows = (
 export const BacktestRunDetail = ({
   result,
   environmentFields = null,
+  accountReport,
 }: {
   result: BacktestRunResult;
+  accountReport?: ReactNode;
   /** 실행 설정 스키마의 칸. page 가 스키마 query 에서 넘긴다. 없으면 기록된 키 그대로 보인다. */
   environmentFields?: readonly RunEnvironmentField[] | null;
 }) => {
@@ -246,6 +248,9 @@ export const BacktestRunDetail = ({
         className="run-detail__navigation"
         aria-label={t("backtest.result.navigation")}
       >
+        {accountReport ? (
+          <a href={`#${titleId}-account`}>{t("backtest.account.title")}</a>
+        ) : null}
         <a href={`#${titleId}-highlights`}>{t("backtest.result.highlights")}</a>
         <a href={`#${titleId}-charts`}>{t("backtest.result.charts")}</a>
         <a href={`#${titleId}-metrics`}>{t("backtest.result.metrics")}</a>
@@ -259,6 +264,16 @@ export const BacktestRunDetail = ({
           {t("backtest.result.manifest")}
         </a>
       </nav>
+
+      {accountReport ? (
+        <section
+          id={`${titleId}-account`}
+          tabIndex={-1}
+          aria-label={t("backtest.account.title")}
+        >
+          {accountReport}
+        </section>
+      ) : null}
 
       <section
         id={`${titleId}-highlights`}

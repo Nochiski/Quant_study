@@ -2,10 +2,11 @@
  * 정동민의 스토리 e2e — 백테스트 결과에서 핵심 숫자와 자산 곡선을 본다(US-DM-04).
  *
  * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/dm.md`다. 이 파일은 그 기준을
- * 사용자가 보는 화면(role·label·보이는 문구)으로만 확인한다. 결과 표현의 반응형·테마 계약은
- * `workbench.workflow.spec.ts`가 소유하므로 여기서 다시 재지 않는다.
+ * 사용자가 보는 화면(role·label·보이는 문구)과 서버 계좌 보고서 값으로 확인한다. 계좌 요약은
+ * 360px 화면과 목차 키보드 이동도 확인하고, 기존 결과의 테마 계약은 workflow spec이 소유한다.
  */
 import { expect, test } from "@playwright/test";
+import type { AccountReport } from "../../src/shared/api/generated";
 
 import {
   backtest,
@@ -83,6 +84,11 @@ test(
     await page.getByLabel(/^OOS 시작일/u).fill(SHORT_OOS_START);
     await toggle.click();
     await expect(backtest(page)).toBeEnabled();
+    const accountResponse = page.waitForResponse((response) =>
+      /\/api\/v1\/backtests\/[^/]+\/account-report$/u.test(
+        new URL(response.url()).pathname,
+      ),
+    );
     await backtest(page).click();
 
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
@@ -94,12 +100,135 @@ test(
     const result = page.getByRole("article", { name: "백테스트 결과" });
     await expect(result).toBeVisible({ timeout: 120_000 });
 
+    // 실제 mock backend가 계산한 계좌 보고서를 표시값과 대조한다. 손익 산식을 화면 테스트에 복제하지 않는다.
+    const accountHttp = await accountResponse;
+    expect(accountHttp.ok()).toBe(true);
+    const account = (await accountHttp.json()) as AccountReport;
+    expect(account.status).toBe("available");
+    expect(account.summary).not.toBeNull();
+    const accountSummary = account.summary!;
+    const accountPanel = result.getByRole("region", {
+      name: "초기자본 기준 계좌 요약",
+      exact: true,
+    });
+    await expect(accountPanel).toBeVisible();
+    await expect(accountPanel).toContainText(account.interpretation!);
+    await expect(accountPanel).toContainText(
+      "전체 구간(FULL)의 총수익률은 첫 계좌 기록을 기준",
+    );
+    const amount = (value: number) =>
+      `₩${value.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}`;
+    for (const [label, value] of [
+      ["초기자본 (시작조건)", amount(accountSummary.initial_cash)],
+      ["최종 평가액", amount(accountSummary.final_equity)],
+      ["마지막 기록의 현금", amount(accountSummary.final_cash)],
+      ["비용 반영 후 손익", amount(accountSummary.pnl)],
+      [
+        "초기자본 대비 수익률",
+        new Intl.NumberFormat("ko-KR", {
+          style: "percent",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(accountSummary.total_return),
+      ],
+      ["첫 기록일", accountSummary.first_snapshot_date],
+      ["마지막 기록일", accountSummary.last_snapshot_date],
+    ]) {
+      await expect(
+        accountPanel.getByText(label, { exact: true }).locator("xpath=.."),
+      ).toContainText(value);
+    }
+    await expect(
+      accountPanel
+        .getByText("초기자본 (시작조건)", { exact: true })
+        .locator("xpath=.."),
+    ).not.toContainText(accountSummary.first_snapshot_date);
+    const accountLink = result
+      .getByRole("navigation", { name: "결과 둘러보기" })
+      .getByRole("link", { name: "초기자본 기준 계좌 요약", exact: true });
+    await accountLink.focus();
+    await accountLink.press("Enter");
+    await expect(accountPanel).toBeFocused();
+    const accountViewport = page.viewportSize();
+    await page.setViewportSize({ width: 360, height: 800 });
+    await accountPanel
+      .getByText("계좌 요약 재현성 정보", { exact: true })
+      .click();
+    await expect(
+      accountPanel.getByText(account.provenance.run_fingerprint, {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(
+      await accountPanel.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    // 폭 회귀가 나면 브라우저의 실제 배치값을 실패 메시지에 남겨 탈출한 요소와 caption 기준 부모를 찾는다.
+    const widthDiagnostics = await page.evaluate(() => {
+      const describe = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName,
+          className: element.getAttribute("class"),
+          text: element.textContent?.trim().slice(0, 100),
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        };
+      };
+      const clippedByAncestor = (element: Element) => {
+        let ancestor = element.parentElement;
+        while (ancestor !== null) {
+          const overflow = getComputedStyle(ancestor).overflowX;
+          if (["auto", "scroll", "hidden", "clip"].includes(overflow))
+            return true;
+          ancestor = ancestor.parentElement;
+        }
+        return false;
+      };
+      return {
+        viewport: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        documentClientWidth: document.documentElement.clientWidth,
+        bodyWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+        unclippedOverflow: [...document.body.querySelectorAll("*")]
+          .filter(
+            (element) =>
+              element.getBoundingClientRect().right > window.innerWidth &&
+              !clippedByAncestor(element),
+          )
+          .map(describe),
+        captions: [
+          ...document.querySelectorAll<HTMLTableCaptionElement>(
+            "caption.sr-only",
+          ),
+        ].map((caption) => ({
+          ...describe(caption),
+          offsetParent: caption.offsetParent
+            ? describe(caption.offsetParent)
+            : null,
+          clip: getComputedStyle(caption).clip,
+        })),
+      };
+    });
+    expect(
+      widthDiagnostics.documentWidth <= widthDiagnostics.viewport,
+      JSON.stringify(widthDiagnostics, null, 2),
+    ).toBe(true);
+    if (accountViewport) await page.setViewportSize(accountViewport);
+
     // 새 결과는 원본 주문 이벤트를 기록한다. 옛 형식의 미기록 안내로 대체되면 안 된다(#411).
     const orderEvents = result.getByRole("region", { name: "주문 상태 기록" });
     await expect(orderEvents).toBeVisible();
     await expect(orderEvents).toContainText(/주문 상태 이벤트.*(?:건|0건)/u);
     await expect(orderEvents).not.toContainText("이전 형식 결과");
-    const records = orderEvents.getByText("주문 상태 원본 보기", { exact: true });
+    const records = orderEvents.getByText("주문 상태 원본 보기", {
+      exact: true,
+    });
     if (await records.count()) {
       await records.click();
       await expect(orderEvents.getByRole("table")).toBeVisible();
@@ -149,6 +278,67 @@ test(
       );
     }
     await expect(oosRow("total_return")).toContainText(/\d\.\d{2}%/u);
+
+    // 계좌 보고서만 실패해도 원본 결과는 유지되고, 일시적 오류는 실제 서버 값을 다시 읽어 복구한다.
+    const accountRoute = `**/api/v1/backtests/${runId}/account-report`;
+    await page.route(accountRoute, (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "계좌 보고서 일시적 조회 실패" }),
+      }),
+    );
+    await page.reload();
+    await expect(accountPanel).toContainText(
+      "계좌 요약을 불러오지 못했습니다.",
+    );
+    await expect(
+      rawMetrics.getByRole("table", { name: "Raw metric table", exact: true }),
+    ).toBeVisible();
+    await expect(
+      result.getByRole("img", { name: "Equity curve 차트" }),
+    ).toBeVisible();
+    const retryAccount = accountPanel.getByRole("button", {
+      name: "계좌 요약 다시 불러오기",
+    });
+    await expect(retryAccount).toBeVisible();
+    await page.unroute(accountRoute);
+    await retryAccount.click();
+    await expect(accountPanel).toContainText("계좌 요약 계산 완료");
+    await expect(accountPanel).not.toContainText(
+      "계좌 요약을 불러오지 못했습니다.",
+    );
+    await expect(
+      accountPanel
+        .getByText("최종 평가액", { exact: true })
+        .locator("xpath=.."),
+    ).toContainText(amount(accountSummary.final_equity));
+
+    // 결과 파일을 다시 읽을 수 없는 영구 오류는 원본 결과와 별도로 안내하고 재시도를 제공하지 않는다.
+    await page.route(accountRoute, (route) =>
+      route.fulfill({
+        status: 410,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: {
+            code: "backtest.result.unreadable",
+            message: "계좌 보고서 결과 파일을 읽을 수 없습니다.",
+          },
+        }),
+      }),
+    );
+    await page.reload();
+    await expect(accountPanel).toContainText(
+      "계좌 요약을 불러오지 못했습니다.",
+    );
+    await expect(accountPanel.getByRole("alert")).toContainText(
+      "이 실행의 결과 파일을 읽을 수 없습니다.",
+    );
+    await expect(
+      rawMetrics.getByRole("table", { name: "Raw metric table", exact: true }),
+    ).toBeVisible();
+    await expect(retryAccount).toHaveCount(0);
+    await page.unroute(accountRoute);
 
     // 나중에 다시 찾을 수 있다: 백테스트 이력에 방금 실행이 완료 상태로 남는다.
     await page.getByRole("link", { name: "백테스트" }).click();

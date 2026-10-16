@@ -68,6 +68,13 @@ bootstrap ─> application + adapters
   재사용하며, 지정가 위반을 포함한 검증 실패 시 주문·revision·계좌를 바꾸지 않는다.
   이 slice의 조립은 호출자/테스트가 명시적으로 수행한다. 기존 bootstrap·HTTP에는
   연결하지 않는다. 상세 실행 계약은 `docs/planning/research-to-trading/S05-offline-execution.md`다.
+- 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
+  `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.
+  `application/backtest_run`은 `self.result(run_id)`의 완료·해시·역직렬화 검증을 한 번 재사용한 뒤
+  projection을 호출하고 application facade를 통해 응답 타입을 공개한다. HTTP는 이를 별도
+  `GET /api/v1/backtests/{run_id}/account-report`로 제공하며 기존 결과 오류를 보존한다.
+  adapter·frontend는 금액을 다시 계산하지 않으며 assistant용 오류→None 포트를 재사용하지 않는다.
+  기존 결과 저장·엔진·일반 analytics·시도 원장은 이 조회 책임에 포함하지 않는다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 커널을 import하는
   노드는 둘이다: `adapters/outbound/backtest_engine`(실행·벤치마크 곡선)과

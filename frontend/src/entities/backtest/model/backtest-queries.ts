@@ -171,6 +171,16 @@ export const useBacktestResult = (runId: string | null, enabled: boolean) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+/** 초기자본 기준 계좌 보고서는 완료된 실행에서만 읽고 실행별 query cache에 둔다. */
+export const useBacktestAccountReport = (runId: string | null, enabled: boolean) =>
+  useQuery({
+    queryKey: ["backtest", runId, "account-report"],
+    retry: false,
+    queryFn: () => strategyWorkbenchApi.backtestAccountReport(runId ?? ""),
+    enabled: runId !== null && enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
 export const useCancelBacktest = () => {
   const queryClient = useQueryClient();
   return useMutation({

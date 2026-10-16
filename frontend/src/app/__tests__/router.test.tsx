@@ -347,6 +347,9 @@ const server = setupServer(
       strategy_source: null,
     }),
   ),
+  http.get(`${API}/api/v1/backtests/:runId/account-report`, () =>
+    HttpResponse.json({ detail: { code: "backtest.result.unreadable" } }, { status: 410 }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () => HttpResponse.error()),
   http.get(`${API}/api/v1/equity/catalog`, () =>
     HttpResponse.json({

@@ -1,0 +1,62 @@
+/* 계좌 요약은 좁은 화면에서 금액과 식별자를 자르지 않고 다음 줄로 보낸다. */
+.account-report {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-large);
+  background: var(--surface-raised);
+  overflow-wrap: anywhere;
+}
+
+.account-report h4 {
+  margin: 0;
+  font-size: var(--text-size-title);
+}
+
+.account-report__basis,
+.account-report dt {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.account-report dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.account-report dl > div {
+  min-width: 0;
+}
+
+.account-report dd {
+  margin: var(--space-1) 0 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.account-report__highlights dd {
+  font-size: var(--text-size-title);
+  font-weight: var(--font-weight-strong);
+}
+
+.account-report summary {
+  display: list-item;
+  min-height: calc(var(--space-6) + var(--space-3));
+  padding-block: var(--space-2);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .account-report dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .account-report dl {
+    grid-template-columns: 1fr;
+  }
+}

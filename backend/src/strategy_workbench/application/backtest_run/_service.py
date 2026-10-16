@@ -25,6 +25,10 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.backtest.facade.account_report import (
+    AccountReport,
+    project_account_report,
+)
 from strategy_workbench.domain.backtest.facade.environment import (
     MissingRunEnvironmentError,
     ResearchWindowViolationError,
@@ -571,6 +575,10 @@ class BacktestRunService:
                 f"backtest result is not ready: run_id={run_id} status={state.status}"
             )
         return self._artifact_store.load(run_id, sha256=state.artifact_sha256)
+
+    def account_report(self, run_id: str) -> AccountReport:
+        """검증해 읽은 완료 결과를 초기자본 기준 계좌 평가손익으로 투영한다."""
+        return project_account_report(self.result(run_id))
 
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.

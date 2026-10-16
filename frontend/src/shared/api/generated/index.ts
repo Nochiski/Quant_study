@@ -778,6 +778,7 @@ export type {
   ValidationIssue,
   ValidationKind,
   ValidationSeverity,
+  WalkForwardEvaluationBasis,
   WalkForwardGap,
   WalkForwardReport,
   WalkForwardWindow,

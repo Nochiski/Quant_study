@@ -68,6 +68,10 @@ const WalkForward = ({
         {t("experiments.walkForward.title")}
       </h2>
       <p>
+        {data.interpretation ??
+          t("experiments.walkForward.interpretationUnavailable")}
+      </p>
+      <p>
         {data.gap === null || data.gap === undefined
           ? tFill("experiments.walkForward.summary", {
               sharpe: data.out_of_sample_sharpe?.toFixed(4) ?? "—",

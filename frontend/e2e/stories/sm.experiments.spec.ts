@@ -246,6 +246,14 @@ test(
     await expect(
       page.getByRole("heading", { name: "워크포워드 결과" }),
     ).toBeVisible();
+    await expect(
+      page.getByText(/같은 초기자본으로 다시 실행.*첫 snapshot 이후/u),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        /현금·보유 수량을 이월하지.*실제 연속 계좌의 손익이 아닙니다/u,
+      ),
+    ).toBeVisible();
     // 감사 기록: 생성부터 실행 시작·끝까지 시각 순으로 남는다.
     const audit = page.getByRole("table", { name: "감사 기록" });
     await expect(audit.getByText("실험 생성")).toBeVisible();

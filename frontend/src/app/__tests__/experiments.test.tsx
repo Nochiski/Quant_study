@@ -299,6 +299,43 @@ const usePreview = (rejected = false) =>
   );
 
 describe("experiments", () => {
+  it.each([
+    [
+      "창마다 재시작하며 현금·보유를 이월하지 않는 backend 안내",
+      "창마다 재시작하며 현금·보유를 이월하지 않는 backend 안내",
+    ],
+    [
+      undefined,
+      "이 서버가 결과의 계좌 연결 방식을 제공하지 않아 연속 계좌 손익인지 확인할 수 없습니다. 서버를 갱신해 평가 방식을 확인하세요.",
+    ],
+  ])(
+    "shows the supplied interpretation or marks an older response as unknown: %s",
+    async (interpretation, expected) => {
+      server.use(
+        http.get(`${API}/api/v1/experiments/:experimentId`, () =>
+          HttpResponse.json(experiment("e-run", "completed")),
+        ),
+        http.get(`${API}/api/v1/experiments/:experimentId/trials`, () =>
+          HttpResponse.json([]),
+        ),
+        http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
+          HttpResponse.json({
+            windows: [],
+            curve: [],
+            out_of_sample_sharpe: 0.1234,
+            retention: 0.8,
+            gap: null,
+            interpretation,
+            evaluation_basis: "window_restart_returns",
+          }),
+        ),
+      );
+      mount("/research/experiments/e-run");
+      expect(await screen.findByText(expected)).toBeVisible();
+      expect(screen.getByText(/표본 밖 샤프.*0.1234.*80.0%/u)).toBeVisible();
+    },
+  );
+
   it("lists the queue with backend status, counts and slots and sends the controls", async () => {
     const controls: unknown[] = [];
     const cancelled: string[] = [];

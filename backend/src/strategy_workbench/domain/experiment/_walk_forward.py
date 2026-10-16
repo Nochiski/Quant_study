@@ -30,6 +30,19 @@ from ._search import GridIndex, neighbor_rank
 from ._trial import awaiting_recovery, settled
 
 
+class WalkForwardEvaluationBasis(StrEnum):
+    """연결곡선이 측정하는 대상. 실제 계좌 연속 평가는 별도 계약으로 구분해야 한다."""
+
+    WINDOW_RESTART_RETURNS = "window_restart_returns"
+
+
+WALK_FORWARD_INTERPRETATION = (
+    "이 곡선은 검증 창마다 같은 초기자본으로 다시 실행한 뒤, 각 창의 첫 snapshot 이후 "
+    "수익률만 연결한 비교 결과입니다. 초기자본에서 첫 snapshot까지의 진입비용·손익은 포함하지 "
+    "않으며, 창 경계의 현금·보유 수량을 이월하지 않습니다. 실제 연속 계좌의 손익이 아닙니다."
+)
+
+
 class SplitMode(StrEnum):
     # 학습 창 길이를 고정하고 창마다 검증 연수만큼 민다.
     ROLLING = "rolling"

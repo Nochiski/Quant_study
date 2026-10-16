@@ -23,6 +23,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 )
 from strategy_workbench.domain.backtest.facade.trials import bankrupt, preview_trial, trial_key
 from strategy_workbench.domain.experiment.facade.design import (
+    WALK_FORWARD_INTERPRETATION,
     CellPlateau,
     ExperimentDesign,
     ExperimentKind,
@@ -35,6 +36,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     SearchSpec,
     SplitSpec,
     TimeEstimate,
+    WalkForwardEvaluationBasis,
     WalkForwardGap,
     WalkForwardWindow,
     build_search_spec,
@@ -209,6 +211,9 @@ class WalkForwardReport:
     out_of_sample_sharpe: float | None
     retention: float | None
     gap: WalkForwardGap | None
+    # 기존 계산값을 보존하고 API 소비자에게 평가 대상을 명시한다.
+    evaluation_basis: WalkForwardEvaluationBasis = WalkForwardEvaluationBasis.WINDOW_RESTART_RETURNS
+    interpretation: str = WALK_FORWARD_INTERPRETATION
 
 
 @dataclass(frozen=True)

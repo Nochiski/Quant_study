@@ -48,6 +48,25 @@ class AdjustedCloseObservation:
 
 
 @dataclass(frozen=True)
+class AdjustmentGapObservation:
+    """원장이 비교 불가능하다고 선언한 종목·세션의 가격 조정 공백."""
+
+    session: date
+    security_id: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.session) is not date
+            or not isinstance(self.security_id, str)
+            or not self.security_id.strip()
+        ):
+            raise ValueError(
+                "adjustment gap requires a date session and a nonblank security id "
+                f"— session={self.session!r} security_id={self.security_id!r}"
+            )
+
+
+@dataclass(frozen=True)
 class ListingInterval:
     security_id: str
     first_session: date
@@ -65,6 +84,7 @@ class PriceLabelStatus(StrEnum):
     LISTING_STATUS_UNKNOWN = "listing_status_unknown"
     LISTING_ENDED_UNSETTLED = "listing_ended_unsettled"
     OUTSIDE_LISTING = "outside_listing"
+    ADJUSTMENT_GAP = "adjustment_gap"
     MISSING_ENTRY = "missing_entry"
     MISSING_EXIT = "missing_exit"
     PRICE_NOT_AVAILABLE = "price_not_available"

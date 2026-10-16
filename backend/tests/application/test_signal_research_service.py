@@ -36,8 +36,10 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 )
 from strategy_workbench.domain.signal_evaluation.facade.evaluation import (
     AdjustedCloseObservation,
+    AdjustmentGapObservation,
     ListingInterval,
     PriceLabelSpec,
+    PriceLabelStatus,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
@@ -86,6 +88,7 @@ class _Labels:
     calls: int = 0
     snapshot: str = "ledger:fields"
     status: LabelDataStatus = LabelDataStatus.READY
+    adjustment_gaps: tuple[AdjustmentGapObservation, ...] = ()
 
     def load(self, query: LabelDataQuery) -> LabelDataLoad:
         self.calls += 1
@@ -98,13 +101,18 @@ class _Labels:
             SignalLabelData(
                 self.snapshot,
                 (D0, D1),
-                (
-                    AdjustedCloseObservation(D0, "a", 100, D0),
-                    AdjustedCloseObservation(D1, "a", 110, D1),
+                tuple(
+                    price
+                    for price in (
+                        AdjustedCloseObservation(D0, "a", 100, D0),
+                        AdjustedCloseObservation(D1, "a", 110, D1),
+                    )
+                    if not any(gap.session == price.session for gap in self.adjustment_gaps)
                 ),
                 (ListingInterval("a", D0, D1),),
                 (),
                 (),
+                self.adjustment_gaps,
             ),
         )
 
@@ -132,6 +140,22 @@ def test_use_case_preserves_requested_factor_and_original_signal_evidence() -> N
     assert outcome.report.evaluations[0].samples[0].signal_value == 1
     assert outcome.report.evaluations[0].samples[0].label.return_fraction == pytest.approx(0.1)
     assert (guard.calls, pipeline.calls, labels.calls) == (2, 1, 1)
+
+
+def test_adjustment_gap_is_forwarded_without_removing_original_signal_or_population() -> None:
+    labels = _Labels(adjustment_gaps=(AdjustmentGapObservation(D1, "a"),))
+    outcome = SignalResearchService(_Guard(), _Pipeline(), labels).run(_request())
+    assert outcome.status is LabelDataStatus.READY
+    assert outcome.report is not None
+    assert outcome.report.label_data.adjustment_gaps == labels.adjustment_gaps
+    result = outcome.report.evaluations[0]
+    assert len(result.samples) == 1
+    assert result.samples[0].signal_value == 1
+    assert result.samples[0].label.status is PriceLabelStatus.ADJUSTMENT_GAP
+    assert result.samples[0].label.return_fraction is None
+    assert result.daily[0].universe_count == 1
+    assert result.daily[0].paired_count == 0
+    assert result.daily[0].coverage_fraction == 0
 
 
 @pytest.mark.parametrize("change", ["wrong_ledger", "wrong_fields", "wrong_tape", "changed_proof"])

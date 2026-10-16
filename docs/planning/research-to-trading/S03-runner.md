@@ -24,7 +24,7 @@ S03 순수 함수의 수식·순위·coverage 계약은 [S03-signal-evaluation.m
 | 요청 JSON·CLI 인자·증거 직렬화 | `adapters/inbound/signal_research_cli` | 기존 hydrate와 RunEnvironment 검증을 사용, 결과 JSON을 새 파일 또는 표준 출력으로 반환 |
 | 구체 구현 조립 | `bootstrap/signal_research` | 검증된 보존 DuckDB만 명시적으로 조립. mock 선택·fallback 없음 |
 
-새 application이 다른 application의 서비스를 직접 빌려 쓰지 않도록 자체 SignalPipelinePort를 소유한다. bridge adapter가 실제 기존 서비스 호출과 포트 입출력 변환·경계검증을 맡는다. 가격 조회 계약도 자체 SignalLabelDataPort이며, 기존 백테스트 memberships의 잘린 날짜를 소비하지 않는다. 새 의존성은 각 facade에 선언하고 architecture 검사를 통과시켰다. 기존 파일 수정은 equity_duckdb facade 의존성 선언에 한정한다. 기존 S03 순수 evaluator는 수정하지 않았다.
+새 application이 다른 application의 서비스를 직접 빌려 쓰지 않도록 자체 SignalPipelinePort를 소유한다. bridge adapter가 실제 기존 서비스 호출과 포트 입출력 변환·경계검증을 맡는다. 가격 조회 계약도 자체 SignalLabelDataPort이며, 기존 백테스트 memberships의 잘린 날짜를 소비하지 않는다. 새 의존성은 각 facade에 선언하고 architecture 검사를 통과시켰다. 후속 개별 조정 공백 처리는 기존 S03 순수 evaluator가 소유하며, adapter는 원장의 MASKED 키를 전달한다.
 
 ## 입력·라벨·실패의 의미
 
@@ -71,15 +71,25 @@ S01 검증 규칙을 복제하거나 완화하지 않는다. 나중에 코드를
 
 ### 중간 가격 조정 공백
 
-기존 `price.adj_close` 원장 계약은 가린 조정 공백을 사이에 둔 두 시점 비교도 금지한다. 현재 pure evaluator는 끝 가격만 받기 때문에 이번 runner는 요청한 종목·가격 조회 범위 안에 **MASKED 조정 공백이 하나라도 있으면 전체 요청을 `unsupported`로 중단**한다. 이때 `label_adjustment_gap`과 건수·첫 종목/세션을 알리고 JSON 성공 증거를 내보내지 않는다.
+기존 `price.adj_close` 원장 계약은 가린 조정 공백을 사이에 둔 두 시점 비교도 금지한다.
+후속 구현은 기존 raw 조회의 `CellKind.MASKED`를
+`AdjustmentGapObservation(session, security_id)`로 변환해 `SignalLabelData.adjustment_gaps`에
+담는다. 원장 MASKED 술어를 복제하지 않고, 공백은 가격과 별도로 순수 evaluator에 전달한다.
 
-이는 개별 라벨이 실제로 공백을 지나는지를 판정하는 기능보다 보수적이다. 어떤 horizon에는 필요 없는 공백이어도 같은 요청 전체가 중단될 수 있다. 공백을 메우거나 해당 종목을 조용히 삭제해서 IC만 계산하는 것보다 현재 지원 범위를 명시적으로 제한한다. 이 제한을 줄이려면 향후 pure evaluator에 원장 공백 경로 계약을 추가하고 별도 검증해야 한다.
+각 라벨은 해당 종목의 `[entry_session, label_end]` 양끝 포함 구간에 공백이 있으면
+`adjustment_gap`·수익 `None`이다. 공백이 없는 horizon·다른 종목은 정상 평가한다.
+달력 부족·미만기·상장근거/종료/상장 전 상태를 먼저 판정하며, 당시 모집단 분모와 상태별
+건수를 보존한다. 원주가·0·전일가 대체나 사후 종목 제외는 하지 않는다.
+상세 계약과 첫 실자료 기술 확인 사양은 [개별 조정 공백 사양](S03-adjustment-gaps.md)이다.
+
+과거 runner는 조회 범위 안 MASKED 하나라도 있으면 전체 요청을 `unsupported`로 중단했다.
+아래 과거 검증 기록은 당시의 구현 증거이며, 현재 개별 라벨 판정의 통과 증거로 재사용하지 않는다.
 
 `LabelDataLoad`와 `SignalResearchOutcome`은 READY+값과 실패+사유를 구분하며 값 없는 성공·사유 없는 실패·값을 가진 실패·알 수 없는 상태를 거절한다. 다른 원천이나 mock으로 복구하지 않는다. CLI 실패는 종료 코드 2와 한글 사유를 남기며 성공 보고서를 생성하지 않는다. Python traceback이 필요한 내부 버그까지 성공 결과로 바꾸지는 않는다.
 
 ## 실행과 내보내기
 
-실제 원장이 제공되기 전에는 아래 명령을 실제 자료에 실행하지 않는다. 아래 경로는 사용 예시이며 이번 작업에서 접근하지 않았다.
+아래 경로는 사용 예시다. 실제 실행은 현재 코드·계약으로 새 S01 사본을 검증하고 결과 전 로컬 요청 JSON·hash·열람 기록을 남긴 뒤 수행한다. 첫 실자료 실행은 아직 하지 않았다.
 
 ```sh
 uv run --no-sync --project backend python -m strategy_workbench.bootstrap.signal_research \
@@ -103,7 +113,7 @@ uv run --no-sync --project backend python -m strategy_workbench.bootstrap.signal
 - S01 검증 ledger ID·계약 원문 hash·descriptor hash·저장소 기준 상대 보존 경로
 - 전략 hash, 전체 StrategySpec·RunEnvironment, cutoff·달력 끝·라벨 명세·팩터 목록
 - 기존 파이프라인의 평가된 신호와 TargetTape, 데이터 경고
-- 실제 읽은 가격·공개일·공통 달력, 원래 상장구간·종료 근거
+- 실제 읽은 가격·공개일·공통 달력, 원래 상장구간·종료 근거, 개별 조정 공백 관측
 - 종목·신호일·horizon별 신호 원값·신호 상태·라벨 첫/끝 세션·수익·상태
 - 날짜·horizon별 Rank IC, 기존 모집단 수·유효 쌍 수·coverage·상태별 건수·제외 사유
 - 현금배당·거래비용·계좌 수익·통계 추론을 포함하지 않는다는 한계
@@ -112,7 +122,7 @@ uv run --no-sync --project backend python -m strategy_workbench.bootstrap.signal
 
 ## 증거
 
-모든 데이터 읽기는 테스트가 만든 tmp 합성 원장에 한정했다. 실제 원장·브로커·시크릿·네트워크·실데이터 성과에는 접근하거나 실행하지 않았다. 과거 봉인 구간은 거절 테스트의 날짜 상수 외에 열람하지 않았다.
+아래 runner 검증 당시 데이터 읽기는 테스트가 만든 tmp 합성 원장에 한정했다. 실제 원장·브로커·시크릿·네트워크·실데이터 성과에는 접근하거나 실행하지 않았다. 과거 봉인 구간은 거절 테스트의 날짜 상수 외에 열람하지 않았다.
 
 검증은 다음 파일이 소유한다.
 
@@ -142,4 +152,4 @@ uv run --no-sync --project backend pytest \
 
 이번 조각으로 보존 입력에서 재현 가능한 가격 예측 비교를 **호출·내보낼 경로**를 마련했다. S03 실제 연구 완료나 가설 채택으로 승격하지 않는다.
 
-다음에는 사용자가 확보한 원장으로 같은 코드·환경의 S01 사본을 준비하고, 연구 질문·신호 창·진입 지연·비교 기간·반복 열람 기록을 먼저 정한 뒤 실제 자료를 평가할지 결정한다. MASKED 공백·배당 총수익·상폐 회수금이 연구 결론에 필요하면 해당 원천/계약부터 보완해야 한다. 첫 실데이터 IC·coverage와 별도의 비용 후 계좌 성과를 함께 검토하기 전 자동매매 투입 판단은 보류한다.
+다음에는 개별 조정 공백 구현의 검증 결과를 확인하고, 같은 코드·환경으로 별도 새 S01 사본을 준비한다. [첫 실자료 기술 확인 사양](S03-adjustment-gaps.md#다음-결정-첫-실자료-기술-확인-초안)에 따라 결과 전 로컬 요청 JSON·hash·열람 기록을 고정한 뒤 1회 기술 경로와 coverage·상태를 서술한다. 배당 총수익·상폐 회수금·비용 후 계좌 성과·통계 추론은 별도 연구이며 이번 기술 확인에서 전략 채택이나 자동매매 투입을 판단하지 않는다.

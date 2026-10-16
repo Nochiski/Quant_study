@@ -159,6 +159,7 @@ class SignalResearchService:
                 sessions=data.sessions,
                 prices=data.prices,
                 listings=data.listings,
+                adjustment_gaps=data.adjustment_gaps,
                 label_spec=request.label_spec,
                 evaluation_as_of=request.evaluation_as_of,
             )
@@ -177,6 +178,7 @@ class SignalResearchService:
                 "가격 라벨은 분할 반영 종가 기준이며 현금배당·거래비용을 제외합니다.",
                 "순위 상관과 비교 가능 비율은 실제 다음 시가 매매의 비용 후 계좌 수익이 아닙니다.",
                 "상폐 회수금과 조정 공백을 임의 가격으로 채우지 않습니다.",
+                "조정 공백을 지나는 라벨은 adjustment_gap으로 남기고 원래 모집단에 포함합니다.",
                 "여러 기간의 결과는 탐색 증거이며 "
                 "최선 기간 선택이나 통계적 유의성을 인증하지 않습니다.",
             ),

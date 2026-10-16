@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -15,6 +15,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 )
 from strategy_workbench.domain.signal_evaluation.facade.evaluation import (
     AdjustedCloseObservation,
+    AdjustmentGapObservation,
     ListingInterval,
     PriceLabelSpec,
     PriceLabelStatus,
@@ -49,6 +50,7 @@ def _evaluate(
     cutoff: date = D3,
     price_snapshot: str = "synthetic",
     sessions: tuple[date, ...] = SESSIONS,
+    adjustment_gaps: tuple[AdjustmentGapObservation, ...] = (),
 ) -> SignalEvaluationResult:
     return evaluate_signal(
         observations=observations,
@@ -65,6 +67,7 @@ def _evaluate(
         ),
         label_spec=spec or PriceLabelSpec((1,)),
         evaluation_as_of=cutoff,
+        adjustment_gaps=adjustment_gaps,
     )
 
 
@@ -294,3 +297,159 @@ def test_default_horizons_remain_an_explicit_report_specification() -> None:
     assert {sample.label.status for sample in result.samples} == {
         PriceLabelStatus.CALENDAR_INSUFFICIENT
     }
+
+
+def test_adjustment_gap_affects_only_the_security_and_horizon_that_cross_it() -> None:
+    sessions = tuple(D0 + timedelta(days=index) for index in range(23))
+    result = _evaluate(
+        tuple(_signal(security_id, float(index)) for index, security_id in enumerate("abc")),
+        tuple(
+            _price(security_id, session, 100 + (index + 1) * session_index)
+            for index, security_id in enumerate("abc")
+            for session_index, session in enumerate(sessions)
+        ),
+        spec=PriceLabelSpec((5, 21)),
+        sessions=sessions,
+        listings=tuple(ListingInterval(security_id, D0, sessions[-1]) for security_id in "abc"),
+        cutoff=sessions[-1],
+        adjustment_gaps=(AdjustmentGapObservation(sessions[10], "a"),),
+    )
+    labels = {(row.security_id, row.horizon_sessions): row.label for row in result.samples}
+    assert labels["a", 5].return_fraction == pytest.approx(0.05)
+    assert labels["a", 21].status is PriceLabelStatus.ADJUSTMENT_GAP
+    assert labels["a", 21].return_fraction is None
+    assert labels["b", 21].return_fraction == pytest.approx(0.42)
+    assert labels["c", 21].return_fraction == pytest.approx(0.63)
+    assert result.daily[0].coverage_fraction == 1.0
+    daily = result.daily[1]
+    assert (daily.universe_count, daily.paired_count) == (3, 2)
+    assert daily.coverage_fraction == pytest.approx(2 / 3)
+    assert {item.reason: item.count for item in daily.exclusions} == {"adjustment_gap": 1}
+    assert {item.reason: item.count for item in daily.label_status_counts} == {
+        "adjustment_gap": 1,
+        "ok": 2,
+    }
+
+
+@pytest.mark.parametrize("gap_session", SESSIONS)
+def test_gap_window_includes_both_endpoints_and_excludes_prior_and_later_sessions(
+    gap_session: date,
+) -> None:
+    result = _evaluate(
+        (_signal("a", 1),),
+        (_price("a", D1, 100), _price("a", D2, 120)),
+        spec=PriceLabelSpec((1,), entry_delay_sessions=1),
+        adjustment_gaps=(AdjustmentGapObservation(gap_session, "a"),),
+    )
+    label = result.samples[0].label
+    assert (label.entry_session, label.label_end) == (D1, D2)
+    if gap_session in (D1, D2):
+        assert label.status is PriceLabelStatus.ADJUSTMENT_GAP
+        assert label.return_fraction is None
+    else:
+        assert label.status is PriceLabelStatus.OK
+        assert label.return_fraction == pytest.approx(0.2)
+
+
+@pytest.mark.parametrize(
+    "spec,cutoff,listings,expected",
+    [
+        (PriceLabelSpec((5,)), D3, (), PriceLabelStatus.CALENDAR_INSUFFICIENT),
+        (PriceLabelSpec((2,)), D1, (), PriceLabelStatus.NOT_MATURED),
+        (PriceLabelSpec((1,)), D3, (), PriceLabelStatus.LISTING_STATUS_UNKNOWN),
+        (
+            PriceLabelSpec((1,)),
+            D3,
+            (ListingInterval("a", D0, D0),),
+            PriceLabelStatus.LISTING_ENDED_UNSETTLED,
+        ),
+        (
+            PriceLabelSpec((1,)),
+            D3,
+            (ListingInterval("a", D1, D3),),
+            PriceLabelStatus.OUTSIDE_LISTING,
+        ),
+    ],
+)
+def test_calendar_maturity_and_listing_statuses_take_precedence_over_adjustment_gaps(
+    spec: PriceLabelSpec,
+    cutoff: date,
+    listings: tuple[ListingInterval, ...],
+    expected: PriceLabelStatus,
+) -> None:
+    result = _evaluate(
+        (_signal("a", 1),),
+        (),
+        spec=spec,
+        cutoff=cutoff,
+        listings=listings,
+        adjustment_gaps=(AdjustmentGapObservation(D0, "a"),),
+    )
+    assert result.samples[0].label.status is expected
+    assert result.samples[0].label.return_fraction is None
+
+
+def test_gap_precedes_missing_prices_but_signal_exclusion_priority_is_preserved() -> None:
+    result = _evaluate(
+        (_signal("a", 1), _signal("b", None), _signal("c", 3, available=D1)),
+        (),
+        adjustment_gaps=tuple(AdjustmentGapObservation(D0, security_id) for security_id in "abc"),
+    )
+    assert {sample.label.status for sample in result.samples} == {PriceLabelStatus.ADJUSTMENT_GAP}
+    daily = result.daily[0]
+    assert (daily.universe_count, daily.paired_count, daily.coverage_fraction) == (3, 0, 0)
+    assert {item.reason: item.count for item in daily.label_status_counts} == {"adjustment_gap": 3}
+    assert {item.reason: item.count for item in daily.exclusions} == {
+        "adjustment_gap": 1,
+        "signal_missing": 1,
+        "signal_not_available": 1,
+    }
+
+
+def test_adjustment_gap_keys_require_unique_common_calendar_sessions() -> None:
+    gap = AdjustmentGapObservation(D0, "a")
+    with pytest.raises(ValueError, match="adjustment gap.*unique"):
+        _evaluate((_signal("a", 1),), (), adjustment_gaps=(gap, gap))
+    with pytest.raises(ValueError, match="adjustment gap.*common-calendar"):
+        _evaluate(
+            (_signal("a", 1),),
+            (),
+            adjustment_gaps=(AdjustmentGapObservation(date(2024, 1, 7), "a"),),
+        )
+    with pytest.raises(ValueError, match="nonblank security id"):
+        AdjustmentGapObservation(D0, "  ")
+
+
+def test_gap_order_and_other_security_do_not_change_price_availability_priority() -> None:
+    observations = (_signal("a", 1),)
+    prices = (
+        _price("a", D1, 100),
+        replace(_price("a", D2, 120), available_date=D3),
+    )
+    spec = PriceLabelSpec((1,), entry_delay_sessions=1)
+    outside_gaps = (
+        AdjustmentGapObservation(D3, "a"),
+        AdjustmentGapObservation(D1, "b"),
+        AdjustmentGapObservation(D0, "a"),
+    )
+    unavailable = _evaluate(
+        observations,
+        prices,
+        spec=spec,
+        cutoff=D2,
+        adjustment_gaps=outside_gaps,
+    )
+    assert unavailable.samples[0].label.status is PriceLabelStatus.PRICE_NOT_AVAILABLE
+    crossing_gaps = (*outside_gaps, AdjustmentGapObservation(D2, "a"))
+    blocked = _evaluate(
+        observations, prices, spec=spec, cutoff=D2, adjustment_gaps=crossing_gaps
+    )
+    assert blocked.samples[0].label.status is PriceLabelStatus.ADJUSTMENT_GAP
+    reversed_result = _evaluate(
+        observations,
+        prices,
+        spec=spec,
+        cutoff=D2,
+        adjustment_gaps=tuple(reversed(crossing_gaps)),
+    )
+    assert reversed_result == blocked

@@ -36,6 +36,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioObservation,
 )
 from strategy_workbench.domain.signal_evaluation.facade.evaluation import (
+    AdjustmentGapObservation,
     PriceLabelSpec,
     PriceLabelStatus,
     evaluate_signal,
@@ -355,16 +356,122 @@ def test_actual_span_end_reason_controls_delisting_and_unknown_coverage(
     assert result.samples[0].label.return_fraction is None
 
 
-def test_masked_middle_adjustment_gap_is_unsupported_even_with_both_endpoint_prices(
+def test_masked_gap_only_invalidates_intersecting_labels_and_preserves_population(
     tmp_path: Path,
 ) -> None:
     equity = EquityDuckdbAdapter(build_workbench_root(tmp_path / "source"))
+    signal = date(2024, 1, 5)
     loaded = DuckdbSignalLabelAdapter(equity).load(
-        LabelDataQuery(date(2024, 1, 8), CALENDAR_END, CALENDAR_END, ("035420:1",))
+        LabelDataQuery(signal, CALENDAR_END, CALENDAR_END, ("035420:1", "005930:1"))
     )
-    assert loaded.status is LabelDataStatus.UNSUPPORTED
-    assert loaded.detail is not None and "label_adjustment_gap" in loaded.detail
-    assert loaded.data is None
+    assert loaded.status is LabelDataStatus.READY
+    data = loaded.data
+    assert data is not None
+    assert data.adjustment_gaps == (
+        AdjustmentGapObservation(date(2024, 1, 9), "035420:1"),
+        AdjustmentGapObservation(date(2024, 1, 11), "035420:1"),
+    )
+    price_keys = {(price.session, price.security_id) for price in data.prices}
+    assert (date(2024, 1, 8), "035420:1") in price_keys
+    assert (CALENDAR_END, "035420:1") in price_keys
+    assert not any((gap.session, gap.security_id) in price_keys for gap in data.adjustment_gaps)
+    result = evaluate_signal(
+        observations=tuple(
+            PortfolioObservation(
+                session, security_id, True, (PortfolioFactorValue("factor", value, session),)
+            )
+            for session in (signal, date(2024, 1, 8))
+            for value, security_id in enumerate(("035420:1", "005930:1"), 1)
+        ),
+        factor_id="factor",
+        signal_snapshot_id=data.data_snapshot_id,
+        price_snapshot_id=data.data_snapshot_id,
+        sessions=data.sessions,
+        prices=data.prices,
+        adjustment_gaps=data.adjustment_gaps,
+        listings=data.listings,
+        label_spec=PriceLabelSpec((1, 4), minimum_pairs=2),
+        evaluation_as_of=CALENDAR_END,
+    )
+    samples = {
+        (row.signal_session, row.security_id, row.horizon_sessions): row for row in result.samples
+    }
+    assert samples[(signal, "035420:1", 1)].label.status is PriceLabelStatus.OK
+    assert samples[(signal, "035420:1", 1)].label.return_fraction == pytest.approx(
+        204_000 / 203_500 - 1
+    )
+    assert samples[(date(2024, 1, 8), "035420:1", 4)].label.status is (
+        PriceLabelStatus.ADJUSTMENT_GAP
+    )
+    assert all(
+        row.label.status is PriceLabelStatus.OK
+        for row in result.samples
+        if row.security_id == "005930:1"
+    )
+    for daily in result.daily:
+        assert daily.universe_count == 2
+        expected_pairs = 2 if daily.signal_session == signal and daily.horizon_sessions == 1 else 1
+        assert daily.paired_count == expected_pairs
+        assert daily.coverage_fraction == expected_pairs / 2
+        if expected_pairs == 1:
+            assert {item.reason: item.count for item in daily.label_status_counts} == {
+                "ok": 1,
+                "adjustment_gap": 1,
+            }
+            assert {item.reason: item.count for item in daily.exclusions} == {"adjustment_gap": 1}
+
+
+def test_cli_exports_masked_gap_evidence_and_per_label_status_from_preserved_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = _source(tmp_path)
+    frozen = tmp_path / "preserved"
+    created = import_ledger_module("equity.research_snapshot").create_snapshot(
+        source, frozen, repo_root=REPO
+    )
+    assert created.ok, created.detail
+    arguments = _arguments(tmp_path, frozen)
+    environment_path = tmp_path / "environment.json"
+    environment_path.write_text(
+        canonical_payload_json(
+            asdict(
+                RunEnvironment(
+                    start=date(2024, 1, 5), end=date(2024, 1, 8), universe_id="krx.common-stock"
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    arguments[arguments.index("--evaluation-as-of") + 1] = "2024-01-11"
+    assert main(arguments) == 0
+    output = capsys.readouterr()
+    assert output.err == ""
+    payload = json.loads(output.out)
+    assert payload["schema_version"] == "signal-research-v1"
+    assert payload["label_data"]["adjustment_gaps"] == [
+        {"session": "2024-01-09", "security_id": "035420:1"},
+        {"session": "2024-01-11", "security_id": "035420:1"},
+    ]
+    result = payload["evaluations"][0]
+    by_key = {
+        (row["signal_session"], row["security_id"], row["horizon_sessions"]): row
+        for row in result["samples"]
+    }
+    normal = by_key[("2024-01-05", "035420:1", 1)]
+    affected = by_key[("2024-01-05", "035420:1", 2)]
+    assert normal["label"]["status"] == "ok"
+    assert affected["label"]["status"] == "adjustment_gap"
+    assert affected["label"]["return_fraction"] is None
+    assert normal["signal_value"] == affected["signal_value"]
+    daily = next(
+        row
+        for row in result["daily"]
+        if row["signal_session"] == "2024-01-05" and row["horizon_sessions"] == 2
+    )
+    assert daily["universe_count"] == 3
+    assert daily["paired_count"] == 2
+    assert daily["coverage_fraction"] == pytest.approx(2 / 3)
+    assert {row["reason"]: row["count"] for row in daily["exclusions"]} == {"adjustment_gap": 1}
 
 
 def test_suspended_reference_price_is_not_an_entry_or_exit_trade_price(tmp_path: Path) -> None:

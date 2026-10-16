@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections import Counter
 from collections.abc import Sequence
 from datetime import date
@@ -11,6 +12,7 @@ from strategy_workbench.domain.portfolio.facade.construction import PortfolioObs
 
 from ._models import (
     AdjustedCloseObservation,
+    AdjustmentGapObservation,
     DailyRankIC,
     ExclusionCount,
     ListingInterval,
@@ -35,6 +37,7 @@ def evaluate_signal(
     listings: Sequence[ListingInterval],
     label_spec: PriceLabelSpec,
     evaluation_as_of: date,
+    adjustment_gaps: Sequence[AdjustmentGapObservation] = (),
 ) -> SignalEvaluationResult:
     """기존 pipeline의 선정 전 팩터 값과 별도 미래 가격을 날짜별로 비교한다.
 
@@ -56,6 +59,16 @@ def evaluate_signal(
         if price.session not in index_by_session or key in price_by_key:
             raise ValueError(f"price must have a unique common-calendar key — key={key!r}")
         price_by_key[key] = price
+    gap_keys: set[tuple[date, str]] = set()
+    gap_sessions_by_id: dict[str, list[date]] = {}
+    for gap in adjustment_gaps:
+        key = (gap.session, gap.security_id)
+        if gap.session not in index_by_session or key in gap_keys:
+            raise ValueError(f"adjustment gap must have a unique common-calendar key — key={key!r}")
+        gap_keys.add(key)
+        gap_sessions_by_id.setdefault(gap.security_id, []).append(gap.session)
+    for gap_sessions in gap_sessions_by_id.values():
+        gap_sessions.sort()
     listing_by_id: dict[str, ListingInterval] = {}
     for listing in listings:
         if listing.security_id in listing_by_id:
@@ -95,6 +108,7 @@ def evaluate_signal(
                 price_by_key,
                 listing_by_id.get(observation.security_id),
                 evaluation_as_of,
+                gap_sessions_by_id.get(observation.security_id, ()),
             )
             samples.append(
                 SignalEvaluationSample(
@@ -125,6 +139,7 @@ def _price_label(
     prices: dict[tuple[date, str], AdjustedCloseObservation],
     listing: ListingInterval | None,
     cutoff: date,
+    adjustment_gap_sessions: Sequence[date],
 ) -> PriceLabel:
     end_index = entry_index + horizon
     entry = calendar[entry_index] if entry_index < len(calendar) else None
@@ -139,6 +154,9 @@ def _price_label(
         return PriceLabel(entry, end, PriceLabelStatus.LISTING_ENDED_UNSETTLED)
     if entry < listing.first_session:
         return PriceLabel(entry, end, PriceLabelStatus.OUTSIDE_LISTING)
+    gap_index = bisect_left(adjustment_gap_sessions, entry)
+    if gap_index < len(adjustment_gap_sessions) and adjustment_gap_sessions[gap_index] <= end:
+        return PriceLabel(entry, end, PriceLabelStatus.ADJUSTMENT_GAP)
     entry_price, exit_price = prices.get((entry, security_id)), prices.get((end, security_id))
     if entry_price is None:
         return PriceLabel(entry, end, PriceLabelStatus.MISSING_ENTRY)

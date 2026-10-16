@@ -305,3 +305,90 @@ def test_fake_does_not_deduplicate_for_the_application(tmp_path: Path) -> None:
     assert report.reconciliation is not None
     assert "duplicate broker intent identity" in report.reconciliation.differences
     assert ledger.halted()
+
+
+@pytest.mark.parametrize(
+    "side,first_price_krw,invalid_price_krw", [("buy", 50, 150), ("sell", 150, 50)]
+)
+def test_fake_rejects_incremental_limit_violation_atomically(
+    tmp_path: Path, side: str, first_price_krw: int, invalid_price_krw: int
+) -> None:
+    ledger, broker, service = setup(tmp_path)
+    intent = Intent("limit", "A", side, 2, 100, 2)
+    assert service.submit(intent).status == ExecutionStatus.OK
+    first = broker.fill("limit", quantity=1, price_krw=first_price_krw, fee_krw=1)
+    before = broker.snapshot()
+    # 중간 복구 없이 두 번째 증분의 위반을 fake 자체에서 거절해야 한다.
+    with pytest.raises(ValueError, match="incremental fill violates limit"):
+        broker.fill("limit", quantity=1, price_krw=invalid_price_krw, fee_krw=1)
+    assert broker.snapshot() == before
+    assert before.orders == (first,)
+    assert ledger.orders()[0].state == OrderState.OPEN
+    assert service.recover().status == ExecutionStatus.OK
+    assert ledger.orders() == (first,)
+    final = broker.fill("limit", quantity=1, price_krw=100, fee_krw=1)
+    assert final.revision == first.revision + 1
+    assert service.recover().status == ExecutionStatus.OK
+
+
+@pytest.mark.parametrize("side,prices_krw", [("buy", (90, 80)), ("sell", (110, 120))])
+def test_fake_accepts_each_price_improvement_without_intermediate_recovery(
+    tmp_path: Path, side: str, prices_krw: tuple[int, int]
+) -> None:
+    ledger, broker, service = setup(tmp_path)
+    assert service.submit(Intent("improved", "A", side, 2, 100, 2)).status == ExecutionStatus.OK
+    broker.fill("improved", quantity=1, price_krw=prices_krw[0], fee_krw=1)
+    final = broker.fill("improved", quantity=1, price_krw=prices_krw[1], fee_krw=1)
+    assert final.state == OrderState.FILLED
+    assert final.revision == 3
+    assert final.filled_value_krw == sum(prices_krw)
+    assert final.fees_krw == 2
+    snapshot = broker.snapshot()
+    signed_quantity = 2 if side == "buy" else -2
+    cash_change_krw = -sum(prices_krw) if side == "buy" else sum(prices_krw)
+    assert snapshot.account == Account(10_000 + cash_change_krw - 2, (("A", 10 + signed_quantity),))
+    assert service.recover().status == ExecutionStatus.OK
+    assert ledger.orders() == (final,)
+
+
+@pytest.mark.parametrize(
+    "quantity,price_krw,fee_krw,error",
+    [
+        (2, 100, 0, "overfill"),
+        (1, 100, 2, "fee budget exceeded"),
+        (True, 100, 0, "invalid fake fill"),
+        (1, 0, 0, "invalid offline integer"),
+        (1, 100, -1, "invalid offline integer"),
+        (1, 10**16, 0, "invalid offline integer"),
+    ],
+)
+def test_fake_invalid_fill_preserves_order_and_account(
+    tmp_path: Path, quantity: int, price_krw: int, fee_krw: int, error: str
+) -> None:
+    _, broker, service = setup(tmp_path)
+    assert service.submit(Intent("invalid", "A", "buy", 2, 100, 2)).status == ExecutionStatus.OK
+    broker.fill("invalid", quantity=1, price_krw=100, fee_krw=1)
+    before = broker.snapshot()
+    with pytest.raises(ValueError, match=error):
+        broker.fill("invalid", quantity=quantity, price_krw=price_krw, fee_krw=fee_krw)
+    assert broker.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    "terminal_state", [OrderState.FILLED, OrderState.CANCELLED, OrderState.REJECTED]
+)
+def test_fake_rejects_fill_after_terminal_state(
+    tmp_path: Path, terminal_state: OrderState
+) -> None:
+    _, broker, service = setup(tmp_path)
+    broker.reject_next = terminal_state == OrderState.REJECTED
+    assert service.submit(Intent("terminal", "A", "buy", 1, 100)).status == ExecutionStatus.OK
+    if terminal_state == OrderState.FILLED:
+        broker.fill("terminal", quantity=1, price_krw=100)
+    elif terminal_state == OrderState.CANCELLED:
+        broker.cancel("terminal")
+    before = broker.snapshot()
+    assert before.orders[0].state == terminal_state
+    with pytest.raises(ValueError, match="invalid fake fill"):
+        broker.fill("terminal", quantity=1, price_krw=100)
+    assert broker.snapshot() == before

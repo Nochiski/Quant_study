@@ -88,6 +88,8 @@ def _columnar_feed(
     rows: Sequence[MarketBarRecord],
     liquidity: Mapping[tuple[date, str], int] | None = None,
     impact: Mapping[tuple[date, str], float] | None = None,
+    *,
+    session_calendar: Sequence[date],
 ) -> DataFeed:
     """dataset 행을 열로 펴 DataFeed를 만든다 — 중간에 `Bar` 객체를 만들지 않는다.
 
@@ -97,6 +99,7 @@ def _columnar_feed(
 
     Args:
         rows: dataset이 답한 시장 bar 행. 순서는 세션 기준으로만 쓰인다.
+        session_calendar: 거래일 정본. bar 없는 세션도 유지한다.
         liquidity: `(세션, 종목)` → 유동성 캡 기준 거래량(`participation_volumes`). 없으면 엔진이
             세션 거래량을 쓴다.
         impact: `(세션, 종목)` → √ 충격 척도(`impact_scales`). 없으면 충격 0 이다.
@@ -108,6 +111,14 @@ def _columnar_feed(
     for row in rows:
         rows_by_session.setdefault(row.session, []).append(row)
 
+    calendar = session_calendar
+    outside_calendar = sorted(set(rows_by_session) - set(calendar))
+    if outside_calendar:
+        raise ValueError(
+            "market bars must belong to the session calendar — "
+            f"outside_sessions={outside_calendar} calendar_sessions={len(calendar)} "
+            f"rows={len(rows)}"
+        )
     sessions: list[datetime] = []
     instruments: list[InstrumentId] = []
     instrument_index: dict[str, int] = {}
@@ -120,9 +131,9 @@ def _columnar_feed(
     volumes: list[int] = []
     liquidity_volumes: list[int] = []
     impact_scales: list[float] = []
-    for session in sorted(rows_by_session):
+    for session in calendar:
         sessions.append(datetime.combine(session, time(15, 30)))
-        for row in rows_by_session[session]:
+        for row in rows_by_session.get(session, ()):
             index = instrument_index.get(row.security_id)
             if index is None:
                 # `_instrument`는 종목당 한 번만 부른다 — 행마다 부르면 유니버스 크기가
@@ -304,6 +315,7 @@ class BacktestEngineExecutorAdapter:
                     request.dataset.bars,
                     costs.participation_volumes,
                     costs.impact_scales,
+                    session_calendar=request.dataset.sessions,
                 ),
                 corporate_actions=corporate_actions,
                 universe=universe,

@@ -131,6 +131,7 @@ def _run(
     )
     dataset = BacktestDataset(
         data_snapshot_id=SNAPSHOT,
+        sessions=SESSIONS,
         bars=bars,
         memberships=(
             UniverseMembershipRecord(

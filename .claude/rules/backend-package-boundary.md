@@ -46,6 +46,10 @@ bootstrap ─> application + adapters
   `SignalPipelinePort`·`SignalLabelDataPort`를 소유한다. `adapters/outbound/research_snapshot`은
   기존 S01 검증 CLI를 UTF-8 subprocess로 연결하고, `adapters/outbound/signal_pipeline`은
   `application/portfolio_design` facade를 재사용해 기존 raw/factor pipeline 결과를 변환한다.
+  `research_snapshot`은 현재 로드된 `strategy_workbench`·`backtest_engine`의 module origin과
+  package search path를 S01 검증 대상 `backend/src`에 묶는다. 소스 checkout/editable과
+  symlink resolve 일치를 지원하며 별도 wheel 위치는 unsupported로 차단한다. 메모리 변조
+  attestation은 이 출처 검증의 범위 밖이다.
   이 bridge가 기존 서비스 호출을 담당하며 새 application에서 다른 application 서비스나
   concrete adapter를 import하지 않는다. `equity_duckdb`의 연구 label adapter는 자체 노드의 기존
   가격·달력·bar 조회와 원래 security_span을 재사용하며 연구 port와 `domain/signal_evaluation`에
@@ -58,13 +62,20 @@ bootstrap ─> application + adapters
   `adapters/outbound/execution_sqlite`(전용 의도 원장)·`adapters/outbound/fake_broker`(네트워크 없는
   장애 fixture)가 소유한다. `execution_sqlite → sqlite_store`는 위 공용 연결·DDL 규칙의 재사용이며
   실행 DB의 스키마·owner는 execution_sqlite에 남는다. application은 두 concrete adapter를
-  import하지 않고, 이 slice의 조립은 호출자/테스트가 명시적으로 수행한다. 기존 bootstrap·HTTP에는
+  import하지 않는다. fake의 증분 `fill`은 저장 전 `domain/order_execution`의 `classify_event`를
+  재사용하며, 지정가 위반을 포함한 검증 실패 시 주문·revision·계좌를 바꾸지 않는다.
+  이 slice의 조립은 호출자/테스트가 명시적으로 수행한다. 기존 bootstrap·HTTP에는
   연결하지 않는다. 상세 실행 계약은 `docs/planning/research-to-trading/S05-offline-execution.md`다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 커널을 import하는
   노드는 둘이다: `adapters/outbound/backtest_engine`(실행·벤치마크 곡선)과
   `adapters/outbound/engine_portfolio`(엔진 요구사항·능력 판정, 목표 행동 변환). 그 밖의 노드에서
   커널을 import하지 않는다. 이 경계를 막는 architecture 테스트는 아직 없어 리뷰로 지킨다.
+- 백테스트 측정 세션 계약은 `application/backtest_run`의 `BacktestDataset.sessions`가 소유한다.
+  기본값 없는 keyword-only 입력이며 equity adapter가 실제 공통 거래일 달력을 답한다.
+  dataset은 오름차순·중복 없음·측정 bar의 달력 포함을 검증하고 `backtest_engine` adapter는
+  bar가 전혀 없는 거래일도 빈 세션으로 커널에 전달한다. 선택 종목·벤치마크 bar의 합집합으로
+  달력을 재구성하지 않아 DAY 만료와 벤치마크 선택에 독립적인 실행 일정을 유지한다.
 
 ## 노드와 facade
 

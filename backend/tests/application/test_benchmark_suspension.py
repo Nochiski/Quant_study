@@ -411,7 +411,7 @@ def test_benchmark_curve_follows_the_engine_holder_through_suspension_split_and_
         RunConfig(run_id=f"buy-and-hold-{core}", initial_cash=1e9, fee_bps=0.0), core=core
     ).run(
         _BuyAndHold(instrument),
-        _columnar_feed(dataset.bars),
+        _columnar_feed(dataset.bars, session_calendar=dataset.sessions),
         corporate_actions=tuple(
             CorporateActionEvent(
                 ts=datetime.combine(item.session, time(15, 30)),

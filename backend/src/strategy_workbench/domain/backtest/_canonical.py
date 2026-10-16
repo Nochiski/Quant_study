@@ -15,7 +15,8 @@ from ._models import BacktestRunSpec, ResolvedBacktestRunSpec, RunEnvironment
 # v4(#342 DOMAIN-V2-02): 참여 한도의 ADV 는 거래대금이 있는 앞선 행 20개가 다 차야 주고, 워밍업은
 # 40세션을 읽는다.
 # v6: 정수 후보의 실제 장부 여력 검증과 비례 바스켓 최종 정수 예산 재판정.
-ENGINE_RULES_VERSION = "backtest-engine-v6"
+# v7: 종목 bar와 독립적인 거래 달력으로 빈 세션의 DAY 취소·평가·판단을 보존한다.
+ENGINE_RULES_VERSION = "backtest-engine-v7"
 
 
 def backtest_run_fingerprint(

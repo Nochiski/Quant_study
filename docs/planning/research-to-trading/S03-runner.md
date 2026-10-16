@@ -32,6 +32,20 @@ S03 순수 함수의 수식·순위·coverage 계약은 [S03-signal-evaluation.m
 
 CLI는 `--preserved-equity-root`와 `--repo-root`를 필수로 받는다. S01 검증은 어댑터를 열기 전, 파이프라인 실행 전, 평가가 끝난 뒤에 실행한다. 코드·환경 해시 검증 옵션을 생략하지 않는다. 성공한 S01 ledger ID가 adapter snapshot의 원천 ID와 같아야 하고, 신호·TargetTape·가격의 전체 snapshot ID도 같아야 한다. 실행 중 보존 descriptor나 검증 근거가 바뀌면 결과를 반환하지 않는다.
 
+검증할 저장소와 실제 실행 코드도 일치해야 한다. 매 S01 검증 전에 현재 프로세스가 이미 불러온
+`strategy_workbench`·`backtest_engine`의 모든 모듈 파일 출처(`__file__`·`__spec__.origin`)와
+패키지의 하위 import 경로(`__path__`·`submodule_search_locations`)를 `--repo-root`의
+`backend/src`에 묶는다. 다른 checkout을 가리키는 검증 인자나 `sys.path` 추가만으로 이미 불러온
+코드의 출처를 바꿀 수 없다. 서로 다른 checkout의 모듈 혼용도 실행 전에 거절한다. 이는 S01의
+파일 해시 규칙을 복제하지 않고, 그 규칙이 검증한 소스와 실제 신호·평가 실행 경로를 연결해
+연구 재현 근거를 보호하는 검사다.
+
+실행은 해당 소스 checkout의 editable 설치를 지원한다. 의존성을 설치한 가상환경은 그대로 사용할 수
+있으며, 한글·공백 경로와 같은 checkout을 가리키는 symlink는 실제 경로로 비교해 허용한다.
+`site-packages`에 별도 복사된 wheel 코드나 출처를 확인할 수 없는 모듈은 명시적으로 거절한다.
+이 검사는 import 출처와 디스크의 S01 검증을 연결하며, 이미 메모리에 올라온 Python 객체의 임의
+변경이나 import 후 디스크 변경에 대한 완전한 메모리 증명까지 제공하지 않는다.
+
 S01 검증 규칙을 복제하거나 완화하지 않는다. 나중에 코드를 바꿨다면 기존 사본의 원본 무결성만 맞는다는 이유로 그대로 연구를 실행할 수 없다. 그 사본에 기록된 코드·환경으로 실행하거나, 승인된 원본과 실제 사용할 코드를 기준으로 S01 사본을 새로 만들고 검증해야 한다.
 
 검증 프로세스는 명령 인자 배열을 사용하며 쉘 문자열을 만들지 않는다. 자식 `PYTHONIOENCODING`과 부모 프로세스 교환 encoding을 UTF-8로 지정했다. 한글·공백 경로는 현재 macOS 테스트 환경에서 실제 subprocess 왕복을 확인했으며 Windows 실행을 검증했다는 뜻은 아니다.
@@ -117,6 +131,12 @@ uv run --no-sync --project backend pytest \
 ```
 
 2026-10-16 위 묶음은 **64 passed, 0 skipped**다(runner 새 25 + S03 순수/연결 21 + architecture 18). 새 범위 ruff·pyright도 오류 0으로 확인했다. 위 묶음에 기존 DuckDB·S01 보존 연결·truthful pipeline 회귀를 더한 최종 검증도 **195 passed, 0 skipped**이며 의존 라이브러리 DeprecationWarning 1건이다.
+
+같은 날 실행 코드 바인딩 회귀를 추가한 runner 단독 검증은 **18 passed, 0 skipped**다.
+다른 임시 checkout의 evaluator가 `999.0`을 반환하도록 바꾸고 그 코드로 S01 보존·검증에 성공해도,
+기존 checkout을 import한 CLI는 종료 코드 2로 중단하고 성공 JSON을 출력하지 않음을 확인했다.
+검증 checkout을 `sys.path`에 추가해도 같은 결과이며, 정상 최상위 패키지 아래의 모듈 출처 혼용,
+하위 패키지 검색 경로 오염을 거절하고 한글·공백 symlink 저장소 경로는 정상 실행한다.
 
 ## 다음 결정
 

@@ -411,6 +411,7 @@ class MockEquityDataAdapter:
                     previous_close = close_price
         return BacktestDataset(
             data_snapshot_id=self._snapshot.snapshot_id,
+            sessions=tuple(sessions),
             bars=tuple(bars),
             history_bars=tuple(history_bars),
             memberships=tuple(

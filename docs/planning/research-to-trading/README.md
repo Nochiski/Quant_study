@@ -7,6 +7,9 @@
 코드 감사 기준은 `1e780ce7`이며, **1차 기반 `8c3c1803` 검증**과 이후 작업의 검증 시점을 구분한다.
 S04 계좌 경계 안내·macOS 공용 PLAN 집계·S03 보존 입력 연구 runner가 후속으로 구현됐다.
 S03 runner는 합성 원장의 호출·내보내기까지 검증했으며 실데이터 연구 완료를 뜻하지 않는다.
+2026-10-16에는 equity 30표 다운로드와 manifest·파일·해시 검증, adapter metadata 읽기를
+확인했다. S01 별도 보존본 생성과 실데이터 연구는 아직 실행하지 않았다. 입력 수신과 무결성
+확인을 IC·수익성·데이터 품질 전체 검증으로 확대하지 않는다.
 아래 테스트 수는 해당 검증 묶음의 실행 결과이며 서로 겹치는 회귀를 합산하지 않는다.
 S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·database 1,437 passed이며,
 아래에 1차와 구분해 기록한다. 이 로컬 검증을 전체 GitHub CI 통과로 표현하지 않는다.
@@ -27,8 +30,10 @@ S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·datab
 - **현재 구현:** 원장 current BuildRecord와 참조 파티션을 별도 root로 복사하고 코드·계약·환경 출처,
   해시·행 수, 정상 catalog를 보존한다. 공개 전 pending과 최종 검증을 거치고 실제 DuckDB adapter도
   pending root를 거절한다. 보존 CLI와 실제 adapter 재접속을 합성 원장으로 확인했다.
-- **증거·아직 못 확인:** 신규 **28 passed**, 영향 회귀 **172 passed**. 실제 원장 root를 확보하지 못해
-  실데이터 범위·복사 용량·품질·재실행 결과는 미검증이다. 계약 문서 원문 지문 `contract_sources_sha256`은 기존 워크벤치 필드 계약 ID와 다르다.
+- **증거·아직 못 확인:** 당시 신규 **28 passed**, 영향 회귀 **172 passed**. 당시에는 실제 원장
+  root를 확보하지 못했다. 현재는 위 다운로드·무결성·metadata 읽기까지만 확인했고 S01 별도
+  보존·재실행과 실데이터 품질·연구 결과는 미검증이다. 계약 문서 원문 지문
+  `contract_sources_sha256`은 기존 워크벤치 필드 계약 ID와 다르다.
   adapter의 pending 차단은 완성 후 파일 해시 재검증까지 수행하지 않는다. 정확한 검증 범위와
   실패·GC·업데이트 사례는 [S01 스펙](S01-snapshot.md),
   [보존 테스트](../../../database/tests/test_research_snapshot.py),
@@ -37,8 +42,8 @@ S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·datab
   의 `create`, `verify`, `open`. 기존 목적지를 덮어쓰지 않으며 검증한 `open` 결과로 기존
   `STRATEGY_WORKBENCH_EQUITY_ROOT`를 설정한다. 실행 전 `open --repo-root`로 입력·코드·계약을
   재검증하고 실패 시 중단한다. 완성 catalog가 절대경로를 사용하므로 root를 이동하지 않는다.
-- **다음 결정:** 실제 로컬 원장을 확보하면 공개·재접속·무결성을 확인하고 S02 한계를 적용한 첫
-  연구 입력으로 사용할지 결정한다. 원본 시점·품질이 부족하면 범위를 줄이거나 보류한다.
+- **다음 결정:** 확보한 원장에서 S01 별도 보존본을 만들고 공개·재접속·무결성을 확인한 뒤
+  S02 한계를 적용한 첫 연구 입력으로 사용할지 결정한다. 원본 시점·품질이 부족하면 범위를 줄이거나 보류한다.
 
 ## S02 — 비용·수량·기업행동 회계 검산
 
@@ -46,6 +51,11 @@ S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·datab
 - **현재 구현:** 합성 두 종목·다섯 세션에서 실제 선정 compiler → TargetTape → 실행 adapter →
   Python/Rust 커널을 손계산과 비교한다. 전량 목표와 부분체결, 분할, 종목 교체, 수수료·매도세,
   평가액·벤치마크 차이를 확인했다. production 회계 의미를 바꾸지 않았다.
+  후속 세션 계약은 필수 keyword-only `BacktestDataset.sessions`로 실제 공통 거래일을 전달한다.
+  모든 선택 종목의 bar가 없어도 빈 세션을 유지해 DAY 만료와 벤치마크 선택에 독립적인 실행
+  일정을 보장하며 역순·중복 달력과 달력 밖 측정 bar는 거절한다.
+  이 일정 변경은 `backtest-engine-v7`로 실행 지문을 구분하며, 양 코어 달력 회귀 **11 passed**와
+  관련 회귀 **124 passed**로 확인했다(서로 겹치는 검증이며 합산하지 않는다).
 - **증거·아직 못 확인:** 신규 **4 passed, 0 skipped**, 관련 회귀 **172 passed, 0 skipped**.
   [S02 스펙](S02-accounting.md)과 [검산 테스트](../../../backend/tests/integration/test_s02_accounting.py)에
   독립 기대값이 있다. 상장 종료 뒤 회수금 없이 마지막 평가가 남는 한계, 마지막 bar 이후 사건 제외,
@@ -65,12 +75,17 @@ S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·datab
   JSON 내보내기를 합성 원장으로 검증했다. 미래 라벨은 선정/목표 비중 입력에 넣지 않는다.
   유스케이스 자체 `SnapshotGuardPort`·`SignalPipelinePort`·`SignalLabelDataPort`를 구현하는
   adapter를 `bootstrap/signal_research`가 별도로 조립한다. 기존 평가·조회·봉인 계약을 복제하지 않는다.
+  snapshot guard는 지정 저장소의 S01 검증에 더해 현재 로드된 `strategy_workbench`·
+  `backtest_engine`의 module origin·package search path를 해당 `backend/src`에 묶는다.
+  소스 checkout/editable과 symlink resolve 일치는 지원하며 별도 wheel 위치는 unsupported로
+  차단한다. 메모리 변조 attestation은 범위 밖이다.
 - **증거·아직 못 확인:** runner 신규 **25 passed**, 기존 S03 21건+architecture 18건 포함
   **64 passed, 0 skipped**, DuckDB·S01·기존 pipeline 관련 회귀 **195 passed, 0 skipped**다.
   미보존·변조 root 차단, 쿼리 끝으로 자르지 않은 실제 `security_span`의 상폐·coverage_gap·data_gap
   구분, 중간 MASKED 조정 공백의 요청 전체 unsupported, 정지 기준가의 거래 가격 제외를 확인했다.
   한글·공백 root의 실제 UTF-8 subprocess 왕복도 확인했다. Windows 실측 증거는 아니다.
-  실원장·실성과·비용 후 포트폴리오 비교·완전 분석·기존 API/UI 노출은 **미완료**다.
+  실원장 수신·무결성 확인 이후 S01 별도 보존본 생성·실데이터 연구·실성과·비용 후 포트폴리오
+  비교·완전 분석·기존 API/UI 노출은 **미완료**다.
   가격 라벨은 배당·비용·실제 다음 시가 체결을 반영하지 않으며 봉인 guard를 유지한다.
 - **실행 진입점:** `python -m strategy_workbench.bootstrap.signal_research`에
   `--preserved-equity-root`·`--repo-root`·전략/실행 설정 JSON·팩터·기간 명세를 명시한다.
@@ -113,6 +128,8 @@ S03 runner·S04를 포함한 후속 전체 회귀는 backend 4,610 passed·datab
 - **현재 구현:** 별도 실행 domain/application과 전용 SQLite 원장, 오프라인 fake broker를 추가했다.
   READY 저장 → UNKNOWN 원자 claim 커밋 뒤 한 번만 전송하고 ACK 유실/재시작은 조회로 대사한다.
   실제 보유·미체결·예약현금, 부분체결·취소·거절·중복/역순 사실을 구분하며 중지와 취소를 분리한다.
+  fake의 각 증분 체결도 기존 도메인 `classify_event`로 저장 전에 검증해 지정가 위반이 누적
+  평균에 가려지지 않게 한다. 실패 시 주문·revision·계좌를 변경하지 않는다.
 - **증거·아직 못 확인:** 신규 동작과 아키텍처 검증 **43 passed**. 저장 실패 zero-send,
   UNKNOWN 커밋 직후 실제 프로세스 종료, ACK 유실과 수동 잔고 변경을 확인했다.
   [S05 스펙](S05-offline-execution.md)과 [장애 테스트](../../../backend/tests/test_offline_execution.py)가
@@ -223,3 +240,13 @@ uv run --locked python -m quant_study_dev.conflict_markers
 1차·후속 회귀를 합산하지 않는다.
 실데이터 수익률·IC를 산출하거나 실제 계좌를 연결하거나 봉인 구간을 개봉하지 않았다.
 Validation Lab PLAN의 MERGED 표시·PR 수·의존성은 이번 인계에서 바꾸지 않는다.
+
+**리뷰 수정 후 로컬 검증(2026-10-16):** 빈 거래일에도 DAY 만료를 유지하고, 연구 실행 코드의
+출처를 검증 저장소에 묶으며, fake의 지정가 위반 증분이 누적 평균에 숨지 않도록 보완했다.
+수정 후 backend 전체는 **4,642 passed, 1 skipped, 34 DeprecationWarning**(171.03초),
+database 전체는 **1,437 passed**(160.66초), root tools는 **52건 통과**했다. backend 전체
+`src tests examples scripts tools`와 root tools의 ruff·pyright는 오류 0이며, 충돌 표식·
+story harness(40 stories·48 e2e 태그)·필드 대응표 검사도 통과했다. frontend·Rust 코드는
+변경하지 않았고 Python/Rust parity는 backend 전체 검증에 포함된다. skip은 실공급자 live
+smoke의 opt-in 미설정에 따른 것으로 외부 연결 증거가 아니다. GitHub CI는 아직 진행 전이며,
+다음 결정은 S01 별도 보존본과 연구 사양을 준비한 뒤 첫 실데이터 연구를 시작할지 정하는 것이다.

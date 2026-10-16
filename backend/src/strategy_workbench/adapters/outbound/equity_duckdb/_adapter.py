@@ -1587,6 +1587,9 @@ class EquityDuckdbAdapter:
         warnings.extend(unfolded)
         return BacktestDataset(
             data_snapshot_id=self._snapshot_id,
+            sessions=self._sessions[
+                bisect_left(self._sessions, query.start) : bisect_right(self._sessions, query.end)
+            ],
             bars=tuple(bars),
             memberships=memberships,
             corporate_actions=tuple(actions),

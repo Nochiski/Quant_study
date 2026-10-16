@@ -183,10 +183,10 @@ def test_workbench_feed_places_each_impact_scale_on_its_own_bar() -> None:
         (sessions[1], "B"): 0.4,
     }
 
-    feed = _columnar_feed(rows, impact=impact)
+    feed = _columnar_feed(rows, impact=impact, session_calendar=sessions)
 
     assert [
         [(bar.instrument.symbol, bar.impact_scale) for bar in snapshot.bars]
         for snapshot in feed.snapshots()
     ] == [[("B", 0.2), ("A", 0.1)], [("B", 0.4), ("A", 0.3)]]
-    assert _columnar_feed(rows).columns().impact_scales is None
+    assert _columnar_feed(rows, session_calendar=sessions).columns().impact_scales is None

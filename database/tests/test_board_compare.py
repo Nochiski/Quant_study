@@ -514,6 +514,9 @@ INPUT_ERRORS: dict[str, tuple[Callable[[Path, Path], None], list[str]]] = {
     "builds_from_not_asof": (lambda ev, rs: _edit_json(
         ev / "factor_inputs" / "_runs" / f"{T_S}_evening.json", builds_from_date="20260924"),
         ["builds_from_date"]),
+    "wise_asof_not_t": (lambda ev, rs: _edit_json(
+        ev / "factor_inputs" / "_runs" / f"{T_S}_evening.json", wise_asof=DP),
+        ["wise_asof", "06:00"]),
     "calendar_missing": (lambda ev, rs: shutil.rmtree(rs / "calendar"), ["daily.calendar"]),
     "research_asof_not_t": (lambda ev, rs: _edit_json(
         rs / "factor_inputs" / "_runs" / f"{T_S}_morning.json", asof=DP), ["연구 판 asof"]),
@@ -786,7 +789,7 @@ def _fi3(tmp: Path, mutate: Mut, *, t: dt.date = T_DATE, dp: dt.date = DP_DATE,
          stage: dict[str, str] | None = None,
          events: dict[str, tuple[dt.date, ...]] | None = None,
          krx_base: dict[str, int] | None = None, no_pred: frozenset[str] = frozenset(),
-         replay: bool = False) -> bc.FiResult:
+         replay: bool = False, wise_cut: dt.date | None = None) -> bc.FiResult:
     """기준 판 → (장 마감 e, 연구 T r, 연구 D' d) 를 `mutate(e, r, d)` 로 고쳐 `compare_fi`. KRX T 기준가는
     기본으로 D' 종가(10,000 — 기업행위 없음), `krx_base` 가 덮는다."""
     base = _mini()
@@ -806,7 +809,7 @@ def _fi3(tmp: Path, mutate: Mut, *, t: dt.date = T_DATE, dp: dt.date = DP_DATE,
     ev = bc.Evidence({A: bc.STAGE_USABLE, B: bc.STAGE_USABLE} if stage is None else stage,
                      events or {}, frozenset({A, B}),     # C 는 우선주·후보 아님 — 수집 대상 밖
                      {A: 10_000, B: 10_000, C: 10_000, **(krx_base or {})}, no_pred)
-    return bc.compare_fi(*boards, t, dp, ev, replay=replay)
+    return bc.compare_fi(*boards, t, dp, ev, replay=replay, wise_cut=wise_cut)
 
 
 def _cats(res: bc.FiResult) -> dict[tuple[str, str], set[str]]:
@@ -1061,6 +1064,41 @@ def test_evening_info_after_dprime_is_never_covered(tmp_path, t: dt.date, dp: dt
     (f,) = res.tally.samples[bc.UNEXPLAINED]
     assert (f.table, f.ticker) == ("fi_consensus_annual", A) and "D' 자르기 위반" in f.note
     assert res.tally.count[bc.FY] == 0
+
+
+def _fin_row(day: dt.date, basis: str, ni: float) -> dict[str, object]:
+    return _r("fi_fin_summary", ticker=A, period="2025/12", period_type="annual", ni=ni,
+              fs_basis=basis, available_date=day)
+
+
+@pytest.mark.parametrize(("table", "e_day", "basis", "cut_note"), [
+    # WISE 행 — 장 마감 판 정보 시점은 wise_asof(T, N-53). T 뒤만 위반
+    ("fi_consensus_annual", T_DATE + dt.timedelta(days=1), "", f"WISE 정보 시점 {T}"),
+    ("fi_consensus_annual", T_DATE, "", None),
+    ("fi_fin_summary", T_DATE, "IFRS연결", None),
+    # 재무 표의 DART 행(WISE 값 없음 — fs_basis 'DART:')은 그대로 D'
+    ("fi_fin_summary", T_DATE, "DART:CFS", "> D'"),
+])
+def test_evening_info_cut_is_wise_asof_for_wise_rows(tmp_path, table: str, e_day: dt.date,
+                                                      basis: str, cut_note: str | None) -> None:
+    """N-53 — 장 마감 판 기록에 wise_asof(T)가 있으면 WISE 행의 시점 상한은 T 다(그날 06:00 수집분을
+    싣는다). 재무 표는 WISE·DART 를 한 행에 합치므로 `fs_basis` 가 'DART:' 인 행만 D' 로 본다. 상한 안이면
+    자르기 위반이 아니라 다음 규칙(3자 대조)으로 간다 — 여기서는 연구 판 D' 와 달라 3자 대조 증거 없음."""
+    def mutate(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        if table == "fi_fin_summary":
+            e[table].append(_fin_row(e_day, basis, 2.0))
+            r[table].append(_fin_row(DP_DATE, basis, 1.0))
+            d[table].append(_fin_row(DP_DATE, basis, 1.0))
+            return
+        for x in _rows(e, table, A):
+            x["fetched_date"] = e_day
+    res = _fi3(tmp_path, mutate, wise_cut=T_DATE)
+    notes = [f.note for f in res.tally.samples[bc.UNEXPLAINED] if f.table == table]
+    assert len(notes) == 1, res.tally.samples
+    if cut_note is None:
+        assert "자르기 위반" not in notes[0] and bc.NO_3WAY in notes[0], notes
+    else:
+        assert "자르기 위반" in notes[0] and cut_note in notes[0], notes
 
 
 @pytest.mark.parametrize(("t", "dp", "want_annual", "want_uni"), [

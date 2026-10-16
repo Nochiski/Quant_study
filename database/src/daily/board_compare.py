@@ -14,7 +14,9 @@
 판정(범주는 증거가 있을 때만 — T-36). fi 8표는 해시가 같으면 끝이고, 다르면 grain 으로 맞대어 다른 칸마다
 `CATEGORIES` 의 범주 하나 또는 미설명(`unexplained`)으로 나눈다. 새 범주는 만들지 않는다.
   · 이월·정보 시점·filing_late: 3자 대조 — E = P(장 마감 판이 D' 를 그대로 실었다)이고 R ≠ P(T 에 바뀌었다).
-    정보 표는 연구 판 수집·공개일이 장 마감 판보다 늦어야 하고, 장 마감 판에 D' 뒤 정보가 있으면 미설명.
+    정보 표는 연구 판 수집·공개일이 장 마감 판보다 늦어야 하고, 장 마감 판에 정보 시점 뒤 정보가 있으면
+    미설명이다. 정보 시점은 D' 이고 WISE 행만 장 마감 판 기록의 `wise_asof`(N-53 — 그날 06:00 수집이라 T,
+    키가 없는 옛 판은 D')다 — 재무 표는 `fs_basis` 가 'DART:' 인 행만 D'.
     연초 첫 거래일(D' 와 T 의 해가 다름)의 연도 창 차이만 3자 대조 없이 인정한다.
   · T 행: 종가 차이는 실운영 미설명(N-35 ①), `--replay`(T 행 = 21:05 원장)이고 T ≥ 애프터마켓 시행일
     (`AFTER_MARKET_START`)일 때만 종가 정의(그 전 날은 21:05 키움 종가 = 정규장 종가라 미설명). 거래량은
@@ -206,7 +208,7 @@ NOT_COMPARED: Mapping[str, tuple[str, ...]] = {"fi_universe": ("mktcap_basis",)}
 # 종가만 읽는다. price_source 는 T-30 어휘('postclose' 대 'krx')라 구조상 다르다. T 전 행은 대조한다
 T_ROW_NOT_COMPARED: Mapping[str, tuple[str, ...]] = {
     "fi_prices": ("open", "high", "low", "amount", "price_source")}
-# 정보 표의 수집·공개일 열 — 장 마감 판은 ≤ D'(asof)
+# 정보 표의 수집·공개일 열 — 장 마감 판은 ≤ 정보 시점(WISE 행 wise_asof · DART 행 D', `_Ctx.info_cut`)
 INFO_DATE_COL: Mapping[str, str] = {"fi_consensus": "fetched_date",
                                     "fi_consensus_annual": "fetched_date",
                                     "fi_fin_summary": "available_date"}
@@ -399,6 +401,16 @@ class _Ctx:
     max_r: dict[str, dict[str, object]] = field(default_factory=dict)
     member: dict[str, tuple[str, str]] = field(default_factory=dict)
     adj_tail: dict[tuple[str, str], bool] = field(default_factory=dict)
+    wise_cut: date | None = None            # 장 마감 판 WISE 정보 시점(N-53) — None 이면 D'(옛 판)
+
+    def info_cut(self, table: str, row: Mapping[str, object]) -> date:
+        """장 마감 판 정보 행의 시점 상한 — WISE 행은 `wise_cut`(그날 06:00 수집 = T), DART 행은 D'.
+        재무 표는 WISE·DART 를 한 행에 합치므로 `fs_basis` 가 'DART:' 인 행(WISE 값이 없는 행)만 D' 다."""
+        if self.wise_cut is None:
+            return self.dprime
+        if table == "fi_fin_summary" and str(row.get("fs_basis") or "").startswith("DART:"):
+            return self.dprime
+        return self.wise_cut
 
     @property
     def boundary(self) -> bool:
@@ -662,8 +674,10 @@ def _rule_info(table: str) -> Callable[[_Pair, _Ctx], list[_Verdict]]:
     def rule(p: _Pair, c: _Ctx) -> list[_Verdict]:
         tk = p.ticker
         got = p.e.get(col)
-        if p.in_e and isinstance(got, date) and got > c.dprime:
-            return [(UNEXPLAINED, p.diff, f"장 마감 판 {col} {got.isoformat()} > D' — D' 자르기 위반")]
+        cut = c.info_cut(table, p.e)
+        if p.in_e and isinstance(got, date) and got > cut:
+            what = "D'" if cut == c.dprime else f"WISE 정보 시점 {cut.isoformat()}"
+            return [(UNEXPLAINED, p.diff, f"장 마감 판 {col} {got.isoformat()} > {what} — D' 자르기 위반")]
         if c.boundary and (table == "fi_consensus_annual" or c.cov_differs(tk)):
             return [(FY, p.diff, "")]
         if not _info_evidence(table, p, c):
@@ -872,8 +886,9 @@ def _flow_stats(con: duckdb.DuckDBPyConnection, pe: str, pr: str,
 
 
 def compare_fi(e: FiBoard, r: FiBoard, d: FiBoard, t: date, dprime: date, ev: Evidence, *,
-               replay: bool = False) -> FiResult:
-    """fi 8표 대조 — 장 마감 판 e · 연구 판 T r · 연구 판 D' d. 스키마가 다르면 `CompareInputError`."""
+               replay: bool = False, wise_cut: date | None = None) -> FiResult:
+    """fi 8표 대조 — 장 마감 판 e · 연구 판 T r · 연구 판 D' d. 스키마가 다르면 `CompareInputError`.
+    `wise_cut` = 장 마감 판 WISE 정보 시점(판 기록 `wise_asof`, N-53). None 이면 D'(옛 판)."""
     con = _connect()
     try:
         paths = {n: (_part(e, n), _part(r, n), _part(d, n)) for n in FI_TABLES}
@@ -898,7 +913,7 @@ def compare_fi(e: FiBoard, r: FiBoard, d: FiBoard, t: date, dprime: date, ev: Ev
         ctx = _Ctx(t, dprime, replay, ev, by_ticker(pu[0]), by_ticker(pu[1]), by_ticker(pu[2]),
                    on_day(pp[0], "close", t), on_day(pp[1], "close", t),
                    on_day(pa[1], "adj_factor", t), on_day(pa[1], "adj_factor", dprime),
-                   on_day(pp[1], "close", dprime))
+                   on_day(pp[1], "close", dprime), wise_cut=wise_cut)
         ctx.member = _membership(ctx)
         for name, col in INFO_DATE_COL.items():
             for side, store in ((0, ctx.max_e), (1, ctx.max_r)):
@@ -1015,6 +1030,18 @@ def load_side(root: Path, basis: str, t: date) -> Side:
                                 f"{mrun.fi_build_id} ≠ factor_inputs 판 {bid} — 다른 fi 판으로 "
                                 "지은 점수다")
     return Side(label, basis, root, run, mrun)
+
+
+def _wise_cut(ev: Side, t: date) -> date | None:
+    """장 마감 판 WISE 정보 시점(판 기록 `wise_asof`, N-53) — 있으면 T 여야 한다. 키가 없는 옛 판(fi1.9.0
+    전)은 None(= D')."""
+    raw = ev.fi_run.get("wise_asof")
+    if raw is None:
+        return None
+    if raw != t.isoformat():
+        raise CompareInputError(f"장 마감 판 wise_asof={raw!r} ≠ T={t.isoformat()} — WISE 는 그날 "
+                                "06:00 수집분을 읽는다(N-53)")
+    return t
 
 
 def _dprime(ev: Side, rt: Side, t: date, calendar_dir: Path) -> date:
@@ -1382,7 +1409,7 @@ def compare(t: date, evening_root: Path, research_root: Path, *, calendar_dir: P
     evidence = Evidence(stage, read_new_events(rt, dprime, t), read_targets(rt, rd, dprime),
                         read_krx_base(rt, t), no_pred)
     fi = compare_fi(ev.fi, rt.fi, FiBoard(rt.fi_root, str(rd["build_id"])), t, dprime, evidence,
-                    replay=replay)
+                    replay=replay, wise_cut=_wise_cut(ev, t))
     if ev.fi_run.get("equity_builds") != rd.get("equity_builds"):
         fi.tally.add(Finding("boards", "", {}, "value", UNEXPLAINED, ("equity_builds",),
                              {"equity_builds": ev.fi_run.get("equity_builds")},

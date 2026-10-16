@@ -106,7 +106,8 @@ from . import gates, queries
 # (연간 행과 같은 '원천들의 max'). 값·엔진 입력은 그대로
 # 1.9.0(2026-10-16, N-53): WISE 정보 시점 `wise_asof` — 장 마감 판도 T(그날 06:00 수집분, 기준일 = 전 거래일).
 # WISE 4표(연간·매트릭스 컨센서스, 연간·분기 재무)의 fetched 컷 · 신선도 D*·수집 지연 · FG1 두 상한이 이것을
-# 본다. DART·universe·WICS·추정기관 수·기업행위는 asof(D') 그대로. 아침판은 wise_asof = asof = D 라 SQL 이 같다
+# 본다. DART·universe·WICS·추정기관 수·기업행위는 asof(D') 그대로(FG1 은 재무 표 DART 행의 D' 자르기를 따로 본다).
+# 아침판은 wise_asof = asof = D 라 SQL 이 같다
 RULES_VERSION = "fi1.9.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
@@ -458,8 +459,8 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     tmp_root.mkdir(parents=True)
     d_iso = d.isoformat()
     asof = d_iso if dprime is None else dprime.isoformat()
-    # WISE 정보 시점(N-53) — 아침판·장 마감 판 모두 판 날짜다. 장 마감 판이 고정한 D' 확정판은 T 아침 08:10 에
-    # 지어져 그날 06:00 WISE 수집분(기준일 = 전 거래일)을 stage 판에 싣고 있다
+    # WISE 정보 시점(N-53) — 아침판·장 마감 판 모두 판 날짜다. 장 마감 판이 고정한 D' 확정판은 평일 T 아침 08:10 에
+    # 지어져 그날 06:00 WISE 수집분을 stage 판에 싣고 있다(월요일·연휴 다음 날은 토요일·연휴 첫날 아침 수집분 — lag 1)
     wise_asof = d_iso
     con = duckdb.connect()
     try:

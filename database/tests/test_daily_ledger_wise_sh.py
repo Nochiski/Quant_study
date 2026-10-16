@@ -254,3 +254,15 @@ def test_other_step_crit_and_wise_warn_both_go_out(tmp_path: Path) -> None:
     assert r.rc == 2, r.out + r.log
     assert [n.split("|")[1] for n in r.by_level("crit")] == ["daily_ledger 실패: kis credit(rc=2)"]
     assert [n.split("|")[1] for n in r.by_level("warn")] == ["WISE 수집 일부 실패 1콜"]
+
+
+def test_wise_is_waited_after_kis_and_summary_keeps_other_steps(tmp_path: Path) -> None:
+    """리뷰 I1·I2 — WISE 는 KIS 뒤에서 기다려 경보가 DART 앞에서 나간다(DART 마감일에도 08:10 전에 사람에게
+    닿게). 알림 요약은 수집 단계(DART 등) 결과를 유지하고 WISE 는 결과 한 줄만 붙는다(진행·④ 줄은 갈래 로그에)."""
+    r = _run(tmp_path, "invalid_stock")
+    assert r.rc == 0, r.out + r.log
+    log = r.log
+    assert log.index(f"  WISE 스냅샷 {r.day} 실패 콜 1") < log.index("──── dart 시작")
+    body = r.by_level("info")[0].split("|", 2)[2]
+    assert "──── dart 종료 rc=0" in body and "──── kis credit 종료 rc=0" in body
+    assert f"WISE 스냅샷 {r.day} 실패 콜 1" in body and "④ 종료" not in body

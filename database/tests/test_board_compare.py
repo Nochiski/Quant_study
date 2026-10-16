@@ -1083,7 +1083,7 @@ def test_evening_info_cut_is_wise_asof_for_wise_rows(tmp_path, table: str, e_day
                                                       basis: str, cut_note: str | None) -> None:
     """N-53 — 장 마감 판 기록에 wise_asof(T)가 있으면 WISE 행의 시점 상한은 T 다(그날 06:00 수집분을
     싣는다). 재무 표는 WISE·DART 를 한 행에 합치므로 `fs_basis` 가 'DART:' 인 행만 D' 로 본다. 상한 안이면
-    자르기 위반이 아니라 다음 규칙(3자 대조)으로 간다 — 여기서는 연구 판 D' 와 달라 3자 대조 증거 없음."""
+    자르기 위반이 아니라 다음 규칙(열 갈래 · 3자 대조)으로 간다 — 여기서는 연구 판이 D' 그대로라 증거 없음."""
     def mutate(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
         if table == "fi_fin_summary":
             e[table].append(_fin_row(e_day, basis, 2.0))
@@ -1095,10 +1095,55 @@ def test_evening_info_cut_is_wise_asof_for_wise_rows(tmp_path, table: str, e_day
     res = _fi3(tmp_path, mutate, wise_cut=T_DATE)
     notes = [f.note for f in res.tally.samples[bc.UNEXPLAINED] if f.table == table]
     assert len(notes) == 1, res.tally.samples
-    if cut_note is None:
-        assert "자르기 위반" not in notes[0] and bc.NO_3WAY in notes[0], notes
+    if cut_note is None:      # 상한 안 — 다음 규칙(열 갈래 · 3자 대조)이 연구 판 D' 와 다른 이 모양을 미설명으로 둔다
+        assert "자르기 위반" not in notes[0], notes
     else:
         assert "자르기 위반" in notes[0] and cut_note in notes[0], notes
+
+
+SAT = DP_DATE + dt.timedelta(days=1)      # 장 마감 판(월 T)이 고정한 금요일 확정판은 토요일 08:10 빌드 — 토요일 수집분
+
+
+def _cons(fetched: dt.date, n: int, op: float = 1.0) -> dict[str, object]:
+    """fi_consensus cur 행 — 기준일(obs_date)은 금요일(DP)."""
+    return _r("fi_consensus", ticker=A, target_period="2026/12", horizon="cur", op=op,
+              n_analysts=n, obs_date=DP_DATE, fetched_date=fetched)
+
+
+@pytest.mark.parametrize(("e_row", "r_row", "d_row", "want"), [
+    # 평일 모양 — 두 판 다 T 스냅샷, 추정기관 수만 다르다(장 마감 판은 coverage_daily 를 D' 로 자른다): E = P · R ≠ P
+    (_cons(T_DATE, 5), _cons(T_DATE, 6), _cons(DP_DATE, 5), bc.INFO),
+    # 월요일 모양 — 장 마감 판은 토요일 수집분, 연구 판 T 는 월요일 수집분. 기준일·값이 같고 수집일만 다르다
+    (_cons(SAT, 5), _cons(T_DATE, 5), _cons(DP_DATE, 5), bc.INFO),
+    # WISE 값이 다르고 장 마감 판 ≠ 연구 판 D' — 설명할 증거가 없다
+    (_cons(T_DATE, 5, op=1.0), _cons(T_DATE, 5, op=2.0), _cons(DP_DATE, 5, op=3.0), bc.UNEXPLAINED),
+    # 수집일 역전(장 마감 판이 더 늦다) — 설명할 증거가 없다
+    (_cons(T_DATE, 5), _cons(SAT, 5), _cons(DP_DATE, 5), bc.UNEXPLAINED),
+], ids=["n_analysts_dprime", "monday_refetch", "wise_value_differs", "fetch_reversed"])
+def test_evening_wise_rows_are_judged_by_column_group(tmp_path, e_row, r_row, d_row,
+                                                      want: str) -> None:
+    """N-53 리뷰 C2 — 장 마감 판의 WISE 행은 T 스냅샷이라 연구 판 D' 와 늘 달라 행 단위 3자 대조(E = P)가 서지
+    않는다. 열 갈래로 본다: 수집·공개일은 장 마감 판 < 연구 판 ≤ T 면 정보 시점, D' 로 자르는 열(추정기관 수)은
+    열 단위 3자 대조. 옛 코드는 평일·월요일 모양 둘 다 미설명이었다(월요일은 커버 종목 전부)."""
+    def mutate(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        e["fi_consensus"].append(e_row)
+        r["fi_consensus"].append(r_row)
+        d["fi_consensus"].append(d_row)
+    res = _fi3(tmp_path, mutate, wise_cut=T_DATE)
+    got = {cat for cat, fs in res.tally.samples.items() for f in fs if f.table == "fi_consensus"}
+    assert got == {want}, res.tally.samples
+
+
+def test_evening_monday_annual_refetch_is_info(tmp_path) -> None:
+    """월요일 — 연간 컨센서스도 토요일 수집분(장 마감 판) 대 월요일 수집분(연구 판 T), 값은 같다 → 정보 시점."""
+    def mutate(e: dict[str, Any], r: dict[str, Any], d: dict[str, Any]) -> None:
+        for x in _rows(e, "fi_consensus_annual", A):
+            x["fetched_date"] = SAT
+        for x in _rows(r, "fi_consensus_annual", A):
+            x["fetched_date"] = T_DATE
+    res = _fi3(tmp_path, mutate, wise_cut=T_DATE)
+    found = [f for fs in res.tally.samples.values() for f in fs if f.table == "fi_consensus_annual"]
+    assert found and all(f.category == bc.INFO and f.note == bc.WISE_REFETCH for f in found), found
 
 
 @pytest.mark.parametrize(("t", "dp", "want_annual", "want_uni"), [

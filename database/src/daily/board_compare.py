@@ -212,6 +212,20 @@ T_ROW_NOT_COMPARED: Mapping[str, tuple[str, ...]] = {
 INFO_DATE_COL: Mapping[str, str] = {"fi_consensus": "fetched_date",
                                     "fi_consensus_annual": "fetched_date",
                                     "fi_fin_summary": "available_date"}
+# N-53 — 장 마감 판이 WISE 를 그날 06:00 수집분(T)까지 읽은 판(판 기록 wise_asof)의 WISE 정보 표 열 갈래.
+# 수집·공개일 열은 장 마감 판이 고정한 확정판의 수집분이라(주말·연휴 다음 날은 토요일·연휴 첫날 수집) 연구 판 T
+# 의 수집일보다 이를 수 있다. D' 열은 WISE 가 아닌 원천이라 D' 로 자른다(추정기관 수 · 재무 표의 DART 유래 열 —
+# `factor_inputs/queries.py` fin_summary · `coverage_daily`)
+WISE_DATE_COLS: Mapping[str, frozenset[str]] = {
+    "fi_consensus": frozenset({"fetched_date", "obs_date"}),
+    "fi_consensus_annual": frozenset({"fetched_date"}),
+    "fi_fin_summary": frozenset({"available_date"})}
+WISE_DPRIME_COLS: Mapping[str, frozenset[str]] = {
+    "fi_consensus": frozenset({"n_analysts"}),
+    "fi_consensus_annual": frozenset(),
+    "fi_fin_summary": frozenset({"roe", "roa", "debt_ratio", "fcf", "capex", "total_assets",
+                                 "period_months", "dps", "capex_basis"})}
+WISE_REFETCH = "같은 값 · 다른 수집일(장 마감 판은 고정한 확정판의 WISE 수집분 — N-53)"
 # 수정주가 미해결 사건 표식(adj_jump_ok 는 H1-4 · fi1.6.0)과 계수
 ADJ_FLAG_COLS = frozenset({"adj_ok", "adj_jump_ok"})
 ADJ_EVENT_COLS = ADJ_FLAG_COLS | {"adj_factor"}
@@ -680,10 +694,40 @@ def _rule_info(table: str) -> Callable[[_Pair, _Ctx], list[_Verdict]]:
             return [(UNEXPLAINED, p.diff, f"장 마감 판 {col} {got.isoformat()} > {what} — D' 자르기 위반")]
         if c.boundary and (table == "fi_consensus_annual" or c.cov_differs(tk)):
             return [(FY, p.diff, "")]
+        split = _wise_split(table, p, c)
+        if split is not None:
+            return split
         if not _info_evidence(table, p, c):
             return [(UNEXPLAINED, p.diff, f"{NO_3WAY} 또는 연구 판 {col} 가 늦지 않다")]
         return [(INFO, p.diff, "")]
     return rule
+
+
+def _wise_split(table: str, p: _Pair, c: _Ctx) -> list[_Verdict] | None:
+    """N-53 장 마감 판(wise_cut 있음)의 WISE 정보 표 — 두 판에 다 있는 행을 열 갈래로 판정한다. 장 마감 판의
+    WISE 행은 T 스냅샷이라 연구 판 D' 와 늘 달라 행 단위 3자 대조(E = P)가 서지 않는다.
+      · 수집·공개일 열: 장 마감 판 < 연구 판 ≤ T 면 정보 시점(같은 기준일을 뒤에 다시 받았다 — 월요일·연휴 다음 날)
+      · D' 열(추정기관 수 · 재무 표 DART 유래 열): 열 단위 3자 대조(E = P, R ≠ P)
+    WISE 값 열이 다르거나(그날 수집이 빠진 종목은 장 마감 판 = 연구 판 D' 라 종전 3자 대조가 맡는다) 재무 표의
+    DART 행(fs_basis 'DART:' — 행 전체가 D')이면 None — 종전 규칙으로 간다."""
+    if c.wise_cut is None or not (p.in_e and p.in_r) or table not in WISE_DATE_COLS:
+        return None
+    if table == "fi_fin_summary" and str(p.e.get("fs_basis") or "").startswith("DART:"):
+        return None
+    dates, dprime = WISE_DATE_COLS[table], WISE_DPRIME_COLS[table]
+    if any(col not in dates and col not in dprime for col in p.diff):
+        return None
+    items: list[tuple[str, str, str]] = []
+    for col in p.diff:
+        if col in dprime:
+            ok = p.in_d and _same(p.e.get(col), p.d.get(col)) and not _same(p.r.get(col), p.d.get(col))
+            items.append((col, INFO, "") if ok else (col, UNEXPLAINED, NO_3WAY))
+            continue
+        e_v, r_v = p.e.get(col), p.r.get(col)
+        ok = isinstance(e_v, date) and isinstance(r_v, date) and e_v < r_v <= c.t
+        items.append((col, INFO, WISE_REFETCH) if ok else
+                     (col, UNEXPLAINED, f"장 마감 판 {col} {e_v} · 연구 판 {r_v} — 연구 판이 늦지 않다"))
+    return _group(items)
 
 
 def _after(a: object, b: date) -> bool:

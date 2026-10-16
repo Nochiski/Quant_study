@@ -282,6 +282,9 @@ def test_evening_baseline_passes_every_gate(con_evening) -> None:
     (f"DELETE FROM g_fi_prices WHERE date = DATE '{T}'", "FG1", "eligible_without_price_on_d"),
     (f"UPDATE g_fi_fin_summary SET available_date = DATE '{T_NEXT}'",
      "FG1", "fi_fin_summary.available_after_d"),
+    # DART 행은 WISE 시점(T) 안이어도 D' 뒤면 위반(N-53 — 리뷰 M2)
+    (f"UPDATE g_fi_fin_summary SET available_date = DATE '{T}', fs_basis = 'DART:CFS'",
+     "FG1", "fi_fin_summary.dart_available_after_asof"),
     ("INSERT INTO g_fi_consensus_annual (ticker, period, data_type, fetched_date) VALUES "
      f"('000001', '2026/12', 'E', DATE '{T_NEXT}')",
      "FG1", "fi_consensus_annual.outside_window_or_vocab"),

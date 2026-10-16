@@ -24,9 +24,9 @@ stage T 행)·`_t_prices`(T 가격 행)·`_t_adj_src`(T 행을 넣은 수정주�
 WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor`) — 는 fetched/available ≤ asof 로 자른다.
 그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
 WISE(컨센서스·재무 — `stg_consensus_annual`·`stg_consensus_matrix`·`stg_fin_wise`·`stg_fin_wise_q`)만
-`Params.wise_asof` 로 자른다(N-53): 아침판 D, 장 마감 판도 T 다. WISE 는 그날 06:00 에 받고(기준일 =
-전 거래일 — 하루 중 언제 받아도 같다) 장 마감 판이 고정한 D' 확정판(T 아침 08:10 빌드)의 stage 판에
-그 수집분이 실려 있다. compat `--consensus-asof`(기본 = 판 날짜)와 같은 시점이다.
+`Params.wise_asof` 로 자른다(N-53): 아침판 D, 장 마감 판도 T 다. WISE 는 그날 06:00 에 받고 장 마감 판이
+고정한 D' 확정판의 stage 판에 그 수집분이 실려 있다(평일은 T 아침 08:10 빌드 — 월요일·연휴 다음 날은 확정판이
+토요일·연휴 첫날 아침에 지어져 그 아침 수집분이다). compat `--consensus-asof`(기본 = 판 날짜)와 같은 시점이다.
 날짜 축이 없는 마스터(`security` 이름·상장일, `corp` 업종 코드)는 고정 판 그대로다. 세션 창(가격
 550 달력일·수급·신용 60 세션)·당해 12월기 `fy`·연간 컨센서스 연도 창은 T 기준이다.
 """
@@ -1131,7 +1131,8 @@ GAPS: tuple[dict[str, str], ...] = (
                "T 종가가 없는 종목은 market_cap NULL"},
     {"table": "fi_universe", "column": "*",
      "reason": "장 마감 판은 universe_daily D' 행 이월(상태 변화는 다음 날 아침 확정판, "
-               "T 신규 상장 누락) · WISE·DART·universe_daily·WICS 는 D' 까지(asof), "
+               "T 신규 상장 누락) · DART·universe_daily·WICS·추정기관 수는 D' 까지(asof) · WISE 는 "
+               "T 까지(wise_asof — 그날 06:00 수집, N-53), "
                "security·corp 은 고정 판 마스터 그대로"},
     {"table": "fi_universe", "column": "filing_late",
      "reason": "가장 최근 제출한 정기보고서만 판정 — 기한이 지났는데 아직 안 낸 보고서(미제출)는 "

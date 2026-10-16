@@ -199,6 +199,11 @@ def fg1_rows(ctx: GateContext) -> GateResult:
              f"GROUP BY ticker HAVING count(*) > {FIN_QUARTERS})")
     viol["fi_fin_summary.available_after_d"] = _count(
         con, f"SELECT count(*) FROM {fin} WHERE available_date > DATE '{ctx.wise_asof}'")
+    # 재무 표의 DART 행(WISE 값이 없는 행 — fs_basis 'DART:')은 asof(장 마감 판 D')까지다. 위 상한이 wise_asof(T)로
+    # 넓어져(N-53) 장 마감 판의 DART D' 자르기 회귀를 따로 잡는다
+    viol["fi_fin_summary.dart_available_after_asof"] = _count(
+        con, f"SELECT count(*) FROM {fin} WHERE fs_basis LIKE 'DART:%' "
+             f"AND available_date > DATE '{ctx.asof}'")
     viol["fi_consensus.horizon_outside_vocab"] = _count(
         con, f"SELECT count(*) FROM {v('fi_consensus')} "
              "WHERE horizon NOT IN ('cur', '1w', '1m', '3m') OR horizon IS NULL")

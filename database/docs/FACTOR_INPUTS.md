@@ -78,8 +78,9 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
   를 fetched/available ≤ D' 로 자른다. 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영과 같다. 날짜 축이
   없는 마스터(`security` 이름·상장일, `corp` 업종 코드·지주사 판정)는 고정 판 그대로다.
 - WISE 정보 시점 wise_asof = T(N-53, fi1.9.0): WISE(컨센서스 연간·매트릭스, 연간·분기 재무) 4표만
-  fetched ≤ T 로 자른다. WISE 는 그날 06:00 체인이 받고(기준일 = 전 거래일 — 하루 중 언제 받아도 같다)
-  장 마감 판이 고정한 D' 확정판(T 아침 08:10 빌드)의 stage 판에 그 수집분이 실려 있다. compat
+  fetched ≤ T 로 자른다. WISE 는 그날 06:00 체인이 받고 장 마감 판이 고정한 D' 확정판의 stage 판에 그
+  수집분이 실려 있다(평일은 T 아침 08:10 빌드 — 월요일·연휴 다음 날은 토요일·연휴 첫날 아침 빌드라 그 아침
+  수집분이고 수집 지연은 정상이 lag 1). compat
   `--consensus-asof`(기본 = 판 날짜 T)와 같은 시점이다. 추정기관 수는 그 종목의 마지막 신선일 값을
   읽되 표(`coverage_daily`)를 D' 로 자르므로, 마지막 신선일이 T 인 종목은 D' 이하 최신 값이다.
 - 세션 축은 T 다: 창의 끝 · 신용 `available_date ≤ T`(T 아침 실입수분 포함) · 당해 12월기 `fy` 와
@@ -88,7 +89,8 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
   접수일 ≤ D' < T 라 false 다. 아침판 D' 에서는 기한 뒤 세션이 달력에 없어 NULL 이다(다음 날 연구 판
   T 와 같은 판정 — 두 판 대조의 등록 범주).
 - WISE 수집 지연(N-12)은 (D\*, T] 의 거래일 수다 — 예상 수집일이 wise_asof = T(그날 06:00 수집)다.
-  그날 수집이 빠지면 lag 1(허용 — 옛 장 마감 판과 같은 시점), 이틀 빠지면 FAIL.
+  그날 수집이 빠지면 lag 1(허용 — 옛 장 마감 판과 같은 시점), 이틀 빠지면 FAIL. 월요일·연휴 다음 날은 고정 판이
+  토요일·연휴 첫날 수집분이라 정상이 lag 1 이다.
 - 산출은 `_runs/<T>_evening.json` · `latest_evening.json`, 판 id 접두 `e_`.
 
 ### 2-2. 장 마감 판 T 행 · 당일 기업행위 · 후보 커버리지(컷오버 PR-5 · fi1.7.0)

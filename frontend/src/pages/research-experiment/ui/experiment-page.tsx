@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   backtestErrorSentence,
   requestRejectionMessage,
+  runStatusLabel,
 } from "../../../entities/backtest";
 import {
   EXPERIMENT_POLL_MS,
@@ -25,6 +26,7 @@ import { Link, useParams } from "../../../shared/lib/router";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 import { AuditTrail } from "./audit-trail";
+import "./experiment-page.css";
 
 const valuesText = (values: Record<string, unknown>) =>
   Object.entries(values)
@@ -60,14 +62,36 @@ const WalkForward = ({
     ...experimentWalkForwardQuery(experimentId),
     refetchInterval,
   });
-  if (report.data === undefined) return null;
+  if (report.isPending) return <p role="status">{t("page.loading")}</p>;
+  if (report.isError)
+    return (
+      <section
+        className="experiment-section"
+        aria-label={t("experiments.walkForward.title")}
+      >
+        <FailureNotice
+          message={t("experiments.walkForward.loadFailed")}
+          reason={failureReason(report.error)}
+        />
+        <Button
+          size="small"
+          tone="secondary"
+          onClick={() => void report.refetch()}
+        >
+          {t("experiments.walkForward.reload")}
+        </Button>
+      </section>
+    );
   const { data } = report;
   return (
-    <section aria-labelledby={`${experimentId}-walk-forward`}>
+    <section
+      className="experiment-section"
+      aria-labelledby={`${experimentId}-walk-forward`}
+    >
       <h2 id={`${experimentId}-walk-forward`}>
         {t("experiments.walkForward.title")}
       </h2>
-      <p>
+      <p className="experiment-interpretation">
         {data.interpretation ??
           t("experiments.walkForward.interpretationUnavailable")}
       </p>
@@ -82,7 +106,12 @@ const WalkForward = ({
             })
           : walkForwardGapLabel(data.gap)}
       </p>
-      <div className="data-list-page__scroll">
+      <div
+        className="data-list-page__scroll experiment-table-scroll"
+        role="region"
+        tabIndex={0}
+        aria-label={t("experiments.walkForward.windows")}
+      >
         <table className="data-list-page__table">
           <caption className="sr-only">
             {t("experiments.walkForward.title")}
@@ -124,7 +153,7 @@ const WalkForward = ({
                         params={{ runId: pick.run_id }}
                       >
                         <code>{pick.run_id.slice(0, 12)}</code> ·{" "}
-                        {run_status ?? "—"}
+                        {run_status == null ? "—" : runStatusLabel(run_status)}
                       </Link>
                     )}
                     {gap === null || gap === undefined ? null : (
@@ -184,7 +213,10 @@ export const ExperimentPage = () => {
     );
   const { record, trial_counts: counts } = experiment.data;
   return (
-    <section className="page data-list-page" aria-labelledby="experiment-title">
+    <section
+      className="page data-list-page experiment-page"
+      aria-labelledby="experiment-title"
+    >
       <header className="data-list-page__header">
         <div>
           <h1 id="experiment-title">
@@ -228,69 +260,82 @@ export const ExperimentPage = () => {
           </Link>
         </span>
       </header>
-      <div className="data-list-page__panel">
-        {retry.isError ? (
-          <FailureNotice
-            title={t("experiments.detail.retryFailed")}
-            message={requestRejectionMessage(
-              retry.error,
-              "experiments.controlFailed",
-            )}
-            reason={failureReason(retry.error)}
-          />
-        ) : null}
-        <div className="data-list-page__scroll">
-          <table className="data-list-page__table">
-            <caption className="sr-only">
-              {t("experiments.detail.trials")}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">{t("experiments.detail.trial")}</th>
-                <th scope="col">{t("experiments.new.parameter")}</th>
-                <th scope="col">{t("experiments.new.train")}</th>
-                <th scope="col">{t("experiments.status")}</th>
-                <th scope="col">{t("experiments.detail.run")}</th>
-                <th scope="col">{t("history.actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trials.data.map((state) => (
-                <tr key={state.trial.index}>
-                  <td>#{state.trial.index + 1}</td>
-                  <td>{valuesText(state.trial.parameter_values)}</td>
-                  <td>
-                    {/* 창이 없는 trial(용량 확인, V4-04)은 기반 기간 전체를 돈다. */}
-                    {state.trial.window === null ||
-                    state.trial.window === undefined
-                      ? "—"
-                      : `${state.trial.window.train_start} ~ ${state.trial.window.train_end}`}
-                  </td>
-                  <td>
-                    <Badge tone={trialStatusTone(state.status)}>
-                      {trialStatusLabel(state.status)}
-                    </Badge>
-                  </td>
-                  <td>
-                    <RunCell state={state} />
-                  </td>
-                  <td>
-                    {state.retryable ? (
-                      <Button
-                        size="small"
-                        tone="ghost"
-                        disabled={retry.isPending}
-                        onClick={() => retry.mutate(state.trial.index)}
-                      >
-                        {t("experiments.detail.retry")}
-                      </Button>
-                    ) : null}
-                  </td>
+      <div className="experiment-page__sections">
+        <section className="data-list-page__panel">
+          <h2
+            id="experiment-trials-title"
+            className="experiment-section__title"
+          >
+            {t("experiments.detail.trials")}
+          </h2>
+          {retry.isError ? (
+            <FailureNotice
+              title={t("experiments.detail.retryFailed")}
+              message={requestRejectionMessage(
+                retry.error,
+                "experiments.controlFailed",
+              )}
+              reason={failureReason(retry.error)}
+            />
+          ) : null}
+          <div
+            className="data-list-page__scroll experiment-table-scroll"
+            role="region"
+            tabIndex={0}
+            aria-label={t("experiments.detail.trials")}
+          >
+            <table className="data-list-page__table">
+              <caption className="sr-only">
+                {t("experiments.detail.trials")}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">{t("experiments.detail.trial")}</th>
+                  <th scope="col">{t("experiments.new.parameter")}</th>
+                  <th scope="col">{t("experiments.new.train")}</th>
+                  <th scope="col">{t("experiments.status")}</th>
+                  <th scope="col">{t("experiments.detail.run")}</th>
+                  <th scope="col">{t("history.actions")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {trials.data.map((state) => (
+                  <tr key={state.trial.index}>
+                    <td>#{state.trial.index + 1}</td>
+                    <td>{valuesText(state.trial.parameter_values)}</td>
+                    <td>
+                      {/* 창이 없는 trial(용량 확인, V4-04)은 기반 기간 전체를 돈다. */}
+                      {state.trial.window === null ||
+                      state.trial.window === undefined
+                        ? "—"
+                        : `${state.trial.window.train_start} ~ ${state.trial.window.train_end}`}
+                    </td>
+                    <td>
+                      <Badge tone={trialStatusTone(state.status)}>
+                        {trialStatusLabel(state.status)}
+                      </Badge>
+                    </td>
+                    <td>
+                      <RunCell state={state} />
+                    </td>
+                    <td>
+                      {state.retryable ? (
+                        <Button
+                          size="small"
+                          tone="ghost"
+                          disabled={retry.isPending}
+                          onClick={() => retry.mutate(state.trial.index)}
+                        >
+                          {t("experiments.detail.retry")}
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
         {record.design.measured ? (
           <WalkForward
             experimentId={experimentId}
@@ -298,10 +343,12 @@ export const ExperimentPage = () => {
             refetchInterval={refetchInterval}
           />
         ) : null}
-        <AuditTrail
-          experimentId={experimentId}
-          refetchInterval={refetchInterval}
-        />
+        <section className="data-list-page__panel experiment-audit">
+          <AuditTrail
+            experimentId={experimentId}
+            refetchInterval={refetchInterval}
+          />
+        </section>
       </div>
     </section>
   );

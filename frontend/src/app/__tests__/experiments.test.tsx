@@ -299,6 +299,71 @@ const usePreview = (rejected = false) =>
   );
 
 describe("experiments", () => {
+  it("감사 기록 조회 실패를 알리고 재시도 후 원본 사건 순서와 키보드 탐색을 복구한다", async () => {
+    let available = false;
+    server.use(
+      http.get(`${API}/api/v1/experiments/:experimentId/trials`, () => HttpResponse.json([])),
+      http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () => HttpResponse.json({
+        windows: [], curve: [], out_of_sample_sharpe: null, retention: null, gap: "no_cell",
+      })),
+      http.get(`${API}/api/v1/experiments/:experimentId/audit`, () =>
+        available
+          ? HttpResponse.json([
+              { occurred_at: "2026-09-30T00:00:00Z", kind: "created" },
+              { occurred_at: "2026-09-30T00:01:00Z", kind: "run_finished", trial_index: 1,
+                run_id: "run-audit-recovered", run_status: "failed", code: "backtest.run.internal" },
+            ])
+          : new HttpResponse(null, { status: 503 }),
+      ),
+    );
+    mount("/research/experiments/e-run");
+    expect(await screen.findByRole("alert", { name: "감사 기록" })).toHaveTextContent("감사 기록을 불러오지 못했습니다");
+    expect(screen.queryByRole("table", { name: "감사 기록" })).not.toBeInTheDocument();
+    available = true;
+    await userEvent.setup().click(screen.getByRole("button", { name: "감사 기록 다시 불러오기" }));
+    const region = await screen.findByRole("region", { name: "감사 기록" });
+    region.focus();
+    expect(region).toHaveFocus();
+    const rows = within(region).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("실험 생성");
+    expect(rows[1]).toHaveTextContent("실행 끝trial #2실패 · run-audit-recovered · backtest.run.internal");
+    expect(screen.queryByRole("alert", { name: "감사 기록" })).not.toBeInTheDocument();
+  });
+
+  it("워크포워드 조회 실패를 보이고 다시 불러오면 서버 해석과 결과를 복구한다", async () => {
+    let available = false;
+    server.use(
+      http.get(`${API}/api/v1/experiments/:experimentId`, () =>
+        HttpResponse.json(experiment("e-run", "completed")),
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId/trials`, () =>
+        HttpResponse.json([]),
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
+        available
+          ? HttpResponse.json({
+              windows: [], curve: [], out_of_sample_sharpe: null,
+              retention: null, gap: null, interpretation: "서버가 제공한 평가 한계",
+              evaluation_basis: "window_restart_returns",
+            })
+          : new HttpResponse(null, { status: 503 }),
+      ),
+    );
+    mount("/research/experiments/e-run");
+    expect(await screen.findByRole("alert")).toHaveTextContent("워크포워드 결과를 불러오지 못했습니다");
+    expect(screen.queryByText(/표본 밖 샤프/u)).not.toBeInTheDocument();
+    available = true;
+    await userEvent.setup().click(screen.getByRole("button", { name: "다시 불러오기" }));
+    expect(await screen.findByText("서버가 제공한 평가 한계")).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText(/표본 밖 샤프.*—.*유지율 —/u)).toBeVisible();
+    const windows = screen.getByRole("region", { name: "워크포워드 검증 창" });
+    windows.focus();
+    expect(windows).toHaveFocus();
+    expect(within(windows).getByRole("table", { name: "워크포워드 결과" })).toBeVisible();
+  });
+
   it.each([
     [
       "창마다 재시작하며 현금·보유를 이월하지 않는 backend 안내",

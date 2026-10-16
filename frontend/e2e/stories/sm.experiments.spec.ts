@@ -236,6 +236,13 @@ test(
     await expect(
       page.getByRole("status").filter({ hasText: `실험 ${second} 완료` }),
     ).toHaveCount(0);
+    // 완료된 실험의 보조 조회만 실패시켜, 결과 없음과 조회 실패를 구분하고 원본 조회로 복구한다.
+    const walkForwardPath = `**/api/v1/experiments/${first}/walk-forward`;
+    const auditPath = `**/api/v1/experiments/${first}/audit`;
+    for (const path of [walkForwardPath, auditPath])
+      await page.route(path, (route) =>
+        route.fulfill({ status: 503, json: { detail: "temporary failure" } }),
+      );
     await notice.getByRole("link", { name: "후보 보기" }).click();
     await expect(
       page.getByRole("heading", { name: `실험 ${first}` }),
@@ -243,6 +250,16 @@ test(
     const trials = page.getByRole("table", { name: "trial 목록" });
     await expect(trials.getByRole("row")).toHaveCount(3);
     await expect(trials.getByText("완료")).toHaveCount(2);
+    await expect(page.getByRole("alert").filter({
+      hasText: "워크포워드 결과를 불러오지 못했습니다.",
+    })).toBeVisible();
+    await expect(page.getByRole("alert").filter({
+      hasText: "감사 기록을 불러오지 못했습니다.",
+    })).toBeVisible();
+    await page.unroute(walkForwardPath);
+    await page.getByRole("button", { name: "다시 불러오기", exact: true }).click();
+    await page.unroute(auditPath);
+    await page.getByRole("button", { name: "감사 기록 다시 불러오기", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "워크포워드 결과" }),
     ).toBeVisible();
@@ -254,6 +271,25 @@ test(
         /현금·보유 수량을 이월하지.*실제 연속 계좌의 손익이 아닙니다/u,
       ),
     ).toBeVisible();
+    // 좁은 화면에서도 검증 창 표에 초점을 두고 방향키로 마지막 열까지 읽을 수 있다.
+    const originalViewport = page.viewportSize();
+    await page.setViewportSize({ width: 360, height: 800 });
+    const windows = page.getByRole("region", { name: "워크포워드 검증 창" });
+    await windows.focus();
+    await windows.press("ArrowRight");
+    await expect
+      .poll(() => windows.evaluate((element) => element.scrollLeft))
+      .toBeGreaterThan(0);
+    const auditRegion = page.getByRole("region", { name: "감사 기록", exact: true });
+    await auditRegion.focus();
+    await auditRegion.press("ArrowRight");
+    await expect
+      .poll(() => auditRegion.evaluate((element) => element.scrollLeft))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(360);
+    if (originalViewport) await page.setViewportSize(originalViewport);
     // 감사 기록: 생성부터 실행 시작·끝까지 시각 순으로 남는다.
     const audit = page.getByRole("table", { name: "감사 기록" });
     await expect(audit.getByText("실험 생성")).toBeVisible();

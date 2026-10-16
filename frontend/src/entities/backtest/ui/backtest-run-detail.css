@@ -76,10 +76,10 @@
 
 .run-detail .metric-highlights strong {
   align-self: end;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: var(--text-size-title);
-  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 지표의 쉬운 이름·뜻(결과 설명 spec R4). 값보다 한 단계 약하게, 이름만 굵게. */
@@ -304,11 +304,9 @@
 
 .run-detail .manifest-grid dd {
   margin: var(--space-1) 0 0;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: var(--text-size-small);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .run-detail .manifest-warnings h5 {
@@ -367,5 +365,41 @@
   .run-detail .metric-highlights,
   .run-detail .manifest-grid dl {
     grid-template-columns: 1fr;
+  }
+}
+
+/* 긴 결과에서도 원본 숫자와 진단으로 바로 이동할 수 있게 한다. */
+.run-detail .run-detail__navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-block-end: var(--space-4);
+  border-block-end: 1px solid var(--border);
+}
+
+.run-detail .run-detail__navigation a {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--space-6) + var(--space-3));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  color: var(--accent);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .result-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.run-detail [id] {
+  scroll-margin-block: var(--space-4);
+}
+
+@media (max-width: 720px) {
+  .run-detail .result-chart header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

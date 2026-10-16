@@ -33,6 +33,7 @@
 }
 
 .data-list-page__scroll {
+  position: relative;
   overflow-x: auto;
 }
 
@@ -103,7 +104,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
   background: var(--surface-panel);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .data-list-page__provenance {
@@ -121,6 +122,7 @@
 .data-list-page__provenance dd {
   min-width: 0;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* 목록 줄 안의 실패 한 줄(`FailureNotice`). 색·글자 크기·줄바꿈은 `.ui-failure`가 준다. */

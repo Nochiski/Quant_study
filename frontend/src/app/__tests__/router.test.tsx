@@ -14,6 +14,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
@@ -379,11 +380,27 @@ const server = setupServer(
   ),
 );
 
+const scrollIntoView = vi.fn();
+let previousScrollIntoView: PropertyDescriptor | undefined;
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeEach(() => {
+  // jsdom이 제공하지 않는 화면 이동 API를 브라우저 동작 검증용으로 보완한다.
+  previousScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
+  scrollIntoView.mockClear();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView,
+  });
+});
 afterEach(() => {
   cleanup();
   server.resetHandlers();
   vi.unstubAllGlobals();
+  if (previousScrollIntoView)
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previousScrollIntoView);
+  else
+    delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
 });
 afterAll(() => server.close());
 
@@ -428,6 +445,8 @@ describe("App Shell routes", () => {
     await user.click(button);
     expect(shell).not.toHaveClass("app-shell--collapsed");
     expect(button).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    expect(button).toHaveFocus();
   });
 
   it("opens a saved revision directly and restores the typed view from the URL", async () => {

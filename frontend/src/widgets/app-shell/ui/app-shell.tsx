@@ -140,7 +140,14 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
             size="small"
             tone="ghost"
             aria-expanded={!collapsed}
-            onClick={() => setManualCollapsed(!collapsed)}
+            onClick={(event) => {
+              const control = event.currentTarget;
+              setManualCollapsed(!collapsed);
+              // 메뉴 높이가 바뀐 뒤에도 조작한 버튼의 초점을 화면 안에 유지한다.
+              requestAnimationFrame(() =>
+                control.scrollIntoView({ block: "nearest", inline: "nearest" }),
+              );
+            }}
           >
             <span aria-hidden="true">{collapsed ? "»" : "«"}</span>
             <span className="sr-only">

@@ -144,7 +144,7 @@ export const BacktestRunPage = () => {
         >
           {runStageLabel(state.stage)} · {Math.round(state.progress * 100)}%
         </p>
-        {state.message ? <details><summary>{t("ui.failure.serverReason")}</summary><p>{state.message}</p></details> : null}
+        {state.message ? <details className="ui-disclosure"><summary>{t("ui.failure.serverReason")}</summary><p>{state.message}</p></details> : null}
         <BacktestRunFailure
           run={state}
           className="page-state page-state--error"

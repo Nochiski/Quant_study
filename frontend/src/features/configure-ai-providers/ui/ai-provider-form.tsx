@@ -151,13 +151,13 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
   };
 
   return (
-    <form className="ai-provider-form" onSubmit={submit}>
+    <form className="ai-provider-form ui-control-touch" onSubmit={submit}>
       <h3 className="ai-provider-form__title">
         {t("assistant.provider.form.title")}
       </h3>
       <div className="ai-provider-form__row">
         <label htmlFor={ids.kind}>{t("assistant.provider.form.kind")}</label>
-        <select
+        <select className="ui-select"
           id={ids.kind}
           ref={kindRef}
           value={kind ?? ""}
@@ -185,7 +185,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
       </div>
       <div className="ai-provider-form__row">
         <label htmlFor={ids.label}>{t("assistant.provider.form.label")}</label>
-        <input
+        <input className="ui-input"
           id={ids.label}
           ref={labelRef}
           value={label}
@@ -200,7 +200,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
         <label htmlFor={ids.secret}>
           {t("assistant.provider.form.secret")}
         </label>
-        <input
+        <input className="ui-input"
           id={ids.secret}
           ref={secretRef}
           type="password"
@@ -216,7 +216,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
       </div>
       <div className="ai-provider-form__row">
         <label htmlFor={ids.model}>{t("assistant.provider.form.model")}</label>
-        <input
+        <input className="ui-input"
           id={ids.model}
           ref={modelRef}
           value={model}
@@ -256,7 +256,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
             <label htmlFor={ids.baseUrl}>
               {t("assistant.provider.form.baseUrl")}
             </label>
-            <input
+            <input className="ui-input"
               id={ids.baseUrl}
               ref={baseUrlRef}
               value={baseUrl}

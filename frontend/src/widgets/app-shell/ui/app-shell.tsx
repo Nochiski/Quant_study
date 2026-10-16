@@ -4,6 +4,7 @@ import { t } from "../../../shared/config";
 import { useMediaQuery } from "../../../shared/lib/media";
 import { Link } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
+import { NavigationIcon } from "./navigation-icon";
 import "./app-shell.css";
 
 type AppShellProps = {
@@ -12,32 +13,32 @@ type AppShellProps = {
 };
 
 const RESEARCH = [
-  { key: "research", label: "nav.research", icon: "⚗", to: null },
+  { key: "research", label: "nav.research", icon: "research", to: null },
   {
     key: "strategies",
     label: "nav.strategies",
-    icon: "↗",
+    icon: "strategies",
     to: "/research/strategies",
   },
   {
     key: "backtests",
     label: "nav.backtests",
-    icon: "▤",
+    icon: "backtests",
     to: "/research/backtests",
   },
   {
     key: "experiments",
     label: "nav.experiments",
-    icon: "▦",
+    icon: "experiments",
     to: "/research/experiments",
   },
 ] as const;
 
 const OPERATIONS = [
-  { to: "/operations/deployments", label: "nav.deployments", icon: "➜" },
-  { to: "/operations/realtime", label: "nav.realtime", icon: "∿" },
-  { to: "/operations/orders", label: "nav.orders", icon: "▥" },
-  { to: "/operations/risk", label: "nav.risk", icon: "⛨" },
+  { to: "/operations/deployments", label: "nav.deployments", icon: "deployments" },
+  { to: "/operations/realtime", label: "nav.realtime", icon: "realtime" },
+  { to: "/operations/orders", label: "nav.orders", icon: "orders" },
+  { to: "/operations/risk", label: "nav.risk", icon: "risk" },
 ] as const;
 
 /**
@@ -52,13 +53,13 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
   const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
   const collapsed = manualCollapsed ?? compactViewport;
   const unavailable = t("nav.operations.unavailable");
-  const disabledItem = (label: string, icon: string) => (
+  const disabledItem = (label: string, icon: Parameters<typeof NavigationIcon>[0]["name"]) => (
     <span
       className="app-shell__link app-shell__link--disabled"
       aria-disabled="true"
     >
       <span className="app-shell__icon" aria-hidden="true">
-        {icon}
+        <NavigationIcon name={icon} />
       </span>
       <span className="app-shell__label">{label}</span>
       <span className="sr-only">({unavailable})</span>
@@ -84,7 +85,7 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
                   activeProps={{ "aria-current": "page" }}
                 >
                   <span className="app-shell__icon" aria-hidden="true">
-                    {item.icon}
+                    <NavigationIcon name={item.icon} />
                   </span>
                   <span className="app-shell__label">{t(item.label)}</span>
                 </Link>
@@ -110,7 +111,7 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
                   activeProps={{ "aria-current": "page" }}
                 >
                   <span className="app-shell__icon" aria-hidden="true">
-                    {item.icon}
+                    <NavigationIcon name={item.icon} />
                   </span>
                   <span className="app-shell__label">{t(item.label)}</span>
                   <span className="sr-only">({unavailable})</span>
@@ -129,7 +130,7 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
               activeProps={{ "aria-current": "page" }}
             >
               <span className="app-shell__icon" aria-hidden="true">
-                ⚙
+                <NavigationIcon name="settings" />
               </span>
               <span className="app-shell__label">{t("nav.settings")}</span>
             </Link>

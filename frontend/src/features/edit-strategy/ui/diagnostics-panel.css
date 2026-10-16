@@ -35,7 +35,7 @@
 
 .problems__filter,
 .problems__copy {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: transparent;
   color: var(--text-muted);
@@ -47,8 +47,9 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 3px var(--space-2);
-  font-size: 11px;
+  min-height: var(--control-height-dense);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-size-small);
 }
 
 .problems__filter[aria-pressed="true"] {
@@ -98,7 +99,7 @@
   padding: var(--space-1) var(--space-3);
   background: var(--surface-subtle);
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: var(--text-size-small);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -169,7 +170,7 @@
 
 .problems__where {
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: var(--text-size-small);
 }
 
 .problems__actions {
@@ -182,7 +183,7 @@
 .problems__copy {
   padding: 2px var(--space-1);
   white-space: nowrap;
-  font-size: 10px;
+  font-size: var(--text-size-small);
 }
 
 .problems__empty {

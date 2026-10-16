@@ -1,6 +1,6 @@
 .ide {
   /* 본문 좌우·아래 여백. 붙은 패널의 바깥 끝이라 넓은 화면 오버레이 서랍도 이 값을 읽는다. */
-  --ide-gutter: var(--space-5);
+  --ide-gutter: var(--page-gutter);
   display: flex;
   flex-direction: column;
   min-width: 360px;
@@ -8,16 +8,17 @@
   background: var(--surface-canvas);
 }
 
-/* top bar: breadcrumb · status · actions */
+/* 탐색·저장 상태·주요 실행 동작은 하나의 상단 띠에 둔다. */
 .ide__topbar {
   position: sticky;
   top: 0;
   z-index: 16;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  min-height: 56px;
-  padding: 0 var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: var(--space-3) var(--page-gutter);
   border-bottom: 1px solid var(--border);
   background: var(--surface-panel);
 }
@@ -25,8 +26,10 @@
 .ide__breadcrumb {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: var(--space-2);
-  font-size: 15px;
+  font-size: var(--text-size-label);
 }
 
 .ide__crumb {
@@ -43,10 +46,11 @@
 }
 
 .ide__topbar-status {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-muted);
   font-size: var(--text-size-small);
-  text-align: center;
+  text-align: end;
 }
 
 .ide__topbar-actions {
@@ -57,18 +61,22 @@
 
 /* title block */
 .ide__title {
-  padding: var(--space-4) var(--space-5) var(--space-3);
+  padding: var(--space-5) var(--page-gutter) var(--space-4);
 }
 
 .ide__title-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }
 
 .ide__title h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--text-size-page-title);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
+  overflow-wrap: anywhere;
   letter-spacing: -0.01em;
 }
 
@@ -88,8 +96,7 @@
 }
 
 .ide__meta div + div {
-  padding-left: var(--space-4);
-  border-left: 1px solid var(--border);
+  padding-left: 0;
 }
 
 .ide__meta dt::after {
@@ -101,7 +108,7 @@
 }
 
 .ide__notice {
-  padding: 0 var(--space-5);
+  padding: 0 var(--page-gutter);
 }
 
 /*
@@ -129,6 +136,25 @@
 
 .ide__left[hidden] {
   display: none;
+}
+
+/* 모바일 구조는 본문을 덮지 않고, 명시해서 펼친 동안에만 제한된 높이를 쓴다. */
+.ide__left--drawer {
+  flex: 0 0 auto;
+  width: 100%;
+  max-height: min(40dvh, 320px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
+}
+
+.ide__left--drawer .ide__panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-panel);
 }
 
 .ide__outline,
@@ -184,14 +210,18 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4) 0;
+  flex-wrap: wrap;
+  padding: var(--space-4) var(--panel-padding);
 }
 
 .ide__editor-heading {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: var(--space-2);
-  font-size: 15px;
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-heading);
 }
 
 .ide__editor-sub {
@@ -201,6 +231,8 @@
 
 .ide__editor-actions {
   display: flex;
+  flex: 1 1 100%;
+  min-width: 0;
   gap: var(--space-2);
 }
 
@@ -304,7 +336,7 @@
   flex: 1;
   flex-direction: column;
   min-height: 240px;
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  padding: var(--space-4) var(--panel-padding) var(--panel-padding);
   overflow: auto;
 }
 
@@ -320,12 +352,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-height: 56px;
+  padding: var(--space-3) var(--panel-padding);
+  border-bottom: 1px solid var(--border);
 }
 
 .ide__panel-header h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-heading);
 }
 
 /* snippets */
@@ -400,7 +437,7 @@
  * 패널 열림·닫힘과 저장된 폭은 그대로 두고, 가로 크기 조절 손잡이만 숨긴다. */
 @media (max-width: 767px) {
   .ide {
-    --ide-gutter: var(--space-2);
+    --ide-gutter: var(--space-4);
     min-width: 0;
   }
   .ide__body {

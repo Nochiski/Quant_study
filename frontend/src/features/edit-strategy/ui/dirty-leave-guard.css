@@ -21,7 +21,7 @@
 }
 
 .leave-guard__title {
-  font-size: 15px;
+  font-size: var(--text-size-subsection);
   font-weight: 700;
 }
 

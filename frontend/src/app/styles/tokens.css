@@ -1,37 +1,34 @@
-/*
- * Semantic theme tokens (WORKFLOW P2-01, P6-04). The light and soft-dark palettes expose the
- * same component contract; P6-03 owns preference persistence and selects `data-theme`.
- * Components use only semantic names (surface / border / text / accent / status / focus);
- * raw colours live here and nowhere else.
- */
+/* 화면 위계·요소 계약은 design-system/strategy-workbench/MASTER.md가 소유한다.
+ * 이 파일은 밝은 테마와 어두운 테마가 공유하는 의미 토큰의 실제 값을 정의한다. */
 :root {
   color-scheme: light;
 
   /* surfaces */
-  --surface-canvas: #f4f6f8;
+  --surface-canvas: #f5f7fb;
   --surface-panel: #ffffff;
-  --surface-raised: #f9fafb;
-  --surface-subtle: #eef2f5;
-  --surface-inverse: #1c2430;
+  --surface-raised: #f8fafc;
+  --surface-subtle: #edf1f7;
+  --surface-inverse: #172033;
   --overlay-scrim: rgb(28 36 48 / 32%);
 
   /* borders */
-  --border: #d9dee5;
-  --border-strong: #b8c1cc;
+  --border: #dce3ee;
+  --border-strong: #b6c2d4;
+  --border-control: #7b8ba3;
   --border-inverse: #3a4657;
 
   /* text */
-  --text: #1c2430;
-  --text-muted: #5b6675;
-  --text-subtle: #66717f;
+  --text: #172033;
+  --text-muted: #53627a;
+  --text-subtle: #62718a;
   --text-on-accent: #ffffff;
-  --text-inverse: #f4f6f8;
+  --text-inverse: #f5f7fb;
 
-  /* accent (teal from the concept) */
-  --accent: #0b6a60;
-  --accent-hover: #085249;
-  --accent-soft: #e3f4f1;
-  --accent-border: #9fd6cc;
+  /* 주 행동은 수익 상태의 녹색과 구분되는 indigo를 쓴다. */
+  --accent: #3156d3;
+  --accent-hover: #2443b0;
+  --accent-soft: #edf1ff;
+  --accent-border: #c8d2fb;
 
   /* status — every status also carries a text/glyph marker in the UI, never colour alone */
   --status-ok: #166a3f;
@@ -53,7 +50,7 @@
   --chart-series-6: #a24f08;
 
   /* focus */
-  --focus-ring: #2e6fd6;
+  --focus-ring: #4669e8;
   --focus-ring-offset: 2px;
 
   /* source syntax */
@@ -61,27 +58,48 @@
   --syntax-string: #176b3a;
   --syntax-number: #713f98;
   --syntax-literal: #974609;
-  --syntax-comment: #66717f;
-  --syntax-punctuation: #5b6675;
+  --syntax-comment: #62718a;
+  --syntax-punctuation: #53627a;
 
-  /* typography: body 14px, secondary text never below 12px */
-  /* Exact-version webfonts keep strict browser snapshots independent of host-installed fonts. */
+  /* 고정 버전 번들 폰트와 역할별 크기로 플랫폼·중첩 배율 차이를 줄인다. */
   --font-sans: "Noto Sans KR Variable", sans-serif;
   --font-mono: "JetBrains Mono Variable", "Noto Sans KR Variable", monospace;
+  --text-size-page-title: 28px;
+  --text-size-section-title: 20px;
+  --text-size-subsection: 16px;
+  --text-size-label: 13px;
   --text-size-body: 14px;
   --text-size-small: 12px;
   --text-size-title: 20px;
   --text-size-display: 28px;
-  --line-height-body: 1.5;
-  --font-weight-strong: 800;
-  --tracking-wide: 0.16em;
+  --line-height-body: 1.6;
+  --line-height-heading: 1.35;
+  --line-height-control: 1.4;
+  --font-weight-heading: 700;
+  --font-weight-label: 600;
+  --font-weight-strong: 700;
+  --tracking-wide: 0.08em;
+
+  /* 일반 폼·편집 도구·표 안 행동은 서로 다른 밀도를 명시한다. */
+  --control-height: 40px;
+  --control-height-compact: 34px;
+  --control-height-dense: 28px;
+  --control-height-touch: 44px;
+  --control-padding-inline: 12px;
+  --page-gutter: 24px;
+  --panel-padding: 20px;
+  --section-gap: 24px;
+  --field-gap: 6px;
+  --content-width: 1280px;
+  --content-width-form: 960px;
+  --metric-card-min-width: 9rem;
 
   /* shape and elevation */
   --radius-small: 6px;
   --radius-medium: 8px;
   --radius-large: 12px;
   --radius-pill: 999px;
-  --shadow-panel: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+  --shadow-panel: 0 1px 2px rgb(23 32 51 / 4%);
   --shadow-popover: 0 8px 24px rgb(16 24 40 / 16%);
 
   /* spacing scale */
@@ -91,36 +109,38 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 48px;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
   /* surfaces */
-  --surface-canvas: #111820;
-  --surface-panel: #18222d;
-  --surface-raised: #1e2a36;
-  --surface-subtle: #253441;
+  --surface-canvas: #101725;
+  --surface-panel: #172133;
+  --surface-raised: #1d293b;
+  --surface-subtle: #243247;
   --surface-inverse: #090f15;
   --overlay-scrim: rgb(3 7 12 / 58%);
 
   /* borders */
-  --border: #354352;
-  --border-strong: #536274;
+  --border: #36465e;
+  --border-strong: #596c86;
+  --border-control: #7183a0;
   --border-inverse: #3e4d5e;
 
   /* text */
-  --text: #e6edf3;
-  --text-muted: #acb8c5;
-  --text-subtle: #93a2b1;
-  --text-on-accent: #071d1a;
+  --text: #e9eef7;
+  --text-muted: #a8b5cb;
+  --text-subtle: #94a5bf;
+  --text-on-accent: #132248;
   --text-inverse: #f1f5f8;
 
   /* accent */
-  --accent: #4fc3b1;
-  --accent-hover: #72d5c5;
-  --accent-soft: #173c39;
-  --accent-border: #347f76;
+  --accent: #a8baff;
+  --accent-hover: #c5d0ff;
+  --accent-soft: #24325c;
+  --accent-border: #5d73ba;
 
   /* status */
   --status-ok: #68d391;
@@ -141,13 +161,19 @@
   --chart-series-5: #72c7ef;
   --chart-series-6: #f0b35f;
 
-  --focus-ring: #7eb4ff;
+  --focus-ring: #b2c3ff;
   --syntax-key: #8bc4ff;
   --syntax-string: #8bd49c;
   --syntax-number: #d7a6ff;
   --syntax-literal: #ffbd7a;
-  --syntax-comment: #93a2b1;
-  --syntax-punctuation: #acb8c5;
-  --shadow-panel: 0 1px 2px rgb(0 0 0 / 28%), 0 2px 5px rgb(0 0 0 / 22%);
+  --syntax-comment: #94a5bf;
+  --syntax-punctuation: #a8b5cb;
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 12%);
   --shadow-popover: 0 12px 32px rgb(0 0 0 / 42%);
+}
+
+@media (max-width: 720px) {
+  :root {
+    --page-gutter: 16px;
+  }
 }

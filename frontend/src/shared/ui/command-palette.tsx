@@ -181,6 +181,7 @@ const OpenCommandPalette = ({
             {searchLabel}
           </label>
           <input
+            className="ui-input"
             ref={input}
             id={`${id}-search`}
             type="search"

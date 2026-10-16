@@ -264,6 +264,36 @@ describe("StrategyIde", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("작은 화면에서는 보조 패널을 하나씩 전환하고 새 패널로 포커스를 옮긴다", async () => {
+    matchMedia(true);
+    const user = userEvent.setup();
+    mount({ assistant: <button>AI 입력</button> });
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "계약 접기" })).toHaveFocus();
+    await user.keyboard("{Alt>}a{/Alt}");
+    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
+  });
+
+  it.each([true, false])("좁은 화면 전환은 이미 열린 구조와 현재 포커스를 유지한다: %s", async (insideOutline) => {
+    const media = controlledMatchMedia(false);
+    mount({ outline: <button>구조 항목</button> });
+    const focused = insideOutline
+      ? screen.getByRole("button", { name: "구조 항목" })
+      : screen.getByRole("textbox", { name: "source" });
+    focused.focus();
+    act(() => media.setMatches(true));
+    expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+    expect(focused).toHaveFocus();
+  });
+
   it("closes wide panels when the viewport becomes narrow", () => {
     const media = controlledMatchMedia(false);
     mount();

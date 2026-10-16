@@ -1,7 +1,9 @@
 .settings-page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--section-gap);
+  width: min(1180px, 100%);
+  margin-inline: auto;
 }
 
 .settings-page__header {
@@ -12,8 +14,9 @@
 
 .settings-page__title {
   margin: 0;
-  font-size: var(--text-size-display);
-  font-weight: var(--font-weight-strong);
+  font-size: var(--text-size-page-title);
+  line-height: var(--line-height-heading);
+  font-weight: var(--font-weight-heading);
 }
 
 .settings-page__description {

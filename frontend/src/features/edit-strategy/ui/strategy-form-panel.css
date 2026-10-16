@@ -1,16 +1,18 @@
 .strategy-form {
   display: grid;
   gap: var(--space-3);
-  padding: 0 var(--space-4) var(--space-4);
+  min-width: 0;
+  padding: 0;
   overflow: auto;
 }
 
 .strategy-form__header {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: start;
   justify-content: space-between;
   gap: var(--space-3);
-  padding-top: var(--space-3);
+  padding-bottom: var(--space-2);
 }
 
 .strategy-form__header > div {
@@ -60,7 +62,8 @@
   display: grid;
   gap: var(--space-3);
   margin: 0;
-  padding: var(--space-3);
+  min-width: 0;
+  padding: var(--panel-padding);
   border: 1px solid var(--border);
   border-radius: var(--radius-medium);
   background: var(--surface-raised);
@@ -71,8 +74,7 @@
   gap: var(--space-2);
   align-items: baseline;
   padding: 0 var(--space-1);
-  font-family: var(--font-mono);
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-body);
 }
 
 .strategy-form__field {
@@ -84,9 +86,10 @@
 .strategy-form__field label,
 .strategy-form__field .strategy-form__label {
   display: flex;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
   align-items: baseline;
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-label);
 }
 
 .strategy-form__unit {
@@ -115,17 +118,24 @@
 .strategy-form__control select,
 .pipeline__field input,
 .pipeline__field select {
-  min-width: 12rem;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border);
+  min-width: min(12rem, 100%);
+  max-width: 100%;
+  height: var(--control-size, var(--control-height));
+  min-height: var(--control-size, var(--control-height));
+  padding: 0 var(--control-padding-inline);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: var(--surface-panel);
   color: var(--text);
-  font: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-control);
 }
 
 .strategy-form__control input[type="checkbox"] {
   min-width: auto;
+  height: auto;
+  min-height: auto;
 }
 
 /* 미작성 필드: 기본값이 회색 placeholder로 보인다(spec D6). */
@@ -175,10 +185,16 @@
 
 .strategy-form__badges {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
 .strategy-form__toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height-compact);
   padding: 0;
   border: 0;
   background: none;

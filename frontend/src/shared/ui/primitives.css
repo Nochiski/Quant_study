@@ -1,19 +1,20 @@
-/* Shared UI primitives (WORKFLOW P2-01). Only semantic tokens; no raw colours. */
+/* 공통 요소의 위계·정렬은 MASTER 계약과 의미 토큰을 따른다. */
 
-/* Button */
+/* 버튼은 일반 행동과 표 안의 작은 행동을 구분한다. */
 .ui-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  min-height: 36px;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--border-strong);
+  min-height: var(--control-size, var(--control-height));
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-medium);
   background: var(--surface-panel);
   color: var(--text);
-  font-weight: 600;
-  line-height: 1.2;
+  font-size: var(--control-font-size, var(--text-size-body));
+  font-weight: var(--font-weight-label);
+  line-height: var(--line-height-control);
   cursor: pointer;
   transition:
     background-color 120ms ease,
@@ -57,9 +58,115 @@
 }
 
 .ui-button--small {
-  min-height: 28px;
+  min-height: var(--control-height-dense);
   padding: 0 var(--space-3);
   font-size: var(--text-size-small);
+}
+
+/* 공통 폼은 명시적으로 선택한 필드에만 적용한다. 너비와 행 배치는 화면이 소유한다. */
+.ui-input,
+.ui-select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--control-size, var(--control-height));
+  padding: 0 var(--control-padding-inline);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-medium);
+  background-color: var(--surface-panel);
+  color: var(--text);
+  font-size: var(--control-font-size, var(--text-size-body));
+  font-weight: 400;
+  line-height: var(--line-height-control);
+  vertical-align: middle;
+}
+
+textarea.ui-input {
+  padding-block: var(--space-3);
+  line-height: var(--line-height-body);
+}
+
+/* 단일 native select의 화살표만 통일하며 키보드와 option 동작은 브라우저에 남긴다. */
+.ui-select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-inline-end: var(--space-6);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - var(--space-3) - 4px) 50%,
+    calc(100% - var(--space-3)) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.ui-input:disabled,
+.ui-select:disabled {
+  background-color: var(--surface-subtle);
+  color: var(--text-subtle);
+  cursor: not-allowed;
+}
+
+/* native disclosure의 상태와 키보드는 유지하고 표식 열을 고정한다. */
+.ui-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-size, var(--control-height-compact));
+  list-style: none;
+  cursor: pointer;
+}
+
+.ui-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ui-disclosure > summary::before,
+.ui-disclosure-toggle::before,
+.ui-disclosure-caret::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-inline: 2px 3px;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.ui-disclosure[open] > summary::before,
+.ui-disclosure-toggle[aria-expanded="true"]::before,
+.ui-disclosure-caret[data-open="true"]::before {
+  transform: rotate(45deg);
+}
+
+/* treeitem은 기존 키보드 소유자를 유지하고 장식 span에 표식 슬롯만 제공한다. */
+.ui-disclosure-caret {
+  display: inline-flex;
+  flex: 0 0 12px;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 18px;
+}
+
+.ui-disclosure-caret[data-empty="true"] {
+  visibility: hidden;
+}
+
+@media (forced-colors: active) {
+  .ui-select:not([multiple]):not([size]) {
+    appearance: auto;
+    padding-inline-end: var(--control-padding-inline);
+    background-image: none;
+  }
+}
+
+/* 넓은 터치 폼·주 행동에만 사용하며 밀집 툴바의 작은 버튼은 그대로 둔다. */
+@media (pointer: coarse) {
+  .ui-control-touch {
+    --control-size: var(--control-height-touch);
+  }
 }
 
 /* Tabs */
@@ -202,14 +309,11 @@
 
 .ui-command-palette__header input {
   min-width: 0;
-  padding: 10px var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-medium);
-  background: var(--surface-raised);
 }
 
 .ui-command-palette__header button {
-  width: 40px;
+  width: var(--control-height);
+  min-height: var(--control-height);
   border: 0;
   border-radius: var(--radius-medium);
   background: transparent;
@@ -377,7 +481,7 @@
   width: 2px;
   height: 24px;
   border-radius: 1px;
-  background: var(--border-strong);
+  background: var(--text-muted);
 }
 
 .ui-split-handle--horizontal .ui-split-handle__grip {
@@ -392,34 +496,35 @@
  * 끝까지 채우는 화면이 있어서다. 그 밖의 라우트 화면은 루트에 이 클래스를 둔다(#261).
  */
 .page {
-  padding: var(--space-5);
-}
-
-@media (max-width: 720px) {
-  .page {
-    padding: var(--space-3);
-  }
+  padding: var(--page-gutter);
 }
 
 .page-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--section-gap);
 }
 
 .page-header h1 {
   margin: 0;
-  font-size: var(--text-size-title);
-  letter-spacing: -0.01em;
+  font-size: var(--text-size-page-title);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
+  letter-spacing: -0.02em;
 }
 
 .page-state {
-  padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-large);
   background: var(--surface-panel);
   color: var(--text-muted);
+}
+
+/* 라우트 루트의 여백은 .page가 소유하고 안쪽 상태 패널만 패널 여백을 쓴다. */
+.page-state:not(.page) {
+  padding: var(--panel-padding);
 }
 
 .page-state--error {

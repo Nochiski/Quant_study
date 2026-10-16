@@ -417,7 +417,7 @@ export const BacktestRunDetail = ({
       <details
         id={`${titleId}-manifest`}
         tabIndex={-1}
-        className="manifest-drawer"
+        className="manifest-drawer ui-disclosure"
         aria-label={t("backtest.result.manifest")}
         ref={drawer}
       >

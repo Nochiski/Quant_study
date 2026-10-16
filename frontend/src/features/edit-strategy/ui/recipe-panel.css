@@ -1,6 +1,6 @@
 .recipe {
   min-width: 0;
-  padding: var(--space-4);
+  padding: 0;
 }
 .recipe__toolbar,
 .recipe__actions {
@@ -27,6 +27,8 @@
   outline: 2px solid var(--accent);
 }
 .recipe__step fieldset {
+  display: grid;
+  gap: var(--space-4);
   min-width: 0;
   margin: 0;
   padding: 0;

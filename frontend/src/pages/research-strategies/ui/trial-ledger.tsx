@@ -119,7 +119,7 @@ const MergeDialog = ({
           ) : null}
           <p className="data-list-page__filter">
             <label htmlFor={selectId}>{t("history.trials.merge.source")}</label>
-            <select
+            <select className="ui-select"
               id={selectId}
               value={source}
               onChange={(event) => setSource(event.target.value)}

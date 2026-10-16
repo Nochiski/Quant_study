@@ -21,7 +21,7 @@ export const BacktestOrderEvents = ({ artifacts }: { artifacts: Artifacts }) => 
         <>
           <p>{t("backtest.orderEvents.count").replace("{count}", String(updates.length))}</p>
           {zeroCapEvents > 0 ? <p>{t("backtest.orderEvents.zeroCapCount").replace("{count}", String(zeroCapEvents))}</p> : null}
-          <details>
+          <details className="ui-disclosure">
             <summary>{t("backtest.orderEvents.records")}</summary>
             <div className="result-table-wrap" tabIndex={0} role="region" aria-label={t("backtest.orderEvents.records")}>
               <table className="result-table">

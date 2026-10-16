@@ -357,6 +357,10 @@ test(
       body: await continuous.screenshot(),
       contentType: "image/png",
     });
+    await page.screenshot({
+      path: testInfo.outputPath("experiment-desktop.png"),
+      fullPage: true,
+    });
     await page.reload();
     await expect(
       continuous.getByText("계좌 평가 완료", { exact: true }),

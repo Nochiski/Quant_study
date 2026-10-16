@@ -98,7 +98,7 @@ const ValuesInput = ({
   if (parameter.kind === "choice") {
     const picked = typeof entry === "string" ? [] : entry;
     return (
-      <select
+      <select className="ui-select"
         multiple
         aria-label={label}
         value={parameter.choices.flatMap((choice, index) =>
@@ -122,7 +122,7 @@ const ValuesInput = ({
     );
   }
   return (
-    <input
+    <input className="ui-input"
       aria-label={label}
       placeholder={t("experiments.new.valuesPlaceholder")}
       value={typeof entry === "string" ? entry : entry.join(", ")}
@@ -148,7 +148,7 @@ const NumberField = ({
   return (
     <span>
       <label htmlFor={id}>{t(label)}</label>{" "}
-      <input
+      <input className="ui-input"
         id={id}
         type="number"
         value={value}
@@ -311,7 +311,7 @@ const Form = ({
       />
       <fieldset className="data-list-page__filter">
         <legend>{t("experiments.new.split")}</legend>
-        <select
+        <select className="ui-select"
           aria-label={t("experiments.new.mode")}
           value={split.mode}
           onChange={(event) =>
@@ -339,7 +339,7 @@ const Form = ({
           value={split.embargo_sessions}
           onChange={(value) => setSplit({ ...split, embargo_sessions: value })}
         />
-        <select
+        <select className="ui-select"
           aria-label={t("experiments.new.rule")}
           value={split.selection_rule}
           onChange={(event) =>

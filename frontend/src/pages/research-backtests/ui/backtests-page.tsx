@@ -56,7 +56,7 @@ const StrategyFilter = ({
   return (
     <form className="data-list-page__filter" onSubmit={submit}>
       <label htmlFor={inputId}>{t("history.backtests.filter")}</label>
-      <input
+      <input className="ui-input"
         id={inputId}
         ref={inputRef}
         defaultValue={initial}

@@ -7,10 +7,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 32px;
-  padding: 0 var(--space-2);
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
+  min-height: var(--control-height-compact);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  color: var(--text);
+  font-size: var(--text-size-label);
+  font-weight: 600;
   word-break: keep-all;
   cursor: pointer;
 }
@@ -20,16 +24,36 @@
 }
 
 .backtest-settings__popover {
+  --control-size: var(--control-height);
   position: absolute;
   z-index: 20;
   top: calc(100% + var(--space-2));
   right: 0;
-  width: min(520px, calc(100vw - var(--space-6)));
-  padding: var(--space-4);
+  width: min(640px, calc(100vw - var(--space-6)));
+  padding: var(--panel-padding);
   border: 1px solid var(--border);
   border-radius: var(--radius-medium);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
   box-shadow: var(--shadow-popover);
+}
+
+.backtest-settings__header {
+  position: sticky;
+  top: calc(-1 * var(--panel-padding));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: calc(-1 * var(--panel-padding)) calc(-1 * var(--panel-padding)) var(--space-4);
+  padding: var(--space-3) var(--panel-padding);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-panel);
+}
+
+.backtest-settings__header strong {
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-heading);
 }
 
 .backtest-settings__hint {
@@ -41,8 +65,10 @@
 
 .backtest-settings fieldset {
   display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-4);
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
@@ -52,20 +78,25 @@
 .backtest-settings__field {
   display: grid;
   gap: var(--space-1);
+  min-width: 0;
   color: var(--text-muted);
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-label);
 }
 
 .backtest-settings input,
 .backtest-settings select {
   min-width: 0;
-  min-height: 34px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border);
+  width: 100%;
+  height: var(--control-size, var(--control-height));
+  min-height: var(--control-size, var(--control-height));
+  padding: 0 var(--control-padding-inline);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   color: var(--text);
-  background: var(--surface);
-  font: inherit;
+  background: var(--surface-panel);
+  font-family: var(--font-sans);
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-control);
 }
 
 .backtest-settings__errors {
@@ -93,9 +124,11 @@
 
 .backtest-settings legend {
   grid-column: 1 / -1;
+  margin-bottom: var(--space-3);
   padding: 0;
   color: var(--text);
-  font-weight: 600;
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-heading);
 }
 
 .backtest-settings__note {
@@ -118,8 +151,52 @@
   font-size: var(--text-size-small);
 }
 
+/* 같은 행의 긴 라벨·설명도 입력 시작선을 바꾸지 않는다. 도움말과 오류는 별도 행이다. */
+@supports (grid-template-rows: subgrid) {
+  .backtest-settings fieldset {
+    row-gap: var(--field-gap);
+  }
+
+  .backtest-settings fieldset > .backtest-settings__field,
+  .backtest-settings fieldset > label {
+    grid-row: span 4;
+    grid-template-rows: subgrid;
+    gap: var(--field-gap);
+    margin-bottom: var(--space-3);
+  }
+
+  .backtest-settings input,
+  .backtest-settings select {
+    grid-row: 2;
+  }
+
+  .backtest-settings__hint {
+    grid-row: 3;
+    margin-top: 0;
+  }
+
+  .backtest-settings__field-error {
+    grid-row: 4;
+  }
+}
+
 @media (max-width: 760px) {
+  /* 모바일은 툴바의 가변 위치에 매달지 않고 화면 안에 설정과 닫기 제어를 유지한다. */
+  .backtest-settings__popover {
+    position: fixed;
+    inset: var(--space-4);
+    z-index: 40;
+    width: auto;
+    max-height: none;
+  }
+
   .backtest-settings fieldset {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (pointer: coarse) {
+  .backtest-settings__popover {
+    --control-size: var(--control-height-touch);
   }
 }

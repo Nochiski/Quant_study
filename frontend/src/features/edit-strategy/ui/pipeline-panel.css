@@ -134,9 +134,11 @@
 /* 선언은 Form 컨트롤 규칙(`strategy-form-panel.css`)과 같고, 문장 안이라 크기만 줄인다. */
 .pipeline__field input,
 .pipeline__field select {
+  --control-size: var(--control-height-compact);
   min-width: 0;
   max-width: min(14rem, 100%);
-  padding: 0 var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-size-label);
 }
 
 .pipeline__field input[type="number"] {

@@ -226,12 +226,12 @@ export const StrategyOutline = ({
       >
         <div className="strategy-outline__item-row">
           <span
-            className="strategy-outline__disclosure"
+            className="strategy-outline__disclosure ui-disclosure-caret"
             data-disclosure="true"
+            data-open={open}
+            data-empty={!hasChildren}
             aria-hidden="true"
-          >
-            {hasChildren ? (open ? "⌄" : "›") : ""}
-          </span>
+          />
           {node.arrayIndex !== null ? (
             <span className="strategy-outline__index">#{node.arrayIndex}</span>
           ) : null}
@@ -263,7 +263,7 @@ export const StrategyOutline = ({
       <div className="strategy-outline__filter">
         <input
           type="search"
-          className="strategy-outline__filter-input"
+          className="strategy-outline__filter-input ui-input"
           aria-label={t("ide.outline.filter")}
           placeholder={t("ide.outline.filterPlaceholder")}
           value={filter}

@@ -26,22 +26,24 @@
 .strategy-debugger__controls label {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: var(--space-1);
   color: var(--text-muted);
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-label);
 }
 
 .strategy-debugger__controls input,
 .strategy-debugger__controls select {
   width: 100%;
   min-width: 0;
-  height: 30px;
+  min-height: var(--control-height-compact);
   padding: 0 var(--space-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: var(--surface-panel);
   color: var(--text);
-  font: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-body);
 }
 
 .strategy-debugger__controls input:focus-visible,

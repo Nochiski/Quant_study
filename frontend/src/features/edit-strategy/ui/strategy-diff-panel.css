@@ -158,11 +158,13 @@
 .strategy-diff__selectors select {
   min-width: 0;
   padding: var(--space-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: var(--surface-panel);
   color: var(--text);
-  font: inherit;
+  font-family: inherit;
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-body);
 }
 
 .strategy-diff button:focus-visible,

@@ -8,6 +8,10 @@ paths:
 
 # UI는 primitive·토큰·접근성 표면을 먼저 쓴다
 
+화면 위계·배치·공통 요소의 디자인 정본은
+[Strategy Workbench 디자인 기준](../../design-system/strategy-workbench/MASTER.md)이다.
+제품 행동과 수용 기준은 기존 유저 스토리를 유지한다.
+
 이 규칙은 `michelo.frontend`의 `ui-components.md`, `styling.md`, `i18n-keys.md`,
 `error-reporting.md`를 차용한다.
 

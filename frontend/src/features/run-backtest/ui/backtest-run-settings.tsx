@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, type SyntheticEvent } from "react";
 
 import { t, tDescription } from "../../../shared/config";
-import { Badge } from "../../../shared/ui";
+import { Badge, Button } from "../../../shared/ui";
 import {
   DATE_INPUT_MAXIMUM,
   DATE_INPUT_MINIMUM,
@@ -103,7 +103,7 @@ const EnvironmentInput = ({
     <div className="backtest-settings__field">
       <label htmlFor={inputId}>{runEnvironmentLabel(field)}</label>
       {field.control === "select" ? (
-        <select
+        <select className="ui-select"
           {...common}
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -115,7 +115,7 @@ const EnvironmentInput = ({
           ))}
         </select>
       ) : (
-        <input
+        <input className="ui-input"
           {...common}
           autoComplete="off"
           spellCheck={false}
@@ -201,6 +201,11 @@ export const BacktestRunSettings = ({
     result.errors,
   );
   const popoverRef = useRef<HTMLDivElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
+  const closePanel = () => {
+    setPanelOpen(false);
+    summaryRef.current?.focus();
+  };
   // 요약 띠·차단 안내가 "이 칸으로 가기"를 요청하면 패널이 열린 뒤 그 칸에 초점을 옮긴다. 요청 한 번
   // (nonce)에 한 번만 움직여, 사용자가 패널을 닫았다 다시 열 때 초점을 빼앗지 않는다.
   const handledNonce = useRef<number | null>(null);
@@ -218,11 +223,17 @@ export const BacktestRunSettings = ({
   }, [focusField, focusNonce, open]);
   return (
     <details
-      className="backtest-settings"
+      className="backtest-settings ui-disclosure ui-control-touch"
       open={open}
       onToggle={(event) => setPanelOpen(event.currentTarget.open)}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closePanel();
+      }}
     >
-      <summary aria-label={t("backtest.settings.open")}>
+      <summary ref={summaryRef} aria-label={t("backtest.settings.open")}>
         {t("backtest.settings.title")}
         <Badge tone={result.valid ? "neutral" : "error"}>
           {result.valid
@@ -235,6 +246,12 @@ export const BacktestRunSettings = ({
         className="backtest-settings__popover"
         hidden={!open}
       >
+        <header className="backtest-settings__header">
+          <strong>{t("backtest.settings.title")}</strong>
+          <Button size="small" tone="ghost" onClick={closePanel}>
+            {t("backtest.settings.close")}
+          </Button>
+        </header>
         <fieldset
           disabled={disabled}
           className="backtest-settings__environment"
@@ -272,7 +289,7 @@ export const BacktestRunSettings = ({
           <legend>{t("backtest.settings.options")}</legend>
           <label>
             <span>{t("backtest.settings.core")}</span>
-            <select
+            <select className="ui-select"
               value={fields.core}
               onChange={(event) =>
                 setField("core", event.target.value as typeof fields.core)
@@ -287,7 +304,7 @@ export const BacktestRunSettings = ({
           </label>
           <label>
             <span>{t("backtest.settings.initialCash")}</span>
-            <input
+            <input className="ui-input"
               inputMode="decimal"
               step="any"
               type="number"
@@ -301,7 +318,7 @@ export const BacktestRunSettings = ({
           </label>
           <label>
             <span>{t("backtest.settings.benchmark")}</span>
-            <input
+            <input className="ui-input"
               autoComplete="off"
               spellCheck={false}
               value={fields.benchmarkSecurityId}
@@ -315,7 +332,7 @@ export const BacktestRunSettings = ({
           </label>
           <label>
             <span>{t("backtest.settings.annualizationDays")}</span>
-            <input
+            <input className="ui-input"
               inputMode="numeric"
               step="1"
               type="number"
@@ -331,7 +348,7 @@ export const BacktestRunSettings = ({
           </label>
           <label>
             <span>{t("backtest.settings.oosStart")}</span>
-            <input
+            <input className="ui-input"
               type="date"
               min={DATE_INPUT_MINIMUM}
               max={DATE_INPUT_MAXIMUM}

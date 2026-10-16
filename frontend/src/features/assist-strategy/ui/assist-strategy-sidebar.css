@@ -29,7 +29,7 @@
 .assist__sessions {
   max-width: 180px;
   padding: 4px var(--space-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: var(--surface-canvas);
   color: var(--text);
@@ -289,12 +289,12 @@
 
 .assist__input {
   padding: var(--space-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   background: var(--surface-canvas);
   color: var(--text);
   font: inherit;
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-body);
   resize: vertical;
 }
 

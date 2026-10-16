@@ -318,7 +318,7 @@ export const FactorGraphPanel = ({
         </div>
         <label>
           <span>{t("plan.factor")}</span>
-          <select
+          <select className="ui-select"
             value={activeIndex}
             onChange={(event) => {
               const next = Number(event.target.value);

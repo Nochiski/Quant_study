@@ -55,7 +55,7 @@ export const OperatorPalette = ({
     >
       <input
         type="search"
-        className="factor-graph__palette-search"
+        className="factor-graph__palette-search ui-input"
         aria-label={t("graph.palette.search")}
         placeholder={t("graph.palette.searchPlaceholder")}
         value={query}

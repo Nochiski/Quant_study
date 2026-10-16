@@ -12,6 +12,7 @@ paths:
   - "docs/superpowers/specs/2026-09-20-ai-assistant-design.md"
   - "docs/superpowers/specs/2026-09-27-ai-backtest-result-explain.md"
   - "docs/planning/validation-lab/**"
+  - "docs/planning/research-to-trading/**"
   - "docs/superpowers/specs/2026-09-29-validation-lab-design.md"
   - "database/src/equity/**"
 ---
@@ -22,6 +23,9 @@ paths:
 
 | 사실 | 유일한 owner | 나머지 레이어 |
 |---|---|---|
+| S01 연구 입력 보존·공개 gate | `database/src/equity/research_snapshot.py`의 `create_snapshot`·`verify_snapshot`·`python -m equity.research_snapshot create/verify/open`이 연구 root 복사·출처·무결성·공개 계약을 소유한다. 원장 current/파티션·해시는 기존 manifest/layout/hash 규칙을 재사용한다 | pending marker가 있는 root는 `verify/open`과 `equity_duckdb/_source.py`의 `table_builds` 진입이 차단한다. 최종 전체 검증 성공 후에만 pending을 해제한다. adapter는 완성 후 바이트 해시를 매번 검증하지 않으므로 실행 전 `open --repo-root` 검증은 호출자 책임이다. `ledger_snapshot_id`는 기존 원장 판이며, `provenance.contract_sources_sha256`은 계약 **문서 원문 지문**이라 기존 `DataSnapshot.snapshot_id`의 **필드 계약 판**을 대체하지 않는다. 실제 필드 계약 계산 owner는 아래 기존 snapshot 행을 유지한다. 합성 검증과 미검증 실원장 범위는 `docs/planning/research-to-trading/S01-snapshot.md`다 |
+| S03 미래 가격 라벨·신호 평가 | `domain/signal_evaluation`의 `evaluate_signal`·`PriceLabelSpec`·상태/결과 타입이 날짜별 Rank IC·커버리지·제외 사유를 소유한다. 기존 `cross_sectional_rank`와 `PortfolioDesignService.run_pipeline`이 만든 `PortfolioObservation`을 재사용한다 | 미래 분할조정 종가 라벨은 신호·선정·TargetTape 입력과 분리하며 현금배당·매매비용·실제 다음 시가 손익을 뜻하지 않는다. `require_research_window`를 기존 backtest facade로 읽어 평가일·신호일의 봉인 guard를 유지한다. 결측·미만기·상장 종료를 임의 0이나 마지막 가격으로 채우지 않고 당시 유니버스 분모/상태를 보존한다. `portfolioAnalytics`는 비용 후 계좌 성과로 별도 책임이며 IC를 대신하지 않는다. 현재 순수 core·합성 pipeline 연결만 구현됐고 실데이터 첫 연구·완전 분석·HTTP/UI 노출은 미완료다. 상세는 `docs/planning/research-to-trading/S03-signal-evaluation.md`다 |
+| S05 오프라인 주문 의도·브로커 사실·대사 | `domain/order_execution`의 `Intent`·`OrderFact`·`classify_event`·`reconcile`·`target_deltas`가 값/전이/대사의 owner다. `application/offline_execution`이 `BrokerPort`·`LedgerPort`와 단일 실행자·전송·복구·중지 명령을 소유한다. 전용 SQLite 스키마는 `execution_sqlite/_ledger.py`의 판본 1(application_id `0x4D484558`)이며 `sqlite_store`의 파일 claim·DDL·트랜잭션을 재사용한다 | 실제 보유와 주문 이후 누적 체결을 최초 baseline에 한 번만 반영해 대조한다. `READY → UNKNOWN` 영속 claim 뒤에만 한 번 전송하고 UNKNOWN은 자동 재발주하지 않는다. ACK·재시작은 fake의 완전한 누적 snapshot으로만 해소한다. snapshot revision/id 조회는 fake 전용 계약이며 실제 공급자 보장이 아니다. 목표 주식 수 입력만 지원하므로 목표 비중→주식 수 변환과 기존 portfolio buffer는 바꾸지 않는다. 전용 DB·명시 경로를 쓰고 전략/연구/assistant DB에 합치지 않는다. 범위·사용법·장애 증거는 `docs/planning/research-to-trading/S05-offline-execution.md`다 |
 | 정규 JSON 직렬화와 SHA-256 | 의존 없는 `domain/canonical` leaf의 `canonical_payload_json`·`canonical_json_spec_hash` | 각 도메인은 해시에 넣을 의미 payload를 소유한다. 전략·실행·필드 계약·스키마·팩터 캐시·결과 저장은 같은 encoder를 사용한다. 기존 팩터 plan/cache의 ASCII escape 표기는 명시 옵션으로 보존하고 비유한 숫자는 모두 거절한다. 스트리밍 tape digest와 원본 파일 무결성 hash는 JSON payload가 아니므로 별도 계약을 유지한다(#356) |
 | 카탈로그 목록 페이지 나누기 | 의존 없는 `domain/paging` leaf의 `validate_page_request`·`paginate`·`MAX_PAGE_SIZE` | 필드 카탈로그·팩터 카탈로그 쿼리가 같은 검증(page ≥ 1, page_size 1~`MAX_PAGE_SIZE`)을 쓰고, HTTP 쿼리 상한도 이 상수를 읽는다. 범위를 넘은 페이지는 빈 창이고 총계·페이지 수는 그대로다(#375 DR-A-14) |
 | 원천 값·공개 시점·coverage | Equity DB view + `dataset_profile` | `EquityDataPort`와 `RawObservationPort` 두 포트로 조회하며, 같은 셀에 같은 값·공개일을 답하는 것이 어댑터 계약이다 |

@@ -42,6 +42,13 @@ bootstrap ─> application + adapters
 - adapter → adapter 의존은 선언된 공용 책임 재사용에 한정한다: SQLite 저장 어댑터는
   무의존 `sqlite_store`의 연결·DDL·시간 규칙을, `backtest_engine`은 `engine_portfolio`의
   엔진 요구사항·목표 변환을 읽는다. 이 두 간선은 도메인 정책을 복제할 근거가 아니다.
+- S05 오프라인 실행은 `domain/order_execution`(정수 수량·KRW 값/누적 사실 전이·대사),
+  `application/offline_execution`(자체 `BrokerPort`·`LedgerPort`, 전송·복구 제어),
+  `adapters/outbound/execution_sqlite`(전용 의도 원장)·`adapters/outbound/fake_broker`(네트워크 없는
+  장애 fixture)가 소유한다. `execution_sqlite → sqlite_store`는 위 공용 연결·DDL 규칙의 재사용이며
+  실행 DB의 스키마·owner는 execution_sqlite에 남는다. application은 두 concrete adapter를
+  import하지 않고, 이 slice의 조립은 호출자/테스트가 명시적으로 수행한다. 기존 bootstrap·HTTP에는
+  연결하지 않는다. 상세 실행 계약은 `docs/planning/research-to-trading/S05-offline-execution.md`다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 커널을 import하는
   노드는 둘이다: `adapters/outbound/backtest_engine`(실행·벤치마크 곡선)과

@@ -226,6 +226,16 @@ export const BacktestRunSettings = ({
       className="backtest-settings ui-disclosure ui-control-touch"
       open={open}
       onToggle={(event) => setPanelOpen(event.currentTarget.open)}
+      onBlurCapture={(event) => {
+        // 비모달 패널 밖으로 이동한 초점은 유지하고, 그 위를 덮는 설정만 닫는다.
+        if (
+          open &&
+          event.relatedTarget instanceof Node &&
+          !event.currentTarget.contains(event.relatedTarget)
+        ) {
+          setPanelOpen(false);
+        }
+      }}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || !open) return;
         event.preventDefault();

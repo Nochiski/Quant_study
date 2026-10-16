@@ -130,6 +130,7 @@
 }
 
 .strategy-debugger__warnings {
+  flex: none;
   margin: 0;
   padding: var(--space-2) var(--space-6);
   border-bottom: 1px solid var(--status-warn);
@@ -140,14 +141,15 @@
 
 .strategy-debugger__results {
   display: flex;
-  min-height: 0;
-  /* 폼·출처 행이 늘어나면 결과 영역이 남은 높이에 맞춰 줄고 내부에서 스크롤한다. */
+  /* 기본 높이에서도 탭과 최소 본문을 남기고, 부족한 공간은 디버거 전체 스크롤로 접근한다. */
+  min-height: 160px;
   flex: 1 1 260px;
   flex-direction: column;
   overflow: hidden;
 }
 
 .strategy-debugger__results > .ui-tabs {
+  flex: none;
   padding-inline: var(--space-4);
 }
 

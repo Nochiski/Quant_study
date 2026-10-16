@@ -90,6 +90,9 @@
   기존 접기 버튼은 `.ui-disclosure-toggle`과 `aria-expanded`, treeitem 안의 장식 span은
   `.ui-disclosure-caret`과 `data-open`·`data-empty`로 같은 슬롯을 재사용한다. 기존 클릭·키보드
   소유자는 그대로 두고 장식 span은 aria-hidden으로 읽기 순서에서 제외한다.
+- 실행 설정은 비모달이다. 초점이 설정 전체(details) 밖의 실제 요소로 이동하면 패널만 닫고
+  외부 요소의 원래 초점을 유지한다. 내부 칸·닫기 단추·summary 사이 이동이나 이동 대상이 없는
+  blur는 자동 닫기 대상이 아니다. Escape와 명시적 닫기 단추는 summary로 초점을 돌려준다.
 - 마우스·키보드·터치에서 동일한 문구와 상태를 쓴다. focus-visible은 둘레를 분명히 표시한다.
   coarse pointer 환경의 주 입력·주 행동은 최소 44px를 고려하되 밀집 도구 버튼 전체를 강제로
   44px로 늘리지 않는다. 모바일 배치에서 행동 사이 간격을 확보한다.

@@ -12,7 +12,11 @@ const expectFocusedControlVisible = async (page: Page) => {
   expect(
     await page.evaluate(() => {
       const element = document.activeElement;
-      if (!(element instanceof HTMLElement)) return false;
+      if (
+        !(element instanceof HTMLElement) ||
+        (element.tabIndex < 0 && !element.isContentEditable)
+      )
+        return false;
       const bounds = element.getBoundingClientRect();
       const hit = document.elementFromPoint(
         bounds.x + bounds.width / 2,
@@ -142,6 +146,32 @@ test(
         await expect(settings.start).toBeHidden();
         await expect(settings.toggle).toBeFocused();
         if (view.width === 360) {
+          await settings.toggle.press("Enter");
+          const closeSettings = page.getByRole("button", {
+            name: "실행 설정 닫기",
+            exact: true,
+          });
+          await closeSettings.focus();
+          await expect(settings.start).toBeVisible();
+          await settings.toggle.focus();
+          await expect(settings.start).toBeVisible();
+          const oosStart = page.getByLabel(/^OOS 시작일 \(선택\)/);
+          await oosStart.focus();
+          const settingsElement = await panel.elementHandle();
+          expect(settingsElement).not.toBeNull();
+          let leftSettings = false;
+          // native 날짜 입력의 연·월·일 세그먼트를 지나 실제 다음 컨트롤로 이동한다.
+          for (let index = 0; index < 8; index += 1) {
+            await page.keyboard.press("Tab");
+            leftSettings = await settingsElement!.evaluate(
+              (element) => !element.contains(document.activeElement),
+            );
+            if (leftSettings) break;
+          }
+          expect(leftSettings).toBe(true);
+          await expect(settings.start).toBeHidden();
+          await expect(settings.toggle).not.toBeFocused();
+          await expectFocusedControlVisible(page);
           const outline = page.getByRole("navigation", {
             name: "전략 구조",
             exact: true,

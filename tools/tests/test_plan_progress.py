@@ -304,8 +304,9 @@ class PlanProgressAggregationTest(unittest.TestCase):
             )
             command = [
                 sys.executable,
-                "-m",
-                "quant_study_dev.plan_progress",
+                "-X",
+                "utf8",
+                str(root / "tools" / "quant_study_dev" / "plan_progress.py"),
                 "--profile",
                 "strategy-workbench-yaml-ui",
                 "--plan-path",

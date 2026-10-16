@@ -7036,6 +7036,13 @@ export type ValidationKind = "semantic" | "capability";
 export type ValidationSeverity = "error" | "warning";
 
 /**
+ * WalkForwardEvaluationBasis
+ *
+ * 연결곡선이 측정하는 대상. 실제 계좌 연속 평가는 별도 계약으로 구분해야 한다.
+ */
+export type WalkForwardEvaluationBasis = "window_restart_returns";
+
+/**
  * WalkForwardGap
  *
  * 이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.
@@ -7063,7 +7070,12 @@ export type WalkForwardReport = {
    * Curve
    */
   curve: Array<EquityCurvePoint>;
+  evaluation_basis?: WalkForwardEvaluationBasis;
   gap: WalkForwardGap | null;
+  /**
+   * Interpretation
+   */
+  interpretation?: string;
   /**
    * Out Of Sample Sharpe
    */

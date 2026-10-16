@@ -222,6 +222,11 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     assert sessions == sorted(set(sessions))
     assert walk_forward["gap"] is None
     assert walk_forward["out_of_sample_sharpe"] is not None
+    assert walk_forward["evaluation_basis"] == "window_restart_returns"
+    assert "같은 초기자본으로 다시 실행" in walk_forward["interpretation"]
+    assert "진입비용·손익은 포함하지" in walk_forward["interpretation"]
+    assert "현금·보유 수량을 이월하지" in walk_forward["interpretation"]
+    assert "실제 연속 계좌의 손익이 아닙니다" in walk_forward["interpretation"]
     # 워밍업은 검증 창 앞에서 읽고 성과에서는 뺀다: 첫 검증 실행의 곡선은 검증 시작일부터지만, 그날
     # 이미 20세션 모멘텀으로 종목을 골라 주문을 낸다.
     tested = client.get(f"/api/v1/backtests/{picks[0]['run_id']}/result").json()

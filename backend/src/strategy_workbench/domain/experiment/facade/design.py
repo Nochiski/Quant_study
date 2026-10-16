@@ -41,8 +41,10 @@ from strategy_workbench.domain.experiment._search import (
     parameter_grid_values,
 )
 from strategy_workbench.domain.experiment._walk_forward import (
+    WALK_FORWARD_INTERPRETATION,
     SplitMode,
     SplitSpec,
+    WalkForwardEvaluationBasis,
     WalkForwardGap,
     WalkForwardWindow,
     WindowSelectionRule,
@@ -55,6 +57,8 @@ from strategy_workbench.domain.experiment._walk_forward import (
 )
 
 __all__ = [
+    "WALK_FORWARD_INTERPRETATION",
+    "WalkForwardEvaluationBasis",
     "EXPERIMENT_CODES",
     "MAX_GRID_POINTS",
     "PEAK_NEIGHBOR_RATIO",

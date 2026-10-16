@@ -685,6 +685,23 @@ def test_daily_excel_has_new_sheets_in_order_with_meta(fi_world: dict[str, Path]
                    if n.startswith("xl/worksheets/sheet"))
 
 
+def test_line_chart_date_axis_sits_at_bottom(fi_world: dict[str, Path]) -> None:
+    """꺾은선 날짜 축은 값 축 최솟값에서 교차한다(min) — autoZero 면 음수 계열(외국인 누적 순매수 등)에서
+    축 선이 0 높이로 그래프를 가로지른다(10-16 사용자 '가로선이 길게'). 막대는 0 에서 자라야 해서 autoZero."""
+    res = build_daily(FRI, "morning", model_root=fi_world["model"], fi_root=fi_world["fi"],
+                      out_root=fi_world["out"])
+    with zipfile.ZipFile(res.path) as z:
+        xmls = [z.read(n).decode("utf-8") for n in z.namelist() if n.startswith("xl/charts/chart")]
+    dated = [x for x in xmls if "<dateAx>" in x]
+    lines = [x for x in dated if "<lineChart>" in x]
+    bars = [x for x in dated if "<barChart>" in x]
+    assert lines and bars
+    for x in lines:
+        assert '<crosses val="min" /><auto val="1" />' in x and "autoZero" not in x.split("<dateAx>")[1].split("</dateAx>")[0]
+    for x in bars:
+        assert '<crosses val="autoZero" /><auto val="1" />' in x
+
+
 def test_missing_source_gives_one_line_sheet_and_warning(fi_world: dict[str, Path],
                                                         tmp_path: Path,
                                                         caplog: pytest.LogCaptureFixture) -> None:

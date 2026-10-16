@@ -1206,9 +1206,11 @@ TimeUnit = Literal["days", "months", "years"]
 
 def date_frame(ch: BarChart | LineChart, yfmt: str, xfmt: str, base: TimeUnit, major: int,
                unit: TimeUnit) -> None:
-    """날짜 가로축 그래프 틀 — 축 칸은 Q.Pack(엑셀 저장본) 날짜 축과 같게(아래 · autoZero · auto ·
-    lblOffset 100). 원자료가 숨긴 열이라 '숨긴 데이터도 표시'."""
-    ax = DateAxis(crossAx=100, axPos="b", crosses="autoZero", auto=True, lblOffset=100,
+    """날짜 가로축 그래프 틀 — 축 칸은 Q.Pack(엑셀 저장본) 날짜 축과 같게(아래 · auto · lblOffset 100).
+    교차는 꺾은선 = 값 축 최솟값(min — autoZero 면 음수 계열에서 축 선이 0 높이로 그래프를 가로지른다,
+    10-16 '가로선이 길게'), 막대 = autoZero(막대가 0 에서 자란다). 원자료가 숨긴 열이라 '숨긴 데이터도 표시'."""
+    crosses = "min" if isinstance(ch, LineChart) else "autoZero"
+    ax = DateAxis(crossAx=100, axPos="b", crosses=crosses, auto=True, lblOffset=100,
                   baseTimeUnit=base, majorUnit=major, majorTimeUnit=unit)
     ax.number_format = xfmt
     vars(ch)["x_axis"] = ax                 # openpyxl 은 막대그래프에 날짜 축 대입을 막아서 직접 넣는다
@@ -1287,8 +1289,7 @@ def finish_charts(path: Path, wb: Workbook) -> int:
             raise ValueError(f"그래프 XML 모양이 예상과 다르다(openpyxl 판 변경?): {name}")
         s = s.replace("<chart><plotArea>", '<chart><autoTitleDeleted val="1" /><plotArea>')
         s = s.replace("<a:r><a:t /></a:r>", "")
-        s = s.replace('<crosses val="autoZero" /><lblOffset',
-                      '<crosses val="autoZero" /><auto val="1" /><lblOffset')
+        s = re.sub(r'(<crosses val="(?:autoZero|min)" />)<lblOffset', r'\1<auto val="1" /><lblOffset', s)
         s = re.sub(r"<cat><numRef><f>(.*?)</f></numRef></cat>", cat, s)
         s = re.sub(r"<val><numRef><f>(.*?)</f></numRef></val>",
                    lambda m: f"<val><numRef><f>{m[1]}</f>{cache('num', m[1])}</numRef></val>", s)

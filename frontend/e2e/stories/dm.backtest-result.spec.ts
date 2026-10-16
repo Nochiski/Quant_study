@@ -40,7 +40,7 @@ const SHORT_OOS_START = "2026-03-02";
 test(
   "US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 일곱 개와 자산 곡선이 보인다",
   { tag: ["@story", "@US-DM-04"] },
-  async ({ page }) => {
+  async ({ page }, testInfo) => {
     test.setTimeout(180_000);
     await openEditor(page, "/research/strategies/new");
     await replaceSource(
@@ -112,6 +112,10 @@ test(
       exact: true,
     });
     await expect(accountPanel).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("backtest-result-desktop.png"),
+      fullPage: true,
+    });
     await expect(accountPanel).toContainText(account.interpretation!);
     await expect(accountPanel).toContainText(
       "전체 구간(FULL)의 총수익률은 첫 계좌 기록을 기준",
@@ -219,6 +223,10 @@ test(
       widthDiagnostics.documentWidth <= widthDiagnostics.viewport,
       JSON.stringify(widthDiagnostics, null, 2),
     ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("backtest-result-mobile.png"),
+      fullPage: true,
+    });
     if (accountViewport) await page.setViewportSize(accountViewport);
 
     // 새 결과는 원본 주문 이벤트를 기록한다. 옛 형식의 미기록 안내로 대체되면 안 된다(#411).

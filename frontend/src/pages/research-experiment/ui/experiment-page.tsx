@@ -220,8 +220,8 @@ export const ExperimentPage = () => {
     >
       <header className="data-list-page__header">
         <div>
-          <h1 id="experiment-title">
-            {tFill("experiments.detail.title", { id: experimentId })}
+          <h1 id="experiment-title" aria-labelledby="experiment-heading experiment-identifier">
+            <span id="experiment-heading">{t("experiments.detail.heading")}</span>
           </h1>
           <p>
             <Badge tone={experimentStatusTone(experiment.data.status)}>
@@ -233,6 +233,10 @@ export const ExperimentPage = () => {
               running: counts.running ?? 0,
               failed: counts.failed ?? 0,
             })}
+          </p>
+          <p className="experiment-page__identity">
+            <span>{t("experiments.detail.id")}</span>
+            <code id="experiment-identifier">{experimentId}</code>
           </p>
           {counting && remaining.isSuccess ? (
             <p>

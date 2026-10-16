@@ -338,7 +338,7 @@ export const FactorGraphEditor = ({
         {factorSelect ? (
           <label>
             <span>{t("plan.factor")}</span>
-            <select
+            <select className="ui-select"
               value={factorIndex}
               onChange={(event) =>
                 onSelectPointer(factorGraphPointer(Number(event.target.value)))
@@ -551,7 +551,7 @@ export const FactorGraphEditor = ({
                         selectedItem.branches.join(", "),
                       )}
                     </span>
-                    <select
+                    <select className="ui-select"
                       aria-label={`${selectedItem.summary} · ${t("form.list.kind")}`}
                       value=""
                       onChange={(event) => {

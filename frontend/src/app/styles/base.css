@@ -1,9 +1,9 @@
-/* Reset, typography and focus (WORKFLOW P2-01). Layout and components live elsewhere. */
+/* 리셋·본문 위계·초점만 소유한다. 화면 배치와 개별 요소는 해당 owner가 정한다. */
 * {
   box-sizing: border-box;
 }
 
-/* The HTML hidden attribute wins over any display rule (panels, drawers, tabpanels). */
+/* 접힌 패널과 탭은 다른 display 규칙보다 native hidden 상태를 우선한다. */
 [hidden] {
   display: none !important;
 }
@@ -39,7 +39,18 @@ kbd,
 pre,
 samp {
   font-family: var(--font-mono);
-  font-size: 0.93em;
+  font-size: max(var(--text-size-small), 0.93em);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 제목 크기와 외곽 여백은 페이지·패널 문맥에서 정하고 공통 굵기·행간만 맞춘다. */
+:where(h1, h2, h3, h4, h5, h6) {
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
+}
+
+:where(table, dl) {
+  font-variant-numeric: tabular-nums;
 }
 
 small,

@@ -47,7 +47,7 @@ export const StrategyPreview = ({
         ) : null}
         <label>
           {t("strategy.preview.factor")}
-          <select
+          <select className="ui-select"
             value={selectedFactorId}
             onChange={(event) => setFactorId(event.target.value)}
           >
@@ -60,7 +60,7 @@ export const StrategyPreview = ({
         </label>
         <label>
           {t("strategy.preview.date")}
-          <input
+          <input className="ui-input"
             type="date"
             value={asOf}
             min={context?.environment.start}

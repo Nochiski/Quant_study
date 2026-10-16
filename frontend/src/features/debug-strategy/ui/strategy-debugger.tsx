@@ -891,7 +891,7 @@ export const StrategyDebugger = ({
       >
         <label>
           <span>{t("debugger.date")}</span>
-          <input
+          <input className="ui-input"
             type="date"
             aria-label={t("debugger.date")}
             value={selectedAsOf}
@@ -915,7 +915,7 @@ export const StrategyDebugger = ({
         </label>
         <label className="strategy-debugger__security-control">
           <span>{t("debugger.security")}</span>
-          <input
+          <input className="ui-input"
             type="text"
             value={selectedSecurity}
             placeholder={t("debugger.security.placeholder")}
@@ -933,7 +933,7 @@ export const StrategyDebugger = ({
         </label>
         <label className="strategy-debugger__holdings-control">
           <span>{t("debugger.holdings")}</span>
-          <input
+          <input className="ui-input"
             type="text"
             value={selectedHoldings}
             placeholder={t("debugger.holdings.placeholder")}
@@ -955,7 +955,7 @@ export const StrategyDebugger = ({
         </label>
         <label>
           <span>{t("debugger.factor")}</span>
-          <select
+          <select className="ui-select"
             value={factor?.factorId ?? ""}
             disabled={context === null || context.factors.length === 0}
             onChange={(event) => {
@@ -979,7 +979,7 @@ export const StrategyDebugger = ({
         </label>
         <label>
           <span>{t("debugger.node")}</span>
-          <select
+          <select className="ui-select"
             value={node?.nodeId ?? ""}
             disabled={factor === undefined}
             onChange={(event) => {

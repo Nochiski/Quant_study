@@ -1,9 +1,9 @@
 /* 백테스트 결과 표현은 이 entity가 소유하며 전략 편집기 수명주기와 분리한다. */
 .run-detail {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--section-gap);
   min-width: 0;
-  padding: var(--space-5);
+  padding: var(--panel-padding);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-large);
   background: var(--surface-panel);
@@ -17,12 +17,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .run-detail .run-detail__header h3 {
   margin: var(--space-1) 0 var(--space-2);
-  font-size: var(--text-size-display);
+  font-size: var(--text-size-section-title);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
 }
 
 .run-detail .run-detail__header p,
@@ -35,7 +38,7 @@
 .run-detail .section-kicker {
   color: var(--accent);
   font-size: var(--text-size-small);
-  font-weight: var(--font-weight-strong);
+  font-weight: var(--font-weight-heading);
   letter-spacing: var(--tracking-wide);
 }
 
@@ -54,7 +57,7 @@
 
 .run-detail .metric-highlights {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--metric-card-min-width)), 1fr));
   gap: var(--space-2);
 }
 
@@ -78,7 +81,7 @@
   align-self: end;
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
-  font-size: var(--text-size-title);
+  font-size: var(--text-size-section-title);
   font-variant-numeric: tabular-nums;
 }
 
@@ -92,7 +95,7 @@
 .run-detail .metric-highlights__plain dfn {
   color: var(--text);
   font-style: normal;
-  font-weight: var(--font-weight-strong);
+  font-weight: var(--font-weight-heading);
 }
 
 .run-detail .metric-highlights small,
@@ -145,7 +148,7 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   font-size: var(--text-size-small);
-  font-weight: var(--font-weight-strong);
+  font-weight: var(--font-weight-heading);
 }
 
 .run-detail .result-chart svg {
@@ -262,7 +265,7 @@
   cursor: pointer;
   color: var(--accent);
   font-size: var(--text-size-small);
-  font-weight: var(--font-weight-strong);
+  font-weight: var(--font-weight-heading);
 }
 
 .run-detail .manifest-grid {

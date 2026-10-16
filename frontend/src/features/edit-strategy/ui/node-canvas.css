@@ -78,7 +78,7 @@
 .node-canvas__move {
   font: inherit;
   font-size: var(--text-size-small);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
   color: var(--text);
   background: var(--surface-subtle);

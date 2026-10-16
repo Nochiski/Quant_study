@@ -52,7 +52,7 @@ export const ConstraintEditor = ({
         const label = `${t("experiments.new.constraints")} ${index + 1}`;
         return (
           <span key={index} role="group" aria-label={label}>
-            <select
+            <select className="ui-select"
               aria-label={`${label}: ${t("experiments.new.constraintLeft")}`}
               value={constraint.left}
               onChange={(event) => update(index, { left: event.target.value })}
@@ -63,7 +63,7 @@ export const ConstraintEditor = ({
                 </option>
               ))}
             </select>
-            <select
+            <select className="ui-select"
               aria-label={`${label}: ${t("experiments.new.constraintOperator")}`}
               value={constraint.operator}
               onChange={(event) =>
@@ -76,7 +76,7 @@ export const ConstraintEditor = ({
                 </option>
               ))}
             </select>
-            <select
+            <select className="ui-select"
               aria-label={`${label}: ${t("experiments.new.constraintRight")}`}
               value={right}
               onChange={(event) => {
@@ -102,7 +102,7 @@ export const ConstraintEditor = ({
               ))}
             </select>
             {constraint.right_parameter == null ? (
-              <input
+              <input className="ui-input"
                 aria-label={`${label}: ${t("experiments.new.constraintValue")}`}
                 value={String(constraint.right_value ?? "")}
                 onChange={(event) =>

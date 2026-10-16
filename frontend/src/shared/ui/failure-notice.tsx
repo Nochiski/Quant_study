@@ -42,7 +42,7 @@ export const FailureNotice = ({
       <div className="ui-failure__actions">{children}</div>
     )}
     {reason === null ? null : (
-      <details className="ui-failure__reason">
+      <details className="ui-failure__reason ui-disclosure">
         <summary>{t("ui.failure.serverReason")}</summary>
         {reason}
       </details>

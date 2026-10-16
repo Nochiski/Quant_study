@@ -210,7 +210,7 @@ const RevisionComparison = ({
     <div className="strategy-diff__revision">
       <div className="strategy-diff__selectors">
         <label htmlFor={baseId}>{t("diff.revision.base")}</label>
-        <select
+        <select className="ui-select"
           id={baseId}
           value={active.base}
           onChange={(event) =>
@@ -227,7 +227,7 @@ const RevisionComparison = ({
           ))}
         </select>
         <label htmlFor={targetId}>{t("diff.revision.target")}</label>
-        <select
+        <select className="ui-select"
           id={targetId}
           value={active.target}
           onChange={(event) =>

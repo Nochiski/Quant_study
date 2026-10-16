@@ -133,6 +133,7 @@ Strategy Workbench의 전체 계획과 체크리스트는
 
 설계 spec:
 
+- [화면 디자인 정본](design-system/strategy-workbench/MASTER.md): 화면 위계·타이포·컨트롤·반응형 배치 기준
 - [schema 1.1 · GUI 편집](docs/superpowers/specs/2026-09-17-strategy-schema-1-1-and-gui-editing-design.md)
 - [AI 어시스턴트](docs/superpowers/specs/2026-09-20-ai-assistant-design.md)
 - [전략 언어 2.0(schema 1.2 · 그래프 표현)](docs/superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)

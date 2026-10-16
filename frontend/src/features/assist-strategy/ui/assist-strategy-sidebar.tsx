@@ -160,7 +160,7 @@ export const AssistStrategySidebar = ({
         <div className="assist__head-actions">
           {chat.sessions.length === 0 ? null : (
             <select
-              className="assist__sessions"
+              className="assist__sessions ui-select"
               aria-label={t("assistant.chat.session")}
               value={chat.sessionId ?? ""}
               onChange={(event) =>

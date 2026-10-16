@@ -225,9 +225,10 @@ export const StrategyIde = ({
   assistant,
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
+  const compact = useMediaQuery("(max-width: 767px)");
   const { layout, debuggerMaxHeight, resize, toggle, close } = usePanelLayout(
     narrow
-      ? { ...DEFAULT_LAYOUT, inspectorOpen: false, debuggerOpen: false }
+      ? { ...DEFAULT_LAYOUT, outlineOpen: !compact, inspectorOpen: false, debuggerOpen: false }
       : DEFAULT_LAYOUT,
   );
   // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가.
@@ -309,16 +310,21 @@ export const StrategyIde = ({
    * 한 번에 하나만 연다 — 겹치면 뒤에 깔린 패널이 보이지 않은 채 탭 순서와 접근성 트리에 남는다
    * (B-04 리뷰 P1-2).
    */
-  const toggleRight = useCallback(
-    (panel: "inspectorOpen" | "assistantOpen"): void => {
+  const togglePanel = useCallback(
+    (panel: "outlineOpen" | "inspectorOpen" | "debuggerOpen" | "assistantOpen"): void => {
       const other =
         panel === "inspectorOpen" ? "assistantOpen" : "inspectorOpen";
       const opening = !layout[panel];
-      if (opening && narrow && layout[other]) close([other]);
+      // 작은 화면의 보조 서랍은 하나만 펼쳐 가려진 내용이 탭 순서에 남지 않게 한다.
+      if (opening && compact) {
+        close((["outlineOpen", "inspectorOpen", "debuggerOpen", "assistantOpen"] as const).filter((key) => key !== panel));
+      } else if (opening && narrow && (panel === "inspectorOpen" || panel === "assistantOpen") && layout[other]) {
+        close([other]);
+      }
       if (opening && panel === "assistantOpen") setAssistantMounted(true);
       toggle(panel);
     },
-    [close, layout, narrow, toggle],
+    [close, compact, layout, narrow, toggle],
   );
   // 슬롯 함수는 렌더 중에 불리므로 이 손잡이는 ref를 닫지 않는다(`react-hooks/refs`). 접은 뒤 돌아갈
   // 자리는 상단 바 토글이고, 그 자리는 id로 찾는다.
@@ -399,7 +405,7 @@ export const StrategyIde = ({
         label: `${layout.outlineOpen ? t("command.hide") : t("command.show")} ${t("ide.outline")}`,
         focusAfterExecute: () =>
           layout.outlineOpen ? outlineRestore.current : outlineCollapse.current,
-        execute: () => toggle("outlineOpen"),
+        execute: () => togglePanel("outlineOpen"),
       },
       {
         id: "panel.inspector",
@@ -409,7 +415,7 @@ export const StrategyIde = ({
           layout.inspectorOpen
             ? inspectorRestore.current
             : inspectorCollapse.current,
-        execute: () => toggleRight("inspectorOpen"),
+        execute: () => togglePanel("inspectorOpen"),
       },
       {
         id: "panel.debugger",
@@ -419,7 +425,7 @@ export const StrategyIde = ({
           layout.debuggerOpen
             ? debuggerRestore.current
             : debuggerCollapse.current,
-        execute: () => toggle("debuggerOpen"),
+        execute: () => togglePanel("debuggerOpen"),
       },
       ...(hasAssistant
         ? [
@@ -433,7 +439,7 @@ export const StrategyIde = ({
                   ? assistantRestore.current
                   : assistantFocusTarget(),
               focusOptions: ASSISTANT_FOCUS,
-              execute: () => toggleRight("assistantOpen"),
+              execute: () => togglePanel("assistantOpen"),
             },
           ]
         : []),
@@ -481,8 +487,7 @@ export const StrategyIde = ({
     saveDisabled,
     symbols,
     theme,
-    toggle,
-    toggleRight,
+    togglePanel,
     validateDisabled,
     view,
     viewTabsId,
@@ -554,7 +559,7 @@ export const StrategyIde = ({
         if (!hasAssistant || event.repeat) return;
         event.preventDefault();
         const opening = !layout.assistantOpen;
-        toggleRight("assistantOpen");
+        togglePanel("assistantOpen");
         queueMicrotask(() =>
           (opening ? assistantFocusTarget() : assistantRestore.current)?.focus(
             ASSISTANT_FOCUS,
@@ -592,7 +597,7 @@ export const StrategyIde = ({
     paletteOpen,
     runDisabled,
     saveDisabled,
-    toggleRight,
+    togglePanel,
     validateDisabled,
     viewTabsId,
   ]);
@@ -612,7 +617,7 @@ export const StrategyIde = ({
           size="small"
           tone="ghost"
           onClick={() => {
-            toggleRight("inspectorOpen");
+            togglePanel("inspectorOpen");
             queueMicrotask(() => inspectorRestore.current?.focus());
           }}
         >
@@ -638,7 +643,7 @@ export const StrategyIde = ({
           size="small"
           tone="ghost"
           onClick={() => {
-            toggle("debuggerOpen");
+            togglePanel("debuggerOpen");
             queueMicrotask(() => debuggerRestore.current?.focus());
           }}
         >
@@ -677,7 +682,7 @@ export const StrategyIde = ({
             size="small"
             tone="ghost"
             onClick={() => {
-              toggleRight("assistantOpen");
+              togglePanel("assistantOpen");
               queueMicrotask(() => assistantRestore.current?.focus());
             }}
           >
@@ -734,7 +739,7 @@ export const StrategyIde = ({
               ref={outlineRestore}
               size="small"
               onClick={() => {
-                toggle("outlineOpen");
+                togglePanel("outlineOpen");
                 queueMicrotask(() => outlineCollapse.current?.focus());
               }}
               aria-controls={ids.outline}
@@ -748,7 +753,7 @@ export const StrategyIde = ({
               ref={inspectorRestore}
               size="small"
               onClick={() => {
-                toggleRight("inspectorOpen");
+                togglePanel("inspectorOpen");
                 queueMicrotask(() => inspectorCollapse.current?.focus());
               }}
               aria-controls={ids.inspector}
@@ -762,7 +767,7 @@ export const StrategyIde = ({
               ref={debuggerRestore}
               size="small"
               onClick={() => {
-                toggle("debuggerOpen");
+                togglePanel("debuggerOpen");
                 queueMicrotask(() => debuggerCollapse.current?.focus());
               }}
               aria-controls={ids.debugger}
@@ -777,7 +782,7 @@ export const StrategyIde = ({
               id={assistantToggleId}
               size="small"
               onClick={() => {
-                toggleRight("assistantOpen");
+                togglePanel("assistantOpen");
                 queueMicrotask(() =>
                   assistantFocusTarget()?.focus(ASSISTANT_FOCUS),
                 );
@@ -858,9 +863,16 @@ export const StrategyIde = ({
 
       <div className="ide__body" ref={bodyRef}>
         <div
-          className="ide__left"
+          className={`ide__left${compact ? " ide__left--drawer" : ""}`}
           hidden={!layout.outlineOpen}
-          style={{ width: layout.outlineWidth }}
+          style={compact ? undefined : { width: layout.outlineWidth }}
+          onKeyDown={(event) => {
+            if (!compact || event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            close(["outlineOpen"]);
+            queueMicrotask(() => outlineRestore.current?.focus());
+          }}
         >
           <nav
             id={ids.outline}
@@ -874,7 +886,7 @@ export const StrategyIde = ({
                 size="small"
                 tone="ghost"
                 onClick={() => {
-                  toggle("outlineOpen");
+                  togglePanel("outlineOpen");
                   queueMicrotask(() => outlineRestore.current?.focus());
                 }}
               >
@@ -888,7 +900,7 @@ export const StrategyIde = ({
             {snippets}
           </section>
         </div>
-        {layout.outlineOpen ? (
+        {layout.outlineOpen && !compact ? (
           <SplitHandle
             orientation="vertical"
             label={t("ide.resizeOutline")}
@@ -904,7 +916,7 @@ export const StrategyIde = ({
           <section className="ide__editor" aria-label={t("ide.editor")}>
             <header className="ide__editor-header">
               <div className="ide__editor-heading">
-                <strong>StrategySpec</strong>
+                <strong>{t("ide.editor")}</strong>
                 <span className="ide__editor-sub">
                   {view.toUpperCase()} · {t("ide.editor.verbose")}
                 </span>

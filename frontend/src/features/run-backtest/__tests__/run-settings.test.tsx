@@ -493,6 +493,42 @@ describe("run environment panel", () => {
     expect(result.current.environment).toBeNull();
   });
 
+  it("설정 밖으로 이동하면 패널을 닫고 외부 초점을 유지한다", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+    const field = screen.getByRole("textbox", { name: "유니버스" });
+    const outside = screen.getByRole("button", { name: "apply upgraded environment" });
+    act(() => field.focus());
+    act(() => outside.focus());
+    expect(field).not.toBeVisible();
+    expect(outside).toHaveFocus();
+    expect(screen.getByLabelText("실행 설정 열기").closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("설정 내부와 summary로 초점을 옮길 때는 열린 상태를 유지한다", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+    const field = screen.getByRole("textbox", { name: "유니버스" });
+    const close = screen.getByRole("button", { name: "실행 설정 닫기" });
+    const summary = screen.getByLabelText("실행 설정 열기");
+    act(() => field.focus());
+    act(() => close.focus());
+    expect(field).toBeVisible();
+    act(() => summary.focus());
+    expect(field).toBeVisible();
+    expect(summary).toHaveFocus();
+  });
+
+  it("다음 초점이 없는 네이티브 선택창·창 이탈은 패널을 닫지 않는다", async () => {
+    renderWithQuery(<Harness />);
+    await openSettings();
+    const field = screen.getByRole("textbox", { name: "유니버스" });
+    act(() => field.focus());
+    fireEvent.blur(field, { relatedTarget: null });
+    expect(field).toBeVisible();
+    expect(screen.getByLabelText("실행 설정 열기").closest("details")).toHaveAttribute("open");
+  });
+
   it("opens the panel at the first empty field from the summary band", async () => {
     const user = userEvent.setup();
     renderWithQuery(<Harness />);
@@ -1100,6 +1136,8 @@ describe("run environment panel", () => {
     );
 
     expect(requestBody()?.environment).toEqual({ ...ENVIRONMENT, fee_bps: 5 });
+    // 외부 문서 행동으로 초점이 이동하면 설정이 닫히므로 다시 열어 적용된 값을 확인한다.
+    await openSettings();
     expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(5);
   });
 

@@ -299,7 +299,7 @@ export const ContinuousAccount = ({
           <code>{state?.evaluation_id ?? requestId}</code>
         </p>
       ) : null}
-      <details className="experiment-continuous__details">
+      <details className="experiment-continuous__details ui-disclosure">
         <summary>{t("experiments.continuous.interpretation")}</summary>
         <p>{t("experiments.continuous.description")}</p>
         <p>{interpretation}</p>
@@ -307,7 +307,7 @@ export const ContinuousAccount = ({
       </details>
       {state?.status === "completed" && result ? (
         <>
-          <details className="experiment-continuous__details">
+          <details className="experiment-continuous__details ui-disclosure">
             <summary>{t("experiments.continuous.metrics")}</summary>
             <p>{t("experiments.continuous.metricBasis")}</p>
             <div className="run-detail">
@@ -317,7 +317,7 @@ export const ContinuousAccount = ({
               />
             </div>
           </details>
-          <details className="experiment-continuous__details">
+          <details className="experiment-continuous__details ui-disclosure">
             <summary>
               {tFill("experiments.continuous.fills", {
                 count: result.artifacts.fills.length,
@@ -373,7 +373,7 @@ export const ContinuousAccount = ({
         </>
       ) : null}
       {state?.status === "completed" && result ? (
-        <details className="experiment-continuous__details">
+        <details className="experiment-continuous__details ui-disclosure">
           <summary>{t("experiments.continuous.details")}</summary>
           <dl>
             {Object.entries(result.manifest).map(([key, value]) => (

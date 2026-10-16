@@ -94,7 +94,7 @@ export const BacktestAccountReport = ({
               </dl>
             </>
           ) : null}
-          <details>
+          <details className="ui-disclosure">
             <summary>{t("backtest.account.provenance")}</summary>
             <dl className="account-report__records">
               <div>
@@ -113,7 +113,7 @@ export const BacktestAccountReport = ({
               ))}
             </dl>
           </details>
-          <details>
+          <details className="ui-disclosure">
             <summary>
               {t("backtest.account.warnings").replace(
                 "{count}",

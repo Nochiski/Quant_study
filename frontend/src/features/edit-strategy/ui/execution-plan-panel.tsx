@@ -100,7 +100,7 @@ export const ExecutionPlanPanel = ({
       <div className="execution-plan__toolbar">
         <label>
           <span>{t("plan.factor")}</span>
-          <select
+          <select className="ui-select"
             value={activeIndex}
             onChange={(event) => {
               const next = Number(event.target.value);

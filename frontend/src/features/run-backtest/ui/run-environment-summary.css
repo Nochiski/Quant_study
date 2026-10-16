@@ -3,10 +3,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-3);
-  padding: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--page-gutter);
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
-  background: var(--surface);
+  background: var(--surface-panel);
   font-size: var(--text-size-small);
 }
 
@@ -31,6 +31,7 @@
 .run-environment-summary dd {
   margin: 0;
   color: var(--text);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
@@ -43,7 +44,8 @@
 }
 
 .run-environment-summary__fill {
-  padding: 0 var(--space-2);
+  min-height: var(--control-height-dense);
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-small);
   color: var(--text);

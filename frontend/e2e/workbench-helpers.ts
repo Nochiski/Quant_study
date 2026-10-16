@@ -259,5 +259,9 @@ export const fillRunEnvironment = async (
     await expect(field).toHaveValue(value);
   }
   await expect(band).toContainText(environment.universe_id);
-  await press(toggle);
+  await press(
+    page.getByRole("button", { name: "실행 설정 닫기", exact: true }),
+  );
+  await expect(start).toBeHidden();
+  await expect(toggle).toBeFocused();
 };

@@ -234,7 +234,7 @@ export const RecipePanel = ({
         {ownInputs.length < 2 ? null : (
           <label>
             {t("recipe.previousInput")}
-            <select
+            <select className="ui-select"
               value={draft.previousInput}
               onChange={(event) =>
                 setPending({ ...draft, previousInput: event.target.value })
@@ -254,7 +254,7 @@ export const RecipePanel = ({
         {draft.fields.map((value, index) => (
           <label key={index}>
             {t("recipe.field")} {index + 1}
-            <select
+            <select className="ui-select"
               value={value}
               onChange={(event) =>
                 setPending({
@@ -342,7 +342,7 @@ export const RecipePanel = ({
     }))
     .filter((group) => group.entries.length > 0);
   return (
-    <section ref={root} className="recipe" aria-label={t("recipe.title")}>
+    <section ref={root} className="recipe ui-control-touch" aria-label={t("recipe.title")}>
       <header
         className="recipe__toolbar"
         aria-current={selectedPointer === graphPointer ? "true" : undefined}

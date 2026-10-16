@@ -104,7 +104,7 @@ export const StrategyFormPanel = ({
   return (
     <section
       ref={container}
-      className="strategy-form"
+      className="strategy-form ui-control-touch"
       aria-label={t("form.panel.label")}
     >
       <header className="strategy-form__header">
@@ -284,12 +284,11 @@ const SectionToggle = ({
   return (
     <button
       type="button"
-      className="strategy-form__toggle"
+      className="strategy-form__toggle ui-disclosure-toggle"
       aria-expanded={open}
       onClick={onToggle}
       title={tDescription(descriptionKey) ?? undefined}
     >
-      <span aria-hidden="true">{open ? "▾" : "▸"}</span>{" "}
       {name === null ? null : (
         <span className="strategy-form__name">{name}</span>
       )}
@@ -385,7 +384,7 @@ const FormListSectionView = ({
       <div hidden={!open}>
         <div className="strategy-form__control">
           {kinds !== null ? (
-            <select
+            <select className="ui-select"
               aria-label={`${section.key} · ${t("form.list.kind")}`}
               value={chosenKind ?? ""}
               onChange={(event) => setKind(event.target.value)}
@@ -415,7 +414,7 @@ const FormListSectionView = ({
             {t("form.list.add")}
           </Button>
           {presets.length > 0 ? (
-            <select
+            <select className="ui-select"
               aria-label={`${section.key} · ${t("form.list.addExample")}`}
               value=""
               disabled={settling}
@@ -992,7 +991,7 @@ export const FieldControl = (props: ControlProps) => {
     if (options === null) return <TextualControl {...props} />;
     const known = options.some((option) => option.value === current);
     return (
-      <select
+      <select className="ui-select"
         id={id}
         aria-label={ariaLabel}
         aria-describedby={describedBy}
@@ -1127,7 +1126,7 @@ const TextualControl = ({
     setPristine(false);
   };
   const input = (
-    <input
+    <input className="ui-input"
       id={id}
       aria-label={ariaLabel}
       aria-describedby={describedBy}

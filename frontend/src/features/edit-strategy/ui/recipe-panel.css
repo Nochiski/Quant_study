@@ -1,6 +1,6 @@
 .recipe {
   min-width: 0;
-  padding: var(--space-4);
+  padding: 0;
 }
 .recipe__toolbar,
 .recipe__actions {
@@ -27,6 +27,8 @@
   outline: 2px solid var(--accent);
 }
 .recipe__step fieldset {
+  display: grid;
+  gap: var(--space-4);
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -53,6 +55,8 @@
   /* IDE 탭 패널이 이미 바깥 여백을 갖는다. 작은 화면에서는 두 겹으로 소비하지 않는다. */
   .recipe {
     padding-inline: 0;
+    /* 카드와 팔레트가 좁아지지 않도록 탭 패널의 안쪽 여백 일부만 되찾는다. */
+    margin-inline: calc(-1 * var(--space-2));
   }
   .recipe .strategy-form__field {
     display: flex;

@@ -21,7 +21,16 @@ from strategy_workbench.domain.backtest.facade.environment import (
     cost_inputs,
     settlement_multipliers,
 )
-from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
+from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION, ExecutionCore
+from tests.integration.test_backtest_session_calendar import (
+    SESSIONS,
+)
+from tests.integration.test_backtest_session_calendar import (
+    _execute as _execute_calendar_request,
+)
+from tests.integration.test_backtest_session_calendar import (
+    _request as _calendar_request,
+)
 from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 from tests.test_executable_capacity import proportional_integer_scenario
 from tests.test_execution_cash_projection import actual_cash_scenario
@@ -37,9 +46,10 @@ from tests.test_negative_cash_recovery import recovery_scenario
 # 같은 미병합 v6 수정에서 대금→수수료→세금의 실제 현금 순서를 포함한다. 기존 28개
 # scenario trace/decision은 그대로이며 actual_cash_fee_application은 새 경계를 고정한다.
 # borrow_cost_negative_cash_recovery는 비용 후 음수 현금에서 매도/환매로 회복하는 경로다.
+# v7는 실행 어댑터가 빈 거래일을 보존하는 경로도 벤치마크 유무별 결과로 고정한다.
 _PINNED = (
-    "backtest-engine-v6",
-    "c572a44ae0ed01a549af4e6e4f4c9518235c0721f0c24bcca17ea91c38752e7f",
+    "backtest-engine-v7",
+    "b7cc160f7bd5a41ab2be80c268e59587e36cfe26e9bc176c53af4ba662569bdf",
 )
 
 
@@ -64,6 +74,18 @@ def _rules_digest() -> str:
     digest.update(b"borrow_cost_negative_cash_recovery")
     digest.update(engine.event_store.trace_bytes())
     digest.update(engine.event_store.decision_tape_bytes())
+    # 어댑터의 거래 달력이 DAY 주문 만료일과 다음 판단·체결일을 결정한다.
+    for benchmark in (False, True):
+        result = _execute_calendar_request(
+            _calendar_request(
+                ExecutionCore.PYTHON,
+                benchmark=benchmark,
+                empty_sessions=(SESSIONS[2],),
+                fee_bps=100,
+            )
+        )
+        digest.update(f"session_calendar_benchmark={benchmark}".encode())
+        digest.update(repr(result.artifacts).encode())
     # ADV(20행)·σ(수익률 20개) 창이 차도록 25세션. 거래대금이 세션마다 달라 창 길이가 결과를 가른다.
     # 23일은 거래정지라 bar 가 없고 그날의 1:2 분할은 다음 행(24일)에서 정산된다(#339). 정산 행 앞에
     # 거래대금이 있는 행이 20개 넘게 있어야 참여 한도가 0 이 아니라 배수가 한도에 드러난다(#396).

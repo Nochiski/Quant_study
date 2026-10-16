@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
+from itertools import pairwise
 from typing import Protocol
 
 from strategy_workbench.domain.backtest.facade.runs import DataWarning
@@ -72,6 +73,23 @@ class BacktestDataset:
     history_bars: tuple[MarketBarRecord, ...] = ()
     # 워밍업 세션의 자본변동. 엔진에 넘기지 않고 충격 σ 가 분할 날 수익률을 빼는 데만 쓴다.
     history_corporate_actions: tuple[CorporateActionRecord, ...] = ()
+    # 측정 구간의 거래 달력. bar가 없는 거래일도 포함한다. 실제 데이터 공급자는 반드시 답한다.
+    # 기존 위치 인자 순서는 유지하되 달력 생략은 허용하지 않는다.
+    sessions: tuple[date, ...] = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        if any(previous >= current for previous, current in pairwise(self.sessions)):
+            raise ValueError(
+                "backtest sessions must be strictly increasing — "
+                f"snapshot={self.data_snapshot_id} sessions={self.sessions}"
+            )
+        outside_calendar = sorted({bar.session for bar in self.bars} - set(self.sessions))
+        if outside_calendar:
+            raise ValueError(
+                "backtest bars must belong to the session calendar — "
+                f"snapshot={self.data_snapshot_id} outside_sessions={outside_calendar} "
+                f"calendar_sessions={len(self.sessions)} bars={len(self.bars)}"
+            )
 
 
 class BacktestDataNotReadyError(RuntimeError):

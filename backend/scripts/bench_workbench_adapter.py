@@ -221,6 +221,7 @@ def synthetic_dataset(
     )
     dataset = BacktestDataset(
         data_snapshot_id=_SNAPSHOT_ID,
+        sessions=sessions,
         bars=records,
         memberships=memberships,
         corporate_actions=(),

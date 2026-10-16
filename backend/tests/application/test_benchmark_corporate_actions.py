@@ -228,6 +228,7 @@ def _dataset(
 ) -> BacktestDataset:
     return BacktestDataset(
         data_snapshot_id="unit",
+        sessions=tuple(sorted({bar.session for bar in bars})),
         bars=bars,
         memberships=(),
         corporate_actions=actions,

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+import sys
 from dataclasses import asdict, replace
 from datetime import date
 from pathlib import Path
@@ -184,6 +187,110 @@ def test_guard_checks_current_code_provenance_and_reuses_s01_identity(tmp_path: 
     assert proof.ledger_snapshot_id == created.ledger_snapshot_id
     assert proof.contract_sources_sha256 == created.contract_sources_sha256
     assert len(proof.descriptor_sha256) == 64
+
+
+def test_cli_rejects_other_checkout_even_when_its_preserved_code_verifies(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshots = import_ledger_module("equity.research_snapshot")
+    other_repo = tmp_path / "다른 checkout"
+    # 로컬 Git 객체만 공유하고 새 커밋·네트워크 없이 별도 코드 판본을 만든다.
+    subprocess.run(
+        ["git", "clone", "--shared", "--no-checkout", "--quiet", str(REPO), str(other_repo)],
+        check=True,
+    )
+    source_names = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(REPO),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "database/src",
+            "backend/src",
+            "backend/rust",
+        ],
+        text=True,
+    ).splitlines()
+    for relative in (
+        set(source_names)
+        | set(snapshots.CONTRACT_FILES)
+        | set(snapshots.ENVIRONMENT_FILES)
+        | {".gitignore"}
+    ):
+        source_file = REPO / relative
+        if source_file.is_file():
+            destination = other_repo / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_file, destination)
+    evaluator = (
+        other_repo / "backend/src/strategy_workbench/domain/signal_evaluation/_evaluation.py"
+    )
+    evaluator.write_text(
+        evaluator.read_text(encoding="utf-8").replace(
+            "return_fraction = exit_price.close / entry_price.close - 1.0",
+            "return_fraction = 999.0",
+        ),
+        encoding="utf-8",
+    )
+    source = _source(tmp_path)
+    frozen = tmp_path / "preserved"
+    created = snapshots.create_snapshot(source, frozen, repo_root=other_repo)
+    assert created.ok, created.detail
+    checked = snapshots.verify_snapshot(frozen, repo_root=other_repo)
+    assert checked.ok, checked.detail
+    arguments = _arguments(tmp_path, frozen)
+    arguments[arguments.index("--repo-root") + 1] = str(other_repo)
+    # sys.path에 검증 저장소를 추가해도 이미 import된 실행 코드는 바뀌지 않는다.
+    monkeypatch.syspath_prepend(str(other_repo / "backend/src"))
+    assert main(arguments) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "검증 저장소와 다릅니다" in output.err
+
+
+@pytest.mark.parametrize("attribute", ["__file__", "spec_origin", "__path__", "spec_paths"])
+def test_guard_rejects_mixed_submodule_origin_and_package_search_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attribute: str
+) -> None:
+    module = sys.modules["strategy_workbench.domain.signal_evaluation"]
+    spec = module.__spec__
+    assert spec is not None
+    outside = tmp_path / "unverified"
+    if attribute == "spec_origin":
+        monkeypatch.setattr(spec, "origin", str(outside / "__init__.py"))
+    elif attribute == "spec_paths":
+        monkeypatch.setattr(spec, "submodule_search_locations", [str(outside)])
+    elif attribute == "__path__":
+        monkeypatch.setattr(module, "__path__", [*module.__path__, str(outside)])
+    else:
+        # 최상위 패키지 출처가 정상이어도 이미 import된 하위 파일을 별도로 검사한다.
+        module = sys.modules["strategy_workbench.domain.signal_evaluation._evaluation"]
+        monkeypatch.setattr(module, "__file__", str(outside / "_evaluation.py"))
+    with pytest.raises(ValueError, match="검증 저장소와 다릅니다"):
+        ResearchSnapshotGuard(tmp_path / "not-opened", REPO).verify()
+
+
+def test_cli_accepts_symlink_repo_root_with_unicode_and_spaces(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = _source(tmp_path)
+    frozen = tmp_path / "preserved"
+    repo_link = tmp_path / "한글 checkout 링크"
+    repo_link.symlink_to(REPO, target_is_directory=True)
+    created = import_ledger_module("equity.research_snapshot").create_snapshot(
+        source, frozen, repo_root=repo_link
+    )
+    assert created.ok, created.detail
+    arguments = _arguments(tmp_path, frozen)
+    arguments[arguments.index("--repo-root") + 1] = str(repo_link)
+    assert main(arguments) == 0
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert json.loads(output.out)["input_proof"]["ledger_snapshot_id"] == created.ledger_snapshot_id
 
 
 def test_coverage_end_is_not_inferred_from_the_query_membership_end(tmp_path: Path) -> None:

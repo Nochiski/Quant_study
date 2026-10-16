@@ -5,10 +5,12 @@ from dataclasses import replace
 from strategy_workbench.application.offline_execution.facade.execution import BrokerError
 from strategy_workbench.domain.order_execution.facade.orders import (
     Account,
+    EventDisposition,
     Intent,
     OrderFact,
     OrderState,
     Snapshot,
+    classify_event,
 )
 
 
@@ -93,6 +95,14 @@ class FakeBroker:
             filled_value_krw=previous.filled_value_krw + quantity * price_krw,
             fees_krw=previous.fees_krw + fee_krw,
         )
+        # 누적 평균에 가려진 증분 지정가 위반도 도메인 전이 정책으로 검사한다.
+        decision = classify_event(previous, fact)
+        if decision.disposition != EventDisposition.APPLY:
+            raise ValueError(
+                f"{decision.detail} — quantity={quantity} price_krw={price_krw} "
+                f"limit_price_krw={previous.intent.limit_price_krw} "
+                f"revision={fact.revision}"
+            )
         self._orders[intent_id] = fact
         return fact
 

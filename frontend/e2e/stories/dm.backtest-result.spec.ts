@@ -114,6 +114,28 @@ test(
     await expect(
       result.getByRole("img", { name: "Equity curve 차트" }),
     ).toBeVisible();
+    // 목차의 키보드 선택은 원본 표로 초점을 옮긴다. 긴 결과를 탭으로 끝까지 훑지 않아도 된다.
+    const rawMetricsLink = result
+      .getByRole("navigation", { name: "결과 둘러보기" })
+      .getByRole("link", { name: "Raw metric table", exact: true });
+    await rawMetricsLink.focus();
+    await rawMetricsLink.press("Enter");
+    const rawMetrics = result.getByRole("region", {
+      name: "Raw metric table",
+      exact: true,
+    });
+    await expect(rawMetrics).toBeFocused();
+    await expect(
+      rawMetrics.getByRole("table", { name: "Raw metric table", exact: true }),
+    ).toBeVisible();
+    const originalViewport = page.viewportSize();
+    await page.setViewportSize({ width: 360, height: 800 });
+    await rawMetrics.focus();
+    await rawMetrics.press("ArrowRight");
+    await expect
+      .poll(() => rawMetrics.evaluate((element) => element.scrollLeft))
+      .toBeGreaterThan(0);
+    if (originalViewport) await page.setViewportSize(originalViewport);
     // 1년 미만 OOS 구간: CAGR·칼마는 값 대신 사유를 보이고, 총수익률은 값으로 보인다.
     const oosRow = (metricId: string) =>
       result

@@ -78,6 +78,21 @@ const result = (): BacktestRunResult => ({
 });
 
 describe("run 상세의 실행 설정", () => {
+  it("결과 둘러보기에서 접힌 재현성 정보를 열고 키보드로 원본 표를 읽는다", async () => {
+    render(<BacktestRunDetail result={result()} environmentFields={FIELDS} />);
+    const navigation = screen.getByRole("navigation", { name: "결과 둘러보기" });
+    const drawer = screen.getByRole("group", { name: "Manifest · 데이터 경고 · 재현성 정보" });
+    expect(within(drawer).getByText("100,000,000")).not.toBeVisible();
+    const manifest = within(navigation).getByRole("link", { name: "Manifest · 데이터 경고 · 재현성 정보" });
+    manifest.focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect(within(drawer).getByText("100,000,000")).toBeVisible();
+    const metrics = screen.getByRole("region", { name: "Raw metric table" });
+    metrics.focus();
+    expect(metrics).toHaveFocus();
+    expect(within(metrics).getByRole("table", { name: "Raw metric table" })).toBeVisible();
+  });
+
   it("실행 상세에서 주문 상태 원본과 구조화된 유동성 사유를 보여 준다", async () => {
     const value = result();
     value.artifacts.order_updates = [{ session: "2026-10-12", order_id: "order-1", status: "open", reason_code: "liquidity_cap_zero", cap_volume: 0, detail: "original reason" }];

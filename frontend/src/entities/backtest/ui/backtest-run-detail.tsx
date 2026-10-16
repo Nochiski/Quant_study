@@ -234,14 +234,35 @@ export const BacktestRunDetail = ({
           <span className="section-kicker">{t("backtest.result.kicker")}</span>
           <h3 id={titleId}>{t("backtest.result.title")}</h3>
           <p>
-            {(result.manifest.run_spec.core?.toUpperCase() ?? "—")} · {t("backtest.result.registry")}{" "}
+            {result.manifest.run_spec.core?.toUpperCase() ?? "—"} ·{" "}
+            {t("backtest.result.registry")}{" "}
             <code>{result.manifest.metric_registry_version}</code>
           </p>
         </div>
         <span className="run-id">{result.manifest.run_id.slice(0, 12)}</span>
       </header>
 
+      <nav
+        className="run-detail__navigation"
+        aria-label={t("backtest.result.navigation")}
+      >
+        <a href={`#${titleId}-highlights`}>{t("backtest.result.highlights")}</a>
+        <a href={`#${titleId}-charts`}>{t("backtest.result.charts")}</a>
+        <a href={`#${titleId}-metrics`}>{t("backtest.result.metrics")}</a>
+        <a href={`#${titleId}-trades`}>{t("backtest.result.trades")}</a>
+        <a
+          href={`#${titleId}-manifest`}
+          onClick={() => {
+            if (drawer.current) drawer.current.open = true;
+          }}
+        >
+          {t("backtest.result.manifest")}
+        </a>
+      </nav>
+
       <section
+        id={`${titleId}-highlights`}
+        tabIndex={-1}
         className="metric-highlights"
         aria-label={t("backtest.result.highlights")}
       >
@@ -269,7 +290,12 @@ export const BacktestRunDetail = ({
         })}
       </section>
 
-      <div className="result-chart-grid">
+      <section
+        className="result-chart-grid"
+        id={`${titleId}-charts`}
+        tabIndex={-1}
+        aria-label={t("backtest.result.charts")}
+      >
         <LineChart
           series={[
             {
@@ -335,7 +361,7 @@ export const BacktestRunDetail = ({
           ]}
           title={t("backtest.result.chart.exposure")}
         />
-      </div>
+      </section>
 
       <section className="monthly-panel">
         <header>
@@ -367,15 +393,24 @@ export const BacktestRunDetail = ({
             {result.metrics.length} {t("backtest.result.values")}
           </span>
         </header>
-        <div className="result-table-wrap">
+        <div
+          className="result-table-wrap"
+          id={`${titleId}-metrics`}
+          role="region"
+          tabIndex={0}
+          aria-label={t("backtest.result.metrics")}
+        >
           <table className="result-table">
+            <caption className="sr-only">
+              {t("backtest.result.metrics")}
+            </caption>
             <thead>
               <tr>
-                <th>{t("backtest.result.column.scope")}</th>
-                <th>{t("backtest.result.column.metric")}</th>
-                <th>{t("backtest.result.column.category")}</th>
-                <th>{t("backtest.result.column.value")}</th>
-                <th>{t("backtest.result.column.samples")}</th>
+                <th scope="col">{t("backtest.result.column.scope")}</th>
+                <th scope="col">{t("backtest.result.column.metric")}</th>
+                <th scope="col">{t("backtest.result.column.category")}</th>
+                <th scope="col">{t("backtest.result.column.value")}</th>
+                <th scope="col">{t("backtest.result.column.samples")}</th>
               </tr>
             </thead>
             <tbody>
@@ -385,7 +420,8 @@ export const BacktestRunDetail = ({
                 return (
                   <tr key={`${metric.scope}-${metric.metric_id}-${index}`}>
                     <td>
-                      {metric.scope_label ?? t(`backtest.scope.${metric.scope}`)}
+                      {metric.scope_label ??
+                        t(`backtest.scope.${metric.scope}`)}
                     </td>
                     <td>
                       <code>{metric.metric_id}</code>
@@ -407,7 +443,7 @@ export const BacktestRunDetail = ({
         </div>
       </section>
 
-      <section className="trade-panel">
+      <section className="trade-panel" id={`${titleId}-trades`} tabIndex={-1}>
         <header>
           <h4>{t("backtest.result.trades")}</h4>
           <span>
@@ -419,18 +455,26 @@ export const BacktestRunDetail = ({
         {result.artifacts.trades.length === 0 ? (
           <p className="inline-state">{t("backtest.result.trades.empty")}</p>
         ) : (
-          <div className="result-table-wrap">
+          <div
+            className="result-table-wrap"
+            role="region"
+            tabIndex={0}
+            aria-label={t("backtest.result.trades")}
+          >
             <table className="result-table">
+              <caption className="sr-only">
+                {t("backtest.result.trades")}
+              </caption>
               <thead>
                 <tr>
-                  <th>{t("backtest.result.column.security")}</th>
-                  <th>{t("backtest.result.column.side")}</th>
-                  <th>{t("backtest.result.column.opened")}</th>
-                  <th>{t("backtest.result.column.closed")}</th>
-                  <th>{t("backtest.result.column.quantity")}</th>
-                  <th>{t("backtest.result.column.pnl")}</th>
-                  <th>{t("backtest.result.column.fees")}</th>
-                  <th>{t("backtest.result.column.slippage")}</th>
+                  <th scope="col">{t("backtest.result.column.security")}</th>
+                  <th scope="col">{t("backtest.result.column.side")}</th>
+                  <th scope="col">{t("backtest.result.column.opened")}</th>
+                  <th scope="col">{t("backtest.result.column.closed")}</th>
+                  <th scope="col">{t("backtest.result.column.quantity")}</th>
+                  <th scope="col">{t("backtest.result.column.pnl")}</th>
+                  <th scope="col">{t("backtest.result.column.fees")}</th>
+                  <th scope="col">{t("backtest.result.column.slippage")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -439,7 +483,9 @@ export const BacktestRunDetail = ({
                     <td>
                       <code>{trade.security_id}</code>
                     </td>
-                    <td>{tOptional(`backtest.side.${trade.side}`) ?? trade.side}</td>
+                    <td>
+                      {tOptional(`backtest.side.${trade.side}`) ?? trade.side}
+                    </td>
                     <td>{trade.opened_on}</td>
                     <td>{trade.closed_on}</td>
                     <td>{trade.quantity}</td>
@@ -461,6 +507,8 @@ export const BacktestRunDetail = ({
       <BacktestOrderEvents artifacts={result.artifacts} />
 
       <details
+        id={`${titleId}-manifest`}
+        tabIndex={-1}
         className="manifest-drawer"
         aria-label={t("backtest.result.manifest")}
         ref={drawer}
@@ -479,11 +527,15 @@ export const BacktestRunDetail = ({
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.core")}</dt>
-                <dd>{(result.manifest.run_spec.core?.toUpperCase() ?? "—")}</dd>
+                <dd>{result.manifest.run_spec.core?.toUpperCase() ?? "—"}</dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.initialCash")}</dt>
-                <dd>{(result.manifest.run_spec.initial_cash?.toLocaleString("ko-KR") ?? "—")}</dd>
+                <dd>
+                  {result.manifest.run_spec.initial_cash?.toLocaleString(
+                    "ko-KR",
+                  ) ?? "—"}
+                </dd>
               </div>
               <div>
                 <dt>{t("backtest.result.manifest.benchmark")}</dt>

@@ -1,0 +1,69 @@
+/* 실험 상태·시도·검증 결과·감사 기록의 읽기 순서를 구분한다. */
+.experiment-page__sections {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.experiment-section {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+
+.experiment-section h2,
+.experiment-section__title {
+  margin: 0;
+  font-size: var(--text-size-title);
+}
+
+.experiment-section__title,
+.experiment-audit caption {
+  padding: var(--space-4);
+  text-align: start;
+  font-weight: var(--font-weight-strong);
+}
+
+.experiment-interpretation {
+  padding: var(--space-3) var(--space-4);
+  border-inline-start: var(--space-1) solid var(--status-warn);
+  border-radius: var(--radius-small);
+  background: var(--status-warn-soft);
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.experiment-table-scroll {
+  max-height: 32rem;
+  overflow: auto;
+}
+
+.experiment-page .data-list-page__table {
+  min-width: 40rem;
+}
+
+.experiment-page .data-list-page__table th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+}
+
+.experiment-page h1,
+.experiment-page .data-list-page__table td {
+  overflow-wrap: anywhere;
+}
+
+.experiment-page .data-list-page__table td {
+  max-width: 24rem;
+}
+
+.experiment-table-scroll:focus-visible {
+  outline-offset: calc(-1 * var(--space-1));
+}
+
+.experiment-section__feedback {
+  margin: 0;
+  padding: var(--space-4);
+}

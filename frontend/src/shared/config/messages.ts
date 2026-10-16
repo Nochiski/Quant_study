@@ -240,6 +240,8 @@ const ko = {
   "backtest.result.chart.exposure": "Exposure",
   "backtest.result.monthly": "Monthly returns",
   "backtest.result.monthly.description": "서버 산출 월별 성과",
+  "backtest.result.navigation": "결과 둘러보기",
+  "backtest.result.charts": "성과 차트",
   "backtest.result.metrics": "Raw metric table",
   "backtest.result.metrics.description":
     "None과 0을 구분하고 Full·IS·Validation·OOS scope를 보존합니다.",
@@ -397,7 +399,7 @@ const ko = {
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
   "backtest.metric.total_return": "총수익률",
   "backtest.metric.total_return.description":
-    "처음 넣은 돈이 끝날 때 몇 % 늘었거나 줄었는지입니다.",
+    "평가 기준 자산에서 마지막 자산까지의 증감률입니다. 전체 구간은 첫 스냅샷 자산을 기준으로 하며, 초기자본 대비 손익과는 다를 수 있습니다.",
   "backtest.metric.cagr": "연평균 수익률",
   "backtest.metric.cagr.description":
     "해마다 평균 몇 %씩 불어났는지로 바꿔 본 값입니다.",
@@ -1953,6 +1955,8 @@ const ko = {
   "experiments.detail.remaining": "남은 시간 최대 약 {total} (남은 실행을 차례로 처음부터 돈다고 본 값입니다)",
   "experiments.detail.remainingUnknown": "남은 시간은 이 전략 계열에 시간을 잰 완료 실행이 생기면 보입니다.",
   "experiments.audit.title": "감사 기록",
+  "experiments.audit.loadFailed": "감사 기록을 불러오지 못했습니다. 다시 불러와 사건 이력을 확인하세요.",
+  "experiments.audit.reload": "감사 기록 다시 불러오기",
   "experiments.audit.time": "시각",
   "experiments.audit.event": "일",
   "experiments.audit.target": "대상",
@@ -2052,6 +2056,9 @@ const ko = {
   "experiments.trial.failed": "실패",
   "experiments.trial.cancelled": "취소됨",
   "experiments.trial.rejected": "실행 접수가 거절됐습니다.",
+  "experiments.walkForward.windows": "워크포워드 검증 창",
+  "experiments.walkForward.loadFailed": "워크포워드 결과를 불러오지 못했습니다. 다시 불러와 결과를 확인하세요.",
+  "experiments.walkForward.reload": "다시 불러오기",
   "experiments.walkForward.title": "워크포워드 결과",
   "experiments.walkForward.interpretationUnavailable": "이 서버가 결과의 계좌 연결 방식을 제공하지 않아 연속 계좌 손익인지 확인할 수 없습니다. 서버를 갱신해 평가 방식을 확인하세요.",
   "experiments.walkForward.summary": "검증 창만 이어 붙인 표본 밖 샤프(세션 단위) {sharpe} · 유지율 {retention}",
@@ -2538,6 +2545,8 @@ export const messages = {
     "backtest.result.monthly": "Monthly returns",
     "backtest.result.monthly.description":
       "Server-calculated monthly performance",
+    "backtest.result.navigation": "Browse results",
+    "backtest.result.charts": "Performance charts",
     "backtest.result.metrics": "Raw metric table",
     "backtest.result.metrics.description":
       "Distinguishes None from zero and preserves Full, IS, Validation, and OOS scopes.",
@@ -2691,7 +2700,7 @@ export const messages = {
     "backtest.result.metricUnavailable.explain": "See why in data warnings",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":
-      "How much the starting money grew or shrank by the end.",
+      "The percentage change from the evaluation baseline equity to the final equity. The full period starts at the first snapshot, so this can differ from P&L relative to initial capital.",
     "backtest.metric.cagr": "Annual growth rate",
     "backtest.metric.cagr.description":
       "The yearly rate that would have produced the same result.",
@@ -4271,6 +4280,8 @@ export const messages = {
     "experiments.detail.remainingUnknown":
       "The remaining time appears once this strategy lineage has a timed completed run.",
     "experiments.audit.title": "Audit trail",
+    "experiments.audit.loadFailed": "Could not load the audit trail. Reload to check the event history.",
+    "experiments.audit.reload": "Reload audit trail",
     "experiments.audit.time": "Time",
     "experiments.audit.event": "Event",
     "experiments.audit.target": "Target",
@@ -4373,6 +4384,9 @@ export const messages = {
     "experiments.trial.failed": "Failed",
     "experiments.trial.cancelled": "Cancelled",
     "experiments.trial.rejected": "The run request was refused.",
+    "experiments.walkForward.windows": "Walk-forward test windows",
+    "experiments.walkForward.loadFailed": "Could not load the walk-forward result. Reload to check the result.",
+    "experiments.walkForward.reload": "Reload",
     "experiments.walkForward.title": "Walk-forward result",
     "experiments.walkForward.interpretationUnavailable": "This server does not describe how account state is joined, so continuous account P&L cannot be confirmed. Update the server to check the evaluation basis.",
     "experiments.walkForward.summary": "Out-of-sample Sharpe of the stitched test windows (per session) {sharpe} · retention {retention}",

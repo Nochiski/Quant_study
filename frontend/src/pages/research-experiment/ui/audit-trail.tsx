@@ -5,6 +5,8 @@ import {
   experimentAuditQuery,
   type ExperimentAuditEvent,
 } from "../../../entities/experiment";
+import { failureReason } from "../../../shared/api";
+import { Button, FailureNotice } from "../../../shared/ui";
 import { t, tFill } from "../../../shared/config";
 import { displayTime } from "../../../shared/lib/display-time";
 
@@ -59,9 +61,37 @@ export const AuditTrail = ({
     ...experimentAuditQuery(experimentId),
     refetchInterval,
   });
-  if (!audit.isSuccess) return null;
+  if (audit.isPending)
+    return (
+      <p className="experiment-section__feedback" role="status">
+        {t("page.loading")}
+      </p>
+    );
+  if (audit.isError)
+    return (
+      <div className="experiment-section__feedback">
+        <FailureNotice
+          title={t("experiments.audit.title")}
+          message={t("experiments.audit.loadFailed")}
+          reason={failureReason(audit.error)}
+        >
+          <Button
+            size="small"
+            tone="secondary"
+            onClick={() => void audit.refetch()}
+          >
+            {t("experiments.audit.reload")}
+          </Button>
+        </FailureNotice>
+      </div>
+    );
   return (
-    <div className="data-list-page__scroll">
+    <div
+      className="data-list-page__scroll experiment-table-scroll"
+      role="region"
+      tabIndex={0}
+      aria-label={t("experiments.audit.title")}
+    >
       <table className="data-list-page__table">
         <caption>{t("experiments.audit.title")}</caption>
         <thead>

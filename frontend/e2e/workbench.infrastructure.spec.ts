@@ -197,6 +197,37 @@ test("keeps the toolbar actions clickable under the tab strip", async ({
   });
 });
 
+test("keeps the navigation keyboard accessible in a short viewport", async ({
+  page,
+}) => {
+  const viewport = { width: 640, height: 360 };
+  await page.setViewportSize(viewport);
+  await page.goto("/research/experiments");
+  const navigation = page.getByRole("navigation", { name: "주 메뉴" });
+  await navigation.getByRole("link", { name: "실험", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  const settings = navigation.getByRole("link", { name: "설정", exact: true });
+  await expect(settings).toBeFocused();
+  await expectWithinViewport(settings, viewport);
+  await page.keyboard.press("Tab");
+  const expand = navigation.getByRole("button", { name: "메뉴 펼치기" });
+  await expect(expand).toBeFocused();
+  await expectWithinViewport(expand, viewport);
+  await expand.press("Enter");
+  const collapse = navigation.getByRole("button", { name: "메뉴 접기" });
+  await expect(collapse).toBeFocused();
+  await expect(collapse).toBeInViewport({ ratio: 1 });
+  await expectWithinViewport(collapse, viewport);
+  await page.keyboard.press("Shift+Tab");
+  await expect(settings).toBeFocused();
+  await expectWithinViewport(settings, viewport);
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(viewport.width);
+  await settings.press("Enter");
+  await expect(page).toHaveURL(/\/settings$/u);
+});
+
 test("matches the professional workbench viewport and theme baseline", async ({
   page,
 }, testInfo) => {

@@ -14,7 +14,7 @@
       --white: #ffffff; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 92px; }
+    html { scroll-behavior: smooth; scroll-padding-top: calc(var(--nav-height, 92px) + 20px); }
     body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
     a { color: inherit; text-underline-offset: 4px; }
     button, textarea { font: inherit; }
@@ -31,15 +31,16 @@
     .wrap { max-width: 1240px; margin: 0 auto; padding: 0 42px; }
     .skip { position: absolute; top: -100px; left: 16px; z-index: 10; background: var(--surface); padding: 10px; }
     .skip:focus { top: 8px; }
-    .topbar { border-bottom: 1px solid var(--line); background: var(--paper); }
+    .topbar { position: sticky; top: 0; z-index: 5; border-bottom: 1px solid var(--line); background: var(--paper); }
     .topbar-inner { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
     .brand { display: flex; align-items: center; gap: 12px; font-weight: 750; letter-spacing: -.03em; text-decoration: none; white-space: nowrap; }
     .brand-mark { display: grid; grid-template-columns: repeat(3, 5px); align-items: end; gap: 3px; width: 27px; height: 26px; }
     .brand-mark i { background: var(--green); height: 12px; }
     .brand-mark i:nth-child(2) { height: 20px; }
     .brand-mark i:nth-child(3) { height: 26px; }
-    .topnav { display: flex; gap: 20px; align-items: center; font-size: 13px; }
-    .topnav a { text-decoration: none; padding: 12px 0; color: var(--muted); }
+    .topnav { display: flex; gap: 4px; align-items: center; font-size: 13px; }
+    .topnav a { text-decoration: none; padding: 10px 9px; min-height: 44px; display: inline-flex; align-items: center; color: var(--muted); border-bottom: 2px solid transparent; }
+    .topnav a[aria-current="location"] { color: var(--green); border-bottom-color: var(--green); font-weight: 700; }
     .topnav a:hover { color: var(--ink); text-decoration: underline; }
     .eyebrow { font: 12px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
     .hero { padding: 65px 0 48px; display: grid; grid-template-columns: 1.25fr 1fr; gap: 56px; align-items: end; }
@@ -73,7 +74,7 @@
     .foundation-content { padding: 20px 24px 22px 0; }
     .foundation-content p { font-size: 14px; color: var(--muted); margin: 5px 0 12px; }
     .route-links { display: flex; flex-wrap: wrap; gap: 9px; }
-    .route-links a { text-decoration: none; font-size: 13px; border: 1px solid #c7a48f; padding: 7px 12px; border-radius: 3px; color: #7f351b; background: var(--surface); min-height: 40px; }
+    .route-links a { text-decoration: none; font-size: 13px; border: 1px solid #c7a48f; padding: 7px 12px; border-radius: 3px; color: #7f351b; background: var(--surface); min-height: 44px; }
     .route-links a:hover { background: var(--orange-soft); }
     .swimlane { display: grid; grid-template-columns: 125px repeat(3, minmax(0, 1fr)); gap: 13px; }
     .column-label { font-size: 12px; color: var(--muted); padding: 0 12px 7px; border-bottom: 1px solid var(--line); }
@@ -122,7 +123,7 @@
     .button.secondary:hover { background: #e9ede7; }
     .session-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
     .session-toolbar p { color: var(--muted); font-size: 12px; }
-    .session { border: 1px solid var(--line); margin-bottom: 12px; background: var(--surface); border-radius: 3px; scroll-margin-top: 24px; }
+    .session { border: 1px solid var(--line); margin-bottom: 12px; background: var(--surface); border-radius: 3px; scroll-margin-top: 0; }
     .session > summary { list-style: none; display: grid; grid-template-columns: 45px 1fr auto 18px; gap: 16px; align-items: center; padding: 19px 22px; }
     .session > summary::-webkit-details-marker { display: none; }
     .session > summary::after { content: "+"; font: 22px var(--mono); color: var(--muted); }
@@ -148,7 +149,7 @@
     .packet-decision { margin-top: 20px; padding: 15px 18px; background: var(--green-soft); border-left: 3px solid var(--green); font-size: 13px; }
     .packet-boundary { font-size: 12px; color: var(--muted); margin-top: 13px; }
     .prompt { margin-top: 19px; border-top: 1px solid var(--line); padding-top: 12px; }
-    .prompt > summary { font-size: 13px; color: var(--blue); padding: 7px 0; min-height: 40px; }
+    .prompt > summary { font-size: 13px; color: var(--blue); padding: 7px 0; min-height: 44px; }
     .prompt textarea { width: 100%; min-height: 230px; resize: vertical; color: var(--ink); border: 1px solid var(--line); background: var(--paper); padding: 14px; font: 12px/1.8 var(--mono); margin: 10px 0; word-break: normal; }
     .prompt-actions { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
     .copy-status { font-size: 12px; color: var(--green); }
@@ -172,11 +173,30 @@
     .source-grid p, .source-grid li { font-size: 12px; color: var(--muted); }
     .source-grid a { color: var(--blue); }
     .foot { border-top: 1px solid var(--line); padding: 24px 0 40px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 20px; }
+    .reading-guide { padding: 24px 0 0; }
+    .reading-guide h2 { font-size: 20px; }
+    .reading-guide > p { color: var(--muted); font-size: 14px; margin-top: 8px; max-width: 85ch; }
+    .reading-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+    .reading-links a { display: flex; flex-direction: column; padding: 16px 18px; border: 1px solid var(--line); background: var(--surface); text-decoration: none; }
+    .reading-links a:hover { border-color: var(--green); }
+    .reading-links strong { font-size: 15px; }
+    .reading-links span { margin-top: 4px; font-size: 13px; color: var(--muted); }
+    .audit-note { margin-top: 18px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+    .audit-note summary { min-height: 44px; padding-block: 10px; color: var(--muted); font-size: 13px; }
+    .audit-note p { color: var(--muted); font-size: 13px; max-width: 90ch; margin: 10px 0; }
+    .session-index { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 20px; }
+    .session-index a { display: flex; align-items: center; gap: 9px; padding: 10px 12px; min-height: 48px; border: 1px solid var(--line); text-decoration: none; font-size: 13px; background: var(--surface); }
+    .session-index a:hover { border-color: var(--blue); }
+    .session-index span { color: var(--blue); font: 12px var(--mono); }
+    .file-list a { min-height: 44px; display: flex; align-items: center; padding-block: 7px; }
+    .mapping-scroll:focus-visible { outline-offset: 2px; }
+    .table-hint { font-size: 13px; color: var(--muted); margin-bottom: 10px; display: none; }
     .no-script { padding: 14px; background: var(--orange-soft); }
     @media (max-width: 960px) {
       .wrap { padding-inline: 25px; }
       .hero { gap: 28px; }
-      .topnav { gap: 14px; }
+      .topbar-inner { flex-direction: column; gap: 4px; align-items: flex-start; padding-block: 10px; }
+      .topnav { gap: 8px; flex-wrap: wrap; }
       .swimlane { grid-template-columns: 90px repeat(3, minmax(0, 1fr)); gap: 10px; }
       .stage { padding: 15px; min-height: 245px; }
       .branch { margin-left: 100px; }
@@ -189,7 +209,15 @@
     @media (max-width: 680px) {
       .wrap { padding-inline: 19px; }
       .topbar-inner { padding-block: 15px; flex-direction: column; gap: 10px; align-items: flex-start; }
-      .topnav { width: 100%; justify-content: space-between; gap: 10px; font-size: 12px; }
+      .topbar-inner { padding-block: 10px 4px; gap: 4px; }
+      .brand { font-size: 14px; }
+      .topnav { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; gap: 0 8px; font-size: 12px; }
+      .topnav a { padding: 8px 0; justify-content: center; }
+      .reading-links { grid-template-columns: 1fr; gap: 8px; }
+      .reading-links a { padding: 13px 16px; }
+      .session-index { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .table-hint { display: block; }
+      .session-toolbar { align-items: flex-start; flex-direction: column; }
       .hero { grid-template-columns: 1fr; padding-top: 36px; gap: 27px; }
       h1 { font-size: 40px; }
       .hero-desc { font-size: 15px; }
@@ -243,7 +271,8 @@
       @page { size: A4; margin: 14mm; }
       body { font-size: 11px; background: white; }
       .wrap { max-width: none; padding: 0; }
-      .topnav, .button, .session-toolbar, .prompt, .skip { display: none; }
+      .topnav, .button, .session-toolbar, .session-index, .reading-links, .prompt, .skip { display: none; }
+      .topbar { position: static; }
       .hero { padding-top: 15px; }
       h1 { font-size: 34px; }
       h2 { font-size: 24px; }
@@ -261,7 +290,7 @@
   <header class="topbar">
     <div class="wrap topbar-inner">
       <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Quant_study <span style="font-weight:400;color:var(--muted)">/ 실행 로드맵</span></a>
-      <nav class="topnav" aria-label="로드맵 목차"><a href="#route">전체 경로</a><a href="#code">코드 우선순위</a><a href="#sessions">세션 작업</a><a href="#legacy">기존 계획 연결</a></nav>
+      <nav class="topnav" aria-label="로드맵 목차"><a href="#intent">의도</a><a href="#route">전체 경로</a><a href="#code">감사 항목</a><a href="#sessions">작업 패킷</a><a href="#legacy">기존 계획</a><a href="#sources">근거</a></nav>
     </div>
   </header>
   <main id="main" class="wrap">
@@ -270,7 +299,16 @@
       <aside class="north-star" aria-label="최종 목적"><div class="eyebrow">North star / 최종 목적</div><h2>감당 가능한 위험 안에서<br>비용 후 수익을 내는 자동매매</h2><p>종목·업종 예측은 수익 기회의 근거를 만들고,<br>시스템 검증은 그 기회를 실행할 수 있는지 확인합니다.</p><div class="rule"></div><small>수익성 · 계산 정확성 · 운영 안전 · 자본 결정을 각각 확인합니다.</small></aside>
     </div>
     <div class="metadata"><span>작성 <strong>2026.10.16</strong></span><span>코드 감사 기준 <strong><code>1e780ce7</code></strong></span><span>상태 <strong>계획 + 현재 구현 연결</strong></span><span>일정 기준 <strong>기간 대신 증거와 완료 조건</strong></span></div>
-    <p class="section-note">현재 구현·증거·남은 결정은 <a href="planning/research-to-trading/README.md">연구·실행 구현 인계</a>에서 확인합니다. S04의 기간별 비교 안내는 API·화면에 연결했고 실제 연속 계좌 평가는 아직 구현하지 않았습니다. S03 연구 runner는 보존 입력의 검증·기존 계산 연결·연구 근거 내보내기를 합성 자료로 확인했습니다. 실제 자료의 수익성은 아직 확인하지 않았습니다. 검토 근거는 <a href="https://github.com/Nochiski/Quant_study/pull/522">PR #522</a>·<a href="https://github.com/Nochiski/Quant_study/pull/523">#523</a>·<a href="https://github.com/Nochiski/Quant_study/pull/524">#524</a>에서 확인합니다. 로컬 회귀 통과와 전체 CI 상태는 구분합니다. 아래 다섯 감사 항목과 여덟 제안 패킷 본문은 원문을 유지합니다.</p>
+    <div class="reading-guide" aria-labelledby="reading-title">
+      <h2 id="reading-title">어디부터 읽을까요?</h2>
+      <p>이 페이지는 연구에서 실행까지의 <strong>제안과 작업 지시 원문</strong>입니다. 현재 구현·검증 범위와 다음 결정은 구현 인계에서 확인한 뒤, 필요한 패킷을 골라 읽으세요.</p>
+      <div class="reading-links">
+        <a href="planning/research-to-trading/README.md"><strong>현재 상태부터 확인하기 →</strong><span>구현한 범위 · 검증 근거 · 아직 남은 결정</span></a>
+        <a href="#route"><strong>전체 흐름 이해하기 →</strong><span>공통 기반에서 연구·운영, 자본 결정까지</span></a>
+        <a href="#sessions"><strong>작업 패킷 찾기 →</strong><span>S01–S08의 의도 · 선행 조건 · 검증 · 프롬프트</span></a>
+      </div>
+      <details class="audit-note"><summary>작성 당시의 구현 연결과 검토 근거 읽기</summary><p >현재 구현·증거·남은 결정은 <a href="planning/research-to-trading/README.md">연구·실행 구현 인계</a>에서 확인합니다. S04의 기간별 비교 안내는 API·화면에 연결했고 실제 연속 계좌 평가는 아직 구현하지 않았습니다. S03 연구 runner는 보존 입력의 검증·기존 계산 연결·연구 근거 내보내기를 합성 자료로 확인했습니다. 실제 자료의 수익성은 아직 확인하지 않았습니다. 검토 근거는 <a href="https://github.com/Nochiski/Quant_study/pull/522">PR #522</a>·<a href="https://github.com/Nochiski/Quant_study/pull/523">#523</a>·<a href="https://github.com/Nochiski/Quant_study/pull/524">#524</a>에서 확인합니다. 로컬 회귀 통과와 전체 CI 상태는 구분합니다. 아래 다섯 감사 항목과 여덟 제안 패킷 본문은 원문을 유지합니다.</p></details>
+    </div>
 
     <section id="intent">
       <div class="section-head"><div><div class="eyebrow">00 / 모든 스펙에 남길 연결</div><h2>구현 앞에, 의도가 있습니다.</h2></div><p class="section-note">다음 세션은 아래 연결을 스펙과 PR에 유지합니다. 결과가 가설을 지지하지 않으면 보류·기각도 연구의 완료입니다.</p></div>
@@ -304,7 +342,7 @@
     </section>
 
     <section id="code">
-      <div class="section-head"><div><div class="eyebrow">02 / 지금 코드에서 시작할 지점</div><h2>먼저 고칠 다섯 가지.</h2></div><p class="section-note">아래 다섯 항목은 감사 당시 설명을 보존합니다. 이후 구현은 <a href="planning/research-to-trading/README.md">인계 문서</a>에서 확인하며, 실제 자료에서의 발생 빈도와 수익성은 아직 확인하지 않았습니다.</p></div>
+      <div class="section-head"><div><div class="eyebrow">02 / 지금 코드에서 시작할 지점</div><h2>감사에서 찾은 다섯 가지.</h2></div><p class="section-note">아래 다섯 항목은 감사 당시 설명을 보존합니다. 이후 구현은 <a href="planning/research-to-trading/README.md">인계 문서</a>에서 확인하며, 실제 자료에서의 발생 빈도와 수익성은 아직 확인하지 않았습니다.</p></div>
       <div class="priority-list">
         <article class="priority-item"><span class="priority-number">01</span><div><h3>같은 데이터로 다시 실행할 수 있게</h3><p>실행에 사용한 데이터의 이름은 남지만, 새 자료를 받으면 기본적으로 최근 두 판만 보관합니다. 기존의 데이터 고정 기능을 활용해 연구에 쓴 사본을 계속 보관할 방법을 먼저 확인합니다.</p><a data-source="database/src/ledger_sync/pull.py#L256">ledger_sync/pull.py:256 ↗</a></div><div><span class="intent-label">S01 · 같은 조건으로 다시 확인하기</span><p>연구에 쓴 데이터 사본과 항목의 뜻, 코드 버전을 함께 남겨 자료가 갱신된 뒤에도 같은 조건으로 다시 실행합니다. 우선 별도 저장 위치에 연구 자료를 보관하고, 오래된 자료를 정리하는 공통 기능은 그대로 둡니다.</p></div></article>
         <article class="priority-item"><span class="priority-number">02</span><div><h3>계산 실수를 전략 수익으로 착각하지 않게</h3><p>주식 분할은 반영하지만, 배당 자료에는 기준일과 배당락일이 없어 배당까지 포함한 수익을 계산할 수 없습니다. 마지막 거래 가격 뒤에 생긴 사건은 정산할 가격이 없어 제외하고 경고합니다.</p><a data-source="database/src/equity/sql/dividend_event.sql#L19">dividend_event.sql:19 ↗</a> · <a data-source="backend/src/strategy_workbench/adapters/outbound/equity_duckdb/_adapter.py#L1516">_adapter.py:1516 ↗</a></div><div><span class="intent-label">S02 · 현금과 주식 수를 직접 검산하기</span><p>손으로 계산할 수 있는 작은 예제로 현금·주식 수·평가액을 확인합니다. 상장폐지 뒤 얼마를 돌려받는지, 배당을 언제 받는지 모르면 값을 채워 넣지 않고 결과를 어디까지 믿을 수 있는지 밝힙니다.</p></div></article>
@@ -316,15 +354,16 @@
 
     <section id="sessions">
       <div class="section-head"><div><div class="eyebrow">03 / 다음 세션에 넘길 작업 패킷</div><h2>작업마다, 목적과 종료 조건을.</h2></div><p class="section-note">패킷은 작업 묶음이며 한 세션에 반드시 끝내야 할 분량이 아닙니다. 아래 본문은 제안 당시의 작업 지시 원문입니다. 현재 구현 증거는 <a href="planning/research-to-trading/README.md">구현 인계</a>에서 확인하고, 제품 기능 상태는 기존 roadmap·PLAN을 따릅니다.</p></div>
-      <div class="start-banner"><div><h3>다음 결정: 실제 보존 입력과 첫 연구 사양</h3><p>S03 실행 연결은 합성 자료로 확인했습니다. 실제 보존 입력과 미리 정한 질문·평가 기간·비용을 준비해 첫 연구를 수행할지 결정합니다. S04의 연속 계좌 평가는 아직 구현하지 않았으며, 후속 로컬 전체 회귀는 통과했으며 실데이터 연구와 전체 CI 통과를 뜻하지 않습니다.</p></div><a class="button" href="planning/research-to-trading/README.md">현재 구현 인계 보기 ↗</a></div>
-      <div class="session-toolbar"><p>각 항목 안에 대상 코드·검증 기준·복사 가능한 프롬프트가 있습니다.</p><button class="button secondary" id="expand-all" type="button" aria-expanded="false">모두 펼치기</button></div>
-      <noscript><p class="no-script">각 작업을 펼쳐 읽을 수 있습니다. 프롬프트 자동 생성·복사 기능에는 JavaScript가 필요합니다.</p></noscript>
+      <div class="start-banner"><div><h3>다음 결정을 고르기 전에, 최신 증거를 확인하세요.</h3><p>S03의 작은 실자료 창은 기술 경로를 확인한 증거입니다. 수익성·비용 후 계좌 성과는 아직 판단하지 않았습니다. S04는 연속 계좌의 합성 검산까지 확인했으며, 제품용 연속 실행기는 미구현입니다. 후속 연구 사양과 계좌 결과 출력 범위는 구현 인계의 다음 결정에서 확인하세요.</p></div><a class="button" href="planning/research-to-trading/README.md">현재 구현 인계 보기 ↗</a></div>
+      <div class="session-toolbar"><p>먼저 패킷을 고르세요. 펼치면 의도·선행 조건·검증 기준·복사할 프롬프트를 볼 수 있습니다.</p><button class="button secondary" id="expand-all" type="button" aria-expanded="false">모두 펼치기</button></div>
+      <noscript><p class="no-script">작업 패킷 표시와 프롬프트 복사에는 JavaScript가 필요합니다. JavaScript를 켜거나 <a href="planning/research-to-trading/README.md">연구·실행 구현 인계</a>에서 현재 범위와 개별 스펙을 확인하세요.</p></noscript>
+      <nav class="session-index" id="session-index" aria-label="작업 패킷 바로가기"></nav>
       <div id="session-list"></div>
     </section>
 
     <section id="legacy">
       <div class="section-head"><div><div class="eyebrow">04 / 기존 로드맵은 어떻게 할 것인가</div><h2>기존 계획은 유지하고,<br>실행 순서와 증거를 보완합니다.</h2></div><p class="section-note">이 HTML은 의도·우선순위·인계용 제안입니다. 공식 기능 상태는 기존 로드맵과 PLAN이 소유합니다. 기준 이후의 구현·검증은 <a href="planning/research-to-trading/README.md">구현 인계</a>에 연결합니다. 1차 기반 <code>8c3c1803</code>과 구분한 후속 로컬 전체 회귀는 backend 4,610건·database 1,437건 통과입니다. <a href="../tools/PLAN_PROGRESS.md">Mac 공용 PLAN 집계</a>는 Python 직접 호출로 수정한 뒤 격리 환경의 다섯 PLAN·root 52건·generated-progress 단일 job을 확인했습니다. 이 증거를 전체 CI 통과나 머지로 해석하지 않습니다. 기존 제품 체크행과 Validation Lab PR 상태·의존성은 유지합니다.</p></div>
-      <div class="mapping-scroll"><table class="mapping"><caption>기존 로드맵 처리와 의도 매핑</caption><thead><tr><th scope="col">기존 항목</th><th scope="col">처리 방향</th><th scope="col">연결할 작업</th><th scope="col">의도와 갱신 원칙</th></tr></thead><tbody><tr><th scope="row" class="milestone">M0–M5</th><td><span class="tag">기반 유지</span></td><td>기존 작성·검증·리비전·실행 경로 재사용<p>M3의 IC 분석 완료 표시는 S03에서 런타임·테스트 근거를 재감사.</p></td><td>이미 만든 기능을 다시 만들지 않기<p>근거가 없는 완료 항목만 증거와 함께 정정. 전체 단계를 일괄 미완료로 돌리지 않음.</p></td></tr><tr><th scope="row" class="milestone">M6</th><td><span class="tag warm">고급 탐색 보류</span></td><td>S03의 무튜닝 사례부터 실행<p>grid·원장·ETA·감사 기록은 재사용. Optuna·임의 binding·새 sampler는 필요 확인 후.</p></td><td>탐색 속도보다 의미 있는 후보를 먼저 확보<p>양수 scale만 바꿔 순위가 같은 탐색을 성과 개선으로 세지 않음.</p></td></tr><tr><th scope="row" class="milestone">M7</th><td><span class="tag">핵심 검증 보완</span></td><td>S04 스트레스·열람·선택 기록, S07 전향 확인<p>학습·선택이 생기면 실제 라벨 정보창으로 purge를 설계.</p></td><td>반복 선택으로 소비한 평가자료를 숨기지 않기<p>2016–2019 봉인은 유지. 과거 국면 검증과 미래 확인을 구분.</p></td></tr><tr><th scope="row" class="milestone">M8</th><td><span class="tag warm">표현 확장 보류</span></td><td>기존 YAML·LANG2 사용, 증거 export는 앞당김<p>고급 분기·재사용 라이브러리·추가 편집기는 사례의 필요가 드러날 때.</p></td><td>한 연구를 재현·검토하는 데 개발을 집중<p>export는 인계의 필요 기능. 편집 표현력 전체를 첫 연구 선행으로 묶지 않음.</p></td></tr><tr><th scope="row" class="milestone">M9</th><td><span class="tag ops">최우선</span></td><td>S01 판본 고정 + S02 필수 데이터 검산<p>PIT 업종은 별도 데이터 작업. 재무 vintage·공매도 결손은 해당 신호 사용 시 해결.</p></td><td>가용 데이터가 실제로 답할 수 있는 질문부터 시작<p>현재 업종값을 과거에 덮어 쓰지 않음. 배당 제외 성과를 총수익이라 부르지 않음.</p></td></tr><tr><th scope="row" class="milestone">M10</th><td><span class="tag">필수 범위 선별</span></td><td>재현·복구·기본 자원 한도를 우선<p>프로세스 격리·대규모 성능 최적화는 측정된 병목에 따라.</p></td><td>연구 실행 안정성과 계좌 운영 안전을 구분<p>브로커 주문 원장·대사는 M10의 기존 실험 복구 완료로 대체하지 않음.</p></td></tr><tr><th scope="row" class="milestone">V5-02</th><td><span class="tag">증거 화면 연결</span></td><td>S03·S04 결과를 화면에 표시<p>수동 증거 묶음으로 첫 연구는 가능. 미구현 통계·서버 판정을 UI가 대신 만들지 않음.</p></td><td>수익·비용·위험·한계를 함께 판단하도록 지원<p>화면 완료가 첫 실데이터 연구를 막는 필수 조건은 아님.</p></td></tr><tr><th scope="row" class="milestone">V4-05<br>V6-01</th><td><span class="tag">병행 가능</span></td><td>회귀 입력 확보 시 노출 분석, 동결·열람 기록 보강<p>V6-01의 원래 개봉 명세와 일반 평가 열람 이력의 범위를 구분.</p></td><td>시장 노출과 전략 효과, 미사용과 재사용을 구분<p>개봉 코드를 만드는 것과 실제 봉인을 여는 것은 별도 결정.</p></td></tr><tr><th scope="row" class="milestone">V5-04/06/07<br>V6-02</th><td><span class="tag warm">기존 선행 준수</span></td><td>결과·통계·동결 backend 뒤에 화면 구현<p>원래 PLAN의 의존 그래프는 그대로 적용.</p></td><td>없는 결과를 화면부터 채우지 않기<p>우선순위 변경이 의존성 생략을 뜻하지 않음.</p></td></tr><tr><th scope="row" class="milestone">운영 확장</th><td><span class="tag ops">새 계획 필요</span></td><td>S05–S08 브로커 실행·대사·운영 검토<p>독립 initiative 제안. 실제 시작 시 이름·책임·스토리를 정하고 기존 계획에서 연결.</p></td><td>실험 엔진에 주문 책임을 섞지 않기<p>계좌 상태·영속 의도·장애 복구를 명시한 별도 스펙이 필요.</p></td></tr></tbody></table></div>
+      <p class="table-hint" id="mapping-hint">표를 좌우로 밀어 네 열을 확인하세요. 키보드에서는 표에 초점을 맞춘 뒤 방향키를 사용하세요.</p><div class="mapping-scroll" tabindex="0" role="region" aria-label="기존 로드맵 연결표" aria-describedby="mapping-hint"><table class="mapping"><caption>기존 로드맵 처리와 의도 매핑</caption><thead><tr><th scope="col">기존 항목</th><th scope="col">처리 방향</th><th scope="col">연결할 작업</th><th scope="col">의도와 갱신 원칙</th></tr></thead><tbody><tr><th scope="row" class="milestone">M0–M5</th><td><span class="tag">기반 유지</span></td><td>기존 작성·검증·리비전·실행 경로 재사용<p>M3의 IC 분석 완료 표시는 S03에서 런타임·테스트 근거를 재감사.</p></td><td>이미 만든 기능을 다시 만들지 않기<p>근거가 없는 완료 항목만 증거와 함께 정정. 전체 단계를 일괄 미완료로 돌리지 않음.</p></td></tr><tr><th scope="row" class="milestone">M6</th><td><span class="tag warm">고급 탐색 보류</span></td><td>S03의 무튜닝 사례부터 실행<p>grid·원장·ETA·감사 기록은 재사용. Optuna·임의 binding·새 sampler는 필요 확인 후.</p></td><td>탐색 속도보다 의미 있는 후보를 먼저 확보<p>양수 scale만 바꿔 순위가 같은 탐색을 성과 개선으로 세지 않음.</p></td></tr><tr><th scope="row" class="milestone">M7</th><td><span class="tag">핵심 검증 보완</span></td><td>S04 스트레스·열람·선택 기록, S07 전향 확인<p>학습·선택이 생기면 실제 라벨 정보창으로 purge를 설계.</p></td><td>반복 선택으로 소비한 평가자료를 숨기지 않기<p>2016–2019 봉인은 유지. 과거 국면 검증과 미래 확인을 구분.</p></td></tr><tr><th scope="row" class="milestone">M8</th><td><span class="tag warm">표현 확장 보류</span></td><td>기존 YAML·LANG2 사용, 증거 export는 앞당김<p>고급 분기·재사용 라이브러리·추가 편집기는 사례의 필요가 드러날 때.</p></td><td>한 연구를 재현·검토하는 데 개발을 집중<p>export는 인계의 필요 기능. 편집 표현력 전체를 첫 연구 선행으로 묶지 않음.</p></td></tr><tr><th scope="row" class="milestone">M9</th><td><span class="tag ops">최우선</span></td><td>S01 판본 고정 + S02 필수 데이터 검산<p>PIT 업종은 별도 데이터 작업. 재무 vintage·공매도 결손은 해당 신호 사용 시 해결.</p></td><td>가용 데이터가 실제로 답할 수 있는 질문부터 시작<p>현재 업종값을 과거에 덮어 쓰지 않음. 배당 제외 성과를 총수익이라 부르지 않음.</p></td></tr><tr><th scope="row" class="milestone">M10</th><td><span class="tag">필수 범위 선별</span></td><td>재현·복구·기본 자원 한도를 우선<p>프로세스 격리·대규모 성능 최적화는 측정된 병목에 따라.</p></td><td>연구 실행 안정성과 계좌 운영 안전을 구분<p>브로커 주문 원장·대사는 M10의 기존 실험 복구 완료로 대체하지 않음.</p></td></tr><tr><th scope="row" class="milestone">V5-02</th><td><span class="tag">증거 화면 연결</span></td><td>S03·S04 결과를 화면에 표시<p>수동 증거 묶음으로 첫 연구는 가능. 미구현 통계·서버 판정을 UI가 대신 만들지 않음.</p></td><td>수익·비용·위험·한계를 함께 판단하도록 지원<p>화면 완료가 첫 실데이터 연구를 막는 필수 조건은 아님.</p></td></tr><tr><th scope="row" class="milestone">V4-05<br>V6-01</th><td><span class="tag">병행 가능</span></td><td>회귀 입력 확보 시 노출 분석, 동결·열람 기록 보강<p>V6-01의 원래 개봉 명세와 일반 평가 열람 이력의 범위를 구분.</p></td><td>시장 노출과 전략 효과, 미사용과 재사용을 구분<p>개봉 코드를 만드는 것과 실제 봉인을 여는 것은 별도 결정.</p></td></tr><tr><th scope="row" class="milestone">V5-04/06/07<br>V6-02</th><td><span class="tag warm">기존 선행 준수</span></td><td>결과·통계·동결 backend 뒤에 화면 구현<p>원래 PLAN의 의존 그래프는 그대로 적용.</p></td><td>없는 결과를 화면부터 채우지 않기<p>우선순위 변경이 의존성 생략을 뜻하지 않음.</p></td></tr><tr><th scope="row" class="milestone">운영 확장</th><td><span class="tag ops">새 계획 필요</span></td><td>S05–S08 브로커 실행·대사·운영 검토<p>독립 initiative 제안. 실제 시작 시 이름·책임·스토리를 정하고 기존 계획에서 연결.</p></td><td>실험 엔진에 주문 책임을 섞지 않기<p>계좌 상태·영속 의도·장애 복구를 명시한 별도 스펙이 필요.</p></td></tr></tbody></table></div>
       <div class="legacy-note"><article><h3>정본 갱신은 구현과 함께</h3><p>패킷마다 관련 roadmap 행에 코드·테스트·한계의 근거를 붙이고, Validation Lab의 PR 상태를 바꾸면 기존 집계 도구를 사용합니다. 새 상태 원장이나 별도의 완료율을 이 HTML에 만들지 않습니다.</p></article><article><h3>새 스펙의 첫 문단</h3><p>“이 작업은 [최종 목적]을 위해 [불확실성]을 줄인다. [변경]을 구현하고 [증거]로 확인한다. [조건]이면 진행하고, [조건]이면 보류·기각한다.” 이 문단을 PR까지 이어갑니다.</p></article></div>
     </section>
 
@@ -423,6 +462,8 @@
       const escapeHtml = (value) => value.replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char]));
       const list = items => `<ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
       const sessionList = document.getElementById("session-list");
+      const packetLabels = ["데이터 보존", "회계 검산", "신호 평가", "반증·선택 통제", "주문·대사", "모의 연결", "전향 관찰", "자본 결정"];
+      document.getElementById("session-index").innerHTML = sessions.map((session, index) => `<a href="#session-${session.id}"><span>${session.id.toUpperCase()}</span>${packetLabels[index]}</a>`).join("");
       sessionList.innerHTML = sessions.map(session => {
         const operations = session.track.includes("운영");
         const prompt = `Quant_study의 docs/auto-trading-roadmap.html을 읽고 ${session.id.toUpperCase()} 「${session.title}」 패킷을 수행하라.\n\n${common}\n\n[의도]\n${session.intent}\n\n[선행 조건]\n${session.dependency}\n\n[구현 범위]\n${session.work.map((item, index) => `${index + 1}. ${item}`).join("\n")}\n\n[우선 읽을 기존 파일 — 새 파일/노드명은 설계 후 확정]\n${session.files.join("\n")}\n\n[확인할 증거]\n${session.evidence.map(item => `- ${item}`).join("\n")}\n\n[검증 출발점]\n${session.checks}\n\n[다음 결정]\n${session.decision}\n\n[범위 경계]\n${session.boundary}\n\n[기존 계획 연결]\n${session.legacy}\n\n실제 구현과 필요한 검증까지 진행하고, 의도·변경·증거·남은 불확실성·다음 결정을 인계하라. 한 세션에 과하면 이 의도를 유지하는 최소 PR로 나누되 완료 범위를 명확히 하라.`;
@@ -464,6 +505,34 @@
           requestAnimationFrame(() => target.scrollIntoView({block: "start"}));
         }
       }));
+      const topbar = document.querySelector(".topbar");
+      const updateNavHeight = () => document.documentElement.style.setProperty("--nav-height", `${topbar.offsetHeight}px`);
+      updateNavHeight();
+      new ResizeObserver(updateNavHeight).observe(topbar);
+      const sectionLinks = [...document.querySelectorAll(".topnav a")];
+      const sections = sectionLinks.map(link => document.querySelector(link.hash));
+      let navigationScheduled = false;
+      function updateCurrentSection() {
+        const boundary = topbar.offsetHeight + 40;
+        let activeIndex = 0;
+        sections.forEach((section, index) => {
+          if (section.getBoundingClientRect().top <= boundary) activeIndex = index;
+        });
+        if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) activeIndex = sections.length - 1;
+        sectionLinks.forEach((link, index) => {
+          if (index === activeIndex) link.setAttribute("aria-current", "location");
+          else link.removeAttribute("aria-current");
+        });
+        navigationScheduled = false;
+      }
+      window.addEventListener("scroll", () => {
+        if (!navigationScheduled) {
+          navigationScheduled = true;
+          requestAnimationFrame(updateCurrentSection);
+        }
+      }, {passive: true});
+      window.addEventListener("resize", updateCurrentSection);
+      updateCurrentSection();
       window.addEventListener("hashchange", revealPacket);
       revealPacket();
       document.querySelectorAll("[data-copy]").forEach(button => button.addEventListener("click", async () => {

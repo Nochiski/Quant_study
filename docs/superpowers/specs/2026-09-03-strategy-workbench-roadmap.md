@@ -32,6 +32,14 @@ Validation Lab의 MERGED/PR 집계를 만드는 기록이 아니다.
 [구현 증거 인계](../../planning/research-to-trading/README.md)는 각 단계의 의도·구현·한계·다음
 결정을 연결한다. [HTML 작업 패킷](../../auto-trading-roadmap.html)은 향후 작업 지시 원문이고,
 공식 기능 상태와 initiative 의존성은 이 로드맵과 각 PLAN이 계속 소유한다.
+전체 backend 4,583 passed·database 1,437 passed는 **1차 기반 `8c3c1803` 검증**이며,
+S03 runner·S04를 포함한 후속 전체 회귀는 **backend 4,610 passed, 1 skipped, 34 warnings**
+(169.50초)·**database 1,437 passed**(162.26초)이고 backend 전체 ruff·pyright 오류 0이다.
+frontend 105파일·1,346테스트·타입/린트/빌드·mock e2e 증거는 앞선 S04 검증 시점의 결과다.
+[PR #522](https://github.com/Nochiski/Quant_study/pull/522)·
+[PR #523](https://github.com/Nochiski/Quant_study/pull/523)·
+[PR #524](https://github.com/Nochiski/Quant_study/pull/524)는 검토 근거 링크로만 연결한다.
+로컬 전체 회귀와 GitHub CI 상태는 구분하며 이 문서에 PR 상태 원장을 만들지 않는다.
 
 - **S01 / M9·재현성 보완:** current 빌드 입력 복사·출처·무결성 검증·pending 공개 gate와 실제
   DuckDB adapter 재접속을 합성 원장으로 검증했다. 실제 원장의 품질·용량·연구 재현은 미검증이다.
@@ -42,15 +50,33 @@ Validation Lab의 MERGED/PR 집계를 만드는 기록이 아니다.
 - **S03 / M3 분석 문구 보완:** 별도 미래 가격 라벨·날짜별 Rank IC·커버리지 core를 기존 raw
   observation/factor pipeline에 합성 연결했다. M3의 관련 체크 한 줄만 부분 구현으로 정정한다.
   `FactorResearchService`의 catalog/validate/explain과 비용 후 `portfolioAnalytics`는 이 신호
-  평가의 완료 증거가 아니다. 실데이터 첫 연구·추론 통계·제품 노출은 미완료다.
-  [S03 core·분리 계약](../../planning/research-to-trading/S03-signal-evaluation.md).
+  평가의 완료 증거가 아니다. 후속 runner는 S01 검증→실제 DuckDB→기존 raw/factor pipeline→별도
+  label→원시 근거·일별 IC/coverage JSON 내보내기를 합성 원장으로 연결했다. 새 25건과 기존 S03·
+  architecture를 합친 64건, 관련 회귀 195건이 통과했다. 실제 원장·실성과·비용 후 비교·API/UI는
+  미완료이며 M3 체크행을 추가로 바꾸지 않는다.
+  [S03 core·분리 계약](../../planning/research-to-trading/S03-signal-evaluation.md) ·
+  [보존 입력 runner·실행/실패 계약](../../planning/research-to-trading/S03-runner.md).
+- **S04 / M7·평가 의미 보완:** 기존 워크포워드 API와 실험 화면에 기간별 초기자본 재시작,
+  첫 기록 이전 진입비용·손익 제외, 현금·보유 수량 미이월을 명시했다. 독립 합성 장부로 현 연결과
+  연속 계좌 손익이 다를 수 있음을 확인했으며 기존 곡선·지표·trial key·판본·선택 규칙은 유지했다.
+  실제 연속 계좌 실행기·스트레스·일반 평가 열람 이력은 남아 있다.
+  [S04 안내·독립 장부·후속 계약](../../planning/research-to-trading/S04-walk-forward.md).
 - **S05 / 별도 운영 확장:** 주문 전 영속 의도·단일 전송·오프라인 fake broker·재시작 대사 기반을
   새 실행 노드로 추가했다. 기존 M10의 연구 실행 복구와 책임을 구분한다. 목표 비중 sizing이나
   외부 모의/실계좌 준비 완료를 뜻하지 않으며 S06 이후는 미착수다.
   [S05 오프라인 스펙·장애 증거](../../planning/research-to-trading/S05-offline-execution.md).
 
-다음 결정은 실제 보존 입력을 확보한 뒤 S02 한계 안에서 무튜닝 S03 첫 사례를 진행할지 판단하는
-것이다. 합성 검증을 비용 후 수익성으로 해석하지 않으며, 실데이터 결과와 반증 기준이 준비된 뒤
+PLAN 집계는 [공용 Python 도구](../../../tools/PLAN_PROGRESS.md)로 macOS에서도 실행한다.
+후속 PS1 다섯 개는 workflow 변경 없이 PATH Python 3.11+를 사전 검사하고 `python -X utf8`로
+절대경로 script를 직접 호출한다. site/editable 설치 없는 `-I -S` 직접 script의 다섯 PLAN 검증,
+부모의 root 전체 unittest 52건·tools ruff/pyright 오류 0을 확인했다. 기존 tracker·체크행·PR 집계나
+의존성은 바꾸지 않았다. 원격 HEAD `79b9c86d`의
+[generated-progress 단일 job 성공](https://github.com/Nochiski/Quant_study/actions/runs/38862921708)은
+추가 근거이며 전체 CI 통과나 머지를 뜻하지 않는다. 동적 상태는 PR 링크에서 확인하고, 실제 Windows
+PowerShell 현지 실측은 남아 있다.
+
+다음 결정은 같은 코드·환경의 실제 보존 입력과 연구 사양을 준비한 뒤 S02 한계 안에서 무튜닝 S03
+첫 사례를 진행할지 판단하는 것이다. 합성 검증을 비용 후 수익성으로 해석하지 않으며, 실데이터 결과와 반증 기준이 준비된 뒤
 후속 연구·운영 범위를 정한다. Validation Lab PLAN의 PR 상태·개수·선행 의존성은 변경하지 않는다.
 
 ## 1. 결론

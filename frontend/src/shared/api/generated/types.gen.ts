@@ -5404,6 +5404,16 @@ export type RunFactorRegression = {
    */
   data_snapshot_id: string;
   /**
+   * Factor Evaluation Version
+   *
+   * 단면을 계산한 팩터 평가 규칙 판본. 같은 run 이라도 이 판본이나 레지스트리 판본이 바뀌면 값이 달라질 수 있다. 파이프라인을 돌리지 못했으면 null.
+   */
+  factor_evaluation_version: string | null;
+  /**
+   * Factor Registry Version
+   */
+  factor_registry_version: string;
+  /**
    * Momentum Factor Id
    */
   momentum_factor_id: string;

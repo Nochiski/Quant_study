@@ -639,6 +639,20 @@ const ko = {
   "debugger.unavailable.preparing":
     "현재 문서의 실행 계획과 데이터 계약을 확인하고 있습니다.",
   "debugger.unavailable.no-factors": "추적할 팩터가 없습니다.",
+  "debugger.unavailable.parameters": "선택한 실행의 파라미터를 확인해야 추적할 수 있습니다. 문서 위의 선택 설정 안내를 확인하세요.",
+  "backtest.parameters.title": "선택한 실행의 파라미터",
+  "debugger.parameters.resolved": "이번 평가에 사용한 파라미터",
+  "backtest.parameters.source": "선택 출처 실행",
+  "backtest.parameters.basis": "적용 범위와 선택 출처",
+  "backtest.parameters.scope": "이 실행의 파라미터 값만 현재 문서와 현재 실행 환경에 적용합니다. 과거 실행 전체를 재현하는 기능이 아닙니다. 정적 실행 계획은 같아도 평가 값은 달라질 수 있습니다.",
+  "backtest.parameters.clear": "문서 기본값으로 돌아가기",
+  "backtest.parameters.clearShort": "기본값 복귀",
+  "backtest.parameters.loading": "선택한 실행의 파라미터를 확인하고 있습니다.",
+  "backtest.parameters.failed": "선택한 실행의 요청을 읽지 못했습니다. 기본값으로 대신 실행하지 않습니다.",
+  "backtest.parameters.mismatch": "선택한 실행의 저장 문서와 현재 리비전이 일치하지 않습니다. 다른 실행을 고르거나 문서 기본값으로 돌아가세요.",
+  "backtest.parameters.empty": "별도 선택값이 없어 문서의 기본값을 사용합니다.",
+  "backtest.parameters.retry": "선택한 실행 다시 조회",
+  "backtest.parameters.inspect": "이 설정 추적",
   "debugger.unavailable.execution-plan":
     "현재 FactorGraph 실행 계획을 확정할 수 없어 추적을 차단했습니다.",
   "debugger.unavailable.environment":
@@ -3152,6 +3166,20 @@ export const messages = {
     "debugger.unavailable.preparing":
       "Checking the current document's execution plan and data contract.",
     "debugger.unavailable.no-factors": "There is no factor to trace.",
+    "debugger.unavailable.parameters": "Confirm the selected run's parameters before tracing. Check the selection notice above the document.",
+    "backtest.parameters.title": "Selected run parameters",
+    "debugger.parameters.resolved": "Parameters used in this evaluation",
+    "backtest.parameters.source": "Source run",
+    "backtest.parameters.basis": "Applied scope and source run",
+    "backtest.parameters.scope": "Only this run's parameter values are applied to the current document and current run environment. This does not reproduce the entire past run. The static plan can remain the same while evaluated values differ.",
+    "backtest.parameters.clear": "Return to document defaults",
+    "backtest.parameters.clearShort": "Use defaults",
+    "backtest.parameters.loading": "Checking the selected run's parameters.",
+    "backtest.parameters.failed": "Could not read the selected run's request. Execution will not silently fall back to defaults.",
+    "backtest.parameters.mismatch": "The selected run's saved document does not match this revision. Select another run or return to document defaults.",
+    "backtest.parameters.empty": "No overrides were selected; document defaults apply.",
+    "backtest.parameters.retry": "Reload selected run",
+    "backtest.parameters.inspect": "Trace these settings",
     "debugger.unavailable.execution-plan":
       "Trace is blocked because the current FactorGraph execution plan cannot be pinned.",
     "debugger.unavailable.environment":

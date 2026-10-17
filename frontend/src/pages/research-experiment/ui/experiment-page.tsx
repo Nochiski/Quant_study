@@ -327,6 +327,14 @@ export const ExperimentPage = () => {
                       <RunCell state={state} />
                     </td>
                     <td>
+                      {state.status === "completed" && state.attempts.at(-1)?.run_id && record.run.strategy_source?.kind === "saved_revision" ? (
+                        <Link
+                          className="ui-button ui-button--small ui-button--secondary"
+                          to="/research/strategies/$strategyId/revisions/$revision"
+                          params={{ strategyId: record.run.strategy_source.strategy_id, revision: String(record.run.strategy_source.revision) }}
+                          search={{ run: state.attempts.at(-1)!.run_id!, view: "graph" }}
+                        >{t("backtest.parameters.inspect")}</Link>
+                      ) : null}
                       {state.retryable ? (
                         <Button
                           size="small"

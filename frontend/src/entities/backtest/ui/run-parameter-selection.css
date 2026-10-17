@@ -1,0 +1,22 @@
+.run-parameter-selection {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  font-size: var(--text-size-body);
+  overflow-wrap: anywhere;
+}
+
+.run-parameter-selection header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.run-parameter-selection p { margin-block: var(--space-2); }
+.run-parameter-selection dl { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-block: var(--space-2) 0; }
+.run-parameter-selection dl > div { min-width: 0; }
+.run-parameter-selection dd { margin: var(--space-1) 0 0; font-family: var(--font-mono); }

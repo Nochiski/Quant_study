@@ -42,6 +42,8 @@ class PortfolioPreviewRequest:
     # 없으면 1.1 문서에서 브리지로 만든다(P2-01). 주어지면 문서의 `data`·`execution` 보다
     # 우선한다. 우선순위 판정은 `resolve_environment` 하나가 소유한다.
     environment: RunEnvironment | None = None
+    # 저장 문서 의미는 바꾸지 않고 평가에 쓸 값만 덮어쓴다. 생략하면 문서 기본값이다.
+    parameter_values: Mapping[str, ParameterValue] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -94,3 +96,13 @@ class PortfolioPreview:
     tape: TargetTape
     engine: EngineCompatibility
     warnings: tuple[str, ...] = ()
+    parameter_values: Mapping[str, ParameterValue] = field(
+        default_factory=dict,
+        metadata={
+            "description": (
+                "문서 기본값을 포함해 해소한 평가 파라미터. "
+                "tape.strategy_hash는 저장 문서 의미이고 "
+                "값별 계산 출력은 tape_hash로 구분한다."
+            )
+        },
+    )

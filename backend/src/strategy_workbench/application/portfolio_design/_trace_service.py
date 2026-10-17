@@ -137,7 +137,9 @@ class StrategyTraceService:
         )
         try:
             pipeline = self._portfolio_design.run_pipeline(
-                PortfolioPreviewRequest(spec, environment=environment),
+                PortfolioPreviewRequest(
+                    spec, environment=environment, parameter_values=request.parameter_values
+                ),
                 options=PortfolioPipelineOptions(
                     trace_factor_id=request.factor_id,
                     trace_selection=selection,
@@ -270,6 +272,7 @@ class StrategyTraceService:
             plan_hash=record.plan.plan_hash,
             factor_evaluation_version=record.plan.evaluation_version,
             provenance=provenance,
+            parameter_values=pipeline.preview.parameter_values,
             factor_id=request.factor_id,
             as_of=resolved_as_of,
             trace=StrategyTracePage(

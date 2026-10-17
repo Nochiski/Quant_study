@@ -44,6 +44,7 @@ type StrategyDocumentSearch = {
   asOf?: string;
   security?: string;
   draft?: string;
+  run?: string;
 };
 type BacktestHistorySearch = {
   offset?: number;
@@ -70,6 +71,7 @@ const strategyDocumentSearch = (
     asOf: typeof search.asOf === "string" ? search.asOf : undefined,
     security: typeof search.security === "string" ? search.security : undefined,
     draft: isNewDraftId(search.draft) ? search.draft : undefined,
+    run: typeof search.run === "string" && search.run.trim() !== "" ? search.run.trim() : undefined,
   };
 };
 

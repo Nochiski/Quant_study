@@ -97,6 +97,7 @@ def test_portfolio_preview_openapi_declares_every_coded_422() -> None:
         "backtest.run.field_invalid",
         "backtest.run.environment_required",
         "backtest.run.research_window_violation",
+        "backtest.run.parameter_invalid",
     }
     malformed = client.post("/api/v1/portfolio/preview", json={"spec": {}})
     assert malformed.status_code == 422

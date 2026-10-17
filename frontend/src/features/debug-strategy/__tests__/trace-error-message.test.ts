@@ -84,6 +84,7 @@ describe("trace rejection code vocabulary (#351)", () => {
     expect(codes).toEqual([
       "backtest.run.environment_required",
       "backtest.run.field_invalid",
+      "backtest.run.parameter_invalid",
       "backtest.run.research_window_violation",
       "portfolio.data.unavailable",
       "portfolio.raw_observation.invalid",
@@ -159,5 +160,15 @@ describe("trace rejection code vocabulary (#351)", () => {
     expect(traceErrorMessage(rejection)).toBe(
       "서버가 요청의 값 하나를 받지 않았습니다. 서버 사유가 짚은 칸을 고친 뒤 다시 실행하세요.",
     );
+  });
+
+  it("선택 파라미터 거절은 공통 번역에서 이름을 채우고 서버 원문을 본문에 넣지 않는다", () => {
+    const rejection = new ApiRequestError("traceStrategy", 422,
+      "backtest.run.parameter_invalid", "unknown parameter: removed_scale",
+      null, null, undefined, undefined, { parameter_id: "removed_scale" });
+    expect(traceErrorMessage(rejection)).toBe(backtestStartRejectionMessage(rejection));
+    expect(traceErrorMessage(rejection)).toContain("전략 파라미터 removed_scale의 값을 쓸 수 없습니다.");
+    expect(traceErrorMessage(rejection)).not.toContain("{parameter_id}");
+    expect(traceErrorMessage(rejection)).not.toContain("unknown parameter");
   });
 });

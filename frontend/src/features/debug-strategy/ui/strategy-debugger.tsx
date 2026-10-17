@@ -42,6 +42,7 @@ import {
   type StrategyTraceState,
 } from "../model/use-strategy-trace";
 import "./strategy-debugger.css";
+import { TraceParameters } from "./trace-parameters";
 
 type DebuggerSearchSelection = {
   asOf?: string;
@@ -774,6 +775,7 @@ const Provenance = ({ state }: { state: StrategyTraceState }) => {
       <span>
         {t("debugger.provenance.asOf")} <code>{response.as_of}</code>
       </span>
+      <TraceParameters values={response.parameter_values} />
     </div>
   );
 };

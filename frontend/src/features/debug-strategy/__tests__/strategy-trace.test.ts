@@ -141,6 +141,24 @@ const response = (): StrategyTraceResponse => ({
 });
 
 describe("strategy trace request contract", () => {
+  it("선택값을 모든 추적 요청에 그대로 보내고 값·출처 실행별 캐시를 나눈다", () => {
+    const selection = { asOf: "2026-08-31", security: "sec-a", factorId: "momentum", nodeId: "ranked" };
+    const original = context();
+    original.parameterValues = { scale: 0, enabled: false };
+    original.parameterSourceRunId = "run-a";
+    const first = prepareStrategyTrace(original, selection);
+    const changed = prepareStrategyTrace({ ...original, parameterValues: { scale: 1, enabled: false } }, selection);
+    const otherRun = prepareStrategyTrace({ ...original, parameterSourceRunId: "run-b" }, selection);
+    if (first.kind !== "ready" || changed.kind !== "ready" || otherRun.kind !== "ready") throw new Error("추적 준비 실패");
+    for (const request of [...first.linkedRequests, first.selectedRequest]) expect(request.parameter_values).toEqual({ scale: 0, enabled: false });
+    expect(first.ownerKey).not.toBe(changed.ownerKey);
+    expect(first.ownerKey).not.toBe(otherRun.ownerKey);
+    expect(first.expected.planHash).toBe(changed.expected.planHash);
+    const valid = { ...response(), parameter_values: { scale: 0, enabled: false, extra_default: 3 } };
+    expect(responseMatchesStrategyTrace(first, valid)).toBe(true);
+    expect(responseMatchesStrategyTrace(first, { ...valid, parameter_values: { scale: 1, enabled: false } })).toBe(false);
+    expect(responseMatchesStrategyTrace(first, response())).toBe(false);
+  });
   it("normalizes security IDs and builds bounded linked plus selected-node requests", () => {
     expect(parseSecurityIds(" sec-b,sec-a  sec-b\nsec-c ")).toEqual([
       "sec-b",

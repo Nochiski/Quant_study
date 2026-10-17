@@ -17,6 +17,7 @@ from strategy_workbench.application.portfolio_design.facade.trace import Strateg
 
 from ._execution_error_contract import (
     BacktestEnvironmentRequiredDetail,
+    BacktestParameterInvalidDetail,
     BacktestResearchWindowViolationDetail,
     BacktestRunFieldInvalidDetail,
     PortfolioDataUnavailableDetail,
@@ -60,6 +61,7 @@ TraceUnprocessableDetail: TypeAlias = Annotated[
     | PortfolioDataUnavailableDetail
     | PortfolioRawObservationInvalidDetail
     | BacktestRunFieldInvalidDetail
+    | BacktestParameterInvalidDetail
     | BacktestEnvironmentRequiredDetail
     | BacktestResearchWindowViolationDetail,
     Field(discriminator="code"),

@@ -3,6 +3,7 @@ import type {
   StrategyDebuggerUnavailableReason,
 } from "../../../features/debug-strategy";
 import type { RunEnvironment } from "../../../shared/api";
+import type { RunParameterContext } from "../../../entities/backtest";
 import {
   compiledNodeOrigin,
   currentCompile,
@@ -40,7 +41,9 @@ export const buildStrategyDebuggerAvailability = (
   document: DocumentState,
   plans: ExecutionPlansState,
   environment: RunEnvironment | null,
+  parameters?: RunParameterContext,
 ): StrategyDebuggerAvailability => {
+  if (parameters?.ready === false) return { context: null, reason: "parameters" };
   const compiled = currentCompile(document);
   if (compiled === null) return { context: null, reason: "document" };
   if ((compiled.spec.factors ?? []).length === 0)
@@ -111,6 +114,8 @@ export const buildStrategyDebuggerAvailability = (
       expectedSnapshotId: plans.expectedDataSnapshotId,
       expectedRegistryVersion: plans.expectedRegistryVersion,
       environment,
+      parameterValues: parameters?.values,
+      parameterSourceRunId: parameters?.runId,
       factors,
     },
   };

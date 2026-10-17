@@ -215,7 +215,7 @@ test(
       false,
     );
     await expect(plateau).toContainText(
-      "추천할 설정이 없어요. 모든 칸의 학습 샤프나 그 이웃 평균이 0 이하예요",
+      "추천할 설정이 없어요. 후보가 될 칸(점수가 난 이웃이 있는 칸)의 학습 샤프나 그 이웃 평균이 모두 0 이하예요",
     );
     await expect(
       card.getByRole("button", { name: "튼튼한지 확인하기" }),

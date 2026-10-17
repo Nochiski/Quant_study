@@ -12,6 +12,7 @@
 
 .assist__head {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
   /* 자식은 동작 묶음 하나뿐이다. 제목은 이 feature를 꽂는 슬롯이 그린다(WORKFLOW B-04).
@@ -24,10 +25,21 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.assist__head-actions .ui-button {
+  flex: none;
+  white-space: nowrap;
 }
 
 .assist__sessions {
-  max-width: 180px;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+  max-width: none;
   padding: 4px var(--space-2);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-small);
@@ -283,6 +295,7 @@
 
 .assist__composer {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: var(--space-2);
 }
@@ -302,4 +315,25 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+@media (max-width: 767px) {
+  /* 작은 서랍에서는 대화·제안에 세로 공간을 주고 입력과 전송은 같은 행에 둔다. */
+  .assist__composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .assist__input {
+    min-width: 0;
+    width: 100%;
+    height: calc(2lh + 2 * var(--space-2) + 2px);
+    min-height: var(--control-height-touch);
+    max-height: 24dvh;
+  }
+
+  .assist__composer-actions .ui-button {
+    white-space: nowrap;
+  }
 }

@@ -1,5 +1,5 @@
 import { t } from "../../../shared/config";
-import { currentCompileOutcome, type DocumentState } from "./document-state";
+import { currentCompileOutcome, currentParseOutcome, type DocumentState } from "./document-state";
 import type { SaveStatus } from "./use-save-document";
 
 /**
@@ -61,4 +61,25 @@ export const saveStatusTone = (
     return "error";
   if (state.dirty) return "warn";
   return "ok";
+};
+
+/** 짧은 저장 안내도 상태 소유자가 해석한다. 오류색만으로 저장 요청 실패를 단정하지 않는다. */
+export const saveStatusSummary = (
+  state: DocumentState,
+  status: SaveStatus,
+): string | null => {
+  if (status.kind === "conflict") return t("save.summary.conflict");
+  if (status.kind === "invalid") return t("save.summary.invalid");
+  if (status.kind === "failed") return t("save.summary.failed");
+  if (status.kind === "saving" || state.source.trim().length === 0) return null;
+  if (state.dirty && currentParseOutcome(state)?.status === "rejected")
+    return t("save.summary.syntax");
+  if (
+    state.dirty &&
+    currentCompileOutcome(state)?.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+  )
+    return t("save.summary.validation");
+  return null;
 };

@@ -30,6 +30,7 @@ import {
   currentDiagnostics,
   revisionDraftId,
   saveStatusText,
+  saveStatusSummary,
   saveStatusTone,
   useApplyAssistantProposal,
   useStrategyAssistant,
@@ -61,7 +62,7 @@ import {
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
-import { Badge } from "../../../shared/ui";
+import { Badge, Button } from "../../../shared/ui";
 import {
   StrategyDebuggerPanel,
   StrategyPreviewPanel,
@@ -179,6 +180,7 @@ export const StrategyRevisionPage = () => {
         search: {
           ...search,
           path,
+          recipe: path?.includes("/graph") ? search.recipe : undefined,
           view: origin === "outline" ? "yaml" : search.view,
         },
         replace: true,
@@ -313,6 +315,7 @@ export const StrategyRevisionPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
+        saveStatusSummary={saveStatusSummary(document, status)}
         onRunBacktest={runBacktest}
         runDisabled={!canRun}
         onValidate={validateNow}
@@ -394,64 +397,161 @@ export const StrategyRevisionPage = () => {
           />
         )}
         projections={{
-          graph: (
-            <>
-              {/* 그래프 1수준(파이프라인) 캔버스 위, 고급 수준(노드 편집·실행 계획) 아래(P4-02). */}
-              <PipelinePanel
-                form={form}
+          graph:
+            !search.recipe &&
+            !(
+              factorIndexAtPointer(search.path) !== null &&
+              search.path?.includes("/graph")
+            ) ? (
+              <section
+                className="pipeline-comparison"
+                aria-label={t("graph.pipeline.comparison")}
+              >
+                <nav
+                  className="pipeline-comparison__navigation"
+                  aria-label={t("graph.pipeline.comparison")}
+                >
+                  <a href="#strategy-rules">
+                    {t("graph.pipeline.rulesSection")}
+                  </a>
+                  <a href="#selection-results">
+                    {t("graph.pipeline.resultsSection")}
+                  </a>
+                </nav>
+                <div className="pipeline-comparison__body">
+                  <div id="strategy-rules" tabIndex={-1}>
+                    <PipelinePanel
+                      form={form}
+                      schema={assist.schema}
+                      transactions={transactions}
+                      catalogs={catalogs}
+                      onOpenGraph={openGraph}
+                      onOpenAdvanced={(pointer) =>
+                        void navigate({
+                          to: ROUTE,
+                          params: { strategyId, revision },
+                          search: {
+                            ...search,
+                            path: pointer,
+                            view: "graph",
+                            recipe: undefined,
+                          },
+                          resetScroll: false,
+                        })
+                      }
+                      selectedPointer={search.path}
+                      revealSignal={problems.revealSignal}
+                    />
+                  </div>
+                  <aside
+                    id="selection-results"
+                    tabIndex={-1}
+                    className="pipeline-comparison__result"
+                    aria-label={t("graph.pipeline.selectionResult")}
+                  >
+                    <StrategyPreviewPanel
+                      document={document}
+                      executionPlans={executionPlans}
+                      environment={runSettings.environment}
+                    />
+                  </aside>
+                </div>
+              </section>
+            ) : search.recipe &&
+              !form.firstParsePending &&
+              assist.schema !== null ? (
+              <RecipePanel
+                tree={form.tree}
                 schema={assist.schema}
+                factorIndex={factorIndexAtPointer(search.path) ?? 0}
                 transactions={transactions}
                 catalogs={catalogs}
-                onOpenGraph={openGraph}
-                selectedPointer={search.path}
-                revealSignal={problems.revealSignal}
-              />
-              <StrategyPreviewPanel document={document} executionPlans={executionPlans} environment={runSettings.environment} />
-              {search.recipe && !form.firstParsePending && assist.schema !== null ? (
-                <RecipePanel
-                  tree={form.tree} schema={assist.schema}
-                  factorIndex={factorIndexAtPointer(search.path) ?? 0}
-                  transactions={transactions} catalogs={catalogs} operators={assist.operators}
-                  diagnostics={currentDiagnostics(document)} plans={executionPlans}
-                  selectedPointer={search.path} revealSignal={problems.revealSignal}
-                  onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-                  onAdvanced={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined }, resetScroll: false })}
-                  onBack={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined, path: undefined }, resetScroll: false })}
-                />
-              ) : (
-              <FactorGraphPanel
-                state={executionPlans}
-                schema={assist.schema}
+                operators={assist.operators}
                 diagnostics={currentDiagnostics(document)}
+                plans={executionPlans}
                 selectedPointer={search.path}
                 revealSignal={problems.revealSignal}
-                // 첫 parse 전 tree 는 비어 있어 편집기가 "팩터가 없습니다"를 그린다. 캔버스처럼 기다린다(#413).
-                editing={
-                  form.firstParsePending
-                    ? undefined
-                    : {
-                        tree: form.tree,
-                        transactions,
-                        catalogs,
-                        operators: assist.operators,
-                        onOpenSource: openSourceAt,
-                        documentKey: document.documentEpoch,
-                        sourceVersion: document.sourceVersion,
-                        active: view === "graph" && !search.recipe,
-                      }
-                }
                 onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-                onOpenSource={(pointer) => {
-                  outline.requestSourceReveal(pointer);
-                  selectPointer(pointer, "outline");
-                }}
+                onAdvanced={() =>
+                  void navigate({
+                    to: ROUTE,
+                    params: { strategyId, revision },
+                    search: {
+                      ...search,
+                      path: search.path?.includes("/graph")
+                        ? search.path
+                        : `/factors/${factorIndexAtPointer(search.path) ?? 0}/graph`,
+                      recipe: undefined,
+                    },
+                    resetScroll: false,
+                  })
+                }
+                onBack={() =>
+                  void navigate({
+                    to: ROUTE,
+                    params: { strategyId, revision },
+                    search: { ...search, recipe: undefined, path: undefined },
+                    resetScroll: false,
+                  })
+                }
               />
-              )}
-            </>
-          ),
+            ) : (
+              <section className="graph-authoring">
+                <header className="graph-authoring__navigation">
+                  <Button
+                    tone="ghost"
+                    onClick={() =>
+                      void navigate({
+                        to: ROUTE,
+                        params: { strategyId, revision },
+                        search: {
+                          ...search,
+                          recipe: undefined,
+                          path: undefined,
+                        },
+                        resetScroll: false,
+                      })
+                    }
+                  >
+                    {t("graph.backToStrategy")}
+                  </Button>
+                </header>
+                <FactorGraphPanel
+                  state={executionPlans}
+                  schema={assist.schema}
+                  diagnostics={currentDiagnostics(document)}
+                  selectedPointer={search.path}
+                  revealSignal={problems.revealSignal}
+                  // 첫 parse 전 tree 는 비어 있어 편집기가 "팩터가 없습니다"를 그린다. 캔버스처럼 기다린다(#413).
+                  editing={
+                    form.firstParsePending
+                      ? undefined
+                      : {
+                          tree: form.tree,
+                          transactions,
+                          catalogs,
+                          operators: assist.operators,
+                          onOpenSource: openSourceAt,
+                          documentKey: document.documentEpoch,
+                          sourceVersion: document.sourceVersion,
+                          active: view === "graph" && !search.recipe,
+                        }
+                  }
+                  onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                  onOpenSource={(pointer) => {
+                    outline.requestSourceReveal(pointer);
+                    selectPointer(pointer, "outline");
+                  }}
+                />
+              </section>
+            ),
         }}
         notice={
           <>
+            {autosave.recovery ? (
+              <RecoveryBanner recovery={autosave.recovery} />
+            ) : null}
+            <ServerDraftBanner sync={serverDraft} />
             {/* 제안 적용 결과는 문서 알림 줄에 둔다 — 사이드바 레일에는 사이드바가 소유한
                 라이브 영역 하나만 있어야 한다(B-03 리뷰). 알림 줄은 배너들의 원래 자리라 저장 충돌
                 배너와 동시에 뜨면 라이브 영역이 둘이 될 수 있으나, 동시 노출이 드물고 두 문장 모두
@@ -481,14 +581,17 @@ export const StrategyRevisionPage = () => {
             ) : null}
           </>
         }
-        outline={
+        outline={({ inspect }) => (
           <StrategyOutline
             snapshot={outline.snapshot}
             selectedPointer={search.path}
-            onSelect={outline.onSelectOutlineNode}
+            onSelect={(node) => {
+              outline.onSelectOutlineNode(node);
+              inspect();
+            }}
             onCollapse={outline.onCollapseOutlineNode}
           />
-        }
+        )}
         snippets={
           <SnippetCatalog
             snippets={snippets.snippets}
@@ -537,10 +640,6 @@ export const StrategyRevisionPage = () => {
         }
         editor={
           <>
-            {autosave.recovery ? (
-              <RecoveryBanner recovery={autosave.recovery} />
-            ) : null}
-            <ServerDraftBanner sync={serverDraft} />
             <SourceEditor
               state={document}
               dispatch={dispatch}
@@ -552,7 +651,7 @@ export const StrategyRevisionPage = () => {
         }
       />
       <ProposalApplyDialog apply={proposalApply} />
-      <DirtyLeaveGuard dirty={document.dirty} />
+      <DirtyLeaveGuard dirty={document.dirty} acceptedRunId={backtest.status.kind === "accepted" ? backtest.status.runId : null} />
     </>
   );
 };

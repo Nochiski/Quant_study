@@ -15,6 +15,8 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openTraceWorkspace,
+  openTraceSource,
   replaceSource,
 } from "../workbench-helpers";
 
@@ -51,6 +53,7 @@ test(
     await replaceSource(page, source);
     await expectPhase(page, "검증 통과");
     await fillRunEnvironment(page);
+    await openTraceWorkspace(page);
 
     const traceControls = page.getByRole("form", { name: "전략 추적 범위" });
     await traceControls.getByLabel("기준일", { exact: true }).fill("2024-01-11");
@@ -64,6 +67,7 @@ test(
       .getByRole("combobox", { name: "노드", exact: true })
       .selectOption("change");
     await page.getByRole("button", { name: "추적 실행" }).click();
+    await openTraceSource(page);
     await expect(page.getByLabel("추적 재현 정보")).toBeVisible({
       timeout: 60_000,
     });

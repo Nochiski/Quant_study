@@ -12,6 +12,9 @@ import {
   expectPhase,
   fillRunEnvironment,
   openEditor,
+  openTraceWorkspace,
+  openTraceSource,
+  openEditorWorkspace,
   replaceSource,
   upgradeFromBanner,
 } from "../workbench-helpers";
@@ -36,6 +39,16 @@ const environment = {
 };
 const pipeline = (page: Page) =>
   page.getByRole("region", { name: "전략 파이프라인" });
+/** 정규화·거르기·위험 설정은 선택 노드의 문맥을 명시적으로 나와 전략 전체에서 편집한다. */
+const openStrategyComposition = async (page: Page) => {
+  await openEditorWorkspace(page);
+  const graphTab = page.getByRole("tab", { name: "그래프", exact: true });
+  await graphTab.click();
+  await expect(graphTab).toHaveAttribute("aria-selected", "true");
+  const back = page.getByRole("button", { name: "전략 구성으로 돌아가기", exact: true });
+  if (await back.isVisible()) await back.click();
+  await expect(pipeline(page)).toBeVisible();
+};
 const number = (value: number) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 }).format(value);
 const linked = (page: Page, id: string) =>
@@ -59,10 +72,11 @@ const load = async (page: Page, source: string) => {
   await openEditor(page, "/research/strategies/new");
   await replaceSource(page, source);
   await waitForSettledDocument(page);
-  await page.getByRole("tab", { name: "그래프", exact: true }).click();
+  await openStrategyComposition(page);
   await fillRunEnvironment(page, {}, environment);
 };
 const trace = async (page: Page, factorId: string, securities: string[]) => {
+  await openTraceWorkspace(page);
   const controls = page.getByRole("form", { name: "전략 추적 범위" });
   await controls
     .getByRole("textbox", { name: "종목 ID", exact: true })
@@ -82,6 +96,7 @@ const trace = async (page: Page, factorId: string, securities: string[]) => {
   const received = await response;
   expect(received.ok()).toBeTruthy();
   const result = (await received.json()) as StrategyTraceResponse;
+  await openTraceSource(page);
   await expect(page.getByLabel("추적 재현 정보")).toBeVisible({
     timeout: 60_000,
   });
@@ -126,7 +141,7 @@ test(
     await expect(selector).toHaveValue("rank");
     const scores = new Map<string, number[]>();
     for (const mode of ["rank", "zscore", "none"] as const) {
-      await page.getByRole("tab", { name: "그래프", exact: true }).click();
+      await openStrategyComposition(page);
       await selector.selectOption(mode);
       await waitForSettledDocument(page);
       const problems = page.getByRole("region", { name: "문제", exact: true });
@@ -203,6 +218,7 @@ test(
         "      output_node_id: value",
         "        - {node_id: scaled, kind: cross_sectional, operator: rank, input_node_id: value}\n      output_node_id: scaled",
       ) + "signal:\n  normalization: none\n";
+    await openEditorWorkspace(page);
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     await replaceSource(page, dimensionless);
     await expectPhase(page, "검증 통과");
@@ -222,7 +238,7 @@ test(
     await expectPhase(page, "구조 오류");
     const upgraded = await upgradeFromBanner(page);
     expect(upgraded.source).toContain("normalization: none");
-    await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await openStrategyComposition(page);
     await expect(
       pipeline(page).getByRole("combobox", {
         name: "점수 정규화",
@@ -348,6 +364,7 @@ test(
       .filter({ hasText: "3 팩터 기여도" });
     await expect(contributions).toContainText("momentum_12_1");
     await expect(contributions).not.toContainText("volatility_60");
+    await openEditorWorkspace(page);
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     const alphaOnly = source
       .replace(/  - factor_id: volatility_60[\s\S]*?(?=portfolio:)/u, "")
@@ -380,6 +397,7 @@ test(
         )!.unconstrained_target_weight,
       ).toBeCloseTo(0.05, 10);
     }
+    await openEditorWorkspace(page);
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     const withoutAlpha = source.replace(
       /  - factor_id: momentum_12_1[\s\S]*?(?=  - factor_id: volatility_60)/u,

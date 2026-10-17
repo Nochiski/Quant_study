@@ -36,6 +36,7 @@ import {
   PANEL_BOUNDS,
   usePanelLayout,
 } from "../model/use-panel-layout";
+import { OpenEditorWorkspaceContext } from "../model/workspace-context";
 import "./strategy-ide.css";
 
 export type SourceView = StrategyView;
@@ -58,6 +59,8 @@ export type StrategyIdeProps = {
   };
   /** Save status text in the top bar, e.g. "방금 저장됨". */
   saveStatus?: string;
+  /** 저장 상태 소유자가 파생한 짧은 안내. 위젯은 오류색이나 상세 문자열로 상태를 추측하지 않는다. */
+  saveStatusSummary?: string | null;
   saveTone?: "ok" | "warn" | "error";
   onRunBacktest?: () => void;
   runDisabled?: boolean;
@@ -88,7 +91,7 @@ export type StrategyIdeProps = {
    */
   runEnvironment?: ReactNode;
   /** Strategy document outline projection (P4-01). */
-  outline: ReactNode;
+  outline: ReactNode | ((controls: { inspect: () => void }) => ReactNode);
   /** P4-10 catalog UI; the P4-05 feature model owns schema projection and insertion. */
   snippets: ReactNode;
   /** Editor toolbar actions (format / validate) rendered in the editor header. */
@@ -192,6 +195,7 @@ export const StrategyIde = ({
   badges,
   meta,
   saveStatus,
+  saveStatusSummary,
   saveTone = "ok",
   onRunBacktest,
   runDisabled = false,
@@ -226,11 +230,7 @@ export const StrategyIde = ({
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
   const compact = useMediaQuery("(max-width: 767px)");
-  const { layout, debuggerMaxHeight, resize, toggle, close } = usePanelLayout(
-    narrow
-      ? { ...DEFAULT_LAYOUT, outlineOpen: !compact, inspectorOpen: false, debuggerOpen: false }
-      : DEFAULT_LAYOUT,
-  );
+  const { layout, resize, toggle, close } = usePanelLayout(DEFAULT_LAYOUT);
   // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가.
   //
   // 뷰포트가 아니라 좌우 패널이 실제로 나눠 갖는 폭(`.ide__body` content box)으로 잰다. 뷰포트로 재면
@@ -285,8 +285,8 @@ export const StrategyIde = ({
     layout.assistantOpen
       ? (layout.lastOpenedRight ?? "assistantOpen")
       : null;
-  const inspectorFloating = narrow || overlayRight === "inspectorOpen";
-  const assistantFloating = narrow || overlayRight === "assistantOpen";
+  const inspectorFloating = layout.debuggerOpen || narrow || overlayRight === "inspectorOpen";
+  const assistantFloating = layout.debuggerOpen || narrow || overlayRight === "assistantOpen";
   // 넓은 화면의 오버레이 서랍은 붙어 있는 오른쪽 패널 자리만 덮는다 — 폭의 owner는 그 패널의 폭
   // 상태다. 좁은 화면용 서랍 폭(420px)은 그 자리보다 넓어 편집기 오른쪽 칸을 가렸다(#290 리뷰 P2-1).
   const railDrawer =
@@ -315,10 +315,12 @@ export const StrategyIde = ({
       const other =
         panel === "inspectorOpen" ? "assistantOpen" : "inspectorOpen";
       const opening = !layout[panel];
+      if (opening && panel === "outlineOpen") close(["debuggerOpen"]);
+      if (opening && panel === "debuggerOpen") close(["outlineOpen", "inspectorOpen", "assistantOpen"]);
       // 작은 화면의 보조 서랍은 하나만 펼쳐 가려진 내용이 탭 순서에 남지 않게 한다.
       if (opening && compact) {
-        close((["outlineOpen", "inspectorOpen", "debuggerOpen", "assistantOpen"] as const).filter((key) => key !== panel));
-      } else if (opening && narrow && (panel === "inspectorOpen" || panel === "assistantOpen") && layout[other]) {
+        close((["outlineOpen", "inspectorOpen", "assistantOpen"] as const).filter((key) => key !== panel));
+      } else if (opening && (narrow || layout.debuggerOpen) && (panel === "inspectorOpen" || panel === "assistantOpen") && layout[other]) {
         close([other]);
       }
       if (opening && panel === "assistantOpen") setAssistantMounted(true);
@@ -326,6 +328,17 @@ export const StrategyIde = ({
     },
     [close, compact, layout, narrow, toggle],
   );
+  const inspect = useCallback((focusInspector = true) => {
+    if (!layout.inspectorOpen) toggle("inspectorOpen");
+    if (narrow || layout.debuggerOpen) close(["assistantOpen"]);
+    if (compact) close(["outlineOpen"]);
+    queueMicrotask(() => {
+      const body = document.getElementById(`${inspectorId}-body`);
+      if (body !== null) body.scrollTop = 0;
+      if (compact && focusInspector) document.getElementById(`${inspectorId}-collapse`)?.focus({ preventScroll: true });
+    });
+  }, [close, compact, layout.debuggerOpen, layout.inspectorOpen, narrow, toggle, inspectorId]);
+
   // 슬롯 함수는 렌더 중에 불리므로 이 손잡이는 ref를 닫지 않는다(`react-hooks/refs`). 접은 뒤 돌아갈
   // 자리는 상단 바 토글이고, 그 자리는 id로 찾는다.
   const assistantToggleId = `${assistantId}-toggle`;
@@ -396,7 +409,7 @@ export const StrategyIde = ({
       shortcut: `Alt ${index + 1}`,
       disabled: !availableViews.includes(id) || !onViewChange,
       focusAfterExecute: () => document.getElementById(tabId(viewTabsId, id)),
-      execute: () => onViewChange?.(id),
+      execute: () => { close(["debuggerOpen"]); onViewChange?.(id); },
     }));
     const panelCommands: CommandPaletteItem[] = [
       {
@@ -462,7 +475,13 @@ export const StrategyIde = ({
       description: symbol.description,
       keywords: symbol.keywords,
       disabled: !onSelectSymbol,
-      execute: () => onSelectSymbol?.(symbol.pointer),
+      execute: () => {
+        close(["debuggerOpen"]);
+        // 심볼 명령은 원문 이동이다. 떠 있는 보조 패널 뒤에 편집 초점을 남기지 않는다.
+        if (narrow) close(["outlineOpen", "inspectorOpen", "assistantOpen"]);
+        onSelectSymbol?.(symbol.pointer);
+        if (!narrow) inspect(false);
+      },
     }));
     return [
       ...actionCommands,
@@ -474,8 +493,11 @@ export const StrategyIde = ({
   }, [
     assistantFocusTarget,
     availableViews,
+    close,
     hasAssistant,
+    inspect,
     layout,
+    narrow,
     onRedo,
     onRunBacktest,
     onSave,
@@ -494,7 +516,7 @@ export const StrategyIde = ({
   ]);
 
   useEffect(() => {
-    if (narrow) close(["inspectorOpen", "debuggerOpen", "assistantOpen"]);
+    if (narrow) close(["inspectorOpen", "assistantOpen"]);
   }, [narrow, close]);
 
   // window 리스너는 layout effect로 설치한다(`.claude/rules/frontend-react-effects.md`, backlog 20·21).
@@ -505,7 +527,7 @@ export const StrategyIde = ({
       if (event.key !== "Escape") return;
       close(
         narrow
-          ? ["inspectorOpen", "debuggerOpen", "assistantOpen"]
+          ? ["inspectorOpen", "assistantOpen"]
           : [overlayRight as "inspectorOpen" | "assistantOpen"],
       );
     };
@@ -575,6 +597,7 @@ export const StrategyIde = ({
         )
           return;
         event.preventDefault();
+        close(["debuggerOpen"]);
         onViewChange(next);
         queueMicrotask(() =>
           document.getElementById(tabId(viewTabsId, next))?.focus(),
@@ -586,6 +609,7 @@ export const StrategyIde = ({
   }, [
     assistantFocusTarget,
     availableViews,
+    close,
     hasAssistant,
     layout.assistantOpen,
     onRedo,
@@ -614,6 +638,7 @@ export const StrategyIde = ({
         <h2>{t("ide.inspector")}</h2>
         <Button
           ref={inspectorCollapse}
+          id={`${inspectorId}-collapse`}
           size="small"
           tone="ghost"
           onClick={() => {
@@ -624,7 +649,7 @@ export const StrategyIde = ({
           {t("ide.collapseInspector")}
         </Button>
       </header>
-      {inspector}
+      <div id={`${inspectorId}-body`} className="ide__inspector-body">{inspector}</div>
     </aside>
   );
 
@@ -634,7 +659,7 @@ export const StrategyIde = ({
       className="ide__debugger"
       aria-label={t("ide.debugger")}
       hidden={!layout.debuggerOpen}
-      style={narrow ? undefined : { height: layout.debuggerHeight }}
+      data-workspace="trace"
     >
       <header className="ide__panel-header">
         <h2>{t("ide.debugger")}</h2>
@@ -647,10 +672,12 @@ export const StrategyIde = ({
             queueMicrotask(() => debuggerRestore.current?.focus());
           }}
         >
-          {t("ide.collapseDebugger")}
+          {t("ide.workspace.return")}
         </Button>
       </header>
-      {debuggerPanel}
+      <OpenEditorWorkspaceContext.Provider value={() => close(["debuggerOpen"])}>
+        {debuggerPanel}
+      </OpenEditorWorkspaceContext.Provider>
     </section>
   );
 
@@ -661,12 +688,12 @@ export const StrategyIde = ({
   const assistantNode = hasAssistant ? (
     <aside
       id={ids.assistant}
-      className="ide__assistant"
+      className={`ide__assistant${assistantFloating ? ` ${drawerClass}` : ""}`}
       aria-label={t("ide.assistant")}
       // 펼친 직후 포커스를 받을 수 있게 한다. 탭 순서에는 들어가지 않는다.
       tabIndex={-1}
       hidden={!layout.assistantOpen}
-      style={assistantFloating ? undefined : { width: layout.assistantWidth }}
+      style={assistantFloating ? railDrawer : { width: layout.assistantWidth }}
     >
       {/*
         패널의 landmark·이름·제목은 슬롯이 소유한다(WORKFLOW B-04 Acceptance). 슬롯 내용은 이름 없는
@@ -702,28 +729,20 @@ export const StrategyIde = ({
   ) : null;
 
   return (
-    <div className="ide">
+    <div className={`ide${layout.debuggerOpen ? " ide--trace" : ""}`}>
       <header className="ide__topbar">
         <nav className="ide__breadcrumb" aria-label={t("ide.breadcrumb")}>
           <span className="ide__crumb">{t("nav.strategies")}</span>
           <span className="ide__crumb-sep" aria-hidden="true">
             /
           </span>
-          <span className="ide__crumb ide__crumb--current" aria-current="page">
-            {title} {versionLabel}
-          </span>
+          <div className="ide__crumb ide__crumb--current" aria-current="page">
+            <h1>{title}</h1>
+            {badges ?? <Badge tone="neutral">{versionLabel}</Badge>}
+          </div>
           <Badge tone="accent">{t("nav.research")}</Badge>
         </nav>
-        <div className="ide__topbar-status" role="status">
-          {saveStatus ? (
-            <>
-              <span aria-hidden="true">
-                {saveTone === "error" ? "✕" : saveTone === "warn" ? "!" : "✓"}
-              </span>{" "}
-              {saveStatus}
-            </>
-          ) : null}
-        </div>
+        {saveStatusSummary ? <span className="ide__save-error" role="status">{saveStatusSummary}</span> : null}
         <div className="ide__topbar-actions">
           <Button
             size="small"
@@ -734,18 +753,24 @@ export const StrategyIde = ({
           >
             {t("command.open")} <kbd>Ctrl/⌘ K</kbd>
           </Button>
-          {!layout.outlineOpen ? (
+          {compact || !layout.outlineOpen ? (
             <Button
               ref={outlineRestore}
               size="small"
-              onClick={() => {
-                togglePanel("outlineOpen");
-                queueMicrotask(() => outlineCollapse.current?.focus());
+              onPointerDown={(event) => {
+                // 열린 서랍의 blur가 click보다 먼저 닫아 같은 버튼을 다시 여는 것을 막는다.
+                if (compact && layout.outlineOpen) event.preventDefault();
               }}
+              onClick={() => {
+                const opening = !layout.outlineOpen;
+                togglePanel("outlineOpen");
+                queueMicrotask(() => (opening ? outlineCollapse.current : outlineRestore.current)?.focus());
+              }}
+              aria-label={t("ide.outline")}
               aria-controls={ids.outline}
-              aria-expanded={false}
+              aria-expanded={layout.outlineOpen}
             >
-              {t("ide.outline")}
+              <span className="ide__label-full">{t("ide.outline")}</span><span className="ide__label-short" aria-hidden="true">{t("ide.outline.short")}</span>
             </Button>
           ) : null}
           {inspectorFloating || !layout.inspectorOpen ? (
@@ -762,20 +787,6 @@ export const StrategyIde = ({
               {t("ide.inspector")}
             </Button>
           ) : null}
-          {narrow || !layout.debuggerOpen ? (
-            <Button
-              ref={debuggerRestore}
-              size="small"
-              onClick={() => {
-                togglePanel("debuggerOpen");
-                queueMicrotask(() => debuggerCollapse.current?.focus());
-              }}
-              aria-controls={ids.debugger}
-              aria-expanded={layout.debuggerOpen}
-            >
-              {t("ide.debugger")}
-            </Button>
-          ) : null}
           {hasAssistant && (assistantFloating || !layout.assistantOpen) ? (
             <Button
               ref={assistantRestore}
@@ -787,30 +798,23 @@ export const StrategyIde = ({
                   assistantFocusTarget()?.focus(ASSISTANT_FOCUS),
                 );
               }}
+              aria-label={t("ide.assistant")}
               aria-controls={ids.assistant}
               aria-expanded={layout.assistantOpen}
               aria-keyshortcuts="Alt+A"
             >
-              {t("ide.assistant")}
+              <span className="ide__label-full">{t("ide.assistant")}</span><span className="ide__label-short" aria-hidden="true">AI</span>
             </Button>
           ) : null}
-          <Button
-            tone="primary"
-            onClick={onRunBacktest}
-            disabled={runDisabled || !onRunBacktest}
-            aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
-          >
-            <span aria-hidden="true">▷</span> {t("ide.runBacktest")}
-          </Button>
-        </div>
-      </header>
-
-      <header className="ide__title">
-        <div className="ide__title-row">
-          <h1>{title}</h1>
-          {badges}
-        </div>
+        <details
+          className="ide__document-info ui-disclosure"
+          onBlurCapture={(event) => {
+            if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+          }}
+        >
+          <summary aria-label={t("ide.documentInfo")}><span className="ide__label-full">{t("ide.documentInfo")}</span><span className="ide__label-short" aria-hidden="true">{t("ide.documentInfo.short")}</span></summary>
         <dl className="ide__meta">
+          {saveStatus ? <div><dt>{t("ide.meta.status")}</dt><dd role="status" data-tone={saveTone}>{saveStatus}</dd></div> : null}
           <div>
             <dt>{t("ide.meta.version")}</dt>
             <dd>
@@ -840,7 +844,7 @@ export const StrategyIde = ({
               <dt>{t("ide.meta.sourceHash")}</dt>
               <dd>
                 <code title={meta.sourceHash ?? undefined}>
-                  {meta.sourceHash ? `${meta.sourceHash.slice(0, 12)}…` : "—"}
+                  {meta.sourceHash ?? "—"}
                 </code>
               </dd>
             </div>
@@ -850,13 +854,41 @@ export const StrategyIde = ({
               <dt>{t("ide.meta.specHash")}</dt>
               <dd>
                 <code title={meta.specHash ?? undefined}>
-                  {meta.specHash ? `${meta.specHash.slice(0, 12)}…` : "—"}
+                  {meta.specHash ?? "—"}
                 </code>
               </dd>
             </div>
           ) : null}
         </dl>
+        </details>
+        </div>
       </header>
+
+      <div className="ide__document-bar">
+        <div className="ide__document-actions">{editorActions}</div>
+
+      </div>
+
+      <div className="ide__workspace-bar">
+        <div role="group" aria-label={t("ide.workspace.label")} className="ide__workspace-switch">
+          <Button
+            size="small"
+            aria-pressed={!layout.debuggerOpen}
+            onClick={() => {
+              if (layout.debuggerOpen) togglePanel("debuggerOpen");
+            }}
+          >{t("ide.workspace.edit")}</Button>
+          <Button
+            ref={debuggerRestore}
+            size="small"
+            aria-pressed={layout.debuggerOpen}
+            onClick={() => {
+              if (!layout.debuggerOpen) togglePanel("debuggerOpen");
+            }}
+          >{t("ide.debugger")}</Button>
+        </div>
+        {documentStatus ? <div className="ide__workspace-status">{documentStatus}</div> : null}
+      </div>
 
       {runEnvironment ?? null}
       {notice ? <div className="ide__notice">{notice}</div> : null}
@@ -864,8 +896,11 @@ export const StrategyIde = ({
       <div className="ide__body" ref={bodyRef}>
         <div
           className={`ide__left${compact ? " ide__left--drawer" : ""}`}
-          hidden={!layout.outlineOpen}
+          hidden={!layout.outlineOpen || layout.debuggerOpen}
           style={compact ? undefined : { width: layout.outlineWidth }}
+          onBlurCapture={(event) => {
+            if (compact && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) close(["outlineOpen"]);
+          }}
           onKeyDown={(event) => {
             if (!compact || event.key !== "Escape") return;
             event.preventDefault();
@@ -893,14 +928,14 @@ export const StrategyIde = ({
                 {t("ide.collapseOutline")}
               </Button>
             </header>
-            {outline}
+            {typeof outline === "function" ? outline({ inspect }) : outline}
           </nav>
           <section className="ide__snippets" aria-label={t("ide.snippets")}>
             <h2 className="ide__snippets-title">{t("ide.snippets")}</h2>
             {snippets}
           </section>
         </div>
-        {layout.outlineOpen && !compact ? (
+        {layout.outlineOpen && !compact && !layout.debuggerOpen ? (
           <SplitHandle
             orientation="vertical"
             label={t("ide.resizeOutline")}
@@ -913,16 +948,7 @@ export const StrategyIde = ({
         ) : null}
 
         <div className="ide__centre">
-          <section className="ide__editor" aria-label={t("ide.editor")}>
-            <header className="ide__editor-header">
-              <div className="ide__editor-heading">
-                <strong>{t("ide.editor")}</strong>
-                <span className="ide__editor-sub">
-                  {view.toUpperCase()} · {t("ide.editor.verbose")}
-                </span>
-              </div>
-              <div className="ide__editor-actions">{editorActions}</div>
-            </header>
+          <section className="ide__editor" aria-label={t("ide.editor")} hidden={layout.debuggerOpen}>
             <div className="ide__editor-tabs">
               <Tabs
                 label={t("ui.tabs.view")}
@@ -938,9 +964,7 @@ export const StrategyIde = ({
               {documentHistory ? (
                 <div className="ide__editor-history">{documentHistory}</div>
               ) : null}
-              {documentStatus ? (
-                <div className="ide__editor-status">{documentStatus}</div>
-              ) : null}
+
             </div>
             {VIEWS.map((id) => (
               <div
@@ -973,19 +997,7 @@ export const StrategyIde = ({
             ) : null}
             {problems ? <div className="ide__problems">{problems}</div> : null}
           </section>
-          {!narrow && layout.debuggerOpen ? (
-            <SplitHandle
-              orientation="horizontal"
-              label={t("ide.resizeDebugger")}
-              value={layout.debuggerHeight}
-              min={PANEL_BOUNDS.debuggerHeight.min}
-              max={debuggerMaxHeight}
-              invert
-              onChange={(value) => resize("debuggerHeight", value)}
-              controls={ids.debugger}
-            />
-          ) : null}
-          {narrow ? null : debuggerNode}
+          {debuggerNode}
         </div>
 
         {!inspectorFloating && layout.inspectorOpen ? (
@@ -1014,7 +1026,8 @@ export const StrategyIde = ({
             controls={ids.assistant}
           />
         ) : null}
-        {assistantFloating ? null : assistantNode}
+        {/* 배치만 바꾸고 DOM 부모는 유지해 대화·미전송 입력·스트림 소유자를 재마운트하지 않는다. */}
+        {assistantNode}
 
         {/* 서랍은 본문 안에 그린다 — 오른쪽 서랍의 세로 범위가 본문과 같아 상단 바 밑에 깔리지 않는다(#325). */}
         {inspectorFloating ? (
@@ -1026,23 +1039,7 @@ export const StrategyIde = ({
             {inspectorNode}
           </div>
         ) : null}
-        {narrow ? (
-          <div
-            className="ide__drawer ide__drawer--bottom"
-            hidden={!layout.debuggerOpen}
-          >
-            {debuggerNode}
-          </div>
-        ) : null}
-        {hasAssistant && assistantFloating ? (
-          <div
-            className={drawerClass}
-            style={railDrawer}
-            hidden={!layout.assistantOpen}
-          >
-            {assistantNode}
-          </div>
-        ) : null}
+
       </div>
       <CommandPalette
         open={paletteOpen}

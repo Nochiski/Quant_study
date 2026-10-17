@@ -234,3 +234,52 @@
 .factor-graph__pending {
   display: contents;
 }
+
+/* 캔버스와 속성은 같은 작업 맥락이며, IDE 전체 창이 아닌 실제 받은 폭으로 나란히 둔다. */
+.factor-graph__editor {
+  container-type: inline-size;
+  min-width: 0;
+}
+.factor-graph__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.factor-graph__workspace > fieldset {
+  min-width: 0;
+  margin: 0;
+}
+.factor-graph__tools,
+.factor-graph__settings {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+.factor-graph__tools > summary,
+.factor-graph__settings > summary {
+  font-weight: var(--font-weight-heading);
+}
+.factor-graph__tools[open] > summary,
+.factor-graph__settings[open] > summary {
+  margin-bottom: var(--space-3);
+}
+@container (min-width: 860px) {
+  .factor-graph__workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  }
+}
+
+.factor-graph__provenance > summary {
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+}
+@container (min-width: 860px) {
+  .factor-graph__workspace > fieldset:first-child {
+    position: sticky;
+    top: 0;
+  }
+}

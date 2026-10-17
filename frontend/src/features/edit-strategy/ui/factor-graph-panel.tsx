@@ -289,11 +289,12 @@ export const FactorGraphPanel = ({
       : projection.factors.find(
           (item) => item.factorId === authored[activeIndex]?.factorId,
         );
-  if (factor === undefined) return (
-    <section ref={container} className="factor-graph__pending">
-      {editor(authored.length, true)}
-    </section>
-  );
+  if (factor === undefined)
+    return (
+      <section ref={container} className="factor-graph__pending">
+        {editor(authored.length, true)}
+      </section>
+    );
   const graphLevelIssues = factor.issues.filter(
     (issue) => issue.node_id === null,
   );
@@ -318,7 +319,8 @@ export const FactorGraphPanel = ({
         </div>
         <label>
           <span>{t("plan.factor")}</span>
-          <select className="ui-select"
+          <select
+            className="ui-select"
             value={activeIndex}
             onChange={(event) => {
               const next = Number(event.target.value);
@@ -339,11 +341,14 @@ export const FactorGraphPanel = ({
         </label>
       </header>
 
-      <FactorSummary
-        factor={factor}
-        registryVersion={projection.expectedRegistryVersion}
-        dataSnapshotId={projection.expectedDataSnapshotId}
-      />
+      <details className="factor-graph__provenance ui-disclosure">
+        <summary>{t("graph.technicalDetails")}</summary>
+        <FactorSummary
+          factor={factor}
+          registryVersion={projection.expectedRegistryVersion}
+          dataSnapshotId={projection.expectedDataSnapshotId}
+        />
+      </details>
 
       {graphLevelIssues.length > 0 ? (
         <ul className="factor-graph__diagnostics">

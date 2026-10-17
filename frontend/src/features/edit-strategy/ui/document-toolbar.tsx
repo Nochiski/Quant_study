@@ -5,7 +5,7 @@ import { backtestStartRejectionMessage } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
 import { Badge, Button, FailureNotice, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
-import { currentCompileOutcome, type DocumentState } from "../model/document-state";
+import { type DocumentState } from "../model/document-state";
 import type { RunBacktestStatus } from "../model/use-run-backtest";
 import "./document-toolbar.css";
 
@@ -30,9 +30,6 @@ type DocumentToolbarProps = {
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
-
-const short = (hash: string | null): string =>
-  hash === null || hash === "" ? "—" : `${hash.slice(0, 12)}…`;
 
 const decisionLabel = (decision: BacktestSourceDecision): string => {
   switch (decision.kind) {
@@ -74,30 +71,9 @@ export const DocumentToolbar = ({
     runStatus.kind === "failed" && runRejectionFix !== undefined
       ? runRejectionFix(runStatus.error)
       : null;
-  const current = currentCompileOutcome(state);
   return (
     <div className="doc-toolbar">
       <dl className="doc-toolbar__identity">
-        <div>
-          <dt>{t("toolbar.schemaVersion")}</dt>
-          <dd>{current?.schemaVersion ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>{t("toolbar.sourceHash")}</dt>
-          <dd>
-            <code title={current?.sourceHash ?? undefined}>
-              {short(current?.sourceHash ?? null)}
-            </code>
-          </dd>
-        </div>
-        <div>
-          <dt>{t("toolbar.specHash")}</dt>
-          <dd>
-            <code title={current?.specHash ?? undefined}>
-              {short(current?.specHash ?? null)}
-            </code>
-          </dd>
-        </div>
         <div>
           <dt>{t("toolbar.dirty")}</dt>
           <dd>
@@ -108,7 +84,6 @@ export const DocumentToolbar = ({
         </div>
       </dl>
       <div className="doc-toolbar__actions">
-        {runSettings}
         <Button
           size="small"
           onClick={onValidate}
@@ -141,6 +116,7 @@ export const DocumentToolbar = ({
               : t("toolbar.backtest")}
           </Button>
         </Tooltip>
+        <div className="doc-toolbar__settings">{runSettings}</div>
         {runStatus.kind === "accepted" ? (
           <span className="doc-toolbar__run-status" role="status">
             {t("toolbar.run.accepted").replace("{runId}", runStatus.runId)}

@@ -20,6 +20,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   RUN_ENVIRONMENT,
   runSettingsInputs,
@@ -38,6 +39,7 @@ test(
     );
     await expectPhase(page, "검증 통과");
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
 
     // 같은 편집 노드에 backend 출력 표식과 스키마 입력 포트가 붙는다.
@@ -57,6 +59,7 @@ test(
     await expect(momentumNode).not.toContainText("time_series");
 
     // 연산자: 팔레트가 한글 이름과 한 줄 설명·계산식을 보인다.
+    await editor.getByText("노드 추가 · 연산자 찾기", { exact: true }).click();
     const palette = editor.getByRole("group", { name: "연산자 팔레트" });
     const movingAverage = palette.getByRole("listitem").filter({
       has: page.getByRole("button", {
@@ -74,6 +77,7 @@ test(
     ).toHaveValue("252");
     await expect(selected).toContainText("집계에 쓸 세션 수입니다");
     // 노드 종류의 한 줄 설명은 계약 패널이 한글로 보인다.
+    await page.getByRole("button", { name: "계약", exact: true }).click();
     const contract = page.getByRole("complementary", { name: "계약" });
     await expect(
       contract.getByRole("heading", { name: "기간 집계" }),
@@ -81,6 +85,7 @@ test(
     await expect(contract).toContainText(
       "같은 종목의 과거 구간을 값 하나로 집계합니다.",
     );
+    await contract.getByRole("button", { name: "계약 접기", exact: true }).click();
 
     // 삭제 거부: 참조하는 노드를 JSON Pointer가 아니라 노드 이름으로 말한다.
     await editor.getByRole("button", { name: /^1\..* · 삭제$/ }).click();
@@ -296,6 +301,7 @@ test(
     await toggle.click();
     await start.fill(RUN_ENVIRONMENT.start);
     await end.fill(RUN_ENVIRONMENT.end);
+    await openRunSettingsGroup(page, "고급 실행");
     await page
       .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
       .fill("KOSPI");

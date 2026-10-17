@@ -1,4 +1,4 @@
-import { useMemo, type ComponentProps } from "react";
+import { useContext, useMemo, type ComponentProps } from "react";
 
 import { StrategyDebugger } from "../../../features/debug-strategy";
 import type { RunEnvironment } from "../../../shared/api";
@@ -7,6 +7,7 @@ import {
   type DocumentState,
   type ExecutionPlansState,
 } from "../../../features/edit-strategy";
+import { OpenEditorWorkspaceContext } from "../model/workspace-context";
 import { buildStrategyDebuggerAvailability } from "../model/strategy-debugger-context";
 
 type StrategyDebuggerPanelProps = {
@@ -36,6 +37,7 @@ export const StrategyDebuggerPanel = ({
   onSearchSelection,
   onSelectPointer,
 }: StrategyDebuggerPanelProps) => {
+  const openEditor = useContext(OpenEditorWorkspaceContext);
   const availability = useMemo(
     () =>
       buildStrategyDebuggerAvailability(document, executionPlans, environment),
@@ -56,6 +58,10 @@ export const StrategyDebuggerPanel = ({
           state={executionPlans}
           selectedPointer={selectedPointer}
           onSelectPointer={onSelectPointer}
+          onInspectPointer={(pointer) => {
+            openEditor?.();
+            onSelectPointer(pointer);
+          }}
         />
       }
     />

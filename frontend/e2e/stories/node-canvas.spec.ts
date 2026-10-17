@@ -32,6 +32,7 @@ test(
     await waitForSettledDocument(page);
     expect(workers).toEqual([]);
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
     await expect(layout(page)).toHaveAttribute("data-layout-status", "ready");
     expect(workers.some((url) => /elk-worker/.test(url))).toBe(true);
     const firstMs = Number(await layout(page).getAttribute("data-layout-ms"));
@@ -193,6 +194,8 @@ test(
     await replaceSource(page, GOLDEN.replace("window: 252", "window: 0"));
     await waitForSettledDocument(page);
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
+    await expect(canvas(page)).toBeVisible();
     const node = canvas(page)
       .locator(".node-canvas__node")
       .filter({ has: page.getByRole("button", { name: /^노드 편집: 2\./ }) });

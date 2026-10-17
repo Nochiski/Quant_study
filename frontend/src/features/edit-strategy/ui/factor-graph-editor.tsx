@@ -238,6 +238,16 @@ export const FactorGraphEditor = ({
     false,
   );
 
+  const settingsRequest =
+    selectedPointer?.startsWith(`${graphPointer}/`) &&
+    !selectedPointer.startsWith(`${graphPointer}/nodes/`)
+      ? `${selectedPointer}:${revealSignal ?? 0}`
+      : null;
+  const [settingsOpen, setSettingsOpen] = useRevealedOpen(
+    settingsRequest,
+    false,
+  );
+
   // `node_id` 확정은 rename이다(backlog 4): 중복·빈 값은 거부하고, 아니면 같은 그래프 안 참조까지 한 트랜잭션으로
   // 바꾼다. 다른 속성은 기본 필드 연산.
   const planNodeCommit: CommitPlanner = (field, value) => {
@@ -338,7 +348,8 @@ export const FactorGraphEditor = ({
         {factorSelect ? (
           <label>
             <span>{t("plan.factor")}</span>
-            <select className="ui-select"
+            <select
+              className="ui-select"
               value={factorIndex}
               onChange={(event) =>
                 onSelectPointer(factorGraphPointer(Number(event.target.value)))
@@ -361,244 +372,261 @@ export const FactorGraphEditor = ({
         feedback={transactions.feedbackFor(GRAPH_OWNER)}
         owner={GRAPH_OWNER}
       />
-      {/* 추가·삭제는 위치 pointer 연산이라 직전 편집의 parse가 따라올 때까지 잠근다(P5-03 리뷰 DEFECT-133-01). */}
-      <fieldset
-        className="factor-graph__editor-section"
-        disabled={disabled !== null || transactions.settling}
-      >
-        <legend>{t("graph.nodesTitle")}</legend>
+      <details className="factor-graph__tools ui-disclosure">
+        <summary>{t("graph.addTools")}</summary>
         <OperatorPalette
           groups={palette}
           disabledReason={paletteDisabled}
           catalogNote={catalogNote(operators)}
           onPick={add}
         />
-        {addFailureNow === null ? null : (
-          <p className="strategy-form__invalid" role="alert">
-            {t(`graph.addFailed.${addFailureNow.reason}`).replace(
-              "{entry}",
-              addFailureNow.entry,
-            )}
-          </p>
-        )}
-        {nodes === undefined || nodes.items.length === 0 ? (
-          <p className="factor-graph__editor-state">{t("graph.noNodes")}</p>
-        ) : (
-          <NodeCanvas
-            graph={canvas}
-            metadata={canvasMetadata(canvas, backendFactor)}
-            documentKey={documentKey}
-            sourceVersion={sourceVersion}
-            factorIndex={factorIndex}
-            factorKey={factorKey}
-            revealSignal={revealSignal}
-            active={active}
-            busy={disabled !== null || transactions.settling}
-            selectedPointer={nodePointer}
-            diagnostics={diagnostics}
-            onSelect={onSelectPointer}
-            onOpenSource={onOpenSource}
-            onInspect={(pointer) => {
-              onSelectPointer(pointer);
-              setInspectRequest((request) => request + 1);
-            }}
-            onRemove={remove}
-            onCopy={(pointer) => {
-              const op = copyCanvasNode(tree, factorPointer, pointer);
-              if (
-                op !== null &&
+      </details>
+      <div className="factor-graph__workspace">
+        <fieldset
+          className="factor-graph__editor-section"
+          disabled={disabled !== null || transactions.settling}
+        >
+          <legend>{t("graph.nodesTitle")}</legend>
+
+          {addFailureNow === null ? null : (
+            <p className="strategy-form__invalid" role="alert">
+              {t(`graph.addFailed.${addFailureNow.reason}`).replace(
+                "{entry}",
+                addFailureNow.entry,
+              )}
+            </p>
+          )}
+          {nodes === undefined || nodes.items.length === 0 ? (
+            <p className="factor-graph__editor-state">{t("graph.noNodes")}</p>
+          ) : (
+            <NodeCanvas
+              graph={canvas}
+              metadata={canvasMetadata(canvas, backendFactor)}
+              documentKey={documentKey}
+              sourceVersion={sourceVersion}
+              factorIndex={factorIndex}
+              factorKey={factorKey}
+              revealSignal={revealSignal}
+              active={active}
+              busy={disabled !== null || transactions.settling}
+              selectedPointer={nodePointer}
+              diagnostics={diagnostics}
+              onSelect={onSelectPointer}
+              onOpenSource={onOpenSource}
+              onInspect={(pointer) => {
+                onSelectPointer(pointer);
+                setInspectRequest((request) => request + 1);
+              }}
+              onRemove={remove}
+              onCopy={(pointer) => {
+                const op = copyCanvasNode(tree, factorPointer, pointer);
+                if (
+                  op !== null &&
+                  transactions.apply(
+                    op,
+                    t("graph.canvas.copy"),
+                    GRAPH_OWNER,
+                    NO_FOCUS,
+                  )
+                )
+                  onSelectPointer(
+                    `${graphPointer}/nodes/${nodes.items.length}`,
+                  );
+              }}
+              onConnect={(from, pointer, input) => {
+                if (
+                  !canvas.nodes.some(
+                    (node) => node.connectable && node.nodeId === from,
+                  )
+                )
+                  return;
+                if (
+                  !canvas.nodes.some(
+                    (node) =>
+                      node.pointer === pointer &&
+                      node.inputs.some((port) => port.key === input),
+                  )
+                )
+                  return;
                 transactions.apply(
-                  op,
-                  t("graph.canvas.copy"),
+                  setNodeField(tree, pointer, input, from),
+                  t("graph.canvas.output"),
                   GRAPH_OWNER,
                   NO_FOCUS,
-                )
-              )
-                onSelectPointer(`${graphPointer}/nodes/${nodes.items.length}`);
-            }}
-            onConnect={(from, pointer, input) => {
-              if (
-                !canvas.nodes.some(
-                  (node) => node.connectable && node.nodeId === from,
-                )
-              )
-                return;
-              if (
-                !canvas.nodes.some(
-                  (node) =>
-                    node.pointer === pointer &&
-                    node.inputs.some((port) => port.key === input),
-                )
-              )
-                return;
-              transactions.apply(
-                setNodeField(tree, pointer, input, from),
-                t("graph.canvas.output"),
-                GRAPH_OWNER,
-                NO_FOCUS,
-              );
-            }}
-          />
-        )}
-        {blockedNow !== null ? (
-          <p className="strategy-form__invalid" role="alert">
-            {blockedNow.by === null
-              ? t("graph.removeMissing").replace("{node}", blockedNow.label)
-              : t("graph.removeBlocked")
-                  .replace("{node}", blockedNow.label)
-                  .replace(
-                    "{nodes}",
-                    [...new Set(blockedNow.by.map(referenceLabel))].join(", "),
-                  )}
-          </p>
-        ) : null}
-      </fieldset>
-      {graphSection !== null && graphSection.written ? (
+                );
+              }}
+            />
+          )}
+          {blockedNow !== null ? (
+            <p className="strategy-form__invalid" role="alert">
+              {blockedNow.by === null
+                ? t("graph.removeMissing").replace("{node}", blockedNow.label)
+                : t("graph.removeBlocked")
+                    .replace("{node}", blockedNow.label)
+                    .replace(
+                      "{nodes}",
+                      [...new Set(blockedNow.by.map(referenceLabel))].join(
+                        ", ",
+                      ),
+                    )}
+            </p>
+          ) : null}
+        </fieldset>
         <fieldset
           className="factor-graph__editor-section"
           disabled={disabled !== null}
+          data-canvas-inspector
+          tabIndex={-1}
         >
-          <legend>{t("graph.settingsTitle")}</legend>
-          <FormFieldsEditor
-            section={graphSection}
-            names={names}
-            showIdentifiers={false}
-            transactions={transactions}
-            catalogs={catalogs}
-            owner={GRAPH_OWNER}
-            selectedPointer={selectedPointer}
-          />
-        </fieldset>
-      ) : null}
-      <fieldset
-        className="factor-graph__editor-section"
-        disabled={disabled !== null}
-        data-canvas-inspector
-        tabIndex={-1}
-      >
-        <legend>
-          {t("graph.selectedNode")}
+          <legend>
+            {t("graph.selectedNode")}
+            {selectedItem !== undefined ? (
+              <span>
+                {
+                  canvas.nodes.find(
+                    (node) => node.pointer === selectedItem.pointer,
+                  )?.label
+                }
+              </span>
+            ) : null}
+          </legend>
           {selectedItem !== undefined ? (
-            <span>
-              {
-                canvas.nodes.find(
-                  (node) => node.pointer === selectedItem.pointer,
-                )?.label
-              }
-            </span>
-          ) : null}
-        </legend>
-        {selectedItem !== undefined ? (
-          <Button
-            size="small"
-            onClick={() => {
-              const node = container.current?.querySelector<HTMLElement>(
-                '.node-canvas__node[aria-current="true"] [data-canvas-node]',
-              );
-              node?.focus({ preventScroll: true });
-              node?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-            }}
-          >
-            {t("graph.canvas.returnToNode")}
-          </Button>
-        ) : null}
-        {nodeSection === null ? (
-          selectedItem === undefined ? (
-            <p>{t("graph.noSelection")}</p>
-          ) : null
-        ) : (
-          <>
-            <FormFieldsEditor
-              section={{
-                ...nodeSection,
-                fields: nodeSection.fields.filter(
-                  (field) => field.key !== "node_id" && field.key !== "kind",
-                ),
-              }}
-              transactions={transactions}
-              catalogs={catalogs}
-              names={names}
-              showIdentifiers={false}
-              owner={GRAPH_OWNER}
-              planCommit={planNodeCommit}
-              selectedPointer={selectedPointer}
-            />
-          </>
-        )}
-        {extraIssues.length > 0 ? (
-          <ul className="strategy-form__diagnostics">
-            {extraIssues.map((issue, index) => (
-              <li key={`${issue.code}:${index}`}>{issue.message}</li>
-            ))}
-          </ul>
-        ) : null}
-        {selectedItem !== undefined ? (
-          <>
             <Button
               size="small"
-              aria-expanded={identifiers}
-              onClick={() => setIdentifiers(!identifiers)}
+              onClick={() => {
+                const node = container.current?.querySelector<HTMLElement>(
+                  '.node-canvas__node[aria-current="true"] [data-canvas-node]',
+                );
+                node?.focus({ preventScroll: true });
+                node?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+              }}
             >
-              {t("recipe.identifiers")}
+              {t("graph.canvas.returnToNode")}
             </Button>
-            {identifiers ? (
-              <div>
-                {selectedItem.branches !== null ? (
-                  <div className="factor-graph__editor-add">
-                    <span className="factor-graph__editor-state">
-                      {t("form.list.branchNeeded").replace(
-                        "{kinds}",
-                        selectedItem.branches.join(", "),
-                      )}
-                    </span>
-                    <select className="ui-select"
-                      aria-label={`${selectedItem.summary} · ${t("form.list.kind")}`}
-                      value=""
-                      onChange={(event) => {
-                        if (event.target.value === "") return;
-                        transactions.apply(
-                          setNodeField(
-                            tree,
-                            selectedItem.pointer,
+          ) : null}
+          {nodeSection === null ? (
+            selectedItem === undefined ? (
+              <p>{t("graph.noSelection")}</p>
+            ) : null
+          ) : (
+            <>
+              <FormFieldsEditor
+                section={{
+                  ...nodeSection,
+                  fields: nodeSection.fields.filter(
+                    (field) => field.key !== "node_id" && field.key !== "kind",
+                  ),
+                }}
+                transactions={transactions}
+                catalogs={catalogs}
+                names={names}
+                showIdentifiers={false}
+                owner={GRAPH_OWNER}
+                planCommit={planNodeCommit}
+                selectedPointer={selectedPointer}
+              />
+            </>
+          )}
+          {extraIssues.length > 0 ? (
+            <ul className="strategy-form__diagnostics">
+              {extraIssues.map((issue, index) => (
+                <li key={`${issue.code}:${index}`}>{issue.message}</li>
+              ))}
+            </ul>
+          ) : null}
+          {selectedItem !== undefined ? (
+            <>
+              <Button
+                size="small"
+                aria-expanded={identifiers}
+                onClick={() => setIdentifiers(!identifiers)}
+              >
+                {t("recipe.identifiers")}
+              </Button>
+              {identifiers ? (
+                <div>
+                  {selectedItem.branches !== null ? (
+                    <div className="factor-graph__editor-add">
+                      <span className="factor-graph__editor-state">
+                        {t("form.list.branchNeeded").replace(
+                          "{kinds}",
+                          selectedItem.branches.join(", "),
+                        )}
+                      </span>
+                      <select
+                        className="ui-select"
+                        aria-label={`${selectedItem.summary} · ${t("form.list.kind")}`}
+                        value=""
+                        onChange={(event) => {
+                          if (event.target.value === "") return;
+                          transactions.apply(
+                            setNodeField(
+                              tree,
+                              selectedItem.pointer,
+                              "kind",
+                              event.target.value,
+                            ),
                             "kind",
-                            event.target.value,
-                          ),
-                          "kind",
-                          GRAPH_OWNER,
-                          NO_FOCUS,
-                        );
+                            GRAPH_OWNER,
+                            NO_FOCUS,
+                          );
+                        }}
+                      >
+                        <option value="">{t("form.list.kind")}</option>
+                        {selectedItem.branches.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : nodeSection === null ? null : (
+                    <FormFieldsEditor
+                      section={{
+                        ...nodeSection,
+                        fields: nodeSection.fields.filter(
+                          (field) =>
+                            field.key === "node_id" || field.key === "kind",
+                        ),
+                        diagnostics: [],
                       }}
-                    >
-                      <option value="">{t("form.list.kind")}</option>
-                      {selectedItem.branches.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : nodeSection === null ? null : (
-                  <FormFieldsEditor
-                    section={{
-                      ...nodeSection,
-                      fields: nodeSection.fields.filter(
-                        (field) =>
-                          field.key === "node_id" || field.key === "kind",
-                      ),
-                      diagnostics: [],
-                    }}
-                    transactions={transactions}
-                    catalogs={catalogs}
-                    owner={GRAPH_OWNER}
-                    planCommit={planNodeCommit}
-                    selectedPointer={selectedPointer}
-                  />
-                )}
-              </div>
-            ) : null}
-          </>
+                      transactions={transactions}
+                      catalogs={catalogs}
+                      owner={GRAPH_OWNER}
+                      planCommit={planNodeCommit}
+                      selectedPointer={selectedPointer}
+                    />
+                  )}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </fieldset>
+      </div>
+      <details
+        className="factor-graph__settings ui-disclosure"
+        open={settingsOpen}
+        onToggle={(event) => setSettingsOpen(event.currentTarget.open)}
+      >
+        <summary>{t("graph.settingsTitle")}</summary>
+        {graphSection !== null && graphSection.written ? (
+          <fieldset
+            className="factor-graph__editor-section"
+            disabled={disabled !== null}
+          >
+            <legend>{t("graph.settingsTitle")}</legend>
+            <FormFieldsEditor
+              section={graphSection}
+              names={names}
+              showIdentifiers={false}
+              transactions={transactions}
+              catalogs={catalogs}
+              owner={GRAPH_OWNER}
+              selectedPointer={selectedPointer}
+            />
+          </fieldset>
         ) : null}
-      </fieldset>
+      </details>
     </section>
   );
 };

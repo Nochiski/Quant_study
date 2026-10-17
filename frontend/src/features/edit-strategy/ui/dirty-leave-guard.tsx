@@ -18,15 +18,22 @@ const canRestoreFocus = (element: HTMLElement | null): element is HTMLElement =>
   !element.matches(":disabled");
 
 /**
- * Blocks in-app navigation (and the browser's unload) while the draft has unsaved changes
- * (WORKFLOW P2-04). The prompt is an in-page alert dialog so the wording is ours and testable;
- * "머무르기" is the default action because leaving discards work.
+ * 저장하지 않은 변경이 있으면 앱 안의 이동과 브라우저 이탈을 막는다(WORKFLOW P2-04).
+ * 앱 안에서는 현재 편집을 계속하는 선택에 먼저 초점을 둔다. 현재 문서가 수락받은 실행의 결과로
+ * 이동할 때만 수락 사실과 결과 보기 문구를 표시하고, 다른 이동에는 기존 이탈 경고를 유지한다.
  *
  * dirty는 `useCommittedRef`로 비추고 blocker는 마운트 때 한 번만 등록한다(Phase 5 backlog 21,
  * `.claude/rules/frontend-react-effects.md`): passive effect로 ref를 갱신하거나 `disabled: !dirty`로 등록을
  * 껐다 켜면, 편집으로 dirty가 켜진 commit과 그 effect 사이에 온 이동이 경고 없이 통과해 편집을 버린다.
  */
-export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
+export const DirtyLeaveGuard = ({
+  dirty,
+  acceptedRunId = null,
+}: {
+  dirty: boolean;
+  /** 실행 owner가 현재 문서에 대해 수락한 실행만 결과 이동 안내에 쓴다. */
+  acceptedRunId?: string | null;
+}) => {
   const titleId = useId();
   const descriptionId = useId();
   const latestDirty = useCommittedRef(dirty);
@@ -63,6 +70,10 @@ export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
     };
   }, [blocked]);
   if (blocker.status !== "blocked") return null;
+  // 다른 실행이나 일반 이탈에는 기존 경고를 유지한다. 경로를 파싱하거나 새 실행 상태를 만들지 않는다.
+  const acceptedResult = acceptedRunId !== null &&
+    blocker.next.fullPath === "/research/backtests/$runId" &&
+    blocker.next.params.runId === acceptedRunId;
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -93,14 +104,14 @@ export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
         onKeyDown={onKeyDown}
       >
         <p id={titleId} className="leave-guard__title">
-          {t("leave.title")}
+          {t(acceptedResult ? "leave.accepted.title" : "leave.title")}
         </p>
-        <p id={descriptionId}>{t("leave.description")}</p>
+        <p id={descriptionId}>{t(acceptedResult ? "leave.accepted.description" : "leave.description")}</p>
         <p className="leave-guard__actions">
           <Button ref={stayButton} tone="primary" onClick={blocker.reset}>
-            {t("leave.stay")}
+            {t(acceptedResult ? "leave.accepted.stay" : "leave.stay")}
           </Button>
-          <Button onClick={blocker.proceed}>{t("leave.leave")}</Button>
+          <Button onClick={blocker.proceed}>{t(acceptedResult ? "leave.accepted.leave" : "leave.leave")}</Button>
         </p>
       </div>
     </div>

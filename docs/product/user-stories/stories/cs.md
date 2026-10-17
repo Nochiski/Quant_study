@@ -82,12 +82,19 @@
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests
   - `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다
+  - `frontend/e2e/stories/cs.debugger-scroll.spec.ts` :: US-CS-03 작은 분할 기록과 무관하게 세 화면에서 추적하고 편집으로 복귀한다
+  - `frontend/e2e/stories/cs.debugger-scroll.spec.ts` :: US-CS-03 연결 실패 상태도 추적 입력 끝과 복귀 행동을 창 안에서 읽는다
   - `frontend/e2e/stories/cs.masked-trace.spec.ts` :: US-CS-03 원장이 가린 신용잔고 칸을 건넌 노드 값과 그 원시 셀을 원장이 가림으로 본다
   - `frontend/e2e/workbench.workflow.spec.ts` :: 레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다
   - `frontend/e2e/stories/strategy-tie-breaker.spec.ts` :: 주 점수가 같을 때 선언한 보조 팩터와 방향으로 선정한다
 
 수용 기준
 
+- Given 편집 중이거나 과거의 작은 분할 높이가 저장된 상태, When 중간 결과 작업공간을 열면,
+  Then 손잡이 확대를 전제하지 않고 범위 입력 끝·추적 실행·해석 가능한 결과 본문을 창 안에서 읽는다.
+  서버 연결 실패로 입력이 비활성이어도 폼 끝과 편집 복귀 행동이 가려지지 않는다.
+- Given 같은 추적 작업공간, When 편집으로 돌아간 뒤 다시 열면, Then 원문·추적 범위·결과가 유지된다.
+  좁은 화면에서는 종목을 선택해 단계를 세로로 읽으며 모든 단계를 가로로 압축하지 않는다.
 - Given 저장하고 실행 설정(기간·유니버스)을 채운 전략, When 중간 결과에 종목 ID 셋과 노드를 넣고
   "추적 실행"을 누르면, Then 추적 재현 정보(전략 해시·데이터 스냅샷·기준일)가 보이고, 원천 값은 모두
   기준일 이전에 공개된 값이다.

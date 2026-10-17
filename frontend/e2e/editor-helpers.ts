@@ -87,3 +87,38 @@ export const runSettingsInputs = (page: Page) => ({
   fee: page.getByRole("spinbutton", { name: "수수료 (bp)" }),
 });
 
+/** 접힌 비용·고급 설정은 native summary로 명시해서 연 뒤 해당 입력을 조작한다. */
+export const openRunSettingsGroup = async (
+  page: Page,
+  label: "비용" | "고급 실행",
+) => {
+  const summary = page.getByLabel(label, { exact: true }).and(page.locator("summary"));
+  await expect(summary).toBeVisible();
+  const open = await summary.evaluate((element) =>
+    element.parentElement instanceof HTMLDetailsElement && element.parentElement.open,
+  );
+  if (!open) await summary.click();
+  await expect(summary.locator("..")).toHaveAttribute("open", "");
+};
+
+/** 작업공간을 여는 사용자 버튼을 거쳐야 내부 입력·탭이 조작 대상이 된다. */
+export const openTraceWorkspace = async (page: Page) => {
+  const entry = page.getByRole("button", { name: "중간 결과", exact: true });
+  if (await entry.getAttribute("aria-pressed") !== "true") await entry.click();
+  await expect(page.getByRole("region", { name: "중간 결과", exact: true })).toBeVisible();
+};
+
+export const openEditorWorkspace = async (page: Page) => {
+  const entry = page.getByRole("button", { name: "전략 편집", exact: true });
+  if (await entry.getAttribute("aria-pressed") !== "true") await entry.click();
+  await expect(entry).toHaveAttribute("aria-pressed", "true");
+};
+
+/** 재현 정보는 원문을 보려는 명시적 펼침 뒤에 읽는다. 결과를 만드는 응답은 기존 대기로 확인한다. */
+export const openTraceSource = async (page: Page) => {
+  const source = page.locator(".strategy-debugger__source");
+  if (!(await source.evaluate(element => (element as HTMLDetailsElement).open))) {
+    await source.locator(":scope > summary").click();
+  }
+};
+

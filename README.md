@@ -51,6 +51,11 @@ extra 목록은 CI(`.github/workflows/ci.yml`)와 같다. `equity`는 실데이�
 `maturin develop`로 넣은 Rust 확장이 함께 빠지므로, 그때는 extra를 포함한 환경 설치와 Rust 확장
 설치를 다시 실행한다.
 
+편집기는 **전략 편집**과 **중간 결과**를 명시해서 전환하며 원문·추적 범위·결과를 유지한다.
+구조·계약·AI 보조 영역은 필요할 때 열고, 그래프에서는 전략 구성·선정 미리보기·팩터 레시피·노드 캔버스의
+입구로 현재 과업을 고른다. 화면 구성과 점검 범위는
+[편집기 사용성 검토](docs/planning/ui-layout-polish/editor-usability-review.md)를 참고한다.
+
 ## 현재 제품 범위
 
 | 영역                                                        | 상태                                                             |

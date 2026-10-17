@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemePreferenceProvider } from "../../../shared/lib/theme";
@@ -104,9 +104,9 @@ const ideLayout = (width: number, scrollbar: () => number = () => 0) => {
   };
 };
 
-/** 사이드바가 본문에 붙어 있는가(겹쳐 뜬 서랍도 본문 안에 있으므로 본문의 직접 자식인지 본다). */
+/** DOM 부모와 무관하게 실제 배치가 레일에 붙어 있는지 판정한다. */
 const assistantAttached = () =>
-  document.querySelector(".ide__body > .ide__assistant") !== null;
+  document.querySelector(".ide__body > .ide__assistant:not(.ide__drawer)") !== null;
 
 const assistantFloating = () =>
   screen
@@ -140,6 +140,12 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
     </ThemePreferenceProvider>,
   );
 
+/** 폭 경계 회귀는 과거와 같은 세 보조 패널을 사용자가 명시해서 연 상태로 검증한다. */
+const openRails = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+  await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+};
+
 /** 접기 버튼을 위젯이 그리는 쪽(슬롯이 평범한 노드). */
 const mountNodeSlot = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
   mount({ assistant: <p>AI 사이드바</p>, ...props });
@@ -169,7 +175,78 @@ const StatefulIde = () => {
   );
 };
 
+const responsiveMedia = (initialWidth: number) => {
+  let width = initialWidth;
+  const listeners = new Map<(event: MediaQueryListEvent) => void, string>();
+  const matches = (query: string) => width <= Number(query.match(/max-width:\s*(\d+)px/)?.[1] ?? 0);
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+    get matches() { return matches(query); },
+    media: query,
+    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.set(listener, query),
+    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+  })));
+  return { resize: (next: number) => act(() => {
+    width = next;
+    [...listeners].forEach(([listener, query]) => listener({ matches: matches(query), media: query } as MediaQueryListEvent));
+  }) };
+};
+
+const StatefulAssistant = ({ mounted, unmounted }: { mounted: () => void; unmounted: () => void }) => {
+  const [text, setText] = useState("");
+  const [session, setSession] = useState("recent");
+  useEffect(() => { mounted(); return unmounted; }, [mounted, unmounted]);
+  return <>
+    <label>미전송 질문<input value={text} onChange={(event) => setText(event.target.value)} /></label>
+    <label>선택 대화<select value={session} onChange={(event) => setSession(event.target.value)}><option value="recent">최근 대화</option><option value="earlier">이전 대화</option></select></label>
+  </>;
+};
+
 describe("StrategyIde assistant 슬롯", () => {
+  it.each([1440, 960, 360])("%ipx에서 편집·추적 왕복은 AI 인스턴스와 미전송 문장·선택 대화를 보존한다", async (width) => {
+    responsiveMedia(width);
+    const user = userEvent.setup();
+    const mounted = vi.fn();
+    const unmounted = vi.fn();
+    mount({ assistant: <StatefulAssistant mounted={mounted} unmounted={unmounted} /> });
+    expect(mounted).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+    const input = screen.getByRole("textbox", { name: "미전송 질문" });
+    await user.type(input, "원천 값을 비교할 질문");
+    await user.selectOptions(screen.getByRole("combobox", { name: "선택 대화" }), "earlier");
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+    expect(screen.getByRole("textbox", { name: "미전송 질문" })).toBe(input);
+    expect(input).toHaveValue("원천 값을 비교할 질문");
+    expect(screen.getByRole("combobox", { name: "선택 대화" })).toHaveValue("earlier");
+    await user.click(screen.getByRole("button", { name: "전략 편집" }));
+    expect(screen.getByRole("textbox", { name: "미전송 질문" })).toBe(input);
+    expect(input).toHaveValue("원천 값을 비교할 질문");
+    expect(screen.getByRole("combobox", { name: "선택 대화" })).toHaveValue("earlier");
+    expect(mounted).toHaveBeenCalledTimes(1);
+    expect(unmounted).not.toHaveBeenCalled();
+  });
+
+  it("화면 폭을 왕복해도 AI 인스턴스와 작성 중 문장을 유지한다", async () => {
+    const media = responsiveMedia(1440);
+    const user = userEvent.setup();
+    const mounted = vi.fn();
+    const unmounted = vi.fn();
+    mount({ assistant: <StatefulAssistant mounted={mounted} unmounted={unmounted} /> });
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+    const input = screen.getByRole("textbox", { name: "미전송 질문" });
+    await user.type(input, "다른 화면에서도 이어 쓸 질문");
+    await user.selectOptions(screen.getByRole("combobox", { name: "선택 대화" }), "earlier");
+    for (const width of [960, 360, 1440]) {
+      media.resize(width);
+      if (screen.queryByRole("complementary", { name: "AI 어시스턴트" }) === null) await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+      expect(screen.getByRole("textbox", { name: "미전송 질문" })).toBe(input);
+      expect(input).toHaveValue("다른 화면에서도 이어 쓸 질문");
+      expect(screen.getByRole("combobox", { name: "선택 대화" })).toHaveValue("earlier");
+    }
+    expect(mounted).toHaveBeenCalledTimes(1);
+    expect(unmounted).not.toHaveBeenCalled();
+  });
+
   it("기본은 접힘이고, 슬롯이 없으면 패널도 토글도 만들지 않는다", () => {
     matchMedia(false);
     mount({ assistant: undefined });
@@ -288,7 +365,7 @@ describe("StrategyIde assistant 슬롯", () => {
     ).toMatchObject({ open: { assistant: true } });
   });
 
-  it("사이드바 키가 없던 기록도 그대로 읽고 기본값만 채운다", () => {
+  it("사이드바 키가 없던 기록도 그대로 읽고 기본값만 채운다", async () => {
     matchMedia(false);
     localStorage.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
@@ -301,7 +378,9 @@ describe("StrategyIde assistant 슬롯", () => {
         },
       }),
     );
+    const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     expect(
       screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "300");
@@ -355,7 +434,8 @@ describe("StrategyIde assistant 슬롯", () => {
     ideLayout(1204);
     const user = userEvent.setup();
     mount();
-    // 계약은 기본 펼침이고 자리에 박혀 있다.
+    await openRails(user);
+    // 구조와 계약을 명시해서 연 뒤, 먼저 연 계약은 자리에 박혀 있다.
     expect(
       screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
     ).toBeNull();
@@ -401,15 +481,16 @@ describe("StrategyIde assistant 슬롯", () => {
     ideLayout(SIDE_BY_SIDE - 1);
     const user = userEvent.setup();
     mount();
+    await openRails(user);
     await user.click(
       screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
     );
     expect(assistantFloating()).toBe(true);
   });
 
-  it("첫 칠 전에 폭을 재어, 열어 둔 사이드바가 처음부터 겹쳐 뜬다", () => {
+  it("관찰 알림 전에 처음 측정한 폭으로 복원된 사이드바의 배치를 정한다", async () => {
     // 관찰 알림은 칠한 뒤에야 온다(여기서는 `notify`를 부르지 않는다). 첫 칠 전 측정이 없으면 폭을
-    // 모르는 배치(붙은 사이드바)로 먼저 그린다(#290 리뷰 P3-2).
+    // 모르는 배치로 판단한다. 기본 접힌 구조·계약은 명시해서 열고 관찰 알림은 보내지 않는다(#290 리뷰 P3-2).
     matchMedia(false);
     localStorage.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
@@ -420,7 +501,12 @@ describe("StrategyIde assistant 슬롯", () => {
       }),
     );
     ideLayout(1204);
+    const user = userEvent.setup();
     mount();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    await openRails(user);
+    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
     expect(assistantFloating()).toBe(true);
   });
 
@@ -433,6 +519,7 @@ describe("StrategyIde assistant 슬롯", () => {
     );
     const user = userEvent.setup();
     mount();
+    await openRails(user);
     await user.click(
       screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
     );
@@ -453,6 +540,7 @@ describe("StrategyIde assistant 슬롯", () => {
     );
     const user = userEvent.setup();
     mount();
+    await openRails(user);
     await user.click(
       screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
     );
@@ -464,11 +552,13 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(placements).toEqual([false, false, false, false]);
   });
 
-  it("넓은 화면에서는 둘 다 자리에 박혀 있다", () => {
+  it("넓은 화면에서는 둘 다 자리에 박혀 있다", async () => {
     matchMedia(false);
     // 1920px 창의 본문 폭.
     ideLayout(1684);
+    const user = userEvent.setup();
     mount();
+    await openRails(user);
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(
       screen
@@ -525,6 +615,7 @@ describe("StrategyIde assistant 슬롯", () => {
     ideLayout(SIDE_BY_SIDE);
     const user = userEvent.setup();
     const first = mount();
+    await openRails(user);
     await user.click(screen.getByRole("button", { name: "AI 어시스턴트" }));
     const handle = () =>
       screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" });

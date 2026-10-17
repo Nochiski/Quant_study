@@ -22,7 +22,10 @@ import {
   type RunEnvironmentField,
   runEnvironmentApplies,
   runEnvironmentLabel,
+  runEnvironmentName,
   runEnvironmentOptionLabel,
+  runEnvironmentValueLabel,
+  runEnvironmentWireText,
   useBacktestTrialPreview,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
@@ -33,6 +36,14 @@ type BacktestRunSettingsProps = {
   /** 실행 버튼이 보낼 요청. 있으면 패널 맨 아래에 이 실행의 시도 영향을 보인다(검증 랩 V5-05). */
   request?: BacktestRunSpec | null;
 };
+
+// 화면의 과업 분류만 소유한다. 값·필수 여부·적용 조건·검증은 해소된 스키마를 그대로 읽는다.
+const PERIOD_FIELDS = new Set(["start", "end", "universe_id"]);
+const COST_FIELDS = new Set([
+  "participation_rate", "participation_basis", "fee_bps", "slippage_bps",
+  "impact_model", "impact_coefficient", "sell_tax", "sell_tax_bps",
+]);
+const COST_SUMMARY_FIELDS = new Set(["fee_bps", "slippage_bps", "impact_model", "sell_tax"]);
 
 /**
  * 이 실행이 결과를 내면 계열 시도 수가 어떻게 되는가(spec D2). 새 시도인지 재확인인지는 backend 미리 계산이
@@ -202,6 +213,36 @@ export const BacktestRunSettings = ({
   );
   const popoverRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
+  const costSummaryId = useId();
+  const advancedSummaryId = useId();
+  const periodFields = environmentFields.filter((field) => PERIOD_FIELDS.has(field.name));
+  const costFields = environmentFields.filter((field) => COST_FIELDS.has(field.name));
+  // 새 스키마 칸도 누락하지 않고 고급 실행에서 읽을 수 있게 한다.
+  const advancedFields = environmentFields.filter(
+    (field) => !PERIOD_FIELDS.has(field.name) && !COST_FIELDS.has(field.name),
+  );
+  const hasErrors = (group: readonly RunEnvironmentField[]) =>
+    group.some((field) => environmentErrors[field.name] !== undefined);
+  const costInvalid = hasErrors(costFields);
+  const advancedInvalid = hasErrors(advancedFields) || result.errors.some((error) => error !== "environment");
+  const costSummary = costFields
+    .filter((field) => COST_SUMMARY_FIELDS.has(field.name) && runEnvironmentApplies(field, environmentValues))
+    .map((field) => `${runEnvironmentName(field)}: ${runEnvironmentValueLabel(field,
+      runEnvironmentWireText(field, environmentValues[field.name] ?? ""))}`)
+    .join(" · ");
+  const renderField = (field: RunEnvironmentField) => (
+    <EnvironmentInput
+      key={field.name}
+      field={field}
+      value={environmentValues[field.name] ?? ""}
+      applies={runEnvironmentApplies(field, environmentValues)}
+      error={environmentErrors[field.name]}
+      onChange={(value) => setEnvironmentValue(field.name, value)}
+      onIncompleteChange={(incomplete, leaving) =>
+        setDateIncomplete(field.name, incomplete, leaving)
+      }
+    />
+  );
   const closePanel = () => {
     setPanelOpen(false);
     summaryRef.current?.focus();
@@ -218,6 +259,10 @@ export const BacktestRunSettings = ({
     const target = popoverRef.current?.querySelector<HTMLElement>(
       `[data-run-field="${CSS.escape(focusField)}"]`,
     );
+    const group = target?.closest("details");
+    if (group !== null && group !== undefined && popoverRef.current?.contains(group)) {
+      group.open = true;
+    }
     target?.focus();
     target?.scrollIntoView?.({ block: "nearest" });
   }, [focusField, focusNonce, open]);
@@ -266,24 +311,12 @@ export const BacktestRunSettings = ({
           disabled={disabled}
           className="backtest-settings__environment"
         >
-          <legend>{t("backtest.settings.environment")}</legend>
+          <legend>{t("backtest.settings.period")}</legend>
           <p className="backtest-settings__note">
             {t("backtest.settings.environment.note")}
           </p>
           {schemaStatus === "ready" ? (
-            environmentFields.map((field) => (
-              <EnvironmentInput
-                key={field.name}
-                field={field}
-                value={environmentValues[field.name] ?? ""}
-                applies={runEnvironmentApplies(field, environmentValues)}
-                error={environmentErrors[field.name]}
-                onChange={(value) => setEnvironmentValue(field.name, value)}
-                onIncompleteChange={(incomplete, leaving) =>
-                  setDateIncomplete(field.name, incomplete, leaving)
-                }
-              />
-            ))
+            periodFields.map(renderField)
           ) : (
             <p
               className="backtest-settings__note"
@@ -295,6 +328,28 @@ export const BacktestRunSettings = ({
             </p>
           )}
         </fieldset>
+        <details className="backtest-settings__group ui-disclosure">
+          <summary aria-label={t("backtest.settings.costs")} aria-describedby={`${costSummaryId}${costInvalid ? ` ${costSummaryId}-error` : ""}`}>
+            <strong>{t("backtest.settings.costs")}</strong>
+            {costInvalid ? <Badge id={`${costSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge> : null}
+            <small id={costSummaryId}>{costSummary}</small>
+          </summary>
+          <fieldset disabled={disabled} aria-label={t("backtest.settings.costs")}>
+            {costFields.map(renderField)}
+          </fieldset>
+        </details>
+        <details className="backtest-settings__group ui-disclosure">
+          <summary aria-label={t("backtest.settings.advanced")} aria-describedby={`${advancedSummaryId}${advancedInvalid ? ` ${advancedSummaryId}-error` : ""}`}>
+            <strong>{t("backtest.settings.advanced")}</strong>
+            {advancedInvalid
+              ? <Badge id={`${advancedSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge> : null}
+            <small id={advancedSummaryId}>
+              {fields.core === "" ? "—" : t(EXECUTION_CORE_LABELS[fields.core])} · {t("backtest.settings.initialCash")}: {fields.initialCashKrw || "—"}
+            </small>
+          </summary>
+          <fieldset disabled={disabled} aria-label={t("backtest.settings.environment")}>
+            {advancedFields.map(renderField)}
+          </fieldset>
         <fieldset disabled={disabled}>
           <legend>{t("backtest.settings.options")}</legend>
           <label>
@@ -382,6 +437,7 @@ export const BacktestRunSettings = ({
             </small>
           </label>
         </fieldset>
+        </details>
         {result.valid ? null : (
           <ul className="backtest-settings__errors" role="alert">
             {result.errors.map((error) => (

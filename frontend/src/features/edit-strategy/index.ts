@@ -4,7 +4,7 @@ export { STRATEGY_VIEWS, migrateStrategyView, type StrategyView } from "./model/
 export { useStrategyDocument } from "./model/use-strategy-document";
 export { type DocumentSource } from "./model/document-source";
 export { useSaveDocument } from "./model/use-save-document";
-export { saveStatusText, saveStatusTone } from "./model/save-status";
+export { saveStatusText, saveStatusTone, saveStatusSummary } from "./model/save-status";
 export { useSchemaAssist } from "./model/use-schema-assist";
 export { useCompileDocument } from "./model/use-compile-document";
 export { DiagnosticsPanel } from "./ui/diagnostics-panel";

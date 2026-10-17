@@ -9,6 +9,7 @@ import {
 
 import { cellKindCopy, type CellKind } from "../../../entities/dataset";
 import { t } from "../../../shared/config";
+import { useMediaQuery } from "../../../shared/lib/media";
 import { useVirtualWindow } from "../../../shared/lib/virtual-window";
 import {
   Badge,
@@ -95,7 +96,7 @@ const unavailableMessage = (reason: StrategyDebuggerUnavailableReason) =>
 
 const TABLE_ROW_HEIGHT = 64;
 const PIPELINE_ROW_HEIGHT = 324;
-const NODE_CHIP_HEIGHT = 58;
+const NODE_CHIP_HEIGHT = 88;
 
 type VirtualTableProps<Row> = {
   rows: readonly Row[];
@@ -143,7 +144,7 @@ const VirtualTable = <Row,>({
       data-rendered-rows={visible.length}
       data-total-rows={rows.length}
       data-virtualized={virtual.virtualized || undefined}
-      onKeyDown={virtual.onKeyDown}
+      onKeyDown={virtual.virtualized ? virtual.onKeyDown : undefined}
       onScroll={virtual.onScroll}
     >
       <table
@@ -221,9 +222,11 @@ const ExclusionReasons = ({
 const VirtualNodeChain = ({
   nodes,
   selectedNodeId,
+  expanded = false,
 }: {
   nodes: LinkedTraceRow["nodes"];
   selectedNodeId: string;
+  expanded?: boolean;
 }) => {
   const selectedIndex = nodes.findIndex(
     (row) => row.node_id === selectedNodeId,
@@ -235,19 +238,19 @@ const VirtualNodeChain = ({
     fallbackViewportHeight: 174,
     anchorIndex: selectedIndex < 0 ? null : selectedIndex,
     overscan: 3,
-    threshold: 24,
+    threshold: expanded ? Number.POSITIVE_INFINITY : 24,
   });
   return (
     <div
       ref={viewportRef}
-      className="strategy-debugger__node-chain"
+      className={`strategy-debugger__node-chain${expanded ? " strategy-debugger__node-chain--expanded" : ""}`}
       role="list"
       aria-label={t("debugger.stage.nodes")}
       tabIndex={0}
       data-rendered-rows={virtual.end - virtual.start}
       data-total-rows={nodes.length}
       data-virtualized={virtual.virtualized || undefined}
-      onKeyDown={virtual.onKeyDown}
+      onKeyDown={virtual.virtualized ? virtual.onKeyDown : undefined}
       onScroll={virtual.onScroll}
     >
       {virtual.paddingBefore > 0 ? (
@@ -336,10 +339,15 @@ const StateNotice = ({ state }: { state: StrategyTraceState }) => {
 const LinkedTraceResult = ({
   state,
   selectedNodeId,
+  activeSecurity,
+  onSecurityChange,
 }: {
   state: StrategyTraceState;
   selectedNodeId: string;
+  activeSecurity: string;
+  onSecurityChange: (security: string) => void;
 }) => {
+  const compact = useMediaQuery("(max-width: 719px)");
   const rows =
     state.kind === "success"
       ? projectLinkedTraceRows(
@@ -349,27 +357,38 @@ const LinkedTraceResult = ({
           state.selectedRows,
         )
       : [];
+  const selectedRow = rows.find((row) => row.securityId === activeSecurity) ?? rows[0];
+  const displayedRows = compact ? (selectedRow === undefined ? [] : [selectedRow]) : rows;
+  const largestChain = Math.max(0, ...displayedRows.map((row) => row.nodes.length));
+  const cardHeight = Math.max(PIPELINE_ROW_HEIGHT - 12, largestChain <= 24 ? largestChain * (NODE_CHIP_HEIGHT + 4) + 240 : PIPELINE_ROW_HEIGHT - 12);
   const viewportRef = useRef<HTMLDivElement>(null);
   const virtual = useVirtualWindow(viewportRef, {
-    itemCount: rows.length,
-    itemHeight: PIPELINE_ROW_HEIGHT,
+    itemCount: displayedRows.length,
+    itemHeight: cardHeight + 12,
     fallbackViewportHeight: 648,
     overscan: 1,
-    threshold: 12,
+    threshold: compact ? Number.POSITIVE_INFINITY : 12,
   });
   if (state.kind !== "success") return null;
   const target = state.response.target;
   return (
+    <div className="strategy-debugger__linked-result">
+      {compact ? <label className="strategy-debugger__security-picker">
+        <span>{t("debugger.compare.security")}</span>
+        <select className="ui-select" value={selectedRow?.securityId ?? ""} onChange={(event) => onSecurityChange(event.target.value)}>
+          {rows.map((row) => <option key={row.securityId} value={row.securityId}>{row.securityId}</option>)}
+        </select>
+      </label> : null}
     <div
       ref={viewportRef}
-      className="strategy-debugger__pipeline-list"
+      className={`strategy-debugger__pipeline-list${compact ? " strategy-debugger__pipeline-list--stacked" : ""}`}
       role="list"
       aria-label={t("debugger.tab.trace")}
       tabIndex={0}
       data-rendered-rows={virtual.end - virtual.start}
-      data-total-rows={rows.length}
+      data-total-rows={displayedRows.length}
       data-virtualized={virtual.virtualized || undefined}
-      onKeyDown={virtual.onKeyDown}
+      onKeyDown={virtual.virtualized ? virtual.onKeyDown : undefined}
       onScroll={virtual.onScroll}
     >
       {virtual.paddingBefore > 0 ? (
@@ -379,16 +398,17 @@ const LinkedTraceResult = ({
           aria-hidden="true"
         />
       ) : null}
-      {rows
+      {displayedRows
         .slice(virtual.start, virtual.end)
         .map(({ securityId, raw, nodes, construction }, visibleIndex) => (
           <article
             className="strategy-debugger__pipeline"
+            style={virtual.virtualized ? { height: cardHeight } : undefined}
             key={securityId}
             role="listitem"
             aria-label={securityId}
             aria-posinset={virtual.start + visibleIndex + 1}
-            aria-setsize={rows.length}
+            aria-setsize={displayedRows.length}
           >
             <header className="strategy-debugger__pipeline-header">
               <h3>{securityId}</h3>
@@ -432,6 +452,7 @@ const LinkedTraceResult = ({
                 <VirtualNodeChain
                   nodes={nodes}
                   selectedNodeId={selectedNodeId}
+                  expanded={compact || nodes.length <= 24}
                 />
               </li>
               {construction === null || target === null ? (
@@ -524,6 +545,7 @@ const LinkedTraceResult = ({
           aria-hidden="true"
         />
       ) : null}
+    </div>
     </div>
   );
 };
@@ -768,7 +790,11 @@ export const StrategyDebugger = ({
   executionPlan,
 }: StrategyDebuggerProps) => {
   const idBase = useId();
+  const compact = useMediaQuery("(max-width: 719px)");
+  const scopeRef = useRef<HTMLDetailsElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<DebuggerTab>("trace");
+  const [activeSecurity, setActiveSecurity] = useState("");
   const routedFactor = context?.factors.find(
     (factor) =>
       selectedPointer === factor.pointer ||
@@ -857,8 +883,17 @@ export const StrategyDebugger = ({
     submittedRequest.current = null;
   };
 
+  useLayoutEffect(() => {
+    if (!compact || trace.state.kind !== "success" || scopeRef.current === null) return;
+    const ownedFocus = scopeRef.current.contains(document.activeElement);
+    scopeRef.current.open = false;
+    if (ownedFocus) resultsRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+  }, [compact, trace.state.kind]);
+
   return (
     <div className="strategy-debugger">
+      <details ref={scopeRef} className="strategy-debugger__scope ui-disclosure" open>
+        <summary>{t("debugger.controls")}{trace.state.kind === "success" ? <span className="strategy-debugger__scope-summary">{t("debugger.scope.count").replace("{count}", String(trace.state.request.security_ids.length))} · {node?.nodeId ?? "—"}</span> : null}</summary>
       <form
         className="strategy-debugger__controls"
         aria-label={t("debugger.controls")}
@@ -911,7 +946,7 @@ export const StrategyDebugger = ({
               });
             }}
           />
-          <small id={`${idBase}-date-note`}>{t("debugger.date.note")}</small>
+          <span className="sr-only" id={`${idBase}-date-note`}>{t("debugger.date.note")}</span>
         </label>
         <label className="strategy-debugger__security-control">
           <span>{t("debugger.security")}</span>
@@ -949,9 +984,9 @@ export const StrategyDebugger = ({
               }));
             }}
           />
-          <small id={`${idBase}-holdings-note`}>
+          <span className="sr-only" id={`${idBase}-holdings-note`}>
             {t("debugger.holdings.note")}
-          </small>
+          </span>
         </label>
         <label>
           <span>{t("debugger.factor")}</span>
@@ -1020,13 +1055,21 @@ export const StrategyDebugger = ({
           ) : null}
         </div>
       </form>
+      <details className="strategy-debugger__scope-help ui-disclosure">
+        <summary>{t("debugger.scope.help")}</summary>
+        <p>{t("debugger.date")}: {t("debugger.date.note")}</p>
+        <p>{t("debugger.holdings")}: {t("debugger.holdings.note")}</p>
+      </details>
+      </details>
 
+      {context === null ? <p className="strategy-debugger__note" role="status">{unavailableMessage(unavailableReason ?? "document")}</p> : null}
+      <div className="strategy-debugger__context">
+      <details className="strategy-debugger__source ui-disclosure" onBlurCapture={(event) => {
+        if (compact && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+      }}>
+        <summary>{t("debugger.source.details")}{trace.state.kind === "success" ? <code>{trace.state.response.as_of}</code> : null}</summary>
       <div className="strategy-debugger__identity">
-        {context === null ? (
-          <p role="status">
-            {unavailableMessage(unavailableReason ?? "document")}
-          </p>
-        ) : (
+        {context !== null ? (
           <>
             <Badge tone="info">
               {context.strategySource.kind === "saved_revision"
@@ -1037,18 +1080,25 @@ export const StrategyDebugger = ({
               {t("debugger.sourceVersion")} {context.sourceVersion}
             </span>
           </>
-        )}
+        ) : null}
         <Provenance state={trace.state} />
       </div>
+      </details>
 
       {trace.state.kind === "success" &&
       trace.state.response.warnings?.length ? (
+        <details className="strategy-debugger__warning-summary ui-disclosure" onBlurCapture={(event) => {
+          if (compact && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+        }}>
+          <summary>{t("debugger.warnings.summary").replace("{count}", String(trace.state.response.warnings.length))}</summary>
         <ul className="strategy-debugger__warnings" role="status">
           {trace.state.response.warnings.map((warning) => (
             <li key={warning}>{warning}</li>
           ))}
         </ul>
+        </details>
       ) : null}
+      </div>
 
       {trace.state.kind === "success" && trace.state.linkedTruncated ? (
         <p className="strategy-debugger__note" role="status">
@@ -1058,7 +1108,7 @@ export const StrategyDebugger = ({
 
       <StateNotice state={trace.state} />
 
-      <div className="strategy-debugger__results">
+      <div ref={resultsRef} className="strategy-debugger__results">
         <Tabs
           label={t("debugger.results")}
           items={tabItems()}
@@ -1073,6 +1123,7 @@ export const StrategyDebugger = ({
             role="tabpanel"
             aria-labelledby={tabId(idBase, item)}
             className="strategy-debugger__panel"
+            data-tab={item}
             hidden={tab !== item}
           >
             {tab === item ? (
@@ -1080,6 +1131,8 @@ export const StrategyDebugger = ({
                 <LinkedTraceResult
                   state={trace.state}
                   selectedNodeId={node?.nodeId ?? ""}
+                  activeSecurity={activeSecurity}
+                  onSecurityChange={setActiveSecurity}
                 />
               ) : item === "target" ? (
                 <TargetResult

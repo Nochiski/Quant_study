@@ -21,6 +21,10 @@ import { backendOrigin } from "./ports.mjs";
 export {
   RUN_ENVIRONMENT,
   runSettingsInputs,
+  openRunSettingsGroup,
+  openTraceWorkspace,
+  openEditorWorkspace,
+  openTraceSource,
   currentSource,
   editor,
   expectPhase,

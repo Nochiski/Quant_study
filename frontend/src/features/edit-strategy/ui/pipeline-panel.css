@@ -175,3 +175,101 @@
   gap: var(--space-2);
   justify-items: start;
 }
+
+/* 같은 문서·선정 결과를 비교하되, 팩터 상세 편집기는 URL의 별도 주 작업으로 연다. */
+.pipeline-comparison {
+  container: pipeline-comparison / inline-size;
+  min-width: 0;
+}
+.pipeline-comparison__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.pipeline-comparison__result {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+.pipeline-comparison__result .strategy-preview {
+  border-top: 0;
+}
+.graph-authoring {
+  container: graph-authoring / inline-size;
+  flex: none;
+  min-width: 0;
+}
+.graph-authoring .factor-graph__state {
+  min-height: 0;
+}
+.graph-authoring__navigation {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-block: var(--space-2);
+  margin-bottom: var(--space-3);
+  background: var(--surface-panel);
+}
+.graph-authoring .factor-graph__toolbar {
+  position: sticky;
+  top: calc(var(--control-height) + var(--space-4));
+  z-index: 4;
+  background: var(--surface-panel);
+}
+/* 좁은 작업 영역에서 큰 팩터 도구 모음이 캔버스를 덮지 않도록 복귀 입구만 고정한다. */
+@container graph-authoring (max-width: 859px) {
+  .graph-authoring__navigation {
+    padding-block: var(--space-1);
+    margin-bottom: var(--space-2);
+  }
+  .graph-authoring .factor-graph__toolbar {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .graph-authoring .factor-graph__toolbar label {
+    width: 100%;
+    min-width: 0;
+  }
+  .graph-authoring .factor-graph__toolbar > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+@container pipeline-comparison (min-width: 1060px) {
+  .pipeline-comparison__body {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  }
+  .pipeline-comparison__result {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.pipeline-comparison__navigation {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  margin-bottom: var(--space-3);
+  background: var(--surface-panel);
+  border-bottom: 1px solid var(--border);
+}
+.pipeline-comparison__navigation a {
+  padding: var(--space-2);
+}
+.pipeline-comparison__body > [id] {
+  min-width: 0;
+  scroll-margin-top: calc(var(--control-height) + var(--space-3));
+}
+@container pipeline-comparison (min-width: 1060px) {
+  .pipeline-comparison__result {
+    top: calc(var(--control-height) + var(--space-3));
+  }
+}

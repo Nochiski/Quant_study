@@ -1,15 +1,12 @@
 import { browserStorage } from "../../../shared/lib/browser-storage";
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 
-import { useViewportHeight } from "../../../shared/lib/media";
 
-/**
- * Panel sizes and collapse flags of the Strategy IDE. Widget-local by design (WORKFLOW 2.6:
- * panel size is widget state, never URL or server state).
- */
+/** 패널 폭·열림은 위젯의 로컬 상태이며 URL이나 서버 상태를 복제하지 않는다. */
 export type PanelLayout = {
   outlineWidth: number;
   inspectorWidth: number;
+  /** v1 저장 기록과의 호환 값이다. 전용 추적 작업공간의 높이로 사용하지 않는다. */
   debuggerHeight: number;
   assistantWidth: number;
   outlineOpen: boolean;
@@ -26,27 +23,20 @@ export type PanelLayout = {
 export const PANEL_BOUNDS = {
   outlineWidth: { min: 180, max: 420 },
   inspectorWidth: { min: 240, max: 520 },
-  // 중간 결과 높이의 상한은 고정값이 아니라 창 높이를 따른다(`DEBUGGER_MAX_VIEWPORT_SHARE`). 저장값은
-  // 하한만 보고 받고, 그리는 높이를 그때 창의 상한으로 자른다.
+  // 과거 저장 기록의 유효성만 검사하며 새 작업공간 크기를 제한하지 않는다.
   debuggerHeight: { min: 120, max: Number.POSITIVE_INFINITY },
   assistantWidth: { min: 280, max: 560 },
 } as const;
-
-/**
- * 중간 결과 패널이 차지할 수 있는 창 높이의 몫. 상한이 480px으로 고정이었을 때는 최대로 키워도 추적 본문이
- * 패널보다 길어(1440×900에서 99px, 1920×1080에서 24px) 연결 추적 아래쪽이 패널 안 스크롤로 가려졌다(#262).
- */
-const DEBUGGER_MAX_VIEWPORT_SHARE = 0.7;
 
 export const DEFAULT_LAYOUT: PanelLayout = {
   outlineWidth: 240,
   inspectorWidth: 320,
   debuggerHeight: 220,
   assistantWidth: 360,
-  outlineOpen: true,
-  inspectorOpen: true,
-  debuggerOpen: true,
-  // AI 사이드바만 기본 접힘이다: 슬롯을 넘기지 않는 화면과 첫 방문의 레이아웃을 그대로 둔다(B-04).
+  outlineOpen: false,
+  inspectorOpen: false,
+  debuggerOpen: false,
+  // 주본문을 먼저 읽고 구조·계약·AI는 사용자가 명시해서 연다.
   assistantOpen: false,
   lastOpenedRight: null,
 };
@@ -135,13 +125,12 @@ const writePanelSizes = (
           debuggerHeight: layout.debuggerHeight,
           assistantWidth: layout.assistantWidth,
         },
-        // 펼침 상태 중 AI 사이드바만 저장한다: 나머지 패널은 기본 펼침이라 복원할 것이 없고,
-        // 사이드바는 기본 접힘이라 열어 둔 선택이 새로고침마다 사라지면 안 된다.
+        // 기존 AI 열림 선호만 복원한다. 나머지는 첫 진입의 주본문 공간을 보장한다.
         open: { assistant: layout.assistantOpen },
       }),
     );
   } catch {
-    // Local persistence must never make the editor unusable.
+    // 로컬 저장 실패가 편집을 막아서는 안 된다.
   }
 };
 
@@ -192,23 +181,8 @@ export const usePanelLayout = (initial: PanelLayout = DEFAULT_LAYOUT) => {
   useEffect(() => {
     writePanelSizes(storage, layout);
   }, [layout, storage]);
-  const viewportHeight = useViewportHeight();
-  const debuggerMaxHeight = Math.max(
-    PANEL_BOUNDS.debuggerHeight.min,
-    Math.round(viewportHeight * DEBUGGER_MAX_VIEWPORT_SHARE),
-  );
-  // 그리는 높이만 지금 창의 상한으로 자르고 저장하는 높이(사용자가 고른 값)는 두어, 창을 잠깐 줄였다고
-  // 고른 높이를 잃지 않는다.
-  const drawn = useMemo(
-    () =>
-      layout.debuggerHeight <= debuggerMaxHeight
-        ? layout
-        : { ...layout, debuggerHeight: debuggerMaxHeight },
-    [debuggerMaxHeight, layout],
-  );
   return {
-    layout: drawn,
-    debuggerMaxHeight,
+    layout,
     resize: useCallback(
       (panel: SizePanel, value: number) =>
         dispatch({ type: "resize", panel, value }),

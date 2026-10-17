@@ -126,3 +126,29 @@
 .contract-inspector__description code {
   color: var(--text-subtle);
 }
+
+.contract-inspector__technical {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.contract-inspector__technical > summary {
+  color: var(--text-muted);
+  font-size: var(--text-size-label);
+}
+.contract-inspector__technical[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+/* 필드의 뜻은 작업을 판단하는 본문이며 기술 메타의 작은 글자와 구분한다. */
+.contract-inspector__section h3 {
+  font-family: var(--font-sans);
+  font-size: var(--text-size-subsection);
+}
+.contract-inspector__description p {
+  font-size: var(--text-size-body);
+  line-height: var(--line-height-body);
+}
+.contract-inspector__technical h3 {
+  font-size: var(--text-size-label);
+}

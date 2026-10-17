@@ -206,6 +206,42 @@ def register_experiment_routes(
             responses=admission,
         )
 
+    robustness = {
+        **admission,
+        404: {
+            "model": ExperimentErrorResponse | BacktestStrategyNotFoundResponse,
+            "description": "The result run or its base strategy revision does not exist",
+        },
+        409: {
+            "model": ExperimentErrorResponse | BacktestStrategyStaleResponse,
+            "description": "A check of this run is still running, or the base revision is stale",
+        },
+    }
+
+    @app.post(
+        "/api/v1/backtests/{run_id}/robustness-check/preview",
+        operation_id="previewRobustnessCheck",
+        responses=robustness,
+    )
+    def preview_robustness_check(run_id: str) -> ExperimentPreview:
+        """결과 실행의 "튼튼한지 확인하기" 미리 계산 — 기본 설계와 새로 세는 시도 수(US-DM-11)."""
+        return admitted(lambda: experiments.preview_robustness(run_id))
+
+    @app.post(
+        "/api/v1/backtests/{run_id}/robustness-check",
+        operation_id="createRobustnessCheck",
+        status_code=202,
+        responses=robustness,
+    )
+    def create_robustness_check(run_id: str) -> Experiment:
+        """결과 실행의 기본 설계로 실험을 만들고 대기열에 넣는다(US-DM-11)."""
+        return admitted(lambda: experiments.create_robustness(run_id))
+
+    @app.get("/api/v1/backtests/{run_id}/robustness-checks", operation_id="listRobustnessChecks")
+    def list_robustness_checks(run_id: str) -> list[Experiment]:
+        """결과 실행에서 "튼튼한지 확인하기"로 만든 실험, 최근에 만든 순. 없으면 빈 목록."""
+        return list(experiments.robustness_checks(run_id))
+
     @app.get("/api/v1/experiments", operation_id="listExperiments")
     def list_experiments(
         after: Annotated[str | None, Query(min_length=1)] = None,
@@ -493,9 +529,7 @@ class _ExperimentStreamHub:
         if cancelled:
             raise asyncio.CancelledError
 
-    async def _drain(
-        self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]
-    ) -> None:
+    async def _drain(self, entries: list[_SharedProgress], tasks: list[asyncio.Task[None]]) -> None:
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
             # 저장소가 닫히기 전에 실제 스레드가 조회를 마칠 때까지 기다린다.

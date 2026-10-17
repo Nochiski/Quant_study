@@ -17,6 +17,7 @@ import {
   useRunEnvironmentSchema,
 } from "../../../entities/backtest";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
+import { RobustnessCheck } from "../../../features/check-robustness";
 import { BacktestRunActions } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useParams } from "../../../shared/lib/router";
@@ -171,7 +172,12 @@ export const BacktestRunPage = () => {
                 loading={validationReport.isPending}
                 fetching={validationReport.isFetching}
                 refresh={() => { void validationReport.refresh(); }}
-              />
+              >
+                {/* 실행 종류(서버 판정)를 읽은 뒤에 붙인다 — 단일 실행에서만 확인 실험을 만든다. */}
+                {summary.data ? (
+                  <RobustnessCheck runId={runId} single={summary.data.kind === "single"} />
+                ) : null}
+              </BacktestValidationReport>
             }
             accountReport={
               <BacktestAccountReport

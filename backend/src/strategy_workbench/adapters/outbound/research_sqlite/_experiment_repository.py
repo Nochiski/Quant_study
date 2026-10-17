@@ -34,9 +34,12 @@ logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 # 설계 JSON 은 기록에서 바뀌는 칸(취소 시각·대기열 조작)과 식별·만든 시각을 뺀 것이다.
-_COLUMNS = {"experiment_id", "created_at", "cancelled_at"}
-_SELECT = "experiment_id, created_at, cancelled_at, design_json, paused, priority"
-_FROM = "experiments LEFT JOIN experiment_controls USING (experiment_order)"
+_COLUMNS = {"experiment_id", "created_at", "cancelled_at", "source_run_id"}
+_SELECT = "experiment_id, created_at, cancelled_at, source_run_id, design_json, paused, priority"
+_FROM = (
+    "experiments LEFT JOIN experiment_controls USING (experiment_order) "
+    "LEFT JOIN experiment_sources USING (experiment_order)"
+)
 _RECORD = TypeAdapter(ExperimentRecord)
 _ATTEMPT = TypeAdapter(TrialAttempt)
 _PICK = TypeAdapter(WindowPick)
@@ -60,7 +63,7 @@ class SQLiteExperimentRepository:
 
     def add(self, record: ExperimentRecord) -> None:
         with self._database.transaction(write=True) as connection:
-            connection.execute(
+            inserted = connection.execute(
                 "INSERT INTO experiments (experiment_id, created_at, design_json) VALUES (?, ?, ?)",
                 (
                     record.experiment_id,
@@ -68,6 +71,12 @@ class SQLiteExperimentRepository:
                     _encode_record(record),
                 ),
             )
+            if record.source_run_id is not None:
+                connection.execute(
+                    "INSERT INTO experiment_sources (experiment_order, source_run_id) "
+                    "VALUES (?, ?)",
+                    (inserted.lastrowid, record.source_run_id),
+                )
 
     def get(self, experiment_id: str) -> ExperimentRecord:
         with self._database.transaction(write=False) as connection:
@@ -121,6 +130,25 @@ class SQLiteExperimentRepository:
                     logger.exception("experiment skipped on listing — experiment_id=%s", cursor)
             if len(rows) < remaining:
                 break
+        return tuple(records)
+
+    def by_source_run(self, run_id: str) -> tuple[ExperimentRecord, ...]:
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                f"SELECT {_SELECT} FROM {_FROM} WHERE source_run_id = ? "
+                "ORDER BY experiment_order DESC",
+                (run_id,),
+            ).fetchall()
+        records: list[ExperimentRecord] = []
+        for row in rows:
+            try:
+                records.append(_record(row))
+            except ResearchStorageError:
+                logger.exception(
+                    "experiment skipped on source lookup — experiment_id=%s source_run_id=%s",
+                    row["experiment_id"],
+                    run_id,
+                )
         return tuple(records)
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None:

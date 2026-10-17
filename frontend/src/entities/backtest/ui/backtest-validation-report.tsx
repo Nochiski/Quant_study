@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { ApiRequestError, type RunValidationReport } from "../../../shared/api";
 import { t, tCode } from "../../../shared/config";
 import { displayTime } from "../../../shared/lib/display-time";
@@ -18,12 +20,15 @@ export const BacktestValidationReport = ({
   fetching,
   error,
   refresh,
+  children,
 }: {
   report: RunValidationReport | undefined;
   loading: boolean;
   fetching: boolean;
   error: unknown;
   refresh: () => void;
+  /** 원장 통계 밖의 검증 항목(표본 밖 성과·고원). 조합은 화면이 한다. */
+  children?: ReactNode;
 }) => {
   const canRefresh = !(error instanceof ApiRequestError) || error.status === 0 || error.status >= 500;
   // 파일 손실 뒤에는 앞서 조회한 통계도 현재 조회 성공인 것처럼 보이지 않는다.
@@ -101,6 +106,7 @@ export const BacktestValidationReport = ({
           </details>
         </>
       ) : null}
+      {children}
     </div>
   );
 };

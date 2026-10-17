@@ -28,6 +28,16 @@ from strategy_workbench.domain.experiment._plateau import (
     cell_outcomes,
     plateau_map,
 )
+from strategy_workbench.domain.experiment._robustness import (
+    ROBUSTNESS_EMBARGO_SESSIONS,
+    ROBUSTNESS_MAX_POINTS,
+    ROBUSTNESS_MIN_TEST_DAYS,
+    ROBUSTNESS_TEST_YEARS,
+    ROBUSTNESS_TRAIN_YEARS,
+    robustness_end,
+    robustness_search,
+    robustness_split,
+)
 from strategy_workbench.domain.experiment._search import (
     MAX_GRID_POINTS,
     ConstraintOperator,
@@ -57,6 +67,14 @@ from strategy_workbench.domain.experiment._walk_forward import (
 )
 
 __all__ = [
+    "ROBUSTNESS_EMBARGO_SESSIONS",
+    "ROBUSTNESS_MAX_POINTS",
+    "ROBUSTNESS_MIN_TEST_DAYS",
+    "ROBUSTNESS_TEST_YEARS",
+    "ROBUSTNESS_TRAIN_YEARS",
+    "robustness_end",
+    "robustness_search",
+    "robustness_split",
     "WALK_FORWARD_INTERPRETATION",
     "WalkForwardEvaluationBasis",
     "EXPERIMENT_CODES",

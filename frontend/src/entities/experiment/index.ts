@@ -8,6 +8,10 @@ export {
   experimentRemainingTimeQuery,
   experimentTrialsQuery,
   experimentWalkForwardQuery,
+  experimentParameterMapQuery,
+  robustnessChecksQuery,
+  useRobustnessPreview,
+  useCreateRobustnessCheck,
   experimentsKey,
   experimentsQuery,
   useCancelExperiment,
@@ -31,6 +35,7 @@ export type {
   ExperimentPreview,
   ExperimentRequest,
   ExperimentTrialState,
+  ParameterMap,
   WalkForwardReport,
 } from "../../shared/api";
 

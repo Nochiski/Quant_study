@@ -53,10 +53,12 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     DEFAULT_RUN_SLOTS,
+    BacktestRunNotFoundError,
     BacktestRunResult,
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
+    RunKind,
     RunLaneControls,
     TrialLedger,
     rejection_code,
@@ -74,6 +76,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
     RunSlotUsage,
+    SourceRun,
     TrialResultUnreadableError,
     TrialRunRejectedError,
 )
@@ -343,6 +346,14 @@ class _RunServiceTrialRuns:
         if self._held_run_ids is not None:
             self._held_run_ids.add(run_id)
         return run_id
+
+    def source_run(self, run_id: str) -> SourceRun | None:
+        try:
+            request = self._runs.request(run_id)
+            kind = self._runs.summary(run_id).kind
+        except BacktestRunNotFoundError:
+            return None
+        return SourceRun(request=request, single=kind is RunKind.SINGLE)
 
     def result(self, run_id: str) -> BacktestRunResult:
         try:

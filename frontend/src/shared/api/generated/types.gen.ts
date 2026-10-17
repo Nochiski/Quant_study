@@ -2591,6 +2591,11 @@ export type ExperimentErrorDetail = {
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
     | "experiment.not_found"
+    | "experiment.robustness.not_single"
+    | "experiment.robustness.period_too_short"
+    | "experiment.robustness.run_not_found"
+    | "experiment.robustness.running"
+    | "experiment.robustness.too_many_parameters"
     | "experiment.search.invalid_constraint"
     | "experiment.search.invalid_values"
     | "experiment.search.no_feasible_point"
@@ -2697,6 +2702,10 @@ export type ExperimentRecord = {
    */
   experiment_id: string;
   run: BacktestRunSpec;
+  /**
+   * Source Run Id
+   */
+  source_run_id?: string | null;
   split: SplitSpec | null;
 };
 
@@ -8959,6 +8968,128 @@ export type GetBacktestResultResponses = {
 
 export type GetBacktestResultResponse =
   GetBacktestResultResponses[keyof GetBacktestResultResponses];
+
+export type CreateRobustnessCheckData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/robustness-check";
+};
+
+export type CreateRobustnessCheckErrors = {
+  /**
+   * Response 404 Createrobustnesscheck
+   *
+   * The result run or its base strategy revision does not exist
+   */
+  404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
+  /**
+   * Response 409 Createrobustnesscheck
+   *
+   * A check of this run is still running, or the base revision is stale
+   */
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type CreateRobustnessCheckError =
+  CreateRobustnessCheckErrors[keyof CreateRobustnessCheckErrors];
+
+export type CreateRobustnessCheckResponses = {
+  /**
+   * Successful Response
+   */
+  202: Experiment;
+};
+
+export type CreateRobustnessCheckResponse =
+  CreateRobustnessCheckResponses[keyof CreateRobustnessCheckResponses];
+
+export type PreviewRobustnessCheckData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/robustness-check/preview";
+};
+
+export type PreviewRobustnessCheckErrors = {
+  /**
+   * Response 404 Previewrobustnesscheck
+   *
+   * The result run or its base strategy revision does not exist
+   */
+  404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
+  /**
+   * Response 409 Previewrobustnesscheck
+   *
+   * A check of this run is still running, or the base revision is stale
+   */
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type PreviewRobustnessCheckError =
+  PreviewRobustnessCheckErrors[keyof PreviewRobustnessCheckErrors];
+
+export type PreviewRobustnessCheckResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentPreview;
+};
+
+export type PreviewRobustnessCheckResponse =
+  PreviewRobustnessCheckResponses[keyof PreviewRobustnessCheckResponses];
+
+export type ListRobustnessChecksData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/robustness-checks";
+};
+
+export type ListRobustnessChecksErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListRobustnessChecksError =
+  ListRobustnessChecksErrors[keyof ListRobustnessChecksErrors];
+
+export type ListRobustnessChecksResponses = {
+  /**
+   * Response Listrobustnesschecks
+   *
+   * Successful Response
+   */
+  200: Array<Experiment>;
+};
+
+export type ListRobustnessChecksResponse =
+  ListRobustnessChecksResponses[keyof ListRobustnessChecksResponses];
 
 export type GetBacktestSummaryData = {
   body?: never;

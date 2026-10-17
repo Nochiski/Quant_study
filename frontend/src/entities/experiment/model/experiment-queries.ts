@@ -123,6 +123,46 @@ export const experimentRemainingTimeQuery = (experimentId: string) =>
       strategyWorkbenchApi.getExperimentRemainingTime(experimentId),
   });
 
+/** 칸 판정(추천·봉우리)과 민감도. 판정 기준은 backend(V4-03)가 소유한다. */
+export const experimentParameterMapQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "parameter-map"],
+    queryFn: () => strategyWorkbenchApi.getExperimentParameterMap(experimentId),
+  });
+
+/**
+ * 결과 실행에서 "튼튼한지 확인하기"로 만든 실험(최근에 만든 순, US-DM-11). 끝나지 않은 실험이 있으면 목록과
+ * 같은 주기로 다시 읽는다.
+ */
+export const robustnessChecksQuery = (runId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), "robustness", runId],
+    queryFn: () => strategyWorkbenchApi.listRobustnessChecks(runId),
+    refetchInterval: (query) =>
+      query.state.data?.some((item) => !item.settled)
+        ? EXPERIMENT_POLL_MS
+        : false,
+  });
+
+/** 확인 창이 열릴 때만 묻는 미리 계산. 거절은 같은 실행이면 늘 같아 다시 묻지 않는다. */
+export const useRobustnessPreview = (runId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: [...experimentsKey(), "robustness", runId, "preview"],
+    queryFn: enabled
+      ? () => strategyWorkbenchApi.previewRobustnessCheck(runId)
+      : skipToken,
+    retry: false,
+  });
+
+export const useCreateRobustnessCheck = (runId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => strategyWorkbenchApi.createRobustnessCheck(runId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: experimentsKey() }),
+  });
+};
+
 export const experimentWalkForwardQuery = (experimentId: string) =>
   queryOptions({
     queryKey: [...experimentsKey(), experimentId, "walk-forward"],

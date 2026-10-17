@@ -47,6 +47,9 @@ from strategy_workbench.domain.experiment.facade.design import (
     pick_window_cell,
     planned_spans,
     plateau_map,
+    robustness_end,
+    robustness_search,
+    robustness_split,
     run_spans,
     stitch_out_of_sample,
     walk_forward_gap,
@@ -328,13 +331,81 @@ class ExperimentRunService:
         _, design = self._design(request)
         return self._create(request.run, request.split, design)
 
+    def _robustness(
+        self, run_id: str
+    ) -> tuple[ExperimentRequest, tuple[AdmittedRun, StrategySpec, RunEnvironment]]:
+        """결과 실행 `run_id` 의 "튼튼한지 확인하기" 실험 요청과 그 기반 접수(US-DM-11).
+
+        기반은 그 실행의 원본 요청이고, 탐색·분할·기간 끝은 `domain/experiment` 의 기본 설계
+        (`robustness_search`·`robustness_split`·`robustness_end`)다. 지표 창은 분할이 정하므로 뺀다.
+        단일 실행만 받는다(실험 trial·검증 실행의 요청은 창 구간·칸 값으로 좁혀져 있다). 저장
+        리비전이 아닌 실행은 실험 기반 규칙대로 `experiment.base.unsaved` 로 거절한다.
+        """
+        source = self._runs.source_run(run_id)
+        if source is None:
+            raise ExperimentNotFoundError(
+                "experiment.robustness.run_not_found",
+                f"튼튼한지 확인할 실행을 찾을 수 없습니다: run_id={run_id}",
+            )
+        if not source.single:
+            raise InvalidExperimentSpecError(
+                "experiment.robustness.not_single",
+                "실험이 돌린 실행은 그 실험 화면에서 확인합니다. 직접 돌린 실행에서 시작하세요: "
+                f"run_id={run_id}",
+            )
+        run = replace(source.request, metric_windows=())
+        base = self._base(run)
+        environment = base[2]
+        split = robustness_split(environment.start, environment.end)
+        end = robustness_end(split, environment.start, environment.end)
+        if end != environment.end and run.environment is not None:
+            # 짧은 꼬리 검증 창을 버린다. 기간이 바뀌었으니 접수 판정을 다시 탄다(드문 경우).
+            run = replace(run, environment=replace(run.environment, end=end))
+            base = self._base(run)
+        request = ExperimentRequest(
+            run=run,
+            search=robustness_search(base[1].parameters, base[0].run.parameter_values),
+            split=split,
+        )
+        return request, base
+
+    def preview_robustness(self, run_id: str) -> ExperimentPreview:
+        """ "튼튼한지 확인하기" 실험의 미리 계산 — 확인 창이 새로 세는 시도 수를 먼저 보인다."""
+        request, base = self._robustness(run_id)
+        return self._preview(*self._design(request, base))
+
+    def create_robustness(self, run_id: str) -> Experiment:
+        """ "튼튼한지 확인하기" 실험을 만들어 대기열에 넣는다.
+
+        결과 화면이 `run_id` 로 다시 찾는다. 같은 실행의 확인 실험이 아직 끝나지 않았으면 거절한다 —
+        탭 두 개에서 누른 요청이 같은 계산을 두 번 대기열에 올리지 않게 한다.
+        """
+        request, base = self._robustness(run_id)
+        _, design = self._design(request, base)
+        with self._lock:
+            if any(not item.settled for item in self.robustness_checks(run_id)):
+                raise ExperimentStateError(
+                    "experiment.robustness.running",
+                    f"이 실행의 확인 실험이 아직 끝나지 않았습니다: run_id={run_id}",
+                )
+            return self._create(request.run, request.split, design, source_run_id=run_id)
+
+    def robustness_checks(self, run_id: str) -> tuple[Experiment, ...]:
+        """결과 실행 `run_id` 에서 만든 실험, 최근에 만든 순. 없으면 빈 튜플."""
+        return tuple(self._experiment(record) for record in self._repository.by_source_run(run_id))
+
     def create_capacity(self, request: CapacitySweepRequest) -> Experiment:
         """용량 스윕을 만들고 금액마다 기반 실행 구간 전체를 대기열에 넘긴다."""
         _, design = self._capacity_design(request)
         return self._create(request.run, None, design)
 
     def _create(
-        self, run: BacktestRunSpec, split: SplitSpec | None, design: ExperimentDesign
+        self,
+        run: BacktestRunSpec,
+        split: SplitSpec | None,
+        design: ExperimentDesign,
+        *,
+        source_run_id: str | None = None,
     ) -> Experiment:
         record = ExperimentRecord(
             experiment_id=self._new_id(),
@@ -343,6 +414,7 @@ class ExperimentRunService:
             split=split,
             design=design,
             controls=DEFAULT_EXPERIMENT_CONTROLS,
+            source_run_id=source_run_id,
         )
         self._repository.add(record)
         self._spawn(lambda: self._submit(record))
@@ -480,7 +552,12 @@ class ExperimentRunService:
         self._repository.add_selection(selection)
         return selection
 
-    def _design(self, request: ExperimentRequest) -> tuple[AdmittedRun, ExperimentDesign]:
+    def _design(
+        self,
+        request: ExperimentRequest,
+        base: tuple[AdmittedRun, StrategySpec, RunEnvironment] | None = None,
+    ) -> tuple[AdmittedRun, ExperimentDesign]:
+        """`base` 는 이미 탄 기반 접수(`_base`)다. 없으면 여기서 탄다."""
         run = request.run
         _base_source(run)
         if run.metric_windows:
@@ -489,7 +566,7 @@ class ExperimentRunService:
                 "실험의 측정 창은 분할 규칙이 정합니다. 기반 실행 요청에서 지표 창을 빼세요: "
                 f"metric_windows={len(run.metric_windows)}",
             )
-        admitted, strategy, environment = self._base(run)
+        admitted, strategy, environment = base or self._base(run)
         return admitted, ExperimentDesign(
             search=build_search_spec(strategy.parameters, request.search, request.constraints),
             parameter_values=admitted.run.parameter_values,

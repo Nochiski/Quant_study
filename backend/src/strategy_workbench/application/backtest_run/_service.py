@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
@@ -29,7 +29,9 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 )
 from strategy_workbench.domain.analytics.facade.factor_regression import (
     FactorRegressionUnavailableReason,
-    regress_on_factors,
+    FactorReturnSeries,
+    factor_return_series,
+    regress_on_factor_returns,
     unavailable_factor_regression,
 )
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope
@@ -42,6 +44,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     ResearchWindowViolationError,
     RunEnvironment,
     cost_history_sessions,
+    environment_hash,
     require_environment,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -80,6 +83,7 @@ from strategy_workbench.domain.experiment.facade.statistics import (
     run_deflated_sharpe_evidence,
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.planning import FACTOR_EVALUATION_VERSION
 from strategy_workbench.domain.factor.facade.registry import (
     FactorRegistry,
     build_default_factor_registry,
@@ -253,6 +257,24 @@ class BacktestResultNotReadyError(RuntimeError):
 # 이 프로세스가 접수한 run 의 메모리 사본. 목록·상태·요청의 정본은 저장소, 결과의 정본은 산출물
 # 저장소이고, 이 사본은 저장하지 않는 것(진행률·진행 이벤트 링·취소 신호)을 든다. 정체성으로
 # 가린다(`eq=False`) — 대기열에서 꺼내고 지울 때 같은 run 만 맞아야 한다.
+# 팩터 수익률 캐시 키: (회귀 실행 설정 해시, 데이터 판, 레지스트리 판본, 평가 규칙 판본).
+_FactorReturnsKey = tuple[str, str, str, str]
+# 계산해 두는 키 수. 한 키는 구간 수(5년 약 1200) × 숫자 일곱이라 작다 — 실행 설정을 바꿔 가며 볼
+# 때 앞 것을 다시 계산하지 않을 만큼만 둔다.
+_FACTOR_RETURNS_KEPT = 8
+
+
+@dataclass(frozen=True)
+class _FactorReturns:
+    series: FactorReturnSeries
+    # 단면을 계산한 평가 계획의 판본(응답 `factor_evaluation_version`).
+    evaluation_version: str | None
+
+
+def _start_daemon(job: Callable[[], None]) -> None:
+    Thread(target=job, name="factor-returns", daemon=True).start()
+
+
 @dataclass(eq=False)
 class _RunRecord:
     state: BacktestRunState
@@ -287,6 +309,7 @@ class BacktestRunService:
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         run_slots: int = DEFAULT_RUN_SLOTS,
         factor_registry: FactorRegistry | None = None,
+        background: Callable[[Callable[[], None]], None] | None = None,
     ) -> None:
         if run_slots < 1:
             raise ValueError(f"run_slots must be at least 1 — run_slots={run_slots!r}")
@@ -310,6 +333,13 @@ class BacktestRunService:
         self._running_experiments = 0
         self._lock = RLock()
         self._factor_regression_lock = Lock()
+        # 팩터 수익률은 전략과 무관해 키(`_factor_returns_key`)마다 한 번 계산해 둔다. 최근 것만
+        # 둔다.
+        self._factor_cache: OrderedDict[_FactorReturnsKey, _FactorReturns] = OrderedDict()
+        self._factor_jobs: set[_FactorReturnsKey] = set()
+        self._factor_failures: dict[_FactorReturnsKey, FactorRegressionUnavailableReason] = {}
+        # 무거운 계산을 거는 곳. 기본은 데몬 스레드이고, 테스트는 그 자리에서 돌리는 함수를 준다.
+        self._background = background or _start_daemon
         self._close_interrupted_runs()
 
     def slot_usage(self) -> tuple[int, int]:
@@ -647,22 +677,25 @@ class BacktestRunService:
         채우지 않는 `drop` 으로 바꾼다 — 채운 팩터 값으로 정렬하면 없는 신호가 포트폴리오에 든다.
         지금 데이터 판이 run 의 판과 다르면 회귀하지 않는다(다른 데이터로 잰 노출을 그 run 의 것으로
         보이지 않는다). 실행·선택 기록은 쓰지 않는다.
+
+        팩터 수익률은 전략과 무관해 실행 설정·데이터 판·레지스트리·평가 판본
+        (`_factor_returns_key`)마다 한 번 계산해 두고 회귀만 매번 한다. 아직 없으면 뒤에서 계산을
+        걸고 `computing` 으로 돌려준다 — 실원장 5년 유니버스 단면에 약 2분이 걸려 조회를 붙잡지
+        않는다(실데이터 확인 2026-10-17 후속 1).
         """
         result = self.result(run_id)
         manifest = result.manifest
         strategy = strategy_period_returns(result)
         days = manifest.run_spec.annualization_days
-        pipeline = self._factor_pipeline(manifest)
-        if isinstance(pipeline, FactorRegressionUnavailableReason):
+        returns = self._factor_returns(manifest)
+        if isinstance(returns, FactorRegressionUnavailableReason):
             report = unavailable_factor_regression(
-                pipeline, strategy_period_count=len(strategy), annualization_days=days
+                returns, strategy_period_count=len(strategy), annualization_days=days
             )
             evaluation_version = None
         else:
-            report = regress_on_factors(
-                strategy, factor_periods(pipeline.observations), annualization_days=days
-            )
-            evaluation_version = pipeline.preview.tape.factor_evaluation_version
+            report = regress_on_factor_returns(strategy, returns.series, annualization_days=days)
+            evaluation_version = returns.evaluation_version
         lineage_id = self._lineage(
             manifest.run_spec,
             manifest.strategy_provenance
@@ -682,6 +715,78 @@ class BacktestRunService:
             alpha_t_threshold=None if trial_count is None else alpha_t_threshold(trial_count),
             report=report,
         )
+
+    def _factor_returns_key(self, manifest: RunManifest) -> _FactorReturnsKey:
+        """팩터 수익률을 가르는 입력 전부.
+
+        회귀가 쓰는 실행 설정(결측 정책 `drop`), run 의 데이터 판, 레지스트리 판본(기본 graph),
+        평가 규칙 판본이다. 전략·실행 옵션은 들지 않는다.
+        """
+        return (
+            environment_hash(replace(manifest.environment, missing=MissingPolicy.DROP)),
+            manifest.data_snapshot_id,
+            self._factor_registry.version,
+            FACTOR_EVALUATION_VERSION,
+        )
+
+    def _factor_returns(
+        self, manifest: RunManifest
+    ) -> _FactorReturns | FactorRegressionUnavailableReason:
+        """계산해 둔 팩터 수익률. 없으면 뒤에서 계산을 걸고(같은 키는 한 번) `COMPUTING`.
+
+        계산이 실패했으면 그 사유를 한 번 돌려주고 잊는다 — 다음 조회가 다시 계산한다(데이터가
+        돌아왔을 수 있다).
+        """
+        key = self._factor_returns_key(manifest)
+        with self._lock:
+            settled = self._settled_factor_returns(key)
+            if settled is not None:
+                return settled
+            start = key not in self._factor_jobs
+            self._factor_jobs.add(key)
+        if start:
+            self._background(lambda: self._compute_factor_returns(key, manifest))
+        with self._lock:
+            # 그 자리에서 도는 실행자(테스트)면 이미 끝났다.
+            return self._settled_factor_returns(key) or FactorRegressionUnavailableReason.COMPUTING
+
+    def _settled_factor_returns(
+        self, key: _FactorReturnsKey
+    ) -> _FactorReturns | FactorRegressionUnavailableReason | None:
+        cached = self._factor_cache.get(key)
+        if cached is not None:
+            self._factor_cache.move_to_end(key)
+            return cached
+        return self._factor_failures.pop(key, None)
+
+    def _compute_factor_returns(self, key: _FactorReturnsKey, manifest: RunManifest) -> None:
+        outcome: _FactorReturns | FactorRegressionUnavailableReason
+        try:
+            pipeline = self._factor_pipeline(manifest)
+            outcome = (
+                pipeline
+                if isinstance(pipeline, FactorRegressionUnavailableReason)
+                else _FactorReturns(
+                    factor_return_series(factor_periods(pipeline.observations)),
+                    pipeline.preview.tape.factor_evaluation_version,
+                )
+            )
+        except Exception:
+            logger.exception(
+                "factor returns computation failed — run_id=%s environment=%s snapshot=%s",
+                manifest.run_id,
+                manifest.environment_hash,
+                manifest.data_snapshot_id,
+            )
+            outcome = FactorRegressionUnavailableReason.COMPUTATION_FAILED
+        with self._lock:
+            self._factor_jobs.discard(key)
+            if isinstance(outcome, FactorRegressionUnavailableReason):
+                self._factor_failures[key] = outcome
+                return
+            self._factor_cache[key] = outcome
+            while len(self._factor_cache) > _FACTOR_RETURNS_KEPT:
+                self._factor_cache.popitem(last=False)
 
     def _factor_pipeline(
         self, manifest: RunManifest

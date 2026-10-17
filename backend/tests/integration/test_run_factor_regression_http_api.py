@@ -1,8 +1,10 @@
 """팩터 회귀 조회(검증 랩 V4-05)의 HTTP 응답 모양과 기존 완료 결과 오류 경계."""
 
 import hashlib
+import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +19,19 @@ from tests.integration.test_account_report_http_api import _client, _input_resul
 from tests.integration.test_trial_ledger_http_api import _saved_run
 
 
+def _settled(client: TestClient, path: str, *, timeout_s: float = 30.0) -> dict[str, Any]:
+    """팩터 수익률은 뒤에서 계산한다 — "계산 중"이 아닌 응답이 올 때까지 다시 묻는다."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        body: dict[str, Any] = response.json()
+        if body["report"]["unavailable_reason"] != "computing":
+            return body
+        assert time.monotonic() < deadline, f"factor returns still computing — path={path}"
+        time.sleep(0.05)
+
+
 def test_saved_mock_run_reports_counts_reason_and_lineage_threshold() -> None:
     client = TestClient(build_http_app())
     request = _saved_run(client)
@@ -26,9 +41,14 @@ def test_saved_mock_run_reports_counts_reason_and_lineage_threshold() -> None:
     assert wait_for_terminal_state(client, run_id)["status"] == "completed"
     path = f"/api/v1/backtests/{run_id}"
     original = client.get(path + "/result").json()
-    response = client.get(path + "/factor-regression")
-    assert response.status_code == 200, response.text
-    body = response.json()
+    first = client.get(path + "/factor-regression")
+    assert first.status_code == 200, first.text
+    # 처음 조회는 기다리지 않는다 — 뒤에서 계산을 걸고 "계산 중"이거나 이미 끝난 값이다.
+    assert first.json()["report"]["unavailable_reason"] in {
+        "computing",
+        "insufficient_observations",
+    }
+    body = _settled(client, path + "/factor-regression")
     assert body["run_id"] == run_id
     assert body["run_fingerprint"] == original["manifest"]["run_fingerprint"]
     assert body["data_snapshot_id"] == original["manifest"]["data_snapshot_id"]
@@ -51,11 +71,9 @@ def test_saved_mock_run_reports_counts_reason_and_lineage_threshold() -> None:
 def test_result_from_another_data_snapshot_is_not_regressed(tmp_path: Path) -> None:
     result = _input_result()
     _seed(tmp_path, result)
-    response = _client(tmp_path).get(
-        f"/api/v1/backtests/{result.manifest.run_id}/factor-regression"
+    body = _settled(
+        _client(tmp_path), f"/api/v1/backtests/{result.manifest.run_id}/factor-regression"
     )
-    assert response.status_code == 200, response.text
-    body = response.json()
     assert body["data_snapshot_id"] == result.manifest.data_snapshot_id
     assert body["report"]["unavailable_reason"] == "data_snapshot_changed"
     assert body["trial_count"] is None

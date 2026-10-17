@@ -51,12 +51,16 @@ __all__ = [
     "FactorRegressionFit",
     "FactorRegressionReport",
     "FactorRegressionUnavailableReason",
+    "FactorReturnSeries",
     "FactorSecurityPeriod",
+    "GappedFactorPeriod",
     "HacRegression",
     "StrategyPeriodReturn",
     "factor_period_returns",
+    "factor_return_series",
     "newey_west_lag",
     "newey_west_regression",
+    "regress_on_factor_returns",
     "regress_on_factors",
     "unavailable_factor_regression",
 ]
@@ -145,6 +149,33 @@ class FactorPeriodReturns:
             FactorKind.VALUE: self.value,
             FactorKind.MOMENTUM: self.momentum,
         }[kind]
+
+
+@dataclass(frozen=True)
+class GappedFactorPeriod:
+    """팩터 수익률을 낼 수 없는 구간과 그 사유."""
+
+    start: date
+    end: date
+    gap: FactorPeriodGap
+
+
+# 구간마다 팩터 수익률 또는 빈 사유. 전략과 무관하다 — 같은 실행 설정·데이터 판이면 어느 전략의
+# 회귀에도 같은 값이라 application 이 한 번 계산해 두고 다시 쓴다.
+FactorReturnSeries = tuple["FactorPeriodReturns | GappedFactorPeriod", ...]
+
+
+def factor_return_series(periods: Sequence[FactorPeriodInput]) -> FactorReturnSeries:
+    """구간 단면마다 `factor_period_returns`."""
+    series: list[FactorPeriodReturns | GappedFactorPeriod] = []
+    for period in periods:
+        outcome = factor_period_returns(period)
+        series.append(
+            GappedFactorPeriod(period.start, period.end, outcome)
+            if isinstance(outcome, FactorPeriodGap)
+            else outcome
+        )
+    return tuple(series)
 
 
 @dataclass(frozen=True)
@@ -369,6 +400,11 @@ class FactorRegressionUnavailableReason(StrEnum):
     DATA_SNAPSHOT_CHANGED = "data_snapshot_changed"
     # 팩터를 만들 원천 관측을 읽지 못했다(application 판정).
     DATA_UNAVAILABLE = "data_unavailable"
+    # 팩터 수익률을 아직 계산하는 중이다(application 판정 — 유니버스 단면이 무거워 뒤에서 돈다).
+    # 다시 조회하면 채워진다.
+    COMPUTING = "computing"
+    # 팩터 수익률 계산이 예상 밖 오류로 멈췄다(서버 로그). 다시 조회하면 다시 계산한다.
+    COMPUTATION_FAILED = "computation_failed"
 
 
 @dataclass(frozen=True)
@@ -440,16 +476,32 @@ def regress_on_factors(
     annualization_days: int,
 ) -> FactorRegressionReport:
     """전략 구간 수익률을 같은 (start, end) 의 팩터 수익률에 회귀한다(모듈 docstring)."""
+    return regress_on_factor_returns(
+        strategy, factor_return_series(periods), annualization_days=annualization_days
+    )
+
+
+def regress_on_factor_returns(
+    strategy: Sequence[StrategyPeriodReturn],
+    series: FactorReturnSeries,
+    *,
+    annualization_days: int,
+) -> FactorRegressionReport:
+    """`regress_on_factors` 를 이미 계산한 팩터 수익률(`factor_return_series`)로."""
     if annualization_days <= 0:
         raise ValueError(f"annualization_days must be positive — got {annualization_days}")
-    by_interval = {(period.start, period.end): period for period in periods}
+    by_interval = {(item.start, item.end): item for item in series}
     gaps: dict[FactorPeriodGap, int] = {}
     response: list[float] = []
     columns: list[list[float]] = [[] for _ in _FACTOR_ORDER]
     for item in sorted(strategy, key=lambda point: point.start):
-        period = by_interval.get((item.start, item.end))
+        found = by_interval.get((item.start, item.end))
         outcome = (
-            FactorPeriodGap.NO_FACTOR_PERIOD if period is None else factor_period_returns(period)
+            FactorPeriodGap.NO_FACTOR_PERIOD
+            if found is None
+            else found.gap
+            if isinstance(found, GappedFactorPeriod)
+            else found
         )
         if isinstance(outcome, FactorPeriodGap):
             gaps[outcome] = gaps.get(outcome, 0) + 1

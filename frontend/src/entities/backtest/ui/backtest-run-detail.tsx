@@ -144,9 +144,12 @@ export const BacktestRunDetail = ({
   result,
   environmentFields = null,
   accountReport,
+  validationReport,
 }: {
   result: BacktestRunResult;
   accountReport?: ReactNode;
+  /** 현재 계열 검증 조회는 page가 소유하며 원본 결과와 별도 영역에 조합한다. */
+  validationReport?: ReactNode;
   /** 실행 설정 스키마의 칸. page 가 스키마 query 에서 넘긴다. 없으면 기록된 키 그대로 보인다. */
   environmentFields?: readonly RunEnvironmentField[] | null;
 }) => {
@@ -194,6 +197,9 @@ export const BacktestRunDetail = ({
         className="run-detail__navigation"
         aria-label={t("backtest.result.navigation")}
       >
+        {validationReport ? (
+          <a href={`#${titleId}-validation`}>{t("backtest.validation.title")}</a>
+        ) : null}
         {accountReport ? (
           <a href={`#${titleId}-account`}>{t("backtest.account.title")}</a>
         ) : null}
@@ -210,6 +216,16 @@ export const BacktestRunDetail = ({
           {t("backtest.result.manifest")}
         </a>
       </nav>
+
+      {validationReport ? (
+        <section
+          id={`${titleId}-validation`}
+          tabIndex={-1}
+          aria-label={t("backtest.validation.title")}
+        >
+          {validationReport}
+        </section>
+      ) : null}
 
       {accountReport ? (
         <section

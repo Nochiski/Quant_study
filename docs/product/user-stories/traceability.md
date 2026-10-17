@@ -21,9 +21,9 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
 | 김철수 | 7 | 0 | 5 | 1 | 13 |
-| 정동민 | 9 | 0 | 2 | 0 | 11 |
+| 정동민 | 10 | 0 | 2 | 0 | 12 |
 | 한상목 | 15 | 0 | 0 | 1 | 16 |
-| 합계 | 31 | 0 | 7 | 2 | 40 |
+| 합계 | 32 | 0 | 7 | 2 | 41 |
 
 ### 스토리별 추적
 
@@ -51,8 +51,9 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-07 | 정동민 | 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 12-1 모멘텀을 만들어 정본 hash로 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 거래대금 상위 20%와 모멘텀을 만들어 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 변동성 역가중을 만들고 참조 이름을 한 번에 되돌린다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 이평 돌파와 선언형 보조 모멘텀을 만들어 백테스트한다<br>`frontend/e2e/stories/graph-ideas.spec.ts` :: 그래프만으로 저PBR·고ROE와 자본총계 필터를 만들어 백테스트한다 |
 | US-DM-08 | 정동민 | 백테스트 결과를 AI에게 쉬운 말로 풀어 달라고 한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-explain.spec.ts` :: US-DM-08 완료된 백테스트 결과에서 AI에게 좋은 결과인지 물으면 지표 뜻과 벤치마크 비교를 쉬운 말로 답한다 |
 | US-DM-09 | 정동민 | AI 제안을 적용한 뒤 버튼 한 번으로 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다 |
-| US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `예정` | V5-02 | V5-02 | — |
+| US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 1440px에서 원래 통계·키보드 근거·조회 오류를 구별한다<br>`frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 360px에서 원래 통계·키보드 근거·조회 오류를 구별한다 |
 | US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `예정` | V3-05, V5-02 | V5-02 | — |
+| US-DM-12 | 정동민 | AI 결과 설명에서 검증 근거와 한계를 함께 본다 | `예정` | V5-02 | V5-02 | — |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |

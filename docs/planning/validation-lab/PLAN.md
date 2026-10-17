@@ -1,12 +1,12 @@
 ---
 plan_version: 1
 project: validation-lab
-project_status: WAITING
-current_phase: V4
-current_pr: V4-05
-active_prs: []
+project_status: IN_PROGRESS
+current_phase: V5
+current_pr: V5-02
+active_prs: [V5-02]
 parallel_window: [V4-05, V5-02, V6-01]
-last_updated: 2026-10-14T03:42:04+09:00
+last_updated: 2026-10-17T12:55:43+09:00
 planned_prs: 28
 merged_prs: 21
 approved_prs: 21
@@ -23,19 +23,26 @@ progress_percent: 75
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `WAITING` |
-| Current phase | `V4` |
-| Current/next PR | `V4-05` |
-| Active PR | none |
+| Project status | `IN_PROGRESS` |
+| Current phase | `V5` |
+| Current/next PR | `V5-02` |
+| Active PR | `V5-02` |
 | Progress | `21 / 28 merged (75%)` |
 | Approved | `21 / 28` |
-| Aggregated at | `2026-10-14 03:42 KST` |
+| Aggregated at | `2026-10-17 12:55 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
-[update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
+[공용 Python progress 도구](../../../tools/quant_study_dev/plan_progress.py)가 생성하며 직접 수정하지 않는다.
+기존 PowerShell wrapper는 호환용으로 유지한다.
 
 ## 현재 결정
+
+- 2026-10-17 사용자: UI 정리 뒤 다음 로드맵 작업을 재개하고 전체 잔여량을 확인한다. 첫 범위는
+  [V5-02 실행 검증 카드](./V5-02-run-validation-card.md)(US-DM-10)다. 좋은 백테스트 숫자만 보고
+  투입하지 않도록 저장된 PSR·현재 계열 DSR·N·계산 근거·부재 이유를 읽게 한다. 최종 비용 후
+  수익 목표와 S03 신호/S04 계좌 성과 검증은 별도이며 이번 mock 구현을 실자료 수익 검증 완료로
+  올리지 않는다. AI 검증 요약은 US-DM-12에 보존하고 V5-02 전체는 계속 미완료다.
 
 - 2026-09-29 제품 소유자: 검증 랩 UI/UX 기획(디자인보드)을 승인하고 전체 앱 UX·lang2 정합 보강을 지시했다.
 - 2026-09-29 제품 소유자: 전략 계열 = `strategy_id` + 계보 상속, 초기화 불가·합치기만(spec D2).
@@ -72,7 +79,7 @@ progress_percent: 75
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 5 | `MERGED` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 4 | `WAITING` |
-| V5 | Screens (after lang2 merge signal) | 7 | 3 | `WAITING` |
+| V5 | Screens (after lang2 merge signal) | 7 | 3 | `IN_PROGRESS` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
 | **Total** |  | **28** | **21** | **75%** |
 <!-- PLAN:PHASES:END -->
@@ -126,7 +133,7 @@ progress_percent: 75
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `MERGED` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
-| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
+| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `IN_PROGRESS` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), `feat/run-validation-card`. backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 잔여: AI 검증 요약(US-DM-12), 스트레스/튼튼한지 확인하기 실행, WF 곡선·US-CS-09, 추적·미리보기 parameter_values. 전체 V5-02 미완료 |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `MERGED` | [#345](https://github.com/Nochiski/Quant_study/pull/345) · main 머지 `ebf2a6ea`(2026-09-30) |
@@ -142,7 +149,16 @@ progress_percent: 75
 
 ## 현재 작업 Packet
 
-- V0-01: 이 패키지·spec·유저 스토리 등록. 브랜치 `docs/validation-lab-plan`, base main `f49e0afd`.
+- V5-02 첫 slice: `feat/run-validation-card`, base main `bc8f3030`.
+  [계약·의도·잔여 범위](./V5-02-run-validation-card.md)를 정본으로 삼는다. 기존 계산 owner·불변
+  결과/후보 선택 스냅숏·계열 N 규칙을 보존한 별도 읽기 전용 report GET/SDK와 US-DM-10 카드를 구현했다.
+- 확인된 backend 전체: 4820 passed, 1 skipped(기존 live opt-in), 34 warnings, 약 199초.
+  관련 domain/application/HTTP·원장/선택·architecture 150 passed는 전체에 포함하므로 합산하지 않는다.
+  frontend 전체 111 files/1434 passed(83.21초), 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초)를 확인했다.
+  root가 기본 카드·계산 근거 PNG 4장을 직접 검토했고 독립 리뷰의 확정 P1/P2는 없었다.
+  이 문서는 로컬 검증 기록이며 공식 CI·머지 상태는 해당 PR의 checks·merge 기록에서 확인한다.
+- 남은 V5-02: AI 검증 요약(US-DM-12), 스트레스/튼튼한지 확인하기 실행, 워크포워드 곡선과
+  US-CS-09 전용 검증, 추적·미리보기 parameter_values. 분모 28·완료 21과 V5-02 미완료 표시는 유지한다.
 
 ## Review 기록
 
@@ -152,9 +168,17 @@ progress_percent: 75
 
 ## 변경 기록
 
+- 2026-10-17: V5-02 첫 검증 카드 slice를 `IN_PROGRESS`로 인계하고 전체 미완료 범위를 명시.
+
 - 2026-09-29: 패키지 생성(V0-01).
 
 ## 갱신 절차
 
-PR 상태를 바꾼 뒤 `powershell -File docs/planning/validation-lab/tools/update-plan-progress.ps1`을 돌리고,
-`-Check`로 집계가 최신인지 확인한다.
+PR 상태를 바꾼 뒤 저장소 루트에서 공용 도구로 집계를 갱신하고 검사한다.
+
+```bash
+uv run --no-sync python -m quant_study_dev.plan_progress --profile validation-lab
+uv run --no-sync python -m quant_study_dev.plan_progress --profile validation-lab --check
+```
+
+기존 PowerShell wrapper는 호환용이며 삭제하지 않는다.

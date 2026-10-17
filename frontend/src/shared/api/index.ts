@@ -61,6 +61,7 @@ export {
   type AccountReportStatus,
   type AccountReportSummary,
   type AccountReportProvenance,
+  type RunValidationReport,
   type ApplicableWhen,
   type BacktestRunResult,
   type BacktestRunSpec,

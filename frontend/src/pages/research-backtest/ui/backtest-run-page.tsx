@@ -4,7 +4,9 @@ import { useId, useRef, useState } from "react";
 
 import {
   BacktestAccountReport,
+  BacktestValidationReport,
   useBacktestAccountReport,
+  useBacktestValidationReport,
   BacktestResultFailure,
   BacktestRunDetail,
   BacktestRunFailure,
@@ -41,6 +43,7 @@ export const BacktestRunPage = () => {
   const summary = useBacktestSummary(runId);
   const completed = status.data?.status === "completed";
   const result = useBacktestResult(runId, completed);
+  const validationReport = useBacktestValidationReport(runId, completed && result.data !== undefined);
   const accountReport = useBacktestAccountReport(runId, completed);
   // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
   const runEnvironmentSchema = useRunEnvironmentSchema();
@@ -161,6 +164,15 @@ export const BacktestRunPage = () => {
         {result.data ? (
           <BacktestRunDetail
             result={result.data}
+            validationReport={
+              <BacktestValidationReport
+                report={validationReport.data}
+                error={validationReport.error}
+                loading={validationReport.isPending}
+                fetching={validationReport.isFetching}
+                refresh={() => { void validationReport.refresh(); }}
+              />
+            }
             accountReport={
               <BacktestAccountReport
                 report={accountReport.data}

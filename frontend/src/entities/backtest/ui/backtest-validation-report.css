@@ -1,0 +1,83 @@
+.validation-report {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-raised);
+  overflow-wrap: anywhere;
+  font-size: var(--text-size-body);
+}
+
+.validation-report__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.validation-report h4 {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+}
+
+.validation-report h5 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.validation-report p {
+  margin-block: var(--space-2);
+}
+
+.validation-report__statistics,
+.validation-report__evidence {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-block: var(--space-4);
+}
+
+.validation-report__statistics > section,
+.validation-report__evidence > div {
+  min-width: 0;
+}
+
+.validation-report__value {
+  margin-block: var(--space-2);
+  font-size: var(--text-size-section-title);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.validation-report__evidence dt,
+.validation-report__observed {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.validation-report__evidence dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-size-body);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: pre-wrap;
+}
+
+.validation-report__warning {
+  padding: var(--space-3);
+  border-left: 3px solid var(--status-warn);
+  background: var(--status-warn-soft);
+}
+
+.validation-report > details > summary {
+  min-height: var(--control-height);
+  padding-block: var(--space-2);
+}
+
+@media (max-width: 600px) {
+  .validation-report__statistics,
+  .validation-report__evidence {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

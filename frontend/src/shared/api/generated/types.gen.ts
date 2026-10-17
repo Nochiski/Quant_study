@@ -1978,6 +1978,110 @@ export type DatasetRevision = {
 };
 
 /**
+ * DeflatedSharpeEvidence
+ *
+ * 조회한 계열 원장을 근거로 한 세션 단위 통계.
+ *
+ * 원래 실행 결과·선택 당시 스냅숏을 변경하지 않는다. 대표 행 자체는 기존 원장 조회가 제공한다.
+ * 판본 목록과 미상 수는 분산에 쓰는 대표 샤프가 있는 시도만 대상으로 한다.
+ */
+export type DeflatedSharpeEvidence = {
+  /**
+   * Annualization Days
+   *
+   * 해당 실행에 기록된 연환산 거래일.
+   */
+  annualization_days: number;
+  /**
+   * Expected Maximum Sharpe
+   *
+   * 계산한 운 기준선 SR₀(세션 단위). N=1이면 0, 계산 전 부재 판정이면 null이다.
+   */
+  expected_maximum_sharpe: number | null;
+  /**
+   * Lineage Id
+   *
+   * 계열 합치기를 해소한 생존 계열. 계열 없는 초안은 null이다.
+   */
+  lineage_id: string | null;
+  /**
+   * Merged Lineage Ids
+   *
+   * 이 생존 계열에 합쳐진 계열 식별자.
+   */
+  merged_lineage_ids: Array<string>;
+  /**
+   * Registry Mixed
+   *
+   * 알려진 대표 판본들과 해당 실행 판본을 합친 집합에 둘 이상 판본이 있는지 여부.
+   */
+  registry_mixed: boolean;
+  /**
+   * Representative Count
+   *
+   * 샤프가 있는 시도 대표 자료 수. N과 다를 수 있으며 재확인 실행은 포함하지 않는다.
+   */
+  representative_count: number;
+  /**
+   * Representative Registry Versions
+   *
+   * 대표 샤프가 있는 시도들의 알려진 지표 판본 집합(정렬). 현재 실행의 판본 목록이 아니다.
+   */
+  representative_registry_versions: Array<string>;
+  /**
+   * Session Sharpe
+   *
+   * 해당 실행의 FULL 연율 샤프를 연환산 거래일로 환산한 세션 샤프. 계산하지 않았으면 null이다.
+   */
+  session_sharpe: number | null;
+  /**
+   * Session Standard Error
+   *
+   * 같은 실행의 FULL 샤프 표준오차를 환산한 세션 단위 값. 계산하지 않았으면 null이다.
+   */
+  session_standard_error: number | null;
+  /**
+   * Trial Count
+   *
+   * 현재 계열 원장의 시도 수 N. 재확인/결과 없음은 제외하고 파산 시도는 포함한다. 계열이 없으면 null이다.
+   */
+  trial_count: number | null;
+  /**
+   * Trial Sharpe Variance
+   *
+   * 계산한 대표 세션 샤프의 표본분산(n−1). N=1이면 0, 계산 전 부재 판정이면 null이다.
+   */
+  trial_sharpe_variance: number | null;
+  /**
+   * 값이 없을 때의 단일 판정 사유. 값이 있으면 null이다.
+   */
+  unavailable_reason: DeflatedSharpeUnavailableReason | null;
+  /**
+   * Unknown Registry Count
+   *
+   * 대표 샤프가 있지만 지표 판본이 기록되지 않은 시도 수. 판본 일치를 추측하지 않는다.
+   */
+  unknown_registry_count: number;
+  /**
+   * Value
+   *
+   * 현재 계열 원장으로 계산한 DSR(0~1). 저장된 PSR이나 후보 선택 당시 스냅숏이 아니다.
+   */
+  value: number | null;
+};
+
+/**
+ * DeflatedSharpeUnavailableReason
+ */
+export type DeflatedSharpeUnavailableReason =
+  | "no_lineage"
+  | "no_counted_trials"
+  | "sharpe_unavailable"
+  | "standard_error_unavailable"
+  | "nonpositive_standard_error"
+  | "insufficient_representatives";
+
+/**
  * DiagnosticAnchor
  *
  * 진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.
@@ -5268,6 +5372,37 @@ export type RunStatus =
   | "cancelled"
   | "completed"
   | "failed";
+
+/**
+ * RunValidationReport
+ *
+ * PSR은 저장된 FULL 지표(없으면 미기록), DSR은 observed_at에 조회한 원장 기준이다.
+ */
+export type RunValidationReport = {
+  dsr: DeflatedSharpeEvidence;
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version: string;
+  /**
+   * Observed At
+   *
+   * application 시계로 기록한 현재 계열 원장 조회 시점. 완료/선택 시각이 아니며 동시 쓰기와의 DB 스냅숏 격리를 추가하지 않는다.
+   */
+  observed_at: string;
+  /**
+   * 저장된 FULL PSR MetricValue 그대로. null은 미기록이고 MetricValue.value null은 원래 부재 사유를 따른다. 재계산하지 않는다.
+   */
+  psr: MetricValue | null;
+  /**
+   * Run Fingerprint
+   */
+  run_fingerprint: string;
+  /**
+   * Run Id
+   */
+  run_id: string;
+};
 
 /**
  * SaveDocumentRequest
@@ -8651,6 +8786,50 @@ export type GetBacktestSummaryResponses = {
 
 export type GetBacktestSummaryResponse =
   GetBacktestSummaryResponses[keyof GetBacktestSummaryResponses];
+
+export type GetBacktestValidationReportData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/validation-report";
+};
+
+export type GetBacktestValidationReportErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestValidationReportError =
+  GetBacktestValidationReportErrors[keyof GetBacktestValidationReportErrors];
+
+export type GetBacktestValidationReportResponses = {
+  /**
+   * Successful Response
+   */
+  200: RunValidationReport;
+};
+
+export type GetBacktestValidationReportResponse =
+  GetBacktestValidationReportResponses[keyof GetBacktestValidationReportResponses];
 
 export type GetContinuousAccountData = {
   body?: never;

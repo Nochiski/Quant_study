@@ -133,6 +133,10 @@ const server = setupServer(
   http.get(`${API}/api/v1/backtests/:runId/account-report`, () =>
     HttpResponse.json({ detail: { code: "backtest.result.unreadable" } }, { status: 410 }),
   ),
+  // AI 설명 회귀에서는 검증 조회 실패도 기존 결과 읽기와 대화를 막지 않는다.
+  http.get(`${API}/api/v1/backtests/:runId/validation-report`, () =>
+    HttpResponse.json({}, { status: 503 }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () =>
     HttpResponse.json(resultFixture()),
   ),

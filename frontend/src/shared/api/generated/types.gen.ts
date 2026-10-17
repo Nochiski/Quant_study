@@ -2591,8 +2591,11 @@ export type ExperimentErrorDetail = {
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
     | "experiment.not_found"
+    | "experiment.robustness.not_single"
     | "experiment.robustness.period_too_short"
     | "experiment.robustness.run_not_found"
+    | "experiment.robustness.running"
+    | "experiment.robustness.too_many_parameters"
     | "experiment.search.invalid_constraint"
     | "experiment.search.invalid_values"
     | "experiment.search.no_feasible_point"
@@ -8986,9 +8989,11 @@ export type CreateRobustnessCheckErrors = {
    */
   404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
   /**
-   * The base revision hash differs from the expected hash
+   * Response 409 Createrobustnesscheck
+   *
+   * A check of this run is still running, or the base revision is stale
    */
-  409: BacktestStrategyStaleResponse;
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
   /**
    * A coded experiment design or base run diagnostic
    */
@@ -9028,9 +9033,11 @@ export type PreviewRobustnessCheckErrors = {
    */
   404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
   /**
-   * The base revision hash differs from the expected hash
+   * Response 409 Previewrobustnesscheck
+   *
+   * A check of this run is still running, or the base revision is stale
    */
-  409: BacktestStrategyStaleResponse;
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
   /**
    * A coded experiment design or base run diagnostic
    */

@@ -3887,6 +3887,13 @@ export type MonthlyReturnPoint = {
 };
 
 /**
+ * NoRecommendation
+ *
+ * 추천 칸이 없는 이유. 화면은 번역만 한다.
+ */
+export type NoRecommendation = "no_scored_cell" | "non_positive_score";
+
+/**
  * NodeContract
  */
 export type NodeContract = {
@@ -4126,6 +4133,7 @@ export type ParameterMap = {
    * Cells
    */
   cells: Array<CellPlateau>;
+  no_recommendation?: NoRecommendation | null;
 };
 
 /**

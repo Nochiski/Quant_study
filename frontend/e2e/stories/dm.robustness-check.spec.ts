@@ -12,6 +12,7 @@ import { expect, test } from "@playwright/test";
 import {
   createStrategyDocument,
   getBacktestStatus,
+  getExperimentParameterMap,
   getExperimentWalkForward,
   listRobustnessChecks,
   startBacktest,
@@ -64,7 +65,7 @@ const ENVIRONMENT = {
 };
 
 test(
-  "US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보가 카드에 채워진다",
+  "US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보(또는 추천하지 않는 이유)가 카드에 채워진다",
   { tag: ["@story", "@US-DM-11", "@US-CS-09"] },
   async ({ page }) => {
     test.setTimeout(300_000);
@@ -157,7 +158,9 @@ test(
     );
 
     // 실험이 끝나면 두 항목이 채워진다. 표본 밖 샤프·유지율은 서버 워크포워드 보고의 값 그대로다.
-    await expect(plateau).toContainText("추천 후보", { timeout: 240_000 });
+    await expect(plateau).toContainText("추천할 설정이 없어요", {
+      timeout: 240_000,
+    });
     const [check] = requireData(
       (
         await listRobustnessChecks({
@@ -196,7 +199,24 @@ test(
     await expect(
       outOfSample.getByRole("img", { name: /검증 구간만 이어 붙인 곡선/u }),
     ).toBeVisible();
-    await expect(plateau).toContainText(/추천 후보: scale [01]/u);
+    // 추천은 칸 점수·고원 점수가 모두 양수인 칸만이다. mock 자료는 두 칸 학습 샤프가 0 이하라 추천하지
+    // 않고, 화면은 서버가 준 이유를 말한다(실데이터 확인 2026-10-17 후속 4).
+    const map = requireData(
+      (
+        await getExperimentParameterMap({
+          client: apiClient,
+          path: { experiment_id: check?.record.experiment_id ?? "" },
+        })
+      ).data,
+      "read parameter map",
+    );
+    expect(map.no_recommendation).toBe("non_positive_score");
+    expect(map.cells.some((cell) => cell.verdict === "recommended")).toBe(
+      false,
+    );
+    await expect(plateau).toContainText(
+      "추천할 설정이 없어요. 후보가 될 칸(점수가 난 이웃이 있는 칸)의 학습 샤프나 그 이웃 평균이 모두 0 이하예요",
+    );
     await expect(
       card.getByRole("button", { name: "튼튼한지 확인하기" }),
     ).toHaveCount(0);

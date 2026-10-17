@@ -1,6 +1,7 @@
 import type {
   Experiment,
   ExperimentTrialState,
+  ParameterMap,
   WalkForwardReport,
 } from "../../../shared/api";
 import { t, tFill, type MessageKey } from "../../../shared/config";
@@ -74,3 +75,21 @@ export const retentionGapLabel = (
     : tFill(RETENTION_GAP[report.retention_gap], {
         mean: report.train_sharpe_mean?.toFixed(4) ?? "—",
       });
+
+type NoRecommendation = NonNullable<ParameterMap["no_recommendation"]>;
+
+// 파라미터 지도에 추천 칸이 없는 이유(backend `NoRecommendation`). 화면은 번역만 한다.
+const NO_RECOMMENDATION: Record<NoRecommendation, MessageKey> = {
+  no_scored_cell: "experiments.noRecommendation.no_scored_cell",
+  non_positive_score: "experiments.noRecommendation.non_positive_score",
+};
+
+/** 추천 칸이 없는 이유 문장. 이유 칸이 없는 옛 서버면 일반 문장이다. */
+export const noRecommendationLabel = (
+  reason: ParameterMap["no_recommendation"],
+): string =>
+  t(
+    reason == null
+      ? "experiments.noRecommendation.unknown"
+      : NO_RECOMMENDATION[reason],
+  );

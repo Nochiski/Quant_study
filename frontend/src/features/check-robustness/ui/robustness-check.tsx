@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { LineChart } from "../../../entities/backtest";
 import {
   experimentParameterMapQuery,
+  noRecommendationLabel,
   experimentStatusLabel,
   experimentWalkForwardQuery,
   robustnessChecksQuery,
@@ -249,7 +250,7 @@ const Plateau = ({ experiment }: { experiment: Experiment }) => {
     );
     content =
       recommended === undefined ? (
-        <p>{t("backtest.robustness.noRecommendation")}</p>
+        <p>{noRecommendationLabel(map.data.no_recommendation)}</p>
       ) : (
         <>
           <p className="robustness-check__value">

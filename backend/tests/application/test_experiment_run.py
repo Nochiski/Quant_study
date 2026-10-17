@@ -527,6 +527,19 @@ def test_a_selection_keeps_the_lineage_snapshot_it_was_made_with() -> None:
     assert service.get(experiment_id).selections == (selection,)
 
 
+def test_run_selections_are_the_selections_of_trials_that_ran_as_that_run() -> None:
+    """US-DM-12: 결과 설명은 그 실행으로 끝난 trial 의 선택 기록만 읽는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    _finish(runs, {f"run-{index}": _result() for index in range(4)})
+    selection = service.select(experiment_id, 2, "학습 샤프가 가장 높다")
+
+    assert service.run_selections(experiment_id, "run-2") == (selection,)
+    assert service.run_selections(experiment_id, "run-0") == ()
+    assert service.run_selections(experiment_id, "run-unknown") == ()
+
+
 def test_a_selection_recorded_before_the_snapshot_reads_without_one(tmp_path: Path) -> None:
     """V4-02 이전 서버가 쓴 선택 기록(스냅숏 칸 없음)은 칸이 비어 읽힌다."""
     runs = _FakeRuns()

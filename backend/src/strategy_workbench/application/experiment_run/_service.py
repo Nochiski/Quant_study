@@ -421,6 +421,22 @@ class ExperimentRunService:
             self._start(record, base, state.trial, attempt=len(state.attempts) + 1)
             return self._trial_state(record, trial_index)
 
+    def run_selections(self, experiment_id: str, run_id: str) -> tuple[ExperimentSelection, ...]:
+        """이 실행으로 끝난 trial 을 고른 선택 기록(검증 근거 US-DM-12). 없으면 빈 튜플.
+
+        trial 의 실행은 마지막 attempt 의 실행이다 — 고를 수 있는 trial 은 마지막 attempt 가 완료된
+        trial 이라 그 실행이 고른 결과다.
+        """
+        latest: dict[int, str | None] = {}
+        for attempt in self._repository.attempts(experiment_id):
+            latest[attempt.trial_index] = attempt.run_id
+        trials = {index for index, latest_run in latest.items() if latest_run == run_id}
+        return tuple(
+            selection
+            for selection in self._repository.selections(experiment_id)
+            if selection.trial_index in trials
+        )
+
     def select(self, experiment_id: str, trial_index: int, reason: str) -> ExperimentSelection:
         """끝난 trial 을 후보로 고른 기록을 남긴다(spec D9).
 

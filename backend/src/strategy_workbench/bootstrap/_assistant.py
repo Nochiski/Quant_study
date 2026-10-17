@@ -52,7 +52,11 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
 )
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.context import AssistantContextBuilder
-from strategy_workbench.application.assistant_chat.facade.ports import LlmProviderPort
+from strategy_workbench.application.assistant_chat.facade.ports import (
+    LlmProviderPort,
+    ResultSelectionSnapshot,
+    ResultValidationFacts,
+)
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
@@ -63,6 +67,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
+from strategy_workbench.application.experiment_run.facade.experiments import ExperimentRunService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
     StrategyAuthoringService,
@@ -325,6 +330,7 @@ def build_assistant_services(
     factor_registry: FactorRegistry,
     strategy_authoring: StrategyAuthoringService,
     backtest_runs: BacktestRunService,
+    experiments: ExperimentRunService | None = None,
     today: Callable[[], date] = date.today,
 ) -> AssistantServices:
     """프로파일·세션 저장소부터 턴 러너까지 한 그래프로 묶는다.
@@ -357,7 +363,7 @@ def build_assistant_services(
         equity_data=equity_data,
         factor_registry=factor_registry,
         compiler=compiler,
-        backtest_results=_RunServiceBacktestResults(backtest_runs),
+        backtest_results=_RunServiceBacktestResults(backtest_runs, experiments),
         today=today,
     )
     chat = AssistantChatService(
@@ -412,20 +418,55 @@ class _RunServiceBacktestResults:
     `_AuthoringStrategyCompiler`와 같은 모양이다. 어시스턴트가 `backtest_run` 유스케이스를
     import하지 않도록 bootstrap이 감싼다. "없음"·"아직 안 끝남"·"결과 파일을 못 읽음"을 None 하나로
     접는 것만 한다 — 어시스턴트 쪽 대응이 같다(설명할 결과가 없다).
+
+    검증 근거(US-DM-12)는 결과 검증 카드와 같은 `validation_report` 와, 실행을 소유한 실험의 선택
+    기록(`run_selections`)을 옮긴다. 실험이 없는 조립(테스트)이면 선택 스냅숏은 비어 있다.
     """
 
-    def __init__(self, runs: BacktestRunService) -> None:
+    def __init__(
+        self, runs: BacktestRunService, experiments: ExperimentRunService | None = None
+    ) -> None:
         self._runs = runs
+        self._experiments = experiments
 
     def completed_result(self, run_id: str) -> BacktestRunResult | None:
         try:
             return self._runs.result(run_id)
-        except (
-            BacktestRunNotFoundError,
-            BacktestResultNotReadyError,
-            BacktestArtifactUnreadableError,
-        ):
+        except _RESULT_UNAVAILABLE:
             return None
+
+    def validation_facts(self, run_id: str) -> ResultValidationFacts | None:
+        try:
+            report = self._runs.validation_report(run_id)
+            experiment_id = self._runs.summary(run_id).experiment_id
+        except _RESULT_UNAVAILABLE:
+            return None
+        selections = (
+            ()
+            if self._experiments is None or experiment_id is None
+            else self._experiments.run_selections(experiment_id, run_id)
+        )
+        return ResultValidationFacts(
+            observed_at=report.observed_at,
+            deflated_sharpe=report.dsr,
+            selections=tuple(
+                ResultSelectionSnapshot(
+                    experiment_id=item.experiment_id,
+                    selected_at=item.selected_at,
+                    trial_count=item.trial_count,
+                    deflated_sharpe=item.deflated_sharpe,
+                    ledger_representative_sharpe=item.ledger_representative_sharpe,
+                )
+                for item in selections
+            ),
+        )
+
+
+_RESULT_UNAVAILABLE = (
+    BacktestRunNotFoundError,
+    BacktestResultNotReadyError,
+    BacktestArtifactUnreadableError,
+)
 
 
 def _now() -> datetime:

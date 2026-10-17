@@ -60,7 +60,7 @@ from strategy_workbench.domain.assistant.facade.tools import (
     RESULT_EXPLAIN_TOOLS,
 )
 
-from .assistant_result_samples import sample_backtest_result
+from .assistant_result_samples import sample_backtest_result, sample_validation_facts
 
 CURRENT_SOURCE = 'title: "원래 제목"\nportfolio:\n  selection_count: 20\n'
 
@@ -460,6 +460,44 @@ def test_the_result_scenario_explains_the_numbers_the_server_summarised() -> Non
     assert "최대 낙폭(Maximum drawdown)은 -22.31%입니다." in answer
     assert answer.endswith("과거 결과가 앞으로의 수익을 보장하지는 않습니다.")
     assert isinstance(events[-1], Done)
+
+
+def test_the_result_scenario_separates_current_ledger_and_selection_time_evidence() -> None:
+    """US-DM-12: 검증 근거의 원래 수치와 시점을 요약에서 읽어 나눠 말한다."""
+    summary = summarize_backtest_result(
+        sample_backtest_result(), validation=sample_validation_facts()
+    )
+
+    answer = _answer(list(result_explanation(_SummaryTool(summary))))
+
+    assert "PSR(probabilistic_sharpe)은 97.21%입니다." in answer
+    assert "앞으로 벌 확률은 아닙니다" in answer
+    assert (
+        "지금 계열 원장(2026-09-01T09:30:00+00:00 조회) 기준 시도 수 N=3, DSR은 61.43%입니다."
+        in answer
+    )
+    assert (
+        "후보로 고를 당시(2026-08-20T14:00:00+00:00) 기록은 시도 수 N=2, DSR 70.12%였습니다."
+        in answer
+    )
+    assert answer.endswith("과거 결과가 앞으로의 수익을 보장하지는 않습니다.")
+
+
+def test_the_result_scenario_names_why_validation_values_are_missing() -> None:
+    summary = json.loads(
+        summarize_backtest_result(sample_backtest_result(), validation=sample_validation_facts())
+    )
+    ledger = summary["validation"]["current_ledger"]
+    ledger.update(deflated_sharpe=None, unavailable_reason="no_lineage", registry_mixed=True)
+
+    answer = _answer(list(result_explanation(_SummaryTool(json.dumps(summary)))))
+
+    assert "DSR은 계산되지 않았습니다(사유: no_lineage)." in answer
+    assert "지표 계산 판본이 섞인 시도들로 잰 값이라" in answer
+    unread = _answer(
+        list(result_explanation(_SummaryTool(summarize_backtest_result(sample_backtest_result()))))
+    )
+    assert "검증 근거는 읽지 못해" in unread
 
 
 def test_the_result_scenario_says_it_cannot_compare_without_a_benchmark() -> None:

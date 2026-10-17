@@ -6,7 +6,9 @@
 - 탐색: 지금 설정 **주변의 국소 격자**다(견고성 확인의 관행 — 전체 격자는 최적화이지 확인이
   아니고, 칸 하나하나가 계열 시도로 남아 DSR 을 깎는다). 숫자 파라미터는 지금 값과 그 양옆(간격이
   있으면 ±간격, 없으면 ±20% — 고원 민감도와 같은 폭)을 범위 안에서 편다. 선택지·참거짓
-  파라미터는 구조를 바꾸는 선택이라 지금 값에 둔다. 칸 수가 `ROBUSTNESS_MAX_POINTS`
+  파라미터는 구조를 바꾸는 선택이라 지금 값에 둔다. 팩터 출력이 읽지 않는 파라미터(선언만 했거나
+  출력에 닿지 않는 노드만 읽는다, `read_parameter_ids`)도 지금 값에 두고 미리 계산이 알린다 — 펴면
+  칸 점수가 모두 같아 고원·추천이 뜻이 없는데 시도 수만 는다. 칸 수가 `ROBUSTNESS_MAX_POINTS`
   를 넘으면 거절한다(파라미터가 너무 많다 — 실험 화면에서 축을 고른다). 선언이 없으면 탐색 축이 없어
   칸 하나(기본값)로 워크포워드만 돈다 — 고원은 볼 수 없다.
 - 분할: 롤링 워크포워드, 검증 1년, 엠바고 5세션. 학습은 연구 관행인 3년을 쓰되 실행 기간이 학습
@@ -22,7 +24,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -43,6 +46,7 @@ __all__ = [
     "ROBUSTNESS_MIN_TEST_DAYS",
     "ROBUSTNESS_TEST_YEARS",
     "ROBUSTNESS_TRAIN_YEARS",
+    "RobustnessSearch",
     "robustness_end",
     "robustness_search",
     "robustness_split",
@@ -61,18 +65,40 @@ ROBUSTNESS_MIN_TEST_DAYS = 182
 _CALENDAR_SLACK = timedelta(days=14)
 
 
+@dataclass(frozen=True)
+class RobustnessSearch:
+    """확인 실험의 탐색 값과, 숫자 파라미터지만 팩터 출력이 읽지 않아 지금 값에 둔 파라미터."""
+
+    search: dict[str, list[ParameterValue] | None]
+    # 선언 순서.
+    unread: tuple[str, ...]
+
+
 def robustness_search(
     parameters: Iterable[ParameterDefinition],
     current: Mapping[str, ParameterValue],
-) -> dict[str, list[ParameterValue] | None]:
-    """지금 값(`current`, 해소된 실행 값) 주변의 국소 격자(모듈 docstring)."""
+    *,
+    read: Collection[str],
+) -> RobustnessSearch:
+    """지금 값(`current`, 해소된 실행 값) 주변의 국소 격자(모듈 docstring).
+
+    Args:
+        parameters: 전략 문서가 선언한 파라미터.
+        current: 실행이 쓴 해소된 값.
+        read: 팩터 출력이 읽는 파라미터 id(`read_parameter_ids`). 여기 없는 숫자 파라미터는
+            펴지 않는다.
+    """
     search: dict[str, list[ParameterValue] | None] = {}
+    unread: list[str] = []
     points = 1
     for parameter in parameters:
         if isinstance(parameter, ChoiceParameter):
             continue
         value = current.get(parameter.parameter_id, parameter.default)
         if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        if parameter.parameter_id not in read:
+            unread.append(parameter.parameter_id)
             continue
         # 기존 격자(`parameter_grid_values`)처럼 Decimal 로 센다 — float 뺄셈의 잡음(0.3 - 0.1 =
         # 0.19999…)이 축 값이 되면 같은 설정이 다른 시도 키로 원장에 두 번 센다.
@@ -99,7 +125,7 @@ def robustness_search(
             f"숫자 파라미터가 많아 주변 격자가 {points}칸입니다(상한 {ROBUSTNESS_MAX_POINTS}). "
             f"실험 화면에서 확인할 파라미터를 골라 주세요: parameters={sorted(search)}",
         )
-    return search
+    return RobustnessSearch(search, tuple(unread))
 
 
 def robustness_split(start: date, end: date) -> SplitSpec:

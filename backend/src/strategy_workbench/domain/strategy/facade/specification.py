@@ -2,6 +2,7 @@ from strategy_workbench.domain.strategy._canonical import (
     STRATEGY_SEMANTIC_HASH_VERSION,
     canonical_strategy_json,
     canonical_strategy_payload,
+    read_parameter_ids,
     strategy_semantic_hash,
     strategy_spec_hash,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "normalized_parameter_value",
     "parameter_value_allowed",
     "resolve_parameter_values",
+    "read_parameter_ids",
     "strategy_semantic_hash",
     "strategy_spec_hash",
 ]

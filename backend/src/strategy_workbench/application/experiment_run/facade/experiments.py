@@ -13,6 +13,7 @@ from strategy_workbench.application.experiment_run._service import (
     ExperimentRunService,
     ExperimentTrialState,
     ParameterMap,
+    RobustnessPreview,
     WalkForwardReport,
     WalkForwardWindowResult,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "ExperimentRunService",
     "ExperimentTrialState",
     "ParameterMap",
+    "RobustnessPreview",
     "WalkForwardReport",
     "WalkForwardWindowResult",
 ]

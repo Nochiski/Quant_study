@@ -3,7 +3,7 @@ import type {
   ExperimentTrialState,
   WalkForwardReport,
 } from "../../../shared/api";
-import { t, type MessageKey } from "../../../shared/config";
+import { t, tFill, type MessageKey } from "../../../shared/config";
 import type { BadgeTone } from "../../../shared/ui";
 
 type ExperimentStatus = Experiment["status"];
@@ -27,6 +27,7 @@ export const experimentStatusTone = (status: ExperimentStatus): BadgeTone =>
 
 type TrialStatus = ExperimentTrialState["status"];
 type Gap = NonNullable<WalkForwardReport["gap"]>;
+type RetentionGap = NonNullable<WalkForwardReport["retention_gap"]>;
 
 // trial 상태도 backend 파생이다(최신 attempt 의 실행 상태).
 const TRIAL: Record<TrialStatus, { label: MessageKey; tone: BadgeTone }> = {
@@ -54,3 +55,22 @@ const GAP: Record<Gap, MessageKey> = {
 };
 
 export const walkForwardGapLabel = (gap: Gap): string => t(GAP[gap]);
+
+// 곡선은 났는데 유지율만 비는 이유(backend `RetentionGap`). "—"만 보이면 계산 실패로 읽힌다.
+const RETENTION_GAP: Record<RetentionGap, MessageKey> = {
+  out_of_sample_unavailable:
+    "experiments.retentionGap.out_of_sample_unavailable",
+  no_train_sharpe: "experiments.retentionGap.no_train_sharpe",
+  non_positive_train_sharpe:
+    "experiments.retentionGap.non_positive_train_sharpe",
+};
+
+/** 유지율이 비었으면 그 이유 문장, 아니면 null. 옛 서버(이유 칸 없음)도 null 이다. */
+export const retentionGapLabel = (
+  report: Pick<WalkForwardReport, "retention_gap" | "train_sharpe_mean">,
+): string | null =>
+  report.retention_gap == null
+    ? null
+    : tFill(RETENTION_GAP[report.retention_gap], {
+        mean: report.train_sharpe_mean?.toFixed(4) ?? "—",
+      });

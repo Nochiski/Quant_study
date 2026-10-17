@@ -24,6 +24,7 @@ export {
 export {
   experimentStatusLabel,
   experimentStatusTone,
+  retentionGapLabel,
   trialStatusLabel,
   trialStatusTone,
   walkForwardGapLabel,

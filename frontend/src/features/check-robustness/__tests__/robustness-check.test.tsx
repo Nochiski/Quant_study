@@ -272,6 +272,64 @@ describe("튼튼한지 확인하기", () => {
     ).toBeNull();
   });
 
+  it('유지율이 비면 "—" 옆에 서버가 준 이유와 학습 샤프 평균을 말한다', async () => {
+    server.use(
+      listChecks(() => [experiment()]),
+      http.get(`${API}/experiments/:id/walk-forward`, () =>
+        HttpResponse.json({
+          ...WALK_FORWARD,
+          retention: null,
+          train_sharpe_mean: -0.0123,
+          retention_gap: "non_positive_train_sharpe",
+        }),
+      ),
+      http.get(`${API}/experiments/:id/parameter-map`, () =>
+        HttpResponse.json(PARAMETER_MAP),
+      ),
+    );
+    mount();
+    const outOfSample = await screen.findByRole("region", {
+      name: "표본 밖 성과 · 워크포워드",
+    });
+    expect(
+      await within(outOfSample).findByText(
+        "표본 밖 샤프(세션 단위) 0.0412 · 유지율 —",
+      ),
+    ).toBeVisible();
+    expect(outOfSample).toHaveTextContent(
+      "유지율 없음: 고른 설정의 학습 샤프 평균이 -0.0123(0 이하)이라",
+    );
+    expect(outOfSample).not.toHaveTextContent("1에 가까울수록");
+  });
+
+  it("팩터 계산이 읽지 않는 파라미터는 확인 창이 지금 값에 둔다고 말한다", async () => {
+    server.use(
+      listChecks(() => []),
+      http.post(`${API}/backtests/:runId/robustness-check/preview`, () =>
+        HttpResponse.json({
+          ...PREVIEW,
+          design: { ...PREVIEW.design, search: { axes: [] } },
+          combination_count: 1,
+          unread_parameters: ["scale"],
+        }),
+      ),
+    );
+    mount();
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "튼튼한지 확인하기" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      await within(dialog).findByText(
+        "팩터 계산이 읽지 않아 지금 값에 둔 파라미터: scale. 바꿔도 결과가 같아 시도 수만 늘어요.",
+      ),
+    ).toBeVisible();
+    expect(dialog).toHaveTextContent(
+      "결과를 바꾸는 숫자 파라미터가 없어 조합 하나로 표본 밖 성과만 봐요.",
+    );
+  });
+
   it("파라미터가 없으면 고원 대신 그 사정을 말하고 지도를 묻지 않는다", async () => {
     server.use(
       listChecks(() => [experiment({}, [])]),
@@ -288,7 +346,7 @@ describe("튼튼한지 확인하기", () => {
     mount();
     expect(
       await screen.findByText(
-        "이 전략에는 파라미터가 없어 고원을 볼 수 없어요. 표본 밖 성과만 확인해요.",
+        "이 전략에는 결과를 바꾸는 숫자 파라미터가 없어 고원을 볼 수 없어요. 표본 밖 성과만 확인해요.",
       ),
     ).toBeVisible();
     expect(screen.queryByRole("img")).toBeNull();

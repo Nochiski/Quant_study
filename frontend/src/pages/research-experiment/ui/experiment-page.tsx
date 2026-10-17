@@ -17,6 +17,7 @@ import {
   trialStatusTone,
   useExperimentProgress,
   useRetryExperimentTrial,
+  retentionGapLabel,
   walkForwardGapLabel,
   type ExperimentTrialState,
 } from "../../../entities/experiment";
@@ -84,6 +85,7 @@ const WalkForward = ({
       </section>
     );
   const { data } = report;
+  const retentionGap = data.gap == null ? retentionGapLabel(data) : null;
   return (
     <section
       className="experiment-section"
@@ -107,6 +109,7 @@ const WalkForward = ({
             })
           : walkForwardGapLabel(data.gap)}
       </p>
+      {retentionGap === null ? null : <p>{retentionGap}</p>}
       <div
         className="data-list-page__scroll experiment-table-scroll"
         role="region"

@@ -99,6 +99,13 @@ export const RobustnessConfirm = ({
                       .join(" · "),
                   })}
             </p>
+            {data.unread_parameters && data.unread_parameters.length > 0 ? (
+              <p>
+                {tFill("backtest.robustness.confirm.unread", {
+                  parameters: data.unread_parameters.join(", "),
+                })}
+              </p>
+            ) : null}
             <table aria-label={t("backtest.robustness.confirm.windows")}>
               <thead>
                 <tr>

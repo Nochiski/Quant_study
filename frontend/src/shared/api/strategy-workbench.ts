@@ -80,6 +80,7 @@ import type {
   ExperimentTrialState,
   ExperimentPreview,
   ExperimentRequest,
+  RobustnessPreview,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -567,7 +568,7 @@ export const strategyWorkbenchApi = {
   },
 
   /** 결과 실행의 "튼튼한지 확인하기" 미리 계산. 기본 설계는 backend 가 정한다(US-DM-11). */
-  async previewRobustnessCheck(runId: string): Promise<ExperimentPreview> {
+  async previewRobustnessCheck(runId: string): Promise<RobustnessPreview> {
     const response = await previewRobustnessCheck({ path: { run_id: runId } });
     return unwrap(response, "previewRobustnessCheck");
   },
@@ -919,6 +920,7 @@ export type {
   ExperimentTrialState,
   ExperimentPreview,
   ExperimentRequest,
+  RobustnessPreview,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,

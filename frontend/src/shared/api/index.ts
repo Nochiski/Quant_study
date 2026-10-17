@@ -81,6 +81,7 @@ export {
   type ExperimentTrialState,
   type ExperimentPreview,
   type ExperimentRequest,
+  type RobustnessPreview,
   type EquityCatalogQuery,
   type FactorCatalog,
   type FactorCatalogQuery,

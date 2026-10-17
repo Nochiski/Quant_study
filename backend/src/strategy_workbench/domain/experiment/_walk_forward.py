@@ -288,18 +288,44 @@ def walk_forward_gap(
     return WalkForwardGap.CANCELLED if cancelled and gap is not None else gap
 
 
+class RetentionGap(StrEnum):
+    """곡선이 났는데도(`WalkForwardGap` 없음) 유지율이 비는 이유. 화면은 번역만 한다."""
+
+    # 이어 붙인 곡선의 샤프를 잴 수 없다(변동이 없는 곡선 등).
+    OUT_OF_SAMPLE_UNAVAILABLE = "out_of_sample_unavailable"
+    # 고른 칸의 학습 점수가 하나도 없다.
+    NO_TRAIN_SHARPE = "no_train_sharpe"
+    # 고른 칸들의 학습 샤프 평균이 0 이하라 "학습 성과가 남은 비율"이 뜻이 없다 — 음수로 나누면
+    # 부호가 뒤집혀 표본 밖에서 잃은 것이 높은 유지율로 보인다.
+    NON_POSITIVE_TRAIN_SHARPE = "non_positive_train_sharpe"
+
+
+@dataclass(frozen=True)
+class WalkForwardRetention:
+    """유지율과 그 분모. 값이 없으면 `gap` 이 이유다(값과 이유 중 하나만 있다)."""
+
+    value: float | None
+    # 창마다 고른 칸의 학습 세션 샤프 평균. 학습 점수가 없으면 None.
+    train_sharpe_mean: float | None
+    gap: RetentionGap | None
+
+
 def walk_forward_retention(
     out_of_sample_sharpe: float | None, train_sharpes: Sequence[float]
-) -> float | None:
+) -> WalkForwardRetention:
     """유지율 = 이어 붙인 검증 곡선의 세션 샤프 ÷ 창마다 고른 칸의 학습 세션 샤프 평균.
 
     학습에서 보인 위험 대비 성과가 표본 밖에서 얼마나 남았는지다. 학습 평균이 0 이하이거나 값이
-    없으면 비율이 뜻이 없어 None 이다.
+    없으면 비율이 뜻이 없어 값을 비우고 이유(`RetentionGap`)를 싣는다.
     """
-    if out_of_sample_sharpe is None or not train_sharpes:
-        return None
-    train = sum(train_sharpes) / len(train_sharpes)
-    return out_of_sample_sharpe / train if train > 0 else None
+    train = sum(train_sharpes) / len(train_sharpes) if train_sharpes else None
+    if out_of_sample_sharpe is None:
+        return WalkForwardRetention(None, train, RetentionGap.OUT_OF_SAMPLE_UNAVAILABLE)
+    if train is None:
+        return WalkForwardRetention(None, None, RetentionGap.NO_TRAIN_SHARPE)
+    if train <= 0:
+        return WalkForwardRetention(None, train, RetentionGap.NON_POSITIVE_TRAIN_SHARPE)
+    return WalkForwardRetention(out_of_sample_sharpe / train, train, None)
 
 
 def _add_years(day: date, years: int) -> date:

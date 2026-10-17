@@ -25,6 +25,13 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.analytics.facade.factor_regression import (
+    FactorRegressionReport,
+    FactorRegressionUnavailableReason,
+    StrategyPeriodReturn,
+    regress_on_factors,
+    unavailable_factor_regression,
+)
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.account_report import (
     AccountReport,
@@ -67,7 +74,15 @@ from strategy_workbench.domain.backtest.facade.trials import (
     summarize_trial_ledger,
     trial_key,
 )
-from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe_evidence
+from strategy_workbench.domain.experiment.facade.statistics import (
+    alpha_t_threshold,
+    run_deflated_sharpe_evidence,
+)
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorRegistry,
+    build_default_factor_registry,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     InvalidParameterValueError,
     StrategySpec,
@@ -75,6 +90,14 @@ from strategy_workbench.domain.strategy.facade.specification import (
     strategy_spec_hash,
 )
 
+from ._factor_regression import (
+    MOMENTUM_FACTOR_ID,
+    VALUE_FACTOR_ID,
+    RunFactorRegression,
+    factor_periods,
+    factor_regression_spec,
+    strategy_period_returns,
+)
 from ._gc_policy import full_collections_suspended
 from ._scheduler import RunLaneControls, RunQueue, experiment_slots
 from ._validation_report import RunValidationReport
@@ -262,6 +285,7 @@ class BacktestRunService:
         new_id: Callable[[], str],
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         run_slots: int = DEFAULT_RUN_SLOTS,
+        factor_registry: FactorRegistry | None = None,
     ) -> None:
         if run_slots < 1:
             raise ValueError(f"run_slots must be at least 1 — run_slots={run_slots!r}")
@@ -274,6 +298,9 @@ class BacktestRunService:
         self._new_id = new_id
         self._now = now
         self._run_slots = run_slots
+        # 팩터 회귀가 모멘텀·가치 기본 graph 를 읽는다(V4-05). 레지스트리는 순수 값이라 주입이
+        # 없으면 기본 레지스트리를 만든다.
+        self._factor_registry = factor_registry or build_default_factor_registry()
         self._records: dict[str, _RunRecord] = {}
         # 끝난 run 은 최근 것만 메모리에 둔다(끝난 순). 상태·요청·결과의 정본은 저장소·산출물이다.
         self._finished: deque[str] = deque()
@@ -609,6 +636,76 @@ class BacktestRunService:
                 None,
             ),
             dsr=run_deflated_sharpe_evidence(result, ledger),
+        )
+
+    def factor_regression(self, run_id: str) -> RunFactorRegression:
+        """검증된 완료 결과의 세션 초과수익을 시장·규모·가치·모멘텀에 회귀한다(V4-05).
+
+        팩터 단면은 run 의 실행 설정으로 기존 포트폴리오 파이프라인을 다시 돌려 읽는다. 결측 정책은
+        채우지 않는 `drop` 으로 바꾼다 — 채운 팩터 값으로 정렬하면 없는 신호가 포트폴리오에 든다.
+        지금 데이터 판이 run 의 판과 다르면 회귀하지 않는다(다른 데이터로 잰 노출을 그 run 의 것으로
+        보이지 않는다). 실행·선택 기록은 쓰지 않는다.
+        """
+        result = self.result(run_id)
+        manifest = result.manifest
+        strategy = strategy_period_returns(result)
+        report = self._factor_regression_report(result, strategy)
+        lineage_id = self._lineage(
+            manifest.run_spec,
+            manifest.strategy_provenance
+            if manifest.strategy_provenance.kind is StrategySourceKind.SAVED_REVISION
+            else None,
+        )
+        trial_count = None if lineage_id is None else self.trial_ledger(lineage_id).trial_count
+        return RunFactorRegression(
+            run_id=manifest.run_id,
+            run_fingerprint=manifest.run_fingerprint,
+            data_snapshot_id=manifest.data_snapshot_id,
+            momentum_factor_id=MOMENTUM_FACTOR_ID,
+            value_factor_id=VALUE_FACTOR_ID,
+            trial_count=trial_count,
+            alpha_t_threshold=None if trial_count is None else alpha_t_threshold(trial_count),
+            report=report,
+        )
+
+    def _factor_regression_report(
+        self, result: BacktestRunResult, strategy: tuple[StrategyPeriodReturn, ...]
+    ) -> FactorRegressionReport:
+        manifest = result.manifest
+        days = manifest.run_spec.annualization_days
+        try:
+            pipeline = self._portfolio_design.run_pipeline(
+                PortfolioPreviewRequest(
+                    factor_regression_spec(self._factor_registry),
+                    environment=replace(manifest.environment, missing=MissingPolicy.DROP),
+                )
+            )
+        except RawObservationUnavailableError as error:
+            logger.warning(
+                "factor regression inputs unavailable — run_id=%s environment=%s: %s",
+                manifest.run_id,
+                manifest.environment_hash,
+                error,
+            )
+            return unavailable_factor_regression(
+                FactorRegressionUnavailableReason.DATA_UNAVAILABLE,
+                strategy_period_count=len(strategy),
+                annualization_days=days,
+            )
+        if pipeline.data_snapshot_id != manifest.data_snapshot_id:
+            logger.warning(
+                "factor regression skipped — data snapshot changed: run_id=%s run=%s current=%s",
+                manifest.run_id,
+                manifest.data_snapshot_id,
+                pipeline.data_snapshot_id,
+            )
+            return unavailable_factor_regression(
+                FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED,
+                strategy_period_count=len(strategy),
+                annualization_days=days,
+            )
+        return regress_on_factors(
+            strategy, factor_periods(pipeline.observations), annualization_days=days
         )
 
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:

@@ -122,6 +122,8 @@ export {
   type TrialPreview,
   type UpgradedDocument,
   type WalkForwardReport,
+  type ParameterMap,
+  type CellPlateau,
 } from "./strategy-workbench";
 
 export type { NodeValueType } from "./generated";

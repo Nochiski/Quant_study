@@ -15,6 +15,10 @@ import {
   getExperimentAudit,
   getExperimentRemainingTime,
   getExperimentWalkForward,
+  getExperimentParameterMap,
+  previewRobustnessCheck,
+  createRobustnessCheck,
+  listRobustnessChecks,
   getExperimentContinuousAccount,
   runExperimentContinuousAccount,
   getContinuousAccount,
@@ -121,6 +125,8 @@ import type {
   TrialPreview,
   UpgradedDocument,
   WalkForwardReport,
+  ParameterMap,
+  CellPlateau,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -553,6 +559,30 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getExperimentWalkForward");
   },
 
+  async getExperimentParameterMap(experimentId: string): Promise<ParameterMap> {
+    const response = await getExperimentParameterMap({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentParameterMap");
+  },
+
+  /** 결과 실행의 "튼튼한지 확인하기" 미리 계산. 기본 설계는 backend 가 정한다(US-DM-11). */
+  async previewRobustnessCheck(runId: string): Promise<ExperimentPreview> {
+    const response = await previewRobustnessCheck({ path: { run_id: runId } });
+    return unwrap(response, "previewRobustnessCheck");
+  },
+
+  async createRobustnessCheck(runId: string): Promise<Experiment> {
+    const response = await createRobustnessCheck({ path: { run_id: runId } });
+    return unwrap(response, "createRobustnessCheck");
+  },
+
+  /** 결과 실행에서 만든 확인 실험, 최근에 만든 순. */
+  async listRobustnessChecks(runId: string): Promise<Experiment[]> {
+    const response = await listRobustnessChecks({ path: { run_id: runId } });
+    return unwrap(response, "listRobustnessChecks");
+  },
+
   async getExperimentContinuousAccount(
     experimentId: string,
   ): Promise<ContinuousAccountLatest> {
@@ -929,4 +959,6 @@ export type {
   TrialPreview,
   UpgradedDocument,
   WalkForwardReport,
+  ParameterMap,
+  CellPlateau,
 };

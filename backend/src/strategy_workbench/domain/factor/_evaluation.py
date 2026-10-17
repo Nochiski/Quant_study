@@ -4,8 +4,9 @@ import math
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from itertools import accumulate
 from statistics import mean, median, pstdev
-from typing import TypeAlias, TypeGuard, TypeVar
+from typing import TypeAlias, TypeGuard, TypeVar, cast
 
 from ._history import SessionReadWindow, node_read_window
 from ._nodes import (
@@ -464,15 +465,23 @@ class _NodeEvaluator:
 # 노드 계산이 평가 진행에서 차지하는 몫. 나머지는 출력 값 조립이다(4년 구간 실측 약 4%).
 _NODES_PROGRESS_SHARE = 0.96
 
-# 노드 종류별 진행 가중치. 실데이터 실측(이슈 #162, 모멘텀 252)에서 시계열 노드가 필드 노드의
-# 약 30배 시간을 썼다(창 길이만큼 값을 복사한다). 횡단면·그룹 노드는 날짜별 정렬이라 그 사이다.
+# 노드 종류별 진행 가중치. 창 전체를 읽는 시계열 연산(평균·표준편차·최소·최대)은 창 길이만큼 돌아
+# 필드 노드보다 훨씬 오래 걸린다(800종목 × 1200세션 합성, 창 252: 표준편차 약 70배). 창 양끝만 읽는
+# 모멘텀·차이는 창을 자르지 않아(`_time_series`) 필드 노드와 비슷하다(같은 측정 약 0.7배 —
+# 실데이터 확인 2026-10-17 후속 1 전에는 이것도 창을 복사해 약 30배였다, 이슈 #162). 횡단면·그룹
+# 노드는 날짜별 정렬이라 그 사이다.
 _TIME_SERIES_PROGRESS_WEIGHT = 20
 _SECTION_PROGRESS_WEIGHT = 3
+_ENDPOINT_TIME_SERIES_OPERATORS = frozenset({TimeSeriesOperator.MOMENTUM, TimeSeriesOperator.DELTA})
 
 
 def _node_progress_weight(node: ExpressionNode) -> int:
     if isinstance(node, TimeSeriesNode):
-        return _TIME_SERIES_PROGRESS_WEIGHT
+        return (
+            1
+            if node.operator in _ENDPOINT_TIME_SERIES_OPERATORS
+            else _TIME_SERIES_PROGRESS_WEIGHT
+        )
     if isinstance(node, (CrossSectionalNode, GroupNode)):
         return _SECTION_PROGRESS_WEIGHT
     return 1
@@ -608,23 +617,33 @@ def _time_series(
     finished = 0
     read_window = node_read_window(node)
     for indices in _checkpointed(by_security.values(), checkpoint):
+        # 종목마다 숫자 변환과 "앞까지 숫자 개수"를 한 번만 만든다. 창마다 원소를 다시 걸러 만들면
+        # 관측 수 × 창 길이만큼 돈다(실데이터 확인 2026-10-17 후속 1: 252일 모멘텀 하나에 6억 번).
+        numbers = [_as_number(values[index]) for index in indices]
+        numeric_before = [0, *accumulate(number is not None for number in numbers)]
         for position, result_index in _checkpointed(enumerate(indices), checkpoint):
             bounds = read_window.bounds(position)
             start, end = bounds.start, bounds.stop
             # 구간에 가린 칸이 드는 칸은 어차피 결측이라 창을 읽지 않는다
             if start < 0 or end <= 0 or result_index in masked:
                 continue
-            window = values_from_indices(values, indices[start:end], checkpoint=checkpoint)
-            if len(window) != node.window:
+            # 창은 정확히 `node.window` 칸이다(`node_read_window`). 그 칸이 모두 숫자일 때만 값을
+            # 낸다 — 숫자만 걸러 센 길이가 창 길이와 같은지 보던 규칙과 같다.
+            if numeric_before[end] - numeric_before[start] != node.window:
                 continue
+            # 창 양끝만 읽는 연산은 창을 자르지 않는다(`_ENDPOINT_TIME_SERIES_OPERATORS`).
+            first, last = cast(float, numbers[start]), cast(float, numbers[end - 1])
+            if node.operator is TimeSeriesOperator.MOMENTUM:
+                result[result_index] = None if first == 0 else last / first - 1
+                continue
+            if node.operator is TimeSeriesOperator.DELTA:
+                result[result_index] = last - first
+                continue
+            window = cast(list[float], numbers[start:end])
             if node.operator is TimeSeriesOperator.MEAN:
                 result[result_index] = mean(window)
             elif node.operator is TimeSeriesOperator.STANDARD_DEVIATION:
                 result[result_index] = pstdev(window)
-            elif node.operator is TimeSeriesOperator.MOMENTUM:
-                result[result_index] = None if window[0] == 0 else window[-1] / window[0] - 1
-            elif node.operator is TimeSeriesOperator.DELTA:
-                result[result_index] = window[-1] - window[0]
             elif node.operator is TimeSeriesOperator.MINIMUM:
                 result[result_index] = min(window)
             else:

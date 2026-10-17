@@ -404,7 +404,8 @@ def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
     graph = FactorGraph(
         nodes=(
             FieldNode("close", "price.close", "field"),
-            TimeSeriesNode("mom", TimeSeriesOperator.MOMENTUM, "close", 2, "time_series"),
+            # 창 전체를 읽는 연산이라 가중치 20 이다(창 양끝만 읽는 모멘텀·차이는 1).
+            TimeSeriesNode("mom", TimeSeriesOperator.MEAN, "close", 2, "time_series"),
         ),
         output_node_id="mom",
     )

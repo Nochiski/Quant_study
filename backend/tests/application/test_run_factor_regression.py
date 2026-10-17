@@ -306,3 +306,45 @@ def test_an_unexpected_failure_is_reported_once_and_retried_on_the_next_read(
     assert retried.unavailable_reason is (
         FactorRegressionUnavailableReason.INSUFFICIENT_OBSERVATIONS
     )
+
+
+def test_a_changed_snapshot_is_kept_and_not_recomputed_on_every_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#544 리뷰 P3-2: 데이터 판은 프로세스 안에서 고정이라 다시 계산해도 같다."""
+    lab = _Lab(tmp_path)
+    run_id = _finish(lab.runs, _saved_run(lab.save(_spec())))
+    design = lab.runs._portfolio_design  # pyright: ignore[reportPrivateUsage]  # reason: 데이터 판만 바꾼다
+    original = design.run_pipeline
+    calls: list[PortfolioPreviewRequest] = []
+
+    def other_snapshot(request: PortfolioPreviewRequest) -> PortfolioPipelineResult:
+        calls.append(request)
+        return replace(original(request), data_snapshot_id="other-snapshot")
+
+    monkeypatch.setattr(design, "run_pipeline", other_snapshot)
+
+    reasons = [lab.runs.factor_regression(run_id).report.unavailable_reason for _ in range(3)]
+
+    assert reasons == [FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED] * 3
+    assert len(calls) == 1
+
+
+def test_a_job_that_cannot_start_does_not_leave_the_key_computing_forever(
+    tmp_path: Path,
+) -> None:
+    """#544 리뷰 P3-3: 스레드를 띄우지 못하면 그 요청은 실패하고 다음 조회가 다시 건다."""
+    lab = _Lab(tmp_path)
+    run_id = _finish(lab.runs, _saved_run(lab.save(_spec()), **_HALF_YEAR))
+
+    def no_threads(job: Callable[[], None]) -> None:
+        raise RuntimeError("can't start new thread")
+
+    lab.runs._background = no_threads  # pyright: ignore[reportPrivateUsage]  # reason: 스레드 한도를 흉내 낸다
+    with pytest.raises(RuntimeError, match="can't start new thread"):
+        lab.runs.factor_regression(run_id)
+    lab.runs._background = lambda job: job()  # pyright: ignore[reportPrivateUsage]  # reason: 다시 그 자리에서 돌린다
+
+    report = lab.runs.factor_regression(run_id).report
+
+    assert report.unavailable_reason is FactorRegressionUnavailableReason.INSUFFICIENT_OBSERVATIONS

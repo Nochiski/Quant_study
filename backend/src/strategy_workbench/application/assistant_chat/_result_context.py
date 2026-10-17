@@ -142,7 +142,7 @@ def summarize_backtest_result(
             "fills": len(result.artifacts.fills),
             "closed_trades": len(result.artifacts.trades),
         },
-        "validation": _validation_payload(result, validation, selections),
+        "validation": _validation_payload(validation, selections),
     }
 
     # 덜어 낼 목록, `omitted` 키, 덜 항목을 고르는 규칙의 짝. 앞에 있는 것부터 줄인다(모듈
@@ -177,21 +177,13 @@ def summarize_backtest_result(
 
 
 def _validation_payload(
-    result: BacktestRunResult,
     validation: ResultValidationFacts | None,
     selections: list[object],
 ) -> dict[str, object] | None:
     """검증 카드와 같은 근거. `selections` 는 상한 때문에 줄어들 수 있어 호출자가 쥔 목록이다."""
     if validation is None:
         return None
-    psr = next(
-        (
-            metric
-            for metric in result.metrics
-            if metric.scope is MetricScope.FULL and metric.metric_id == "probabilistic_sharpe"
-        ),
-        None,
-    )
+    psr = validation.psr
     evidence = validation.deflated_sharpe
     return {
         "psr": None
@@ -199,7 +191,9 @@ def _validation_payload(
         else {
             "value": psr.value,
             "sample_count": psr.sample_count,
-            "unavailable_reason": psr.unavailable_reason,
+            "unavailable_reason": None
+            if psr.unavailable_reason is None
+            else psr.unavailable_reason.value,
         },
         "current_ledger": {
             "observed_at": validation.observed_at.isoformat(),

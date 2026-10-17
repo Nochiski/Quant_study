@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from strategy_workbench.domain.analytics.facade.metrics import MetricValue
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
 from strategy_workbench.domain.experiment.facade.statistics import DeflatedSharpeEvidence
 
@@ -41,6 +42,8 @@ class ResultValidationFacts:
     """결과 검증 카드와 같은 근거. `observed_at` 은 원장을 읽은 시각이지 완료·선택 시각이 아니다."""
 
     observed_at: datetime
+    # 검증 카드와 같은 저장된 FULL PSR(없으면 미기록). 고르는 규칙은 검증 조회가 소유한다.
+    psr: MetricValue | None
     deflated_sharpe: DeflatedSharpeEvidence
     selections: tuple[ResultSelectionSnapshot, ...]
 

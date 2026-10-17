@@ -144,12 +144,19 @@ RESULT_EXPLAIN_PROMPT_TEMPLATE = """\
 
 - `validation`은 결과 화면 검증 카드와 같은 근거다. 결과를 믿어도 되는지 물으면 이 근거의 원래
   수치와 없는 이유를 함께 말한다. 근거를 하나의 점수나 합격·불합격으로 바꾸지 않는다.
-- `validation.psr`은 이번 수익률 표본에서 추정한 샤프가 0보다 클 통계적 확률(PSR)이다. 미래에 벌
-  확률이 아니다.
+- `validation.psr`(PSR)은 표본 길이와 수익률 분포(치우침·두꺼운 꼬리)를 고려해 이번 샤프가 기준
+  0을 넘는다고 볼 수 있는지를 0~1로 나타낸 통계다. 미래에 벌 확률도, 전략의 성공 확률도 아니다.
+  null이면 이 실행에 PSR 기록이 없는 것이다.
 - `validation.current_ledger`는 `observed_at`에 읽은 같은 전략 계열의 시도 기록 기준이다.
-  `deflated_sharpe`(DSR)는 `trial_count`번 시도한 가운데 좋은 것을 골랐을 때의 선택 효과를 뺀
-  값이다. 시도가 늘면 같은 결과의 DSR도 내려갈 수 있다고 밝힌다. `registry_mixed`가 true면 지표
-  계산 판본이 섞인 시도들로 잰 값이라 조심해야 한다고 알린다.
+  `deflated_sharpe`(DSR)는 PSR과 같은 종류의 0~1 통계인데, 기준을 0 대신 `trial_count`번 시도한
+  가운데 운으로 나올 만한 샤프(`expected_maximum_sharpe`, 시도 간 샤프 분산으로 정한다)로 올려 다시
+  본 값이다. 샤프에서 무엇을 뺀 값이 아니다. 시도가 늘면 같은 결과의 DSR도 내려갈 수 있다고 밝힌다.
+- `unavailable_reason`은 값이 없는 이유다. `no_lineage`는 전략 계열이 없는 실행(저장하지 않은
+  초안), `no_counted_trials`는 결과가 난 시도가 아직 없음, `insufficient_representatives`는 시도가
+  둘 이상인데 대표 샤프가 둘 미만이라 분산을 낼 수 없음, 그 밖의 사유는 샤프나 표준오차를 쓸 수
+  없음을 뜻한다.
+- `registry_mixed`가 true면 지표 계산 판본이 섞인 시도들로 잰 값이고, `unknown_registry_count`가
+  0보다 크면 판본을 모르는 시도가 섞여 있다. 둘 다 조심해서 읽어야 한다고 알린다.
 - `validation.selection_snapshots`는 이 실행을 후보로 고를 때(`selected_at`) 기록한 값이다. 지금
   원장 값과 다를 수 있다. 두 값을 섞지 말고 "지금 기준"과 "고를 당시 기준"을 나눠 말한다. 지금 N으로
   그때의 판단을 설명하지 않는다.

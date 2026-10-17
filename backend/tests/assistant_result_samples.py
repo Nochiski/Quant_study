@@ -231,6 +231,11 @@ def sample_validation_facts() -> ResultValidationFacts:
     """표본 실행의 검증 근거. 지금 원장(N=3)과 후보로 고를 당시 스냅숏(N=2)이 다르다(US-DM-12)."""
     return ResultValidationFacts(
         observed_at=datetime(2026, 9, 1, 9, 30, tzinfo=UTC),
+        psr=next(
+            metric
+            for metric in sample_backtest_result().metrics
+            if metric.metric_id == "probabilistic_sharpe" and metric.scope is MetricScope.FULL
+        ),
         deflated_sharpe=DeflatedSharpeEvidence(
             value=0.6143,
             unavailable_reason=None,

@@ -564,21 +564,25 @@ def _validation_parts(validation: object) -> tuple[str, ...]:
     if isinstance(psr, Mapping):
         value = psr.get("value")
         parts.append(
-            f"PSR(probabilistic_sharpe)은 {_percent(float(value))}입니다. 이번 표본의 샤프가 0보다 "
-            "클 통계적 확률이지 앞으로 벌 확률은 아닙니다. "
+            f"PSR(probabilistic_sharpe)은 {_percent(float(value))}입니다. 표본 길이와 분포를 "
+            "고려해 샤프가 기준 0을 넘는지 본 통계이고, 앞으로 벌 확률은 아닙니다. "
             if isinstance(value, int | float)
             else f"PSR은 계산되지 않았습니다(사유: {psr.get('unavailable_reason')}). "
         )
+    else:
+        parts.append("이 실행에는 PSR 기록이 없습니다. ")
     ledger = validation.get("current_ledger")
     if isinstance(ledger, Mapping):
         dsr = ledger.get("deflated_sharpe")
         basis = f"지금 계열 원장({ledger.get('observed_at')} 조회) 기준 "
         parts.append(
             f"{basis}시도 수 N={ledger.get('trial_count')}, DSR은 {_percent(float(dsr))}입니다. "
+            "시도 수만큼 기준을 올려 다시 본 같은 종류의 통계입니다. "
             if isinstance(dsr, int | float)
             else f"{basis}DSR은 계산되지 않았습니다(사유: {ledger.get('unavailable_reason')}). "
         )
-        if ledger.get("registry_mixed") is True:
+        unknown = ledger.get("unknown_registry_count")
+        if ledger.get("registry_mixed") is True or (isinstance(unknown, int) and unknown > 0):
             parts.append("지표 계산 판본이 섞인 시도들로 잰 값이라 조심해서 읽어야 합니다. ")
     snapshots = validation.get("selection_snapshots")
     for snapshot in snapshots if isinstance(snapshots, list) else []:

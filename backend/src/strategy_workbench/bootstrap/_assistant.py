@@ -65,6 +65,8 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunNotFoundError,
     BacktestRunResult,
     BacktestRunService,
+    InvalidBacktestRunError,
+    StrategyReferenceNotFoundError,
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.experiment_run.facade.experiments import ExperimentRunService
@@ -73,6 +75,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyAuthoringService,
 )
 from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
+from strategy_workbench.application.strategy_design.facade.ports import StrategyNotFoundError
 from strategy_workbench.domain.assistant.facade.models import (
     ProposalCompileResult,
     ProposalDiagnostic,
@@ -330,7 +333,7 @@ def build_assistant_services(
     factor_registry: FactorRegistry,
     strategy_authoring: StrategyAuthoringService,
     backtest_runs: BacktestRunService,
-    experiments: ExperimentRunService | None = None,
+    experiments: ExperimentRunService,
     today: Callable[[], date] = date.today,
 ) -> AssistantServices:
     """프로파일·세션 저장소부터 턴 러너까지 한 그래프로 묶는다.
@@ -420,12 +423,10 @@ class _RunServiceBacktestResults:
     접는 것만 한다 — 어시스턴트 쪽 대응이 같다(설명할 결과가 없다).
 
     검증 근거(US-DM-12)는 결과 검증 카드와 같은 `validation_report` 와, 실행을 소유한 실험의 선택
-    기록(`run_selections`)을 옮긴다. 실험이 없는 조립(테스트)이면 선택 스냅숏은 비어 있다.
+    기록(`run_selections`)을 옮긴다.
     """
 
-    def __init__(
-        self, runs: BacktestRunService, experiments: ExperimentRunService | None = None
-    ) -> None:
+    def __init__(self, runs: BacktestRunService, experiments: ExperimentRunService) -> None:
         self._runs = runs
         self._experiments = experiments
 
@@ -441,13 +442,16 @@ class _RunServiceBacktestResults:
             experiment_id = self._runs.summary(run_id).experiment_id
         except _RESULT_UNAVAILABLE:
             return None
+        except _LEDGER_UNAVAILABLE as error:
+            # 계열 출처를 해소하지 못했다 — 근거 없이도 결과는 설명한다(요약 `validation` 이 null).
+            logger.warning("result validation evidence unavailable — run_id=%s: %s", run_id, error)
+            return None
         selections = (
-            ()
-            if self._experiments is None or experiment_id is None
-            else self._experiments.run_selections(experiment_id, run_id)
+            () if experiment_id is None else self._experiments.run_selections(experiment_id, run_id)
         )
         return ResultValidationFacts(
             observed_at=report.observed_at,
+            psr=report.psr,
             deflated_sharpe=report.dsr,
             selections=tuple(
                 ResultSelectionSnapshot(
@@ -466,6 +470,12 @@ _RESULT_UNAVAILABLE = (
     BacktestRunNotFoundError,
     BacktestResultNotReadyError,
     BacktestArtifactUnreadableError,
+)
+# 결과는 읽었지만 그 계열 원장을 해소하지 못한 경우(출처 계열이 없거나 저장 전략이 사라졌다).
+_LEDGER_UNAVAILABLE = (
+    InvalidBacktestRunError,
+    StrategyReferenceNotFoundError,
+    StrategyNotFoundError,
 )
 
 

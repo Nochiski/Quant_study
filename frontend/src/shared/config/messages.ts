@@ -46,7 +46,6 @@ const ko = {
   "ide.view.graph": "그래프",
   "ide.documentInfo": "문서 정보",
   "ide.documentInfo.short": "정보",
-  "ide.save.failureShort": "저장 오류",
   "ide.outline.short": "구조",
   "ide.meta.status": "저장 상태",
   "ide.workspace.label": "작업 공간",
@@ -1552,6 +1551,11 @@ const ko = {
   "strategy.operator.comparison.eq.formula": "left = right",
 
 
+  "save.summary.conflict": "저장 충돌",
+  "save.summary.invalid": "저장 요청 거절",
+  "save.summary.failed": "저장 실패",
+  "save.summary.syntax": "저장 전 구문 오류 수정",
+  "save.summary.validation": "저장 전 검증 오류 수정",
   "save.action": "저장",
   "save.saving": "저장 중…",
   "save.unsaved": "저장되지 않은 변경",
@@ -2470,7 +2474,6 @@ export const messages = {
     "ide.view.graph": "Graph",
     "ide.documentInfo": "Document details",
     "ide.documentInfo.short": "Info",
-    "ide.save.failureShort": "Save failed",
     "ide.outline.short": "Outline",
     "ide.meta.status": "Save status",
     "ide.workspace.label": "Workspace",
@@ -3998,6 +4001,11 @@ export const messages = {
     "strategy.operator.comparison.eq.formula": "left = right",
 
 
+    "save.summary.conflict": "Save conflict",
+    "save.summary.invalid": "Save request rejected",
+    "save.summary.failed": "Save failed",
+    "save.summary.syntax": "Fix syntax before saving",
+    "save.summary.validation": "Fix validation before saving",
     "save.action": "Save",
     "save.saving": "Saving…",
     "save.unsaved": "Unsaved changes",

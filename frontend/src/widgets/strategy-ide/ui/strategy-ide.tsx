@@ -59,6 +59,8 @@ export type StrategyIdeProps = {
   };
   /** Save status text in the top bar, e.g. "방금 저장됨". */
   saveStatus?: string;
+  /** 저장 상태 소유자가 파생한 짧은 안내. 위젯은 오류색이나 상세 문자열로 상태를 추측하지 않는다. */
+  saveStatusSummary?: string | null;
   saveTone?: "ok" | "warn" | "error";
   onRunBacktest?: () => void;
   runDisabled?: boolean;
@@ -193,6 +195,7 @@ export const StrategyIde = ({
   badges,
   meta,
   saveStatus,
+  saveStatusSummary,
   saveTone = "ok",
   onRunBacktest,
   runDisabled = false,
@@ -739,7 +742,7 @@ export const StrategyIde = ({
           </div>
           <Badge tone="accent">{t("nav.research")}</Badge>
         </nav>
-        {saveTone === "error" ? <span className="ide__save-error" role="status">{t("ide.save.failureShort")}</span> : null}
+        {saveStatusSummary ? <span className="ide__save-error" role="status">{saveStatusSummary}</span> : null}
         <div className="ide__topbar-actions">
           <Button
             size="small"

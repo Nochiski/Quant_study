@@ -43,12 +43,22 @@ test(
         ),
       )
       .toBeGreaterThan(0);
-    const observed = await page.evaluate(
-      () =>
-        new Promise<{ remounts: number; modeTransitions: number }>((resolve) => {
+    const observed = await page.getByRole("complementary", { name: "AI 어시스턴트", exact: true }).evaluate(
+      (sidebar) =>
+        new Promise<{ remounts: number; samples: number; maxXDelta: number; maxWidthDelta: number }>((resolve) => {
           let remounts = 0;
-          let modeTransitions = 0;
-          const floating = (classes: string | null) => classes?.split(/\s+/u).includes("ide__drawer") ?? false;
+          let samples = 0;
+          let maxXDelta = 0;
+          let maxWidthDelta = 0;
+          const initial = sidebar.getBoundingClientRect();
+          let frame = 0;
+          const measure = () => {
+            const current = sidebar.getBoundingClientRect();
+            samples += 1;
+            maxXDelta = Math.max(maxXDelta, Math.abs(current.x - initial.x));
+            maxWidthDelta = Math.max(maxWidthDelta, Math.abs(current.width - initial.width));
+            frame = requestAnimationFrame(measure);
+          };
           const observeChanges = (records: MutationRecord[]) => {
             for (const record of records)
               for (const node of record.addedNodes)
@@ -58,24 +68,22 @@ test(
                     node.querySelector(".ide__assistant") !== null)
                 )
                   remounts += 1;
-            const modeRecords = records.filter(record => record.type === "attributes" && record.target instanceof HTMLElement && record.target.matches(".ide__assistant"));
-            for (const [index, record] of modeRecords.entries()) {
-              // 한 callback 안에서 붙음→뜸→붙음이 모두 일어나도 oldValue의 연결로 각 전환을 센다.
-              const next = modeRecords.slice(index + 1).find(candidate => candidate.target === record.target);
-              const after = next === undefined ? (record.target as HTMLElement).getAttribute("class") : next.oldValue;
-              if (floating(record.oldValue) !== floating(after)) modeTransitions += 1;
-            }
           };
           const observer = new MutationObserver(observeChanges);
-          observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
+          observer.observe(document.body, { childList: true, subtree: true });
+          frame = requestAnimationFrame(measure);
           setTimeout(() => {
+            cancelAnimationFrame(frame);
             observeChanges(observer.takeRecords());
             observer.disconnect();
-            resolve({ remounts, modeTransitions });
+            resolve({ remounts, samples, maxXDelta, maxWidthDelta });
           }, 1_000);
         }),
     );
     expect(observed.remounts, "1초 동안 사이드바가 다시 마운트된 횟수").toBe(0);
-    expect(observed.modeTransitions, "같은 1초 동안 사이드바의 붙음·뜸 배치가 바뀐 횟수").toBe(0);
+    expect(observed.samples, "같은 1초 동안 실제 배치를 여러 프레임 관측한다").toBeGreaterThan(1);
+    // 소수점 배치 반올림만 0.5 CSS px까지 허용한다. 붙음·뜸 전환의 수십 px 재배치는 이 한계를 넘는다.
+    expect(observed.maxXDelta, "같은 1초 동안 사이드바 가로 위치의 최대 편차").toBeLessThanOrEqual(0.5);
+    expect(observed.maxWidthDelta, "같은 1초 동안 사이드바 폭의 최대 편차").toBeLessThanOrEqual(0.5);
   },
 );

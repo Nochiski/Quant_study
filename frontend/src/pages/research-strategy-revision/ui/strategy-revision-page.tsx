@@ -30,6 +30,7 @@ import {
   currentDiagnostics,
   revisionDraftId,
   saveStatusText,
+  saveStatusSummary,
   saveStatusTone,
   useApplyAssistantProposal,
   useStrategyAssistant,
@@ -314,6 +315,7 @@ export const StrategyRevisionPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
+        saveStatusSummary={saveStatusSummary(document, status)}
         onRunBacktest={runBacktest}
         runDisabled={!canRun}
         onValidate={validateNow}

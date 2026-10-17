@@ -401,10 +401,24 @@ describe("StrategyIde", () => {
   it("저장 실패는 간결하게 드러내고 문서 정보에서 전체 원인을 읽는다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
-    mount({ saveTone: "error", saveStatus: "서버에 초안을 저장할 수 없습니다. 원문은 로컬에 보존했습니다." });
-    expect(screen.getByText("저장 오류")).toBeVisible();
+    mount({ saveTone: "error", saveStatusSummary: "저장 실패", saveStatus: "서버에 초안을 저장할 수 없습니다. 원문은 로컬에 보존했습니다." });
+    expect(screen.getByText("저장 실패")).toBeVisible();
     await user.click(screen.getByText("문서 정보"));
     expect(screen.getByText("서버에 초안을 저장할 수 없습니다. 원문은 로컬에 보존했습니다.")).toBeVisible();
+  });
+
+  it("오류색만으로 저장 실패를 만들지 않고 전달된 저장 전 안내를 표시한다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    const view = mount({ saveTone: "error", saveStatus: "검증 오류가 있어 저장할 수 없습니다" });
+    expect(screen.queryByText("저장 오류")).not.toBeInTheDocument();
+    expect(screen.queryByText("저장 실패")).not.toBeInTheDocument();
+    view.unmount();
+    mount({ saveTone: "error", saveStatusSummary: "저장 전 검증 오류 수정", saveStatus: "검증 오류가 있어 저장할 수 없습니다" });
+    expect(screen.getByText("저장 전 검증 오류 수정")).toBeVisible();
+    expect(screen.queryByText("저장 실패")).not.toBeInTheDocument();
+    await user.click(screen.getByText("문서 정보"));
+    expect(screen.getByText("검증 오류가 있어 저장할 수 없습니다")).toBeVisible();
   });
 
   it("renders caller-owned inspector content without sample contract values", () => {

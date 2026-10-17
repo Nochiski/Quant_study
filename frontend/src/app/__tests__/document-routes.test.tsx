@@ -1467,6 +1467,7 @@ describe("document routes (P2-04)", () => {
         "저장 실패: 문서 검증 오류: title must not be empty",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByText("저장 요청 거절")).toBeVisible();
     expect(history.location.pathname).toBe("/research/strategies/new");
     expect(view.state.doc.toString()).toBe("title: bad\n");
   });
@@ -3918,6 +3919,22 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     scrollIntoView.mock.contexts
       .filter((element) => (element as Element).closest("[hidden]") === null)
       .at(-1);
+
+  it("편집만 한 문서의 검증 오류는 저장 전 수정 안내를 보이고 저장 POST를 만들지 않는다", async () => {
+    server.use(graphCompileWith([{
+      code: "factor.graph.time_series_window", kind: "semantic", severity: "error",
+      pointer: "/factors/0/graph/nodes/1", node_id: "mom_252",
+      message: "window는 1 이상이어야 합니다: window=0",
+    }]), ...graphHandlers());
+    mount("/research/strategies/new");
+    const view = await editor();
+    replaceText(view, GRAPH_SOURCE.replace("window: 252", "window: 0"));
+    expect(await screen.findByText("저장 전 검증 오류 수정")).toBeVisible();
+    expect(saveButton()).toBeDisabled();
+    expect(screen.queryByText("저장 오류")).not.toBeInTheDocument();
+    expect(screen.queryByText("저장 실패")).not.toBeInTheDocument();
+    expect(posted).toHaveLength(0);
+  });
 
   it("shows the badge and the problem list while the Graph tab is selected", async () => {
     server.use(

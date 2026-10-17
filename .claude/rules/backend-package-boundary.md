@@ -82,6 +82,12 @@ bootstrap ─> application + adapters
   함께 판정하며 기존 scalar·후보 선택도 이 판정을 재사용한다. application이 조회 시각을 주입하고,
   HTTP의 별도 읽기 전용 `GET /api/v1/backtests/{run_id}/validation-report`가 그대로 노출한다.
   저장된 FULL PSR은 재계산하지 않으며 결과·시도 수·선택 스냅숏을 갱신하지 않는다.
+- 완료 run의 팩터 회귀(V4-05)도 같은 `application/backtest_run`이 `self.result(run_id)`를 한 번
+  검증한 뒤, 이미 주입된 `PortfolioDesignService.run_pipeline`을 run의 실행 설정으로 다시 돌려 유니버스
+  단면을 읽는다. 새 port·application 화살표는 없다. 모멘텀·가치 기본 graph를 레지스트리에서 읽으려고
+  facade `DEPENDS_ON`에 `domain.factor`를 더했고, 레지스트리는 bootstrap이 주입한다. 팩터 수익률·회귀
+  규칙은 `domain/analytics`가 소유하며 HTTP `GET /api/v1/backtests/{run_id}/factor-regression`이 그대로
+  노출한다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - 연속 계좌 평가는 `application/continuous_account`가 자체 실험 출처·파이프라인·실행·이력
   포트를 소유하고, 기존 `application/backtest_run`의 outgoing 데이터 포트만 재사용한다.

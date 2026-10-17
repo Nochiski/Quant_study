@@ -375,6 +375,26 @@ domain 한 곳(`pick_window_cell`)이다. 검증 실행은 새 선택이 아니�
 평가 경로 재사용, 새 팩터 정의 금지), OLS + HAC(Newey–West) 표준오차. 데이터를 읽는 application 노드와 포트를
 이 PR에서 정한다. 손계산 소형 데이터로 계수·t값 검증.
 
+**결정(2026-10-17, 업계 관행 기준)**: (1) 데이터 노드는 `application/backtest_run` 이다. 이미 주입된
+`PortfolioDesignService.run_pipeline` 을 run 의 실행 설정(결측 정책만 `drop`)으로 다시 돌려 모멘텀·가치 기본 graph 값과
+그 graph 가 읽는 수정주가·시가총액·자본총계 필드를 단면으로 받는다 — 새 port·application 화살표가 없다. S03
+`signal_research` 는 duckdb·CLI 전용이고 라벨이 미래 구간이라 쓰지 않는다. (2) 팩터 구성은 Fama·French(1993) 3팩터와
+Carhart(1997) 모멘텀의 세션 판이다: 규모 중앙값 × 가치(모멘텀) 30·70 분위 독립 2×3 정렬, 여섯 포트폴리오 시가총액 가중,
+자본총계 0 이하 가치 정렬 제외, 매 구간 PIT 값으로 다시 정렬(AQR timely 방향). 규모 팩터는 새 정의 없이 시가총액 필드로
+정렬한다. 브레이크포인트는 유니버스 전체(NYSE 같은 기준 시장 구분이 없다). (3) 회귀는 전략·시장 초과수익(기준금리
+ACT/365, 샤프와 같은 `interval_risk_free`)의 일별 OLS, Newey·West HAC(Bartlett, lag ⌊4(n/100)^(2/9)⌋, 소표본 보정
+n/(n−k) — statsmodels HAC 의 보정 판과 같은 방향)이고 하한 60 구간이다. 연율 알파는 세션 알파 × 연환산 거래일. (4) 결측은
+채우지 않고 빠진 구간을 사유별로 센다. run 과 다른 데이터 판이면 회귀하지 않는다(`data_snapshot_changed`). (5) 알파 t
+기준은 조회 시점 계열 N 으로 `alpha_t_threshold`, 계열 없으면 null. 결과는 `GET /api/v1/backtests/{run_id}/factor-regression`
+한 곳이다. 손계산(2×2 HAC, 7 종목 2×3)과 독립 numpy 구현 대조로 검증했다.
+
+**V4-05 인계**: (1) V5-06 검증 카드는 `RunFactorRegression` 을 칠하기만 하고(연율 알파·t·β·표준오차·R²·관측 수·빠진 구간
+사유·t 기준) 다시 계산하지 않는다. 사유 어휘는 `FactorRegressionUnavailableReason`·`FactorPeriodGap` 번역이다. (2) mock
+유니버스가 3 종목이라 mock 에서는 늘 `insufficient_observations` 다 — V5-06 e2e 가 숫자 경로를 보려면 mock 종목 확대나
+e2e 전용 단면이 필요하다. (3) 조회마다 파이프라인을 다시 돈다(실데이터 유니버스에서 수 초~수십 초). 화면은 로딩 상태를
+두고, 느리면 결과 산출물에 함께 저장할지 그때 정한다. (4) 알려진 한계: 상장 종료 종목의 마지막 구간 손실은 팩터에 들지
+않는다. 일별 회귀의 비동시 거래 편향(Dimson 보정 없음). 섹터(업종) 팩터는 PIT 섹터 자료가 생긴 뒤다.
+
 ---
 
 ## 8. Phase 5 — 화면

@@ -24,6 +24,7 @@ export {
 export {
   experimentStatusLabel,
   experimentStatusTone,
+  noRecommendationLabel,
   retentionGapLabel,
   trialStatusLabel,
   trialStatusTone,

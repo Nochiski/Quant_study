@@ -327,9 +327,38 @@ describe("튼튼한지 확인하기", () => {
       await within(plateau).findByText(/추천할 설정이 없어요/u),
     ).toBeVisible();
     expect(plateau).toHaveTextContent(
-      "모든 칸의 학습 샤프나 그 이웃 평균이 0 이하예요",
+      "후보가 될 칸(점수가 난 이웃이 있는 칸)의 학습 샤프나 그 이웃 평균이 모두 0 이하예요",
     );
     expect(plateau).not.toHaveTextContent("추천 후보");
+  });
+
+  it("점수가 난 칸이 없어 추천하지 않으면 그 이유를 말한다", async () => {
+    server.use(
+      listChecks(() => [experiment()]),
+      http.get(`${API}/experiments/:id/walk-forward`, () =>
+        HttpResponse.json(WALK_FORWARD),
+      ),
+      http.get(`${API}/experiments/:id/parameter-map`, () =>
+        HttpResponse.json({
+          cells: PARAMETER_MAP.cells.map((cell) => ({
+            ...cell,
+            verdict: "failed",
+            score: null,
+            plateau_score: null,
+          })),
+          no_recommendation: "no_scored_cell",
+        }),
+      ),
+    );
+    mount();
+    const plateau = await screen.findByRole("region", {
+      name: "파라미터 고원",
+    });
+    expect(
+      await within(plateau).findByText(
+        "추천할 칸이 없어요. 점수가 난 칸이 아직 없어요(모두 실패했거나 아직 돌고 있어요).",
+      ),
+    ).toBeVisible();
   });
 
   it("팩터 계산이 읽지 않는 파라미터는 확인 창이 지금 값에 둔다고 말한다", async () => {

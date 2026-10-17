@@ -136,7 +136,7 @@ progress_percent: 79
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `MERGED` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
-| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `IN_PROGRESS` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), [#537](https://github.com/Nochiski/Quant_study/pull/537) main 머지 `c8b87b65`(2026-10-17). 둘째 slice: AI 결과 설명 검증 근거(US-DM-12, `구현됨-e2e`) [#539](https://github.com/Nochiski/Quant_study/pull/539) · 리뷰 1차 REQUEST_CHANGES(P2 2·P3 4) 전부 반영. backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 잔여: 스트레스/튼튼한지 확인하기 실행, WF 곡선·US-CS-09, 추적·미리보기 parameter_values. 전체 V5-02 미완료 |
+| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `IN_PROGRESS` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), [#537](https://github.com/Nochiski/Quant_study/pull/537) main 머지 `c8b87b65`(2026-10-17). 둘째 slice: AI 결과 설명 검증 근거(US-DM-12, `구현됨-e2e`) [#539](https://github.com/Nochiski/Quant_study/pull/539) · 리뷰 1차 REQUEST_CHANGES(P2 2·P3 4) 전부 반영. 셋째 slice: 튼튼한지 확인하기·표본 밖 곡선(US-DM-11·US-CS-09, `구현됨-e2e`) `feat/vlab-robustness-check`. backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 잔여: 추적·미리보기 parameter_values. 전체 V5-02 미완료 |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `MERGED` | [#345](https://github.com/Nochiski/Quant_study/pull/345) · main 머지 `ebf2a6ea`(2026-09-30) |
@@ -160,8 +160,7 @@ progress_percent: 79
   frontend 전체 111 files/1434 passed(83.21초), 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초)를 확인했다.
   root가 기본 카드·계산 근거 PNG 4장을 직접 검토했고 독립 리뷰의 확정 P1/P2는 없었다.
   이 문서는 로컬 검증 기록이며 공식 CI·머지 상태는 해당 PR의 checks·merge 기록에서 확인한다.
-- 남은 V5-02: 스트레스/튼튼한지 확인하기 실행(US-DM-11), 워크포워드 곡선과
-  US-CS-09 전용 검증, 추적·미리보기 parameter_values. 분모 28·완료 21과 V5-02 미완료 표시는 유지한다.
+- 남은 V5-02: 추적·미리보기 parameter_values. 분모 28·완료 21과 V5-02 미완료 표시는 유지한다.
 
 ## Review 기록
 

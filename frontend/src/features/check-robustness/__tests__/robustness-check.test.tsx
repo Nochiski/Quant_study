@@ -246,7 +246,7 @@ describe("튼튼한지 확인하기", () => {
     );
     const plateau = screen.getByRole("region", { name: "파라미터 고원" });
     expect(
-      await within(plateau).findByText("추천 후보: scale=1, mode=a"),
+      await within(plateau).findByText("추천 후보: scale 1 · mode a"),
     ).toBeVisible();
     expect(plateau).toHaveTextContent(
       "고원 점수(이웃 평균 샤프, 세션 단위) 0.0400 · 칸 점수 0.0500 · ±20% 민감도 12.0%",

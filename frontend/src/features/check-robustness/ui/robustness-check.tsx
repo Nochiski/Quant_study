@@ -242,9 +242,9 @@ const Plateau = ({ experiment }: { experiment: Experiment }) => {
               values: axes
                 .map(
                   (axis, index) =>
-                    `${axis.parameter_id}=${String(axis.values[recommended.grid_index[index] ?? 0])}`,
+                    `${axis.parameter_id} ${String(axis.values[recommended.grid_index[index] ?? 0])}`,
                 )
-                .join(", "),
+                .join(" · "),
             })}
           </p>
           <p>

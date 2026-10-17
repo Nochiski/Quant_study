@@ -20,10 +20,10 @@ PR은 GitHub 번호(`#123`)로 적는다.
 
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
-| 김철수 | 7 | 0 | 5 | 1 | 13 |
-| 정동민 | 11 | 0 | 1 | 0 | 12 |
+| 김철수 | 8 | 0 | 4 | 1 | 13 |
+| 정동민 | 12 | 0 | 0 | 0 | 12 |
 | 한상목 | 15 | 0 | 0 | 1 | 16 |
-| 합계 | 33 | 0 | 6 | 2 | 41 |
+| 합계 | 35 | 0 | 4 | 2 | 41 |
 
 ### 스토리별 추적
 
@@ -37,7 +37,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-CS-06 | 김철수 | 거래대금 상위 20% 같은 횡단면 필터와 변동성 역가중을 쓴다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 100종목 상위 20%의 20개 통과·80개 순위 탈락을 구분한다<br>`frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 변동성은 역가중에만 쓰이고 알파가 없으면 compile을 막는다 |
 | US-CS-07 | 김철수 | 노드 캔버스에서 끌어서 잇고 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/node-canvas.spec.ts` :: 노드 캔버스 배선·키보드·취소·배치·YAML undo가 같은 원문을 지킨다<br>`frontend/e2e/stories/node-canvas.spec.ts` :: 캔버스의 같은 진단을 다시 선택하면 해당 노드와 인스펙터를 드러낸다 |
 | US-CS-08 | 김철수 | 파생 팩터를 저장해 두고 다른 전략에서 다시 쓴다 | `미계획` | — | — | — |
-| US-CS-09 | 김철수 | 워크포워드 실험으로 표본 밖 성과를 본다 | `예정` | V3-01, V3-05, V5-01, V5-02 | V5-02 | — |
+| US-CS-09 | 김철수 | 워크포워드 실험으로 표본 밖 성과를 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보가 카드에 채워진다 |
 | US-CS-10 | 김철수 | 파라미터 지도에서 고원을 확인하고 후보를 고른다 | `예정` | V4-03, V5-04 | V5-04 | — |
 | US-CS-11 | 김철수 | 비용을 현실적으로 잡고 운용 금액별 용량을 본다 | `예정` | V2-01, V2-02, V2-03, V4-04, V5-06 | V5-06 | — |
 | US-CS-12 | 김철수 | 팩터 회귀로 진짜 알파가 남는지 본다 | `예정` | V4-05, V5-06 | V5-06 | — |
@@ -52,7 +52,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-08 | 정동민 | 백테스트 결과를 AI에게 쉬운 말로 풀어 달라고 한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-explain.spec.ts` :: US-DM-08 완료된 백테스트 결과에서 AI에게 좋은 결과인지 물으면 지표 뜻과 벤치마크 비교를 쉬운 말로 답한다 |
 | US-DM-09 | 정동민 | AI 제안을 적용한 뒤 버튼 한 번으로 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다 |
 | US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 1440px에서 원래 통계·키보드 근거·조회 오류를 구별한다<br>`frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 360px에서 원래 통계·키보드 근거·조회 오류를 구별한다 |
-| US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `예정` | V3-05, V5-02 | V5-02 | — |
+| US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보가 카드에 채워진다 |
 | US-DM-12 | 정동민 | AI 결과 설명에서 검증 근거와 한계를 함께 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 AI에게 결과를 믿어도 되는지 물으면 검증 카드의 PSR·DSR 원래 수치와 조회 시점을 함께 답한다<br>`frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 후보로 고른 뒤 계열 시도가 늘어난 결과에서 AI는 지금 원장 기준과 고를 당시 기준을 나눠 답한다 |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |

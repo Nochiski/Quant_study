@@ -2,15 +2,15 @@
 plan_version: 1
 project: validation-lab
 project_status: IN_PROGRESS
-current_phase: V4,V5
-current_pr: V4-05,V5-02
-active_prs: [V4-05, V5-02]
-parallel_window: [V4-05, V5-02]
-last_updated: 2026-10-17T13:56:28+09:00
+current_phase: V5
+current_pr: V5-02
+active_prs: [V5-02]
+parallel_window: [V5-02]
+last_updated: 2026-10-17T14:45:28+09:00
 planned_prs: 28
-merged_prs: 21
+merged_prs: 22
 approved_prs: 22
-progress_percent: 75
+progress_percent: 79
 ---
 
 # 검증 랩 실시간 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 75
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `V4,V5` |
-| Current/next PR | `V4-05,V5-02` |
-| Active PR | `V4-05, V5-02` |
-| Progress | `21 / 28 merged (75%)` |
+| Current phase | `V5` |
+| Current/next PR | `V5-02` |
+| Active PR | `V5-02` |
+| Progress | `22 / 28 merged (79%)` |
 | Approved | `22 / 28` |
-| Aggregated at | `2026-10-17 13:56 KST` |
+| Aggregated at | `2026-10-17 14:45 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -81,10 +81,10 @@ progress_percent: 75
 | V1 | Research window seal, run persistence, trial ledger | 5 | 5 | `MERGED` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 5 | `MERGED` |
-| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 4 | `APPROVED` |
+| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 5 | `MERGED` |
 | V5 | Screens (after lang2 merge signal) | 7 | 3 | `IN_PROGRESS` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
-| **Total** |  | **28** | **21** | **75%** |
+| **Total** |  | **28** | **22** | **79%** |
 <!-- PLAN:PHASES:END -->
 
 ## V0 — 기획 패키지
@@ -129,14 +129,14 @@ progress_percent: 75
 | [x] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `MERGED` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
 | [x] | `V4-03` | 고원·민감도 | V4-02 | `MERGED` | [#403](https://github.com/Nochiski/Quant_study/pull/403) |
 | [x] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `MERGED` | [#410](https://github.com/Nochiski/Quant_study/pull/410) 1/2 · [#422](https://github.com/Nochiski/Quant_study/pull/422) 2/2 |
-| [ ] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `APPROVED` | [#538](https://github.com/Nochiski/Quant_study/pull/538) · 독립 Opus 리뷰 APPROVE(P2-1·P3-1~3 반영, P3-4 유지) · 로컬 backend 4842 passed/1 skipped, database 1437 passed. CI green 뒤 머지 |
+| [x] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `MERGED` | [#538](https://github.com/Nochiski/Quant_study/pull/538) · 독립 Opus 리뷰 APPROVE(P2-1·P3-1~3 반영, P3-4 유지) · main 머지 `b759fd44`(2026-10-17) |
 
 ## V5 — 화면 (각 화면의 backend PR 뒤)
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `MERGED` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
-| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `IN_PROGRESS` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), [#537](https://github.com/Nochiski/Quant_study/pull/537) main 머지 `c8b87b65`(2026-10-17). backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 잔여: AI 검증 요약(US-DM-12), 스트레스/튼튼한지 확인하기 실행, WF 곡선·US-CS-09, 추적·미리보기 parameter_values. 전체 V5-02 미완료 |
+| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `IN_PROGRESS` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), [#537](https://github.com/Nochiski/Quant_study/pull/537) main 머지 `c8b87b65`(2026-10-17). 둘째 slice: AI 결과 설명 검증 근거(US-DM-12, `구현됨-e2e`) [#539](https://github.com/Nochiski/Quant_study/pull/539) · 리뷰 1차 REQUEST_CHANGES(P2 2·P3 4) 전부 반영. backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 잔여: 스트레스/튼튼한지 확인하기 실행, WF 곡선·US-CS-09, 추적·미리보기 parameter_values. 전체 V5-02 미완료 |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `MERGED` | [#345](https://github.com/Nochiski/Quant_study/pull/345) · main 머지 `ebf2a6ea`(2026-09-30) |
@@ -160,7 +160,7 @@ progress_percent: 75
   frontend 전체 111 files/1434 passed(83.21초), 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초)를 확인했다.
   root가 기본 카드·계산 근거 PNG 4장을 직접 검토했고 독립 리뷰의 확정 P1/P2는 없었다.
   이 문서는 로컬 검증 기록이며 공식 CI·머지 상태는 해당 PR의 checks·merge 기록에서 확인한다.
-- 남은 V5-02: AI 검증 요약(US-DM-12), 스트레스/튼튼한지 확인하기 실행, 워크포워드 곡선과
+- 남은 V5-02: 스트레스/튼튼한지 확인하기 실행(US-DM-11), 워크포워드 곡선과
   US-CS-09 전용 검증, 추적·미리보기 parameter_values. 분모 28·완료 21과 V5-02 미완료 표시는 유지한다.
 
 ## Review 기록
@@ -171,7 +171,7 @@ progress_percent: 75
 
 ## 변경 기록
 
-- 2026-10-17: V5-02 첫 slice #537 머지 기록. V4-05 팩터 회귀 backend #538 리뷰 APPROVE.
+- 2026-10-17: V5-02 첫 slice #537 머지 기록. V4-05 팩터 회귀 backend #538 머지. V5-02 둘째 slice(US-DM-12) #539.
 
 - 2026-10-17: V5-02 첫 검증 카드 slice를 `IN_PROGRESS`로 인계하고 전체 미완료 범위를 명시.
 

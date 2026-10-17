@@ -3,7 +3,7 @@
  * 표본 밖 곡선과 유지율을 결과 검증 카드에서 본다(US-CS-09).
  *
  * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/dm.md`·`cs.md`다. 확인 실험의 설계
- * (선언한 파라미터 격자 전체, 롤링 학습 3년·검증 1년·엠바고 5세션)·시도 수·창 선택·고원 판정은 backend 가
+ * (팩터 출력이 읽는 파라미터의 지금 값 주변 격자, 롤링 학습 3년·검증 1년·엠바고 5세션)·시도 수·창 선택·고원 판정은 backend 가
  * 정한다. mock 실행은 빨리 끝나지만 실험 trial 은 backend 훅(`TRIAL_HOLD_SECONDS`)이 붙잡아, 시작 직후
  * "도는 중" 상태를 화면에서 본다.
  */
@@ -24,15 +24,32 @@ import {
   requireData,
 } from "../workbench-helpers";
 
-/** 값 두 개(0, 1)를 펴는 파라미터 하나 — 고원 지도의 칸이 둘이다. */
+/**
+ * 값 두 개(0, 1)를 펴는 파라미터 하나 — 고원 지도의 칸이 둘이다. 확인 실험은 팩터 출력이 읽는
+ * 파라미터만 펴므로 모멘텀에 배율 `scale`(기본 1)을 곱한다.
+ */
 const WITH_PARAMETER = mustReplace(
-  GOLDEN,
+  mustReplace(
+    GOLDEN,
+    "      output_node_id: mom_252",
+    [
+      "        - kind: parameter",
+      "          node_id: scale_value",
+      "          parameter_id: scale",
+      "        - kind: binary",
+      "          node_id: scaled",
+      "          operator: multiply",
+      "          left_node_id: mom_252",
+      "          right_node_id: scale_value",
+      "      output_node_id: scaled",
+    ].join("\n"),
+  ),
   "parameters: []",
   [
     "parameters:",
     "  - parameter_id: scale",
     "    kind: float",
-    "    default: 0.0",
+    "    default: 1.0",
     "    minimum: 0.0",
     "    maximum: 1.0",
     "    step: 1.0",
@@ -112,7 +129,7 @@ test(
 
     await card.getByRole("button", { name: "튼튼한지 확인하기" }).click();
     const dialog = page.getByRole("dialog", { name: "튼튼한지 확인하기" });
-    // 새로 세는 시도 수가 먼저 보인다. 기반 실행(scale 0)은 이미 센 시도라 scale 1 하나만 새로 센다.
+    // 새로 세는 시도 수가 먼저 보인다. 기반 실행(scale 1)은 이미 센 시도라 scale 0 하나만 새로 센다.
     const trials = dialog.locator("p").first();
     await expect(trials).toHaveText("새로 세는 시도 1개 · 계열 시도 수 1 → 2");
     await expect(dialog).toContainText(
@@ -159,8 +176,8 @@ test(
       ).data,
       "read walk-forward report",
     );
-    // 모든 창의 검증이 끝나 곡선과 표본 밖 샤프가 있다. 유지율은 학습 샤프 평균이 0 이하면 서버가 비운다
-    // (mock 자료가 그렇다) — 화면은 그 값을 그대로 보인다.
+    // 모든 창의 검증이 끝나 곡선과 표본 밖 샤프가 있다. 유지율은 학습 샤프 평균이 0 이하면 서버가 비우고
+    // 이유를 싣는다(mock 자료가 그렇다) — 화면은 그 값과 이유를 그대로 보인다.
     expect(report.gap ?? null).toBeNull();
     expect(report.out_of_sample_sharpe).toEqual(expect.any(Number));
     const retention =
@@ -170,6 +187,11 @@ test(
     await expect(outOfSample).toContainText(
       `표본 밖 샤프(세션 단위) ${report.out_of_sample_sharpe?.toFixed(4) ?? ""} · 유지율 ${retention}`,
     );
+    if (report.retention === null) {
+      // 비운 유지율은 "—"만 두지 않고 서버가 준 이유를 말한다.
+      expect(report.retention_gap).toEqual(expect.any(String));
+      await expect(outOfSample).toContainText("유지율 없음:");
+    }
     await expect(
       outOfSample.getByRole("img", { name: /검증 구간만 이어 붙인 곡선/u }),
     ).toBeVisible();

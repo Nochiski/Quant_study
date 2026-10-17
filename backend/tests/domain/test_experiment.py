@@ -22,10 +22,12 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentKind,
     GridIndex,
     InvalidExperimentSpecError,
+    RetentionGap,
     SearchSpec,
     SplitMode,
     SplitSpec,
     WalkForwardGap,
+    WalkForwardRetention,
     WalkForwardWindow,
     WindowSelectionRule,
     build_search_spec,
@@ -479,21 +481,28 @@ def test_a_cancelled_experiment_reports_cancelled_unless_every_window_finished()
     assert walk_forward_gap([None, None], cancelled=True) is None
 
 
+NON_POSITIVE = RetentionGap.NON_POSITIVE_TRAIN_SHARPE
+
+
 @pytest.mark.parametrize(
     ("out_of_sample", "train", "expected"),
     [
-        (0.05, [0.1, 0.3], 0.25),
-        (-0.02, [0.1], -0.2),
-        (0.05, [-0.1, 0.1], None),
-        (0.05, [-0.2], None),
-        (0.05, [], None),
-        (None, [0.1], None),
+        (0.05, [0.1, 0.3], WalkForwardRetention(0.25, 0.2, None)),
+        (-0.02, [0.1], WalkForwardRetention(-0.2, 0.1, None)),
+        # 학습 평균 0 이하: 음수로 나누면 표본 밖 손실이 높은 유지율로 뒤집혀 보인다.
+        (0.05, [-0.1, 0.1], WalkForwardRetention(None, 0.0, NON_POSITIVE)),
+        (-0.05, [-0.2], WalkForwardRetention(None, -0.2, NON_POSITIVE)),
+        (0.05, [], WalkForwardRetention(None, None, RetentionGap.NO_TRAIN_SHARPE)),
+        (None, [0.1], WalkForwardRetention(None, 0.1, RetentionGap.OUT_OF_SAMPLE_UNAVAILABLE)),
     ],
 )
-def test_retention_is_out_of_sample_over_mean_train_sharpe(
-    out_of_sample: float | None, train: list[float], expected: float | None
+def test_retention_is_out_of_sample_over_mean_train_sharpe_or_says_why_not(
+    out_of_sample: float | None, train: list[float], expected: WalkForwardRetention
 ) -> None:
-    assert walk_forward_retention(out_of_sample, train) == pytest.approx(expected)
+    retention = walk_forward_retention(out_of_sample, train)
+    assert retention.gap is expected.gap
+    assert retention.value == pytest.approx(expected.value)
+    assert retention.train_sharpe_mean == pytest.approx(expected.train_sharpe_mean)
 
 
 def test_terminal_statuses() -> None:

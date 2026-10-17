@@ -8,7 +8,11 @@ from strategy_workbench.domain.canonical.facade.encoding import (
     canonical_json_spec_hash,
     canonical_payload_json,
 )
-from strategy_workbench.domain.factor.facade.expression import ExpressionNode, FactorGraph
+from strategy_workbench.domain.factor.facade.expression import (
+    ExpressionNode,
+    FactorGraph,
+    ParameterNode,
+)
 from strategy_workbench.domain.factor.facade.validation import node_dependencies
 
 from ._models import REFERENCE_FACTOR, StrategySpec
@@ -92,6 +96,22 @@ def strategy_semantic_hash(spec: StrategySpec) -> str:
         del factor["label"]
     payload["hash_version"] = STRATEGY_SEMANTIC_HASH_VERSION
     return canonical_json_spec_hash(canonical_payload_json(payload))
+
+
+def read_parameter_ids(spec: StrategySpec) -> frozenset[str]:
+    """팩터 출력에 닿는 파라미터 노드가 읽는 파라미터 id.
+
+    파라미터는 팩터 그래프의 파라미터 노드로만 계산에 들어간다. 선언만 했거나 출력에 닿지 않는
+    노드만 읽는 파라미터는 값을 바꿔도 결과가 같다 — 탐색 축으로 펴면 칸 점수가 모두 같아 고원이
+    뜻이 없고 시도 수만 는다. 출력에 닿는가는 시도 키의 구조 그래프(`_structural_graph`)와 같은
+    규칙이다.
+    """
+    return frozenset(
+        node.parameter_id
+        for factor in spec.factors
+        for node in _structural_graph(factor.graph).nodes
+        if isinstance(node, ParameterNode)
+    )
 
 
 def _structural(spec: StrategySpec) -> StrategySpec:

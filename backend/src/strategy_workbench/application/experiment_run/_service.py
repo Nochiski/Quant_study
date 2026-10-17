@@ -33,6 +33,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     GridIndex,
     InvalidExperimentSpecError,
     ParameterConstraint,
+    RetentionGap,
     SearchSpec,
     SplitSpec,
     TimeEstimate,
@@ -76,7 +77,11 @@ from strategy_workbench.domain.experiment.facade.trial import (
     trial_status,
     validate_selection_reason,
 )
-from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    ParameterValue,
+    StrategySpec,
+    read_parameter_ids,
+)
 
 from ._audit import ExperimentAuditEvent, audit_trail
 from .ports.outgoing.experiment_repository import (
@@ -152,6 +157,17 @@ class ExperimentPreview:
 
 
 @dataclass(frozen=True)
+class RobustnessPreview(ExperimentPreview):
+    """ "튼튼한지 확인하기" 미리 계산.
+
+    숫자 파라미터지만 팩터 출력이 읽지 않아 펴지 않고 지금 값에 둔 파라미터(`robustness_search`)를
+    함께 싣는다 — 확인 창이 그 사정을 말한다.
+    """
+
+    unread_parameters: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ExperimentTrialState:
     trial: ExperimentTrial
     # 최신 attempt 에서 파생한다. attempt 가 없으면 대기(실험을 취소했으면 취소)다.
@@ -217,6 +233,10 @@ class WalkForwardReport:
     # 기존 계산값을 보존하고 API 소비자에게 평가 대상을 명시한다.
     evaluation_basis: WalkForwardEvaluationBasis = WalkForwardEvaluationBasis.WINDOW_RESTART_RETURNS
     interpretation: str = WALK_FORWARD_INTERPRETATION
+    # 유지율의 분모(창마다 고른 칸의 학습 세션 샤프 평균)와, `gap` 없이 유지율만 비었을 때의 이유.
+    # 화면은 이유를 번역만 한다 — 비운 칸을 계산 실패로 읽지 않게 한다.
+    train_sharpe_mean: float | None = None
+    retention_gap: RetentionGap | None = None
 
 
 @dataclass(frozen=True)
@@ -333,13 +353,16 @@ class ExperimentRunService:
 
     def _robustness(
         self, run_id: str
-    ) -> tuple[ExperimentRequest, tuple[AdmittedRun, StrategySpec, RunEnvironment]]:
+    ) -> tuple[
+        ExperimentRequest, tuple[AdmittedRun, StrategySpec, RunEnvironment], tuple[str, ...]
+    ]:
         """결과 실행 `run_id` 의 "튼튼한지 확인하기" 실험 요청과 그 기반 접수(US-DM-11).
 
         기반은 그 실행의 원본 요청이고, 탐색·분할·기간 끝은 `domain/experiment` 의 기본 설계
         (`robustness_search`·`robustness_split`·`robustness_end`)다. 지표 창은 분할이 정하므로 뺀다.
         단일 실행만 받는다(실험 trial·검증 실행의 요청은 창 구간·칸 값으로 좁혀져 있다). 저장
-        리비전이 아닌 실행은 실험 기반 규칙대로 `experiment.base.unsaved` 로 거절한다.
+        리비전이 아닌 실행은 실험 기반 규칙대로 `experiment.base.unsaved` 로 거절한다. 셋째 값은
+        팩터 출력이 읽지 않아 펴지 않은 숫자 파라미터다.
         """
         source = self._runs.source_run(run_id)
         if source is None:
@@ -362,17 +385,17 @@ class ExperimentRunService:
             # 짧은 꼬리 검증 창을 버린다. 기간이 바뀌었으니 접수 판정을 다시 탄다(드문 경우).
             run = replace(run, environment=replace(run.environment, end=end))
             base = self._base(run)
-        request = ExperimentRequest(
-            run=run,
-            search=robustness_search(base[1].parameters, base[0].run.parameter_values),
-            split=split,
+        search = robustness_search(
+            base[1].parameters, base[0].run.parameter_values, read=read_parameter_ids(base[1])
         )
-        return request, base
+        request = ExperimentRequest(run=run, search=search.search, split=split)
+        return request, base, search.unread
 
-    def preview_robustness(self, run_id: str) -> ExperimentPreview:
+    def preview_robustness(self, run_id: str) -> RobustnessPreview:
         """ "튼튼한지 확인하기" 실험의 미리 계산 — 확인 창이 새로 세는 시도 수를 먼저 보인다."""
-        request, base = self._robustness(run_id)
-        return self._preview(*self._design(request, base))
+        request, base, unread = self._robustness(run_id)
+        preview = self._preview(*self._design(request, base))
+        return RobustnessPreview(**vars(preview), unread_parameters=unread)
 
     def create_robustness(self, run_id: str) -> Experiment:
         """ "튼튼한지 확인하기" 실험을 만들어 대기열에 넣는다.
@@ -380,7 +403,7 @@ class ExperimentRunService:
         결과 화면이 `run_id` 로 다시 찾는다. 같은 실행의 확인 실험이 아직 끝나지 않았으면 거절한다 —
         탭 두 개에서 누른 요청이 같은 계산을 두 번 대기열에 올리지 않게 한다.
         """
-        request, base = self._robustness(run_id)
+        request, base, _ = self._robustness(run_id)
         _, design = self._design(request, base)
         with self._lock:
             if any(not item.settled for item in self.robustness_checks(run_id)):
@@ -736,7 +759,16 @@ class ExperimentRunService:
         curve = stitch_out_of_sample(segments)
         oos = out_of_sample_sharpe(curve, self._registry, record.run.annualization_days)
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
-        return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
+        retention = walk_forward_retention(oos, train)
+        return WalkForwardReport(
+            windows,
+            curve,
+            oos,
+            retention.value,
+            None,
+            train_sharpe_mean=retention.train_sharpe_mean,
+            retention_gap=retention.gap,
+        )
 
     def remaining_time(self, experiment_id: str) -> TimeEstimate | None:
         """남은 실행을 차례로 돈다고 본 시간 어림(로드맵 M6 Experiment Monitor ETA, 규칙은

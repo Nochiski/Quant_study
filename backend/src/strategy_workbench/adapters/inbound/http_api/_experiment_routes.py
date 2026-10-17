@@ -29,6 +29,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
     ExperimentRunService,
     ExperimentTrialState,
     ParameterMap,
+    RobustnessPreview,
     WalkForwardReport,
 )
 from strategy_workbench.application.experiment_run.facade.ports import ExperimentSelection
@@ -223,7 +224,7 @@ def register_experiment_routes(
         operation_id="previewRobustnessCheck",
         responses=robustness,
     )
-    def preview_robustness_check(run_id: str) -> ExperimentPreview:
+    def preview_robustness_check(run_id: str) -> RobustnessPreview:
         """결과 실행의 "튼튼한지 확인하기" 미리 계산 — 기본 설계와 새로 세는 시도 수(US-DM-11)."""
         return admitted(lambda: experiments.preview_robustness(run_id))
 

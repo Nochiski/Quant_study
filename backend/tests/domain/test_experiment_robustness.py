@@ -8,6 +8,7 @@ import pytest
 
 from strategy_workbench.domain.experiment.facade.design import (
     InvalidExperimentSpecError,
+    RobustnessSearch,
     SplitMode,
     SplitSpec,
     robustness_end,
@@ -18,7 +19,13 @@ from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
     FloatParameter,
     IntegerParameter,
+    ParameterDefinition,
 )
+
+
+def _ids(parameters: tuple[ParameterDefinition, ...]) -> set[str]:
+    """팩터 출력이 모든 파라미터를 읽는다."""
+    return {parameter.parameter_id for parameter in parameters}
 
 
 def _rolling(train_years: int) -> SplitSpec:
@@ -65,27 +72,44 @@ def test_numeric_parameters_are_searched_around_the_current_value_within_range()
     )
     current = {"scale": 1.0, "window": 20, "threshold": 0.5, "mode": "b"}
 
-    assert robustness_search(parameters, current) == {
+    assert robustness_search(parameters, current, read=_ids(parameters)).search == {
         "scale": [0.0, 1.0],
         "window": [15, 20, 25],
         "threshold": [0.4, 0.5, 0.6],
     }
-    assert robustness_search((), {}) == {}
+    assert robustness_search((), {}, read=()) == RobustnessSearch({}, ())
+
+
+def test_numeric_parameters_the_factor_output_does_not_read_stay_at_the_current_value() -> None:
+    """실데이터 확인(2026-10-17) 후속 3: 펴도 칸 점수가 모두 같아 시도 수만 늘린다."""
+    parameters = (
+        IntegerParameter("window", 20, 5, 60, kind="integer", step=5),
+        FloatParameter("unused", 0.5, 0.0, 1.0, kind="float", step=0.1),
+        ChoiceParameter("mode", "a", ("a", "b"), kind="choice"),
+    )
+
+    found = robustness_search(parameters, {"unused": 0.3}, read={"window"})
+
+    assert found == RobustnessSearch({"window": [15, 20, 25]}, ("unused",))
 
 
 def test_neighbours_are_exact_decimal_steps_not_float_noise() -> None:
     """재검토 P2: 0.3 - 0.1 이 0.19999… 가 아니라 격자 값 0.2 여야 같은 설정이 같은 시도 키다."""
     parameter = FloatParameter("th", 0.3, 0.0, 1.0, kind="float", step=0.1)
-    assert robustness_search((parameter,), {"th": 0.3}) == {"th": [0.2, 0.3, 0.4]}
+    assert robustness_search((parameter,), {"th": 0.3}, read={"th"}).search == {
+        "th": [0.2, 0.3, 0.4]
+    }
     no_step = FloatParameter("w", 0.7, 0.0, 1.0, kind="float")
     # 0.7 의 ±20% = ±0.14.
-    assert robustness_search((no_step,), {"w": 0.7}) == {"w": [0.56, 0.7, 0.84]}
+    assert robustness_search((no_step,), {"w": 0.7}, read={"w"}).search == {"w": [0.56, 0.7, 0.84]}
 
 
 def test_a_zero_value_without_step_moves_by_a_tenth_of_the_range() -> None:
     parameter = FloatParameter("tilt", 0.0, -1.0, 1.0, kind="float")
     # 0 의 ±20% 는 0 이라 범위 폭의 10%(= 20% 의 절반)로 옮긴다.
-    assert robustness_search((parameter,), {"tilt": 0.0}) == {"tilt": [-0.2, 0.0, 0.2]}
+    assert robustness_search((parameter,), {"tilt": 0.0}, read={"tilt"}).search == {
+        "tilt": [-0.2, 0.0, 0.2]
+    }
 
 
 def test_too_many_numeric_parameters_are_refused_with_the_cell_count() -> None:
@@ -93,7 +117,7 @@ def test_too_many_numeric_parameters_are_refused_with_the_cell_count() -> None:
         IntegerParameter(f"p{index}", 10, 0, 100, kind="integer", step=1) for index in range(5)
     )
     with pytest.raises(InvalidExperimentSpecError) as refused:
-        robustness_search(parameters, {})
+        robustness_search(parameters, {}, read=_ids(parameters))
     # 3⁵ = 243 칸 > 81.
     assert refused.value.code == "experiment.robustness.too_many_parameters"
     assert "243칸" in str(refused.value)

@@ -5163,6 +5163,14 @@ export type ResearchPreview = {
 export type ResearchWarningSeverity = "info" | "warning";
 
 /**
+ * RetentionGap
+ *
+ * 곡선이 났는데도(`WalkForwardGap` 없음) 유지율이 비는 이유. 화면은 번역만 한다.
+ */
+export type RetentionGap =
+  "out_of_sample_unavailable" | "no_train_sharpe" | "non_positive_train_sharpe";
+
+/**
  * ReviseDocumentRequest
  */
 export type ReviseDocumentRequest = {
@@ -5296,6 +5304,47 @@ export type RiskStep = {
    * Sector Neutral
    */
   sector_neutral?: boolean;
+};
+
+/**
+ * RobustnessPreview
+ *
+ * "튼튼한지 확인하기" 미리 계산.
+ *
+ * 숫자 파라미터지만 팩터 출력이 읽지 않아 펴지 않고 지금 값에 둔 파라미터(`robustness_search`)를
+ * 함께 싣는다 — 확인 창이 그 사정을 말한다.
+ */
+export type RobustnessPreview = {
+  /**
+   * Combination Count
+   */
+  combination_count: number;
+  design: ExperimentDesign;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string;
+  /**
+   * New Trial Count
+   */
+  new_trial_count: number;
+  /**
+   * Run Count
+   */
+  run_count: number;
+  time_estimate: TimeEstimate | null;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trial Count After
+   */
+  trial_count_after: number;
+  /**
+   * Unread Parameters
+   */
+  unread_parameters?: Array<string>;
 };
 
 /**
@@ -7991,6 +8040,11 @@ export type WalkForwardReport = {
    * Retention
    */
   retention: number | null;
+  retention_gap?: RetentionGap | null;
+  /**
+   * Train Sharpe Mean
+   */
+  train_sharpe_mean?: number | null;
   /**
    * Windows
    */
@@ -9051,7 +9105,7 @@ export type PreviewRobustnessCheckResponses = {
   /**
    * Successful Response
    */
-  200: ExperimentPreview;
+  200: RobustnessPreview;
 };
 
 export type PreviewRobustnessCheckResponse =

@@ -8376,6 +8376,16 @@
         "title": "ResearchWarningSeverity",
         "type": "string"
       },
+      "RetentionGap": {
+        "description": "곡선이 났는데도(`WalkForwardGap` 없음) 유지율이 비는 이유. 화면은 번역만 한다.",
+        "enum": [
+          "out_of_sample_unavailable",
+          "no_train_sharpe",
+          "non_positive_train_sharpe"
+        ],
+        "title": "RetentionGap",
+        "type": "string"
+      },
       "ReviseDocumentRequest": {
         "properties": {
           "expected_revision": {
@@ -8588,6 +8598,68 @@
           }
         },
         "title": "RiskStep",
+        "type": "object"
+      },
+      "RobustnessPreview": {
+        "description": "\"튼튼한지 확인하기\" 미리 계산.\n\n숫자 파라미터지만 팩터 출력이 읽지 않아 펴지 않고 지금 값에 둔 파라미터(`robustness_search`)를\n함께 싣는다 — 확인 창이 그 사정을 말한다.",
+        "properties": {
+          "combination_count": {
+            "title": "Combination Count",
+            "type": "integer"
+          },
+          "design": {
+            "$ref": "#/components/schemas/ExperimentDesign"
+          },
+          "lineage_id": {
+            "title": "Lineage Id",
+            "type": "string"
+          },
+          "new_trial_count": {
+            "title": "New Trial Count",
+            "type": "integer"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "time_estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trial_count_after": {
+            "title": "Trial Count After",
+            "type": "integer"
+          },
+          "unread_parameters": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unread Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "design",
+          "combination_count",
+          "run_count",
+          "lineage_id",
+          "trial_count",
+          "new_trial_count",
+          "trial_count_after",
+          "time_estimate"
+        ],
+        "title": "RobustnessPreview",
         "type": "object"
       },
       "RollingMetricPoint": {
@@ -12734,6 +12806,27 @@
             ],
             "title": "Retention"
           },
+          "retention_gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetentionGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "train_sharpe_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Train Sharpe Mean"
+          },
           "windows": {
             "items": {
               "$ref": "#/components/schemas/WalkForwardWindowResult"
@@ -14410,7 +14503,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperimentPreview"
+                  "$ref": "#/components/schemas/RobustnessPreview"
                 }
               }
             },

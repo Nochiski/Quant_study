@@ -355,6 +355,7 @@ describe("experiments", () => {
               windows: [], curve: [], out_of_sample_sharpe: null,
               retention: null, gap: null, interpretation: "서버가 제공한 평가 한계",
               evaluation_basis: "window_restart_returns",
+              retention_gap: "out_of_sample_unavailable", train_sharpe_mean: 0.02,
             })
           : new HttpResponse(null, { status: 503 }),
       ),
@@ -367,6 +368,10 @@ describe("experiments", () => {
     expect(await screen.findByText("서버가 제공한 평가 한계")).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText(/표본 밖 샤프.*—.*유지율 —/u)).toBeVisible();
+    // "—"만 두지 않고 유지율이 빈 이유를 서버 코드대로 말한다.
+    expect(
+      screen.getByText(/유지율 없음: 이어 붙인 검증 곡선의 샤프를 잴 수 없어요/u),
+    ).toBeVisible();
     const windows = screen.getByRole("region", { name: "워크포워드 검증 창" });
     windows.focus();
     expect(windows).toHaveFocus();

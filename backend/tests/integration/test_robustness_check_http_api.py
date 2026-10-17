@@ -33,6 +33,7 @@ def test_a_saved_run_previews_creates_and_finds_its_robustness_check() -> None:
     # 템플릿 전략은 파라미터가 없어 칸 하나로 워크포워드만 돈다. 기반 실행이 이미 센 시도의
     # 재확인이라 N 이 그대로다.
     assert body["combination_count"] == 1
+    assert body["unread_parameters"] == []
     assert (body["trial_count"], body["new_trial_count"]) == (1, 0)
     (window,) = body["design"]["windows"]
     assert (window["test_start"], window["test_end"]) == ("2022-01-04", "2022-12-30")

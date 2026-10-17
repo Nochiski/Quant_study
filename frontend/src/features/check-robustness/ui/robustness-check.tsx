@@ -7,6 +7,7 @@ import {
   experimentStatusLabel,
   experimentWalkForwardQuery,
   robustnessChecksQuery,
+  retentionGapLabel,
   walkForwardGapLabel,
   type Experiment,
 } from "../../../entities/experiment";
@@ -187,7 +188,10 @@ const OutOfSample = ({ experimentId }: { experimentId: string }) => {
               retention: percent(data.retention),
             })}
           </p>
-          <p>{t("backtest.robustness.retentionMeaning")}</p>
+          <p>
+            {retentionGapLabel(data) ??
+              t("backtest.robustness.retentionMeaning")}
+          </p>
           <LineChart
             title={t("backtest.robustness.curve")}
             series={[

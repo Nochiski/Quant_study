@@ -73,6 +73,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentNotFoundError,
     ExperimentStateError,
     InvalidExperimentSpecError,
+    RetentionGap,
     SplitMode,
     SplitSpec,
     WalkForwardGap,
@@ -85,8 +86,15 @@ from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentStatus,
     TrialStatus,
 )
+from strategy_workbench.domain.factor.facade.expression import (
+    BinaryNode,
+    BinaryOperator,
+    FactorGraph,
+    ParameterNode,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
+    FactorSignal,
     FloatParameter,
     ParameterValue,
 )
@@ -94,8 +102,29 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from ..assistant_result_samples import sample_backtest_result
 
 _AT = datetime(2026, 9, 30, tzinfo=UTC)
+_TEMPLATE = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
+
+
+def _reading_scale(factor: FactorSignal) -> FactorSignal:
+    """팩터 출력에 배율 `scale` 을 곱한다 — 튼튼한지 확인하기는 출력이 읽는 파라미터만 편다."""
+    graph = factor.graph
+    nodes = (
+        *graph.nodes,
+        ParameterNode(node_id="scale_value", parameter_id="scale", kind="parameter"),
+        BinaryNode(
+            node_id="scaled_output",
+            operator=BinaryOperator.MULTIPLY,
+            left_node_id=graph.output_node_id,
+            right_node_id="scale_value",
+            kind="binary",
+        ),
+    )
+    return replace(factor, graph=FactorGraph(nodes=nodes, output_node_id="scaled_output"))
+
+
 _STRATEGY = replace(
-    StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template(),
+    _TEMPLATE,
+    factors=(_reading_scale(_TEMPLATE.factors[0]), *_TEMPLATE.factors[1:]),
     parameters=(
         FloatParameter("scale", 1.0, -1.0, 1.0, kind="float", step=1.0),
         ChoiceParameter("mode", "a", ("a", "b"), kind="choice"),
@@ -161,6 +190,8 @@ class _FakeRuns:
         self.on_ledger: Callable[[], None] | None = None
         # 결과 실행의 원본 요청과 종류(튼튼한지 확인하기의 기반).
         self.sources: dict[str, SourceRun] = {}
+        # 접수가 해소해 돌려주는 전략.
+        self.strategy = _STRATEGY
 
     def source_run(self, run_id: str) -> SourceRun | None:
         return self.sources.get(run_id)
@@ -171,7 +202,7 @@ class _FakeRuns:
             hook()
         resolved = replace(
             request,
-            strategy=_STRATEGY,
+            strategy=self.strategy,
             parameter_values={"scale": 1.0, "mode": "a", **request.parameter_values},
         )
         return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
@@ -877,6 +908,22 @@ def test_a_retry_refused_by_the_base_recheck_leaves_no_attempt() -> None:
     assert len(service.trials(experiment_id)[0].attempts) == 1
 
 
+def test_robustness_check_keeps_a_parameter_the_factor_output_never_reads_and_says_so() -> None:
+    """실데이터 확인(2026-10-17) 후속 3: 펴도 칸 점수가 모두 같아 시도 수만 는다."""
+    runs = _FakeRuns()
+    runs.strategy = replace(_STRATEGY, factors=_TEMPLATE.factors)  # scale 을 선언만 한다
+    runs.sources["single-1"] = SourceRun(_BASE, single=True)
+    service = _service(runs)
+
+    preview = service.preview_robustness("single-1")
+
+    assert preview.unread_parameters == ("scale",)
+    assert preview.design.search.axes == ()
+    assert preview.combination_count == 1
+    assert preview.new_trial_count == 1
+    assert preview.design.parameter_values == {"scale": 1.0, "mode": "b"}
+
+
 def test_robustness_check_searches_around_the_run_and_is_found_by_its_run(
     tmp_path: Path,
 ) -> None:
@@ -1084,8 +1131,43 @@ def test_the_stitched_curve_chains_only_test_window_returns() -> None:
     assert report.out_of_sample_sharpe == pytest.approx(mean / deviation)
     # 유지율 = 표본 밖 세션 샤프 ÷ 고른 칸 학습 샤프 평균 (0.2 + 0.3) / 2.
     assert report.retention == pytest.approx(mean / deviation / 0.25)
-    assert report.gap is None
+    assert report.train_sharpe_mean == pytest.approx(0.25)
+    assert (report.gap, report.retention_gap) == (None, None)
     assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_a_negative_train_mean_leaves_retention_empty_with_its_reason() -> None:
+    """실데이터 확인(2026-10-17) 후속 2: 곡선·표본 밖 샤프는 났는데 유지율만 빌 때 이유를 싣는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    # 창 0 은 칸 (0,) -0.1, 창 1 은 칸 (1,) -0.05 를 고른다 — 학습 평균 -0.075.
+    _finish(
+        runs,
+        {
+            "run-0": _result(-0.1),
+            "run-1": _result(-0.3),
+            "run-2": _result(-0.2),
+            "run-3": _result(-0.05),
+        },
+    )
+    service.advance(experiment_id)
+    cash = _BASE.initial_cash
+    _finish(
+        runs,
+        {
+            "run-4": _result(equity=((date(2022, 1, 4), cash), (date(2022, 1, 5), cash * 1.01))),
+            "run-5": _result(equity=((date(2023, 1, 4), cash), (date(2023, 1, 5), cash * 0.99))),
+        },
+    )
+
+    report = service.walk_forward(experiment_id)
+
+    assert report.gap is None
+    assert report.out_of_sample_sharpe is not None
+    assert report.retention is None
+    assert report.train_sharpe_mean == pytest.approx(-0.075)
+    assert report.retention_gap is RetentionGap.NON_POSITIVE_TRAIN_SHARPE
 
 
 def test_a_failed_test_window_empties_the_summary_with_its_reason() -> None:

@@ -17,6 +17,7 @@ import {
   trialStatusTone,
   useExperimentProgress,
   useRetryExperimentTrial,
+  retentionGapLabel,
   walkForwardGapLabel,
   type ExperimentTrialState,
 } from "../../../entities/experiment";
@@ -84,6 +85,7 @@ const WalkForward = ({
       </section>
     );
   const { data } = report;
+  const retentionGap = data.gap == null ? retentionGapLabel(data) : null;
   return (
     <section
       className="experiment-section"
@@ -107,6 +109,7 @@ const WalkForward = ({
             })
           : walkForwardGapLabel(data.gap)}
       </p>
+      {retentionGap === null ? null : <p>{retentionGap}</p>}
       <div
         className="data-list-page__scroll experiment-table-scroll"
         role="region"
@@ -220,8 +223,13 @@ export const ExperimentPage = () => {
     >
       <header className="data-list-page__header">
         <div>
-          <h1 id="experiment-title" aria-labelledby="experiment-heading experiment-identifier">
-            <span id="experiment-heading">{t("experiments.detail.heading")}</span>
+          <h1
+            id="experiment-title"
+            aria-labelledby="experiment-heading experiment-identifier"
+          >
+            <span id="experiment-heading">
+              {t("experiments.detail.heading")}
+            </span>
           </h1>
           <p>
             <Badge tone={experimentStatusTone(experiment.data.status)}>

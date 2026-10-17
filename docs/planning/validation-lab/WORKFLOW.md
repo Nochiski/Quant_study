@@ -58,7 +58,13 @@ main
 | API contract | backend 전체 → `uv run python scripts/export_openapi.py openapi.json` → `npm run api:generate` → frontend 전체 |
 | frontend | focused vitest → `npm run typecheck` → `npm run lint` → `npm test` → `npm run build` |
 | E2E 포함 | 위 + `npm run test:e2e`(머신 잠금 러너) |
+| **실데이터 확인(모든 기능 PR, 우선)** | mock 게이트와 별개로 로컬 원장(duckdb 어댑터)에 연결한 서버로 그 기능을 끝까지 돌린다 — [실데이터 확인 절차·열람 기록](./REAL-DATA-CHECKS.md) |
 
+- **실데이터 우선(2026-10-17 사용자 결정)**: 기능 PR은 mock 테스트 통과만으로 끝내지 않는다. 구현하면 먼저
+  실데이터 서버로 그 기능의 경로(계산이 끝까지 도는가, 값이 채워지는가, 소요 시간, 실데이터에서만 나는 오류)를
+  확인하고, 결과와 본 범위를 [REAL-DATA-CHECKS.md](./REAL-DATA-CHECKS.md)의 열람 기록에 한 줄 남기며, PR 본문 테스트
+  계획에 "실데이터 확인" 결과를 적는다. 구간은 2020-01-02 이후만 쓰고 봉인(2016~2019)은 열지 않는다. 기술 확인이지
+  성과 판정이 아니다 — 수치를 보고 전략·설계를 바꾸면 그 사실도 기록한다(연구 로드맵 6절 노출 기록).
 - 실행 설정 모델이 바뀌면 `uv run python tools/export_runtime_schema.py`로 스키마 fixture를 재생성한다.
 - `uv sync`를 돌렸으면 게이트 전에 `maturin develop --release`를 다시 돌린다(editable `backtest_core` 휠 제거).
 - PR 크기는 [YAML Strategy Workbench WORKFLOW 12절](../strategy-workbench-yaml-ui/WORKFLOW.md)을 따른다. 상한을

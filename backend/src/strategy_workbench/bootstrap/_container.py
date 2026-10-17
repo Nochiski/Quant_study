@@ -222,6 +222,7 @@ def build_container(
         run_repository=run_repository,
         new_id=lambda: str(uuid4()),
         run_slots=run_slots,
+        factor_registry=factor_registry,
     )
     # 결과 설명 세션이 완료된 실행을 읽으므로 실행 레지스트리를 먼저 세운다(결과 설명 spec R2).
     assistant_services = build_assistant_services(

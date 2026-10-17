@@ -18,6 +18,9 @@ from starlette.concurrency import run_in_threadpool
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
+from strategy_workbench.application.backtest_run.facade.factor_regression import (
+    RunFactorRegression,
+)
 from strategy_workbench.application.backtest_run.facade.runs import (
     AccountReport,
     BacktestArtifactUnreadableError,
@@ -542,6 +545,27 @@ def create_app(
     def get_backtest_validation_report(run_id: str) -> RunValidationReport:
         try:
             return backtest_runs.validation_report(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+        except BacktestResultNotReadyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/factor-regression",
+        operation_id="getBacktestFactorRegression",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_factor_regression(run_id: str) -> RunFactorRegression:
+        try:
+            return backtest_runs.factor_regression(run_id)
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
         except BacktestResultNotReadyError as error:

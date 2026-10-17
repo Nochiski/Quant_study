@@ -181,7 +181,7 @@
 | 워크포워드 유지율 | 실험 | `domain/experiment` |
 | 이웃 평균 | 실험 | `domain/experiment`(V3-01) |
 | ±20% 민감도·봉우리 판정 | 실험 | `domain/experiment`(V4-03) |
-| 팩터 회귀(α·t·β, HAC) | 실행 | 회귀 계산은 `domain/analytics`의 새 함수. 시장 팩터는 유니버스 시가총액 가중 수익률(지수 데이터 GAP-09 우회). 규모·가치·모멘텀 롱숏 수익률은 Factor Registry의 기존 `factor_id`와 기존 평가 경로를 재사용하고 새 팩터 정의를 만들지 않는다. 데이터를 읽는 application 노드와 포트는 V4-05가 정한다 |
+| 팩터 회귀(α·t·β, HAC) | 실행 | 회귀 계산은 `domain/analytics`의 새 함수. 시장 팩터는 유니버스 시가총액 가중 수익률(지수 데이터 GAP-09 우회). 규모·가치·모멘텀 롱숏 수익률은 Factor Registry의 기존 `factor_id`와 기존 평가 경로를 재사용하고 새 팩터 정의를 만들지 않는다. V4-05 결정: `application/backtest_run` 이 기존 포트폴리오 파이프라인으로 단면을 읽고(새 포트 없음), 규모 중앙값 × 30·70 분위 2×3 시가총액 가중 정렬, Newey·West HAC 일별 OLS. 정본은 SoT "완료 run 의 팩터 회귀" 행 |
 | 알파 t 기준 | 계열 | `domain/experiment`의 상수 하나: 계열 N이 20 이상이면 3.0, 아니면 2.0(Harvey·Liu·Zhu 2016) |
 | 용량 한계 금액 | 실험(용량 스윕) | `domain/experiment` |
 

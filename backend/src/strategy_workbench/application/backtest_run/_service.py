@@ -6,7 +6,7 @@ from collections import deque
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
-from threading import Event, RLock, Thread
+from threading import Event, Lock, RLock, Thread
 
 from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCompatibility,
@@ -15,7 +15,9 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     PortfolioPipelineOptions,
+    PortfolioPipelineResult,
     PortfolioPreviewRequest,
+    PortfolioSnapshotMismatchError,
     RawObservationContractError,
     RawObservationUnavailableError,
 )
@@ -24,6 +26,11 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     PageRequest,
     StrategyNotFoundError,
     StrategyRepositoryPort,
+)
+from strategy_workbench.domain.analytics.facade.factor_regression import (
+    FactorRegressionUnavailableReason,
+    regress_on_factors,
+    unavailable_factor_regression,
 )
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.account_report import (
@@ -48,6 +55,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     InlineDraft,
     ResolvedBacktestRunSpec,
     RunFailureCode,
+    RunManifest,
     RunProgressEvent,
     RunStage,
     RunStatus,
@@ -67,7 +75,15 @@ from strategy_workbench.domain.backtest.facade.trials import (
     summarize_trial_ledger,
     trial_key,
 )
-from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe_evidence
+from strategy_workbench.domain.experiment.facade.statistics import (
+    alpha_t_threshold,
+    run_deflated_sharpe_evidence,
+)
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorRegistry,
+    build_default_factor_registry,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     InvalidParameterValueError,
     StrategySpec,
@@ -75,6 +91,14 @@ from strategy_workbench.domain.strategy.facade.specification import (
     strategy_spec_hash,
 )
 
+from ._factor_regression import (
+    MOMENTUM_FACTOR_ID,
+    VALUE_FACTOR_ID,
+    RunFactorRegression,
+    factor_periods,
+    factor_regression_spec,
+    strategy_period_returns,
+)
 from ._gc_policy import full_collections_suspended
 from ._scheduler import RunLaneControls, RunQueue, experiment_slots
 from ._validation_report import RunValidationReport
@@ -262,6 +286,7 @@ class BacktestRunService:
         new_id: Callable[[], str],
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         run_slots: int = DEFAULT_RUN_SLOTS,
+        factor_registry: FactorRegistry | None = None,
     ) -> None:
         if run_slots < 1:
             raise ValueError(f"run_slots must be at least 1 — run_slots={run_slots!r}")
@@ -274,6 +299,9 @@ class BacktestRunService:
         self._new_id = new_id
         self._now = now
         self._run_slots = run_slots
+        # 팩터 회귀가 모멘텀·가치 기본 graph 를 읽는다(V4-05). 레지스트리는 순수 값이라 주입이
+        # 없으면 기본 레지스트리를 만든다.
+        self._factor_registry = factor_registry or build_default_factor_registry()
         self._records: dict[str, _RunRecord] = {}
         # 끝난 run 은 최근 것만 메모리에 둔다(끝난 순). 상태·요청·결과의 정본은 저장소·산출물이다.
         self._finished: deque[str] = deque()
@@ -281,6 +309,7 @@ class BacktestRunService:
         self._running = 0
         self._running_experiments = 0
         self._lock = RLock()
+        self._factor_regression_lock = Lock()
         self._close_interrupted_runs()
 
     def slot_usage(self) -> tuple[int, int]:
@@ -610,6 +639,91 @@ class BacktestRunService:
             ),
             dsr=run_deflated_sharpe_evidence(result, ledger),
         )
+
+    def factor_regression(self, run_id: str) -> RunFactorRegression:
+        """검증된 완료 결과의 세션 초과수익을 시장·규모·가치·모멘텀에 회귀한다(V4-05).
+
+        팩터 단면은 run 의 실행 설정으로 기존 포트폴리오 파이프라인을 다시 돌려 읽는다. 결측 정책은
+        채우지 않는 `drop` 으로 바꾼다 — 채운 팩터 값으로 정렬하면 없는 신호가 포트폴리오에 든다.
+        지금 데이터 판이 run 의 판과 다르면 회귀하지 않는다(다른 데이터로 잰 노출을 그 run 의 것으로
+        보이지 않는다). 실행·선택 기록은 쓰지 않는다.
+        """
+        result = self.result(run_id)
+        manifest = result.manifest
+        strategy = strategy_period_returns(result)
+        days = manifest.run_spec.annualization_days
+        pipeline = self._factor_pipeline(manifest)
+        if isinstance(pipeline, FactorRegressionUnavailableReason):
+            report = unavailable_factor_regression(
+                pipeline, strategy_period_count=len(strategy), annualization_days=days
+            )
+            evaluation_version = None
+        else:
+            report = regress_on_factors(
+                strategy, factor_periods(pipeline.observations), annualization_days=days
+            )
+            evaluation_version = pipeline.preview.tape.factor_evaluation_version
+        lineage_id = self._lineage(
+            manifest.run_spec,
+            manifest.strategy_provenance
+            if manifest.strategy_provenance.kind is StrategySourceKind.SAVED_REVISION
+            else None,
+        )
+        trial_count = None if lineage_id is None else self.trial_ledger(lineage_id).trial_count
+        return RunFactorRegression(
+            run_id=manifest.run_id,
+            run_fingerprint=manifest.run_fingerprint,
+            data_snapshot_id=manifest.data_snapshot_id,
+            momentum_factor_id=MOMENTUM_FACTOR_ID,
+            value_factor_id=VALUE_FACTOR_ID,
+            factor_registry_version=self._factor_registry.version,
+            factor_evaluation_version=evaluation_version,
+            trial_count=trial_count,
+            alpha_t_threshold=None if trial_count is None else alpha_t_threshold(trial_count),
+            report=report,
+        )
+
+    def _factor_pipeline(
+        self, manifest: RunManifest
+    ) -> PortfolioPipelineResult | FactorRegressionUnavailableReason:
+        """run 의 실행 설정으로 팩터 단면을 읽는다. 데이터가 없거나 판이 다르면 그 사유.
+
+        유니버스 전체를 읽는 무거운 조회라 한 번에 하나만 돈다 — 화면을 여러 번 열어도 메모리·
+        CPU 가 요청 수만큼 늘어 도는 백테스트와 다투지 않게 한다(V4-05 리뷰 P2-1).
+        """
+        try:
+            with self._factor_regression_lock:
+                pipeline = self._portfolio_design.run_pipeline(
+                    PortfolioPreviewRequest(
+                        factor_regression_spec(self._factor_registry),
+                        environment=replace(manifest.environment, missing=MissingPolicy.DROP),
+                    )
+                )
+        except RawObservationUnavailableError as error:
+            logger.warning(
+                "factor regression inputs unavailable — run_id=%s environment=%s: %s",
+                manifest.run_id,
+                manifest.environment_hash,
+                error,
+            )
+            return FactorRegressionUnavailableReason.DATA_UNAVAILABLE
+        except PortfolioSnapshotMismatchError as error:
+            # 원천과 팩터 메타데이터가 서로 다른 판을 답했다 — 조회 중 데이터가 바뀐 경합이다.
+            logger.warning(
+                "factor regression skipped — snapshot moved during the read: run_id=%s: %s",
+                manifest.run_id,
+                error,
+            )
+            return FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED
+        if pipeline.data_snapshot_id != manifest.data_snapshot_id:
+            logger.warning(
+                "factor regression skipped — data snapshot changed: run_id=%s run=%s current=%s",
+                manifest.run_id,
+                manifest.data_snapshot_id,
+                pipeline.data_snapshot_id,
+            )
+            return FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED
+        return pipeline
 
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.

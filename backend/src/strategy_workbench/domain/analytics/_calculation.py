@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from datetime import date
 from itertools import pairwise
 from statistics import NormalDist
 
@@ -198,11 +199,23 @@ def _excess_returns(
     """
     excess: list[float] = []
     for (before, after), value in zip(pairwise(points), returns, strict=True):
-        rate = base_rate(before.session)
-        if rate is None:
+        risk_free = interval_risk_free(before.session, after.session)
+        if risk_free is None:
             return None
-        excess.append(value - rate * (after.session - before.session).days / _DAYS_PER_YEAR)
+        excess.append(value - risk_free)
     return tuple(excess)
+
+
+def interval_risk_free(start: date, end: date) -> float | None:
+    """구간(`start` 세션 종가 → `end` 세션 종가)의 무위험수익률. 기준금리 이력 이전이면 None.
+
+    `start` 에 유효한 한국은행 기준금리를 두 세션 사이 달력 일수만큼 ACT/365로 일할한다. 샤프·
+    소르티노의 초과수익과 팩터 회귀의 초과수익이 같은 값을 쓴다.
+    """
+    rate = base_rate(start)
+    if rate is None:
+        return None
+    return rate * (end - start).days / _DAYS_PER_YEAR
 
 
 def _risk_adjusted(

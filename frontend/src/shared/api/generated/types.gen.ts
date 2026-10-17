@@ -2352,6 +2352,17 @@ export type EquityCurvePoint = {
 };
 
 /**
+ * ExcludedFactorPeriods
+ */
+export type ExcludedFactorPeriods = {
+  /**
+   * Count
+   */
+  count: number;
+  reason: FactorPeriodGap;
+};
+
+/**
  * ExclusionReason
  */
 export type ExclusionReason =
@@ -3092,6 +3103,25 @@ export type FactorExplanation = {
 };
 
 /**
+ * FactorExposure
+ */
+export type FactorExposure = {
+  /**
+   * Beta
+   */
+  beta: number;
+  factor: FactorKind;
+  /**
+   * Standard Error
+   */
+  standard_error: number;
+  /**
+   * T Value
+   */
+  t_value: number | null;
+};
+
+/**
  * FactorGraph
  */
 export type FactorGraph = {
@@ -3155,9 +3185,93 @@ export type FactorGraphValidation = {
 };
 
 /**
+ * FactorKind
+ */
+export type FactorKind = "market" | "size" | "value" | "momentum";
+
+/**
+ * FactorPeriodGap
+ */
+export type FactorPeriodGap =
+  | "base_rate_not_covered"
+  | "no_market_weight"
+  | "size_value_empty"
+  | "size_momentum_empty"
+  | "no_factor_period";
+
+/**
  * FactorPreference
  */
 export type FactorPreference = "high" | "low";
+
+/**
+ * FactorRegressionFit
+ */
+export type FactorRegressionFit = {
+  /**
+   * Alpha Annualized
+   */
+  alpha_annualized: number;
+  /**
+   * Alpha Per Session
+   */
+  alpha_per_session: number;
+  /**
+   * Alpha Standard Error
+   */
+  alpha_standard_error: number;
+  /**
+   * Alpha T Value
+   */
+  alpha_t_value: number | null;
+  /**
+   * Exposures
+   */
+  exposures: Array<FactorExposure>;
+  /**
+   * Hac Lag
+   */
+  hac_lag: number;
+  /**
+   * R Squared
+   */
+  r_squared: number | null;
+};
+
+/**
+ * FactorRegressionReport
+ *
+ * 회귀 결과. `fit` 이 없으면 `unavailable_reason` 이 있다.
+ */
+export type FactorRegressionReport = {
+  /**
+   * Annualization Days
+   */
+  annualization_days: number;
+  /**
+   * Excluded Periods
+   */
+  excluded_periods: Array<ExcludedFactorPeriods>;
+  fit: FactorRegressionFit | null;
+  /**
+   * Observation Count
+   */
+  observation_count: number;
+  /**
+   * Strategy Period Count
+   */
+  strategy_period_count: number;
+  unavailable_reason: FactorRegressionUnavailableReason | null;
+};
+
+/**
+ * FactorRegressionUnavailableReason
+ */
+export type FactorRegressionUnavailableReason =
+  | "insufficient_observations"
+  | "singular_design"
+  | "data_snapshot_changed"
+  | "data_unavailable";
 
 /**
  * FactorSignal
@@ -5271,6 +5385,57 @@ export type RunEnvironmentSchema = {
    * Schema Hash
    */
   schema_hash: string;
+};
+
+/**
+ * RunFactorRegression
+ *
+ * 불변 실행과 그 데이터 판으로 잰 팩터 회귀. 계열 통계(N·t 기준)는 조회 시점 원장이다.
+ */
+export type RunFactorRegression = {
+  /**
+   * Alpha T Threshold
+   *
+   * 알파 t 값의 기준(N ≥ 20 이면 3.0, 아니면 2.0, Harvey·Liu·Zhu 2016). 계열이 없어 N 을 모르면 null.
+   */
+  alpha_t_threshold: number | null;
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Factor Evaluation Version
+   *
+   * 단면을 계산한 팩터 평가 규칙 판본. 같은 run 이라도 이 판본이나 레지스트리 판본이 바뀌면 값이 달라질 수 있다. 파이프라인을 돌리지 못했으면 null.
+   */
+  factor_evaluation_version: string | null;
+  /**
+   * Factor Registry Version
+   */
+  factor_registry_version: string;
+  /**
+   * Momentum Factor Id
+   */
+  momentum_factor_id: string;
+  report: FactorRegressionReport;
+  /**
+   * Run Fingerprint
+   */
+  run_fingerprint: string;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Trial Count
+   *
+   * 조회 시점 계열 원장의 시도 수 N. 계열 없는 실행은 null.
+   */
+  trial_count: number | null;
+  /**
+   * Value Factor Id
+   */
+  value_factor_id: string;
 };
 
 /**
@@ -8666,6 +8831,50 @@ export type StreamBacktestEventsResponses = {
    */
   200: unknown;
 };
+
+export type GetBacktestFactorRegressionData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/factor-regression";
+};
+
+export type GetBacktestFactorRegressionErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestFactorRegressionError =
+  GetBacktestFactorRegressionErrors[keyof GetBacktestFactorRegressionErrors];
+
+export type GetBacktestFactorRegressionResponses = {
+  /**
+   * Successful Response
+   */
+  200: RunFactorRegression;
+};
+
+export type GetBacktestFactorRegressionResponse =
+  GetBacktestFactorRegressionResponses[keyof GetBacktestFactorRegressionResponses];
 
 export type GetBacktestRequestData = {
   body?: never;

@@ -223,13 +223,8 @@ export const ExperimentPage = () => {
     >
       <header className="data-list-page__header">
         <div>
-          <h1
-            id="experiment-title"
-            aria-labelledby="experiment-heading experiment-identifier"
-          >
-            <span id="experiment-heading">
-              {t("experiments.detail.heading")}
-            </span>
+          <h1 id="experiment-title" aria-labelledby="experiment-heading experiment-identifier">
+            <span id="experiment-heading">{t("experiments.detail.heading")}</span>
           </h1>
           <p>
             <Badge tone={experimentStatusTone(experiment.data.status)}>

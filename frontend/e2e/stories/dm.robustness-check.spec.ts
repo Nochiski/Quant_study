@@ -187,11 +187,12 @@ test(
     await expect(outOfSample).toContainText(
       `표본 밖 샤프(세션 단위) ${report.out_of_sample_sharpe?.toFixed(4) ?? ""} · 유지율 ${retention}`,
     );
-    if (report.retention === null) {
-      // 비운 유지율은 "—"만 두지 않고 서버가 준 이유를 말한다.
-      expect(report.retention_gap).toEqual(expect.any(String));
-      await expect(outOfSample).toContainText("유지율 없음:");
-    }
+    // mock 자료는 학습 샤프 평균이 0 이하라 유지율이 빈다. "—"만 두지 않고 서버가 준 이유를 말한다.
+    expect(report.retention).toBeNull();
+    expect(report.retention_gap).toBe("non_positive_train_sharpe");
+    await expect(outOfSample).toContainText(
+      "유지율 없음: 고른 설정의 학습 샤프 평균이",
+    );
     await expect(
       outOfSample.getByRole("img", { name: /검증 구간만 이어 붙인 곡선/u }),
     ).toBeVisible();

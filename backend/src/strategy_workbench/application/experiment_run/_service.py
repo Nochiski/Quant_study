@@ -47,6 +47,8 @@ from strategy_workbench.domain.experiment.facade.design import (
     pick_window_cell,
     planned_spans,
     plateau_map,
+    robustness_search,
+    robustness_split,
     run_spans,
     stitch_out_of_sample,
     walk_forward_gap,
@@ -328,13 +330,56 @@ class ExperimentRunService:
         _, design = self._design(request)
         return self._create(request.run, request.split, design)
 
+    def robustness_request(self, run_id: str) -> ExperimentRequest:
+        """결과 실행 `run_id` 의 "튼튼한지 확인하기" 실험 요청(US-DM-11).
+
+        기반은 그 실행의 원본 요청이고, 탐색·분할은 `domain/experiment` 의 기본 설계
+        (`robustness_search`·`robustness_split`)다. 지표 창은 분할이 정하므로 뺀다. 저장 리비전이
+        아닌 실행은 실험 기반 규칙대로 `experiment.base.unsaved` 로 거절한다.
+        """
+        requested = self._runs.request(run_id)
+        if requested is None:
+            raise ExperimentNotFoundError(
+                "experiment.robustness.run_not_found",
+                f"튼튼한지 확인할 실행을 찾을 수 없습니다: run_id={run_id}",
+            )
+        run = replace(requested, metric_windows=())
+        _admitted, strategy, environment = self._base(run)
+        return ExperimentRequest(
+            run=run,
+            search=robustness_search(strategy.parameters),
+            split=robustness_split(environment.start, environment.end),
+        )
+
+    def preview_robustness(self, run_id: str) -> ExperimentPreview:
+        """ "튼튼한지 확인하기" 실험의 미리 계산 — 확인 창이 새로 세는 시도 수를 먼저 보인다."""
+        return self.preview(self.robustness_request(run_id))
+
+    def create_robustness(self, run_id: str) -> Experiment:
+        """ "튼튼한지 확인하기" 실험을 만들어 대기열에 넣는다.
+
+        결과 화면이 `run_id` 로 다시 찾는다.
+        """
+        request = self.robustness_request(run_id)
+        _, design = self._design(request)
+        return self._create(request.run, request.split, design, source_run_id=run_id)
+
+    def robustness_checks(self, run_id: str) -> tuple[Experiment, ...]:
+        """결과 실행 `run_id` 에서 만든 실험, 최근에 만든 순. 없으면 빈 튜플."""
+        return tuple(self._experiment(record) for record in self._repository.by_source_run(run_id))
+
     def create_capacity(self, request: CapacitySweepRequest) -> Experiment:
         """용량 스윕을 만들고 금액마다 기반 실행 구간 전체를 대기열에 넘긴다."""
         _, design = self._capacity_design(request)
         return self._create(request.run, None, design)
 
     def _create(
-        self, run: BacktestRunSpec, split: SplitSpec | None, design: ExperimentDesign
+        self,
+        run: BacktestRunSpec,
+        split: SplitSpec | None,
+        design: ExperimentDesign,
+        *,
+        source_run_id: str | None = None,
     ) -> Experiment:
         record = ExperimentRecord(
             experiment_id=self._new_id(),
@@ -343,6 +388,7 @@ class ExperimentRunService:
             split=split,
             design=design,
             controls=DEFAULT_EXPERIMENT_CONTROLS,
+            source_run_id=source_run_id,
         )
         self._repository.add(record)
         self._spawn(lambda: self._submit(record))

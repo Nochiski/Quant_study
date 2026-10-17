@@ -53,6 +53,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     DEFAULT_RUN_SLOTS,
+    BacktestRunNotFoundError,
     BacktestRunResult,
     BacktestRunService,
     BacktestRunSpec,
@@ -343,6 +344,12 @@ class _RunServiceTrialRuns:
         if self._held_run_ids is not None:
             self._held_run_ids.add(run_id)
         return run_id
+
+    def request(self, run_id: str) -> BacktestRunSpec | None:
+        try:
+            return self._runs.request(run_id)
+        except BacktestRunNotFoundError:
+            return None
 
     def result(self, run_id: str) -> BacktestRunResult:
         try:

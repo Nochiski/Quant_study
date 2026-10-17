@@ -30,6 +30,9 @@ class ExperimentRecord:
     design: ExperimentDesign
     controls: ExperimentControls
     cancelled_at: datetime | None = None
+    # "튼튼한지 확인하기"로 만든 실험이면 그 버튼이 있던 결과의 실행(US-DM-11). 결과 화면이 이
+    # 실행의 실험을 찾는다. 직접 만든 실험은 None 이다.
+    source_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +166,13 @@ class ExperimentRepositoryPort(Protocol):
 
         디코드 실패 행은 adapter가 식별자를 로그에 남기고 건너뛴다. 원장은 변경하지 않는다.
         모르는 `after` 면 빈 목록이고, 저장소 전체 읽기 실패는 전파한다.
+        """
+        ...
+
+    def by_source_run(self, run_id: str) -> tuple[ExperimentRecord, ...]:
+        """`source_run_id` 가 `run_id` 인 기록, 최근에 만든 순.
+
+        읽지 못하는 행은 `list` 처럼 건너뛴다.
         """
         ...
 

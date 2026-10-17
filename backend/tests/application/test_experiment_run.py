@@ -158,6 +158,11 @@ class _FakeRuns:
         self.unreadable: set[str] = set()
         # `trial_ledger` 를 읽을 때마다 부른다(락 밖에서 읽는지 본다).
         self.on_ledger: Callable[[], None] | None = None
+        # 접수한 원본 요청(튼튼한지 확인하기의 기반).
+        self.requests: dict[str, BacktestRunSpec] = {}
+
+    def request(self, run_id: str) -> BacktestRunSpec | None:
+        return self.requests.get(run_id)
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
         if self.before_admit is not None:
@@ -871,6 +876,41 @@ def test_a_retry_refused_by_the_base_recheck_leaves_no_attempt() -> None:
     assert len(service.trials(experiment_id)[0].attempts) == 1
 
 
+def test_robustness_check_searches_every_declared_parameter_and_is_found_by_its_run(
+    tmp_path: Path,
+) -> None:
+    """US-DM-11: 결과 실행 하나로 기본 설계의 실험을 만들고, 그 실행으로 다시 찾는다."""
+    runs = _FakeRuns()
+    window = MetricWindow(MetricScope.OUT_OF_SAMPLE, date(2023, 1, 2), date(2023, 6, 30))
+    runs.requests["single-1"] = replace(_BASE, metric_windows=(window,))
+    path = tmp_path / "research.sqlite3"
+    service = _service(runs, repository=SQLiteExperimentRepository(path))
+
+    preview = service.preview_robustness("single-1")
+    created = service.create_robustness("single-1")
+    other = service.create(_request())
+
+    # 선언한 두 파라미터의 격자 전체: scale 3 값(-1, 0, 1) × mode 2 값 = 6 칸.
+    assert [axis.parameter_id for axis in preview.design.search.axes] == ["scale", "mode"]
+    assert preview.combination_count == 6
+    # 2021-01-04 ~ 2023-06-30 은 학습 3년 + 검증 1년을 담지 못해 학습 1년·검증 1년이다.
+    assert created.record.split == SplitSpec(
+        mode=SplitMode.ROLLING, train_years=1, test_years=1, embargo_sessions=5
+    )
+    # 지표 창은 분할이 정하므로 기반 요청에서 뺀다.
+    assert created.record.run == _BASE
+    assert created.record.source_run_id == "single-1"
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+    assert [item.record.experiment_id for item in reopened.robustness_checks("single-1")] == [
+        created.record.experiment_id
+    ]
+    assert reopened.get(other.record.experiment_id).record.source_run_id is None
+    assert reopened.robustness_checks("single-2") == ()
+    with pytest.raises(ExperimentNotFoundError) as missing:
+        service.preview_robustness("single-2")
+    assert missing.value.code == "experiment.robustness.run_not_found"
+
+
 def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path) -> None:
     """#348 리뷰 P3-4: 판본 3 파일(조작 표 없음)을 열면 실험 행은 그대로이고 조작은 기본값이다."""
     runs = _FakeRuns()
@@ -881,6 +921,7 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
         .record.experiment_id
     )
     with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE experiment_sources")
         connection.execute("DROP TABLE experiment_control_changes")
         connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")
@@ -1235,6 +1276,7 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
         document = json.loads(stored)
         del document["design"]["measured"]
         connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(document),))
+        connection.execute("DROP TABLE experiment_sources")
         connection.execute("DROP TABLE experiment_control_changes")
         connection.execute("DROP TABLE backtest_run_starts")
         connection.execute("DROP TABLE experiment_window_picks")

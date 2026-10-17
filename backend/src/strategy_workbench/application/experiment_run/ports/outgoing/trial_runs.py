@@ -80,6 +80,10 @@ class TrialRunPort(Protocol):
         """
         ...
 
+    def request(self, run_id: str) -> BacktestRunSpec | None:
+        """접수한 원본 실행 요청. 모르는 실행이면 None(튼튼한지 확인하기의 기반, US-DM-11)."""
+        ...
+
     def result(self, run_id: str) -> BacktestRunResult:
         """완료된 실행의 결과(이어 붙인 검증 곡선).
 

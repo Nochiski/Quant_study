@@ -23,10 +23,11 @@ EXPERIMENT_SPEC_CODES: frozenset[str] = frozenset(
         "experiment.split.no_window",
         "experiment.capacity.invalid_amounts",
         "experiment.capacity.base_not_run",
+        "experiment.robustness.period_too_short",
     }
 )
 EXPERIMENT_NOT_FOUND_CODES: frozenset[str] = frozenset(
-    {"experiment.not_found", "experiment.trial.not_found"}
+    {"experiment.not_found", "experiment.trial.not_found", "experiment.robustness.run_not_found"}
 )
 # 실험·trial 의 지금 상태로는 받을 수 없는 요청이다.
 EXPERIMENT_STATE_CODES: frozenset[str] = frozenset(

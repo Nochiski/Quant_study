@@ -14,6 +14,7 @@
 | 5 | 워크포워드 창별 자동 선택(V3-05): `experiment_window_picks` |
 | 6 | run 시작 시각(로드맵 M6 시간 추정): `backtest_run_starts` |
 | 7 | 실험 조작 이력(로드맵 M6 감사 기록): `experiment_control_changes` |
+| 8 | 실험을 만든 결과 실행(검증 랩 V5-02 튼튼한지 확인하기): `experiment_sources` |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
 파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다.
@@ -32,7 +33,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -314,6 +315,28 @@ _V7_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V7_SCHEMA_OBJECTS = V6_SCHEMA_OBJECTS + _V7_ADDED_OBJECTS
 
+# "튼튼한지 확인하기"가 만든 실험과 그 버튼이 있던 결과 실행. 결과 화면이 실행으로 실험을 찾는다.
+# 설계 JSON 에 두지 않고 곁 표로 둬 실행 id 로 색인한다. 직접 만든 실험은 행이 없다.
+_V8_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "experiment_sources",
+        """
+        CREATE TABLE experiment_sources (
+            experiment_order INTEGER PRIMARY KEY REFERENCES experiments (experiment_order),
+            source_run_id TEXT NOT NULL COLLATE BINARY CHECK (length(trim(source_run_id)) >= 1)
+        )
+        """,
+    ),
+    (
+        "index",
+        "experiment_sources_by_run",
+        "CREATE INDEX experiment_sources_by_run ON experiment_sources (source_run_id)",
+    ),
+)
+
+V8_SCHEMA_OBJECTS = V7_SCHEMA_OBJECTS + _V8_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -330,7 +353,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V7_SCHEMA_OBJECTS,
+            objects=V8_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
@@ -339,6 +362,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 SchemaUpgrade(4, V4_SCHEMA_OBJECTS, _added(_V5_ADDED_OBJECTS)),
                 SchemaUpgrade(5, V5_SCHEMA_OBJECTS, _added(_V6_ADDED_OBJECTS)),
                 SchemaUpgrade(6, V6_SCHEMA_OBJECTS, _added(_V7_ADDED_OBJECTS)),
+                SchemaUpgrade(7, V7_SCHEMA_OBJECTS, _added(_V8_ADDED_OBJECTS)),
             ),
         ),
     )

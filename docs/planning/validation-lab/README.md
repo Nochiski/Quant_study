@@ -11,6 +11,7 @@
   이 initiative의 계약 SoT
 - [WORKFLOW.md](./WORKFLOW.md): Phase별 PR scope packet과 공통 gate
 - [PLAN.md](./PLAN.md): PR 상태, 리뷰·검증 결과를 계속 갱신하는 단일 진행 추적 파일
+- [REAL-DATA-CHECKS.md](./REAL-DATA-CHECKS.md): 기능마다 우선하는 실데이터 확인 절차와 열람 기록
 - [tools/update-plan-progress.ps1](./tools/update-plan-progress.ps1): PLAN.md 집계 갱신
 - 디자인보드: [전략 검증 랩 UI/UX 기획](https://claude.ai/artifact/5jYGBTPKcWFHhjB4fvEtup)
 - 수학 노트: [검증 랩 수학 노트](https://claude.ai/artifact/CieccrnXuEpin4DWmvuXvu)

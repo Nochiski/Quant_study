@@ -38,6 +38,9 @@ progress_percent: 79
 
 ## 현재 결정
 
+- 2026-10-17 사용자: 앞으로 기능을 구현할 때마다 실데이터(로컬 원장, duckdb 어댑터)에 연결해 **우선** 확인한다.
+  WORKFLOW 공통 gate에 "실데이터 확인" 단계를 더했고 절차·열람 기록은 [REAL-DATA-CHECKS.md](./REAL-DATA-CHECKS.md)다.
+  이미 머지한 #538·#539·#540은 같은 날 소급 확인했다.
 - 2026-10-17 사용자: 남은 병행 항목은 번호 낮은 순(V4-05 → V5-02 잔여 → V6-01)으로 진행한다. 퀀트 방법론
   결정은 묻지 않고 업계 관행·수학적 근거로 정해 PR 설계 결정에 남긴다. V4-05는 FF3·Carhart 2×3 시가총액 가중 정렬과
   Newey·West HAC 일별 회귀로 정했다(WORKFLOW V4-05 결정).
@@ -136,7 +139,7 @@ progress_percent: 79
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04, V3-05 | `MERGED` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
-| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `IN_PROGRESS` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), [#537](https://github.com/Nochiski/Quant_study/pull/537) main 머지 `c8b87b65`(2026-10-17). 둘째 slice: AI 결과 설명 검증 근거(US-DM-12, `구현됨-e2e`) [#539](https://github.com/Nochiski/Quant_study/pull/539) · 리뷰 1차 REQUEST_CHANGES(P2 2·P3 4) 전부 반영. 셋째 slice: 튼튼한지 확인하기·표본 밖 곡선(US-DM-11·US-CS-09, `구현됨-e2e`) `feat/vlab-robustness-check`. backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 잔여: 추적·미리보기 parameter_values. 전체 V5-02 미완료 |
+| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `IN_PROGRESS` | 첫 slice: [PSR·DSR 카드/조회 계약](./V5-02-run-validation-card.md), [#537](https://github.com/Nochiski/Quant_study/pull/537) main 머지 `c8b87b65`(2026-10-17). 둘째 slice: AI 결과 설명 검증 근거(US-DM-12, `구현됨-e2e`) [#539](https://github.com/Nochiski/Quant_study/pull/539) · 리뷰 1차 REQUEST_CHANGES(P2 2·P3 4) 전부 반영. 셋째 slice: 튼튼한지 확인하기·표본 밖 곡선(US-DM-11·US-CS-09, `구현됨-e2e`) [#540](https://github.com/Nochiski/Quant_study/pull/540) main 머지 `f3f58356`. backend 구현·전체 회귀 4820 passed/1 skipped(기존 live opt-in), 관련 회귀 150 passed. frontend 전체 111 files/1434 passed, 정적 제목 최종 등록본 mock 스토리 2 passed(14.1초); root 시각 QA 4 PNG·독립 리뷰 확정 P1/P2 없음. 잔여: 추적·미리보기 parameter_values. 전체 V5-02 미완료 |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `MERGED` | [#345](https://github.com/Nochiski/Quant_study/pull/345) · main 머지 `ebf2a6ea`(2026-09-30) |

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
+from decimal import Decimal
 
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
@@ -33,13 +34,13 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 from ._errors import InvalidExperimentSpecError
+from ._plateau import SENSITIVITY_STEP
 from ._walk_forward import SplitMode, SplitSpec, _add_years
 
 __all__ = [
     "ROBUSTNESS_EMBARGO_SESSIONS",
     "ROBUSTNESS_MAX_POINTS",
     "ROBUSTNESS_MIN_TEST_DAYS",
-    "ROBUSTNESS_RELATIVE_STEP",
     "ROBUSTNESS_TEST_YEARS",
     "ROBUSTNESS_TRAIN_YEARS",
     "robustness_end",
@@ -51,8 +52,6 @@ ROBUSTNESS_TEST_YEARS = 1
 # 앞에서부터 고른다: 담을 수 있는 가장 긴 학습 기간.
 ROBUSTNESS_TRAIN_YEARS = (3, 1)
 ROBUSTNESS_EMBARGO_SESSIONS = 5
-# 간격 없는 실수 파라미터를 옮기는 폭(고원 민감도 `SENSITIVITY_STEP` 과 같은 ±20%).
-ROBUSTNESS_RELATIVE_STEP = 0.2
 # 국소 격자 칸 수 상한: 숫자 파라미터 넷(3⁴)까지.
 ROBUSTNESS_MAX_POINTS = 81
 # 꼬리 검증 창의 최소 길이(약 반년). 이보다 짧은 마지막 창은 버린다.
@@ -75,20 +74,23 @@ def robustness_search(
         value = current.get(parameter.parameter_id, parameter.default)
         if isinstance(value, bool) or not isinstance(value, int | float):
             continue
-        if isinstance(parameter, IntegerParameter):
-            delta: float = parameter.step
-        elif parameter.step is not None:
-            delta = parameter.step
+        # 기존 격자(`parameter_grid_values`)처럼 Decimal 로 센다 — float 뺄셈의 잡음(0.3 - 0.1 =
+        # 0.19999…)이 축 값이 되면 같은 설정이 다른 시도 키로 원장에 두 번 센다.
+        center = Decimal(str(value))
+        if parameter.step is not None:
+            delta = Decimal(str(parameter.step))
+        elif center != 0:
+            delta = abs(center) * Decimal(str(SENSITIVITY_STEP))
         else:
-            delta = abs(value) * ROBUSTNESS_RELATIVE_STEP or (
-                (parameter.maximum - parameter.minimum) * ROBUSTNESS_RELATIVE_STEP / 2
-            )
+            span = Decimal(str(parameter.maximum)) - Decimal(str(parameter.minimum))
+            delta = span * Decimal(str(SENSITIVITY_STEP)) / 2
+        low, high = Decimal(str(parameter.minimum)), Decimal(str(parameter.maximum))
+        as_number = int if isinstance(parameter, IntegerParameter) else float
         values: list[ParameterValue] = []
-        for candidate in (value - delta, value, value + delta):
-            if parameter.minimum <= candidate <= parameter.maximum and candidate not in values:
-                values.append(
-                    int(candidate) if isinstance(parameter, IntegerParameter) else float(candidate)
-                )
+        for candidate in (center - delta, center, center + delta):
+            number = as_number(candidate)
+            if low <= candidate <= high and number not in values:
+                values.append(number)
         search[parameter.parameter_id] = values
         points *= len(values)
     if points > ROBUSTNESS_MAX_POINTS:

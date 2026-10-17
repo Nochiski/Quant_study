@@ -73,6 +73,15 @@ def test_numeric_parameters_are_searched_around_the_current_value_within_range()
     assert robustness_search((), {}) == {}
 
 
+def test_neighbours_are_exact_decimal_steps_not_float_noise() -> None:
+    """재검토 P2: 0.3 - 0.1 이 0.19999… 가 아니라 격자 값 0.2 여야 같은 설정이 같은 시도 키다."""
+    parameter = FloatParameter("th", 0.3, 0.0, 1.0, kind="float", step=0.1)
+    assert robustness_search((parameter,), {"th": 0.3}) == {"th": [0.2, 0.3, 0.4]}
+    no_step = FloatParameter("w", 0.7, 0.0, 1.0, kind="float")
+    # 0.7 의 ±20% = ±0.14.
+    assert robustness_search((no_step,), {"w": 0.7}) == {"w": [0.56, 0.7, 0.84]}
+
+
 def test_a_zero_value_without_step_moves_by_a_tenth_of_the_range() -> None:
     parameter = FloatParameter("tilt", 0.0, -1.0, 1.0, kind="float")
     # 0 의 ±20% 는 0 이라 범위 폭의 10%(= 20% 의 절반)로 옮긴다.

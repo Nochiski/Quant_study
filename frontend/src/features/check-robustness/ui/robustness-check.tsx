@@ -51,7 +51,9 @@ export const RobustnessCheck = ({
   const canStart =
     single &&
     checks.isSuccess &&
-    (latest === undefined || latest.record.cancelled_at != null);
+    // 취소한 실험도 남은 실행이 멈출 때(settled)까지는 서버가 새 확인을 받지 않는다.
+    (latest === undefined ||
+      (latest.record.cancelled_at != null && latest.settled));
 
   let body;
   if (checks.isPending)

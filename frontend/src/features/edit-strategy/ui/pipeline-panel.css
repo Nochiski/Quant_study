@@ -198,7 +198,11 @@
 }
 .graph-authoring {
   container: graph-authoring / inline-size;
+  flex: none;
   min-width: 0;
+}
+.graph-authoring .factor-graph__state {
+  min-height: 0;
 }
 .graph-authoring__navigation {
   position: sticky;

@@ -27,6 +27,7 @@ test(
     await expectPhase(page, "검증 통과");
 
     // 필드 이름을 외우지 않아도 된다: 전략 구조를 걸러 찾고 고른다.
+    await page.getByRole("button", { name: "전략 구조", exact: true }).click();
     await page.getByLabel("전략 구조 필터").fill("max_name_weight");
     const outline = page.getByRole("tree", { name: "StrategySpec 문서 구조" });
     await outline.getByRole("treeitem", { name: /max_name_weight/u }).click();
@@ -36,6 +37,7 @@ test(
     await expect(
       contract.getByRole("heading", { name: "종목별 최대 목표 비중 한도" }),
     ).toBeVisible();
+    await contract.getByText("필드 경로 · 타입 · 기술 근거", { exact: true }).click();
     await expect(
       contract
         .getByRole("term")

@@ -107,6 +107,9 @@ const factor = async (
   await canvas
     .getByRole("button", { name: "알파 팩터 · 항목 추가", exact: true })
     .click();
+  // 새 팩터의 노드 작업에서 구성으로 복귀한 뒤 이름·방향·레시피를 편집한다.
+  await page.getByRole("button", { name: "전략 구성으로 돌아가기", exact: true }).click();
+  await expect(canvas).toBeVisible();
   // 새 항목이 parse 투영에 나타난 뒤 편집한다. 기존 마지막 팩터를 먼저 채우면 안 된다.
   await expect(labels).toHaveCount(previousCount + 1);
   await waitForSettledDocument(page);

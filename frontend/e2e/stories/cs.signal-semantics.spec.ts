@@ -39,6 +39,16 @@ const environment = {
 };
 const pipeline = (page: Page) =>
   page.getByRole("region", { name: "전략 파이프라인" });
+/** 정규화·거르기·위험 설정은 선택 노드의 문맥을 명시적으로 나와 전략 전체에서 편집한다. */
+const openStrategyComposition = async (page: Page) => {
+  await openEditorWorkspace(page);
+  const graphTab = page.getByRole("tab", { name: "그래프", exact: true });
+  await graphTab.click();
+  await expect(graphTab).toHaveAttribute("aria-selected", "true");
+  const back = page.getByRole("button", { name: "전략 구성으로 돌아가기", exact: true });
+  if (await back.isVisible()) await back.click();
+  await expect(pipeline(page)).toBeVisible();
+};
 const number = (value: number) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 }).format(value);
 const linked = (page: Page, id: string) =>
@@ -62,7 +72,7 @@ const load = async (page: Page, source: string) => {
   await openEditor(page, "/research/strategies/new");
   await replaceSource(page, source);
   await waitForSettledDocument(page);
-  await page.getByRole("tab", { name: "그래프", exact: true }).click();
+  await openStrategyComposition(page);
   await fillRunEnvironment(page, {}, environment);
 };
 const trace = async (page: Page, factorId: string, securities: string[]) => {
@@ -131,8 +141,7 @@ test(
     await expect(selector).toHaveValue("rank");
     const scores = new Map<string, number[]>();
     for (const mode of ["rank", "zscore", "none"] as const) {
-      await openEditorWorkspace(page);
-      await page.getByRole("tab", { name: "그래프", exact: true }).click();
+      await openStrategyComposition(page);
       await selector.selectOption(mode);
       await waitForSettledDocument(page);
       const problems = page.getByRole("region", { name: "문제", exact: true });
@@ -229,7 +238,7 @@ test(
     await expectPhase(page, "구조 오류");
     const upgraded = await upgradeFromBanner(page);
     expect(upgraded.source).toContain("normalization: none");
-    await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await openStrategyComposition(page);
     await expect(
       pipeline(page).getByRole("combobox", {
         name: "점수 정규화",

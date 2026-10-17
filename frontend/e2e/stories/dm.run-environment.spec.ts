@@ -129,15 +129,18 @@ test(
     await universe.click();
     await expect(oos).toHaveValue("");
     await expect(oos).toHaveAttribute("aria-invalid", "true");
-    const oosIncomplete = page.getByText(
-      "연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
-    );
-    await expect(oosIncomplete.first()).toBeVisible();
+    const oosIncomplete = page.locator(".backtest-settings__errors").getByRole("listitem").filter({
+      hasText: "연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
+    });
+    await expect(oosIncomplete).toBeVisible();
+    await expect(oosIncomplete).toHaveText("OOS 시작일: 연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.");
     await expect(summary).toContainText(
       "실행 설정의 OOS 시작일 칸을 고치세요: 연·월·일까지 모두 올바르게 입력하세요.",
     );
     await expect(backtest(page)).toBeDisabled();
     // 띠의 "실행 설정 고치기"가 OOS 칸으로 초점을 옮긴다(#266 재리뷰 P3-2).
+    await page.keyboard.press("Escape");
+    await expect(oos).toBeHidden();
     await summary.getByRole("button", { name: "실행 설정 고치기" }).click();
     await expect(oos).toBeFocused();
 

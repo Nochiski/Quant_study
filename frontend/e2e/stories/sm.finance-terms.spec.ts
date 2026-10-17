@@ -57,6 +57,7 @@ test(
       .click();
 
     // 문서의 금융 필드는 전략 구조에서 고르면 계약 패널이 한글 뜻을 보인다.
+    await page.getByRole("button", { name: "전략 구조", exact: true }).click();
     await page.getByLabel("전략 구조 필터").fill("selection_count");
     await page
       .getByRole("tree", { name: "StrategySpec 문서 구조" })
@@ -72,6 +73,7 @@ test(
     // 내려가므로, 사용자처럼 제목까지 굴려 올려 읽는다.
     await scrollPageTo(heading);
     expect(await coveringElement(heading)).toBeNull();
+    await contract.getByText("필드 경로 · 타입 · 기술 근거", { exact: true }).click();
     await expect(
       contract
         .getByRole("term")

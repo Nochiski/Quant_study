@@ -72,7 +72,8 @@ describe("DirtyLeaveGuard (backlog 21)", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveAccessibleName(result ? "백테스트 실행이 접수되었습니다" : "저장하지 않은 변경이 있습니다");
     expect(dialog).toHaveAccessibleDescription(result ? "실행 결과 화면으로 이동할까요?" : "이 화면을 떠나면 편집 중인 내용이 사라집니다.");
-    expect(within(dialog).getByRole("button", { name: result ? "편집 계속" : "머무르기" })).toHaveFocus();
+    // 대화상자 DOM이 먼저 관찰될 수 있다. effect가 예약한 동일 버튼의 초점 이동까지 기다린다.
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: result ? "편집 계속" : "머무르기" })).toHaveFocus());
     expect(within(dialog).getByRole("button", { name: result ? "결과 보기" : "나가기" })).toBeVisible();
     expect(router.state.location.pathname).toBe("/");
     if (result) {

@@ -205,6 +205,49 @@
   border: 0;
 }
 
+@media (max-width: 760px) {
+  /* 좁은 화면에서는 본문과 긴 원문 경로가 상태·복사 열에 눌리지 않게 각 행을 준다. */
+  .problems__item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .problems__navigate {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .problems__severity {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .problems__kind {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .problems__message,
+  .problems__where {
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .problems__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    padding: 0 var(--space-3) var(--space-2);
+  }
+
+  .problems__summary,
+  .problems__filters {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
 @media (max-width: 840px) {
   .problems__header {
     align-items: flex-start;

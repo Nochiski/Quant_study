@@ -21,18 +21,21 @@ test(
   "US-DM-03 스크롤바가 폭을 차지하는 창에서도 사이드바가 붙었다 떴다 하지 않는다",
   { tag: ["@story", "@US-DM-03"] },
   async ({ page }) => {
-    // 1660×1120: 스크롤바가 없을 때 본문은 1424px로 계약과 사이드바를 나란히 두는 임계(1418px) 위다.
-    // 사이드바를 붙이면 페이지가 창보다 길어져 스크롤바(15px)가 본문을 1409px로 줄인다. 판정이 스크롤바를
-    // 뺀 폭을 읽으면 사이드바가 매 프레임 붙었다 떴다 했다.
-    await page.setViewportSize({ width: 1660, height: 1120 });
+    // 새 본문 여백에서 1636×1120은 스크롤바를 제외한 폭이 1424px로 나란히 배치하는 임계(1418px) 위다.
+    // OS의 실제 classic gutter가 차지한 폭까지 판정에서 빼면 임계 아래가 된다.
+    await page.setViewportSize({ width: 1636, height: 1120 });
     await openEditor(page, "/research/strategies/new");
+    // 본문은 창 높이에 제한되므로, 상시 페이지 스크롤바를 쓰는 OS 환경을 fixture에서 명시한다.
+    await page.addStyleTag({ content: ":root { overflow-y: scroll; }" });
+    await page.getByRole("button", { name: "전략 구조", exact: true }).click();
+    await page.getByRole("button", { name: "계약", exact: true }).click();
     await page
       .getByRole("button", { name: "AI 어시스턴트", exact: true })
       .click();
     await expect(
       page.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
     ).toBeVisible();
-    // 스크롤바가 폭을 차지하는 상태를 재현했는지 먼저 본다. 사이드바 내용이 늦게 차서 기다린다.
+    // 가짜 폭을 넣지 않는다. OS의 실제 스크롤바가 폭을 차지하는 상태인지 먼저 본다.
     await expect
       .poll(() =>
         page.evaluate(
@@ -40,11 +43,13 @@ test(
         ),
       )
       .toBeGreaterThan(0);
-    const remounts = await page.evaluate(
+    const observed = await page.evaluate(
       () =>
-        new Promise<number>((resolve) => {
-          let count = 0;
-          const observer = new MutationObserver((records) => {
+        new Promise<{ remounts: number; modeTransitions: number }>((resolve) => {
+          let remounts = 0;
+          let modeTransitions = 0;
+          const floating = (classes: string | null) => classes?.split(/\s+/u).includes("ide__drawer") ?? false;
+          const observeChanges = (records: MutationRecord[]) => {
             for (const record of records)
               for (const node of record.addedNodes)
                 if (
@@ -52,15 +57,25 @@ test(
                   (node.matches(".ide__assistant") ||
                     node.querySelector(".ide__assistant") !== null)
                 )
-                  count += 1;
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
+                  remounts += 1;
+            const modeRecords = records.filter(record => record.type === "attributes" && record.target instanceof HTMLElement && record.target.matches(".ide__assistant"));
+            for (const [index, record] of modeRecords.entries()) {
+              // 한 callback 안에서 붙음→뜸→붙음이 모두 일어나도 oldValue의 연결로 각 전환을 센다.
+              const next = modeRecords.slice(index + 1).find(candidate => candidate.target === record.target);
+              const after = next === undefined ? (record.target as HTMLElement).getAttribute("class") : next.oldValue;
+              if (floating(record.oldValue) !== floating(after)) modeTransitions += 1;
+            }
+          };
+          const observer = new MutationObserver(observeChanges);
+          observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
           setTimeout(() => {
+            observeChanges(observer.takeRecords());
             observer.disconnect();
-            resolve(count);
+            resolve({ remounts, modeTransitions });
           }, 1_000);
         }),
     );
-    expect(remounts, "1초 동안 사이드바가 다시 마운트된 횟수").toBe(0);
+    expect(observed.remounts, "1초 동안 사이드바가 다시 마운트된 횟수").toBe(0);
+    expect(observed.modeTransitions, "같은 1초 동안 사이드바의 붙음·뜸 배치가 바뀐 횟수").toBe(0);
   },
 );

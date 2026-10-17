@@ -474,8 +474,10 @@ export const StrategyIde = ({
       disabled: !onSelectSymbol,
       execute: () => {
         close(["debuggerOpen"]);
+        // 심볼 명령은 원문 이동이다. 떠 있는 보조 패널 뒤에 편집 초점을 남기지 않는다.
+        if (narrow) close(["outlineOpen", "inspectorOpen", "assistantOpen"]);
         onSelectSymbol?.(symbol.pointer);
-        inspect(false);
+        if (!narrow) inspect(false);
       },
     }));
     return [
@@ -492,6 +494,7 @@ export const StrategyIde = ({
     hasAssistant,
     inspect,
     layout,
+    narrow,
     onRedo,
     onRunBacktest,
     onSave,
@@ -682,12 +685,12 @@ export const StrategyIde = ({
   const assistantNode = hasAssistant ? (
     <aside
       id={ids.assistant}
-      className="ide__assistant"
+      className={`ide__assistant${assistantFloating ? ` ${drawerClass}` : ""}`}
       aria-label={t("ide.assistant")}
       // 펼친 직후 포커스를 받을 수 있게 한다. 탭 순서에는 들어가지 않는다.
       tabIndex={-1}
       hidden={!layout.assistantOpen}
-      style={assistantFloating ? undefined : { width: layout.assistantWidth }}
+      style={assistantFloating ? railDrawer : { width: layout.assistantWidth }}
     >
       {/*
         패널의 landmark·이름·제목은 슬롯이 소유한다(WORKFLOW B-04 Acceptance). 슬롯 내용은 이름 없는
@@ -747,17 +750,22 @@ export const StrategyIde = ({
           >
             {t("command.open")} <kbd>Ctrl/⌘ K</kbd>
           </Button>
-          {!layout.outlineOpen ? (
+          {compact || !layout.outlineOpen ? (
             <Button
               ref={outlineRestore}
               size="small"
+              onPointerDown={(event) => {
+                // 열린 서랍의 blur가 click보다 먼저 닫아 같은 버튼을 다시 여는 것을 막는다.
+                if (compact && layout.outlineOpen) event.preventDefault();
+              }}
               onClick={() => {
+                const opening = !layout.outlineOpen;
                 togglePanel("outlineOpen");
-                queueMicrotask(() => outlineCollapse.current?.focus());
+                queueMicrotask(() => (opening ? outlineCollapse.current : outlineRestore.current)?.focus());
               }}
               aria-label={t("ide.outline")}
               aria-controls={ids.outline}
-              aria-expanded={false}
+              aria-expanded={layout.outlineOpen}
             >
               <span className="ide__label-full">{t("ide.outline")}</span><span className="ide__label-short" aria-hidden="true">{t("ide.outline.short")}</span>
             </Button>
@@ -887,6 +895,9 @@ export const StrategyIde = ({
           className={`ide__left${compact ? " ide__left--drawer" : ""}`}
           hidden={!layout.outlineOpen || layout.debuggerOpen}
           style={compact ? undefined : { width: layout.outlineWidth }}
+          onBlurCapture={(event) => {
+            if (compact && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) close(["outlineOpen"]);
+          }}
           onKeyDown={(event) => {
             if (!compact || event.key !== "Escape") return;
             event.preventDefault();
@@ -1012,7 +1023,8 @@ export const StrategyIde = ({
             controls={ids.assistant}
           />
         ) : null}
-        {assistantFloating ? null : assistantNode}
+        {/* 배치만 바꾸고 DOM 부모는 유지해 대화·미전송 입력·스트림 소유자를 재마운트하지 않는다. */}
+        {assistantNode}
 
         {/* 서랍은 본문 안에 그린다 — 오른쪽 서랍의 세로 범위가 본문과 같아 상단 바 밑에 깔리지 않는다(#325). */}
         {inspectorFloating ? (
@@ -1024,15 +1036,7 @@ export const StrategyIde = ({
             {inspectorNode}
           </div>
         ) : null}
-        {hasAssistant && assistantFloating ? (
-          <div
-            className={drawerClass}
-            style={railDrawer}
-            hidden={!layout.assistantOpen}
-          >
-            {assistantNode}
-          </div>
-        ) : null}
+
       </div>
       <CommandPalette
         open={paletteOpen}

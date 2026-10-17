@@ -1540,6 +1540,9 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await expect(pipeline).toBeVisible();
   await expect(pipeline).not.toContainText("구조 오류");
   await pipeline.getByRole("button", { name: /팩터.*추가/ }).click();
+  // 추가한 팩터의 노드 편집에서 구성으로 돌아온 뒤 레시피의 명시적인 입구를 사용한다.
+  await page.getByRole("button", { name: "전략 구성으로 돌아가기", exact: true }).click();
+  await expect(pipeline).toBeVisible();
   await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
   await page.getByRole("region", { name: "팩터 레시피" }).getByRole("button", { name: "고급으로", exact: true }).click();
   const graph = page.getByRole("region", { name: "그래프 편집" });
@@ -1552,6 +1555,9 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   }
   await graph.getByText("그래프 설정", { exact: true }).first().click();
   const output = graph.getByRole("combobox", { name: /출력 노드/ });
+  await output.scrollIntoViewIfNeeded();
+  await output.focus();
+  await expect(output).toBeInViewport();
   await output.selectOption("rank");
   // 빈 제목의 검증 오류가 생겨도 선택한 컨트롤이 빈 스크롤 영역 뒤로 사라지면 안 된다.
   await expectPhase(page, "검증 오류");
@@ -1605,6 +1611,8 @@ test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화�
   await page.getByRole("tab", { name: "그래프", exact: true }).click();
   const pipeline = page.getByRole("region", { name: "전략 파이프라인" });
   await pipeline.getByRole("button", { name: /팩터.*추가/ }).click();
+  await page.getByRole("button", { name: "전략 구성으로 돌아가기", exact: true }).click();
+  await expect(pipeline).toBeVisible();
   await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
   const recipe = page.getByRole("region", { name: "팩터 레시피" });
   await expect(recipe).toBeVisible();

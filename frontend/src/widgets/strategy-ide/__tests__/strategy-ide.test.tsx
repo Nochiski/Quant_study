@@ -290,6 +290,45 @@ describe("StrategyIde", () => {
     expect(focused).toHaveFocus();
   });
 
+  it("작은 화면의 구조 버튼은 열림·외부 이탈에도 같은 자리를 유지하고 계약 클릭을 전달한다", async () => {
+    matchMedia(true);
+    const user = userEvent.setup();
+    mount({ outline: <button>구조 항목</button> });
+    const opener = screen.getByRole("button", { name: "전략 구조", expanded: false });
+    const contract = screen.getByRole("button", { name: "계약", expanded: false });
+    await user.click(opener);
+    expect(screen.getByRole("button", { name: "전략 구조", expanded: true })).toBe(opener);
+    expect(screen.getByRole("button", { name: "계약", expanded: false })).toBe(contract);
+    await user.click(contract);
+    expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "전략 구조", expanded: false })).toBe(opener);
+    await user.click(opener);
+    expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
+    await user.click(opener);
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(opener).toHaveAttribute("aria-expanded", "false");
+    expect(opener).toHaveFocus();
+  });
+
+  it.each([[true, false], [true, true], [false, false], [false, true]])("구조 경계의 키보드 이탈은 compact=%s, shift=%s에서 도착 초점을 유지한다", async (compact, shift) => {
+    matchMedia(compact);
+    const user = userEvent.setup();
+    mount({ outline: <button>구조 안 항목</button>, snippets: <button>마지막 스니펫</button> });
+    const opener = screen.getByRole("button", { name: "전략 구조", expanded: false });
+    await user.click(opener);
+    const left = screen.getByRole("navigation", { name: "전략 구조" }).closest(".ide__left")!;
+    expect(screen.getByRole("button", { name: "전략 구조 접기" })).toHaveFocus();
+    if (!shift) await user.click(screen.getByRole("button", { name: "마지막 스니펫" }));
+    await user.tab({ shift });
+    const arrived = document.activeElement;
+    expect(left.contains(arrived)).toBe(false);
+    expect(arrived).not.toBe(opener);
+    await waitFor(() => expect(arrived).toHaveFocus());
+    if (compact) expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    else expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeInTheDocument();
+  });
+
   it("좁은 화면으로 바뀌어도 현재 추적 작업공간을 유지한다", () => {
     const media = controlledMatchMedia(false);
     mount();
@@ -527,6 +566,35 @@ describe("StrategyIde", () => {
     editable.remove();
     select.remove();
     date.remove();
+  });
+
+  it.each([360, 960, 1440])("%ipx의 심볼 명령은 원문 초점을 지키고 떠 있는 보조 패널만 닫는다", async (width) => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: width <= Number(query.match(/max-width:\s*(\d+)px/)?.[1] ?? 0),
+      media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    const user = userEvent.setup();
+    const onSelectSymbol = vi.fn(() => screen.getByRole("textbox", { name: "source" }).focus());
+    mount({
+      assistant: <button>AI 작성</button>,
+      symbols: [{ id: "/risk/max_name_weight", pointer: "/risk/max_name_weight", label: "최대 종목 비중", description: "/risk/max_name_weight", keywords: ["비중"] }],
+      onSelectSymbol,
+    });
+    if (width < 1280) {
+      await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+      expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    } else screen.getByRole("textbox", { name: "source" }).focus();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await user.type(screen.getByRole("combobox"), "최대 종목 비중");
+    await user.keyboard("{Enter}");
+    expect(onSelectSymbol).toHaveBeenCalledWith("/risk/max_name_weight");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "source" })).toHaveFocus());
+    expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
+    if (width < 1280) {
+      expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    } else expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
   });
 
   it("searches document symbols and controls panels and theme from the palette", async () => {

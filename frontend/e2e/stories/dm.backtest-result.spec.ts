@@ -16,6 +16,8 @@ import {
   mustReplace,
   openEditor,
   openRunSettingsGroup,
+  openTraceWorkspace,
+  openEditorWorkspace,
   replaceSource,
   runSettingsInputs,
   saveAndWaitForRevision,
@@ -56,13 +58,17 @@ test(
     await expect(backtest(page)).toBeDisabled();
     // 같은 상태에서 중간 결과도 막힌 이유를 실행 설정 한 문장으로만 말한다. 문서는 멀쩡한데 "실행 가능한
     // 문서가 없다"가 함께 뜨면 사용자가 문서를 고치러 간다(이슈 #260).
+    await openTraceWorkspace(page);
     const debuggerRegion = page.getByRole("region", { name: "중간 결과" });
+    await debuggerRegion.getByText("입력 도움말", { exact: true }).click();
+    await expect(debuggerRegion.locator(".strategy-debugger__scope-help")).toHaveAttribute("open", "");
     await expect(debuggerRegion).toContainText(
       "추적은 실행 설정 위에서 돕니다.",
     );
     await expect(
       debuggerRegion.getByText("현재 실행 가능한 문서가 없습니다."),
     ).toHaveCount(0);
+    await openEditorWorkspace(page);
     await fillRunEnvironment(page, { via: "band" });
     await expect(backtest(page)).toBeEnabled();
 

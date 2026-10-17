@@ -1065,7 +1065,7 @@ export const StrategyDebugger = ({
       {context === null ? <p className="strategy-debugger__note" role="status">{unavailableMessage(unavailableReason ?? "document")}</p> : null}
       <div className="strategy-debugger__context">
       <details className="strategy-debugger__source ui-disclosure" onBlurCapture={(event) => {
-        if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+        if (compact && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
       }}>
         <summary>{t("debugger.source.details")}{trace.state.kind === "success" ? <code>{trace.state.response.as_of}</code> : null}</summary>
       <div className="strategy-debugger__identity">
@@ -1088,7 +1088,7 @@ export const StrategyDebugger = ({
       {trace.state.kind === "success" &&
       trace.state.response.warnings?.length ? (
         <details className="strategy-debugger__warning-summary ui-disclosure" onBlurCapture={(event) => {
-          if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+          if (compact && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
         }}>
           <summary>{t("debugger.warnings.summary").replace("{count}", String(trace.state.response.warnings.length))}</summary>
         <ul className="strategy-debugger__warnings" role="status">

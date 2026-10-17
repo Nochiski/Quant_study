@@ -77,6 +77,7 @@ test(
     ).toHaveValue("252");
     await expect(selected).toContainText("집계에 쓸 세션 수입니다");
     // 노드 종류의 한 줄 설명은 계약 패널이 한글로 보인다.
+    await page.getByRole("button", { name: "계약", exact: true }).click();
     const contract = page.getByRole("complementary", { name: "계약" });
     await expect(
       contract.getByRole("heading", { name: "기간 집계" }),
@@ -84,6 +85,7 @@ test(
     await expect(contract).toContainText(
       "같은 종목의 과거 구간을 값 하나로 집계합니다.",
     );
+    await contract.getByRole("button", { name: "계약 접기", exact: true }).click();
 
     // 삭제 거부: 참조하는 노드를 JSON Pointer가 아니라 노드 이름으로 말한다.
     await editor.getByRole("button", { name: /^1\..* · 삭제$/ }).click();

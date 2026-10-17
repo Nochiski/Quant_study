@@ -99,6 +99,8 @@ class _Lab:
             LocalArtifactStore(self._tmp_path / "artifacts"),
             run_repository=SQLiteBacktestRunRepository(self.path),
             new_id=self._run_ids.__next__,
+            # 팩터 수익률 계산을 뒤가 아니라 그 자리에서 돌려 조회 한 번에 결과를 본다.
+            background=lambda job: job(),
         )
 
     def save(self, spec: StrategySpec) -> SavedStrategy:

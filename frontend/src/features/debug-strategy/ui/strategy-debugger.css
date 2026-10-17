@@ -4,9 +4,54 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   container-type: inline-size;
+}
+
+.strategy-debugger__scroll-help {
+  flex: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-debugger__viewport {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* OS가 기본 스크롤바를 숨겨도 내용이 더 있음을 발견할 수 있게 한다. */
+.strategy-debugger__viewport::-webkit-scrollbar {
+  width: var(--space-3);
+}
+
+.strategy-debugger__viewport::-webkit-scrollbar-track {
+  background: var(--surface-subtle);
+}
+
+.strategy-debugger__viewport::-webkit-scrollbar-thumb {
+  border: 2px solid var(--surface-subtle);
+  border-radius: var(--radius-small);
+  background: var(--border-control);
+}
+
+.strategy-debugger__viewport:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (forced-colors: active) {
+  .strategy-debugger__viewport::-webkit-scrollbar-thumb {
+    background: ButtonText;
+  }
 }
 
 .strategy-debugger__controls {

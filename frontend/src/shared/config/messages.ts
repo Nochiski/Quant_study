@@ -550,6 +550,8 @@ const ko = {
 
 
   "debugger.controls": "전략 추적 범위",
+  "debugger.scroll.label": "추적 범위와 결과 스크롤 영역",
+  "debugger.scroll.help": "필요하면 안에서 스크롤하세요 · 방향키 지원",
   "debugger.date": "기준일",
   "debugger.date.note":
     "비워 두면 서버가 실제 TargetTape의 마지막 실행 가능한 신호일을 선택합니다.",
@@ -2931,6 +2933,8 @@ export const messages = {
 
 
     "debugger.controls": "Strategy trace scope",
+    "debugger.scroll.label": "Trace scope and results scroll area",
+    "debugger.scroll.help": "Scroll here when needed · Arrow keys supported",
     "debugger.date": "As-of date",
     "debugger.date.note":
       "Leave blank to let the server choose the latest executable TargetTape signal date.",

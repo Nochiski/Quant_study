@@ -859,6 +859,16 @@ export const StrategyDebugger = ({
 
   return (
     <div className="strategy-debugger">
+      <p id={`${idBase}-scroll-help`} className="strategy-debugger__scroll-help">
+        {t("debugger.scroll.help")}
+      </p>
+      <div
+        className="strategy-debugger__viewport"
+        role="region"
+        aria-label={t("debugger.scroll.label")}
+        aria-describedby={`${idBase}-scroll-help`}
+        tabIndex={0}
+      >
       <form
         className="strategy-debugger__controls"
         aria-label={t("debugger.controls")}
@@ -1099,6 +1109,7 @@ export const StrategyDebugger = ({
             ) : null}
           </div>
         ))}
+      </div>
       </div>
     </div>
   );

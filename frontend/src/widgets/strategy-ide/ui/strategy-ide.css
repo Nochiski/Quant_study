@@ -400,6 +400,7 @@
   top: auto;
   left: 0;
   width: auto;
+  height: 50vh;
   max-height: 50vh;
   border-left: 0;
   border-top: 1px solid var(--border);

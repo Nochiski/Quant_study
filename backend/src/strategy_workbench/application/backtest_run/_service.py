@@ -6,7 +6,7 @@ from collections import deque
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
-from threading import Event, RLock, Thread
+from threading import Event, Lock, RLock, Thread
 
 from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCompatibility,
@@ -15,7 +15,9 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     PortfolioPipelineOptions,
+    PortfolioPipelineResult,
     PortfolioPreviewRequest,
+    PortfolioSnapshotMismatchError,
     RawObservationContractError,
     RawObservationUnavailableError,
 )
@@ -26,9 +28,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyRepositoryPort,
 )
 from strategy_workbench.domain.analytics.facade.factor_regression import (
-    FactorRegressionReport,
     FactorRegressionUnavailableReason,
-    StrategyPeriodReturn,
     regress_on_factors,
     unavailable_factor_regression,
 )
@@ -55,6 +55,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     InlineDraft,
     ResolvedBacktestRunSpec,
     RunFailureCode,
+    RunManifest,
     RunProgressEvent,
     RunStage,
     RunStatus,
@@ -308,6 +309,7 @@ class BacktestRunService:
         self._running = 0
         self._running_experiments = 0
         self._lock = RLock()
+        self._factor_regression_lock = Lock()
         self._close_interrupted_runs()
 
     def slot_usage(self) -> tuple[int, int]:
@@ -649,7 +651,18 @@ class BacktestRunService:
         result = self.result(run_id)
         manifest = result.manifest
         strategy = strategy_period_returns(result)
-        report = self._factor_regression_report(result, strategy)
+        days = manifest.run_spec.annualization_days
+        pipeline = self._factor_pipeline(manifest)
+        if isinstance(pipeline, FactorRegressionUnavailableReason):
+            report = unavailable_factor_regression(
+                pipeline, strategy_period_count=len(strategy), annualization_days=days
+            )
+            evaluation_version = None
+        else:
+            report = regress_on_factors(
+                strategy, factor_periods(pipeline.observations), annualization_days=days
+            )
+            evaluation_version = pipeline.preview.tape.factor_evaluation_version
         lineage_id = self._lineage(
             manifest.run_spec,
             manifest.strategy_provenance
@@ -663,23 +676,29 @@ class BacktestRunService:
             data_snapshot_id=manifest.data_snapshot_id,
             momentum_factor_id=MOMENTUM_FACTOR_ID,
             value_factor_id=VALUE_FACTOR_ID,
+            factor_registry_version=self._factor_registry.version,
+            factor_evaluation_version=evaluation_version,
             trial_count=trial_count,
             alpha_t_threshold=None if trial_count is None else alpha_t_threshold(trial_count),
             report=report,
         )
 
-    def _factor_regression_report(
-        self, result: BacktestRunResult, strategy: tuple[StrategyPeriodReturn, ...]
-    ) -> FactorRegressionReport:
-        manifest = result.manifest
-        days = manifest.run_spec.annualization_days
+    def _factor_pipeline(
+        self, manifest: RunManifest
+    ) -> PortfolioPipelineResult | FactorRegressionUnavailableReason:
+        """run 의 실행 설정으로 팩터 단면을 읽는다. 데이터가 없거나 판이 다르면 그 사유.
+
+        유니버스 전체를 읽는 무거운 조회라 한 번에 하나만 돈다 — 화면을 여러 번 열어도 메모리·
+        CPU 가 요청 수만큼 늘어 도는 백테스트와 다투지 않게 한다(V4-05 리뷰 P2-1).
+        """
         try:
-            pipeline = self._portfolio_design.run_pipeline(
-                PortfolioPreviewRequest(
-                    factor_regression_spec(self._factor_registry),
-                    environment=replace(manifest.environment, missing=MissingPolicy.DROP),
+            with self._factor_regression_lock:
+                pipeline = self._portfolio_design.run_pipeline(
+                    PortfolioPreviewRequest(
+                        factor_regression_spec(self._factor_registry),
+                        environment=replace(manifest.environment, missing=MissingPolicy.DROP),
+                    )
                 )
-            )
         except RawObservationUnavailableError as error:
             logger.warning(
                 "factor regression inputs unavailable — run_id=%s environment=%s: %s",
@@ -687,11 +706,15 @@ class BacktestRunService:
                 manifest.environment_hash,
                 error,
             )
-            return unavailable_factor_regression(
-                FactorRegressionUnavailableReason.DATA_UNAVAILABLE,
-                strategy_period_count=len(strategy),
-                annualization_days=days,
+            return FactorRegressionUnavailableReason.DATA_UNAVAILABLE
+        except PortfolioSnapshotMismatchError as error:
+            # 원천과 팩터 메타데이터가 서로 다른 판을 답했다 — 조회 중 데이터가 바뀐 경합이다.
+            logger.warning(
+                "factor regression skipped — snapshot moved during the read: run_id=%s: %s",
+                manifest.run_id,
+                error,
             )
+            return FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED
         if pipeline.data_snapshot_id != manifest.data_snapshot_id:
             logger.warning(
                 "factor regression skipped — data snapshot changed: run_id=%s run=%s current=%s",
@@ -699,14 +722,8 @@ class BacktestRunService:
                 manifest.data_snapshot_id,
                 pipeline.data_snapshot_id,
             )
-            return unavailable_factor_regression(
-                FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED,
-                strategy_period_count=len(strategy),
-                annualization_days=days,
-            )
-        return regress_on_factors(
-            strategy, factor_periods(pipeline.observations), annualization_days=days
-        )
+            return FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED
+        return pipeline
 
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.

@@ -84,15 +84,15 @@ def _security(
 
 
 # 일곱 종목: 규모 아래 ⌊7/2⌋=3(A·B·C)이 소형, 분위 ⌊0.3·7⌋=2 개씩 하·상.
-# 가치 하 = A·D, 중 = B·E·F, 상 = C·G. 모멘텀 하 = B·E, 중 = A·F·G, 상 = C·D.
+# 가치 하 = A·D, 중 = B·E·F, 상 = C·G. 모멘텀 하 = B·E, 중 = A·F·D, 상 = C·G.
 _SEVEN = (
     _security("A", 10, 0.1, 0.5, 0.01),
     _security("B", 20, 0.4, 0.1, 0.02),
     _security("C", 30, 0.8, 0.8, 0.03),
-    _security("D", 40, 0.2, 0.9, -0.01),
+    _security("D", 40, 0.2, 0.7, -0.01),
     _security("E", 50, 0.5, 0.2, 0.0),
     _security("F", 60, 0.6, 0.6, 0.01),
-    _security("G", 70, 0.9, 0.7, 0.04),
+    _security("G", 70, 0.9, 0.9, 0.04),
 )
 _START = date(2024, 1, 8)
 
@@ -107,8 +107,9 @@ def test_factor_returns_match_hand_calculation() -> None:
     big_middle = 0.6 / 110
     assert outcome.size == pytest.approx((0.01 + 0.02 + 0.03) / 3 - (-0.01 + big_middle + 0.04) / 3)
     assert outcome.value == pytest.approx((0.03 + 0.04) / 2 - (0.01 - 0.01) / 2)
-    # 모멘텀: 소형 하 B 2%·상 C 3%, 대형 하 E 0%·상 D -1% → (3 - 1)/2 - (2 + 0)/2 = 0.
-    assert outcome.momentum == pytest.approx(0.0)
+    # 모멘텀: 소형 하 B 2%·상 C 3%, 대형 하 E 0%·상 G 4% → (3 + 4)/2 - (2 + 0)/2 = 2.5%.
+    # 0 이 아니어서 상·하가 뒤바뀌면 부호로 드러난다.
+    assert outcome.momentum == pytest.approx(0.025)
     assert outcome.factor(FactorKind.VALUE) == outcome.value
 
 

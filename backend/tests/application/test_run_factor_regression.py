@@ -15,6 +15,7 @@ from strategy_workbench.application.backtest_run.facade.factor_regression import
 from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioPipelineResult,
     PortfolioPreviewRequest,
+    PortfolioSnapshotMismatchError,
     RawObservationUnavailableError,
 )
 from strategy_workbench.domain.analytics.facade.factor_regression import (
@@ -162,6 +163,9 @@ def test_regression_uses_run_returns_and_pipeline_cross_sections(
     expected = regress_on_factors(strategy, _hand_periods(rows), annualization_days=252)
     assert expected.fit is not None
     assert report.report == expected
+    # 단면을 계산한 판본을 함께 싣는다 — 같은 run 이라도 규칙이 바뀌면 값이 달라질 수 있다.
+    assert report.factor_registry_version
+    assert report.factor_evaluation_version is not None
 
 
 def test_changed_data_snapshot_is_not_regressed(
@@ -193,7 +197,24 @@ def test_unreadable_inputs_are_reported_as_unavailable(
         raise RawObservationUnavailableError(DataLoadStatus.NO_DATA, "no rows for the window")
 
     monkeypatch.setattr(design, "run_pipeline", unavailable)
-    report = lab.runs.factor_regression(run_id).report
+    response = lab.runs.factor_regression(run_id)
+    report = response.report
     assert report.unavailable_reason is FactorRegressionUnavailableReason.DATA_UNAVAILABLE
     assert report.strategy_period_count > 0
     assert report.excluded_periods == ()
+    assert response.factor_evaluation_version is None
+
+
+def test_snapshot_moving_during_the_read_is_reported_as_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lab = _Lab(tmp_path)
+    run_id = _finish(lab.runs, _saved_run(lab.save(_spec())))
+    design = lab.runs._portfolio_design  # pyright: ignore[reportPrivateUsage]  # reason: 조회 중 판 경합을 흉내 낸다
+
+    def moved(request: PortfolioPreviewRequest) -> PortfolioPipelineResult:
+        raise PortfolioSnapshotMismatchError(expected="a", actual="b")
+
+    monkeypatch.setattr(design, "run_pipeline", moved)
+    report = lab.runs.factor_regression(run_id).report
+    assert report.unavailable_reason is FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED

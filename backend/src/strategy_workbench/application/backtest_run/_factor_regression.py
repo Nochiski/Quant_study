@@ -64,6 +64,15 @@ class RunFactorRegression:
     data_snapshot_id: str
     momentum_factor_id: str
     value_factor_id: str
+    factor_registry_version: str
+    factor_evaluation_version: str | None = field(
+        metadata={
+            "description": (
+                "단면을 계산한 팩터 평가 규칙 판본. 같은 run 이라도 이 판본이나 레지스트리 판본이 "
+                "바뀌면 값이 달라질 수 있다. 파이프라인을 돌리지 못했으면 null."
+            )
+        }
+    )
     trial_count: int | None = field(
         metadata={"description": "조회 시점 계열 원장의 시도 수 N. 계열 없는 실행은 null."}
     )

@@ -4,8 +4,9 @@ import math
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from itertools import accumulate
 from statistics import mean, median, pstdev
-from typing import TypeAlias, TypeGuard, TypeVar
+from typing import TypeAlias, TypeGuard, TypeVar, cast
 
 from ._history import SessionReadWindow, node_read_window
 from ._nodes import (
@@ -608,15 +609,21 @@ def _time_series(
     finished = 0
     read_window = node_read_window(node)
     for indices in _checkpointed(by_security.values(), checkpoint):
+        # 종목마다 숫자 변환과 "앞까지 숫자 개수"를 한 번만 만든다. 창마다 원소를 다시 걸러 만들면
+        # 관측 수 × 창 길이만큼 돈다(실데이터 확인 2026-10-17 후속 1: 252일 모멘텀 하나에 6억 번).
+        numbers = [_as_number(values[index]) for index in indices]
+        numeric_before = [0, *accumulate(number is not None for number in numbers)]
         for position, result_index in _checkpointed(enumerate(indices), checkpoint):
             bounds = read_window.bounds(position)
             start, end = bounds.start, bounds.stop
             # 구간에 가린 칸이 드는 칸은 어차피 결측이라 창을 읽지 않는다
             if start < 0 or end <= 0 or result_index in masked:
                 continue
-            window = values_from_indices(values, indices[start:end], checkpoint=checkpoint)
-            if len(window) != node.window:
+            # 창은 정확히 `node.window` 칸이다(`node_read_window`). 그 칸이 모두 숫자일 때만 값을
+            # 낸다 — 숫자만 걸러 센 길이가 창 길이와 같은지 보던 규칙과 같다.
+            if numeric_before[end] - numeric_before[start] != node.window:
                 continue
+            window = cast(list[float], numbers[start:end])
             if node.operator is TimeSeriesOperator.MEAN:
                 result[result_index] = mean(window)
             elif node.operator is TimeSeriesOperator.STANDARD_DEVIATION:

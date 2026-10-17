@@ -7,6 +7,7 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from threading import Event, Lock, RLock, Thread
+from typing import TypeVar
 
 from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCompatibility,
@@ -254,14 +255,11 @@ class BacktestResultNotReadyError(RuntimeError):
     pass
 
 
-# 이 프로세스가 접수한 run 의 메모리 사본. 목록·상태·요청의 정본은 저장소, 결과의 정본은 산출물
-# 저장소이고, 이 사본은 저장하지 않는 것(진행률·진행 이벤트 링·취소 신호)을 든다. 정체성으로
-# 가린다(`eq=False`) — 대기열에서 꺼내고 지울 때 같은 run 만 맞아야 한다.
 # 팩터 수익률 캐시 키: (회귀 실행 설정 해시, 데이터 판, 레지스트리 판본, 평가 규칙 판본).
 _FactorReturnsKey = tuple[str, str, str, str]
-# 계산해 두는 키 수. 한 키는 구간 수(5년 약 1200) × 숫자 일곱이라 작다 — 실행 설정을 바꿔 가며 볼
-# 때 앞 것을 다시 계산하지 않을 만큼만 둔다.
-_FACTOR_RETURNS_KEPT = 8
+# 계산해 두는 키 수(결과와 오래가는 실패 모두). 한 키는 구간 수(5년 약 1200) × 숫자 일곱이라 작다 —
+# 실행 설정을 바꿔 가며 여러 결과를 함께 열어도 끝난 계산이 읽히기 전에 밀려나지 않을 만큼 둔다.
+_FACTOR_RETURNS_KEPT = 32
 
 
 @dataclass(frozen=True)
@@ -271,10 +269,29 @@ class _FactorReturns:
     evaluation_version: str | None
 
 
+@dataclass(frozen=True)
+class _FactorMiss:
+    """팩터 단면을 얻지 못한 사유. `lasting` 이면 이 프로세스에서 다시 계산해도 같다."""
+
+    reason: FactorRegressionUnavailableReason
+    lasting: bool
+
+
+_Cached = TypeVar("_Cached")
+
+
+def _keep_latest(entries: OrderedDict[_FactorReturnsKey, _Cached]) -> None:
+    while len(entries) > _FACTOR_RETURNS_KEPT:
+        entries.popitem(last=False)
+
+
 def _start_daemon(job: Callable[[], None]) -> None:
     Thread(target=job, name="factor-returns", daemon=True).start()
 
 
+# 이 프로세스가 접수한 run 의 메모리 사본. 목록·상태·요청의 정본은 저장소, 결과의 정본은 산출물
+# 저장소이고, 이 사본은 저장하지 않는 것(진행률·진행 이벤트 링·취소 신호)을 든다. 정체성으로
+# 가린다(`eq=False`) — 대기열에서 꺼내고 지울 때 같은 run 만 맞아야 한다.
 @dataclass(eq=False)
 class _RunRecord:
     state: BacktestRunState
@@ -334,10 +351,16 @@ class BacktestRunService:
         self._lock = RLock()
         self._factor_regression_lock = Lock()
         # 팩터 수익률은 전략과 무관해 키(`_factor_returns_key`)마다 한 번 계산해 둔다. 최근 것만
-        # 둔다.
-        self._factor_cache: OrderedDict[_FactorReturnsKey, _FactorReturns] = OrderedDict()
+        # 둔다. 값은 계산한 팩터 수익률이거나, 이 프로세스에서 다시 계산해도 같은 사유(데이터 판이
+        # 다르다)다.
+        self._factor_cache: OrderedDict[
+            _FactorReturnsKey, _FactorReturns | FactorRegressionUnavailableReason
+        ] = OrderedDict()
         self._factor_jobs: set[_FactorReturnsKey] = set()
-        self._factor_failures: dict[_FactorReturnsKey, FactorRegressionUnavailableReason] = {}
+        # 한 번 알리고 잊는 일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류).
+        self._factor_failures: OrderedDict[_FactorReturnsKey, FactorRegressionUnavailableReason] = (
+            OrderedDict()
+        )
         # 무거운 계산을 거는 곳. 기본은 데몬 스레드이고, 테스트는 그 자리에서 돌리는 함수를 준다.
         self._background = background or _start_daemon
         self._close_interrupted_runs()
@@ -734,8 +757,10 @@ class BacktestRunService:
     ) -> _FactorReturns | FactorRegressionUnavailableReason:
         """계산해 둔 팩터 수익률. 없으면 뒤에서 계산을 걸고(같은 키는 한 번) `COMPUTING`.
 
-        계산이 실패했으면 그 사유를 한 번 돌려주고 잊는다 — 다음 조회가 다시 계산한다(데이터가
-        돌아왔을 수 있다).
+        데이터 판은 프로세스 안에서 고정이라(SoT "백테스트 run 접수" 행) 계산해 둔 값은 늘 지금
+        판과 같은 판의 것이고, 판이 달라 회귀하지 않는다는 답도 다시 계산하지 않고 그대로 둔다.
+        일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류)는 사유를 한 번 돌려주고 잊는다 — 다음
+        조회가 다시 계산한다.
         """
         key = self._factor_returns_key(manifest)
         with self._lock:
@@ -745,7 +770,13 @@ class BacktestRunService:
             start = key not in self._factor_jobs
             self._factor_jobs.add(key)
         if start:
-            self._background(lambda: self._compute_factor_returns(key, manifest))
+            try:
+                self._background(lambda: self._compute_factor_returns(key, manifest))
+            except BaseException:
+                # 계산을 걸지 못했다 — 키를 남기면 그 키는 재시작까지 "계산 중"만 답한다.
+                with self._lock:
+                    self._factor_jobs.discard(key)
+                raise
         with self._lock:
             # 그 자리에서 도는 실행자(테스트)면 이미 끝났다.
             return self._settled_factor_returns(key) or FactorRegressionUnavailableReason.COMPUTING
@@ -760,12 +791,12 @@ class BacktestRunService:
         return self._factor_failures.pop(key, None)
 
     def _compute_factor_returns(self, key: _FactorReturnsKey, manifest: RunManifest) -> None:
-        outcome: _FactorReturns | FactorRegressionUnavailableReason
+        outcome: _FactorReturns | _FactorMiss
         try:
             pipeline = self._factor_pipeline(manifest)
             outcome = (
                 pipeline
-                if isinstance(pipeline, FactorRegressionUnavailableReason)
+                if isinstance(pipeline, _FactorMiss)
                 else _FactorReturns(
                     factor_return_series(factor_periods(pipeline.observations)),
                     pipeline.preview.tape.factor_evaluation_version,
@@ -778,19 +809,19 @@ class BacktestRunService:
                 manifest.environment_hash,
                 manifest.data_snapshot_id,
             )
-            outcome = FactorRegressionUnavailableReason.COMPUTATION_FAILED
+            outcome = _FactorMiss(FactorRegressionUnavailableReason.COMPUTATION_FAILED, False)
         with self._lock:
             self._factor_jobs.discard(key)
-            if isinstance(outcome, FactorRegressionUnavailableReason):
-                self._factor_failures[key] = outcome
+            if isinstance(outcome, _FactorMiss) and not outcome.lasting:
+                self._factor_failures[key] = outcome.reason
+                _keep_latest(self._factor_failures)
                 return
-            self._factor_cache[key] = outcome
-            while len(self._factor_cache) > _FACTOR_RETURNS_KEPT:
-                self._factor_cache.popitem(last=False)
+            self._factor_cache[key] = (
+                outcome.reason if isinstance(outcome, _FactorMiss) else outcome
+            )
+            _keep_latest(self._factor_cache)
 
-    def _factor_pipeline(
-        self, manifest: RunManifest
-    ) -> PortfolioPipelineResult | FactorRegressionUnavailableReason:
+    def _factor_pipeline(self, manifest: RunManifest) -> PortfolioPipelineResult | _FactorMiss:
         """run 의 실행 설정으로 팩터 단면을 읽는다. 데이터가 없거나 판이 다르면 그 사유.
 
         유니버스 전체를 읽는 무거운 조회라 한 번에 하나만 돈다 — 화면을 여러 번 열어도 메모리·
@@ -811,7 +842,7 @@ class BacktestRunService:
                 manifest.environment_hash,
                 error,
             )
-            return FactorRegressionUnavailableReason.DATA_UNAVAILABLE
+            return _FactorMiss(FactorRegressionUnavailableReason.DATA_UNAVAILABLE, False)
         except PortfolioSnapshotMismatchError as error:
             # 원천과 팩터 메타데이터가 서로 다른 판을 답했다 — 조회 중 데이터가 바뀐 경합이다.
             logger.warning(
@@ -819,7 +850,7 @@ class BacktestRunService:
                 manifest.run_id,
                 error,
             )
-            return FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED
+            return _FactorMiss(FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED, False)
         if pipeline.data_snapshot_id != manifest.data_snapshot_id:
             logger.warning(
                 "factor regression skipped — data snapshot changed: run_id=%s run=%s current=%s",
@@ -827,7 +858,8 @@ class BacktestRunService:
                 manifest.data_snapshot_id,
                 pipeline.data_snapshot_id,
             )
-            return FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED
+            # 판은 프로세스 안에서 고정이라 다시 읽어도 같다 — 약 2분 계산을 되풀이하지 않는다.
+            return _FactorMiss(FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED, True)
         return pipeline
 
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:

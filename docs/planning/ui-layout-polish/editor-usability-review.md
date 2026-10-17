@@ -26,6 +26,15 @@ ruff·pyright도 오류 없이 통과했고, 스토리 하네스는 40개 스토
 이는 로컬 검사이며 공식 Windows CI·머지 상태는 해당 PR의 checks·merge 기록에서 확인한다.
 부분 회귀와 재실행 횟수를 전체 검사 수에 더하지 않는다.
 
+공식 Windows 소스 검증은 `7a841921a038ef1571436577199caf8eccb74815`의 PR CI
+run `38994793993`, browser job `117284862592`, visual artifact `12087525018`에서
+67개 통과·시각 비교 9개 실패·serial 후속 1개 미실행·flaky 0개로 완주했다. 비시각 실패는 없었다.
+루트가 actual 9장·diff 9장과 대표 expected를 직접 검토해 작업공간·상태 안내 재설계 의도와
+일치함을 확인하고, 외부 `windows-7a84/mapping.json`의 정확한 PNG 9개만 기준선 교체를 승인했다.
+복사한 각 기준선은 원본 actual·재시도 actual과 SHA256이 모두 일치한다. 임계값·skip·retry 설정은
+변경하지 않았다. 아직 기준선 갱신 후 최종 CI는 대기 중이며, 전체 통과·머지 여부의 정본은
+PR #535 최신 head의 CI다. serial 후속 미실행을 통과로 기록하지 않는다.
+
 저장 안내는 `features/edit-strategy`의 기존 save-status 소유자가 짧은 문구를 도출하고 IDE는
 그 결과를 표시한다. 오류색으로 저장 요청 실패를 추측하지 않는다. 1440px·360px 각각에서
 검증 차단은 저장 POST 0회, 실제 네트워크 저장 실패는 POST 1회로 구분하는 4개 QA가 통과했다

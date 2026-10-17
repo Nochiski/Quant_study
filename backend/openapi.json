@@ -6360,6 +6360,15 @@
         "title": "MonthlyReturnPoint",
         "type": "object"
       },
+      "NoRecommendation": {
+        "description": "추천 칸이 없는 이유. 화면은 번역만 한다.",
+        "enum": [
+          "no_scored_cell",
+          "non_positive_score"
+        ],
+        "title": "NoRecommendation",
+        "type": "string"
+      },
       "NodeContract": {
         "properties": {
           "minimum_history_sessions": {
@@ -6699,6 +6708,16 @@
             },
             "title": "Cells",
             "type": "array"
+          },
+          "no_recommendation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoRecommendation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

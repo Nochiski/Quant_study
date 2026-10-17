@@ -249,7 +249,13 @@ const Plateau = ({ experiment }: { experiment: Experiment }) => {
     );
     content =
       recommended === undefined ? (
-        <p>{t("backtest.robustness.noRecommendation")}</p>
+        <p>
+          {t(
+            map.data.no_recommendation === "non_positive_score"
+              ? "backtest.robustness.noRecommendation.non_positive_score"
+              : "backtest.robustness.noRecommendation",
+          )}
+        </p>
       ) : (
         <>
           <p className="robustness-check__value">

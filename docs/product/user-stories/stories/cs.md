@@ -270,7 +270,7 @@ non-goal로 두고 1.2에서 두 노드를 없앴다(P2-06). 사용자 팩터를
 - e2e 담당: 없음
 - 기능 영역: 실험 · 워크포워드
 - e2e:
-  - `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보가 카드에 채워진다
+  - `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보(또는 추천하지 않는 이유)가 카드에 채워진다
 - 비고: backend(`GET /api/v1/experiments/{id}/walk-forward`)는 V3-05가, 유지율·창별 선택 표·이유 번역 화면은
   V5-01(#407)이 넣었다. 이어 붙인 표본 밖 곡선과 이 스토리의 e2e는 V5-02 셋째 slice가 넣었다(#379 V3-AUDIT-12).
 

@@ -249,7 +249,11 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
     assert [cell["score"] for cell in parameter_map.json()["cells"]] == pytest.approx(
         [sum(values) / 2 for values in expected.values()]
     )
-    assert [cell["verdict"] for cell in parameter_map.json()["cells"]].count("recommended") == 1
+    # 추천은 칸 점수·고원 점수가 모두 양수인 칸뿐이다(후속 4). mock 자료의 세 칸은 학습 샤프가 0
+    # 이하라 추천하지 않고 이유를 싣는다.
+    assert all(cell["score"] <= 0 for cell in parameter_map.json()["cells"])
+    assert [cell["verdict"] for cell in parameter_map.json()["cells"]].count("recommended") == 0
+    assert parameter_map.json()["no_recommendation"] == "non_positive_score"
 
 
 def test_a_capacity_sweep_from_a_finished_run_leaves_the_trial_count_as_it_was() -> None:

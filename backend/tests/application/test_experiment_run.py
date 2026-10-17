@@ -73,6 +73,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentNotFoundError,
     ExperimentStateError,
     InvalidExperimentSpecError,
+    NoRecommendation,
     RetentionGap,
     SplitMode,
     SplitSpec,
@@ -1422,13 +1423,16 @@ def test_the_parameter_map_averages_ledger_train_scores_and_floors_a_bankrupt_ce
     cells = service.parameter_map(experiment_id).cells
 
     # 칸 점수 (0,)=0.3, (2,)=0.2. 파산 칸 (1,) 은 최하 점수 min(0.2, 0) = 0 이라 두 칸의 이웃 평균이
-    # 모두 0 — 동점이면 좌표가 앞선 칸이 추천이다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 은
-    # 파산이라 하락 1.0, 1×0.8=0.8 쪽도 0 이라 1.0. -1×1.2·1×1.2 쪽은 축 끝이다.
+    # 모두 0 — 고원 점수가 0 이하라 추천 칸이 없고(후속 4), 최고 칸 (0,) 은 이웃이 제 점수의
+    # 절반보다 낮아 봉우리다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 은 파산이라 하락 1.0,
+    # 1×0.8=0.8 쪽도 0 이라 1.0. -1×1.2·1×1.2 쪽은 축 끝이다.
+    mapped = service.parameter_map(experiment_id)
+    assert mapped.no_recommendation is NoRecommendation.NON_POSITIVE_SCORE
     assert [
         (cell.grid_index, cell.verdict, cell.score, cell.plateau_score, cell.sensitivity)
         for cell in cells
     ] == [
-        ((0,), CellVerdict.RECOMMENDED, pytest.approx(0.3), 0.0, pytest.approx(1.0)),
+        ((0,), CellVerdict.PEAK, pytest.approx(0.3), 0.0, pytest.approx(1.0)),
         ((1,), CellVerdict.FAILED, None, None, None),
         ((2,), CellVerdict.SCORED, pytest.approx(0.2), 0.0, pytest.approx(1.0)),
     ]

@@ -32,6 +32,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentTrial,
     GridIndex,
     InvalidExperimentSpecError,
+    NoRecommendation,
     ParameterConstraint,
     RetentionGap,
     SearchSpec,
@@ -245,6 +246,8 @@ class ParameterMap:
 
     # 그리드 칸 좌표 순.
     cells: tuple[CellPlateau, ...]
+    # 추천 칸이 없으면 그 이유(점수 난 칸 없음·모두 0 이하). 화면은 번역만 한다.
+    no_recommendation: NoRecommendation | None = None
 
 
 @dataclass(frozen=True)
@@ -828,7 +831,8 @@ class ExperimentRunService:
             )
             for state in states
         )
-        return ParameterMap(plateau_map(record.design.search, cell_outcomes(trials)))
+        mapped = plateau_map(record.design.search, cell_outcomes(trials))
+        return ParameterMap(mapped.cells, mapped.no_recommendation)
 
     def capacity(self, experiment_id: str) -> CapacityReport:
         """용량 스윕 금액별 비용 후 샤프·가격 충격·미체결 비율과, 모든 금액이 끝났으면 한계 금액

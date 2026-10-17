@@ -547,6 +547,7 @@ export type {
   MonthlyReturnPoint,
   NodeContract,
   NodeValueType,
+  NoRecommendation,
   OperatorAvailability,
   OperatorDefinition,
   OperatorParameter,

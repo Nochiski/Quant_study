@@ -3747,6 +3747,23 @@
         "title": "EquityCurvePoint",
         "type": "object"
       },
+      "ExcludedFactorPeriods": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/FactorPeriodGap"
+          }
+        },
+        "required": [
+          "reason",
+          "count"
+        ],
+        "title": "ExcludedFactorPeriods",
+        "type": "object"
+      },
       "ExclusionReason": {
         "enum": [
           "not_in_universe",
@@ -5042,6 +5059,40 @@
         "title": "FactorExplanation",
         "type": "object"
       },
+      "FactorExposure": {
+        "properties": {
+          "beta": {
+            "title": "Beta",
+            "type": "number"
+          },
+          "factor": {
+            "$ref": "#/components/schemas/FactorKind"
+          },
+          "standard_error": {
+            "title": "Standard Error",
+            "type": "number"
+          },
+          "t_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "T Value"
+          }
+        },
+        "required": [
+          "factor",
+          "beta",
+          "standard_error",
+          "t_value"
+        ],
+        "title": "FactorExposure",
+        "type": "object"
+      },
       "FactorGraph": {
         "properties": {
           "nodes": {
@@ -5166,12 +5217,157 @@
         "title": "FactorGraphValidation",
         "type": "object"
       },
+      "FactorKind": {
+        "enum": [
+          "market",
+          "size",
+          "value",
+          "momentum"
+        ],
+        "title": "FactorKind",
+        "type": "string"
+      },
+      "FactorPeriodGap": {
+        "enum": [
+          "base_rate_not_covered",
+          "no_market_weight",
+          "size_value_empty",
+          "size_momentum_empty",
+          "no_factor_period"
+        ],
+        "title": "FactorPeriodGap",
+        "type": "string"
+      },
       "FactorPreference": {
         "enum": [
           "high",
           "low"
         ],
         "title": "FactorPreference",
+        "type": "string"
+      },
+      "FactorRegressionFit": {
+        "properties": {
+          "alpha_annualized": {
+            "title": "Alpha Annualized",
+            "type": "number"
+          },
+          "alpha_per_session": {
+            "title": "Alpha Per Session",
+            "type": "number"
+          },
+          "alpha_standard_error": {
+            "title": "Alpha Standard Error",
+            "type": "number"
+          },
+          "alpha_t_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alpha T Value"
+          },
+          "exposures": {
+            "items": {
+              "$ref": "#/components/schemas/FactorExposure"
+            },
+            "title": "Exposures",
+            "type": "array"
+          },
+          "hac_lag": {
+            "title": "Hac Lag",
+            "type": "integer"
+          },
+          "r_squared": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R Squared"
+          }
+        },
+        "required": [
+          "alpha_per_session",
+          "alpha_annualized",
+          "alpha_standard_error",
+          "alpha_t_value",
+          "exposures",
+          "r_squared",
+          "hac_lag"
+        ],
+        "title": "FactorRegressionFit",
+        "type": "object"
+      },
+      "FactorRegressionReport": {
+        "description": "회귀 결과. `fit` 이 없으면 `unavailable_reason` 이 있다.",
+        "properties": {
+          "annualization_days": {
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "excluded_periods": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedFactorPeriods"
+            },
+            "title": "Excluded Periods",
+            "type": "array"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorRegressionFit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "strategy_period_count": {
+            "title": "Strategy Period Count",
+            "type": "integer"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorRegressionUnavailableReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "observation_count",
+          "strategy_period_count",
+          "excluded_periods",
+          "annualization_days",
+          "fit",
+          "unavailable_reason"
+        ],
+        "title": "FactorRegressionReport",
+        "type": "object"
+      },
+      "FactorRegressionUnavailableReason": {
+        "enum": [
+          "insufficient_observations",
+          "singular_design",
+          "data_snapshot_changed",
+          "data_unavailable"
+        ],
+        "title": "FactorRegressionUnavailableReason",
         "type": "string"
       },
       "FactorSignal": {
@@ -8513,6 +8709,70 @@
           "options_schema"
         ],
         "title": "RunEnvironmentSchema",
+        "type": "object"
+      },
+      "RunFactorRegression": {
+        "description": "불변 실행과 그 데이터 판으로 잰 팩터 회귀. 계열 통계(N·t 기준)는 조회 시점 원장이다.",
+        "properties": {
+          "alpha_t_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "알파 t 값의 기준(N ≥ 20 이면 3.0, 아니면 2.0, Harvey·Liu·Zhu 2016). 계열이 없어 N 을 모르면 null.",
+            "title": "Alpha T Threshold"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "momentum_factor_id": {
+            "title": "Momentum Factor Id",
+            "type": "string"
+          },
+          "report": {
+            "$ref": "#/components/schemas/FactorRegressionReport"
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "trial_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "조회 시점 계열 원장의 시도 수 N. 계열 없는 실행은 null.",
+            "title": "Trial Count"
+          },
+          "value_factor_id": {
+            "title": "Value Factor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_fingerprint",
+          "data_snapshot_id",
+          "momentum_factor_id",
+          "value_factor_id",
+          "trial_count",
+          "alpha_t_threshold",
+          "report"
+        ],
+        "title": "RunFactorRegression",
         "type": "object"
       },
       "RunKind": {
@@ -13820,6 +14080,75 @@
           }
         },
         "summary": "Stream Backtest Events"
+      }
+    },
+    "/api/v1/backtests/{run_id}/factor-regression": {
+      "get": {
+        "operationId": "getBacktestFactorRegression",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFactorRegression"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Factor Regression"
       }
     },
     "/api/v1/backtests/{run_id}/request": {

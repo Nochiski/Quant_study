@@ -63,6 +63,9 @@ import type {
   GetBacktestAccountReportData,
   GetBacktestAccountReportErrors,
   GetBacktestAccountReportResponses,
+  GetBacktestFactorRegressionData,
+  GetBacktestFactorRegressionErrors,
+  GetBacktestFactorRegressionResponses,
   GetBacktestRequestData,
   GetBacktestRequestErrors,
   GetBacktestRequestResponses,
@@ -550,6 +553,20 @@ export const streamBacktestEvents = <ThrowOnError extends boolean = false>(
     StreamBacktestEventsErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/events", ...options });
+
+/**
+ * Get Backtest Factor Regression
+ */
+export const getBacktestFactorRegression = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetBacktestFactorRegressionData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestFactorRegressionResponses,
+    GetBacktestFactorRegressionErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/factor-regression", ...options });
 
 /**
  * Get Backtest Request

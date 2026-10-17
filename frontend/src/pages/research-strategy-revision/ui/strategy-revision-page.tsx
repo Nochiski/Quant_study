@@ -411,10 +411,10 @@ export const StrategyRevisionPage = () => {
                   className="pipeline-comparison__navigation"
                   aria-label={t("graph.pipeline.comparison")}
                 >
-                  <a href="#strategy-rules">
+                  <a className="ui-button" href="#strategy-rules">
                     {t("graph.pipeline.rulesSection")}
                   </a>
-                  <a href="#selection-results">
+                  <a className="ui-button" href="#selection-results">
                     {t("graph.pipeline.resultsSection")}
                   </a>
                 </nav>

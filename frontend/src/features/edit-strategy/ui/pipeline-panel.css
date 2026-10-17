@@ -178,6 +178,9 @@
 
 /* 같은 문서·선정 결과를 비교하되, 팩터 상세 편집기는 URL의 별도 주 작업으로 연다. */
 .pipeline-comparison {
+  --pipeline-navigation-height: calc(
+    var(--control-height-compact) + var(--space-4)
+  );
   container: pipeline-comparison / inline-size;
   min-width: 0;
 }
@@ -250,26 +253,42 @@
 }
 
 .pipeline-comparison__navigation {
+  --control-size: var(--control-height-compact);
+  --control-font-size: var(--text-size-label);
   position: sticky;
   top: 0;
   z-index: 3;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
-  padding: var(--space-2);
+  gap: var(--space-2);
+  padding-block: var(--space-2);
   margin-bottom: var(--space-3);
   background: var(--surface-panel);
   border-bottom: 1px solid var(--border);
 }
-.pipeline-comparison__navigation a {
-  padding: var(--space-2);
+.pipeline-comparison__navigation > a {
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  text-decoration: none;
+  overflow-wrap: anywhere;
 }
 .pipeline-comparison__body > [id] {
   min-width: 0;
-  scroll-margin-top: calc(var(--control-height) + var(--space-3));
+  scroll-margin-top: calc(var(--pipeline-navigation-height) + var(--space-3));
 }
 @container pipeline-comparison (min-width: 1060px) {
   .pipeline-comparison__result {
-    top: calc(var(--control-height) + var(--space-3));
+    top: calc(var(--pipeline-navigation-height) + var(--space-3));
+  }
+}
+
+@container pipeline-comparison (max-width: 479px) {
+  .pipeline-comparison__body {
+    --pipeline-navigation-height: calc(
+      var(--control-height-compact) * 2 + var(--space-2) + var(--space-4)
+    );
+  }
+  .pipeline-comparison__navigation > a {
+    width: 100%;
   }
 }

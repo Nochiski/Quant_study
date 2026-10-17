@@ -5381,7 +5381,9 @@
           "insufficient_observations",
           "singular_design",
           "data_snapshot_changed",
-          "data_unavailable"
+          "data_unavailable",
+          "computing",
+          "computation_failed"
         ],
         "title": "FactorRegressionUnavailableReason",
         "type": "string"

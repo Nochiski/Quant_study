@@ -3280,7 +3280,9 @@ export type FactorRegressionUnavailableReason =
   | "insufficient_observations"
   | "singular_design"
   | "data_snapshot_changed"
-  | "data_unavailable";
+  | "data_unavailable"
+  | "computing"
+  | "computation_failed";
 
 /**
  * FactorSignal

@@ -25,6 +25,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.account_report import (
     AccountReport,
     project_account_report,
@@ -66,6 +67,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
     summarize_trial_ledger,
     trial_key,
 )
+from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe_evidence
 from strategy_workbench.domain.strategy.facade.specification import (
     InvalidParameterValueError,
     StrategySpec,
@@ -75,6 +77,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 
 from ._gc_policy import full_collections_suspended
 from ._scheduler import RunLaneControls, RunQueue, experiment_slots
+from ._validation_report import RunValidationReport
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
 from .ports.outgoing.backtest_data import (
     BacktestDataNotReadyError,
@@ -579,6 +582,34 @@ class BacktestRunService:
     def account_report(self, run_id: str) -> AccountReport:
         """검증해 읽은 완료 결과를 초기자본 기준 계좌 평가손익으로 투영한다."""
         return project_account_report(self.result(run_id))
+
+    def validation_report(self, run_id: str) -> RunValidationReport:
+        """검증된 완료 결과와 현재 계열 원장의 통계를 읽는다. 실행·선택 기록은 쓰지 않는다."""
+        result = self.result(run_id)
+        manifest = result.manifest
+        # 완료 결과의 검증된 출처를 쓴다. 은퇴한 리비전을 실행 가능 여부로 다시 해소하지 않는다.
+        provenance = (
+            manifest.strategy_provenance
+            if manifest.strategy_provenance.kind is StrategySourceKind.SAVED_REVISION
+            else None
+        )
+        lineage_id = self._lineage(manifest.run_spec, provenance)
+        ledger = None if lineage_id is None else self.trial_ledger(lineage_id)
+        return RunValidationReport(
+            run_id=manifest.run_id,
+            run_fingerprint=manifest.run_fingerprint,
+            metric_registry_version=manifest.metric_registry_version,
+            observed_at=self._now(),
+            psr=next(
+                (
+                    m
+                    for m in result.metrics
+                    if m.scope is MetricScope.FULL and m.metric_id == "probabilistic_sharpe"
+                ),
+                None,
+            ),
+            dsr=run_deflated_sharpe_evidence(result, ledger),
+        )
 
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.

@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  ApiRequestError,
   strategyWorkbenchApi,
   type BacktestRunSpec,
   type RunKind,
@@ -181,6 +182,28 @@ export const useBacktestAccountReport = (runId: string | null, enabled: boolean)
     enabled: runId !== null && enabled,
     staleTime: Number.POSITIVE_INFINITY,
   });
+
+/** 원본 결과와 다른 조회 시점의 원장 값이다. 자동 재조회 없이 명시한 때만 새 근거를 읽는다. */
+export const useBacktestValidationReport = (runId: string | null, enabled: boolean) => {
+  const query = useQuery({
+    queryKey: ["backtest", runId, "validation-report"],
+    queryFn: () => strategyWorkbenchApi.getBacktestValidationReport(runId ?? ""),
+    enabled: runId !== null && enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+    retryOnMount: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  return {
+    ...query,
+    refresh: () => {
+      if (query.error instanceof ApiRequestError && query.error.status === 410) return;
+      return query.refetch();
+    },
+  };
+};
 
 export const useCancelBacktest = () => {
   const queryClient = useQueryClient();

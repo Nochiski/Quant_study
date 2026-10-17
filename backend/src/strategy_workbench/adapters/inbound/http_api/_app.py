@@ -38,6 +38,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     TrialPreview,
     rejection_code,
 )
+from strategy_workbench.application.backtest_run.facade.validation_report import RunValidationReport
 from strategy_workbench.application.continuous_account.facade.evaluation import (
     ContinuousAccountService,
 )
@@ -520,6 +521,27 @@ def create_app(
     def get_backtest_result(run_id: str) -> BacktestRunResult:
         try:
             return backtest_runs.result(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+        except BacktestResultNotReadyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/validation-report",
+        operation_id="getBacktestValidationReport",
+        responses=_backtest_result_responses(),
+    )
+    def get_backtest_validation_report(run_id: str) -> RunValidationReport:
+        try:
+            return backtest_runs.validation_report(run_id)
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
         except BacktestResultNotReadyError as error:

@@ -10,10 +10,13 @@ from strategy_workbench.domain.experiment._capacity import (
     execution_costs,
 )
 from strategy_workbench.domain.experiment._deflation import (
+    DeflatedSharpeEvidence,
+    DeflatedSharpeUnavailableReason,
     alpha_t_threshold,
     deflated_sharpe,
     expected_maximum_sharpe,
     run_deflated_sharpe,
+    run_deflated_sharpe_evidence,
 )
 
 __all__ = [
@@ -23,6 +26,9 @@ __all__ = [
     "CapacityGap",
     "CapacityLimit",
     "ExecutionCosts",
+    "DeflatedSharpeEvidence",
+    "DeflatedSharpeUnavailableReason",
+    "run_deflated_sharpe_evidence",
     "alpha_t_threshold",
     "capacity_amounts",
     "capacity_limit",

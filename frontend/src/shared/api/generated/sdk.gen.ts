@@ -75,6 +75,9 @@ import type {
   GetBacktestSummaryData,
   GetBacktestSummaryErrors,
   GetBacktestSummaryResponses,
+  GetBacktestValidationReportData,
+  GetBacktestValidationReportErrors,
+  GetBacktestValidationReportResponses,
   GetContinuousAccountData,
   GetContinuousAccountErrors,
   GetContinuousAccountResponses,
@@ -588,6 +591,20 @@ export const getBacktestSummary = <ThrowOnError extends boolean = false>(
     GetBacktestSummaryErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/summary", ...options });
+
+/**
+ * Get Backtest Validation Report
+ */
+export const getBacktestValidationReport = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetBacktestValidationReportData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestValidationReportResponses,
+    GetBacktestValidationReportErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/validation-report", ...options });
 
 /**
  * Get

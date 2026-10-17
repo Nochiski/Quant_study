@@ -115,6 +115,11 @@ workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추�
 
 전략 작성 화면의 YAML source와 JSON/Form/Graph/Diff projection은 같은 StrategySpec 계약을 사용한다.
 파라미터 실험·워크포워드 비교·mock 연속 계좌 평가는 실험 화면에서 확인한다.
+
+완료 백테스트의 검증 카드는 저장된 PSR과 현재 계열의 시도 수를 반영한 DSR·계산 근거를 보여준다.
+원장은 명시적으로 다시 조회하며, 통계 값이 없는 이유와 조회 오류를 구분한다. 실수익성 검증을
+뜻하지 않으며 자세한 범위와 남은 작업은 [실행 검증 카드 계약](docs/planning/validation-lab/V5-02-run-validation-card.md)을 따른다.
+
 Equity 층은 `backend`의 duckdb outbound adapter(`STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb`)가 읽고,
 환경변수를 주지 않으면 같은 application port를 구현하는 PIT mock adapter로 뜬다. 실데이터 연결 절차는
 아래 [실데이터 연결](#실데이터-연결) 절 참고.
@@ -133,7 +138,7 @@ Strategy Workbench의 전체 계획과 체크리스트는
 | [strategy-workbench-yaml-ui](docs/planning/strategy-workbench-yaml-ui/README.md)     | YAML-first Strategy Workbench 문서 IDE       | 완료                  |
 | [strategy-gui-editing](docs/planning/strategy-gui-editing/README.md)                 | schema 1.1, Form/Graph 편집                  | 완료                  |
 | [ai-assistant](docs/planning/ai-assistant/README.md)                                 | AI 어시스턴트, 백테스트 결과 AI 설명         | 완료                  |
-| [strategy-language-2-0](docs/planning/strategy-language-2-0/README.md)               | schema 1.2, 실행 설정, 그래프 표현           | 진행 중 (다음 P3-03)  |
+| [strategy-language-2-0](docs/planning/strategy-language-2-0/README.md)               | schema 1.2, 실행 설정, 그래프 표현           | 완료                  |
 | [research-to-trading](docs/planning/research-to-trading/README.md)                 | 연구 보존·신호 평가·연속 계좌·오프라인 실행 | mock 연속 평가 UI 연결, 실자료 수익성 검증은 별도 |
 
 설계 spec:

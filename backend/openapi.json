@@ -3188,6 +3188,172 @@
         "title": "DatasetRevision",
         "type": "object"
       },
+      "DeflatedSharpeEvidence": {
+        "description": "조회한 계열 원장을 근거로 한 세션 단위 통계.\n\n원래 실행 결과·선택 당시 스냅숏을 변경하지 않는다. 대표 행 자체는 기존 원장 조회가 제공한다.\n판본 목록과 미상 수는 분산에 쓰는 대표 샤프가 있는 시도만 대상으로 한다.",
+        "properties": {
+          "annualization_days": {
+            "description": "해당 실행에 기록된 연환산 거래일.",
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "expected_maximum_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "계산한 운 기준선 SR₀(세션 단위). N=1이면 0, 계산 전 부재 판정이면 null이다.",
+            "title": "Expected Maximum Sharpe"
+          },
+          "lineage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "계열 합치기를 해소한 생존 계열. 계열 없는 초안은 null이다.",
+            "title": "Lineage Id"
+          },
+          "merged_lineage_ids": {
+            "description": "이 생존 계열에 합쳐진 계열 식별자.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Merged Lineage Ids",
+            "type": "array"
+          },
+          "registry_mixed": {
+            "description": "알려진 대표 판본들과 해당 실행 판본을 합친 집합에 둘 이상 판본이 있는지 여부.",
+            "title": "Registry Mixed",
+            "type": "boolean"
+          },
+          "representative_count": {
+            "description": "샤프가 있는 시도 대표 자료 수. N과 다를 수 있으며 재확인 실행은 포함하지 않는다.",
+            "title": "Representative Count",
+            "type": "integer"
+          },
+          "representative_registry_versions": {
+            "description": "대표 샤프가 있는 시도들의 알려진 지표 판본 집합(정렬). 현재 실행의 판본 목록이 아니다.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Representative Registry Versions",
+            "type": "array"
+          },
+          "session_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "해당 실행의 FULL 연율 샤프를 연환산 거래일로 환산한 세션 샤프. 계산하지 않았으면 null이다.",
+            "title": "Session Sharpe"
+          },
+          "session_standard_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "같은 실행의 FULL 샤프 표준오차를 환산한 세션 단위 값. 계산하지 않았으면 null이다.",
+            "title": "Session Standard Error"
+          },
+          "trial_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "현재 계열 원장의 시도 수 N. 재확인/결과 없음은 제외하고 파산 시도는 포함한다. 계열이 없으면 null이다.",
+            "title": "Trial Count"
+          },
+          "trial_sharpe_variance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "계산한 대표 세션 샤프의 표본분산(n−1). N=1이면 0, 계산 전 부재 판정이면 null이다.",
+            "title": "Trial Sharpe Variance"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeflatedSharpeUnavailableReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "값이 없을 때의 단일 판정 사유. 값이 있으면 null이다."
+          },
+          "unknown_registry_count": {
+            "description": "대표 샤프가 있지만 지표 판본이 기록되지 않은 시도 수. 판본 일치를 추측하지 않는다.",
+            "title": "Unknown Registry Count",
+            "type": "integer"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "현재 계열 원장으로 계산한 DSR(0~1). 저장된 PSR이나 후보 선택 당시 스냅숏이 아니다.",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "unavailable_reason",
+          "lineage_id",
+          "merged_lineage_ids",
+          "trial_count",
+          "representative_count",
+          "trial_sharpe_variance",
+          "expected_maximum_sharpe",
+          "session_sharpe",
+          "session_standard_error",
+          "annualization_days",
+          "representative_registry_versions",
+          "unknown_registry_count",
+          "registry_mixed"
+        ],
+        "title": "DeflatedSharpeEvidence",
+        "type": "object"
+      },
+      "DeflatedSharpeUnavailableReason": {
+        "enum": [
+          "no_lineage",
+          "no_counted_trials",
+          "sharpe_unavailable",
+          "standard_error_unavailable",
+          "nonpositive_standard_error",
+          "insufficient_representatives"
+        ],
+        "title": "DeflatedSharpeUnavailableReason",
+        "type": "string"
+      },
       "DiagnosticAnchor": {
         "description": "진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.\n\n편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는\nbackend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).",
         "enum": [
@@ -8486,6 +8652,53 @@
         ],
         "title": "RunStatus",
         "type": "string"
+      },
+      "RunValidationReport": {
+        "description": "PSR은 저장된 FULL 지표(없으면 미기록), DSR은 observed_at에 조회한 원장 기준이다.",
+        "properties": {
+          "dsr": {
+            "$ref": "#/components/schemas/DeflatedSharpeEvidence"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "observed_at": {
+            "description": "application 시계로 기록한 현재 계열 원장 조회 시점. 완료/선택 시각이 아니며 동시 쓰기와의 DB 스냅숏 격리를 추가하지 않는다.",
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "psr": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "저장된 FULL PSR MetricValue 그대로. null은 미기록이고 MetricValue.value null은 원래 부재 사유를 따른다. 재계산하지 않는다."
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_fingerprint",
+          "metric_registry_version",
+          "observed_at",
+          "psr",
+          "dsr"
+        ],
+        "title": "RunValidationReport",
+        "type": "object"
       },
       "SaveDocumentRequest": {
         "properties": {
@@ -13786,6 +13999,75 @@
           }
         },
         "summary": "Get Backtest Summary"
+      }
+    },
+    "/api/v1/backtests/{run_id}/validation-report": {
+      "get": {
+        "operationId": "getBacktestValidationReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunValidationReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Validation Report"
       }
     },
     "/api/v1/continuous-accounts/{evaluation_id}": {

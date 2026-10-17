@@ -166,3 +166,136 @@ def test_more_trials_raise_the_luck_baseline() -> None:
 @pytest.mark.parametrize(("trial_count", "expected"), [(1, 2.0), (19, 2.0), (20, 3.0), (238, 3.0)])
 def test_alpha_t_threshold_rises_at_twenty_trials(trial_count: int, expected: float) -> None:
     assert alpha_t_threshold(trial_count) == expected
+
+
+@pytest.mark.parametrize(
+    ("ledger", "sharpe", "error", "reason"),
+    [
+        (None, 0.8, 0.4, "no_lineage"),
+        (_ledger(0, []), 0.8, 0.4, "no_counted_trials"),
+        (_ledger(1, [0.05]), None, 0.4, "sharpe_unavailable"),
+        (_ledger(1, [0.05]), 0.8, None, "standard_error_unavailable"),
+        (_ledger(1, [0.05]), 0.8, 0.0, "nonpositive_standard_error"),
+        (_ledger(1, [0.05]), 0.8, -0.1, "nonpositive_standard_error"),
+        (_ledger(3, [0.05]), 0.8, 0.4, "insufficient_representatives"),
+    ],
+)
+def test_run_evidence_keeps_unavailable_reasons_and_full_scope(
+    ledger: TrialLedger | None, sharpe: float | None, error: float | None, reason: str
+) -> None:
+    from dataclasses import replace
+
+    from strategy_workbench.domain.analytics.facade.metrics import MetricScope, MetricValue
+    from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe_evidence
+    from tests.test_backtest_artifact_store import _result
+
+    result = replace(
+        _result(),
+        metrics=(
+            MetricValue("sharpe", sharpe, MetricScope.FULL, 300),
+            MetricValue("sharpe_standard_error", error, MetricScope.FULL, 300),
+            MetricValue("sharpe", 9.0, MetricScope.OUT_OF_SAMPLE, 100),
+        ),
+    )
+    evidence = run_deflated_sharpe_evidence(result, ledger)
+    assert evidence.value is None
+    assert evidence.unavailable_reason == reason
+    assert evidence.session_sharpe is None
+
+
+def test_run_evidence_uses_sample_variance_and_only_representative_registry_versions() -> None:
+    from dataclasses import replace
+
+    from strategy_workbench.domain.analytics.facade.metrics import MetricScope, MetricValue
+    from strategy_workbench.domain.experiment.facade.statistics import (
+        run_deflated_sharpe,
+        run_deflated_sharpe_evidence,
+    )
+    from tests.test_backtest_artifact_store import _result
+
+    ledger = _ledger(4, [0.01, 0.03, 0.02])
+    ledger = replace(
+        ledger,
+        merged_lineage_ids=("parent",),
+        trials=tuple(
+            replace(trial, metric_registry_version=version)
+            for trial, version in zip(
+                ledger.trials, ("v1", "v2", None, "unused", "no-result"), strict=True
+            )
+        ),
+    )
+    result = replace(
+        _result(),
+        metrics=(
+            MetricValue("sharpe", 0.05 * math.sqrt(252), MetricScope.FULL, 300),
+            MetricValue("sharpe_standard_error", 0.03 * math.sqrt(252), MetricScope.FULL, 300),
+        ),
+    )
+    evidence = run_deflated_sharpe_evidence(result, ledger)
+    assert evidence.trial_count == 4
+    assert evidence.representative_count == 3
+    assert evidence.trial_sharpe_variance == pytest.approx(0.0001)
+    assert evidence.expected_maximum_sharpe == expected_maximum_sharpe(4, 0.0001)
+    assert evidence.value == pytest.approx(
+        probabilistic_sharpe(0.05, 0.03, expected_maximum_sharpe(4, 0.0001))
+    )
+    assert evidence.value == run_deflated_sharpe(result, ledger)
+    assert evidence.representative_registry_versions == ("v1", "v2")
+    assert evidence.unknown_registry_count == 1
+    assert evidence.registry_mixed
+    assert evidence.merged_lineage_ids == ("parent",)
+
+
+@pytest.mark.parametrize("stored_psr", [None, 0.001])
+def test_single_trial_uses_current_formula_even_without_stored_psr(
+    stored_psr: float | None,
+) -> None:
+    from dataclasses import replace
+
+    from strategy_workbench.domain.analytics.facade.metrics import MetricScope, MetricValue
+    from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe_evidence
+    from tests.test_backtest_artifact_store import _result
+
+    result = replace(
+        _result(),
+        metrics=(
+            MetricValue("sharpe", 0.8, MetricScope.FULL, 300),
+            MetricValue("sharpe_standard_error", 0.4, MetricScope.FULL, 300),
+        ),
+    )
+    if stored_psr is not None:
+        result = replace(
+            result,
+            metrics=result.metrics
+            + (MetricValue("probabilistic_sharpe", stored_psr, MetricScope.FULL, 300),),
+        )
+    evidence = run_deflated_sharpe_evidence(result, _ledger(1, []))
+    assert evidence.value == pytest.approx(probabilistic_sharpe(0.8, 0.4, 0))
+    assert evidence.value != stored_psr
+    assert evidence.unavailable_reason is None
+    assert evidence.trial_sharpe_variance == evidence.expected_maximum_sharpe == 0
+
+
+@pytest.mark.parametrize("error", [None, 0.0, -1.0])
+def test_unavailable_error_does_not_compute_overflowing_representative_variance(
+    error: float | None,
+) -> None:
+    from dataclasses import replace
+
+    from strategy_workbench.domain.analytics.facade.metrics import MetricScope, MetricValue
+    from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe_evidence
+    from tests.test_backtest_artifact_store import _result
+
+    ledger = _ledger(2, [1e308, -1e308])
+    result = replace(
+        _result(),
+        metrics=(
+            MetricValue("sharpe", 0.8, MetricScope.FULL, 300),
+            MetricValue("sharpe_standard_error", error, MetricScope.FULL, 300),
+        ),
+    )
+    report = run_deflated_sharpe_evidence(result, ledger)
+    assert report.value is None
+    assert report.trial_sharpe_variance is None
+    if error is not None:
+        assert deflated_sharpe(0.8, error, 252, ledger) is None

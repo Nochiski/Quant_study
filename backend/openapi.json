@@ -4151,6 +4151,8 @@
               "experiment.capacity.invalid_amounts",
               "experiment.kind.mismatch",
               "experiment.not_found",
+              "experiment.robustness.period_too_short",
+              "experiment.robustness.run_not_found",
               "experiment.search.invalid_constraint",
               "experiment.search.invalid_values",
               "experiment.search.no_feasible_point",
@@ -4322,6 +4324,17 @@
           },
           "run": {
             "$ref": "#/components/schemas/BacktestRunSpec"
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
           },
           "split": {
             "anyOf": [
@@ -14296,6 +14309,186 @@
           }
         },
         "summary": "Get Backtest Result"
+      }
+    },
+    "/api/v1/backtests/{run_id}/robustness-check": {
+      "post": {
+        "description": "결과 실행의 기본 설계로 실험을 만들고 대기열에 넣는다(US-DM-11).",
+        "operationId": "createRobustnessCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                    }
+                  ],
+                  "title": "Response 404 Createrobustnesscheck"
+                }
+              }
+            },
+            "description": "The result run or its base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The base revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Create Robustness Check"
+      }
+    },
+    "/api/v1/backtests/{run_id}/robustness-check/preview": {
+      "post": {
+        "description": "결과 실행의 \"튼튼한지 확인하기\" 미리 계산 — 기본 설계와 새로 세는 시도 수(US-DM-11).",
+        "operationId": "previewRobustnessCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                    }
+                  ],
+                  "title": "Response 404 Previewrobustnesscheck"
+                }
+              }
+            },
+            "description": "The result run or its base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The base revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Preview Robustness Check"
+      }
+    },
+    "/api/v1/backtests/{run_id}/robustness-checks": {
+      "get": {
+        "description": "결과 실행에서 \"튼튼한지 확인하기\"로 만든 실험, 최근에 만든 순. 없으면 빈 목록.",
+        "operationId": "listRobustnessChecks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Experiment"
+                  },
+                  "title": "Response Listrobustnesschecks",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Robustness Checks"
       }
     },
     "/api/v1/backtests/{run_id}/summary": {

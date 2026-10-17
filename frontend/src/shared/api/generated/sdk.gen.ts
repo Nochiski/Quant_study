@@ -33,6 +33,9 @@ import type {
   CreateExperimentData,
   CreateExperimentErrors,
   CreateExperimentResponses,
+  CreateRobustnessCheckData,
+  CreateRobustnessCheckErrors,
+  CreateRobustnessCheckResponses,
   CreateStrategyData,
   CreateStrategyDocumentData,
   CreateStrategyDocumentErrors,
@@ -153,6 +156,9 @@ import type {
   ListExperimentTrialsData,
   ListExperimentTrialsErrors,
   ListExperimentTrialsResponses,
+  ListRobustnessChecksData,
+  ListRobustnessChecksErrors,
+  ListRobustnessChecksResponses,
   ListStrategiesData,
   ListStrategiesErrors,
   ListStrategiesResponses,
@@ -183,6 +189,9 @@ import type {
   PreviewPortfolioData,
   PreviewPortfolioErrors,
   PreviewPortfolioResponses,
+  PreviewRobustnessCheckData,
+  PreviewRobustnessCheckErrors,
+  PreviewRobustnessCheckResponses,
   RetryExperimentTrialData,
   RetryExperimentTrialErrors,
   RetryExperimentTrialResponses,
@@ -593,6 +602,48 @@ export const getBacktestResult = <ThrowOnError extends boolean = false>(
     GetBacktestResultErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/result", ...options });
+
+/**
+ * Create Robustness Check
+ *
+ * 결과 실행의 기본 설계로 실험을 만들고 대기열에 넣는다(US-DM-11).
+ */
+export const createRobustnessCheck = <ThrowOnError extends boolean = false>(
+  options: Options<CreateRobustnessCheckData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateRobustnessCheckResponses,
+    CreateRobustnessCheckErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/robustness-check", ...options });
+
+/**
+ * Preview Robustness Check
+ *
+ * 결과 실행의 "튼튼한지 확인하기" 미리 계산 — 기본 설계와 새로 세는 시도 수(US-DM-11).
+ */
+export const previewRobustnessCheck = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewRobustnessCheckData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewRobustnessCheckResponses,
+    PreviewRobustnessCheckErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/robustness-check/preview", ...options });
+
+/**
+ * List Robustness Checks
+ *
+ * 결과 실행에서 "튼튼한지 확인하기"로 만든 실험, 최근에 만든 순. 없으면 빈 목록.
+ */
+export const listRobustnessChecks = <ThrowOnError extends boolean = false>(
+  options: Options<ListRobustnessChecksData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListRobustnessChecksResponses,
+    ListRobustnessChecksErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/robustness-checks", ...options });
 
 /**
  * Get Backtest Summary

@@ -7,6 +7,7 @@ export {
   requestRejectionMessage,
 } from "./model/backtest-error";
 export { BacktestRunDetail } from "./ui/backtest-run-detail";
+export { LineChart, type ChartSeries } from "./ui/line-chart";
 export {
   BacktestResultFailure,
   BacktestRunFailure,

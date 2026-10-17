@@ -83,3 +83,22 @@ US-DM-12로 보존하며 담당/e2e는 V5-02로 유지한다. 삭제나 완료 �
 backend 및 루트 tools의 Ruff·Pyright와 diff 공백 검사를 통과했다. 격리한 mock 앱으로 생성한
 OpenAPI 비교에서 기존 경로·기존 schema 변경은 0이고 validation-report 경로와 새 응답 타입만 추가됐다.
 브라우저 근거는 위 로컬 검증 범위를 따르고 공식 CI·머지 상태는 해당 PR의 기록에서 확인한다.
+
+## 둘째 slice: AI 결과 설명의 검증 근거(US-DM-12)
+
+결과 설명 세션이 읽는 요약(`read_backtest_result`)에 `validation` 칸을 더했다. 검증 카드와 같은 근거를
+시점별로 나눈다.
+
+- `psr`: 저장된 FULL PSR 값·표본 수·부재 사유를 그대로 옮긴다.
+- `current_ledger`: `validation_report`가 `observed_at`에 읽은 계열 원장 근거(DSR 값·사유·N·대표 자료 수·
+  분산·SR₀·세션 샤프/표준오차·판본 섞임)다.
+- `selection_snapshots`: 이 실행의 trial을 후보로 고를 때 굳힌 N·DSR·원장 대표 샤프와 선택 시각이다.
+  실험 서비스의 `run_selections`가 마지막 attempt가 이 실행인 trial의 선택만 고른다.
+
+근거를 못 읽으면 `validation`은 null이고, 프롬프트는 근거 없이 결과를 믿어도 된다고 말하지 않게 한다.
+PSR을 미래 확률로, 지금 N을 선택 당시 판단으로 설명하지 않도록 프롬프트에 읽는 법을 더했다. 값은 기존
+owner가 계산한 것을 옮기며 요약에서 다시 계산하지 않는다.
+
+알려진 한계: 같은 run을 여러 실험이 이어 쓰면 소유 실험은 `BacktestRunSummary.experiment_id`(가장 앞선
+소유자) 하나라 다른 실험의 선택은 싣지 않는다. 남은 V5-02: 스트레스/튼튼한지 확인하기 실행(US-DM-11),
+워크포워드 곡선과 US-CS-09, 추적·미리보기 parameter_values. V5-02 전체는 계속 미완료다.

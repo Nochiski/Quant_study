@@ -1,5 +1,7 @@
 from strategy_workbench.application.assistant_chat.ports.outgoing.backtest_results import (
     BacktestResultPort,
+    ResultSelectionSnapshot,
+    ResultValidationFacts,
 )
 from strategy_workbench.application.assistant_chat.ports.outgoing.chat_sessions import (
     ChatSessionNotFoundError,
@@ -30,6 +32,8 @@ __all__ = [
     "ProviderProfileRepository",
     "ProviderSecretMissingError",
     "ProviderSecretStore",
+    "ResultSelectionSnapshot",
+    "ResultValidationFacts",
     "StrategyCompilerPort",
     "TurnNotFoundError",
 ]

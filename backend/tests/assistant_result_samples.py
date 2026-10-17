@@ -16,6 +16,10 @@ from datetime import UTC, date, datetime, timedelta
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
+from strategy_workbench.application.assistant_chat.facade.ports import (
+    ResultSelectionSnapshot,
+    ResultValidationFacts,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.analytics.facade.metrics import (
     DrawdownPoint,
@@ -44,6 +48,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
     StrategySourceKind,
 )
+from strategy_workbench.domain.experiment.facade.statistics import DeflatedSharpeEvidence
 
 __all__ = ["SAMPLE_RUN_ID", "sample_backtest_result"]
 
@@ -75,6 +80,7 @@ _FULL_VALUES: dict[str, float | None] = {
     "trade_count": 4.0,
     "win_rate": 0.5,
     "profit_factor": 1.8,
+    "probabilistic_sharpe": 0.9721,
 }
 
 
@@ -217,5 +223,42 @@ def sample_backtest_result() -> BacktestRunResult:
             fills=fills,
             costs=(),
             trades=trades,
+        ),
+    )
+
+
+def sample_validation_facts() -> ResultValidationFacts:
+    """표본 실행의 검증 근거. 지금 원장(N=3)과 후보로 고를 당시 스냅숏(N=2)이 다르다(US-DM-12)."""
+    return ResultValidationFacts(
+        observed_at=datetime(2026, 9, 1, 9, 30, tzinfo=UTC),
+        psr=next(
+            metric
+            for metric in sample_backtest_result().metrics
+            if metric.metric_id == "probabilistic_sharpe" and metric.scope is MetricScope.FULL
+        ),
+        deflated_sharpe=DeflatedSharpeEvidence(
+            value=0.6143,
+            unavailable_reason=None,
+            lineage_id="strategy-sample",
+            merged_lineage_ids=(),
+            trial_count=3,
+            representative_count=3,
+            trial_sharpe_variance=0.0004,
+            expected_maximum_sharpe=0.0172,
+            session_sharpe=0.0548,
+            session_standard_error=0.0251,
+            annualization_days=252,
+            representative_registry_versions=("metric-registry-v1",),
+            unknown_registry_count=0,
+            registry_mixed=False,
+        ),
+        selections=(
+            ResultSelectionSnapshot(
+                experiment_id="experiment-sample",
+                selected_at=datetime(2026, 8, 20, 14, 0, tzinfo=UTC),
+                trial_count=2,
+                deflated_sharpe=0.7012,
+                ledger_representative_sharpe=0.0548,
+            ),
         ),
     )

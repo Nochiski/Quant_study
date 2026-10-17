@@ -15,6 +15,7 @@ from strategy_workbench.application.assistant_chat._result_context import (
     MAX_SUMMARY_MONTHS,
     summarize_backtest_result,
 )
+from strategy_workbench.application.assistant_chat.facade.ports import ResultValidationFacts
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope, MetricValue
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
@@ -22,11 +23,22 @@ from strategy_workbench.domain.backtest.facade.runs import (
     WarningSeverity,
 )
 
-from ..assistant_result_samples import SAMPLE_RUN_ID, sample_backtest_result
+from ..assistant_result_samples import (
+    SAMPLE_RUN_ID,
+    sample_backtest_result,
+    sample_validation_facts,
+)
 
 
-def _summary(result: BacktestRunResult | None = None, **kwargs: int) -> dict[str, object]:
-    text = summarize_backtest_result(result or sample_backtest_result(), **kwargs)
+def _summary(
+    result: BacktestRunResult | None = None,
+    *,
+    validation: ResultValidationFacts | None = None,
+    max_chars: int = MAX_RESULT_CONTEXT_CHARS,
+) -> dict[str, object]:
+    text = summarize_backtest_result(
+        result or sample_backtest_result(), validation=validation, max_chars=max_chars
+    )
     payload = json.loads(text)
     assert isinstance(payload, dict)
     return payload
@@ -302,3 +314,59 @@ def test_info_warnings_are_dropped_before_warning_severity_ones() -> None:
         *(f"data.info.{index}" for index in range(len(info) - dropped)),
         *(f"data.warning.{index}" for index in range(5)),
     ]
+
+
+def test_validation_evidence_keeps_current_ledger_and_selection_time_apart() -> None:
+    """US-DM-12: 조회 시점 원장 근거와 후보로 고를 당시 스냅숏을 다른 칸에 싣는다."""
+    payload = _summary(validation=sample_validation_facts())
+    validation = payload["validation"]
+    assert isinstance(validation, dict)
+    assert validation["psr"] == {"value": 0.9721, "sample_count": 820, "unavailable_reason": None}
+    ledger = validation["current_ledger"]
+    assert ledger["observed_at"] == "2026-09-01T09:30:00+00:00"
+    assert (ledger["deflated_sharpe"], ledger["trial_count"]) == (0.6143, 3)
+    assert ledger["registry_mixed"] is False
+    assert validation["selection_snapshots"] == [
+        {
+            "experiment_id": "experiment-sample",
+            "selected_at": "2026-08-20T14:00:00+00:00",
+            "trial_count": 2,
+            "deflated_sharpe": 0.7012,
+            "ledger_representative_sharpe": 0.0548,
+        }
+    ]
+
+
+def test_unreadable_validation_is_null_not_an_empty_pass() -> None:
+    assert _summary()["validation"] is None
+
+
+def test_a_tight_cap_drops_selection_snapshots_but_keeps_the_current_ledger() -> None:
+    facts = sample_validation_facts()
+    many = replace(
+        facts,
+        selections=tuple(
+            replace(facts.selections[0], experiment_id=f"experiment-{index:02d}")
+            for index in range(40)
+        ),
+    )
+    full = summarize_backtest_result(sample_backtest_result(), validation=many)
+    cap = len(full)
+    while True:
+        cap -= 200
+        payload = _summary(validation=many, max_chars=cap)
+        omitted = payload.get("omitted")
+        assert isinstance(omitted, dict)
+        if "selection_snapshots" in omitted:
+            break
+    validation = payload["validation"]
+    assert isinstance(validation, dict)
+    # 스냅숏을 덜기 전에 월별 수익률·구간 지표·팩터를 먼저 다 덜었다.
+    assert payload["monthly_returns"] == []
+    metrics = payload["metrics"]
+    assert isinstance(metrics, list)
+    assert all(metric["scope"] == "full" for metric in metrics)
+    assert len(validation["selection_snapshots"]) == 40 - omitted["selection_snapshots"]
+    # 오래된 것부터 던다: 같은 시각이면 입력 순서이므로 앞 실험이 먼저 빠진다.
+    assert validation["selection_snapshots"][-1]["experiment_id"] == "experiment-39"
+    assert validation["current_ledger"]["trial_count"] == 3

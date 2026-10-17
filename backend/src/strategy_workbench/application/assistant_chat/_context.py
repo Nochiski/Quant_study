@@ -102,7 +102,12 @@ class AssistantContextBuilder:
         result = self._backtest_results.completed_result(run_id)
         if result is None:
             raise BacktestResultUnavailableError(run_id)
-        return ResultContext(run_id=run_id, summary=summarize_backtest_result(result))
+        return ResultContext(
+            run_id=run_id,
+            summary=summarize_backtest_result(
+                result, validation=self._backtest_results.validation_facts(run_id)
+            ),
+        )
 
     def tool_result(self, call: ToolCall, context: TurnContext | ResultContext) -> ToolResult:
         """도구 하나를 실행한다. 모르는 이름은 예외가 아니라 도구 오류로 돌려준다.

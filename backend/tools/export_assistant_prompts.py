@@ -45,6 +45,7 @@ from pathlib import Path
 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.application.assistant_chat.facade.context import AssistantContextBuilder
+from strategy_workbench.application.assistant_chat.facade.ports import ResultValidationFacts
 from strategy_workbench.application.assistant_chat.facade.prompt import MODEL_NOTICES
 from strategy_workbench.application.assistant_chat.facade.result_context import (
     summarize_backtest_result,
@@ -63,6 +64,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 from tests.assistant_result_samples import (  # noqa: E402  # reason: sys.path를 먼저 세워야 import된다
     SAMPLE_RUN_ID,
     sample_backtest_result,
+    sample_validation_facts,
 )
 
 __all__ = [
@@ -106,6 +108,9 @@ class _SampleBacktestResults:
     def completed_result(self, run_id: str) -> BacktestRunResult | None:
         return sample_backtest_result() if run_id == SAMPLE_RUN_ID else None
 
+    def validation_facts(self, run_id: str) -> ResultValidationFacts | None:
+        return sample_validation_facts() if run_id == SAMPLE_RUN_ID else None
+
 
 def _context_builder() -> AssistantContextBuilder:
     schema = json.loads(RUNTIME_SCHEMA_FIXTURE.read_text(encoding="utf-8"))
@@ -130,7 +135,9 @@ def _tools_document(tools: tuple[ToolSpec, ...]) -> str:
 
 def _result_context_document() -> str:
     """결정적 표본 실행의 요약. 모델이 결과에서 보는 것 전부다(들여쓰기만 다르다)."""
-    summary = summarize_backtest_result(sample_backtest_result())
+    summary = summarize_backtest_result(
+        sample_backtest_result(), validation=sample_validation_facts()
+    )
     return json.dumps(json.loads(summary), indent=2, ensure_ascii=False) + "\n"
 
 

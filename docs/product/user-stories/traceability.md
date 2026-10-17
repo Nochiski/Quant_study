@@ -21,9 +21,9 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
 | 김철수 | 7 | 0 | 5 | 1 | 13 |
-| 정동민 | 10 | 0 | 2 | 0 | 12 |
+| 정동민 | 11 | 0 | 1 | 0 | 12 |
 | 한상목 | 15 | 0 | 0 | 1 | 16 |
-| 합계 | 32 | 0 | 7 | 2 | 41 |
+| 합계 | 33 | 0 | 6 | 2 | 41 |
 
 ### 스토리별 추적
 
@@ -53,7 +53,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-09 | 정동민 | AI 제안을 적용한 뒤 버튼 한 번으로 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다 |
 | US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 1440px에서 원래 통계·키보드 근거·조회 오류를 구별한다<br>`frontend/e2e/stories/dm.run-validation.spec.ts` :: US-DM-10 360px에서 원래 통계·키보드 근거·조회 오류를 구별한다 |
 | US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `예정` | V3-05, V5-02 | V5-02 | — |
-| US-DM-12 | 정동민 | AI 결과 설명에서 검증 근거와 한계를 함께 본다 | `예정` | V5-02 | V5-02 | — |
+| US-DM-12 | 정동민 | AI 결과 설명에서 검증 근거와 한계를 함께 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 AI에게 결과를 믿어도 되는지 물으면 검증 카드의 PSR·DSR 원래 수치와 조회 시점을 함께 답한다<br>`frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 후보로 고른 뒤 계열 시도가 늘어난 결과에서 AI는 지금 원장 기준과 고를 당시 기준을 나눠 답한다 |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |

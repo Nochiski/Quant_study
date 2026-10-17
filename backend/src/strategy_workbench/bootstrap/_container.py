@@ -224,14 +224,6 @@ def build_container(
         run_slots=run_slots,
         factor_registry=factor_registry,
     )
-    # 결과 설명 세션이 완료된 실행을 읽으므로 실행 레지스트리를 먼저 세운다(결과 설명 spec R2).
-    assistant_services = build_assistant_services(
-        settings=assistant,
-        equity_data=equity_data,
-        factor_registry=factor_registry,
-        strategy_authoring=strategy_authoring,
-        backtest_runs=backtest_runs,
-    )
     experiment_repository = SQLiteExperimentRepository(research_db_path)
     experiments = ExperimentRunService(
         experiment_repository,
@@ -240,6 +232,16 @@ def build_container(
         ),
         metric_registry=metric_registry,
         new_id=lambda: str(uuid4()),
+    )
+    # 결과 설명 세션이 완료된 실행을 읽으므로 실행 레지스트리를 먼저 세운다(결과 설명 spec R2).
+    # 검증 근거의 선택 스냅숏을 실험 기록에서 읽으므로 실험 서비스도 먼저 세운다(US-DM-12).
+    assistant_services = build_assistant_services(
+        settings=assistant,
+        equity_data=equity_data,
+        factor_registry=factor_registry,
+        strategy_authoring=strategy_authoring,
+        backtest_runs=backtest_runs,
+        experiments=experiments,
     )
     # 지난 프로세스가 끝내지 못한 실험의 남은 trial 을 다시 넘긴다(검증 랩 spec D6). 실행
     # 레지스트리가 중단된 run 을 먼저 닫은 뒤라야 한다.

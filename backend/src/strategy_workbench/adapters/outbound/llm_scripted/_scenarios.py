@@ -550,7 +550,50 @@ def _result_answer_parts(summary: Mapping[str, object] | None) -> tuple[str, ...
             f"최대 낙폭(Maximum drawdown)은 {_percent(drawdown)}입니다. 가장 높았던 때에서 가장 "
             "많이 떨어진 폭입니다. 그만큼 떨어지는 시기를 견딜 수 있는지 생각해 보세요. "
         )
+    parts.extend(_validation_parts(summary.get("validation")))
     parts.append("과거 결과가 앞으로의 수익을 보장하지는 않습니다.")
+    return tuple(parts)
+
+
+def _validation_parts(validation: object) -> tuple[str, ...]:
+    """검증 근거를 시점별로 옮긴다(US-DM-12). 값·사유·시점은 모두 요약에서 읽는다."""
+    if not isinstance(validation, Mapping):
+        return ("검증 근거는 읽지 못해 결과를 믿어도 되는지는 판단하지 않겠습니다. ",)
+    parts: list[str] = []
+    psr = validation.get("psr")
+    if isinstance(psr, Mapping):
+        value = psr.get("value")
+        parts.append(
+            f"PSR(probabilistic_sharpe)은 {_percent(float(value))}입니다. 표본 길이와 분포를 "
+            "고려해 샤프가 기준 0을 넘는지 본 통계이고, 앞으로 벌 확률은 아닙니다. "
+            if isinstance(value, int | float)
+            else f"PSR은 계산되지 않았습니다(사유: {psr.get('unavailable_reason')}). "
+        )
+    else:
+        parts.append("이 실행에는 PSR 기록이 없습니다. ")
+    ledger = validation.get("current_ledger")
+    if isinstance(ledger, Mapping):
+        dsr = ledger.get("deflated_sharpe")
+        basis = f"지금 계열 원장({ledger.get('observed_at')} 조회) 기준 "
+        parts.append(
+            f"{basis}시도 수 N={ledger.get('trial_count')}, DSR은 {_percent(float(dsr))}입니다. "
+            "시도 수만큼 기준을 올려 다시 본 같은 종류의 통계입니다. "
+            if isinstance(dsr, int | float)
+            else f"{basis}DSR은 계산되지 않았습니다(사유: {ledger.get('unavailable_reason')}). "
+        )
+        unknown = ledger.get("unknown_registry_count")
+        if ledger.get("registry_mixed") is True or (isinstance(unknown, int) and unknown > 0):
+            parts.append("지표 계산 판본이 섞인 시도들로 잰 값이라 조심해서 읽어야 합니다. ")
+    snapshots = validation.get("selection_snapshots")
+    for snapshot in snapshots if isinstance(snapshots, list) else []:
+        if not isinstance(snapshot, Mapping):
+            continue
+        dsr = snapshot.get("deflated_sharpe")
+        shown = _percent(float(dsr)) if isinstance(dsr, int | float) else "기록 없음"
+        parts.append(
+            f"후보로 고를 당시({snapshot.get('selected_at')}) 기록은 시도 수 "
+            f"N={snapshot.get('trial_count')}, DSR {shown}였습니다. 지금 기준과 따로 봐야 합니다. "
+        )
     return tuple(parts)
 
 

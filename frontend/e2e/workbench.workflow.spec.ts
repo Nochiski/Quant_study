@@ -37,6 +37,9 @@ import {
   mustReplace,
   openEditor,
   openRunSettingsGroup,
+  openTraceWorkspace,
+  openEditorWorkspace,
+  openTraceSource,
   REQUESTED_ENVIRONMENT,
   replaceSource,
   requestedEnvironment,
@@ -380,6 +383,7 @@ test.describe("professional YAML workflow", () => {
     // 추적은 실행 설정의 기간·유니버스 위에서 돈다(P3-02). 이 페이지는 따로 연 브라우저 문맥이라
     // 마지막 사용값이 없어 사용자가 정한다.
     await fillRunEnvironment(workflow);
+    await openTraceWorkspace(workflow);
     await workflow
       .getByRole("textbox", { name: "종목 ID", exact: true })
       .fill(securityIds.join(", "));
@@ -397,6 +401,7 @@ test.describe("professional YAML workflow", () => {
     await workflow.getByRole("button", { name: "추적 실행" }).click();
     expect((await submittedTrace).postDataJSON()).toEqual(traceRequest);
     const provenance = workflow.getByLabel("추적 재현 정보");
+    await openTraceSource(workflow);
     await expect(provenance).toBeVisible({ timeout: 60_000 });
 
     const trace = requireData(
@@ -677,6 +682,7 @@ test.describe("professional YAML workflow", () => {
       planPanel.getByText("price.adj_close", { exact: true }),
     ).toBeVisible();
 
+    await openEditorWorkspace(workflow);
     const settingsToggle = runSettingsInputs(workflow).toggle;
     await settingsToggle.click();
     await openRunSettingsGroup(workflow, "고급 실행");

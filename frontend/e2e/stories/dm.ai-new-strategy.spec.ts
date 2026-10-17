@@ -213,6 +213,7 @@ test(
       name: "계약",
       exact: true,
     });
+    await contractToggle.click();
     // 경우마다 페이지 맨 위에서 연다. 계약 칸 내용이 본문을 늘려 페이지가 창보다 길다.
     const toTop = () => page.evaluate(() => window.scrollTo(0, 0));
 

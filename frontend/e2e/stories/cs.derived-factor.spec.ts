@@ -19,6 +19,8 @@ import {
   mustReplace,
   openEditor,
   openRunSettingsGroup,
+  openTraceWorkspace,
+  openTraceSource,
   replaceSource,
   RUN_ENVIRONMENT,
   runSettingsInputs,
@@ -93,6 +95,7 @@ test(
     await saveAndWaitForRevision(page, 1);
     // 추적과 백테스트는 실행 설정의 기간·유니버스 위에서 돈다(P3-02).
     await fillRunEnvironment(page);
+    await openTraceWorkspace(page);
 
     // 중간 결과: 파생 팩터의 마지막 노드를 골라 종목 셋을 추적한다.
     await page
@@ -105,6 +108,7 @@ test(
       .getByRole("combobox", { name: "노드", exact: true })
       .selectOption("btm_z");
     await page.getByRole("button", { name: "추적 실행" }).click();
+    await openTraceSource(page);
     await expect(page.getByLabel("추적 재현 정보")).toBeVisible({
       timeout: 60_000,
     });
@@ -186,6 +190,7 @@ test(
     await openRunSettingsGroup(page, "비용");
     await settings.fee.fill("20");
     await settings.toggle.click();
+    await openTraceSource(page);
     await expect(page.getByLabel("추적 재현 정보")).toBeHidden();
     await expect(
       debuggerRegion.getByText("범위를 선택한 뒤 추적을 실행하세요."),

@@ -12,6 +12,9 @@ import {
   expectPhase,
   fillRunEnvironment,
   openEditor,
+  openTraceWorkspace,
+  openTraceSource,
+  openEditorWorkspace,
   replaceSource,
   upgradeFromBanner,
 } from "../workbench-helpers";
@@ -63,6 +66,7 @@ const load = async (page: Page, source: string) => {
   await fillRunEnvironment(page, {}, environment);
 };
 const trace = async (page: Page, factorId: string, securities: string[]) => {
+  await openTraceWorkspace(page);
   const controls = page.getByRole("form", { name: "전략 추적 범위" });
   await controls
     .getByRole("textbox", { name: "종목 ID", exact: true })
@@ -82,6 +86,7 @@ const trace = async (page: Page, factorId: string, securities: string[]) => {
   const received = await response;
   expect(received.ok()).toBeTruthy();
   const result = (await received.json()) as StrategyTraceResponse;
+  await openTraceSource(page);
   await expect(page.getByLabel("추적 재현 정보")).toBeVisible({
     timeout: 60_000,
   });
@@ -126,6 +131,7 @@ test(
     await expect(selector).toHaveValue("rank");
     const scores = new Map<string, number[]>();
     for (const mode of ["rank", "zscore", "none"] as const) {
+      await openEditorWorkspace(page);
       await page.getByRole("tab", { name: "그래프", exact: true }).click();
       await selector.selectOption(mode);
       await waitForSettledDocument(page);
@@ -203,6 +209,7 @@ test(
         "      output_node_id: value",
         "        - {node_id: scaled, kind: cross_sectional, operator: rank, input_node_id: value}\n      output_node_id: scaled",
       ) + "signal:\n  normalization: none\n";
+    await openEditorWorkspace(page);
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     await replaceSource(page, dimensionless);
     await expectPhase(page, "검증 통과");
@@ -348,6 +355,7 @@ test(
       .filter({ hasText: "3 팩터 기여도" });
     await expect(contributions).toContainText("momentum_12_1");
     await expect(contributions).not.toContainText("volatility_60");
+    await openEditorWorkspace(page);
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     const alphaOnly = source
       .replace(/  - factor_id: volatility_60[\s\S]*?(?=portfolio:)/u, "")
@@ -380,6 +388,7 @@ test(
         )!.unconstrained_target_weight,
       ).toBeCloseTo(0.05, 10);
     }
+    await openEditorWorkspace(page);
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     const withoutAlpha = source.replace(
       /  - factor_id: momentum_12_1[\s\S]*?(?=  - factor_id: volatility_60)/u,

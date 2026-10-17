@@ -25,6 +25,16 @@ export const RunEnvironmentSummary = ({
     problemKind,
     openPanelAtFirstProblem,
   } = controller;
+  const briefFields = new Set(["start", "end", "universe_id", "fee_bps", "slippage_bps"]);
+  const values = (brief: boolean) => (
+    <dl>
+      {environmentFields.map((field) => {
+        if (environment === null || !(field.name in environment) || (brief && !briefFields.has(field.name))) return null;
+        const value = (environment as unknown as Record<string, unknown>)[field.name];
+        return <div key={field.name}><dt>{runEnvironmentLabel(field)}</dt><dd>{runEnvironmentValueLabel(field, value)}</dd></div>;
+      })}
+    </dl>
+  );
   return (
     <section
       className="run-environment-summary"
@@ -32,27 +42,13 @@ export const RunEnvironmentSummary = ({
     >
       <strong>{t("runEnvironment.summary.title")}</strong>
       {schemaStatus !== "ready" ? (
-        <span>
+        <span className="run-environment-summary__schema">
           {schemaStatus === "error"
             ? t("backtest.settings.environment.schemaError")
             : t("backtest.settings.environment.schemaLoading")}
         </span>
       ) : environment === null ? null : (
-        <dl>
-          {environmentFields.map((field) => {
-            // 요청에 실리는 칸만 보인다 — 지금 모드에서 읽히지 않아 꺼진 칸(#352)은 싣지 않는다.
-            if (!(field.name in environment)) return null;
-            const value = (environment as unknown as Record<string, unknown>)[field.name];
-            return (
-              <div key={field.name}>
-                <dt>{runEnvironmentLabel(field)}</dt>
-                <dd>
-                  {runEnvironmentValueLabel(field, value)}
-                </dd>
-              </div>
-            );
-          })}
-        </dl>
+        values(true)
       )}
       {/* 막힌 이유는 툴바 tooltip 이 아니라 여기서 보이는 문장이다. 버튼이 그 칸으로 초점을 옮긴다
           (DEFECT-242-01). 문장은 툴바·"적용 후 백테스트" 알림과 같은 `blockedReason` 이다. */}
@@ -76,7 +72,19 @@ export const RunEnvironmentSummary = ({
           </button>
         </>
       ) : null}
-      <small>{t("runEnvironment.summary.outside")}</small>
+      {schemaStatus === "ready" && environment !== null && blockedReason === null ? <span className="run-environment-summary__mobile-state">{t("toolbar.environmentReady")}</span> : null}
+      <details
+        className="run-environment-summary__details ui-disclosure"
+        onBlurCapture={(event) => {
+          if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+        }}
+      >
+        <summary>{t("toolbar.environmentDetails")}</summary>
+        <div className="run-environment-summary__all">
+          <p>{t("runEnvironment.summary.outside")}</p>
+          {environment === null ? null : values(false)}
+        </div>
+      </details>
     </section>
   );
 };

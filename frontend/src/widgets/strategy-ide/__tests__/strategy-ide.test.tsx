@@ -5,7 +5,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -107,40 +106,27 @@ const StatefulViewIde = () => {
 };
 
 describe("StrategyIde", () => {
-  it("renders the outline slot and a single set of projection tabs", () => {
+  it("주본문을 먼저 열고 구조·계약·중간 결과는 명시해서 연다", async () => {
     matchMedia(false);
-    mount({
-      outline: (
-        <ul role="tree" aria-label="StrategySpec document structure">
-          <li role="treeitem">parameters</li>
-          <li role="treeitem">risk</li>
-        </ul>
-      ),
-    });
-    const outline = screen.getByRole("navigation", { name: "전략 구조" });
-    expect(within(outline).getByRole("tree")).toHaveTextContent(
-      "parametersrisk",
-    );
-    // Projection views + results tabs; the caller owns inspector content and there is no
-    // Data→…→Execution stepper.
-    expect(
-      new Set(
-        screen.getAllByRole("tablist").map((l) => l.getAttribute("aria-label")),
-      ),
-    ).toEqual(new Set(["표현 전환"]));
+    const user = userEvent.setup();
+    mount({ outline: <ul role="tree"><li role="treeitem">risk</li></ul> });
+    expect(screen.queryByRole("navigation", { name: "전략 구조" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "중간 결과" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("complementary", { name: "계약" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("region", { name: "중간 결과" }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    expect(screen.getByRole("tree")).toHaveTextContent("risk");
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(screen.getByRole("complementary", { name: "계약" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tablist")).toHaveLength(1);
   });
 
-  it("resizes every panel linearly by keyboard and pointer, inverting the right/bottom panes", async () => {
+  it("명시해서 연 보조 패널의 폭을 키보드로 조절한다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const outlineHandle = screen.getByRole("separator", {
       name: "전략 구조 크기 조절",
     });
@@ -161,49 +147,58 @@ describe("StrategyIde", () => {
     await user.keyboard("{End}");
     expect(inspectorHandle).toHaveAttribute("aria-valuenow", "520");
 
-    const debuggerHandle = screen.getByRole("separator", {
-      name: "중간 결과 크기 조절",
-    });
-    debuggerHandle.setPointerCapture = vi.fn();
-    debuggerHandle.releasePointerCapture = vi.fn();
-    debuggerHandle.hasPointerCapture = vi.fn(() => true);
-    fireEvent.pointerDown(debuggerHandle, { pointerId: 1, clientY: 500 });
-    for (const clientY of [510, 520, 530]) {
-      fireEvent.pointerMove(debuggerHandle, { pointerId: 1, clientY });
-    }
-    expect(debuggerHandle).toHaveAttribute("aria-valuenow", "190"); // 220 - 30, linear
   });
 
-  it("lets the debugger grow with the window height and keeps the chosen height through a shorter window", async () => {
-    // 상한이 창 높이를 따른다 — 고정 480px이면 큰 창에서도 연결 추적 아래쪽이 가려졌다(#262).
+  it("과거의 작은 분할 높이를 복원해도 추적 작업공간과 편집 원문 상태를 보존한다", async () => {
     matchMedia(false);
-    vi.stubGlobal("innerHeight", 900);
+    localStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, JSON.stringify({version: 1, sizes: {outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 120}}));
     const user = userEvent.setup();
-    mount();
-    const handle = screen.getByRole("separator", {
-      name: "중간 결과 크기 조절",
-    });
-    handle.focus();
-    await user.keyboard("{End}");
-    expect(handle).toHaveAttribute("aria-valuemax", "630");
-    expect(handle).toHaveAttribute("aria-valuenow", "630");
+    mount({ debugger: <input aria-label="추적 종목" defaultValue="SEC001" /> });
+    await user.type(screen.getByRole("textbox", { name: "source" }), "보존할 원문");
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    expect(screen.queryByRole("region", { name: "편집기" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "중간 결과" })).not.toHaveStyle({height: "120px"});
+    expect(screen.queryByRole("separator", { name: "중간 결과 크기 조절" })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "추적 종목" }), ",SEC002");
+    await user.click(screen.getByRole("button", { name: "전략 편집" }));
+    expect(screen.getByRole("textbox", { name: "source" })).toHaveValue("보존할 원문");
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    expect(screen.getByRole("textbox", { name: "추적 종목" })).toHaveValue("SEC001,SEC002");
+  });
 
-    const resizeWindow = (height: number) =>
-      act(() => {
-        vi.stubGlobal("innerHeight", height);
-        window.dispatchEvent(new Event("resize"));
-      });
-    // 창이 줄면 그 창의 상한으로 그리고, 다시 늘면 고른 높이로 돌아온다.
-    resizeWindow(700);
-    expect(handle).toHaveAttribute("aria-valuenow", "490");
-    resizeWindow(900);
-    expect(handle).toHaveAttribute("aria-valuenow", "630");
+  it("추적 중 AI와 계약을 명시해서 열어도 추적과 범위 입력을 유지한다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount({ assistant: <p>AI 대화</p>, debugger: <input aria-label="추적 범위" defaultValue="SEC001" /> });
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+    expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "추적 범위" })).toHaveValue("SEC001");
+    expect(screen.queryByRole("complementary", { name: "AI 어시스턴트" })).not.toBeInTheDocument();
+  });
+
+  it("추적 중 표현 열기 단축키는 원문을 보존하며 편집으로 복귀한다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    render(<StatefulViewIde />);
+    await user.type(screen.getByRole("textbox", { name: "source" }), "같은 원문");
+    await user.click(screen.getByRole("button", { name: "중간 결과" }));
+    fireEvent.keyDown(window, { key: "1", altKey: true });
+    expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "중간 결과" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    expect(screen.getByRole("textbox", { name: "source" })).toHaveValue("같은 원문");
   });
 
   it("collapses and restores panels with resolvable controls and distinct names", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const collapse = screen
       .getAllByRole("button", { name: /접기/ })
       .map((b) => b.textContent);
@@ -285,6 +280,7 @@ describe("StrategyIde", () => {
   it.each([true, false])("좁은 화면 전환은 이미 열린 구조와 현재 포커스를 유지한다: %s", async (insideOutline) => {
     const media = controlledMatchMedia(false);
     mount({ outline: <button>구조 항목</button> });
+    fireEvent.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     const focused = insideOutline
       ? screen.getByRole("button", { name: "구조 항목" })
       : screen.getByRole("textbox", { name: "source" });
@@ -294,30 +290,15 @@ describe("StrategyIde", () => {
     expect(focused).toHaveFocus();
   });
 
-  it("closes wide panels when the viewport becomes narrow", () => {
+  it("좁은 화면으로 바뀌어도 현재 추적 작업공간을 유지한다", () => {
     const media = controlledMatchMedia(false);
     mount();
-    expect(
-      screen.getByRole("complementary", { name: "계약" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("region", { name: "중간 결과" }),
-    ).toBeInTheDocument();
-
+    fireEvent.click(screen.getByRole("button", { name: "중간 결과" }));
+    fireEvent.click(screen.getByRole("button", { name: "계약", expanded: false }));
     act(() => media.setMatches(true));
-
-    expect(
-      screen.getByRole("button", { name: "계약", expanded: false }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "중간 결과", expanded: false }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("complementary", { name: "계약" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("region", { name: "중간 결과" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "계약" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "중간 결과" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "중간 결과" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("lets palette Escape close only the top modal and restore focus inside a narrow drawer", async () => {
@@ -351,16 +332,19 @@ describe("StrategyIde", () => {
     const onRunBacktest = vi.fn();
     mount({
       onRunBacktest,
+      editorActions: <button onClick={onRunBacktest}>백테스트 실행</button>,
       saveStatus: "방금 저장됨",
       meta: { author: "김연구" },
     });
     expect(
       screen.getByRole("navigation", { name: "현재 위치" }),
-    ).toHaveTextContent(/새 전략 v12/);
+    ).toHaveTextContent(/새 전략.*v12/);
     expect(screen.getByText("방금 저장됨")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /백테스트 실행/ }));
     expect(onRunBacktest).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("김연구")).toBeInTheDocument();
+    await user.click(screen.getByText("문서 정보"));
+    expect(screen.getByText("김연구")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     expect(
       screen.getByRole("navigation", { name: "전략 구조" }),
     ).toBeInTheDocument();
@@ -375,9 +359,19 @@ describe("StrategyIde", () => {
     );
   });
 
+  it("저장 실패는 간결하게 드러내고 문서 정보에서 전체 원인을 읽는다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount({ saveTone: "error", saveStatus: "서버에 초안을 저장할 수 없습니다. 원문은 로컬에 보존했습니다." });
+    expect(screen.getByText("저장 오류")).toBeVisible();
+    await user.click(screen.getByText("문서 정보"));
+    expect(screen.getByText("서버에 초안을 저장할 수 없습니다. 원문은 로컬에 보존했습니다.")).toBeVisible();
+  });
+
   it("renders caller-owned inspector content without sample contract values", () => {
     matchMedia(false);
     mount({ inspector: <div>runtime contract projection</div> });
+    fireEvent.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const inspector = screen.getByRole("complementary", { name: "계약" });
     expect(inspector).toHaveTextContent("runtime contract projection");
     expect(inspector).not.toHaveTextContent("/risk/max_name_weight");
@@ -616,6 +610,7 @@ describe("StrategyIde", () => {
     matchMedia(false);
     const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     const collapse = screen.getByRole("button", { name: "계약 접기" });
     collapse.focus();
 
@@ -634,6 +629,7 @@ describe("StrategyIde", () => {
     matchMedia(false);
     const user = userEvent.setup();
     const first = mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     const outline = screen.getByRole("separator", {
       name: "전략 구조 크기 조절",
     });
@@ -643,6 +639,7 @@ describe("StrategyIde", () => {
     first.unmount();
 
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     expect(
       screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "256");

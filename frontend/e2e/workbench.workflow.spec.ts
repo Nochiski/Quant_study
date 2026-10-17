@@ -36,6 +36,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   REQUESTED_ENVIRONMENT,
   replaceSource,
   requestedEnvironment,
@@ -678,6 +679,7 @@ test.describe("professional YAML workflow", () => {
 
     const settingsToggle = runSettingsInputs(workflow).toggle;
     await settingsToggle.click();
+    await openRunSettingsGroup(workflow, "고급 실행");
     const core = workflow.getByRole("combobox", { name: "실행 core" });
     await core.selectOption("python");
     await expect(core).toHaveValue("python");
@@ -745,6 +747,7 @@ test.describe("professional YAML workflow", () => {
     await workflow.unroute("**/api/v1/backtests", rejectStart);
     // 거절 표시는 그 요청의 실행 설정에 묶인다. 값을 바꾸면 사라진다.
     await settingsToggle.click();
+    await openRunSettingsGroup(workflow, "고급 실행");
     await initialCash.fill("123456789");
     await expect(workflow.getByRole("alert")).toHaveCount(0);
     await workflow
@@ -1136,9 +1139,12 @@ test.describe("professional YAML workflow", () => {
 
     const baseSource = await currentSource(page);
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
     await expect(editor).toBeVisible();
     await expect(editor.getByText("편집 가능")).toBeVisible();
+
+    await editor.getByText("노드 추가 · 연산자 찾기", { exact: true }).click();
 
     // 노드 추가: 연산자 팔레트에서 고르면 kind가 따라온다(WORKFLOW P1-04). 새 field 노드가 문서
     // 끝에 들어가고 바로 선택된다.
@@ -1261,7 +1267,9 @@ test.describe("professional YAML workflow", () => {
     await expectPhase(page, "검증 통과");
 
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
+    await editor.getByText("노드 추가 · 연산자 찾기", { exact: true }).click();
     const palette = editor.getByRole("group", { name: "연산자 팔레트" });
     await expect(palette).toBeVisible();
     // kind 드롭다운은 없고, 카탈로그가 도착하면 연산자 이름과 계산식이 보인다(P1-03 카탈로그).
@@ -1315,6 +1323,7 @@ test.describe("professional YAML workflow", () => {
     await expectPhase(page, "검증 오류");
 
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    await page.getByRole("button", { name: /· 노드 편집$/ }).first().click();
     const editorRegion = page.getByRole("region", { name: "그래프 편집" });
     await expect(editorRegion).toBeVisible();
     const canvas = editorRegion.getByRole("region", { name: "노드 캔버스" });
@@ -1398,6 +1407,7 @@ test.describe("professional YAML workflow", () => {
       await toggle.click();
       for (const field of [start, end, universe])
         await expect(field).toHaveValue("");
+      await openRunSettingsGroup(page, "비용");
       await fee.fill("30");
       await toggle.click();
 
@@ -1414,6 +1424,7 @@ test.describe("professional YAML workflow", () => {
       await expect(start).toHaveValue(environment.start);
       await expect(end).toHaveValue(environment.end);
       await expect(universe).toHaveValue(environment.universe_id);
+      await openRunSettingsGroup(page, "비용");
       await expect(fee).toHaveValue(String(environment.fee_bps));
       await toggle.click();
       const source = await currentSource(page);
@@ -1526,12 +1537,14 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
   await page.getByRole("region", { name: "팩터 레시피" }).getByRole("button", { name: "고급으로", exact: true }).click();
   const graph = page.getByRole("region", { name: "그래프 편집" });
+  await graph.getByText("노드 추가 · 연산자 찾기", { exact: true }).click();
   await graph.getByRole("button", { name: "데이터 필드 노드 추가", exact: true }).click();
   await graph.getByRole("group", { name: /선택한 노드/ })
     .getByRole("combobox", { name: "데이터 필드", exact: true }).selectOption("price.close");
   for (const operation of ["양끝 자르기", "순위"]) {
     await graph.getByRole("button", { name: `${operation} 노드 추가`, exact: true }).click();
   }
+  await graph.getByText("그래프 설정", { exact: true }).first().click();
   const output = graph.getByRole("combobox", { name: /출력 노드/ });
   await output.selectOption("rank");
   // 빈 제목의 검증 오류가 생겨도 선택한 컨트롤이 빈 스크롤 영역 뒤로 사라지면 안 된다.
@@ -1566,6 +1579,7 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await replaceSource(page, mustReplace(source, 'title: ""', 'title: "빈 문서에서 만든 전략"'));
   await page.getByRole("tab", { name: "그래프", exact: true }).click();
   await expectPhase(page, "검증 통과");
+  await page.getByRole("button", { name: "전략 구성으로 돌아가기", exact: true }).click();
   await expect(pipeline).not.toContainText(/_id|_node|kind:/);
   await fillRunEnvironment(page);
   const preview = page.getByRole("region", { name: "선정 미리보기" });
@@ -1573,8 +1587,8 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await expect(preview.getByRole("table", { name: "선정 종목" })).toBeVisible();
   await backtest(page).click();
   // 미저장 초안의 실행 결과로 이동할 때도 기존 이탈 보호를 명시적으로 거친다.
-  const leaveGuard = page.getByRole("alertdialog", { name: "저장하지 않은 변경이 있습니다" });
-  await leaveGuard.getByRole("button", { name: "나가기", exact: true }).click();
+  const leaveGuard = page.getByRole("alertdialog", { name: "백테스트 실행이 접수되었습니다" });
+  await leaveGuard.getByRole("button", { name: "결과 보기", exact: true }).click();
   await expect(page).toHaveURL(/\/backtests\//);
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText("완료", { timeout: 120_000 });
 });
@@ -1625,6 +1639,8 @@ test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화�
   await expect(recipe).toBeVisible();
   await expect(recipe.getByRole("article")).toHaveCount(2);
   await fillRunEnvironment(page);
+  await recipe.getByRole("button", { name: "파이프라인으로", exact: true }).click();
+  await page.getByRole("link", { name: "선정 결과와 비교", exact: true }).click();
   const factorPreview = page.getByRole("region", { name: "선정 미리보기" });
   await factorPreview.getByRole("button", { name: "미리보기 새로고침" }).click();
   await expect(factorPreview.getByRole("table", { name: "팩터 상위 5개 (방향 기준)" })).toBeVisible();
@@ -1633,6 +1649,8 @@ test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화�
     await factorPreview.scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath(`recipe-preview-${width}.png`) });
   }
+  await page.getByRole("link", { name: "전략 규칙 읽기 · 편집", exact: true }).click();
+  await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
   for (const width of [1440, 640, 360]) {
     await page.setViewportSize({ width, height: 900 });
     await recipe.getByRole("button", { name: "1. 데이터 필드", exact: true }).click();

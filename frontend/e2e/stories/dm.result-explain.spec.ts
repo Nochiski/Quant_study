@@ -22,6 +22,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   runSettingsInputs,
   saveAndWaitForRevision,
@@ -51,6 +52,7 @@ test(
     await fillRunEnvironment(page, { via: "band" });
     const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
+    await openRunSettingsGroup(page, "고급 실행");
     await page
       .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
       .fill(BENCHMARK);

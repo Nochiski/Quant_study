@@ -80,8 +80,7 @@
 }
 
 .problems__body {
-  max-height: 220px;
-  overflow: auto;
+  overflow: visible;
 }
 
 .problems__section + .problems__section {
@@ -163,9 +162,9 @@
 }
 
 .problems__message {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .problems__where {

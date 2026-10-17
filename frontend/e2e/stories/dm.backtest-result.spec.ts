@@ -15,6 +15,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   runSettingsInputs,
   saveAndWaitForRevision,
@@ -71,6 +72,7 @@ test(
     const { toggle } = runSettingsInputs(page);
     const cash = page.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
     await toggle.click();
+    await openRunSettingsGroup(page, "고급 실행");
     await cash.fill("0");
     await toggle.click();
     await expect(summary).toContainText(

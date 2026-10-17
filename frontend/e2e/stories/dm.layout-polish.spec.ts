@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { runSettingsInputs } from "../workbench-helpers";
+import { openRunSettingsGroup, runSettingsInputs } from "../workbench-helpers";
 
 const views = [
   { width: 1440, height: 900, theme: "light" as const },
@@ -113,6 +113,7 @@ test(
         expect(evidence.right).toBeLessThanOrEqual(view.width);
         expect(evidence.documentWidth).toBeLessThanOrEqual(view.width);
         const startBounds = await settings.start.boundingBox();
+        await openRunSettingsGroup(page, "고급 실행");
         const market = page.getByRole("combobox", {
           name: "시장",
           exact: true,
@@ -123,6 +124,7 @@ test(
           Math.abs(marketBounds!.height - startBounds!.height),
         ).toBeLessThanOrEqual(1);
         // native select의 초점과 실제 종속 칸 상태가 공통 화살표 스타일 뒤에도 유지된다.
+        await openRunSettingsGroup(page, "비용");
         const impact = page.getByRole("combobox", {
           name: "가격 충격 모델",
           exact: true,
@@ -155,6 +157,7 @@ test(
           await expect(settings.start).toBeVisible();
           await settings.toggle.focus();
           await expect(settings.start).toBeVisible();
+          await openRunSettingsGroup(page, "고급 실행");
           const oosStart = page.getByLabel(/^OOS 시작일 \(선택\)/);
           await oosStart.focus();
           const settingsElement = await panel.elementHandle();

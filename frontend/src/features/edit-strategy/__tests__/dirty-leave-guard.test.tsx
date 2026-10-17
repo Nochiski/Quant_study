@@ -1,4 +1,5 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   Outlet,
   RouterProvider,
@@ -21,7 +22,7 @@ import { DirtyLeaveGuard } from "../ui/dirty-leave-guard";
 
 afterEach(cleanup);
 
-const Editor = ({ open }: { open: Promise<void> }) => {
+const Editor = ({ open, acceptedRunId }: { open: Promise<void>; acceptedRunId?: string | null }) => {
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
     void open.then(() => setDirty(true));
@@ -29,17 +30,17 @@ const Editor = ({ open }: { open: Promise<void> }) => {
   return (
     <>
       <output data-dirty={dirty}>{dirty ? "dirty" : "clean"}</output>
-      <DirtyLeaveGuard dirty={dirty} />
+      <DirtyLeaveGuard dirty={dirty} acceptedRunId={acceptedRunId} />
     </>
   );
 };
 
-const mount = (open: Promise<void>, history = createMemoryHistory({ initialEntries: ["/"] })) => {
+const mount = (open: Promise<void>, history = createMemoryHistory({ initialEntries: ["/"] }), acceptedRunId?: string | null) => {
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
   const editorRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <Editor open={open} />,
+    component: () => <Editor open={open} acceptedRunId={acceptedRunId} />,
   });
   const awayRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -47,7 +48,11 @@ const mount = (open: Promise<void>, history = createMemoryHistory({ initialEntri
     component: () => <p>away</p>,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([editorRoute, awayRoute]),
+    routeTree: rootRoute.addChildren([editorRoute, awayRoute, createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/research/backtests/$runId",
+      component: () => <p>run results</p>,
+    })]),
     history,
   });
   render(<RouterProvider router={router} />);
@@ -55,6 +60,31 @@ const mount = (open: Promise<void>, history = createMemoryHistory({ initialEntri
 };
 
 describe("DirtyLeaveGuard (backlog 21)", () => {
+  it.each([
+    { accepted: "run-7", destination: "/research/backtests/run-7", result: true },
+    { accepted: "run-7", destination: "/research/backtests/run-other", result: false },
+    { accepted: "run-7", destination: "/away", result: false },
+    { accepted: null, destination: "/research/backtests/run-7", result: false },
+  ])("수락 실행 $accepted → $destination 에만 정확한 결과 이동 안내를 표시한다", async ({ accepted, destination, result }) => {
+    const router = mount(Promise.resolve(), undefined, accepted);
+    await screen.findByText("dirty");
+    router.history.push(destination);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveAccessibleName(result ? "백테스트 실행이 접수되었습니다" : "저장하지 않은 변경이 있습니다");
+    expect(dialog).toHaveAccessibleDescription(result ? "실행 결과 화면으로 이동할까요?" : "이 화면을 떠나면 편집 중인 내용이 사라집니다.");
+    expect(within(dialog).getByRole("button", { name: result ? "편집 계속" : "머무르기" })).toHaveFocus();
+    expect(within(dialog).getByRole("button", { name: result ? "결과 보기" : "나가기" })).toBeVisible();
+    expect(router.state.location.pathname).toBe("/");
+    if (result) {
+      const user = userEvent.setup();
+      await user.click(within(dialog).getByRole("button", { name: "편집 계속" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      router.history.push(destination);
+      await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "결과 보기" }));
+      await waitFor(() => expect(router.state.location.pathname).toBe(destination));
+    }
+  });
+
   it("blocks a navigation issued in the very tick the draft became dirty", async () => {
     let open!: () => void;
     const gate = new Promise<void>((resolve) => {

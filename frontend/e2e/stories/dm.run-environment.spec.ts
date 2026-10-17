@@ -18,6 +18,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   requireData,
   RUN_ENVIRONMENT,
@@ -86,6 +87,7 @@ test(
     const incomplete = "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01";
     await end.click();
     await page.keyboard.type("2026");
+    await openRunSettingsGroup(page, "고급 실행");
     await oos.click();
     await expect(end).toHaveValue("");
     await expect(end).toHaveAccessibleDescription(new RegExp(incomplete, "u"));
@@ -185,6 +187,8 @@ test(
     // 실행 설정: 나머지 칸은 서버(실행 설정 스키마)가 준 기본값으로 채워져 있다.
     const { toggle, start, fee } = runSettingsInputs(page);
     await toggle.click();
+    await openRunSettingsGroup(page, "고급 실행");
+    await openRunSettingsGroup(page, "비용");
     await expect(page.getByRole("combobox", { name: "시장" })).toHaveValue(
       "KRX",
     );
@@ -212,6 +216,7 @@ test(
     // 고정 bp 에서만 켜진다. 켜진 세율 칸이 비면 띠가 그 칸을 채우라고 막고, 방식을 되돌리면 꺼진 칸에 남은
     // 세율 값은 실행을 막지 않는다 — 아래 실제 실행이 그 값을 싣지 않은 요청을 서버가 받는지 본다(#343 V2-07).
     await toggle.click();
+    await openRunSettingsGroup(page, "비용");
     const taxMethod = page.getByRole("combobox", { name: "매도 거래세" });
     const taxRate = page.getByRole("spinbutton", {
       name: "매도 거래세율 (bp)",

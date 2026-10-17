@@ -18,6 +18,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   RUN_ENVIRONMENT,
   runSettingsInputs,
@@ -182,6 +183,7 @@ test(
     const settings = runSettingsInputs(page);
     const debuggerRegion = page.getByRole("region", { name: "중간 결과" });
     await settings.toggle.click();
+    await openRunSettingsGroup(page, "비용");
     await settings.fee.fill("20");
     await settings.toggle.click();
     await expect(page.getByLabel("추적 재현 정보")).toBeHidden();

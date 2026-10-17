@@ -28,7 +28,8 @@
   position: absolute;
   z-index: 20;
   top: calc(100% + var(--space-2));
-  right: 0;
+  left: 0;
+  right: auto;
   width: min(640px, calc(100vw - var(--space-6)));
   padding: var(--panel-padding);
   border: 1px solid var(--border);
@@ -151,6 +152,30 @@
   font-size: var(--text-size-small);
 }
 
+.backtest-settings__group {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.backtest-settings__group > summary {
+  flex-wrap: wrap;
+  min-height: var(--control-height);
+  padding-block: var(--space-3);
+}
+
+.backtest-settings__group > summary strong {
+  font-size: var(--text-size-subsection);
+  font-weight: var(--font-weight-heading);
+}
+
+.backtest-settings__group > summary small {
+  flex: 1 1 100%;
+  padding-inline-start: var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
+}
+
 /* 같은 행의 긴 라벨·설명도 입력 시작선을 바꾸지 않는다. 도움말과 오류는 별도 행이다. */
 @supports (grid-template-rows: subgrid) {
   .backtest-settings fieldset {
@@ -180,8 +205,8 @@
   }
 }
 
-@media (max-width: 760px) {
-  /* 모바일은 툴바의 가변 위치에 매달지 않고 화면 안에 설정과 닫기 제어를 유지한다. */
+@media (max-width: 1279px) {
+  /* 중간 폭부터는 툴바의 가변 위치에 매달지 않고 화면 안에 설정과 닫기 제어를 유지한다. */
   .backtest-settings__popover {
     position: fixed;
     inset: var(--space-4);
@@ -189,7 +214,9 @@
     width: auto;
     max-height: none;
   }
+}
 
+@media (max-width: 760px) {
   .backtest-settings fieldset {
     grid-template-columns: 1fr;
   }

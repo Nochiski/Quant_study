@@ -191,10 +191,16 @@ const Harness = ({
   );
 };
 
-const openSettings = async () => {
+const openSettings = async (expandGroups = true) => {
   const user = userEvent.setup();
   await user.click(screen.getByLabelText("실행 설정 열기"));
   await screen.findByRole("textbox", { name: "유니버스" });
+  if (expandGroups) {
+    for (const label of ["비용", "고급 실행"]) {
+      const summary = screen.getByLabelText(label, { selector: "summary" });
+      if (!summary.closest("details")?.open) await user.click(summary);
+    }
+  }
   return user;
 };
 
@@ -464,7 +470,7 @@ describe("run environment panel", () => {
     expect(screen.getByLabelText(/^시작일/)).toHaveValue("");
     expect(screen.getByRole("textbox", { name: "유니버스" })).toHaveValue("");
     expect(screen.getAllByText("값을 정하세요.")).toHaveLength(3);
-    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
     expect(requestBody()).toBeNull();
     // 차단 안내와 요약 띠가 "어느 칸을 채우라"를 칸 이름으로 말한다(P3-02 결정 1 보충).
     expect(
@@ -473,6 +479,29 @@ describe("run environment panel", () => {
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
+  });
+
+  it("처음에는 기간·종목 범위만 펼치고 비용·고급의 현재 값을 요약한다", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings(false);
+    expect(screen.getByLabelText(/^시작일/)).toBeVisible();
+    expect(screen.getByLabelText(/^종료일/)).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "유니버스" })).toBeVisible();
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).not.toBeVisible();
+    expect(screen.getByRole("combobox", { name: "실행 core" })).not.toBeVisible();
+    const costs = screen.getByLabelText("비용", { selector: "summary" });
+    expect(costs).toHaveAccessibleDescription(/수수료: 15bp/);
+
+    await fillPeriodAndUniverse(user);
+    const request = requestBody();
+    await user.click(costs);
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(15);
+    await user.click(costs);
+    const advanced = screen.getByLabelText("고급 실행", { selector: "summary" });
+    await user.click(advanced);
+    expect(screen.getByRole("combobox", { name: "실행 core" })).toBeVisible();
+    await user.click(advanced);
+    expect(requestBody()).toEqual(request);
   });
 
   // #357 C-P3-16: 실행 계획 설명은 결측 정책 칸만 따로 싣는다. 기간·유니버스가 비었다고 기본 정책의
@@ -573,6 +602,10 @@ describe("run environment panel", () => {
     const fee = screen.getByRole("spinbutton", { name: /수수료/ });
     await user.clear(fee);
     await user.type(fee, "-1");
+    const costs = screen.getByLabelText("비용", { selector: "summary" });
+    await user.click(costs);
+    expect(costs).toHaveAccessibleDescription(/입력 확인/);
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).not.toBeVisible();
     await user.click(screen.getByLabelText("실행 설정 열기"));
 
     const reason = "실행 설정의 수수료 칸을 고치세요: 0bp 이상이어야 합니다.";
@@ -617,6 +650,9 @@ describe("run environment panel", () => {
     const user = await openSettings();
     await fillPeriodAndUniverse(user);
     await user.type(screen.getByLabelText(/^OOS 시작일/), "2020-12-31");
+    const advanced = screen.getByLabelText("고급 실행", { selector: "summary" });
+    await user.click(advanced);
+    expect(advanced).toHaveAccessibleDescription(/입력 확인/);
     await user.click(screen.getByLabelText("실행 설정 열기"));
 
     const band = screen.getByRole("region", { name: "실행 설정 요약" });
@@ -664,7 +700,7 @@ describe("run environment panel", () => {
 
     await user.selectOptions(method, "custom");
     expect(rate).toBeEnabled();
-    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 매도 거래세율 칸을 채우세요.",
     );
@@ -1306,7 +1342,7 @@ describe("run environment panel", () => {
       "초기 자본: 0보다 큰 숫자를 입력하세요.",
     );
     expect(cash).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("실행 설정 열기")).getByText("입력 확인")).toBeInTheDocument();
   });
 });
 

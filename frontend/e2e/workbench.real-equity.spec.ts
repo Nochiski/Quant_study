@@ -27,6 +27,7 @@ import {
   GOLDEN,
   mustReplace,
   openEditor,
+  openRunSettingsGroup,
   replaceSource,
   requireData,
   runSettingsInputs,
@@ -147,6 +148,7 @@ test.describe("real equity data", () => {
     await fillRunEnvironment(page, {}, REAL_RUN_ENVIRONMENT);
     const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
+    await openRunSettingsGroup(page, "고급 실행");
     await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
     await page
       .getByRole("textbox", { name: "벤치마크 종목 ID" })

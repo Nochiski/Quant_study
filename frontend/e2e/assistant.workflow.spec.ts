@@ -284,7 +284,7 @@ test.describe("AI 어시스턴트", () => {
       ).toBeVisible();
 
       // 저장하지 않은 문서를 떠나므로 이탈 확인을 거친다.
-      const leaveGuard = page.getByRole("button", { name: "나가기" });
+      const leaveGuard = page.getByRole("button", { name: "결과 보기" });
       await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
       await leaveGuard.click();
 
@@ -331,7 +331,7 @@ test.describe("AI 어시스턴트", () => {
       await freshExplain;
 
       // 계획이 도착하면 실행이 시작되고, 저장하지 않은 문서를 떠나므로 이탈 확인이 뜬다.
-      const leaveGuard = page.getByRole("button", { name: "나가기" });
+      const leaveGuard = page.getByRole("button", { name: "결과 보기" });
       await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
       await expect(
         page.getByText(/백테스트를 시작하지 않았습니다/u),

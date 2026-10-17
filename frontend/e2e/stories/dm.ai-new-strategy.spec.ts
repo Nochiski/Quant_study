@@ -43,7 +43,7 @@ const toolbarControls = (page: Page) =>
  * 편집기 칸의 조작이 옆 칸이나 겹쳐 뜬 패널에 깔리지 않고 제자리에서 눌린다. 1440px에서 편집기 칸이
  * 266px로 눌려 "검증"이 계약 칸 밑에 깔렸고(#269), 겹쳐 뜬 서랍이 편집기 오른쪽 칸을 덮었고(#290 리뷰
  * P2-1), 512px 이하 칸에서는 Graph·Diff 탭이 이력 버튼 밑에 깔렸다(#296). 조작마다 사용자가 그 조작을 보려고
- * 굴린 자리에서 찍는다 — 1280×800에서 "중간 결과 접기"는 첫 화면 밖이다.
+ * 굴린 자리에서 찍는다. 중간 결과는 별도 작업공간의 명시 진입 버튼을 확인한다.
  */
 const expectEditorReachable = async (
   page: Page,
@@ -53,7 +53,8 @@ const expectEditorReachable = async (
     ["Graph 탭", page.getByRole("tab", { name: "그래프" })],
     ["YAML 탭", page.getByRole("tab", { name: "YAML" })],
     ["문서 상태", page.getByRole("status", { name: "문서 상태" })],
-    ["중간 결과 접기", page.getByRole("button", { name: "중간 결과 접기" })],
+    ["전략 편집", page.getByRole("button", { name: "전략 편집", exact: true })],
+    ["중간 결과", page.getByRole("button", { name: "중간 결과", exact: true })],
   ],
 ) => {
   for (const [name, control] of controls) {
@@ -120,6 +121,8 @@ test(
     test.setTimeout(240_000);
     await ensureProvider(page);
     await openEditor(page, "/research/strategies/new");
+    // 보조 영역은 기본 접힘이다. 이 시나리오에서 비교할 구조·AI 조합을 직접 연다.
+    await page.getByRole("button", { name: "전략 구조", exact: true }).click();
     // 빈 새 전략은 아직 전략이 아니다: 실행할 수 없다.
     await expect(backtest(page)).toBeDisabled();
 
@@ -168,6 +171,10 @@ test(
       .getByRole("button", { name: "사이드바 닫기" })
       .click();
     await expectEditorReachable(page, "1280");
+    await page.getByRole("button", { name: "중간 결과", exact: true }).click();
+    await expect(page.getByRole("region", { name: "중간 결과", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "전략 편집", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "편집기", exact: true })).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // 요약 띠의 "실행 설정 채우기"로 패널을 열어 기간·유니버스를 정한다.
@@ -177,7 +184,7 @@ test(
     // 실행 화면으로 가기 전에 이탈 확인이 반드시 한 번 뜬다(`DirtyLeaveGuard`).
     await expect(backtest(page)).toBeEnabled();
     await backtest(page).click();
-    const leaveGuard = page.getByRole("button", { name: "나가기" });
+    const leaveGuard = page.getByRole("button", { name: "결과 보기" });
     await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
     await expect(page).toHaveURL(/\/research\/strategies\/new/u);
     await leaveGuard.click();

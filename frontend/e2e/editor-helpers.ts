@@ -87,3 +87,17 @@ export const runSettingsInputs = (page: Page) => ({
   fee: page.getByRole("spinbutton", { name: "수수료 (bp)" }),
 });
 
+/** 접힌 비용·고급 설정은 native summary로 명시해서 연 뒤 해당 입력을 조작한다. */
+export const openRunSettingsGroup = async (
+  page: Page,
+  label: "비용" | "고급 실행",
+) => {
+  const summary = page.getByLabel(label, { exact: true }).and(page.locator("summary"));
+  await expect(summary).toBeVisible();
+  const open = await summary.evaluate((element) =>
+    element.parentElement instanceof HTMLDetailsElement && element.parentElement.open,
+  );
+  if (!open) await summary.click();
+  await expect(summary.locator("..")).toHaveAttribute("open", "");
+};
+

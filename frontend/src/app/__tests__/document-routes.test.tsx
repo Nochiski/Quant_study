@@ -644,10 +644,16 @@ const replaceText = (view: EditorView, text: string) =>
   });
 
 const saveButton = () =>
-  within(globalThis.document.querySelector(".ide__editor-actions")!).getByRole(
-    "button",
-    { name: "리비전 저장" },
-  );
+  screen.getByRole("button", { name: "리비전 저장" });
+
+/** 보조 영역은 기본 접힘이므로 검증할 작업에 들어가는 사용자 행동을 명시한다. */
+const openOutline = async () => {
+  await userEvent.setup().click(await screen.findByRole("button", { name: "전략 구조" }));
+};
+
+const openTrace = async () => {
+  await userEvent.setup().click(await screen.findByRole("button", { name: "중간 결과" }));
+};
 
 const leaveLink = () =>
   globalThis.document.querySelector<HTMLAnchorElement>(
@@ -741,9 +747,7 @@ describe("professional keyboard workflow (P6-03)", () => {
       mount(route);
       await editor();
       await waitFor(() => expect(compiledSources).toContain(initialSource));
-      const validate = within(
-        globalThis.document.querySelector(".ide__editor-actions")!,
-      ).getByRole("button", { name: "검증" });
+      const validate = screen.getByRole("button", { name: "검증" });
       await waitFor(() => expect(validate).toBeEnabled());
       const before = compiledSources.length;
 
@@ -779,9 +783,7 @@ describe("professional keyboard workflow (P6-03)", () => {
       await editor();
       // Validate 케이스와 같은 순서: compile 결과가 도착한 뒤 게이트를 본다(cold 실행 1회 flake, #150 리뷰 P1-2).
       await waitFor(() => expect(compiledSources).toContain(initialSource));
-      const run = within(
-        globalThis.document.querySelector(".ide__editor-actions")!,
-      ).getByRole("button", { name: "백테스트" });
+      const run = screen.getByRole("button", { name: "백테스트" });
       await waitFor(() => expect(run).toBeEnabled());
 
       fireEvent.keyDown(window, {
@@ -805,9 +807,8 @@ describe("professional keyboard workflow (P6-03)", () => {
     async ({ route }) => {
       const history = mount(route);
       const view = await editor();
-      const run = within(
-        globalThis.document.querySelector(".ide__editor-actions")!,
-      ).getByRole("button", { name: "백테스트" });
+      await openOutline();
+      const run = screen.getByRole("button", { name: "백테스트" });
       await waitFor(() => expect(run).toBeEnabled());
 
       act(() =>
@@ -856,6 +857,7 @@ describe("professional keyboard workflow (P6-03)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=graph");
     expect(await screen.findByRole("tab", { name: "그래프" })).toBeVisible();
+    await openOutline();
     const outlineFilter = screen.getByRole("searchbox", {
       name: t("ide.outline.filter"),
     });
@@ -896,9 +898,10 @@ describe("professional keyboard workflow (P6-03)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2");
     const view = await editor();
+    await openOutline();
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: /백테스트 실행/ }),
+        screen.getByRole("button", { name: "백테스트" }),
       ).toBeEnabled(),
     );
     view.focus();
@@ -942,6 +945,7 @@ describe("document routes (P2-04)", () => {
     const user = userEvent.setup();
     mount(route);
     const view = await editor();
+    await openOutline();
     act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
 
     await user.click(
@@ -998,6 +1002,7 @@ describe("document routes (P2-04)", () => {
     );
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2?view=graph");
+    await openOutline();
 
     await user.click(
       await screen.findByRole("button", {
@@ -1023,6 +1028,7 @@ describe("document routes (P2-04)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/new");
     const view = await editor();
+    await openOutline();
     const invalid = "title: [broken\n\n";
     replaceText(view, invalid);
     act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
@@ -1063,6 +1069,7 @@ describe("document routes (P2-04)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/new");
     const view = await editor();
+    await openOutline();
     act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
 
     const insert = await screen.findByRole("button", {
@@ -1085,6 +1092,7 @@ describe("document routes (P2-04)", () => {
       ),
     );
     mount("/research/strategies/new");
+    await openOutline();
 
     expect(
       await screen.findByText(/메타데이터를 불러올 수 없어 스니펫을 차단/),
@@ -1109,6 +1117,7 @@ describe("document routes (P2-04)", () => {
       ),
     );
     mount("/research/strategies/new");
+    await openOutline();
 
     expect(
       await screen.findByText(/계약·팩터 카탈로그 버전이 일치하지 않아/),
@@ -1137,6 +1146,65 @@ describe("document routes (P2-04)", () => {
     expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
     expect(screen.getByText("2026-09-04 09:30")).toBeInTheDocument();
   });
+
+  it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
+    "%s의 기본 그래프에서 복구본을 발견하고 원문을 확인한 뒤 명시적으로 복원한다",
+    async (route) => {
+      const saved = !route.endsWith("/new");
+      const original = saved ? STORED : 'schema_version: "1.2"\ntitle: ""\n';
+      const recovered = `${original}description: local recovery\n`;
+      const key = saved ? "s1@2" : "new";
+      localStorage.setItem(
+        `strategy-workbench.draft.${key}`,
+        JSON.stringify({
+          key,
+          format: "yaml",
+          source: recovered,
+          strategyId: saved ? "s1" : null,
+          baseRevision: saved ? 2 : null,
+          baseSpecHash: saved ? "2".repeat(64) : null,
+          schemaVersion: "1.2",
+          savedAt: "2026-09-05T01:02:03Z",
+        }),
+      );
+      const user = userEvent.setup();
+      mountWithClient(route, undefined, false);
+
+      const banner = await screen.findByRole("region", { name: "복구본" });
+      expect(banner).toBeVisible();
+      expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute("aria-selected", "true");
+      await user.click(screen.getByRole("tab", { name: "YAML" }));
+      const view = await editor();
+      expect(view.state.doc.toString()).toBe(original);
+
+      await user.click(screen.getByRole("tab", { name: "그래프" }));
+      await user.click(within(banner).getByRole("button", { name: "복구본 불러오기" }));
+      await waitFor(() => expect(view.state.doc.toString()).toBe(recovered));
+      expect(screen.queryByRole("region", { name: "복구본" })).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute("aria-selected", "true");
+    },
+  );
+
+  it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
+    "%s의 기본 그래프에서 서버 초안 연결 실패를 알리고 원문을 유지한다",
+    async (route) => {
+      server.use(
+        http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
+          HttpResponse.error(),
+        ),
+      );
+      const user = userEvent.setup();
+      mountWithClient(route, undefined, false);
+
+      expect(await screen.findByText(t("draft.server.offline"))).toBeVisible();
+      expect(screen.getByRole("button", { name: t("draft.server.retry") })).toBeVisible();
+      expect(screen.getByRole("tab", { name: "그래프" })).toHaveAttribute("aria-selected", "true");
+      await user.click(screen.getByRole("tab", { name: "YAML" }));
+      expect((await editor()).state.doc.toString()).toBe(
+        route.endsWith("/new") ? 'schema_version: "1.2"\ntitle: ""\n' : STORED,
+      );
+    },
+  );
 
   it("recovers an exact server draft on a direct revision route without silent overwrite", async () => {
     const recovered = `${STORED}description: server recovery\n`;
@@ -1557,6 +1625,7 @@ describe("Strategy Outline route integration (P4-01)", () => {
   it("maps an edit-owned cursor only after the new source parse is current", async () => {
     const history = mount("/research/strategies/s1/revisions/2");
     const view = await editor();
+    await openOutline();
     await screen.findByRole("tree", { name: "StrategySpec 문서 구조" });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(history.location.search).not.toContain("path=");
@@ -1585,6 +1654,7 @@ describe("Strategy Outline route integration (P4-01)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2");
     const view = await editor();
+    await openOutline();
     const tree = await screen.findByRole("tree", {
       name: "StrategySpec 문서 구조",
     });
@@ -1624,6 +1694,7 @@ describe("Strategy Outline route integration (P4-01)", () => {
   it("switches a read-only projection to source and reveals the selected path atomically", async () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=graph");
+    await openOutline();
     expect(
       await screen.findByRole("tab", { name: "그래프" }),
     ).toBeInTheDocument();
@@ -1995,7 +2066,10 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       expect(
         within(canvas).getByRole("spinbutton", { name: WEIGHT, hidden: true }),
       ).toHaveValue(0.05);
-      expect(graphEditor()).not.toBeNull();
+      // 노드 편집은 명시적으로 여는 별도 주 작업이므로 파이프라인과 동시에 만들지 않는다.
+      expect(graphEditor()).toBeNull();
+      // 팩터가 없는 문서에 기본 팩터나 편집 입구를 만들어 내지 않는다.
+      expect(screen.queryAllByRole("button", { name: /· 노드 편집$/ })).toHaveLength(0);
 
       // 첫 parse 뒤 편집 직후(디바운스)는 로딩으로 바꾸지 않고 직전 parse 로 그린다(DEFECT-P404-001,
       // #416 리뷰 P2-1). 숨은 편집기는 role 로 찾지 못해 DOM 에서 view 를 얻는다.
@@ -2256,6 +2330,8 @@ describe("FactorGraph read-only projection (P4-07)", () => {
         replaceText(await editor(), GRAPH_SOURCE);
         await user.click(screen.getByRole("tab", { name: "그래프" }));
       }
+      await user.click(await screen.findByRole("button", { name: /· 노드 편집$/ }));
+      expect(screen.queryByRole("region", { name: "전략 파이프라인" })).toBeNull();
       await screen.findByRole("region", { name: "노드 캔버스" });
       await waitFor(() => expect(explainedGraphs).toHaveLength(1));
       // 계획 ready 전환은 캔버스를 다시 마운트할 수 있으므로 현재 DOM을 매번 조회한다.
@@ -2268,6 +2344,9 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       expect(within(graph).getAllByText("ratio").length).toBeGreaterThan(0);
       expect(within(graph).getAllByText("H 252 세션").length).toBeGreaterThan(0);
       await user.click(node);
+      await user.click(screen.getByRole("button", { name: "전략 구성으로 돌아가기" }));
+      expect(await screen.findByRole("region", { name: "전략 파이프라인" })).toBeVisible();
+      expect(screen.queryByRole("region", { name: "노드 캔버스" })).toBeNull();
     },
     15_000,
   );
@@ -2549,6 +2628,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     );
     const user = userEvent.setup();
     const history = mount("/research/strategies/new");
+    await openTrace();
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: "종목 ID" })).toBeEnabled(),
     );
@@ -2574,7 +2654,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       },
     });
     expect(tracedStrategies[0]).not.toHaveProperty("as_of");
-    expect(screen.getByText("2026-09-01")).toBeInTheDocument();
+    expect(screen.getByText("2026-09-01", { selector: ".strategy-debugger__source > summary > code" })).toBeVisible();
   }, 15_000);
 
   // #351: 추적의 실행 설정 거절은 백테스트 시작과 같은 코드라 같은 문장·날짜로 보이고, 서버 원문은 접힌 사유로
@@ -2600,6 +2680,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     );
     const user = userEvent.setup();
     mount("/research/strategies/new");
+    await openTrace();
     const security = await screen.findByRole("textbox", { name: "종목 ID" });
     await waitFor(() => expect(security).toBeEnabled());
     await user.type(security, "sec-a");
@@ -2728,6 +2809,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     const initial = `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${nodePath}`;
     const history = mount(initial);
     const user = userEvent.setup();
+    await openTrace();
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "추적 실행" })).toBeEnabled(),
@@ -2824,12 +2906,14 @@ describe("FactorGraph read-only projection (P4-07)", () => {
         `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${encodeURIComponent(nodePath)}`,
       );
       const user = userEvent.setup();
+      await openTrace();
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "추적 실행" })).toBeEnabled(),
       );
       await user.click(screen.getByRole("button", { name: "추적 실행" }));
       await waitFor(() => expect(request).toBeDefined());
 
+      await user.click(screen.getByRole("button", { name: "전략 편집" }));
       await user.click(screen.getByRole("tab", { name: "그래프" }));
       await openComparison();
       await screen.findByLabelText("StrategySpec Diff");
@@ -2846,8 +2930,10 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           rejectTrace?.(new Error("deferred trace failed")),
         );
       } else {
+        await openTrace();
         await user.click(screen.getByRole("button", { name: "취소" }));
         await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+        await user.click(screen.getByRole("button", { name: "전략 편집" }));
       }
 
       await waitFor(() => {
@@ -2861,6 +2947,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
         "aria-expanded",
         "true",
       );
+      await openTrace();
       expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
       expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
         "sec-r",
@@ -3167,9 +3254,10 @@ describe("backtest from the editor (P3-05)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2");
     await editor();
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(screen.getByLabelText("실행 설정 열기"));
+    await user.click(screen.getByLabelText("고급 실행", { selector: "summary" }));
     const annualization = screen.getByRole("spinbutton", {
       name: "연환산 거래일",
     });
@@ -3212,7 +3300,7 @@ describe("backtest from the editor (P3-05)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2");
     await editor();
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
@@ -3254,7 +3342,7 @@ describe("backtest from the editor (P3-05)", () => {
     );
     const user = userEvent.setup();
     mount("/research/strategies/new");
-    const run = await screen.findByRole("button", { name: /백테스트 실행/ });
+    const run = await screen.findByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
@@ -3290,7 +3378,7 @@ describe("backtest from the editor (P3-05)", () => {
     );
     const user = userEvent.setup();
     mount("/research/strategies/new");
-    const run = await screen.findByRole("button", { name: /백테스트 실행/ });
+    const run = await screen.findByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
@@ -3324,7 +3412,7 @@ describe("backtest from the editor (P3-05)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2");
     await editor();
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
@@ -3365,9 +3453,10 @@ describe("backtest from the editor (P3-05)", () => {
       ),
     );
     await editor();
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
-    expect(screen.getAllByText("2".repeat(12) + "…").length).toBeGreaterThan(0); // backend spec hash
+    await user.click(screen.getByLabelText("문서 정보", { selector: "summary" }));
+    expect(within(globalThis.document.querySelector(".ide__meta")!).getByText("2".repeat(64))).toBeVisible(); // backend 원본 spec hash
     await user.click(run);
     await waitFor(() =>
       expect(history.location.pathname).toBe("/research/backtests/run-7"),
@@ -3399,7 +3488,7 @@ describe("backtest from the editor (P3-05)", () => {
     const history = mount("/research/strategies/s1/revisions/2");
     const view = await editor();
     replaceText(view, `${STORED}description: 개정\n`);
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
     await waitFor(() => expect(started).toHaveLength(1));
@@ -3419,7 +3508,7 @@ describe("backtest from the editor (P3-05)", () => {
     });
     const firstPrompt = await screen.findByRole("alertdialog");
     await user.click(
-      within(firstPrompt).getByRole("button", { name: "머무르기" }),
+      within(firstPrompt).getByRole("button", { name: "편집 계속" }),
     );
     expect(history.location.pathname).toBe(
       "/research/strategies/s1/revisions/2",
@@ -3429,7 +3518,7 @@ describe("backtest from the editor (P3-05)", () => {
     const secondPrompt = await screen.findByRole("alertdialog");
     expect(started).toHaveLength(1);
     await user.click(
-      within(secondPrompt).getByRole("button", { name: "나가기" }),
+      within(secondPrompt).getByRole("button", { name: "결과 보기" }),
     );
     await waitFor(() =>
       expect(history.location.pathname).toBe("/research/backtests/run-7"),
@@ -3440,7 +3529,7 @@ describe("backtest from the editor (P3-05)", () => {
     replaceText(fresh, "title: [broken\n");
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: /백테스트 실행/ }),
+        screen.getByRole("button", { name: "백테스트" }),
       ).toBeDisabled(),
     );
     expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
@@ -3457,7 +3546,7 @@ describe("backtest from the editor (P3-05)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2");
     await editor();
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
     await waitFor(() => expect(started).toHaveLength(1));
@@ -3495,7 +3584,7 @@ describe("backtest from the editor (P3-05)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2");
     await editor();
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
@@ -3881,9 +3970,10 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=graph");
 
-    // compile이 error를 내면 실행 plan이 막혀 DAG는 없고 문서 tree로 그리는 편집 표면만 남는다.
-    await screen.findByRole("region", { name: "그래프 편집" });
+    // 진단 선택이 전략 구성에서 해당 노드 편집으로 이동한다. compile 오류여도 원문 tree를 편집한다.
+    await screen.findByRole("region", { name: "전략 파이프라인" });
     await user.click(await problemRow(/window는 1 이상이고 lag는 0 이상이어야 합니다/));
+    await screen.findByRole("region", { name: "그래프 편집" });
 
     await waitFor(() => {
       expect(history.location.search).toContain("view=graph");
@@ -4028,9 +4118,10 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2?view=graph");
 
+    await screen.findByRole("region", { name: "전략 파이프라인" });
+    await user.click(await problemRow(/window가 깁니다/));
     await screen.findByRole("region", { name: "노드 캔버스" });
     await screen.findByRole("region", { name: "그래프 편집" });
-    await user.click(await problemRow(/window가 깁니다/));
 
     const editorRow = screen
       .getByRole("button", { name: /^노드 편집: 2\./ })
@@ -4173,6 +4264,7 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     const before = view.state.doc.toString();
     // 실행 옵션 칸이 틀려도 턴은 실행 설정을 싣는다(#355 위험성의 두 번째 경우).
     await user.click(screen.getByLabelText("실행 설정 열기"));
+    await user.click(screen.getByLabelText("고급 실행", { selector: "summary" }));
     fireEvent.change(
       screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
       { target: { value: "0" } },
@@ -4418,7 +4510,7 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
       await waitFor(() => expect(upgrade).toBeEnabled());
       expect(saveButton()).toBeDisabled();
       expect(
-        screen.getByRole("button", { name: /백테스트 실행/ }),
+        screen.getByRole("button", { name: "백테스트" }),
       ).toBeDisabled();
 
       await user.click(upgrade);
@@ -4443,7 +4535,7 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
       await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
 
       // 채운 실행 설정이 실행 요청에 그대로 실린다(초안 실행).
-      const run = screen.getByRole("button", { name: /백테스트 실행/ });
+      const run = screen.getByRole("button", { name: "백테스트" });
       await waitFor(() => expect(run).toBeEnabled());
       await user.click(run);
       await waitFor(() => expect(started).toHaveLength(1));
@@ -4455,7 +4547,7 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
       expect(started[0]).not.toHaveProperty("lineage_strategy_id");
       await user.click(
         within(await screen.findByRole("alertdialog")).getByRole("button", {
-          name: "머무르기",
+          name: "편집 계속",
         }),
       );
 
@@ -4513,7 +4605,7 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
     ).toMatchObject({ start: OLD_ENVIRONMENT.start, end: OLD_ENVIRONMENT.end });
 
     release();
-    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    const run = screen.getByRole("button", { name: "백테스트" });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
     await waitFor(() => expect(started).toHaveLength(1));

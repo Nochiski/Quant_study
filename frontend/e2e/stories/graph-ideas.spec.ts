@@ -275,8 +275,8 @@ const finish = async (
   await fillRunEnvironment(page, {}, ideaEnvironment);
   await backtest(page).click();
   await page
-    .getByRole("alertdialog", { name: "저장하지 않은 변경이 있습니다" })
-    .getByRole("button", { name: "나가기", exact: true })
+    .getByRole("alertdialog", { name: "백테스트 실행이 접수되었습니다" })
+    .getByRole("button", { name: "결과 보기", exact: true })
     .click();
   await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/);
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(

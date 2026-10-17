@@ -1,5 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
 
 import type {
   FactorCatalog,
@@ -161,9 +162,7 @@ const TREE = {
     {
       factor_id: "alpha",
       graph: {
-        nodes: [
-          { node_id: "px", kind: "field", field_id: "close" },
-        ],
+        nodes: [{ node_id: "px", kind: "field", field_id: "close" }],
         output_node_id: "px",
       },
     },
@@ -517,6 +516,27 @@ describe("field applicability in the contract projection (P2-03)", () => {
 });
 
 describe("ContractInspector UI", () => {
+  it("표시값과 설명을 먼저 읽고 필요할 때 기술 경로를 펼친다", async () => {
+    const user = userEvent.setup();
+    render(
+      <ContractInspector
+        source={source()}
+        selectedPointer="/risk/max_name_weight"
+        tree={TREE}
+        stale={false}
+      />,
+    );
+    expect(screen.getByText("5%")).toBeVisible();
+    expect(screen.getByText("종목별 최대 목표 비중 한도")).toBeVisible();
+    const path = screen.getAllByText("/risk/max_name_weight")[0];
+    expect(path).not.toBeVisible();
+    await user.click(
+      screen.getByText("필드 경로 · 타입 · 기술 근거", { selector: "summary" }),
+    );
+    expect(path).toBeVisible();
+    expect(screen.getByText("number", { selector: "code" })).toBeVisible();
+  });
+
   it("requires a kind before showing a branch-dependent field contract", () => {
     render(
       <ContractInspector
@@ -619,14 +639,18 @@ describe("ContractInspector UI", () => {
     };
     render(
       <ContractInspector
-        source={source({ equityCatalog: { ...EQUITY_CATALOG, fields: [field] } })}
+        source={source({
+          equityCatalog: { ...EQUITY_CATALOG, fields: [field] },
+        })}
         selectedPointer="/factors/0/graph/nodes/0/field_id"
         tree={tree}
         stale={false}
       />,
     );
-    expect(screen.getByText("단위", { selector: "dt" }).nextElementSibling?.textContent).toBe("pct");
+    expect(
+      screen.getByText("단위", { selector: "dt" }).nextElementSibling
+        ?.textContent,
+    ).toBe("pct");
     expect(screen.getByText(field.description)).toBeInTheDocument();
   });
-
 });

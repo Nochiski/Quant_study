@@ -68,3 +68,17 @@
     flex-wrap: wrap;
   }
 }
+
+/* 단계 편집 중에도 현재 팩터와 복귀·고급 편집·반영 상태를 같은 작업 머리에 남긴다. */
+.recipe__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-block: var(--space-2);
+  background: var(--surface-panel);
+  border-bottom: 1px solid var(--border);
+}
+.recipe__toolbar > p {
+  flex-basis: 100%;
+  margin: 0;
+}

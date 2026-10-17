@@ -140,6 +140,12 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
     </ThemePreferenceProvider>,
   );
 
+/** 폭 경계 회귀는 과거와 같은 세 보조 패널을 사용자가 명시해서 연 상태로 검증한다. */
+const openRails = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
+  await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+};
+
 /** 접기 버튼을 위젯이 그리는 쪽(슬롯이 평범한 노드). */
 const mountNodeSlot = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
   mount({ assistant: <p>AI 사이드바</p>, ...props });
@@ -288,7 +294,7 @@ describe("StrategyIde assistant 슬롯", () => {
     ).toMatchObject({ open: { assistant: true } });
   });
 
-  it("사이드바 키가 없던 기록도 그대로 읽고 기본값만 채운다", () => {
+  it("사이드바 키가 없던 기록도 그대로 읽고 기본값만 채운다", async () => {
     matchMedia(false);
     localStorage.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
@@ -301,7 +307,9 @@ describe("StrategyIde assistant 슬롯", () => {
         },
       }),
     );
+    const user = userEvent.setup();
     mount();
+    await user.click(screen.getByRole("button", { name: "전략 구조", expanded: false }));
     expect(
       screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "300");
@@ -355,7 +363,8 @@ describe("StrategyIde assistant 슬롯", () => {
     ideLayout(1204);
     const user = userEvent.setup();
     mount();
-    // 계약은 기본 펼침이고 자리에 박혀 있다.
+    await openRails(user);
+    // 구조와 계약을 명시해서 연 뒤, 먼저 연 계약은 자리에 박혀 있다.
     expect(
       screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
     ).toBeNull();
@@ -401,15 +410,16 @@ describe("StrategyIde assistant 슬롯", () => {
     ideLayout(SIDE_BY_SIDE - 1);
     const user = userEvent.setup();
     mount();
+    await openRails(user);
     await user.click(
       screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
     );
     expect(assistantFloating()).toBe(true);
   });
 
-  it("첫 칠 전에 폭을 재어, 열어 둔 사이드바가 처음부터 겹쳐 뜬다", () => {
+  it("관찰 알림 전에 처음 측정한 폭으로 복원된 사이드바의 배치를 정한다", async () => {
     // 관찰 알림은 칠한 뒤에야 온다(여기서는 `notify`를 부르지 않는다). 첫 칠 전 측정이 없으면 폭을
-    // 모르는 배치(붙은 사이드바)로 먼저 그린다(#290 리뷰 P3-2).
+    // 모르는 배치로 판단한다. 기본 접힌 구조·계약은 명시해서 열고 관찰 알림은 보내지 않는다(#290 리뷰 P3-2).
     matchMedia(false);
     localStorage.setItem(
       PANEL_LAYOUT_STORAGE_KEY,
@@ -420,7 +430,12 @@ describe("StrategyIde assistant 슬롯", () => {
       }),
     );
     ideLayout(1204);
+    const user = userEvent.setup();
     mount();
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeInTheDocument();
+    await openRails(user);
+    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
     expect(assistantFloating()).toBe(true);
   });
 
@@ -433,6 +448,7 @@ describe("StrategyIde assistant 슬롯", () => {
     );
     const user = userEvent.setup();
     mount();
+    await openRails(user);
     await user.click(
       screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
     );
@@ -453,6 +469,7 @@ describe("StrategyIde assistant 슬롯", () => {
     );
     const user = userEvent.setup();
     mount();
+    await openRails(user);
     await user.click(
       screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
     );
@@ -464,11 +481,13 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(placements).toEqual([false, false, false, false]);
   });
 
-  it("넓은 화면에서는 둘 다 자리에 박혀 있다", () => {
+  it("넓은 화면에서는 둘 다 자리에 박혀 있다", async () => {
     matchMedia(false);
     // 1920px 창의 본문 폭.
     ideLayout(1684);
+    const user = userEvent.setup();
     mount();
+    await openRails(user);
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(
       screen
@@ -525,6 +544,7 @@ describe("StrategyIde assistant 슬롯", () => {
     ideLayout(SIDE_BY_SIDE);
     const user = userEvent.setup();
     const first = mount();
+    await openRails(user);
     await user.click(screen.getByRole("button", { name: "AI 어시스턴트" }));
     const handle = () =>
       screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" });

@@ -8,51 +8,20 @@
   container-type: inline-size;
 }
 
-.strategy-debugger__scroll-help {
-  flex: none;
-  margin: 0;
-  padding: var(--space-1) var(--space-4);
-  border-bottom: 1px solid var(--border);
+/* 입력과 결과는 같은 작업공간에 두고 긴 출처는 명시적으로 펼친다. */
+.strategy-debugger__scope { flex: none; border-bottom: 1px solid var(--border); }
+.strategy-debugger__scope > summary,
+.strategy-debugger__context summary {
+  padding: var(--space-2) var(--space-4);
   color: var(--text-muted);
-  font-size: var(--text-size-small);
+  font-size: var(--text-size-label);
 }
-
-.strategy-debugger__viewport {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: scroll;
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
-}
-
-/* OS가 기본 스크롤바를 숨겨도 내용이 더 있음을 발견할 수 있게 한다. */
-.strategy-debugger__viewport::-webkit-scrollbar {
-  width: var(--space-3);
-}
-
-.strategy-debugger__viewport::-webkit-scrollbar-track {
-  background: var(--surface-subtle);
-}
-
-.strategy-debugger__viewport::-webkit-scrollbar-thumb {
-  border: 2px solid var(--surface-subtle);
-  border-radius: var(--radius-small);
-  background: var(--border-control);
-}
-
-.strategy-debugger__viewport:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
-}
-
-@media (forced-colors: active) {
-  .strategy-debugger__viewport::-webkit-scrollbar-thumb {
-    background: ButtonText;
-  }
-}
+.strategy-debugger__scope-summary { margin-left: auto; overflow-wrap: anywhere; }
+.strategy-debugger__scope-help { padding: 0 var(--space-4) var(--space-2); color: var(--text-muted); font-size: var(--text-size-small); }
+.strategy-debugger__scope-help p { margin: var(--space-1) 0; }
+.strategy-debugger__context { display: flex; flex: none; flex-wrap: wrap; position: relative; border-bottom: 1px solid var(--border); }
+.strategy-debugger__source[open], .strategy-debugger__warning-summary[open] { flex-basis: 100%; max-height: 30dvh; overflow: auto; }
+.strategy-debugger__warning-summary { color: var(--status-warn); }
 
 .strategy-debugger__controls {
   display: grid;
@@ -119,7 +88,7 @@
   .strategy-debugger__controls > label,
   .strategy-debugger__actions {
     display: grid;
-    grid-row: span 3;
+    grid-row: span 2;
     grid-template-rows: subgrid;
     row-gap: var(--field-gap);
   }
@@ -186,9 +155,8 @@
 
 .strategy-debugger__results {
   display: flex;
-  /* 기본 높이에서도 탭과 최소 본문을 남기고, 부족한 공간은 디버거 전체 스크롤로 접근한다. */
-  min-height: 160px;
-  flex: 1 1 260px;
+  min-height: 0;
+  flex: 1;
   flex-direction: column;
   overflow: hidden;
 }
@@ -201,8 +169,11 @@
 .strategy-debugger__panel {
   min-height: 0;
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
 }
+.strategy-debugger__panel[data-tab="plan"] { overflow: auto; }
+.strategy-debugger__linked-result { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+.strategy-debugger__security-picker { display: grid; flex: none; gap: var(--field-gap); padding: var(--space-2) var(--space-4); font-size: var(--text-size-label); }
 
 .strategy-debugger__panel[hidden] {
   display: none;
@@ -210,7 +181,7 @@
 
 .strategy-debugger__state {
   display: grid;
-  min-height: 72px;
+  min-height: 0;
   place-content: center;
   padding: var(--space-4);
   color: var(--text-muted);
@@ -228,7 +199,7 @@
 
 .strategy-debugger__virtual-viewport {
   height: 100%;
-  min-height: 240px;
+  min-height: 0;
   overscroll-behavior: contain;
 }
 
@@ -283,7 +254,8 @@
 }
 
 .strategy-debugger__pipeline-list {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   box-sizing: border-box;
   overflow: auto;
   padding: var(--space-3) var(--space-4) var(--space-4);
@@ -292,11 +264,9 @@
 
 .strategy-debugger__pipeline {
   display: flex;
-  height: 312px;
   box-sizing: border-box;
   flex-direction: column;
   margin-bottom: var(--space-3);
-  overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-medium);
   background: var(--surface-panel);
@@ -322,12 +292,12 @@
 
 .strategy-debugger__pipeline-stages {
   display: grid;
-  width: max-content;
+  width: 100%;
   min-width: 100%;
   min-height: 0;
   flex: 1;
-  grid-auto-columns: minmax(185px, 1fr);
-  grid-auto-flow: column;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -340,8 +310,10 @@
   gap: var(--space-2);
   padding: var(--space-3);
   border-right: 1px solid var(--border);
+  min-width: 0;
+  grid-column: span 3;
   color: var(--text-muted);
-  overflow: auto;
+  overflow-wrap: anywhere;
 }
 
 .strategy-debugger__pipeline-stages > li:last-child {
@@ -378,7 +350,7 @@
 .strategy-debugger__stage-values > span,
 .strategy-debugger__node-chip {
   display: grid;
-  grid-template-columns: minmax(90px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px var(--space-2);
   align-items: center;
   padding: var(--space-1);
@@ -387,7 +359,7 @@
 }
 
 .strategy-debugger__node-chip {
-  height: 58px;
+  height: 88px;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -435,18 +407,74 @@
   }
 }
 
-@media (max-width: 1279px) {
-  .strategy-debugger__controls {
-    grid-template-columns: 1fr;
+.strategy-debugger__node-chain--expanded { height: auto; overflow: visible; }
+.strategy-debugger__node-chain--expanded .strategy-debugger__node-chip { min-height: 58px; height: auto; overflow: visible; }
+@media (max-width: 719px) {
+  .strategy-debugger__scope[open] { flex: 1; min-height: 0; overflow: auto; }
+  .strategy-debugger__scope[open] ~ .strategy-debugger__results { display: none; }
+  .strategy-debugger__controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strategy-debugger__pipeline-stages { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); }
+  .strategy-debugger__pipeline-stages > li { border-right: 0; border-bottom: 1px solid var(--border); }
+  .strategy-debugger__pipeline-stages > li:last-child { border-bottom: 0; }
+  .strategy-debugger__pipeline-list--stacked .strategy-debugger__pipeline { height: auto; }
+}
+
+/* 근거 세 열을 먼저 읽고 요약 결과는 다음 행에서 비교한다. */
+.strategy-debugger__pipeline-stages > li:nth-child(-n + 3) { grid-column: span 4; }
+.strategy-debugger__pipeline-stages > li:nth-child(n + 4) { border-top: 1px solid var(--border); }
+.strategy-debugger__pipeline-stages > li:nth-child(8) { grid-column: 1 / -1; }
+.strategy-debugger__node-chip > code,
+.strategy-debugger__node-chip > span:nth-child(2),
+.strategy-debugger__node-chip > .strategy-debugger__inputs { grid-column: 1 / -1; }
+.strategy-debugger__node-chain--expanded .strategy-debugger__inputs { max-height: none; overflow: visible; }
+@media (max-width: 719px) {
+  .strategy-debugger__pipeline-stages > li,
+  .strategy-debugger__pipeline-stages > li:nth-child(-n + 3),
+  .strategy-debugger__pipeline-stages > li:nth-child(8) { grid-column: 1; }
+}
+
+@media (max-width: 719px) {
+  .strategy-debugger__scope > summary, .strategy-debugger__context summary { padding: var(--space-1) var(--space-2); font-size: var(--text-size-small); }
+  .strategy-debugger__context { flex-wrap: nowrap; }
+  .strategy-debugger__source > summary > code { display: none; }
+  .strategy-debugger__context > details[open] { position: absolute; top: 100%; right: 0; left: 0; z-index: 3; background: var(--surface-panel); border: 1px solid var(--border); }
+  .strategy-debugger__security-picker { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); }
+  .strategy-debugger__security-picker > span { flex: none; font-size: var(--text-size-small); }
+  .strategy-debugger__security-picker > select { min-width: 0; height: var(--control-height-compact); min-height: var(--control-height-compact); }
+}
+
+@media (max-width: 719px) {
+  .strategy-debugger__pipeline-header { flex-wrap: wrap; }
+  .strategy-debugger__pipeline-header h3 { flex-basis: 100%; overflow-wrap: anywhere; }
+}
+
+/* 출처는 좁은 열에서도 판 식별자 전체를 서로 겹치지 않는 행으로 읽는다. */
+@container (max-width: 719px) {
+  .strategy-debugger__identity {
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    overflow-wrap: anywhere;
+  }
+
+  .strategy-debugger__identity > .ui-badge {
+    max-width: 100%;
+    white-space: normal;
   }
 
   .strategy-debugger__provenance {
+    flex: none;
+    align-self: stretch;
+    flex-direction: column;
     justify-content: flex-start;
+    gap: var(--space-1);
   }
 
-  .strategy-debugger__results {
-    flex-basis: 260px;
-    flex-shrink: 0;
-    overflow: visible;
+  .strategy-debugger__provenance > span,
+  .strategy-debugger__provenance code {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }

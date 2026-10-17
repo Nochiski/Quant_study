@@ -78,6 +78,7 @@ type CardContext = {
   selectedPointer: string | undefined;
   revealSignal: number | undefined;
   onOpenGraph: ((pointer: string) => void) | undefined;
+  onOpenAdvanced: ((pointer: string) => void) | undefined;
 };
 
 export const PipelinePanel = ({
@@ -86,6 +87,7 @@ export const PipelinePanel = ({
   transactions,
   catalogs,
   onOpenGraph,
+  onOpenAdvanced,
   selectedPointer,
   revealSignal,
 }: {
@@ -97,6 +99,7 @@ export const PipelinePanel = ({
   catalogs: FormCatalogs;
   /** 팩터의 그래프를 고급 편집기에서 연다(pointer 선택). 없으면 버튼을 그리지 않는다. */
   onOpenGraph?: (pointer: string) => void;
+  onOpenAdvanced?: (pointer: string) => void;
   selectedPointer?: string;
   revealSignal?: number;
 }) => {
@@ -128,8 +131,10 @@ export const PipelinePanel = ({
           selectedPointer,
           revealSignal,
           onOpenGraph,
+          onOpenAdvanced,
         };
-  const documentSection = pipeline === null ? null : pipelineDocumentProperties(pipeline);
+  const documentSection =
+    pipeline === null ? null : pipelineDocumentProperties(pipeline);
   return (
     <section
       ref={container}
@@ -518,6 +523,16 @@ const RecipeLine = ({
           aria-label={`${label} · ${t("graph.pipeline.openRecipe")}`}
         >
           {t("graph.pipeline.openRecipe")}
+        </Button>
+      )}
+      {context.onOpenAdvanced === undefined ? null : (
+        <Button
+          size="small"
+          tone="ghost"
+          onClick={() => context.onOpenAdvanced?.(graph.pointer)}
+          aria-label={`${label} · ${t("graph.pipeline.openNodes")}`}
+        >
+          {t("graph.pipeline.openNodes")}
         </Button>
       )}
     </div>

@@ -255,11 +255,7 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
   await replaceSource(page, GOLDEN);
   await expectPhase(page, "검증 통과");
   await fillRunEnvironment(page);
-  const resizeDebugger = page.getByRole("separator", {
-    name: "중간 결과 크기 조절",
-  });
-  await resizeDebugger.focus();
-  await resizeDebugger.press("End");
+  await page.getByRole("button", { name: "중간 결과", exact: true }).click();
   await page
     .getByRole("textbox", { name: "종목 ID", exact: true })
     .fill("sec-005930-1, sec-000660-1");
@@ -286,10 +282,7 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
     debuggerPanel.getByRole("tablist", { name: "추적 결과" }),
     viewport,
   );
-  // 최대 높이가 창 높이를 따르므로(#262) 추적 범위 폼부터 연결 추적까지 패널 안에서 스크롤하지 않고 다
-  // 보인다. 연결 추적 탭 패널이 중간 결과 패널 안에서 끝나는지 본다 — 본문이 넘치면 그 아래로 삐져나간다.
-  // 480px 상한일 때는 1440 에서 99px, 1920 에서 24px 넘쳐, 추적을 스크롤해 들인 상태를 기준선으로 찍었고
-  // 그래서 폼 쪽 회귀를 기준선이 잡지 못했다.
+  // 전용 추적 작업공간은 손잡이 확대 없이 범위와 해석할 결과 본문을 함께 제공한다.
   const tracePanel = debuggerPanel.getByRole("tabpanel", { name: "연결 추적" });
   await expectWithinViewport(tracePanel, viewport);
   const panelBox = await debuggerPanel.boundingBox();

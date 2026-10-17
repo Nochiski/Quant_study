@@ -352,6 +352,7 @@ afterEach(() => {
   requests = [];
   server.resetHandlers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 afterAll(() => server.close());
 
@@ -412,6 +413,39 @@ describe("StrategyDebugger unavailable reasons", () => {
 });
 
 describe("StrategyDebugger", () => {
+  it("좁은 화면의 종목 선택은 결과 탭을 왕복해도 유지한다", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query.includes("719px"), media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn() })));
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    const picker = await screen.findByRole("combobox", { name: "비교할 종목" });
+    await user.selectOptions(picker, "sec-b");
+    await user.click(screen.getByRole("tab", { name: "원시 데이터" }));
+    await user.click(screen.getByRole("tab", { name: "연결 추적" }));
+    expect(screen.getByRole("combobox", { name: "비교할 종목" })).toHaveValue("sec-b");
+    expect(screen.getByRole("list", { name: "연결 추적" })).toHaveTextContent("sec-b");
+  });
+
+  it("출처와 경고를 읽은 뒤 Tab으로 나가면 원래 외부 초점을 유지하며 닫는다", async () => {
+    server.use(http.post(`${API}/api/v1/strategies/debug/trace`, () => HttpResponse.json({ ...traceResponse(), warnings: ["경고 원문 전체를 보존합니다."] })));
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    const source = await screen.findByText(/추적 출처/, { selector: "summary" });
+    const warning = await screen.findByText("데이터 경고 1건", { selector: "summary" });
+    await user.click(source);
+    expect(source.closest("details")).toHaveAttribute("open");
+    expect(screen.getByLabelText("추적 재현 정보")).toBeVisible();
+    await user.tab();
+    expect(warning).toHaveFocus();
+    expect(source.closest("details")).not.toHaveAttribute("open");
+    await user.click(warning);
+    expect(screen.getByText("경고 원문 전체를 보존합니다.")).toBeVisible();
+    await user.tab();
+    expect(screen.getByRole("tab", { name: "연결 추적" })).toHaveFocus();
+    expect(warning.closest("details")).not.toHaveAttribute("open");
+  });
+
   it("uses the generated trace contract and prioritizes exact TargetTape fields", async () => {
     const user = userEvent.setup();
     renderDebugger(<StrategyDebugger {...props()} />);
@@ -784,10 +818,10 @@ describe("StrategyDebugger", () => {
     expect(screen.getByLabelText("기준일")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
 
-    expect(await screen.findByText("2026-08-31")).toBeInTheDocument();
+    expect(await screen.findByText(/추적 출처/, { selector: "summary" })).toHaveTextContent("2026-08-31");
     expect(requests).toHaveLength(1);
     expect(requests[0]).not.toHaveProperty("as_of");
-    expect(screen.getByText(/서버가 실제 TargetTape/)).toBeInTheDocument();
+    expect(screen.getByLabelText("기준일")).toHaveAccessibleDescription(/서버가 실제 TargetTape/);
   });
 
   it("commits a typed security scope and runs the trace in one submit", async () => {

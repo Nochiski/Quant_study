@@ -24,6 +24,8 @@ EXPERIMENT_SPEC_CODES: frozenset[str] = frozenset(
         "experiment.capacity.invalid_amounts",
         "experiment.capacity.base_not_run",
         "experiment.robustness.period_too_short",
+        "experiment.robustness.too_many_parameters",
+        "experiment.robustness.not_single",
     }
 )
 EXPERIMENT_NOT_FOUND_CODES: frozenset[str] = frozenset(
@@ -37,6 +39,7 @@ EXPERIMENT_STATE_CODES: frozenset[str] = frozenset(
         "experiment.selection.not_finished",
         "experiment.kind.mismatch",
         "experiment.cancel.completed",
+        "experiment.robustness.running",
     }
 )
 EXPERIMENT_CODES = EXPERIMENT_SPEC_CODES | EXPERIMENT_NOT_FOUND_CODES | EXPERIMENT_STATE_CODES

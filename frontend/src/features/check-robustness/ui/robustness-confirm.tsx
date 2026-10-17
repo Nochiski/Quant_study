@@ -18,7 +18,8 @@ export const RobustnessConfirm = ({
   onClose,
 }: {
   runId: string;
-  onClose: () => void;
+  /** `started` 는 실험을 대기열에 넣고 닫았는가다. */
+  onClose: (started: boolean) => void;
 }) => {
   const preview = useRobustnessPreview(runId, true);
   const create = useCreateRobustnessCheck(runId);
@@ -32,7 +33,7 @@ export const RobustnessConfirm = ({
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
+      onClose(false);
       return;
     }
     if (event.key !== "Tab") return;
@@ -90,7 +91,12 @@ export const RobustnessConfirm = ({
               {axes.length === 0
                 ? t("backtest.robustness.confirm.noAxes")
                 : tFill("backtest.robustness.confirm.axes", {
-                    axes: axes.map((axis) => axis.parameter_id).join(", "),
+                    axes: axes
+                      .map(
+                        (axis) =>
+                          `${axis.parameter_id} ${axis.values.join(", ")}`,
+                      )
+                      .join(" · "),
                   })}
             </p>
             <table aria-label={t("backtest.robustness.confirm.windows")}>
@@ -127,14 +133,16 @@ export const RobustnessConfirm = ({
           />
         ) : null}
         <footer className="robustness-confirm__actions">
-          <Button ref={close} tone="secondary" onClick={onClose}>
+          <Button ref={close} tone="secondary" onClick={() => onClose(false)}>
             {t("backtest.robustness.confirm.cancel")}
           </Button>
           {data ? (
             <Button
               ref={start}
               disabled={create.isPending}
-              onClick={() => create.mutate(undefined, { onSuccess: onClose })}
+              onClick={() =>
+                create.mutate(undefined, { onSuccess: () => onClose(true) })
+              }
             >
               {t(
                 create.isPending

@@ -212,6 +212,10 @@ def register_experiment_routes(
             "model": ExperimentErrorResponse | BacktestStrategyNotFoundResponse,
             "description": "The result run or its base strategy revision does not exist",
         },
+        409: {
+            "model": ExperimentErrorResponse | BacktestStrategyStaleResponse,
+            "description": "A check of this run is still running, or the base revision is stale",
+        },
     }
 
     @app.post(

@@ -1820,6 +1820,12 @@ const ko = {
     "튼튼한지 확인하려면 실행 기간이 2년 이상이어야 합니다. 학습 1년과 검증 1년이 들어갈 만큼 기간을 늘려 다시 실행하세요.",
   "backtest.error.experiment.robustness.run_not_found":
     "확인할 실행을 찾을 수 없습니다. 백테스트 이력에서 실행을 다시 여세요.",
+  "backtest.error.experiment.robustness.too_many_parameters":
+    "숫자 파라미터가 많아 확인할 칸이 너무 많습니다. 실험 화면에서 확인할 파라미터를 골라 실험을 만드세요.",
+  "backtest.error.experiment.robustness.not_single":
+    "실험이 돌린 실행은 그 실험 화면에서 확인합니다. 직접 돌린 실행에서 시작하세요.",
+  "backtest.error.experiment.robustness.running":
+    "이 실행의 확인 실험이 아직 끝나지 않았습니다. 끝난 뒤 결과를 보세요.",
   "backtest.error.experiment.trial.not_retryable":
     "실패하거나 취소된 trial만 다시 실행할 수 있고, 취소한 실험은 다시 실행하지 않습니다.",
   "backtest.error.experiment.selection.not_completed":
@@ -2236,7 +2242,7 @@ const ko = {
   "backtest.robustness.loading": "확인 실험을 찾는 중입니다.",
   "backtest.robustness.loadFailed": "확인 실험을 읽지 못했습니다.",
   "backtest.robustness.reload": "다시 읽기",
-  "backtest.robustness.running": "확인 실험이 도는 중이에요 · {status}. 끝나면 이 항목이 채워져요.",
+  "backtest.robustness.running": "확인 실험이 아직 끝나지 않았어요 · {status}. 끝나면 이 항목이 채워져요.",
   "backtest.robustness.cancelled": "확인 실험을 취소했어요. 다시 확인하려면 새로 시작하세요.",
   "backtest.robustness.open": "확인 실험 자세히 보기",
   "backtest.robustness.retention": "표본 밖 샤프(세션 단위) {sharpe} · 유지율 {retention}",
@@ -2246,13 +2252,13 @@ const ko = {
   "backtest.robustness.curve.benchmark": "벤치마크",
   "backtest.robustness.noParameters": "이 전략에는 파라미터가 없어 고원을 볼 수 없어요. 표본 밖 성과만 확인해요.",
   "backtest.robustness.recommended": "추천 후보: {values}",
-  "backtest.robustness.recommendedScore": "고원 점수(이웃 평균 샤프, 세션 단위) {plateau} · 칸 점수 {score} · ±20% 민감도 {sensitivity}",
+  "backtest.robustness.recommendedScore": "고원 점수(이웃 평균 샤프, 세션 단위) {plateau} · 칸 점수 {score} · 민감도(설정을 조금 옮긴 칸의 점수 하락) {sensitivity}",
   "backtest.robustness.noRecommendation": "추천할 칸이 없어요. 점수가 난 칸이 이웃과 함께 있어야 추천할 수 있어요.",
   "backtest.robustness.confirm.title": "튼튼한지 확인하기",
   "backtest.robustness.confirm.trials": "새로 세는 시도 {count}개 · 계열 시도 수 {before} → {after}",
   "backtest.robustness.confirm.trialsMeaning": "새로 세는 시도는 시도 횟수 보정(DSR)의 N 에 들어가요. 시도가 늘면 같은 결과의 DSR이 내려갈 수 있어요.",
   "backtest.robustness.confirm.plan": "조합 {combinations}개 · 실행 {runs}개",
-  "backtest.robustness.confirm.axes": "탐색할 파라미터: {axes} (선언한 격자 전체)",
+  "backtest.robustness.confirm.axes": "지금 값과 양옆을 볼 파라미터: {axes}",
   "backtest.robustness.confirm.noAxes": "파라미터가 없어 조합 하나로 표본 밖 성과만 봐요.",
   "backtest.robustness.confirm.windows": "학습·검증 창",
   "backtest.robustness.confirm.train": "학습",
@@ -4343,6 +4349,12 @@ export const messages = {
       "A robustness check needs a run of at least two years. Extend the period to fit one training year and one test year, then run again.",
     "backtest.error.experiment.robustness.run_not_found":
       "The run to check was not found. Open the run again from the backtest history.",
+    "backtest.error.experiment.robustness.too_many_parameters":
+      "Too many numeric parameters to check at once. Pick the parameters to check on the experiment page.",
+    "backtest.error.experiment.robustness.not_single":
+      "Runs made by an experiment are checked on that experiment's page. Start from a run you made directly.",
+    "backtest.error.experiment.robustness.running":
+      "A robustness experiment for this run has not finished yet. Check its result once it finishes.",
     "backtest.error.experiment.trial.not_retryable":
       "Only a failed or cancelled trial can run again, and a cancelled experiment does not run again.",
     "backtest.error.experiment.selection.not_completed":
@@ -4763,7 +4775,7 @@ export const messages = {
     "backtest.robustness.loading": "Looking for the robustness experiment.",
     "backtest.robustness.loadFailed": "Could not read the robustness experiment.",
     "backtest.robustness.reload": "Reload",
-    "backtest.robustness.running": "The robustness experiment is running · {status}. These items fill in when it finishes.",
+    "backtest.robustness.running": "The robustness experiment has not finished · {status}. These items fill in when it finishes.",
     "backtest.robustness.cancelled": "The robustness experiment was cancelled. Start a new one to check again.",
     "backtest.robustness.open": "Open the robustness experiment",
     "backtest.robustness.retention": "Out-of-sample Sharpe (per session) {sharpe} · retention {retention}",
@@ -4773,13 +4785,13 @@ export const messages = {
     "backtest.robustness.curve.benchmark": "Benchmark",
     "backtest.robustness.noParameters": "This strategy has no parameters, so there is no plateau to check. Only out-of-sample performance is checked.",
     "backtest.robustness.recommended": "Recommended candidate: {values}",
-    "backtest.robustness.recommendedScore": "Plateau score (neighbour mean Sharpe, per session) {plateau} · cell score {score} · ±20% sensitivity {sensitivity}",
+    "backtest.robustness.recommendedScore": "Plateau score (neighbour mean Sharpe, per session) {plateau} · cell score {score} · sensitivity (score drop when the setting moves a little) {sensitivity}",
     "backtest.robustness.noRecommendation": "No cell to recommend. A scored cell needs scored neighbours to be recommended.",
     "backtest.robustness.confirm.title": "Check robustness",
     "backtest.robustness.confirm.trials": "{count} new trials · lineage trials {before} → {after}",
     "backtest.robustness.confirm.trialsMeaning": "New trials count toward N in the deflated Sharpe (DSR). More trials can lower the DSR of the same result.",
     "backtest.robustness.confirm.plan": "{combinations} combinations · {runs} runs",
-    "backtest.robustness.confirm.axes": "Parameters searched: {axes} (each declared grid in full)",
+    "backtest.robustness.confirm.axes": "Parameters checked at the current value and its neighbours: {axes}",
     "backtest.robustness.confirm.noAxes": "No parameters, so a single combination checks out-of-sample performance only.",
     "backtest.robustness.confirm.windows": "Training and test windows",
     "backtest.robustness.confirm.train": "Training",

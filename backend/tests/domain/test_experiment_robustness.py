@@ -10,12 +10,14 @@ from strategy_workbench.domain.experiment.facade.design import (
     InvalidExperimentSpecError,
     SplitMode,
     SplitSpec,
+    robustness_end,
     robustness_search,
     robustness_split,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
     FloatParameter,
+    IntegerParameter,
 )
 
 
@@ -50,10 +52,48 @@ def test_a_period_shorter_than_two_years_is_refused_with_its_reason() -> None:
     assert "start=2021-01-04 end=2022-06-30" in str(refused.value)
 
 
-def test_every_declared_parameter_is_searched_over_its_whole_grid() -> None:
+def test_numeric_parameters_are_searched_around_the_current_value_within_range() -> None:
     parameters = (
-        FloatParameter("scale", 1.0, -1.0, 1.0, kind="float", step=1.0),
+        # 간격 있는 실수: 지금 값 ±간격, 범위 밖은 뺀다(1.0 + 1.0 = 2.0 은 최댓값 밖).
+        FloatParameter("scale", 0.0, -1.0, 1.0, kind="float", step=1.0),
+        # 정수: ±간격.
+        IntegerParameter("window", 20, 5, 60, kind="integer", step=5),
+        # 간격 없는 실수: ±20%.
+        FloatParameter("threshold", 0.5, 0.0, 1.0, kind="float"),
+        # 선택지는 구조를 바꾸는 선택이라 지금 값에 둔다(탐색하지 않는다).
         ChoiceParameter("mode", "a", ("a", "b"), kind="choice"),
     )
-    assert robustness_search(parameters) == {"scale": None, "mode": None}
-    assert robustness_search(()) == {}
+    current = {"scale": 1.0, "window": 20, "threshold": 0.5, "mode": "b"}
+
+    assert robustness_search(parameters, current) == {
+        "scale": [0.0, 1.0],
+        "window": [15, 20, 25],
+        "threshold": [0.4, 0.5, 0.6],
+    }
+    assert robustness_search((), {}) == {}
+
+
+def test_a_zero_value_without_step_moves_by_a_tenth_of_the_range() -> None:
+    parameter = FloatParameter("tilt", 0.0, -1.0, 1.0, kind="float")
+    # 0 의 ±20% 는 0 이라 범위 폭의 10%(= 20% 의 절반)로 옮긴다.
+    assert robustness_search((parameter,), {"tilt": 0.0}) == {"tilt": [-0.2, 0.0, 0.2]}
+
+
+def test_too_many_numeric_parameters_are_refused_with_the_cell_count() -> None:
+    parameters = tuple(
+        IntegerParameter(f"p{index}", 10, 0, 100, kind="integer", step=1) for index in range(5)
+    )
+    with pytest.raises(InvalidExperimentSpecError) as refused:
+        robustness_search(parameters, {})
+    # 3⁵ = 243 칸 > 81.
+    assert refused.value.code == "experiment.robustness.too_many_parameters"
+    assert "243칸" in str(refused.value)
+
+
+def test_a_short_trailing_test_window_is_dropped() -> None:
+    split = robustness_split(date(2020, 1, 2), date(2024, 1, 10))
+    # 둘째 창의 검증은 2024-01-02 ~ 2024-01-10 로 며칠뿐이라 첫 창 검증 끝까지만 쓴다.
+    end = robustness_end(split, date(2020, 1, 2), date(2024, 1, 10))
+    assert end == split.windows(date(2020, 1, 2), date(2024, 1, 10))[0].test_end
+    # 꼬리가 반년 이상이면 그대로다.
+    assert robustness_end(split, date(2020, 1, 2), date(2024, 9, 30)) == date(2024, 9, 30)

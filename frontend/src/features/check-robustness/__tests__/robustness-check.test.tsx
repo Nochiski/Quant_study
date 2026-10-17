@@ -199,17 +199,30 @@ describe("튼튼한지 확인하기", () => {
     );
     expect(dialog.querySelector("p")).toBe(trials);
     expect(dialog).toHaveTextContent("조합 4개 · 실행 5개");
-    expect(dialog).toHaveTextContent("탐색할 파라미터: scale, mode");
+    expect(dialog).toHaveTextContent(
+      "지금 값과 양옆을 볼 파라미터: scale 0, 1 · mode a, b",
+    );
     const windows = within(dialog).getByRole("table", { name: "학습·검증 창" });
     expect(within(windows).getByText("2023-01-02 ~ 2023-12-28")).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "닫기" })).toHaveFocus();
+    // 포커스는 창 안 두 버튼 사이에서만 돈다.
+    await user.tab();
+    expect(within(dialog).getByRole("button", { name: "시작" })).toHaveFocus();
+    await user.tab();
+    expect(within(dialog).getByRole("button", { name: "닫기" })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(within(dialog).getByRole("button", { name: "시작" })).toHaveFocus();
 
     await user.click(within(dialog).getByRole("button", { name: "시작" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(posted).toEqual([RUN_ID]);
+    // 시작한 뒤에는 버튼이 사라지므로 포커스가 항목 제목으로 간다.
+    expect(
+      screen.getByRole("heading", { name: "튼튼한지 확인" }),
+    ).toHaveFocus();
     expect(
       await screen.findAllByText(
-        "확인 실험이 도는 중이에요 · 실행 중. 끝나면 이 항목이 채워져요.",
+        "확인 실험이 아직 끝나지 않았어요 · 실행 중. 끝나면 이 항목이 채워져요.",
       ),
     ).toHaveLength(2);
     expect(
@@ -249,7 +262,7 @@ describe("튼튼한지 확인하기", () => {
       await within(plateau).findByText("추천 후보: scale 1 · mode a"),
     ).toBeVisible();
     expect(plateau).toHaveTextContent(
-      "고원 점수(이웃 평균 샤프, 세션 단위) 0.0400 · 칸 점수 0.0500 · ±20% 민감도 12.0%",
+      "고원 점수(이웃 평균 샤프, 세션 단위) 0.0400 · 칸 점수 0.0500 · 민감도(설정을 조금 옮긴 칸의 점수 하락) 12.0%",
     );
     expect(
       screen.getByRole("link", { name: "확인 실험 자세히 보기" }),
@@ -308,8 +321,15 @@ describe("튼튼한지 확인하기", () => {
       ),
     ).toBeVisible();
     expect(within(dialog).queryByRole("button", { name: "시작" })).toBeNull();
+    // 시작 버튼이 없으면 Tab 이 닫기 버튼에 머문다.
+    await user.tab();
+    expect(within(dialog).getByRole("button", { name: "닫기" })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+    // 닫으면 포커스가 연 버튼으로 돌아온다.
+    expect(
+      screen.getByRole("button", { name: "튼튼한지 확인하기" }),
+    ).toHaveFocus();
   });
 
   it("실험이 돌린 실행에는 버튼 대신 실험 화면에서 보라고 말한다", async () => {

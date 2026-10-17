@@ -9,6 +9,7 @@ from strategy_workbench.application.experiment_run.ports.outgoing.experiment_rep
 from strategy_workbench.application.experiment_run.ports.outgoing.trial_runs import (
     AdmittedRun,
     RunSlotUsage,
+    SourceRun,
     TrialResultUnreadableError,
     TrialRunPort,
     TrialRunRejectedError,
@@ -23,6 +24,7 @@ __all__ = [
     "RunSlotUsage",
     "TrialAttempt",
     "TrialResultUnreadableError",
+    "SourceRun",
     "TrialRunPort",
     "TrialRunRejectedError",
     "WindowPick",

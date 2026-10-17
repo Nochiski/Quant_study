@@ -55,6 +55,18 @@ class AdmittedRun:
     ledger: TrialLedger
 
 
+@dataclass(frozen=True)
+class SourceRun:
+    """결과 실행 하나의 원본 요청과 종류.
+
+    실험 trial·검증 실행은 요청이 창 구간·칸 값으로 좁혀져 있다.
+    """
+
+    request: BacktestRunSpec
+    # 사용자가 직접 돌린 단일 실행인가(실행 종류는 실행 서비스가 판정한다).
+    single: bool
+
+
 class TrialRunPort(Protocol):
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
         """실행 시작과 같은 판정(preflight 포함)으로 검사하되 접수하지 않는다. 실행 요청이 아니므로
@@ -80,8 +92,8 @@ class TrialRunPort(Protocol):
         """
         ...
 
-    def request(self, run_id: str) -> BacktestRunSpec | None:
-        """접수한 원본 실행 요청. 모르는 실행이면 None(튼튼한지 확인하기의 기반, US-DM-11)."""
+    def source_run(self, run_id: str) -> SourceRun | None:
+        """튼튼한지 확인하기의 기반 실행(US-DM-11) — 원본 요청과 단일 실행인지. 모르면 None."""
         ...
 
     def result(self, run_id: str) -> BacktestRunResult:

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { LineChart } from "../../../entities/backtest";
 import {
@@ -40,6 +40,13 @@ export const RobustnessCheck = ({
 }) => {
   const checks = useQuery(robustnessChecksQuery(runId));
   const [confirming, setConfirming] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  // 창을 닫으면 포커스를 연 버튼으로 돌려준다. 시작했으면 버튼이 사라지므로 항목 제목으로 옮긴다.
+  const closeConfirm = (started: boolean) => {
+    setConfirming(false);
+    (started ? heading.current : trigger.current)?.focus();
+  };
   const latest = checks.data?.[0];
   const canStart =
     single &&
@@ -90,15 +97,17 @@ export const RobustnessCheck = ({
 
   return (
     <div className="robustness-check">
-      <h5>{t("backtest.robustness.title")}</h5>
+      <h5 ref={heading} tabIndex={-1}>
+        {t("backtest.robustness.title")}
+      </h5>
       {body}
       {canStart ? (
-        <Button onClick={() => setConfirming(true)}>
+        <Button ref={trigger} onClick={() => setConfirming(true)}>
           {t("backtest.robustness.start")}
         </Button>
       ) : null}
       {confirming ? (
-        <RobustnessConfirm runId={runId} onClose={() => setConfirming(false)} />
+        <RobustnessConfirm runId={runId} onClose={closeConfirm} />
       ) : null}
     </div>
   );

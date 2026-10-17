@@ -12,6 +12,8 @@ import { expect, test } from "@playwright/test";
 import {
   createStrategyDocument,
   getBacktestStatus,
+  getExperimentWalkForward,
+  listRobustnessChecks,
   startBacktest,
 } from "../../src/shared/api/generated";
 import {
@@ -113,7 +115,9 @@ test(
     // 새로 세는 시도 수가 먼저 보인다. 기반 실행(scale 0)은 이미 센 시도라 scale 1 하나만 새로 센다.
     const trials = dialog.locator("p").first();
     await expect(trials).toHaveText("새로 세는 시도 1개 · 계열 시도 수 1 → 2");
-    await expect(dialog).toContainText("탐색할 파라미터: scale");
+    await expect(dialog).toContainText(
+      "지금 값과 양옆을 볼 파라미터: scale 0, 1",
+    );
     // 창 미리보기의 어떤 창도 봉인 구간(2019-12-31 이전)에 걸리지 않는다.
     const windows = dialog.getByRole("table", { name: "학습·검증 창" });
     const rows = windows.locator("tbody tr");
@@ -128,12 +132,44 @@ test(
     await dialog.getByRole("button", { name: "시작" }).click();
     await expect(dialog).toBeHidden();
     // 실험이 대기열에 들어가 두 항목이 "도는 중"을 말한다.
-    await expect(outOfSample).toContainText("확인 실험이 도는 중이에요", {
-      timeout: 30_000,
-    });
+    await expect(outOfSample).toContainText(
+      "확인 실험이 아직 끝나지 않았어요",
+      {
+        timeout: 30_000,
+      },
+    );
 
-    // 실험이 끝나면 두 항목이 채워진다.
-    await expect(outOfSample).toContainText("유지율", { timeout: 240_000 });
+    // 실험이 끝나면 두 항목이 채워진다. 표본 밖 샤프·유지율은 서버 워크포워드 보고의 값 그대로다.
+    await expect(plateau).toContainText("추천 후보", { timeout: 240_000 });
+    const [check] = requireData(
+      (
+        await listRobustnessChecks({
+          client: apiClient,
+          path: { run_id: runId },
+        })
+      ).data,
+      "list robustness checks",
+    );
+    const report = requireData(
+      (
+        await getExperimentWalkForward({
+          client: apiClient,
+          path: { experiment_id: check?.record.experiment_id ?? "" },
+        })
+      ).data,
+      "read walk-forward report",
+    );
+    // 모든 창의 검증이 끝나 곡선과 표본 밖 샤프가 있다. 유지율은 학습 샤프 평균이 0 이하면 서버가 비운다
+    // (mock 자료가 그렇다) — 화면은 그 값을 그대로 보인다.
+    expect(report.gap ?? null).toBeNull();
+    expect(report.out_of_sample_sharpe).toEqual(expect.any(Number));
+    const retention =
+      report.retention === null
+        ? "—"
+        : `${(report.retention * 100).toFixed(1)}%`;
+    await expect(outOfSample).toContainText(
+      `표본 밖 샤프(세션 단위) ${report.out_of_sample_sharpe?.toFixed(4) ?? ""} · 유지율 ${retention}`,
+    );
     await expect(
       outOfSample.getByRole("img", { name: /검증 구간만 이어 붙인 곡선/u }),
     ).toBeVisible();

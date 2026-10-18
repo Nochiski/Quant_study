@@ -9,6 +9,8 @@ DEPENDS_ON: tuple[str, ...] = (
     "adapters.outbound.sqlite_store",
     "application.backtest_run",
     "application.experiment_run",
+    "application.holdout_registration",
+    "domain.canonical",
     "application.strategy_design",
     "domain.backtest",
     "domain.experiment",

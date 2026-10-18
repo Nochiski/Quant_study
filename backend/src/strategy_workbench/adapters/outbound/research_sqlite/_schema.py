@@ -15,6 +15,7 @@
 | 6 | run 시작 시각(로드맵 M6 시간 추정): `backtest_run_starts` |
 | 7 | 실험 조작 이력(로드맵 M6 감사 기록): `experiment_control_changes` |
 | 8 | 실험을 만든 결과 실행(검증 랩 V5-02 튼튼한지 확인하기): `experiment_sources` |
+| 9 | 합성 사전등록·모의 claim·관측 결과(실제 개봉 권위 없음) |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
 파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다.
@@ -33,7 +34,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -338,6 +339,108 @@ _V8_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 V8_SCHEMA_OBJECTS = V7_SCHEMA_OBJECTS + _V8_ADDED_OBJECTS
 
 
+_V9_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "holdout_simulation_registrations",
+        """
+     CREATE TABLE holdout_simulation_registrations (
+       registration_id TEXT NOT NULL, registration_hash TEXT NOT NULL,
+       payload TEXT NOT NULL, payload_sha256 TEXT NOT NULL
+     )""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_registrations_no_update",
+        """
+     CREATE TRIGGER holdout_simulation_registrations_no_update
+     BEFORE UPDATE ON holdout_simulation_registrations BEGIN
+       SELECT RAISE(ABORT, 'simulation registration is immutable'); END""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_registrations_no_delete",
+        """
+     CREATE TRIGGER holdout_simulation_registrations_no_delete
+     BEFORE DELETE ON holdout_simulation_registrations BEGIN
+       SELECT RAISE(ABORT, 'simulation registration is immutable'); END""",
+    ),
+    (
+        "table",
+        "holdout_simulation_claims",
+        """
+     CREATE TABLE holdout_simulation_claims (
+       request_id TEXT NOT NULL,
+       registration_id TEXT NOT NULL REFERENCES holdout_simulation_registrations(registration_id),
+       registration_hash TEXT NOT NULL, namespace TEXT NOT NULL, window_id TEXT NOT NULL,
+       claimed_at TEXT NOT NULL, status TEXT NOT NULL, completed_at TEXT
+     )""",
+    ),
+    (
+        "index",
+        "holdout_simulation_window_once",
+        """
+     CREATE UNIQUE INDEX holdout_simulation_window_once
+       ON holdout_simulation_claims(namespace, window_id)""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_claims_no_delete",
+        """
+     CREATE TRIGGER holdout_simulation_claims_no_delete BEFORE DELETE ON holdout_simulation_claims
+     BEGIN SELECT RAISE(ABORT, 'simulation window consumption cannot be deleted'); END""",
+    ),
+    (
+        "trigger",
+        "holdout_simulation_claims_fixed_identity",
+        """
+     CREATE TRIGGER holdout_simulation_claims_fixed_identity
+     BEFORE UPDATE OF request_id, registration_id, registration_hash, namespace, window_id,
+                      claimed_at
+     ON holdout_simulation_claims
+     BEGIN SELECT RAISE(ABORT, 'simulation claim identity is immutable'); END""",
+    ),
+    (
+        "table",
+        "holdout_simulation_results",
+        """
+     CREATE TABLE holdout_simulation_results (
+       request_id TEXT NOT NULL REFERENCES holdout_simulation_claims(request_id),
+       payload TEXT NOT NULL, payload_sha256 TEXT NOT NULL
+     )""",
+    ),
+)
+
+_V9_ADDED_OBJECTS += (
+    (
+        "index",
+        "holdout_simulation_registration_id",
+        (
+            "CREATE UNIQUE INDEX holdout_simulation_registration_id "
+            "ON holdout_simulation_registrations(registration_id)"
+        ),
+    ),
+    (
+        "index",
+        "holdout_simulation_request_id",
+        (
+            "CREATE UNIQUE INDEX holdout_simulation_request_id "
+            "ON holdout_simulation_claims(request_id)"
+        ),
+    ),
+    (
+        "index",
+        "holdout_simulation_result_id",
+        (
+            "CREATE UNIQUE INDEX holdout_simulation_result_id "
+            "ON holdout_simulation_results(request_id)"
+        ),
+    ),
+)
+
+V9_SCHEMA_OBJECTS = V8_SCHEMA_OBJECTS + _V9_ADDED_OBJECTS
+
+
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
         for _object_type, _name, statement in objects:
@@ -353,7 +456,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V8_SCHEMA_OBJECTS,
+            objects=V9_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
@@ -363,6 +466,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 SchemaUpgrade(5, V5_SCHEMA_OBJECTS, _added(_V6_ADDED_OBJECTS)),
                 SchemaUpgrade(6, V6_SCHEMA_OBJECTS, _added(_V7_ADDED_OBJECTS)),
                 SchemaUpgrade(7, V7_SCHEMA_OBJECTS, _added(_V8_ADDED_OBJECTS)),
+                SchemaUpgrade(8, V8_SCHEMA_OBJECTS, _added(_V9_ADDED_OBJECTS)),
             ),
         ),
     )

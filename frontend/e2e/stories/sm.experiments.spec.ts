@@ -230,12 +230,23 @@ test(
     await page.goto(`/research/experiments/${first}`);
     await expect(page.getByText(/^남은 시간 최대 약 /u)).toBeVisible();
     await page.goto("/research/backtests");
+    // 긴 ID는 요약해서 보여도 원본 title과 후보 링크는 같은 실험을 가리켜야 한다.
     const notice = page
       .getByRole("status")
-      .filter({ hasText: `실험 ${first} 완료` });
+      .filter({ has: page.getByTitle(first, { exact: true }) });
     await expect(notice).toBeVisible({ timeout: TRIAL_HOLD_SECONDS * 8_000 });
+    const firstLabel =
+      first.length > 16 ? `${first.slice(0, 8)}…${first.slice(-4)}` : first;
+    await expect(notice.getByTitle(first, { exact: true })).toHaveText(
+      `실험 ${firstLabel} 완료`,
+    );
     await expect(
-      page.getByRole("status").filter({ hasText: `실험 ${second} 완료` }),
+      notice.getByRole("link", { name: "후보 보기" }),
+    ).toHaveAttribute("href", `/research/experiments/${first}`);
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ has: page.getByTitle(second, { exact: true }) }),
     ).toHaveCount(0);
     // 완료된 실험의 보조 조회만 실패시켜, 결과 없음과 조회 실패를 구분하고 원본 조회로 복구한다.
     const walkForwardPath = `**/api/v1/experiments/${first}/walk-forward`;

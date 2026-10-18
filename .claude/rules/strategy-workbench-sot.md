@@ -123,6 +123,16 @@ paths:
 | AI 결과 설명의 모드와 모델이 보는 결과 사실 | 모드는 세션의 `DocumentRef.run_id`가 정한다(요청 플래그 아님). 결과 요약(무엇을 싣고 무엇을 덜어 내는가·길이 상한)은 `application/assistant_chat/_result_context.py`의 `summarize_backtest_result`, 결과를 읽는 통로는 `BacktestResultPort`(bootstrap이 `BacktestRunService.result`를 감싼다) | 결과 세션은 `read_backtest_result` 하나만 받고 검색이 없으며 준 도구 밖 호출(`propose_strategy` 포함)은 도구 오류다(결과 설명 spec R5). frontend는 결과를 모델에게 보내지 않고(`readContext` 없음) 요약을 만들지 않는다. 대본 공급자는 도구 목록으로 결과 대본을 고른다. 검증 근거(US-DM-12)는 같은 포트의 `validation_facts`(bootstrap 이 `BacktestRunService.validation_report`·`summary` 와 `ExperimentRunService.run_selections` 를 감싼다)로 읽어 요약의 `validation` 칸에 싣는다: 저장된 PSR, 조회 시점(`observed_at`) 원장 DSR 근거(`current_ledger`), 이 실행의 trial 을 고를 때 굳힌 스냅숏(`selection_snapshots`)을 다른 칸으로 둬 두 시점을 섞지 않는다. 값은 검증 카드와 같은 계산 owner 의 것이고 요약이 다시 계산하지 않는다. 근거를 못 읽으면 `validation` 이 null 이다. 선택 스냅숏은 길이 상한에서 팩터 다음에 덜고 현재 원장 근거는 덜지 않는다. 실험 실행의 소유 실험은 `BacktestRunSummary.experiment_id`(가장 앞선 소유자) 하나라, 같은 run 을 여러 실험이 이어 쓰면 다른 실험의 선택은 싣지 않는다(알려진 한계) |
 | AI 채팅 세션·턴·메시지·이벤트 이력(sequence), 메시지의 턴 소속(`turn_id`) | `assistant_sqlite`(턴 id를 만드는 것은 `AssistantTurnRunner`, 메시지에 찍는 것은 `AssistantChatService.send`). 파일 판본은 `assistant_sqlite/_schema.py`의 `SCHEMA_VERSION`(지금 3)이고, 옛 파일은 열 때 제자리에서 v1 → v2 → v3으로 차례로 올린다 | 진행 중 턴 레지스트리·취소 신호는 `application/assistant_chat`의 `AssistantTurnRunner`(프로세스 내, 단일 워커 전제). 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트와 **마지막 반영 sequence·턴 투영**(`entities/assistant` 리듀서, 사유는 `.claude/rules/frontend-api-state.md`)은 frontend local UI state. 질문과 턴의 짝은 메시지의 `turn_id`만 정하고 턴 배열 순서로 추정하지 않는다(C-03). 제안은 사용자의 "적용"으로만, 업그레이드 적용과 같은 편집기 전체 범위 교체(`replaceRange`, 문서가 바뀌었으면 적용 전 확인) 경로로 문서에 들어간다 — source 트랜잭션 행의 두 번째 명시 예외. `ChatEvent`에는 판별자가 없으므로 전송용 `type` 태그와 그 합집합 메타데이터는 `adapters/inbound/http_api/_assistant_contract.py`가 소유한다 — domain은 `isinstance`로, 생성 SDK는 `type`으로 갈래를 가른다 |
 
+### V5-06 화면 조회 계약
+
+용량 화면은 기존 capacity preview/create/report가 답한 시도 수·금액별 비용·한계 사유를 표시한다.
+`entities/experiment` query가 응답을 소유하고 `features/check-capacity`가 명시 시작 뒤 기존 영속 실험 상세로 연결한다.
+팩터 회귀 화면은 run/fingerprint별 query에서 사용자가 연 뒤 `computing`만 5초 간격·최대36개 응답으로 제한 조회하며, 예산 소진 시 자동 확인 중단을 명시한다.
+부재/오류는 자동 반복하지 않고 410은 재조회하지 않는다. 표본·판본·계열 N/t 기준과 통계적 한계를 표시하며 다시 계산하지 않는다.
+화면의 응답 수신 시각은 선택 시각이나 DB 스냅숏 시각이 아니다.
+선행 factor admission #546은 main에 머지되었고 이 reports 스택에도 포함되어 활성 작업1·서로 다른 키의 대기daemon/큐0을 보장한다.
+`computing`은 준비 또는 진행이며 슬롯이 비면 다음 유한 poll/명시 조회에서만 새 키를 접수한다. 수식·LRU32·N은 불변이다.
+
 ## 금지
 
 - frontend에 팩터 공식, 지표 공식, 전략 validation 규칙, 서버 status transition을 복제하지 않는다.

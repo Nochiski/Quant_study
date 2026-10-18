@@ -29,6 +29,10 @@ import {
   getBacktestResult,
   getBacktestAccountReport,
   getBacktestValidationReport,
+  getBacktestFactorRegression,
+  previewCapacitySweep,
+  createCapacitySweep,
+  getExperimentCapacity,
   getStrategyDraft,
   getStrategyDocument,
   getStrategyDocumentContract,
@@ -54,6 +58,9 @@ import {
   upgradeStrategyDocument,
 } from "./generated/sdk.gen";
 import type {
+  RunFactorRegression,
+  CapacitySweepRequest,
+  CapacityReport,
   ContinuousAccountLatest,
   ContinuousAccountState,
   AccountReport,
@@ -690,6 +697,19 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestValidationReport");
   },
 
+  async getBacktestFactorRegression(runId: string): Promise<RunFactorRegression> {
+    return unwrap(await getBacktestFactorRegression({ path: { run_id: runId } }), "getBacktestFactorRegression");
+  },
+  async previewCapacitySweep(request: CapacitySweepRequest): Promise<ExperimentPreview> {
+    return unwrap(await previewCapacitySweep({ body: request }), "previewCapacitySweep");
+  },
+  async createCapacitySweep(request: CapacitySweepRequest): Promise<Experiment> {
+    return unwrap(await createCapacitySweep({ body: request }), "createCapacitySweep");
+  },
+  async getExperimentCapacity(experimentId: string): Promise<CapacityReport> {
+    return unwrap(await getExperimentCapacity({ path: { experiment_id: experimentId } }), "getExperimentCapacity");
+  },
+
   /** 취소 요청. 다른 소유자(실험)가 써서 계속 돌면 `kept_by_owners` 가 참이다(#382). */
   async cancelBacktest(runId: string): Promise<BacktestCancelResult> {
     const response = await cancelBacktest({ path: { run_id: runId } });
@@ -902,6 +922,9 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  RunFactorRegression,
+  CapacitySweepRequest,
+  CapacityReport,
   RunValidationReport,
   ContinuousAccountLatest,
   ContinuousAccountState,

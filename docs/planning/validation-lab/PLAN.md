@@ -3,10 +3,10 @@ plan_version: 1
 project: validation-lab
 project_status: IN_PROGRESS
 current_phase: V5,V6
-current_pr: V5-02,V6-01
-active_prs: [V5-02, V6-01]
-parallel_window: [V5-02, V6-01]
-last_updated: 2026-10-18T08:50:14+09:00
+current_pr: V5-02,V5-07,V6-01
+active_prs: [V5-02, V5-07, V6-01]
+parallel_window: [V5-02, V5-07, V6-01]
+last_updated: 2026-10-18T09:48:19+09:00
 planned_prs: 28
 merged_prs: 22
 approved_prs: 22
@@ -25,11 +25,11 @@ progress_percent: 79
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `V5,V6` |
-| Current/next PR | `V5-02,V6-01` |
-| Active PR | `V5-02, V6-01` |
+| Current/next PR | `V5-02,V5-07,V6-01` |
+| Active PR | `V5-02, V5-07, V6-01` |
 | Progress | `22 / 28 merged (79%)` |
 | Approved | `22 / 28` |
-| Aggregated at | `2026-10-18 08:50 KST` |
+| Aggregated at | `2026-10-18 09:48 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -148,7 +148,7 @@ progress_percent: 79
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V5-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `MERGED` | [#345](https://github.com/Nochiski/Quant_study/pull/345) · main 머지 `ebf2a6ea`(2026-09-30) |
 | [ ] | `V5-06` | 용량 스윕·팩터 회귀 화면 | V5-02, V4-04, V4-05 | `PLANNED` | — |
-| [ ] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `PLANNED` | — |
+| [ ] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `IN_PROGRESS` | [현재 문서·환경을 보존하는 연구 진입점](./V5-07-ide-research.md): 기존 계열 N 조회·실험 Form·recipe URL 소유자 재사용. 1440/360×640 실제 과업 수용은 독립 브라우저 검증 기록으로 확인 |
 
 ## V6 — 홀드아웃 개봉
 

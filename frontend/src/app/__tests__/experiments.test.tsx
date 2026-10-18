@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -13,6 +14,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { App } from "../app";
+import type { BacktestRunSpec } from "../../shared/api";
 
 // 실험 화면(검증 랩 V5-01, US-SM-14·15). 상태·진행 수·슬롯·우선순위 상한·조합 수·시도 수 변화는 backend
 // 응답이고, 화면은 그 값을 보이고 요청을 싣기만 한다.
@@ -34,7 +36,7 @@ const BASE = {
   environment: ENVIRONMENT,
   metric_windows: [
     {
-      scope: "out_of_sample",
+      scope: "out_of_sample" as const,
       start: "2025-01-02",
       end: "2025-12-30",
       label: "OOS",
@@ -251,14 +253,13 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-const mount = (initial: string) => {
+const mount = (initial: string, seed?: BacktestRunSpec, client = new QueryClient({ defaultOptions: { queries: { retry: 0 } } })) => {
   const history = createMemoryHistory({ initialEntries: [initial] });
+  if (seed !== undefined) history.replace(initial, { experimentSeed: seed });
   render(
     <App
       history={history}
-      queryClient={
-        new QueryClient({ defaultOptions: { queries: { retry: 0 } } })
-      }
+      queryClient={client}
       operationsEnabled={false}
     />,
   );
@@ -580,6 +581,97 @@ describe("experiments", () => {
     expect(
       screen.getByRole("link", { name: "백테스트 이력으로" }),
     ).toHaveAttribute("href", "/research/backtests");
+  });
+
+  it("IDE에서 보낸 현재 환경·선택값은 기존 실험 Form에서 명시 접수 전까지 보존한다", async () => {
+    usePreview();
+    let created = 0;
+    server.use(http.post(`${API}/api/v1/experiments`, () => {
+      created++;
+      return HttpResponse.json(experiment("e-new", "queued"), { status: 202 });
+    }));
+    const seed = { ...BASE, parameter_values: { top_n: 20 }, environment: { ...ENVIRONMENT, start: "2022-01-03" } };
+    mount("/research/experiments/new", seed);
+    await screen.findByRole("status", { name: "시작 전 확인" });
+    expect(screen.getByText(/편집기에서 보낸 저장 리비전/u)).toBeVisible();
+    expect(previews.at(-1)).toMatchObject({ run: { ...seed, metric_windows: [] } });
+    expect(created).toBe(0);
+    await userEvent.setup().click(screen.getByRole("button", { name: "대기열에 넣기" }));
+    await waitFor(() => expect(created).toBe(1));
+  });
+
+  it("서로 다른 IDE history entry는 축·제약·분할을 새로 열고 같은 entry의 조회 갱신은 편집을 유지한다", async () => {
+    usePreview();
+    server.use(http.get(`${API}/api/v1/strategies/:strategyId/revisions/:revision/document`, ({ params }) =>
+      HttpResponse.json(params.strategyId === "s2" ? { ...document, strategy_id: "s2", spec: { ...document.spec, parameters: [{ ...document.spec.parameters[0], parameter_id: "lookback" }] } } : document),
+    ));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 0 } } });
+    const history = mount("/research/experiments/new", { ...BASE, parameter_values: { top_n: 20 } }, client);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("checkbox", { name: "탐색: top_n" }));
+    await user.type(screen.getByLabelText("값 직접 입력: top_n"), "10,20");
+    await user.click(screen.getByRole("button", { name: "제약 추가" }));
+    await user.type(screen.getByLabelText("조합 제약 1: 값"), "15");
+    await user.selectOptions(screen.getByLabelText("창 방식"), "anchored");
+    const years = screen.getByLabelText("학습(년)");
+    await user.clear(years);
+    await user.type(years, "5");
+    await act(async () => { await client.invalidateQueries(); });
+    expect(screen.getByLabelText("값 직접 입력: top_n")).toHaveValue("10,20");
+    expect(screen.getByLabelText("조합 제약 1: 값")).toHaveValue("15");
+    expect(screen.getByLabelText("학습(년)")).toHaveValue(5);
+    const seedB: BacktestRunSpec = { ...BASE, strategy_source: { ...SAVED, strategy_id: "s2" }, parameter_values: { lookback: 10 } };
+    await act(async () => { history.push("/research/experiments/new", { experimentSeed: seedB }); });
+    expect(await screen.findByRole("checkbox", { name: "탐색: lookback" })).not.toBeChecked();
+    expect(screen.queryByLabelText("조합 제약 1: 값")).toBeNull();
+    expect(screen.getByLabelText("창 방식")).toHaveValue("rolling");
+    expect(screen.getByLabelText("학습(년)")).toHaveValue(3);
+    await act(async () => { history.back(); });
+    expect(await screen.findByRole("checkbox", { name: "탐색: top_n" })).not.toBeChecked();
+    expect(screen.getByLabelText("학습(년)")).toHaveValue(3);
+    expect(screen.queryByLabelText("조합 제약 1: 값")).toBeNull();
+    await act(async () => { history.forward(); });
+    expect(await screen.findByRole("checkbox", { name: "탐색: lookback" })).not.toBeChecked();
+  });
+
+  it.each(["run", "from"] as const)("캐시된 %s 기반을 왕복해도 다른 기반의 축·제약·분할을 물려받지 않는다", async (kind) => {
+    usePreview();
+    const baseB: BacktestRunSpec = { ...BASE, strategy_source: { ...SAVED, strategy_id: "s2" } };
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId/request`, ({ params }) => HttpResponse.json(params.runId === "b" ? baseB : BASE)),
+      http.get(`${API}/api/v1/strategies/:strategyId/revisions/:revision/document`, ({ params }) => HttpResponse.json(params.strategyId === "s2" ? { ...document, strategy_id: "s2", spec: { ...document.spec, parameters: [{ ...document.spec.parameters[0], parameter_id: "lookback" }] } } : document)),
+      http.get(`${API}/api/v1/experiments/:experimentId`, ({ params }) => {
+        const original = experiment(String(params.experimentId), "completed");
+        return HttpResponse.json(params.experimentId === "b" ? { ...original, record: { ...original.record, run: baseB, design: { ...original.record.design, search: { axes: [{ parameter_id: "lookback", values: [10, 20] }] } } } } : original);
+      }),
+    );
+    const history = mount(`/research/experiments/new?${kind}=a`);
+    await screen.findByRole("checkbox", { name: "탐색: top_n" });
+    await act(async () => { history.push(`/research/experiments/new?${kind}=b`); });
+    const box = await screen.findByRole("checkbox", { name: "탐색: lookback" });
+    const user = userEvent.setup();
+    if (!(box as HTMLInputElement).checked) await user.click(box);
+    await user.click(screen.getByRole("button", { name: "제약 추가" }));
+    await user.type(screen.getByLabelText("조합 제약 1: 값"), "15");
+    await user.clear(screen.getByLabelText("학습(년)"));
+    await user.type(screen.getByLabelText("학습(년)"), "9");
+    await act(async () => { history.back(); });
+    const a = await screen.findByRole("checkbox", { name: "탐색: top_n" });
+    expect(a).toHaveProperty("checked", kind === "from");
+    expect(screen.queryByLabelText("조합 제약 1: 값")).toBeNull();
+    expect(screen.getByLabelText("학습(년)")).toHaveValue(kind === "from" ? 2 : 3);
+    await act(async () => { history.forward(); });
+    await screen.findByRole("checkbox", { name: "탐색: lookback" });
+    expect(screen.queryByLabelText("조합 제약 1: 값")).toBeNull();
+    expect(screen.getByLabelText("학습(년)")).toHaveValue(kind === "from" ? 2 : 3);
+  });
+
+  it("명시 run URL은 남아 있는 IDE seed보다 우선한다", async () => {
+    usePreview();
+    mount("/research/experiments/new?run=run-1", { ...BASE, parameter_values: { top_n: 20 } });
+    await screen.findByRole("status", { name: "시작 전 확인" });
+    expect(previews.at(-1)).toMatchObject({ run: { ...BASE, metric_windows: [] } });
+    expect(screen.queryByText(/편집기에서 보낸 저장 리비전/u)).not.toBeInTheDocument();
   });
 
   it("previews a new experiment from a run and queues it", async () => {

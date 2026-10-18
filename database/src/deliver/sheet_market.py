@@ -2,8 +2,9 @@
 
 원천: equity `index_daily`(KRX 지수) · `price_daily` · `universe_daily` · `flow_daily`(키움, 보통주) ·
 수정종가(카탈로그 매크로 `v_adj_price` 와 같은 정의 — `equity.views` 템플릿을 판 고정 원천에 올린다).
-기준일: 지수 · 시장 폭 · 거래대금 = KRX 지수(코스피) 최신일, 투자자 수급 = 키움 수급 최신 완전한 날
-(블록마다 따로 — 수급이 늦으면 4행 · 표 제목에 그 날짜를 적고, 없는 날은 0 이 아니라 빈칸).
+기준일: 지수 = KRX 지수(코스피) 최신일, 시장 폭 · 거래대금 = 그날과 종목 가격 최신일 중 이른 날,
+투자자 수급 = 키움 수급 최신 완전한 날(블록마다 따로 — 지수보다 늦으면 4행 · 표 제목에 그 날짜를 적고,
+없는 날은 0 이 아니라 빈칸). 시장 구분 = 지수 기준일 이하 최신 유니버스 날짜(`common_markets`).
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ from .extra_common import (
     Calendar,
     Latest,
     base_text,
+    close_day,
     common_markets,
     krx_calendar,
     latest,
@@ -92,6 +94,7 @@ class MarketData:
     tv: dict[date, dict[str, float]]                    # 날짜 → 시장 → 보통주 거래대금(원)
     mkt_flow: dict[tuple[str, str], dict[str, float | None]]   # (시장, 창) → 투자자 열 → 순매수(원)
     daily_flow: dict[date, dict[str, float | None]]     # 날짜 → 열 → 순매수(원)
+    breadth_day: date                                   # 시장 폭 · 거래대금 블록 기준일
 
 
 def adj_price_macro(con: duckdb.DuckDBPyConnection, src: Sources, since: date) -> None:
@@ -138,14 +141,18 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date) -> MarketData
         series[day_of(dd)][text(nm)] = num(c)
     # ── 시장 폭(보통주, 수정종가) — 오늘 오른 · 내린 종목, 52주(250거래일) 최고 · 최저와 같은 종목 ──
     common_markets(con, src, day)
+    # 블록 기준일 = 지수 기준일과 종목 가격(fi 판 고정) 최신일 중 이른 날 — 지수는 current 판이라 D+1
+    # 아침 체인 뒤에 만들면 하루 앞선다. 그 뒤 날짜 행은 내지 않는다(N-49 ④ 블록마다 원천 날짜)
+    bday = close_day(con, src, day)
+    bdays = [x for x in cal.days if x <= bday]
     adj_price_macro(con, src, cal.back(ADJ_DAYS))
     con.execute("CREATE OR REPLACE TEMP TABLE dd (date DATE, i INTEGER)")
     con.executemany("INSERT INTO dd VALUES (?, ?)", [(d, i) for i, d in enumerate(cal.days)])
-    last20 = len(cal.days) - BREADTH_DAYS
+    last20 = len(bdays) - BREADTH_DAYS
     got = {day_of(r[0]): r for r in con.execute(f"""
         WITH ap AS (
             SELECT a.ticker, mk.market, dd.i, dd.date, a.adj_close AS c
-            FROM v_adj_price({lit(day)}, NULL) a JOIN mk USING (ticker) JOIN dd USING (date)
+            FROM v_adj_price({lit(bday)}, NULL) a JOIN mk USING (ticker) JOIN dd USING (date)
             WHERE a.date >= {lit(cal.back(ADJ_DAYS))} AND a.adj_close IS NOT NULL),
         w AS (
             SELECT ticker, market, i, date, c, lag(c) OVER p AS pc, lag(i) OVER p AS pi,
@@ -167,7 +174,7 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date) -> MarketData
     # 비교할 행이 하나도 없는 날은 빈칸 줄(0 이 아니다)
     breadth = [Breadth(x, (r[1], r[2], r[3]), (r[4], r[5], r[6]), r[7], r[8]) if r is not None
                else Breadth(x, (None, None, None), (None, None, None), None, None)
-               for x in cal.days[last20:] for r in (got.get(x),)]
+               for x in bdays[last20:] for r in (got.get(x),)]
     tv: dict[date, dict[str, float]] = defaultdict(dict)
     for dd, mkt, v in con.execute(f"""
             SELECT p.date, u.market, sum(p.value_krw)
@@ -178,7 +185,7 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date) -> MarketData
         if (x := num(v)) is not None:
             tv[day_of(dd)][text(mkt)] = x
     first = con.execute(f"SELECT min(date) FROM {ix} WHERE index_name = '코스피'").fetchone()
-    # ── 시장 투자자별 순매수(키움, 보통주 — 시장은 지수 기준일 시장). 수급 기준일 · 창은 따로 ──
+    # ── 시장 투자자별 순매수(키움, 보통주 — 시장은 위 `mk`). 수급 기준일 · 창은 따로 ──
     fl = src.equity("flow_daily")
     flow = latest_complete(con, fl, "date", upto, "src = 'kiwoom' AND frgnr_invsr_krw IS NOT NULL",
                            "키움 투자자별 매매")
@@ -200,7 +207,7 @@ def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date) -> MarketData
         GROUP BY 1""").fetchall()}
     first_day = day_of(first[0]) if first and first[0] else day
     return MarketData(cal, flow, fcal, first_day.year, index, series, breadth, tv, mkt_flow,
-                      daily_flow)
+                      daily_flow, bday)
 
 
 def write(wb: Workbook, m: MarketData, refs: XRefs, d: date,
@@ -309,7 +316,8 @@ def write(wb: Workbook, m: MarketData, refs: XRefs, d: date,
         "개인 + 외국인 + 기관계 + 기타법인 = 0")
     # 시장 폭
     t0 = m2_end + 2
-    header(t0, [("A", f"시장 폭: 최근 {BREADTH_DAYS}거래일, 보통주"), ("C", "코스피(종목 수)"),
+    header(t0, [("A", f"시장 폭: 최근 {BREADTH_DAYS}거래일, 보통주{until(m.breadth_day, day)}"),
+                ("C", "코스피(종목 수)"),
                 ("F", "코스닥(종목 수)"), ("I", "52주(두 시장)"), ("K", "거래대금(조원)")],
            ["", "날짜", "상승", "하락", "보합", "상승", "하락", "보합", "신고가", "신저가", "코스피",
             "코스닥"], ab=True)

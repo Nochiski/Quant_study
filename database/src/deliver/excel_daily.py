@@ -13,7 +13,7 @@ import logging
 import os
 import statistics
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -84,7 +84,7 @@ from .reader import (
     read_scores,
     ymd,
 )
-from .sources import open_sources
+from .sources import SourceMissing, Sources, connect, num, open_sources
 from .trend import (
     FALLBACK_NOTE,
     HISTORY_BASIS,
@@ -181,6 +181,11 @@ class FiData:
     fins: dict[str, list[Row]] = field(default_factory=dict)
     cons: dict[str, list[Row]] = field(default_factory=dict)
     flow_last: dict[str, str | None] = field(default_factory=dict)
+    # 확정 지배주주 순이익(억원) — 종목 → 'YYYY/MM'. 같은 fi 판 fi_consensus_annual 확정('A') 행 +
+    # 그 표 창(Y−1~Y+1) 밖 Y−2 는 stage stg_consensus_annual(`load_ni_y2`). Earnings 순이익 칸이
+    # 추정치(fi_consensus — 컨센서스 지배 순이익)와 같은 정의로 견주게 한다(결함 2)
+    ni_actual: dict[str, dict[str, float]] = field(default_factory=dict)
+    ni_fetched: dict[str, date] = field(default_factory=dict)   # 종목 → 그 표가 고른 수집일
 
     def annual(self, t: str, need: Sequence[str] = ("ni",)) -> Row | None:
         """need 열 중 하나라도 값이 있는 가장 최근 연간 확정 행."""
@@ -241,8 +246,82 @@ def load_fi(fi_root: Path, view: DayView) -> FiData:
         fi_root, "fi_prices", bid, columns=("ticker", "close"), where=f"date = DATE '{d}'")}
     flow_last = {str(r["ticker"]): iso(r["last_date"]) for r in read_fi(
         fi_root, "fi_flows", bid, select="ticker, max(date) AS last_date", tail="GROUP BY ticker")}
+    try:
+        ctrl = read_fi(fi_root, "fi_consensus_annual", bid,
+                       columns=("ticker", "period", "data_type", "ni", "fetched_date"))
+    except (DeliverError, duckdb.Error) as e:
+        # 표가 없는 옛 fi 판 · 깨진 파일 — 엑셀은 그대로, 확정 지배 순이익 칸만 추정치(회색 E) · 빈칸
+        # (연결 값으로 대신 안 함)
+        log.warning("Earnings 순이익 — fi_consensus_annual 을 읽지 못해 확정 지배 순이익이 없다"
+                    "(데이터 %s): %s", bid, e)
+        ctrl = []
+    ni_actual: dict[str, dict[str, float]] = {}
+    ni_fetched: dict[str, date] = {}
+    for r in ctrl:
+        t, fd = str(r["ticker"]), r["fetched_date"]
+        if isinstance(fd, date):
+            ni_fetched[t] = max(fd, ni_fetched.get(t, fd))
+        if r["data_type"] == "A" and (v := _num(r["ni"])) is not None:
+            ni_actual.setdefault(t, {})[str(r["period"])] = v
     return FiData(close=close, fins=_group(read_fi(fi_root, "fi_fin_summary", bid)),
-                  cons=_group(read_fi(fi_root, "fi_consensus", bid)), flow_last=flow_last)
+                  cons=_group(read_fi(fi_root, "fi_consensus", bid)), flow_last=flow_last,
+                  ni_actual=ni_actual, ni_fetched=ni_fetched)
+
+
+# Y−2 확정 지배 순이익을 읽은 종목이 모집단의 이 몫보다 적으면 경고(10-14 실측 869종목 중 864 ≈ 99%)
+NI_Y2_MIN_SHARE = 0.8
+
+
+def load_ni_y2(src: Sources, view: DayView, fi: FiData) -> None:
+    """Y−2 확정 지배주주 순이익을 `fi.ni_actual` 에 더한다(그 기 값이 이미 있으면 그대로) — Earnings
+    순이익 Y−1 YoY 의 비교값. fi_consensus_annual 창(Y−1~Y+1) 밖이라 같은 표 계열 stage
+    `stg_consensus_annual` 을 읽는다 — 종목마다 fi_consensus_annual 이 고른 바로 그 수집
+    (`fi.ni_fetched` = fetched_date)의 확정('E' 아닌) 행, 같은 기가 둘이면 period_label 순 첫 행(fi
+    `consensus_annual_sql` 과 같은 고르기). 판 = fi 판 JSON `stage_builds` 고정(`open_sources`). 고정
+    판이 지워졌으면(keep=3 — 늦은 재생성) current 판에서 같은 수집의 행을 읽는다(한 수집의 행은 판이
+    바뀌어도 같다) — 경고 한 줄. current 판도 못 읽으면 경고만 — 그 YoY 칸이 빈다(연결 순이익으로
+    대신하지 않는다). 읽은 종목이 모집단의 `NI_Y2_MIN_SHARE` 보다 적으면 경고, 아니면 건수 info."""
+    year = int(view.date[:4]) - 2
+    table = "stg_consensus_annual"
+    try:
+        try:
+            rel = src.stage(table)
+        except SourceMissing as e:
+            if table not in src.stage_pins:
+                raise
+            log.warning("Earnings 순이익 — stage %s 고정 판 없음 — current 판의 같은 수집 행으로 "
+                        "대체(고정 판 %s): %s", table, src.stage_pins[table], e)
+            rel = replace(src, stage_pins={}, used={}).stage(table)
+        con = connect()
+        try:
+            con.execute("CREATE TEMP TABLE pick (ticker VARCHAR, fetched_date DATE)")
+            con.executemany("INSERT INTO pick VALUES (?, ?)", list(fi.ni_fetched.items()))
+            got = con.execute(f"""
+                SELECT ticker, period, ni FROM (
+                    SELECT a.ticker, a.period, a.ni, row_number() OVER (
+                             PARTITION BY a.ticker, a.period ORDER BY a.period_label) AS rn
+                    FROM {rel} a JOIN pick p
+                         ON p.ticker = a.ticker AND p.fetched_date = a.fetched_date
+                    WHERE substr(a.period, 1, 4) = '{year}' AND coalesce(a.period_kind, '') <> 'E')
+                WHERE rn = 1""").fetchall()
+        finally:
+            con.close()
+    except (SourceMissing, duckdb.Error) as e:
+        log.warning("Earnings 순이익 — %d 확정 지배 순이익(stage stg_consensus_annual)을 읽지 못해 "
+                    "%d YoY 칸을 비운다: %s", year, year + 1, e)
+        return
+    found: set[str] = set()
+    for t, period, ni in got:
+        if (v := num(ni)) is not None:
+            p = str(period)
+            fi.ni_actual.setdefault(str(t), {}).setdefault(f"{p[:4]}/{p[4:6]}", v)
+            found.add(str(t))
+    n, total = len(found & set(view.by_ticker)), len(view.by_ticker)
+    if n == 0 or n < NI_Y2_MIN_SHARE * total:
+        log.warning("Earnings 순이익 — %d 확정 지배 순이익(stage)을 모집단 %d/%d종목만 읽었다 — 나머지 "
+                    "%d YoY 칸은 빈다", year, n, total, year + 1)
+    else:
+        log.info("Earnings 순이익 — %d 확정 지배 순이익(stage) 모집단 %d/%d종목", year, n, total)
 
 
 # ── 공통 열 ──────────────────────────────────────────────────────────────────
@@ -562,11 +641,17 @@ NO_PREV = "전일 데이터 없음"
 class Candidates:
     """오늘 후보(순위순, 대분류마다 최대 k 까지 top_n 종목)와 전일 후보 대비 변화.
 
-    전일 후보 = 전일 순위에 같은 규칙(전일 대분류 = 오늘 값 — 전일 업종 스냅샷은 읽지 않는다).
+    전일 후보 = 전일 순위 **전체**(오늘 모집단에서 빠진 종목 포함 — 추정치 소멸 등)에 같은 규칙.
+    대분류는 오늘 모집단 종목이면 오늘 값, 빠진 종목이면 전일 판 fi_universe 값(`build_daily` 가
+    읽어 `prev_uni` 로 준다). 그 값을 모르면(전일 판 fi_universe 를 못 읽음 · 그 종목 행 없음) 경고
+    로그를 남기고 대분류 없음(한 묶음)으로 둔다. 오늘 모집단만으로 다시 뽑으면 빠진 종목 자리를 전일
+    후보가 아니던 종목이 채워 거짓 '이탈' · '진입' 누락이 생긴다(결함 3).
     변화: 진입(오늘 후보인데 전일 후보 아님) · 이탈(전일 후보인데 오늘 아님 — 오늘 순위가
     top_n 안이면 'k종목 초과' 로 밀린 이탈) · k종목 초과(순위 top_n 안인데 대분류가 이미
-    k종목, 전일도 후보 아님). 전일 순위가 하나도 없으면(첫 날 · 같은 basis 직전 성공 데이터 없음 ·
-    읽기 실패) 변화는 모두 비운다 — 30종목 전부 '진입'으로 보이면 틀린 말이다(코드 리뷰 I-2)."""
+    k종목, 전일도 후보 아님). 오늘 모집단 밖 전일 후보는 Score 에 행이 없어 `gone` 으로 내고 Meta
+    '전일 후보 중 오늘 모집단 밖' 줄에 적는다. 전일 순위가 하나도 없으면(첫 날 · 같은 basis 직전
+    성공 데이터 없음 · 읽기 실패) 변화는 모두 비운다 — 30종목 전부 '진입'으로 보이면 틀린
+    말이다(코드 리뷰 I-2)."""
 
     picked: frozenset[str]
     change: Mapping[str, str]
@@ -575,29 +660,52 @@ class Candidates:
     top_n: int
     k: int
     no_prev: bool = False           # 전일 순위가 없어 변화를 비웠다
+    gone: tuple[tuple[str, str], ...] = ()   # 오늘 모집단 밖 전일 후보 (코드, 이름) — 전일 순위순
 
     @property
     def full_text(self) -> str:
         return "·".join(self.full) or "없음"
 
+    @property
+    def gone_text(self) -> str:
+        """Meta '전일 후보 중 오늘 모집단 밖' 값 — '이름(코드)' 를 ' · ' 로(이름을 모르면 코드만)."""
+        if self.no_prev:
+            return NO_PREV
+        return " · ".join(f"{n}({c})" if n else c for c, n in self.gone) or "없음"
 
-def candidates(view: DayView, prev_rank: Mapping[str, int | None]) -> Candidates:
+
+def candidates(view: DayView, prev_rank: Mapping[str, int | None],
+               prev_uni: Mapping[str, Mapping[str, object]] | None = None) -> Candidates:
+    """`prev_uni` = 전일 판 fi_universe(종목 → 행) — 오늘 모집단에서 빠진 전일 순위 종목의 대분류 ·
+    이름. 빠진 종목이 없으면 읽지 않아도 된다."""
     out = view.output
     top_n, k = out.top_n, out.max_per_sector
     level = "sector_l2" if out.sector_level == "L2" else "sector_l1"
+    prev_uni = prev_uni or {}
 
     def sector_of(t: str) -> object:
         return view.by_ticker.get(t, {}).get(level)
+
+    def prev_sector_of(t: str) -> object:
+        return sector_of(t) if t in view.by_ticker else prev_uni.get(t, {}).get(level)
 
     picked = list(view.candidates)
     no_prev = not any(r is not None for r in prev_rank.values())
     if no_prev:
         log.warning("전일 데이터 없음(주 모델 %s · %s %s) — Score 변화 열을 비운다",
                     view.spec_id, view.date, view.run.basis)
-    order = sorted((t for t in (ticker_of(r) for r in view.rows) if prev_rank.get(t) is not None),
-                   key=lambda t: prev_rank[t] or 0)
+    # 전일 순위 전체 — 오늘 모집단 종목(행 순서) 뒤에 빠진 종목, 전일 순위순(같은 순위는 그 순서)
+    dropped = [t for t, rk in prev_rank.items() if rk is not None and t not in view.by_ticker]
+    order = sorted((t for t in [*(ticker_of(r) for r in view.rows), *dropped]
+                    if prev_rank.get(t) is not None), key=lambda t: prev_rank[t] or 0)
+    unknown = [t for t in dropped if prev_sector_of(t) is None]
+    if unknown:
+        log.warning("전일 후보 — 오늘 모집단 밖 %d종목의 전일 대분류를 몰라 대분류 없음으로 둔다: %s",
+                    len(unknown), ", ".join(unknown[:10]))
     before = {str(r["t"]) for r in cap_candidates([{"t": t} for t in order], top_n, k,
-                                                  lambda r: sector_of(str(r["t"])))}
+                                                  lambda r: prev_sector_of(str(r["t"])))}
+    gone = tuple((t, str(prev_uni.get(t, {}).get("name") or "")) for t in order
+                 if t in before and t not in view.by_ticker)
     now = set(picked)
     change: dict[str, str] = {}
     for r in () if no_prev else view.rows:          # 전일 순위가 없으면 변화를 매기지 않는다
@@ -618,7 +726,7 @@ def candidates(view: DayView, prev_rank: Mapping[str, int | None]) -> Candidates
         names.setdefault(sector_of(t), str(view.uni.get(t, {}).get(name_key) or sector_of(t)))
     full = tuple(names[s] for s in sorted(counts, key=str) if counts[s] >= k)
     cut = max((view.rank(t) or 0 for t in picked), default=None)
-    return Candidates(frozenset(picked), change, cut, full, top_n, k, no_prev)
+    return Candidates(frozenset(picked), change, cut, full, top_n, k, no_prev, gone)
 
 
 def candidate_rule_text(c: Candidates) -> str:
@@ -781,8 +889,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         Col("chg", "변화", "txt", None, fixed=chg_width, definition=(
             f"진입: 전일 후보 {top_n} 에 없던 오늘 후보 · 이탈: 전일 후보였는데 오늘 후보 아님 · "
             f"이탈({k}종목 초과): 순위는 {top_n} 안인데 대분류가 이미 {k}종목이라 밀려 이탈 · "
-            f"{k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과. 전일 후보 = 전일 순위에 같은 규칙 "
-            "적용(전일 대분류 = 오늘 값 가정). 노랑(전일 순위 칸) = 진입")),
+            f"{k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과. 전일 후보 = 전일 순위 전체에 같은 "
+            "규칙(오늘 모집단 밖 포함). 대분류: 모집단 안은 오늘 값, 밖은 전일 값. 모집단 밖 이탈은 "
+            "Meta '전일 후보 중 오늘 모집단 밖' 줄. 노랑(전일 순위 칸) = 진입")),
     ), gap=False))
 
     first_axis = f"{view.buckets[0]}_u" if view.buckets else None
@@ -849,7 +958,9 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
         "■ 이탈: 전일 후보였는데 오늘 후보 아님\n"
         f"■ 이탈({k}종목 초과): 순위는 {top_n} 안인데 대분류가 이미 {k}종목이라 밀려 이탈\n"
         f"■ {k}종목 초과: 순위 ≤ {top_n} 인데 대분류 {k} 초과(전일도 후보 아님)\n"
-        "전일 후보 = 전일 순위에 같은 규칙 적용(전일 대분류 = 오늘 값 가정)"
+        "전일 후보 = 전일 순위 전체에\n같은 규칙(오늘 모집단 밖 포함)\n"
+        "대분류: 모집단 안은 오늘 값,\n밖은 전일 값\n"
+        "모집단 밖 이탈은 Meta\n'전일 후보 중 오늘 모집단 밖' 줄"
         + (f"\n{NO_PREV}: 오늘은 변화 열을 비움" if cands.no_prev else ""))
     # 후보 · 변화 두 줄은 Meta 열 사전 끝에(그룹 이름 '후보')
     tail = [("Score", "후보", label, d) for _s, g, label, d in sh.dictionary
@@ -963,10 +1074,13 @@ def sheet_raw(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
 
 # ── 시트: Earnings ────────────────────────────────────────────────────────────
 METRICS = (("revenue", "매출"), ("op", "영업이익"), ("ni", "순이익"))
+NI_DEFINITION = "지배주주 순이익(컨센서스 표 기준 — 확정·추정 같은 정의)"
 N_QUARTERS = 5          # fi_fin_summary 는 분기 5기만 싣는다(계약 창)
 
 
 def _actual(fi: FiData, t: str, period: str, key: str) -> float | None:
+    if key == "ni":     # 확정 순이익 = 지배주주 순이익(컨센서스 연간 표) — 추정치와 같은 정의(결함 2)
+        return fi.ni_actual.get(t, {}).get(period)
     row = fi.annual_at(t, period)
     return None if row is None else _num(row.get(key))
 
@@ -1022,16 +1136,20 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
     for key, label in METRICS:
         cols: list[Col] = []
         prev_head = f"{year - 2}"
+        # 순이익은 확정 · 추정 모두 지배주주 순이익이라고 정의 글에 밝힌다(결함 2)
+        name = NI_DEFINITION if key == "ni" else label
+        unit = f"{name}, 억원." if key == "ni" else f"{label}(억원)"
+        actual_src = "컨센서스 연간 표 확정 행" if key == "ni" else "사업보고서"
         for slot, yr, head in years:
             what = (f"{yr}년에 끝나는 결산기(12월 결산 = {yr}/12, 9월 결산이면 {yr}/09) "
-                    "확정치(사업보고서). 확정치가 없으면 같은 결산기 추정치(컨센서스 cur)를 회색 'E' "
-                    "서식으로, 둘 다 없으면 빈칸" if slot == "a"
+                    f"확정치({actual_src}). 확정치가 없으면 같은 결산기 추정치(컨센서스 cur)를 회색 "
+                    "'E' 서식으로, 둘 다 없으면 빈칸" if slot == "a"
                     else f"{yr}년에 끝나는 결산기 추정치(컨센서스 cur)")
             cols += [
-                Col(f"{key}_{slot}", head, "num", "#,##0", definition=f"{label}(억원) {what}"),
+                Col(f"{key}_{slot}", head, "num", "#,##0", definition=f"{unit} {what}"),
                 Col(f"{key}_{slot}_y", yoy_label(prev_head, head), "chg", "#,##0.0", color=False,
                     fit_lines=True, definition=(
-                        f"{label} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 "
+                        f"{name} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 "
                         "추정)와 비교. 부호가 바뀌면 숫자 대신 흑자전환(−→+) · 적자전환(+→−) · "
                         "적자지속(−→−)"
                         + (". 옆 칸이 추정치(회색 'E')면 이 칸도 회색" if slot == "a" else ""))),
@@ -1503,6 +1621,8 @@ def meta_pairs(view: DayView, fi_meta: Mapping[str, object], fi: FiData | None,
              f"상위 {view.output.top_n} · {view.output.sector_level} 업종당 최대 "
              f"{view.output.max_per_sector}"),
         ]
+        if cands is not None:   # Score 에 행이 없어 '이탈'이 안 보이는 전일 후보(결함 3)
+            pairs.append(("전일 후보 중 오늘 모집단 밖", cands.gone_text))
     for sid in sorted(run.specs):
         s = run.specs[sid]
         pairs.append((f"데이터 검사 {sid}",
@@ -1621,8 +1741,20 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
             log.warning("전일 순위를 읽지 못했다(%s %s): %s", prev.date, prev.build_id, e)
             prev_rank = {}
 
+    # 오늘 모집단에서 빠진 전일 순위 종목의 대분류 · 이름 — 전일 판 fi_universe(같은 fi 루트)
+    prev_uni: dict[str, Row] = {}
+    dropped = [t for t, rk in prev_rank.items() if rk is not None and t not in view.by_ticker]
+    if prev is not None and dropped:
+        try:
+            prev_uni = {str(r["ticker"]): r for r in read_fi(
+                fi_root, "fi_universe", prev.fi_build_id,
+                columns=("ticker", "name", "sector_l1", "sector_l2"))}
+        except (DeliverError, duckdb.Error) as e:      # 엑셀은 그대로 — 그 종목만 대분류 없음
+            log.warning("전일 후보 — 전일 fi_universe 를 읽지 못했다(%s %s): %s",
+                        prev.date, prev.fi_build_id, e)
+
     trend = load_trend(model_root, run, view.spec_id, basis, trend_fallback_root, history_root)
-    cands = candidates(view, prev_rank)
+    cands = candidates(view, prev_rank, prev_uni)
 
     # 시트 순서 = 확정 양식(Score · Sector · Earnings · 새 시트 여섯 · Compare · Raw · Meta · trend).
     # Meta 열 사전은 옛 순서(Score · Raw · Earnings · Sector · Compare) 뒤에 Score 후보 두 줄, 그 뒤
@@ -1633,12 +1765,15 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands,
                                           grace_of(view, fi_root, trend, more_fi))
     sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
-    earnings_dict = sheet_earnings(wb, view, fi)
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
     if supplement and not fi_meta.get("wise_asof"):
         log.warning("주말 보강판 fi 판 JSON(%s _runs/%s_supplement.json, 판 %s)의 wise_asof 를 못 "
                     "읽었다 — Analyst 는 휴일 재수집 없이 엑셀 D 까지만 읽는다", fi_root,
                     ymd(run.date), run.fi_build_id)
+    # Earnings 순이익 Y−2 확정 지배 순이익 — 새 시트 원천 기록(`src.used`)과 따로 연다
+    load_ni_y2(replace(open_sources(fi_meta, equity_root, stage_root), label="Earnings 순이익"),
+               view, fi)
+    earnings_dict = sheet_earnings(wb, view, fi)
     src = open_sources(fi_meta, equity_root, stage_root)
     extra = sheets_extra.build(wb, src, XRefs.of(wb["Sector"]), date.fromisoformat(run.date),
                                extra_universe(view), index=len(wb.worksheets),

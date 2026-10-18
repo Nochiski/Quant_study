@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import cast
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 from deliver import __main__ as cli
@@ -34,6 +35,7 @@ from model import registry
 from model.contracts import FI_TABLES, score_columns
 from openpyxl import load_workbook
 from openpyxl.formatting.rule import ColorScale
+from stage import manifest
 
 W39 = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"]
 HOLIDAY = "2026-09-23"
@@ -228,7 +230,7 @@ def write_fi_day(fi_root: Path, day: str,
                  edit: Callable[[str, list[dict[str, object]]], None] | None = None) -> str:
     """합성 fi 판 하나. `edit(표 이름, 행 목록)` 으로 쓰기 직전에 표마다 행을 고칠 수 있다."""
     bid = f"m_{day.replace('-', '')}T010000Z"
-    uni, prices, adj, flows, fins, cons = [], [], [], [], [], []
+    uni, prices, adj, flows, fins, cons, cons_a = [], [], [], [], [], [], []
     for i in range(N + 1):
         t = tick(i)
         uni.append({"ticker": t, "date": day, "name": FORMULA_NAME if i == 7 else f"종목{i}",
@@ -261,6 +263,13 @@ def write_fi_day(fi_root: Path, day: str,
             fins.append({"ticker": t, "period": per, "period_type": "annual", "revenue": rev,
                          "op": op, "ni": ni, "roe": 5.0 + i, "roa": 2.0, "debt_ratio": 80.0,
                          "available_date": "2026-03-15" if per == "2025/12" else "2025-03-15"})
+            # 컨센서스 연간 표 확정 행 — 합성 세계는 지배 순이익 = 연결 순이익(두 정의가 갈리는 경우 ·
+            # 실제 창(Y−1~Y+1) 밖 Y−2 를 stage 에서 읽는 경우는 `_controlling_ni` 테스트)
+            cons_a.append({"ticker": t, "period": per, "data_type": "A", "revenue": rev, "op": op,
+                           "ni": ni, "fetched_date": "2026-09-24"})
+        for per, ni in (("2026/12", -3.0 if i == 2 else 70.0), ("2027/12", 80.0)):
+            cons_a.append({"ticker": t, "period": per, "data_type": "E", "revenue": 1200.0 + 10 * i,
+                           "op": 130.0 + i, "ni": ni, "fetched_date": "2026-09-24"})
         for k, per in enumerate(("2025/06", "2025/09", "2025/12", "2026/03", "2026/06")):
             op = 10.0 + k
             if i == 1:
@@ -279,7 +288,7 @@ def write_fi_day(fi_root: Path, day: str,
                          "fetched_date": "2026-09-24"})
     for table, rows in (("fi_universe", uni), ("fi_prices", prices), ("fi_adj_prices", adj),
                         ("fi_flows", flows), ("fi_fin_summary", fins), ("fi_consensus", cons),
-                        ("fi_credit", []), ("fi_consensus_annual", [])):
+                        ("fi_credit", []), ("fi_consensus_annual", cons_a)):
         if edit is not None:
             edit(table, rows)
         write_fi(fi_root, table, bid, rows)
@@ -539,8 +548,12 @@ def test_daily_earnings_real_years_quarters_and_sign_words(daily) -> None:
 def _roll_to_2027(table: str, rows: list[dict[str, object]]) -> None:
     """2027-01-04 판 합성 — 2026 사업보고서는 0번 종목만 나왔고 나머지는 공시 전이다.
     컨센서스는 2026·2027·2028 결산기다(11번 종목은 2026 추정치도 없다).
-    2026/09 분기는 0번 종목만 있다(분기 5기 창이라 0번의 2025/06 은 빠진다)."""
-    if table == "fi_fin_summary":
+    2026/09 분기는 0번 종목만 있다(분기 5기 창이라 0번의 2025/06 은 빠진다).
+    0번의 2026 확정 지배 순이익(컨센서스 연간 표)도 연결 순이익과 같은 값으로 나왔다."""
+    if table == "fi_consensus_annual":
+        rows.append({"ticker": tick(0), "period": "2026/12", "data_type": "A", "revenue": 1450.0,
+                     "op": 150.0, "ni": 75.0, "fetched_date": "2027-01-03"})
+    elif table == "fi_fin_summary":
         rows[:] = [r for r in rows if not (r["ticker"] == tick(0) and r["period"] == "2025/06")]
         rows += [{"ticker": tick(0), "period": "2026/12", "period_type": "annual",
                   "revenue": 1450.0, "op": 150.0, "ni": 75.0, "available_date": "2027-01-03"},
@@ -1853,6 +1866,228 @@ def test_daily_earnings_estimated_prior_year_yoy_is_grey_too(tmp_path: Path) -> 
     assert grey == est                                   # y-y 회색 = 'E' 칸 행 그대로
 
 
+# ── Earnings 순이익 = 지배주주 순이익(결함 2) ──────────────────────────────────────
+CTRL, CTRL_EST, CTRL_NONE = tick(20), tick(21), tick(22)
+STAGE_PIN = "b_pin_0001"
+NI_DEF = "지배주주 순이익(컨센서스 표 기준 — 확정·추정 같은 정의)"
+
+
+def _controlling_ni(table: str, rows: list[dict[str, object]]) -> None:
+    """LG에너지솔루션(373220, 10-14 판) 모양 — 연결 순이익(fi_fin_summary 60)은 흑자인데 지배 순이익
+    (컨센서스 연간 표 확정 −10,728.1 · 2026E −2,520.9)은 적자. 컨센서스 연간 표 창은 실제처럼
+    Y−1~Y+1 이라 2024 행이 없다(stage 에서 읽는다). CTRL_EST = 2025 확정 지배 행 없이 2025
+    추정치만, CTRL_NONE = 둘 다 없음(연결 순이익은 둘 다 있다)."""
+    if table == "fi_consensus_annual":
+        rows[:] = [r for r in rows if r["period"] != "2024/12" and not (
+            r["ticker"] in (CTRL_EST, CTRL_NONE) and r["period"] == "2025/12")]
+        for r in rows:
+            if r["ticker"] == CTRL and r["period"] == "2025/12":
+                r["ni"] = -10728.1
+    elif table == "fi_consensus":
+        for r in rows:
+            if r["ticker"] == CTRL and r["horizon"] == "cur" and r["target_period"] == "2026/12":
+                r["ni"] = -2520.9
+        rows.append({"ticker": CTRL_EST, "target_period": "2025/12", "horizon": "cur",
+                     "revenue": 1310.0, "op": 141.0, "ni": 55.0, "eps": 900.0, "per": 12.5,
+                     "pbr": 1.1, "n_analysts": 5, "obs_date": "2026-09-24",
+                     "fetched_date": "2026-09-24"})
+
+
+def write_stage_consensus_annual(root: Path, build_id: str,
+                                 rows: list[tuple[str, str, str, str, float]]) -> None:
+    """stage `stg_consensus_annual` 판 하나 — (종목, 수집일, 기 YYYYMM, 종류, 순이익). 나중에 쓴 판이
+    current."""
+    vdir = root / "stg_consensus_annual" / f"v={build_id}"
+    vdir.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.table({
+        "ticker": pa.array([r[0] for r in rows], pa.string()),
+        "fetched_date": pa.array([date.fromisoformat(r[1]) for r in rows], pa.date32()),
+        "period_label": pa.array([f"{r[2][:4]}.{r[2][4:]}({r[3]})" for r in rows], pa.string()),
+        "period": pa.array([r[2] for r in rows], pa.string()),
+        "period_kind": pa.array([r[3] for r in rows], pa.string()),
+        "ni": pa.array([r[4] for r in rows], pa.float64())}), vdir / "part0.parquet")
+    manifest.commit(root / "stg_consensus_annual", manifest.BuildRecord(
+        build_id=build_id, snapshot_id="", rules_version="v_test",
+        built_at_utc="2026-09-26T00:00:00+00:00", n_rows=len(rows), content_hash="test",
+        partitions=[{"path": f"v={build_id}", "n_rows": len(rows)}]))
+
+
+# 고정 판 행 — fi 가 고른 수집(09-24, fi_consensus_annual fetched_date)의 확정 행만 쓴다. 다른 수집
+# (asof 이하인 09-25 · 그 뒤 09-28)과 추정('E') 행은 쓰지 않는다
+PINNED_ROWS = [
+    (CTRL, "2026-09-24", "202412", "A", -10187.4),
+    (CTRL, "2026-09-24", "202412", "E", 777.0),
+    (CTRL, "2026-09-25", "202412", "A", 888.0),
+    (CTRL, "2026-09-28", "202412", "A", 999.0),
+    (CTRL_EST, "2026-09-24", "202412", "A", 50.0),
+    (CTRL_NONE, "2026-09-24", "202412", "A", 50.0),
+    (tick(10), "2026-09-24", "202412", "A", 50.0)]
+# 고정 판과 같은 수집일 값을 다르게 가진 current 판 — 고정 판을 읽는지 가린다
+REWRITTEN = [(CTRL, "2026-09-24", "202412", "A", 12345.0)]
+
+
+def _controlling_board(tmp_path: Path, pin: str,
+                       current: list[tuple[str, str, str, str, float]] | None = REWRITTEN) -> Path:
+    """`_controlling_ni` 판(FRI 아침) + stage 2024 확정 지배 순이익. fi 판 JSON 은 stage 판을 `pin` 에
+    고정한다. stage 판은 `PINNED_ROWS`(STAGE_PIN) 뒤에 `current` 행의 판이 current 로 선다 —
+    `current` 가 None 이면 stage 표 자체가 없다. 엑셀 경로를 돌려준다."""
+    model_root, fi_root, st = tmp_path / "model", tmp_path / "fi", tmp_path / "stage"
+    fi_bid = write_fi_day(fi_root, FRI, edit=_controlling_ni)
+    write_model_day(model_root, FRI, fi_bid)
+    if current is not None:
+        write_stage_consensus_annual(st, STAGE_PIN, PINNED_ROWS)
+        write_stage_consensus_annual(st, "b_new_0002", current)
+    runs = fi_root / "_runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "20260925_morning.json").write_text(json.dumps({
+        "build_id": fi_bid, "asof": FRI, "stage_root": str(st),
+        "stage_builds": {"stg_consensus_annual": pin}}), encoding="utf-8")
+    return build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root,
+                       out_root=tmp_path / "out").path
+
+
+def test_daily_earnings_net_income_is_controlling_in_every_cell(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """결함 2 — 순이익 행 모든 칸(2025 확정 · 2026E · 2027E · 각 YoY)이 지배주주 순이익 하나다.
+    2025 확정 = 같은 fi 판 컨센서스 연간 표 확정 행(연결 60 이 아니다), 2024 = 고정 stage 판
+    stg_consensus_annual 에서 fi 가 고른 수집(fetched_date)의 확정 행. 매출 · 영업이익 칸은 그대로
+    (연결 확정치). stage 에서 2024 를 읽은 종목이 모집단보다 크게 적으면 경고 한 줄."""
+    with caplog.at_level("WARNING"):
+        wb = load_workbook(_controlling_board(tmp_path, STAGE_PIN))
+    assert any("2024 확정 지배 순이익" in rec.getMessage() and "4/45" in rec.getMessage()
+               for rec in caplog.records if rec.levelname == "WARNING")
+    ws = wb["Earnings"]
+    rows = rows_by_code(ws)
+    r = rows[CTRL]
+    ni = {h: col_of(ws, h, 2) for h in ("2025", "YoY (2024-2025)", "2026E", "YoY (2025-2026E)",
+                                        "2027E", "YoY (2026E-2027E)")}
+    assert ws.cell(r, ni["2025"]).value == -10728.1
+    assert ws.cell(r, ni["2025"]).number_format == "#,##0"               # 확정치 — 'E' 아님
+    assert ws.cell(r, ni["YoY (2024-2025)"]).value == "적자지속"           # −10,187.4 → −10,728.1
+    assert ws.cell(r, ni["2026E"]).value == -2520.9
+    assert ws.cell(r, ni["YoY (2025-2026E)"]).value == "적자지속"          # 연결 기준이면 '적자전환'
+    assert ws.cell(r, ni["2027E"]).value == 80
+    assert ws.cell(r, ni["YoY (2026E-2027E)"]).value == "흑자전환"
+    # 매출 · 영업이익은 연결 확정치 그대로(20번 종목: 2024 → 2025 매출 1,200 → 1,300 · 영업이익 120 → 140)
+    assert ws.cell(r, col_of(ws, "2025", 0)).value == 1300
+    rev_y, op_y = (ws.cell(r, col_of(ws, "YoY (2024-2025)", k)).value for k in (0, 1))
+    assert rev_y == pytest.approx((1300 / 1200 - 1) * 100)
+    assert ws.cell(r, col_of(ws, "2025", 1)).value == 140
+    assert op_y == pytest.approx((140 / 120 - 1) * 100)
+    # 확정 지배 순이익이 없으면 같은 결산기 추정치(회색 'E') — 연결 순이익(60)으로 대신하지 않는다
+    est = ws.cell(rows[CTRL_EST], ni["2025"])
+    assert est.value == 55 and '"E"' in est.number_format and est.font.color.rgb.endswith("7F7F7F")
+    est_y = ws.cell(rows[CTRL_EST], ni["YoY (2024-2025)"])
+    assert est_y.value == pytest.approx((55 / 50 - 1) * 100)
+    assert est_y.font.color.rgb.endswith("7F7F7F")
+    assert ws.cell(rows[CTRL_NONE], ni["2025"]).value is None              # 둘 다 없으면 빈칸
+    assert ws.cell(rows[CTRL_NONE], ni["YoY (2024-2025)"]).value is None
+    assert ws.cell(rows[CTRL_NONE], ni["YoY (2025-2026E)"]).value is None
+    y10 = ws.cell(rows[tick(10)], ni["YoY (2024-2025)"]).value
+    assert y10 == pytest.approx((60 / 50 - 1) * 100)
+    # 정의 글(Meta 열 사전) — 순이익 열만 지배주주 순이익이라고 밝힌다
+    meta = wb["Meta"]
+    defs = {(meta.cell(rr, 1).value, meta.cell(rr, 2).value): str(meta.cell(rr, 3).value)
+            for rr in range(1, meta.max_row + 1)}
+    for head in ni:
+        assert NI_DEF in defs[("Earnings", f"순이익(억원 · YoY %) · {head}")], head
+    assert NI_DEF not in defs[("Earnings", "매출(억원 · YoY %) · 2025")]
+
+
+def test_daily_earnings_gc_pinned_two_years_ago_falls_back_to_current_same_fetch(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Y−2(2024) 고정 stage 판이 지워졌으면(keep=3 — 늦은 재생성) current 판에서 fi 가 고른 수집
+    (fetched_date)의 확정 행을 읽는다 — 그 수집의 행은 판이 바뀌어도 같아 고정 판과 같은 값이다.
+    2025 YoY 가 통째로 비지 않는다. 대체 경고는 Earnings 원천이라고 적는다(새 시트 원천이 아니다).
+    읽은 종목이 모집단만큼이면 경고 대신 건수 info."""
+    rest = [(t, "2026-09-24", "202412", "A", 50.0) for t in map(tick, range(N + 1))
+            if t not in {r[0] for r in PINNED_ROWS}]
+    history = [*PINNED_ROWS, *rest, (CTRL, "2026-09-29", "202412", "A", 777.0)]   # 그 뒤 수집
+    with caplog.at_level("INFO"):
+        wb = load_workbook(_controlling_board(tmp_path, "b_gone_0000", current=history))
+    ws = wb["Earnings"]
+    rows = rows_by_code(ws)
+    y25 = col_of(ws, "YoY (2024-2025)", 2)
+    assert ws.cell(rows[CTRL], y25).value == "적자지속"                   # −10,187.4 → −10,728.1
+    assert ws.cell(rows[tick(10)], y25).value == pytest.approx((60 / 50 - 1) * 100)
+    assert ws.cell(rows[CTRL_EST], y25).value == pytest.approx((55 / 50 - 1) * 100)
+    msgs = {rec.levelname: [] for rec in caplog.records}
+    for rec in caplog.records:
+        msgs[rec.levelname].append(rec.getMessage())
+    assert any("고정 판 없음 — current 판의 같은 수집 행으로 대체" in m for m in msgs["WARNING"])
+    assert any(m.startswith("Earnings 순이익 원천 stage stg_consensus_annual") for m in msgs["WARNING"])
+    assert not any(m.startswith("새 시트 원천 stage stg_consensus_annual") for m in msgs["WARNING"])
+    assert any("2024 확정 지배 순이익" in m and "45/45" in m for m in msgs.get("INFO", []))
+    assert not any("2024 확정 지배 순이익" in m for m in msgs["WARNING"])
+
+
+def test_daily_earnings_unreadable_two_years_ago_blanks_only_that_yoy(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Y−2(2024) 확정 지배 순이익을 고정 판 · current 판 모두 못 읽으면(stage 표 없음) 2025 YoY 칸만
+    빈다 — 연결 순이익으로 대신하지 않는다. 다른 칸은 그대로, 경고 로그."""
+    with caplog.at_level("WARNING"):
+        wb = load_workbook(_controlling_board(tmp_path, "b_gone_0000", current=None))
+    ws = wb["Earnings"]
+    rows = rows_by_code(ws)
+    y25 = col_of(ws, "YoY (2024-2025)", 2)
+    assert ws.cell(rows[CTRL], y25).value is None
+    assert ws.cell(rows[tick(10)], y25).value is None
+    assert ws.cell(rows[CTRL], col_of(ws, "2025", 2)).value == -10728.1
+    assert ws.cell(rows[CTRL], col_of(ws, "YoY (2025-2026E)", 2)).value == "적자지속"
+    assert ws.cell(rows[CTRL], col_of(ws, "YoY (2024-2025)", 1)).value == pytest.approx(
+        (140 / 120 - 1) * 100)
+    assert any("YoY 칸을 비운다" in rec.getMessage() for rec in caplog.records
+               if rec.levelname == "WARNING")
+
+
+@pytest.mark.parametrize("case", ["missing", "broken"])
+def test_daily_earnings_unreadable_consensus_annual_leaves_only_those_cells_blank(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture, case: str) -> None:
+    """fi_consensus_annual 을 못 읽으면(옛 fi 판 — 표 없음 · 깨진 파일) 엑셀은 그대로 나가고 순이익
+    확정 칸만 추정치 · 빈칸이다(연결 순이익으로 대신하지 않는다). 경고 로그."""
+    model_root, fi_root = tmp_path / "model", tmp_path / "fi"
+    fi_bid = write_fi_day(fi_root, FRI)
+    write_model_day(model_root, FRI, fi_bid)
+    part = fi_root / "fi_consensus_annual" / f"v={fi_bid}"
+    shutil.rmtree(part)
+    if case == "broken":
+        part.mkdir(parents=True)
+        (part / "part0.parquet").write_bytes(b"not a parquet file")
+    with caplog.at_level("WARNING"):
+        res = build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root,
+                          out_root=tmp_path / "out")
+    ws = load_workbook(res.path)["Earnings"]
+    r = rows_by_code(ws)[tick(10)]
+    assert ws.cell(r, col_of(ws, "2025", 2)).value is None        # 연결 60 이 아니다
+    assert ws.cell(r, col_of(ws, "2026E", 2)).value == 70
+    assert ws.cell(r, col_of(ws, "2025", 0)).value == 1200        # 매출은 그대로
+    assert any("fi_consensus_annual" in rec.getMessage() for rec in caplog.records
+               if rec.levelname == "WARNING")
+
+
+def test_daily_unreadable_previous_universe_keeps_the_excel(
+        world: dict[str, Path], tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """전일 판 fi_universe 를 못 읽으면(깨진 파일) 엑셀은 그대로 나가고 오늘 모집단 밖 전일 종목만
+    대분류 없음 · 이름 없이(코드만) 다룬다. 경고 로그."""
+    model, fi = tmp_path / "model", tmp_path / "fi"
+    shutil.copytree(world["model"], model)
+    shutil.copytree(world["fi"], fi)
+    fri, thu = find_run(model, FRI, "morning"), find_run(model, THU, "morning")
+    assert fri is not None and thu is not None
+    path = model / PRIMARY / f"v={fri.build_id}" / "scores.parquet"
+    tbl = pq.read_table(path)
+    pq.write_table(tbl.filter(pc.not_equal(tbl["ticker"], tick(0))), path)
+    for f in (fi / "fi_universe" / f"v={thu.fi_build_id}").glob("*.parquet"):
+        f.write_bytes(b"not a parquet file")
+    with caplog.at_level("WARNING"):
+        wb = load_workbook(build_daily(FRI, "morning", model_root=model, fi_root=fi,
+                                       out_root=tmp_path / "out").path)
+    assert dict(_meta_pairs(wb))["전일 후보 중 오늘 모집단 밖"] == tick(0)
+    msgs = [rec.getMessage() for rec in caplog.records if rec.levelname == "WARNING"]
+    assert any("전일 fi_universe" in m for m in msgs)
+    assert any("전일 대분류" in m for m in msgs)
+
+
 # ── scope 실물 모양 판(실제 model.build — 주 모델 scope@2.0) ─────────────────────
 # 연간 확정 PER·PBR·배당수익률이 없는 종목 → scope 밸류 버킷 결측(279570 모양)
 NO_VAL = "100007"
@@ -2379,6 +2614,65 @@ def test_candidates_and_change_follow_the_sector_cap_against_yesterday() -> None
     assert not c.no_prev and none.full_text == "없음"
 
 
+def test_previous_candidates_include_stocks_that_left_todays_population(
+        caplog: pytest.LogCaptureFixture) -> None:
+    """결함 3 — 전일 후보 = 전일 순위 **전체**(오늘 모집단에서 빠진 종목 포함)에 같은 규칙. 빠진
+    종목(g)의 대분류는 전일 판 fi_universe 값. 옛 코드는 오늘 모집단 종목만으로 다시 뽑아 g 자리를
+    전일 후보가 아니던 종목이 채웠다 — ① t5 거짓 '이탈' ② t2 '진입' 누락. 빠진 전일 후보는 Score 에
+    행이 없어 `gone`(Meta 줄)으로 낸다. 전일 대분류를 모르면 경고하고 대분류 없음으로 둔다."""
+    from deliver.excel_daily import candidates
+    sectors = {"t1": "A", "t2": "A", "t3": "B", "t4": "B", "t5": "C", "t6": "C"}
+    today = {"t1": 1, "t2": 2, "t3": 3, "t4": 4, "t5": 5, "t6": 6}
+    view = _CandView(today, sectors, top_n=4, k=2)
+    prev_uni = {"g": {"sector_l1": "A", "name": "빠진종목"}}
+    # ① 옛 코드: 전일 후보 t1 · t3 · t6 · t5(g 자리) → t5 거짓 '이탈'
+    prev1 = {"g": 1, "t1": 2, "t3": 3, "t6": 4, "t5": 5, "t2": 6, "t4": 7}
+    c = candidates(view, prev1, prev_uni)                         # type: ignore[arg-type]
+    assert dict(c.change) == {"t2": "진입", "t4": "진입", "t6": "이탈"}
+    assert c.gone == (("g", "빠진종목"),) and c.gone_text == "빠진종목(g)"
+    # ② 옛 코드: 전일 후보 t1 · t6 · t3 · t2(g 자리) → t2 '진입' 누락
+    prev2 = {"g": 1, "t1": 2, "t6": 3, "t3": 4, "t2": 5, "t5": 6, "t4": 7}
+    c = candidates(view, prev2, prev_uni)                         # type: ignore[arg-type]
+    assert dict(c.change) == {"t2": "진입", "t4": "진입", "t6": "이탈"}
+    # 전일 대분류를 모르면(전일 판 fi_universe 를 못 읽음) 대분류 없음 한 묶음 — 경고 한 줄
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        c = candidates(view, {"g": 1, "t1": 2, "t3": 3, "t6": 4, "t5": 5},  # type: ignore[arg-type]
+                       {})
+    assert c.gone == (("g", ""),) and c.gone_text == "g"
+    assert any("전일 대분류" in r.getMessage() for r in caplog.records)
+    # 빠진 종목이 없는 날 — 전일 판 fi_universe 를 넘겨도 결과가 같다
+    prev = {"t1": 1, "t3": 2, "t5": 3, "t2": 4, "t4": 5, "t6": 6}
+    same = candidates(view, prev, prev_uni)                       # type: ignore[arg-type]
+    assert same == candidates(view, prev)                          # type: ignore[arg-type]
+    assert same.gone == () and same.gone_text == "없음"
+
+
+def test_daily_previous_candidate_outside_todays_population(world: dict[str, Path],
+                                                            tmp_path: Path) -> None:
+    """결함 3 실판 경로 — 금요일 주 모델 모집단에서 0번(목요일 2위 · 후보)이 빠진 날. 목요일 후보
+    G45 9자리는 1 · 0 · 2~8번이라 9번은 '진입'이다(옛 코드는 0번 자리를 9번으로 채워 진입을 놓쳤다).
+    0번은 Score 에 행이 없어 Meta '전일 후보 중 오늘 모집단 밖' 줄에 이름(코드)으로 적는다. 대분류 ·
+    이름은 목요일 판 fi_universe 에서 읽는다."""
+    model = tmp_path / "model"
+    shutil.copytree(world["model"], model)
+    fri = find_run(model, FRI, "morning")
+    assert fri is not None
+    path = model / PRIMARY / f"v={fri.build_id}" / "scores.parquet"
+    tbl = pq.read_table(path)
+    pq.write_table(tbl.filter(pc.not_equal(tbl["ticker"], tick(0))), path)
+    wb = load_workbook(build_daily(FRI, "morning", model_root=model, fi_root=world["fi"],
+                                   out_root=tmp_path / "out").path)
+    ws = wb["Score"]
+    h, rows = header(ws), rows_by_code(ws)
+    assert tick(0) not in rows
+    chg = {t: ws.cell(r, h["변화"]).value for t, r in rows.items()}
+    assert chg[tick(9)] == "진입"
+    assert not [t for t, v in chg.items() if v is not None and str(v).startswith("이탈")]
+    meta = dict(_meta_pairs(wb))
+    assert meta["전일 후보 중 오늘 모집단 밖"] == f"종목0({tick(0)})"
+
+
 def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
     """Score 끝 '후보(대분류당 최대 9)' 블록 — 후보 = view 후보(30), 변화 열, 전일 순위 칸 노랑 =
     변화 '진입'(조건부 서식이라 정렬해도 따라간다), 커버리지 '신선' 은 옅은 회색."""
@@ -2402,12 +2696,22 @@ def test_daily_score_candidate_columns_and_entry_highlight(daily) -> None:
     assert rules[f"{prev}8:{prev}{7 + N}"].dxf.fill.fgColor.rgb == "FFFFFF00"
     assert rules[f"{cov}8:{cov}{7 + N}"].formula == [f'${cov}8="신선"']
     notes = {k: ws.cell(7, h[k]).comment for k in ("비고", "후보", "변화")}
+    meta = wb["Meta"]
     assert all(notes.values())
     assert "오늘 커트라인: 순위" in notes["후보"].text.replace("\n", " ")
-    meta = wb["Meta"]
+    # 변화 설명(결함 3) — 전일 후보는 전일 순위 전체, 대분류는 모집단 안 · 밖, 밖 이탈은 Meta 줄
+    memo = notes["변화"].text.replace("\n", " ").replace("\xa0", " ")
+    defn = next(str(meta.cell(r, 3).value) for r in range(1, meta.max_row + 1)
+                if meta.cell(r, 2).value == "후보 · 변화")
+    for text in (memo, defn):
+        assert "전일 순위 전체에 같은 규칙(오늘 모집단 밖 포함)" in text, text
+        assert "모집단 안은 오늘 값, 밖은 전일 값" in text, text
+        assert "모집단 밖 이탈은 Meta '전일 후보 중 오늘 모집단 밖' 줄" in text, text
+        assert "오늘 값 가정" not in text
     tail = [(meta.cell(r, 1).value, meta.cell(r, 2).value) for r in (meta.max_row - 1,
                                                                      meta.max_row)]
     assert tail == [("Score", "후보 · 후보"), ("Score", "후보 · 변화")]
+    assert dict(_meta_pairs(wb))["전일 후보 중 오늘 모집단 밖"] == "없음"
 
 
 def test_sector_week_and_quarter_returns_are_cap_weighted(scope_board) -> None:

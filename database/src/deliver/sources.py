@@ -2,8 +2,9 @@
 
 equity 표는 fi 판 JSON(`factor_inputs/_runs/<D>_<basis>.json`)의 `equity_builds` 에 있으면 그 판,
 없으면 그날 `MANIFEST.json` 의 current_build 를 읽는다(`equity.inputs.resolve` — 디렉토리 glob 은
-keep=3 으로 남은 옛 판을 함께 문다). stage 표는 늘 current_build. 읽은 판 id 는 `used` 에 모아
-Meta 에 적는다.
+keep=3 으로 남은 옛 판을 함께 문다). stage 표도 같은 규칙으로 `stage_builds` 에 있으면 그 판(fi 가
+읽는 컨센서스 · WISE 재무 표뿐 — 새 시트가 읽는 stage 표는 없어 늘 current_build). 읽은 판 id 는
+`used` 에 모아 Meta 에 적는다.
 
 루트는 fi 판 JSON 의 `equity_root` · `stage_root` 가 기본이고, deliver CLI `--equity-root` ·
 `--stage-root` 로 덮는다(로컬 사본 대조 · 리허설).
@@ -43,7 +44,9 @@ class Sources:
     equity_root: Path | None
     stage_root: Path | None
     equity_pins: Mapping[str, str] = field(default_factory=dict)
+    stage_pins: Mapping[str, str] = field(default_factory=dict)
     used: dict[str, str] = field(default_factory=dict)      # '층/표' → 판 id
+    label: str = "새 시트"                                   # 로그에 적는 읽는 쪽 이름
     # WISE 원천 상한 — fi 판 JSON 의 wise_asof(아침판 D · 장 마감 판 D' · 주말 보강판 W, N-45).
     # 없으면 엑셀 D 와 같다(`wise_upto`)
     wise_asof: date | None = None
@@ -60,7 +63,7 @@ class Sources:
         try:
             pb = inputs.resolve(Path(root), table, build_id)
         except (FileNotFoundError, KeyError, ValueError) as e:
-            log.warning("새 시트 원천 %s %s 를 못 읽었다 — %s", layer, table, e)
+            log.warning("%s 원천 %s %s 를 못 읽었다 — %s", self.label, layer, table, e)
             raise SourceMissing(f"{layer} {table} 데이터를 못 찾았다") from e
         files = [str(p) for p in pb.globs]
         if not files:
@@ -73,7 +76,7 @@ class Sources:
         return self._read("equity", self.equity_root, table, self.equity_pins.get(table))
 
     def stage(self, table: str) -> str:
-        return self._read("stage", self.stage_root, table, None)
+        return self._read("stage", self.stage_root, table, self.stage_pins.get(table))
 
     def used_text(self) -> str:
         """Meta 한 줄 — 층마다 '표=판 id'."""
@@ -88,11 +91,14 @@ class Sources:
 
 def open_sources(fi_meta: Mapping[str, object], equity_root: Path | None = None,
                  stage_root: Path | None = None) -> Sources:
-    """fi 판 JSON 에서 루트 · equity 판 고정표 · WISE 상한(wise_asof)을 읽는다. 인자로 준 루트가
-    이긴다."""
+    """fi 판 JSON 에서 루트 · equity · stage 판 고정표 · WISE 상한(wise_asof)을 읽는다. 인자로 준
+    루트가 이긴다."""
     def root(v: object) -> Path | None:
         return Path(v) if isinstance(v, str) and v else None
-    pins = fi_meta.get("equity_builds")
+
+    def pins(key: str) -> dict[str, str]:
+        got = fi_meta.get(key)
+        return {str(k): str(v) for k, v in got.items()} if isinstance(got, Mapping) else {}
     wise: date | None = None
     if isinstance(fi_meta.get("wise_asof"), str) and fi_meta["wise_asof"]:
         try:
@@ -103,8 +109,7 @@ def open_sources(fi_meta: Mapping[str, object], equity_root: Path | None = None,
                         fi_meta["wise_asof"])
     return Sources(equity_root or root(fi_meta.get("equity_root")),
                    stage_root or root(fi_meta.get("stage_root")),
-                   {str(k): str(v) for k, v in pins.items()} if isinstance(pins, Mapping) else {},
-                   wise_asof=wise)
+                   pins("equity_builds"), pins("stage_builds"), wise_asof=wise)
 
 
 def connect(temp_dir: Path | None = None) -> duckdb.DuckDBPyConnection:

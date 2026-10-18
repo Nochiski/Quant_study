@@ -22,6 +22,7 @@ import { Link, useNavigate, useRouterState, useSearch } from "../../../shared/li
 import { Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 import { ConstraintEditor, type Constraint } from "./constraint-editor";
+import "./new-experiment-page.css";
 
 // 화면의 분할은 고르는 기준까지 늘 값이 있다. 기준이 빠진 기록은 처음 값(`INITIAL_SPLIT`)의 기준으로 채운다.
 type Split = Required<ExperimentRequest["split"]>;
@@ -146,7 +147,7 @@ const NumberField = ({
 }) => {
   const id = useId();
   return (
-    <span>
+    <span className="experiment-form__field">
       <label htmlFor={id}>{t(label)}</label>{" "}
       <input className="ui-input"
         id={id}
@@ -170,6 +171,7 @@ const Form = ({
   initialConstraints?: Constraint[];
 }) => {
   const navigate = useNavigate();
+  const scrollHintId = useId();
   // 탐색하는 파라미터 → 값 입력. 원 실험의 값은 받은 그대로 둔다.
   const [entries, setEntries] = useState<Record<string, Entry>>(() =>
     Object.fromEntries(
@@ -241,7 +243,7 @@ const Form = ({
     ]),
   );
   return (
-    <div className="data-list-page__panel">
+    <div className="data-list-page__panel experiment-form">
       {/* 기반이 무엇인지 한 줄로 보인다 — 어떤 전략·리비전·연구 기간을 나눠 도는지(#402 리뷰 P2-2). */}
       {source?.kind === "saved_revision" && base.environment ? (
         <p>
@@ -253,7 +255,13 @@ const Form = ({
           })}
         </p>
       ) : null}
-      <div className="data-list-page__scroll">
+      <p className="experiment-form__scroll-hint" id={scrollHintId}>
+        {t("debugger.scroll.help")}
+      </p>
+      <div className="data-list-page__scroll"
+        role="region" tabIndex={0}
+        aria-label={t("experiments.new.space")} aria-describedby={scrollHintId}
+      >
         <table className="data-list-page__table">
           <caption>{t("experiments.new.space")}</caption>
           <thead>
@@ -309,21 +317,24 @@ const Form = ({
         constraints={constraints}
         onChange={setConstraints}
       />
-      <fieldset className="data-list-page__filter">
+      <fieldset className="data-list-page__filter experiment-form__split">
         <legend>{t("experiments.new.split")}</legend>
-        <select className="ui-select"
-          aria-label={t("experiments.new.mode")}
-          value={split.mode}
-          onChange={(event) =>
-            setSplit({ ...split, mode: event.target.value as Split["mode"] })
-          }
-        >
-          {Object.entries(MODES).map(([value, label]) => (
-            <option key={value} value={value}>
-              {t(label)}
-            </option>
-          ))}
-        </select>
+        <label className="experiment-form__field">
+          <span>{t("experiments.new.mode")}</span>
+          <select className="ui-select"
+            aria-label={t("experiments.new.mode")}
+            value={split.mode}
+            onChange={(event) =>
+              setSplit({ ...split, mode: event.target.value as Split["mode"] })
+            }
+          >
+            {Object.entries(MODES).map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
         <NumberField
           label="experiments.new.trainYears"
           value={split.train_years}
@@ -339,19 +350,22 @@ const Form = ({
           value={split.embargo_sessions}
           onChange={(value) => setSplit({ ...split, embargo_sessions: value })}
         />
-        <select className="ui-select"
-          aria-label={t("experiments.new.rule")}
-          value={split.selection_rule}
-          onChange={(event) =>
-            setSplit({ ...split, selection_rule: event.target.value as Rule })
-          }
-        >
-          {Object.entries(RULES).map(([value, label]) => (
-            <option key={value} value={value}>
-              {t(label)}
-            </option>
-          ))}
-        </select>
+        <label className="experiment-form__field experiment-form__field--rule">
+          <span>{t("experiments.new.rule")}</span>
+          <select className="ui-select"
+            aria-label={t("experiments.new.rule")}
+            value={split.selection_rule}
+            onChange={(event) =>
+              setSplit({ ...split, selection_rule: event.target.value as Rule })
+            }
+          >
+            {Object.entries(RULES).map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
       </fieldset>
       {preview.isError ? (
         <FailureNotice
@@ -381,7 +395,10 @@ const Form = ({
                 })
               : t("experiments.new.estimateUnknown")}
           </p>
-          <div className="data-list-page__scroll">
+          <div className="data-list-page__scroll"
+            role="region" tabIndex={0}
+            aria-label={t("experiments.new.windows")} aria-describedby={scrollHintId}
+          >
             <table className="data-list-page__table">
               <caption>{t("experiments.new.windows")}</caption>
               <thead>

@@ -180,7 +180,28 @@ const scenario = async (page: Page, info: TestInfo, width: number) => {
   await expect(
     page.getByRole("button", { name: "대기열에 넣기", exact: true }),
   ).toBeVisible();
+  const form = page.locator(".experiment-form");
+  if (width < 768) {
+    const bounds = await form.boundingBox();
+    expect(bounds).not.toBeNull();
+    for (const field of await form.locator("input, select, legend, .experiment-form__scroll-hint").all()) {
+      // 탐색표의 값 입력은 이름 있는 내부 가로 스크롤에서 읽는다.
+      if (await field.evaluate(element => element.closest(".data-list-page__scroll") !== null)) continue;
+      const box = await field.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(bounds!.x);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
+    }
+  }
+  const enqueue = page.getByRole("button", { name: "대기열에 넣기", exact: true });
+  await enqueue.scrollIntoViewIfNeeded();
+  await expect.poll(() => enqueue.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return hit !== null && element.contains(hit);
+  })).toBe(true);
   expect(submitted).toBe(0);
+  await form.screenshot({ path: info.outputPath(`experiment-full-form-${width}.png`) });
   await page.screenshot({
     path: info.outputPath(`experiment-seed-${width}.png`),
   });

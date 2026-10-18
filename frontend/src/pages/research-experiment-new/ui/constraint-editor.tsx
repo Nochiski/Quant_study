@@ -42,7 +42,7 @@ export const ConstraintEditor = ({
       ),
     );
   return (
-    <fieldset className="data-list-page__filter" aria-labelledby={legendId}>
+    <fieldset className="data-list-page__filter experiment-form__constraints" aria-labelledby={legendId}>
       <legend id={legendId}>{t("experiments.new.constraints")}</legend>
       {constraints.map((constraint, index) => {
         const right =
@@ -51,7 +51,7 @@ export const ConstraintEditor = ({
             : VALUE_CHOICE;
         const label = `${t("experiments.new.constraints")} ${index + 1}`;
         return (
-          <span key={index} role="group" aria-label={label}>
+          <span className="experiment-form__constraint" key={index} role="group" aria-label={label}>
             <select className="ui-select"
               aria-label={`${label}: ${t("experiments.new.constraintLeft")}`}
               value={constraint.left}

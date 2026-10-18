@@ -10,7 +10,9 @@ import {
   getExperiment,
   getExperimentParameterMap,
   listExperimentTrials,
+  type BacktestRunResult,
   type ExperimentSelection,
+  type RunValidationReport,
 } from "../../src/shared/api/generated";
 import {
   apiClient,
@@ -230,6 +232,15 @@ test.describe("후보 지도 실자료 기술 QA", () => {
     await page.screenshot({
       path: info.outputPath("real-candidate-recorded.png"),
     });
+    // 결과 페이지가 원래 읽는 응답을 보관하며 추가 계산이나 원천 데이터 조회를 하지 않는다.
+    const resultResponse = page.waitForResponse((response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === `/api/v1/backtests/${runId}/result`,
+    );
+    const validationResponse = page.waitForResponse((response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === `/api/v1/backtests/${runId}/validation-report`,
+    );
     await comparison
       .getByRole("link", {
         name: "선택한 실행의 결과 검증 카드 보기",
@@ -242,6 +253,26 @@ test.describe("후보 지도 실자료 기술 QA", () => {
       exact: true,
     });
     await expect(validation).toContainText("계열 시도 수 N");
+    const resultHttp = await resultResponse;
+    const validationHttp = await validationResponse;
+    expect(resultHttp.ok()).toBe(true);
+    expect(validationHttp.ok()).toBe(true);
+    const result = (await resultHttp.json()) as BacktestRunResult;
+    const validationReport = (await validationHttp.json()) as RunValidationReport;
+    const manifest = result.manifest;
+    expect(manifest.run_id).toBe(runId);
+    expect(manifest.data_snapshot_id).not.toBe("");
+    expect(manifest.run_fingerprint).not.toBe("");
+    expect(validationReport.run_id).toBe(manifest.run_id);
+    expect(validationReport.run_fingerprint).toBe(manifest.run_fingerprint);
+    expect(manifest.strategy_provenance).toMatchObject({
+      kind: "saved_revision",
+      strategy_id: saved.strategy_id,
+      revision: saved.revision,
+      spec_hash: saved.spec_hash,
+      source_hash: saved.source_hash,
+    });
+    expect(manifest.run_spec.parameter_values).toEqual(candidate!.trial.parameter_values);
     await validation.scrollIntoViewIfNeeded();
     await page.screenshot({
       path: info.outputPath("real-candidate-validation.png"),
@@ -259,6 +290,10 @@ test.describe("후보 지도 실자료 기술 QA", () => {
           run_id: runId,
           source_hash: saved.source_hash,
           environment: persisted.record.run.environment,
+          parameter_map: mapped,
+          trial_states: trials,
+          manifest,
+          validation_report: validationReport,
           selection: snapshot,
         },
         null,

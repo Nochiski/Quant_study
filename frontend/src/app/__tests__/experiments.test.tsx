@@ -116,6 +116,7 @@ const document = {
 };
 
 const server = setupServer(
+  http.get(`${API}/api/v1/experiments/:id/parameter-map`, () => HttpResponse.json({ cells: [], no_recommendation: "no_scored_cell" })),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json({ detail: { code: "x" } }, { status: 404 }),
   ),

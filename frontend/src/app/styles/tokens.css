@@ -30,6 +30,15 @@
   --accent-soft: #edf1ff;
   --accent-border: #c8d2fb;
 
+  /* 실험 내부의 서버 점수 상대색. 숫자는 --text로 읽으며 단계에 수익 판정 의미를 부여하지 않는다. */
+  --heat-1: #f1f5ff;
+  --heat-2: #e0e9fc;
+  --heat-3: #cbdaf8;
+  --heat-4: #b5caf3;
+  --heat-5: #9fbaed;
+  --heat-6: #87a7e5;
+  --heat-7: #6c91d4;
+
   /* status — every status also carries a text/glyph marker in the UI, never colour alone */
   --status-ok: #166a3f;
   --status-ok-soft: #e4f5ec;
@@ -141,6 +150,14 @@
   --accent-hover: #c5d0ff;
   --accent-soft: #24325c;
   --accent-border: #5d73ba;
+
+  --heat-1: #182230;
+  --heat-2: #1c2a3e;
+  --heat-3: #20324c;
+  --heat-4: #253a59;
+  --heat-5: #2a4266;
+  --heat-6: #2f4a72;
+  --heat-7: #34527e;
 
   /* status */
   --status-ok: #68d391;

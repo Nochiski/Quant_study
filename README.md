@@ -284,6 +284,9 @@ npm run dev
 실패하며 Python core로 조용히 대체하지 않는다.
 
 화면별 사용법과 오류 복구는 [사용자 매뉴얼](docs/manual/strategy-workbench/README.md)에 있다.
+파라미터 탐색 실험 상세에서는 [지도와 후보 선택](docs/planning/validation-lab/V5-04-candidate-map.md)으로
+칸과 주변 성과를 비교하고, 학습 창·이유를 명시해 선택 기록과 해당 실행의 결과 검증 카드를 읽는다.
+선택 당시 N·DSR은 현재 원장 조회값과 구분하며 추천을 실거래 판단으로 사용하지 않는다.
 매뉴얼 스크린샷은 두 서버를 격리 DB로 실행한 뒤 `frontend`에서
 `npm run docs:capture`로 실제 브라우저 시나리오를 다시 실행해 갱신한다.
 

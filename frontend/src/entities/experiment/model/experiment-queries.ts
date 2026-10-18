@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import {
   strategyWorkbenchApi,
   type ExperimentRequest,
+  type ExperimentSelectionRequest,
 } from "../../../shared/api";
 
 export const experimentsKey = () => ["experiments"] as const;
@@ -129,6 +130,15 @@ export const experimentParameterMapQuery = (experimentId: string) =>
     queryKey: [...experimentsKey(), experimentId, "parameter-map"],
     queryFn: () => strategyWorkbenchApi.getExperimentParameterMap(experimentId),
   });
+
+/** 선택 당시 통계는 서버의 불변 기록이며 현재 원장에서 화면이 다시 만들지 않는다. */
+export const useSelectExperimentCandidate = (experimentId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ExperimentSelectionRequest) => strategyWorkbenchApi.selectExperimentTrial(experimentId, request),
+    onSuccess: (selection) => queryClient.invalidateQueries({ queryKey: [...experimentsKey(), selection.experiment_id] }),
+  });
+};
 
 /**
  * 결과 실행에서 "튼튼한지 확인하기"로 만든 실험(최근에 만든 순, US-DM-11). 끝나지 않은 실험이 있으면 목록과

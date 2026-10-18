@@ -9,6 +9,7 @@ export {
   experimentTrialsQuery,
   experimentWalkForwardQuery,
   experimentParameterMapQuery,
+  useSelectExperimentCandidate,
   robustnessChecksQuery,
   useRobustnessPreview,
   useCreateRobustnessCheck,

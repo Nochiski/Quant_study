@@ -319,7 +319,7 @@ test(
 test(
   "US-DM-06 결과 파일을 읽을 수 없는 완료 실행은 결과 화면이 다시 실행하라고 말하고 결과를 다시 묻지 않는다",
   { tag: ["@story", "@US-DM-06"] },
-  async ({ page }) => {
+  async ({ page }, testInfo) => {
     const unreadable: BacktestRunState = {
       run_id: "run-dm06-unreadable",
       status: "completed",
@@ -330,13 +330,59 @@ test(
       created_at: "2026-09-02T00:00:00Z",
       updated_at: "2026-09-02T00:00:07Z",
     };
-    let resultReads = 0;
-    await page.route(`**/api/v1/backtests/${unreadable.run_id}`, (route) =>
-      route.fulfill({ json: unreadable }),
+    // 이 case의 초기 부팅 실패만 진단한다. 이벤트 수·문자열 길이를 제한하고 헤더·본문은 수집하지 않는다.
+    const pageErrors: string[] = [];
+    const requestFailures: Array<{
+      url: string;
+      resource: string;
+      error: string;
+    }> = [];
+    const consoleErrors: string[] = [];
+    const bounded = <T>(items: T[], value: T) => {
+      if (items.length < 20) items.push(value);
+    };
+    const localUrl = (value: string): string => {
+      const url = new URL(value);
+      return `${url.origin}${url.pathname}`.slice(0, 1000);
+    };
+    page.on("pageerror", (error) =>
+      bounded(pageErrors, (error.stack ?? error.message).slice(0, 2000)),
     );
+    page.on("requestfailed", (request) =>
+      bounded(requestFailures, {
+        url: localUrl(request.url()),
+        resource: request.resourceType(),
+        error: (request.failure()?.errorText ?? "").slice(0, 1000),
+      }),
+    );
+    page.on("console", (message) => {
+      if (message.type() === "error")
+        bounded(consoleErrors, message.text().slice(0, 2000));
+    });
+    const documentSnapshot = () =>
+      page.evaluate(() => {
+        const root = document.getElementById("root");
+        return {
+          url: `${location.origin}${location.pathname}`,
+          readyState: document.readyState,
+          rootExists: root !== null,
+          rootChildCount: root?.childElementCount ?? null,
+          rootText: root?.textContent?.slice(0, 2000) ?? null,
+        };
+      });
+    let statusReads = 0;
+    let requestReads = 0;
+    let resultReads = 0;
+    await page.route(`**/api/v1/backtests/${unreadable.run_id}`, (route) => {
+      statusReads++;
+      return route.fulfill({ json: unreadable });
+    });
     await page.route(
       `**/api/v1/backtests/${unreadable.run_id}/request`,
-      (route) => route.fulfill({ json: OLD_RUN_REQUEST }),
+      (route) => {
+        requestReads++;
+        return route.fulfill({ json: OLD_RUN_REQUEST });
+      },
     );
     await page.route(
       `**/api/v1/backtests/${unreadable.run_id}/result`,
@@ -358,13 +404,38 @@ test(
       `/research/backtests/${unreadable.run_id}`,
     );
     expect(response?.ok()).toBe(true);
+    const initialDocument = await documentSnapshot();
     // 일반 문구 대신 다시 불러와도 소용없고 같은 설정으로 다시 실행하라고 말한다. 서버 사유는 접힌 상세에만 있다.
     const failure = page
       .getByRole("alert")
       .filter({ hasText: "이 실행의 결과 파일을 읽을 수 없습니다." });
-    await expect(failure).toContainText(
-      "다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
-    );
+    try {
+      await expect(failure).toContainText(
+        "다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
+      );
+    } catch (error) {
+      const failedDocument = await documentSnapshot().catch((captureError) => ({
+        captureError: String(captureError).slice(0, 1000),
+      }));
+      await testInfo
+        .attach("unreadable-run-boot-diagnostics.json", {
+          contentType: "application/json",
+          body: JSON.stringify(
+            {
+              initialDocument,
+              failedDocument,
+              routeReads: { statusReads, requestReads, resultReads },
+              pageErrors,
+              requestFailures,
+              consoleErrors,
+            },
+            null,
+            2,
+          ),
+        })
+        .catch(() => undefined);
+      throw error;
+    }
     await expect(failure.getByRole("group")).toContainText(
       "run result file is missing",
     );

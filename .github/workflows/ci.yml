@@ -144,7 +144,9 @@ jobs:
     # Baselines use bundled exact-version webfonts; pin the Windows generation as well so the
     # host rasterizer does not silently move from one runner generation to another.
     runs-on: windows-2025
-    timeout-minutes: 20
+    # Windows 설치·빌드와 누적된 전체 브라우저 회귀를 함께 포함하는 job 예산이다.
+    # 20분 전체 제한에 의한 중단을 막고, 개별 test·expect·poll의 대기와 단언은 유지한다.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

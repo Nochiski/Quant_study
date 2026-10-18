@@ -83,5 +83,17 @@ panel 경계를 넘지 않는다. 원문·계산·API·Form state/history와 기
 실제 스크롤한 뒤 center hit를 검사한다. ROOT가 360px 전체 Form PNG를 직접 보고 안내·범례·입력·버튼의
 가림이 없고 표만 내부 스크롤임을 확인했다. 최종 frontend/E2E 타입·lint 및 하네스 **41개 스토리·64개 태그 e2e**도 확인했다.
 
-선택 파라미터 선행 #548은 main `28bafecf`로 머지됐으며(12개 검사 통과), 후보 지도 #549와 보고서 #550은
-각각 head `a397`·`95e`로 검토 중이다. 이 IDE 문서는 해당 스택의 CI·머지 완료를 선반영하지 않는다.
+선택 파라미터 #548은 main `28bafecf`, 후보 지도 #549는 main `45328d0b`로 머지됐다(각12개 검사 통과).
+보고서 #550은 head `7c1a7a5b`/base main으로 검토 중이며 이 IDE 문서는 미머지 스택의 완료를 선반영하지 않는다.
+
+### 승인된 Windows 기준선 갱신
+
+Windows run `39084732903`, source head `c9755d8b3cb9065e1aa5d4217dd4624ee4f556ea`의
+1440·1920 × light·dark `strategy-workbench-actual.png` 네 장을 ROOT가 actual/diff와 기존 expected를 직접 보고 승인했다.
+변경 범위는 좌상단의 수동 연구 badge를 native 연구 disclosure로 바꾼 표시이며 나머지 정렬은 유지됐다.
+승인한 Windows 원본 actual 네 장만 정본에 복사했고 원본·정본 SHA256을 대조했다.
+다른 PNG·제품 소스·단언·픽셀 허용치는 변경하지 않았다. 해당 CI는 시각 차이 네 건(light167px/dark258px, 두 폭 동일) 이후
+기존 sm.experiments 구간을 진행하다20분 job 제한으로 취소되어 나머지 과업의 통과나 전체 완료를 주장하지 않는다.
+적용 전 코드 `7e61ce6e`는 #550 알림 검증 정정을 포함하며 ROOT의 실제 `sm.experiments` 두 과업은
+**2 passed, 52.7초**로 확인했다(`browser-sm-notice-integrated-final.log`). 이 기준선 갱신과 부분 과업 통과는
+최종 새 head 전체 CI 성공을 선반영하지 않는다.

@@ -22,6 +22,7 @@ import {
   type ExperimentTrialState,
 } from "../../../entities/experiment";
 import { failureReason } from "../../../shared/api";
+import { ExperimentCandidateMap } from "../../../features/select-experiment-candidate";
 import { t, tDuration, tFill } from "../../../shared/config";
 import { Link, useParams } from "../../../shared/lib/router";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
@@ -269,6 +270,7 @@ export const ExperimentPage = () => {
         </span>
       </header>
       <div className="experiment-page__sections">
+        {record.design.kind === "capacity_sweep" ? null : <ExperimentCandidateMap experiment={experiment.data} trials={trials.data} />}
         <section className="data-list-page__panel">
           <h2
             id="experiment-trials-title"

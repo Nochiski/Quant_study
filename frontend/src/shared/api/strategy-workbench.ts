@@ -16,6 +16,7 @@ import {
   getExperimentRemainingTime,
   getExperimentWalkForward,
   getExperimentParameterMap,
+  selectExperimentTrial,
   previewRobustnessCheck,
   createRobustnessCheck,
   listRobustnessChecks,
@@ -128,6 +129,10 @@ import type {
   WalkForwardReport,
   ParameterMap,
   CellPlateau,
+  ExperimentSelection,
+  ExperimentSelectionRequest,
+  CellVerdict,
+  SearchAxis,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -567,6 +572,10 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getExperimentParameterMap");
   },
 
+  async selectExperimentTrial(experimentId: string, body: ExperimentSelectionRequest): Promise<ExperimentSelection> {
+    return unwrap(await selectExperimentTrial({ path: { experiment_id: experimentId }, body }), "selectExperimentTrial");
+  },
+
   /** 결과 실행의 "튼튼한지 확인하기" 미리 계산. 기본 설계는 backend 가 정한다(US-DM-11). */
   async previewRobustnessCheck(runId: string): Promise<RobustnessPreview> {
     const response = await previewRobustnessCheck({ path: { run_id: runId } });
@@ -963,4 +972,8 @@ export type {
   WalkForwardReport,
   ParameterMap,
   CellPlateau,
+  ExperimentSelection,
+  ExperimentSelectionRequest,
+  CellVerdict,
+  SearchAxis,
 };

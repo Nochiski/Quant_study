@@ -94,6 +94,10 @@ schema 1.2부터 시장·기간·유니버스·체결·비용은 전략 문서�
 현재 범위와 다음 연구의 기준은 [연구→자동매매 진행 현황](docs/planning/research-to-trading/README.md)과
 [S04 연속 평가 계약](docs/planning/research-to-trading/S04-walk-forward.md)을 따른다.
 
+홀드아웃 준비의 [V6-01 사전등록·모의 검증 core](docs/planning/validation-lab/V6-01-preregistration-simulation.md)는
+동결 후보·기준과 일회성 모의 claim을 영속화한다. 합성 지표로 절차를 확인하는 범위이며 실제 봉인
+개봉·실자료 후보 통과·개봉 UI는 제공하지 않는다.
+
 ## 구조
 
 ```

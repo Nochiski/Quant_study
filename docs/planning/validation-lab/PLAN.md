@@ -2,11 +2,11 @@
 plan_version: 1
 project: validation-lab
 project_status: IN_PROGRESS
-current_phase: V5
-current_pr: V5-02
-active_prs: [V5-02]
-parallel_window: [V5-02]
-last_updated: 2026-10-17T14:45:28+09:00
+current_phase: V5,V6
+current_pr: V5-02,V6-01
+active_prs: [V5-02, V6-01]
+parallel_window: [V5-02, V6-01]
+last_updated: 2026-10-18T08:50:14+09:00
 planned_prs: 28
 merged_prs: 22
 approved_prs: 22
@@ -24,12 +24,12 @@ progress_percent: 79
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `V5` |
-| Current/next PR | `V5-02` |
-| Active PR | `V5-02` |
+| Current phase | `V5,V6` |
+| Current/next PR | `V5-02,V6-01` |
+| Active PR | `V5-02, V6-01` |
 | Progress | `22 / 28 merged (79%)` |
 | Approved | `22 / 28` |
-| Aggregated at | `2026-10-17 14:45 KST` |
+| Aggregated at | `2026-10-18 08:50 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -37,6 +37,10 @@ progress_percent: 79
 기존 PowerShell wrapper는 호환용으로 유지한다.
 
 ## 현재 결정
+
+- 2026-10-18 사용자: 키움 연결 없이 가능한 작업을 우선한다. 이에 따라 리드는 이번 V6-01 구현 범위를
+  사전등록·합성 모의 절차 core로 정했다. 실제 개봉·실자료 관측·UI는 남기며 별도 simulation namespace의
+  기록은 실제 연구 권위가 아니다.
 
 - 2026-10-17 사용자: 앞으로 기능을 구현할 때마다 실데이터(로컬 원장, duckdb 어댑터)에 연결해 **우선** 확인한다.
   WORKFLOW 공통 gate에 "실데이터 확인" 단계를 더했고 절차·열람 기록은 [REAL-DATA-CHECKS.md](./REAL-DATA-CHECKS.md)다.
@@ -86,7 +90,7 @@ progress_percent: 79
 | V3 | Experiment backend, async queue, walk-forward | 5 | 5 | `MERGED` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 5 | `MERGED` |
 | V5 | Screens (after lang2 merge signal) | 7 | 3 | `IN_PROGRESS` |
-| V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
+| V6 | Holdout one-time opening | 2 | 0 | `IN_PROGRESS` |
 | **Total** |  | **28** | **22** | **79%** |
 <!-- PLAN:PHASES:END -->
 
@@ -150,10 +154,14 @@ progress_percent: 79
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V6-01` | 개봉 backend(사양 동결·기준 등록·개봉 원장) | V1-01, V1-05, V4-02 | `PLANNED` | — |
+| [ ] | `V6-01` | 개봉 backend(사양 동결·기준 등록·개봉 원장) | V1-01, V1-05, V4-02 | `IN_PROGRESS` | [사전등록·모의 core 계약](./V6-01-preregistration-simulation.md): 동결 등록·전역 simulation claim·기준 비교·SQLite 영속 구현. 실제 개봉 권한/원천 연결·HTTP/bootstrap·UI는 미완료. 합성 판정을 실제 후보 통과로 승격하지 않음 |
 | [ ] | `V6-02` | 개봉 화면 | V6-01, V5-02 | `PLANNED` | — |
 
 ## 현재 작업 Packet
+
+- V6-01 core: `feat/holdout-simulation-core`, base `4de3a50e`. [계약](./V6-01-preregistration-simulation.md)의
+  등록·모의 claim·재시작 소모 유지·기준 비교를 구현했다. 관련 회귀와 정적 검사는 로컬 근거이며
+  전체 backend 검증·공식 CI·머지 여부는 해당 검증 기록에서 확인한다. 실제 개봉·UI는 미완료다.
 
 - V5-02 첫 slice: `feat/run-validation-card`, base main `bc8f3030`.
   [계약·의도·잔여 범위](./V5-02-run-validation-card.md)를 정본으로 삼는다. 기존 계산 owner·불변

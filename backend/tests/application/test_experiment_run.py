@@ -18,6 +18,10 @@ from threading import Thread
 
 import pytest
 
+from strategy_workbench.adapters.outbound.research_sqlite._schema import (
+    V3_SCHEMA_OBJECTS,
+    V4_SCHEMA_OBJECTS,
+)
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     ResearchStorageError,
     SQLiteExperimentRepository,
@@ -984,6 +988,25 @@ def test_robustness_check_refuses_unknown_and_experiment_runs() -> None:
     assert trial.value.code == "experiment.robustness.not_single"
 
 
+def _write_legacy_research_file(
+    path: Path, version: int, objects: tuple[tuple[str, str, str], ...]
+) -> None:
+    """현행 fixture의 행만 정확한 옛 DDL에 옮긴다. 후속 판본 객체를 남기지 않는다."""
+    legacy = path.with_suffix(".legacy.sqlite3")
+    with sqlite3.connect(path) as source:
+        application_id = source.execute("PRAGMA application_id").fetchone()[0]
+    with sqlite3.connect(legacy) as connection:
+        connection.execute("ATTACH DATABASE ? AS fixture", (str(path),))
+        for _, _, ddl in objects:
+            connection.execute(ddl)
+        for kind, name, _ in objects:
+            if kind == "table":
+                connection.execute(f'INSERT INTO "{name}" SELECT * FROM fixture."{name}"')
+        connection.execute(f"PRAGMA application_id = {application_id}")
+        connection.execute(f"PRAGMA user_version = {version}")
+    legacy.replace(path)
+
+
 def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path) -> None:
     """#348 리뷰 P3-4: 판본 3 파일(조작 표 없음)을 열면 실험 행은 그대로이고 조작은 기본값이다."""
     runs = _FakeRuns()
@@ -993,13 +1016,7 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
         .create(_request())
         .record.experiment_id
     )
-    with sqlite3.connect(path) as connection:
-        connection.execute("DROP TABLE experiment_sources")
-        connection.execute("DROP TABLE experiment_control_changes")
-        connection.execute("DROP TABLE backtest_run_starts")
-        connection.execute("DROP TABLE experiment_window_picks")
-        connection.execute("DROP TABLE experiment_controls")
-        connection.execute("PRAGMA user_version = 3")
+    _write_legacy_research_file(path, 3, V3_SCHEMA_OBJECTS)
 
     reopened = _service(runs, repository=SQLiteExperimentRepository(path))
     before = reopened.get(experiment_id)
@@ -1384,11 +1401,7 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
         document = json.loads(stored)
         del document["design"]["measured"]
         connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(document),))
-        connection.execute("DROP TABLE experiment_sources")
-        connection.execute("DROP TABLE experiment_control_changes")
-        connection.execute("DROP TABLE backtest_run_starts")
-        connection.execute("DROP TABLE experiment_window_picks")
-        connection.execute("PRAGMA user_version = 4")
+    _write_legacy_research_file(path, 4, V4_SCHEMA_OBJECTS)
     runs.complete_all()
 
     reopened = _service(runs, repository=SQLiteExperimentRepository(path))

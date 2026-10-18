@@ -1,0 +1,31 @@
+from strategy_workbench.domain.backtest._holdout_registration import (
+    SIMULATION_NAMESPACE,
+    SIMULATION_WINDOW,
+    CriterionComparison,
+    CriterionOutcome,
+    FrozenHoldoutCandidate,
+    HoldoutCriterion,
+    HoldoutRegistration,
+    HoldoutSimulationClaim,
+    HoldoutSimulationObservation,
+    HoldoutSimulationResult,
+    SimulationClaimStatus,
+    SimulationVerdict,
+    evaluate_holdout_simulation,
+)
+
+__all__ = [
+    "SIMULATION_NAMESPACE",
+    "SIMULATION_WINDOW",
+    "CriterionComparison",
+    "CriterionOutcome",
+    "FrozenHoldoutCandidate",
+    "HoldoutCriterion",
+    "HoldoutRegistration",
+    "HoldoutSimulationClaim",
+    "HoldoutSimulationObservation",
+    "HoldoutSimulationResult",
+    "SimulationClaimStatus",
+    "SimulationVerdict",
+    "evaluate_holdout_simulation",
+]

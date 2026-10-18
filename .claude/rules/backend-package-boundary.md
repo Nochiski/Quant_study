@@ -88,6 +88,11 @@ bootstrap ─> application + adapters
   facade `DEPENDS_ON`에 `domain.factor`를 더했고, 레지스트리는 bootstrap이 주입한다. 팩터 수익률·회귀
   규칙은 `domain/analytics`가 소유하며 HTTP `GET /api/v1/backtests/{run_id}/factor-regression`이 그대로
   노출한다.
+- V6-01 모의 사전등록은 `domain/backtest`의 동결 등록·필수 기준 비교와
+  `application/holdout_registration`의 자체 source-pin·simulation-executor·ledger 포트가 소유한다.
+  다른 application 서비스를 직접 import하지 않는다. 기존 `research_sqlite`가 schema v9의
+  별도 simulation 등록·claim·결과 테이블과 commit을 맡는다. commit 성공 반환 뒤에만 executor를
+  호출하며 실제 원천 adapter·HTTP·bootstrap 연결은 없다. 기존 trial/N·blocked-attempt를 쓰지 않는다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - 연속 계좌 평가는 `application/continuous_account`가 자체 실험 출처·파이프라인·실행·이력
   포트를 소유하고, 기존 `application/backtest_run`의 outgoing 데이터 포트만 재사용한다.

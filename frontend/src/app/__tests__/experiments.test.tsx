@@ -13,6 +13,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { App } from "../app";
+import type { BacktestRunSpec } from "../../shared/api";
 
 // 실험 화면(검증 랩 V5-01, US-SM-14·15). 상태·진행 수·슬롯·우선순위 상한·조합 수·시도 수 변화는 backend
 // 응답이고, 화면은 그 값을 보이고 요청을 싣기만 한다.
@@ -34,7 +35,7 @@ const BASE = {
   environment: ENVIRONMENT,
   metric_windows: [
     {
-      scope: "out_of_sample",
+      scope: "out_of_sample" as const,
       start: "2025-01-02",
       end: "2025-12-30",
       label: "OOS",
@@ -251,8 +252,9 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-const mount = (initial: string) => {
+const mount = (initial: string, seed?: BacktestRunSpec) => {
   const history = createMemoryHistory({ initialEntries: [initial] });
+  if (seed !== undefined) history.replace(initial, { experimentSeed: seed });
   render(
     <App
       history={history}
@@ -580,6 +582,31 @@ describe("experiments", () => {
     expect(
       screen.getByRole("link", { name: "백테스트 이력으로" }),
     ).toHaveAttribute("href", "/research/backtests");
+  });
+
+  it("IDE에서 보낸 현재 환경·선택값은 기존 실험 Form에서 명시 접수 전까지 보존한다", async () => {
+    usePreview();
+    let created = 0;
+    server.use(http.post(`${API}/api/v1/experiments`, () => {
+      created++;
+      return HttpResponse.json(experiment("e-new", "queued"), { status: 202 });
+    }));
+    const seed = { ...BASE, parameter_values: { top_n: 20 }, environment: { ...ENVIRONMENT, start: "2022-01-03" } };
+    mount("/research/experiments/new", seed);
+    await screen.findByRole("status", { name: "시작 전 확인" });
+    expect(screen.getByText(/편집기에서 보낸 저장 리비전/u)).toBeVisible();
+    expect(previews.at(-1)).toMatchObject({ run: { ...seed, metric_windows: [] } });
+    expect(created).toBe(0);
+    await userEvent.setup().click(screen.getByRole("button", { name: "대기열에 넣기" }));
+    await waitFor(() => expect(created).toBe(1));
+  });
+
+  it("명시 run URL은 남아 있는 IDE seed보다 우선한다", async () => {
+    usePreview();
+    mount("/research/experiments/new?run=run-1", { ...BASE, parameter_values: { top_n: 20 } });
+    await screen.findByRole("status", { name: "시작 전 확인" });
+    expect(previews.at(-1)).toMatchObject({ run: { ...BASE, metric_windows: [] } });
+    expect(screen.queryByText(/편집기에서 보낸 저장 리비전/u)).not.toBeInTheDocument();
   });
 
   it("previews a new experiment from a run and queues it", async () => {

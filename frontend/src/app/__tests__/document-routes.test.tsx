@@ -438,6 +438,9 @@ const server = setupServer(
   http.get(`${API}/api/v1/strategies/:strategyId/revisions`, () =>
     HttpResponse.json({ items: [], offset: 0, limit: 50, total: 0 }),
   ),
+  http.get(`${API}/api/v1/strategies/:strategyId/trials`, ({ params }) =>
+    HttpResponse.json({ lineage_id: params.strategyId, merged_lineage_ids: [], trial_count: 3, trials: [], blocked: [] }),
+  ),
   http.get(`${API}/api/v1/equity/catalog`, () =>
     HttpResponse.json({
       total: 0,
@@ -1128,6 +1131,57 @@ describe("document routes (P2-04)", () => {
     expect(
       screen.queryByRole("button", { name: /현재 커서에 삽입/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("IDE 연구는 원장 N을 읽고 dirty 원문을 옛 저장본으로 보내지 않는다", async () => {
+    mount("/research/strategies/s1/revisions/2?view=yaml");
+    const view = await editor();
+    const summary = await screen.findByText("연구", { selector: "summary" });
+    await waitFor(() => expect(summary).toHaveTextContent("N 3"));
+    await userEvent.setup().click(summary);
+    expect(screen.getByText(/현재 계열 시도 수 N=3/u)).toBeVisible();
+    expect(screen.getByRole("link", { name: "전략 목록에서 시도 원장 찾기" })).toHaveAttribute("href", "/research/strategies");
+    const changed = `${STORED}\n# 미저장 연구\n`;
+    replaceText(view, changed);
+    expect(await screen.findByText(/현재 원문을 리비전으로 저장한 뒤 보내세요/u)).toBeVisible();
+    expect(screen.getByRole("button", { name: "실험으로 보내기" })).toBeDisabled();
+    expect(view.state.doc.toString()).toBe(changed);
+  });
+
+  it("연구 메뉴 안의 Escape만 소비하고 닫은 뒤 원문을 보존하며 summary에 초점을 돌린다", async () => {
+    mount("/research/strategies/s1/revisions/2?view=yaml");
+    const view = await editor();
+    await openOutline();
+    const summary = await screen.findByText("연구", { selector: "summary" });
+    const user = userEvent.setup();
+    await user.click(summary);
+    const link = screen.getByRole("link", { name: "전략 목록에서 시도 원장 찾기" });
+    await user.tab();
+    expect(link).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(link).not.toBeVisible();
+    expect(summary).toHaveFocus();
+    expect(screen.getByRole("navigation", { name: "전략 구조" })).toBeVisible();
+    expect(view.state.doc.toString()).toBe(STORED);
+    await user.click(summary);
+    expect(link).toBeVisible();
+  });
+
+  it("IDE 계열 조회 실패를 0으로 바꾸지 않고 명시 재조회로 복구한다", async () => {
+    let reads = 0;
+    server.use(http.get(`${API}/api/v1/strategies/:strategyId/trials`, () =>
+      ++reads === 1 ? HttpResponse.json({}, { status: 503 }) : HttpResponse.json({ lineage_id: "s1", merged_lineage_ids: [], trial_count: 7, trials: [], blocked: [] }),
+    ));
+    mount("/research/strategies/s1/revisions/2?view=yaml");
+    const view = await editor();
+    const summary = await screen.findByText("연구", { selector: "summary" });
+    await userEvent.setup().click(summary);
+    await screen.findByRole("button", { name: "계열 다시 조회" });
+    expect(summary).toHaveTextContent("N —");
+    await userEvent.setup().click(screen.getByRole("button", { name: "계열 다시 조회" }));
+    await waitFor(() => expect(summary).toHaveTextContent("N 7"));
+    expect(view.state.doc.toString()).toBe(STORED);
+    expect(reads).toBe(2);
   });
 
   it("loads the exact stored source of a revision into the editor as the draft base", async () => {

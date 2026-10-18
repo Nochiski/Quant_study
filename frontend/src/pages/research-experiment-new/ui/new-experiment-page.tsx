@@ -18,7 +18,7 @@ import {
 } from "../../../entities/strategy";
 import { failureReason } from "../../../shared/api";
 import { t, tDuration, tFill, type MessageKey } from "../../../shared/config";
-import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
+import { Link, useNavigate, useRouterState, useSearch } from "../../../shared/lib/router";
 import { Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 import { ConstraintEditor, type Constraint } from "./constraint-editor";
@@ -441,6 +441,9 @@ const Form = ({
  */
 export const NewExperimentPage = () => {
   const { run, from } = useSearch({ from: "/research/experiments/new" });
+  const historySeed = useRouterState({ select: state => state.location.state.experimentSeed });
+  // URL로 지정한 기반을 우선하며 IDE 입력은 run/from이 없는 명시적 이동에서만 쓴다.
+  const seed = run === undefined && from === undefined ? historySeed : undefined;
   const request = useBacktestRequest(run ?? null);
   const origin = useQuery({
     ...experimentQuery(from ?? ""),
@@ -458,7 +461,12 @@ export const NewExperimentPage = () => {
           <p>{t("experiments.new.description")}</p>
         </div>
       </header>
-      {run === undefined && from === undefined ? (
+      {seed !== undefined ? (
+        <>
+          <p>{t("research.ide.received")}</p>
+          <Form base={seed} initialSearch={{}} initialSplit={INITIAL_SPLIT} />
+        </>
+      ) : run === undefined && from === undefined ? (
         <p className="page-state">
           {t("experiments.new.noBase")}{" "}
           <Link to="/research/backtests" search={{}}>

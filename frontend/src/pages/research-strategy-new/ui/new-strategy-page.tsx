@@ -9,6 +9,7 @@ import {
   DocumentHistoryActions,
   DocumentStatus,
   DocumentToolbar,
+  DocumentResearchActions,
   FactorGraphPanel,
   RecipePanel,
   factorIndexAtPointer,
@@ -298,6 +299,13 @@ export const NewStrategyPage = () => {
         title={t("page.newStrategy.title")}
         versionLabel={t("page.newStrategy.draft")}
         badges={<Badge tone="info">{t("page.newStrategy.draft")}</Badge>}
+        research={({ openEditor }) => <DocumentResearchActions
+          state={document} request={backtest.request}
+          requiresUpgrade={documentUpgrade.availability.kind !== "none"}
+          recipeOpen={view === "graph" && search.recipe === true}
+          onToggleRecipe={() => { const closing = view === "graph" && search.recipe === true; openEditor(); void navigate({ to: ROUTE, search: { ...search, view: "graph", recipe: closing ? undefined : true, path: closing ? undefined : `/factors/${factorIndexAtPointer(search.path) ?? 0}/graph` }, replace: true, resetScroll: false }); }}
+          onSend={(request) => void navigate({ to: "/research/experiments/new", search: {}, state: { experimentSeed: request } })}
+        />}
         meta={{
           schemaVersion: current?.schemaVersion ?? null,
           sourceHash: current?.sourceHash ?? null,

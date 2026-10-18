@@ -100,6 +100,10 @@ schema 1.2부터 시장·기간·유니버스·체결·비용은 전략 문서�
 
 ## 구조
 
+편집기 제목 옆 **연구**에서 계열 시도 수를 확인하고, 저장한 현재 원문·선택 파라미터·현재 환경을
+기존 실험 만들기로 보내거나 레시피 탐색을 전환한다. 미저장 변경을 옛 저장본으로 대신 보내지 않는다.
+범위와 검증 기준은 [V5-07 연구 진입점](docs/planning/validation-lab/V5-07-ide-research.md)을 따른다.
+
 ```
 backend/
 ├─ src/backtest_engine/     # Python API/reference engine: types, engine, ports, adapters, data

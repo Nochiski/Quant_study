@@ -14,6 +14,7 @@ import {
   DocumentHistoryActions,
   DocumentStatus,
   DocumentToolbar,
+  DocumentResearchActions,
   FactorGraphPanel,
   RecipePanel,
   factorIndexAtPointer,
@@ -307,6 +308,15 @@ export const StrategyRevisionPage = () => {
       <StrategyIde
         title={title}
         versionLabel={`v${stored.revision}`}
+        research={({ openEditor }) => <DocumentResearchActions
+          state={document} request={backtest.request}
+          requiresUpgrade={documentUpgrade.availability.kind !== "none"}
+          parametersReady={runParameters.ready}
+          selectedParameters={runParameters.state === "selected"}
+          recipeOpen={view === "graph" && search.recipe === true}
+          onToggleRecipe={() => { const closing = view === "graph" && search.recipe === true; openEditor(); void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, view: "graph", recipe: closing ? undefined : true, path: closing ? undefined : `/factors/${factorIndexAtPointer(search.path) ?? 0}/graph` }, replace: true, resetScroll: false }); }}
+          onSend={(request) => void navigate({ to: "/research/experiments/new", search: {}, state: { experimentSeed: request } })}
+        />}
         badges={
           <>
             <Badge tone="accent">

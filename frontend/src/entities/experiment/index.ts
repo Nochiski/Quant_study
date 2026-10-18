@@ -45,3 +45,4 @@ export type {
 export { continuousAccountErrorKey } from "./model/continuous-account-copy";
 
 export { capacityReportQuery, useCapacityPreview, useCreateCapacity } from "./model/capacity-queries";
+export type { IdeExperimentSeed } from "./model/ide-seed";

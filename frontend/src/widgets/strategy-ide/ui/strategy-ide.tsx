@@ -47,6 +47,8 @@ export type StrategyIdeProps = {
   versionLabel: string;
   /** Header badges next to the title (draft/revision markers). */
   badges?: ReactNode;
+  /** 현재 문서의 연구 진입점. 요청·계열 판정은 주입한 기능이 소유한다. */
+  research?: ReactNode | ((controls: { openEditor: () => void }) => ReactNode);
   /** Meta line under the title: author, created, updated. Missing values render as "—". */
   meta?: {
     author?: string;
@@ -193,6 +195,7 @@ export const StrategyIde = ({
   title,
   versionLabel,
   badges,
+  research,
   meta,
   saveStatus,
   saveStatusSummary,
@@ -740,7 +743,7 @@ export const StrategyIde = ({
             <h1>{title}</h1>
             {badges ?? <Badge tone="neutral">{versionLabel}</Badge>}
           </div>
-          <Badge tone="accent">{t("nav.research")}</Badge>
+          {research === undefined ? <Badge tone="accent">{t("nav.research")}</Badge> : typeof research === "function" ? research({ openEditor: () => close(["debuggerOpen"]) }) : research}
         </nav>
         {saveStatusSummary ? <span className="ide__save-error" role="status">{saveStatusSummary}</span> : null}
         <div className="ide__topbar-actions">

@@ -13,12 +13,8 @@ export const RunParameterSelection = ({ selection, clear }: {
   if (selection.state === "default") return null;
   const canRetry = selection.error !== null && (!(selection.error instanceof ApiRequestError) || selection.error.status === 0 || selection.error.status >= 500);
   return <section className="run-parameter-selection" aria-label={t("backtest.parameters.title")}>
-    <header>
-      <strong>{t("backtest.parameters.title")}</strong>
-      <Button aria-label={t("backtest.parameters.clear")} onClick={clear}>{t("backtest.parameters.clearShort")}</Button>
-    </header>
     <details className="ui-disclosure">
-      <summary>{t("backtest.parameters.basis")}</summary>
+      <summary aria-label={`${t("backtest.parameters.summary")}: ${t("backtest.parameters.basis")}`}>{t("backtest.parameters.summary")}</summary>
       <div tabIndex={0} role="region" aria-label={t("backtest.parameters.basis")}>
         <p>{t("backtest.parameters.source")}: <code>{selection.runId}</code></p>
         <p>{t("backtest.parameters.scope")}</p>
@@ -28,6 +24,7 @@ export const RunParameterSelection = ({ selection, clear }: {
           : null}
       </div>
     </details>
+    <Button className="run-parameter-selection__clear" aria-label={t("backtest.parameters.clear")} onClick={clear}>{t("backtest.parameters.clearShort")}</Button>
     {selection.state === "loading" ? <p role="status">{t("backtest.parameters.loading")}</p> : null}
     {selection.state === "mismatch" ? <p role="alert">{t("backtest.parameters.mismatch")}</p> : null}
     {selection.state === "error" ? <FailureNotice

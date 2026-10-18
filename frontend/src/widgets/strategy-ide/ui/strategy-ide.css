@@ -234,6 +234,13 @@
   font-weight: var(--font-weight-heading);
 }
 
+@media (max-width: 719px) {
+  .ide__debugger > .ide__panel-header {
+    min-height: var(--control-height-compact);
+    padding-block: var(--space-1);
+  }
+}
+
 .ide__editor-tabs {
   display: flex;
   flex: none;

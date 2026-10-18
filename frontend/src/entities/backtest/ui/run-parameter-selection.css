@@ -1,6 +1,9 @@
 .run-parameter-selection {
   min-width: 0;
-  padding: var(--space-3);
+  display: grid;
+  padding: var(--space-1) var(--space-2);
+  --control-size: var(--control-height-compact);
+  --control-font-size: var(--text-size-label);
   border: 1px solid var(--border);
   border-radius: var(--radius-medium);
   background: var(--surface-raised);
@@ -8,12 +11,28 @@
   overflow-wrap: anywhere;
 }
 
-.run-parameter-selection header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+.run-parameter-selection > details {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.run-parameter-selection > details > summary {
+  padding-inline-end: calc(40% + var(--space-2));
+  font-weight: var(--font-weight-strong);
+}
+
+.run-parameter-selection__clear {
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: end;
+  max-width: 40%;
+  padding: var(--space-1) var(--space-2);
+  white-space: nowrap;
+}
+
+.run-parameter-selection > p,
+.run-parameter-selection > .ui-failure {
+  grid-column: 1;
 }
 
 .run-parameter-selection p { margin-block: var(--space-2); }

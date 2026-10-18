@@ -37,7 +37,9 @@ describe("선택 실행의 파라미터 출처", () => {
   it("서버의 0·false·문자열을 보존하고 펼친 출처에서 읽는다", async () => {
     mount("run-a");
     await waitFor(() => expect(screen.getByRole("button", { name: "백테스트" })).toBeEnabled());
-    await userEvent.setup().click(screen.getByText("적용 범위와 선택 출처", { selector: "summary" }));
+    expect(screen.getByText("0", { selector: "dd" })).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "문서 기본값으로 돌아가기" })).toBeVisible();
+    await userEvent.setup().click(screen.getByLabelText("선택값 출처: 적용 범위와 선택 출처", { selector: "summary", exact: true }));
     expect(screen.getByText("0", { selector: "dd" })).toBeVisible();
     expect(screen.getByText("false", { selector: "dd" })).toBeVisible();
     expect(screen.getByText("fast", { selector: "dd" })).toBeVisible();
@@ -79,7 +81,7 @@ describe("선택 실행의 파라미터 출처", () => {
     expect(screen.getByRole("button", { name: "백테스트" })).toBeDisabled();
     view.rerender(view.element("current"));
     await waitFor(() => expect(screen.getByRole("button", { name: "백테스트" })).toBeEnabled());
-    await userEvent.setup().click(screen.getByText("적용 범위와 선택 출처", { selector: "summary" }));
+    await userEvent.setup().click(screen.getByLabelText("선택값 출처: 적용 범위와 선택 출처", { selector: "summary", exact: true }));
     expect(screen.getByText("2", { selector: "dd" })).toBeVisible();
     release();
     await waitFor(() => expect(returned).toBe(true));

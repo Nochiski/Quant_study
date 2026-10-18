@@ -9,6 +9,8 @@
 }
 
 /* 입력과 결과는 같은 작업공간에 두고 긴 출처는 명시적으로 펼친다. */
+.strategy-debugger__setup { display: contents; }
+.strategy-debugger__scope-label-short { display: none; }
 .strategy-debugger__scope { flex: none; border-bottom: 1px solid var(--border); }
 .strategy-debugger__scope > summary,
 .strategy-debugger__context summary {
@@ -410,8 +412,16 @@
 .strategy-debugger__node-chain--expanded { height: auto; overflow: visible; }
 .strategy-debugger__node-chain--expanded .strategy-debugger__node-chip { min-height: 58px; height: auto; overflow: visible; }
 @media (max-width: 719px) {
-  .strategy-debugger__scope[open] { flex: 1; min-height: 0; overflow: auto; }
-  .strategy-debugger__scope[open] ~ .strategy-debugger__results { display: none; }
+  .strategy-debugger__setup { display: flex; position: relative; flex: none; flex-wrap: wrap; min-height: 0; }
+  .strategy-debugger__setup:has(.strategy-debugger__scope[open]) { flex: 1; overflow: auto; }
+  .strategy-debugger__setup:has(.strategy-debugger__scope[open]) ~ .strategy-debugger__results { display: none; }
+  .strategy-debugger__scope { flex: 1; min-width: 0; }
+  .strategy-debugger__scope[open] { flex-basis: 100%; }
+  .strategy-debugger__scope-label { display: none; }
+  .strategy-debugger__scope-label-short { display: inline; }
+  .strategy-debugger__setup > .strategy-debugger__note { flex-basis: 100%; }
+  .strategy-debugger__scope > summary, .strategy-debugger__context summary { padding-inline: var(--space-2); }
+  .strategy-debugger__context { position: static; }
   .strategy-debugger__controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .strategy-debugger__pipeline-stages { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); }
   .strategy-debugger__pipeline-stages > li { border-right: 0; border-bottom: 1px solid var(--border); }
@@ -438,7 +448,7 @@
   .strategy-debugger__context { flex-wrap: nowrap; }
   .strategy-debugger__source > summary > code { display: none; }
   .strategy-debugger__context > details[open] { position: absolute; top: 100%; right: 0; left: 0; z-index: 3; background: var(--surface-panel); border: 1px solid var(--border); }
-  .strategy-debugger__security-picker { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); }
+  .strategy-debugger__security-picker { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); }
   .strategy-debugger__security-picker > span { flex: none; font-size: var(--text-size-small); }
   .strategy-debugger__security-picker > select { min-width: 0; height: var(--control-height-compact); min-height: var(--control-height-compact); }
 }

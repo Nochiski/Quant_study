@@ -894,8 +894,9 @@ export const StrategyDebugger = ({
 
   return (
     <div className="strategy-debugger">
+      <div className="strategy-debugger__setup">
       <details ref={scopeRef} className="strategy-debugger__scope ui-disclosure" open>
-        <summary>{t("debugger.controls")}{trace.state.kind === "success" ? <span className="strategy-debugger__scope-summary">{t("debugger.scope.count").replace("{count}", String(trace.state.request.security_ids.length))} · {node?.nodeId ?? "—"}</span> : null}</summary>
+        <summary aria-label={t("debugger.controls")}><span className="strategy-debugger__scope-label">{t("debugger.controls")}</span><span className="strategy-debugger__scope-label-short" aria-hidden="true">{t("debugger.controls.short")}</span>{trace.state.kind === "success" ? <span className="strategy-debugger__scope-summary">{t("debugger.scope.count").replace("{count}", String(trace.state.request.security_ids.length))} · {node?.nodeId ?? "—"}</span> : null}</summary>
       <form
         className="strategy-debugger__controls"
         aria-label={t("debugger.controls")}
@@ -1100,6 +1101,7 @@ export const StrategyDebugger = ({
         </ul>
         </details>
       ) : null}
+      </div>
       </div>
 
       {trace.state.kind === "success" && trace.state.linkedTruncated ? (

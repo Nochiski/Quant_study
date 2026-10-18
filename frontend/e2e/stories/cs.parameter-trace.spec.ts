@@ -140,6 +140,18 @@ const scenario = async (page: Page, testInfo: TestInfo, width: number, dark: boo
     await list.press("Home");
     await expect(list.getByRole("listitem").first()).toContainText("scaled");
     await expect(result).toBeVisible();
+    // 선택 출처는 접어서 유지하고, 첫 카드의 원천 값까지 바로 읽을 공간을 확보한다.
+    const listBounds = await list.boundingBox();
+    expect(listBounds).not.toBeNull();
+    expect(listBounds!.height).toBeGreaterThanOrEqual(120);
+    const firstCard = list.getByRole("listitem").first();
+    const firstValue = firstCard.locator(".strategy-debugger__stage-values .strategy-debugger__numeric").first();
+    await expect(firstValue).toHaveText(/\d/u);
+    await expect.poll(() => centerIsVisible(firstValue)).toBe(true);
+    const valueBounds = await firstValue.boundingBox();
+    expect(valueBounds).not.toBeNull();
+    expect(valueBounds!.y).toBeGreaterThanOrEqual(listBounds!.y);
+    expect(valueBounds!.y + valueBounds!.height).toBeLessThanOrEqual(listBounds!.y + listBounds!.height);
     await page.screenshot({ path: testInfo.outputPath(`selected-${value}-results-${width}.png`) });
     await openEditorWorkspace(page);
     // 노드 선택은 기존 outline 정책에 따라 YAML을 연다. 미리보기 과업으로 돌아갈 때 Graph를 명시한다.

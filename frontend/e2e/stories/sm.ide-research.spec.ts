@@ -16,6 +16,7 @@ import {
   REQUESTED_ENVIRONMENT,
   requireData,
 } from "../workbench-helpers";
+import { expectResearchMenuReadable } from "../ide-research/menu-checks";
 
 const scenario = async (page: Page, info: TestInfo, width: number) => {
   let submitted = 0;
@@ -31,7 +32,7 @@ const scenario = async (page: Page, info: TestInfo, width: number) => {
     mustReplace(
       GOLDEN,
       "퀄리티 모멘텀",
-      `US-SM-12 IDE 연구 ${width} ${Date.now()}`,
+      "연구",
     ),
     "parameters: []",
     "parameters:\n  - parameter_id: tilt\n    kind: float\n    default: 0.5\n    minimum: 0.0\n    maximum: 1.0\n    step: 0.5",
@@ -92,6 +93,8 @@ const scenario = async (page: Page, info: TestInfo, width: number) => {
   await expect(menu).toContainText("N 1");
   const original = await currentSource(page);
   await menu.click();
+  await expectResearchMenuReadable(page, menu);
+  await page.screenshot({ path: info.outputPath(`short-title-menu-${width}.png`) });
   await expect(
     page.getByText(
       "선택한 실행의 파라미터 값을 사용합니다. 과거 실행 전체를 재현하지 않습니다.",

@@ -7,7 +7,7 @@
 서버 선택 기록 → 그 실행의 결과 검증 카드다. 추천은 수익 보장이나 실거래 허가가 아니다.
 
 이 문서는 구현 범위와 검증 근거를 기록한다. ROOT의 실제 mock 브라우저·PNG 확인은 완료했으며,
-실자료 기술 QA·공식 CI·머지는 별도 게이트다. PLAN의 V5-04 완료나 검증 랩 전체 완료를 선언하지 않는다. 키움·실계좌·주문 전송,
+실자료 기술 QA와 메타 보존도 완료했으며 공식 CI·머지는 별도 게이트다. PLAN의 V5-04 완료나 검증 랩 전체 완료를 선언하지 않는다. 키움·실계좌·주문 전송,
 봉인 열람·S01 보존본 갱신·실자료 수익성 판정은 범위 밖이다.
 
 ## 정본과 책임
@@ -77,4 +77,15 @@ invalidate도 자동 GET을 만들지 않고 명시 재조회로 복구하는 �
 별도 실자료 기술 QA는 [REAL-DATA-CHECKS](./REAL-DATA-CHECKS.md)에 따라 격리 DB/서버에서
 2020-01-02 이후만 사용한다. 이 구현 작업 자체는 사용자 원장·서버·브라우저를 열지 않는다.
 `frontend/e2e/candidate-map/workbench.real-equity.spec.ts`는 기존 최소 split 계약에 맞춘 2023~2024
-1개 창·3세션 모멘텀×scale ±1 두 칸의 opt-in 시나리오이며 ROOT 실행 전까지 준비 상태다.
+1개 창·3세션 모멘텀×scale ±1 두 칸의 opt-in 시나리오다. ROOT 초기 기술 QA는 1개 통과(1.8분,
+`browser-real.log`)했으나 최초 첨부에는 데이터 판 식별이 빠져 있었다. 기존 GET 결과 응답의 Manifest와
+검증 보고서, 지도·trial 원문 첨부를 보강한 최종 재실행도 1개 통과(1.7분, `browser-real-final.log`)했다.
+선택·기간·기준·기존 단언·시간 예산은 유지했으며 같은 실행의 식별 근거 보존을 위한 재검증이다.
+
+최종 원문의 데이터 판은 `2164ba776cbd99f2:3d4aa095f7837c29`, 실행은
+`400bad21-83cc-4acb-a5db-ad01850d56ff`다. 결과와 검증 보고서의 실행 지문이 같고, 저장 전략의
+ID·리비전·spec/source hash와 선택 파라미터가 Manifest와 일치한다. 선택 당시 N=2, DSR·대표 샤프·이유와
+영속 선택 기록을 확인했다. 이는 원수치 전달·선택 기록의 기술 검증이며 실자료 수익성 판정이 아니다.
+외부 `candidate-map-20261018/real-metadata-final/`에 최종 test-results·HTML 보고서·내장 ZIP과
+`technical-selection-inputs.json`을 보존했다. `raw-attachment-provenance.json`은 원본 보고서 경로·ZIP
+entry·보고서/ZIP/첨부 SHA256을 기록한다. 초기 1.8분 증거는 `real-final/`에 별도로 유지한다.

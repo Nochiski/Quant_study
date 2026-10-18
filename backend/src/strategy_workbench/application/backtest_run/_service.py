@@ -356,6 +356,7 @@ class BacktestRunService:
         self._factor_cache: OrderedDict[
             _FactorReturnsKey, _FactorReturns | FactorRegressionUnavailableReason
         ] = OrderedDict()
+        # 활성 키는 최대 하나다. 다른 키의 요청을 대기 스레드나 내부 큐로 쌓지 않는다.
         self._factor_jobs: set[_FactorReturnsKey] = set()
         # 한 번 알리고 잊는 일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류).
         self._factor_failures: OrderedDict[_FactorReturnsKey, FactorRegressionUnavailableReason] = (
@@ -761,22 +762,25 @@ class BacktestRunService:
         판과 같은 판의 것이고, 판이 달라 회귀하지 않는다는 답도 다시 계산하지 않고 그대로 둔다.
         일시 실패(원천 부재·조회 중 판 경합·예상 밖 오류)는 사유를 한 번 돌려주고 잊는다 — 다음
         조회가 다시 계산한다.
+        활성 계산이 있으면 다른 키도 `COMPUTING`만 답하며, 완료 후 다음 조회에서 접수한다.
         """
         key = self._factor_returns_key(manifest)
         with self._lock:
             settled = self._settled_factor_returns(key)
             if settled is not None:
                 return settled
-            start = key not in self._factor_jobs
+            # 활성 계산 하나만 접수한다. 다른 키를 기다리는 daemon도 만들지 않는다.
+            # 자리가 비면 다음 명시 조회가 그 키를 접수한다.
+            if self._factor_jobs:
+                return FactorRegressionUnavailableReason.COMPUTING
             self._factor_jobs.add(key)
-        if start:
-            try:
-                self._background(lambda: self._compute_factor_returns(key, manifest))
-            except BaseException:
-                # 계산을 걸지 못했다 — 키를 남기면 그 키는 재시작까지 "계산 중"만 답한다.
-                with self._lock:
-                    self._factor_jobs.discard(key)
-                raise
+        try:
+            self._background(lambda: self._compute_factor_returns(key, manifest))
+        except BaseException:
+            # 계산을 걸지 못했다 — 키를 남기면 그 키는 재시작까지 "계산 중"만 답한다.
+            with self._lock:
+                self._factor_jobs.discard(key)
+            raise
         with self._lock:
             # 그 자리에서 도는 실행자(테스트)면 이미 끝났다.
             return self._settled_factor_returns(key) or FactorRegressionUnavailableReason.COMPUTING

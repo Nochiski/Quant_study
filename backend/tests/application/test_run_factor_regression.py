@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -279,6 +280,48 @@ def test_factor_returns_are_computed_in_the_background_once_and_then_served(
     )
     assert done.factor_evaluation_version is not None
     assert (len(jobs), len(calls)) == (1, 1)
+
+
+def test_different_keys_do_not_create_waiting_background_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """다른 기간의 동시 조회도 실행자 하나만 접수하고, 완료 뒤 재조회로 다음 키를 접수한다."""
+    lab = _Lab(tmp_path)
+    saved = lab.save(_spec())
+    run_ids = [
+        _finish(
+            lab.runs,
+            _saved_run(saved, start=date(2024, 1, day), end=_HALF_YEAR["end"]),
+        )
+        for day in (2, 3, 4, 5)
+    ]
+    before = [lab.runs.result(run_id) for run_id in run_ids]
+    jobs: list[Callable[[], None]] = []
+    lab.runs._background = jobs.append  # pyright: ignore[reportPrivateUsage]  # reason: 접수한 실행자를 붙잡는다
+    calls = _counting_pipeline(lab, monkeypatch)
+    first = lab.runs.factor_regression(run_ids[0])
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        waiting = list(pool.map(lab.runs.factor_regression, run_ids * 4))
+
+    assert first.report.unavailable_reason is FactorRegressionUnavailableReason.COMPUTING
+    assert all(
+        report.report.unavailable_reason is FactorRegressionUnavailableReason.COMPUTING
+        for report in waiting
+    )
+    assert (len(jobs), len(calls)) == (1, 0)
+    jobs[0]()
+    # 먼저 계산한 키는 캐시에서 읽는다. 기다리던 키는 자동으로 실행되지 않는다.
+    assert lab.runs.factor_regression(run_ids[0]).factor_evaluation_version is not None
+    assert (len(jobs), len(calls)) == (1, 1)
+    next_waiting = lab.runs.factor_regression(run_ids[1])
+    assert next_waiting.report.unavailable_reason is FactorRegressionUnavailableReason.COMPUTING
+    assert (len(jobs), len(calls)) == (2, 1)
+    jobs[1]()
+    done = lab.runs.factor_regression(run_ids[1])
+    assert done.factor_evaluation_version is not None
+    assert (len(jobs), len(calls)) == (2, 2)
+    assert [lab.runs.result(run_id) for run_id in run_ids] == before
+    assert {report.trial_count for report in waiting} == {done.trial_count}
 
 
 def test_an_unexpected_failure_is_reported_once_and_retried_on_the_next_read(

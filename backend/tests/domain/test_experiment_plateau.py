@@ -12,6 +12,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     CellPlateau,
     CellVerdict,
     GridIndex,
+    NoRecommendation,
     SearchAxis,
     SearchSpec,
     WindowSelectionRule,
@@ -52,7 +53,7 @@ def _map(
     bankrupt: Collection[GridIndex] = (),
     failed: Collection[GridIndex] = (),
 ) -> tuple[CellPlateau, ...]:
-    return plateau_map(search, CellOutcomes(dict(scores), set(bankrupt), set(failed)))
+    return plateau_map(search, CellOutcomes(dict(scores), set(bankrupt), set(failed))).cells
 
 
 def _by_cell(cells: tuple[CellPlateau, ...]) -> dict[GridIndex, CellPlateau]:
@@ -102,8 +103,9 @@ def test_a_lone_survivor_among_bankrupt_cells_is_not_a_flat_plateau() -> None:
     """#403 리뷰 P2-1 ①: 살아남은 칸이 하나뿐이어도 파산 이웃이 자기 점수와 같아 보이지 않는다."""
     (cell, *_) = _map(_axis(10, 20, 30), {(0,): 1.5}, bankrupt={(1,), (2,)})
 
-    # 이웃 20 은 파산이라 0. 민감도: 12 쪽 가장 가까운 20 → (1.5 − 0)/1.5 = 1.0.
-    assert cell == CellPlateau((0,), CellVerdict.RECOMMENDED, 1.5, 0.0, 1.0, (1,))
+    # 이웃 20 은 파산이라 0. 민감도: 12 쪽 가장 가까운 20 → (1.5 − 0)/1.5 = 1.0. 고원 점수가 0 이라
+    # 추천 후보가 아니다(후속 4) — 이웃이 모두 파산한 칸은 조금만 옮겨도 무너지는 봉우리다.
+    assert cell == CellPlateau((0,), CellVerdict.PEAK, 1.5, 0.0, 1.0, (1,))
 
 
 def test_moving_into_a_bankrupt_cell_is_a_full_drop_even_from_the_lowest_cell() -> None:
@@ -223,9 +225,10 @@ def test_top_cells_with_the_same_score_are_judged_alike() -> None:
 
 def test_a_top_cell_that_is_not_positive_is_not_a_peak() -> None:
     # 최고 칸 -0.1 의 이웃 평균 -2.0 은 제 점수의 절반보다 낮지만 점수가 0 이하라 봉우리가 아니다.
+    # 손실 나는 칸은 추천하지도 않는다(후속 4) — 예전에는 이웃이 -0.1 인 -2.0 칸을 추천했다.
     cells = _map(_axis(10, 20), {(0,): -0.1, (1,): -2.0})
 
-    assert [cell.verdict for cell in cells] == [CellVerdict.SCORED, CellVerdict.RECOMMENDED]
+    assert [cell.verdict for cell in cells] == [CellVerdict.SCORED, CellVerdict.SCORED]
 
 
 def test_no_cell_is_recommended_before_any_score() -> None:
@@ -344,3 +347,30 @@ def test_cell_outcomes_average_completed_windows_and_split_bankrupt_from_other_f
 
     assert outcomes.scores == pytest.approx({(0,): 0.3})
     assert (outcomes.bankrupt, outcomes.failed) == ({(1,), (7,)}, {(6,)})
+
+
+@pytest.mark.parametrize(
+    ("scores", "bankrupt", "recommended", "reason"),
+    [
+        # 점수가 난 칸이 없다.
+        ({}, {(0,)}, None, NoRecommendation.NO_SCORED_CELL),
+        # 모두 손실이다(실원장 확인 실험의 두 칸 -0.0609 와 같은 모양).
+        ({(0,): -0.06, (1,): -0.06}, set(), None, NoRecommendation.NON_POSITIVE_SCORE),
+        # 고원 점수는 양수지만 제 점수가 음수인 칸(0) 대신 둘 다 양수인 칸(2)을 고른다.
+        ({(0,): -0.1, (1,): 0.9, (2,): 0.2}, set(), (2,), None),
+        # 둘 다 양수면 고원 점수가 높은 칸이다: (0) 의 이웃은 0.2, (1) 의 이웃 평균은 0.3.
+        ({(0,): 0.3, (1,): 0.2}, set(), (1,), None),
+    ],
+)
+def test_only_a_cell_with_positive_score_and_plateau_is_recommended_and_otherwise_says_why(
+    scores: dict[GridIndex, float],
+    bankrupt: set[GridIndex],
+    recommended: GridIndex | None,
+    reason: NoRecommendation | None,
+) -> None:
+    """실데이터 확인(2026-10-17) 후속 4: 손실 나는 설정을 "추천 후보"로 보이지 않는다."""
+    mapped = plateau_map(_axis(10, 20, 30), CellOutcomes(scores, bankrupt, set()))
+
+    chosen = [cell.grid_index for cell in mapped.cells if cell.verdict is CellVerdict.RECOMMENDED]
+    assert chosen == ([] if recommended is None else [recommended])
+    assert mapped.no_recommendation is reason

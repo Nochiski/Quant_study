@@ -1,7 +1,9 @@
 """파라미터 고원·민감도 — 칸마다 추천·봉우리·실패 판정(검증 랩 V4-03, 수학 노트 5절, spec D8).
 
 칸 점수는 그 칸의 창별 학습 세션 샤프 평균이다. 고원 점수는 이웃 칸 점수의 평균
-(`neighbor_mean`)이고, 추천 후보는 고원 점수가 가장 높은 칸이다. 봉우리는 점수가 가장 높지만
+(`neighbor_mean`)이고, 추천 후보는 칸 점수와 고원 점수가 모두 양수인 칸 가운데 고원 점수가
+가장 높은 칸이다 — 손실 나는 고원은 후보가 아니다(없으면 이유 `NoRecommendation`). 봉우리는
+점수가 가장 높지만
 이웃이 크게 낮은 칸이다. 민감도는 숫자 파라미터를 ±20% 바꾼 칸(가장 가까운 격자값)에서 점수가
 가장 크게 떨어진 비율이다.
 
@@ -34,7 +36,8 @@ SENSITIVITY_STEP = 0.2
 class CellVerdict(StrEnum):
     """칸 판정. 화면은 번역만 한다."""
 
-    # 고원 점수(이웃 평균)가 가장 높은 칸. 동점이면 좌표가 앞선 칸이다.
+    # 칸 점수·고원 점수(이웃 평균)가 모두 양수인 칸 가운데 고원 점수가 가장 높은 칸. 동점이면
+    # 좌표가 앞선 칸이다.
     RECOMMENDED = "recommended"
     # 점수가 가장 높지만 이웃 평균이 제 점수의 `PEAK_NEIGHBOR_RATIO` 보다 낮다 — 운으로 튄 칸.
     PEAK = "peak"
@@ -44,6 +47,16 @@ class CellVerdict(StrEnum):
     UNSCORED = "unscored"
     # 점수가 있는 나머지 칸.
     SCORED = "scored"
+
+
+class NoRecommendation(StrEnum):
+    """추천 칸이 없는 이유. 화면은 번역만 한다."""
+
+    # 점수가 난 칸이 없다(아직 돌거나 모두 실패했다).
+    NO_SCORED_CELL = "no_scored_cell"
+    # 후보 칸의 칸 점수나 고원 점수가 모두 0 이하다 — 학습 구간에서도 위험 대비 성과가 없는 설정을
+    # "추천"으로 보이지 않는다(실데이터 확인 2026-10-17 후속 4).
+    NON_POSITIVE_SCORE = "non_positive_score"
 
 
 @dataclass(frozen=True)
@@ -110,8 +123,16 @@ def cell_outcomes(
     return outcomes
 
 
-def plateau_map(search: SearchSpec, outcomes: CellOutcomes) -> tuple[CellPlateau, ...]:
-    """그리드 칸마다 판정·점수·고원 점수·민감도(좌표 순)."""
+@dataclass(frozen=True)
+class PlateauMap:
+    # 그리드 칸 좌표 순.
+    cells: tuple[CellPlateau, ...]
+    # 추천 칸이 없으면 그 이유, 있으면 None.
+    no_recommendation: NoRecommendation | None
+
+
+def plateau_map(search: SearchSpec, outcomes: CellOutcomes) -> PlateauMap:
+    """그리드 칸마다 판정·점수·고원 점수·민감도(좌표 순)와, 추천 칸이 없으면 그 이유."""
     shape, scores = search.shape, outcomes.scores
     floor = bankrupt_score(scores.values())
     filled = dict(scores) | {cell: floor for cell in outcomes.bankrupt}
@@ -119,7 +140,21 @@ def plateau_map(search: SearchSpec, outcomes: CellOutcomes) -> tuple[CellPlateau
     # 점수 있는 이웃이 없는 외톨이 칸은 추천 후보가 아니다 — 운으로 튄 한 칸이 원점수로 추천되지
     # 않게 한다. 모든 칸이 외톨이일 때만(한 칸 그리드 등) 자기 점수로 잰다(`neighbor_rank`).
     candidates = [cell for cell in sorted(scores) if plateau[cell] is not None] or sorted(scores)
-    recommended = max(candidates, key=lambda cell: neighbor_rank(filled, shape, cell), default=None)
+    # 손실 나는 설정은 고원이어도 후보가 아니다. 봉우리(최고 점수 > 0)·민감도(점수 > 0)와 같은
+    # 경계다.
+    positive = [
+        cell
+        for cell in candidates
+        if scores[cell] > 0 and neighbor_rank(filled, shape, cell) > 0
+    ]
+    recommended = max(positive, key=lambda cell: neighbor_rank(filled, shape, cell), default=None)
+    no_recommendation = (
+        None
+        if recommended is not None
+        else NoRecommendation.NON_POSITIVE_SCORE
+        if scores
+        else NoRecommendation.NO_SCORED_CELL
+    )
     top = max(scores.values(), default=0.0)
     # 최고 점수가 같은 칸은 모두 같은 기준으로 본다. 외톨이 칸은 자기 점수로 재므로(이웃이 낮은지
     # 알 수 없다) 봉우리가 아니다.
@@ -146,7 +181,7 @@ def plateau_map(search: SearchSpec, outcomes: CellOutcomes) -> tuple[CellPlateau
             failed = cell in outcomes.bankrupt or cell in outcomes.failed
             verdict = CellVerdict.FAILED if failed else CellVerdict.UNSCORED
             cells.append(CellPlateau(cell, verdict, None, None, None, None))
-    return tuple(cells)
+    return PlateauMap(tuple(cells), no_recommendation)
 
 
 def _sensitivity(

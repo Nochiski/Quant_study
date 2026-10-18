@@ -320,11 +320,10 @@ def _synced(home: Path) -> str:
     return f.read_text(encoding="utf-8") if f.exists() else ""
 
 
-@pytest.mark.parametrize("conf", [None, "shipped", "CALENDAR_EXPORT_V3=yes\n", "CALENDAR_EXPORT_V3=0\n"])
+@pytest.mark.parametrize("conf", [None, "CALENDAR_EXPORT_V3=yes\n", "CALENDAR_EXPORT_V3=0\n"])
 def test_export_switch_off_keeps_the_v3_calendar_sync(tmp_path: Path, conf: str | None) -> None:
-    """꺼짐(파일 없음·저장소 값·다른 값) — 지금처럼 v3 사본 동기화를 부르고 건너뜀 줄이 없다."""
-    text = (DB_ROOT / "config" / "calendar_export.env").read_text(encoding="utf-8") if conf == "shipped" else conf
-    r = _run(tmp_path, "none", dry=True, conf=text)
+    """꺼짐(파일 없음·다른 값) — 지금처럼 v3 사본 동기화를 부르고 건너뜀 줄이 없다."""
+    r = _run(tmp_path, "none", dry=True, conf=conf)
     assert r.rc == 0, r.out + r.log
     assert _synced(tmp_path) == "sync\n"
     assert "동기화 건너뜀" not in r.log

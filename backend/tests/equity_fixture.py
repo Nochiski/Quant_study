@@ -217,6 +217,10 @@ def factor_table(
         "price_factor": pa.array([1.0 / r[4] for r in rows], type=pa.float64()),
         "share_factor": pa.array([r[4] for r in rows], type=pa.float64()),
         "factor_ok": pa.array([r[5] for r in rows], type=pa.bool_()),
+        # 가격 축을 따로 지정하지 않은 옛 손 픽스처는 미해결 사건을 유지한다.
+        "price_resolution": pa.array(
+            ["factor" if r[5] else "unresolved" for r in rows], type=pa.string()
+        ),
     }
     if apply_dates is not None:
         columns["apply_date"] = pa.array(apply_dates, type=pa.date32())

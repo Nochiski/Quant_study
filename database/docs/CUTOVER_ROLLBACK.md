@@ -6,7 +6,7 @@
 
 ## 0. 한눈에
 
-컷오버 날(10-19) 순서는 이렇다. ① v3 quant.db 고정 백업 2벌(§1) → ② V3-A~E(v3 크론·체인 변경) → ③ 첫 반영 `v3_post.sh`(V3-C — 매일과 같은 증분 창, T-46) → ④ 원천 전환(PR-9). 되돌리기 창은 컷오버일부터 **5거래일**(10-19~23)이다. v3 는 매 수집에서 종목마다 최근 5행을 다시 받으므로, 창 안에 되돌리면 빈 날을 v3 가 스스로 메운다(§3).
+컷오버 날(10-16 — N-51 로 10-19 에서 당김) 순서는 이렇다. ① v3 quant.db 고정 백업 2벌(§1) → ② V3-A~E(v3 크론·체인 변경) → ③ 첫 반영 `v3_post.sh`(V3-C — 매일과 같은 증분 창, T-46) → ④ 원천 전환(PR-9). 되돌리기 창은 컷오버일부터 **5거래일**(10-16~22)이다. v3 는 매 수집에서 종목마다 최근 5행을 다시 받으므로, 창 안에 되돌리면 빈 날을 v3 가 스스로 메운다(§3).
 
 | 되돌리는 것 | 그대로 두는 것 |
 |---|---|
@@ -59,9 +59,9 @@ scripts/v3_backup.sh --v3-db "$HOME/kael-system-v3/data/quant.db" \
 
 ## 2. 언제 되돌리나
 
-- **창**: 컷오버일 10-19 부터 5거래일(10-19~23)이다(정본 §4). 세는 법은 `daily.window_judge` 와 같다(세션 예외일도 거래일로 센다).
+- **창**: 컷오버일 10-16 부터 5거래일(10-16~22)이다(정본 §4). 세는 법은 `daily.window_judge` 와 같다(세션 예외일도 거래일로 센다).
 - **후보 신호**
-  1. X-2 판정 실패. `PYTHONPATH=src .venv/bin/python -m daily.window_judge judge --start 20261019 --cutover 20261019` 의 되돌리기 창 날짜 중 fail 인 날이 있다. fail 이 되는 것은 장 마감 체인 단계 실패 · 세는 crit · 수동 개입 · 다음 날 대조 rc≠0 이다(T-39).
+  1. X-2 판정 실패. `PYTHONPATH=src .venv/bin/python -m daily.window_judge judge --start 20261016 --cutover 20261016` 의 되돌리기 창 날짜 중 fail 인 날이 있다. fail 이 되는 것은 장 마감 체인 단계 실패 · 세는 crit · 수동 개입 · 다음 날 대조 rc≠0 이다(T-39).
   2. v3 소비자 장애. 07:00 v3 브리핑 · v3 엑셀 텔레그램(T-20, daily_post) · uni 브리프가 틀리거나 나오지 않는다.
   3. 사람 판단.
 - **결정은 사람(사용자)이 한다.** 판정 실패는 후보 신호다. 실패한 하루가 곧 되돌리기를 뜻하지는 않는다.
@@ -72,9 +72,9 @@ scripts/v3_backup.sh --v3-db "$HOME/kael-system-v3/data/quant.db" \
 - **창 안**(복원 뒤 v3 첫 수집일이 10-23 이하)
   - v3 수집은 종목마다 최근 5행을 다시 받는다. 가격은 `backend/pipeline/collectors.py` 의 `items[:5]`, 수급은 `records[:5]` 다(로컬 사본 25dd56b).
   - 백업은 컷오버 날 아침에 떴으므로 직전 거래일(10-16)까지만 들어 있다.
-  - 그래서 첫 수집일 X 가 10-19 부터 5거래일 안이면 10-19~X 의 `daily_prices`·`investor_detail_flows` 가 빈 날 없이 v3 정의로 다시 찬다.
+  - 그래서 첫 수집일 X 가 10-16 부터 5거래일 안이면 10-16~X 의 `daily_prices`·`investor_detail_flows` 가 빈 날 없이 v3 정의로 다시 찬다.
 - **창 밖**(첫 수집이 여섯째 거래일 이후)
-  - 10-19 부터 (X 의 4거래일 전) 전날까지 두 표가 빈다.
+  - 10-16 부터 (X 의 4거래일 전) 전날까지 두 표가 빈다.
   - 선택지(결정은 사람):
     - ① **권고** — 7표를 복원한 뒤 v3 자체 백필로 메운다. v3 저장소에서 `scripts/backfill.py --mode prices --days N` · `--mode investor_detail --days N` 을 돌린다. 키움 호출이므로 `--dry-run` 으로 예상 콜 수를 먼저 본다. `data/.backfill.lock` 을 쓴다. 이렇게 하면 v3 정의로 통일된다.
     - ② 가격·수급 두 표는 복원하지 않는다(`--tables` 에서 뺀다). compat 행이 남아 그 날들의 종가는 KRX 정규장 종가(T-33)다. v3 종가(애프터마켓 포함)와 섞인다.
@@ -249,13 +249,13 @@ EOF
   from pathlib import Path
   c = sqlite3.connect(f"{Path(sys.argv[1]).resolve().as_uri()}?mode=ro", uri=True)
   print("daily_prices 최신", c.execute("SELECT max(trade_date) FROM daily_prices").fetchone()[0])
-  print(c.execute("SELECT trade_date, count(*) FROM daily_prices WHERE trade_date >= '2026-10-19' GROUP BY 1").fetchall())
+  print(c.execute("SELECT trade_date, count(*) FROM daily_prices WHERE trade_date >= '2026-10-16' GROUP BY 1").fetchall())
   for t in ("score_history", "score_history_v2"):
-      print(t, c.execute(f"SELECT score_date, count(*) FROM {t} WHERE score_date >= '2026-10-19' GROUP BY 1").fetchall())
+      print(t, c.execute(f"SELECT score_date, count(*) FROM {t} WHERE score_date >= '2026-10-16' GROUP BY 1").fetchall())
   print(c.execute("SELECT job_name, status, finished_at FROM pipeline_runs ORDER BY run_id DESC LIMIT 6").fetchall())
   EOF
   ```
-  - `daily_prices` 최신일이 그날이다. 창 안이면 10-19 뒤 거래일마다 행이 다시 있다.
+  - `daily_prices` 최신일이 그날이다. 창 안이면 10-16 뒤 거래일마다 행이 다시 있다.
   - 점수: v3 가 쓴 날짜(첫 실행일)는 v3 유니버스 — `score_history` 1,300 안팎, `score_history_v2` 2,500 안팎이다. 컷오버 기간 날짜는 compat 값 593·625 그대로다(T-42 — 점수 표를 복원하지 않았다. `--with-scores` 였으면 그 날짜 행이 없다). 같은 날짜를 둘 다 썼으면 §3 의 섞임이 생긴다.
   - 잡이 `success` 다(비치명 단계 실패는 로그에 남는다 — 원인을 본다).
 

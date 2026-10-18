@@ -836,19 +836,17 @@ def test_real_v3_post_is_not_called_without_its_pinned_board(tmp_path: Path, mod
     assert r.titles("crit") == [f"{label} 실패: 고정 판 확인"]
 
 
-def test_shipped_config_is_off_and_shadow(tmp_path: Path) -> None:
-    """저장소에 실린 설정은 꺼짐이다 — 머지·배포만으로는 아무것도 돌지 않는다. 켜도(ENABLED=1 만 더함)
-    발송·제자리 반영은 그림자 값이다(PR-9 몫)."""
+def test_shipped_config_is_cutover(tmp_path: Path) -> None:
+    """저장소에 실린 설정은 컷오버 값이다(10-16, 컷오버 플랜 §7 6) — 엑셀을 보내고 v3 에 제자리 반영한 뒤
+    v3 daily_post 를 부른다. 꺼짐 동작은 test_disabled_chain_does_nothing 이 본다."""
     shipped = (DB_ROOT / "config/postclose_chain.env").read_text(encoding="utf-8")
     _root(tmp_path, conf=shipped)
-    off = _chain(tmp_path, "close", "--date", T)
-    assert off.rc == 0 and off.calls == [], off.out
-    _root(tmp_path, conf=shipped + "POSTCLOSE_ENABLED=1\n")
     on = _chain(tmp_path, "close", "--date", T)
     assert on.rc == 0, on.out + on.log
-    assert "--send" not in on.call("deliver")
+    assert "--send" in on.call("deliver")
     v3 = on.call("v3_post.sh")
-    assert "--shadow" in v3 and "--v3-post-cmd" not in v3
+    assert "--shadow" not in v3 and "--v3-post-cmd" in v3
+    assert "--chain daily_post" in v3
 
 
 @pytest.mark.skipif(shutil.which("flock") is None,

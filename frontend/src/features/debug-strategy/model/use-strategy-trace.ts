@@ -69,6 +69,7 @@ const sameCalculation = (
 ): boolean =>
   anchor.as_of === candidate.as_of &&
   sameWireValue(anchor.provenance, candidate.provenance) &&
+  sameWireValue(anchor.parameter_values ?? {}, candidate.parameter_values ?? {}) &&
   sameWireValue(anchor.target, candidate.target) &&
   sameWireValue(anchor.summary, candidate.summary) &&
   sameWireValue(anchor.factor_preview, candidate.factor_preview) &&

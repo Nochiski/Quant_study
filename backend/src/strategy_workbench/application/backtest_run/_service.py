@@ -1481,6 +1481,7 @@ _REJECTION_CODES: tuple[tuple[type[Exception], AdmissionRejectionCode], ...] = (
     (MissingRunEnvironmentError, "backtest.run.environment_required"),
     (ResearchWindowViolationError, "backtest.run.research_window_violation"),
     (BacktestParameterValueError, "backtest.run.parameter_invalid"),
+    (InvalidParameterValueError, "backtest.run.parameter_invalid"),
     (InvalidBacktestRunError, "backtest.run.invalid"),
     (StrategyReferenceNotFoundError, "backtest.strategy.not_found"),
     (StaleStrategyReferenceError, "backtest.strategy.stale"),

@@ -48,12 +48,13 @@ export const useRunBacktest = (
   state: DocumentState,
   executionPlans: ExecutionPlansState,
   options: BacktestRunOptions | null,
+  parameterSourceRunId?: string,
 ) => {
   const navigate = useNavigate();
   const router = useRouter();
   const start = useStartBacktest();
   const [ownedStatus, setOwnedStatus] = useState<OwnedRunStatus | null>(null);
-  const optionsKey = useMemo(() => JSON.stringify(options), [options]);
+  const optionsKey = useMemo(() => JSON.stringify(parameterSourceRunId === undefined ? options : [options, parameterSourceRunId]), [options, parameterSourceRunId]);
   const currentOwner = useMemo<RunOwner>(
     () => ({
       documentEpoch: state.documentEpoch,

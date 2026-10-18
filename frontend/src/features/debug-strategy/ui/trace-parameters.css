@@ -1,0 +1,13 @@
+.trace-parameters {
+  min-width: 0;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.trace-parameters dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-block: var(--space-2);
+}
+.trace-parameters dl > div { min-width: 0; }
+.trace-parameters dd { margin: var(--space-1) 0 0; font-family: var(--font-mono); }

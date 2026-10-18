@@ -19,7 +19,7 @@ change; the observation adapter owns their as_of vintage (D-006).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Sized
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import TypeVar
@@ -70,6 +70,8 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 )
 from strategy_workbench.domain.strategy.facade.constraints import expression_code
 from strategy_workbench.domain.strategy.facade.specification import (
+    InvalidParameterValueError,
+    ParameterValue,
     StrategySpec,
     resolve_parameter_values,
 )
@@ -114,6 +116,27 @@ _PROGRESS_FACTOR_INPUTS = 0.197
 _PROGRESS_FACTORS_START = 0.279
 _PROGRESS_FACTORS_END = 0.87
 _PROGRESS_COMPILE = 0.966
+
+
+def _resolve_pipeline_parameters(
+    spec: StrategySpec,
+    requested: Mapping[str, ParameterValue],
+    options: Mapping[str, ParameterValue],
+) -> dict[str, ParameterValue]:
+    """공개 요청과 기존 내부 옵션을 한 관문에서 해소한다. 모순된 두 입력은 덮어쓰지 않는다."""
+    resolved = resolve_parameter_values(spec.parameters, requested)
+    if not options:
+        return resolved
+    legacy = resolve_parameter_values(spec.parameters, options)
+    if requested and resolved != legacy:
+        parameter_id = next(key for key in resolved if resolved[key] != legacy[key])
+        raise InvalidParameterValueError(
+            parameter_id,
+            "공개 요청과 내부 옵션의 파라미터 값이 다릅니다 — "
+            f"parameter_id={parameter_id} request={resolved[parameter_id]!r} "
+            f"options={legacy[parameter_id]!r}",
+        )
+    return legacy
 
 
 def _no_progress(fraction: float, message: str) -> None:
@@ -224,6 +247,7 @@ class _PreparedPipeline:
     plans: dict[str, FactorExecutionPlan]
     # 문서 검증 뒤에 해소한 실행 설정. 호출자가 브리지를 다시 부르지 않게 같이 돌려준다.
     environment: RunEnvironment
+    parameter_values: dict[str, ParameterValue]
 
 
 @dataclass(frozen=True)
@@ -273,7 +297,12 @@ class PortfolioDesignService:
         # 엔진 호환성만은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게
         # 명시한다. 문서·실행 설정 오류는 위 docstring 대로 예외다.
         options = PortfolioPipelineOptions(require_engine_compatible=False)
-        return self._prepare(request.spec, options, request.environment).engine
+        return self._prepare(
+            request.spec,
+            options,
+            request.environment,
+            requested_parameters=request.parameter_values,
+        ).engine
 
     def run_pipeline(
         self,
@@ -298,7 +327,13 @@ class PortfolioDesignService:
         # 브리지는 `_prepare` 안에서 `validate_strategy` 뒤에 돈다 — 잘못된 문서는 코드화된
         # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다. 플랜이 결측 정책을
         # 인자로 받으므로(P2-02) 해소한 실행 설정을 `_prepare` 가 돌려준다.
-        prepared = self._prepare(spec, pipeline_options, request.environment, checkpoint=checkpoint)
+        prepared = self._prepare(
+            spec,
+            pipeline_options,
+            request.environment,
+            requested_parameters=request.parameter_values,
+            checkpoint=checkpoint,
+        )
         environment = prepared.environment
         engine = prepared.engine
         metadata = prepared.metadata
@@ -374,9 +409,7 @@ class PortfolioDesignService:
         )
         parameters = tuple(
             ResolvedFactorParameter(parameter_id, value)
-            for parameter_id, value in resolve_parameter_values(
-                spec.parameters, pipeline_options.parameter_values
-            ).items()
+            for parameter_id, value in prepared.parameter_values.items()
         )
         evaluations: list[FactorEvaluationRecord] = []
         factor_count = max(len(spec.factors), 1)
@@ -504,6 +537,7 @@ class PortfolioDesignService:
             tape=tape,
             engine=engine,
             warnings=raw.warnings,
+            parameter_values=prepared.parameter_values,
         )
         progress(1.0, "Target tape compiled")
         return PortfolioPipelineResult(
@@ -522,6 +556,7 @@ class PortfolioDesignService:
         environment: RunEnvironment | None,
         *,
         checkpoint: Callable[[], None] = lambda: None,
+        requested_parameters: Mapping[str, ParameterValue] | None = None,
     ) -> _PreparedPipeline:
         """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다.
 
@@ -537,6 +572,9 @@ class PortfolioDesignService:
             environment, requested_by=f"portfolio.preview({spec.title!r})"
         )
 
+        parameter_values = _resolve_pipeline_parameters(
+            spec, requested_parameters or {}, pipeline_options.parameter_values
+        )
         engine = self._engine_portfolio.assess(spec, resolved)
         if pipeline_options.require_engine_compatible and not engine.compatible:
             raise IncompatiblePortfolioRequestError(engine)
@@ -553,7 +591,11 @@ class PortfolioDesignService:
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
         return _PreparedPipeline(
-            engine=engine, metadata=metadata, plans=plans, environment=resolved
+            engine=engine,
+            metadata=metadata,
+            plans=plans,
+            environment=resolved,
+            parameter_values=parameter_values,
         )
 
     def validate_trial_strategy(self, spec: StrategySpec, *, missing: MissingPolicy) -> None:

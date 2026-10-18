@@ -6965,6 +6965,27 @@
           "engine": {
             "$ref": "#/components/schemas/EngineCompatibility"
           },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "문서 기본값을 포함해 해소한 평가 파라미터. tape.strategy_hash는 저장 문서 의미이고 값별 계산 출력은 tape_hash로 구분한다.",
+            "title": "Parameter Values",
+            "type": "object"
+          },
           "tape": {
             "$ref": "#/components/schemas/TargetTape"
           },
@@ -6995,6 +7016,26 @@
                 "type": "null"
               }
             ]
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
           },
           "spec": {
             "$ref": "#/components/schemas/StrategySpec"
@@ -7167,6 +7208,7 @@
               "mapping": {
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
                 "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
@@ -7186,6 +7228,9 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
@@ -10919,6 +10964,26 @@
             "title": "Offset",
             "type": "integer"
           },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
+          },
           "security_ids": {
             "description": "Securities to trace. An empty list skips per-security rows and returns only the as-of summary.",
             "items": {
@@ -10998,6 +11063,27 @@
           },
           "factor_preview": {
             "$ref": "#/components/schemas/StrategyFactorPreview"
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "기본값을 포함한 해소 평가 값. spec_hash/provenance는 문서 의미, plan_hash는 계산 구조이며 파라미터 값 변경으로 바꾸지 않는다.",
+            "title": "Parameter Values",
+            "type": "object"
           },
           "plan_hash": {
             "title": "Plan Hash",
@@ -11752,6 +11838,7 @@
               "mapping": {
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
                 "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
@@ -11787,6 +11874,9 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"

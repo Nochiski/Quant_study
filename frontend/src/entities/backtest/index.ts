@@ -24,3 +24,6 @@ export { BacktestValidationReport } from "./ui/backtest-validation-report";
 export { useBacktestValidationReport } from "./model/backtest-queries";
 
 export { BacktestMetricTable } from "./ui/backtest-metrics";
+export { useRunParameters } from "./model/use-run-parameters";
+export type { RunParameterContext } from "./model/use-run-parameters";
+export { RunParameterSelection } from "./ui/run-parameter-selection";

@@ -1404,6 +1404,39 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     },
   });
 
+  it("선택값별 미리보기를 분리하고 늦게 도착한 다른 칸의 응답을 현재 결과로 표시하지 않는다", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    let oldReturned = false;
+    const sent: StrategyTraceRequest[] = [];
+    server.use(http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+      const body = await request.json() as StrategyTraceRequest;
+      sent.push(body);
+      if (body.parameter_values?.scale === 0) { await pending; oldReturned = true; }
+      const result = summaryResponse(body);
+      result.parameter_values = { ...body.parameter_values, extra_default: 12 };
+      result.summary!.targets[0]!.security!.name = body.parameter_values?.scale === 0 ? "이전 칸 종목" : "현재 칸 종목";
+      return HttpResponse.json(result);
+    }));
+    const first = { ...context(), parameterValues: { scale: 0 }, parameterSourceRunId: "run-a" };
+    const second = { ...context(), parameterValues: { scale: 1 }, parameterSourceRunId: "run-b" };
+    const view = renderDebugger(<StrategyPreview context={first} unavailableReason={null} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    view.rerender(<StrategyPreview context={second} unavailableReason={null} />);
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    expect(await screen.findByText("현재 칸 종목")).toBeVisible();
+    expect(sent.map(request => request.parameter_values)).toEqual([{ scale: 0 }, { scale: 1 }]);
+    await user.click(screen.getByText("이번 평가에 사용한 파라미터", { selector: "summary" }));
+    const defaultRow = screen.getByText("extra_default", { selector: "dt" }).parentElement!;
+    expect(within(defaultRow).getByText("12", { selector: "dd" })).toBeVisible();
+    release();
+    await waitFor(() => expect(oldReturned).toBe(true));
+    expect(screen.queryByText("이전 칸 종목")).toBeNull();
+    expect(screen.getByText("현재 칸 종목")).toBeVisible();
+  });
+
   it("명시적 새로고침만 빈 종목·첫 팩터로 요청하고 서버의 날짜·순위·이름·점수를 그대로 표시한다", async () => {
     const requests: StrategyTraceRequest[] = [];
     server.use(

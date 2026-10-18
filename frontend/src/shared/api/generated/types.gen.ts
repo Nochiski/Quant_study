@@ -4288,6 +4288,14 @@ export type PortfolioFrameSummary = {
  */
 export type PortfolioPreview = {
   engine: EngineCompatibility;
+  /**
+   * Parameter Values
+   *
+   * 문서 기본값을 포함해 해소한 평가 파라미터. tape.strategy_hash는 저장 문서 의미이고 값별 계산 출력은 tape_hash로 구분한다.
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   tape: TargetTape;
   /**
    * Warnings
@@ -4300,6 +4308,12 @@ export type PortfolioPreview = {
  */
 export type PortfolioPreviewRequest = {
   environment?: RunEnvironment | null;
+  /**
+   * Parameter Values
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   spec: StrategySpec;
 };
 
@@ -4416,6 +4430,9 @@ export type PortfolioUnprocessableResponse = {
     | ({
         code: "backtest.run.field_invalid";
       } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
     | ({
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)
@@ -6825,6 +6842,12 @@ export type StrategyTraceRequest = {
    */
   offset?: number;
   /**
+   * Parameter Values
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
+  /**
    * Security Ids
    *
    * Securities to trace. An empty list skips per-security rows and returns only the as-of summary.
@@ -6865,6 +6888,14 @@ export type StrategyTraceResponse = {
    */
   factor_id: string;
   factor_preview: StrategyFactorPreview;
+  /**
+   * Parameter Values
+   *
+   * 기본값을 포함한 해소 평가 값. spec_hash/provenance는 문서 의미, plan_hash는 계산 구조이며 파라미터 값 변경으로 바꾸지 않는다.
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   /**
    * Plan Hash
    */
@@ -7393,6 +7424,9 @@ export type TraceUnprocessableResponse = {
     | ({
         code: "backtest.run.field_invalid";
       } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
     | ({
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)

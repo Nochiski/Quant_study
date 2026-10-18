@@ -2,6 +2,7 @@ import { useContext, useMemo, type ComponentProps } from "react";
 
 import { StrategyDebugger } from "../../../features/debug-strategy";
 import type { RunEnvironment } from "../../../shared/api";
+import type { RunParameterContext } from "../../../entities/backtest";
 import {
   ExecutionPlanPanel,
   type DocumentState,
@@ -15,6 +16,7 @@ type StrategyDebuggerPanelProps = {
   executionPlans: ExecutionPlansState;
   /** 실행 설정 패널이 검증한 실행 설정. 없으면 추적이 막힌다(P3-02). */
   environment: RunEnvironment | null;
+  parameters?: RunParameterContext;
   publicationOwnerKey: string;
   asOf?: string;
   security?: string;
@@ -30,6 +32,7 @@ export const StrategyDebuggerPanel = ({
   document,
   executionPlans,
   environment,
+  parameters,
   publicationOwnerKey,
   asOf,
   security,
@@ -40,8 +43,8 @@ export const StrategyDebuggerPanel = ({
   const openEditor = useContext(OpenEditorWorkspaceContext);
   const availability = useMemo(
     () =>
-      buildStrategyDebuggerAvailability(document, executionPlans, environment),
-    [document, environment, executionPlans],
+      buildStrategyDebuggerAvailability(document, executionPlans, environment, parameters),
+    [document, environment, executionPlans, parameters],
   );
   return (
     <StrategyDebugger

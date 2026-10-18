@@ -8,6 +8,7 @@ import type {
 } from "../model/strategy-trace";
 import { useStrategyTrace } from "../model/use-strategy-trace";
 import "./strategy-preview.css";
+import { TraceParameters } from "./trace-parameters";
 
 /** 응답은 trace query cache만 소유한다. 이 패널은 마지막 요청 신원과 날짜 입력만 보관한다. */
 export const StrategyPreview = ({
@@ -105,6 +106,7 @@ export const StrategyPreview = ({
       ) : null}
       {response === null ? null : (
         <>
+          <TraceParameters values={response.parameter_values} />
           <p>
             {t("strategy.preview.resolvedDate")}: <time>{response.as_of}</time>
           </p>

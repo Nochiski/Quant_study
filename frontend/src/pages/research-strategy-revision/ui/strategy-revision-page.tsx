@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
+import { RunParameterSelection, useRunParameters } from "../../../entities/backtest";
 import {
   ContractInspector,
   ProposalApplyDialog,
@@ -128,6 +129,13 @@ export const StrategyRevisionPage = () => {
   // 실행 설정(시장·기간·유니버스·체결·비용·결측)은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2,
   // P3-02). 마지막 사용값은 이 전략의 local UI state 다.
   const runSettings = useBacktestRunSettings(strategyId);
+  const runParameters = useRunParameters(search.run, { strategyId, revision: Number(revision), specHash: stored.spec_hash });
+  const runOptions = useMemo(() => {
+    if (!runParameters.ready || runSettings.requestOptions === null) return null;
+    return runParameters.state === "selected"
+      ? { ...runSettings.requestOptions, parameter_values: runParameters.values }
+      : runSettings.requestOptions;
+  }, [runParameters.ready, runParameters.state, runParameters.values, runSettings.requestOptions]);
   // 실행 계획 sandbox 도 실행과 같은 결측 정책을 싣는다(Phase 2 감사 #3). 기간·유니버스가 비어도
   // 결측 정책 칸 값은 따로 싣는다(#357 C-P3-16).
   const executionPlans = useExecutionPlans(
@@ -138,7 +146,8 @@ export const StrategyRevisionPage = () => {
   const backtest = useRunBacktest(
     document,
     executionPlans,
-    runSettings.requestOptions,
+    runOptions,
+    search.run,
   );
   const startBacktest = backtest.run;
   // 저장된 1.0 revision 참조로 보낸 실행을 backend가 거부한 경우: 같은 배너로 안내하고 실행을 막는다.
@@ -453,6 +462,7 @@ export const StrategyRevisionPage = () => {
                       document={document}
                       executionPlans={executionPlans}
                       environment={runSettings.environment}
+                      parameters={runParameters}
                     />
                   </aside>
                 </div>
@@ -548,6 +558,9 @@ export const StrategyRevisionPage = () => {
         }}
         notice={
           <>
+            <RunParameterSelection selection={runParameters} clear={() => {
+              void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, run: undefined }, replace: true, resetScroll: false });
+            }} />
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}
@@ -623,6 +636,7 @@ export const StrategyRevisionPage = () => {
             document={document}
             executionPlans={executionPlans}
             environment={runSettings.environment}
+            parameters={runParameters}
             publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}

@@ -3248,6 +3248,53 @@ describe("StrategySpec Diff projection (P4-08)", () => {
 });
 
 describe("backtest from the editor (P3-05)", () => {
+  it.each(["loading", "mismatch", "error"])("선택 설정 %s에서는 단축키와 추적 모두 POST하지 않고 명시 해제 뒤만 기본값을 쓴다", async (mode) => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    server.use(
+      ...graphHandlers(), revisionDocumentHandler(GRAPH_SOURCE),
+      http.get(`${API}/api/v1/backtests/selected/request`, async () => {
+        if (mode === "loading") await pending;
+        if (mode === "error") return HttpResponse.json({}, { status: 503 });
+        return HttpResponse.json({ strategy_source: { kind: "saved_revision", strategy_id: "s1", revision: mode === "mismatch" ? 1 : 2, expected_spec_hash: "2".repeat(64) }, parameter_values: { scale: 0 } });
+      }),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2?run=selected&asOf=2026-08-31&security=sec-a&path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1");
+    await waitFor(() => expect(explainedGraphs).toHaveLength(1));
+    if (mode !== "loading") await screen.findByRole("alert");
+    expect(screen.getByRole("button", { name: "백테스트" })).toBeDisabled();
+    await openTrace();
+    expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
+    await user.keyboard("{Control>}{Shift>}{Enter}{/Shift}{/Control}");
+    await user.keyboard("{Meta>}{Shift>}{Enter}{/Shift}{/Meta}");
+    expect(started).toHaveLength(0);
+    expect(tracedStrategies).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "문서 기본값으로 돌아가기" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "추적 실행" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "백테스트" })).toBeEnabled();
+    release();
+    expect(started).toHaveLength(0);
+    expect(tracedStrategies).toHaveLength(0);
+    // 같은 실행 단축키는 선택을 명시 해제한 뒤에는 실제 요청을 만든다.
+    await user.keyboard("{Control>}{Shift>}{Enter}{/Shift}{/Control}");
+    await waitFor(() => expect(started).toHaveLength(1));
+  });
+
+  it("선택 요청의 값을 실행 gateway에 그대로 넘기고 실행 환경은 현재 입력을 유지한다", async () => {
+    server.use(http.get(`${API}/api/v1/backtests/selected/request`, () => HttpResponse.json({
+      strategy_source: { kind: "saved_revision", strategy_id: "s1", revision: 2, expected_spec_hash: "2".repeat(64) },
+      parameter_values: { scale: 0, enabled: false }, environment: { start: "2024-01-01", end: "2024-12-31", universe_id: "past" },
+    })));
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2?run=selected");
+    const run = await screen.findByRole("button", { name: "백테스트" });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ parameter_values: { scale: 0, enabled: false }, environment: RUN_ENVIRONMENT });
+  });
+
   it("blocks lossy and non-positive integers locally before any request", async () => {
     server.use(
       http.post(`${API}/api/v1/backtests`, async ({ request }) => {

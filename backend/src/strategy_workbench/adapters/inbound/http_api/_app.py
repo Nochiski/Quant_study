@@ -138,7 +138,10 @@ from strategy_workbench.domain.equity.facade.research_data import (
 )
 from strategy_workbench.domain.paging.facade.page import MAX_PAGE_SIZE
 from strategy_workbench.domain.strategy.facade.explanation import StrategyExplanation
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    InvalidParameterValueError,
+    StrategySpec,
+)
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
 from ._assistant_routes import register_assistant_routes
@@ -1408,7 +1411,7 @@ def _raise_run_request_rejection(error: Exception) -> NoReturn:
             "sealed_end": error.sealed_end.isoformat(),
             "research_start": error.research_start.isoformat(),
         }
-    elif isinstance(error, BacktestParameterValueError):
+    elif isinstance(error, (BacktestParameterValueError, InvalidParameterValueError)):
         detail["parameter_id"] = error.parameter_id
     raise HTTPException(
         status_code=_ADMISSION_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT),

@@ -7,6 +7,7 @@ import {
   compileStrategyDocument,
   createStrategyDocument,
   getBacktestRequest,
+  getBacktestResult,
   getBacktestStatus,
   getTrialLedger,
   startBacktest,
@@ -153,6 +154,41 @@ test.describe("IDE 연구 진입점 실자료 기술 QA", () => {
     );
     expect(original.strategy_source).toEqual(reference);
     expect(original.parameter_values).toEqual({ scale: 0 });
+    const result = requireData(
+      (await getBacktestResult({ client: apiClient, path: { run_id: runId } }))
+        .data,
+      "선택 실행의 불변 완료 결과",
+    );
+    // 기존 실자료 QA와 같은 원장 판:필드 계약 판 형식으로 mock 대체를 거절한다.
+    expect(result.manifest.data_snapshot_id).toMatch(
+      /^[0-9a-f]{16}:[0-9a-f]{16}$/u,
+    );
+    expect(result.manifest.run_fingerprint).toHaveLength(64);
+    expect(result.manifest.run_id).toBe(runId);
+    expect(result.manifest.strategy_provenance).toMatchObject({
+      kind: "saved_revision",
+      strategy_id: saved.strategy_id,
+      revision: saved.revision,
+      spec_hash: saved.spec_hash,
+    });
+    expect(result.manifest.run_spec.strategy_source).toEqual(reference);
+    expect(result.manifest.run_spec.parameter_values).toEqual({ scale: 0 });
+    expect(result.manifest.environment).toEqual(original.environment);
+    expect(result.manifest.run_spec.environment).toEqual(original.environment);
+    expect(result.manifest.environment).toMatchObject(ENVIRONMENT);
+    await info.attach("selected-run-original-request-and-result.json", {
+      body: JSON.stringify(
+        {
+          submitted_source: source,
+          saved_document: saved,
+          original_request: original,
+          completed_result: result,
+        },
+        null,
+        2,
+      ),
+      contentType: "application/json",
+    });
     let submissions = 0;
     page.on("request", (request) => {
       if (

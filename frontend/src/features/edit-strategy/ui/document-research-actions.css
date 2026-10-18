@@ -1,5 +1,6 @@
 .document-research {
-  position: relative;
+  /* 문서 제목 길이 대신 기존 IDE header를 기준으로 main 안에 펼친다. */
+  position: static;
   flex: none;
 }
 .document-research > summary {
@@ -11,8 +12,8 @@
   position: absolute;
   z-index: 21;
   inset-block-start: 100%;
-  inset-inline-end: 0;
-  width: min(var(--content-width-form), calc(100vw - var(--space-6)));
+  inset-inline-start: var(--space-4);
+  width: min(var(--content-width-form), calc(100% - var(--space-6)));
   max-width: calc(var(--space-7) * 7);
   max-height: 65dvh;
   overflow: auto;

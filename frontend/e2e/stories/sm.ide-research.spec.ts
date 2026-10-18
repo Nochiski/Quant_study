@@ -16,6 +16,7 @@ import {
   REQUESTED_ENVIRONMENT,
   requireData,
 } from "../workbench-helpers";
+import { waitForSettledDocument } from "../editor-helpers";
 import { expectResearchMenuReadable } from "../ide-research/menu-checks";
 
 const scenario = async (page: Page, info: TestInfo, width: number) => {
@@ -190,6 +191,7 @@ test(
   { tag: ["@story", "@US-SM-12"] },
   async ({ page }, info) => {
     test.setTimeout(120_000);
+    await menuGeometryScenario(page, info);
     await scenario(page, info, 1440);
   },
 );
@@ -201,3 +203,29 @@ test(
     await scenario(page, info, 360);
   },
 );
+
+// 기존 데스크톱 과업 안에서 제목 길이와 본문 폭 경계를 함께 확인한다.
+const menuGeometryScenario = async (page: Page, info: TestInfo) => {
+    for (const [label, title] of [
+      ["short", "연구"],
+      ["long", "현재 선택한 전략의 원문과 실행 환경을 유지하며 연구를 이어가는 긴 제목"],
+    ]) {
+      const saved = requireData(
+        (await createStrategyDocument({ client: apiClient, body: {
+          format: "yaml", source: mustReplace(GOLDEN, "퀄리티 모멘텀", title!),
+        } })).data,
+        "제목 길이별 메뉴 검증 전략",
+      );
+      await page.goto(`/research/strategies/${saved.strategy_id}/revisions/${saved.revision}?view=yaml`);
+      await waitForSettledDocument(page);
+      const menu = page.locator("summary").filter({ hasText: /^연구/u });
+      for (const width of [768, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 640 });
+        await menu.click();
+        await expectResearchMenuReadable(page, menu);
+        await page.screenshot({ path: info.outputPath(`${label}-title-menu-${width}.png`) });
+        await menu.press("Escape");
+        await expect(menu).toBeFocused();
+      }
+    }
+};

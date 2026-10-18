@@ -41,7 +41,11 @@ export const ExperimentCompletionNotice = () => {
         const id = item.record.experiment_id;
         return (
           <div key={id} className="experiment-notice__item" role="status">
-            <strong>{tFill("experiments.notice.done", { id })}</strong>{" "}
+            <strong title={id}>
+              {tFill("experiments.notice.done", {
+                id: id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id,
+              })}
+            </strong>{" "}
             <Link
               to="/research/experiments/$experimentId"
               params={{ experimentId: id }}

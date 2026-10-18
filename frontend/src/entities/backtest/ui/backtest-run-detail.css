@@ -115,7 +115,6 @@
   gap: var(--space-3);
 }
 
-.run-detail .result-chart,
 .run-detail .monthly-panel,
 .run-detail .raw-metric-panel,
 .run-detail .trade-panel,
@@ -127,54 +126,11 @@
   background: var(--surface-raised);
 }
 
-.run-detail .result-chart header,
-.run-detail .result-chart footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.run-detail .result-chart h4,
 .run-detail .monthly-panel h4,
 .run-detail .raw-metric-panel h4,
 .run-detail .trade-panel h4 {
   margin: 0;
   font-size: var(--text-size-body);
-}
-
-.run-detail .chart-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  font-size: var(--text-size-small);
-  font-weight: var(--font-weight-heading);
-}
-
-.run-detail .result-chart svg {
-  display: block;
-  width: 100%;
-  height: calc(var(--space-6) * 6);
-  margin-top: var(--space-4);
-}
-
-.run-detail .result-chart svg line {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-
-.run-detail .result-chart svg path {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
-.run-detail .result-chart footer {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-size-small);
 }
 
 .run-detail .monthly-panel header span,
@@ -399,11 +355,4 @@
 
 .run-detail [id] {
   scroll-margin-block: var(--space-4);
-}
-
-@media (max-width: 720px) {
-  .run-detail .result-chart header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 }

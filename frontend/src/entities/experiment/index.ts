@@ -43,3 +43,5 @@ export type {
 } from "../../shared/api";
 
 export { continuousAccountErrorKey } from "./model/continuous-account-copy";
+
+export { capacityReportQuery, useCapacityPreview, useCreateCapacity } from "./model/capacity-queries";

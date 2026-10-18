@@ -1,4 +1,5 @@
 import "./primitives.css";
+import "./analysis-panel.css";
 
 export { Badge, type BadgeTone } from "./badge";
 export { Button, type ButtonTone } from "./button";

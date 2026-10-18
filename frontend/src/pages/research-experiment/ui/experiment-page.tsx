@@ -28,6 +28,7 @@ import { Link, useParams } from "../../../shared/lib/router";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 import { AuditTrail } from "./audit-trail";
+import { CapacityReport } from "../../../features/check-capacity";
 import { ContinuousAccount } from "./continuous-account";
 import "./experiment-page.css";
 
@@ -354,6 +355,7 @@ export const ExperimentPage = () => {
             </table>
           </div>
         </section>
+        {record.design.kind === "capacity_sweep" ? <CapacityReport experimentId={experimentId} settled={experiment.data.settled} /> : null}
         {record.design.measured ? (
           <WalkForward
             experimentId={experimentId}

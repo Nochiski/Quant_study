@@ -951,14 +951,15 @@ describe("experiments", () => {
     12_000,
   );
 
-  it("announces an experiment that finishes while the app is open, but not one done before", async () => {
+  it.each(["e-late", "4a8d0176-85c8-4292-a233-5e0d158c409d"])("완료 알림은 식별자 %s를 요약해도 원본 상세로 이동하고 닫을 수 있다", async (id) => {
+    const summary = id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
     let listed = 0;
     server.use(
       http.get(`${API}/api/v1/experiments`, () => {
         listed += 1;
         return HttpResponse.json({
           items: [
-            experiment("e-late", listed === 1 ? "running" : "completed"),
+            experiment(id, listed === 1 ? "running" : "completed"),
             experiment("e-old", "completed"),
           ],
           next_after: null,
@@ -970,18 +971,19 @@ describe("experiments", () => {
     const user = userEvent.setup();
     mount("/research/backtests");
 
-    const done = await screen.findByText("실험 e-late 완료", undefined, {
+    const done = await screen.findByText(`실험 ${summary} 완료`, undefined, {
       timeout: 5_000,
     });
     expect(screen.queryByText("실험 e-old 완료")).not.toBeInTheDocument();
+    expect(done).toHaveAttribute("title", id);
     const item = done.closest("[role='status']")!;
     expect(
       within(item as HTMLElement).getByRole("link", { name: "후보 보기" }),
-    ).toHaveAttribute("href", "/research/experiments/e-late");
+    ).toHaveAttribute("href", `/research/experiments/${id}`);
     await user.click(
       within(item as HTMLElement).getByRole("button", { name: "닫기" }),
     );
-    expect(screen.queryByText("실험 e-late 완료")).not.toBeInTheDocument();
+    expect(screen.queryByText(`실험 ${summary} 완료`)).not.toBeInTheDocument();
   }, 10_000);
 
   it("fills a new experiment with the constraints and exact choice values of a finished one", async () => {

@@ -4,6 +4,7 @@ import { useId, useRef, useState } from "react";
 
 import {
   BacktestAccountReport,
+  BacktestFactorRegression,
   BacktestValidationReport,
   useBacktestAccountReport,
   useBacktestValidationReport,
@@ -17,6 +18,7 @@ import {
   useRunEnvironmentSchema,
 } from "../../../entities/backtest";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
+import { CheckCapacity } from "../../../features/check-capacity";
 import { RobustnessCheck } from "../../../features/check-robustness";
 import { BacktestRunActions } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
@@ -190,6 +192,10 @@ export const BacktestRunPage = () => {
             environmentFields={environmentFields}
           />
         ) : null}
+        {completed && result.data ? <>
+          <CheckCapacity runId={runId} request={request.isError ? undefined : request.data} requestError={request.error} reloadRequest={() => { void request.refetch(); }} single={summary.data?.kind === "single"} />
+          <BacktestFactorRegression runId={runId} fingerprint={result.data.manifest.run_fingerprint} />
+        </> : null}
       </div>
       {assistantAvailable && panel.mounted ? (
         // 결과 화면의 AI 패널. landmark·이름·제목은 여기가 소유하고 채팅 feature는 이름 없는

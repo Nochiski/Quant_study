@@ -27,3 +27,5 @@ export { BacktestMetricTable } from "./ui/backtest-metrics";
 export { useRunParameters } from "./model/use-run-parameters";
 export type { RunParameterContext } from "./model/use-run-parameters";
 export { RunParameterSelection } from "./ui/run-parameter-selection";
+
+export { BacktestFactorRegression } from "./ui/backtest-factor-regression";

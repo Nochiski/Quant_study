@@ -1,4 +1,5 @@
 import { t } from "../../../shared/config";
+import "./line-chart.css";
 
 /** 같은 x 축(세션 순서)을 나눠 쓰는 선 하나. 값이 없는 칸은 선을 끊는다. */
 export type ChartSeries = {

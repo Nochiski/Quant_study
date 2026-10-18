@@ -441,7 +441,9 @@ const Form = ({
  */
 export const NewExperimentPage = () => {
   const { run, from } = useSearch({ from: "/research/experiments/new" });
-  const historySeed = useRouterState({ select: state => state.location.state.experimentSeed });
+  const location = useRouterState({ select: state => state.location });
+  const historySeed = location.state.experimentSeed;
+  const entryKey = location.state.__TSR_key;
   // URL로 지정한 기반을 우선하며 IDE 입력은 run/from이 없는 명시적 이동에서만 쓴다.
   const seed = run === undefined && from === undefined ? historySeed : undefined;
   const request = useBacktestRequest(run ?? null);
@@ -450,6 +452,8 @@ export const NewExperimentPage = () => {
     enabled: from !== undefined,
   });
   const source = from !== undefined ? origin : request;
+  // 떠나는 화면이 목적지 entry key로 새 Form을 열어 불필요한 미리 계산을 보내지 않는다.
+  if (location.pathname !== "/research/experiments/new") return null;
   return (
     <section
       className="page data-list-page"
@@ -464,7 +468,8 @@ export const NewExperimentPage = () => {
       {seed !== undefined ? (
         <>
           <p>{t("research.ide.received")}</p>
-          <Form base={seed} initialSearch={{}} initialSplit={INITIAL_SPLIT} />
+          {/* Form 입력은 기반/방문 단위다. router가 부여한 entry key로만 새 입력 세션을 구분한다. */}
+          <Form key={`seed:${entryKey}`} base={seed} initialSearch={{}} initialSplit={INITIAL_SPLIT} />
         </>
       ) : run === undefined && from === undefined ? (
         <p className="page-state">
@@ -484,6 +489,7 @@ export const NewExperimentPage = () => {
         />
       ) : origin.data !== undefined ? (
         <Form
+          key={`from:${from}:${entryKey}`}
           base={origin.data.record.run}
           initialSearch={Object.fromEntries(
             origin.data.record.design.search.axes.map((axis) => [
@@ -498,6 +504,7 @@ export const NewExperimentPage = () => {
         />
       ) : request.data !== undefined ? (
         <Form
+          key={`run:${run}:${entryKey}`}
           base={request.data}
           initialSearch={{}}
           initialSplit={INITIAL_SPLIT}

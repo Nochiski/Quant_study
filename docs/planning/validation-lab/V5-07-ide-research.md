@@ -20,6 +20,11 @@
 - 전달 수단은 typed browser history state의 `experimentSeed`다. 서버 캐시나 영구 연구 초안이 아니다.
   `run`/`from` URL이 있으면 그 명시적인 기반을 우선하며 seed를 무시한다. seed도 URL 기반도 없으면
   기존 기반 실행 선택 안내를 보이고 임의 기본값으로 실험을 만들지 않는다.
+- 실험 Form의 편집 축·제약·분할은 router가 부여한 `location.state.__TSR_key`와 기반 종류·ID를
+  입력 세션 경계로 쓴다. 같은 history entry의 일반 재렌더/조회 갱신은 사용자 편집을 유지한다.
+  다른 seed 방문 또는 run/from 기반으로 옮기면 그 기반의 초기값으로 새 Form을 연다. 뒤로/앞으로
+  돌아와도 떠나기 전 편집값을 별도 보관·복원하지 않고 해당 entry의 기반 초기값에서 시작한다.
+  이는 명시한 초기화 경계이며 새 초안 저장소·클라이언트 캐시를 추가하지 않는다.
 - 기존 실험 Form이 탐색·분할과 미리 계산을 소유한다. 명시적인 대기열 접수 전에는 실험 생성 POST가
   없다. 분할이 측정 범위를 소유하므로 기존 Form의 `metric_windows=[]` 규칙을 유지한다.
 - 레시피 탐색은 기존 `search.recipe`·`path`·Graph/Recipe projection만 전환한다. 중간 결과에서

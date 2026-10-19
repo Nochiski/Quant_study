@@ -61,7 +61,10 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   discriminated error 계약으로 함께 제공한다. 동시 실행 슬롯 수는 환경 변수
   `STRATEGY_WORKBENCH_RUN_SLOTS`(기본 2)가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free
   run slot`)로 기다린다. 배정 순서(단일 실행 전용 슬롯·실험 라운드로빈)와 같은 입력 잇기·공유 run 취소
-  규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다.
+  규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다. run 계산은
+  기본으로 서버 프로세스의 스레드에서 돌고, `STRATEGY_WORKBENCH_RUN_ISOLATION=process`(opt-in, 기본
+  `thread`)면 run마다 worker 프로세스(`python -m strategy_workbench.bootstrap.run_worker`)에서 돈다 —
+  설계는 `docs/superpowers/specs/2026-10-19-run-worker-process-design.md`, 취소·고장·판본 대조는 W1-03 몫.
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다

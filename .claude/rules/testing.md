@@ -40,7 +40,8 @@ OS 사용자 설정 디렉터리의 공급자 비밀)를 열면 실제 대화 �
 - `backend/tests/runtime_path_guard.py`의 감사 훅이 이 프로세스가 감시 경로를 열면 그 테스트를
   실패시킨다. 하위 프로세스와 네이티브 라이브러리가 C 코드에서 직접 여는 파일(in-memory 연결의
   SQLite `ATTACH`, `duckdb.connect(path)`)은 보지 못한다. 그런 경로를 쓰는 테스트는 가드에 기대지
-  말고 경로를 직접 격리한다.
+  말고 경로를 직접 격리한다. 예: run worker 통합 테스트(`tests/integration/test_run_worker_process.py`)는
+  하위 프로세스가 쓰는 산출물 루트·연구 DB를 tmp로 명시한다.
 
 ## 산출물 검증이 필요하다면
 

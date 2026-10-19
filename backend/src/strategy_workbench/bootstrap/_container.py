@@ -383,7 +383,7 @@ def build_run_versions(
 ) -> VersionBundle:
     """이 프로세스가 run 을 계산할 판본 묶음(spec D6).
 
-    worker 가 `ready` 에 싣고, W1-03 에서 부모가 자기 묶음과 대조한다.
+    서버가 부팅 때 한 번 계산해 두고, worker 가 `ready` 에 실은 자기 묶음과 대조한다.
     """
     return VersionBundle(
         snapshot_id=equity_data.snapshot().snapshot_id,

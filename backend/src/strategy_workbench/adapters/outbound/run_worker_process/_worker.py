@@ -112,14 +112,12 @@ def serve(
     job 뒤의 stdin 은 감시 스레드가 끝까지 읽는다. EOF 면 부모가 사라진 것이라 결과를 쓰지 않고
     끝낸다(spec D5 보조 경로).
     """
-    try:
-        line = stdin.readline()
-        if not line:
-            raise ProtocolError("not_json", "run worker stdin closed before a job line arrived")
-        message = decode_job(line)
-    except ProtocolError:
-        logger.exception("run worker could not read its job line")
-        raise
+    # job 읽기·부팅 실패는 여기서 로그로 남기지 않고 올린다. 잡히지 않은 예외의 traceback 이
+    # stderr 에 한 번 남고, 부모가 run_id 를 붙여 ERROR 로 옮긴다(#581 리뷰 nit).
+    line = stdin.readline()
+    if not line:
+        raise ProtocolError("not_json", "run worker stdin closed before a job line arrived")
+    message = decode_job(line)
     job = message.job
     watch = _ParentWatch(stdin)
     watch.start()
@@ -129,11 +127,7 @@ def serve(
         stdout.write(encode_event(event))
         stdout.flush()
 
-    try:
-        booted = boot(message.settings)
-    except BaseException:
-        logger.exception("run worker boot failed — run_id=%s", job.run_id)
-        raise
+    booted = boot(message.settings)
     sender(ReadyMessage(booted.versions))
     computation = replace(
         booted.computation,

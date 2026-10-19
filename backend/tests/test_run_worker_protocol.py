@@ -160,6 +160,24 @@ def test_both_directions_reject_another_protocol_version(tmp_path: Path, version
     assert job_error.value.reason == event_error.value.reason == "version_mismatch"
 
 
+def test_a_json_object_without_a_protocol_field_is_not_a_version_mismatch(tmp_path: Path) -> None:
+    """라이브러리가 찍은 JSON 줄 같은 것은 판본 불일치가 아니다(재시작 안내를 내지 않는다)."""
+    line = json.dumps({"type": "progress", "stage": "tape"}) + "\n"
+
+    with pytest.raises(ProtocolError) as event_error:
+        decode_event(line)
+    with pytest.raises(ProtocolError) as job_error:
+        decode_job(line)
+    assert event_error.value.reason == job_error.value.reason == "not_protocol"
+
+
+def test_message_types_outside_the_protocol_are_folded() -> None:
+    assert ProtocolError("unexpected_type", "x", message_type="ready").message_type == "ready"
+    assert ProtocolError("unexpected_type", "x", message_type="C:/x").message_type == "<unknown>"
+    assert ProtocolError("unexpected_type", "x", message_type=7).message_type == "<unknown>"
+    assert ProtocolError("not_json", "x").message_type is None
+
+
 @pytest.mark.parametrize(
     "line",
     [

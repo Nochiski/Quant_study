@@ -333,11 +333,12 @@ class _WorkerRun:
                     "run worker speaks another protocol version than the server — "
                     f"run_id={run_id}; restart the server",
                 )
-            # 줄 발췌는 로그에만 남겼다. 상태에는 종류와 메시지 type 만 싣는다(#575 리뷰 P3).
+            # 줄 발췌는 로그에만 남겼다. 상태에는 종류와 메시지 type 만 싣고, type 은 이 판본이 아는
+            # 이름이 아니면 `<unknown>` 으로 접혀 있다(#575 리뷰 P3, #581 리뷰 nit).
             return RunFailed(
                 "backtest.run.internal",
                 f"run worker broke the protocol — run_id={run_id} "
-                f"reason={reading.broken.reason} type={reading.broken.message_type!r} "
+                f"reason={reading.broken.reason} type={reading.broken.message_type} "
                 f"exit_code={exit_code}",
             )
         terminal = reading.terminal
@@ -373,6 +374,13 @@ class _WorkerRun:
                 continue
             try:
                 event = decode_event(raw.decode("utf-8"))
+                if not reading.ready and not isinstance(event, ReadyMessage):
+                    # 판본을 대조하기 전의 진행·종결은 믿을 수 없다(D6, #581 리뷰 nit).
+                    raise ProtocolError(
+                        "before_ready",
+                        "run worker sent an event before its ready event — "
+                        f"type={type(event).__name__}",
+                    )
                 if reading.terminal is not None:
                     raise ProtocolError(
                         "after_terminal",
@@ -390,6 +398,7 @@ class _WorkerRun:
                 process.kill()
                 continue
             if isinstance(event, ReadyMessage):
+                reading.ready = True
                 mismatched = self._versions.mismatched(event.versions)
                 if mismatched:
                     logger.error(
@@ -437,6 +446,7 @@ class _Reading:
     """stdout 을 읽으며 모은 것."""
 
     def __init__(self) -> None:
+        self.ready = False
         self.terminal: CommittedMessage | FailedMessage | None = None
         self.broken: ProtocolError | None = None
         self.mismatched: tuple[str, ...] = ()

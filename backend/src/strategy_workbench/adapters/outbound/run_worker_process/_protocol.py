@@ -39,9 +39,12 @@ ProtocolErrorReason = Literal[
     "not_utf8",
     "not_json",
     "not_object",
+    # JSON 객체이지만 `protocol` 칸이 없다 — 프로토콜 줄이 아니다(다른 판본과 구별한다).
+    "not_protocol",
     "version_mismatch",
     "unexpected_type",
     "invalid_fields",
+    "before_ready",
     "after_terminal",
 ]
 
@@ -49,7 +52,8 @@ ProtocolErrorReason = Literal[
 class ProtocolError(ValueError):
     """상대가 보낸 줄을 이 판본의 프로토콜로 읽을 수 없다.
 
-    `reason`·`message_type` 은 상태에 실어도 되는 요약이고, 메시지 본문(줄 발췌 포함)은 로그용이다.
+    `reason`·`message_type` 은 상태에 실어도 되는 요약이고(`message_type` 은 이 판본이 아는
+    이름이거나 `<unknown>`), 메시지 본문(줄 발췌 포함)은 로그용이다.
     """
 
     def __init__(
@@ -57,7 +61,13 @@ class ProtocolError(ValueError):
     ) -> None:
         super().__init__(detail)
         self.reason: ProtocolErrorReason = reason
-        self.message_type = message_type
+        self.message_type: str | None = (
+            None
+            if message_type is None
+            else message_type
+            if isinstance(message_type, str) and message_type in _MESSAGE_TYPES
+            else "<unknown>"
+        )
 
 
 @dataclass(frozen=True)
@@ -162,6 +172,9 @@ _EVENT_TYPES: dict[type, str] = {
     CommittedMessage: "committed",
     FailedMessage: "failed",
 }
+# 상태 문장에 실어도 되는 메시지 type(`ProtocolError.message_type`). 이 밖의 값은 상대가 보낸
+# 원문이라 `<unknown>` 으로 접는다.
+_MESSAGE_TYPES = frozenset({"job", "proceed", *_EVENTS})
 
 
 def encode_job(job: RunJob, settings: WorkerSettings) -> str:
@@ -260,7 +273,11 @@ def _read(line: str) -> tuple[object, dict[str, Any]]:
         raise ProtocolError(
             "not_object", f"run worker line is not a JSON object — line={line[:200]!r}"
         )
-    version = payload.pop("protocol", None)
+    if "protocol" not in payload:
+        raise ProtocolError(
+            "not_protocol", f"run worker line has no protocol field — line={line[:200]!r}"
+        )
+    version = payload.pop("protocol")
     kind = payload.pop("type", None)
     if version != PROTOCOL_VERSION:
         raise ProtocolError(

@@ -40,6 +40,7 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol imp
     FailedMessage,
     ProgressMessage,
     decode_event,
+    encode_event,
     encode_job,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -295,6 +296,39 @@ def test_a_supervision_error_still_ends_the_worker_and_removes_its_leftovers(
     assert outcome.error_code == "backtest.run.internal"
     assert wait_for_exit(wait_for_marker(marker), timeout_s=5.0)
     assert _leftovers(root, "run-supervision-error") == []
+
+
+def _scripted(tmp_path: Path, *lines: str) -> RunOutcome:
+    """job 을 읽지 않고 `lines` 를 그대로 쓰고 끝나는 가짜 worker 의 결말."""
+    script = "import sys\nsys.stdout.write(''.join(sys.argv[1:]))\nsys.stdout.flush()\n"
+    listener = _Recorder()
+    ProcessRunExecution(
+        WorkerSettings("mock", None, tmp_path / "artifacts"),
+        versions=parent_versions(),
+        discard_unfinished=lambda _run_id: None,
+        command=[sys.executable, "-c", script, *lines],
+    ).start(resolved_job("run-scripted"), listener)
+    return listener.wait()
+
+
+def test_a_terminal_event_before_ready_breaks_the_protocol(tmp_path: Path) -> None:
+    """판본 대조(`ready`) 전의 종결은 믿지 않는다(D6, #581 리뷰 nit)."""
+    outcome = _scripted(
+        tmp_path, encode_event(FailedMessage("backtest.run.data_not_ready", "early", None))
+    )
+
+    assert isinstance(outcome, RunFailed)
+    assert outcome.error_code == "backtest.run.internal"
+    assert "reason=before_ready" in outcome.error
+
+
+def test_an_unknown_message_type_is_not_copied_into_the_run_error(tmp_path: Path) -> None:
+    """상대가 보낸 type 원문은 상태 문장에 싣지 않고 `<unknown>` 으로 접는다(#581 리뷰 nit)."""
+    outcome = _scripted(tmp_path, '{"protocol": 1, "type": "C:/server/secret"}\n')
+
+    assert isinstance(outcome, RunFailed)
+    assert "reason=unexpected_type type=<unknown>" in outcome.error
+    assert "secret" not in outcome.error
 
 
 class _Recorder:

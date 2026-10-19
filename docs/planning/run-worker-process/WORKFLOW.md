@@ -150,6 +150,9 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 **Acceptance**:
 - 슬롯과 무관하게 `ready`까지 부팅한 예비 worker를 항상 1개 둔다. 쓰면 바로 새 예비를 띄운다.
 - 예비 부팅 실패·판본 불일치 정책은 spec D7을 따른다. 서버 종료와 reload 때 예비 worker도 정리된다.
+- #581 리뷰 nit(후속): 서버 종료 정리를 `app.router.add_event_handler("shutdown", …)`에서 FastAPI lifespan
+  context로 옮긴다. 실험 SSE 회수(`_experiment_routes.py`)도 같은 방식이라 둘을 함께 옮긴다. W1-03에서는
+  범위가 커져 미뤘다.
 - 프로세스 모드 전체 `npm run test:e2e`(Windows) 시간이 스레드 모드 대비 5% 이하로 늘어난다(V-7). 두 시간을 PR 본문에 남긴다.
 
 ### W2-02 — 메모리 가드

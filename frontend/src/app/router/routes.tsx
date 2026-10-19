@@ -91,6 +91,10 @@ const StrategyRevisionPage = lazyRouteComponent(
   () => import("../../pages/research-strategy-revision"),
   "StrategyRevisionPage",
 );
+const ResearchHomePage = lazyRouteComponent(
+  () => import("../../pages/research-home"),
+  "ResearchHomePage",
+);
 const StrategiesPage = lazyRouteComponent(
   () => import("../../pages/research-strategies"),
   "StrategiesPage",
@@ -181,13 +185,17 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  beforeLoad: () => {
+  // 연구 홈(재설계 P6). 옛 빌더 북마크(`?step=…&run=…`)만 예전처럼 새 전략 편집기로 보낸다.
+  beforeLoad: ({ search }) => {
+    const legacy = search as Record<string, unknown>;
+    if (legacy.step === undefined && legacy.run === undefined) return;
     throw redirect({
       to: "/research/strategies/new",
       search: {},
       replace: true,
     });
   },
+  component: ResearchHomePage,
 });
 
 const legacyBuilderRoute = createRoute({

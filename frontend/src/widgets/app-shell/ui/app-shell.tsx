@@ -14,6 +14,7 @@ type AppShellProps = {
 
 const RESEARCH = [
   { key: "research", label: "nav.research", icon: "research", to: null },
+  { key: "home", label: "nav.home", icon: "home", to: "/", exact: true },
   {
     key: "strategies",
     label: "nav.strategies",
@@ -89,6 +90,7 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
                   search={{}}
                   className="app-shell__link"
                   activeProps={{ "aria-current": "page" }}
+                  activeOptions={{ exact: "exact" in item && item.exact }}
                 >
                   <span className="app-shell__icon" aria-hidden="true">
                     <NavigationIcon name={item.icon} />

@@ -4357,7 +4357,9 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
 describe("AI 어시스턴트 제안 적용 (B-04)", () => {
   /** 사이드바를 열고 질문 하나를 보낸 뒤 그 턴의 SSE 연결을 돌려준다. */
   const askAssistant = async (user: ReturnType<typeof userEvent.setup>) => {
-    fireEvent.keyDown(window, { key: "a", altKey: true });
+    // AI 열은 처음부터 열려 있다(RD-04-A). 접혀 있을 때만 단축키로 연다.
+    if (screen.queryByRole("complementary", { name: "AI 어시스턴트" }) === null)
+      fireEvent.keyDown(window, { key: "a", altKey: true });
     const input = await screen.findByRole("textbox", {
       name: "어시스턴트에게 보낼 메시지",
     });
@@ -4444,7 +4446,7 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     const user = userEvent.setup();
     mount("/research/strategies/new");
     const view = await editor();
-    fireEvent.keyDown(window, { key: "a", altKey: true });
+    // AI 열은 처음부터 열려 있다(RD-04-A).
     const input = await screen.findByRole("textbox", {
       name: "어시스턴트에게 보낼 메시지",
     });

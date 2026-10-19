@@ -3,10 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import random
+import subprocess
+import sys
 from dataclasses import asdict, replace
 from datetime import date, timedelta
 from enum import Enum
+from pathlib import Path
 
 import pytest
 
@@ -1766,13 +1770,9 @@ def test_capped_allocation_does_not_depend_on_the_string_hash_seed() -> None:
     """상한 배분이 문자열 set 순회 순서에 기대면 같은 입력의 tape 해시가 프로세스마다 갈린다(T0-02).
 
     run 을 별도 worker 프로세스로 옮기면 서버와 worker 의 해시 seed 가 달라 같은 요청이 다른
-    tape 를 낸다.
+    tape 를 낸다. 가중 방식(점수·역위험)과 롱·숏 모두 같은 `_capped_allocate` 를 지나므로 롱
+    점수 가중 하나로 덮는다.
     """
-    import os
-    import subprocess
-    import sys
-    from pathlib import Path
-
     backend = Path(__file__).resolve().parents[2]
     code = (
         "import tests.domain.test_portfolio_pipeline as module;"

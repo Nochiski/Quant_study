@@ -19,7 +19,7 @@ import {
 import { failureReason } from "../../../shared/api";
 import { t, tDuration, tFill, type MessageKey } from "../../../shared/config";
 import { Link, useNavigate, useRouterState, useSearch } from "../../../shared/lib/router";
-import { Button, FailureNotice } from "../../../shared/ui";
+import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 import { ConstraintEditor, type Constraint } from "./constraint-editor";
 import "./new-experiment-page.css";
@@ -172,6 +172,7 @@ const Form = ({
 }) => {
   const navigate = useNavigate();
   const scrollHintId = useId();
+  const summaryTitleId = useId();
   // 탐색하는 파라미터 → 값 입력. 원 실험의 값은 받은 그대로 둔다.
   const [entries, setEntries] = useState<Record<string, Entry>>(() =>
     Object.fromEntries(
@@ -291,9 +292,18 @@ const Form = ({
                     <code>{id}</code>
                   </td>
                   <td>
-                    {values === undefined
-                      ? "—"
-                      : `${values.join(", ")} (${values.length})`}
+                    {values === undefined ? (
+                      "—"
+                    ) : (
+                      <ul
+                        className="experiment-chips"
+                        aria-label={tFill("experiments.new.valueCount", { count: values.length })}
+                      >
+                        {values.map((value) => (
+                          <li key={String(value)}>{String(value)}</li>
+                        ))}
+                      </ul>
+                    )}
                   </td>
                   <td>
                     {entry === undefined ? null : (
@@ -365,6 +375,12 @@ const Form = ({
               </option>
             ))}
           </select>
+          {split.selection_rule === INITIAL_SPLIT.selection_rule ? (
+            <small className="experiment-form__rule-note">
+              <Badge tone="neutral">{t("experiments.new.default")}</Badge>{" "}
+              {t("experiments.new.rule.neighbor_mean_sharpe_max.why")}
+            </small>
+          ) : null}
         </label>
       </fieldset>
       {preview.isError ? (
@@ -376,7 +392,8 @@ const Form = ({
       ) : preview.data === undefined ? (
         <p role="status">{t("page.loading")}</p>
       ) : (
-        <>
+        <section className="experiment-form__summary" aria-labelledby={summaryTitleId}>
+          <h2 id={summaryTitleId}>{t("experiments.new.summary")}</h2>
           <p role="status" aria-label={t("experiments.new.summary")}>
             {tFill("experiments.new.counts", {
               combinations: preview.data.combination_count,
@@ -406,10 +423,11 @@ const Form = ({
                   <th scope="col">{t("experiments.new.window")}</th>
                   <th scope="col">{t("experiments.new.train")}</th>
                   <th scope="col">{t("experiments.new.test")}</th>
+                  <th scope="col">{t("experiments.new.span")}</th>
                 </tr>
               </thead>
               <tbody>
-                {preview.data.design.windows.map((window, index) => (
+                {preview.data.design.windows.map((window, index, windows) => (
                   <tr key={index}>
                     <td>{index + 1}</td>
                     <td>
@@ -418,12 +436,15 @@ const Form = ({
                     <td>
                       {window.test_start} ~ {window.test_end}
                     </td>
+                    <td>
+                      <WindowBar window={window} windows={windows} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </>
+        </section>
       )}
       {create.isError ? (
         <FailureNotice
@@ -456,6 +477,47 @@ const Form = ({
  * 새 실험(검증 랩 V5-01, US-SM-14). 기반은 백테스트 실행(`run`) 하나의 요청이거나, 끝난 실험(`from`)의 기반·
  * 탐색 공간·분할이다. 조합·창·실행 수와 시도 수 변화는 backend 미리 계산이 정한다.
  */
+type DesignWindow = { train_start: string; train_end: string; test_start: string; test_end: string };
+
+const dayOf = (date: string) => Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+
+/**
+ * 창 하나를 전체 기간 위의 막대로 보인다: 학습은 연한 칸, 검증은 진한 칸(RD-09-A). 날짜는 서버 설계 그대로이고
+ * 막대 위치만 화면이 정한다. 연도 문장을 함께 둬 막대를 읽지 못해도 같은 정보를 얻는다.
+ */
+const WindowBar = ({
+  window,
+  windows,
+}: {
+  window: DesignWindow;
+  windows: readonly DesignWindow[];
+}) => {
+  const start = Math.min(...windows.map((item) => dayOf(item.train_start)));
+  const end = Math.max(...windows.map((item) => dayOf(item.test_end)));
+  const span = Math.max(end - start, 1);
+  const at = (date: string) => ((dayOf(date) - start) / span) * 100;
+  return (
+    <span className="experiment-window">
+      <span className="experiment-window__bar" aria-hidden="true">
+        <span
+          className="experiment-window__train"
+          style={{ left: `${at(window.train_start)}%`, width: `${at(window.train_end) - at(window.train_start)}%` }}
+        />
+        <span
+          className="experiment-window__test"
+          style={{ left: `${at(window.test_start)}%`, width: `${at(window.test_end) - at(window.test_start)}%` }}
+        />
+      </span>
+      <small>
+        {tFill("experiments.new.spanText", {
+          train: `${window.train_start.slice(0, 4)}–${window.train_end.slice(0, 4)}`,
+          test: `${window.test_start.slice(0, 4)}–${window.test_end.slice(0, 4)}`,
+        })}
+      </small>
+    </span>
+  );
+};
+
 export const NewExperimentPage = () => {
   const { run, from } = useSearch({ from: "/research/experiments/new" });
   const location = useRouterState({ select: state => state.location });

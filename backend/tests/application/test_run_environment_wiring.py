@@ -34,6 +34,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import Moc
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -151,6 +152,7 @@ def _runs(portfolio: PortfolioDesignService, tmp_path: Path, run_id: str) -> Bac
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
+        run_execution=ThreadRunExecution,
     )
 
 
@@ -546,6 +548,7 @@ def test_adv20_reads_forty_warmup_sessions_and_caps_fills_by_them(
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "adv-run",
+        run_execution=ThreadRunExecution,
     )
     runs.start(BacktestRunSpec(strategy=_spec(), core=core, environment=environment))
     assert wait_for_terminal_run(runs, "adv-run").status.value == "completed"
@@ -626,6 +629,7 @@ def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "impact-run",
+        run_execution=ThreadRunExecution,
     )
     runs.start(BacktestRunSpec(strategy=_spec(), core=core, environment=environment))
     assert wait_for_terminal_run(runs, "impact-run").status.value == "completed"
@@ -715,6 +719,7 @@ def test_missing_impact_inputs_warn_only_when_the_run_actually_fills(tmp_path: P
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "cold-impact",
+        run_execution=ThreadRunExecution,
     )
     runs.start(
         BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=environment)
@@ -737,6 +742,7 @@ def test_zero_adv_cap_is_explained_by_original_order_updates(tmp_path: Path) -> 
         LocalArtifactStore(tmp_path),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "zero-adv-cap",
+        run_execution=ThreadRunExecution,
     )
     runs.start(
         BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=environment)

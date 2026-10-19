@@ -163,6 +163,19 @@ def test_runtime_artifact_root_does_not_clean_another_servers_staging(
     assert isolated.is_dir()
 
 
+def test_container_boot_removes_staging_left_in_its_own_artifact_root(tmp_path: Path) -> None:
+    """부팅 청소는 composition root 가 자기 산출물 루트에서 한 번 한다(run-worker spec D4)."""
+    from strategy_workbench.bootstrap import _container
+
+    root = tmp_path / "backtest-runs"
+    orphan = root / ".killed-run.0123abcd.tmp"
+    orphan.mkdir(parents=True)
+
+    _container.build_container(artifact_root=root)
+
+    assert not orphan.exists()
+
+
 def test_explicit_http_artifact_root_is_forwarded_without_reading_runtime_env(
     monkeypatch, tmp_path: Path
 ) -> None:

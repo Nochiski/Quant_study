@@ -22,6 +22,16 @@ from strategy_workbench.application.backtest_run.ports.outgoing.backtest_executo
     ProgressCallback,
     RunCancelledError,
 )
+from strategy_workbench.application.backtest_run.ports.outgoing.run_execution import (
+    RunCancelled,
+    RunCommitted,
+    RunExecutionPort,
+    RunFailed,
+    RunHandle,
+    RunJob,
+    RunListener,
+    RunOutcome,
+)
 from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
     BacktestRunNotFoundError,
     BacktestRunRepositoryPort,
@@ -58,7 +68,15 @@ __all__ = [
     "MarketBarRecord",
     "ProgressCallback",
     "RunKind",
+    "RunCancelled",
     "RunCancelledError",
+    "RunCommitted",
+    "RunExecutionPort",
+    "RunFailed",
+    "RunHandle",
+    "RunJob",
+    "RunListener",
+    "RunOutcome",
     "TrialLedgerRecords",
     "TrialLineageAlreadyMergedError",
     "UniverseMembershipRecord",

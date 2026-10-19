@@ -61,9 +61,15 @@ class LocalArtifactStore:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
         self._root.mkdir(parents=True, exist_ok=True)
-        # 커밋 도중 프로세스가 죽으면 staging 이 남는다. 부팅 때 여기서 한 번 치운다 — 루트 하나를
-        # 서버 프로세스 하나가 쓴다는 전제다(연구 기록 DB 와 같다). 못 지워도(Windows 잠금 등)
-        # 부팅은 막지 않는다 — 남은 staging 은 run 이 읽지 않는다.
+
+    def remove_orphan_staging(self) -> None:
+        """커밋 도중 프로세스가 죽어 남은 staging(`.*.tmp`)을 모두 지운다.
+
+        루트 하나를 서버 프로세스 하나가 쓴다는 전제라, 그 서버의 composition root 가 부팅 때 한 번
+        부른다(연구 기록 DB 와 같다). 생성자에서 지우지 않는다 — 같은 루트를 여는 다른 프로세스가
+        도는 run 의 staging 을 지우게 된다(run-worker spec D4). 못 지워도(Windows 잠금 등) 부팅은
+        막지 않는다 — 남은 staging 은 run 이 읽지 않는다.
+        """
         for staging in self._root.glob(".*.tmp"):
             try:
                 shutil.rmtree(staging)

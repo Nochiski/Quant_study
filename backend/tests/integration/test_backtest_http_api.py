@@ -27,6 +27,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestDataNotReadyError,
@@ -108,6 +109,7 @@ def _backtests_with_raw_load_barrier(
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
+        run_execution=ThreadRunExecution,
     )
     return backtests, barrier
 
@@ -285,6 +287,7 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
         barrier,
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: next(run_ids),
+        run_execution=ThreadRunExecution,
     )
     client = TestClient(_app_with_backtests(container, backtests))
     submitted = _run_body(client, "python")
@@ -464,6 +467,7 @@ def test_cancel_first_observed_by_a_progress_callback_ends_cancelled(tmp_path: P
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
+        run_execution=ThreadRunExecution,
     )
     client = TestClient(_app_with_backtests(container, backtests))
 
@@ -590,6 +594,7 @@ def test_engine_incompatible_strategy_is_rejected_at_start_with_the_issue_list(
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "must-not-be-accepted",
+        run_execution=ThreadRunExecution,
     )
     client = TestClient(_app_with_backtests(container, backtests))
 
@@ -759,7 +764,7 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
             raise failure
 
     monkeypatch.setattr(
-        "strategy_workbench.application.backtest_run._service.Thread", _UnstartableThread
+        "strategy_workbench.adapters.outbound.run_thread._execution.Thread", _UnstartableThread
     )
     run_id = "run-thread-unstartable"
     container = build_container(artifact_root=tmp_path / "unused")
@@ -833,7 +838,7 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     ],
 )
 def test_run_error_masks_server_paths_but_keeps_urls_and_units(raw: str, masked: str) -> None:
-    from strategy_workbench.application.backtest_run._service import _mask_paths
+    from strategy_workbench.application.backtest_run._computation import _mask_paths
 
     assert _mask_paths(raw) == masked
 
@@ -853,7 +858,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         PortfolioRawObservationInvalidDetail,
         PortfolioStrategyInvalidDetail,
     )
-    from strategy_workbench.application.backtest_run._service import (
+    from strategy_workbench.application.backtest_run._computation import (
         InvalidBacktestRunError,
         NoPositionsError,
         _failure_code,

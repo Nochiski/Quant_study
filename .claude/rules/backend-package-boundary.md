@@ -88,6 +88,12 @@ bootstrap ─> application + adapters
   facade `DEPENDS_ON`에 `domain.factor`를 더했고, 레지스트리는 bootstrap이 주입한다. 팩터 수익률·회귀
   규칙은 `domain/analytics`가 소유하며 HTTP `GET /api/v1/backtests/{run_id}/factor-regression`이 그대로
   노출한다.
+- 백테스트 run 계산을 어디서 돌릴지(run-worker spec D10·D13)는 `application/backtest_run`의
+  outgoing `RunExecutionPort`(`ports/outgoing/run_execution.py`)가 계약이다. 계산은 같은 노드의
+  `RunComputation`(`_computation.py`) 하나이고, 서비스는 상태 전이·완료와 취소의 선형화·저장만 한다.
+  `adapters/outbound/run_thread`는 그 계산을 같은 프로세스의 데몬 스레드에서 부르고 GC 구간
+  (`_gc_policy`)을 감싼다. `application.backtest_run` facade에만 의존한다. 어느 전송을 쓸지는
+  bootstrap이 `BacktestRunService(run_execution=...)`로 정한다.
 - V6-01 모의 사전등록은 `domain/backtest`의 동결 등록·필수 기준 비교와
   `application/holdout_registration`의 자체 source-pin·simulation-executor·ledger 포트가 소유한다.
   다른 application 서비스를 직접 import하지 않는다. 기존 `research_sqlite`가 schema v9의

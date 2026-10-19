@@ -38,6 +38,7 @@ from strategy_workbench.adapters.outbound.research_sqlite.facade.repository impo
     SQLiteBacktestRunRepository,
     SQLiteExperimentRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteFactorLibraryRepository,
     SQLiteStrategyDraftRepository,
@@ -173,21 +174,7 @@ def build_container(
     나른다. 레지스트리는 A-05·A-06이 자기 항목을 등록할 때까지 비어 있고, 팩토리는 시작할 때가
     아니라 처음 필요할 때 불린다(미설치 SDK가 서버 시작을 막지 않는다).
     """
-    equity_data: MockEquityDataAdapter | EquityDuckdbAdapter
-    if equity_adapter == "mock":
-        equity_data = MockEquityDataAdapter.demo()
-    elif equity_adapter == "duckdb":
-        if equity_root is None:
-            raise ValueError(
-                "equity_adapter='duckdb' requires equity_root — "
-                "pass the directory holding <table>/MANIFEST.json and equity.duckdb"
-            )
-        equity_data = EquityDuckdbAdapter(equity_root)
-    else:
-        raise ValueError(
-            f"unsupported equity adapter — equity_adapter={equity_adapter!r} "
-            f"available={EQUITY_ADAPTERS}"
-        )
+    equity_data = _equity_data(equity_adapter, equity_root)
     engine_portfolio = BacktestEnginePortfolioAdapter()
     factor_registry = build_default_factor_registry()
     portfolio_design = PortfolioDesignService(
@@ -229,14 +216,18 @@ def build_container(
             "e2e trial hold is on — experiment trial runs wait %.1fs before the engine stage",
             trial_hold_seconds,
         )
+    run_artifacts = LocalArtifactStore(run_artifact_root)
+    # 강제 종료가 남긴 staging 은 이 서버의 composition root 가 부팅 때 한 번 치운다(spec D4).
+    run_artifacts.remove_orphan_staging()
     backtest_runs = BacktestRunService(
         portfolio_design,
         strategy_repository,
         equity_data,
         hold or executor,
-        LocalArtifactStore(run_artifact_root),
+        run_artifacts,
         run_repository=run_repository,
         new_id=lambda: str(uuid4()),
+        run_execution=ThreadRunExecution,
         run_slots=run_slots,
         factor_registry=factor_registry,
     )
@@ -314,6 +305,25 @@ def build_container(
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,
+    )
+
+
+def _equity_data(
+    equity_adapter: str, equity_root: Path | None
+) -> MockEquityDataAdapter | EquityDuckdbAdapter:
+    """설정한 equity 어댑터를 만든다. 모르는 이름이나 빠진 루트는 mock 으로 돌아가지 않고 멈춘다."""
+    if equity_adapter == "mock":
+        return MockEquityDataAdapter.demo()
+    if equity_adapter == "duckdb":
+        if equity_root is None:
+            raise ValueError(
+                "equity_adapter='duckdb' requires equity_root — "
+                "pass the directory holding <table>/MANIFEST.json and equity.duckdb"
+            )
+        return EquityDuckdbAdapter(equity_root)
+    raise ValueError(
+        f"unsupported equity adapter — equity_adapter={equity_adapter!r} "
+        f"available={EQUITY_ADAPTERS}"
     )
 
 

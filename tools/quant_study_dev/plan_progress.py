@@ -46,6 +46,21 @@ PROFILES: dict[str, PlanProfile] = {
         "(?:P\\d+(?:\\.\\d+)?|[A-Z])-\\d{2}",
         False,
     ),
+    "columnar-tape": PlanProfile(
+        (
+            ("T0", "Planning package and prerequisite defect"),
+            ("T1", "Parity harness"),
+            ("T2", "Columnar raw panel port"),
+            ("T3", "Columnar factor evaluator"),
+            ("T4", "Pipeline switch"),
+            ("T5", "Columnar compiler"),
+            ("T6", "Consumer migration"),
+            ("T7", "Legacy path removal"),
+            ("T9", "Closeout review"),
+        ),
+        "T\\d+-\\d{2}",
+        False,
+    ),
     "run-worker-process": PlanProfile(
         (
             ("W0", "Planning package and benchmark"),

@@ -157,4 +157,7 @@
 - LATEST 원천은 `bisect_right(공개일들, cutoff) − 1`이다. 늦은 필드는 값을 비우고 MISSING으로 둔다(2014-2027). 법인 축은 `_corp_map`이다.
 - 셀 종류는 `_cell_kind`(232-253)가 정한다. 가림이 결측보다 먼저이고, `omitted_is_zero`면 0이다.
 - `security_id = ticker:span_seq`(170, 290-292). 숫자는 `float(Decimal)`(482-489)이다. 열 경로의 숫자 규칙은 spec D3 원시 숫자 행이다(비스케일 정수 ÷ 10^scale, 넘치면 `float(Decimal)`).
-- 열 경로(`_raw_panel.py`, T2-02)는 행 경로와 같은 `_grid_sql` 질의를 열 받기 투영으로 감싸 읽고, 셀 종류는 `_cell_kind`를 조합마다 평가한 표로 정한다. 질의 앞 판정(`_raw_request`)과 읽는 범위(`_fetch_range`)도 두 경로가 함께 쓴다.
+- 열 경로(`_raw_panel.py`, T2-02·T2-03)는 행 경로와 같은 `_grid_sql`·`_latest_sql` 질의를 열 받기 투영으로 감싸 읽고, 셀 종류는 `_cell_kind`를 조합마다 평가한 표로 정한다. 질의 앞 판정(`_raw_request`)과 읽는 범위(`_fetch_range`), 법인 축 대응(`_corp_map`)도 두 경로가 함께 쓴다.
+- 열 경로의 LATEST는 (축 키, 공개일) 정렬 열에서 `searchsorted(side="right") − 1`로 찾고 같은 축 키인지 본다. 축 키는 격자에 나온 티커 전부(랙 행 포함)이고, 법인 축은 `_corp_map`이 없는 티커를 셀 없음으로 둔다. 늦은 필드는 셀을 고른 뒤 필드 공개일 > 컷오프인 칸만 값 없는 MISSING·행 공개일로 바꾼다.
+- 숫자가 아닌 선언 타입은 행 경로 `_as_float`처럼 값이 실린 칸이 있을 때만 실패하고, 모두 NULL이면 값 없는 셀이다. duckdb 필드 계약에는 범주 필드가 없어 `text`는 -1, `categories`는 비어 있다.
+- 어댑터는 `load_raw_panel`로 `ColumnarRawObservationPort`를 선언한다(T2-03). 운영 파이프라인은 T4-01부터 고른다.

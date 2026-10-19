@@ -98,6 +98,7 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawObservation,
     RawObservationQuery,
     RawObservationSet,
+    RawPanel,
 )
 from strategy_workbench.domain.backtest.facade.runs import DataWarning, WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
@@ -1342,6 +1343,26 @@ class EquityDuckdbAdapter:
         progress(1.0)
         return result
 
+    def load_raw_panel(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None] = _noop_checkpoint,
+        progress: Callable[[float], None] = _noop_progress,
+    ) -> RawPanel:
+        """`ColumnarRawObservationPort` 능력 — 같은 원시 관측을 행 객체 없이 열로 낸다(T2-03).
+
+        결과는 `RawPanel.from_observation_set(self.load_raw_observations(query),
+        field_ids=query.field_ids)` 와 셀마다 같다(columnar-tape spec 5절 L0). 구현과 규칙은
+        `_raw_panel.load_raw_panel` 이 소유한다. 운영 파이프라인은 아직 이 능력을 쓰지 않는다
+        (T4-01).
+        """
+        # `_raw_panel` 은 이 모듈의 규칙(`_cell_kind`·`_grid_sql`·`_latest_sql`)을 가져다 쓴다.
+        # 모듈 맨 위에서 불러오면 순환 import 라 호출 때 불러온다.
+        from ._raw_panel import load_raw_panel
+
+        return load_raw_panel(self, query, checkpoint=checkpoint, progress=progress)
+
     # ── BacktestDataPort ──────────────────────────────────────────────────────
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
@@ -1845,7 +1866,7 @@ class EquityDuckdbAdapter:
     ) -> _GridSql:
         """`universe_daily` × `security_span` 격자에 GRID 원천을 (ticker, date) 로 붙이는 질의.
 
-        행 경로(`_grid`)와 열 경로(`_raw_panel.load_grid_raw_panel`)가 이 질의 하나를 쓴다. 결과 열
+        행 경로(`_grid`)와 열 경로(`_raw_panel.load_raw_panel`)가 이 질의 하나를 쓴다. 결과 열
         이름은 `_GridSql` 이 적는다.
         """
         member_expr = (
@@ -2025,7 +2046,7 @@ class EquityDuckdbAdapter:
     ) -> _LatestSql:
         """LATEST 원천 하나를 (축 키, 공개일)마다 한 행으로 줄여 읽는 질의.
 
-        행 경로(`_latest`)가 쓰고 열 경로(T2-03)도 이 질의 하나를 쓴다. 결과 열
+        행 경로(`_latest`)와 열 경로(`_raw_panel.load_raw_panel`)가 이 질의 하나를 쓴다. 결과 열
         이름은 `_LatestSql` 이 적는다. 축 키 목록은 `_KEYS_SQL` 자리 파라미터 하나다.
         """
         outputs = {

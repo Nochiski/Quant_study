@@ -23,3 +23,59 @@
   margin: 0;
   color: var(--text-muted);
 }
+
+.settings-page__section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.settings-page__section h2 {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+}
+
+.settings-theme {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.settings-theme__card {
+  display: grid;
+  gap: var(--space-2);
+  width: calc(var(--space-6) * 6);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  cursor: pointer;
+}
+
+.settings-theme__card[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.settings-theme__card input {
+  justify-self: start;
+}
+
+/* 견본은 각 테마의 대표 표면색이다. 원시 색은 쓰지 않고 테마 토큰의 고정 짝을 읽는다. */
+.settings-theme__swatch {
+  display: block;
+  height: calc(var(--space-6) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.settings-theme__swatch--light {
+  background: var(--theme-swatch-light);
+}
+
+.settings-theme__swatch--dark {
+  background: var(--theme-swatch-dark);
+}
+
+.settings-theme__swatch--system {
+  background: linear-gradient(90deg, var(--theme-swatch-light) 50%, var(--theme-swatch-dark) 50%);
+}

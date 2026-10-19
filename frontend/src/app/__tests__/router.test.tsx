@@ -1391,6 +1391,20 @@ describe("App Shell routes", () => {
     expect(alert).not.toHaveTextContent("백테스트 결과를 불러올 수 없습니다");
   });
 
+  it("설정의 화면 테마를 고르면 바로 바뀌고 저장된다(RD-11-A)", async () => {
+    const user = userEvent.setup();
+    mount("/settings");
+    const themes = await screen.findByRole("radiogroup", { name: "화면 테마" });
+    expect(within(themes).getByRole("radio", { name: "시스템 설정 따르기 (기본)" })).toBeChecked();
+    await user.click(within(themes).getByRole("radio", { name: "어둡게" }));
+    await waitFor(() => expect(globalThis.document.documentElement.dataset.theme).toBe("dark"));
+    expect(JSON.parse(localStorage.getItem("quant-workbench.theme.v1") ?? "null")).toMatchObject({
+      preference: "dark",
+    });
+    await user.click(within(themes).getByRole("radio", { name: "밝게" }));
+    await waitFor(() => expect(globalThis.document.documentElement.dataset.theme).toBe("light"));
+  });
+
   it("opens the settings route with the AI provider section from the shell", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests");

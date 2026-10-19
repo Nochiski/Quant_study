@@ -22,6 +22,7 @@ from strategy_workbench.application.assistant_chat.facade.profiles import (
 )
 from strategy_workbench.application.strategy_design.facade.ports import StrategyNotFoundError
 from strategy_workbench.bootstrap import _assistant as assistant_module
+from strategy_workbench.bootstrap import _file_guard
 from strategy_workbench.bootstrap import _http as http_module
 from strategy_workbench.bootstrap._assistant import (
     _AuthoringStrategyCompiler,  # pyright: ignore[reportPrivateUsage]  # reason: composition root가 소유한 port 구현이라 공개 facade가 없다
@@ -695,8 +696,6 @@ def test_the_acl_runner_reports_the_failure_when_its_output_is_not_decodable() -
 
     디코딩 실패로 stderr 가 None 이 되면 `strip` 이 AttributeError 를 내 권한 오류를 가렸다.
     """
-    from strategy_workbench.bootstrap import _file_guard
-
     command = (
         sys.executable,
         "-c",

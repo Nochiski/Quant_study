@@ -102,8 +102,9 @@ def default_windows_account() -> str:
     )
 
 
-# `icacls` 는 콘솔(OEM) 코드 페이지로 출력한다. 로캘이나 UTF-8 모드로 읽으면 디코딩이 실패해
-# stderr 가 None 이 되고, 그 뒤 처리의 예외가 원래 권한 오류를 가린다. 못 읽는 바이트는 바꿔 넣는다.
+# `icacls` 는 콘솔 코드 페이지(기본은 시스템 OEM)로 출력한다. 로캘이나 UTF-8 모드로 읽으면 디코딩이
+# 실패해 stderr 가 None 이 되고, 그 뒤 처리의 예외가 원래 권한 오류를 가린다. 콘솔 코드 페이지를
+# 바꾼 환경(`chcp`)에서는 OEM 과 다를 수 있으므로 못 읽는 바이트는 바꿔 넣는다.
 ICACLS_OUTPUT_ENCODING: str | None = "oem" if sys.platform == "win32" else None
 
 

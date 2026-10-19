@@ -3,6 +3,7 @@ type NavigationIconName =
   | "strategies"
   | "backtests"
   | "experiments"
+  | "factors"
   | "deployments"
   | "realtime"
   | "orders"
@@ -14,6 +15,7 @@ const PATHS: Record<NavigationIconName, string> = {
   strategies: "M4 18l5-6 4 3 7-10M14 5h6v6",
   backtests: "M4 4v16h16M8 16v-5M12 16V7M16 16v-6",
   experiments: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
+  factors: "M5 4h14v4H5zM5 10h14v4H5zM5 16h9v4H5z",
   deployments: "M12 16V3m-5 5 5-5 5 5M4 14v6h16v-6",
   realtime: "M3 12h4l3-7 4 14 3-7h4",
   orders: "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",

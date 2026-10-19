@@ -155,3 +155,32 @@
     flex-direction: column;
   }
 }
+
+/* 실행 목록의 결과 칸(머리 지표 세 개)과 접힌 재현 정보(RD-06-A). */
+.data-list-page__headline {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.data-list-page__headline > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.data-list-page__headline dt {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.data-list-page__headline dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.data-list-page__provenance-details {
+  margin-top: var(--space-1);
+  font-size: var(--text-size-small);
+}

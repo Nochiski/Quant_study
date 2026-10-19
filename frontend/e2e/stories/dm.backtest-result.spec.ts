@@ -386,8 +386,10 @@ test(
     await expect(
       page.getByRole("heading", { name: "백테스트 이력" }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("row").filter({ hasText: runId }),
-    ).toContainText("완료");
+    const historyRow = page.getByRole("row").filter({ hasText: runId });
+    await expect(historyRow).toContainText("완료");
+    // 결과 칸은 결과 파일을 열지 않고 서버가 실은 머리 지표를 보인다(RD-06-A).
+    for (const label of ["총수익률", "샤프", "최대 낙폭"])
+      await expect(historyRow).toContainText(label);
   },
 );

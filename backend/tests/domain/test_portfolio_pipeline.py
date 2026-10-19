@@ -1738,3 +1738,56 @@ def test_unknown_sector_warning_appears_only_when_a_sector_constraint_could_bind
 
     assert tape.frames[0].targets
     assert bool(tape.warnings) is warned
+
+
+def _capped_factor_score_tape_hash() -> str:
+    """종목 상한이 걸리는 점수 가중 tape 의 해시. 결정성 테스트가 하위 프로세스에서 부른다."""
+    spec = _spec()
+    spec = replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio, selection_count=40, weighting=WeightingMethod.FACTOR_SCORE
+        ),
+        risk=replace(spec.risk, max_name_weight=0.04, max_sector_weight=1.0),
+    )
+    day = date(2026, 1, 2)
+    # 비트가 꽉 찬 점수여야 합의 순서가 마지막 자리를 바꾸고, 상한이 여러 차례 걸려 남은 예산
+    # 차감 순서가 결과에 드러난다.
+    generator = random.Random(20261020)
+    scores = tuple(generator.uniform(0.0, 10.0) for _ in range(48))
+    observations = tuple(
+        _observation(day, f"sec-{index:02d}", score, sector_id=None)
+        for index, score in enumerate(scores)
+    )
+    return _compile(spec, observations).tape_hash
+
+
+def test_capped_allocation_does_not_depend_on_the_string_hash_seed() -> None:
+    """상한 배분이 문자열 set 순회 순서에 기대면 같은 입력의 tape 해시가 프로세스마다 갈린다(T0-02).
+
+    run 을 별도 worker 프로세스로 옮기면 서버와 worker 의 해시 seed 가 달라 같은 요청이 다른
+    tape 를 낸다.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[2]
+    code = (
+        "import tests.domain.test_portfolio_pipeline as module;"
+        "print(module._capped_factor_score_tape_hash())"
+    )
+    hashes = set()
+    for seed in ("0", "1", "2", "3", "4", "5"):
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=backend,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        hashes.add(completed.stdout.strip())
+    assert len(hashes) == 1, hashes

@@ -1347,7 +1347,10 @@ def _capped_allocate(
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     allocation = {security_id: 0.0 for security_id in scores}
-    remaining = set(scores)
+    # 남은 종목은 `scores` 의 순서(순위 순)를 지킨다. 합과 남은 예산 차감이 순회 순서를 따르므로,
+    # 문자열 set 을 쓰면 해시 seed 마다 마지막 자리가 갈려 같은 입력의 tape 해시가 프로세스마다
+    # 달라진다(T0-02).
+    remaining = dict.fromkeys(scores)
     remaining_budget = max(budget, 0.0)
     while remaining and remaining_budget > 1e-15:
         checkpoint()
@@ -1366,7 +1369,7 @@ def _capped_allocate(
             )
             for security_id in _checkpointed(remaining, checkpoint)
         }
-        capped = {security_id for security_id, weight in proposed.items() if weight > cap}
+        capped = [security_id for security_id, weight in proposed.items() if weight > cap]
         if not capped:
             for security_id, weight in _checkpointed(proposed.items(), checkpoint):
                 allocation[security_id] = _finite(
@@ -1387,7 +1390,7 @@ def _capped_allocate(
                 stage="remaining_budget",
                 context=f"security_id={security_id!r} cap={cap!r}",
             )
-            remaining.remove(security_id)
+            del remaining[security_id]
     return allocation
 
 

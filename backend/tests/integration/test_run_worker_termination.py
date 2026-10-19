@@ -234,6 +234,34 @@ def test_a_worker_with_other_versions_fails_the_run_as_a_mismatch(tmp_path: Path
     assert _leftovers(tmp_path / "artifacts", "run-mismatch") == []
 
 
+def test_a_supervision_error_still_ends_the_worker_and_removes_its_leftovers(
+    tmp_path: Path,
+) -> None:
+    """감독이 예외로 멈춰도 worker 를 끝내고 기다린 뒤 남긴 결과를 지운다(D5 2, #581 리뷰 P3-4)."""
+    marker = tmp_path / "marker"
+    root = tmp_path / "artifacts"
+
+    class Failing(_Recorder):
+        def on_progress(self, stage: RunStage, fraction: float, message: str) -> None:
+            # worker 가 결과를 rename 한 자리에 멈출 때까지 기다렸다가 예상 밖 오류를 낸다.
+            wait_for_marker(marker)
+            raise RuntimeError("listener failed")
+
+    listener = Failing()
+    ProcessRunExecution(
+        WorkerSettings("mock", None, root),
+        versions=parent_versions(),
+        discard_unfinished=LocalArtifactStore(root).discard_unfinished,
+        command=hook_command("artifact_renamed", marker),
+    ).start(resolved_job("run-supervision-error"), listener)
+
+    outcome = listener.wait()
+    assert isinstance(outcome, RunFailed)
+    assert outcome.error_code == "backtest.run.internal"
+    assert wait_for_exit(wait_for_marker(marker), timeout_s=5.0)
+    assert _leftovers(root, "run-supervision-error") == []
+
+
 class _Recorder:
     def __init__(self) -> None:
         self.stages: list[RunStage] = []

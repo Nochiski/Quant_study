@@ -262,6 +262,9 @@ class _WorkerRun:
             creationflags=_CREATION_FLAGS,
             start_new_session=sys.platform != "win32",
         )
+        relay: Thread | None = None
+        stdin: IO[bytes] | None = None
+        outcome: RunOutcome | None = None
         try:
             self._assign(process, run_id)
             with self._lock:
@@ -277,34 +280,43 @@ class _WorkerRun:
                 daemon=True,
             )
             relay.start()
-        except BaseException:
-            process.kill()
-            raise
-        try:
             # job 을 쓰기 직전에 플래그를 다시 본다(D5 1). 섰으면 쓰지 않고 그 worker 를 버린다.
             if self._is_cancelled():
                 process.kill()
             else:
                 _write(stdin, encode_job(self._job, self._settings))
             reading = self._read_events(process, stdin, stdout)
-            exit_code = process.wait()
-        except BaseException:
-            process.kill()
-            raise
+            outcome = self._outcome(reading, process.wait())
+            return outcome
         finally:
+            # 감독이 예외로 멈춰도 같은 순서로 치운다: 끝내고 기다린 뒤에만 지운다(D5 2).
+            self._clean_up(process, relay, stdin, outcome)
+
+    def _clean_up(
+        self,
+        process: subprocess.Popen[bytes],
+        relay: Thread | None,
+        stdin: IO[bytes] | None,
+        outcome: RunOutcome | None,
+    ) -> None:
+        run_id = self.run_id
+        if outcome is None:
+            process.kill()
+        process.wait()
+        if relay is not None:
             relay.join()
+        if stdin is not None:
             _close(stdin)
-        outcome = self._outcome(reading, exit_code)
         with self._lock:
             handed_over = isinstance(outcome, RunCommitted) and not self._abandoned
-        if not handed_over:
-            # 프로세스가 끝난 뒤에만 지운다(rename·열린 파일 경합, D5 2). 완료로 넘기는 결과는
-            # 서비스가 취소와 선형화한 뒤 지우거나 남긴다.
-            try:
-                self._discard_unfinished(run_id)
-            except OSError:
-                logger.exception("run worker leftovers not removed — run_id=%s", run_id)
-        return outcome
+        if handed_over:
+            # 완료로 넘기는 결과는 서비스가 취소와 선형화한 뒤 지우거나 남긴다.
+            return
+        # 프로세스가 끝난 뒤에만 지운다(rename·열린 파일 경합, D5 2).
+        try:
+            self._discard_unfinished(run_id)
+        except OSError:
+            logger.exception("run worker leftovers not removed — run_id=%s", run_id)
 
     def _outcome(self, reading: _Reading, exit_code: int) -> RunOutcome:
         run_id = self.run_id

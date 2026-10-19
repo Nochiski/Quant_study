@@ -86,7 +86,7 @@ _DECIMAL_TYPE = re.compile(r"DECIMAL\((\d+),\s*(\d+)\)")
 FAST_UNSCALED_LIMIT = 2**53
 FAST_SCALE_LIMIT = 22
 _EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
-_GRID_FETCHED = 0.4  # 진행 구간: 격자 질의 완료. 이후 법인 대응·LATEST 원천 질의
+_COLUMNAR_GRID_FETCHED = 0.4  # 진행 구간: 격자 질의 완료. 이후 법인 대응·LATEST 원천 질의
 _FETCHED = 0.5  # 질의 전부 완료. 이후 필드 열 조립
 _ASSEMBLED = 0.95  # 필드 열 조립 완료. 이후 행 정렬
 _EXACT_CHECKPOINT = 256  # 정확 경로 루프의 checkpoint 간격(칸, spec D7)
@@ -470,7 +470,7 @@ def load_raw_panel(
         )
     finally:
         con.close()
-    progress(_GRID_FETCHED)
+    progress(_COLUMNAR_GRID_FETCHED)
 
     day_present, day = _ordinals(fetched["d"], "universe_daily.date", checkpoint)
     if not bool(day_present.all()):
@@ -488,7 +488,10 @@ def load_raw_panel(
     series: dict[str, _LatestColumns] = {}
     for count, name in enumerate(latest_sources):
         checkpoint()
-        progress(_GRID_FETCHED + (_FETCHED - _GRID_FETCHED) * count / len(latest_sources))
+        progress(
+            _COLUMNAR_GRID_FETCHED
+            + (_FETCHED - _COLUMNAR_GRID_FETCHED) * count / len(latest_sources)
+        )
         source = SOURCE_BY_NAME[name]
         keys = (
             panel_tickers

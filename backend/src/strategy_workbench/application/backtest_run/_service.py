@@ -833,6 +833,14 @@ class BacktestRunService:
             return _FactorMiss(FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED, True)
         return pipeline
 
+    def shutdown(self) -> None:
+        """서버가 끝날 때 전송이 띄운 것을 정리한다(run-worker spec D5).
+
+        도는 run 을 종결로 바꾸지 않는다 — 기록은 `queued`·`running` 으로 남고 다음 부팅이
+        `interrupted` 로 닫는다(`_close_interrupted_runs`).
+        """
+        self._run_execution.shutdown()
+
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.
 

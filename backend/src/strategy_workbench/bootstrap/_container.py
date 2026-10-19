@@ -196,13 +196,13 @@ def build_container(
     나른다. 레지스트리는 A-05·A-06이 자기 항목을 등록할 때까지 비어 있고, 팩토리는 시작할 때가
     아니라 처음 필요할 때 불린다(미설치 SDK가 서버 시작을 막지 않는다).
     """
+    if run_isolation not in RUN_ISOLATIONS:
+        # 모르는 실행 방식은 DB 를 열기 전에 멈춘다. 스레드로 돌아가지 않는다(spec D9).
+        raise ValueError(
+            f"unsupported run isolation — run_isolation={run_isolation!r} "
+            f"available={RUN_ISOLATIONS}"
+        )
     run_artifact_root = artifact_root or DEFAULT_RUN_ARTIFACT_ROOT
-    # 모르는 실행 방식은 DB 를 열기 전에 멈춘다. worker 는 부모가 해석한 이 설정만 받는다(spec D10).
-    run_execution = _run_execution(
-        run_isolation,
-        WorkerSettings(equity_adapter, equity_root, run_artifact_root),
-        trial_hold_seconds=trial_hold_seconds,
-    )
     equity_data = build_equity_data(equity_adapter, equity_root)
     engine_portfolio = BacktestEnginePortfolioAdapter()
     factor_registry = build_default_factor_registry()
@@ -250,7 +250,16 @@ def build_container(
         run_artifacts,
         run_repository=run_repository,
         new_id=lambda: str(uuid4()),
-        run_execution=run_execution,
+        run_execution=_run_execution(
+            run_isolation,
+            # worker 는 부모가 해석한 이 설정만 받는다(spec D10).
+            WorkerSettings(
+                equity_adapter, equity_root, run_artifact_root, engine_gate=hold is not None
+            ),
+            artifacts=run_artifacts,
+            hold=hold,
+            versions=lambda: build_run_versions(equity_data, factor_registry, metric_registry),
+        ),
         run_slots=run_slots,
         factor_registry=factor_registry,
     )
@@ -332,23 +341,24 @@ def build_container(
 
 
 def _run_execution(
-    run_isolation: str, worker: WorkerSettings, *, trial_hold_seconds: float
+    run_isolation: str,
+    worker: WorkerSettings,
+    *,
+    artifacts: LocalArtifactStore,
+    hold: _TrialHold | None,
+    versions: Callable[[], VersionBundle],
 ) -> Callable[[RunComputation], RunExecutionPort]:
-    """run 계산을 돌릴 전송을 고른다. 모르는 값은 스레드로 돌아가지 않고 멈춘다(spec D9)."""
+    """run 계산을 돌릴 전송을 고른다(spec D9). 허용 값은 `build_container` 가 먼저 판정했다."""
     if run_isolation == "thread":
         return ThreadRunExecution
-    if run_isolation == "process":
-        if trial_hold_seconds > 0:
-            # e2e hold 는 worker 와 왕복해야 한다(spec D11, W1-03). 붙잡지 못한 채 조용히 돌지
-            # 않는다.
-            raise ValueError(
-                "e2e trial hold is not supported with run_isolation='process' yet — "
-                f"trial_hold_seconds={trial_hold_seconds}"
-            )
-        # worker 가 같은 계산을 자기 쪽에서 다시 조립하므로 서비스의 계산은 쓰지 않는다.
-        return lambda _computation: ProcessRunExecution(worker)
-    raise ValueError(
-        f"unsupported run isolation — run_isolation={run_isolation!r} available={RUN_ISOLATIONS}"
+    # worker 가 같은 계산을 자기 쪽에서 다시 조립하므로 서비스의 계산은 쓰지 않는다. 판본 묶음은
+    # 프로세스 전송만 대조하므로 그때만 부팅 때 한 번 계산한다(spec D6, 코드 지문 비용).
+    bundle = versions()
+    return lambda _computation: ProcessRunExecution(
+        worker,
+        versions=bundle,
+        discard_unfinished=artifacts.discard_unfinished,
+        engine_gate=None if hold is None else hold.release,
     )
 
 
@@ -558,6 +568,20 @@ class _TrialHold:
         self._seconds = seconds
         self.run_ids: set[str] = set()
 
+    def release(self, run_id: str, cancelled: CancellationCheck) -> bool:
+        """붙잡을 run 이면 기한까지 기다린다. 취소되면 거짓이다.
+
+        스레드 전송은 엔진 단계 앞(`execute`)에서, 프로세스 전송은 worker 의 `engine_ready` 를 받은
+        감독 스레드에서 같은 판정을 부른다(spec D11). 대상 집합은 `start` 가 돌아온 뒤에 채워지므로
+        엔진 단계까지 판정을 미룬다.
+        """
+        deadline = time.monotonic() + self._seconds
+        while run_id in self.run_ids and time.monotonic() < deadline:
+            if cancelled():
+                return False
+            time.sleep(0.05)
+        return True
+
     def execute(
         self,
         request: BacktestExecutionRequest,
@@ -565,13 +589,8 @@ class _TrialHold:
         progress: ProgressCallback,
         cancelled: CancellationCheck,
     ) -> BacktestRunResult:
-        deadline = time.monotonic() + self._seconds
-        while request.run_id in self.run_ids and time.monotonic() < deadline:
-            if cancelled():
-                raise RunCancelledError(
-                    f"held experiment trial cancelled — run_id={request.run_id}"
-                )
-            time.sleep(0.05)
+        if not self.release(request.run_id, cancelled):
+            raise RunCancelledError(f"held experiment trial cancelled — run_id={request.run_id}")
         return self._executor.execute(request, progress=progress, cancelled=cancelled)
 
 

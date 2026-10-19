@@ -377,6 +377,8 @@ def create_app(
             "the server."
         ),
     )
+    # 서버가 끝날 때 run 전송이 띄운 worker 를 정리한다(run-worker spec D5).
+    app.router.add_event_handler("shutdown", backtest_runs.shutdown)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),

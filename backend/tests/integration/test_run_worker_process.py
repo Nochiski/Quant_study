@@ -33,6 +33,7 @@ from strategy_workbench.application.backtest_run.facade.ports import RunFailed, 
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.runs import RunStage
 from tests.backtest_run_wait import wait_for_terminal_state
+from tests.run_worker_support import parent_versions
 from tests.test_run_worker_protocol import resolved_job
 
 # 하위 프로세스 부팅(import·조립)을 CI 의 느린 기계에서도 기다린다.
@@ -199,34 +200,49 @@ def test_worker_rejects_a_job_of_another_protocol_version(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize(
-    ("program", "expected"),
+    ("program", "code", "expected"),
     [
-        # 다른 판본의 worker: 부모가 거절한다.
+        # 다른 판본의 worker: 부모가 거절하고 서버를 다시 시작하라고 안내한다.
         (
             "import sys; sys.stdin.readline(); "
             f'print(\'{{"protocol": {PROTOCOL_VERSION + 1}, "type": "ready"}}\', flush=True)',
-            "protocol version mismatch",
+            "backtest.run.worker_mismatch",
+            "restart the server",
+        ),
+        # 깨진 줄: 상태에는 종류·type 만 싣고 worker 원문 발췌는 로그에만 남긴다(#575 리뷰 P3).
+        (
+            "import sys; sys.stdin.readline(); print('secret C:/private 원문', flush=True)",
+            "backtest.run.internal",
+            "reason=not_json",
         ),
         # 종결 이벤트 없이 끝난 worker: run_id·종료 코드를 싣고 실패로 닫는다.
-        ("import sys; sys.stdin.readline(); sys.exit(3)", "exit_code=3"),
+        (
+            "import sys; sys.stdin.readline(); sys.exit(3)",
+            "backtest.run.worker_exited",
+            "exit_code=3",
+        ),
     ],
 )
 def test_parent_fails_the_run_when_the_worker_breaks_the_protocol(
-    tmp_path: Path, program: str, expected: str
+    tmp_path: Path, program: str, code: str, expected: str
 ) -> None:
     outcome = _start(tmp_path, [sys.executable, "-c", program])
 
     assert isinstance(outcome, RunFailed)
-    assert outcome.error_code == "backtest.run.internal"
+    assert outcome.error_code == code
     assert "run-protocol" in outcome.error
     assert expected in outcome.error
+    assert "secret" not in outcome.error
 
 
 def _start(tmp_path: Path, command: list[str]) -> RunOutcome:
     """전송을 직접 띄워 종결을 기다린다. `start` 는 감독 스레드만 띄우고 바로 돌아와야 한다."""
     listener = _Listener()
     execution = ProcessRunExecution(
-        WorkerSettings("mock", None, tmp_path / "artifacts"), command=command
+        WorkerSettings("mock", None, tmp_path / "artifacts"),
+        versions=parent_versions(),
+        discard_unfinished=lambda _run_id: None,
+        command=command,
     )
     started = time.monotonic()
     execution.start(resolved_job("run-protocol"), listener)

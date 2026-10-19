@@ -1,16 +1,16 @@
 ---
 plan_version: 1
 project: columnar-tape
-project_status: IN_PROGRESS
+project_status: IN_REVIEW
 current_phase: T2,T3
-current_pr: T2-02,T3-03
-active_prs: [T2-02, T3-03]
-parallel_window: [T2-02, T3-03]
-last_updated: 2026-10-20T07:51:15+09:00
+current_pr: T2-03,T3-03
+active_prs: [T2-03, T3-03]
+parallel_window: [T2-03, T3-03]
+last_updated: 2026-10-20T10:08:17+09:00
 planned_prs: 26
-merged_prs: 6
-approved_prs: 6
-progress_percent: 23
+merged_prs: 7
+approved_prs: 7
+progress_percent: 27
 ---
 
 # tape 열 지향 계산 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 23
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `IN_REVIEW` |
 | Current phase | `T2,T3` |
-| Current/next PR | `T2-02,T3-03` |
-| Active PR | `T2-02, T3-03` |
-| Progress | `6 / 26 merged (23%)` |
-| Approved | `6 / 26` |
-| Aggregated at | `2026-10-20 07:51 KST` |
+| Current/next PR | `T2-03,T3-03` |
+| Active PR | `T2-03, T3-03` |
+| Progress | `7 / 26 merged (27%)` |
+| Approved | `7 / 26` |
+| Aggregated at | `2026-10-20 10:08 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -54,14 +54,14 @@ progress_percent: 23
 |---|---|---:|---:|---|
 | T0 | Planning package and prerequisite defect | 2 | 2 | `MERGED` |
 | T1 | Parity harness | 1 | 1 | `MERGED` |
-| T2 | Columnar raw panel port | 3 | 1 | `IN_PROGRESS` |
+| T2 | Columnar raw panel port | 3 | 2 | `IN_REVIEW` |
 | T3 | Columnar factor evaluator | 6 | 2 | `IN_REVIEW` |
 | T4 | Pipeline switch | 3 | 0 | `WAITING` |
 | T5 | Columnar compiler | 4 | 0 | `WAITING` |
 | T6 | Consumer migration | 3 | 0 | `WAITING` |
 | T7 | Legacy path removal | 3 | 0 | `WAITING` |
 | T9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **26** | **6** | **23%** |
+| **Total** |  | **26** | **7** | **27%** |
 <!-- PLAN:PHASES:END -->
 
 ## T0 — 기획·선행 결함
@@ -82,8 +82,8 @@ progress_percent: 23
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `T2-01` | `RawPanel` 포트, numpy 사용 규칙 | T1-01 | `MERGED` | #574 · APPROVE(P3 5건은 T2-02로) · main 머지 49041ccc(2026-10-20) |
-| [ ] | `T2-02` | duckdb 열 로딩 GRID | T2-01 | `IN_PROGRESS` | - |
-| [ ] | `T2-03` | duckdb 열 로딩 LATEST·법인 축 | T2-02 | `PLANNED` | - |
+| [x] | `T2-02` | duckdb 열 로딩 GRID | T2-01 | `MERGED` | #576 · APPROVE(P3 3건 반영) · main 머지 632840f8(2026-10-20) |
+| [ ] | `T2-03` | duckdb 열 로딩 LATEST·법인 축 | T2-02 | `IN_REVIEW` | #582 · 2차 APPROVE |
 
 ## T3 — 열 평가기
 

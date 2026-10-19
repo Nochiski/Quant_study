@@ -1,6 +1,8 @@
-"""Tier 1 대조(columnar-tape spec 5절). 지금 엔진은 객체 경로 하나라 자기 일관성을 본다.
+"""Tier 1 대조(columnar-tape spec 5절). 네 층을 다 도는 엔진은 객체 경로 하나라 자기 일관성을 보고,
+층별로 들어온 열 구현(L1 `columnar_nodes`)은 그 층에서 객체 경로와 대조한다.
 
-같은 사례를 엔진 A·B 로 돌려 L0~L3 결과를 비트 대조한다. 열 경로가 들어오면 `_ENGINE_B` 만 바꾼다.
+같은 사례를 엔진 A·B 로 돌려 L0~L3 결과를 비트 대조한다. 열 경로가 네 층을 갖추면 `_ENGINE_B` 만
+바꾼다.
 Tier 1-b 는 해시 seed 가 다른 하위 프로세스에서 L3 `tape_hash` 가 같은지 본다(T0-02 회귀).
 """
 
@@ -20,6 +22,16 @@ import pytest
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioPipelineResult
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
+from strategy_workbench.domain.factor.facade.expression import (
+    BinaryNode,
+    ComparisonNode,
+    ConditionalNode,
+    ConstantNode,
+    FieldNode,
+    MissingPolicy,
+    ParameterNode,
+    UnaryNode,
+)
 from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
     TargetTapeTraceResult,
@@ -35,6 +47,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from ._compare import ParityReport, compare, format_report
 from ._corpus import (
     MOCK_WINDOW,
+    EvaluatorCase,
     PipelineCase,
     adapter_cases,
     compiler_cases,
@@ -44,7 +57,7 @@ from ._corpus import (
     portfolio_panel,
     synthetic_raw_panel,
 )
-from ._engines import ENGINES, Failure, TapeEngine, pipeline_source
+from ._engines import ENGINES, Failure, NodeCache, TapeEngine, columnar_nodes, pipeline_source
 
 _ENGINE_A = ENGINES["object"]
 _ENGINE_B = ENGINES["object"]
@@ -128,6 +141,46 @@ def test_l1_evaluator_node_caches_match() -> None:
     _assert_parity(compare("L1", results))
     # 넘침 그래프는 오류도 결과로 대조한다(node_id·as_of·security_id·value).
     assert any(isinstance(expected, Failure) for _, expected, _ in results)
+
+
+# 열 평가기 골격(T3-01)이 구현한 노드. 나머지 노드와 `cross_sectional_median` 채움은 T3-02~T3-05 다.
+_COLUMNAR_NODES = (
+    FieldNode,
+    ConstantNode,
+    ParameterNode,
+    UnaryNode,
+    BinaryNode,
+    ComparisonNode,
+    ConditionalNode,
+)
+
+
+def _columnar_ready(case: EvaluatorCase) -> bool:
+    # 정수 상수는 hydrate 가 float 로 바꾸므로 운영 입력이 아니다(열 평가기는 거절한다).
+    return case.missing is not MissingPolicy.CROSS_SECTIONAL_MEDIAN and all(
+        isinstance(node, _COLUMNAR_NODES)
+        and not (isinstance(node, ConstantNode) and not isinstance(node.value, float))
+        for node in case.graph.nodes
+    )
+
+
+def test_l1_columnar_evaluator_matches_object_node_caches() -> None:
+    """열 평가기가 다루는 사례에서 모든 노드·칸의 값·타입·가린 칸이 객체 경로와 비트 단위로 같다."""
+    cases = [case for case in evaluator_cases() if _columnar_ready(case)]
+    results = [(case.key, _ENGINE_A.nodes(case), columnar_nodes(case)) for case in cases]
+    _assert_parity(compare("L1-columnar", results))
+    # 사례가 줄어 조용히 통과하지 않게: 첫 비유한 노드(평가 순서상 앞 노드)·lag 가림 전파·bool
+    # 출력이 실제로 든다.
+    assert len(cases) >= 100
+    failed_nodes = {
+        failure.detail[0]
+        for _, failure, _ in results
+        if isinstance(failure, Failure) and isinstance(failure.detail, tuple)
+    }
+    assert failed_nodes == {"square", "ratio", "out"}
+    caches = [expected for _, expected, _ in results if isinstance(expected, NodeCache)]
+    assert any(cache.masked.get("l3") for cache in caches)
+    assert any(type(value) is bool for cache in caches for value in cache.computed["out"])
 
 
 def test_combinations_reach_every_level() -> None:

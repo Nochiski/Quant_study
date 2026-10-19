@@ -1,5 +1,6 @@
-"""엔진별 층 결과(columnar-tape spec 5절). 지금은 객체 경로 하나뿐이고, 열 경로가 들어오면 `ENGINES`
-에 항목을 더한다(spec D8 의 `tape_engine` 인자).
+"""엔진별 층 결과(columnar-tape spec 5절). 전체 층을 도는 엔진은 객체 경로 하나뿐이고, 열 경로가
+네 층을 모두 갖추면 `ENGINES` 에 항목을 더한다(spec D8 의 `tape_engine` 인자). 그 전까지 층별로
+들어오는 열 구현은 `columnar_nodes`(L1, T3-01~) 처럼 따로 둔다.
 
 오류도 결과다. 예외 종류와 진단 내용이 엔진마다 같아야 하므로(spec D6) `Failure` 로 접어 비교한다.
 """
@@ -8,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+
+import numpy as np
 
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
@@ -30,6 +33,10 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.factor._evaluation import _compute_nodes
 from strategy_workbench.domain.factor.facade.evaluation import NonFiniteFactorCalculationError
+from strategy_workbench.domain.factor.facade.panel_evaluation import (
+    FactorPanel,
+    evaluate_panel_nodes,
+)
 from strategy_workbench.domain.portfolio.facade.construction import (
     NonFinitePortfolioCalculationError,
     PortfolioTraceSelection,
@@ -93,6 +100,29 @@ def _object_nodes(case: EvaluatorCase) -> object:
             type(error).__name__, (error.node_id, error.as_of, error.security_id, error.value)
         )
     return NodeCache(evaluator.computed, evaluator.masked)
+
+
+def columnar_nodes(case: EvaluatorCase) -> object:
+    """L1 열 평가기 결과를 객체 평가기와 같은 `NodeCache` 모양(Python 값 목록)으로 낸다."""
+    panel = FactorPanel.from_observations(case.observations, case.graph)
+    try:
+        cache = evaluate_panel_nodes(
+            case.graph, panel=panel, missing=case.missing, parameters=case.parameters
+        )
+    except NonFiniteFactorCalculationError as error:
+        return Failure(
+            type(error).__name__, (error.node_id, error.as_of, error.security_id, error.value)
+        )
+    computed: dict[str, list[float | bool | None]] = {}
+    masked: dict[str, frozenset[int]] = {}
+    for node_id, column in cache.columns.items():
+        values: list[float | bool | None] = column.values.tolist()
+        computed[node_id] = [
+            value if valid else None
+            for value, valid in zip(values, column.valid.tolist(), strict=True)
+        ]
+        masked[node_id] = frozenset(np.flatnonzero(column.masked).tolist())
+    return NodeCache(computed, masked)
 
 
 def _object_compile(case: CompilerCase) -> object:

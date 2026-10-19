@@ -57,14 +57,22 @@ def serve_stdio(boot: Callable[[WorkerSettings], WorkerBoot]) -> int:
 
     라이브러리의 `print` 가 프로토콜 줄과 섞이지 않게 `sys.stdout` 을 stderr(로그)로 돌린다.
     """
-    stdin, channel = sys.stdin, sys.stdout
-    if not isinstance(stdin, io.TextIOWrapper) or not isinstance(channel, io.TextIOWrapper):
+    stdin, channel, log = sys.stdin, sys.stdout, sys.stderr
+    if (
+        not isinstance(stdin, io.TextIOWrapper)
+        or not isinstance(channel, io.TextIOWrapper)
+        or not isinstance(log, io.TextIOWrapper)
+    ):
         raise RuntimeError(
             "run worker needs text stdio streams to speak the protocol — "
-            f"stdin={type(stdin).__name__} stdout={type(channel).__name__}"
+            f"stdin={type(stdin).__name__} stdout={type(channel).__name__} "
+            f"stderr={type(log).__name__}"
         )
+    # 부모가 넣는 환경(`PYTHONIOENCODING`)이 없어도 세 파이프는 UTF-8 이다. 콘솔 코드 페이지(cp949·
+    # cp1252)로 쓴 로그를 부모가 UTF-8 로 읽다 깨지지 않게 한다(spec D2).
     stdin.reconfigure(encoding="utf-8")
     channel.reconfigure(encoding="utf-8", newline="\n")
+    log.reconfigure(encoding="utf-8", errors="backslashreplace")
     sys.stdout = sys.stderr
     return serve(boot, stdin=stdin, stdout=channel)
 

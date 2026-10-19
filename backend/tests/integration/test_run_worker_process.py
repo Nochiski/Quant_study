@@ -10,6 +10,7 @@ mock 어댑터와 실제 `python -m strategy_workbench.bootstrap.run_worker` 하
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -173,11 +174,21 @@ def test_service_queries_stay_responsive_while_the_worker_boots_with_a_large_job
 
 
 def test_worker_rejects_a_job_of_another_protocol_version(tmp_path: Path) -> None:
+    """worker 도 다른 판본을 거절한다. 인코딩 환경 변수가 없어도 로그(stderr)는 UTF-8 이다.
+
+    Windows 콘솔 코드 페이지(cp1252·cp949)로 쓰면 부모가 UTF-8 로 읽다 깨진다(CI windows job).
+    """
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTHONUTF8", "PYTHONIOENCODING"}
+    }
     completed = subprocess.run(
         WORKER_COMMAND,
         input=json.dumps({"protocol": PROTOCOL_VERSION + 1, "type": "job"}) + "\n",
         capture_output=True,
         encoding="utf-8",
+        env=environment,
         timeout=_TIMEOUT_S,
         check=False,
     )

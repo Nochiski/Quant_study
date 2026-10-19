@@ -46,6 +46,19 @@ PROFILES: dict[str, PlanProfile] = {
         "(?:P\\d+(?:\\.\\d+)?|[A-Z])-\\d{2}",
         False,
     ),
+    "run-worker-process": PlanProfile(
+        (
+            ("W0", "Planning package and benchmark"),
+            ("W1", "Computation boundary and worker process"),
+            ("W2", "Spare worker and memory guard"),
+            ("W3", "Default switch and SoT revision"),
+            ("W4", "Factor regression job"),
+            ("W5", "Interactive path decision gate"),
+            ("W9", "Closeout review"),
+        ),
+        "W\\d+-\\d{2}",
+        False,
+    ),
     "strategy-gui-editing": PlanProfile(
         (
             ("P1", "Backend schema 1.1"),

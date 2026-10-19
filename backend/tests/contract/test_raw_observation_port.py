@@ -209,6 +209,26 @@ def test_observations_are_deterministic_and_ordered(adapter: ContractAdapter) ->
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+@pytest.mark.parametrize("reverse", [False, True], ids=["suite-order", "reversed-order"])
+def test_observation_fields_follow_the_query_field_order(
+    adapter: ContractAdapter, reverse: bool
+) -> None:
+    """원시 계약: 관측의 fields 는 질의 field_ids 순서의 부분열이다(열 포트가 열 순서로 쓴다).
+
+    질의 순서를 뒤집어도 따라오는지 본다 — 어댑터가 자기 선언 순서로 내면 한쪽에서 실패한다.
+    """
+    fields = _fields(adapter)
+    query = _query(adapter, fields=tuple(reversed(fields)) if reverse else fields, history=3)
+    result = adapter.load_raw_observations(query)
+    assert result.ok and result.observations
+
+    position = {field_id: index for index, field_id in enumerate(query.field_ids)}
+    for observation in result.observations:
+        order = [position[field.field_id] for field in observation.fields]
+        assert order == sorted(set(order)), (observation.as_of, observation.security_id, order)
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
 def test_long_raw_load_honours_the_application_cancellation_checkpoint(
     adapter: ContractAdapter,
 ) -> None:
@@ -470,9 +490,10 @@ def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
         )
 
 
-@pytest.mark.parametrize("value", [True, False])
-def test_result_rejects_bool_raw_values(value: bool) -> None:
-    """값 타입은 float·str·None 이다. 열 포트와 한 계약을 쓰려고 bool 을 뺐다(T2-01)."""
+@pytest.mark.parametrize("value", [True, False, 3, 0])
+def test_result_rejects_bool_and_int_raw_values(value: bool | int) -> None:
+    """값 타입은 정확히 float·str·None 이다. 열 포트와 한 계약을 쓰려고 bool(T2-01)과
+    int(#574 리뷰 P3-2)를 뺐다. 두 경우 문장 형식이 같다."""
     field = RawFieldValue("price.close", value, START)
     with pytest.raises(
         RawObservationContractViolation,

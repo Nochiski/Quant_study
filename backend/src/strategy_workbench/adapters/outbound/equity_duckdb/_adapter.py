@@ -78,7 +78,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from threading import Event, Thread
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataNotReadyError,
@@ -163,6 +163,7 @@ if TYPE_CHECKING:
     import duckdb
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 MARKET = "KRX"
 VENUE = "XKRX"
@@ -241,6 +242,9 @@ def _cell_kind(
     다(#371). 가림 표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게
     둔다. 결측 사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도
     MASKED 다.
+
+    이 함수가 셀 종류 규칙의 한 벌이다. 열 경로(`_raw_panel.cell_rules`)는 (값 유무, 결측 사유,
+    가림) 조합마다 이 함수를 불러 만든 표를 쓴다.
     """
     if masked:
         return value, CellKind.MASKED
@@ -329,6 +333,51 @@ class _Window:
     @property
     def sessions(self) -> tuple[date, ...]:
         return (*self.history, *self.requested)
+
+
+@dataclass(frozen=True)
+class _RawRequest:
+    """원시 관측 질의를 받아들인 결과 — 창과 필드별 랙. 행 경로와 열 경로가 같이 쓴다."""
+
+    window: _Window
+    lags: dict[str, int]
+
+
+@dataclass(frozen=True)
+class _RawRejection:
+    """원시 관측 질의를 실패 값으로 끝낼 사유(시장·유니버스·필드·창)."""
+
+    status: DataLoadStatus
+    detail: str
+
+
+@dataclass(frozen=True)
+class _FetchRange:
+    """격자를 읽을 날짜 범위 — 창 첫 세션에서 최대 랙만큼 앞부터 창 끝까지."""
+
+    start: date
+    end: date
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _GridSql:
+    """격자 질의 하나. `layout` 은 GRID 원천마다 (원천 이름, 그 원천에서 읽는 field_id 들)이다.
+
+    결과 열 이름: 행 `d`·`ticker`·`span_seq`·`member`, 원천 i 마다 `p{i}`(원천 행 있음)·`a{i}`
+    (공개일)·`t{i}`(내용일)·`k{i}`(결측 사유)·`m{i}`(가림 표시)·`v{i}_{j}`(j 번째 필드 값).
+    """
+
+    sql: str
+    params: list[object]
+    layout: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+def _no_members_detail(query: RawObservationQuery) -> str:
+    return (
+        f"no members in universe — universe_id={query.universe_id} "
+        f"start={query.start} end={query.end}"
+    )
 
 
 def _catalog_error_types() -> tuple[type[Exception], ...]:
@@ -437,8 +486,18 @@ def _fetchall(
     params: list[object],
     checkpoint: Callable[[], None],
 ) -> list[tuple[object, ...]]:
-    """`con.execute(sql, params).fetchall()` 과 같되, 도는 동안 취소되면 질의를 끊는다(#160).
+    """`con.execute(sql, params).fetchall()` 과 같되, 도는 동안 취소되면 질의를 끊는다(#160)."""
+    return _interruptible(con, lambda: con.execute(sql, params).fetchall(), checkpoint)
 
+
+def _interruptible(
+    con: duckdb.DuckDBPyConnection,
+    call: Callable[[], _T],
+    checkpoint: Callable[[], None],
+) -> _T:
+    """`con` 위의 duckdb 호출 `call` 하나를 돌리되, 도는 동안 취소되면 질의를 끊는다(#160).
+
+    행 경로(`_fetchall`)와 열 경로(`_raw_panel` 의 `fetchnumpy`)가 같은 감시 방식을 쓴다.
     질의와 결과 변환은 호출 한 번이라 행 단위 checkpoint 가 닿지 않는다(실원장 6개월 구간 실측:
     격자 약 1초). 그동안 감시 스레드가 `_INTERRUPT_POLL_SECONDS` 마다 `checkpoint` 를 부르고,
     예외가 나면 호출이 끝날 때까지 폴링마다 `con.interrupt()` 로 끊는다 — 질의가 시작되기 전에 보낸
@@ -461,7 +520,7 @@ def _fetchall(
     watchdog = Thread(target=watch, name="equity-duckdb-interrupt", daemon=True)
     watchdog.start()
     try:
-        return con.execute(sql, params).fetchall()
+        return call()
     except Exception:
         if interrupted.is_set():
             checkpoint()
@@ -1205,25 +1264,10 @@ class EquityDuckdbAdapter:
             )
 
         checkpoint()
-        if query.market != MARKET:
-            return failure(
-                DataLoadStatus.INVALID_QUERY,
-                f"unknown market — market={query.market!r} supported=({MARKET!r},)",
-            )
-        if query.universe_id not in self._policies:
-            return failure(
-                DataLoadStatus.INVALID_QUERY,
-                f"unknown universe_id — universe_id={query.universe_id!r} "
-                f"supported={sorted(self._policies)} ({POLICY_TABLE} build="
-                f"{self._builds[POLICY_TABLE]})",
-            )
-        unknown = self._unknown_fields(query.field_ids)
-        if unknown:
-            return failure(DataLoadStatus.INVALID_QUERY, unknown)
-        window = self._window(query.start, query.end, query.history_sessions_before_start)
-        if isinstance(window, str):
-            return failure(DataLoadStatus.NO_DATA, window)
-        lags = self._lags(query.field_ids, ())
+        request = self._raw_request(query)
+        if isinstance(request, _RawRejection):
+            return failure(request.status, request.detail)
+        window, lags = request.window, request.lags
         panel = self._panel(
             window,
             lags,
@@ -1275,12 +1319,7 @@ class EquityDuckdbAdapter:
             sessions=window.requested,
             history_sessions=window.history,
             observations=tuple(observations),
-            detail=(
-                None
-                if observations
-                else f"no members in universe — universe_id={query.universe_id} "
-                f"start={query.start} end={query.end}"
-            ),
+            detail=None if observations else _no_members_detail(query),
             warnings=tuple(sorted({*window.warnings, *panel.warnings})),
             validation_checkpoint=checkpoint,
             validation_progress=lambda fraction: progress(
@@ -1602,6 +1641,28 @@ class EquityDuckdbAdapter:
 
     # ── 패널 코어 ─────────────────────────────────────────────────────────────
 
+    def _raw_request(self, query: RawObservationQuery) -> _RawRequest | _RawRejection:
+        """원시 관측 질의를 판정한다 — 시장 → 유니버스 → 필드 → 창 순서로 첫 실패 사유를 낸다."""
+        if query.market != MARKET:
+            return _RawRejection(
+                DataLoadStatus.INVALID_QUERY,
+                f"unknown market — market={query.market!r} supported=({MARKET!r},)",
+            )
+        if query.universe_id not in self._policies:
+            return _RawRejection(
+                DataLoadStatus.INVALID_QUERY,
+                f"unknown universe_id — universe_id={query.universe_id!r} "
+                f"supported={sorted(self._policies)} ({POLICY_TABLE} build="
+                f"{self._builds[POLICY_TABLE]})",
+            )
+        unknown = self._unknown_fields(query.field_ids)
+        if unknown:
+            return _RawRejection(DataLoadStatus.INVALID_QUERY, unknown)
+        window = self._window(query.start, query.end, query.history_sessions_before_start)
+        if isinstance(window, str):
+            return _RawRejection(DataLoadStatus.NO_DATA, window)
+        return _RawRequest(window, self._lags(query.field_ids, ()))
+
     def _unknown_fields(self, field_ids: Sequence[str]) -> str | None:
         unknown = sorted(set(field_ids) - set(self._fields))
         if not unknown:
@@ -1710,17 +1771,8 @@ class EquityDuckdbAdapter:
         """
         grouped = self._fields_by_source(field_ids)
         grid_sources = [name for name in grouped if SOURCE_BY_NAME[name].mode is SourceMode.GRID]
-        max_lag = max((lags[f] for f in field_ids), default=0)
-        first_index = self._session_index[window.sessions[0]]
-        fetch_first = max(first_index - max_lag, 0)
-        warnings: list[str] = []
-        if first_index - max_lag < 0 and max_lag > 0:
-            warnings.append(
-                "랙만큼 거슬러 올라갈 거래일 달력이 모자라 달력 시작부터 읽었다 — "
-                f"max_lag={max_lag} "
-                f"first_session={window.sessions[0]} calendar_start={self._sessions[0]}"
-            )
-        fetch_start, fetch_end = self._sessions[fetch_first], window.sessions[-1]
+        fetch = self._fetch_range(window, lags, field_ids)
+        fetch_start, fetch_end = fetch.start, fetch.end
         rows = self._grid(
             grouped,
             grid_sources,
@@ -1750,9 +1802,25 @@ class EquityDuckdbAdapter:
                 source, grouped[name], keys, fetch_end, checkpoint=checkpoint
             )
         progress(1.0)
-        return _Panel(rows, latest, corp_by_ticker, tuple(warnings))
+        return _Panel(rows, latest, corp_by_ticker, fetch.warnings)
 
-    def _grid(
+    def _fetch_range(
+        self, window: _Window, lags: dict[str, int], field_ids: Sequence[str]
+    ) -> _FetchRange:
+        """격자를 읽을 범위 — 랙 n 셀이 n 세션 앞 행을 읽으므로 최대 랙만큼 앞에서 시작한다."""
+        max_lag = max((lags[f] for f in field_ids), default=0)
+        first_index = self._session_index[window.sessions[0]]
+        warnings: tuple[str, ...] = ()
+        if first_index - max_lag < 0 and max_lag > 0:
+            warnings = (
+                "랙만큼 거슬러 올라갈 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"max_lag={max_lag} "
+                f"first_session={window.sessions[0]} calendar_start={self._sessions[0]}",
+            )
+        start = self._sessions[max(first_index - max_lag, 0)]
+        return _FetchRange(start, window.sessions[-1], warnings)
+
+    def _grid_sql(
         self,
         grouped: dict[str, tuple[str, ...]],
         grid_sources: Sequence[str],
@@ -1761,13 +1829,11 @@ class EquityDuckdbAdapter:
         *,
         tickers: tuple[str, ...] | None,
         predicate: str | None,
-        checkpoint: Callable[[], None] = _noop_checkpoint,
-        progress: Callable[[float], None] = _noop_progress,
-    ) -> dict[tuple[str, date], _Row]:
-        """`universe_daily` × `security_span` 격자에 GRID 원천을 (ticker, date) 로 붙인 행들.
+    ) -> _GridSql:
+        """`universe_daily` × `security_span` 격자에 GRID 원천을 (ticker, date) 로 붙이는 질의.
 
-        질의가 끝나면 `_GRID_FETCHED`, 파이썬 행 조립 동안 `_CHECKPOINT_ROWS` 행마다 그 뒤를 채워
-        1.0 까지 보고한다. 조립 루프가 질의보다 훨씬 길다(2년 구간 실측 약 8.5초 대 2초).
+        행 경로(`_grid`)와 열 경로(`_raw_panel.load_grid_raw_panel`)가 이 질의 하나를 쓴다. 결과 열
+        이름은 `_GridSql` 이 적는다.
         """
         member_expr = (
             f"coalesce(({predicate}), FALSE)" if predicate is not None else "NULL::BOOLEAN"
@@ -1815,8 +1881,12 @@ class EquityDuckdbAdapter:
                 f"LEFT JOIN ({picked}) g{index} ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
-                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, g{index}.mk, "
-                + ", ".join(f"g{index}.c{position}" for position in range(len(fields)))
+                f"g{index}.k IS NOT NULL AS p{index}, g{index}.av AS a{index}, "
+                f"g{index}.ct AS t{index}, g{index}.kd AS k{index}, g{index}.mk AS m{index}, "
+                + ", ".join(
+                    f"g{index}.c{position} AS v{index}_{position}"
+                    for position in range(len(fields))
+                )
             )
             layout.append((name, fields))
         sql = f"""
@@ -1832,14 +1902,42 @@ class EquityDuckdbAdapter:
                 JOIN {self._source(SPAN_TABLE)} s
                   ON s.ticker = u.ticker AND u.date BETWEEN s.first_date AND s.last_date
             )
-            SELECT r.date, r.ticker, r.span_seq, r.member{"".join(", " + s for s in selects)}
+            SELECT r.date AS d, r.ticker AS ticker, r.span_seq AS span_seq,
+                   r.member AS member{"".join(", " + s for s in selects)}
             FROM r
             {" ".join(joins)}
             ORDER BY r.date, r.ticker, r.span_seq
         """
+        return _GridSql(sql, params, tuple(layout))
+
+    def _grid(
+        self,
+        grouped: dict[str, tuple[str, ...]],
+        grid_sources: Sequence[str],
+        fetch_start: date,
+        fetch_end: date,
+        *,
+        tickers: tuple[str, ...] | None,
+        predicate: str | None,
+        checkpoint: Callable[[], None] = _noop_checkpoint,
+        progress: Callable[[float], None] = _noop_progress,
+    ) -> dict[tuple[str, date], _Row]:
+        """`_grid_sql` 격자 행을 (ticker, date) 로 조립한다.
+
+        질의가 끝나면 `_GRID_FETCHED`, 파이썬 행 조립 동안 `_CHECKPOINT_ROWS` 행마다 그 뒤를 채워
+        1.0 까지 보고한다. 조립 루프가 질의보다 훨씬 길다(2년 구간 실측 약 8.5초 대 2초).
+        """
+        grid = self._grid_sql(
+            grouped,
+            grid_sources,
+            fetch_start,
+            fetch_end,
+            tickers=tickers,
+            predicate=predicate,
+        )
         con = self._connect(SOURCE_BY_NAME[name] for name in grid_sources)
         try:
-            raw_rows = _fetchall(con, sql, params, checkpoint)
+            raw_rows = _fetchall(con, grid.sql, grid.params, checkpoint)
         finally:
             con.close()
         progress(_GRID_FETCHED)
@@ -1852,7 +1950,7 @@ class EquityDuckdbAdapter:
             ticker = str(raw[1])
             cells: dict[str, _Observed] = {}
             offset = 4
-            for name, fields in layout:
+            for name, fields in grid.layout:
                 present = bool(raw[offset])
                 available = raw[offset + 1]
                 content = raw[offset + 2]

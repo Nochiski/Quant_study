@@ -117,7 +117,8 @@ def test_synthetic_panels_carry_every_required_edge() -> None:
         "0 나누기": 0 in ys,
         "극단 큰 값": any(abs(x) > 1e300 for x in floats),
         "극단 작은 값": any(0 < abs(x) < 1e-290 for x in floats),
-        "정수 값": any(type(x) is int for x in xs),
+        # 원시 계약이 int 를 거절하므로(T2-02, #574 리뷰 P3-2) 정수 꼴 float 로 싣는다
+        "정수 값": any(type(x) is float and x != 0 and x.is_integer() for x in s00 if x),
         "bool·str 숫자 입력": {bool, str} <= {type(x) for x in xs},
         "상수 창": any(
             s00[i] is not None and s00[i] == s00[i + 1] == s00[i + 2] for i in range(len(s00) - 2)

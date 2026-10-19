@@ -70,7 +70,7 @@ Phase마다 작업분 SoT·책임 분리 점검을 하고, T9-01에서 portfolio
 | T2-02 | duckdb 열 로딩(GRID) | 숫자 열 규칙(spec D3 원시 숫자 행: 선언 타입별 비스케일 정수 ÷ 10^scale, 넘치면 `float(Decimal)`), lag 조인(span_seq), `_cell_kind` 벡터판(행 경로와 공유), 감시 스레드 | LATEST | `equity_duckdb/_raw_panel.py`, `_adapter.py`, 테스트 | L0 손 픽스처, Tier 2 L0 |
 | T2-03 | duckdb 열 로딩(LATEST·법인 축) | asof `searchsorted`, 늦은 필드 규칙, `_corp_map`. 어댑터가 프로토콜 구현 | 운영 연결 | 같은 파일 | L0 전 필드 |
 | T3-01 | 열 평가기 골격 | `FactorPanel`, 행·위치 배치, field·constant·parameter·unary·binary·comparison·conditional·lag, `_value_spans`·`_masked_in` 벡터판, zero 채움, 유한값 첫 위반, checkpoint·progress | ts·cs | `domain/factor/_panel_evaluation.py`, facade, 테스트 | L1 부분 행렬 |
-| T3-02 | 시계열 끝점·min/max | 창 유효성(정확히 window칸), momentum·delta, Python 의미 min·max | mean·std | 같은 모듈 | L1, ±0 |
+| T3-02 | 시계열 끝점·min/max | 창 유효성(정확히 window칸), momentum·delta, Python 의미 min·max | mean·std | `domain/factor/_panel_time_series.py`(창 커널), `_panel_evaluation.py` 배선, 테스트 | L1, ±0 |
 | T3-03 | 정확 평균 커널 | 인증 dd 평균 + 정확 경로, 창·그룹 형태, checkpoint. 오차 상한 식·중점(동점) 처리·+0.0 시작·극단 크기 가드를 코드 주석과 spec에 고정, 실데이터 정확 경로 비율 측정 | std | `_statistics.py` | CI는 seed 고정 차분 2만 건(예산 내), PR 증거로 로컬 수백만 건 차분 결과를 본문에 첨부. 동점·정수·극단 크기·n=2 |
 | T3-04 | 정확 pstdev 커널 | 이동 dd 분산 + 반올림 경계 `((s+pred)/2)²`·`((s+succ)/2)²` 인증 + 정확 경로(경계와 같으면 실패 처리) | - | 같은 파일 | T3-03과 같은 CI·로컬 분량 나눔, n=2 중점 사례 |
 | T3-05 | 남은 연산 | ts mean·std, cs rank·zscore·winsorize·demean, group neutralize·rank, 중앙값·그룹 중앙값 채움. 스칼라 rank·zscore를 그룹 커널 위로 | trace | 평가 모듈, `_statistics.py` | 전체 L1, 기존 `test_factor_*` |

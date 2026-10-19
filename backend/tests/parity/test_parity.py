@@ -30,6 +30,8 @@ from strategy_workbench.domain.factor.facade.expression import (
     FieldNode,
     MissingPolicy,
     ParameterNode,
+    TimeSeriesNode,
+    TimeSeriesOperator,
     UnaryNode,
 )
 from strategy_workbench.domain.portfolio.facade.construction import (
@@ -144,7 +146,8 @@ def test_l1_evaluator_node_caches_match() -> None:
     assert any(isinstance(expected, Failure) for _, expected, _ in results)
 
 
-# 열 평가기 골격(T3-01)이 구현한 노드. 나머지 노드와 `cross_sectional_median` 채움은 T3-02~T3-05 다.
+# 열 평가기가 구현한 노드(T3-01 골격, T3-02 시계열 끝점·min/max). 시계열 mean·std 는 T3-03·T3-04,
+# 나머지 노드와 `cross_sectional_median` 채움은 T3-05 다.
 _COLUMNAR_NODES = (
     FieldNode,
     ConstantNode,
@@ -153,6 +156,15 @@ _COLUMNAR_NODES = (
     BinaryNode,
     ComparisonNode,
     ConditionalNode,
+    TimeSeriesNode,
+)
+_COLUMNAR_TIME_SERIES = frozenset(
+    {
+        TimeSeriesOperator.MOMENTUM,
+        TimeSeriesOperator.DELTA,
+        TimeSeriesOperator.MINIMUM,
+        TimeSeriesOperator.MAXIMUM,
+    }
 )
 
 
@@ -161,6 +173,7 @@ def _columnar_ready(case: EvaluatorCase) -> bool:
     return case.missing is not MissingPolicy.CROSS_SECTIONAL_MEDIAN and all(
         isinstance(node, _COLUMNAR_NODES)
         and not (isinstance(node, ConstantNode) and not isinstance(node.value, float))
+        and not (isinstance(node, TimeSeriesNode) and node.operator not in _COLUMNAR_TIME_SERIES)
         for node in case.graph.nodes
     )
 
@@ -182,6 +195,16 @@ def test_l1_columnar_evaluator_matches_object_node_caches() -> None:
     caches = [expected for _, expected, _ in results if isinstance(expected, NodeCache)]
     assert any(cache.masked.get("l3") for cache in caches)
     assert any(type(value) is bool for cache in caches for value in cache.computed["out"])
+    # 시계열 네 연산이 모두 실제 값을 낸다(창이 늘 비어 조용히 통과하지 않게)
+    produced = {
+        node.operator
+        for case, (_, expected, _) in zip(cases, results, strict=True)
+        if isinstance(expected, NodeCache)
+        for node in case.graph.nodes
+        if isinstance(node, TimeSeriesNode)
+        and any(value is not None for value in expected.computed[node.node_id])
+    }
+    assert produced == _COLUMNAR_TIME_SERIES
 
 
 def test_combinations_reach_every_level() -> None:

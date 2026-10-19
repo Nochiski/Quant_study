@@ -58,7 +58,6 @@ def _evaluate(
 @pytest.mark.parametrize(
     "node",
     [
-        TimeSeriesNode("out", TimeSeriesOperator.MEAN, "x", 2, "time_series"),
         CrossSectionalNode("out", CrossSectionalOperator.RANK, "x", "cross_sectional"),
         GroupNode("out", GroupOperator.RANK, "x", "g", "group"),
     ],
@@ -66,6 +65,40 @@ def _evaluate(
 def test_nodes_outside_the_skeleton_are_rejected(node: ExpressionNode) -> None:
     with pytest.raises(UnsupportedPanelEvaluationError, match="kind="):
         _evaluate((node,))
+
+
+@pytest.mark.parametrize(
+    "operator", [TimeSeriesOperator.MEAN, TimeSeriesOperator.STANDARD_DEVIATION]
+)
+def test_time_series_mean_and_std_wait_for_exact_kernels(operator: TimeSeriesOperator) -> None:
+    with pytest.raises(UnsupportedPanelEvaluationError, match="operator="):
+        _evaluate((TimeSeriesNode("out", operator, "x", 2, "time_series"),))
+
+
+def test_time_series_checkpoints_per_chunk_and_window_offset_with_monotone_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_panel_evaluation, "_CHUNK_ROWS", 2)
+    graph = FactorGraph(
+        (_X, TimeSeriesNode("out", TimeSeriesOperator.MINIMUM, "x", 2, "time_series")), "out"
+    )
+    calls: list[str] = []
+    fractions: list[float] = []
+    cache = evaluate_panel_nodes(
+        graph,
+        panel=FactorPanel.from_observations(_rows(6), graph),
+        missing=MissingPolicy.DROP,
+        checkpoint=lambda: calls.append("checkpoint"),
+        progress=fractions.append,
+    )
+    # 종목마다 첫 행은 이력이 모자라 None 이고, 나머지는 직전 행과의 작은 값이다
+    assert [cache.value("out", row) for row in range(6)] == [None, None, 0.0, 1.0, 2.0, 3.0]
+    # 노드 진입 2번 + x 유한값 검사 3청크 + out 가림 구간 1필드
+    # + 시계열 커널 앞뒤 2번 + 창 후보 5행의 3청크와 청크마다 offset 1번 + out 유한값 검사 3청크
+    assert len(calls) == 2 + 3 + 1 + 2 + 3 * 2 + 3
+    # 노드 안에서도 청크마다 올리고 끝값은 1.0 이다
+    assert len(fractions) == 2 + 3
+    assert fractions == sorted(fractions) and fractions[-1] == 1.0
 
 
 def test_cross_sectional_median_fill_waits_for_t3_05() -> None:

@@ -514,7 +514,8 @@ def test_migration_from_v8_preserves_existing_schema_and_adds_only_simulation_re
             ).fetchall()
         )
         assert all(after[name] == sql for name, sql in before)
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        # v8 → v9(모의 사전등록) → v10(목록 머리 지표)를 차례로 올린다.
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
         assert (
             connection.execute("SELECT count(*) FROM holdout_simulation_claims").fetchone()[0] == 0
         )

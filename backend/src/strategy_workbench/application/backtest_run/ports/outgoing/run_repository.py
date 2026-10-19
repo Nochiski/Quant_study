@@ -19,7 +19,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
 )
 
-from .trial_ledger import TrialLedgerPort
+from .trial_ledger import RunHeadline, TrialLedgerPort
 
 
 class RetiredRunRequestError(RuntimeError):
@@ -66,6 +66,8 @@ class BacktestRunSummary:
     kind: RunKind
     experiment_id: str | None
     experiment_paused: bool
+    headline: RunHeadline | None = None
+    """완료 run 의 머리 지표. 끝나지 않았거나 판본 10 이전에 끝난 run 은 None 이다."""
 
 
 class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):

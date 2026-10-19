@@ -16,9 +16,11 @@
 | 7 | 실험 조작 이력(로드맵 M6 감사 기록): `experiment_control_changes` |
 | 8 | 실험을 만든 결과 실행(검증 랩 V5-02 튼튼한지 확인하기): `experiment_sources` |
 | 9 | 합성 사전등록·모의 claim·관측 결과(실제 개봉 권위 없음) |
+| 10 | 완료 run 의 머리 지표(목록 응답, 재설계 결정 1): `backtest_run_headlines` |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다. v5 에서 올린
-파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다.
+파일의 기존 run 은 시작 시각이 없어 시간 추정의 근거가 되지 않는다. v9 에서 올린 파일의 기존 완료
+run 은 머리 지표가 없어 목록에서 지표 칸이 비어 보인다(결과 화면은 그대로 읽힌다).
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -440,6 +442,26 @@ _V9_ADDED_OBJECTS += (
 
 V9_SCHEMA_OBJECTS = V8_SCHEMA_OBJECTS + _V9_ADDED_OBJECTS
 
+# 완료 run 의 머리 지표(FULL 범위 총수익률·샤프·최대 낙폭). 목록이 결과 파일을 열지 않고 읽는
+# 투영이며, 완료 기록(`record_trial_result`)과 같은 트랜잭션에서 한 번 쓴다. 값이 없는(사용 불가)
+# 지표는 NULL 이다.
+_V10_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "backtest_run_headlines",
+        """
+        CREATE TABLE backtest_run_headlines (
+            accepted_order INTEGER PRIMARY KEY REFERENCES backtest_runs (accepted_order),
+            total_return REAL,
+            sharpe REAL,
+            max_drawdown REAL
+        )
+        """,
+    ),
+)
+
+V10_SCHEMA_OBJECTS = V9_SCHEMA_OBJECTS + _V10_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -456,7 +478,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V9_SCHEMA_OBJECTS,
+            objects=V10_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
@@ -467,6 +489,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 SchemaUpgrade(6, V6_SCHEMA_OBJECTS, _added(_V7_ADDED_OBJECTS)),
                 SchemaUpgrade(7, V7_SCHEMA_OBJECTS, _added(_V8_ADDED_OBJECTS)),
                 SchemaUpgrade(8, V8_SCHEMA_OBJECTS, _added(_V9_ADDED_OBJECTS)),
+                SchemaUpgrade(9, V9_SCHEMA_OBJECTS, _added(_V10_ADDED_OBJECTS)),
             ),
         ),
     )

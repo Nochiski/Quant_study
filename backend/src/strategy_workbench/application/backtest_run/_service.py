@@ -121,6 +121,7 @@ from .ports.outgoing.backtest_executor import (
     RunCancelledError,
 )
 from .ports.outgoing.run_repository import BacktestRunRepositoryPort, BacktestRunSummary, RunKind
+from .ports.outgoing.trial_ledger import RunHeadline
 
 logger = logging.getLogger(__name__)
 
@@ -1084,6 +1085,7 @@ class BacktestRunService:
                 run_id,
                 session_sharpe=representative_sharpe(result),
                 metric_registry_version=result.manifest.metric_registry_version,
+                headline=run_headline(result),
             )
         except Exception:
             logger.exception("trial result could not be recorded — run_id=%s", run_id)
@@ -1555,4 +1557,22 @@ def _as_data_warnings(messages: tuple[str, ...]) -> tuple[DataWarning, ...]:
             severity=WarningSeverity.WARNING,
         )
         for message in messages
+    )
+
+
+# 목록 머리 지표의 registry id. 값은 결과의 FULL 범위 지표 그대로 옮긴다(재설계 결정 1).
+_HEADLINE_METRICS = ("total_return", "sharpe", "max_drawdown")
+
+
+def run_headline(result: BacktestRunResult) -> RunHeadline:
+    """완료 결과의 FULL 범위 머리 지표. 지표가 없거나 사용 불가면 그 칸은 None 이다."""
+    values = {
+        metric.metric_id: metric.value
+        for metric in result.metrics
+        if metric.scope is MetricScope.FULL and metric.metric_id in _HEADLINE_METRICS
+    }
+    return RunHeadline(
+        total_return=values.get("total_return"),
+        sharpe=values.get("sharpe"),
+        max_drawdown=values.get("max_drawdown"),
     )

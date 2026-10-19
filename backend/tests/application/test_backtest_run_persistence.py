@@ -36,6 +36,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunRepositoryPort,
+    RunHeadline,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResultNotReadyError,
@@ -217,7 +218,12 @@ def test_a_completion_that_cannot_be_saved_is_not_shown(
 
 class _RefusingTrialResult(SQLiteBacktestRunRepository):
     def record_trial_result(
-        self, run_id: str, *, session_sharpe: float | None, metric_registry_version: str
+        self,
+        run_id: str,
+        *,
+        session_sharpe: float | None,
+        metric_registry_version: str,
+        headline: RunHeadline | None = None,
     ) -> None:
         raise ResearchStorageError(f"disk full — run_id={run_id}")
 

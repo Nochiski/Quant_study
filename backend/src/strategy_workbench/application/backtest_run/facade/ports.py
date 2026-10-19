@@ -30,6 +30,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.run_repository i
     RunKind,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
+    RunHeadline,
     TrialLedgerRecords,
     TrialLineageAlreadyMergedError,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "BacktestArtifactUnreadableError",
     "BacktestRunNotFoundError",
     "RetiredRunRequestError",
+    "RunHeadline",
     "BacktestRunRepositoryPort",
     "BacktestRunSummary",
     "CancellationCheck",

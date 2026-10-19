@@ -97,9 +97,7 @@ FIELDS = (
 ADAPTERS = [pytest.param("mock", id="mock"), pytest.param("equity_duckdb", id="equity_duckdb")]
 
 
-class ContractAdapter(
-    RawObservationPort, CancellableRawObservationPort, EquityDataPort, Protocol
-):
+class ContractAdapter(RawObservationPort, CancellableRawObservationPort, EquityDataPort, Protocol):
     """All three ports on one object — the suite checks they agree cell by cell.
 
     Cancellation is not optional for a contract case: a long trace must be interruptible on
@@ -189,9 +187,7 @@ def test_lagged_fields_are_present_on_the_first_history_session(
     adapter: ContractAdapter,
 ) -> None:
     """Lag is the adapter's job: warm-up sessions must already carry lagged fields."""
-    result = adapter.load_raw_observations(
-        _query(adapter, fields=("price.market_cap",), history=2)
-    )
+    result = adapter.load_raw_observations(_query(adapter, fields=("price.market_cap",), history=2))
     first = result.history_sessions[0]
     present = [
         o
@@ -246,9 +242,7 @@ def test_facts_do_not_depend_on_the_query_window(adapter: ContractAdapter) -> No
 def test_unknown_field_is_a_failure_value_not_a_synthetic_series(
     adapter: ContractAdapter,
 ) -> None:
-    result = adapter.load_raw_observations(
-        _query(adapter, fields=("price.close", "unknown.field"))
-    )
+    result = adapter.load_raw_observations(_query(adapter, fields=("price.close", "unknown.field")))
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert not result.ok
     assert result.observations == ()

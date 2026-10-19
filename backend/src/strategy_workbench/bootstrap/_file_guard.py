@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
+    ICACLS_OUTPUT_ENCODING,
     default_windows_account,
     icacls_command,
 )
@@ -108,7 +109,14 @@ def _run_icacls(command: Sequence[str]) -> None:
     """
     try:
         # shell을 거치지 않고 고정된 인자 배열만 넘긴다. 경로는 인자라 인용 문제가 없다.
-        completed = subprocess.run(list(command), capture_output=True, text=True, check=False)
+        completed = subprocess.run(
+            list(command),
+            capture_output=True,
+            text=True,
+            encoding=ICACLS_OUTPUT_ENCODING,
+            errors="replace",
+            check=False,
+        )
     except OSError as error:
         raise FilePermissionError(
             f"could not run the ACL command — command={list(command)} "

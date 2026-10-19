@@ -8,7 +8,7 @@
 
 `tools/quant_study_dev/plan_progress.py`가 순수 Python 집계·검증·생성의 단일 owner다. 새 의존성은
 없으며 Python 3.11 이상으로 script를 직접 실행할 수 있다. 기존 루트 uv 명령도 유지한다.
-다섯 initiative의 phase 이름·ID 형식과 lang2의
+initiative별 phase 이름·ID 형식과 lang2의
 `INTEGRATED` 지원 차이는 `PROFILES`에 선언한다. 각 initiative의 `tools/update-plan-progress.ps1`은
 기존 Windows의 `-PlanPath`·`-Check` 호출을 같은 Python 도구로 전달하는 호환 진입점이다.
 

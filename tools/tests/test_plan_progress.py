@@ -94,7 +94,7 @@ class PlanProgressAggregationTest(unittest.TestCase):
                     ),
                 )
 
-    def test_all_five_profiles_keep_their_phase_and_integration_contracts(self) -> None:
+    def test_every_profile_keeps_its_phase_and_integration_contracts(self) -> None:
         for name, profile in PROFILES.items():
             final = profile.phases[-1][0]
             with self.subTest(profile=name):

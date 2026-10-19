@@ -246,6 +246,7 @@ def test_fg_fresh_collection_lag(con) -> None:
 
 # ── 장 마감 판(evening, 컷오버 PR-4 · T-2) ───────────────────────────────────
 T = "2026-09-29"            # 장 마감 판의 오늘. 직전 거래일 D' = D
+T_NEXT = "2026-09-30"       # T 다음 날 — 장 마감 판 WISE 시점(T) 뒤
 
 
 @pytest.fixture
@@ -269,7 +270,7 @@ def _ectx(con: duckdb.DuckDBPyConnection, **over: object) -> gates.GateContext:
     over.setdefault("t_candidates_from", "m_20260928T233000Z")
     over.setdefault("t_source_build", "e_20260929T064500Z")
     over.setdefault("t_source_max_date", T)
-    return _ctx(con, date=T, basis="evening", asof=D, **over)
+    return _ctx(con, date=T, basis="evening", asof=D, wise_asof=T, **over)
 
 
 def test_evening_baseline_passes_every_gate(con_evening) -> None:
@@ -284,7 +285,7 @@ def test_evening_baseline_passes_every_gate(con_evening) -> None:
     assert (res["FG5"].metrics["n_candidates"], res["FG5"].metrics["n_missing"]) == (1, 0)
     # KRX 시총 대조는 장 마감 판에 대상이 없다(KRX 의 T 시총은 아직 없다) — 0 이 아니라 NULL
     assert res["FG3"].metrics["n_krx_mktcap_diff"] is None
-    assert res["FG-fresh"].metrics["collection_expected_date"] == D
+    assert res["FG-fresh"].metrics["collection_expected_date"] == T     # 그날 06:00 수집(N-53)
 
 
 @pytest.mark.parametrize("breaker, gate, key", [
@@ -296,19 +297,38 @@ def test_evening_baseline_passes_every_gate(con_evening) -> None:
     ("UPDATE g_fi_universe SET mktcap_basis = 'krx'", "FG3", "non_t1_basis"),
     ("UPDATE g_fi_universe SET market_cap = 90.0", "FG3", "market_cap_rule"),   # D' 종가로 잰 시총
     (f"DELETE FROM g_fi_prices WHERE date = DATE '{T}'", "FG1", "eligible_without_price_on_d"),
-    (f"UPDATE g_fi_fin_summary SET available_date = DATE '{T}'",
+    (f"UPDATE g_fi_fin_summary SET available_date = DATE '{T_NEXT}'",
      "FG1", "fi_fin_summary.available_after_d"),
+    # DART 행은 WISE 시점(T) 안이어도 D' 뒤면 위반(N-53 — 리뷰 M2)
+    (f"UPDATE g_fi_fin_summary SET available_date = DATE '{T}', fs_basis = 'DART:CFS'",
+     "FG1", "fi_fin_summary.dart_available_after_asof"),
     ("INSERT INTO g_fi_consensus_annual (ticker, period, data_type, fetched_date) VALUES "
-     f"('000001', '2026/12', 'E', DATE '{T}')",
+     f"('000001', '2026/12', 'E', DATE '{T_NEXT}')",
      "FG1", "fi_consensus_annual.outside_window_or_vocab"),
 ])
 def test_evening_gates_fail_on_each_breach(con_evening, breaker: str, gate: str,
                                            key: str) -> None:
     """장 마감 판 FG2(T 전 행 KRX · T 행 장 마감 원천 · 시총 기준) · FG3(D' 주식수 × T 종가) ·
-    FG1(eligible 은 T 가격 · 재무·연간 컨센서스는 D' 까지 — 정보 시점)."""
+    FG1(eligible 은 T 가격 · 재무·연간 컨센서스는 WISE 시점 T 까지 — N-53)."""
     con_evening.execute(breaker)
     r = _by_name(gates.run_all(_ectx(con_evening)))[gate]
     assert r.status is GateStatus.FAIL and r.metrics[key], (key, r.detail)
+
+
+def test_evening_fg1_takes_wise_rows_of_the_day(con_evening) -> None:
+    """N-53 — 장 마감 판은 그날 06:00 WISE 수집분(fetched·available = T)을 싣는다. FG1 두 상한(재무
+    available · 연간 컨센서스 fetched)은 wise_asof(T)라 통과하고, 같은 행이 아침판(wise_asof = D)이면
+    FAIL 이다(아침판 규칙은 그대로)."""
+    con_evening.execute(f"UPDATE g_fi_fin_summary SET available_date = DATE '{T}'")
+    con_evening.execute("INSERT INTO g_fi_consensus_annual (ticker, period, data_type, fetched_date) "
+                        f"VALUES ('000001', '2026/12', 'E', DATE '{T}')")
+    r = _by_name(gates.run_all(_ectx(con_evening)))["FG1"]
+    assert r.status is GateStatus.PASS, r.detail
+    assert (r.metrics["fi_fin_summary.available_after_d"],
+            r.metrics["fi_consensus_annual.outside_window_or_vocab"]) == (0, 0)
+    m = gates.fg1_rows(_ctx(con_evening, date=D, asof=D, wise_asof=D))
+    assert (m.metrics["fi_fin_summary.available_after_d"],
+            m.metrics["fi_consensus_annual.outside_window_or_vocab"]) == (1, 1)
 
 
 def test_morning_fg2_refuses_the_evening_market_cap_basis(con) -> None:

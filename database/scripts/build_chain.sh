@@ -93,7 +93,7 @@ step_soft() {
 }
 snapshot_step() {
   # 5 DB 전부 뜬다. stg_price_daily 의 G9 가 kiwoom 원장을 직접 조인하므로 부분 스냅샷은 금지
-  # (STAGE_DESIGN §2). 저녁 체인은 키움·WISE 가 끝나면 바로 호출되고 dart.db 는 아직 쓰는 중일 수 있다 —
+  # (STAGE_DESIGN §2). 저녁 체인은 키움이 끝나면 바로 호출되고 dart.db 는 아직 쓰는 중일 수 있다 —
   # 그날 DART 분은 아침 확정판에 들어온다.
   local out; out=$(mktemp)
   # raw 락은 잡지 않는다. 스냅샷은 읽기 전용 연결의 VACUUM INTO 라 트랜잭션 일관 사본이고, 저녁에는 DART 갈래가

@@ -20,19 +20,20 @@ stage T 행)·`_t_prices`(T 가격 행)·`_t_adj_src`(T 행을 넣은 수정주�
 
 두 날짜(컷오버 PR-4 · T-2): `Params.d` 는 판 기준일(세션·창의 끝), `Params.asof` 는 정보 시점이다.
 아침판은 둘 다 D 다. 장 마감 판(basis evening)은 d = 오늘 T, asof = D'(직전 거래일 = 고정한 연구
-판의 마지막 세션)이다. 날짜 축이 있는 정보 입력 — WISE(컨센서스·재무)·DART(재무·배당·감사·
-공시)·`universe_daily`(D' 행)·WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor`) — 는
-fetched/available ≤ asof 로 자른다(compat `--consensus-asof` 와 같은 개념 — 기본값이 D 인 것도
-같다). 그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
+판의 마지막 세션)이다. 날짜 축이 있는 정보 입력 — DART(재무·배당·감사·공시)·`universe_daily`(D' 행)·
+WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor`) — 는 fetched/available ≤ asof 로 자른다.
+그래야 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영(15:41 에는 D' 까지만 안다)과 같다.
+WISE(컨센서스·재무 — `stg_consensus_annual`·`stg_consensus_matrix`·`stg_fin_wise`·`stg_fin_wise_q`)만
+`Params.wise_asof` 로 자른다(N-53): 아침판 D, 장 마감 판도 T 다. WISE 는 그날 06:00 에 받고 장 마감 판이
+고정한 D' 확정판의 stage 판에 그 수집분이 실려 있다(평일은 T 아침 08:10 빌드 — 월요일·연휴 다음 날은 확정판이
+토요일·연휴 첫날 아침에 지어져 그 아침 수집분이다). compat `--consensus-asof`(기본 = 판 날짜)와 같은 시점이다.
 날짜 축이 없는 마스터(`security` 이름·상장일, `corp` 업종 코드)는 고정 판 그대로다. 세션 창(가격
 550 달력일·수급·신용 60 세션)·당해 12월기 `fy`·연간 컨센서스 연도 창은 T 기준이다.
 
-WISE 시점 `Params.wise_asof`(주말 보강판 basis supplement, N-45): WISE 컨센서스에서 나온 입력 — 신선도
-(`_dstar`·`_cov`)·매트릭스(`_cov` 를 따른다)·연간 컨센서스·추정기관 수(`coverage_daily`)·WISE 연간·분기
-재무 — 만 fetched_date ≤ wise_asof 로 자른다. 아침·장 마감 판은 wise_asof = asof 라 SQL 글자가 그대로다.
-보강판은 asof = D(가격·수급·DART·universe_daily·WICS·기업행위)이고 wise_asof = 휴일 아침 수집일 W(> D,
-WISE 기준일 = D)다. 그 휴일 수집은 다음 세션 저녁 수집과 같은 내용이라(N-45 실측) 신선도 나이는 W 를 D 다음
-세션으로 센다(`coverage_sqls`).
+주말 보강판(basis supplement, N-45): asof = D(가격·수급·DART·universe_daily·WICS·기업행위)이고 wise_asof =
+휴일 아침 수집일 W(> D, WISE 기준일 = D)다. 보강판만 추정기관 수(`coverage_daily`)도 wise_asof 로 자른다 —
+정규 판은 asof(장 마감 판 D', N-53 계획 '열린 것' 3). 그 휴일 수집은 다음 세션 저녁 수집과 같은 내용이라(N-45
+실측) 신선도 나이는 W 를 D 다음 세션으로 센다(`coverage_sqls`).
 """
 from __future__ import annotations
 
@@ -128,13 +129,13 @@ class Params:
     credit_lag: int         # 신용잔고 실입수 랙(세션, equity FieldProfile)
     basis: str = "morning"  # morning | evening(장 마감 판 — 컷오버 T-2) | supplement(주말 보강판 N-45)
     asof: str = ""          # 정보 시점(YYYY-MM-DD) — 비우면 d. 장 마감 판은 D'(모듈 docstring)
-    wise_asof: str = ""     # WISE 컨센서스 입력의 시점 — 비우면 asof. 보강판만 asof 뒤(모듈 docstring)
+    wise_asof: str = ""     # WISE 정보 시점 — 비우면 d. 장 마감 판도 T(그날 06:00 수집, N-53), 보강판은 휴일 수집일 W
 
     def __post_init__(self) -> None:
         if not self.asof:
             object.__setattr__(self, "asof", self.d)
         if not self.wise_asof:
-            object.__setattr__(self, "wise_asof", self.asof)
+            object.__setattr__(self, "wise_asof", self.d)
 
 
 def _lit_list(values: tuple[str, ...]) -> str:
@@ -170,7 +171,7 @@ def coverage_sqls(p: Params) -> list[str]:
     """종목별 신선도 `_cov`(T2.11 · 유예 규칙 = layer-fixes §3-2).
 
     D* = `stg_consensus_annual` 에서 fetched_date ≤ wise_asof 인 **마지막 수집일**(전 종목 공통 —
-    아침판 D, 장 마감 판 D', 보강판 휴일 수집일 W).
+    아침판 D, 장 마감 판도 T — 그날 06:00 수집(N-53), 보강판 휴일 수집일 W).
     종목의 마지막 신선일 = 당해 12월기 추정(period_kind 'E', period = fy)의 op·ni 가 **둘 다** 있는
     fetched_date 의 최댓값(compat `ESTIMATE_TICKERS_SQL` 과 같은 판정).
       fresh  = 마지막 신선일 = D*               (나이 0)
@@ -181,11 +182,13 @@ def coverage_sqls(p: Params) -> list[str]:
     보강판은 D* 가 D 뒤 휴일 W 라 거래일 축(`_calx` — D 에서 끝난다)에 없다. W 수집은 D 다음 세션의 저녁
     수집과 같은 내용이므로(N-45) W 까지 신선하지 않은 종목은 그 세션 하나를 더 센다 — 평일 판에서 같은 종목이
     받을 나이와 같다(빼면 나이 0 인 grace 가 생겨 유예 0 spec 이 낡은 추정치 종목을 그대로 채점한다).
+    D ≤ d 인 휴일 D*(장 마감 판의 월요일·연휴 다음 날 — 토요일·연휴 첫날 06:00 수집, N-53)는 붙이지 않아 나이 0
+    grace 다(`test_grace_window_five_marks_ages_one_to_five_grace_and_six_lapsed`).
     """
     dstar = ("CREATE OR REPLACE TEMP TABLE _dstar AS\n"
              "SELECT max(fetched_date) AS dstar FROM stg_consensus_annual\n"
              f"WHERE fetched_date <= DATE '{p.wise_asof}'")
-    # 아침·장 마감 판은 D* ≤ asof ≤ d 라 붙이지 않는다(SQL 글자 그대로)
+    # 아침·장 마감 판은 D* ≤ d 라 붙이지 않는다(SQL 글자 그대로)
     next_session = ("" if p.basis != BASIS_SUPPLEMENT else
                     "\n             + CASE WHEN f.last_fresh < s.dstar "
                     f"AND s.dstar > DATE '{p.d}' THEN 1 ELSE 0 END")
@@ -290,6 +293,8 @@ def universe_sql(p: Params, rule: UniverseRule) -> str:
         mktcap_basis = "krx"
         px_cols = "px.close, px.shares_out,"
     mktcap_lit = f"'{mktcap_basis}'".ljust(42)      # 열 정렬 — 아침판 SQL 글자가 바뀌지 않게
+    # 추정기관 수 시점 — 보강판만 휴일 수집일 W, 정규 판은 asof(장 마감 판 D' — N-53 계획 '열린 것' 3)
+    analyst_cut = p.wise_asof if p.basis == BASIS_SUPPLEMENT else p.asof
     inner = f"""WITH u AS (
     SELECT ticker, market, sec_type, halt_state, admin_state, adv20_krw FROM universe_daily
     WHERE date = DATE '{p.asof}' AND status IN ({_lit_list(LIVE_STATUSES)})
@@ -341,14 +346,14 @@ base AS (
            coalesce(v.coverage_state, 'none')            AS coverage_state,
            v.coverage_age_days,
            CASE WHEN v.coverage_state IN ('fresh', 'grace') THEN v.last_fresh
-                ELSE DATE '{p.wise_asof}' END                    AS analyst_asof
+                ELSE DATE '{analyst_cut}' END                    AS analyst_asof
     FROM u
     LEFT JOIN security s USING (ticker)
     LEFT JOIN px USING (ticker)
     LEFT JOIN _cov v USING (ticker)
 ),
 na AS (
-    SELECT ticker, date, analyst_count FROM coverage_daily WHERE date <= DATE '{p.wise_asof}'
+    SELECT ticker, date, analyst_count FROM coverage_daily WHERE date <= DATE '{analyst_cut}'
 ),
 judged AS (
     SELECT b.*, n.analyst_count,
@@ -1143,7 +1148,8 @@ GAPS: tuple[dict[str, str], ...] = (
                "T 종가가 없는 종목은 market_cap NULL"},
     {"table": "fi_universe", "column": "*",
      "reason": "장 마감 판은 universe_daily D' 행 이월(상태 변화는 다음 날 아침 확정판, "
-               "T 신규 상장 누락) · WISE·DART·universe_daily·WICS 는 D' 까지(asof), "
+               "T 신규 상장 누락) · DART·universe_daily·WICS·추정기관 수는 D' 까지(asof) · WISE 는 "
+               "T 까지(wise_asof — 그날 06:00 수집, N-53), "
                "security·corp 은 고정 판 마스터 그대로"},
     {"table": "fi_universe", "column": "filing_late",
      "reason": "가장 최근 제출한 정기보고서만 판정 — 기한이 지났는데 아직 안 낸 보고서(미제출)는 "

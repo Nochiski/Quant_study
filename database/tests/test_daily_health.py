@@ -279,10 +279,11 @@ def test_skip_source_excludes_its_checks(tmp_path):
     assert rep.ok                                                     # 오염 99% 픽스처인데 kiwoom 을 제외했으니 통과
 
 
-# WISE 스냅샷 시각 3종 — (run_at UTC, checked_at UTC, fetched_date KST). 대상일 D=20260908 기준.
+# WISE 스냅샷 시각 4종 — (run_at UTC, checked_at UTC, fetched_date KST). 대상일 D=20260908 기준.
 _WISE_SNAPSHOT = {
-    "evening": ("2026-09-08T09:05:00", "2026-09-08T09:05:30", "2026-09-08"),       # D 18:05 KST (V2-3)
-    "next_morning": ("2026-09-08T21:04:00", "2026-09-08T21:04:30", "2026-09-09"),  # D+1 06:04 KST (옛 방식)
+    "morning": ("2026-09-07T21:04:00", "2026-09-07T21:04:30", "2026-09-08"),       # D 06:04 KST (N-53)
+    "evening": ("2026-09-08T09:05:00", "2026-09-08T09:05:30", "2026-09-08"),       # D 18:05 KST (옛 V2-3)
+    "next_morning": ("2026-09-08T21:04:00", "2026-09-08T21:04:30", "2026-09-09"),  # D+1 06:04 KST (폴백)
     "stale": ("2026-09-04T09:05:00", "2026-09-04T09:05:30", "2026-09-04"),         # D-4 저녁 — 두 기준 다 아님
 }
 
@@ -370,20 +371,25 @@ def test_wise_raw_expectation_derives_from_coverage_not_a_fixed_band(tmp_path):
     assert next(c for c in rep2.checks if c.name == "wise.raw").status is lh.Status.FAIL
 
 
-def test_wise_snapshot_read_on_target_day_evening(tmp_path):
-    # V2-3: 스냅샷이 06:00(D+1) → 18:05(D) 로 옮겨간다. D+1 아침 판정은 실행일이 아니라 D 의 KST 날짜를 봐야 한다.
-    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, snapshot="evening")))
+@pytest.mark.parametrize("snapshot", ["morning", "evening"])
+def test_wise_snapshot_read_on_target_day(tmp_path, snapshot):
+    # N-53: 스냅샷은 D 06:00 체인(옛 V2-3 은 D 18:05). D+1 아침 판정은 실행일이 아니라 D 의 KST 날짜를 본다.
+    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, snapshot=snapshot)))
     c = _by(rep)
     assert c["wise.snapshot_day"].value == "target_day"
+    assert c["wise.snapshot_day"].status is lh.Status.PASS
     assert c["wise.run"].status is lh.Status.PASS and c["wise.req_identity"].status is lh.Status.PASS
     assert c["wise.raw"].status is lh.Status.PASS
 
 
 def test_wise_falls_back_to_next_morning_snapshot(tmp_path):
-    # 전환기: D 저녁 행이 없고 옛 방식(D+1 아침) 행만 있으면 그것으로 판정하되 snapshot_day 에 남긴다.
+    # D 06:00 행이 없고 D+1 아침 행만 있으면 그것으로 수집이 살아 있는지 판정하되, snapshot_day 는 warn 등급 FAIL —
+    # D 의 판들은 전날 수집분을 읽었다(N-53). 06:00 체인에선 D+1 아침 런이 늘 있어 PASS 면 결손이 묻힌다.
     rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, snapshot="next_morning")))
     c = _by(rep)
     assert c["wise.snapshot_day"].value == "next_morning"
+    assert c["wise.snapshot_day"].status is lh.Status.FAIL
+    assert c["wise.snapshot_day"].level is lh.Level.WARN      # 확정 빌드 게이트(REQUIRED)는 막지 않는다
     assert c["wise.run"].status is lh.Status.PASS and c["wise.req_identity"].status is lh.Status.PASS
     assert c["wise.raw"].status is lh.Status.PASS
 

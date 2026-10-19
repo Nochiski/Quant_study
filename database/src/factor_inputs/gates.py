@@ -22,20 +22,19 @@
                  않고, 셀 수 있는 항목이 0 이면 `skip(no_fixtures)` — 허용표 밖이라 층 판정은
                  FAIL 이다(K1-7a, `stage/skip_allow.py`).
   FG-fresh     — 신선도 상태 수를 기록하고, lapsed·none 은 eligible 이 아니며(require_estimates),
-                 grace 나이 ≤ G, 마지막 수집일 D* 가 예상 수집일(asof — 아침판 D, 장 마감 판 D')
-                 보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지 않는다(수집 중단 허용치는 유예 G 와
-                 따로 둔다). grace 종목이 `GRACE_WARN_MAX` 를 넘으면 metrics `warn`(판정은 그대로 —
-                 WISE 부분 수집 실패 의심, N-47).
+                 grace 나이 ≤ G, 마지막 수집일 D* 가 예상 수집일(wise_asof — 아침판 D, 장 마감 판도
+                 T: 그날 06:00 수집, N-53)보다 COLLECTION_LAG_MAX 거래일 넘게 뒤처지지 않는다(수집 중단
+                 허용치는 유예 G 와 따로 둔다). grace 종목이 `GRACE_WARN_MAX` 를 넘으면 metrics `warn`
+                 (판정은 그대로 — WISE 부분 수집 실패 의심, N-47).
   FG5 후보 커버리지 — 장 마감 판만(컷오버 PR-5 · N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패').
                  직전 판 모델 후보 중 T 가격이 없는 종목 비율 ≤ `T_CANDIDATE_MISSING_MAX`. 후보를 못
                  읽으면 FAIL. 아침판 판 기록에는 이 게이트가 없다(`GATE_ORDER` 그대로).
 
-정보 시점 `asof`(컷오버 PR-4): 재무·연간 컨센서스의 available/fetched 상한은 asof 로 본다(아침판은
-D 그대로). 신용 available_date 는 세션 축이라 D(장 마감 판 T)로 본다.
-WISE 시점 `wise_asof`(주말 보강판 N-45 — 아침·장 마감 판은 asof 와 같다): 연간 컨센서스 fetched_date ·
-재무 available_date(WISE 판 날짜가 섞인다) 상한과 수집 지연의 예상 수집일은 wise_asof 로 본다. 보강판은
-D* 가 wise_asof(휴일 수집일)와 같아야 한다 — 다르면 그 휴일 WISE 가 판에 없다(FG-fresh FAIL, 정규 판과
-같은 판을 '보강판'으로 내보내지 않는다).
+정보 시점(컷오버 PR-4 · N-53): 재무의 available 상한·연간 컨센서스의 fetched 상한은 WISE 정보 시점
+`wise_asof` 로 본다(아침판 D, 장 마감 판도 T — 그날 06:00 수집, 보강판은 휴일 수집일 W — N-45). 재무 표는
+WISE·DART 를 한 행에 합쳐 available_date = 원천들의 max 라, DART 의 D' 자르기는 SQL(`queries`, asof)이 맡는다.
+신용 available_date 는 세션 축이라 D(장 마감 판 T)로 본다. 보강판은 D* 가 wise_asof(휴일 수집일)와 같아야
+한다 — 다르면 그 휴일 WISE 가 판에 없다(FG-fresh FAIL, 정규 판과 같은 판을 '보강판'으로 내보내지 않는다).
 """
 from __future__ import annotations
 
@@ -107,22 +106,22 @@ class GateContext:
     rule: UniverseRule
     min_eligible: int
     dstar: str | None                       # 마지막 수집일 D*
-    collection_lag_sessions: int | None     # (D*, asof] 거래일 수
+    collection_lag_sessions: int | None     # (D*, wise_asof] 거래일 수
     golden: list[dict[str, object]] = field(default_factory=list)
     view: Callable[[str], str] = lambda t: f"g_{t}"
     asof: str = ""                          # 정보 시점 — 비우면 date. 장 마감 판은 D'
+    wise_asof: str = ""                     # WISE 정보 시점 — 비우면 date. 장 마감 판도 T(N-53), 보강판은 휴일 수집일 W
     # 장 마감 판 FG5 대상 = 직전 판 모델 후보(`daily.postclose.fi_candidates`). 못 읽었으면 None
     t_candidates: tuple[str, ...] | None = None
     t_candidates_from: str = ""             # 후보를 읽은 fi 판 id, 못 읽었으면 그 사유
     t_source_build: str = ""                # 장 마감 stage 판 id(T 행 원천)
     t_source_max_date: str | None = None    # 그 판의 max(date) — T 가 아니면 판이 T 수집 전에 섰다
-    wise_asof: str = ""                     # WISE 컨센서스 입력 시점 — 비우면 asof. 보강판은 휴일 수집일
 
     def __post_init__(self) -> None:
         if not self.asof:
             self.asof = self.date
         if not self.wise_asof:
-            self.wise_asof = self.asof
+            self.wise_asof = self.date
 
 
 def _scalar(con: duckdb.DuckDBPyConnection, sql: str) -> object:
@@ -209,6 +208,11 @@ def fg1_rows(ctx: GateContext) -> GateResult:
     # 연간 행 available_date 는 WISE 판 날짜와 DART 날짜의 max 라 상한은 wise_asof 다(DART 쪽은 SQL 이 asof 로 자른다)
     viol["fi_fin_summary.available_after_d"] = _count(
         con, f"SELECT count(*) FROM {fin} WHERE available_date > DATE '{ctx.wise_asof}'")
+    # 재무 표의 DART 행(WISE 값이 없는 행 — fs_basis 'DART:')은 asof(장 마감 판 D')까지다. 위 상한이 wise_asof(T)로
+    # 넓어져(N-53) 장 마감 판의 DART D' 자르기 회귀를 따로 잡는다
+    viol["fi_fin_summary.dart_available_after_asof"] = _count(
+        con, f"SELECT count(*) FROM {fin} WHERE fs_basis LIKE 'DART:%' "
+             f"AND available_date > DATE '{ctx.asof}'")
     viol["fi_consensus.horizon_outside_vocab"] = _count(
         con, f"SELECT count(*) FROM {v('fi_consensus')} "
              "WHERE horizon NOT IN ('cur', '1w', '1m', '3m') OR horizon IS NULL")

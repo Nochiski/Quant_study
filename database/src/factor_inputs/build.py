@@ -33,7 +33,8 @@
 장 마감 판(`--basis evening`, 컷오버 T-2 · PR-4): --date 는 오늘 T, 원천은 직전 거래일 D' 아침
 확정판을 `--builds-from` 으로 고정한 것뿐이다(고정 없으면 rc 2). 산출 루트는 연구 루트
 (`research_root()`)와 달라야 한다(T-3 — 같으면 rc 2). 세션 = 연구 판 trading_calendar ∪
-{T}, 유니버스 = D' 행 이월, 정보 시점(asof) = D' (`queries` 모듈 docstring '두 날짜'). 다음이면
+{T}, 유니버스 = D' 행 이월, 정보 시점(asof) = D' · WISE 정보 시점(wise_asof) = T(N-53 — 그날 06:00
+수집. `queries` 모듈 docstring '두 날짜'). 다음이면
 `FactorInputsError`(rc 2) — 사유를 메시지에 남긴다:
   (a) T 가 `daily.calendar` 거래일이 아니다(휴장·주말) 또는 판정 달력을 못 읽는다
   (b) MD-SEAM — `daily.calendar` 의 T 직전 거래일 D' ≠ 연구 판 trading_calendar 의 마지막 날
@@ -64,7 +65,8 @@ universe_daily corp_action_window 45세션 · equity 규칙 변경)이 낳는 T 
 나온 입력만 자른다 — 가격·수급·DART·universe_daily·WICS·기업행위는 asof = D 그대로(`queries`
 모듈 docstring 'WISE 시점'). 판은 basis 로 갈린다(`_runs/<D>_supplement.json`·`latest_supplement.json`,
 빌드 id `s_`) — 정규 판 기록을 덮지 않는다. 휴일 수집분이 판에 없으면(D* ≠ W) FG-fresh FAIL.
-아침·장 마감 판은 wise_asof = asof(--wise-asof 를 주면 asof 와 같아야 한다 — rc 2)라 SQL 이 그대로다.
+아침·장 마감 판의 wise_asof 는 판 날짜다(아침판 D = asof, 장 마감 판 T — N-53). --wise-asof 를 주면 판 날짜와
+같아야 한다(rc 2).
 """
 from __future__ import annotations
 
@@ -112,13 +114,17 @@ from . import gates, queries
 # 1.8.0(2026-10-10, 컷오버 F-1 · T-43): fi_fin_summary DART 4Q 파생 분기 행의 available_date — 파생값을
 # 실은 행(q4_derived_available_date ≤ asof)은 max(사업보고서 available_date, q4_derived_available_date)
 # (연간 행과 같은 '원천들의 max'). 값·엔진 입력은 그대로
-# 1.9.0(2026-10-12, N-47 · 엑셀 확정분 E2): 추정치 유예 창 기본 0 → FI_COVERAGE_GRACE_MAX(5)
-# — 나이 1~5 grace 종목이 eligible 이고 컨센서스·WISE 재무·추정기관 수를 마지막 신선일 판으로
-# 싣는다. 유예가 더 짧은 spec(원본 미러·scope_v1.0 = 0)은 엔진이 coverage 열로 다시 자른다
+# 1.9.0(2026-10-16 · 10-19 배포, N-53): WISE 정보 시점 `wise_asof` — 장 마감 판도 T(그날 06:00 수집분, 기준일 =
+# 전 거래일). WISE 4표(연간·매트릭스 컨센서스, 연간·분기 재무)의 fetched 컷 · 신선도 D*·수집 지연 · FG1 두 상한이
+# 이것을 본다. DART·universe·WICS·추정기관 수·기업행위는 asof(D') 그대로(FG1 은 재무 표 DART 행의 D' 자르기를
+# 따로 본다). 아침판은 wise_asof = asof = D 라 SQL 이 같다
+# 1.10.0(2026-10-12 구현 · 10-19 N-53 위로 다시 매김, N-47 · 엑셀 확정분 E2): 추정치 유예 창 기본 0 →
+# FI_COVERAGE_GRACE_MAX(5) — 나이 1~5 grace 종목이 eligible 이고 컨센서스·WISE 재무·추정기관 수를 마지막
+# 신선일 판으로 싣는다. 유예가 더 짧은 spec(원본 미러·scope_v1.0 = 0)은 엔진이 coverage 열로 다시 자른다
 # (창은 `--grace-days` 로 덮을 수 있다) · FG-fresh grace 종목 수 경고(기록형 `GRACE_WARN_MAX`)
-# (1.9.0 에 더함, 2026-10-12 N-45 · 엑셀 확정분 E5): basis supplement · wise_asof(판 manifest 에 기록) —
-# 아침·장 마감 판의 SQL·게이트 판정은 글자 그대로라 판본을 올리지 않는다(올리면 배포 다음 두 판 대조가 하루 rc 2)
-RULES_VERSION = "fi1.9.0"
+# (1.10.0 에 더함, 2026-10-12 N-45 · 엑셀 확정분 E5): basis supplement — wise_asof = 휴일 수집일 W(판 manifest
+# 에 기록). 아침·장 마감 판의 SQL·게이트 판정은 글자 그대로다
+RULES_VERSION = "fi1.10.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning", BASIS_SUPPLEMENT)
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
@@ -424,7 +430,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     `default_postclose_stage_root()`) · `candidates_root`(직전 판 모델 후보를 읽을 연구 fi 루트,
     없으면 `research_root()`). `replay` 는 재생 전용 — 세션 축 뷰를 asof 에서 자른다(모듈 docstring
     '재생'). `wise_asof`(YYYYMMDD)는 WISE 컨센서스 입력의 시점 — 보강판은 필수(D 보다 뒤), 그 밖은
-    비우거나 asof 와 같아야 한다(모듈 docstring '주말 보강판')."""
+    비우거나 판 날짜와 같아야 한다(N-53 — 모듈 docstring '주말 보강판')."""
     t0 = time.time()
     d = _parse_date(date_s)
     if basis not in BASES_KNOWN:
@@ -454,13 +460,15 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             "keep 이 하루 2판씩 소모돼 모델 판이 가리키는 fi 판이 GC 된다. --root data/model_db/"
             "factor_inputs 로 분리한다(T-3)")
     dprime = _evening_dprime(d, calendar_dir) if evening else None
-    asof_d = d if dprime is None else dprime
-    if not supplement and wise_d is not None and wise_d != asof_d:
+    if not supplement and wise_d is not None and wise_d != d:
         raise FactorInputsError(
-            f"--wise-asof 를 asof 와 다르게 줄 수 있는 것은 보강판(--basis supplement)뿐이다: "
-            f"--basis={basis} asof={asof_d.isoformat()} --wise-asof={wise_asof} — 정규 판의 "
-            "추정치를 D 뒤 수집분으로 넓히지 않는다")
-    wise_iso = (wise_d or asof_d).isoformat()
+            f"--wise-asof 를 판 날짜와 다르게 줄 수 있는 것은 보강판(--basis supplement)뿐이다: "
+            f"--basis={basis} --date={date_s} --wise-asof={wise_asof} — 정규 판의 추정치를 판 날짜 "
+            "뒤 수집분으로 넓히지 않는다")
+    # WISE 정보 시점 — 아침판·장 마감 판은 판 날짜(N-53: 장 마감 판이 고정한 D' 확정판은 평일 T 아침 08:10 에
+    # 지어져 그날 06:00 WISE 수집분을 stage 판에 싣고 있다 — 월요일·연휴 다음 날은 토요일·연휴 첫날 아침 수집분,
+    # lag 1), 보강판은 휴일 수집일 W(N-45)
+    wise_iso = (wise_d or d).isoformat()
     # 유예 창 기본 = FI_COVERAGE_GRACE_MAX(5, N-47) — spec 마다 다른 유예는 엔진이 다시 자른다
     rule = UniverseRule(
         coverage_grace_days=FI_COVERAGE_GRACE_MAX if grace_days is None else grace_days)
@@ -500,9 +508,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         con.execute("SET enable_progress_bar = false")
         for name, expr in {**eq_exprs, **st_exprs}.items():
             # 재생만 세션 축을 asof 에서 자른다 — 재생이 아니면 꼬리가 비어 운영 SQL 그대로다.
-            # coverage_daily 는 날짜가 WISE 수집일이라 wise_asof 에서 자른다(정규 판은 asof 와 같다 —
-            # 보강판 재생만 다르다. asof 에서 자르면 휴일 수집분의 추정기관 수가 빠진다)
-            cut_at = wise_iso if name == "coverage_daily" else asof
+            # 보강판 재생만 coverage_daily 를 wise_asof(휴일 수집일)에서 자른다 — asof 에서 자르면 휴일 수집분의
+            # 추정기관 수가 빠진다. 정규 판의 추정기관 수는 asof(장 마감 판 D' — N-53 '열린 것' 3)
+            cut_at = wise_iso if supplement and name == "coverage_daily" else asof
             cut = (f" WHERE date <= DATE '{cut_at}'"
                    if replay and name in REPLAY_SESSION_TABLES else "")
             con.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS SELECT * FROM {expr}{cut}')
@@ -533,9 +541,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         for sql in queries.coverage_sqls(p):
             con.execute(sql)
         dstar = _one(con, "SELECT dstar FROM _dstar")
-        # N-12 수집 지연 = (D*, 예상 수집일] 거래일 수. 예상 수집일 = wise_asof(= asof — 장 마감 판은
-        # D'(T 저녁 수집은 아직 없다), 보강판은 휴일 수집일). T 로 재면 정상 상태가 lag 1 이 되어 하루만
-        # 빠져도 FAIL 이다. 보강판의 휴일은 거래일 축에 없어 FG-fresh 가 D* = wise_asof 를 따로 본다.
+        # N-12 수집 지연 = (D*, 예상 수집일] 거래일 수. 예상 수집일 = wise_asof — 장 마감 판도 T(그날
+        # 06:00 수집, N-53). 그날 수집이 빠지면 lag 1(허용), 이틀 빠지면 FAIL 이다. 보강판의 휴일은 거래일 축에
+        # 없어 FG-fresh 가 D* = wise_asof 를 따로 본다.
         lag = None if dstar is None else int(str(_one(
             con, f"SELECT count(*) FROM _calx WHERE date > DATE '{dstar}' "
                  f"AND date <= DATE '{wise_iso}'")))
@@ -588,7 +596,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     payload: dict[str, object] = {
         "layer": LAYER, "status": status, "build_id": bid, "date": d_iso, "basis": basis,
         "asof": asof,
-        # WISE 컨센서스 입력 시점 — 정규 판은 asof 와 같고 보강판은 휴일 수집일(N-45)
+        # WISE 컨센서스 입력 시점 — 정규 판은 판 날짜(N-53), 보강판은 휴일 수집일(N-45)
         "wise_asof": wise_iso,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rules_version": RULES_VERSION,
@@ -615,7 +623,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
         # 재생 표시(재생 판에만) — 현판을 이 날에서 자른 판이다(운영 판과 구분)
         payload["replay"] = {"session_cut": asof, "tables": list(REPLAY_SESSION_TABLES),
                              "note": "재생(PR-8b) — 현판 equity 의 세션 축을 asof 에서 자른 판"}
-        if wise_iso != asof:
+        if supplement:
             # 보강판 재생 — coverage_daily 는 wise_asof 에서 잘랐다(정규 판 재생 표시는 그대로)
             payload["replay"]["wise_cut"] = wise_iso
 

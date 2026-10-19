@@ -5,7 +5,7 @@
 기준일 = 증권사 의견 최신 수집일(토요일 수집이면 창은 그 앞 마지막 거래일에서 센다).
 같은 날 같은 증권사 보고서는 한 건(나중 수집이 이긴다). 일별 그래프는 기준일(최신 수집일) 앞
 마지막 거래일까지 — WISE 가 그날 보고서를 다음 날 올려 수집일은 늘 비어 보인다.
-WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto`) — 아침판 D, 장 마감 판 D',
+WISE 원천의 수집일 상한은 fi 판 JSON 의 wise_asof(`Sources.wise_upto`) — 아침판 D, 장 마감 판 T(N-53),
 주말 보강판은 휴일 수집일 W 라 D 분 보고서가 들어오고 일별 그래프가 D 까지 간다(N-45). 그때 글의
 날짜는 WISE 기준일 D 다 — 4행 '기준일: D(WISE 휴일 아침 재수집 W)', 보고서 날짜 · 컨센서스 날짜도 D.
 """
@@ -126,7 +126,7 @@ def _opt(x: object) -> str | None:
 
 def load(con: duckdb.DuckDBPyConnection, src: Sources, upto: date, uni: Universe) -> AnalystData:
     ob = src.equity("opinion_broker_daily")
-    # WISE 원천은 수집일 ≤ wise_asof — 아침판 D · 장 마감 판 D' · 주말 보강판 W(N-45). 종가는 D
+    # WISE 원천은 수집일 ≤ wise_asof — 아침판 D · 장 마감 판 T(N-53) · 주말 보강판 W(N-45). 종가는 D
     wise = src.wise_upto(upto)
     day = latest(con, ob, "fetched_date", wise, "true", "WISE 증권사별 투자의견")
     cal = krx_calendar(con, src, day, upto)

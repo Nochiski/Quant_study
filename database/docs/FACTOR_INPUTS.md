@@ -76,18 +76,24 @@ python -m factor_inputs build --date <T> --basis evening --root data/model_db/fa
 - 유니버스 = `universe_daily` **D' 행 이월**(date 열만 T, T 신규 상장은 빠진다). 시총 =
   round(D' KRX 상장주식수 × T 종가 / 1e8), `mktcap_basis = 't1_shares_x_t_close'`. T 종가는 T 행
   `_t_prices`(§2-2)에서 읽고 없으면 시총 NULL · `no_price`.
-- 정보 시점 asof = D': 날짜 축이 있는 정보 입력 — WISE(컨센서스·연간·분기 재무)·DART(재무·4Q
-  파생값·배당·감사·공시)·`universe_daily`(D' 행)·WICS(`sector_snapshot`)·추정기관 수·기업행위
-  (`adj_factor.available_date`) — 를 fetched/available ≤ D' 로 자른다(compat `--consensus-asof` 와
-  같은 개념). 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영과 같다. 날짜 축이 없는 마스터
-  (`security` 이름·상장일, `corp` 업종 코드·지주사 판정)는 고정 판 그대로다.
+- 정보 시점 asof = D': 날짜 축이 있는 정보 입력 — DART(재무·4Q 파생값·배당·감사·공시)·
+  `universe_daily`(D' 행)·WICS(`sector_snapshot`)·추정기관 수·기업행위(`adj_factor.available_date`) —
+  를 fetched/available ≤ D' 로 자른다. 재생이 D' 뒤 자료를 담은 판을 고정해도 실운영과 같다. 날짜 축이
+  없는 마스터(`security` 이름·상장일, `corp` 업종 코드·지주사 판정)는 고정 판 그대로다.
+- WISE 정보 시점 wise_asof = T(N-53, fi1.9.0): WISE(컨센서스 연간·매트릭스, 연간·분기 재무) 4표만
+  fetched ≤ T 로 자른다. WISE 는 그날 06:00 체인이 받고 장 마감 판이 고정한 D' 확정판의 stage 판에 그
+  수집분이 실려 있다(평일은 T 아침 08:10 빌드 — 월요일·연휴 다음 날은 토요일·연휴 첫날 아침 빌드라 그 아침
+  수집분이고 수집 지연은 정상이 lag 1). compat
+  `--consensus-asof`(기본 = 판 날짜 T)와 같은 시점이다. 추정기관 수는 그 종목의 마지막 신선일 값을
+  읽되 표(`coverage_daily`)를 D' 로 자르므로, 마지막 신선일이 T 인 종목은 D' 이하 최신 값이다.
 - 세션 축은 T 다: 창의 끝 · 신용 `available_date ≤ T`(T 아침 실입수분 포함) · 당해 12월기 `fy` 와
   연간 컨센서스 연도 창 Y = **T 의 연도**(연초 첫 거래일에 D' 와 해가 갈려도 다음 날 연구 판 T 와 같다).
 - `filing_late`: 법정기한이 (D', T] 에 드는 보고서는 세션 축에 T 가 있어 실효 기한이 T 가 되고,
   접수일 ≤ D' < T 라 false 다. 아침판 D' 에서는 기한 뒤 세션이 달력에 없어 NULL 이다(다음 날 연구 판
   T 와 같은 판정 — 두 판 대조의 등록 범주).
-- WISE 수집 지연(N-12)은 (D\*, D'] 의 거래일 수다 — 예상 수집일이 D' 다(T 로 재면 정상 상태가
-  lag 1).
+- WISE 수집 지연(N-12)은 (D\*, T] 의 거래일 수다 — 예상 수집일이 wise_asof = T(그날 06:00 수집)다.
+  그날 수집이 빠지면 lag 1(허용 — 옛 장 마감 판과 같은 시점), 이틀 빠지면 FAIL. 월요일·연휴 다음 날은 고정 판이
+  토요일·연휴 첫날 수집분이라 정상이 lag 1 이다.
 - 산출은 `_runs/<T>_evening.json` · `latest_evening.json`, 판 id 접두 `e_`.
 
 ### 2-2. 장 마감 판 T 행 · 당일 기업행위 · 후보 커버리지(컷오버 PR-5 · fi1.7.0)
@@ -184,7 +190,8 @@ python -m factor_inputs build --date <D> --basis supplement --wise-asof <W> \
 - 두 시점: asof = D — 가격·수급·신용·DART(재무·배당·감사·공시)·`universe_daily`·WICS·기업행위. **wise_asof = W** —
   WISE 컨센서스에서 나온 입력만: 신선도(`_dstar`·`_cov`)와 그것을 따르는 매트릭스(`fi_consensus`)·연간 컨센서스
   (`fi_consensus_annual`)·추정기관 수(`coverage_daily`)·WISE 연간·분기 재무(`fi_fin_summary` 의 WISE 열·WISE 분기
-  행). 판 manifest 에 `wise_asof` 가 남는다(정규 판은 asof 와 같은 값).
+  행). 판 manifest 에 `wise_asof` 가 남는다(정규 판은 판 날짜 — 아침판 D, 장 마감 판 T, N-53). 추정기관 수를 W 로
+  자르는 것은 보강판뿐이다 — 정규 판은 asof(장 마감 판 D', N-53 계획 '열린 것' 3).
 - 신선도 나이: W 는 거래일 축(`_calx` — D 에서 끝난다)에 없다. W 수집은 D 다음 세션의 저녁 수집과 같은 내용이라
   (N-45 실측 — 같은 기준일을 토·일·월에 받은 값이 같다) W 까지 신선하지 않은 종목은 그 세션을 하나 더 센다 —
   D 에 신선했고 W 판에서 추정치가 빠진 종목은 grace 1(평일 다음 판과 같은 나이 — 나이 0 grace 를 만들지 않는다).
@@ -195,12 +202,12 @@ python -m factor_inputs build --date <D> --basis supplement --wise-asof <W> \
   — 정규 판 기록·포인터와 이름이 갈린다. 연구 루트를 같이 쓴다 — 한 연휴에 keep 한 칸을 써서 keep 60 이 거래일 판 약 50개를
   담고, 표 MANIFEST `current_build` 는 다음 아침 확정판까지 `s_` 판을 가리킨다(소비자는 basis 별 `latest_<basis>.json`·`_runs`
   의 판 id 로 연다 — §3).
-- 정규 판(아침·장 마감)은 `--wise-asof` 를 생략하면 asof 와 같고 SQL 글자가 그대로다. asof 와 다른 값을 주면 rc 2
-  (정규 판의 추정치를 D 뒤 수집분으로 넓히지 않는다). D 아침판은 휴일 수집분을 담은 stage 위에서도 수집일 ≤ D 로
+- 정규 판(아침·장 마감)은 `--wise-asof` 를 생략하면 판 날짜(아침판 D, 장 마감 판 T — N-53)다. 판 날짜와 다른 값을
+  주면 rc 2(정규 판의 추정치를 판 날짜 뒤 수집분으로 넓히지 않는다). D 아침판은 휴일 수집분을 담은 stage 위에서도 수집일 ≤ D 로
   잘라 바뀌지 않는다 — 휴일 WISE 행이 없는 원천으로 지은 아침판과 8표 content_hash 가 같다
   (`tests/test_factor_inputs_supplement.py`).
-- 판본은 fi1.9.0 그대로다 — 정규 판 SQL·게이트 판정이 바뀌지 않았고, 올리면 배포 다음 두 판 대조(§2-3)가 하루
-  rc 2(규칙 판본 불일치)가 된다.
+- 판본: E2 유예 창(§5)과 함께 fi1.10.0 이다(N-53 이 fi1.9.0 을 먼저 써서 10-19 재병합 때 다시 매김). 정규 판 SQL·
+  게이트 판정은 보강판 때문에 바뀌지 않는다. 배포 다음 두 판 대조(§2-3)는 판본이 바뀌어 하루 rc 2 다.
 
 ## 3. 판 규약
 
@@ -334,7 +341,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 
 ## 5. 신선도 유예 (T2.11 · DQ-7)
 
-- D\* = `stg_consensus_annual` 의 fetched_date ≤ D(장 마감 판은 asof=D', §2-1 · 보강판은 wise_asof=W, §2-4) 중
+- D\* = `stg_consensus_annual` 의 fetched_date ≤ wise_asof(아침판 D · 장 마감 판 T — N-53, §2-1 · 보강판 W, §2-4) 중
   **마지막 수집일**(전 종목 공통).
 - 종목의 마지막 신선일 = 당해 12월기(`period = D.year||'12'` — 장 마감 판은 T 의 연도) 추정(`period_kind='E'`)의 op·ni 가
   **둘 다** 있는 fetched_date 의 최댓값(compat 추정치 유니버스와 같은 판정).
@@ -348,7 +355,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | `lapsed` | 나이 > G | false → 유니버스 제외, `n_lapsed_dropped` | 없음(추정·WISE 재무 NULL) |
 | `none` | 신선일이 한 번도 없다 | false | 없음 |
 
-- G = `--grace-days`(기본 유예 창 `FI_COVERAGE_GRACE_MAX` = **5** — 2026-10-11 사용자 결정 N-47, fi1.9.0.
+- G = `--grace-days`(기본 유예 창 `FI_COVERAGE_GRACE_MAX` = **5** — 2026-10-11 사용자 결정 N-47, fi1.10.0.
   그 전 기본은 0(N-14 — WISE 는 증권사 추정치를 약 3개월(91~92일)만 쓰므로 이탈은 만료라는 근거, `DECISIONS.md`
   U1 원인)이었다). spec 마다 다른 유예는 엔진이 다시 자른다: fi eligible 종목 중 grace 이고 나이 >
   `spec.universe.coverage_grace_days` 면 뺀다(`model/engines/_common.py` `estimates_lapsed` — v3·v2·v4 엔진과
@@ -366,11 +373,11 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | 게이트 | 판정 | FAIL 조건 |
 |---|---|---|
 | FG0 스키마 | 8표 열 이름·순서·타입 = 계약 | 하나라도 다르면(뒤 게이트는 `skip(upstream_failed)`) |
-| FG1 행수 | 유니버스 × 창 | 종목 ⊄ fi_universe · fi_universe 종목 중복·date ≠ D · eligible 인데 D 가격 없음 · eligible 인데 cur 컨센서스 없음 · eligible < `--min-eligible`(기본 300) · 날짜가 창 밖 · 수급·신용 60 세션 초과 · 신용 `available_date > D` · 재무 `available_date > wise_asof`(정규 판은 asof) · 연간 > 2기 · 분기 > 5기 · horizon 어휘 밖 · `fi_consensus_annual` 기가 Y−1~Y+1/12 밖·data_type ∉ {E, A}·fetched_date > wise_asof · eligible 중 WISE 연간 재무(per 또는 eps) 비율 < 0.9. 기록형: eligible 중 WISE 연간 손익(op 또는 ni — cF3002) 비율 `eligible_wise_is_ratio`(fi1.4.0, D7-8 — 서버 재연 6개 D 에서 ≥ 0.95 면 `FIN_IS_COVERAGE_ENFORCED` 로 같은 하한 0.9 의 FAIL 조건으로 올린다) |
+| FG1 행수 | 유니버스 × 창 | 종목 ⊄ fi_universe · fi_universe 종목 중복·date ≠ D · eligible 인데 D 가격 없음 · eligible 인데 cur 컨센서스 없음 · eligible < `--min-eligible`(기본 300) · 날짜가 창 밖 · 수급·신용 60 세션 초과 · 신용 `available_date > D` · 재무 `available_date > wise_asof`(정규 판은 판 날짜 — 장 마감 판 T, N-53. DART 행은 따로 asof) · 연간 > 2기 · 분기 > 5기 · horizon 어휘 밖 · `fi_consensus_annual` 기가 Y−1~Y+1/12 밖·data_type ∉ {E, A}·fetched_date > wise_asof · eligible 중 WISE 연간 재무(per 또는 eps) 비율 < 0.9. 기록형: eligible 중 WISE 연간 손익(op 또는 ni — cF3002) 비율 `eligible_wise_is_ratio`(fi1.4.0, D7-8 — 서버 재연 6개 D 에서 ≥ 0.95 면 `FIN_IS_COVERAGE_ENFORCED` 로 같은 하한 0.9 의 FAIL 조건으로 올린다) |
 | FG2 T 행 출처 | 아침판: 전 행 KRX. 장 마감 판: T 전 행 KRX · T 행 `postclose` · 시총 기준 `t1_shares_x_t_close`, T 가격 행 수 `n_t_price_rows` 기록 | 아침판 `price_source`·`mktcap_basis` ≠ 'krx' · 장 마감 판 T 전 행 ≠ krx · T 행 ≠ postclose · `mktcap_basis` ≠ t1 |
 | FG3 시총 | market_cap = round(shares × close(D) / 1e8) (상대 1e-6) | 규칙 위반 · 주식수·종가가 있는데 NULL · basis ≠ krx(장 마감 판은 ≠ t1). KRX `mktcap_krw` 반올림값과 다른 수는 기록형(`n_krx_mktcap_diff` — 장 마감 판은 KRX T 시총이 없어 NULL). 장 마감 판의 shares 는 D' 주식수, close 는 T 행 종가 |
 | FG4 골든 | `src/factor_inputs/fixtures/golden.json`(3종목 005930·000660·161890, 22항목, stage 원장에서 손으로 옮긴 값) | 창·유니버스 안 항목이 값이 다르거나 행이 없다. 셀 수 있는 항목이 0 이면 `skip(no_fixtures)` — 허용표 밖이라 판은 **FAIL**(K1-7a). 창이 지나가면 골든을 갱신한다(수급·신용 항목은 2026-08 날짜라 11월 중순에 창 밖, 가격 항목은 550일 창이라 2028-02 까지 남는다) |
-| FG-fresh | 상태 수·eligible 상태 수·`n_lapsed_dropped`·D\*·수집 지연 기록 | 어휘 밖 · has_estimates ≠ 상태 · fresh 나이 ≠ 0 · grace 나이 > G · lapsed 나이 ≤ G · lapsed/none 인데 eligible · **D\* 가 예상 수집일(wise_asof — 아침판 D, 장 마감 판 D', 보강판 W)보다 1거래일 넘게 뒤처짐**(`COLLECTION_LAG_MAX`, N-12 — 유예 G 와 따로 둔다. 수집 정지 — 전 종목이 '신선' 으로 보이는 조용한 낡음) · 보강판만 D\* ≠ W(`supplement_wise_not_on_wise_asof`, §2-4). D 이전 수집 기록이 없으면 `skip(no_collection)` — 허용표 밖이라 판은 **FAIL**(K1-7a) |
+| FG-fresh | 상태 수·eligible 상태 수·`n_lapsed_dropped`·D\*·수집 지연 기록 | 어휘 밖 · has_estimates ≠ 상태 · fresh 나이 ≠ 0 · grace 나이 > G · lapsed 나이 ≤ G · lapsed/none 인데 eligible · **D\* 가 예상 수집일(wise_asof — 아침판 D, 장 마감 판 T(N-53), 보강판 W)보다 1거래일 넘게 뒤처짐**(`COLLECTION_LAG_MAX`, N-12 — 유예 G 와 따로 둔다. 수집 정지 — 전 종목이 '신선' 으로 보이는 조용한 낡음) · 보강판만 D\* ≠ W(`supplement_wise_not_on_wise_asof`, §2-4). D 이전 수집 기록이 없으면 `skip(no_collection)` — 허용표 밖이라 판은 **FAIL**(K1-7a) |
 | FG5 후보 커버리지(장 마감 판만, 컷오버 PR-5) | 직전 판 모델 후보(수집기 순서 ① 과 같은 집합) 중 T 가격이 없는 종목 수·비율과 갈래(`n_no_row`·`n_price_invalid`·`n_missing_other`·`missing_tickers`) · T-6 보류 수(후보 중 · 층 전체 갈래별)와 후보 중 비율 > 0.02 이면 `warn`(기록형) · `n_pred_pre_missing` · 장 마감 stage 판 id·max(date) | **비율 > `T_CANDIDATE_MISSING_MAX`(= 1 − `kw_daily.COMMIT_MIN_RATIO` = 0.02)** — N-42 Q4 '당일 행 없는 종목이 상한 넘으면 판 실패'. 근거: N-35 ③ 프로브 후보 100/100(3일, 오류 0)·후보 먼저 수집이라 16:00 전 완료, 크기는 저녁 키움 직행 ka10060 커버 하한(T-28)에서 끌어온다 · 후보를 못 읽음(`candidates_unavailable`). 아침판 판 기록에는 없다 |
 
 아침판 가드(게이트 전, rc 2): equity 판 접두어가 `e_` 이면 거절 · `price_daily`·`price_adj_daily`·
@@ -383,7 +390,7 @@ D-13 적격성 재료 5열(계약 09-29 — **eligible 에는 쓰지 않는다**
 | `fi_prices.price_source` · `fi_universe.mktcap_basis` | 아침판 전 행 `krx`. 장 마감 판은 T 전 행 `krx` · T 행 `postclose`(15:41 장 마감 직후 수집, 키움 KRX 코드 정규장 종가 — `stg_flow_postclose_kiwoom` 의 가격을 쓸 수 있는 행(price_valid 참 · 종가 > 0 · 거래량 있음)만. 그 밖·원장 행 없음은 T 가격 없음 → `no_price`, 시총 NULL) · 시총 기준 `t1_shares_x_t_close`(B-24) |
 | `fi_prices` 장 마감 판 T 행 open·high·low·amount | 원천 ka10060 에 없어 NULL — volume 은 수집 시점 누적 거래량. 엔진은 종가만 읽는다(다음 날 아침 확정판 T 행은 KRX 값) |
 | `fi_adj_prices` 장 마감 판 T 행 | adj_close = T 종가 × D' 누적계수(T 의 새 계수는 아직 없다), 표식은 연구 판 행과 같은 SQL(§2-2) — T 에 기준가를 바꾼 사건은 T-6 이 그날 eligible 에서 빼고 반영은 다음 날 아침 확정판 |
-| `fi_universe` 장 마감 판 | `universe_daily` D' 행 이월(상태 변화는 다음 날 아침 확정판, T 신규 상장 누락) · WISE·DART·`universe_daily`·WICS 는 D' 까지, `security`·`corp` 은 고정 판 마스터 그대로 |
+| `fi_universe` 장 마감 판 | `universe_daily` D' 행 이월(상태 변화는 다음 날 아침 확정판, T 신규 상장 누락) · WISE 는 T(그날 06:00 수집, N-53)·DART·`universe_daily`·WICS·추정기관 수는 D' 까지, `security`·`corp` 은 고정 판 마스터 그대로 |
 | `fi_consensus` 전체 원천 | **한시 예외**: equity 에 op·ni 컨센서스 표가 없어(B-23) stage `stg_consensus_matrix` 를 직독한다(compat GAP-6 과 같은 예외). 만료 = W1-a S17b `consensus_revision` |
 | `fi_consensus.obs_date`(1w/1m/3m) | NULL — WISE 매트릭스는 lookback 관측일을 주지 않는다(cur 만 base_date) |
 | `fi_fin_summary.op_margin·ni_margin·yoy` | compat 과 같이 NULL — 계산은 엔진 몫 |

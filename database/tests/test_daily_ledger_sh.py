@@ -18,10 +18,14 @@ v3 휴장 사본 동기화 대역(`scripts/sync_calendar.sh`)은 부를 때마�
 (`scripts/postclose_conf.sh`)은 진짜를 복사한다. 휴장 파일 내보내기(`-m daily.calendar_export`, T-48)는 calls.txt 에
 적히고 받은 인자는 export_args.txt 에 남으며 rc 는 `RC_daily_calendar_export` 다. `REAL_EXPORT` 가 있으면 진짜
 python·진짜 모듈로 가서 `QL_V3_HOLIDAY_FILE`(테스트가 늘 임시 경로로 준다)에 실제로 쓴다.
-주말 보강 WISE(N-45)의 `-c`(대상일 판정 `supplement_*` · WISE 런 로그 `ws_run_log`)는 진짜 python·진짜 `daily.calendar`·
-`daily.runlog` 로 넘긴다 — 달력은 임시 루트 `data/calendar/kis_holidays_2026.json`, 오늘은 `QL_TODAY`. 대역 수집기
-(`src/backfill_wise.py`)는 `WISE_RUNLOG` 가 있으면 완주 증거(ws_run_log 1행 — n_req `WISE_N_REQ` · n_ok `WISE_N_OK`)를
-임시 루트 `data/raw/wisereport.db` 에 남긴다.
+WISE 스냅샷(N-53 — 배경 갈래 `src/backfill_wise.py`)은 순서가 정해지지 않으므로 calls.txt 가 아니라 wise.txt 에
+적히고 rc 는 `RC_backfill_wise` 다. 그 런의 실패 콜 수 `-c`(ws_run_log)는 `WISE_FAIL_OUT`(기본 "0 {}" = 실패 없음)을
+찍는다. 실물 수집기로 보는 WISE 경보는 `test_daily_ledger_wise_sh.py`.
+주말 보강 WISE(N-45)의 `-c`(대상일 판정 `supplement_*` · 보강 런의 WISE 런 로그 `ws_run_log … AND mode = ?`)는 진짜
+python·진짜 `daily.calendar`·`daily.runlog` 로 넘긴다 — 달력은 임시 루트 `data/calendar/kis_holidays_2026.json`, 오늘은
+`QL_TODAY`. 보강 대역 수집기(`src/backfill_wise.py --run-tag supplement` — calls.txt 에 적히고 rc 는 `RC_supp_wise`)는
+`WISE_RUNLOG` 가 있으면 완주 증거(ws_run_log 1행 — n_req `WISE_N_REQ` · n_ok `WISE_N_OK`)를 임시 루트
+`data/raw/wisereport.db` 에 남긴다.
 """
 from __future__ import annotations
 
@@ -46,12 +50,13 @@ SCRIPT = DB_ROOT / "scripts" / "daily_ledger.sh"
 _PY = """#!/usr/bin/env bash
 if [ "$1" = "-c" ]; then
   case "$2" in
-    *dart_universe*|*prev_trading_day*|*supplement*|*ws_run_log*)
+    *dart_universe*|*prev_trading_day*|*supplement*|*"AND mode = ?"*)
       [ -n "${STDERR_NOISE:-}" ] && echo "DeprecationWarning: 대역 경고 줄" >&2
       PYTHONPATH="$REAL_SRC" exec "$REAL_PY" "$@" ;;
     *runlog.start*) echo 7 ;;
     *runlog.recent*) exit "${RC_recent:-1}" ;;
     *runlog.finish*) echo "$4|$5" >> "$QL_HOME/runlog.txt" ;;
+    *ws_run_log*) echo "$WISE_FAIL_OUT" ;;
   esac
   exit 0
 fi
@@ -61,10 +66,16 @@ probe() {  # probe <기다릴 표식> <보면 남길 표식> — 나란히 도�
     sleep 0.05
   done
 }
+if [ "$1" = "src/backfill_wise.py" ] && [[ " ${*:2} " != *" --run-tag supplement "* ]]; then
+  echo "$*" >> "$QL_HOME/wise.txt"
+  if [ -n "${WISE_HOLD:-}" ]; then touch "$QL_HOME/wise_running"; sleep "$WISE_HOLD"; rm -f "$QL_HOME/wise_running"; fi
+  exit "${RC_backfill_wise:-0}"
+fi
 if [ "$1" != "-m" ]; then
   echo "$1" >> "$QL_HOME/calls.txt"
   if [ "$1" = "src/backfill_wise.py" ]; then
     echo "${*:2}" >> "$QL_HOME/wise_args.txt"
+    [ -e "$QL_HOME/wise_running" ] && touch "$QL_HOME/supp_overlapped_regular"
     if [ -n "${PARALLEL_PROBE:-}" ]; then touch "$QL_HOME/wise_started"; probe dart_started wise_saw_dart; fi
     for i in $(seq 1 "${WISE_PROGRESS:-0}"); do echo "  $i/2,400  요청 진행 줄(대역)"; done
     if [ -n "${WISE_RUNLOG:-}" ]; then
@@ -72,6 +83,7 @@ if [ "$1" != "-m" ]; then
     fi
   fi
   var="RC_$(basename "$1" .py)"
+  [ "$1" = "src/backfill_wise.py" ] && var=RC_supp_wise
   exit "${!var:-0}"
 fi
 name="$2"
@@ -149,7 +161,7 @@ def _universe_runs(root: Path) -> list[tuple[str, str]]:
 
 def _env(root: Path, **extra: str) -> dict[str, str]:
     env = dict(os.environ, QL_LEDGER_ROOT=str(root), QL_RAW_LOCK_HELD="1",
-               REAL_PY=sys.executable, REAL_SRC=str(DB_ROOT / "src"), **extra)
+               REAL_PY=sys.executable, REAL_SRC=str(DB_ROOT / "src"), WISE_FAIL_OUT="0 {}", **extra)
     for k in ("QL_SKIP_KW", "QL_HOME", "PYTHONPATH", "QL_RAW_LOCK_FILE"):
         env.pop(k, None)
     return env
@@ -176,6 +188,65 @@ def test_all_steps_ok(tmp_path: Path) -> None:
     assert calls == [_CAL, "daily_wise", "daily.kw_daily", "daily.kis_daily", "kw_cover", "daily.dart_daily",
                      "gap"]
     assert notify.startswith("info|") and runlog.startswith("ok|")
+
+
+# ── WISE 스냅샷(N-53 — 18:05 저녁 체인에서 옮김) — 키움 마스터 뒤 배경 갈래, 월~토, D 건너뜀과 무관 ──────────
+def _wise_calls(tmp_path: Path) -> str:
+    f = tmp_path / "ql" / "wise.txt"
+    return f.read_text(encoding="utf-8") if f.exists() else ""
+
+
+
+
+@pytest.mark.parametrize("weekday", [1, 3, 6])
+def test_wise_snapshot_runs_monday_to_saturday(tmp_path: Path, weekday: int) -> None:
+    """월~토 06:00 — 그날 장 마감 판(15:41)이 읽을 스냅샷을 받는다(기준일 = 전 거래일). 다른 단계 순서는 그대로."""
+    rc, calls, notify, runlog_txt = _run(tmp_path, weekday=weekday)
+    assert rc == 0
+    assert _wise_calls(tmp_path) == "src/backfill_wise.py --mode full\n"
+    assert [c for c in calls if c != "src/dart_universe.py"] == _ALL
+    assert notify.startswith("info|") and runlog_txt.startswith("ok|")
+    assert "──── WISE 스냅샷 종료 rc=0" in _chain_log(tmp_path / "ql")
+
+
+def test_wise_snapshot_skips_sunday(tmp_path: Path) -> None:
+    """일요일은 받지 않는다 — 토요일 06:00 수집과 기준일(금요일)이 같다."""
+    rc, _, notify, _ = _run(tmp_path, weekday=7)
+    assert rc == 0 and notify.startswith("info|")
+    assert _wise_calls(tmp_path) == ""
+    assert "WISE 스냅샷 건너뜀 — 일요일" in _chain_log(tmp_path / "ql")
+
+
+def test_wise_snapshot_dry_run_only_plans(tmp_path: Path) -> None:
+    """dry-run 은 원장 쓰기라 받지 않고 계획 한 줄만(backfill_wise.py 에 --dry-run 이 없다)."""
+    rc, _, _, _ = _run(tmp_path, "--dry-run")
+    assert rc == 0
+    assert _wise_calls(tmp_path) == ""
+    assert "WISE 스냅샷 계획(dry-run — 받지 않음)" in _chain_log(tmp_path / "ql")
+
+
+def test_wise_failure_is_a_chain_failure(tmp_path: Path) -> None:
+    """수집기 rc≠0 은 다른 단계처럼 FAILED — crit 1건, 런 로그도 failed(DEFECT-A10: 둘이 같은 판정). 다른
+    단계는 막지 않는다(배경 갈래)."""
+    rc, calls, notify, runlog_txt = _run(tmp_path, backfill_wise=1)
+    assert rc == 2
+    assert calls == _ALL
+    assert notify.startswith("crit|daily_ledger 실패: wise(rc=1)")
+    assert runlog_txt == "failed|wise(rc=1)\n"
+
+
+def test_wise_snapshot_runs_when_d_was_already_collected(tmp_path: Path) -> None:
+    """월요일·연휴 다음 날 — D(직전 거래일)는 이미 받아 수집 단계는 건너뛰어도 WISE 는 그날 스냅샷을 받는다
+    (그날 장 마감 판이 읽는다). 건너뜀 길에서도 끝나기 전에 기다린다 — 실패면 crit."""
+    rc, calls, notify, runlog_txt = _run(tmp_path, weekday=1, recent=0)
+    assert rc == 0, notify
+    assert _wise_calls(tmp_path) == "src/backfill_wise.py --mode full\n"
+    assert "daily.dart_daily" not in calls and runlog_txt == ""
+    assert notify.startswith("info|daily_ledger 건너뜀(D=20260929 이미 수집 완료)")
+    sub = tmp_path / "fail"
+    sub.mkdir()
+    rc, _, notify, _ = _run(sub, weekday=1, recent=0, backfill_wise=1)
+    assert rc == 2 and notify.startswith("crit|daily_ledger 실패: wise(rc=1)")
 
 
 def test_kis_failure_does_not_stop_dart(tmp_path: Path) -> None:
@@ -950,7 +1021,7 @@ def test_supplement_wise_on_a_weekday_holiday_targets_the_day_before(tmp_path: P
 
 
 @pytest.mark.parametrize(("rcs", "wise_log", "n_ok", "status", "warn"), [
-    ({"backfill_wise": 1}, True, 10, "failed", "주말 보강 WISE 수집 실패(rc=1)"),
+    ({"supp_wise": 1}, True, 10, "failed", "주말 보강 WISE 수집 실패(rc=1)"),
     ({}, False, 10, "failed", "주말 보강 WISE 완주 기록 없음"),
     ({}, True, 8, "ok", "주말 보강 WISE 일부 실패 2콜"),
 ])
@@ -1020,6 +1091,19 @@ def test_supplement_wise_already_collected_d_still_runs_and_waits(tmp_path: Path
     assert r.calls == [_CAL, "daily_wise", _WISE]
     assert r.runs == [(_SAT, "ok", f"D={_SAT_D} wise_rc=0 fail_calls=0")]
     assert r.notify == ["info|daily_ledger 건너뜀(D=20260929 이미 수집 완료)"]
+
+
+@pytest.mark.parametrize("rcs", [{}, {"recent": 0}], ids=["d_collected_now", "d_already_collected"])
+def test_supplement_wise_starts_after_the_regular_wise_branch_ends(
+        tmp_path: Path, rcs: dict[str, int]) -> None:
+    """10-19 재병합(N-53 · N-45) — 06:00 정규 WISE 갈래(배경)와 주말 보강 WISE 갈래는 같은 원장(wisereport.db)을 쓴다.
+    보강 갈래는 정규 갈래를 기다린(wise_wait) 뒤에만 시작한다 — 두 길(D 수집 · D 이미 수집) 모두. 정규 대역이 2초 동안
+    표식을 쥐고, 보강 대역이 시작할 때 그 표식을 보면 남긴다."""
+    r = _run_supp(tmp_path, WISE_HOLD="2", **rcs)
+    assert r.rc == 0, r.log
+    assert (r.root / "wise.txt").exists()                       # 정규 갈래가 돌았다
+    assert r.wise_args == ["--mode full --run-tag supplement"]  # 보강 갈래도 돌았다
+    assert not (r.root / "supp_overlapped_regular").exists(), r.log
 
 
 def test_holiday_summary_keeps_source_failures_and_wise_progress_stays_in_its_log(

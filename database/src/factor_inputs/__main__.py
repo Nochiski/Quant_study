@@ -70,7 +70,8 @@ def _parser() -> argparse.ArgumentParser:
                         "그날 판을 짓는다. 판 manifest 에 replay 표시. 운영 체인은 쓰지 않는다")
     b.add_argument("--wise-asof", default=None,
                    help="WISE 컨센서스 입력의 시점(YYYYMMDD) — 보강판은 휴일 수집일(D 보다 뒤) 필수, "
-                        "그 밖은 생략(= asof). 가격·수급·DART 등은 asof 그대로")
+                        "그 밖은 생략(= 판 날짜 — 장 마감 판 T, N-53. 주면 판 날짜와 같아야 한다). "
+                        "가격·수급·DART 등은 asof 그대로")
     return p
 
 

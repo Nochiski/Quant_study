@@ -262,7 +262,7 @@ def test_supplement_without_the_holiday_collection_fails_fresh_gate(supp, tmp_pa
      ["--wise-asof", "D 보다 뒤"]),
     (["--basis", "supplement", "--builds-from", "<hist>", "--wise-asof", "2026-09-29"],
      ["YYYYMMDD"]),
-    (["--basis", "morning", "--wise-asof", W_S], ["보강판", "asof=2026-09-28"]),
+    (["--basis", "morning", "--wise-asof", W_S], ["보강판", "--date=20260928"]),
 ])
 def test_supplement_argument_errors_stop_with_rc2(supp, tmp_path: Path, capsys,
                                                   args: list[str], want: list[str]) -> None:

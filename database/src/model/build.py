@@ -67,7 +67,7 @@ RULES_VERSION = "mb1.7.0"   # 1.1.0(2026-10-05): v3_zscore 유니버스·MG1 에
                             #   미해결 수정주가면 결측(컷오버 H1-4 · T-9, fi1.6.0 adj_jump_ok)
                             #   · 판 manifest spec 요약에 엔진 메타(scope adj_jump_masked)
                             # 1.7.0(2026-10-12, N-47): 엔진·MG1 이 fi grace 종목을 spec 유예로
-                            #   다시 자른다(fi1.9.0 유예 창 5) · scope@2.0 등록 · 기본 주 모델
+                            #   다시 자른다(fi1.10.0 유예 창 5) · scope@2.0 등록 · 기본 주 모델
                             #   scope@1.0 → scope@2.0
                             # (1.7.0 에 더함, 2026-10-12 N-45 · E5): basis supplement(주말 보강판)
                             #   — 어휘만 늘었고 점수·게이트는 그대로라 판본을 올리지 않는다

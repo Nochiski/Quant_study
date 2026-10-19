@@ -34,14 +34,12 @@
 #             --trend-fallback-root data/model(T-50 — 1M 비교 판이 장 마감 판 이력에 없으면 연구 루트 아침 확정판으로, 읽기만)
 #             — 발송(--send)은 설정 POSTCLOSE_SEND=1 일 때만(T-7: 그림자 기간 미발송)
 #     ⑥ v3    scripts/v3_post.sh --date T --basis evening --v3-db <v3 quant.db> --model-root data/model_db/model
-#             --builds-from data/deliver/history/<D'>_morning.json --consensus-asof D' — fi 와 같은 고정 판·같은 정보
-#             시점(P1 — compat 기본 consensus_asof 는 T 라, D' 판 stage 에 든 휴일 보강 WISE(N-45, 수집일 > D')를 읽어
-#             같은 판의 fi·점수(asof D')와 갈린다). 그림자는 --shadow(v3 본 파일
-#             무변경). 설정 POSTCLOSE_V3=in-place 면 제자리 반영이고, POSTCLOSE_V3_POST_CMD 가 있으면 --v3-post-cmd(v3
+#             --builds-from data/deliver/history/<D'>_morning.json — fi 와 같은 고정 판(P1). 컨센서스 정보 시점은 compat
+#             기본(T)이다 — fi 장 마감 판 wise_asof 도 T(N-53, 그날 06:00 수집)라 D' 로 고정하면 점수와 갈린다(10-19 재병합에서
+#             801d0f26 되돌림). 그림자는 --shadow(v3 본 파일 무변경). 설정 POSTCLOSE_V3=in-place 면 제자리 반영이고, POSTCLOSE_V3_POST_CMD 가 있으면 --v3-post-cmd(v3
 #             daily_post, T-31). 점수 두 표를 v3 에 쓰는 것은 이 ⑥ 하나다
 #   refill — 21:05 저녁 원장 뒤 v3 재반영(QL-D 후속 · T-38). ⑥ 결과와 상관없이 늘 점수 없는 7표 반영
-#     v3_post.sh --basis evening --no-scores --builds-from <D'>_morning.json --consensus-asof D'(QL-F2, compat 만 —
-#     daily_post 없음. 정보 시점은 ⑥ 과 같다).
+#     v3_post.sh --basis evening --no-scores --builds-from <D'>_morning.json(QL-F2, compat 만 — daily_post 없음).
 #     16:00 컷오프로 못 받은 종목을 21:05 원장 값으로 채우고, 장 마감 판이 없는 날(판 실패·세션 예외일)엔 그날 저녁 v3
 #     T 행을 넣는 유일한 경로다(T-26 · T-38). 점수는 ⑥ 만 쓴다 — 판이 없던 날의 점수는 다음 날 아침 재반영이 채운다(T-34).
 #     부르기 전에 고정 판(<D'>_morning.json)의 날짜·health 를 본다 — 쓸 수 없으면 v3_post 를 부르지 않고 crit(compat 은
@@ -258,17 +256,14 @@ excel_cmd() {
 }
 # v3_post 세 갈래 — 셋 다 고정 판(--builds-from)을 넘긴다(P1 — fi 와 같은 판). 판이 없으면 compat 이 멈추고 v3_post 가
 # crit 을 낸다. 락 fd 는 v3 쪽 자식에 넘기지 않는다
-# 장 마감 두 갈래(⑥ · refill)는 컨센서스 정보 시점도 D' 로 넘긴다 — compat 기본(T)이면 D' 판 stage 에 든 휴일 보강 WISE
-# (N-45, 수집일 ∈ (D', T])를 읽어 같은 판의 fi·점수(asof D')와 갈린다(P1). 아침 갈래는 D 판 = D 라 기본값 그대로다
 v3_evening_cmd() {  # $1 = daily_post 명령(⑥ 에만, 그 밖엔 빈 값)
   bash scripts/v3_post.sh --date "$D" --basis evening --v3-db "$V3_DB" --model-root "$MDB/model" \
-     --builds-from "$HIST/${DPREV}_morning.json" --consensus-asof "$DPREV" ${SHADOW:+--shadow} \
-     ${1:+--v3-post-cmd "$1"} 6>&- 7>&-
+     --builds-from "$HIST/${DPREV}_morning.json" ${SHADOW:+--shadow} ${1:+--v3-post-cmd "$1"} 6>&- 7>&-
 }
 v3_noscores_cmd() {  # refill — 점수 두 표를 뺀 7표(T-38, QL-F2). 점수는 ⑥ 만 쓴다
   STEP_NOTE="no-scores"
   bash scripts/v3_post.sh --date "$D" --basis evening --v3-db "$V3_DB" --no-scores \
-     --builds-from "$HIST/${DPREV}_morning.json" --consensus-asof "$DPREV" ${SHADOW:+--shadow} 6>&- 7>&-
+     --builds-from "$HIST/${DPREV}_morning.json" ${SHADOW:+--shadow} 6>&- 7>&-
 }
 v3_morning_cmd() {
   bash scripts/v3_post.sh --date "$D" --basis morning --v3-db "$V3_DB" \
@@ -327,12 +322,12 @@ if [ -n "$DRY" ]; then
       echo "  3. $PY -m factor_inputs build --date $D --basis evening --root $MDB/factor_inputs --builds-from $HIST/${DPREV:-?}_morning.json --calendar-dir data/calendar"
       echo "  4. $PY -m model build --date $D --basis evening --root $MDB/model --fi-root $MDB/factor_inputs"
       echo "  5. $PY -m deliver model-daily --date $D --basis evening --model-root $MDB/model --trend-fallback-root data/model --fi-root $MDB/factor_inputs --out-root $MDB/deliver${SEND:+ --send}"
-      echo "  6. scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --model-root $MDB/model --builds-from $HIST/${DPREV:-?}_morning.json --consensus-asof ${DPREV:-?}${SHADOW:+ --shadow}${POST_CMD:+ --v3-post-cmd '<설정 POSTCLOSE_V3_POST_CMD>'}" ;;
+      echo "  6. scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --model-root $MDB/model --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}${POST_CMD:+ --v3-post-cmd '<설정 POSTCLOSE_V3_POST_CMD>'}" ;;
     refill)
       DPREV=$(prev_day "$D" 2>/dev/null)
       echo "  0. 체인 락 $CHAIN_LOCK (돌고 있는 close 가 끝날 때까지 기다림)"
       echo "  -  고정 판 $HIST/${DPREV:-?}_morning.json — 지금: $( [ -n "$DPREV" ] && board_ok "$DPREV" 2>&1 || echo 'D 계산 불가')"
-      echo "  1. 점수 없는 7표(⑥ 결과와 무관, T-38): scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --no-scores --builds-from $HIST/${DPREV:-?}_morning.json --consensus-asof ${DPREV:-?}${SHADOW:+ --shadow}" ;;
+      echo "  1. 점수 없는 7표(⑥ 결과와 무관, T-38): scripts/v3_post.sh --date $D --basis evening --v3-db $V3_DB --no-scores --builds-from $HIST/${DPREV:-?}_morning.json${SHADOW:+ --shadow}" ;;
     morning)
       echo "  -  고정 판 $HIST/${D}_morning.json — 지금: $(board_ok "$D" 2>&1)"
       echo "  1. scripts/v3_post.sh --date $D --basis morning --v3-db $V3_DB --builds-from $HIST/${D}_morning.json${SHADOW:+ --shadow}   (compat 만)"

@@ -19,6 +19,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  collapseAssistant,
   ask,
   assistant,
   ensureProvider,
@@ -213,6 +214,8 @@ test.describe("AI 어시스턴트", () => {
       await ensureProvider(page);
       await saveStrategyRevision(page, "B-05 제안 적용");
       const before = await currentSource(page);
+      // 접힌 열을 펼치는 흐름을 본다 — 처음부터 열려 있는 열을 먼저 접는다(RD-04-A).
+      await collapseAssistant(page);
       await openAssistant(page);
       // 펼치는 순간 상단 토글이 스스로 언마운트되므로 패널이 포커스를 받는다(B-04 3차 리뷰 P1-1).
       // 그러지 않으면 키보드 사용자는 방금 연 사이드바를 찾아 처음부터 탭해야 한다.

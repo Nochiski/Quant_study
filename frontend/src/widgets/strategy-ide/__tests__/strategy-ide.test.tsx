@@ -749,7 +749,8 @@ describe("StrategyIde", () => {
         debuggerHeight: 220,
         assistantWidth: 360,
       },
-      open: { assistant: false },
+      // 기록이 없던 첫 화면은 AI 열을 연 채로 뜨고 그 상태를 저장한다(RD-04-A).
+      open: { assistant: true },
     });
   });
 

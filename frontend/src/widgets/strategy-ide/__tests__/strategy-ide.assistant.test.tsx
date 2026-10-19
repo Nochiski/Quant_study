@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemePreferenceProvider } from "../../../shared/lib/theme";
 import { StrategyIde } from "..";
@@ -24,6 +24,22 @@ afterEach(() => {
     .forEach((style) => style.remove());
   localStorage.clear();
 });
+
+/**
+ * 이 파일의 시나리오는 "접힌 AI 열을 연다"에서 시작한다. AI 열은 기록이 없으면 열린 채로 뜨므로
+ * (RD-04-A) 사용자가 접어 둔 기록을 먼저 심는다. 기본값(열림)과 기록 존중은 아래 전용 시나리오가 본다.
+ */
+const storeClosedAssistant = () =>
+  localStorage.setItem(
+    PANEL_LAYOUT_STORAGE_KEY,
+    JSON.stringify({
+      version: 1,
+      sizes: { outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 220 },
+      open: { assistant: false },
+    }),
+  );
+
+beforeEach(storeClosedAssistant);
 
 const matchMedia = (matches: boolean) =>
   vi.stubGlobal(
@@ -384,9 +400,36 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "300");
+    // 기록에 AI 열 키가 없으면 새 기본값(열림)을 쓴다(RD-04-A).
+    expect(
+      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
+    ).toBeVisible();
+  });
+
+  it("처음 연 편집기는 AI 열을 왼쪽에 열어 두고, 접어 둔 기록은 그대로 존중한다", async () => {
+    matchMedia(false);
+    localStorage.clear();
+    const user = userEvent.setup();
+    const first = mount();
+    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    expect(panel).toBeVisible();
+    // 본문의 첫 칸이다 — 전략 구조·편집기보다 왼쪽이다.
+    expect(panel.parentElement?.firstElementChild).toBe(panel);
+    expect(
+      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
+    ).toHaveAttribute("aria-valuenow", "360");
+    fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
+    first.unmount();
+
+    mount();
+    expect(
+      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }));
+    expect(screen.getByRole("complementary", { name: "AI 어시스턴트" })).toBeVisible();
   });
 
   it("저장소를 못 쓰면 기본값으로 뜨고 화면은 그대로 동작한다", () => {
@@ -400,13 +443,14 @@ describe("StrategyIde assistant 슬롯", () => {
       },
     });
     mount();
-    expect(
-      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
-    ).not.toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "a", altKey: true });
+    // 기록을 읽지 못하면 기본값이다: AI 열이 열려 있고 기본 폭이다.
     expect(
       screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
     ).toHaveAttribute("aria-valuenow", "360");
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(
+      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
+    ).not.toBeInTheDocument();
   });
 
   it("좁은 폭에서는 오버레이 서랍이 되고 Escape로 닫힌다", () => {
@@ -446,8 +490,8 @@ describe("StrategyIde assistant 슬롯", () => {
     const assistant = screen.getByRole("complementary", {
       name: "AI 어시스턴트",
     });
-    // 서랍은 붙어 있는 계약 자리만 덮는다 — 계약 폭(기본 320)을 따른다(#290 리뷰 P2-1).
-    expect(assistant.closest(".ide__drawer")).toHaveStyle({ width: "320px" });
+    // AI 열은 왼쪽이라 서랍은 왼쪽 자기 자리만 덮는다 — AI 열 폭(기본 360)을 따른다(RD-04-A).
+    expect(assistant.closest(".ide__drawer")).toHaveStyle({ width: "360px" });
     expect(
       screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
     ).toBeNull();

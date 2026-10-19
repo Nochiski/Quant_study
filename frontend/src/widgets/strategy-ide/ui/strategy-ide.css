@@ -337,6 +337,12 @@
   width: auto;
 }
 
+/* AI 열의 서랍은 왼쪽에서 나온다(RD-04-A). */
+.ide__drawer--left {
+  right: auto;
+  left: var(--ide-gutter);
+}
+
 @media (max-width: 767px) {
   .ide {
     --ide-gutter: var(--space-2);

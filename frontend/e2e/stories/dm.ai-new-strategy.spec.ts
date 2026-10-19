@@ -10,6 +10,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
+  collapseAssistant,
   ask,
   assistant,
   ensureProvider,
@@ -205,6 +206,17 @@ test(
   async ({ page }) => {
     await ensureProvider(page);
     await openEditor(page, "/research/strategies/new");
+    // 처음 연 편집기는 AI 열을 왼쪽에 열어 둔다(RD-04-A). 열은 편집기보다 왼쪽에 있다.
+    const column = page.getByRole("complementary", { name: "AI 어시스턴트", exact: true });
+    await expect(column).toBeVisible();
+    const editorBox = await page.getByRole("region", { name: "편집기" }).boundingBox();
+    const columnBox = await column.boundingBox();
+    expect(columnBox!.x).toBeLessThan(editorBox!.x);
+    await expect(
+      column.getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" }),
+    ).toHaveAttribute("placeholder", /^생각을 말로 적어 주세요/u);
+    // 접힌 사이드바를 여는 입구들을 본다 — 처음부터 열린 AI 열을 먼저 접는다.
+    await collapseAssistant(page);
     const assistantToggle = page.getByRole("button", {
       name: "AI 어시스턴트",
       exact: true,

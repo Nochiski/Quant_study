@@ -1123,6 +1123,11 @@ const ko = {
   "command.group.theme": "테마",
   "command.group.symbol": "문서 경로",
   "command.theme.system": "테마: 시스템 설정",
+  "settings.theme.title": "화면 테마",
+  "settings.theme.description": "고르면 바로 바뀌고 이 브라우저에 저장됩니다. 명령 팔레트의 테마 명령과 같은 설정입니다.",
+  "settings.theme.light": "밝게",
+  "settings.theme.dark": "어둡게",
+  "settings.theme.system": "시스템 설정 따르기 (기본)",
   "command.theme.light": "테마: 라이트",
   "command.theme.dark": "테마: 다크",
   "ide.savedJustNow": "방금 저장됨",
@@ -2849,7 +2854,7 @@ const ko = {
   "assistant.chat.close.confirm.cancel": "계속 두기",
   "assistant.chat.input": "어시스턴트에게 보낼 메시지",
   "assistant.chat.input.placeholder":
-    "무엇을 만들고 싶은지 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
+    "생각을 말로 적어 주세요. 부족한 조건은 AI가 되묻습니다. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
   "assistant.chat.input.placeholder.result":
     "결과에서 궁금한 것을 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
   "assistant.chat.send": "보내기",
@@ -4031,6 +4036,11 @@ export const messages = {
     "command.group.theme": "Theme",
     "command.group.symbol": "Document path",
     "command.theme.system": "Theme: system",
+    "settings.theme.title": "Theme",
+    "settings.theme.description": "Changes apply immediately and are saved in this browser. It is the same setting as the command palette theme commands.",
+    "settings.theme.light": "Light",
+    "settings.theme.dark": "Dark",
+    "settings.theme.system": "Follow system (default)",
     "command.theme.light": "Theme: light",
     "command.theme.dark": "Theme: dark",
     "ide.savedJustNow": "Saved just now",
@@ -5786,7 +5796,7 @@ export const messages = {
     "assistant.chat.close.confirm.cancel": "Keep it open",
     "assistant.chat.input": "Message for the assistant",
     "assistant.chat.input.placeholder":
-      "Describe what you want to build. Enter sends, Shift+Enter adds a line.",
+      "Describe your idea in words. The AI asks about missing conditions. Enter sends, Shift+Enter adds a line.",
     "assistant.chat.input.placeholder.result":
       "Ask about this result. Enter sends, Shift+Enter adds a line.",
     "assistant.chat.send": "Send",

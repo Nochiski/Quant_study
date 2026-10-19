@@ -2767,9 +2767,9 @@ const ko = {
   "assistant.provider.kind.anthropic": "Claude (Anthropic)",
   "assistant.provider.kind.openai": "Codex (OpenAI)",
   "assistant.provider.installed": "사용 가능",
-  "assistant.provider.notInstalled": "설치 필요",
+  "assistant.provider.notInstalled": "서버 SDK 없음",
   "assistant.provider.notInstalled.reason":
-    "서버에 이 공급자의 SDK가 설치되어 있지 않습니다. backend에서 llm extra를 설치한 뒤 서버를 다시 시작하세요.",
+    "backend Python 환경에 이 공급자의 SDK가 없습니다. PC에 설치한 Claude·Codex 앱과는 별개입니다. README '바로 실행'의 uv sync 명령으로 llm extra까지 설치한 뒤 서버를 다시 시작하세요.",
   "assistant.provider.active": "활성",
   "assistant.provider.activate": "활성으로 사용",
   "assistant.provider.model": "모델",
@@ -5706,9 +5706,9 @@ export const messages = {
     "assistant.provider.kind.anthropic": "Claude (Anthropic)",
     "assistant.provider.kind.openai": "Codex (OpenAI)",
     "assistant.provider.installed": "Available",
-    "assistant.provider.notInstalled": "Not installed",
+    "assistant.provider.notInstalled": "SDK missing on server",
     "assistant.provider.notInstalled.reason":
-      "This provider's SDK is not installed on the server. Install the llm extra in the backend and restart the server.",
+      "This provider's SDK is missing from the backend Python environment. It is separate from any Claude or Codex app installed on your computer. Install the llm extra with the uv sync command in the README quick start, then restart the server.",
     "assistant.provider.active": "Active",
     "assistant.provider.activate": "Use as active",
     "assistant.provider.model": "Model",

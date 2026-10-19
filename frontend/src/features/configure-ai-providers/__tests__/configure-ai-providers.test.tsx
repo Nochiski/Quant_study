@@ -177,10 +177,11 @@ describe("AI 공급자 설정 섹션", () => {
     expect(option).toBeDisabled();
 
     const status = screen.getByTestId("provider-kind-openai");
-    expect(within(status).getByText("설치 필요")).toBeInTheDocument();
+    expect(within(status).getByText("서버 SDK 없음")).toBeInTheDocument();
+    // PC에 설치한 앱과 헷갈리지 않게 서버 환경의 SDK라는 점과 설치 경로를 함께 알린다.
     expect(
       within(status).getByRole("tooltip", { hidden: true }),
-    ).toHaveTextContent(/설치/);
+    ).toHaveTextContent(/PC에 설치한 Claude·Codex 앱과는 별개.*llm extra/);
   });
 
   it("키를 요청 본문으로만 보내고 제출 뒤 화면·캐시에 남기지 않는다", async () => {

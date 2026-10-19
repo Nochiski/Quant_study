@@ -28,11 +28,11 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -71,6 +71,8 @@ from ._specs import (
 if TYPE_CHECKING:
     import duckdb
 
+_Item = TypeVar("_Item", bound=np.generic)
+
 # fetchnumpy 가 그대로 받는 숫자 열 — 값이 float64 로 정확하거나(FLOAT·작은 정수) numpy 의
 # int64 → float64 변환이 Python `float(int)` 와 같은 최근접 짝수 반올림이다.
 _DIRECT_TYPES = frozenset(
@@ -88,7 +90,10 @@ _GRID_FETCHED = 0.4  # 진행 구간: 격자 질의 완료. 이후 법인 대응
 _FETCHED = 0.5  # 질의 전부 완료. 이후 필드 열 조립
 _ASSEMBLED = 0.95  # 필드 열 조립 완료. 이후 행 정렬
 _EXACT_CHECKPOINT = 256  # 정확 경로 루프의 checkpoint 간격(칸, spec D7)
-_CODE_CHUNK = 1 << 18  # 티커 코드 매기기 루프의 checkpoint 간격(행, spec D7)
+# 행 단위 전체 연산(날짜 변환·랙 찾기·셀 조립·재정렬)의 checkpoint 간격(행, spec D7).
+_CHUNK_ROWS = 1 << 18
+# 원소마다 Python 을 도는 루프(티커 코드 매기기)의 checkpoint 간격(행). 2^18 행이면 0.1초를 넘는다.
+_PY_CHUNK_ROWS = 1 << 16
 
 # `_cell_kind` 에 넣어 볼 결측 사유 대표값 — NULL, 어휘 하나씩, 어휘 밖 문자열 하나. 어휘 밖 값은
 # 모두 같은 결과(MISSING)라 대표 하나로 충분하다.
@@ -239,14 +244,20 @@ class NumericColumn:
             return has_value, value
         if self.direct:
             column = fetched[self.alias]
-            has_value = ~np.ma.getmaskarray(column)
-            value[has_value] = np.ma.getdata(column)[has_value].astype(np.float64)
+            data, missing = np.ma.getdata(column), np.ma.getmaskarray(column)
+            for part in _row_chunks(rows, checkpoint):
+                known = ~missing[part]
+                has_value[part] = known
+                value[part][known] = data[part][known].astype(np.float64)
         if self.scale is not None:
             unscaled = fetched[f"{self.alias}_u"]
-            fast = ~np.ma.getmaskarray(unscaled)
-            # 두 수가 float64 로 정확하므로 IEEE 나눗셈 한 번이 정확 반올림이다.
-            value[fast] = np.ma.getdata(unscaled)[fast].astype(np.float64) / float(10**self.scale)
-            has_value |= fast
+            data, missing = np.ma.getdata(unscaled), np.ma.getmaskarray(unscaled)
+            divisor = float(10**self.scale)
+            for part in _row_chunks(rows, checkpoint):
+                fast = ~missing[part]
+                # 두 수가 float64 로 정확하므로 IEEE 나눗셈 한 번이 정확 반올림이다.
+                value[part][fast] = data[part][fast].astype(np.float64) / divisor
+                has_value[part] |= fast
         if self.exact:
             texts = fetched[f"{self.alias}_x"]
             for count, row in enumerate(np.flatnonzero(~np.ma.getmaskarray(texts)).tolist()):
@@ -275,7 +286,11 @@ def numeric_column(alias: str, declared: str, label: str) -> NumericColumn:
 
 
 def _ordinals(
-    column: NDArray[np.generic], label: str, *, read: NDArray[np.bool_] | None = None
+    column: NDArray[np.generic],
+    label: str,
+    checkpoint: Callable[[], None],
+    *,
+    read: NDArray[np.bool_] | None = None,
 ) -> tuple[NDArray[np.bool_], NDArray[np.int32]]:
     """날짜 열 → (값 있음, 일 서수). 값이 없는 칸은 0 이다.
 
@@ -294,9 +309,46 @@ def _ordinals(
             )
         return np.zeros(present.shape, dtype=np.bool_), np.zeros(present.shape, dtype=np.int32)
     days = np.zeros(present.shape, dtype=np.int32)
-    # NULL 칸(NaT)은 정수로 바꾸지 않는다. 날짜 단위 내림은 행 경로 `datetime.date()` 와 같다.
-    days[present] = data[present].astype("datetime64[D]").astype(np.int64) + _EPOCH_ORDINAL
+    for part in _row_chunks(present.size, checkpoint):
+        known = present[part]
+        # NULL 칸(NaT)은 정수로 바꾸지 않는다. 날짜 단위 내림은 행 경로 `datetime.date()` 와 같다.
+        days[part][known] = (
+            data[part][known].astype("datetime64[D]").astype(np.int64) + _EPOCH_ORDINAL
+        )
     return present, days
+
+
+def _row_chunks(
+    rows: int, checkpoint: Callable[[], None], size: int = _CHUNK_ROWS
+) -> Iterator[slice]:
+    """행 구간을 `size` 씩 나누고 구간마다 checkpoint 를 부른다(spec D7, #582 리뷰 P3-2)."""
+    for low in range(0, rows, size):
+        checkpoint()
+        yield slice(low, min(low + size, rows))
+
+
+def _take(
+    array: NDArray[_Item], index: NDArray[np.intp], checkpoint: Callable[[], None]
+) -> NDArray[_Item]:
+    """`array[index]` 를 행 구간마다 checkpoint 를 부르며 만든다."""
+    taken = np.empty(index.size, dtype=array.dtype)
+    for part in _row_chunks(index.size, checkpoint):
+        taken[part] = array[index[part]]
+    return taken
+
+
+def _searchsorted(
+    haystack: NDArray[np.int64], needles: NDArray[np.int64], *, side: Literal["left", "right"]
+) -> NDArray[np.intp]:
+    """`np.searchsorted(haystack, needles, side=side)` 와 같은 위치.
+
+    찾을 값을 먼저 정렬해 넘긴다. 정렬된 값은 numpy 가 앞 결과에서 이어 찾아 큰 정렬 열을 차례로
+    훑으므로, 행 순서(날짜·티커)대로 흩어진 값을 그대로 넘길 때보다 몇 배 빠르다(#582 리뷰 P3-2).
+    """
+    order = np.argsort(needles, kind="stable")
+    position = np.empty(needles.size, dtype=np.intp)
+    position[order] = np.searchsorted(haystack, needles[order], side=side)
+    return position
 
 
 def _flags(column: NDArray[np.generic]) -> NDArray[np.bool_]:
@@ -310,10 +362,9 @@ def _codes(
     """문자열 열을 처음 나온 순서의 코드로 바꾼다."""
     lookup: dict[str, int] = {}
     codes = np.empty(len(values), dtype=np.int32)
-    for low in range(0, len(values), _CODE_CHUNK):
-        checkpoint()
-        part = values[low : low + _CODE_CHUNK]
-        codes[low : low + len(part)] = np.fromiter(
+    for chunk in _row_chunks(len(values), checkpoint, _PY_CHUNK_ROWS):
+        part = values[chunk]
+        codes[chunk] = np.fromiter(
             (lookup.setdefault(str(item), len(lookup)) for item in part),
             dtype=np.int32,
             count=len(part),
@@ -421,14 +472,13 @@ def load_raw_panel(
         con.close()
     progress(_GRID_FETCHED)
 
-    day_present, day = _ordinals(fetched["d"], "universe_daily.date")
+    day_present, day = _ordinals(fetched["d"], "universe_daily.date", checkpoint)
     if not bool(day_present.all()):
         raise EquityDuckdbSetupError("universe_daily.date must be a date — got NULL")
     ticker, tickers = _codes(fetched["ticker"], checkpoint)
     span_seq = np.ma.getdata(fetched["span_seq"]).astype(np.int64)
     member = _flags(fetched["member"])
-    _reject_duplicate_keys(ticker, day, tickers)
-    checkpoint()
+    lookup = _GridLookup(ticker, day, tickers, checkpoint)  # (ticker, date) 중복도 여기서 거절
 
     # LATEST 원천은 행 경로(`_panel`)처럼 격자에 나온 티커 전부(랙 행 포함)를 축 키로 읽는다.
     panel_tickers = tuple(sorted(tickers))
@@ -461,17 +511,18 @@ def load_raw_panel(
 
     # 격자 행 → 달력 세션 index(달력 밖 날짜는 -1). 행은 창 세션만, 랙은 index 로 센다.
     calendar = np.array([session.toordinal() for session in adapter._sessions], dtype=np.int32)
-    found = np.minimum(np.searchsorted(calendar, day), len(calendar) - 1)
-    session_index = np.where(calendar[found] == day, found, -1).astype(np.int64)
+    session_index = np.full(day.size, -1, dtype=np.int64)
+    for part in _row_chunks(day.size, checkpoint):
+        found = np.minimum(np.searchsorted(calendar, day[part]), len(calendar) - 1)
+        session_index[part] = np.where(calendar[found] == day[part], found, -1)
     first_index = adapter._session_index[window.sessions[0]]
     rows = np.flatnonzero(session_index >= first_index)
-    lookup = _GridLookup(ticker, session_index, len(calendar))
     checkpoint()
 
     sources: dict[str, _SourceCells] = {}
     for index, (name, _fields) in enumerate(grid.layout):
         checkpoint()
-        sources[name] = _source_cells(fetched, index, SOURCE_BY_NAME[name])
+        sources[name] = _source_cells(fetched, index, SOURCE_BY_NAME[name], checkpoint)
     source_of = {field_id: name for name, fields in grouped.items() for field_id in fields}
     targets: dict[int, NDArray[np.int64]] = {}
     matches: dict[tuple[str, int], _LatestMatch] = {}
@@ -485,22 +536,26 @@ def load_raw_panel(
         if latest is not None:
             if (name, lag) not in matches:
                 matches[(name, lag)] = latest.match(
-                    ticker[rows], session_index[rows] - lag, calendar
+                    ticker[rows], session_index[rows] - lag, calendar, checkpoint
                 )
-            columns.append(latest.field_column(field_id, matches[(name, lag)]))
+            columns.append(latest.field_column(field_id, matches[(name, lag)], checkpoint))
             continue
         if lag not in targets:
-            targets[lag] = lookup.lagged(rows, lag, span_seq)
+            targets[lag] = lookup.lagged(rows, session_index, lag, calendar, span_seq, checkpoint)
         cells = sources[name]
         has_value, value = numeric[field_id].decode(fetched, checkpoint, cells=cells.present)
-        columns.append(_field_column(field_id, targets[lag], cells, has_value, value))
+        columns.append(_field_column(field_id, targets[lag], cells, has_value, value, checkpoint))
     progress(_ASSEMBLED)
+    # 받은 열은 더 쓰지 않는다. 재정렬 동안 메모리를 쥐지 않게 먼저 놓는다. 큰 배열을 한꺼번에
+    # 놓으면 그동안 checkpoint 가 없어 열마다 놓는다.
+    del targets, matches, sources, series
+    for key in list(fetched):
+        del fetched[key]
+        checkpoint()
 
     # 행 순서는 (as_of, security_id) 다. security_id 는 문자열 순서로 코드를 매긴다.
     width = int(span_seq.max(initial=0)) + 1
-    pairs = ticker[rows].astype(np.int64) * width + span_seq[rows]
-    unique_pairs, pair_of_row = np.unique(pairs, return_inverse=True)
-    checkpoint()
+    unique_pairs, pair_of_row = _security_pairs(ticker, span_seq, rows, width, checkpoint)
     security_ids = [
         f"{tickers[pair // width]}{SECURITY_ID_SEP}{pair % width}" for pair in unique_pairs.tolist()
     ]
@@ -508,39 +563,101 @@ def load_raw_panel(
     rank[sorted(range(len(security_ids)), key=security_ids.__getitem__)] = np.arange(
         len(security_ids), dtype=np.int32
     )
-    row_security = rank[pair_of_row].astype(np.int32)
-    row_date = day[rows]
-    order = np.lexsort((row_security, row_date))
-    reordered: list[RawFieldColumn] = []
-    for column in columns:
+    row_security = _take(rank, pair_of_row, checkpoint)
+    row_date = _take(day, rows, checkpoint)
+    order = _row_order(row_date, row_security, checkpoint)
+    # 열마다 옮긴 뒤 옛 열을 놓는다(한 번에 두 벌을 쥐지 않는다).
+    for index in range(len(columns)):
         checkpoint()
-        reordered.append(_reordered(column, order))
+        columns[index] = _reordered(columns[index], order, checkpoint)
+    row_date, row_security = (
+        _take(row_date, order, checkpoint),
+        _take(row_security, order, checkpoint),
+    )
+    member = _take(member, _take(rows, order, checkpoint), checkpoint)
     securities = tuple(sorted(security_ids))
     _reject_repeated_fields(
         query.field_ids,
-        reordered,
-        row_date[order],
-        row_security[order],
+        columns,
+        row_date,
+        row_security,
         securities,
         adapter._snapshot_id,
     )
+    checkpoint()
     panel = RawPanel(
         status=DataLoadStatus.OK if rows.size else DataLoadStatus.NO_DATA,
         data_snapshot_id=adapter._snapshot_id,
         sessions=window.requested,
         history_sessions=window.history,
         securities=securities,
-        row_date=row_date[order],
-        row_security=row_security[order],
-        universe_member=member[rows][order],
+        row_date=row_date,
+        row_security=row_security,
+        universe_member=member,
         sector=np.full(rows.size, -1, dtype=np.int32),  # 행 경로처럼 섹터는 미제공(DESIGN §7)
         previous_weight=np.zeros(rows.size, dtype=np.float64),
-        fields=tuple(reordered),
+        fields=tuple(columns),
         detail=None if rows.size else _no_members_detail(query),
         warnings=tuple(sorted({*window.warnings, *fetch.warnings})),
     )
     progress(1.0)
     return panel
+
+
+def _security_pairs(
+    ticker: NDArray[np.int32],
+    span_seq: NDArray[np.int64],
+    rows: NDArray[np.intp],
+    width: int,
+    checkpoint: Callable[[], None],
+) -> tuple[NDArray[np.int64], NDArray[np.intp]]:
+    """행의 (티커 코드, span_seq) 쌍 → (오름차순 고유 쌍, 행마다 고유 쌍 위치).
+
+    `np.unique(쌍, return_inverse=True)` 와 같다. 쌍 공간(티커 수 × span 폭)이 작아 정렬 대신
+    표시 표를 행 구간마다 채운다(#582 리뷰 P3-2).
+    """
+    space = (int(ticker.max(initial=-1)) + 1) * width
+    pair_code = np.empty(rows.size, dtype=np.int64)
+    seen = np.zeros(space, dtype=np.bool_)
+    for part in _row_chunks(rows.size, checkpoint):
+        chunk = rows[part]
+        codes = ticker[chunk].astype(np.int64) * width + span_seq[chunk]
+        pair_code[part] = codes
+        seen[codes] = True
+    unique_pairs = np.flatnonzero(seen).astype(np.int64)
+    position = np.full(space, -1, dtype=np.intp)
+    position[unique_pairs] = np.arange(unique_pairs.size, dtype=np.intp)
+    return unique_pairs, _take(position, pair_code.astype(np.intp), checkpoint)
+
+
+def _row_order(
+    row_date: NDArray[np.int32], row_security: NDArray[np.int32], checkpoint: Callable[[], None]
+) -> NDArray[np.intp]:
+    """`np.lexsort((row_security, row_date))` 와 같은 순서.
+
+    격자 질의는 날짜 순(`ORDER BY r.date, …`)으로 행을 내므로 보통 날짜가 이미 오름차순이다. 그러면
+    날짜 묶음마다 종목 코드만 안정 정렬하고 묶음 사이에 checkpoint 를 부른다(#582 리뷰 P3-2). 날짜가
+    오름차순이 아니면 전체를 한 번에 정렬한다(그 동안은 checkpoint 가 없다).
+    """
+    rows = row_date.size
+    ascending = True
+    for part in _row_chunks(max(rows - 1, 0), checkpoint):
+        if bool((row_date[part.start + 1 : part.stop + 1] < row_date[part]).any()):
+            ascending = False
+            break
+    if not ascending:
+        return np.lexsort((row_security, row_date))
+    starts = np.flatnonzero(np.diff(row_date)) + 1
+    bounds = [0, *starts.tolist(), rows]
+    order = np.empty(rows, dtype=np.intp)
+    pending = 0
+    for low, high in zip(bounds, bounds[1:], strict=False):
+        order[low:high] = low + np.argsort(row_security[low:high], kind="stable")
+        pending += high - low
+        if pending >= _CHUNK_ROWS:
+            checkpoint()
+            pending = 0
+    return order
 
 
 def _reject_repeated_fields(
@@ -580,57 +697,77 @@ def _reject_repeated_fields(
     )
 
 
-def _reject_duplicate_keys(
-    ticker: NDArray[np.int32], day: NDArray[np.int32], tickers: Sequence[str]
-) -> None:
-    """(ticker, date) 가 겹치면 행 경로(`_grid`)와 같은 오류다."""
-    order = np.lexsort((day, ticker))
-    same = (ticker[order][1:] == ticker[order][:-1]) & (day[order][1:] == day[order][:-1])
-    hits = np.flatnonzero(same)
-    if hits.size:
-        row = int(order[hits[0] + 1])
-        key = (tickers[int(ticker[row])], date.fromordinal(int(day[row])))
-        raise EquityDuckdbSetupError(
-            f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key}"
-        )
-
-
 class _GridLookup:
-    """(티커, 달력 세션 index) → 격자 행. 달력 밖 날짜의 행은 찾지 않는다."""
+    """(티커 코드, 날짜) → 격자 행 표. 정렬하지 않고 행 구간마다 채운다(#582 리뷰 P3-2).
+
+    표는 티커 수 × (격자 날짜 범위의 달력 일수) 칸이다. 채운 뒤 행마다 자기 칸을 다시 읽어 다른 행이
+    덮었으면 (ticker, date) 중복이다 — 행 경로 `_grid` 와 같은 오류로 거절한다.
+    """
 
     def __init__(
-        self, ticker: NDArray[np.int32], session_index: NDArray[np.int64], sessions: int
+        self,
+        ticker: NDArray[np.int32],
+        day: NDArray[np.int32],
+        tickers: Sequence[str],
+        checkpoint: Callable[[], None],
     ) -> None:
-        self._sessions = sessions
         self._ticker = ticker
-        self._session_index = session_index
-        calendar_rows = np.flatnonzero(session_index >= 0)
-        keys = ticker[calendar_rows].astype(np.int64) * sessions + session_index[calendar_rows]
-        order = np.argsort(keys, kind="stable")
-        self._keys = keys[order]
-        self._rows = calendar_rows[order]
+        # 표의 열은 격자에 나온 첫 날짜부터 마지막 날짜까지의 달력 일수다.
+        self._base = int(day.min()) if day.size else 0
+        width = int(day.max()) - self._base + 1 if day.size else 0
+        self._table = np.full((len(tickers), width), -1, dtype=np.int32)
+        for part in _row_chunks(day.size, checkpoint):
+            rows = np.arange(part.start, part.stop, dtype=np.int32)
+            self._table[ticker[part], day[part] - self._base] = rows
+        for part in _row_chunks(day.size, checkpoint):
+            rows = np.arange(part.start, part.stop, dtype=np.int32)
+            overwritten = np.flatnonzero(self._table[ticker[part], day[part] - self._base] != rows)
+            if overwritten.size:
+                row = part.start + int(overwritten[0])
+                key = (tickers[int(ticker[row])], date.fromordinal(int(day[row])))
+                raise EquityDuckdbSetupError(
+                    f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key}"
+                )
 
     def lagged(
-        self, rows: NDArray[np.intp], lag: int, span_seq: NDArray[np.int64]
+        self,
+        rows: NDArray[np.intp],
+        session_index: NDArray[np.int64],
+        lag: int,
+        calendar: NDArray[np.int32],
+        span_seq: NDArray[np.int64],
+        checkpoint: Callable[[], None],
     ) -> NDArray[np.int64]:
         """행마다 랙 `lag` 셀을 읽을 격자 행. 없으면 -1 이다(행 경로 `_cell` 의 GRID 갈래).
 
-        달력 세션 index − lag 행이 같은 티커에 있고 `span_seq` 가 같아야 한다. 랙이 상장 공백을
-        건너도 이전 상장 구간의 값을 새 종목 신원에 싣지 않는다.
+        달력 세션 index − lag 의 날짜 행이 같은 티커에 있고 `span_seq` 가 같아야 한다. 랙이 상장
+        공백을 건너도 이전 상장 구간의 값을 새 종목 신원에 싣지 않는다.
         """
-        target_index = self._session_index[rows] - lag
-        keys = self._ticker[rows].astype(np.int64) * self._sessions + target_index
-        if not self._keys.size:
-            return np.full(rows.size, -1, dtype=np.int64)
-        position = np.minimum(np.searchsorted(self._keys, keys), self._keys.size - 1)
-        target = self._rows[position].astype(np.int64)
-        found = (target_index >= 0) & (self._keys[position] == keys)
-        found &= span_seq[target] == span_seq[rows]
-        return np.where(found, target, -1)
+        lagged = np.full(rows.size, -1, dtype=np.int64)
+        width = self._table.shape[1]
+        if not width:
+            return lagged
+        for part in _row_chunks(rows.size, checkpoint):
+            chunk = rows[part]
+            target_index = session_index[chunk] - lag
+            column = calendar[np.maximum(target_index, 0)].astype(np.int64) - self._base
+            inside = (target_index >= 0) & (column >= 0) & (column < width)
+            target = np.where(
+                inside,
+                self._table[self._ticker[chunk], np.clip(column, 0, width - 1)],
+                -1,
+            ).astype(np.int64)
+            found = target >= 0
+            found &= span_seq[np.maximum(target, 0)] == span_seq[chunk]
+            lagged[part] = np.where(found, target, -1)
+        return lagged
 
 
 def _source_cells(
-    fetched: Mapping[str, NDArray[np.generic]], index: int, source: SourceSpec
+    fetched: Mapping[str, NDArray[np.generic]],
+    index: int,
+    source: SourceSpec,
+    checkpoint: Callable[[], None],
 ) -> _SourceCells:
     present = _flags(fetched[f"p{index}"])
     # 행 경로 `_grid` 는 원천 행이 있고 공개일·내용일이 둘 다 NULL 이 아닌 행에서만 둘을 읽는다.
@@ -640,11 +777,13 @@ def _source_cells(
     has_available, available = _ordinals(
         available_column,
         f"{source.relation}.{source.available_expr}",
+        checkpoint,
         read=present & content_known,
     )
     has_content, _content = _ordinals(
         content_column,
         f"{source.relation}.{source.content_expr}",
+        checkpoint,
         read=present & available_known,
     )
     return _SourceCells(
@@ -656,45 +795,86 @@ def _source_cells(
     )
 
 
+@dataclass(frozen=True)
+class _LateCells:
+    """LATEST 의 늦게 공개되는 필드 규칙 입력 — 행마다 컷오프와, 원천 행마다 행 공개일."""
+
+    cutoff: NDArray[np.int32]
+    row_available: NDArray[np.int32]
+
+
 def _field_column(
     field_id: str,
     target: NDArray[np.int64],
     cells: _SourceCells,
     has_value: NDArray[np.bool_],
     value: NDArray[np.float64],
+    checkpoint: Callable[[], None],
+    *,
+    late: _LateCells | None = None,
 ) -> RawFieldColumn:
-    """랙을 적용한 필드 열. 셀이 없는 칸은 `RawPanel.from_observation_set` 과 같은 기본값이다."""
-    source_row = np.maximum(target, 0)
-    present = (target >= 0) & cells.present[source_row]
-    has_source = has_value[source_row]
-    fill_code = cells.fill_code[source_row]
-    masked = cells.masked[source_row]
-    position = (has_source.astype(np.intp), fill_code, masked.astype(np.intp))
-    keep = cells.rules.keep[position]
-    fill = cells.rules.fill[position]
-    cell_value = np.where(
-        keep, value[source_row], np.where(fill, cells.rules.constant[position], 0.0)
-    )
+    """랙을 적용한 필드 열. 셀이 없는 칸은 `RawPanel.from_observation_set` 과 같은 기본값이다.
+
+    `late` 가 있으면(LATEST) 필드 공개일이 컷오프보다 늦은 칸을 값 없는 MISSING·행 공개일로
+    둔다(행 경로 `_cell`, #238). 행 구간마다 checkpoint 를 부른다(#582 리뷰 P3-2).
+    """
+    rows = target.size
+    present = np.zeros(rows, dtype=np.bool_)
+    cell_has_value = np.zeros(rows, dtype=np.bool_)
+    cell_value = np.zeros(rows, dtype=np.float64)
+    available = np.zeros(rows, dtype=np.int32)
+    kind = np.full(rows, -1, dtype=np.int8)
+    for part in _row_chunks(rows, checkpoint):
+        chunk = target[part]
+        source_row = np.maximum(chunk, 0)
+        chunk_present = (chunk >= 0) & cells.present[source_row]
+        has_source = has_value[source_row]
+        fill_code = cells.fill_code[source_row]
+        masked = cells.masked[source_row]
+        position = (has_source.astype(np.intp), fill_code, masked.astype(np.intp))
+        keep = cells.rules.keep[position]
+        fill = cells.rules.fill[position]
+        chunk_value = np.where(
+            keep, value[source_row], np.where(fill, cells.rules.constant[position], 0.0)
+        )
+        chunk_available = cells.available[source_row]
+        chunk_kind = cells.rules.kind[position]
+        chunk_has_value = keep | fill
+        if late is not None:
+            is_late = chunk_present & (chunk_available > late.cutoff[part])
+            chunk_has_value &= ~is_late
+            chunk_value = np.where(is_late, 0.0, chunk_value)
+            chunk_available = np.where(is_late, late.row_available[source_row], chunk_available)
+            chunk_kind = np.where(is_late, _KIND_CODE[CellKind.MISSING], chunk_kind)
+        present[part] = chunk_present
+        cell_has_value[part] = chunk_present & chunk_has_value
+        cell_value[part] = np.where(chunk_present, chunk_value, 0.0)
+        available[part] = np.where(chunk_present, chunk_available, 0)
+        kind[part] = np.where(chunk_present, chunk_kind, -1)
     return RawFieldColumn(
         field_id=field_id,
         present=present,
-        has_value=present & (keep | fill),
-        value=np.where(present, cell_value, 0.0).astype(np.float64),
-        text=np.full(target.size, -1, dtype=np.int32),
-        available=np.where(present, cells.available[source_row], 0).astype(np.int32),
-        kind=np.where(present, cells.rules.kind[position], -1).astype(np.int8),
+        has_value=cell_has_value,
+        value=cell_value,
+        text=np.full(rows, -1, dtype=np.int32),
+        available=available,
+        kind=kind,
     )
 
 
-def _reordered(column: RawFieldColumn, order: NDArray[np.intp]) -> RawFieldColumn:
+def _reordered(
+    column: RawFieldColumn, order: NDArray[np.intp], checkpoint: Callable[[], None]
+) -> RawFieldColumn:
+    """열을 `order` 순서로 옮긴다. 행 구간마다 checkpoint 를 부른다(#582 리뷰 P3-2)."""
     return RawFieldColumn(
         field_id=column.field_id,
-        present=column.present[order],
-        has_value=column.has_value[order],
-        value=column.value[order],
-        text=column.text[order],
-        available=column.available[order],
-        kind=column.kind[order],
+        present=_take(column.present, order, checkpoint),
+        has_value=_take(column.has_value, order, checkpoint),
+        value=_take(column.value, order, checkpoint),
+        text=_take(column.text, order, checkpoint),
+        available=_take(column.available, order, checkpoint),
+        kind=_take(column.kind, order, checkpoint),
+        categories=column.categories,
     )
 
 
@@ -741,25 +921,34 @@ class _LatestColumns:
         ticker: NDArray[np.int32],
         cutoff_index: NDArray[np.int64],
         calendar: NDArray[np.int32],
+        checkpoint: Callable[[], None],
     ) -> _LatestMatch:
         """행 경로 `_cell` 의 LATEST 갈래 — 컷오프 이하의 마지막 관측을 찾는다.
 
         컷오프는 달력 세션 index − 랙의 세션이다(음수면 셀 없음). 축 키(티커 또는 법인)마다
         `bisect_right(공개일들, 컷오프) − 1` 이고, 정렬 열에서는 `searchsorted(side="right") − 1`
-        뒤 같은 축 키인지 본다.
+        뒤 같은 축 키인지 본다. 행 구간마다 checkpoint 를 부른다(#582 리뷰 P3-2).
         """
-        key = self.key_of_ticker[ticker]
-        valid = (cutoff_index >= 0) & (key >= 0)
-        cutoff = np.where(valid, calendar[np.maximum(cutoff_index, 0)], 0).astype(np.int32)
-        if not self.sort_keys.size:
-            return _LatestMatch(np.full(ticker.size, -1, dtype=np.int64), cutoff)
-        wanted = key * _DAY_SPAN + cutoff
-        position = np.searchsorted(self.sort_keys, wanted, side="right") - 1
-        found = valid & (position >= 0)
-        found &= self.sort_keys[np.maximum(position, 0)] // _DAY_SPAN == key
-        return _LatestMatch(np.where(found, position, -1).astype(np.int64), cutoff)
+        row = np.full(ticker.size, -1, dtype=np.int64)
+        cutoff = np.zeros(ticker.size, dtype=np.int32)
+        for part in _row_chunks(ticker.size, checkpoint):
+            key = self.key_of_ticker[ticker[part]]
+            chunk_index = cutoff_index[part]
+            valid = (chunk_index >= 0) & (key >= 0)
+            chunk_cutoff = np.where(valid, calendar[np.maximum(chunk_index, 0)], 0)
+            cutoff[part] = chunk_cutoff
+            if not self.sort_keys.size:
+                continue
+            wanted = key * _DAY_SPAN + chunk_cutoff
+            position = _searchsorted(self.sort_keys, wanted, side="right") - 1
+            found = valid & (position >= 0)
+            found &= self.sort_keys[np.maximum(position, 0)] // _DAY_SPAN == key
+            row[part] = np.where(found, position, -1)
+        return _LatestMatch(row, cutoff)
 
-    def field_column(self, field_id: str, match: _LatestMatch) -> RawFieldColumn:
+    def field_column(
+        self, field_id: str, match: _LatestMatch, checkpoint: Callable[[], None]
+    ) -> RawFieldColumn:
         """고른 관측의 셀. 필드 공개일이 컷오프보다 늦으면 값 없는 MISSING, 공개일은 행의 것이다.
 
         행 경로 `_cell` 은 늦은 필드를 다른 관측 값으로 대신하지 않는다(재무 TTM 정정본, #238).
@@ -776,23 +965,14 @@ class _LatestColumns:
                 kind=np.full(rows, -1, dtype=np.int8),
             )
         position = self.fields.index(field_id)
-        column = _field_column(
+        return _field_column(
             field_id,
             match.row,
             self.cells[position],
             self.has_value[position],
             self.value[position],
-        )
-        late = column.present & (column.available > match.cutoff)
-        row_available = self.available[np.maximum(match.row, 0)]
-        return RawFieldColumn(
-            field_id=field_id,
-            present=column.present,
-            has_value=column.has_value & ~late,
-            value=np.where(late, 0.0, column.value).astype(np.float64),
-            text=column.text,
-            available=np.where(late, row_available, column.available).astype(np.int32),
-            kind=np.where(late, _KIND_CODE[CellKind.MISSING], column.kind).astype(np.int8),
+            checkpoint,
+            late=_LateCells(cutoff=match.cutoff, row_available=self.available),
         )
 
 
@@ -839,11 +1019,11 @@ def _latest_columns(
     if not len(fetched["k"]):
         return _empty_latest(fields, no_keys, rules)
     label = f"{source.relation}.{source.available_expr}"
-    has_available, available = _ordinals(fetched["av"], label)
+    has_available, available = _ordinals(fetched["av"], label, checkpoint)
     if not bool(has_available.all()):
         raise EquityDuckdbSetupError(f"{label} must be a date — got NoneType: None")
     # 내용일은 셀에 싣지 않는다. 행 경로처럼 타입만 보고 NULL 은 받는다(행 공개일로 대신한다).
-    _ordinals(fetched["ct"], f"{source.relation}.{source.content_expr}")
+    _ordinals(fetched["ct"], f"{source.relation}.{source.content_expr}", checkpoint)
     key, key_names = _codes(fetched["k"], checkpoint)
     order = np.lexsort((available, key))
     available = available[order]
@@ -857,7 +1037,7 @@ def _latest_columns(
         late = latest_sql.late.get(position)
         if late is not None:
             late_label = f"{source.relation}.{late}"
-            has_late, late_available = _ordinals(fetched[f"a{position}"], late_label)
+            has_late, late_available = _ordinals(fetched[f"a{position}"], late_label, checkpoint)
             if not bool(has_late.all()):
                 raise EquityDuckdbSetupError(f"{late_label} must be a date — got NoneType: None")
             field_available = late_available[order]

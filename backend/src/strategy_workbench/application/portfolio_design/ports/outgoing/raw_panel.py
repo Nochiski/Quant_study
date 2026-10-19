@@ -9,9 +9,10 @@
   행 키 비교를 코드 비교로 한다.
 - 셀 생략(`present=False`)과 값 없음(`has_value=False`)을 따로 둔다. 숫자 값은 `value`, 문자열
   값은 `text`(범주 사전 `categories` 의 코드)에 담는다.
-- `fields` 의 순서가 모든 관측의 fields 튜플 순서다. 첫 위반은 (행, 이 순서)로 고른다.
+- `fields` 의 순서는 질의 `field_ids` 순서다. 원시 계약상 모든 관측의 fields 튜플이 이 순서의
+  부분열이라, 첫 위반을 (행, 이 순서)로 고르면 객체 경로와 같다.
 - 생성 시 계약을 검사하지 않는다. 소비 경계에서 `validate_contract` 를 한 번 부른다(spec
-  DEFECT-CT-01 재검증 행). 생성 시에는 배열 길이·코드 범위 같은 구조만 본다.
+  DEFECT-CT-01 재검증 행). 생성 시에는 배열 길이·dtype·코드 범위 같은 구조만 본다.
 
 검증 규칙이 `RawObservationSet.validate_contract`·`RawFieldValue.__post_init__` 와 두 벌인 것은 대조
 기간에만 허용한다. T7-03 에서 객체 검증을 이 열 검증에서 파생해 한 벌로 줄인다. 그때까지 두 검증이
@@ -23,7 +24,6 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date
-from graphlib import CycleError, TopologicalSorter
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -80,6 +80,22 @@ def _first_hit(candidates: Sequence[NDArray[np.bool_]]) -> tuple[int, int] | Non
     return best
 
 
+def _require_dtypes(owner: str, arrays: dict[str, tuple[NDArray[np.generic], type]]) -> None:
+    """배열마다 dtype 이 정확히 기대 타입인지 본다. 다른 dtype 은 비교·비트 대조를 조용히 바꾼다."""
+    wrong = {
+        name: str(array.dtype)
+        for name, (array, expected) in arrays.items()
+        if array.dtype != np.dtype(expected)
+    }
+    if wrong:
+        expected = {
+            name: np.dtype(kind).name for name, (_, kind) in arrays.items() if name in wrong
+        }
+        raise ValueError(
+            f"raw panel {owner} arrays have wrong dtypes — got={wrong} want={expected}"
+        )
+
+
 def _require_codes(name: str, codes: NDArray[np.integer], size: int, *, missing: bool) -> None:
     low = -1 if missing else 0
     if codes.size and (int(codes.min()) < low or int(codes.max()) >= size):
@@ -87,6 +103,14 @@ def _require_codes(name: str, codes: NDArray[np.integer], size: int, *, missing:
             f"raw panel {name} code out of range — min={int(codes.min())} "
             f"max={int(codes.max())} allowed={low}..{size - 1} rows={codes.size}"
         )
+
+
+@dataclass(frozen=True)
+class RawCellPosition:
+    """패널의 셀 하나. `row` 는 행 위치, `field` 는 `RawPanel.fields` 위치다."""
+
+    row: int
+    field: int
 
 
 @dataclass(frozen=True, eq=False)
@@ -111,10 +135,27 @@ class RawFieldColumn:
                 f"field_id={self.field_id!r} rows={rows} "
                 f"shapes={[array.shape for array in arrays]}"
             )
+        _require_dtypes(
+            f"field {self.field_id!r}",
+            {
+                "present": (self.present, np.bool_),
+                "has_value": (self.has_value, np.bool_),
+                "value": (self.value, np.float64),
+                "text": (self.text, np.int32),
+                "available": (self.available, np.int32),
+                "kind": (self.kind, np.int8),
+            },
+        )
         _require_codes("text", self.text, len(self.categories), missing=True)
         _require_codes("kind", self.kind, len(RAW_CELL_KINDS), missing=True)
         if bool((self.kind[self.present] < 0).any()):
             raise ValueError(f"raw panel present cell needs a kind — field_id={self.field_id!r}")
+        # 일 서수는 1(0001-01-01)부터다. 0 은 "셀 없음" 자리라 present 셀의 날짜로 풀 수 없다.
+        if bool((self.available[self.present] < 1).any()):
+            raise ValueError(
+                "raw panel present cell needs an available ordinal >= 1 — "
+                f"field_id={self.field_id!r}"
+            )
 
 
 @dataclass(frozen=True, eq=False)
@@ -143,6 +184,20 @@ class RawPanel:
         if any(shape != (rows,) for shape in shapes):
             raise ValueError(
                 f"raw panel arrays must share one row length — rows={rows} shapes={shapes}"
+            )
+        _require_dtypes(
+            "row",
+            {
+                "row_date": (self.row_date, np.int32),
+                "row_security": (self.row_security, np.int32),
+                "universe_member": (self.universe_member, np.bool_),
+                "sector": (self.sector, np.int32),
+                "previous_weight": (self.previous_weight, np.float64),
+            },
+        )
+        if rows and int(self.row_date.min()) < 1:
+            raise ValueError(
+                f"raw panel row_date ordinals must be >= 1 — min={self.row_date.min()}"
             )
         if list(self.securities) != sorted(set(self.securities)):
             raise ValueError(
@@ -292,12 +347,15 @@ class RawPanel:
             f"kind={kind.value!r}"
         )
 
-    def first_look_ahead(self, *, checkpoint: Callable[[], None] = _noop_checkpoint) -> str | None:
-        """공개일이 관측일보다 늦은 첫 셀의 진단 문장. 없으면 None 이다.
+    def first_look_ahead(
+        self, *, checkpoint: Callable[[], None] = _noop_checkpoint
+    ) -> RawCellPosition | None:
+        """공개일이 관측일보다 늦은 첫 셀의 (행, 필드) 위치. 없으면 None 이다.
 
         객체 경로는 소비 경계(`_service._to_factor_observation`)에서 `LookAheadViolationError` 를
-        낸다. 예외 타입은 application 서비스가 소유하므로 여기서는 같은 문장만 돌려준다. 이 검사는
-        `validate_contract` 에 넣지 않는다. 넣으면 관문 순서(spec D6)가 바뀐다.
+        낸다. 예외와 문장은 application 서비스가 소유하므로(`_service._look_ahead_violation`)
+        여기서는 위치만 돌려준다. 이 검사는 `validate_contract` 에 넣지 않는다. 넣으면 관문
+        순서(spec D6)가 바뀐다.
         """
         rows = self.row_date.shape[0]
         for part in _chunks(rows, checkpoint, _noop_progress, start=0.0, end=1.0):
@@ -305,15 +363,8 @@ class RawPanel:
             hit = _first_hit(
                 [column.present[part] & (column.available[part] > days) for column in self.fields]
             )
-            if hit is None:
-                continue
-            row, column = part.start + hit[0], self.fields[hit[1]]
-            as_of, security_id = self._key(row)
-            return (
-                "raw field published after its observation date — "
-                f"field_id={column.field_id!r} security_id={security_id!r} "
-                f"as_of={as_of} available_date={date.fromordinal(int(column.available[row]))}"
-            )
+            if hit is not None:
+                return RawCellPosition(row=part.start + hit[0], field=hit[1])
         return None
 
     def observations(self, rows: Sequence[int] | None = None) -> tuple[RawObservation, ...]:
@@ -385,19 +436,25 @@ class RawPanel:
         return tuple(result)
 
     @classmethod
-    def from_observation_set(cls, raw: RawObservationSet) -> RawPanel:
+    def from_observation_set(cls, raw: RawObservationSet, *, field_ids: Sequence[str]) -> RawPanel:
         """객체 관측을 같은 셀의 열로 옮긴다(구조 변환, 계약은 검사하지 않는다).
 
-        열에 담을 수 없는 관측은 거절한다. 한 관측 안의 중복 field_id 와 bool 값은
-        `validate_contract` 와 같은 계약 위반 메시지로, 관측마다 필드 상대 순서가 어긋나 한 열
-        순서로 줄일 수 없는 집합은 `ValueError` 로 거절한다.
+        열 순서는 질의 `field_ids` 순서다. 한 번도 나오지 않은 필드는 present 가 모두 False 인
+        열이다.
+        열에 담을 수 없는 관측은 `validate_contract` 와 같은 계약 위반 예외로 거절한다. 한 관측 안의
+        중복 field_id, float·str·None 이 아닌 값(bool·int 포함), `field_ids` 의 부분열이 아닌
+        fields(원시 계약의 순서 조항)가 그렇다.
+
+        이 거절들은 열에 담기 위한 방어용 검사다. 위반이 여럿 섞인 집합에서는 첫 위반이 객체 경로
+        (`RawObservationSet` 생성 → `validate_contract`)와 다른 순서로 걸릴 수 있다. 위반이 하나뿐인
+        집합에서는 같은 메시지다.
         """
         observations = raw.observations
         rows = len(observations)
+        order = tuple(field_ids)
         securities = tuple(sorted({item.security_id for item in observations}))
         security_code = {security_id: code for code, security_id in enumerate(securities)}
         sector_code: dict[str, int] = {}
-        order = _field_order(observations)
         position = {field_id: index for index, field_id in enumerate(order)}
         present = [[False] * rows for _ in order]
         has_value = [[False] * rows for _ in order]
@@ -414,16 +471,26 @@ class RawPanel:
                 if item.sector_id is None
                 else sector_code.setdefault(item.sector_id, len(sector_code))
             )
+            previous = -1
             for field in item.fields:
-                column = position[field.field_id]
+                column = position.get(field.field_id, -1)
                 cell = field.value
-                if present[column][row]:
+                if column >= 0 and present[column][row]:
                     raise RawObservationContractViolation(
                         "raw observation field_ids must be unique — "
                         f"as_of={item.as_of} security_id={item.security_id!r} "
                         f"field_id={field.field_id!r} snapshot={raw.data_snapshot_id!r}"
                     )
-                if isinstance(cell, bool):
+                if column <= previous:
+                    raise RawObservationContractViolation(
+                        "raw observation fields must follow the query field_ids order — "
+                        f"as_of={item.as_of} security_id={item.security_id!r} "
+                        f"field_id={field.field_id!r} "
+                        f"fields={tuple(f.field_id for f in item.fields)} field_ids={order} "
+                        f"snapshot={raw.data_snapshot_id!r}"
+                    )
+                previous = column
+                if cell is not None and not isinstance(cell, float | str):
                     raise RawObservationContractViolation(
                         "raw field value must be float, str or None — "
                         f"as_of={item.as_of} security_id={item.security_id!r} "
@@ -474,29 +541,6 @@ class RawPanel:
             detail=raw.detail,
             warnings=raw.warnings,
         )
-
-
-def _field_order(observations: Sequence[RawObservation]) -> tuple[str, ...]:
-    """모든 관측의 fields 튜플 순서를 지키는 열 순서 하나(위상 정렬).
-
-    관측마다 일부 필드가 생략되므로 첫 등장 순서만으로는 모자란다(앞 행에 B 만, 뒤 행에 A, B).
-    한 관측 안의 중복 field_id 는 여기서 무시하고 변환 루프가 계약 위반으로 거절한다.
-    """
-    graph: TopologicalSorter[str] = TopologicalSorter()
-    for sequence in dict.fromkeys(
-        tuple(dict.fromkeys(field.field_id for field in item.fields)) for item in observations
-    ):
-        for field_id in sequence:
-            graph.add(field_id)
-        for before, after in zip(sequence, sequence[1:], strict=False):
-            graph.add(after, before)
-    try:
-        return tuple(graph.static_order())
-    except CycleError as error:
-        raise ValueError(
-            "raw observations disagree on field order and cannot share one column order — "
-            f"cycle={error.args[1]} observations={len(observations)}"
-        ) from error
 
 
 @runtime_checkable

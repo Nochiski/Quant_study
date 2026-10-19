@@ -2,6 +2,7 @@
 
 - 왕복: 객체 관측 → `from_observation_set` → `observations()` 가 dataclass `==` 와 float
   비트(±0)까지 원본과 같다. mock 어댑터, 원장 손 픽스처(duckdb), 손으로 만든 경계 사례를 쓴다.
+  열 순서는 질의 field_ids 순서다(원시 계약의 순서 조항).
 - 검증 동등성: 계약 위반 사례마다 열 검증과 객체 검증(`RawFieldValue` 생성 → `RawObservationSet`
   생성)이 같은 예외 타입·메시지를 낸다. 열 검증이 규칙을 두 벌로 갖는 대조 기간의 안전망이다(T7-03
   에서 한 벌로 줄인다).
@@ -14,6 +15,7 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
@@ -63,8 +65,15 @@ def _bits(observations: tuple[RawObservation, ...]) -> list[object]:
     ]
 
 
-def _assert_round_trip(raw: RawObservationSet) -> RawPanel:
-    panel = RawPanel.from_observation_set(raw)
+def _query_order(raw: RawObservationSet) -> tuple[str, ...]:
+    """관측에 나온 field_id 를 처음 나온 순서로. 손으로 만든 사례의 질의 순서로 쓴다."""
+    return tuple(
+        dict.fromkeys(field.field_id for item in raw.observations for field in item.fields)
+    )
+
+
+def _assert_round_trip(raw: RawObservationSet, field_ids: tuple[str, ...]) -> RawPanel:
+    panel = RawPanel.from_observation_set(raw, field_ids=field_ids)
     restored = panel.observations()
     assert restored == raw.observations
     assert _bits(restored) == _bits(raw.observations)
@@ -95,10 +104,11 @@ def _query(
 )
 def test_mock_raw_observations_round_trip_bit_for_bit(start: date, end: date, history: int) -> None:
     mock = MockEquityDataAdapter.demo()
-    raw = mock.load_raw_observations(_query(mock, start, end, history))
+    query = _query(mock, start, end, history)
+    raw = mock.load_raw_observations(query)
     assert raw.ok and raw.observations
 
-    panel = _assert_round_trip(raw)
+    panel = _assert_round_trip(raw, query.field_ids)
 
     rows = [len(raw.observations) - 1, 0, 2]
     assert panel.observations(rows) == tuple(raw.observations[row] for row in rows)
@@ -113,21 +123,20 @@ def test_ledger_fixture_raw_observations_round_trip_bit_for_bit(tmp_path: Path) 
 
     adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity"))
     fields = tuple(profile.field_id for profile in adapter.list_fields())
-    raw = adapter.load_raw_observations(
-        RawObservationQuery(
-            "KRX", "krx.common-stock", date(2024, 1, 8), date(2024, 1, 12), fields, 3
-        )
+    query = RawObservationQuery(
+        "KRX", "krx.common-stock", date(2024, 1, 8), date(2024, 1, 12), fields, 3
     )
+    raw = adapter.load_raw_observations(query)
     assert raw.ok and raw.observations
     kinds = {field.kind for item in raw.observations for field in item.fields}
     assert {CellKind.MASKED, CellKind.SOURCE_OMITTED_ZERO, CellKind.MISSING} <= kinds
 
-    _assert_round_trip(raw)
+    _assert_round_trip(raw, query.field_ids)
 
 
 def test_round_trip_keeps_signed_zero_text_none_and_omission() -> None:
     rows = (
-        # 앞 행에는 B 만 있고 뒤 행에 A, B 가 온다. 열 순서는 첫 등장이 아니라 위상 순서다.
+        # 앞 행에는 B 만 있고 뒤 행에 A, B 가 온다. 열 순서는 첫 등장이 아니라 질의 순서다.
         RawObservation(D1, "a", True, (RawFieldValue("b", -0.0, D0),), "s1", -0.0),
         RawObservation(
             D1,
@@ -146,28 +155,45 @@ def test_round_trip_keeps_signed_zero_text_none_and_omission() -> None:
     )
     raw = RawObservationSet(DataLoadStatus.OK, "snap", (D1, D2), (D0,), rows, warnings=("w",))
 
-    panel = _assert_round_trip(raw)
+    panel = _assert_round_trip(raw, ("a", "b", "c", "never"))
 
-    assert [column.field_id for column in panel.fields] == ["a", "b", "c"]
+    assert [column.field_id for column in panel.fields] == ["a", "b", "c", "never"]
+    never = panel.fields[3]
+    assert not never.present.any() and never.present.shape == (len(rows),)
 
 
 def test_round_trip_of_a_failure_value() -> None:
     raw = RawObservationSet(DataLoadStatus.NO_DATA, "snap", (), (), (), detail="no rows")
 
-    panel = _assert_round_trip(raw)
+    panel = _assert_round_trip(raw, ("p", "q"))
 
     assert not panel.ok
+    assert [column.field_id for column in panel.fields] == ["p", "q"]
 
 
-def test_inconsistent_field_order_cannot_share_one_column_order() -> None:
+@pytest.mark.parametrize(
+    ("fields", "field_ids"),
+    [
+        pytest.param(("b", "a"), ("a", "b"), id="out-of-query-order"),
+        pytest.param(("a", "z"), ("a", "b"), id="field-outside-the-query"),
+    ],
+)
+def test_fields_must_be_a_subsequence_of_the_query_field_ids(
+    fields: tuple[str, ...], field_ids: tuple[str, ...]
+) -> None:
+    """원시 계약: 관측의 fields 는 질의 field_ids 순서의 부분열이다. 어기면 계약 위반이다."""
     rows = (
-        RawObservation(D1, "a", True, (RawFieldValue("a", 1.0, D1), RawFieldValue("b", 1.0, D1))),
-        RawObservation(D1, "b", True, (RawFieldValue("b", 1.0, D1), RawFieldValue("a", 1.0, D1))),
+        RawObservation(D1, "a", True, (RawFieldValue("a", 1.0, D1),)),
+        RawObservation(D1, "b", True, tuple(RawFieldValue(f, 1.0, D1) for f in fields)),
     )
     raw = RawObservationSet(DataLoadStatus.OK, "snap", (D1,), (), rows)
 
-    with pytest.raises(ValueError, match="disagree on field order"):
-        RawPanel.from_observation_set(raw)
+    with pytest.raises(
+        RawObservationContractViolation, match="must follow the query field_ids order"
+    ) as caught:
+        RawPanel.from_observation_set(raw, field_ids=field_ids)
+
+    assert "security_id='b'" in str(caught.value)
 
 
 # --- 검증 동등성 -------------------------------------------------------------------------------
@@ -233,7 +259,7 @@ def _object_error(raw: RawObservationSet) -> RawObservationContractViolation:
 
 def _panel_error(raw: RawObservationSet) -> RawObservationContractViolation:
     with pytest.raises(RawObservationContractViolation) as caught:
-        RawPanel.from_observation_set(raw).validate_contract()
+        RawPanel.from_observation_set(raw, field_ids=_query_order(raw)).validate_contract()
     return caught.value
 
 
@@ -275,6 +301,8 @@ CASES = {
     "ordering-before-non-finite": _unchecked((_row(D2, "a", _field("p", NAN)), _row(D1, "a"))),
     "bool-value": _unchecked((_row(D1, "a", _field("p", 1.0)), _row(D1, "b", _field("p", True)))),
     "bool-false-value": _unchecked((_row(D1, "a", _field("p", False)),)),
+    "int-value": _unchecked((_row(D1, "a", _field("p", 1.0)), _row(D1, "b", _field("p", 3)))),
+    "zero-int-value": _unchecked((_row(D1, "a", _field("p", 0)),)),
     "duplicate-field-id": _unchecked((_row(D1, "a", _field("p", 1.0), _field("p", 2.0)),)),
 }
 
@@ -304,6 +332,14 @@ def test_bool_value_message_names_field_security_and_date() -> None:
 
     assert "field_id='p'" in message and "security_id='b'" in message
     assert f"as_of={D1}" in message and "value=True" in message
+
+
+def test_int_value_message_has_the_bool_message_format() -> None:
+    """P3-2: int 도 bool 과 같은 문장으로 거절한다(값 타입은 정확히 float·str·None)."""
+    message = str(_panel_error(CASES["int-value"]))
+
+    assert message.startswith("raw field value must be float, str or None — ")
+    assert "field_id='p'" in message and "security_id='b'" in message and "value=3" in message
 
 
 def _service_look_ahead(raw: RawObservationSet) -> str | None:
@@ -336,14 +372,31 @@ def _service_look_ahead(raw: RawObservationSet) -> str | None:
 )
 def test_look_ahead_detail_matches_the_consumer_boundary(rows: tuple[RawObservation, ...]) -> None:
     raw = RawObservationSet(DataLoadStatus.OK, "snap", (D1, D2), (D0,), rows)
+    panel = RawPanel.from_observation_set(raw, field_ids=("p", "q"))
 
-    assert RawPanel.from_observation_set(raw).first_look_ahead() == _service_look_ahead(raw)
+    position = panel.first_look_ahead()
+
+    if position is None:
+        assert _service_look_ahead(raw) is None
+        return
+    # 위치만 열이 주고 문장은 서비스가 만든다(P3-4: 문장의 owner 는 하나).
+    row = panel.observations([position.row])[0]
+    column = panel.fields[position.field]
+    error = portfolio_module._look_ahead_violation(
+        field_id=column.field_id,
+        security_id=row.security_id,
+        as_of=row.as_of,
+        available_date=date.fromordinal(int(column.available[position.row])),
+    )
+    assert isinstance(error, LookAheadViolationError)
+    assert str(error) == _service_look_ahead(raw)
 
 
 def test_validation_checkpoints_and_reports_monotonic_progress() -> None:
     mock = MockEquityDataAdapter.demo()
-    raw = mock.load_raw_observations(_query(mock, date(2024, 1, 8), date(2024, 1, 12), 3))
-    panel = RawPanel.from_observation_set(raw)
+    query = _query(mock, date(2024, 1, 8), date(2024, 1, 12), 3)
+    raw = mock.load_raw_observations(query)
+    panel = RawPanel.from_observation_set(raw, field_ids=query.field_ids)
     checkpoints = 0
     fractions: list[float] = []
 
@@ -363,7 +416,7 @@ def test_validation_stops_at_a_cancelling_checkpoint(monkeypatch: pytest.MonkeyP
     raw = RawObservationSet(
         DataLoadStatus.OK, "snap", (D1,), (), tuple(_row(D1, f"s{index:02d}") for index in range(8))
     )
-    panel = RawPanel.from_observation_set(raw)
+    panel = RawPanel.from_observation_set(raw, field_ids=())
     calls = 0
 
     def checkpoint() -> None:
@@ -385,3 +438,55 @@ def test_columnar_capability_is_a_runtime_checkable_protocol() -> None:
 
     assert isinstance(_Columnar(), ColumnarRawObservationPort)
     assert not isinstance(MockEquityDataAdapter.demo(), ColumnarRawObservationPort)
+
+
+# --- 생성 시 구조 검사(P3-3) ------------------------------------------------------------------
+
+
+def _one_cell_panel() -> RawPanel:
+    raw = RawObservationSet(
+        DataLoadStatus.OK, "snap", (D1,), (), (_row(D1, "a", _field("p", 1.5)),)
+    )
+    return RawPanel.from_observation_set(raw, field_ids=("p",))
+
+
+@pytest.mark.parametrize(
+    ("name", "wrong"),
+    [
+        ("value", np.array([1], dtype=np.int64)),
+        ("present", np.array([1], dtype=np.int8)),
+        ("has_value", np.array([1], dtype=np.int8)),
+        ("available", np.array([D1.toordinal()], dtype=np.int64)),
+        ("text", np.array([-1], dtype=np.int64)),
+        ("kind", np.array([0], dtype=np.int32)),
+    ],
+)
+def test_field_column_rejects_wrong_dtypes(name: str, wrong: np.ndarray) -> None:
+    column = _one_cell_panel().fields[0]
+
+    with pytest.raises(ValueError, match=f"wrong dtypes — got={{'{name}'"):
+        replace(column, **{name: wrong})
+
+
+@pytest.mark.parametrize(
+    ("name", "wrong"),
+    [
+        ("row_date", np.array([D1.toordinal()], dtype=np.int64)),
+        ("row_security", np.array([0], dtype=np.int64)),
+        ("universe_member", np.array([1], dtype=np.int8)),
+        ("sector", np.array([-1], dtype=np.int64)),
+        ("previous_weight", np.array([0.0], dtype=np.float32)),
+    ],
+)
+def test_panel_rejects_wrong_row_dtypes(name: str, wrong: np.ndarray) -> None:
+    panel = _one_cell_panel()
+
+    with pytest.raises(ValueError, match=f"wrong dtypes — got={{'{name}'"):
+        replace(panel, **{name: wrong})
+
+
+def test_present_cell_needs_an_available_ordinal_of_at_least_one() -> None:
+    column = _one_cell_panel().fields[0]
+
+    with pytest.raises(ValueError, match="available ordinal >= 1"):
+        replace(column, available=np.array([0], dtype=np.int32))

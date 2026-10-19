@@ -928,15 +928,31 @@ def _reject_sessions_outside_run_range(
     )
 
 
+def _look_ahead_violation(
+    *, field_id: str, security_id: str, as_of: date, available_date: date
+) -> LookAheadViolationError:
+    """look-ahead 위반 예외와 문장의 owner.
+
+    객체 경로(아래 `_to_factor_observation`)와 열 경로(`RawPanel.first_look_ahead` 가 돌려준 위치)가
+    같이 쓴다.
+    """
+    return LookAheadViolationError(
+        "raw field published after its observation date — "
+        f"field_id={field_id!r} security_id={security_id!r} "
+        f"as_of={as_of} available_date={available_date}"
+    )
+
+
 def _to_factor_observation(
     item: RawObservation, *, checkpoint: Callable[[], None]
 ) -> FactorObservation:
     for field in _checkpointed(item.fields, checkpoint):
         if field.available_date > item.as_of:
-            raise LookAheadViolationError(
-                "raw field published after its observation date — "
-                f"field_id={field.field_id!r} security_id={item.security_id!r} "
-                f"as_of={item.as_of} available_date={field.available_date}"
+            raise _look_ahead_violation(
+                field_id=field.field_id,
+                security_id=item.security_id,
+                as_of=item.as_of,
+                available_date=field.available_date,
             )
     return FactorObservation(
         as_of=item.as_of,

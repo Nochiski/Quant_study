@@ -210,15 +210,27 @@ class NumericColumn:
         return [unscaled, exact]
 
     def decode(
-        self, fetched: Mapping[str, NDArray[np.generic]], checkpoint: Callable[[], None]
+        self,
+        fetched: Mapping[str, NDArray[np.generic]],
+        checkpoint: Callable[[], None],
+        *,
+        cells: NDArray[np.bool_] | None = None,
     ) -> tuple[NDArray[np.bool_], NDArray[np.float64]]:
-        """(값 있음, 값). 값이 없는 칸은 0.0 이다."""
+        """(값 있음, 값). 값이 없는 칸은 0.0 이다.
+
+        `cells` 는 행 경로가 값을 읽는 행이다(GRID: 원천 행이 있고 공개일·내용일이 다 있다, 없으면
+        전부). 숫자가 아닌 선언 타입은 그 행에 값이 실렸을 때만 실패한다 — 행 경로 `_as_float` 는
+        셀이 아닌 행의 값을 보지 않는다(#582 리뷰 P3-1).
+        """
         key = next(iter(fetched))
         rows = len(fetched[key])
         has_value = np.zeros(rows, dtype=np.bool_)
         value = np.zeros(rows, dtype=np.float64)
         if self.invalid is not None:
-            carried = int(np.count_nonzero(_flags(fetched[f"{self.alias}_n"])))
+            carried_rows = _flags(fetched[f"{self.alias}_n"])
+            if cells is not None:
+                carried_rows &= cells
+            carried = int(np.count_nonzero(carried_rows))
             if carried:
                 raise EquityDuckdbSetupError(
                     f"{self.label} must be numeric — got {carried} non-null value(s) of declared "
@@ -263,13 +275,24 @@ def numeric_column(alias: str, declared: str, label: str) -> NumericColumn:
 
 
 def _ordinals(
-    column: NDArray[np.generic], label: str
+    column: NDArray[np.generic], label: str, *, read: NDArray[np.bool_] | None = None
 ) -> tuple[NDArray[np.bool_], NDArray[np.int32]]:
-    """날짜 열 → (값 있음, 일 서수). 값이 없는 칸은 0 이다."""
+    """날짜 열 → (값 있음, 일 서수). 값이 없는 칸은 0 이다.
+
+    `read` 는 행 경로가 그 열을 `_as_date` 로 읽는 행이다(없으면 전부). 날짜가 아닌 선언 타입은
+    그 행에 값이 실렸을 때만 실패하고, 아니면 모두 값 없는 칸이다 — 전부 NULL 인 VARCHAR 열을
+    행 경로가 통과시키는 것과 같다(#582 리뷰 P3-1).
+    """
     data = np.ma.getdata(column)
-    if not np.issubdtype(data.dtype, np.datetime64):
-        raise EquityDuckdbSetupError(f"{label} must be a date — got dtype {data.dtype}")
     present = ~np.ma.getmaskarray(column)
+    if not np.issubdtype(data.dtype, np.datetime64):
+        carried = present if read is None else present & read
+        if bool(carried.any()):
+            raise EquityDuckdbSetupError(
+                f"{label} must be a date — got dtype {data.dtype} "
+                f"non_null={int(np.count_nonzero(carried))} rows={present.size}"
+            )
+        return np.zeros(present.shape, dtype=np.bool_), np.zeros(present.shape, dtype=np.int32)
     days = np.zeros(present.shape, dtype=np.int32)
     # NULL 칸(NaT)은 정수로 바꾸지 않는다. 날짜 단위 내림은 행 경로 `datetime.date()` 와 같다.
     days[present] = data[present].astype("datetime64[D]").astype(np.int64) + _EPOCH_ORDINAL
@@ -468,8 +491,9 @@ def load_raw_panel(
             continue
         if lag not in targets:
             targets[lag] = lookup.lagged(rows, lag, span_seq)
-        has_value, value = numeric[field_id].decode(fetched, checkpoint)
-        columns.append(_field_column(field_id, targets[lag], sources[name], has_value, value))
+        cells = sources[name]
+        has_value, value = numeric[field_id].decode(fetched, checkpoint, cells=cells.present)
+        columns.append(_field_column(field_id, targets[lag], cells, has_value, value))
     progress(_ASSEMBLED)
 
     # 행 순서는 (as_of, security_id) 다. security_id 는 문자열 순서로 코드를 매긴다.
@@ -609,11 +633,19 @@ def _source_cells(
     fetched: Mapping[str, NDArray[np.generic]], index: int, source: SourceSpec
 ) -> _SourceCells:
     present = _flags(fetched[f"p{index}"])
+    # 행 경로 `_grid` 는 원천 행이 있고 공개일·내용일이 둘 다 NULL 이 아닌 행에서만 둘을 읽는다.
+    available_column, content_column = fetched[f"a{index}"], fetched[f"t{index}"]
+    available_known = ~np.ma.getmaskarray(available_column)
+    content_known = ~np.ma.getmaskarray(content_column)
     has_available, available = _ordinals(
-        fetched[f"a{index}"], f"{source.relation}.{source.available_expr}"
+        available_column,
+        f"{source.relation}.{source.available_expr}",
+        read=present & content_known,
     )
     has_content, _content = _ordinals(
-        fetched[f"t{index}"], f"{source.relation}.{source.content_expr}"
+        content_column,
+        f"{source.relation}.{source.content_expr}",
+        read=present & available_known,
     )
     return _SourceCells(
         present=present & has_available & has_content,

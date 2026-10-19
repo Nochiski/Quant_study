@@ -452,6 +452,80 @@ def test_an_all_null_categorical_column_is_cells_without_values(
     assert (column.text == -1).all() and column.categories == ()
 
 
+def test_a_categorical_value_outside_any_cell_is_not_read(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#582 리뷰 P3-1: 공개일이 NULL 인 행(셀 아님)에만 실린 문자열 값은 두 경로 모두 읽지 않는다.
+
+    행 경로 `_grid` 는 원천 행이 있고 공개일·내용일이 다 있는 행에서만 값을 `_as_float` 로 읽는다.
+    """
+    source = SOURCE_BY_NAME["flow"]
+    late_day = "date = DATE '2024-01-09'"
+    monkeypatch.setitem(
+        SOURCE_BY_NAME,
+        "flow",
+        replace(
+            source,
+            available_expr=f"CASE WHEN {late_day} THEN NULL ELSE {source.available_expr} END",
+        ),
+    )
+    field_id = "flow.foreign_net_buy"
+    monkeypatch.setitem(
+        adapter._fields,
+        field_id,
+        replace(adapter._fields[field_id], expr=f"CASE WHEN {late_day} THEN 'x' END"),
+    )
+    query = _query((field_id, "price.close"), universe="krx.all")
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
+@pytest.mark.parametrize(
+    ("source_name", "field_id"),
+    [("flow", "flow.foreign_net_buy"), ("consensus_eps", "consensus.forward_eps")],
+    ids=["grid", "latest"],
+)
+def test_an_all_null_non_date_content_column_matches_the_row_path(
+    adapter: EquityDuckdbAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    source_name: str,
+    field_id: str,
+) -> None:
+    """#582 리뷰 P3-1: 내용일 열이 날짜가 아닌 타입이어도 값이 모두 NULL 이면 행 경로처럼 통과한다.
+
+    GRID 는 내용일이 NULL 이면 셀이 없고, LATEST 는 내용일 대신 행 공개일을 쓴다.
+    """
+    source = SOURCE_BY_NAME[source_name]
+    monkeypatch.setitem(
+        SOURCE_BY_NAME, source_name, replace(source, content_expr="CAST(NULL AS VARCHAR)")
+    )
+    query = _query((field_id, "price.close"), universe="krx.all", history=2)
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
+@pytest.mark.parametrize("source_name", ["flow", "consensus_eps"], ids=["grid", "latest"])
+def test_a_non_date_content_value_fails_like_the_row_path(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch, source_name: str
+) -> None:
+    """내용일 열에 날짜가 아닌 값이 실리면 두 경로 모두 설정 오류다(예외 타입만 같다)."""
+    source = SOURCE_BY_NAME[source_name]
+    monkeypatch.setitem(
+        SOURCE_BY_NAME, source_name, replace(source, content_expr="CAST(available_date AS VARCHAR)")
+    )
+    field_id = next(field for field in _fields(adapter) if FIELD_BY_ID[field].source == source_name)
+    query = _query((field_id,), universe="krx.all", history=2)
+    with pytest.raises(EquityDuckdbSetupError, match="must be a date"):
+        adapter.load_raw_observations(query)
+
+    with pytest.raises(EquityDuckdbSetupError, match="must be a date"):
+        load_raw_panel(adapter, query)
+
+
 def test_the_adapter_declares_the_columnar_capability(adapter: EquityDuckdbAdapter) -> None:
     """능력 선언(T2-03). 운영 파이프라인은 아직 이 능력을 고르지 않는다(T4-01)."""
     query = _query(_fields(adapter), history=2)

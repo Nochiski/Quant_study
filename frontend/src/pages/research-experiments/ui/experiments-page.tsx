@@ -15,6 +15,23 @@ import { t, tFill } from "../../../shared/config";
 import { Link } from "../../../shared/lib/router";
 import { Badge, Button, EmptyState, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
+import "./experiments-page.css";
+
+type TrialCounts = Experiment["trial_counts"];
+
+/** 끝난 몫(완료·실패·취소)과 남은 몫을 한 막대로 보인다. 수는 서버 `trial_counts` 그대로다. */
+const TrialProgress = ({ counts }: { counts: TrialCounts }) => {
+  const total = Object.values(counts).reduce((sum, count) => sum + (count ?? 0), 0);
+  const part = (key: keyof TrialCounts) =>
+    total === 0 ? 0 : ((counts[key] ?? 0) / total) * 100;
+  return (
+    <span className="experiment-progress" aria-hidden="true">
+      <span className="experiment-progress__completed" style={{ width: `${part("completed")}%` }} />
+      <span className="experiment-progress__failed" style={{ width: `${part("failed")}%` }} />
+      <span className="experiment-progress__running" style={{ width: `${part("running")}%` }} />
+    </span>
+  );
+};
 
 /** 실험 한 줄의 조작. 대기열 규칙(슬롯·배정·우선순위 상한)은 backend 가 적용한다(spec D6). */
 const Actions = ({
@@ -192,8 +209,28 @@ export const ExperimentsPage = () => {
                           <Badge tone={experimentStatusTone(item.status)}>
                             {experimentStatusLabel(item.status)}
                           </Badge>
+                          {item.status === "completed" && item.selections.length === 0 ? (
+                            <>
+                              {" "}
+                              <Badge tone="info">{t("experiments.awaitingCandidate")}</Badge>{" "}
+                              <Link
+                                className="ui-button ui-button--secondary ui-button--small"
+                                to="/research/experiments/$experimentId"
+                                params={{ experimentId: item.record.experiment_id }}
+                                hash="candidate"
+                              >
+                                {t("experiments.notice.candidates")}
+                              </Link>
+                            </>
+                          ) : null}
+                          {item.status === "queued" ? (
+                            <small className="experiment-list__hint">
+                              {t("experiments.queuedHint")}
+                            </small>
+                          ) : null}
                         </td>
                         <td>
+                          <TrialProgress counts={counts} />
                           {tFill("experiments.counts", {
                             completed: counts.completed ?? 0,
                             total: Object.values(counts).reduce(

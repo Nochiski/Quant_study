@@ -132,3 +132,98 @@
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
+
+/* 탐색 값은 칩으로 보인다(RD-09-A). */
+.experiment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.experiment-chips li {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.experiment-form__rule-note {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+/* 시작 전 확인: 넓은 화면에서는 오른쪽 열에 고정해 값을 바꾸며 바로 본다(RD-09-A). */
+.experiment-form__summary {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.experiment-form__summary h2 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.experiment-form__summary > p {
+  margin: 0;
+}
+
+@media (min-width: 1200px) {
+  .experiment-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--space-6) * 14));
+    grid-auto-flow: row dense;
+  }
+
+  .experiment-form > * {
+    grid-column: 1;
+  }
+
+  .experiment-form > .experiment-form__summary {
+    position: sticky;
+    top: var(--space-4);
+    grid-row: 1 / span 6;
+    grid-column: 2;
+    align-self: start;
+  }
+}
+
+.experiment-window {
+  display: grid;
+  gap: var(--space-1);
+  min-width: calc(var(--space-6) * 5);
+}
+
+.experiment-window__bar {
+  position: relative;
+  height: var(--space-3);
+  border-radius: var(--radius-small);
+  background: var(--surface-subtle);
+}
+
+.experiment-window__train,
+.experiment-window__test {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.experiment-window__train {
+  background: var(--accent-soft);
+}
+
+.experiment-window__test {
+  background: var(--accent);
+}
+
+.experiment-window small {
+  color: var(--text-muted);
+}

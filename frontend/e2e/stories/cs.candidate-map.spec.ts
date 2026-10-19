@@ -278,6 +278,10 @@ const scenario = async (
   await form
     .getByRole("combobox", { name: "후보로 기록할 학습 창", exact: true })
     .selectOption(String(chosen!.trial.index));
+  // 이유 없이 누르면 기록하지 않고 이유 칸 아래에 알린다(RD-10-B). 다음 할 일 띠도 보인다.
+  await expect(page.getByText("후보를 고르고 이유를 남겨 주세요.")).toBeVisible();
+  await form.getByRole("button", { name: "이유와 후보 기록", exact: true }).click();
+  await expect(form.getByRole("alert")).toHaveText("선택 이유를 적어 주세요.");
   const reason = `최고 칸만 보지 않고 이웃 평균과 민감도를 비교했다. ${width}px 기술 QA이며 실제 자금 투입 판단이 아니다.`;
   await form
     .getByRole("textbox", { name: "선택 이유", exact: true })

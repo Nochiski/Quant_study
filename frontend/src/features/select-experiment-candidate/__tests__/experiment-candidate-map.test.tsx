@@ -266,6 +266,15 @@ describe("파라미터 지도와 명시적 후보 선택", () => {
       within(form).getByLabelText("후보로 기록할 학습 창"),
       "0",
     );
+    // 기록 버튼 바로 위에 되돌릴 수 없음과 실행·자금 투입 없음을 말한다(RD-10-B).
+    expect(form).toHaveTextContent(
+      "기록은 되돌릴 수 없어요. 비교한 점수와 한계를 이유에 남기세요. 자동매매 실행이나 자금 투입은 하지 않아요.",
+    );
+    // 이유가 비면 기록하지 않고 이유 칸 아래에 알린다.
+    await user.click(submit);
+    expect(within(form).getByRole("alert")).toHaveTextContent("선택 이유를 적어 주세요.");
+    expect(within(form).getByLabelText("선택 이유")).toHaveAttribute("aria-invalid", "true");
+    expect(submitted).toEqual([]);
     await user.type(
       within(form).getByLabelText("선택 이유"),
       "이웃 점수와 민감도를 비교했습니다.",

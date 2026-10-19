@@ -33,6 +33,7 @@ from numpy.typing import NDArray
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RAW_CELL_KINDS,
     RawFieldColumn,
+    RawObservationContractViolation,
     RawObservationQuery,
     RawPanel,
 )
@@ -45,6 +46,8 @@ from ._adapter import (
     _cell_kind,
     _interruptible,
     _no_members_detail,
+    _noop_checkpoint,
+    _noop_progress,
     _RawRejection,
 )
 from ._source import EquityDuckdbSetupError
@@ -157,7 +160,7 @@ def _fill_kind_sql(column: str) -> str:
 
 @dataclass(frozen=True)
 class NumericColumn:
-    """값 열 하나를 받는 방식(spec D3 원시 숫자 행). `declared` 는 duckdb 선언 타입이다.
+    """값 열 하나를 받는 방식(spec D3 원시 숫자 행).
 
     - `direct`: fetchnumpy 값을 float64 로 그대로 쓴다.
     - `scale`: DECIMAL 빠른 길 — 비스케일 정수 열 `<alias>_u` 를 `10**scale` 로 한 번 나눈다.
@@ -165,7 +168,6 @@ class NumericColumn:
     """
 
     alias: str
-    declared: str
     direct: bool = False
     scale: int | None = None
     exact: bool = False
@@ -223,9 +225,9 @@ def numeric_column(alias: str, declared: str, label: str) -> NumericColumn:
     """선언 타입에 맞는 받기 방식. 숫자가 아닌 타입은 행 경로 `_as_float` 처럼 실패다."""
     kind = declared.strip().upper()
     if kind in _DIRECT_TYPES:
-        return NumericColumn(alias, kind, direct=True)
+        return NumericColumn(alias, direct=True)
     if kind in _EXACT_TYPES:
-        return NumericColumn(alias, kind, exact=True)
+        return NumericColumn(alias, exact=True)
     match = _DECIMAL_TYPE.fullmatch(kind)
     if match is None:
         raise EquityDuckdbSetupError(
@@ -233,9 +235,9 @@ def numeric_column(alias: str, declared: str, label: str) -> NumericColumn:
         )
     precision, scale = int(match[1]), int(match[2])
     if scale > FAST_SCALE_LIMIT:
-        return NumericColumn(alias, kind, exact=True)
+        return NumericColumn(alias, exact=True)
     # 10^precision ≤ 2^53 이면 비스케일 정수가 늘 빠른 길 안이라 정확 경로 열이 필요 없다.
-    return NumericColumn(alias, kind, scale=scale, exact=10**precision > FAST_UNSCALED_LIMIT)
+    return NumericColumn(alias, scale=scale, exact=10**precision > FAST_UNSCALED_LIMIT)
 
 
 def _ordinals(
@@ -318,14 +320,6 @@ def _failure_panel(
     )
 
 
-def _noop_checkpoint() -> None:
-    pass
-
-
-def _noop_progress(fraction: float) -> None:
-    pass
-
-
 def load_grid_raw_panel(
     adapter: EquityDuckdbAdapter,
     query: RawObservationQuery,
@@ -404,6 +398,7 @@ def load_grid_raw_panel(
     span_seq = np.ma.getdata(fetched["span_seq"]).astype(np.int64)
     member = _flags(fetched["member"])
     _reject_duplicate_keys(ticker, day, tickers)
+    checkpoint()
 
     # 격자 행 → 달력 세션 index(달력 밖 날짜는 -1). 행은 창 세션만, 랙은 index 로 센다.
     calendar = np.array([session.toordinal() for session in adapter._sessions], dtype=np.int32)
@@ -412,11 +407,12 @@ def load_grid_raw_panel(
     first_index = adapter._session_index[window.sessions[0]]
     rows = np.flatnonzero(session_index >= first_index)
     lookup = _GridLookup(ticker, session_index, len(calendar))
+    checkpoint()
 
-    sources = {
-        name: _source_cells(fetched, index, SOURCE_BY_NAME[name])
-        for index, (name, _fields) in enumerate(grid.layout)
-    }
+    sources: dict[str, _SourceCells] = {}
+    for index, (name, _fields) in enumerate(grid.layout):
+        checkpoint()
+        sources[name] = _source_cells(fetched, index, SOURCE_BY_NAME[name])
     source_of = {field_id: name for name, fields in grid.layout for field_id in fields}
     targets: dict[int, NDArray[np.int64]] = {}
     columns: list[RawFieldColumn] = []
@@ -429,11 +425,13 @@ def load_grid_raw_panel(
         cells = sources[source_of[field_id]]
         has_value, value = numeric[field_id].decode(fetched, checkpoint)
         columns.append(_field_column(field_id, targets[lag], cells, has_value, value))
+    progress(_ASSEMBLED)
 
     # 행 순서는 (as_of, security_id) 다. security_id 는 문자열 순서로 코드를 매긴다.
     width = int(span_seq.max(initial=0)) + 1
     pairs = ticker[rows].astype(np.int64) * width + span_seq[rows]
     unique_pairs, pair_of_row = np.unique(pairs, return_inverse=True)
+    checkpoint()
     security_ids = [
         f"{tickers[pair // width]}{SECURITY_ID_SEP}{pair % width}" for pair in unique_pairs.tolist()
     ]
@@ -444,23 +442,73 @@ def load_grid_raw_panel(
     row_security = rank[pair_of_row].astype(np.int32)
     row_date = day[rows]
     order = np.lexsort((row_security, row_date))
+    reordered: list[RawFieldColumn] = []
+    for column in columns:
+        checkpoint()
+        reordered.append(_reordered(column, order))
+    securities = tuple(sorted(security_ids))
+    _reject_repeated_fields(
+        query.field_ids,
+        reordered,
+        row_date[order],
+        row_security[order],
+        securities,
+        adapter._snapshot_id,
+    )
     panel = RawPanel(
         status=DataLoadStatus.OK if rows.size else DataLoadStatus.NO_DATA,
         data_snapshot_id=adapter._snapshot_id,
         sessions=window.requested,
         history_sessions=window.history,
-        securities=tuple(sorted(security_ids)),
+        securities=securities,
         row_date=row_date[order],
         row_security=row_security[order],
         universe_member=member[rows][order],
         sector=np.full(rows.size, -1, dtype=np.int32),  # 행 경로처럼 섹터는 미제공(DESIGN §7)
         previous_weight=np.zeros(rows.size, dtype=np.float64),
-        fields=tuple(_reordered(column, order) for column in columns),
+        fields=tuple(reordered),
         detail=None if rows.size else _no_members_detail(query),
         warnings=tuple(sorted({*window.warnings, *fetch.warnings})),
     )
     progress(1.0)
     return panel
+
+
+def _reject_repeated_fields(
+    field_ids: Sequence[str],
+    columns: Sequence[RawFieldColumn],
+    row_date: NDArray[np.int32],
+    row_security: NDArray[np.int32],
+    securities: Sequence[str],
+    snapshot_id: str,
+) -> None:
+    """질의 field_ids 에 같은 필드가 두 번 있으면 행 경로와 같은 계약 위반으로 거절한다.
+
+    행 경로는 관측마다 fields 를 질의 순서로 싣고 `RawObservationSet` 생성 검사가 (행 순서, fields
+    순서)로 처음 겹친 칸을 거절한다. 같은 필드의 열은 present 가 같으므로 다시 나온 자리의 열이
+    present 인 첫 (행, 자리)가 그 칸이다. 그런 셀이 하나도 없으면 행 경로는 통과하고 열 경로는
+    `RawPanel` 생성의 중복 field_id 검사(`from_observation_set` 과 같은 ValueError)로 끝난다.
+    """
+    seen: set[str] = set()
+    repeats: list[int] = []
+    for position, field_id in enumerate(field_ids):
+        if field_id in seen:
+            repeats.append(position)
+        seen.add(field_id)
+    best: tuple[int, int] | None = None
+    for position in repeats:
+        hits = np.flatnonzero(columns[position].present)
+        if hits.size and (best is None or int(hits[0]) < best[0]):
+            best = (int(hits[0]), position)
+    if best is None:
+        return
+    row, position = best
+    raise RawObservationContractViolation(
+        "raw observation field_ids must be unique — "
+        f"as_of={date.fromordinal(int(row_date[row]))} "
+        f"security_id={securities[int(row_security[row])]!r} "
+        f"field_id={field_ids[position]!r} snapshot={snapshot_id!r}"
+    )
 
 
 def _reject_duplicate_keys(

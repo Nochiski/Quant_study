@@ -547,9 +547,9 @@ class RawPanel:
 class ColumnarRawObservationPort(Protocol):
     """선택 능력: 원시 관측을 열로 바로 낸다(T2-02 에서 duckdb 가 구현).
 
-    결과는 `RawPanel.from_observation_set(load_raw_observations(query))` 와 셀마다 같아야 한다
-    (spec 5절 L0). 능력이 없는 어댑터는 application 이 그 구조 변환을 쓴다. `checkpoint`·`progress`
-    규칙은 `ProgressReportingRawObservationPort` 와 같다.
+    결과는 `RawPanel.from_observation_set(load_raw_observations(query), field_ids=query.field_ids)`
+    와 셀마다 같아야 한다(spec 5절 L0). 능력이 없는 어댑터는 application 이 그 구조 변환을 쓴다.
+    `checkpoint`·`progress` 규칙은 `ProgressReportingRawObservationPort` 와 같다.
     """
 
     def load_raw_panel(

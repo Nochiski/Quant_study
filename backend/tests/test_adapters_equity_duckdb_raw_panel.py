@@ -44,6 +44,7 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RAW_CELL_KINDS,
     ColumnarRawObservationPort,
     RawFieldColumn,
+    RawObservationContractViolation,
     RawObservationQuery,
     RawPanel,
 )
@@ -238,6 +239,25 @@ def test_a_lag_reaching_the_previous_listing_reads_no_cell(
         columnar.row_date == date(2023, 12, 29).toordinal()
     )
     assert reached.sum() == 1
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [("price.close", "price.volume", "price.close"), ("credit.margin_balance",) * 2],
+    ids=["repeated-after-another", "repeated-lagged"],
+)
+def test_a_repeated_query_field_fails_like_the_row_path(
+    adapter: EquityDuckdbAdapter, fields: tuple[str, ...]
+) -> None:
+    """질의에 같은 필드가 두 번 있으면 두 경로가 같은 계약 위반 문장으로 끝난다(#576 리뷰 P3)."""
+    query = _query(fields, history=3)
+    with pytest.raises(RawObservationContractViolation) as expected:
+        adapter.load_raw_observations(query)
+
+    with pytest.raises(RawObservationContractViolation) as actual:
+        load_grid_raw_panel(adapter, query)
+
+    assert str(actual.value) == str(expected.value)
 
 
 def test_a_query_with_a_latest_source_field_is_refused(adapter: EquityDuckdbAdapter) -> None:

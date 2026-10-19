@@ -74,7 +74,7 @@ test(
     );
     // 실행 전: 저장한 전략의 첫 결과라 새 시도로 센다(US-SM-16).
     await expect(impact).toHaveText(
-      "결과가 나오면 새 시도로 셉니다. 계열 시도 수 0회 → 1회.",
+      "결과가 나오면 새 시도로 셉니다. 계열 시도 수 0회 → 1회. 시도가 늘면 같은 결과의 시도 횟수 보정 통계(DSR)가 낮아질 수 있어요.",
     );
     await toggle.click();
     await expect(backtest(page)).toBeEnabled();

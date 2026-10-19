@@ -190,6 +190,11 @@ test(
     // 실행 설정: 나머지 칸은 서버(실행 설정 스키마)가 준 기본값으로 채워져 있다.
     const { toggle, start, fee } = runSettingsInputs(page);
     await toggle.click();
+    // 기본값 그대로인 묶음은 요약 줄에 "기본값" 배지를 단다(RD-05-A).
+    for (const group of ["비용", "고급 실행"])
+      await expect(
+        page.getByLabel(group, { exact: true }).and(page.locator("summary")),
+      ).toContainText("기본값");
     await openRunSettingsGroup(page, "고급 실행");
     await openRunSettingsGroup(page, "비용");
     await expect(page.getByRole("combobox", { name: "시장" })).toHaveValue(

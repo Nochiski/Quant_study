@@ -504,6 +504,23 @@ describe("run environment panel", () => {
     expect(requestBody()).toEqual(request);
   });
 
+  it("기본값 그대로인 묶음에 기본값 배지를 달고, 값을 바꾸면 배지를 뗀다(RD-05-A)", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings(false);
+    const costs = screen.getByLabelText("비용", { selector: "summary" });
+    const advanced = screen.getByLabelText("고급 실행", { selector: "summary" });
+    expect(within(costs).getByText("기본값")).toBeInTheDocument();
+    expect(within(advanced).getByText("기본값")).toBeInTheDocument();
+
+    await user.click(costs);
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "20");
+    expect(within(costs).queryByText("기본값")).toBeNull();
+    expect(costs).toHaveAccessibleDescription(/수수료: 20bp/);
+    expect(within(advanced).getByText("기본값")).toBeInTheDocument();
+  });
+
   // #357 C-P3-16: 실행 계획 설명은 결측 정책 칸만 따로 싣는다. 기간·유니버스가 비었다고 기본 정책의
   // 계획을 보이면 고른 정책과 다른 `plan_hash` 가 된다.
   it("hands out the missing policy while the period and universe are still empty", async () => {

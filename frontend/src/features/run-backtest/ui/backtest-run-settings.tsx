@@ -62,6 +62,12 @@ const TrialImpact = ({ request }: { request: BacktestRunSpec }) => {
       {t(`backtest.trial.${data.reason}`)
         .replace("{count}", String(data.trial_count))
         .replace("{after}", String(data.trial_count_after))}
+      {data.reason === "new_trial" ? (
+        <small className="backtest-settings__hint">
+          {" "}
+          {t("backtest.trial.dsrNote")}
+        </small>
+      ) : null}
     </p>
   );
 };
@@ -190,6 +196,7 @@ export const BacktestRunSettings = ({
 }: BacktestRunSettingsProps) => {
   const {
     fields,
+    optionDefaults,
     setField,
     result,
     schemaStatus,
@@ -225,6 +232,22 @@ export const BacktestRunSettings = ({
     group.some((field) => environmentErrors[field.name] !== undefined);
   const costInvalid = hasErrors(costFields);
   const advancedInvalid = hasErrors(advancedFields) || result.errors.some((error) => error !== "environment");
+  // 기본값 그대로인가: 지금 값이 스키마 기본값과 같은 칸만 있다(기본값이 없는 칸은 보지 않는다).
+  const atDefault = (group: readonly RunEnvironmentField[]) =>
+    group.every(
+      (field) =>
+        field.defaultValue === null ||
+        !runEnvironmentApplies(field, environmentValues) ||
+        (environmentValues[field.name] ?? "") === field.defaultValue,
+    );
+  const costDefault = atDefault(costFields);
+  const advancedDefault =
+    atDefault(advancedFields) &&
+    fields.core === optionDefaults.core &&
+    fields.initialCashKrw === optionDefaults.initialCashKrw &&
+    fields.benchmarkSecurityId === optionDefaults.benchmarkSecurityId &&
+    fields.annualizationDays === optionDefaults.annualizationDays &&
+    fields.oosStart === optionDefaults.oosStart;
   const costSummary = costFields
     .filter((field) => COST_SUMMARY_FIELDS.has(field.name) && runEnvironmentApplies(field, environmentValues))
     .map((field) => `${runEnvironmentName(field)}: ${runEnvironmentValueLabel(field,
@@ -307,6 +330,8 @@ export const BacktestRunSettings = ({
             {t("backtest.settings.close")}
           </Button>
         </header>
+        {/* 실행 전에 시도 수가 어떻게 되는지를 설정보다 먼저 보인다(RD-05-B). */}
+        {open && request !== null ? <TrialImpact request={request} /> : null}
         <fieldset
           disabled={disabled}
           className="backtest-settings__environment"
@@ -331,7 +356,7 @@ export const BacktestRunSettings = ({
         <details className="backtest-settings__group ui-disclosure">
           <summary aria-label={t("backtest.settings.costs")} aria-describedby={`${costSummaryId}${costInvalid ? ` ${costSummaryId}-error` : ""}`}>
             <strong>{t("backtest.settings.costs")}</strong>
-            {costInvalid ? <Badge id={`${costSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge> : null}
+            {costInvalid ? <Badge id={`${costSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge> : costDefault ? <Badge tone="neutral">{t("backtest.settings.default")}</Badge> : null}
             <small id={costSummaryId}>{costSummary}</small>
           </summary>
           <fieldset disabled={disabled} aria-label={t("backtest.settings.costs")}>
@@ -342,7 +367,8 @@ export const BacktestRunSettings = ({
           <summary aria-label={t("backtest.settings.advanced")} aria-describedby={`${advancedSummaryId}${advancedInvalid ? ` ${advancedSummaryId}-error` : ""}`}>
             <strong>{t("backtest.settings.advanced")}</strong>
             {advancedInvalid
-              ? <Badge id={`${advancedSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge> : null}
+              ? <Badge id={`${advancedSummaryId}-error`} tone="error">{t("backtest.settings.invalid")}</Badge>
+              : advancedDefault ? <Badge tone="neutral">{t("backtest.settings.default")}</Badge> : null}
             <small id={advancedSummaryId}>
               {fields.core === "" ? "—" : t(EXECUTION_CORE_LABELS[fields.core])} · {t("backtest.settings.initialCash")}: {fields.initialCashKrw || "—"}
             </small>
@@ -445,7 +471,6 @@ export const BacktestRunSettings = ({
             ))}
           </ul>
         )}
-        {open && request !== null ? <TrialImpact request={request} /> : null}
       </div>
     </details>
   );

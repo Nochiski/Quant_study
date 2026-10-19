@@ -367,6 +367,8 @@ export const useBacktestRunSettings = (storageKey: string) => {
     schemaError: schema.error,
     environmentFields,
     environmentValues,
+    /** 실행 옵션의 스키마 기본값. 패널이 "기본값" 배지를 판정한다(저장하지 않는다). */
+    optionDefaults: initialBacktestRunSettings(schema.data?.options_schema ?? null),
     setEnvironmentValue,
     setDateIncomplete,
     applyEnvironment,

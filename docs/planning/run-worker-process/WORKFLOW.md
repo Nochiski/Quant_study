@@ -30,6 +30,10 @@ W0-01 기획 패키지·측정 도구
 - 각 PR은 diff 150~450줄을 권장한다. 600줄이나 파일 10개를 넘으면 나눈다
   (`docs/planning/strategy-workbench-yaml-ui/WORKFLOW.md:1012-1022`).
 - 다른 흐름이 같은 파일(`_service.py`, `_container.py`)을 고치고 있으면, 머지 순서는 리드가 정하고 이 스택은 rebase한다.
+- tape 열 지향 트랙([columnar-tape WORKFLOW](../columnar-tape/WORKFLOW.md))과의 순서:
+  - W1-02는 T0-02(상한 배분 결정성, #571) 머지 뒤에 연다. V-3이 해시 seed 비결정성에 걸리면 안 된다.
+  - W5-00 측정은 T6-01 뒤에 한다.
+  - W2-02 메모리 추정식 계수는 T4-03 측정 뒤에 다시 맞춘다. 그때 열리는 첫 W PR(늦으면 별도 후속 PR)이 맡는다.
 
 ## 2. 공통 gate
 

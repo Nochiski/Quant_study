@@ -8,13 +8,13 @@
 
 | 규칙 | 위치 | 열에서 지킬 점 |
 |---|---|---|
-| `available_date <= as_of`. 늦은 값은 빼고 셀을 지어내지 않는다 | 9-13. 소비 경계는 `_service.py:934-940`(`LookAheadViolationError`) | 열 비교. 첫 위반을 (행 순서, 질의 `field_ids` 순서)로 골라 같은 메시지 |
+| `available_date <= as_of`. 늦은 값은 빼고 셀을 지어내지 않는다 | 9-13. 소비 경계는 `_service.py:934-940`(`LookAheadViolationError`) | 열 비교. 첫 위반을 (행 순서, 그 관측의 `fields` 튜플 순서)로 골라 같은 메시지 |
 | 생략(셀 없음)과 값 None(셀 있음·값 없음)은 다르다 | 12-14 | `present` 플래그를 따로 둔다. 팩터 값 공개일(6절)과 trace 원시 투영이 이 구분을 쓴다 |
 | OBSERVED·SOURCE_OMITTED_ZERO는 값 필수, 나머지는 값 없음 | 141-153 | `kind`(int8)와 값 유무의 정합을 열로 검사 |
 | 세션 오름차순·유일, history는 모두 sessions보다 앞 | 211-224 | 같다 |
 | 관측은 (as_of, security_id) 엄격 증가 | 227-235 | 정렬 코드 열의 인접 비교 |
 | 선언되지 않은 날짜 금지(창은 날짜가 아니라 행 위치를 센다, D-003) | 236-253 | 행 날짜 코드가 선언 세션 범위 안 |
-| `previous_weight`와 숫자 값은 유한 | 255-284 | `np.isfinite`, 첫 위반 메시지 맞춤 |
+| `previous_weight`와 숫자 값은 유한 | 255-284 | `np.isfinite`, 첫 위반 메시지 맞춤. 검증은 세 번 훑는다(정렬 → 미선언 날짜 → 행별 previous_weight·필드). 첫 위반은 이 순서로 정한다 |
 | 실패는 `status`/`detail` 값 | 29-30 | 같다 |
 | 취소·진행은 선택 능력, 콜백은 스레드 안전 | 31-39, 288-322 | 열 포트도 같은 방식으로 능력 협상 |
 | `universe_member`·`sector_id`는 공개일 없음. as_of 시점 값은 어댑터 책임 | 18-28 | 같다 |
@@ -109,6 +109,7 @@
   - 모집단은 (팩터, 구성원 여부)마다 따로 잡는다.
   - None·숫자 아님·늦은 공개 값은 뺀다. 역가중·보조 순위 팩터는 정규화하지 않는다(`composite_factors`, `domain/strategy/_models.py:360-366`).
   - 공식은 `cross_sectional_rank`·`zscore`를 공유한다(SoT 56행).
+- **유동성·레짐**: 유동성·레짐에서 떨어진 종목도 2차 횡단면 모집단에는 남는다(414-416). long_short의 `score_threshold`는 `abs` 비교다.
 - **2차 횡단면 적격 `_apply_cross_sectional_eligibility`(679-749)**
   - 규칙마다 모집단을 따로 잡는다(구성원, 절대 규칙 통과, 값 공개).
   - `(−값, security_id)`로 정렬한 뒤 `floor(Decimal(n) × Decimal(str(v)))`(1541-1568)개를 남기고, 컷 아래에 ELIGIBILITY_RANK_CUT을 단다.
@@ -119,10 +120,10 @@
   - 버퍼 `_apply_turnover_buffer`(1081-1117)
   - 가중 `_weight_scores`(1222-1258)·`_margin_strengths`(1261-1313)
   - 무제약 배분 `_proportional_allocate`(1316-1339)
-  - 상한 배분 `_capped_allocate`(1342-1391). 남은 종목은 `scores` 순서를 따른다(T0-02)
-  - 최소 거래(1176-1191)
-  - 섹터 `_apply_sector_constraints`(1406-1451, 허용 오차 `1e-12` 1395, 모르는 섹터 제외)
-  - 측별 예산 `_apply_side_budgets`(1203-1219)
+  - 상한 배분 `_capped_allocate`(1342-1391). 남은 종목은 `scores` 순서를 따른다(T0-02). 반복 정지는 남은 예산 `1e-15` 이하
+  - 최소 거래(1176-1191): `sign_compatible`·`within_name_cap` 조건
+  - 섹터 `_apply_sector_constraints`(1406-1451, 허용 오차 `1e-12` 1395, 모르는 섹터 제외). 섹터 중립은 `LONG_SHORT`일 때만 켜진다
+  - 측별 예산 `_apply_side_budgets`(1203-1219): 롱 `(gross+net)/2`, 숏 `max((gross−net)/2, 0)`(1129-1138)
   - `_finalize_decision`(1454-1488): TURNOVER_BUFFER·OUTSIDE_SELECTION·MISSING_RISK·MINIMUM_TRADE 순서
   - `_risk_value`·`_field`(1491-1513)
 - **targets·candidates**: targets는 security_id 순, `selected and weight != 0`(584-596). candidates는 프레임의 **모든** 관측을 security_id 순으로(597).
@@ -153,4 +154,4 @@
 - GRID 원천의 lag는 **달력 세션 index − lag** 행에서 읽되 `span_seq`가 같아야 한다(2001-2013).
 - LATEST 원천은 `bisect_right(공개일들, cutoff) − 1`이다. 늦은 필드는 값을 비우고 MISSING으로 둔다(2014-2027). 법인 축은 `_corp_map`이다.
 - 셀 종류는 `_cell_kind`(232-253)가 정한다. 가림이 결측보다 먼저이고, `omitted_is_zero`면 0이다.
-- `security_id = ticker:span_seq`(170, 290-292). 숫자는 `float(Decimal)`(482-489)이다. 열 경로는 SQL `CAST AS DOUBLE`로 받는다(spec D3).
+- `security_id = ticker:span_seq`(170, 290-292). 숫자는 `float(Decimal)`(482-489)이다. 열 경로의 숫자 규칙은 spec D3 원시 숫자 행이다(비스케일 정수 ÷ 10^scale, 넘치면 `float(Decimal)`).

@@ -6,7 +6,7 @@ current_phase: T0
 current_pr: T0-01,T0-02
 active_prs: [T0-01, T0-02]
 parallel_window: [T0-01, T0-02]
-last_updated: 2026-10-20T01:27:21+09:00
+last_updated: 2026-10-20T01:56:56+09:00
 planned_prs: 26
 merged_prs: 0
 approved_prs: 0
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `T0-01, T0-02` |
 | Progress | `0 / 26 merged (0%)` |
 | Approved | `0 / 26` |
-| Aggregated at | `2026-10-20 01:27 KST` |
+| Aggregated at | `2026-10-20 01:56 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -75,7 +75,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T1-01` | 대조 하네스 골격, `scripts/parity_tape.py` | T0-01 | `PLANNED` | - |
+| [ ] | `T1-01` | 대조 하네스 골격, `scripts/parity_tape.py` | T0-01, T0-02 | `PLANNED` | - |
 
 ## T2 — 열 원시 포트
 
@@ -125,7 +125,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T7-01` | 객체 평가기 삭제·digest 고정·SoT 갱신 | T6-03 | `PLANNED` | - |
+| [ ] | `T7-01` | 객체 평가기 삭제·digest 고정·SoT 갱신 | T6-01, T6-02, T6-03 | `PLANNED` | - |
 | [ ] | `T7-02` | 객체 컴파일러 삭제 | T5-04 | `PLANNED` | - |
 | [ ] | `T7-03` | 어댑터 단일화 | T7-01 | `PLANNED` | - |
 
@@ -142,3 +142,4 @@ progress_percent: 0
 ## 변경 기록
 
 - 2026-10-20: 기획 패키지 초안(설계 에이전트 조사 결과를 spec·SEMANTICS·WORKFLOW로 정리).
+- 2026-10-20: #570 1차 리뷰 REQUEST_CHANGES(P2 3건·P3 11건) 반영 — CT-02 범위 확대, 안정 정렬, DECIMAL 규칙, 인증 경계, 3.11 기준 판, 계약 단일화, 의존·교차 기록.

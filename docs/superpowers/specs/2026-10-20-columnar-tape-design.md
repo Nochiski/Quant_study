@@ -31,10 +31,13 @@
 
 ### DEFECT-CT-02: 상한 배분이 문자열 set 순서에 기대 tape 해시가 프로세스마다 갈린다(T0-02로 먼저 고친다)
 
-- **상황**: `factor_score` 또는 `risk` 가중에서 종목 상한(`max_name_weight`)이 여러 차례 걸리는 프레임.
+- **상황**: `factor_score` 또는 `risk` 가중이고 선정 종목이 3개 이상인 모든 프레임. 상한이 걸리지 않아도 해당한다. 첫 반복의 분모 합부터
+  set 순서를 따르기 때문이다(리뷰 실측: cap=1.0에서도 seed마다 해시가 달랐다). `rank`·`equal` 가중은 정수 합이라 안전하다.
 - **인풋**: 같은 spec·관측을 `PYTHONHASHSEED`가 다른 두 프로세스에서 `compile_target_tape`로 컴파일한다.
 - **에러 위치**: `domain/portfolio/_compiler.py:1350` `remaining = set(scores)`. 합(1355)과 남은 예산 차감(1385)이 set 순회 순서를 따른다.
 - **위험성**: 같은 입력의 `tape_hash`와 run 지문이 프로세스마다 다르다(비결정, silent). run worker 트랙의 V-3 "두 모드 결과 동일"도 깨진다.
+  수정 뒤에는 `factor_score`·`risk` 가중 run의 지문이 사실상 전부 한 값으로 고정된다. `target_tape_hash`가 지문에 들어가므로
+  (`domain/backtest/_canonical.py:42`) 옛 run과 지문이 다를 수 있다. 같은 입력 잇기(`run_input_key`)와 시도 키는 tape를 담지 않아 영향이 없다.
   재현 테스트: `tests/domain/test_portfolio_pipeline.py::test_capped_allocation_does_not_depend_on_the_string_hash_seed`.
 
 ## 2. 측정이 가리키는 답
@@ -59,7 +62,8 @@ GPU(CuPy)는 run 하나에는 numpy보다 2~3배 느리고, 데이터를 GPU에 
 ### D2. numpy를 domain·application의 순수 배열 계산에 허용한다
 
 - numpy는 이미 core 의존성이다(`backend/pyproject.toml`의 `numpy>=1.26`). IO를 하지 않는다.
-- pyarrow(optional extra `parquet`)와 duckdb는 adapter에서만 쓴다. extra 없는 CI job(`backend-no-extras`)과도 맞는다.
+- pyarrow(optional extra `parquet`)와 duckdb는 adapter에서만 쓴다. 근거는 `parquet` extra 없는 운영 설치다(CI `backend-no-extras` job은 dev 그룹으로
+  pyarrow를 설치하고 assistant·architecture 테스트만 돌려 이 경계를 잡지 못한다). 강제 수단은 `test_forbidden_imports`다(T2-01).
 - `.claude/rules/backend-package-boundary.md`와 `tests/architecture/test_forbidden_imports.py`에 이 규칙을 적는다(T2-01).
 
 ### D3. 수치 동일성 방식(연산별)
@@ -70,17 +74,21 @@ GPU(CuPy)는 run 하나에는 numpy보다 2~3배 느리고, 데이터를 GPU에 
 | binary 4종 | IEEE 단일 연산, 같은 결합 순서. 분모 `== 0`(−0.0 포함) 마스크 |
 | momentum·delta | 두 번의 IEEE 연산을 같은 순서로 |
 | ts min·max | `np.minimum`은 `min(0.0,-0.0)`과 다르다. 오래된 칸부터 `acc = where(x < acc, x, acc)`(max는 `>`)로 누적해 "같으면 앞 원소"를 재현한다 |
-| mean·demean·neutralize·zscore 중심 | **인증 커널**: TwoSum으로 double-double 합 → `q=(s+c)/n` → TwoProduct 잔차 보정 1회 → 이웃 반올림 경계까지의 거리가 오차 상한보다 크면 확정, 아니면 그 칸만 `statistics.mean` |
-| std·zscore 편차 | 이동값을 뺀 double-double Σd·Σd²로 분산 dd를 만들고 후보 s의 (s ± ½ulp)²와 비교해 인증한다. 극단 크기(\|x\| > 1e150, 0이 아닌 \|x\| < 1e-150)와 인증 실패 칸은 `statistics.pstdev` |
-| median 채움 | 홀수는 가운데 원소, 짝수는 `(a+b)/2`를 직접 계산한다(numpy median 금지) |
+| mean·demean·neutralize·zscore 중심 | **인증 커널**: +0.0에서 시작한 TwoSum double-double 합 → `q=(s+c)/n` → Dekker TwoProduct 잔차 보정 1회(numpy에 fma가 없다) → 반올림 경계(`(q+pred(q))/2`, `(q+succ(q))/2`)까지 거리가 오차 상한보다 크면 확정, 같거나 작으면(정확한 중점 포함) 그 칸만 `statistics.mean`. 극단 크기(\|q\| > 1e300, subnormal)와 비유한값은 정확 경로 |
+| std·zscore 편차 | 이동값을 뺀 double-double Σd·Σd²로 분산 dd를 만들고 후보 s의 반올림 경계 `((s+pred(s))/2)²`·`((s+succ(s))/2)²`(2의 거듭제곱 경계는 아래 간격이 절반)와 비교해 인증한다. 경계와 같으면(작은 창에서 흔하다, n=2에서 21%) 인증 실패로 보고 정확 경로. 극단 크기(\|x\| > 1e150, 0이 아닌 \|x\| < 1e-150)와 인증 실패 칸은 `statistics.pstdev` |
+| median 채움 | 동료 입력 순서를 유지하는 **안정 정렬**(`kind="stable"`) 뒤 홀수는 가운데 원소, 짝수는 `(a+b)/2`를 직접 계산한다(numpy median 금지). 기본 정렬은 −0.0·0.0 순서를 바꿔 부호가 달라진다(리뷰 실측 2만 건 중 5,744건) |
 | rank(횡단면·그룹·정규화) | 평균 순위 `(pos+1+end)/2`(정확), IEEE 나눗셈 한 번, 안정 정렬과 `==` 동점 |
-| winsorize | `p×(n-1)`, `int()`, `(1-w)·a + w·b` 순서 그대로. `min(max())`는 `where`로 Python 의미를 재현 |
+| winsorize | **안정 정렬** 뒤 `p×(n-1)`, `int()`, `(1-w)·a + w·b` 순서 그대로. `min(max())`는 `where`로 Python 의미를 재현 |
 | 컴파일러 점수 | 후보마다 팩터 순서대로 누적. 결측 팩터는 `where(mask, s+t, s)` |
 | 컴파일러 합 | `np.sum`(쌍별)을 쓰지 않는다. 왼쪽부터 차례로 더하는 순차 누적을 명시한다(3.12+ `sum`의 보정 합산과도 무관해진다) |
 | 해시 payload | `np.float64` repr은 float와 같지만 `np.bool_`·`np.int64`는 JSON이 거절한다. 객체로 만들 때 반드시 Python 타입으로 바꾼다 |
-| 원시 숫자(어댑터) | `fetchnumpy`는 DECIMAL(폭 > 18)을 정확히 반올림하지 않는다(실측 17~27% 다름). SQL `CAST(expr AS DOUBLE)`로 받는다(6만 건 0 차이). 실원장 전 셀 비트 대조로 확정하고, 어긋나면 비스케일 정수와 scale로 받는다 |
+| 원시 숫자(어댑터) | `fetchnumpy`와 `CAST AS DOUBLE`은 둘 다 DECIMAL을 항상 정확히 반올림하지는 않는다(리뷰 실측: scale > 0이고 비스케일 정수 > 2^53이면 `fetchnumpy` 24~28%, CAST 1~27% 다름). 규칙: 열 선언 타입마다 \|비스케일 정수\| ≤ 2^53이고 scale ≤ 22이면 비스케일 정수를 받아 `unscaled / 10**scale` 나눗셈 한 번(두 수가 정확히 표현되므로 정확 반올림)으로 만든다. 그 밖의 셀만 `float(Decimal)` 정확 경로다. DOUBLE 열은 그대로 받는다. Tier 2 전 셀 비트 대조로 확정한다 |
 
-시제품: 인증 평균 20만 창에서 오답 0건, 정확 경로로 넘긴 칸 0.99%, 0.15초(`statistics.mean` 7.1초).
+시제품: 인증 평균 20만 창에서 오답 0건, 정확 경로로 넘긴 칸 0.99%, 0.15초(`statistics.mean` 7.1초). 정확 경로 비율은 데이터에 따라 다르다
+(리뷰 실측: 수익률 n=252 0.09%, n=20 2.1%, 상쇄가 큰 데이터 17.6%, n=2 21.7%). 오차 상한 식은 T3-03·T3-04 PR이 문서로 고정한다.
+
+**비트 동일의 기준 판은 CPython 3.11이다.** 3.12부터 builtin `sum`이 보정 합산을 쓰고(`requires-python`에 상한이 없다), 3.13에서는 지금 구현의
+tape 해시도 바뀐다(run worker BENCHMARK 3절). 대조 하네스와 digest는 3.11 기준이며, 판을 올리는 일은 엔진·평가 판본 결정과 함께 따로 한다.
 
 ### D4. 데이터 모양
 
@@ -106,10 +114,10 @@ GPU(CuPy)는 run 하나에는 numpy보다 2~3배 느리고, 데이터를 GPU에 
 | 열 원시 포트·검증·변환 | `application/portfolio_design/ports/outgoing/raw_panel.py`, facade `facade/ports.py` | 포트는 유스케이스가 소유. 원천 값·공개일 계약(`raw_observations.py`)과 같은 셀에 같은 값 |
 | duckdb 열 로딩 | `adapters/outbound/equity_duckdb/_raw_panel.py` | `_grid`·`_latest` SQL 생성을 함수로 떼어 행 경로와 같이 쓴다. `_cell_kind` 규칙은 어댑터 안 한 벌(최종적으로 행 경로를 열 경로에서 파생). 취소는 `_fetchall` 감시 스레드 방식 |
 | mock | 바꾸지 않는다 | 능력이 없으면 application이 `RawPanel.from_observation_set`으로 구조 변환 |
-| 열 평가기 | `domain/factor/_panel_evaluation.py`, 정확 통계 커널 `_statistics.py` | 팩터 값 계산자는 `portfolio_design` 하나(SoT 54행). `cross_sectional_rank`·`zscore` 스칼라 API는 그룹 커널을 감싸 공식 owner 하나(SoT 56행) |
-| trace | `domain/factor/_trace.py` | `evaluate_factor_graph_with_trace` 진입점 유지(SoT 48행). 노드 값 접근만 캐시 뷰로 |
+| 열 평가기 | `domain/factor/_panel_evaluation.py`, 정확 통계 커널 `_statistics.py` | 팩터 값 계산자는 `portfolio_design` 하나(SoT "팩터 **값**" 행). `cross_sectional_rank`·`zscore` 스칼라 API는 그룹 커널을 감싸 공식 owner 하나(SoT "결합 전 정규화 방식과 합성 공식" 행) |
+| trace | `domain/factor/_trace.py` | `evaluate_factor_graph_with_trace` 진입점 유지(SoT "팩터의 세션 읽기 창" 행). 노드 값 접근만 캐시 뷰로 |
 | 열 컴파일러 | `domain/portfolio/_frame_panel.py` + `_compiler.py` | 1단계(점수·1차 적격·정규화·2차 적격·순위)는 전 프레임 벡터, 2단계(버퍼·비중·상한·섹터·예산·finalize)는 프레임 fold 스칼라·순차 합. `compile_target_tape`와 `compile_scheduled_target_tape`가 같은 구현 |
-| 파이프라인 | `application/portfolio_design/_service.py` | 관문 순서(4절)·팩터 값 공개일(SoT 55행)을 열로 |
+| 파이프라인 | `application/portfolio_design/_service.py` | 관문 순서(4절)·팩터 값 공개일(SoT "팩터 값의 공개일" 행)을 열로 |
 | 객체 경계 | 각 타입 owner | `TargetTape`·`PortfolioPreview`·HTTP 모양 불변. 필요한 날짜·종목만 객체로 |
 
 `DEPENDS_ON` 변경은 없다(`domain.portfolio → domain.factor`는 이미 있다).
@@ -138,8 +146,9 @@ GPU(CuPy)는 run 하나에는 numpy보다 2~3배 느리고, 데이터를 GPU에 
 2. `PortfolioDesignService(..., tape_engine="object"|"columnar")` 생성자 인자. 환경 변수·bootstrap은 건드리지 않는다(run worker 트랙의 bootstrap과 분리).
 3. 기본값을 `columnar`로 바꾼다. 이때 컴파일러는 기존 객체 컴파일러에 신호일 관측만 넘긴다. 실원장 대조 0건을 증거로 남긴다.
 4. 객체 평가기·변환 코드를 지운다. 기존 domain 테스트가 단일 경로를 검증하도록 `evaluate_factor_graph(observations=...)`는 객체 입력을 패널로 바꾸는 경계 함수로 남긴다.
-5. 열 컴파일러를 기존 `_compile_frame`과 대조하고, 해시가 같으면 기존 구현을 지운다.
-6. duckdb 행 경로를 열 경로에서 파생한다.
+5. 열 컴파일러를 기존 `_compile_frame`과 대조하고, 해시가 같으면 기존 구현을 지운다. `compile_target_tape(observations=...)` 객체 API는 객체 입력을
+   패널로 바꾸는 경계 함수로 남긴다(평가기와 같은 방식, 기존 컴파일러 테스트가 단일 경로를 검증).
+6. duckdb 행 경로를 열 경로에서 파생한다. 원시 관측 계약 검증도 하나만 남긴다. `RawObservationSet.validate_contract`는 `RawPanel` 검증에서 파생한다(T7-03).
 
 두 구현이 함께 있는 것은 대조 기간뿐이다. 최종 상태에서 계산 경로는 하나다.
 
@@ -225,9 +234,9 @@ GPU(CuPy)는 run 하나에는 numpy보다 2~3배 느리고, 데이터를 GPU에 
 | 인증 커널의 정확성 | 수백만 seed 차분 테스트, 정확 경로, 극단 크기는 무조건 정확 경로. 실데이터 정확 경로 비율은 T3에서 잰다 |
 | 행 위치와 세션 혼동 | 위치는 종목 안 행 위치로 만든다. 합성 패널에 행 공백을 반드시 넣는다 |
 | 오류 우선순위 변화 | D6 순서를 L3 음성 사례로 고정 |
-| 열 포트가 bool·혼합 타입 셀을 받음 | 계약 위반으로 거절한다(계약을 좁힘). 지금 그런 셀을 내는 어댑터는 없다. Tier 2로 0건 확인 |
+| 열 포트가 bool·혼합 타입 셀을 받음 | 계약을 두 벌로 만들지 않도록 원시 계약의 값 타입(`RawFieldValueType`, `raw_observations.py:52`) 자체를 좁힌다(T2-01). 지금 그런 셀을 내는 어댑터는 없다. duckdb는 Tier 2, mock은 계약 테스트로 확인한다 |
 | 실데이터 대조가 홀드아웃을 엶 | 스크립트가 시작일을 강제하고, 개수만 보고하고, 워밍업 값은 출력하지 않는다 |
-| T0-02로 일부 과거 tape 해시가 바뀜 | 의미 변경이 아니라 비결정성 제거다. 판본은 올리지 않고 PR에 영향 범위를 적는다 |
+| T0-02로 `factor_score`·`risk` 가중 run 지문이 옛 run과 달라짐 | 의미 변경이 아니라 비결정성 제거다(옛 값도 프로세스마다 달랐다). 판본은 올리지 않고 PR에 영향 범위를 적는다. 잇기·시도 키는 영향 없음 |
 
 ## 9. 롤백
 

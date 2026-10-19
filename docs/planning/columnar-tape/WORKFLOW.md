@@ -36,7 +36,8 @@ T0-01 기획 패키지 ──────┴─ T1-01 대조 하네스 골격
 4. W2-02 메모리 추정식 계수는 T4-03 측정 뒤 W 쪽에서 다시 맞춘다.
 5. T6-03은 W4-01 머지 뒤에 한다(같은 factor-regression 구간).
 6. W5-00 측정은 T6-01 뒤에 한다(trace·preview가 빨라지면 판단이 달라진다).
-7. SoT 행: W3-01은 75·87·90행과 "백테스트 run 접수" 행, T7-01은 43·48·54·55·56·85행을 고친다. 행이 겹치지 않는다.
+7. SoT 행: W3-01은 "실험 시간 어림"·"백테스트 run 접수"·"백테스트 run 기록" 행, T7-01은 팩터 관련 행(T7-01 packet)을 고친다. 행이 겹치지 않는다.
+8. 비트 동일의 기준 판은 CPython 3.11이다(spec D3). Python 판 상향은 이 initiative 밖에서 판본 결정과 함께 한다.
 
 ## 2. 공통 gate
 
@@ -65,18 +66,18 @@ Phase마다 작업분 SoT·책임 분리 점검을 하고, T9-01에서 portfolio
 | T0-01 | 기획 패키지 | spec·SEMANTICS·PLAN·WORKFLOW·README, `plan_progress` 프로필 `--check` 통과 | 제품 코드 | `docs/planning/columnar-tape/*`, spec, `tools/quant_study_dev/plan_progress.py` | 도구 check |
 | T0-02 | 상한 배분 결정성(DEFECT-CT-02) | `_capped_allocate`가 `scores` 순서로 순회한다. 해시 seed 6개 하위 프로세스에서 tape_hash 같음 | 다른 정책 | `domain/portfolio/_compiler.py`, 테스트 1개 | 결정성 테스트, 기존 tie·weight 테스트 |
 | T1-01 | 대조 하네스 골격 | `tests/parity/_corpus.py`(말뭉치·합성 패널), 비트 비교기·차이 보고기, `scripts/parity_tape.py`(홀드아웃 관문, 개수만 출력). 처음에는 객체 경로의 자기 일관성(seed 결정성, 창 불변성)을 검사 | 새 구현 | `tests/parity/*`, `backend/scripts/parity_tape.py` | 하네스 자체 테스트 |
-| T2-01 | `RawPanel` 포트 | 타입·열 검증(SEMANTICS 1절, 같은 메시지)·`from_observation_set`·`observations()` 왕복·능력 프로토콜. bool·혼합 타입 셀 거절. numpy 사용 규칙을 경계 문서·`test_forbidden_imports`에 적음 | 어댑터 | `ports/outgoing/raw_panel.py`, `facade/ports.py`, 규칙 문서, 테스트 | mock·손 픽스처 왕복, 음성 사례가 `validate_contract`와 같은 메시지 |
-| T2-02 | duckdb 열 로딩(GRID) | `fetchnumpy` + `CAST AS DOUBLE`, lag 조인(span_seq), `_cell_kind` 벡터판(행 경로와 공유), 감시 스레드 | LATEST | `equity_duckdb/_raw_panel.py`, `_adapter.py`, 테스트 | L0 손 픽스처, Tier 2 L0 |
+| T2-01 | `RawPanel` 포트 | 타입·열 검증(SEMANTICS 1절, 같은 메시지)·`from_observation_set`·`observations()` 왕복·능력 프로토콜. 원시 계약 값 타입(`RawFieldValueType`)에서 bool을 빼 두 포트가 한 계약을 쓴다(mock 계약 테스트로 확인). numpy 사용 규칙을 경계 문서·`test_forbidden_imports`에 적음 | 어댑터 | `ports/outgoing/raw_panel.py`, `facade/ports.py`, 규칙 문서, 테스트 | mock·손 픽스처 왕복, 음성 사례가 `validate_contract`와 같은 메시지 |
+| T2-02 | duckdb 열 로딩(GRID) | 숫자 열 규칙(spec D3 원시 숫자 행: 선언 타입별 비스케일 정수 ÷ 10^scale, 넘치면 `float(Decimal)`), lag 조인(span_seq), `_cell_kind` 벡터판(행 경로와 공유), 감시 스레드 | LATEST | `equity_duckdb/_raw_panel.py`, `_adapter.py`, 테스트 | L0 손 픽스처, Tier 2 L0 |
 | T2-03 | duckdb 열 로딩(LATEST·법인 축) | asof `searchsorted`, 늦은 필드 규칙, `_corp_map`. 어댑터가 프로토콜 구현 | 운영 연결 | 같은 파일 | L0 전 필드 |
 | T3-01 | 열 평가기 골격 | `FactorPanel`, 행·위치 배치, field·constant·parameter·unary·binary·comparison·conditional·lag, `_value_spans`·`_masked_in` 벡터판, zero 채움, 유한값 첫 위반, checkpoint·progress | ts·cs | `domain/factor/_panel_evaluation.py`, facade, 테스트 | L1 부분 행렬 |
 | T3-02 | 시계열 끝점·min/max | 창 유효성(정확히 window칸), momentum·delta, Python 의미 min·max | mean·std | 같은 모듈 | L1, ±0 |
-| T3-03 | 정확 평균 커널 | 인증 dd 평균 + 정확 경로, 창·그룹 형태, checkpoint | std | `_statistics.py` | 수백만 seed 차분 대 `statistics.mean`, 동점·정수·극단 크기 |
-| T3-04 | 정확 pstdev 커널 | 이동 dd 분산 + sqrt 인증 + 정확 경로 | - | 같은 파일 | 차분 대 `pstdev` |
+| T3-03 | 정확 평균 커널 | 인증 dd 평균 + 정확 경로, 창·그룹 형태, checkpoint. 오차 상한 식·중점(동점) 처리·+0.0 시작·극단 크기 가드를 코드 주석과 spec에 고정, 실데이터 정확 경로 비율 측정 | std | `_statistics.py` | CI는 seed 고정 차분 2만 건(예산 내), PR 증거로 로컬 수백만 건 차분 결과를 본문에 첨부. 동점·정수·극단 크기·n=2 |
+| T3-04 | 정확 pstdev 커널 | 이동 dd 분산 + 반올림 경계 `((s+pred)/2)²`·`((s+succ)/2)²` 인증 + 정확 경로(경계와 같으면 실패 처리) | - | 같은 파일 | T3-03과 같은 CI·로컬 분량 나눔, n=2 중점 사례 |
 | T3-05 | 남은 연산 | ts mean·std, cs rank·zscore·winsorize·demean, group neutralize·rank, 중앙값·그룹 중앙값 채움. 스칼라 rank·zscore를 그룹 커널 위로 | trace | 평가 모듈, `_statistics.py` | 전체 L1, 기존 `test_factor_*` |
 | T3-06 | trace를 캐시에서 | `_trace.py`가 `FactorNodeCache` 뷰를 읽는다 | 서비스 | `_trace.py` | 기존 `test_factor_trace.py` + 두 캐시 trace 동등 |
 | T4-01 | 파이프라인 열 경로 | `tape_engine` 인자(기본 object), 능력 협상·변환, 관문 순서(SEMANTICS 2절), 열 평가, `PortfolioPanel`, 열 팩터 값 공개일, 신호일만 객체로 기존 컴파일러에 | 기본값 전환 | `application/portfolio_design/_service.py`(또는 `_columnar.py`), `domain/portfolio/_frame_panel.py` | L3 전 말뭉치, 오류 순서 사례 |
 | T4-02 | 결과 호환 | `raw_observations`·`observations`·`values` 지연 생성, `.preview` 불변 | 소비자 이전 | 같은 파일, `_models.py` | 소비자별 L3 투영 동등 |
-| T4-03 | 기본값 전환 | 기본 `columnar`, Tier 2 전 구간 불일치 0, BENCHMARK 재측정(tape·RSS, C-1·C-2), 진행 구간 상수 재측정 | 삭제 | `_service.py`, BENCHMARK | 전체 pytest, 진행 단조 테스트 |
+| T4-03 | 기본값 전환 | 기본 `columnar`, Tier 2 전 구간 불일치 0, BENCHMARK 재측정(tape·RSS, C-1·C-2), 취소 확인 간격 실측(C-6), 진행 구간 상수 재측정 | 삭제 | `_service.py`, BENCHMARK | 전체 pytest, 진행 단조 테스트 |
 | T5-01 | 컴파일러 1단계 | 점수·1차 적격·정규화·사유 이벤트 행렬·비유한 첫 위반 | fold | `_frame_panel.py`, `_compiler.py` | L2 후보 단위 |
 | T5-02 | 2차 적격·순위 | 횡단면 컷·보조 순위·숏 순위·선정 수 | 비중 | 같음 | L2 순위 |
 | T5-03 | fold·객체 생성 | 버퍼·가중 4종·상한·최소 거래·섹터·예산·finalize(순차 합), `TargetFrame`·construction trace. 연속 일정 컴파일러도 같은 구현 | 해시 | 같음, `_scheduled_compiler.py` | L2·L3 tape_hash, `test_scheduled_portfolio.py` |
@@ -84,9 +85,9 @@ Phase마다 작업분 SoT·책임 분리 점검을 하고, T9-01에서 portfolio
 | T6-01 | trace 서비스 | 기준일 원시 행·구성원·팩터 값을 열에서 읽는다 | - | `_trace_service.py` | trace HTTP 통합 |
 | T6-02 | S03·연속 계좌 | 정합 검사를 열로, 필요한 날짜만 객체 | analytics | `signal_pipeline/_adapter.py`, `continuous_pipeline/_adapter.py` | 기존 S03·S04 통합 |
 | T6-03 | factor-regression 입력 | `factor_periods`가 `PortfolioPanel`을 읽는다(W4-01 뒤) | 회귀 공식 | `backtest_run/_factor_regression.py`, `_service.py` | `test_factor_regression*` |
-| T7-01 | 객체 평가기 삭제 | 옛 평가기·변환 삭제, digest 고정, SoT 43·48·54·55·56·85행·경계 규칙·`test_forbidden_imports` 갱신 | - | `_evaluation.py`, `_service.py`, tests, rules | 전체 |
-| T7-02 | 객체 컴파일러 삭제 | T5 대조 끝, 옛 `_compile_frame` 경로 삭제 | - | `_compiler.py`, tests | 전체 |
-| T7-03 | 어댑터 단일화 | duckdb 행 API를 열 경로에서 파생, `_signal_labels`도 열 경로로 | 포트 행 메서드 제거 결정 | `equity_duckdb/*` | L0, 계약 테스트 |
+| T7-01 | 객체 평가기 삭제 | 옛 평가기·변환 삭제, digest 고정, SoT("팩터 정의"·"팩터의 세션 읽기 창"·"팩터 **값**"·"팩터 값의 공개일"·"결합 전 정규화"·"팩터 평가 규칙 판본" 행)·경계 규칙·`test_forbidden_imports` 갱신 | - | `_evaluation.py`, `_service.py`, tests, rules | 전체 |
+| T7-02 | 객체 컴파일러 삭제 | T5 대조 끝, 옛 `_compile_frame` 경로 삭제. `compile_target_tape(observations=...)`는 패널 변환 경계 함수로 남김 | - | `_compiler.py`, tests | 전체 |
+| T7-03 | 어댑터 단일화 | duckdb 행 API를 열 경로에서 파생, `_signal_labels`도 열 경로로, `RawObservationSet.validate_contract`를 `RawPanel` 검증에서 파생(계약 검증 하나) | 포트 행 메서드 제거 결정 | `equity_duckdb/*` | L0, 계약 테스트 |
 | T9-01 | 종료 리뷰 | 경로 단일성·SoT·경계 감사, 도메인 전체 리뷰 | - | - | - |
 
 ## 4. Backlog

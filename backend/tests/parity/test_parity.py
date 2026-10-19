@@ -20,6 +20,17 @@ import pytest
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioPipelineResult
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
+from strategy_workbench.domain.portfolio.facade.construction import (
+    ExclusionReason,
+    TargetTapeTraceResult,
+)
+from strategy_workbench.domain.strategy.facade.specification import (
+    EligibilityOperator,
+    FactorDirection,
+    RebalanceFrequency,
+    StrategySpec,
+    WeightingMethod,
+)
 
 from ._compare import ParityReport, compare, format_report
 from ._corpus import (
@@ -94,6 +105,7 @@ def test_synthetic_panels_carry_every_required_edge() -> None:
         "극단 큰 값": any(abs(x) > 1e300 for x in floats),
         "극단 작은 값": any(0 < abs(x) < 1e-290 for x in floats),
         "정수 값": any(type(x) is int for x in xs),
+        "bool·str 숫자 입력": {bool, str} <= {type(x) for x in xs},
         "상수 창": any(
             s00[i] is not None and s00[i] == s00[i + 1] == s00[i + 2] for i in range(len(s00) - 2)
         ),
@@ -118,13 +130,49 @@ def test_l1_evaluator_node_caches_match() -> None:
     assert any(isinstance(expected, Failure) for _, expected, _ in results)
 
 
+def test_combinations_reach_every_level() -> None:
+    """조합 열이 행 번호에 묶여 수준 하나를 놓치지 않는다(필드 역가중·분기·보조 방향 low 등)."""
+    combos: list[list[StrategySpec]] = [
+        [case.spec for case in compiler_cases() if "/combo=" in case.key],
+        [case.spec for case in pipeline_cases() if case.key.startswith("L3/synthetic/combo=")],
+    ]
+    for specs in combos:
+        rules = {rule.operator for spec in specs for rule in spec.eligibility.rules}
+        assert rules == set(EligibilityOperator)
+        assert {spec.portfolio.rebalance for spec in specs} == set(RebalanceFrequency)
+        assert {spec.portfolio.weighting for spec in specs} == set(WeightingMethod)
+        risk = [spec.risk for spec in specs if spec.portfolio.weighting is WeightingMethod.RISK]
+        assert any(item.risk_field_id is not None for item in risk)
+        assert any(item.risk_factor_id is not None for item in risk)
+        assert any(
+            spec.portfolio.tie_breaker_direction is FactorDirection.LOW
+            and spec.portfolio.tie_breaker_factor_id is not None
+            for spec in specs
+        )
+
+
 def test_l2_compiler_outputs_match() -> None:
     cases = compiler_cases()
-    _assert_parity(
-        compare(
-            "L2", [(case.key, _ENGINE_A.compile(case), _ENGINE_B.compile(case)) for case in cases]
-        )
-    )
+    results = [(case, _ENGINE_A.compile(case), _ENGINE_B.compile(case)) for case in cases]
+    _assert_parity(compare("L2", [(case.key, a, b) for case, a, b in results]))
+    failures = {case.key: a.error_type for case, a, _ in results if isinstance(a, Failure)}
+    assert failures == {"L2/negative/overflow": "NonFinitePortfolioCalculationError"}
+    compiled = [(case, a.tape) for case, a, _ in results if isinstance(a, TargetTapeTraceResult)]
+    reasons = [
+        reason
+        for _, tape in compiled
+        for frame in tape.frames
+        for candidate in frame.candidates
+        for reason in candidate.exclusion_reasons
+    ]
+    # 최소 거래 조건(측 호환·상한 안·문턱)이 실제로 판정을 가른다.
+    assert reasons.count(ExclusionReason.MINIMUM_TRADE) >= 5
+    quarterly = [
+        tape
+        for case, tape in compiled
+        if case.spec.portfolio.rebalance is RebalanceFrequency.QUARTERLY
+    ]
+    assert quarterly and all(tape.frames for tape in quarterly)
 
 
 def _pipeline(engine: TapeEngine, case: PipelineCase) -> object:
@@ -139,7 +187,16 @@ def test_l3_pipeline_results_match_and_negative_cases_fail_in_gate_order() -> No
     assert failures == {
         "L3/negative/overflow": "InvalidPortfolioRequestError",
         "L3/negative/lookahead": "LookAheadViolationError",
+        "L3/negative/snapshot": "PortfolioSnapshotMismatchError",
+        "L3/negative/outside-range": "RawObservationContractError",
+        "L3/negative/trace-scope": "InvalidPortfolioTraceSelectionError",
     }
+    # 시작 보유가 첫 프레임 시드를 실제로 바꾼다(없는 종목은 0.0, 관측에 없는 종목은 무시).
+    held_key = next(key for key in results if key.endswith("/holdings"))
+    held, plain = results[held_key][0], results[held_key.removesuffix("/holdings")][0]
+    assert isinstance(held, PortfolioPipelineResult)
+    assert isinstance(plain, PortfolioPipelineResult)
+    assert held.preview.tape.tape_hash != plain.preview.tape.tape_hash
 
 
 def test_object_path_is_window_invariant() -> None:

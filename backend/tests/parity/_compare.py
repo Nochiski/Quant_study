@@ -2,7 +2,8 @@
 
 `==` 는 `0.0 == -0.0` 이고 `nan != nan` 이며 `1 == 1.0 == True` 라서 대조에 쓰지 않는다. 여기서는
 타입이 정확히 같아야 하고, float 는 IEEE 비트(int64)가 같아야 한다. tuple·list 는 순서까지,
-dict 는 키 순서까지, dataclass 는 필드마다 재귀로 본다.
+dict 는 키 순서까지, dataclass 는 필드마다 재귀로 본다. set 원소와 dict 키도 같은 규칙으로 본다.
+`==` 로 끝내는 것은 str·int·bool·date·None 뿐이고, 모르는 타입은 `TypeError` 로 거절한다.
 """
 
 from __future__ import annotations
@@ -11,7 +12,11 @@ import dataclasses
 import struct
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
+
+# `==` 가 비트 비교와 같은 타입. 타입 검사가 먼저라 bool 과 int 는 섞이지 않는다.
+_EQUALITY_TYPES = (str, int, bool, date, type(None))
 
 
 @dataclass(frozen=True)
@@ -76,16 +81,17 @@ def differences(expected: object, actual: object, path: str = "") -> Iterator[tu
             yield from differences(left, right, f"{path}[{index}]")
         return
     if isinstance(expected, Mapping) and isinstance(actual, Mapping):
-        if list(expected) != list(actual):
-            yield f"{path}.keys", _show(list(expected)), _show(list(actual))
+        yield from differences(list(expected), list(actual), f"{path}.keys")
         for name in expected:
             if name in actual:
                 yield from differences(expected[name], actual[name], f"{path}[{name!r}]")
         return
     if isinstance(expected, (set, frozenset)) and isinstance(actual, (set, frozenset)):
-        if expected != actual:
-            yield path, _show(sorted(expected - actual)), _show(sorted(actual - expected))
+        # 원소를 repr 순으로 줄 세워 목록처럼 본다. `{1}`·`{True}`, `{0.0}`·`{-0.0}` 이 갈린다.
+        yield from differences(sorted(expected, key=repr), sorted(actual, key=repr), path)
         return
+    if type(expected) not in _EQUALITY_TYPES:
+        raise TypeError(f"비교 규칙이 없는 타입 — type={type(expected).__name__} path={path!r}")
     if expected != actual:
         yield path, _show(expected), _show(actual)
 

@@ -5,6 +5,10 @@ from __future__ import annotations
 import math
 import struct
 from dataclasses import dataclass, replace
+from datetime import date
+
+import numpy as np
+import pytest
 
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioPipelineResult
 from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
@@ -48,8 +52,26 @@ def test_order_and_type_differ() -> None:
     assert _paths(1, 1.0) == [""]
     assert _paths(True, 1) == [""]
     assert _paths((1.0,), (1.0, 2.0)) == [".len"]
-    assert _paths(_ROW, replace(_ROW, weights={"b": 0.25})) == [".weights.keys"]
-    assert _paths(frozenset({1, 2}), frozenset({1})) == [""]
+    assert _paths(_ROW, replace(_ROW, weights={"b": 0.25})) == [".weights.keys[0]"]
+    assert _paths(frozenset({1, 2}), frozenset({1})) == [".len"]
+
+
+def test_set_elements_and_dict_keys_compare_by_type_and_bits() -> None:
+    assert _paths(frozenset({1}), frozenset({True})) == ["[0]"]
+    assert _paths(frozenset({0.0}), frozenset({-0.0})) == ["[0]"]
+    assert _paths({np.int64(1)}, {1}) == ["[0]"]
+    assert _paths({0.0: "x"}, {-0.0: "x"}) == [".keys[0]"]
+    assert _paths(frozenset({"b", "a"}), frozenset({"a", "b"})) == []
+
+
+def test_types_without_an_equality_rule_are_refused() -> None:
+    assert (
+        _paths((None, "a", 1, True, date(2024, 1, 2)), (None, "a", 1, True, date(2024, 1, 2))) == []
+    )
+    with pytest.raises(TypeError):
+        _paths(np.int64(1), np.int64(1))
+    with pytest.raises(TypeError):
+        _paths(object(), object())
 
 
 def test_report_keeps_the_first_differences_and_the_total() -> None:

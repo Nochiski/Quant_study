@@ -10,6 +10,9 @@
 
 - 측정 시작일이 연구 하한(`RESEARCH_START`)보다 이르면 아무것도 읽지 않고 거절한다.
 - 출력은 사례별 불일치 개수와 차이의 (층, 사례, 경로)뿐이다. 값·수익률·IC 는 내지 않는다.
+- 대조기가 잡지 않은 예외도 실원장에서는 예외 종류만 남긴다(메시지에 값이 실릴 수 있다).
+
+사례가 하나도 없거나, 불일치·예외가 있으면 exit 1 이다. 마지막 줄은 결과 종류별 개수다.
 
 라이브 서버 상태(전략·연구 DB, 실행 산출물)는 열지 않는다. 원장 카탈로그는 read_only 로 열리고,
 실행 동안 작업 디렉터리를 임시 폴더로 옮겨 duckdb 임시 파일도 거기 둔다.
@@ -23,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import os
 import sys
 import tempfile
@@ -94,6 +98,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     engine_a, engine_b = ENGINES[args.engine_a], ENGINES[args.engine_b]
     working_directory = Path.cwd()
     mismatches = 0
+    outcomes: collections.Counter[str] = collections.Counter()
     with tempfile.TemporaryDirectory(prefix="parity-tape-") as scratch:
         os.chdir(scratch)
         try:
@@ -105,11 +110,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             ]
             for case in cases:
                 started = time.perf_counter()
-                expected = engine_a.pipeline(case, adapter, adapter)
-                actual = engine_b.pipeline(case, adapter, adapter)
+                try:
+                    expected = engine_a.pipeline(case, adapter, adapter)
+                    actual = engine_b.pipeline(case, adapter, adapter)
+                except Exception as error:
+                    if equity_root is None:
+                        raise
+                    # 실원장 예외 메시지는 셀 값을 실을 수 있어 종류만 남긴다(holdout-window.md).
+                    outcome = f"error:{type(error).__name__}"
+                    outcomes[outcome] += 1
+                    print(f"{case.key} result={outcome}", flush=True)
+                    continue
                 report = compare("L3", [(case.key, expected, actual)], limit=args.limit)
                 mismatches += report.total
                 outcome = expected.error_type if isinstance(expected, Failure) else "ok"
+                outcomes[outcome] += 1
                 print(
                     f"{case.key} result={outcome} mismatches={report.total} "
                     f"seconds={time.perf_counter() - started:.1f}",
@@ -123,7 +138,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"engines={args.engine_a}/{args.engine_b} source={'ledger' if equity_root else 'mock'} "
         f"window={args.start}..{args.end} cases={len(cases)} mismatches={mismatches}"
     )
-    return 0 if mismatches == 0 else 1
+    errors = sum(count for name, count in outcomes.items() if name.startswith("error:"))
+    counts = " ".join(f"{name}={count}" for name, count in sorted(outcomes.items()))
+    print(f"outcomes {counts or 'none'}")
+    return 0 if cases and mismatches == 0 and errors == 0 else 1
 
 
 if __name__ == "__main__":

@@ -8,6 +8,12 @@
 
 합성 패널은 `numpy.random.default_rng` 로 만들고, 셀 값은 (seed, 필드 id)만으로 정해진다. 그래서
 질의 구간과 필드 순서가 달라도 같은 (날짜, 종목, 필드) 셀은 같다(창 불변성).
+
+덮지 않는 것(SEMANTICS.md 항목 중):
+
+- 연속 일정 컴파일러(`_scheduled_compiler.py`). T5-03 범위다.
+- 후보 trace 의 `math.isclose` 허용오차(`_candidate_trace`) 경계에 걸리는 값.
+- 취소·진행 보고(spec D7). 결과 값이 아니라 대조 대상이 아니다.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from strategy_workbench.application.factor_research.facade.ports import (
 from strategy_workbench.application.portfolio_design._service import _to_factor_observation
 from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioPipelineOptions,
+    PortfolioStartingHolding,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RawFieldValue,
@@ -122,7 +129,9 @@ def _business_days(start: date, count: int) -> tuple[date, ...]:
     return tuple(days)
 
 
-SESSIONS = _business_days(date(2024, 1, 1), 48)
+# 분기말(2023-12-29)이 L2 전체와 L3 측정 구간(SESSIONS[20]~) 안에 들어 분기 리밸런싱
+# 프레임이 생긴다.
+SESSIONS = _business_days(date(2023, 11, 20), 48)
 
 
 def _rng(seed: int, name: str) -> np.random.Generator:
@@ -157,6 +166,14 @@ def _number(rng: np.random.Generator, security: int, day: int, *, extreme: bool)
     if security >= 10:
         return float(rng.normal(0.0, 1.0))
     return float(rng.integers(-6, 7)) / 4.0  # 동점이 많다
+
+
+def _previous_weight(security: int) -> float:
+    """첫 프레임 시드 비중. 작은 롱·이름 상한(0.12)보다 큰 롱·작은 숏·0 을 섞는다.
+
+    최소 거래 조건의 세 갈래(측 호환, 상한 안, |Δ| < 문턱)가 각각 결과를 가르게 한다.
+    """
+    return (0.04, 0.15, -0.03, 0.0)[security % 4]
 
 
 def _numeric_cell(
@@ -231,7 +248,7 @@ def synthetic_raw_panel(
                     universe_member=bool(member[day, security]),
                     fields=fields,
                     sector_id=sector.value if sector and isinstance(sector.value, str) else None,
-                    previous_weight=0.04 if security % 4 == 0 else 0.0,
+                    previous_weight=_previous_weight(security),
                 )
             )
     return tuple(observations)
@@ -283,8 +300,21 @@ def _extra_graphs() -> list[FactorGraph]:
 
 
 def factor_panel(seed: int) -> tuple[FactorObservation, ...]:
+    """L1 입력. S11 의 `x` 몇 칸에 bool·str 을 넣는다(숫자 입력 자리라 평가기가 None 으로 본다)."""
     raw = synthetic_raw_panel(seed, ("x", "y", "sector"), group="sector", extreme="x")
-    return tuple(_to_factor_observation(item, checkpoint=lambda: None) for item in raw)
+    rows = [_to_factor_observation(item, checkpoint=lambda: None) for item in raw]
+    odd: dict[int, bool | str] = {2: True, 5: False, 9: "A"}
+    for position, row in enumerate(rows):
+        day = SESSIONS.index(row.as_of)
+        if row.security_id == "S11" and day % 11 in odd:
+            fields = tuple(
+                replace(item, value=odd[day % 11])
+                if item.field_id == "x" and not item.masked
+                else item
+                for item in row.fields
+            )
+            rows[position] = replace(row, fields=fields)
+    return tuple(rows)
 
 
 def evaluator_cases() -> list[EvaluatorCase]:
@@ -315,6 +345,25 @@ _L2_FIELDS: FieldMap = {name: name for name in ("e1", "e2", "liq", "vol", "reg")
 _FACTOR_IDS = ("f1", "f2", "tb", "riskf")
 # 2수준 열의 마스크. 4수준 둘(가중 = 비트 0·1, 정규화 = 비트 2·3)과 모두 직교한다.
 _TWO_LEVEL_MASKS = (5, 6, 7, 9, 10, 11, 13, 14, 15)
+# GF(4) 에서 α 를 곱한 값. 리밸런싱 = 가중 XOR α·정규화 는 L3 결측 정책(가중 XOR 정규화)과
+# 직교하는 라틴 방격이라 리밸런싱이 가중·정규화·결측 정책 어느 쪽과도 겹치지 않는다.
+_TIMES_ALPHA = (0, 2, 3, 1)
+_REBALANCES = (
+    RebalanceFrequency.EVERY_N_SESSIONS,
+    RebalanceFrequency.WEEKLY,
+    RebalanceFrequency.MONTHLY,
+    RebalanceFrequency.QUARTERLY,
+)
+# 절대 규칙(연산자, 임계값). 행 번호 `(index + index // 4) % 6` 으로 고르면 가중 4수준과
+# 모두 만난다.
+_ABSOLUTE_RULES: tuple[tuple[EligibilityOperator, float] | None, ...] = (
+    None,
+    (EligibilityOperator.GREATER_THAN, -1.0),
+    (EligibilityOperator.GREATER_THAN_OR_EQUAL, 0.5),
+    (EligibilityOperator.LESS_THAN, 2.0),
+    (EligibilityOperator.LESS_THAN_OR_EQUAL, 1.5),
+    (EligibilityOperator.EQUAL, 1.0),
+)
 
 
 @dataclass(frozen=True)
@@ -348,24 +397,25 @@ def combination_specs(
     """정규화 × 가중 × 선정 × 롱숏 × 버퍼·최소 거래·상한·섹터 중립·보조 순위·top_percent·top_count.
 
     전부 곱하지 않고 직교 배열 32행(`_orthogonal_rows`)만 쓴다. 두 열의 모든 수준 쌍이 나온다.
+    행 번호로 돌려 쓰는 열(절대 규칙·유동성·레짐·역가중 원천·보조 방향)은 가중·리밸런싱과
+    겹치지 않게 `index // 4`·접힘 비트에서 고른다.
     """
     specs: list[tuple[str, StrategySpec]] = []
     for index, (weighting, normalization, bits) in enumerate(_orthogonal_rows()):
         percentile, short, buffer, trade, cap, neutral, tie, top_percent, top_count = bits
         method = tuple(WeightingMethod)[weighting]
-        risk_factor = method is WeightingMethod.RISK and index % 2 == 1
+        # 가중 비트와 독립이라 RISK 행의 절반은 팩터, 절반은 필드(`risk_field_id`)로 역가중한다.
+        risk_factor = method is WeightingMethod.RISK and (index // 4) % 2 == 1
+        liquidity = (index // 4) % 3 == 1
+        regime = (index // 4) % 3 == 2
         factors = [signal("f1", FactorDirection.HIGH, 0.6), signal("f2", FactorDirection.LOW, 0.4)]
         factors += [signal("tb", FactorDirection.LOW, 1.0)] if tie else []
         factors += [signal("riskf", FactorDirection.LOW, 1.0)] if risk_factor else []
-        rules = [EligibilityRule(fields["e1"], EligibilityOperator.GREATER_THAN, -1.0)]
-        rules = rules if index % 3 == 1 else []
+        absolute = _ABSOLUTE_RULES[(index + index // 4) % len(_ABSOLUTE_RULES)]
+        rules = [] if absolute is None else [EligibilityRule(fields["e1"], *absolute)]
         rules += [EligibilityRule(fields["e1"], EligibilityOperator.TOP_PERCENT, 0.6)] * top_percent
         rules += [EligibilityRule(fields["e2"], EligibilityOperator.TOP_COUNT, 7)] * top_count
-        rebalance = (
-            RebalanceFrequency.EVERY_N_SESSIONS,
-            RebalanceFrequency.WEEKLY,
-            RebalanceFrequency.MONTHLY,
-        )[index % 3]
+        rebalance = _REBALANCES[weighting ^ _TIMES_ALPHA[normalization]]
         spec = StrategySpec(
             identity=StrategyIdentity(strategy_id=f"parity-{index}", revision=1),
             title=f"대조 조합 {index}",
@@ -379,8 +429,8 @@ def combination_specs(
                     SignalNormalization.RANK,
                 )[normalization],
                 score_threshold=0.1 if index % 5 == 0 else None,
-                regime_field_id=fields["reg"] if index % 6 == 2 else None,
-                regime_minimum=-1.0 if index % 6 == 2 else None,
+                regime_field_id=fields["reg"] if regime else None,
+                regime_minimum=-1.0 if regime else None,
             ),
             portfolio=PortfolioStep(
                 side=PortfolioSide.LONG_SHORT if short else PortfolioSide.LONG_ONLY,
@@ -394,10 +444,13 @@ def combination_specs(
                 rebalance=rebalance,
                 rebalance_every_n_sessions=5,
                 turnover_buffer_count=2 * buffer,
-                minimum_trade_weight=0.01 * trade,
-                liquidity_field_id=fields["liq"] if index % 4 == 1 else None,
-                minimum_liquidity=0.0 if index % 4 == 1 else None,
+                minimum_trade_weight=0.05 * trade,
+                liquidity_field_id=fields["liq"] if liquidity else None,
+                minimum_liquidity=0.0 if liquidity else None,
                 tie_breaker_factor_id="tb" if tie else None,
+                tie_breaker_direction=(
+                    FactorDirection.LOW if tie and index >= 16 else FactorDirection.HIGH
+                ),
             ),
             risk=RiskStep(
                 gross_exposure=1.6 if short else 1.0,
@@ -463,19 +516,46 @@ def portfolio_panel(seed: int) -> tuple[PortfolioObservation, ...]:
                         factor_values=factors,
                         fields=fields,
                         sector_id=None if sector == "none" else str(sector),
-                        previous_weight=0.05 if security % 4 == 0 else 0.0,
+                        previous_weight=_previous_weight(security),
                     )
                 )
     return tuple(observations)
 
 
+def _overflow_case(panel: tuple[PortfolioObservation, ...]) -> CompilerCase:
+    """합성 점수가 넘치는 음성 사례. 가중 1 인 두 팩터 값이 모두 1.7e308 이면 합이 inf 다."""
+    factors = tuple(_field_signal(name, FactorDirection.HIGH, 1.0) for name in ("f1", "f2"))
+    spec = StrategySpec(
+        identity=StrategyIdentity(strategy_id="parity-overflow", revision=1),
+        title="넘침",
+        factors=factors,
+        signal=SignalStep(normalization=SignalNormalization.NONE),
+    )
+    huge = tuple(
+        replace(
+            row,
+            factor_values=tuple(
+                replace(value, value=1.7e308, available_date=row.as_of)
+                if value.factor_id in {"f1", "f2"}
+                else value
+                for value in row.factor_values
+            ),
+        )
+        if row.security_id == "S00"
+        else row
+        for row in panel
+    )
+    return CompilerCase("L2/negative/overflow", spec, SESSIONS, huge)
+
+
 def compiler_cases() -> list[CompilerCase]:
     panels = {seed: portfolio_panel(seed) for seed in SEEDS}
-    return [
+    cases = [
         CompilerCase(f"L2/{key}/seed={seed}", spec, SESSIONS, panels[seed])
         for position, (key, spec) in enumerate(combination_specs(_L2_FIELDS, _field_signal))
         for seed in (SEEDS[position % len(SEEDS)],)
     ]
+    return [*cases, _overflow_case(panels[SEEDS[0]])]
 
 
 # --- L3 파이프라인 ----------------------------------------------------------------------------
@@ -486,8 +566,8 @@ class PipelineCase:
     key: str
     spec: StrategySpec
     environment: RunEnvironment
-    # "mock" 또는 `SyntheticRawSource` 의 "synthetic"(12종목)·"synthetic-wide"(40종목)·
-    # "synthetic-lookahead"(공개일 위반 음성 사례). 원천은 `_engines.pipeline_source` 가 만든다.
+    # "mock" 또는 "synthetic"·"synthetic-<변형>"(`SyntheticRawSource` 의 `variant`).
+    # 원천은 `_engines.pipeline_source` 가 만든다.
     source: str
     options: PortfolioPipelineOptions = field(default_factory=PortfolioPipelineOptions)
 
@@ -495,16 +575,18 @@ class PipelineCase:
 class SyntheticRawSource:
     """합성 원시 패널을 질의 구간대로 잘라 주는 원시 관측 포트. 필드 계약·스냅숏은 mock 의 것이다.
 
-    `lookahead` 면 첫 관측의 첫 셀 공개일을 하루 뒤로 밀어 소비 경계 위반을 만든다.
+    `variant` 는 "" (12종목), "wide"(40종목), 그리고 관문 음성 사례다.
+
+    - "lookahead": 첫 관측의 첫 셀 공개일을 하루 뒤로 밀어 소비 경계 위반을 만든다.
+    - "snapshot": 필드 계약과 다른 스냅숏 id 로 답한다.
+    - "outside": 질의 끝을 무시하고 달력 끝까지 세션을 답한다(구간 밖 세션).
     """
 
-    def __init__(
-        self, seed: int, *, lookahead: bool = False, securities: int = len(SECURITIES)
-    ) -> None:
+    def __init__(self, seed: int, *, variant: str = "") -> None:
         self._mock = MockEquityDataAdapter.demo()
         self._seed = seed
-        self._lookahead = lookahead
-        self._securities = securities
+        self._variant = variant
+        self._securities = 40 if variant == "wide" else len(SECURITIES)
 
     def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
         return self._mock.resolve_factor_fields(field_ids)
@@ -515,7 +597,8 @@ class SyntheticRawSource:
     def load_raw_observations_cancellable(
         self, query: RawObservationQuery, *, checkpoint: Callable[[], None]
     ) -> RawObservationSet:
-        requested = tuple(day for day in SESSIONS if query.start <= day <= query.end)
+        end = SESSIONS[-1] if self._variant == "outside" else query.end
+        requested = tuple(day for day in SESSIONS if query.start <= day <= end)
         before = [day for day in SESSIONS if day < query.start]
         history = tuple(before[len(before) - query.history_sessions_before_start :])
         dates = set(history + requested)
@@ -527,13 +610,14 @@ class SyntheticRawSource:
             securities=self._securities,
         )
         rows = [item for item in panel if item.as_of in dates]
-        if self._lookahead and rows and rows[0].fields:
+        if self._variant == "lookahead" and rows and rows[0].fields:
             first = rows[0].fields[0]
             late = replace(first, available_date=rows[0].as_of + timedelta(days=1))
             rows[0] = replace(rows[0], fields=(late, *rows[0].fields[1:]))
+        snapshot = self._mock.snapshot().snapshot_id
         return RawObservationSet(
             status=DataLoadStatus.OK,
-            data_snapshot_id=self._mock.snapshot().snapshot_id,
+            data_snapshot_id=f"{snapshot}-stale" if self._variant == "snapshot" else snapshot,
             sessions=requested,
             history_sessions=history,
             observations=tuple(rows),
@@ -719,11 +803,30 @@ def pipeline_cases() -> list[PipelineCase]:
     cases = adapter_cases(MockEquityDataAdapter.demo(), mock, source="mock")
     combinations = combination_specs(SYNTHETIC_FIELDS, _synthetic_signal)
     for index, (key, spec) in enumerate(combinations):
-        # (가중 + 정규화) mod 4 는 라틴 방격이라 결측 정책이 두 열과 모두 직교한다.
-        missing = policies[(index + index // 4) % len(policies)]
+        # 가중 XOR 정규화는 라틴 방격이라 결측 정책이 두 열·리밸런싱과 모두 직교한다.
+        missing = policies[(index ^ (index >> 2)) & 3]
         environment = replace(_SYNTHETIC_ENVIRONMENT, missing=missing)
         cases.append(PipelineCase(f"L3/synthetic/{key}", spec, environment, "synthetic"))
     traced = cases[-1]
+    # 최소 거래·이름 상한이 켜진 조합에 시작 보유를 준다. 목록에 없는 종목(0.0)과 관측에 없는
+    # 종목(ZZ99)이 함께 든다.
+    held = next(
+        case
+        for case in cases
+        if case.key.startswith("L3/synthetic/")
+        and case.spec.portfolio.minimum_trade_weight > 0
+        and case.spec.risk.max_name_weight < 1
+    )
+    holdings = (("S01", 0.14), ("S02", -0.02), ("S05", 0.03), ("ZZ99", 0.1))
+    cases.append(
+        replace(
+            held,
+            key=f"{held.key}/holdings",
+            options=PortfolioPipelineOptions(
+                starting_holdings=tuple(PortfolioStartingHolding(*item) for item in holdings)
+            ),
+        )
+    )
     cases += [
         PipelineCase(f"L3/wide/{key}", spec, _SYNTHETIC_ENVIRONMENT, "synthetic-wide")
         for key, spec in _wide_specs()
@@ -745,4 +848,24 @@ def pipeline_cases() -> list[PipelineCase]:
         PipelineCase("L3/negative/overflow", _overflow_spec(), _SYNTHETIC_ENVIRONMENT, "synthetic")
     )
     cases.append(replace(traced, key="L3/negative/lookahead", source="synthetic-lookahead"))
+    cases.append(replace(traced, key="L3/negative/snapshot", source="synthetic-snapshot"))
+    cases.append(
+        replace(
+            traced,
+            key="L3/negative/outside-range",
+            environment=replace(traced.environment, end=SESSIONS[-3]),
+            source="synthetic-outside",
+        )
+    )
+    cases.append(
+        replace(
+            traced,
+            key="L3/negative/trace-scope",
+            options=PortfolioPipelineOptions(
+                construction_trace_selection=PortfolioTraceSelection(
+                    as_of=None, security_ids=("S99",), include_order_delta=False
+                )
+            ),
+        )
+    )
     return cases

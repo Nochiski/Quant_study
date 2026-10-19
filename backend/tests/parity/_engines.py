@@ -18,6 +18,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 from strategy_workbench.application.factor_research.facade.ports import FactorMetadataPort
 from strategy_workbench.application.portfolio_design.facade.design import (
     InvalidPortfolioRequestError,
+    InvalidPortfolioTraceSelectionError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
     RawObservationContractError,
@@ -75,11 +76,7 @@ def pipeline_source(name: str) -> tuple[RawObservationPort, FactorMetadataPort]:
     if name == "mock":
         adapter = MockEquityDataAdapter.demo()
         return adapter, adapter
-    source = SyntheticRawSource(
-        17,
-        lookahead=name == "synthetic-lookahead",
-        securities=40 if name == "synthetic-wide" else len(SECURITIES),
-    )
+    source = SyntheticRawSource(17, variant=name.removeprefix("synthetic").removeprefix("-"))
     return source, source
 
 
@@ -131,7 +128,11 @@ def _object_pipeline(
         return service.run_pipeline(
             PortfolioPreviewRequest(case.spec, environment=case.environment), options=case.options
         )
-    except (InvalidPortfolioRequestError, RawObservationContractError) as error:
+    except (
+        InvalidPortfolioRequestError,
+        InvalidPortfolioTraceSelectionError,
+        RawObservationContractError,
+    ) as error:
         return Failure(type(error).__name__, (str(error), getattr(error, "validation", None)))
 
 

@@ -514,6 +514,14 @@ export const NewStrategyPage = () => {
                       document={document}
                       executionPlans={executionPlans}
                       environment={runSettings.environment}
+                      onTraceSelection={(selection) =>
+                        void navigate({
+                          to: ROUTE,
+                          search: { ...search, ...selection },
+                          replace: true,
+                          resetScroll: false,
+                        })
+                      }
                     />
                   </aside>
                 </div>

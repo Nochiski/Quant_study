@@ -1485,6 +1485,28 @@ describe("선정 미리보기의 요청·응답 소유권", () => {
     ).toBeDisabled();
   });
 
+  it("선정 종목의 비중을 보이고 '왜 골랐나'는 그 종목과 기준일을 넘긴다(RD-04-C)", async () => {
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) =>
+        HttpResponse.json(summaryResponse((await request.json()) as StrategyTraceRequest)),
+      ),
+    );
+    const explained: { asOf: string; security: string }[] = [];
+    const user = userEvent.setup();
+    renderDebugger(
+      <StrategyPreview
+        context={context()}
+        unavailableReason={null}
+        onExplain={(selection) => explained.push(selection)}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    const targets = await screen.findByRole("table", { name: "선정 종목" });
+    expect(within(targets).getByRole("columnheader", { name: "비중" })).toBeInTheDocument();
+    await user.click(within(targets).getByRole("button", { name: "서버 종목명 · 왜 골랐나" }));
+    expect(explained).toEqual([{ asOf: "2026-08-31", security: expect.any(String) }]);
+  });
+
   it("이전 문서의 지연 응답은 현재 미리보기를 채우지 않는다", async () => {
     let finish: (() => void) | undefined;
     const wait = new Promise<void>((resolve) => {

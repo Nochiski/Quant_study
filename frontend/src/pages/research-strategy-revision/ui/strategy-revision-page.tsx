@@ -473,6 +473,15 @@ export const StrategyRevisionPage = () => {
                       executionPlans={executionPlans}
                       environment={runSettings.environment}
                       parameters={runParameters}
+                      onTraceSelection={(selection) =>
+                        void navigate({
+                          to: ROUTE,
+                          params: { strategyId, revision },
+                          search: { ...search, ...selection },
+                          replace: true,
+                          resetScroll: false,
+                        })
+                      }
                     />
                   </aside>
                 </div>

@@ -97,9 +97,7 @@ FIELDS = (
 ADAPTERS = [pytest.param("mock", id="mock"), pytest.param("equity_duckdb", id="equity_duckdb")]
 
 
-class ContractAdapter(
-    RawObservationPort, CancellableRawObservationPort, EquityDataPort, Protocol
-):
+class ContractAdapter(RawObservationPort, CancellableRawObservationPort, EquityDataPort, Protocol):
     """All three ports on one object — the suite checks they agree cell by cell.
 
     Cancellation is not optional for a contract case: a long trace must be interruptible on
@@ -189,9 +187,7 @@ def test_lagged_fields_are_present_on_the_first_history_session(
     adapter: ContractAdapter,
 ) -> None:
     """Lag is the adapter's job: warm-up sessions must already carry lagged fields."""
-    result = adapter.load_raw_observations(
-        _query(adapter, fields=("price.market_cap",), history=2)
-    )
+    result = adapter.load_raw_observations(_query(adapter, fields=("price.market_cap",), history=2))
     first = result.history_sessions[0]
     present = [
         o
@@ -246,9 +242,7 @@ def test_facts_do_not_depend_on_the_query_window(adapter: ContractAdapter) -> No
 def test_unknown_field_is_a_failure_value_not_a_synthetic_series(
     adapter: ContractAdapter,
 ) -> None:
-    result = adapter.load_raw_observations(
-        _query(adapter, fields=("price.close", "unknown.field"))
-    )
+    result = adapter.load_raw_observations(_query(adapter, fields=("price.close", "unknown.field")))
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert not result.ok
     assert result.observations == ()
@@ -474,6 +468,41 @@ def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
             (),
             (RawObservation(START, "a", True, (), previous_weight=value),),
         )
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_result_rejects_bool_raw_values(value: bool) -> None:
+    """값 타입은 float·str·None 이다. 열 포트와 한 계약을 쓰려고 bool 을 뺐다(T2-01)."""
+    field = RawFieldValue("price.close", value, START)
+    with pytest.raises(
+        RawObservationContractViolation,
+        match=(
+            rf"raw field value must be float, str or None — as_of={START} "
+            rf"security_id='a' field_id='price\.close' value={value}"
+        ),
+    ):
+        RawObservationSet(
+            DataLoadStatus.OK, "snap", (START,), (), (RawObservation(START, "a", True, (field,)),)
+        )
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+def test_raw_field_values_are_float_str_or_none(adapter: ContractAdapter) -> None:
+    """두 어댑터 모두 bool·int 값을 내지 않는다. 열 포트(`RawPanel`)는 숫자와 문자열만 담는다."""
+    queries = [_query(adapter, history=3)]
+    if isinstance(adapter, MockEquityDataAdapter):
+        # 달력 밖 합성 구간도 같은 값 타입이어야 한다.
+        queries.append(_query(adapter, start=date(2025, 3, 3), end=date(2025, 3, 14), history=5))
+    for query in queries:
+        result = adapter.load_raw_observations(query)
+        assert result.ok and result.observations
+        for observation in result.observations:
+            for field in observation.fields:
+                assert field.value is None or type(field.value) in (float, str), (
+                    observation.as_of,
+                    observation.security_id,
+                    field,
+                )
 
 
 @pytest.mark.parametrize("consumer_revalidation", [False, True])

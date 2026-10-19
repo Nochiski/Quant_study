@@ -6,6 +6,9 @@ import type {
   ActivateAssistantProviderData,
   ActivateAssistantProviderErrors,
   ActivateAssistantProviderResponses,
+  AddLibraryFactorVersionData,
+  AddLibraryFactorVersionErrors,
+  AddLibraryFactorVersionResponses,
   CancelAssistantTurnData,
   CancelAssistantTurnErrors,
   CancelAssistantTurnResponses,
@@ -116,6 +119,9 @@ import type {
   GetFactorCatalogResponses,
   GetHealthData,
   GetHealthResponses,
+  GetLibraryFactorData,
+  GetLibraryFactorErrors,
+  GetLibraryFactorResponses,
   GetRunEnvironmentSchemaData,
   GetRunEnvironmentSchemaErrors,
   GetRunEnvironmentSchemaResponses,
@@ -156,6 +162,9 @@ import type {
   ListExperimentTrialsData,
   ListExperimentTrialsErrors,
   ListExperimentTrialsResponses,
+  ListLibraryFactorsData,
+  ListLibraryFactorsErrors,
+  ListLibraryFactorsResponses,
   ListRobustnessChecksData,
   ListRobustnessChecksErrors,
   ListRobustnessChecksResponses,
@@ -165,6 +174,9 @@ import type {
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
+  MatchLibraryFactorsData,
+  MatchLibraryFactorsErrors,
+  MatchLibraryFactorsResponses,
   MergeTrialLineageData,
   MergeTrialLineageErrors,
   MergeTrialLineageResponses,
@@ -204,12 +216,18 @@ import type {
   RunExperimentContinuousAccountData,
   RunExperimentContinuousAccountErrors,
   RunExperimentContinuousAccountResponses,
+  SaveLibraryFactorData,
+  SaveLibraryFactorErrors,
+  SaveLibraryFactorResponses,
   SaveStrategyDraftData,
   SaveStrategyDraftErrors,
   SaveStrategyDraftResponses,
   SelectExperimentTrialData,
   SelectExperimentTrialErrors,
   SelectExperimentTrialResponses,
+  SetLibraryFactorVisibilityData,
+  SetLibraryFactorVisibilityErrors,
+  SetLibraryFactorVisibilityResponses,
   StartAssistantTurnData,
   StartAssistantTurnErrors,
   StartAssistantTurnResponses,
@@ -1080,6 +1098,108 @@ export const getExperimentWalkForward = <ThrowOnError extends boolean = false>(
     GetExperimentWalkForwardErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/walk-forward", ...options });
+
+/**
+ * List Factors
+ */
+export const listLibraryFactors = <ThrowOnError extends boolean = false>(
+  options?: Options<ListLibraryFactorsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListLibraryFactorsResponses,
+    ListLibraryFactorsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/factor-library", ...options });
+
+/**
+ * Save
+ */
+export const saveLibraryFactor = <ThrowOnError extends boolean = false>(
+  options: Options<SaveLibraryFactorData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    SaveLibraryFactorResponses,
+    SaveLibraryFactorErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Matches
+ */
+export const matchLibraryFactors = <ThrowOnError extends boolean = false>(
+  options: Options<MatchLibraryFactorsData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    MatchLibraryFactorsResponses,
+    MatchLibraryFactorsErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library/matches",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get Factor
+ */
+export const getLibraryFactor = <ThrowOnError extends boolean = false>(
+  options: Options<GetLibraryFactorData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetLibraryFactorResponses,
+    GetLibraryFactorErrors,
+    ThrowOnError
+  >({ url: "/api/v1/factor-library/{library_id}", ...options });
+
+/**
+ * Set Visibility
+ */
+export const setLibraryFactorVisibility = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<SetLibraryFactorVisibilityData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    SetLibraryFactorVisibilityResponses,
+    SetLibraryFactorVisibilityErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library/{library_id}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Add Version
+ */
+export const addLibraryFactorVersion = <ThrowOnError extends boolean = false>(
+  options: Options<AddLibraryFactorVersionData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    AddLibraryFactorVersionResponses,
+    AddLibraryFactorVersionErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factor-library/{library_id}/versions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * Factor Catalog

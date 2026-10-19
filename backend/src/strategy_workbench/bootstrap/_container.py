@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
@@ -37,6 +39,7 @@ from strategy_workbench.adapters.outbound.research_sqlite.facade.repository impo
     SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
+    SQLiteFactorLibraryRepository,
     SQLiteStrategyDraftRepository,
     SQLiteStrategyRepository,
 )
@@ -80,6 +83,12 @@ from strategy_workbench.application.experiment_run.facade.ports import (
     TrialResultUnreadableError,
     TrialRunRejectedError,
 )
+from strategy_workbench.application.factor_library.facade.library import FactorLibraryService
+from strategy_workbench.application.factor_library.facade.ports import (
+    CompiledLibraryDocument,
+    FieldAvailability,
+    LibraryDiagnostic,
+)
 from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
@@ -91,7 +100,10 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyDocumentService,
     StrategyDraftService,
 )
-from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
+from strategy_workbench.application.strategy_authoring.facade.ports import (
+    FieldCatalogPort,
+    SourceFormat,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -123,6 +135,7 @@ class BackendContainer:
     backtest_runs: BacktestRunService
     experiments: ExperimentRunService
     continuous_accounts: ContinuousAccountService
+    factor_library: FactorLibraryService
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
@@ -289,10 +302,65 @@ def build_container(
         backtest_runs=backtest_runs,
         experiments=experiments,
         continuous_accounts=continuous_accounts,
+        # 사용자 팩터 라이브러리는 전략 저장소 파일에 둔다. 전략 리비전과 수명·백업이 같다
+        # (US-CS-08).
+        factor_library=FactorLibraryService(
+            SQLiteFactorLibraryRepository(strategy_repository_path),
+            _AuthoringLibraryCompiler(strategy_authoring),
+            _CatalogFieldAvailability(equity_data),
+            new_id=lambda: str(uuid4()),
+            now=lambda: datetime.now(UTC),
+        ),
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,
     )
+
+
+class _AuthoringLibraryCompiler:
+    """`FactorDocumentCompilerPort` 구현: 전략 compile 을 감싼다(US-CS-08).
+
+    라이브러리 팩터도 전략 문서와 같은 필드 계약·그래프 규칙으로 판정해야 하므로, 연결된
+    어댑터의 필드 계약을 쓰는 저작 서비스를 그대로 부른다. 라이브러리가 저작 유스케이스를
+    import 하지 않게 여기서 감싼다.
+    """
+
+    def __init__(self, authoring: StrategyAuthoringService) -> None:
+        self._authoring = authoring
+
+    def compile(self, source: str, *, format: Literal["yaml", "json"]) -> CompiledLibraryDocument:
+        compiled = self._authoring.compile(
+            CompileRequest(source=source, format=SourceFormat(format))
+        )
+        return CompiledLibraryDocument(
+            canonical=(
+                None
+                if compiled.canonical_json is None
+                else json.loads(compiled.canonical_json)
+            ),
+            diagnostics=tuple(
+                LibraryDiagnostic(
+                    code=diagnostic.code,
+                    message=diagnostic.message,
+                    pointer=diagnostic.pointer,
+                    severity="error" if diagnostic.severity == "error" else "warning",
+                )
+                for diagnostic in compiled.diagnostics
+            ),
+        )
+
+
+class _CatalogFieldAvailability:
+    """`FieldAvailabilityPort` 구현: compile 이 읽는 필드 계약을 그대로 읽는다."""
+
+    def __init__(self, catalog: FieldCatalogPort) -> None:
+        self._catalog = catalog
+
+    def field_availability(self) -> FieldAvailability:
+        return FieldAvailability(
+            available=frozenset(field.field_id for field in self._catalog.factor_field_catalog()),
+            unavailable_reasons=dict(self._catalog.unavailable_factor_fields()),
+        )
 
 
 class _RunServiceTrialRuns:

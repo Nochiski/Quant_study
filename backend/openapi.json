@@ -187,6 +187,44 @@
         "title": "AccountReportSummary",
         "type": "object"
       },
+      "AddLibraryVersionBody": {
+        "properties": {
+          "expected_latest": {
+            "title": "Expected Latest",
+            "type": "integer"
+          },
+          "factor": {
+            "additionalProperties": true,
+            "title": "Factor",
+            "type": "object"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "factor",
+          "expected_latest"
+        ],
+        "title": "AddLibraryVersionBody",
+        "type": "object"
+      },
       "ApplicableCondition": {
         "properties": {
           "equals": {
@@ -5243,6 +5281,16 @@
         "title": "FactorKind",
         "type": "string"
       },
+      "FactorMatchStatus": {
+        "description": "전략 문서의 팩터 항목이 라이브러리와 어떤 관계인가.",
+        "enum": [
+          "current",
+          "outdated",
+          "modified"
+        ],
+        "title": "FactorMatchStatus",
+        "type": "string"
+      },
       "FactorPeriodGap": {
         "enum": [
           "base_rate_not_covered",
@@ -6122,6 +6170,365 @@
           "kind"
         ],
         "title": "IntegerParameter",
+        "type": "object"
+      },
+      "LibraryDiagnosticBody": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "pointer",
+          "severity"
+        ],
+        "title": "LibraryDiagnosticBody",
+        "type": "object"
+      },
+      "LibraryErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "library.request_invalid",
+              "library.factor.invalid",
+              "library.factor.not_found",
+              "library.factor.key_exists",
+              "library.version.unchanged",
+              "library.version.conflict"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LibraryDiagnosticBody"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostics"
+          },
+          "existing_library_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Existing Library Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "LibraryErrorDetail",
+        "type": "object"
+      },
+      "LibraryErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/LibraryErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LibraryErrorResponse",
+        "type": "object"
+      },
+      "LibraryFactorAvailabilityBody": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Fields",
+            "type": "array"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "missing_fields",
+          "reasons"
+        ],
+        "title": "LibraryFactorAvailabilityBody",
+        "type": "object"
+      },
+      "LibraryFactorBody": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/LibraryFactorAvailabilityBody"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "library_id": {
+            "title": "Library Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryFactorVersionBody"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "library_id",
+          "key",
+          "name",
+          "description",
+          "hidden",
+          "created_at",
+          "latest_version",
+          "versions",
+          "availability"
+        ],
+        "title": "LibraryFactorBody",
+        "type": "object"
+      },
+      "LibraryFactorList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryFactorBody"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LibraryFactorList",
+        "type": "object"
+      },
+      "LibraryFactorMatchBody": {
+        "properties": {
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "factor_index": {
+            "title": "Factor Index",
+            "type": "integer"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "library_id": {
+            "title": "Library Id",
+            "type": "string"
+          },
+          "matched_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FactorMatchStatus"
+          }
+        },
+        "required": [
+          "factor_index",
+          "factor_id",
+          "library_id",
+          "status",
+          "matched_version",
+          "latest_version"
+        ],
+        "title": "LibraryFactorMatchBody",
+        "type": "object"
+      },
+      "LibraryFactorMatchesBody": {
+        "properties": {
+          "compiled": {
+            "title": "Compiled",
+            "type": "boolean"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryFactorMatchBody"
+            },
+            "title": "Matches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "compiled",
+          "matches"
+        ],
+        "title": "LibraryFactorMatchesBody",
+        "type": "object"
+      },
+      "LibraryFactorVersionBody": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "factor": {
+            "additionalProperties": true,
+            "title": "Factor",
+            "type": "object"
+          },
+          "identity": {
+            "title": "Identity",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "identity",
+          "factor",
+          "parameters",
+          "created_at",
+          "note"
+        ],
+        "title": "LibraryFactorVersionBody",
+        "type": "object"
+      },
+      "LibraryMatchesBody": {
+        "properties": {
+          "format": {
+            "enum": [
+              "yaml",
+              "json"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "source"
+        ],
+        "title": "LibraryMatchesBody",
+        "type": "object"
+      },
+      "LibraryVisibilityBody": {
+        "properties": {
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hidden"
+        ],
+        "title": "LibraryVisibilityBody",
         "type": "object"
       },
       "Market": {
@@ -9147,6 +9554,49 @@
           "format"
         ],
         "title": "SaveDocumentRequest",
+        "type": "object"
+      },
+      "SaveLibraryFactorBody": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "factor": {
+            "additionalProperties": true,
+            "title": "Factor",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "factor"
+        ],
+        "title": "SaveLibraryFactorBody",
         "type": "object"
       },
       "SaveStrategyDraftRequest": {
@@ -16328,6 +16778,375 @@
           }
         },
         "summary": "Get Experiment Walk Forward"
+      }
+    },
+    "/api/v1/factor-library": {
+      "get": {
+        "operationId": "listLibraryFactors",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_hidden",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Hidden",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Factors"
+      },
+      "post": {
+        "operationId": "saveLibraryFactor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveLibraryFactorBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Save"
+      }
+    },
+    "/api/v1/factor-library/matches": {
+      "post": {
+        "operationId": "matchLibraryFactors",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryMatchesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorMatchesBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Matches"
+      }
+    },
+    "/api/v1/factor-library/{library_id}": {
+      "get": {
+        "operationId": "getLibraryFactor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Factor"
+      },
+      "patch": {
+        "operationId": "setLibraryFactorVisibility",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryVisibilityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Set Visibility"
+      }
+    },
+    "/api/v1/factor-library/{library_id}/versions": {
+      "post": {
+        "operationId": "addLibraryFactorVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLibraryVersionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFactorBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Add Version"
       }
     },
     "/api/v1/factors/catalog": {

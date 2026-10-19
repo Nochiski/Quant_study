@@ -58,6 +58,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
     ExperimentRunService,
 )
 from strategy_workbench.application.experiment_run.facade.ports import TrialRunRejectedError
+from strategy_workbench.application.factor_library.facade.library import FactorLibraryService
 from strategy_workbench.application.factor_research.facade.research import (
     FactorAvailability,
     FactorCatalog,
@@ -164,6 +165,7 @@ from ._execution_error_contract import (
     PortfolioRawObservationInvalidDetail,
 )
 from ._experiment_routes import register_experiment_routes
+from ._factor_library_routes import register_factor_library_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
 from ._strategy_document_contract import (
@@ -350,6 +352,7 @@ def create_app(
     backtest_runs: BacktestRunService,
     experiments: ExperimentRunService | None = None,
     continuous_accounts: ContinuousAccountService | None = None,
+    factor_library: FactorLibraryService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
@@ -468,6 +471,8 @@ def create_app(
         register_experiment_routes(app, experiments, admitted=admitted)
     if continuous_accounts is not None:
         register_continuous_account_routes(app, continuous_accounts)
+    if factor_library is not None:
+        register_factor_library_routes(app, factor_library)
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}

@@ -296,7 +296,7 @@ def test_a_missing_altered_or_undecodable_result_file_is_a_coded_error(tmp_path:
     assert str(tmp_path) not in message and "'x'" not in message
 
 
-def test_opening_the_store_removes_staging_left_by_a_killed_commit(
+def test_boot_cleanup_removes_staging_left_by_a_killed_commit(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     commit = LocalArtifactStore(tmp_path).commit(_result())
@@ -304,8 +304,11 @@ def test_opening_the_store_removes_staging_left_by_a_killed_commit(
     orphan.mkdir()
     (orphan / "result.json").write_bytes(b"{partial")
 
+    # 여는 것만으로는 지우지 않는다 — 같은 루트의 다른 프로세스가 도는 commit 일 수 있다(spec D4).
+    store = LocalArtifactStore(tmp_path)
+    assert orphan.exists()
     with caplog.at_level(logging.WARNING):
-        store = LocalArtifactStore(tmp_path)
+        store.remove_orphan_staging()
 
     assert not orphan.exists()
     assert "orphan run artifact staging removed — name=.run-killed.0123abcd.tmp" in caplog.text
@@ -313,7 +316,7 @@ def test_opening_the_store_removes_staging_left_by_a_killed_commit(
     assert store.load("run-safe-001", sha256=commit.sha256) == _result()
 
 
-def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
+def test_staging_that_cannot_be_removed_does_not_block_the_boot_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     orphan = tmp_path / ".run-locked.0123abcd.tmp"
@@ -323,7 +326,7 @@ def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
         raise PermissionError(f"locked: {path}")
 
     monkeypatch.setattr(shutil, "rmtree", locked)
-    LocalArtifactStore(tmp_path)
+    LocalArtifactStore(tmp_path).remove_orphan_staging()
 
     assert orphan.exists()
     assert "orphan run artifact staging not removed — name=.run-locked.0123abcd.tmp" in caplog.text

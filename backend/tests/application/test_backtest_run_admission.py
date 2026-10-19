@@ -28,6 +28,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import Moc
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -106,6 +107,7 @@ def gated_runs(tmp_path: Path) -> Iterator[_GatedRuns]:
             LocalArtifactStore(tmp_path),
             run_repository=SQLiteBacktestRunRepository(),
             new_id=iter(run_ids).__next__,
+            run_execution=ThreadRunExecution,
             run_slots=run_slots,
         )
         barriers.append(barrier)
@@ -185,7 +187,7 @@ def test_a_run_whose_thread_fails_to_start_frees_its_slot_for_the_next_queued_ru
             super().start()
 
     monkeypatch.setattr(
-        "strategy_workbench.application.backtest_run._service.Thread", _SomeRunsFailToStart
+        "strategy_workbench.adapters.outbound.run_thread._execution.Thread", _SomeRunsFailToStart
     )
     runs, port, entries = gated_runs(
         "startfail-first", "startfail-second", "startfail-third", "startfail-fourth"
@@ -347,6 +349,7 @@ def test_the_same_request_on_another_field_contract_gets_another_run_fingerprint
             LocalArtifactStore(tmp_path / run_id),
             run_repository=SQLiteBacktestRunRepository(),
             new_id=lambda: run_id,
+            run_execution=ThreadRunExecution,
         )
         runs.start(_request())
         assert wait_for_terminal_run(runs, run_id).status is RunStatus.COMPLETED
@@ -505,7 +508,9 @@ def test_a_user_who_withdraws_from_a_joined_experiment_run_returns_it_to_the_exp
             dispatched.append(self.name.removeprefix("backtest-"))
             super().start()
 
-    monkeypatch.setattr("strategy_workbench.application.backtest_run._service.Thread", _Recording)
+    monkeypatch.setattr(
+        "strategy_workbench.adapters.outbound.run_thread._execution.Thread", _Recording
+    )
     runs, port, entries = gated_runs("e1", "u1", "e2", "u2", run_slots=2)
     runs.start(_request(end=date(2024, 1, 12)), owner="exp")
     runs.start(_request(end=date(2024, 1, 9)))

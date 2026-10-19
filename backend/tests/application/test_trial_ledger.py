@@ -24,6 +24,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import Moc
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -99,6 +100,7 @@ class _Lab:
             LocalArtifactStore(self._tmp_path / "artifacts"),
             run_repository=SQLiteBacktestRunRepository(self.path),
             new_id=self._run_ids.__next__,
+            run_execution=ThreadRunExecution,
             # 팩터 수익률 계산을 뒤가 아니라 그 자리에서 돌려 조회 한 번에 결과를 본다.
             background=lambda job: job(),
         )

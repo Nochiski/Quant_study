@@ -76,7 +76,7 @@ logger.warning(
 - API 응답으로 나가는 문장도 외부 메시지다. 우리가 쓰는 문장(포트 결과 `detail`, 원천을 뺀 사유, 스냅샷
   `source`, 질의 중 예외)은 처음부터 서버 경로 없이 쓰고, 경로는 부팅 예외와 로그에만 싣는다. 가리기
   (`_mask_paths`)는 서버 경로를 담을 수 있는 서드파티 원문(파일·DB 입출력 예외)이 응답으로 나가는 곳에만
-  둔다. 지금 그곳은 run `error` 하나다(`application/backtest_run/_service.py`의 `_describe_failure`).
+  둔다. 지금 그곳은 run `error` 하나다(`application/backtest_run/_computation.py`의 `_describe_failure`).
   요청 본문만 파싱하는 문서 codec 의 오류 원문은 경로를 담을 수 없어 가리지 않는다. 쓰는 쪽이 경로를
   싣고 받는 쪽이 지우는 두 단계를 만들지 않는다(#163)
 - 로컬 로그(`logger.*`) 는 절대 경로/상세 stack 노출해도 OK — 단 PII/secret 은 제외

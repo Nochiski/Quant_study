@@ -31,6 +31,7 @@ from strategy_workbench.adapters.outbound.research_sqlite.facade.repository impo
     ResearchStorageError,
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -110,6 +111,7 @@ def _service(
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=repository,
         new_id=iter(run_ids).__next__,
+        run_execution=ThreadRunExecution,
         run_slots=1,
     )
 

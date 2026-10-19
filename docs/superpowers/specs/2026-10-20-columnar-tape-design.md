@@ -74,7 +74,7 @@ GPU(CuPy)는 run 하나에는 numpy보다 2~3배 느리고, 데이터를 GPU에 
 | binary 4종 | IEEE 단일 연산, 같은 결합 순서. 분모 `== 0`(−0.0 포함) 마스크 |
 | momentum·delta | 두 번의 IEEE 연산을 같은 순서로 |
 | ts min·max | `np.minimum`은 `min(0.0,-0.0)`과 다르다. 오래된 칸부터 `acc = where(x < acc, x, acc)`(max는 `>`)로 누적해 "같으면 앞 원소"를 재현한다 |
-| mean·demean·neutralize·zscore 중심 | **인증 커널**: +0.0에서 시작한 TwoSum double-double 합 → `q=(s+c)/n` → Dekker TwoProduct 잔차 보정 1회(numpy에 fma가 없다) → 반올림 경계(`(q+pred(q))/2`, `(q+succ(q))/2`)까지 거리가 오차 상한보다 크면 확정, 같거나 작으면(정확한 중점 포함) 그 칸만 `statistics.mean`. 극단 크기(\|q\| > 1e300, subnormal)와 비유한값은 정확 경로 |
+| mean·demean·neutralize·zscore 중심 | **인증 커널**: +0.0에서 시작한 TwoSum double-double 합 → `q=(s+c)/n` → Dekker TwoProduct 잔차 보정 1회(numpy에 fma가 없다) → 반올림 경계(`(q+pred(q))/2`, `(q+succ(q))/2`)까지 거리가 오차 상한보다 크면 확정, 같거나 작으면(정확한 중점 포함) 그 칸만 `statistics.mean`. 극단 크기(\|q\| > 1e300, 0이 아닌 \|q\| < 1e-290 — Dekker 오차항이 2^-1074 밑으로 떨어지는 경계)와 비유한값은 정확 경로 |
 | std·zscore 편차 | 이동값을 뺀 double-double Σd·Σd²로 분산 dd를 만들고 후보 s의 반올림 경계 `((s+pred(s))/2)²`·`((s+succ(s))/2)²`(2의 거듭제곱 경계는 아래 간격이 절반)와 비교해 인증한다. 경계와 같으면(작은 창에서 흔하다, n=2에서 21%) 인증 실패로 보고 정확 경로. 극단 크기(\|x\| > 1e150, 0이 아닌 \|x\| < 1e-150)와 인증 실패 칸은 `statistics.pstdev` |
 | median 채움 | 동료 입력 순서를 유지하는 **안정 정렬**(`kind="stable"`) 뒤 홀수는 가운데 원소, 짝수는 `(a+b)/2`를 직접 계산한다(numpy median 금지). 기본 정렬은 −0.0·0.0 순서를 바꿔 부호가 달라진다(리뷰 실측 2만 건 중 5,744건) |
 | rank(횡단면·그룹·정규화) | 평균 순위 `(pos+1+end)/2`(정확), IEEE 나눗셈 한 번, 안정 정렬과 `==` 동점 |

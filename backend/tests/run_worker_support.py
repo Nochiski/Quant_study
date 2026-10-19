@@ -31,6 +31,9 @@ def hold():
 
 if stage == "before_main":
     hold()
+elif stage == "slow_boot":
+    # job 을 읽기 전에 잠깐 잠든다. 부모의 큰 job 쓰기가 그동안 파이프에서 막힌다.
+    time.sleep(2.0)
 elif stage == "tape":
     from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
     PortfolioDesignService.run_pipeline = lambda self, *args, **kwargs: hold()

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +31,11 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol imp
     PROTOCOL_VERSION,
 )
 from strategy_workbench.application.backtest_run.facade.ports import RunFailed, RunOutcome
+from strategy_workbench.bootstrap import _container
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.runs import RunStage
 from tests.backtest_run_wait import wait_for_terminal_state
-from tests.run_worker_support import parent_versions
+from tests.run_worker_support import hook_command, parent_versions
 from tests.test_run_worker_protocol import resolved_job
 
 # 하위 프로세스 부팅(import·조립)을 CI 의 느린 기계에서도 기다린다.
@@ -138,13 +140,19 @@ def test_failure_code_and_korean_message_cross_the_process_boundary(tmp_path: Pa
 
 
 def test_service_queries_stay_responsive_while_the_worker_boots_with_a_large_job(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """D12: 감독 스레드가 큰 job 을 쓰고 `ready` 를 기다리는 동안에도 조회가 막히지 않는다.
 
-    job 은 파이프 버퍼보다 훨씬 크다(설명 약 1.5MB). worker 는 무거운 import 를 마친 뒤에 job 을
-    읽으므로 그동안 감독 스레드의 쓰기가 막힌다. 접수와, 그 뒤 조립·`ready` 까지의 조회 시간을 잰다.
+    job 은 파이프 버퍼보다 훨씬 크다(설명 약 1.5MB). worker 는 job 을 읽기 전에 2초 잠들어(무거운
+    import 를 과장한다) 그동안 감독 스레드의 쓰기가 막힌다. 접수와, 그 뒤 조립·`ready` 까지의 조회
+    시간을 잰다. 쓰기가 서비스 잠금 안에 있으면 접수가 2초 넘게 걸려 실패한다.
     """
+    monkeypatch.setattr(
+        _container,
+        "ProcessRunExecution",
+        partial(ProcessRunExecution, command=hook_command("slow_boot", tmp_path / "unused")),
+    )
     client = _client(tmp_path, "process")
     body = _body(client, description="큰 job 한글 설명 " * 100_000)
     posted = time.monotonic()

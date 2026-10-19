@@ -116,12 +116,12 @@ class ProcessRunExecution:
                 # 서버가 끝나는 중이다. 새 worker 를 띄우지 않는다 — 그 run 은 다음 부팅이
                 # `interrupted` 로 닫는다(spec D5).
                 return run
-            self._runs[run] = thread
-        try:
+            # 시작과 등록을 같은 잠금 안에서 한다. 사이가 열려 있으면 `shutdown` 이 아직 시작하지
+            # 않은 스레드를 join 해 RuntimeError 로 끝난다(#581 리뷰 P3-1). `start` 는 스레드가
+            # 뜰 때까지만 기다린다. 감독 본문은 끝(`_forget`)에서야 이 잠금을 잡으므로 교착이 없고,
+            # 시작이 실패하면 등록하지 않는다.
             thread.start()
-        except BaseException:
-            self._forget(run)
-            raise
+            self._runs[run] = thread
         return run
 
     def shutdown(self) -> None:

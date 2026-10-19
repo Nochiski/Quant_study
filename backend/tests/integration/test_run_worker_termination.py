@@ -29,6 +29,7 @@ from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
+from strategy_workbench.adapters.outbound.run_worker_process import _execution
 from strategy_workbench.adapters.outbound.run_worker_process.facade.execution import (
     WORKER_COMMAND,
     ProcessRunExecution,
@@ -334,6 +335,57 @@ def test_server_shutdown_ends_running_workers_without_closing_their_runs(tmp_pat
     assert not any(thread.name == f"backtest-worker-{run_id}" for thread in threading.enumerate())
     assert not service.state(run_id).status.is_terminal
     assert _leftovers(root, run_id) == []
+
+
+def test_shutdown_during_start_waits_for_the_supervisor_to_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """등록과 시작 사이에 서버 종료가 끼어도 시작 전 스레드를 join 하지 않는다(#581 리뷰 P3-1).
+
+    감독 스레드의 `start` 를 붙잡아 그 틈을 넓힌다. 고치기 전에는 종료가 등록된 스레드를 곧바로
+    join 해 RuntimeError 로 끝났다.
+    """
+    entered, release = threading.Event(), threading.Event()
+
+    class HeldStart(threading.Thread):
+        def start(self) -> None:
+            if not self.name.endswith("-stderr"):
+                entered.set()
+                release.wait(TIMEOUT_S)
+            super().start()
+
+    monkeypatch.setattr(_execution, "Thread", HeldStart)
+    root = tmp_path / "artifacts"
+    execution = ProcessRunExecution(
+        WorkerSettings("mock", None, root),
+        versions=parent_versions(),
+        discard_unfinished=LocalArtifactStore(root).discard_unfinished,
+    )
+    listener = _Recorder()
+    starter = threading.Thread(target=execution.start, args=(resolved_job("run-race"), listener))
+    starter.start()
+    assert entered.wait(TIMEOUT_S)
+
+    errors: list[BaseException] = []
+
+    def stop() -> None:
+        try:
+            execution.shutdown()
+        except BaseException as error:
+            errors.append(error)
+
+    stopper = threading.Thread(target=stop)
+    stopper.start()
+    stopper.join(0.5)
+    release.set()
+    starter.join(TIMEOUT_S)
+    stopper.join(TIMEOUT_S)
+
+    assert errors == []
+    assert not stopper.is_alive()
+    assert not any(thread.name == "backtest-worker-run-race" for thread in threading.enumerate())
+    # 서버 종료로 버린 run 은 종결을 알리지 않는다(다음 부팅 몫).
+    assert not listener.finished.is_set()
 
 
 def test_http_lifespan_shutdown_reaches_the_run_service(

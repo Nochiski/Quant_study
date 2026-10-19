@@ -94,8 +94,8 @@ def test_time_series_checkpoints_per_chunk_and_window_offset_with_monotone_progr
     # 종목마다 첫 행은 이력이 모자라 None 이고, 나머지는 직전 행과의 작은 값이다
     assert [cache.value("out", row) for row in range(6)] == [None, None, 0.0, 1.0, 2.0, 3.0]
     # 노드 진입 2번 + x 유한값 검사 3청크 + out 가림 구간 1필드
-    # + 창 후보 5행의 3청크와 청크마다 offset 1번 + out 유한값 검사 3청크
-    assert len(calls) == 2 + 3 + 1 + 3 * 2 + 3
+    # + 시계열 커널 앞뒤 2번 + 창 후보 5행의 3청크와 청크마다 offset 1번 + out 유한값 검사 3청크
+    assert len(calls) == 2 + 3 + 1 + 2 + 3 * 2 + 3
     # 노드 안에서도 청크마다 올리고 끝값은 1.0 이다
     assert len(fractions) == 2 + 3
     assert fractions == sorted(fractions) and fractions[-1] == 1.0

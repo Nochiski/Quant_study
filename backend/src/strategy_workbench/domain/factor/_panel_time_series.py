@@ -42,6 +42,8 @@ def time_series_window(
     window = node.window
     far = node_read_window(node).far
     ordered = values[order]
+    # 4M행 재배열·누적합과 흩뿌리기도 0.1초 간격 안에 두려고 앞뒤에서 한 번씩 부른다(spec D7)
+    checkpoint()
     result = np.zeros(rows, np.float64)
     ok = np.zeros(rows, bool)
     # 정렬 위치 j(≥ far)의 창은 [j − far, j − far + window). t = j − far 로 센다
@@ -69,6 +71,7 @@ def time_series_window(
                     else:
                         result[target] = last - first
                 advance(chunk.stop / candidates)
+    checkpoint()
     values_out = np.empty(rows, np.float64)
     valid_out = np.empty(rows, bool)
     values_out[order] = result

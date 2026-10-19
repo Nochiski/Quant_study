@@ -26,6 +26,10 @@ bootstrap ─> application + adapters
   `backtest_engine`을 import하지 않는다.
 - `application/<use_case>`: 유스케이스와 그 유스케이스가 요구하는 port를 소유한다.
   concrete adapter를 import하지 않는다.
+- domain·application은 numpy(core 의존성)를 순수 배열 계산에만 쓴다. pyarrow·duckdb는 adapter에만
+  둔다. pyarrow는 optional extra `parquet`이라 그 extra 없는 운영 설치에서 import가 깨지고, duckdb는
+  IO다(columnar-tape spec D2). CI `backend-no-extras` job은 dev 그룹으로 pyarrow를 설치하므로 이 경계를
+  잡지 못하고, 아래 `test_forbidden_imports.py`가 막는다.
 - application → application 화살표는 한 유스케이스가 **다른 유스케이스의 outgoing port를
   소비할 때만** 허용하며, port owner는 그 계약을 먼저 정의한 유스케이스다. 현재 선언된 6개는
   `strategy_authoring → strategy_design`, `portfolio_design → strategy_design`,
@@ -133,7 +137,8 @@ bootstrap ─> application + adapters
 
 - 조회 계약 SoT는 `application/equity_workspace/ports/outgoing/equity_data.py`다. raw PIT
   관측 계약은 `application/portfolio_design/ports/outgoing/raw_observations.py`가 별도로
-  소유하며, 두 포트는 같은 셀에 같은 값·공개일을 답해야 한다.
+  소유하며, 두 포트는 같은 셀에 같은 값·공개일을 답해야 한다. 같은 디렉터리의 열 포트
+  `raw_panel.py`(`RawPanel`)는 이 원시 계약을 열로 담을 뿐 정본이 아니다(columnar-tape T2-01).
 - 구현은 둘이다. `adapters/outbound/equity_mock`은 테스트·e2e용 결정적 fixture이며 PIT
   available-date, revision, recommended lag, 실제 0/결측/미수집/coverage gap/원장이 가린 셀(masked)을
   구분한다.
@@ -169,7 +174,7 @@ import는 절대·상대 표기를 가리지 않는다. 게이트가 파일 위�
 
 같은 `backend/tests/architecture/` 폴더의 게이트가 셋 더 있다.
 
-- `test_forbidden_imports.py`: domain·application은 pydantic을 import하지 않고, 누구도 PyYAML을
+- `test_forbidden_imports.py`: domain·application은 pydantic·pyarrow·duckdb를 import하지 않고, 누구도 PyYAML을
   import하지 않으며(YAML 1.2 파서는 ruamel.yaml 하나), 공급자 SDK(`anthropic`·`openai`)는 자기
   outbound adapter 안에만 있다. AST의 `import` 문만 보므로 문자열 import는 리뷰로 확인한다.
 - `test_run_environment_ownership.py`: 실행 설정은 `RunEnvironment` 하나가 소유한다. `src`

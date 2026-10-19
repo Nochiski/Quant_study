@@ -5,6 +5,9 @@
 - 공급자 SDK(`anthropic`, `openai`)는 자기 outbound adapter 안에만 있다(AI 어시스턴트 설계 spec
   D1/D4, A-01). domain·application은 `LlmProviderPort`로만 공급자를 보므로, 공급자를 하나 더
   붙이는 일은 새 adapter를 만드는 것이지 도구 루프를 고치는 것이 아니다.
+- domain·application은 pyarrow·duckdb를 import하지 않는다(columnar-tape spec D2, T2-01). numpy(core
+  의존성)는 순수 배열 계산에 쓸 수 있지만, pyarrow는 optional extra `parquet`이라 그 extra 없는 운영
+  설치에서 import가 깨지고 duckdb는 IO다. 둘은 adapter에만 둔다.
 
 검사 범위: 이 게이트들은 AST에서 `import` / `from … import` 문만 읽는다. 문자열로 하는 import
 (`importlib.import_module("anthropic")`, `__import__`)는 볼 수 없으므로, 공급자 adapter를 읽는
@@ -44,6 +47,23 @@ def test_domain_and_application_do_not_import_pydantic() -> None:
         if "pydantic" in _imports(path)
     ]
     assert offenders == [], f"pydantic leaked into pure layers — files={offenders}"
+
+
+# 열 지향 계산이 numpy 밖으로 새지 않게 막는다. IO·optional extra 라이브러리는 adapter 몫이다.
+COLUMNAR_IO_LIBRARIES = frozenset({"pyarrow", "duckdb"})
+
+
+def test_domain_and_application_do_not_import_pyarrow_or_duckdb() -> None:
+    offenders = [
+        f"{path.relative_to(SRC_ROOT).as_posix()}: {module}"
+        for layer in ("domain", "application")
+        for path in (SRC_ROOT / layer).rglob("*.py")
+        for module in sorted(_imports(path) & COLUMNAR_IO_LIBRARIES)
+    ]
+    assert offenders == [], (
+        f"pyarrow/duckdb leaked into pure layers — files={offenders} "
+        "(domain/application may use numpy only; keep pyarrow and duckdb in adapters)"
+    )
 
 
 def test_nobody_imports_pyyaml() -> None:

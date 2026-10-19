@@ -15,6 +15,8 @@ Contract:
   because evaluators cannot consistently choose which raw fact is authoritative.
   Numeric values and `previous_weight` are always finite; NaN/±Infinity is an adapter contract
   violation and is rejected before factor or portfolio calculation rather than normalized.
+- 값 타입은 float·str·None 셋이다. bool 은 계약 위반이다. 열 포트(`raw_panel.py`)가 같은 계약
+  하나를 쓰도록 좁혔다(columnar-tape spec 8절). 지금 bool 을 내는 어댑터는 없다.
 - `universe_member` is a fact of (as_of, security) alone: the same pair answers the same way
   regardless of the query window or history length (window invariance).
 - `history_sessions_before_start` counts sessions strictly before `start` (as_of is not one of
@@ -49,7 +51,7 @@ from typing import Protocol, TypeVar, runtime_checkable
 
 from strategy_workbench.domain.equity.facade.research_data import CellKind, DataLoadStatus
 
-RawFieldValueType = float | str | bool | None
+RawFieldValueType = float | str | None
 _T = TypeVar("_T")
 _CHECKPOINT_BATCH = 256
 
@@ -274,7 +276,15 @@ class RawObservationSet:
                     )
                 field_ids.add(field.field_id)
                 value = field.value
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                # bool 은 int 의 하위 타입이라 타입 검사기가 float 자리에 받는다. 실행 시 거절한다.
+                if isinstance(value, bool):
+                    raise RawObservationContractViolation(
+                        "raw field value must be float, str or None — "
+                        f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                        f"field_id={field.field_id!r} value={value!r} "
+                        f"snapshot={self.data_snapshot_id!r}"
+                    )
+                if isinstance(value, (int, float)):
                     if not _finite_number(value):
                         raise RawObservationContractViolation(
                             "raw numeric field value must be finite — "

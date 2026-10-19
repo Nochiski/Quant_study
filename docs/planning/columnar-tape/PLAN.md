@@ -2,11 +2,11 @@
 plan_version: 1
 project: columnar-tape
 project_status: IN_PROGRESS
-current_phase: T0
-current_pr: T0-01,T0-02
-active_prs: [T0-01, T0-02]
-parallel_window: [T0-01, T0-02]
-last_updated: 2026-10-20T01:56:56+09:00
+current_phase: T0,T2
+current_pr: T0-01,T0-02,T2-01
+active_prs: [T0-01, T0-02, T2-01]
+parallel_window: [T0-01, T0-02, T2-01]
+last_updated: 2026-10-20T03:42:03+09:00
 planned_prs: 26
 merged_prs: 0
 approved_prs: 0
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `T0` |
-| Current/next PR | `T0-01,T0-02` |
-| Active PR | `T0-01, T0-02` |
+| Current phase | `T0,T2` |
+| Current/next PR | `T0-01,T0-02,T2-01` |
+| Active PR | `T0-01, T0-02, T2-01` |
 | Progress | `0 / 26 merged (0%)` |
 | Approved | `0 / 26` |
-| Aggregated at | `2026-10-20 01:56 KST` |
+| Aggregated at | `2026-10-20 03:42 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -54,7 +54,7 @@ progress_percent: 0
 |---|---|---:|---:|---|
 | T0 | Planning package and prerequisite defect | 2 | 0 | `IN_PROGRESS` |
 | T1 | Parity harness | 1 | 0 | `WAITING` |
-| T2 | Columnar raw panel port | 3 | 0 | `WAITING` |
+| T2 | Columnar raw panel port | 3 | 0 | `IN_PROGRESS` |
 | T3 | Columnar factor evaluator | 6 | 0 | `WAITING` |
 | T4 | Pipeline switch | 3 | 0 | `WAITING` |
 | T5 | Columnar compiler | 4 | 0 | `WAITING` |
@@ -81,7 +81,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T2-01` | `RawPanel` 포트, numpy 사용 규칙 | T1-01 | `PLANNED` | - |
+| [ ] | `T2-01` | `RawPanel` 포트, numpy 사용 규칙 | T1-01 | `IN_PROGRESS` | - |
 | [ ] | `T2-02` | duckdb 열 로딩 GRID | T2-01 | `PLANNED` | - |
 | [ ] | `T2-03` | duckdb 열 로딩 LATEST·법인 축 | T2-02 | `PLANNED` | - |
 

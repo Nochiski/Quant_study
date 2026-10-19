@@ -470,6 +470,41 @@ def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
         )
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_result_rejects_bool_raw_values(value: bool) -> None:
+    """값 타입은 float·str·None 이다. 열 포트와 한 계약을 쓰려고 bool 을 뺐다(T2-01)."""
+    field = RawFieldValue("price.close", value, START)
+    with pytest.raises(
+        RawObservationContractViolation,
+        match=(
+            rf"raw field value must be float, str or None — as_of={START} "
+            rf"security_id='a' field_id='price\.close' value={value}"
+        ),
+    ):
+        RawObservationSet(
+            DataLoadStatus.OK, "snap", (START,), (), (RawObservation(START, "a", True, (field,)),)
+        )
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+def test_raw_field_values_are_float_str_or_none(adapter: ContractAdapter) -> None:
+    """두 어댑터 모두 bool·int 값을 내지 않는다. 열 포트(`RawPanel`)는 숫자와 문자열만 담는다."""
+    queries = [_query(adapter, history=3)]
+    if isinstance(adapter, MockEquityDataAdapter):
+        # 달력 밖 합성 구간도 같은 값 타입이어야 한다.
+        queries.append(_query(adapter, start=date(2025, 3, 3), end=date(2025, 3, 14), history=5))
+    for query in queries:
+        result = adapter.load_raw_observations(query)
+        assert result.ok and result.observations
+        for observation in result.observations:
+            for field in observation.fields:
+                assert field.value is None or type(field.value) in (float, str), (
+                    observation.as_of,
+                    observation.security_id,
+                    field,
+                )
+
+
 @pytest.mark.parametrize("consumer_revalidation", [False, True])
 def test_raw_contract_validation_cancels_after_first_numeric_check(
     monkeypatch: pytest.MonkeyPatch, consumer_revalidation: bool

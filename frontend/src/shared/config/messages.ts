@@ -240,6 +240,8 @@ const ko = {
   "strategy.preview.rank": "순위",
   "strategy.preview.name": "종목명",
   "strategy.preview.score": "종합 점수",
+  "strategy.preview.weight": "비중",
+  "strategy.preview.explain": "왜 골랐나",
   "strategy.preview.unknownName": "이름 미제공",
   "strategy.preview.empty": "선정된 종목이 없습니다.",
 
@@ -3061,6 +3063,8 @@ export const messages = {
     "strategy.preview.rank": "Rank",
     "strategy.preview.name": "Name",
     "strategy.preview.score": "Composite score",
+    "strategy.preview.weight": "Weight",
+    "strategy.preview.explain": "Why chosen",
     "strategy.preview.unknownName": "Name unavailable",
     "strategy.preview.empty": "No targets selected.",
 

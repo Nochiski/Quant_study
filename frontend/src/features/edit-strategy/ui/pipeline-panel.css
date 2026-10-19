@@ -55,6 +55,22 @@
   .pipeline__stages {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+
+  /* 데이터 → 비중을 한 방향으로 읽게 열 사이에 화살표를 둔다(RD-04-B). 장식이라 낭독하지 않는다. */
+  .pipeline__stage--flows {
+    position: relative;
+  }
+
+  .pipeline__stage--flows::after {
+    content: "→" / "";
+    position: absolute;
+    top: var(--space-4);
+    right: calc(var(--space-3) * -1);
+    z-index: 1;
+    transform: translateX(50%);
+    color: var(--text-muted);
+    font-weight: var(--font-weight-heading);
+  }
 }
 
 /* 열 폭보다 긴 컨트롤이 옆 열 밑으로 넘치지 않게 한다(grid 항목의 기본 최소 폭은 내용 폭이다). */

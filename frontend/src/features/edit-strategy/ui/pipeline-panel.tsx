@@ -199,6 +199,7 @@ export const PipelinePanel = ({
                 stage={stage}
                 number={index + 1}
                 context={context}
+                flowsOn={index < pipeline.stages.length - 1}
               />
             ))}
             <ExecutionGuide
@@ -221,16 +222,19 @@ const StageColumn = ({
   stage,
   number,
   context,
+  flowsOn,
 }: {
   stage: PipelineStage;
   number: number;
   context: CardContext;
+  /** 다음 단계로 이어지는가. 넓은 화면에서 열 사이에 화살표를 그린다(RD-04-B). */
+  flowsOn: boolean;
 }) => {
   const headingId = useId();
   const notesId = useId();
   const stem = `strategy.stage.${stage.stage}`;
   return (
-    <li className="pipeline__stage">
+    <li className={`pipeline__stage${flowsOn ? " pipeline__stage--flows" : ""}`}>
       <div role="group" aria-labelledby={headingId}>
         <h3 id={headingId} className="pipeline__stage-title">
           <span className="pipeline__stage-number">{number}</span> {tName(stem)}{" "}

@@ -1,0 +1,271 @@
+/* 새 전략 단계별 안내(RD-04-D). 왼쪽 단계 목록, 가운데 지금 단계, 오른쪽 문서 미리보기. */
+.strategy-guide {
+  display: grid;
+  grid-template-columns: minmax(0, calc(var(--space-6) * 7)) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.strategy-guide__header {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.strategy-guide__header h2 {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+}
+
+.strategy-guide__header p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+}
+
+.strategy-guide__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.strategy-guide__steps ol {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategy-guide__steps button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--space-6);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-medium);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.strategy-guide__steps button:hover {
+  background: var(--surface-subtle);
+}
+
+.strategy-guide__steps button[aria-current="step"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--font-weight-heading);
+}
+
+.strategy-guide__step-number {
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-5);
+  height: var(--space-5);
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  font-size: var(--text-size-small);
+}
+
+.strategy-guide__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--space-6) * 10));
+  gap: var(--space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.strategy-guide__step {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+}
+
+.strategy-guide__step h3,
+.strategy-guide__preview h3 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.strategy-guide__stage,
+.strategy-guide__properties {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.strategy-guide__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-guide__summary {
+  margin: 0;
+}
+
+.strategy-guide__more > summary {
+  font-weight: var(--font-weight-heading);
+}
+
+.strategy-guide__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.strategy-guide__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--space-6);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.strategy-guide__chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--font-weight-heading);
+}
+
+.strategy-guide__count {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-guide__factors {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.strategy-guide__factor-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategy-guide__factor {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.strategy-guide__factor p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-guide__factor-action {
+  display: grid;
+  justify-items: end;
+  gap: var(--space-1);
+  max-width: calc(var(--space-6) * 6);
+  text-align: right;
+}
+
+.strategy-guide__footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.strategy-guide__preview {
+  position: sticky;
+  top: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-raised);
+}
+
+.strategy-guide__preview pre {
+  max-height: calc(var(--space-6) * 16);
+  margin: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.strategy-guide__line {
+  display: block;
+  padding: 0 var(--space-1);
+}
+
+.strategy-guide__line--changed {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+@media (max-width: 1279px) {
+  .strategy-guide__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .strategy-guide__preview {
+    position: static;
+  }
+}
+
+@media (max-width: 900px) {
+  .strategy-guide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .strategy-guide__steps ol {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .strategy-guide__steps button {
+    white-space: nowrap;
+  }
+
+  .strategy-guide__factor {
+    flex-direction: column;
+  }
+
+  .strategy-guide__factor-action {
+    justify-items: start;
+    max-width: none;
+    text-align: left;
+  }
+}
+
+.strategy-guide__review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

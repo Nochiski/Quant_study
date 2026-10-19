@@ -18,6 +18,7 @@ import {
   ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
+  StrategyGuide,
   StrategyOutline,
   UpgradeBanner,
   STRATEGY_VIEWS,
@@ -273,6 +274,91 @@ export const NewStrategyPage = () => {
       replace: true,
     });
   }, [leaving, document.strategyId, document.baseRevision, navigate]);
+
+  // 단계별 안내(RD-04-D). 같은 문서·같은 트랜잭션을 쓰고, 편집기는 숨긴 채 살아 있어 되돌리기 이력이 이어진다.
+  // 안내를 닫으면 같은 초안을 편집기 그래프 보기로 연다.
+  const leaveGuide = (next: Partial<typeof search>) =>
+    void navigate({
+      to: ROUTE,
+      // 숨은 편집기의 커서가 남긴 선택(`path`)은 버린다. 남기면 그 팩터의 노드 편집기가 열린다.
+      search: { ...search, guide: undefined, step: undefined, path: undefined, recipe: undefined, ...next },
+      resetScroll: false,
+    });
+  if (search.guide)
+    return (
+      <>
+        <div className="page">
+          {autosave.recovery ? (
+            <RecoveryBanner recovery={autosave.recovery} />
+          ) : null}
+          <ServerDraftBanner sync={serverDraft} />
+          <StrategyGuide
+            form={form}
+            schema={assist.schema}
+            transactions={transactions}
+            catalogs={catalogs}
+            snippetSource={assist.snippetSource}
+            source={document.source}
+            step={search.step}
+            onStep={(step) =>
+              void navigate({
+                to: ROUTE,
+                search: { ...search, step },
+                replace: true,
+                resetScroll: false,
+              })
+            }
+            onOpenGraph={(pointer) =>
+              leaveGuide({ path: pointer, view: "graph", recipe: true })
+            }
+            onOpenEditor={() => leaveGuide({ view: "graph" })}
+            onUndo={history.undo}
+            canUndo={history.depth.undo > 0}
+            review={
+              <>
+                <DiagnosticsPanel
+                  diagnostics={problems.diagnostics}
+                  stale={problems.stale}
+                  onSelect={(diagnostic) =>
+                    leaveGuide({
+                      view: "yaml",
+                      path: diagnostic.pointer === "" ? undefined : diagnostic.pointer,
+                    })
+                  }
+                />
+                <StrategyPreviewPanel
+                  document={document}
+                  executionPlans={executionPlans}
+                  environment={runSettings.environment}
+                />
+                <div className="strategy-guide__review-actions">
+                  <Button tone="primary" onClick={save} disabled={!canSave}>
+                    {t("guide.saveAndPrepare")}
+                  </Button>
+                  <Button tone="secondary" onClick={() => leaveGuide({ view: "graph" })}>
+                    {t("guide.openInEditor")}
+                  </Button>
+                  <span role="status">
+                    {canSave ? saveStatusText(document, status) : t("guide.saveBlocked")}
+                  </span>
+                </div>
+              </>
+            }
+          />
+          {/* 트랜잭션은 편집기 핸들로 적용된다. 안내 동안에도 편집기를 띄워 두되 보이지 않게 한다. */}
+          <div hidden>
+            <SourceEditor
+              state={document}
+              dispatch={dispatch}
+              assist={assist}
+              onEditorReady={editorOwner.onEditorReady}
+              onSelectionChange={outline.onEditorSelectionChange}
+            />
+          </div>
+        </div>
+        <DirtyLeaveGuard dirty={document.dirty && !leaving} acceptedRunId={null} />
+      </>
+    );
 
   return (
     <>

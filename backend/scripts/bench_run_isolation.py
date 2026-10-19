@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import statistics
 import subprocess
 import sys
@@ -31,7 +32,8 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-HOLDOUT_FLOOR = date(2020, 1, 2)
+from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
+
 TERMINAL = ("completed", "failed", "cancelled")
 
 try:
@@ -50,7 +52,7 @@ def _call(base: str, path: str, body: object | None = None, timeout: float = 60)
 
 
 def _percentile(values: list[float], fraction: float) -> float | None:
-    ordered = sorted(v for v in values if v == v)
+    ordered = sorted(values)
     if not ordered:
         return None
     return round(ordered[min(len(ordered) - 1, int(fraction * len(ordered)))], 1)
@@ -62,6 +64,7 @@ class _Sampler:
     def __init__(self, server: str | None) -> None:
         self._server = server
         self.health_ms: list[float] = []
+        self.health_failures = 0
         self.cores: list[float] = []
         self.available_gb: list[float] = []
         self._stop = threading.Event()
@@ -76,9 +79,10 @@ class _Sampler:
                 started = time.perf_counter()
                 try:
                     _call(self._server, "/api/v1/health", timeout=20)
-                    self.health_ms.append((time.perf_counter() - started) * 1e3)
                 except OSError:
-                    self.health_ms.append(float("nan"))
+                    # 시간초과·연결 실패도 그만큼 기다린 표본이다. 빼면 가장 나쁜 값이 사라진다
+                    self.health_failures += 1
+                self.health_ms.append((time.perf_counter() - started) * 1e3)
             if psutil is not None and time.perf_counter() - last >= 1.0:
                 self.cores.append(psutil.cpu_percent(None) / 100 * (psutil.cpu_count() or 1))
                 self.available_gb.append(psutil.virtual_memory().available / 2**30)
@@ -93,8 +97,9 @@ class _Sampler:
         self._stop.set()
         self._thread.join()
 
-    def summary(self) -> dict[str, float | None]:
+    def summary(self) -> dict[str, float | int | None]:
         return {
+            "health_failures": self.health_failures,
             "health_p50_ms": _percentile(self.health_ms, 0.5),
             "health_p95_ms": _percentile(self.health_ms, 0.95),
             "health_max_ms": _percentile(self.health_ms, 1.0),
@@ -110,15 +115,6 @@ def _run_request(spec_source: dict, start: str, end: str, cash: float) -> dict:
         "core": "rust",
         "initial_cash": cash,
     }
-
-
-def _wait(base: str, run_id: str, poll: float = 0.5) -> dict:
-    while True:
-        state = _call(base, f"/api/v1/backtests/{run_id}")
-        state = state.get("run", state)
-        if state["status"] in TERMINAL:
-            return state
-        time.sleep(poll)
 
 
 def _child(args: argparse.Namespace) -> None:
@@ -154,6 +150,8 @@ def _child(args: argparse.Namespace) -> None:
         "/api/v1/strategy-documents/compile",
         json={"source": Path(args.strategy).read_text(encoding="utf-8"), "format": "yaml"},
     ).json()
+    if compiled.get("spec") is None:
+        raise SystemExit(f"전략을 compile 하지 못했다 — diagnostics={compiled.get('diagnostics')}")
     source = {
         "kind": "inline_draft",
         "spec": compiled["spec"],
@@ -163,6 +161,8 @@ def _child(args: argparse.Namespace) -> None:
     response = client.post(
         "/api/v1/backtests", json=_run_request(source, args.start, args.end, args.cash)
     )
+    if response.status_code != 202:
+        raise SystemExit(f"run 접수 거절 — status={response.status_code} body={response.text}")
     run_id = response.json()["run"]["run_id"]
     while True:
         state = client.get(f"/api/v1/backtests/{run_id}").json()
@@ -171,12 +171,16 @@ def _child(args: argparse.Namespace) -> None:
             break
         time.sleep(0.2)
     stop.set()
+    client.close()
+    # Windows 에서는 아직 열린 DB 핸들이 있을 수 있어 지우지 못한 파일은 남긴다
+    shutil.rmtree(tmp, ignore_errors=True)
     print(
         json.dumps(
             {
                 "run_s": round(time.perf_counter() - run_started, 1),
                 "boot_s": round(boot_s, 1),
                 "status": state["status"],
+                "error": state.get("error"),
                 "peak_rss_mb": round(peak["rss"] / 2**20) if psutil is not None else None,
             }
         )
@@ -205,12 +209,21 @@ def _measure_thread(args: argparse.Namespace) -> dict:
     ]
     if len(set(run_ids)) != len(run_ids):
         raise SystemExit("동시 run 이 하나로 합쳐졌다 — 요청을 서로 다르게 만들어야 한다")
-    walls: list[float] = []
-    statuses: list[str] = []
-    for run_id in run_ids:
-        statuses.append(_wait(args.server, run_id)["status"])
-        walls.append(round(time.perf_counter() - started, 1))
-    return {"wall_s": walls, "status": statuses}
+    # 모든 run 을 함께 살펴 끝난 시각을 각자 적는다(차례로 기다리면 뒤 run 의 시간이 부푼다)
+    finished: dict[str, tuple[float, str]] = {}
+    while len(finished) < len(run_ids):
+        for run_id in run_ids:
+            if run_id in finished:
+                continue
+            state = _call(args.server, f"/api/v1/backtests/{run_id}")
+            state = state.get("run", state)
+            if state["status"] in TERMINAL:
+                finished[run_id] = (round(time.perf_counter() - started, 1), state["status"])
+        time.sleep(0.5)
+    return {
+        "wall_s": [finished[run_id][0] for run_id in run_ids],
+        "status": [finished[run_id][1] for run_id in run_ids],
+    }
 
 
 def _measure_process(args: argparse.Namespace) -> dict:
@@ -230,7 +243,7 @@ def _measure_process(args: argparse.Namespace) -> dict:
         subprocess.Popen(
             [*command, "--cash", str(args.cash + index)],
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
         )
@@ -238,8 +251,13 @@ def _measure_process(args: argparse.Namespace) -> dict:
     ]
     rows = []
     for child in children:
-        out, _ = child.communicate()
-        rows.append(json.loads(out.strip().splitlines()[-1]))
+        out, err = child.communicate()
+        lines = out.strip().splitlines()
+        if child.returncode != 0 or not lines:
+            raise SystemExit(
+                f"측정 자식 프로세스 실패 — exit={child.returncode} stderr 끝={err.strip()[-2000:]}"
+            )
+        rows.append(json.loads(lines[-1]))
     return {
         "wall_s": [row["run_s"] for row in rows],
         "boot_s": [row["boot_s"] for row in rows],
@@ -260,9 +278,9 @@ def main() -> None:
     parser.add_argument("--cash", type=float, default=100_000_000.0)
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if date.fromisoformat(args.start) < HOLDOUT_FLOOR:
+    if date.fromisoformat(args.start) < RESEARCH_START:
         raise SystemExit(
-            f"구간 시작이 홀드아웃 하한보다 이르다 — start={args.start} floor={HOLDOUT_FLOOR}"
+            f"구간 시작이 연구 하한보다 이르다 — start={args.start} floor={RESEARCH_START}"
         )
     if args.child:
         _child(args)

@@ -63,7 +63,8 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 **Acceptance**:
 - `backend/scripts/bench_run_isolation.py` 하나를 둔다. BENCHMARK.md의 표를 다시 만든다(스레드 1·2, 프로세스 1·2, 구간 1년·최장 허용).
   실행은 `uv run --no-sync --with psutil python scripts/bench_run_isolation.py`다.
-- 라이브 서버 DB를 건드리지 않는다. 임시 디렉터리 격리(`build_http_app`에 경로를 명시)를 쓴다.
+- 라이브 DB를 건드리지 않는다. process 모드는 임시 디렉터리 격리(`build_http_app`에 경로를 명시)를 쓰고, thread 모드는 DB·산출물
+  경로를 임시 디렉터리로 준 측정 전용 서버를 대상으로 한다(BENCHMARK 절차).
 - 홀드아웃 하한(2020-01-02) 밖 구간을 인자로 받으면 거절한다.
 - `tools/quant_study_dev/plan_progress.py`의 `PROFILES`에 `run-worker-process`를 더하고, `--check`를 통과한다.
 
@@ -86,6 +87,9 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 - 기존 backend 테스트가 수정 없이 전부 통과한다. 테스트를 고쳐야 한다면, 그 이유가 "스레드 이름·`_service.Thread`
   monkeypatch처럼 전송 세부에 묶인 단언"일 때만 고치고, 그 목록을 PR 본문에 적는다.
 
+- 계약은 spec D13(`start`·`cancel`·listener·`shutdown`)이고 잠금 규율은 D12다. 진행률 구간 상수는 계산 함수 모듈이 소유한다(D10).
+- 새 노드 `run_thread`를 `.claude/rules/backend-package-boundary.md`에 적는다.
+
 **Non-goal**: 프로세스, 동작 변경, API 변경.
 
 **예상 파일**: `_service.py`, `_computation.py`(새), `ports/outgoing/run_execution.py`(새),
@@ -107,20 +111,27 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
   - V-3 결과 동일성: 같은 요청을 두 모드로 돌려 지문, tape 해시, 지표가 같다
   - 한글 메시지 왕복
 - 하위 프로세스 경로는 테스트가 직접 격리한다(`testing.md`).
+- 잠금 규율(D12): 부팅 중인 worker에 큰 job을 보내는 동안에도 `GET /health`가 막히지 않는다(테스트로 확인).
+- CI에 Windows backend job을 더한다. worker 통합 테스트만 돌리며 예산은 10분 이하다(opt-in 단계부터 Windows 경로를 밟는다).
+- 새 노드 `run_worker_process`·`bootstrap/run_worker`를 `backend-package-boundary.md`에 적는다.
 
 **Non-goal**: 취소, 고장, 예비 worker, 기본값 변경.
 
-### W1-03 — 취소, 고장, 데이터 판본
+### W1-03 — 취소, 고장, 판본
 
-**Intent**: spec D5·D6·D11.
+**Intent**: spec D5·D6·D11. 종결 발행은 감독 스레드 하나가 맡는다(D5 순서 1~4).
 
 **Acceptance**:
 - 취소: tape·data·engine·artifact 각 단계에서 취소하면 2초 안에 `cancelled`가 된다(V-4). staging과 결과 디렉터리가 남지 않는다.
-  완료와 취소가 경합해도 현행 선형화 테스트(`test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays`)가
-  프로세스 모드에서도 통과한다.
-- worker 강제 종료(테스트가 kill)는 `backtest.run.worker_exited`로 닫는다. 부모가 사라지면(stdin을 닫으면) worker가 스스로 끝난다.
-- snapshot이 다르면 `backtest.run.data_snapshot_changed`로 닫는다.
-- e2e hold(`hold_seconds`)가 프로세스 모드에서도 같은 의미로 동작한다.
+  완료와 취소의 경합은 부모 쪽 장치로 재현한다. 감독 스레드가 `committed`를 받은 뒤 잠금을 잡기 전 barrier에서 취소를 넣고,
+  결과가 `cancelled`이며 결과 디렉터리가 지워졌는지 본다. worker 안의 commit에는 같은 프로세스 barrier를 걸 수 없기 때문이다
+  (현행 `_CommitBarrierStore`, `tests/integration/test_backtest_http_api.py:279`).
+- worker 강제 종료(테스트가 kill)는 `backtest.run.worker_exited`로 닫고, 이미 rename된 결과 디렉터리를 지운다.
+- 부모 사망: 중간 부모 프로세스가 worker를 띄운 뒤 그 부모를 실제로 kill하면 worker가 끝난다(Windows Job Object, POSIX EOF).
+  stdin을 닫는 것만으로 대신하지 않는다.
+- 판본 묶음(D6: snapshot·엔진 규칙·지표 레지스트리·팩터 평가·팩터 레지스트리·코드 지문)이 다르면 `backtest.run.worker_mismatch`로 닫는다.
+- 서버 정상 종료(lifespan) 때 도는 worker가 정리된다.
+- e2e hold가 프로세스 모드에서도 같은 의미로 동작한다(D11 `engine_ready` → 부모 판정 → `proceed`). 실험이 나중에 이은 사용자 run도 붙잡힌다.
 - 실패 코드 두 개를 `RunFailureCode`에 더하고, OpenAPI·SDK 재생성 커밋과 frontend `backtest.run.error.*` 번역을 함께 넣는다.
 
 **Non-goal**: 예비 worker, 메모리 가드.
@@ -129,19 +140,22 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 
 ### W2-01 — 예비 worker
 
-**Intent**: spec D7. 배정 지연(V-5)과 e2e 시간(V-7)을 지킨다.
+**Intent**: spec D7. 배정 지연(V-5)과 e2e 시간(V-7)을 지킨다. V-7은 이 PR의 gate다.
 
 **Acceptance**:
-- 빈 슬롯이 있으면 예비 worker 하나를 `ready`까지 띄워 둔다. 쓰면 바로 새 예비 worker를 띄운다.
-- 예비 worker 부팅 실패 정책(spec 8절)을 따른다. 서버 종료와 reload 때 예비 worker도 정리된다.
-- 프로세스 모드로 전체 `npm run test:e2e`를 돌린 시간을 스레드 모드와 비교해 PR 본문에 남긴다.
+- 슬롯과 무관하게 `ready`까지 부팅한 예비 worker를 항상 1개 둔다. 쓰면 바로 새 예비를 띄운다.
+- 예비 부팅 실패·판본 불일치 정책은 spec D7을 따른다. 서버 종료와 reload 때 예비 worker도 정리된다.
+- 프로세스 모드 전체 `npm run test:e2e`(Windows) 시간이 스레드 모드 대비 5% 이하로 늘어난다(V-7). 두 시간을 PR 본문에 남긴다.
 
 ### W2-02 — 메모리 가드
 
 **Intent**: spec D8.
 
 **Acceptance**:
-- 가용 물리 메모리가 예약치보다 작으면, 슬롯이 비어도 배정하지 않고 대기열에 둔다. 도는 run이 없으면 가드를 적용하지 않는다.
+- spec D8의 식(가용 − Σ 도는 run의 남은 예약분 ≥ 예약치)을 대기열에서 꺼내기 전에 판정한다. 도는 run이 없으면 가드를 적용하지 않는다.
+- 연달아 접수한 두 run 가운데 둘째가 가드에 걸리는지 테스트로 확인한다(첫 run의 RSS가 아직 작을 때).
+- 실험 trial 처리량(가드 전후, 1년 구간 실험)을 재서 PR 본문에 남긴다.
+- US-SM-15 비고에 "메모리가 모자라면 슬롯이 비어도 `queued`로 기다린다"를 적는다.
 - worker가 보고한 최대 RSS를 로그에 남긴다.
 - 가용 메모리 조회는 부모의 작은 adapter 하나가 소유한다. Windows는 `GlobalMemoryStatusEx`, Linux는 `/proc/meminfo`를 쓰고, 새
   라이브러리는 들이지 않는다.
@@ -154,10 +168,9 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 **Intent**: `process`를 기본으로 바꾸고, 문서와 규칙을 한 PR에서 맞춘다(spec 7절).
 
 **Acceptance**:
-- BENCHMARK 재측정으로 V-1, V-2, V-4, V-5, V-6을 확인하고 숫자를 남긴다.
-- CI에 Windows backend job을 더한다. worker 통합 테스트만 돌리며 예산은 10분 이하다.
-- `strategy-workbench-sot.md` 75·87·90행과 "백테스트 run 접수" 행, validation-lab spec D6 개정 링크, `backend/README.md`, `README.md`를
-  고친다.
+- BENCHMARK 재측정으로 V-1, V-2, V-4, V-5, V-6, V-7을 확인하고 숫자를 남긴다(부모가 진행 줄을 파싱하는 실제 제품 경로로 잰다).
+- `strategy-workbench-sot.md` 75·87·90행과 "백테스트 run 접수" 행, validation-lab spec D6 개정 링크, `backend/README.md`, `README.md`,
+  `.claude/rules/testing.md`(하위 프로세스 경로 격리 예)를 고친다.
 - 실험 남은 시간 어림을 슬롯 병렬로 나눌지는 V-2 결과로 정한다. 사용자 문구가 바뀌면 US-SM-15 수용 기준과 e2e를 고친다.
 - 전체 e2e가 green이다.
 

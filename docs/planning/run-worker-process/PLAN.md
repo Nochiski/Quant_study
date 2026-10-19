@@ -73,16 +73,16 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `W1-01` | 계산 경계 추출, `RunExecutionPort`, `run_thread` adapter(동작 불변) | W0-01, D6 개정 승인 | `PLANNED` | - |
-| [ ] | `W1-02` | `bootstrap/run_worker`, IPC v1, `run_worker_process` adapter(opt-in) | W1-01 | `PLANNED` | - |
-| [ ] | `W1-03` | 취소=종료, worker 고장, 부모 사망, 판본 대조, e2e hold, 실패 코드 2개 | W1-02 | `PLANNED` | - |
+| [ ] | `W1-01` | 계산 경계 추출, `RunExecutionPort`, `run_thread` adapter(동작 불변) | W0-01 | `PLANNED` | - |
+| [ ] | `W1-02` | `bootstrap/run_worker`, IPC v1, `run_worker_process` adapter(opt-in), Windows backend job | W1-01 | `PLANNED` | - |
+| [ ] | `W1-03` | 취소=종료(감독 스레드 종결), worker 고장, 부모 사망(Job Object), 판본 묶음 대조, e2e hold 게이트, 실패 코드 2개 | W1-02 | `PLANNED` | - |
 
 ## W2 — 지연과 메모리
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `W2-01` | 예비 worker | W1-03 | `PLANNED` | - |
-| [ ] | `W2-02` | 메모리 가드(예약치, 최대 RSS 기록) | W2-01 | `PLANNED` | - |
+| [ ] | `W2-01` | 예비 worker 항상 1개, V-7 gate | W1-03 | `PLANNED` | - |
+| [ ] | `W2-02` | 메모리 가드(도는 run 남은 예약분 차감, 최대 RSS 기록) | W2-01 | `PLANNED` | - |
 
 ## W3 — 기본값
 
@@ -115,3 +115,4 @@ progress_percent: 0
 ## 변경 기록
 
 - 2026-10-19: 기획 패키지 초안. 측정 근거는 [BENCHMARK.md](./BENCHMARK.md).
+- 2026-10-20: #569 1차 리뷰 REQUEST_CHANGES(P2 7건·P3 15건) 반영 — D5 종결 순서, D6 판본 묶음, D7 예비 1개 상시, D8 남은 예약분 차감, D11 엔진 게이트, D12 잠금 규율, D13 port 계약, Windows job을 W1-02로.

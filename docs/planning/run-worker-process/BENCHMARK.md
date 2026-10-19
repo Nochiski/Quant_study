@@ -12,7 +12,11 @@
 
 ## 절차
 
-1. 서버(`uv run dev`, duckdb 어댑터)에 도는 run이 없는지 확인한다.
+1. 스레드 측정은 **측정 전용 서버**를 대상으로 한다. 라이브 DB·산출물에 측정 run이 쌓이지 않게 경로를 임시 디렉터리로 준다:
+   `STRATEGY_WORKBENCH_DB_PATH`·`STRATEGY_WORKBENCH_RESEARCH_DB_PATH`·`STRATEGY_WORKBENCH_CONTINUOUS_DB_PATH`·
+   `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH`·`STRATEGY_WORKBENCH_ARTIFACT_ROOT`, 그리고 `STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb`·
+   `STRATEGY_WORKBENCH_EQUITY_ROOT`. 2026-10-19 측정은 개발 서버에 직접 보냈다(인라인 초안이라 계열·N은 늘지 않았다).
+   서버에 도는 run이 없는지 확인한다.
 2. 구간마다 **워밍업 run 1회**를 별도 프로세스로 돌려 버린다(OS 파일 캐시).
 3. 측정 중에는 테스트·빌드 같은 무거운 작업을 돌리지 않는다.
 4. 측정 방식:
@@ -45,7 +49,7 @@ uv run --no-sync --with psutil python scripts/bench_run_isolation.py \
 
 - 스레드 2개는 혼자 실행의 1.86배가 걸린다. GIL이 두 run을 직렬로 돌린다. 프로세스 2개는 혼자 실행과 거의 같다(진짜 병렬).
   run 2개를 끝내는 데 스레드는 83초, 프로세스는 44초다(처리량 1.9배).
-- run이 도는 동안 API p95는 스레드 721ms, 프로세스 2.4ms다(약 300배).
+- run이 도는 동안 API p95는 스레드 721ms, 프로세스 2.4ms다(약 300배). 프로세스 값은 부모가 worker 진행 줄을 파싱하지 않는 시제품(유휴 서버) 값이다. 실제 제품 경로 값은 W3-01이 다시 잰다.
 - 1년 run 하나의 최대 RSS는 2.0GB다. 2개를 동시에 돌리면 가용 메모리가 1.8GB까지 떨어졌다.
 
 ### 2. 5년·6.7년 구간(메모리)
@@ -59,6 +63,9 @@ uv run --no-sync --with psutil python scripts/bench_run_isolation.py \
 - 5년 run 두 개를 서버 안에서 동시에 돌렸을 때 각 724초가 걸렸고, 서버 working set이 최대 8.6GB였다. 다만 다른 작업의 부하가 함께 있었다.
   끝난 뒤에도 서버 private commit 1.67GB가 남았다.
 - 16GB PC에서 6.7년 run 두 개(각 약 7GB 추정)는 동시에 돌리지 않았다. 페이징으로 PC 전체가 멈출 위험이 있다.
+
+> 3~5절은 시제품 측정이다. 측정 스크립트(GC·재검증 패치 A/B, Python 3.13, py-spy, numpy·CuPy 커널)는 저장소에 없다.
+> tape 열 지향화 initiative의 대조 하네스가 재현 도구가 된다.
 
 ### 3. 지금 구조 안에서의 개선 시도(1년 구간, 기준선과 3회 교대, 최솟값 비교)
 

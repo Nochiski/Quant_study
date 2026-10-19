@@ -151,9 +151,11 @@ class RunComputation:
         except RunCancelledError:
             return RunCancelled()
         except BaseException as error:
-            failed = RunFailed(_failure_code(error), _describe_failure(error), exception=error)
+            # 프레임을 먼저 비운다. 실패 값을 지역 변수에 두면 이 프레임(아직 도는 중이라
+            # 비울 수 없다)과 순환을 이뤄 job·listener 가 GC 를 기다린다. 실패 분류는 예외
+            # 타입·메시지만 읽는다.
             _release_frames(error)
-            return failed
+            return RunFailed(_failure_code(error), _describe_failure(error), exception=error)
 
     def _commit(
         self, job: RunJob, progress: RunProgress, cancelled: Callable[[], bool]

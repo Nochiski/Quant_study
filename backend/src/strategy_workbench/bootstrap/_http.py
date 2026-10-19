@@ -185,6 +185,7 @@ def build_http_app(
         backtest_runs=container.backtest_runs,
         experiments=container.experiments,
         continuous_accounts=container.continuous_accounts,
+        factor_library=container.factor_library,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,

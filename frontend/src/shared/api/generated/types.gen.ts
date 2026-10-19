@@ -121,6 +121,32 @@ export type AccountReportSummary = {
 };
 
 /**
+ * AddLibraryVersionBody
+ */
+export type AddLibraryVersionBody = {
+  /**
+   * Expected Latest
+   */
+  expected_latest: number;
+  /**
+   * Factor
+   */
+  factor: {
+    [key: string]: unknown;
+  };
+  /**
+   * Note
+   */
+  note?: string | null;
+  /**
+   * Parameters
+   */
+  parameters?: Array<{
+    [key: string]: unknown;
+  }>;
+};
+
+/**
  * ApplicableCondition
  */
 export type ApplicableCondition = {
@@ -3199,6 +3225,13 @@ export type FactorGraphValidation = {
 export type FactorKind = "market" | "size" | "value" | "momentum";
 
 /**
+ * FactorMatchStatus
+ *
+ * 전략 문서의 팩터 항목이 라이브러리와 어떤 관계인가.
+ */
+export type FactorMatchStatus = "current" | "outdated" | "modified";
+
+/**
  * FactorPeriodGap
  */
 export type FactorPeriodGap =
@@ -3736,6 +3769,233 @@ export type IntegerParameter = {
    * Step
    */
   step?: number;
+};
+
+/**
+ * LibraryDiagnosticBody
+ */
+export type LibraryDiagnosticBody = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+  /**
+   * Severity
+   */
+  severity: "error" | "warning" | "info";
+};
+
+/**
+ * LibraryErrorDetail
+ */
+export type LibraryErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "library.request_invalid"
+    | "library.factor.invalid"
+    | "library.factor.not_found"
+    | "library.factor.key_exists"
+    | "library.version.unchanged"
+    | "library.version.conflict";
+  /**
+   * Current Version
+   */
+  current_version?: number | null;
+  /**
+   * Diagnostics
+   */
+  diagnostics?: Array<LibraryDiagnosticBody> | null;
+  /**
+   * Existing Library Id
+   */
+  existing_library_id?: string | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * LibraryErrorResponse
+ */
+export type LibraryErrorResponse = {
+  detail: LibraryErrorDetail;
+};
+
+/**
+ * LibraryFactorAvailabilityBody
+ */
+export type LibraryFactorAvailabilityBody = {
+  /**
+   * Available
+   */
+  available: boolean;
+  /**
+   * Missing Fields
+   */
+  missing_fields: Array<string>;
+  /**
+   * Reasons
+   */
+  reasons: Array<string>;
+};
+
+/**
+ * LibraryFactorBody
+ */
+export type LibraryFactorBody = {
+  availability: LibraryFactorAvailabilityBody;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Description
+   */
+  description: string;
+  /**
+   * Hidden
+   */
+  hidden: boolean;
+  /**
+   * Key
+   */
+  key: string;
+  /**
+   * Latest Version
+   */
+  latest_version: number;
+  /**
+   * Library Id
+   */
+  library_id: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Versions
+   */
+  versions: Array<LibraryFactorVersionBody>;
+};
+
+/**
+ * LibraryFactorList
+ */
+export type LibraryFactorList = {
+  /**
+   * Items
+   */
+  items: Array<LibraryFactorBody>;
+};
+
+/**
+ * LibraryFactorMatchBody
+ */
+export type LibraryFactorMatchBody = {
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Factor Index
+   */
+  factor_index: number;
+  /**
+   * Latest Version
+   */
+  latest_version: number;
+  /**
+   * Library Id
+   */
+  library_id: string;
+  /**
+   * Matched Version
+   */
+  matched_version: number | null;
+  status: FactorMatchStatus;
+};
+
+/**
+ * LibraryFactorMatchesBody
+ */
+export type LibraryFactorMatchesBody = {
+  /**
+   * Compiled
+   */
+  compiled: boolean;
+  /**
+   * Matches
+   */
+  matches: Array<LibraryFactorMatchBody>;
+};
+
+/**
+ * LibraryFactorVersionBody
+ */
+export type LibraryFactorVersionBody = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Factor
+   */
+  factor: {
+    [key: string]: unknown;
+  };
+  /**
+   * Identity
+   */
+  identity: string;
+  /**
+   * Note
+   */
+  note: string | null;
+  /**
+   * Parameters
+   */
+  parameters: Array<{
+    [key: string]: unknown;
+  }>;
+  /**
+   * Version
+   */
+  version: number;
+};
+
+/**
+ * LibraryMatchesBody
+ */
+export type LibraryMatchesBody = {
+  /**
+   * Format
+   */
+  format: "yaml" | "json";
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
+ * LibraryVisibilityBody
+ */
+export type LibraryVisibilityBody = {
+  /**
+   * Hidden
+   */
+  hidden: boolean;
 };
 
 /**
@@ -5663,6 +5923,36 @@ export type SaveDocumentRequest = {
    * Source
    */
   source: string;
+};
+
+/**
+ * SaveLibraryFactorBody
+ */
+export type SaveLibraryFactorBody = {
+  /**
+   * Description
+   */
+  description?: string;
+  /**
+   * Factor
+   */
+  factor: {
+    [key: string]: unknown;
+  };
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Note
+   */
+  note?: string | null;
+  /**
+   * Parameters
+   */
+  parameters?: Array<{
+    [key: string]: unknown;
+  }>;
 };
 
 /**
@@ -10188,6 +10478,236 @@ export type GetExperimentWalkForwardResponses = {
 
 export type GetExperimentWalkForwardResponse =
   GetExperimentWalkForwardResponses[keyof GetExperimentWalkForwardResponses];
+
+export type ListLibraryFactorsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Include Hidden
+     */
+    include_hidden?: boolean;
+  };
+  url: "/api/v1/factor-library";
+};
+
+export type ListLibraryFactorsErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type ListLibraryFactorsError =
+  ListLibraryFactorsErrors[keyof ListLibraryFactorsErrors];
+
+export type ListLibraryFactorsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorList;
+};
+
+export type ListLibraryFactorsResponse =
+  ListLibraryFactorsResponses[keyof ListLibraryFactorsResponses];
+
+export type SaveLibraryFactorData = {
+  body: SaveLibraryFactorBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/factor-library";
+};
+
+export type SaveLibraryFactorErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type SaveLibraryFactorError =
+  SaveLibraryFactorErrors[keyof SaveLibraryFactorErrors];
+
+export type SaveLibraryFactorResponses = {
+  /**
+   * Successful Response
+   */
+  201: LibraryFactorBody;
+};
+
+export type SaveLibraryFactorResponse =
+  SaveLibraryFactorResponses[keyof SaveLibraryFactorResponses];
+
+export type MatchLibraryFactorsData = {
+  body: LibraryMatchesBody;
+  path?: never;
+  query?: never;
+  url: "/api/v1/factor-library/matches";
+};
+
+export type MatchLibraryFactorsErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type MatchLibraryFactorsError =
+  MatchLibraryFactorsErrors[keyof MatchLibraryFactorsErrors];
+
+export type MatchLibraryFactorsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorMatchesBody;
+};
+
+export type MatchLibraryFactorsResponse =
+  MatchLibraryFactorsResponses[keyof MatchLibraryFactorsResponses];
+
+export type GetLibraryFactorData = {
+  body?: never;
+  path: {
+    /**
+     * Library Id
+     */
+    library_id: string;
+  };
+  query?: never;
+  url: "/api/v1/factor-library/{library_id}";
+};
+
+export type GetLibraryFactorErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type GetLibraryFactorError =
+  GetLibraryFactorErrors[keyof GetLibraryFactorErrors];
+
+export type GetLibraryFactorResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorBody;
+};
+
+export type GetLibraryFactorResponse =
+  GetLibraryFactorResponses[keyof GetLibraryFactorResponses];
+
+export type SetLibraryFactorVisibilityData = {
+  body: LibraryVisibilityBody;
+  path: {
+    /**
+     * Library Id
+     */
+    library_id: string;
+  };
+  query?: never;
+  url: "/api/v1/factor-library/{library_id}";
+};
+
+export type SetLibraryFactorVisibilityErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type SetLibraryFactorVisibilityError =
+  SetLibraryFactorVisibilityErrors[keyof SetLibraryFactorVisibilityErrors];
+
+export type SetLibraryFactorVisibilityResponses = {
+  /**
+   * Successful Response
+   */
+  200: LibraryFactorBody;
+};
+
+export type SetLibraryFactorVisibilityResponse =
+  SetLibraryFactorVisibilityResponses[keyof SetLibraryFactorVisibilityResponses];
+
+export type AddLibraryFactorVersionData = {
+  body: AddLibraryVersionBody;
+  path: {
+    /**
+     * Library Id
+     */
+    library_id: string;
+  };
+  query?: never;
+  url: "/api/v1/factor-library/{library_id}/versions";
+};
+
+export type AddLibraryFactorVersionErrors = {
+  /**
+   * Not Found
+   */
+  404: LibraryErrorResponse;
+  /**
+   * Conflict
+   */
+  409: LibraryErrorResponse;
+  /**
+   * Unprocessable Entity
+   */
+  422: LibraryErrorResponse;
+};
+
+export type AddLibraryFactorVersionError =
+  AddLibraryFactorVersionErrors[keyof AddLibraryFactorVersionErrors];
+
+export type AddLibraryFactorVersionResponses = {
+  /**
+   * Successful Response
+   */
+  201: LibraryFactorBody;
+};
+
+export type AddLibraryFactorVersionResponse =
+  AddLibraryFactorVersionResponses[keyof AddLibraryFactorVersionResponses];
 
 export type GetFactorCatalogData = {
   body?: never;

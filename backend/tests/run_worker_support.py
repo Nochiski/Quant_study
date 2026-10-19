@@ -34,6 +34,10 @@ if stage == "before_main":
 elif stage == "slow_boot":
     # job 을 읽기 전에 잠깐 잠든다. 부모의 큰 job 쓰기가 그동안 파이프에서 막힌다.
     time.sleep(2.0)
+elif stage == "watch_off":
+    # 부모 사망 감시 스레드를 띄우지 않는다. commit 직전 확인만이 닫힌 stdin 을 볼 수 있다.
+    from strategy_workbench.adapters.outbound.run_worker_process import _worker
+    _worker._ParentWatch.start = lambda self: None
 elif stage == "tape":
     from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
     PortfolioDesignService.run_pipeline = lambda self, *args, **kwargs: hold()

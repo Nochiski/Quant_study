@@ -35,6 +35,13 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.execution im
     ProcessRunExecution,
     WorkerSettings,
 )
+from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol import (
+    CommittedMessage,
+    FailedMessage,
+    ProgressMessage,
+    decode_event,
+    encode_job,
+)
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataPort,
     RunCancelled,
@@ -232,6 +239,34 @@ def test_a_worker_with_other_versions_fails_the_run_as_a_mismatch(tmp_path: Path
     assert "mismatched=snapshot_id,code_fingerprint" in outcome.error
     assert "restart the server" in outcome.error
     assert _leftovers(tmp_path / "artifacts", "run-mismatch") == []
+
+
+def test_a_worker_whose_parent_closed_stdin_does_not_commit(tmp_path: Path) -> None:
+    """commit 직전 확인은 감시 스레드가 움직이지 못해도 닫힌 stdin 을 직접 본다(D5, #581 리뷰 P3-3).
+
+    감시 스레드를 끈 worker 에 job 을 쓰고 곧바로 stdin 을 닫는다. 그 worker 는 계산을 마치고도
+    결과를 쓰지 않고 `EXIT_PARENT_GONE`(3)으로 끝나야 한다.
+    """
+    root = tmp_path / "artifacts"
+    run_id = "run-parent-closed"
+    worker = subprocess.Popen(
+        hook_command("watch_off", tmp_path / "unused-marker"),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        cwd=_BACKEND,
+    )
+    stdout, _ = worker.communicate(
+        encode_job(resolved_job(run_id), WorkerSettings("mock", None, root)).encode("utf-8"),
+        timeout=TIMEOUT_S,
+    )
+
+    events = [decode_event(line) for line in stdout.decode("utf-8").splitlines()]
+    assert worker.returncode == 3
+    # 계산은 artifact 단계까지 갔지만 결과 줄도 결과 폴더도 없다.
+    assert any(isinstance(event, ProgressMessage) and event.stage == "artifact" for event in events)
+    assert not any(isinstance(event, CommittedMessage | FailedMessage) for event in events)
+    assert not root.exists() or _leftovers(root, run_id) == []
 
 
 def test_a_supervision_error_still_ends_the_worker_and_removes_its_leftovers(

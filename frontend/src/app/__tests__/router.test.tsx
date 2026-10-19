@@ -1340,7 +1340,10 @@ describe("App Shell routes", () => {
     expect(row).toHaveTextContent(
       "실행 오류: 세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).",
     );
-    const reason = within(row).getByRole("group");
+    // 행에는 접힌 "재현 정보"도 있어 실패 사유 묶음을 이름으로 고른다.
+    const reason = within(row)
+      .getAllByRole("group")
+      .find((group) => group.textContent?.includes("서버 사유"))!;
     expect(reason).toHaveTextContent("서버 사유");
     expect(reason).not.toHaveAttribute("open");
     expect(

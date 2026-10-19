@@ -15,7 +15,9 @@ from strategy_workbench.adapters.outbound.run_worker_process._worker import _Pro
 from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol import (
     PROTOCOL_VERSION,
     CommittedMessage,
+    EngineReadyMessage,
     FailedMessage,
+    ProceedMessage,
     ProgressMessage,
     ProtocolError,
     ReadyMessage,
@@ -24,8 +26,10 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol imp
     WorkerSettings,
     decode_event,
     decode_job,
+    decode_proceed,
     encode_event,
     encode_job,
+    encode_proceed,
 )
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
@@ -44,11 +48,19 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
     StrategySourceKind,
 )
-from strategy_workbench.domain.strategy.facade.specification import strategy_spec_hash
+from strategy_workbench.domain.strategy.facade.specification import (
+    ParameterValue,
+    strategy_spec_hash,
+)
 
 
-def resolved_job(run_id: str, *, lineage_strategy_id: str | None = None) -> RunJob:
-    """mock 어댑터가 답하는 구간의 템플릿 전략 run 하나."""
+def resolved_job(
+    run_id: str,
+    *,
+    lineage_strategy_id: str | None = None,
+    parameter_values: dict[str, ParameterValue] | None = None,
+) -> RunJob:
+    """mock 어댑터가 답하는 구간의 템플릿 전략 run 하나. 파라미터를 주지 않으면 실제로 돈다."""
     strategy = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "x").template()
     environment = RunEnvironment(
         start=date(2026, 1, 2), end=date(2026, 2, 20), universe_id="krx.common-stock"
@@ -61,7 +73,7 @@ def resolved_job(run_id: str, *, lineage_strategy_id: str | None = None) -> RunJ
             request,
             strategy=strategy,
             environment=environment,
-            parameter_values={"n": 3, "on": True, "rate": 0.5, "name": "가"},
+            parameter_values=parameter_values or {},
         ),
         provenance=StrategyProvenance(
             kind=StrategySourceKind.INLINE_DRAFT,
@@ -75,16 +87,22 @@ def resolved_job(run_id: str, *, lineage_strategy_id: str | None = None) -> RunJ
 
 
 def test_job_line_rebuilds_the_resolved_spec_and_settings(tmp_path: Path) -> None:
-    job = resolved_job("run-1", lineage_strategy_id="계열")
-    settings = WorkerSettings("duckdb", tmp_path / "원장", tmp_path / "artifacts")
+    # 값의 타입이 줄을 오가며 바뀌지 않는지 보려고 문서에 없는 파라미터 값도 싣는다(줄만 본다).
+    job = resolved_job(
+        "run-1",
+        lineage_strategy_id="계열",
+        parameter_values={"n": 3, "on": True, "rate": 0.5, "name": "가"},
+    )
+    settings = WorkerSettings("duckdb", tmp_path / "원장", tmp_path / "artifacts", engine_gate=True)
 
     line = encode_job(job, settings)
     decoded = decode_job(line)
 
     assert line.endswith("\n") and line.count("\n") == 1
     assert "계열" in line  # 한글은 이스케이프하지 않는 UTF-8 이다
-    assert decoded.job == job
-    assert decoded.settings == settings
+    # `==` 는 1 과 1.0·True 를 같다고 본다. 값의 타입까지 같은지 repr 로 본다(#575 리뷰 P3).
+    assert repr(decoded.job) == repr(job)
+    assert repr(decoded.settings) == repr(settings)
 
 
 @pytest.mark.parametrize(
@@ -92,6 +110,7 @@ def test_job_line_rebuilds_the_resolved_spec_and_settings(tmp_path: Path) -> Non
     [
         ReadyMessage(VersionBundle("snap:판", "engine-v7", "metric-v5", "fe-v1", "fr-v1", "c0de")),
         ProgressMessage("tape", 0.25, "팩터 계산"),
+        EngineReadyMessage(),
         CommittedMessage(
             RunCommitted(
                 sha256="0" * 64,
@@ -105,7 +124,22 @@ def test_job_line_rebuilds_the_resolved_spec_and_settings(tmp_path: Path) -> Non
     ],
 )
 def test_event_lines_round_trip(event: WorkerEvent) -> None:
-    assert decode_event(encode_event(event)) == event
+    assert repr(decode_event(encode_event(event))) == repr(event)
+
+
+def test_proceed_line_round_trips_and_nothing_else_passes_for_it() -> None:
+    assert repr(decode_proceed(encode_proceed())) == repr(ProceedMessage())
+    with pytest.raises(ProtocolError) as error:
+        decode_proceed(encode_event(EngineReadyMessage()))
+    assert error.value.reason == "unexpected_type"
+
+
+def test_version_bundles_name_the_items_that_differ() -> None:
+    server = VersionBundle("snap", "engine-v7", "metric-v5", "fe-v1", "fr-v1", "c0de")
+    worker = VersionBundle("snap2", "engine-v7", "metric-v5", "fe-v1", "fr-v1", "beef")
+
+    assert server.mismatched(server) == ()
+    assert server.mismatched(worker) == ("snapshot_id", "code_fingerprint")
 
 
 def _with_version(line: str, version: object) -> str:
@@ -119,10 +153,11 @@ def test_both_directions_reject_another_protocol_version(tmp_path: Path, version
     job_line = encode_job(resolved_job("run-1"), WorkerSettings("mock", None, tmp_path))
     event_line = encode_event(ProgressMessage("tape", 0.1, "x"))
 
-    with pytest.raises(ProtocolError, match="protocol version mismatch"):
+    with pytest.raises(ProtocolError, match="protocol version mismatch") as job_error:
         decode_job(_with_version(job_line, version))
-    with pytest.raises(ProtocolError, match="protocol version mismatch"):
+    with pytest.raises(ProtocolError, match="protocol version mismatch") as event_error:
         decode_event(_with_version(event_line, version))
+    assert job_error.value.reason == event_error.value.reason == "version_mismatch"
 
 
 @pytest.mark.parametrize(

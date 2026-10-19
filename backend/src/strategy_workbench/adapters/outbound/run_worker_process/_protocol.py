@@ -1,10 +1,11 @@
-"""run worker IPC 프로토콜 v1 의 인코딩·디코딩(run-worker spec D3).
+"""run worker IPC 프로토콜 v1 의 인코딩·디코딩(run-worker spec D3·D11).
 
 부모와 worker 가 이 모듈 하나로 줄을 쓰고 읽는다. 한 줄은 UTF-8 JSON 객체 하나이고 `protocol`·
 `type` 칸을 싣는다. 버전이 다르면 양쪽 모두 `ProtocolError` 로 거절한다.
 
-- 부모 → worker(stdin): `job`
-- worker → 부모(stdout): `ready`, `progress`, `committed`, `failed`(종결은 뒤의 둘)
+- 부모 → worker(stdin): `job` 한 줄, 엔진 관문을 켠 job 이면 `proceed` 한 줄
+- worker → 부모(stdout): `ready`, `progress`, `engine_ready`(엔진 관문), `committed`, `failed`
+  (종결은 뒤의 둘)
 
 작업 입력은 pickle 이 아니라 기존 직렬화 계약으로 옮긴다. spec 은
 `ResolvedBacktestRunSpec.to_wire()` 의 pydantic 표현(HTTP 요청 본문과 같은 검증)이고, worker 가
@@ -15,9 +16,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -34,18 +35,43 @@ PROTOCOL_VERSION = 1
 
 _T = TypeVar("_T")
 
+ProtocolErrorReason = Literal[
+    "not_utf8",
+    "not_json",
+    "not_object",
+    "version_mismatch",
+    "unexpected_type",
+    "invalid_fields",
+    "after_terminal",
+]
+
 
 class ProtocolError(ValueError):
-    """상대가 보낸 줄을 이 판본의 프로토콜로 읽을 수 없다."""
+    """상대가 보낸 줄을 이 판본의 프로토콜로 읽을 수 없다.
+
+    `reason`·`message_type` 은 상태에 실어도 되는 요약이고, 메시지 본문(줄 발췌 포함)은 로그용이다.
+    """
+
+    def __init__(
+        self, reason: ProtocolErrorReason, detail: str, *, message_type: object = None
+    ) -> None:
+        super().__init__(detail)
+        self.reason: ProtocolErrorReason = reason
+        self.message_type = message_type
 
 
 @dataclass(frozen=True)
 class WorkerSettings:
-    """부모가 해석해 worker 에 넘기는 설정. worker 는 환경 변수를 다시 읽지 않는다(spec D10)."""
+    """부모가 해석해 worker 에 넘기는 설정. worker 는 환경 변수를 다시 읽지 않는다(spec D10).
+
+    `engine_gate` 가 참이면 worker 는 엔진 단계 앞에서 `engine_ready` 를 보내고 `proceed` 를
+    기다린다(e2e hold, spec D11).
+    """
 
     equity_adapter: str
     equity_root: Path | None
     artifact_root: Path
+    engine_gate: bool = False
 
 
 @dataclass(frozen=True)
@@ -56,7 +82,7 @@ class JobMessage:
 
 @dataclass(frozen=True)
 class VersionBundle:
-    """worker 가 부팅 뒤 읽은 데이터·규칙·코드 판본(spec D6). 대조는 부모가 한다(W1-03)."""
+    """run 을 계산하는 데이터·규칙·코드 판본(spec D6). 부모가 자기 묶음과 대조한다."""
 
     snapshot_id: str
     engine_rules_version: str
@@ -64,6 +90,14 @@ class VersionBundle:
     factor_evaluation_version: str
     factor_registry_version: str
     code_fingerprint: str
+
+    def mismatched(self, other: VersionBundle) -> tuple[str, ...]:
+        """값이 다른 항목 이름(선언 순서)."""
+        return tuple(
+            item.name
+            for item in fields(self)
+            if getattr(self, item.name) != getattr(other, item.name)
+        )
 
 
 @dataclass(frozen=True)
@@ -79,6 +113,11 @@ class ProgressMessage:
 
 
 @dataclass(frozen=True)
+class EngineReadyMessage:
+    """엔진 단계 앞에 왔다. 부모의 `proceed` 를 기다린다(spec D11)."""
+
+
+@dataclass(frozen=True)
 class CommittedMessage:
     committed: RunCommitted
     max_rss_bytes: int | None
@@ -91,7 +130,12 @@ class FailedMessage:
     max_rss_bytes: int | None
 
 
-WorkerEvent = ReadyMessage | ProgressMessage | CommittedMessage | FailedMessage
+@dataclass(frozen=True)
+class ProceedMessage:
+    """엔진 단계로 넘어가도 된다(부모 → worker, spec D11)."""
+
+
+WorkerEvent = ReadyMessage | ProgressMessage | EngineReadyMessage | CommittedMessage | FailedMessage
 
 
 @dataclass(frozen=True)
@@ -107,12 +151,14 @@ _JOB = TypeAdapter(_JobWire)
 _EVENTS: dict[str, TypeAdapter[Any]] = {
     "ready": TypeAdapter(ReadyMessage),
     "progress": TypeAdapter(ProgressMessage),
+    "engine_ready": TypeAdapter(EngineReadyMessage),
     "committed": TypeAdapter(CommittedMessage),
     "failed": TypeAdapter(FailedMessage),
 }
 _EVENT_TYPES: dict[type, str] = {
     ReadyMessage: "ready",
     ProgressMessage: "progress",
+    EngineReadyMessage: "engine_ready",
     CommittedMessage: "committed",
     FailedMessage: "failed",
 }
@@ -133,14 +179,18 @@ def encode_job(job: RunJob, settings: WorkerSettings) -> str:
 def decode_job(line: str) -> JobMessage:
     kind, body = _read(line)
     if kind != "job":
-        raise ProtocolError(f"run worker expected a job line — type={kind!r}")
+        raise ProtocolError(
+            "unexpected_type", f"run worker expected a job line — type={kind!r}", message_type=kind
+        )
     wire = _validate(_JOB, kind, body)
     request = wire.spec
     if request.strategy is None or request.environment is None:
         raise ProtocolError(
+            "invalid_fields",
             "run worker job lacks the resolved strategy or environment — "
             f"run_id={wire.run_id} strategy={request.strategy is not None} "
-            f"environment={request.environment is not None}"
+            f"environment={request.environment is not None}",
+            message_type=kind,
         )
     spec = ResolvedBacktestRunSpec.from_request(
         request,
@@ -160,6 +210,21 @@ def decode_job(line: str) -> JobMessage:
     )
 
 
+def encode_proceed() -> str:
+    return _line("proceed", {})
+
+
+def decode_proceed(line: str) -> ProceedMessage:
+    kind, body = _read(line)
+    if kind != "proceed" or body:
+        raise ProtocolError(
+            "unexpected_type",
+            f"run worker expected a proceed line — type={kind!r} fields={sorted(body)}",
+            message_type=kind,
+        )
+    return ProceedMessage()
+
+
 def encode_event(event: WorkerEvent) -> str:
     kind = _EVENT_TYPES[type(event)]
     return _line(kind, _EVENTS[kind].dump_python(event, mode="json"))
@@ -170,7 +235,9 @@ def decode_event(line: str) -> WorkerEvent:
     adapter = _EVENTS.get(kind) if isinstance(kind, str) else None
     if adapter is None:
         raise ProtocolError(
-            f"run worker sent an unknown event type — type={kind!r} known={sorted(_EVENTS)}"
+            "unexpected_type",
+            f"run worker sent an unknown event type — type={kind!r} known={sorted(_EVENTS)}",
+            message_type=kind,
         )
     return _validate(adapter, kind, body)
 
@@ -186,15 +253,21 @@ def _read(line: str) -> tuple[object, dict[str, Any]]:
     try:
         payload = json.loads(line)
     except json.JSONDecodeError as error:
-        raise ProtocolError(f"run worker line is not JSON — {error} line={line[:200]!r}") from error
+        raise ProtocolError(
+            "not_json", f"run worker line is not JSON — {error} line={line[:200]!r}"
+        ) from error
     if not isinstance(payload, dict):
-        raise ProtocolError(f"run worker line is not a JSON object — line={line[:200]!r}")
+        raise ProtocolError(
+            "not_object", f"run worker line is not a JSON object — line={line[:200]!r}"
+        )
     version = payload.pop("protocol", None)
     kind = payload.pop("type", None)
     if version != PROTOCOL_VERSION:
         raise ProtocolError(
+            "version_mismatch",
             "run worker protocol version mismatch — "
-            f"expected={PROTOCOL_VERSION} got={version!r} type={kind!r}"
+            f"expected={PROTOCOL_VERSION} got={version!r} type={kind!r}",
+            message_type=kind,
         )
     return kind, payload
 
@@ -205,6 +278,8 @@ def _validate(adapter: TypeAdapter[_T], kind: object, body: dict[str, Any]) -> _
     except ValidationError as error:
         first = error.errors()[0]
         raise ProtocolError(
+            "invalid_fields",
             f"run worker {kind} line does not decode — errors={error.error_count()} "
-            f"first={first['loc']}: {first['msg']}"
+            f"first={first['loc']}: {first['msg']}",
+            message_type=kind,
         ) from error

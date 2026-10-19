@@ -1,7 +1,7 @@
-"""worker 쪽 전송: job 한 줄을 읽어 계산하고 이벤트 줄을 쓴다(run-worker spec D3·D6).
+"""worker 쪽 전송: job 한 줄을 읽어 계산하고 이벤트 줄을 쓴다(run-worker spec D3·D5·D6·D11).
 
 조립(어댑터·계산 만들기)은 composition root(`bootstrap/run_worker`)가 `boot` 로 넘긴다. 이 모듈은
-줄 주고받기, 진행 이벤트 상한, 코드 지문, 최대 RSS 만 소유한다.
+줄 주고받기, 진행 이벤트 상한, 부모 사망 감시, 엔진 관문, 코드 지문, 최대 RSS 만 소유한다.
 """
 
 from __future__ import annotations
@@ -10,23 +10,35 @@ import hashlib
 import importlib.util
 import io
 import logging
+import os
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
+from threading import Event, Thread
 from typing import TextIO
 
 from strategy_workbench.application.backtest_run.facade.computation import (
     RunComputation,
     full_collections_suspended,
 )
-from strategy_workbench.application.backtest_run.facade.ports import RunCommitted, RunFailed
-from strategy_workbench.domain.backtest.facade.runs import RunStage
+from strategy_workbench.application.backtest_run.facade.ports import (
+    ArtifactCommit,
+    BacktestArtifactStorePort,
+    BacktestExecutionRequest,
+    BacktestExecutorPort,
+    CancellationCheck,
+    ProgressCallback,
+    RunCommitted,
+    RunFailed,
+)
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, RunStage
 
 from ._protocol import (
     CommittedMessage,
+    EngineReadyMessage,
     FailedMessage,
     ProgressMessage,
     ProtocolError,
@@ -35,6 +47,7 @@ from ._protocol import (
     WorkerEvent,
     WorkerSettings,
     decode_job,
+    decode_proceed,
     encode_event,
 )
 
@@ -42,6 +55,13 @@ logger = logging.getLogger(__name__)
 
 # 진행 이벤트 상한(spec D3). 단계·설명이 바뀌거나 직전 전송 뒤 이만큼 지났을 때만 보낸다.
 _PROGRESS_INTERVAL_S = 0.1
+# 부모가 사라졌을 때(stdin EOF) 결과를 쓰지 않고 끝내는 종료 코드와, 부모가 깨진 줄을 보냈을 때의
+# 종료 코드.
+EXIT_PARENT_GONE = 3
+EXIT_PROTOCOL = 4
+# commit 직전 감시 스레드에게 GIL 을 넘겨 주는 시간. Rust 엔진이 GIL 을 쥐는 동안 감시 스레드가
+# EOF 를 보고도 움직이지 못했을 수 있다(spec D5).
+_COMMIT_EOF_GRACE_S = 0.02
 
 
 @dataclass(frozen=True)
@@ -80,28 +100,48 @@ def serve_stdio(boot: Callable[[WorkerSettings], WorkerBoot]) -> int:
 def serve(boot: Callable[[WorkerSettings], WorkerBoot], *, stdin: TextIO, stdout: TextIO) -> int:
     """job 하나를 읽어 부팅·계산하고 종결 이벤트를 보낸다.
 
-    stdin 은 닫지 않는다(부모 사망 감지, D5).
+    job 뒤의 stdin 은 감시 스레드가 끝까지 읽는다. EOF 면 부모가 사라진 것이라 결과를 쓰지 않고
+    끝낸다(spec D5 보조 경로).
     """
-    line = stdin.readline()
-    if not line:
-        raise ProtocolError("run worker stdin closed before a job line arrived")
-    message = decode_job(line)
+    try:
+        line = stdin.readline()
+        if not line:
+            raise ProtocolError("not_json", "run worker stdin closed before a job line arrived")
+        message = decode_job(line)
+    except ProtocolError:
+        logger.exception("run worker could not read its job line")
+        raise
     job = message.job
+    watch = _ParentWatch(stdin)
+    watch.start()
 
-    def send(event: WorkerEvent) -> None:
+    def sender(event: WorkerEvent) -> None:
+        # 이벤트는 계산 스레드 하나만 쓴다(진행·엔진 관문·종결).
         stdout.write(encode_event(event))
         stdout.flush()
 
-    booted = boot(message.settings)
-    send(ReadyMessage(booted.versions))
-    progress = _ProgressThrottle(send)
+    try:
+        booted = boot(message.settings)
+    except BaseException:
+        logger.exception("run worker boot failed — run_id=%s", job.run_id)
+        raise
+    sender(ReadyMessage(booted.versions))
+    computation = replace(
+        booted.computation,
+        artifact_store=_ParentAliveStore(booted.computation.artifact_store, watch),
+    )
+    if message.settings.engine_gate:
+        computation = replace(
+            computation, executor=_EngineGate(computation.executor, sender, watch)
+        )
+    progress = _ProgressThrottle(sender)
     # 전체 수집 미루기는 스레드 전송과 같은 범위로 계산을 감싼다(`_gc_policy`).
     with full_collections_suspended():
-        outcome = booted.computation.compute(job, progress=progress, cancelled=lambda: False)
+        outcome = computation.compute(job, progress=progress, cancelled=lambda: False)
     progress.flush()
     max_rss = peak_rss_bytes()
     if isinstance(outcome, RunCommitted):
-        send(CommittedMessage(outcome, max_rss))
+        sender(CommittedMessage(outcome, max_rss))
         return 0
     if isinstance(outcome, RunFailed):
         # 원래 예외의 stack trace 는 이 프로세스에만 있다. 로그(stderr)로 남기고 부모가 run_id 를
@@ -112,11 +152,11 @@ def serve(boot: Callable[[WorkerSettings], WorkerBoot], *, stdin: TextIO, stdout
             outcome.error_code,
             exc_info=outcome.exception,
         )
-        send(FailedMessage(outcome.error_code, outcome.error, max_rss))
+        sender(FailedMessage(outcome.error_code, outcome.error, max_rss))
         return 0
     # worker 에는 협조적 취소 신호가 없다(취소는 프로세스 종료, D5). 계산이 취소로 멈췄다면
     # 계약 위반이라 실패로 알린다.
-    send(
+    sender(
         FailedMessage(
             "backtest.run.internal",
             "run worker computation stopped as cancelled without a cancel request — "
@@ -125,6 +165,77 @@ def serve(boot: Callable[[WorkerSettings], WorkerBoot], *, stdin: TextIO, stdout
         )
     )
     return 0
+
+
+class _ParentWatch:
+    """job 뒤의 stdin 을 읽는다. `proceed` 는 관문을 열고, EOF 는 부모가 사라진 것이라 바로
+    끝낸다."""
+
+    def __init__(self, stdin: TextIO) -> None:
+        self._stdin = stdin
+        self.proceed = Event()
+
+    def start(self) -> None:
+        Thread(target=self._watch, name="run-worker-parent-watch", daemon=True).start()
+
+    def _watch(self) -> None:
+        for line in self._stdin:
+            try:
+                decode_proceed(line)
+            except ProtocolError:
+                logger.exception("run worker got a broken command line from its parent")
+                os._exit(EXIT_PROTOCOL)
+            self.proceed.set()
+        logger.error("run worker parent is gone (stdin closed) — exiting without a result")
+        os._exit(EXIT_PARENT_GONE)
+
+    def yield_to_watch(self) -> None:
+        """감시 스레드에게 GIL 을 잠깐 넘긴다. 부모가 사라졌으면 그 사이 감시 스레드가 끝낸다."""
+        time.sleep(_COMMIT_EOF_GRACE_S)
+
+
+class _ParentAliveStore:
+    """commit 직전에 부모가 살아 있는지 한 번 더 본다(spec D5). 나머지는 그대로 넘긴다."""
+
+    def __init__(self, store: BacktestArtifactStorePort, watch: _ParentWatch) -> None:
+        self._store = store
+        self._watch = watch
+
+    def commit(self, result: BacktestRunResult) -> ArtifactCommit:
+        self._watch.yield_to_watch()
+        return self._store.commit(result)
+
+    def load(self, run_id: str, *, sha256: str) -> BacktestRunResult:
+        return self._store.load(run_id, sha256=sha256)
+
+    def discard(self, run_id: str) -> None:
+        self._store.discard(run_id)
+
+
+class _EngineGate:
+    """엔진 단계 앞에서 `engine_ready` 를 보내고 부모의 `proceed` 를 기다린다(spec D11)."""
+
+    def __init__(
+        self,
+        executor: BacktestExecutorPort,
+        send: Callable[[WorkerEvent], None],
+        watch: _ParentWatch,
+    ) -> None:
+        self._executor = executor
+        self._send = send
+        self._watch = watch
+
+    def execute(
+        self,
+        request: BacktestExecutionRequest,
+        *,
+        progress: ProgressCallback,
+        cancelled: CancellationCheck,
+    ) -> BacktestRunResult:
+        self._send(EngineReadyMessage())
+        # 판정·기한·취소는 부모가 한다. 취소면 부모가 이 프로세스를 끝낸다.
+        self._watch.proceed.wait()
+        return self._executor.execute(request, progress=progress, cancelled=cancelled)
 
 
 class _ProgressThrottle:

@@ -106,6 +106,12 @@ bootstrap ─> application + adapters
   (`bootstrap` facade의 `build_equity_data`·`build_portfolio_design`·`build_run_versions`)를 재사용하며,
   `BacktestRunService`는 만들지 않는다. 실행 방식 설정(`STRATEGY_WORKBENCH_RUN_ISOLATION`)은
   `bootstrap/_http.py`가 읽고 허용 값(`RUN_ISOLATIONS`)과 전송 선택은 `bootstrap/_container.py`가 한다.
+  run 하나의 종결(spec D5)은 그 run 의 감독 스레드 하나가 발행한다. worker 가 끝난 뒤 남긴 staging·결과
+  디렉터리는 `artifact_local`의 `discard_unfinished`(bootstrap 이 주입)가 지우고, 부모 사망 감지는
+  Windows Job Object(`_job_object.py`)와 worker 의 stdin EOF 감시가 맡는다. 판본 대조는 서버가 부팅 때
+  `build_run_versions`로 한 번 계산한 묶음과 worker 의 `ready`를 비교한다(D6). e2e hold 판정은
+  `bootstrap`의 `_TrialHold.release` 하나를 스레드 전송(엔진 앞)과 프로세스 전송(`engine_ready` 왕복,
+  D11)이 함께 부른다.
 - V6-01 모의 사전등록은 `domain/backtest`의 동결 등록·필수 기준 비교와
   `application/holdout_registration`의 자체 source-pin·simulation-executor·ledger 포트가 소유한다.
   다른 application 서비스를 직접 import하지 않는다. 기존 `research_sqlite`가 schema v9의

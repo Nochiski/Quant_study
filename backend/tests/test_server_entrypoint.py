@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy_workbench.bootstrap import _http, _server
+from strategy_workbench.bootstrap import _container, _http, _server
 
 
 class _UvicornCommand:
@@ -104,6 +104,24 @@ def test_the_e2e_trial_hold_is_off_unless_a_non_negative_number_is_set(
     monkeypatch.setenv(_http.E2E_TRIAL_HOLD_SECONDS_ENV, configured)
     with pytest.raises(ValueError, match="non-negative number"):
         _http.runtime_trial_hold_seconds()
+
+
+def test_run_isolation_comes_from_the_environment_and_unknown_values_stop_the_build(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """run-worker spec D9: 기본은 스레드이고, 모르는 값은 스레드로 돌아가지 않고 멈춘다."""
+    monkeypatch.delenv(_http.RUN_ISOLATION_ENV, raising=False)
+    assert _http.runtime_run_isolation() == "thread"
+    monkeypatch.setenv(_http.RUN_ISOLATION_ENV, " process ")
+    assert _http.runtime_run_isolation() == "process"
+
+    with pytest.raises(ValueError, match="unsupported run isolation"):
+        _container.build_container(artifact_root=tmp_path, run_isolation="processes")
+    # e2e hold 는 아직 worker 와 왕복하지 못한다(W1-03) — 붙잡지 못한 채 돌지 않는다.
+    with pytest.raises(ValueError, match="trial hold is not supported"):
+        _container.build_container(
+            artifact_root=tmp_path, run_isolation="process", trial_hold_seconds=1.0
+        )
 
 
 def test_importing_and_building_test_app_never_opens_the_runtime_database(

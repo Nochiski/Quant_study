@@ -105,6 +105,11 @@ const backtestSummary = ({
     revision: saved ? 2 : null,
     source_hash: saved ? "b".repeat(64) : "c".repeat(64),
   },
+  // 완료 run 만 머리 지표가 있다(재설계 결정 1). 진행 중 run 은 null 이다.
+  headline:
+    status === "completed"
+      ? { total_return: 0.1234, sharpe: 1.5, max_drawdown: -0.0812 }
+      : null,
 });
 
 const trialLedger = (trialCount: number) => ({
@@ -967,6 +972,11 @@ describe("App Shell routes", () => {
     expect(screen.getByText("Inline draft")).toBeInTheDocument();
     expect(screen.getByText("저장 revision")).toBeInTheDocument();
     expect(screen.getByText("bbbbbbbbbbbb")).toBeInTheDocument();
+    // 결과 칸: 완료 run 은 총수익률·샤프·최대 낙폭을 부호와 함께, 진행 중 run 은 "—"(RD-06-A).
+    const savedRow = screen.getByText("run-saved").closest("tr")!;
+    expect(savedRow).toHaveTextContent("총수익률상승 +12.34%");
+    expect(savedRow).toHaveTextContent("샤프1.50");
+    expect(savedRow).toHaveTextContent("최대 낙폭하락 −8.12%");
     expect(screen.getByText("cccccccccccc")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "s1 · v2" })).toHaveAttribute(
       "href",
@@ -1330,7 +1340,10 @@ describe("App Shell routes", () => {
     expect(row).toHaveTextContent(
       "실행 오류: 세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).",
     );
-    const reason = within(row).getByRole("group");
+    // 행에는 접힌 "재현 정보"도 있어 실패 사유 묶음을 이름으로 고른다.
+    const reason = within(row)
+      .getAllByRole("group")
+      .find((group) => group.textContent?.includes("서버 사유"))!;
     expect(reason).toHaveTextContent("서버 사유");
     expect(reason).not.toHaveAttribute("open");
     expect(

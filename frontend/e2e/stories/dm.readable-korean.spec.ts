@@ -233,7 +233,10 @@ test(
     expect(response?.ok()).toBe(true);
     const row = page.getByRole("row").filter({ hasText: WIPED_OUT.run_id });
     await expect(row.getByText(`실행 오류: ${sentence}`)).toBeVisible();
-    await expect(row.getByRole("group")).toContainText("EquityWipedOutError");
+    // 줄에는 접힌 묶음이 둘(서버 사유·재현 정보)이라 서버 사유 묶음을 내용으로 고른다.
+    await expect(
+      row.getByRole("group").filter({ hasText: "서버 사유" }),
+    ).toContainText("EquityWipedOutError");
     await expect(row).not.toContainText("EquityWipedOutError", {
       useInnerText: true,
     });

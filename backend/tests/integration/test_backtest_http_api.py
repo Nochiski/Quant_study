@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from threading import Event
 from typing import Any, NoReturn, cast
@@ -279,13 +281,14 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     container = build_container(artifact_root=tmp_path / "unused")
     artifact_root = tmp_path / "artifacts"
     barrier = _CommitBarrierStore(LocalArtifactStore(artifact_root), first_run_id)
+    research_db = tmp_path / "research.sqlite3"
     backtests = BacktestRunService(
         container.portfolio_design,
         container.strategy_repository,
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         barrier,
-        run_repository=SQLiteBacktestRunRepository(),
+        run_repository=SQLiteBacktestRunRepository(research_db),
         new_id=lambda: next(run_ids),
         run_execution=ThreadRunExecution,
     )
@@ -317,6 +320,15 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     assert '"status":"cancel_requested"' in events
     assert '"status":"cancelled"' in events
     assert '"status":"completed"' not in events
+    # 취소가 이긴 run 에는 원장 대표 샤프도 목록 머리 지표도 남지 않는다(#581 리뷰). 계열 없는
+    # 초안이라 원장 조회로는 못 봐 저장소 파일을 읽는다.
+    assert client.get(f"/api/v1/backtests/{first_run_id}/summary").json()["headline"] is None
+    with closing(sqlite3.connect(research_db)) as connection:
+        assert connection.execute(
+            "SELECT session_sharpe FROM trial_ledger JOIN backtest_runs USING (accepted_order) "
+            "WHERE run_id = ?",
+            (first_run_id,),
+        ).fetchone() == (None,)
 
     # Reuse the server-serialized accepted request bytes, not the original client draft.
     replay = client.post(

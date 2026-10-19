@@ -443,8 +443,8 @@ _V9_ADDED_OBJECTS += (
 V9_SCHEMA_OBJECTS = V8_SCHEMA_OBJECTS + _V9_ADDED_OBJECTS
 
 # 완료 run 의 머리 지표(FULL 범위 총수익률·샤프·최대 낙폭). 목록이 결과 파일을 열지 않고 읽는
-# 투영이며, 완료 기록(`record_trial_result`)과 같은 트랜잭션에서 한 번 쓴다. 값이 없는(사용 불가)
-# 지표는 NULL 이다.
+# 투영이며, 완료 기록(`record_trial_result`, 완료 전이와 한 트랜잭션)에서 한 번 쓴다. 값이
+# 없는(사용 불가) 지표는 NULL 이다.
 _V10_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
     (
         "table",

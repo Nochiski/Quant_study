@@ -140,26 +140,7 @@ class SQLiteBacktestRunRepository:
 
     def update(self, state: BacktestRunState) -> None:
         with self._database.transaction(write=True) as connection:
-            updated = connection.execute(
-                """
-                UPDATE backtest_runs
-                SET status = ?, progress = ?, stage = ?, message = ?, updated_at = ?,
-                    error = ?, error_code = ?, artifact_sha256 = ?
-                WHERE run_id = ?
-                """,
-                (*_state_values(state), state.run_id),
-            )
-            if updated.rowcount != 1:
-                raise BacktestRunNotFoundError(state.run_id)
-            # 시작 시각은 한 번만 적는다 — 처음 `running` 이 된 전이가 정본이다.
-            if state.started_at is not None:
-                connection.execute(
-                    """
-                    INSERT OR IGNORE INTO backtest_run_starts (accepted_order, started_at)
-                    SELECT accepted_order, ? FROM backtest_runs WHERE run_id = ?
-                    """,
-                    (_time_text(state.started_at, "started_at", state.run_id), state.run_id),
-                )
+            _write_state(connection, state)
 
     def get(self, run_id: str) -> BacktestRunSummary:
         with self._database.transaction(write=False) as connection:
@@ -203,13 +184,22 @@ class SQLiteBacktestRunRepository:
 
     def record_trial_result(
         self,
-        run_id: str,
+        completed: BacktestRunState,
         *,
         session_sharpe: float | None,
         metric_registry_version: str,
         headline: RunHeadline | None = None,
     ) -> None:
+        if completed.status is not RunStatus.COMPLETED:
+            raise ValueError(
+                "trial result is recorded only with the completed state — "
+                f"run_id={completed.run_id} status={completed.status}"
+            )
+        run_id = completed.run_id
+        # 완료 전이·대표 샤프·머리 지표는 한 트랜잭션이다. 완료가 아닌 run 에 샤프·머리 지표가 남지
+        # 않는다(#581 리뷰).
         with self._database.transaction(write=True) as connection:
+            _write_state(connection, completed)
             updated = connection.execute(
                 """
                 UPDATE trial_ledger SET session_sharpe = ?, metric_registry_version = ?
@@ -348,6 +338,30 @@ class SQLiteBacktestRunRepository:
                 ids,
             ).fetchall()
         return {row["run_id"]: _state(row) for row in rows}
+
+
+def _write_state(connection: sqlite3.Connection, state: BacktestRunState) -> None:
+    """상태 전이 하나를 열린 쓰기 트랜잭션에 적는다(`update`·`record_trial_result` 가 함께 쓴다)."""
+    updated = connection.execute(
+        """
+        UPDATE backtest_runs
+        SET status = ?, progress = ?, stage = ?, message = ?, updated_at = ?,
+            error = ?, error_code = ?, artifact_sha256 = ?
+        WHERE run_id = ?
+        """,
+        (*_state_values(state), state.run_id),
+    )
+    if updated.rowcount != 1:
+        raise BacktestRunNotFoundError(state.run_id)
+    # 시작 시각은 한 번만 적는다 — 처음 `running` 이 된 전이가 정본이다.
+    if state.started_at is not None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO backtest_run_starts (accepted_order, started_at)
+            SELECT accepted_order, ? FROM backtest_runs WHERE run_id = ?
+            """,
+            (_time_text(state.started_at, "started_at", state.run_id), state.run_id),
+        )
 
 
 def _state_values(state: BacktestRunState) -> tuple[object, ...]:

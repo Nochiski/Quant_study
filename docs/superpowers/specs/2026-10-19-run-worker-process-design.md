@@ -126,11 +126,11 @@ Python 루프라 실행 내내 GIL을 쥔다. 그래서 같은 프로세스의 H
 
 - **선택**:
   - worker는 결과를 기존 `LocalArtifactStore.commit`으로 `<root>/<run_id>/result.json`에 원자 기록한다.
-  - 이어서 `committed{sha256, session_sharpe, metric_registry_version, headline}`을 보낸다. 값은
-    `_record_trial_result`(`_service.py:1081-1092`)가 쓰는 것과 같은 계산 함수로 worker가 구한다.
+  - 이어서 `committed{sha256, session_sharpe, metric_registry_version, headline}`을 보낸다. 값은 부모의 완료
+    기록(`_record_completion`)이 싣는 것과 같은 계산 함수로 worker가 구한다.
   - 상태 전이, 실행 기록, 시도 원장(SQLite)은 지금처럼 부모의 `BacktestRunService`가 같은 잠금 안에서 쓴다. 완료와 취소의
-    선형화(`_service.py:1271-1297`)도 그대로다. `committed`를 받은 부모는 잠금 안에서 취소 플래그를 확인한 뒤에만 완료로
-    바꾸고, 취소가 이겼으면 `discard`한다.
+    선형화(`_complete`)도 그대로다. `committed`를 받은 부모는 잠금 안에서 취소 플래그를 확인한 뒤에만 완료 전이·원장
+    대표 샤프·머리 지표를 한 트랜잭션으로 적고, 취소가 이겼으면 아무것도 적지 않고 `discard`한다(#581 리뷰).
 - **대안**: (a) worker가 SQLite까지 쓴다. (b) 결과 전체를 파이프로 받아 부모가 commit한다.
 - **선택 이유**:
   - (a)는 "파일 하나를 서버 프로세스 하나가 쓴다"는 SoT(`strategy-workbench-sot.md:90`)와 부팅 복구

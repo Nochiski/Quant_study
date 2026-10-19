@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 from collections import Counter
+from contextlib import closing
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -108,11 +110,22 @@ def _service(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         store,
-        run_repository=SQLiteBacktestRunRepository(),
+        run_repository=SQLiteBacktestRunRepository(tmp_path / "research.sqlite3"),
         new_id=lambda: str(uuid4()),
         run_execution=transport,
     )
     return service, root
+
+
+def _ledger_sharpe(database: Path, run_id: str) -> object:
+    """그 run 의 원장 대표 샤프 칸. 계열 없는 초안이라 원장 조회로는 못 봐 저장소 파일을 읽는다."""
+    with closing(sqlite3.connect(database)) as connection:
+        (sharpe,) = connection.execute(
+            "SELECT session_sharpe FROM trial_ledger JOIN backtest_runs USING (accepted_order) "
+            "WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+    return sharpe
 
 
 def _request() -> BacktestRunSpec:
@@ -210,7 +223,10 @@ class _BarrierListener:
 
 
 def test_cancel_accepted_after_committed_wins_and_removes_the_result(tmp_path: Path) -> None:
-    """D5 4: `committed` 뒤 잠금 전에 취소가 들어오면 `cancelled` 이고 결과 디렉터리는 없다."""
+    """D5 4: `committed` 뒤 잠금 전에 취소가 들어오면 `cancelled` 이고 결과 디렉터리는 없다.
+
+    원장의 대표 샤프와 머리 지표도 적히지 않는다 — 완료·취소 승패가 정해진 뒤에만 적는다(#581 리뷰).
+    """
     _CommitBarrier.instances.clear()
     service, root = _service(tmp_path, wrap=_CommitBarrier)
     run_id = service.start(_request()).run.run_id
@@ -225,6 +241,8 @@ def test_cancel_accepted_after_committed_wins_and_removes_the_result(tmp_path: P
     assert state.status is RunStatus.CANCELLED, state
     assert state.artifact_sha256 is None
     assert _leftovers(root, run_id) == []
+    assert service.summary(run_id).headline is None
+    assert _ledger_sharpe(tmp_path / "research.sqlite3", run_id) is None
 
 
 def test_a_worker_with_other_versions_fails_the_run_as_a_mismatch(tmp_path: Path) -> None:

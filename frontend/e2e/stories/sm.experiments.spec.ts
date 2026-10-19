@@ -140,9 +140,10 @@ test(
     await page.getByLabel("학습(년)").fill("1");
     await page.getByLabel("검증(년)").fill("1");
     await page.getByLabel("엠바고(세션)").fill("0");
+    // 탐색 값은 칩으로 보인다(RD-09-A).
     await expect(
-      page.getByRole("cell", { name: "0, 1 (2)", exact: true }),
-    ).toBeVisible();
+      page.getByRole("list", { name: "탐색 값 2개", exact: true }).getByRole("listitem"),
+    ).toHaveText(["0", "1"]);
     await expect(
       page.getByText(
         /조합 2개 · 창 1개 · 백테스트 실행 \d+회 · 계열 시도 수 \d+회 → \d+회/u,
@@ -191,6 +192,7 @@ test(
     // US-SM-15: 앞 실험이 실험 몫 슬롯을 붙잡고 있는 동안 두 실험이 실행 중과 대기로 보이고 슬롯 사용량이 보인다.
     await expect(experimentStatus(page, first)).toContainText("실행 중");
     await expect(experimentStatus(page, second)).toContainText("대기");
+    await expect(experimentStatus(page, second)).toContainText("슬롯이 비면 시작해요.");
     await expect(
       page.getByText(/동시 실행 슬롯 \d+ \/ \d+ 사용 중/u),
     ).toBeVisible();
@@ -235,6 +237,14 @@ test(
       .getByRole("status")
       .filter({ has: page.getByTitle(first, { exact: true }) });
     await expect(notice).toBeVisible({ timeout: TRIAL_HOLD_SECONDS * 8_000 });
+    // 끝났고 후보 기록이 없으면 실험 목록이 "후보 선택 대기"와 "후보 보기"를 보인다(RD-08-A).
+    const list = await context.newPage();
+    await list.goto("/research/experiments");
+    await expect(experimentStatus(list, first)).toContainText("후보 선택 대기");
+    await expect(
+      experimentStatus(list, first).getByRole("link", { name: "후보 보기" }),
+    ).toHaveAttribute("href", `/research/experiments/${first}#candidate`);
+    await list.close();
     const firstLabel =
       first.length > 16 ? `${first.slice(0, 8)}…${first.slice(-4)}` : first;
     await expect(notice.getByTitle(first, { exact: true })).toHaveText(

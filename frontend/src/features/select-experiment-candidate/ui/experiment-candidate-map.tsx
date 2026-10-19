@@ -41,6 +41,14 @@ const VERDICT: Record<CellVerdict, MessageKey> = {
   unscored: "experiments.map.unscored",
   scored: "experiments.map.scored",
 };
+/** 칸 판정을 한 문장으로 풀어 쓴다(RD-10-A). 판정 자체는 backend 지도가 정한다. */
+const MEANING: Record<CellVerdict, MessageKey> = {
+  recommended: "experiments.map.meaning.recommended",
+  peak: "experiments.map.meaning.peak",
+  failed: "experiments.map.meaning.failed",
+  unscored: "experiments.map.meaning.unscored",
+  scored: "experiments.map.meaning.scored",
+};
 const raw = (value: number | null | undefined) =>
   value == null ? "—" : String(value);
 const valuesText = (values: ExperimentSelection["parameter_values"]) =>
@@ -135,6 +143,8 @@ export const ExperimentCandidateMap = ({
   const heading = useRef<HTMLHeadingElement>(null);
   const grid = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const reasonErrorId = useId();
+  const [reasonMissing, setReasonMissing] = useState(false);
   const cells = useMemo(
     () =>
       new Map(
@@ -496,6 +506,7 @@ export const ExperimentCandidateMap = ({
                   <strong>{label(selected.grid_index)}</strong> ·{" "}
                   {t(VERDICT[selected.verdict])}
                 </p>
+                <p className="candidate-map__meaning">{t(MEANING[selected.verdict])}</p>
                 <dl className="candidate-map__metrics">
                   {(
                     [
@@ -539,19 +550,18 @@ export const ExperimentCandidateMap = ({
                     aria-label={t("experiments.map.form")}
                     onSubmit={(event) => {
                       event.preventDefault();
-                      if (
-                        !trial?.selectable ||
-                        view.reason.trim() === "" ||
-                        select.isPending
-                      )
+                      // 이유가 비면 기록하지 않고 이유 칸 아래에 알린다(RD-10-B).
+                      if (view.reason.trim() === "") {
+                        setReasonMissing(true);
                         return;
+                      }
+                      if (!trial?.selectable || select.isPending) return;
                       select.mutate({
                         trial_index: trial.trial.index,
                         reason: view.reason,
                       });
                     }}
                   >
-                    <p>{t("experiments.map.irreversible")}</p>
                     <label>
                       {t("experiments.map.trial")}
                       <select
@@ -585,19 +595,29 @@ export const ExperimentCandidateMap = ({
                       {t("experiments.map.reason")}
                       <textarea
                         className="ui-input"
-                        required
+                        aria-required="true"
+                        aria-invalid={reasonMissing ? true : undefined}
+                        aria-describedby={reasonMissing ? reasonErrorId : undefined}
                         value={view.reason}
-                        onChange={(event) =>
-                          update({ reason: event.target.value })
-                        }
+                        onChange={(event) => {
+                          update({ reason: event.target.value });
+                          if (event.target.value.trim() !== "") setReasonMissing(false);
+                        }}
                       />
                     </label>
+                    {reasonMissing ? (
+                      <p id={reasonErrorId} role="alert" className="candidate-map__error">
+                        {t("experiments.map.reasonMissing")}
+                      </p>
+                    ) : null}
+                    <p className="candidate-map__irreversible">
+                      {t("experiments.map.irreversible")}
+                    </p>
                     <Button
                       type="submit"
                       tone="primary"
                       disabled={
                         !trial?.selectable ||
-                        view.reason.trim() === "" ||
                         select.isPending ||
                         success !== undefined
                       }

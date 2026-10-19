@@ -270,8 +270,24 @@ export const ExperimentPage = () => {
           </Link>
         </span>
       </header>
+      {/* 끝난 탐색 실험에 기록한 후보가 없으면 다음 할 일을 맨 위에 둔다(RD-10-B). */}
+      {record.design.kind !== "capacity_sweep" &&
+      experiment.data.status === "completed" &&
+      experiment.data.selections.length === 0 ? (
+        <p className="experiment-page__next" role="note">
+          <strong>{t("experiments.detail.next")}</strong>{" "}
+          {t("experiments.detail.next.candidate")}{" "}
+          <a className="ui-button ui-button--primary ui-button--small" href="#candidate">
+            {t("experiments.detail.next.go")}
+          </a>
+        </p>
+      ) : null}
       <div className="experiment-page__sections">
-        {record.design.kind === "capacity_sweep" ? null : <ExperimentCandidateMap experiment={experiment.data} trials={trials.data} />}
+        {record.design.kind === "capacity_sweep" ? null : (
+          <div id="candidate" tabIndex={-1}>
+            <ExperimentCandidateMap experiment={experiment.data} trials={trials.data} />
+          </div>
+        )}
         <section className="data-list-page__panel">
           <h2
             id="experiment-trials-title"

@@ -1,5 +1,11 @@
 import { client } from "./generated/client.gen";
 import {
+  addLibraryFactorVersion,
+  getLibraryFactor,
+  listLibraryFactors,
+  matchLibraryFactors,
+  saveLibraryFactor,
+  setLibraryFactorVisibility,
   cancelBacktest,
   cancelExperiment,
   compileStrategyDocument,
@@ -106,6 +112,12 @@ import type {
   PageBacktestRunSummary,
   PageRevisionSummary,
   PageStrategySummary,
+  AddLibraryVersionBody,
+  LibraryFactorBody,
+  LibraryFactorList,
+  LibraryFactorMatchesBody,
+  LibraryMatchesBody,
+  SaveLibraryFactorBody,
   ResearchCatalog,
   ReviseDocumentRequest,
   RevisionDiff,
@@ -745,6 +757,55 @@ export const strategyWorkbenchApi = {
   ): Promise<FactorExplanation> {
     const response = await explainFactorGraph({ body: request, signal });
     return unwrap(response, "explainFactorGraph");
+  },
+
+  async listLibraryFactors(includeHidden = false): Promise<LibraryFactorList> {
+    const response = await listLibraryFactors({
+      query: { include_hidden: includeHidden },
+    });
+    return unwrap(response, "listLibraryFactors");
+  },
+
+  async getLibraryFactor(libraryId: string): Promise<LibraryFactorBody> {
+    const response = await getLibraryFactor({ path: { library_id: libraryId } });
+    return unwrap(response, "getLibraryFactor");
+  },
+
+  async saveLibraryFactor(
+    request: SaveLibraryFactorBody,
+  ): Promise<LibraryFactorBody> {
+    const response = await saveLibraryFactor({ body: request });
+    return unwrap(response, "saveLibraryFactor");
+  },
+
+  async addLibraryFactorVersion(
+    libraryId: string,
+    request: AddLibraryVersionBody,
+  ): Promise<LibraryFactorBody> {
+    const response = await addLibraryFactorVersion({
+      path: { library_id: libraryId },
+      body: request,
+    });
+    return unwrap(response, "addLibraryFactorVersion");
+  },
+
+  async setLibraryFactorVisibility(
+    libraryId: string,
+    hidden: boolean,
+  ): Promise<LibraryFactorBody> {
+    const response = await setLibraryFactorVisibility({
+      path: { library_id: libraryId },
+      body: { hidden },
+    });
+    return unwrap(response, "setLibraryFactorVisibility");
+  },
+
+  async matchLibraryFactors(
+    request: LibraryMatchesBody,
+    signal?: AbortSignal,
+  ): Promise<LibraryFactorMatchesBody> {
+    const response = await matchLibraryFactors({ body: request, signal });
+    return unwrap(response, "matchLibraryFactors");
   },
 
   async listStrategies(

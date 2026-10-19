@@ -1,0 +1,59 @@
+.factor-library__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-size-small);
+}
+
+.factor-library__list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factor-library__entry {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+}
+
+.factor-library__entry > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.factor-library__entry h2 {
+  margin: 0;
+  font-size: var(--text-size-subsection);
+}
+
+.factor-library__entry dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.factor-library__entry dt {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-library__entry dd {
+  margin: 0;
+}
+
+.factor-library__entry p {
+  margin: 0;
+}
+
+.factor-library__missing {
+  color: var(--status-warn);
+}

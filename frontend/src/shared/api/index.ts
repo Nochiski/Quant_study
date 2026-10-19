@@ -11,6 +11,11 @@ export {
   type AssistantStreamRejection,
 } from "./assistant-stream";
 export type {
+  LibraryFactorBody,
+  LibraryFactorList,
+  LibraryFactorMatchBody,
+  LibraryFactorMatchesBody,
+  LibraryFactorVersionBody,
   Assistant409Response,
   AssistantEventEnvelopeView,
   AssistantNotFoundResponse,

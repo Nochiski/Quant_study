@@ -204,7 +204,8 @@ test("keeps the navigation keyboard accessible in a short viewport", async ({
   await page.setViewportSize(viewport);
   await page.goto("/research/experiments");
   const navigation = page.getByRole("navigation", { name: "주 메뉴" });
-  await navigation.getByRole("link", { name: "실험", exact: true }).focus();
+  // 연구 묶음의 마지막 항목("내 팩터")에서 다음 칸이 설정이다.
+  await navigation.getByRole("link", { name: "내 팩터", exact: true }).focus();
   await page.keyboard.press("Tab");
   const settings = navigation.getByRole("link", { name: "설정", exact: true });
   await expect(settings).toBeFocused();

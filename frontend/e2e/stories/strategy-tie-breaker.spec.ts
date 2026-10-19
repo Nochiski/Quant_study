@@ -52,7 +52,16 @@ risk:
   expect(low.spec_hash).not.toBe(high.spec_hash);
   expect(low.summary?.targets.map((row) => row.position.security_id)).toEqual([...values].reverse().slice(0, 2).map((row) => row.security_id));
   expect(low.summary?.targets.map((row) => row.position.composite_score)).toEqual(high.summary?.targets.map((row) => row.position.composite_score));
-  await expect(preview.getByRole("table", { name: "선정 종목" })).toBeVisible();
+  const targets = preview.getByRole("table", { name: "선정 종목" });
+  await expect(targets).toBeVisible();
+  await expect(targets.getByRole("columnheader", { name: "비중" })).toBeVisible();
+  // "왜 골랐나"는 그 종목과 기준일로 중간 결과 작업공간을 연다(RD-04-C).
+  const chosen = low.summary!.targets[0]!.position.security_id;
+  await targets.getByRole("button", { name: /· 왜 골랐나$/u }).first().click();
+  await expect(page).toHaveURL(new RegExp(`security=${chosen}`, "u"));
+  await expect(page).toHaveURL(new RegExp(`asOf=${low.as_of}`, "u"));
+  await expect(page.getByRole("region", { name: "중간 결과" })).toBeVisible();
+  await page.getByRole("button", { name: "편집으로 돌아가기" }).first().click();
   for (const width of [1440, 640, 360]) {
     await page.setViewportSize({ width, height: 1000 });
     await pipeline.getByRole("combobox", { name: "동점 해소 방향", exact: true }).scrollIntoViewIfNeeded();

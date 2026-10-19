@@ -3,8 +3,8 @@
 - L0 대조(spec 5절): 원장 손 픽스처에서 `load_grid_raw_panel(q)` 와
   `RawPanel.from_observation_set(load_raw_observations(q), field_ids=q.field_ids)` 를
   field_id 기준으로 비교한다. 열 위치·코드가 아니라 풀어낸 값(present·kind·available·member·
-  sector·previous_weight·값의 float 비트·메타)과 `observations()` 복원값을 본다. `tests/parity`
-  (T1-01)가 아직 main 에 없어 비교기는 이 파일에 둔다.
+  sector·previous_weight·값·메타)과 `observations()` 복원값을 대조 하네스의 비트 비교기
+  (`tests/parity/_compare.py`, 허용오차 0)로 본다.
 - DECIMAL 경계(spec D3 원시 숫자 행): 비스케일 정수 2^53 ± 1, scale 0·4·10·18·22, 음수·0·−0.
 - 취소: 열 질의 도중 checkpoint 가 던지면 감시 스레드가 질의를 끊는다.
 """
@@ -44,12 +44,12 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RAW_CELL_KINDS,
     ColumnarRawObservationPort,
     RawFieldColumn,
-    RawObservation,
     RawObservationQuery,
     RawPanel,
 )
 from strategy_workbench.domain.equity.facade.research_data import CellKind
 from tests.equity_fixture import build_workbench_root
+from tests.parity._compare import compare, format_report
 
 if TYPE_CHECKING:
     import duckdb
@@ -90,63 +90,43 @@ def _rows(panel: RawPanel) -> list[tuple[object, ...]]:
             [panel.securities[code] for code in panel.row_security.tolist()],
             panel.universe_member.tolist(),
             [None if code < 0 else panel.sectors[code] for code in panel.sector.tolist()],
-            _float_bits(panel.previous_weight),
+            panel.previous_weight.tolist(),
             strict=True,
         )
     )
 
 
-def _cells(column: RawFieldColumn) -> list[tuple[object, ...]]:
-    """한 필드의 칸을 풀어낸 값으로. 셀이 없는 칸은 None 이다."""
-    result: list[tuple[object, ...]] = []
+def _cells(column: RawFieldColumn) -> list[tuple[object, ...] | None]:
+    """한 필드의 칸을 풀어낸 값으로(공개일·종류·값). 셀이 없는 칸은 None 이다."""
+    result: list[tuple[object, ...] | None] = []
     for row in range(column.present.shape[0]):
         if not column.present[row]:
-            result.append((None,))
+            result.append(None)
             continue
-        value: object = None
+        value: float | str | None = None
         if column.has_value[row]:
             code = int(column.text[row])
-            value = (
-                ("text", column.categories[code])
-                if code >= 0
-                else ("float", _float_bits(column.value[row : row + 1])[0])
-            )
-        result.append(
-            (
-                date.fromordinal(int(column.available[row])),
-                RAW_CELL_KINDS[int(column.kind[row])],
-                value,
-            )
-        )
+            value = column.categories[code] if code >= 0 else float(column.value[row])
+        available = date.fromordinal(int(column.available[row]))
+        result.append((available, RAW_CELL_KINDS[int(column.kind[row])], value))
     return result
+
+
+def _projection(panel: RawPanel) -> dict[str, object]:
+    """L0 대조 단위 — field_id 로 묶어 열 위치·사전 코드에 기대지 않는다."""
+    meta = ("status", "data_snapshot_id", "sessions", "history_sessions", "detail", "warnings")
+    return {
+        "meta": {name: getattr(panel, name) for name in meta},
+        "rows": _rows(panel),
+        "fields": {column.field_id: _cells(column) for column in panel.fields},
+        "observations": list(panel.observations()),
+    }
 
 
 def _assert_same_panel(columnar: RawPanel, reference: RawPanel) -> None:
     """L0: field_id 기준으로 모든 칸과 메타가 같다(허용오차 0, spec D1)."""
-    meta = ("status", "data_snapshot_id", "sessions", "history_sessions", "detail", "warnings")
-    assert {name: getattr(columnar, name) for name in meta} == {
-        name: getattr(reference, name) for name in meta
-    }
-    assert _rows(columnar) == _rows(reference)
-    by_id = {column.field_id: column for column in columnar.fields}
-    assert list(by_id) == [column.field_id for column in reference.fields]
-    for column in reference.fields:
-        assert _cells(by_id[column.field_id]) == _cells(column), column.field_id
-    restored, expected = columnar.observations(), reference.observations()
-    assert restored == expected
-    assert _observation_bits(restored) == _observation_bits(expected)
-
-
-def _observation_bits(observations: tuple[RawObservation, ...]) -> list[object]:
-    """복원한 관측의 값 타입과 float 비트(dataclass `==` 는 -0.0 과 0.0 을 같게 본다)."""
-    return [
-        [
-            (field.field_id, type(field.value).__name__, _float_bits(np.array([field.value]))[0])
-            for field in item.fields
-            if isinstance(field.value, float)
-        ]
-        for item in observations
-    ]
+    report = compare("L0", [("grid", _projection(reference), _projection(columnar))])
+    assert report.ok, format_report(report, values=True)
 
 
 def _reference(adapter: EquityDuckdbAdapter, query: RawObservationQuery) -> RawPanel:

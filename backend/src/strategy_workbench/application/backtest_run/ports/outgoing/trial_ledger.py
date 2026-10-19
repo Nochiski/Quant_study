@@ -28,11 +28,31 @@ class TrialLedgerRecords:
     blocked: tuple[BlockedTrialAttempt, ...]
 
 
+@dataclass(frozen=True)
+class RunHeadline:
+    """완료 run 의 머리 지표(FULL 범위). 목록이 결과 파일을 열지 않고 읽는 투영이다(재설계 결정 1).
+
+    값은 결과의 지표 레지스트리 값 그대로이고 사용 불가면 None 이다. 다시 계산하지 않는다.
+    """
+
+    total_return: float | None
+    sharpe: float | None
+    max_drawdown: float | None
+
+
 class TrialLedgerPort(Protocol):
     def record_trial_result(
-        self, run_id: str, *, session_sharpe: float | None, metric_registry_version: str
+        self,
+        run_id: str,
+        *,
+        session_sharpe: float | None,
+        metric_registry_version: str,
+        headline: RunHeadline | None = None,
     ) -> None:
-        """완료된 run 의 대표 샤프 후보(세션 단위)와 지표 레지스트리 판본을 적는다."""
+        """완료된 run 의 대표 샤프 후보(세션 단위)와 지표 레지스트리 판본을 적는다.
+
+        `headline` 은 목록이 읽는 머리 지표다. 같은 트랜잭션에 적어 완료 기록과 갈리지 않게 한다.
+        """
         ...
 
     def record_blocked_attempt(self, attempt: BlockedTrialAttempt) -> None:

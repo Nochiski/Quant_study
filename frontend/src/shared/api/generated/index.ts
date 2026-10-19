@@ -716,6 +716,7 @@ export type {
   RunExperimentContinuousAccountResponse,
   RunExperimentContinuousAccountResponses,
   RunFactorRegression,
+  RunHeadline,
   RunKind,
   RunManifest,
   RunSlotUsage,

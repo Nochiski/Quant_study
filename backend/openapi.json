@@ -1325,6 +1325,16 @@
             "title": "Experiment Paused",
             "type": "boolean"
           },
+          "headline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunHeadline"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/RunKind"
           },
@@ -9352,6 +9362,51 @@
           "report"
         ],
         "title": "RunFactorRegression",
+        "type": "object"
+      },
+      "RunHeadline": {
+        "description": "완료 run 의 머리 지표(FULL 범위). 목록이 결과 파일을 열지 않고 읽는 투영이다(재설계 결정 1).\n\n값은 결과의 지표 레지스트리 값 그대로이고 사용 불가면 None 이다. 다시 계산하지 않는다.",
+        "properties": {
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "total_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Return"
+          }
+        },
+        "required": [
+          "total_return",
+          "sharpe",
+          "max_drawdown"
+        ],
+        "title": "RunHeadline",
         "type": "object"
       },
       "RunKind": {

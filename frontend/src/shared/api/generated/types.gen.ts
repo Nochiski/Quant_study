@@ -906,6 +906,7 @@ export type BacktestRunSummary = {
    * Experiment Paused
    */
   experiment_paused: boolean;
+  headline?: RunHeadline | null;
   kind: RunKind;
   run: BacktestRunState;
   strategy_provenance: StrategyProvenance;
@@ -5781,6 +5782,28 @@ export type RunFactorRegression = {
    * Value Factor Id
    */
   value_factor_id: string;
+};
+
+/**
+ * RunHeadline
+ *
+ * 완료 run 의 머리 지표(FULL 범위). 목록이 결과 파일을 열지 않고 읽는 투영이다(재설계 결정 1).
+ *
+ * 값은 결과의 지표 레지스트리 값 그대로이고 사용 불가면 None 이다. 다시 계산하지 않는다.
+ */
+export type RunHeadline = {
+  /**
+   * Max Drawdown
+   */
+  max_drawdown: number | null;
+  /**
+   * Sharpe
+   */
+  sharpe: number | null;
+  /**
+   * Total Return
+   */
+  total_return: number | null;
 };
 
 /**

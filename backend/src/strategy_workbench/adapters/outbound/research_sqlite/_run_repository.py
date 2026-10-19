@@ -11,6 +11,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import d
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    RunHeadline,
     RunKind,
     TrialLedgerRecords,
     TrialLineageAlreadyMergedError,
@@ -44,8 +45,14 @@ _SUMMARY_COLUMNS = """
 """
 # run 행과 시작 시각(곁 표 `backtest_run_starts`). 읽기는 모두 이 관계를 쓴다.
 _RUN_ROWS = """(
-    SELECT backtest_runs.*, backtest_run_starts.started_at
-    FROM backtest_runs LEFT JOIN backtest_run_starts USING (accepted_order)
+    SELECT backtest_runs.*, backtest_run_starts.started_at,
+        backtest_run_headlines.accepted_order IS NOT NULL AS has_headline,
+        backtest_run_headlines.total_return AS headline_total_return,
+        backtest_run_headlines.sharpe AS headline_sharpe,
+        backtest_run_headlines.max_drawdown AS headline_max_drawdown
+    FROM backtest_runs
+    LEFT JOIN backtest_run_starts USING (accepted_order)
+    LEFT JOIN backtest_run_headlines USING (accepted_order)
 )"""
 _STATE_COLUMNS = f"{_SUMMARY_COLUMNS}, started_at"
 # 실행 종류와 쓰는 실험(검증 랩 V5-03, #382)은 저장하지 않고 같은 파일에서 읽는다. 실험 attempt 가
@@ -75,7 +82,10 @@ _RUNS = f"""(
     LEFT JOIN experiment_controls
         ON experiment_controls.experiment_order = experiments.experiment_order
 )"""
-_READ_COLUMNS = f"{_STATE_COLUMNS}, kind, experiment_id, experiment_paused"
+_READ_COLUMNS = (
+    f"{_STATE_COLUMNS}, kind, experiment_id, experiment_paused, has_headline, "
+    "headline_total_return, headline_sharpe, headline_max_drawdown"
+)
 
 
 class SQLiteBacktestRunRepository:
@@ -192,7 +202,12 @@ class SQLiteBacktestRunRepository:
         )
 
     def record_trial_result(
-        self, run_id: str, *, session_sharpe: float | None, metric_registry_version: str
+        self,
+        run_id: str,
+        *,
+        session_sharpe: float | None,
+        metric_registry_version: str,
+        headline: RunHeadline | None = None,
     ) -> None:
         with self._database.transaction(write=True) as connection:
             updated = connection.execute(
@@ -204,6 +219,16 @@ class SQLiteBacktestRunRepository:
             )
             if updated.rowcount != 1:
                 raise BacktestRunNotFoundError(run_id)
+            if headline is not None:
+                # 머리 지표는 완료 기록과 같은 트랜잭션에 한 번 적는다. 다시 적으면 처음 값을 둔다.
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO backtest_run_headlines
+                        (accepted_order, total_return, sharpe, max_drawdown)
+                    SELECT accepted_order, ?, ?, ? FROM backtest_runs WHERE run_id = ?
+                    """,
+                    (headline.total_return, headline.sharpe, headline.max_drawdown, run_id),
+                )
 
     def record_blocked_attempt(self, attempt: BlockedTrialAttempt) -> None:
         with self._database.transaction(write=True) as connection:
@@ -381,6 +406,15 @@ def _summary(row: sqlite3.Row) -> BacktestRunSummary:
             kind=RunKind(row["kind"]),
             experiment_id=row["experiment_id"],
             experiment_paused=bool(row["experiment_paused"]),
+            headline=(
+                RunHeadline(
+                    total_return=row["headline_total_return"],
+                    sharpe=row["headline_sharpe"],
+                    max_drawdown=row["headline_max_drawdown"],
+                )
+                if row["has_headline"]
+                else None
+            ),
         )
     except (TypeError, ValueError) as error:
         raise ResearchStorageError(

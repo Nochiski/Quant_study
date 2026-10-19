@@ -307,7 +307,9 @@ def test_an_empty_file_is_claimed_once(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA application_id").fetchone() == (0x53575253,)
-        assert connection.execute("PRAGMA user_version").fetchone() == (9,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (
+            SQLiteBacktestRunRepository.SCHEMA_VERSION,
+        )
 
 
 @pytest.mark.parametrize(
@@ -331,13 +333,14 @@ def test_a_file_owned_by_someone_else_is_refused(prepare: str, match: str, tmp_p
 @pytest.mark.parametrize(
     ("tamper", "match"),
     [
-        ("PRAGMA user_version = 10", "newer than this server"),
-        ("CREATE TABLE stray (x)", "does not match version 9"),
-        ("DROP TABLE experiment_controls", "does not match version 9"),
-        ("DROP TABLE experiment_window_picks", "does not match version 9"),
-        ("DROP TABLE backtest_run_starts", "does not match version 9"),
-        ("DROP TABLE experiment_control_changes", "does not match version 9"),
-        ("DROP TABLE experiment_sources", "does not match version 9"),
+        ("PRAGMA user_version = 11", "newer than this server"),
+        ("CREATE TABLE stray (x)", "does not match version 10"),
+        ("DROP TABLE experiment_controls", "does not match version 10"),
+        ("DROP TABLE experiment_window_picks", "does not match version 10"),
+        ("DROP TABLE backtest_run_starts", "does not match version 10"),
+        ("DROP TABLE experiment_control_changes", "does not match version 10"),
+        ("DROP TABLE experiment_sources", "does not match version 10"),
+        ("DROP TABLE backtest_run_headlines", "does not match version 10"),
     ],
 )
 def test_a_future_or_edited_schema_is_refused(tamper: str, match: str, tmp_path: Path) -> None:

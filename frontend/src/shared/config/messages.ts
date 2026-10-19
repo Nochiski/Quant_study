@@ -2774,7 +2774,7 @@ const ko = {
   "assistant.chat.close.confirm.cancel": "계속 두기",
   "assistant.chat.input": "어시스턴트에게 보낼 메시지",
   "assistant.chat.input.placeholder":
-    "무엇을 만들고 싶은지 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
+    "생각을 말로 적어 주세요. 부족한 조건은 AI가 되묻습니다. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
   "assistant.chat.input.placeholder.result":
     "결과에서 궁금한 것을 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
   "assistant.chat.send": "보내기",
@@ -5636,7 +5636,7 @@ export const messages = {
     "assistant.chat.close.confirm.cancel": "Keep it open",
     "assistant.chat.input": "Message for the assistant",
     "assistant.chat.input.placeholder":
-      "Describe what you want to build. Enter sends, Shift+Enter adds a line.",
+      "Describe your idea in words. The AI asks about missing conditions. Enter sends, Shift+Enter adds a line.",
     "assistant.chat.input.placeholder.result":
       "Ask about this result. Enter sends, Shift+Enter adds a line.",
     "assistant.chat.send": "Send",

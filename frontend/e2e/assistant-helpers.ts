@@ -33,6 +33,17 @@ export const progress = (page: Page) =>
  * 새로고침 뒤에는 배치에 남은 열림 상태로 이미 펼쳐져 있고 그때는 상단 바 토글이 사라진다 —
  * 그래서 버튼이 있을 때만 누른다.
  */
+/**
+ * AI 열은 처음부터 열려 있다(RD-04-A). 접힌 상태에서 여는 흐름을 보려는 시나리오는 이것으로 먼저 접는다.
+ */
+export const collapseAssistant = async (page: Page) => {
+  const panel = assistant(page);
+  if (await panel.isVisible()) {
+    await page.keyboard.press("Alt+A");
+    await expect(panel).toBeHidden();
+  }
+};
+
 export const openAssistant = async (page: Page) => {
   const toggle = page.getByRole("button", {
     name: "AI 어시스턴트",

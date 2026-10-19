@@ -152,18 +152,20 @@ export const NewStrategyPage = () => {
     ) => {
       void navigate({
         to: ROUTE,
-        search: {
-          ...search,
+        // 커서 게시는 parse가 끝난 뒤 effect에서 늦게 올 수 있다. 렌더 시점 `search`를 펼치면 그사이 탭 전환이
+        // 바꾼 `view`를 옛 값으로 되돌린다 — 라우터의 최신 위치(`prev`)에 `path`만 얹는다.
+        search: (prev) => ({
+          ...prev,
           path,
-          recipe: path?.includes("/graph") ? search.recipe : undefined,
-          view: origin === "outline" ? "yaml" : search.view,
-        },
+          recipe: path?.includes("/graph") ? prev.recipe : undefined,
+          view: origin === "outline" ? "yaml" : prev.view,
+        }),
         replace: true,
         // 문서 안 선택은 reveal 경로가 스크롤을 소유한다. URL 갱신이 페이지를 맨 위로 돌리면 안 된다.
         resetScroll: false,
       });
     },
-    [navigate, search],
+    [navigate],
   );
   const outline = useOutlineNavigation(editorOwner, {
     state: document,

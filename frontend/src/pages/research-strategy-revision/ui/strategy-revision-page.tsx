@@ -16,6 +16,7 @@ import {
   DocumentToolbar,
   DocumentResearchActions,
   FactorGraphPanel,
+  LibraryUpdateNotice,
   RecipePanel,
   factorIndexAtPointer,
   PipelinePanel,
@@ -440,6 +441,7 @@ export const StrategyRevisionPage = () => {
                 <div className="pipeline-comparison__body">
                   <div id="strategy-rules" tabIndex={-1}>
                     <PipelinePanel
+                      librarySave
                       form={form}
                       schema={assist.schema}
                       transactions={transactions}
@@ -583,6 +585,11 @@ export const StrategyRevisionPage = () => {
               apply={proposalApply}
               chain={strategyAssistant.chain}
               blockedReason={runSettings.blockedReason}
+            />
+            <LibraryUpdateNotice
+              document={document}
+              form={form}
+              transactions={transactions}
             />
             <UpgradeBanner
               upgrade={documentUpgrade}

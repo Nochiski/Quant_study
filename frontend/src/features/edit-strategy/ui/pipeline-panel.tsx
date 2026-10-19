@@ -61,6 +61,7 @@ import {
   type FormCatalogs,
   type SliderRange,
 } from "./strategy-form-panel";
+import { LibraryFactorSave } from "./library-factor-save";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./pipeline-panel.css";
 
@@ -79,6 +80,8 @@ export type CardContext = {
   revealSignal: number | undefined;
   onOpenGraph: ((pointer: string) => void) | undefined;
   onOpenAdvanced: ((pointer: string) => void) | undefined;
+  /** 팩터 카드에 "내 팩터로 저장"을 둔다(US-CS-08). 라이브러리 API 가 있는 화면만 켠다. */
+  librarySave: boolean;
 };
 
 export const PipelinePanel = ({
@@ -90,6 +93,7 @@ export const PipelinePanel = ({
   onOpenAdvanced,
   selectedPointer,
   revealSignal,
+  librarySave = false,
 }: {
   /** Form 투영(`useFormProjection`): stale parse 와 진단 규칙을 한 번 판정한 결과. */
   form: FormProjectionState;
@@ -102,6 +106,8 @@ export const PipelinePanel = ({
   onOpenAdvanced?: (pointer: string) => void;
   selectedPointer?: string;
   revealSignal?: number;
+  /** 팩터 카드에 "내 팩터로 저장"을 둔다(US-CS-08). */
+  librarySave?: boolean;
 }) => {
   const container = useRevealSelection<HTMLElement>(
     selectedPointer,
@@ -132,6 +138,7 @@ export const PipelinePanel = ({
           revealSignal,
           onOpenGraph,
           onOpenAdvanced,
+          librarySave,
         };
   const documentSection =
     pipeline === null ? null : pipelineDocumentProperties(pipeline);
@@ -428,6 +435,13 @@ const ListItemCard = ({
     >
       {graph === undefined ? null : (
         <RecipeLine item={item} graph={graph} label={label} context={context} />
+      )}
+      {graph === undefined || !context.librarySave ? null : (
+        <LibraryFactorSave
+          tree={context.tree}
+          itemPointer={item.pointer}
+          label={label}
+        />
       )}
       {identity === undefined ? null : (
         <div className="pipeline__identity">

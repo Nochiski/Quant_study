@@ -4846,3 +4846,182 @@ describe("새 전략 단계별 안내(RD-04-D)", () => {
     expect(within(combine).getByText(/^더 설정하기 \(\d+\)$/u)).toBeInTheDocument();
   });
 });
+
+describe("내 팩터 라이브러리(US-CS-08)", () => {
+  const LIBRARY_GRAPH = {
+    nodes: [
+      { node_id: "close", kind: "field", field_id: "price.close" },
+      { node_id: "win", kind: "parameter", parameter_id: "band_window" },
+      {
+        node_id: "mean",
+        kind: "time_series",
+        operator: "mean",
+        input_node_id: "close",
+        window: 20,
+      },
+    ],
+    output_node_id: "mean",
+  };
+  const PARAMETER = {
+    kind: "integer",
+    parameter_id: "band_window",
+    default: 20,
+    minimum: 5,
+    maximum: 60,
+  };
+  const version = (number: number, graph: unknown) => ({
+    version: number,
+    identity: String(number).repeat(64),
+    factor: {
+      factor_id: "bollinger_b",
+      label: "볼린저 %B",
+      direction: "high",
+      graph,
+    },
+    parameters: [PARAMETER],
+    created_at: "2026-10-19T00:00:00Z",
+    note: null,
+  });
+  const ENTRY = {
+    library_id: "lib-1",
+    key: "bollinger_b",
+    name: "볼린저 %B",
+    description: "",
+    hidden: false,
+    created_at: "2026-10-19T00:00:00Z",
+    latest_version: 2,
+    versions: [
+      version(1, LIBRARY_GRAPH),
+      version(2, { ...LIBRARY_GRAPH, output_node_id: "close" }),
+    ],
+    availability: { available: true, missing_fields: [], reasons: [] },
+  };
+  const libraryHandlers = (matches: unknown[] = []) => [
+    http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+      HttpResponse.json({
+        schema: RUNTIME_SCHEMA,
+        schema_hash: "h".repeat(64),
+        schema_version: "1.2",
+      }),
+    ),
+    http.get(`${API}/api/v1/factor-library`, () =>
+      HttpResponse.json({ items: [ENTRY] }),
+    ),
+    http.post(`${API}/api/v1/factor-library/matches`, () =>
+      HttpResponse.json({ compiled: true, matches }),
+    ),
+  ];
+  const hiddenView = async () => {
+    let view: EditorView | null = null;
+    await waitFor(() => {
+      const content = globalThis.document.querySelector(".cm-content");
+      view = content ? EditorView.findFromDOM(content as HTMLElement) : null;
+      expect(view).not.toBeNull();
+    });
+    return view as unknown as EditorView;
+  };
+
+  it("안내의 내 팩터 탭에서 꺼내 쓰면 팩터와 파라미터가 복사되고 되돌리기 한 번에 취소된다", async () => {
+    server.use(...libraryHandlers());
+    const user = userEvent.setup();
+    mountWithClient(
+      "/research/strategies/new?guide=true&step=signal.factors",
+      undefined,
+      false,
+    );
+    const view = await hiddenView();
+    const before = view.state.doc.toString();
+    await user.click(await screen.findByRole("button", { name: "내 팩터" }));
+    await user.click(await screen.findByRole("button", { name: "볼린저 %B · 담기" }));
+
+    await waitFor(() => expect(view.state.doc.toString()).toContain("factor_id: bollinger_b"));
+    expect(view.state.doc.toString()).toContain("parameter_id: band_window");
+    // 최신(v2) 그래프를 복사한다.
+    expect(view.state.doc.toString()).toMatch(/output_node_id: close/u);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "볼린저 %B · 담기" }),
+      ).toHaveAccessibleDescription("이미 담았어요."),
+    );
+
+    await user.click(screen.getByRole("button", { name: "되돌리기" }));
+    await waitFor(() => expect(view.state.doc.toString()).toBe(before));
+  });
+
+  it("같은 키가 이미 저장돼 있으면 그 팩터의 새 버전으로 저장한다", async () => {
+    const saved: unknown[] = [];
+    const versions: unknown[] = [];
+    server.use(
+      ...libraryHandlers(),
+      http.post(`${API}/api/v1/factor-library`, async ({ request }) => {
+        saved.push(await request.json());
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "library.factor.key_exists",
+              message: "exists",
+              existing_library_id: "lib-1",
+            },
+          },
+          { status: 409 },
+        );
+      }),
+      http.post(`${API}/api/v1/factor-library/lib-1/versions`, async ({ request }) => {
+        versions.push(await request.json());
+        return HttpResponse.json({ ...ENTRY, latest_version: 3 }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?view=graph", undefined, false);
+    const view = await hiddenView();
+    replaceText(view, GRAPH_SOURCE);
+
+    await user.click(await screen.findByRole("button", { name: "모멘텀 · 내 팩터로 저장" }));
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "같은 팩터 id로 저장한 내 팩터가 있어요.",
+    );
+    expect(saved).toMatchObject([{ name: "모멘텀", factor: { factor_id: "momentum" } }]);
+
+    await user.click(
+      await screen.findByRole("button", { name: "\"볼린저 %B\"의 새 버전(v3)으로 저장" }),
+    );
+    await waitFor(() =>
+      expect(versions).toMatchObject([
+        { expected_latest: 2, factor: { factor_id: "momentum" } },
+      ]),
+    );
+    expect(await screen.findByText("내 팩터 \"볼린저 %B\"에 저장했어요 (v3).")).toBeVisible();
+  });
+
+  it("예전 버전을 복사한 팩터는 새 버전을 알리고 바꾸기로 그 팩터의 그래프만 바꾼다", async () => {
+    server.use(
+      ...libraryHandlers([
+        {
+          factor_index: 0,
+          factor_id: "momentum",
+          library_id: "lib-1",
+          status: "outdated",
+          matched_version: 1,
+          latest_version: 2,
+        },
+      ]),
+    );
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?view=graph", undefined, false);
+    const view = await hiddenView();
+    replaceText(view, GRAPH_SOURCE);
+
+    const notice = await screen.findByRole("region", { name: "내 팩터 새 버전" });
+    expect(notice).toHaveTextContent(
+      "\"모멘텀\"은(는) 내 팩터 \"볼린저 %B\" v1를 복사한 것이고 v2이 있어요.",
+    );
+    await user.click(within(notice).getByRole("button", { name: "v2로 바꾸기" }));
+
+    await waitFor(() => expect(view.state.doc.toString()).toContain("parameter_id: band_window"));
+    const source = view.state.doc.toString();
+    expect(source).toContain("factor_id: momentum");
+    expect(source).toContain("label: 모멘텀");
+    expect(source).not.toContain("mom_252");
+  });
+});

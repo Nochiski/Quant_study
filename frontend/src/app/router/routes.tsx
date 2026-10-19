@@ -111,6 +111,10 @@ const NewExperimentPage = lazyRouteComponent(
   () => import("../../pages/research-experiment-new"),
   "NewExperimentPage",
 );
+const FactorLibraryPage = lazyRouteComponent(
+  () => import("../../pages/research-factors"),
+  "FactorLibraryPage",
+);
 const SettingsPage = lazyRouteComponent(
   () => import("../../pages/settings"),
   "SettingsPage",
@@ -248,6 +252,12 @@ const backtestRunRoute = createRoute({
   component: BacktestRunPage,
 });
 
+const factorLibraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/factors",
+  component: FactorLibraryPage,
+});
+
 const experimentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/experiments",
@@ -313,6 +323,7 @@ const routeTree = rootRoute.addChildren([
   experimentsRoute,
   newExperimentRoute,
   experimentRoute,
+  factorLibraryRoute,
   settingsRoute,
   operationsRoute.addChildren([
     deploymentsRoute,

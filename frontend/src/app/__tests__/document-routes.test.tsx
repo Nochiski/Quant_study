@@ -4733,3 +4733,116 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
     expect(started[0]?.environment).toEqual(OLD_ENVIRONMENT);
   });
 });
+
+describe("새 전략 단계별 안내(RD-04-D)", () => {
+  const SOON = {
+    ...FACTOR,
+    availability: "catalog_only",
+    category: "financial",
+    default_graph: null,
+    factor_id: "server.quality",
+    label: "Server quality",
+  };
+  const useGuideCatalog = () =>
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json({
+          schema: RUNTIME_SCHEMA,
+          schema_hash: "h".repeat(64),
+          schema_version: "1.2",
+        }),
+      ),
+      http.get(`${API}/api/v1/factors/catalog`, () =>
+        HttpResponse.json({
+          facets: {},
+          factors: [FACTOR, SOON],
+          page: 1,
+          page_count: 1,
+          page_size: 100,
+          registry_version: "v1",
+          total: 2,
+        }),
+      ),
+    );
+  /** 안내 동안 편집기는 숨겨져 있다. 트랜잭션이 쓴 원문은 숨은 편집기에서 읽는다. */
+  const hiddenSource = async () => {
+    let view: EditorView | null = null;
+    await waitFor(() => {
+      const content = globalThis.document.querySelector(".cm-content");
+      view = content ? EditorView.findFromDOM(content as HTMLElement) : null;
+      expect(view).not.toBeNull();
+    });
+    return () => (view as unknown as EditorView).state.doc.toString();
+  };
+  const steps = () => screen.getByRole("navigation", { name: "만드는 단계" });
+
+  it("일곱 단계를 보이고 첫 단계에서 시작하며 편집기로 바로 갈 수 있다", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    const history = mountWithClient("/research/strategies/new?guide=true", undefined, false).history;
+    await screen.findByRole("heading", { name: "새 전략 만들기" });
+    await waitFor(() =>
+      expect(within(steps()).getAllByRole("button").map((button) => button.textContent)).toEqual([
+        "1이름·의도",
+        "2유니버스",
+        "3알파 팩터",
+        "4결합",
+        "5포트폴리오 구성",
+        "6리스크 제약",
+        "7확인",
+      ]),
+    );
+    expect(within(steps()).getByRole("button", { name: "이름·의도" })).toHaveAttribute("aria-current", "step");
+
+    await user.click(screen.getByRole("button", { name: "편집기에서 직접 쓰기" }));
+    await waitFor(() => expect(history.location.search).not.toContain("guide"));
+    // 같은 초안을 편집기 그래프 보기(파이프라인)로 연다.
+    expect(history.location.search).toContain("view=graph");
+    expect(
+      await screen.findByRole("region", { name: t("graph.pipeline.label") }),
+    ).toBeVisible();
+  });
+
+  it("팩터는 분류별로 보이고 바로 쓸 수 있는 것만 담겨 문서와 미리보기에 들어간다", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true&step=signal.factors", undefined, false);
+    const source = await hiddenSource();
+    const chips = await screen.findByRole("group", { name: "팩터 분류" });
+    expect(within(chips).getByRole("button", { name: "가격 1" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(within(chips).getByRole("button", { name: "재무 1" }));
+    const soon = screen.getByRole("button", { name: "Server quality · 담기" });
+    expect(soon).toBeDisabled();
+    expect(soon).toHaveAccessibleDescription("계산식이 아직 없어 담을 수 없어요.");
+
+    await user.click(within(chips).getByRole("button", { name: "가격 1" }));
+    await user.click(screen.getByRole("button", { name: "Server momentum · 담기" }));
+    await waitFor(() => expect(source()).toContain("factor_id: server.momentum"));
+    const preview = screen.getByRole("complementary", { name: "전략 문서 미리보기" });
+    await waitFor(() =>
+      expect(within(preview).getAllByText("방금 바뀐 줄:").length).toBeGreaterThan(0),
+    );
+    expect(preview).toHaveTextContent("factor_id: server.momentum");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Server momentum · 담기" })).toHaveAccessibleDescription("이미 담았어요."),
+    );
+  });
+
+  it("고르지 않고 넘어가면 문서에 아무것도 쓰지 않고, 핵심 칸 밖은 더 설정하기에 접는다", async () => {
+    useGuideCatalog();
+    const user = userEvent.setup();
+    mountWithClient("/research/strategies/new?guide=true", undefined, false);
+    const source = await hiddenSource();
+    const before = source();
+    await screen.findByRole("button", { name: "유니버스" });
+    for (let index = 0; index < 6; index += 1)
+      await user.click(screen.getByRole("button", { name: "다음" }));
+    expect(within(steps()).getByRole("button", { name: "확인" })).toHaveAttribute("aria-current", "step");
+    expect(source()).toBe(before);
+
+    await user.click(within(steps()).getByRole("button", { name: "결합" }));
+    const combine = screen.getByRole("region", { name: "결합" });
+    expect(within(combine).getByText(/^더 설정하기 \(\d+\)$/u)).toBeInTheDocument();
+  });
+});

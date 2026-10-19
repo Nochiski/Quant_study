@@ -67,7 +67,7 @@ import "./pipeline-panel.css";
 /** 캔버스의 feedback owner. Form(`form`)·Graph(`graph`)와 슬롯을 나눈다. */
 const PIPELINE_OWNER = "pipeline";
 
-type CardContext = {
+export type CardContext = {
   /** 카탈로그·참조 선택지의 이름 풀이(요약 띠와 같은 것). */
   names: SummaryNames;
   schema: JsonSchema;
@@ -299,7 +299,7 @@ const ExecutionGuide = ({
 /**
  * 목록(규칙·팩터). 항목은 문장 카드(틀 `<목록 설명 키>.card`)이고 추가·삭제는 Form 목록과 같은 연산이다.
  */
-const StageList = ({
+export const StageList = ({
   list,
   context,
 }: {
@@ -543,7 +543,7 @@ const RecipeLine = ({
  * 문장 카드: 틀의 글자와 `{<키>}` 자리(그 행의 컨트롤)를 잇는다. 틀 밖의 행은 이름 라벨 행으로 그리되,
  * 지금 쓰이지 않는 행(적용 조건 거짓)은 문서에 적혀 있을 때만 보인다(경고를 읽고 지울 수 있게).
  */
-const SentenceCard = ({
+export const SentenceCard = ({
   label,
   rows,
   template,

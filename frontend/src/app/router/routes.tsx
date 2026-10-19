@@ -45,6 +45,10 @@ type StrategyDocumentSearch = {
   security?: string;
   draft?: string;
   run?: string;
+  /** 새 전략 단계별 안내를 보인다(RD-04-D). 끄면 같은 초안을 편집기로 본다. */
+  guide?: boolean;
+  /** 안내의 지금 단계 id(`guideSteps`). 모르는 값이면 화면이 첫 단계로 본다. */
+  step?: string;
 };
 type BacktestHistorySearch = {
   offset?: number;
@@ -72,6 +76,8 @@ const strategyDocumentSearch = (
     security: typeof search.security === "string" ? search.security : undefined,
     draft: isNewDraftId(search.draft) ? search.draft : undefined,
     run: typeof search.run === "string" && search.run.trim() !== "" ? search.run.trim() : undefined,
+    guide: search.guide === true || search.guide === "true" ? true : undefined,
+    step: typeof search.step === "string" && search.step !== "" ? search.step : undefined,
   };
 };
 

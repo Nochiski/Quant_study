@@ -343,7 +343,7 @@ export const StrategiesPage = () => {
         <Link
           className="ui-button ui-button--primary"
           to="/research/strategies/new"
-          search={{}}
+          search={{ guide: true }}
         >
           {t("history.strategies.new")}
         </Link>
@@ -367,7 +367,7 @@ export const StrategiesPage = () => {
             <Link
               className="ui-button ui-button--primary"
               to="/research/strategies/new"
-              search={{}}
+              search={{ guide: true }}
             >
               {t("history.strategies.new")}
             </Link>

@@ -73,3 +73,4 @@ export { useWholeDocumentReplacement } from "./model/replace-whole-document";
 
 export { useEditorHandle } from "./model/use-editor-handle";
 export { DocumentResearchActions } from "./ui/document-research-actions";
+export { StrategyGuide } from "./ui/strategy-guide";

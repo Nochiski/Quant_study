@@ -691,18 +691,24 @@ export const StrategyIde = ({
   );
 
   /**
-   * AI 어시스턴트 사이드바. 편집기 view와 무관하게 오른쪽 레일에 붙어 있어 YAML·Form·Graph 어느 탭에서도
-   * 같은 대화가 보인다(spec D7). 1280px 미만에서는 계약·중간 결과와 같은 오버레이 서랍이 된다.
+   * AI 어시스턴트 열. 편집기 view와 무관하게 본문 왼쪽에 붙어 있어 YAML·Graph 어느 탭에서도 같은 대화가
+   * 보인다(spec D7, RD-04-A). 1280px 미만에서는 왼쪽에서 나오는 오버레이 서랍이 된다.
    */
   const assistantNode = hasAssistant ? (
     <aside
       id={ids.assistant}
-      className={`ide__assistant${assistantFloating ? ` ${drawerClass}` : ""}`}
+      className={`ide__assistant${assistantFloating ? ` ${drawerClass} ide__drawer--left` : ""}`}
       aria-label={t("ide.assistant")}
       // 펼친 직후 포커스를 받을 수 있게 한다. 탭 순서에는 들어가지 않는다.
       tabIndex={-1}
       hidden={!layout.assistantOpen}
-      style={assistantFloating ? railDrawer : { width: layout.assistantWidth }}
+      style={
+        assistantFloating
+          ? railDrawer === undefined
+            ? undefined
+            : { width: layout.assistantWidth }
+          : { width: layout.assistantWidth }
+      }
     >
       {/*
         패널의 landmark·이름·제목은 슬롯이 소유한다(WORKFLOW B-04 Acceptance). 슬롯 내용은 이름 없는
@@ -904,6 +910,20 @@ export const StrategyIde = ({
 
       <OpenTraceWorkspaceContext.Provider value={openTraceWorkspace}>
       <div className="ide__body" ref={bodyRef}>
+        {/* AI 열은 본문 맨 왼쪽이다(RD-04-A). 서랍일 때도 같은 자리에 두어 DOM 부모·순서를 바꾸지 않는다 —
+            대화·미전송 입력·스트림 소유자를 재마운트하지 않는다. */}
+        {assistantNode}
+        {hasAssistant && !assistantFloating && layout.assistantOpen ? (
+          <SplitHandle
+            orientation="vertical"
+            label={t("ide.resizeAssistant")}
+            value={layout.assistantWidth}
+            min={PANEL_BOUNDS.assistantWidth.min}
+            max={PANEL_BOUNDS.assistantWidth.max}
+            onChange={(value) => resize("assistantWidth", value)}
+            controls={ids.assistant}
+          />
+        ) : null}
         <div
           className={`ide__left${compact ? " ide__left--drawer" : ""}`}
           hidden={!layout.outlineOpen || layout.debuggerOpen}
@@ -1024,20 +1044,6 @@ export const StrategyIde = ({
         ) : null}
         {inspectorFloating ? null : inspectorNode}
 
-        {hasAssistant && !assistantFloating && layout.assistantOpen ? (
-          <SplitHandle
-            orientation="vertical"
-            label={t("ide.resizeAssistant")}
-            value={layout.assistantWidth}
-            min={PANEL_BOUNDS.assistantWidth.min}
-            max={PANEL_BOUNDS.assistantWidth.max}
-            invert
-            onChange={(value) => resize("assistantWidth", value)}
-            controls={ids.assistant}
-          />
-        ) : null}
-        {/* 배치만 바꾸고 DOM 부모는 유지해 대화·미전송 입력·스트림 소유자를 재마운트하지 않는다. */}
-        {assistantNode}
 
         {/* 서랍은 본문 안에 그린다 — 오른쪽 서랍의 세로 범위가 본문과 같아 상단 바 밑에 깔리지 않는다(#325). */}
         {inspectorFloating ? (

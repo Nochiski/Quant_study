@@ -21,9 +21,9 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
 | 김철수 | 12 | 0 | 1 | 0 | 13 |
-| 정동민 | 13 | 0 | 0 | 0 | 13 |
+| 정동민 | 14 | 0 | 0 | 0 | 14 |
 | 한상목 | 16 | 0 | 0 | 1 | 17 |
-| 합계 | 41 | 0 | 1 | 1 | 43 |
+| 합계 | 42 | 0 | 1 | 1 | 44 |
 
 ### 스토리별 추적
 
@@ -55,6 +55,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보(또는 추천하지 않는 이유)가 카드에 채워진다 |
 | US-DM-12 | 정동민 | AI 결과 설명에서 검증 근거와 한계를 함께 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 AI에게 결과를 믿어도 되는지 물으면 검증 카드의 PSR·DSR 원래 수치와 조회 시점을 함께 답한다<br>`frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 후보로 고른 뒤 계열 시도가 늘어난 결과에서 AI는 지금 원장 기준과 고를 당시 기준을 나눠 답한다 |
 | US-DM-13 | 정동민 | 새 전략을 단계별 안내를 따라 만든다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.strategy-guide.spec.ts` :: US-DM-13 새 전략을 단계별로 고르면 같은 전략 문서가 만들어지고 편집기에서 이어 쓴다 |
+| US-DM-14 | 정동민 | 화면 테마를 설정에서 고른다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.settings-theme.spec.ts` :: US-DM-14 설정에서 어둡게를 고르면 바로 바뀌고 새로고침 뒤에도 유지된다 |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |

@@ -36,8 +36,9 @@ export const DEFAULT_LAYOUT: PanelLayout = {
   outlineOpen: false,
   inspectorOpen: false,
   debuggerOpen: false,
-  // 주본문을 먼저 읽고 구조·계약·AI는 사용자가 명시해서 연다.
-  assistantOpen: false,
+  // 구조·계약은 사용자가 명시해서 연다. AI 열은 처음부터 왼쪽에 열어 둔다(RD-04-A, 2026-10-19 결정 3).
+  // 저장된 닫힘 선택은 그대로 존중한다 — 기본값은 저장 기록에 `assistant` 키가 없을 때만 쓰인다.
+  assistantOpen: true,
   lastOpenedRight: null,
 };
 

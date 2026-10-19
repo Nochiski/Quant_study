@@ -873,9 +873,9 @@ test.describe("professional YAML workflow", () => {
     await expect(runRow).toContainText("완료");
     await expect(runRow).toContainText(`${strategyId} · v4`);
 
-    await workflow.getByRole("link", { name: "전략" }).click();
+    await workflow.getByRole("link", { name: "전략 세션" }).click();
     await expect(
-      workflow.getByRole("heading", { name: "전략 이력" }),
+      workflow.getByRole("heading", { name: "전략 세션" }),
     ).toBeVisible();
     const strategyRow = workflow
       .getByRole("row")
@@ -925,7 +925,7 @@ test.describe("professional YAML workflow", () => {
       );
       await workflow.goBack();
       await expect(
-        workflow.getByRole("heading", { name: "전략 이력" }),
+        workflow.getByRole("heading", { name: "전략 세션" }),
       ).toBeVisible();
     }
 
@@ -1498,7 +1498,7 @@ test.describe("professional YAML workflow", () => {
 
     await page.goto("/research/strategies");
     await expect(
-      page.getByRole("heading", { name: "전략 이력" }),
+      page.getByRole("heading", { name: "전략 세션" }),
     ).toBeVisible();
     const legacyRow = page
       .getByRole("row")

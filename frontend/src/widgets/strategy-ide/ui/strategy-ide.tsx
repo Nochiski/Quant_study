@@ -747,7 +747,7 @@ export const StrategyIde = ({
     <div className={`ide${layout.debuggerOpen ? " ide--trace" : ""}`}>
       <header className="ide__topbar">
         <nav className="ide__breadcrumb" aria-label={t("ide.breadcrumb")}>
-          <span className="ide__crumb">{t("nav.strategies")}</span>
+          <span className="ide__crumb">{t("ide.breadcrumb.strategies")}</span>
           <span className="ide__crumb-sep" aria-hidden="true">
             /
           </span>

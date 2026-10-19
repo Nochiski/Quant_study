@@ -1,0 +1,23 @@
+/* 실험 진행 막대: 완료·실패·실행 중을 나눠 칠한다(RD-08-A). 수는 옆 문장이 말한다. */
+.experiment-progress {
+  display: flex;
+  width: 100%;
+  min-width: calc(var(--space-6) * 3);
+  height: var(--space-2);
+  margin-bottom: var(--space-1);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+}
+
+.experiment-progress__completed {
+  background: var(--status-ok);
+}
+
+.experiment-progress__failed {
+  background: var(--status-error);
+}
+
+.experiment-progress__running {
+  background: var(--status-info);
+}

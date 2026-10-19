@@ -8,29 +8,14 @@ import {
 } from "../../../entities/backtest";
 import { strategiesQuery } from "../../../entities/strategy";
 import { ApiRequestError, failureReason } from "../../../shared/api";
-import { t, type MessageKey } from "../../../shared/config";
+import { t } from "../../../shared/config";
 import { Link } from "../../../shared/lib/router";
 import {
   Badge,
   Button,
   FailureNotice,
-  type BadgeTone,
 } from "../../../shared/ui";
-
-type Role = TrialLedger["trials"][number]["runs"][number]["role"];
-
-// 실행 역할은 backend 원장 집계(`summarize_trial_ledger`)가 정한다. 화면은 이름과 색만 붙인다.
-const ROLE_TONE: Record<Role, BadgeTone> = {
-  counted: "ok",
-  recheck: "info",
-  pending: "neutral",
-  no_result: "warn",
-};
-
-const roleLabel = (role: Role): string => {
-  const key: MessageKey = `history.trials.role.${role}`;
-  return t(key);
-};
+import { ROLE_TONE, roleLabel } from "../model/trial-roles";
 
 const ShortKey = ({ value }: { value: string }) => (
   <code className="data-list-page__hash" title={value}>

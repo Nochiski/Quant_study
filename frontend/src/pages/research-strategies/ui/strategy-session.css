@@ -1,0 +1,155 @@
+/* 전략 세션: 왼쪽은 버전마다 묶은 실행 흐름, 오른쪽은 원장·지문 카드(RD-03). 좁으면 한 줄로 쌓는다. */
+.strategy-session__header {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.strategy-session__header h1 {
+  margin: 0;
+}
+
+.strategy-session__intent {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 72ch;
+  padding: var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-subtle);
+}
+
+.strategy-session__intent p {
+  margin: 0;
+}
+
+.strategy-session__intent small,
+.strategy-session__time,
+.strategy-session__hint,
+.strategy-session__empty {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-session__intent--empty {
+  justify-items: start;
+}
+
+.strategy-session__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.strategy-session__timeline {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.strategy-session__timeline > h2,
+.strategy-session__card h2 {
+  margin: 0;
+  font-size: var(--text-size-section-title);
+}
+
+.strategy-session__version,
+.strategy-session__card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.strategy-session__version-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.strategy-session__version-head h3 {
+  margin: 0;
+}
+
+.strategy-session__version-head .data-list-page__actions {
+  margin-left: auto;
+}
+
+.strategy-session__note {
+  margin: 0;
+}
+
+.strategy-session__entries {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategy-session__entry {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-small);
+  background: var(--surface-subtle);
+}
+
+.strategy-session__entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.strategy-session__aside {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.strategy-session__count {
+  margin: 0;
+  font-weight: 600;
+}
+
+.strategy-session__roles {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategy-session__roles li,
+.strategy-session__hashes > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.strategy-session__hashes {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.strategy-session__hashes dt {
+  color: var(--text-muted);
+}
+
+.strategy-session__hashes dd {
+  margin: 0;
+}
+
+.strategy-session__hint {
+  margin: 0;
+}
+
+@media (max-width: 960px) {
+  .strategy-session__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

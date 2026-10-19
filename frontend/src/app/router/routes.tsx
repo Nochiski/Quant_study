@@ -95,6 +95,10 @@ const StrategiesPage = lazyRouteComponent(
   () => import("../../pages/research-strategies"),
   "StrategiesPage",
 );
+const StrategySessionPage = lazyRouteComponent(
+  () => import("../../pages/research-strategies"),
+  "StrategySessionPage",
+);
 const BacktestsPage = lazyRouteComponent(
   () => import("../../pages/research-backtests"),
   "BacktestsPage",
@@ -212,6 +216,12 @@ const strategiesRoute = createRoute({
   component: StrategiesPage,
 });
 
+const strategySessionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/strategies/$strategyId",
+  component: StrategySessionPage,
+});
+
 const strategyRevisionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/strategies/$strategyId/revisions/$revision",
@@ -317,6 +327,7 @@ const routeTree = rootRoute.addChildren([
   legacyBuilderRoute,
   strategiesRoute,
   newStrategyRoute,
+  strategySessionRoute,
   strategyRevisionRoute,
   backtestsRoute,
   backtestRunRoute,

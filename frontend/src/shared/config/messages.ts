@@ -455,6 +455,10 @@ const ko = {
     "서버 내부 오류로 실행이 중단되었습니다. 서버 로그를 확인하세요.",
   "backtest.run.error.backtest.run.interrupted":
     "실행이 끝나기 전에 서버가 다시 시작되어 중단되었습니다. 같은 설정으로 다시 실행하세요.",
+  "backtest.run.error.backtest.run.worker_exited":
+    "실행을 맡은 작업 프로세스가 결과 없이 끝났습니다. 같은 설정으로 다시 실행하고, 되풀이되면 서버 로그를 확인하세요.",
+  "backtest.run.error.backtest.run.worker_mismatch":
+    "작업 프로세스가 서버와 다른 데이터·코드 판본을 읽어 실행을 멈췄습니다. 서버를 다시 시작한 뒤 실행하세요.",
   "backtest.settings.title": "실행 설정",
   "backtest.settings.open": "실행 설정 열기",
   "backtest.settings.close": "실행 설정 닫기",
@@ -3369,6 +3373,10 @@ export const messages = {
       "The run stopped because of an internal server error. Check the server logs.",
     "backtest.run.error.backtest.run.interrupted":
       "The server restarted before the run finished. Run it again with the same settings.",
+    "backtest.run.error.backtest.run.worker_exited":
+      "The worker process running this backtest ended without a result. Run it again with the same settings and check the server logs if it repeats.",
+    "backtest.run.error.backtest.run.worker_mismatch":
+      "The worker process read a different data or code version than the server, so the run stopped. Restart the server, then run it again.",
     "backtest.settings.title": "Run settings",
     "backtest.settings.open": "Open run settings",
     "backtest.settings.close": "Close run settings",

@@ -886,8 +886,10 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(BacktestDataUnavailableError("x")),
         _failure_code(RuntimeError("x")),
     }
-    # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3).
-    assert produced == RUN_FAILURE_CODES - {"backtest.run.interrupted"}
+    # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3). worker 두
+    # 코드는 계산이 아니라 프로세스 전송의 감독이 붙인다(run-worker spec D5·D6).
+    transport = {"backtest.run.worker_exited", "backtest.run.worker_mismatch"}
+    assert produced == RUN_FAILURE_CODES - {"backtest.run.interrupted"} - transport
 
     def contract_code(detail_type: type) -> str:
         # future annotations 라 필드 타입이 문자열이다 — 평가해서 Literal 인자를 꺼낸다.
@@ -906,6 +908,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         "backtest.run.no_positions",
         "backtest.run.benchmark_unknown",
         "backtest.run.interrupted",
+        *transport,
     }
 
 

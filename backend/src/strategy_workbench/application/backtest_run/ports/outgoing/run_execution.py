@@ -67,7 +67,13 @@ RunOutcome = RunCommitted | RunFailed | RunCancelled
 
 
 class RunListener(Protocol):
-    """전송이 run 하나의 진행·종결을 알리는 곳. 전송의 감독 스레드가 서비스 잠금 밖에서 부른다."""
+    """전송이 run 하나의 진행·종결을 알리는 곳. 전송의 감독 스레드가 서비스 잠금 밖에서 부른다.
+
+    잠금 순서는 서비스 → 전송이다. 서비스는 자기 잠금을 쥔 채 `start`·`cancel` 을 부르므로,
+    전송은 자기 잠금(예: 예비 worker 장부)을 쥔 채 listener 를 부르지 않는다. listener 는
+    `start` 를 부른 스레드에서 동기로 불리지 않는다 — 불리면 서비스가 실행 수를 늘리기 전에
+    줄인다.
+    """
 
     def on_progress(self, stage: RunStage, fraction: float, message: str) -> None:
         """run 막대 위치(0~1)와 단계.

@@ -6,6 +6,7 @@ worker 프로세스가 예외 객체 대신 코드와 문장을 보낼 수 있�
 
 from __future__ import annotations
 
+import weakref
 from datetime import date
 from typing import cast
 
@@ -118,3 +119,41 @@ def test_a_progress_report_that_sees_the_cancel_stops_the_computation() -> None:
 
     assert outcome == RunCancelled()
     assert data.queries == []
+
+
+class _Payload:
+    """tape·데이터처럼 큰 중간 결과를 흉내 내는 객체. weakref 로 살아 있는지 본다."""
+
+
+class _FailsHoldingPayload:
+    """큰 중간 결과를 지역 변수로 쥔 채 실패하는 데이터 포트."""
+
+    def __init__(self) -> None:
+        self.payload_ref: weakref.ref[_Payload] | None = None
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
+        payload = _Payload()
+        self.payload_ref = weakref.ref(payload)
+        raise BacktestDataUnavailableError(
+            f"unknown benchmark — security_id={query.benchmark_security_id}"
+        )
+
+
+def test_a_failed_computation_does_not_keep_its_intermediate_results_alive() -> None:
+    """실패 값의 원래 예외가 계산 프레임의 지역 변수를 붙잡지 않는다(#572 리뷰 P2).
+
+    붙잡으면 tape·데이터가 GC 미루기 구간 밖까지 살아, 구간이 끝난 뒤 전체 수집이 그것을 훑어 같은
+    프로세스의 HTTP 요청을 세운다(#196).
+    """
+    data = _FailsHoldingPayload()
+
+    outcome = _computation(cast(_UnknownBenchmark, data)).compute(
+        _job(), progress=lambda stage, fraction, message: None, cancelled=lambda: False
+    )
+
+    assert isinstance(outcome, RunFailed)
+    # 로그용 원래 예외와 그 traceback 위치는 남는다.
+    assert isinstance(outcome.exception, BacktestDataUnavailableError)
+    assert outcome.exception.__traceback__ is not None
+    assert data.payload_ref is not None
+    assert data.payload_ref() is None

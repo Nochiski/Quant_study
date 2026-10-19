@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -150,7 +151,9 @@ class RunComputation:
         except RunCancelledError:
             return RunCancelled()
         except BaseException as error:
-            return RunFailed(_failure_code(error), _describe_failure(error), exception=error)
+            failed = RunFailed(_failure_code(error), _describe_failure(error), exception=error)
+            _release_frames(error)
+            return failed
 
     def _commit(
         self, job: RunJob, progress: RunProgress, cancelled: Callable[[], bool]
@@ -351,3 +354,24 @@ def run_headline(result: BacktestRunResult) -> RunHeadline:
         sharpe=values.get("sharpe"),
         max_drawdown=values.get("max_drawdown"),
     )
+
+
+def _release_frames(error: BaseException) -> None:
+    """실패 예외 체인의 traceback 프레임 지역 변수를 비운다(#572 리뷰 P2).
+
+    traceback 이 계산 프레임을 쥐면 그 지역 변수(tape·데이터셋·결과)가 GC 미루기 구간 밖까지 살아,
+    구간이 끝난 뒤의 전체 수집이 그것을 훑어 같은 프로세스의 HTTP 요청을 세운다(#196). 파일·줄·함수
+    정보는 남아 로그 stack trace 는 그대로다. 아직 도는 프레임(이 함수를 부른 `compute`)은
+    `traceback.clear_frames` 가 건너뛴다.
+    """
+    seen: set[int] = set()
+    pending: list[BaseException] = [error]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        traceback.clear_frames(current.__traceback__)
+        pending.extend(
+            item for item in (current.__cause__, current.__context__) if item is not None
+        )

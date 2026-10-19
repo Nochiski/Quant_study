@@ -8,6 +8,7 @@ import {
   Button,
   CommandPalette,
   EmptyState,
+  SignedValue,
   SplitHandle,
   Tabs,
   Tooltip,
@@ -112,6 +113,25 @@ describe("Badge", () => {
     expect(screen.getByText("2", { exact: false })).toHaveTextContent("오류 2");
     render(<Badge tone="neutral">3</Badge>);
     expect(screen.getByText("3")).toHaveTextContent(/^3$/);
+  });
+});
+
+describe("SignedValue", () => {
+  it("prefixes the sign and a direction word so direction never relies on colour alone", () => {
+    render(<SignedValue value={0.123} magnitude="12.30%" />);
+    expect(screen.getByText("12.30%", { exact: false })).toHaveTextContent(
+      "상승 +12.30%",
+    );
+    cleanup();
+    render(<SignedValue value={-0.041} magnitude="4.10%" />);
+    expect(screen.getByText("4.10%", { exact: false })).toHaveTextContent(
+      "하락 −4.10%",
+    );
+    cleanup();
+    render(<SignedValue value={0} magnitude="0.00%" />);
+    expect(screen.getByText("0.00%", { exact: false })).toHaveTextContent(
+      /^0\.00%$/,
+    );
   });
 });
 

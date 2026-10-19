@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { LineChart } from "../../../entities/backtest";
 import {
   experimentParameterMapQuery,
+  useRobustnessPreview,
   noRecommendationLabel,
   experimentStatusLabel,
   experimentWalkForwardQuery,
@@ -57,6 +58,8 @@ export const RobustnessCheck = ({
     (latest === undefined ||
       (latest.record.cancelled_at != null && latest.settled));
 
+  // 누르기 전에 조합·실행·시도 수 변화를 보인다(RD-07-B). 확인 창과 같은 미리 계산 query 를 쓴다.
+  const preview = useRobustnessPreview(runId, canStart);
   let body;
   if (checks.isPending)
     body = <p role="status">{t("backtest.robustness.loading")}</p>;
@@ -105,6 +108,16 @@ export const RobustnessCheck = ({
         {t("backtest.robustness.title")}
       </h5>
       {body}
+      {canStart && preview.data ? (
+        <p className="robustness-check__preview">
+          {tFill("backtest.robustness.preview", {
+            combinations: preview.data.combination_count,
+            runs: preview.data.run_count,
+            before: preview.data.trial_count,
+            after: preview.data.trial_count_after,
+          })}
+        </p>
+      ) : null}
       {canStart ? (
         <Button ref={trigger} onClick={() => setConfirming(true)}>
           {t("backtest.robustness.start")}

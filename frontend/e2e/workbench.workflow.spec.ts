@@ -71,11 +71,14 @@ const rowFor = (region: Locator, securityId: string): Locator =>
 
 const expectBacktestResultPresentation = async (page: Page) => {
   const result = page.getByRole("article", { name: "백테스트 결과" });
-  const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
+  // "결과 한눈에" 카드 묶음. 계좌 요약이 늦으면 최종 평가액 카드가 없어 네 장일 수 있다.
+  const highlights = result
+    .getByRole("region", { name: "결과 한눈에" })
+    .locator(".metric-highlights");
   const backgrounds = new Map<string, string>();
   const scenarios = [
-    { width: 1440, height: 900, colorScheme: "light", columns: 7 },
-    { width: 1440, height: 900, colorScheme: "dark", columns: 7 },
+    { width: 1440, height: 900, colorScheme: "light", columns: 4 },
+    { width: 1440, height: 900, colorScheme: "dark", columns: 4 },
     { width: 800, height: 900, colorScheme: "light", columns: 2 },
     { width: 800, height: 900, colorScheme: "dark", columns: 2 },
     { width: 520, height: 900, colorScheme: "light", columns: 1 },
@@ -100,7 +103,10 @@ const expectBacktestResultPresentation = async (page: Page) => {
     const columns = await highlights.evaluate(
       (element) => getComputedStyle(element).gridTemplateColumns,
     );
-    expect(columns.trim().split(/\s+/u)).toHaveLength(scenario.columns);
+    // auto-fit 이 접은 빈 칸(0px)은 세지 않는다. 넓은 화면은 카드가 모두 한 줄에 선다(4장 이상).
+    const tracks = columns.trim().split(/\s+/u).filter((track) => track !== "0px");
+    if (scenario.columns === 4) expect(tracks.length).toBeGreaterThanOrEqual(4);
+    else expect(tracks).toHaveLength(scenario.columns);
     expect(background).not.toBe("rgba(0, 0, 0, 0)");
     backgrounds.set(`${scenario.width}-${scenario.colorScheme}`, background);
 

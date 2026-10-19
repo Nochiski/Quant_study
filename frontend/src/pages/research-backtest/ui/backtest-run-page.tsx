@@ -92,6 +92,7 @@ export const BacktestRunPage = () => {
   // 설명할 결과는 완료된 실행에만 있다. 진행 중·실패한 실행에는 진입점을 두지 않는다(spec R6).
   const assistantAvailable = completed && result.data !== undefined;
   const assistantOpen = assistantAvailable && panel.open;
+  const provenance = result.data?.manifest.strategy_provenance;
   return (
     <div
       className={
@@ -129,6 +130,21 @@ export const BacktestRunPage = () => {
               search={{ run: runId }}
             >
               {t("backtest.actions.experiment")}
+            </Link>
+          ) : null}
+          {/* 저장 리비전으로 돈 실행만 그 리비전 편집기로 보낸다. 인라인 초안은 돌아갈 문서가 없다. */}
+          {provenance?.kind === "saved_revision" &&
+          provenance.strategy_id != null &&
+          provenance.revision != null ? (
+            <Link
+              className="ui-button ui-button--secondary ui-button--small"
+              to="/research/strategies/$strategyId/revisions/$revision"
+              params={{
+                strategyId: provenance.strategy_id,
+                revision: String(provenance.revision),
+              }}
+            >
+              {t("backtest.result.rules")}
             </Link>
           ) : null}
           {assistantAvailable ? (
@@ -181,6 +197,13 @@ export const BacktestRunPage = () => {
                 ) : null}
               </BacktestValidationReport>
             }
+            account={accountReport.data?.summary}
+            regression={
+              <BacktestFactorRegression runId={runId} fingerprint={result.data.manifest.run_fingerprint} />
+            }
+            capacityCheck={
+              <CheckCapacity runId={runId} request={request.isError ? undefined : request.data} requestError={request.error} reloadRequest={() => { void request.refetch(); }} single={summary.data?.kind === "single"} />
+            }
             accountReport={
               <BacktestAccountReport
                 report={accountReport.data}
@@ -192,10 +215,6 @@ export const BacktestRunPage = () => {
             environmentFields={environmentFields}
           />
         ) : null}
-        {completed && result.data ? <>
-          <CheckCapacity runId={runId} request={request.isError ? undefined : request.data} requestError={request.error} reloadRequest={() => { void request.refetch(); }} single={summary.data?.kind === "single"} />
-          <BacktestFactorRegression runId={runId} fingerprint={result.data.manifest.run_fingerprint} />
-        </> : null}
       </div>
       {assistantAvailable && panel.mounted ? (
         // 결과 화면의 AI 패널. landmark·이름·제목은 여기가 소유하고 채팅 feature는 이름 없는

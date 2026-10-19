@@ -69,27 +69,32 @@ test(
     await expect(result).toBeVisible({ timeout: 120_000 });
 
     // 지표 이름 옆에 쉬운 한글 이름과 한 줄 뜻이 보인다.
-    const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
+    const highlights = result.getByRole("region", { name: "결과 한눈에" });
     const cell = (label: string) =>
       highlights.getByText(label, { exact: true }).locator("xpath=..");
     await expect(cell("Sharpe ratio")).toContainText(
       "샤프 비율 흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다.",
     );
-    // 샤프 옆의 표준오차는 95% 범위 읽는 법과 근사의 한계를 함께 말한다(이슈 #274).
-    await expect(cell("Sharpe standard error")).toContainText(
+    // 샤프 카드는 표준오차를 "오차 ±"로 곁들이고, 95% 범위 읽는 법과 근사의 한계를 함께 말한다(이슈 #274).
+    await expect(cell("Sharpe ratio")).toContainText("오차 ±");
+    await expect(cell("Sharpe ratio")).toContainText(
       "샤프 비율 오차 샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다.",
     );
-    await expect(cell("Sharpe standard error")).toContainText(
+    await expect(cell("Sharpe ratio")).toContainText(
       "샤프 ± 이 값의 2배가 대략 95% 범위이고, 날마다 독립이라고 본 근사라 실제로는 더 클 수 있습니다.",
     );
     await expect(cell("Maximum drawdown")).toContainText(
       "최대 낙폭 가장 높았던 때에서 가장 많이 떨어진 폭입니다.",
     );
-    const totalReturn = (
-      await cell("Total return").locator("strong").innerText()
-    ).trim();
-    expect(totalReturn).toMatch(/^-?\d+\.\d{2}%$/u);
-
+    // 총수익률은 부호·낭독 문구와 함께 보인다. AI 답은 같은 값을 부호 있는 십진수로 말한다.
+    // 낭독 문구 뒤 줄바꿈은 innerText 표기라 공백 하나로 접는다.
+    const shown = (await cell("Total return").locator("strong").innerText())
+      .replace(/\s+/gu, " ")
+      .trim();
+    expect(shown).toMatch(/^(?:(?:상승 ?\+|하락 ?−)\d+\.\d{2}%|0\.00%)$/u);
+    const totalReturn = shown
+      .replace(/^상승 ?\+/u, "")
+      .replace(/^하락 ?−/u, "-");
     // 결과 화면에서 AI에게 묻는다.
     await page.getByRole("button", { name: "AI에게 결과 묻기" }).click();
     const panel = page.getByRole("complementary", { name: "AI 어시스턴트" });

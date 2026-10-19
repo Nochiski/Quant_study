@@ -187,6 +187,10 @@ describe("튼튼한지 확인하기", () => {
     expect(
       screen.getByRole("region", { name: "파라미터 고원" }),
     ).toHaveTextContent("실험이 필요해요");
+    // 누르기 전에 조합·실행·시도 수 변화가 먼저 보인다(RD-07-B).
+    expect(
+      await screen.findByText("조합 4개 · 실행 5개 · 시도 수 1 → 4"),
+    ).toBeVisible();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "튼튼한지 확인하기" }));

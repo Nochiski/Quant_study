@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const css = ["backtest-run-detail.css", "line-chart.css"]
+const css = ["backtest-run-detail.css", "line-chart.css", "performance-chart.css"]
   .map((file) =>
     readFileSync(
       resolve(process.cwd(), "src/entities/backtest/ui", file),

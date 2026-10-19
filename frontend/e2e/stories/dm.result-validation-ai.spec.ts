@@ -66,7 +66,7 @@ test(
     expect(report.dsr.trial_count).toBe(1);
     expect(report.dsr.value).not.toBeNull();
     expect(report.psr?.value).toEqual(expect.any(Number));
-    const card = page.getByRole("region", { name: "결과 검증", exact: true });
+    const card = page.getByRole("region", { name: "운일까, 튼튼할까", exact: true });
     await expect(card).toBeVisible();
 
     await page.getByRole("button", { name: "AI에게 결과 묻기" }).click();
@@ -262,7 +262,7 @@ test(
       ),
     );
     await expect(
-      page.getByRole("region", { name: "결과 검증", exact: true }),
+      page.getByRole("region", { name: "운일까, 튼튼할까", exact: true }),
     ).toBeVisible();
     const current = (await (await report).json()) as RunValidationReport;
     expect(current.dsr.trial_count).toBe(3);

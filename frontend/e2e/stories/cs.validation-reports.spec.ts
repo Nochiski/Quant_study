@@ -238,7 +238,10 @@ test(
       )
       .toBe("completed");
     await page.goto(`/research/backtests/${runId}`);
-    const panel = page.getByRole("region", { name: "팩터 회귀", exact: true });
+    // 팩터 회귀는 "종목 선정이 효과가 있었나" 카드 안에 있다(RD-07-C).
+    const panel = page
+      .getByRole("region", { name: "종목 선정이 효과가 있었나", exact: true })
+      .getByRole("region", { name: "팩터 회귀", exact: true });
     await panel.getByRole("button", { name: "팩터 회귀 조회" }).click();
     await expect(panel).toContainText(
       "회귀에 필요한 유효 관측 구간이 부족합니다.",

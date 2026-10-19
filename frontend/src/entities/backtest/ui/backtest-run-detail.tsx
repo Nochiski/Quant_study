@@ -1,16 +1,13 @@
-import { BacktestMetricTable, MetricCell, type MetricExplanation } from "./backtest-metrics";
+import { BacktestMetricTable, type MetricExplanation } from "./backtest-metrics";
 import { BacktestOrderEvents } from "./backtest-order-events";
 import type {
+  AccountReport,
   BacktestRunResult,
   MetricValue,
 } from "../../../shared/api";
-import { t, tOptional } from "../../../shared/config";
+import { t, tFill, tOptional } from "../../../shared/config";
 import { type ReactNode, useId, useRef } from "react";
-import {
-  EXPLAINING_WARNING_CODES,
-  HIGHLIGHTED_METRIC_IDS,
-  metricPlainCopy,
-} from "../model/metric-copy";
+import { EXPLAINING_WARNING_CODES } from "../model/metric-copy";
 import {
   runEnvironmentApplies,
   runEnvironmentLabel,
@@ -19,6 +16,10 @@ import {
 } from "../model/run-environment-fields";
 import "./backtest-run-detail.css";
 import { LineChart } from "./line-chart";
+import { MonthlyReturns } from "./monthly-returns";
+import { PerformanceChart } from "./performance-chart";
+import { ResultAxes } from "./result-axes";
+import { ResultSummary, type ResultMetrics } from "./result-summary";
 
 /**
  * 실행된 실행 설정의 행. 칸 목록·순서·이름·단위·enum 값 이름은 실행 설정 스키마에서 읽는다
@@ -49,14 +50,35 @@ const environmentRows = (
   ];
 };
 
+/** 보조 차트의 화면 읽기용 요약: 마지막 값을 말한다. 값이 없으면 차트가 빈 문구를 보인다. */
+const lastValueSummary = (
+  title: string,
+  values: ReadonlyArray<number | null>,
+  format: (value: number) => string,
+) => {
+  const last = [...values].reverse().find((value) => value !== null) ?? null;
+  return last === null
+    ? undefined
+    : tFill("backtest.chart.lastValueSummary", { title, value: format(last) });
+};
+
 export const BacktestRunDetail = ({
   result,
   environmentFields = null,
+  account,
   accountReport,
   validationReport,
+  capacityCheck,
+  regression,
 }: {
   result: BacktestRunResult;
+  /** 계좌 보고서 요약. "결과 한눈에"의 최종 평가액 카드가 읽는다. */
+  account?: AccountReport["summary"];
   accountReport?: ReactNode;
+  /** 용량 확인. 청산 거래 뒤, 전체 지표 표 앞에 둔다(RD-07-E). */
+  capacityCheck?: ReactNode;
+  /** 팩터 회귀 패널. "종목 선정이 효과가 있었나" 카드 안에 둔다(RD-07-C). */
+  regression?: ReactNode;
   /** 현재 계열 검증 조회는 page가 소유하며 원본 결과와 별도 영역에 조합한다. */
   validationReport?: ReactNode;
   /** 실행 설정 스키마의 칸. page 가 스키마 query 에서 넘긴다. 없으면 기록된 키 그대로 보인다. */
@@ -87,6 +109,11 @@ export const BacktestRunDetail = ({
       .filter((item) => item.scope === "full")
       .map((item) => [item.metric_id, item]),
   );
+  const metrics: ResultMetrics = {
+    metric: (metricId) => fullMetrics.get(metricId),
+    definition: (metricId) => definitions.get(metricId),
+    explanationFor,
+  };
   return (
     <article className="run-detail" aria-labelledby={titleId}>
       <header className="run-detail__header">
@@ -106,16 +133,18 @@ export const BacktestRunDetail = ({
         className="run-detail__navigation"
         aria-label={t("backtest.result.navigation")}
       >
+        <a href={`#${titleId}-summary`}>{t("backtest.summary.title")}</a>
         {validationReport ? (
-          <a href={`#${titleId}-validation`}>{t("backtest.validation.title")}</a>
+          <a href={`#${titleId}-validation`}>{t("backtest.evidence.title")}</a>
         ) : null}
+        <a href={`#${titleId}-charts`}>{t("backtest.chart.title")}</a>
+        <a href={`#${titleId}-axes`}>{t("backtest.axes.title")}</a>
+        <a href={`#${titleId}-monthly`}>{t("backtest.monthly.title")}</a>
+        <a href={`#${titleId}-trades`}>{t("backtest.result.trades")}</a>
         {accountReport ? (
           <a href={`#${titleId}-account`}>{t("backtest.account.title")}</a>
         ) : null}
-        <a href={`#${titleId}-highlights`}>{t("backtest.result.highlights")}</a>
-        <a href={`#${titleId}-charts`}>{t("backtest.result.charts")}</a>
         <a href={`#${titleId}-metrics`}>{t("backtest.result.metrics")}</a>
-        <a href={`#${titleId}-trades`}>{t("backtest.result.trades")}</a>
         <a
           href={`#${titleId}-manifest`}
           onClick={() => {
@@ -126,87 +155,33 @@ export const BacktestRunDetail = ({
         </a>
       </nav>
 
+      <ResultSummary id={`${titleId}-summary`} metrics={metrics} account={account} />
+
       {validationReport ? (
         <section
           id={`${titleId}-validation`}
           tabIndex={-1}
-          aria-label={t("backtest.validation.title")}
+          className="result-evidence"
+          aria-label={t("backtest.evidence.title")}
         >
+          <h4>{t("backtest.evidence.title")}</h4>
           {validationReport}
+          <p className="result-evidence__disclaimer">
+            {t("backtest.evidence.disclaimer")}
+          </p>
         </section>
       ) : null}
 
-      {accountReport ? (
-        <section
-          id={`${titleId}-account`}
-          tabIndex={-1}
-          aria-label={t("backtest.account.title")}
-        >
-          {accountReport}
-        </section>
-      ) : null}
-
-      <section
-        id={`${titleId}-highlights`}
-        tabIndex={-1}
-        className="metric-highlights"
-        aria-label={t("backtest.result.highlights")}
-      >
-        {HIGHLIGHTED_METRIC_IDS.map((metricId) => {
-          const metric = fullMetrics.get(metricId);
-          const definition = definitions.get(metricId);
-          if (metric === undefined || definition === undefined) return null;
-          // 영어 이름은 registry `label` 그대로, 쉬운 이름·뜻은 i18n이 소유한다(결과 설명 spec R4).
-          const plain = metricPlainCopy(metricId);
-          return (
-            <div key={metricId}>
-              <span>{definition.label}</span>
-              <MetricCell
-                definition={definition}
-                explanation={explanationFor(metric)}
-                metric={metric}
-              />
-              {plain === null ? null : (
-                <p className="metric-highlights__plain">
-                  <dfn>{plain.name}</dfn> {plain.description}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </section>
+      <PerformanceChart
+        id={`${titleId}-charts`}
+        series={result.series}
+        benchmarkId={result.manifest.run_spec.benchmark_security_id}
+      />
 
       <section
         className="result-chart-grid"
-        id={`${titleId}-charts`}
-        tabIndex={-1}
-        aria-label={t("backtest.result.charts")}
+        aria-label={t("backtest.chart.more")}
       >
-        <LineChart
-          series={[
-            {
-              label: t("backtest.result.series.strategy"),
-              color: "var(--chart-series-1)",
-              values: result.series.equity.map((item) => item.equity),
-            },
-            {
-              label: t("backtest.result.series.benchmark"),
-              color: "var(--chart-series-2)",
-              values: result.series.equity.map((item) => item.benchmark_equity),
-            },
-          ]}
-          title={t("backtest.result.chart.equity")}
-        />
-        <LineChart
-          series={[
-            {
-              label: t("backtest.result.series.drawdown"),
-              color: "var(--chart-series-3)",
-              values: result.series.drawdown.map((item) => item.drawdown),
-            },
-          ]}
-          title={t("backtest.result.chart.drawdown")}
-        />
         <LineChart
           series={[
             {
@@ -216,6 +191,11 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.rollingSharpe")}
+          summary={lastValueSummary(
+            t("backtest.result.chart.rollingSharpe"),
+            result.series.rolling_sharpe.map((item) => item.value),
+            (value) => value.toFixed(2),
+          )}
           // 창보다 짧은 실행만 창 길이로 이유를 말한다. 흔들림 0 등 다른 이유면 일반 문구다(#303).
           emptyText={
             result.series.rolling_sharpe_window_sessions != null &&
@@ -246,34 +226,23 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.exposure")}
+          summary={lastValueSummary(
+            t("backtest.result.chart.exposure"),
+            result.artifacts.snapshots.map((item) => item.gross_exposure),
+            (value) => `${(value * 100).toFixed(1)}%`,
+          )}
         />
       </section>
 
-      <section className="monthly-panel">
-        <header>
-          <h4>{t("backtest.result.monthly")}</h4>
-          <span>{t("backtest.result.monthly.description")}</span>
-        </header>
-        <div className="monthly-grid">
-          {result.series.monthly_returns.map((item) => (
-            <div
-              className={item.value >= 0 ? "is-positive" : "is-negative"}
-              key={`${item.year}-${item.month}`}
-            >
-              <span>
-                {item.year}.{String(item.month).padStart(2, "0")}
-              </span>
-              <strong>{(item.value * 100).toFixed(2)}%</strong>
-            </div>
-          ))}
-        </div>
-      </section>
+      <ResultAxes
+        id={`${titleId}-axes`}
+        metrics={metrics}
+        regression={regression}
+      />
 
-      <BacktestMetricTable
-        definitions={result.metric_definitions}
-        metrics={result.metrics}
-        id={`${titleId}-metrics`}
-        explanationFor={explanationFor}
+      <MonthlyReturns
+        id={`${titleId}-monthly`}
+        points={result.series.monthly_returns}
       />
 
       <section className="trade-panel" id={`${titleId}-trades`} tabIndex={-1}>
@@ -338,6 +307,25 @@ export const BacktestRunDetail = ({
       </section>
 
       <BacktestOrderEvents artifacts={result.artifacts} />
+
+      {capacityCheck}
+
+      {accountReport ? (
+        <section
+          id={`${titleId}-account`}
+          tabIndex={-1}
+          aria-label={t("backtest.account.title")}
+        >
+          {accountReport}
+        </section>
+      ) : null}
+
+      <BacktestMetricTable
+        definitions={result.metric_definitions}
+        metrics={result.metrics}
+        id={`${titleId}-metrics`}
+        explanationFor={explanationFor}
+      />
 
       <details
         id={`${titleId}-manifest`}

@@ -280,7 +280,7 @@ describe("백테스트 결과 화면의 AI 패널", () => {
     mount();
 
     const highlights = await screen.findByRole("region", {
-      name: "핵심 성과 지표",
+      name: "결과 한눈에",
     });
     expect(await screen.findByText("계좌 요약을 불러오지 못했습니다. 기존 성과 결과는 아래에서 볼 수 있습니다.")).toBeVisible();
     const sharpe = within(highlights)

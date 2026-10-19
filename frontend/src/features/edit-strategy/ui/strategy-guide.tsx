@@ -10,7 +10,11 @@ import type { FactorDefinition } from "../../../shared/api";
 import { t, tCode, tDescription, tFill, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import { buildCanonicalSnippetCatalog, type SnippetCatalogSource } from "../model/canonical-snippets";
-import { catalogProfiles, type FormListSection } from "../model/form-projection";
+import {
+  catalogProfiles,
+  type FormListSection,
+  type FormProjection,
+} from "../model/form-projection";
 import { factorAddition, groupFactors, type FactorCategory } from "../model/guide-factors";
 import { changedLines } from "../model/guide-preview";
 import { guideSteps, type GuideStep } from "../model/guide-steps";
@@ -29,6 +33,7 @@ import type { FormProjectionState } from "../model/use-form-projection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { cardTemplate } from "../model/pipeline-projection";
 import { type CardContext, SentenceCard, StageList } from "./pipeline-panel";
+import { LibraryFactorPicker } from "./library-factor-picker";
 import { FormFieldsEditor, type FormCatalogs } from "./strategy-form-panel";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./strategy-guide.css";
@@ -109,6 +114,7 @@ export const StrategyGuide = ({
           revealSignal: undefined,
           onOpenGraph,
           onOpenAdvanced: undefined,
+          librarySave: true,
         };
   const disabled = transactions.disabled;
   return (
@@ -169,6 +175,7 @@ export const StrategyGuide = ({
               pipeline={pipeline}
               context={context}
               snippetSource={snippetSource}
+              projection={form.projection}
             />
           ) : (
             <>
@@ -186,6 +193,10 @@ export const StrategyGuide = ({
           <TransactionFeedbackNote
             feedback={transactions.feedbackFor("pipeline")}
             owner="pipeline"
+          />
+          <TransactionFeedbackNote
+            feedback={transactions.feedbackFor("library")}
+            owner="library"
           />
           <footer className="strategy-guide__footer">
             <Button
@@ -244,11 +255,13 @@ const StageStep = ({
   pipeline,
   context,
   snippetSource,
+  projection,
 }: {
   step: Extract<GuideStep, { kind: "stage" }>;
   pipeline: PipelineProjection;
   context: CardContext;
   snippetSource: SnippetCatalogSource;
+  projection: FormProjection | null;
 }) => {
   const stage = pipeline.stages.find((candidate) => candidate.stage === step.stage);
   const lists = (stage?.lists ?? []).filter((list) =>
@@ -266,11 +279,12 @@ const StageStep = ({
       {describe === null ? null : <p className="strategy-guide__hint">{describe}</p>}
       {step.listOnly
         ? lists.map((list) => (
-            <FactorPicker
+            <FactorSources
               key={list.pointer}
               list={list}
               context={context}
               snippetSource={snippetSource}
+              projection={projection}
             />
           ))
         : null}
@@ -315,6 +329,43 @@ const Cards = ({
     ))}
   </>
 );
+
+/** 팩터를 고르는 곳: 카탈로그(backend 레지스트리)와 내 팩터(라이브러리, US-CS-08). */
+const FactorSources = ({
+  list,
+  context,
+  snippetSource,
+  projection,
+}: {
+  list: FormListSection;
+  context: CardContext;
+  snippetSource: SnippetCatalogSource;
+  projection: FormProjection | null;
+}) => {
+  const [source, setSource] = useState<"catalog" | "mine">("catalog");
+  return (
+    <>
+      <div className="strategy-guide__chips" role="group" aria-label={t("library.tabs")}>
+        {(["catalog", "mine"] as const).map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            className="strategy-guide__chip"
+            aria-pressed={source === candidate}
+            onClick={() => setSource(candidate)}
+          >
+            {t(`library.tab.${candidate}`)}
+          </button>
+        ))}
+      </div>
+      {source === "catalog" ? (
+        <FactorPicker list={list} context={context} snippetSource={snippetSource} />
+      ) : (
+        <LibraryFactorPicker context={context} projection={projection} />
+      )}
+    </>
+  );
+};
 
 /**
  * 분류 칩과 팩터 목록. 바로 쓸 수 있는(`implemented`) 팩터만 담기가 켜지고, 준비 중·데이터 없음은 이유와

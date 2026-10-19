@@ -36,7 +36,10 @@ import {
   PANEL_BOUNDS,
   usePanelLayout,
 } from "../model/use-panel-layout";
-import { OpenEditorWorkspaceContext } from "../model/workspace-context";
+import {
+  OpenEditorWorkspaceContext,
+  OpenTraceWorkspaceContext,
+} from "../model/workspace-context";
 import "./strategy-ide.css";
 
 export type SourceView = StrategyView;
@@ -331,6 +334,9 @@ export const StrategyIde = ({
     },
     [close, compact, layout, narrow, toggle],
   );
+  const openTraceWorkspace = useCallback(() => {
+    if (!layout.debuggerOpen) togglePanel("debuggerOpen");
+  }, [layout.debuggerOpen, togglePanel]);
   const inspect = useCallback((focusInspector = true) => {
     if (!layout.inspectorOpen) toggle("inspectorOpen");
     if (narrow || layout.debuggerOpen) close(["assistantOpen"]);
@@ -902,6 +908,7 @@ export const StrategyIde = ({
       {runEnvironment ?? null}
       {notice ? <div className="ide__notice">{notice}</div> : null}
 
+      <OpenTraceWorkspaceContext.Provider value={openTraceWorkspace}>
       <div className="ide__body" ref={bodyRef}>
         {/* AI 열은 본문 맨 왼쪽이다(RD-04-A). 서랍일 때도 같은 자리에 두어 DOM 부모·순서를 바꾸지 않는다 —
             대화·미전송 입력·스트림 소유자를 재마운트하지 않는다. */}
@@ -1050,6 +1057,7 @@ export const StrategyIde = ({
         ) : null}
 
       </div>
+      </OpenTraceWorkspaceContext.Provider>
       <CommandPalette
         open={paletteOpen}
         label={t("command.palette")}

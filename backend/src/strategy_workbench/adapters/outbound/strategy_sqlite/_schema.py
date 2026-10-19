@@ -10,7 +10,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import StrategyRepositoryStorageError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _APPLICATION_ID = 0x5357524B  # ASCII-ish "SWRK", scoped to this adapter's database.
 
 _V1_SCHEMA_OBJECTS = (
@@ -122,6 +122,78 @@ _V2_ADDED_SCHEMA_OBJECTS = (
 )
 
 
+# 사용자 팩터 라이브러리(US-CS-08). 항목 머리는 이름·숨김만 바뀌고, 버전 행은 쌓기만 한다 — 어느
+# 전략이 어느 버전을 복사했는지 그래프 신원으로 다시 찾을 수 있어야 한다.
+_V3_ADDED_SCHEMA_OBJECTS = (
+    (
+        "table",
+        "factor_library",
+        """
+        CREATE TABLE factor_library (
+            library_id TEXT NOT NULL COLLATE BINARY PRIMARY KEY CHECK (
+                length(trim(library_id)) >= 1
+            ),
+            factor_key TEXT NOT NULL COLLATE BINARY CHECK (
+                length(trim(factor_key)) >= 1
+            ),
+            name TEXT NOT NULL CHECK (length(trim(name)) >= 1),
+            description TEXT NOT NULL,
+            hidden INTEGER NOT NULL CHECK (hidden IN (0, 1)),
+            latest_version INTEGER NOT NULL CHECK (
+                typeof(latest_version) = 'integer' AND latest_version >= 1
+            ),
+            created_at TEXT NOT NULL
+        ) WITHOUT ROWID
+        """,
+    ),
+    (
+        "index",
+        "factor_library_key",
+        "CREATE UNIQUE INDEX factor_library_key ON factor_library(factor_key)",
+    ),
+    (
+        "table",
+        "factor_library_versions",
+        """
+        CREATE TABLE factor_library_versions (
+            library_id TEXT NOT NULL COLLATE BINARY,
+            version INTEGER NOT NULL CHECK (typeof(version) = 'integer' AND version >= 1),
+            identity TEXT NOT NULL CHECK (length(identity) = 64),
+            factor_json TEXT NOT NULL,
+            parameters_json TEXT NOT NULL,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (library_id, version),
+            FOREIGN KEY (library_id) REFERENCES factor_library(library_id)
+                ON UPDATE RESTRICT ON DELETE RESTRICT
+        ) WITHOUT ROWID
+        """,
+    ),
+    (
+        "trigger",
+        "factor_library_versions_immutable_update",
+        """
+        CREATE TRIGGER factor_library_versions_immutable_update
+        BEFORE UPDATE ON factor_library_versions
+        BEGIN
+            SELECT RAISE(ABORT, 'factor library versions are immutable');
+        END
+        """,
+    ),
+    (
+        "trigger",
+        "factor_library_versions_immutable_delete",
+        """
+        CREATE TRIGGER factor_library_versions_immutable_delete
+        BEFORE DELETE ON factor_library_versions
+        BEGIN
+            SELECT RAISE(ABORT, 'factor library versions are immutable');
+        END
+        """,
+    ),
+)
+
+
 def migrate_schema(connection: sqlite3.Connection) -> None:
     """Create our schema atomically, while refusing to claim or weaken any foreign file."""
     # 선언을 호출 시점에 읽는다 — 테스트가 모듈의 선언을 바꿔 실패하는 claim 을 재현한다.
@@ -131,13 +203,27 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="strategy",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=(*_V1_SCHEMA_OBJECTS, *_V2_ADDED_SCHEMA_OBJECTS),
+            objects=(
+                *_V1_SCHEMA_OBJECTS,
+                *_V2_ADDED_SCHEMA_OBJECTS,
+                *_V3_ADDED_SCHEMA_OBJECTS,
+            ),
             error=StrategyRepositoryStorageError,
-            upgrades=(SchemaUpgrade(1, _V1_SCHEMA_OBJECTS, _upgrade_v1_to_v2),),
+            upgrades=(
+                SchemaUpgrade(1, _V1_SCHEMA_OBJECTS, _upgrade_v1_to_v2),
+                SchemaUpgrade(
+                    2, (*_V1_SCHEMA_OBJECTS, *_V2_ADDED_SCHEMA_OBJECTS), _upgrade_v2_to_v3
+                ),
+            ),
         ),
     )
 
 
 def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
     for _object_type, _name, statement in _V2_ADDED_SCHEMA_OBJECTS:
+        connection.execute(statement)
+
+
+def _upgrade_v2_to_v3(connection: sqlite3.Connection) -> None:
+    for _object_type, _name, statement in _V3_ADDED_SCHEMA_OBJECTS:
         connection.execute(statement)

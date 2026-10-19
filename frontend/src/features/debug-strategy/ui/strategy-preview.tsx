@@ -14,9 +14,12 @@ import { TraceParameters } from "./trace-parameters";
 export const StrategyPreview = ({
   context,
   unavailableReason,
+  onExplain,
 }: {
   context: StrategyDebuggerContext | null;
   unavailableReason: StrategyDebuggerUnavailableReason | null;
+  /** 한 종목을 그 기준일로 추적한다(RD-04-C, "왜 골랐나"). 없으면 버튼을 두지 않는다. */
+  onExplain?: (selection: { asOf: string; security: string }) => void;
 }) => {
   const titleId = useId();
   const [asOf, setAsOf] = useState("");
@@ -177,6 +180,12 @@ export const StrategyPreview = ({
                       <th scope="col">{t("strategy.preview.rank")}</th>
                       <th scope="col">{t("strategy.preview.name")}</th>
                       <th scope="col">{t("strategy.preview.score")}</th>
+                      <th scope="col">{t("strategy.preview.weight")}</th>
+                      {onExplain === undefined ? null : (
+                        <th scope="col">
+                          <span className="sr-only">{t("strategy.preview.explain")}</span>
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -187,6 +196,24 @@ export const StrategyPreview = ({
                           {security?.name ?? t("strategy.preview.unknownName")}
                         </td>
                         <td>{position.composite_score}</td>
+                        <td>{`${(position.weight * 100).toFixed(2)}%`}</td>
+                        {onExplain === undefined ? null : (
+                          <td>
+                            <Button
+                              size="small"
+                              tone="ghost"
+                              aria-label={`${security?.name ?? position.security_id} · ${t("strategy.preview.explain")}`}
+                              onClick={() =>
+                                onExplain({
+                                  asOf: response.as_of,
+                                  security: position.security_id,
+                                })
+                              }
+                            >
+                              {t("strategy.preview.explain")}
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

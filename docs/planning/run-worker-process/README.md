@@ -6,7 +6,7 @@
 
 ## 문서 구성
 
-- [설계 spec](../../superpowers/specs/2026-10-19-run-worker-process-design.md): 결함 4건, 결정 D1~D11, 검증 기준
+- [설계 spec](../../superpowers/specs/2026-10-19-run-worker-process-design.md): 결함 4건, 결정 D1~D13, 검증 기준
   V-1~V-7, non-goal, 롤백. 이 initiative의 계약 SoT다
 - [BENCHMARK.md](./BENCHMARK.md): 측정 절차, 원 숫자, 해석
 - [WORKFLOW.md](./WORKFLOW.md): PR scope packet과 공통 gate

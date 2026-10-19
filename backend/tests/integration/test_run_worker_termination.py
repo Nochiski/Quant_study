@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -64,6 +66,7 @@ from strategy_workbench.domain.analytics.facade.metrics import build_default_met
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import RunStage, RunStatus
 from tests.backtest_run_wait import wait_for_terminal_run
+from tests.integration.test_experiment_http_api import _experiment
 from tests.run_worker_support import (
     TIMEOUT_S,
     hook_command,
@@ -407,6 +410,55 @@ def test_a_held_run_is_cancelled_without_reaching_the_engine(tmp_path: Path) -> 
     assert isinstance(listener.wait(), RunCancelled)
     assert time.monotonic() - requested <= _CANCEL_LIMIT_S
     assert listener.messages[-1] == _ENGINE_START
+
+
+def test_the_e2e_hold_holds_experiment_trials_in_process_mode_until_cancelled(
+    tmp_path: Path,
+) -> None:
+    """D11 배선: 프로세스 방식에서도 e2e hold 가 실험 trial 을 엔진 앞에 붙잡고 취소가 푼다.
+
+    스레드 방식 `test_a_held_experiment_can_be_paused_streamed_and_cancelled` 와 같은 관찰을 서버
+    조립(`build_http_app`)으로 한다(#581 리뷰 P3-2). 붙잡히지 않으면 mock 실행은 엔진 단계에 든 뒤
+    1초 안에 끝난다.
+    """
+    app = build_http_app(
+        trial_hold_seconds=30, run_isolation="process", artifact_root=tmp_path / "artifacts"
+    )
+    with TestClient(app) as client:
+        experiment_id = client.post("/api/v1/experiments", json=_experiment(client)).json()[
+            "record"
+        ]["experiment_id"]
+        base = f"/api/v1/experiments/{experiment_id}"
+        run_id = _held_trial_run(client, base)
+        time.sleep(2.0)
+        held = client.get(f"/api/v1/backtests/{run_id}").json()
+        trials = client.get(f"{base}/trials").json()
+
+        requested = time.monotonic()
+        cancelled = client.post(f"{base}/cancel")
+        with client.stream("GET", f"{base}/events") as stream:
+            frames = [line for line in stream.iter_lines() if line.startswith("data:")]
+        elapsed = time.monotonic() - requested
+
+    assert (held["status"], held["stage"]) == ("running", "engine"), held
+    assert Counter(trial["status"] for trial in trials) == {"running": 1, "queued": 5}
+    assert cancelled.json()["status"] == "cancelled"
+    final = json.loads(frames[-1][len("data:") :])
+    assert final["status"] == "cancelled"
+    assert set(final["trial_counts"]) == {"cancelled"}
+    assert elapsed <= TIMEOUT_S
+
+
+def _held_trial_run(client: TestClient, base: str) -> str:
+    """엔진 단계에 든 trial run 의 id."""
+    deadline = time.monotonic() + TIMEOUT_S
+    while time.monotonic() < deadline:
+        for trial in client.get(f"{base}/trials").json():
+            run_id = trial["attempts"][-1]["run_id"] if trial["attempts"] else None
+            if run_id and client.get(f"/api/v1/backtests/{run_id}").json()["stage"] == "engine":
+                return run_id
+        time.sleep(0.1)
+    raise AssertionError(f"no experiment trial reached the engine stage within {TIMEOUT_S}s")
 
 
 def test_the_engine_gate_is_set_on_both_sides_or_not_at_all(tmp_path: Path) -> None:

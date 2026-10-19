@@ -161,7 +161,8 @@ def _rows(seed: int, securities: int = len(SECURITIES)) -> tuple[np.ndarray, np.
 def _number(rng: np.random.Generator, security: int, day: int, *, extreme: bool) -> float:
     """종목마다 다른 값 성질. 정수·상수 창·극단 크기·±0·동점·연속 분포."""
     if security == 0:
-        return int((day // 4) % 5) - 2  # 정수 값, 4세션 상수 창
+        # 정수 값(정수 꼴 float — 원시 계약은 int 를 거절한다, T2-02), 4세션 상수 창
+        return float((day // 4) % 5 - 2)
     if security == 1 and extreme:
         return float(rng.choice((-1.0, 1.0)) * rng.uniform(1.0, 9.0) * 1e300)
     if security == 2 and extreme:

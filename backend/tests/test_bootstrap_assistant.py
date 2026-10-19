@@ -22,6 +22,7 @@ from strategy_workbench.application.assistant_chat.facade.profiles import (
 )
 from strategy_workbench.application.strategy_design.facade.ports import StrategyNotFoundError
 from strategy_workbench.bootstrap import _assistant as assistant_module
+from strategy_workbench.bootstrap import _file_guard
 from strategy_workbench.bootstrap import _http as http_module
 from strategy_workbench.bootstrap._assistant import (
     _AuthoringStrategyCompiler,  # pyright: ignore[reportPrivateUsage]  # reason: composition root가 소유한 port 구현이라 공개 facade가 없다
@@ -688,3 +689,17 @@ def test_unresolvable_lineage_folds_validation_evidence_into_none(
     monkeypatch.setattr(container.backtest_runs, "validation_report", missing)
     port = _RunServiceBacktestResults(container.backtest_runs, container.experiments)
     assert port.validation_facts("run-1") is None
+
+
+def test_the_acl_runner_reports_the_failure_when_its_output_is_not_decodable() -> None:
+    """icacls 출력(콘솔 코드 페이지)을 디코딩하지 못해도 원래 실패가 권한 오류로 남는다.
+
+    디코딩 실패로 stderr 가 None 이 되면 `strip` 이 AttributeError 를 내 권한 오류를 가렸다.
+    """
+    command = (
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.buffer.write(bytes([0xFF, 0xFE, 0xB8])); raise SystemExit(5)",
+    )
+    with pytest.raises(_file_guard.FilePermissionError, match="returncode=5"):
+        _file_guard._run_icacls(command)

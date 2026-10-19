@@ -38,10 +38,11 @@ from .reader import DeliverError, ModelRun, previous_run, read_scores, runs_betw
 from .view import rank_of, ticker_of
 
 log = logging.getLogger(__name__)
-SHEET = "순위 흐름"          # 그래프 원자료(숨김 시트). 행 번호를 점수 시트와 맞춘다
+SHEET = "trend"              # 그래프 원자료(숨김 시트). 행 번호를 Score 시트와 맞춘다
 WINDOWS = ("1M",)             # 엑셀에 싣는 창(1W 는 10-06 사용자 결정으로 뺐다)
 LINE_UP, LINE_DOWN, LINE_FLAT = "1E8C45", "D0312D", "8C8C8C"   # 상승 초록 · 하락 빨강 · 같음 회색
-FALLBACK_NOTE = "(아침 확정판 — 장 마감 판 비교 판 없음, T-50)"   # 메타 '1M 비교 판' 값 뒤에 붙인다
+# Meta '1M 비교 데이터' 값 뒤에 붙인다
+FALLBACK_NOTE = "(아침 확정 데이터 — 장 마감 데이터 비교 데이터 없음, T-50)"
 
 
 def month_back(d: date) -> date:
@@ -135,6 +136,11 @@ def load_trend(model_root: Path, run: ModelRun, spec_id: str, basis: str,
     return Trend(dates, {t: tuple(v) for t, v in line.items()}, base, base_rank, fallback)
 
 
+def sheet_ref(name: str) -> str:
+    """수식 안 시트 이름 — 영숫자 · 밑줄만이면 그대로(trend), 그 밖은 작은따옴표로 감싼다."""
+    return name if name.replace("_", "").isalnum() and name.isascii() else f"'{name}'"
+
+
 def line_color(delta: int | None) -> str:
     if delta is None or delta == 0:
         return LINE_FLAT
@@ -142,7 +148,7 @@ def line_color(delta: int | None) -> str:
 
 
 def write_sheet(wb: Workbook, tickers: Sequence[str], trend: Trend) -> None:
-    """숨김 원자료 시트 — 7행 머리(코드·날짜), 8행부터 점수 시트와 같은 행 순서. 값 = −순위."""
+    """숨김 원자료 시트 — 7행 머리(코드·날짜), 8행부터 Score 시트와 같은 행 순서. 값 = −순위."""
     ws = wb.create_sheet(SHEET)
     qpack.put(ws, 7, 1, "코드").font = qpack.font(bold=True)
     for j, day in enumerate(trend.dates, start=2):
@@ -163,7 +169,7 @@ def spark_groups(tickers: Sequence[str], trend: Trend, d: date,
                  ) -> list[qpack.SparkGroup]:
     """창(1W·1M)마다 선 색(Δ 부호)별 묶음. 흐름 판이 2개 미만이면 그 창은 그리지 않는다.
 
-    `cols` = 창 → 점수 시트의 그래프 열 글자, `deltas` = 창 → 종목 → Δ순위."""
+    `cols` = 창 → Score 시트의 그래프 열 글자, `deltas` = 창 → 종목 → Δ순위."""
     out: list[qpack.SparkGroup] = []
     last = len(trend.dates) + 1                    # 원자료 시트 마지막 날짜 열(1 = 코드)
     for w in WINDOWS:
@@ -175,7 +181,7 @@ def spark_groups(tickers: Sequence[str], trend: Trend, d: date,
         for i, t in enumerate(tickers, start=qpack.FIRST_DATA_ROW):
             if t not in trend.line:
                 continue
-            ref = f"'{SHEET}'!" + ref_cols.format(r=i)
+            ref = f"{sheet_ref(SHEET)}!" + ref_cols.format(r=i)
             by_color.setdefault(line_color(deltas[w].get(t)), []).append((ref, f"{cols[w]}{i}"))
         out += [qpack.SparkGroup(c, tuple(cells)) for c, cells in sorted(by_color.items())]
     return out

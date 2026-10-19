@@ -10,7 +10,7 @@ from ._assistant import (
     AssistantSettings,
     scripted_provider_factories,
 )
-from ._container import build_container
+from ._container import DEFAULT_RUN_ISOLATION, build_container
 
 DEFAULT_STRATEGY_REPOSITORY_PATH = (
     Path(__file__).resolve().parents[3] / ".local" / "strategy-revisions.sqlite3"
@@ -29,6 +29,7 @@ EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
 ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
 RUN_SLOTS_ENV = "STRATEGY_WORKBENCH_RUN_SLOTS"
 E2E_TRIAL_HOLD_SECONDS_ENV = "STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS"
+RUN_ISOLATION_ENV = "STRATEGY_WORKBENCH_RUN_ISOLATION"
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
 ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
@@ -84,6 +85,14 @@ def runtime_trial_hold_seconds() -> float:
             f"{E2E_TRIAL_HOLD_SECONDS_ENV}={configured!r}"
         )
     return seconds
+
+
+def runtime_run_isolation() -> str:
+    """run 계산을 어디서 돌리는가(`thread`·`process`, run-worker spec D9). 없으면 기본값이다.
+
+    허용 값 판정은 `build_container` 가 한다 — 모르는 값은 스레드로 돌아가지 않고 멈춘다.
+    """
+    return os.environ.get(RUN_ISOLATION_ENV, "").strip() or DEFAULT_RUN_ISOLATION
 
 
 def runtime_equity_selection() -> tuple[str, Path | None]:
@@ -157,6 +166,7 @@ def build_http_app(
     artifact_root: Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
+    run_isolation: str = DEFAULT_RUN_ISOLATION,
     equity_adapter: str = "mock",
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
@@ -169,6 +179,7 @@ def build_http_app(
         artifact_root=artifact_root,
         run_slots=run_slots,
         trial_hold_seconds=trial_hold_seconds,
+        run_isolation=run_isolation,
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
@@ -203,6 +214,7 @@ def build_runtime_http_app():
         artifact_root=runtime_artifact_root(),
         run_slots=runtime_run_slots(),
         trial_hold_seconds=runtime_trial_hold_seconds(),
+        run_isolation=runtime_run_isolation(),
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),

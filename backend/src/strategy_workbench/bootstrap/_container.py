@@ -39,6 +39,14 @@ from strategy_workbench.adapters.outbound.research_sqlite.facade.repository impo
     SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.run_thread.facade.execution import ThreadRunExecution
+from strategy_workbench.adapters.outbound.run_worker_process.facade.execution import (
+    ProcessRunExecution,
+    WorkerSettings,
+)
+from strategy_workbench.adapters.outbound.run_worker_process.facade.worker import (
+    VersionBundle,
+    code_fingerprint,
+)
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteFactorLibraryRepository,
     SQLiteStrategyDraftRepository,
@@ -47,6 +55,7 @@ from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository impo
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
+from strategy_workbench.application.backtest_run.facade.computation import RunComputation
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestArtifactUnreadableError,
     BacktestExecutionRequest,
@@ -54,6 +63,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     CancellationCheck,
     ProgressCallback,
     RunCancelledError,
+    RunExecutionPort,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     DEFAULT_RUN_SLOTS,
@@ -107,9 +117,17 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
-from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.analytics.facade.metrics import (
+    MetricRegistry,
+    build_default_metric_registry,
+)
+from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
 from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
-from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
+from strategy_workbench.domain.factor.facade.planning import FACTOR_EVALUATION_VERSION
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorRegistry,
+    build_default_factor_registry,
+)
 
 from ._assistant import (
     DEFAULT_ASSISTANT_SETTINGS,
@@ -143,6 +161,9 @@ class BackendContainer:
 
 
 EQUITY_ADAPTERS = ("mock", "duckdb")
+# run 계산을 어디서 돌리는가(run-worker spec D9). `process` 는 W3 에서 기본값이 된다.
+RUN_ISOLATIONS = ("thread", "process")
+DEFAULT_RUN_ISOLATION = "thread"
 # `artifact_root`를 주지 않은 컨테이너의 백테스트 산출물 위치. `build_container`가 호출 시점에 읽는
 # 모듈 상수라 테스트가 개발자 로컬 `.local/`을 쓰지 않게 tmp로 바꿀 수 있다(#211).
 DEFAULT_RUN_ARTIFACT_ROOT = Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
@@ -158,6 +179,7 @@ def build_container(
     continuous_db_path: str | Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
+    run_isolation: str = DEFAULT_RUN_ISOLATION,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
@@ -174,15 +196,17 @@ def build_container(
     나른다. 레지스트리는 A-05·A-06이 자기 항목을 등록할 때까지 비어 있고, 팩토리는 시작할 때가
     아니라 처음 필요할 때 불린다(미설치 SDK가 서버 시작을 막지 않는다).
     """
-    equity_data = _equity_data(equity_adapter, equity_root)
+    run_artifact_root = artifact_root or DEFAULT_RUN_ARTIFACT_ROOT
+    # 모르는 실행 방식은 DB 를 열기 전에 멈춘다. worker 는 부모가 해석한 이 설정만 받는다(spec D10).
+    run_execution = _run_execution(
+        run_isolation,
+        WorkerSettings(equity_adapter, equity_root, run_artifact_root),
+        trial_hold_seconds=trial_hold_seconds,
+    )
+    equity_data = build_equity_data(equity_adapter, equity_root)
     engine_portfolio = BacktestEnginePortfolioAdapter()
     factor_registry = build_default_factor_registry()
-    portfolio_design = PortfolioDesignService(
-        equity_data,
-        engine_portfolio,
-        factor_metadata=equity_data,
-        factor_registry_version=factor_registry.version,
-    )
+    portfolio_design = build_portfolio_design(equity_data, engine_portfolio, factor_registry)
     metric_registry = build_default_metric_registry()
     strategy_authoring = StrategyAuthoringService(
         RuamelDocumentCodec(),
@@ -204,7 +228,6 @@ def build_container(
         ),
     )
     strategy_draft_repository = SQLiteStrategyDraftRepository(strategy_repository_path)
-    run_artifact_root = artifact_root or DEFAULT_RUN_ARTIFACT_ROOT
     run_repository = SQLiteBacktestRunRepository(research_db_path)
     if run_repository.database_path is not None:
         restrict_to_current_user(run_repository.database_path)
@@ -227,7 +250,7 @@ def build_container(
         run_artifacts,
         run_repository=run_repository,
         new_id=lambda: str(uuid4()),
-        run_execution=ThreadRunExecution,
+        run_execution=run_execution,
         run_slots=run_slots,
         factor_registry=factor_registry,
     )
@@ -308,7 +331,61 @@ def build_container(
     )
 
 
-def _equity_data(
+def _run_execution(
+    run_isolation: str, worker: WorkerSettings, *, trial_hold_seconds: float
+) -> Callable[[RunComputation], RunExecutionPort]:
+    """run 계산을 돌릴 전송을 고른다. 모르는 값은 스레드로 돌아가지 않고 멈춘다(spec D9)."""
+    if run_isolation == "thread":
+        return ThreadRunExecution
+    if run_isolation == "process":
+        if trial_hold_seconds > 0:
+            # e2e hold 는 worker 와 왕복해야 한다(spec D11, W1-03). 붙잡지 못한 채 조용히 돌지
+            # 않는다.
+            raise ValueError(
+                "e2e trial hold is not supported with run_isolation='process' yet — "
+                f"trial_hold_seconds={trial_hold_seconds}"
+            )
+        # worker 가 같은 계산을 자기 쪽에서 다시 조립하므로 서비스의 계산은 쓰지 않는다.
+        return lambda _computation: ProcessRunExecution(worker)
+    raise ValueError(
+        f"unsupported run isolation — run_isolation={run_isolation!r} available={RUN_ISOLATIONS}"
+    )
+
+
+def build_portfolio_design(
+    equity_data: MockEquityDataAdapter | EquityDuckdbAdapter,
+    engine_portfolio: BacktestEnginePortfolioAdapter,
+    factor_registry: FactorRegistry,
+) -> PortfolioDesignService:
+    """팩터 값을 계산하는 파이프라인 서비스. 서버와 run worker 가 같은 조립을 쓴다(spec D10)."""
+    return PortfolioDesignService(
+        equity_data,
+        engine_portfolio,
+        factor_metadata=equity_data,
+        factor_registry_version=factor_registry.version,
+    )
+
+
+def build_run_versions(
+    equity_data: MockEquityDataAdapter | EquityDuckdbAdapter,
+    factor_registry: FactorRegistry,
+    metric_registry: MetricRegistry,
+) -> VersionBundle:
+    """이 프로세스가 run 을 계산할 판본 묶음(spec D6).
+
+    worker 가 `ready` 에 싣고, W1-03 에서 부모가 자기 묶음과 대조한다.
+    """
+    return VersionBundle(
+        snapshot_id=equity_data.snapshot().snapshot_id,
+        engine_rules_version=ENGINE_RULES_VERSION,
+        metric_registry_version=metric_registry.version,
+        factor_evaluation_version=FACTOR_EVALUATION_VERSION,
+        factor_registry_version=factor_registry.version,
+        code_fingerprint=code_fingerprint(),
+    )
+
+
+def build_equity_data(
     equity_adapter: str, equity_root: Path | None
 ) -> MockEquityDataAdapter | EquityDuckdbAdapter:
     """설정한 equity 어댑터를 만든다. 모르는 이름이나 빠진 루트는 mock 으로 돌아가지 않고 멈춘다."""

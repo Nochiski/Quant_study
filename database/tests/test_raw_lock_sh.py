@@ -8,8 +8,8 @@
 남기고 rc 3(대기자 락 `<원장 락>.<이름>.wait`). 알림은 notify 기록만이고 dry-run 이면 남기지 않는다.
 
 HOME 을 임시 폴더로 바꿔 `~/quant-ledger` 에 진짜 스크립트 다섯 개 + `raw_lock.sh` 를 두고, 대역
-`.venv/bin/python`(`-c` 는 rc 0 — D 는 20261006, 가드·'이미 완료'는 참 / 그 밖은 calls.txt 에 적고
-rc 0)·`scripts/notify.sh`·`sync_calendar.sh`·`dart_company_gap.sh` 로 돌린다. 크론 경로(인자 없음)는
+`.venv/bin/python`(`-c` 는 rc 0 — D 는 20261006, 가드·'이미 완료'는 참, WISE 실패 콜 집계는 0 / 그 밖은
+calls.txt 에 적고 rc 0)·`scripts/notify.sh`·`sync_calendar.sh`·`dart_company_gap.sh` 로 돌린다. 크론 경로(인자 없음)는
 각 스크립트가 '이미 완료·건너뜀' 또는 완료 info 로 끝난다. 락 파일은 `QL_RAW_LOCK_FILE` 임시 경로라
 운영 락 `/tmp/quant_ledger_raw.lock` 을 잡지 않는다. 맥에는 flock 이 없어 PATH 대역 flock
 (fd 별 rc)으로 호출 순서를 보고, 진짜 flock 이 있으면(서버·CI 우분투) 다른 프로세스가 쥔 락으로
@@ -49,7 +49,10 @@ _ID = {"ids": lambda s: s.name}
 
 _PY = """#!/usr/bin/env bash
 if [ "$1" = "-c" ]; then
-  case "$2" in *prev_trading_day*) echo 20261006 ;; esac
+  case "$2" in
+    *prev_trading_day*) echo 20261006 ;;
+    *ws_run_log*) echo "0 {}" ;;   # 06:00 WISE 갈래(N-53)의 실패 콜 집계 — 실패 없음
+  esac
   exit 0
 fi
 if [ "$1" = "-m" ]; then echo "$2"; else echo "$1"; fi >> "$QL_HOME/calls.txt"

@@ -2,7 +2,7 @@
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
 #   순서: v3 휴장 사본 동기화(병행 대조용) → 휴장 달력 직접 갱신(KIS chk-holiday 1콜, K1-9) →
 #         [스위치 켜짐] v3·uni 휴장 파일 내보내기(T-48 — 켜져 있으면 앞의 v3 사본 동기화는 건너뜀) → D(직전 거래일) 판정 →
-#         키움 마스터(daily_wise.sh, 매일) →
+#         키움 마스터(daily_wise.sh, 매일) → [월~토] WISE 스냅샷 시작(뒤 단계와 병렬, KIS 뒤 — 건너뜀 길은 끝 전 — 에서 기다림, N-53) →
 #         [월요일 KST · 마지막 성공 7일 초과] DART 번호표 갱신(dart_universe.py → dart_corp_map·corps.txt, A-01) →
 #         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → 저녁 키움 보강 판정(T-13) → DART 스윕·상세·문서 →
 #         신규 corp 회사정보 공백 메우기 → 수집 요약 알림
@@ -14,11 +14,21 @@
 #         QL_V3_HOLIDAY_FILE (휴장 파일 내보내기 대상 덮어쓰기 — 테스트용. 기본은 아래 V3_HOLIDAY_FILE)
 #         QL_SKIP_KW=1 이면 키움 시계열 단계를 건너뛴다(앱키 분리 전 임시)
 #         키움은 대차(ka20068) 하나만 여기서 늘 받는다 — 투자자·공매도(ka10060·ka10014)는 18:05
-#         daily_evening.sh 가 당일 저녁(21:05)에 원장 직행으로 받고(결정 V2-1·V2-3), 여기서는 그 D 커버리지를
+#         daily_evening.sh 가 당일 저녁(21:05)에 원장 직행으로 받고(결정 V2-1), 여기서는 그 D 커버리지를
 #         재서 미달일 때만 다시 받는다(T-13 · H1-5). 외국인 보유(ka10008)는 T-1 행이 07시 전후에 정정되므로
 #         (프로브 실측 09-10) daily_build.sh(08:10) 가 받는다.
 #   원장 락: 다른 원장 작업이 쥐고 있으면 끝날 때까지 기다렸다 이어서 돈다(P9, 배포 묶음 5-3) — 규칙은
 #         scripts/raw_lock.sh 한 곳(대기자 1 · QL_RAW_LOCK_HELD · QL_RAW_LOCK_FILE 테스트 전용).
+#   WISE 스냅샷(N-53 — 18:05 저녁 체인에서 옮김, V2-3 되돌림): 아침에 받아 두면 08:10 확정 체인의 stage 판에 실리고,
+#         15:41 장 마감 판(D' 확정판 고정)이 그날 수집분을 읽는다(전제 — 아침 본문이 그날 갱신분인지는 배포 전 실측 대상,
+#         plans/2026-10-16-wise-0600.md '열린 것'). 월요일·연휴 다음 날은 장 마감 판이 고정한 확정판이 토요일·연휴 첫날
+#         아침에 지어져 그날 수집분이 아니라 그 아침 수집분을 읽는다 — 그날 수집분은 그날 연구 확정판·원장 건전성 몫이다.
+#         수집기(`src/backfill_wise.py`, 약 7분)는 다른 원장(wisereport.db)만 쓰므로 키움 마스터 뒤 배경으로 돌려 KIS 의 07:00
+#         전 종료 여유를 줄이지 않는다. 일요일은 받지 않는다(토요일 06:00 수집과 기준일이 같다 — 금요일). D 건너뜀과
+#         상관없이 돈다. 수집기 rc≠0 은 다른 단계처럼 FAILED(crit — D 를 받는 길이면 ledger_chain 런 로그도 failed) 이고, rc 0
+#         인데 실패 콜이 있으면 KIS 뒤 기다린 자리에서 warn 1건(N-27 ③ — 08:10 확정 체인 전에 같은 날 재실행하면 그날 장 마감
+#         판에 실린다).
+#         dry-run 은 원장 쓰기라 받지 않고 계획 한 줄만 찍는다(backfill_wise.py 에 --dry-run 이 없다).
 set -uo pipefail
 ROOT="${QL_LEDGER_ROOT:-$HOME/quant-ledger}"   # 테스트가 임시 루트를 쓰게 할 때만 바꾼다
 cd "$ROOT"
@@ -44,6 +54,9 @@ LOG="logs/daily_ledger_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
 FAILED=""
 SKIPPED=""   # 건너뜀 사유 — 비어 있지 않으면 완료 알림 제목을 바꾼다(V2-7: 건너뜀도 보고)
+WISE_DAY=$(TZ=Asia/Seoul date +%Y%m%d)   # 스냅샷 날짜(KST 오늘 — 수집기 fetched_date 와 같은 축)
+WISE_LOG="logs/wise_${WISE_DAY}.log"
+PID_WISE=""; RC_WISE=""; WISE_FROM=""; WISE_N_BAD=""; WISE_BAD_SUMMARY=
 step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 덧붙이고 1 반환
   local name="$1"; shift
   echo "──── $name 시작 $(kst) ────"
@@ -51,6 +64,56 @@ step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 덧
   echo "──── $name 종료 rc=$rc $(kst) ────"
   if [ "$rc" -ne 0 ]; then FAILED="${FAILED:+$FAILED, }$name(rc=$rc)"; return 1; fi
   return 0
+}
+branch_wise() {   # 배경 갈래 — 자기 로그($WISE_LOG)에만 쓴다
+  echo "──── WISE 스냅샷 시작 $(kst) ────"
+  $PY src/backfill_wise.py --mode full 2>&1 | grep -vE "Deprecation|datetime\.datetime"
+  local rc=${PIPESTATUS[0]}
+  echo "──── WISE 스냅샷 종료 rc=$rc $(kst) ────"
+  return "$rc"
+}
+wise_wait() {   # 배경 WISE 갈래를 기다려 rc·실패 콜 수를 모은다. 갈래가 없으면(일요일·dry-run) 아무것도 안 한다
+  [ -n "$PID_WISE" ] || return 0
+  wait "$PID_WISE"; RC_WISE=$?
+  PID_WISE=""
+  # 체인 로그·알림 요약에는 시작·끝·결과 줄만 싣는다 — 200종목마다 찍히는 진행 줄이 요약(tail)을 차지해 DART·KIS
+  # 결과를 밀어내지 않게. 전체는 갈래 로그($WISE_LOG)에 남는다
+  grep -E "^──── WISE|④ 종료|⚠⚠|· 대상" "$WISE_LOG" || true
+  # 실패 콜 수(N-27 ③ · N-30 ③) — 수집기는 일부 콜이 실패해도 rc 0 이다. 근거는 이번 런의 런 로그(ws_run_log,
+  # run_at ≥ 갈래 시작)의 n_req − n_ok(본문 검증 실패 + 전송 실패) — 08:10 wise.run 판정과 같은 양이다(P1). 같은 날
+  # 앞 런은 세지 않는다(회복 여부는 08:10 건전성 몫). 런 로그가 0행이거나 못 읽으면 모름(빈 값) — --limit 없는 rc 0
+  # 런은 대상 0 이어도 런 로그를 반드시 1행 쓰므로 0행은 실제 이상이다.
+  WISE_FAIL=$($PY -c 'import json, sqlite3, sys
+since = sys.argv[1]
+try:
+    con = sqlite3.connect("file:data/raw/wisereport.db?mode=ro", uri=True)
+    rows = con.execute("SELECT n_req, n_ok, n_bad, bad_summary FROM ws_run_log WHERE run_at >= ?",
+                       (since,)).fetchall()
+    n_fail, kinds = 0, {}
+    for n_req, n_ok, n_bad, summary in rows:
+        for k, v in json.loads(summary or "{}").items():
+            kinds[k] = kinds.get(k, 0) + int(v)
+        other = int(n_req or 0) - int(n_ok or 0) - int(n_bad or 0)
+        if other:
+            kinds["전송 실패(http·exc·notjson)"] = kinds.get("전송 실패(http·exc·notjson)", 0) + other
+        n_fail += int(n_req or 0) - int(n_ok or 0)
+except Exception as e:  # noqa: BLE001  # reason: 읽기·파싱 어떤 실패든 "모름"(빈 값) — 확인 불가 warn 이 받는다
+    sys.exit(f"  ! WISE 런 로그를 읽지 못했다 — run_at>={since} ({type(e).__name__}: {e})")
+if not rows:
+    sys.exit(f"  ! WISE 런 로그 없음 — run_at>={since} (수집기 비정상 종료·--limit)")
+print(n_fail, json.dumps(kinds, ensure_ascii=False))' "$WISE_FROM")
+  WISE_N_BAD="${WISE_FAIL%% *}"; WISE_BAD_SUMMARY="${WISE_FAIL#* }"
+  echo "  WISE 스냅샷 $WISE_DAY 실패 콜 ${WISE_N_BAD:-모름} ${WISE_BAD_SUMMARY} $(kst)"
+  if [ "$RC_WISE" -ne 0 ]; then FAILED="${FAILED:+$FAILED, }wise(rc=$RC_WISE)"; fi
+  # 부분 실패 warn(N-27 ③ · N-30 ③) — 체인 끝(DART 마감일엔 08:10 뒤)이 아니라 기다린 자리에서 바로 낸다. 08:10
+  # 확정 체인 전에 같은 날 다시 받으면 그날 장 마감 판에도 실린다(README 'WISE 같은 날 재실행'). 수집기 rc 0 인데
+  # 실패 수를 모르면 그것도 warn 1건(P1). rc≠0 은 체인 끝 crit(FAILED)이 맡는다
+  if [ -z "$DRY" ] && [ "${WISE_N_BAD:-0}" -gt 0 ]; then
+    scripts/notify.sh warn "WISE 수집 일부 실패 ${WISE_N_BAD}콜" \
+      "스냅샷=$WISE_DAY | 종류 $WISE_BAD_SUMMARY | 같은 날 재실행: README 'WISE 같은 날 재실행'(08:10 전) | 로그 $WISE_LOG"
+  elif [ -z "$DRY" ] && [ -z "$WISE_N_BAD" ] && [ "$RC_WISE" -eq 0 ]; then
+    scripts/notify.sh warn "WISE 실패 콜 수 확인 불가" "스냅샷=$WISE_DAY | 수집기 rc 0, 런 로그(run_at>=$WISE_FROM) 못 읽음 | 로그 $LOG"
+  fi
 }
 {
 echo "════ [$(kst)] daily_ledger 시작 dry=${DRY:-no}${LOCK_WAITED:+ 원장 락 대기 $LOCK_WAITED} ════"
@@ -109,8 +172,19 @@ if [ -z "$D" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_ledger 중단 — 대상 거래일 산출 실패" "daily.calendar.prev_trading_day 가 값을 주지 않았다(연도 파일 부재?) | 로그 $LOG"
   cat "$RUN" >> "$LOG"; rm -f "$RUN"; exit 2
 fi
-# ① 소멸성 축(키움 마스터)은 매일 — daily_wise.sh 는 raw 락을 물려받는다(WISE 는 18:05 로 이동)
+# ① 소멸성 축(키움 마스터)은 매일 — daily_wise.sh 는 raw 락을 물려받는다(이름과 달리 WISE 는 받지 않는다 — 아래 갈래)
 if [ -z "$DRY" ]; then step "daily_wise" bash scripts/daily_wise.sh || true; fi
+# WISE 스냅샷(N-53) — 키움 마스터 뒤(수집 대상 = 그날 마스터) 배경으로 시작하고 KIS 뒤(건너뜀 길은 끝 전)에 wise_wait 로 기다린다.
+#   QL_WEEKDAY(1=월…7=일)는 테스트 전용 요일 주입 — 운영에선 비워 둔다(크론이 UTC 라 요일은 KST 로 본다)
+if [ "${QL_WEEKDAY:-$(TZ=Asia/Seoul date +%u)}" = 7 ]; then
+  echo "  WISE 스냅샷 건너뜀 — 일요일(토요일 06:00 수집과 기준일이 같다)"
+elif [ -n "$DRY" ]; then
+  echo "  WISE 스냅샷 계획(dry-run — 받지 않음): $PY src/backfill_wise.py --mode full → $WISE_LOG"
+else
+  WISE_FROM=$(date -u +%Y-%m-%dT%H:%M:%S)   # 이번 런의 하한 — ws_run_log.run_at 과 같은 UTC 형식
+  echo "  WISE 스냅샷 배경 시작 — 로그 $WISE_LOG $(kst)"
+  branch_wise > "$WISE_LOG" 2>&1 & PID_WISE=$!
+fi
 # DART 번호표(dart_corp_map)·corps.txt 갱신(A-01 · DART 1콜) — 신규 상장을 DART 재무·공시에 잇는다.
 #   월요일(KST)엔 늘, 그 밖의 날엔 마지막 성공(런 로그 source=dart_universe, date = KST 달력일)이 7일을 넘었거나
 #   기록이 없을 때 돈다(N-27 ⑤, 배포 묶음 5-2 — 월요일만이면 실패한 주는 2주 공백). 런 로그를 못 읽으면 돈다(P1).
@@ -154,6 +228,7 @@ rows=[r for r in runlog.recent("data/raw/daily_run.db", source="ledger_chain", l
 sys.exit(0 if rows else 1)' "$D"; then
   echo "  D=$D 는 이미 수집 완료 — 종료"
   SKIPPED="건너뜀(D=$D 이미 수집 완료)"
+  wise_wait
   echo "════ 종료 $(kst) ════"
 else
   RID=""
@@ -165,6 +240,9 @@ else
     step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka20068 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT || true
   fi
   step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT || true
+  # WISE(약 7분)는 키움 대차·KIS(약 41분)보다 먼저 끝나 보통 기다림이 없다 — 여기서 받아 경보를 바로 낸다(DART 마감일에도
+  # 08:10 전에 사람에게 닿게). 실패는 이 체인의 실패다 — 런 로그와 알림이 같은 판정을 쓴다(DEFECT-A10)
+  wise_wait
   # 저녁 키움 보강(T-13 · H1-5) — 전날 21:05 저녁 직행(ka10060·ka10014)의 D 커버리지를 원장에서 재고(읽기만),
   #   미달인 TR 만 저녁과 같은 `--fetch --commit` 으로 한 번 다시 받은 뒤 다시 잰다. 그래도 미달이면 rc 2 →
   #   다른 소스 단계처럼 FAILED → crit · rc 2 · ledger_chain failed. 그 D 를 다음 06:00 이 다시 판정하는 것은
@@ -190,7 +268,10 @@ fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
 # 저녁 키움 보강 판정 줄(T-13)은 맨 앞 — 뒤 단계(DART) 출력이 tail 창에서 밀어내지 않게 따로 집는다
-SUMMARY=$({ grep -E "^\[kw_daily\] cover 판정" "$RUN" | tail -1; grep -E "^  |──── .* 종료" "$RUN" | tail -8; } \
+# WISE 줄은 tail 창 밖에서 결과 한 줄만 붙인다 — 수집 단계(KIS·DART) 결과를 밀어내지 않게(N-53)
+SUMMARY=$({ grep -E "^\[kw_daily\] cover 판정" "$RUN" | tail -1
+            grep -E "^  |──── .* 종료" "$RUN" | grep -vE "WISE 스냅샷|④ 종료|^  · 대상" | tail -8
+            grep -E "^  WISE 스냅샷 (건너뜀|[0-9]{8} 실패 콜)" "$RUN" | tail -1; } \
   | tr '\n' ' ' | cut -c1-900)
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_ledger 실패: $FAILED" "$SUMMARY | 로그 $LOG"

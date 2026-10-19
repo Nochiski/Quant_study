@@ -33,7 +33,8 @@
 장 마감 판(`--basis evening`, 컷오버 T-2 · PR-4): --date 는 오늘 T, 원천은 직전 거래일 D' 아침
 확정판을 `--builds-from` 으로 고정한 것뿐이다(고정 없으면 rc 2). 산출 루트는 연구 루트
 (`research_root()`)와 달라야 한다(T-3 — 같으면 rc 2). 세션 = 연구 판 trading_calendar ∪
-{T}, 유니버스 = D' 행 이월, 정보 시점(asof) = D' (`queries` 모듈 docstring '두 날짜'). 다음이면
+{T}, 유니버스 = D' 행 이월, 정보 시점(asof) = D' · WISE 정보 시점(wise_asof) = T(N-53 — 그날 06:00
+수집. `queries` 모듈 docstring '두 날짜'). 다음이면
 `FactorInputsError`(rc 2) — 사유를 메시지에 남긴다:
   (a) T 가 `daily.calendar` 거래일이 아니다(휴장·주말) 또는 판정 달력을 못 읽는다
   (b) MD-SEAM — `daily.calendar` 의 T 직전 거래일 D' ≠ 연구 판 trading_calendar 의 마지막 날
@@ -103,7 +104,11 @@ from . import gates, queries
 # 1.8.0(2026-10-10, 컷오버 F-1 · T-43): fi_fin_summary DART 4Q 파생 분기 행의 available_date — 파생값을
 # 실은 행(q4_derived_available_date ≤ asof)은 max(사업보고서 available_date, q4_derived_available_date)
 # (연간 행과 같은 '원천들의 max'). 값·엔진 입력은 그대로
-RULES_VERSION = "fi1.8.0"
+# 1.9.0(2026-10-16, N-53): WISE 정보 시점 `wise_asof` — 장 마감 판도 T(그날 06:00 수집분, 기준일 = 전 거래일).
+# WISE 4표(연간·매트릭스 컨센서스, 연간·분기 재무)의 fetched 컷 · 신선도 D*·수집 지연 · FG1 두 상한이 이것을
+# 본다. DART·universe·WICS·추정기관 수·기업행위는 asof(D') 그대로(FG1 은 재무 표 DART 행의 D' 자르기를 따로 본다).
+# 아침판은 wise_asof = asof = D 라 SQL 이 같다
+RULES_VERSION = "fi1.9.0"
 LAYER = "factor_inputs"
 BASES_KNOWN = ("evening", "morning")
 # fi 가 읽는 equity 판 basis — 아침 확정판·수동 재빌드만(`_check_basis`)
@@ -454,6 +459,9 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     tmp_root.mkdir(parents=True)
     d_iso = d.isoformat()
     asof = d_iso if dprime is None else dprime.isoformat()
+    # WISE 정보 시점(N-53) — 아침판·장 마감 판 모두 판 날짜다. 장 마감 판이 고정한 D' 확정판은 평일 T 아침 08:10 에
+    # 지어져 그날 06:00 WISE 수집분을 stage 판에 싣고 있다(월요일·연휴 다음 날은 토요일·연휴 첫날 아침 수집분 — lag 1)
+    wise_asof = d_iso
     con = duckdb.connect()
     try:
         con.execute(f"SET threads = {DUCKDB_THREADS}")
@@ -487,15 +495,15 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             d=d_iso, fy=f"{d.year}12",
             price_from=(d - timedelta(days=queries.PRICE_WINDOW_DAYS)).isoformat(),
             flow_from=str(flow_from), grace_days=rule.coverage_grace_days,
-            credit_lag=_credit_lag_sessions(), basis=basis, asof=asof)
+            credit_lag=_credit_lag_sessions(), basis=basis, asof=asof, wise_asof=wise_asof)
         for sql in queries.coverage_sqls(p):
             con.execute(sql)
         dstar = _one(con, "SELECT dstar FROM _dstar")
-        # N-12 수집 지연 = (D*, 예상 수집일] 거래일 수. 예상 수집일 = asof — 장 마감 판은 D'(T 저녁
-        # 수집은 아직 없다). T 로 재면 정상 상태가 lag 1 이 되어 하루만 빠져도 FAIL 이다.
+        # N-12 수집 지연 = (D*, 예상 수집일] 거래일 수. 예상 수집일 = wise_asof — 장 마감 판도 T(그날
+        # 06:00 수집, N-53). 그날 수집이 빠지면 lag 1(허용), 이틀 빠지면 FAIL 이다.
         lag = None if dstar is None else int(str(_one(
             con, f"SELECT count(*) FROM _calx WHERE date > DATE '{dstar}' "
-                 f"AND date <= DATE '{asof}'")))
+                 f"AND date <= DATE '{wise_asof}'")))
         for _, sql in queries.table_sqls(p, rule):
             con.execute(sql)
 
@@ -518,6 +526,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
             con=con, date=d_iso, basis=basis, price_from=p.price_from, flow_from=p.flow_from,
             rule=rule, min_eligible=min_eligible, dstar=None if dstar is None else str(dstar),
             collection_lag_sessions=lag, golden=gates.load_golden(golden_path), asof=asof,
+            wise_asof=wise_asof,
             t_candidates=t_cands, t_candidates_from=t_from,
             t_source_build=post_builds.get(queries.T_SOURCE_TABLE, ""),
             t_source_max_date=t_src_max)
@@ -544,7 +553,7 @@ def build(date_s: str, basis: str, root: Path, stage_root: Path, equity_root: Pa
     run_manifest = root / "_runs" / f"{d.strftime('%Y%m%d')}_{basis}.json"
     payload: dict[str, object] = {
         "layer": LAYER, "status": status, "build_id": bid, "date": d_iso, "basis": basis,
-        "asof": asof,
+        "asof": asof, "wise_asof": wise_asof,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rules_version": RULES_VERSION,
         "equity_root": str(Path(equity_root).resolve()),

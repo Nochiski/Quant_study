@@ -64,13 +64,11 @@ def _latest(home: Path, basis: str, *, health: object = True, d: str = D,
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _ledger_evening(home: Path, *, kiwoom_rc: int = 0, dart_rc: int = 0, wise_rc: int = 0,
+def _ledger_evening(home: Path, *, kiwoom_rc: int = 0, dart_rc: int = 0,
                     d: str = D, extra: dict[str, object] | None = None) -> None:
-    """`extra` = 옛 픽스처에 없던 키(예: WISE 부분 실패 `wise_n_bad`·`wise_bad_summary`)."""
+    """`daily_evening.sh` 인계 파일(N-53 뒤 — WISE 키 없음). `extra` = 그 밖의 키(예: 옛 판의 WISE 키)."""
     payload = {"date": d, "finished_at": "2026-09-10T09:39:11Z", "kiwoom_rc": kiwoom_rc,
-               "dart_rc": dart_rc, "wise_rc": wise_rc,
-               "kiwoom_done_at": "2026-09-10T18:12:03+09:00",
-               "wise_done_at": "2026-09-10T18:09:41+09:00", **(extra or {})}
+               "dart_rc": dart_rc, "kiwoom_done_at": "2026-09-10T18:12:03+09:00", **(extra or {})}
     (home / "data" / "deliver" / "ledger_evening.json").write_text(
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
@@ -140,7 +138,10 @@ def test_런_failed_는_수집_실패로_crit(tmp_path: Path) -> None:
     assert "ledger_chain" in r.text
 
 
-# `daily_evening.sh` 가 실패한 저녁 체인 런에 남기는 detail 모양(:178-184) — 갈래별 rc 와 실패 갈래
+# `daily_evening.sh` 가 실패한 저녁 체인 런에 남기는 detail 모양 — 갈래별 rc 와 실패 갈래. N-53 전 런은 WISE
+# 갈래(wise_rc)도 있었다 — 옛 모양(아래 상수 넷)도 그대로 읽혀야 한다
+_EVENING_DART_ONLY_NOW = ("kiwoom_rc=0 dart_rc=2 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
+                          "failed= DART(rc=2)")
 _EVENING_DART_ONLY = ("kiwoom_rc=0 dart_rc=2 wise_rc=0 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
                       "wise_done_at=2026-09-10T18:09:41+09:00 failed= DART(rc=2)")
 _EVENING_KIWOOM_TOO = ("kiwoom_rc=1 dart_rc=2 wise_rc=0 kiwoom_done_at=2026-09-10T21:12:03+09:00 "
@@ -152,7 +153,7 @@ _EVENING_KIWOOM_ONLY = ("kiwoom_rc=1 dart_rc=0 wise_rc=0 kiwoom_done_at=2026-09-
 
 
 def _recovery_day(tmp_path: Path, *, dart: tuple[str, ...], dart_rc: int = 2,
-                  kiwoom_rc: int = 0, wise_rc: int = 0, evening: tuple[str, ...] = ()) -> Path:
+                  kiwoom_rc: int = 0, evening: tuple[str, ...] = ()) -> Path:
     """저녁 dart 런(18:05) 뒤 아침 dart 런(06:00)이 같은 D 를 다시 판정한 날.
     `dart` = 런 순서대로의 상태. `evening` = 실패한 저녁 체인 런들의 detail(순서대로)."""
     home = _home(tmp_path)
@@ -160,7 +161,7 @@ def _recovery_day(tmp_path: Path, *, dart: tuple[str, ...], dart_rc: int = 2,
     for basis in ("evening", "morning"):
         _stage(home, basis)
         _latest(home, basis)
-    _ledger_evening(home, dart_rc=dart_rc, kiwoom_rc=kiwoom_rc, wise_rc=wise_rc)
+    _ledger_evening(home, dart_rc=dart_rc, kiwoom_rc=kiwoom_rc)
     chain = tuple(("evening_chain", "failed", e) for e in evening)
     _runs(home, rows=(("dart", dart[0]), *chain, ("ledger_chain", "ok"),
                       *(("dart", s) for s in dart[1:])))
@@ -177,29 +178,32 @@ def test_저녁_dart_실패를_아침_dart_런이_회복하면_crit_이_아니�
     assert "DART rc=2(뒤 런에서 회복)" in r.text
 
 
-def test_저녁_체인이_DART_하나로만_실패했고_dart_가_회복되면_crit_이_아니다(tmp_path: Path) -> None:
+@pytest.mark.parametrize("detail", [_EVENING_DART_ONLY_NOW, _EVENING_DART_ONLY], ids=["now", "pre_n53"])
+def test_저녁_체인이_DART_하나로만_실패했고_dart_가_회복되면_crit_이_아니다(tmp_path: Path,
+                                                                     detail: str) -> None:
     """M-3 운영 모양 — 저녁 DART 갈래가 실패하면 `daily_evening.sh` 는 evening_chain 런도 failed 로
-    남긴다. 원인이 DART 하나뿐이고 dart 가 아침에 회복됐으면 저녁 체인 실패도 회복이다."""
-    r = _build(_recovery_day(tmp_path, dart=("gate_failed", "ok"), evening=(_EVENING_DART_ONLY,)))
+    남긴다. 원인이 DART 하나뿐이고 dart 가 아침에 회복됐으면 저녁 체인 실패도 회복이다. 갈래는 키움·DART
+    둘이고(N-53 — WISE 는 06:00 체인), 옛 런의 wise_rc=0 은 '그 밖의 갈래 0'으로 읽는다."""
+    r = _build(_recovery_day(tmp_path, dart=("gate_failed", "ok"), evening=(detail,)))
     assert r.status is not dr.ReportStatus.CRIT, r.text
     assert "회복 dart(" in r.text and "회복 evening_chain(DART 뒤 런 회복)" in r.text
 
 
-@pytest.mark.parametrize(("detail", "kiwoom_rc", "wise_rc"), [
-    (_EVENING_KIWOOM_TOO, 1, 0),
-    (_EVENING_WISE_TOO, 0, 1),
-    ("dart_rc=2", 0, 0),                          # rc 일부만 — 키움·WISE 를 확인할 수 없다
+@pytest.mark.parametrize(("detail", "kiwoom_rc"), [
+    (_EVENING_KIWOOM_TOO, 1),
+    (_EVENING_WISE_TOO, 0),                     # 옛 런(N-53 전)의 WISE 실패 — 모르는 갈래처럼 막는다
+    ("dart_rc=2", 0),                           # rc 일부만 — 키움을 확인할 수 없다
     # 모르는 갈래(krx_rc)가 실패 — 갈래가 늘어도 거짓 회복이 열리지 않는다(P1)
-    ("kiwoom_rc=0 dart_rc=2 wise_rc=0 krx_rc=1 failed= DART(rc=2) KRX(rc=1)", 0, 0),
-    ("kiwoom_rc=0 dart_rc=0 wise_rc=0", 0, 0),   # 세 rc 가 다 0 인데 failed — 원인 미상은 회복 아님
-    ("", 0, 0),
-    ("형식 미상", 0, 0),
-], ids=["kiwoom", "wise", "dart_rc_only", "unknown_branch", "all_zero", "empty", "unknown"])
+    ("kiwoom_rc=0 dart_rc=2 krx_rc=1 failed= DART(rc=2) KRX(rc=1)", 0),
+    ("kiwoom_rc=0 dart_rc=0", 0),               # 두 rc 가 다 0 인데 failed — 원인 미상은 회복 아님
+    ("", 0),
+    ("형식 미상", 0),
+], ids=["kiwoom", "wise_pre_n53", "dart_rc_only", "unknown_branch", "all_zero", "empty", "unknown"])
 def test_저녁_체인_실패_원인이_DART_만이_아니거나_모르면_dart_가_회복돼도_crit(
-        tmp_path: Path, detail: str, kiwoom_rc: int, wise_rc: int) -> None:
-    """키움·WISE 갈래도 실패했거나, detail 로 원인을 가릴 수 없으면 지금처럼 crit(P1)."""
+        tmp_path: Path, detail: str, kiwoom_rc: int) -> None:
+    """키움(옛 런은 WISE) 갈래도 실패했거나, detail 로 원인을 가릴 수 없으면 지금처럼 crit(P1)."""
     home = _recovery_day(tmp_path, dart=("gate_failed", "ok"), evening=(detail,),
-                         kiwoom_rc=kiwoom_rc, wise_rc=wise_rc)
+                         kiwoom_rc=kiwoom_rc)
     r = _build(home)
     assert r.status is dr.ReportStatus.CRIT
     assert "수집 실패 런 evening_chain" in r.text
@@ -326,80 +330,25 @@ def test_런이_아직_running_이면_warn(tmp_path: Path) -> None:
 
 def test_저녁_원장_rc_0이_아니면_crit(tmp_path: Path) -> None:
     home = _full(tmp_path)
-    _ledger_evening(home, wise_rc=2)
+    _ledger_evening(home, kiwoom_rc=2)
     r = _build(home)
     assert r.status is dr.ReportStatus.CRIT
-    assert "wise_rc=2" in r.text
+    assert "kiwoom_rc=2" in r.text
 
 
-def test_저녁_WISE_부분_실패는_warn_줄로_싣고_crit_은_아니다(tmp_path: Path) -> None:
-    """N-27 ③ · N-30 ③ — 수집기 rc 0 인 채 일부 콜이 실패한 저녁. 실패 콜 수·종류를 경고에 싣되
-    이 줄만으로 crit 로 올리지 않는다. 이 픽스처의 원장 건전성엔 `wise.run` 이 없다 — 회복 여부를
-    모르면 경고로 남긴다(P1)."""
-    home = _full(tmp_path)
-    kinds = {"invalid_stock": 1, "전송 실패(http·exc·notjson)": 1}
-    _ledger_evening(home, extra={"wise_n_bad": 2, "wise_bad_summary": kinds})
-    r = _build(home)
-    assert r.status is dr.ReportStatus.WARN, r.text
-    assert "WISE 저녁 실패 2콜(invalid_stock 1, 전송 실패(http·exc·notjson) 1)" in r.text
-    assert "■ 경고: " in r.text
-
-
-@pytest.mark.parametrize("extra", [None, {"wise_n_bad": 0, "wise_bad_summary": {}}],
-                         ids=["old_json_no_keys", "zero"])
-def test_저녁_WISE_실패가_없으면_아무것도_안_붙는다(
-        tmp_path: Path, extra: dict[str, object] | None) -> None:
-    """회귀 가드 — 키가 없는 옛 인계 파일·실패 0 은 종전 리포트 그대로(info)."""
+@pytest.mark.parametrize("extra", [
+    None, {"wise_rc": 2, "wise_n_bad": 2, "wise_bad_summary": {"invalid_stock": 2}},
+    {"wise_rc": 0, "wise_n_bad": None, "wise_bad_summary": None}],
+    ids=["now", "pre_n53_failed", "pre_n53_unknown"])
+def test_저녁_원장_절에는_WISE_가_없다(tmp_path: Path, extra: dict[str, object] | None) -> None:
+    """N-53 — WISE 수집은 06:00 체인 몫이라 저녁 원장 절은 키움·DART 만 본다. WISE 실패는 06:00 체인
+    알림과 원장 건전성 `wise.*` 가 맡는다. 옛 인계 파일의 WISE 키(실패·모름)도 읽지 않는다."""
     home = _full(tmp_path)
     _ledger_evening(home, extra=extra)
     r = _build(home)
     assert r.status is dr.ReportStatus.INFO, r.text
-    assert "WISE 저녁 실패" not in r.text
-
-
-def test_저녁_WISE_실패_수를_모르면_warn(tmp_path: Path) -> None:
-    """I-1 — 키가 있는데 null 이고 wise_rc 0 = 수집기는 끝났는데 런 로그를 못 읽었다. 실패 수를
-    모르는 것도 경고다(P1)."""
-    home = _full(tmp_path)
-    _ledger_evening(home, extra={"wise_n_bad": None, "wise_bad_summary": None})
-    r = _build(home)
-    assert r.status is dr.ReportStatus.WARN, r.text
-    assert "WISE 저녁 실패 수 확인 불가" in r.text
-
-
-def test_저녁_WISE_rc_실패면_확인_불가_줄은_없다(tmp_path: Path) -> None:
-    """wise_rc≠0 이면 이미 crit(저녁 원장 수집 실패) — 실패 수 모름은 따로 싣지 않는다."""
-    home = _full(tmp_path)
-    _ledger_evening(home, wise_rc=2, extra={"wise_n_bad": None, "wise_bad_summary": None})
-    r = _build(home)
-    assert r.status is dr.ReportStatus.CRIT
-    assert "wise_rc=2" in r.text
-    assert "확인 불가" not in r.text
-
-
-def test_저녁_WISE_실패를_같은_날_재실행이_회복했으면_등급을_안_올린다(tmp_path: Path) -> None:
-    """같은 리포트의 원장 `wise.run` 이 PASS = 같은 날 재실행이 실패 콜을 다시 받았다(DART
-    `_recovery` 와 같은 방식). 저녁 절에 '회복'으로만 적고 경고로 올리지 않는다."""
-    home = _full(tmp_path)
-    _ledger(home, checks=[_check("krx.rows", "required", "pass"),
-                          _check("wise.run", "required", "pass")])
-    _ledger_evening(home, extra={"wise_n_bad": 2, "wise_bad_summary": {"invalid_stock": 2}})
-    r = _build(home)
-    assert r.status is dr.ReportStatus.INFO, r.text
-    assert "WISE 저녁 실패 2콜(invalid_stock 2) — 같은 날 재실행으로 회복(wise.run pass)" in r.text
-    assert "■ 경고" not in r.text
-
-
-def test_저녁_WISE_실패가_회복되지_않았으면_경고로_남긴다(tmp_path: Path) -> None:
-    """`wise.run` FAIL — 원장 쪽에서 이미 crit 이고, 저녁 실패 줄은 지금처럼 경고에 남는다."""
-    home = _full(tmp_path)
-    _ledger(home, checks=[_check("krx.rows", "required", "pass"),
-                          _check("wise.run", "required", "fail")])
-    _ledger_evening(home, extra={"wise_n_bad": 2, "wise_bad_summary": {"invalid_stock": 2}})
-    r = _build(home)
-    assert r.status is dr.ReportStatus.CRIT
-    assert "■ 경고: WISE 저녁 실패 2콜(invalid_stock 2)" in r.text
-    assert "회복(wise.run" not in r.text
+    evening = next(ln for ln in r.text.splitlines() if ln.startswith("■ 저녁 원장"))
+    assert "WISE" not in evening and "wise" not in r.text
 
 
 def test_빌드_health_실패는_게이트_폐기로_crit(tmp_path: Path) -> None:

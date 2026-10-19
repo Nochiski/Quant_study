@@ -4,9 +4,10 @@
 #   크론(서버 TZ=UTC. 등록은 오케스트레이터): 20 12 * * 1-5 cd $HOME/quant-ledger && scripts/build_evening.sh
 #   (09-13 까지 18:15 → 결정 11: 키움 저녁 수집이 21:05 로 옮겨져 인계 파일이 ≈21:20 에 나온다)
 #   순서: 오늘(KST) 거래일 판정 → 저녁 원장 완료 대기 → scripts/build_chain.sh evening
-#   대기 규칙: data/deliver/ledger_evening.json 이 date==오늘 && kiwoom_rc==0 && wise_rc==0 이 될
+#   대기 규칙: data/deliver/ledger_evening.json 이 date==오늘 && kiwoom_rc==0 이 될
 #     때까지 60초 간격으로 본다. 한도는 21:45 KST(QL_EVENING_BUILD_DEADLINE 로 조정 — 키움이 21:05 부터 받는다). DART 는
-#     조건이 아니다 — 저녁 스코어링 경로 밖이라 실패해도 빌드는 간다. 인계 파일은 키움·WISE 가 끝나면
+#     조건이 아니다 — 저녁 스코어링 경로 밖이라 실패해도 빌드는 간다. WISE 는 그날 06:00 체인이 이미 받았다(N-53 — 인계
+#     파일에 WISE 키가 없다. 그날 수집 실패는 06:00 체인 crit·08:10 건전성 몫). 인계 파일은 키움이 끝나면
 #     dart_rc=null 로 먼저 쓰이고(daily_evening.sh) DART 가 끝나면 다시 쓰인다 — 그래서 dart.db 는 아직 쓰는
 #     중일 수 있고, 스냅샷은 VACUUM INTO 트랜잭션 일관 사본이다(build_chain.sh snapshot_step). 그날 DART 분은
 #     아침 확정판에 들어온다(마감일엔 잠정판에 DART 일부만 — 배포 묶음 3 구조 검토).
@@ -54,10 +55,9 @@ try:
     rep = json.loads(path.read_text(encoding="utf-8"))
 except ValueError:
     raise SystemExit(1)      # 쓰는 중 — 다음 주기에 다시 본다
-ready = (str(rep.get("date") or "") == sys.argv[1]
-         and rep.get("kiwoom_rc") == 0 and rep.get("wise_rc") == 0)
+ready = str(rep.get("date") or "") == sys.argv[1] and rep.get("kiwoom_rc") == 0
 print(f"  원장 보고 date={rep.get('date')} kiwoom_rc={rep.get('kiwoom_rc')} "
-      f"wise_rc={rep.get('wise_rc')} dart_rc={rep.get('dart_rc')}(조건 아님)")
+      f"dart_rc={rep.get('dart_rc')}(조건 아님)")
 raise SystemExit(0 if ready else 1)
 PY
 }
@@ -87,7 +87,7 @@ while ! ledger_ready "$D" >> "$LOG" 2>&1; do
   if [ "$(date +%s)" -ge "$DEADLINE_TS" ]; then
     say "  ✗ $DEADLINE_HHMM KST 까지 저녁 원장이 완료되지 않았다 (대기 ${WAITED}초)"
     scripts/notify.sh crit "잠정 빌드 시작 불가 — 저녁 원장 미완료" \
-      "D=$D | data/deliver/ledger_evening.json 이 date=$D kiwoom_rc=0 wise_rc=0 이 되지 않았다 (한도 $DEADLINE_HHMM KST, 대기 ${WAITED}초) | 로그 $LOG"
+      "D=$D | data/deliver/ledger_evening.json 이 date=$D kiwoom_rc=0 이 되지 않았다 (한도 $DEADLINE_HHMM KST, 대기 ${WAITED}초) | 로그 $LOG"
     exit 2
   fi
   sleep 60

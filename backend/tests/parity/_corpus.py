@@ -475,7 +475,8 @@ def combination_specs(
         method = tuple(WeightingMethod)[weighting]
         folded = index >= 16
         # RISK 행의 절반은 팩터, 절반은 필드(`risk_field_id`)로 역가중한다. RISK 행 안에서도
-        # 정규화 수준마다 두 갈래가 다 나온다.
+        # 정규화 수준마다 두 갈래가 다 나온다. 다만 RISK 행 8개 안에서는 이 열이 2수준 열 trade·
+        # cap(반대 방향)·neutral(같은 방향)과 완전히 묶인다(OA 접힘의 성질, #577 리뷰 P3-1).
         risk_factor = method is WeightingMethod.RISK and folded ^ bool(normalization >> 1)
         liquidity = folded ^ bool(weighting & 1)
         regime = folded ^ bool(normalization & 1)

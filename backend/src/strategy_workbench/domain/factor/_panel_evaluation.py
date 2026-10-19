@@ -454,9 +454,8 @@ class _PanelEvaluator:
             )
         # `is True`·`is False` 만 가지를 고른다. 숫자 predicate 는 모두 None 이다
         if predicate.boolean:
-            flags = predicate.values.astype(np.bool_, copy=False)
-            take_true = predicate.valid & flags
-            take_false = predicate.valid & ~flags
+            take_true = np.logical_and(predicate.valid, predicate.values)
+            take_false = np.logical_and(predicate.valid, np.logical_not(predicate.values))
         else:
             take_true = take_false = np.zeros(rows, bool)
         values = self._map(
@@ -474,7 +473,7 @@ class _PanelEvaluator:
         panel = self._panel
         reached = panel.position >= periods
         origin = np.where(reached, panel.rank - periods, 0)
-        source_row = panel.order[origin] if rows else origin
+        source_row = panel.order[origin]
         values = self._map(rows, source.values.dtype.type, lambda s: source.values[source_row[s]])
         return values, reached & source.valid[source_row]
 

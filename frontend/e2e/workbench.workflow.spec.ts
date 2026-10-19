@@ -25,6 +25,7 @@ import {
   type StartBacktestErrors,
   type StrategyTraceRequest,
 } from "../src/shared/api/generated";
+import { collapseAssistant } from "./assistant-helpers";
 import { runtimeDatabasePath } from "./runtime";
 import {
   apiClient,
@@ -1320,6 +1321,8 @@ test.describe("professional YAML workflow", () => {
     // P6: 노드 badge가 해당 인스펙터로 이동하고, 진단 본문은 그 인스펙터 폭을 사용한다.
     // 옛 목록 카드의 근접성 계약은 명시적 선택·소유권과 본문 폭 계약으로 옮긴다.
     await openEditor(page, "/research/strategies/new");
+    // 노드 카드 폭 기준선은 AI 열 없이 찍었다 — 처음부터 열린 AI 열을 접는다(RD-04-A).
+    await collapseAssistant(page);
     // 오류를 **마지막이 아닌** 노드에 준다: 뒤에 노드가 없으면 근접성이 뒤집혀도 드러나지 않는다.
     // golden의 마지막 노드(`mom_252`)를 깨고 그 뒤에 노드를 하나 더 둔다.
     const withTrailingNode = mustReplace(
@@ -1542,6 +1545,8 @@ for (const width of [360, 640]) {
 
 test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기 뒤 백테스트한다", async ({ page }) => {
   await page.goto("/research/strategies/new");
+  // 그래프 편집 칸이 한 화면에 들어오는지 본다 — 처음부터 열린 AI 열을 접는다(RD-04-A).
+  await collapseAssistant(page);
   const pipeline = page.getByRole("region", { name: "전략 파이프라인" });
   await expect(pipeline).toBeVisible();
   await expect(pipeline).not.toContainText("구조 오류");

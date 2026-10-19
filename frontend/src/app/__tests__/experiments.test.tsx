@@ -713,7 +713,17 @@ describe("experiments", () => {
         /^예상 소요 최대 약 4분 11초 · 이 계열의 최근 완료 실행 5개를/u,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("10, 20, 30 (3)")).toBeInTheDocument();
+    // 탐색 값은 칩으로 보인다(RD-09-A).
+    const chips = screen.getByRole("list", { name: "탐색 값 3개" });
+    expect(within(chips).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "10",
+      "20",
+      "30",
+    ]);
+    // 시작 전 확인은 보이는 제목을 가진 구역이고, 창마다 학습·검증 연도 문장이 붙는다.
+    expect(screen.getByRole("region", { name: "시작 전 확인" })).toBeInTheDocument();
+    expect(screen.getAllByText(/^\d{4}–\d{4} 학습 · \d{4}–\d{4} 검증$/u).length).toBeGreaterThan(0);
+    expect(screen.getByText("주변 칸의 평균으로 골라 우연히 튄 칸을 덜 골라요.")).toBeInTheDocument();
     expect(screen.getByText("2024-01-02 ~ 2024-12-30")).toBeInTheDocument();
     // 기반 요청의 지표 창은 싣지 않고, 탐색 값을 정하지 않으면 null 로 정의의 격자를 편다.
     expect(previews.at(-1)).toEqual({

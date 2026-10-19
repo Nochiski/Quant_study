@@ -32,6 +32,12 @@ const RESEARCH = [
     icon: "experiments",
     to: "/research/experiments",
   },
+  {
+    key: "factors",
+    label: "nav.factors",
+    icon: "factors",
+    to: "/research/factors",
+  },
 ] as const;
 
 const OPERATIONS = [

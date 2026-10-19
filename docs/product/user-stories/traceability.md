@@ -20,10 +20,10 @@ PR은 GitHub 번호(`#123`)로 적는다.
 
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
-| 김철수 | 11 | 0 | 1 | 1 | 13 |
+| 김철수 | 12 | 0 | 1 | 0 | 13 |
 | 정동민 | 13 | 0 | 0 | 0 | 13 |
 | 한상목 | 15 | 0 | 0 | 1 | 16 |
-| 합계 | 39 | 0 | 1 | 2 | 42 |
+| 합계 | 40 | 0 | 1 | 1 | 42 |
 
 ### 스토리별 추적
 
@@ -36,7 +36,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-CS-05 | 김철수 | 단위가 다른 팩터를 결합 전에 정규화한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-05 1.1 업그레이드는 none과 원시 기여도를 보존한다<br>`frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-05 기본 순위와 세 정규화의 기여도·합계 및 단위 경고를 추적한다 |
 | US-CS-06 | 김철수 | 거래대금 상위 20% 같은 횡단면 필터와 변동성 역가중을 쓴다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 100종목 상위 20%의 20개 통과·80개 순위 탈락을 구분한다<br>`frontend/e2e/stories/cs.signal-semantics.spec.ts` :: US-CS-06 변동성은 역가중에만 쓰이고 알파가 없으면 compile을 막는다 |
 | US-CS-07 | 김철수 | 노드 캔버스에서 끌어서 잇고 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/node-canvas.spec.ts` :: 노드 캔버스 배선·키보드·취소·배치·YAML undo가 같은 원문을 지킨다<br>`frontend/e2e/stories/node-canvas.spec.ts` :: 캔버스의 같은 진단을 다시 선택하면 해당 노드와 인스펙터를 드러낸다 |
-| US-CS-08 | 김철수 | 파생 팩터를 저장해 두고 다른 전략에서 다시 쓴다 | `미계획` | — | — | — |
+| US-CS-08 | 김철수 | 파생 팩터를 저장해 두고 다른 전략에서 다시 쓴다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.factor-library.spec.ts` :: US-CS-08 파생 팩터를 내 팩터로 저장해 다른 전략에서 꺼내 쓰고, 새 버전은 알림을 보고 바꾼다 |
 | US-CS-09 | 김철수 | 워크포워드 실험으로 표본 밖 성과를 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.robustness-check.spec.ts` :: US-DM-11 US-CS-09 한 번 돌린 결과에서 튼튼한지 확인하기로 시도 수를 먼저 보고 실험을 걸면, 끝난 뒤 표본 밖 곡선·유지율과 추천 후보(또는 추천하지 않는 이유)가 카드에 채워진다 |
 | US-CS-10 | 김철수 | 파라미터 지도에서 고원을 확인하고 후보를 고른다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.candidate-map.spec.ts` :: US-CS-10 좁고 낮은 다크 화면에서 키보드로 후보를 기록하고 결과 근거를 읽는다<br>`frontend/e2e/stories/cs.candidate-map.spec.ts` :: US-CS-10 지도에서 설정을 비교하고 이유와 후보를 기록한 뒤 결과 검증 카드로 이동한다 |
 | US-CS-11 | 김철수 | 비용을 현실적으로 잡고 운용 금액별 용량을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/cs.validation-reports.spec.ts` :: US-CS-11 용량 확인은 시도 수를 늘리지 않고 금액별 비용과 한계 사유를 보인다 |

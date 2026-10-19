@@ -84,6 +84,25 @@ jobs:
           tests/application/test_assistant_usage.py
           tests/architecture
 
+  # run worker 프로세스는 Windows 에서 프로세스 그룹·파이프·인코딩 경로가 Linux 와 다르다(run-worker
+  # spec 8절). opt-in 단계(W1-02)부터 worker 통합 테스트만 Windows 에서 돌린다. 예산은 10분이다.
+  backend-windows-worker:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: uv sync --locked --extra parquet --extra equity --extra llm
+      - run: uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
+      - run: uv run pytest -q tests/integration/test_run_worker_process.py tests/test_run_worker_protocol.py
+
   # 유저 스토리 하네스(`docs/product/user-stories/`): 스토리 상태·e2e 태그·traceability 표가 서로
   # 맞는지 본다. 검사기 단위 테스트는 backend job의 "Verify root server contract" step이 함께 돈다.
   user-story-harness:

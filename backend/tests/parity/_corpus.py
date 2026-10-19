@@ -66,8 +66,13 @@ from strategy_workbench.domain.factor.facade.evaluation import FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
+    ComparisonNode,
+    ConditionalNode,
+    ConstantNode,
     CrossSectionalNode,
     CrossSectionalOperator,
+    ExpressionNode,
+    FactorComparisonOperator,
     FactorGraph,
     FieldNode,
     GroupNode,
@@ -267,7 +272,7 @@ class EvaluatorCase:
 
 
 def _extra_graphs() -> list[FactorGraph]:
-    """판본 고정 묶음에 없는 조합: 넘침, 파라미터, 시계열→횡단면 연쇄, lag 뒤 그룹 순위."""
+    """판본 고정 묶음에 없는 조합: 넘침, 파라미터, 시계열→횡단면, lag 뒤 그룹 순위, 원소·lag."""
     x = FieldNode("x", "x", "field")
     y = FieldNode("y", "y", "field")
     return [
@@ -296,7 +301,70 @@ def _extra_graphs() -> list[FactorGraph]:
             ),
             "out",
         ),
+        *_elementwise_graphs(x, y),
     ]
+
+
+def _elementwise_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
+    """열 평가기 골격(T3-01)이 다루는 원소·lag 노드만 쓰는 조합.
+
+    lag 와 섞는 연산의 가림 구간, bool lag·bool 가지 조건, 숫자 predicate, −0.0 분모와 넘침,
+    여러 노드가 넘칠 때 평가 순서상 첫 노드, 상수만 있는 그래프를 덮는다.
+    """
+
+    def lag(node_id: str, source: str, periods: int) -> UnaryNode:
+        return UnaryNode(node_id, UnaryOperator.LAG, source, "unary", periods=periods)
+
+    def binary(node_id: str, operator: BinaryOperator, left: str, right: str) -> BinaryNode:
+        return BinaryNode(node_id, operator, left, right, "binary")
+
+    def compare(
+        node_id: str, operator: FactorComparisonOperator, left: str, right: str
+    ) -> ComparisonNode:
+        return ComparisonNode(node_id, operator, left, right, "comparison")
+
+    negate = UnaryNode("neg", UnaryOperator.NEGATE, "x", "unary")
+    ratio = binary("ratio", BinaryOperator.DIVIDE, "y", "x")  # x 가 아주 작으면 넘친다
+    square = binary("square", BinaryOperator.MULTIPLY, "x", "x")  # x 가 아주 크면 넘친다
+    nodes: list[tuple[ExpressionNode, ...]] = [
+        (x, lag("l3", "x", 3), binary("out", BinaryOperator.SUBTRACT, "x", "l3")),
+        (
+            x,
+            lag("l1", "x", 1),
+            binary("d", BinaryOperator.SUBTRACT, "x", "l1"),
+            lag("out", "d", 2),
+        ),
+        (
+            x,
+            y,
+            lag("ly", "y", 1),
+            compare("gate", FactorComparisonOperator.GREATER_THAN, "x", "ly"),
+            negate,
+            ConstantNode("zero", 0.0, "constant"),
+            ConditionalNode("out", "gate", "neg", "zero", "conditional"),
+        ),
+        (
+            x,
+            y,
+            compare("gate", FactorComparisonOperator.GREATER_THAN_OR_EQUAL, "x", "y"),
+            lag("out", "gate", 1),
+        ),
+        (
+            x,
+            y,
+            compare("p", FactorComparisonOperator.LESS_THAN, "x", "y"),
+            compare("t", FactorComparisonOperator.EQUAL, "x", "y"),
+            compare("f", FactorComparisonOperator.LESS_THAN_OR_EQUAL, "x", "y"),
+            ConditionalNode("out", "p", "t", "f", "conditional"),
+        ),
+        (x, y, ConditionalNode("out", "y", "x", "y", "conditional")),
+        (x, y, negate, binary("out", BinaryOperator.DIVIDE, "neg", "y")),
+        (x, y, negate, binary("out", BinaryOperator.DIVIDE, "y", "neg")),
+        (x, y, ratio, square, binary("out", BinaryOperator.ADD, "ratio", "square")),
+        (x, y, ratio, square, binary("out", BinaryOperator.SUBTRACT, "square", "ratio")),
+        (ConstantNode("out", 1.5, "constant"),),
+    ]
+    return [FactorGraph(graph, "out") for graph in nodes]
 
 
 def factor_panel(seed: int) -> tuple[FactorObservation, ...]:
@@ -397,17 +465,21 @@ def combination_specs(
     """정규화 × 가중 × 선정 × 롱숏 × 버퍼·최소 거래·상한·섹터 중립·보조 순위·top_percent·top_count.
 
     전부 곱하지 않고 직교 배열 32행(`_orthogonal_rows`)만 쓴다. 두 열의 모든 수준 쌍이 나온다.
-    행 번호로 돌려 쓰는 열(절대 규칙·유동성·레짐·역가중 원천·보조 방향)은 가중·리밸런싱과
-    겹치지 않게 `index // 4`·접힘 비트에서 고른다.
+    절대 규칙은 행 번호로 돌려 쓰고, 보조 방향은 접힘 비트에서 고른다. 유동성·레짐·역가중 원천은
+    접힘 비트와 4수준 열의 비트를 XOR 한 2수준 열이라 가중·정규화·리밸런싱·결측 정책의 모든 수준과
+    두 값 모두 만난다(#573 리뷰 P3: `index // 4` 는 정규화 수준과 묶여 있었다).
     """
     specs: list[tuple[str, StrategySpec]] = []
     for index, (weighting, normalization, bits) in enumerate(_orthogonal_rows()):
         percentile, short, buffer, trade, cap, neutral, tie, top_percent, top_count = bits
         method = tuple(WeightingMethod)[weighting]
-        # 가중 비트와 독립이라 RISK 행의 절반은 팩터, 절반은 필드(`risk_field_id`)로 역가중한다.
-        risk_factor = method is WeightingMethod.RISK and (index // 4) % 2 == 1
-        liquidity = (index // 4) % 3 == 1
-        regime = (index // 4) % 3 == 2
+        folded = index >= 16
+        # RISK 행의 절반은 팩터, 절반은 필드(`risk_field_id`)로 역가중한다. RISK 행 안에서도
+        # 정규화 수준마다 두 갈래가 다 나온다. 다만 RISK 행 8개 안에서는 이 열이 2수준 열 trade·
+        # cap(반대 방향)·neutral(같은 방향)과 완전히 묶인다(OA 접힘의 성질, #577 리뷰 P3-1).
+        risk_factor = method is WeightingMethod.RISK and folded ^ bool(normalization >> 1)
+        liquidity = folded ^ bool(weighting & 1)
+        regime = folded ^ bool(normalization & 1)
         factors = [signal("f1", FactorDirection.HIGH, 0.6), signal("f2", FactorDirection.LOW, 0.4)]
         factors += [signal("tb", FactorDirection.LOW, 1.0)] if tie else []
         factors += [signal("riskf", FactorDirection.LOW, 1.0)] if risk_factor else []
@@ -809,13 +881,17 @@ def pipeline_cases() -> list[PipelineCase]:
         cases.append(PipelineCase(f"L3/synthetic/{key}", spec, environment, "synthetic"))
     traced = cases[-1]
     # 최소 거래·이름 상한이 켜진 조합에 시작 보유를 준다. 목록에 없는 종목(0.0)과 관측에 없는
-    # 종목(ZZ99)이 함께 든다.
+    # 종목(ZZ99)이 함께 든다. 유동성 거르기는 합성 거래대금에서 후보를 거의 다 떨어뜨리고, 월·분기
+    # 리밸런싱은 측정 구간에 프레임이 한두 개라 선정이 빌 수 있어 그 조합은 고르지 않는다.
     held = next(
         case
         for case in cases
         if case.key.startswith("L3/synthetic/")
         and case.spec.portfolio.minimum_trade_weight > 0
         and case.spec.risk.max_name_weight < 1
+        and case.spec.portfolio.liquidity_field_id is None
+        and case.spec.portfolio.rebalance
+        in (RebalanceFrequency.EVERY_N_SESSIONS, RebalanceFrequency.WEEKLY)
     )
     holdings = (("S01", 0.14), ("S02", -0.02), ("S05", 0.03), ("ZZ99", 0.1))
     cases.append(

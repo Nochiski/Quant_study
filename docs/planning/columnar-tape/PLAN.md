@@ -2,15 +2,15 @@
 plan_version: 1
 project: columnar-tape
 project_status: IN_PROGRESS
-current_phase: T1
-current_pr: T1-01
-active_prs: [T1-01]
-parallel_window: [T1-01]
-last_updated: 2026-10-20T04:13:46+09:00
+current_phase: T3
+current_pr: T3-01
+active_prs: [T3-01]
+parallel_window: [T2-02, T3-01]
+last_updated: 2026-10-20T04:59:33+09:00
 planned_prs: 26
-merged_prs: 3
-approved_prs: 3
-progress_percent: 12
+merged_prs: 4
+approved_prs: 4
+progress_percent: 15
 ---
 
 # tape 열 지향 계산 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 12
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `T1` |
-| Current/next PR | `T1-01` |
-| Active PR | `T1-01` |
-| Progress | `3 / 26 merged (12%)` |
-| Approved | `3 / 26` |
-| Aggregated at | `2026-10-20 04:13 KST` |
+| Current phase | `T3` |
+| Current/next PR | `T3-01` |
+| Active PR | `T3-01` |
+| Progress | `4 / 26 merged (15%)` |
+| Approved | `4 / 26` |
+| Aggregated at | `2026-10-20 04:59 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -53,15 +53,15 @@ progress_percent: 12
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | T0 | Planning package and prerequisite defect | 2 | 2 | `MERGED` |
-| T1 | Parity harness | 1 | 0 | `IN_PROGRESS` |
+| T1 | Parity harness | 1 | 1 | `MERGED` |
 | T2 | Columnar raw panel port | 3 | 1 | `WAITING` |
-| T3 | Columnar factor evaluator | 6 | 0 | `WAITING` |
+| T3 | Columnar factor evaluator | 6 | 0 | `IN_PROGRESS` |
 | T4 | Pipeline switch | 3 | 0 | `WAITING` |
 | T5 | Columnar compiler | 4 | 0 | `WAITING` |
 | T6 | Consumer migration | 3 | 0 | `WAITING` |
 | T7 | Legacy path removal | 3 | 0 | `WAITING` |
 | T9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **26** | **3** | **12%** |
+| **Total** |  | **26** | **4** | **15%** |
 <!-- PLAN:PHASES:END -->
 
 ## T0 — 기획·선행 결함
@@ -75,7 +75,7 @@ progress_percent: 12
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T1-01` | 대조 하네스 골격, `scripts/parity_tape.py` | T0-01, T0-02 | `IN_PROGRESS` | - |
+| [x] | `T1-01` | 대조 하네스 골격, `scripts/parity_tape.py` | T0-01, T0-02 | `MERGED` | #573 · 2차 APPROVE(1차 P2 2건 해소) · main 머지 04611454(2026-10-20) |
 
 ## T2 — 열 원시 포트
 
@@ -89,7 +89,7 @@ progress_percent: 12
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T3-01` | 열 평가기 골격 | T2-01 | `PLANNED` | - |
+| [ ] | `T3-01` | 열 평가기 골격 | T2-01 | `IN_PROGRESS` | - |
 | [ ] | `T3-02` | 시계열 끝점·min/max | T3-01 | `PLANNED` | - |
 | [ ] | `T3-03` | 정확 평균 커널 | T3-02 | `PLANNED` | - |
 | [ ] | `T3-04` | 정확 pstdev 커널 | T3-03 | `PLANNED` | - |

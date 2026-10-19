@@ -2,15 +2,15 @@
 plan_version: 1
 project: columnar-tape
 project_status: IN_PROGRESS
-current_phase: T0,T2
-current_pr: T0-01,T0-02,T2-01
-active_prs: [T0-01, T0-02, T2-01]
-parallel_window: [T0-01, T0-02, T2-01]
-last_updated: 2026-10-20T03:42:03+09:00
+current_phase: T1
+current_pr: T1-01
+active_prs: [T1-01]
+parallel_window: [T1-01]
+last_updated: 2026-10-20T04:13:46+09:00
 planned_prs: 26
-merged_prs: 0
-approved_prs: 0
-progress_percent: 0
+merged_prs: 3
+approved_prs: 3
+progress_percent: 12
 ---
 
 # tape 열 지향 계산 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `T0,T2` |
-| Current/next PR | `T0-01,T0-02,T2-01` |
-| Active PR | `T0-01, T0-02, T2-01` |
-| Progress | `0 / 26 merged (0%)` |
-| Approved | `0 / 26` |
-| Aggregated at | `2026-10-20 03:42 KST` |
+| Current phase | `T1` |
+| Current/next PR | `T1-01` |
+| Active PR | `T1-01` |
+| Progress | `3 / 26 merged (12%)` |
+| Approved | `3 / 26` |
+| Aggregated at | `2026-10-20 04:13 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -52,36 +52,36 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| T0 | Planning package and prerequisite defect | 2 | 0 | `IN_PROGRESS` |
-| T1 | Parity harness | 1 | 0 | `WAITING` |
-| T2 | Columnar raw panel port | 3 | 0 | `IN_PROGRESS` |
+| T0 | Planning package and prerequisite defect | 2 | 2 | `MERGED` |
+| T1 | Parity harness | 1 | 0 | `IN_PROGRESS` |
+| T2 | Columnar raw panel port | 3 | 1 | `WAITING` |
 | T3 | Columnar factor evaluator | 6 | 0 | `WAITING` |
 | T4 | Pipeline switch | 3 | 0 | `WAITING` |
 | T5 | Columnar compiler | 4 | 0 | `WAITING` |
 | T6 | Consumer migration | 3 | 0 | `WAITING` |
 | T7 | Legacy path removal | 3 | 0 | `WAITING` |
 | T9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **26** | **0** | **0%** |
+| **Total** |  | **26** | **3** | **12%** |
 <!-- PLAN:PHASES:END -->
 
 ## T0 — 기획·선행 결함
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T0-01` | 기획 패키지(spec·SEMANTICS·PLAN·WORKFLOW), progress 프로필 | 없음 | `IN_PROGRESS` | - |
-| [ ] | `T0-02` | 상한 배분 결정성(DEFECT-CT-02) | 없음 | `IN_PROGRESS` | - |
+| [x] | `T0-01` | 기획 패키지(spec·SEMANTICS·PLAN·WORKFLOW), progress 프로필 | 없음 | `MERGED` | #570 · 2차 APPROVE(1차 P2 3건 해소) · main 머지 0c902fd7(2026-10-20) |
+| [x] | `T0-02` | 상한 배분 결정성(DEFECT-CT-02) | 없음 | `MERGED` | #571 · APPROVE · main 머지 eb300722(2026-10-20) |
 
 ## T1 — 대조 하네스
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T1-01` | 대조 하네스 골격, `scripts/parity_tape.py` | T0-01, T0-02 | `PLANNED` | - |
+| [ ] | `T1-01` | 대조 하네스 골격, `scripts/parity_tape.py` | T0-01, T0-02 | `IN_PROGRESS` | - |
 
 ## T2 — 열 원시 포트
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T2-01` | `RawPanel` 포트, numpy 사용 규칙 | T1-01 | `IN_PROGRESS` | - |
+| [x] | `T2-01` | `RawPanel` 포트, numpy 사용 규칙 | T1-01 | `MERGED` | #574 · APPROVE(P3 5건은 T2-02로) · main 머지 49041ccc(2026-10-20) |
 | [ ] | `T2-02` | duckdb 열 로딩 GRID | T2-01 | `PLANNED` | - |
 | [ ] | `T2-03` | duckdb 열 로딩 LATEST·법인 축 | T2-02 | `PLANNED` | - |
 

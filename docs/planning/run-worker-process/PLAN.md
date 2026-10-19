@@ -2,15 +2,15 @@
 plan_version: 1
 project: run-worker-process
 project_status: IN_PROGRESS
-current_phase: W0
-current_pr: W0-01
-active_prs: [W0-01]
+current_phase: W1
+current_pr: W1-01
+active_prs: [W1-01]
 parallel_window: []
-last_updated: 2026-10-20T00:55:35+09:00
+last_updated: 2026-10-20T02:28:45+09:00
 planned_prs: 10
-merged_prs: 0
-approved_prs: 0
-progress_percent: 0
+merged_prs: 1
+approved_prs: 1
+progress_percent: 10
 ---
 
 # run 별도 프로세스 실행 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `W0` |
-| Current/next PR | `W0-01` |
-| Active PR | `W0-01` |
-| Progress | `0 / 10 merged (0%)` |
-| Approved | `0 / 10` |
-| Aggregated at | `2026-10-20 00:55 KST` |
+| Current phase | `W1` |
+| Current/next PR | `W1-01` |
+| Active PR | `W1-01` |
+| Progress | `1 / 10 merged (10%)` |
+| Approved | `1 / 10` |
+| Aggregated at | `2026-10-20 02:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -53,27 +53,27 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| W0 | Planning package and benchmark | 1 | 0 | `IN_PROGRESS` |
-| W1 | Computation boundary and worker process | 3 | 0 | `WAITING` |
+| W0 | Planning package and benchmark | 1 | 1 | `MERGED` |
+| W1 | Computation boundary and worker process | 3 | 0 | `IN_PROGRESS` |
 | W2 | Spare worker and memory guard | 2 | 0 | `WAITING` |
 | W3 | Default switch and SoT revision | 1 | 0 | `WAITING` |
 | W4 | Factor regression job | 1 | 0 | `WAITING` |
 | W5 | Interactive path decision gate | 1 | 0 | `WAITING` |
 | W9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **10** | **0** | **0%** |
+| **Total** |  | **10** | **1** | **10%** |
 <!-- PLAN:PHASES:END -->
 
 ## W0 — 기획
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `W0-01` | 기획 패키지, `backend/scripts/bench_run_isolation.py`, progress 프로필 | 없음 | `IN_PROGRESS` | - |
+| [x] | `W0-01` | 기획 패키지, `backend/scripts/bench_run_isolation.py`, progress 프로필 | 없음 | `MERGED` | #569 · 3차 APPROVE(1차 P2 7·2차 P2 1 해소) · main 머지 4cda11bf(2026-10-20) |
 
 ## W1 — 경계와 worker
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `W1-01` | 계산 경계 추출, `RunExecutionPort`, `run_thread` adapter(동작 불변) | W0-01 | `PLANNED` | - |
+| [ ] | `W1-01` | 계산 경계 추출, `RunExecutionPort`, `run_thread` adapter(동작 불변) | W0-01 | `IN_PROGRESS` | - |
 | [ ] | `W1-02` | `bootstrap/run_worker`, IPC v1, `run_worker_process` adapter(opt-in), Windows backend job | W1-01 | `PLANNED` | - |
 | [ ] | `W1-03` | 취소=종료(감독 스레드 종결), worker 고장, 부모 사망(Job Object), 판본 묶음 대조, e2e hold 게이트, 실패 코드 2개 | W1-02 | `PLANNED` | - |
 

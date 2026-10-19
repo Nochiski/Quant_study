@@ -242,6 +242,9 @@ def _cell_kind(
     다(#371). 가림 표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게
     둔다. 결측 사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도
     MASKED 다.
+
+    이 함수가 셀 종류 규칙의 한 벌이다. 열 경로(`_raw_panel.cell_rules`)는 (값 유무, 결측 사유,
+    가림) 조합마다 이 함수를 불러 만든 표를 쓴다.
     """
     if masked:
         return value, CellKind.MASKED

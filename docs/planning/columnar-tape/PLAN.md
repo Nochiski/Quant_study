@@ -2,15 +2,15 @@
 plan_version: 1
 project: columnar-tape
 project_status: IN_PROGRESS
-current_phase: T3
-current_pr: T3-01
-active_prs: [T3-01]
-parallel_window: [T2-02, T3-01]
-last_updated: 2026-10-20T04:59:33+09:00
+current_phase: T2
+current_pr: T2-02
+active_prs: [T2-02]
+parallel_window: [T2-02]
+last_updated: 2026-10-20T06:06:17+09:00
 planned_prs: 26
-merged_prs: 4
-approved_prs: 4
-progress_percent: 15
+merged_prs: 5
+approved_prs: 5
+progress_percent: 19
 ---
 
 # tape 열 지향 계산 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 15
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `T3` |
-| Current/next PR | `T3-01` |
-| Active PR | `T3-01` |
-| Progress | `4 / 26 merged (15%)` |
-| Approved | `4 / 26` |
-| Aggregated at | `2026-10-20 04:59 KST` |
+| Current phase | `T2` |
+| Current/next PR | `T2-02` |
+| Active PR | `T2-02` |
+| Progress | `5 / 26 merged (19%)` |
+| Approved | `5 / 26` |
+| Aggregated at | `2026-10-20 06:06 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -54,14 +54,14 @@ progress_percent: 15
 |---|---|---:|---:|---|
 | T0 | Planning package and prerequisite defect | 2 | 2 | `MERGED` |
 | T1 | Parity harness | 1 | 1 | `MERGED` |
-| T2 | Columnar raw panel port | 3 | 1 | `WAITING` |
-| T3 | Columnar factor evaluator | 6 | 0 | `IN_PROGRESS` |
+| T2 | Columnar raw panel port | 3 | 1 | `IN_PROGRESS` |
+| T3 | Columnar factor evaluator | 6 | 1 | `WAITING` |
 | T4 | Pipeline switch | 3 | 0 | `WAITING` |
 | T5 | Columnar compiler | 4 | 0 | `WAITING` |
 | T6 | Consumer migration | 3 | 0 | `WAITING` |
 | T7 | Legacy path removal | 3 | 0 | `WAITING` |
 | T9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **26** | **4** | **15%** |
+| **Total** |  | **26** | **5** | **19%** |
 <!-- PLAN:PHASES:END -->
 
 ## T0 — 기획·선행 결함
@@ -82,14 +82,14 @@ progress_percent: 15
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `T2-01` | `RawPanel` 포트, numpy 사용 규칙 | T1-01 | `MERGED` | #574 · APPROVE(P3 5건은 T2-02로) · main 머지 49041ccc(2026-10-20) |
-| [ ] | `T2-02` | duckdb 열 로딩 GRID | T2-01 | `PLANNED` | - |
+| [ ] | `T2-02` | duckdb 열 로딩 GRID | T2-01 | `IN_PROGRESS` | - |
 | [ ] | `T2-03` | duckdb 열 로딩 LATEST·법인 축 | T2-02 | `PLANNED` | - |
 
 ## T3 — 열 평가기
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `T3-01` | 열 평가기 골격 | T2-01 | `IN_PROGRESS` | - |
+| [x] | `T3-01` | 열 평가기 골격 | T2-01 | `MERGED` | #577 · APPROVE(P3 3건 반영) · main 머지 426d9ba1(2026-10-20) |
 | [ ] | `T3-02` | 시계열 끝점·min/max | T3-01 | `PLANNED` | - |
 | [ ] | `T3-03` | 정확 평균 커널 | T3-02 | `PLANNED` | - |
 | [ ] | `T3-04` | 정확 pstdev 커널 | T3-03 | `PLANNED` | - |

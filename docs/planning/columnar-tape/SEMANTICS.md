@@ -15,7 +15,8 @@
 | 관측은 (as_of, security_id) 엄격 증가 | 227-235 | 정렬 코드 열의 인접 비교 |
 | 선언되지 않은 날짜 금지(창은 날짜가 아니라 행 위치를 센다, D-003) | 236-253 | 행 날짜 코드가 선언 세션 범위 안 |
 | `previous_weight`와 숫자 값은 유한 | 255-284 | `np.isfinite`, 첫 위반 메시지 맞춤. 검증은 세 번 훑는다(정렬 → 미선언 날짜 → 행별 previous_weight·필드). 첫 위반은 이 순서로 정한다. 셀 생성 시점 검사(빈 field_id, 종류와 값 유무)는 객체에서 집합보다 먼저 일어나므로 열 검증도 맨 앞에서 한다 |
-| 값 타입은 float·str·None. bool은 위반(T2-01에서 좁힘) | 52, 행별 필드 검사 | 열은 숫자 `value`와 문자 `text` 코드만 담아 bool 칸이 없다. `from_observation_set`이 bool을 같은 메시지로 거절한다 |
+| 값 타입은 정확히 float·str·None. bool·int는 위반(T2-01에서 bool, T2-02에서 int를 좁힘) | 52, 행별 필드 검사 | 열은 숫자 `value`와 문자 `text` 코드만 담아 bool 칸이 없다. `from_observation_set`이 bool·int를 같은 메시지로 거절한다 |
+| 관측의 `fields`는 질의 `field_ids` 순서의 부분열이다(T2-02) | 계약 docstring. 집합은 질의를 몰라 생성 시 검사하지 않는다 | 열 순서가 곧 질의 순서다. `from_observation_set(raw, field_ids=...)`가 어긋난 관측을 계약 위반으로 거절하고, mock·duckdb는 계약 테스트가 고정한다 |
 | 실패는 `status`/`detail` 값 | 29-30 | 같다 |
 | 취소·진행은 선택 능력, 콜백은 스레드 안전 | 31-39, 288-322 | 열 포트도 같은 방식으로 능력 협상 |
 | `universe_member`·`sector_id`는 공개일 없음. as_of 시점 값은 어댑터 책임 | 18-28 | 같다 |
@@ -156,3 +157,4 @@
 - LATEST 원천은 `bisect_right(공개일들, cutoff) − 1`이다. 늦은 필드는 값을 비우고 MISSING으로 둔다(2014-2027). 법인 축은 `_corp_map`이다.
 - 셀 종류는 `_cell_kind`(232-253)가 정한다. 가림이 결측보다 먼저이고, `omitted_is_zero`면 0이다.
 - `security_id = ticker:span_seq`(170, 290-292). 숫자는 `float(Decimal)`(482-489)이다. 열 경로의 숫자 규칙은 spec D3 원시 숫자 행이다(비스케일 정수 ÷ 10^scale, 넘치면 `float(Decimal)`).
+- 열 경로(`_raw_panel.py`, T2-02)는 행 경로와 같은 `_grid_sql` 질의를 열 받기 투영으로 감싸 읽고, 셀 종류는 `_cell_kind`를 조합마다 평가한 표로 정한다. 질의 앞 판정(`_raw_request`)과 읽는 범위(`_fetch_range`)도 두 경로가 함께 쓴다.

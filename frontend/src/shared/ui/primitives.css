@@ -205,6 +205,20 @@ textarea.ui-input {
   opacity: 0.5;
 }
 
+/* 수익 방향: 부호와 낭독 문구가 함께 가므로 색은 보조 표식이다 */
+.ui-signed {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ui-signed--up {
+  color: var(--return-up);
+}
+
+.ui-signed--down {
+  color: var(--return-down);
+}
+
 /* Badge: tone colour plus a glyph so status never relies on colour alone */
 .ui-badge {
   display: inline-flex;

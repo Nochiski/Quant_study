@@ -50,6 +50,11 @@
   --status-info: #2258b8;
   --status-info-soft: #e6eefc;
 
+  /* 수익 방향 — 국내 관례대로 상승은 빨강, 하락은 파랑이다. 성공·오류 상태색과 역할이 달라 따로 두고,
+   * 화면은 부호와 낭독 문구를 함께 붙여 색만으로 방향을 전하지 않는다. */
+  --return-up: #c8322b;
+  --return-down: #1f5fcc;
+
   /* chart series on the light canvas (>= 3:1 for lines, legend text uses the same ink) */
   --chart-series-1: #0b6a60;
   --chart-series-2: #2258b8;
@@ -169,6 +174,9 @@
   --status-error-border: #8a4640;
   --status-info: #86b3ff;
   --status-info-soft: #1d3150;
+
+  --return-up: #ff8a80;
+  --return-down: #8fb2ff;
 
   /* chart series tuned for the dark canvas */
   --chart-series-1: #4fc3b1;

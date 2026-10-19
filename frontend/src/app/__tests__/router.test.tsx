@@ -171,6 +171,23 @@ const openTrialLedger = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 const server = setupServer(
+  http.get(`${API}/api/v1/experiments`, () =>
+    HttpResponse.json({
+      items: [],
+      next_after: null,
+      slots: { running: 0, total: 2 },
+      max_priority: 10,
+    }),
+  ),
+  http.get(`${API}/api/v1/strategies/:strategyId/trials`, ({ params }) =>
+    HttpResponse.json({
+      lineage_id: params.strategyId,
+      merged_lineage_ids: [],
+      trial_count: 0,
+      trials: [],
+      blocked: [],
+    }),
+  ),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json(
       { detail: { code: "strategy.draft.not_found" } },
@@ -604,7 +621,7 @@ describe("App Shell routes", () => {
     const user = userEvent.setup();
     mount("/research/strategies");
     expect(
-      await screen.findByRole("heading", { name: "전략 이력" }),
+      await screen.findByRole("heading", { name: "전략 세션" }),
     ).toBeInTheDocument();
     expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "최신본 열기" })).toHaveAttribute(
@@ -628,6 +645,88 @@ describe("App Shell routes", () => {
     expect(
       within(revisions).getAllByRole("link", { name: "Diff" })[0],
     ).toHaveAttribute("href", expect.stringContaining("compare=true"));
+  });
+
+  it("shows each strategy's latest result, trial count and waiting experiments in the session list", async () => {
+    const user = userEvent.setup();
+    const saved = (strategyId: string, status: "completed" | "failed") => {
+      const summary = backtestSummary({ runId: `run-${strategyId}`, saved: true, status });
+      return {
+        ...summary,
+        run: { ...summary.run, stage: status === "failed" ? "data" : "completed" },
+        strategy_provenance: { ...summary.strategy_provenance, strategy_id: strategyId },
+      };
+    };
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({
+          items: ["good", "bad"].map((strategyId) => ({
+            strategy_id: strategyId,
+            latest_revision: 2,
+            requires_upgrade: false,
+            title: `${strategyId} strategy`,
+            spec_hash: "a".repeat(64),
+            updated_at: "2026-09-04T00:00:00Z",
+          })),
+          total: 2,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+      http.get(`${API}/api/v1/backtests`, ({ request }) => {
+        const strategyId = new URL(request.url).searchParams.get("strategy_id") ?? "good";
+        return HttpResponse.json({
+          items: [saved(strategyId, strategyId === "bad" ? "failed" : "completed")],
+          total: 1,
+          offset: 0,
+          limit: 1,
+        });
+      }),
+      http.get(`${API}/api/v1/strategies/:strategyId/trials`, ({ params }) =>
+        HttpResponse.json({
+          lineage_id: params.strategyId,
+          merged_lineage_ids: [],
+          trial_count: params.strategyId === "good" ? 3 : 1,
+          trials: [],
+          blocked: [],
+        }),
+      ),
+      http.get(`${API}/api/v1/experiments`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              record: {
+                experiment_id: "exp-done",
+                created_at: "2026-09-05T00:00:00Z",
+                run: { strategy_source: { kind: "saved_revision", strategy_id: "good", revision: 2 } },
+              },
+              status: "completed",
+              finished: true,
+              settled: true,
+              selections: [],
+              trial_counts: { completed: 4 },
+            },
+          ],
+          next_after: null,
+          slots: { running: 0, total: 2 },
+          max_priority: 10,
+        }),
+      ),
+    );
+    mount("/research/strategies");
+    const good = (await screen.findByRole("link", { name: "good strategy" })).closest("tr")!;
+    expect(screen.getByRole("link", { name: "good strategy" })).toHaveAttribute(
+      "href",
+      "/research/strategies/good",
+    );
+    await waitFor(() => expect(good).toHaveTextContent("12.34%"));
+    expect(within(good).getByText("3")).toBeInTheDocument();
+    expect(within(good).getByText("후보 선택 대기 1")).toBeInTheDocument();
+    const bad = screen.getByRole("link", { name: "bad strategy" }).closest("tr")!;
+    expect(await within(bad).findByText("실패")).toBeInTheDocument();
+    expect(within(bad).getByText(/단계에서 실패/)).toBeInTheDocument();
+    await user.click(screen.getByText("계열 시도 수가 무엇인가요?"));
+    expect(screen.getByText(/DSR로 보정할 때 이 수를 씁니다/)).toBeVisible();
   });
 
   it("marks frozen schema 1.0 strategies and revisions in the history lists", async () => {
@@ -1414,8 +1513,8 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByRole("heading", { name: "백테스트 실행" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "전략" }));
-    await screen.findByRole("heading", { name: "전략 이력" });
+    await user.click(screen.getByRole("link", { name: "전략 세션" }));
+    await screen.findByRole("heading", { name: "전략 세션" });
     history.back();
     await waitFor(() =>
       expect(history.location.pathname).toBe("/research/backtests/run-1"),

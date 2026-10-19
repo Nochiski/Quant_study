@@ -29,3 +29,4 @@ export type { RunParameterContext } from "./model/use-run-parameters";
 export { RunParameterSelection } from "./ui/run-parameter-selection";
 
 export { BacktestFactorRegression } from "./ui/backtest-factor-regression";
+export { RunHeadline } from "./ui/run-headline";

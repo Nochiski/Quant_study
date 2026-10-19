@@ -1,14 +1,21 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 
-import { trialLedgerQuery } from "../../../entities/backtest";
+import {
+  backtestHistoryQuery,
+  RUN_STATUS,
+  RunHeadline,
+  runStageLabel,
+  trialLedgerQuery,
+} from "../../../entities/backtest";
+import { experimentsQuery, type Experiment } from "../../../entities/experiment";
 import {
   strategiesQuery,
   strategyRevisionsQuery,
   type StrategySummary,
 } from "../../../entities/strategy";
 import { displayTime } from "../../../shared/lib/display-time";
-import { t } from "../../../shared/config";
+import { t, tFill } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import {
   Badge,
@@ -227,7 +234,62 @@ const StrategyHistory = ({
   );
 };
 
-const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
+/** 그 전략의 가장 최근 단일 백테스트 한 건. 숫자는 목록 응답의 `headline` 그대로다(결정 1). */
+const LatestResult = ({ strategyId }: { strategyId: string }) => {
+  const latest = useQuery(backtestHistoryQuery({ strategyId, kind: "single", limit: 1 }));
+  const run = latest.data?.items[0];
+  if (latest.isPending) return <span role="status">{t("page.loading")}</span>;
+  if (latest.isError) return <span>{t("history.strategies.resultError")}</span>;
+  if (run === undefined) return <span>{t("history.strategies.noRun")}</span>;
+  if (run.run.status === "failed")
+    return (
+      <span className="data-list-page__actions">
+        <Badge tone="error">{t("history.strategies.failed")}</Badge>
+        <small>{tFill("history.session.failedAt", { stage: runStageLabel(run.run.stage) })}</small>
+      </span>
+    );
+  if (RUN_STATUS[run.run.status].active)
+    return <Badge tone="info">{t("history.strategies.running")}</Badge>;
+  return <RunHeadline headline={run.headline} />;
+};
+
+const TrialCount = ({ strategyId }: { strategyId: string }) => {
+  const ledger = useQuery(trialLedgerQuery(strategyId));
+  return <>{ledger.isSuccess ? ledger.data.trial_count : "—"}</>;
+};
+
+const strategyExperiments = (experiments: readonly Experiment[], strategyId: string) =>
+  experiments.filter((experiment) => {
+    const source = experiment.record.run.strategy_source;
+    return source?.kind === "saved_revision" && source.strategy_id === strategyId;
+  });
+
+/** 진행 중 작업: 끝나지 않은 실험 수와 후보 선택을 기다리는 실험 수. 실험 상태는 backend 가 파생했다. */
+const ActiveWork = ({ experiments }: { experiments: readonly Experiment[] }) => {
+  const running = experiments.filter((experiment) => !experiment.finished).length;
+  const awaiting = experiments.filter(
+    (experiment) => experiment.status === "completed" && experiment.selections.length === 0,
+  ).length;
+  if (running === 0 && awaiting === 0) return <>—</>;
+  return (
+    <span className="data-list-page__actions">
+      {running > 0 ? (
+        <Badge tone="info">{tFill("history.strategies.experimentsRunning", { count: running })}</Badge>
+      ) : null}
+      {awaiting > 0 ? (
+        <Badge tone="info">{tFill("history.strategies.awaitingCandidate", { count: awaiting })}</Badge>
+      ) : null}
+    </span>
+  );
+};
+
+const StrategyRow = ({
+  strategy,
+  experiments,
+}: {
+  strategy: StrategySummary;
+  experiments: readonly Experiment[];
+}) => {
   const [expanded, setExpanded] = useState(false);
   const historyId = useId();
   const strategyLabel = strategy.title
@@ -239,7 +301,12 @@ const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
       <tr>
         <td>
           <span className="data-list-page__title">
-            <strong>{strategy.title || t("page.revision.untitled")}</strong>
+            <Link
+              to="/research/strategies/$strategyId"
+              params={{ strategyId: strategy.strategy_id }}
+            >
+              <strong>{strategy.title || t("page.revision.untitled")}</strong>
+            </Link>
             <code>{strategy.strategy_id}</code>
           </span>
         </td>
@@ -248,20 +315,42 @@ const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
           {strategy.requires_upgrade ? (
             <>
               {" "}
-              <Badge tone="warn">{t("history.frozen")}</Badge>
+              <Badge tone="warn">{t("history.frozen")}</Badge>{" "}
+              <Link
+                className="ui-button ui-button--secondary ui-button--small"
+                to="/research/strategies/$strategyId/revisions/$revision"
+                params={{
+                  strategyId: strategy.strategy_id,
+                  revision: String(strategy.latest_revision),
+                }}
+                search={{}}
+              >
+                {t("history.session.upgrade")}
+              </Link>
             </>
           ) : null}
         </td>
-        <td>{displayTime(strategy.updated_at)}</td>
         <td>
-          <code className="data-list-page__hash" title={strategy.spec_hash}>
-            {strategy.spec_hash.slice(0, 12)}
-          </code>
+          <LatestResult strategyId={strategy.strategy_id} />
         </td>
+        <td>
+          <TrialCount strategyId={strategy.strategy_id} />
+        </td>
+        <td>
+          <ActiveWork experiments={experiments} />
+        </td>
+        <td>{displayTime(strategy.updated_at)}</td>
         <td>
           <span className="data-list-page__actions">
             <Link
               className="ui-button ui-button--primary ui-button--small"
+              to="/research/strategies/$strategyId"
+              params={{ strategyId: strategy.strategy_id }}
+            >
+              {t("history.strategies.openSession")}
+            </Link>
+            <Link
+              className="ui-button ui-button--secondary ui-button--small"
               to="/research/strategies/$strategyId/revisions/$revision"
               params={{
                 strategyId: strategy.strategy_id,
@@ -292,7 +381,7 @@ const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
       </tr>
       {expanded ? (
         <tr>
-          <td colSpan={5} className="data-list-page__nested">
+          <td colSpan={7} className="data-list-page__nested">
             <div id={historyId} role="region" aria-label={historyLabel}>
               <StrategyHistory
                 strategyId={strategy.strategy_id}
@@ -311,6 +400,9 @@ export const StrategiesPage = () => {
   const navigate = useNavigate();
   const offset = search.offset ?? 0;
   const strategies = useQuery(strategiesQuery({ offset, limit: PAGE_SIZE }));
+  // 실험 목록은 한 번만 읽어 전략마다 나눈다. 첫 쪽(최근 실험)만 본다.
+  const experiments = useInfiniteQuery(experimentsQuery());
+  const experimentItems = experiments.data?.pages.flatMap((page) => page.items) ?? [];
   const correctedOffset =
     strategies.data !== undefined &&
     offset > 0 &&
@@ -375,6 +467,10 @@ export const StrategiesPage = () => {
         />
       ) : (
         <div className="data-list-page__panel">
+          <details className="data-list-page__filter">
+            <summary>{t("history.strategies.trialsHelp")}</summary>
+            <p>{t("history.strategies.trialsHelpBody")}</p>
+          </details>
           <div className="data-list-page__scroll">
             <table className="data-list-page__table">
               <caption className="sr-only">
@@ -384,14 +480,20 @@ export const StrategiesPage = () => {
                 <tr>
                   <th scope="col">{t("history.strategies.strategy")}</th>
                   <th scope="col">{t("history.strategies.latest")}</th>
+                  <th scope="col">{t("history.strategies.result")}</th>
+                  <th scope="col">{t("history.strategies.trials")}</th>
+                  <th scope="col">{t("history.strategies.active")}</th>
                   <th scope="col">{t("history.strategies.updated")}</th>
-                  <th scope="col">{t("history.strategies.hash")}</th>
                   <th scope="col">{t("history.actions")}</th>
                 </tr>
               </thead>
               <tbody>
                 {strategies.data.items.map((strategy) => (
-                  <StrategyRow key={strategy.strategy_id} strategy={strategy} />
+                  <StrategyRow
+                    key={strategy.strategy_id}
+                    strategy={strategy}
+                    experiments={strategyExperiments(experimentItems, strategy.strategy_id)}
+                  />
                 ))}
               </tbody>
             </table>

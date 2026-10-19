@@ -42,6 +42,7 @@ export type {
   WalkForwardReport,
 } from "../../shared/api";
 
+export { TrialProgress } from "./ui/trial-progress";
 export { continuousAccountErrorKey } from "./model/continuous-account-copy";
 
 export { capacityReportQuery, useCapacityPreview, useCreateCapacity } from "./model/capacity-queries";

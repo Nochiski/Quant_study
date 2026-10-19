@@ -9,8 +9,9 @@ SoT: 팩터 값의 계산자는 `application/portfolio_design` 하나이고, 횡
 남긴다. 값 구간 규칙(`_value_spans`), 진행 가중치, 예외 타입은 `_evaluation.py` 의 것을 그대로 쓰고
 다시 적지 않는다.
 
-T3-01 범위는 field·constant·parameter·unary(negate·lag)·binary·comparison·conditional 이다.
-time_series(T3-02~T3-04)·cross_sectional·group(T3-05)과 `cross_sectional_median` 채움(T3-05)은
+T3-01 범위는 field·constant·parameter·unary(negate·lag)·binary·comparison·conditional 이고, T3-02 가
+time_series 의 momentum·delta·min·max 를 더했다(창 커널은 `_panel_time_series.py`). time_series 의
+mean·std(T3-03·T3-04)·cross_sectional·group(T3-05)과 `cross_sectional_median` 채움(T3-05)은
 `UnsupportedPanelEvaluationError` 로 거절한다.
 """
 
@@ -47,9 +48,11 @@ from ._nodes import (
     GroupNode,
     MissingPolicy,
     ParameterNode,
+    TimeSeriesNode,
     UnaryNode,
     UnaryOperator,
 )
+from ._panel_time_series import WINDOW_TIME_SERIES_OPERATORS, time_series_window
 from ._planning import ResolvedFactorParameter
 from ._validation import node_dependencies
 
@@ -261,7 +264,7 @@ def evaluate_panel_nodes(
     return FactorNodeCache(evaluator.columns)
 
 
-_UNSUPPORTED_KINDS = frozenset({"time_series", "cross_sectional", "group"})
+_UNSUPPORTED_KINDS = frozenset({"cross_sectional", "group"})
 
 
 class _PanelEvaluator:
@@ -300,8 +303,13 @@ class _PanelEvaluator:
             ) from error
         if node.kind in _UNSUPPORTED_KINDS:
             raise UnsupportedPanelEvaluationError(
-                "columnar evaluator does not implement this node yet (T3-02~T3-05) — "
+                "columnar evaluator does not implement this node yet (T3-05) — "
                 f"node_id={node_id!r} kind={node.kind!r}"
+            )
+        if isinstance(node, TimeSeriesNode) and node.operator not in WINDOW_TIME_SERIES_OPERATORS:
+            raise UnsupportedPanelEvaluationError(
+                "columnar evaluator does not implement this time series operator yet "
+                f"(T3-03~T3-04) — node_id={node_id!r} operator={node.operator.value!r}"
             )
         dependencies = node_dependencies(node)
         inputs = [self.evaluate(dependency) for dependency in dependencies]
@@ -378,6 +386,8 @@ class _PanelEvaluator:
             return self._compare(node.operator, inputs[0], inputs[1], rows)
         if isinstance(node, ConditionalNode):
             return self._conditional(node, *inputs, rows=rows)
+        if isinstance(node, TimeSeriesNode):
+            return self._time_series(node, inputs[0], rows)
         raise UnsupportedPanelEvaluationError(  # pragma: no cover - 종류는 위에서 모두 갈랐다
             f"columnar evaluator has no rule for the node — node={node!r}"
         )
@@ -476,6 +486,27 @@ class _PanelEvaluator:
         source_row = panel.order[origin]
         values = self._map(rows, source.values.dtype.type, lambda s: source.values[source_row[s]])
         return values, reached & source.valid[source_row]
+
+    def _time_series(
+        self, node: TimeSeriesNode, source: FactorNodeColumn, rows: int
+    ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+        # bool 은 숫자가 아니라 창이 채워지지 않는다(`_as_number`)
+        if source.boolean:
+            return np.zeros(rows, np.float64), np.zeros(rows, bool)
+        weight = _node_progress_weight(node)
+        return time_series_window(
+            node,
+            source.values,  # pyright: ignore[reportArgumentType]  # reason: bool 열은 위에서 걸렀다
+            source.valid,
+            order=self._panel.order,
+            position=self._panel.position,
+            chunks=lambda count: _chunks(count, self._checkpoint),
+            checkpoint=self._checkpoint,
+            # 노드 안 진행도 객체 경로처럼 올린다. 끝값은 노드 완료 값과 같아 단조다
+            advance=lambda fraction: self._progress(
+                (self._completed_weight + fraction * weight) / self._total_weight
+            ),
+        )
 
     def _masked_in(self, spans: _Spans) -> NDArray[np.bool_]:
         """값의 시점 구간에 가린 칸이 드는 칸(`_NodeEvaluator._masked_in` 의 열판).

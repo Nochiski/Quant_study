@@ -273,7 +273,8 @@ class EvaluatorCase:
 
 
 def _extra_graphs() -> list[FactorGraph]:
-    """판본 고정 묶음에 없는 조합: 넘침, 파라미터, 시계열→횡단면, lag 뒤 그룹 순위, 원소·lag."""
+    """판본 고정 묶음에 없는 조합: 넘침, 파라미터, 시계열→횡단면, lag 뒤 그룹 순위, 원소·lag,
+    시계열 끝점·min/max."""
     x = FieldNode("x", "x", "field")
     y = FieldNode("y", "y", "field")
     return [
@@ -303,6 +304,7 @@ def _extra_graphs() -> list[FactorGraph]:
             "out",
         ),
         *_elementwise_graphs(x, y),
+        *_time_series_graphs(x, y),
     ]
 
 
@@ -364,6 +366,60 @@ def _elementwise_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
         (x, y, ratio, square, binary("out", BinaryOperator.ADD, "ratio", "square")),
         (x, y, ratio, square, binary("out", BinaryOperator.SUBTRACT, "square", "ratio")),
         (ConstantNode("out", 1.5, "constant"),),
+    ]
+    return [FactorGraph(graph, "out") for graph in nodes]
+
+
+def _time_series_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
+    """열 평가기 시계열 끝점·min/max(T3-02)가 다루는 조합.
+
+    창 1·2(양끝만)·20(상장 S06·폐지 S07·결측 연속 S04 경계에 걸친다), lag 0·5, S03 의 ±0 동점과
+    first == 0, 시계열 → 시계열·이항 체인, bool 입력을 덮는다. 창 3·lag 1 은 판본 고정 묶음에 있다.
+    """
+    operators = (
+        TimeSeriesOperator.MOMENTUM,
+        TimeSeriesOperator.DELTA,
+        TimeSeriesOperator.MINIMUM,
+        TimeSeriesOperator.MAXIMUM,
+    )
+
+    def ts(
+        node_id: str, operator: TimeSeriesOperator, source: str, window: int, lag: int = 0
+    ) -> TimeSeriesNode:
+        return TimeSeriesNode(node_id, operator, source, window, "time_series", lag=lag)
+
+    nodes: list[tuple[ExpressionNode, ...]] = [
+        *((x, ts("out", operator, "x", 2)) for operator in operators),
+        *((x, ts("out", operator, "x", 20, lag=5)) for operator in operators),
+        (x, ts("out", TimeSeriesOperator.MOMENTUM, "x", 1, lag=3)),
+        (
+            x,
+            ts("low", TimeSeriesOperator.MINIMUM, "x", 4),
+            ts("out", TimeSeriesOperator.DELTA, "low", 3, lag=2),
+        ),
+        (
+            x,
+            ts("high", TimeSeriesOperator.MAXIMUM, "x", 3, lag=1),
+            ts("out", TimeSeriesOperator.MOMENTUM, "high", 5),
+        ),
+        # 오늘 값과 건너뛴 창을 섞으면 가림 구간이 둘을 덮는다
+        (
+            x,
+            ts("mom", TimeSeriesOperator.MOMENTUM, "x", 6, lag=2),
+            BinaryNode("out", BinaryOperator.SUBTRACT, "x", "mom", "binary"),
+        ),
+        (
+            x,
+            y,
+            ts("drop", TimeSeriesOperator.DELTA, "y", 3),
+            BinaryNode("out", BinaryOperator.DIVIDE, "drop", "x", "binary"),
+        ),
+        (
+            x,
+            y,
+            ComparisonNode("gate", FactorComparisonOperator.GREATER_THAN, "x", "y", "comparison"),
+            ts("out", TimeSeriesOperator.MAXIMUM, "gate", 2),
+        ),
     ]
     return [FactorGraph(graph, "out") for graph in nodes]
 

@@ -21,9 +21,9 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | 페르소나 | `구현됨-e2e` | `구현됨-e2e없음` | `예정` | `미계획` | 합계 |
 |---|---:|---:|---:|---:|---:|
 | 김철수 | 12 | 0 | 1 | 0 | 13 |
-| 정동민 | 14 | 0 | 0 | 0 | 14 |
+| 정동민 | 15 | 0 | 0 | 0 | 15 |
 | 한상목 | 16 | 0 | 0 | 1 | 17 |
-| 합계 | 42 | 0 | 1 | 1 | 44 |
+| 합계 | 43 | 0 | 1 | 1 | 45 |
 
 ### 스토리별 추적
 
@@ -56,6 +56,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-12 | 정동민 | AI 결과 설명에서 검증 근거와 한계를 함께 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 AI에게 결과를 믿어도 되는지 물으면 검증 카드의 PSR·DSR 원래 수치와 조회 시점을 함께 답한다<br>`frontend/e2e/stories/dm.result-validation-ai.spec.ts` :: US-DM-12 후보로 고른 뒤 계열 시도가 늘어난 결과에서 AI는 지금 원장 기준과 고를 당시 기준을 나눠 답한다 |
 | US-DM-13 | 정동민 | 새 전략을 단계별 안내를 따라 만든다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.strategy-guide.spec.ts` :: US-DM-13 새 전략을 단계별로 고르면 같은 전략 문서가 만들어지고 편집기에서 이어 쓴다 |
 | US-DM-14 | 정동민 | 화면 테마를 설정에서 고른다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.settings-theme.spec.ts` :: US-DM-14 설정에서 어둡게를 고르면 바로 바뀌고 새로고침 뒤에도 유지된다 |
+| US-DM-15 | 정동민 | 앱을 열면 이어서 할 일과 돌고 있는 일을 먼저 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.research-home.spec.ts` :: US-DM-15 연구 홈은 최근 결과와 작업 기록을 보이고 계좌 칸에는 숫자 없이 미연결만 말한다 |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |

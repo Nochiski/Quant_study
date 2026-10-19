@@ -540,13 +540,108 @@ describe("App Shell routes", () => {
     ).toBeInTheDocument();
   });
 
-  it("redirects the bare root to the new strategy route", async () => {
+  it("opens the research home at the bare root and guides a first strategy when none exist", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({ items: [], total: 0, offset: 0, limit: 10 }),
+      ),
+    );
     const history = mount("/");
-    await screen.findByRole("heading", { name: "새 전략" });
-    expect(history.location.pathname).toBe("/research/strategies/new");
-    expect(screen.queryByRole("tab", { name: "JSON" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Form" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "그래프" })).toBeEnabled();
+    await screen.findByText("첫 전략을 만들어 보세요");
+    expect(history.location.pathname).toBe("/");
+    expect(screen.getByRole("link", { name: "새 전략 만들기" })).toHaveAttribute(
+      "href",
+      "/research/strategies/new?guide=true",
+    );
+    const account = screen.getByRole("region", { name: /계좌 손익/u });
+    expect(account).toHaveTextContent("미연결");
+    expect(account.textContent).not.toMatch(/\d/u);
+  });
+
+  it("lists waiting candidates, failed runs and unsaved drafts on the research home", async () => {
+    window.localStorage.setItem(
+      "strategy-workbench.draft.new",
+      JSON.stringify({
+        key: "new",
+        format: "yaml",
+        source: "title: 초안",
+        strategyId: null,
+        baseRevision: null,
+        baseSpecHash: null,
+        schemaVersion: "1.2",
+        savedAt: "2026-09-06T00:00:00Z",
+      }),
+    );
+    const failed = backtestSummary({ runId: "run-failed", saved: true, status: "failed" });
+    server.use(
+      http.get(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...failed,
+              run: {
+                ...failed.run,
+                stage: "data",
+                error: "boom",
+                error_code: "backtest.run.no_positions",
+              },
+            },
+            backtestSummary({ runId: "run-done", saved: true }),
+          ],
+          total: 2,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+      http.get(`${API}/api/v1/experiments`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              record: {
+                experiment_id: "exp-waiting-1",
+                created_at: "2026-09-05T00:00:00Z",
+                run: { strategy_source: { kind: "saved_revision", strategy_id: "s1", revision: 2 } },
+              },
+              status: "completed",
+              finished: true,
+              settled: true,
+              selections: [],
+              trial_counts: { completed: 4 },
+            },
+          ],
+          next_after: null,
+          slots: { running: 1, total: 4 },
+          max_priority: 10,
+        }),
+      ),
+    );
+    try {
+      mount("/");
+      const todo = await screen.findByRole("region", { name: "오늘 이어서 할 일" });
+      expect(await within(todo).findByText("후보 선택 대기")).toBeInTheDocument();
+      expect(within(todo).getByRole("link", { name: "후보 보기" })).toHaveAttribute(
+        "href",
+        "/research/experiments/exp-waiting-1#candidate",
+      );
+      expect(await within(todo).findByText(/s1 · v2 백테스트가 .* 단계에서 실패했어요/u)).toBeInTheDocument();
+      expect(within(todo).getByRole("link", { name: "원인 보기" })).toHaveAttribute(
+        "href",
+        "/research/backtests/run-failed",
+      );
+      expect(within(todo).getByText("저장 안 됨")).toBeInTheDocument();
+      expect(within(todo).getByRole("link", { name: "이어서 편집" })).toHaveAttribute(
+        "href",
+        "/research/strategies/new",
+      );
+      expect(screen.getByText("동시 실행 슬롯 1 / 4", { exact: false })).toBeInTheDocument();
+      const results = screen.getByRole("region", { name: "최근 결과" });
+      await waitFor(() => expect(results).toHaveTextContent("12.34%"));
+      expect(screen.getByRole("region", { name: "작업 기록" })).toHaveTextContent(
+        "주문·체결 운영 로그가 아닙니다",
+      );
+    } finally {
+      window.localStorage.removeItem("strategy-workbench.draft.new");
+    }
   });
 
   it("moves legacy bookmarks to a clean YAML draft route", async () => {

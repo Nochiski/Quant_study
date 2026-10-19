@@ -1,5 +1,6 @@
 type NavigationIconName =
   | "research"
+  | "home"
   | "strategies"
   | "backtests"
   | "experiments"
@@ -12,6 +13,7 @@ type NavigationIconName =
 
 const PATHS: Record<NavigationIconName, string> = {
   research: "M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M8 15h8",
+  home: "M4 11 12 4l8 7M6 9.5V20h4v-6h4v6h4V9.5",
   strategies: "M4 18l5-6 4 3 7-10M14 5h6v6",
   backtests: "M4 4v16h16M8 16v-5M12 16V7M16 16v-6",
   experiments: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",

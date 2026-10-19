@@ -36,10 +36,13 @@ export const LineChart = ({
   title,
   series,
   emptyText = t("backtest.result.chartEmpty"),
+  summary,
 }: {
   title: string;
   series: ChartSeries[];
   emptyText?: string;
+  /** 화면 읽기용 한 문장 요약. 없으면 제목으로 이름을 단다. */
+  summary?: string;
 }) => {
   const finite = series.flatMap((item) =>
     item.values.filter((value): value is number => value !== null),
@@ -71,7 +74,7 @@ export const LineChart = ({
         </div>
       </header>
       <svg
-        aria-label={`${title} ${t("backtest.result.chart")}`}
+        aria-label={summary ?? `${title} ${t("backtest.result.chart")}`}
         preserveAspectRatio="none"
         role="img"
         viewBox="0 0 620 180"

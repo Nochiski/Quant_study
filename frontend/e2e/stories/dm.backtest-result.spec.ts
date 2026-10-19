@@ -24,24 +24,21 @@ import {
 } from "../workbench-helpers";
 
 /**
- * 결과 상단에 고정으로 보이는 일곱 지표의 이름. 이름은 backend Metric Registry가 소유하고 화면은
- * 그대로 옮긴다(SoT 규칙). 이름이 바뀌면 스토리 수용 기준도 함께 고친다.
+ * "결과 한눈에"의 지표 카드 이름. 이름은 backend Metric Registry가 소유하고 화면은 그대로 옮긴다(SoT
+ * 규칙). 이름이 바뀌면 스토리 수용 기준도 함께 고친다. 이 실행은 벤치마크 없이 돌아 Excess return은
+ * 사용 불가 사유를 보이므로 값 검사에서 뺀다. 최종 평가액 카드는 계좌 보고서 값과 따로 대조한다.
  */
-const HIGHLIGHT_LABELS = [
+const SUMMARY_LABELS = [
   "Total return",
   "Sharpe ratio",
-  "Sharpe standard error",
   "Maximum drawdown",
-  "Calmar ratio",
-  "Turnover",
-  "Closed trades",
 ] as const;
 
 /** 종료일 1년 안쪽의 OOS 시작일. 이 구간의 CAGR·칼마는 연율화하지 않는다(#274). */
 const SHORT_OOS_START = "2026-03-02";
 
 test(
-  "US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 일곱 개와 자산 곡선이 보인다",
+  "US-DM-04 저장한 전략을 백테스트하면 결과 한눈에·두 축 카드·자산 곡선이 보인다",
   { tag: ["@story", "@US-DM-04"] },
   async ({ page }, testInfo) => {
     test.setTimeout(180_000);
@@ -250,15 +247,43 @@ test(
       await expect(orderEvents.getByRole("table")).toBeVisible();
     }
 
-    const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
-    // 지표마다 이름 바로 뒤에 서버가 계산한 값이 숫자로 붙는다. 값이 없으면 "계산 불가"라 여기서 걸린다.
-    for (const label of HIGHLIGHT_LABELS)
+    // 머리말에서 다음 행동으로 바로 간다(RD-07-E). 저장 리비전으로 돈 실행이라 "규칙 고치기"가 있다.
+    for (const name of ["동일 설정 재실행", "AI에게 결과 묻기"])
+      await expect(page.getByRole("button", { name })).toBeVisible();
+    await expect(page.getByRole("link", { name: "규칙 고치기" })).toHaveAttribute(
+      "href",
+      /\/research\/strategies\/[^/]+\/revisions\/1$/u,
+    );
+
+    const highlights = result.getByRole("region", { name: "결과 한눈에" });
+    // 지표마다 이름 바로 뒤에 서버가 계산한 값이 숫자로 붙는다. 수익 방향이 있는 값은 낭독 문구와 부호가
+    // 먼저 온다. 값이 없으면 "계산 불가"라 여기서 걸린다.
+    for (const label of SUMMARY_LABELS)
       await expect(
         highlights.getByText(label, { exact: true }).locator("xpath=.."),
-      ).toHaveText(new RegExp(`^${label}\\s*[-₩]?\\d`, "u"));
+      ).toHaveText(new RegExp(`^${label}\\s*(?:상승\\s*\\+|하락\\s*−|-)?\\d`, "u"));
     await expect(
-      result.getByRole("img", { name: "Equity curve 차트" }),
+      highlights.getByText("Excess return", { exact: true }).locator("xpath=.."),
+    ).toContainText("벤치마크 값이 비어 계산할 수 없습니다");
+    await expect(
+      highlights.getByText("최종 평가액", { exact: true }).locator("xpath=.."),
+    ).toContainText(
+      `₩${accountSummary.final_equity.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}`,
+    );
+    // 두 축 카드: 손익비는 원문과 정의를 함께, 손익 구조는 실현 통계라는 한계를 함께 보인다(RD-07-C).
+    await expect(
+      result.getByRole("region", { name: "종목 선정이 효과가 있었나" }),
     ).toBeVisible();
+    const pnl = result.getByRole("region", { name: "손익 구조는 어땠나" });
+    await expect(pnl).toContainText("profit factor · 이익 합 ÷ 손실 합");
+    await expect(pnl).toContainText(
+      "실제로 청산된 거래로 계산한 실현 통계예요. 지금 전략에는 손절·익절 규칙이 없어서 목표 손익비는 표시하지 않아요.",
+    );
+    // 자산 곡선과 낙폭은 같은 가로축으로 붙어 있고 그래프마다 한 문장 요약이 있다(RD-07-D).
+    const curves = result.getByRole("region", { name: "자산 곡선과 낙폭" });
+    await expect(curves.getByRole("img", { name: /^자산 곡선\. /u })).toBeVisible();
+    await expect(curves.getByRole("img", { name: /^낙폭\. /u })).toBeVisible();
+    await expect(curves.getByText("전략", { exact: true })).toBeVisible();
     // 목차의 키보드 선택은 원본 표로 초점을 옮긴다. 긴 결과를 탭으로 끝까지 훑지 않아도 된다.
     const rawMetricsLink = result
       .getByRole("navigation", { name: "결과 둘러보기" })
@@ -312,7 +337,7 @@ test(
       rawMetrics.getByRole("table", { name: "Raw metric table", exact: true }),
     ).toBeVisible();
     await expect(
-      result.getByRole("img", { name: "Equity curve 차트" }),
+      result.getByRole("img", { name: /^자산 곡선\. /u }),
     ).toBeVisible();
     const retryAccount = accountPanel.getByRole("button", {
       name: "계좌 요약 다시 불러오기",

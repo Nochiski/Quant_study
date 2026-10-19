@@ -5,18 +5,29 @@ import { tCode, tDescription, tName } from "../../../shared/config";
 export type MetricPlainCopy = { name: string; description: string };
 
 /**
- * 결과 화면 맨 위에 강조하는 지표(registry `metric_id`, 화면 순서). registry 에 없는 id 는 강조 칸에서
- * 조용히 빠지므로 backend 골든(`metric_ids.json`)의 부분집합임을 테스트가 본다(#362 DR-B-09).
+ * 결과 화면의 "결과 한눈에"와 두 축 카드가 읽는 지표(registry `metric_id`). registry 에 없는 id 는 카드에서
+ * 조용히 빠지므로 backend 골든(`metric_ids.json`)의 부분집합임을 테스트가 본다(#362 DR-B-09). 화면은 이
+ * 유니온으로만 지표를 꺼내 목록 밖 id 를 typecheck 가 막는다.
  */
-export const HIGHLIGHTED_METRIC_IDS = [
+export const RESULT_LAYOUT_METRIC_IDS = [
   "total_return",
+  "benchmark_return",
+  "excess_return",
   "sharpe",
   "sharpe_standard_error",
   "max_drawdown",
-  "calmar",
+  "max_drawdown_recovery_sessions",
   "turnover",
+  "average_gross_exposure",
+  "win_rate",
+  "profit_factor",
   "trade_count",
+  "total_fees",
+  "total_taxes",
+  "total_slippage_cost",
 ] as const;
+
+export type ResultLayoutMetricId = (typeof RESULT_LAYOUT_METRIC_IDS)[number];
 
 /**
  * backend Metric Registry의 `metric_id`로 쉬운 이름·뜻을 찾는다(결과 설명 spec R4).

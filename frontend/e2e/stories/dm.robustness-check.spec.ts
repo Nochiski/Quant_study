@@ -119,7 +119,7 @@ test(
       .toBe("completed");
 
     await page.goto(`/research/backtests/${runId}`);
-    const card = page.getByRole("region", { name: "결과 검증", exact: true });
+    const card = page.getByRole("region", { name: "운일까, 튼튼할까", exact: true });
     const outOfSample = card.getByRole("region", {
       name: "표본 밖 성과 · 워크포워드",
     });
@@ -127,6 +127,11 @@ test(
     // 실험 없이 한 번 돌린 결과: 두 항목이 실험이 필요하다고 말하고 버튼이 있다.
     await expect(outOfSample).toContainText("실험이 필요해요");
     await expect(plateau).toContainText("실험이 필요해요");
+    // 누르기 전에 조합·실행·시도 수 변화가 먼저 보이고, 같은 구역이 미래 수익을 약속하지 않는다고 말한다.
+    await expect(card).toContainText(/조합 \d+개 · 실행 \d+개 · 시도 수 1 → 2/u);
+    await expect(card).toContainText(
+      "앞으로의 수익을 보장하거나 확률로 약속하지 않아요",
+    );
 
     await card.getByRole("button", { name: "튼튼한지 확인하기" }).click();
     const dialog = page.getByRole("dialog", { name: "튼튼한지 확인하기" });

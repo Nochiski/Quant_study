@@ -66,6 +66,8 @@ describe("실행 검증 카드의 wire 조회와 읽기", () => {
     const dsr = screen.getByRole("region", { name: "시도 횟수 보정 통계(DSR)" });
     expect(dsr).toHaveTextContent("61.01%");
     expect(dsr).toHaveTextContent("계열 시도 수 N: 238");
+    // 쉬운 설명 문장 안에서도 지금 시도 수를 말한다(RD-07-B).
+    expect(dsr).toHaveTextContent("지금 이 계열에서 238번 시도한 것을 감안한 값이에요.");
     expect(dsr).toHaveTextContent("대표 샤프 자료 수: 237");
     expect(screen.getByText(/조회 시점의 계열 원장 기준입니다/u)).toBeVisible();
     expect(screen.getByText(/판본이 섞여 있습니다/u)).toBeVisible();

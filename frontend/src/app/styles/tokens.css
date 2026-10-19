@@ -54,6 +54,8 @@
    * 화면은 부호와 낭독 문구를 함께 붙여 색만으로 방향을 전하지 않는다. */
   --return-up: #c8322b;
   --return-down: #1f5fcc;
+  --return-up-soft: #fdeeec;
+  --return-down-soft: #e1ebfb;
 
   /* chart series on the light canvas (>= 3:1 for lines, legend text uses the same ink) */
   --chart-series-1: #0b6a60;
@@ -177,6 +179,8 @@
 
   --return-up: #ff8a80;
   --return-down: #8fb2ff;
+  --return-up-soft: #3a2224;
+  --return-down-soft: #1c2a45;
 
   /* chart series tuned for the dark canvas */
   --chart-series-1: #4fc3b1;

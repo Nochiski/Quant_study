@@ -337,7 +337,7 @@ const scenario = async (
     .click();
   await expect(page).toHaveURL(new RegExp(`/research/backtests/${runId}$`));
   const validation = page.getByRole("region", {
-    name: "결과 검증",
+    name: "운일까, 튼튼할까",
     exact: true,
   });
   await expect(validation).toContainText("계열 시도 수 N");

@@ -493,7 +493,9 @@ try {
     "display",
     "grid",
   );
-  await expect(page.getByRole("region", { name: "핵심 성과 지표" })).toHaveCSS(
+  await expect(
+    page.getByRole("region", { name: "결과 한눈에" }).locator(".metric-highlights"),
+  ).toHaveCSS(
     "grid-template-columns",
     /^(?!none$).+/u,
   );

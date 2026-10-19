@@ -61,6 +61,8 @@ const textPairs = [
   ["--status-info", "--status-info-soft"],
   ["--return-up", "--surface-panel"],
   ["--return-down", "--surface-panel"],
+  ["--return-up", "--return-up-soft"],
+  ["--return-down", "--return-down-soft"],
   ["--syntax-key", "--surface-panel"],
   ["--syntax-string", "--surface-panel"],
   ["--syntax-number", "--surface-panel"],

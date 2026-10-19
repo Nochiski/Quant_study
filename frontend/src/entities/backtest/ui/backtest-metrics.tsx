@@ -1,27 +1,9 @@
 import type { MetricDefinition, MetricValue } from "../../../shared/api";
 import { t } from "../../../shared/config";
+import { SignedValue } from "../../../shared/ui";
 import { metricUnavailableCopy } from "../model/metric-copy";
+import { formatMetric } from "../model/metric-format";
 import "./backtest-run-detail.css";
-
-const formatMetric = (
-  metric: MetricValue,
-  definition: MetricDefinition,
-): string => {
-  if (metric.value === null) return t("backtest.result.unavailable");
-  const precision = definition.precision ?? 4;
-  if (definition.unit === "percent") {
-    return `${(metric.value * 100).toFixed(Math.min(precision, 2))}%`;
-  }
-  if (definition.unit === "currency") {
-    return `₩${metric.value.toLocaleString("ko-KR", {
-      maximumFractionDigits: precision,
-    })}`;
-  }
-  if (definition.unit === "count" || definition.unit === "sessions") {
-    return metric.value.toFixed(0);
-  }
-  return metric.value.toFixed(precision);
-};
 
 /** 사용 불가 지표 칸에서 이유를 적은 데이터 경고로 가는 연결. */
 export type MetricExplanation = { href: string; open: () => void };
@@ -55,6 +37,30 @@ export const MetricCell = ({
     )}
   </>
 );
+
+/**
+ * 방향이 있는 수익 지표(수익률·낙폭)를 부호·색과 함께 보인다. 값이 없으면 `MetricCell` 과 같이 사유를
+ * 보인다. 어떤 지표에 쓸지는 호출자가 정한다.
+ */
+export const SignedMetricCell = ({
+  metric,
+  definition,
+  explanation = null,
+}: {
+  metric: MetricValue;
+  definition: MetricDefinition;
+  explanation?: MetricExplanation | null;
+}) =>
+  metric.value === null ? (
+    <MetricCell definition={definition} explanation={explanation} metric={metric} />
+  ) : (
+    <strong>
+      <SignedValue
+        value={metric.value}
+        magnitude={formatMetric({ ...metric, value: Math.abs(metric.value) }, definition)}
+      />
+    </strong>
+  );
 
 /** 지표 계산은 서버에 두고 기존 단위·사용 불가 사유 표시를 함께 재사용한다. */
 export const BacktestMetricTable = ({

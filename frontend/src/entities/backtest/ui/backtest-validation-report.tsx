@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { ApiRequestError, type RunValidationReport } from "../../../shared/api";
-import { t, tCode } from "../../../shared/config";
+import { t, tCode, tFill } from "../../../shared/config";
 import { displayTime } from "../../../shared/lib/display-time";
 import { Button } from "../../../shared/ui";
 import { metricUnavailableCopy } from "../model/metric-copy";
@@ -76,7 +76,12 @@ export const BacktestValidationReport = ({
             <section aria-label={t("backtest.validation.dsr")}>
               <h5>{t("backtest.validation.dsr")}</h5>
               <div className="validation-report__value">{statistic(dsr.value)}</div>
-              <p>{t("backtest.validation.dsrMeaning")}</p>
+              <p>
+                {t("backtest.validation.dsrMeaning")}
+                {dsr.trial_count == null ? null : (
+                  <> {tFill("backtest.validation.dsrTrials", { count: dsr.trial_count })}</>
+                )}
+              </p>
               {dsr.unavailable_reason ? <p>{tCode(`backtest.validation.reason.${dsr.unavailable_reason}`, dsr.unavailable_reason)}</p> : null}
               <p>{t("backtest.validation.trialCount")}: {dsr.trial_count ?? t("backtest.validation.noValue")}</p>
               <p>{t("backtest.validation.representativeCount")}: {dsr.representative_count}</p>

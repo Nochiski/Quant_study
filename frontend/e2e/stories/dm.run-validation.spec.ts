@@ -33,7 +33,7 @@ const runValidationStory = async (page: Page, testInfo: TestInfo, viewport: { wi
       expect(http.ok()).toBe(true);
       const report = await http.json() as RunValidationReport;
       expect(report.dsr.trial_count).toBe(1);
-      const card = page.getByRole("region", { name: "결과 검증", exact: true });
+      const card = page.getByRole("region", { name: "운일까, 튼튼할까", exact: true });
       await expect(card).toBeVisible();
       await expect(card).toContainText("미래 수익을 보장하거나 전략의 통과 여부를 판정하지 않습니다.");
       await expect(card).toContainText("후보 선택 당시 기록된 통계 스냅숏과 다르며");
@@ -68,7 +68,7 @@ const runValidationStory = async (page: Page, testInfo: TestInfo, viewport: { wi
       const manifestFingerprint = page.getByRole("group", { name: "Manifest · 데이터 경고 · 재현성 정보", exact: true }).getByTitle(report.run_fingerprint, { exact: true });
       await expect(manifestFingerprint).toBeVisible();
       await expect(manifestFingerprint).toHaveText(`${report.run_fingerprint.slice(0, 16)}…`);
-      await navigation.getByRole("link", { name: "결과 검증", exact: true }).click();
+      await navigation.getByRole("link", { name: "운일까, 튼튼할까", exact: true }).click();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await testInfo.attach("검증 카드 계산 근거", { body: await card.screenshot(), contentType: "image/png" });
       await basis.focus();

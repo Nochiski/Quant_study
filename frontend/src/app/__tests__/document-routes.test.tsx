@@ -2450,6 +2450,9 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       const field = await waitFor(() => {
         const input = screen.getAllByRole("textbox").find((node) => (node as HTMLInputElement).value === "price.close");
         expect(input).toBeDefined();
+        // revision 화면은 그래프로 바로 열려 숨은 편집기 chunk가 늦게 붙는다. 붙기 전 칸은 잠겨 있으니(`editor`)
+        // 보이는 것만이 아니라 편집 가능해질 때까지 기다린다.
+        expect(input).toBeEnabled();
         return input!;
       });
       await user.clear(field);

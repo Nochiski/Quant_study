@@ -129,7 +129,9 @@ class ProcessRunExecution:
             command=self._command,
             assign=self._assign,
             take_spare=self._take_spare,
-            own_worker_booted=self._own_worker_booted,
+            # 직접 띄운 worker 가 맞게 부팅했으면 예비를 멈추게 한 원인이 지금은 없을 수 있다. 멈춘
+            # 예비를 한 번 다시 띄워 본다(`_fill_spare`, #591 리뷰 P3-1).
+            own_worker_booted=self._fill_spare,
             forget=self._forget,
         )
         thread = Thread(target=run.supervise, name=f"backtest-worker-{job.run_id}", daemon=True)
@@ -188,9 +190,11 @@ class ProcessRunExecution:
     def _fill_spare(self) -> None:
         """예비 자리가 비었으면 새 예비를 띄운다(D7). 띄우기·부팅·대기는 예비 스레드가 한다(D12).
 
-        연속 실패로 멈춘 뒤에는 `_spare_failed` 가 더 부르지 않는다. 만들 때, 예비를 run 에 넘길 때,
-        run 이 직접 띄운 worker 가 판본까지 맞게 부팅했을 때(`_own_worker_booted`)만 여기로 온다 —
-        뒤의 둘은 실패 횟수가 0 으로 돌아간 뒤다.
+        연속 실패로 멈춘 뒤에는 `_spare_failed` 가 더 부르지 않는다. 그 뒤로는 run 이 직접 띄운
+        worker 가 판본까지 맞게 부팅했을 때만 여기로 와서 예비를 한 번 다시 띄워 본다. 그 예비가
+        `ready` 에 닿으면 실패 횟수가 0 으로 돌아가고, 또 실패하면 다시 멈춘다(#591 리뷰 P3-1·2차
+        P3-2). 판본 불일치로 멈춘 예비는 되살아나지 않는다 — 직접 띄운 worker 도 같은 판본을 읽어
+        어긋난다.
         """
         with self._lock:
             if not self._keeps_spare or self._closed or self._spare is not None:
@@ -268,20 +272,6 @@ class ProcessRunExecution:
                 failures,
             )
             return
-        self._fill_spare()
-
-    def _own_worker_booted(self) -> None:
-        """run 이 직접 띄운 worker 가 판본까지 맞게 부팅했다. 예비를 멈추게 한 원인이 지금은 없으니
-        실패 횟수를 0 으로 돌리고 예비를 다시 채운다(#591 리뷰 P3-1).
-
-        판본 불일치로 멈춘 예비는 여기로 되살아나지 않는다. 직접 띄운 worker 도 같은 판본을 읽어
-        어긋나므로 이 함수까지 오지 않고, 서버 재시작만이 고친다.
-        """
-        with self._lock:
-            stopped = self._spare_failures >= SPARE_FAILURE_LIMIT
-            self._spare_failures = 0
-        if stopped:
-            logger.info("run worker booted on its own — spares start again")
         self._fill_spare()
 
     def _take_spare(self) -> _Worker | None:

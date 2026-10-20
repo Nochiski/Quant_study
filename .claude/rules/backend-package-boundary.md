@@ -98,7 +98,7 @@ bootstrap ─> application + adapters
   `adapters/outbound/run_thread`는 그 계산을 같은 프로세스의 데몬 스레드에서 부르고 GC 구간
   (`_gc_policy`)을 감싼다. `application.backtest_run` facade에만 의존한다. 어느 전송을 쓸지는
   bootstrap이 `BacktestRunService(run_execution=...)`로 정한다.
-  `adapters/outbound/run_worker_process`는 같은 포트를 worker 프로세스로 구현한다. IPC 프로토콜 v2
+  `adapters/outbound/run_worker_process`는 같은 포트를 worker 프로세스로 구현한다. IPC 프로토콜 v3
   (`_protocol.py`)의 인코딩·디코딩, 부모 쪽 감독(`_execution.py`), worker 쪽 줄 주고받기·진행 상한·코드
   지문과 지문 뒤 첫 프로젝트 모듈 import 를 거절하는 commit 가드(`_worker.py`)를 이 노드 하나가 소유하고 `application.backtest_run`·`domain.backtest` facade에만
   의존한다. 예비 worker(spec D7: 늘 하나, 쓰면 곧바로 다시 채움, 연속 3회 실패면 멈추고 run 이 직접 띄운 worker 가

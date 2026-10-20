@@ -136,7 +136,9 @@ _MIN_TAPE_PROGRESS_STEP = 0.01
 # 덮어쓴다). 실데이터 긴 구간 run 한 건이 CPU 수백 초·RSS 약 5GB 를 쓰므로(#158·#161) 넘는 run 은
 # 스레드 없이 `queued` 로 기다린다. 배정 순서는 `_scheduler.py` 가 정한다.
 DEFAULT_RUN_SLOTS = 2
-# 메모리 가드가 슬롯이 비었는데도 대기시킨 run 의 상태 설명(spec D8). 상태는 `queued` 그대로다.
+# 대기 run 의 상태 설명. 상태는 둘 다 `queued` 다. 메모리 쪽은 메모리 가드가 슬롯이 비었는데도
+# 대기시킨 run 이다(spec D8). 사유가 바뀌면 배정이 문장을 고친다(`_dispatch`).
+_SLOT_WAIT_MESSAGE = "Waiting for a free run slot"
 _MEMORY_WAIT_MESSAGE = "Waiting for free memory"
 
 
@@ -423,7 +425,7 @@ class BacktestRunService:
             slot_free = self._running < self._run_slots and (
                 owner is None or self._running_experiments < experiment_slots(self._run_slots)
             )
-            message = "Run accepted" if slot_free else "Waiting for a free run slot"
+            message = "Run accepted" if slot_free else _SLOT_WAIT_MESSAGE
             record = _RunRecord(
                 state=BacktestRunState(
                     run_id=run_id,
@@ -1127,14 +1129,14 @@ class BacktestRunService:
         예비 worker 를 다시 채우지 않게 한다(#591 리뷰).
         """
 
-        held = False
+        held: _RunRecord | None = None
         while self._running < self._run_slots:
             experiments = self._running_experiments < experiment_slots(self._run_slots)
             record = self._waiting.peek(experiments=experiments)
             if record is None:
                 break
             if not self._memory_admits(record):
-                held = True
+                held = record
                 break
             self._waiting.pop(experiments=experiments)
             try:
@@ -1175,7 +1177,18 @@ class BacktestRunService:
                     None if shape is None else shape.fields,
                     None if shape is None else shape.factor_steps,
                 )
-        self._run_execution.set_memory_hold(held)
+        # 메모리를 기다린다고 적힌 대기 run 가운데 지금 가드가 붙잡은 run 이 아닌 것은 슬롯·차례를
+        # 기다린다(앞에 단일 실행이 끼었거나 슬롯이 찼다). 문장이 실제 사유를 따라가게 고친다.
+        for item in self._records.values():
+            if (
+                item is not held
+                and item.state.status is RunStatus.QUEUED
+                and item.state.message == _MEMORY_WAIT_MESSAGE
+            ):
+                self._emit(
+                    item, RunStatus.QUEUED, item.state.progress, "queued", _SLOT_WAIT_MESSAGE
+                )
+        self._run_execution.set_memory_hold(held is not None)
 
     def _memory_admits(self, record: _RunRecord) -> bool:
         """메모리 가드: 대기열 앞의 `record` 를 지금 띄워도 되는가(spec D8). 잠금 안에서 부른다.

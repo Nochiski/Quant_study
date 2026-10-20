@@ -554,7 +554,7 @@ class _WorkerRun:
         self._forget = forget
         self._lock = Lock()
         self._process: subprocess.Popen[bytes] | None = None
-        # 메모리를 잴 worker. 손에 넣은 뒤부터 끝내기 직전까지만 있다(`measured_pid`).
+        # 메모리를 잴 worker. 손에 넣은 뒤에 한 번 정한다(`measured_pid`).
         self._measured: _Worker | None = None
         self._cancelled = False
         self._abandoned = False
@@ -564,9 +564,14 @@ class _WorkerRun:
         return self._job.run_id
 
     def measured_pid(self) -> int | None:
-        """메모리 가드가 RSS 를 잴 이 run 의 worker pid. 아직 `ready` 전이거나 끝나는 중이면 None.
+        """메모리 가드가 RSS 를 잴 이 run 의 worker pid. 아직 `ready` 전이거나 끝났으면 None.
 
-        pid 는 worker 가 살아 있는 동안만 준다 — 끝난 뒤의 pid 는 다른 프로세스가 다시 쓸 수 있다.
+        끝난 pid 는 다른 프로세스가 다시 쓸 수 있어 worker 가 살아 있는 동안만 준다. 그 판정은 여기
+        `poll()` 하나다(#599 리뷰 nit) — 종료 코드를 거두면(감독의 `wait`든 이 `poll`이든) 그 뒤로는
+        늘 None 이다. 전송 장부에서 빼는 `_forget` 은 정리일 뿐 이 방어에 기대지 않는다. Windows
+        에서는 부모가 띄운 프로세스가 런처라, 인터프리터가 끝난 뒤 런처가 끝나기까지의 짧은 틈에
+        그 pid 를 잴 수 있다. 다른 프로세스를 잰 값은 남은 예약분을 줄이는 쪽이라 0 아래로는
+        내려가지 않는다(`memory_verdict`).
         """
         with self._lock:
             worker = self._measured
@@ -650,9 +655,6 @@ class _WorkerRun:
 
     def _clean_up(self, worker: _Worker, outcome: RunOutcome | None) -> None:
         run_id = self.run_id
-        with self._lock:
-            # 끝나는 worker 의 pid 는 더 재지 않는다(`measured_pid`).
-            self._measured = None
         if outcome is None:
             worker.process.kill()
         worker.close()

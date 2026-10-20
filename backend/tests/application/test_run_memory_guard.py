@@ -409,6 +409,26 @@ def test_the_reserve_counts_the_factor_warm_up(tmp_path: Path) -> None:
     assert transport.started_ids() == ["run-1"]
 
 
+def test_a_single_run_goes_ahead_of_a_held_trial_and_the_trial_then_waits_for_a_slot(
+    tmp_path: Path,
+) -> None:
+    """#599 리뷰 nit: 단일 실행 우선이라 메모리를 기다리던 실험 trial 을 뒤에 온 단일 실행이 먼저
+    판정받는다. 슬롯이 차면 그 trial 의 문장은 슬롯 대기로 바뀐다(사유를 따라간다)."""
+    light, heavy = _request(), _request(end=date(2024, 1, 11), factors=4)
+    transport = _FakeTransport()
+    runs = _service(tmp_path, transport, run_slots=2)
+    transport.sample = _memory(2 * _reserve(light))
+    runs.start(light)
+    runs.start(heavy, owner="experiment-1")
+    assert runs.state("run-2").message == "Waiting for free memory"
+
+    runs.start(replace(light, initial_cash=1.0e9))
+
+    assert transport.started_ids() == ["run-1", "run-3"]
+    state = runs.state("run-2")
+    assert (state.status, state.message) == (RunStatus.QUEUED, "Waiting for a free run slot")
+
+
 def test_two_heavy_runs_do_not_start_together_where_two_light_runs_do(tmp_path: Path) -> None:
     """#599 리뷰 P2-1: 같은 구간·같은 가용 메모리에서 팩터 단계가 많은 run 둘은 함께 뜨지 않는다."""
     light, heavy = _request(), _request(factors=4)

@@ -10,6 +10,8 @@ permissions:
 jobs:
   generated-progress:
     runs-on: ubuntu-latest
+    # 멈춘 job 이 기본값 360분을 쓰지 않게 한다(#599 리뷰 P3-3). 보통 10초 안에 끝난다.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: 공식 생성 집계 검사

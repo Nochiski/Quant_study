@@ -1,18 +1,22 @@
-"""duckdb 어댑터의 열 지향 원시 패널 로딩(GRID 원천, columnar-tape T2-02).
+"""duckdb 어댑터의 열 지향 원시 패널 로딩(GRID·LATEST 원천과 법인 축, columnar-tape T2-02·T2-03).
 
-- L0 대조(spec 5절): 원장 손 픽스처에서 `load_grid_raw_panel(q)` 와
+- L0 대조(spec 5절): 원장 손 픽스처에서 `load_raw_panel(q)` 와
   `RawPanel.from_observation_set(load_raw_observations(q), field_ids=q.field_ids)` 를
   field_id 기준으로 비교한다. 열 위치·코드가 아니라 풀어낸 값(present·kind·available·member·
   sector·previous_weight·값·메타)과 `observations()` 복원값을 대조 하네스의 비트 비교기
   (`tests/parity/_compare.py`, 허용오차 0)로 본다.
+- LATEST(T2-03): 컷오프 이하 마지막 관측, 늦게 공개되는 필드(재무 TTM, #238), 법인 축 대응
+  (`_corp_map`, 같은 법인의 종류주·법인 없는 ETF), 재상장, GRID 와 섞인 질의.
 - DECIMAL 경계(spec D3 원시 숫자 행): 비스케일 정수 2^53 ± 1, scale 0·4·10·18·22, 음수·0·−0.
+- 숫자가 아닌 선언 타입(범주 값): 행 경로처럼 값이 실리면 실패, 모두 NULL 이면 값 없는 셀.
 - 취소: 열 질의 도중 checkpoint 가 던지면 감시 스레드가 질의를 끊는다.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -27,13 +31,13 @@ from strategy_workbench.adapters.outbound.equity_duckdb._adapter import _GridSql
 from strategy_workbench.adapters.outbound.equity_duckdb._raw_panel import (
     FAST_SCALE_LIMIT,
     FAST_UNSCALED_LIMIT,
-    ColumnarSourceUnsupportedError,
-    load_grid_raw_panel,
+    load_raw_panel,
     numeric_column,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_BY_ID,
     SOURCE_BY_NAME,
+    SourceAxis,
     SourceMode,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
@@ -49,7 +53,15 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawPanel,
 )
 from strategy_workbench.domain.equity.facade.research_data import CellKind
-from tests.equity_fixture import build_workbench_root
+from tests.equity_fixture import (
+    WB_FIN_ROWS,
+    WB_SPANS,
+    build_workbench_root,
+    fin_std_table,
+    span_table,
+    write_catalog,
+    write_equity_table,
+)
 from tests.parity._compare import compare, format_report
 
 if TYPE_CHECKING:
@@ -68,12 +80,72 @@ def adapter(tmp_path_factory: pytest.TempPathFactory) -> EquityDuckdbAdapter:
     )
 
 
-def _grid_fields(adapter: EquityDuckdbAdapter) -> tuple[str, ...]:
+@pytest.fixture(scope="module")
+def late_adapter(tmp_path_factory: pytest.TempPathFactory) -> EquityDuckdbAdapter:
+    """#238 모양 — 000660 의 TTM 창 안 분기 정정본이 행보다 늦게 접수돼 흐름 필드가 늦게 보인다.
+
+    `test_adapters_equity_duckdb.py::test_a_late_correction_inside_the_ttm_window_...` 와
+    같은 행이다.
+    """
+    pytest.importorskip("duckdb", reason=DUCKDB_EXTRA)
+    root = build_workbench_root(tmp_path_factory.mktemp("columnar-late") / "equity")
+    fiscal_2022 = [
+        {
+            "corp_code": "C00660",
+            "period_end": period_end,
+            "report_code": report,
+            "bsns_year": "2022",
+            "rcept_no": f"R00660{report}_22",
+            "available_date": available,
+            "revenue": revenue,
+            "net_income": net_income,
+            "cf_operating_ytd": cf_ytd,
+        }
+        for period_end, report, available, revenue, net_income, cf_ytd in (
+            (date(2022, 3, 31), "11013", date(2024, 1, 10), 150, 30, 20),
+            (date(2022, 6, 30), "11012", date(2022, 8, 16), 160, 32, 45),
+            (date(2022, 9, 30), "11014", date(2022, 11, 14), 170, 34, 70),
+            (date(2022, 12, 31), "11011", date(2023, 3, 14), 660, 136, 100),
+        )
+    ]
+    write_equity_table(
+        root,
+        "fin_std",
+        fin_std_table([*WB_FIN_ROWS, *fiscal_2022]),
+        build_id="b_fin_238",
+        year_column="period_end",
+    )
+    write_catalog(root)
+    return EquityDuckdbAdapter(root)
+
+
+def _fields(adapter: EquityDuckdbAdapter, mode: SourceMode | None = None) -> tuple[str, ...]:
     return tuple(
         profile.field_id
         for profile in adapter.list_fields()
-        if SOURCE_BY_NAME[FIELD_BY_ID[profile.field_id].source].mode is SourceMode.GRID
+        if mode is None or SOURCE_BY_NAME[FIELD_BY_ID[profile.field_id].source].mode is mode
     )
+
+
+def _corp_fields(adapter: EquityDuckdbAdapter) -> tuple[str, ...]:
+    return tuple(
+        field_id
+        for field_id in _fields(adapter, SourceMode.LATEST)
+        if SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].axis is SourceAxis.CORP
+    )
+
+
+def _field(panel: RawPanel, field_id: str) -> RawFieldColumn:
+    return next(column for column in panel.fields if column.field_id == field_id)
+
+
+def _row(panel: RawPanel, session: date, security_id: str) -> int:
+    hits = np.flatnonzero(
+        (panel.row_date == session.toordinal())
+        & (panel.row_security == panel.securities.index(security_id))
+    )
+    assert hits.size == 1, (session, security_id)
+    return int(hits[0])
 
 
 # --- L0 비교기 ---------------------------------------------------------------------------------
@@ -120,13 +192,14 @@ def _projection(panel: RawPanel) -> dict[str, object]:
         "meta": {name: getattr(panel, name) for name in meta},
         "rows": _rows(panel),
         "fields": {column.field_id: _cells(column) for column in panel.fields},
+        "categories": {column.field_id: column.categories for column in panel.fields},
         "observations": list(panel.observations()),
     }
 
 
 def _assert_same_panel(columnar: RawPanel, reference: RawPanel) -> None:
     """L0: field_id 기준으로 모든 칸과 메타가 같다(허용오차 0, spec D1)."""
-    report = compare("L0", [("grid", _projection(reference), _projection(columnar))])
+    report = compare("L0", [("raw", _projection(reference), _projection(columnar))])
     assert report.ok, format_report(report, values=True)
 
 
@@ -151,45 +224,117 @@ def _query(
 # --- L0 손 픽스처 ------------------------------------------------------------------------------
 
 
-L0_CASES: dict[str, Callable[[tuple[str, ...]], RawObservationQuery]] = {
-    "grid-fields-with-history": lambda grid: _query(grid, history=3),
+L0_CASES: dict[str, Callable[[EquityDuckdbAdapter], RawObservationQuery]] = {
+    "grid-fields-with-history": lambda a: _query(_fields(a, SourceMode.GRID), history=3),
+    "all-fields-with-history": lambda a: _query(_fields(a), history=3),
+    "latest-fields-only": lambda a: _query(_fields(a, SourceMode.LATEST), history=2),
+    # 법인 축 — 005930·005935 는 같은 법인, 069500(ETF)은 법인이 없다, 035420 은 관측이 없다
+    "corp-axis-all-securities": lambda a: _query(_corp_fields(a), universe="krx.all", history=5),
     # 달력 첫 세션부터 — 워밍업·랙을 거슬러 올라갈 달력이 모자란 경고 둘이 난다
-    "calendar-start": lambda grid: _query(
-        grid, start=date(2023, 12, 26), end=date(2024, 1, 3), history=2
+    "calendar-start": lambda a: _query(
+        _fields(a), start=date(2023, 12, 26), end=date(2024, 1, 3), history=2
     ),
-    "reversed-field-order": lambda grid: _query(tuple(reversed(grid)), history=1),
-    # 랙 3 신용잔고 — 036220 재상장(2024-01-08) 구간은 이전 상장 값을 물지 않는다
-    "lag-across-relisting": lambda _grid: _query(
-        ("credit.margin_balance", "price.close", "flow.foreign_net_buy"),
+    "reversed-field-order": lambda a: _query(tuple(reversed(_fields(a))), history=1),
+    # 랙 3 신용잔고 — 036220 재상장(2024-01-08) 구간은 이전 상장 값을 물지 않는다. 재무는
+    # 법인 축이라 재상장 구간에도 같은 법인의 값이 실린다
+    "lag-across-relisting": lambda _a: _query(
+        (
+            "credit.margin_balance",
+            "financial.net_income",
+            "price.close",
+            "financial.revenue",
+            "flow.foreign_net_buy",
+        ),
         start=date(2024, 1, 4),
+        universe="krx.all",
     ),
-    "all-securities": lambda grid: _query(grid, universe="krx.all", history=2),
-    "no-fields": lambda _grid: _query((), history=1),
-    "no-members": lambda _grid: _query(("price.close",), universe="krx.none"),
-    "unknown-market": lambda grid: _query(grid, market="NYSE"),
-    "unknown-universe": lambda grid: _query(grid, universe="krx.unknown"),
-    "unknown-field": lambda _grid: _query(("price.close", "price.unknown")),
-    "outside-coverage": lambda grid: _query(grid, start=date(2023, 1, 2), end=date(2023, 1, 6)),
-    "no-sessions-in-range": lambda grid: _query(
-        grid, start=date(2023, 12, 30), end=date(2024, 1, 1)
+    # GRID 와 LATEST 가 섞이고 순서가 번갈아 든다
+    "grid-and-latest-mixed": lambda _a: _query(
+        (
+            "consensus.forward_eps",
+            "price.close",
+            "financial.book_equity",
+            "short.short_sale_volume",
+            "event.buyback_amount",
+            "event.dividend_per_share",
+            "credit.margin_balance",
+            "consensus.recommendation",
+        ),
+        history=4,
+    ),
+    "all-securities": lambda a: _query(_fields(a), universe="krx.all", history=2),
+    # 창 끝이 모든 LATEST 관측의 공개일보다 앞이다 — 축 키는 있는데 관측이 하나도 없다
+    "latest-before-any-observation": lambda _a: _query(
+        ("event.insider_net_buy", "event.buyback_amount", "price.close"),
+        start=date(2023, 12, 26),
+        end=date(2023, 12, 27),
+        universe="krx.all",
+    ),
+    "no-fields": lambda _a: _query((), history=1),
+    "no-members": lambda a: _query(_fields(a), universe="krx.none"),
+    "unknown-market": lambda a: _query(_fields(a), market="NYSE"),
+    "unknown-universe": lambda a: _query(_fields(a), universe="krx.unknown"),
+    "unknown-field": lambda _a: _query(("financial.revenue", "price.unknown")),
+    "outside-coverage": lambda a: _query(_fields(a), start=date(2023, 1, 2), end=date(2023, 1, 6)),
+    "no-sessions-in-range": lambda a: _query(
+        _fields(a), start=date(2023, 12, 30), end=date(2024, 1, 1)
     ),
 }
 
 
 @pytest.mark.parametrize("case", list(L0_CASES.values()), ids=list(L0_CASES))
-def test_columnar_grid_load_matches_the_row_path_cell_by_cell(
-    adapter: EquityDuckdbAdapter, case: Callable[[tuple[str, ...]], RawObservationQuery]
+def test_columnar_load_matches_the_row_path_cell_by_cell(
+    adapter: EquityDuckdbAdapter, case: Callable[[EquityDuckdbAdapter], RawObservationQuery]
 ) -> None:
-    query = case(_grid_fields(adapter))
+    query = case(adapter)
 
-    columnar = load_grid_raw_panel(adapter, query)
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
+@pytest.mark.parametrize("rows_per_chunk", [1, 3])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "all-fields-with-history",
+        "corp-axis-all-securities",
+        "lag-across-relisting",
+        "grid-and-latest-mixed",
+        "all-securities",
+    ],
+)
+def test_chunk_boundaries_do_not_change_any_cell(
+    adapter: EquityDuckdbAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    rows_per_chunk: int,
+) -> None:
+    """#582 리뷰 nit-1: 행 구간을 1·3 행으로 줄여도 칸이 같다(구간 경계를 넘는 상태가 없다).
+
+    `_row_chunks` 의 기본 구간은 정의 때 묶이므로 감싼 함수로 상한을 건다. 파이썬 원소 루프의
+    구간(`_PY_CHUNK_ROWS`)과 정렬 누적 기준(`_CHUNK_ROWS`)도 같이 줄인다.
+    """
+    original = raw_panel_module._row_chunks
+
+    def small_chunks(
+        rows: int, checkpoint: Callable[[], None], size: int = rows_per_chunk
+    ) -> Iterator[slice]:
+        return original(rows, checkpoint, min(size, rows_per_chunk))
+
+    monkeypatch.setattr(raw_panel_module, "_row_chunks", small_chunks)
+    monkeypatch.setattr(raw_panel_module, "_CHUNK_ROWS", rows_per_chunk)
+    monkeypatch.setattr(raw_panel_module, "_PY_CHUNK_ROWS", rows_per_chunk)
+    query = L0_CASES[case](adapter)
+
+    columnar = load_raw_panel(adapter, query)
 
     _assert_same_panel(columnar, _reference(adapter, query))
 
 
 def test_the_fixture_exercises_every_grid_cell_kind_and_lag(adapter: EquityDuckdbAdapter) -> None:
     """L0 사례가 덮는 범위의 확인 — 가림·0 채움·결측·미수집 셀과 랙 셀이 실제로 나온다."""
-    panel = load_grid_raw_panel(adapter, _query(_grid_fields(adapter), history=3))
+    panel = load_raw_panel(adapter, _query(_fields(adapter, SourceMode.GRID), history=3))
     kinds = {
         RAW_CELL_KINDS[code]
         for column in panel.fields
@@ -202,17 +347,63 @@ def test_the_fixture_exercises_every_grid_cell_kind_and_lag(adapter: EquityDuckd
         CellKind.MISSING,
         CellKind.NOT_COLLECTED,
     } <= kinds
-    credit = next(column for column in panel.fields if column.field_id == "credit.margin_balance")
-    assert credit.present.any()  # 랙 3 셀이 실제로 나온다
+    assert _field(panel, "credit.margin_balance").present.any()  # 랙 3 셀이 실제로 나온다
     # 재상장 구간 첫 세션(036220:2, 2024-01-08)의 랙 1 셀은 이전 상장 구간 값을 물지 않는다
-    relisted = panel.securities.index("036220:2")
-    flow = next(column for column in panel.fields if column.field_id == "flow.foreign_net_buy")
-    first_row = np.flatnonzero(panel.row_security == relisted)[0]
-    assert panel.row_date[first_row] == date(2024, 1, 8).toordinal()
-    assert not flow.present[first_row]
+    first_row = _row(panel, date(2024, 1, 8), "036220:2")
+    assert not _field(panel, "flow.foreign_net_buy").present[first_row]
     # 달력 첫 세션부터 읽는 사례는 워밍업·랙 경고를 둘 다 낸다
-    early = load_grid_raw_panel(adapter, L0_CASES["calendar-start"](_grid_fields(adapter)))
+    early = load_raw_panel(adapter, L0_CASES["calendar-start"](adapter))
     assert len(early.warnings) == 2
+
+
+def test_the_fixture_exercises_latest_cutoffs_and_the_corp_axis(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """LATEST 사례가 덮는 범위 — 컷오프 전·후, 같은 법인의 종류주, 법인 없는 종목, 값 없는 관측."""
+    panel = load_raw_panel(adapter, L0_CASES["corp-axis-all-securities"](adapter))
+    equity = _field(panel, "financial.book_equity")
+    # 005930 FY 행은 01-04 공개, 랙 1 이라 01-05 부터 615 다. 01-04 에는 3분기 행(610)이 보인다
+    assert equity.value[_row(panel, date(2024, 1, 4), "005930:1")] == 610.0
+    assert equity.value[_row(panel, date(2024, 1, 5), "005930:1")] == 615.0
+    # 우선주 005935 는 같은 법인이라 같은 셀을 받고, ETF 069500 은 법인이 없어 셀이 없다
+    for session in (date(2024, 1, 5), END):
+        common, preferred = _row(panel, session, "005930:1"), _row(panel, session, "005935:1")
+        assert equity.present[preferred] and equity.value[preferred] == equity.value[common]
+        assert not equity.present[_row(panel, session, "069500:1")]
+    # 035420 은 법인 대응은 있으나 관측이 없다
+    assert not equity.present[_row(panel, END, "035420:1")]
+    # 036220 은 01-09 공개 행 하나뿐이다 — 잔액(자본)은 OBSERVED, TTM 매출은 네 분기가 없어 MISSING
+    relisted = _row(panel, END, "036220:2")
+    revenue = _field(panel, "financial.revenue")
+    assert RAW_CELL_KINDS[int(revenue.kind[relisted])] is CellKind.MISSING
+    assert RAW_CELL_KINDS[int(equity.kind[relisted])] is CellKind.OBSERVED
+    assert not revenue.present[_row(panel, date(2024, 1, 9), "036220:2")]  # 랙 1 컷오프 전
+
+
+def test_a_late_ttm_field_is_missing_until_its_own_filing(
+    late_adapter: EquityDuckdbAdapter,
+) -> None:
+    """#238: 늦게 공개되는 흐름 필드는 그 공개일까지 값 없는 MISSING, 공개일은 행의 것이다."""
+    fields = (
+        "financial.revenue",
+        "financial.net_income",
+        "financial.operating_cash_flow",
+        "financial.book_equity",
+    )
+    query = _query(fields, start=date(2024, 1, 9), universe="krx.all", history=2)
+
+    columnar = load_raw_panel(late_adapter, query)
+
+    _assert_same_panel(columnar, _reference(late_adapter, query))
+    revenue = _field(columnar, "financial.revenue")
+    cash_flow = _field(columnar, "financial.operating_cash_flow")
+    row = _row(columnar, date(2024, 1, 10), "000660:1")
+    assert RAW_CELL_KINDS[int(revenue.kind[row])] is CellKind.MISSING
+    assert not revenue.has_value[row]
+    assert revenue.available[row] == date(2023, 8, 14).toordinal()  # 행의 공개일
+    assert cash_flow.has_value[row] and cash_flow.available[row] == date(2024, 1, 9).toordinal()
+    later = _row(columnar, END, "000660:1")
+    assert revenue.has_value[later] and revenue.available[later] == date(2024, 1, 10).toordinal()
 
 
 def test_a_lag_reaching_the_previous_listing_reads_no_cell(
@@ -220,31 +411,36 @@ def test_a_lag_reaching_the_previous_listing_reads_no_cell(
 ) -> None:
     """랙 5 이면 036220:2 첫 세션(2024-01-08)이 036220:1 의 마지막 세션(2023-12-29) 행에 닿는다.
 
-    그 행은 격자에 있지만 `span_seq` 가 달라 셀이 없어야 한다(행 경로 `_cell`). 두 경로가 같은
-    `_lags` 를 읽으므로 그것만 바꿔 대조한다.
+    그 행은 격자에 있지만 `span_seq` 가 달라 GRID 셀이 없어야 한다(행 경로 `_cell`). LATEST 는
+    축 키 열이라 상장 구간과 무관하고, 컷오프가 달력 앞이면 셀이 없다. 두 경로가 같은 `_lags` 를
+    읽으므로 그것만 바꿔 대조한다.
     """
     monkeypatch.setattr(adapter, "_lags", lambda field_ids, _overrides: dict.fromkeys(field_ids, 5))
-    query = _query(("price.close",), start=date(2023, 12, 26), universe="krx.all")
+    query = _query(
+        ("price.close", "financial.net_income", "consensus.forward_eps"),
+        start=date(2023, 12, 26),
+        universe="krx.all",
+        history=0,
+    )
 
-    columnar = load_grid_raw_panel(adapter, query)
+    columnar = load_raw_panel(adapter, query)
 
     _assert_same_panel(columnar, _reference(adapter, query))
-    relisted = columnar.securities.index("036220:2")
-    first_row = np.flatnonzero(columnar.row_security == relisted)[0]
-    assert columnar.row_date[first_row] == date(2024, 1, 8).toordinal()
-    assert not columnar.fields[0].present[first_row]
-    # 랙이 닿는 행(036220:1, 2023-12-29)은 격자에 있다 — 셀이 없는 이유는 span_seq 다
-    earlier = columnar.securities.index("036220:1")
-    reached = (columnar.row_security == earlier) & (
-        columnar.row_date == date(2023, 12, 29).toordinal()
-    )
-    assert reached.sum() == 1
+    first_row = _row(columnar, date(2024, 1, 8), "036220:2")
+    assert not _field(columnar, "price.close").present[first_row]
+    # 달력 첫 세션의 컷오프는 달력 앞이라 LATEST 셀도 없다
+    calendar_start = _row(columnar, date(2023, 12, 26), "005930:1")
+    assert not _field(columnar, "financial.net_income").present[calendar_start]
 
 
 @pytest.mark.parametrize(
     "fields",
-    [("price.close", "price.volume", "price.close"), ("credit.margin_balance",) * 2],
-    ids=["repeated-after-another", "repeated-lagged"],
+    [
+        ("price.close", "price.volume", "price.close"),
+        ("credit.margin_balance",) * 2,
+        ("financial.revenue", "price.close", "financial.revenue"),
+    ],
+    ids=["repeated-after-another", "repeated-lagged", "repeated-latest"],
 )
 def test_a_repeated_query_field_fails_like_the_row_path(
     adapter: EquityDuckdbAdapter, fields: tuple[str, ...]
@@ -255,28 +451,223 @@ def test_a_repeated_query_field_fails_like_the_row_path(
         adapter.load_raw_observations(query)
 
     with pytest.raises(RawObservationContractViolation) as actual:
-        load_grid_raw_panel(adapter, query)
+        load_raw_panel(adapter, query)
 
     assert str(actual.value) == str(expected.value)
 
 
-def test_a_query_with_a_latest_source_field_is_refused(adapter: EquityDuckdbAdapter) -> None:
-    """LATEST 원천은 T2-03 범위다. 그 필드만 행 경로로 채우지 않고 질의 전체를 거절한다."""
-    query = _query(("price.close", "financial.book_equity"))
-
-    with pytest.raises(ColumnarSourceUnsupportedError) as caught:
-        load_grid_raw_panel(adapter, query)
-
-    message = str(caught.value)
-    assert "T2-03" in message and "columnar_latest_unsupported" in message
-    assert "financial.book_equity" in message and "price.close" not in message
-
-
-def test_the_adapter_does_not_declare_the_columnar_capability_yet(
+@pytest.mark.parametrize(
+    ("fields", "error"),
+    [
+        (("event.buyback_amount",) * 2, ValueError),
+        (
+            ("price.close", "event.buyback_amount", "event.buyback_amount"),
+            RawObservationContractViolation,
+        ),
+    ],
+    ids=["no-other-violation", "masked-value-first"],
+)
+def test_a_repeated_field_without_cells_fails_like_the_row_path(
     adapter: EquityDuckdbAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    fields: tuple[str, ...],
+    error: type[ValueError],
 ) -> None:
-    """능력 선언은 T2-03 이다. 지금 선언하면 application 이 LATEST 질의까지 열 경로로 보낸다."""
-    assert not isinstance(adapter, ColumnarRawObservationPort)
+    """#582 리뷰 nit-4: 겹친 필드에 셀이 하나도 없어도 행 경로와 같은 예외·문장으로 끝난다.
+
+    창 끝(2023-12-27)이 자사주 관측의 공개일보다 앞이라 겹친 필드의 셀이 없다. 다른 위반이
+    없으면 `from_observation_set` 의 ValueError, 가린 셀에 값이 실렸으면 행 경로가 셀을 만들 때
+    내는 계약 위반이 먼저다.
+    """
+    price = SOURCE_BY_NAME["price"]
+    monkeypatch.setitem(
+        SOURCE_BY_NAME, "price", replace(price, masked_expr="(date = DATE '2023-12-27')")
+    )
+    query = _query(fields, start=date(2023, 12, 26), end=date(2023, 12, 27), universe="krx.all")
+    with pytest.raises(ValueError) as expected:
+        _reference(adapter, query)
+
+    with pytest.raises(ValueError) as actual:
+        load_raw_panel(adapter, query)
+
+    assert type(expected.value) is error
+    assert type(actual.value) is error
+    assert str(actual.value) == str(expected.value)
+
+
+def test_a_duplicate_grid_key_fails_like_the_row_path(tmp_path: Path) -> None:
+    """#582 리뷰 P3-1: `security_span` 이 겹쳐 (ticker, date) 가 두 번 나오면 같은 문장으로 끝난다.
+
+    격자 질의는 (date, ticker, span_seq) 순이라 같은 키는 붙어 나온다. 두 경로 모두 가장 이른
+    키를 말한다.
+    """
+    pytest.importorskip("duckdb", reason=DUCKDB_EXTRA)
+    root = build_workbench_root(tmp_path / "equity")
+    overlapping = [
+        ("005930", 2, date(2024, 1, 11), date(2024, 1, 11), "coverage_gap"),
+        ("000660", 2, date(2024, 1, 9), date(2024, 1, 9), "coverage_gap"),
+    ]
+    write_equity_table(
+        root, "security_span", span_table([*WB_SPANS, *overlapping]), build_id="b_span_dup"
+    )
+    write_catalog(root)
+    adapter = EquityDuckdbAdapter(root)
+    query = _query(("price.close",), universe="krx.all")
+    with pytest.raises(EquityDuckdbSetupError) as expected:
+        adapter.load_raw_observations(query)
+
+    with pytest.raises(EquityDuckdbSetupError) as actual:
+        load_raw_panel(adapter, query)
+
+    assert str(actual.value) == str(expected.value)
+    assert "key=('000660', datetime.date(2024, 1, 9))" in str(actual.value)
+
+
+@pytest.mark.parametrize(
+    ("field_id", "expr"),
+    [("price.volume", "CAST('x' AS VARCHAR)"), ("consensus.recommendation", "'buy'")],
+    ids=["grid", "latest"],
+)
+def test_a_categorical_value_fails_like_the_row_path(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch, field_id: str, expr: str
+) -> None:
+    """duckdb 필드 계약에는 범주 필드가 없다. 문자열 값이 실리면 두 경로 모두 설정 오류다."""
+    monkeypatch.setitem(adapter._fields, field_id, replace(adapter._fields[field_id], expr=expr))
+    query = _query(("price.close", field_id), history=1)
+    with pytest.raises(EquityDuckdbSetupError, match=f"{field_id} must be numeric"):
+        adapter.load_raw_observations(query)
+
+    with pytest.raises(EquityDuckdbSetupError, match=f"{field_id} must be numeric"):
+        load_raw_panel(adapter, query)
+
+
+@pytest.mark.parametrize(
+    "field_id", ["price.volume", "consensus.recommendation"], ids=["grid", "latest"]
+)
+def test_an_all_null_categorical_column_is_cells_without_values(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch, field_id: str
+) -> None:
+    """숫자가 아닌 선언 타입이라도 값이 모두 NULL 이면 행 경로처럼 값 없는 셀이다(text -1)."""
+    expr = "CAST(NULL AS VARCHAR)"
+    monkeypatch.setitem(adapter._fields, field_id, replace(adapter._fields[field_id], expr=expr))
+    query = _query(("price.close", field_id), history=1)
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+    column = _field(columnar, field_id)
+    assert column.present.any() and not column.has_value.any()
+    assert (column.text == -1).all() and column.categories == ()
+
+
+def test_a_categorical_value_outside_any_cell_is_not_read(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#582 리뷰 P3-1: 공개일이 NULL 인 행(셀 아님)에만 실린 문자열 값은 두 경로 모두 읽지 않는다.
+
+    행 경로 `_grid` 는 원천 행이 있고 공개일·내용일이 다 있는 행에서만 값을 `_as_float` 로 읽는다.
+    """
+    source = SOURCE_BY_NAME["flow"]
+    late_day = "date = DATE '2024-01-09'"
+    monkeypatch.setitem(
+        SOURCE_BY_NAME,
+        "flow",
+        replace(
+            source,
+            available_expr=f"CASE WHEN {late_day} THEN NULL ELSE {source.available_expr} END",
+        ),
+    )
+    field_id = "flow.foreign_net_buy"
+    monkeypatch.setitem(
+        adapter._fields,
+        field_id,
+        replace(adapter._fields[field_id], expr=f"CASE WHEN {late_day} THEN 'x' END"),
+    )
+    query = _query((field_id, "price.close"), universe="krx.all")
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
+def test_a_non_date_available_value_outside_any_cell_is_not_read(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#582 리뷰 nit-2: 공개일 열은 원천 행·내용일이 있는 행에서만 읽는다(행 경로 `_grid`).
+
+    공개일 열이 VARCHAR 이고 값은 내용일이 NULL 인 행에만 있으면 두 경로 모두 통과한다.
+    """
+    source = SOURCE_BY_NAME["flow"]
+    late_day = "date = DATE '2024-01-09'"
+    monkeypatch.setitem(
+        SOURCE_BY_NAME,
+        "flow",
+        replace(
+            source,
+            available_expr=f"CASE WHEN {late_day} THEN 'x' END",
+            content_expr=f"CASE WHEN {late_day} THEN NULL ELSE date END",
+        ),
+    )
+    query = _query(("flow.foreign_net_buy", "price.close"), universe="krx.all")
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
+@pytest.mark.parametrize(
+    ("source_name", "field_id"),
+    [("flow", "flow.foreign_net_buy"), ("consensus_eps", "consensus.forward_eps")],
+    ids=["grid", "latest"],
+)
+def test_an_all_null_non_date_content_column_matches_the_row_path(
+    adapter: EquityDuckdbAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    source_name: str,
+    field_id: str,
+) -> None:
+    """#582 리뷰 P3-1: 내용일 열이 날짜가 아닌 타입이어도 값이 모두 NULL 이면 행 경로처럼 통과한다.
+
+    GRID 는 내용일이 NULL 이면 셀이 없고, LATEST 는 내용일 대신 행 공개일을 쓴다.
+    """
+    source = SOURCE_BY_NAME[source_name]
+    monkeypatch.setitem(
+        SOURCE_BY_NAME, source_name, replace(source, content_expr="CAST(NULL AS VARCHAR)")
+    )
+    query = _query((field_id, "price.close"), universe="krx.all", history=2)
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
+@pytest.mark.parametrize("source_name", ["flow", "consensus_eps"], ids=["grid", "latest"])
+def test_a_non_date_content_value_fails_like_the_row_path(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch, source_name: str
+) -> None:
+    """내용일 열에 날짜가 아닌 값이 실리면 두 경로 모두 설정 오류다(예외 타입만 같다)."""
+    source = SOURCE_BY_NAME[source_name]
+    monkeypatch.setitem(
+        SOURCE_BY_NAME, source_name, replace(source, content_expr="CAST(available_date AS VARCHAR)")
+    )
+    field_id = next(field for field in _fields(adapter) if FIELD_BY_ID[field].source == source_name)
+    query = _query((field_id,), universe="krx.all", history=2)
+    with pytest.raises(EquityDuckdbSetupError, match="must be a date"):
+        adapter.load_raw_observations(query)
+
+    with pytest.raises(EquityDuckdbSetupError, match="must be a date"):
+        load_raw_panel(adapter, query)
+
+
+def test_the_adapter_declares_the_columnar_capability(adapter: EquityDuckdbAdapter) -> None:
+    """능력 선언(T2-03). 운영 파이프라인은 아직 이 능력을 고르지 않는다(T4-01)."""
+    query = _query(_fields(adapter), history=2)
+
+    assert isinstance(adapter, ColumnarRawObservationPort)
+    _assert_same_panel(
+        adapter.load_raw_panel(query, checkpoint=lambda: None, progress=lambda _f: None),
+        _reference(adapter, query),
+    )
 
 
 def test_progress_is_monotonic_and_ends_at_one(adapter: EquityDuckdbAdapter) -> None:
@@ -287,16 +678,16 @@ def test_progress_is_monotonic_and_ends_at_one(adapter: EquityDuckdbAdapter) -> 
         nonlocal checkpoints
         checkpoints += 1
 
-    load_grid_raw_panel(
+    load_raw_panel(
         adapter,
-        _query(_grid_fields(adapter), history=3),
+        _query(_fields(adapter), history=3),
         checkpoint=checkpoint,
         progress=reported.append,
     )
 
     assert reported == sorted(reported) and reported[-1] == 1.0
     assert all(0.0 <= fraction <= 1.0 for fraction in reported)
-    assert checkpoints > len(_grid_fields(adapter))
+    assert checkpoints > len(_fields(adapter))
 
 
 # --- 숫자 열 규칙(spec D3 원시 숫자 행) ---------------------------------------------------------
@@ -365,9 +756,25 @@ def test_each_declared_type_picks_its_reading_path(
     assert (column.direct, column.scale, column.exact) == (direct, scale, exact)
 
 
-def test_a_non_numeric_declared_type_is_refused() -> None:
+def test_a_non_numeric_declared_type_fails_only_when_a_value_is_carried() -> None:
+    """행 경로 `_as_float` 는 값이 실린 칸에서만 실패한다 — 열 경로도 값 유무만 읽어 같이 간다."""
+    duckdb = pytest.importorskip("duckdb", reason=DUCKDB_EXTRA)
+    column = numeric_column("v", "VARCHAR", "price.close")
+    con = duckdb.connect()
+    try:
+        carried = con.execute(
+            f"SELECT {', '.join(column.select('v'))} FROM (VALUES ('a'), (NULL)) t(v)"
+        ).fetchnumpy()
+        empty = con.execute(
+            f"SELECT {', '.join(column.select('v'))} FROM (VALUES (NULL::VARCHAR)) t(v)"
+        ).fetchnumpy()
+    finally:
+        con.close()
+
     with pytest.raises(EquityDuckdbSetupError, match="price.close must be numeric"):
-        numeric_column("v", "VARCHAR", "price.close")
+        column.decode(carried, lambda: None)
+    has_value, values = column.decode(empty, lambda: None)
+    assert not has_value.any() and values.tolist() == [0.0]
 
 
 @pytest.mark.parametrize(
@@ -426,10 +833,24 @@ def _cancelled_once_the_query_runs() -> Callable[[], None]:
     return checkpoint
 
 
-def test_both_columnar_queries_watch_the_callers_checkpoint(
-    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("fields", "queries"),
+    [
+        (("price.close",), 2),  # 격자 DESCRIBE·열 질의
+        (("price.close", "financial.book_equity"), 4),  # + LATEST DESCRIBE·열 질의
+    ],
+    ids=["grid", "grid-and-latest"],
+)
+def test_every_columnar_query_watches_the_callers_checkpoint(
+    adapter: EquityDuckdbAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    fields: tuple[str, ...],
+    queries: int,
 ) -> None:
-    """선언 타입 확인(DESCRIBE)과 열 질의가 모두 감시 스레드 아래에서 돈다."""
+    """선언 타입 확인(DESCRIBE)과 열 질의가 모두 감시 스레드 아래에서 돈다.
+
+    법인 대응(`_corp_map`)은 행 경로의 `_fetchall` 을 그대로 쓰므로 이 목록 밖이다.
+    """
     passed: list[Callable[[], None]] = []
     original = raw_panel_module._interruptible
 
@@ -444,9 +865,9 @@ def test_both_columnar_queries_watch_the_callers_checkpoint(
     def checkpoint() -> None:
         pass
 
-    load_grid_raw_panel(adapter, _query(("price.close",)), checkpoint=checkpoint)
+    load_raw_panel(adapter, _query(fields), checkpoint=checkpoint)
 
-    assert passed == [checkpoint, checkpoint]
+    assert passed == [checkpoint] * queries
 
 
 def test_a_cancelled_columnar_query_is_interrupted_into_the_callers_error(
@@ -480,7 +901,7 @@ def test_a_cancelled_columnar_query_is_interrupted_into_the_callers_error(
 
     started = time.monotonic()
     with pytest.raises(_Cancelled) as caught:
-        load_grid_raw_panel(
+        load_raw_panel(
             adapter, _query(("price.close",)), checkpoint=_cancelled_once_the_query_runs()
         )
 

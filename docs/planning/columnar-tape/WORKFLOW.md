@@ -87,7 +87,7 @@ Phase마다 작업분 SoT·책임 분리 점검을 하고, T9-01에서 portfolio
 | T6-03 | factor-regression 입력 | `factor_periods`가 `PortfolioPanel`을 읽는다(W4-01 뒤) | 회귀 공식 | `backtest_run/_factor_regression.py`, `_service.py` | `test_factor_regression*` |
 | T7-01 | 객체 평가기 삭제 | 옛 평가기·변환 삭제, digest 고정, SoT("팩터 정의"·"팩터의 세션 읽기 창"·"팩터 **값**"·"팩터 값의 공개일"·"결합 전 정규화"·"팩터 평가 규칙 판본" 행)·경계 규칙·`test_forbidden_imports` 갱신 | - | `_evaluation.py`, `_service.py`, tests, rules | 전체 |
 | T7-02 | 객체 컴파일러 삭제 | T5 대조 끝, 옛 `_compile_frame` 경로 삭제. `compile_target_tape(observations=...)`는 패널 변환 경계 함수로 남김 | - | `_compiler.py`, tests | 전체 |
-| T7-03 | 어댑터 단일화 | duckdb 행 API를 열 경로에서 파생, `_signal_labels`도 열 경로로, `RawObservationSet.validate_contract`를 `RawPanel` 검증에서 파생(계약 검증 하나) | 포트 행 메서드 제거 결정 | `equity_duckdb/*` | L0, 계약 테스트 |
+| T7-03 | 어댑터 단일화 | duckdb 행 API를 열 경로에서 파생, `_signal_labels`도 열 경로로, `RawObservationSet.validate_contract`를 `RawPanel` 검증에서 파생(계약 검증 하나). L0 대조 규칙도 한 벌로 합친다 — 지금은 `scripts/parity_tape.py`의 열 대조기 `panel_differences`(실원장용, 칸 수만)와 테스트의 `_projection`+`tests/parity/_compare.py`(손 픽스처용, 값까지) 두 벌이다(#582 리뷰 nit-1) | 포트 행 메서드 제거 결정 | `equity_duckdb/*` | L0, 계약 테스트 |
 | T9-01 | 종료 리뷰 | 경로 단일성·SoT·경계 감사, 도메인 전체 리뷰 | - | - | - |
 
 ## 4. Backlog

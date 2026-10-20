@@ -98,6 +98,7 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawObservation,
     RawObservationQuery,
     RawObservationSet,
+    RawPanel,
 )
 from strategy_workbench.domain.backtest.facade.runs import DataWarning, WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
@@ -371,6 +372,19 @@ class _GridSql:
     sql: str
     params: list[object]
     layout: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+@dataclass(frozen=True)
+class _LatestSql:
+    """LATEST 원천 질의 하나. (축 키, 공개일)마다 한 행이고 (k, av) 순서다.
+
+    결과 열 이름: `k`(축 키)·`av`(행 공개일)·`ct`(내용일)·`c{j}`(j 번째 필드 값), 그 뒤에
+    `late` 순서대로 `a{j}`(행보다 늦게 공개되는 j 번째 필드의 공개일). `late` 는 필드 위치 →
+    공개일 열 식이다.
+    """
+
+    sql: str
+    late: dict[int, str]
 
 
 def _no_members_detail(query: RawObservationQuery) -> str:
@@ -1329,6 +1343,26 @@ class EquityDuckdbAdapter:
         progress(1.0)
         return result
 
+    def load_raw_panel(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None] = _noop_checkpoint,
+        progress: Callable[[float], None] = _noop_progress,
+    ) -> RawPanel:
+        """`ColumnarRawObservationPort` 능력 — 같은 원시 관측을 행 객체 없이 열로 낸다(T2-03).
+
+        결과는 `RawPanel.from_observation_set(self.load_raw_observations(query),
+        field_ids=query.field_ids)` 와 셀마다 같다(columnar-tape spec 5절 L0). 구현과 규칙은
+        `_raw_panel.load_raw_panel` 이 소유한다. 운영 파이프라인은 아직 이 능력을 쓰지 않는다
+        (T4-01).
+        """
+        # `_raw_panel` 은 이 모듈의 규칙(`_cell_kind`·`_grid_sql`·`_latest_sql`)을 가져다 쓴다.
+        # 모듈 맨 위에서 불러오면 순환 import 라 호출 때 불러온다.
+        from ._raw_panel import load_raw_panel
+
+        return load_raw_panel(self, query, checkpoint=checkpoint, progress=progress)
+
     # ── BacktestDataPort ──────────────────────────────────────────────────────
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
@@ -1832,7 +1866,7 @@ class EquityDuckdbAdapter:
     ) -> _GridSql:
         """`universe_daily` × `security_span` 격자에 GRID 원천을 (ticker, date) 로 붙이는 질의.
 
-        행 경로(`_grid`)와 열 경로(`_raw_panel.load_grid_raw_panel`)가 이 질의 하나를 쓴다. 결과 열
+        행 경로(`_grid`)와 열 경로(`_raw_panel.load_raw_panel`)가 이 질의 하나를 쓴다. 결과 열
         이름은 `_GridSql` 이 적는다.
         """
         member_expr = (
@@ -2007,21 +2041,14 @@ class EquityDuckdbAdapter:
             con.close()
         return {str(ticker): str(corp) for ticker, corp in rows}
 
-    def _latest(
-        self,
-        source: SourceSpec,
-        fields: tuple[str, ...],
-        keys: Sequence[str],
-        fetch_end: date,
-        *,
-        checkpoint: Callable[[], None],
-    ) -> dict[str, _LatestSeries]:
-        """축 키 → `available_date` 오름차순 관측열. `reduce` 가 grain 을 (키, 공개일)로 줄인다.
+    def _latest_sql(
+        self, source: SourceSpec, fields: tuple[str, ...], fetch_end: date
+    ) -> _LatestSql:
+        """LATEST 원천 하나를 (축 키, 공개일)마다 한 행으로 줄여 읽는 질의.
 
-        `checkpoint` 는 질의 동안(`_fetchall`)과 관측 조립 중 `_CHECKPOINT_ROWS` 행마다 부른다.
+        행 경로(`_latest`)와 열 경로(`_raw_panel.load_raw_panel`)가 이 질의 하나를 쓴다. 결과 열
+        이름은 `_LatestSql` 이 적는다. 축 키 목록은 `_KEYS_SQL` 자리 파라미터 하나다.
         """
-        if not keys:
-            return {}
         outputs = {
             f"c{position}": self._fields[field_id].expr for position, field_id in enumerate(fields)
         }
@@ -2056,9 +2083,28 @@ class EquityDuckdbAdapter:
                 f"ORDER BY {source.pick_order}) AS rn "
                 f"FROM {relation} WHERE {predicate}) WHERE rn = 1 ORDER BY k, av"
             )
+        return _LatestSql(sql, late)
+
+    def _latest(
+        self,
+        source: SourceSpec,
+        fields: tuple[str, ...],
+        keys: Sequence[str],
+        fetch_end: date,
+        *,
+        checkpoint: Callable[[], None],
+    ) -> dict[str, _LatestSeries]:
+        """축 키 → `available_date` 오름차순 관측열. `reduce` 가 grain 을 (키, 공개일)로 줄인다.
+
+        `checkpoint` 는 질의 동안(`_fetchall`)과 관측 조립 중 `_CHECKPOINT_ROWS` 행마다 부른다.
+        """
+        if not keys:
+            return {}
+        latest_sql = self._latest_sql(source, fields, fetch_end)
+        late = latest_sql.late
         con = self._connect([source])
         try:
-            raw_rows = _fetchall(con, sql, [_keys_param(keys)], checkpoint)
+            raw_rows = _fetchall(con, latest_sql.sql, [_keys_param(keys)], checkpoint)
         finally:
             con.close()
         dates: dict[str, list[date]] = {}

@@ -545,7 +545,7 @@ class RawPanel:
 
 @runtime_checkable
 class ColumnarRawObservationPort(Protocol):
-    """선택 능력: 원시 관측을 열로 바로 낸다(T2-02 에서 duckdb 가 구현).
+    """선택 능력: 원시 관측을 열로 바로 낸다(T2-03 부터 duckdb 가 구현).
 
     결과는 `RawPanel.from_observation_set(load_raw_observations(query), field_ids=query.field_ids)`
     와 셀마다 같아야 한다(spec 5절 L0). 능력이 없는 어댑터는 application 이 그 구조 변환을 쓴다.

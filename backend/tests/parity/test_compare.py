@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
+import importlib.util
 import math
 import struct
 from dataclasses import dataclass, replace
 from datetime import date
+from pathlib import Path
+from types import ModuleType
 
 import numpy as np
 import pytest
 
+from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
+    MockEquityDataAdapter,
+)
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioPipelineResult
+from strategy_workbench.application.portfolio_design.facade.ports import (
+    RAW_CELL_KINDS,
+    RawFieldColumn,
+    RawObservationQuery,
+    RawPanel,
+)
 from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
 
 from ._compare import Difference, compare, differences, format_report
-from ._corpus import pipeline_cases
+from ._corpus import MOCK_WINDOW, pipeline_cases
 from ._engines import ENGINES, pipeline_source
 
 
@@ -102,4 +114,54 @@ def test_a_one_bit_change_deep_in_a_pipeline_result_is_located() -> None:
     report = compare("L3", [(case.key, result, changed)])
     assert [item.path for item in report.differences] == [
         f".preview.tape.frames[{len(frames) - 1}].targets[0].weight"
+    ]
+
+
+def _parity_tape_script() -> ModuleType:
+    """`scripts/parity_tape.py` 를 모듈로 읽는다(`scripts/` 는 패키지가 아니다)."""
+    path = Path(__file__).resolve().parents[2] / "scripts" / "parity_tape.py"
+    spec = importlib.util.spec_from_file_location("parity_tape_script", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _mock_panel() -> RawPanel:
+    adapter = MockEquityDataAdapter.demo()
+    fields = tuple(profile.field_id for profile in adapter.list_fields())[:4]
+    query = RawObservationQuery("KRX", "krx.common-stock", *MOCK_WINDOW, fields, 2)
+    return RawPanel.from_observation_set(adapter.load_raw_observations(query), field_ids=fields)
+
+
+def _with_column(panel: RawPanel, column: RawFieldColumn) -> RawPanel:
+    fields = tuple(column if item.field_id == column.field_id else item for item in panel.fields)
+    return replace(panel, fields=fields)
+
+
+def test_the_script_l0_comparator_reports_one_cell_per_changed_cell() -> None:
+    """`parity_tape --layer L0` 의 열 대조기(#582 리뷰 nit-1).
+
+    같은 패널이면 차이가 없고, 값 부호나 셀 종류를 한 칸 바꾸면 그 경로 한 칸만 낸다. 이 대조 규칙과
+    테스트의 `_projection`+`compare` 를 한 벌로 합치는 일은 T7-03 후속이다(WORKFLOW).
+    """
+    panel_differences = _parity_tape_script().panel_differences
+    panel = _mock_panel()
+    column = next(item for item in panel.fields if item.has_value.any())
+    row = int(np.flatnonzero(column.has_value)[0])
+
+    assert panel_differences(panel, _mock_panel()) == []
+
+    value = column.value.copy()
+    value[row] = -value[row] if value[row] != 0 else -0.0
+    flipped = replace(column, value=value)
+    assert panel_differences(panel, _with_column(panel, flipped)) == [
+        (f"fields[{column.field_id!r}].value", 1)
+    ]
+
+    kind = column.kind.copy()
+    kind[row] = (int(kind[row]) + 1) % len(RAW_CELL_KINDS)
+    relabelled = replace(column, kind=kind)
+    assert panel_differences(panel, _with_column(panel, relabelled)) == [
+        (f"fields[{column.field_id!r}].kind", 1)
     ]

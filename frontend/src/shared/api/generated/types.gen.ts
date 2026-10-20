@@ -524,6 +524,8 @@ export type BacktestCancelResult = {
     | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
+    | "backtest.run.worker_exited"
+    | "backtest.run.worker_mismatch"
     | null;
   /**
    * Kept By Owners
@@ -851,6 +853,8 @@ export type BacktestRunState = {
     | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
+    | "backtest.run.worker_exited"
+    | "backtest.run.worker_mismatch"
     | null;
   /**
    * Message
@@ -8454,6 +8458,8 @@ export type WalkForwardWindowResult = {
     | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
+    | "backtest.run.worker_exited"
+    | "backtest.run.worker_mismatch"
     | null;
   run_status: RunStatus | null;
 };

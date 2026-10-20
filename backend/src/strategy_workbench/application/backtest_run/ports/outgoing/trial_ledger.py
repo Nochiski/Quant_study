@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunState
 from strategy_workbench.domain.backtest.facade.trials import BlockedTrialAttempt, TrialLedgerEntry
 
 
@@ -43,15 +44,17 @@ class RunHeadline:
 class TrialLedgerPort(Protocol):
     def record_trial_result(
         self,
-        run_id: str,
+        completed: BacktestRunState,
         *,
         session_sharpe: float | None,
         metric_registry_version: str,
         headline: RunHeadline | None = None,
     ) -> None:
-        """완료된 run 의 대표 샤프 후보(세션 단위)와 지표 레지스트리 판본을 적는다.
+        """run 의 완료 전이와 대표 샤프 후보(세션 단위)·지표 레지스트리 판본을 한 트랜잭션에 적는다.
 
-        `headline` 은 목록이 읽는 머리 지표다. 같은 트랜잭션에 적어 완료 기록과 갈리지 않게 한다.
+        `completed` 는 `COMPLETED` 상태여야 한다. `headline` 은 목록이 읽는 머리 지표다. 셋을
+        함께 적어 완료가 아닌 run 에 대표 샤프·머리 지표가 남지 않게 한다 — 서비스는 취소와
+        선형화해 완료가 이긴 뒤에만 부른다(#581 리뷰).
         """
         ...
 

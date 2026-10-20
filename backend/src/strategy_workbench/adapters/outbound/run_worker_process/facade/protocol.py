@@ -1,8 +1,10 @@
 from strategy_workbench.adapters.outbound.run_worker_process._protocol import (
     PROTOCOL_VERSION,
     CommittedMessage,
+    EngineReadyMessage,
     FailedMessage,
     JobMessage,
+    ProceedMessage,
     ProgressMessage,
     ProtocolError,
     ReadyMessage,
@@ -11,15 +13,19 @@ from strategy_workbench.adapters.outbound.run_worker_process._protocol import (
     WorkerSettings,
     decode_event,
     decode_job,
+    decode_proceed,
     encode_event,
     encode_job,
+    encode_proceed,
 )
 
 __all__ = [
     "PROTOCOL_VERSION",
     "CommittedMessage",
+    "EngineReadyMessage",
     "FailedMessage",
     "JobMessage",
+    "ProceedMessage",
     "ProgressMessage",
     "ProtocolError",
     "ReadyMessage",
@@ -28,6 +34,8 @@ __all__ = [
     "WorkerSettings",
     "decode_event",
     "decode_job",
+    "decode_proceed",
     "encode_event",
     "encode_job",
+    "encode_proceed",
 ]

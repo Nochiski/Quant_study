@@ -64,7 +64,9 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다. run 계산은
   기본으로 서버 프로세스의 스레드에서 돌고, `STRATEGY_WORKBENCH_RUN_ISOLATION=process`(opt-in, 기본
   `thread`)면 run마다 worker 프로세스(`python -m strategy_workbench.bootstrap.run_worker`)에서 돈다 —
-  설계는 `docs/superpowers/specs/2026-10-19-run-worker-process-design.md`, 취소·고장·판본 대조는 W1-03 몫.
+  설계는 `docs/superpowers/specs/2026-10-19-run-worker-process-design.md`. 이 방식에서 취소는 worker
+  종료라 어느 단계에서든 바로 끝나고, worker 가 결과 없이 끝나면 `backtest.run.worker_exited`, 서버와
+  다른 데이터·코드 판본을 읽었으면 `backtest.run.worker_mismatch`(서버를 다시 시작한다)로 끝난다.
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다

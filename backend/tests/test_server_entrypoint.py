@@ -117,11 +117,10 @@ def test_run_isolation_comes_from_the_environment_and_unknown_values_stop_the_bu
 
     with pytest.raises(ValueError, match="unsupported run isolation"):
         _container.build_container(artifact_root=tmp_path, run_isolation="processes")
-    # e2e hold 는 아직 worker 와 왕복하지 못한다(W1-03) — 붙잡지 못한 채 돌지 않는다.
-    with pytest.raises(ValueError, match="trial hold is not supported"):
-        _container.build_container(
-            artifact_root=tmp_path, run_isolation="process", trial_hold_seconds=1.0
-        )
+    # e2e hold 는 worker 와 엔진 관문으로 왕복한다(spec D11) — 프로세스 방식에서도 켤 수 있다.
+    _container.build_container(
+        artifact_root=tmp_path, run_isolation="process", trial_hold_seconds=1.0
+    )
 
 
 def test_importing_and_building_test_app_never_opens_the_runtime_database(

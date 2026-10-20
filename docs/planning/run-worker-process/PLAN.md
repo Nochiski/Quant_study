@@ -3,14 +3,14 @@ plan_version: 1
 project: run-worker-process
 project_status: IN_PROGRESS
 current_phase: W1
-current_pr: W1-02
-active_prs: [W1-02]
+current_pr: W1-03
+active_prs: [W1-03]
 parallel_window: []
-last_updated: 2026-10-20T03:47:07+09:00
+last_updated: 2026-10-20T06:46:24+09:00
 planned_prs: 10
-merged_prs: 2
-approved_prs: 2
-progress_percent: 20
+merged_prs: 3
+approved_prs: 3
+progress_percent: 30
 ---
 
 # run 별도 프로세스 실행 진행 계획
@@ -25,11 +25,11 @@ progress_percent: 20
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `W1` |
-| Current/next PR | `W1-02` |
-| Active PR | `W1-02` |
-| Progress | `2 / 10 merged (20%)` |
-| Approved | `2 / 10` |
-| Aggregated at | `2026-10-20 03:47 KST` |
+| Current/next PR | `W1-03` |
+| Active PR | `W1-03` |
+| Progress | `3 / 10 merged (30%)` |
+| Approved | `3 / 10` |
+| Aggregated at | `2026-10-20 06:46 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -54,13 +54,13 @@ progress_percent: 20
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | W0 | Planning package and benchmark | 1 | 1 | `MERGED` |
-| W1 | Computation boundary and worker process | 3 | 1 | `IN_PROGRESS` |
+| W1 | Computation boundary and worker process | 3 | 2 | `IN_PROGRESS` |
 | W2 | Spare worker and memory guard | 2 | 0 | `WAITING` |
 | W3 | Default switch and SoT revision | 1 | 0 | `WAITING` |
 | W4 | Factor regression job | 1 | 0 | `WAITING` |
 | W5 | Interactive path decision gate | 1 | 0 | `WAITING` |
 | W9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **10** | **2** | **20%** |
+| **Total** |  | **10** | **3** | **30%** |
 <!-- PLAN:PHASES:END -->
 
 ## W0 — 기획
@@ -74,8 +74,8 @@ progress_percent: 20
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `W1-01` | 계산 경계 추출, `RunExecutionPort`, `run_thread` adapter(동작 불변) | W0-01 | `MERGED` | #572 · 2차 APPROVE(1차 P2 1건 해소) · main 머지 50a5c6ac(2026-10-20) |
-| [ ] | `W1-02` | `bootstrap/run_worker`, IPC v1, `run_worker_process` adapter(opt-in), Windows backend job | W1-01 | `IN_PROGRESS` | - |
-| [ ] | `W1-03` | 취소=종료(감독 스레드 종결), worker 고장, 부모 사망(Job Object), 판본 묶음 대조, e2e hold 게이트, 실패 코드 2개 | W1-02 | `PLANNED` | - |
+| [x] | `W1-02` | `bootstrap/run_worker`, IPC v1, `run_worker_process` adapter(opt-in), Windows backend job | W1-01 | `MERGED` | #575 · APPROVE(P3 6건 중 4건 W1-03, 2건 W2-02) · main 머지 5ed8c88a(2026-10-20) |
+| [ ] | `W1-03` | 취소=종료(감독 스레드 종결), worker 고장, 부모 사망(Job Object), 판본 묶음 대조, e2e hold 게이트, 실패 코드 2개 | W1-02 | `IN_PROGRESS` | - |
 
 ## W2 — 지연과 메모리
 

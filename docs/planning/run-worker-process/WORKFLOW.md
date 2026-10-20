@@ -137,6 +137,7 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 - 서버 정상 종료(lifespan) 때 도는 worker가 정리된다.
 - e2e hold가 프로세스 모드에서도 같은 의미로 동작한다(D11 `engine_ready` → 부모 판정 → `proceed`). 실험이 나중에 이은 사용자 run도 붙잡힌다.
 - 실패 코드 두 개를 `RunFailureCode`에 더하고, OpenAPI·SDK 재생성 커밋과 frontend `backtest.run.error.*` 번역을 함께 넣는다.
+- #575 리뷰 P3: 부모가 부팅 때 한 번 계산하는 판본 묶음(코드 지문 포함)의 비용을 재서 PR 본문에 남긴다.
 
 **Non-goal**: 예비 worker, 메모리 가드.
 
@@ -149,6 +150,9 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 **Acceptance**:
 - 슬롯과 무관하게 `ready`까지 부팅한 예비 worker를 항상 1개 둔다. 쓰면 바로 새 예비를 띄운다.
 - 예비 부팅 실패·판본 불일치 정책은 spec D7을 따른다. 서버 종료와 reload 때 예비 worker도 정리된다.
+- #581 리뷰 nit(후속): 서버 종료 정리를 `app.router.add_event_handler("shutdown", …)`에서 FastAPI lifespan
+  context로 옮긴다. 실험 SSE 회수(`_experiment_routes.py`)도 같은 방식이라 둘을 함께 옮긴다. W1-03에서는
+  범위가 커져 미뤘다.
 - 프로세스 모드 전체 `npm run test:e2e`(Windows) 시간이 스레드 모드 대비 5% 이하로 늘어난다(V-7). 두 시간을 PR 본문에 남긴다.
 
 ### W2-02 — 메모리 가드
@@ -163,6 +167,7 @@ Phase가 끝날 때마다 작업분 SoT·책임 분리 점검을 하고, W9-01�
 - 최대 RSS 로그에 읽은 세션 수·필드 수·팩터 수·유니버스 행 수를 함께 남긴다. 추정식(세션 수 하나)을 다시 맞출 때 다른 전략 모양의 근거가 된다.
 - US-SM-15 비고에 "메모리가 모자라면 슬롯이 비어도 `queued`로 기다린다"를 적는다.
 - worker가 보고한 최대 RSS를 로그에 남긴다.
+- #575 리뷰 P3: worker의 최대 RSS 코드(`run_worker_process/_worker.py`의 `peak_rss_bytes`, ctypes·`resource`)를 가용 메모리 adapter와 같은 곳으로 모은다.
 - 가용 메모리 조회는 부모의 작은 adapter 하나가 소유한다. Windows는 `GlobalMemoryStatusEx`, Linux는 `/proc/meminfo`를 쓰고, 새
   라이브러리는 들이지 않는다.
 - 테스트는 조회를 주입해 대기·해제 순서를 확인한다.

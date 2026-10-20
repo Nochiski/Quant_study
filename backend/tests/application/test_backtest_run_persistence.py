@@ -189,8 +189,20 @@ def test_a_failed_accept_write_rejects_the_run(
 
 
 class _RefusingUpdate(SQLiteBacktestRunRepository):
+    """디스크가 찬 저장소: 접수 뒤의 상태 전이를 하나도 적지 못한다(완료 전이 포함)."""
+
     def update(self, state: BacktestRunState) -> None:
         raise ResearchStorageError(f"disk full — run_id={state.run_id}")
+
+    def record_trial_result(
+        self,
+        completed: BacktestRunState,
+        *,
+        session_sharpe: float | None,
+        metric_registry_version: str,
+        headline: RunHeadline | None = None,
+    ) -> None:
+        raise ResearchStorageError(f"disk full — run_id={completed.run_id}")
 
 
 def test_a_completion_that_cannot_be_saved_is_not_shown(
@@ -221,13 +233,13 @@ def test_a_completion_that_cannot_be_saved_is_not_shown(
 class _RefusingTrialResult(SQLiteBacktestRunRepository):
     def record_trial_result(
         self,
-        run_id: str,
+        completed: BacktestRunState,
         *,
         session_sharpe: float | None,
         metric_registry_version: str,
         headline: RunHeadline | None = None,
     ) -> None:
-        raise ResearchStorageError(f"disk full — run_id={run_id}")
+        raise ResearchStorageError(f"disk full — run_id={completed.run_id}")
 
 
 def test_a_completion_whose_trial_result_cannot_be_saved_is_not_shown(
@@ -237,7 +249,8 @@ def test_a_completion_whose_trial_result_cannot_be_saved_is_not_shown(
     시도로 세고 사용자는 결과를 본다."""
     free = _open_barrier(barriers)
     free.release.set()
-    runs = _service(tmp_path, _RefusingTrialResult(), free, "run-1")
+    repository = _RefusingTrialResult()
+    runs = _service(tmp_path, repository, free, "run-1")
 
     runs.start(_request())
 
@@ -245,7 +258,10 @@ def test_a_completion_whose_trial_result_cannot_be_saved_is_not_shown(
     assert (ended.status, ended.artifact_sha256) == (RunStatus.FAILED, None)
     with pytest.raises(BacktestResultNotReadyError):
         runs.result("run-1")
-    assert "trial result could not be recorded — run_id=run-1" in caplog.text
+    assert "run completion and trial result could not be recorded — run_id=run-1" in caplog.text
+    # 완료 전이·대표 샤프·머리 지표는 한 트랜잭션이라 함께 적히지 않았다.
+    assert repository.get("run-1").run.status is not RunStatus.COMPLETED
+    assert repository.get("run-1").headline is None
 
 
 def test_only_recent_finished_runs_keep_an_in_memory_copy(

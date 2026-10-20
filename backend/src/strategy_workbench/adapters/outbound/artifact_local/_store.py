@@ -128,6 +128,20 @@ class LocalArtifactStore:
         if target.exists():
             shutil.rmtree(target)
 
+    def discard_unfinished(self, run_id: str) -> None:
+        """끝나지 못한 run 하나의 staging(`.{run_id}.*.tmp`)과 결과 디렉터리를 지운다(멱등).
+
+        다른 프로세스(run worker)가 쓰던 run 을, 그 프로세스가 끝난 뒤 부모가 치울 때 쓴다
+        (run-worker spec D5). 프로세스가 살아 있는 동안 부르지 않는다 — rename·열린 파일과 경합한다.
+        """
+        target = self._run_dir(run_id)
+        for staging in self._root.glob(f".{run_id}.*.tmp"):
+            shutil.rmtree(staging)
+            logger.warning("unfinished run artifact staging removed — run_id=%s", run_id)
+        if target.exists():
+            shutil.rmtree(target)
+            logger.warning("unfinished run artifact removed — run_id=%s", run_id)
+
     def _run_dir(self, run_id: str) -> Path:
         target = (self._root / run_id).resolve()
         if target.parent != self._root:

@@ -833,6 +833,14 @@ class BacktestRunService:
             return _FactorMiss(FactorRegressionUnavailableReason.DATA_SNAPSHOT_CHANGED, True)
         return pipeline
 
+    def shutdown(self) -> None:
+        """서버가 끝날 때 전송이 띄운 것을 정리한다(run-worker spec D5).
+
+        도는 run 을 종결로 바꾸지 않는다 — 기록은 `queued`·`running` 으로 남고 다음 부팅이
+        `interrupted` 로 닫는다(`_close_interrupted_runs`).
+        """
+        self._run_execution.shutdown()
+
     def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.
 
@@ -1047,17 +1055,21 @@ class BacktestRunService:
                 environment.start,
             )
 
-    def _record_trial_result(self, run_id: str, committed: RunCommitted) -> None:
-        """완료와 같은 내구 경로다. 실패하면 원인을 남기고 올려 완료를 막는다(#381)."""
+    def _record_completion(self, completed: BacktestRunState, committed: RunCommitted) -> None:
+        """완료 전이와 대표 샤프·머리 지표를 한 트랜잭션에 적는다. 실패하면 원인을 남기고 올려
+        완료를 막는다(#381)."""
         try:
             self._repository.record_trial_result(
-                run_id,
+                completed,
                 session_sharpe=committed.session_sharpe,
                 metric_registry_version=committed.metric_registry_version,
                 headline=committed.headline,
             )
         except Exception:
-            logger.exception("trial result could not be recorded — run_id=%s", run_id)
+            logger.exception(
+                "run completion and trial result could not be recorded — run_id=%s",
+                completed.run_id,
+            )
             raise
 
     def _dispatch(self) -> None:
@@ -1132,24 +1144,17 @@ class BacktestRunService:
         )
 
     def _complete(self, record: _RunRecord, committed: RunCommitted) -> None:
-        """커밋한 결과를 완료로 보인다. 취소가 먼저 이겼으면 결과를 지우고 `RunCancelledError`."""
+        """커밋한 결과를 완료로 보인다. 취소가 먼저 이겼으면 결과를 지우고 `RunCancelledError`.
+
+        완료와 취소 접수는 같은 잠금에서 선형화한다. 취소가 먼저 잡았으면 커밋한 묶음을 지우고
+        아무것도 적지 않는다. 완료가 먼저 잡았으면 완료 전이·대표 샤프·머리 지표를 한 트랜잭션에
+        적고, 뒤의 취소는 끝난 run 을 보고 받아들여지지 않는다. 승패가 정해지기 전에 원장·머리
+        지표를 적지 않는다 — 적으면 취소된 run 에 샤프·머리 지표가 남는다(#581 리뷰).
+        """
         run_id = record.state.run_id
-        try:
-            self._record_trial_result(run_id, committed)
-        except Exception:
-            # 대표 샤프를 기록하지 못한 완료도 보이지 않는다 — 보이면 원장이 그 시도를 샤프 없는
-            # 시도로 세 사용자가 본 결과와 갈린다(#381). 실행은 실패 분기로 끝난다.
-            self._artifact_store.discard(run_id)
-            raise
-        cancelled_after_commit = False
         with self._lock:
-            # Completion and cancel acceptance linearize on the same lock. If cancel acquired
-            # it first, the committed bundle is compensation-cleaned and never becomes
-            # observable through state/result. If completion acquired it first, cancel sees a
-            # terminal run and is not accepted.
-            if record.cancellation.is_set():
-                cancelled_after_commit = True
-            else:
+            cancelled_after_commit = record.cancellation.is_set()
+            if not cancelled_after_commit:
                 record.state = replace(record.state, artifact_sha256=committed.sha256)
                 try:
                     self._emit(
@@ -1158,7 +1163,7 @@ class BacktestRunService:
                         1.0,
                         "completed",
                         "Run completed",
-                        durable=True,
+                        completion=committed,
                     )
                 except Exception:
                     # 저장하지 못한 완료는 보이지 않는다 — 보이면 사용자가 본 결과를 원장이
@@ -1231,10 +1236,14 @@ class BacktestRunService:
         stage: RunStage,
         message: str,
         *,
-        durable: bool = False,
+        completion: RunCommitted | None = None,
     ) -> None:
-        """상태를 바꾸고 이벤트를 남긴다. `durable` 이면 저장이 먼저이고 실패하면 올린다(메모리
-        상태도 바꾸지 않는다). 아니면 상태가 바뀔 때만 저장하고 저장 실패는 삼킨다(`_persist`)."""
+        """상태를 바꾸고 이벤트를 남긴다.
+
+        `completion` 이 있으면(완료 전이) 대표 샤프·머리 지표와 함께 저장이 먼저이고 실패하면
+        올린다(메모리 상태도 바꾸지 않는다). 아니면 상태가 바뀔 때만 저장하고 저장 실패는
+        삼킨다(`_persist`).
+        """
         occurred_at = self._now()
         previous = record.state.status
         state = replace(
@@ -1247,8 +1256,9 @@ class BacktestRunService:
             started_at=record.state.started_at
             or (occurred_at if status is RunStatus.RUNNING else None),
         )
-        if durable:
-            self._repository.update(state)
+        durable = completion is not None
+        if completion is not None:
+            self._record_completion(state, completion)
         record.state = state
         record.events.append(
             RunProgressEvent(
@@ -1298,7 +1308,7 @@ class BacktestRunService:
 
         run 스레드의 실패 분기가 다시 저장하다 터지면 레코드가 비종결로 굳는다. 이 프로세스에서는
         메모리 상태가 계속 맞고(저장하지 못한 종결 run 은 사본을 버리지 않는다), 저장되지 않은
-        전이는 재시작 때 `interrupted` 로 닫힌다. 완료는 여기로 오지 않는다(`_emit(durable=True)`).
+        전이는 재시작 때 `interrupted` 로 닫힌다. 완료는 여기로 오지 않는다(`_emit(completion=…)`).
         """
         try:
             self._repository.update(state)

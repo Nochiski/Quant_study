@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -10,9 +12,11 @@ import pytest
 
 from strategy_workbench.adapters.outbound.research_sqlite._schema import V1_SCHEMA_OBJECTS
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    ResearchStorageError,
     SQLiteBacktestRunRepository,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
+    RunHeadline,
     TrialLineageAlreadyMergedError,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
@@ -94,13 +98,80 @@ def test_merging_an_already_merged_lineage_again_links_the_surviving_lineages(
     assert [entry.run_id for entry in records.entries] == ["run-a", "run-b", "run-c"]
 
 
+def _completed(run_id: str) -> BacktestRunState:
+    return BacktestRunState(
+        run_id,
+        RunStatus.COMPLETED,
+        1.0,
+        "completed",
+        "Run completed",
+        _AT,
+        _AT,
+        artifact_sha256="f" * 64,
+    )
+
+
 def test_a_trial_result_for_an_unknown_run_is_refused(tmp_path: Path) -> None:
     repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
 
     with pytest.raises(BacktestRunNotFoundError):
         repository.record_trial_result(
-            "missing", session_sharpe=0.1, metric_registry_version="metric-registry-v4"
+            _completed("missing"), session_sharpe=0.1, metric_registry_version="metric-registry-v4"
         )
+
+
+def test_a_completion_whose_last_write_fails_leaves_nothing_behind(tmp_path: Path) -> None:
+    """완료 전이·대표 샤프·머리 지표는 한 트랜잭션이라 마지막 쓰기가 실패하면 앞의 둘도 남지
+    않는다(#581 2차 리뷰 P3-1). 머리 지표 표에 실패 트리거를 걸어 마지막 문장을 깬다."""
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    _add(repository, "run-1", "s-1")
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "CREATE TRIGGER refuse_headline BEFORE INSERT ON backtest_run_headlines "
+            "BEGIN SELECT RAISE(ABORT, 'x'); END"
+        )
+        connection.commit()
+
+    with pytest.raises(ResearchStorageError):
+        repository.record_trial_result(
+            _completed("run-1"),
+            session_sharpe=0.1,
+            metric_registry_version="metric-registry-v4",
+            headline=RunHeadline(total_return=0.1, sharpe=1.0, max_drawdown=-0.1),
+        )
+
+    (entry,) = repository.trial_ledger("s-1").entries
+    assert repository.get("run-1").run.status is not RunStatus.COMPLETED
+    assert entry.session_sharpe is None
+
+
+def test_the_trial_result_is_written_with_the_completed_state(tmp_path: Path) -> None:
+    """완료 전이·대표 샤프·머리 지표는 한 트랜잭션이다(#581 리뷰). 완료가 아니면 적지 않는다."""
+    repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
+    _add(repository, "run-1", "s-1")
+
+    with pytest.raises(ValueError, match="completed state"):
+        repository.record_trial_result(
+            replace(_completed("run-1"), status=RunStatus.CANCELLED),
+            session_sharpe=0.1,
+            metric_registry_version="metric-registry-v4",
+            headline=RunHeadline(total_return=0.1, sharpe=1.0, max_drawdown=-0.1),
+        )
+    assert repository.get("run-1").headline is None
+    assert repository.trial_ledger("s-1").entries[0].session_sharpe is None
+
+    repository.record_trial_result(
+        _completed("run-1"),
+        session_sharpe=0.1,
+        metric_registry_version="metric-registry-v4",
+        headline=RunHeadline(total_return=0.1, sharpe=1.0, max_drawdown=-0.1),
+    )
+    summary = repository.get("run-1")
+    (entry,) = repository.trial_ledger("s-1").entries
+    assert (summary.run.status, summary.run.artifact_sha256) == (RunStatus.COMPLETED, "f" * 64)
+    assert summary.headline == RunHeadline(total_return=0.1, sharpe=1.0, max_drawdown=-0.1)
+    assert (entry.status, entry.session_sharpe) == (RunStatus.COMPLETED, 0.1)
 
 
 def test_a_failed_run_carries_its_failure_code_into_the_ledger(tmp_path: Path) -> None:

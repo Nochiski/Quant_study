@@ -102,9 +102,14 @@ def _object_nodes(case: EvaluatorCase) -> object:
     return NodeCache(evaluator.computed, evaluator.masked)
 
 
-def columnar_nodes(case: EvaluatorCase) -> object:
-    """L1 열 평가기 결과를 객체 평가기와 같은 `NodeCache` 모양(Python 값 목록)으로 낸다."""
-    panel = FactorPanel.from_observations(case.observations, case.graph)
+def columnar_nodes(case: EvaluatorCase, panel: FactorPanel | None = None) -> object:
+    """L1 열 평가기 결과를 객체 평가기와 같은 `NodeCache` 모양(Python 값 목록)으로 낸다.
+
+    `panel` 은 `case.observations` 를 바꾼 패널이다(실원장 스크립트가 그래프마다 다시 만들지
+    않으려고 넘긴다). 없으면 그래프가 읽는 필드로 만든다.
+    """
+    if panel is None:
+        panel = FactorPanel.from_observations(case.observations, case.graph)
     try:
         cache = evaluate_panel_nodes(
             case.graph, panel=panel, missing=case.missing, parameters=case.parameters

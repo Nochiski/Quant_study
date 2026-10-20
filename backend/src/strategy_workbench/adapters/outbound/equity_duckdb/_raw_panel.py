@@ -20,6 +20,8 @@
   로 옮겼다. 행보다 늦게 공개되는 필드(재무 TTM, #238)가 컷오프보다 늦으면 값 없는 MISSING 이고
   공개일은 행의 공개일이다.
 - 취소는 행 경로와 같은 감시 스레드 방식(`_interruptible`)이다.
+- 질의 `field_ids` 가 겹치면 행 경로에 맡긴다. 그 질의는 두 경로 모두 예외로 끝나고, 어느 예외가
+  먼저인지는 행 경로의 검사 순서가 정한다(#582 리뷰 nit-4).
 
 어댑터는 `EquityDuckdbAdapter.load_raw_panel` 로 `ColumnarRawObservationPort` 능력을 선언한다.
 운영 파이프라인은 아직 이 능력을 쓰지 않는다(T4-01).
@@ -40,7 +42,6 @@ from numpy.typing import NDArray
 from strategy_workbench.application.portfolio_design.facade.ports import (
     RAW_CELL_KINDS,
     RawFieldColumn,
-    RawObservationContractViolation,
     RawObservationQuery,
     RawPanel,
 )
@@ -431,10 +432,22 @@ def load_raw_panel(
     끝난다. 실패 값으로 끝나는 경로는 보고하지 않는다(행 경로와 같다). `checkpoint` 는 질의마다
     감시 스레드로, 단계·원천·필드 사이와 긴 루프 안에서 부른다.
 
+    질의 `field_ids` 가 겹치면 행 경로를 그대로 불러 그 예외를 낸다. 열 패널은 같은 field_id 열을
+    두 번 담지 못해(`RawPanel` 생성의 ValueError) 그 질의는 어느 경로에서나 실패한다. 행 경로는
+    셀 생성·집합 검증의 계약 위반(`RawObservationContractViolation`)이 먼저이고 없으면
+    `from_observation_set` 의 ValueError 다. 위반의 순서를 열에서 다시 적지 않으려고 맡긴다.
+
     Raises:
         EquityDuckdbSetupError: 원천 열 타입·격자 중복이 행 경로도 거절할 모양이다.
     """
     checkpoint()
+    if len(set(query.field_ids)) != len(query.field_ids):
+        return RawPanel.from_observation_set(
+            adapter.load_raw_observations_reporting(
+                query, checkpoint=checkpoint, progress=progress
+            ),
+            field_ids=query.field_ids,
+        )
     request = adapter._raw_request(query)
     if isinstance(request, _RawRejection):
         return _failure_panel(adapter._snapshot_id, request, query.field_ids)
@@ -579,14 +592,6 @@ def load_raw_panel(
     )
     member = _take(member, _take(rows, order, checkpoint), checkpoint)
     securities = tuple(sorted(security_ids))
-    _reject_repeated_fields(
-        query.field_ids,
-        columns,
-        row_date,
-        row_security,
-        securities,
-        adapter._snapshot_id,
-    )
     checkpoint()
     panel = RawPanel(
         status=DataLoadStatus.OK if rows.size else DataLoadStatus.NO_DATA,
@@ -661,43 +666,6 @@ def _row_order(
             checkpoint()
             pending = 0
     return order
-
-
-def _reject_repeated_fields(
-    field_ids: Sequence[str],
-    columns: Sequence[RawFieldColumn],
-    row_date: NDArray[np.int32],
-    row_security: NDArray[np.int32],
-    securities: Sequence[str],
-    snapshot_id: str,
-) -> None:
-    """질의 field_ids 에 같은 필드가 두 번 있으면 행 경로와 같은 계약 위반으로 거절한다.
-
-    행 경로는 관측마다 fields 를 질의 순서로 싣고 `RawObservationSet` 생성 검사가 (행 순서, fields
-    순서)로 처음 겹친 칸을 거절한다. 같은 필드의 열은 present 가 같으므로 다시 나온 자리의 열이
-    present 인 첫 (행, 자리)가 그 칸이다. 그런 셀이 하나도 없으면 행 경로는 통과하고 열 경로는
-    `RawPanel` 생성의 중복 field_id 검사(`from_observation_set` 과 같은 ValueError)로 끝난다.
-    """
-    seen: set[str] = set()
-    repeats: list[int] = []
-    for position, field_id in enumerate(field_ids):
-        if field_id in seen:
-            repeats.append(position)
-        seen.add(field_id)
-    best: tuple[int, int] | None = None
-    for position in repeats:
-        hits = np.flatnonzero(columns[position].present)
-        if hits.size and (best is None or int(hits[0]) < best[0]):
-            best = (int(hits[0]), position)
-    if best is None:
-        return
-    row, position = best
-    raise RawObservationContractViolation(
-        "raw observation field_ids must be unique — "
-        f"as_of={date.fromordinal(int(row_date[row]))} "
-        f"security_id={securities[int(row_security[row])]!r} "
-        f"field_id={field_ids[position]!r} snapshot={snapshot_id!r}"
-    )
 
 
 class _GridLookup:

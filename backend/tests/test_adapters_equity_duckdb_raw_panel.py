@@ -416,6 +416,45 @@ def test_a_repeated_query_field_fails_like_the_row_path(
 
 
 @pytest.mark.parametrize(
+    ("fields", "error"),
+    [
+        (("event.buyback_amount",) * 2, ValueError),
+        (
+            ("price.close", "event.buyback_amount", "event.buyback_amount"),
+            RawObservationContractViolation,
+        ),
+    ],
+    ids=["no-other-violation", "masked-value-first"],
+)
+def test_a_repeated_field_without_cells_fails_like_the_row_path(
+    adapter: EquityDuckdbAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    fields: tuple[str, ...],
+    error: type[ValueError],
+) -> None:
+    """#582 리뷰 nit-4: 겹친 필드에 셀이 하나도 없어도 행 경로와 같은 예외·문장으로 끝난다.
+
+    창 끝(2023-12-27)이 자사주 관측의 공개일보다 앞이라 겹친 필드의 셀이 없다. 다른 위반이
+    없으면 `from_observation_set` 의 ValueError, 가린 셀에 값이 실렸으면 행 경로가 셀을 만들 때
+    내는 계약 위반이 먼저다.
+    """
+    price = SOURCE_BY_NAME["price"]
+    monkeypatch.setitem(
+        SOURCE_BY_NAME, "price", replace(price, masked_expr="(date = DATE '2023-12-27')")
+    )
+    query = _query(fields, start=date(2023, 12, 26), end=date(2023, 12, 27), universe="krx.all")
+    with pytest.raises(ValueError) as expected:
+        _reference(adapter, query)
+
+    with pytest.raises(ValueError) as actual:
+        load_raw_panel(adapter, query)
+
+    assert type(expected.value) is error
+    assert type(actual.value) is error
+    assert str(actual.value) == str(expected.value)
+
+
+@pytest.mark.parametrize(
     ("field_id", "expr"),
     [("price.volume", "CAST('x' AS VARCHAR)"), ("consensus.recommendation", "'buy'")],
     ids=["grid", "latest"],

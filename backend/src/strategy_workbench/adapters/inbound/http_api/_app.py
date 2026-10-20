@@ -374,11 +374,16 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        yield
-        # run 전송이 띄운 worker(예비 포함)를 정리한다(run-worker spec D5·D7).
-        backtest_runs.shutdown()
-        for close in closers:
-            await close()
+        # 예외·취소로 빠져도 정리는 한다(#591 리뷰 P3-3). 한쪽 정리가 실패해도 다른 쪽을 부른다.
+        try:
+            yield
+        finally:
+            try:
+                # run 전송이 띄운 worker(예비 포함)를 정리한다(run-worker spec D5·D7).
+                backtest_runs.shutdown()
+            finally:
+                for close in closers:
+                    await close()
 
     app = FastAPI(
         title="Quant Strategy Workbench API",

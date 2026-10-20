@@ -390,3 +390,25 @@ def test_http_lifespan_shutdown_closes_the_experiment_streams(
         assert calls == []
 
     assert calls == ["runs", "streams"]
+
+
+def test_http_lifespan_cleans_up_even_when_the_server_leaves_with_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """lifespan 이 예외로 빠져도 run 전송·예비 정리와 실험 스트림 회수를 한다(#591 리뷰 P3-3)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", lambda self: calls.append("runs"))
+    app = build_http_app(artifact_root=tmp_path / "artifacts")
+
+    async def serve_and_fail() -> None:
+        async with app.router.lifespan_context(app):
+            raise RuntimeError("server stopped by an error")
+
+    with pytest.raises(RuntimeError, match="server stopped by an error"):
+        asyncio.run(serve_and_fail())
+    assert calls == ["runs", "streams"]

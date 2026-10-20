@@ -305,6 +305,7 @@ def _extra_graphs() -> list[FactorGraph]:
         ),
         *_elementwise_graphs(x, y),
         *_time_series_graphs(x, y),
+        *_section_graphs(x, y),
     ]
 
 
@@ -419,6 +420,77 @@ def _time_series_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
             y,
             ComparisonNode("gate", FactorComparisonOperator.GREATER_THAN, "x", "y", "comparison"),
             ts("out", TimeSeriesOperator.MAXIMUM, "gate", 2),
+        ),
+    ]
+    return [FactorGraph(graph, "out") for graph in nodes]
+
+
+def _section_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
+    """열 평가기 T3-05(시계열 mean·std, 횡단면·그룹 노드, 채움 자리)가 다루는 조합.
+
+    창 1·2·20 의 mean·std(lag 포함), 횡단면 출력을 시계열이 읽는 사슬(채운 값이 창에 든다, #312
+    리뷰 P2-3), 그룹 노드를 다시 횡단면·그룹으로 잇는 사슬, 분위 끝값 winsorize, lag 로 옮긴 가린
+    칸 위의 그룹 노드, 원소 연산 뒤 그룹 노드를 덮는다. 결측 정책 4종과 곱해 채움 세 자리가 모두
+    든다.
+    """
+
+    def ts(
+        node_id: str, operator: TimeSeriesOperator, source: str, window: int, lag: int = 0
+    ) -> TimeSeriesNode:
+        return TimeSeriesNode(node_id, operator, source, window, "time_series", lag=lag)
+
+    def cs(
+        node_id: str,
+        operator: CrossSectionalOperator,
+        source: str,
+        quantiles: tuple[float, float] = (0.01, 0.99),
+    ) -> CrossSectionalNode:
+        return CrossSectionalNode(node_id, operator, source, "cross_sectional", *quantiles)
+
+    def group(node_id: str, operator: GroupOperator, source: str) -> GroupNode:
+        return GroupNode(node_id, operator, source, "sector", "group")
+
+    mean, std = TimeSeriesOperator.MEAN, TimeSeriesOperator.STANDARD_DEVIATION
+    nodes: list[tuple[ExpressionNode, ...]] = [
+        *((x, ts("out", operator, "x", window)) for operator in (mean, std) for window in (1, 2)),
+        *((x, ts("out", operator, "x", 20, lag=2)) for operator in (mean, std)),
+        (
+            x,
+            cs("z", CrossSectionalOperator.ZSCORE, "x"),
+            ts("out", mean, "z", 3),
+        ),
+        (
+            x,
+            group("n", GroupOperator.NEUTRALIZE, "x"),
+            ts("s", std, "n", 2),
+            cs("out", CrossSectionalOperator.RANK, "s"),
+        ),
+        (
+            x,
+            group("n", GroupOperator.NEUTRALIZE, "x"),
+            cs("out", CrossSectionalOperator.WINSORIZE, "n", (0.0, 1.0)),
+        ),
+        (
+            x,
+            cs("w", CrossSectionalOperator.WINSORIZE, "x", (0.25, 0.75)),
+            group("out", GroupOperator.RANK, "w"),
+        ),
+        (
+            x,
+            UnaryNode("l", UnaryOperator.LAG, "x", "unary", periods=2),
+            group("out", GroupOperator.NEUTRALIZE, "l"),
+        ),
+        (
+            x,
+            y,
+            BinaryNode("d", BinaryOperator.SUBTRACT, "x", "y", "binary"),
+            group("g", GroupOperator.RANK, "d"),
+            cs("out", CrossSectionalOperator.DEMEAN, "g"),
+        ),
+        (
+            x,
+            ts("m", mean, "x", 2),
+            cs("out", CrossSectionalOperator.ZSCORE, "m"),
         ),
     ]
     return [FactorGraph(graph, "out") for graph in nodes]

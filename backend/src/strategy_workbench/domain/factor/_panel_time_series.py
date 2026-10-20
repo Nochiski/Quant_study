@@ -5,7 +5,9 @@
 음수(이력 부족)이거나 창에 숫자가 아닌 칸이 하나라도 있으면 None 이다. 가린 칸이 든 창은 호출자가
 `_masked_in` 으로 None 처리한다(값을 계산해도 그 칸은 쓰지 않는다).
 
-T3-02 는 momentum·delta·min·max 다. mean·std 는 정확 커널(T3-03·T3-04)이 맡는다.
+T3-02 가 momentum·delta·min·max 를, T3-05 가 mean·std 를 더했다. mean·std 는 정확 커널
+(`_statistics.py` 의 `window_mean`·`window_pstdev`, T3-03·T3-04)에 같은 창 유효성을 `wanted` 로
+넘긴다 — 원하지 않는 창(이력 부족·숫자가 아닌 칸)은 계산하지 않고, 원하는 창의 원소는 모두 숫자다.
 """
 
 from __future__ import annotations
@@ -17,13 +19,16 @@ from numpy.typing import NDArray
 
 from ._history import node_read_window
 from ._nodes import TimeSeriesNode, TimeSeriesOperator
+from ._statistics import window_mean, window_pstdev
 
 # min·max 의 교체 비교. Python `min`/`max` 는 더 작을(클) 때만 바꿔 같으면 앞 원소가 남는다
 # (`min(0.0, -0.0)` 은 0.0). `np.minimum` 은 이 규칙을 지키지 않아 쓰지 않는다.
 _REPLACES = {TimeSeriesOperator.MINIMUM: np.less, TimeSeriesOperator.MAXIMUM: np.greater}
-WINDOW_TIME_SERIES_OPERATORS = frozenset(
-    {TimeSeriesOperator.MOMENTUM, TimeSeriesOperator.DELTA, *_REPLACES}
-)
+# `statistics.mean`·`pstdev` 와 비트가 같은 창 커널(spec D3)
+_EXACT_KERNELS = {
+    TimeSeriesOperator.MEAN: window_mean,
+    TimeSeriesOperator.STANDARD_DEVIATION: window_pstdev,
+}
 
 
 def time_series_window(
@@ -62,6 +67,12 @@ def time_series_window(
                     result[target] = _extremum(
                         _REPLACES[node.operator], ordered, chunk, window, checkpoint
                     )
+                elif node.operator in _EXACT_KERNELS:
+                    result[target] = (
+                        _EXACT_KERNELS[node.operator](
+                            ordered, window, starts=chunk, wanted=ok[target], checkpoint=checkpoint
+                        )
+                    ).values
                 else:
                     last = ordered[chunk.start + window - 1 : chunk.stop + window - 1]
                     if node.operator is TimeSeriesOperator.MOMENTUM:

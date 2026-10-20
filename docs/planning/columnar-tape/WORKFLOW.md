@@ -77,7 +77,7 @@ Phase마다 작업분 SoT·책임 분리 점검을 하고, T9-01에서 portfolio
 | T3-06 | trace를 캐시에서 | `_trace.py`가 `FactorNodeCache` 뷰를 읽는다 | 서비스 | `_trace.py`, 두 캐시의 뷰(`_evaluation.py`의 `_NodeEvaluator.cache`, `_panel_evaluation.py`의 `FactorNodeCache.is_masked`) | 기존 `test_factor_trace.py` + 두 캐시 trace 동등(`tests/parity/test_trace_parity.py`) |
 | T4-01 | 파이프라인 열 경로 | `tape_engine` 인자(기본 object), 능력 협상·변환, 관문 순서(SEMANTICS 2절), 열 평가, `PortfolioPanel`, 열 팩터 값 공개일, 신호일만 객체로 기존 컴파일러에. 부팅 뒤 run에서 프로젝트 모듈을 처음 import하지 않는다(worker 가드가 거절, run-worker spec D7) | 기본값 전환 | `application/portfolio_design/_service.py`(또는 `_columnar.py`), `domain/portfolio/_frame_panel.py` | L3 전 말뭉치, 오류 순서 사례 |
 | T4-02 | 결과 호환 | `raw_observations`·`observations`·`values` 지연 생성, `.preview` 불변 | 소비자 이전 | 같은 파일, `_models.py` | 소비자별 L3 투영 동등 |
-| T4-03 | 기본값 전환 | 기본 `columnar`, Tier 2 전 구간 불일치 0, BENCHMARK 재측정(tape·RSS, C-1·C-2), 취소 확인 간격 실측(C-6), 진행 구간 상수 재측정 | 삭제 | `_service.py`, BENCHMARK | 전체 pytest, 진행 단조 테스트 |
+| T4-03 | 기본값 전환 | 기본 `columnar`, Tier 2 전 구간 불일치 0, BENCHMARK 재측정(tape·RSS, C-1·C-2, 열 캐시 trace 투영(창 읽기 선택) — T3-06 실측 1,000종목 × 300세션·252칸 창에서 열 캐시 0.4772초 대 객체 캐시 0.3765초로 27% 느림, 원인은 `FactorNodeCache.value`의 칸별 numpy 스칼라 변환, #600 리뷰 P3-2), 취소 확인 간격 실측(C-6), 진행 구간 상수 재측정 | 삭제 | `_service.py`, BENCHMARK | 전체 pytest, 진행 단조 테스트 |
 | T5-01 | 컴파일러 1단계 | 점수·1차 적격·정규화·사유 이벤트 행렬·비유한 첫 위반 | fold | `_frame_panel.py`, `_compiler.py` | L2 후보 단위 |
 | T5-02 | 2차 적격·순위 | 횡단면 컷·보조 순위·숏 순위·선정 수 | 비중 | 같음 | L2 순위 |
 | T5-03 | fold·객체 생성 | 버퍼·가중 4종·상한·최소 거래·섹터·예산·finalize(순차 합), `TargetFrame`·construction trace. 연속 일정 컴파일러도 같은 구현 | 해시 | 같음, `_scheduled_compiler.py` | L2·L3 tape_hash, `test_scheduled_portfolio.py` |

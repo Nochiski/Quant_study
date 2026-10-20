@@ -26,13 +26,26 @@ grain `field_id` — 어댑터 `list_fields()`(`DatasetFieldProfile`)의 원천�
   `_meta.lag_known_inputs`(EG2-P04 의 stage `lag_known=false` 모집단 — 이 맵이 아니면 SQL 로
   stage 판본을 볼 방법이 없다). 그래서 6단계는 S08~S18 이 전부 커밋된 뒤에만 돈다.
 
-**커버 축**(`FieldProfile.coverage_axis`) — 분모를 무엇으로 잡느냐가 이 표의 정직함을 정한다:
-  `grid_session`  = `universe_daily` (ticker, date) 격자 셀 분모. 세션 빈도 필드(가격·유니버스)
-  `grid_security` = 격자의 **종목** 분모. 월·이벤트 빈도(컨센서스·의견)를 일별 셀로 나누면 관측이
-                    월 1회라 구조적으로 낮게 나온다 — FIELD_MAP §3 의 "커버 종목 804 / 810" 축이다
-  `table_rows`    = 소유 테이블 행수 분모 — 법인·접수 축(`fin_std`·4B 6테이블)은 종목 격자가 없고,
-                    "이 보고서 행들 중 이 계정이 실린 비율" 이 곧 GAP-02 의 판정이다
-  `static_label`  = 차원표 현재값 라벨(`corp.induty_code`) — 창은 캘린더 전체
+**커버 축**(`FieldProfile.coverage_axis`) — 분모를 무엇으로 잡느냐가 이 표의 정직함을 정한다.
+분모는 늘 "이 필드가 값을 가져야 할 자리" 이고, 분자는 그중 값이 있는 자리다. 분자 술어
+(`_predicate`)는 선언 컬럼 전부 NOT NULL ∧ `row_filter` 이다. 창(`coverage_from`~`coverage_to`)은
+값 창 → 테이블 창 → 캘린더 창 순으로 잡는다(`_window`):
+  `grid_session`  분모 = 창 안의 `universe_daily` (ticker, date) 격자 셀. 세션 빈도 필드(가격·
+                  유니버스). `row_filter` 는 값을 읽을 원천 행(`src = 'kis'`)을 고를 뿐 분모를
+                  줄이지 않는다 — 값이 있어야 할 자리는 원천이 아니라 격자다.
+  `grid_security` 분모 = 격자의 **종목** 수(창과 무관). 월·이벤트 빈도(컨센서스·의견)를 일별 셀로
+                  나누면 관측이 월 1회라 구조적으로 낮게 나온다 — FIELD_MAP §3 의 "커버 종목
+                  804 / 810" 축이다. `row_filter`(`metric = 'eps'`)는 `grid_session` 과 같이
+                  분자만 고른다.
+  `table_rows`    분모 = 창 안의 측정 테이블 행 중 `row_filter` 에 드는 행 — 법인·접수 축
+                  (`fin_std`·4B 6테이블)은 종목 격자가 없고, "이 보고서 행들 중 이 계정이 실린
+                  비율" 이 곧 GAP-02 의 판정이다. `row_filter` 가 있는 필드(사건 유형·원천으로
+                  거르는 필드)는 그 유형의 행만 센다 — 다른 유형의 행은 이 필드가 값을 가질 자리가
+                  아니어서, 분모에 섞으면 커버율이 다른 유형의 행 수에 흔들린다(#592).
+  `static_label`  분모 = 차원표 행 중 `row_filter` 에 드는 행(`corp.induty_code`, 지금은 필터 없음)
+                  — 창은 캘린더 전체. 행 축이라 `table_rows` 와 같은 분모 규칙을 쓴다.
+행 축 두 개는 분모가 0 일 수 있다(창 안에 그 유형 행이 없다). 그때 분자도 0 이고 커버율은 0 이다
+(`_pct`) — 나누지 않고, EG2 의 재계산 항등과 S20 의 `no_observations` 판정이 같은 0 을 읽는다.
 격자 두 축은 시총 분위별 커버율까지 낸다 — S17·S18 이 입력에 시총 축이 없어 미룬 EG9-P06 이다
 (DESIGN §10 P36·P37 ⑥).
 
@@ -212,6 +225,38 @@ def _predicate(fp: FieldProfile) -> str:
     return " AND ".join(parts)
 
 
+def _target(fp: FieldProfile) -> str:
+    """이 필드가 값을 가져야 할 행 — 행 축(table_rows·static_label)의 분모. 필터 없으면 전 행."""
+    return f"({fp.row_filter})" if fp.row_filter else "TRUE"
+
+
+def _row_counts(con: duckdb.DuckDBPyConnection, table: str, fp: FieldProfile,
+                where: str = "") -> tuple[int, int]:
+    """행 축의 (분자, 분모). 분모 = `where` 안의 `row_filter` 행, 분자 = 그중 값이 있는 행.
+
+    `row_filter` 는 분자(`_predicate`)와 분모(`_target`)에 **따로** 건다. 분자에만 걸면 다른 사건
+    유형·원천의 행이 분모에 섞여 커버율이 그 행 수에 흔들린다(#592 — 절단본 `event.buyback_amount`
+    가 분할·감자 등 다른 사건 9행까지 세어 40/50 으로 나왔다). 분자 술어가 `row_filter` 를 품으므로
+    분자 ≤ 분모다.
+    """
+    n_obs, n_den = _one(con, f"SELECT count(*) FILTER (WHERE {_predicate(fp)}), "
+                             f"count(*) FILTER (WHERE {_target(fp)}) FROM {_q(table)} {where}")
+    return int(str(n_obs)), int(str(n_den))
+
+
+def table_rows_coverage(con: duckdb.DuckDBPyConnection, table: str, fp: FieldProfile,
+                        calendar: tuple[dt.date, dt.date]) -> tuple[dt.date, dt.date, int, int]:
+    """`table_rows` 축 (coverage_from, coverage_to, 분자, 분모). 창은 `available_date` 축이다.
+
+    분모는 창 안 `table` 행 중 이 필드가 대상으로 하는 행(`row_filter`)이다. 창 안에 그 유형 행이
+    없으면 (0, 0) 이고 커버율은 `_pct` 가 0 으로 둔다.
+    """
+    lo, hi, _ = _window(con, table, "available_date", _predicate(fp), calendar)
+    n_obs, n_den = _row_counts(
+        con, table, fp, f"WHERE available_date BETWEEN DATE '{lo}' AND DATE '{hi}'")
+    return lo, hi, n_obs, n_den
+
+
 def _window(con: duckdb.DuckDBPyConnection, table: str, date_col: str, pred: str,
             calendar: tuple[dt.date, dt.date]) -> tuple[dt.date, dt.date, bool]:
     """(coverage_from, coverage_to, 관측 있음). 값 창 → 테이블 창 → 캘린더 창 순으로 물러난다."""
@@ -319,14 +364,10 @@ def coverage_rows(con: duckdb.DuckDBPyConnection) -> list[tuple[object, ...]]:
         measured = fp.measured_table or table
         pred = _predicate(fp)
         if fp.coverage_axis == "static_label":
-            n_obs, n_den = _one(con, f"SELECT count(*) FILTER (WHERE {pred}), count(*) "
-                                     f"FROM {_q(measured)}")
+            n_obs, n_den = _row_counts(con, measured, fp)
             lo, hi, quint = *calendar, None
         elif fp.coverage_axis == "table_rows":
-            lo, hi, _ = _window(con, measured, "available_date", pred, calendar)
-            span = f"available_date BETWEEN DATE '{lo}' AND DATE '{hi}'"
-            n_obs, n_den = _one(con, f"SELECT count(*) FILTER (WHERE {pred}), count(*) "
-                                     f"FROM {_q(measured)} WHERE {span}")
+            lo, hi, n_obs, n_den = table_rows_coverage(con, measured, fp, calendar)
             quint = None
         elif fp.coverage_axis == "grid_security":
             # 월·이벤트 빈도 필드 — 분모는 격자의 **종목** 이고 창에 무관하다(FIELD_MAP §3 의
@@ -595,4 +636,4 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s19.json"
 """이 슬라이스가 요구하는 baseline 상수 — 없다. 파일은 그 사실과 실측을 기록한다."""
 
 __all__ = ["BASELINE_SEED", "DATASET_PROFILE", "SOURCE_TABLES", "TABLES", "declaration_rows",
-           "owned_fields", "stage_closure"]
+           "owned_fields", "stage_closure", "table_rows_coverage"]

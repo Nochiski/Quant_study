@@ -1358,8 +1358,10 @@ count(price_adj_daily) = count(price_daily)
 
 절단본 손계산으로 옮긴 실측 단언: `event.insider_net_buy` 창 2024-08-26~2026-08-26 · GAP-02
 3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버(09-06 에는 0,
-e1.9.0 부터 값이 실린다 — 절단본 80% · 100%) · M01/V05 `first_usable_date` · E05/E06 판정(09-06
-`no_observations` → e1.9.0 부터 ready) · 커버율 ↔ 정수 분자·분모 항등.
+e1.9.0 부터 값이 실린다 — 절단본 97.560976%(40/41) · 100%, e1.21.0 분모 기준) · `row_filter` 가
+있는 `table_rows` 다섯 필드의 분자·분모(e1.21.0, #592 — 분모는 창 안 그 유형 행) · M01/V05
+`first_usable_date` · E05/E06 판정(09-06 `no_observations` → e1.9.0 부터 ready) · 커버율 ↔ 정수
+분자·분모 항등.
 
 ### 부정 픽스처 (§7-5)
 

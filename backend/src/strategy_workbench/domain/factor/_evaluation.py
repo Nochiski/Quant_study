@@ -215,8 +215,8 @@ def _compute_nodes(
 ) -> _NodeEvaluator:
     """출력에서 닿는 노드를 한 번씩 평가한 평가기. 그 노드 캐시가 값의 유일한 출처다.
 
-    `evaluate_factor_graph` 는 출력 노드만, `_trace` 는 캐시 전체(`computed`)와 원장이 가린
-    칸 때문에 결측으로 둔 칸(`masked`)을 읽는다. 같은 목록을 읽으므로 추적 값과 평가 값은 만들
+    `evaluate_factor_graph` 는 출력 노드만, `_trace` 는 캐시 뷰(`cache`)로 모든 노드의 칸 값과
+    원장이 가린 칸 때문에 결측으로 둔 칸을 읽는다. 같은 목록을 읽으므로 추적 값과 평가 값은 만들
     때부터 같다.
 
     진행은 도달 가능한 노드마다 종류별 가중치(`_node_progress_weight`)로 몫을 나눠 노드 완료 때
@@ -286,6 +286,11 @@ class _NodeEvaluator:
         """노드마다 원장이 가린 칸 때문에 결측이 된 출력 칸. 판정은 값 구간 규칙(`_value_spans`)
         이다."""
         return self._masked
+
+    @property
+    def cache(self) -> _ObjectNodeCache:
+        """trace 가 읽는 노드 캐시 뷰. 열 평가기 `FactorNodeCache` 와 같은 읽기를 낸다(T3-06)."""
+        return _ObjectNodeCache(self._computed, self._masked)
 
     def _securities(self) -> dict[str, list[int]]:
         """종목별 관측 index(날짜 순). 관측에만 달려 있어 시간 연산 노드들이 나눠 쓴다."""
@@ -462,6 +467,31 @@ class _NodeEvaluator:
         return values
 
 
+class _ObjectNodeCache:
+    """객체 평가기 캐시의 trace 뷰(`_trace.TraceNodeCache`). 평가기 목록을 복사하지 않고 읽는다.
+
+    열 평가기 `FactorNodeCache` 가 같은 두 읽기를 낸다. 그래서 trace 는 어느 평가기의 캐시로
+    만들어도 같다.
+    """
+
+    __slots__ = ("_computed", "_masked")
+
+    def __init__(
+        self,
+        computed: dict[str, list[FactorComputedValue]],
+        masked: dict[str, frozenset[int]],
+    ) -> None:
+        self._computed = computed
+        self._masked = masked
+
+    def value(self, node_id: str, row: int) -> FactorComputedValue:
+        return self._computed[node_id][row]
+
+    def is_masked(self, node_id: str, row: int) -> bool:
+        """원장이 가린 칸 때문에 결측이 된 칸인가(`_NodeEvaluator.masked`)."""
+        return row in self._masked[node_id]
+
+
 # 노드 계산이 평가 진행에서 차지하는 몫. 나머지는 출력 값 조립이다(4년 구간 실측 약 4%).
 _NODES_PROGRESS_SHARE = 0.96
 
@@ -478,9 +508,7 @@ _ENDPOINT_TIME_SERIES_OPERATORS = frozenset({TimeSeriesOperator.MOMENTUM, TimeSe
 def _node_progress_weight(node: ExpressionNode) -> int:
     if isinstance(node, TimeSeriesNode):
         return (
-            1
-            if node.operator in _ENDPOINT_TIME_SERIES_OPERATORS
-            else _TIME_SERIES_PROGRESS_WEIGHT
+            1 if node.operator in _ENDPOINT_TIME_SERIES_OPERATORS else _TIME_SERIES_PROGRESS_WEIGHT
         )
     if isinstance(node, (CrossSectionalNode, GroupNode)):
         return _SECTION_PROGRESS_WEIGHT
@@ -799,19 +827,6 @@ def _indices_by_security(
     for indices in _checkpointed(grouped.values(), checkpoint):
         indices.sort(key=lambda index: observations[index].as_of)
     return grouped
-
-
-def values_from_indices(
-    values: list[FactorComputedValue],
-    indices: list[int],
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[float]:
-    return [
-        number
-        for index in _checkpointed(indices, checkpoint)
-        if (number := _as_number(values[index])) is not None
-    ]
 
 
 def _is_number(value: FactorComputedValue) -> TypeGuard[int | float]:

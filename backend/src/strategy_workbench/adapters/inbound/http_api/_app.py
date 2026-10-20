@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -199,6 +200,8 @@ from ._trace_contract import (
 
 _T = TypeVar("_T")
 
+logger = logging.getLogger(__name__)
+
 EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
 FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
 
@@ -372,18 +375,22 @@ def create_app(
     # 서버가 끝날 때 기다릴 회수. 라우트를 다는 쪽이 더하고 lifespan 이 더한 순서대로 부른다.
     closers: list[Callable[[], Awaitable[None]]] = []
 
+    async def shutdown_runs() -> None:
+        # run 전송이 띄운 worker(예비 포함)를 정리한다(run-worker spec D5·D7).
+        backtest_runs.shutdown()
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        # 예외·취소로 빠져도 정리는 한다(#591 리뷰 P3-3). 한쪽 정리가 실패해도 다른 쪽을 부른다.
+        # 예외·취소로 빠져도 정리는 다 한다(#591 리뷰 P3-3). 정리 하나가 실패해도 나머지를
+        # 부르고, 서버를 멈춘 원래 예외를 덮지 않는다 — 정상 종료일 때만 첫 정리 실패를
+        # 올린다(2차 리뷰 nit).
         try:
             yield
-        finally:
-            try:
-                # run 전송이 띄운 worker(예비 포함)를 정리한다(run-worker spec D5·D7).
-                backtest_runs.shutdown()
-            finally:
-                for close in closers:
-                    await close()
+        except BaseException:
+            await _clean_up((shutdown_runs, *closers))
+            raise
+        if (failure := await _clean_up((shutdown_runs, *closers))) is not None:
+            raise failure
 
     app = FastAPI(
         title="Quant Strategy Workbench API",
@@ -1409,6 +1416,18 @@ def _research_window_rejection(
     둔다.
     """
     return RequestValidationError([{"type": error.code, "loc": loc, "msg": str(error)}])
+
+
+async def _clean_up(cleanups: tuple[Callable[[], Awaitable[None]], ...]) -> Exception | None:
+    """정리를 차례로 모두 부르고 첫 실패를 돌려준다. 실패마다 로그를 남긴다."""
+    first: Exception | None = None
+    for cleanup in cleanups:
+        try:
+            await cleanup()
+        except Exception as error:
+            logger.exception("server shutdown cleanup failed — cleanup=%s", cleanup.__qualname__)
+            first = first or error
+    return first
 
 
 def _raise_run_request_rejection(error: Exception) -> NoReturn:

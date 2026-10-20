@@ -412,3 +412,33 @@ def test_http_lifespan_cleans_up_even_when_the_server_leaves_with_an_error(
     with pytest.raises(RuntimeError, match="server stopped by an error"):
         asyncio.run(serve_and_fail())
     assert calls == ["runs", "streams"]
+
+
+@pytest.mark.parametrize("server_error", [False, True])
+def test_a_failed_cleanup_does_not_skip_the_rest_or_hide_the_server_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server_error: bool
+) -> None:
+    """run 전송 정리가 실패해도 스트림 회수는 돈다. 서버를 멈춘 예외가 있으면 그 예외가 그대로
+    올라가고, 정상 종료면 정리 실패가 올라간다(#591 2차 리뷰 nit)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    def shutdown(self: BacktestRunService) -> None:
+        calls.append("runs")
+        raise OSError("worker cleanup failed")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", shutdown)
+    app = build_http_app(artifact_root=tmp_path / "artifacts")
+
+    async def serve() -> None:
+        async with app.router.lifespan_context(app):
+            if server_error:
+                raise RuntimeError("server stopped by an error")
+
+    expected = (RuntimeError, "server stopped") if server_error else (OSError, "cleanup failed")
+    with pytest.raises(expected[0], match=expected[1]):
+        asyncio.run(serve())
+    assert calls == ["runs", "streams"]

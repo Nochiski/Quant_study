@@ -230,8 +230,20 @@ class BacktestEngineExecutorAdapter:
         오래 기다릴 수 있어, 코드 지문을 재기 전에 올려 두지 않으면 기다리는 동안 바뀐 확장 파일을
         대조 없이 쓴다(run-worker spec D6·D7, #591 리뷰 P2-1). 확장을 import 하는 노드는 이
         adapter 라(`backend-package-boundary.md` 커널 경계) 조립 쪽이 직접 import 하지 않는다.
+
+        Raises:
+            RuntimeError: 확장 파일이 없다(빌드하지 않은 checkout). 조치를 함께 싣는다.
         """
-        importlib.import_module("backtest_core")
+        try:
+            importlib.import_module("backtest_core")
+        except ModuleNotFoundError as error:
+            # 확장을 빌드하지 않으면 패키지 안의 확장 모듈이 없다. 다른 모듈이 없으면 그대로 올린다.
+            if error.name is None or error.name.partition(".")[0] != "backtest_core":
+                raise
+            raise RuntimeError(
+                "backtest_core extension file not found — run `maturin develop` "
+                f"missing={error.name}"
+            ) from error
 
     def execute(
         self,

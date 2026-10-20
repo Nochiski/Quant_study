@@ -11,9 +11,16 @@
   전체 선택은 위상 순서로 메모가 입력부터 찬다. 원인 전파를 한 단계 빠뜨리면 두 경로가 갈린다.
 - 조건 노드는 실제로 고른 가지의 원인만 잇는다.
 - `masked` 상태는 평가기가 가린 칸에만 있고, 가린 칸은 `masked` 이거나 이력 부족이다.
+
+성질로 다 묶이지 않는 규칙(그룹 값이 문자열이 아니면 그룹 없음, 이력 부족이 가림보다 먼저 등)은
+RNG 없는 손 패널의 상태 열을 두 캐시에 같은 기대 표로 고정해 지킨다(#600 리뷰 P3-1).
 """
 
 from __future__ import annotations
+
+from datetime import date, timedelta
+
+import pytest
 
 from strategy_workbench.domain.factor._evaluation import _compute_nodes
 from strategy_workbench.domain.factor._trace import (
@@ -25,17 +32,27 @@ from strategy_workbench.domain.factor._trace import (
     _project_trace,
     _trace_context,
 )
-from strategy_workbench.domain.factor.facade.evaluation import NonFiniteFactorCalculationError
+from strategy_workbench.domain.factor.facade.evaluation import (
+    FactorFieldValue,
+    FactorObservation,
+    NonFiniteFactorCalculationError,
+)
 from strategy_workbench.domain.factor.facade.expression import (
+    BinaryNode,
+    BinaryOperator,
     ComparisonNode,
     ConditionalNode,
     ConstantNode,
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    GroupNode,
+    GroupOperator,
     MissingPolicy,
     TimeSeriesNode,
     TimeSeriesOperator,
+    UnaryNode,
+    UnaryOperator,
 )
 from strategy_workbench.domain.factor.facade.panel_evaluation import (
     FactorPanel,
@@ -236,3 +253,142 @@ def test_trace_from_either_node_cache_is_bit_identical() -> None:
     assert narrow_rows >= 5_000
     assert statuses == set(TraceValueStatus)
     assert deciding >= 20
+
+
+# 손 패널 상태표의 글자. 값은 싣지 않아 OS·libm 차이에 흔들리지 않는다
+_CODES = {
+    TraceValueStatus.OK: "O",
+    TraceValueStatus.MISSING_INPUT: "M",
+    TraceValueStatus.WARM_UP: "W",
+    TraceValueStatus.DIVIDE_BY_ZERO: "Z",
+    TraceValueStatus.GROUP_MISSING: "G",
+    TraceValueStatus.MASKED: "K",
+}
+_FIXED_DAYS = tuple(date(2024, 1, 1) + timedelta(days=offset) for offset in range(5))
+# 종목마다 날짜 순 셀. 숫자는 값, None 은 값 없는 셀, "masked" 는 원장이 가린 셀, "omit" 은 셀 없음
+_FIXED_CELLS: dict[str, dict[str, tuple[object, ...]]] = {
+    "a": {
+        "x": (10.0, 11.0, 12.0, 13.0, 14.0),
+        "d": (1.0, 0.0, 2.0, 2.0, 2.0),
+        "g": ("A", "A", "A", "A", "A"),
+    },
+    "b": {
+        "x": (None, 0.0, 5.0, "masked", 6.0),
+        "d": (1.0, 1.0, 1.0, 1.0, 1.0),
+        "g": ("A", None, 3.0, "B", "B"),
+    },
+    "c": {
+        "x": ("masked", 20.0, 21.0, 22.0, 23.0),
+        "d": (1.0, 1.0, 1.0, 1.0, 1.0),
+        "g": ("B", "B", "B", "omit", "B"),
+    },
+}
+
+
+def _fixed_cell(field_id: str, value: object) -> tuple[FactorFieldValue, ...]:
+    if value == "omit":
+        return ()
+    if value == "masked":
+        return (FactorFieldValue(field_id, None, masked=True),)
+    if not (value is None or isinstance(value, (str, float))):
+        raise TypeError(f"손 패널 셀 값 — field_id={field_id!r} value={value!r}")
+    return (FactorFieldValue(field_id, value),)
+
+
+def _fixed_case() -> EvaluatorCase:
+    """상태 여섯 가지와 원인 전파를 한 그래프로 덮는 손 패널(RNG 없음).
+
+    그룹 값 str·None·3.0·셀 없음, 가린 칸, 이력 부족, 0 분모, 모멘텀 0 시작, 고르지 않은 조건 가지
+    (참·거짓 두 조건 모두 이력이 모자란 `lag` 쪽 가지를 고르지 않는다)를 넣었다.
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("x", "x", "field"),
+            FieldNode("d", "d", "field"),
+            BinaryNode("ratio", BinaryOperator.DIVIDE, "x", "d", "binary"),
+            TimeSeriesNode("mom", TimeSeriesOperator.MOMENTUM, "x", 2, "time_series"),
+            GroupNode("grp", GroupOperator.RANK, "x", "g", "group"),
+            UnaryNode("lag", UnaryOperator.LAG, "x", "unary", periods=1),
+            ConstantNode("one", 1.0, "constant"),
+            ConstantNode("two", 2.0, "constant"),
+            ComparisonNode("yes", FactorComparisonOperator.EQUAL, "one", "one", "comparison"),
+            ComparisonNode("no", FactorComparisonOperator.EQUAL, "one", "two", "comparison"),
+            ConditionalNode("pick_true", "yes", "x", "lag", "conditional"),
+            ConditionalNode("pick_false", "no", "lag", "x", "conditional"),
+            BinaryNode("s1", BinaryOperator.ADD, "ratio", "mom", "binary"),
+            BinaryNode("s2", BinaryOperator.ADD, "grp", "pick_true", "binary"),
+            BinaryNode("s3", BinaryOperator.ADD, "s2", "pick_false", "binary"),
+            BinaryNode("out", BinaryOperator.ADD, "s1", "s3", "binary"),
+        ),
+        output_node_id="out",
+    )
+    rows = tuple(
+        FactorObservation(
+            day,
+            security,
+            tuple(
+                cell
+                for field_id, values in cells.items()
+                for cell in _fixed_cell(field_id, values[position])
+            ),
+        )
+        for position, day in enumerate(_FIXED_DAYS)
+        for security, cells in _FIXED_CELLS.items()
+    )
+    return EvaluatorCase("T/fixed", graph, rows, MissingPolicy.DROP)
+
+
+def _status_table(case: EvaluatorCase, cache: TraceNodeCache) -> dict[str, dict[str, str]]:
+    """전체 선택 trace 의 상태 열만: 노드 → 종목 → 날짜 순 상태 글자."""
+    trace = _trace(case, cache, _selections(case)[0])
+    table: dict[str, dict[str, str]] = {}
+    for node in trace.nodes:
+        row = table.setdefault(node.node_id, {})
+        for value in node.values:
+            row[value.security_id] = row.get(value.security_id, "") + _CODES[value.status]
+    return table
+
+
+# main(8e78acbe) trace 로 손계산과 대조해 고정한 상태표다. 칸을 읽는 법(종목 b·c 는 날짜 0~4):
+# - grp b `MGGKO`: 그룹 "A" 인데 x 결측 → 입력 결측, 그룹 None·3.0 → 그룹 없음(문자열만
+#   그룹), 가린 칸. c 의 날짜 3 `G` 는 그룹 셀이 없는 칸이다.
+# - mom c `WK...`: 날짜 0 은 가린 칸이 창에 들어도 이력 부족이 먼저다. b 날짜 1 `M`(창에 결측),
+#   날짜 2 `Z`(모멘텀이 0 에서 시작).
+# - ratio a 날짜 1 `Z`(0 분모). s1 a `WM...`: 입력의 이력 부족은 전파하고 0 분모는 입력 결측이다.
+# - pick_true·pick_false b 날짜 0 `M`: 고른 가지 x 의 결측만 잇고, 고르지 않은 lag 의 이력
+#   부족은 읽지 않는다.
+_FIXED_STATUSES = {
+    "x": {"a": "OOOOO", "b": "MOOKO", "c": "KOOOO"},
+    "d": {"a": "OOOOO", "b": "OOOOO", "c": "OOOOO"},
+    "ratio": {"a": "OZOOO", "b": "MOOKO", "c": "KOOOO"},
+    "mom": {"a": "WOOOO", "b": "WMZKK", "c": "WKOOO"},
+    "s1": {"a": "WMOOO", "b": "WMMKK", "c": "KKOOO"},
+    "grp": {"a": "OOOOO", "b": "MGGKO", "c": "KOOGO"},
+    "one": {"a": "OOOOO", "b": "OOOOO", "c": "OOOOO"},
+    "yes": {"a": "OOOOO", "b": "OOOOO", "c": "OOOOO"},
+    "lag": {"a": "WOOOO", "b": "WMOOK", "c": "WKOOO"},
+    "pick_true": {"a": "OOOOO", "b": "MOOKK", "c": "KKOOO"},
+    "s2": {"a": "OOOOO", "b": "MMMKK", "c": "KKOMO"},
+    "two": {"a": "OOOOO", "b": "OOOOO", "c": "OOOOO"},
+    "no": {"a": "OOOOO", "b": "OOOOO", "c": "OOOOO"},
+    "pick_false": {"a": "OOOOO", "b": "MOOKK", "c": "KKOOO"},
+    "s3": {"a": "OOOOO", "b": "MMMKK", "c": "KKOMO"},
+    "out": {"a": "WMOOO", "b": "WMMKK", "c": "KKOMO"},
+}
+
+
+@pytest.mark.parametrize("cache_index", [0, 1], ids=["object", "columnar"])
+def test_fixed_panel_trace_statuses_are_pinned_for_both_caches(cache_index: int) -> None:
+    """두 캐시가 함께 쓰는 상태 규칙을 손 패널의 상태 열로 고정한다(#600 리뷰 P3-1).
+
+    두 캐시 대조는 규칙이 두 캐시에서 함께 바뀌면 잡지 못한다. 상태 글자만 보므로 값의 OS·libm
+    차이와 무관하고, 말뭉치·퍼저 생성기가 바뀌어도 이 표는 그대로다.
+    """
+    case = _fixed_case()
+    caches = _caches(case)
+    assert caches is not None
+    table = _status_table(case, caches[cache_index])
+    assert table == _FIXED_STATUSES
+    assert {code for row in table.values() for codes in row.values() for code in codes} == set(
+        _CODES.values()
+    )

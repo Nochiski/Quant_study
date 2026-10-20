@@ -3,14 +3,14 @@ plan_version: 1
 project: run-worker-process
 project_status: IN_REVIEW
 current_phase: W2
-current_pr: W2-01
-active_prs: [W2-01]
+current_pr: W2-02
+active_prs: [W2-02]
 parallel_window: []
-last_updated: 2026-10-20T10:50:20+09:00
+last_updated: 2026-10-20T16:49:34+09:00
 planned_prs: 10
-merged_prs: 4
-approved_prs: 4
-progress_percent: 40
+merged_prs: 5
+approved_prs: 5
+progress_percent: 50
 ---
 
 # run 별도 프로세스 실행 진행 계획
@@ -25,11 +25,11 @@ progress_percent: 40
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `W2` |
-| Current/next PR | `W2-01` |
-| Active PR | `W2-01` |
-| Progress | `4 / 10 merged (40%)` |
-| Approved | `4 / 10` |
-| Aggregated at | `2026-10-20 10:50 KST` |
+| Current/next PR | `W2-02` |
+| Active PR | `W2-02` |
+| Progress | `5 / 10 merged (50%)` |
+| Approved | `5 / 10` |
+| Aggregated at | `2026-10-20 16:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수로 센다. frontmatter와 위 표, Phase 집계는
@@ -55,12 +55,12 @@ progress_percent: 40
 |---|---|---:|---:|---|
 | W0 | Planning package and benchmark | 1 | 1 | `MERGED` |
 | W1 | Computation boundary and worker process | 3 | 3 | `MERGED` |
-| W2 | Spare worker and memory guard | 2 | 0 | `IN_REVIEW` |
+| W2 | Spare worker and memory guard | 2 | 1 | `IN_REVIEW` |
 | W3 | Default switch and SoT revision | 1 | 0 | `WAITING` |
 | W4 | Factor regression job | 1 | 0 | `WAITING` |
 | W5 | Interactive path decision gate | 1 | 0 | `WAITING` |
 | W9 | Closeout review | 1 | 0 | `WAITING` |
-| **Total** |  | **10** | **4** | **40%** |
+| **Total** |  | **10** | **5** | **50%** |
 <!-- PLAN:PHASES:END -->
 
 ## W0 — 기획
@@ -81,8 +81,8 @@ progress_percent: 40
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `W2-01` | 예비 worker 항상 1개, V-7 gate | W1-03 | `IN_REVIEW` | - |
-| [ ] | `W2-02` | 메모리 가드(도는 run 남은 예약분 차감, 최대 RSS 기록) | W2-01 | `PLANNED` | - |
+| [x] | `W2-01` | 예비 worker 항상 1개, V-7 gate | W1-03 | `MERGED` | #591 · 3차 확인 APPROVE(1차 P2-1·2차 P2-1 해소) · main 머지 3414611b(2026-10-20) |
+| [ ] | `W2-02` | 메모리 가드(도는 run 남은 예약분 차감, 최대 RSS 기록) | W2-01 | `IN_REVIEW` | - |
 
 ## W3 — 기본값
 
@@ -117,3 +117,4 @@ progress_percent: 40
 - 2026-10-19: 기획 패키지 초안. 측정 근거는 [BENCHMARK.md](./BENCHMARK.md).
 - 2026-10-20: #569 1차 리뷰 REQUEST_CHANGES(P2 7건·P3 15건) 반영 — D5 종결 순서, D6 판본 묶음, D7 예비 1개 상시, D8 남은 예약분 차감, D11 엔진 게이트, D12 잠금 규율, D13 port 계약, Windows job을 W1-02로.
 - 2026-10-20: W1-03(#581) main 머지. W2-01 — 프로토콜 v2(`boot` 줄), 예비 worker 늘 1개(구현 세부는 spec D7), 서버 종료 정리의 lifespan 이전(#581 리뷰 nit).
+- 2026-10-20: W2-01(#591) main 머지. W2-02 — 메모리 가드(프로세스 방식, 구현 세부는 spec D8), 프로토콜 v3(`ready` 에 인터프리터 pid), 최대 RSS 읽기를 메모리 모듈로 모음(#575 리뷰 P3).

@@ -109,12 +109,12 @@ Python 루프라 실행 내내 GIL을 쥔다. 그래서 같은 프로세스의 H
 
 ### D3. IPC: stdin 작업·명령 줄, stdout 이벤트 줄, pickle 금지
 
-- **선택**: 줄 단위 JSON(JSON Lines) 프로토콜(W1-02 v1, W2-01부터 v2). 인코딩·디코딩은 한 모듈이 소유하고, 버전이 다르면 양쪽이
-  거절한다.
+- **선택**: 줄 단위 JSON(JSON Lines) 프로토콜(W1-02 v1, W2-01부터 v2, W2-02부터 v3). 인코딩·디코딩은 한 모듈이 소유하고, 버전이 다르면 양쪽이
+  거절한다. v3 는 `ready` 에 계산하는 인터프리터의 pid 를 싣는다(D8 메모리 가드가 그 pid 의 RSS 를 잰다).
   - 부모 → worker(stdin): `boot` 한 줄(D10의 설정), `ready`를 받은 뒤 `job` 한 줄, 필요할 때 `proceed`(D11). 이후 stdin은
     열어 둔다(D5 부모 사망 감지). 설정을 job보다 먼저 보내는 것은 예비 worker가 run이 정해지기 전에 `ready`까지 부팅하기 때문이다
     (D7, 프로토콜 v2. v1은 설정을 job에 실었다).
-  - worker → 부모(stdout): `ready`(부팅 완료, D6 판본 묶음 포함), `progress`(stage·fraction·message), `engine_ready`(D11,
+  - worker → 부모(stdout): `ready`(부팅 완료, D6 판본 묶음과 인터프리터 pid 포함), `progress`(stage·fraction·message), `engine_ready`(D11,
     요청한 job에서만), `committed`(D4), `failed`(error_code·error) 중 하나씩. 종결 이벤트는 `committed`·`failed` 둘이다.
   - stderr는 로그다. 부모가 run_id를 붙여 자기 로거로 중계한다.
 - **대안**: pickle(`multiprocessing.Queue`), 공유 메모리, gRPC.
@@ -232,6 +232,28 @@ run마다 부모에 **감독 스레드** 하나가 있다(D12). 그 run의 종�
   - 도는 run이 하나도 없으면 가드를 적용하지 않는다. 적어도 하나는 돈다(굶주림 없음).
   - worker는 종결 이벤트에 최대 RSS를 싣고, 부모는 로그에 남긴다.
   - V-2는 이 기본 추정식으로 잰다. 측정 때만 예약치를 바꾸지 않는다.
+  - 구현에서 정한 것(W2-02):
+    - 가드는 프로세스 방식에서만 쓴다. 스레드 방식은 run 이 모두 서버 프로세스 안에 있어 run 마다 RSS 를 잴 수 없다
+      (`RunExecutionPort.memory` 가 None). 스레드 방식의 배정은 W2-02 전과 같다.
+    - run 의 RSS 는 worker 가 `ready` 에 실은 pid(프로토콜 v3)로 잰다. Windows venv 의 `python.exe` 는 실제 인터프리터를
+      자식으로 띄우는 런처라, 부모가 띄운 pid 로 재면 런처 몇 MB 만 보인다. 가용 물리 메모리는 Windows
+      `GlobalMemoryStatusEx`, Linux `/proc/meminfo` 의 `MemAvailable` 이고 RSS 는 Windows working set, Linux
+      `/proc/<pid>/statm` 이다(`run_worker_process/_memory.py`, 최대 RSS 읽기도 같은 모듈). 가용 메모리를 읽지 못하면 0 으로
+      보아 run 을 하나씩만 띄운다(보수 쪽).
+    - 고정 오버헤드는 다시 채울 예비 하나 몫 128MiB 다(BENCHMARK 6절 working set 78MB 와 이 절의 유휴 RSS 118MB 중 큰 쪽을
+      덮는 값). 메모리가 모자라 run 을 대기시키는 동안 예비 다시 채우기를 미루고(`set_memory_hold`), 풀리면 채운다.
+    - 세션 수 `n` 은 측정 구간의 평일 수 + 팩터 워밍업(원시 관측 질의가 시작일 앞에서 읽는 세션 수, `preflight` 가 답한다)이다.
+      평일 수는 공휴일만큼 크다. GB 는 2³⁰ 바이트로 센다. 둘 다 예약치를 크게 잡는 쪽이다.
+    - 판정은 대기열 앞의 run 하나에 한다. 모자라면 뒤의 작은 run 도 앞지르지 않는다(큰 run 이 굶지 않는다). 다시 판정하는
+      때는 배정 사건(접수·종결·취소·일시정지와 우선순위 변경)이고 시계로 다시 보지 않는다. 도는 run 이 끝나면 그 예약이 풀려
+      기다리던 run 이 뜬다.
+    - run 하나의 어림이 기계 메모리보다 커도 거절하지 않는다. 도는 run 이 없으면 가드를 쓰지 않으므로 혼자서는 돈다.
+    - 대기 run 의 상태 문장은 `Waiting for free memory` 이고 상태는 `queued` 그대로다(저장하지 않는다). 부모 로그는 배정 때
+      예약치·세션 수 어림을, 처음 대기시킬 때 판정 근거를, 완료 때 최대 RSS 와 읽은 입력의 크기(세션·필드·팩터·원시 관측 행,
+      `RunFootprint`)를 남긴다. 최대 RSS 는 run 기록·API 에 싣지 않는다(이 절의 "로그에 남긴다").
+    - 서비스는 잠금 안에서 `memory()` 를 부른다. 시스템 호출만 하고 파이프·프로세스를 기다리지 않는다(D12).
+    - 계수는 T4-03(tape 열 지향화) 측정 뒤 `application/backtest_run/_memory_guard.py` 한 곳에서 다시 맞춘다. W2-02 의 실측은
+      BENCHMARK 7절에 있다.
 - **이유**: 프로세스를 나눠도 메모리는 줄지 않는다. 16GB PC에서 5년 run 둘이 겹치면 페이징으로 둘 다 느려진다
   (DEFECT-RW-02의 일부 원인으로 추정). 슬롯 수를 메모리로 자동 결정하면 화면의 "n / 2" 계약과 단일 실행 전용 슬롯
   스토리가 기계마다 달라지므로, 슬롯은 두고 배정만 늦춘다. 슬롯이 비었는데 기다리는 run은 `queued`로 보인다. US-SM-15 비고에
@@ -271,7 +293,8 @@ run마다 부모에 **감독 스레드** 하나가 있다(D12). 그 run의 종�
 ### D12. 잠금 규율
 
 - 서비스 잠금(`self._lock`) 안에서는 장부 갱신과 감독 스레드 시작만 한다. `Popen`, 파이프 읽기·쓰기, `ready` 대기, 프로세스 `wait`, 파일 정리를
-  잠금 안에서 하지 않는다. 배정(`_dispatch`)은 잠금 안에서 불리므로(`_service.py:1094-1131`, 호출처 `:427`·`:469`·`:596`·`:886`·`:1147`), job 쓰기와
+  잠금 안에서 하지 않는다. 예외로 메모리 가드의 측정(`memory()`, 가용 메모리·RSS 시스템 호출)과 예비 채우기 미루기·풀기
+  (`set_memory_hold`, 예비 스레드 시작)는 잠금 안에서 한다(D8). 배정(`_dispatch`)은 잠금 안에서 불리므로(`_service.py:1094-1131`, 호출처 `:427`·`:469`·`:596`·`:886`·`:1147`), job 쓰기와
   `ready` 대기는 그 run의 감독 스레드가 맡는다.
 - 감독 스레드는 진행을 `_update`로 넘긴다. 취소 중이면 `_update`가 `RunCancelledError`를 낸다(`_service.py:1368-1369`). 감독 스레드는 이 예외를 삼키고
   파이프를 끝까지 읽는다. 읽기를 멈추면 worker가 쓰기에서 막힌다.

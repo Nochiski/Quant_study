@@ -182,10 +182,18 @@ class FiData:
     cons: dict[str, list[Row]] = field(default_factory=dict)
     flow_last: dict[str, str | None] = field(default_factory=dict)
     # 확정 지배주주 순이익(억원) — 종목 → 'YYYY/MM'. 같은 fi 판 fi_consensus_annual 확정('A') 행 +
-    # 그 표 창(Y−1~Y+1) 밖 Y−2 는 stage stg_consensus_annual(`load_ni_y2`). Earnings 순이익 칸이
+    # 그 표 창(Y−1~Y+1) 밖 Y−2 는 stage stg_consensus_annual(`load_consensus_stage`). Earnings 순이익 칸이
     # 추정치(fi_consensus — 컨센서스 지배 순이익)와 같은 정의로 견주게 한다(결함 2)
     ni_actual: dict[str, dict[str, float]] = field(default_factory=dict)
     ni_fetched: dict[str, date] = field(default_factory=dict)   # 종목 → 그 표가 고른 수집일
+    # 확정 영업이익(억원, U23 — 발표기준 우선, 없으면 표준: 같은 표 확정 행 값이 그 정의다 — 10-20
+    # 실측) — 종목 → 'YYYY/MM' → 값(확정 행은 있는데 칸이 비면 None). 원천은 순이익과 같다
+    op_actual: dict[str, dict[str, float | None]] = field(default_factory=dict)
+    # 연결/별도 범위 — 종목 → ('YYYY/MM', 'A'|'E') → '연결'|'별도'(같은 표 · 같은 수집의 라벨)
+    scope: dict[str, dict[tuple[str, str], str]] = field(default_factory=dict)
+
+    def scope_at(self, t: str, period: str, kind: str) -> str | None:
+        return self.scope.get(t, {}).get((period, kind))
 
     def annual(self, t: str, need: Sequence[str] = ("ni",)) -> Row | None:
         """need 열 중 하나라도 값이 있는 가장 최근 연간 확정 행."""
@@ -248,40 +256,49 @@ def load_fi(fi_root: Path, view: DayView) -> FiData:
         fi_root, "fi_flows", bid, select="ticker, max(date) AS last_date", tail="GROUP BY ticker")}
     try:
         ctrl = read_fi(fi_root, "fi_consensus_annual", bid,
-                       columns=("ticker", "period", "data_type", "ni", "fetched_date"))
+                       columns=("ticker", "period", "data_type", "op", "ni", "fetched_date"))
     except (DeliverError, duckdb.Error) as e:
-        # 표가 없는 옛 fi 판 · 깨진 파일 — 엑셀은 그대로, 확정 지배 순이익 칸만 추정치(회색 E) · 빈칸
-        # (연결 값으로 대신 안 함)
-        log.warning("Earnings 순이익 — fi_consensus_annual 을 읽지 못해 확정 지배 순이익이 없다"
-                    "(데이터 %s): %s", bid, e)
+        # 표가 없는 옛 fi 판 · 깨진 파일 — 엑셀은 그대로, 확정 지배 순이익 · 영업이익 칸만 추정치(회색
+        # E) · 빈칸(연결 순이익 · 표준 영업이익으로 대신 안 함)
+        log.warning("Earnings 순이익 · 영업이익 — fi_consensus_annual 을 읽지 못해 확정 지배 순이익 · "
+                    "영업이익이 없다(데이터 %s): %s", bid, e)
         ctrl = []
     ni_actual: dict[str, dict[str, float]] = {}
     ni_fetched: dict[str, date] = {}
+    op_actual: dict[str, dict[str, float | None]] = {}
     for r in ctrl:
         t, fd = str(r["ticker"]), r["fetched_date"]
         if isinstance(fd, date):
             ni_fetched[t] = max(fd, ni_fetched.get(t, fd))
         if r["data_type"] == "A" and (v := _num(r["ni"])) is not None:
             ni_actual.setdefault(t, {})[str(r["period"])] = v
+        if r["data_type"] == "A":
+            op_actual.setdefault(t, {})[str(r["period"])] = _num(r["op"])
     return FiData(close=close, fins=_group(read_fi(fi_root, "fi_fin_summary", bid)),
                   cons=_group(read_fi(fi_root, "fi_consensus", bid)), flow_last=flow_last,
-                  ni_actual=ni_actual, ni_fetched=ni_fetched)
+                  ni_actual=ni_actual, ni_fetched=ni_fetched, op_actual=op_actual)
 
 
 # Y−2 확정 지배 순이익을 읽은 종목이 모집단의 이 몫보다 적으면 경고(10-14 실측 869종목 중 864 ≈ 99%)
 NI_Y2_MIN_SHARE = 0.8
 
 
-def load_ni_y2(src: Sources, view: DayView, fi: FiData) -> None:
-    """Y−2 확정 지배주주 순이익을 `fi.ni_actual` 에 더한다(그 기 값이 이미 있으면 그대로) — Earnings
-    순이익 Y−1 YoY 의 비교값. fi_consensus_annual 창(Y−1~Y+1) 밖이라 같은 표 계열 stage
-    `stg_consensus_annual` 을 읽는다 — 종목마다 fi_consensus_annual 이 고른 바로 그 수집
-    (`fi.ni_fetched` = fetched_date)의 확정('E' 아닌) 행, 같은 기가 둘이면 period_label 순 첫 행(fi
-    `consensus_annual_sql` 과 같은 고르기). 판 = fi 판 JSON `stage_builds` 고정(`open_sources`). 고정
-    판이 지워졌으면(keep=3 — 늦은 재생성) current 판에서 같은 수집의 행을 읽는다(한 수집의 행은 판이
-    바뀌어도 같다) — 경고 한 줄. current 판도 못 읽으면 경고만 — 그 YoY 칸이 빈다(연결 순이익으로
-    대신하지 않는다). 읽은 종목이 모집단의 `NI_Y2_MIN_SHARE` 보다 적으면 경고, 아니면 건수 info."""
+def load_consensus_stage(src: Sources, view: DayView, fi: FiData) -> None:
+    """컨센서스 연간 표(stage `stg_consensus_annual`)에서 Earnings 가 fi 판 밖에서 더 읽는 것 —
+    ① Y−2 확정 지배주주 순이익 → `fi.ni_actual` · 확정 영업이익(U23) → `fi.op_actual`(그 기 값이
+    이미 있으면 그대로): Y−1 YoY 의 비교값. fi_consensus_annual 창(Y−1~Y+1) 밖이다.
+    ② Y−2~Y+1 기마다 확정(A) · 추정(E) 행의 연결/별도 라벨 → `fi.scope`(재무 검토 #6 — fi 표엔 라벨
+    열이 없다).
+    종목마다 fi_consensus_annual 이 고른 바로 그 수집(`fi.ni_fetched` = fetched_date)의 행, 같은
+    (기, 종류)가 둘이면 period_label 순 첫 행(fi `consensus_annual_sql` 과 같은 고르기). 판 = fi 판
+    JSON `stage_builds` 고정(`open_sources`). 고정 판이 지워졌으면(keep=3 — 늦은 재생성) current 판에서
+    같은 수집의 행을 읽는다(한 수집의 행은 판이 바뀌어도 같다) — 경고 한 줄. current 판도 못 읽으면
+    경고만 — 그 YoY 칸이 비고(연결 순이익 · 표준 영업이익으로 대신하지 않는다) 연결/별도 표시도 없다.
+    fi 표를 못 읽어 고를 수집이 없으면 아무것도 하지 않는다(경고는 `load_fi` 몫). Y−2 순이익을 읽은
+    종목이 모집단의 `NI_Y2_MIN_SHARE` 보다 적으면 경고, 아니면 건수 info."""
     year = int(view.date[:4]) - 2
+    if not fi.ni_fetched:
+        return
     table = "stg_consensus_annual"
     try:
         try:
@@ -297,25 +314,34 @@ def load_ni_y2(src: Sources, view: DayView, fi: FiData) -> None:
             con.execute("CREATE TEMP TABLE pick (ticker VARCHAR, fetched_date DATE)")
             con.executemany("INSERT INTO pick VALUES (?, ?)", list(fi.ni_fetched.items()))
             got = con.execute(f"""
-                SELECT ticker, period, ni FROM (
-                    SELECT a.ticker, a.period, a.ni, row_number() OVER (
-                             PARTITION BY a.ticker, a.period ORDER BY a.period_label) AS rn
-                    FROM {rel} a JOIN pick p
-                         ON p.ticker = a.ticker AND p.fetched_date = a.fetched_date
-                    WHERE substr(a.period, 1, 4) = '{year}' AND coalesce(a.period_kind, '') <> 'E')
+                SELECT ticker, period, kind, ni, op, fs_basis FROM (
+                    SELECT *, row_number() OVER (
+                             PARTITION BY ticker, period, kind ORDER BY period_label) AS rn
+                    FROM (SELECT a.ticker, a.period, a.period_label, a.ni, a.op, a.fs_basis,
+                                 CASE WHEN coalesce(a.period_kind, '') = 'E' THEN 'E' ELSE 'A' END
+                                     AS kind
+                          FROM {rel} a JOIN pick p
+                               ON p.ticker = a.ticker AND p.fetched_date = a.fetched_date
+                          WHERE substr(a.period, 1, 4) BETWEEN '{year}' AND '{year + 3}'))
                 WHERE rn = 1""").fetchall()
         finally:
             con.close()
     except (SourceMissing, duckdb.Error) as e:
-        log.warning("Earnings 순이익 — %d 확정 지배 순이익(stage stg_consensus_annual)을 읽지 못해 "
-                    "%d YoY 칸을 비운다: %s", year, year + 1, e)
+        log.warning("Earnings 순이익 — %d 확정 지배 순이익 · 영업이익(stage stg_consensus_annual)을 읽지 "
+                    "못해 %d 순이익 · 영업이익 YoY 칸을 비운다 — 연결/별도 회색 표시도 없다: %s",
+                    year, year + 1, e)
         return
     found: set[str] = set()
-    for t, period, ni in got:
+    for t, period, kind, ni, op, label in got:
+        t, p = str(t), f"{str(period)[:4]}/{str(period)[4:6]}"
+        if label:
+            fi.scope.setdefault(t, {}).setdefault((p, kind), "연결" if "연결" in label else "별도")
+        if kind != "A" or p[:4] != str(year):
+            continue
+        fi.op_actual.setdefault(t, {}).setdefault(p, num(op))
         if (v := num(ni)) is not None:
-            p = str(period)
-            fi.ni_actual.setdefault(str(t), {}).setdefault(f"{p[:4]}/{p[4:6]}", v)
-            found.add(str(t))
+            fi.ni_actual.setdefault(t, {}).setdefault(p, v)
+            found.add(t)
     n, total = len(found & set(view.by_ticker)), len(view.by_ticker)
     if n == 0 or n < NI_Y2_MIN_SHARE * total:
         log.warning("Earnings 순이익 — %d 확정 지배 순이익(stage)을 모집단 %d/%d종목만 읽었다 — 나머지 "
@@ -511,6 +537,8 @@ QUALITY_PL_KEYS = tuple(c.key for c in V3_RAW if c.bucket == "quality" and c.key
 # Score 비고 표지 — 짧게(확정 샘플 · 뜻은 Q7 머리 메모 범례)
 QUALITY_VOL_ONLY_NOTE = "퀄리티 변동성만"
 NET_REVENUE_NOTE = "매출 순액"
+# Earnings YoY 가 연결/별도 범위가 다른 두 값을 견준 칸(재무 검토 #6 — 값은 두고 회색 글자)
+BASIS_MIXED_NOTE = "연결/별도 다름"
 
 
 def quality_vol_only(view: DayView, t: str) -> bool:
@@ -758,6 +786,8 @@ NOTE_LEGEND = (
     ("애널 미상", "애널리스트 수를 모름"),
     ("N월 결산", "12월 결산이 아닌 회사"),
     (NET_REVENUE_NOTE, "매출을 순액으로 적는 회사(증권·카드 등), 매출 YoY 비움"),
+    (BASIS_MIXED_NOTE, ("Earnings YoY 중 연결과 별도처럼 범위가 다른 두 값을 견준 칸이 있음"
+                        "(회색 글자 — 성장률이 아님)")),
     (QUALITY_VOL_ONLY_NOTE, "퀄리티를 주가 변동성 하나로만 계산"),
 )
 
@@ -803,7 +833,8 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
                 "결산월이 12월이 아니면 'N월 결산'(Earnings 시트 연간 칸 = 결산기가 끝나는 연도) · "
                 "scope 퀄리티 손익 지표가 다 비면 '퀄리티 = 변동성만(손익 지표 없음)' · "
                 "확정 매출이 순액이라 매출 y-y 를 비우면 '매출 = 순영업이익(순액) — "
-                "총액 추정치와 y-y 비교 안 함' 을 ' · ' 로 덧붙인다")),
+                "총액 추정치와 y-y 비교 안 함' · Earnings 연간 YoY 가 연결/별도 범위가 다른 두 값을 "
+                "견주면(회색 글자) '연결/별도 다름' 을 ' · ' 로 덧붙인다")),
         ), gap=False),
     ]
     for b in view.buckets:
@@ -851,7 +882,8 @@ def sheet_scores(wb: Workbook, view: DayView, fi: FiData, prev_rank: Mapping[str
                  *grace_notes(grace, t, state, u.get("coverage_age_days")),
                  None if mm == "12" else f"{int(mm)}월 결산",
                  QUALITY_VOL_ONLY_NOTE if quality_vol_only(view, t) else None,
-                 NET_REVENUE_NOTE if revenue_basis_mixed(fi, t, year) else None)
+                 NET_REVENUE_NOTE if revenue_basis_mixed(fi, t, year) else None,
+                 BASIS_MIXED_NOTE if basis_mixed(fi, t, year) else None)
         out: Row = {**id_values(view, t, fi), "rank": r, "composite": composite_of(row),
                     "prev_rank": pr, "d1m": trend.delta("1M", t, r),
                     "excl": exclude_label(row.get("exclude_reason")),
@@ -1081,6 +1113,14 @@ N_QUARTERS = 5          # fi_fin_summary 는 분기 5기만 싣는다(계약 창
 def _actual(fi: FiData, t: str, period: str, key: str) -> float | None:
     if key == "ni":     # 확정 순이익 = 지배주주 순이익(컨센서스 연간 표) — 추정치와 같은 정의(결함 2)
         return fi.ni_actual.get(t, {}).get(period)
+    if key == "op":     # 확정 영업이익 = 같은 표 확정 행(발표기준 우선, 없으면 표준 — U23)
+        rows = fi.op_actual.get(t, {})
+        if period not in rows:
+            # 표에 확정 행이 없다(못 읽음 · 연초 cF3002 만 먼저 확정 · 표에 없는 종목) — 표준 값으로
+            # 대신하면 정의가 섞인다(순이익과 같은 규칙: 추정치 회색 E 또는 빈칸)
+            return None
+        if (v := rows[period]) is not None:
+            return v
     row = fi.annual_at(t, period)
     return None if row is None else _num(row.get(key))
 
@@ -1122,6 +1162,39 @@ def revenue_basis_mixed(fi: FiData, t: str, year: int) -> list[str]:
     return out
 
 
+def _with_kind(fi: FiData, t: str, period: str, key: str,
+               actual_first: bool = True) -> tuple[float | None, str]:
+    """(값, 'A'|'E') — 확정 우선이면 확정, 없으면 추정(`_either` 와 같은 고르기)."""
+    if actual_first and (a := _actual(fi, t, period, key)) is not None:
+        return a, "A"
+    return _estimate(fi, t, period, key), "E"
+
+
+def basis_mixed(fi: FiData, t: str, year: int) -> set[tuple[str, str]]:
+    """(지표, slot) — 연간 YoY 칸 중 견주는 두 값의 연결/별도 범위(같은 컨센서스 표 · 같은 수집의
+    라벨, `fi.scope`)가 다른 칸(재무 검토 #6: 2025 연결 확정 vs 2026E 별도 추정 13종목, 10-20). 값은
+    그대로 두고 회색 글자 · Score 비고(10-20 사용자 '표시만 해두면'). 라벨이 없거나 YoY 가 원래 비는
+    칸(값 하나 없음 · 순액 매출 비움)은 넣지 않는다. 라벨은 표 라벨이다 — WISE cF3002 라벨은 값이
+    같은데도 49종목이 달라(별도만 내는 회사를 표가 연결로 적는 등) 쓰지 않는다."""
+    mm = fi.fy_month(t)
+    net = revenue_basis_mixed(fi, t, year)
+    out: set[tuple[str, str]] = set()
+    for key, _ in METRICS:
+        for slot, yr, _head in annual_years(year):
+            if key == "revenue" and slot in net:
+                continue
+            p, p0 = f"{yr}/{mm}", f"{yr - 1}/{mm}"
+            cur, kind = _with_kind(fi, t, p, key, actual_first=slot == "a")
+            prev, kind0 = _with_kind(fi, t, p0, key)
+            y, f = yoy(cur, prev)
+            if y is None and f is None:
+                continue
+            a, b = fi.scope_at(t, p, kind), fi.scope_at(t, p0, kind0)
+            if a is not None and b is not None and a != b:
+                out.add((key, slot))
+    return out
+
+
 def yoy_label(prev_head: str, head: str) -> str:
     """YoY 머리 — 비교하는 두 해가 보이게(10-11 사용자: 2025 옆 YoY 를 2026 대비로 읽음)."""
     return f"YoY\n({prev_head}-{head})"
@@ -1139,7 +1212,9 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
         # 순이익은 확정 · 추정 모두 지배주주 순이익이라고 정의 글에 밝힌다(결함 2)
         name = NI_DEFINITION if key == "ni" else label
         unit = f"{name}, 억원." if key == "ni" else f"{label}(억원)"
-        actual_src = "컨센서스 연간 표 확정 행" if key == "ni" else "사업보고서"
+        actual_src = {"ni": "컨센서스 연간 표 확정 행",
+                      "op": "컨센서스 연간 표 확정 행 — 회사 발표기준 영업이익, 없으면 WISE 표준"
+                      }.get(key, "사업보고서")
         for slot, yr, head in years:
             what = (f"{yr}년에 끝나는 결산기(12월 결산 = {yr}/12, 9월 결산이면 {yr}/09) "
                     f"확정치({actual_src}). 확정치가 없으면 같은 결산기 추정치(컨센서스 cur)를 회색 "
@@ -1152,7 +1227,9 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
                         f"{name} 전년 대비(%) — 한 해 앞 같은 결산월 결산기(확정 우선, 없으면 "
                         "추정)와 비교. 부호가 바뀌면 숫자 대신 흑자전환(−→+) · 적자전환(+→−) · "
                         "적자지속(−→−)"
-                        + (". 옆 칸이 추정치(회색 'E')면 이 칸도 회색" if slot == "a" else ""))),
+                        + (". 옆 칸이 추정치(회색 'E')면 이 칸도 회색" if slot == "a" else "")
+                        + ". 견주는 두 값의 연결/별도 범위(컨센서스 표 라벨)가 다르면 값은 두고 "
+                        "회색 글자 — 성장률이 아니다(Score 비고 '연결/별도 다름')")),
             ]
             if slot != "a":
                 sides[f"{key}_{slot}"] = SIDE_PAIR
@@ -1178,11 +1255,13 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
 
     rows: list[Row] = []
     est: list[tuple[int, str]] = []         # Y−1 칸에 추정치를 넣은 (행 순번, 지표)
+    mixed_cells: list[tuple[int, str]] = []  # 연결/별도가 다른 두 값을 견준 (행 순번, YoY 열 key)
     for i, row in enumerate(view.rows):
         t = ticker_of(row)
         out: Row = id_values(view, t)
         mm = fi.fy_month(t)                 # 결산월 — 비12월이면 Score 비고에 'N월 결산'
         mixed = revenue_basis_mixed(fi, t, year)     # 순액 대 총액 매출 y-y — 비우고 비고
+        mixed_cells += [(i, f"{k}_{slot}_y") for k, slot in basis_mixed(fi, t, year)]
         for key, _ in METRICS:
             for slot, yr, _head in years:
                 p = f"{yr}/{mm}"
@@ -1209,8 +1288,9 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
                *zip(starts, (
                    f"{year - 1}: 확정치(없으면 추정치를 회색 E 로) · {year}E·{year + 1}E: 컨센서스",
                    f"연도: 결산기가 끝나는 해(9월 결산 {year}E = {year}/09)",
-                   "매출 순액 회사: 매출 YoY 비움 · 어닝시즌: 원천 없음",
-                   f"분기: 최근 {N_QUARTERS}분기(분기말이 다른 결산월은 칸이 비고 YoY 만)"),
+                   "매출 순액 회사: 매출 YoY 비움 · 회색 YoY: 연결/별도 다름",
+                   (f"분기: 최근 {N_QUARTERS}분기(분기말이 다른 결산월은 칸이 비고 YoY 만) · "
+                    "어닝시즌: 원천 없음")),
                    strict=True)]
     sh = write_confirmed(wb, "Earnings",
                          band(view, "Earnings: 연간·분기 실적과 YoY", "정렬: Score 순위 순",
@@ -1232,6 +1312,10 @@ def sheet_earnings(wb: Workbook, view: DayView, fi: FiData) -> Dictionary:
         yy = ws.cell(r0 + i, sh.cols[f"{key}_a_y"])
         if yy.value not in SIGN_COLORS:
             yy.font = font(color=C_HDR)
+    # 연결/별도 범위가 다른 두 값의 YoY — 값 · 부호 글자는 두고 회색 글자(부호 글자 색도 덮는다:
+    # '흑자전환' 자체가 범위 차이일 수 있다, 동국씨엠 연결 −388 → 별도 390E)
+    for i, key in mixed_cells:
+        ws.cell(r0 + i, sh.cols[key]).font = font(color=C_HDR)
     return sh.dictionary
 
 
@@ -1762,17 +1846,18 @@ def build_daily(d: str | date, basis: str, *, model_root: Path, fi_root: Path, o
     wb = new_workbook()
     wb.remove(wb.worksheets[0])
     more_fi = (history_fi_root,) if supplement and history_fi_root is not None else ()
-    score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands,
-                                          grace_of(view, fi_root, trend, more_fi))
-    sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
     fi_meta = fi_run_meta(fi_root, run.date, basis, run.fi_build_id)
     if supplement and not fi_meta.get("wise_asof"):
         log.warning("주말 보강판 fi 판 JSON(%s _runs/%s_supplement.json, 판 %s)의 wise_asof 를 못 "
                     "읽었다 — Analyst 는 휴일 재수집 없이 엑셀 D 까지만 읽는다", fi_root,
                     ymd(run.date), run.fi_build_id)
-    # Earnings 순이익 Y−2 확정 지배 순이익 — 새 시트 원천 기록(`src.used`)과 따로 연다
-    load_ni_y2(replace(open_sources(fi_meta, equity_root, stage_root), label="Earnings 순이익"),
-               view, fi)
+    # Earnings Y−2 확정 순이익 · 영업이익과 연결/별도 라벨 — 새 시트 원천 기록(`src.used`)과 따로
+    # 연다. Score 비고('연결/별도 다름')도 라벨을 쓰니 Score 앞에서 읽는다
+    load_consensus_stage(replace(open_sources(fi_meta, equity_root, stage_root),
+                                 label="Earnings 순이익"), view, fi)
+    score_dict, score_tail = sheet_scores(wb, view, fi, prev_rank, trend, cands,
+                                          grace_of(view, fi_root, trend, more_fi))
+    sector_dict = sheet_sectors(wb, view, week_returns(fi_root, view))
     earnings_dict = sheet_earnings(wb, view, fi)
     src = open_sources(fi_meta, equity_root, stage_root)
     extra = sheets_extra.build(wb, src, XRefs.of(wb["Sector"]), date.fromisoformat(run.date),

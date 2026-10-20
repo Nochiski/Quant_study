@@ -1894,18 +1894,25 @@ def _controlling_ni(table: str, rows: list[dict[str, object]]) -> None:
 
 
 def write_stage_consensus_annual(root: Path, build_id: str,
-                                 rows: list[tuple[str, str, str, str, float]]) -> None:
-    """stage `stg_consensus_annual` 판 하나 — (종목, 수집일, 기 YYYYMM, 종류, 순이익). 나중에 쓴 판이
-    current."""
+                                 rows: list[tuple[object, ...]]) -> None:
+    """stage `stg_consensus_annual` 판 하나 — (종목, 수집일, 기 YYYYMM, 종류, 순이익[, 영업이익,
+    연결/별도 라벨]). 뒤 둘을 빼면 NULL. 나중에 쓴 판이 current."""
     vdir = root / "stg_consensus_annual" / f"v={build_id}"
     vdir.mkdir(parents=True, exist_ok=True)
+
+    def opt(k: int) -> list[object]:
+        return [r[k] if len(r) > k else None for r in rows]
+
     pq.write_table(pa.table({
         "ticker": pa.array([r[0] for r in rows], pa.string()),
-        "fetched_date": pa.array([date.fromisoformat(r[1]) for r in rows], pa.date32()),
-        "period_label": pa.array([f"{r[2][:4]}.{r[2][4:]}({r[3]})" for r in rows], pa.string()),
+        "fetched_date": pa.array([date.fromisoformat(str(r[1])) for r in rows], pa.date32()),
+        "period_label": pa.array([f"{str(r[2])[:4]}.{str(r[2])[4:]}({r[3]})" for r in rows],
+                                 pa.string()),
         "period": pa.array([r[2] for r in rows], pa.string()),
         "period_kind": pa.array([r[3] for r in rows], pa.string()),
-        "ni": pa.array([r[4] for r in rows], pa.float64())}), vdir / "part0.parquet")
+        "ni": pa.array([r[4] for r in rows], pa.float64()),
+        "op": pa.array(opt(5), pa.float64()),
+        "fs_basis": pa.array(opt(6), pa.string())}), vdir / "part0.parquet")
     manifest.commit(root / "stg_consensus_annual", manifest.BuildRecord(
         build_id=build_id, snapshot_id="", rules_version="v_test",
         built_at_utc="2026-09-26T00:00:00+00:00", n_rows=len(rows), content_hash="test",
@@ -2024,7 +2031,8 @@ def test_daily_earnings_gc_pinned_two_years_ago_falls_back_to_current_same_fetch
 def test_daily_earnings_unreadable_two_years_ago_blanks_only_that_yoy(
         tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Y−2(2024) 확정 지배 순이익을 고정 판 · current 판 모두 못 읽으면(stage 표 없음) 2025 YoY 칸만
-    빈다 — 연결 순이익으로 대신하지 않는다. 다른 칸은 그대로, 경고 로그."""
+    빈다 — 연결 순이익으로 대신하지 않는다. 영업이익 2025 YoY 도 같은 표(2024 확정 행)가 없어 빈다
+    (U23 — 표준 값으로 대신하지 않는다). 매출과 다른 칸은 그대로, 경고 로그."""
     with caplog.at_level("WARNING"):
         wb = load_workbook(_controlling_board(tmp_path, "b_gone_0000", current=None))
     ws = wb["Earnings"]
@@ -2034,8 +2042,9 @@ def test_daily_earnings_unreadable_two_years_ago_blanks_only_that_yoy(
     assert ws.cell(rows[tick(10)], y25).value is None
     assert ws.cell(rows[CTRL], col_of(ws, "2025", 2)).value == -10728.1
     assert ws.cell(rows[CTRL], col_of(ws, "YoY (2025-2026E)", 2)).value == "적자지속"
-    assert ws.cell(rows[CTRL], col_of(ws, "YoY (2024-2025)", 1)).value == pytest.approx(
-        (140 / 120 - 1) * 100)
+    assert ws.cell(rows[CTRL], col_of(ws, "YoY (2024-2025)", 1)).value is None
+    assert ws.cell(rows[CTRL], col_of(ws, "YoY (2024-2025)", 0)).value == pytest.approx(
+        (1300 / 1200 - 1) * 100)
     assert any("YoY 칸을 비운다" in rec.getMessage() for rec in caplog.records
                if rec.levelname == "WARNING")
 
@@ -2061,8 +2070,211 @@ def test_daily_earnings_unreadable_consensus_annual_leaves_only_those_cells_blan
     assert ws.cell(r, col_of(ws, "2025", 2)).value is None        # 연결 60 이 아니다
     assert ws.cell(r, col_of(ws, "2026E", 2)).value == 70
     assert ws.cell(r, col_of(ws, "2025", 0)).value == 1200        # 매출은 그대로
+    # 영업이익 확정치도 컨센서스 연간 표 몫이라(U23) 표를 못 읽으면 표준 값(130)으로 대신하지 않는다
+    assert ws.cell(r, col_of(ws, "2025", 1)).value is None
     assert any("fi_consensus_annual" in rec.getMessage() for rec in caplog.records
                if rec.levelname == "WARNING")
+
+
+# ── Earnings 영업이익 = 발표기준 우선(U23) · 연결/별도가 다른 YoY 는 회색(재무 검토 #6) ──────────
+OP_PUB, OP_GAP, MIX_E, MIX_A, MIX_SIGN, MIX_GAAP, MIX_FWD, OP_EARLY = (
+    tick(i) for i in range(23, 31))
+BASIS_NOTE = "연결/별도 다름"
+GREY = "7F7F7F"
+C, S_ = "IFRS연결", "IFRS별도"
+
+
+def _u23_fi(table: str, rows: list[dict[str, object]]) -> None:
+    """실제 판 모양 — 컨센서스 연간 표 창은 Y−1~Y+1(2024 는 stage). OP_PUB = LG에너지솔루션(10-20 판):
+    표준 영업이익(fi_fin_summary) 2024 −9,046 · 2025 −3,007, 표 확정 행(발표기준) 2025 13,461 ·
+    2026E 9,967. OP_GAP = 2025 표 확정 행은 있는데 영업이익 칸이 빔 → 표준(144). MIX_SIGN = 동국씨엠
+    모양 −388(연결) → 390E(별도). OP_EARLY = 연초 전환 — 표는 2025 를 아직 추정(E)으로만 싣고
+    fi_fin_summary(cF3002)는 이미 확정(표준 150): 확정 행이 없으니 표준으로 대신하지 않는다."""
+    if table == "fi_consensus_annual":
+        rows[:] = [r for r in rows if r["period"] != "2024/12"
+                   and not (r["ticker"] == OP_EARLY and r["period"] == "2025/12")]
+        for r in rows:
+            if r["period"] == "2025/12" and r["data_type"] == "A":
+                if r["ticker"] == OP_PUB:
+                    r["op"] = 13461.0
+                elif r["ticker"] == OP_GAP:
+                    r["op"] = None
+                elif r["ticker"] == MIX_SIGN:
+                    r["op"] = -388.0
+    elif table == "fi_fin_summary":
+        for r in rows:
+            if r["period_type"] == "annual" and r["ticker"] == OP_PUB:
+                r["op"] = {"2024/12": -9046.0, "2025/12": -3007.0}[str(r["period"])]
+            if r["period_type"] == "annual" and r["ticker"] == MIX_SIGN and r["period"] == "2025/12":
+                r["op"] = -388.0
+    elif table == "fi_consensus":
+        for r in rows:
+            if r["horizon"] == "cur" and r["target_period"] == "2026/12":
+                if r["ticker"] == OP_PUB:
+                    r["op"] = 9967.0
+                elif r["ticker"] == MIX_SIGN:
+                    r["op"] = 390.0
+        rows.append({"ticker": OP_EARLY, "target_period": "2025/12", "horizon": "cur",
+                     "revenue": 1390.0, "op": 141.0, "ni": 55.0, "eps": 900.0, "per": 12.5,
+                     "pbr": 1.1, "n_analysts": 5, "obs_date": "2026-09-24",
+                     "fetched_date": "2026-09-24"})
+
+
+def _u23_stage_rows() -> list[tuple[object, ...]]:
+    """fi 가 고른 수집(09-24)의 표 행 — 2024 확정(순이익 50 · 영업이익) + 기마다 연결/별도 라벨.
+    라벨: 기본 전부 연결. MIX_E · MIX_SIGN = 2025 확정 연결 → 추정 별도, MIX_A = 2024 확정 별도 →
+    2025 연결(추정도 연결), MIX_GAAP = 확정 IFRS별도 · 추정 GAAP개별(둘 다 별도 — 같은 범위),
+    MIX_FWD = 2026E 연결 → 2027E 별도."""
+    labels = {MIX_E: (C, C, S_, S_), MIX_SIGN: (C, C, S_, S_), MIX_A: (S_, C, C, C),
+              MIX_GAAP: (S_, S_, "GAAP개별", "GAAP개별"), MIX_FWD: (C, C, C, S_)}
+    out: list[tuple[object, ...]] = []
+    for i in range(N + 1):
+        t = tick(i)
+        b24, b25, b26, b27 = labels.get(t, (C, C, C, C))
+        op24 = 5754.0 if t == OP_PUB else None       # None = 2024 표준 값(fi_fin_summary)으로
+        out += [(t, "2026-09-24", "202412", "A", 50.0, op24, b24),
+                (t, "2026-09-24", "202512", "A", 60.0, None, b25),
+                (t, "2026-09-24", "202612", "E", 70.0, None, b26),
+                (t, "2026-09-24", "202712", "E", 80.0, None, b27)]
+    return out
+
+
+def _u23_board(tmp_path: Path, stage_rows: list[tuple[object, ...]] | None) -> Path:
+    """`_u23_fi` 판(FRI 아침) + stage 표(`stage_rows`, None 이면 표 없음 — 못 읽음)."""
+    model_root, fi_root, st = tmp_path / "model", tmp_path / "fi", tmp_path / "stage"
+    fi_bid = write_fi_day(fi_root, FRI, edit=_u23_fi)
+    write_model_day(model_root, FRI, fi_bid)
+    if stage_rows is not None:
+        write_stage_consensus_annual(st, STAGE_PIN, stage_rows)
+    runs = fi_root / "_runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "20260925_morning.json").write_text(json.dumps({
+        "build_id": fi_bid, "asof": FRI, "stage_root": str(st),
+        "stage_builds": {"stg_consensus_annual": STAGE_PIN}}), encoding="utf-8")
+    return build_daily(FRI, "morning", model_root=model_root, fi_root=fi_root,
+                       out_root=tmp_path / "out").path
+
+
+def _grey(cell) -> bool:
+    return cell.font.color is not None and str(cell.font.color.rgb).endswith(GREY)
+
+
+def test_daily_earnings_operating_profit_is_the_announced_figure(tmp_path: Path) -> None:
+    """U23(10-20 사용자) — 확정 영업이익 = 컨센서스 연간 표 확정 행(발표기준 우선, 없으면 표준 — 10-20
+    실측 602종목 일치). 2025 = 같은 fi 판 fi_consensus_annual, 2024 = 고정 stage 판의 fi 가 고른 수집.
+    표 확정 행의 영업이익 칸이 비면 표준 값(fi_fin_summary). 매출은 그대로."""
+    ws = load_workbook(_u23_board(tmp_path, _u23_stage_rows()))["Earnings"]
+    rows = rows_by_code(ws)
+    op = {h: col_of(ws, h, 1) for h in ("2025", "YoY (2024-2025)", "2026E", "YoY (2025-2026E)")}
+    r = rows[OP_PUB]
+    assert ws.cell(r, op["2025"]).value == 13461                       # 표준 −3,007 이 아니다
+    assert ws.cell(r, op["YoY (2024-2025)"]).value == pytest.approx((13461 / 5754 - 1) * 100)
+    assert ws.cell(r, op["YoY (2025-2026E)"]).value == pytest.approx((9967 / 13461 - 1) * 100)
+    g = rows[OP_GAP]                                                     # 표 칸 빔 → 표준
+    assert ws.cell(g, op["2025"]).value == 120 + 24
+    assert ws.cell(g, op["YoY (2024-2025)"]).value == pytest.approx(((120 + 24) / (100 + 24) - 1) * 100)
+    assert ws.cell(rows[OP_PUB], col_of(ws, "2025", 0)).value == 1100 + 10 * 23   # 매출 그대로
+    e = ws.cell(rows[OP_EARLY], op["2025"])                  # 표 확정 행 없음 → 추정치(회색 E)
+    assert e.value == 141 and '"E"' in e.number_format     # 표준 150 이 아니다(리뷰 10-20 #1)
+
+
+def test_daily_earnings_unreadable_stage_blanks_the_operating_profit_yoy_too(
+        tmp_path: Path) -> None:
+    """2024 표 행(stage)을 못 읽으면 2025 영업이익 YoY 도 빈다 — 표준 2024 값과 발표기준 2025 값을
+    견주지 않는다(순이익과 같은 규칙). 2025 값 · 추정 YoY 는 그대로."""
+    ws = load_workbook(_u23_board(tmp_path, None))["Earnings"]
+    rows = rows_by_code(ws)
+    r = rows[OP_PUB]
+    assert ws.cell(r, col_of(ws, "YoY (2024-2025)", 1)).value is None
+    assert ws.cell(r, col_of(ws, "2025", 1)).value == 13461
+    assert ws.cell(r, col_of(ws, "YoY (2025-2026E)", 1)).value == pytest.approx(
+        (9967 / 13461 - 1) * 100)
+    assert not any(_grey(ws.cell(rr, col_of(ws, "YoY (2025-2026E)", k)))
+                   for rr in rows.values() for k in (0, 1, 2))   # 라벨을 못 읽으면 표시 없음
+
+
+def test_daily_earnings_mixed_consolidation_yoy_is_kept_but_grey(tmp_path: Path) -> None:
+    """재무 검토 #6(10-20 사용자 '그냥 표시하고 보는 사람이 알 수 있게') — 견주는 두 값의 연결/별도
+    범위(같은 컨센서스 표 라벨)가 다르면 YoY 값 · 부호 글자는 그대로 두고 회색 글자로, Score 비고에
+    '연결/별도 다름'. IFRS별도 ↔ GAAP개별은 같은 범위(별도)라 표시하지 않는다."""
+    wb = load_workbook(_u23_board(tmp_path, _u23_stage_rows()))
+    ws = wb["Earnings"]
+    rows = rows_by_code(ws)
+
+    def cell(t: str, head: str, k: int):
+        return ws.cell(rows[t], col_of(ws, head, k))
+
+    for k in (0, 1, 2):                                       # 매출 · 영업이익 · 순이익
+        e0 = cell(MIX_E, "YoY (2025-2026E)", k)
+        assert e0.value is not None and _grey(e0)                # 2025 연결 → 2026E 별도
+        assert not _grey(cell(MIX_E, "YoY (2024-2025)", k))      # 2024 · 2025 둘 다 연결
+        assert not _grey(cell(MIX_E, "YoY (2026E-2027E)", k))    # 추정끼리 같은 별도
+        a = cell(MIX_A, "YoY (2024-2025)", k)
+        assert a.value is not None and _grey(a)                  # 2024 별도 → 2025 연결
+        assert not _grey(cell(MIX_A, "YoY (2025-2026E)", k))
+        fwd = cell(MIX_FWD, "YoY (2026E-2027E)", k)
+        assert fwd.value is not None and _grey(fwd)              # 2026E 연결 → 2027E 별도
+        assert not _grey(cell(MIX_FWD, "YoY (2025-2026E)", k))
+        for t in (MIX_GAAP, tick(10)):
+            for head in ("YoY (2024-2025)", "YoY (2025-2026E)", "YoY (2026E-2027E)"):
+                assert not _grey(cell(t, head, k)), (t, head, k)
+    sign = cell(MIX_SIGN, "YoY (2025-2026E)", 1)
+    assert sign.value == "흑자전환" and _grey(sign)               # 부호 글자도 회색(파랑이 아니다)
+    assert cell(MIX_E, "YoY (2025-2026E)", 1).value == pytest.approx(((130 + 25) / (120 + 25) - 1) * 100)
+    sc = wb["Score"]
+    note = {t: sc.cell(r, header(sc)["비고"]).value for t, r in rows_by_code(sc).items()}
+    for t in (MIX_E, MIX_A, MIX_SIGN, MIX_FWD):
+        assert BASIS_NOTE in str(note[t]), t
+    for t in (MIX_GAAP, OP_PUB, tick(10)):
+        assert BASIS_NOTE not in str(note[t] or ""), t
+    legend = sc.cell(7, header(sc)["비고"]).comment.text
+    assert f"■ {BASIS_NOTE}:" in legend and "성장률이 아님" in legend
+    assert any("회색 YoY: 연결/별도 다름" in str(c.value or "") for c in ws[5])
+    meta = wb["Meta"]
+    defs = {(meta.cell(rr, 1).value, meta.cell(rr, 2).value): str(meta.cell(rr, 3).value)
+            for rr in range(1, meta.max_row + 1)}
+    assert "발표기준" in defs[("Earnings", "영업이익(억원 · YoY %) · 2025")]
+    assert "발표기준" not in defs[("Earnings", "매출(억원 · YoY %) · 2025")]
+    for g in ("매출", "영업이익", "순이익"):
+        assert "연결/별도" in defs[("Earnings", f"{g}(억원 · YoY %) · YoY (2025-2026E)")], g
+
+
+def test_basis_mixed_pairs_the_values_the_sheet_shows() -> None:
+    """`basis_mixed` 는 시트가 실제로 견주는 두 값(확정 우선 · 없으면 추정)의 라벨로 가른다(리뷰 10-20
+    살아남은 변이 M5 · M1 · M2).
+    ① Y−1 영업이익 · 순이익 확정 행이 없어 추정치(별도)를 보여 주면 2024 확정(별도)과 같은 범위 —
+    매출만 확정(연결)이라 다르다. ② 라벨은 다르지만 견줄 추정치가 없어 YoY 가 원래 비면 넣지 않는다.
+    ③ 순액 매출로 비운 칸은 넣지 않는다(영업이익 · 순이익은 넣는다)."""
+    from deliver.excel_daily import FiData, basis_mixed
+
+    def cons(period: str, rev: float, op: float, ni: float) -> dict[str, object]:
+        return {"target_period": period, "horizon": "cur", "revenue": rev, "op": op, "ni": ni}
+
+    def fin(period: str, rev: float, op: float, basis: str | None = None) -> dict[str, object]:
+        return {"period": period, "period_type": "annual", "revenue": rev, "op": op,
+                "revenue_basis": basis}
+
+    a, b, n = "A00001", "B00001", "N00001"
+    fi = FiData(
+        fins={a: [fin("2024/12", 1000, 100), fin("2025/12", 1100, 120)],
+              b: [fin("2024/12", 1000, 100), fin("2025/12", 1100, 120)],
+              n: [fin("2024/12", 300, 30, "net"), fin("2025/12", 330, 33, "net")]},
+        cons={a: [cons("2025/12", 1150, 130, 60), cons("2026/12", 1200, 140, 70),
+                  cons("2027/12", 1300, 150, 80)],
+              b: [cons("2027/12", 1300, 150, 80)],
+              n: [cons("2026/12", 1500, 40, 20)]},
+        ni_actual={a: {"2024/12": 50}, b: {"2024/12": 50, "2025/12": 60},
+                   n: {"2024/12": 15, "2025/12": 18}},
+        op_actual={a: {"2024/12": 100}, b: {"2024/12": 100, "2025/12": 120},
+                   n: {"2024/12": 30, "2025/12": 33}},
+        scope={a: {("2024/12", "A"): "별도", ("2025/12", "A"): "연결", ("2025/12", "E"): "별도",
+                   ("2026/12", "E"): "별도", ("2027/12", "E"): "별도"},
+               b: {("2024/12", "A"): "연결", ("2025/12", "A"): "연결", ("2026/12", "E"): "별도",
+                   ("2027/12", "E"): "별도"},
+               n: {("2024/12", "A"): "연결", ("2025/12", "A"): "연결", ("2026/12", "E"): "별도"}})
+    assert basis_mixed(fi, a, 2026) == {("revenue", "a"), ("revenue", "e0")}
+    assert basis_mixed(fi, b, 2026) == set()
+    assert basis_mixed(fi, n, 2026) == {("op", "e0"), ("ni", "e0")}
 
 
 def test_daily_unreadable_previous_universe_keeps_the_excel(

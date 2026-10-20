@@ -60,6 +60,18 @@ elif stage == "record":
         return job
 
     _worker.decode_job = decoded
+elif stage == "late_import":
+    # marker 자리는 모듈 이름이다. tape 계산 중 부팅 때 불러오지 않은 프로젝트 모듈을 처음
+    # 불러온다 — worker 는 그 결과를 commit 하지 않아야 한다(spec D7).
+    import importlib
+    from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
+    run_pipeline = PortfolioDesignService.run_pipeline
+
+    def late(self, *args, **kwargs):
+        importlib.import_module(marker)
+        return run_pipeline(self, *args, **kwargs)
+
+    PortfolioDesignService.run_pipeline = late
 elif stage == "slow_boot":
     # job 을 읽기 전에 잠깐 잠든다. 부모의 큰 job 쓰기가 그동안 파이프에서 막힌다.
     time.sleep(2.0)
@@ -111,6 +123,15 @@ def hook_command(stage: str, marker: Path) -> list[str]:
     `record` 는 잠들지 않고 `marker` 디렉터리에 띄워짐·job 대기·job 받음 표시만 남긴다(`records`).
     """
     return [sys.executable, "-c", _HOOK, stage, str(marker)]
+
+
+# worker 부팅이 불러오지 않는 프로젝트 모듈(무거운 의존이 없는 빈 패키지).
+LATE_IMPORT_MODULE = "strategy_workbench.adapters.outbound.fake_broker"
+
+
+def late_import_command() -> list[str]:
+    """tape 계산 중 `LATE_IMPORT_MODULE` 을 처음 불러오는 worker 진입점(spec D7 가드 확인용)."""
+    return [sys.executable, "-c", _HOOK, "late_import", LATE_IMPORT_MODULE]
 
 
 @cache

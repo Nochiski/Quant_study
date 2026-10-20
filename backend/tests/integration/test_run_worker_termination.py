@@ -72,8 +72,10 @@ from strategy_workbench.domain.backtest.facade.runs import RunStage, RunStatus
 from tests.backtest_run_wait import wait_for_terminal_run
 from tests.integration.test_experiment_http_api import _experiment
 from tests.run_worker_support import (
+    LATE_IMPORT_MODULE,
     TIMEOUT_S,
     hook_command,
+    late_import_command,
     parent_versions,
     wait_for_exit,
     wait_for_marker,
@@ -264,6 +266,33 @@ def test_a_worker_with_other_versions_fails_the_run_as_a_mismatch(tmp_path: Path
     assert "mismatched=snapshot_id,code_fingerprint" in outcome.error
     assert "restart the server" in outcome.error
     assert _leftovers(tmp_path / "artifacts", "run-mismatch") == []
+
+
+def test_a_run_that_imports_project_code_after_the_version_check_is_not_committed(
+    tmp_path: Path,
+) -> None:
+    """D7: 판본 대조 뒤 run 이 처음 불러온 프로젝트 모듈은 서버와 대조하지 않은 코드다.
+
+    worker 는 결과를 commit 하지 않고 `worker_mismatch` 로 닫으며, 문장에 그 모듈 이름을 싣는다
+    (#591 2차 리뷰 P3-1).
+    """
+    listener = _Recorder()
+    root = tmp_path / "artifacts"
+    execution = ProcessRunExecution(
+        WorkerSettings("mock", None, root),
+        versions=parent_versions(),
+        discard_unfinished=LocalArtifactStore(root).discard_unfinished,
+        command=late_import_command(),
+        spare=False,
+    )
+    execution.start(resolved_job("run-late-import"), listener)
+
+    outcome = listener.wait()
+    assert isinstance(outcome, RunFailed)
+    assert outcome.error_code == "backtest.run.worker_mismatch"
+    assert f"modules={LATE_IMPORT_MODULE}" in outcome.error
+    assert "run_id=run-late-import" in outcome.error
+    assert not root.exists() or _leftovers(root, "run-late-import") == []
 
 
 def test_a_worker_whose_parent_closed_stdin_does_not_commit(tmp_path: Path) -> None:

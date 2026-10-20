@@ -155,24 +155,8 @@ def window_mean(
     Returns:
         `starts` 길이의 값과 정확 경로 표시.
     """
-    _require_floats(values, "values")
-    if window < 1:
-        raise ValueError(f"window mean needs window >= 1 — window={window}")
-    limit = max(values.shape[0] - window + 1, 0)
-    span = slice(0, limit) if starts is None else starts
-    low = 0 if span.start is None else span.start
-    high = limit if span.stop is None else span.stop
-    if span.step not in (None, 1) or not 0 <= low <= high <= limit:
-        raise ValueError(
-            "window mean starts must be a contiguous range inside the series — "
-            f"starts={span!r} rows={values.shape[0]} window={window} limit={limit}"
-        )
+    low, high = _window_range(values, window, starts, wanted, "window mean")
     count = high - low
-    if wanted is not None and (wanted.dtype != np.bool_ or wanted.shape != (count,)):
-        raise ValueError(
-            "window mean wanted mask must be a bool array as long as starts — "
-            f"wanted_shape={wanted.shape} wanted_dtype={wanted.dtype} starts={count}"
-        )
     means = np.zeros(count, np.float64)
     exact = np.zeros(count, bool)
     for first in range(low, high, _KERNEL_CHUNK):
@@ -181,12 +165,11 @@ def window_mean(
         part = slice(first - low, last - low)
         total, error, magnitude = _window_sums(values, window, first, last, checkpoint)
         _settle(
-            total,
-            error,
-            magnitude,
-            np.full(last - first, float(window)),
+            last - first,
+            _mean_certifier(total, error, magnitude, np.full(last - first, float(window))),
             None if wanted is None else wanted[part],
             lambda cell, origin=first: values[origin + cell : origin + cell + window],
+            mean,
             checkpoint,
             out=means[part],
             exact=exact[part],
@@ -211,21 +194,7 @@ def segment_mean(
         offsets: 길이 G + 1 의 비감소 정수 열. `offsets[0] == 0`, `offsets[-1] == len(values)`.
         checkpoint: 협조적 취소 확인. 블록 offset 반복·청크·정확 경로 256칸마다 부른다.
     """
-    _require_floats(values, "values")
-    bounds = np.asarray(offsets)
-    if (
-        bounds.ndim != 1
-        or bounds.shape[0] < 1
-        or not np.issubdtype(bounds.dtype, np.integer)
-        or int(bounds[0]) != 0
-        or int(bounds[-1]) != values.shape[0]
-        or bool(np.any(np.diff(bounds) < 0))
-    ):
-        raise ValueError(
-            "segment mean offsets must be non-decreasing integers from 0 to len(values) — "
-            f"offsets_shape={bounds.shape} dtype={bounds.dtype} rows={values.shape[0]}"
-        )
-    bounds = bounds.astype(np.intp)
+    bounds = _segment_bounds(values, offsets, "segment mean")
     lengths = np.diff(bounds)
     total, error, magnitude = _segment_sums(values, bounds, lengths, checkpoint)
     groups = lengths.shape[0]
@@ -237,12 +206,11 @@ def segment_mean(
         checkpoint()
         part = slice(first, min(first + _KERNEL_CHUNK, groups))
         _settle(
-            total[part],
-            error[part],
-            magnitude[part],
-            counts[part],
+            part.stop - part.start,
+            _mean_certifier(total[part], error[part], magnitude[part], counts[part]),
             nonempty[part],
             lambda cell, origin=first: values[bounds[origin + cell] : bounds[origin + cell + 1]],
+            mean,
             checkpoint,
             out=means[part],
             exact=exact[part],
@@ -251,10 +219,54 @@ def segment_mean(
     return ExactMeans(means, exact)
 
 
+def _window_range(
+    values: _Floats, window: int, starts: slice | None, wanted: _Bools | None, kernel: str
+) -> tuple[int, int]:
+    """창 커널 입력을 검사하고 시작 위치 구간 [low, high) 를 돌려준다."""
+    _require_floats(values, "values")
+    if window < 1:
+        raise ValueError(f"{kernel} needs window >= 1 — window={window}")
+    limit = max(values.shape[0] - window + 1, 0)
+    span = slice(0, limit) if starts is None else starts
+    low = 0 if span.start is None else span.start
+    high = limit if span.stop is None else span.stop
+    if span.step not in (None, 1) or not 0 <= low <= high <= limit:
+        raise ValueError(
+            f"{kernel} starts must be a contiguous range inside the series — "
+            f"starts={span!r} rows={values.shape[0]} window={window} limit={limit}"
+        )
+    count = high - low
+    if wanted is not None and (wanted.dtype != np.bool_ or wanted.shape != (count,)):
+        raise ValueError(
+            f"{kernel} wanted mask must be a bool array as long as starts — "
+            f"wanted_shape={wanted.shape} wanted_dtype={wanted.dtype} starts={count}"
+        )
+    return low, high
+
+
+def _segment_bounds(values: _Floats, offsets: NDArray[np.intp], kernel: str) -> NDArray[np.intp]:
+    """구간 커널 입력을 검사하고 intp 경계 열을 돌려준다."""
+    _require_floats(values, "values")
+    bounds = np.asarray(offsets)
+    if (
+        bounds.ndim != 1
+        or bounds.shape[0] < 1
+        or not np.issubdtype(bounds.dtype, np.integer)
+        or int(bounds[0]) != 0
+        or int(bounds[-1]) != values.shape[0]
+        or bool(np.any(np.diff(bounds) < 0))
+    ):
+        raise ValueError(
+            f"{kernel} offsets must be non-decreasing integers from 0 to len(values) — "
+            f"offsets_shape={bounds.shape} dtype={bounds.dtype} rows={values.shape[0]}"
+        )
+    return bounds.astype(np.intp)
+
+
 def _require_floats(values: np.ndarray, name: str) -> None:
     if values.ndim != 1 or values.dtype != np.float64:
         raise TypeError(
-            f"exact mean kernel needs a 1-D float64 array — {name} shape={values.shape} "
+            f"exact statistics kernel needs a 1-D float64 array — {name} shape={values.shape} "
             f"dtype={values.dtype}"
         )
 
@@ -335,27 +347,37 @@ def _certify(
     return candidate, certified, zero
 
 
+_Certifier = Callable[[slice], tuple[_Floats, _Bools, _Bools]]
+
+
+def _mean_certifier(
+    total: _Floats, error: _Floats, magnitude: _Floats, count: _Floats
+) -> _Certifier:
+    return lambda cells: _certify(total[cells], error[cells], magnitude[cells], count[cells])
+
+
 def _settle(
-    total: _Floats,
-    error: _Floats,
-    magnitude: _Floats,
-    count: _Floats,
+    cells_total: int,
+    certify: _Certifier,
     wanted: _Bools | None,
     members: Callable[[int], _Floats],
+    exact_value: Callable[[list[float]], float],
     checkpoint: Callable[[], None],
     *,
     out: _Floats,
     exact: _Bools,
 ) -> None:
-    """인증된 칸은 후보를, 정확한 0 은 +0.0 을, 나머지 원하는 칸은 `statistics.mean` 을 쓴다."""
-    pending = np.zeros(total.shape[0], bool)
+    """인증된 칸은 후보를, 정확한 0 은 +0.0 을, 나머지 원하는 칸은 `exact_value` 를 쓴다.
+
+    `certify(조각)` 은 그 조각의 (후보, 인증됨, 정확한 0) 이고 `exact_value` 는 객체 경로와 같은
+    `statistics` 함수다(원소 list 를 그대로 넘긴다).
+    """
+    pending = np.zeros(cells_total, bool)
     # 인증식은 칸마다 연산이 많아 캐시에 드는 조각으로 나눠 계산하고 조각마다 checkpoint 한다
-    for low in range(0, total.shape[0], _CERTIFY_CHUNK):
+    for low in range(0, cells_total, _CERTIFY_CHUNK):
         checkpoint()
-        part = slice(low, min(low + _CERTIFY_CHUNK, total.shape[0]))
-        candidate, certified, zero = _certify(
-            total[part], error[part], magnitude[part], count[part]
-        )
+        part = slice(low, min(low + _CERTIFY_CHUNK, cells_total))
+        candidate, certified, zero = certify(part)
         if wanted is not None:
             certified &= wanted[part]
             zero &= wanted[part]
@@ -367,7 +389,7 @@ def _settle(
     elements = 0
     for cell in np.flatnonzero(pending).tolist():
         items = members(cell)
-        out[cell] = mean(items.tolist())
+        out[cell] = exact_value(items.tolist())
         exact[cell] = True
         cells += 1
         elements += items.shape[0]
@@ -386,13 +408,8 @@ def _window_sums(
     둘을 TwoSum 으로 잇는다. 각 창의 합은 자기 원소만 담는다 — 다른 종목의 큰 값이나 NaN 이
     섞이지 않는다.
     """
-    count = last - first
-    blocks = (count - 1) // window + 2
-    stop = min(first + blocks * window, values.shape[0])
-    grid = np.zeros(blocks * window, np.float64)
-    grid[: stop - first] = values[first:stop]
-    # 행 = 블록 안 offset, 열 = 블록. 한 offset 의 모든 블록이 연속 메모리다
-    rows = np.ascontiguousarray(grid.reshape(blocks, window).T)
+    rows, block, offset_in_block = _window_rows(values, window, first, last)
+    blocks = rows.shape[1]
     prefix = [np.zeros((window, blocks), np.float64) for _ in range(3)]
     suffix = [np.zeros((window, blocks), np.float64) for _ in range(3)]
     with np.errstate(all="ignore"):
@@ -410,8 +427,6 @@ def _window_sums(
             state = _accumulate(state, rows[offset])
             for target, part in zip(suffix, state, strict=True):
                 target[offset] = part
-        relative = np.arange(count)
-        block, offset_in_block = np.divmod(relative, window)
         tail = offset_in_block * blocks + block
         head = tail + 1
         tail_total, tail_error, tail_magnitude = (part.reshape(-1)[tail] for part in suffix)
@@ -420,6 +435,72 @@ def _window_sums(
         error = (tail_error + head_error) + joint
         magnitude = (tail_magnitude + head_magnitude) + np.abs(joint)
     return total, error, magnitude
+
+
+def _window_rows(
+    values: _Floats, window: int, first: int, last: int
+) -> tuple[_Floats, NDArray[np.intp], NDArray[np.intp]]:
+    """시작 t ∈ [first, last) 창을 덮는 창 길이 블록 격자와 시작마다의 (블록, 블록 안 offset).
+
+    행 = 블록 안 offset, 열 = 블록이라 한 offset 의 모든 블록이 연속 메모리다. 창이 끝 블록
+    다음까지 닿도록 블록을 하나 더 두고, 열 끝을 넘는 칸은 0.0 이다(그 칸을 쓰는 창은 열 밖이라
+    원하지 않는다).
+    """
+    count = last - first
+    blocks = (count - 1) // window + 2
+    stop = min(first + blocks * window, values.shape[0])
+    grid = np.zeros(blocks * window, np.float64)
+    grid[: stop - first] = values[first:stop]
+    rows = np.ascontiguousarray(grid.reshape(blocks, window).T)
+    block, offset_in_block = np.divmod(np.arange(count), window)
+    return rows, block, offset_in_block
+
+
+@dataclass(frozen=True, eq=False)
+class _SegmentBlocks:
+    """구간을 길이 `block` 조각으로 자른 배치. 조각은 길이 내림차순(`order`)으로 놓는다.
+
+    `sorted_starts[k]` 는 k 번째(정렬 뒤) 조각의 시작 위치, `sorted_owners[k]` 는 그 조각의
+    구간, `active_blocks[o]` 는 offset o 에서 아직 원소가 남은 조각 수(앞쪽 연속), `position[b]` 는
+    원래 조각 b 의 정렬 뒤 자리다. 2단계는 조각 수 내림차순 구간 순서 `group_order` 와 j 번째
+    조각이 남은 구간 수 `active_groups[j]` 로 돈다.
+    """
+
+    block: int
+    sorted_starts: NDArray[np.intp]
+    sorted_owners: NDArray[np.intp]
+    active_blocks: NDArray[np.intp]
+    position: NDArray[np.intp]
+    first_block: NDArray[np.intp]
+    group_order: NDArray[np.intp]
+    active_groups: NDArray[np.intp]
+
+
+def _segment_blocks(bounds: NDArray[np.intp], lengths: NDArray[np.intp]) -> _SegmentBlocks:
+    groups = lengths.shape[0]
+    longest = int(lengths.max()) if groups else 0
+    block = max(_MIN_SEGMENT_BLOCK, isqrt(max(longest - 1, 0)) + 1)
+    per_group = (lengths + block - 1) // block
+    blocks = int(per_group.sum())
+    owner = np.repeat(np.arange(groups), per_group)
+    first_block = np.cumsum(per_group) - per_group
+    within = np.arange(blocks) - first_block[owner]
+    starts = bounds[:-1][owner] + within * block
+    sizes = np.minimum(block, bounds[1:][owner] - starts)
+    # 길이 내림차순으로 놓으면 offset k 에서 도는 조각은 앞쪽 연속 구간이다
+    order = np.argsort(-sizes, kind="stable")
+    position = np.empty(blocks, np.intp)
+    position[order] = np.arange(blocks)
+    return _SegmentBlocks(
+        block=block,
+        sorted_starts=starts[order],
+        sorted_owners=owner[order],
+        active_blocks=_active_counts(sizes, block),
+        position=position,
+        first_block=first_block,
+        group_order=np.argsort(-per_group, kind="stable"),
+        active_groups=_active_counts(per_group, int(per_group.max()) if groups else 0),
+    )
 
 
 def _segment_sums(
@@ -434,45 +515,33 @@ def _segment_sums(
     모아 벡터 길이를 줄인다. 합 순서는 인증 식에 들지 않는다(오차 상한은 순서와 무관하다).
     """
     groups = lengths.shape[0]
-    longest = int(lengths.max()) if groups else 0
-    block = max(_MIN_SEGMENT_BLOCK, isqrt(max(longest - 1, 0)) + 1)
-    per_group = (lengths + block - 1) // block
-    blocks = int(per_group.sum())
-    owner = np.repeat(np.arange(groups), per_group)
-    first_block = np.cumsum(per_group) - per_group
-    within = np.arange(blocks) - first_block[owner]
-    starts = bounds[:-1][owner] + within * block
-    sizes = np.minimum(block, bounds[1:][owner] - starts)
-    # 1단계: 블록 합. 길이 내림차순으로 놓으면 offset k 에서 도는 블록은 앞쪽 연속 구간이다
-    order = np.argsort(-sizes, kind="stable")
-    sorted_starts = starts[order]
-    active_blocks = _active_counts(sizes, block)
-    block_state = _zero_state(blocks)
+    layout = _segment_blocks(bounds, lengths)
+    starts = layout.sorted_starts
+    block_state = _zero_state(starts.shape[0])
     with np.errstate(all="ignore"):
-        for offset in range(block):
+        # 1단계: 블록 합
+        for offset in range(layout.block):
             _accumulate_prefix(
                 block_state,
-                active_blocks[offset],
-                lambda part, k=offset: values[sorted_starts[part] + k],
+                layout.active_blocks[offset],
+                lambda part, k=offset: values[starts[part] + k],
                 checkpoint,
             )
         # 2단계: 구간마다 블록 합을 블록 순서대로 잇는다
-        position = np.empty(blocks, np.intp)
-        position[order] = np.arange(blocks)
-        group_order = np.argsort(-per_group, kind="stable")
-        active_groups = _active_counts(per_group, int(per_group.max()) if groups else 0)
         group_state = _zero_state(groups)
-        for index in range(active_groups.shape[0]):
+        for index in range(layout.active_groups.shape[0]):
             _join_prefix(
                 group_state,
                 block_state,
-                active_groups[index],
-                lambda part, j=index: position[first_block[group_order[part]] + j],
+                layout.active_groups[index],
+                lambda part, j=index: layout.position[
+                    layout.first_block[layout.group_order[part]] + j
+                ],
                 checkpoint,
             )
     result = [np.empty(groups, np.float64) for _ in range(3)]
     for target, part in zip(result, group_state, strict=True):
-        target[group_order] = part
+        target[layout.group_order] = part
     return result[0], result[1], result[2]
 
 

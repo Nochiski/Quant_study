@@ -245,6 +245,87 @@ def _boundary_cells(seed: int, cells: int) -> list[list[float]]:
     return out
 
 
+def _squares(target: int, count: int, rng: random.Random) -> list[int] | None:
+    """target 을 정수 count 개의 제곱합으로 나눈다(앞쪽은 고르게, 끝 둘은 탐색)."""
+    for _ in range(30):
+        ys: list[int] = []
+        rest = target
+        for _ in range(count - 2):
+            y = isqrt(rest // (count - len(ys))) + rng.randint(-1000, 1000)
+            y = max(0, min(y, isqrt(rest)))
+            ys.append(y)
+            rest -= y * y
+        first = isqrt(rest)
+        for a in range(first, max(-1, first - 5000), -1):
+            left = rest - a * a
+            # 제곱수는 256 으로 나눈 나머지가 44 가지뿐이라 isqrt 전에 대부분 거른다
+            if left & 255 not in _SQUARE_RESIDUES:
+                continue
+            b = isqrt(left)
+            if b * b == left:
+                return [*ys, a, b]
+    return None
+
+
+_SQUARE_RESIDUES = frozenset(value * value & 255 for value in range(256))
+
+
+def _exact_structure_cell(rng: random.Random) -> list[float] | None:
+    """e1 이 필요한 n=16 칸(#587 리뷰 P2-1 반례 계열).
+
+    0 과 굵은 원소 12개(정수 k·2^(e−24), 합 σ 와 제곱합이 정확)는 정확히 더해져
+    D1 = n·s2 − σ² = 2^8(1 + 2^-52)·4^e 이고 후보는 2^e 다. 작은 f, ε, −f 는 s1 에 흡수됐다가
+    c1 에서 f 끼리 지워진다 — 위쪽(up) 칸이면 c1 이 잃은 ε 가 참 W 를 위쪽 경계 너머로 민다.
+    """
+    r = rng.randrange(11_184_811, 22_369_621) | 1
+    q = 3 * r
+    ys = _squares((2**52 + 1 - 3 * r * r) // 2, 6, rng)
+    if ys is None:
+        return None
+    ks = [k for y in ys for k in (r + y, r - y)]
+    if any(abs(k) >= 2**26 for k in ks):
+        return None
+    exponent = rng.randint(-60, 60)
+    sign = rng.choice((1.0, -1.0))
+    coarse = [sign * math.ldexp(k, -24 + exponent) for k in ks]
+    rng.shuffle(coarse)
+    sigma = sign * math.ldexp(4 * q, -24 + exponent)
+    up = rng.random() < 0.5
+    eta = 2.0 ** -rng.uniform(4, 40)
+    tail = math.ldexp(1.0, 8 - 106 + 2 * exponent)
+    f = math.sqrt(tail * ((1 - eta) if up else (1 + eta)) / 32)
+    if not f < math.ulp(sigma) / 2:
+        return None
+    eps = math.ulp(f) * rng.choice((0.25, 0.125, 2.0**-10)) * (-1.0 if up == (sigma > 0) else 1.0)
+    f *= rng.choice((1.0, -1.0))
+    return [0.0, *coarse, f, eps, -f]
+
+
+def test_c1_cancellation_cells_need_the_s1_error_term() -> None:
+    # 구간은 첫 원소(0)가, 뒤집은 창은 블록 끝 원소(0)가 이동값이라 두 형태 모두 같은 구조를 본다
+    rng = random.Random(20261022)
+    cells: list[list[float]] = []
+    while len(cells) < 60:
+        cell = _exact_structure_cell(rng)
+        if cell is not None:
+            cells.append(cell)
+    expected = [_hex(statistics.pstdev(cell)) for cell in cells]
+    values = np.array([value for cell in cells for value in cell], np.float64)
+    offsets = np.arange(0, values.shape[0] + 1, 16).astype(np.intp)
+    by_segment = segment_pstdev(values, offsets)
+    reversed_values = np.array([value for cell in cells for value in cell[::-1]], np.float64)
+    wanted = np.zeros(reversed_values.shape[0] - 15, bool)
+    wanted[::16] = True
+    by_window = window_pstdev(reversed_values, 16, wanted=wanted)
+    wrong = [
+        index
+        for index in range(len(cells))
+        if _hex(by_segment.values[index]) != expected[index]
+        or _hex(by_window.values[index * 16]) != expected[index]
+    ]
+    assert wrong == []
+
+
 def test_segment_pstdev_is_exact_next_to_rounding_boundaries() -> None:
     cells = _boundary_cells(20261020, 4000)
     values = np.array([value for cell in cells for value in cell], np.float64)
@@ -327,6 +408,24 @@ def test_window_pstdev_is_exact_next_to_rounding_boundaries() -> None:
             + ["-0x1.6a09e667f3bccp-22", "0x1.6a09e667f3bccp-22", "-0x1.fffffffffffffp+4"]
             + ["0x1.fffffffffffffp+4", "0x1.d734c828ce9dbp-49"],
             id="c1² 누락",
+        ),
+        # #587 리뷰 P2-1: 굵은 원소는 정확히 더해지고 작은 f, ε, −f 가 s1·c1 에서 사라지는 칸.
+        # c1 이 0 으로 상쇄돼 E_res 의 2·s1·c1 항과 e2 가 e1 을 덮지 못한다
+        pytest.param(
+            ["0x0.0p+0", "-0x1.5e6a200000000p+5", "0x1.e21f480000000p+5", "0x1.195e458000000p+9"]
+            + ["0x1.e1fcc00000000p+5", "0x1.195f568000000p+9", "0x1.3a673c0000000p+8"]
+            + ["0x1.e220380000000p+5", "0x1.195e548000000p+9", "0x1.4d66eb0000000p+9"]
+            + ["0x1.e20f280000000p+5", "0x1.3499560000000p+8", "0x1.19607d0000000p+9"]
+            + ["0x1.6a09e3bf1b04cp-44", "-0x1.0000000000000p-98", "-0x1.6a09e3bf1b04cp-44"],
+            id="e1(c1 누적 오차) 누락 1",
+        ),
+        pytest.param(
+            ["0x0.0p+0", "0x1.9f0c300000000p-38", "0x1.9ed5f00000000p-38", "-0x1.453af80000000p-36"]
+            + ["0x1.4596720000000p-33", "0x1.0ff8638000000p-33", "0x1.0ff6b18000000p-33"]
+            + ["0x1.16f6970000000p-34", "0x1.9eb8400000000p-38", "0x1.0ff9510000000p-33"]
+            + ["0x1.22e78f0000000p-34", "0x1.9eb7400000000p-38", "0x1.0ff9590000000p-33"]
+            + ["0x1.6a09e6674f9fep-86", "-0x1.0000000000000p-148", "-0x1.6a09e6674f9fep-86"],
+            id="e1(c1 누적 오차) 누락 2",
         ),
     ],
 )

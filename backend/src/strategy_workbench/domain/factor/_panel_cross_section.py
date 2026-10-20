@@ -92,9 +92,7 @@ def peer_layout(
     while low < total:
         checkpoint()
         high = _date_cut(starts, low, total)
-        part = (
-            np.arange(low, high, dtype=np.intp) if candidates is None else candidates[low:high]
-        )
+        part = np.arange(low, high, dtype=np.intp) if candidates is None else candidates[low:high]
         key = row_date[part].astype(np.int64) * 2 + universe_member[part]
         if group_codes is not None:
             codes = group_codes[part]

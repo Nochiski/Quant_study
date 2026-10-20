@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
@@ -55,8 +55,10 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
 from strategy_workbench.domain.equity.facade.research_data import CellKind
 from tests.equity_fixture import (
     WB_FIN_ROWS,
+    WB_SPANS,
     build_workbench_root,
     fin_std_table,
+    span_table,
     write_catalog,
     write_equity_table,
 )
@@ -291,6 +293,45 @@ def test_columnar_load_matches_the_row_path_cell_by_cell(
     _assert_same_panel(columnar, _reference(adapter, query))
 
 
+@pytest.mark.parametrize("rows_per_chunk", [1, 3])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "all-fields-with-history",
+        "corp-axis-all-securities",
+        "lag-across-relisting",
+        "grid-and-latest-mixed",
+        "all-securities",
+    ],
+)
+def test_chunk_boundaries_do_not_change_any_cell(
+    adapter: EquityDuckdbAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    rows_per_chunk: int,
+) -> None:
+    """#582 리뷰 nit-1: 행 구간을 1·3 행으로 줄여도 칸이 같다(구간 경계를 넘는 상태가 없다).
+
+    `_row_chunks` 의 기본 구간은 정의 때 묶이므로 감싼 함수로 상한을 건다. 파이썬 원소 루프의
+    구간(`_PY_CHUNK_ROWS`)과 정렬 누적 기준(`_CHUNK_ROWS`)도 같이 줄인다.
+    """
+    original = raw_panel_module._row_chunks
+
+    def small_chunks(
+        rows: int, checkpoint: Callable[[], None], size: int = rows_per_chunk
+    ) -> Iterator[slice]:
+        return original(rows, checkpoint, min(size, rows_per_chunk))
+
+    monkeypatch.setattr(raw_panel_module, "_row_chunks", small_chunks)
+    monkeypatch.setattr(raw_panel_module, "_CHUNK_ROWS", rows_per_chunk)
+    monkeypatch.setattr(raw_panel_module, "_PY_CHUNK_ROWS", rows_per_chunk)
+    query = L0_CASES[case](adapter)
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
 def test_the_fixture_exercises_every_grid_cell_kind_and_lag(adapter: EquityDuckdbAdapter) -> None:
     """L0 사례가 덮는 범위의 확인 — 가림·0 채움·결측·미수집 셀과 랙 셀이 실제로 나온다."""
     panel = load_raw_panel(adapter, _query(_fields(adapter, SourceMode.GRID), history=3))
@@ -454,6 +495,34 @@ def test_a_repeated_field_without_cells_fails_like_the_row_path(
     assert str(actual.value) == str(expected.value)
 
 
+def test_a_duplicate_grid_key_fails_like_the_row_path(tmp_path: Path) -> None:
+    """#582 리뷰 P3-1: `security_span` 이 겹쳐 (ticker, date) 가 두 번 나오면 같은 문장으로 끝난다.
+
+    격자 질의는 (date, ticker, span_seq) 순이라 같은 키는 붙어 나온다. 두 경로 모두 가장 이른
+    키를 말한다.
+    """
+    pytest.importorskip("duckdb", reason=DUCKDB_EXTRA)
+    root = build_workbench_root(tmp_path / "equity")
+    overlapping = [
+        ("005930", 2, date(2024, 1, 11), date(2024, 1, 11), "coverage_gap"),
+        ("000660", 2, date(2024, 1, 9), date(2024, 1, 9), "coverage_gap"),
+    ]
+    write_equity_table(
+        root, "security_span", span_table([*WB_SPANS, *overlapping]), build_id="b_span_dup"
+    )
+    write_catalog(root)
+    adapter = EquityDuckdbAdapter(root)
+    query = _query(("price.close",), universe="krx.all")
+    with pytest.raises(EquityDuckdbSetupError) as expected:
+        adapter.load_raw_observations(query)
+
+    with pytest.raises(EquityDuckdbSetupError) as actual:
+        load_raw_panel(adapter, query)
+
+    assert str(actual.value) == str(expected.value)
+    assert "key=('000660', datetime.date(2024, 1, 9))" in str(actual.value)
+
+
 @pytest.mark.parametrize(
     ("field_id", "expr"),
     [("price.volume", "CAST('x' AS VARCHAR)"), ("consensus.recommendation", "'buy'")],
@@ -515,6 +584,31 @@ def test_a_categorical_value_outside_any_cell_is_not_read(
         replace(adapter._fields[field_id], expr=f"CASE WHEN {late_day} THEN 'x' END"),
     )
     query = _query((field_id, "price.close"), universe="krx.all")
+
+    columnar = load_raw_panel(adapter, query)
+
+    _assert_same_panel(columnar, _reference(adapter, query))
+
+
+def test_a_non_date_available_value_outside_any_cell_is_not_read(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#582 리뷰 nit-2: 공개일 열은 원천 행·내용일이 있는 행에서만 읽는다(행 경로 `_grid`).
+
+    공개일 열이 VARCHAR 이고 값은 내용일이 NULL 인 행에만 있으면 두 경로 모두 통과한다.
+    """
+    source = SOURCE_BY_NAME["flow"]
+    late_day = "date = DATE '2024-01-09'"
+    monkeypatch.setitem(
+        SOURCE_BY_NAME,
+        "flow",
+        replace(
+            source,
+            available_expr=f"CASE WHEN {late_day} THEN 'x' END",
+            content_expr=f"CASE WHEN {late_day} THEN NULL ELSE date END",
+        ),
+    )
+    query = _query(("flow.foreign_net_buy", "price.close"), universe="krx.all")
 
     columnar = load_raw_panel(adapter, query)
 

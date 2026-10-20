@@ -258,12 +258,35 @@ def test_scalar_api_wraps_the_segment_kernels() -> None:
     assert all(type(value) is float for value in cross_sectional_zscore([2.0, 1.0]))
 
 
-@pytest.mark.parametrize("kernel", [segment_rank, segment_median])
+@pytest.mark.parametrize(
+    "kernel",
+    [segment_rank, lambda values, offsets: segment_winsorize(values, offsets, 0.1, 0.9)],
+)
 def test_sorting_kernels_reject_nan(kernel: Kernel) -> None:
     with pytest.raises(ValueError, match="cannot order NaN"):
         kernel(np.array([1.0, math.nan]), np.array([0, 2]))
     with pytest.raises(ValueError, match="cannot order NaN"):
         cross_sectional_rank([1.0, math.nan])
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        # 출력 채움이 넘친 출력 노드 값의 중앙값을 구하는 자리(#598 리뷰 P1-1)
+        [-math.inf, -math.inf, math.nan],
+        [math.nan, 1.0, 2.0],
+        [1.0, math.nan, -math.inf, 3.0],
+        [math.nan],
+        [math.inf, math.nan, -math.inf, 0.0, -0.0],
+    ],
+)
+def test_median_of_a_segment_with_nan_follows_statistics_median(items: list[float]) -> None:
+    """NaN 이 든 구간은 순서를 벡터로 재현할 정의가 없어 `statistics.median` 그대로다. 다른
+    구간은 영향을 받지 않는다."""
+    values = np.array([*items, 4.0, 1.0, 2.0])
+    result = segment_median(values, np.array([0, len(items), len(items) + 3]))
+    assert _hex(result[0]) == _hex(statistics.median(items))
+    assert _hex(result[1]) == (2.0).hex()
 
 
 @pytest.mark.parametrize(("lower", "upper"), [(-0.1, 0.5), (0.2, 1.5), (math.nan, 0.5)])

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from math import isqrt
-from statistics import mean, pstdev
+from statistics import mean, median, pstdev
 
 import numpy as np
 from numpy.typing import NDArray
@@ -976,9 +976,14 @@ def _certify_deviation(sums: _Floats, count: _Floats) -> tuple[_Floats, _Bools, 
 #   1차 키로 둔 `np.lexsort`(안정)로 구간 안에서만 정렬한다. 정렬 키는 `값 + 0.0` 이다 — −0.0 이
 #   +0.0 이 되어 두 0 이 같은 키라, 정렬 구현이 부호 비트를 보더라도 같은 값은 입력 순서로 남는다.
 #   값 자체는 원래 열에서 읽어 부호를 잃지 않는다.
-# - NaN 은 `<` 로 순서가 정해지지 않아 `sorted` 결과가 입력 배치에 따라 달라진다. 객체 경로의 입력은
-#   유한값 검사를 통과한 값이라 NaN 이 없고, 정렬 커널은 NaN 을 `ValueError` 로 거절한다. ±inf 는
-#   순서가 정해져 그대로 다룬다.
+# - NaN 은 `<` 로 순서가 정해지지 않아 `sorted` 결과가 입력 배치에 따라 달라진다. 벡터로 재현할
+#   정의가 없으므로 NaN 이 든 구간의 중앙값은 그 구간을 `statistics.median` 에 동료 순서 그대로 넘겨
+#   정한다. 그래프 출력 채움(`_filled`)은 출력 노드의 유한값 검사보다 먼저 돌아(`_evaluation.py` 의
+#   출력 채움 뒤 `_require_finite_values`) 넘친 ±inf·NaN 이 중앙값까지 온다(#598 리뷰 P1-1).
+#   rank·winsorize 의 입력(횡단면·그룹 노드 입력)은 유한값 검사를 통과한 자식 값과 채움 값(0.0, 또는
+#   유한값의 중앙값 — 넘치면 ±inf 이고 NaN 은 아니다)뿐이고, 스칼라 API 호출자(컴파일러·신호 평가)는
+#   비유한값을 먼저 거른다. 그래서 두 커널은 NaN 을 `ValueError` 로 거절한다. ±inf 는 순서가 정해져
+#   그대로 다룬다.
 # - 정렬은 구간을 모은 `_SORT_CHUNK` 원소 조각마다, 원소 연산은 `_KERNEL_CHUNK` 원소 조각마다 하고
 #   조각마다 checkpoint 를 부른다. 구간 하나가 정렬 조각보다 길면 그 구간의 정렬 한 번 안에서는
 #   부를 수 없다(정확 경로의 긴 칸과 같은 한계).
@@ -1101,11 +1106,12 @@ def segment_median(
 ) -> _Floats:
     """구간마다 `statistics.median` — 안정 정렬 뒤 홀수는 가운데 원소, 짝수는 `(a + b) / 2`.
 
-    numpy `median` 은 정렬과 평균 방식이 달라 쓰지 않는다. 빈 구간은 중앙값이 정의되지 않아
-    (`statistics.median` 은 예외) NaN 이다.
+    numpy `median` 은 정렬과 평균 방식이 달라 쓰지 않는다. NaN 이 든 구간은 그 구간을
+    `statistics.median` 에 그대로 넘긴다(머리 주석). 호출자(`_panel_cross_section.filled`)는 값이
+    있는 구간만 넘긴다 — 빈 구간 칸은 중앙값이 정의되지 않아(`statistics.median` 은 예외) NaN 으로
+    둔다.
     """
     bounds = _segment_bounds(values, offsets, "segment median")
-    _require_ordered(values, "segment median")
     medians = np.full(bounds.shape[0] - 1, np.nan)
     for low, high, local, first in _segment_spans(bounds, checkpoint):
         part = values[low:high]
@@ -1121,6 +1127,12 @@ def segment_median(
         with np.errstate(all="ignore"):
             even = (lower + upper) / 2.0
         medians[first + present] = np.where(odd, upper, even)
+    # NaN 이 든 구간은 순서가 입력 배치에 달려 Python 정의 그대로 다시 정한다
+    missing = np.flatnonzero(np.isnan(values))
+    unordered = np.unique(np.searchsorted(bounds, missing, side="right") - 1)
+    for group in unordered.tolist():
+        checkpoint()
+        medians[group] = median(values[bounds[group] : bounds[group + 1]].tolist())
     return medians
 
 

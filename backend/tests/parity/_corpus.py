@@ -62,7 +62,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DatasetFieldProfile,
     DataSnapshot,
 )
-from strategy_workbench.domain.factor.facade.evaluation import FactorObservation
+from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
@@ -531,7 +531,37 @@ def evaluator_cases() -> list[EvaluatorCase]:
                         parameters,
                     )
                 )
-    return cases
+    return cases + _overflow_fill_cases()
+
+
+def _overflow_fill_cases() -> list[EvaluatorCase]:
+    """중앙값 채움이 넘쳐 출력 채움까지 ±inf·NaN 이 가는 사례(#598 리뷰 P1-1).
+
+    S0·S1 의 중앙값 (a + b) / 2 가 넘쳐 S2 입력이 inf 로 채워지고, demean 은 −inf·NaN 을,
+    winsorize 는 inf 를 낸다. 그래프 출력 채움은 출력 노드의 유한값 검사보다 먼저 돌아 그 값의
+    중앙값을 구한다.
+    실패는 첫 비유한 칸(node_id·as_of·security_id·value)까지 대조한다.
+    """
+    x = FieldNode("x", "x", "field")
+    rows = tuple(
+        FactorObservation(
+            as_of=SESSIONS[0], security_id=security, fields=(FactorFieldValue("x", value),)
+        )
+        for security, value in (("S0", 1.7e308), ("S1", 1.6e308), ("S2", None))
+    )
+    operators = (CrossSectionalOperator.DEMEAN, CrossSectionalOperator.WINSORIZE)
+    return [
+        EvaluatorCase(
+            f"L1/overflow-fill/{operator.value}/missing={policy.value}",
+            FactorGraph(
+                (x, CrossSectionalNode("out", operator, "x", "cross_sectional", 0.0, 1.0)), "out"
+            ),
+            rows,
+            policy,
+        )
+        for operator in operators
+        for policy in MissingPolicy
+    ]
 
 
 # --- L2 컴파일러 ------------------------------------------------------------------------------

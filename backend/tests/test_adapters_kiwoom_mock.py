@@ -70,7 +70,11 @@ class Call:
 
 
 class FakeKiwoom:
-    """키움 모의 서버 대역. 응답 필드 모양은 공식 명세 예시를 따른다."""
+    """키움 모의 서버 대역. 필드 모양은 공식 명세, 표기 값은 2026-10-20 모의 실측을 따른다.
+
+    실측 표기는 명세 예시와 다르다: REST 주문의 통신구분은 "모의투자", 지정가 매매구분은 "보통가",
+    접수구분은 "주문완료", 원주문의 정정취소는 "일반", 취소 행은 같은 주문구분에 "취소"다.
+    """
 
     def __init__(self, clock: Clock, *, account: str = ACCOUNT) -> None:
         self.clock = clock
@@ -177,7 +181,7 @@ class FakeKiwoom:
             io_name,
             int(str(body["ord_qty"])),
             int(str(body["ord_uv"])),
-            channel="REST API",
+            channel="모의투자",
         )
         if self.order_mode == "lose_twice":
             self.add_row(
@@ -185,7 +189,7 @@ class FakeKiwoom:
                 io_name,
                 int(str(body["ord_qty"])),
                 int(str(body["ord_uv"])),
-                channel="REST API",
+                channel="모의투자",
             )
         if self.order_mode in ("lose", "lose_twice"):
             raise KiwoomNoResponseError("injected ACK loss after acceptance")
@@ -200,11 +204,14 @@ class FakeKiwoom:
     def _kt10003(self, body: dict[str, object], _: dict[str, str]) -> KiwoomHttpResponse:
         original = self.row(str(body["orig_ord_no"]))
         remaining = int(original["ord_remnq"])
-        ord_no = self.add_row(str(body["stk_cd"]), "현금매수취소", remaining, 0, channel="REST API")
+        ord_no = self.add_row(
+            str(body["stk_cd"]), original["io_tp_nm"], remaining, 0, channel="모의투자"
+        )
         cancel = self.row(ord_no)
         cancel["ori_ord"] = original["ord_no"]
+        cancel["mdfy_cncl"] = ""
         if self.confirm_cancel:
-            cancel["mdfy_cncl"] = "취소확인"
+            cancel["mdfy_cncl"] = "취소"
             cancel["cnfm_qty"] = pad(remaining)
             original["ord_remnq"] = pad(0)
         return self._ok(
@@ -223,12 +230,12 @@ class FakeKiwoom:
             {
                 "ord_no": ord_no,
                 "stk_cd": f"A{code}",
-                "trde_tp": "지정가",
+                "trde_tp": "보통가",
                 "crd_tp": "보통매매",
                 "ord_qty": pad(quantity),
                 "ord_uv": pad(price),
                 "cnfm_qty": pad(0),
-                "acpt_tp": "접수",
+                "acpt_tp": "주문완료",
                 "rsrv_tp": "",
                 "ord_tm": self.clock.now_value.strftime("%H:%M:%S"),
                 "ori_ord": "0000000",
@@ -239,7 +246,7 @@ class FakeKiwoom:
                 "cntr_uv": pad(0),
                 "ord_remnq": pad(quantity),
                 "comm_ord_tp": channel,
-                "mdfy_cncl": "",
+                "mdfy_cncl": "일반",
                 "cnfm_tm": "",
                 "dmst_stex_tp": "KRX",
                 "cond_uv": pad(0),
@@ -525,7 +532,7 @@ def test_rejected_answer_is_not_rebound_to_a_later_identical_order(tmp_path: Pat
     r.fake.order_mode = "error"
     r.service.submit(buy())
     assert r.service.recover().status == ExecutionStatus.OK
-    r.fake.add_row(SYMBOL, "현금매수", 5, 70_000, channel="REST API")
+    r.fake.add_row(SYMBOL, "현금매수", 5, 70_000, channel="모의투자")
     assert r.service.recover().status == ExecutionStatus.BLOCKED
     assert fact_of(r.ledger).state == OrderState.REJECTED
     assert r.broker.latch() is None

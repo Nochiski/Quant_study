@@ -13,8 +13,12 @@ from datetime import datetime, timedelta
 from strategy_workbench.domain.order_execution.facade.orders import Intent, OrderFact, OrderState
 
 NO_ORIGINAL = "0000000"
-# kt00007은 지정가를 "지정가"로, ka10076·실시간은 "보통"으로 적는다. 우리는 trde_tp 0만 보낸다.
-_LIMIT_TYPES = frozenset({"지정가", "보통"})
+# 우리는 trde_tp 0(보통 = 지정가)만 보낸다. 명세 예시는 "지정가"·"보통"이고, 2026-10-20 모의 실측의
+# kt00007은 "보통가"였다.
+_LIMIT_TYPES = frozenset({"지정가", "보통", "보통가"})
+# REST로 낸 주문의 통신구분. 명세는 "REST API"이고 모의 실측은 "모의투자"였다. 모의에서 HTS 주문도
+# "모의투자"로 남는지는 미확인이라, 같은 내용의 HTS 주문이 있으면 후보 2건으로 정지한다.
+_ORDER_CHANNELS = frozenset({"REST API", "모의투자"})
 UNTRACKED_PREFIX = "kiwoom-untracked-"
 
 
@@ -136,7 +140,7 @@ def is_candidate(row: OrderRow, intent: Intent, sent_at: datetime, margin: timed
     )
     return (
         row.original == NO_ORIGINAL
-        and "REST" in row.channel.upper()
+        and row.channel in _ORDER_CHANNELS
         and row.symbol == intent.symbol
         and row.side == intent.side
         and row.quantity == intent.quantity

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -107,11 +108,20 @@ class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
 class UrllibTransport:
     """표준 라이브러리 HTTP. 모의 도메인 밖으로는 보내지 않는다."""
 
-    def __init__(self, *, timeout_seconds: float = 10.0) -> None:
+    def __init__(
+        self, *, timeout_seconds: float = 10.0, ssl_context: ssl.SSLContext | None = None
+    ) -> None:
+        """`ssl_context`는 조립하는 쪽이 고른다.
+
+        python.org macOS 빌드는 기본 인증서 목록이 비어 있어 기본값으로는 TLS 확인에 실패한다.
+        """
         if timeout_seconds <= 0:
             raise ValueError(f"timeout_seconds must be positive — got={timeout_seconds!r}")
         self._timeout_seconds = timeout_seconds
-        self._opener = urllib.request.build_opener(_RefuseRedirect())
+        handlers: list[urllib.request.BaseHandler] = [_RefuseRedirect()]
+        if ssl_context is not None:
+            handlers.append(urllib.request.HTTPSHandler(context=ssl_context))
+        self._opener = urllib.request.build_opener(*handlers)
 
     def post(
         self, path: str, headers: Mapping[str, str], body: Mapping[str, object]

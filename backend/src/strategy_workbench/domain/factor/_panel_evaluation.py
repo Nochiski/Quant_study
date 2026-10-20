@@ -9,10 +9,10 @@ SoT: 팩터 값의 계산자는 `application/portfolio_design` 하나이고, 횡
 남긴다. 값 구간 규칙(`_value_spans`), 진행 가중치, 예외 타입은 `_evaluation.py` 의 것을 그대로 쓰고
 다시 적지 않는다.
 
-T3-01 범위는 field·constant·parameter·unary(negate·lag)·binary·comparison·conditional 이고, T3-02 가
-time_series 의 momentum·delta·min·max 를 더했다(창 커널은 `_panel_time_series.py`). time_series 의
-mean·std(T3-03·T3-04)·cross_sectional·group(T3-05)과 `cross_sectional_median` 채움(T3-05)은
-`UnsupportedPanelEvaluationError` 로 거절한다.
+T3-01 이 field·constant·parameter·unary(negate·lag)·binary·comparison·conditional 을, T3-02 가
+time_series 의 momentum·delta·min·max 를(창 커널은 `_panel_time_series.py`), T3-05 가 time_series
+mean·std(정확 커널 `_statistics.py`), cross_sectional·group 노드와 결측 채움 두 정책(동료 묶음은
+`_panel_cross_section.py`)을 더해 모든 노드를 다룬다.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from ._nodes import (
     ComparisonNode,
     ConditionalNode,
     ConstantNode,
+    CrossSectionalNode,
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
@@ -52,7 +53,8 @@ from ._nodes import (
     UnaryNode,
     UnaryOperator,
 )
-from ._panel_time_series import WINDOW_TIME_SERIES_OPERATORS, time_series_window
+from ._panel_cross_section import PeerLayout, cross_sectional, filled, group_transform, peer_layout
+from ._panel_time_series import time_series_window
 from ._planning import ResolvedFactorParameter
 from ._validation import node_dependencies
 
@@ -61,7 +63,7 @@ _CHUNK_ROWS = 1 << 18
 
 
 class UnsupportedPanelEvaluationError(NotImplementedError):
-    """열 평가기가 아직 구현하지 않은 노드·채움. 운영 경로에 연결하기 전까지만 있다."""
+    """열 하나에 담을 수 없는 노드(가지 타입이 섞인 조건). 검증기가 막는 입력이다."""
 
 
 def _chunks(rows: int, checkpoint: Callable[[], None]) -> Iterator[slice]:
@@ -172,10 +174,9 @@ class FactorPanel:
                 valid[field_id].append(number)
                 masked[field_id].append(cell is not None and cell.masked)
             for field_id in grouped:
-                cell = cells.get(field_id)
-                labels[field_id].append(
-                    cell.value if cell is not None and isinstance(cell.value, str) else None
-                )
+                # 그룹은 같은 필드의 첫 셀을 읽는다(`_peer_indices` 의 `next(...)` 와 같다)
+                label = next((cell.value for cell in row.fields if cell.field_id == field_id), None)
+                labels[field_id].append(label if isinstance(label, str) else None)
         groups: dict[str, FactorGroupColumn] = {}
         for field_id, column in labels.items():
             categories = tuple(sorted({label for label in column if label is not None}))
@@ -264,9 +265,6 @@ def evaluate_panel_nodes(
     return FactorNodeCache(evaluator.columns)
 
 
-_UNSUPPORTED_KINDS = frozenset({"cross_sectional", "group"})
-
-
 class _PanelEvaluator:
     def __init__(
         self,
@@ -288,6 +286,8 @@ class _PanelEvaluator:
         self._spans: dict[str, _Spans] = {}
         # 필드마다 원장이 가린 셀의 정렬 위치(`_NodeEvaluator._boundaries` 의 열판)
         self._boundaries: dict[str, NDArray[np.intp]] = {}
+        # 동료 묶음 배치. 키 None 은 (as_of, universe_member), 필드 id 는 그 그룹까지 나눈 묶음이다
+        self._layouts: dict[str | None, PeerLayout] = {}
         self._total_weight = _reachable_progress_weight(graph.output_node_id, self._nodes)
         self._completed_weight = 0
 
@@ -301,16 +301,6 @@ class _PanelEvaluator:
             raise ValueError(
                 f"factor evaluation references unknown node — node_id={node_id!r}"
             ) from error
-        if node.kind in _UNSUPPORTED_KINDS:
-            raise UnsupportedPanelEvaluationError(
-                "columnar evaluator does not implement this node yet (T3-05) — "
-                f"node_id={node_id!r} kind={node.kind!r}"
-            )
-        if isinstance(node, TimeSeriesNode) and node.operator not in WINDOW_TIME_SERIES_OPERATORS:
-            raise UnsupportedPanelEvaluationError(
-                "columnar evaluator does not implement this time series operator yet "
-                f"(T3-03~T3-04) — node_id={node_id!r} operator={node.operator.value!r}"
-            )
         dependencies = node_dependencies(node)
         inputs = [self.evaluate(dependency) for dependency in dependencies]
         spans = _value_spans(node, [self._spans[dependency] for dependency in dependencies])
@@ -388,6 +378,10 @@ class _PanelEvaluator:
             return self._conditional(node, *inputs, rows=rows)
         if isinstance(node, TimeSeriesNode):
             return self._time_series(node, inputs[0], rows)
+        if isinstance(node, CrossSectionalNode):
+            return self._section(node, inputs[0], None, rows)
+        if isinstance(node, GroupNode):
+            return self._section(node, inputs[0], node.group_field_id, rows)
         raise UnsupportedPanelEvaluationError(  # pragma: no cover - 종류는 위에서 모두 갈랐다
             f"columnar evaluator has no rule for the node — node={node!r}"
         )
@@ -508,6 +502,54 @@ class _PanelEvaluator:
             ),
         )
 
+    def _section(
+        self,
+        node: CrossSectionalNode | GroupNode,
+        source: FactorNodeColumn,
+        group_field_id: str | None,
+        rows: int,
+    ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+        """횡단면·그룹 노드. 입력을 그 노드의 동료로 먼저 채우고(`_NodeEvaluator.evaluate` 의 입력
+        채움 자리) 같은 동료 묶음에서 계산한다. bool 입력은 숫자가 아니라 모두 None 이다."""
+        if source.boolean:
+            return np.zeros(rows, np.float64), np.zeros(rows, bool)
+        numbers, valid = self._filled(source.values, source.valid, source.masked, group_field_id)
+        layout = self._layout(group_field_id)
+        if isinstance(node, CrossSectionalNode):
+            return cross_sectional(
+                node.operator,
+                (node.lower_quantile, node.upper_quantile),
+                numbers,  # pyright: ignore[reportArgumentType]  # reason: bool 열은 위에서 걸렀다
+                valid,
+                layout,
+                self._checkpoint,
+            )
+        return group_transform(
+            node.operator,
+            numbers,  # pyright: ignore[reportArgumentType]  # reason: bool 열은 위에서 걸렀다
+            valid,
+            layout,
+            self._checkpoint,
+        )
+
+    def _layout(self, group_field_id: str | None) -> PeerLayout:
+        """동료 묶음 배치를 그룹 키마다 한 번 만든다."""
+        if group_field_id not in self._layouts:
+            codes = None
+            if group_field_id is not None:
+                try:
+                    codes = self._panel.groups[group_field_id].codes
+                except KeyError as error:
+                    raise ValueError(
+                        "factor panel has no group column for the group node — "
+                        f"group_field_id={group_field_id!r} groups={sorted(self._panel.groups)}"
+                    ) from error
+            panel = self._panel
+            self._layouts[group_field_id] = peer_layout(
+                panel.row_date, panel.universe_member, codes, self._checkpoint
+            )
+        return self._layouts[group_field_id]
+
     def _masked_in(self, spans: _Spans) -> NDArray[np.bool_]:
         """값의 시점 구간에 가린 칸이 드는 칸(`_NodeEvaluator._masked_in` 의 열판).
 
@@ -534,28 +576,24 @@ class _PanelEvaluator:
         values: NDArray[np.float64] | NDArray[np.bool_],
         valid: NDArray[np.bool_],
         masked: NDArray[np.bool_],
+        group_field_id: str | None = None,
     ) -> tuple[NDArray[np.float64] | NDArray[np.bool_], NDArray[np.bool_]]:
         """결측 정책의 채움(`_NodeEvaluator._filled` 의 열판).
 
-        채움 자리는 셋이다: 횡단면 노드 입력, 그룹 노드 입력, 그래프 출력. T3-01 은 그래프 출력의
-        `zero` 만 한다. 두 노드 입력 자리는 그 노드와 함께 T3-05 에서 넣고, `cross_sectional_median`
-        도 T3-05 다. `zero` 는 같은 (as_of, universe_member) 동료에 숫자 값이 하나라도 있을 때
-        가리지 않은 빈칸을 0.0 으로 채운다. bool 은 숫자가 아니라 bool 열은 채우지 않는다.
+        채움 자리는 셋이다: 횡단면 노드 입력, 그룹 노드 입력(`group_field_id`, 그룹 동료), 그래프
+        출력. `masked` 는 원장이 가린 칸이라 어느 정책도 채우지 않는다. bool 열은 채우지 않는다 —
+        객체 경로의 bool 칸은 None 이 아니고 동료에 숫자도 없다.
         """
-        if self._missing not in FILLING_MISSING_POLICIES:
+        if self._missing not in FILLING_MISSING_POLICIES or values.dtype == np.bool_:
             return values, valid
-        if self._missing is not MissingPolicy.ZERO:
-            raise UnsupportedPanelEvaluationError(
-                "columnar evaluator fills cross_sectional_median from T3-05 — "
-                f"missing={self._missing.value!r} output_node_id={self._output_node_id!r}"
-            )
-        if values.dtype == np.bool_:
-            return values, valid
-        panel = self._panel
-        peers = panel.row_date.astype(np.int64) * 2 + panel.universe_member
-        has_number = np.bincount(peers[valid], minlength=2 * len(panel.dates)) > 0
-        fill = ~valid & ~masked & has_number[peers]
-        return np.where(fill, 0.0, values), valid | fill
+        return filled(
+            self._missing,
+            values,  # pyright: ignore[reportArgumentType]  # reason: bool 열은 위에서 걸렀다
+            valid,
+            masked,
+            self._layout(group_field_id),
+            self._checkpoint,
+        )
 
     def _require_finite(
         self,

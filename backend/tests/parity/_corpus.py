@@ -62,7 +62,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DatasetFieldProfile,
     DataSnapshot,
 )
-from strategy_workbench.domain.factor.facade.evaluation import FactorObservation
+from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
@@ -305,6 +305,7 @@ def _extra_graphs() -> list[FactorGraph]:
         ),
         *_elementwise_graphs(x, y),
         *_time_series_graphs(x, y),
+        *_section_graphs(x, y),
     ]
 
 
@@ -424,6 +425,77 @@ def _time_series_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
     return [FactorGraph(graph, "out") for graph in nodes]
 
 
+def _section_graphs(x: FieldNode, y: FieldNode) -> list[FactorGraph]:
+    """열 평가기 T3-05(시계열 mean·std, 횡단면·그룹 노드, 채움 자리)가 다루는 조합.
+
+    창 1·2·20 의 mean·std(lag 포함), 횡단면 출력을 시계열이 읽는 사슬(채운 값이 창에 든다, #312
+    리뷰 P2-3), 그룹 노드를 다시 횡단면·그룹으로 잇는 사슬, 분위 끝값 winsorize, lag 로 옮긴 가린
+    칸 위의 그룹 노드, 원소 연산 뒤 그룹 노드를 덮는다. 결측 정책 4종과 곱해 채움 세 자리가 모두
+    든다.
+    """
+
+    def ts(
+        node_id: str, operator: TimeSeriesOperator, source: str, window: int, lag: int = 0
+    ) -> TimeSeriesNode:
+        return TimeSeriesNode(node_id, operator, source, window, "time_series", lag=lag)
+
+    def cs(
+        node_id: str,
+        operator: CrossSectionalOperator,
+        source: str,
+        quantiles: tuple[float, float] = (0.01, 0.99),
+    ) -> CrossSectionalNode:
+        return CrossSectionalNode(node_id, operator, source, "cross_sectional", *quantiles)
+
+    def group(node_id: str, operator: GroupOperator, source: str) -> GroupNode:
+        return GroupNode(node_id, operator, source, "sector", "group")
+
+    mean, std = TimeSeriesOperator.MEAN, TimeSeriesOperator.STANDARD_DEVIATION
+    nodes: list[tuple[ExpressionNode, ...]] = [
+        *((x, ts("out", operator, "x", window)) for operator in (mean, std) for window in (1, 2)),
+        *((x, ts("out", operator, "x", 20, lag=2)) for operator in (mean, std)),
+        (
+            x,
+            cs("z", CrossSectionalOperator.ZSCORE, "x"),
+            ts("out", mean, "z", 3),
+        ),
+        (
+            x,
+            group("n", GroupOperator.NEUTRALIZE, "x"),
+            ts("s", std, "n", 2),
+            cs("out", CrossSectionalOperator.RANK, "s"),
+        ),
+        (
+            x,
+            group("n", GroupOperator.NEUTRALIZE, "x"),
+            cs("out", CrossSectionalOperator.WINSORIZE, "n", (0.0, 1.0)),
+        ),
+        (
+            x,
+            cs("w", CrossSectionalOperator.WINSORIZE, "x", (0.25, 0.75)),
+            group("out", GroupOperator.RANK, "w"),
+        ),
+        (
+            x,
+            UnaryNode("l", UnaryOperator.LAG, "x", "unary", periods=2),
+            group("out", GroupOperator.NEUTRALIZE, "l"),
+        ),
+        (
+            x,
+            y,
+            BinaryNode("d", BinaryOperator.SUBTRACT, "x", "y", "binary"),
+            group("g", GroupOperator.RANK, "d"),
+            cs("out", CrossSectionalOperator.DEMEAN, "g"),
+        ),
+        (
+            x,
+            ts("m", mean, "x", 2),
+            cs("out", CrossSectionalOperator.ZSCORE, "m"),
+        ),
+    ]
+    return [FactorGraph(graph, "out") for graph in nodes]
+
+
 def factor_panel(seed: int) -> tuple[FactorObservation, ...]:
     """L1 입력. S11 의 `x` 몇 칸에 bool·str 을 넣는다(숫자 입력 자리라 평가기가 None 으로 본다)."""
     raw = synthetic_raw_panel(seed, ("x", "y", "sector"), group="sector", extreme="x")
@@ -459,7 +531,37 @@ def evaluator_cases() -> list[EvaluatorCase]:
                         parameters,
                     )
                 )
-    return cases
+    return cases + _overflow_fill_cases()
+
+
+def _overflow_fill_cases() -> list[EvaluatorCase]:
+    """중앙값 채움이 넘쳐 출력 채움까지 ±inf·NaN 이 가는 사례(#598 리뷰 P1-1).
+
+    S0·S1 의 중앙값 (a + b) / 2 가 넘쳐 S2 입력이 inf 로 채워지고, demean 은 −inf·NaN 을,
+    winsorize 는 inf 를 낸다. 그래프 출력 채움은 출력 노드의 유한값 검사보다 먼저 돌아 그 값의
+    중앙값을 구한다.
+    실패는 첫 비유한 칸(node_id·as_of·security_id·value)까지 대조한다.
+    """
+    x = FieldNode("x", "x", "field")
+    rows = tuple(
+        FactorObservation(
+            as_of=SESSIONS[0], security_id=security, fields=(FactorFieldValue("x", value),)
+        )
+        for security, value in (("S0", 1.7e308), ("S1", 1.6e308), ("S2", None))
+    )
+    operators = (CrossSectionalOperator.DEMEAN, CrossSectionalOperator.WINSORIZE)
+    return [
+        EvaluatorCase(
+            f"L1/overflow-fill/{operator.value}/missing={policy.value}",
+            FactorGraph(
+                (x, CrossSectionalNode("out", operator, "x", "cross_sectional", 0.0, 1.0)), "out"
+            ),
+            rows,
+            policy,
+        )
+        for operator in operators
+        for policy in MissingPolicy
+    ]
 
 
 # --- L2 컴파일러 ------------------------------------------------------------------------------

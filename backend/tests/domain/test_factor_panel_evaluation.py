@@ -1,10 +1,12 @@
-"""열 평가기 골격(columnar-tape T3-01)의 경계 동작. 값의 비트 대조는 `tests/parity` L1 이 한다."""
+"""열 평가기(columnar-tape T3-01~T3-05)의 경계 동작. 값의 비트 대조는 `tests/parity` L1 이 한다."""
 
+from dataclasses import replace
 from datetime import date
 
+import numpy as np
 import pytest
 
-from strategy_workbench.domain.factor import _panel_evaluation
+from strategy_workbench.domain.factor import _panel_cross_section, _panel_evaluation
 from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
@@ -28,7 +30,6 @@ from strategy_workbench.domain.factor.facade.expression import (
 from strategy_workbench.domain.factor.facade.panel_evaluation import (
     FactorNodeCache,
     FactorPanel,
-    UnsupportedPanelEvaluationError,
     evaluate_panel_nodes,
 )
 
@@ -62,17 +63,32 @@ def _evaluate(
         GroupNode("out", GroupOperator.RANK, "x", "g", "group"),
     ],
 )
-def test_nodes_outside_the_skeleton_are_rejected(node: ExpressionNode) -> None:
-    with pytest.raises(UnsupportedPanelEvaluationError, match="kind="):
-        _evaluate((node,))
+def test_section_nodes_rank_within_each_date(node: ExpressionNode) -> None:
+    """날짜마다 두 종목(S0 < S1)이 한 묶음이다. 그룹은 모두 "A" 라 횡단면과 같다."""
+    cache = _evaluate((node,))
+    assert [cache.value("out", row) for row in range(6)] == [0.0, 1.0] * 3
+
+
+def test_group_node_needs_its_group_column() -> None:
+    graph = FactorGraph((_X, GroupNode("out", GroupOperator.RANK, "x", "g", "group")), "out")
+    panel = FactorPanel.from_observations(_rows(6), FactorGraph((_X,), "x"))
+    with pytest.raises(ValueError, match="no group column"):
+        evaluate_panel_nodes(graph, panel=panel, missing=MissingPolicy.DROP)
 
 
 @pytest.mark.parametrize(
-    "operator", [TimeSeriesOperator.MEAN, TimeSeriesOperator.STANDARD_DEVIATION]
+    ("operator", "expected"),
+    [
+        (TimeSeriesOperator.MEAN, [None, None, 1.0, 2.0, 3.0, 4.0]),
+        (TimeSeriesOperator.STANDARD_DEVIATION, [None, None, 1.0, 1.0, 1.0, 1.0]),
+    ],
 )
-def test_time_series_mean_and_std_wait_for_exact_kernels(operator: TimeSeriesOperator) -> None:
-    with pytest.raises(UnsupportedPanelEvaluationError, match="operator="):
-        _evaluate((TimeSeriesNode("out", operator, "x", 2, "time_series"),))
+def test_time_series_mean_and_std_read_full_windows(
+    operator: TimeSeriesOperator, expected: list[float | None]
+) -> None:
+    # 종목마다 x 가 2 씩 오른다: 창 2 의 평균은 가운데, 모집단 표준편차는 1 이다
+    cache = _evaluate((TimeSeriesNode("out", operator, "x", 2, "time_series"),))
+    assert [cache.value("out", row) for row in range(6)] == expected
 
 
 def test_time_series_checkpoints_per_chunk_and_window_offset_with_monotone_progress(
@@ -94,17 +110,28 @@ def test_time_series_checkpoints_per_chunk_and_window_offset_with_monotone_progr
     # 종목마다 첫 행은 이력이 모자라 None 이고, 나머지는 직전 행과의 작은 값이다
     assert [cache.value("out", row) for row in range(6)] == [None, None, 0.0, 1.0, 2.0, 3.0]
     # 노드 진입 2번 + x 유한값 검사 3청크 + out 가림 구간 1필드
-    # + 시계열 커널 앞뒤 2번 + 창 후보 5행의 3청크와 청크마다 offset 1번 + out 유한값 검사 3청크
-    assert len(calls) == 2 + 3 + 1 + 2 + 3 * 2 + 3
+    # + 시계열 커널(종목 우선 재배열 3청크·누적합 뒤 1번·창 후보 5행의 3청크와 청크마다 offset
+    # 1번·흩뿌리기 3청크) + out 유한값 검사 3청크
+    assert len(calls) == 2 + 3 + 1 + (3 + 1 + 3 * 2 + 3) + 3
     # 노드 안에서도 청크마다 올리고 끝값은 1.0 이다
     assert len(fractions) == 2 + 3
     assert fractions == sorted(fractions) and fractions[-1] == 1.0
 
 
-def test_cross_sectional_median_fill_waits_for_t3_05() -> None:
-    with pytest.raises(UnsupportedPanelEvaluationError, match="cross_sectional_median"):
-        _evaluate((), MissingPolicy.CROSS_SECTIONAL_MEDIAN)
-    # 채움이 없는 정책은 같은 그래프를 평가한다
+def test_cross_sectional_median_fills_the_output_from_its_peers() -> None:
+    """그래프 출력의 빈칸은 같은 (as_of, universe_member) 동료 값의 중앙값으로 채운다."""
+    rows = list(_rows(8))
+    # 날짜 1 의 S0 값을 비우고, 날짜 3 은 두 종목을 다 비운다(동료에 값이 없으면 채우지 않는다)
+    for index in (2, 6, 7):
+        rows[index] = replace(rows[index], fields=(FactorFieldValue("x", None),))
+    graph = FactorGraph((_X,), "x")
+    cache = evaluate_panel_nodes(
+        graph,
+        panel=FactorPanel.from_observations(tuple(rows), graph),
+        missing=MissingPolicy.CROSS_SECTIONAL_MEDIAN,
+    )
+    assert [cache.value("x", row) for row in range(8)] == [0.0, 1.0, 3.0, 3.0, 4.0, 5.0, None, None]
+    # 채움이 없는 정책은 빈칸을 그대로 둔다
     assert _evaluate((), MissingPolicy.KEEP).value("x", 0) == 0.0
 
 
@@ -143,6 +170,28 @@ def test_checkpoint_runs_per_node_and_per_chunk_and_progress_ends_at_one(
         progress=fractions.append,
     )
     # 노드 진입 3번(out, x, 캐시된 x) + x 유한값 검사 3청크 + out 가림 구간 1필드 + 덧셈 3청크
-    # + out 유한값 검사 3청크
-    assert len(calls) == 3 + 3 + 1 + 3 + 3
+    # + 출력 채움 8번(동료 묶음 배치 3·값 있는 동료 3·채움 2) + out 유한값 검사 3청크
+    assert len(calls) == 3 + 3 + 1 + 3 + 8 + 3
     assert fractions == sorted(fractions) and fractions[-1] == 1.0
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 7, 1 << 18])
+def test_peer_layout_orders_unsorted_rows_by_date_like_a_stable_sort(
+    monkeypatch: pytest.MonkeyPatch, chunk: int
+) -> None:
+    """정본 순서가 아닌 행의 날짜 순열(조각 계수 정렬)이 전체 안정 정렬과 같고 조각마다 멈춘다."""
+    monkeypatch.setattr(_panel_cross_section, "_LAYOUT_CHUNK", chunk)
+    rng = np.random.default_rng(11)
+    row_date = rng.integers(0, 6, 40).astype(np.int32)
+    row_date[7] = 9  # 행이 없는 날짜 위치를 건너뛴다
+    calls: list[None] = []
+    order, starts = _panel_cross_section._date_order(row_date, lambda: calls.append(None))
+    expected = np.argsort(row_date, kind="stable")
+    assert order.tolist() == expected.tolist()
+    ordered = row_date[expected]
+    assert starts.tolist() == (np.flatnonzero(ordered[1:] != ordered[:-1]) + 1).tolist()
+    assert len(calls) == 2 * -(-40 // chunk) + 1
+    members = rng.random(40) < 0.7
+    layout = _panel_cross_section.peer_layout(row_date, members, None, lambda: None)
+    keys = row_date.astype(np.int64) * 2 + members
+    assert layout.rows.tolist() == np.argsort(keys, kind="stable").tolist()

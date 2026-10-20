@@ -42,6 +42,7 @@
   - 출력은 입력 관측 순서(189-204)다.
   - 시계열은 종목별 **행 위치**로 센다(`_indices_by_security` 791-801, `_history.py:17-28`).
   - 횡단면·그룹 동료는 `(as_of, universe_member[, 그룹])`(`_peer_indices` 763-788)이다. 그룹 값이 문자열이 아닌 행은 어느 그룹에도 들지 않는다(784-785).
+  - 그룹 값은 같은 필드의 **첫** 셀이다(`next(...)`, 780-783). 숫자 필드 값은 마지막 셀이다(`_field_values`의 dict, 537). 열 패널(`FactorPanel.from_observations`)도 둘을 따로 읽는다(T3-05).
 - **값 타입**
   - float·bool·None 세 가지다.
   - 필드 원값 중 bool·str은 숫자 입력에서 None이다(`_field_values` 541-545). `_as_number`도 bool을 숫자로 보지 않는다(817-822).

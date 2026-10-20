@@ -21,18 +21,17 @@ import pytest
 
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioPipelineResult
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
+from strategy_workbench.domain.factor import _panel_cross_section, _panel_evaluation, _statistics
 from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
-    BinaryNode,
-    ComparisonNode,
-    ConditionalNode,
     ConstantNode,
-    FieldNode,
+    CrossSectionalNode,
+    CrossSectionalOperator,
+    GroupNode,
+    GroupOperator,
     MissingPolicy,
-    ParameterNode,
     TimeSeriesNode,
     TimeSeriesOperator,
-    UnaryNode,
 )
 from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
@@ -60,6 +59,7 @@ from ._corpus import (
     synthetic_raw_panel,
 )
 from ._engines import ENGINES, Failure, NodeCache, TapeEngine, columnar_nodes, pipeline_source
+from ._fuzz import fuzz_case
 
 _ENGINE_A = ENGINES["object"]
 _ENGINE_B = ENGINES["object"]
@@ -146,46 +146,24 @@ def test_l1_evaluator_node_caches_match() -> None:
     assert any(isinstance(expected, Failure) for _, expected, _ in results)
 
 
-# 열 평가기가 구현한 노드(T3-01 골격, T3-02 시계열 끝점·min/max). 시계열 mean·std 는 T3-03·T3-04,
-# 나머지 노드와 `cross_sectional_median` 채움은 T3-05 다.
-_COLUMNAR_NODES = (
-    FieldNode,
-    ConstantNode,
-    ParameterNode,
-    UnaryNode,
-    BinaryNode,
-    ComparisonNode,
-    ConditionalNode,
-    TimeSeriesNode,
-)
-_COLUMNAR_TIME_SERIES = frozenset(
-    {
-        TimeSeriesOperator.MOMENTUM,
-        TimeSeriesOperator.DELTA,
-        TimeSeriesOperator.MINIMUM,
-        TimeSeriesOperator.MAXIMUM,
-    }
-)
-
-
 def _columnar_ready(case: EvaluatorCase) -> bool:
     # 정수 상수는 hydrate 가 float 로 바꾸므로 운영 입력이 아니다(열 평가기는 거절한다).
-    return case.missing is not MissingPolicy.CROSS_SECTIONAL_MEDIAN and all(
-        isinstance(node, _COLUMNAR_NODES)
-        and not (isinstance(node, ConstantNode) and not isinstance(node.value, float))
-        and not (isinstance(node, TimeSeriesNode) and node.operator not in _COLUMNAR_TIME_SERIES)
+    return not any(
+        isinstance(node, ConstantNode) and not isinstance(node.value, float)
         for node in case.graph.nodes
     )
 
 
 def test_l1_columnar_evaluator_matches_object_node_caches() -> None:
-    """열 평가기가 다루는 사례에서 모든 노드·칸의 값·타입·가린 칸이 객체 경로와 비트 단위로 같다."""
+    """모든 연산자 계열 × 결측 정책 4종 × 가린 셀 × 모집단 분리에서 모든 노드·칸의 값·타입·가린
+    칸과 실패 내용(node_id·as_of·security_id·value)이 객체 경로와 비트 단위로 같다."""
     cases = [case for case in evaluator_cases() if _columnar_ready(case)]
     results = [(case.key, _ENGINE_A.nodes(case), columnar_nodes(case)) for case in cases]
     _assert_parity(compare("L1-columnar", results))
     # 사례가 줄어 조용히 통과하지 않게: 첫 비유한 노드(평가 순서상 앞 노드)·lag 가림 전파·bool
     # 출력이 실제로 든다.
-    assert len(cases) >= 100
+    assert len(cases) >= 400
+    assert {case.missing for case in cases} == set(MissingPolicy)
     failed_nodes = {
         failure.detail[0]
         for _, failure, _ in results
@@ -195,16 +173,53 @@ def test_l1_columnar_evaluator_matches_object_node_caches() -> None:
     caches = [expected for _, expected, _ in results if isinstance(expected, NodeCache)]
     assert any(cache.masked.get("l3") for cache in caches)
     assert any(type(value) is bool for cache in caches for value in cache.computed["out"])
-    # 시계열 네 연산이 모두 실제 값을 낸다(창이 늘 비어 조용히 통과하지 않게)
+    # 시계열 여섯·횡단면 넷·그룹 둘이 모두 실제 값을 낸다(창·동료가 늘 비어 조용히 통과하지 않게)
     produced = {
-        node.operator
+        (type(node).__name__, node.operator)
         for case, (_, expected, _) in zip(cases, results, strict=True)
         if isinstance(expected, NodeCache)
         for node in case.graph.nodes
-        if isinstance(node, TimeSeriesNode)
+        if isinstance(node, (TimeSeriesNode, CrossSectionalNode, GroupNode))
         and any(value is not None for value in expected.computed[node.node_id])
     }
-    assert produced == _COLUMNAR_TIME_SERIES
+    assert produced == {
+        *(("TimeSeriesNode", operator) for operator in TimeSeriesOperator),
+        *(("CrossSectionalNode", operator) for operator in CrossSectionalOperator),
+        *(("GroupNode", operator) for operator in GroupOperator),
+    }
+
+
+# CI 퍼저 seed 수. PR 증거의 대량 실행은 같은 `fuzz_case` 를 더 많은 seed 로 돌린다
+_FUZZ_SEEDS = 600
+
+
+def test_l1_columnar_evaluator_matches_object_on_fuzzed_graphs() -> None:
+    """무작위 그래프(시계열·횡단면·그룹 사슬)와 패널(종목·그룹 수, 결측·가림·동점·±0·극단 크기,
+    정본이 아닌 행 순서)에서 열 평가기가 객체 경로와 같다."""
+    cases = [fuzz_case(seed) for seed in range(_FUZZ_SEEDS)]
+    results = [(case.key, _ENGINE_A.nodes(case), columnar_nodes(case)) for case in cases]
+    _assert_parity(compare("L1-fuzz", results))
+    # 실패 사례만 남거나 값이 비어 조용히 통과하지 않게
+    caches = [expected for _, expected, _ in results if isinstance(expected, NodeCache)]
+    assert len(caches) >= _FUZZ_SEEDS * 9 // 10
+    assert {case.missing for case in cases} == set(MissingPolicy)
+    assert sum(any(cache.masked.values()) for cache in caches) >= _FUZZ_SEEDS // 4
+
+
+def test_l1_columnar_evaluator_matches_with_small_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """조각 크기를 줄여 묶음 배치의 날짜 조각·구간 커널 조각·원소 청크 경계를 실제로 밟아도 같다.
+
+    운영 크기(2^18)는 작은 사례에서 조각이 하나라 경계 처리가 시험되지 않는다.
+    """
+    monkeypatch.setattr(_panel_cross_section, "_LAYOUT_CHUNK", 7)
+    monkeypatch.setattr(_statistics, "_KERNEL_CHUNK", 5)
+    monkeypatch.setattr(_statistics, "_SORT_CHUNK", 4)
+    monkeypatch.setattr(_statistics, "_CERTIFY_CHUNK", 3)
+    monkeypatch.setattr(_panel_evaluation, "_CHUNK_ROWS", 11)
+    cases = [case for case in evaluator_cases()[::5] if _columnar_ready(case)]
+    cases += [fuzz_case(seed) for seed in range(_FUZZ_SEEDS, _FUZZ_SEEDS + 100)]
+    results = [(case.key, _ENGINE_A.nodes(case), columnar_nodes(case)) for case in cases]
+    _assert_parity(compare("L1-small-chunks", results))
 
 
 def test_combinations_reach_every_level() -> None:

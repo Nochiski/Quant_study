@@ -98,11 +98,14 @@ bootstrap ─> application + adapters
   `adapters/outbound/run_thread`는 그 계산을 같은 프로세스의 데몬 스레드에서 부르고 GC 구간
   (`_gc_policy`)을 감싼다. `application.backtest_run` facade에만 의존한다. 어느 전송을 쓸지는
   bootstrap이 `BacktestRunService(run_execution=...)`로 정한다.
-  `adapters/outbound/run_worker_process`는 같은 포트를 worker 프로세스로 구현한다. IPC 프로토콜 v1
+  `adapters/outbound/run_worker_process`는 같은 포트를 worker 프로세스로 구현한다. IPC 프로토콜 v2
   (`_protocol.py`)의 인코딩·디코딩, 부모 쪽 감독(`_execution.py`), worker 쪽 줄 주고받기·진행 상한·코드
-  지문(`_worker.py`)을 이 노드 하나가 소유하고 `application.backtest_run`·`domain.backtest` facade에만
-  의존한다. worker 쪽 composition root는 `bootstrap/run_worker`(`python -m
-  strategy_workbench.bootstrap.run_worker`)다. 부모가 해석해 job에 실은 설정만 쓰고, 서버 조립 함수
+  지문과 지문 뒤 첫 프로젝트 모듈 import 를 거절하는 commit 가드(`_worker.py`)를 이 노드 하나가 소유하고 `application.backtest_run`·`domain.backtest` facade에만
+  의존한다. 예비 worker(spec D7: 늘 하나, 쓰면 곧바로 다시 채움, 연속 3회 실패면 멈추고 run 이 직접 띄운 worker 가
+  맞게 부팅하면 다시 채움)도 같은 노드의
+  `ProcessRunExecution`이 소유한다 — 서비스는 예비를 모르고 `start`·`shutdown`만 부른다. worker 쪽
+  composition root는 `bootstrap/run_worker`(`python -m
+  strategy_workbench.bootstrap.run_worker`)다. 부모가 해석해 `boot` 줄에 실은 설정만 쓰고, 서버 조립 함수
   (`bootstrap` facade의 `build_equity_data`·`build_portfolio_design`·`build_run_versions`)를 재사용하며,
   `BacktestRunService`는 만들지 않는다. 실행 방식 설정(`STRATEGY_WORKBENCH_RUN_ISOLATION`)은
   `bootstrap/_http.py`가 읽고 허용 값(`RUN_ISOLATIONS`)과 전송 선택은 `bootstrap/_container.py`가 한다.

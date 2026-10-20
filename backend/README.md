@@ -67,6 +67,8 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   설계는 `docs/superpowers/specs/2026-10-19-run-worker-process-design.md`. 이 방식에서 취소는 worker
   종료라 어느 단계에서든 바로 끝나고, worker 가 결과 없이 끝나면 `backtest.run.worker_exited`, 서버와
   다른 데이터·코드 판본을 읽었으면 `backtest.run.worker_mismatch`(서버를 다시 시작한다)로 끝난다.
+  서버는 부팅을 마친 예비 worker 하나를 늘 띄워 두고 run 에 넘기므로 run 시작에 부팅 시간이 들지
+  않는다(유휴 예비 하나의 비용은 `docs/planning/run-worker-process/BENCHMARK.md` 6절).
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다

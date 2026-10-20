@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event
 from typing import cast
 
 import pytest
+from fastapi.testclient import TestClient
 
 from strategy_workbench.adapters.inbound.http_api._experiment_routes import (
     _ExperimentStreamHub,
     _progress_stream,
 )
+from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.experiment_run.facade.experiments import ExperimentRunService
+from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, TrialStatus
 
 
@@ -367,3 +371,74 @@ def test_cancelled_shutdown_still_owns_and_drains_the_worker(concurrent_close: b
             await hub.close()
 
     asyncio.run(exercise())
+
+
+def test_http_lifespan_shutdown_closes_the_experiment_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """앱 lifespan 이 끝날 때 run 전송을 정리한 다음 실험 진행 스트림 회수를 마친다
+    (#581 리뷰 nit)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", lambda self: calls.append("runs"))
+
+    with TestClient(build_http_app(artifact_root=tmp_path / "artifacts")):
+        assert calls == []
+
+    assert calls == ["runs", "streams"]
+
+
+def test_http_lifespan_cleans_up_even_when_the_server_leaves_with_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """lifespan 이 예외로 빠져도 run 전송·예비 정리와 실험 스트림 회수를 한다(#591 리뷰 P3-3)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", lambda self: calls.append("runs"))
+    app = build_http_app(artifact_root=tmp_path / "artifacts")
+
+    async def serve_and_fail() -> None:
+        async with app.router.lifespan_context(app):
+            raise RuntimeError("server stopped by an error")
+
+    with pytest.raises(RuntimeError, match="server stopped by an error"):
+        asyncio.run(serve_and_fail())
+    assert calls == ["runs", "streams"]
+
+
+@pytest.mark.parametrize("server_error", [False, True])
+def test_a_failed_cleanup_does_not_skip_the_rest_or_hide_the_server_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server_error: bool
+) -> None:
+    """run 전송 정리가 실패해도 스트림 회수는 돈다. 서버를 멈춘 예외가 있으면 그 예외가 그대로
+    올라가고, 정상 종료면 정리 실패가 올라간다(#591 2차 리뷰 nit)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    def shutdown(self: BacktestRunService) -> None:
+        calls.append("runs")
+        raise OSError("worker cleanup failed")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", shutdown)
+    app = build_http_app(artifact_root=tmp_path / "artifacts")
+
+    async def serve() -> None:
+        async with app.router.lifespan_context(app):
+            if server_error:
+                raise RuntimeError("server stopped by an error")
+
+    expected = (RuntimeError, "server stopped") if server_error else (OSError, "cleanup failed")
+    with pytest.raises(expected[0], match=expected[1]):
+        asyncio.run(serve())
+    assert calls == ["runs", "streams"]

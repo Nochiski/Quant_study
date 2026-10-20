@@ -1357,11 +1357,7 @@ class EquityDuckdbAdapter:
         `_raw_panel.load_raw_panel` 이 소유한다. 운영 파이프라인은 아직 이 능력을 쓰지 않는다
         (T4-01).
         """
-        # `_raw_panel` 은 이 모듈의 규칙(`_cell_kind`·`_grid_sql`·`_latest_sql`)을 가져다 쓴다.
-        # 모듈 맨 위에서 불러오면 순환 import 라 호출 때 불러온다.
-        from ._raw_panel import load_raw_panel
-
-        return load_raw_panel(self, query, checkpoint=checkpoint, progress=progress)
+        return _raw_panel.load_raw_panel(self, query, checkpoint=checkpoint, progress=progress)
 
     # ── BacktestDataPort ──────────────────────────────────────────────────────
 
@@ -2170,3 +2166,10 @@ class EquityDuckdbAdapter:
         if found.available_date > cutoff:
             return _Observed(None, series.dates[position], found.content_date, CellKind.MISSING)
         return found
+
+
+# `_raw_panel` 은 이 모듈의 규칙(`_cell_kind`·`_grid_sql`·`_latest_sql`)을 가져다 쓴다. 맨 위에서
+# 불러오면 순환 import 라 정의가 모두 끝난 여기서 모듈을 불러온다(이름이 아니라 모듈이라 어느 쪽을
+# 먼저 불러도 된다). 호출 때 불러오지 않는다 — run worker 는 판본 대조 뒤 처음 import 되는 프로젝트
+# 모듈을 거절한다(run-worker spec D7, #591 2차 리뷰 P3-1).
+from . import _raw_panel  # noqa: E402  # reason: 위 순환 import 를 모듈 끝에서 푼다

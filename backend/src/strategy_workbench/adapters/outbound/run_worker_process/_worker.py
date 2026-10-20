@@ -1,7 +1,8 @@
-"""worker 쪽 전송: job 한 줄을 읽어 계산하고 이벤트 줄을 쓴다(run-worker spec D3·D5·D6·D11).
+"""worker 쪽 전송: boot 줄로 부팅하고 job 한 줄을 읽어 계산해 이벤트 줄을 쓴다(spec D3·D5~D7·D11).
 
 조립(어댑터·계산 만들기)은 composition root(`bootstrap/run_worker`)가 `boot` 로 넘긴다. 이 모듈은
-줄 주고받기, 진행 이벤트 상한, 부모 사망 감시, 엔진 관문, 코드 지문, 최대 RSS 만 소유한다.
+줄 주고받기, 진행 이벤트 상한, 부모 사망 감시, 엔진 관문, 코드 지문과 그 뒤 import 가드, 최대 RSS 만
+소유한다.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from ._protocol import (
     VersionBundle,
     WorkerEvent,
     WorkerSettings,
+    decode_boot,
     decode_job,
     decode_proceed,
     encode_event,
@@ -59,8 +61,15 @@ _PROGRESS_INTERVAL_S = 0.1
 # 종료 코드.
 EXIT_PARENT_GONE = 3
 EXIT_PROTOCOL = 4
-# Windows 감시 스레드가 stdin 파이프에 쌓인 바이트를 다시 들여다보는 간격(`_StdinPipe`).
+# Windows 에서 stdin 파이프에 쌓인 바이트를 다시 들여다보는 간격(`_StdinPipe`). 감시 스레드와
+# job 을 기다리는 예비 worker 의 주 스레드가 쓴다.
 _PIPE_POLL_S = 0.02
+# 코드 지문(spec D6)이 덮는 패키지: 앞 둘은 `.py` 소스를, 마지막은 확장 파일을 해시한다.
+# 부팅 뒤 run 은 이 패키지의 모듈을 처음 불러오지 않는다 — 불러오면 대조하지 않은 코드라
+# commit 앞에서 거절한다(spec D7, `_GuardedStore`).
+_SOURCE_PACKAGES = ("strategy_workbench", "backtest_engine")
+_EXTENSION_PACKAGE = "backtest_core"
+_PROJECT_PACKAGES = frozenset((*_SOURCE_PACKAGES, _EXTENSION_PACKAGE))
 
 
 @dataclass(frozen=True)
@@ -107,33 +116,42 @@ class ParentPipe(Protocol):
 def serve(
     boot: Callable[[WorkerSettings], WorkerBoot], *, stdin: ParentPipe, stdout: TextIO
 ) -> int:
-    """job 하나를 읽어 부팅·계산하고 종결 이벤트를 보낸다.
+    """`boot` 줄로 부팅해 `ready` 를 보내고, job 하나를 읽어 계산한 뒤 종결 이벤트를 보낸다.
 
-    job 뒤의 stdin 은 감시 스레드가 끝까지 읽는다. EOF 면 부모가 사라진 것이라 결과를 쓰지 않고
-    끝낸다(spec D5 보조 경로).
+    `ready` 뒤에는 job 을 기다린다 — 예비 worker 는 여기서 run 이 정해질 때까지 머문다(spec D7).
+    그동안의 EOF 는 부모가 사라진 것이라 결과 없이 끝낸다. job 뒤의 stdin 은 감시 스레드가 끝까지
+    읽고, EOF 면 결과를 쓰지 않고 끝낸다(spec D5 보조 경로).
     """
-    # job 읽기·부팅 실패는 여기서 로그로 남기지 않고 올린다. 잡히지 않은 예외의 traceback 이
-    # stderr 에 한 번 남고, 부모가 run_id 를 붙여 ERROR 로 옮긴다(#581 리뷰 nit).
+    # boot·job 읽기와 부팅 실패는 여기서 로그로 남기지 않고 올린다. 잡히지 않은 예외의 traceback
+    # 이 stderr 에 한 번 남고, 부모가 run_id 를 붙여 ERROR 로 옮긴다(#581 리뷰 nit).
     line = stdin.readline()
     if not line:
-        raise ProtocolError("not_json", "run worker stdin closed before a job line arrived")
-    message = decode_job(line)
-    job = message.job
-    watch = _ParentWatch(stdin)
-    watch.start()
+        raise ProtocolError("not_json", "run worker stdin closed before a boot line arrived")
+    settings = decode_boot(line)
 
     def sender(event: WorkerEvent) -> None:
         # 이벤트는 계산 스레드 하나만 쓴다(진행·엔진 관문·종결).
         stdout.write(encode_event(event))
         stdout.flush()
 
-    booted = boot(message.settings)
+    booted = boot(settings)
+    # 코드 지문은 boot 의 마지막 단계다. 지금 불러온 프로젝트 모듈이 판본 대조에 든 코드이고, run 이
+    # 이 뒤에 처음 불러오는 모듈은 commit 앞에서 거절한다(spec D7, #591 2차 리뷰 P3-1).
+    booted_modules = project_modules()
     sender(ReadyMessage(booted.versions))
+    line = stdin.readline()
+    if not line:
+        # 예비로 기다리던 중 부모가 사라졌다(POSIX 의 부모 사망 경로, Windows 는 Job Object).
+        logger.error("run worker parent is gone (stdin closed before a job) — exiting")
+        return EXIT_PARENT_GONE
+    job = decode_job(line)
+    watch = _ParentWatch(stdin)
+    watch.start()
     computation = replace(
         booted.computation,
-        artifact_store=_ParentAliveStore(booted.computation.artifact_store, watch),
+        artifact_store=_GuardedStore(booted.computation.artifact_store, watch, booted_modules),
     )
-    if message.settings.engine_gate:
+    if settings.engine_gate:
         computation = replace(
             computation, executor=_EngineGate(computation.executor, sender, watch)
         )
@@ -147,15 +165,21 @@ def serve(
         sender(CommittedMessage(outcome, max_rss))
         return 0
     if isinstance(outcome, RunFailed):
+        code, error = outcome.error_code, outcome.error
+        if isinstance(outcome.exception, _LateProjectImportError):
+            # 대조하지 않은 코드로 낸 결과라 판본 불일치로 닫는다. 계산은 이 예외를 모르므로 분류는
+            # 이 노드가 한다(spec D6·D7).
+            code = "backtest.run.worker_mismatch"
+            error = f"{outcome.exception} — run_id={job.run_id}"
         # 원래 예외의 stack trace 는 이 프로세스에만 있다. 로그(stderr)로 남기고 부모가 run_id 를
         # 붙여 중계한다. 부모에는 코드와 문장만 간다.
         logger.error(
             "backtest run failed in worker — run_id=%s error_code=%s",
             job.run_id,
-            outcome.error_code,
+            code,
             exc_info=outcome.exception,
         )
-        sender(FailedMessage(outcome.error_code, outcome.error, max_rss))
+        sender(FailedMessage(code, error, max_rss))
         return 0
     # worker 에는 협조적 취소 신호가 없다(취소는 프로세스 종료, D5). 계산이 취소로 멈췄다면
     # 계약 위반이라 실패로 알린다.
@@ -318,15 +342,36 @@ def _named_pipe_peek(handle: int) -> Callable[[], int | None]:
     return peek
 
 
-class _ParentAliveStore:
-    """commit 직전에 부모가 살아 있는지 한 번 더 본다(spec D5). 나머지는 그대로 넘긴다."""
+class _LateProjectImportError(RuntimeError):
+    """run 이 판본 대조 뒤 프로젝트 모듈을 처음 불러왔다 — 그 코드는 서버와 대조하지 않았다."""
 
-    def __init__(self, store: BacktestArtifactStorePort, watch: _ParentWatch) -> None:
+
+class _GuardedStore:
+    """commit 직전에 두 가지를 본다. 나머지는 그대로 넘긴다.
+
+    부모가 살아 있는가(spec D5), 그리고 부팅 뒤 run 이 프로젝트 모듈을 처음 불러오지 않았는가(spec
+    D7). 지문은 디스크의 소스를 해시하므로, 예비가 기다리는 동안 바뀐 파일을 run 이 처음 불러오면
+    서버와 다른 코드로 계산한 결과가 같은 판본으로 남는다. 그런 결과는 commit 하지 않는다.
+    """
+
+    def __init__(
+        self,
+        store: BacktestArtifactStorePort,
+        watch: _ParentWatch,
+        booted_modules: frozenset[str],
+    ) -> None:
         self._store = store
         self._watch = watch
+        self._booted_modules = booted_modules
 
     def commit(self, result: BacktestRunResult) -> ArtifactCommit:
         self._watch.check_parent_alive()
+        if late := project_modules() - self._booted_modules:
+            raise _LateProjectImportError(
+                "run worker imported project modules after its version check, so their code was "
+                f"not compared with the server — modules={','.join(sorted(late))}; the result was "
+                "not committed (import them at worker boot, run-worker spec D7)"
+            )
         return self._store.commit(result)
 
     def load(self, run_id: str, *, sha256: str) -> BacktestRunResult:
@@ -400,7 +445,7 @@ def code_fingerprint() -> str:
     해시한다. 커널 패키지는 import 하지 않고 위치만 찾는다.
     """
     entries: list[tuple[str, Path]] = []
-    for package in ("strategy_workbench", "backtest_engine"):
+    for package in _SOURCE_PACKAGES:
         for root in _package_locations(package):
             entries.extend(
                 (f"{package}/{path.relative_to(root).as_posix()}", path)
@@ -408,7 +453,7 @@ def code_fingerprint() -> str:
             )
     extensions = sorted(
         path
-        for root in _package_locations("backtest_core")
+        for root in _package_locations(_EXTENSION_PACKAGE)
         for path in root.iterdir()
         if any(path.name.endswith(suffix) for suffix in EXTENSION_SUFFIXES)
     )
@@ -423,6 +468,14 @@ def code_fingerprint() -> str:
         digest.update(name.encode("utf-8") + b"\0")
         digest.update(hashlib.sha256(path.read_bytes()).digest())
     return digest.hexdigest()
+
+
+def project_modules() -> frozenset[str]:
+    """지금 불러온 프로젝트 모듈 이름(지문이 덮는 패키지와 그 하위)."""
+    # 다른 스레드가 import 하는 중일 수 있어 사본을 훑는다(dict.copy 는 GIL 아래 한 번에 끝난다).
+    return frozenset(
+        name for name in sys.modules.copy() if name.partition(".")[0] in _PROJECT_PACKAGES
+    )
 
 
 def _package_locations(package: str) -> tuple[Path, ...]:

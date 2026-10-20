@@ -1,4 +1,4 @@
-"""run worker IPC 프로토콜 v1(run-worker spec D3): 줄 인코딩·디코딩, 판본 거절, 진행 상한.
+"""run worker IPC 프로토콜(run-worker spec D3·D7): 줄 인코딩·디코딩, 판본 거절, 진행 상한.
 
 하위 프로세스 없이 줄만 본다. 실제 하위 프로세스는 `integration/test_run_worker_process.py` 가 돈다.
 """
@@ -24,9 +24,11 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol imp
     VersionBundle,
     WorkerEvent,
     WorkerSettings,
+    decode_boot,
     decode_event,
     decode_job,
     decode_proceed,
+    encode_boot,
     encode_event,
     encode_job,
     encode_proceed,
@@ -86,23 +88,37 @@ def resolved_job(
     )
 
 
-def test_job_line_rebuilds_the_resolved_spec_and_settings(tmp_path: Path) -> None:
+def test_job_line_rebuilds_the_resolved_spec() -> None:
     # 값의 타입이 줄을 오가며 바뀌지 않는지 보려고 문서에 없는 파라미터 값도 싣는다(줄만 본다).
     job = resolved_job(
         "run-1",
         lineage_strategy_id="계열",
         parameter_values={"n": 3, "on": True, "rate": 0.5, "name": "가"},
     )
-    settings = WorkerSettings("duckdb", tmp_path / "원장", tmp_path / "artifacts", engine_gate=True)
 
-    line = encode_job(job, settings)
-    decoded = decode_job(line)
+    line = encode_job(job)
 
     assert line.endswith("\n") and line.count("\n") == 1
     assert "계열" in line  # 한글은 이스케이프하지 않는 UTF-8 이다
     # `==` 는 1 과 1.0·True 를 같다고 본다. 값의 타입까지 같은지 repr 로 본다(#575 리뷰 P3).
-    assert repr(decoded.job) == repr(job)
-    assert repr(decoded.settings) == repr(settings)
+    assert repr(decode_job(line)) == repr(job)
+
+
+def test_boot_line_carries_the_settings_before_any_job(tmp_path: Path) -> None:
+    """예비 worker 는 run 이 정해지기 전에 부팅하므로 설정이 job 과 따로 먼저 간다(spec D7)."""
+    settings = WorkerSettings("duckdb", tmp_path / "원장", tmp_path / "artifacts", engine_gate=True)
+
+    line = encode_boot(settings)
+
+    assert line.endswith("\n") and line.count("\n") == 1
+    assert "원장" in line
+    assert repr(decode_boot(line)) == repr(settings)
+    with pytest.raises(ProtocolError) as error:
+        decode_job(line)
+    assert (error.value.reason, error.value.message_type) == ("unexpected_type", "boot")
+    with pytest.raises(ProtocolError) as error:
+        decode_boot(encode_job(resolved_job("run-1")))
+    assert (error.value.reason, error.value.message_type) == ("unexpected_type", "job")
 
 
 @pytest.mark.parametrize(
@@ -148,16 +164,21 @@ def _with_version(line: str, version: object) -> str:
     return json.dumps(payload) + "\n"
 
 
-@pytest.mark.parametrize("version", [PROTOCOL_VERSION + 1, None, "1"])
+@pytest.mark.parametrize("version", [PROTOCOL_VERSION + 1, PROTOCOL_VERSION - 1, None, "2"])
 def test_both_directions_reject_another_protocol_version(tmp_path: Path, version: object) -> None:
-    job_line = encode_job(resolved_job("run-1"), WorkerSettings("mock", None, tmp_path))
+    boot_line = encode_boot(WorkerSettings("mock", None, tmp_path))
+    job_line = encode_job(resolved_job("run-1"))
     event_line = encode_event(ProgressMessage("tape", 0.1, "x"))
 
+    with pytest.raises(ProtocolError, match="protocol version mismatch") as boot_error:
+        decode_boot(_with_version(boot_line, version))
     with pytest.raises(ProtocolError, match="protocol version mismatch") as job_error:
         decode_job(_with_version(job_line, version))
     with pytest.raises(ProtocolError, match="protocol version mismatch") as event_error:
         decode_event(_with_version(event_line, version))
-    assert job_error.value.reason == event_error.value.reason == "version_mismatch"
+    assert {boot_error.value.reason, job_error.value.reason, event_error.value.reason} == {
+        "version_mismatch"
+    }
 
 
 def test_a_json_object_without_a_protocol_field_is_not_a_version_mismatch(tmp_path: Path) -> None:

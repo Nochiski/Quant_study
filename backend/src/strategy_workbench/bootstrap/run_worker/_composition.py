@@ -36,10 +36,15 @@ def boot(settings: WorkerSettings) -> WorkerBoot:
     equity_data = build_equity_data(settings.equity_adapter, settings.equity_root)
     factor_registry = build_default_factor_registry()
     metric_registry = build_default_metric_registry()
+    executor = BacktestEngineExecutorAdapter(metric_registry)
+    # 지문을 재기 전에 엔진 확장을 올린다. 그래야 계산이 쓰는 확장이 지문을 잰 파일과 같거나 그보다
+    # 오래되고, 사이에 바뀌었으면 판본 불일치로 멈춘다 — 예비가 기다리는 동안 바뀐 확장을 대조 없이
+    # 쓰지 않는다(spec D6·D7, #591 리뷰 P2-1).
+    executor.load_kernel()
     computation = RunComputation(
         build_portfolio_design(equity_data, BacktestEnginePortfolioAdapter(), factor_registry),
         equity_data,
-        BacktestEngineExecutorAdapter(metric_registry),
+        executor,
         # staging 정리는 부르지 않는다 — 같은 루트의 다른 run staging 을 지운다(spec D4).
         LocalArtifactStore(settings.artifact_root),
     )

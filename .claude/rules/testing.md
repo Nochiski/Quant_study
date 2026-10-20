@@ -42,6 +42,9 @@ OS 사용자 설정 디렉터리의 공급자 비밀)를 열면 실제 대화 �
   SQLite `ATTACH`, `duckdb.connect(path)`)은 보지 못한다. 그런 경로를 쓰는 테스트는 가드에 기대지
   말고 경로를 직접 격리한다. 예: run worker 통합 테스트(`tests/integration/test_run_worker_process.py`)는
   하위 프로세스가 쓰는 산출물 루트·연구 DB를 tmp로 명시한다.
+- 프로세스 전송(`ProcessRunExecution`)은 만들 때 예비 worker를 띄운다. 같은 conftest의 autouse fixture
+  `_close_process_run_executions`가 테스트마다 만든 전송을 끝에 닫아, lifespan을 거치지 않는 앱이 남긴
+  유휴 worker가 쌓이지 않게 한다.
 
 ## 산출물 검증이 필요하다면
 

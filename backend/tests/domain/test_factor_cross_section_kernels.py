@@ -285,6 +285,7 @@ def test_chunked_kernels_match_one_chunk_and_checkpoint_per_chunk(
         "winsorize": segment_winsorize(values, offsets, 0.1, 0.9),
     }
     monkeypatch.setattr(_statistics, "_KERNEL_CHUNK", 16)
+    monkeypatch.setattr(_statistics, "_SORT_CHUNK", 16)
     calls: list[int] = []
     pieces = {
         "rank": segment_rank(values, offsets, checkpoint=lambda: calls.append(1)),

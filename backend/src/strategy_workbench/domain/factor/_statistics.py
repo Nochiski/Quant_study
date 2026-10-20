@@ -102,6 +102,9 @@ _CERTIFY_CHUNK = 1 << 16
 _EXACT_CHECK_CELLS = 256
 _EXACT_CHECK_ELEMENTS = 1 << 15
 _MIN_SEGMENT_BLOCK = 64
+# 구간 정렬 커널(rank·winsorize·median)의 조각 원소 수. 정렬과 동점 묶기가 원소당 연산이 많아 2^18
+# 원소 조각은 4.2M행에서 checkpoint 간격이 60ms 가까이 된다(spec D7)
+_SORT_CHUNK = 1 << 16
 
 _Floats = NDArray[np.float64]
 _Bools = NDArray[np.bool_]
@@ -976,9 +979,9 @@ def _certify_deviation(sums: _Floats, count: _Floats) -> tuple[_Floats, _Bools, 
 # - NaN 은 `<` 로 순서가 정해지지 않아 `sorted` 결과가 입력 배치에 따라 달라진다. 객체 경로의 입력은
 #   유한값 검사를 통과한 값이라 NaN 이 없고, 정렬 커널은 NaN 을 `ValueError` 로 거절한다. ±inf 는
 #   순서가 정해져 그대로 다룬다.
-# - 정렬·원소 연산은 구간을 모은 `_KERNEL_CHUNK` 원소 조각마다 하고 조각마다 checkpoint 를
-#   부른다. 구간 하나가 그보다 길면 그 구간의 정렬 한 번 안에서는 부를 수 없다(정확 경로의 긴 칸과
-#   같은 한계).
+# - 정렬은 구간을 모은 `_SORT_CHUNK` 원소 조각마다, 원소 연산은 `_KERNEL_CHUNK` 원소 조각마다 하고
+#   조각마다 checkpoint 를 부른다. 구간 하나가 정렬 조각보다 길면 그 구간의 정렬 한 번 안에서는
+#   부를 수 없다(정확 경로의 긴 칸과 같은 한계).
 # ---------------------------------------------------------------------------
 
 
@@ -1136,7 +1139,7 @@ def _segment_spans(
 ) -> Iterator[tuple[int, int, NDArray[np.intp], int]]:
     """구간을 차례로 모은 조각마다 (원소 시작, 원소 끝, 조각 안 구간 경계, 첫 구간 번호).
 
-    조각은 원소가 `_KERNEL_CHUNK` 이하가 되게 구간을 모은다. 구간 하나가 그보다 길면 그 구간만
+    조각은 원소가 `_SORT_CHUNK` 이하가 되게 구간을 모은다. 구간 하나가 그보다 길면 그 구간만
     담는다.
     """
     groups = bounds.shape[0] - 1
@@ -1144,7 +1147,7 @@ def _segment_spans(
     while first < groups:
         checkpoint()
         low = int(bounds[first])
-        last = int(np.searchsorted(bounds, low + _KERNEL_CHUNK, side="right")) - 1
+        last = int(np.searchsorted(bounds, low + _SORT_CHUNK, side="right")) - 1
         last = min(max(last, first + 1), groups)
         yield low, int(bounds[last]), bounds[first : last + 1] - low, first
         first = last

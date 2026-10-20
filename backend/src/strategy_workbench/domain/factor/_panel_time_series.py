@@ -46,15 +46,20 @@ def time_series_window(
     rows = values.shape[0]
     window = node.window
     far = node_read_window(node).far
-    ordered = values[order]
-    # 4M행 재배열·누적합과 흩뿌리기도 0.1초 간격 안에 두려고 앞뒤에서 한 번씩 부른다(spec D7)
-    checkpoint()
+    # 종목 우선 재배열과 흩뿌리기는 행 순서와 다른 순열이라 4M행 한 번에 60ms 가까이 걸린다.
+    # 청크마다 나눠 checkpoint 간격을 줄인다(spec D7). 원소를 옮기기만 해 값은 그대로다
+    ordered = np.empty(rows, np.float64)
+    ordered_valid = np.empty(rows, bool)
+    for chunk in chunks(rows):
+        ordered[chunk] = values[order[chunk]]
+        ordered_valid[chunk] = valid[order[chunk]]
     result = np.zeros(rows, np.float64)
     ok = np.zeros(rows, bool)
     # 정렬 위치 j(≥ far)의 창은 [j − far, j − far + window). t = j − far 로 센다
     candidates = rows - far
     if candidates > 0:
-        numeric = np.concatenate(([0], np.cumsum(valid[order], dtype=np.int64)))
+        numeric = np.concatenate(([0], np.cumsum(ordered_valid, dtype=np.int64)))
+        checkpoint()
         with np.errstate(all="ignore"):
             for chunk in chunks(candidates):
                 first = ordered[chunk]
@@ -82,11 +87,11 @@ def time_series_window(
                     else:
                         result[target] = last - first
                 advance(chunk.stop / candidates)
-    checkpoint()
     values_out = np.empty(rows, np.float64)
     valid_out = np.empty(rows, bool)
-    values_out[order] = result
-    valid_out[order] = ok
+    for chunk in chunks(rows):
+        values_out[order[chunk]] = result[chunk]
+        valid_out[order[chunk]] = ok[chunk]
     return values_out, valid_out
 
 

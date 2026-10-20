@@ -21,6 +21,7 @@ import pytest
 
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioPipelineResult
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
+from strategy_workbench.domain.factor import _panel_cross_section, _panel_evaluation, _statistics
 from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
     ConstantNode,
@@ -203,6 +204,22 @@ def test_l1_columnar_evaluator_matches_object_on_fuzzed_graphs() -> None:
     assert len(caches) >= _FUZZ_SEEDS * 9 // 10
     assert {case.missing for case in cases} == set(MissingPolicy)
     assert sum(any(cache.masked.values()) for cache in caches) >= _FUZZ_SEEDS // 4
+
+
+def test_l1_columnar_evaluator_matches_with_small_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """조각 크기를 줄여 묶음 배치의 날짜 조각·구간 커널 조각·원소 청크 경계를 실제로 밟아도 같다.
+
+    운영 크기(2^18)는 작은 사례에서 조각이 하나라 경계 처리가 시험되지 않는다.
+    """
+    monkeypatch.setattr(_panel_cross_section, "_LAYOUT_CHUNK", 7)
+    monkeypatch.setattr(_statistics, "_KERNEL_CHUNK", 5)
+    monkeypatch.setattr(_statistics, "_SORT_CHUNK", 4)
+    monkeypatch.setattr(_statistics, "_CERTIFY_CHUNK", 3)
+    monkeypatch.setattr(_panel_evaluation, "_CHUNK_ROWS", 11)
+    cases = [case for case in evaluator_cases()[::5] if _columnar_ready(case)]
+    cases += [fuzz_case(seed) for seed in range(_FUZZ_SEEDS, _FUZZ_SEEDS + 100)]
+    results = [(case.key, _ENGINE_A.nodes(case), columnar_nodes(case)) for case in cases]
+    _assert_parity(compare("L1-small-chunks", results))
 
 
 def test_combinations_reach_every_level() -> None:

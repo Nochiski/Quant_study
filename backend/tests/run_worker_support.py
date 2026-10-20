@@ -195,19 +195,32 @@ def wait_for_exit(pid: int, *, timeout_s: float) -> bool:
             os.kill(pid, 0)
         except ProcessLookupError:
             return True
-        if _is_zombie(pid):
+        if _exited(pid):
             return True
         time.sleep(0.05)
     return False
 
 
-def _is_zombie(pid: int) -> bool:
+def _exited(pid: int) -> bool:
     """POSIX: 끝났지만 부모가 아직 거두지 않은 프로세스면 참이다. 거두지 않는다.
 
     죽은 자식은 부모의 `Popen` 이 poll·wait 로 거둘 때까지 좀비로 남아 `os.kill(pid, 0)` 이
-    계속 성공한다(#591 2차 리뷰 P2-1). 남의 자식(부모를 죽인 고아)도 볼 수 있게 `waitid` 대신
-    `/proc/<pid>/stat` 의 상태 칸을 읽는다. `/proc` 이 없는 플랫폼은 거짓이다.
+    계속 성공한다(#591 2차 리뷰 P2-1). 이 프로세스의 자식이면 `waitid(WNOWAIT)` 로 본다 —
+    거둘 수 있게 된 뒤에야 참이라 부모 `Popen.poll()` 도 같은 때부터 끝을 본다. `/proc` 의 좀비
+    표시는 다른 스레드가 아직 끝나는 중인 그룹 리더에서 먼저 서므로(그동안 `poll()` 은 None)
+    자식에게는 쓰지 않는다. 남의 자식(부모를 죽인 고아)만 `/proc` 상태로 본다.
     """
+    if sys.platform == "win32":
+        raise RuntimeError("waitid() is POSIX only — use WaitForSingleObject on Windows")
+    try:
+        found = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
+    except ChildProcessError:
+        return _is_zombie(pid)
+    return found is not None
+
+
+def _is_zombie(pid: int) -> bool:
+    """POSIX: `/proc/<pid>/stat` 의 상태 칸이 좀비(Z)면 참이다. `/proc` 이 없으면 거짓이다."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii", errors="replace")
     except OSError:

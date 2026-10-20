@@ -73,17 +73,16 @@ def peer_layout(
     """(as_of, universe_member[, 그룹]) 묶음 배치. 묶음 안은 행 순서다(`_peer_indices` 와 같다).
 
     키가 날짜 우선이라 날짜 경계에서 자른 조각마다 키로 안정 정렬해 이으면 전체가 키 순이고, 묶음은
-    조각을 넘지 않는다. 행이 정본 순서((as_of, security_id))가 아니면 날짜로 한 번 안정 정렬한다
-    (대조용 경계 함수 입력이다. 그 정렬 한 번은 checkpoint 사이에 든다).
+    조각을 넘지 않는다. 행이 정본 순서((as_of, security_id))가 아니면(대조용 경계 함수 입력) 먼저
+    날짜 순 안정 순열을 조각 단위 계수 정렬로 만든다(`_date_order`, #598 리뷰 P3-1).
     """
     total = row_date.shape[0]
     checkpoint()
     candidates: _Indices | None = None
     if bool(np.any(row_date[1:] < row_date[:-1])):
-        candidates = np.argsort(row_date, kind="stable").astype(np.intp)
-        checkpoint()
-    dates = row_date if candidates is None else row_date[candidates]
-    starts = (np.flatnonzero(dates[1:] != dates[:-1]) + 1).astype(np.intp)
+        candidates, starts = _date_order(row_date, checkpoint)
+    else:
+        starts = (np.flatnonzero(row_date[1:] != row_date[:-1]) + 1).astype(np.intp)
     width = 1 if group_codes is None else int(group_codes.max(initial=-1)) + 1
     rows: list[_Indices] = []
     segments: list[_Indices] = []
@@ -111,6 +110,35 @@ def peer_layout(
     checkpoint()
     empty = np.zeros(0, np.intp)
     return PeerLayout(np.concatenate([empty, *rows]), np.concatenate([empty, *segments]), count)
+
+
+def _date_order(
+    row_date: NDArray[np.int32], checkpoint: Callable[[], None]
+) -> tuple[_Indices, _Indices]:
+    """행을 날짜 순(같은 날짜 안은 행 순)으로 놓는 안정 순열과, 그 순서에서 날짜가 바뀌는 자리.
+
+    `np.argsort(kind="stable")` 한 번은 4.2M행에서 checkpoint 사이에 약 0.3초가 든다(spec D7 위반).
+    날짜 위치마다 행 수를 세어 자리를 정한 뒤(계수 정렬), `_LAYOUT_CHUNK` 행 조각마다 조각 안을 안정
+    정렬해 날짜별 커서 자리에 놓는다. 조각을 행 순으로 처리하므로 같은 날짜의 행은 행 순이다.
+    """
+    total = row_date.shape[0]
+    days = int(row_date.max(initial=-1)) + 1
+    counts = np.zeros(days, np.intp)
+    for piece in _pieces(total, checkpoint):
+        counts += np.bincount(row_date[piece], minlength=days)
+    first = np.cumsum(counts) - counts
+    cursor = first.copy()
+    order = np.empty(total, np.intp)
+    for piece in _pieces(total, checkpoint):
+        part = row_date[piece]
+        local = np.argsort(part, kind="stable")
+        ordered = part[local]
+        here = np.bincount(part, minlength=days)
+        within = np.arange(local.shape[0], dtype=np.intp) - (np.cumsum(here) - here)[ordered]
+        order[cursor[ordered] + within] = piece.start + local
+        cursor += here
+    checkpoint()
+    return order, first[counts > 0][1:].astype(np.intp)
 
 
 def _date_cut(starts: _Indices, low: int, total: int) -> int:

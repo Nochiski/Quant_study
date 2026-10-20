@@ -3,9 +3,10 @@
 from dataclasses import replace
 from datetime import date
 
+import numpy as np
 import pytest
 
-from strategy_workbench.domain.factor import _panel_evaluation
+from strategy_workbench.domain.factor import _panel_cross_section, _panel_evaluation
 from strategy_workbench.domain.factor.facade.evaluation import FactorFieldValue, FactorObservation
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
@@ -172,3 +173,25 @@ def test_checkpoint_runs_per_node_and_per_chunk_and_progress_ends_at_one(
     # + 출력 채움 8번(동료 묶음 배치 3·값 있는 동료 3·채움 2) + out 유한값 검사 3청크
     assert len(calls) == 3 + 3 + 1 + 3 + 8 + 3
     assert fractions == sorted(fractions) and fractions[-1] == 1.0
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 7, 1 << 18])
+def test_peer_layout_orders_unsorted_rows_by_date_like_a_stable_sort(
+    monkeypatch: pytest.MonkeyPatch, chunk: int
+) -> None:
+    """정본 순서가 아닌 행의 날짜 순열(조각 계수 정렬)이 전체 안정 정렬과 같고 조각마다 멈춘다."""
+    monkeypatch.setattr(_panel_cross_section, "_LAYOUT_CHUNK", chunk)
+    rng = np.random.default_rng(11)
+    row_date = rng.integers(0, 6, 40).astype(np.int32)
+    row_date[7] = 9  # 행이 없는 날짜 위치를 건너뛴다
+    calls: list[None] = []
+    order, starts = _panel_cross_section._date_order(row_date, lambda: calls.append(None))
+    expected = np.argsort(row_date, kind="stable")
+    assert order.tolist() == expected.tolist()
+    ordered = row_date[expected]
+    assert starts.tolist() == (np.flatnonzero(ordered[1:] != ordered[:-1]) + 1).tolist()
+    assert len(calls) == 2 * -(-40 // chunk) + 1
+    members = rng.random(40) < 0.7
+    layout = _panel_cross_section.peer_layout(row_date, members, None, lambda: None)
+    keys = row_date.astype(np.int64) * 2 + members
+    assert layout.rows.tolist() == np.argsort(keys, kind="stable").tolist()

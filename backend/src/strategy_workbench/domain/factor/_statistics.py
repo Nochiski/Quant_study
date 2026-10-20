@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from math import isqrt
 from statistics import mean, pstdev
@@ -16,11 +16,12 @@ def cross_sectional_rank(values: Sequence[float]) -> list[float]:
     않도록 1 로 막아 유일한 값이 0.0 이 된다 — 횡단면에 비교 대상이 없으면 순위 정보도 없다.
 
     `CrossSectionalOperator.RANK`·`GroupOperator.RANK` 와 `signal.normalization: rank` 가 같은
-    정의를 쓰도록 이 함수 하나가 순위 공식을 소유한다(P2-04).
+    정의를 쓴다(P2-04). 공식은 구간 커널 `segment_rank` 하나가 소유하고, 이 함수는 입력 전체를
+    구간 하나로 감싼다(columnar-tape spec D5). 값은 유한한 float 여야 한다(NaN 은 `ValueError`).
     """
-    ranked = rank_items(list(enumerate(values)))
-    denominator = max(len(ranked) - 1, 1)
-    return [(ranked[index] - 1) / denominator for index in range(len(values))]
+    array = np.asarray(values, dtype=np.float64)
+    ranks = segment_rank(array, np.array([0, array.shape[0]], np.intp))
+    return ranks.tolist()
 
 
 def cross_sectional_zscore(values: Sequence[float]) -> list[float]:
@@ -29,31 +30,15 @@ def cross_sectional_zscore(values: Sequence[float]) -> list[float]:
     모집단 표준편차(`pstdev`)를 쓴다. 분산이 0 이면(표본 1개 포함) 편차 정보가 없으므로 전부
     0.0 이다 — 0 으로 나누는 대신 "정보 없음"을 중립값으로 표현한다.
 
-    `CrossSectionalOperator.ZSCORE` 와 `signal.normalization: zscore` 가 같은 정의를 쓰도록 이
-    함수 하나가 표준화 공식을 소유한다(P2-04).
+    `CrossSectionalOperator.ZSCORE` 와 `signal.normalization: zscore` 가 같은 정의를 쓴다(P2-04).
+    공식은 구간 커널 `segment_zscore` 하나가 소유하고, 이 함수는 입력 전체를 구간 하나로 감싼다
+    (columnar-tape spec D5).
     """
     if not values:
         return []
-    center = mean(values)
-    deviation = pstdev(values)
-    if deviation == 0:
-        return [0.0] * len(values)
-    return [(value - center) / deviation for value in values]
-
-
-def rank_items(values: list[tuple[int, float]]) -> dict[int, float]:
-    ordered = sorted(values, key=lambda item: (item[1], item[0]))
-    ranks: dict[int, float] = {}
-    position = 0
-    while position < len(ordered):
-        end = position + 1
-        while end < len(ordered) and ordered[end][1] == ordered[position][1]:
-            end += 1
-        average_rank = (position + 1 + end) / 2
-        for index, _ in ordered[position:end]:
-            ranks[index] = average_rank
-        position = end
-    return ranks
+    array = np.asarray(values, dtype=np.float64)
+    scores = segment_zscore(array, np.array([0, array.shape[0]], np.intp))
+    return scores.tolist()
 
 
 def quantile(ordered: list[float], probability: float) -> float:
@@ -973,3 +958,236 @@ def _certify_deviation(sums: _Floats, count: _Floats) -> tuple[_Floats, _Bools, 
         )
         zero = sums[_SPREAD] == 0.0
     return candidate, certified, zero
+
+
+# ---------------------------------------------------------------------------
+# 횡단면 구간 커널(columnar-tape spec D3 rank·winsorize·median 행, D5, T3-05)
+#
+# 구간 g 는 `values[offsets[g] : offsets[g + 1]]` 이고, 구간 안 순서는 객체 경로 동료 목록의
+# 순서(관측 순서)다. 아래 커널은 그 목록을 받은 객체 경로 공식과 비트가 같다. 스칼라 API
+# `cross_sectional_rank`·`cross_sectional_zscore` 는 입력 전체를 구간 하나로 감싸 같은 커널을
+# 부른다.
+#
+# - 정렬: 객체 경로는 Python `sorted` 다(rank 는 키 (값, 입력 순서), winsorize·median 은 값만).
+#   둘 다 안정 정렬이라 같은 값(`==`, −0.0 과 0.0 포함)은 입력 순서를 지킨다. 여기서는 구간 번호를
+#   1차 키로 둔 `np.lexsort`(안정)로 구간 안에서만 정렬한다. 정렬 키는 `값 + 0.0` 이다 — −0.0 이
+#   +0.0 이 되어 두 0 이 같은 키라, 정렬 구현이 부호 비트를 보더라도 같은 값은 입력 순서로 남는다.
+#   값 자체는 원래 열에서 읽어 부호를 잃지 않는다.
+# - NaN 은 `<` 로 순서가 정해지지 않아 `sorted` 결과가 입력 배치에 따라 달라진다. 객체 경로의 입력은
+#   유한값 검사를 통과한 값이라 NaN 이 없고, 정렬 커널은 NaN 을 `ValueError` 로 거절한다. ±inf 는
+#   순서가 정해져 그대로 다룬다.
+# - 정렬·원소 연산은 구간을 모은 `_KERNEL_CHUNK` 원소 조각마다 하고 조각마다 checkpoint 를
+#   부른다. 구간 하나가 그보다 길면 그 구간의 정렬 한 번 안에서는 부를 수 없다(정확 경로의 긴 칸과
+#   같은 한계).
+# ---------------------------------------------------------------------------
+
+
+def segment_rank(
+    values: _Floats,
+    offsets: NDArray[np.intp],
+    *,
+    checkpoint: Callable[[], None] = _no_checkpoint,
+) -> _Floats:
+    """구간마다 백분위 순위 `(평균 순위 − 1) / max(n − 1, 1)`. 결과는 `values` 와 같은 자리다.
+
+    평균 순위는 같은 값(`==`) 묶음이 정렬 위치 [p, e) 를 차지할 때 `(p + 1 + e) / 2` 다(정수 합을 한
+    번 나눠 정확하다). 그 뒤 1 을 빼고 분모로 한 번 나눈다 — 객체 경로와 같은 IEEE 연산 순서다.
+    """
+    bounds = _segment_bounds(values, offsets, "segment rank")
+    _require_ordered(values, "segment rank")
+    ranks = np.empty(values.shape[0], np.float64)
+    for low, high, local, _ in _segment_spans(bounds, checkpoint):
+        part = values[low:high]
+        order, segment = _segment_order(part, local)
+        ordered = part[order]
+        count = high - low
+        # 정렬 위치마다 그 값 묶음의 시작·끝(반열린)을 구간 안 위치로 센다
+        fresh = np.ones(count, bool)
+        fresh[1:] = (segment[1:] != segment[:-1]) | (ordered[1:] != ordered[:-1])
+        run_start = np.flatnonzero(fresh)
+        run_stop = np.append(run_start[1:], count)
+        run = np.cumsum(fresh) - 1
+        first = local[:-1][segment]
+        average = ((run_start[run] - first) + 1 + (run_stop[run] - first)).astype(np.float64) / 2.0
+        denominator = np.maximum(np.diff(local) - 1, 1).astype(np.float64)[segment]
+        ranks[low + order] = (average - 1.0) / denominator
+    return ranks
+
+
+def segment_zscore(
+    values: _Floats,
+    offsets: NDArray[np.intp],
+    *,
+    checkpoint: Callable[[], None] = _no_checkpoint,
+) -> _Floats:
+    """구간마다 `(x − mean) / pstdev`. 편차가 0 인 구간(원소 1개 포함)은 모두 +0.0 이다.
+
+    중심과 편차는 정확 커널(`segment_mean`·`segment_pstdev`)이라 `statistics.mean`·`pstdev` 와
+    비트가 같고, 빼기·나누기는 객체 경로와 같은 IEEE 연산 한 번씩이다.
+    """
+    bounds = _segment_bounds(values, offsets, "segment zscore")
+    centers = segment_mean(values, bounds, checkpoint=checkpoint).values
+    deviations = segment_pstdev(values, bounds, checkpoint=checkpoint).values
+    scores = np.empty(values.shape[0], np.float64)
+    for part, segment in _element_segments(bounds, checkpoint):
+        deviation = deviations[segment]
+        with np.errstate(all="ignore"):
+            scaled = (values[part] - centers[segment]) / deviation
+        scores[part] = np.where(deviation == 0.0, 0.0, scaled)
+    return scores
+
+
+def segment_demean(
+    values: _Floats,
+    offsets: NDArray[np.intp],
+    *,
+    checkpoint: Callable[[], None] = _no_checkpoint,
+) -> _Floats:
+    """구간마다 `x − statistics.mean(구간)`(횡단면 demean·그룹 neutralize). IEEE 빼기 한 번이다."""
+    bounds = _segment_bounds(values, offsets, "segment demean")
+    centers = segment_mean(values, bounds, checkpoint=checkpoint).values
+    centered = np.empty(values.shape[0], np.float64)
+    for part, segment in _element_segments(bounds, checkpoint):
+        with np.errstate(all="ignore"):
+            centered[part] = values[part] - centers[segment]
+    return centered
+
+
+def segment_winsorize(
+    values: _Floats,
+    offsets: NDArray[np.intp],
+    lower_probability: float,
+    upper_probability: float,
+    *,
+    checkpoint: Callable[[], None] = _no_checkpoint,
+) -> _Floats:
+    """구간마다 `min(max(x, lo), hi)`. lo·hi 는 안정 정렬한 구간의 `quantile` 이다.
+
+    `quantile` 처럼 원소가 1개면 그 원소, 아니면 `p × (n − 1)` 의 정수부(`int()`)와 그다음 원소를
+    `a × (1 − w) + b × w` 로 잇는다. Python `max(x, lo)` 는 `lo > x` 일 때만, `min(·, hi)` 는
+    `hi < ·` 일 때만 바꿔 같으면 앞 인자가 남는다(±0 의 부호) — `np.maximum` 대신 `where` 로
+    같게 한다.
+    분위는 검증기(`factor.graph.winsor_bounds`)처럼 [0, 1] 이어야 한다.
+    """
+    bounds = _segment_bounds(values, offsets, "segment winsorize")
+    _require_ordered(values, "segment winsorize")
+    probabilities = (float(lower_probability), float(upper_probability))
+    if not all(0.0 <= probability <= 1.0 for probability in probabilities):
+        raise ValueError(
+            "segment winsorize needs quantiles inside [0, 1] — "
+            f"lower={lower_probability!r} upper={upper_probability!r}"
+        )
+    clipped = np.empty(values.shape[0], np.float64)
+    for low, high, local, _ in _segment_spans(bounds, checkpoint):
+        part = values[low:high]
+        order, segment = _segment_order(part, local)
+        ordered = part[order]
+        lower, upper = (
+            _segment_quantile(ordered, local, probability)[segment] for probability in probabilities
+        )
+        raised = np.where(lower > part, lower, part)
+        clipped[low:high] = np.where(upper < raised, upper, raised)
+    return clipped
+
+
+def segment_median(
+    values: _Floats,
+    offsets: NDArray[np.intp],
+    *,
+    checkpoint: Callable[[], None] = _no_checkpoint,
+) -> _Floats:
+    """구간마다 `statistics.median` — 안정 정렬 뒤 홀수는 가운데 원소, 짝수는 `(a + b) / 2`.
+
+    numpy `median` 은 정렬과 평균 방식이 달라 쓰지 않는다. 빈 구간은 중앙값이 정의되지 않아
+    (`statistics.median` 은 예외) NaN 이다.
+    """
+    bounds = _segment_bounds(values, offsets, "segment median")
+    _require_ordered(values, "segment median")
+    medians = np.full(bounds.shape[0] - 1, np.nan)
+    for low, high, local, first in _segment_spans(bounds, checkpoint):
+        part = values[low:high]
+        order, _ = _segment_order(part, local)
+        ordered = part[order]
+        sizes = np.diff(local)
+        present = np.flatnonzero(sizes > 0)
+        sizes = sizes[present]
+        middle = local[:-1][present] + sizes // 2
+        odd = sizes % 2 == 1
+        upper = ordered[middle]
+        lower = ordered[np.where(odd, middle, middle - 1)]
+        with np.errstate(all="ignore"):
+            even = (lower + upper) / 2.0
+        medians[first + present] = np.where(odd, upper, even)
+    return medians
+
+
+def _require_ordered(values: _Floats, kernel: str) -> None:
+    """정렬 커널 입력에 NaN 이 없는지 본다(머리 주석)."""
+    missing = np.flatnonzero(np.isnan(values))
+    if missing.size:
+        raise ValueError(
+            f"{kernel} cannot order NaN — first_index={int(missing[0])} count={missing.size} "
+            f"rows={values.shape[0]}"
+        )
+
+
+def _segment_spans(
+    bounds: NDArray[np.intp], checkpoint: Callable[[], None]
+) -> Iterator[tuple[int, int, NDArray[np.intp], int]]:
+    """구간을 차례로 모은 조각마다 (원소 시작, 원소 끝, 조각 안 구간 경계, 첫 구간 번호).
+
+    조각은 원소가 `_KERNEL_CHUNK` 이하가 되게 구간을 모은다. 구간 하나가 그보다 길면 그 구간만
+    담는다.
+    """
+    groups = bounds.shape[0] - 1
+    first = 0
+    while first < groups:
+        checkpoint()
+        low = int(bounds[first])
+        last = int(np.searchsorted(bounds, low + _KERNEL_CHUNK, side="right")) - 1
+        last = min(max(last, first + 1), groups)
+        yield low, int(bounds[last]), bounds[first : last + 1] - low, first
+        first = last
+
+
+def _segment_order(
+    part: _Floats, local: NDArray[np.intp]
+) -> tuple[NDArray[np.intp], NDArray[np.intp]]:
+    """조각 안에서 구간마다 값으로 안정 정렬한 순열과, 원소(같은 자리)마다의 조각 안 구간 번호."""
+    segment = np.repeat(np.arange(local.shape[0] - 1), np.diff(local))
+    # −0.0 + 0.0 은 +0.0 이라 두 0 이 같은 키다(머리 주석). 구간 번호가 1차 키다
+    order = np.lexsort((part + 0.0, segment))
+    return order.astype(np.intp), segment
+
+
+def _segment_quantile(ordered: _Floats, local: NDArray[np.intp], probability: float) -> _Floats:
+    """조각 안 구간마다 `quantile(정렬된 구간, probability)`. 빈 구간 칸은 쓰지 않는 0.0 이다."""
+    sizes = np.diff(local)
+    result = np.zeros(sizes.shape[0], np.float64)
+    present = np.flatnonzero(sizes > 0)
+    count = sizes[present]
+    start = local[:-1][present]
+    position = probability * (count - 1).astype(np.float64)
+    # `int()` 는 0 쪽으로 자른다. 분위가 [0, 1] 이라 position ≥ 0 이고 정수부는 n − 1 이하다
+    lower_index = np.trunc(position).astype(np.intp)
+    upper_index = np.minimum(lower_index + 1, count - 1)
+    weight = position - lower_index
+    with np.errstate(all="ignore"):
+        blended = (
+            ordered[start + lower_index] * (1.0 - weight) + ordered[start + upper_index] * weight
+        )
+    result[present] = np.where(count == 1, ordered[start], blended)
+    return result
+
+
+def _element_segments(
+    bounds: NDArray[np.intp], checkpoint: Callable[[], None]
+) -> Iterator[tuple[slice, NDArray[np.intp]]]:
+    """원소를 `_KERNEL_CHUNK` 조각으로 나눠 (조각, 원소마다의 구간 번호). 조각마다 checkpoint."""
+    total = int(bounds[-1])
+    for low in range(0, total, _KERNEL_CHUNK):
+        checkpoint()
+        part = slice(low, min(low + _KERNEL_CHUNK, total))
+        # 원소 i 의 구간은 bounds[g] ≤ i < bounds[g + 1] 인 g 다(빈 구간은 건너뛴다)
+        segment = np.searchsorted(bounds, np.arange(part.start, part.stop), side="right") - 1
+        yield part, segment

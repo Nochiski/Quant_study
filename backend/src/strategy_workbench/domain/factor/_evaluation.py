@@ -508,9 +508,7 @@ _ENDPOINT_TIME_SERIES_OPERATORS = frozenset({TimeSeriesOperator.MOMENTUM, TimeSe
 def _node_progress_weight(node: ExpressionNode) -> int:
     if isinstance(node, TimeSeriesNode):
         return (
-            1
-            if node.operator in _ENDPOINT_TIME_SERIES_OPERATORS
-            else _TIME_SERIES_PROGRESS_WEIGHT
+            1 if node.operator in _ENDPOINT_TIME_SERIES_OPERATORS else _TIME_SERIES_PROGRESS_WEIGHT
         )
     if isinstance(node, (CrossSectionalNode, GroupNode)):
         return _SECTION_PROGRESS_WEIGHT

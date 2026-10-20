@@ -40,10 +40,12 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.execution im
     WorkerSettings,
 )
 from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol import (
+    PROTOCOL_VERSION,
     CommittedMessage,
     FailedMessage,
     ProgressMessage,
     decode_event,
+    encode_boot,
     encode_event,
     encode_job,
 )
@@ -75,6 +77,7 @@ from tests.run_worker_support import (
     parent_versions,
     wait_for_exit,
     wait_for_marker,
+    wait_for_records,
 )
 from tests.test_run_worker_protocol import resolved_job
 
@@ -278,10 +281,8 @@ def test_a_worker_whose_parent_closed_stdin_does_not_commit(tmp_path: Path) -> N
         stderr=subprocess.DEVNULL,
         cwd=_BACKEND,
     )
-    stdout, _ = worker.communicate(
-        encode_job(resolved_job(run_id), WorkerSettings("mock", None, root)).encode("utf-8"),
-        timeout=TIMEOUT_S,
-    )
+    lines = encode_boot(WorkerSettings("mock", None, root)) + encode_job(resolved_job(run_id))
+    stdout, _ = worker.communicate(lines.encode("utf-8"), timeout=TIMEOUT_S)
 
     events = [decode_event(line) for line in stdout.decode("utf-8").splitlines()]
     assert worker.returncode == 3
@@ -328,6 +329,7 @@ def _scripted(tmp_path: Path, *lines: str) -> RunOutcome:
         versions=parent_versions(),
         discard_unfinished=lambda _run_id: None,
         command=[sys.executable, "-c", script, *lines],
+        spare=False,
     ).start(resolved_job("run-scripted"), listener)
     return listener.wait()
 
@@ -358,8 +360,10 @@ def test_a_non_utf8_command_line_ends_the_worker_as_a_protocol_error(tmp_path: P
     )
     try:
         assert worker.stdin is not None
-        job = encode_job(resolved_job("run-bad-line"), WorkerSettings("mock", None, tmp_path))
-        worker.stdin.write(job.encode("utf-8"))
+        lines = encode_boot(WorkerSettings("mock", None, tmp_path)) + encode_job(
+            resolved_job("run-bad-line")
+        )
+        worker.stdin.write(lines.encode("utf-8"))
         worker.stdin.flush()
         wait_for_marker(marker)
         worker.stdin.write(b"\xff\xfe\n")
@@ -373,7 +377,9 @@ def test_a_non_utf8_command_line_ends_the_worker_as_a_protocol_error(tmp_path: P
 
 def test_an_unknown_message_type_is_not_copied_into_the_run_error(tmp_path: Path) -> None:
     """상대가 보낸 type 원문은 상태 문장에 싣지 않고 `<unknown>` 으로 접는다(#581 리뷰 nit)."""
-    outcome = _scripted(tmp_path, '{"protocol": 1, "type": "C:/server/secret"}\n')
+    outcome = _scripted(
+        tmp_path, json.dumps({"protocol": PROTOCOL_VERSION, "type": "C:/server/secret"}) + "\n"
+    )
 
     assert isinstance(outcome, RunFailed)
     assert "reason=unexpected_type type=<unknown>" in outcome.error
@@ -551,10 +557,12 @@ def test_shutdown_during_start_waits_for_the_supervisor_to_start(
 
     monkeypatch.setattr(_execution, "Thread", HeldStart)
     root = tmp_path / "artifacts"
+    # 예비 스레드의 시작도 붙잡히므로 예비를 끈다(이 틈은 감독 스레드의 것이다).
     execution = ProcessRunExecution(
         WorkerSettings("mock", None, root),
         versions=parent_versions(),
         discard_unfinished=LocalArtifactStore(root).discard_unfinished,
+        spare=False,
     )
     listener = _Recorder()
     starter = threading.Thread(target=execution.start, args=(resolved_job("run-race"), listener))
@@ -611,12 +619,16 @@ class Listener:
         pass
 
 root, stage, marker = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
-ProcessRunExecution(
+spare = stage == "record"
+execution = ProcessRunExecution(
     WorkerSettings("mock", None, root),
     versions=parent_versions(),
     discard_unfinished=lambda run_id: None,
     command=hook_command(stage, marker),
-).start(resolved_job("run-orphan"), Listener())
+    spare=spare,
+)
+if not spare:
+    execution.start(resolved_job("run-orphan"), Listener())
 time.sleep(600)
 """
 
@@ -633,12 +645,15 @@ time.sleep(600)
                 sys.platform != "win32", reason="Job Object 는 Windows 전용이다(POSIX 는 EOF 경로)"
             ),
         ),
+        # run 없이 job 을 기다리는 예비(spec D7): Windows 는 Job Object, POSIX 는 job 대기의 EOF 다.
+        "record",
     ],
 )
 def test_killing_the_parent_process_ends_its_worker(tmp_path: Path, stage: str) -> None:
     """D5 부모 사망: worker 를 띄운 중간 부모 프로세스를 실제로 죽이면 worker 도 끝난다.
 
-    stdin 을 닫는 것으로 대신하지 않는다(WORKFLOW W1-03).
+    stdin 을 닫는 것으로 대신하지 않는다(WORKFLOW W1-03). `record` 는 run 이 없는 부모가 띄운 예비
+    worker 가 `ready` 뒤 job 을 기다리는 자리다.
     """
     marker = tmp_path / "marker"
     parent = subprocess.Popen(
@@ -648,7 +663,10 @@ def test_killing_the_parent_process_ends_its_worker(tmp_path: Path, stage: str) 
         stderr=subprocess.DEVNULL,
     )
     try:
-        pid = wait_for_marker(marker)
+        if stage == "record":
+            (pid,) = wait_for_records(marker, "idle", 1)
+        else:
+            pid = wait_for_marker(marker)
     finally:
         parent.kill()
         parent.wait(TIMEOUT_S)

@@ -142,11 +142,13 @@ def test_failure_code_and_korean_message_cross_the_process_boundary(tmp_path: Pa
 def test_service_queries_stay_responsive_while_the_worker_boots_with_a_large_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D12: 감독 스레드가 큰 job 을 쓰고 `ready` 를 기다리는 동안에도 조회가 막히지 않는다.
+    """D12: 감독 스레드가 worker 를 띄우고 `ready` 를 기다리고 큰 job 을 쓰는 동안에도 조회가
+    막히지 않는다.
 
-    job 은 파이프 버퍼보다 훨씬 크다(설명 약 1.5MB). worker 는 job 을 읽기 전에 2초 잠들어(무거운
-    import 를 과장한다) 그동안 감독 스레드의 쓰기가 막힌다. 접수와, 그 뒤 조립·`ready` 까지의 조회
-    시간을 잰다. 쓰기가 서비스 잠금 안에 있으면 접수가 2초 넘게 걸려 실패한다.
+    job 은 파이프 버퍼보다 훨씬 크다(설명 약 1.5MB). worker 는 `boot` 줄을 읽기 전에 2초 잠든다
+    (무거운 import 를 과장한다). 예비도 같은 진입점이라 아직 준비되지 않아, run 의 감독 스레드가
+    직접 띄우고 기다린다. 접수와, 그 뒤 조립·`ready` 까지의 조회 시간을 잰다. 띄우기·기다리기·쓰기가
+    서비스 잠금 안에 있으면 접수가 2초 넘게 걸려 실패한다.
     """
     monkeypatch.setattr(
         _container,
@@ -244,13 +246,18 @@ def test_parent_fails_the_run_when_the_worker_breaks_the_protocol(
 
 
 def _start(tmp_path: Path, command: list[str]) -> RunOutcome:
-    """전송을 직접 띄워 종결을 기다린다. `start` 는 감독 스레드만 띄우고 바로 돌아와야 한다."""
+    """전송을 직접 띄워 종결을 기다린다. `start` 는 감독 스레드만 띄우고 바로 돌아와야 한다.
+
+    run 의 감독 스레드가 직접 띄운 worker 의 결말을 본다(예비 없이). 예비가 깨진 worker 를 다루는
+    길은 `test_run_worker_spare.py` 가 본다.
+    """
     listener = _Listener()
     execution = ProcessRunExecution(
         WorkerSettings("mock", None, tmp_path / "artifacts"),
         versions=parent_versions(),
         discard_unfinished=lambda _run_id: None,
         command=command,
+        spare=False,
     )
     started = time.monotonic()
     execution.start(resolved_job("run-protocol"), listener)

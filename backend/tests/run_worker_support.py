@@ -31,6 +31,35 @@ def hold():
 
 if stage == "before_main":
     hold()
+elif stage == "record":
+    # marker 는 디렉터리다. 띄워지면 started-<pid>, `ready` 뒤 job 을 기다리기 시작하면 idle-<pid>,
+    # job 을 받으면 job-<pid> 를 만든다. 예비 worker 를 누가 언제 썼는지 본다(spec D7).
+    from pathlib import Path
+    from strategy_workbench.adapters.outbound.run_worker_process import _worker
+    folder = Path(marker)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    def touch(kind):
+        (folder / f"{kind}-{os.getpid()}").write_text("", encoding="utf-8")
+
+    touch("started")
+    readline, calls = _worker._StdinPipe.readline, []
+
+    def tracked(self):
+        calls.append(None)
+        if len(calls) == 2:  # 첫 줄은 boot, 둘째 줄을 기다리는 것은 job 이다
+            touch("idle")
+        return readline(self)
+
+    _worker._StdinPipe.readline = tracked
+    decode_job = _worker.decode_job
+
+    def decoded(line):
+        job = decode_job(line)
+        touch("job")
+        return job
+
+    _worker.decode_job = decoded
 elif stage == "slow_boot":
     # job 을 읽기 전에 잠깐 잠든다. 부모의 큰 job 쓰기가 그동안 파이프에서 막힌다.
     time.sleep(2.0)
@@ -77,7 +106,10 @@ raise SystemExit(main())
 
 
 def hook_command(stage: str, marker: Path) -> list[str]:
-    """`stage` 에 들어서면 pid 를 `marker` 에 쓰고 잠드는 worker 진입점."""
+    """`stage` 에 들어서면 pid 를 `marker` 에 쓰고 잠드는 worker 진입점.
+
+    `record` 는 잠들지 않고 `marker` 디렉터리에 띄워짐·job 대기·job 받음 표시만 남긴다(`records`).
+    """
     return [sys.executable, "-c", _HOOK, stage, str(marker)]
 
 
@@ -99,6 +131,25 @@ def wait_for_marker(marker: Path, *, timeout_s: float = TIMEOUT_S) -> int:
             return int(text)
         time.sleep(0.05)
     raise AssertionError(f"worker did not reach its hook stage within {timeout_s}s — {marker}")
+
+
+def records(folder: Path, kind: str) -> set[int]:
+    """`record` worker 들이 남긴 표시(`started`·`idle`·`job`)의 pid."""
+    return {int(path.name.split("-", 1)[1]) for path in folder.glob(f"{kind}-*")}
+
+
+def wait_for_records(
+    folder: Path, kind: str, count: int, *, timeout_s: float = TIMEOUT_S
+) -> set[int]:
+    """`kind` 표시가 `count` 개 이상 생길 때까지 기다린 pid. 모자라면 AssertionError."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if len(found := records(folder, kind)) >= count:
+            return found
+        time.sleep(0.05)
+    raise AssertionError(
+        f"expected {count} {kind} records within {timeout_s}s — got {sorted(records(folder, kind))}"
+    )
 
 
 def wait_for_exit(pid: int, *, timeout_s: float) -> bool:

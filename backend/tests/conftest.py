@@ -4,11 +4,15 @@ import sys
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from backtest_engine.types.instruments import AssetClass, InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot
+from strategy_workbench.adapters.outbound.run_worker_process.facade.execution import (
+    ProcessRunExecution,
+)
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import default_secrets_path
 from strategy_workbench.bootstrap import _assistant, _container, _http
 
@@ -103,6 +107,28 @@ def isolate_runtime_state_paths(
     root = tmp_path_factory.mktemp("runtime-state")
     _redirect_runtime_defaults(monkeypatch, root)
     return root
+
+
+@pytest.fixture(autouse=True)
+def _close_process_run_executions(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """테스트가 만든 프로세스 전송을 끝에 모두 닫는다(run-worker spec D5·D7).
+
+    프로세스 전송은 만들 때 예비 worker 를 띄운다. 서버 종료(lifespan)를 거치지 않는 앱·전송이
+    예비를 남기면 테스트마다 유휴 worker 가 쌓인다. `build_http_app` 이 만든 것도 같은 클래스라 함께
+    닫힌다. 이미 닫힌 전송을 다시 닫아도 된다.
+    """
+    opened: list[ProcessRunExecution] = []
+    initialize = ProcessRunExecution.__init__
+
+    # reason: 감싼 생성자의 인자를 그대로 넘기는 패스스루라 `Any` 다(code-style.md `Any` 표).
+    def tracked(self: ProcessRunExecution, *args: Any, **kwargs: Any) -> None:
+        initialize(self, *args, **kwargs)
+        opened.append(self)
+
+    monkeypatch.setattr(ProcessRunExecution, "__init__", tracked)
+    yield
+    for execution in opened:
+        execution.shutdown()
 
 
 @pytest.fixture(autouse=True)

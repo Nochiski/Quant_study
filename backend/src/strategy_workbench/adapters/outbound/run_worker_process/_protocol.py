@@ -1,11 +1,15 @@
-"""run worker IPC 프로토콜 v1 의 인코딩·디코딩(run-worker spec D3·D11).
+"""run worker IPC 프로토콜 v2 의 인코딩·디코딩(run-worker spec D3·D7·D11).
 
 부모와 worker 가 이 모듈 하나로 줄을 쓰고 읽는다. 한 줄은 UTF-8 JSON 객체 하나이고 `protocol`·
 `type` 칸을 싣는다. 버전이 다르면 양쪽 모두 `ProtocolError` 로 거절한다.
 
-- 부모 → worker(stdin): `job` 한 줄, 엔진 관문을 켠 job 이면 `proceed` 한 줄
+- 부모 → worker(stdin): `boot` 한 줄(설정), `ready` 를 받은 뒤 `job` 한 줄, 엔진 관문을 켠 job 이면
+  `proceed` 한 줄
 - worker → 부모(stdout): `ready`, `progress`, `engine_ready`(엔진 관문), `committed`, `failed`
   (종결은 뒤의 둘)
+
+v2 는 설정을 job 에서 떼어 `boot` 로 먼저 보낸다. 예비 worker 는 run 이 정해지기 전에 `ready` 까지
+부팅해 두므로(spec D7) 부팅에 쓸 설정이 job 보다 먼저 와야 한다.
 
 작업 입력은 pickle 이 아니라 기존 직렬화 계약으로 옮긴다. spec 은
 `ResolvedBacktestRunSpec.to_wire()` 의 pydantic 표현(HTTP 요청 본문과 같은 검증)이고, worker 가
@@ -31,7 +35,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
 )
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 _T = TypeVar("_T")
 
@@ -74,20 +78,14 @@ class ProtocolError(ValueError):
 class WorkerSettings:
     """부모가 해석해 worker 에 넘기는 설정. worker 는 환경 변수를 다시 읽지 않는다(spec D10).
 
-    `engine_gate` 가 참이면 worker 는 엔진 단계 앞에서 `engine_ready` 를 보내고 `proceed` 를
-    기다린다(e2e hold, spec D11).
+    `boot` 줄에 실린다. `engine_gate` 가 참이면 worker 는 엔진 단계 앞에서 `engine_ready` 를 보내고
+    `proceed` 를 기다린다(e2e hold, spec D11).
     """
 
     equity_adapter: str
     equity_root: Path | None
     artifact_root: Path
     engine_gate: bool = False
-
-
-@dataclass(frozen=True)
-class JobMessage:
-    job: RunJob
-    settings: WorkerSettings
 
 
 @dataclass(frozen=True)
@@ -154,9 +152,9 @@ class _JobWire:
     # 출처·계열은 `to_wire` 가 요청 칸으로 싣는다.
     spec: BacktestRunSpec
     provenance: StrategyProvenance
-    settings: WorkerSettings
 
 
+_BOOT = TypeAdapter(WorkerSettings)
 _JOB = TypeAdapter(_JobWire)
 _EVENTS: dict[str, TypeAdapter[Any]] = {
     "ready": TypeAdapter(ReadyMessage),
@@ -174,27 +172,33 @@ _EVENT_TYPES: dict[type, str] = {
 }
 # 상태 문장에 실어도 되는 메시지 type(`ProtocolError.message_type`). 이 밖의 값은 상대가 보낸
 # 원문이라 `<unknown>` 으로 접는다.
-_MESSAGE_TYPES = frozenset({"job", "proceed", *_EVENTS})
+_MESSAGE_TYPES = frozenset({"boot", "job", "proceed", *_EVENTS})
 
 
-def encode_job(job: RunJob, settings: WorkerSettings) -> str:
+def encode_boot(settings: WorkerSettings) -> str:
+    return _line("boot", _BOOT.dump_python(settings, mode="json"))
+
+
+def decode_boot(line: str) -> WorkerSettings:
+    kind, body = _read(line)
+    _expect(kind, "boot")
+    return _validate(_BOOT, kind, body)
+
+
+def encode_job(job: RunJob) -> str:
     wire = _JobWire(
         run_id=job.run_id,
         spec=job.spec.to_wire(
             strategy_source=job.strategy_source, lineage_strategy_id=job.lineage_strategy_id
         ),
         provenance=job.provenance,
-        settings=settings,
     )
     return _line("job", _JOB.dump_python(wire, mode="json"))
 
 
-def decode_job(line: str) -> JobMessage:
+def decode_job(line: str) -> RunJob:
     kind, body = _read(line)
-    if kind != "job":
-        raise ProtocolError(
-            "unexpected_type", f"run worker expected a job line — type={kind!r}", message_type=kind
-        )
+    _expect(kind, "job")
     wire = _validate(_JOB, kind, body)
     request = wire.spec
     if request.strategy is None or request.environment is None:
@@ -211,15 +215,12 @@ def decode_job(line: str) -> JobMessage:
         environment=request.environment,
         parameter_values=request.parameter_values,
     )
-    return JobMessage(
-        RunJob(
-            run_id=wire.run_id,
-            spec=spec,
-            provenance=wire.provenance,
-            strategy_source=request.strategy_source,
-            lineage_strategy_id=request.lineage_strategy_id,
-        ),
-        wire.settings,
+    return RunJob(
+        run_id=wire.run_id,
+        spec=spec,
+        provenance=wire.provenance,
+        strategy_source=request.strategy_source,
+        lineage_strategy_id=request.lineage_strategy_id,
     )
 
 
@@ -258,6 +259,15 @@ def decode_event(line: str) -> WorkerEvent:
             message_type=kind,
         )
     return _validate(adapter, kind, body)
+
+
+def _expect(kind: object, expected: str) -> None:
+    if kind != expected:
+        raise ProtocolError(
+            "unexpected_type",
+            f"run worker expected a {expected} line — type={kind!r}",
+            message_type=kind,
+        )
 
 
 def _line(kind: str, body: dict[str, Any]) -> str:

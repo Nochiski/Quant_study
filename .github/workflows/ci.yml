@@ -104,6 +104,7 @@ jobs:
       - run: >
           uv run pytest -q
           tests/integration/test_run_worker_process.py
+          tests/integration/test_run_worker_spare.py
           tests/integration/test_run_worker_termination.py
           tests/test_run_worker_protocol.py
 

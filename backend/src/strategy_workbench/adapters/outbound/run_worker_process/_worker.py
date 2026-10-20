@@ -1,4 +1,4 @@
-"""worker 쪽 전송: job 한 줄을 읽어 계산하고 이벤트 줄을 쓴다(run-worker spec D3·D5·D6·D11).
+"""worker 쪽 전송: boot 줄로 부팅하고 job 한 줄을 읽어 계산해 이벤트 줄을 쓴다(spec D3·D5~D7·D11).
 
 조립(어댑터·계산 만들기)은 composition root(`bootstrap/run_worker`)가 `boot` 로 넘긴다. 이 모듈은
 줄 주고받기, 진행 이벤트 상한, 부모 사망 감시, 엔진 관문, 코드 지문, 최대 RSS 만 소유한다.
@@ -46,6 +46,7 @@ from ._protocol import (
     VersionBundle,
     WorkerEvent,
     WorkerSettings,
+    decode_boot,
     decode_job,
     decode_proceed,
     encode_event,
@@ -59,7 +60,8 @@ _PROGRESS_INTERVAL_S = 0.1
 # 종료 코드.
 EXIT_PARENT_GONE = 3
 EXIT_PROTOCOL = 4
-# Windows 감시 스레드가 stdin 파이프에 쌓인 바이트를 다시 들여다보는 간격(`_StdinPipe`).
+# Windows 에서 stdin 파이프에 쌓인 바이트를 다시 들여다보는 간격(`_StdinPipe`). 감시 스레드와
+# job 을 기다리는 예비 worker 의 주 스레드가 쓴다.
 _PIPE_POLL_S = 0.02
 
 
@@ -107,33 +109,39 @@ class ParentPipe(Protocol):
 def serve(
     boot: Callable[[WorkerSettings], WorkerBoot], *, stdin: ParentPipe, stdout: TextIO
 ) -> int:
-    """job 하나를 읽어 부팅·계산하고 종결 이벤트를 보낸다.
+    """`boot` 줄로 부팅해 `ready` 를 보내고, job 하나를 읽어 계산한 뒤 종결 이벤트를 보낸다.
 
-    job 뒤의 stdin 은 감시 스레드가 끝까지 읽는다. EOF 면 부모가 사라진 것이라 결과를 쓰지 않고
-    끝낸다(spec D5 보조 경로).
+    `ready` 뒤에는 job 을 기다린다 — 예비 worker 는 여기서 run 이 정해질 때까지 머문다(spec D7).
+    그동안의 EOF 는 부모가 사라진 것이라 결과 없이 끝낸다. job 뒤의 stdin 은 감시 스레드가 끝까지
+    읽고, EOF 면 결과를 쓰지 않고 끝낸다(spec D5 보조 경로).
     """
-    # job 읽기·부팅 실패는 여기서 로그로 남기지 않고 올린다. 잡히지 않은 예외의 traceback 이
-    # stderr 에 한 번 남고, 부모가 run_id 를 붙여 ERROR 로 옮긴다(#581 리뷰 nit).
+    # boot·job 읽기와 부팅 실패는 여기서 로그로 남기지 않고 올린다. 잡히지 않은 예외의 traceback
+    # 이 stderr 에 한 번 남고, 부모가 run_id 를 붙여 ERROR 로 옮긴다(#581 리뷰 nit).
     line = stdin.readline()
     if not line:
-        raise ProtocolError("not_json", "run worker stdin closed before a job line arrived")
-    message = decode_job(line)
-    job = message.job
-    watch = _ParentWatch(stdin)
-    watch.start()
+        raise ProtocolError("not_json", "run worker stdin closed before a boot line arrived")
+    settings = decode_boot(line)
 
     def sender(event: WorkerEvent) -> None:
         # 이벤트는 계산 스레드 하나만 쓴다(진행·엔진 관문·종결).
         stdout.write(encode_event(event))
         stdout.flush()
 
-    booted = boot(message.settings)
+    booted = boot(settings)
     sender(ReadyMessage(booted.versions))
+    line = stdin.readline()
+    if not line:
+        # 예비로 기다리던 중 부모가 사라졌다(POSIX 의 부모 사망 경로, Windows 는 Job Object).
+        logger.error("run worker parent is gone (stdin closed before a job) — exiting")
+        return EXIT_PARENT_GONE
+    job = decode_job(line)
+    watch = _ParentWatch(stdin)
+    watch.start()
     computation = replace(
         booted.computation,
         artifact_store=_ParentAliveStore(booted.computation.artifact_store, watch),
     )
-    if message.settings.engine_gate:
+    if settings.engine_gate:
         computation = replace(
             computation, executor=_EngineGate(computation.executor, sender, watch)
         )

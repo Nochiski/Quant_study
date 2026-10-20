@@ -1,8 +1,13 @@
-"""부모 쪽 전송: run 하나를 worker 프로세스 하나에서 돌린다(run-worker spec D1·D2·D5·D6·D11·D13).
+"""부모 쪽 전송: run 하나를 worker 프로세스 하나에서 돌린다(run-worker spec D1·D2·D5·D6·D7·D11·D13).
 
-run 마다 감독 스레드 하나가 worker 를 띄우고 job 을 쓰고 stdout 이벤트를 끝까지 읽어 listener 에
+run 마다 감독 스레드 하나가 worker 를 손에 넣고 job 을 쓰고 stdout 이벤트를 끝까지 읽어 listener 에
 옮긴다. 그 run 의 종결은 이 스레드 하나만 알린다. stderr 는 따로 읽는 스레드가 run_id 를 붙여 로그로
 중계한다. 두 파이프를 모두 끝까지 읽어 worker 가 쓰기에서 막히지 않게 한다(교착 방지, D3).
+
+worker 는 `boot` 줄로 부팅해 `ready` 를 보내고, 부모가 판본을 대조한 뒤에야 job 을 받는다.
+전송은 그렇게 `ready` 까지 부팅해 둔 예비 worker 를 슬롯 수와 무관하게 늘 하나 둔다(D7). run 은
+준비된 예비가 있으면 그것을 쓰고 곧바로 다음 예비를 띄운다. 예비가 아직 부팅 중이거나 없으면
+감독 스레드가 직접 띄운다. 그래서 worker 프로세스는 도는 run 수 + 1 개를 넘지 않는다.
 
 종결 순서(D5):
 1. 취소는 플래그를 세우고 worker 종료를 요청만 한다. 감독 스레드는 worker 를 손에 넣은 직후와 job 을
@@ -20,7 +25,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import IO, Protocol
 
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -45,6 +50,7 @@ from ._protocol import (
     VersionBundle,
     WorkerSettings,
     decode_event,
+    encode_boot,
     encode_job,
     encode_proceed,
     event_type,
@@ -58,8 +64,13 @@ WORKER_COMMAND: tuple[str, ...] = (sys.executable, "-m", "strategy_workbench.boo
 # (spec D2).
 _CREATION_FLAGS = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
 _LOG_LEVELS = logging.getLevelNamesMapping()
-# 서버 종료 때 감독 스레드를 기다리는 상한. worker 는 이미 끝내라고 했으니 EOF 처리만 남는다.
+# 서버 종료 때 감독·예비 스레드를 기다리는 상한. worker 는 이미 끝내라고 했으니 EOF 처리만 남는다.
 _SHUTDOWN_JOIN_S = 10.0
+# 예비가 부팅에 실패하거나 판본이 어긋나거나 기다리다 죽는 일이 이만큼 이어지면 예비 띄우기를 멈춘다
+# (spec D7). 그 뒤로는 run 마다 감독 스레드가 worker 를 띄운다.
+SPARE_FAILURE_LIMIT = 3
+# 기다리는 예비가 살아 있는지 다시 보는 간격. 죽은 예비를 다시 띄우기까지의 지연이다.
+_SPARE_POLL_S = 0.2
 
 EngineGate = Callable[[str, Callable[[], bool]], bool]
 """(run_id, 취소 확인) → 엔진 단계로 보내도 되면 참. e2e hold 판정이다(spec D11)."""
@@ -71,7 +82,10 @@ class ProcessRunExecution:
     `start` 는 감독 스레드만 띄우고 바로 돌아온다 — 서비스 잠금 안에서 불리므로 `Popen`·파이프
     쓰기·`ready` 대기를 여기서 하지 않는다(D12). `versions` 는 서버가 부팅 때 계산한 판본 묶음이고
     worker 의 `ready` 와 대조한다(D6). `discard_unfinished` 는 완료로 넘기지 않는 run 의 산출물
-    흔적을 지운다(D5). `command` 는 테스트가 worker 진입점을 감쌀 때만 바꾼다.
+    흔적을 지운다(D5).
+
+    만들 때 예비 worker 를 띄우기 시작한다(D7). `spare=False` 는 예비 없이 run 마다 감독 스레드가
+    띄우는 경로만 볼 때(테스트·측정) 끈다. `command` 는 테스트가 worker 진입점을 감쌀 때만 바꾼다.
     """
 
     def __init__(
@@ -82,6 +96,7 @@ class ProcessRunExecution:
         discard_unfinished: Callable[[str], None],
         engine_gate: EngineGate | None = None,
         command: Sequence[str] = WORKER_COMMAND,
+        spare: bool = True,
     ) -> None:
         if settings.engine_gate != (engine_gate is not None):
             raise ValueError(
@@ -98,6 +113,10 @@ class ProcessRunExecution:
         self._runs: dict[_WorkerRun, Thread] = {}
         self._closed = False
         self._job = _job_object()
+        self._keeps_spare = spare
+        self._spare: _Spare | None = None
+        self._spare_failures = 0
+        self._fill_spare()
 
     def start(self, job: RunJob, listener: RunListener) -> RunHandle:
         run = _WorkerRun(
@@ -109,6 +128,7 @@ class ProcessRunExecution:
             engine_gate=self._engine_gate,
             command=self._command,
             assign=self._assign,
+            take_spare=self._take_spare,
             forget=self._forget,
         )
         thread = Thread(target=run.supervise, name=f"backtest-worker-{job.run_id}", daemon=True)
@@ -126,12 +146,25 @@ class ProcessRunExecution:
         return run
 
     def shutdown(self) -> None:
-        """도는 worker 를 끝내고 감독 스레드를 기다린다. 종결은 알리지 않는다(다음 부팅 몫)."""
+        """도는 worker 와 예비를 끝내고 그 스레드들을 기다린다. 종결은 알리지 않는다(다음 부팅
+        몫)."""
         with self._lock:
             self._closed = True
             runs = dict(self._runs)
+            spare, self._spare = self._spare, None
+            spare_worker = None if spare is None else spare.worker
+        if spare is not None:
+            spare.left.set()
+        if spare_worker is not None:
+            spare_worker.process.kill()
         for run in runs:
             run.abandon()
+        if spare is not None:
+            spare.thread.join(_SHUTDOWN_JOIN_S)
+            if spare.thread.is_alive():
+                logger.error(
+                    "run worker spare did not stop on shutdown — waited_s=%s", _SHUTDOWN_JOIN_S
+                )
         for run, thread in runs.items():
             thread.join(_SHUTDOWN_JOIN_S)
             if thread.is_alive():
@@ -141,7 +174,119 @@ class ProcessRunExecution:
                     _SHUTDOWN_JOIN_S,
                 )
 
-    def _assign(self, process: subprocess.Popen[bytes], run_id: str) -> None:
+    def spare_pid(self) -> int | None:
+        """준비된(`ready`·판본 일치) 예비 worker 의 pid. 없거나 부팅 중이면 None 이다.
+
+        진단·측정용 조회다. 아무것도 바꾸지 않는다.
+        """
+        with self._lock:
+            spare = self._spare
+            worker = None if spare is None or not spare.ready else spare.worker
+            return None if worker is None else worker.process.pid
+
+    def _fill_spare(self) -> None:
+        """예비 자리가 비었으면 새 예비를 띄운다(D7). 띄우기·부팅·대기는 예비 스레드가 한다(D12).
+
+        연속 실패로 멈춘 뒤에는 `_spare_failed` 가 더 부르지 않는다. 예비를 run 에 넘길 때(실패
+        횟수가 0 으로 돌아간 뒤)와 만들 때만 여기로 온다.
+        """
+        with self._lock:
+            if not self._keeps_spare or self._closed or self._spare is not None:
+                return
+            spare = _Spare()
+            spare.thread = Thread(
+                target=self._keep_spare, args=(spare,), name="backtest-worker-spare", daemon=True
+            )
+            self._spare = spare
+            try:
+                spare.thread.start()
+            except RuntimeError:
+                # 스레드를 못 띄우면 예비 없이 간다. run 은 감독 스레드가 직접 띄운다.
+                self._spare = None
+                logger.exception("run worker spare thread could not be started")
+
+    def _keep_spare(self, spare: _Spare) -> None:
+        """예비 하나를 띄워 `ready` 까지 부팅하고, 쓰이거나 서버가 끝날 때까지 살아 있는지 본다."""
+        try:
+            worker = _Worker.spawn(self._command, self._settings, self._assign, label="spare")
+        except Exception:
+            logger.exception("run worker spare could not be started")
+            self._spare_failed(spare)
+            return
+        with self._lock:
+            spare.worker = worker
+            kept = self._spare is spare
+        if not kept:
+            # 띄우는 동안 서버가 끝나기 시작했다.
+            worker.process.kill()
+            worker.close()
+            return
+        worker.label = f"spare pid={worker.process.pid}"
+        worker.boot(self._versions)
+        if worker.booted:
+            with self._lock:
+                if self._spare is spare:
+                    spare.ready = True
+                    self._spare_failures = 0
+            # 쓰이거나(`left`) 죽을 때까지 기다린다. 기다리는 동안 worker 는 아무것도 쓰지 않는다.
+            while not spare.left.wait(_SPARE_POLL_S):
+                if worker.process.poll() is not None:
+                    break
+            with self._lock:
+                if spare.taken:
+                    # run 의 감독 스레드가 이 worker 를 맡았다.
+                    return
+        worker.process.kill()
+        exit_code = worker.close()
+        with self._lock:
+            kept = self._spare is spare
+        if kept:
+            reading = worker.reading
+            logger.warning(
+                "run worker spare is gone — pid=%s exit_code=%s phase=%s reason=%s",
+                worker.process.pid,
+                exit_code,
+                "waiting" if worker.booted else "boot",
+                _boot_failure(reading),
+            )
+        self._spare_failed(spare)
+
+    def _spare_failed(self, spare: _Spare) -> None:
+        """예비 하나를 잃었다. 서버 종료로 버린 예비가 아니면 세고 다시 띄운다(D7)."""
+        with self._lock:
+            if self._spare is not spare:
+                return
+            self._spare = None
+            self._spare_failures += 1
+            failures = self._spare_failures
+        if failures >= SPARE_FAILURE_LIMIT:
+            logger.error(
+                "run worker spares stopped after consecutive failures — failures=%s; "
+                "each run now starts its own worker",
+                failures,
+            )
+            return
+        self._fill_spare()
+
+    def _take_spare(self) -> _Worker | None:
+        """준비된 예비를 run 에 넘기고 다음 예비를 띄운다. 준비된 예비가 없으면 None 이다(D7)."""
+        with self._lock:
+            spare = self._spare
+            worker = None if spare is None else spare.worker
+            if (
+                spare is None
+                or worker is None
+                or not spare.ready
+                or worker.process.poll() is not None
+            ):
+                return None
+            spare.taken = True
+            self._spare = None
+        spare.left.set()
+        self._fill_spare()
+        return worker
+
+    def _assign(self, process: subprocess.Popen[bytes], label: str) -> None:
         if self._job is None:
             return
         try:
@@ -149,8 +294,8 @@ class ProcessRunExecution:
         except OSError:
             # stdin EOF 감시가 보조 경로로 남는다(spec D5).
             logger.warning(
-                "run worker not placed in the kill-on-close job — run_id=%s pid=%s",
-                run_id,
+                "run worker not placed in the kill-on-close job — %s pid=%s",
+                label,
                 process.pid,
                 exc_info=True,
             )
@@ -176,6 +321,133 @@ def _job_object() -> _ProcessJob | None:
         return None
 
 
+class _Spare:
+    """예비 자리 하나(D7). `worker`·`ready`·`taken` 은 전송 잠금 안에서만 바꾼다.
+
+    `left` 는 run 이 가져갔거나 서버가 끝나 예비 스레드가 기다림을 멈출 때 선다.
+    """
+
+    def __init__(self) -> None:
+        self.worker: _Worker | None = None
+        self.ready = False
+        self.taken = False
+        self.left = Event()
+        self.thread: Thread
+
+
+class _Worker:
+    """worker 프로세스 하나: 파이프, stderr 중계, 부팅 결과(`reading`).
+
+    `label` 은 로그에 붙는 이름이다. 예비일 때는 pid 이고, run 이 맡으면 그 run_id 로 바뀐다.
+    """
+
+    def __init__(self, process: subprocess.Popen[bytes], label: str) -> None:
+        self.process = process
+        self.label = label
+        self.stdin, self.stdout, stderr = _pipes(process)
+        self.reading = _Reading()
+        self._relay = Thread(
+            target=_relay_stderr,
+            args=(stderr, self),
+            name=f"backtest-worker-{process.pid}-stderr",
+            daemon=True,
+        )
+
+    @classmethod
+    def spawn(
+        cls,
+        command: tuple[str, ...],
+        settings: WorkerSettings,
+        assign: Callable[[subprocess.Popen[bytes], str], None],
+        *,
+        label: str,
+    ) -> _Worker:
+        """worker 를 띄우고 `boot` 줄을 쓴다. 중간에 실패하면 끝내고 기다린 뒤 올린다."""
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            creationflags=_CREATION_FLAGS,
+            start_new_session=sys.platform != "win32",
+        )
+        try:
+            assign(process, label)
+            worker = cls(process, label)
+            worker._relay.start()
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        _write(worker.stdin, encode_boot(settings))
+        return worker
+
+    @property
+    def booted(self) -> bool:
+        """`ready` 를 받았고 판본이 같다 — job 을 써도 된다."""
+        return self.reading.ready and not self.reading.discarding
+
+    def boot(self, versions: VersionBundle) -> None:
+        """stdout 을 `ready` 까지 읽고 판본을 대조한다(D6). 결과는 `reading` 에 남는다.
+
+        `ready` 이고 판본이 같으면 거기서 읽기를 멈춘다 — 다음 줄(job 의 사건)은 run 의 감독이 같은
+        stdout 에서 읽는다. `ready` 전의 다른 사건, 깨진 줄, 다른 판본이면 worker 를 끝내고 EOF 까지
+        남은 줄을 버리며 읽는다.
+        """
+        reading = self.reading
+        for raw in self.stdout:
+            if reading.discarding:
+                continue
+            try:
+                event = decode_event(raw.decode("utf-8"))
+            except (ProtocolError, UnicodeDecodeError) as error:
+                self.broke(error)
+                continue
+            if not isinstance(event, ReadyMessage):
+                # 판본을 대조하기 전의 진행·종결은 믿을 수 없다(D6, #581 리뷰 nit).
+                self.broke(
+                    ProtocolError(
+                        "before_ready",
+                        "run worker sent an event before its ready event — "
+                        f"type={event_type(event)}",
+                        message_type=event_type(event),
+                    )
+                )
+                continue
+            reading.ready = True
+            mismatched = versions.mismatched(event.versions)
+            if not mismatched:
+                return
+            logger.error(
+                "run worker versions differ from the server — %s server=%s worker=%s",
+                self.label,
+                versions,
+                event.versions,
+            )
+            reading.mismatched = mismatched
+            self.process.kill()
+
+    def broke(self, error: ProtocolError | UnicodeDecodeError) -> None:
+        """worker 가 프로토콜을 어겼다. 남기고 끝낸다 — 그 뒤의 줄은 버린다."""
+        broken = (
+            error
+            if isinstance(error, ProtocolError)
+            else ProtocolError("not_utf8", f"run worker line is not UTF-8 — {error}")
+        )
+        logger.error("run worker broke the protocol — %s %s", self.label, broken)
+        self.reading.broken = broken
+        self.process.kill()
+
+    def close(self) -> int:
+        """끝난 것을 확인하고(`wait`) stderr 를 마저 옮긴 뒤 stdin 을 닫는다. 종료 코드를
+        돌려준다."""
+        exit_code = self.process.wait()
+        self._relay.join()
+        _close(self.stdin)
+        return exit_code
+
+
 class _WorkerRun:
     """worker 하나의 손잡이와 감독. 종결(`on_finished`)은 감독 스레드만 한 번 알린다.
 
@@ -194,6 +466,7 @@ class _WorkerRun:
         engine_gate: EngineGate | None,
         command: tuple[str, ...],
         assign: Callable[[subprocess.Popen[bytes], str], None],
+        take_spare: Callable[[], _Worker | None],
         forget: Callable[[_WorkerRun], None],
     ) -> None:
         self._job = job
@@ -204,6 +477,7 @@ class _WorkerRun:
         self._engine_gate = engine_gate
         self._command = command
         self._assign = assign
+        self._take_spare = take_spare
         self._forget = forget
         self._lock = Lock()
         self._process: subprocess.Popen[bytes] | None = None
@@ -254,60 +528,42 @@ class _WorkerRun:
 
     def _supervise(self) -> RunOutcome:
         run_id = self.run_id
-        process = subprocess.Popen(
-            self._command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
-            creationflags=_CREATION_FLAGS,
-            start_new_session=sys.platform != "win32",
-        )
-        relay: Thread | None = None
-        stdin: IO[bytes] | None = None
+        label = f"run_id={run_id}"
+        worker = self._take_spare()
+        if worker is None:
+            # 준비된 예비가 없다(부팅 중이거나 멈췄다). 이 run 의 worker 를 직접 띄운다(D7).
+            logger.info("run worker starts without a ready spare — %s", label)
+            worker = _Worker.spawn(self._command, self._settings, self._assign, label=label)
+        else:
+            logger.info("run worker spare taken — %s pid=%s", label, worker.process.pid)
+            worker.label = label
         outcome: RunOutcome | None = None
         try:
-            self._assign(process, run_id)
             with self._lock:
-                self._process = process
+                self._process = worker.process
                 cancelled = self._cancelled
             if cancelled:
-                process.kill()
-            stdin, stdout, stderr = _pipes(process)
-            relay = Thread(
-                target=_relay_stderr,
-                args=(stderr, run_id),
-                name=f"backtest-worker-{run_id}-stderr",
-                daemon=True,
-            )
-            relay.start()
+                worker.process.kill()
+            if not worker.reading.ready:
+                worker.boot(self._versions)
             # job 을 쓰기 직전에 플래그를 다시 본다(D5 1). 섰으면 쓰지 않고 그 worker 를 버린다.
-            if self._is_cancelled():
-                process.kill()
-            else:
-                _write(stdin, encode_job(self._job, self._settings))
-            reading = self._read_events(process, stdin, stdout)
-            outcome = self._outcome(reading, process.wait())
+            if worker.booted:
+                if self._is_cancelled():
+                    worker.process.kill()
+                else:
+                    _write(worker.stdin, encode_job(self._job))
+                    self._read_events(worker)
+            outcome = self._outcome(worker.reading, worker.process.wait())
             return outcome
         finally:
             # 감독이 예외로 멈춰도 같은 순서로 치운다: 끝내고 기다린 뒤에만 지운다(D5 2).
-            self._clean_up(process, relay, stdin, outcome)
+            self._clean_up(worker, outcome)
 
-    def _clean_up(
-        self,
-        process: subprocess.Popen[bytes],
-        relay: Thread | None,
-        stdin: IO[bytes] | None,
-        outcome: RunOutcome | None,
-    ) -> None:
+    def _clean_up(self, worker: _Worker, outcome: RunOutcome | None) -> None:
         run_id = self.run_id
         if outcome is None:
-            process.kill()
-        process.wait()
-        if relay is not None:
-            relay.join()
-        if stdin is not None:
-            _close(stdin)
+            worker.process.kill()
+        worker.close()
         with self._lock:
             handed_over = isinstance(outcome, RunCommitted) and not self._abandoned
         if handed_over:
@@ -358,62 +614,37 @@ class _WorkerRun:
             return RunFailed(terminal.error_code, terminal.error)
         if self._is_cancelled():
             return RunCancelled()
-        # stderr 원문과 서버 경로는 로그에만 있다(error-messages.md).
+        # stderr 원문과 서버 경로는 로그에만 있다(error-messages.md). 부팅 중에 끝났으면 마지막
+        # 단계가 없다(None).
         return RunFailed(
             "backtest.run.worker_exited",
             f"run worker exited without a result — run_id={run_id} exit_code={exit_code} "
             f"last_stage={reading.last_stage}",
         )
 
-    def _read_events(
-        self, process: subprocess.Popen[bytes], stdin: IO[bytes], stdout: IO[bytes]
-    ) -> _Reading:
-        """stdout 을 EOF 까지 읽는다. 버릴 worker 면 끝내라고 한 뒤에도 남은 줄을 버리며 읽는다."""
-        reading = _Reading()
-        for raw in stdout:
+    def _read_events(self, worker: _Worker) -> None:
+        """job 을 쓴 뒤의 stdout 을 EOF 까지 읽는다. 버릴 worker 면 끝내라고 한 뒤에도 남은 줄을
+        버리며 읽는다."""
+        reading = worker.reading
+        for raw in worker.stdout:
             if reading.discarding:
                 continue
             try:
                 event = decode_event(raw.decode("utf-8"))
-                if not reading.ready and not isinstance(event, ReadyMessage):
-                    # 판본을 대조하기 전의 진행·종결은 믿을 수 없다(D6, #581 리뷰 nit).
-                    raise ProtocolError(
-                        "before_ready",
-                        "run worker sent an event before its ready event — "
-                        f"type={event_type(event)}",
-                        message_type=event_type(event),
-                    )
-                if reading.terminal is not None:
-                    raise ProtocolError(
-                        "after_terminal",
-                        "run worker sent an event after its terminal event — "
-                        f"type={event_type(event)}",
-                        message_type=event_type(event),
-                    )
             except (ProtocolError, UnicodeDecodeError) as error:
-                broken = (
-                    error
-                    if isinstance(error, ProtocolError)
-                    else ProtocolError("not_utf8", f"run worker line is not UTF-8 — {error}")
-                )
-                logger.error("run worker broke the protocol — run_id=%s %s", self.run_id, broken)
-                reading.broken = broken
-                process.kill()
+                worker.broke(error)
                 continue
-            if isinstance(event, ReadyMessage):
-                reading.ready = True
-                mismatched = self._versions.mismatched(event.versions)
-                if mismatched:
-                    logger.error(
-                        "run worker versions differ from the server — "
-                        "run_id=%s server=%s worker=%s",
-                        self.run_id,
-                        self._versions,
-                        event.versions,
+            if isinstance(event, ReadyMessage) or reading.terminal is not None:
+                worker.broke(
+                    ProtocolError(
+                        "unexpected_type" if isinstance(event, ReadyMessage) else "after_terminal",
+                        "run worker sent an event out of order — "
+                        f"type={event_type(event)} terminal={reading.terminal is not None}",
+                        message_type=event_type(event),
                     )
-                    reading.mismatched = mismatched
-                    process.kill()
-            elif isinstance(event, ProgressMessage):
+                )
+                continue
+            if isinstance(event, ProgressMessage):
                 reading.last_stage = event.stage
                 try:
                     self._listener.on_progress(event.stage, event.fraction, event.message)
@@ -421,32 +652,27 @@ class _WorkerRun:
                     # 취소가 이겼다. 읽기를 멈추면 worker 가 쓰기에서 막히므로 끝까지 읽는다(D12).
                     pass
             elif isinstance(event, EngineReadyMessage):
-                self._release_engine(process, stdin, reading)
+                self._release_engine(worker)
             else:
                 reading.terminal = event
-        return reading
 
-    def _release_engine(
-        self, process: subprocess.Popen[bytes], stdin: IO[bytes], reading: _Reading
-    ) -> None:
+    def _release_engine(self, worker: _Worker) -> None:
         """e2e hold 판정 뒤 `proceed` 를 보낸다(D11). 관문을 켜지 않은 worker 가 물으면 깨졌다."""
         if self._engine_gate is None:
-            reading.broken = ProtocolError(
-                "unexpected_type",
-                "run worker asked for the engine gate it was not given",
-                message_type="engine_ready",
+            worker.broke(
+                ProtocolError(
+                    "unexpected_type",
+                    "run worker asked for the engine gate it was not given",
+                    message_type="engine_ready",
+                )
             )
-            logger.error(
-                "run worker broke the protocol — run_id=%s %s", self.run_id, reading.broken
-            )
-            process.kill()
             return
         if self._engine_gate(self.run_id, self._is_cancelled) and not self._is_cancelled():
-            _write(stdin, encode_proceed())
+            _write(worker.stdin, encode_proceed())
 
 
 class _Reading:
-    """stdout 을 읽으며 모은 것."""
+    """stdout 을 읽으며 모은 것. 부팅(`ready` 까지)과 job 뒤의 사건을 한 객체에 모은다."""
 
     def __init__(self) -> None:
         self.ready = False
@@ -458,6 +684,15 @@ class _Reading:
     @property
     def discarding(self) -> bool:
         return self.broken is not None or bool(self.mismatched)
+
+
+def _boot_failure(reading: _Reading) -> str:
+    """예비를 잃은 사유(로그용)."""
+    if reading.mismatched:
+        return f"mismatched={','.join(reading.mismatched)}"
+    if reading.broken is not None:
+        return f"protocol={reading.broken.reason}"
+    return "exited" if not reading.ready else "exited_while_waiting"
 
 
 def _pipes(process: subprocess.Popen[bytes]) -> tuple[IO[bytes], IO[bytes], IO[bytes]]:
@@ -482,8 +717,8 @@ def _close(stream: IO[bytes]) -> None:
         logger.debug("run worker stdin close failed", exc_info=True)
 
 
-def _relay_stderr(stream: IO[bytes], run_id: str) -> None:
-    """worker 로그 줄을 run_id 를 붙여 이 프로세스 로거로 옮긴다.
+def _relay_stderr(stream: IO[bytes], worker: _Worker) -> None:
+    """worker 로그 줄을 그 worker 의 이름(run_id 또는 예비 pid)을 붙여 이 프로세스 로거로 옮긴다.
 
     레벨은 줄 머리를 따르고, 머리가 없는 줄은 앞 줄의 레벨을 잇는다. 머리 없이 시작하는
     traceback(로깅 전에 죽은 worker)은 ERROR 다(#575 리뷰 P3).
@@ -495,4 +730,4 @@ def _relay_stderr(stream: IO[bytes], run_id: str) -> None:
             level = logging.ERROR
         else:
             level = _LOG_LEVELS.get(line.split(" ", 1)[0], level)
-        logger.log(level, "run worker — run_id=%s %s", run_id, line)
+        logger.log(level, "run worker — %s %s", worker.label, line)

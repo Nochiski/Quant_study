@@ -404,3 +404,40 @@ def test_worker_boot_loads_the_engine_extension_before_the_code_fingerprint(
 
     assert completed.returncode == 0, completed.stderr[-2000:]
     assert completed.stdout.split()[-2:] == ["[True]", "True"], completed.stdout
+
+
+# n 번째로 띄워진 worker 가 `failing` 이 고른 번호면 `ready` 전에 끝나고, 아니면 실제 진입점을
+# 돈다. 띄워질 때마다 started-<pid> 표시를 남겨 n 을 센다(예비·직접 띄우기는 차례로 뜬다).
+_FLAKY = r"""
+import os, sys, pathlib
+folder, failing = pathlib.Path(sys.argv[1]), sys.argv[2]
+folder.mkdir(parents=True, exist_ok=True)
+(folder / f"started-{os.getpid()}").write_text("")
+launch = len(list(folder.glob("started-*")))
+if (failing == "odd" and launch % 2 == 1) or (failing == "first3" and launch <= 3):
+    raise SystemExit(3)
+from strategy_workbench.bootstrap.run_worker.facade.worker import main
+raise SystemExit(main())
+"""
+
+
+def _flaky(tmp_path: Path, folder: Path, failing: str) -> ProcessRunExecution:
+    return _execution(
+        tmp_path, folder, command=[sys.executable, "-c", _FLAKY, str(folder), failing]
+    )
+
+
+def test_spares_start_again_after_a_run_boots_its_own_worker(tmp_path: Path) -> None:
+    """연속 3회 실패로 멈춘 예비는 run 이 직접 띄운 worker 가 판본까지 맞게 부팅하면 다시 뜬다
+    (#591 리뷰 P3-1). 일시적인 부팅 실패가 서버 수명 내내 run 마다 부팅 시간을 물리지 않는다."""
+    folder = tmp_path / "records"
+    execution = _flaky(tmp_path, folder, "first3")
+    wait_for_records(folder, "started", 3)
+    time.sleep(_QUIET_S)
+    assert len(records(folder, "started")) == 3 and execution.spare_pid() is None
+
+    listener = _Recorder()
+    execution.start(resolved_job("run-recovers-spares"), listener)
+
+    assert isinstance(listener.wait(), RunCommitted)
+    assert _wait_until(execution.spare_pid)

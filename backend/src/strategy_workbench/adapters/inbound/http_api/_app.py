@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import Event
@@ -368,6 +369,17 @@ def create_app(
     (`bootstrap/_http.py`의 `DEFAULT_ALLOWED_ORIGINS`)이고, 여기에 같은 리터럴을 또 두면 개발 서버
     포트를 옮길 때 한쪽만 바뀐다(Phase B 감사 NB-7).
     """
+    # 서버가 끝날 때 기다릴 회수. 라우트를 다는 쪽이 더하고 lifespan 이 더한 순서대로 부른다.
+    closers: list[Callable[[], Awaitable[None]]] = []
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        # run 전송이 띄운 worker(예비 포함)를 정리한다(run-worker spec D5·D7).
+        backtest_runs.shutdown()
+        for close in closers:
+            await close()
+
     app = FastAPI(
         title="Quant Strategy Workbench API",
         version="0.1.0",
@@ -376,9 +388,8 @@ def create_app(
             "StrategySpec is the execution source of truth; YAML/JSON documents are compiled by "
             "the server."
         ),
+        lifespan=lifespan,
     )
-    # 서버가 끝날 때 run 전송이 띄운 worker 를 정리한다(run-worker spec D5).
-    app.router.add_event_handler("shutdown", backtest_runs.shutdown)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(allowed_origins),
@@ -470,7 +481,7 @@ def create_app(
 
     # 실험 라우트도 어시스턴트처럼 서비스가 올 때만 생긴다. 기반 실행 요청은 시작과 같은 판정이다.
     if experiments is not None:
-        register_experiment_routes(app, experiments, admitted=admitted)
+        closers.append(register_experiment_routes(app, experiments, admitted=admitted))
     if continuous_accounts is not None:
         register_continuous_account_routes(app, continuous_accounts)
     if factor_library is not None:

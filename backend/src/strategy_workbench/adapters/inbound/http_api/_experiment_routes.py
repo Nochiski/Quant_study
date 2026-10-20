@@ -135,9 +135,10 @@ def register_experiment_routes(
     experiments: ExperimentRunService,
     *,
     admitted: Callable[[Callable[[], Any]], Any],
-) -> None:
+) -> Callable[[], Awaitable[None]]:
+    """실험 라우트를 단다. 돌려준 함수는 서버가 끝날 때 진행 스트림 회수를 마친다(앱 lifespan 이
+    부른다)."""
     streams = _ExperimentStreamHub(experiments)
-    app.router.add_event_handler("shutdown", streams.close)
 
     async def experiment_error(_: Request, error: Exception) -> JSONResponse:
         assert isinstance(error, ExperimentError)
@@ -391,6 +392,8 @@ def register_experiment_routes(
     ) -> ExperimentSelection:
         """완료된 trial 을 후보로 고른 기록을 남긴다(spec D9). 되돌릴 수 없다."""
         return experiments.select(experiment_id, request.trial_index, request.reason)
+
+    return streams.close
 
 
 async def _progress_stream(

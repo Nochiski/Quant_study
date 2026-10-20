@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event
 from typing import cast
 
 import pytest
+from fastapi.testclient import TestClient
 
 from strategy_workbench.adapters.inbound.http_api._experiment_routes import (
     _ExperimentStreamHub,
     _progress_stream,
 )
+from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.experiment_run.facade.experiments import ExperimentRunService
+from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, TrialStatus
 
 
@@ -367,3 +371,22 @@ def test_cancelled_shutdown_still_owns_and_drains_the_worker(concurrent_close: b
             await hub.close()
 
     asyncio.run(exercise())
+
+
+def test_http_lifespan_shutdown_closes_the_experiment_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """앱 lifespan 이 끝날 때 run 전송을 정리한 다음 실험 진행 스트림 회수를 마친다
+    (#581 리뷰 nit)."""
+    calls: list[str] = []
+
+    async def close(self: _ExperimentStreamHub) -> None:
+        calls.append("streams")
+
+    monkeypatch.setattr(_ExperimentStreamHub, "close", close)
+    monkeypatch.setattr(BacktestRunService, "shutdown", lambda self: calls.append("runs"))
+
+    with TestClient(build_http_app(artifact_root=tmp_path / "artifacts")):
+        assert calls == []
+
+    assert calls == ["runs", "streams"]

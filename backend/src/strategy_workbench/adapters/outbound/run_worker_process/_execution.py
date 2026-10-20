@@ -47,6 +47,7 @@ from ._protocol import (
     decode_event,
     encode_job,
     encode_proceed,
+    event_type,
 )
 
 logger = logging.getLogger(__name__)
@@ -379,13 +380,15 @@ class _WorkerRun:
                     raise ProtocolError(
                         "before_ready",
                         "run worker sent an event before its ready event — "
-                        f"type={type(event).__name__}",
+                        f"type={event_type(event)}",
+                        message_type=event_type(event),
                     )
                 if reading.terminal is not None:
                     raise ProtocolError(
                         "after_terminal",
                         "run worker sent an event after its terminal event — "
-                        f"type={type(event).__name__}",
+                        f"type={event_type(event)}",
+                        message_type=event_type(event),
                     )
             except (ProtocolError, UnicodeDecodeError) as error:
                 broken = (

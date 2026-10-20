@@ -340,7 +340,35 @@ def test_a_terminal_event_before_ready_breaks_the_protocol(tmp_path: Path) -> No
 
     assert isinstance(outcome, RunFailed)
     assert outcome.error_code == "backtest.run.internal"
-    assert "reason=before_ready" in outcome.error
+    assert "reason=before_ready type=failed" in outcome.error
+
+
+def test_a_non_utf8_command_line_ends_the_worker_as_a_protocol_error(tmp_path: Path) -> None:
+    """감시 스레드의 줄 읽기가 UTF-8 이 아닌 줄을 받으면 `EXIT_PROTOCOL`(4)로 끝낸다.
+
+    감시 스레드만 조용히 죽고 worker 가 남지 않는다(#581 2차 리뷰 nit-2).
+    """
+    marker = tmp_path / "marker"
+    worker = subprocess.Popen(
+        hook_command("engine", marker),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        cwd=_BACKEND,
+    )
+    try:
+        assert worker.stdin is not None
+        job = encode_job(resolved_job("run-bad-line"), WorkerSettings("mock", None, tmp_path))
+        worker.stdin.write(job.encode("utf-8"))
+        worker.stdin.flush()
+        wait_for_marker(marker)
+        worker.stdin.write(b"\xff\xfe\n")
+        worker.stdin.flush()
+
+        assert worker.wait(timeout=30) == 4
+    finally:
+        worker.kill()
+        worker.wait(TIMEOUT_S)
 
 
 def test_an_unknown_message_type_is_not_copied_into_the_run_error(tmp_path: Path) -> None:

@@ -183,13 +183,15 @@ class _ParentWatch:
         Thread(target=self._watch, name="run-worker-parent-watch", daemon=True).start()
 
     def _watch(self) -> None:
-        while line := self._stdin.readline():
-            try:
+        # 줄 읽기도 감싼다. UTF-8 이 아닌 줄(`not_utf8`)에 감시 스레드만 조용히 죽으면 부모 사망을
+        # 더는 보지 못한다(#581 2차 리뷰 nit-2).
+        try:
+            while line := self._stdin.readline():
                 decode_proceed(line)
-            except ProtocolError:
-                logger.exception("run worker got a broken command line from its parent")
-                os._exit(EXIT_PROTOCOL)
-            self.proceed.set()
+                self.proceed.set()
+        except ProtocolError:
+            logger.exception("run worker got a broken command line from its parent")
+            os._exit(EXIT_PROTOCOL)
         self.parent_gone.set()
         _exit_parent_gone("stdin closed")
 
@@ -239,6 +241,12 @@ class _StdinPipe:
         return _decode(line + b"\n")
 
     def closed(self) -> bool:
+        """쓰는 쪽(부모)이 닫았으면 참. 막히지 않는다.
+
+        플랫폼마다 남은 바이트를 다르게 본다: POSIX 는 안 읽은 바이트가 있어도 닫힘을 바로 보고,
+        Windows 는 안 읽은 바이트가 남아 있으면 그 바이트를 읽은 뒤에야 참이 된다(`PeekNamedPipe` 는
+        쌓인 바이트가 있는 동안 성공한다).
+        """
         if self._peek is None:
             return _hung_up(self._fd)
         return self._peek() is None
@@ -263,7 +271,8 @@ def _decode(raw: bytes) -> str:
 
 
 def _hung_up(fd: int) -> bool:
-    """POSIX: 쓰는 쪽이 모두 닫혔으면 참. 남은 바이트가 있어도 닫힘을 본다."""
+    """POSIX: 쓰는 쪽이 모두 닫혔으면 참. 안 읽은 바이트가 있어도 POLLHUP 로 닫힘을 본다
+    (Windows 의 `_named_pipe_peek` 는 그 바이트를 다 읽어야 닫힘을 안다)."""
     if sys.platform == "win32":
         raise RuntimeError("poll() is POSIX only — use PeekNamedPipe on Windows")
     import select

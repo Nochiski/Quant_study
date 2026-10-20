@@ -238,8 +238,13 @@ def decode_proceed(line: str) -> ProceedMessage:
     return ProceedMessage()
 
 
+def event_type(event: WorkerEvent) -> str:
+    """worker 사건의 프로토콜 type 이름(`ready`·`progress`·…)."""
+    return _EVENT_TYPES[type(event)]
+
+
 def encode_event(event: WorkerEvent) -> str:
-    kind = _EVENT_TYPES[type(event)]
+    kind = event_type(event)
     return _line(kind, _EVENTS[kind].dump_python(event, mode="json"))
 
 

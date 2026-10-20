@@ -195,6 +195,11 @@ run마다 부모에 **감독 스레드** 하나가 있다(D12). 그 run의 종�
       도는 run 수 + 1을 넘지 않는다.
     - 예비는 run이 정해지기 전에 부팅하므로 설정을 job보다 먼저 받는다(D3의 `boot` 줄). job을 기다리는 동안 stdin EOF는 부모
       사망이라 결과 없이 끝난다(POSIX 경로, Windows는 Job Object). 서버 종료는 부팅 중이든 기다리든 예비를 끝낸다(D5).
+    - worker 부팅은 코드 지문을 재기 **전에** 엔진 확장(`backtest_core`)을 올린다. 엔진은 확장을 run 안에서 처음 import 하므로,
+      그러지 않으면 예비가 기다리는 동안 바뀐 확장 파일을 대조 없이 쓴다(#591 리뷰 P2-1, 재현됨). 올린 확장은 지문을 잰 파일과
+      같거나 그보다 오래되므로 어긋나면 판본 불일치로 멈춘다. 2026-10-20 mock·duckdb run 에서 부팅 뒤 처음 import 되는 프로젝트
+      모듈은 `backtest_core` 뿐이었다. 부작용: Windows 에서는 유휴 예비가 확장 파일을 열어 두므로, 서버가 도는 동안
+      `maturin develop` 의 덮어쓰기 설치가 막힌다. 스레드 방식 서버가 첫 run 뒤에 같은 파일을 쥐는 것과 같다.
 - **이유**: mock run은 1초 안에 끝나는데 부팅이 3~6초다. 예비가 없으면 e2e와 실험 trial이 run마다 그만큼 늘어난다. 실험 trial은
   슬롯 1개를 연달아 쓰므로 부팅이 직렬로 쌓인다. `browser-e2e` job은 이미 88개 테스트에 약 18분을 쓰고 30분 제한 아래 있다
   (`docs/planning/validation-lab/V5-06-capacity-factor-reports.md:68-99`). 유휴 worker 하나의 RSS는 118MB다.

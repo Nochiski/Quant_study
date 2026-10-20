@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -358,3 +359,48 @@ def test_a_run_on_the_spare_gives_the_thread_mode_result(
         assert process["manifest"][key] == thread["manifest"][key], key
     assert process["metrics"] == thread["metrics"]
     assert process == thread
+
+
+_FINGERPRINT_ORDER = r"""
+import sys
+from pathlib import Path
+from strategy_workbench.bootstrap import _container
+from strategy_workbench.bootstrap.run_worker import _composition
+from strategy_workbench.adapters.outbound.run_worker_process.facade.protocol import WorkerSettings
+
+fingerprint = _container.code_fingerprint
+seen = []
+
+def recorded():
+    seen.append("backtest_core.backtest_core" in sys.modules)
+    return fingerprint()
+
+_container.code_fingerprint = recorded
+assert "backtest_core.backtest_core" not in sys.modules
+_composition.boot(WorkerSettings("mock", None, Path(sys.argv[1])))
+print(seen, "backtest_core.backtest_core" in sys.modules)
+"""
+
+
+def test_worker_boot_loads_the_engine_extension_before_the_code_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """#591 리뷰 P2-1: 엔진 확장은 run 안에서 처음 import 된다. 예비가 기다리는 동안 확장 파일이
+    바뀌어도 대조 없이 쓰지 않도록, worker 부팅은 지문을 재기 전에 확장을 올린다.
+
+    그러면 올린 확장은 지문을 잰 파일과 같거나 그보다 오래되어, 어긋나면 판본 불일치로 멈춘다.
+    테스트 프로세스는 이미 확장을 올렸으므로 깨끗한 하위 프로세스에서 본다(공유 venv 의 확장
+    파일은 건드리지 않는다).
+    """
+    completed = subprocess.run(
+        [sys.executable, "-c", _FINGERPRINT_ORDER, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=Path(__file__).resolve().parents[2],
+        timeout=TIMEOUT_S,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    assert completed.stdout.split()[-2:] == ["[True]", "True"], completed.stdout

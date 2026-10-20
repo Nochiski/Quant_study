@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -221,6 +222,16 @@ class BacktestEngineExecutorAdapter:
     def __init__(self, registry: MetricRegistry | None = None) -> None:
         self._registry = registry or build_default_metric_registry()
         self._portfolio_bridge = BacktestEnginePortfolioAdapter()
+
+    def load_kernel(self) -> None:
+        """Rust 엔진 확장(`backtest_core`)을 지금 올린다. 이미 올렸으면 아무것도 하지 않는다.
+
+        엔진은 확장을 run 안에서 처음 import 한다(`backtest_engine.engine`). 예비 worker 는 부팅 뒤
+        오래 기다릴 수 있어, 코드 지문을 재기 전에 올려 두지 않으면 기다리는 동안 바뀐 확장 파일을
+        대조 없이 쓴다(run-worker spec D6·D7, #591 리뷰 P2-1). 확장을 import 하는 노드는 이
+        adapter 라(`backend-package-boundary.md` 커널 경계) 조립 쪽이 직접 import 하지 않는다.
+        """
+        importlib.import_module("backtest_core")
 
     def execute(
         self,

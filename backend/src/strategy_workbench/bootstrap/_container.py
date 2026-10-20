@@ -180,6 +180,7 @@ def build_container(
     run_slots: int = DEFAULT_RUN_SLOTS,
     trial_hold_seconds: float = 0.0,
     run_isolation: str = DEFAULT_RUN_ISOLATION,
+    run_memory_reserve_gb: float | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
@@ -261,6 +262,7 @@ def build_container(
             versions=lambda: build_run_versions(equity_data, factor_registry, metric_registry),
         ),
         run_slots=run_slots,
+        memory_reserve_gb=run_memory_reserve_gb,
         factor_registry=factor_registry,
     )
     experiment_repository = SQLiteExperimentRepository(research_db_path)

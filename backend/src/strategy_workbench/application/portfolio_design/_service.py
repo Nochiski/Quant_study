@@ -249,6 +249,26 @@ class _PreparedPipeline:
     environment: RunEnvironment
     parameter_values: dict[str, ParameterValue]
 
+    @property
+    def history_sessions(self) -> int:
+        """원시 관측 질의가 시작일 앞에서 읽는 워밍업 세션 수.
+
+        플랜은 as_of 를 세고 포트는 시작일 앞의 세션만 센다.
+        """
+        return max((plan.minimum_history_sessions - 1 for plan in self.plans.values()), default=0)
+
+
+@dataclass(frozen=True)
+class PortfolioPreflight:
+    """데이터를 읽지 않는 사전 검사(`preflight`)의 답."""
+
+    engine: EngineCompatibility
+    # 아래 셋은 run 메모리 예약치의 입력이다(run-worker spec D8). 원시 관측 질의가 시작일 앞에서
+    # 읽을 워밍업 세션 수, 그 질의가 읽을 원천 필드 수, 팩터 실행 계획의 단계(노드) 수 합.
+    history_sessions: int
+    field_count: int
+    factor_steps: int
+
 
 @dataclass(frozen=True)
 class PortfolioPipelineResult:
@@ -258,6 +278,9 @@ class PortfolioPipelineResult:
     observations: tuple[PortfolioObservation, ...]
     construction_trace: PortfolioConstructionTrace | None
     preview: PortfolioPreview
+    # 원시 관측을 읽은 세션 수(측정 구간 + 워밍업)와 필드 수. run 메모리 로그용이다(spec D8).
+    raw_sessions: int
+    raw_fields: int
 
 
 class PortfolioDesignService:
@@ -277,8 +300,8 @@ class PortfolioDesignService:
     def preview(self, request: PortfolioPreviewRequest) -> PortfolioPreview:
         return self.run_pipeline(request).preview
 
-    def preflight(self, request: PortfolioPreviewRequest) -> EngineCompatibility:
-        """관측 데이터를 읽지 않고 끝나는 검사만 돌려 엔진 호환성을 답한다.
+    def preflight(self, request: PortfolioPreviewRequest) -> PortfolioPreflight:
+        """관측 데이터를 읽지 않고 끝나는 검사만 돌려 엔진 호환성과 워밍업 세션 수를 답한다.
 
         `run_pipeline` 의 앞부분(스펙 검증·엔진 판정·팩터 메타데이터·실행 플랜·출력 타입/저장 참조
         거부)과 같은 `_prepare` 를 타므로, 여기서 예외 없이 끝난 스펙이 그 앞부분에서 예외로
@@ -297,12 +320,18 @@ class PortfolioDesignService:
         # 엔진 호환성만은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게
         # 명시한다. 문서·실행 설정 오류는 위 docstring 대로 예외다.
         options = PortfolioPipelineOptions(require_engine_compatible=False)
-        return self._prepare(
+        prepared = self._prepare(
             request.spec,
             options,
             request.environment,
             requested_parameters=request.parameter_values,
-        ).engine
+        )
+        return PortfolioPreflight(
+            engine=prepared.engine,
+            history_sessions=prepared.history_sessions,
+            field_count=len(_required_field_ids(request.spec, prepared.plans)),
+            factor_steps=sum(len(plan.steps) for plan in prepared.plans.values()),
+        )
 
     def run_pipeline(
         self,
@@ -344,10 +373,7 @@ class PortfolioDesignService:
             start=environment.start,
             end=environment.end,
             field_ids=_required_field_ids(spec, plans),
-            # Plans count as_of itself; the port counts sessions strictly before start.
-            history_sessions_before_start=max(
-                (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
-            ),
+            history_sessions_before_start=prepared.history_sessions,
         )
         progress(0.0, "Loading raw observations")
         try:
@@ -547,6 +573,8 @@ class PortfolioDesignService:
             observations=observations,
             construction_trace=construction_trace,
             preview=preview,
+            raw_sessions=len(raw.history_sessions) + len(raw.sessions),
+            raw_fields=len(raw_query.field_ids),
         )
 
     def _prepare(

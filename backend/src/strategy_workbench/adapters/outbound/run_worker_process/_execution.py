@@ -9,6 +9,9 @@ worker 는 `boot` 줄로 부팅해 `ready` 를 보내고, 부모가 판본을 �
 준비된 예비가 있으면 그것을 쓰고 곧바로 다음 예비를 띄운다. 예비가 아직 부팅 중이거나 없으면
 감독 스레드가 직접 띄운다. 그래서 worker 프로세스는 도는 run 수 + 1 개를 넘지 않는다.
 
+메모리 가드(D8)의 판정은 서비스가 하고, 이 전송은 측정값(가용 메모리, run 마다 worker 의 RSS, 다시
+채울 예비 몫)을 주고 가드가 run 을 대기시키는 동안 예비 다시 채우기를 미룬다.
+
 종결 순서(D5):
 1. 취소는 플래그를 세우고 worker 종료를 요청만 한다. 감독 스레드는 worker 를 손에 넣은 직후와 job 을
    쓰기 직전에 플래그를 다시 본다.
@@ -36,10 +39,12 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     RunHandle,
     RunJob,
     RunListener,
+    RunMemory,
     RunOutcome,
 )
 from strategy_workbench.domain.backtest.facade.runs import RunStage
 
+from ._memory import available_memory_bytes, process_rss_bytes
 from ._protocol import (
     CommittedMessage,
     EngineReadyMessage,
@@ -71,6 +76,10 @@ _SHUTDOWN_JOIN_S = 10.0
 SPARE_FAILURE_LIMIT = 3
 # 기다리는 예비가 살아 있는지 다시 보는 간격. 죽은 예비를 다시 띄우기까지의 지연이다.
 _SPARE_POLL_S = 0.2
+# run 이 예비를 가져가면 곧바로 다시 채우는 예비 하나가 부팅하며 쓸 물리 메모리. 메모리 가드의 고정
+# 오버헤드다(spec D8, #591 리뷰). 유휴 예비의 실측(BENCHMARK 6절 working set 78MB, spec D7 RSS
+# 118MB) 가운데 큰 쪽을 덮는다.
+SPARE_MEMORY_BYTES = 128 * 1024 * 1024
 
 EngineGate = Callable[[str, Callable[[], bool]], bool]
 """(run_id, 취소 확인) → 엔진 단계로 보내도 되면 참. e2e hold 판정이다(spec D11)."""
@@ -116,6 +125,11 @@ class ProcessRunExecution:
         self._keeps_spare = spare
         self._spare: _Spare | None = None
         self._spare_failures = 0
+        # 메모리 가드가 run 을 대기시키는 동안 참(`set_memory_hold`). 그동안 미룬 예비 채우기가
+        # 있으면 `_spare_deferred` 가 참이다.
+        self._memory_held = False
+        self._spare_deferred = False
+        self._memory_unreadable_logged = False
         self._fill_spare()
 
     def start(self, job: RunJob, listener: RunListener) -> RunHandle:
@@ -187,6 +201,50 @@ class ProcessRunExecution:
             worker = None if spare is None or not spare.ready else spare.worker
             return None if worker is None else worker.process.pid
 
+    def memory(self) -> RunMemory:
+        """메모리 가드가 읽을 측정값(spec D8). 서비스 잠금 안에서 불린다 — 시스템 호출만 한다.
+
+        run 의 RSS 는 그 worker 가 `ready` 에 실은 pid 로 잰다. 부모가 띄운 프로세스는 런처일 수
+        있다(Windows venv). 가용 메모리를 읽지 못하면 0 으로 답해 가드가 run 을 하나씩만 띄운다.
+        """
+        with self._lock:
+            runs = tuple(self._runs)
+            refills = self._keeps_spare and not self._closed
+        rss: dict[str, int] = {}
+        for run in runs:
+            pid = run.measured_pid()
+            if pid is not None and (value := process_rss_bytes(pid)) is not None:
+                rss[run.run_id] = value
+        available = available_memory_bytes()
+        if available is None:
+            if not self._memory_unreadable_logged:
+                self._memory_unreadable_logged = True
+                logger.warning(
+                    "available memory could not be read — platform=%s; the memory guard runs "
+                    "one backtest at a time",
+                    sys.platform,
+                )
+            available = 0
+        return RunMemory(
+            available_bytes=available,
+            rss_bytes=rss,
+            overhead_bytes=SPARE_MEMORY_BYTES if refills else 0,
+        )
+
+    def set_memory_hold(self, held: bool) -> None:
+        """메모리 가드가 run 을 대기시키는 동안 예비를 다시 채우지 않는다(spec D8, #591 리뷰).
+
+        풀리면 그동안 미룬 채우기를 한다. 예비 스레드만 띄우므로 서비스 잠금 안에서 불려도
+        된다(D12).
+        """
+        with self._lock:
+            self._memory_held = held
+            deferred = not held and self._spare_deferred
+            if deferred:
+                self._spare_deferred = False
+        if deferred:
+            self._fill_spare()
+
     def _fill_spare(self) -> None:
         """예비 자리가 비었으면 새 예비를 띄운다(D7). 띄우기·부팅·대기는 예비 스레드가 한다(D12).
 
@@ -195,9 +253,15 @@ class ProcessRunExecution:
         `ready` 에 닿으면 실패 횟수가 0 으로 돌아가고, 또 실패하면 다시 멈춘다(#591 리뷰 P3-1·2차
         P3-2). 판본 불일치로 멈춘 예비는 되살아나지 않는다 — 직접 띄운 worker 도 같은 판본을 읽어
         어긋난다.
+
+        메모리 가드가 run 을 대기시키는 동안에는 띄우지 않고 미룬다 — 예비가 run 을 밀어내지 않게
+        한다(spec D8). 가드가 풀리면 `set_memory_hold` 가 다시 부른다.
         """
         with self._lock:
             if not self._keeps_spare or self._closed or self._spare is not None:
+                return
+            if self._memory_held:
+                self._spare_deferred = True
                 return
             spare = _Spare()
             spare.thread = Thread(
@@ -422,6 +486,7 @@ class _Worker:
                 )
                 continue
             reading.ready = True
+            reading.pid = event.pid
             mismatched = versions.mismatched(event.versions)
             if not mismatched:
                 return
@@ -489,12 +554,30 @@ class _WorkerRun:
         self._forget = forget
         self._lock = Lock()
         self._process: subprocess.Popen[bytes] | None = None
+        # 메모리를 잴 worker. 손에 넣은 뒤에 한 번 정한다(`measured_pid`).
+        self._measured: _Worker | None = None
         self._cancelled = False
         self._abandoned = False
 
     @property
     def run_id(self) -> str:
         return self._job.run_id
+
+    def measured_pid(self) -> int | None:
+        """메모리 가드가 RSS 를 잴 이 run 의 worker pid. 아직 `ready` 전이거나 끝났으면 None.
+
+        끝난 pid 는 다른 프로세스가 다시 쓸 수 있어 worker 가 살아 있는 동안만 준다. 그 판정은 여기
+        `poll()` 하나다(#599 리뷰 nit) — 종료 코드를 거두면(감독의 `wait`든 이 `poll`이든) 그 뒤로는
+        늘 None 이다. 전송 장부에서 빼는 `_forget` 은 정리일 뿐 이 방어에 기대지 않는다. Windows
+        에서는 부모가 띄운 프로세스가 런처라, 인터프리터가 끝난 뒤 런처가 끝나기까지의 짧은 틈에
+        그 pid 를 잴 수 있다. 다른 프로세스를 잰 값은 남은 예약분을 줄이는 쪽이라 0 아래로는
+        내려가지 않는다(`memory_verdict`).
+        """
+        with self._lock:
+            worker = self._measured
+        if worker is None or worker.process.poll() is not None:
+            return None
+        return worker.reading.pid
 
     def cancel(self) -> None:
         """worker 종료를 요청만 한다(D5 1). 기다리지 않는다 — 결말은 감독 스레드가 EOF 를 보고
@@ -549,6 +632,7 @@ class _WorkerRun:
         try:
             with self._lock:
                 self._process = worker.process
+                self._measured = worker
                 cancelled = self._cancelled
             if cancelled:
                 worker.process.kill()
@@ -610,8 +694,17 @@ class _WorkerRun:
             )
         terminal = reading.terminal
         if isinstance(terminal, CommittedMessage):
+            # 메모리 추정식(세션 수 하나)을 다시 맞출 근거로 읽은 입력의 크기도 남긴다(spec D8).
+            footprint = terminal.committed.footprint
             logger.info(
-                "run worker committed — run_id=%s max_rss_bytes=%s", run_id, terminal.max_rss_bytes
+                "run worker committed — run_id=%s max_rss_bytes=%s sessions=%s fields=%s "
+                "factors=%s observation_rows=%s",
+                run_id,
+                terminal.max_rss_bytes,
+                None if footprint is None else footprint.sessions,
+                None if footprint is None else footprint.fields,
+                None if footprint is None else footprint.factors,
+                None if footprint is None else footprint.observation_rows,
             )
             return terminal.committed
         if isinstance(terminal, FailedMessage):
@@ -690,6 +783,8 @@ class _Reading:
         self.broken: ProtocolError | None = None
         self.mismatched: tuple[str, ...] = ()
         self.last_stage: RunStage | None = None
+        # `ready` 가 실은 인터프리터 pid(메모리 가드가 RSS 를 잴 대상).
+        self.pid: int | None = None
 
     @property
     def discarding(self) -> bool:

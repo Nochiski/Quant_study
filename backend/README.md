@@ -68,7 +68,10 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   종료라 어느 단계에서든 바로 끝나고, worker 가 결과 없이 끝나면 `backtest.run.worker_exited`, 서버와
   다른 데이터·코드 판본을 읽었으면 `backtest.run.worker_mismatch`(서버를 다시 시작한다)로 끝난다.
   서버는 부팅을 마친 예비 worker 하나를 늘 띄워 두고 run 에 넘기므로 run 시작에 부팅 시간이 들지
-  않는다(유휴 예비 하나의 비용은 `docs/planning/run-worker-process/BENCHMARK.md` 6절).
+  않는다(유휴 예비 하나의 비용은 `docs/planning/run-worker-process/BENCHMARK.md` 6절). 이 방식에서는
+  메모리 가드가 run 을 꺼내기 전에 가용 물리 메모리와 도는 run 들의 남은 예약분을 보고, 모자라면 슬롯이
+  비어도 `queued`(상태 문장 `Waiting for free memory`)로 기다리게 한다. 예약치는 run 이 읽을 세션 수와
+  전략 모양(원천 필드 수·팩터 단계 수)으로 어림하고(spec D8), `STRATEGY_WORKBENCH_RUN_MEMORY_RESERVE_GB` 로 run 마다 같은 값으로 고정할 수 있다.
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다

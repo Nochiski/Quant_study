@@ -451,7 +451,10 @@
   붙였다. 스토리 e2e 는 trial 붙잡기 훅으로 앞 실험이 실험 몫 슬롯을 쥔 동안 대기·일시정지·재개·취소를 보고,
   창을 닫았다 새 창으로 열어 진행을 확인한다. 재개가 멈춘 지점부터 잇는지는 backend
   `tests/application/test_backtest_run_admission.py`·`test_run_scheduler.py` 가 확인한다(화면은 재개 뒤 상태만
-  본다).
+  본다). run 을 worker 프로세스로 돌리는 방식(`STRATEGY_WORKBENCH_RUN_ISOLATION=process`, W3-01 에서 기본값)
+  에서는 메모리가 모자라면 슬롯이 비어도 run 이 `queued` 로 기다린다(run-worker spec D8, W2-02). 화면의
+  대기 표시는 그대로이고, 도는 run 이 끝나 예약한 메모리가 풀리면 뜬다. 가드는 backend
+  `tests/application/test_run_memory_guard.py` 가 확인한다.
 
 ### US-SM-16 실행 전에 이 실행이 시도 수를 늘리는지 본다
 

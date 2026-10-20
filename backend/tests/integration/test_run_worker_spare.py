@@ -478,3 +478,51 @@ def test_spares_start_again_after_a_run_boots_its_own_worker(tmp_path: Path) -> 
 
     assert isinstance(listener.wait(), RunCommitted)
     assert _wait_until(execution.spare_pid)
+
+
+def test_a_memory_hold_defers_the_spare_refill_until_it_is_released(tmp_path: Path) -> None:
+    """spec D8·#591 리뷰: 메모리 가드가 run 을 대기시키는 동안 가져간 예비를 다시 채우지 않는다.
+
+    예비가 run 을 밀어내지 않게 한다. 가드가 풀리면 미룬 예비를 띄운다.
+    """
+    folder = tmp_path / "records"
+    execution = _execution(tmp_path, folder)
+    _, spare = _ready_spare(execution, folder)
+    execution.set_memory_hold(True)
+
+    listener = _Recorder()
+    execution.start(resolved_job("run-while-held"), listener)
+
+    assert isinstance(listener.wait(), RunCommitted)
+    assert records(folder, "job") == {spare}
+    time.sleep(_QUIET_S)
+    assert records(folder, "started") == {spare}
+    assert execution.spare_pid() is None
+
+    execution.set_memory_hold(False)
+    _ready_spare(execution, folder, known=frozenset({spare}))
+
+
+def test_memory_reads_the_rss_of_the_interpreter_named_in_the_ready_event(
+    tmp_path: Path,
+) -> None:
+    """spec D8: run 의 RSS 는 `ready` 가 실은 인터프리터 pid 로 잰다.
+
+    Windows venv 의 python.exe 는 실제 인터프리터를 자식으로 띄우는 런처라, 부모가 띄운 pid 로 재면
+    런처 몇 MB 만 보인다. 끝난 run 은 더 재지 않는다.
+    """
+    marker = tmp_path / "marker"
+    execution = _execution(tmp_path, marker, command=hook_command("tape", marker))
+    _wait_until(execution.spare_pid)
+    listener = _Recorder()
+    handle = execution.start(resolved_job("run-measured"), listener)
+    wait_for_marker(marker)
+
+    memory = execution.memory()
+
+    assert memory.available_bytes > 0
+    assert memory.overhead_bytes == execution_module.SPARE_MEMORY_BYTES
+    assert memory.rss_bytes["run-measured"] >= 30 * 1024 * 1024
+    handle.cancel()
+    assert isinstance(listener.wait(), RunCancelled)
+    assert "run-measured" not in execution.memory().rss_bytes

@@ -127,12 +127,15 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   tsstk: list[dict[str, object]] | None = None,
                   cvbd: list[dict[str, object]] | None = None,
                   corp_ticker: list[dict[str, object]] | None = None,
+                  spans: list[dict[str, object]] | None = None,
                   const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
     """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
 
     `listing` 은 (ticker, date, list_shrs[, par_value_krw]) 를 주면 되고 corp_ticker·security_span
     은 거기서 유도한다 — corp_code = 'C' + ticker, 첫 상장일 = 그 티커의 첫 행. 한 법인에 보통주·
     우선주 여러 티커를 두려면 `corp_ticker` 로 (ticker, isin8, corp_code, is_common) 행을 직접 준다.
+    재상장(구간 둘)이나 끝이 캘린더와 어긋난 구간처럼 listing 으로 유도되지 않는 security_span 은
+    `spans` 로 (ticker, first_date, last_date, end_reason) 행을 직접 준다 — 주면 유도하지 않는다.
     """
     con = duckdb.connect()
     try:
@@ -153,11 +156,13 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                "is_common": "BOOLEAN"})
         # 구간 끝이 캘린더 끝이면 원천 끝까지 상장(coverage_gap), 아니면 그날 폐지(delisted) —
         # security_span.sql 의 end_reason 규칙과 같은 모양이다.
-        spans = []
-        for t in tickers:
-            days = [r["date"] for r in listing if r["ticker"] == t]
-            spans.append({"ticker": t, "first_date": min(days), "last_date": max(days),
-                          "end_reason": "coverage_gap" if max(days) == cal[-1] else "delisted"})
+        if spans is None:
+            spans = []
+            for t in tickers:
+                days = [r["date"] for r in listing if r["ticker"] == t]
+                spans.append({"ticker": t, "first_date": min(days), "last_date": max(days),
+                              "end_reason": ("coverage_gap" if max(days) == cal[-1]
+                                             else "delisted")})
         _view(con, "security_span", spans,
               {"ticker": "VARCHAR", "first_date": "DATE", "last_date": "DATE",
                "end_reason": "VARCHAR"})
@@ -974,18 +979,23 @@ def test_금액이_없는_행은_격리하지_않고_금액만_결측이다() ->
 
 def _run_two_class_corp(cal: list[date], preferred: tuple[str, ...],
                         tsstk: list[dict[str, object]],
-                        delisted: tuple[str, ...] = ()) -> dict[str, dict[str, object]]:
+                        delisted: tuple[str, ...] = (),
+                        listed_days: dict[str, list[date]] | None = None,
+                        spans: list[dict[str, object]] | None = None,
+                        repeat_legs: tuple[str, ...] = ()) -> dict[str, dict[str, object]]:
     """보통주 A00001 과 상장 우선주 `preferred` 를 가진 법인 CX 위에서 자사주 공시만 돌린다.
 
     `delisted` 의 우선주는 앞 10세션만 상장했다가 폐지된다(security_span 끝 = cal[9]).
+    `listed_days` 는 티커별 상장 세션을 직접 정하고, `spans` 는 security_span 을 직접 준다.
+    `repeat_legs` 의 티커는 corp_ticker 에 같은 행이 두 번 실린다(원천 중복).
     """
     tickers = ("A00001", *preferred)
-    listing = [row for t in tickers
-               for row in flat_listing(t, cal[:10] if t in delisted else cal, 1_000_000)]
+    days = {t: (listed_days or {}).get(t, cal[:10] if t in delisted else cal) for t in tickers}
+    listing = [row for t in tickers for row in flat_listing(t, days[t], 1_000_000)]
     corp_ticker: list[dict[str, object]] = [
         {"ticker": t, "isin8": f"KR7{t}", "corp_code": "CX", "is_common": t == "A00001"}
-        for t in tickers]
-    return run_event_sql(cal, listing, tsstk=tsstk, corp_ticker=corp_ticker)
+        for t in (*tickers, *repeat_legs)]
+    return run_event_sql(cal, listing, tsstk=tsstk, corp_ticker=corp_ticker, spans=spans)
 
 
 def test_자사주_취득_금액은_주식_종류별로_그_종류의_티커에_붙는다() -> None:
@@ -1062,6 +1072,83 @@ def test_우선주_둘_중_결정일에_살아_있는_하나에만_기타주식_
     got = {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
     assert got == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
                    f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+    # 정해진 티커(leg_ticker)는 legs 로 다시 펴지 않는다 — 펴면 우선주 leg 수만큼 같은 후보가
+    # pool 에 들어가 dedup 이 접고(n_src_rows 2), EG1 모집단이 부푼다.
+    assert out[f"A00005:treasury_buy:{cal[20]}"]["n_src_rows"] == 1
+
+
+def _treasury_rows(out: dict[str, dict[str, object]]) -> dict[str, object]:
+    return {e: r["amount_krw"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+
+
+def test_결정일이_우선주_구간의_첫날이나_끝날이면_그날_상장이다() -> None:
+    """구간 양끝은 포함이다(first_date ≤ 결정일 ≤ last_date) — universe_daily 와 같은 규칙.
+
+    A00005 는 cal[20] 에 처음 상장하고, A00007 은 cal[30] 에 폐지된다(끝 = delisted). 각 구간의
+    첫날·끝날 결정은 그 우선주에 붙는다. 같은 날 살아 있는 다른 우선주가 없게 법인을 따로 둔다.
+    """
+    cal = sessions(60)
+    first = _run_two_class_corp(
+        cal, ("A00005",), [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}],
+        listed_days={"A00005": cal[20:]})
+    assert _treasury_rows(first) == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                                     f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+    last = _run_two_class_corp(
+        cal, ("A00007",), [{**_BOTH_CLASSES, "aq_dd": cal[30], "available_date": cal[30]}],
+        listed_days={"A00007": cal[:31]})
+    assert _treasury_rows(last) == {f"A00001:treasury_buy:{cal[30]}": 5_000_000_000,
+                                    f"A00007:treasury_buy:{cal[30]}": 1_000_000_000}
+
+
+def test_재상장_우선주는_구간_사이_결정일에는_없고_두_번째_구간_안에서는_있다() -> None:
+    """security_span 은 재상장마다 구간이 따로다. cal[10]~cal[29] 사이는 상장돼 있지 않았다."""
+    cal = sessions(60)
+    spans: list[dict[str, object]] = [
+        {"ticker": "A00001", "first_date": cal[0], "last_date": cal[-1],
+         "end_reason": "coverage_gap"},
+        {"ticker": "A00005", "first_date": cal[0], "last_date": cal[9], "end_reason": "delisted"},
+        {"ticker": "A00005", "first_date": cal[30], "last_date": cal[-1],
+         "end_reason": "coverage_gap"}]
+    tsstk = [{**_BOTH_CLASSES, "rcept_no": f"2021030100000{i}", "aq_dd": cal[d],
+              "available_date": cal[d]} for i, d in ((1, 20), (2, 40))]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, spans=spans)
+    assert _treasury_rows(out) == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                                   f"A00001:treasury_buy:{cal[40]}": 5_000_000_000,
+                                   f"A00005:treasury_buy:{cal[40]}": 1_000_000_000}
+
+
+def test_구간_끝이_coverage_gap_이면_끝날_뒤도_상장으로_본다() -> None:
+    """원천 끝까지 상장한 구간(coverage_gap)은 열린 끝이다. 정상 빌드에서는 그 뒤 결정일이 캘린더
+    밖이라 out_of_calendar 가 먼저 걸러 보이지 않고, 입력 판본이 어긋날 때(security_span 이
+    캘린더보다 먼저 끝난 판)만 의미가 있는 방어다 — 그 판을 직접 주입해 본다."""
+    cal = sessions(60)
+    spans: list[dict[str, object]] = [
+        {"ticker": t, "first_date": cal[0], "last_date": cal[30], "end_reason": "coverage_gap"}
+        for t in ("A00001", "A00005")]
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[40], "available_date": cal[40]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, spans=spans)
+    assert _treasury_rows(out) == {f"A00001:treasury_buy:{cal[40]}": 5_000_000_000,
+                                   f"A00005:treasury_buy:{cal[40]}": 1_000_000_000}
+
+
+def test_corp_ticker_에_같은_우선주가_두_번_있어도_우선주는_하나다() -> None:
+    """우선주 수는 서로 다른 티커 수다(count DISTINCT) — 원천 중복 행이 모호함을 만들지 않는다."""
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": cal[20], "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk, repeat_legs=("A00005",))
+    assert _treasury_rows(out) == {f"A00001:treasury_buy:{cal[20]}": 5_000_000_000,
+                                   f"A00005:treasury_buy:{cal[20]}": 1_000_000_000}
+
+
+def test_결정일이_없으면_우선주_하나로_귀속하고_effective_unresolved_로_격리한다() -> None:
+    """결정일이 없으면 시점을 못 정해 전 기간 우선주로 센다. 하나면 그 티커의 후보가 되고, 날짜가
+    없어 effective_unresolved 로 격리된다 — 범위 밖으로 조용히 빠지지 않는다."""
+    cal = sessions(60)
+    tsstk = [{**_BOTH_CLASSES, "aq_dd": None, "available_date": cal[20]}]
+    out = _run_two_class_corp(cal, ("A00005",), tsstk)
+    rejects = {e: r["reject_reason"] for e, r in out.items() if r["event_type"] == "treasury_buy"}
+    assert rejects == {"A00001:treasury_buy:-": "effective_unresolved",
+                       "A00005:treasury_buy:-": "effective_unresolved"}
 
 
 def test_보통주_수량만_있고_금액이_없으면_보통주_금액은_0이_아니라_결측이다() -> None:

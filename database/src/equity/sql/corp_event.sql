@@ -188,7 +188,8 @@ capital AS (
 --             우선주인지 말하지 않는다).
 --             「그날 상장」은 universe_daily 와 같은 security_span 구간 규칙(first_date ≤ 날짜 ≤ last_date)
 --             이고, 끝이 coverage_gap 인 구간(원천 끝까지 상장)은 열린 끝이다. 결정일이 없으면 시점을 못
---             정하므로 날짜 조건 없이 세고, 뒤 판정이 effective_unresolved 로 격리한다.
+--             정하므로 전 기간으로 세고, 그 결과가 1개일 때만 뒤 판정이 effective_unresolved 로
+--             격리한다(0개면 unlisted_class, 2개 이상이면 class_ambiguous).
 tsstk_estk AS (
     SELECT t.*,
            (SELECT {'n': count(DISTINCT l.ticker), 'ticker': min(l.ticker)}
@@ -197,6 +198,8 @@ tsstk_estk AS (
               AND (t.aq_dd IS NULL OR EXISTS (
                    SELECT 1 FROM security_span s
                    WHERE s.ticker = l.ticker AND t.aq_dd >= s.first_date
+                     -- coverage_gap 열린 끝은 입력 판본이 어긋날 때(구간이 캘린더보다 먼저 끝난
+                     -- 판)만 의미 있는 방어다 — 정상 빌드에서는 out_of_calendar 가 먼저 거른다.
                      AND (t.aq_dd <= s.last_date OR s.end_reason = 'coverage_gap')))) AS pref
     FROM stg_event_tsstk_aq t
     WHERE coalesce(t.aqpln_prc_estk, 0) > 0 OR coalesce(t.aqpln_stk_estk, 0) > 0

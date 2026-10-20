@@ -458,12 +458,13 @@ def _window_rows(
 
 @dataclass(frozen=True, eq=False)
 class _SegmentBlocks:
-    """구간을 길이 `block` 조각으로 자른 배치. 조각은 길이 내림차순(`order`)으로 놓는다.
+    """구간을 길이 `block` 조각으로 자른 배치. 조각은 길이 내림차순으로 정렬해 놓는다.
 
     `sorted_starts[k]` 는 k 번째(정렬 뒤) 조각의 시작 위치, `sorted_owners[k]` 는 그 조각의
     구간, `active_blocks[o]` 는 offset o 에서 아직 원소가 남은 조각 수(앞쪽 연속), `position[b]` 는
-    원래 조각 b 의 정렬 뒤 자리다. 2단계는 조각 수 내림차순 구간 순서 `group_order` 와 j 번째
-    조각이 남은 구간 수 `active_groups[j]` 로 돈다.
+    원래(구간 순서) 조각 b 의 정렬 뒤 자리, `first_block[g]` 는 구간 g 의 첫 조각의 원래 번호다.
+    2단계는 조각 수 내림차순 구간 순서 `group_order` 와 j 번째 조각이 남은 구간 수
+    `active_groups[j]` 로 돈다.
     """
 
     block: int
@@ -839,10 +840,15 @@ def _window_deviation_sums(
             state = _accumulate_deviations(state, own[offset], shift, raw_shift)
             suffix[:, offset] = state
         index = offset_in_block * width + block
-        return _join_deviations(
-            suffix.reshape(_DEVIATION_ROWS, -1)[:, index],
-            prefix.reshape(_DEVIATION_ROWS, -1)[:, index],
-        )
+        tails = suffix.reshape(_DEVIATION_ROWS, -1)
+        heads = prefix.reshape(_DEVIATION_ROWS, -1)
+        joined = np.empty((_DEVIATION_ROWS, index.shape[0]), np.float64)
+        # 모으기·이음은 2^16칸 조각마다 checkpoint 한다(창이 짧으면 2^18칸 전체가 한 번에 길다)
+        for low in range(0, index.shape[0], _CERTIFY_CHUNK):
+            checkpoint()
+            part = index[low : low + _CERTIFY_CHUNK]
+            joined[:, low : low + part.shape[0]] = _join_deviations(tails[:, part], heads[:, part])
+        return joined
 
 
 def _segment_deviation_sums(

@@ -174,5 +174,22 @@ def wait_for_exit(pid: int, *, timeout_s: float) -> bool:
             os.kill(pid, 0)
         except ProcessLookupError:
             return True
+        if _is_zombie(pid):
+            return True
         time.sleep(0.05)
     return False
+
+
+def _is_zombie(pid: int) -> bool:
+    """POSIX: 끝났지만 부모가 아직 거두지 않은 프로세스면 참이다. 거두지 않는다.
+
+    죽은 자식은 부모의 `Popen` 이 poll·wait 로 거둘 때까지 좀비로 남아 `os.kill(pid, 0)` 이
+    계속 성공한다(#591 2차 리뷰 P2-1). 남의 자식(부모를 죽인 고아)도 볼 수 있게 `waitid` 대신
+    `/proc/<pid>/stat` 의 상태 칸을 읽는다. `/proc` 이 없는 플랫폼은 거짓이다.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii", errors="replace")
+    except OSError:
+        return False
+    # 둘째 칸(실행 파일 이름)은 괄호 안이고 공백을 담을 수 있어 마지막 ')' 뒤에서 상태를 읽는다.
+    return stat.rpartition(")")[2].split()[:1] == ["Z"]

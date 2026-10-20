@@ -36,10 +36,10 @@ grain `field_id` — 어댑터 `list_fields()`(`DatasetFieldProfile`)의 원천�
 격자 두 축은 시총 분위별 커버율까지 낸다 — S17·S18 이 입력에 시총 축이 없어 미룬 EG9-P06 이다
 (DESIGN §10 P36·P37 ⑥).
 
-**창이 비면 폐기하지 않는다**: 관측이 0 인 필드(선언은 있으나 행이 없는 `event.buyback_amount`
-부류)는 소유 테이블의 창 → 캘린더 창으로 물러나 `coverage_from` 을 채우고
-`estimated_coverage_pct = 0` 으로 남는다. 그 0 을 팩터 판정으로 옮기는 것은 S20 EG10 의 일이다
-(`blocked_reason='no_observations'`) — 여기서 격리하면 EG7 비율이 터지고 "필드가 없다" 와
+**창이 비면 폐기하지 않는다**: 관측이 0 인 필드(선언은 있으나 행이 없는 필드 — e1.9.0 전의
+`event.buyback_amount` 가 그랬다)는 소유 테이블의 창 → 캘린더 창으로 물러나 `coverage_from` 을
+채우고 `estimated_coverage_pct = 0` 으로 남는다. 그 0 을 팩터 판정으로 옮기는 것은 S20 EG10 의
+일이다(`blocked_reason='no_observations'`) — 여기서 격리하면 EG7 비율이 터지고 "필드가 없다" 와
 "필드는 있는데 값이 없다" 가 구별되지 않는다.
 """
 from __future__ import annotations

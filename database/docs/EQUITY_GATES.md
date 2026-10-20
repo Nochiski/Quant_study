@@ -1341,7 +1341,7 @@ count(price_adj_daily) = count(price_daily)
 | FX-6-001 | `dataset_profile` | `price.close` | `available_date_basis`, `recommended_lag_sessions` | decl:rules_s04 | `default`, `0`(가격류 당일 관측) |
 | FX-6-002 | `dataset_profile` | `consensus.forward_eps` | `recommended_lag_sessions` | decl:rules_s17 | `1` — v3 는 collected = base + 1영업일 |
 | FX-6-003 | `dataset_profile` | `price.market_cap` | `recommended_lag_sessions` | decl:rules_s04 | `1` — 주식수가 `stg_listing_daily`(lag_known=false) |
-| FX-6-004 | `dataset_profile` | `event.buyback_amount` | `column_scope` | decl:rules_s05 | `amount_krw`(커버율 0 은 pytest 손계산으로 이동) |
+| FX-6-004 | `dataset_profile` | `event.buyback_amount` | `column_scope` | decl:rules_s05 | `amount_krw`(커버율은 pytest 손계산으로 이동) |
 | FX-6-005 | `dataset_profile` | `classification.sector` | `point_in_time` | decl:rules_s01 | `false`(GAP-07) |
 | FX-6-006 | `dataset_profile` | `price.adj_close` | `table_name`, `available_date_basis`, `field_scope` | decl:rules_s06 · rules_s19 | `v_adj_price_fwd`, `default\|derived`, `internal` |
 | FX-6-007 | `dataset_profile` | `event.insider_net_buy` | `column_scope` | decl:rules_s15 | `qty_change_shr`(롤링 2년 창은 pytest) |
@@ -1357,8 +1357,9 @@ count(price_adj_daily) = count(price_daily)
 | FX-6-019 | `factor_readiness` | `Q01` | `required_columns`, `owner` | decl:rules_s20 ⋈ profile | `[fin_std.net_income, fin_std.total_equity]`, `factor_layer` |
 
 절단본 손계산으로 옮긴 실측 단언: `event.insider_net_buy` 창 2024-08-26~2026-08-26 · GAP-02
-3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버 0 ·
-M01/V05 `first_usable_date` · E05/E06 `no_observations` · 커버율 ↔ 정수 분자·분모 항등.
+3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버(09-06 에는 0,
+e1.9.0 부터 값이 실린다 — 절단본 80% · 100%) · M01/V05 `first_usable_date` · E05/E06 판정(09-06
+`no_observations` → e1.9.0 부터 ready) · 커버율 ↔ 정수 분자·분모 항등.
 
 ### 부정 픽스처 (§7-5)
 
@@ -2041,7 +2042,7 @@ S07 의 커널 3포트 어댑터는 제품 경로가 쓰지 않았고, 제품 �
 | `owner` 의 뜻 | (미정의) | **막힌 것을 푸는 책임자**. ready 행은 계산이 남았으므로 `factor_layer`. 절단본 분포 equity 16 · factor_layer 37 · unavailable 1 | `rules_s20.FactorSpec` |
 | R04(시장 베타) | 제안서 §1-6 "즉시" | **blocked(field_unavailable) · owner `unavailable`** — `index_daily.close_idx` 는 실재하지만 `benchmark.close` 는 FIELD_MAP §2 가 미지원으로 판정한 축이다(GAP-09: 지수가 security 축이 아니다). 데이터가 아니라 계약이 없다 | FIELD_MAP §2 |
 | G04(EPS 성장률) | 제안서 §1-3 "즉시" | **blocked(partial_support)** — `fin_std.eps_basic` 이 주식분할 미조정 원장 값이라(FIELD_MAP §3, S12 실측) 시계열 비율이 분할 구간에서 가짜 점프를 낸다. 제안서는 S12 실측 전 판정이었다 | FIELD_MAP §3 |
-| E05·E06 | 제안서 §1-7 "즉시" | **blocked(no_observations)** — `corp_event` 가 MVP 4유형만 적재해 `treasury_buy`·`rights`·`cb_issue` 행이 0 이다(DESIGN §4-2). 원천(`stg_event_tsstk_aq` 1,951 등)은 실재하므로 S05 후속으로 풀린다. **EG10 이 잡으라고 만든 바로 그 경우** | DESIGN §10 P39 |
+| E05·E06 | 제안서 §1-7 "즉시" | **ready**(e1.9.0 부터). 09-06 첫 판정은 **blocked(no_observations)** 였다 — `corp_event` 가 MVP 4유형만 적재해 `treasury_buy`·`rights`·`cb_issue` 행이 0 이었고, **EG10 이 잡으라고 만든 바로 그 경우**였다. e1.9.0(09-07)이 `treasury_buy`(← `stg_event_tsstk_aq`)·`cb_issue`(← `stg_event_cvbd_is`)를 실어 둘 다 열렸다. E05 금액은 주식 종류별이고(e1.20.0, #589) E06 은 `rights` 가 아직 없어 CB 만 덮는다 — 조건은 각 caveat 에 있다 | DESIGN §10 P39 · `rules_s20.py` E05·E06 |
 | V05·V07·Q07·Q08 | 제안서 §1-1·§1-2 "조건부(GAP-02)" | **ready** — GAP-02 는 "3계정이 실재하는가" 였고 S12·S19 실측이 **실재한다**로 답했다(`borrowings` 17.5% · `depreciation`·`interest_expense` 15.0%). 대신 커버 시작이 늦어 `first_usable_date` 가 2023-11-14 다 — 조건이 판정에서 **시작일**로 옮겨간 것이다 | DESIGN §10 P38 |
 
 **S21 축소 정정 — 워크벤치 어댑터 · contract `ADAPTERS` · MVP-B 백테스트 (2026-09-05, 절단본 실측 → `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/`)**

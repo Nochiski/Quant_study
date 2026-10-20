@@ -219,7 +219,7 @@ FACTORS: tuple[FactorSpec, ...] = (
                             "price.market_cap"), "factor_layer",
        "FACTORS §4 I03 = (취득 − 처분) / 시가총액.",
        caveat="취득방법 3축 중 **잎 행만**(`acqs_mth3 <> '소계'`) 더해야 한다 — 소계·총계 행이 "
-              "같은 테이블에 있다(FX-4B-001).", registry="event.buyback_announcement"),
+              "같은 테이블에 있다(FX-4B-001)."),
     _f("I04", "주주환원율", ("event.dividend_total", "event.treasury_acquired",
                         "event.treasury_disposed", "price.market_cap"), "factor_layer",
        "FACTORS §4 I04 = (현금배당 + 자사주 순매입) / 시가총액 = I01 + I03.",
@@ -313,11 +313,17 @@ FACTORS: tuple[FactorSpec, ...] = (
        "FACTORS §7 E04 = 1 − 최대주주 지분율 − 자사주비율. free float 이라 시총 가중에 영향.",
        caveat="세 재료의 축(법인·종류주)을 소비자가 맞춰야 한다."),
     _f("E05", "자사주 취득 발표", ("event.buyback_amount",), "equity",
-       "FACTORS §7 E05 = 취득 결정 공시 이벤트 더미(발표일 초과수익).",
-       caveat="`corp_event` 가 MVP 4유형(split·reverse_split·bonus·capred)만 적재해 "
-              "`treasury_buy` 행이 0 이다 — 원천 stg_event_tsstk_aq 1,951 건은 실재(S05 후속)."),
+       "FACTORS §7 E05 = 취득 결정 공시 이벤트 더미(발표일 초과수익). 재료는 `corp_event` 의 "
+       "`treasury_buy` 행(e1.9.0 부터 적재, ← stg_event_tsstk_aq).",
+       caveat="금액은 결정 공시의 **취득예정금액**이고 주식 종류별이다(e1.20.0) — 보통주 티커는 "
+              "보통주식분, 우선주 티커는 기타주식분만 받는다. 상장 우선주가 둘 이상인 법인의 "
+              "기타주식분은 어느 우선주인지 몰라 싣지 않는다(`class_ambiguous`). 실제 취득 "
+              "수량은 사업보고서 축(`event.treasury_acquired`, I03)이다.",
+       registry="event.buyback_announcement"),
     _f("E06", "유상증자·CB 발행", ("event.capital_raise_amount",), "equity",
-       "FACTORS §7 E06 = 희석 이벤트(piicDecsn·cvbdIsDecsn).", caveat="E05 와 같은 S05 후속."),
+       "FACTORS §7 E06 = 희석 이벤트(piicDecsn·cvbdIsDecsn).",
+       caveat="CB 발행(`cb_issue`)만 실린다(e1.9.0) — 유상증자(`rights`)는 신주배정기준일이 없어 "
+              "가격 축 효력일을 못 정해 아직 싣지 않는다."),
     _f("E07", "상폐 위험", ("universe.delist_signal", "universe.admin_state"), "equity",
        "FACTORS §7 E07 = 부도·해산·회생·관리 이벤트. 생존편향 26.75% 제거의 근거.",
        caveat="**소비 규약으로 열었다(2026-09-08)** — KOSPI 관리종목 **해제 공시가 3건뿐**이라 "

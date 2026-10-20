@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 
 from strategy_workbench.adapters.outbound.research_sqlite._schema import V1_SCHEMA_OBJECTS
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    ResearchStorageError,
     SQLiteBacktestRunRepository,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -116,6 +118,32 @@ def test_a_trial_result_for_an_unknown_run_is_refused(tmp_path: Path) -> None:
         repository.record_trial_result(
             _completed("missing"), session_sharpe=0.1, metric_registry_version="metric-registry-v4"
         )
+
+
+def test_a_completion_whose_last_write_fails_leaves_nothing_behind(tmp_path: Path) -> None:
+    """완료 전이·대표 샤프·머리 지표는 한 트랜잭션이라 마지막 쓰기가 실패하면 앞의 둘도 남지
+    않는다(#581 2차 리뷰 P3-1). 머리 지표 표에 실패 트리거를 걸어 마지막 문장을 깬다."""
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    _add(repository, "run-1", "s-1")
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "CREATE TRIGGER refuse_headline BEFORE INSERT ON backtest_run_headlines "
+            "BEGIN SELECT RAISE(ABORT, 'x'); END"
+        )
+        connection.commit()
+
+    with pytest.raises(ResearchStorageError):
+        repository.record_trial_result(
+            _completed("run-1"),
+            session_sharpe=0.1,
+            metric_registry_version="metric-registry-v4",
+            headline=RunHeadline(total_return=0.1, sharpe=1.0, max_drawdown=-0.1),
+        )
+
+    (entry,) = repository.trial_ledger("s-1").entries
+    assert repository.get("run-1").run.status is not RunStatus.COMPLETED
+    assert entry.session_sharpe is None
 
 
 def test_the_trial_result_is_written_with_the_completed_state(tmp_path: Path) -> None:

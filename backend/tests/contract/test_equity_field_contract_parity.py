@@ -5,7 +5,8 @@
 field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 green 인 문서가 실데이터에서만 다르게
 동작한다. 정본은 원장이다. mock 은 원장 스키마를 옮긴 duckdb 선언표(`FIELD_SPECS`)에 단위·값
 타입을 맞추고, 선언표의 단위·빈도·값 타입과 mock 의 랙은 원장 `dataset_profile` 선언에 맞춘다.
-단위·빈도의 어휘 차이는 아래 계약 대응표가 소유한다(#375 DR-A-13).
+단위·빈도의 어휘 차이는 아래 계약 대응표가 소유한다(#375 DR-A-13). 원천이 행을 고르는 필터도
+원장 필드 선언과 원장이 싣는 사건 유형에 대조한다(#583).
 
 대조는 선언표를 직접 읽는다 — 손 픽스처 루트의 `list_fields()` 는 그 루트에 원천 테이블이 있는
 필드만 내므로, 새 `FieldSpec` 이 픽스처보다 먼저 들어오면 대조를 빠져나갈 수 있다.
@@ -343,6 +344,69 @@ def test_원장_뷰의_가림_표시_열을_그_뷰를_읽는_원천이_읽는�
     assert wired == views.MASK_COLUMNS, (
         f"원장 뷰의 가림 표시 열과 어댑터 배선이 다르다 — ledger={views.MASK_COLUMNS} "
         f"duckdb={wired}"
+    )
+
+
+# ── 행 필터 (#583) ────────────────────────────────────────────────────────────
+# 원천의 `row_filter` 가 원장에 없는 값으로 거르면 질의는 오류 없이 행 0 을 읽어 필드가 조용히
+# 비고, 단위·값 타입 대조로는 드러나지 않는다. 원장 선언을 직접 읽어 두 방향에서 본다.
+_EVENT_TYPE_PREDICATE = re.compile(r"\bevent_type\s*(?:=\s*'[^']*'|IN\s*\([^)]*\))", re.IGNORECASE)
+
+
+def _conjuncts(predicate: str) -> list[str]:
+    return [part.strip() for part in re.split(r"\s+AND\s+", predicate, flags=re.IGNORECASE)]
+
+
+def test_원장_필드의_행_필터를_어댑터_원천이_그대로_건다() -> None:
+    """원장 필드 선언의 행 필터는 그 필드 원천 `row_filter` 의 AND 항 하나와 글자까지 같다.
+
+    어댑터는 그 뒤에 조건을 더 이어 좁힐 수 있다(컨센서스 FY1). 원장 필터가 없는 필드는 보지
+    않는다 — 재무의 `period_frontier` 는 원장 뷰가 만든 열이다.
+    """
+    ledger = _ledger_profiles()
+    expected = {
+        field_id: profile.row_filter
+        for field_id in FIELD_BY_ID
+        if (profile := ledger.get(field_id)) is not None and profile.row_filter
+    }
+    actual = {
+        field_id: SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].row_filter or ""
+        for field_id in expected
+    }
+    drift = {
+        field_id: (want, actual[field_id])
+        for field_id, want in expected.items()
+        if want not in _conjuncts(actual[field_id])
+    }
+
+    assert expected, "원장 행 필터가 있는 지원 필드가 없다 — 대조가 공허하다"
+    assert drift == {}, f"원장 행 필터와 어댑터 원천 필터가 다르다 — (ledger, adapter)={drift}"
+
+
+def test_corp_event_를_거르는_유형은_원장이_싣는_사건_유형이다() -> None:
+    """어댑터 원천과 손 픽스처가 쓰는 `event_type` 은 원장 `corp_event` 가 실제로 싣는 유형이다.
+
+    선언만 되고 행을 만들지 않는 유형(`EVENT_TYPE_VOCAB` 의 나머지)으로 걸러도 필드가 비므로
+    `LOADED_EVENT_TYPES` 와 대조한다. 손 픽스처가 어댑터의 틀린 값을 따라 적으면 어댑터 테스트가
+    그 값으로 통과하므로 픽스처 행도 함께 본다(#583).
+    """
+    pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
+    from tests.equity_fixture import WB_EVENT_ROWS, import_ledger_module
+
+    rules_s05: Any = import_ledger_module("equity.rules_s05")
+    loaded = set(rules_s05.LOADED_EVENT_TYPES)
+    filtered = {
+        literal
+        for spec in SOURCE_BY_NAME.values()
+        if spec.relation == rules_s05.CORP_EVENT.name and spec.row_filter
+        for predicate in _EVENT_TYPE_PREDICATE.findall(spec.row_filter)
+        for literal in re.findall(r"'([^']*)'", predicate)
+    }
+    written = {row[2] for row in WB_EVENT_ROWS}
+
+    assert filtered, "corp_event 를 event_type 으로 거르는 원천이 없다 — 대조가 공허하다"
+    assert (sorted(filtered - loaded), sorted(written - loaded)) == ([], []), (
+        f"원장이 싣지 않는 event_type — (adapter, fixture) 밖 값, loaded={sorted(loaded)}"
     )
 
 

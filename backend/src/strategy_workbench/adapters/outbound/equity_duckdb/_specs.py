@@ -106,6 +106,10 @@ class SourceSpec:
     `GRID` 는 (축 키, date) 당 1행을 고른다. GRID 에서 필요한 것은 `flow_daily` 뿐이다
     (grain 에 `src` 가 들어 한 격자 셀에 원천 수만큼 행이 올 수 있다).
 
+    `row_filter` 는 원장 필드 선언에 행 필터(`FieldProfile.row_filter`)가 있으면 그것을 그대로
+    담고, 더 좁힐 때는 그 뒤에 `AND` 로 조건을 잇는다. 그 대조는
+    `tests/contract/test_equity_field_contract_parity.py` 가 맡는다(#583).
+
     `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
     있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
 
@@ -371,7 +375,8 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         available_expr="available_date",
         content_expr="announce_date",
         reduce=Reduce.SUM,
-        row_filter="event_type = 'tsstk_aq'",
+        # 원장 사건 어휘다. `tsstk_aq` 는 원천 표(`stg_event_tsstk_aq`) 이름이라 행이 없다(#583).
+        row_filter="event_type = 'treasury_buy'",
         pick_order=None,
         lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
@@ -1017,7 +1022,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "같은 값이 이어집니다."
         ),
         disclosure_basis="DART 주요사항보고 접수일(announce_date)",
-        evidence="corp_event.amount_krw (event_type='tsstk_aq', 서버 1,951건)",
+        evidence="corp_event.amount_krw (event_type='treasury_buy' ← stg_event_tsstk_aq, e1.9.0)",
     ),
     # DART 소유보고 API 가 롤링 2년 창만 주고 재수집이 불가능하다(DART_DESIGN P3e).
     FieldSpec(

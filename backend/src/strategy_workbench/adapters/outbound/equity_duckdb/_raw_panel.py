@@ -564,7 +564,7 @@ def load_raw_panel(
     progress(_ASSEMBLED)
     # 받은 열은 더 쓰지 않는다. 재정렬 동안 메모리를 쥐지 않게 먼저 놓는다. 큰 배열을 한꺼번에
     # 놓으면 그동안 checkpoint 가 없어 열마다 놓는다.
-    del targets, matches, sources, series
+    del targets, matches, sources, series, lookup
     for key in list(fetched):
         del fetched[key]
         checkpoint()

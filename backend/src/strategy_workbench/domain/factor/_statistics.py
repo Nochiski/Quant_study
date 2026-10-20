@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from math import isqrt
 from statistics import mean, pstdev
+
+import numpy as np
+from numpy.typing import NDArray
 
 
 def cross_sectional_rank(values: Sequence[float]) -> list[float]:
@@ -60,3 +65,469 @@ def quantile(ordered: list[float], probability: float) -> float:
     weight = position - lower_index
     return ordered[lower_index] * (1 - weight) + ordered[upper_index] * weight
 
+
+# ---------------------------------------------------------------------------
+# 정확 평균 커널(columnar-tape spec D3 mean 행, T3-03)
+#
+# 객체 평가기는 칸마다 `statistics.mean(list[float])` 을 부른다. CPython 3.11 의 이 함수는 원소를
+# 정확한 유리수로 더해 원소 수로 나눈 값을 한 번만 반올림한다(가장 가까운 float, 동점은 짝수 쪽).
+# 그래서 합 순서와 무관한 수학적 정의이고, 아래 커널은 그 값을 벡터로 "증명하며" 재현한다.
+#
+# 1. 합: +0.0 에서 시작해 TwoSum(Knuth)으로 더한다. 각 덧셈의 반올림 오차 e 는 정확히 표현되므로
+#    W(정확한 합) = s + Σe 가 항등식이다. c = fl(Σe), a = fl(Σ|e|) 를 함께 나른다.
+#    |c − Σe| ≤ γ_{T−1}·Σ|e| ≤ 2·T·u·a (T = TwoSum 횟수, u = 2^-53, T·u ≪ 1). 창은 T ≤ n + 1,
+#    구간은 블록 두 단계라 T ≤ 2n 이므로 두 형태 모두 E_sum = 4·(n + 2)·u·a 로 덮는다.
+# 2. 후보: q0 = fl(fl(s + c)/n). Dekker TwoProduct(numpy 에 fma 가 없다)로 q0·n = p + pe 를 정확히
+#    쪼개 잔차 R = W − q0·n 을 구하고, q = fl(q0 + fl(R/n)) 로 한 번 고친다.
+# 3. 인증: q 에 대해 잔차 R 을 다시 구한다. (d, de) = TwoSum(s, −p) 일 때
+#    r = fl(d + fl(fl(de − pe) + c)). 정확한 R = d + de − pe + Σe 이므로
+#    |R − r| ≤ E_sum + E_res, E_res = 3·u·(|de| + |pe| + |c| + |r|).
+#    반올림 경계 (q + succ(q))/2 · (q + pred(q))/2 까지의 거리를 잔차 단위로 재면
+#    n·(succ(q) − q)/2 − R 과 n·(q − pred(q))/2 + R 이다(2의 거듭제곱 경계는 아래 간격이 절반이다).
+#    두 거리가 모두 4·(E_sum + E_res) + 2^-1060 보다 **크면** W/n 은 q 의 반올림 칸 안쪽에 있어
+#    statistics.mean 과 같은 q 다. 같거나 작으면(정확한 중점 포함 — 동점 짝수 규칙은 계산하지
+#    않는다) 그 칸만 `statistics.mean` 으로 정한다. 4배는 경계식 자체의 float 계산 오차다.
+#    2^-1060 은 부분정규 크기에서 상대 오차 모형이 깨지는 두 곳의 절대 오차(각 ≤ 2^-1075)를
+#    덮는다: n 이 홀수이고 간격이 2^-1074 이면 n·gap/2(= n·2^-1075)가 표현되지 않아 반올림되고,
+#    E_res 의 곱(u·|x|)도 부분정규 영역에서는 상대 오차가 아니라 절대 오차로 반올림된다.
+# 4. 정확 경로로 보내는 칸: 비유한값(합·후보가 inf/NaN — 비교가 거짓이라 인증되지 않는다),
+#    |q| > 1e300(TwoProduct 분할 상수 2^27+1 을 곱하면 |q| > 2^997 ≈ 1.3e300 에서 넘친다. 넘쳐도
+#    NaN 이 되어 인증되지 않지만 가드로 미리 막는다), 0 이 아닌 |q| < 1e-290, q == 0.
+#    1e-290 가드는 정확성에 필요한 경계가 아니라 보수적 여유다. n 이 정수(< 2^26 이면 분할이
+#    (n, 0))라 q·n 의 Dekker 분해는 부분정규 크기에서도 정확하고(#584 리뷰 실측 30만 건), 작은
+#    크기에서 정확하지 않은 n·gap/2 와 E_res 의 상대 오차 가정은 위 2^-1060 이 덮는다.
+# 5. s == 0 이고 a == 0 이면 모든 e 가 0 이라 W 가 정확히 0 이다. statistics.mean 은 정확한 0 을
+#    +0.0 으로 돌려주므로(−0.0 만 있는 칸도 `mean([-0.0]) == +0.0`) 그 칸은 +0.0 이다. +0.0 에서
+#    시작한 TwoSum 은 −0.0 을 만들지 않는다(−0.0 + −0.0 만 −0.0 이다).
+#
+# 객체 경로는 `_as_number` 가 float() 로 바꾼 값만 mean 에 넘긴다 — int 가 들어가는 경로는 없다.
+# 그래서 커널 입력은 float64 열 하나이고, 정수 값 float 도 같은 정의로 다룬다.
+# ---------------------------------------------------------------------------
+
+_UNIT_ROUNDOFF = 2.0**-53
+_SPLITTER = 2.0**27 + 1.0
+_LARGEST_CERTIFIED = 1e300
+_SMALLEST_CERTIFIED = 1e-290
+_UNDERFLOW_SLACK = 2.0**-1060
+# 원소 단위 벡터 연산은 이 칸 수마다 checkpoint 를 부른다(spec D7, `_panel_evaluation._CHUNK_ROWS`)
+_KERNEL_CHUNK = 1 << 18
+# 인증식 조각. 칸마다 연산이 80개 남짓이라 2^16 칸(0.5MB 배열)이 2^18 칸보다 칸당 1.5배 빠르다
+_CERTIFY_CHUNK = 1 << 16
+# 정확 경로는 256칸 또는 이 원소 수마다 checkpoint 를 부른다. 큰 그룹은 칸 하나가 길다
+_EXACT_CHECK_CELLS = 256
+_EXACT_CHECK_ELEMENTS = 1 << 15
+_MIN_SEGMENT_BLOCK = 64
+
+_Floats = NDArray[np.float64]
+_Bools = NDArray[np.bool_]
+
+
+def _no_checkpoint() -> None:
+    return None
+
+
+@dataclass(frozen=True, eq=False)
+class ExactMeans:
+    """칸마다의 평균. `exact_path` 가 참인 칸은 `statistics.mean` 이 정했다."""
+
+    values: _Floats
+    exact_path: _Bools
+
+
+def window_mean(
+    values: _Floats,
+    window: int,
+    *,
+    starts: slice | None = None,
+    wanted: _Bools | None = None,
+    checkpoint: Callable[[], None] = _no_checkpoint,
+) -> ExactMeans:
+    """시작 위치 t 마다 `statistics.mean(values[t : t + window].tolist())` 와 비트가 같은 값.
+
+    Args:
+        values: 1차원 float64 열. 창은 이 순서 그대로의 연속 구간이다(종목 우선 정렬 위치).
+        window: 창 길이(≥ 1).
+        starts: 계산할 시작 위치 구간. 기본은 전체 `[0, len − window]`.
+        wanted: `starts` 길이의 마스크. 거짓인 칸은 값을 쓰지 않으므로 계산하지 않고 0.0 이다
+            (종목 경계를 넘거나 숫자가 아닌 칸이 든 창 — 그 칸의 원소는 의미가 없다).
+        checkpoint: 협조적 취소 확인. 창 offset 반복·청크·정확 경로 256칸마다 부른다.
+
+    Returns:
+        `starts` 길이의 값과 정확 경로 표시.
+    """
+    _require_floats(values, "values")
+    if window < 1:
+        raise ValueError(f"window mean needs window >= 1 — window={window}")
+    limit = max(values.shape[0] - window + 1, 0)
+    span = slice(0, limit) if starts is None else starts
+    low = 0 if span.start is None else span.start
+    high = limit if span.stop is None else span.stop
+    if span.step not in (None, 1) or not 0 <= low <= high <= limit:
+        raise ValueError(
+            "window mean starts must be a contiguous range inside the series — "
+            f"starts={span!r} rows={values.shape[0]} window={window} limit={limit}"
+        )
+    count = high - low
+    if wanted is not None and (wanted.dtype != np.bool_ or wanted.shape != (count,)):
+        raise ValueError(
+            "window mean wanted mask must be a bool array as long as starts — "
+            f"wanted_shape={wanted.shape} wanted_dtype={wanted.dtype} starts={count}"
+        )
+    means = np.zeros(count, np.float64)
+    exact = np.zeros(count, bool)
+    for first in range(low, high, _KERNEL_CHUNK):
+        checkpoint()
+        last = min(first + _KERNEL_CHUNK, high)
+        part = slice(first - low, last - low)
+        total, error, magnitude = _window_sums(values, window, first, last, checkpoint)
+        _settle(
+            total,
+            error,
+            magnitude,
+            np.full(last - first, float(window)),
+            None if wanted is None else wanted[part],
+            lambda cell, origin=first: values[origin + cell : origin + cell + window],
+            checkpoint,
+            out=means[part],
+            exact=exact[part],
+        )
+    return ExactMeans(means, exact)
+
+
+def segment_mean(
+    values: _Floats,
+    offsets: NDArray[np.intp],
+    *,
+    checkpoint: Callable[[], None] = _no_checkpoint,
+) -> ExactMeans:
+    """구간 g 마다 `statistics.mean(values[offsets[g] : offsets[g + 1]].tolist())` 와 같은 비트.
+
+    횡단면·그룹 평균(demean·neutralize·zscore 중심)이 쓸 형태다. `statistics.mean` 은 정확한
+    유리수 합을 한 번 반올림하므로 구간 안 원소 순서는 결과를 바꾸지 않는다. 빈 구간은 평균이
+    정의되지 않아(`statistics.mean` 은 예외) NaN 이고 정확 경로 표시는 거짓이다.
+
+    Args:
+        values: 1차원 float64 열.
+        offsets: 길이 G + 1 의 비감소 정수 열. `offsets[0] == 0`, `offsets[-1] == len(values)`.
+        checkpoint: 협조적 취소 확인. 블록 offset 반복·청크·정확 경로 256칸마다 부른다.
+    """
+    _require_floats(values, "values")
+    bounds = np.asarray(offsets)
+    if (
+        bounds.ndim != 1
+        or bounds.shape[0] < 1
+        or not np.issubdtype(bounds.dtype, np.integer)
+        or int(bounds[0]) != 0
+        or int(bounds[-1]) != values.shape[0]
+        or bool(np.any(np.diff(bounds) < 0))
+    ):
+        raise ValueError(
+            "segment mean offsets must be non-decreasing integers from 0 to len(values) — "
+            f"offsets_shape={bounds.shape} dtype={bounds.dtype} rows={values.shape[0]}"
+        )
+    bounds = bounds.astype(np.intp)
+    lengths = np.diff(bounds)
+    total, error, magnitude = _segment_sums(values, bounds, lengths, checkpoint)
+    groups = lengths.shape[0]
+    means = np.zeros(groups, np.float64)
+    exact = np.zeros(groups, bool)
+    counts = lengths.astype(np.float64)
+    nonempty = lengths > 0
+    for first in range(0, groups, _KERNEL_CHUNK):
+        checkpoint()
+        part = slice(first, min(first + _KERNEL_CHUNK, groups))
+        _settle(
+            total[part],
+            error[part],
+            magnitude[part],
+            counts[part],
+            nonempty[part],
+            lambda cell, origin=first: values[bounds[origin + cell] : bounds[origin + cell + 1]],
+            checkpoint,
+            out=means[part],
+            exact=exact[part],
+        )
+    means[~nonempty] = np.nan
+    return ExactMeans(means, exact)
+
+
+def _require_floats(values: np.ndarray, name: str) -> None:
+    if values.ndim != 1 or values.dtype != np.float64:
+        raise TypeError(
+            f"exact mean kernel needs a 1-D float64 array — {name} shape={values.shape} "
+            f"dtype={values.dtype}"
+        )
+
+
+def _two_sum(left: _Floats, right: _Floats) -> tuple[_Floats, _Floats]:
+    """Knuth TwoSum: total + error == left + right 가 정확하다(넘침이 없으면)."""
+    total = left + right
+    virtual = total - left
+    error = (left - (total - virtual)) + (right - virtual)
+    return total, error
+
+
+def _split(value: _Floats) -> tuple[_Floats, _Floats]:
+    """Veltkamp 분할: value == high + low, 두 부분은 각각 26비트 이하다."""
+    scaled = _SPLITTER * value
+    high = scaled - (scaled - value)
+    return high, value - high
+
+
+def _two_product(left: _Floats, right: _Floats) -> tuple[_Floats, _Floats]:
+    """Dekker TwoProduct: product + error == left × right (넘침·부분정규 오차항이 없으면 정확)."""
+    product = left * right
+    left_high, left_low = _split(left)
+    right_high, right_low = _split(right)
+    error = left_low * right_low - (
+        ((product - left_high * right_high) - left_low * right_high) - left_high * right_low
+    )
+    return product, error
+
+
+def _residual_terms(
+    total: _Floats, error: _Floats, candidate: _Floats, count: _Floats
+) -> tuple[_Floats, _Floats, _Floats]:
+    """(W − candidate·count 의 근사 r, de, pe). (p, pe) = TwoProduct, (d, de) = TwoSum(s, −p)."""
+    product, product_error = _two_product(candidate, count)
+    difference, difference_error = _two_sum(total, -product)
+    residual = difference + ((difference_error - product_error) + error)
+    return residual, difference_error, product_error
+
+
+def _residual(
+    total: _Floats, error: _Floats, candidate: _Floats, count: _Floats
+) -> tuple[_Floats, _Floats]:
+    """(잔차 r, r 을 만든 세 덧셈의 반올림 오차 상한 E_res)."""
+    residual, difference_error, product_error = _residual_terms(total, error, candidate, count)
+    rounding = (3.0 * _UNIT_ROUNDOFF) * (
+        np.abs(difference_error) + np.abs(product_error) + np.abs(error) + np.abs(residual)
+    )
+    return residual, rounding
+
+
+def _corrected(total: _Floats, error: _Floats, candidate: _Floats, count: _Floats) -> _Floats:
+    """한 번 고친 후보 fl(q0 + fl(R/n)). 오차 상한은 인증 단계(`_residual`)에서만 잰다."""
+    residual, _, _ = _residual_terms(total, error, candidate, count)
+    return candidate + residual / count
+
+
+def _certify(
+    total: _Floats, error: _Floats, magnitude: _Floats, count: _Floats
+) -> tuple[_Floats, _Bools, _Bools]:
+    """(후보 q, 인증됨, 정확한 0). 식은 위 머리 주석 2~5."""
+    with np.errstate(all="ignore"):
+        candidate = _corrected(total, error, (total + error) / count, count)
+        residual, rounding = _residual(total, error, candidate, count)
+        summation = (4.0 * _UNIT_ROUNDOFF) * (count + 2.0) * magnitude
+        bound = 4.0 * (summation + rounding) + _UNDERFLOW_SLACK
+        half = 0.5 * count
+        above = (np.nextafter(candidate, np.inf) - candidate) * half - residual
+        below = (candidate - np.nextafter(candidate, -np.inf)) * half + residual
+        size = np.abs(candidate)
+        certified = (
+            (size >= _SMALLEST_CERTIFIED)
+            & (size <= _LARGEST_CERTIFIED)
+            & (above > bound)
+            & (below > bound)
+        )
+        zero = (total == 0.0) & (magnitude == 0.0)
+    return candidate, certified, zero
+
+
+def _settle(
+    total: _Floats,
+    error: _Floats,
+    magnitude: _Floats,
+    count: _Floats,
+    wanted: _Bools | None,
+    members: Callable[[int], _Floats],
+    checkpoint: Callable[[], None],
+    *,
+    out: _Floats,
+    exact: _Bools,
+) -> None:
+    """인증된 칸은 후보를, 정확한 0 은 +0.0 을, 나머지 원하는 칸은 `statistics.mean` 을 쓴다."""
+    pending = np.zeros(total.shape[0], bool)
+    # 인증식은 칸마다 연산이 많아 캐시에 드는 조각으로 나눠 계산하고 조각마다 checkpoint 한다
+    for low in range(0, total.shape[0], _CERTIFY_CHUNK):
+        checkpoint()
+        part = slice(low, min(low + _CERTIFY_CHUNK, total.shape[0]))
+        candidate, certified, zero = _certify(
+            total[part], error[part], magnitude[part], count[part]
+        )
+        if wanted is not None:
+            certified &= wanted[part]
+            zero &= wanted[part]
+        out[part] = np.where(certified, candidate, 0.0)
+        pending[part] = ~(certified | zero)
+    if wanted is not None:
+        pending &= wanted
+    cells = 0
+    elements = 0
+    for cell in np.flatnonzero(pending).tolist():
+        items = members(cell)
+        out[cell] = mean(items.tolist())
+        exact[cell] = True
+        cells += 1
+        elements += items.shape[0]
+        if cells >= _EXACT_CHECK_CELLS or elements >= _EXACT_CHECK_ELEMENTS:
+            checkpoint()
+            cells = elements = 0
+
+
+def _window_sums(
+    values: _Floats, window: int, first: int, last: int, checkpoint: Callable[[], None]
+) -> tuple[_Floats, _Floats, _Floats]:
+    """시작 t ∈ [first, last) 창의 (s, c, a).
+
+    [first, …) 를 창 길이 블록으로 자르면 창 하나는 블록 i 의 접미(offset o 부터)와 블록 i + 1 의
+    접두(o 칸)다. 블록마다 접두·접미 합을 한 번씩 누적해(창 길이 반복 × 블록 수 벡터) 창마다
+    둘을 TwoSum 으로 잇는다. 각 창의 합은 자기 원소만 담는다 — 다른 종목의 큰 값이나 NaN 이
+    섞이지 않는다.
+    """
+    count = last - first
+    blocks = (count - 1) // window + 2
+    stop = min(first + blocks * window, values.shape[0])
+    grid = np.zeros(blocks * window, np.float64)
+    grid[: stop - first] = values[first:stop]
+    # 행 = 블록 안 offset, 열 = 블록. 한 offset 의 모든 블록이 연속 메모리다
+    rows = np.ascontiguousarray(grid.reshape(blocks, window).T)
+    prefix = [np.zeros((window, blocks), np.float64) for _ in range(3)]
+    suffix = [np.zeros((window, blocks), np.float64) for _ in range(3)]
+    with np.errstate(all="ignore"):
+        state = _zero_state(blocks)
+        # prefix[·][o] = 블록 앞 o 칸의 합(o = 0 은 0)
+        for offset in range(1, window):
+            checkpoint()
+            state = _accumulate(state, rows[offset - 1])
+            for target, part in zip(prefix, state, strict=True):
+                target[offset] = part
+        state = _zero_state(blocks)
+        # suffix[·][o] = 블록 o 칸부터 끝까지의 합
+        for offset in range(window - 1, -1, -1):
+            checkpoint()
+            state = _accumulate(state, rows[offset])
+            for target, part in zip(suffix, state, strict=True):
+                target[offset] = part
+        relative = np.arange(count)
+        block, offset_in_block = np.divmod(relative, window)
+        tail = offset_in_block * blocks + block
+        head = tail + 1
+        tail_total, tail_error, tail_magnitude = (part.reshape(-1)[tail] for part in suffix)
+        head_total, head_error, head_magnitude = (part.reshape(-1)[head] for part in prefix)
+        total, joint = _two_sum(tail_total, head_total)
+        error = (tail_error + head_error) + joint
+        magnitude = (tail_magnitude + head_magnitude) + np.abs(joint)
+    return total, error, magnitude
+
+
+def _segment_sums(
+    values: _Floats,
+    bounds: NDArray[np.intp],
+    lengths: NDArray[np.intp],
+    checkpoint: Callable[[], None],
+) -> tuple[_Floats, _Floats, _Floats]:
+    """구간마다 (s, c, a). 구간을 길이 B 블록으로 자르고 블록 합 → 구간 합 두 단계로 더한다.
+
+    B = max(64, ⌈√최장⌉) 라 반복 수는 단계마다 B 이하·최장/B 이하이고, 활성 블록·구간만 앞쪽에
+    모아 벡터 길이를 줄인다. 합 순서는 인증 식에 들지 않는다(오차 상한은 순서와 무관하다).
+    """
+    groups = lengths.shape[0]
+    longest = int(lengths.max()) if groups else 0
+    block = max(_MIN_SEGMENT_BLOCK, isqrt(max(longest - 1, 0)) + 1)
+    per_group = (lengths + block - 1) // block
+    blocks = int(per_group.sum())
+    owner = np.repeat(np.arange(groups), per_group)
+    first_block = np.cumsum(per_group) - per_group
+    within = np.arange(blocks) - first_block[owner]
+    starts = bounds[:-1][owner] + within * block
+    sizes = np.minimum(block, bounds[1:][owner] - starts)
+    # 1단계: 블록 합. 길이 내림차순으로 놓으면 offset k 에서 도는 블록은 앞쪽 연속 구간이다
+    order = np.argsort(-sizes, kind="stable")
+    sorted_starts = starts[order]
+    active_blocks = _active_counts(sizes, block)
+    block_state = _zero_state(blocks)
+    with np.errstate(all="ignore"):
+        for offset in range(block):
+            _accumulate_prefix(
+                block_state,
+                active_blocks[offset],
+                lambda part, k=offset: values[sorted_starts[part] + k],
+                checkpoint,
+            )
+        # 2단계: 구간마다 블록 합을 블록 순서대로 잇는다
+        position = np.empty(blocks, np.intp)
+        position[order] = np.arange(blocks)
+        group_order = np.argsort(-per_group, kind="stable")
+        active_groups = _active_counts(per_group, int(per_group.max()) if groups else 0)
+        group_state = _zero_state(groups)
+        for index in range(active_groups.shape[0]):
+            _join_prefix(
+                group_state,
+                block_state,
+                active_groups[index],
+                lambda part, j=index: position[first_block[group_order[part]] + j],
+                checkpoint,
+            )
+    result = [np.empty(groups, np.float64) for _ in range(3)]
+    for target, part in zip(result, group_state, strict=True):
+        target[group_order] = part
+    return result[0], result[1], result[2]
+
+
+def _zero_state(size: int) -> tuple[_Floats, _Floats, _Floats]:
+    return (
+        np.zeros(size, np.float64),
+        np.zeros(size, np.float64),
+        np.zeros(size, np.float64),
+    )
+
+
+def _accumulate(
+    state: tuple[_Floats, _Floats, _Floats], item: _Floats
+) -> tuple[_Floats, _Floats, _Floats]:
+    total, error, magnitude = state
+    total, step = _two_sum(total, item)
+    return total, error + step, magnitude + np.abs(step)
+
+
+def _active_counts(sizes: NDArray[np.intp], span: int) -> NDArray[np.intp]:
+    """k ∈ [0, span) 마다 크기가 k 보다 큰 항목 수."""
+    histogram = np.bincount(sizes, minlength=span + 1)
+    return (sizes.shape[0] - np.cumsum(histogram))[:span].astype(np.intp)
+
+
+def _accumulate_prefix(
+    state: tuple[_Floats, _Floats, _Floats],
+    active: int,
+    items: Callable[[slice], _Floats],
+    checkpoint: Callable[[], None],
+) -> None:
+    """state 의 앞 `active` 칸에 items(구간) 를 더한다. 청크마다 checkpoint."""
+    total, error, magnitude = state
+    for low in range(0, int(active), _KERNEL_CHUNK):
+        checkpoint()
+        part = slice(low, min(low + _KERNEL_CHUNK, int(active)))
+        total[part], step = _two_sum(total[part], items(part))
+        error[part] += step
+        magnitude[part] += np.abs(step)
+
+
+def _join_prefix(
+    state: tuple[_Floats, _Floats, _Floats],
+    blocks: tuple[_Floats, _Floats, _Floats],
+    active: int,
+    positions: Callable[[slice], NDArray[np.intp]],
+    checkpoint: Callable[[], None],
+) -> None:
+    """state 의 앞 `active` 칸에 블록 합(s, c, a)을 잇는다. c·a 에 블록 값과 이음 오차를 더한다."""
+    total, error, magnitude = state
+    block_total, block_error, block_magnitude = blocks
+    for low in range(0, int(active), _KERNEL_CHUNK):
+        checkpoint()
+        part = slice(low, min(low + _KERNEL_CHUNK, int(active)))
+        index = positions(part)
+        total[part], step = _two_sum(total[part], block_total[index])
+        error[part] = (error[part] + block_error[index]) + step
+        magnitude[part] = (magnitude[part] + block_magnitude[index]) + np.abs(step)

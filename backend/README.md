@@ -261,9 +261,10 @@ extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따�
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |
 | `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH` | `.local/assistant.sqlite3` | 어시스턴트 프로파일·세션 저장소 |
-| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 공급자 API 키 파일 |
+| `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH` | OS 기본 사용자 설정 위치 | 공급자 API 키 파일. 키움 모의 연결 키(S06)도 같은 파일에 둔다 |
 | `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL` | 꺼짐 | 정확히 `1`일 때만 로컬 프록시용 비보안 base URL 허용 |
 | `STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER` | 꺼짐 | 정확히 `1`일 때만 공급자를 대본 adapter(`llm_scripted`)로 바꾼다. 브라우저 e2e 전용 |
+| `STRATEGY_WORKBENCH_BROKER_FAKE_PROBE` | 꺼짐 | 정확히 `1`일 때만 키움 모의 "연결 확인"을 대본 probe로 바꾼다(키움을 부르지 않는다). 브라우저 e2e 전용 |
 
 Equity HTTP 계약은 다음 네 경로로 분리한다. mock과 duckdb adapter가 같은 계약을 따른다.
 

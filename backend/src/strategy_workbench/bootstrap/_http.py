@@ -36,6 +36,8 @@ ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
 ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV = "STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL"
 ASSISTANT_FAKE_PROVIDER_ENV = "STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER"
+# 브라우저 e2e 전용. 키움 "연결 확인"을 대본 probe로 바꾼다. 정확히 "1"일 때만 켠다.
+BROKER_FAKE_PROBE_ENV = "STRATEGY_WORKBENCH_BROKER_FAKE_PROBE"
 
 
 def runtime_strategy_repository_path() -> Path:
@@ -176,6 +178,10 @@ def runtime_assistant_settings() -> AssistantSettings:
     )
 
 
+def runtime_broker_fake_probe() -> bool:
+    return os.environ.get(BROKER_FAKE_PROBE_ENV, "").strip() == "1"
+
+
 def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
@@ -190,6 +196,7 @@ def build_http_app(
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
     allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS,
+    broker_fake_probe: bool = False,
 ):  # return type is inferred from the FastAPI factory at this composition root
     container = build_container(
         strategy_repository_path=strategy_repository_path,
@@ -203,6 +210,7 @@ def build_http_app(
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
+        broker_fake_probe=broker_fake_probe,
     )
     return create_app(
         strategy_design=container.strategy_design,
@@ -217,6 +225,7 @@ def build_http_app(
         experiments=container.experiments,
         continuous_accounts=container.continuous_accounts,
         factor_library=container.factor_library,
+        broker_connections=container.broker_connections,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
@@ -239,5 +248,6 @@ def build_runtime_http_app():
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),
+        broker_fake_probe=runtime_broker_fake_probe(),
         allowed_origins=runtime_allowed_origins(),
     )

@@ -78,6 +78,10 @@ bootstrap ─> application + adapters
   위 공용 연결·DDL 규칙의 재사용이다. HTTP는 표준 라이브러리이며 주소는 모의 도메인 상수 하나다. 키 저장과
   bootstrap·HTTP 연결은 이 노드의 범위가 아니다. 상세 계약은
   `docs/planning/research-to-trading/S06-kiwoom-contract.md`다.
+- S06 ②-2의 키움 모의 연결 설정은 `application/broker_connection`이 자기 outgoing 포트
+  (`BrokerCredentialStore`·`BrokerConnectionProbe`)로 소유한다. `secrets_local`이 저장 포트를,
+  `kiwoom_mock`이 연결 확인 포트를 구현하고, HTTP는 `/api/v1/broker-connections/kiwoom-mock`으로 그대로
+  옮긴다. 이 노드는 `application.offline_execution`과 서로 import하지 않는다.
 - 완료 run의 계좌 보고서는 `domain/backtest`의 순수 projection·전용
   `facade/account_report.py`가 금액·상태·초기자본 기준 해석을 소유한다.
   `application/backtest_run`은 `self.result(run_id)`의 완료·해시·역직렬화 검증을 한 번 재사용한 뒤

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
@@ -34,6 +35,11 @@ from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import UrllibTransport
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.probe import (
+    KiwoomConnectionProbe,
+    ScriptedConnectionProbe,
+)
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
     SQLiteExperimentRepository,
@@ -46,6 +52,9 @@ from strategy_workbench.adapters.outbound.run_worker_process.facade.execution im
 from strategy_workbench.adapters.outbound.run_worker_process.facade.worker import (
     VersionBundle,
     code_fingerprint,
+)
+from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
+    LocalFileBrokerCredentialStore,
 )
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteFactorLibraryRepository,
@@ -76,6 +85,10 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     RunLaneControls,
     TrialLedger,
     rejection_code,
+)
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerConnectionProbe,
+    BrokerConnectionService,
 )
 from strategy_workbench.application.continuous_account.facade.evaluation import (
     ContinuousAccountService,
@@ -155,6 +168,7 @@ class BackendContainer:
     experiments: ExperimentRunService
     continuous_accounts: ContinuousAccountService
     factor_library: FactorLibraryService
+    broker_connections: BrokerConnectionService
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
@@ -182,6 +196,7 @@ def build_container(
     run_isolation: str = DEFAULT_RUN_ISOLATION,
     run_memory_reserve_gb: float | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
+    broker_fake_probe: bool = False,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
 
@@ -336,10 +351,30 @@ def build_container(
             new_id=lambda: str(uuid4()),
             now=lambda: datetime.now(UTC),
         ),
+        broker_connections=BrokerConnectionService(
+            LocalFileBrokerCredentialStore(assistant_services.secrets),
+            _broker_probe(fake=broker_fake_probe),
+        ),
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,
     )
+
+
+def _broker_probe(*, fake: bool) -> BrokerConnectionProbe:
+    """키움 연결 확인 probe. e2e 대본은 `fake`일 때만 쓴다(`STRATEGY_WORKBENCH_BROKER_FAKE_PROBE`).
+
+    python.org macOS 빌드는 기본 인증서 목록이 비어 있다. OS 신뢰 저장소를 읽는 `truststore`가
+    설치돼 있으면 그것을 쓰고, 없으면 파이썬 기본값으로 둔다(Windows 기본값은 OS 저장소를 읽는다).
+    """
+    if fake:
+        return ScriptedConnectionProbe()
+    try:
+        import truststore
+    except ImportError:
+        return KiwoomConnectionProbe()
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    return KiwoomConnectionProbe(transport=UrllibTransport(ssl_context=context))
 
 
 def _run_execution(

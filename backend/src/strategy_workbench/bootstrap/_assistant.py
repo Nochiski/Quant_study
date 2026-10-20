@@ -250,6 +250,9 @@ class AssistantServices:
     chat: AssistantChatService
     turns: AssistantTurnRunner
     database: AssistantDatabase
+    # 키움 모의 연결 설정(S06 ②-2)이 같은 secrets.json을 쓴다. 인스턴스를 하나로 둬야 그 잠금이
+    # 두 쓰기를 막는다.
+    secrets: LocalFileProviderSecretStore
 
 
 def repository_root() -> Path:
@@ -384,6 +387,7 @@ def build_assistant_services(
         chat=chat,
         turns=AssistantTurnRunner(chat, session_repository, now=_now, new_id=_new_id),
         database=database,
+        secrets=secrets,
     )
 
 

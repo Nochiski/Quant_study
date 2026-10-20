@@ -25,6 +25,11 @@ from strategy_workbench.adapters.outbound.kiwoom_mock.facade.broker import (
     KiwoomNoResponseError,
     UrllibTransport,
 )
+from strategy_workbench.adapters.outbound.kiwoom_mock.facade.probe import KiwoomConnectionProbe
+from strategy_workbench.application.broker_connection.facade.connection import (
+    BrokerCredentials,
+    ConnectionOutcome,
+)
 from strategy_workbench.application.offline_execution.facade.execution import (
     BrokerError,
     ExecutionStatus,
@@ -720,3 +725,43 @@ def test_urllib_transport_only_targets_the_mock_host(monkeypatch: pytest.MonkeyP
     for path in ("https://api.kiwoom.com/oauth2/token", "//api.kiwoom.com/x", "oauth2/token"):
         with pytest.raises(ValueError):
             transport.post(path, {"api-id": "au10001"}, {})
+
+
+# --- 설정 화면의 "연결 확인"(②-2) --------------------------------------------------------------
+
+
+def test_connection_probe_maps_kiwoom_answers_without_ordering() -> None:
+    clock = Clock()
+    fake = FakeKiwoom(clock)
+    probe = KiwoomConnectionProbe(
+        transport=fake, now=clock.now, monotonic=clock.monotonic, sleep=clock.sleep
+    )
+    credentials = BrokerCredentials(APP_KEY, SECRET, ACCOUNT)
+    assert probe.verify(credentials).outcome == ConnectionOutcome.CONNECTED
+    fake.account = "5099999999"
+    assert probe.verify(credentials).outcome == ConnectionOutcome.ACCOUNT_MISMATCH
+    fake.account = ACCOUNT
+    for code, outcome in (
+        ("8030", ConnectionOutcome.MODE_MISMATCH),
+        ("8050", ConnectionOutcome.IP_NOT_ALLOWED),
+        ("8001", ConnectionOutcome.AUTH_FAILED),
+    ):
+        fake.token_error = code
+        assert probe.verify(credentials).outcome == outcome
+    assert set(fake.api_ids()) == {"au10001", "ka00001"}
+
+
+class _Silent:
+    def post(
+        self, path: str, headers: Mapping[str, str], body: Mapping[str, object]
+    ) -> KiwoomHttpResponse:
+        raise KiwoomNoResponseError("injected outage")
+
+
+def test_connection_probe_reports_no_response() -> None:
+    clock = Clock()
+    probe = KiwoomConnectionProbe(
+        transport=_Silent(), now=clock.now, monotonic=clock.monotonic, sleep=clock.sleep
+    )
+    result = probe.verify(BrokerCredentials(APP_KEY, SECRET, ACCOUNT))
+    assert result.outcome == ConnectionOutcome.NO_RESPONSE

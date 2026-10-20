@@ -371,7 +371,7 @@ def test_선언은_있는데_값이_없는_필드는_커버율_0_으로_남는�
     `table_rows` 축의 분모는 창 안 `corp_event` 중 `row_filter`(`treasury_buy`) 행이다(#592) —
     2026-10-20(#589) 종류별 class-row 로 자사주 행이 32 → 41(우선주 005935 leg 11 추가, 대신증권
     기타주식만 산 2건 제외)이 되어 분자 = 금액 있는 자사주 행 40(금액 없는 00260657 2023-11-17
-    1건 제외) / 분모 41 = 97.560976%. 손계산 근거 전부는 아래 `table_rows` 분모 테스트에 있다.
+    1건 제외) / 분모 41 = 97.560976%. 손계산 근거 전부는 아래 `ROW_FILTERED_FIELDS` 에 있다.
     """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, estimated_coverage_pct FROM dp "
@@ -383,7 +383,8 @@ def test_선언은_있는데_값이_없는_필드는_커버율_0_으로_남는�
     assert r.n_reject == 0
 
 
-# `row_filter` 가 있는 `table_rows` 필드 전부(#592 전수 점검) — 절단본 손계산.
+# `row_filter` 가 있는 필드 전부(#592 전수 점검, 축 넷 모두) — 절단본 손계산.
+# ① 행 축(`table_rows`) — 분모는 창 안 그 유형 행이다.
 #   corp_event(창 2015-01-23~2026-08-19 안 50행) = treasury_buy 41(금액 40) · capred 5 · split 2 ·
 #     bonus 1 · cb_issue 1(2023-07-18, 금액 있음). rights 는 아직 싣지 않는다(0행).
 #   holder_daily = stg_holder_elestock 4,197행(접수 × 보고자 4,197 키, 증감 수량·비율 전부 있음,
@@ -392,32 +393,48 @@ def test_선언은_있는데_값이_없는_필드는_커버율_0_으로_남는�
 # 분자는 값이 있는 그 유형 행이고, 분모는 창 안 그 유형 행이다. 수정 전 분모는 창 안 전 행이었다
 # — buyback 50 · insider 4,329(elestock 4,197 + majorstock 132) · major_holder 4,323(창 안
 # elestock 4,191 + majorstock 132) — 그래서 major_holder_stake 가 3.05% 로 나왔다.
-ROW_FILTERED_TABLE_ROWS: dict[str, tuple[int, int, float, str, str]] = {
-    # field_id: (n_observed, n_denominator, 커버율 %, coverage_from, coverage_to)
-    "event.buyback_amount": (40, 41, 97.560976, "2015-01-23", "2026-08-19"),
-    "event.capital_raise_amount": (1, 1, 100.0, "2023-07-18", "2023-07-18"),
-    "event.insider_net_buy": (4197, 4197, 100.0, "2024-08-26", "2026-08-26"),
-    "event.insider_stake_change": (4197, 4197, 100.0, "2024-08-26", "2026-08-26"),
-    "event.major_holder_stake": (132, 132, 100.0, "2024-09-09", "2026-08-25"),
+# ② 격자 축 — `row_filter` 는 값을 읽을 원천 행만 고르고 분모(격자)를 줄이지 않는다.
+#   grid_session(flow_daily `src = 'kis'`): KIS 행 3,925 = 캘린더 전 29 + 창 2010-01-04~2019-02-12
+#     안 3,896(그중 격자 셀 3,891, 격자 밖 5). 분모 = 그 창의 universe_daily 셀 23,387(15종목).
+#     분모에 원천 필터를 걸면(KIS 행이 있는 격자 셀 3,891) 100% 로 부푼다 — 원천이 격자를 얼마나
+#     덮는지가 사라진다.
+#   grid_security(consensus_daily `metric`): 분모 = 격자 종목 15. 값이 있는 종목은 eps·ni·op 5,
+#     revenue 4(전부 격자 안). 분모를 그 metric 행이 있는 종목(eps·revenue 7)으로 좁히면 부푼다.
+ROW_FILTERED_FIELDS: dict[str, tuple[str, int, int, float, str, str]] = {
+    # field_id: (coverage_basis, n_observed, n_denominator, 커버율 %, coverage_from, coverage_to)
+    "event.buyback_amount": ("table_rows", 40, 41, 97.560976, "2015-01-23", "2026-08-19"),
+    "event.capital_raise_amount": ("table_rows", 1, 1, 100.0, "2023-07-18", "2023-07-18"),
+    "event.insider_net_buy": ("table_rows", 4197, 4197, 100.0, "2024-08-26", "2026-08-26"),
+    "event.insider_stake_change": ("table_rows", 4197, 4197, 100.0, "2024-08-26", "2026-08-26"),
+    "event.major_holder_stake": ("table_rows", 132, 132, 100.0, "2024-09-09", "2026-08-25"),
+    "flow.foreign_net_buy_kis": ("grid_session", 3891, 23387, 16.637448, "2010-01-04",
+                                 "2019-02-12"),
+    "flow.institution_net_buy_kis": ("grid_session", 3891, 23387, 16.637448, "2010-01-04",
+                                     "2019-02-12"),
+    "consensus.eps_dispersion": ("grid_security", 5, 15, 33.333333, "2026-09-01", "2026-09-02"),
+    "consensus.forward_eps": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-09-02"),
+    "consensus.forward_ni": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
+    "consensus.forward_op": ("grid_security", 5, 15, 33.333333, "2026-04-03", "2026-08-04"),
+    "consensus.forward_sales": ("grid_security", 4, 15, 26.666667, "2026-04-03", "2026-09-02"),
 }
 
 
-def test_table_rows_분모는_row_filter_가_고른_행만_센다(built) -> None:
-    """사건 유형·원천으로 거르는 필드의 커버율이 다른 유형의 행 수에 흔들리지 않는다(#592).
+def test_row_filter_필드의_분모는_축마다_정한_뜻을_지킨다(built) -> None:
+    """행 축은 그 유형 행만 분모에 넣고, 격자 축은 분모(격자)를 줄이지 않는다(#592·#597 리뷰 P3-1).
 
-    선언 전수와 표를 함께 본다 — `row_filter` 가 있는 `table_rows` 필드가 새로 생기면 이 표에
-    손계산을 더해야 통과한다. 창이 값 행에서 잡히는지(분자 필터가 창에도 걸리는지)는
+    선언 전수와 표를 함께 본다 — `row_filter` 가 있는 필드가 새로 생기면 이 표에 손계산을 더해야
+    통과한다. 창이 값 행에서 잡히는지(분자 필터가 창에도 걸리는지)는
     `capital_raise_amount`·`major_holder_stake` 의 `coverage_from` 이 본다.
     """
     _, r = built
-    declared = {fp.field_id for _, fp in rules_s19.owned_fields()
-                if fp.coverage_axis == "table_rows" and fp.row_filter}
-    assert declared == set(ROW_FILTERED_TABLE_ROWS)
+    declared = {fp.field_id for _, fp in rules_s19.owned_fields() if fp.row_filter}
+    assert declared == set(ROW_FILTERED_FIELDS)
     ids = ", ".join(f"'{f}'" for f in sorted(declared))
-    got = {str(f): (n_obs, n_den, pct, str(lo), str(hi)) for f, n_obs, n_den, pct, lo, hi in _rows(
-        r.out_dir, "SELECT field_id, n_observed, n_denominator, estimated_coverage_pct, "
-                   f"coverage_from, coverage_to FROM dp WHERE field_id IN ({ids})")}
-    assert got == ROW_FILTERED_TABLE_ROWS
+    got = {str(row[0]): (row[1], row[2], row[3], row[4], str(row[5]), str(row[6]))
+           for row in _rows(r.out_dir, "SELECT field_id, coverage_basis, n_observed, "
+                                       "n_denominator, estimated_coverage_pct, coverage_from, "
+                                       f"coverage_to FROM dp WHERE field_id IN ({ids})")}
+    assert got == ROW_FILTERED_FIELDS
 
 
 def _event_table(rows: list[tuple[str, str, int | None]]) -> duckdb.DuckDBPyConnection:

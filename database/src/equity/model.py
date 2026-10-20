@@ -167,9 +167,9 @@ RULES_VERSION = "e1.20.0"                # BuildRecord.rules_version 에 실린�
 #         보통주식분(`aqpln_prc_ostk`)만, 결정일에 상장돼 있던 우선주가 하나인 법인의 우선주
 #         티커는 기타주식분(`aqpln_prc_estk`)만 받는다. 그런 우선주가 없으면 `unlisted_class`,
 #         둘 이상이면 `class_ambiguous`(둘 다 범위 밖)이고, 상장 여부는 `security_span` 구간으로
-#         본다(#590 리뷰 P3-1). 기타주식만 산 공시는 보통주 행이 없다. `corp_event` 의 행·`amount_krw` 와
-#         `dataset_profile` 의 `event.buyback_amount` 커버가 바뀐다. 같은 판에서 S19·S20 문장의
-#         「E05 행 0」 서술을 지금 원장대로 고치고(#588) E05 에 레지스트리
+#         본다(#590 리뷰 P3-1). 기타주식만 산 공시는 보통주 행이 없다. `corp_event` 의 행·
+#         `amount_krw` 와 `dataset_profile` 의 `event.buyback_amount` 커버가 바뀐다. 같은 판에서
+#         S19·S20 문장의 「E05 행 0」 서술을 지금 원장대로 고치고(#588) E05 에 레지스트리
 #         `event.buyback_announcement` 를 옮겨 단다(I03 은 사업보고서 확정치 축이라 그 팩터의
 #         재료가 아니다).
 

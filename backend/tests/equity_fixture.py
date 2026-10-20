@@ -875,11 +875,11 @@ WB_DIVIDEND_ROWS: list[DividendRow] = [
 WB_BONUS_EX = date(2024, 1, 4)
 WB_EVENT_ROWS: list[CorpEventRow] = [
     # 같은 공시일 2건 → 합 1,500,000
-    ("E1", "005930", "tsstk_aq", date(2024, 1, 5), date(2024, 1, 5), 1_000_000),
-    ("E2", "005930", "tsstk_aq", date(2024, 1, 5), date(2024, 1, 5), 500_000),
+    ("E1", "005930", "treasury_buy", date(2024, 1, 5), date(2024, 1, 5), 1_000_000),
+    ("E2", "005930", "treasury_buy", date(2024, 1, 5), date(2024, 1, 5), 500_000),
     # 유형이 다른 행은 event.buyback_amount 에 섞이지 않는다
     ("E3", "005930", "split", date(2024, 1, 8), date(2024, 1, 8), None),
-    ("E4", "000660", "tsstk_aq", date(2023, 12, 27), date(2023, 12, 27), 2_000_000),
+    ("E4", "000660", "treasury_buy", date(2023, 12, 27), date(2023, 12, 27), 2_000_000),
     ("E5", "000660", "bonus", date(2024, 1, 2), WB_BONUS_EX, None),
 ]
 # 격자 3테이블(S08~S10) — 셀 종류 5갈래를 한 창 안에서 다 낸다.

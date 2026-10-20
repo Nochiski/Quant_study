@@ -263,8 +263,15 @@ def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -
 # ── S21 본판: 필드별 1셀 손검산 ───────────────────────────────────────────────
 
 def _cell(result, as_of: date, security_id: str, field_id: str):
-    o = next(o for o in result.observations if (o.as_of, o.security_id) == (as_of, security_id))
-    return next(f for f in o.fields if f.field_id == field_id)
+    # 셀이 없으면 StopIteration 대신 무엇을 찾았는지 남긴다(#586 리뷰)
+    o = next((o for o in result.observations if (o.as_of, o.security_id) == (as_of, security_id)),
+             None)
+    assert o is not None, f"관측 행 없음 — as_of={as_of} security_id={security_id}"
+    cell = next((f for f in o.fields if f.field_id == field_id), None)
+    assert cell is not None, (
+        f"셀 없음 — as_of={as_of} security_id={security_id} field_id={field_id} "
+        f"present={sorted(f.field_id for f in o.fields)}")
+    return cell
 
 
 def test_2018_05_04_가격_6필드는_KRX_원장_행_그대로다(adapter) -> None:
@@ -339,10 +346,11 @@ def test_2026_08_컨센서스_의견_임원지분_1셀(adapter) -> None:
     # 08-20 세션에는 08-14 접수 4건 합(1,040주)이 최신이다. majorstock 축은 섞이지 않는다
     insider = _cell(r, BACKFILL_END, "005930:1", "event.insider_net_buy")
     assert (insider.value, insider.available_date) == (1_040.0, date(2026, 8, 14))
-    # 절단본 corp_event 에 tsstk_aq 행이 없어 자사주 필드는 목록엔 있어도 셀이 없다(합성 금지)
-    o = next(o for o in r.observations
-             if (o.as_of, o.security_id) == (BACKFILL_END, "005930:1"))
-    assert "event.buyback_amount" not in {f.field_id for f in o.fields}
+    # 자사주 취득 결정 — 원장 사건 어휘 `treasury_buy` 행을 읽는다(#583, 전에는 원천 표 이름
+    # `tsstk_aq` 로 걸러 셀이 없었다). 08-21 접수 결정은 as_of(08-20) 뒤라 보이지 않고, 그 앞의
+    # 03-18 접수 1건(보통주 7,174,300,000,000원, stg_event_tsstk_aq.aqpln_prc_ostk)이 최신이다
+    buyback = _cell(r, BACKFILL_END, "005930:1", "event.buyback_amount")
+    assert (buyback.value, buyback.available_date) == (7_174_300_000_000.0, date(2026, 3, 18))
 
 
 def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) -> None:

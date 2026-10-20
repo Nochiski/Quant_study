@@ -22,6 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
+from strategy_workbench.adapters.outbound.run_worker_process import _execution as execution_module
 from strategy_workbench.adapters.outbound.run_worker_process.facade.execution import (
     ProcessRunExecution,
     WorkerSettings,
@@ -425,6 +426,41 @@ def _flaky(tmp_path: Path, folder: Path, failing: str) -> ProcessRunExecution:
     return _execution(
         tmp_path, folder, command=[sys.executable, "-c", _FLAKY, str(folder), failing]
     )
+
+
+def test_a_ready_spare_resets_the_consecutive_failure_count(tmp_path: Path) -> None:
+    """D7 "연속" 3회: 판본이 맞는 `ready` 가 사이에 있으면 실패는 이어지지 않는다(#591 리뷰 P3-2).
+
+    홀수 번째로 뜬 예비만 실패한다. 준비된 예비를 두 번 죽이면 실패는 1·2·1·2·1 로 오가며 3 에
+    닿지 않아 예비가 다시 준비된다. `ready` 에서 0 으로 돌리지 않으면 셋째 실패에서 멈춘다.
+    """
+    folder = tmp_path / "records"
+    execution = _flaky(tmp_path, folder, "odd")
+    for _ in range(2):
+        handle = _wait_until(execution.spare_pid)
+        os.kill(handle, signal.SIGTERM)
+        _wait_until(lambda handle=handle: execution.spare_pid() not in (None, handle))
+
+    assert len(records(folder, "started")) >= 6
+
+
+def test_a_dead_spare_is_never_handed_to_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """예비가 죽은 뒤 예비 스레드가 알아채기 전에 든 run 은 그 예비를 받지 않고 직접 띄운다
+    (#591 리뷰 P3-2). 받으면 job 이 닿지 않아 `worker_exited` 로 끝난다."""
+    monkeypatch.setattr(execution_module, "_SPARE_POLL_S", 600.0)
+    folder = tmp_path / "records"
+    execution = _execution(tmp_path, folder)
+    handle, dead = _ready_spare(execution, folder)
+
+    os.kill(handle, signal.SIGTERM)
+    assert wait_for_exit(dead, timeout_s=TIMEOUT_S)
+    listener = _Recorder()
+    execution.start(resolved_job("run-after-silent-death"), listener)
+
+    assert isinstance(listener.wait(), RunCommitted)
+    assert dead not in records(folder, "job")
 
 
 def test_spares_start_again_after_a_run_boots_its_own_worker(tmp_path: Path) -> None:

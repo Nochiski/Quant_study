@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.19.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.20.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -163,6 +163,14 @@ RULES_VERSION = "e1.19.0"                # BuildRecord.rules_version 에 실린�
 # e1.19.0: 2026-09-28 `price.adj_close` 의 `field_scope` 가 `internal` → `field_map`(S23 선언). #218 이
 #         레지스트리 가격 변화 팩터를 이 필드로 옮겨 FIELD_MAP §2 어휘가 됐다(문서 감사 결정 5).
 #         값·랙·커버는 그대로이고 `dataset_profile` 한 행의 `field_scope`·`evidence` 만 바뀐다.
+# e1.20.0: 2026-10-20 자사주 취득 금액을 주식 종류별 class-row 로 나눈다(#589). 보통주 티커는
+#         보통주식분(`aqpln_prc_ostk`)만, 상장 우선주가 하나인 법인의 우선주 티커는 기타주식분
+#         (`aqpln_prc_estk`)만 받고, 우선주가 둘 이상이면 기타주식분을 범위 밖 `class_ambiguous` 로
+#         둔다(기타주식만 산 공시는 보통주 행이 없다). `corp_event` 의 행·`amount_krw` 와
+#         `dataset_profile` 의 `event.buyback_amount` 커버가 바뀐다. 같은 판에서 S19·S20 문장의
+#         「E05 행 0」 서술을 지금 원장대로 고치고(#588) E05 에 레지스트리
+#         `event.buyback_announcement` 를 옮겨 단다(I03 은 사업보고서 확정치 축이라 그 팩터의
+#         재료가 아니다).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

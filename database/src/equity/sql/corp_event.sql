@@ -24,6 +24,8 @@
 --   unlisted_class   상장 티커가 없는 주식 종류(RCPS·전환우선주 등 UNLISTED_KINDS, 또는 우선주
 --                    계열인데 법인에 상장 우선주가 없음, 결정공시의 기타주식도 같은 규칙)
 --   class_unknown    종류 어휘 밖('-' 포함) — 어느 티커의 사건인지 정할 수 없다
+--   class_ambiguous  금액을 나르는 기타주식 class-row 인데 법인의 상장 우선주 티커가 둘 이상 —
+--                    금액은 나눠 붙일 수 없어 어느 우선주의 금액인지 정할 수 없다(자사주 취득, #589)
 --   pre_listing      티커는 있으나 효력일이 그 티커의 security_span 첫 존재일 이전
 --   krx_par_only     KRX 액면가 변경인데 주식수가 사실상 불변(|ratio−1| ≤ krx_share_change_tol)
 --   share_unchanged  결정공시·자본변동인데 전후 주식수 불변(액면감액 감자 등) — 같은 허용치
@@ -171,14 +173,33 @@ capital AS (
 -- `adj_factor` 는 MVP 4유형만 읽으므로(sql/adj_factor.sql WHERE event_type IN …) 계수 축과
 -- 격리돼 있다. 사건일은 **결정일**이다 — 조정할 가격 효력일이 없고 소비자가 쓰는 축이
 -- 「발표 당일 초과수익」이라 결정일이 곧 사건일이다.
--- 종류 축이 없다(법인 사실) → cls = 'common' 으로 보통주 티커에만 붙인다.
+-- 자사주 취득 결정은 주식 종류 축이 있다(DART tsstkAqDecsn 의 `_ostk` 보통주식 · `_estk` 기타주식)
+-- → 위 결정공시와 같은 class-row 규칙으로 종류마다 그 종류의 취득예정금액만 싣는다(#589). 두 금액을
+-- 합쳐 보통주 티커에 붙이면 보통주 시가총액으로 나눈 규모가 우선주 매입분만큼 부푼다.
+--   common    보통주식분. 기타주식만 사는 공시(보통주 수량·금액이 0 또는 결측)는 보통주 사건이 아니라
+--             행을 내지 않는다. 종류별 수량·금액이 하나도 없는 공시는 보통주 행으로 남기고 금액만 결측이다.
+--   preferred 기타주식분 — 기타주식 = 상장 우선주 leg 라는 규칙은 결정공시 estk leg · 종류 대응표
+--             '기타주식'(rules_s05.PREFERRED_KINDS)과 같다. 상장 우선주가 없으면 unlisted_class 다.
+--             **금액은 나눠 붙일 수 없다** — 우선주 티커가 둘 이상인 법인은 어느 우선주의 금액인지
+--             공시가 말하지 않으므로 cls 를 'ambiguous' 로 두어 class_ambiguous(범위 밖)로 보낸다.
+--             (비율 사건은 1주당 배수라 모든 우선주 leg 에 같은 값이 맞지만 금액은 합이다.)
 tsstk_aq AS (
     SELECT rcept_no, corp_code, 'event_tsstk_aq' AS source, 'treasury_buy' AS event_type,
            'common' AS cls, aq_dd AS basis_date,
            NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis,
-           coalesce(aqpln_prc_ostk, 0) + coalesce(aqpln_prc_estk, 0) AS amount_raw,
-           (aqpln_prc_ostk IS NOT NULL OR aqpln_prc_estk IS NOT NULL) AS amount_given
+           aqpln_prc_ostk AS amount_raw, (aqpln_prc_ostk IS NOT NULL) AS amount_given
     FROM stg_event_tsstk_aq
+    WHERE coalesce(aqpln_prc_ostk, 0) > 0 OR coalesce(aqpln_stk_ostk, 0) > 0
+       OR NOT (coalesce(aqpln_prc_estk, 0) > 0 OR coalesce(aqpln_stk_estk, 0) > 0)
+    UNION ALL
+    SELECT t.rcept_no, t.corp_code, 'event_tsstk_aq', 'treasury_buy',
+           CASE WHEN (SELECT count(*) FROM legs l
+                      WHERE l.corp_code = t.corp_code AND l.cls = 'preferred') > 1
+                THEN 'ambiguous' ELSE 'preferred' END,
+           t.aq_dd, NULL::DOUBLE, FALSE, t.available_date, t.available_basis,
+           t.aqpln_prc_estk, (t.aqpln_prc_estk IS NOT NULL)
+    FROM stg_event_tsstk_aq t
+    WHERE coalesce(t.aqpln_prc_estk, 0) > 0 OR coalesce(t.aqpln_stk_estk, 0) > 0
 ),
 cvbd_is AS (
     SELECT rcept_no, corp_code, 'event_cvbd_is' AS source, 'cb_issue' AS event_type,
@@ -198,7 +219,7 @@ dart AS (
 dart_leg AS (
     -- announce 폴백: rcept_no 14자리 = 접수일 YYYYMMDD + 일련번호 6자리 → '%Y%m%d%f'(%f = 6자리)
     -- 로 한 번에 파싱해 날짜만 취한다(참조표 미스 → stage available_date NULL·basis unknown).
-    -- unlisted·unknown class-row 는 legs 에 없으므로 ticker NULL 1행으로 남아 scope_out 으로 간다.
+    -- unlisted·unknown·ambiguous class-row 는 legs 에 없으므로 ticker NULL 1행으로 남아 scope_out 으로 간다.
     SELECT l.ticker, d.corp_code, d.source, d.event_type, d.cls, d.basis_date, d.ratio,
            d.ratio_given, CASE WHEN d.amount_given THEN d.amount_raw END AS amount_krw,
            d.rcept_no,
@@ -262,6 +283,7 @@ pool AS (
                 WHEN p.cls = 'unlisted' OR (p.cls = 'preferred' AND p.ticker IS NULL)
                      THEN 'unlisted_class'
                 WHEN p.cls = 'unknown' THEN 'class_unknown'
+                WHEN p.cls = 'ambiguous' THEN 'class_ambiguous'
                 WHEN p.ticker IS NOT NULL AND p.effective_date < fl.first_date THEN 'pre_listing'
            END AS scope_out
     FROM (

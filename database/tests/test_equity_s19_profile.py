@@ -367,11 +367,17 @@ def test_선언은_있는데_값이_없는_필드는_커버율_0_으로_남는�
     두 유형은 **가격 조정 사건이 아니다**(주식수가 안 변한다). `ratio` NULL · `amount_krw` 가
     값을 나르고 `adj_factor` 는 계수 4유형만 읽으므로 조정 축과 격리돼 있다.
     자사주 금액은 원천 채움률이 100%가 아니라(서버 `aqpln_prc_ostk` 94.7%) 커버가 그만큼 낮다.
+    `table_rows` 축의 분모는 창 안 `corp_event` 전 행이다 — 2026-10-20(#589) 종류별 class-row 로
+    자사주 행이 32 → 41(우선주 005935 leg 11 추가, 대신증권 기타주식만 산 2건 제외)이 되어
+    분자 = 금액 있는 자사주 행 40(금액 없는 00260657 2023-11-17 1건 제외) / 분모 50 = 80%.
     """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, estimated_coverage_pct FROM dp "
                                 "WHERE table_name = 'corp_event' ORDER BY 1"))
-    assert got == {"event.buyback_amount": 75.609756, "event.capital_raise_amount": 100.0}
+    assert got == {"event.buyback_amount": 80.0, "event.capital_raise_amount": 100.0}
+    (n_obs, n_den), = _rows(r.out_dir, "SELECT n_observed, n_denominator FROM dp "
+                                       "WHERE field_id = 'event.buyback_amount'")
+    assert (n_obs, n_den) == (40, 50)
     assert r.n_reject == 0
 
 

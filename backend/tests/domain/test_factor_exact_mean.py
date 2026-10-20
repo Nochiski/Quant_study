@@ -4,6 +4,7 @@
 """
 
 import math
+import random
 import statistics
 from collections.abc import Callable
 
@@ -62,6 +63,176 @@ def _series(rng: np.random.Generator, kind: str, size: int) -> np.ndarray:
         step = rng.integers(-2, 3, size).astype(np.float64)
         return anchor + step * np.spacing(anchor)
     raise AssertionError(kind)
+
+
+# 정확한 평균을 정수로 다루려고 모든 float 를 2^1074 배 한 정수로 본다(가장 작은 부분정규수가 1)
+_SCALE_BITS = 1074
+_SCALE = 1 << _SCALE_BITS
+
+
+def _scaled(value: float) -> int:
+    numerator, denominator = value.as_integer_ratio()
+    return numerator << (_SCALE_BITS - (denominator.bit_length() - 1))
+
+
+def _rest(rng: random.Random, count: int, center: float) -> list[float]:
+    """경계 칸의 나머지 원소. 같은 크기·큰 상쇄·이웃 float·±0·정수·오차 상쇄를 섞는다."""
+    size = abs(center)
+    kind = rng.random()
+    if kind < 0.25:
+        return [center * rng.uniform(-2.0, 2.0) for _ in range(count)]
+    if kind < 0.4:
+        limit = min(size * 10.0 ** rng.uniform(0.0, 12.0), 1e300 / max(count, 1))
+        return [rng.uniform(-limit, limit) for _ in range(count)]
+    if kind < 0.5:
+        return [center + rng.randint(-3, 3) * math.ulp(center) for _ in range(count)]
+    if kind < 0.55:
+        return [rng.choice((0.0, -0.0)) for _ in range(count)]
+    if kind < 0.6:
+        limit = max(1.0, min(size * 1e6, 2.0**60))
+        return [float(round(rng.uniform(-limit, limit))) for _ in range(count)]
+    if kind < 0.9 and count >= 4 and size < 1e250:
+        # 거의 지워지는 거대한 짝(남는 몫이 합 W 크기) + 그 짝의 ulp 근처에서 서로 지워지는
+        # 중간 값들: 중간 값이 TwoSum 오차로 흡수된 뒤 서로 지워져 c 의 반올림 오차가
+        # |c| 보다 훨씬 크게 남는다 — E_sum 항만 덮는 경우다(리뷰 반례의 구조)
+        huge = count * size * 2.0 ** rng.uniform(46.0, 58.0)
+        unit = math.ulp(huge)
+        out = [huge, -(huge + rng.randint(1, 8) * unit)]
+        while len(out) < count:
+            middle = unit * 2.0 ** rng.uniform(-30.0, 4.0) * rng.choice((-1.0, 1.0))
+            out += [middle, -middle * (1.0 + 2.0 ** -rng.uniform(8.0, 40.0))]
+        return out[:count]
+    # 큰 값 짝이 지워지고 작은 값이 남는다
+    big = min(size * 10.0 ** rng.uniform(3.0, 16.0), 1e300 / max(count, 1))
+    return [big * (1 if index % 2 == 0 else -1) + center * rng.random() for index in range(count)]
+
+
+def _boundary_cell(rng: random.Random) -> list[float] | None:
+    """정확한 합 W 를 n·(반올림 경계) + t 로 정수 구성한다.
+
+    t 는 경계까지 간격의 2^0 ~ 2^-115 배이고 약 15% 는 0(정확한 중점)이다. 인증 상한이 너무
+    느슨하면 정확 경로가 늘 뿐이지만, 너무 빡빡하면(상한 0·E_sum 누락·간격 대칭화) 경계 바로
+    앞의 칸을 잘못 확정한다 — 무작위 분포로는 그 칸을 거의 만들지 못한다(#584 리뷰 P2-1).
+    """
+    count = rng.choice((2, 2, 3, 4, 5, 7, 12, 20, 63))
+    band = rng.random()
+    if band < 0.55:
+        exponent = rng.randint(-40, 40)
+    elif band < 0.67:
+        exponent = rng.randint(-1074, -1000)  # 부분정규·작은 값 가드 아래
+    elif band < 0.77:
+        exponent = rng.randint(-972, -955)  # 1e-290 ≈ 2^-963.3 근처
+    elif band < 0.87:
+        exponent = rng.randint(985, 1000)  # 1e300 ≈ 2^996.6 근처
+    else:
+        exponent = rng.randint(-1074, 1010)
+    mantissa = 1.0 if rng.random() < 0.2 else rng.random() + 0.5  # 2의 거듭제곱은 아래 간격이 절반
+    center = math.ldexp(mantissa, exponent) * rng.choice((-1.0, 1.0))
+    if center == 0.0 or math.isinf(center):
+        return None
+    neighbour = math.nextafter(center, rng.choice((math.inf, -math.inf)))
+    if math.isinf(neighbour):
+        return None
+    lower, upper = _scaled(center), _scaled(neighbour)
+    gap = abs(upper - lower) * count  # 잔차 단위 경계 간격의 두 배
+    if rng.random() < 0.15:
+        offset = 0
+    else:
+        shift = rng.uniform(0.0, 115.0)
+        whole = int(shift)
+        offset = (gap * int(2.0**53 * 2.0 ** -(shift - whole))) >> (53 + whole)
+        offset *= rng.choice((-1, 1))
+    target = (count * (lower + upper) + offset) // 2
+    rest = [value for value in _rest(rng, count - 2, center) if math.isfinite(value)]
+    rest += [0.0] * (count - 2 - len(rest))
+    remainder = target - sum(_scaled(value) for value in rest)
+    try:
+        first = remainder / _SCALE
+    except OverflowError:
+        return None
+    if math.isinf(first):
+        return None
+    items = [*rest, first, (remainder - _scaled(first)) / _SCALE]
+    rng.shuffle(items)
+    return items
+
+
+def _boundary_cells(seed: int, cells: int) -> list[list[float]]:
+    rng = random.Random(seed)
+    out: list[list[float]] = []
+    while len(out) < cells:
+        cell = _boundary_cell(rng)
+        if cell is not None:
+            out.append(cell)
+    return out
+
+
+def test_segment_mean_is_exact_next_to_rounding_boundaries() -> None:
+    cells = _boundary_cells(20261020, 4000)
+    values = np.array([value for cell in cells for value in cell], np.float64)
+    offsets = np.concatenate(([0], np.cumsum([len(cell) for cell in cells]))).astype(np.intp)
+    result = segment_mean(values, offsets)
+    wrong = [
+        index
+        for index, cell in enumerate(cells)
+        if _hex(result.values[index]) != _hex(statistics.mean(cell))
+    ]
+    assert wrong == []
+    # 경계에서 상한보다 먼 칸(약 1/4)은 벡터 경로가 정해야 이 차분이 인증 식을 실제로 시험한다.
+    # 가드 밖 크기·중점·상한 안쪽 칸은 설계대로 정확 경로다(실측 77%)
+    assert result.exact_path.mean() < 0.9
+
+
+def test_window_mean_is_exact_next_to_rounding_boundaries() -> None:
+    by_length: dict[int, list[list[float]]] = {}
+    for cell in _boundary_cells(20261021, 3000):
+        by_length.setdefault(len(cell), []).append(cell)
+    wrong: list[tuple[int, int]] = []
+    for count, cells in by_length.items():
+        # 같은 길이 칸을 이어 붙이고 칸 경계에서 시작하는 창만 원한다
+        values = np.array([value for cell in cells for value in cell], np.float64)
+        wanted = np.zeros(values.shape[0] - count + 1, bool)
+        wanted[::count] = True
+        result = window_mean(values, count, wanted=wanted)
+        wrong += [
+            (count, index)
+            for index, cell in enumerate(cells)
+            if _hex(result.values[index * count]) != _hex(statistics.mean(cell))
+        ]
+    assert wrong == []
+
+
+@pytest.mark.parametrize(
+    "hexes",
+    [
+        # 퍼저가 찾은 인증 상한 변이의 반례(#584 리뷰 P2-1). 기대값은 statistics.mean 이다
+        pytest.param(
+            ["0x1.d029f6201d098p+26", "-0x1.e1b1fe07bdcc5p+89", "0x1.ff17eb04eff19p+35"]
+            + ["0x1.e1b1fe07bdcc4p+89"],
+            id="상한 0",
+        ),
+        pytest.param(
+            ["-0x1.01fa1ae2aef4fp+582", "0x1.6fdd1f25ebad7p+630", "-0x1.a545650dcc37bp+575"]
+            + ["-0x1.23c5d205bd71bp+562", "0x1.7aa25bfdef8a6p+583", "-0x1.6fdd1f25ebe76p+630"]
+            + ["-0x1.2b76624c68e12p+554"],
+            id="E_sum 누락",
+        ),
+        pytest.param(
+            ["-0x1.8000000000000p-616", "-0x1.6ff46c4ecd200p-719", "0x1.8000000000000p-562"],
+            id="위아래 간격 대칭화",
+        ),
+        pytest.param(
+            ["-0x1.0000000000000p-93", "0x1.424527df96636p-38", "0x1.ec6f30c1c4cbdp-812"],
+            id="pe 누락",
+        ),
+    ],
+)
+def test_certification_bound_regressions(hexes: list[str]) -> None:
+    items = [float.fromhex(text) for text in hexes]
+    values = np.array(items, np.float64)
+    expected = _hex(statistics.mean(items))
+    assert _hex(window_mean(values, values.shape[0]).values[0]) == expected
+    assert _hex(segment_mean(values, np.array([0, values.shape[0]], np.intp)).values[0]) == expected
 
 
 @pytest.mark.parametrize(

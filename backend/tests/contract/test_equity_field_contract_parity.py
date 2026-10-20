@@ -353,15 +353,38 @@ def test_원장_뷰의_가림_표시_열을_그_뷰를_읽는_원천이_읽는�
 _EVENT_TYPE_PREDICATE = re.compile(r"\bevent_type\s*(?:=\s*'[^']*'|IN\s*\([^)]*\))", re.IGNORECASE)
 
 
-def _conjuncts(predicate: str) -> list[str]:
-    return [part.strip() for part in re.split(r"\s+AND\s+", predicate, flags=re.IGNORECASE)]
+_TOP_LEVEL_TOKEN = re.compile(r"'|\(|\)|\b(?:AND|OR)\b", re.IGNORECASE)
+
+
+def _top_level_terms(predicate: str) -> tuple[frozenset[str], bool]:
+    """괄호·문자열 밖 최상위 AND 항의 집합과 최상위 OR 유무."""
+    terms: list[str] = []
+    has_or, depth, quoted, start = False, 0, False, 0
+    for match in _TOP_LEVEL_TOKEN.finditer(predicate):
+        token = match.group(0).upper()
+        if token == "'":
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif token == "(":
+            depth += 1
+        elif token == ")":
+            depth -= 1
+        elif depth == 0 and token == "OR":
+            has_or = True
+        elif depth == 0:
+            terms.append(predicate[start : match.start()].strip())
+            start = match.end()
+    terms.append(predicate[start:].strip())
+    return frozenset(term for term in terms if term), has_or
 
 
 def test_원장_필드의_행_필터를_어댑터_원천이_그대로_건다() -> None:
-    """원장 필드 선언의 행 필터는 그 필드 원천 `row_filter` 의 AND 항 하나와 글자까지 같다.
+    """원장 필드 선언 행 필터의 최상위 AND 항은 모두 그 필드 원천 `row_filter` 의 AND 항이다.
 
-    어댑터는 그 뒤에 조건을 더 이어 좁힐 수 있다(컨센서스 FY1). 원장 필터가 없는 필드는 보지
-    않는다 — 재무의 `period_frontier` 는 원장 뷰가 만든 열이다.
+    어댑터는 항을 더 이어 좁힐 수 있다(컨센서스 FY1). 어느 쪽이든 최상위 OR 이 있으면 AND 항
+    포함만으로 같은 행을 고른다고 말할 수 없어 실패로 본다(우선순위로 필터가 풀린다, #586 리뷰).
+    원장 필터가 없는 필드는 보지 않는다 — 재무의 `period_frontier` 는 원장 뷰가 만든 열이다.
     """
     ledger = _ledger_profiles()
     expected = {
@@ -373,11 +396,12 @@ def test_원장_필드의_행_필터를_어댑터_원천이_그대로_건다() -
         field_id: SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].row_filter or ""
         for field_id in expected
     }
-    drift = {
-        field_id: (want, actual[field_id])
-        for field_id, want in expected.items()
-        if want not in _conjuncts(actual[field_id])
-    }
+    drift: dict[str, tuple[str, str]] = {}
+    for field_id, want in expected.items():
+        ledger_terms, ledger_or = _top_level_terms(want)
+        adapter_terms, adapter_or = _top_level_terms(actual[field_id])
+        if ledger_or or adapter_or or not ledger_terms <= adapter_terms:
+            drift[field_id] = (want, actual[field_id])
 
     assert expected, "원장 행 필터가 있는 지원 필드가 없다 — 대조가 공허하다"
     assert drift == {}, f"원장 행 필터와 어댑터 원천 필터가 다르다 — (ledger, adapter)={drift}"

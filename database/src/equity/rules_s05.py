@@ -369,11 +369,13 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
 eg3_corp_event.gate_name = "EG3_corp_event"     # type: ignore[attr-defined]
 
 # ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `event.buyback_amount`) ────────
-# **두 필드 다 MVP 4유형(split·reverse_split·bonus·capred) 밖이라 지금은 행이 0 이다** — 원천
-# (`stg_event_tsstk_aq` 1,951 · `piic` 5,538 · `cvbd_is` 5,386)은 실재하지만 `corp_event` 가 아직
-# 적재하지 않는다(DESIGN §4-2 "나머지 9종의 행은 만들지 않는다"). 선언을 지우지 않고 남기는 이유는
-# S19 가 커버율 0 을 재고 S20 EG10 이 그것을 blocked(no_observations)로 드러내게 하기 위해서다 —
-# 선언이 없으면 "필드가 없다" 와 "필드는 있는데 값이 없다" 가 구별되지 않는다(GATES §6 EG10 의 왜).
+# 처음(S19, 09-06)에는 두 필드 다 MVP 4유형 밖이라 행이 0 이었다. e1.9.0(09-07)부터 `corp_event` 가
+# `stg_event_tsstk_aq` 를 `treasury_buy` 로, `stg_event_cvbd_is` 를 `cb_issue` 로 싣는다
+# (`FACT_ONLY_TYPES`). `rights` 는 아직 싣지 않아 `event.capital_raise_amount` 는 `cb_issue` 행만 읽는다.
+# 선언은 행이 없을 때도 남긴다 — S19 가 커버율 0 을 재고 S20 EG10 이 blocked(no_observations)로
+# 드러내야 "필드가 없다" 와 "필드는 있는데 값이 없다" 가 구별된다(GATES §6 EG10 의 왜).
+# `row_filter` 의 `event_type` 은 원장 사건 어휘다(원천 표 이름 `tsstk_aq` 가 아니다). 워크벤치
+# 어댑터의 같은 필터가 이 선언과 같은지는 backend 계약 테스트가 본다(#583).
 # 랙 1 세션: 원천이 전부 stage `lag_known=false` 이고 공시는 장중·장후 어느 쪽이든 접수된다.
 FIELDS_CORP_EVENT: tuple[FieldProfile, ...] = (
     FieldProfile(

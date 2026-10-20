@@ -609,6 +609,8 @@ _SEEDS = (
         ("event.dividend_per_share", _RAW_CLOSE),
         1,
     ),
+    # 분자(자사주 취득 결정 금액)와 분모(시가총액)는 같은 티커, 곧 같은 주식 종류다. 원장이 금액을
+    # 주식 종류별로 싣는다(#589) — 보통주식분은 보통주 티커, 기타주식분은 우선주 티커.
     _CatalogSeed(
         "event.buyback_announcement",
         "자사주 매입 공시",

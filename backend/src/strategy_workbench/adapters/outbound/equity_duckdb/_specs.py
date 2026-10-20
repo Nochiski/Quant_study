@@ -1018,11 +1018,17 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
         description=(
-            "최근 자기주식 취득 결정 공시 금액(원)이고 같은 날 공시는 합합니다. 다음 공시 전까지 "
-            "같은 값이 이어집니다."
+            "최근 자기주식 취득 결정 공시에서 이 종목의 주식 종류에 해당하는 취득예정금액(원)"
+            "입니다. 보통주는 보통주식분, 우선주는 기타주식분만 받습니다. 상장 우선주가 둘 이상인 "
+            "회사는 기타주식분이 어느 우선주 것인지 공시에 없어 우선주에 값이 없습니다. 같은 날 "
+            "공시는 합하고, 다음 공시 전까지 같은 값이 이어집니다."
         ),
         disclosure_basis="DART 주요사항보고 접수일(announce_date)",
-        evidence="corp_event.amount_krw (event_type='treasury_buy' ← stg_event_tsstk_aq, e1.9.0)",
+        # 원장이 주식 종류별 class-row 로 싣는다(e1.20.0, #589) — 어댑터는 티커 축 그대로 옮긴다.
+        evidence=(
+            "corp_event.amount_krw (event_type='treasury_buy' ← stg_event_tsstk_aq, e1.9.0; "
+            "보통주 aqpln_prc_ostk · 우선주 aqpln_prc_estk, e1.20.0)"
+        ),
     ),
     # DART 소유보고 API 가 롤링 2년 창만 주고 재수집이 불가능하다(DART_DESIGN P3e).
     FieldSpec(

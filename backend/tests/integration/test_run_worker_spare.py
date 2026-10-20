@@ -51,8 +51,9 @@ from tests.run_worker_support import (
 )
 from tests.test_run_worker_protocol import resolved_job
 
-# V-5: 예비가 있을 때 배정부터 첫 tape 진행까지 ≤ 0.5초. 느린 CI 여유를 둔 상한이다 — 예비를
-# 쓰지 않고 띄우면 부팅(수 초)이 들어 이 상한을 넘는다.
+# V-5: 예비가 있을 때 배정부터 첫 tape 진행까지 ≤ 0.5초. 느린 CI 여유를 둔 위생 상한일 뿐이다 —
+# 직접 띄우면 이 PC 에서 1.4~1.7초(mock)라 이 상한으로는 가르지 못할 수 있고, 예비를 썼는지는
+# `records`(job 을 받은 worker)가 판별한다.
 _SPARE_START_LIMIT_S = 2.0
 # 예비가 더 생기지 않는지 지켜보는 시간. mock worker 부팅(약 2~3초)보다 길다.
 _QUIET_S = 6.0

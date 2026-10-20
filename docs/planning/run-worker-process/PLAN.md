@@ -88,7 +88,7 @@ progress_percent: 40
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `W3-01` | `process` 기본값, Windows backend job, SoT·README 개정 | W2-02 | `PLANNED` | - |
+| [ ] | `W3-01` | `process` 기본값, Windows backend job, SoT·README 개정, 최장 구간 실데이터 V-3 | W2-02 | `PLANNED` | - |
 
 ## W4 — 다른 백그라운드 계산
 
